@@ -1,0 +1,20 @@
+# JS / Vite
+node_modules
+dist
+dist-ssr
+*.local
+
+# Rust / Cargo build output (each crate's compiled artifacts)
+target/
+crates/target/
+
+# Test images / datasets — keep large binaries out of git
+data/
+
+# Editor / OS
+.DS_Store
+.vscode/*
+!.vscode/extensions.json
+
+# Note: src/wasm/** (the generated WASM bindings) is intentionally NOT ignored,
+# so the app runs on a fresh clone without needing the Rust toolchain.

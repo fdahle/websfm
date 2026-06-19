@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell($ErrorActionPreference='SilentlyContinue'; \"winget: \" + \\(Get-Command winget\\).Source; \"cargo: \" + \\(Get-Command cargo\\).Source; \"rustup: \" + \\(Get-Command rustup\\).Source; \"existing cargo bin:\"; Test-Path \"$env:USERPROFILE\\\\.cargo\\\\bin\\\\cargo.exe\")"
+    ]
+  }
+}
