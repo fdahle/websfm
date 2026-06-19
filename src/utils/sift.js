@@ -62,7 +62,7 @@ export async function detectKeypoints(url, options = {}) {
     const dy = flat[i + 1]
     keypoints.push({
       x: dx / scale, // original-image pixels
-      y: flat[i + 1] / scale,
+      y: dy / scale,
       nx: dx / width, // normalized 0..1
       ny: dy / height,
       scale: flat[i + 2] / scale,

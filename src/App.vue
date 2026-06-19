@@ -1,31 +1,23 @@
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, computed, reactive, onMounted } from 'vue'
 import Ribbon from './components/Ribbon.vue'
 import Sidebar from './components/Sidebar.vue'
 import Viewer from './components/Viewer.vue'
 import ImageViewer from './components/ImageViewer.vue'
 import ImageInfoModal from './components/ImageInfoModal.vue'
 import DetectFeaturesModal from './components/DetectFeaturesModal.vue'
+import SettingsModal from './components/SettingsModal.vue'
+import DevConsole from './components/DevConsole.vue'
 import MetadataTable from './components/MetadataTable.vue'
-import { extractMetadata } from './utils/metadata.js'
-import { detectKeypoints } from './utils/sift.js'
+import { useImages } from './composables/useImages.js'
+import { useTabs } from './composables/useTabs.js'
 
-const images = ref([])
-const selectedId = ref(null)
-const ribbonInput = ref(null)
-
+// ── Theme ────────────────────────────────────────────────────────────────────
 const theme = ref(localStorage.getItem('theme') || 'dark')
-const settingsOpen = ref(false)
-const infoImageId = ref(null)
-const detectFeaturesOpen = ref(false)
-const infoImage = computed(() => (infoImageId.value ? imageById(infoImageId.value) : null))
 
 function applyTheme(t) {
-  if (t === 'light') {
-    document.documentElement.setAttribute('data-theme', 'light')
-  } else {
-    document.documentElement.removeAttribute('data-theme')
-  }
+  if (t === 'light') document.documentElement.setAttribute('data-theme', 'light')
+  else document.documentElement.removeAttribute('data-theme')
 }
 
 function setTheme(t) {
@@ -34,198 +26,105 @@ function setTheme(t) {
   localStorage.setItem('theme', t)
 }
 
-onMounted(() => applyTheme(theme.value))
+onMounted(() => {
+  applyTheme(theme.value)
+  window.addEventListener('keydown', (e) => {
+    if (e.key === '`' && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault()
+      consoleOpen.value = !consoleOpen.value
+    }
+  })
+})
 
-// Main-area tabs. The 3D viewer is always present and is the default tab.
-const VIEWER_TAB = { id: 'viewer', type: 'viewer', title: '3D', closable: false }
-const tabs = ref([{ ...VIEWER_TAB }])
-const activeTabId = ref('viewer')
+// ── Images ───────────────────────────────────────────────────────────────────
+const {
+  images, selectedId,
+  imageById, selectImage,
+  addImages, removeImage,
+  updateMask, detectOne, detectAll, clearAll,
+} = useImages()
 
+// ── Tabs ─────────────────────────────────────────────────────────────────────
+const {
+  tabs, activeTabId,
+  activeTab, activeImageTab, activeView,
+  activateTab, openImageTab, openMetadataTab,
+  closeTab, closeTabForImage, onImageDetected, resetToViewer,
+} = useTabs(imageById)
+
+// ── Derived state ─────────────────────────────────────────────────────────────
 const selected = computed(() => images.value.find((img) => img.id === selectedId.value) || null)
 
-// The image for whichever image tab is currently active (null otherwise).
-const activeImageTab = computed(() => {
-  const tab = tabs.value.find((t) => t.id === activeTabId.value)
-  return tab?.type === 'image' ? imageById(tab.imageId) : null
+const activeImageViewState = computed(() => {
+  const tab = activeTab.value
+  if (!tab || tab.type !== 'image') return null
+  const img = imageById(tab.imageId)
+  if (!img) return null
+  return {
+    showKeypoints: tab.showKeypoints,
+    maskMode:      tab.maskMode,
+    brushRadius:   tab.brushRadius,
+    kpStatus:      img.kpStatus,
+    kpCount:       img.kpCount,
+    hasMask:       !!img.mask,
+  }
 })
 
-// Refs to ImageViewer instances, keyed by imageId.
+// ── Console ───────────────────────────────────────────────────────────────────
+const consoleOpen = ref(false)
+
+// ── Modals ────────────────────────────────────────────────────────────────────
+const settingsOpen = ref(false)
+const infoImageId = ref(null)
+const detectFeaturesOpen = ref(false)
+const infoImage = computed(() => (infoImageId.value ? imageById(infoImageId.value) : null))
+
+// ── ImageViewer refs (for imperative mask ops) ────────────────────────────────
 const imageViewerRefs = reactive({})
+const ribbonInput = ref(null)
 
-// For the ribbon's active-state highlighting.
-const activeView = computed(() => {
-  if (activeTabId.value === 'viewer') return 'viewer'
-  if (activeTabId.value === 'metadata') return 'table'
-  return ''
-})
-
-function imageById(id) {
-  return images.value.find((img) => img.id === id) || null
-}
-
-function activateTab(id) {
-  activeTabId.value = id
-}
-
-function openImageTab(id) {
-  const img = imageById(id)
-  if (!img) return
-  const tabId = `img:${id}`
-  if (!tabs.value.some((t) => t.id === tabId)) {
-    tabs.value.push({ id: tabId, type: 'image', title: img.name, imageId: id, closable: true })
-  }
-  activeTabId.value = tabId
-}
-
-function openMetadataTab() {
-  if (!tabs.value.some((t) => t.id === 'metadata')) {
-    tabs.value.push({ id: 'metadata', type: 'table', title: 'Metadata', closable: true })
-  }
-  activeTabId.value = 'metadata'
-}
-
-function closeTab(id) {
-  const idx = tabs.value.findIndex((t) => t.id === id)
-  if (idx === -1 || !tabs.value[idx].closable) return
-  const wasActive = activeTabId.value === id
-  tabs.value.splice(idx, 1)
-  if (wasActive) {
-    const next = tabs.value[idx] || tabs.value[idx - 1] || tabs.value[0]
-    activeTabId.value = next ? next.id : 'viewer'
-  }
-}
-
-function addImages(files) {
-  for (const file of files) {
-    const id = `${file.name}-${file.size}-${file.lastModified}`
-    if (images.value.some((img) => img.id === id)) continue
-    const item = {
-      id,
-      name: file.name,
-      url: URL.createObjectURL(file),
-      file,
-      meta: null,
-      loading: true,
-      keypoints: [],
-      kpStatus: 'idle', // 'idle' | 'running' | 'done' | 'error'
-      kpCount: 0,
-      kpMs: 0,
+// ── Commands ──────────────────────────────────────────────────────────────────
+function handleCommand(id) {
+  switch (id) {
+    case 'import-images':      ribbonInput.value.click(); break
+    case 'clear-all':          clearAll(resetToViewer); break
+    case 'remove-selected':    if (selectedId.value) removeImage(selectedId.value, closeTabForImage); break
+    case 'view-viewer':        activateTab('viewer'); break
+    case 'view-map':           activateTab('map'); break
+    case 'view-table':         openMetadataTab(); break
+    case 'detect-features':    detectFeaturesOpen.value = true; break
+    case 'open-settings':      settingsOpen.value = true; break
+    case 'toggle-console':     consoleOpen.value = !consoleOpen.value; break
+    case 'img-detect-sift':    if (activeImageTab.value) detectOne(activeImageTab.value.id, {}, onImageDetected); break
+    case 'img-show-info':      if (activeImageTab.value) infoImageId.value = activeImageTab.value.id; break
+    case 'img-remove':         if (activeImageTab.value) removeImage(activeImageTab.value.id, closeTabForImage); break
+    case 'img-toggle-keypoints': {
+      const tab = activeTab.value
+      if (tab?.type === 'image') tab.showKeypoints = !tab.showKeypoints
+      break
     }
-    images.value.push(item)
-    extractMetadata(file, item.url)
-      .then((meta) => {
-        const found = images.value.find((img) => img.id === id)
-        if (found) {
-          found.meta = meta
-          found.loading = false
-        }
-      })
-      .catch(() => {
-        const found = images.value.find((img) => img.id === id)
-        if (found) found.loading = false
-      })
-  }
-}
-
-function removeImage(id) {
-  const idx = images.value.findIndex((img) => img.id === id)
-  if (idx !== -1) {
-    URL.revokeObjectURL(images.value[idx].url)
-    images.value.splice(idx, 1)
-    if (selectedId.value === id) selectedId.value = null
-    closeTab(`img:${id}`)
-  }
-}
-
-function selectImage(id) {
-  selectedId.value = id
-}
-
-async function detectOne(id, settings = {}) {
-  const img = images.value.find((i) => i.id === id)
-  if (!img || img.kpStatus === 'running') return
-  img.kpStatus = 'running'
-  try {
-    const res = await detectKeypoints(img.url, settings)
-    const found = images.value.find((i) => i.id === id)
-    if (found) {
-      found.keypoints = res.keypoints
-      found.kpCount = res.keypoints.length
-      found.kpMs = Math.round(res.ms)
-      found.kpStatus = 'done'
+    case 'img-mask-draw': {
+      const tab = activeTab.value
+      if (tab?.type === 'image') tab.maskMode = tab.maskMode === 'draw' ? 'none' : 'draw'
+      break
     }
-  } catch (err) {
-    console.error('SIFT detection failed', err)
-    const found = images.value.find((i) => i.id === id)
-    if (found) found.kpStatus = 'error'
+    case 'img-mask-erase': {
+      const tab = activeTab.value
+      if (tab?.type === 'image') tab.maskMode = tab.maskMode === 'erase' ? 'none' : 'erase'
+      break
+    }
+    case 'img-mask-import': imageViewerRefs[activeImageTab.value?.id]?.triggerMaskImport(); break
+    case 'img-mask-clear':  imageViewerRefs[activeImageTab.value?.id]?.clearMask(); break
+    case 'img-brush-s': { const t = activeTab.value; if (t?.type === 'image') t.brushRadius = 10; break }
+    case 'img-brush-m': { const t = activeTab.value; if (t?.type === 'image') t.brushRadius = 20; break }
+    case 'img-brush-l': { const t = activeTab.value; if (t?.type === 'image') t.brushRadius = 40; break }
   }
-}
-
-async function detectAll(settings = {}) {
-  // Sequential so the UI stays responsive between images.
-  for (const img of images.value) {
-    if (img.kpStatus !== 'done') await detectOne(img.id, settings)
-  }
-}
-
-function clearAll() {
-  for (const img of images.value) URL.revokeObjectURL(img.url)
-  images.value = []
-  selectedId.value = null
-  // Drop all image tabs; keep the permanent 3D tab.
-  tabs.value = tabs.value.filter((t) => !t.closable)
-  activeTabId.value = 'viewer'
 }
 
 function onRibbonPick(event) {
   const files = [...event.target.files].filter((f) => f.type.startsWith('image/'))
   if (files.length) addImages(files)
   event.target.value = ''
-}
-
-function handleCommand(id) {
-  switch (id) {
-    case 'import-images':
-      ribbonInput.value.click()
-      break
-    case 'clear-all':
-      clearAll()
-      break
-    case 'remove-selected':
-      if (selectedId.value) removeImage(selectedId.value)
-      break
-    case 'view-viewer':
-      activateTab('viewer')
-      break
-    case 'view-table':
-      openMetadataTab()
-      break
-    case 'detect-features':
-      detectFeaturesOpen.value = true
-      break
-    case 'open-settings':
-      settingsOpen.value = true
-      break
-    case 'img-fit':
-      imageViewerRefs[activeImageTab.value?.id]?.fit()
-      break
-    case 'img-zoom-in':
-      imageViewerRefs[activeImageTab.value?.id]?.zoomIn()
-      break
-    case 'img-zoom-out':
-      imageViewerRefs[activeImageTab.value?.id]?.zoomOut()
-      break
-    case 'img-detect-sift':
-      if (activeImageTab.value) detectOne(activeImageTab.value.id)
-      break
-    case 'img-show-info':
-      if (activeImageTab.value) infoImageId.value = activeImageTab.value.id
-      break
-    case 'img-remove':
-      if (activeImageTab.value) removeImage(activeImageTab.value.id)
-      break
-    // Remaining Reconstruct / Export commands are placeholders for now.
-  }
 }
 </script>
 
@@ -237,6 +136,8 @@ function handleCommand(id) {
       :image-count="images.length"
       :active-image-id="activeImageTab?.id ?? null"
       :active-image-name="activeImageTab?.name ?? null"
+      :image-view-state="activeImageViewState"
+      :console-open="consoleOpen"
       @command="handleCommand"
     />
     <input ref="ribbonInput" type="file" accept="image/*" multiple hidden @change="onRibbonPick" />
@@ -245,28 +146,17 @@ function handleCommand(id) {
       <DetectFeaturesModal
         v-if="detectFeaturesOpen"
         @close="detectFeaturesOpen = false"
-        @run="(s) => { detectFeaturesOpen = false; detectAll(s) }"
+        @run="(s) => { detectFeaturesOpen = false; detectAll(s, onImageDetected) }"
       />
     </Teleport>
 
     <Teleport to="body">
-      <div v-if="settingsOpen" class="modal-overlay" @click.self="settingsOpen = false" @keydown.esc="settingsOpen = false">
-        <div class="modal" role="dialog" aria-modal="true" aria-label="Settings">
-          <div class="modal-header">
-            <span class="modal-title">Settings</span>
-            <button class="modal-close" title="Close" @click="settingsOpen = false">×</button>
-          </div>
-          <div class="modal-body">
-            <div class="setting-row">
-              <span class="setting-label">Theme</span>
-              <div class="theme-toggle">
-                <button :class="{ active: theme === 'dark' }" @click="setTheme('dark')">Dark</button>
-                <button :class="{ active: theme === 'light' }" @click="setTheme('light')">Light</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
+      <SettingsModal
+        v-if="settingsOpen"
+        :theme="theme"
+        @close="settingsOpen = false"
+        @set-theme="setTheme"
+      />
     </Teleport>
 
     <div class="layout">
@@ -274,9 +164,9 @@ function handleCommand(id) {
         :images="images"
         :selected-id="selectedId"
         @add-images="addImages"
-        @remove-image="removeImage"
+        @remove-image="(id) => removeImage(id, closeTabForImage)"
         @select="selectImage"
-        @open="openImageTab"
+        @open="(id) => openImageTab(id)"
         @show-info="infoImageId = $event"
       />
       <main class="main">
@@ -295,6 +185,7 @@ function handleCommand(id) {
 
         <div class="content">
           <Viewer v-show="activeTabId === 'viewer'" :theme="theme" />
+          <div v-show="activeTabId === 'map'" class="placeholder-2d">2D view — coming soon</div>
           <template v-for="tab in tabs" :key="tab.id">
             <MetadataTable
               v-if="tab.type === 'table'"
@@ -309,6 +200,10 @@ function handleCommand(id) {
               v-show="activeTabId === tab.id"
               :ref="(el) => { if (el) imageViewerRefs[tab.imageId] = el; else delete imageViewerRefs[tab.imageId] }"
               :image="imageById(tab.imageId)"
+              :show-keypoints="tab.showKeypoints"
+              :mask-mode="tab.maskMode"
+              :brush-radius="tab.brushRadius"
+              @update-mask="(dataUrl) => updateMask(tab.imageId, dataUrl)"
             />
           </template>
 
@@ -317,12 +212,14 @@ function handleCommand(id) {
               v-if="infoImage"
               :image="infoImage"
               @close="infoImageId = null"
-              @detect="detectOne"
+              @detect="(id, s) => detectOne(id, s, onImageDetected)"
             />
           </Teleport>
         </div>
       </main>
     </div>
+
+    <DevConsole v-if="consoleOpen" />
   </div>
 </template>
 
@@ -373,9 +270,7 @@ function handleCommand(id) {
   white-space: nowrap;
 }
 
-.tab:hover {
-  color: var(--text);
-}
+.tab:hover { color: var(--text); }
 
 .tab.active {
   background: var(--bg);
@@ -407,96 +302,14 @@ function handleCommand(id) {
   min-height: 0;
 }
 
-/* Settings modal */
-.modal-overlay {
-  position: fixed;
+.placeholder-2d {
+  position: absolute;
   inset: 0;
-  background: rgba(0, 0, 0, 0.55);
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 200;
-}
-
-.modal {
-  background: var(--panel);
-  border: 1px solid var(--panel-border);
-  border-radius: 8px;
-  width: 360px;
-  max-width: 90vw;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
-}
-
-.modal-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 13px 16px;
-  border-bottom: 1px solid var(--panel-border);
-}
-
-.modal-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text);
-}
-
-.modal-close {
-  background: none;
-  border: none;
-  color: var(--text-dim);
-  font-size: 20px;
-  line-height: 1;
-  cursor: pointer;
-  padding: 1px 6px;
-  border-radius: 4px;
-}
-
-.modal-close:hover {
-  background: var(--hover-bg);
-  color: var(--text);
-}
-
-.modal-body {
-  padding: 16px;
-}
-
-.setting-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 6px 0;
-}
-
-.setting-label {
   font-size: 13px;
-  color: var(--text);
-}
-
-.theme-toggle {
-  display: flex;
-  border: 1px solid var(--panel-border);
-  border-radius: 6px;
-  overflow: hidden;
-}
-
-.theme-toggle button {
-  background: none;
-  border: none;
   color: var(--text-dim);
-  font-size: 12px;
-  padding: 4px 16px;
-  cursor: pointer;
-  font: inherit;
-}
-
-.theme-toggle button:hover:not(.active) {
-  background: var(--hover-bg);
-  color: var(--text);
-}
-
-.theme-toggle button.active {
-  background: var(--accent);
-  color: #fff;
+  font-style: italic;
 }
 </style>

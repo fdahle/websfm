@@ -22,6 +22,14 @@ const props = defineProps({
     type: String,
     default: null,
   },
+  imageViewState: {
+    type: Object,
+    default: null,
+  },
+  consoleOpen: {
+    type: Boolean,
+    default: false,
+  },
 })
 
 const emit = defineEmits(['command'])
@@ -82,7 +90,8 @@ const tabs = [
         label: 'Layout',
         commands: [
           { id: 'view-viewer', label: '3D\nViewer', icon: '🧊', view: 'viewer' },
-          { id: 'view-table', label: 'Metadata\nTable', icon: '📋', view: 'table' },
+          { id: 'view-map',    label: '2D\nView',   icon: '🗺️', view: 'map' },
+          { id: 'view-table',  label: 'Metadata\nTable', icon: '📋', view: 'table' },
         ],
       },
       {
@@ -133,24 +142,42 @@ const pictureTab = {
   contextual: true,
   groups: [
     {
-      label: 'View',
+      label: 'Keypoints',
       commands: [
-        { id: 'img-fit', label: 'Fit to\nView', icon: '⊡' },
-        { id: 'img-zoom-in', label: 'Zoom\nIn', icon: '⊕' },
-        { id: 'img-zoom-out', label: 'Zoom\nOut', icon: '⊖' },
+        { id: 'img-detect-sift', label: 'Detect\nSIFT', icon: '✨' },
+        {
+          id: 'img-toggle-keypoints',
+          labelFn: (s) => s?.kpCount ? `KP\n${s.kpCount}` : 'KP',
+          icon: '⊙',
+          activeKey: 'showKeypoints',
+          disableKey: 'kpNotDone',
+        },
       ],
     },
     {
-      label: 'Analysis',
+      label: 'Mask',
       commands: [
-        { id: 'img-detect-sift', label: 'Detect\nSIFT', icon: '✨' },
+        { id: 'img-mask-draw',   label: 'Draw',   icon: '✏', activeKey: 'maskDraw' },
+        { id: 'img-mask-erase',  label: 'Erase',  icon: '◻', activeKey: 'maskErase' },
+        { id: 'img-mask-import', label: 'Import', icon: '📥' },
+        { id: 'img-mask-clear',  label: 'Clear',  icon: '✕', disableKey: 'noMask' },
+      ],
+    },
+    {
+      id: 'brush',
+      label: 'Brush',
+      maskOnly: true,  // hidden unless maskMode is active
+      commands: [
+        { id: 'img-brush-s', label: 'Small',  icon: '·', activeKey: 'brushS' },
+        { id: 'img-brush-m', label: 'Medium', icon: '○', activeKey: 'brushM' },
+        { id: 'img-brush-l', label: 'Large',  icon: '●', activeKey: 'brushL' },
       ],
     },
     {
       label: 'Image',
       commands: [
         { id: 'img-show-info', label: 'Image\nInfo', icon: 'ℹ' },
-        { id: 'img-remove', label: 'Remove', icon: '✖' },
+        { id: 'img-remove',    label: 'Remove',      icon: '✖' },
       ],
     },
   ],
@@ -171,14 +198,32 @@ const allTabs = computed(() => (props.activeImageId ? [...tabs, pictureTab] : ta
 const currentTab = computed(() => allTabs.value.find((t) => t.id === activeTab.value) || tabs[0])
 
 function isActive(cmd) {
-  return cmd.view != null && cmd.view === props.activeView
+  if (cmd.view != null && cmd.view === props.activeView) return true
+  const s = props.imageViewState
+  if (!s || !cmd.activeKey) return false
+  switch (cmd.activeKey) {
+    case 'showKeypoints': return s.showKeypoints
+    case 'maskDraw':      return s.maskMode === 'draw'
+    case 'maskErase':     return s.maskMode === 'erase'
+    case 'brushS':        return s.brushRadius === 10
+    case 'brushM':        return s.brushRadius === 20
+    case 'brushL':        return s.brushRadius === 40
+  }
+  return false
 }
 
 function isDisabled(cmd) {
   if (cmd.disabled) return true
   if (cmd.needsSelection && !props.hasSelection) return true
   if (cmd.needsImages && props.imageCount === 0) return true
+  const s = props.imageViewState
+  if (cmd.disableKey === 'kpNotDone' && s?.kpStatus !== 'done') return true
+  if (cmd.disableKey === 'noMask'    && !s?.hasMask)            return true
   return false
+}
+
+function cmdLabel(cmd) {
+  return cmd.labelFn ? cmd.labelFn(props.imageViewState) : cmd.label
 }
 
 function run(cmd) {
@@ -212,27 +257,38 @@ function run(cmd) {
         </button>
       </template>
 
+      <button
+        class="settings-btn"
+        :class="{ active: consoleOpen }"
+        title="Toggle Console (Ctrl+`)"
+        @click="emit('command', 'toggle-console')"
+      >&gt;_</button>
       <button class="settings-btn" title="Settings" @click="emit('command', 'open-settings')">⚙</button>
     </div>
 
     <div class="ribbon-body">
-      <div v-for="group in currentTab.groups" :key="group.label" class="group">
-        <div class="group-commands">
-          <button
-            v-for="cmd in group.commands"
-            :key="cmd.id"
-            class="cmd"
-            :class="{ active: isActive(cmd) }"
-            :disabled="isDisabled(cmd)"
-            :title="cmd.disabled ? 'Coming soon' : ''"
-            @click="run(cmd)"
-          >
-            <span class="cmd-icon">{{ cmd.icon }}</span>
-            <span class="cmd-label">{{ cmd.label }}</span>
-          </button>
+      <template v-for="group in currentTab.groups" :key="group.label">
+        <div
+          v-if="!group.maskOnly || imageViewState?.maskMode !== 'none'"
+          class="group"
+        >
+          <div class="group-commands">
+            <button
+              v-for="cmd in group.commands"
+              :key="cmd.id"
+              class="cmd"
+              :class="{ active: isActive(cmd) }"
+              :disabled="isDisabled(cmd)"
+              :title="cmd.disabled ? 'Coming soon' : ''"
+              @click="run(cmd)"
+            >
+              <span class="cmd-icon">{{ cmd.icon }}</span>
+              <span class="cmd-label">{{ cmdLabel(cmd) }}</span>
+            </button>
+          </div>
+          <div class="group-label">{{ group.label }}</div>
         </div>
-        <div class="group-label">{{ group.label }}</div>
-      </div>
+      </template>
     </div>
   </div>
 </template>

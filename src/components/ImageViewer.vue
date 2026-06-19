@@ -1,159 +1,375 @@
 <script setup>
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
 
 const props = defineProps({
-  image: { type: Object, required: true },
+  image:         { type: Object,  required: true },
+  showKeypoints: { type: Boolean, default: false },
+  maskMode:      { type: String,  default: 'none' }, // 'none' | 'draw' | 'erase'
+  brushRadius:   { type: Number,  default: 20 },     // screen pixels
 })
 
-const container = ref(null)
-const imgEl = ref(null)
+const emit = defineEmits(['update-mask'])
 
-const scale = ref(1)
-const tx = ref(0)
-const ty = ref(0)
+const container      = ref(null)
+const imgEl          = ref(null)
+const overlayCanvas  = ref(null)
+const maskFileInput  = ref(null)
+
+// Pan/zoom
+const scale    = ref(1)
+const tx       = ref(0)
+const ty       = ref(0)
 const dragging = ref(false)
+const hoverPx  = ref(null)
 
-// Status bar: pixel under cursor, null when outside image
-const hoverPx = ref(null)
+// Mask canvas state
+const hasMask = ref(!!props.image.mask)
 
-let startX = 0
-let startY = 0
-let startTx = 0
-let startTy = 0
+let maskOffscreen = null  // OffscreenCanvas at native image resolution
+let mousePos      = null  // { x, y } screen coords for brush cursor
+let isDrawing     = false
+let startX = 0, startY = 0, startTx = 0, startTy = 0
 let resizeObserver = null
-let offscreenCtx = null
+let offscreenCtx   = null
 
 const MIN_SCALE = 0.05
 const MAX_SCALE = 40
 
-function clamp(v, lo, hi) {
-  return Math.min(hi, Math.max(lo, v))
-}
+function clamp(v, lo, hi) { return Math.min(hi, Math.max(lo, v)) }
+
+// ── Fit & zoom ───────────────────────────────────────────────────────────────
 
 function fit() {
-  const c = container.value
+  const c   = container.value
   const img = imgEl.value
   if (!c || !img || !img.naturalWidth) return
-  const cw = c.clientWidth
-  const ch = c.clientHeight
-  const s = Math.min(cw / img.naturalWidth, ch / img.naturalHeight, 1)
+  const s = Math.min(c.clientWidth / img.naturalWidth, c.clientHeight / img.naturalHeight, 1)
   scale.value = s
-  tx.value = (cw - img.naturalWidth * s) / 2
-  ty.value = (ch - img.naturalHeight * s) / 2
-}
-
-function onWheel(e) {
-  e.preventDefault()
-  const rect = container.value.getBoundingClientRect()
-  const cx = e.clientX - rect.left
-  const cy = e.clientY - rect.top
-  const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15
-  const newScale = clamp(scale.value * factor, MIN_SCALE, MAX_SCALE)
-  const ratio = newScale / scale.value
-  // Keep the point under the cursor fixed while zooming.
-  tx.value = cx - (cx - tx.value) * ratio
-  ty.value = cy - (cy - ty.value) * ratio
-  scale.value = newScale
-}
-
-function onMouseDown(e) {
-  dragging.value = true
-  startX = e.clientX
-  startY = e.clientY
-  startTx = tx.value
-  startTy = ty.value
-}
-
-function onMouseMove(e) {
-  if (dragging.value) {
-    tx.value = startTx + (e.clientX - startX)
-    ty.value = startTy + (e.clientY - startY)
-  }
-
-  const rect = container.value.getBoundingClientRect()
-  const cx = e.clientX - rect.left
-  const cy = e.clientY - rect.top
-  const px = Math.floor((cx - tx.value) / scale.value)
-  const py = Math.floor((cy - ty.value) / scale.value)
-  const img = imgEl.value
-
-  if (img && px >= 0 && py >= 0 && px < img.naturalWidth && py < img.naturalHeight) {
-    const info = { x: px, y: py, r: null, g: null, b: null }
-    if (offscreenCtx) {
-      const d = offscreenCtx.getImageData(px, py, 1, 1).data
-      info.r = d[0]; info.g = d[1]; info.b = d[2]
-    }
-    hoverPx.value = info
-  } else {
-    hoverPx.value = null
-  }
-}
-
-function stopDrag() {
-  dragging.value = false
-}
-
-function onMouseLeave() {
-  dragging.value = false
-  hoverPx.value = null
-}
-
-function setupOffscreenCanvas() {
-  const img = imgEl.value
-  if (!img || !img.naturalWidth) return
-  try {
-    const canvas = new OffscreenCanvas(img.naturalWidth, img.naturalHeight)
-    offscreenCtx = canvas.getContext('2d')
-    offscreenCtx.drawImage(img, 0, 0)
-  } catch {
-    offscreenCtx = null
-  }
+  tx.value = (c.clientWidth  - img.naturalWidth  * s) / 2
+  ty.value = (c.clientHeight - img.naturalHeight * s) / 2
+  drawOverlay()
 }
 
 function applyZoom(factor) {
   const c = container.value
   if (!c) return
-  const cx = c.clientWidth / 2
+  const cx = c.clientWidth  / 2
   const cy = c.clientHeight / 2
   const newScale = clamp(scale.value * factor, MIN_SCALE, MAX_SCALE)
   const ratio = newScale / scale.value
   tx.value = cx - (cx - tx.value) * ratio
   ty.value = cy - (cy - ty.value) * ratio
   scale.value = newScale
+  drawOverlay()
 }
 
-function zoomIn() { applyZoom(1.5) }
+function zoomIn()  { applyZoom(1.5) }
 function zoomOut() { applyZoom(1 / 1.5) }
+
+// ── Overlay canvas (mask + keypoints + brush cursor) ─────────────────────────
+
+function drawOverlay() {
+  const c   = overlayCanvas.value
+  const img = imgEl.value
+  if (!c || !img || !img.naturalWidth || !container.value) return
+
+  const w = container.value.clientWidth
+  const h = container.value.clientHeight
+  if (!w || !h) return
+
+  const dpr = window.devicePixelRatio || 1
+  const pw  = Math.round(w * dpr)
+  const ph  = Math.round(h * dpr)
+  if (c.width !== pw || c.height !== ph) {
+    c.width  = pw
+    c.height = ph
+    c.style.width  = `${w}px`
+    c.style.height = `${h}px`
+  }
+
+  const ctx = c.getContext('2d')
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+  ctx.clearRect(0, 0, w, h)
+
+  const dispW = img.naturalWidth  * scale.value
+  const dispH = img.naturalHeight * scale.value
+
+  // Mask — red semi-transparent overlay at image position
+  if (maskOffscreen && hasMask.value) {
+    ctx.save()
+    ctx.globalAlpha = 0.45
+    ctx.drawImage(maskOffscreen, tx.value, ty.value, dispW, dispH)
+    ctx.restore()
+  }
+
+  // Keypoints — green circles
+  if (props.showKeypoints && props.image.keypoints?.length) {
+    ctx.strokeStyle = 'rgba(0, 230, 118, 0.85)'
+    ctx.lineWidth = 1
+    for (const kp of props.image.keypoints) {
+      const x = kp.nx * dispW + tx.value
+      const y = kp.ny * dispH + ty.value
+      const r = Math.max(1.5, (kp.scale || 2) * scale.value)
+      ctx.beginPath()
+      ctx.arc(x, y, r, 0, Math.PI * 2)
+      ctx.stroke()
+    }
+  }
+
+  // Brush cursor circle
+  if (props.maskMode !== 'none' && mousePos) {
+    ctx.beginPath()
+    ctx.arc(mousePos.x, mousePos.y, props.brushRadius, 0, Math.PI * 2)
+    ctx.strokeStyle = props.maskMode === 'draw' ? 'rgba(255,80,80,0.9)' : 'rgba(100,180,255,0.9)'
+    ctx.lineWidth = 1.5
+    ctx.stroke()
+  }
+}
+
+// ── Mask operations ───────────────────────────────────────────────────────────
+
+function initMaskCanvas() {
+  const img = imgEl.value
+  if (!img || !img.naturalWidth) return
+  maskOffscreen = new OffscreenCanvas(img.naturalWidth, img.naturalHeight)
+  if (props.image.mask?.dataUrl) loadMaskFromDataUrl(props.image.mask.dataUrl)
+}
+
+async function loadMaskFromDataUrl(dataUrl) {
+  if (!maskOffscreen) return
+  try {
+    const blob = await (await fetch(dataUrl)).blob()
+    const bmp  = await createImageBitmap(blob)
+    const ctx  = maskOffscreen.getContext('2d')
+    ctx.clearRect(0, 0, maskOffscreen.width, maskOffscreen.height)
+    ctx.drawImage(bmp, 0, 0, maskOffscreen.width, maskOffscreen.height)
+    hasMask.value = true
+    drawOverlay()
+  } catch {}
+}
+
+// Paint or erase a circle at screen position onto the mask canvas.
+// Brush radius stays constant in screen space (divided by scale → image coords).
+function paintAt(sx, sy) {
+  if (!maskOffscreen) return
+  const imgX = (sx - tx.value) / scale.value
+  const imgY = (sy - ty.value) / scale.value
+  const r    = props.brushRadius / scale.value
+  const ctx  = maskOffscreen.getContext('2d')
+
+  if (props.maskMode === 'draw') {
+    ctx.globalCompositeOperation = 'source-over'
+    ctx.fillStyle = 'red'
+    ctx.beginPath()
+    ctx.arc(imgX, imgY, r, 0, Math.PI * 2)
+    ctx.fill()
+    hasMask.value = true
+  } else if (props.maskMode === 'erase') {
+    ctx.globalCompositeOperation = 'destination-out'
+    ctx.beginPath()
+    ctx.arc(imgX, imgY, r, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.globalCompositeOperation = 'source-over'
+  }
+}
+
+async function exportMask() {
+  if (!maskOffscreen) return
+  const blob   = await maskOffscreen.convertToBlob({ type: 'image/png' })
+  const dataUrl = await new Promise((resolve) => {
+    const fr = new FileReader()
+    fr.onload = () => resolve(fr.result)
+    fr.readAsDataURL(blob)
+  })
+  emit('update-mask', dataUrl)
+}
+
+function clearMask() {
+  if (!maskOffscreen) return
+  maskOffscreen.getContext('2d').clearRect(0, 0, maskOffscreen.width, maskOffscreen.height)
+  hasMask.value = false
+  emit('update-mask', null)
+  drawOverlay()
+}
+
+function triggerMaskImport() {
+  maskFileInput.value?.click()
+}
+
+// Import an image as mask: bright/opaque pixels → red (masked region).
+async function onMaskFileChange(e) {
+  const file = e.target.files?.[0]
+  e.target.value = ''
+  if (!file || !maskOffscreen) return
+  try {
+    const bmp  = await createImageBitmap(file)
+    const tmp  = new OffscreenCanvas(maskOffscreen.width, maskOffscreen.height)
+    const tmpCtx = tmp.getContext('2d')
+    tmpCtx.drawImage(bmp, 0, 0, tmp.width, tmp.height)
+    const id = tmpCtx.getImageData(0, 0, tmp.width, tmp.height)
+    const d  = id.data
+    for (let i = 0; i < d.length; i += 4) {
+      const lum = d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114
+      if (lum > 127 || d[i + 3] > 127) {
+        d[i] = 255; d[i + 1] = 0; d[i + 2] = 0; d[i + 3] = 255
+      } else {
+        d[i + 3] = 0
+      }
+    }
+    const ctx = maskOffscreen.getContext('2d')
+    ctx.clearRect(0, 0, maskOffscreen.width, maskOffscreen.height)
+    ctx.putImageData(id, 0, 0)
+    hasMask.value = true
+    await exportMask()
+    drawOverlay()
+  } catch (err) {
+    console.error('Failed to import mask:', err)
+  }
+}
+
+// ── Mouse handlers ────────────────────────────────────────────────────────────
+
+function getViewportCoords(e) {
+  const rect = container.value.getBoundingClientRect()
+  return { x: e.clientX - rect.left, y: e.clientY - rect.top }
+}
+
+function onMouseDown(e) {
+  if (props.maskMode !== 'none' && e.button === 0) {
+    isDrawing = true
+    const { x, y } = getViewportCoords(e)
+    paintAt(x, y)
+    drawOverlay()
+  } else if (e.button === 0) {
+    dragging.value = true
+    startX  = e.clientX
+    startY  = e.clientY
+    startTx = tx.value
+    startTy = ty.value
+  }
+}
+
+function onMouseMove(e) {
+  const { x, y } = getViewportCoords(e)
+  mousePos = { x, y }
+
+  if (isDrawing && props.maskMode !== 'none') {
+    paintAt(x, y)
+  } else if (dragging.value) {
+    tx.value = startTx + (e.clientX - startX)
+    ty.value = startTy + (e.clientY - startY)
+  }
+
+  // Pixel color for status bar
+  const px  = Math.floor((x - tx.value) / scale.value)
+  const py  = Math.floor((y - ty.value) / scale.value)
+  const img = imgEl.value
+  if (img && px >= 0 && py >= 0 && px < img.naturalWidth && py < img.naturalHeight) {
+    const info = { x: px, y: py, r: null, g: null, b: null }
+    if (offscreenCtx) {
+      const pixel = offscreenCtx.getImageData(px, py, 1, 1).data
+      info.r = pixel[0]; info.g = pixel[1]; info.b = pixel[2]
+    }
+    hoverPx.value = info
+  } else {
+    hoverPx.value = null
+  }
+
+  drawOverlay()
+}
+
+async function onMouseUp() {
+  if (isDrawing) {
+    isDrawing = false
+    await exportMask()
+  }
+  dragging.value = false
+}
+
+function onMouseLeave() {
+  dragging.value = false
+  if (isDrawing) { isDrawing = false; exportMask() }
+  mousePos      = null
+  hoverPx.value = null
+  drawOverlay()
+}
+
+function onWheel(e) {
+  e.preventDefault()
+  const rect     = container.value.getBoundingClientRect()
+  const cx       = e.clientX - rect.left
+  const cy       = e.clientY - rect.top
+  const factor   = e.deltaY < 0 ? 1.15 : 1 / 1.15
+  const newScale = clamp(scale.value * factor, MIN_SCALE, MAX_SCALE)
+  const ratio    = newScale / scale.value
+  tx.value    = cx - (cx - tx.value) * ratio
+  ty.value    = cy - (cy - ty.value) * ratio
+  scale.value = newScale
+  drawOverlay()
+}
+
+// ── Lifecycle ─────────────────────────────────────────────────────────────────
+
+function setupOffscreenCanvas() {
+  const img = imgEl.value
+  if (!img || !img.naturalWidth) return
+  try {
+    const c    = new OffscreenCanvas(img.naturalWidth, img.naturalHeight)
+    offscreenCtx = c.getContext('2d')
+    offscreenCtx.drawImage(img, 0, 0)
+  } catch {
+    offscreenCtx = null
+  }
+}
 
 function onImgLoad() {
   fit()
   setupOffscreenCanvas()
+  initMaskCanvas()
 }
 
+// Redraw when keypoints arrive or showKeypoints changes
+watch(() => props.image.kpStatus,    () => drawOverlay())
+watch(() => props.image.keypoints,   () => drawOverlay(), { deep: false })
+watch(() => props.showKeypoints,     () => drawOverlay())
+watch(() => props.maskMode,          () => drawOverlay())
+
+// Sync mask canvas when parent clears or replaces the mask externally
+watch(() => props.image.mask, (mask, prev) => {
+  if (mask === prev) return
+  if (mask?.dataUrl && maskOffscreen) {
+    loadMaskFromDataUrl(mask.dataUrl)
+  } else if (!mask && maskOffscreen) {
+    maskOffscreen.getContext('2d').clearRect(0, 0, maskOffscreen.width, maskOffscreen.height)
+    hasMask.value = false
+    drawOverlay()
+  }
+})
+
 onMounted(() => {
-  resizeObserver = new ResizeObserver(() => {
-    if (!dragging.value) fit()
-  })
+  resizeObserver = new ResizeObserver(() => fit())
   if (container.value) resizeObserver.observe(container.value)
 })
 
 onBeforeUnmount(() => resizeObserver?.disconnect())
 
-defineExpose({ fit, zoomIn, zoomOut })
+defineExpose({ fit, zoomIn, zoomOut, triggerMaskImport, clearMask })
 </script>
 
 <template>
   <div class="image-viewer">
+    <input ref="maskFileInput" type="file" accept="image/*" hidden @change="onMaskFileChange" />
+
     <div
       ref="container"
       class="viewport"
-      :class="{ grabbing: dragging }"
+      :class="{ grabbing: dragging && maskMode === 'none', drawing: maskMode !== 'none' }"
       @wheel="onWheel"
       @mousedown="onMouseDown"
       @mousemove="onMouseMove"
-      @mouseup="stopDrag"
+      @mouseup="onMouseUp"
       @mouseleave="onMouseLeave"
-      @dblclick="fit"
+      @dblclick="maskMode === 'none' && fit()"
     >
       <img
         ref="imgEl"
@@ -164,6 +380,8 @@ defineExpose({ fit, zoomIn, zoomOut })
         draggable="false"
         @load="onImgLoad"
       />
+
+      <canvas ref="overlayCanvas" class="overlay-canvas" />
 
       <div class="hud">
         <span>{{ Math.round(scale * 100) }}%</span>
@@ -208,9 +426,8 @@ defineExpose({ fit, zoomIn, zoomOut })
   cursor: grab;
 }
 
-.viewport.grabbing {
-  cursor: grabbing;
-}
+.viewport.grabbing { cursor: grabbing; }
+.viewport.drawing  { cursor: none; }
 
 .image {
   position: absolute;
@@ -219,6 +436,13 @@ defineExpose({ fit, zoomIn, zoomOut })
   transform-origin: 0 0;
   image-rendering: auto;
   will-change: transform;
+}
+
+.overlay-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
 }
 
 .hud {
@@ -246,11 +470,8 @@ defineExpose({ fit, zoomIn, zoomOut })
   cursor: pointer;
 }
 
-.hud button:hover {
-  background: var(--hover-bg);
-}
+.hud button:hover { background: var(--hover-bg); }
 
-/* Status bar */
 .status-bar {
   flex-shrink: 0;
   height: 24px;
@@ -265,14 +486,8 @@ defineExpose({ fit, zoomIn, zoomOut })
   border-top: 1px solid var(--panel-border);
 }
 
-.coord {
-  color: var(--text, #ccc);
-  letter-spacing: 0.02em;
-}
-
-.sep {
-  color: var(--panel-border, #444);
-}
+.coord { color: var(--text); letter-spacing: 0.02em; }
+.sep   { color: var(--panel-border); }
 
 .swatch {
   display: inline-block;
@@ -283,11 +498,8 @@ defineExpose({ fit, zoomIn, zoomOut })
   flex-shrink: 0;
 }
 
-.channel {
-  letter-spacing: 0.02em;
-}
-
-.channel.r { color: #e07070; }
-.channel.g { color: #70c070; }
-.channel.b { color: #6090e0; }
+.channel     { letter-spacing: 0.02em; }
+.channel.r   { color: #e07070; }
+.channel.g   { color: #70c070; }
+.channel.b   { color: #6090e0; }
 </style>
