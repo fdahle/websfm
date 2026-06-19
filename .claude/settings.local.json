@@ -1,7 +1,11 @@
 {
   "permissions": {
     "allow": [
-      "PowerShell($ErrorActionPreference='SilentlyContinue'; \"winget: \" + \\(Get-Command winget\\).Source; \"cargo: \" + \\(Get-Command cargo\\).Source; \"rustup: \" + \\(Get-Command rustup\\).Source; \"existing cargo bin:\"; Test-Path \"$env:USERPROFILE\\\\.cargo\\\\bin\\\\cargo.exe\")"
+      "PowerShell($ErrorActionPreference='SilentlyContinue'; \"winget: \" + \\(Get-Command winget\\).Source; \"cargo: \" + \\(Get-Command cargo\\).Source; \"rustup: \" + \\(Get-Command rustup\\).Source; \"existing cargo bin:\"; Test-Path \"$env:USERPROFILE\\\\.cargo\\\\bin\\\\cargo.exe\")",
+      "Bash(npm run *)",
+      "PowerShell($env:PATH += \";$env:USERPROFILE\\\\.cargo\\\\bin\"; cd \"c:\\\\Users\\\\Felix\\\\Documents\\\\GitHub\\\\websfm\\\\crates\\\\sift\"; cargo test 2>&1)",
+      "PowerShell($env:PATH -split \";\" | Where-Object { $_ -match \"rust|cargo|wasm\" })",
+      "PowerShell($env:PATH -split \";\" | ForEach-Object { $_ })"
     ]
   }
 }
