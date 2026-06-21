@@ -1,0 +1,12 @@
+[package]
+name = "matching"
+version = "0.1.0"
+edition = "2021"
+description = "SIFT descriptor matching and RANSAC geometric verification compiled to WebAssembly"
+license = "MIT OR Apache-2.0"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+wasm-bindgen = "0.2"

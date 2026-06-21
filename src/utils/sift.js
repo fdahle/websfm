@@ -1,5 +1,9 @@
 import init, { detect_sift } from '../wasm/sift/sift.js'
 
+// Must match STRIDE in crates/sift/src/lib.rs: [x, y, scale, response, angle, d0..d127]
+const STRIDE = 133
+const DESC_LEN = 128
+
 let initPromise = null
 
 // Lazily initialize the WASM module exactly once.
@@ -46,32 +50,38 @@ function loadImage(url) {
  * @returns {Promise<{ keypoints: Array, width: number, height: number, detectWidth: number, detectHeight: number, ms: number }>}
  */
 export async function detectKeypoints(url, options = {}) {
-  const { maxDim = 1200, contrastThreshold = 0.03, maxKeypoints = 5000 } = options
+  const { maxDim = 1200, contrastThreshold = 0.01, maxKeypoints = 5000 } = options
 
   await ensureWasm()
   const img = await loadImage(url)
   const { data, width, height, scale } = rasterize(img, maxDim)
 
   const t0 = performance.now()
-  const flat = detect_sift(data, width, height, contrastThreshold, maxKeypoints)
+  const flat = detect_sift(new Uint8Array(data.buffer), width, height, contrastThreshold, maxKeypoints)
   const ms = performance.now() - t0
 
+  const n = Math.floor(flat.length / STRIDE)
   const keypoints = []
-  for (let i = 0; i < flat.length; i += 4) {
-    const dx = flat[i] // x in detection space
-    const dy = flat[i + 1]
+  const descriptors = new Float32Array(n * DESC_LEN)
+
+  for (let i = 0; i < n; i++) {
+    const base = i * STRIDE
+    const dx = flat[base]
+    const dy = flat[base + 1]
     keypoints.push({
-      x: dx / scale, // original-image pixels
+      x: dx / scale,
       y: dy / scale,
-      nx: dx / width, // normalized 0..1
+      nx: dx / width,
       ny: dy / height,
-      scale: flat[i + 2] / scale,
-      response: flat[i + 3],
+      scale: flat[base + 2] / scale,
+      response: flat[base + 3],
     })
+    descriptors.set(flat.subarray(base + 5, base + 5 + DESC_LEN), i * DESC_LEN)
   }
 
   return {
     keypoints,
+    descriptors, // Float32Array, N×128 row-major — not stored in image object, persisted to OPFS
     width: img.naturalWidth,
     height: img.naturalHeight,
     detectWidth: width,

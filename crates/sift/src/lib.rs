@@ -222,7 +222,7 @@ fn compute_descriptor(
             let rx = ( cos_t * dx_f + sin_t * dy_f) / hist_width;
             let ry = (-sin_t * dx_f + cos_t * dy_f) / hist_width;
 
-            if rx < -(half + 1.0) || rx >= half || ry < -(half + 1.0) || ry >= half {
+            if rx < -(half + 1.0) || rx >= half + 1.0 || ry < -(half + 1.0) || ry >= half + 1.0 {
                 continue;
             }
 

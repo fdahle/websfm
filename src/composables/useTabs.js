@@ -1,11 +1,22 @@
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 
 const VIEWER_TAB = { id: 'viewer', type: 'viewer', title: '3D', closable: false }
 const MAP_TAB    = { id: 'map',    type: 'map',    title: '2D', closable: false }
 
-export function useTabs(imageById) {
+// showMap: Ref<boolean> — when false the 2D tab is hidden and map view redirects to viewer
+export function useTabs(imageById, showMap) {
   const tabs = ref([{ ...VIEWER_TAB }, { ...MAP_TAB }])
   const activeTabId = ref('viewer')
+
+  // When map becomes unavailable (scene type change), remove the tab and redirect
+  watch(showMap || ref(true), (visible) => {
+    if (!visible) {
+      tabs.value = tabs.value.filter((t) => t.id !== 'map')
+      if (activeTabId.value === 'map') activeTabId.value = 'viewer'
+    } else if (!tabs.value.some((t) => t.id === 'map')) {
+      tabs.value.splice(1, 0, { ...MAP_TAB })
+    }
+  })
 
   const activeTab = computed(() => tabs.value.find((t) => t.id === activeTabId.value) || null)
 
@@ -36,8 +47,25 @@ export function useTabs(imageById) {
         imageId,
         closable: true,
         showKeypoints: img?.kpStatus === 'done',
+        showMask: true,
         maskMode: 'none',
         brushRadius: 20,
+      })
+    }
+    activeTabId.value = tabId
+  }
+
+  function openMatchTab(pairId, imgIdA, imgIdB, nameA, nameB) {
+    const tabId = `match:${pairId}`
+    if (!tabs.value.some((t) => t.id === tabId)) {
+      tabs.value.push({
+        id: tabId,
+        type: 'match',
+        title: `${nameA.replace(/\.[^.]+$/, '')} ↔ ${nameB.replace(/\.[^.]+$/, '')}`,
+        pairId,
+        imageIdA: imgIdA,
+        imageIdB: imgIdB,
+        closable: true,
       })
     }
     activeTabId.value = tabId
@@ -65,7 +93,6 @@ export function useTabs(imageById) {
     closeTab(`img:${imageId}`)
   }
 
-  // Called after detection so open image tabs auto-show keypoints.
   function onImageDetected(imageId) {
     for (const tab of tabs.value) {
       if (tab.imageId === imageId) tab.showKeypoints = true
@@ -85,6 +112,7 @@ export function useTabs(imageById) {
     activeView,
     activateTab,
     openImageTab,
+    openMatchTab,
     openMetadataTab,
     closeTab,
     closeTabForImage,

@@ -5,7 +5,23 @@
       "Bash(npm run *)",
       "PowerShell($env:PATH += \";$env:USERPROFILE\\\\.cargo\\\\bin\"; cd \"c:\\\\Users\\\\Felix\\\\Documents\\\\GitHub\\\\websfm\\\\crates\\\\sift\"; cargo test 2>&1)",
       "PowerShell($env:PATH -split \";\" | Where-Object { $_ -match \"rust|cargo|wasm\" })",
-      "PowerShell($env:PATH -split \";\" | ForEach-Object { $_ })"
+      "PowerShell($env:PATH -split \";\" | ForEach-Object { $_ })",
+      "PowerShell(cargo install wasm-pack 2>&1)",
+      "Bash(wasm-pack --version)",
+      "Bash(cargo --version)",
+      "PowerShell(wsl -- bash -ic \"wasm-pack --version && cargo --version\" 2>&1)",
+      "PowerShell(wsl -- bash -ic \"cd /mnt/c/Users/Felix/Documents/GitHub/websfm/crates && wasm-pack build sift --target web --out-dir ../src/wasm/sift 2>&1\")",
+      "PowerShell(wsl -- bash -ic \"cd /mnt/c/Users/Felix/Documents/GitHub/websfm/crates && wasm-pack build matching --target web --out-dir ../src/wasm/matching 2>&1\")",
+      "PowerShell(wsl -- bash -ic \"ls -la /mnt/c/Users/Felix/Documents/GitHub/websfm/src/wasm/sift/ && echo '---' && ls -la /mnt/c/Users/Felix/Documents/GitHub/websfm/crates/src/wasm/sift/ 2>/dev/null || echo 'crates/src/wasm/sift does not exist'\")",
+      "PowerShell(wsl -- bash -ic \"cd /mnt/c/Users/Felix/Documents/GitHub/websfm/crates/sift && wasm-pack build --target web --out-dir ../../src/wasm/sift 2>&1\")",
+      "PowerShell(wsl -- bash -ic \"cd /mnt/c/Users/Felix/Documents/GitHub/websfm/crates/matching && wasm-pack build --target web --out-dir ../../src/wasm/matching 2>&1\")",
+      "PowerShell(wsl -- bash -ic \"rm -rf /mnt/c/Users/Felix/Documents/GitHub/websfm/crates/src\")",
+      "Bash(node -e \"console.log\\(require\\('./node_modules/three/package.json'\\).version\\)\")",
+      "Bash(npm install *)",
+      "Bash(wasm-pack build *)",
+      "Bash(wsl -e bash -c \"which wasm-pack && wasm-pack --version\")",
+      "Bash(wsl bash *)",
+      "PowerShell(wsl -- bash -ic \"cd /mnt/c/Users/Felix/Documents/GitHub/websfm && wasm-pack build crates/reconstruction --target web --out-dir ../../src/wasm/reconstruction 2>&1\")"
     ]
   }
 }
