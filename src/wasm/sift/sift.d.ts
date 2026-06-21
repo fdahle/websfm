@@ -2,10 +2,10 @@
 /* eslint-disable */
 
 /**
- * Detect SIFT keypoints.
+ * Detect SIFT keypoints and compute 128-d descriptors.
  *
- * Returns a flat `Float32Array` with 4 values per keypoint:
- * `[x, y, scale, response, x, y, scale, response, ...]`
+ * Returns a flat `Float32Array` with `STRIDE` (133) values per keypoint:
+ * `[x, y, scale, response, angle, d0..d127, ...]`
  * where `x`/`y` are in input-image pixel coordinates.
  */
 export function detect_sift(rgba: Uint8Array, width: number, height: number, contrast_threshold: number, max_keypoints: number): Float32Array;

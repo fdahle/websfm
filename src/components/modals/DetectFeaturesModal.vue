@@ -3,18 +3,19 @@ import { ref, computed } from 'vue'
 
 const emit = defineEmits(['close', 'run'])
 
+const overwrite = ref(false)
 const detector = ref('sift')
 
 const siftSettings = ref({
   maxDim: 1200,
-  contrastThreshold: 0.03,
+  contrastThreshold: 0.01,
   maxKeypoints: 5000,
 })
 
 const detectors = [
-  { id: 'sift', label: 'SIFT' },
-  { id: 'orb', label: 'ORB', disabled: true },
-  { id: 'akaze', label: 'AKAZE', disabled: true },
+  { id: 'sift',  label: 'SIFT' },
+  { id: 'orb',   label: 'ORB (coming soon)',   disabled: true },
+  { id: 'akaze', label: 'AKAZE (coming soon)',  disabled: true },
 ]
 
 const settings = computed(() => {
@@ -23,7 +24,7 @@ const settings = computed(() => {
 })
 
 function run() {
-  emit('run', { detector: detector.value, ...settings.value })
+  emit('run', { detector: detector.value, overwrite: overwrite.value, ...settings.value })
 }
 </script>
 
@@ -36,21 +37,42 @@ function run() {
       </div>
 
       <div class="modal-body">
+
+        <!-- Append / Overwrite toggle -->
         <div class="field">
-          <span class="field-label">Detector</span>
-          <div class="detector-row">
+          <span class="field-label">Mode</span>
+          <div class="seg-ctrl">
             <button
+              class="seg-btn"
+              :class="{ active: !overwrite }"
+              @click="overwrite = false"
+            >Append</button>
+            <button
+              class="seg-btn"
+              :class="{ active: overwrite }"
+              @click="overwrite = true"
+            >Overwrite</button>
+          </div>
+          <span class="field-hint">
+            {{ overwrite
+              ? 'Re-detect all images, replacing existing keypoints.'
+              : 'Skip images that already have keypoints.' }}
+          </span>
+        </div>
+
+        <div class="section-sep"></div>
+
+        <!-- Detector select -->
+        <div class="field">
+          <label class="field-label" for="detector-sel">Detector</label>
+          <select id="detector-sel" v-model="detector" class="field-select">
+            <option
               v-for="d in detectors"
               :key="d.id"
-              class="detector-btn"
-              :class="{ active: detector === d.id, disabled: d.disabled }"
+              :value="d.id"
               :disabled="d.disabled"
-              :title="d.disabled ? 'Coming soon' : ''"
-              @click="!d.disabled && (detector = d.id)"
-            >
-              {{ d.label }}
-            </button>
-          </div>
+            >{{ d.label }}</option>
+          </select>
         </div>
 
         <template v-if="detector === 'sift'">
@@ -194,35 +216,36 @@ function run() {
   color: var(--text-dim);
 }
 
-.detector-row {
+/* Segmented control */
+.seg-ctrl {
   display: flex;
-  gap: 4px;
-}
-
-.detector-btn {
-  background: none;
   border: 1px solid var(--panel-border);
-  border-radius: 5px;
-  color: var(--text);
-  font-size: 12px;
-  padding: 4px 14px;
-  cursor: pointer;
+  border-radius: 6px;
+  overflow: hidden;
+  width: fit-content;
+}
+
+.seg-btn {
+  background: none;
+  border: none;
+  border-right: 1px solid var(--panel-border);
+  color: var(--text-dim);
   font: inherit;
+  font-size: 12px;
+  padding: 4px 16px;
+  cursor: pointer;
 }
 
-.detector-btn:hover:not(.disabled) {
+.seg-btn:last-child { border-right: none; }
+
+.seg-btn:hover:not(.active) {
   background: var(--hover-bg);
+  color: var(--text);
 }
 
-.detector-btn.active {
+.seg-btn.active {
   background: var(--accent);
-  border-color: var(--accent);
   color: #fff;
-}
-
-.detector-btn.disabled {
-  opacity: 0.35;
-  cursor: default;
 }
 
 .section-sep {
@@ -231,6 +254,7 @@ function run() {
   margin: 2px 0;
 }
 
+/* Inputs */
 .input-row {
   display: flex;
   align-items: center;
@@ -243,8 +267,8 @@ function run() {
   border: 1px solid var(--panel-border);
   border-radius: 5px;
   color: var(--text);
-  font-size: 13px;
   font: inherit;
+  font-size: 13px;
   padding: 4px 8px;
 }
 
@@ -258,20 +282,35 @@ function run() {
   color: var(--text-dim);
 }
 
+.field-select {
+  background: var(--bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 5px;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  padding: 4px 8px;
+  cursor: pointer;
+  width: fit-content;
+}
+
+.field-select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
 .btn {
   background: none;
   border: 1px solid var(--panel-border);
   border-radius: 5px;
   color: var(--text);
-  font-size: 13px;
   font: inherit;
+  font-size: 13px;
   padding: 5px 14px;
   cursor: pointer;
 }
 
-.btn:hover {
-  background: var(--hover-bg);
-}
+.btn:hover { background: var(--hover-bg); }
 
 .btn-primary {
   background: var(--accent);
@@ -279,7 +318,5 @@ function run() {
   color: #fff;
 }
 
-.btn-primary:hover {
-  opacity: 0.88;
-}
+.btn-primary:hover { opacity: 0.88; }
 </style>

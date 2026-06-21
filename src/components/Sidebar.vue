@@ -1,12 +1,12 @@
 <script setup>
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 
 const props = defineProps({
-  images: { type: Array, required: true },
+  images:     { type: Array,  required: true },
   selectedId: { type: String, default: null },
 })
 
-const emit = defineEmits(['add-images', 'remove-image', 'select', 'open', 'show-info'])
+const emit = defineEmits(['add-images', 'remove-image', 'select', 'open', 'show-info', 'delete-keypoints'])
 
 // Whole-sidebar drag-and-drop (counter avoids false dragleave on children)
 const isDragging = ref(false)
@@ -31,18 +31,72 @@ function onDrop(e) {
 }
 
 // Collapsible sections
-const open = ref({ images: true, cameras: false, features: false, matches: false, sparse: false })
+const open = ref({ images: true, cameras: false })
 
 function toggle(key) {
   open.value[key] = !open.value[key]
 }
 
+// Per-image expand state
+const expanded = ref({})
+
+function toggleExpand(id) {
+  if (expanded.value[id]) delete expanded.value[id]
+  else expanded.value[id] = true
+}
+
+// Multi-select: local array of selected ids + anchor for shift-range
+const localSelected = ref([])
+const anchor = ref(null)
+let suppressWatch = false
+
+function handleItemClick(e, img) {
+  suppressWatch = true
+  if (e.shiftKey && anchor.value !== null) {
+    const ids = props.images.map((i) => i.id)
+    const ai = ids.indexOf(anchor.value)
+    const ci = ids.indexOf(img.id)
+    const [from, to] = ai <= ci ? [ai, ci] : [ci, ai]
+    localSelected.value = ids.slice(from, to + 1)
+  } else {
+    localSelected.value = [img.id]
+    anchor.value = img.id
+  }
+  emit('select', img.id)
+}
+
+watch(() => props.selectedId, (newId) => {
+  if (suppressWatch) { suppressWatch = false; return }
+  localSelected.value = newId ? [newId] : []
+  anchor.value = newId
+})
+
 // Context menu
 const ctxMenu = ref(null) // { x, y, img }
 
+// The set of images the context menu should act on:
+// multi if right-clicking within an existing multi-selection, else just the one image.
+const ctxTargets = computed(() => {
+  if (!ctxMenu.value) return []
+  const { img } = ctxMenu.value
+  if (localSelected.value.length > 1 && localSelected.value.includes(img.id))
+    return props.images.filter((i) => localSelected.value.includes(i.id))
+  return [img]
+})
+
+const ctxIsMulti    = computed(() => ctxTargets.value.length > 1)
+const ctxHasKp      = computed(() => ctxTargets.value.some((i) => i.kpStatus === 'done'))
+
 function onRightClick(e, img) {
   e.preventDefault()
-  const menuW = 175, menuH = 115
+  // Right-clicking outside the current selection collapses to that single image
+  if (!localSelected.value.includes(img.id)) {
+    localSelected.value = [img.id]
+    anchor.value = img.id
+    suppressWatch = true
+    emit('select', img.id)
+  }
+  const menuW = 190, menuH = 160
   ctxMenu.value = {
     x: Math.min(e.clientX, window.innerWidth - menuW),
     y: Math.min(e.clientY, window.innerHeight - menuH),
@@ -54,9 +108,18 @@ function closeCtxMenu() {
   ctxMenu.value = null
 }
 
-function ctxOpen() { emit('open', ctxMenu.value.img.id); closeCtxMenu() }
-function ctxInfo()  { emit('show-info', ctxMenu.value.img.id); closeCtxMenu() }
-function ctxRemove() { emit('remove-image', ctxMenu.value.img.id); closeCtxMenu() }
+function ctxOpen()     { emit('open', ctxMenu.value.img.id); closeCtxMenu() }
+function ctxInfo()     { emit('show-info', ctxMenu.value.img.id); closeCtxMenu() }
+function ctxDeleteKp() {
+  ctxTargets.value.forEach((img) => {
+    if (img.kpStatus === 'done') emit('delete-keypoints', img.id)
+  })
+  closeCtxMenu()
+}
+function ctxRemove() {
+  ctxTargets.value.forEach((img) => emit('remove-image', img.id))
+  closeCtxMenu()
+}
 
 onMounted(() => document.addEventListener('click', closeCtxMenu))
 onBeforeUnmount(() => document.removeEventListener('click', closeCtxMenu))
@@ -82,19 +145,46 @@ onBeforeUnmount(() => document.removeEventListener('click', closeCtxMenu))
         <span v-if="images.length" class="badge">{{ images.length }}</span>
       </button>
       <ul v-if="open.images" class="item-list">
-        <li
-          v-for="img in images"
-          :key="img.id"
-          class="list-item"
-          :class="{ selected: img.id === selectedId }"
-          :title="img.name"
-          @click="emit('select', img.id)"
-          @dblclick="emit('open', img.id)"
-          @contextmenu="onRightClick($event, img)"
-        >
-          <span class="status-dot" :class="img.kpStatus"></span>
-          <span class="item-name">{{ img.name }}</span>
-        </li>
+        <template v-for="img in images" :key="img.id">
+          <li
+            class="list-item"
+            :class="{ selected: localSelected.includes(img.id) }"
+            :title="img.name"
+            @click="handleItemClick($event, img)"
+            @dblclick="emit('open', img.id)"
+            @contextmenu="onRightClick($event, img)"
+          >
+            <button
+              class="expand-btn"
+              :class="{ open: expanded[img.id] }"
+              @click.stop="toggleExpand(img.id)"
+              :title="expanded[img.id] ? 'Collapse' : 'Expand'"
+            ></button>
+            <span v-if="img.kpStatus === 'running'" class="status-dot running"></span>
+            <span v-else-if="img.kpStatus === 'error'" class="status-dot error"></span>
+            <span class="item-name">{{ img.name }}</span>
+          </li>
+          <li v-if="expanded[img.id]" class="img-details" @contextmenu.stop>
+            <div class="detail-row">
+              <span class="detail-label">Keypoints</span>
+              <span class="detail-value">
+                <template v-if="img.kpStatus === 'done'">
+                  {{ img.kpCount }}
+                </template>
+                <span v-else-if="img.kpStatus === 'running'" class="detail-dim">detecting…</span>
+                <span v-else-if="img.kpStatus === 'error'" class="detail-error">failed</span>
+                <span v-else class="detail-dim">—</span>
+              </span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">Mask</span>
+              <span class="detail-value">
+                <span v-if="img.mask">yes</span>
+                <span v-else class="detail-dim">—</span>
+              </span>
+            </div>
+          </li>
+        </template>
         <li v-if="!images.length" class="empty">No images — drop here to add</li>
       </ul>
     </div>
@@ -108,33 +198,6 @@ onBeforeUnmount(() => document.removeEventListener('click', closeCtxMenu))
       <div v-if="open.cameras" class="placeholder">No camera models yet</div>
     </div>
 
-    <!-- Features -->
-    <div class="section">
-      <button class="section-hd" @click="toggle('features')">
-        <span class="chevron">{{ open.features ? '▾' : '▸' }}</span>
-        <span class="section-name">Features</span>
-      </button>
-      <div v-if="open.features" class="placeholder">No features extracted yet</div>
-    </div>
-
-    <!-- Matches -->
-    <div class="section">
-      <button class="section-hd" @click="toggle('matches')">
-        <span class="chevron">{{ open.matches ? '▾' : '▸' }}</span>
-        <span class="section-name">Matches</span>
-      </button>
-      <div v-if="open.matches" class="placeholder">No matches computed yet</div>
-    </div>
-
-    <!-- Sparse Model -->
-    <div class="section">
-      <button class="section-hd" @click="toggle('sparse')">
-        <span class="chevron">{{ open.sparse ? '▾' : '▸' }}</span>
-        <span class="section-name">Sparse Model</span>
-      </button>
-      <div v-if="open.sparse" class="placeholder">No reconstruction yet</div>
-    </div>
-
     <!-- Context menu -->
     <Teleport to="body">
       <div
@@ -143,8 +206,12 @@ onBeforeUnmount(() => document.removeEventListener('click', closeCtxMenu))
         :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }"
         @click.stop
       >
-        <button class="ctx-item" @click="ctxOpen">Open in tab</button>
-        <button class="ctx-item" @click="ctxInfo">Show information</button>
+        <button class="ctx-item" :class="{ 'ctx-disabled': ctxIsMulti }" :disabled="ctxIsMulti" @click="ctxOpen">Open in tab</button>
+        <button class="ctx-item" :class="{ 'ctx-disabled': ctxIsMulti }" :disabled="ctxIsMulti" @click="ctxInfo">Show information</button>
+        <template v-if="ctxHasKp">
+          <div class="ctx-sep"></div>
+          <button class="ctx-item" @click="ctxDeleteKp">Delete keypoints</button>
+        </template>
         <div class="ctx-sep"></div>
         <button class="ctx-item danger" @click="ctxRemove">Remove</button>
       </div>
@@ -238,6 +305,7 @@ onBeforeUnmount(() => document.removeEventListener('click', closeCtxMenu))
 .item-list {
   list-style: none;
   padding: 2px 0 6px;
+  user-select: none;
 }
 
 .list-item {
@@ -263,13 +331,10 @@ onBeforeUnmount(() => document.removeEventListener('click', closeCtxMenu))
   height: 6px;
   border-radius: 50%;
   flex-shrink: 0;
-  background: var(--text-dim);
-  opacity: 0.5;
 }
 
-.status-dot.done    { background: #4c9; opacity: 1; }
-.status-dot.error   { background: #e55; opacity: 1; }
-.status-dot.running { background: #fa0; opacity: 1; animation: pulse 0.9s ease-in-out infinite; }
+.status-dot.error   { background: #e55; }
+.status-dot.running { background: #fa0; animation: pulse 0.9s ease-in-out infinite; }
 
 @keyframes pulse {
   0%, 100% { opacity: 1; }
@@ -290,6 +355,63 @@ onBeforeUnmount(() => document.removeEventListener('click', closeCtxMenu))
   color: var(--text-dim);
   font-style: italic;
 }
+
+/* Per-image expand toggle */
+.expand-btn {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-dim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 2px;
+}
+
+.expand-btn::before {
+  content: '';
+  display: block;
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-width: 5px 0 5px 8px;
+  border-color: transparent transparent transparent currentColor;
+  transition: transform 0.15s;
+}
+
+.expand-btn:hover { color: var(--text); }
+.expand-btn.open::before { transform: rotate(90deg); }
+
+/* Image detail panel — white card with dotted left connector */
+.img-details {
+  background: #fff;
+  border-left: 1.5px dotted #bbb;
+  margin: 0 8px 4px 19px;
+  border-radius: 0 4px 4px 0;
+  padding: 4px 8px 4px 10px;
+}
+
+.detail-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  line-height: 1.8;
+}
+
+.detail-label { color: #777; }
+
+.detail-value {
+  color: #222;
+  font-variant-numeric: tabular-nums;
+}
+
+.detail-dim   { color: #aaa; }
+.detail-error { color: #c33; }
 
 /* Context menu */
 .ctx-menu {
@@ -323,6 +445,12 @@ onBeforeUnmount(() => document.removeEventListener('click', closeCtxMenu))
 
 .ctx-item.danger       { color: #e55; }
 .ctx-item.danger:hover { background: rgba(220, 80, 80, 0.12); }
+
+.ctx-disabled {
+  opacity: 0.35;
+  cursor: default;
+  pointer-events: none;
+}
 
 .ctx-sep {
   height: 1px;

@@ -5,11 +5,11 @@ const entries = ref([])
 let _seq = 0
 
 export function useLog() {
-  function log(message, level = 'info') {
+  function log(message, level = 'info', source = null) {
     const now = new Date()
     const hms = now.toLocaleTimeString('en', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
     const ms  = now.getMilliseconds().toString().padStart(3, '0')
-    entries.value.push({ id: ++_seq, time: `${hms}.${ms}`, level, message })
+    entries.value.push({ id: ++_seq, time: `${hms}.${ms}`, level, message, source })
     if (entries.value.length > 1000) entries.value.shift()
   }
 

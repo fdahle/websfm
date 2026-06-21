@@ -2,58 +2,40 @@
 import { ref, computed, watch } from 'vue'
 
 const props = defineProps({
-  activeView: {
-    type: String,
-    default: 'viewer',
-  },
-  hasSelection: {
-    type: Boolean,
-    default: false,
-  },
-  imageCount: {
-    type: Number,
-    default: 0,
-  },
-  activeImageId: {
-    type: String,
-    default: null,
-  },
-  activeImageName: {
-    type: String,
-    default: null,
-  },
-  imageViewState: {
-    type: Object,
-    default: null,
-  },
-  consoleOpen: {
-    type: Boolean,
-    default: false,
-  },
+  activeView: { type: String, default: 'viewer' },
+  hasSelection: { type: Boolean, default: false },
+  imageCount: { type: Number, default: 0 },
+  matchCount: { type: Number, default: 0 },
+  activeImageId: { type: String, default: null },
+  activeImageName: { type: String, default: null },
+  imageViewState: { type: Object, default: null },
+  consoleOpen: { type: Boolean, default: false },
+  persistenceEnabled: { type: Boolean, default: false },
+  currentProjectName: { type: String, default: null },
+  sceneType: { type: String, default: null },
 })
 
 const emit = defineEmits(['command'])
 
-// Data-driven ribbon definition. Add tabs / groups / commands here.
-// A command with `disabled: true` is a placeholder for future work.
 const tabs = [
   {
-    id: 'home',
-    label: 'Home',
+    id: 'view',
+    label: 'View',
     groups: [
       {
-        label: 'Session',
+        label: 'Camera',
         commands: [
-          { id: 'clear-all', label: 'Clear\nAll', icon: '🗑️', needsImages: true },
+          { id: 'view-preset-top',   label: 'Top\nView',   icon: '⬆', disabled: true },
+          { id: 'view-preset-side',  label: 'Side\nView',  icon: '◧', disabled: true },
+          { id: 'view-preset-front', label: 'Front\nView', icon: '▣', disabled: true },
+          { id: 'reset-view',        label: 'Reset\nView', icon: '⊙', disabled: true },
         ],
       },
       {
-        label: 'Selection',
-        commands: [{ id: 'remove-selected', label: 'Remove\nSelected', icon: '✖', needsSelection: true }],
-      },
-      {
-        label: 'App',
-        commands: [{ id: 'open-settings', label: 'Settings', icon: '⚙' }],
+        label: 'Panels',
+        commands: [
+          { id: 'toggle-console', label: 'Console', icon: '>_', activeKey: 'consoleOpen' },
+        ],
       },
     ],
   },
@@ -77,26 +59,8 @@ const tabs = [
       {
         label: 'Ground Control',
         commands: [
-          { id: 'import-gcps', label: 'GCP\nFile', icon: '📍', disabled: true },
+          { id: 'import-gcps', label: 'GCP\nFile', icon: '📍', aerialOnly: true, disabled: true },
         ],
-      },
-    ],
-  },
-  {
-    id: 'view',
-    label: 'View',
-    groups: [
-      {
-        label: 'Layout',
-        commands: [
-          { id: 'view-viewer', label: '3D\nViewer', icon: '🧊', view: 'viewer' },
-          { id: 'view-map',    label: '2D\nView',   icon: '🗺️', view: 'map' },
-          { id: 'view-table',  label: 'Metadata\nTable', icon: '📋', view: 'table' },
-        ],
-      },
-      {
-        label: 'Camera',
-        commands: [{ id: 'reset-view', label: 'Reset\nView', icon: '🎯', disabled: true }],
       },
     ],
   },
@@ -108,14 +72,21 @@ const tabs = [
         label: 'Features',
         commands: [
           { id: 'detect-features', label: 'Detect\nFeatures', icon: '✨', needsImages: true },
-          { id: 'match-features', label: 'Match\nFeatures', icon: '🔗', disabled: true },
+          { id: 'match-features', label: 'Match\nFeatures', icon: '🔗', needsImages: true },
         ],
       },
       {
         label: 'Reconstruction',
         commands: [
-          { id: 'sparse', label: 'Sparse\nModel', icon: '⠿', disabled: true },
-          { id: 'dense', label: 'Dense\nModel', icon: '☁', disabled: true },
+          { id: 'reconstruct', label: 'Sparse\nModel', icon: '⠿', needsMatches: true },
+          { id: 'dense',       label: 'Dense\nModel',  icon: '☁',  disabled: true },
+        ],
+      },
+      {
+        label: 'Results',
+        commands: [
+          { id: 'open-metadata',   label: 'Metadata\nTable', icon: '📋', needsImages: true },
+          { id: 'open-match-list', label: 'Match\nList',     icon: '🔗' },
         ],
       },
     ],
@@ -133,24 +104,42 @@ const tabs = [
       },
     ],
   },
+  {
+    id: 'other',
+    label: 'Other',
+    groups: [
+      {
+        label: 'App',
+        commands: [
+          { id: 'open-settings', label: 'Settings', icon: '⚙' },
+          { id: 'open-about',    label: 'About',    icon: 'ℹ' },
+        ],
+      },
+    ],
+  },
 ]
 
-// Contextual tab shown only when an image tab is active.
 const pictureTab = {
   id: 'picture',
   label: 'Picture',
   contextual: true,
   groups: [
     {
-      label: 'Keypoints',
+      label: 'Toggles',
       commands: [
-        { id: 'img-detect-sift', label: 'Detect\nSIFT', icon: '✨' },
         {
           id: 'img-toggle-keypoints',
-          labelFn: (s) => s?.kpCount ? `KP\n${s.kpCount}` : 'KP',
+          labelFn: (s) => s?.kpCount ? `KP\n${s.kpCount}` : 'Keypoints',
           icon: '⊙',
           activeKey: 'showKeypoints',
           disableKey: 'kpNotDone',
+        },
+        {
+          id: 'img-toggle-mask',
+          label: 'Mask',
+          icon: '◑',
+          activeKey: 'showMask',
+          disableKey: 'noMask',
         },
       ],
     },
@@ -166,7 +155,7 @@ const pictureTab = {
     {
       id: 'brush',
       label: 'Brush',
-      maskOnly: true,  // hidden unless maskMode is active
+      maskOnly: true,
       commands: [
         { id: 'img-brush-s', label: 'Small',  icon: '·', activeKey: 'brushS' },
         { id: 'img-brush-m', label: 'Medium', icon: '○', activeKey: 'brushM' },
@@ -177,32 +166,37 @@ const pictureTab = {
       label: 'Image',
       commands: [
         { id: 'img-show-info', label: 'Image\nInfo', icon: 'ℹ' },
-        { id: 'img-remove',    label: 'Remove',      icon: '✖' },
+        { id: 'img-remove',    label: 'Remove',      icon: '✖', danger: true },
       ],
     },
   ],
 }
 
-const activeTab = ref('home')
+const activeTab = ref('view')
 
-// Auto-switch to/from Picture tab when image context changes.
 watch(() => !!props.activeImageId, (hasImage) => {
   if (hasImage) {
     activeTab.value = 'picture'
   } else if (activeTab.value === 'picture') {
-    activeTab.value = 'home'
+    activeTab.value = 'view'
   }
 })
 
 const allTabs = computed(() => (props.activeImageId ? [...tabs, pictureTab] : tabs))
 const currentTab = computed(() => allTabs.value.find((t) => t.id === activeTab.value) || tabs[0])
 
+function isHidden(cmd) {
+  return cmd.aerialOnly && props.sceneType === 'object'
+}
+
 function isActive(cmd) {
   if (cmd.view != null && cmd.view === props.activeView) return true
+  if (cmd.activeKey === 'consoleOpen') return props.consoleOpen
   const s = props.imageViewState
   if (!s || !cmd.activeKey) return false
   switch (cmd.activeKey) {
     case 'showKeypoints': return s.showKeypoints
+    case 'showMask':      return s.showMask
     case 'maskDraw':      return s.maskMode === 'draw'
     case 'maskErase':     return s.maskMode === 'erase'
     case 'brushS':        return s.brushRadius === 10
@@ -215,7 +209,8 @@ function isActive(cmd) {
 function isDisabled(cmd) {
   if (cmd.disabled) return true
   if (cmd.needsSelection && !props.hasSelection) return true
-  if (cmd.needsImages && props.imageCount === 0) return true
+  if (cmd.needsImages   && props.imageCount === 0) return true
+  if (cmd.needsMatches  && props.matchCount === 0) return true
   const s = props.imageViewState
   if (cmd.disableKey === 'kpNotDone' && s?.kpStatus !== 'done') return true
   if (cmd.disableKey === 'noMask'    && !s?.hasMask)            return true
@@ -235,7 +230,17 @@ function run(cmd) {
 <template>
   <div class="ribbon">
     <div class="ribbon-tabs">
-      <span class="brand">websfm</span>
+      <button
+        v-if="persistenceEnabled"
+        class="project-btn"
+        :title="currentProjectName || 'Project'"
+        @click="emit('command', 'open-project-picker')"
+      >
+        {{ currentProjectName || '—' }}
+        <span class="project-caret">▾</span>
+      </button>
+      <span v-else class="brand">websfm</span>
+
       <button
         v-for="tab in tabs"
         :key="tab.id"
@@ -256,14 +261,6 @@ function run(cmd) {
           {{ activeImageName || 'Image' }}
         </button>
       </template>
-
-      <button
-        class="settings-btn"
-        :class="{ active: consoleOpen }"
-        title="Toggle Console (Ctrl+`)"
-        @click="emit('command', 'toggle-console')"
-      >&gt;_</button>
-      <button class="settings-btn" title="Settings" @click="emit('command', 'open-settings')">⚙</button>
     </div>
 
     <div class="ribbon-body">
@@ -275,9 +272,10 @@ function run(cmd) {
           <div class="group-commands">
             <button
               v-for="cmd in group.commands"
+              v-show="!isHidden(cmd)"
               :key="cmd.id"
               class="cmd"
-              :class="{ active: isActive(cmd) }"
+              :class="{ active: isActive(cmd), danger: cmd.danger }"
               :disabled="isDisabled(cmd)"
               :title="cmd.disabled ? 'Coming soon' : ''"
               @click="run(cmd)"
@@ -316,6 +314,36 @@ function run(cmd) {
   color: var(--text-dim);
   margin-right: 10px;
   padding: 6px 0;
+}
+
+.project-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: none;
+  border: none;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  padding: 5px 8px 5px 0;
+  margin-right: 6px;
+  cursor: pointer;
+  border-radius: 4px;
+  max-width: 180px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.project-btn:hover {
+  color: var(--accent);
+}
+
+.project-caret {
+  font-size: 9px;
+  color: var(--text-dim);
+  flex-shrink: 0;
 }
 
 .tab {
@@ -400,6 +428,9 @@ function run(cmd) {
   cursor: default;
 }
 
+.cmd.danger       { color: #c0604a; }
+.cmd.danger:hover:not(:disabled) { background: rgba(220, 80, 60, 0.1); border-color: rgba(220, 80, 60, 0.3); }
+
 .cmd-icon {
   font-size: 18px;
   line-height: 1;
@@ -434,22 +465,5 @@ function run(cmd) {
 .ctx-tab.active {
   color: #e8a820 !important;
   border-bottom-color: #d4900a !important;
-}
-
-.settings-btn {
-  margin-left: auto;
-  background: none;
-  border: none;
-  color: var(--text-dim);
-  font-size: 14px;
-  padding: 5px 10px;
-  cursor: pointer;
-  border-radius: 4px;
-  line-height: 1;
-}
-
-.settings-btn:hover {
-  color: var(--text);
-  background: var(--hover-bg);
 }
 </style>

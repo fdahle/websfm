@@ -1,12 +1,12 @@
 <script setup>
 import { computed, onMounted, onBeforeUnmount } from 'vue'
-import { FIELD_DEFS } from '../utils/metadata.js'
+import { FIELD_DEFS } from '../../utils/metadata.js'
 
 const props = defineProps({
   image: { type: Object, required: true },
 })
 
-const emit = defineEmits(['close', 'detect'])
+const emit = defineEmits(['close'])
 
 const rows = computed(() => {
   const meta = props.image.meta
@@ -45,18 +45,13 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
           <img :src="image.url" :alt="image.name" class="preview-img" />
         </div>
 
-        <div class="sift-bar">
-          <button
-            class="detect-btn"
-            :disabled="image.kpStatus === 'running'"
-            @click="$emit('detect', image.id)"
-          >
-            {{ image.kpStatus === 'running' ? 'Detecting…' : 'Detect SIFT' }}
-          </button>
-          <span v-if="image.kpStatus === 'done'" class="sift-info">
+        <div v-if="image.kpStatus !== null" class="kp-bar">
+          <span v-if="image.kpStatus === 'done'" class="kp-info">
             {{ image.kpCount }} keypoints · {{ image.kpMs }} ms
           </span>
-          <span v-else-if="image.kpStatus === 'error'" class="sift-error">detection failed</span>
+          <span v-else-if="image.kpStatus === 'running'" class="kp-running">Detecting features…</span>
+          <span v-else-if="image.kpStatus === 'error'" class="kp-error">Feature detection failed</span>
+          <span v-else class="kp-none">No features detected yet</span>
         </div>
 
         <div v-if="image.loading" class="loading">Reading metadata…</div>
@@ -153,43 +148,16 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
   object-fit: contain;
 }
 
-.sift-bar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 16px;
+.kp-bar {
+  padding: 8px 16px;
   border-bottom: 1px solid var(--panel-border);
-}
-
-.detect-btn {
-  background: var(--accent);
-  color: #fff;
-  border: none;
-  border-radius: 5px;
-  padding: 5px 12px;
   font-size: 12px;
-  cursor: pointer;
-  font: inherit;
 }
 
-.detect-btn:hover:not(:disabled) {
-  background: var(--accent-hover);
-}
-
-.detect-btn:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
-
-.sift-info {
-  font-size: 12px;
-  color: var(--text-dim);
-}
-
-.sift-error {
-  font-size: 12px;
-  color: #e55;
-}
+.kp-info    { color: var(--text-dim); }
+.kp-running { color: var(--text-dim); font-style: italic; }
+.kp-error   { color: #e55; }
+.kp-none    { color: var(--text-dim); font-style: italic; }
 
 .loading {
   padding: 20px 16px;

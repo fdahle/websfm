@@ -1,10 +1,10 @@
 /* @ts-self-types="./sift.d.ts" */
 
 /**
- * Detect SIFT keypoints.
+ * Detect SIFT keypoints and compute 128-d descriptors.
  *
- * Returns a flat `Float32Array` with 4 values per keypoint:
- * `[x, y, scale, response, x, y, scale, response, ...]`
+ * Returns a flat `Float32Array` with `STRIDE` (133) values per keypoint:
+ * `[x, y, scale, response, angle, d0..d127, ...]`
  * where `x`/`y` are in input-image pixel coordinates.
  * @param {Uint8Array} rgba
  * @param {number} width

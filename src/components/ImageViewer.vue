@@ -4,6 +4,7 @@ import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
 const props = defineProps({
   image:         { type: Object,  required: true },
   showKeypoints: { type: Boolean, default: false },
+  showMask:      { type: Boolean, default: true },
   maskMode:      { type: String,  default: 'none' }, // 'none' | 'draw' | 'erase'
   brushRadius:   { type: Number,  default: 20 },     // screen pixels
 })
@@ -95,25 +96,53 @@ function drawOverlay() {
   const dispH = img.naturalHeight * scale.value
 
   // Mask — red semi-transparent overlay at image position
-  if (maskOffscreen && hasMask.value) {
+  if (maskOffscreen && hasMask.value && props.showMask) {
     ctx.save()
     ctx.globalAlpha = 0.45
     ctx.drawImage(maskOffscreen, tx.value, ty.value, dispW, dispH)
     ctx.restore()
   }
 
-  // Keypoints — green circles
+  // Keypoints — colour-coded dots (cold=blue → hot=red by SIFT response)
   if (props.showKeypoints && props.image.keypoints?.length) {
-    ctx.strokeStyle = 'rgba(0, 230, 118, 0.85)'
-    ctx.lineWidth = 1
-    for (const kp of props.image.keypoints) {
+    const kps = props.image.keypoints
+    let minR = Infinity, maxR = -Infinity
+    for (const kp of kps) {
+      if (kp.response < minR) minR = kp.response
+      if (kp.response > maxR) maxR = kp.response
+    }
+    const range = maxR - minR || 1
+    for (const kp of kps) {
       const x = kp.nx * dispW + tx.value
       const y = kp.ny * dispH + ty.value
-      const r = Math.max(1.5, (kp.scale || 2) * scale.value)
+      const t = (kp.response - minR) / range      // 0 = coldest, 1 = hottest
+      const hue = Math.round((1 - t) * 240)       // 240° blue → 0° red
+      ctx.fillStyle = `hsl(${hue},100%,55%)`
       ctx.beginPath()
-      ctx.arc(x, y, r, 0, Math.PI * 2)
-      ctx.stroke()
+      ctx.arc(x, y, 2, 0, Math.PI * 2)
+      ctx.fill()
     }
+
+    // Colour legend — bottom-left corner of the viewport
+    const LX = 12, LY = h - 36, LW = 72, LH = 8
+    ctx.save()
+    const grad = ctx.createLinearGradient(LX, 0, LX + LW, 0)
+    grad.addColorStop(0,   'hsl(240,100%,55%)')
+    grad.addColorStop(0.5, 'hsl(120,100%,55%)')
+    grad.addColorStop(1,   'hsl(0,100%,55%)')
+    ctx.fillStyle = 'rgba(0,0,0,0.45)'
+    ctx.fillRect(LX - 4, LY - 14, LW + 8, LH + 22)
+    ctx.fillStyle = grad
+    ctx.fillRect(LX, LY, LW, LH)
+    ctx.font = '9px sans-serif'
+    ctx.fillStyle = 'rgba(255,255,255,0.75)'
+    ctx.textAlign = 'left'
+    ctx.fillText('low', LX, LY + LH + 10)
+    ctx.textAlign = 'right'
+    ctx.fillText('high', LX + LW, LY + LH + 10)
+    ctx.textAlign = 'center'
+    ctx.fillText('response', LX + LW / 2, LY - 3)
+    ctx.restore()
   }
 
   // Brush cursor circle
@@ -332,6 +361,7 @@ function onImgLoad() {
 watch(() => props.image.kpStatus,    () => drawOverlay())
 watch(() => props.image.keypoints,   () => drawOverlay(), { deep: false })
 watch(() => props.showKeypoints,     () => drawOverlay())
+watch(() => props.showMask,          () => drawOverlay())
 watch(() => props.maskMode,          () => drawOverlay())
 
 // Sync mask canvas when parent clears or replaces the mask externally
