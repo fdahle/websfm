@@ -7,11 +7,12 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "build:wasm": "wasm-pack build crates/sift --target web --out-dir ../../src/wasm/sift && rm -f src/wasm/sift/.gitignore"
+    "build:wasm": "wasm-pack build crates/sift --target web --out-dir ../../src/wasm/sift && wasm-pack build crates/matching --target web --out-dir ../../src/wasm/matching && wasm-pack build crates/reconstruction --target web --out-dir ../../src/wasm/reconstruction && rm -f src/wasm/*/.gitignore"
   },
   "dependencies": {
     "exifr": "^7.1.3",
     "ol": "^10.9.0",
+    "proj4": "^2.20.9",
     "three": "^0.171.0",
     "vue": "^3.5.13"
   },

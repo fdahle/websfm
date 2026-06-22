@@ -2,7 +2,9 @@ import { ref, computed } from 'vue'
 import * as opfs from '../utils/opfs.js'
 
 export function useProjects() {
-  const persistenceEnabled = ref(localStorage.getItem('persistenceEnabled') === 'true')
+  // Persistence is always on; this only tracks whether OPFS is usable in this
+  // environment. When false, the app runs transiently without a project.
+  const persistenceAvailable = ref(true)
   const projects = ref([])        // [{ id, name, sceneType, createdAt, lastModified }]
   const currentProjectId = ref(null)
 
@@ -11,10 +13,10 @@ export function useProjects() {
   )
   const currentProjectName = computed(() => currentProject.value?.name || null)
   const currentSceneType = computed(() => currentProject.value?.sceneType || null)
+  const currentCrs = computed(() => currentProject.value?.crs || 'EPSG:4326')
 
-  function setPersistence(enabled) {
-    persistenceEnabled.value = enabled
-    localStorage.setItem('persistenceEnabled', String(enabled))
+  function setPersistenceAvailable(available) {
+    persistenceAvailable.value = available
   }
 
   // ── Index I/O ───────────────────────────────────────────────────────────────
@@ -35,15 +37,27 @@ export function useProjects() {
 
   // ── CRUD ────────────────────────────────────────────────────────────────────
 
-  async function createProject(name, sceneType) {
+  async function createProject(name, sceneType, crs = 'EPSG:4326') {
     const id = crypto.randomUUID()
     const now = new Date().toISOString()
-    const entry = { id, name, sceneType, createdAt: now, lastModified: now }
+    const entry = { id, name, sceneType, crs, createdAt: now, lastModified: now }
     projects.value.push(entry)
     currentProjectId.value = id
     await opfs.writeProject(id, { ...entry, images: [] })
     await saveIndex()
     return id
+  }
+
+  async function setProjectCrs(id, crs, onChanged) {
+    const p = projects.value.find((p) => p.id === id)
+    if (!p || p.crs === crs) return
+    const prevCrs = p.crs || 'EPSG:4326'
+    p.crs = crs
+    p.lastModified = new Date().toISOString()
+    const data = await opfs.readProject(id)
+    if (data) await opfs.writeProject(id, { ...data, crs })
+    await saveIndex()
+    await onChanged?.(prevCrs, crs)
   }
 
   async function switchProject(id) {
@@ -80,15 +94,17 @@ export function useProjects() {
   }
 
   return {
-    persistenceEnabled,
+    persistenceAvailable,
     projects,
     currentProjectId,
     currentProjectName,
     currentSceneType,
-    setPersistence,
+    currentCrs,
+    setPersistenceAvailable,
     loadIndex,
     saveIndex,
     createProject,
+    setProjectCrs,
     switchProject,
     renameProject,
     deleteProjectById,

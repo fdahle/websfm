@@ -1,11 +1,15 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
+import Icon from '../Icon.vue'
 
 const props = defineProps({
   activeView: { type: String, default: 'viewer' },
   hasSelection: { type: Boolean, default: false },
   imageCount: { type: Number, default: 0 },
   matchCount: { type: Number, default: 0 },
+  gcpCount: { type: Number, default: 0 },
+  poseCount: { type: Number, default: 0 },
+  sensorCount: { type: Number, default: 0 },
   activeImageId: { type: String, default: null },
   activeImageName: { type: String, default: null },
   imageViewState: { type: Object, default: null },
@@ -25,16 +29,25 @@ const tabs = [
       {
         label: 'Camera',
         commands: [
-          { id: 'view-preset-top',   label: 'Top\nView',   icon: '⬆', disabled: true },
-          { id: 'view-preset-side',  label: 'Side\nView',  icon: '◧', disabled: true },
-          { id: 'view-preset-front', label: 'Front\nView', icon: '▣', disabled: true },
-          { id: 'reset-view',        label: 'Reset\nView', icon: '⊙', disabled: true },
+          { id: 'view-preset-top',   label: 'Top\nView',   icon: 'view-top',   disabled: true },
+          { id: 'view-preset-side',  label: 'Side\nView',  icon: 'view-side',  disabled: true },
+          { id: 'view-preset-front', label: 'Front\nView', icon: 'view-front', disabled: true },
+          { id: 'reset-view',        label: 'Reset\nView', icon: 'view-reset', disabled: true },
+        ],
+      },
+      {
+        label: 'Inspect',
+        commands: [
+          { id: 'open-image-table',  label: 'Image\nTable',  icon: 'table',  needsImages: true },
+          { id: 'open-sensor-table', label: 'Sensor\nTable', icon: 'camera', needsSensors: true },
+          { id: 'open-gcp-table',    label: 'GCP\nTable',    icon: 'map-pin', needsGcps: true, aerialOnly: true },
+          { id: 'open-match-list',   label: 'Match\nList',   icon: 'list',    needsMatches: true },
         ],
       },
       {
         label: 'Panels',
         commands: [
-          { id: 'toggle-console', label: 'Console', icon: '>_', activeKey: 'consoleOpen' },
+          { id: 'toggle-console', label: 'Console', icon: 'console', activeKey: 'consoleOpen' },
         ],
       },
     ],
@@ -46,20 +59,20 @@ const tabs = [
       {
         label: 'Images',
         commands: [
-          { id: 'import-images', label: 'Images', icon: '🖼️' },
+          { id: 'import-images', label: 'Images', icon: 'image' },
         ],
       },
       {
         label: 'Camera',
         commands: [
-          { id: 'import-camera-list', label: 'Camera\nList', icon: '📷', disabled: true },
-          { id: 'import-calib', label: 'Calibration', icon: '🎯', disabled: true },
+          { id: 'import-camera-list', label: 'Camera\nPoses', icon: 'camera' },
+          { id: 'import-calib', label: 'Calibration', icon: 'target' },
         ],
       },
       {
         label: 'Ground Control',
         commands: [
-          { id: 'import-gcps', label: 'GCP\nFile', icon: '📍', aerialOnly: true, disabled: true },
+          { id: 'import-gcps', label: 'GCP\nFile', icon: 'map-pin', aerialOnly: true },
         ],
       },
     ],
@@ -71,22 +84,22 @@ const tabs = [
       {
         label: 'Features',
         commands: [
-          { id: 'detect-features', label: 'Detect\nFeatures', icon: '✨', needsImages: true },
-          { id: 'match-features', label: 'Match\nFeatures', icon: '🔗', needsImages: true },
+          { id: 'detect-features', label: 'Detect\nFeatures', icon: 'sparkles', needsImages: true },
+          { id: 'match-features', label: 'Match\nFeatures', icon: 'link', needsImages: true },
         ],
       },
       {
         label: 'Reconstruction',
         commands: [
-          { id: 'reconstruct', label: 'Sparse\nModel', icon: '⠿', needsMatches: true },
-          { id: 'dense',       label: 'Dense\nModel',  icon: '☁',  disabled: true },
+          { id: 'reconstruct', label: 'Sparse\nModel', icon: 'cube',  needsMatches: true },
+          { id: 'dense',       label: 'Dense\nModel',  icon: 'cloud', disabled: true },
         ],
       },
       {
-        label: 'Results',
+        label: 'Products',
         commands: [
-          { id: 'open-metadata',   label: 'Metadata\nTable', icon: '📋', needsImages: true },
-          { id: 'open-match-list', label: 'Match\nList',     icon: '🔗' },
+          { id: 'gen-dem',   label: 'DEM',   icon: 'dem',   disabled: true },
+          { id: 'gen-ortho', label: 'Ortho', icon: 'ortho', disabled: true },
         ],
       },
     ],
@@ -96,10 +109,18 @@ const tabs = [
     label: 'Export',
     groups: [
       {
-        label: 'Export',
+        label: 'Scene',
         commands: [
-          { id: 'export-cameras', label: 'Camera\nPoses', icon: '📷', disabled: true },
-          { id: 'export-cloud', label: 'Point\nCloud', icon: '💾', disabled: true },
+          { id: 'export-cameras', label: 'Camera\nPoses', icon: 'camera', needsPoses: true },
+          { id: 'export-sensors', label: 'Sensors',       icon: 'target', needsSensors: true },
+          { id: 'export-cloud',   label: 'Point\nCloud',  icon: 'point-cloud', disabled: true },
+        ],
+      },
+      {
+        label: 'Products',
+        commands: [
+          { id: 'export-dem',   label: 'DEM',   icon: 'dem',   disabled: true },
+          { id: 'export-ortho', label: 'Ortho', icon: 'ortho', disabled: true },
         ],
       },
     ],
@@ -111,8 +132,8 @@ const tabs = [
       {
         label: 'App',
         commands: [
-          { id: 'open-settings', label: 'Settings', icon: '⚙' },
-          { id: 'open-about',    label: 'About',    icon: 'ℹ' },
+          { id: 'open-settings', label: 'Settings', icon: 'settings' },
+          { id: 'open-about',    label: 'About',    icon: 'info' },
         ],
       },
     ],
@@ -130,26 +151,47 @@ const pictureTab = {
         {
           id: 'img-toggle-keypoints',
           labelFn: (s) => s?.kpCount ? `KP\n${s.kpCount}` : 'Keypoints',
-          icon: '⊙',
+          icon: 'keypoints',
           activeKey: 'showKeypoints',
           disableKey: 'kpNotDone',
         },
         {
           id: 'img-toggle-mask',
           label: 'Mask',
-          icon: '◑',
+          icon: 'mask',
           activeKey: 'showMask',
           disableKey: 'noMask',
+        },
+        {
+          id: 'img-toggle-depth',
+          label: 'Depth',
+          icon: 'depth',
+          activeKey: 'showDepth',
+          disableKey: 'noDepth',
+        },
+        {
+          id: 'img-toggle-gcps',
+          label: 'GCPs',
+          icon: 'map-pin',
+          activeKey: 'showGcps',
+          disableKey: 'noGcps',
         },
       ],
     },
     {
       label: 'Mask',
       commands: [
-        { id: 'img-mask-draw',   label: 'Draw',   icon: '✏', activeKey: 'maskDraw' },
-        { id: 'img-mask-erase',  label: 'Erase',  icon: '◻', activeKey: 'maskErase' },
-        { id: 'img-mask-import', label: 'Import', icon: '📥' },
-        { id: 'img-mask-clear',  label: 'Clear',  icon: '✕', disableKey: 'noMask' },
+        { id: 'img-mask-draw',   label: 'Draw',   icon: 'pencil',   activeKey: 'maskDraw' },
+        { id: 'img-mask-erase',  label: 'Erase',  icon: 'eraser',   activeKey: 'maskErase' },
+        { id: 'img-mask-import', label: 'Import', icon: 'download' },
+        { id: 'img-mask-clear',  label: 'Clear',  icon: 'x', disableKey: 'noMask' },
+      ],
+    },
+    {
+      label: 'Depth',
+      commands: [
+        { id: 'img-depth-import', label: 'Import', icon: 'download' },
+        { id: 'img-depth-clear',  label: 'Clear',  icon: 'x', disableKey: 'noDepth' },
       ],
     },
     {
@@ -157,16 +199,16 @@ const pictureTab = {
       label: 'Brush',
       maskOnly: true,
       commands: [
-        { id: 'img-brush-s', label: 'Small',  icon: '·', activeKey: 'brushS' },
-        { id: 'img-brush-m', label: 'Medium', icon: '○', activeKey: 'brushM' },
-        { id: 'img-brush-l', label: 'Large',  icon: '●', activeKey: 'brushL' },
+        { id: 'img-brush-s', label: 'Small',  icon: 'brush-s', activeKey: 'brushS' },
+        { id: 'img-brush-m', label: 'Medium', icon: 'brush-m', activeKey: 'brushM' },
+        { id: 'img-brush-l', label: 'Large',  icon: 'brush-l', activeKey: 'brushL' },
       ],
     },
     {
       label: 'Image',
       commands: [
-        { id: 'img-show-info', label: 'Image\nInfo', icon: 'ℹ' },
-        { id: 'img-remove',    label: 'Remove',      icon: '✖', danger: true },
+        { id: 'img-show-info', label: 'Image\nInfo', icon: 'info' },
+        { id: 'img-remove',    label: 'Remove',      icon: 'remove', danger: true },
       ],
     },
   ],
@@ -197,6 +239,8 @@ function isActive(cmd) {
   switch (cmd.activeKey) {
     case 'showKeypoints': return s.showKeypoints
     case 'showMask':      return s.showMask
+    case 'showDepth':     return s.showDepth
+    case 'showGcps':      return s.showGcps
     case 'maskDraw':      return s.maskMode === 'draw'
     case 'maskErase':     return s.maskMode === 'erase'
     case 'brushS':        return s.brushRadius === 10
@@ -211,10 +255,31 @@ function isDisabled(cmd) {
   if (cmd.needsSelection && !props.hasSelection) return true
   if (cmd.needsImages   && props.imageCount === 0) return true
   if (cmd.needsMatches  && props.matchCount === 0) return true
+  if (cmd.needsGcps     && props.gcpCount === 0)   return true
+  if (cmd.needsPoses    && props.poseCount === 0)  return true
+  if (cmd.needsSensors  && props.sensorCount === 0) return true
   const s = props.imageViewState
   if (cmd.disableKey === 'kpNotDone' && s?.kpStatus !== 'done') return true
   if (cmd.disableKey === 'noMask'    && !s?.hasMask)            return true
+  if (cmd.disableKey === 'noDepth'   && !s?.hasDepth)           return true
+  if (cmd.disableKey === 'noGcps'    && !s?.gcpCount)           return true
   return false
+}
+
+function disabledReason(cmd) {
+  if (cmd.disabled) return 'Coming soon'
+  if (cmd.needsImages   && props.imageCount === 0) return 'Import images first'
+  if (cmd.needsMatches  && props.matchCount === 0) return 'Run feature matching first'
+  if (cmd.needsGcps     && props.gcpCount === 0)   return 'Import GCPs first'
+  if (cmd.needsPoses    && props.poseCount === 0)  return 'No camera poses to export'
+  if (cmd.needsSensors  && props.sensorCount === 0) return 'No sensors to export'
+  if (cmd.needsSelection && !props.hasSelection)   return 'Select an image first'
+  const s = props.imageViewState
+  if (cmd.disableKey === 'kpNotDone' && s?.kpStatus !== 'done') return 'Detect keypoints first'
+  if (cmd.disableKey === 'noMask'    && !s?.hasMask)            return 'No mask available'
+  if (cmd.disableKey === 'noDepth'   && !s?.hasDepth)           return 'No depth map available'
+  if (cmd.disableKey === 'noGcps'    && !s?.gcpCount)           return 'No GCPs on this image'
+  return ''
 }
 
 function cmdLabel(cmd) {
@@ -275,12 +340,12 @@ function run(cmd) {
               v-show="!isHidden(cmd)"
               :key="cmd.id"
               class="cmd"
-              :class="{ active: isActive(cmd), danger: cmd.danger }"
-              :disabled="isDisabled(cmd)"
-              :title="cmd.disabled ? 'Coming soon' : ''"
+              :class="{ active: isActive(cmd), danger: cmd.danger, disabled: isDisabled(cmd) }"
+              :aria-disabled="isDisabled(cmd)"
+              :title="isDisabled(cmd) ? disabledReason(cmd) : ''"
               @click="run(cmd)"
             >
-              <span class="cmd-icon">{{ cmd.icon }}</span>
+              <Icon :name="cmd.icon" class="cmd-icon" />
               <span class="cmd-label">{{ cmdLabel(cmd) }}</span>
             </button>
           </div>
@@ -413,7 +478,7 @@ function run(cmd) {
   font: inherit;
 }
 
-.cmd:hover:not(:disabled) {
+.cmd:hover:not(.disabled) {
   background: var(--hover-bg);
   border-color: var(--panel-border);
 }
@@ -423,22 +488,25 @@ function run(cmd) {
   border-color: var(--accent);
 }
 
-.cmd:disabled {
+.cmd.disabled {
   opacity: 0.4;
   cursor: default;
 }
 
 .cmd.danger       { color: #c0604a; }
-.cmd.danger:hover:not(:disabled) { background: rgba(220, 80, 60, 0.1); border-color: rgba(220, 80, 60, 0.3); }
+.cmd.danger:hover:not(.disabled) { background: rgba(220, 80, 60, 0.1); border-color: rgba(220, 80, 60, 0.3); }
 
 .cmd-icon {
-  font-size: 18px;
-  line-height: 1;
+  width: 18px;
+  height: 18px;
 }
 
 .cmd-label {
   font-size: 10px;
   line-height: 1.2;
+  /* Reserve two lines so single-line labels keep the same button height
+     across tabs (otherwise the Other tab collapses shorter). */
+  min-height: 24px;
   text-align: center;
   white-space: pre-line;
 }

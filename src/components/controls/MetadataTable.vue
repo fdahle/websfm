@@ -1,5 +1,5 @@
 <script setup>
-import { formatFileSize } from '../utils/metadata.js'
+import { formatFileSize } from '../../utils/metadata.js'
 
 defineProps({
   images: {
@@ -59,8 +59,8 @@ const round = (n, d = 1) => (n == null ? null : Number(n.toFixed(d)))
             </td>
             <td>{{ img.meta.fNumber != null ? 'f/' + round(img.meta.fNumber) : '—' }}</td>
             <td>{{ img.meta.iso ?? '—' }}</td>
-            <td :class="{ missing: img.meta.gpsLat == null }">
-              {{ img.meta.gpsLat != null ? '✓' : 'missing' }}
+            <td :class="{ na: img.meta.gpsLat == null }">
+              {{ img.meta.gpsLat != null ? `${round(img.meta.gpsLat, 5)}, ${round(img.meta.gpsLon, 5)}` : '—' }}
             </td>
             <td>
               <span v-if="img.kpStatus === 'running'" class="na">…</span>

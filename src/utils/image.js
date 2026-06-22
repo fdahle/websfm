@@ -6,6 +6,7 @@ export function createImage(file) {
     url: URL.createObjectURL(file),
     file,
     meta: null,
+    sensorId: null, // id of the Sensor (shared intrinsics) this image belongs to
     loading: true,
     keypoints: [],
     descriptors: null, // Float32Array (N×128) kept in-memory for matching
@@ -13,5 +14,6 @@ export function createImage(file) {
     kpCount: 0,
     kpMs: 0,
     mask: null, // { dataUrl: string } | null
+    depth: null, // { dataUrl: string } | null
   }
 }

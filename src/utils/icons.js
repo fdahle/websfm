@@ -1,0 +1,128 @@
+// Uniform black & white outline icon set.
+//
+// Each entry is the *inner* SVG markup for a 24x24 viewBox. They are rendered by
+// src/components/Icon.vue inside an <svg> that sets:
+//   fill="none" stroke="currentColor" stroke-width="1.5"
+//   stroke-linecap="round" stroke-linejoin="round"
+// so every icon inherits the button's text color (and dims when disabled).
+//
+// Keep paths centered in the 24x24 box with a little padding (~2px) for a
+// consistent visual weight across the ribbon.
+
+export const icons = {
+  // ── View / Camera ──────────────────────────────────────────────────────────
+  'view-top': `
+    <rect x="4" y="4" width="16" height="16" rx="1.5" />
+    <path d="M12 16V9" />
+    <path d="M9 12l3-3 3 3" />`,
+  'view-side': `
+    <rect x="4" y="4" width="16" height="16" rx="1.5" />
+    <path d="M8 12h7" />
+    <path d="M12 9l3 3-3 3" />`,
+  'view-front': `
+    <rect x="4" y="4" width="16" height="16" rx="1.5" />
+    <rect x="9" y="9" width="6" height="6" rx="1" />`,
+  'view-reset': `
+    <path d="M4 11a8 8 0 1 1 1.5 5" />
+    <path d="M4 17v-5h5" />`,
+  console: `
+    <rect x="3" y="5" width="18" height="14" rx="2" />
+    <path d="M7 10l3 2.5L7 15" />
+    <path d="M13 15h4" />`,
+
+  // ── Import ──────────────────────────────────────────────────────────────────
+  image: `
+    <rect x="3" y="4" width="18" height="16" rx="2" />
+    <circle cx="8.5" cy="9.5" r="1.5" />
+    <path d="M21 16l-5-5L5 20" />`,
+  camera: `
+    <path d="M3 8a2 2 0 0 1 2-2h2l1.5-2h7L17 6h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+    <circle cx="12" cy="12.5" r="3.5" />`,
+  target: `
+    <circle cx="12" cy="12" r="8" />
+    <circle cx="12" cy="12" r="3.5" />
+    <path d="M12 2v3M12 19v3M2 12h3M19 12h3" />`,
+  'map-pin': `
+    <path d="M12 21s7-6.3 7-11a7 7 0 1 0-14 0c0 4.7 7 11 7 11z" />
+    <circle cx="12" cy="10" r="2.5" />`,
+
+  // ── Reconstruct ─────────────────────────────────────────────────────────────
+  sparkles: `
+    <path d="M12 4l1.6 4.4L18 10l-4.4 1.6L12 16l-1.6-4.4L6 10l4.4-1.6z" />
+    <path d="M18 15l.7 1.8L20.5 17.5l-1.8.7L18 20l-.7-1.8L15.5 17.5l1.8-.7z" />`,
+  link: `
+    <path d="M9.5 14.5l5-5" />
+    <path d="M10.5 6.5l1-1a3.5 3.5 0 0 1 5 5l-2 2" />
+    <path d="M13.5 17.5l-1 1a3.5 3.5 0 0 1-5-5l2-2" />`,
+  cube: `
+    <path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z" />
+    <path d="M4 7.5l8 4.5 8-4.5" />
+    <path d="M12 12v9" />`,
+  cloud: `
+    <path d="M7 18a4 4 0 0 1-.5-7.97A5 5 0 0 1 16 9.5a3.5 3.5 0 0 1 .5 6.96" />
+    <path d="M7 18h9.5" />`,
+  table: `
+    <rect x="3" y="4" width="18" height="16" rx="1.5" />
+    <path d="M3 9h18M3 14h18M9 4v16M15 4v16" />`,
+  list: `
+    <path d="M8 7h11M8 12h11M8 17h11" />
+    <circle cx="4.5" cy="7" r="0.8" />
+    <circle cx="4.5" cy="12" r="0.8" />
+    <circle cx="4.5" cy="17" r="0.8" />`,
+
+  // ── Products (DEM / Ortho) ──────────────────────────────────────────────────
+  dem: `
+    <path d="M3 18l5-8 3 4 3-5 4 6 3-3" />
+    <path d="M3 21h18" />`,
+  ortho: `
+    <path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z" />
+    <path d="M4 7.5l8 4.5 8-4.5M12 12v9" />
+    <path d="M8 5.2l8 4.6M8 9.5l8 4.6" opacity="0.5" />`,
+
+  // ── Export ──────────────────────────────────────────────────────────────────
+  'point-cloud': `
+    <circle cx="7" cy="8" r="1" /><circle cx="12" cy="6" r="1" /><circle cx="17" cy="9" r="1" />
+    <circle cx="6" cy="14" r="1" /><circle cx="11" cy="13" r="1" /><circle cx="16" cy="15" r="1" />
+    <circle cx="9" cy="18" r="1" /><circle cx="14" cy="19" r="1" />`,
+  download: `
+    <path d="M12 4v10" />
+    <path d="M8 11l4 4 4-4" />
+    <path d="M5 19h14" />`,
+
+  // ── Other ───────────────────────────────────────────────────────────────────
+  settings: `
+    <circle cx="12" cy="12" r="3" />
+    <path d="M19.4 13a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-2.7 1.1V21a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-2.7-1.1l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.6 1.6 0 0 0 4.6 13H4a2 2 0 1 1 0-4h.1a1.6 1.6 0 0 0 1.1-2.7l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3 1.6 1.6 0 0 0 .9-1.4V4a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 2.7 1.1l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8 1.6 1.6 0 0 0 1.4.9H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5.9z" />`,
+  info: `
+    <circle cx="12" cy="12" r="8.5" />
+    <path d="M12 11v5" />
+    <circle cx="12" cy="7.8" r="0.6" fill="currentColor" stroke="none" />`,
+
+  // ── Picture (image context) ─────────────────────────────────────────────────
+  keypoints: `
+    <circle cx="12" cy="12" r="2" />
+    <path d="M12 4v3M12 17v3M4 12h3M17 12h3" />
+    <circle cx="6" cy="6" r="1" /><circle cx="18" cy="18" r="1" /><circle cx="18" cy="6" r="1" /><circle cx="6" cy="18" r="1" />`,
+  mask: `
+    <circle cx="12" cy="12" r="8.5" />
+    <path d="M12 3.5a8.5 8.5 0 0 0 0 17z" fill="currentColor" stroke="none" />`,
+  depth: `
+    <path d="M12 3l8 4-8 4-8-4z" />
+    <path d="M4 12l8 4 8-4" opacity="0.7" />
+    <path d="M4 17l8 4 8-4" opacity="0.4" />`,
+  pencil: `
+    <path d="M5 19l1-4L16 5l3 3L9 18z" />
+    <path d="M14 7l3 3" />`,
+  eraser: `
+    <path d="M8 17l-3-3a1.5 1.5 0 0 1 0-2L13 4a1.5 1.5 0 0 1 2 0l4 4a1.5 1.5 0 0 1 0 2l-7 7z" />
+    <path d="M8 17h11" />`,
+  x: `<path d="M6 6l12 12M18 6L6 18" />`,
+  'brush-s': `<circle cx="12" cy="12" r="2" fill="currentColor" stroke="none" />`,
+  'brush-m': `<circle cx="12" cy="12" r="4" />`,
+  'brush-l': `<circle cx="12" cy="12" r="7" />`,
+  remove: `
+    <circle cx="12" cy="12" r="8.5" />
+    <path d="M9 9l6 6M15 9l-6 6" />`,
+}
+
+export default icons

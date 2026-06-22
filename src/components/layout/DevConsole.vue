@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, watch, nextTick } from 'vue'
-import { useLog } from '../composables/useLog.js'
+import { useLog } from '../../composables/useLog.js'
 
 const { entries, clear } = useLog()
 const body = ref(null)

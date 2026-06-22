@@ -1,5 +1,6 @@
 <script setup>
 import { ref } from 'vue'
+import CrsPicker from '../controls/CrsPicker.vue'
 
 defineProps({
   canCancel: { type: Boolean, default: true },
@@ -9,11 +10,12 @@ const emit = defineEmits(['create', 'cancel'])
 
 const name = ref('My Project')
 const sceneType = ref('aerial')
+const crs = ref('EPSG:4326')
 
 function submit() {
   const n = name.value.trim()
   if (!n) return
-  emit('create', { name: n, sceneType: sceneType.value })
+  emit('create', { name: n, sceneType: sceneType.value, crs: crs.value })
 }
 </script>
 
@@ -58,6 +60,10 @@ function submit() {
             <span class="scene-desc">Objects or scenes without GPS — scale set manually</span>
           </button>
         </div>
+
+        <label class="field-label" style="margin-top: 20px">Coordinate system</label>
+        <CrsPicker v-model="crs" />
+        <span class="crs-hint">Working CRS for the map, GCPs and cameras. You can change it later in Settings.</span>
       </div>
 
       <div class="modal-footer">
@@ -192,6 +198,14 @@ function submit() {
 }
 
 .scene-desc {
+  font-size: 11px;
+  color: var(--text-dim);
+  line-height: 1.4;
+}
+
+.crs-hint {
+  display: block;
+  margin-top: 7px;
   font-size: 11px;
   color: var(--text-dim);
   line-height: 1.4;

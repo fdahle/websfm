@@ -1,0 +1,17 @@
+{
+  "name": "matching",
+  "type": "module",
+  "description": "SIFT descriptor matching and RANSAC geometric verification compiled to WebAssembly",
+  "version": "0.1.0",
+  "license": "MIT OR Apache-2.0",
+  "files": [
+    "matching_bg.wasm",
+    "matching.js",
+    "matching.d.ts"
+  ],
+  "main": "matching.js",
+  "types": "matching.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}

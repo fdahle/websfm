@@ -1,0 +1,17 @@
+{
+  "name": "reconstruction",
+  "type": "module",
+  "description": "Incremental SfM sparse reconstruction compiled to WebAssembly",
+  "version": "0.1.0",
+  "license": "MIT OR Apache-2.0",
+  "files": [
+    "reconstruction_bg.wasm",
+    "reconstruction.js",
+    "reconstruction.d.ts"
+  ],
+  "main": "reconstruction.js",
+  "types": "reconstruction.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}

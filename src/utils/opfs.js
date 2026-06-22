@@ -264,6 +264,140 @@ export async function deleteMask(projectId, uuid) {
   } catch {}
 }
 
+// ── Depth maps ────────────────────────────────────────────────────────────────
+
+export async function saveDepth(projectId, uuid, dataUrl) {
+  const res = await fetch(dataUrl)
+  const blob = await res.blob()
+  const dir = await getSubDir(projectId, 'depthmaps')
+  const fh = await dir.getFileHandle(uuid + '.png', { create: true })
+  const writable = await fh.createWritable()
+  await writable.write(blob)
+  await writable.close()
+}
+
+export async function loadDepthDataUrl(projectId, uuid) {
+  try {
+    const dir = await getSubDir(projectId, 'depthmaps')
+    const fh = await dir.getFileHandle(uuid + '.png')
+    const file = await fh.getFile()
+    return new Promise((resolve) => {
+      const reader = new FileReader()
+      reader.onload = (e) => resolve(e.target.result)
+      reader.readAsDataURL(file)
+    })
+  } catch {
+    return null
+  }
+}
+
+export async function deleteDepth(projectId, uuid) {
+  try {
+    const dir = await getSubDir(projectId, 'depthmaps')
+    await dir.removeEntry(uuid + '.png')
+  } catch {}
+}
+
+// ── Ground Control Points ───────────────────────────────────────────────────────
+// JSON: { crs, gcps: [{ id, name, x, y, z, observations: [...], enabled }] }
+
+export async function saveGcps(projectId, data) {
+  const dir = await getProjectDir(projectId, true)
+  await writeJson(dir, 'gcps.json', data)
+}
+
+export async function loadGcps(projectId) {
+  try {
+    const dir = await getProjectDir(projectId)
+    return readJson(dir, 'gcps.json')
+  } catch {
+    return null
+  }
+}
+
+export async function deleteGcps(projectId) {
+  try {
+    const dir = await getProjectDir(projectId)
+    await dir.removeEntry('gcps.json')
+  } catch {}
+}
+
+// ── Footprints ──────────────────────────────────────────────────────────────────
+// JSON: { crs, footprints: [{ id, name, imageId, imageName, rings, enabled }] }
+
+export async function saveFootprints(projectId, data) {
+  const dir = await getProjectDir(projectId, true)
+  await writeJson(dir, 'footprints.json', data)
+}
+
+export async function loadFootprints(projectId) {
+  try {
+    const dir = await getProjectDir(projectId)
+    return readJson(dir, 'footprints.json')
+  } catch {
+    return null
+  }
+}
+
+export async function deleteFootprints(projectId) {
+  try {
+    const dir = await getProjectDir(projectId)
+    await dir.removeEntry('footprints.json')
+  } catch {}
+}
+
+// ── Sensors (shared camera intrinsics) ──────────────────────────────────────────
+// JSON: { sensors: [{ id, label, width, height, pixelSize, focal, cx, cy,
+//                      k1, k2, k3, p1, p2, fixed, source }] }
+// Intrinsics are CRS-free, so (unlike GCPs/footprints/poses) no `crs` field.
+
+export async function saveSensors(projectId, data) {
+  const dir = await getProjectDir(projectId, true)
+  await writeJson(dir, 'sensors.json', data)
+}
+
+export async function loadSensors(projectId) {
+  try {
+    const dir = await getProjectDir(projectId)
+    return readJson(dir, 'sensors.json')
+  } catch {
+    return null
+  }
+}
+
+export async function deleteSensors(projectId) {
+  try {
+    const dir = await getProjectDir(projectId)
+    await dir.removeEntry('sensors.json')
+  } catch {}
+}
+
+// ── Camera poses (exterior orientation / extrinsics) ────────────────────────────
+// JSON: { crs, poses: [{ imageId, imageName, x, y, z, omega, phi, kappa,
+//                        accXYZ, accAngle, source, enabled }] }
+// Positions live in the project CRS; angles (deg) pass through unchanged.
+
+export async function savePoses(projectId, data) {
+  const dir = await getProjectDir(projectId, true)
+  await writeJson(dir, 'poses.json', data)
+}
+
+export async function loadPoses(projectId) {
+  try {
+    const dir = await getProjectDir(projectId)
+    return readJson(dir, 'poses.json')
+  } catch {
+    return null
+  }
+}
+
+export async function deletePoses(projectId) {
+  try {
+    const dir = await getProjectDir(projectId)
+    await dir.removeEntry('poses.json')
+  } catch {}
+}
+
 // ── Reconstruction ────────────────────────────────────────────────────────────
 // JSON: { cameras: [{ uuid, R, t, K }], points: [{ x, y, z }] }
 

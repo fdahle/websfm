@@ -1,4 +1,4 @@
-import init, { detect_sift } from '../wasm/sift/sift.js'
+import init, { detect_sift } from '../wasm/detection/sift.js'
 
 // Must match STRIDE in crates/sift/src/lib.rs: [x, y, scale, response, angle, d0..d127]
 const STRIDE = 133

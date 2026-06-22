@@ -4,6 +4,9 @@ import { ref, onMounted, onBeforeUnmount } from 'vue'
 const props = defineProps({
   projects: { type: Array, required: true },
   currentProjectId: { type: String, default: null },
+  // When false (e.g. on startup with no project open), the picker cannot be
+  // dismissed — the user must select or create a project.
+  dismissible: { type: Boolean, default: true },
 })
 
 const emit = defineEmits(['switch', 'rename', 'delete', 'new', 'close'])
@@ -37,11 +40,12 @@ function confirmDelete(project) {
 function onKey(e) {
   if (e.key === 'Escape') {
     if (renamingId.value) cancelRename()
-    else emit('close')
+    else if (props.dismissible) emit('close')
   }
 }
 
 function onOutsideClick(e) {
+  if (!props.dismissible) return
   if (!e.target.closest('.project-picker')) emit('close')
 }
 
@@ -57,7 +61,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="project-picker">
+  <div class="project-picker" :class="{ centered: !dismissible }">
     <ul class="project-list">
       <li
         v-for="project in projects"
@@ -105,6 +109,12 @@ onBeforeUnmount(() => {
   min-width: 240px;
   max-width: 320px;
   overflow: hidden;
+}
+
+.project-picker.centered {
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
 }
 
 .project-list {

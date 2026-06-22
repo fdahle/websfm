@@ -9,9 +9,22 @@ export function useModals(imageById) {
   const newProjectCanCancel = ref(true)
   const detectFeaturesOpen  = ref(false)
   const matchFeaturesOpen   = ref(false)
-  const metadataOpen        = ref(false)
+  const imageTableOpen      = ref(false)
+  const sensorTableOpen     = ref(false)
+  const gcpTableOpen        = ref(false)
   const matchListOpen       = ref(false)
   const reconstructOpen     = ref(false)
+  const gcpImportOpen       = ref(false)
+  const gcpImportText       = ref('')
+  const gcpImportName       = ref('')
+  const gcpImportGeojson    = ref(null)   // pre-parsed GCPs from a GeoJSON points file, or null
+  const gcpImportCrs        = ref(null)   // CRS detected from the GeoJSON, or null
+  const footprintImportOpen = ref(false)
+  const footprintImportData = ref(null)   // { features, propertyKeys, detectedCrs, fileName }
+  const cameraImportOpen    = ref(false)
+  const cameraImportText    = ref('')
+  const cameraImportName    = ref('')
+  const cameraImportMode    = ref('pose') // sniffed default: 'sensor' | 'pose'
   const infoImageId         = ref(null)
   const infoImage           = computed(() => infoImageId.value ? imageById(infoImageId.value) : null)
 
@@ -23,9 +36,22 @@ export function useModals(imageById) {
     newProjectCanCancel,
     detectFeaturesOpen,
     matchFeaturesOpen,
-    metadataOpen,
+    imageTableOpen,
+    sensorTableOpen,
+    gcpTableOpen,
     matchListOpen,
     reconstructOpen,
+    gcpImportOpen,
+    gcpImportText,
+    gcpImportName,
+    gcpImportGeojson,
+    gcpImportCrs,
+    footprintImportOpen,
+    footprintImportData,
+    cameraImportOpen,
+    cameraImportText,
+    cameraImportName,
+    cameraImportMode,
     infoImageId,
     infoImage,
   }
