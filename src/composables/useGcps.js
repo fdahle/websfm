@@ -1,0 +1,185 @@
+import { ref } from 'vue'
+import { useLog } from './useLog.js'
+import { ensureProjection, transform } from '../utils/crs.js'
+import * as opfs from '../utils/opfs.js'
+
+// images:     Ref<Array>   — image objects (used to resolve observation image names → ids)
+// currentCrs: Ref<string>  — the project's working CRS (GCPs are stored in it)
+// persist:    { enabled, projectId }
+// Default measurement accuracies for a new GCP.
+//   x / y / z — per-axis accuracy of the ground coordinates, in project-CRS units (e.g. metres)
+//   rel       — accuracy of the image observations (marker projections), in pixels
+const DEFAULT_ACCURACY_X   = 1.0
+const DEFAULT_ACCURACY_Y   = 1.0
+const DEFAULT_ACCURACY_Z   = 1.0
+const DEFAULT_ACCURACY_REL = 1.0
+
+export function useGcps({ images, currentCrs, persist } = {}) {
+  const { log } = useLog()
+
+  // [{ id, name, x, y, z, accuracyX, accuracyY, accuracyZ, accuracyRel,
+  //    observations: [{ imageId, imageName, px, py }], enabled }]
+  const gcps = ref([])
+
+  // Backfill accuracy fields on GCPs loaded from older saved projects.
+  // (Pre-split `accuracyAbs`/`accuracyXY` seed the per-axis values.)
+  function normalize(g) {
+    if (g.accuracyX   == null) g.accuracyX   = g.accuracyXY ?? g.accuracyAbs ?? DEFAULT_ACCURACY_X
+    if (g.accuracyY   == null) g.accuracyY   = g.accuracyXY ?? g.accuracyAbs ?? DEFAULT_ACCURACY_Y
+    if (g.accuracyZ   == null) g.accuracyZ   = g.accuracyAbs ?? DEFAULT_ACCURACY_Z
+    if (g.accuracyRel == null) g.accuracyRel = DEFAULT_ACCURACY_REL
+    delete g.accuracyAbs
+    delete g.accuracyXY
+    return g
+  }
+
+  function isPersisting() {
+    return persist?.enabled.value && !!persist?.projectId.value
+  }
+
+  async function save() {
+    if (!isPersisting()) return
+    await opfs.saveGcps(persist.projectId.value, {
+      crs: currentCrs.value,
+      gcps: gcps.value,
+    }).catch((err) => log(`GCP save failed — ${err?.message ?? err}`, 'error', 'GCP'))
+  }
+
+  // Resolve an observation's image name to an in-memory image id (case-insensitive,
+  // tolerant of extension differences).
+  function resolveImageId(imageName) {
+    if (!imageName) return null
+    const lc = imageName.toLowerCase()
+    const base = lc.replace(/\.[^.]+$/, '')
+    const hit = images?.value.find((img) => {
+      const n = img.name.toLowerCase()
+      return n === lc || n.replace(/\.[^.]+$/, '') === base
+    })
+    return hit?.id ?? null
+  }
+
+  // Add parsed GCPs (given in `sourceCrs`), transforming positions into the project CRS.
+  async function addGcps(rawGcps, sourceCrs) {
+    const projCrs = currentCrs.value
+    // If either CRS can't be resolved, transform() below would throw mid-loop —
+    // bail with a clear log instead of rejecting silently into the caller.
+    try {
+      await ensureProjection(sourceCrs)
+      await ensureProjection(projCrs)
+    } catch (err) {
+      log(`GCP import failed — could not resolve CRS (${err?.message ?? err})`, 'error', 'GCP')
+      return 0
+    }
+
+    let added = 0
+    for (const raw of rawGcps) {
+      const [x, y, z] = transform([raw.x, raw.y, raw.z ?? 0], sourceCrs, projCrs)
+      const existing = gcps.value.find((g) => g.name === raw.name)
+      const observations = (raw.observations || []).map((o) => ({
+        imageId: resolveImageId(o.imageName),
+        imageName: o.imageName,
+        px: o.px,
+        py: o.py,
+      }))
+      if (existing) {
+        // Merge: update position + append observations we don't already have
+        // (re-importing the same file must not duplicate observations).
+        existing.x = x; existing.y = y; existing.z = raw.z != null ? z : existing.z
+        for (const o of observations) {
+          const dup = existing.observations.some(
+            (e) => e.imageName === o.imageName && e.px === o.px && e.py === o.py,
+          )
+          if (!dup) existing.observations.push(o)
+        }
+      } else {
+        gcps.value.push({
+          id: crypto.randomUUID(),
+          name: raw.name,
+          x, y, z: raw.z != null ? z : null,
+          accuracyX:   DEFAULT_ACCURACY_X,
+          accuracyY:   DEFAULT_ACCURACY_Y,
+          accuracyZ:   DEFAULT_ACCURACY_Z,
+          accuracyRel: DEFAULT_ACCURACY_REL,
+          observations,
+          enabled: true,
+        })
+        added++
+      }
+    }
+    const obsCount = rawGcps.reduce((n, g) => n + (g.observations?.length || 0), 0)
+    log(`GCPs imported: ${added} point(s)${obsCount ? `, ${obsCount} observation(s)` : ''} (from ${sourceCrs})`, 'success', 'GCP')
+    await save()
+    return added
+  }
+
+  // Update one accuracy field ('x' | 'y' | 'z' | 'rel') of a GCP. Empty/invalid
+  // input falls back to that field's default so we never persist a NaN.
+  const ACCURACY_FIELDS = {
+    x:   { prop: 'accuracyX',   def: DEFAULT_ACCURACY_X   },
+    y:   { prop: 'accuracyY',   def: DEFAULT_ACCURACY_Y   },
+    z:   { prop: 'accuracyZ',   def: DEFAULT_ACCURACY_Z   },
+    rel: { prop: 'accuracyRel', def: DEFAULT_ACCURACY_REL },
+  }
+  function setGcpAccuracy(id, kind, value) {
+    const field = ACCURACY_FIELDS[kind]
+    const g = gcps.value.find((x) => x.id === id)
+    if (!field || !g) return
+    const num = Number(value)
+    g[field.prop] = Number.isFinite(num) && num > 0 ? num : field.def
+    save()
+  }
+
+  function removeGcp(id) {
+    const idx = gcps.value.findIndex((g) => g.id === id)
+    if (idx === -1) return
+    gcps.value.splice(idx, 1)
+    save()
+  }
+
+  function clearGcps() {
+    gcps.value = []
+    if (isPersisting()) opfs.deleteGcps(persist.projectId.value).catch(() => {})
+  }
+
+  async function restoreGcps(projectId, projectCrs) {
+    gcps.value = []
+    const data = await opfs.loadGcps(projectId)
+    if (!data?.gcps?.length) return
+    // Stored CRS may differ from the current project CRS (e.g. CRS changed elsewhere).
+    if (data.crs && projectCrs && data.crs !== projectCrs) {
+      await ensureProjection(data.crs).catch(() => {})
+      await ensureProjection(projectCrs).catch(() => {})
+      gcps.value = data.gcps.map((g) => {
+        const [x, y, z] = transform([g.x, g.y, g.z ?? 0], data.crs, projectCrs)
+        return normalize({ ...g, x, y, z: g.z != null ? z : null })
+      })
+      await opfs.saveGcps(projectId, { crs: projectCrs, gcps: gcps.value }).catch(() => {})
+    } else {
+      gcps.value = data.gcps.map(normalize)
+    }
+    log(`GCPs restored: ${gcps.value.length} point(s)`, 'success', 'GCP')
+  }
+
+  // Re-project all stored GCPs when the project CRS changes.
+  async function reprojectGcps(fromCrs, toCrs) {
+    if (!gcps.value.length || fromCrs === toCrs) { await save(); return }
+    await ensureProjection(fromCrs).catch(() => {})
+    await ensureProjection(toCrs).catch(() => {})
+    gcps.value = gcps.value.map((g) => {
+      const [x, y, z] = transform([g.x, g.y, g.z ?? 0], fromCrs, toCrs)
+      return { ...g, x, y, z: g.z != null ? z : null }
+    })
+    await save()
+    log(`GCPs re-projected to ${toCrs}`, 'info', 'GCP')
+  }
+
+  return {
+    gcps,
+    addGcps,
+    setGcpAccuracy,
+    removeGcp,
+    clearGcps,
+    restoreGcps,
+    reprojectGcps,
+  }
+}

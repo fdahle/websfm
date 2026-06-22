@@ -1,7 +1,7 @@
 import { ref } from 'vue'
 import { createImage } from '../utils/image.js'
 import { extractMetadata } from '../utils/metadata.js'
-import { detectKeypoints } from '../utils/sift.js'
+import { detectKeypoints } from '../utils/detection.js'
 import { useLog } from './useLog.js'
 import * as opfs from '../utils/opfs.js'
 
@@ -78,6 +78,7 @@ export function useImages({ persist } = {}) {
         opfs.deleteKeypoints(pid, img.uuid).catch(() => {})
         opfs.deleteDescriptors(pid, img.uuid).catch(() => {})
         opfs.deleteMask(pid, img.uuid).catch(() => {})
+        opfs.deleteDepth(pid, img.uuid).catch(() => {})
         persist.sync(images.value)
       }
       onRemoved?.(id)
@@ -93,6 +94,19 @@ export function useImages({ persist } = {}) {
       const pid = persist.projectId.value
       if (dataUrl) opfs.saveMask(pid, img.uuid, dataUrl).catch(() => {})
       else opfs.deleteMask(pid, img.uuid).catch(() => {})
+      persist.sync(images.value)
+    }
+  }
+
+  function updateDepth(imageId, dataUrl) {
+    const img = imageById(imageId)
+    if (!img) return
+    img.depth = dataUrl ? { dataUrl } : null
+    log(dataUrl ? `Depth map saved: ${img.name}` : `Depth map cleared: ${img.name}`, 'info', 'Images')
+    if (isPersisting()) {
+      const pid = persist.projectId.value
+      if (dataUrl) opfs.saveDepth(pid, img.uuid, dataUrl).catch(() => {})
+      else opfs.deleteDepth(pid, img.uuid).catch(() => {})
       persist.sync(images.value)
     }
   }
@@ -185,12 +199,14 @@ export function useImages({ persist } = {}) {
           url,
           file: null,
           meta: record.meta,
+          sensorId: record.sensorId ?? null,
           loading: false,
           keypoints: [],
           kpStatus: record.kpStatus,
           kpCount: record.kpCount || 0,
           kpMs: record.kpMs || 0,
           mask: null,
+          depth: null,
         }
         if (record.kpStatus === 'done') {
           const kps = await opfs.loadKeypoints(projectId, record.uuid)
@@ -199,6 +215,10 @@ export function useImages({ persist } = {}) {
         if (record.hasMask) {
           const maskDataUrl = await opfs.loadMaskDataUrl(projectId, record.uuid)
           if (maskDataUrl) img.mask = { dataUrl: maskDataUrl }
+        }
+        if (record.hasDepth) {
+          const depthDataUrl = await opfs.loadDepthDataUrl(projectId, record.uuid)
+          if (depthDataUrl) img.depth = { dataUrl: depthDataUrl }
         }
         images.value.push(img)
       } catch (err) {
@@ -216,6 +236,7 @@ export function useImages({ persist } = {}) {
     addImages,
     removeImage,
     updateMask,
+    updateDepth,
     detectOne,
     detectAll,
     clearKeypoints,

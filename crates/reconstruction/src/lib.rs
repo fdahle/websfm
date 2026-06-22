@@ -307,12 +307,13 @@ impl Xorshift {
     fn usize_below(&mut self, n: usize) -> usize {
         (self.next() as usize) % n
     }
-    fn sample6(&mut self, n: usize) -> [usize; 6] {
-        let mut s = [0usize; 6];
-        let mut count = 0;
-        while count < 6 {
+    // k distinct indices in [0, n). Used for PnP: a few more than the 6-point
+    // minimum stabilises the (normalised) DLT on near-planar samples.
+    fn sample_k(&mut self, n: usize, k: usize) -> Vec<usize> {
+        let mut s: Vec<usize> = Vec::with_capacity(k);
+        while s.len() < k {
             let r = self.usize_below(n);
-            if !s[..count].contains(&r) { s[count] = r; count += 1; }
+            if !s.contains(&r) { s.push(r); }
         }
         s
     }
@@ -328,21 +329,79 @@ fn pnp_dlt(pts3: &[[f64; 3]], pts2: &[[f64; 2]], fx: f64, fy: f64, cx: f64, cy: 
     let pts2n: Vec<[f64; 2]> = pts2.iter().map(|p| {
         [(p[0] - cx) / fx, (p[1] - cy) / fy]
     }).collect();
-    // Build 2N × 12 matrix for DLT
+
+    // ── Hartley normalisation ──────────────────────────────────────────────
+    // Centre + isotropically scale both the 3D points and the (K^{-1}-applied)
+    // 2D points so the DLT system is well-conditioned. Without this the 12×12
+    // normal matrix spans a huge dynamic range and the null vector is garbage —
+    // which makes PnP fail on near-planar scenes (e.g. aerial terrain).
+    let nf = n as f64;
+    let mut c3 = [0.0f64; 3];
+    for p in pts3 { c3[0] += p[0]; c3[1] += p[1]; c3[2] += p[2]; }
+    c3[0] /= nf; c3[1] /= nf; c3[2] /= nf;
+    let mut d3 = 0.0f64;
+    for p in pts3 {
+        let dx = p[0]-c3[0]; let dy = p[1]-c3[1]; let dz = p[2]-c3[2];
+        d3 += (dx*dx + dy*dy + dz*dz).sqrt();
+    }
+    d3 /= nf;
+    if d3 < 1e-12 { return None; }
+    let s3 = (3.0f64).sqrt() / d3;
+
+    let mut c2 = [0.0f64; 2];
+    for p in &pts2n { c2[0] += p[0]; c2[1] += p[1]; }
+    c2[0] /= nf; c2[1] /= nf;
+    let mut d2 = 0.0f64;
+    for p in &pts2n {
+        let dx = p[0]-c2[0]; let dy = p[1]-c2[1];
+        d2 += (dx*dx + dy*dy).sqrt();
+    }
+    d2 /= nf;
+    if d2 < 1e-12 { return None; }
+    let s2 = (2.0f64).sqrt() / d2;
+
+    // Build 2N × 12 DLT matrix on the normalised correspondences.
     let mut rows: Vec<[f64; 12]> = Vec::with_capacity(2 * n);
     for i in 0..n {
-        let x = pts3[i][0]; let y = pts3[i][1]; let z = pts3[i][2];
-        let u = pts2n[i][0]; let v = pts2n[i][1];
+        let x = (pts3[i][0]-c3[0]) * s3;
+        let y = (pts3[i][1]-c3[1]) * s3;
+        let z = (pts3[i][2]-c3[2]) * s3;
+        let u = (pts2n[i][0]-c2[0]) * s2;
+        let v = (pts2n[i][1]-c2[1]) * s2;
         rows.push([x, y, z, 1.0, 0.0, 0.0, 0.0, 0.0, -u*x, -u*y, -u*z, -u]);
         rows.push([0.0, 0.0, 0.0, 0.0, x, y, z, 1.0, -v*x, -v*y, -v*z, -v]);
     }
     let p_flat = null12(&rows);
-    // Reshape to 3×4
-    let p34: M34 = [
+    let pn: M34 = [
         [p_flat[0], p_flat[1],  p_flat[2],  p_flat[3]],
         [p_flat[4], p_flat[5],  p_flat[6],  p_flat[7]],
         [p_flat[8], p_flat[9],  p_flat[10], p_flat[11]],
     ];
+
+    // ── Denormalise: P = T_inv · P' · U ────────────────────────────────────
+    // T_inv (3×3) undoes the 2D normalisation; U (4×4) applies the 3D one.
+    let ti = [[1.0/s2, 0.0, c2[0]], [0.0, 1.0/s2, c2[1]], [0.0, 0.0, 1.0]];
+    let mut m = [[0.0f64; 4]; 3]; // M = T_inv · P'
+    for r in 0..3 {
+        for col in 0..4 {
+            m[r][col] = ti[r][0]*pn[0][col] + ti[r][1]*pn[1][col] + ti[r][2]*pn[2][col];
+        }
+    }
+    let u_mat = [
+        [s3,  0.0, 0.0, -s3*c3[0]],
+        [0.0, s3,  0.0, -s3*c3[1]],
+        [0.0, 0.0, s3,  -s3*c3[2]],
+        [0.0, 0.0, 0.0, 1.0],
+    ];
+    let mut p34 = [[0.0f64; 4]; 3]; // P = M · U
+    for r in 0..3 {
+        for col in 0..4 {
+            let mut acc = 0.0;
+            for k in 0..4 { acc += m[r][k] * u_mat[k][col]; }
+            p34[r][col] = acc;
+        }
+    }
+
     // Extract R and t: P = [R|t] in normalised coords
     let r_raw: M3 = [[p34[0][0], p34[0][1], p34[0][2]],
                      [p34[1][0], p34[1][1], p34[1][2]],
@@ -520,8 +579,11 @@ pub fn solve_pnp(
     let mut best_r = [[1.0,0.0,0.0],[0.0,1.0,0.0],[0.0,0.0,1.0]];
     let mut best_t = [0.0f64; 3];
 
+    // A few more than the 6-point minimum makes each (now normalised) DLT
+    // hypothesis far more stable when the scene is close to planar.
+    let sample_n = n.min(8).max(6);
     for _ in 0..max_iters {
-        let idx = rng.sample6(n);
+        let idx = rng.sample_k(n, sample_n);
         let s3: Vec<[f64; 3]> = idx.iter().map(|&i| pts3[i]).collect();
         let s2: Vec<[f64; 2]> = idx.iter().map(|&i| pts2[i]).collect();
 

@@ -1,27 +1,27 @@
 <script setup>
-import MetadataTable from '../MetadataTable.vue'
+import GcpTable from '../controls/GcpTable.vue'
 
 defineProps({
-  images:     { type: Array,  required: true },
-  selectedId: { type: String, default: null },
+  gcps: { type: Array,  required: true },
+  crs:  { type: String, default: null },
 })
 
-const emit = defineEmits(['close', 'select', 'open'])
+const emit = defineEmits(['close', 'remove', 'update-accuracy'])
 </script>
 
 <template>
   <div class="overlay" @click.self="emit('close')">
-    <div class="modal" role="dialog" aria-modal="true" aria-label="Metadata Table">
+    <div class="modal" role="dialog" aria-modal="true" aria-label="Ground Control Points Table">
       <div class="modal-header">
-        <span class="modal-title">Metadata</span>
+        <span class="modal-title">Ground Control Points</span>
         <button class="modal-close" title="Close" @click="emit('close')">×</button>
       </div>
       <div class="modal-body">
-        <MetadataTable
-          :images="images"
-          :selected-id="selectedId"
-          @select="emit('select', $event)"
-          @open="emit('open', $event)"
+        <GcpTable
+          :gcps="gcps"
+          :crs="crs"
+          @remove="emit('remove', $event)"
+          @update-accuracy="emit('update-accuracy', $event)"
         />
       </div>
     </div>
@@ -44,6 +44,7 @@ const emit = defineEmits(['close', 'select', 'open'])
   border: 1px solid var(--panel-border);
   border-radius: 8px;
   width: min(90vw, 900px);
+  height: 80vh;
   max-height: 80vh;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
   display: flex;

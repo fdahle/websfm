@@ -47,7 +47,9 @@ export function useTabs(imageById, showMap) {
         imageId,
         closable: true,
         showKeypoints: img?.kpStatus === 'done',
-        showMask: true,
+        showMask: false,
+        showDepth: false,
+        showGcps: false,
         maskMode: 'none',
         brushRadius: 20,
       })

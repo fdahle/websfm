@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed } from 'vue'
-import MatchViewer from '../MatchViewer.vue'
+import ViewerMatch from '../viewers/ViewerMatch.vue'
 
 const props = defineProps({
   matchSummaries: { type: Array,  default: () => [] },
@@ -80,7 +80,7 @@ function selectMatch(pairId) {
 
         <!-- Right: match viewer preview -->
         <div class="preview-panel">
-          <MatchViewer
+          <ViewerMatch
             v-if="selectedImgA && selectedImgB"
             :image-a="selectedImgA"
             :image-b="selectedImgB"

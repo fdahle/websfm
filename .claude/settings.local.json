@@ -21,7 +21,13 @@
       "Bash(wasm-pack build *)",
       "Bash(wsl -e bash -c \"which wasm-pack && wasm-pack --version\")",
       "Bash(wsl bash *)",
-      "PowerShell(wsl -- bash -ic \"cd /mnt/c/Users/Felix/Documents/GitHub/websfm && wasm-pack build crates/reconstruction --target web --out-dir ../../src/wasm/reconstruction 2>&1\")"
+      "PowerShell(wsl -- bash -ic \"cd /mnt/c/Users/Felix/Documents/GitHub/websfm && wasm-pack build crates/reconstruction --target web --out-dir ../../src/wasm/reconstruction 2>&1\")",
+      "Bash(npx vite *)",
+      "Bash(grep -v \"^M$\\\\|^path\\\\|^d$\\\\|^viewBox\")",
+      "Bash(cd /Users/fhdahle/Documents/GitHub/websfm; wasm-pack build crates/reconstruction --target web --out-dir ../../src/wasm/reconstruction 2>&1 | grep -iE \"warning|error|Finished|Done\" | head; rm -f src/wasm/*/.gitignore; echo \"=== app build ===\"; npm run build 2>&1 | tail -4)"
+    ],
+    "additionalDirectories": [
+      "/Users/fhdahle/Documents/GitHub/websfm/src/wasm/*"
     ]
   }
 }

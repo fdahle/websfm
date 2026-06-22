@@ -4,17 +4,21 @@ import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
 const props = defineProps({
   image:         { type: Object,  required: true },
   showKeypoints: { type: Boolean, default: false },
-  showMask:      { type: Boolean, default: true },
+  showMask:      { type: Boolean, default: false },
+  showDepth:     { type: Boolean, default: false },
+  showGcps:      { type: Boolean, default: false },
+  gcps:          { type: Array,   default: () => [] }, // [{ name, px, py }] observations on this image
   maskMode:      { type: String,  default: 'none' }, // 'none' | 'draw' | 'erase'
   brushRadius:   { type: Number,  default: 20 },     // screen pixels
 })
 
-const emit = defineEmits(['update-mask'])
+const emit = defineEmits(['update-mask', 'update-depth'])
 
 const container      = ref(null)
 const imgEl          = ref(null)
 const overlayCanvas  = ref(null)
 const maskFileInput  = ref(null)
+const depthFileInput = ref(null)
 
 // Pan/zoom
 const scale    = ref(1)
@@ -26,7 +30,9 @@ const hoverPx  = ref(null)
 // Mask canvas state
 const hasMask = ref(!!props.image.mask)
 
-let maskOffscreen = null  // OffscreenCanvas at native image resolution
+let maskOffscreen  = null  // OffscreenCanvas at native image resolution
+let depthOffscreen = null  // OffscreenCanvas holding colorized depth at native resolution
+const hasDepth = ref(!!props.image.depth)
 let mousePos      = null  // { x, y } screen coords for brush cursor
 let isDrawing     = false
 let startX = 0, startY = 0, startTx = 0, startTy = 0
@@ -95,6 +101,14 @@ function drawOverlay() {
   const dispW = img.naturalWidth  * scale.value
   const dispH = img.naturalHeight * scale.value
 
+  // Depth — colorized semi-transparent overlay at image position
+  if (depthOffscreen && hasDepth.value && props.showDepth) {
+    ctx.save()
+    ctx.globalAlpha = 0.6
+    ctx.drawImage(depthOffscreen, tx.value, ty.value, dispW, dispH)
+    ctx.restore()
+  }
+
   // Mask — red semi-transparent overlay at image position
   if (maskOffscreen && hasMask.value && props.showMask) {
     ctx.save()
@@ -143,6 +157,41 @@ function drawOverlay() {
     ctx.textAlign = 'center'
     ctx.fillText('response', LX + LW / 2, LY - 3)
     ctx.restore()
+  }
+
+  // GCP markers — observation pixel positions on this image
+  if (props.showGcps && props.gcps?.length && img.naturalWidth) {
+    for (const g of props.gcps) {
+      if (g.px == null || g.py == null) continue
+      const x = (g.px / img.naturalWidth)  * dispW + tx.value
+      const y = (g.py / img.naturalHeight) * dispH + ty.value
+      ctx.save()
+      // Ring
+      ctx.strokeStyle = 'rgba(255,210,0,0.95)'
+      ctx.lineWidth = 1.5
+      ctx.beginPath()
+      ctx.arc(x, y, 7, 0, Math.PI * 2)
+      ctx.stroke()
+      // Cross-hair
+      ctx.beginPath()
+      ctx.moveTo(x - 11, y); ctx.lineTo(x - 3, y)
+      ctx.moveTo(x + 3, y);  ctx.lineTo(x + 11, y)
+      ctx.moveTo(x, y - 11);  ctx.lineTo(x, y - 3)
+      ctx.moveTo(x, y + 3);   ctx.lineTo(x, y + 11)
+      ctx.stroke()
+      // Label
+      if (g.name) {
+        ctx.font = '11px sans-serif'
+        const tw = ctx.measureText(g.name).width
+        ctx.fillStyle = 'rgba(0,0,0,0.55)'
+        ctx.fillRect(x + 9, y - 16, tw + 6, 14)
+        ctx.fillStyle = 'rgba(255,210,0,0.95)'
+        ctx.textAlign = 'left'
+        ctx.textBaseline = 'middle'
+        ctx.fillText(g.name, x + 12, y - 9)
+      }
+      ctx.restore()
+    }
   }
 
   // Brush cursor circle
@@ -256,6 +305,103 @@ async function onMaskFileChange(e) {
   }
 }
 
+// ── Depth map operations ──────────────────────────────────────────────────────
+
+function initDepthCanvas() {
+  const img = imgEl.value
+  if (!img || !img.naturalWidth) return
+  depthOffscreen = new OffscreenCanvas(img.naturalWidth, img.naturalHeight)
+  if (props.image.depth?.dataUrl) loadDepthFromDataUrl(props.image.depth.dataUrl)
+}
+
+// Already-colorized depth maps are stored as PNG data URLs; just blit them in.
+async function loadDepthFromDataUrl(dataUrl) {
+  if (!depthOffscreen) return
+  try {
+    const blob = await (await fetch(dataUrl)).blob()
+    const bmp  = await createImageBitmap(blob)
+    const ctx  = depthOffscreen.getContext('2d')
+    ctx.clearRect(0, 0, depthOffscreen.width, depthOffscreen.height)
+    ctx.drawImage(bmp, 0, 0, depthOffscreen.width, depthOffscreen.height)
+    hasDepth.value = true
+    drawOverlay()
+  } catch {}
+}
+
+// Turbo-ish color ramp: maps a normalized depth (0..1) to [r,g,b].
+function depthColor(t) {
+  // Smooth blue → cyan → green → yellow → red ramp.
+  const r = Math.round(255 * clamp(1.5 - Math.abs(4 * t - 3), 0, 1))
+  const g = Math.round(255 * clamp(1.5 - Math.abs(4 * t - 2), 0, 1))
+  const b = Math.round(255 * clamp(1.5 - Math.abs(4 * t - 1), 0, 1))
+  return [r, g, b]
+}
+
+function triggerDepthImport() {
+  depthFileInput.value?.click()
+}
+
+// Import a (typically grayscale) depth image, normalize by luminance, and
+// store a colorized version. Fully transparent / zero pixels are treated as "no data".
+async function onDepthFileChange(e) {
+  const file = e.target.files?.[0]
+  e.target.value = ''
+  if (!file || !depthOffscreen) return
+  try {
+    const bmp    = await createImageBitmap(file)
+    const tmp    = new OffscreenCanvas(depthOffscreen.width, depthOffscreen.height)
+    const tmpCtx = tmp.getContext('2d')
+    tmpCtx.drawImage(bmp, 0, 0, tmp.width, tmp.height)
+    const id = tmpCtx.getImageData(0, 0, tmp.width, tmp.height)
+    const d  = id.data
+
+    // Find min/max luminance over valid pixels for contrast normalization.
+    let lo = Infinity, hi = -Infinity
+    for (let i = 0; i < d.length; i += 4) {
+      if (d[i + 3] === 0) continue
+      const lum = d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114
+      if (lum < lo) lo = lum
+      if (lum > hi) hi = lum
+    }
+    const range = hi - lo || 1
+
+    for (let i = 0; i < d.length; i += 4) {
+      if (d[i + 3] === 0) { d[i + 3] = 0; continue }
+      const lum = d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114
+      const t = (lum - lo) / range
+      const [r, g, b] = depthColor(t)
+      d[i] = r; d[i + 1] = g; d[i + 2] = b; d[i + 3] = 255
+    }
+    const ctx = depthOffscreen.getContext('2d')
+    ctx.clearRect(0, 0, depthOffscreen.width, depthOffscreen.height)
+    ctx.putImageData(id, 0, 0)
+    hasDepth.value = true
+    await exportDepth()
+    drawOverlay()
+  } catch (err) {
+    console.error('Failed to import depth map:', err)
+  }
+}
+
+async function exportDepth() {
+  if (!depthOffscreen) return
+  const blob = await depthOffscreen.convertToBlob({ type: 'image/png' })
+  const dataUrl = await new Promise((resolve) => {
+    const fr = new FileReader()
+    fr.onload = () => resolve(fr.result)
+    fr.readAsDataURL(blob)
+  })
+  emit('update-depth', dataUrl)
+}
+
+function clearDepth() {
+  if (!depthOffscreen) return
+  depthOffscreen.getContext('2d').clearRect(0, 0, depthOffscreen.width, depthOffscreen.height)
+  hasDepth.value = false
+  emit('update-depth', null)
+  drawOverlay()
+}
+
 // ── Mouse handlers ────────────────────────────────────────────────────────────
 
 function getViewportCoords(e) {
@@ -355,6 +501,7 @@ function onImgLoad() {
   fit()
   setupOffscreenCanvas()
   initMaskCanvas()
+  initDepthCanvas()
 }
 
 // Redraw when keypoints arrive or showKeypoints changes
@@ -362,6 +509,9 @@ watch(() => props.image.kpStatus,    () => drawOverlay())
 watch(() => props.image.keypoints,   () => drawOverlay(), { deep: false })
 watch(() => props.showKeypoints,     () => drawOverlay())
 watch(() => props.showMask,          () => drawOverlay())
+watch(() => props.showDepth,         () => drawOverlay())
+watch(() => props.showGcps,          () => drawOverlay())
+watch(() => props.gcps,              () => drawOverlay(), { deep: true })
 watch(() => props.maskMode,          () => drawOverlay())
 
 // Sync mask canvas when parent clears or replaces the mask externally
@@ -376,6 +526,18 @@ watch(() => props.image.mask, (mask, prev) => {
   }
 })
 
+// Sync depth canvas when parent clears or replaces the depth map externally
+watch(() => props.image.depth, (depth, prev) => {
+  if (depth === prev) return
+  if (depth?.dataUrl && depthOffscreen) {
+    loadDepthFromDataUrl(depth.dataUrl)
+  } else if (!depth && depthOffscreen) {
+    depthOffscreen.getContext('2d').clearRect(0, 0, depthOffscreen.width, depthOffscreen.height)
+    hasDepth.value = false
+    drawOverlay()
+  }
+})
+
 onMounted(() => {
   resizeObserver = new ResizeObserver(() => fit())
   if (container.value) resizeObserver.observe(container.value)
@@ -383,12 +545,13 @@ onMounted(() => {
 
 onBeforeUnmount(() => resizeObserver?.disconnect())
 
-defineExpose({ fit, zoomIn, zoomOut, triggerMaskImport, clearMask })
+defineExpose({ fit, zoomIn, zoomOut, triggerMaskImport, clearMask, triggerDepthImport, clearDepth })
 </script>
 
 <template>
   <div class="image-viewer">
     <input ref="maskFileInput" type="file" accept="image/*" hidden @change="onMaskFileChange" />
+    <input ref="depthFileInput" type="file" accept="image/*" hidden @change="onDepthFileChange" />
 
     <div
       ref="container"
