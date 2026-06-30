@@ -39,11 +39,13 @@ function poseFor(img) {
 function intrinsics(img) {
   if (mode.value === 'estimated') {
     const est = estimatedIntrinsics(props.cameras.get(img.uuid))
-    return est ? { focal: est.focal, unit: 'px', cx: est.cx, cy: est.cy, k1: null, estimated: true } : null
+    return est
+      ? { focal: est.focal, unit: 'px', cx: est.cx, cy: est.cy, k1: null, k2: null, k3: null, p1: null, p2: null, estimated: true }
+      : null
   }
   const s = sensorFor(img)
   if (!s) return null
-  return { focal: s.focal, unit: s.focalUnit || 'px', cx: s.cx, cy: s.cy, k1: s.k1, estimated: false }
+  return { focal: s.focal, unit: s.focalUnit || 'px', cx: s.cx, cy: s.cy, k1: s.k1, k2: s.k2, k3: s.k3, p1: s.p1, p2: s.p2, estimated: false }
 }
 
 // ── Extrinsics row ────────────────────────────────────────────────────────────
@@ -117,7 +119,7 @@ function onOpen(id)    { emit('open', id) }
 
         <!-- Intrinsics -->
         <div v-else-if="tab === 'intrinsics'" class="table-wrap">
-          <table v-if="images.length">
+          <table v-if="images.length" v-col-resize>
             <thead>
               <tr>
                 <th>Name</th>
@@ -126,6 +128,10 @@ function onOpen(id)    { emit('open', id) }
                 <th>cx</th>
                 <th>cy</th>
                 <th>k1</th>
+                <th>k2</th>
+                <th>k3</th>
+                <th>p1</th>
+                <th>p2</th>
               </tr>
             </thead>
             <tbody>
@@ -154,9 +160,13 @@ function onOpen(id)    { emit('open', id) }
                   <td>{{ show(intrinsics(img).cx) }}</td>
                   <td>{{ show(intrinsics(img).cy) }}</td>
                   <td :class="{ dim: intrinsics(img).k1 == null }">{{ show(intrinsics(img).k1) }}</td>
+                  <td :class="{ dim: intrinsics(img).k2 == null }">{{ show(intrinsics(img).k2) }}</td>
+                  <td :class="{ dim: intrinsics(img).k3 == null }">{{ show(intrinsics(img).k3) }}</td>
+                  <td :class="{ dim: intrinsics(img).p1 == null }">{{ show(intrinsics(img).p1) }}</td>
+                  <td :class="{ dim: intrinsics(img).p2 == null }">{{ show(intrinsics(img).p2) }}</td>
                 </template>
                 <template v-else>
-                  <td colspan="4" class="dim">{{ mode === 'estimated' ? 'not reconstructed' : 'no sensor assigned' }}</td>
+                  <td colspan="8" class="dim">{{ mode === 'estimated' ? 'not reconstructed' : 'no sensor assigned' }}</td>
                 </template>
               </tr>
             </tbody>
@@ -166,7 +176,7 @@ function onOpen(id)    { emit('open', id) }
 
         <!-- Extrinsics -->
         <div v-else class="table-wrap">
-          <table v-if="images.length">
+          <table v-if="images.length" v-col-resize>
             <thead>
               <tr>
                 <th>Name</th>

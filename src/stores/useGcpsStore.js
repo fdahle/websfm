@@ -1,11 +1,12 @@
 import { ref } from 'vue'
-import { useLog } from './useLog.js'
-import { ensureProjection, transform } from '../utils/crs.js'
+import { defineStore } from 'pinia'
+import { useLog } from '../composables/useLog.js'
+import { ensureProjection, transform } from '../core/crs.js'
 import * as opfs from '../utils/opfs.js'
+import { registerProjectStore } from './projectStores.js'
+import { useImagesStore } from './useImagesStore.js'
+import { useProjectsStore } from './useProjectsStore.js'
 
-// images:     Ref<Array>   — image objects (used to resolve observation image names → ids)
-// currentCrs: Ref<string>  — the project's working CRS (GCPs are stored in it)
-// persist:    { enabled, projectId }
 // Default measurement accuracies for a new GCP.
 //   x / y / z — per-axis accuracy of the ground coordinates, in project-CRS units (e.g. metres)
 //   rel       — accuracy of the image observations (marker projections), in pixels
@@ -14,8 +15,14 @@ const DEFAULT_ACCURACY_Y   = 1.0
 const DEFAULT_ACCURACY_Z   = 1.0
 const DEFAULT_ACCURACY_REL = 1.0
 
-export function useGcps({ images, currentCrs, persist } = {}) {
+// Project-scoped store: ground control points, stored in the project's working CRS.
+//
+// Reads the image list (to resolve observation image names → ids) from the images
+// store and the project CRS / persistence flags from the projects store.
+export const useGcpsStore = registerProjectStore(defineStore('gcps', () => {
   const { log } = useLog()
+  const imagesStore = useImagesStore()
+  const projects = useProjectsStore()
 
   // [{ id, name, x, y, z, accuracyX, accuracyY, accuracyZ, accuracyRel,
   //    observations: [{ imageId, imageName, px, py }], enabled }]
@@ -33,14 +40,13 @@ export function useGcps({ images, currentCrs, persist } = {}) {
     return g
   }
 
-  function isPersisting() {
-    return persist?.enabled.value && !!persist?.projectId.value
-  }
+  // Persist only when a project is open and OPFS is usable (see useProjectsStore).
+  const isPersisting = () => projects.isPersisting
 
   async function save() {
     if (!isPersisting()) return
-    await opfs.saveGcps(persist.projectId.value, {
-      crs: currentCrs.value,
+    await opfs.saveGcps(projects.currentProjectId, {
+      crs: projects.currentCrs,
       gcps: gcps.value,
     }).catch((err) => log(`GCP save failed — ${err?.message ?? err}`, 'error', 'GCP'))
   }
@@ -51,7 +57,7 @@ export function useGcps({ images, currentCrs, persist } = {}) {
     if (!imageName) return null
     const lc = imageName.toLowerCase()
     const base = lc.replace(/\.[^.]+$/, '')
-    const hit = images?.value.find((img) => {
+    const hit = imagesStore.images.find((img) => {
       const n = img.name.toLowerCase()
       return n === lc || n.replace(/\.[^.]+$/, '') === base
     })
@@ -60,7 +66,7 @@ export function useGcps({ images, currentCrs, persist } = {}) {
 
   // Add parsed GCPs (given in `sourceCrs`), transforming positions into the project CRS.
   async function addGcps(rawGcps, sourceCrs) {
-    const projCrs = currentCrs.value
+    const projCrs = projects.currentCrs
     // If either CRS can't be resolved, transform() below would throw mid-loop —
     // bail with a clear log instead of rejecting silently into the caller.
     try {
@@ -136,12 +142,16 @@ export function useGcps({ images, currentCrs, persist } = {}) {
     save()
   }
 
-  function clearGcps() {
+  // Project-store contract: reset state and purge persisted data.
+  function clear() {
     gcps.value = []
-    if (isPersisting()) opfs.deleteGcps(persist.projectId.value).catch(() => {})
+    if (isPersisting()) opfs.deleteGcps(projects.currentProjectId).catch(() => {})
   }
 
-  async function restoreGcps(projectId, projectCrs) {
+  // Project-store contract: load this project's GCPs, re-projecting if the stored
+  // CRS differs from the project's current working CRS.
+  async function restore({ projectId, projectData }) {
+    const projectCrs = projectData?.crs
     gcps.value = []
     const data = await opfs.loadGcps(projectId)
     if (!data?.gcps?.length) return
@@ -178,8 +188,9 @@ export function useGcps({ images, currentCrs, persist } = {}) {
     addGcps,
     setGcpAccuracy,
     removeGcp,
-    clearGcps,
-    restoreGcps,
     reprojectGcps,
+    // project-store contract
+    clear,
+    restore,
   }
-}
+}))

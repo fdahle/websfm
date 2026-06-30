@@ -150,6 +150,39 @@ export async function deleteKeypoints(projectId, uuid) {
   } catch {}
 }
 
+// ── Keypoint colours ────────────────────────────────────────────────────────
+// Per-keypoint RGB sampled at detection, stored separately from the packed
+// keypoint floats (Uint8Array, N×3) so the keypoint format stays back-compatible.
+// Parallel array to keypoints; used to colour the sparse cloud.
+
+export async function saveColors(projectId, uuid, keypoints) {
+  const buf = new Uint8Array(keypoints.length * 3)
+  keypoints.forEach((kp, i) => {
+    const c = kp.color
+    if (c) { buf[i * 3] = c[0]; buf[i * 3 + 1] = c[1]; buf[i * 3 + 2] = c[2] }
+  })
+  const dir = await getSubDir(projectId, 'keypoint_colors')
+  const fh = await dir.getFileHandle(uuid + '.bin', { create: true })
+  const writable = await fh.createWritable()
+  await writable.write(buf.buffer)
+  await writable.close()
+}
+
+export async function loadColors(projectId, uuid) {
+  try {
+    const dir = await getSubDir(projectId, 'keypoint_colors')
+    const fh = await dir.getFileHandle(uuid + '.bin')
+    const file = await fh.getFile()
+    const buf = new Uint8Array(await file.arrayBuffer())
+    const n = Math.floor(buf.length / 3)
+    const colors = new Array(n)
+    for (let i = 0; i < n; i++) colors[i] = [buf[i * 3], buf[i * 3 + 1], buf[i * 3 + 2]]
+    return colors
+  } catch {
+    return null
+  }
+}
+
 // ── Descriptors ───────────────────────────────────────────────────────────────
 // Stored as raw Float32Array (N×128 floats) in descriptors/{uuid}.bin.
 // Not loaded into the image object — fetched on-demand when matching.
@@ -399,7 +432,10 @@ export async function deletePoses(projectId) {
 }
 
 // ── Reconstruction ────────────────────────────────────────────────────────────
-// JSON: { cameras: [{ uuid, R, t, K }], points: [{ x, y, z }] }
+// JSON: { clouds: [{ id, name, kind, createdAt,
+//                    cameras: [{ uuid, R, t, K }], points: [{ x, y, z, color }] }] }
+// Legacy single-model files { cameras: [...], points: [...] } are still read and
+// wrapped into one sparse cloud on restore.
 
 export async function saveReconstruction(projectId, data) {
   const dir = await getProjectDir(projectId, true)

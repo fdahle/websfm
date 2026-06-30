@@ -2,9 +2,9 @@
 // orientation ('pose'), so the import modal can open in the right mode. The
 // modal lets the user override, so this only needs to be a good first guess.
 
-import { sniffDelimiter, parseRows } from './gcp.js'
-import { guessMapping as guessSensors } from './sensor.js'
-import { guessMapping as guessPoses } from './pose.js'
+import { sniffDelimiter, parseRows } from '../core/gcp.js'
+import { guessMapping as guessSensors } from '../core/sensor.js'
+import { guessMapping as guessPoses } from '../core/pose.js'
 
 export function detectCameraMode(text) {
   const delim = sniffDelimiter(text)

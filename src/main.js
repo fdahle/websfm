@@ -1,6 +1,11 @@
 import { createApp } from 'vue'
+import { createPinia } from 'pinia'
 import App from './App.vue'
 import './style.css'
 import 'ol/ol.css'
+import { colResize } from './utils/resizableColumns.js'
 
-createApp(App).mount('#app')
+createApp(App)
+  .use(createPinia())
+  .directive('col-resize', colResize)
+  .mount('#app')

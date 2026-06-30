@@ -285,6 +285,98 @@ fn compute_descriptor(
 
 // ── Detection + description ───────────────────────────────────────────────────
 
+/// Solve a 3×3 linear system `A · x = b` by Cramer's rule.
+/// Returns `None` for a (near-)singular matrix.
+fn solve3(a: [[f32; 3]; 3], b: [f32; 3]) -> Option<[f32; 3]> {
+    let det3 = |m: &[[f32; 3]; 3]| {
+        m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1])
+      - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
+      + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0])
+    };
+    let det = det3(&a);
+    if det.abs() < 1e-12 { return None; }
+    let inv = 1.0 / det;
+    let mut out = [0f32; 3];
+    for c in 0..3 {
+        let mut m = a;
+        for r in 0..3 { m[r][c] = b[r]; }
+        out[c] = det3(&m) * inv;
+    }
+    Some(out)
+}
+
+/// Refine a discrete DoG extremum to sub-pixel / sub-scale position via the
+/// standard Lowe quadratic fit (Lowe §4). Iteratively fits a 3D quadratic to
+/// the DoG around `(x0, y0, s0)` and solves `H · offset = -gradient` for the
+/// peak; if the offset exceeds half a sample the search re-centres on the
+/// nearest neighbour and retries. Returns the refined octave-local `(x, y)`,
+/// the fractional scale-layer index, and the interpolated DoG contrast, or
+/// `None` if it walks outside the valid interior or fails to converge.
+fn refine_extremum(
+    dog: &[Vec<f32>],
+    w: usize,
+    h: usize,
+    x0: usize,
+    y0: usize,
+    s0: usize,
+) -> Option<(f32, f32, f32, f32)> {
+    const MAX_ITERS: usize = 5;
+    let s_lo = 1i32;
+    let s_hi = dog.len() as i32 - 2;
+
+    let mut x = x0 as i32;
+    let mut y = y0 as i32;
+    let mut s = s0 as i32;
+
+    for _ in 0..MAX_ITERS {
+        let (xi, yi, si) = (x as usize, y as usize, s as usize);
+        let at = |ss: usize, yy: usize, xx: usize| dog[ss][yy * w + xx];
+        let c = at(si, yi, xi);
+
+        // 3D gradient (central differences in x, y, scale).
+        let gx = 0.5 * (at(si, yi, xi + 1) - at(si, yi, xi - 1));
+        let gy = 0.5 * (at(si, yi + 1, xi) - at(si, yi - 1, xi));
+        let gs = 0.5 * (at(si + 1, yi, xi) - at(si - 1, yi, xi));
+
+        // 3D Hessian.
+        let dxx = at(si, yi, xi + 1) + at(si, yi, xi - 1) - 2.0 * c;
+        let dyy = at(si, yi + 1, xi) + at(si, yi - 1, xi) - 2.0 * c;
+        let dss = at(si + 1, yi, xi) + at(si - 1, yi, xi) - 2.0 * c;
+        let dxy = 0.25 * (at(si, yi + 1, xi + 1) - at(si, yi + 1, xi - 1)
+                        - at(si, yi - 1, xi + 1) + at(si, yi - 1, xi - 1));
+        let dxs = 0.25 * (at(si + 1, yi, xi + 1) - at(si + 1, yi, xi - 1)
+                        - at(si - 1, yi, xi + 1) + at(si - 1, yi, xi - 1));
+        let dys = 0.25 * (at(si + 1, yi + 1, xi) - at(si + 1, yi - 1, xi)
+                        - at(si - 1, yi + 1, xi) + at(si - 1, yi - 1, xi));
+
+        let offset = solve3(
+            [[dxx, dxy, dxs],
+             [dxy, dyy, dys],
+             [dxs, dys, dss]],
+            [-gx, -gy, -gs],
+        )?;
+        let (ox, oy, os) = (offset[0], offset[1], offset[2]);
+
+        // Converged: peak lies within half a sample of the current point.
+        if ox.abs() < 0.5 && oy.abs() < 0.5 && os.abs() < 0.5 {
+            let contrast = c + 0.5 * (gx * ox + gy * oy + gs * os);
+            return Some((xi as f32 + ox, yi as f32 + oy, si as f32 + os, contrast));
+        }
+
+        // Otherwise re-centre on the nearest sample and retry.
+        if ox >  0.5 { x += 1; } else if ox < -0.5 { x -= 1; }
+        if oy >  0.5 { y += 1; } else if oy < -0.5 { y -= 1; }
+        if os >  0.5 { s += 1; } else if os < -0.5 { s -= 1; }
+
+        if x < 1 || x >= w as i32 - 1
+        || y < 1 || y >= h as i32 - 1
+        || s < s_lo || s > s_hi {
+            return None;
+        }
+    }
+    None
+}
+
 fn sift_keypoints(gray: &[f32], width: usize, height: usize, contrast_threshold: f32) -> Vec<Kp> {
     let scales_per_octave = 3usize;
     let k        = 2f32.powf(1.0 / scales_per_octave as f32);
@@ -322,8 +414,6 @@ fn sift_keypoints(gray: &[f32], width: usize, height: usize, contrast_threshold:
 
         // Scan interior DoG layers for scale-space extrema.
         for s in 1..dog.len() - 1 {
-            let kscale = sigma0 * k.powi(s as i32);
-
             for y in 1..h - 1 {
                 for x in 1..w - 1 {
                     let v = dog[s][y * w + x];
@@ -347,7 +437,17 @@ fn sift_keypoints(gray: &[f32], width: usize, height: usize, contrast_threshold:
                     }
                     if !(is_max || is_min) { continue; }
 
-                    // Edge-response rejection (2×2 Hessian of the DoG).
+                    // Sub-pixel / sub-scale localization: fit a 3D quadratic to
+                    // the DoG around the discrete extremum and solve for the
+                    // true peak offset.
+                    let (rx, ry, rs, contrast) = match refine_extremum(&dog, w, h, x, y, s) {
+                        Some(r) => r,
+                        None    => continue, // failed to converge inside the volume
+                    };
+                    // Low-contrast rejection on the *interpolated* DoG value.
+                    if contrast.abs() < contrast_threshold { continue; }
+
+                    // Edge-response rejection (2×2 spatial Hessian of the DoG).
                     let c   = dog[s][y * w + x];
                     let dxx = dog[s][y * w + x + 1] + dog[s][y * w + x - 1] - 2.0 * c;
                     let dyy = dog[s][(y + 1) * w + x] + dog[s][(y - 1) * w + x] - 2.0 * c;
@@ -360,8 +460,10 @@ fn sift_keypoints(gray: &[f32], width: usize, height: usize, contrast_threshold:
                     let r = edge_threshold;
                     if tr * tr / det >= (r + 1.0) * (r + 1.0) / r { continue; }
 
-                    let kx = x as f32;
-                    let ky = y as f32;
+                    // Refined octave-local position and (fractional) scale.
+                    let kx     = rx;
+                    let ky     = ry;
+                    let kscale = sigma0 * k.powf(rs);
 
                     let angle = compute_orientation(&gauss[s], w, h, kx, ky, kscale);
                     let desc  = compute_descriptor(&gauss[s], w, h, kx, ky, kscale, angle);
@@ -370,7 +472,7 @@ fn sift_keypoints(gray: &[f32], width: usize, height: usize, contrast_threshold:
                         x:        kx * scale_factor,
                         y:        ky * scale_factor,
                         scale:    kscale * scale_factor,
-                        response: v.abs(),
+                        response: contrast.abs(),
                         angle,
                         desc,
                     });

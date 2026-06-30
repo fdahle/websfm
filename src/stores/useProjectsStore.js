@@ -1,7 +1,13 @@
 import { ref, computed } from 'vue'
+import { defineStore } from 'pinia'
 import * as opfs from '../utils/opfs.js'
 
-export function useProjects() {
+// The project index: which projects exist, which one is open, and its metadata
+// (name, scene type, working CRS). Foundational store — most other stores read
+// `currentProjectId` / `persistenceAvailable` / `currentCrs` from here to decide
+// whether and where to persist. It is the project *index*, not project content,
+// so it is not itself a registry-driven project-scoped store.
+export const useProjectsStore = defineStore('projects', () => {
   // Persistence is always on; this only tracks whether OPFS is usable in this
   // environment. When false, the app runs transiently without a project.
   const persistenceAvailable = ref(true)
@@ -14,6 +20,11 @@ export function useProjects() {
   const currentProjectName = computed(() => currentProject.value?.name || null)
   const currentSceneType = computed(() => currentProject.value?.sceneType || null)
   const currentCrs = computed(() => currentProject.value?.crs || 'EPSG:4326')
+
+  // True when there is an open project AND OPFS is usable — the single gate every
+  // project-scoped store checks before reading/writing persistence. Hoisted here
+  // (was duplicated as a local `isPersisting()` in each store).
+  const isPersisting = computed(() => persistenceAvailable.value && !!currentProjectId.value)
 
   function setPersistenceAvailable(available) {
     persistenceAvailable.value = available
@@ -97,9 +108,11 @@ export function useProjects() {
     persistenceAvailable,
     projects,
     currentProjectId,
+    currentProject,
     currentProjectName,
     currentSceneType,
     currentCrs,
+    isPersisting,
     setPersistenceAvailable,
     loadIndex,
     saveIndex,
@@ -110,4 +123,4 @@ export function useProjects() {
     deleteProjectById,
     touchProject,
   }
-}
+})

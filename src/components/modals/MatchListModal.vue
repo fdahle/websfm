@@ -16,6 +16,43 @@ function trimExt(name) {
 
 const selectedPairId = ref(null)
 
+// ── Filtering + sorting ───────────────────────────────────────────────────────
+const filterA = ref('')
+const sortKey = ref('nameA')   // 'nameA' | 'nameB' | 'inlierCount' | 'rawCount'
+const sortDir = ref('asc')     // 'asc' | 'desc'
+
+function sortBy(key) {
+  if (sortKey.value === key) {
+    sortDir.value = sortDir.value === 'asc' ? 'desc' : 'asc'
+  } else {
+    sortKey.value = key
+    sortDir.value = 'asc'
+  }
+}
+
+// Distinct Image A names present in the pairs, for the filter dropdown.
+const imageAOptions = computed(() => {
+  const names = [...new Set(props.matchSummaries.map((m) => trimExt(m.nameA)))]
+  return names.sort((a, b) => a.localeCompare(b))
+})
+
+const displayedSummaries = computed(() => {
+  const q = filterA.value
+  let rows = props.matchSummaries
+  if (q) rows = rows.filter((m) => trimExt(m.nameA) === q)
+
+  const key = sortKey.value
+  const dir = sortDir.value === 'asc' ? 1 : -1
+  const isText = key === 'nameA' || key === 'nameB'
+  return [...rows].sort((a, b) => {
+    const va = isText ? trimExt(a[key]).toLowerCase() : a[key]
+    const vb = isText ? trimExt(b[key]).toLowerCase() : b[key]
+    if (va < vb) return -1 * dir
+    if (va > vb) return 1 * dir
+    return 0
+  })
+})
+
 const selectedSummary = computed(() =>
   props.matchSummaries.find((m) => m.pairId === selectedPairId.value) ?? null
 )
@@ -52,30 +89,42 @@ function selectMatch(pairId) {
         <!-- Left: match list -->
         <div class="list-panel">
           <div v-if="!matchSummaries.length" class="empty">No matches yet — run Match Features first.</div>
-          <table v-else class="match-table">
-            <thead>
-              <tr>
-                <th>Image A</th>
-                <th>Image B</th>
-                <th class="num-col">Inliers</th>
-                <th class="num-col">Raw</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr
-                v-for="m in matchSummaries"
-                :key="m.pairId"
-                class="match-row"
-                :class="{ active: m.pairId === selectedPairId }"
-                @click="selectMatch(m.pairId)"
-              >
-                <td class="name-cell">{{ trimExt(m.nameA) }}</td>
-                <td class="name-cell">{{ trimExt(m.nameB) }}</td>
-                <td class="num-col">{{ m.inlierCount }}</td>
-                <td class="num-col dim">{{ m.rawCount }}</td>
-              </tr>
-            </tbody>
-          </table>
+          <template v-else>
+            <div class="filter-bar">
+              <select v-model="filterA" class="filter-input">
+                <option value="">All images</option>
+                <option v-for="name in imageAOptions" :key="name" :value="name">{{ name }}</option>
+              </select>
+              <button v-if="filterA" class="filter-clear" title="Clear filter" @click="filterA = ''">×</button>
+            </div>
+            <table v-col-resize class="match-table">
+              <thead>
+                <tr>
+                  <th class="sortable" @click="sortBy('nameA')">Image A<span class="arrow">{{ sortKey === 'nameA' ? (sortDir === 'asc' ? '▲' : '▼') : '' }}</span></th>
+                  <th class="sortable" @click="sortBy('nameB')">Image B<span class="arrow">{{ sortKey === 'nameB' ? (sortDir === 'asc' ? '▲' : '▼') : '' }}</span></th>
+                  <th class="sortable num-col" @click="sortBy('inlierCount')">Inliers<span class="arrow">{{ sortKey === 'inlierCount' ? (sortDir === 'asc' ? '▲' : '▼') : '' }}</span></th>
+                  <th class="sortable num-col" @click="sortBy('rawCount')">Raw<span class="arrow">{{ sortKey === 'rawCount' ? (sortDir === 'asc' ? '▲' : '▼') : '' }}</span></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-if="!displayedSummaries.length">
+                  <td colspan="4" class="empty-row">No pairs match “{{ filterA }}”.</td>
+                </tr>
+                <tr
+                  v-for="m in displayedSummaries"
+                  :key="m.pairId"
+                  class="match-row"
+                  :class="{ active: m.pairId === selectedPairId }"
+                  @click="selectMatch(m.pairId)"
+                >
+                  <td class="name-cell">{{ trimExt(m.nameA) }}</td>
+                  <td class="name-cell">{{ trimExt(m.nameB) }}</td>
+                  <td class="num-col">{{ m.inlierCount }}</td>
+                  <td class="num-col dim">{{ m.rawCount }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </template>
         </div>
 
         <!-- Right: match viewer preview -->
@@ -179,6 +228,43 @@ function selectMatch(pairId) {
   text-align: center;
 }
 
+.filter-bar {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--panel-border);
+}
+
+.filter-input {
+  flex: 1;
+  background: var(--bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 7px;
+  outline: none;
+}
+.filter-input:focus { border-color: var(--accent); }
+
+.filter-clear {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+  border-radius: 4px;
+}
+.filter-clear:hover { background: var(--hover-bg); color: var(--text); }
+
 .match-table {
   width: 100%;
   border-collapse: collapse;
@@ -195,8 +281,28 @@ function selectMatch(pairId) {
   letter-spacing: 0.04em;
   border-bottom: 1px solid var(--panel-border);
   position: sticky;
-  top: 0;
+  top: 37px;
   background: var(--panel);
+}
+
+.match-table th.sortable {
+  cursor: pointer;
+  user-select: none;
+}
+.match-table th.sortable:hover { color: var(--text); }
+.match-table th.num-col { text-align: right; }
+.arrow {
+  display: inline-block;
+  width: 1em;
+  font-size: 9px;
+  color: var(--accent);
+}
+
+.empty-row {
+  padding: 16px 12px !important;
+  text-align: center;
+  color: var(--text-dim);
+  font-style: italic;
 }
 
 .match-row {

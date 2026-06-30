@@ -1,7 +1,14 @@
-import { ref, computed } from 'vue'
+import { ref } from 'vue'
+import { defineStore } from 'pinia'
 
-// imageById: (id: string) => image | null — from useImages
-export function useModals(imageById) {
+// Pure UI state: which modals/dialogs are open and the transient payloads they
+// carry while open. Not project-scoped — it does not persist or restore, so it
+// is a plain Pinia store (no project-store registry contract).
+//
+// NOTE: `infoImage` (the resolved image for the Image Info modal) lives in App.vue
+// rather than here, because resolving it needs the image list. Once images become
+// a store, that computed can move in and read useImagesStore() directly.
+export const useModalsStore = defineStore('modals', () => {
   const settingsOpen        = ref(false)
   const aboutOpen           = ref(false)
   const projectPickerOpen   = ref(false)
@@ -10,10 +17,13 @@ export function useModals(imageById) {
   const detectFeaturesOpen  = ref(false)
   const matchFeaturesOpen   = ref(false)
   const imageTableOpen      = ref(false)
+  const maskManagerOpen     = ref(false)
   const sensorTableOpen     = ref(false)
   const gcpTableOpen        = ref(false)
   const matchListOpen       = ref(false)
   const reconstructOpen     = ref(false)
+  const depthMapsOpen       = ref(false)
+  const denseOpen           = ref(false)
   const gcpImportOpen       = ref(false)
   const gcpImportText       = ref('')
   const gcpImportName       = ref('')
@@ -21,12 +31,14 @@ export function useModals(imageById) {
   const gcpImportCrs        = ref(null)   // CRS detected from the GeoJSON, or null
   const footprintImportOpen = ref(false)
   const footprintImportData = ref(null)   // { features, propertyKeys, detectedCrs, fileName }
+  const footprintFromPosesOpen = ref(false)
   const cameraImportOpen    = ref(false)
   const cameraImportText    = ref('')
   const cameraImportName    = ref('')
   const cameraImportMode    = ref('pose') // sniffed default: 'sensor' | 'pose'
+  const importKindOpen      = ref(false)  // "what is this dropped file?" chooser
+  const importKindFile      = ref(null)   // the File awaiting a kind choice, or null
   const infoImageId         = ref(null)
-  const infoImage           = computed(() => infoImageId.value ? imageById(infoImageId.value) : null)
 
   return {
     settingsOpen,
@@ -37,10 +49,13 @@ export function useModals(imageById) {
     detectFeaturesOpen,
     matchFeaturesOpen,
     imageTableOpen,
+    maskManagerOpen,
     sensorTableOpen,
     gcpTableOpen,
     matchListOpen,
     reconstructOpen,
+    depthMapsOpen,
+    denseOpen,
     gcpImportOpen,
     gcpImportText,
     gcpImportName,
@@ -48,11 +63,13 @@ export function useModals(imageById) {
     gcpImportCrs,
     footprintImportOpen,
     footprintImportData,
+    footprintFromPosesOpen,
     cameraImportOpen,
     cameraImportText,
     cameraImportName,
     cameraImportMode,
+    importKindOpen,
+    importKindFile,
     infoImageId,
-    infoImage,
   }
-}
+})

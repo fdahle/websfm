@@ -24,10 +24,23 @@
       "PowerShell(wsl -- bash -ic \"cd /mnt/c/Users/Felix/Documents/GitHub/websfm && wasm-pack build crates/reconstruction --target web --out-dir ../../src/wasm/reconstruction 2>&1\")",
       "Bash(npx vite *)",
       "Bash(grep -v \"^M$\\\\|^path\\\\|^d$\\\\|^viewBox\")",
-      "Bash(cd /Users/fhdahle/Documents/GitHub/websfm; wasm-pack build crates/reconstruction --target web --out-dir ../../src/wasm/reconstruction 2>&1 | grep -iE \"warning|error|Finished|Done\" | head; rm -f src/wasm/*/.gitignore; echo \"=== app build ===\"; npm run build 2>&1 | tail -4)"
+      "Bash(cd /Users/fhdahle/Documents/GitHub/websfm; wasm-pack build crates/reconstruction --target web --out-dir ../../src/wasm/reconstruction 2>&1 | grep -iE \"warning|error|Finished|Done\" | head; rm -f src/wasm/*/.gitignore; echo \"=== app build ===\"; npm run build 2>&1 | tail -4)",
+      "Bash(echo \"=== exit $? \\(1 = none found, good\\) ===\")",
+      "Bash(grep -nA12 \"export function buildGcps\" src/core/gcp.js)",
+      "Bash(npm test *)",
+      "Bash(cargo build *)",
+      "Bash(npx vitest *)",
+      "Bash(cargo test *)",
+      "Bash(command -v wasm-pack)",
+      "Bash(cargo check *)",
+      "Bash(cd /Users/fhdahle/Documents/GitHub/websfm && wasm-pack build crates/reconstruction --target web --out-dir ../../src/wasm/reconstruction 2>&1 | tail -4 && rm -f src/wasm/*/.gitignore && echo \"=== exports ===\" && grep -oE \"export function \\(recover_pose|triangulate_dlt|solve_pnp|bundle_adjust|compute_depth_map\\)\" src/wasm/reconstruction/reconstruction.js | sort)",
+      "Bash(npx eslint *)",
+      "Bash(timeout 180 npx vite build)"
     ],
     "additionalDirectories": [
-      "/Users/fhdahle/Documents/GitHub/websfm/src/wasm/*"
+      "/Users/fhdahle/Documents/GitHub/websfm/src/wasm/*",
+      "/Users/fhdahle/Documents/GitHub/websfm/crates/src/wasm/*",
+      "/Users/fhdahle/Documents/GitHub/websfm/crates/reconstruction/src/wasm/*"
     ]
   }
 }

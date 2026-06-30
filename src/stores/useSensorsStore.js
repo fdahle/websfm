@@ -1,42 +1,48 @@
 import { ref, watch, computed } from 'vue'
-import { useLog } from './useLog.js'
-import { exifSignature, sensorFromExif } from '../utils/sensor.js'
+import { defineStore, storeToRefs } from 'pinia'
+import { useLog } from '../composables/useLog.js'
+import { exifSignature, sensorFromExif } from '../core/sensor.js'
 import * as opfs from '../utils/opfs.js'
+import { useImagesStore } from './useImagesStore.js'
+import { useProjectsStore } from './useProjectsStore.js'
 
 // Sensors are shared camera intrinsics. Each image references one via
 // `image.sensorId`. Sensors arrive two ways:
 //   - automatically, grouped from image EXIF (same camera + focal + dimensions)
 //   - explicitly, imported from a calibration file (utils/sensor.js)
 //
-// images:  Ref<Array>   — image objects (mutated: their `sensorId` is assigned)
-// persist: { enabled, projectId, sync } — sync re-serializes images (sensorId lives on them)
-export function useSensors({ images, persist } = {}) {
+// Project-scoped, but NOT registry-driven: its restore must run *before* images
+// restore (the EXIF auto-grouping watcher reacts to the image list), so App.vue
+// orchestrates restoreSensors/clearSensors directly.
+export const useSensorsStore = defineStore('sensors', () => {
   const { log } = useLog()
+  const imagesStore = useImagesStore()
+  const projects = useProjectsStore()
+  const { images } = storeToRefs(imagesStore)
 
   // [{ id, label, width, height, focal, focalUnit, cx, cy,
   //    k1, k2, k3, p1, p2, pixelSize, signature, source }]
   const sensors = ref([])
 
-  function isPersisting() {
-    return persist?.enabled.value && !!persist?.projectId.value
-  }
+  // Persist only when a project is open and OPFS is usable (see useProjectsStore).
+  const isPersisting = () => projects.isPersisting
 
   async function save() {
     if (!isPersisting()) return
-    await opfs.saveSensors(persist.projectId.value, { sensors: sensors.value })
+    await opfs.saveSensors(projects.currentProjectId, { sensors: sensors.value })
       .catch((err) => log(`Sensor save failed — ${err?.message ?? err}`, 'error', 'Sensor'))
   }
 
   // How many images currently reference a sensor.
   function imageCount(sensorId) {
-    return images?.value.filter((img) => img.sensorId === sensorId).length ?? 0
+    return images.value.filter((img) => img.sensorId === sensorId).length ?? 0
   }
 
   // Auto-create / assign sensors from EXIF. Images with an identical signature
   // collapse into one sensor; only images lacking a sensorId are touched, so a
   // manual reassignment is never overwritten.
   function ensureExifSensors() {
-    if (!images?.value.length) return
+    if (!images.value.length) return
     let changed = false
     for (const img of images.value) {
       // Skip images already bound to a live sensor. A sensorId that points to no
@@ -61,19 +67,17 @@ export function useSensors({ images, persist } = {}) {
     }
     if (changed) {
       save()
-      if (isPersisting()) persist.sync(images.value)
+      if (isPersisting()) imagesStore.sync()
     }
   }
 
   // Re-group whenever an image is added/removed, its EXIF lands, or its sensor
   // assignment changes. Keyed on id+sensorId+EXIF-signature rather than a deep
   // watch, so unrelated image mutations (keypoints, masks) don't re-scan.
-  if (images) {
-    const imageSensorSig = computed(() =>
-      images.value.map((i) => `${i.id}:${i.sensorId ?? ''}:${exifSignature(i.meta) ?? ''}`).join('|'),
-    )
-    watch(imageSensorSig, ensureExifSensors)
-  }
+  const imageSensorSig = computed(() =>
+    images.value.map((i) => `${i.id}:${i.sensorId ?? ''}:${exifSignature(i.meta) ?? ''}`).join('|'),
+  )
+  watch(imageSensorSig, ensureExifSensors)
 
   // Add sensors parsed from a calibration file. These are not EXIF-grouped
   // (no signature), so the user assigns images to them manually.
@@ -121,39 +125,55 @@ export function useSensors({ images, persist } = {}) {
     save()
   }
 
+  // Intrinsics a future bundle adjustment may refine; the others (width/height)
+  // are physical facts, never solved for. A truthy `sensor.fixed[field]` tells
+  // the solver to hold that parameter constant. Absent ⇒ free to refine.
+  const LOCKABLE_FIELDS = new Set(['focal', 'cx', 'cy', 'k1', 'k2', 'k3', 'p1', 'p2'])
+
+  function toggleSensorFixed(id, field) {
+    if (!LOCKABLE_FIELDS.has(field)) return
+    const s = sensors.value.find((x) => x.id === id)
+    if (!s) return
+    const fixed = { ...(s.fixed || {}) }
+    if (fixed[field]) delete fixed[field]
+    else fixed[field] = true
+    s.fixed = fixed
+    save()
+  }
+
   function assignSensor(imageId, sensorId) {
-    const img = images?.value.find((i) => i.id === imageId)
+    const img = images.value.find((i) => i.id === imageId)
     if (!img) return
     img.sensorId = sensorId || null
     save()
-    if (isPersisting()) persist.sync(images.value)
+    if (isPersisting()) imagesStore.sync()
   }
 
   // Fold `sourceId` into `targetId`: move its images, then drop it.
   function mergeSensors(targetId, sourceId) {
     if (targetId === sourceId) return
-    for (const img of images?.value ?? []) {
+    for (const img of images.value) {
       if (img.sensorId === sourceId) img.sensorId = targetId
     }
     const idx = sensors.value.findIndex((s) => s.id === sourceId)
     if (idx !== -1) sensors.value.splice(idx, 1)
     save()
-    if (isPersisting()) persist.sync(images.value)
+    if (isPersisting()) imagesStore.sync()
   }
 
   function removeSensor(id) {
-    for (const img of images?.value ?? []) {
+    for (const img of images.value) {
       if (img.sensorId === id) img.sensorId = null
     }
     const idx = sensors.value.findIndex((s) => s.id === id)
     if (idx !== -1) sensors.value.splice(idx, 1)
     save()
-    if (isPersisting()) persist.sync(images.value)
+    if (isPersisting()) imagesStore.sync()
   }
 
   function clearSensors() {
     sensors.value = []
-    if (isPersisting()) opfs.deleteSensors(persist.projectId.value).catch(() => {})
+    if (isPersisting()) opfs.deleteSensors(projects.currentProjectId).catch(() => {})
   }
 
   async function restoreSensors(projectId) {
@@ -173,10 +193,11 @@ export function useSensors({ images, persist } = {}) {
     ensureExifSensors,
     addSensors,
     updateSensor,
+    toggleSensorFixed,
     assignSensor,
     mergeSensors,
     removeSensor,
     clearSensors,
     restoreSensors,
   }
-}
+})

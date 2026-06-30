@@ -1,18 +1,22 @@
 import { ref, computed } from 'vue'
+import { defineStore } from 'pinia'
 import * as opfs from '../utils/opfs.js'
-import { matchDescriptors, verifyMatches } from '../utils/matching.js'
-import { useLog } from './useLog.js'
+import { matchDescriptors, verifyMatches } from '../workers/computeClient.js'
+import { useLog } from '../composables/useLog.js'
+import { registerProjectStore } from './projectStores.js'
+import { useProjectsStore } from './useProjectsStore.js'
 
-// persist: { enabled: Ref<bool>, projectId: Ref<string|null> }
-export function useMatches({ persist } = {}) {
+// Project-scoped store: pairwise feature matches. Reads persistence flags from the
+// projects store; restore/clear run through the project-store registry.
+export const useMatchesStore = registerProjectStore(defineStore('matches', () => {
   const { log } = useLog()
+  const projects = useProjectsStore()
 
   // pairId → { idA, idB, rawCount, inlierCount, F, matches: [[ia,ib],...], status }
   const matchStore = ref(new Map())
 
-  function isPersisting() {
-    return persist?.enabled.value && !!persist?.projectId.value
-  }
+  // Persist only when a project is open and OPFS is usable (see useProjectsStore).
+  const isPersisting = () => projects.isPersisting
 
   function pairId(uuidA, uuidB) {
     return [uuidA, uuidB].sort().join('--')
@@ -30,7 +34,7 @@ export function useMatches({ persist } = {}) {
 
   async function matchPair(imgA, imgB, settings = {}, onDone) {
     const [idA, idB] = [imgA.uuid, imgB.uuid].sort()
-    const pid = idA + '--' + idB
+    const pid = pairId(idA, idB)
     // Ensure descriptors are ordered the same way as IDs
     const [kpsA, kpsB] = idA === imgA.uuid
       ? [imgA.keypoints, imgB.keypoints]
@@ -42,7 +46,7 @@ export function useMatches({ persist } = {}) {
     matchStore.value = new Map(matchStore.value)
 
     try {
-      const projectId = persist?.projectId.value
+      const projectId = projects.currentProjectId
       // Image whose uuid sorts first → idA; its descriptors go to descA
       const srcA = idA === imgA.uuid ? imgA : imgB
       const srcB = idA === imgA.uuid ? imgB : imgA
@@ -84,7 +88,14 @@ export function useMatches({ persist } = {}) {
           ransacThreshPx: settings.ransacThreshPx ?? 2.0,
           maxIters: settings.maxIters ?? 1000,
         })
-        if (result && result.inlierCount >= minMatches) {
+        // Inlier-RATIO gate, on top of the absolute count. On repetitive/near-planar
+        // scenes (e.g. a building façade) the fundamental-matrix RANSAC can scrape a
+        // dozen "inliers" out of ~100 putatives by fitting a bogus epipolar geometry.
+        // True pairs sit well above this ratio (~0.5+); false pairs cluster ~0.15.
+        // Admitting the false ones corrupts SfM registration, so reject them here.
+        const minInlierRatio = settings.minInlierRatio ?? 0.25
+        const ratio = result ? result.inlierCount / Math.max(1, raw.length) : 0
+        if (result && result.inlierCount >= minMatches && ratio >= minInlierRatio) {
           entry.F = result.F
           entry.inlierCount = result.inlierCount
           entry.matches = raw
@@ -93,6 +104,7 @@ export function useMatches({ persist } = {}) {
         } else {
           entry.inlierCount = 0
           entry.matches = []
+          entry.rejectRatio = ratio // for the diagnostic log below
         }
       } else {
         entry.matches = raw.map(m => [m.ia, m.ib])
@@ -112,7 +124,19 @@ export function useMatches({ persist } = {}) {
       }
 
       const label = `${imgA.name} ↔ ${imgB.name}`
-      log(`Matched: ${label} — ${entry.inlierCount}/${entry.rawCount} inliers`, 'success', 'Matching')
+      // A pair with 0 inliers failed geometric verification — it is not a usable
+      // match, so don't report it in green as a success.
+      if (entry.inlierCount > 0) {
+        log(`Matched: ${label} — ${entry.inlierCount}/${entry.rawCount} inliers`, 'success', 'Matching')
+      } else if (entry.rejectRatio != null && entry.rejectRatio > 0) {
+        // Failed the inlier-ratio gate: likely a spurious epipolar fit on repetitive
+        // structure, not a real overlap.
+        log(`Rejected: ${label} — ${entry.rawCount} raw matches, inlier ratio `
+          + `${entry.rejectRatio.toFixed(2)} too low (likely false match on repetitive structure)`,
+          'warn', 'Matching')
+      } else {
+        log(`Rejected: ${label} — ${entry.rawCount} raw matches, none passed geometric verification`, 'warn', 'Matching')
+      }
     } catch (err) {
       entry.status = 'error'
       log(`Match error: ${imgA.name} ↔ ${imgB.name} — ${err?.message ?? err}`, 'error', 'Matching')
@@ -122,7 +146,7 @@ export function useMatches({ persist } = {}) {
     onDone?.(pairId(imgA.uuid, imgB.uuid), entry)
   }
 
-  async function matchAll(images, settings = {}, onProgress) {
+  async function matchAll(images, settings = {}, onProgress, shouldCancel) {
     const ready = images.filter(img => img.kpStatus === 'done')
     const strategy = settings.strategy ?? 'exhaustive'
 
@@ -143,6 +167,7 @@ export function useMatches({ persist } = {}) {
     log(`Matching: ${pairs.length} pair(s) — ${strategy}`, 'info', 'Matching')
     let done = 0
     for (const [a, b] of pairs) {
+      if (shouldCancel?.()) { log(`Matching cancelled — ${done}/${pairs.length} done`, 'warn', 'Matching'); return }
       await matchPair(a, b, settings)
       done++
       onProgress?.(done, pairs.length)
@@ -150,7 +175,28 @@ export function useMatches({ persist } = {}) {
     log(`Matching complete: ${done} pair(s) processed`, 'success', 'Matching')
   }
 
-  async function restoreMatches(projectId) {
+  // Drop every pair involving `uuid`. Re-detecting an image (or clearing its
+  // keypoints) renumbers its keypoint indices, so any stored match referencing
+  // the old indices is now wrong — invalidate them rather than let stale indices
+  // corrupt a later match/reconstruct run.
+  function removeMatchesForImage(uuid) {
+    let removed = 0
+    for (const [pid, e] of matchStore.value) {
+      if (e.idA === uuid || e.idB === uuid) {
+        matchStore.value.delete(pid)
+        if (isPersisting()) opfs.deleteMatches(projects.currentProjectId, pid).catch(() => {})
+        removed++
+      }
+    }
+    if (removed) {
+      matchStore.value = new Map(matchStore.value)
+      log(`Matches invalidated: ${removed} pair(s) — keypoints changed, re-match these`, 'warn', 'Matching')
+    }
+    return removed
+  }
+
+  // Project-store contract.
+  async function restore({ projectId }) {
     const all = await opfs.loadAllMatches(projectId)
     const newMap = new Map()
     for (const { pairId, idA, idB, rawCount, inlierCount, F, matches } of all) {
@@ -167,13 +213,13 @@ export function useMatches({ persist } = {}) {
     if (all.length > 0) log(`Matches restored: ${all.length} pair(s)`, 'success', 'Matching')
   }
 
-  function clearMatches() {
+  function clear() {
     matchStore.value.clear()
     matchStore.value = new Map()
     if (isPersisting()) {
-      opfs.clearAllMatches(persist.projectId.value).catch(() => {})
+      opfs.clearAllMatches(projects.currentProjectId).catch(() => {})
     }
   }
 
-  return { matchStore, pairId, getMatch, verifiedPairs, matchPair, matchAll, restoreMatches, clearMatches }
-}
+  return { matchStore, pairId, getMatch, verifiedPairs, matchPair, matchAll, removeMatchesForImage, restore, clear }
+}))

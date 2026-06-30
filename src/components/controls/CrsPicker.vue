@@ -1,9 +1,10 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
-import { CRS_CATALOG, ensureProjection } from '../../utils/crs.js'
+import { CRS_CATALOG, ensureProjection } from '../../core/crs.js'
 
 const props = defineProps({
   modelValue: { type: String, default: 'EPSG:4326' },
+  disabled: { type: Boolean, default: false },
 })
 const emit = defineEmits(['update:modelValue'])
 
@@ -43,8 +44,8 @@ async function applyCustom() {
 </script>
 
 <template>
-  <div class="crs-picker">
-    <select class="crs-select" :value="mode" @change="onSelect">
+  <div class="crs-picker" :class="{ disabled }">
+    <select class="crs-select" :value="mode" :disabled="disabled" @change="onSelect">
       <option v-for="c in CRS_CATALOG" :key="c.code" :value="c.code">
         {{ c.name }} ({{ c.code }})
       </option>
@@ -59,10 +60,11 @@ async function applyCustom() {
         type="text"
         inputmode="numeric"
         placeholder="32733"
+        :disabled="disabled"
         @keydown.enter="applyCustom"
         @blur="applyCustom"
       />
-      <button class="crs-apply" @click="applyCustom">Set</button>
+      <button class="crs-apply" :disabled="disabled" @click="applyCustom">Set</button>
     </div>
 
     <p v-if="error" class="crs-error">{{ error }}</p>
@@ -75,6 +77,16 @@ async function applyCustom() {
   flex-direction: column;
   gap: 8px;
   width: 100%;
+}
+
+.crs-picker.disabled {
+  opacity: 0.5;
+}
+
+.crs-select:disabled,
+.crs-input:disabled,
+.crs-apply:disabled {
+  cursor: not-allowed;
 }
 
 .crs-select,

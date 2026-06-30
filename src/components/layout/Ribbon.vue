@@ -7,9 +7,12 @@ const props = defineProps({
   hasSelection: { type: Boolean, default: false },
   imageCount: { type: Number, default: 0 },
   matchCount: { type: Number, default: 0 },
+  kpImageCount: { type: Number, default: 0 },
   gcpCount: { type: Number, default: 0 },
   poseCount: { type: Number, default: 0 },
   sensorCount: { type: Number, default: 0 },
+  sparseReady: { type: Boolean, default: false },
+  depthMapCount: { type: Number, default: 0 },
   activeImageId: { type: String, default: null },
   activeImageName: { type: String, default: null },
   imageViewState: { type: Object, default: null },
@@ -27,29 +30,17 @@ const tabs = [
     label: 'View',
     groups: [
       {
-        label: 'Camera',
-        commands: [
-          { id: 'view-preset-top',   label: 'Top\nView',   icon: 'view-top',   disabled: true },
-          { id: 'view-preset-side',  label: 'Side\nView',  icon: 'view-side',  disabled: true },
-          { id: 'view-preset-front', label: 'Front\nView', icon: 'view-front', disabled: true },
-          { id: 'reset-view',        label: 'Reset\nView', icon: 'view-reset', disabled: true },
-        ],
-      },
-      {
         label: 'Inspect',
         commands: [
-          { id: 'open-image-table',  label: 'Image\nTable',  icon: 'table',  needsImages: true },
-          { id: 'open-sensor-table', label: 'Sensor\nTable', icon: 'camera', needsSensors: true },
-          { id: 'open-gcp-table',    label: 'GCP\nTable',    icon: 'map-pin', needsGcps: true, aerialOnly: true },
-          { id: 'open-match-list',   label: 'Match\nList',   icon: 'list',    needsMatches: true },
+          { id: 'open-image-table',  label: 'Images',  icon: 'table',   needsImages: true },
+          { id: 'open-mask-manager', label: 'Masks',   icon: 'mask',    needsImages: true },
+          { id: 'open-sensor-table', label: 'Sensors', icon: 'camera',  needsSensors: true },
+          { id: 'open-gcp-table',    label: 'GCPs',    icon: 'map-pin', needsGcps: true, aerialOnly: true },
+          { id: 'open-match-list',   label: 'Matches', icon: 'list',    needsMatches: true },
         ],
       },
-      {
-        label: 'Panels',
-        commands: [
-          { id: 'toggle-console', label: 'Console', icon: 'console', activeKey: 'consoleOpen' },
-        ],
-      },
+      // The second group is contextual: see cameraGroup / mapGroup below. It is
+      // injected by the currentTab computed depending on the active viewer.
     ],
   },
   {
@@ -91,8 +82,9 @@ const tabs = [
       {
         label: 'Reconstruction',
         commands: [
-          { id: 'reconstruct', label: 'Sparse\nModel', icon: 'cube',  needsMatches: true },
-          { id: 'dense',       label: 'Dense\nModel',  icon: 'cloud', disabled: true },
+          { id: 'reconstruct',   label: 'Sparse\nModel', icon: 'cube',        needsMatches: true },
+          { id: 'compute-depth', label: 'Depth\nMaps',   icon: 'cloud',       needsSparse: true },
+          { id: 'dense',         label: 'Dense\nModel',  icon: 'point-cloud', needsDepthMaps: true },
         ],
       },
       {
@@ -100,6 +92,36 @@ const tabs = [
         commands: [
           { id: 'gen-dem',   label: 'DEM',   icon: 'dem',   disabled: true },
           { id: 'gen-ortho', label: 'Ortho', icon: 'ortho', disabled: true },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'tools',
+    label: 'Tools',
+    groups: [
+      {
+        label: 'Footprints',
+        commands: [
+          { id: 'footprints-from-poses', label: 'From\nPoses', icon: 'footprint', needsPoses: true, needsSensors: true, aerialOnly: true },
+        ],
+      },
+      {
+        label: 'Georeferencing',
+        commands: [
+          { id: 'auto-georeference', label: 'Auto\nGeoref', icon: 'target', disabled: true },
+        ],
+      },
+      {
+        label: 'Masks',
+        commands: [
+          { id: 'auto-mask', label: 'Auto\nMask', icon: 'mask', disabled: true },
+        ],
+      },
+      {
+        label: 'Point Cloud',
+        commands: [
+          { id: 'filter-cloud', label: 'Filter\nCloud', icon: 'point-cloud', disabled: true },
         ],
       },
     ],
@@ -117,6 +139,13 @@ const tabs = [
         ],
       },
       {
+        label: 'Features',
+        commands: [
+          { id: 'export-keypoints', label: 'Key\npoints', icon: 'keypoints', needsKeypoints: true },
+          { id: 'export-matches',   label: 'Matches',     icon: 'link',      needsMatches: true },
+        ],
+      },
+      {
         label: 'Products',
         commands: [
           { id: 'export-dem',   label: 'DEM',   icon: 'dem',   disabled: true },
@@ -130,6 +159,12 @@ const tabs = [
     label: 'Other',
     groups: [
       {
+        label: 'Panels',
+        commands: [
+          { id: 'toggle-console', label: 'Console', icon: 'console', activeKey: 'consoleOpen' },
+        ],
+      },
+      {
         label: 'App',
         commands: [
           { id: 'open-settings', label: 'Settings', icon: 'settings' },
@@ -139,6 +174,39 @@ const tabs = [
     ],
   },
 ]
+
+// The View tab's second group swaps with the active viewer. The `dynamic` badge
+// signals that it is contextual (3D camera presets ↔ 2D map controls).
+const cameraGroup = {
+  label: 'Camera',
+  dynamic: '3D',
+  commands: [
+    { pair: [
+      { id: 'view-preset-top',    label: 'Top',    icon: 'view-top' },
+      { id: 'view-preset-bottom', label: 'Bottom', icon: 'view-bottom' },
+    ] },
+    { pair: [
+      { id: 'view-preset-left',  label: 'Left',  icon: 'view-left' },
+      { id: 'view-preset-right', label: 'Right', icon: 'view-right' },
+    ] },
+    { pair: [
+      { id: 'view-preset-front', label: 'Front', icon: 'view-front' },
+      { id: 'view-preset-back',  label: 'Back',  icon: 'view-back' },
+    ] },
+    { id: 'reset-view', label: 'Reset\nView', icon: 'view-reset' },
+  ],
+}
+
+const mapGroup = {
+  label: 'Map',
+  dynamic: '2D',
+  commands: [
+    { id: 'map-fit-view',          label: 'Fit\nView',   icon: 'fit-view' },
+    { id: 'map-toggle-graticule',  label: 'Graticule',   icon: 'grid',      disabled: true },
+    { id: 'map-toggle-footprints', label: 'Footprints',  icon: 'footprint', disabled: true },
+    { id: 'map-toggle-poses',      label: 'Poses',       icon: 'camera',    disabled: true },
+  ],
+}
 
 const pictureTab = {
   id: 'picture',
@@ -225,7 +293,14 @@ watch(() => !!props.activeImageId, (hasImage) => {
 })
 
 const allTabs = computed(() => (props.activeImageId ? [...tabs, pictureTab] : tabs))
-const currentTab = computed(() => allTabs.value.find((t) => t.id === activeTab.value) || tabs[0])
+const currentTab = computed(() => {
+  const tab = allTabs.value.find((t) => t.id === activeTab.value) || tabs[0]
+  if (tab.id === 'view') {
+    const dynamic = props.activeView === 'map' ? mapGroup : cameraGroup
+    return { ...tab, groups: [...tab.groups, dynamic] }
+  }
+  return tab
+})
 
 function isHidden(cmd) {
   return cmd.aerialOnly && props.sceneType === 'object'
@@ -254,7 +329,10 @@ function isDisabled(cmd) {
   if (cmd.disabled) return true
   if (cmd.needsSelection && !props.hasSelection) return true
   if (cmd.needsImages   && props.imageCount === 0) return true
-  if (cmd.needsMatches  && props.matchCount === 0) return true
+  if (cmd.needsMatches   && props.matchCount === 0)   return true
+  if (cmd.needsSparse    && !props.sparseReady)       return true
+  if (cmd.needsDepthMaps && props.depthMapCount === 0) return true
+  if (cmd.needsKeypoints && props.kpImageCount === 0) return true
   if (cmd.needsGcps     && props.gcpCount === 0)   return true
   if (cmd.needsPoses    && props.poseCount === 0)  return true
   if (cmd.needsSensors  && props.sensorCount === 0) return true
@@ -269,10 +347,13 @@ function isDisabled(cmd) {
 function disabledReason(cmd) {
   if (cmd.disabled) return 'Coming soon'
   if (cmd.needsImages   && props.imageCount === 0) return 'Import images first'
-  if (cmd.needsMatches  && props.matchCount === 0) return 'Run feature matching first'
+  if (cmd.needsMatches   && props.matchCount === 0)   return 'Run feature matching first'
+  if (cmd.needsSparse    && !props.sparseReady)       return 'Build the sparse model first'
+  if (cmd.needsDepthMaps && props.depthMapCount === 0) return 'Compute depth maps first'
+  if (cmd.needsKeypoints && props.kpImageCount === 0) return 'Detect keypoints first'
   if (cmd.needsGcps     && props.gcpCount === 0)   return 'Import GCPs first'
-  if (cmd.needsPoses    && props.poseCount === 0)  return 'No camera poses to export'
-  if (cmd.needsSensors  && props.sensorCount === 0) return 'No sensors to export'
+  if (cmd.needsPoses    && props.poseCount === 0)  return 'Import camera poses first'
+  if (cmd.needsSensors  && props.sensorCount === 0) return 'No sensors available'
   if (cmd.needsSelection && !props.hasSelection)   return 'Select an image first'
   const s = props.imageViewState
   if (cmd.disableKey === 'kpNotDone' && s?.kpStatus !== 'done') return 'Detect keypoints first'
@@ -335,21 +416,40 @@ function run(cmd) {
           class="group"
         >
           <div class="group-commands">
-            <button
-              v-for="cmd in group.commands"
-              v-show="!isHidden(cmd)"
-              :key="cmd.id"
-              class="cmd"
-              :class="{ active: isActive(cmd), danger: cmd.danger, disabled: isDisabled(cmd) }"
-              :aria-disabled="isDisabled(cmd)"
-              :title="isDisabled(cmd) ? disabledReason(cmd) : ''"
-              @click="run(cmd)"
-            >
-              <Icon :name="cmd.icon" class="cmd-icon" />
-              <span class="cmd-label">{{ cmdLabel(cmd) }}</span>
-            </button>
+            <template v-for="(item, i) in group.commands" :key="item.id || `pair-${i}`">
+              <!-- A stacked pair of two half-height buttons in one button's footprint -->
+              <div v-if="item.pair" class="cmd-pair">
+                <button
+                  v-for="cmd in item.pair"
+                  v-show="!isHidden(cmd)"
+                  :key="cmd.id"
+                  class="cmd cmd-small"
+                  :class="{ active: isActive(cmd), disabled: isDisabled(cmd) }"
+                  :aria-disabled="isDisabled(cmd)"
+                  :title="isDisabled(cmd) ? disabledReason(cmd) : cmdLabel(cmd)"
+                  @click="run(cmd)"
+                >
+                  <Icon :name="cmd.icon" class="cmd-icon-sm" />
+                  <span class="cmd-label-sm">{{ cmdLabel(cmd) }}</span>
+                </button>
+              </div>
+              <button
+                v-else
+                v-show="!isHidden(item)"
+                class="cmd"
+                :class="{ active: isActive(item), danger: item.danger, disabled: isDisabled(item) }"
+                :aria-disabled="isDisabled(item)"
+                :title="isDisabled(item) ? disabledReason(item) : ''"
+                @click="run(item)"
+              >
+                <Icon :name="item.icon" class="cmd-icon" />
+                <span class="cmd-label">{{ cmdLabel(item) }}</span>
+              </button>
+            </template>
           </div>
-          <div class="group-label">{{ group.label }}</div>
+          <div class="group-label">
+            {{ group.label }}<span v-if="group.dynamic" class="group-badge">{{ group.dynamic }}</span>
+          </div>
         </div>
       </template>
     </div>
@@ -499,6 +599,48 @@ function run(cmd) {
 .cmd-icon {
   width: 18px;
   height: 18px;
+}
+
+/* Two small buttons stacked in the footprint of one normal button. */
+.cmd-pair {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  align-self: stretch;
+}
+
+.cmd-small {
+  flex: 1;
+  flex-direction: row;
+  justify-content: flex-start;
+  gap: 6px;
+  min-width: 64px;
+  padding: 4px 8px;
+}
+
+.cmd-icon-sm {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.cmd-label-sm {
+  font-size: 10px;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.group-badge {
+  display: inline-block;
+  margin-left: 5px;
+  padding: 0 4px;
+  border-radius: 6px;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: #e8a820;
+  border: 1px solid rgba(232, 168, 32, 0.5);
+  vertical-align: middle;
 }
 
 .cmd-label {
