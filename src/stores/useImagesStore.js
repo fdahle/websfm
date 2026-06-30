@@ -1,19 +1,70 @@
-import { ref } from 'vue'
+import { ref, markRaw } from 'vue'
+import { defineStore } from 'pinia'
 import { createImage } from '../utils/image.js'
-import { extractMetadata } from '../utils/metadata.js'
-import { detectKeypoints } from '../utils/detection.js'
-import { useLog } from './useLog.js'
+import { extractMetadata } from '../core/metadata.js'
+import { detectKeypoints } from '../workers/computeClient.js'
+import { useLog } from '../composables/useLog.js'
 import * as opfs from '../utils/opfs.js'
+import { useProjectsStore } from './useProjectsStore.js'
+import { useMatchesStore } from './useMatchesStore.js'
 
-// persist: { enabled: Ref<bool>, projectId: Ref<string|null>, sync: (images) => void }
-export function useImages({ persist } = {}) {
+// The image set: source images, their metadata, keypoints, masks, depth maps, and
+// sensor assignments. Project-scoped and persisted, but its restore/clear have
+// bespoke signatures (and a strict ordering relative to sensors), so it is driven
+// directly from App.vue rather than through the project-store registry for now.
+export const useImagesStore = defineStore('images', () => {
   const { log } = useLog()
+  const projects = useProjectsStore()
 
   const images = ref([])
   const selectedId = ref(null)
 
-  function isPersisting() {
-    return persist?.enabled.value && !!persist?.projectId.value
+  // Persist only when a project is open and OPFS is usable (see useProjectsStore).
+  const isPersisting = () => projects.isPersisting
+
+  // Write the project document with the current image list (project record +
+  // per-image metadata). Was App.vue's `syncProject`; lives here now since this
+  // store owns the image content. Other stores that mutate image-borne data (e.g.
+  // sensor assignments) call this to re-persist.
+  //
+  // `sync()` is fired from many concurrent async callbacks (per-image metadata
+  // `.then`, per-map `updateDepth`), and each call rewrites the *whole* project
+  // doc. Overlapping writes to the same OPFS file race (last-writer-wins / lost
+  // updates / FS errors), so writes are coalesced: at most one is in flight, and a
+  // request that arrives mid-write schedules exactly one re-run afterwards (which
+  // captures the latest state). N callers collapse to ≤2 ordered writes.
+  let writing = false
+  let rerun = false
+  async function sync() {
+    if (!isPersisting()) return
+    if (writing) { rerun = true; return }
+    writing = true
+    try {
+      do { rerun = false; await writeProjectNow() } while (rerun)
+    } finally {
+      writing = false
+    }
+  }
+
+  async function writeProjectNow() {
+    const pid = projects.currentProjectId
+    const proj = projects.projects.find((p) => p.id === pid)
+    if (!proj) return
+    await opfs.writeProject(pid, {
+      ...proj,
+      lastModified: new Date().toISOString(),
+      images: images.value.map((img) => {
+        // eslint-disable-next-line no-unused-vars
+        const { raw: _raw, ...metaToSave } = img.meta ?? {}
+        return {
+          id: img.id, uuid: img.uuid, name: img.name,
+          kpStatus: img.kpStatus, kpCount: img.kpCount, kpMs: img.kpMs,
+          hasMask: !!img.mask, hasDepth: !!img.depth,
+          sensorId: img.sensorId ?? null,
+          meta: img.meta ? metaToSave : null,
+        }
+      }),
+    })
   }
 
   function imageById(id) {
@@ -37,7 +88,7 @@ export function useImages({ persist } = {}) {
       log(`Added image: ${file.name} (${(file.size / 1024).toFixed(0)} KB)`, 'info', 'Images')
 
       if (isPersisting()) {
-        opfs.saveImage(persist.projectId.value, item.uuid, file)
+        opfs.saveImage(projects.currentProjectId, item.uuid, file)
           .catch((err) => log(`OPFS save failed: ${file.name} — ${err?.message ?? err}`, 'error', 'Images'))
       }
 
@@ -50,18 +101,18 @@ export function useImages({ persist } = {}) {
             const cam = [meta.make, meta.model].filter(Boolean).join(' ') || 'unknown camera'
             const dim = meta.width && meta.height ? ` ${meta.width}×${meta.height}` : ''
             log(`Metadata: ${file.name} — ${cam}${dim}`, 'success', 'Metadata')
-            if (isPersisting()) persist.sync(images.value)
+            if (isPersisting()) sync()
           }
         })
         .catch((err) => {
           const found = images.value.find((img) => img.id === item.id)
           if (found) found.loading = false
           log(`Metadata failed: ${file.name} — ${err?.message ?? err}`, 'error', 'Metadata')
-          if (isPersisting()) persist.sync(images.value)
+          if (isPersisting()) sync()
         })
     }
     if (added > 1) log(`Added ${added} images`, 'success', 'Images')
-    if (isPersisting()) persist.sync(images.value)
+    if (isPersisting()) sync()
   }
 
   function removeImage(id, onRemoved) {
@@ -72,14 +123,15 @@ export function useImages({ persist } = {}) {
       images.value.splice(idx, 1)
       if (selectedId.value === id) selectedId.value = null
       log(`Removed image: ${img.name}`, 'info', 'Images')
+      useMatchesStore().removeMatchesForImage(img.uuid)
       if (isPersisting()) {
-        const pid = persist.projectId.value
+        const pid = projects.currentProjectId
         opfs.deleteImage(pid, img.uuid).catch(() => {})
         opfs.deleteKeypoints(pid, img.uuid).catch(() => {})
         opfs.deleteDescriptors(pid, img.uuid).catch(() => {})
         opfs.deleteMask(pid, img.uuid).catch(() => {})
         opfs.deleteDepth(pid, img.uuid).catch(() => {})
-        persist.sync(images.value)
+        sync()
       }
       onRemoved?.(id)
     }
@@ -91,10 +143,10 @@ export function useImages({ persist } = {}) {
     img.mask = dataUrl ? { dataUrl } : null
     log(dataUrl ? `Mask saved: ${img.name}` : `Mask cleared: ${img.name}`, 'info', 'Images')
     if (isPersisting()) {
-      const pid = persist.projectId.value
+      const pid = projects.currentProjectId
       if (dataUrl) opfs.saveMask(pid, img.uuid, dataUrl).catch(() => {})
       else opfs.deleteMask(pid, img.uuid).catch(() => {})
-      persist.sync(images.value)
+      sync()
     }
   }
 
@@ -104,33 +156,43 @@ export function useImages({ persist } = {}) {
     img.depth = dataUrl ? { dataUrl } : null
     log(dataUrl ? `Depth map saved: ${img.name}` : `Depth map cleared: ${img.name}`, 'info', 'Images')
     if (isPersisting()) {
-      const pid = persist.projectId.value
+      const pid = projects.currentProjectId
       if (dataUrl) opfs.saveDepth(pid, img.uuid, dataUrl).catch(() => {})
       else opfs.deleteDepth(pid, img.uuid).catch(() => {})
-      persist.sync(images.value)
+      sync()
     }
   }
 
   async function detectOne(id, settings = {}, onDetected) {
     const img = images.value.find((i) => i.id === id)
     if (!img || img.kpStatus === 'running') return
+    // Re-detecting renumbers keypoints, so any existing matches for this image
+    // become stale — invalidate them once detection succeeds (below).
+    const hadKeypoints = img.kpStatus === 'done'
     img.kpStatus = 'running'
     log(`SIFT start: ${img.name}`, 'info', 'SIFT')
     try {
-      const res = await detectKeypoints(img.url, settings)
+      // Pass the per-image mask (if any) so keypoints inside masked regions are
+      // dropped at detection — this propagates to matching and reconstruction.
+      const res = await detectKeypoints(img.url, { ...settings, mask: img.mask?.dataUrl ?? null })
       const found = images.value.find((i) => i.id === id)
       if (found) {
-        found.keypoints   = res.keypoints
-        found.descriptors = res.descriptors   // keep in-memory for non-persistent matching
+        // markRaw: these are large and never need reactivity; leaving them as
+        // Vue proxies also breaks the worker boundary (a Proxy can't be
+        // structured-cloned, so postMessage throws "could not be cloned").
+        found.keypoints   = markRaw(res.keypoints)
+        found.descriptors = markRaw(res.descriptors)   // keep in-memory for non-persistent matching
         found.kpCount  = res.keypoints.length
         found.kpMs     = Math.round(res.ms)
         found.kpStatus = 'done'
+        if (hadKeypoints) useMatchesStore().removeMatchesForImage(found.uuid)
         log(`SIFT done: ${found.name} — ${found.kpCount} keypoints in ${found.kpMs} ms`, 'success', 'SIFT')
         if (isPersisting()) {
-          const pid = persist.projectId.value
+          const pid = projects.currentProjectId
           opfs.saveKeypoints(pid, found.uuid, found.keypoints).catch(() => {})
+          opfs.saveColors(pid, found.uuid, found.keypoints).catch(() => {})
           opfs.saveDescriptors(pid, found.uuid, res.descriptors).catch(() => {})
-          persist.sync(images.value)
+          sync()
         }
         onDetected?.(id)
       }
@@ -141,7 +203,7 @@ export function useImages({ persist } = {}) {
     }
   }
 
-  async function detectAll(settings = {}, onDetected, onProgress) {
+  async function detectAll(settings = {}, onDetected, onProgress, shouldCancel) {
     const pending = settings.overwrite
       ? images.value
       : images.value.filter((img) => img.kpStatus !== 'done')
@@ -149,6 +211,7 @@ export function useImages({ persist } = {}) {
     log(`SIFT batch: ${total} image(s) queued`, 'info', 'SIFT')
     let done = 0
     for (const img of pending) {
+      if (shouldCancel?.()) { log(`SIFT cancelled — ${done}/${total} done`, 'warn', 'SIFT'); return }
       await detectOne(img.id, settings, onDetected)
       done++
       onProgress?.(done, total, img.name)
@@ -164,11 +227,12 @@ export function useImages({ persist } = {}) {
     img.kpMs      = 0
     img.kpStatus  = null
     log(`Keypoints cleared: ${img.name}`, 'info', 'SIFT')
+    useMatchesStore().removeMatchesForImage(img.uuid)
     if (isPersisting()) {
-      const pid = persist.projectId.value
+      const pid = projects.currentProjectId
       opfs.deleteKeypoints(pid, img.uuid).catch(() => {})
       opfs.deleteDescriptors(pid, img.uuid).catch(() => {})
-      persist.sync(images.value)
+      sync()
     }
   }
 
@@ -177,8 +241,8 @@ export function useImages({ persist } = {}) {
     for (const img of images.value) URL.revokeObjectURL(img.url)
     images.value = []
     selectedId.value = null
-    log(`Session cleared (${n} image${n !== 1 ? 's' : ''} removed)`, 'warn', 'Images')
-    if (isPersisting()) persist.sync([])
+    if (n > 0) log(`Session cleared (${n} image${n !== 1 ? 's' : ''} removed)`, 'warn', 'Images')
+    if (isPersisting()) sync()
     onCleared?.()
   }
 
@@ -210,7 +274,13 @@ export function useImages({ persist } = {}) {
         }
         if (record.kpStatus === 'done') {
           const kps = await opfs.loadKeypoints(projectId, record.uuid)
-          if (kps) img.keypoints = kps
+          if (kps) {
+            // Re-attach per-keypoint colours (stored separately) so a restored
+            // project can still colour the sparse cloud without re-detecting.
+            const colors = await opfs.loadColors(projectId, record.uuid)
+            if (colors) kps.forEach((kp, i) => { if (colors[i]) kp.color = colors[i] })
+            img.keypoints = markRaw(kps)
+          }
         }
         if (record.hasMask) {
           const maskDataUrl = await opfs.loadMaskDataUrl(projectId, record.uuid)
@@ -231,6 +301,7 @@ export function useImages({ persist } = {}) {
   return {
     images,
     selectedId,
+    sync,
     imageById,
     selectImage,
     addImages,
@@ -243,4 +314,4 @@ export function useImages({ persist } = {}) {
     clearAll,
     restoreImages,
   }
-}
+})

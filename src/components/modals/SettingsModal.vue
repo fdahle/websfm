@@ -5,6 +5,7 @@ import CrsPicker from '../controls/CrsPicker.vue'
 defineProps({
   theme: String,
   crs: { type: String, default: null },
+  sceneType: { type: String, default: null },
 })
 const emit = defineEmits(['close', 'set-theme', 'set-crs'])
 
@@ -51,12 +52,19 @@ const verboseLogging = ref(false)
       <div class="modal-body">
         <!-- Project -->
         <template v-if="activeTab === 'project'">
-          <div v-if="crs" class="setting-row setting-row-stacked">
+          <div v-if="crs && sceneType !== 'object'" class="setting-row setting-row-stacked">
             <div class="setting-info">
               <span class="setting-label">Coordinate system</span>
               <span class="setting-desc">Working CRS for this project's map, GCPs and cameras. Changing it re-projects existing data.</span>
             </div>
             <CrsPicker :model-value="crs" @update:model-value="emit('set-crs', $event)" />
+          </div>
+          <div v-else-if="sceneType === 'object'" class="setting-row setting-row-stacked">
+            <div class="setting-info">
+              <span class="setting-label">Coordinate system</span>
+              <span class="setting-desc">Object-capture projects have no coordinate system — scale is set manually.</span>
+            </div>
+            <CrsPicker :model-value="crs || 'EPSG:4326'" disabled />
           </div>
           <div v-else class="empty-note">Open a project to edit its coordinate system.</div>
 

@@ -14,6 +14,10 @@ let renderer, scene, camera, controls, animationId, resizeObserver, grid
 let pointCloud = null
 const frustumGroup = new THREE.Group()
 
+// Bounding sphere of the loaded scene — drives the camera view presets.
+const sceneCenter = new THREE.Vector3(0, 0, 0)
+let sceneRadius = 5
+
 const BG = { dark: 0x1a1a1a, light: 0xf0f0f0 }
 const GRID = {
   dark:  [0x444444, 0x2a2a2a],
@@ -71,22 +75,41 @@ function setReconstructionData(cameras, points3d) {
   if (pointCloud) { scene.remove(pointCloud); pointCloud.geometry.dispose() }
   frustumGroup.clear()
 
-  if (points3d.length === 0 && cameras.size === 0) return
+  if (points3d.length === 0 && cameras.size === 0) {
+    sceneCenter.set(0, 0, 0)
+    sceneRadius = 5
+    return
+  }
 
   // ── Point cloud ────────────────────────────────────────────────────────────
   if (points3d.length > 0) {
     const positions = new Float32Array(points3d.length * 3)
+    // Per-point RGB sampled from the source images (median over each track). Fall
+    // back to the flat blue when a point has no colour (e.g. a restored model from
+    // before colouring, or keypoints detected without colour).
+    const hasColor = points3d.some((p) => p.color)
+    const colors = hasColor ? new Float32Array(points3d.length * 3) : null
     for (let i = 0; i < points3d.length; i++) {
       positions[i*3]   = points3d[i].x
       positions[i*3+1] = points3d[i].y
       positions[i*3+2] = points3d[i].z
+      if (colors) {
+        const c = points3d[i].color
+        if (c) { colors[i*3] = c[0]/255; colors[i*3+1] = c[1]/255; colors[i*3+2] = c[2]/255 }
+        else   { colors[i*3] = 0.27; colors[i*3+1] = 0.67; colors[i*3+2] = 1.0 } // 0x44aaff
+      }
     }
 
     const geo = new THREE.BufferGeometry()
     geo.setAttribute('position', new THREE.BufferAttribute(positions, 3))
+    if (colors) geo.setAttribute('color', new THREE.BufferAttribute(colors, 3))
     geo.computeBoundingSphere()
 
-    const mat = new THREE.PointsMaterial({ size: 3, sizeAttenuation: false, color: 0x44aaff })
+    const mat = new THREE.PointsMaterial(
+      colors
+        ? { size: 3, sizeAttenuation: false, vertexColors: true }
+        : { size: 3, sizeAttenuation: false, color: 0x44aaff },
+    )
     pointCloud = new THREE.Points(geo, mat)
     scene.add(pointCloud)
 
@@ -94,12 +117,11 @@ function setReconstructionData(cameras, points3d) {
     const sphere = geo.boundingSphere
     if (sphere) {
       const r = sphere.radius || 1
-      controls.target.set(sphere.center.x, sphere.center.y, sphere.center.z)
-      camera.position.set(sphere.center.x, sphere.center.y + r * 0.5, sphere.center.z + r * 2.5)
+      sceneCenter.copy(sphere.center)
+      sceneRadius = r
       camera.near = r * 0.001
       camera.far  = r * 100
-      camera.updateProjectionMatrix()
-      controls.update()
+      resetView()
     }
   }
 
@@ -148,7 +170,51 @@ function clearReconstructionData() {
   setReconstructionData(new Map(), [])
 }
 
-defineExpose({ setReconstructionData, clearReconstructionData })
+// ── Camera view presets ──────────────────────────────────────────────────────
+// Place the camera along a principal axis (three.js is Y-up) looking at the
+// scene centre, at a distance that frames the bounding sphere.
+const VIEW_OFFSETS = {
+  top:    [0,  1,  0],
+  bottom: [0, -1,  0],
+  front:  [0,  0,  1],
+  back:   [0,  0, -1],
+  left:   [-1, 0,  0],
+  right:  [1,  0,  0],
+}
+
+function setView(dir) {
+  if (!camera || !controls) return
+  const o = VIEW_OFFSETS[dir] || VIEW_OFFSETS.front
+  const d = sceneRadius * 2.5
+  // For top/bottom the view direction is parallel to the default up vector, so
+  // pick an in-plane up so OrbitControls doesn't gimbal-lock.
+  if (dir === 'top')         camera.up.set(0, 0, -1)
+  else if (dir === 'bottom') camera.up.set(0, 0,  1)
+  else                       camera.up.set(0, 1,  0)
+  controls.target.copy(sceneCenter)
+  camera.position.set(
+    sceneCenter.x + o[0] * d,
+    sceneCenter.y + o[1] * d,
+    sceneCenter.z + o[2] * d,
+  )
+  camera.updateProjectionMatrix()
+  controls.update()
+}
+
+function resetView() {
+  if (!camera || !controls) return
+  camera.up.set(0, 1, 0)
+  controls.target.copy(sceneCenter)
+  camera.position.set(
+    sceneCenter.x,
+    sceneCenter.y + sceneRadius * 0.5,
+    sceneCenter.z + sceneRadius * 2.5,
+  )
+  camera.updateProjectionMatrix()
+  controls.update()
+}
+
+defineExpose({ setReconstructionData, clearReconstructionData, setView, resetView })
 
 function onResize() {
   const el = container.value

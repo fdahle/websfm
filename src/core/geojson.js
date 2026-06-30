@@ -98,7 +98,7 @@ function num(v) {
 }
 
 // Convert Point/MultiPoint features into raw GCPs (file's own coordinates).
-// Shape matches what useGcps.addGcps consumes: { name, x, y, z, observations }.
+// Shape matches what useGcpsStore.addGcps consumes: { name, x, y, z, observations }.
 export function geoJsonToGcps(features, nameKey) {
   const gcps = []
   let i = 0

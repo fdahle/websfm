@@ -1,5 +1,6 @@
 <script setup>
 import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
+import { maskFromSource } from '../../core/mask.js'
 
 const props = defineProps({
   image:         { type: Object,  required: true },
@@ -274,32 +275,16 @@ function triggerMaskImport() {
   maskFileInput.value?.click()
 }
 
-// Import an image as mask: bright/opaque pixels → red (masked region).
+// Import an image as mask: bright/opaque pixels → red (masked region). Shared
+// normalize/rescale logic lives in core/mask.js (also used by the Mask Manager).
 async function onMaskFileChange(e) {
   const file = e.target.files?.[0]
   e.target.value = ''
   if (!file || !maskOffscreen) return
   try {
-    const bmp  = await createImageBitmap(file)
-    const tmp  = new OffscreenCanvas(maskOffscreen.width, maskOffscreen.height)
-    const tmpCtx = tmp.getContext('2d')
-    tmpCtx.drawImage(bmp, 0, 0, tmp.width, tmp.height)
-    const id = tmpCtx.getImageData(0, 0, tmp.width, tmp.height)
-    const d  = id.data
-    for (let i = 0; i < d.length; i += 4) {
-      const lum = d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114
-      if (lum > 127 || d[i + 3] > 127) {
-        d[i] = 255; d[i + 1] = 0; d[i + 2] = 0; d[i + 3] = 255
-      } else {
-        d[i + 3] = 0
-      }
-    }
-    const ctx = maskOffscreen.getContext('2d')
-    ctx.clearRect(0, 0, maskOffscreen.width, maskOffscreen.height)
-    ctx.putImageData(id, 0, 0)
-    hasMask.value = true
+    const dataUrl = await maskFromSource(file, maskOffscreen.width, maskOffscreen.height)
+    await loadMaskFromDataUrl(dataUrl)
     await exportMask()
-    drawOverlay()
   } catch (err) {
     console.error('Failed to import mask:', err)
   }
@@ -440,10 +425,14 @@ function onMouseMove(e) {
   const py  = Math.floor((y - ty.value) / scale.value)
   const img = imgEl.value
   if (img && px >= 0 && py >= 0 && px < img.naturalWidth && py < img.naturalHeight) {
-    const info = { x: px, y: py, r: null, g: null, b: null }
+    const info = { x: px, y: py, r: null, g: null, b: null, masked: null }
     if (offscreenCtx) {
       const pixel = offscreenCtx.getImageData(px, py, 1, 1).data
       info.r = pixel[0]; info.g = pixel[1]; info.b = pixel[2]
+    }
+    // Whether this pixel is excluded by the mask (opaque on the mask canvas).
+    if (maskOffscreen && hasMask.value) {
+      info.masked = maskOffscreen.getContext('2d').getImageData(px, py, 1, 1).data[3] > 127
     }
     hoverPx.value = info
   } else {
@@ -597,6 +586,10 @@ defineExpose({ fit, zoomIn, zoomOut, triggerMaskImport, clearMask, triggerDepthI
           <span class="channel g">G&nbsp;{{ hoverPx.g }}</span>
           <span class="channel b">B&nbsp;{{ hoverPx.b }}</span>
         </template>
+        <template v-if="hoverPx.masked !== null">
+          <span class="sep">|</span>
+          <span class="masked" :class="{ on: hoverPx.masked }">Masked&nbsp;{{ hoverPx.masked ? '✓' : '—' }}</span>
+        </template>
       </template>
     </div>
   </div>
@@ -695,4 +688,6 @@ defineExpose({ fit, zoomIn, zoomOut, triggerMaskImport, clearMask, triggerDepthI
 .channel.r   { color: #e07070; }
 .channel.g   { color: #70c070; }
 .channel.b   { color: #6090e0; }
+.masked      { color: var(--text-dim); letter-spacing: 0.02em; }
+.masked.on   { color: #ff8a8a; }
 </style>

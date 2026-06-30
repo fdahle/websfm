@@ -1,32 +1,34 @@
 import { ref, watch, computed } from 'vue'
-import { useLog } from './useLog.js'
-import { ensureProjection, transform } from '../utils/crs.js'
+import { defineStore, storeToRefs } from 'pinia'
+import { useLog } from '../composables/useLog.js'
+import { ensureProjection, transform } from '../core/crs.js'
 import * as opfs from '../utils/opfs.js'
+import { registerProjectStore } from './projectStores.js'
+import { useImagesStore } from './useImagesStore.js'
+import { useProjectsStore } from './useProjectsStore.js'
 
 // Camera poses (exterior orientation / extrinsics): one per image, used as
 // georeferencing priors for bundle adjustment. Positions are stored in the
 // project working CRS — exactly like GCPs/footprints — and re-projected when the
 // CRS changes. Orientation angles (omega/phi/kappa, degrees) pass through.
-//
-// images:     Ref<Array>   — poses link to images by name (retroactive, like footprints)
-// currentCrs: Ref<string>  — the project's working CRS
-// persist:    { enabled, projectId }
 const DEFAULT_ACC_XYZ   = 5.0   // position prior accuracy, project-CRS units (m)
 const DEFAULT_ACC_ANGLE = 2.0   // orientation prior accuracy, degrees
 
-export function usePoses({ images, currentCrs, persist } = {}) {
+export const usePosesStore = registerProjectStore(defineStore('poses', () => {
   const { log } = useLog()
+  const projects = useProjectsStore()
+  const { images } = storeToRefs(useImagesStore())
+  const { currentCrs } = storeToRefs(projects)
 
   // [{ imageId, imageName, x, y, z, omega, phi, kappa, accXYZ, accAngle, source, enabled }]
   const poses = ref([])
 
-  function isPersisting() {
-    return persist?.enabled.value && !!persist?.projectId.value
-  }
+  // Persist only when a project is open and OPFS is usable (see useProjectsStore).
+  const isPersisting = () => projects.isPersisting
 
   async function save() {
     if (!isPersisting()) return
-    await opfs.savePoses(persist.projectId.value, {
+    await opfs.savePoses(projects.currentProjectId, {
       crs: currentCrs.value,
       poses: poses.value,
     }).catch((err) => log(`Pose save failed — ${err?.message ?? err}`, 'error', 'Pose'))
@@ -38,7 +40,7 @@ export function usePoses({ images, currentCrs, persist } = {}) {
     if (!imageName) return null
     const lc = imageName.toLowerCase()
     const base = lc.replace(/\.[^.]+$/, '')
-    const hit = images?.value.find((img) => {
+    const hit = images.value.find((img) => {
       const n = img.name.toLowerCase()
       return n === lc || n.replace(/\.[^.]+$/, '') === base
     })
@@ -58,10 +60,8 @@ export function usePoses({ images, currentCrs, persist } = {}) {
 
   // Keyed on id+name rather than a deep watch, so unrelated image mutations
   // (keypoints, masks, EXIF) don't trigger a full re-scan.
-  if (images) {
-    const imageSig = computed(() => images.value.map((i) => `${i.id}:${i.name}`).join('|'))
-    watch(imageSig, resolveImageMatches)
-  }
+  const imageSig = computed(() => images.value.map((i) => `${i.id}:${i.name}`).join('|'))
+  watch(imageSig, resolveImageMatches)
 
   // Add parsed poses (positions in `sourceCrs`), transforming into the project CRS.
   async function addPoses(rawPoses, sourceCrs) {
@@ -110,12 +110,13 @@ export function usePoses({ images, currentCrs, persist } = {}) {
     save()
   }
 
-  function clearPoses() {
+  function clear() {
     poses.value = []
-    if (isPersisting()) opfs.deletePoses(persist.projectId.value).catch(() => {})
+    if (isPersisting()) opfs.deletePoses(projects.currentProjectId).catch(() => {})
   }
 
-  async function restorePoses(projectId, projectCrs) {
+  async function restore({ projectId, projectData }) {
+    const projectCrs = projectData?.crs
     poses.value = []
     const data = await opfs.loadPoses(projectId)
     if (!data?.poses?.length) return
@@ -151,8 +152,8 @@ export function usePoses({ images, currentCrs, persist } = {}) {
     poses,
     addPoses,
     removePose,
-    clearPoses,
-    restorePoses,
     reprojectPoses,
+    restore,
+    clear,
   }
-}
+}))

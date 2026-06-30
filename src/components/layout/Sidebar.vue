@@ -1,22 +1,25 @@
 <script setup>
-import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 
 const props = defineProps({
   images:     { type: Array,  required: true },
   gcps:       { type: Array,  default: () => [] },
   sensors:    { type: Array,  default: () => [] },
   poses:      { type: Array,  default: () => [] },
-  // { status, cameras, points } — sparse reconstruction summary
-  reconstruction: { type: Object, default: () => ({ status: 'idle', cameras: 0, points: 0 }) },
+  // Point clouds: [{ id, name, kind, createdAt, cameras: Map, points: [] }]
+  clouds:     { type: Array,  default: () => [] },
+  selectedCloudId: { type: String, default: null },
+  reconStatus: { type: String, default: 'idle' }, // 'idle'|'running'|'done'|'error'
   // (sensorId) => number of images using that sensor
   sensorImageCount: { type: Function, default: () => 0 },
   selectedId: { type: String, default: null },
 })
 
 const emit = defineEmits([
-  'add-images', 'gcp-file', 'remove-image', 'remove-gcp',
+  'add-images', 'import-file', 'remove-image', 'remove-gcp',
   'remove-sensor', 'merge-sensors', 'assign-sensor', 'remove-pose',
-  'select', 'open', 'show-info', 'delete-keypoints',
+  'select', 'open', 'show-info', 'delete-keypoints', 'zoom-to-image',
+  'select-cloud', 'remove-cloud', 'rename-cloud', 'reconstruct',
 ])
 
 // Whole-sidebar drag-and-drop (counter avoids false dragleave on children)
@@ -40,25 +43,74 @@ function onDrop(e) {
   const all = [...e.dataTransfer.files]
   const images = all.filter((f) => f.type.startsWith('image/'))
   if (images.length) emit('add-images', images)
-  // Route the first non-image file (e.g. a .csv/.txt GCP list) to the GCP importer.
+  // Route the first non-image file (e.g. a .csv/.txt list of GCPs or camera
+  // positions) to the importer, which classifies it and opens the right modal.
   const other = all.find((f) => !f.type.startsWith('image/'))
-  if (other) emit('gcp-file', other)
+  if (other) emit('import-file', other)
 }
 
 // Collapsible sections
-const open = ref({ images: true, gcps: true, sensors: false, reconstruction: true })
+const open = ref({ images: true, gcps: true, sensors: false, clouds: true })
 
 function toggle(key) {
   open.value[key] = !open.value[key]
 }
 
-// Human-readable label for the reconstruction stage status.
-const reconStatusLabel = computed(() => ({
-  idle: 'Not started',
-  running: 'Running…',
-  done: 'Complete',
-  error: 'Failed',
-}[props.reconstruction.status] || '—'))
+// ── Point cloud rows ──────────────────────────────────────────────────────────
+const cloudExpanded = ref({})
+
+function toggleCloudExpand(id) {
+  if (cloudExpanded.value[id]) delete cloudExpanded.value[id]
+  else cloudExpanded.value[id] = true
+}
+
+const cloudKindLabel = (kind) => (kind === 'dense' ? 'Dense' : 'Sparse')
+
+// Inline rename. Only one cloud edits at a time, so a single template ref on the
+// (v-if'd) input always points at the active field.
+const editingCloudId = ref(null)
+const editingName = ref('')
+const renameInput = ref(null)
+
+function startRename(cloud) {
+  editingCloudId.value = cloud.id
+  editingName.value = cloud.name
+  nextTick(() => { renameInput.value?.focus(); renameInput.value?.select() })
+}
+
+function commitRename() {
+  if (editingCloudId.value == null) return
+  emit('rename-cloud', { id: editingCloudId.value, name: editingName.value })
+  editingCloudId.value = null
+}
+
+function cancelRename() {
+  editingCloudId.value = null
+}
+
+function fmtCreated(ts) {
+  if (!ts) return '—'
+  return new Date(ts).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })
+}
+
+// ── Point cloud context menu ──────────────────────────────────────────────────
+const cloudCtx = ref(null) // { x, y, cloud }
+
+function onCloudRightClick(e, cloud) {
+  e.preventDefault()
+  ctxMenu.value = null
+  sensorCtx.value = null
+  const menuW = 180, menuH = 120
+  cloudCtx.value = {
+    x: Math.min(e.clientX, window.innerWidth - menuW),
+    y: Math.min(e.clientY, window.innerHeight - menuH),
+    cloud,
+  }
+}
+
+function ctxRenameCloud()  { startRename(cloudCtx.value.cloud); closeMenus() }
+function ctxRebuildCloud() { emit('reconstruct'); closeMenus() }
+function ctxRemoveCloud()  { emit('remove-cloud', cloudCtx.value.cloud.id); closeMenus() }
 
 // Per-sensor expand state
 const sensorExpanded = ref({})
@@ -161,10 +213,16 @@ const ctxTargets = computed(() => {
 
 const ctxIsMulti    = computed(() => ctxTargets.value.length > 1)
 const ctxHasKp      = computed(() => ctxTargets.value.some((i) => i.kpStatus === 'done'))
+// Can we point at this image on the map? True if it has a pose or an EXIF GPS fix.
+const ctxHasPosition = computed(() => {
+  const img = ctxMenu.value?.img
+  return !!img && (!!poseFor(img) || (img.meta?.gpsLat != null && img.meta?.gpsLon != null))
+})
 
 function onRightClick(e, img) {
   e.preventDefault()
   sensorCtx.value = null
+  cloudCtx.value = null
   // Right-clicking outside the current selection collapses to that single image
   if (!localSelected.value.includes(img.id)) {
     localSelected.value = [img.id]
@@ -172,7 +230,7 @@ function onRightClick(e, img) {
     suppressWatch = true
     emit('select', img.id)
   }
-  const menuW = 200, menuH = 220
+  const menuW = 200, menuH = 248
   ctxMenu.value = {
     x: Math.min(e.clientX, window.innerWidth - menuW),
     y: Math.min(e.clientY, window.innerHeight - menuH),
@@ -182,6 +240,7 @@ function onRightClick(e, img) {
 
 function ctxOpen()     { emit('open', ctxMenu.value.img.id); closeMenus() }
 function ctxInfo()     { emit('show-info', ctxMenu.value.img.id); closeMenus() }
+function ctxZoom()     { emit('zoom-to-image', ctxMenu.value.img.id); closeMenus() }
 function ctxDeleteKp() {
   ctxTargets.value.forEach((img) => {
     if (img.kpStatus === 'done') emit('delete-keypoints', img.id)
@@ -208,6 +267,7 @@ const mergeTargets = computed(() =>
 function onSensorRightClick(e, sensor) {
   e.preventDefault()
   ctxMenu.value = null
+  cloudCtx.value = null
   const menuW = 200, menuH = 160
   sensorCtx.value = {
     x: Math.min(e.clientX, window.innerWidth - menuW),
@@ -225,6 +285,7 @@ function ctxMergeSensor(targetId) {
 function closeMenus() {
   ctxMenu.value = null
   sensorCtx.value = null
+  cloudCtx.value = null
 }
 
 onMounted(() => document.addEventListener('click', closeMenus))
@@ -409,38 +470,67 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenus))
       </ul>
     </div>
 
-    <!-- Reconstruction (sparse model: camera poses + 3D points) -->
+    <!-- Point clouds (sparse / dense models: camera poses + 3D points) -->
     <div class="section">
-      <button class="section-hd" @click="toggle('reconstruction')">
-        <span class="chevron">{{ open.reconstruction ? '▾' : '▸' }}</span>
-        <span class="section-name">Reconstruction</span>
-        <span
-          v-if="reconstruction.status === 'running'"
-          class="status-dot running"
-        ></span>
-        <span
-          v-else-if="reconstruction.status === 'error'"
-          class="status-dot error"
-        ></span>
-        <span v-else-if="reconstruction.cameras" class="badge">{{ reconstruction.cameras }}</span>
+      <button class="section-hd" @click="toggle('clouds')">
+        <span class="chevron">{{ open.clouds ? '▾' : '▸' }}</span>
+        <span class="section-name">Point Clouds</span>
+        <span v-if="reconStatus === 'running'" class="status-dot running"></span>
+        <span v-else-if="reconStatus === 'error'" class="status-dot error"></span>
+        <span v-else-if="clouds.length" class="badge">{{ clouds.length }}</span>
       </button>
-      <ul v-if="open.reconstruction" class="item-list">
-        <li v-if="reconstruction.status === 'idle' && !reconstruction.cameras" class="empty">
-          Not reconstructed — run sparse reconstruction
-        </li>
-        <li v-else class="img-details recon-details">
-          <div class="detail-row">
-            <span class="detail-label">Status</span>
-            <span class="detail-value" :class="{ 'detail-error': reconstruction.status === 'error' }">{{ reconStatusLabel }}</span>
-          </div>
-          <div class="detail-row">
-            <span class="detail-label">Cameras</span>
-            <span class="detail-value">{{ reconstruction.cameras }}</span>
-          </div>
-          <div class="detail-row">
-            <span class="detail-label">Sparse points</span>
-            <span class="detail-value">{{ reconstruction.points.toLocaleString() }}</span>
-          </div>
+      <ul v-if="open.clouds" class="item-list">
+        <template v-for="cloud in clouds" :key="cloud.id">
+          <li
+            class="list-item"
+            :class="{ selected: cloud.id === selectedCloudId }"
+            :title="cloud.name"
+            @click="emit('select-cloud', cloud.id)"
+            @dblclick="startRename(cloud)"
+            @contextmenu="onCloudRightClick($event, cloud)"
+          >
+            <button
+              class="expand-btn"
+              :class="{ open: cloudExpanded[cloud.id] }"
+              @click.stop="toggleCloudExpand(cloud.id)"
+              :title="cloudExpanded[cloud.id] ? 'Collapse' : 'Expand'"
+            ></button>
+            <input
+              v-if="editingCloudId === cloud.id"
+              ref="renameInput"
+              v-model="editingName"
+              class="rename-input"
+              @click.stop
+              @dblclick.stop
+              @keydown.enter.prevent="commitRename"
+              @keydown.esc.prevent="cancelRename"
+              @blur="commitRename"
+            />
+            <span v-else class="item-name">{{ cloud.name }}</span>
+            <span class="obs-badge" :title="`${cloud.cameras.size} camera(s)`">{{ cloud.cameras.size }}</span>
+          </li>
+          <li v-if="cloudExpanded[cloud.id]" class="img-details" @contextmenu.stop>
+            <div class="detail-row">
+              <span class="detail-label">Type</span>
+              <span class="detail-value">{{ cloudKindLabel(cloud.kind) }}</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">Cameras</span>
+              <span class="detail-value">{{ cloud.cameras.size }}</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">Points</span>
+              <span class="detail-value">{{ cloud.points.length.toLocaleString() }}</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">Created</span>
+              <span class="detail-value">{{ fmtCreated(cloud.createdAt) }}</span>
+            </div>
+          </li>
+        </template>
+        <li v-if="reconStatus === 'running' && !clouds.length" class="empty">Reconstructing…</li>
+        <li v-else-if="!clouds.length" class="empty">
+          No point clouds — <button class="link-btn" @click="emit('reconstruct')">run reconstruction</button>
         </li>
       </ul>
     </div>
@@ -455,6 +545,7 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenus))
       >
         <button class="ctx-item" :class="{ 'ctx-disabled': ctxIsMulti }" :disabled="ctxIsMulti" @click="ctxOpen">Open in tab</button>
         <button class="ctx-item" :class="{ 'ctx-disabled': ctxIsMulti }" :disabled="ctxIsMulti" @click="ctxInfo">Show information</button>
+        <button class="ctx-item" :class="{ 'ctx-disabled': ctxIsMulti || !ctxHasPosition }" :disabled="ctxIsMulti || !ctxHasPosition" @click="ctxZoom">Zoom to position on map</button>
         <template v-if="sensors.length">
           <div class="ctx-sep"></div>
           <div class="ctx-sub-wrap">
@@ -491,6 +582,21 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenus))
         </div>
         <div v-if="mergeTargets.length" class="ctx-sep"></div>
         <button class="ctx-item danger" @click="ctxRemoveSensor">Remove sensor</button>
+      </div>
+    </Teleport>
+
+    <!-- Point cloud context menu -->
+    <Teleport to="body">
+      <div
+        v-if="cloudCtx"
+        class="ctx-menu"
+        :style="{ left: cloudCtx.x + 'px', top: cloudCtx.y + 'px' }"
+        @click.stop
+      >
+        <button class="ctx-item" @click="ctxRenameCloud">Rename</button>
+        <button class="ctx-item" @click="ctxRebuildCloud">Rebuild sparse cloud</button>
+        <div class="ctx-sep"></div>
+        <button class="ctx-item danger" @click="ctxRemoveCloud">Remove</button>
       </div>
     </Teleport>
   </aside>
@@ -626,11 +732,38 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenus))
   color: var(--text);
 }
 
+/* Inline rename field (point cloud rows) */
+.rename-input {
+  flex: 1;
+  min-width: 0;
+  padding: 1px 4px;
+  background: var(--panel);
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+}
+
+.rename-input:focus { outline: none; }
+
 .empty {
   padding: 8px 12px;
   font-size: 12px;
   color: var(--text-dim);
   font-style: italic;
+}
+
+/* Inline "run reconstruction" action in the empty Point Clouds state */
+.link-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-style: italic;
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: underline;
 }
 
 /* Per-image expand toggle */
@@ -689,13 +822,6 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenus))
 
 .detail-dim   { color: #aaa; }
 .detail-error { color: #c33; }
-
-/* Reconstruction summary card — standalone, no nested-row indent/connector */
-.recon-details {
-  margin: 2px 8px 6px;
-  border-left: none;
-  border-radius: 4px;
-}
 
 /* GCP observation count pill */
 .obs-badge {

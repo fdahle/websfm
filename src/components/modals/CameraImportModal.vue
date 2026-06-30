@@ -1,9 +1,9 @@
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
 import CrsPicker from '../controls/CrsPicker.vue'
-import { DELIMITER_OPTIONS, sniffDelimiter, parseRows } from '../../utils/gcp.js'
-import { SENSOR_ROLES, SENSOR_ROLE_LABELS, guessMapping as guessSensors, buildSensors } from '../../utils/sensor.js'
-import { POSE_ROLES, POSE_ROLE_LABELS, guessMapping as guessPoses, buildPoses } from '../../utils/pose.js'
+import { DELIMITER_OPTIONS, sniffDelimiter, parseRows } from '../../core/gcp.js'
+import { SENSOR_ROLES, SENSOR_ROLE_LABELS, guessMapping as guessSensors, buildSensors } from '../../core/sensor.js'
+import { POSE_ROLES, POSE_ROLE_LABELS, guessMapping as guessPoses, buildPoses } from '../../core/pose.js'
 
 // Imports camera parameters from delimited text in one of two modes:
 //   - 'sensor' : shared intrinsics (one row per sensor) — no CRS
@@ -15,7 +15,13 @@ const props = defineProps({
   projectCrs:   { type: String, default: 'EPSG:4326' },
   detectedMode: { type: String, default: 'pose' },
 })
-const emit = defineEmits(['close', 'import'])
+const emit = defineEmits(['close', 'import', 'switch-kind'])
+
+// Re-interpret this same file as a different content type (hands off to App,
+// which opens the matching importer).
+function switchKind(kind) {
+  emit('switch-kind', { kind, rawText: props.rawText, fileName: props.fileName })
+}
 
 const mode = ref(props.detectedMode === 'sensor' ? 'sensor' : 'pose')
 const delimiter = ref(sniffDelimiter(props.rawText))
@@ -103,13 +109,11 @@ function doImport() {
       <div class="modal-body">
         <div class="filename">{{ fileName }}</div>
 
-        <div class="mode-toggle">
-          <button class="mode-btn" :class="{ active: mode === 'sensor' }" @click="mode = 'sensor'">
-            Intrinsics <span class="mode-sub">(sensor)</span>
-          </button>
-          <button class="mode-btn" :class="{ active: mode === 'pose' }" @click="mode = 'pose'">
-            Extrinsics <span class="mode-sub">(pose)</span>
-          </button>
+        <label class="section-label kind-label">Import as</label>
+        <div class="kind-toggle">
+          <button class="kind-btn" @click="switchKind('gcp')">Ground Control Points</button>
+          <button class="kind-btn" :class="{ active: mode === 'pose' }" @click="mode = 'pose'">Camera Positions</button>
+          <button class="kind-btn" :class="{ active: mode === 'sensor' }" @click="mode = 'sensor'">Camera Intrinsics</button>
         </div>
 
         <div class="controls">
@@ -227,8 +231,9 @@ function doImport() {
   font-family: monospace;
 }
 
-/* Mode toggle */
-.mode-toggle {
+/* Content-type toggle */
+.kind-label { margin-bottom: 8px; }
+.kind-toggle {
   display: inline-flex;
   border: 1px solid var(--panel-border);
   border-radius: 6px;
@@ -236,7 +241,7 @@ function doImport() {
   margin-bottom: 16px;
 }
 
-.mode-btn {
+.kind-btn {
   background: var(--bg);
   border: none;
   color: var(--text-dim);
@@ -245,10 +250,9 @@ function doImport() {
   padding: 7px 16px;
   cursor: pointer;
 }
-.mode-btn + .mode-btn { border-left: 1px solid var(--panel-border); }
-.mode-btn:hover { color: var(--text); }
-.mode-btn.active { background: var(--accent); color: #fff; }
-.mode-sub { opacity: 0.7; font-size: 11px; }
+.kind-btn + .kind-btn { border-left: 1px solid var(--panel-border); }
+.kind-btn:hover { color: var(--text); }
+.kind-btn.active { background: var(--accent); color: #fff; }
 
 .controls {
   display: grid;

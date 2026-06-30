@@ -37,6 +37,10 @@ function onDragEnd() {
 // Source badge visibility toggle
 const showSource = ref(true)
 
+// Detailed (debug-level) log visibility. Debug entries are always recorded;
+// this only controls whether they're shown here. Off by default.
+const showDetail = ref(false)
+
 // Filter panel
 const filterOpen = ref(false)
 const hiddenSources = ref(new Set())
@@ -48,8 +52,11 @@ const allSources = computed(() => {
 })
 
 const filteredEntries = computed(() => {
-  if (hiddenSources.value.size === 0) return entries.value
-  return entries.value.filter(e => !hiddenSources.value.has(e.source))
+  return entries.value.filter(e => {
+    if (!showDetail.value && e.level === 'debug') return false
+    if (hiddenSources.value.has(e.source)) return false
+    return true
+  })
 })
 
 function toggleSource(source) {
@@ -73,6 +80,7 @@ const SOURCE_COLORS = {
   'SIFT':     '#e67e22',
   'Matching': '#1abc9c',
   'Project':  '#2ecc71',
+  'Reconstruction': '#e0518a',
 }
 
 function sourceColor(source) {
@@ -82,6 +90,19 @@ function sourceColor(source) {
 function sourceStyle(source) {
   const c = sourceColor(source)
   return { color: c, borderColor: c + '60', background: c + '18' }
+}
+
+function onKeyDown(e) {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'a') {
+    e.preventDefault()
+    const el = body.value
+    if (!el) return
+    const range = document.createRange()
+    range.selectNodeContents(el)
+    const sel = window.getSelection()
+    sel.removeAllRanges()
+    sel.addRange(range)
+  }
 }
 
 // Save visible entries to a .txt file
@@ -95,7 +116,10 @@ function saveTxt() {
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = `console-${new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-')}.txt`
+  const now = new Date()
+  const pad = n => n.toString().padStart(2, '0')
+  const stamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}-${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`
+  a.download = `console-${stamp}.txt`
   a.click()
   URL.revokeObjectURL(url)
 }
@@ -115,6 +139,12 @@ function saveTxt() {
         >src</button>
         <button
           class="btn-action"
+          :class="{ active: showDetail }"
+          title="Show detailed (debug) log entries"
+          @click="showDetail = !showDetail"
+        >Detail</button>
+        <button
+          class="btn-action"
           :class="{ active: filterOpen }"
           title="Filter by source"
           @click="filterOpen = !filterOpen"
@@ -124,7 +154,7 @@ function saveTxt() {
       </div>
     </div>
     <div class="console-main">
-      <div ref="body" class="console-body">
+      <div ref="body" class="console-body" tabindex="0" @keydown="onKeyDown">
         <div
           v-for="entry in filteredEntries"
           :key="entry.id"
@@ -307,6 +337,7 @@ function saveTxt() {
 .level-success .entry-msg { color: #4ec94e; }
 .level-warn    .entry-msg { color: #d4900a; }
 .level-error   .entry-msg { color: #f05050; }
+.level-debug   .entry-msg { color: var(--console-text-dim); }
 
 .empty {
   padding: 8px 10px;

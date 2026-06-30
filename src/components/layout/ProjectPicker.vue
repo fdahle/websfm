@@ -37,6 +37,23 @@ function confirmDelete(project) {
   }
 }
 
+// A short, glanceable summary line for each project: scene type, then CRS (aerial
+// only — object-capture projects have none), then when it was last touched.
+function projectMeta(project) {
+  const parts = [project.sceneType === 'object' ? 'Object capture' : 'Aerial']
+  if (project.sceneType !== 'object' && project.crs) parts.push(project.crs)
+  const edited = formatDate(project.lastModified)
+  if (edited) parts.push(`edited ${edited}`)
+  return parts.join(' · ')
+}
+
+function formatDate(iso) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
+}
+
 function onKey(e) {
   if (e.key === 'Escape') {
     if (renamingId.value) cancelRename()
@@ -82,8 +99,13 @@ onBeforeUnmount(() => {
         </template>
         <template v-else>
           <span class="check">{{ project.id === currentProjectId ? '✓' : '' }}</span>
-          <span class="project-name" @click="emit('switch', project.id)">{{ project.name }}</span>
-          <span class="scene-badge">{{ project.sceneType === 'aerial' ? '✈' : '◼' }}</span>
+          <div class="project-main" @click="emit('switch', project.id)">
+            <div class="project-name-row">
+              <span class="scene-badge">{{ project.sceneType === 'aerial' ? '✈' : '◼' }}</span>
+              <span class="project-name">{{ project.name }}</span>
+            </div>
+            <span class="project-meta">{{ projectMeta(project) }}</span>
+          </div>
           <button class="icon-btn" title="Rename" @click.stop="startRename(project)">✏</button>
           <button class="icon-btn danger" title="Delete" @click.stop="confirmDelete(project)">✕</button>
         </template>
@@ -106,8 +128,8 @@ onBeforeUnmount(() => {
   border: 1px solid var(--panel-border);
   border-radius: 7px;
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
-  min-width: 240px;
-  max-width: 320px;
+  min-width: 280px;
+  max-width: 360px;
   overflow: hidden;
 }
 
@@ -128,9 +150,12 @@ onBeforeUnmount(() => {
 .project-item {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 0 6px;
-  height: 32px;
+  gap: 6px;
+  padding: 8px 8px;
+}
+
+.project-item + .project-item {
+  border-top: 1px solid var(--panel-border);
 }
 
 .project-item.current {
@@ -138,44 +163,68 @@ onBeforeUnmount(() => {
 }
 
 .check {
-  width: 16px;
+  width: 14px;
   font-size: 11px;
   color: var(--accent);
   flex-shrink: 0;
   text-align: center;
+  align-self: flex-start;
+  margin-top: 2px;
+}
+
+.project-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  cursor: pointer;
+}
+
+.project-name-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
 }
 
 .project-name {
-  flex: 1;
   font-size: 13px;
   color: var(--text);
-  cursor: pointer;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.project-name:hover {
+.project-main:hover .project-name {
   color: var(--accent);
 }
 
 .scene-badge {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-dim);
   flex-shrink: 0;
 }
 
+.project-meta {
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .icon-btn {
   background: none;
-  border: none;
+  border: 1px solid transparent;
   color: var(--text-dim);
-  font-size: 11px;
-  padding: 3px 5px;
+  font-size: 14px;
+  padding: 6px 8px;
   cursor: pointer;
-  border-radius: 3px;
+  border-radius: 5px;
   flex-shrink: 0;
   line-height: 1;
-  opacity: 0;
+  opacity: 0.65;
 }
 
 .project-item:hover .icon-btn {
@@ -215,8 +264,8 @@ onBeforeUnmount(() => {
   border: none;
   color: var(--accent);
   font: inherit;
-  font-size: 12px;
-  padding: 7px 22px;
+  font-size: 13px;
+  padding: 10px 14px;
   text-align: left;
   cursor: pointer;
 }

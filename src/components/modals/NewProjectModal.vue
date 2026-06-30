@@ -15,7 +15,9 @@ const crs = ref('EPSG:4326')
 function submit() {
   const n = name.value.trim()
   if (!n) return
-  emit('create', { name: n, sceneType: sceneType.value, crs: crs.value })
+  // Object-capture projects have no geographic CRS (scale is set manually).
+  const crsValue = sceneType.value === 'object' ? null : crs.value
+  emit('create', { name: n, sceneType: sceneType.value, crs: crsValue })
 }
 </script>
 
@@ -62,8 +64,12 @@ function submit() {
         </div>
 
         <label class="field-label" style="margin-top: 20px">Coordinate system</label>
-        <CrsPicker v-model="crs" />
-        <span class="crs-hint">Working CRS for the map, GCPs and cameras. You can change it later in Settings.</span>
+        <CrsPicker v-model="crs" :disabled="sceneType === 'object'" />
+        <span class="crs-hint">{{
+          sceneType === 'object'
+            ? 'Object-capture projects have no coordinate system — scale is set manually.'
+            : 'Working CRS for the map, GCPs and cameras. You can change it later in Settings.'
+        }}</span>
       </div>
 
       <div class="modal-footer">

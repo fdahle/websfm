@@ -11,11 +11,14 @@ const props = defineProps({
   cameras: { type: Map,    default: () => new Map() }, // uuid → { R, t, K }
 })
 
-const emit = defineEmits(['update', 'remove'])
+const emit = defineEmits(['update', 'remove', 'toggle-fixed'])
 
-const mode = ref('initial') // 'initial' | 'estimated'
+const isFixed = (s, field) => !!s.fixed?.[field]
+
+const mode = ref('initial') // 'initial' | 'estimated' | 'diff'
 
 const round = (n, d = 2) => (n == null ? null : Number(n.toFixed(d)))
+const signed = (n, d = 2) => (n == null ? null : (n >= 0 ? '+' : '') + n.toFixed(d))
 
 function imageCount(sensorId) {
   return props.images.filter((i) => i.sensorId === sensorId).length
@@ -40,18 +43,35 @@ function estimated(sensorId) {
 
 const anyEstimated = computed(() => props.sensors.some((s) => estimated(s.id)))
 
+const hint = computed(() => ({
+  initial:   'Calibration priors — editable',
+  fixed:     'Tick a parameter to hold it constant during bundle adjustment',
+  estimated: 'Bundle-adjusted (read-only), averaged per sensor',
+  diff:      'Estimated − initial (Δ)',
+}[mode.value]))
+
+// Estimated − initial for an intrinsic, or null if either side is missing.
+function diff(sensorId, key) {
+  const est = estimated(sensorId)
+  if (!est || est[key] == null) return null
+  const s = props.sensors.find((x) => x.id === sensorId)
+  const init = s?.[key]
+  if (init == null || init === '') return null
+  return est[key] - Number(init)
+}
+
 // Editable numeric columns (label handled separately).
 const NUM_COLS = [
   { key: 'width',  label: 'W' },
   { key: 'height', label: 'H' },
-  { key: 'focal',  label: 'Focal' },
-  { key: 'cx',     label: 'cx' },
-  { key: 'cy',     label: 'cy' },
-  { key: 'k1',     label: 'k1' },
-  { key: 'k2',     label: 'k2' },
-  { key: 'k3',     label: 'k3' },
-  { key: 'p1',     label: 'p1' },
-  { key: 'p2',     label: 'p2' },
+  { key: 'focal',  label: 'Focal', lockable: true },
+  { key: 'cx',     label: 'cx', lockable: true },
+  { key: 'cy',     label: 'cy', lockable: true },
+  { key: 'k1',     label: 'k1', lockable: true },
+  { key: 'k2',     label: 'k2', lockable: true },
+  { key: 'k3',     label: 'k3', lockable: true },
+  { key: 'p1',     label: 'p1', lockable: true },
+  { key: 'p2',     label: 'p2', lockable: true },
 ]
 
 function onEdit(id, field, e) {
@@ -71,8 +91,16 @@ function onEdit(id, field, e) {
           :title="anyEstimated ? '' : 'Run a reconstruction to get estimated values'"
           @click="mode = 'estimated'"
         >Estimated</button>
+        <button
+          class="seg-btn"
+          :class="{ active: mode === 'diff' }"
+          :disabled="!anyEstimated"
+          :title="anyEstimated ? '' : 'Run a reconstruction to compare values'"
+          @click="mode = 'diff'"
+        >Difference</button>
+        <button class="seg-btn" :class="{ active: mode === 'fixed' }" @click="mode = 'fixed'">Fixed</button>
       </div>
-      <span class="hint">{{ mode === 'initial' ? 'Calibration priors — editable' : 'Bundle-adjusted (read-only), averaged per sensor' }}</span>
+      <span class="hint">{{ hint }}</span>
     </div>
 
     <table v-if="sensors.length">
@@ -109,12 +137,33 @@ function onEdit(id, field, e) {
               />
             </td>
           </template>
-          <template v-else>
+          <template v-else-if="mode === 'fixed'">
+            <td v-for="c in NUM_COLS" :key="c.key" class="check-cell">
+              <input
+                v-if="c.lockable"
+                type="checkbox"
+                class="fix-check"
+                :checked="isFixed(s, c.key)"
+                :title="isFixed(s, c.key) ? 'Held constant by the solver' : 'Free to refine'"
+                @change="emit('toggle-fixed', { id: s.id, field: c.key })"
+              />
+              <span v-else class="dim">—</span>
+            </td>
+          </template>
+          <template v-else-if="mode === 'estimated'">
             <td>{{ s.width ?? '—' }}</td>
             <td>{{ s.height ?? '—' }}</td>
             <td :class="{ dim: !estimated(s.id) }">{{ round(estimated(s.id)?.focal) ?? '—' }}</td>
             <td :class="{ dim: !estimated(s.id) }">{{ round(estimated(s.id)?.cx) ?? '—' }}</td>
             <td :class="{ dim: !estimated(s.id) }">{{ round(estimated(s.id)?.cy) ?? '—' }}</td>
+            <td v-for="c in ['k1','k2','k3','p1','p2']" :key="c" class="dim">—</td>
+          </template>
+          <template v-else>
+            <td class="dim">—</td>
+            <td class="dim">—</td>
+            <td v-for="c in ['focal','cx','cy']" :key="c" :class="{ dim: diff(s.id, c) == null }">
+              {{ signed(diff(s.id, c)) ?? '—' }}
+            </td>
             <td v-for="c in ['k1','k2','k3','p1','p2']" :key="c" class="dim">—</td>
           </template>
 
@@ -166,6 +215,16 @@ tbody td.dim { color: var(--text-dim); }
 }
 .label-input { width: 130px; }
 .cell-input:focus { border-color: var(--accent); }
+
+/* Numeric input without the up/down spinners — stepping makes no sense for
+   calibration values, but we keep type=number for numeric keyboards/validation. */
+.cell-input[type='number'] { -moz-appearance: textfield; appearance: textfield; }
+.cell-input[type='number']::-webkit-outer-spin-button,
+.cell-input[type='number']::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+
+/* Fixed tab — checkbox per refinable intrinsic (held constant by the solver). */
+.check-cell { text-align: center; }
+.fix-check { width: 14px; height: 14px; accent-color: var(--accent); cursor: pointer; margin: 0; vertical-align: middle; }
 
 .remove {
   background: none; border: none; color: var(--text-dim); cursor: pointer;

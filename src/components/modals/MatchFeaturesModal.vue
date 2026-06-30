@@ -15,6 +15,7 @@ const settings = ref({
   minMatches: 15,
   geometricVerification: true,
   ransacThreshPx: 2.0,
+  minInlierRatio: 0.25,
   maxIters: 1000,
 })
 
@@ -110,6 +111,17 @@ function run() {
               <span class="field-unit">px</span>
             </div>
             <span class="field-hint">Sampson distance threshold for inlier classification.</span>
+          </div>
+
+          <div class="field">
+            <label class="field-label" for="minInlierRatio">Min inlier ratio</label>
+            <input
+              id="minInlierRatio"
+              v-model.number="settings.minInlierRatio"
+              type="number" min="0" max="0.9" step="0.05"
+              class="field-input"
+            />
+            <span class="field-hint">Reject pairs whose inliers/raw is below this — kills false matches on repetitive structure.</span>
           </div>
 
           <div class="field">

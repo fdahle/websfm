@@ -1,5 +1,5 @@
 <script setup>
-import { formatFileSize } from '../../utils/metadata.js'
+import { formatFileSize } from '../../core/metadata.js'
 
 defineProps({
   images: {
@@ -19,7 +19,7 @@ const round = (n, d = 1) => (n == null ? null : Number(n.toFixed(d)))
 
 <template>
   <div class="table-wrap">
-    <table v-if="images.length">
+    <table v-if="images.length" v-col-resize>
       <thead>
         <tr>
           <th></th>

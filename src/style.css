@@ -55,3 +55,19 @@ body {
   color: var(--text);
   overflow: hidden;
 }
+
+/* Drag handle injected by the v-col-resize directive onto resizable <th>s. */
+.col-resize-handle {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  width: 7px;
+  height: 100%;
+  cursor: col-resize;
+  user-select: none;
+  z-index: 3;
+}
+.col-resize-handle:hover {
+  background: var(--accent);
+  opacity: 0.5;
+}

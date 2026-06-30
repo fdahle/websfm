@@ -1,8 +1,8 @@
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
 import CrsPicker from '../controls/CrsPicker.vue'
-import { DELIMITER_OPTIONS, sniffDelimiter, parseRows, guessMapping, buildGcps } from '../../utils/gcp.js'
-import { axisLabels } from '../../utils/crs.js'
+import { DELIMITER_OPTIONS, sniffDelimiter, parseRows, guessMapping, buildGcps } from '../../core/gcp.js'
+import { axisLabels } from '../../core/crs.js'
 
 const props = defineProps({
   rawText:    { type: String, default: '' },
@@ -13,9 +13,15 @@ const props = defineProps({
   geojsonGcps: { type: Array,  default: null },
   detectedCrs: { type: String, default: null },
 })
-const emit = defineEmits(['close', 'import'])
+const emit = defineEmits(['close', 'import', 'switch-kind'])
 
 const geojsonMode = computed(() => Array.isArray(props.geojsonGcps))
+
+// Re-interpret this same file as camera data (hands off to App, which opens the
+// camera importer). Not offered in GeoJSON mode — GeoJSON points are never poses.
+function switchKind(kind) {
+  emit('switch-kind', { kind, rawText: props.rawText, fileName: props.fileName })
+}
 
 const delimiter = ref(sniffDelimiter(props.rawText))
 const hasHeader = ref(true)
@@ -104,6 +110,15 @@ function doImport() {
 
       <div class="modal-body">
         <div class="filename">{{ fileName }}</div>
+
+        <template v-if="!geojsonMode">
+          <label class="section-label kind-label">Import as</label>
+          <div class="kind-toggle">
+            <button class="kind-btn active">Ground Control Points</button>
+            <button class="kind-btn" @click="switchKind('pose')">Camera Positions</button>
+            <button class="kind-btn" @click="switchKind('sensor')">Camera Intrinsics</button>
+          </div>
+        </template>
 
         <div class="controls">
           <template v-if="!geojsonMode">
@@ -232,6 +247,29 @@ function doImport() {
   margin-bottom: 14px;
   font-family: monospace;
 }
+
+/* Content-type toggle */
+.kind-label { margin-bottom: 8px; }
+.kind-toggle {
+  display: inline-flex;
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  overflow: hidden;
+  margin-bottom: 16px;
+}
+
+.kind-btn {
+  background: var(--bg);
+  border: none;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 13px;
+  padding: 7px 16px;
+  cursor: pointer;
+}
+.kind-btn + .kind-btn { border-left: 1px solid var(--panel-border); }
+.kind-btn:hover { color: var(--text); }
+.kind-btn.active { background: var(--accent); color: #fff; }
 
 .controls {
   display: grid;

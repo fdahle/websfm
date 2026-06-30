@@ -28,6 +28,10 @@ export async function extractMetadata(file, url) {
     lens: e.LensModel ?? null,
     focalLength: e.FocalLength ?? null,
     focalLength35: e.FocalLengthIn35mmFormat ?? null,
+    // Lets us derive the physical sensor width when the 35mm-equivalent focal is
+    // absent: sensorWidth_mm = imageWidth_px / FocalPlaneXResolution × unit.
+    focalPlaneXRes: e.FocalPlaneXResolution ?? null,
+    focalPlaneResUnit: e.FocalPlaneResolutionUnit ?? null,
     fNumber: e.FNumber ?? null,
     exposureTime: e.ExposureTime ?? null,
     iso: e.ISO ?? null,

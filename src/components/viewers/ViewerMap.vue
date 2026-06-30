@@ -16,12 +16,13 @@ import { Style, Circle as CircleStyle, RegularShape, Fill, Stroke } from 'ol/sty
 import { get as getOlProjection } from 'ol/proj'
 import { Attribution } from 'ol/control'
 import { createEmpty, extend } from 'ol/extent'
-import { ensureProjection, transform, crsInfo } from '../../utils/crs.js'
+import { ensureProjection, transform, crsInfo } from '../../core/crs.js'
 
 const props = defineProps({
   images:     { type: Array,  default: () => [] },
   gcps:       { type: Array,  default: () => [] },
   footprints: { type: Array,  default: () => [] },
+  poses:      { type: Array,  default: () => [] },
   selectedId: { type: String, default: null },
   crs:        { type: String, default: 'EPSG:4326' },
 })
@@ -36,6 +37,7 @@ let map             = null
 let vSource         = null
 let gcpSource       = null
 let footprintSource = null
+let poseSource      = null
 
 // ── Styles ────────────────────────────────────────────────────────────────────
 
@@ -69,6 +71,29 @@ const gcpStyle = new Style({
     stroke: new Stroke({ color: '#fff', width: 1.5 }),
   }),
 })
+
+// Camera-position markers: purple triangle, distinct from GPS circles and GCP diamonds.
+const poseStyle = new Style({
+  image: new RegularShape({
+    points: 3,
+    radius: 7,
+    fill:   new Fill({ color: '#b06ad9' }),
+    stroke: new Stroke({ color: '#fff', width: 1.5 }),
+  }),
+})
+
+const poseSelectedStyle = new Style({
+  image: new RegularShape({
+    points: 3,
+    radius: 9,
+    fill:   new Fill({ color: '#f0a500' }),
+    stroke: new Stroke({ color: '#fff', width: 2 }),
+  }),
+})
+
+function poseStyleFor(feature) {
+  return feature.get('imgId') === props.selectedId ? poseSelectedStyle : poseStyle
+}
 
 // Footprint polygons: translucent fill + stroke; brighter when the linked image is selected.
 const footprintStyle = new Style({
@@ -108,6 +133,12 @@ const mapFootprints = computed(() =>
 )
 const hasFootprints = computed(() => mapFootprints.value.length > 0)
 
+// Camera poses are stored in the project CRS already (= the map view CRS), no transform.
+const mapPoses = computed(() =>
+  props.poses.filter((p) => p.enabled !== false && Number.isFinite(p.x) && Number.isFinite(p.y))
+)
+const hasPoses = computed(() => mapPoses.value.length > 0)
+
 // ── Features ──────────────────────────────────────────────────────────────────
 // Image GPS is always WGS84 (from EXIF); project it into the current view CRS.
 
@@ -135,6 +166,13 @@ function makeFootprintFeature(fp) {
   return f
 }
 
+function makePoseFeature(p) {
+  const f = new Feature({ geometry: new Point([p.x, p.y]) })
+  f.set('poseName', p.imageName)
+  if (p.imageId) f.set('imgId', p.imageId)
+  return f
+}
+
 function refreshFeatures() {
   if (!vSource) return
   vSource.clear(true)
@@ -156,9 +194,16 @@ function refreshFootprints() {
   fitToMarkers()
 }
 
+function refreshPoses() {
+  if (!poseSource) return
+  poseSource.clear(true)
+  poseSource.addFeatures(mapPoses.value.map(makePoseFeature))
+  fitToMarkers()
+}
+
 function fitToMarkers() {
   if (!map) return
-  const features = [...(vSource?.getFeatures() || []), ...(gcpSource?.getFeatures() || []), ...(footprintSource?.getFeatures() || [])]
+  const features = [...(vSource?.getFeatures() || []), ...(gcpSource?.getFeatures() || []), ...(footprintSource?.getFeatures() || []), ...(poseSource?.getFeatures() || [])]
   if (!features.length) return
   const geom = features.length === 1 ? features[0].getGeometry() : null
   if (geom?.getType() === 'Point') {
@@ -206,6 +251,7 @@ async function build() {
   vSource = new VectorSource({ features: gpsImages.value.map(makeFeature) })
   gcpSource = new VectorSource({ features: mapGcps.value.map(makeGcpFeature) })
   footprintSource = new VectorSource({ features: mapFootprints.value.map(makeFootprintFeature) })
+  poseSource = new VectorSource({ features: mapPoses.value.map(makePoseFeature) })
 
   const graticule = new Graticule({
     strokeStyle: new Stroke({ color: 'rgba(140,140,140,0.45)', width: 1 }),
@@ -220,6 +266,7 @@ async function build() {
       new VectorLayer({ source: footprintSource, style: footprintStyleFor }),
       new VectorLayer({ source: vSource, style: styleFor }),
       new VectorLayer({ source: gcpSource, style: gcpStyle }),
+      new VectorLayer({ source: poseSource, style: poseStyleFor }),
     ],
     view: new View({
       projection: projection || 'EPSG:3857',
@@ -255,7 +302,11 @@ async function build() {
     if (hit) {
       const gcpName = hit.get('gcpName')
       const fpName = hit.get('footprintName')
-      const text = gcpName ? `GCP: ${gcpName}` : fpName ? `Footprint: ${fpName}` : hit.get('name')
+      const poseName = hit.get('poseName')
+      const text = gcpName ? `GCP: ${gcpName}`
+        : fpName ? `Footprint: ${fpName}`
+        : poseName ? `Camera: ${poseName}`
+        : hit.get('name')
       hover.value = { text, x: e.pixel[0], y: e.pixel[1] }
     } else {
       hover.value = null
@@ -269,6 +320,7 @@ function destroy() {
   vSource = null
   gcpSource = null
   footprintSource = null
+  poseSource = null
   hover.value = null
 }
 
@@ -284,8 +336,12 @@ watch(mapGcps, refreshGcps)
 // be re-resolved in place by retroactive matching)
 watch(mapFootprints, refreshFootprints, { deep: true })
 
+// Rebuild pose markers when the pose list changes (deep: imageId may be
+// re-resolved in place by retroactive matching)
+watch(mapPoses, refreshPoses, { deep: true })
+
 // Re-style on selection change without rebuilding features
-watch(() => props.selectedId, () => { vSource?.changed(); footprintSource?.changed() })
+watch(() => props.selectedId, () => { vSource?.changed(); footprintSource?.changed(); poseSource?.changed() })
 
 // Rebuild the whole map when the project CRS changes
 watch(() => props.crs, async () => {
@@ -308,13 +364,35 @@ onBeforeUnmount(() => {
   resizeObserver?.disconnect()
   destroy()
 })
+
+// ── Imperative API ────────────────────────────────────────────────────────────
+
+// Centre the view on an image's position — its imported pose if present,
+// otherwise its EXIF GPS. No-op if the image has neither.
+function zoomToImage(imgId) {
+  if (!map) return
+  let coord = null
+  const pose = props.poses.find((p) => p.imageId === imgId && Number.isFinite(p.x) && Number.isFinite(p.y))
+  if (pose) {
+    coord = [pose.x, pose.y]
+  } else {
+    const img = props.images.find((i) => i.id === imgId)
+    if (img?.meta?.gpsLat != null && img?.meta?.gpsLon != null) {
+      coord = projectLonLat(img.meta.gpsLon, img.meta.gpsLat)
+    }
+  }
+  if (!coord) return
+  map.getView().animate({ center: coord, zoom: 17, duration: 300 })
+}
+
+defineExpose({ zoomToImage, fitView: fitToMarkers })
 </script>
 
 <template>
   <div class="map-viewer">
     <div ref="mapEl" class="ol-map" />
-    <div v-if="!hasGps && !hasGcps && !hasFootprints" class="no-gps-hint">
-      No GPS coordinates found — images with geotags or imported GCPs appear as markers here.
+    <div v-if="!hasGps && !hasGcps && !hasFootprints && !hasPoses" class="no-gps-hint">
+      No coordinates found — images with geotags, imported GCPs, or camera positions appear as markers here.
     </div>
     <div v-if="basemapNote" class="basemap-note">{{ basemapNote }}</div>
 
@@ -322,9 +400,10 @@ onBeforeUnmount(() => {
       {{ hover.text }}
     </div>
 
-    <div v-if="hasGcps || hasFootprints" class="legend">
+    <div v-if="hasGcps || hasFootprints || hasPoses" class="legend">
       <span class="legend-item"><span class="legend-dot img"></span>Image GPS</span>
       <span v-if="hasGcps" class="legend-item"><span class="legend-dot gcp"></span>GCP</span>
+      <span v-if="hasPoses" class="legend-item"><span class="legend-dot pose"></span>Camera</span>
       <span v-if="hasFootprints" class="legend-item"><span class="legend-dot footprint"></span>Footprint</span>
     </div>
   </div>
@@ -405,6 +484,7 @@ onBeforeUnmount(() => {
 .legend-dot { width: 9px; height: 9px; display: inline-block; }
 .legend-dot.img { background: #0e639c; border-radius: 50%; }
 .legend-dot.gcp { background: #3fae6a; transform: rotate(45deg); }
+.legend-dot.pose { width: 0; height: 0; background: none; border-left: 5px solid transparent; border-right: 5px solid transparent; border-bottom: 9px solid #b06ad9; }
 .legend-dot.footprint { background: rgba(14, 99, 156, 0.2); border: 1.5px solid rgba(14, 99, 156, 0.8); }
 </style>
 

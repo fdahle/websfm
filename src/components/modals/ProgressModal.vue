@@ -1,16 +1,76 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue'
 
 const props = defineProps({
-  title:   { type: String, required: true },
-  current: { type: Number, default: 0 },
-  total:   { type: Number, default: 0 },
-  label:   { type: String, default: '' },
+  title:      { type: String, required: true },
+  current:    { type: Number, default: 0 },
+  total:      { type: Number, default: 0 },
+  label:      { type: String, default: '' },
+  cancelable: { type: Boolean, default: false },
 })
+const emit = defineEmits(['cancel'])
 
 const pct = computed(() =>
   props.total > 0 ? Math.round((props.current / props.total) * 100) : 0
 )
+
+function formatClock(secs) {
+  const s = Math.max(0, Math.round(secs))
+  const m = Math.floor(s / 60)
+  return `${m}:${String(s % 60).padStart(2, '0')}`
+}
+
+// Elapsed-time timer. The modal is created fresh per run (v-if), so timing it
+// from mount measures the run; the ticker just refreshes the display each second.
+const startedAt = ref(0)
+const now = ref(0)
+let ticker = null
+
+const elapsed = computed(() => formatClock((now.value - startedAt.value) / 1000))
+
+// ── ETA via rolling average ────────────────────────────────────────────────
+// Record the wall-clock time each time `current` advances, then average the gaps
+// between the most recent completions. A rolling window (not the run-wide mean)
+// keeps the estimate responsive when items speed up or slow down. ETA = mean gap
+// × items remaining. Shown only once there's enough signal to be meaningful.
+const WINDOW = 10
+const stamps = ref([])   // timestamps of recent `current` increments
+
+watch(() => props.current, (val, prev) => {
+  // Reset if the counter restarts (e.g. a new phase reusing the same modal).
+  if (val < (prev ?? 0)) { stamps.value = []; return }
+  if (val > (prev ?? 0)) {
+    stamps.value.push(Date.now())
+    if (stamps.value.length > WINDOW + 1) stamps.value.shift()
+  }
+})
+
+const etaSeconds = computed(() => {
+  // Depend on `now` so the countdown ticks down between completions.
+  void now.value
+  const s = stamps.value
+  if (props.total <= 0 || s.length < 2) return null
+  const remaining = props.total - props.current
+  if (remaining <= 0) return 0
+  const span = (s[s.length - 1] - s[0]) / 1000
+  const perItem = span / (s.length - 1)
+  if (!(perItem > 0)) return null
+  // Subtract time already spent on the in-flight item so the estimate decays.
+  const sinceLast = (now.value - s[s.length - 1]) / 1000
+  return Math.max(0, perItem * remaining - sinceLast)
+})
+
+const eta = computed(() => etaSeconds.value == null ? null : formatClock(etaSeconds.value))
+
+onMounted(() => {
+  startedAt.value = Date.now()
+  now.value = startedAt.value
+  ticker = setInterval(() => { now.value = Date.now() }, 250)
+})
+
+onBeforeUnmount(() => {
+  if (ticker) clearInterval(ticker)
+})
 </script>
 
 <template>
@@ -24,8 +84,15 @@ const pct = computed(() =>
         <span class="progress-pct">{{ pct }}%</span>
       </div>
       <div class="progress-sub">
-        <span class="progress-count">{{ current }} / {{ total }}</span>
+        <span class="progress-count">
+          {{ current }} / {{ total }}
+          <span class="progress-time" title="Elapsed time">· ⏱ {{ elapsed }}</span>
+          <span v-if="eta" class="progress-time" title="Estimated time remaining">· ~{{ eta }} left</span>
+        </span>
         <span v-if="label" class="progress-label" :title="label">{{ label }}</span>
+      </div>
+      <div v-if="cancelable" class="progress-actions">
+        <button class="btn-cancel" @click="emit('cancel')">Cancel</button>
       </div>
     </div>
   </div>
@@ -105,6 +172,11 @@ const pct = computed(() =>
   flex-shrink: 0;
 }
 
+.progress-time {
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
 .progress-label {
   font-size: 12px;
   color: var(--text-dim);
@@ -113,5 +185,26 @@ const pct = computed(() =>
   text-overflow: ellipsis;
   max-width: 200px;
   text-align: right;
+}
+
+.progress-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.btn-cancel {
+  background: none;
+  border: 1px solid var(--panel-border);
+  border-radius: 5px;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 14px;
+  cursor: pointer;
+}
+
+.btn-cancel:hover {
+  background: var(--hover-bg);
+  color: var(--text);
 }
 </style>

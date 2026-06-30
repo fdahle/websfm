@@ -1,5 +1,6 @@
 <script setup>
-import { ref, computed, reactive, watch, onMounted } from 'vue'
+import { ref, computed, reactive, watch, onMounted, nextTick } from 'vue'
+import { storeToRefs } from 'pinia'
 import Ribbon from './components/layout/Ribbon.vue'
 import Sidebar from './components/layout/Sidebar.vue'
 import Viewer3D from './components/viewers/Viewer3D.vue'
@@ -9,6 +10,7 @@ import ImageInfoModal from './components/modals/ImageInfoModal.vue'
 import DetectFeaturesModal from './components/modals/DetectFeaturesModal.vue'
 import MatchFeaturesModal from './components/modals/MatchFeaturesModal.vue'
 import ImageTableModal from './components/modals/ImageTableModal.vue'
+import MaskManagerModal from './components/modals/MaskManagerModal.vue'
 import SensorTableModal from './components/modals/SensorTableModal.vue'
 import MatchListModal from './components/modals/MatchListModal.vue'
 import ProgressModal from './components/modals/ProgressModal.vue'
@@ -17,73 +19,63 @@ import AboutModal from './components/modals/AboutModal.vue'
 import NewProjectModal from './components/modals/NewProjectModal.vue'
 import ProjectPicker from './components/layout/ProjectPicker.vue'
 import DevConsole from './components/layout/DevConsole.vue'
-import { useImages } from './composables/useImages.js'
-import { useMatches } from './composables/useMatches.js'
+import { useImagesStore } from './stores/useImagesStore.js'
+import { useMatchesStore } from './stores/useMatchesStore.js'
 import { useTabs } from './composables/useTabs.js'
-import { useProjects } from './composables/useProjects.js'
+import { useProjectsStore } from './stores/useProjectsStore.js'
 import { useTheme } from './composables/useTheme.js'
-import { useModals } from './composables/useModals.js'
+import { useModalsStore } from './stores/useModalsStore.js'
 import { usePipeline } from './composables/usePipeline.js'
-import { useReconstruction } from './composables/useReconstruction.js'
-import { useGcps } from './composables/useGcps.js'
-import { useFootprints } from './composables/useFootprints.js'
-import { useSensors } from './composables/useSensors.js'
-import { usePoses } from './composables/usePoses.js'
+import { useReconstructionStore } from './stores/useReconstructionStore.js'
+import { useGcpsStore } from './stores/useGcpsStore.js'
+import { restoreProjectStores, clearProjectStores } from './stores/projectStores.js'
+import { useFootprintsStore } from './stores/useFootprintsStore.js'
+import { useSensorsStore } from './stores/useSensorsStore.js'
+import { usePosesStore } from './stores/usePosesStore.js'
 import ReconstructModal from './components/modals/ReconstructModal.vue'
+import DepthMapsModal from './components/modals/DepthMapsModal.vue'
+import DenseModal from './components/modals/DenseModal.vue'
 import GcpImportModal from './components/modals/GcpImportModal.vue'
 import GcpTableModal from './components/modals/GcpTableModal.vue'
 import FootprintImportModal from './components/modals/FootprintImportModal.vue'
+import FootprintFromPosesModal from './components/modals/FootprintFromPosesModal.vue'
 import CameraImportModal from './components/modals/CameraImportModal.vue'
-import { parseGeoJson, looksLikeGeoJson, geoJsonToGcps, guessNameKey } from './utils/geojson.js'
+import ImportKindModal from './components/modals/ImportKindModal.vue'
+import { parseGeoJson, looksLikeGeoJson, geoJsonToGcps, guessNameKey } from './core/geojson.js'
 import { detectCameraMode } from './utils/camera.js'
+import { detectFileKind } from './utils/importKind.js'
 import { buildPosesCsv, buildSensorsCsv, downloadCsv } from './utils/exportCsv.js'
 import * as opfs from './utils/opfs.js'
-import { ensureProjection } from './utils/crs.js'
+import { ensureProjection } from './core/crs.js'
 
 // ── Theme ─────────────────────────────────────────────────────────────────────
 const { theme, applyTheme, setTheme } = useTheme()
 
 // ── Projects ──────────────────────────────────────────────────────────────────
+const projectsStore = useProjectsStore()
 const {
   persistenceAvailable, projects, currentProjectId, currentProjectName, currentSceneType, currentCrs,
+} = storeToRefs(projectsStore)
+const {
   setPersistenceAvailable, loadIndex, createProject, setProjectCrs, switchProject, renameProject,
   deleteProjectById,
-} = useProjects()
-
-async function syncProject(imgs) {
-  if (!persistenceAvailable.value || !currentProjectId.value) return
-  const proj = projects.value.find((p) => p.id === currentProjectId.value)
-  if (!proj) return
-  await opfs.writeProject(currentProjectId.value, {
-    ...proj,
-    lastModified: new Date().toISOString(),
-    images: imgs.map((img) => {
-      // eslint-disable-next-line no-unused-vars
-      const { raw: _raw, ...metaToSave } = img.meta ?? {}
-      return {
-        id: img.id, uuid: img.uuid, name: img.name,
-        kpStatus: img.kpStatus, kpCount: img.kpCount, kpMs: img.kpMs,
-        hasMask: !!img.mask, hasDepth: !!img.depth,
-        sensorId: img.sensorId ?? null,
-        meta: img.meta ? metaToSave : null,
-      }
-    }),
-  })
-}
-
-const persistContext = { enabled: persistenceAvailable, projectId: currentProjectId, sync: syncProject }
+} = projectsStore
 
 // ── Images ────────────────────────────────────────────────────────────────────
+const imagesStore = useImagesStore()
+const { images, selectedId } = storeToRefs(imagesStore)
 const {
-  images, selectedId,
   imageById, selectImage,
   addImages, removeImage,
   updateMask, updateDepth, detectAll, clearKeypoints, clearAll,
   restoreImages,
-} = useImages({ persist: persistContext })
+} = imagesStore
 
 // ── Matches ───────────────────────────────────────────────────────────────────
-const { matchStore, matchAll, restoreMatches, clearMatches } = useMatches({ persist: persistContext })
+// Project-scoped store; restore/clear run through the project-store registry.
+const matchesStore = useMatchesStore()
+const { matchStore } = storeToRefs(matchesStore)
+const { matchAll } = matchesStore
 
 // ── Tabs ──────────────────────────────────────────────────────────────────────
 const showMap = computed(() => currentSceneType.value !== 'object')
@@ -96,52 +88,74 @@ const {
 } = useTabs(imageById, showMap)
 
 // ── Reconstruction ────────────────────────────────────────────────────────────
-const {
-  cameras, points3d, reconStatus, reconSummary,
-  reconstruct, clearReconstruction, restoreReconstruction,
-} = useReconstruction({ images, matchStore, persist: persistContext })
+// Project-scoped store; restore/clear run through the project-store registry.
+const reconstructionStore = useReconstructionStore()
+const { cameras, points3d, reconStatus, clouds, selectedCloudId, selectedCloud, depthMaps } = storeToRefs(reconstructionStore)
+const { reconstruct, computeDepthMaps, densify, selectCloud, removeCloud, renameCloud } = reconstructionStore
+
+// Clicking a point cloud in the sidebar shows it in the 3D viewer.
+function showCloud(id) {
+  selectCloud(id)
+  activateTab('viewer')
+}
 
 // ── Ground Control Points ───────────────────────────────────────────────────────
-const {
-  gcps, addGcps, setGcpAccuracy, removeGcp, clearGcps, restoreGcps, reprojectGcps,
-} = useGcps({ images, currentCrs, persist: persistContext })
+const gcpsStore = useGcpsStore()
+const { gcps } = storeToRefs(gcpsStore)
+const { addGcps, setGcpAccuracy, removeGcp, reprojectGcps } = gcpsStore
 
 // ── Footprints ──────────────────────────────────────────────────────────────────
-const {
-  footprints, addFootprints, clearFootprints, restoreFootprints, reprojectFootprints,
-} = useFootprints({ images, currentCrs, persist: persistContext })
+const footprintsStore = useFootprintsStore()
+const { footprints } = storeToRefs(footprintsStore)
+const { addFootprints, computeFootprints, reprojectFootprints } = footprintsStore
 
 // ── Sensors (shared intrinsics) ───────────────────────────────────────────────────
+// Project-scoped, but restored/cleared manually (must precede images — its EXIF
+// auto-grouping watcher reacts to the image list).
+const sensorsStore = useSensorsStore()
+const { sensors } = storeToRefs(sensorsStore)
 const {
-  sensors, imageCount: sensorImageCount,
-  addSensors, updateSensor, assignSensor, mergeSensors, removeSensor, clearSensors, restoreSensors,
-} = useSensors({ images, persist: persistContext })
+  imageCount: sensorImageCount,
+  addSensors, updateSensor, toggleSensorFixed, assignSensor, mergeSensors, removeSensor, clearSensors, restoreSensors,
+} = sensorsStore
 
 // ── Camera poses (extrinsics) ─────────────────────────────────────────────────────
-const {
-  poses, addPoses, removePose, clearPoses, restorePoses, reprojectPoses,
-} = usePoses({ images, currentCrs, persist: persistContext })
+const posesStore = usePosesStore()
+const { poses } = storeToRefs(posesStore)
+const { addPoses, removePose, reprojectPoses } = posesStore
 
 // ── Modals ────────────────────────────────────────────────────────────────────
 const {
   settingsOpen, aboutOpen,
   projectPickerOpen, newProjectOpen, newProjectCanCancel,
   detectFeaturesOpen, matchFeaturesOpen,
-  imageTableOpen, sensorTableOpen, gcpTableOpen, matchListOpen, reconstructOpen,
+  imageTableOpen, maskManagerOpen, sensorTableOpen, gcpTableOpen, matchListOpen, reconstructOpen,
+  depthMapsOpen, denseOpen,
   gcpImportOpen, gcpImportText, gcpImportName, gcpImportGeojson, gcpImportCrs,
-  footprintImportOpen, footprintImportData,
+  footprintImportOpen, footprintImportData, footprintFromPosesOpen,
   cameraImportOpen, cameraImportText, cameraImportName, cameraImportMode,
-  infoImageId, infoImage,
-} = useModals(imageById)
+  importKindOpen, importKindFile,
+  infoImageId,
+} = storeToRefs(useModalsStore())
+
+// Resolved image for the Image Info modal. Lives here (not in the modals store)
+// because it needs the image list; moves into the store once images is one too.
+const infoImage = computed(() => infoImageId.value ? imageById(infoImageId.value) : null)
 
 // ── Pipeline ──────────────────────────────────────────────────────────────────
 const {
   progressOpen, progressTitle, progressCurrent, progressTotal, progressLabel,
-  runDetect, runMatch, runReconstruct,
-} = usePipeline({ images, detectAll, matchAll, onImageDetected, reconstruct })
+  cancelRun, runDetect, runMatch, runReconstruct, runComputeDepthMaps, runDensify,
+} = usePipeline({ images, detectAll, matchAll, onImageDetected, reconstruct, computeDepthMaps, densify })
+
+// Dense pipeline gating for the Ribbon.
+const sparseReady = computed(() => clouds.value.some((c) => c.kind === 'sparse' && c.cameras.size >= 2))
+const depthMapCount = computed(() => depthMaps.value.size)
 
 // ── Derived state ──────────────────────────────────────────────────────────────
 const selected = computed(() => images.value.find((img) => img.id === selectedId.value) || null)
+
+const kpImageCount = computed(() => images.value.filter(img => img.kpStatus === 'done').length)
 
 const matchSummaries = computed(() => {
   const result = []
@@ -201,9 +215,13 @@ const activeImageGcps = computed(() => {
 
 // ── Viewer ref (for imperative point-cloud updates) ───────────────────────────
 const viewerRef = ref(null)
+const mapViewerRef = ref(null)
 
-watch(reconStatus, (s) => {
-  if (s === 'done') viewerRef.value?.setReconstructionData(cameras.value, points3d.value)
+// Push the selected point cloud into the 3D viewer. Reference changes on select,
+// rebuild (a fresh object replaces the sparse cloud), and restore.
+watch(selectedCloud, (c) => {
+  if (c) viewerRef.value?.setReconstructionData(c.cameras, c.points)
+  else viewerRef.value?.clearReconstructionData()
 })
 
 // ── Console ───────────────────────────────────────────────────────────────────
@@ -243,32 +261,24 @@ async function openProject(id) {
   if (!projectData) return
   if (projectData.crs) await ensureProjection(projectData.crs).catch(() => {})
   resetToViewer()
-  clearReconstruction()
   viewerRef.value?.clearReconstructionData()
   // Restore sensors before images: EXIF auto-grouping reacts to the image list,
   // so the saved sensors must already be in place or it would mint duplicates
-  // and clobber manual sensor assignments.
+  // and clobber manual sensor assignments. Both have bespoke restore signatures,
+  // so they stay manual; every other project-scoped store restores through the
+  // registry below (matches, reconstruction, GCPs, footprints, poses).
   await restoreSensors(id)
   await restoreImages(projectData.images || [], id)
-  await restoreMatches(id)
-  await restoreReconstruction(id)
-  await restoreGcps(id, projectData.crs)
-  await restoreFootprints(id, projectData.crs)
-  await restorePoses(id, projectData.crs)
-  if (reconStatus.value === 'done')
-    viewerRef.value?.setReconstructionData(cameras.value, points3d.value)
+  await restoreProjectStores({ projectId: id, projectData })
+  // restore() sets selectedCloud, which the watcher pushes into the viewer.
 }
 
 // ── New project ───────────────────────────────────────────────────────────────
 async function handleCreateProject({ name, sceneType, crs }) {
   newProjectOpen.value = false
   clearAll(resetToViewer)
-  clearMatches()
-  clearGcps()
-  clearFootprints()
   clearSensors()
-  clearPoses()
-  clearReconstruction({ purge: true })
+  clearProjectStores({ purge: true })   // matches, reconstruction, GCPs, footprints, poses
   viewerRef.value?.clearReconstructionData()
   if (crs) await ensureProjection(crs).catch(() => {})
   await createProject(name, sceneType, crs)
@@ -336,11 +346,70 @@ async function openImportFile(file) {
   gcpImportOpen.value = true
 }
 
+// Sidebar drag-and-drop has no declared intent, so classify the dropped file and
+// route it: GCPs/footprints → GCP importer, poses/intrinsics → camera importer,
+// and anything ambiguous (a bare name + X/Y/Z list) → a small chooser.
+async function openDroppedImport(file) {
+  if (!file) return
+  let text
+  try {
+    text = await file.text()
+  } catch (err) {
+    console.error('Could not read dropped file', err)
+    return
+  }
+  routeImport(file, detectFileKind(text, file.name).kind)
+}
+
+function routeImport(file, kind) {
+  if (kind === 'pose' || kind === 'sensor') openCameraImport(file, kind)
+  else if (kind === 'gcp' || kind === 'footprint') openImportFile(file)
+  else { importKindFile.value = file; importKindOpen.value = true }
+}
+
+// User answered the "what is this file?" chooser.
+function onImportKindChosen(kind) {
+  const file = importKindFile.value
+  importKindOpen.value = false
+  importKindFile.value = null
+  if (file) routeImport(file, kind)
+}
+
+// User re-classified the file from inside an open import modal ("Import as …").
+function onImportSwitchKind({ kind, rawText, fileName }) {
+  gcpImportOpen.value = false
+  cameraImportOpen.value = false
+  if (kind === 'gcp') {
+    gcpImportGeojson.value = null
+    gcpImportCrs.value = null
+    gcpImportText.value = rawText
+    gcpImportName.value = fileName
+    gcpImportOpen.value = true
+  } else {
+    cameraImportText.value = rawText
+    cameraImportName.value = fileName
+    cameraImportMode.value = kind // 'pose' | 'sensor'
+    cameraImportOpen.value = true
+  }
+}
+
+// Switch to the map and centre it on an image's position (pose or EXIF GPS).
+function zoomToImagePosition(imgId) {
+  activateTab('map')
+  nextTick(() => mapViewerRef.value?.zoomToImage(imgId))
+}
+
 async function onGcpImport({ gcps: parsed, sourceCrs }) {
   gcpImportOpen.value = false
   gcpImportGeojson.value = null
   await addGcps(parsed, sourceCrs)
   activateTab('map')
+}
+
+function onFootprintFromPoses(settings) {
+  footprintFromPosesOpen.value = false
+  const { computed: n } = computeFootprints(settings)
+  if (n > 0) activateTab('map')
 }
 
 async function onFootprintImport({ footprints: parsed, sourceCrs }) {
@@ -401,31 +470,78 @@ function exportSensors() {
   downloadCsv(`${currentProjectName.value || 'project'}-sensors.csv`, buildSensorsCsv(sensors.value))
 }
 
+function saveJson(data, filename) {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+function exportKeypoints() {
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-')
+  const data = images.value
+    .filter(img => img.kpStatus === 'done' && img.keypoints?.length)
+    .map(img => ({
+      image: img.name,
+      uuid: img.uuid,
+      kpCount: img.kpCount,
+      keypoints: img.keypoints.map(kp => ({ x: kp.x, y: kp.y, scale: kp.scale, response: kp.response })),
+    }))
+  saveJson(data, `keypoints-${stamp}.json`)
+}
+
+function exportMatches() {
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-')
+  const byUuid = Object.fromEntries(images.value.map(img => [img.uuid, img.name]))
+  const data = []
+  for (const [, entry] of matchStore.value) {
+    if (entry.status !== 'done') continue
+    data.push({
+      imageA: byUuid[entry.idA] ?? entry.idA,
+      imageB: byUuid[entry.idB] ?? entry.idB,
+      rawCount: entry.rawCount,
+      inlierCount: entry.inlierCount,
+      matches: entry.matches,
+    })
+  }
+  saveJson(data, `matches-${stamp}.json`)
+}
+
 // ── Project picker actions ────────────────────────────────────────────────────
 async function handleSwitchProject(id) {
   if (id === currentProjectId.value) { projectPickerOpen.value = false; return }
   projectPickerOpen.value = false
   clearAll(resetToViewer)
-  clearMatches()
-  clearGcps()
-  clearFootprints()
   clearSensors()
-  clearPoses()
+  clearProjectStores()
   await openProject(id)
 }
 
 async function handleDeleteProject(id) {
   const nextId = await deleteProjectById(id)
+
+  // Deleting the last project leaves nothing to pick — close the picker and go
+  // straight to project creation (non-cancellable), never an empty list.
+  if (projects.value.length === 0) {
+    projectPickerOpen.value = false
+    clearAll(resetToViewer)
+    clearSensors()
+    clearProjectStores({ purge: true })
+    viewerRef.value?.clearReconstructionData()
+    newProjectCanCancel.value = false
+    newProjectOpen.value = true
+    return
+  }
+
   if (id === currentProjectId.value) {
     clearAll(resetToViewer)
-    clearGcps()
-    clearFootprints()
     clearSensors()
-    clearPoses()
-    clearReconstruction({ purge: true })
+    clearProjectStores({ purge: true })
     viewerRef.value?.clearReconstructionData()
     if (nextId) await openProject(nextId)
-    else { newProjectCanCancel.value = false; newProjectOpen.value = true }
   }
 }
 
@@ -433,6 +549,16 @@ async function handleDeleteProject(id) {
 function onDetectRun(settings)      { detectFeaturesOpen.value = false;  runDetect(settings)      }
 function onMatchRun(settings)       { matchFeaturesOpen.value  = false;  runMatch(settings)       }
 function onReconstructRun(settings) { reconstructOpen.value    = false;  runReconstruct(settings) }
+
+// Open an image from the Mask Manager and drop straight into mask-draw mode.
+function editMask(id) {
+  maskManagerOpen.value = false
+  openImageTab(id)
+  const tab = activeTab.value
+  if (tab?.type === 'image') { tab.showMask = true; tab.maskMode = 'draw' }
+}
+function onDepthMapsRun(settings)   { depthMapsOpen.value      = false;  runComputeDepthMaps(settings) }
+function onDenseRun(settings)       { denseOpen.value          = false;  runDensify(settings) }
 
 // ── ImageViewer refs (for imperative mask ops) ────────────────────────────────
 const imageViewerRefs = reactive({})
@@ -450,15 +576,29 @@ function handleCommand(id) {
     case 'import-calib':         cameraPickMode.value = 'sensor'; cameraInput.value.click(); break
     case 'export-cameras':       exportPoses(); break
     case 'export-sensors':       exportSensors(); break
-    case 'clear-all':            clearAll(resetToViewer); clearMatches(); clearGcps(); clearFootprints(); clearSensors(); clearPoses(); clearReconstruction({ purge: true }); viewerRef.value?.clearReconstructionData(); break
+    case 'export-keypoints':     exportKeypoints(); break
+    case 'export-matches':       exportMatches(); break
+    case 'clear-all':            clearAll(resetToViewer); clearSensors(); clearProjectStores({ purge: true }); viewerRef.value?.clearReconstructionData(); break
     case 'remove-selected':      if (selectedId.value) removeImage(selectedId.value, closeTabForImage); break
     case 'view-viewer':          activateTab('viewer'); break
     case 'view-map':             activateTab('map'); break
+    case 'view-preset-top':      viewerRef.value?.setView('top'); break
+    case 'view-preset-bottom':   viewerRef.value?.setView('bottom'); break
+    case 'view-preset-left':     viewerRef.value?.setView('left'); break
+    case 'view-preset-right':    viewerRef.value?.setView('right'); break
+    case 'view-preset-front':    viewerRef.value?.setView('front'); break
+    case 'view-preset-back':     viewerRef.value?.setView('back'); break
+    case 'reset-view':           viewerRef.value?.resetView(); break
+    case 'map-fit-view':         mapViewerRef.value?.fitView(); break
     case 'open-image-table':     imageTableOpen.value = true; break
+    case 'open-mask-manager':    maskManagerOpen.value = true; break
     case 'open-sensor-table':    sensorTableOpen.value = true; break
     case 'open-gcp-table':       gcpTableOpen.value = true; break
     case 'open-match-list':      matchListOpen.value = true; break
     case 'reconstruct':          reconstructOpen.value = true; break
+    case 'compute-depth':        depthMapsOpen.value = true; break
+    case 'dense':                denseOpen.value = true; break
+    case 'footprints-from-poses': footprintFromPosesOpen.value = true; break
     case 'detect-features':      detectFeaturesOpen.value = true; break
     case 'match-features':       matchFeaturesOpen.value = true; break
     case 'open-settings':        settingsOpen.value = true; break
@@ -521,9 +661,12 @@ function onRibbonPick(event) {
       :has-selection="!!selected"
       :image-count="images.length"
       :match-count="matchSummaries.length"
+      :kp-image-count="kpImageCount"
       :gcp-count="gcps.length"
       :pose-count="poses.length"
       :sensor-count="sensors.length"
+      :sparse-ready="sparseReady"
+      :depth-map-count="depthMapCount"
       :active-image-id="activeImageTab?.id ?? null"
       :active-image-name="activeImageTab?.name ?? null"
       :image-view-state="activeImageViewState"
@@ -576,6 +719,22 @@ function onRibbonPick(event) {
     </Teleport>
 
     <Teleport to="body">
+      <DepthMapsModal
+        v-if="depthMapsOpen"
+        @close="depthMapsOpen = false"
+        @run="onDepthMapsRun"
+      />
+    </Teleport>
+
+    <Teleport to="body">
+      <DenseModal
+        v-if="denseOpen"
+        @close="denseOpen = false"
+        @run="onDenseRun"
+      />
+    </Teleport>
+
+    <Teleport to="body">
       <GcpImportModal
         v-if="gcpImportOpen"
         :raw-text="gcpImportText"
@@ -585,6 +744,16 @@ function onRibbonPick(event) {
         :detected-crs="gcpImportCrs"
         @close="gcpImportOpen = false; gcpImportGeojson = null; gcpImportText = ''; gcpImportCrs = null"
         @import="onGcpImport"
+        @switch-kind="onImportSwitchKind"
+      />
+    </Teleport>
+
+    <Teleport to="body">
+      <ImportKindModal
+        v-if="importKindOpen && importKindFile"
+        :file-name="importKindFile.name"
+        @close="importKindOpen = false; importKindFile = null"
+        @select="onImportKindChosen"
       />
     </Teleport>
 
@@ -603,6 +772,17 @@ function onRibbonPick(event) {
     </Teleport>
 
     <Teleport to="body">
+      <FootprintFromPosesModal
+        v-if="footprintFromPosesOpen"
+        :poses="poses"
+        :sensors="sensors"
+        :images="images"
+        @close="footprintFromPosesOpen = false"
+        @run="onFootprintFromPoses"
+      />
+    </Teleport>
+
+    <Teleport to="body">
       <CameraImportModal
         v-if="cameraImportOpen"
         :raw-text="cameraImportText"
@@ -611,6 +791,7 @@ function onRibbonPick(event) {
         :detected-mode="cameraImportMode"
         @close="cameraImportOpen = false"
         @import="onCameraImport"
+        @switch-kind="onImportSwitchKind"
       />
     </Teleport>
 
@@ -621,6 +802,8 @@ function onRibbonPick(event) {
         :current="progressCurrent"
         :total="progressTotal"
         :label="progressLabel"
+        :cancelable="true"
+        @cancel="cancelRun"
       />
     </Teleport>
 
@@ -629,6 +812,7 @@ function onRibbonPick(event) {
         v-if="settingsOpen"
         :theme="theme"
         :crs="currentProjectId ? currentCrs : null"
+        :scene-type="currentSceneType"
         @close="settingsOpen = false"
         @set-theme="setTheme"
         @set-crs="handleSetCrs"
@@ -654,6 +838,12 @@ function onRibbonPick(event) {
         @assign-sensor="({ imageId, sensorId }) => assignSensor(imageId, sensorId)"
         @open-sensor-table="imageTableOpen = false; sensorTableOpen = true"
       />
+
+      <MaskManagerModal
+        v-if="maskManagerOpen"
+        @close="maskManagerOpen = false"
+        @edit="editMask"
+      />
     </Teleport>
 
     <Teleport to="body">
@@ -664,6 +854,7 @@ function onRibbonPick(event) {
         :cameras="cameras"
         @close="sensorTableOpen = false"
         @update="({ id, field, value }) => updateSensor(id, field, value)"
+        @toggle-fixed="({ id, field }) => toggleSensorFixed(id, field)"
         @remove="removeSensor"
       />
     </Teleport>
@@ -704,11 +895,17 @@ function onRibbonPick(event) {
         :gcps="gcps"
         :sensors="sensors"
         :poses="poses"
-        :reconstruction="reconSummary"
+        :clouds="clouds"
+        :selected-cloud-id="selectedCloudId"
+        :recon-status="reconStatus"
         :sensor-image-count="sensorImageCount"
         :selected-id="selectedId"
+        @select-cloud="showCloud"
+        @remove-cloud="removeCloud"
+        @rename-cloud="({ id, name }) => renameCloud(id, name)"
+        @reconstruct="reconstructOpen = true"
         @add-images="addImages"
-        @gcp-file="openImportFile"
+        @import-file="openDroppedImport"
         @remove-image="(id) => removeImage(id, closeTabForImage)"
         @remove-gcp="removeGcp"
         @remove-sensor="removeSensor"
@@ -719,6 +916,7 @@ function onRibbonPick(event) {
         @open="(id) => openImageTab(id)"
         @show-info="infoImageId = $event"
         @delete-keypoints="clearKeypoints"
+        @zoom-to-image="zoomToImagePosition"
       />
       <main class="main">
         <div class="tabstrip">
@@ -736,7 +934,7 @@ function onRibbonPick(event) {
 
         <div class="content">
           <Viewer3D ref="viewerRef" v-show="activeTabId === 'viewer'" :theme="theme" />
-          <ViewerMap v-show="activeTabId === 'map'" :images="images" :gcps="gcps" :footprints="footprints" :selected-id="selectedId" :crs="currentCrs" @select="selectImage" />
+          <ViewerMap ref="mapViewerRef" v-show="activeTabId === 'map'" :images="images" :gcps="gcps" :footprints="footprints" :poses="poses" :selected-id="selectedId" :crs="currentCrs" @select="selectImage" />
           <template v-for="tab in tabs" :key="tab.id">
             <ViewerImage
               v-if="tab.type === 'image' && imageById(tab.imageId)"

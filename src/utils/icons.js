@@ -19,12 +19,35 @@ export const icons = {
     <rect x="4" y="4" width="16" height="16" rx="1.5" />
     <path d="M8 12h7" />
     <path d="M12 9l3 3-3 3" />`,
+  'view-bottom': `
+    <rect x="4" y="4" width="16" height="16" rx="1.5" />
+    <path d="M12 8v7" />
+    <path d="M9 12l3 3 3-3" />`,
+  'view-left': `
+    <rect x="4" y="4" width="16" height="16" rx="1.5" />
+    <path d="M16 12H9" />
+    <path d="M12 9l-3 3 3 3" />`,
+  'view-right': `
+    <rect x="4" y="4" width="16" height="16" rx="1.5" />
+    <path d="M8 12h7" />
+    <path d="M12 9l3 3-3 3" />`,
   'view-front': `
     <rect x="4" y="4" width="16" height="16" rx="1.5" />
     <rect x="9" y="9" width="6" height="6" rx="1" />`,
+  'view-back': `
+    <rect x="7" y="7" width="13" height="13" rx="1.5" />
+    <path d="M4 16V4h12" />`,
   'view-reset': `
     <path d="M4 11a8 8 0 1 1 1.5 5" />
     <path d="M4 17v-5h5" />`,
+  grid: `
+    <rect x="4" y="4" width="16" height="16" rx="1.5" />
+    <path d="M4 10h16M4 14h16M10 4v16M14 4v16" />`,
+  'fit-view': `
+    <path d="M4 9V5a1 1 0 0 1 1-1h4" />
+    <path d="M20 9V5a1 1 0 0 0-1-1h-4" />
+    <path d="M4 15v4a1 1 0 0 0 1 1h4" />
+    <path d="M20 15v4a1 1 0 0 1-1 1h-4" />`,
   console: `
     <rect x="3" y="5" width="18" height="14" rx="2" />
     <path d="M7 10l3 2.5L7 15" />
@@ -123,6 +146,13 @@ export const icons = {
   remove: `
     <circle cx="12" cy="12" r="8.5" />
     <path d="M9 9l6 6M15 9l-6 6" />`,
+
+  // ── Tools ───────────────────────────────────────────────────────────────────
+  // Ground footprint: a perspective quadrilateral with the camera nadir at top.
+  footprint: `
+    <circle cx="12" cy="4" r="1.5" />
+    <path d="M12 5.5L8 12M12 5.5L16 12" opacity="0.6" />
+    <path d="M5 13l7-2 7 2-7 7z" />`,
 }
 
 export default icons
