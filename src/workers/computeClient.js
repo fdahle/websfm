@@ -106,3 +106,13 @@ export const computeDepthMaps = streamingOp('computeDepthMaps')
 // Dense Stage B — fuse the Stage A depth maps into a coloured point cloud.
 // Resolves to { points: Float32Array } packed as [x,y,z,r,g,b] per point.
 export const densify = streamingOp('densify')
+
+// Products — DEM (rasterise a height grid in the chosen frame). Resolves to the
+// grid { width, height, gsd, originX, originY, data, mask, zMin, zMax, frame,
+// crs, unit, previewDataUrl }. See core/dem.js.
+export const generateDem = streamingOp('generateDem')
+
+// Products — orthophoto (reproject each DEM cell into the cached depth maps).
+// Resolves to { width, height, rgba:Uint8Array, covered, previewDataUrl }.
+// See core/ortho.js.
+export const generateOrtho = streamingOp('generateOrtho')

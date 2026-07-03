@@ -56,6 +56,7 @@ export function bundle_adjust(cameras_flat, intrinsics_flat, pts_flat, obs_flat,
  * @param {Uint32Array} src_dims
  * @param {Float32Array} src_k
  * @param {Float32Array} src_rel
+ * @param {Uint8Array} src_mask
  * @param {Float32Array} seed_depth
  * @param {number} depth_min
  * @param {number} depth_max
@@ -65,7 +66,7 @@ export function bundle_adjust(cameras_flat, intrinsics_flat, pts_flat, obs_flat,
  * @param {number} seed
  * @returns {Float32Array}
  */
-export function compute_depth_map(ref_gray, ref_w, ref_h, ref_k, src_gray, src_dims, src_k, src_rel, seed_depth, depth_min, depth_max, window, iterations, best_k, seed) {
+export function compute_depth_map(ref_gray, ref_w, ref_h, ref_k, src_gray, src_dims, src_k, src_rel, src_mask, seed_depth, depth_min, depth_max, window, iterations, best_k, seed) {
     const ptr0 = passArray8ToWasm0(ref_gray, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
     const ptr1 = passArrayF32ToWasm0(ref_k, wasm.__wbindgen_malloc);
@@ -78,12 +79,14 @@ export function compute_depth_map(ref_gray, ref_w, ref_h, ref_k, src_gray, src_d
     const len4 = WASM_VECTOR_LEN;
     const ptr5 = passArrayF32ToWasm0(src_rel, wasm.__wbindgen_malloc);
     const len5 = WASM_VECTOR_LEN;
-    const ptr6 = passArrayF32ToWasm0(seed_depth, wasm.__wbindgen_malloc);
+    const ptr6 = passArray8ToWasm0(src_mask, wasm.__wbindgen_malloc);
     const len6 = WASM_VECTOR_LEN;
-    const ret = wasm.compute_depth_map(ptr0, len0, ref_w, ref_h, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4, ptr5, len5, ptr6, len6, depth_min, depth_max, window, iterations, best_k, seed);
-    var v8 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
+    const ptr7 = passArrayF32ToWasm0(seed_depth, wasm.__wbindgen_malloc);
+    const len7 = WASM_VECTOR_LEN;
+    const ret = wasm.compute_depth_map(ptr0, len0, ref_w, ref_h, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4, ptr5, len5, ptr6, len6, ptr7, len7, depth_min, depth_max, window, iterations, best_k, seed);
+    var v9 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
     wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
-    return v8;
+    return v9;
 }
 
 /**

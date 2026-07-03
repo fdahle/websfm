@@ -181,12 +181,13 @@ export async function reconstruct(input, hooks = {}) {
     return [med(rs), med(gs), med(bs)]
   }
 
-  const done = (status) => ({
+  const done = (status, summary = null) => ({
     status,
     cameras: [...cameras.entries()].map(([uuid, cam]) => ({ uuid, ...cam })),
     points: points3d.map(({ x, y, z, views }) => ({
       x, y, z, views: [...views.entries()], color: pointColor(views),
     })),
+    summary,
   })
 
   try {
@@ -230,9 +231,18 @@ export async function reconstruct(input, hooks = {}) {
       const K = resolveK(img.meta, img.sensor)
       Kmap.set(img.uuid, K)
       if (K.source.startsWith('default')) defaultKCount++
+      const implied = K.impliedFilmWidthMm != null
+        ? ` [implies ${K.impliedFilmWidthMm.toFixed(0)}mm film width]` : ''
       log(`Reconstruction: K[${img.name}] fx=${K.fx.toFixed(1)} fy=${K.fy.toFixed(1)} `
-        + `cx=${K.cx.toFixed(1)} cy=${K.cy.toFixed(1)} — ${K.source}`,
+        + `cx=${K.cx.toFixed(1)} cy=${K.cy.toFixed(1)} — ${K.source}${implied}`,
         'debug', 'Reconstruction')
+      // The pixel-pitch path can silently produce an off-standard film width (a
+      // ~9% focal error on the CA…V set). Flag it so the user checks pitch/format.
+      if (K.impliedFilmWidthMm != null && K.filmWidthOk === false) {
+        log(`Reconstruction: K[${img.name}] implied film width ${K.impliedFilmWidthMm.toFixed(0)}mm `
+          + `is not a standard aerial format (~230/240mm) — check the scan pixel pitch, or use the `
+          + `film/sensor-format (mm) field instead of pixel size.`, 'warn', 'Reconstruction')
+      }
     }
     if (defaultKCount > 0) {
       log(`Reconstruction: ${defaultKCount}/${imgs.length} image(s) have no focal length — using a default FOV guess. `
@@ -336,6 +346,13 @@ export async function reconstruct(input, hooks = {}) {
         'debug', 'Reconstruction')
       viable.push(init)
     }
+
+    // Per-pair init reprojection (for the run summary / cross-run comparison).
+    const perPairInitReproj = viable.map((v) => ({
+      pair: `${v.nameA} ↔ ${v.nameB}`,
+      medianPx: v.reproj.median,
+      parallaxDeg: v.angle,
+    }))
 
     // Among candidates clearing the parallax floor, take the lowest-reprojection
     // seed. If none clear it, fall back to the widest baseline available.
@@ -645,7 +662,8 @@ export async function reconstruct(input, hooks = {}) {
     }
 
     log(`Reconstruction: ${cameras.size}/${imgs.length} cameras registered, ${points3d.length} points`, 'info', 'Reconstruction')
-    log(`Reconstruction: pre-BA reprojection — ${fmtStats(modelReprojStats())}`, 'info', 'Reconstruction')
+    const preBaStats = modelReprojStats()
+    log(`Reconstruction: pre-BA reprojection — ${fmtStats(preBaStats)}`, 'info', 'Reconstruction')
     markStage('registration')
 
     // ── Bundle adjustment + track filtering (Phase 2 + 3) ────────────────────
@@ -687,11 +705,20 @@ export async function reconstruct(input, hooks = {}) {
         return
       }
       // A correct bundle adjustment can only lower the cost; reject a worsening
-      // result rather than commit a diverged model.
+      // result rather than commit a diverged model. But a fully converged model
+      // can tick up by a float epsilon on a no-op re-solve — that's convergence,
+      // not divergence, so don't cry wolf (< 0.01px is below any real-world
+      // meaning). Only warn + reject when the cost genuinely grows (≥ 0.01px).
       if (result.costBefore != null && result.costAfter != null && result.costAfter > result.costBefore) {
-        log(`Reconstruction: ${label} REJECTED — RMS ${result.costBefore.toFixed(2)}px → `
-          + `${result.costAfter.toFixed(2)}px would worsen the model; keeping the pre-BA estimate`,
-          'warn', 'Reconstruction')
+        const delta = result.costAfter - result.costBefore
+        if (delta < 0.01) {
+          log(`Reconstruction: ${label} already converged (RMS ${result.costBefore.toFixed(2)}px unchanged); `
+            + `keeping the pre-BA estimate`, 'debug', 'Reconstruction')
+        } else {
+          log(`Reconstruction: ${label} REJECTED — RMS ${result.costBefore.toFixed(2)}px → `
+            + `${result.costAfter.toFixed(2)}px would worsen the model; keeping the pre-BA estimate`,
+            'warn', 'Reconstruction')
+        }
         return
       }
       uuidList.forEach((uuid, ci) => {
@@ -797,10 +824,29 @@ export async function reconstruct(input, hooks = {}) {
     log(`Reconstruction: total time ${(totalMs / 1000).toFixed(1)}s `
       + `(${Object.entries(stageTimes).map(([k, v]) => `${k} ${(v / 1000).toFixed(1)}s`).join(', ')})`, 'info', 'Reconstruction')
 
+    // Q3: persistable run summary so successive runs are honestly comparable
+    // ("did it improve" becomes a number, not a feeling). Persisted next to
+    // georef in reconstruction.json by the store.
+    const finalStats = modelReprojStats()
+    const nPoints = points3d.length
+    const pct3plusViewTracks = nPoints ? (100 * (tracks3 + tracks4) / nPoints) : 0
+    const summary = {
+      date: new Date().toISOString(),
+      nCameras: cameras.size,
+      nPoints,
+      pct3plusViewTracks,
+      preBaP95px: preBaStats.p95,
+      postBaMedianPx: finalStats.median,
+      perPairInitReproj,
+    }
+
     onProgress?.(imgs.length, imgs.length, 'Done')
     log(`Reconstruction complete: ${cameras.size} cameras, ${points3d.length} points, `
-      + `final reprojection ${fmtStats(modelReprojStats())}`, 'success', 'Reconstruction')
-    return done('done')
+      + `final reprojection ${fmtStats(finalStats)}`, 'success', 'Reconstruction')
+    log(`Reconstruction summary: ${summary.nCameras} cameras, ${summary.nPoints} points, `
+      + `${pct3plusViewTracks.toFixed(1)}% ≥3-view tracks, pre-BA p95 ${preBaStats.p95.toFixed(1)}px, `
+      + `post-BA median ${finalStats.median.toFixed(2)}px`, 'success', 'Reconstruction')
+    return done('done', summary)
   } catch (err) {
     log(`Reconstruction error: ${err?.message ?? err}`, 'error', 'Reconstruction')
     return done('error')

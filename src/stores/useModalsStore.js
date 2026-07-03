@@ -18,12 +18,15 @@ export const useModalsStore = defineStore('modals', () => {
   const matchFeaturesOpen   = ref(false)
   const imageTableOpen      = ref(false)
   const maskManagerOpen     = ref(false)
+  const autoMaskOpen        = ref(false)
   const sensorTableOpen     = ref(false)
   const gcpTableOpen        = ref(false)
   const matchListOpen       = ref(false)
   const reconstructOpen     = ref(false)
   const depthMapsOpen       = ref(false)
   const denseOpen           = ref(false)
+  const demOpen             = ref(false)
+  const orthoOpen           = ref(false)
   const gcpImportOpen       = ref(false)
   const gcpImportText       = ref('')
   const gcpImportName       = ref('')
@@ -50,12 +53,15 @@ export const useModalsStore = defineStore('modals', () => {
     matchFeaturesOpen,
     imageTableOpen,
     maskManagerOpen,
+    autoMaskOpen,
     sensorTableOpen,
     gcpTableOpen,
     matchListOpen,
     reconstructOpen,
     depthMapsOpen,
     denseOpen,
+    demOpen,
+    orthoOpen,
     gcpImportOpen,
     gcpImportText,
     gcpImportName,

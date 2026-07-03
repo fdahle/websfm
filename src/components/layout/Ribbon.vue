@@ -13,6 +13,9 @@ const props = defineProps({
   sensorCount: { type: Number, default: 0 },
   sparseReady: { type: Boolean, default: false },
   depthMapCount: { type: Number, default: 0 },
+  cloudReady: { type: Boolean, default: false },
+  demReady: { type: Boolean, default: false },
+  productReady: { type: Boolean, default: false },
   activeImageId: { type: String, default: null },
   activeImageName: { type: String, default: null },
   imageViewState: { type: Object, default: null },
@@ -20,6 +23,8 @@ const props = defineProps({
   persistenceEnabled: { type: Boolean, default: false },
   currentProjectName: { type: String, default: null },
   sceneType: { type: String, default: null },
+  showCameras: { type: Boolean, default: true },
+  showGraticule: { type: Boolean, default: true },
 })
 
 const emit = defineEmits(['command'])
@@ -76,7 +81,7 @@ const tabs = [
         label: 'Features',
         commands: [
           { id: 'detect-features', label: 'Detect\nFeatures', icon: 'sparkles', needsImages: true },
-          { id: 'match-features', label: 'Match\nFeatures', icon: 'link', needsImages: true },
+          { id: 'match-features', label: 'Match\nFeatures', icon: 'link', needsKeypoints: true },
         ],
       },
       {
@@ -90,8 +95,9 @@ const tabs = [
       {
         label: 'Products',
         commands: [
-          { id: 'gen-dem',   label: 'DEM',   icon: 'dem',   disabled: true },
-          { id: 'gen-ortho', label: 'Ortho', icon: 'ortho', disabled: true },
+          { id: 'gen-dem',       label: 'DEM',     icon: 'dem',   needsCloud: true },
+          { id: 'gen-ortho',     label: 'Ortho',   icon: 'ortho', needsDem: true, needsDepthMaps: true },
+          { id: 'view-products', label: 'Preview', icon: 'image', needsProducts: true },
         ],
       },
     ],
@@ -109,13 +115,13 @@ const tabs = [
       {
         label: 'Georeferencing',
         commands: [
-          { id: 'auto-georeference', label: 'Auto\nGeoref', icon: 'target', disabled: true },
+          { id: 'auto-georeference', label: 'Auto\nGeoref', icon: 'target', needsSparse: true, needsPoses: true, aerialOnly: true },
         ],
       },
       {
         label: 'Masks',
         commands: [
-          { id: 'auto-mask', label: 'Auto\nMask', icon: 'mask', disabled: true },
+          { id: 'auto-mask', label: 'Auto\nMask', icon: 'mask', needsImages: true },
         ],
       },
       {
@@ -197,6 +203,17 @@ const cameraGroup = {
   ],
 }
 
+// 3D scene display toggles (cameras / graticule). Sits beside the camera presets
+// when the 3D viewer is active.
+const sceneGroup = {
+  label: 'Scene',
+  dynamic: '3D',
+  commands: [
+    { id: 'view-toggle-cameras',   label: 'Cameras',   icon: 'camera', activeKey: 'showCameras' },
+    { id: 'view-toggle-graticule', label: 'Graticule', icon: 'grid',   activeKey: 'showGraticule' },
+  ],
+}
+
 const mapGroup = {
   label: 'Map',
   dynamic: '2D',
@@ -213,6 +230,13 @@ const pictureTab = {
   label: 'Picture',
   contextual: true,
   groups: [
+    {
+      label: 'Image',
+      commands: [
+        { id: 'img-show-info', label: 'Image\nInfo', icon: 'info' },
+        { id: 'img-remove',    label: 'Remove',      icon: 'remove', danger: true },
+      ],
+    },
     {
       label: 'Toggles',
       commands: [
@@ -256,13 +280,6 @@ const pictureTab = {
       ],
     },
     {
-      label: 'Depth',
-      commands: [
-        { id: 'img-depth-import', label: 'Import', icon: 'download' },
-        { id: 'img-depth-clear',  label: 'Clear',  icon: 'x', disableKey: 'noDepth' },
-      ],
-    },
-    {
       id: 'brush',
       label: 'Brush',
       maskOnly: true,
@@ -270,13 +287,6 @@ const pictureTab = {
         { id: 'img-brush-s', label: 'Small',  icon: 'brush-s', activeKey: 'brushS' },
         { id: 'img-brush-m', label: 'Medium', icon: 'brush-m', activeKey: 'brushM' },
         { id: 'img-brush-l', label: 'Large',  icon: 'brush-l', activeKey: 'brushL' },
-      ],
-    },
-    {
-      label: 'Image',
-      commands: [
-        { id: 'img-show-info', label: 'Image\nInfo', icon: 'info' },
-        { id: 'img-remove',    label: 'Remove',      icon: 'remove', danger: true },
       ],
     },
   ],
@@ -296,8 +306,11 @@ const allTabs = computed(() => (props.activeImageId ? [...tabs, pictureTab] : ta
 const currentTab = computed(() => {
   const tab = allTabs.value.find((t) => t.id === activeTab.value) || tabs[0]
   if (tab.id === 'view') {
-    const dynamic = props.activeView === 'map' ? mapGroup : cameraGroup
-    return { ...tab, groups: [...tab.groups, dynamic] }
+    // The contextual group tracks the *active viewer*, not merely "not map": while
+    // an image detail tab is open activeView is neither, so no 3D/2D group applies.
+    if (props.activeView === 'map')    return { ...tab, groups: [...tab.groups, mapGroup] }
+    if (props.activeView === 'viewer') return { ...tab, groups: [...tab.groups, cameraGroup, sceneGroup] }
+    return tab
   }
   return tab
 })
@@ -308,7 +321,9 @@ function isHidden(cmd) {
 
 function isActive(cmd) {
   if (cmd.view != null && cmd.view === props.activeView) return true
-  if (cmd.activeKey === 'consoleOpen') return props.consoleOpen
+  if (cmd.activeKey === 'consoleOpen')   return props.consoleOpen
+  if (cmd.activeKey === 'showCameras')   return props.showCameras
+  if (cmd.activeKey === 'showGraticule') return props.showGraticule
   const s = props.imageViewState
   if (!s || !cmd.activeKey) return false
   switch (cmd.activeKey) {
@@ -332,6 +347,9 @@ function isDisabled(cmd) {
   if (cmd.needsMatches   && props.matchCount === 0)   return true
   if (cmd.needsSparse    && !props.sparseReady)       return true
   if (cmd.needsDepthMaps && props.depthMapCount === 0) return true
+  if (cmd.needsCloud     && !props.cloudReady)        return true
+  if (cmd.needsDem       && !props.demReady)          return true
+  if (cmd.needsProducts  && !props.productReady)      return true
   if (cmd.needsKeypoints && props.kpImageCount === 0) return true
   if (cmd.needsGcps     && props.gcpCount === 0)   return true
   if (cmd.needsPoses    && props.poseCount === 0)  return true
@@ -350,6 +368,9 @@ function disabledReason(cmd) {
   if (cmd.needsMatches   && props.matchCount === 0)   return 'Run feature matching first'
   if (cmd.needsSparse    && !props.sparseReady)       return 'Build the sparse model first'
   if (cmd.needsDepthMaps && props.depthMapCount === 0) return 'Compute depth maps first'
+  if (cmd.needsCloud     && !props.cloudReady)        return 'Build a point cloud first'
+  if (cmd.needsDem       && !props.demReady)          return 'Build a DEM first'
+  if (cmd.needsProducts  && !props.productReady)      return 'Build a DEM or orthophoto first'
   if (cmd.needsKeypoints && props.kpImageCount === 0) return 'Detect keypoints first'
   if (cmd.needsGcps     && props.gcpCount === 0)   return 'Import GCPs first'
   if (cmd.needsPoses    && props.poseCount === 0)  return 'Import camera poses first'

@@ -8,7 +8,7 @@ import { terminateAll } from '../workers/computeClient.js'
 // reconstruct:      function      — from useReconstructionStore
 // computeDepthMaps:  function      — from useReconstructionStore (dense Stage A)
 // densify:          function      — from useReconstructionStore (dense Stage B)
-export function usePipeline({ images, detectAll, matchAll, onImageDetected, reconstruct, computeDepthMaps, densify }) {
+export function usePipeline({ images, detectAll, matchAll, onImageDetected, reconstruct, computeDepthMaps, densify, generateDem, generateOrtho }) {
   const progressOpen    = ref(false)
   const progressTitle   = ref('')
   const progressCurrent = ref(0)
@@ -100,6 +100,29 @@ export function usePipeline({ images, detectAll, matchAll, onImageDetected, reco
     progressOpen.value = false
   }
 
+  // Products — DEM (rasterise a height grid). Single worker call; cancel by
+  // terminating the worker (the store catches the rejection and resets status).
+  async function runGenerateDem(settings) {
+    openProgress('Building DEM', 1, () => terminateAll('DEM cancelled'))
+    await generateDem(settings, (done, total, label) => {
+      progressCurrent.value = done
+      progressTotal.value   = total
+      progressLabel.value   = label ?? ''
+    })
+    progressOpen.value = false
+  }
+
+  // Products — orthophoto (reproject the DEM through the cached depth maps).
+  async function runGenerateOrtho(settings) {
+    openProgress('Building Orthophoto', 1, () => terminateAll('orthophoto cancelled'))
+    await generateOrtho(settings, (done, total, label) => {
+      progressCurrent.value = done
+      progressTotal.value   = total
+      progressLabel.value   = label ?? ''
+    })
+    progressOpen.value = false
+  }
+
   return {
     progressOpen,
     progressTitle,
@@ -112,5 +135,7 @@ export function usePipeline({ images, detectAll, matchAll, onImageDetected, reco
     runReconstruct,
     runComputeDepthMaps,
     runDensify,
+    runGenerateDem,
+    runGenerateOrtho,
   }
 }

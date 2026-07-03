@@ -56,7 +56,34 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
    extension, then bundle adjustment + 2-pass track filtering. Heavily instrumented via
    `onLog` (toggle "Detail"/debug in DevConsole).
 4. **Dense MVS** (`core/mvs.js` + `crates/reconstruction/src/mvs.rs`): Stage A build
-   per-image PatchMatch depth maps; Stage B fuse with cross-view geometric consistency.
+   per-image PatchMatch depth maps → optional `filterDepthMap` (median/speckle cleanup)
+   → Stage B `fuseDepthMaps` (cross-view geometric consistency). Both stages now log
+   per-image timing, depth range, cost distribution, and fusion cull breakdown ('Dense'
+   category). **Perf**: single-threaded WASM, cost scales with overlap×sources×pixels²;
+   levers are `maxDim`/`maxSources`/`iterations`, or parallelism (not yet done). **Quality**
+   is gated by correct intrinsics — `resolveK` falling back to "default FOV" (fx=image
+   width) directly distorts depth.
+   - **WebGPU backend (in progress)**: `src/workers/gpu/` (`device.js` lazy device
+     singleton, `depthMapGpu.js`, `patchmatch.wgsl`). `depthMapForImage` takes the
+     depth-map kernel as an injected arg (default = WASM); the worker swaps in
+     `computeDepthMapGPU` when `settings.useGpu` is set and an adapter exists, with
+     automatic per-image fallback to WASM on error. Modal exposes it as "Use GPU
+     (experimental)", default off. **Phase 1 (current)**: `patchmatch.wgsl` ports the
+     ZNCC `plane_cost` for a *single* source + frontal normal (no propagation/refine/
+     best-K). `core/planeCost.js` is the pure JS reference (unit-tested); the worker
+     A/B-validates GPU vs CPU cost on the first image and logs `GPU validate: … RMS …`
+     (texels scaled ×255 in-shader so the textureless cutoff matches the reference).
+     **Phase 2 complete**: full multi-source PatchMatch on GPU — slanted-plane init,
+     red-black checkerboard sweeps (in-place; one dispatch per parity, no ping-pong),
+     decaying random refinement (PCG RNG), best-K cost aggregation. Sources packed
+     into a `texture_2d_array` (each in a maxW×maxH layer; sample coord clamped to the
+     valid (w,h) so bilinear never reads zero padding) + per-source pose storage
+     buffer. One `main` entry driven by `ctrl` (mode/parity/iter); state =
+     `array<vec4<f32>>` (depth+normal) + cost. A/B logs cost-consistency RMS
+     (recompute best-K on the CPU reference at the GPU's final depth+normal, expect
+     ~e-3) + median final cost (convergence). On real data: ~0.1s/img GPU vs minutes
+     on CPU. **Remaining (Phase 3)**: make GPU the default when available (still opt-in
+     via the modal). Dense quality is now gated by intrinsics + fusion, not the kernel.
 
 ## CRS / GCP / poses
 Per-project working CRS (proj4). GCPs, footprints, and camera poses store positions in

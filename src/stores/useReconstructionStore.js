@@ -4,14 +4,21 @@ import {
   reconstruct as workerReconstruct,
   computeDepthMaps as workerComputeDepthMaps,
   densify as workerDensify,
+  generateDem as workerGenerateDem,
+  generateOrtho as workerGenerateOrtho,
 } from '../workers/computeClient.js'
 import { useLog } from '../composables/useLog.js'
 import * as opfs from '../utils/opfs.js'
+import { fitSimilarity } from '../core/georef.js'
+import { aerialUpRotation, rotateReconstruction } from '../core/projection.js'
+import { cameraCenter } from '../core/geometry.js'
+import { qualityToMaxDim } from '../core/mvs.js'
 import { registerProjectStore } from './projectStores.js'
 import { useImagesStore } from './useImagesStore.js'
 import { useMatchesStore } from './useMatchesStore.js'
 import { useProjectsStore } from './useProjectsStore.js'
 import { useSensorsStore } from './useSensorsStore.js'
+import { usePosesStore } from './usePosesStore.js'
 
 // Project-scoped store: the sparse model (camera poses + 3D points) from
 // incremental SfM. Reads the image list and match graph from their stores;
@@ -23,6 +30,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
   const { images } = storeToRefs(imagesStore)
   const { matchStore } = storeToRefs(useMatchesStore())
   const { sensors } = storeToRefs(useSensorsStore())
+  const posesStore = usePosesStore()
 
   // Point clouds produced for this project. Each is an independent layer the user
   // can select in the sidebar and view in the 3D viewer (sparse now; dense later).
@@ -40,6 +48,27 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
   // reactive Proxy wrapper can't be structured-cloned to the densify worker.
   const depthMaps = shallowRef(new Map())
 
+  // Georeference: a fitted SfM→CRS similarity (scale + rotation + translation),
+  // or null in the local frame. { sim:{scale,R,t}, crs, rms, count, method }.
+  // Small + useful across sessions, so it persists in reconstruction.json.
+  const georef = ref(null)
+
+  // Quality summaries from the last sparse / dense run (Q3). Small, persisted in
+  // reconstruction.json so successive runs can be compared across sessions.
+  //   summary:      { date, nCameras, nPoints, pct3plusViewTracks, preBaP95px,
+  //                   postBaMedianPx, perPairInitReproj }
+  //   denseSummary: { costMedian, keptPct, cullBreakdown }
+  const summary = ref(null)
+  const denseSummary = ref(null)
+
+  // Products (DEM + orthophoto). Transient, recomputable rasters (large typed
+  // arrays) — shallowRef so the planes stay PLAIN, NOT persisted (like depthMaps).
+  //   dem:   { width, height, gsd, originX, originY, data, mask, zMin, zMax,
+  //            crs, unit, previewDataUrl }
+  //   ortho: { width, height, rgba, covered, previewDataUrl }
+  const dem = shallowRef(null)
+  const ortho = shallowRef(null)
+
   let cloudSeq = 0
   const makeCloudId = () => `cloud-${Date.now()}-${cloudSeq++}`
 
@@ -53,6 +82,14 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
   // viewer keep working off "the active model" without knowing about the list.
   const cameras = computed(() => selectedCloud.value?.cameras ?? new Map())
   const points3d = computed(() => selectedCloud.value?.points ?? [])
+
+  // Cameras of the sparse model specifically — only the sparse cloud carries
+  // bundle-adjusted poses/intrinsics. The sensor table reads estimated values
+  // from these, so it must not follow the viewer's selection (selecting the
+  // dense cloud, whose camera Map is empty, would otherwise blank the table).
+  const sparseCameras = computed(
+    () => clouds.value.find((c) => c.kind === 'sparse')?.cameras ?? new Map(),
+  )
 
   function selectCloud(id) {
     selectedCloudId.value = id
@@ -85,8 +122,19 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
       clouds: clouds.value.map((c) => ({
         id: c.id, name: c.name, kind: c.kind, createdAt: c.createdAt,
         cameras: [...c.cameras.entries()].map(([uuid, cam]) => ({ uuid, ...cam })),
-        points: c.points.map(({ x, y, z, color }) => ({ x, y, z, color })),
+        // Persist view-tracks ([uuid, kpIdx] pairs) so dense MVS can run on a
+        // restored project without rebuilding the sparse model. Dense clouds
+        // carry no tracks; their points serialize the empty array.
+        points: c.points.map(({ x, y, z, color, views }) => ({
+          x, y, z, color, views: views ? [...views.entries()] : [],
+        })),
       })),
+      // Small + reusable across sessions; the DEM/ortho rasters themselves are
+      // recomputable and stay out of the persisted doc.
+      georef: georef.value,
+      // Run-quality summaries (Q3) — tiny, kept for cross-run comparison.
+      summary: summary.value,
+      denseSummary: denseSummary.value,
     }
   }
 
@@ -136,8 +184,9 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
   // Dense Stage A — Build Depth Maps. Runs PatchMatch MVS in the worker over the
   // sparse cloud's registered cameras, stores the raw depth maps for fusion, and
   // pushes a display depth image into each image (viewer overlay). Needs a sparse
-  // cloud whose points still carry view-tracks (a freshly-built one — restored
-  // clouds drop tracks, so re-run Reconstruct first).
+  // cloud whose points carry view-tracks; these are now persisted, so a restored
+  // project works without rebuilding (legacy models saved before this still need
+  // a Reconstruct re-run).
   async function computeDepthMaps(settings = {}, onProgress) {
     const cloud = clouds.value.find((c) => c.kind === 'sparse')
     if (!cloud || cloud.cameras.size < 2) {
@@ -151,6 +200,17 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     }
     reconStatus.value = 'running'
     try {
+      // Resolve a quality preset → working maxDim from the largest native image
+      // dimension (Step 3), unless the user set an explicit maxDim in Advanced.
+      const resolved = { ...settings }
+      if (resolved.quality && !(resolved.maxDim > 0)) {
+        const nativeLong = images.value.reduce(
+          (m, im) => Math.max(m, im.meta?.width || 0, im.meta?.height || 0), 0)
+        resolved.maxDim = qualityToMaxDim(resolved.quality, nativeLong)
+        log(`Dense: quality '${resolved.quality}' → working ≤${resolved.maxDim}px `
+          + `(¼-scale presets of ${nativeLong}px native)`, 'info', 'Dense')
+      }
+      settings = resolved
       // Rebuild every value as plain arrays/objects: cloud cameras + points are
       // reactive Pinia state, and Vue's Proxy wrappers can't be structured-cloned
       // to the worker ("object can not be cloned").
@@ -200,7 +260,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     }
     reconStatus.value = 'running'
     try {
-      const { points: flat } = await workerDensify(
+      const { points: flat, summary: dSummary } = await workerDensify(
         { maps, settings },
         { onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl) => onProgress?.(d, t, lbl) },
       )
@@ -209,10 +269,130 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
         pts.push({ x: flat[i], y: flat[i+1], z: flat[i+2], color: [flat[i+3], flat[i+4], flat[i+5]] })
       }
       upsertDenseCloud(pts)
+      denseSummary.value = dSummary ?? null
       reconStatus.value = 'done'
       await persist()
     } catch (err) {
       log(`Densify error: ${err?.message ?? err}`, 'error', 'Dense')
+      reconStatus.value = 'error'
+    }
+  }
+
+  // ── Georeferencing + products (DEM / orthophoto) ─────────────────────────────
+
+  // 3D-3D correspondences for the SfM→CRS fit: registered sparse camera centres
+  // ↔ imported camera poses (both keyed to images; poses are in the project CRS).
+  function georefPairs() {
+    const cams = sparseCameras.value
+    if (!cams.size) return []
+    const imgById = new Map(images.value.map((im) => [im.id, im]))
+    const pairs = []
+    for (const p of posesStore.poses) {
+      if (p.enabled === false || p.imageId == null || p.x == null || p.y == null) continue
+      const im = imgById.get(p.imageId)
+      if (!im) continue
+      const cam = cams.get(im.uuid)
+      if (!cam) continue
+      pairs.push({ src: cameraCenter(cam), dst: [p.x, p.y, p.z ?? 0] })
+    }
+    return pairs
+  }
+
+  // True when a georeference can be fit (≥3 pose↔camera correspondences), so the
+  // product modals can offer a real-CRS output alongside the local frame.
+  const canGeoreference = computed(() => georefPairs().length >= 3)
+
+  // Fit (or refit) the SfM→CRS similarity from camera poses, targeting the current
+  // project CRS. Returns the georef record or null.
+  function georeference() {
+    const pairs = georefPairs()
+    if (pairs.length < 3) {
+      log('Georeference: need ≥3 camera poses matching registered images', 'warn', 'Products')
+      return null
+    }
+    const fit = fitSimilarity(pairs)
+    if (!fit) {
+      log('Georeference: fit failed (degenerate pose configuration)', 'warn', 'Products')
+      return null
+    }
+    georef.value = {
+      sim: { scale: fit.scale, R: fit.R, t: fit.t },
+      crs: projects.currentCrs, rms: fit.rms, count: fit.count, method: 'poses',
+    }
+    log(`Georeference: ${fit.count} poses → ${projects.currentCrs}, `
+      + `scale ${fit.scale.toPrecision(4)}, RMS ${fit.rms.toPrecision(3)}`, 'success', 'Products')
+    persist()
+    return georef.value
+  }
+
+  // Build a DEM from the densest available cloud, in the requested frame
+  // (settings.crs: 'local' | 'project'). A new DEM invalidates the old ortho.
+  async function generateDem(settings = {}, onProgress) {
+    const dense = clouds.value.find((c) => c.kind === 'dense')
+    const sparse = clouds.value.find((c) => c.kind === 'sparse')
+    const src = dense?.points?.length ? dense : sparse
+    if (!src || !src.points.length) {
+      log('DEM: build a point cloud first', 'warn', 'Products')
+      return
+    }
+    // Resolve the target frame. 'project' needs a georeference (fit on demand,
+    // refit if the CRS changed since); fall back to local if it can't be built.
+    let frameSpec = { kind: 'local' }
+    if (settings.crs && settings.crs !== 'local') {
+      const g = georef.value?.crs === projects.currentCrs ? georef.value : georeference()
+      if (g) frameSpec = { kind: 'similarity', ...g.sim, crs: g.crs }
+      else log('DEM: no georeference available — using the local frame', 'warn', 'Products')
+    }
+    reconStatus.value = 'running'
+    try {
+      // Plain copies: cloud state is reactive (Vue proxies can't be cloned).
+      const points = src.points.map((p) => ({ x: p.x, y: p.y, z: p.z }))
+      const cameras = [...(sparse?.cameras ?? new Map()).entries()].map(([uuid, cam]) => ({
+        uuid, R: cam.R.map((r) => [...r]), t: [...cam.t], K: { ...cam.K },
+      }))
+      const grid = await workerGenerateDem(
+        { points, cameras, frame: frameSpec, settings },
+        { onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl) => onProgress?.(d, t, lbl) },
+      )
+      dem.value = grid
+      ortho.value = null // a new DEM invalidates the old ortho
+      if (isPersisting()) {
+        opfs.saveProduct(projects.currentProjectId, 'dem', grid).catch(() => {})
+        opfs.deleteProduct(projects.currentProjectId, 'ortho').catch(() => {})
+      }
+      reconStatus.value = 'done'
+    } catch (err) {
+      log(`DEM error: ${err?.message ?? err}`, 'error', 'Products')
+      reconStatus.value = 'error'
+    }
+  }
+
+  // Orthorectify the current DEM using the cached depth maps (occlusion via their
+  // depth planes, colour from their RGB planes). Needs a DEM + depth maps.
+  async function generateOrtho(settings = {}, onProgress) {
+    if (!dem.value) { log('Ortho: build a DEM first', 'warn', 'Products'); return }
+    const maps = [...depthMaps.value.values()]
+    if (!maps.length) { log('Ortho: compute depth maps first', 'warn', 'Products'); return }
+    reconStatus.value = 'running'
+    try {
+      const d = dem.value
+      const demPayload = {
+        width: d.width, height: d.height, gsd: d.gsd, originX: d.originX, originY: d.originY,
+        data: d.data, mask: d.mask, frame: d.frame,
+      }
+      const mapsPayload = maps.map((m) => ({
+        uuid: m.uuid, width: m.width, height: m.height, K: m.K, R: m.R, t: m.t,
+        depth: m.depth, cost: m.cost, rgb: m.rgb,
+      }))
+      const res = await workerGenerateOrtho(
+        { dem: demPayload, maps: mapsPayload, settings },
+        { onLog: (m, l, c) => log(m, l, c), onProgress: (dn, t, lbl) => onProgress?.(dn, t, lbl) },
+      )
+      ortho.value = res
+      if (isPersisting()) opfs.saveProduct(projects.currentProjectId, 'ortho', res).catch(() => {})
+      reconStatus.value = 'done'
+    } catch (err) {
+      log(`Ortho error: ${err?.message ?? err}`, 'error', 'Products')
       reconStatus.value = 'error'
     }
   }
@@ -256,6 +436,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
             sensor: s
               ? {
                   focal: s.focal, focalUnit: s.focalUnit, pixelSize: s.pixelSize,
+                  sensorWidthMm: s.sensorWidthMm,
                   cx: s.cx, cy: s.cy, width: s.width, height: s.height,
                 }
               : null,
@@ -283,10 +464,24 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
       // Apply the model. Point view-tracks come back as [[uuid, kpIdx], …];
       // rebuild them as Maps to match the in-memory shape.
       if (result.status === 'done') {
-        const camMap = new Map()
+        let camMap = new Map()
         for (const { uuid, R, t, K } of result.cameras) camMap.set(uuid, { R, t, K })
-        const pts = result.points.map(({ x, y, z, views, color }) => ({ x, y, z, views: new Map(views), color }))
+        let pts = result.points.map(({ x, y, z, views, color }) => ({ x, y, z, views: new Map(views), color }))
+
+        // Aerial auto-orient: SfM leaves the model in an arbitrary frame (it can
+        // come out upside-down). For aerial surveys the cameras look down, so we
+        // rotate the whole model Z-up — cameras above the ground — before storing.
+        if (projects.currentSceneType === 'aerial') {
+          const R = aerialUpRotation(camMap)
+          if (R) {
+            const oriented = rotateReconstruction(camMap, pts, R)
+            camMap = oriented.cameras
+            pts = oriented.points
+            log('Oriented model Z-up (aerial: cameras above ground)', 'info', 'Reconstruction')
+          }
+        }
         upsertSparseCloud(camMap, pts)
+        summary.value = result.summary ?? null
         reconStatus.value = 'done'
         await persist()
       } else {
@@ -306,8 +501,14 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     selectedCloudId.value = null
     reconStatus.value = 'idle'
     depthMaps.value = new Map()
+    dem.value = null
+    ortho.value = null
+    georef.value = null
+    summary.value = null
+    denseSummary.value = null
     if (purge && isPersisting()) {
       opfs.deleteReconstruction(projects.currentProjectId).catch(() => {})
+      opfs.deleteProducts(projects.currentProjectId).catch(() => {})
     }
   }
 
@@ -339,10 +540,27 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
         kind: c.kind ?? 'sparse',
         createdAt: c.createdAt ?? Date.now(),
         cameras: map,
-        points: (c.points || []).map(({ x, y, z, color }) => ({ x, y, z, views: new Map(), color })),
+        // Restore view-tracks if persisted (legacy clouds saved none → empty Map).
+        points: (c.points || []).map(({ x, y, z, color, views }) => ({
+          x, y, z, color, views: new Map(views || []),
+        })),
       }
     })
     selectedCloudId.value = clouds.value[0]?.id ?? null
+    georef.value = data.georef ?? null
+    summary.value = data.summary ?? null
+    denseSummary.value = data.denseSummary ?? null
+
+    // Restore persisted raster products (DEM / ortho), if any.
+    const [savedDem, savedOrtho] = await Promise.all([
+      opfs.loadProduct(projectId, 'dem'),
+      opfs.loadProduct(projectId, 'ortho'),
+    ])
+    dem.value = savedDem
+    ortho.value = savedOrtho
+    if (savedDem || savedOrtho) {
+      log(`Products restored: ${[savedDem && 'DEM', savedOrtho && 'ortho'].filter(Boolean).join(' + ')}`, 'success', 'Products')
+    }
 
     if (clouds.value.length) {
       const camTotal = clouds.value.reduce((n, c) => n + c.cameras.size, 0)
@@ -355,9 +573,19 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     selectedCloudId,
     selectedCloud,
     cameras,
+    sparseCameras,
     points3d,
     reconStatus,
     depthMaps,
+    georef,
+    summary,
+    denseSummary,
+    dem,
+    ortho,
+    canGeoreference,
+    georeference,
+    generateDem,
+    generateOrtho,
     reconstruct,
     computeDepthMaps,
     densify,

@@ -5,6 +5,10 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 
 const props = defineProps({
   theme: { type: String, default: 'dark' },
+  // Source images ({ uuid, url, … }) — used to texture camera-frustum thumbnails.
+  images: { type: Array, default: () => [] },
+  showCameras: { type: Boolean, default: true },
+  showGraticule: { type: Boolean, default: true },
 })
 
 const container = ref(null)
@@ -13,6 +17,10 @@ let renderer, scene, camera, controls, animationId, resizeObserver, grid
 // Reconstruction scene objects (replaced on each setReconstructionData call)
 let pointCloud = null
 const frustumGroup = new THREE.Group()
+// Thumbnail textures live as long as their frustum; tracked so we can dispose
+// them when the scene is rebuilt (frustumGroup.clear() drops the meshes but not
+// the GPU textures they reference).
+let thumbTextures = []
 
 // Bounding sphere of the loaded scene — drives the camera view presets.
 const sceneCenter = new THREE.Vector3(0, 0, 0)
@@ -26,7 +34,12 @@ const GRID = {
 
 function makeGrid(t) {
   const [mc, gc] = GRID[t] ?? GRID.dark
-  return new THREE.GridHelper(10, 10, mc, gc)
+  const g = new THREE.GridHelper(10, 10, mc, gc)
+  // GridHelper lies in the XZ plane (three.js is Y-up); our scenes are Z-up, so
+  // rotate it onto the XY plane to act as the ground graticule.
+  g.rotation.x = Math.PI / 2
+  g.visible = props.showGraticule
+  return g
 }
 
 function init() {
@@ -37,7 +50,9 @@ function init() {
   scene.background = new THREE.Color(BG[props.theme] ?? BG.dark)
 
   camera = new THREE.PerspectiveCamera(60, w / h, 0.1, 10000)
-  camera.position.set(2.5, 2, 3)
+  // Z-up scene (elevation along +Z, matching the SfM/geospatial convention).
+  camera.up.set(0, 0, 1)
+  camera.position.set(3, -3, 2.5)
   camera.lookAt(0, 0, 0)
 
   renderer = new THREE.WebGLRenderer({ antialias: true })
@@ -47,6 +62,7 @@ function init() {
 
   grid = makeGrid(props.theme)
   scene.add(grid)
+  frustumGroup.visible = props.showCameras
   scene.add(frustumGroup)
 
   const dir = new THREE.DirectionalLight(0xffffff, 2)
@@ -71,9 +87,16 @@ function init() {
 function setReconstructionData(cameras, points3d) {
   if (!scene) return
 
+  // Was a model already loaded? If so we keep the current camera framing when the
+  // data is swapped (e.g. sparse ↔ dense of the same scene) rather than snapping
+  // back to the default view on every selection.
+  const hadContent = pointCloud !== null || frustumGroup.children.length > 0
+
   // Remove previous
-  if (pointCloud) { scene.remove(pointCloud); pointCloud.geometry.dispose() }
+  if (pointCloud) { scene.remove(pointCloud); pointCloud.geometry.dispose(); pointCloud = null }
   frustumGroup.clear()
+  for (const tex of thumbTextures) tex.dispose()
+  thumbTextures = []
 
   if (points3d.length === 0 && cameras.size === 0) {
     sceneCenter.set(0, 0, 0)
@@ -121,7 +144,10 @@ function setReconstructionData(cameras, points3d) {
       sceneRadius = r
       camera.near = r * 0.001
       camera.far  = r * 100
-      resetView()
+      camera.updateProjectionMatrix()
+      // Only auto-frame the very first model; swapping between clouds of an
+      // already-loaded scene leaves the user's viewpoint untouched.
+      if (!hadContent) resetView()
     }
   }
 
@@ -131,8 +157,10 @@ function setReconstructionData(cameras, points3d) {
   const frustumDepth = sceneScale * 0.15
 
   const frustumMat = new THREE.LineBasicMaterial({ color: 0xff8844 })
+  const urlByUuid = new Map(props.images.map((im) => [im.uuid, im.url]))
+  const texLoader = new THREE.TextureLoader()
 
-  for (const [, cam] of cameras) {
+  for (const [uuid, cam] of cameras) {
     const { R, t } = cam
     // Camera centre in world = -R^T * t
     const cx = -(R[0][0]*t[0] + R[1][0]*t[1] + R[2][0]*t[2])
@@ -163,6 +191,27 @@ function setReconstructionData(cameras, points3d) {
     const geo = new THREE.BufferGeometry()
     geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(verts), 3))
     frustumGroup.add(new THREE.LineSegments(geo, frustumMat))
+
+    // Thumbnail: a small textured quad on the frustum's far face (image plane).
+    // worldCorners is [BL-in-image, BR, TR, TL] in camera x-right / y-down space,
+    // so map UVs with the texture's top row (v=1) to the y=-hw corners.
+    const url = urlByUuid.get(uuid)
+    if (url) {
+      const [c0, c1, c2, c3] = worldCorners
+      const planeGeo = new THREE.BufferGeometry()
+      planeGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array([
+        c0.x, c0.y, c0.z,  c1.x, c1.y, c1.z,  c2.x, c2.y, c2.z,  c3.x, c3.y, c3.z,
+      ]), 3))
+      planeGeo.setAttribute('uv', new THREE.BufferAttribute(new Float32Array([
+        0, 1,  1, 1,  1, 0,  0, 0,
+      ]), 2))
+      planeGeo.setIndex([0, 1, 2, 0, 2, 3])
+      const tex = texLoader.load(url)
+      tex.colorSpace = THREE.SRGBColorSpace
+      thumbTextures.push(tex)
+      const planeMat = new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide })
+      frustumGroup.add(new THREE.Mesh(planeGeo, planeMat))
+    }
   }
 }
 
@@ -171,13 +220,14 @@ function clearReconstructionData() {
 }
 
 // ── Camera view presets ──────────────────────────────────────────────────────
-// Place the camera along a principal axis (three.js is Y-up) looking at the
-// scene centre, at a distance that frames the bounding sphere.
+// Scenes are Z-up (elevation along +Z): Top/Bottom look down the vertical Z axis,
+// while Front/Back/Left/Right are the horizontal side views. Place the camera
+// along the chosen axis, looking at the scene centre, framing the bounding sphere.
 const VIEW_OFFSETS = {
-  top:    [0,  1,  0],
-  bottom: [0, -1,  0],
-  front:  [0,  0,  1],
-  back:   [0,  0, -1],
+  top:    [0,  0,  1],
+  bottom: [0,  0, -1],
+  front:  [0, -1,  0],
+  back:   [0,  1,  0],
   left:   [-1, 0,  0],
   right:  [1,  0,  0],
 }
@@ -186,11 +236,10 @@ function setView(dir) {
   if (!camera || !controls) return
   const o = VIEW_OFFSETS[dir] || VIEW_OFFSETS.front
   const d = sceneRadius * 2.5
-  // For top/bottom the view direction is parallel to the default up vector, so
-  // pick an in-plane up so OrbitControls doesn't gimbal-lock.
-  if (dir === 'top')         camera.up.set(0, 0, -1)
-  else if (dir === 'bottom') camera.up.set(0, 0,  1)
-  else                       camera.up.set(0, 1,  0)
+  // For top/bottom the view direction is parallel to the up axis (Z), so pick an
+  // in-plane up (Y) to avoid OrbitControls gimbal-locking.
+  if (dir === 'top' || dir === 'bottom') camera.up.set(0, 1, 0)
+  else                                   camera.up.set(0, 0, 1)
   controls.target.copy(sceneCenter)
   camera.position.set(
     sceneCenter.x + o[0] * d,
@@ -203,12 +252,12 @@ function setView(dir) {
 
 function resetView() {
   if (!camera || !controls) return
-  camera.up.set(0, 1, 0)
+  camera.up.set(0, 0, 1)
   controls.target.copy(sceneCenter)
   camera.position.set(
-    sceneCenter.x,
-    sceneCenter.y + sceneRadius * 0.5,
-    sceneCenter.z + sceneRadius * 2.5,
+    sceneCenter.x + sceneRadius * 1.8,
+    sceneCenter.y - sceneRadius * 1.8,
+    sceneCenter.z + sceneRadius * 1.4,
   )
   camera.updateProjectionMatrix()
   controls.update()
@@ -239,11 +288,16 @@ watch(() => props.theme, (t) => {
   scene.add(grid)
 })
 
+watch(() => props.showCameras, (v) => { if (frustumGroup) frustumGroup.visible = v })
+watch(() => props.showGraticule, (v) => { if (grid) grid.visible = v })
+
 onMounted(init)
 
 onBeforeUnmount(() => {
   cancelAnimationFrame(animationId)
   resizeObserver?.disconnect()
+  for (const tex of thumbTextures) tex.dispose()
+  thumbTextures = []
   controls?.dispose()
   renderer?.dispose()
   renderer?.domElement.remove()

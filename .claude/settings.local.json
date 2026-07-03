@@ -35,7 +35,9 @@
       "Bash(cargo check *)",
       "Bash(cd /Users/fhdahle/Documents/GitHub/websfm && wasm-pack build crates/reconstruction --target web --out-dir ../../src/wasm/reconstruction 2>&1 | tail -4 && rm -f src/wasm/*/.gitignore && echo \"=== exports ===\" && grep -oE \"export function \\(recover_pose|triangulate_dlt|solve_pnp|bundle_adjust|compute_depth_map\\)\" src/wasm/reconstruction/reconstruction.js | sort)",
       "Bash(npx eslint *)",
-      "Bash(timeout 180 npx vite build)"
+      "Bash(timeout 180 npx vite build)",
+      "Bash(command -v wasm-pack cargo)",
+      "Bash(node -e ' *)"
     ],
     "additionalDirectories": [
       "/Users/fhdahle/Documents/GitHub/websfm/src/wasm/*",

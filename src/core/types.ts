@@ -91,7 +91,11 @@ export interface Sensor {
   k3: number | null
   p1: number | null
   p2: number | null
+  /** mm per pixel — converts an mm focal to px (focal / pixelSize). */
   pixelSize: number | null
+  /** Film/sensor format width in mm — the alternative mm→px conversion for
+   *  film cameras (fx = focal / sensorWidthMm × width). */
+  sensorWidthMm?: number | null
 }
 
 // ── CRS-tagged coordinates ────────────────────────────────────────────────────

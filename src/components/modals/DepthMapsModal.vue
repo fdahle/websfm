@@ -1,20 +1,46 @@
 <script setup>
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 
 const emit = defineEmits(['close', 'run'])
 
-// Stage A — Build Depth Maps (PatchMatch MVS). Defaults mirror the worker's
-// computeDepthMaps fallbacks (core/mvs.js + compute.worker.js).
+// Memory budget for the dense pre-flight (Step 5). Persisted across sessions so a
+// user who raised it for large projects doesn't have to redo it each run.
+const BUDGET_KEY = 'websfm.dense.memBudgetGb'
+const savedBudgetGb = Number(localStorage.getItem(BUDGET_KEY)) || 2
+
+// Stage A — Build Depth Maps (PatchMatch MVS). Quality is the primary control
+// (Metashape-style relative preset → the store resolves it to a working maxDim
+// from the largest native image dimension). Advanced overrides are optional:
+// maxDim (null ⇒ derive from quality) and bestK (null ⇒ auto per image).
 const settings = ref({
-  maxDim: 800,
+  quality: 'medium',   // low = ⅛, medium = ¼, high = ½, ultra = full native
+  maxDim: null,        // Advanced override; null = derive from quality
   maxSources: 6,
-  window: 2,
+  window: 3,            // 7×7 ZNCC — 5×5 is matching noise on grainy quarter-scale film
   iterations: 3,
-  bestK: 3,
+  bestK: null,         // Advanced override; null = auto per image (ceil(nSrc/2), 1..4)
+  speckleFilter: true,
+  filterRelTol: 10,    // exposed as a percentage; converted to a relative fraction on run
+  useGpu: false,       // experimental WebGPU backend
+  memBudgetGb: savedBudgetGb, // dense pre-flight budget (Step 5)
+})
+
+watch(() => settings.value.memBudgetGb, (v) => {
+  if (v > 0) localStorage.setItem(BUDGET_KEY, String(v))
 })
 
 function run() {
-  emit('run', { ...settings.value })
+  const { filterRelTol, maxDim, bestK, memBudgetGb, ...rest } = settings.value
+  const out = {
+    ...rest,
+    filterRelTol: filterRelTol / 100,
+    memBudgetBytes: Math.max(0.25, memBudgetGb || 2) * 1024 * 1024 * 1024,
+  }
+  // Only forward the numeric overrides when actually set — otherwise let the
+  // store/worker derive them (maxDim from quality, bestK per image).
+  if (maxDim > 0) out.maxDim = maxDim
+  if (bestK > 0) out.bestK = bestK
+  emit('run', out)
 }
 </script>
 
@@ -28,73 +54,134 @@ function run() {
 
       <div class="modal-body">
         <div class="field">
-          <label class="field-label" for="maxDim">Working resolution (longest side)</label>
+          <label class="field-label" for="quality">Quality</label>
+          <select id="quality" v-model="settings.quality" class="field-input field-select">
+            <option value="low">Low (⅛ native)</option>
+            <option value="medium">Medium (¼ native)</option>
+            <option value="high">High (½ native)</option>
+            <option value="ultra">Ultra (full native)</option>
+          </select>
+          <span class="field-hint">Working resolution as a fraction of the largest image. Higher = denser & far slower. Resolved against native size when the run starts (see the log).</span>
+        </div>
+
+        <div class="section-sep"></div>
+
+        <div class="field">
+          <label class="field-label">
+            <input v-model="settings.speckleFilter" type="checkbox" />
+            Speckle / median filter
+          </label>
+          <span class="field-hint">Cleans per-image depth noise (drops flying pixels, smooths to the local median) before fusion.</span>
+        </div>
+
+        <div v-if="settings.speckleFilter" class="field">
+          <label class="field-label" for="filterRelTol">Speckle tolerance</label>
           <div class="input-row">
             <input
-              id="maxDim"
-              v-model.number="settings.maxDim"
-              type="number" min="200" max="4000" step="100"
+              id="filterRelTol"
+              v-model.number="settings.filterRelTol"
+              type="number" min="1" max="50" step="1"
               class="field-input"
             />
-            <span class="field-unit">px</span>
+            <span class="field-unit">%</span>
           </div>
-          <span class="field-hint">Images are downscaled to this before matching. Higher = denser & far slower.</span>
+          <span class="field-hint">Drop a pixel whose depth differs from its 3×3 median by more than this. Lower = more aggressive.</span>
         </div>
 
         <div class="section-sep"></div>
 
         <div class="field">
-          <label class="field-label" for="maxSources">Source views per image</label>
-          <input
-            id="maxSources"
-            v-model.number="settings.maxSources"
-            type="number" min="1" max="16" step="1"
-            class="field-input"
-          />
-          <span class="field-hint">Neighbouring images compared against each reference (chosen by shared tie-points).</span>
+          <label class="field-label">
+            <input v-model="settings.useGpu" type="checkbox" />
+            Use GPU (experimental)
+          </label>
+          <span class="field-hint">
+            WebGPU backend (experimental) — multi-source best-K PatchMatch, much faster than CPU. Falls back to CPU
+            if WebGPU is unavailable; the log shows the active backend and a GPU↔CPU validation line.
+          </span>
         </div>
 
         <div class="section-sep"></div>
 
-        <div class="field">
-          <label class="field-label" for="bestK">Sources aggregated (best-K)</label>
-          <input
-            id="bestK"
-            v-model.number="settings.bestK"
-            type="number" min="1" max="16" step="1"
-            class="field-input"
-          />
-          <span class="field-hint">Average the K best-matching sources per pixel — robust to occlusion.</span>
-        </div>
+        <details class="advanced">
+          <summary>Advanced</summary>
+          <div class="advanced-body">
+            <div class="field">
+              <label class="field-label" for="maxDim">Working resolution override (longest side)</label>
+              <div class="input-row">
+                <input
+                  id="maxDim"
+                  v-model.number="settings.maxDim"
+                  type="number" min="200" step="100" placeholder="auto (from quality)"
+                  class="field-input"
+                />
+                <span class="field-unit">px</span>
+              </div>
+              <span class="field-hint">Leave blank to derive from Quality. No hard cap — a memory pre-flight guards very large values.</span>
+            </div>
 
-        <div class="section-sep"></div>
+            <div class="field">
+              <label class="field-label" for="maxSources">Source views per image</label>
+              <input
+                id="maxSources"
+                v-model.number="settings.maxSources"
+                type="number" min="1" max="16" step="1"
+                class="field-input"
+              />
+              <span class="field-hint">Neighbouring images compared against each reference (chosen by shared tie-points).</span>
+            </div>
 
-        <div class="field">
-          <label class="field-label" for="window">Patch window radius</label>
-          <div class="input-row">
-            <input
-              id="window"
-              v-model.number="settings.window"
-              type="number" min="1" max="3" step="1"
-              class="field-input"
-            />
-            <span class="field-unit">px</span>
+            <div class="field">
+              <label class="field-label" for="bestK">Sources aggregated (best-K)</label>
+              <input
+                id="bestK"
+                v-model.number="settings.bestK"
+                type="number" min="1" max="16" step="1" placeholder="auto (per image)"
+                class="field-input"
+              />
+              <span class="field-hint">Average the K best-matching sources per pixel. Blank = auto (≈half the sources, 1–4).</span>
+            </div>
+
+            <div class="field">
+              <label class="field-label" for="window">Patch window radius</label>
+              <div class="input-row">
+                <input
+                  id="window"
+                  v-model.number="settings.window"
+                  type="number" min="1" max="3" step="1"
+                  class="field-input"
+                />
+                <span class="field-unit">px</span>
+              </div>
+              <span class="field-hint">Half-size of the correlation window (1–3 ⇒ 3×3…7×7).</span>
+            </div>
+
+            <div class="field">
+              <label class="field-label" for="iterations">PatchMatch iterations (per level)</label>
+              <input
+                id="iterations"
+                v-model.number="settings.iterations"
+                type="number" min="1" max="8" step="1"
+                class="field-input"
+              />
+              <span class="field-hint">Propagation/refinement sweeps at the finest pyramid level (coarser levels get more).</span>
+            </div>
+
+            <div class="field">
+              <label class="field-label" for="memBudget">Memory budget</label>
+              <div class="input-row">
+                <input
+                  id="memBudget"
+                  v-model.number="settings.memBudgetGb"
+                  type="number" min="0.25" step="0.5"
+                  class="field-input"
+                />
+                <span class="field-unit">GB</span>
+              </div>
+              <span class="field-hint">Pre-flight refuses to start if the projected peak exceeds this (prevents the browser killing the tab). Persisted across sessions.</span>
+            </div>
           </div>
-          <span class="field-hint">Half-size of the correlation window (1–3 ⇒ 3×3…7×7).</span>
-        </div>
-
-        <div class="section-sep"></div>
-
-        <div class="field">
-          <label class="field-label" for="iterations">PatchMatch iterations</label>
-          <input
-            id="iterations"
-            v-model.number="settings.iterations"
-            type="number" min="1" max="8" step="1"
-            class="field-input"
-          />
-          <span class="field-hint">Propagation/refinement sweeps. More = better but slower.</span>
-        </div>
+        </details>
       </div>
 
       <div class="modal-footer">
@@ -147,7 +234,14 @@ function run() {
   border-radius: 5px; color: var(--text); font: inherit; font-size: 13px; padding: 4px 8px;
 }
 .field-input:focus { outline: none; border-color: var(--accent); }
+.field-select { width: auto; min-width: 160px; }
 .field-unit { font-size: 12px; color: var(--text-dim); }
+.advanced > summary {
+  font-size: 12px; font-weight: 600; color: var(--text-dim);
+  cursor: pointer; user-select: none; list-style-position: inside;
+}
+.advanced > summary:hover { color: var(--text); }
+.advanced-body { display: flex; flex-direction: column; gap: 12px; margin-top: 10px; }
 .btn {
   background: none; border: 1px solid var(--panel-border);
   border-radius: 5px; color: var(--text); font: inherit; font-size: 13px;

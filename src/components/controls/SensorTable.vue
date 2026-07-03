@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { estimatedIntrinsics } from '../../utils/cameraEstimated.js'
+import { resolveK } from '../../core/reconstruction.js'
 
 // Editable table of sensors (shared intrinsics). In 'initial' mode the numeric
 // cells are editable inputs (the source of truth); in 'estimated' mode they show
@@ -43,6 +44,35 @@ function estimated(sensorId) {
 
 const anyEstimated = computed(() => props.sensors.some((s) => estimated(s.id)))
 
+// Flag sensors whose intrinsics fall back to resolveK()'s last resort — the
+// default-FOV guess (fx = max(w,h)). That guess directly distorts SfM and depth
+// maps (see CLAUDE.md), and is common for scanned/historic imagery with no usable
+// EXIF focal. Evaluate resolveK per assigned image (it depends on per-image EXIF
+// as well as the sensor); warn when any resolve to the fallback. Returns
+// { count, total } per sensor id.
+const fallbacks = computed(() => {
+  const m = new Map()
+  for (const s of props.sensors) {
+    const imgs = props.images.filter((i) => i.sensorId === s.id)
+    // No images yet: still flag a sensor that carries no usable focal on its own.
+    const probe = imgs.length ? imgs : [{ meta: null }]
+    let count = 0
+    for (const img of probe) {
+      if (resolveK(img.meta, s).source.startsWith('default FOV')) count++
+    }
+    m.set(s.id, { count, total: probe.length, hasImages: imgs.length > 0 })
+  }
+  return m
+})
+
+function fallbackTitle(s) {
+  const fb = fallbacks.value.get(s.id)
+  const scope = fb.hasImages ? `${fb.count} of ${fb.total} image(s)` : 'this sensor'
+  return `No usable calibration for ${scope}: intrinsics fall back to a default ` +
+    `field-of-view guess (focal ≈ image width), which distorts SfM and depth maps. ` +
+    `Fix it below — set Focal in px, or Focal in mm plus either px size or film format.`
+}
+
 const hint = computed(() => ({
   initial:   'Calibration priors — editable',
   fixed:     'Tick a parameter to hold it constant during bundle adjustment',
@@ -60,19 +90,28 @@ function diff(sensorId, key) {
   return est[key] - Number(init)
 }
 
-// Editable numeric columns (label handled separately).
+// Editable numeric columns (label handled separately). `focal` carries a
+// px/mm unit toggle; `pixelSize`/`sensorWidthMm` convert an mm focal to pixels
+// (a film/scanned-aerial camera: focal length + film format from a calibration
+// sheet — fill either pixel size or format width, not both).
 const NUM_COLS = [
-  { key: 'width',  label: 'W' },
-  { key: 'height', label: 'H' },
-  { key: 'focal',  label: 'Focal', lockable: true },
-  { key: 'cx',     label: 'cx', lockable: true },
-  { key: 'cy',     label: 'cy', lockable: true },
-  { key: 'k1',     label: 'k1', lockable: true },
-  { key: 'k2',     label: 'k2', lockable: true },
-  { key: 'k3',     label: 'k3', lockable: true },
-  { key: 'p1',     label: 'p1', lockable: true },
-  { key: 'p2',     label: 'p2', lockable: true },
+  { key: 'width',        label: 'W' },
+  { key: 'height',       label: 'H' },
+  { key: 'focal',        label: 'Focal', lockable: true },
+  { key: 'pixelSize',    label: 'px size (mm)' },
+  { key: 'sensorWidthMm', label: 'format (mm)' },
+  { key: 'cx',           label: 'cx', lockable: true },
+  { key: 'cy',           label: 'cy', lockable: true },
+  { key: 'k1',           label: 'k1', lockable: true },
+  { key: 'k2',           label: 'k2', lockable: true },
+  { key: 'k3',           label: 'k3', lockable: true },
+  { key: 'p1',           label: 'p1', lockable: true },
+  { key: 'p2',           label: 'p2', lockable: true },
 ]
+
+// 'mm' unless explicitly pixels — a focal in mm needs a pixel size or format
+// width to convert, so the mm-only columns are dimmed when the unit is px.
+const focalInMm = (s) => s.focalUnit !== 'px'
 
 function onEdit(id, field, e) {
   emit('update', { id, field, value: e.target.value })
@@ -116,19 +155,57 @@ function onEdit(id, field, e) {
       <tbody>
         <tr v-for="s in sensors" :key="s.id">
           <td class="label-cell">
-            <input
-              v-if="mode === 'initial'"
-              class="cell-input label-input"
-              :value="s.label"
-              @change="onEdit(s.id, 'label', $event)"
-            />
-            <span v-else>{{ s.label }}</span>
+            <span class="label-wrap">
+              <span
+                v-if="fallbacks.get(s.id)?.count"
+                class="warn-badge"
+                :title="fallbackTitle(s)"
+              >⚠</span>
+              <input
+                v-if="mode === 'initial'"
+                class="cell-input label-input"
+                :value="s.label"
+                @change="onEdit(s.id, 'label', $event)"
+              />
+              <span v-else>{{ s.label }}</span>
+            </span>
           </td>
           <td class="dim">{{ s.source === 'exif' ? 'EXIF' : 'imported' }}</td>
 
           <template v-if="mode === 'initial'">
             <td v-for="c in NUM_COLS" :key="c.key">
+              <!-- Focal: numeric input + px/mm unit toggle. -->
+              <span v-if="c.key === 'focal'" class="focal-cell">
+                <input
+                  class="cell-input focal-input"
+                  type="number"
+                  step="any"
+                  :value="s.focal ?? ''"
+                  @change="onEdit(s.id, 'focal', $event)"
+                />
+                <select
+                  class="unit-select"
+                  :value="s.focalUnit === 'px' ? 'px' : 'mm'"
+                  title="Focal length unit"
+                  @change="onEdit(s.id, 'focalUnit', $event)"
+                >
+                  <option value="mm">mm</option>
+                  <option value="px">px</option>
+                </select>
+              </span>
+              <!-- Pixel size / format only apply to an mm focal. -->
               <input
+                v-else-if="c.key === 'pixelSize' || c.key === 'sensorWidthMm'"
+                class="cell-input"
+                type="number"
+                step="any"
+                :disabled="!focalInMm(s)"
+                :title="focalInMm(s) ? '' : 'Only used when focal is in mm'"
+                :value="s[c.key] ?? ''"
+                @change="onEdit(s.id, c.key, $event)"
+              />
+              <input
+                v-else
                 class="cell-input"
                 type="number"
                 step="any"
@@ -154,6 +231,8 @@ function onEdit(id, field, e) {
             <td>{{ s.width ?? '—' }}</td>
             <td>{{ s.height ?? '—' }}</td>
             <td :class="{ dim: !estimated(s.id) }">{{ round(estimated(s.id)?.focal) ?? '—' }}</td>
+            <td class="dim">—</td>
+            <td class="dim">—</td>
             <td :class="{ dim: !estimated(s.id) }">{{ round(estimated(s.id)?.cx) ?? '—' }}</td>
             <td :class="{ dim: !estimated(s.id) }">{{ round(estimated(s.id)?.cy) ?? '—' }}</td>
             <td v-for="c in ['k1','k2','k3','p1','p2']" :key="c" class="dim">—</td>
@@ -161,7 +240,10 @@ function onEdit(id, field, e) {
           <template v-else>
             <td class="dim">—</td>
             <td class="dim">—</td>
-            <td v-for="c in ['focal','cx','cy']" :key="c" :class="{ dim: diff(s.id, c) == null }">
+            <td :class="{ dim: diff(s.id, 'focal') == null }">{{ signed(diff(s.id, 'focal')) ?? '—' }}</td>
+            <td class="dim">—</td>
+            <td class="dim">—</td>
+            <td v-for="c in ['cx','cy']" :key="c" :class="{ dim: diff(s.id, c) == null }">
               {{ signed(diff(s.id, c)) ?? '—' }}
             </td>
             <td v-for="c in ['k1','k2','k3','p1','p2']" :key="c" class="dim">—</td>
@@ -207,6 +289,11 @@ thead th {
 tbody td { padding: 4px 10px; border-bottom: 1px solid var(--panel-border); white-space: nowrap; color: var(--text); }
 tbody td.dim { color: var(--text-dim); }
 .label-cell { min-width: 140px; }
+.label-wrap { display: inline-flex; align-items: center; gap: 6px; }
+.warn-badge {
+  flex: none; cursor: help; font-size: 13px; line-height: 1;
+  color: #e0a020; filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.4));
+}
 .count { text-align: center; font-variant-numeric: tabular-nums; }
 
 .cell-input {
@@ -215,6 +302,16 @@ tbody td.dim { color: var(--text-dim); }
 }
 .label-input { width: 130px; }
 .cell-input:focus { border-color: var(--accent); }
+.cell-input:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Focal cell: numeric input + compact px/mm unit selector. */
+.focal-cell { display: inline-flex; gap: 4px; align-items: center; }
+.focal-input { width: 52px; }
+.unit-select {
+  background: var(--bg); border: 1px solid var(--panel-border); border-radius: 4px;
+  color: var(--text); font: inherit; font-size: 11px; padding: 3px 2px; outline: none; cursor: pointer;
+}
+.unit-select:focus { border-color: var(--accent); }
 
 /* Numeric input without the up/down spinners — stepping makes no sense for
    calibration values, but we keep type=number for numeric keyboards/validation. */

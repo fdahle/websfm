@@ -1,0 +1,7 @@
+# Enable WebAssembly SIMD (128-bit) for all wasm crates. The matcher's L2 hot
+# loop uses explicit f32x4 intrinsics (crates/matching/src/lib.rs); the other
+# crates get LLVM auto-vectorisation for free. SIMD128 is supported by every
+# browser that ships WebGPU (and all current evergreen browsers besides), so this
+# does not narrow the app's effective support matrix.
+[target.wasm32-unknown-unknown]
+rustflags = ["-C", "target-feature=+simd128"]
