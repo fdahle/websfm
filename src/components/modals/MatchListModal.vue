@@ -6,6 +6,9 @@ const props = defineProps({
   matchSummaries: { type: Array,  default: () => [] },
   images:         { type: Array,  default: () => [] },
   matchStore:     { type: Map,    default: () => new Map() },
+  // True once a sparse cloud exists — enables the "Used" column (matches that
+  // became tie-points) and dims pairs that contributed nothing to the model.
+  hasSparse:      { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['close'])
@@ -102,25 +105,27 @@ function selectMatch(pairId) {
                 <tr>
                   <th class="sortable" @click="sortBy('nameA')">Image A<span class="arrow">{{ sortKey === 'nameA' ? (sortDir === 'asc' ? '▲' : '▼') : '' }}</span></th>
                   <th class="sortable" @click="sortBy('nameB')">Image B<span class="arrow">{{ sortKey === 'nameB' ? (sortDir === 'asc' ? '▲' : '▼') : '' }}</span></th>
-                  <th class="sortable num-col" @click="sortBy('inlierCount')">Inliers<span class="arrow">{{ sortKey === 'inlierCount' ? (sortDir === 'asc' ? '▲' : '▼') : '' }}</span></th>
-                  <th class="sortable num-col" @click="sortBy('rawCount')">Raw<span class="arrow">{{ sortKey === 'rawCount' ? (sortDir === 'asc' ? '▲' : '▼') : '' }}</span></th>
+                  <th class="sortable num-col" @click="sortBy('inlierCount')">Matches<span class="arrow">{{ sortKey === 'inlierCount' ? (sortDir === 'asc' ? '▲' : '▼') : '' }}</span></th>
+                  <th class="sortable num-col" @click="sortBy('rawCount')">Candidates<span class="arrow">{{ sortKey === 'rawCount' ? (sortDir === 'asc' ? '▲' : '▼') : '' }}</span></th>
+                  <th v-if="hasSparse" class="sortable num-col" @click="sortBy('usedCount')" title="Matches that became tie-points in the sparse model">Used<span class="arrow">{{ sortKey === 'usedCount' ? (sortDir === 'asc' ? '▲' : '▼') : '' }}</span></th>
                 </tr>
               </thead>
               <tbody>
                 <tr v-if="!displayedSummaries.length">
-                  <td colspan="4" class="empty-row">No pairs match “{{ filterA }}”.</td>
+                  <td :colspan="hasSparse ? 5 : 4" class="empty-row">No pairs match “{{ filterA }}”.</td>
                 </tr>
                 <tr
                   v-for="m in displayedSummaries"
                   :key="m.pairId"
                   class="match-row"
-                  :class="{ active: m.pairId === selectedPairId }"
+                  :class="{ active: m.pairId === selectedPairId, unused: hasSparse && !m.usedCount }"
                   @click="selectMatch(m.pairId)"
                 >
                   <td class="name-cell">{{ trimExt(m.nameA) }}</td>
                   <td class="name-cell">{{ trimExt(m.nameB) }}</td>
                   <td class="num-col">{{ m.inlierCount }}</td>
                   <td class="num-col dim">{{ m.rawCount }}</td>
+                  <td v-if="hasSparse" class="num-col" :class="{ dim: !m.usedCount }">{{ m.usedCount }}</td>
                 </tr>
               </tbody>
             </table>
@@ -316,6 +321,9 @@ function selectMatch(pairId) {
 .match-row.active td {
   background: rgba(14, 99, 156, 0.22);
 }
+
+/* A verified pair that contributed no tie-points to the sparse model. */
+.match-row.unused .name-cell { color: var(--text-dim); }
 
 .match-row td {
   padding: 7px 12px;

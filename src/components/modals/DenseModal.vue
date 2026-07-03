@@ -4,8 +4,11 @@ import { ref } from 'vue'
 const emit = defineEmits(['close', 'run'])
 
 // Stage B — Build Dense Cloud (fuse depth maps). `depthTolPct` is exposed as a
-// percentage; converted to the fraction core/mvs.js fuseDepthMaps expects.
+// percentage; converted to the fraction core/mvs.js fuseDepthMaps expects. In
+// Auto mode minViews + maxCost are derived by fusion from the data (minViews =
+// min(2, nMaps−1); maxCost = p70 of the pooled valid-pixel costs).
 const settings = ref({
+  auto: true,
   minViews: 2,
   depthTolPct: 1.0,
   maxCost: 0.6,
@@ -13,8 +16,13 @@ const settings = ref({
 })
 
 function run() {
-  const { minViews, depthTolPct, maxCost, step } = settings.value
-  emit('run', { minViews, depthTolRel: depthTolPct / 100, maxCost, step })
+  const { auto, minViews, depthTolPct, maxCost, step } = settings.value
+  emit('run', {
+    minViews: auto ? null : minViews,
+    maxCost: auto ? null : maxCost,
+    depthTolRel: depthTolPct / 100,
+    step,
+  })
 }
 </script>
 
@@ -28,6 +36,16 @@ function run() {
 
       <div class="modal-body">
         <div class="field">
+          <label class="field-label">
+            <input v-model="settings.auto" type="checkbox" />
+            Auto thresholds (recommended)
+          </label>
+          <span class="field-hint">Derive min-views and max-cost from the data. Uncheck to set them by hand.</span>
+        </div>
+
+        <div class="section-sep"></div>
+
+        <div v-if="!settings.auto" class="field">
           <label class="field-label" for="minViews">Min consistent views</label>
           <input
             id="minViews"
@@ -38,7 +56,7 @@ function run() {
           <span class="field-hint">A point is kept only if this many other depth maps agree on it. Higher = cleaner, sparser.</span>
         </div>
 
-        <div class="section-sep"></div>
+        <div v-if="!settings.auto" class="section-sep"></div>
 
         <div class="field">
           <label class="field-label" for="depthTol">Depth agreement tolerance</label>
@@ -54,9 +72,9 @@ function run() {
           <span class="field-hint">How closely a reprojected depth must match to count as agreement.</span>
         </div>
 
-        <div class="section-sep"></div>
+        <div v-if="!settings.auto" class="section-sep"></div>
 
-        <div class="field">
+        <div v-if="!settings.auto" class="field">
           <label class="field-label" for="maxCost">Max matching cost</label>
           <input
             id="maxCost"

@@ -32,6 +32,27 @@ export function normalizeMaskPixels(data) {
   return data
 }
 
+// Paint the outer border of an RGBA buffer to the red-exclude convention. `sides`
+// gives the per-edge margin in pixels (top/right/bottom/left, default 0). Margins
+// are clamped to half the corresponding dimension, so a side ≥ w/2 (or h/2) simply
+// masks everything inward rather than wrapping. Mutates and returns `data`.
+// Pure: the unit-testable core of the Auto-Mask "border" strategy.
+export function paintBorderExclude(data, w, h, { top = 0, right = 0, bottom = 0, left = 0 } = {}) {
+  const t = Math.max(0, Math.min(Math.round(top),    Math.floor(h / 2)))
+  const b = Math.max(0, Math.min(Math.round(bottom), Math.floor(h / 2)))
+  const l = Math.max(0, Math.min(Math.round(left),   Math.floor(w / 2)))
+  const r = Math.max(0, Math.min(Math.round(right),  Math.floor(w / 2)))
+  for (let y = 0; y < h; y++) {
+    const inV = y >= t && y < h - b   // inside the top/bottom bands?
+    for (let x = 0; x < w; x++) {
+      if (inV && x >= l && x < w - r) continue   // interior — leave untouched
+      const o = (y * w + x) * 4
+      data[o] = 255; data[o + 1] = 0; data[o + 2] = 0; data[o + 3] = 255
+    }
+  }
+  return data
+}
+
 // ── Canvas I/O (works on main thread and in workers via OffscreenCanvas) ───────
 
 function blobToDataUrl(blob) {
@@ -70,4 +91,23 @@ export async function buildMaskLookup(dataUrl, w, h) {
   ctx.drawImage(bmp, 0, 0, w, h)
   bmp.close()
   return maskLookupFromRgba(ctx.getImageData(0, 0, w, h).data, w, h)
+}
+
+// Build a w×h border mask PNG dataUrl excluding the outer `sides` margins (px).
+// When `base` (an existing stored mask dataUrl, already in exclude form) is given,
+// it is drawn in first so the result is the UNION of that mask and the border
+// (merge mode); pass null to start blank (replace mode). Used by the Auto-Mask
+// modal's "border" strategy.
+export async function buildBorderMask(w, h, sides, base = null) {
+  const canvas = new OffscreenCanvas(w, h)
+  const ctx = canvas.getContext('2d', { willReadFrequently: true })
+  if (base) {
+    const bmp = await createImageBitmap(await (await fetch(base)).blob())
+    ctx.drawImage(bmp, 0, 0, w, h)
+    bmp.close()
+  }
+  const id = ctx.getImageData(0, 0, w, h)
+  paintBorderExclude(id.data, w, h, sides)
+  ctx.putImageData(id, 0, 0)
+  return blobToDataUrl(await canvas.convertToBlob({ type: 'image/png' }))
 }

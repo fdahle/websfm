@@ -6,7 +6,11 @@
  *
  * Returns a flat `Float32Array` with `STRIDE` (133) values per keypoint:
  * `[x, y, scale, response, angle, d0..d127, ...]`
- * where `x`/`y` are in input-image pixel coordinates.
+ * where `x`/`y` are in input-image pixel coordinates, followed by a SINGLE
+ * trailing value = the total keypoints found *before* the `max_keypoints` cap
+ * (so callers can report how many were dropped to the cap). A degenerate input
+ * (zero-size / short buffer) returns an empty vec; a valid image with no extrema
+ * returns `[0.0]`. Parse as `kept = floor((len - 1) / STRIDE)`, `raw = last`.
  */
 export function detect_sift(rgba: Uint8Array, width: number, height: number, contrast_threshold: number, max_keypoints: number): Float32Array;
 

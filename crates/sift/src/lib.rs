@@ -11,7 +11,11 @@ const STRIDE: usize = 5 + DESC_LEN; // 133
 ///
 /// Returns a flat `Float32Array` with `STRIDE` (133) values per keypoint:
 /// `[x, y, scale, response, angle, d0..d127, ...]`
-/// where `x`/`y` are in input-image pixel coordinates.
+/// where `x`/`y` are in input-image pixel coordinates, followed by a SINGLE
+/// trailing value = the total keypoints found *before* the `max_keypoints` cap
+/// (so callers can report how many were dropped to the cap). A degenerate input
+/// (zero-size / short buffer) returns an empty vec; a valid image with no extrema
+/// returns `[0.0]`. Parse as `kept = floor((len - 1) / STRIDE)`, `raw = last`.
 #[wasm_bindgen]
 pub fn detect_sift(
     rgba: &[u8],
@@ -26,13 +30,14 @@ pub fn detect_sift(
 
     let gray = to_gray(rgba, width, height);
     let mut kps = sift_keypoints(&gray, width, height, contrast_threshold);
+    let raw_found = kps.len(); // total detected before the max_keypoints cap
 
     kps.sort_by(|a, b| b.response.partial_cmp(&a.response).unwrap_or(std::cmp::Ordering::Equal));
     if max_keypoints > 0 && kps.len() > max_keypoints {
         kps.truncate(max_keypoints);
     }
 
-    let mut out = Vec::with_capacity(kps.len() * STRIDE);
+    let mut out = Vec::with_capacity(kps.len() * STRIDE + 1);
     for k in kps {
         out.push(k.x);
         out.push(k.y);
@@ -41,6 +46,7 @@ pub fn detect_sift(
         out.push(k.angle);
         out.extend_from_slice(&k.desc);
     }
+    out.push(raw_found as f32); // trailing raw-count sentinel
     out
 }
 
@@ -512,10 +518,14 @@ mod tests {
         }
 
         let out = detect_sift(&rgba, w, h, 0.02, 1000);
-        assert_eq!(out.len() % STRIDE, 0, "output must be groups of {}", STRIDE);
-        assert!(!out.is_empty(), "expected keypoints on blobs");
+        // Trailing raw-count sentinel ⇒ (len - 1) is a multiple of STRIDE.
+        assert_eq!((out.len() - 1) % STRIDE, 0, "output must be groups of {} + 1", STRIDE);
+        let kept = (out.len() - 1) / STRIDE;
+        assert!(kept > 0, "expected keypoints on blobs");
+        let raw = *out.last().unwrap();
+        assert!(raw >= kept as f32, "raw-found count must be ≥ kept count");
 
-        for chunk in out.chunks(STRIDE) {
+        for chunk in out[..out.len() - 1].chunks(STRIDE) {
             assert!(chunk[0] >= 0.0 && chunk[0] < w as f32, "x out of bounds");
             assert!(chunk[1] >= 0.0 && chunk[1] < h as f32, "y out of bounds");
             assert!(chunk[3] > 0.0, "response should be positive");
@@ -531,6 +541,8 @@ mod tests {
         let (w, h) = (48usize, 48usize);
         let rgba = vec![128u8; w * h * 4];
         let out = detect_sift(&rgba, w, h, 0.03, 1000);
-        assert!(out.is_empty(), "a flat image has no extrema");
+        // No extrema ⇒ just the trailing raw-count sentinel, which is 0.
+        assert_eq!(out.len(), 1, "a flat image yields only the raw-count sentinel");
+        assert_eq!(out[0], 0.0, "raw-found count should be 0 on a flat image");
     }
 }

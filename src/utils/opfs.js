@@ -22,6 +22,19 @@ async function writeJson(dir, filename, data) {
   await writable.close()
 }
 
+async function writeBin(dir, filename, buffer) {
+  const fh = await dir.getFileHandle(filename, { create: true })
+  const writable = await fh.createWritable()
+  await writable.write(buffer)
+  await writable.close()
+}
+
+async function readBin(dir, filename) {
+  const fh = await dir.getFileHandle(filename)
+  const file = await fh.getFile()
+  return file.arrayBuffer()
+}
+
 async function getProjectDir(projectId, create = false) {
   const root = await getRoot()
   const projects = await root.getDirectoryHandle('projects', { create: true })
@@ -379,6 +392,31 @@ export async function deleteFootprints(projectId) {
   } catch {}
 }
 
+// ── Dev console log ──────────────────────────────────────────────────────────────
+// JSON: [{ id, time, level, message, source }] — the console entries, so reopening
+// a project shows its previous console output.
+
+export async function saveLog(projectId, entries) {
+  const dir = await getProjectDir(projectId, true)
+  await writeJson(dir, 'log.json', entries)
+}
+
+export async function loadLog(projectId) {
+  try {
+    const dir = await getProjectDir(projectId)
+    return readJson(dir, 'log.json')
+  } catch {
+    return null
+  }
+}
+
+export async function deleteLog(projectId) {
+  try {
+    const dir = await getProjectDir(projectId)
+    await dir.removeEntry('log.json')
+  } catch {}
+}
+
 // ── Sensors (shared camera intrinsics) ──────────────────────────────────────────
 // JSON: { sensors: [{ id, label, width, height, pixelSize, focal, cx, cy,
 //                      k1, k2, k3, p1, p2, fixed, source }] }
@@ -433,7 +471,8 @@ export async function deletePoses(projectId) {
 
 // ── Reconstruction ────────────────────────────────────────────────────────────
 // JSON: { clouds: [{ id, name, kind, createdAt,
-//                    cameras: [{ uuid, R, t, K }], points: [{ x, y, z, color }] }] }
+//                    cameras: [{ uuid, R, t, K }],
+//                    points: [{ x, y, z, color, views: [[uuid, kpIdx], …] }] }] }
 // Legacy single-model files { cameras: [...], points: [...] } are still read and
 // wrapped into one sparse cloud on restore.
 
@@ -455,5 +494,56 @@ export async function deleteReconstruction(projectId) {
   try {
     const dir = await getProjectDir(projectId)
     await dir.removeEntry('reconstruction.json')
+  } catch {}
+}
+
+// ── Products (DEM / orthophoto rasters) ──────────────────────────────────────
+// Recomputable but expensive, so persisted like other project data. Metadata
+// (dimensions, geotransform, CRS, preview PNG data URL) goes in products/{kind}.json;
+// the raw sample arrays go in sibling .bin files so hover read-out survives a
+// reload. DEM: Float32 heights (`data`) + Uint8 validity (`mask`). Ortho: Uint8
+// RGBA (`rgba`).
+
+export async function saveProduct(projectId, kind, product) {
+  try {
+    const dir = await getSubDir(projectId, 'products')
+    const { data, mask, rgba, ...meta } = product
+    await writeJson(dir, `${kind}.json`, meta)
+    if (data) await writeBin(dir, `${kind}_data.bin`, data.buffer)
+    if (mask) await writeBin(dir, `${kind}_mask.bin`, mask.buffer)
+    if (rgba) await writeBin(dir, `${kind}_rgba.bin`, rgba.buffer)
+  } catch {}
+}
+
+export async function loadProduct(projectId, kind) {
+  try {
+    const dir = await getSubDir(projectId, 'products')
+    const meta = await readJson(dir, `${kind}.json`)
+    if (!meta) return null
+    if (kind === 'dem') {
+      const data = new Float32Array(await readBin(dir, 'dem_data.bin'))
+      const mask = new Uint8Array(await readBin(dir, 'dem_mask.bin'))
+      return { ...meta, data, mask }
+    }
+    const rgba = new Uint8Array(await readBin(dir, `${kind}_rgba.bin`))
+    return { ...meta, rgba }
+  } catch {
+    return null
+  }
+}
+
+export async function deleteProduct(projectId, kind) {
+  try {
+    const dir = await getSubDir(projectId, 'products')
+    for (const suffix of ['.json', '_data.bin', '_mask.bin', '_rgba.bin']) {
+      await dir.removeEntry(`${kind}${suffix}`).catch(() => {})
+    }
+  } catch {}
+}
+
+export async function deleteProducts(projectId) {
+  try {
+    const dir = await getProjectDir(projectId)
+    await dir.removeEntry('products', { recursive: true })
   } catch {}
 }

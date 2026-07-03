@@ -32,7 +32,10 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
     return n
   })
 
-  async function matchPair(imgA, imgB, settings = {}, onDone) {
+  // `descCache` (optional): id → descriptors, shared across a matchAll run so each
+  // image's descriptors are loaded from OPFS once instead of once per pair (an
+  // image appears in N−1 pairs, so this turns O(N²) loads into O(N)).
+  async function matchPair(imgA, imgB, settings = {}, onDone, descCache = null) {
     const [idA, idB] = [imgA.uuid, imgB.uuid].sort()
     const pid = pairId(idA, idB)
     // Ensure descriptors are ordered the same way as IDs
@@ -51,12 +54,14 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
       const srcA = idA === imgA.uuid ? imgA : imgB
       const srcB = idA === imgA.uuid ? imgB : imgA
 
-      const descA = isPersisting()
-        ? await opfs.loadDescriptors(projectId, idA)
-        : srcA.descriptors ?? null
-      const descB = isPersisting()
-        ? await opfs.loadDescriptors(projectId, idB)
-        : srcB.descriptors ?? null
+      const loadDesc = async (id, src) => {
+        if (descCache?.has(id)) return descCache.get(id)
+        const d = isPersisting() ? await opfs.loadDescriptors(projectId, id) : (src.descriptors ?? null)
+        if (d && descCache) descCache.set(id, d)
+        return d
+      }
+      const descA = await loadDesc(idA, srcA)
+      const descB = await loadDesc(idB, srcB)
 
       if (!descA || !descB) {
         entry.status = 'error'
@@ -106,6 +111,12 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
           entry.matches = []
           entry.rejectRatio = ratio // for the diagnostic log below
         }
+        // Detailed diagnostics (debug level): putatives, inliers, the ratio, and
+        // the gate/threshold that decided the outcome — for every verified pair,
+        // not just rejects (marginal accepts are the interesting ones to audit).
+        log(`Match ${imgA.name} ↔ ${imgB.name} — ${raw.length} putatives → `
+          + `${result?.inlierCount ?? 0} inliers (ratio ${ratio.toFixed(2)}, gate ${minInlierRatio}), `
+          + `RANSAC ${settings.ransacThreshPx ?? 2.0}px`, 'debug', 'Matching')
       } else {
         entry.matches = raw.map(m => [m.ia, m.ib])
         entry.inlierCount = raw.length
@@ -166,13 +177,43 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
 
     log(`Matching: ${pairs.length} pair(s) — ${strategy}`, 'info', 'Matching')
     let done = 0
+    // Tally this run's outcomes for the completion summary. Skipped = too few raw
+    // matches to bother verifying; rejected = verified but failed the count/ratio
+    // gate; matched = kept (with ≥1 inlier).
+    const minMatches = settings.minMatches ?? 15
+    const stats = { matched: 0, rejected: 0, skipped: 0, inliers: 0, ratios: [] }
+    const tally = (_pid, entry) => {
+      if (entry.status !== 'done') return
+      if (entry.inlierCount > 0) {
+        stats.matched++; stats.inliers += entry.inlierCount
+        if (entry.rawCount) stats.ratios.push(entry.inlierCount / entry.rawCount)
+      } else if (entry.rawCount >= minMatches) stats.rejected++
+      else stats.skipped++
+    }
+    // Load each image's descriptors from OPFS at most once for the whole run.
+    const descCache = new Map()
     for (const [a, b] of pairs) {
       if (shouldCancel?.()) { log(`Matching cancelled — ${done}/${pairs.length} done`, 'warn', 'Matching'); return }
-      await matchPair(a, b, settings)
+      await matchPair(a, b, settings, tally, descCache)
+      // matchPair writes its entry into the store as it goes, so a cancel pressed
+      // while this pair was in flight leaves a finished result behind — drop it
+      // and stop, so cancellation doesn't silently attach one more pair.
+      if (shouldCancel?.()) {
+        const pid = pairId(a.uuid, b.uuid)
+        matchStore.value.delete(pid)
+        matchStore.value = new Map(matchStore.value)
+        if (isPersisting()) opfs.deleteMatches(projects.currentProjectId, pid).catch(() => {})
+        log(`Matching cancelled — ${done}/${pairs.length} done`, 'warn', 'Matching')
+        return
+      }
       done++
       onProgress?.(done, pairs.length)
     }
-    log(`Matching complete: ${done} pair(s) processed`, 'success', 'Matching')
+    const meanRatio = stats.ratios.length
+      ? stats.ratios.reduce((s, r) => s + r, 0) / stats.ratios.length : 0
+    log(`Matching complete: ${done} pair(s) — ${stats.matched} matched, ${stats.rejected} rejected, `
+      + `${stats.skipped} skipped; ${stats.inliers} total inliers, mean inlier ratio ${meanRatio.toFixed(2)}`,
+      'success', 'Matching')
   }
 
   // Drop every pair involving `uuid`. Re-detecting an image (or clearing its

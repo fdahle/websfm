@@ -28,35 +28,31 @@ let ticker = null
 
 const elapsed = computed(() => formatClock((now.value - startedAt.value) / 1000))
 
-// ── ETA via rolling average ────────────────────────────────────────────────
-// Record the wall-clock time each time `current` advances, then average the gaps
-// between the most recent completions. A rolling window (not the run-wide mean)
-// keeps the estimate responsive when items speed up or slow down. ETA = mean gap
-// × items remaining. Shown only once there's enough signal to be meaningful.
-const WINDOW = 10
-const stamps = ref([])   // timestamps of recent `current` increments
+// ── ETA via run-wide average ─────────────────────────────────────────────────
+// Estimate from the whole run, not a short trailing window: per-item time is
+// highly variable here (e.g. match pairs rejected early finish in a fraction of
+// the time a fully-verified pair takes), so a small window made the estimate
+// swing wildly. The cumulative mean (elapsed ÷ completed) integrates over that
+// variance and only nudges as the run proceeds. ETA = mean × remaining, minus the
+// time already spent on the in-flight item so the countdown decays smoothly.
+const lastStamp = ref(0) // wall-clock of the most recent completion
 
 watch(() => props.current, (val, prev) => {
   // Reset if the counter restarts (e.g. a new phase reusing the same modal).
-  if (val < (prev ?? 0)) { stamps.value = []; return }
-  if (val > (prev ?? 0)) {
-    stamps.value.push(Date.now())
-    if (stamps.value.length > WINDOW + 1) stamps.value.shift()
-  }
+  if (val < (prev ?? 0)) { startedAt.value = Date.now(); lastStamp.value = 0; return }
+  if (val > (prev ?? 0)) lastStamp.value = Date.now()
 })
 
 const etaSeconds = computed(() => {
   // Depend on `now` so the countdown ticks down between completions.
   void now.value
-  const s = stamps.value
-  if (props.total <= 0 || s.length < 2) return null
   const remaining = props.total - props.current
+  if (props.total <= 0 || props.current < 2 || !lastStamp.value) return null
   if (remaining <= 0) return 0
-  const span = (s[s.length - 1] - s[0]) / 1000
-  const perItem = span / (s.length - 1)
+  const perItem = ((lastStamp.value - startedAt.value) / 1000) / props.current
   if (!(perItem > 0)) return null
   // Subtract time already spent on the in-flight item so the estimate decays.
-  const sinceLast = (now.value - s[s.length - 1]) / 1000
+  const sinceLast = (now.value - lastStamp.value) / 1000
   return Math.max(0, perItem * remaining - sinceLast)
 })
 

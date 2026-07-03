@@ -4,7 +4,50 @@ const DESC: usize = 128;
 
 // ─── Descriptor matching ──────────────────────────────────────────────────────
 
-// Exit early when partial L2 already exceeds `limit` (safe for ratio test: limit = second-best).
+// Squared-L2 distance between two 128-d descriptors, exiting early once the
+// partial sum already exceeds `limit` (safe for the ratio test, where `limit` is
+// the current second-best). The brute-force NN scan over every pair of
+// descriptors is the matcher's hot loop, so this is the function to vectorise.
+
+// SIMD path: 128 dims = 4 blocks of 32 (8× f32x4). Accumulate squared diffs in a
+// vector, fold to scalar after each block, and bail when the running distance
+// crosses `limit`. Four early-exit checkpoints instead of the scalar path's
+// per-element check — far fewer instructions per element, at the cost of letting
+// a doomed candidate run up to 31 extra dims before bailing. Summation order
+// differs from the scalar path, so distances can differ by float rounding; that
+// only matters for borderline ratio-test ties, which RANSAC then re-filters.
+#[cfg(target_feature = "simd128")]
+fn l2_sq_early(a: &[f32], b: &[f32], limit: f32) -> f32 {
+    use core::arch::wasm32::*;
+    let mut d = 0.0f32;
+    // SAFETY: callers always pass full 128-float descriptor rows; wasm v128 loads
+    // are unaligned-safe (alignment is only a hint in the wasm spec).
+    unsafe {
+        let (pa, pb) = (a.as_ptr(), b.as_ptr());
+        let mut k = 0usize;
+        while k < DESC {
+            let mut acc = f32x4_splat(0.0);
+            let block_end = k + 32;
+            while k < block_end {
+                let diff = f32x4_sub(
+                    v128_load(pa.add(k) as *const v128),
+                    v128_load(pb.add(k) as *const v128),
+                );
+                acc = f32x4_add(acc, f32x4_mul(diff, diff));
+                k += 4;
+            }
+            d += f32x4_extract_lane::<0>(acc) + f32x4_extract_lane::<1>(acc)
+               + f32x4_extract_lane::<2>(acc) + f32x4_extract_lane::<3>(acc);
+            if d >= limit {
+                return d;
+            }
+        }
+    }
+    d
+}
+
+// Scalar fallback for non-SIMD targets (e.g. native `cargo test`/`cargo check`).
+#[cfg(not(target_feature = "simd128"))]
 fn l2_sq_early(a: &[f32], b: &[f32], limit: f32) -> f32 {
     let mut d = 0.0f32;
     for k in 0..DESC {

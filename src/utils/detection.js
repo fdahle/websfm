@@ -60,7 +60,9 @@ export async function detectKeypoints(url, options = {}) {
   const flat = detect_sift(new Uint8Array(data.buffer), width, height, contrastThreshold, maxKeypoints)
   const ms = performance.now() - t0
 
-  const n = Math.floor(flat.length / STRIDE)
+  // detect_sift appends a trailing raw-count scalar after the STRIDE-packed
+  // keypoints, so kept = floor((len - 1) / STRIDE). See crates/sift/src/lib.rs.
+  const n = flat.length > 0 ? Math.floor((flat.length - 1) / STRIDE) : 0
   const keypoints = []
   const descriptors = new Float32Array(n * DESC_LEN)
 

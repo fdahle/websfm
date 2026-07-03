@@ -108,13 +108,18 @@ export const useSensorsStore = defineStore('sensors', () => {
 
   // Editable intrinsic fields and their parsing. Blank input clears the field
   // to null; `label` is free text, everything else is numeric.
-  const NUMERIC_FIELDS = new Set(['width', 'height', 'focal', 'cx', 'cy', 'k1', 'k2', 'k3', 'p1', 'p2', 'pixelSize'])
+  const NUMERIC_FIELDS = new Set(['width', 'height', 'focal', 'cx', 'cy', 'k1', 'k2', 'k3', 'p1', 'p2', 'pixelSize', 'sensorWidthMm'])
 
   function updateSensor(id, field, value) {
     const s = sensors.value.find((x) => x.id === id)
     if (!s) return
     if (field === 'label') {
       s.label = String(value).trim() || s.label
+    } else if (field === 'focalUnit') {
+      // Toggle between a focal length in pixels and one in millimetres. Only
+      // these two are valid; anything else leaves it as-is.
+      if (value === 'px' || value === 'mm') { s.focalUnit = value; save() }
+      return
     } else if (NUMERIC_FIELDS.has(field)) {
       if (value === '' || value == null) { s[field] = null }
       else {

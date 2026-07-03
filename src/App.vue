@@ -11,6 +11,7 @@ import DetectFeaturesModal from './components/modals/DetectFeaturesModal.vue'
 import MatchFeaturesModal from './components/modals/MatchFeaturesModal.vue'
 import ImageTableModal from './components/modals/ImageTableModal.vue'
 import MaskManagerModal from './components/modals/MaskManagerModal.vue'
+import AutoMaskModal from './components/modals/AutoMaskModal.vue'
 import SensorTableModal from './components/modals/SensorTableModal.vue'
 import MatchListModal from './components/modals/MatchListModal.vue'
 import ProgressModal from './components/modals/ProgressModal.vue'
@@ -32,9 +33,14 @@ import { restoreProjectStores, clearProjectStores } from './stores/projectStores
 import { useFootprintsStore } from './stores/useFootprintsStore.js'
 import { useSensorsStore } from './stores/useSensorsStore.js'
 import { usePosesStore } from './stores/usePosesStore.js'
+import './stores/useLogStore.js'   // registers the console as a project-scoped store
 import ReconstructModal from './components/modals/ReconstructModal.vue'
 import DepthMapsModal from './components/modals/DepthMapsModal.vue'
 import DenseModal from './components/modals/DenseModal.vue'
+import DemModal from './components/modals/DemModal.vue'
+import OrthoModal from './components/modals/OrthoModal.vue'
+import ConfirmModal from './components/modals/ConfirmModal.vue'
+import ProductViewer from './components/viewers/ProductViewer.vue'
 import GcpImportModal from './components/modals/GcpImportModal.vue'
 import GcpTableModal from './components/modals/GcpTableModal.vue'
 import FootprintImportModal from './components/modals/FootprintImportModal.vue'
@@ -83,15 +89,15 @@ const showMap = computed(() => currentSceneType.value !== 'object')
 const {
   tabs, activeTabId,
   activeTab, activeImageTab, activeView,
-  activateTab, openImageTab,
+  activateTab, openImageTab, openProductTab,
   closeTab, closeTabForImage, onImageDetected, resetToViewer,
 } = useTabs(imageById, showMap)
 
 // ── Reconstruction ────────────────────────────────────────────────────────────
 // Project-scoped store; restore/clear run through the project-store registry.
 const reconstructionStore = useReconstructionStore()
-const { cameras, points3d, reconStatus, clouds, selectedCloudId, selectedCloud, depthMaps } = storeToRefs(reconstructionStore)
-const { reconstruct, computeDepthMaps, densify, selectCloud, removeCloud, renameCloud } = reconstructionStore
+const { cameras, sparseCameras, points3d, reconStatus, clouds, selectedCloudId, selectedCloud, depthMaps, dem, ortho, georef, canGeoreference } = storeToRefs(reconstructionStore)
+const { reconstruct, computeDepthMaps, densify, generateDem, generateOrtho, georeference, selectCloud, removeCloud, renameCloud } = reconstructionStore
 
 // Clicking a point cloud in the sidebar shows it in the 3D viewer.
 function showCloud(id) {
@@ -129,8 +135,8 @@ const {
   settingsOpen, aboutOpen,
   projectPickerOpen, newProjectOpen, newProjectCanCancel,
   detectFeaturesOpen, matchFeaturesOpen,
-  imageTableOpen, maskManagerOpen, sensorTableOpen, gcpTableOpen, matchListOpen, reconstructOpen,
-  depthMapsOpen, denseOpen,
+  imageTableOpen, maskManagerOpen, autoMaskOpen, sensorTableOpen, gcpTableOpen, matchListOpen, reconstructOpen,
+  depthMapsOpen, denseOpen, demOpen, orthoOpen,
   gcpImportOpen, gcpImportText, gcpImportName, gcpImportGeojson, gcpImportCrs,
   footprintImportOpen, footprintImportData, footprintFromPosesOpen,
   cameraImportOpen, cameraImportText, cameraImportName, cameraImportMode,
@@ -146,16 +152,50 @@ const infoImage = computed(() => infoImageId.value ? imageById(infoImageId.value
 const {
   progressOpen, progressTitle, progressCurrent, progressTotal, progressLabel,
   cancelRun, runDetect, runMatch, runReconstruct, runComputeDepthMaps, runDensify,
-} = usePipeline({ images, detectAll, matchAll, onImageDetected, reconstruct, computeDepthMaps, densify })
+  runGenerateDem, runGenerateOrtho,
+} = usePipeline({ images, detectAll, matchAll, onImageDetected, reconstruct, computeDepthMaps, densify, generateDem, generateOrtho })
 
 // Dense pipeline gating for the Ribbon.
 const sparseReady = computed(() => clouds.value.some((c) => c.kind === 'sparse' && c.cameras.size >= 2))
 const depthMapCount = computed(() => depthMaps.value.size)
+// Products gating: a DEM needs any cloud; an ortho needs a DEM (+ depth maps);
+// the preview needs a built product.
+const cloudReady = computed(() => clouds.value.some((c) => c.points.length > 0))
+const demReady = computed(() => !!dem.value)
+const productReady = computed(() => !!dem.value || !!ortho.value)
 
 // ── Derived state ──────────────────────────────────────────────────────────────
 const selected = computed(() => images.value.find((img) => img.id === selectedId.value) || null)
 
 const kpImageCount = computed(() => images.value.filter(img => img.kpStatus === 'done').length)
+
+const hasSparse = computed(() => clouds.value.some((c) => c.kind === 'sparse'))
+
+// Per-pair count of matches that became tie-points in the sparse model.
+// Walk every tie-point's view-track ([uuid, kpIdx] observations); a pair of
+// observations (sorted by uuid to match `pairId`) is a "used correspondence"
+// of that image pair. Recomputed only when the sparse cloud changes.
+const usedMatchesByPair = computed(() => {
+  const byPair = new Map()   // pairId → Set("kpA:kpB")
+  const sparse = clouds.value.find((c) => c.kind === 'sparse')
+  if (!sparse) return byPair
+  for (const pt of sparse.points) {
+    if (!pt.views || pt.views.size < 2) continue
+    const obs = [...pt.views.entries()]              // [[uuid, kpIdx], …]
+    for (let i = 0; i < obs.length; i++) {
+      for (let j = i + 1; j < obs.length; j++) {
+        let [ua, ka] = obs[i]
+        let [ub, kb] = obs[j]
+        if (ua > ub) { [ua, ka, ub, kb] = [ub, kb, ua, ka] }
+        const pid = `${ua}--${ub}`
+        let set = byPair.get(pid)
+        if (!set) { set = new Set(); byPair.set(pid, set) }
+        set.add(`${ka}:${kb}`)
+      }
+    }
+  }
+  return byPair
+})
 
 const matchSummaries = computed(() => {
   const result = []
@@ -172,9 +212,27 @@ const matchSummaries = computed(() => {
       nameB:       imgB.name,
       inlierCount: entry.inlierCount,
       rawCount:    entry.rawCount,
+      usedCount:   usedMatchesByPair.value.get(pid)?.size ?? 0,
     })
   }
   return result
+})
+
+// Sidebar summary of the pairwise match store: verified/total/running/failed counts.
+// `verified` mirrors matchSummaries.length (done + inliers), but we walk the store
+// once here to also surface in-flight and failed pairs at a glance.
+const matchStats = computed(() => {
+  let total = 0, verified = 0, running = 0, error = 0
+  for (const [, entry] of matchStore.value) {
+    total++
+    if (entry.status === 'running') running++
+    else if (entry.status === 'error') error++
+    else if (entry.status === 'done' && entry.inlierCount > 0) verified++
+  }
+  // Pairs that contributed at least one tie-point to the sparse model (0 until
+  // reconstruction has run).
+  const used = hasSparse.value ? usedMatchesByPair.value.size : null
+  return { total, verified, running, error, used }
 })
 
 const activeImageViewState = computed(() => {
@@ -223,6 +281,10 @@ watch(selectedCloud, (c) => {
   if (c) viewerRef.value?.setReconstructionData(c.cameras, c.points)
   else viewerRef.value?.clearReconstructionData()
 })
+
+// ── 3D scene display toggles ───────────────────────────────────────────────────
+const showCameras = ref(true)
+const showGraticule = ref(true)
 
 // ── Console ───────────────────────────────────────────────────────────────────
 const consoleOpen = ref(localStorage.getItem('consoleOpen') === 'true')
@@ -555,10 +617,38 @@ function editMask(id) {
   maskManagerOpen.value = false
   openImageTab(id)
   const tab = activeTab.value
-  if (tab?.type === 'image') { tab.showMask = true; tab.maskMode = 'draw' }
+  if (tab?.type === 'image') { tab.showMask = true; tab.showDepth = false; tab.maskMode = 'draw' }
 }
 function onDepthMapsRun(settings)   { depthMapsOpen.value      = false;  runComputeDepthMaps(settings) }
 function onDenseRun(settings)       { denseOpen.value          = false;  runDensify(settings) }
+// Products: build, then pop the preview so the result is immediately visible.
+async function onDemRun(settings)   { demOpen.value = false;   await runGenerateDem(settings);   if (dem.value) openProductTab('dem') }
+async function onOrthoRun(settings) { orthoOpen.value = false; await runGenerateOrtho(settings); if (ortho.value) openProductTab('ortho') }
+
+// ── Image deletion (with confirmation) ────────────────────────────────────────
+// Removing images is irreversible (drops keypoints/masks/matches), so route every
+// delete request through a confirm dialog. Holds the pending image ids + names.
+const pendingImageDelete = ref(null)
+
+function requestRemoveImages(idOrIds) {
+  const ids = (Array.isArray(idOrIds) ? idOrIds : [idOrIds]).filter(Boolean)
+  if (!ids.length) return
+  const names = ids.map((id) => imageById(id)?.name).filter(Boolean)
+  pendingImageDelete.value = { ids, names }
+}
+
+function confirmRemoveImages() {
+  const ids = pendingImageDelete.value?.ids ?? []
+  for (const id of ids) removeImage(id, closeTabForImage)
+  pendingImageDelete.value = null
+}
+
+const deleteMessage = computed(() => {
+  const p = pendingImageDelete.value
+  if (!p) return ''
+  if (p.ids.length === 1) return `Remove “${p.names[0] ?? 'this image'}”? This also deletes its keypoints, mask, depth map and matches. This can't be undone.`
+  return `Remove ${p.ids.length} images? This also deletes their keypoints, masks, depth maps and matches. This can't be undone.`
+})
 
 // ── ImageViewer refs (for imperative mask ops) ────────────────────────────────
 const imageViewerRefs = reactive({})
@@ -579,7 +669,7 @@ function handleCommand(id) {
     case 'export-keypoints':     exportKeypoints(); break
     case 'export-matches':       exportMatches(); break
     case 'clear-all':            clearAll(resetToViewer); clearSensors(); clearProjectStores({ purge: true }); viewerRef.value?.clearReconstructionData(); break
-    case 'remove-selected':      if (selectedId.value) removeImage(selectedId.value, closeTabForImage); break
+    case 'remove-selected':      if (selectedId.value) requestRemoveImages(selectedId.value); break
     case 'view-viewer':          activateTab('viewer'); break
     case 'view-map':             activateTab('map'); break
     case 'view-preset-top':      viewerRef.value?.setView('top'); break
@@ -589,15 +679,22 @@ function handleCommand(id) {
     case 'view-preset-front':    viewerRef.value?.setView('front'); break
     case 'view-preset-back':     viewerRef.value?.setView('back'); break
     case 'reset-view':           viewerRef.value?.resetView(); break
+    case 'view-toggle-cameras':  showCameras.value = !showCameras.value; break
+    case 'view-toggle-graticule': showGraticule.value = !showGraticule.value; break
     case 'map-fit-view':         mapViewerRef.value?.fitView(); break
     case 'open-image-table':     imageTableOpen.value = true; break
     case 'open-mask-manager':    maskManagerOpen.value = true; break
+    case 'auto-mask':            autoMaskOpen.value = true; break
     case 'open-sensor-table':    sensorTableOpen.value = true; break
     case 'open-gcp-table':       gcpTableOpen.value = true; break
     case 'open-match-list':      matchListOpen.value = true; break
     case 'reconstruct':          reconstructOpen.value = true; break
     case 'compute-depth':        depthMapsOpen.value = true; break
     case 'dense':                denseOpen.value = true; break
+    case 'gen-dem':              demOpen.value = true; break
+    case 'gen-ortho':            orthoOpen.value = true; break
+    case 'view-products':        openProductTab(dem.value ? 'dem' : 'ortho'); break
+    case 'auto-georeference':    georeference(); break
     case 'footprints-from-poses': footprintFromPosesOpen.value = true; break
     case 'detect-features':      detectFeaturesOpen.value = true; break
     case 'match-features':       matchFeaturesOpen.value = true; break
@@ -606,7 +703,7 @@ function handleCommand(id) {
     case 'open-project-picker':  projectPickerOpen.value = !projectPickerOpen.value; break
     case 'toggle-console':       consoleOpen.value = !consoleOpen.value; break
     case 'img-show-info':        if (activeImageTab.value) infoImageId.value = activeImageTab.value.id; break
-    case 'img-remove':           if (activeImageTab.value) removeImage(activeImageTab.value.id, closeTabForImage); break
+    case 'img-remove':           if (activeImageTab.value) requestRemoveImages(activeImageTab.value.id); break
     case 'img-toggle-keypoints': {
       const tab = activeTab.value
       if (tab?.type === 'image') tab.showKeypoints = !tab.showKeypoints
@@ -614,12 +711,19 @@ function handleCommand(id) {
     }
     case 'img-toggle-mask': {
       const tab = activeTab.value
-      if (tab?.type === 'image') tab.showMask = !tab.showMask
+      // Mask and depth overlays are mutually exclusive — turning one on clears the other.
+      if (tab?.type === 'image') {
+        tab.showMask = !tab.showMask
+        if (tab.showMask) tab.showDepth = false
+      }
       break
     }
     case 'img-toggle-depth': {
       const tab = activeTab.value
-      if (tab?.type === 'image') tab.showDepth = !tab.showDepth
+      if (tab?.type === 'image') {
+        tab.showDepth = !tab.showDepth
+        if (tab.showDepth) tab.showMask = false
+      }
       break
     }
     case 'img-toggle-gcps': {
@@ -639,8 +743,6 @@ function handleCommand(id) {
     }
     case 'img-mask-import': imageViewerRefs[activeImageTab.value?.id]?.triggerMaskImport(); break
     case 'img-mask-clear':  imageViewerRefs[activeImageTab.value?.id]?.clearMask(); break
-    case 'img-depth-import': imageViewerRefs[activeImageTab.value?.id]?.triggerDepthImport(); break
-    case 'img-depth-clear':  imageViewerRefs[activeImageTab.value?.id]?.clearDepth(); break
     case 'img-brush-s': { const t = activeTab.value; if (t?.type === 'image') t.brushRadius = 10; break }
     case 'img-brush-m': { const t = activeTab.value; if (t?.type === 'image') t.brushRadius = 20; break }
     case 'img-brush-l': { const t = activeTab.value; if (t?.type === 'image') t.brushRadius = 40; break }
@@ -667,6 +769,9 @@ function onRibbonPick(event) {
       :sensor-count="sensors.length"
       :sparse-ready="sparseReady"
       :depth-map-count="depthMapCount"
+      :cloud-ready="cloudReady"
+      :dem-ready="demReady"
+      :product-ready="productReady"
       :active-image-id="activeImageTab?.id ?? null"
       :active-image-name="activeImageTab?.name ?? null"
       :image-view-state="activeImageViewState"
@@ -674,6 +779,8 @@ function onRibbonPick(event) {
       :persistence-enabled="persistenceAvailable"
       :current-project-name="currentProjectName"
       :scene-type="currentSceneType"
+      :show-cameras="showCameras"
+      :show-graticule="showGraticule"
       @command="handleCommand"
     />
     <input ref="ribbonInput" type="file" accept="image/*" multiple hidden @change="onRibbonPick" />
@@ -731,6 +838,38 @@ function onRibbonPick(event) {
         v-if="denseOpen"
         @close="denseOpen = false"
         @run="onDenseRun"
+      />
+    </Teleport>
+
+    <Teleport to="body">
+      <DemModal
+        v-if="demOpen"
+        :can-georeference="canGeoreference"
+        :project-crs="currentCrs"
+        @close="demOpen = false"
+        @run="onDemRun"
+      />
+    </Teleport>
+
+    <Teleport to="body">
+      <ConfirmModal
+        v-if="pendingImageDelete"
+        :title="pendingImageDelete.ids.length > 1 ? 'Remove images?' : 'Remove image?'"
+        :message="deleteMessage"
+        confirm-label="Remove"
+        danger
+        @confirm="confirmRemoveImages"
+        @cancel="pendingImageDelete = null"
+      />
+    </Teleport>
+
+    <Teleport to="body">
+      <OrthoModal
+        v-if="orthoOpen"
+        :dem-crs="dem?.crs === 'local' || !dem?.crs ? 'local frame' : dem.crs"
+        :dem-size="dem ? `${dem.width}×${dem.height}` : null"
+        @close="orthoOpen = false"
+        @run="onOrthoRun"
       />
     </Teleport>
 
@@ -844,6 +983,10 @@ function onRibbonPick(event) {
         @close="maskManagerOpen = false"
         @edit="editMask"
       />
+      <AutoMaskModal
+        v-if="autoMaskOpen"
+        @close="autoMaskOpen = false"
+      />
     </Teleport>
 
     <Teleport to="body">
@@ -851,7 +994,7 @@ function onRibbonPick(event) {
         v-if="sensorTableOpen"
         :sensors="sensors"
         :images="images"
-        :cameras="cameras"
+        :cameras="sparseCameras"
         @close="sensorTableOpen = false"
         @update="({ id, field, value }) => updateSensor(id, field, value)"
         @toggle-fixed="({ id, field }) => toggleSensorFixed(id, field)"
@@ -876,6 +1019,7 @@ function onRibbonPick(event) {
         :match-summaries="matchSummaries"
         :images="images"
         :match-store="matchStore"
+        :has-sparse="hasSparse"
         @close="matchListOpen = false"
       />
     </Teleport>
@@ -898,15 +1042,20 @@ function onRibbonPick(event) {
         :clouds="clouds"
         :selected-cloud-id="selectedCloudId"
         :recon-status="reconStatus"
+        :match-stats="matchStats"
         :sensor-image-count="sensorImageCount"
         :selected-id="selectedId"
+        :dem="dem"
+        :ortho="ortho"
+        @open-product="openProductTab"
+        @open-matches="matchListOpen = true"
         @select-cloud="showCloud"
         @remove-cloud="removeCloud"
         @rename-cloud="({ id, name }) => renameCloud(id, name)"
         @reconstruct="reconstructOpen = true"
         @add-images="addImages"
         @import-file="openDroppedImport"
-        @remove-image="(id) => removeImage(id, closeTabForImage)"
+        @remove-image="requestRemoveImages"
         @remove-gcp="removeGcp"
         @remove-sensor="removeSensor"
         @merge-sensors="({ target, source }) => mergeSensors(target, source)"
@@ -933,7 +1082,7 @@ function onRibbonPick(event) {
         </div>
 
         <div class="content">
-          <Viewer3D ref="viewerRef" v-show="activeTabId === 'viewer'" :theme="theme" />
+          <Viewer3D ref="viewerRef" v-show="activeTabId === 'viewer'" :theme="theme" :images="images" :show-cameras="showCameras" :show-graticule="showGraticule" />
           <ViewerMap ref="mapViewerRef" v-show="activeTabId === 'map'" :images="images" :gcps="gcps" :footprints="footprints" :poses="poses" :selected-id="selectedId" :crs="currentCrs" @select="selectImage" />
           <template v-for="tab in tabs" :key="tab.id">
             <ViewerImage
@@ -950,6 +1099,12 @@ function onRibbonPick(event) {
               :brush-radius="tab.brushRadius"
               @update-mask="(dataUrl) => updateMask(tab.imageId, dataUrl)"
               @update-depth="(dataUrl) => updateDepth(tab.imageId, dataUrl)"
+            />
+            <ProductViewer
+              v-else-if="tab.type === 'product'"
+              v-show="activeTabId === tab.id"
+              :kind="tab.productKind"
+              :product="tab.productKind === 'ortho' ? ortho : dem"
             />
           </template>
 

@@ -80,6 +80,22 @@ export function useTabs(imageById, showMap) {
     activeTabId.value = 'metadata'
   }
 
+  // Open a raster product (DEM / orthophoto) in its own tab, like an image.
+  // One tab per kind; re-opening focuses the existing tab.
+  function openProductTab(kind) { // 'dem' | 'ortho'
+    const tabId = `product:${kind}`
+    if (!tabs.value.some((t) => t.id === tabId)) {
+      tabs.value.push({
+        id: tabId,
+        type: 'product',
+        productKind: kind,
+        title: kind === 'ortho' ? 'Orthophoto' : 'DEM',
+        closable: true,
+      })
+    }
+    activeTabId.value = tabId
+  }
+
   function closeTab(id) {
     const idx = tabs.value.findIndex((t) => t.id === id)
     if (idx === -1 || !tabs.value[idx].closable) return
@@ -116,6 +132,7 @@ export function useTabs(imageById, showMap) {
     openImageTab,
     openMatchTab,
     openMetadataTab,
+    openProductTab,
     closeTab,
     closeTabForImage,
     onImageDetected,

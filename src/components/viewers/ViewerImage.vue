@@ -1,6 +1,7 @@
 <script setup>
 import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import { maskFromSource } from '../../core/mask.js'
+import { depthColor } from '../../core/colormap.js'
 
 const props = defineProps({
   image:         { type: Object,  required: true },
@@ -313,14 +314,6 @@ async function loadDepthFromDataUrl(dataUrl) {
   } catch {}
 }
 
-// Turbo-ish color ramp: maps a normalized depth (0..1) to [r,g,b].
-function depthColor(t) {
-  // Smooth blue → cyan → green → yellow → red ramp.
-  const r = Math.round(255 * clamp(1.5 - Math.abs(4 * t - 3), 0, 1))
-  const g = Math.round(255 * clamp(1.5 - Math.abs(4 * t - 2), 0, 1))
-  const b = Math.round(255 * clamp(1.5 - Math.abs(4 * t - 1), 0, 1))
-  return [r, g, b]
-}
 
 function triggerDepthImport() {
   depthFileInput.value?.click()

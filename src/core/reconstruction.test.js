@@ -10,6 +10,7 @@ import {
   fundamentalToEssential,
   solvePnp,
   bundleAdjust,
+  resolveK,
 } from './reconstruction.js'
 
 // The wasm glue defaults to fetch()ing its .wasm via a URL, which Node can't do.
@@ -48,6 +49,46 @@ function crossMat(t) {
     [-t[1], t[0], 0],
   ]
 }
+
+describe('resolveK (intrinsics resolution)', () => {
+  const meta = { width: 10137, height: 9600 }
+
+  it('uses a focal in px directly', () => {
+    const K = resolveK(meta, { width: 10137, height: 9600, focal: 6758, focalUnit: 'px' })
+    expect(K.fx).toBeCloseTo(6758, 6)
+    expect(K.fy).toBeCloseTo(6758, 6)
+    expect(K.cx).toBeCloseTo(10137 / 2, 6)
+  })
+
+  it('converts an mm focal via pixel size', () => {
+    const K = resolveK(meta, { width: 10137, focal: 152, focalUnit: 'mm', pixelSize: 152 / 6758 })
+    expect(K.fx).toBeCloseTo(6758, 3)
+  })
+
+  it('reports the implied film width and flags off-standard pitch (Q4)', () => {
+    // 0.025mm/px × 10137px = 253mm — wider than standard 230/240mm film.
+    const bad = resolveK(meta, { width: 10137, focal: 154, focalUnit: 'mm', pixelSize: 0.025 })
+    expect(bad.impliedFilmWidthMm).toBeCloseTo(253.4, 1)
+    expect(bad.filmWidthOk).toBe(false)
+    // A pitch giving a ~230mm frame is accepted.
+    const good = resolveK(meta, { width: 10137, focal: 152, focalUnit: 'mm', pixelSize: 230 / 10137 })
+    expect(good.impliedFilmWidthMm).toBeCloseTo(230, 3)
+    expect(good.filmWidthOk).toBe(true)
+  })
+
+  it('converts an mm focal via film/sensor format width (film camera)', () => {
+    // 152mm focal on a 228mm (9") format, scanned to 10137px wide.
+    const K = resolveK(meta, { width: 10137, focal: 152, focalUnit: 'mm', sensorWidthMm: 228 })
+    expect(K.fx).toBeCloseTo((152 / 228) * 10137, 3)
+    expect(K.source).toMatch(/format/)
+  })
+
+  it('falls back to a default FOV with no calibration', () => {
+    const K = resolveK(meta, null)
+    expect(K.fx).toBe(10137) // max(w, h)
+    expect(K.source).toMatch(/default FOV/)
+  })
+})
 
 describe('triangulateDlt', () => {
   it('recovers known 3D points from two views (no rotation, lateral baseline)', async () => {

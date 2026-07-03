@@ -42,6 +42,9 @@ pub(crate) fn sample_gray(img: &[u8], w: usize, h: usize, x: f64, y: f64) -> f64
 // to the reference camera (x_src = R·x_ref + t, both in their camera frames).
 pub(crate) struct SrcView<'a> {
     gray: &'a [u8],
+    // Per-pixel exclusion mask (0/1, 1 = masked frame/fiducial), same dims as `gray`.
+    // Empty slice means "no mask". A patch warping onto a masked texel is rejected.
+    mask: &'a [u8],
     w: usize,
     h: usize,
     fx: f64, fy: f64, cx: f64, cy: f64,
@@ -49,11 +52,19 @@ pub(crate) struct SrcView<'a> {
     t: V3,
 }
 
+// Sentinel: a source that provides no measurement (warp OOB / masked / <4 px /
+// textureless). `agg_cost` excludes these instead of averaging a max cost 2.0 in
+// (adaptive best-K over *valid* sources). Test with `>= INVALID_THRESH`.
+pub(crate) const INVALID: f64 = 1e9;
+const INVALID_THRESH: f64 = 1e8;
+
 // ZNCC of the reference patch around (u, v) against the source patch obtained by
 // mapping each reference sample through the plane (depth at (u,v), unit normal n)
 // induced homography. `radius` is the half-window; step keeps it cheap. Returns a
 // matching *cost* in [0, 2]: 0 = perfect correlation, 2 = anti-correlated. A
-// large value (2.0) is returned when the warp leaves the source image.
+// degenerate plane (bad hypothesis) scores the max cost 2.0; when the source
+// provides no measurement (warp OOB / masked / <4 px / textureless) it returns
+// the INVALID sentinel so `agg_cost` can exclude it rather than average it in.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn plane_cost(
     refimg: &[u8], rw: usize, rh: usize,
@@ -98,7 +109,13 @@ pub(crate) fn plane_cost(
             let su = src.fx * (xs[0] / xs[2]) + src.cx;
             let sv_ = src.fy * (xs[1] / xs[2]) + src.cy;
             if su < 0.0 || sv_ < 0.0 || su >= src.w as f64 || sv_ >= src.h as f64 {
-                return 2.0; // warp left the source — reject this hypothesis here
+                return INVALID; // warp left the source — no measurement from this view
+            }
+            // Masked source texel (frame/fiducial) — reject like an out-of-bounds warp
+            // so the reference can't falsely correlate against a neighbour's border.
+            if !src.mask.is_empty() {
+                let mi = sv_ as usize * src.w + su as usize;
+                if mi < src.mask.len() && src.mask[mi] != 0 { return INVALID; }
             }
             let rval = refimg[yi as usize * rw + xi as usize] as f64;
             let sval = sample_gray(src.gray, src.w, src.h, su, sv_);
@@ -109,14 +126,14 @@ pub(crate) fn plane_cost(
         }
         y += 1;
     }
-    if cnt < 4.0 { return 2.0; }
+    if cnt < 4.0 { return INVALID; } // too little overlap — no measurement
     let mean_r = sum_r / cnt;
     let mean_s = sum_s / cnt;
     let var_r = sum_rr / cnt - mean_r*mean_r;
     let var_s = sum_ss / cnt - mean_s*mean_s;
     let cov = sum_rs / cnt - mean_r*mean_s;
     let denom = (var_r * var_s).sqrt();
-    if denom < 1e-6 { return 2.0; } // tex(ture)less patch — uninformative
+    if denom < 1e-6 { return INVALID; } // textureless patch — no measurement
     let ncc = (cov / denom).clamp(-1.0, 1.0);
     1.0 - ncc // cost in [0, 2]
 }
@@ -131,9 +148,13 @@ pub(crate) fn agg_cost(
     u: usize, v: usize, depth: f64, n: &V3, radius: i32,
 ) -> f64 {
     if depth <= 0.0 { return 2.0; }
+    // Collect only *valid* per-source costs; exclude no-measurement sources
+    // (INVALID sentinel) rather than averaging their max cost in.
     let mut costs: Vec<f64> = srcs.iter()
         .map(|s| plane_cost(refimg, rw, rh, rfx, rfy, rcx, rcy, s, u, v, depth, n, radius))
+        .filter(|c| *c < INVALID_THRESH)
         .collect();
+    if costs.is_empty() { return 2.0; } // no source measured this pixel
     costs.sort_by(|a, b| a.partial_cmp(b).unwrap());
     let k = best_k.min(costs.len()).max(1);
     costs[..k].iter().sum::<f64>() / k as f64
@@ -143,7 +164,7 @@ pub(crate) fn agg_cost(
 #[allow(clippy::too_many_arguments)]
 pub fn compute_depth_map(
     ref_gray: &[u8], ref_w: u32, ref_h: u32, ref_k: &[f32],
-    src_gray: &[u8], src_dims: &[u32], src_k: &[f32], src_rel: &[f32],
+    src_gray: &[u8], src_dims: &[u32], src_k: &[f32], src_rel: &[f32], src_mask: &[u8],
     seed_depth: &[f32],
     depth_min: f32, depth_max: f32,
     window: u32, iterations: u32, best_k: u32,
@@ -177,8 +198,11 @@ pub fn compute_depth_map(
             [src_rel[s*12+3] as f64, src_rel[s*12+4] as f64, src_rel[s*12+5] as f64],
             [src_rel[s*12+6] as f64, src_rel[s*12+7] as f64, src_rel[s*12+8] as f64],
         ];
+        // Mask is optional: use the matching slice only when src_mask covers all
+        // sources (same concatenated layout as src_gray), else treat as unmasked.
+        let mask: &[u8] = if src_mask.len() >= src_gray.len() { &src_mask[off..off+len] } else { &[] };
         srcs.push(SrcView {
-            gray: &src_gray[off..off+len], w, h,
+            gray: &src_gray[off..off+len], mask, w, h,
             fx: src_k[s*4] as f64, fy: src_k[s*4+1] as f64,
             cx: src_k[s*4+2] as f64, cy: src_k[s*4+3] as f64,
             r, t: [src_rel[s*12+9] as f64, src_rel[s*12+10] as f64, src_rel[s*12+11] as f64],

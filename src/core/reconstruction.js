@@ -42,13 +42,22 @@ function sensorWidthMm(meta) {
   return sensorWidthFromDb(meta)
 }
 
+// True when a physical film width (mm) matches a standard aerial format within
+// ±5%. Historical mapping cameras use 230mm (9") or 240mm frames; a scan whose
+// implied width is far from these usually means a wrong pixel pitch.
+export function isKnownAerialFilmWidth(mm) {
+  return [230, 240].some((w) => Math.abs(mm - w) / w <= 0.05)
+}
+
 // Resolve K intrinsics (pixels) for one image, preferring the (user-editable)
 // assigned sensor over raw EXIF. Order of reliability:
 //   1. sensor focal already in pixels        (table value — authoritative)
 //   2. sensor focal (mm) ÷ pixel size         (table value)
-//   3. EXIF 35mm-equivalent focal
-//   4. focal (mm, from sensor or EXIF) × imageWidth ÷ derivable sensor width
-//   5. default-FOV guess (fx = max(w,h)) — poor; registration may fail
+//   3. sensor focal (mm) × imageWidth ÷ sensor/film width (mm) (table value —
+//      the natural film-camera input: focal + format from a calibration sheet)
+//   4. EXIF 35mm-equivalent focal
+//   5. focal (mm, from sensor or EXIF) × imageWidth ÷ derivable sensor width
+//   6. default-FOV guess (fx = max(w,h)) — poor; registration may fail
 // Returns { fx, fy, cx, cy, source } where `source` explains the path taken.
 export function resolveK(meta, sensor = null) {
   const w = sensor?.width || meta?.width || 1000
@@ -56,25 +65,45 @@ export function resolveK(meta, sensor = null) {
   const cx = sensor?.cx ?? w / 2
   const cy = sensor?.cy ?? h / 2
 
+  // A focal in mm only — px focals are handled separately in path 1.
+  const sensorFocalMm = (sensor?.focal != null && sensor.focalUnit !== 'px') ? sensor.focal : null
+
   // 1. Sensor with an explicit pixel focal — the edited table wins outright.
   if (sensor?.focal != null && sensor.focalUnit === 'px') {
     return { fx: sensor.focal, fy: sensor.focal, cx, cy, source: 'sensor table (focal in px)' }
   }
 
   // 2. Sensor focal in mm + a pixel size → fx = focal / pixelSize.
-  if (sensor?.focal != null && sensor.focalUnit !== 'px' && sensor.pixelSize) {
-    const fx = sensor.focal / sensor.pixelSize
-    return { fx, fy: fx, cx, cy, source: `sensor table (${sensor.focal}mm ÷ ${sensor.pixelSize}mm/px)` }
+  if (sensorFocalMm != null && sensor.pixelSize) {
+    const fx = sensorFocalMm / sensor.pixelSize
+    // Sanity check: widthPx × pitch is the physical film width the scan implies.
+    // Standard aerial film is ~230mm or ~240mm; a wildly different value (e.g. a
+    // full-frame scan at the wrong pitch) silently distorts every focal downstream.
+    const impliedFilmWidthMm = w * sensor.pixelSize
+    return {
+      fx, fy: fx, cx, cy,
+      source: `sensor table (${sensorFocalMm}mm ÷ ${sensor.pixelSize}mm/px)`,
+      impliedFilmWidthMm,
+      filmWidthOk: isKnownAerialFilmWidth(impliedFilmWidthMm),
+    }
   }
 
-  // 3. EXIF 35mm-equivalent focal length.
+  // 3. Sensor focal in mm + film/sensor width in mm → fx = focal/widthMm × w.
+  //    The standard scanned-aerial-film input: focal length and format size
+  //    from the camera calibration certificate, no pixel size needed.
+  if (sensorFocalMm != null && sensor.sensorWidthMm) {
+    const fx = (sensorFocalMm / sensor.sensorWidthMm) * w
+    return { fx, fy: fx, cx, cy, source: `sensor table (${sensorFocalMm}mm, ${sensor.sensorWidthMm}mm format)` }
+  }
+
+  // 4. EXIF 35mm-equivalent focal length.
   if (meta?.focalLength35) {
     const fx = (meta.focalLength35 / 36) * w
     return { fx, fy: fx, cx, cy, source: 'EXIF 35mm-equivalent focal' }
   }
 
-  // 4. A real focal (mm) — sensor's or EXIF's — plus a derivable sensor width.
-  const focalMm = (sensor?.focal != null && sensor.focalUnit !== 'px') ? sensor.focal : meta?.focalLength
+  // 5. A real focal (mm) — sensor's or EXIF's — plus a derivable sensor width.
+  const focalMm = sensorFocalMm ?? meta?.focalLength
   if (focalMm) {
     const sw = sensorWidthMm(meta)
     if (sw) {
@@ -83,11 +112,11 @@ export function resolveK(meta, sensor = null) {
     }
   }
 
-  // 5. No usable calibration. Distinguish "no focal at all" from "focal known but
+  // 6. No usable calibration. Distinguish "no focal at all" from "focal known but
   //    no sensor/pixel size to convert it" — the latter is fixable in the table.
   const fx = Math.max(w, h)
   const why = focalMm
-    ? `default FOV (focal ${focalMm}mm present but no sensor/pixel size to convert it)`
+    ? `default FOV (focal ${focalMm}mm present but no pixel size or film/sensor format to convert it)`
     : 'default FOV (no focal length in metadata)'
   return { fx, fy: fx, cx, cy, source: why }
 }
@@ -264,8 +293,10 @@ export async function bundleAdjust(cameras, intrinsics, points3d, observations, 
 // PatchMatch multi-view-stereo depth map for one reference image (dense recon).
 //   refGray:  Uint8Array grayscale, length refW*refH
 //   refK:     { fx, fy, cx, cy } at the reference's WORKING resolution
-//   sources:  [{ gray: Uint8Array, w, h, K:{fx,fy,cx,cy}, R:[[…]×3], t:[tx,ty,tz] }]
-//             R,t map the reference camera frame → that source's frame.
+//   sources:  [{ gray: Uint8Array, w, h, K:{fx,fy,cx,cy}, R:[[…]×3], t:[tx,ty,tz], mask? }]
+//             R,t map the reference camera frame → that source's frame. `mask`, when
+//             present, is a length-w*h 0/1 LUT (1 = excluded frame/fiducial) so the
+//             ZNCC match skips a source's border instead of falsely correlating to it.
 //   opts:     { depthMin, depthMax, seedDepth?: Float32Array(refW*refH),
 //               window=2, iterations=3, bestK=3, seed=1 }
 // Returns { depth: Float32Array, cost: Float32Array, width, height } (cost: lower
@@ -283,12 +314,15 @@ export async function computeDepthMap(refGray, refW, refH, refK, sources, opts =
   let total = 0
   for (const s of sources) total += s.w * s.h
   const srcGray = new Uint8Array(total)
+  const srcMask = new Uint8Array(total) // 0/1, parallel to srcGray (0 where no mask)
   const srcDims = new Uint32Array(n * 2)
   const srcK = new Float32Array(n * 4)
   const srcRel = new Float32Array(n * 12)
   let off = 0
   sources.forEach((s, i) => {
-    srcGray.set(s.gray, off); off += s.w * s.h
+    srcGray.set(s.gray, off)
+    if (s.mask) srcMask.set(s.mask.subarray(0, s.w * s.h), off)
+    off += s.w * s.h
     srcDims[i*2] = s.w; srcDims[i*2+1] = s.h
     srcK.set([s.K.fx, s.K.fy, s.K.cx, s.K.cy], i * 4)
     const { R, t } = s
@@ -298,7 +332,7 @@ export async function computeDepthMap(refGray, refW, refH, refK, sources, opts =
   const refKArr = new Float32Array([refK.fx, refK.fy, refK.cx, refK.cy])
   const raw = compute_depth_map(
     refGray, refW, refH, refKArr,
-    srcGray, srcDims, srcK, srcRel,
+    srcGray, srcDims, srcK, srcRel, srcMask,
     seedDepth,
     depthMin, depthMax,
     window, iterations, bestK, seed >>> 0,

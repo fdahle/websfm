@@ -9,7 +9,12 @@ const props = defineProps({
   // Point clouds: [{ id, name, kind, createdAt, cameras: Map, points: [] }]
   clouds:     { type: Array,  default: () => [] },
   selectedCloudId: { type: String, default: null },
+  // Raster products (recomputable): DEM / orthophoto, or null when not built.
+  dem:        { type: Object, default: null },
+  ortho:      { type: Object, default: null },
   reconStatus: { type: String, default: 'idle' }, // 'idle'|'running'|'done'|'error'
+  // Pairwise-match summary: { total, verified, running, error }
+  matchStats: { type: Object, default: () => ({ total: 0, verified: 0, running: 0, error: 0 }) },
   // (sensorId) => number of images using that sensor
   sensorImageCount: { type: Function, default: () => 0 },
   selectedId: { type: String, default: null },
@@ -20,6 +25,7 @@ const emit = defineEmits([
   'remove-sensor', 'merge-sensors', 'assign-sensor', 'remove-pose',
   'select', 'open', 'show-info', 'delete-keypoints', 'zoom-to-image',
   'select-cloud', 'remove-cloud', 'rename-cloud', 'reconstruct',
+  'open-matches', 'open-product',
 ])
 
 // Whole-sidebar drag-and-drop (counter avoids false dragleave on children)
@@ -50,11 +56,33 @@ function onDrop(e) {
 }
 
 // Collapsible sections
-const open = ref({ images: true, gcps: true, sensors: false, clouds: true })
+const open = ref({ images: true, gcps: true, sensors: false, matches: true, clouds: true, products: true })
 
 function toggle(key) {
   open.value[key] = !open.value[key]
 }
+
+// ── Products (DEM / orthophoto) ────────────────────────────────────────────────
+// One row per built raster; opening (double-click) shows it in a tab like an image.
+const productRows = computed(() => {
+  const rows = []
+  if (props.dem) rows.push({ kind: 'dem', name: 'DEM', product: props.dem })
+  if (props.ortho) rows.push({ kind: 'ortho', name: 'Orthophoto', product: props.ortho })
+  return rows
+})
+
+const productExpanded = ref({})
+function toggleProductExpand(kind) {
+  if (productExpanded.value[kind]) delete productExpanded.value[kind]
+  else productExpanded.value[kind] = true
+}
+
+const productUnit = (p) => (p?.unit === 'm' ? 'm' : 'units')
+const productCrs = (p) => (p?.crs === 'local' || !p?.crs ? 'Local' : p.crs)
+
+// Matches summary is a single expandable row (no per-pair list — pairs are O(N²)
+// and live in the dedicated modal). This just toggles the inline stats card.
+const matchesExpanded = ref(false)
 
 // ── Point cloud rows ──────────────────────────────────────────────────────────
 const cloudExpanded = ref({})
@@ -66,11 +94,23 @@ function toggleCloudExpand(id) {
 
 const cloudKindLabel = (kind) => (kind === 'dense' ? 'Dense' : 'Sparse')
 
-// Inline rename. Only one cloud edits at a time, so a single template ref on the
-// (v-if'd) input always points at the active field.
+// Tie-points = sparse points carrying at least one view-track. (Dense clouds have
+// no tracks, so this is only shown for sparse clouds.)
+function tiePointCount(cloud) {
+  return cloud.points.reduce((n, p) => n + (p.views?.size > 0 ? 1 : 0), 0)
+}
+
+// Inline rename. Only one cloud edits at a time. The input lives inside the cloud
+// v-for, so a plain `ref="…"` would collect into an *array* (leaving `.focus()`
+// a silent no-op — the field never focuses and never blurs, so the row appears
+// stuck in rename mode). A function ref captures the single live element instead.
 const editingCloudId = ref(null)
 const editingName = ref('')
 const renameInput = ref(null)
+
+function setRenameInput(el) {
+  if (el) renameInput.value = el
+}
 
 function startRename(cloud) {
   editingCloudId.value = cloud.id
@@ -248,7 +288,9 @@ function ctxDeleteKp() {
   closeMenus()
 }
 function ctxRemove() {
-  ctxTargets.value.forEach((img) => emit('remove-image', img.id))
+  // Emit the whole target set at once so the parent can confirm a batch delete
+  // with a single prompt.
+  emit('remove-image', ctxTargets.value.map((img) => img.id))
   closeMenus()
 }
 function ctxAssignSensor(sensorId) {
@@ -364,58 +406,6 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenus))
       </ul>
     </div>
 
-    <!-- Ground Control Points -->
-    <div class="section">
-      <button class="section-hd" @click="toggle('gcps')">
-        <span class="chevron">{{ open.gcps ? '▾' : '▸' }}</span>
-        <span class="section-name">Ground Control Points</span>
-        <span v-if="gcps.length" class="badge">{{ gcps.length }}</span>
-      </button>
-      <ul v-if="open.gcps" class="item-list">
-        <template v-for="gcp in gcps" :key="gcp.id">
-          <li
-            class="list-item"
-            :title="gcp.name"
-            @click="toggleGcpExpand(gcp.id)"
-          >
-            <button
-              class="expand-btn"
-              :class="{ open: gcpExpanded[gcp.id] }"
-              @click.stop="toggleGcpExpand(gcp.id)"
-              :title="gcpExpanded[gcp.id] ? 'Collapse' : 'Expand'"
-            ></button>
-            <span class="item-name">{{ gcp.name }}</span>
-            <span v-if="gcp.observations?.length" class="obs-badge" :title="`${gcp.observations.length} observation(s)`">
-              {{ gcp.observations.length }}
-            </span>
-          </li>
-          <li v-if="gcpExpanded[gcp.id]" class="img-details">
-            <div class="detail-row">
-              <span class="detail-label">X</span>
-              <span class="detail-value">{{ fmtCoord(gcp.x) }}</span>
-            </div>
-            <div class="detail-row">
-              <span class="detail-label">Y</span>
-              <span class="detail-value">{{ fmtCoord(gcp.y) }}</span>
-            </div>
-            <div class="detail-row">
-              <span class="detail-label">Z</span>
-              <span class="detail-value">
-                <template v-if="gcp.z != null">{{ fmtCoord(gcp.z) }}</template>
-                <span v-else class="detail-dim">—</span>
-              </span>
-            </div>
-            <div class="detail-row">
-              <span class="detail-label">Observations</span>
-              <span class="detail-value">{{ gcp.observations?.length || 0 }}</span>
-            </div>
-            <button class="gcp-remove" @click.stop="emit('remove-gcp', gcp.id)">Remove</button>
-          </li>
-        </template>
-        <li v-if="!gcps.length" class="empty">No GCPs — import a control-point file</li>
-      </ul>
-    </div>
-
     <!-- Sensors (shared camera intrinsics) -->
     <div class="section">
       <button class="section-hd" @click="toggle('sensors')">
@@ -470,6 +460,108 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenus))
       </ul>
     </div>
 
+    <!-- Matches (pairwise feature correspondences; the full list lives in a modal) -->
+    <div class="section">
+      <button class="section-hd" @click="toggle('matches')">
+        <span class="chevron">{{ open.matches ? '▾' : '▸' }}</span>
+        <span class="section-name">Matches</span>
+        <span v-if="matchStats.running" class="status-dot running"></span>
+        <span v-else-if="matchStats.verified" class="badge">{{ matchStats.verified }}</span>
+      </button>
+      <ul v-if="open.matches" class="item-list">
+        <template v-if="matchStats.total">
+          <li
+            class="list-item"
+            title="Double-click to open the match list"
+            @click="matchesExpanded = !matchesExpanded"
+            @dblclick="emit('open-matches')"
+          >
+            <button
+              class="expand-btn"
+              :class="{ open: matchesExpanded }"
+              @click.stop="matchesExpanded = !matchesExpanded"
+              :title="matchesExpanded ? 'Collapse' : 'Expand'"
+            ></button>
+            <span class="item-name">Verified pairs</span>
+            <span class="obs-badge" :title="`${matchStats.verified} of ${matchStats.total} pair(s)`">{{ matchStats.verified }}</span>
+          </li>
+          <li v-if="matchesExpanded" class="img-details">
+            <div class="detail-row">
+              <span class="detail-label">Verified</span>
+              <span class="detail-value">{{ matchStats.verified.toLocaleString() }}</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">Total pairs</span>
+              <span class="detail-value">{{ matchStats.total.toLocaleString() }}</span>
+            </div>
+            <div v-if="matchStats.used != null" class="detail-row">
+              <span class="detail-label">Used in model</span>
+              <span class="detail-value">{{ matchStats.used.toLocaleString() }}</span>
+            </div>
+            <div v-if="matchStats.error" class="detail-row">
+              <span class="detail-label">Failed</span>
+              <span class="detail-value detail-error">{{ matchStats.error }}</span>
+            </div>
+            <button class="link-btn matches-view" @click.stop="emit('open-matches')">View match list</button>
+          </li>
+        </template>
+        <li v-else-if="matchStats.running" class="empty">Matching…</li>
+        <li v-else class="empty">No matches — run matching</li>
+      </ul>
+    </div>
+
+    <!-- Ground Control Points -->
+    <div class="section">
+      <button class="section-hd" @click="toggle('gcps')">
+        <span class="chevron">{{ open.gcps ? '▾' : '▸' }}</span>
+        <span class="section-name">Ground Control Points</span>
+        <span v-if="gcps.length" class="badge">{{ gcps.length }}</span>
+      </button>
+      <ul v-if="open.gcps" class="item-list">
+        <template v-for="gcp in gcps" :key="gcp.id">
+          <li
+            class="list-item"
+            :title="gcp.name"
+            @click="toggleGcpExpand(gcp.id)"
+          >
+            <button
+              class="expand-btn"
+              :class="{ open: gcpExpanded[gcp.id] }"
+              @click.stop="toggleGcpExpand(gcp.id)"
+              :title="gcpExpanded[gcp.id] ? 'Collapse' : 'Expand'"
+            ></button>
+            <span class="item-name">{{ gcp.name }}</span>
+            <span v-if="gcp.observations?.length" class="obs-badge" :title="`${gcp.observations.length} observation(s)`">
+              {{ gcp.observations.length }}
+            </span>
+          </li>
+          <li v-if="gcpExpanded[gcp.id]" class="img-details">
+            <div class="detail-row">
+              <span class="detail-label">X</span>
+              <span class="detail-value">{{ fmtCoord(gcp.x) }}</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">Y</span>
+              <span class="detail-value">{{ fmtCoord(gcp.y) }}</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">Z</span>
+              <span class="detail-value">
+                <template v-if="gcp.z != null">{{ fmtCoord(gcp.z) }}</template>
+                <span v-else class="detail-dim">—</span>
+              </span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">Observations</span>
+              <span class="detail-value">{{ gcp.observations?.length || 0 }}</span>
+            </div>
+            <button class="gcp-remove" @click.stop="emit('remove-gcp', gcp.id)">Remove</button>
+          </li>
+        </template>
+        <li v-if="!gcps.length" class="empty">No GCPs — import a control-point file</li>
+      </ul>
+    </div>
+
     <!-- Point clouds (sparse / dense models: camera poses + 3D points) -->
     <div class="section">
       <button class="section-hd" @click="toggle('clouds')">
@@ -486,7 +578,6 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenus))
             :class="{ selected: cloud.id === selectedCloudId }"
             :title="cloud.name"
             @click="emit('select-cloud', cloud.id)"
-            @dblclick="startRename(cloud)"
             @contextmenu="onCloudRightClick($event, cloud)"
           >
             <button
@@ -497,7 +588,7 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenus))
             ></button>
             <input
               v-if="editingCloudId === cloud.id"
-              ref="renameInput"
+              :ref="setRenameInput"
               v-model="editingName"
               class="rename-input"
               @click.stop
@@ -522,6 +613,10 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenus))
               <span class="detail-label">Points</span>
               <span class="detail-value">{{ cloud.points.length.toLocaleString() }}</span>
             </div>
+            <div v-if="cloud.kind === 'sparse'" class="detail-row">
+              <span class="detail-label">Tie-points</span>
+              <span class="detail-value">{{ tiePointCount(cloud).toLocaleString() }}</span>
+            </div>
             <div class="detail-row">
               <span class="detail-label">Created</span>
               <span class="detail-value">{{ fmtCreated(cloud.createdAt) }}</span>
@@ -532,6 +627,61 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenus))
         <li v-else-if="!clouds.length" class="empty">
           No point clouds — <button class="link-btn" @click="emit('reconstruct')">run reconstruction</button>
         </li>
+      </ul>
+    </div>
+
+    <!-- Products (rasters: DEM + orthophoto) -->
+    <div class="section">
+      <button class="section-hd" @click="toggle('products')">
+        <span class="chevron">{{ open.products ? '▾' : '▸' }}</span>
+        <span class="section-name">Products</span>
+        <span v-if="productRows.length" class="badge">{{ productRows.length }}</span>
+      </button>
+      <ul v-if="open.products" class="item-list">
+        <template v-for="row in productRows" :key="row.kind">
+          <li
+            class="list-item"
+            :title="`${row.name} — double-click to open`"
+            @dblclick="emit('open-product', row.kind)"
+          >
+            <button
+              class="expand-btn"
+              :class="{ open: productExpanded[row.kind] }"
+              @click.stop="toggleProductExpand(row.kind)"
+              :title="productExpanded[row.kind] ? 'Collapse' : 'Expand'"
+            ></button>
+            <span class="item-name">{{ row.name }}</span>
+            <span class="obs-badge" :title="`${row.product.width}×${row.product.height} px`">
+              {{ row.product.width }}×{{ row.product.height }}
+            </span>
+          </li>
+          <li v-if="productExpanded[row.kind]" class="img-details">
+            <div class="detail-row">
+              <span class="detail-label">Frame</span>
+              <span class="detail-value">{{ productCrs(dem || row.product) }}</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">Size</span>
+              <span class="detail-value">{{ row.product.width }} × {{ row.product.height }} px</span>
+            </div>
+            <template v-if="row.kind === 'dem'">
+              <div class="detail-row">
+                <span class="detail-label">GSD</span>
+                <span class="detail-value">{{ row.product.gsd?.toPrecision(3) }} {{ productUnit(row.product) }}/px</span>
+              </div>
+              <div class="detail-row">
+                <span class="detail-label">Elevation</span>
+                <span class="detail-value">{{ row.product.zMin?.toPrecision(4) }}–{{ row.product.zMax?.toPrecision(4) }}</span>
+              </div>
+            </template>
+            <div v-else-if="row.product.covered != null" class="detail-row">
+              <span class="detail-label">Coverage</span>
+              <span class="detail-value">{{ Math.round(100 * row.product.covered / (row.product.width * row.product.height)) }}%</span>
+            </div>
+            <button class="link-btn products-open" @click.stop="emit('open-product', row.kind)">Open in tab</button>
+          </li>
+        </template>
+        <li v-if="!productRows.length" class="empty">No products — build a DEM or orthophoto</li>
       </ul>
     </div>
 
@@ -764,6 +914,20 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenus))
   color: var(--accent);
   cursor: pointer;
   text-decoration: underline;
+}
+
+/* "View match list" action inside the Matches detail card */
+.matches-view {
+  display: block;
+  margin: 6px 0 2px;
+  font-size: 11px;
+}
+
+/* "Open in tab" action inside a Product detail card */
+.products-open {
+  display: block;
+  margin: 6px 0 2px;
+  font-size: 11px;
 }
 
 /* Per-image expand toggle */

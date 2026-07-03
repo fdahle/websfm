@@ -163,7 +163,7 @@ export const useImagesStore = defineStore('images', () => {
     }
   }
 
-  async function detectOne(id, settings = {}, onDetected) {
+  async function detectOne(id, settings = {}, onDetected, shouldCancel) {
     const img = images.value.find((i) => i.id === id)
     if (!img || img.kpStatus === 'running') return
     // Re-detecting renumbers keypoints, so any existing matches for this image
@@ -175,6 +175,15 @@ export const useImagesStore = defineStore('images', () => {
       // Pass the per-image mask (if any) so keypoints inside masked regions are
       // dropped at detection — this propagates to matching and reconstruction.
       const res = await detectKeypoints(img.url, { ...settings, mask: img.mask?.dataUrl ?? null })
+      // The worker can't be interrupted mid-image, so a cancel pressed while this
+      // one was in flight lands here with a finished result — drop it rather than
+      // attach it, reverting to the image's prior state.
+      if (shouldCancel?.()) {
+        const found = images.value.find((i) => i.id === id)
+        if (found) found.kpStatus = hadKeypoints ? 'done' : null
+        log(`SIFT discarded (cancelled): ${img.name}`, 'warn', 'SIFT')
+        return
+      }
       const found = images.value.find((i) => i.id === id)
       if (found) {
         // markRaw: these are large and never need reactivity; leaving them as
@@ -187,6 +196,18 @@ export const useImagesStore = defineStore('images', () => {
         found.kpStatus = 'done'
         if (hadKeypoints) useMatchesStore().removeMatchesForImage(found.uuid)
         log(`SIFT done: ${found.name} — ${found.kpCount} keypoints in ${found.kpMs} ms`, 'success', 'SIFT')
+        // Detailed diagnostics (debug level): the working resolution actually
+        // used, how many features the cap discarded, mask drops, and the response
+        // spread (the signal for tuning maxKeypoints / contrastThreshold).
+        const d = res.diag
+        if (d) {
+          log(`SIFT ${found.name} — detect @ ${d.detectWidth}×${d.detectHeight} `
+            + `(${d.scale.toFixed(3)}× of ${d.natW}×${d.natH})`, 'debug', 'SIFT')
+          log(`SIFT ${found.name} — ${d.rawFound} found → ${d.capped}`
+            + `${d.capHit ? ` capped (min response ${d.minResponse.toFixed(3)})` : ' (under cap)'}`
+            + `${d.maskedDropped > 0 ? `, −${d.maskedDropped} in mask → ${d.kept}` : ''}`
+            + `; response p50 ${d.respP50.toFixed(3)} / p95 ${d.respP95.toFixed(3)}`, 'debug', 'SIFT')
+        }
         if (isPersisting()) {
           const pid = projects.currentProjectId
           opfs.saveKeypoints(pid, found.uuid, found.keypoints).catch(() => {})
@@ -208,11 +229,17 @@ export const useImagesStore = defineStore('images', () => {
       ? images.value
       : images.value.filter((img) => img.kpStatus !== 'done')
     const total = pending.length
-    log(`SIFT batch: ${total} image(s) queued`, 'info', 'SIFT')
+    // Echo the settings actually in effect so the console records what was run.
+    const { maxDim = 1200, contrastThreshold = 0.01, maxKeypoints = 5000 } = settings
+    log(`SIFT batch: ${total} image(s) queued — ≤${maxDim}px, contrast ${contrastThreshold}, ≤${maxKeypoints} kp`,
+      'info', 'SIFT')
     let done = 0
     for (const img of pending) {
       if (shouldCancel?.()) { log(`SIFT cancelled — ${done}/${total} done`, 'warn', 'SIFT'); return }
-      await detectOne(img.id, settings, onDetected)
+      await detectOne(img.id, settings, onDetected, shouldCancel)
+      // Cancelled mid-image: detectOne already discarded the result, so stop here
+      // without counting it as done.
+      if (shouldCancel?.()) { log(`SIFT cancelled — ${done}/${total} done`, 'warn', 'SIFT'); return }
       done++
       onProgress?.(done, total, img.name)
     }
