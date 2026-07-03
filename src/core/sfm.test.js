@@ -97,8 +97,9 @@ describe('reconstruct (incremental SfM, synthetic 3-view scene)', () => {
 
     const logs = []
     const progress = []
-    // baIterations: 0 → exercise init + incremental registration + triangulation
-    // deterministically (bundle adjustment is gradient-descent; covered separately).
+    // baIterations: 0 isolates init + incremental registration + triangulation +
+    // track merging deterministically. The LM bundle-adjustment path is exercised
+    // by the noisy end-to-end test below and by the Rust crate's BA unit tests.
     const out = await reconstruct(
       { images, pairs, settings: { baIterations: 0 } },
       {
@@ -144,6 +145,52 @@ describe('reconstruct (incremental SfM, synthetic 3-view scene)', () => {
       expect(new Set(seen).size).toBe(seen.length)   // no camera twice in a track
       expect(seen.length).toBeLessThanOrEqual(3)      // never more views than cameras
     }
+  })
+
+  it('runs LM bundle adjustment end-to-end on a noisy scene', async () => {
+    const rng = mulberry32(7)
+    const N = 60
+    const world = Array.from({ length: N }, () => [
+      (rng() - 0.5) * 4, (rng() - 0.5) * 3, 8 + rng() * 4,
+    ])
+    const centers = [[0, 0, 0], [2, 0, 0], [-2, 0, 0]]
+    const Rs = [rotY(0), rotY(0.15), rotY(-0.15)]
+    const ts = Rs.map((R, i) => mv(R, centers[i]).map((v) => -v))
+    const uuids = ['c0', 'c1', 'c2']
+
+    // ±~0.4px keypoint noise (sum of two uniforms) so BA + filtering has real work.
+    const noise = () => (rng() - 0.5 + rng() - 0.5)
+    const images = uuids.map((uuid, ci) => ({
+      uuid, name: uuid, kpStatus: 'done', meta: META,
+      keypoints: world.map((X) => {
+        const p = project(Rs[ci], ts[ci], X)
+        return { x: p.x + noise(), y: p.y + noise() }
+      }),
+    }))
+    const matches = world.map((_, i) => [i, i])
+    const pairs = []
+    for (let a = 0; a < 3; a++) for (let b = a + 1; b < 3; b++) {
+      pairs.push({
+        idA: uuids[a], idB: uuids[b],
+        F: fundamental(Rs[a], ts[a], Rs[b], ts[b]),
+        matches, inlierCount: N, status: 'done',
+      })
+    }
+
+    const out = await reconstruct(
+      { images, pairs, settings: { baIterations: 25 } },
+      { onLog: () => {} },
+    )
+    expect(out.status).toBe('done')
+    expect(out.cameras).toHaveLength(3)
+
+    // The Q3 run summary is populated and internally consistent: BA drove the
+    // post-BA median below the (looser) pre-BA p95, and the model is well-formed.
+    expect(out.summary).toBeTruthy()
+    expect(out.summary.nCameras).toBe(3)
+    expect(out.summary.postBaMedianPx).toBeLessThan(1.5)
+    expect(out.summary.preBaP95px).toBeGreaterThanOrEqual(out.summary.postBaMedianPx)
+    expect(out.summary.perPairInitReproj.length).toBeGreaterThan(0)
   })
 
   it('returns status "idle" when fewer than two images have keypoints', async () => {

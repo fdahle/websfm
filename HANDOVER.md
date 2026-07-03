@@ -1,4 +1,4 @@
-# HANDOVER — websfm improvement plan (2026-07-03)
+# HANDOVER — websfm improvement plan
 
 Audience: implementing agent (Opus). Read `CLAUDE.md` first (layering rules,
 conventions, gotchas) and skim `TODO.md` (roadmap history; this file supersedes
@@ -8,7 +8,37 @@ its "Active plan"). The previous HANDOVER (dense quality/memory overhaul) is
 This plan is ordered by expected impact on the user's actual workflow:
 reconstructing scanned Antarctic aerial film (CA213732V… test set, 5-image
 strip, 10137×9600 scans). Each item is independently shippable. Do them in
-order within a track; tracks Q → A are the priority, P/F/I as capacity allows.
+order within a track; tracks A → F are the priority, P/I as capacity allows.
+
+**How the docs divide up** (so this file stays useful):
+- `CLAUDE.md` — evergreen architecture, layering, invariants, "where things
+  live." High-level and stable; not a task tracker.
+- `HANDOVER.md` (this file) — the single **living plan**: remaining work,
+  priority-ordered, plus a short **Done log** below. When an item ships, move it
+  from the plan into the Done log (one line: date · what · where it lives). No
+  separate "done" file needed — the Done log + git history are the record.
+- `TODO.md` — long-term roadmap archive + parked/rejected ideas.
+
+---
+
+## Done log (most recent first)
+
+- **2026-07-03 · A1 LM bundle adjustment** — found already implemented
+  (`crates/reconstruction/src/bundle.rs`: LM + Schur complement + analytic
+  Jacobians + adaptive Huber; wired via `core/reconstruction.js` `bundleAdjust`).
+  The A-section text below had described the *superseded* finite-difference
+  solver. Remaining loose ends closed: added a noisy-convergence Rust test
+  (`bundle_adjust_converges_under_noise`, asserts monotone accepted-step trace +
+  noise-floor convergence) and a BA-enabled end-to-end JS test in `sfm.test.js`
+  (the old integration test only ran `baIterations: 0`). **A2 self-calibration
+  is the real next accuracy step.**
+- **2026-07-03 · Q1–Q5 quick wins** — Q1 fusion auto-maxCost clamp→0.45 +
+  weak-signal warn (`core/mvs.js`); Q2 converged-BA logs `debug` not `warn`
+  (`core/sfm.js`); Q3 persisted run summaries, sparse + dense, in
+  `reconstruction.json` (`sfm.js`/`mvs.js`/`useReconstructionStore.js`); Q4
+  implied-film-width sanity log + off-standard warn (`core/reconstruction.js`
+  `resolveK` + `sfm.js` K log); Q5 dense window default 2→3 (7×7). Tests added
+  in `mvs.test.js` / `reconstruction.test.js`.
 
 ---
 
@@ -48,81 +78,24 @@ the code-side support. Do not hard-code a "correct" focal.
 
 ---
 
-## Q. Quick wins (each ≤ a few hours, no WASM changes)
-
-### Q1 — Clamp + sanity-check the fusion auto-maxCost
-`core/mvs.js` `fuseDepthMaps` (auto threshold = p70 of pooled valid costs,
-currently clamps to [0.3, 0.8] — log showed 0.71 chosen). Change:
-- Tighten the upper clamp to **0.45** (a real match is ZNCC ≥ ~0.55).
-- When the raw p70 exceeds 0.55, log a `warn`: the cost distribution itself is
-  weak — "check intrinsics / window size / working resolution" — so the user
-  learns the problem is upstream instead of silently keeping junk.
-- Expect the kept-fraction on the current test project to *drop* — that is
-  correct behaviour (junk out). It recovers when A-items fix the signal.
-- Unit test in `mvs.test.js`: synthetic cost pools → clamped threshold + flag.
-
-### Q2 — Stop warning on converged post-filter BA
-`core/sfm.js` `runBundleAdjust` (~line 691): the guard rejects any
-`costAfter > costBefore`, so a fully converged model logs a scary
-`REJECTED … would worsen the model` warn for a float-epsilon increase
-(log showed "RMS 0.79px → 0.79px REJECTED"). When
-`costAfter - costBefore < 0.01`, log `debug` "already converged (RMS
-unchanged)" instead and keep the old estimate. Keep the warn for genuine
-divergence (delta ≥ 0.01px).
-
-### Q3 — One-line run summary for honest cross-run comparison
-The user cannot tell whether a change helped ("did it improve" is a feeling).
-At the end of `core/sfm.js` emit one `success` log AND persist a small
-`summary` object in the reconstruction result (store it in
-`reconstruction.json` next to `georef`): `{ date, nCameras, nPoints,
-pct3plusViewTracks, preBaP95px, postBaMedianPx, perPairInitReproj }`.
-Sidebar or DevConsole can render later; persistence is the point. Mirror a
-dense equivalent in `fuseDepthMaps` results: `{ costMedian, keptPct,
-cullBreakdown }`.
-
-### Q4 — Intrinsics sanity log (implied film width)
-Where K is resolved for reconstruction (`core/reconstruction.js` `resolveK`
-path, logged in the worker as `K[image] … ← sensor table`): when the
-pixel-pitch path is used, also compute `impliedFilmWidthMm = widthPx × pitchMm`
-and append it to the log line. If it falls outside known aerial-film widths
-(~230mm and ~240mm, ±5%), log a `warn` naming the numbers and suggesting the
-film-format-mm path (already implemented — `Sensor.sensorWidthMm`) or a pitch
-check. This turns the current silent 253mm situation into an actionable line.
-
-### Q5 — Raise the dense window default
-`DepthMapsModal.vue` (and the derived-params path): default `window` 2 → **3**
-(7×7). 5×5 ZNCC on grainy quarter-scale film is matching noise; the GPU
-backend runs 1–2 s/image so the cost is negligible. Keep it a visible
-Advanced knob. Verify on the test set: per-image `cost median` in the log
-should drop (baseline 0.63–0.70).
-
----
-
 ## A. Accuracy track (the core work — sparse geometry quality)
 
-### A1 — Proper Levenberg–Marquardt bundle adjustment (Rust)
-The current BA is finite-difference gradient descent that can *increase* cost
-(hence the rejection guard). This is the single biggest solver-quality lever
-and a prerequisite for A2.
-- `crates/reconstruction/src/lib.rs` (or a new `ba.rs` module): LM with
-  **analytic Jacobians**. Parameterise cameras as angle-axis (3) + t (3);
-  points as xyz. Pinhole projection Jacobians are standard closed forms.
-- Exploit sparsity via the Schur complement: per-point 3×3 blocks are
-  invertible in closed form; reduce to the camera system (6N×6N, N ≤ ~50 for
-  this app — dense Cholesky is fine). **Keep the crate dependency-free**
-  (hand-rolled linear algebra, like the existing `svd3`).
-- Same wasm-bindgen signature as today (`bundleAdjust` marshalling in
-  `core/reconstruction.js`) so `sfm.js` doesn't change; return `costTrace` as
-  now. Robustify with Huber loss (~2–3px) — the track filter currently does
-  the outlier handling BA lacks.
-- Tests: extend `sfm.test.js`/`reconstruction.test.js` — noisy synthetic
-  scene: cost strictly decreases, recovers ground-truth poses to tolerance,
-  and beats the old solver's final RMS. (Backlog note: the integration test
-  currently runs `baIterations: 0` — fix that while here.)
-- `npm run build:wasm`, commit `src/wasm/reconstruction/*`.
+### A1 — Proper Levenberg–Marquardt bundle adjustment (Rust) — ✅ DONE (2026-07-03)
+Already implemented before this handover was written; the text here originally
+described the *superseded* finite-difference solver. The current solver is
+`crates/reconstruction/src/bundle.rs`: LM with the Schur complement (points
+eliminated against cameras, dense reduced-camera Cholesky), **analytic
+Jacobians** (cameras as left-perturbed so(3) + t, points xyz), adaptive Huber
+robustification, and damping retries that never accept a worsening step. Crate
+stays dependency-free (hand-rolled linalg in `linalg.rs`). Same wasm-bindgen
+signature (`bundle_adjust` → `core/reconstruction.js` `bundleAdjust`), returns
+`costTrace`. Tests: `bundle_adjust_reduces_reprojection` +
+`bundle_adjust_converges_under_noise` (Rust), plus a BA-enabled end-to-end test
+in `sfm.test.js` (the old integration test only ran `baIterations: 0`). The WASM
+was already rebuilt (`src/wasm/reconstruction/*` in the working tree).
 
-### A2 — Optional intrinsics refinement in BA (self-calibration)
-Once A1 lands, add optional shared-per-sensor parameters to the LM problem:
+### A2 — Optional intrinsics refinement in BA (self-calibration) ← **next accuracy step**
+Now that A1 is in place, add optional shared-per-sensor parameters to the LM problem:
 `refineIntrinsics: 'none' | 'f' | 'f,cxcy'` (setting, default `'none'`,
 exposed in the reconstruct modal's advanced section).
 - All images sharing a sensor share one f (and optionally cx,cy) — one extra

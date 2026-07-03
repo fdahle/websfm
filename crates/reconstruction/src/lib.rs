@@ -170,4 +170,75 @@ mod tests {
             "BA barely improved: {cost_before}px -> {cost_after}px");
         assert!(cost_after < 0.5, "BA did not converge: {cost_after}px");
     }
+
+    // Noisy variant: perturbed cameras + points AND ±0.5px observation noise. The
+    // LM solver must (a) never let an accepted step raise the cost — the whole
+    // point of the guard the old finite-difference solver lacked — and (b) settle
+    // near the injected noise floor rather than the >1px perturbed start.
+    #[test]
+    fn bundle_adjust_converges_under_noise() {
+        let (fx, fy, cx, cy) = (800.0_f64, 800.0_f64, 320.0_f64, 240.0_f64);
+        let gt_cams: Vec<(M3, V3)> = vec![
+            (so3_exp(&[0.0, 0.0, 0.0]),       [0.0, 0.0, 6.0]),
+            (so3_exp(&[0.05, -0.1, 0.02]),    [0.5, 0.1, 6.2]),
+            (so3_exp(&[-0.08, 0.06, -0.03]),  [-0.4, 0.2, 5.8]),
+            (so3_exp(&[0.03, 0.12, 0.05]),    [0.2, -0.3, 6.1]),
+        ];
+        let n_cam = gt_cams.len();
+        let mut gt_pts: Vec<V3> = Vec::new();
+        for ix in -2..=2 {
+            for iy in -2..=2 {
+                gt_pts.push([ix as f64 * 0.5, iy as f64 * 0.5, 0.2 * ((ix * iy) as f64).cos()]);
+            }
+        }
+        let n_pts = gt_pts.len();
+
+        // Deterministic LCG noise in [-0.5, 0.5) px on every observation.
+        let mut seed: u64 = 0x1234_5678;
+        let mut noise = || {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            (seed >> 33) as f64 / (1u64 << 31) as f64 - 0.5
+        };
+
+        let mut obs: Vec<f32> = Vec::new();
+        for (ci, (r, t)) in gt_cams.iter().enumerate() {
+            for (pi, x) in gt_pts.iter().enumerate() {
+                let (u, v) = project_px(r, t, fx, fy, cx, cy, x);
+                obs.extend_from_slice(&[ci as f32, pi as f32, (u + noise()) as f32, (v + noise()) as f32]);
+            }
+        }
+        let mut k_flat: Vec<f32> = Vec::new();
+        for _ in 0..n_cam { k_flat.extend_from_slice(&[fx as f32, fy as f32, cx as f32, cy as f32]); }
+
+        let mut cam_flat: Vec<f32> = Vec::new();
+        for (ci, (r, t)) in gt_cams.iter().enumerate() {
+            let w = [0.03 * (ci as f64 + 1.0).sin(), -0.025 * (ci as f64).cos(), 0.02];
+            let rp = mat3_mul(&so3_exp(&w), r);
+            let tp = [t[0] + 0.1, t[1] - 0.08, t[2] + 0.12];
+            for row in &rp { for &v in row { cam_flat.push(v as f32); } }
+            for &v in &tp { cam_flat.push(v as f32); }
+        }
+        let mut pt_flat: Vec<f32> = Vec::new();
+        for (pi, x) in gt_pts.iter().enumerate() {
+            let d = 0.08;
+            pt_flat.push((x[0] + d * (pi as f64).sin()) as f32);
+            pt_flat.push((x[1] - d * (pi as f64 * 1.3).cos()) as f32);
+            pt_flat.push((x[2] + d * 0.5) as f32);
+        }
+
+        let out = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &obs, 80);
+        let base = n_cam * 12 + n_pts * 3;
+        let cost_before = out[base];
+        let cost_after = out[base + 1];
+        let trace = &out[base + 2..];
+        assert!(!trace.is_empty(), "no convergence trace emitted");
+        // The accepted-step RMS trace is monotonically non-increasing (LM never
+        // commits a worsening step — the property Q2's guard relies on).
+        for w in trace.windows(2) {
+            assert!(w[1] <= w[0] + 1e-4, "cost rose across an accepted step: {} -> {}", w[0], w[1]);
+        }
+        assert!(cost_after < cost_before, "BA did not reduce cost under noise: {cost_before} -> {cost_after}");
+        // ±0.5px uniform noise ⇒ RMS floor ≈ 0.41px; converge near it, not the start.
+        assert!(cost_after < 0.7, "BA did not reach the noise floor: {cost_after}px");
+    }
 }
