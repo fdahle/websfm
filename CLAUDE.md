@@ -4,6 +4,16 @@ Browser-based Structure-from-Motion / photogrammetry app. Vue 3 + Pinia front en
 heavy CV math in Rust→WASM, everything runs client-side (no server). Targets polar /
 non-WGS84 projects (Antarctica), so CRS handling is first-class.
 
+## The three docs (keep the roles strict)
+- **CLAUDE.md** (this file) — evergreen architecture, layering, invariants, "where
+  things live". No status, no tasks; if a sentence can go stale, it belongs elsewhere.
+- **TODO.md** — the single prioritized plan: Now → Next → Backlog → Parked. All open
+  work lives there, nowhere else.
+- **HANDOVER.md** — the record: measured baselines (before/after yardsticks) and a
+  reverse-chronological done log.
+When an item ships: delete it from TODO.md, add one done-log line to HANDOVER.md
+(date · what · where it lives), and fold any *evergreen* lesson into this file.
+
 ## Stack
 - **UI**: Vue 3 (`<script setup>`), Pinia stores, OpenLayers (map), Three.js (3D).
 - **Compute**: three Rust crates compiled to WASM (`crates/{sift,matching,reconstruction}`),
@@ -11,7 +21,7 @@ non-WGS84 projects (Antarctica), so CRS handling is first-class.
 - **Persistence**: OPFS (Origin Private File System) via `src/utils/opfs.js`. Per-project
   directory tree; everything recomputable is recomputed rather than stored.
 - **Build/test**: Vite, Vitest (`npm test`), `tsc --noEmit` (`npm run typecheck`),
-  `npm run build:wasm` (needs `wasm-pack`). Tests + typecheck currently green.
+  `npm run build:wasm` (needs `wasm-pack`).
 
 ## Layering (important — keep these boundaries)
 ```
@@ -43,54 +53,60 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
   `sync()` writes the whole `project.json`.
 - `useMatchesStore` — pairwise matches; `pairId = sorted([uuidA,uuidB]).join('--')`.
 - `useReconstructionStore` — clouds (sparse + dense), depth-map cache (`shallowRef`,
-  not persisted), runs reconstruct / computeDepthMaps / densify.
+  not persisted), georef fit, run summaries; runs reconstruct / computeDepthMaps /
+  densify / generateDem / generateOrtho.
 - `useSensorsStore`, `useProjectsStore`, `useGcpsStore`, `useFootprintsStore`,
   `usePosesStore`, `useModalsStore`.
 
 ## Pipelines
 1. **Detect** (SIFT, `crates/sift`) → keypoints (+colours) + 128-d descriptors.
-2. **Match** (`crates/matching`) → ratio test + RANSAC fundamental-matrix verification,
-   with an inlier-**ratio** gate (rejects spurious epipolar fits on repetitive structure).
+2. **Match** (`crates/matching`) → Lowe ratio test + RANSAC fundamental-matrix
+   verification, with an inlier-**ratio** gate (rejects spurious epipolar fits on
+   repetitive structure). Optional pair **preselection** (`core/preselect.js`,
+   k-nearest by imported camera position) prunes the exhaustive O(N²) set;
+   `matchAll` runs on a concurrency-limited worker pool with a per-run descriptor
+   cache.
 3. **Sparse SfM** (`core/sfm.js`): pick init pair (inliers + parallax + lowest init
-   reprojection), incremental PnP registration with an **adaptive** gate, track
-   extension, then bundle adjustment + 2-pass track filtering. Heavily instrumented via
-   `onLog` (toggle "Detail"/debug in DevConsole).
+   reprojection), incremental PnP registration (P3P + MSAC + Gauss-Newton polish in
+   `crates/reconstruction/src/pose.rs`), track extension, then LM bundle adjustment
+   (`bundle.rs`: Schur complement, analytic Jacobians, adaptive Huber; optional
+   shared per-sensor intrinsics refinement via `refineIntrinsics`), retriangulation
+   + split-track merging (`retriangulatePairs`/`mergeSplitTracks`), and 2-pass track
+   filtering. Brown–Conrady distortion (`core/distortion.js`) is removed once at
+   ingest so the whole pipeline stays pinhole. Heavily instrumented via `onLog`
+   (toggle "Detail"/debug in DevConsole).
 4. **Dense MVS** (`core/mvs.js` + `crates/reconstruction/src/mvs.rs`): Stage A build
    per-image PatchMatch depth maps → optional `filterDepthMap` (median/speckle cleanup)
-   → Stage B `fuseDepthMaps` (cross-view geometric consistency). Both stages now log
+   → Stage B `fuseDepthMaps` (cross-view geometric consistency). Both stages log
    per-image timing, depth range, cost distribution, and fusion cull breakdown ('Dense'
-   category). **Perf**: single-threaded WASM, cost scales with overlap×sources×pixels²;
-   levers are `maxDim`/`maxSources`/`iterations`, or parallelism (not yet done). **Quality**
-   is gated by correct intrinsics — `resolveK` falling back to "default FOV" (fx=image
-   width) directly distorts depth.
-   - **WebGPU backend (in progress)**: `src/workers/gpu/` (`device.js` lazy device
-     singleton, `depthMapGpu.js`, `patchmatch.wgsl`). `depthMapForImage` takes the
-     depth-map kernel as an injected arg (default = WASM); the worker swaps in
-     `computeDepthMapGPU` when `settings.useGpu` is set and an adapter exists, with
-     automatic per-image fallback to WASM on error. Modal exposes it as "Use GPU
-     (experimental)", default off. **Phase 1 (current)**: `patchmatch.wgsl` ports the
-     ZNCC `plane_cost` for a *single* source + frontal normal (no propagation/refine/
-     best-K). `core/planeCost.js` is the pure JS reference (unit-tested); the worker
-     A/B-validates GPU vs CPU cost on the first image and logs `GPU validate: … RMS …`
-     (texels scaled ×255 in-shader so the textureless cutoff matches the reference).
-     **Phase 2 complete**: full multi-source PatchMatch on GPU — slanted-plane init,
-     red-black checkerboard sweeps (in-place; one dispatch per parity, no ping-pong),
-     decaying random refinement (PCG RNG), best-K cost aggregation. Sources packed
-     into a `texture_2d_array` (each in a maxW×maxH layer; sample coord clamped to the
-     valid (w,h) so bilinear never reads zero padding) + per-source pose storage
-     buffer. One `main` entry driven by `ctrl` (mode/parity/iter); state =
-     `array<vec4<f32>>` (depth+normal) + cost. A/B logs cost-consistency RMS
-     (recompute best-K on the CPU reference at the GPU's final depth+normal, expect
-     ~e-3) + median final cost (convergence). On real data: ~0.1s/img GPU vs minutes
-     on CPU. **Remaining (Phase 3)**: make GPU the default when available (still opt-in
-     via the modal). Dense quality is now gated by intrinsics + fusion, not the kernel.
+   category). **Perf**: cost scales with overlap×sources×pixels²; levers are
+   `maxDim`/`maxSources`/`iterations`. **Quality** is gated by correct intrinsics —
+   `resolveK` falling back to "default FOV" (fx=image width) directly distorts depth.
+   - **Two depth-map backends**: WASM (CPU, default) and WebGPU (opt-in "Use GPU
+     (experimental)" in the modal; ~0.1s/img vs minutes on CPU). `depthMapForImage`
+     takes the kernel as an injected arg; the worker swaps in `computeDepthMapGPU`
+     when `settings.useGpu` is set and an adapter exists, with per-image fallback to
+     WASM on error. Lives in `src/workers/gpu/` (`device.js` lazy device singleton,
+     `depthMapGpu.js`, `patchmatch.wgsl`): slanted-plane init, red-black checkerboard
+     sweeps (in-place, one dispatch per parity), decaying random refinement (PCG RNG),
+     best-K aggregation; sources packed into a `texture_2d_array` (sample coords
+     clamped to each layer's valid (w,h)) + per-source pose storage buffer; one `main`
+     entry driven by `ctrl` (mode/parity/iter). The worker A/B-validates GPU vs CPU on
+     the first image and logs `GPU validate: … RMS …`.
+5. **Products**: local vertical frame (`core/projection.js`, aerial Z-up auto-orient) →
+   DEM (`core/dem.js`, binned heights + IDW fill, hillshaded preview) → orthophoto
+   (`core/ortho.js`, true reprojection reusing the cached depth maps as z-buffer +
+   colour). Optional georeferencing via `core/georef.js` (Horn 7-param similarity,
+   SfM centres ↔ imported poses). Exports in `core/exporters.js` +
+   `core/geotiff.js` (PLY, model JSON, DEM GeoTIFF/.asc, ortho GeoTIFF/PNG+.wld)
+   through `ExportModal.vue`. Products persist to OPFS (`products/…`).
 
 ## CRS / GCP / poses
 Per-project working CRS (proj4). GCPs, footprints, and camera poses store positions in
 the project CRS and are reprojected on CRS change (`handleSetCrs` in App.vue). See memory
 `gcp-crs-architecture` and `works-in-antarctica`.
 
-## Conventions & gotchas
+## Conventions, invariants & gotchas
 - `markRaw`/`shallowRef` for big typed arrays (keypoints, descriptors, depth planes):
   reactivity is wasteful AND a Vue Proxy can't be `postMessage`d to the worker.
 - Worker results transfer ArrayBuffers (see each op's `transfer`).
@@ -105,11 +121,22 @@ the project CRS and are reprojected on CRS change (`handleSetCrs` in App.vue). S
   matches (also on image removal).
 - Rotation matrices are row-major `[[…],[…],[…]]`; `t` is `[x,y,z]`; camera centre
   `C = -Rᵀt`; projection matrices are flat 12-elem `[R|t]` (no K).
+- The three PatchMatch kernels (`patchmatch.wgsl`, `core/planeCost.js`,
+  `crates/reconstruction/src/mvs.rs`) implement the same math; the first-image
+  GPU↔CPU A/B check must stay RMS < 5e-3. Change all three (and the `aggRef`
+  closure in `core/mvs.js`) in lockstep or not at all.
+- After any `crates/` change: `npm run build:wasm`, commit `src/wasm/*` with the
+  source change.
+- Keep the heavy logging style — every derived/auto value gets a log line the user
+  can audit.
+
+## Verification
+Per change: `npm test` + `npm run typecheck`. WASM changes: rebuild + rerun.
+Browser-runtime work (WGSL, OPFS, modals) needs a manual browser run this
+environment may not support — say so explicitly rather than claiming verification.
 
 ## Where things live
 - Models / on-disk shapes: docstrings at the top of each `opfs.js` section.
 - SfM tuning knobs: destructured `settings` in `core/sfm.js` (init/PnP/BA/filter).
 - Type hints: `src/core/types.ts` (+ `npm run typecheck`).
-- `TODO.md` and `HANDOVER` notes track in-flight work and the roadmap.
-</content>
-</invoke>
+- The plan: `TODO.md`. Baselines + done log: `HANDOVER.md`.
