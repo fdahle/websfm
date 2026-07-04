@@ -3,13 +3,14 @@
 // return shapes — so the stores only had to swap their import. The heavy work now
 // runs off the main thread, keeping the UI responsive during detect/match runs.
 //
-// A small worker pool is provisioned (round-robin dispatch). Today the store
-// loops await one item at a time, so effectively one worker is busy; the pool is
-// here so those loops can be parallelised later (which also needs the match store
-// and project-doc persistence made concurrency-safe — see HANDOVER).
+// A worker pool is provisioned (round-robin dispatch). `matchAll` now dispatches
+// up to POOL_SIZE pairs concurrently (the match store is concurrency-safe — it
+// mutates in place + triggerRefs rather than swapping the whole Map). The big
+// single-call ops (reconstruct/dense/products) still use one worker at a time.
 
-// Keep this modest: each worker loads its own copy of the wasm on first use.
-export const POOL_SIZE = Math.max(1, Math.min(2, (navigator.hardwareConcurrency || 2) - 1))
+// One worker per core (minus one for the UI thread), capped so we don't spawn a
+// pile of workers that each load their own wasm copy on first use.
+export const POOL_SIZE = Math.max(1, Math.min(8, (navigator.hardwareConcurrency || 4) - 1))
 
 let workers = null
 let rr = 0

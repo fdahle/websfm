@@ -7,6 +7,7 @@ const settings = ref({
   minMatchesForRegistration: 20,
   reprjThreshold: 4.0,
   baIterations: 30,
+  refineIntrinsics: 'none',   // self-calibration in BA: 'none' | 'f' | 'f,cxcy'
 })
 
 function run() {
@@ -65,6 +66,22 @@ function run() {
           />
           <span class="field-hint">Set to 0 to skip bundle adjustment.</span>
         </div>
+
+        <div class="section-sep"></div>
+
+        <div class="field">
+          <label class="field-label" for="refineIntr">Refine intrinsics (self-calibration)</label>
+          <select id="refineIntr" v-model="settings.refineIntrinsics" class="field-input field-select">
+            <option value="none">Off (use sensor table)</option>
+            <option value="f">Focal length</option>
+            <option value="f,cxcy">Focal + principal point</option>
+          </select>
+          <span class="field-hint">
+            Lets bundle adjustment solve one shared focal per sensor. Weakly observed
+            on short/single strips — the refined value is logged, never written back to
+            the sensor table.
+          </span>
+        </div>
       </div>
 
       <div class="modal-footer">
@@ -117,6 +134,7 @@ function run() {
   border-radius: 5px; color: var(--text); font: inherit; font-size: 13px; padding: 4px 8px;
 }
 .field-input:focus { outline: none; border-color: var(--accent); }
+.field-select { width: auto; min-width: 180px; cursor: pointer; }
 .field-unit { font-size: 12px; color: var(--text-dim); }
 .btn {
   background: none; border: 1px solid var(--panel-border);

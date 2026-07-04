@@ -238,9 +238,18 @@ export async function solvePnp(pts3d, pts2d, K, opts = {}) {
 // observations: [{ camIdx, ptIdx, x, y }] (pixel coords)
 // Returns { cameras: [{ R, t }], points3d: [{x,y,z}], costBefore, costAfter } or null.
 // costBefore/costAfter are RMS reprojection error (px) from the WASM solver.
+// `opts`:
+//   maxIters          — outer LM iterations (default 30)
+//   refineIntrinsics  — 'none' | 'f' | 'f,cxcy' (self-calibration; default 'none')
+//   sensorOfCam       — per-camera integer sensor id (cameras sharing an id share
+//                       one focal); required for refinement, ignored for 'none'.
+// Returns { cameras, points3d, intrinsics, costBefore, costAfter, costTrace } —
+// `intrinsics` is the refined effective K per camera (unchanged when 'none').
+const REFINE_MODE = { none: 0, f: 1, 'f,cxcy': 2 }
 export async function bundleAdjust(cameras, intrinsics, points3d, observations, opts = {}) {
   await ensureWasm()
-  const { maxIters = 30 } = opts
+  const { maxIters = 30, refineIntrinsics = 'none', sensorOfCam = null } = opts
+  const refineMode = REFINE_MODE[refineIntrinsics] ?? 0
   const nCam = cameras.length
   const nPts = points3d.length
   const nObs = observations.length
@@ -265,14 +274,23 @@ export async function bundleAdjust(cameras, intrinsics, points3d, observations, 
     obsFlat.set([camIdx, ptIdx, x, y], i * 4)
   })
 
-  const raw = bundle_adjust(camFlat, kFlat, ptsFlat, obsFlat, maxIters)
-  const base = nCam * 12 + nPts * 3
-  if (!raw || raw.length < base) return null
-  // Trailing [costBefore, costAfter] appended by the solver (older WASM omits them),
-  // then a variable-length per-iteration RMS convergence trace.
-  const costBefore = raw.length >= base + 2 ? raw[base]     : null
-  const costAfter  = raw.length >= base + 2 ? raw[base + 1] : null
-  const costTrace  = raw.length >  base + 2 ? Array.from(raw.slice(base + 2)) : []
+  // sensor_of_cam: aligned to `cameras`; -1 (own group) where unknown. Empty/all-−1
+  // is fine — the solver only uses it when refineMode > 0.
+  const sensorFlat = new Int32Array(nCam)
+  for (let c = 0; c < nCam; c++) {
+    const id = sensorOfCam ? sensorOfCam[c] : -1
+    sensorFlat[c] = Number.isInteger(id) ? id : -1
+  }
+
+  const raw = bundle_adjust(camFlat, kFlat, ptsFlat, obsFlat, maxIters, sensorFlat, refineMode)
+  // Layout: cameras(nCam×12), points(nPts×3), intrinsics(nCam×4), costBefore,
+  // costAfter, then a variable-length per-iteration RMS convergence trace.
+  const intrBase = nCam * 12 + nPts * 3
+  const base = intrBase + nCam * 4
+  if (!raw || raw.length < base + 2) return null
+  const costBefore = raw[base]
+  const costAfter  = raw[base + 1]
+  const costTrace  = raw.length > base + 2 ? Array.from(raw.slice(base + 2)) : []
 
   const outCameras = cameras.map((_, c) => {
     const b = c * 12
@@ -287,7 +305,12 @@ export async function bundleAdjust(cameras, intrinsics, points3d, observations, 
     x: raw[ptsBase + i*3], y: raw[ptsBase + i*3+1], z: raw[ptsBase + i*3+2],
   }))
 
-  return { cameras: outCameras, points3d: outPoints, costBefore, costAfter, costTrace }
+  const outIntrinsics = cameras.map((_, c) => {
+    const b = intrBase + c * 4
+    return { fx: raw[b], fy: raw[b+1], cx: raw[b+2], cy: raw[b+3] }
+  })
+
+  return { cameras: outCameras, points3d: outPoints, intrinsics: outIntrinsics, costBefore, costAfter, costTrace }
 }
 
 // PatchMatch multi-view-stereo depth map for one reference image (dense recon).

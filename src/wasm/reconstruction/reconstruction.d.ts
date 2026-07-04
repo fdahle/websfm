@@ -5,29 +5,39 @@
  * Bundle adjustment by sparse Levenberg–Marquardt with the Schur complement.
  *
  * Jointly refines every camera pose (6-DOF: left-perturbed so(3) rotation +
- * translation; intrinsics held fixed) and every 3D point to minimise a
- * Huber-robustified reprojection error. The normal equations are reduced with
- * the Schur complement (points eliminated against the cameras) into a dense
- * reduced-camera system solved by Cholesky — true global BA, not the old
- * coordinate descent. The Huber threshold adapts to the residual median, so
- * surviving gross mis-triangulations cannot drag the solution.
+ * translation) and every 3D point, and — when `refine_mode > 0` — a small set of
+ * shared per-sensor intrinsic parameters (self-calibration). Points are always
+ * eliminated by the Schur complement; the reduced system holds the camera poses
+ * plus the intrinsic groups, solved by dense Cholesky. Huber robustification (an
+ * adaptive threshold tracking the residual median) keeps surviving gross
+ * mis-triangulations from dragging the solution.
+ *
+ * Intrinsic self-calibration is opt-in and modest: each sensor group carries a
+ * focal **scale** `s` (init 1, multiplying every member camera's fx/fy) and,
+ * for `refine_mode == 2`, shared principal-point offsets `dcx, dcy`. Modelling
+ * the focal as a scale (not an absolute) preserves any per-camera differences in
+ * the seed intrinsics while still sharing one degree of freedom across the group.
  *
  * At large camera counts the dense reduced-camera Cholesky (`chol_solve`) is the
- * only part that needs swapping for an iterative Schur solve; assembly and the
- * rest of the loop are size-independent.
+ * only part that needs swapping for an iterative Schur solve.
  *
  * # Inputs
- * - `cameras_flat`: n_cam × 12 floats `[R(9)|t(3), R(9)|t(3), …]`
- * - `intrinsics_flat`: n_cam × 4 floats `[fx,fy,cx,cy, …]`
+ * - `cameras_flat`: n_cam × 12 floats `[R(9)|t(3), …]`
+ * - `intrinsics_flat`: n_cam × 4 floats `[fx,fy,cx,cy, …]` (the seed / base K)
  * - `pts_flat`: n_pts × 3 floats `[x,y,z, …]`
  * - `obs_flat`: n_obs × 4 floats `[cam_i, pt_i, pixel_x, pixel_y, …]`
  * - `max_iters`: outer LM iterations
+ * - `sensor_of_cam`: n_cam ints — per-camera sensor id (shared → shared focal);
+ *   `< 0` (or a short/empty list) ⇒ that camera is its own group
+ * - `refine_mode`: 0 = none (poses+points only), 1 = focal, 2 = focal + cx,cy
  *
  * # Output
- * `[cameras_flat(n_cam×12), pts_flat(n_pts×3), cost_before, cost_after]`
- * (cost_* are RMS reprojection error in pixels).
+ * `[cameras_flat(n_cam×12), pts_flat(n_pts×3), intrinsics_flat(n_cam×4),
+ *   cost_before, cost_after, cost_trace…]` — the returned intrinsics are the
+ * **refined** effective K per camera (identical to the input when
+ * `refine_mode == 0`); cost_* are RMS reprojection error in pixels.
  */
-export function bundle_adjust(cameras_flat: Float32Array, intrinsics_flat: Float32Array, pts_flat: Float32Array, obs_flat: Float32Array, max_iters: number): Float32Array;
+export function bundle_adjust(cameras_flat: Float32Array, intrinsics_flat: Float32Array, pts_flat: Float32Array, obs_flat: Float32Array, max_iters: number, sensor_of_cam: Int32Array, refine_mode: number): Float32Array;
 
 export function compute_depth_map(ref_gray: Uint8Array, ref_w: number, ref_h: number, ref_k: Float32Array, src_gray: Uint8Array, src_dims: Uint32Array, src_k: Float32Array, src_rel: Float32Array, src_mask: Uint8Array, seed_depth: Float32Array, depth_min: number, depth_max: number, window: number, iterations: number, best_k: number, seed: number): Float32Array;
 
@@ -87,7 +97,7 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
-    readonly bundle_adjust: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => [number, number];
+    readonly bundle_adjust: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => [number, number];
     readonly compute_depth_map: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number, s: number, t: number, u: number, v: number, w: number, x: number) => [number, number];
     readonly recover_pose: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number];
     readonly solve_pnp: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number];

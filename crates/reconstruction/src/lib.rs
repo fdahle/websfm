@@ -156,9 +156,9 @@ mod tests {
             pt_flat.push((x[2] + d * 0.5) as f32);
         }
 
-        let out = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &obs, 60);
-        let base = n_cam * 12 + n_pts * 3;
-        // cameras + points + [cost_before, cost_after] + per-iteration trace.
+        let out = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &obs, 60, &[], 0);
+        let base = n_cam * 12 + n_pts * 3 + n_cam * 4;
+        // cameras + points + intrinsics + [cost_before, cost_after] + trace.
         assert!(out.len() >= base + 2, "unexpected BA output length");
         let cost_before = out[base];
         let cost_after = out[base + 1];
@@ -226,8 +226,8 @@ mod tests {
             pt_flat.push((x[2] + d * 0.5) as f32);
         }
 
-        let out = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &obs, 80);
-        let base = n_cam * 12 + n_pts * 3;
+        let out = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &obs, 80, &[], 0);
+        let base = n_cam * 12 + n_pts * 3 + n_cam * 4;
         let cost_before = out[base];
         let cost_after = out[base + 1];
         let trace = &out[base + 2..];
@@ -240,5 +240,65 @@ mod tests {
         assert!(cost_after < cost_before, "BA did not reduce cost under noise: {cost_before} -> {cost_after}");
         // ±0.5px uniform noise ⇒ RMS floor ≈ 0.41px; converge near it, not the start.
         assert!(cost_after < 0.7, "BA did not reach the noise floor: {cost_after}px");
+    }
+
+    // Self-calibration (A2): a scene rendered with the TRUE focal, but BA seeded
+    // with a focal 10% too small and asked to refine one shared focal
+    // (refine_mode = 1, all cameras on sensor id 0). It must pull the focal back to
+    // ~1.1× within 1% — the check the intrinsics-refinement path exists to pass.
+    #[test]
+    fn bundle_adjust_refines_shared_focal() {
+        let (cx, cy) = (320.0_f64, 240.0_f64);
+        let f_true = 880.0_f64;  // ground truth
+        let f_seed = 800.0_f64;  // 10% low prior
+        // Four genuinely different viewpoints so the focal is well observed (a
+        // single strip would leave it degenerate with scene depth).
+        let gt_cams: Vec<(M3, V3)> = vec![
+            (so3_exp(&[0.0, 0.0, 0.0]),      [0.0, 0.0, 6.0]),
+            (so3_exp(&[0.10, -0.14, 0.03]),  [0.8, 0.15, 6.3]),
+            (so3_exp(&[-0.12, 0.10, -0.05]), [-0.7, 0.25, 5.7]),
+            (so3_exp(&[0.05, 0.18, 0.06]),   [0.3, -0.4, 6.2]),
+        ];
+        let n_cam = gt_cams.len();
+        let mut gt_pts: Vec<V3> = Vec::new();
+        for ix in -2..=2 {
+            for iy in -2..=2 {
+                gt_pts.push([ix as f64 * 0.6, iy as f64 * 0.6, 0.3 * ((ix + 2 * iy) as f64).sin()]);
+            }
+        }
+        let n_pts = gt_pts.len();
+
+        let mut obs: Vec<f32> = Vec::new();
+        for (ci, (r, t)) in gt_cams.iter().enumerate() {
+            for (pi, x) in gt_pts.iter().enumerate() {
+                let (u, v) = project_px(r, t, f_true, f_true, cx, cy, x);
+                obs.extend_from_slice(&[ci as f32, pi as f32, u as f32, v as f32]);
+            }
+        }
+        // Seed intrinsics 10% low; all cameras share sensor id 0 → one shared focal.
+        let mut k_flat: Vec<f32> = Vec::new();
+        for _ in 0..n_cam { k_flat.extend_from_slice(&[f_seed as f32, f_seed as f32, cx as f32, cy as f32]); }
+        let sensor_of_cam: Vec<i32> = vec![0; n_cam];
+
+        // Seed poses + points at ground truth (only the focal is wrong).
+        let mut cam_flat: Vec<f32> = Vec::new();
+        for (r, t) in &gt_cams {
+            for row in r { for &v in row { cam_flat.push(v as f32); } }
+            for &v in t { cam_flat.push(v as f32); }
+        }
+        let mut pt_flat: Vec<f32> = Vec::new();
+        for x in &gt_pts { for &v in x { pt_flat.push(v as f32); } }
+
+        let out = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &obs, 100, &sensor_of_cam, 1);
+        let intr_base = n_cam * 12 + n_pts * 3;
+        let cost_after = out[intr_base + n_cam * 4 + 1];
+        // Refined focal is returned per camera; sharing ⇒ all equal, ≈ f_true.
+        for c in 0..n_cam {
+            let fx = out[intr_base + c * 4] as f64;
+            let fy = out[intr_base + c * 4 + 1] as f64;
+            assert!((fx - f_true).abs() / f_true < 0.01, "focal not recovered: cam {c} fx {fx} vs {f_true}");
+            assert!((fy - fx).abs() < 1e-3, "fx and fy diverged: {fx} vs {fy}");
+        }
+        assert!(cost_after < 0.2, "BA did not fit the refined focal: {cost_after}px");
     }
 }

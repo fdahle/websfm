@@ -20,7 +20,8 @@ import {
   resolveK, fundamentalToEssential, makeP34flat,
   recoverPose, triangulateDlt, solvePnp, bundleAdjust,
 } from './reconstruction.js'
-import { projectPoint, medianTriangulationAngle } from './geometry.js'
+import { projectPoint, projectWithDepth, medianTriangulationAngle } from './geometry.js'
+import { undistortPixel, distortionOf } from './distortion.js'
 
 // ── Geometry helpers ────────────────────────────────────────────────────────────
 const I3 = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
@@ -96,6 +97,122 @@ function essentialSingularValues(Eflat) {
 // Build flat P34 for a camera in *normalised* image coords (no K).
 function camToP34flat(cam) {
   return makeP34flat(cam.R, cam.t)
+}
+
+// ── Retriangulation + track merging (A3, pure) ───────────────────────────────
+// Standard COLMAP-style post-BA structure recovery, factored out of `reconstruct`
+// so it's testable in isolation. Shared signature:
+//   points3d : [{ x, y, z, views: Map<uuid,kpIdx> }]
+//   cameras  : Map<uuid, { R, t, K }>
+//   pairs    : verified match pairs [{ idA, idB, matches: [[iaKp, ibKp], …] }]
+//   keypointOf(uuid, kpIdx) → { x, y } | null
+//   maxReprojPx : reprojection gate (px)
+
+// uuid → Map<kpIdx, point> reverse index over a track list.
+function buildViewIndex(points3d) {
+  const index = new Map()
+  for (const pt of points3d) {
+    for (const [uuid, kp] of pt.views) {
+      let m = index.get(uuid)
+      if (!m) { m = new Map(); index.set(uuid, m) }
+      m.set(kp, pt)
+    }
+  }
+  return index
+}
+
+const reprojErr = (cam, x, y, z, kp) => {
+  const p = projectWithDepth(cam, x, y, z) // null when behind the camera
+  return p ? Math.hypot(p.u - kp.x, p.v - kp.y) : Infinity
+}
+
+// Retriangulate matches whose *both* keypoints are still unassigned, using the
+// current (post-BA) poses. Adds a point when it's in front of both cameras and
+// reprojects ≤ gate in both. `triangulate(nA, nB, PA, PB)` is injected (WASM DLT
+// in production). Mutates + returns `points3d`; returns { added }.
+export async function retriangulatePairs({ points3d, cameras, pairs, keypointOf, maxReprojPx, triangulate }) {
+  const index = buildViewIndex(points3d)
+  const addIndexed = (pt, uuid, kp) => {
+    pt.views.set(uuid, kp)
+    let m = index.get(uuid); if (!m) { m = new Map(); index.set(uuid, m) }
+    m.set(kp, pt)
+  }
+  let added = 0
+  for (const e of pairs) {
+    const camA = cameras.get(e.idA), camB = cameras.get(e.idB)
+    if (!camA || !camB) continue // both endpoints must be registered
+    const idxA = index.get(e.idA), idxB = index.get(e.idB)
+    const fresh = e.matches.filter(([ia, ib]) => !idxA?.has(ia) && !idxB?.has(ib))
+    if (!fresh.length) continue
+
+    const KA = camA.K, KB = camB.K
+    const PA = camToP34flat(camA), PB = camToP34flat(camB)
+    const nA = [], nB = [], keep = []
+    for (const [ia, ib] of fresh) {
+      const kA = keypointOf(e.idA, ia), kB = keypointOf(e.idB, ib)
+      if (!kA || !kB) continue
+      nA.push(toNorm(kA.x, kA.y, KA)); nB.push(toNorm(kB.x, kB.y, KB)); keep.push([ia, ib])
+    }
+    if (!keep.length) continue
+
+    const tri = await triangulate(nA, nB, PA, PB) // [{ x, y, z, srcIdx }]
+    for (const { x, y, z, srcIdx } of tri) {
+      const [ia, ib] = keep[srcIdx]
+      // A point added earlier in this batch may already own one endpoint.
+      if (index.get(e.idA)?.has(ia) || index.get(e.idB)?.has(ib)) continue
+      const kA = keypointOf(e.idA, ia), kB = keypointOf(e.idB, ib)
+      if (reprojErr(camA, x, y, z, kA) > maxReprojPx) continue
+      if (reprojErr(camB, x, y, z, kB) > maxReprojPx) continue
+      const pt = { x, y, z, views: new Map() }
+      addIndexed(pt, e.idA, ia)
+      addIndexed(pt, e.idB, ib)
+      points3d.push(pt)
+      added++
+    }
+  }
+  return { added }
+}
+
+// Merge tracks split across two points: a match whose endpoints belong to two
+// *different* points means the same physical feature was reconstructed twice.
+// Fold the loser into the winner when the union is consistent (no image twice) and
+// every added observation still reprojects ≤ gate against the winner. Returns the
+// surviving array + { merged }.
+export function mergeSplitTracks({ points3d, cameras, pairs, keypointOf, maxReprojPx }) {
+  const index = buildViewIndex(points3d)
+  let merged = 0
+  for (const e of pairs) {
+    if (!cameras.has(e.idA) || !cameras.has(e.idB)) continue
+    const idxA = index.get(e.idA), idxB = index.get(e.idB)
+    for (const [ia, ib] of e.matches) {
+      const p1 = idxA?.get(ia), p2 = idxB?.get(ib)
+      if (!p1 || !p2 || p1 === p2 || p1._dead || p2._dead) continue
+      // No image may be observed with two different keypoints across the union.
+      let conflict = false
+      for (const [uuid, kp] of p2.views) {
+        if (p1.views.has(uuid) && p1.views.get(uuid) !== kp) { conflict = true; break }
+      }
+      if (conflict) continue
+      // Every added observation must still reproject within the gate against p1.
+      let ok = true
+      for (const [uuid, kp] of p2.views) {
+        const cam = cameras.get(uuid), kpt = keypointOf(uuid, kp)
+        if (!cam || !kpt || reprojErr(cam, p1.x, p1.y, p1.z, kpt) > maxReprojPx) { ok = false; break }
+      }
+      if (!ok) continue
+      for (const [uuid, kp] of p2.views) {
+        p1.views.set(uuid, kp)
+        let m = index.get(uuid); if (!m) { m = new Map(); index.set(uuid, m) }
+        m.set(kp, p1)
+      }
+      p2._dead = true
+      merged++
+    }
+  }
+  if (!merged) return { points3d, merged }
+  const out = points3d.filter((p) => !p._dead)
+  for (const p of out) delete p._dead
+  return { points3d: out, merged }
 }
 
 export async function reconstruct(input, hooks = {}) {
@@ -244,6 +361,28 @@ export async function reconstruct(input, hooks = {}) {
           + `film/sensor-format (mm) field instead of pixel size.`, 'warn', 'Reconstruction')
       }
     }
+    // ── Undistort keypoints at ingest ────────────────────────────────────────
+    // Remove Brown–Conrady lens distortion once, up front, so every downstream
+    // step (init, PnP, triangulation, BA) is pure pinhole. Keypoint indices are
+    // preserved (matches reference them), only positions move. The pairwise F used
+    // for the init pair is still the distorted-space fit from matching — a slight
+    // approximation the global BA corrects; everything else is exact pinhole.
+    let undistortedImgs = 0
+    for (const img of imgs) {
+      const dist = distortionOf(img.sensor)
+      if (!dist || !img.keypoints?.length) continue
+      const K = Kmap.get(img.uuid)
+      img.keypoints = img.keypoints.map((kp) => {
+        const u = undistortPixel(kp.x, kp.y, K, dist)
+        return { ...kp, x: u.x, y: u.y }
+      })
+      undistortedImgs++
+    }
+    if (undistortedImgs > 0) {
+      log(`Reconstruction: undistorted keypoints on ${undistortedImgs}/${imgs.length} image(s) `
+        + `(lens distortion removed at ingest — pipeline stays pinhole)`, 'info', 'Reconstruction')
+    }
+
     if (defaultKCount > 0) {
       log(`Reconstruction: ${defaultKCount}/${imgs.length} image(s) have no focal length — using a default FOV guess. `
         + `Wrong intrinsics distort the geometry and commonly prevent cameras from registering; `
@@ -671,7 +810,22 @@ export async function reconstruct(input, hooks = {}) {
       baIterations = 30,
       filterMaxReprojPx = 4.0,   // observation pruning threshold (px)
       filterMinTriAngleDeg = 1.5, // drop points whose rays are too parallel
+      refineIntrinsics = 'none', // self-calibration: 'none' | 'f' | 'f,cxcy'
     } = settings
+
+    // Map each image's sensor to a stable integer so BA can share one focal across
+    // all cameras on the same sensor. Images without an assigned sensor get their
+    // own group (−1 sentinel below); reconstruction still runs pinhole otherwise.
+    const sensorIntByUuid = new Map()
+    {
+      const idToInt = new Map()
+      for (const img of imgs) {
+        const sid = img.sensorId ?? null
+        if (sid == null) { sensorIntByUuid.set(img.uuid, -1); continue }
+        if (!idToInt.has(sid)) idToInt.set(sid, idToInt.size)
+        sensorIntByUuid.set(img.uuid, idToInt.get(sid))
+      }
+    }
 
     // Run one global bundle adjustment, apply it (guarded: never commit a result
     // that worsens the cost), and log RMS / convergence trace. Reused for the
@@ -685,6 +839,7 @@ export async function reconstruct(input, hooks = {}) {
       const uuidList = [...cameras.keys()]
       const camList  = uuidList.map((u) => cameras.get(u))
       const kList    = camList.map((c) => c.K)
+      const sensorOfCam = uuidList.map((u) => sensorIntByUuid.get(u) ?? -1)
 
       const observations = []
       points3d.forEach((pt, pi) => {
@@ -699,7 +854,8 @@ export async function reconstruct(input, hooks = {}) {
       log(`Reconstruction: ${label} — ${camList.length} cameras, ${points3d.length} points, `
         + `${observations.length} observations, ${iters} iters`, 'info', 'Reconstruction')
 
-      const result = await bundleAdjust(camList, kList, points3d, observations, { maxIters: iters })
+      const result = await bundleAdjust(camList, kList, points3d, observations,
+        { maxIters: iters, refineIntrinsics, sensorOfCam })
       if (!result) {
         log(`Reconstruction: ${label} returned no result (skipped)`, 'warn', 'Reconstruction')
         return
@@ -723,9 +879,40 @@ export async function reconstruct(input, hooks = {}) {
       }
       uuidList.forEach((uuid, ci) => {
         const old = cameras.get(uuid)
-        cameras.set(uuid, { ...old, ...result.cameras[ci] })
+        // Merge refined intrinsics into K (keeps impliedFilmWidthMm / source meta)
+        // so subsequent BA passes and reprojection stats use the calibrated focal.
+        const K = refineIntrinsics !== 'none' && result.intrinsics
+          ? { ...old.K, ...result.intrinsics[ci] }
+          : old.K
+        cameras.set(uuid, { ...old, ...result.cameras[ci], K })
       })
       points3d = result.points3d.map((pt, i) => ({ ...pt, views: points3d[i].views }))
+
+      // Self-calibration report: one line per sensor group (before → after focal +
+      // the implied film width, tying back to the Q4 sanity check). Never written
+      // back to the sensor table — the user decides whether to adopt it.
+      if (refineIntrinsics !== 'none' && result.intrinsics) {
+        const seen = new Set()
+        uuidList.forEach((uuid, ci) => {
+          const g = sensorOfCam[ci]
+          if (g < 0 || seen.has(g)) return
+          seen.add(g)
+          const fx0 = kList[ci].fx, fx1 = result.intrinsics[ci].fx
+          const pct = fx0 ? (100 * (fx1 - fx0) / fx0) : 0
+          let implied = ''
+          const w0 = kList[ci].impliedFilmWidthMm
+          if (w0 != null && fx1) implied = `, implied film width ${w0.toFixed(0)}mm → ${(w0 * fx0 / fx1).toFixed(0)}mm`
+          const cxcy = refineIntrinsics === 'f,cxcy'
+            ? `, cx ${kList[ci].cx.toFixed(1)}→${result.intrinsics[ci].cx.toFixed(1)}, `
+              + `cy ${kList[ci].cy.toFixed(1)}→${result.intrinsics[ci].cy.toFixed(1)}` : ''
+          log(`Reconstruction: ${label} self-calibration — sensor group ${g}: `
+            + `fx ${fx0.toFixed(1)} → ${fx1.toFixed(1)} (${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%)${cxcy}${implied}`,
+            'info', 'Reconstruction')
+        })
+        log(`Reconstruction: ${label} self-calibration is weakly observed on short/single strips `
+          + `(needs ≥2° tilt variation for a trustworthy focal); review before updating the sensor table.`,
+          'debug', 'Reconstruction')
+      }
       if (result.costBefore != null && result.costAfter != null) {
         log(`Reconstruction: ${label} RMS ${result.costBefore.toFixed(2)}px → ${result.costAfter.toFixed(2)}px `
           + `(−${Math.abs(result.costBefore - result.costAfter).toFixed(2)}px)`, 'success', 'Reconstruction')
@@ -788,11 +975,46 @@ export async function reconstruct(input, hooks = {}) {
       return { obsRemoved, ptsRemoved }
     }
 
+    // Track-length histogram { t2, t3, t4 } (2-view / 3-view / 4+-view counts).
+    const trackHist = () => {
+      let t2 = 0, t3 = 0, t4 = 0
+      for (const pt of points3d) { const n = pt.views.size; if (n <= 2) t2++; else if (n === 3) t3++; else t4++ }
+      return { t2, t3, t4 }
+    }
+
+    // Retriangulation + track merging run through the pure, unit-tested module
+    // functions below (`retriangulatePairs`, `mergeSplitTracks`); the closure just
+    // supplies this run's keypoint lookup + the WASM triangulator.
+    const keypointOf = (uuid, kpIdx) => imageByUuid(uuid)?.keypoints?.[kpIdx] ?? null
+
     if (cameras.size >= 2 && points3d.length >= 10 && baIterations > 0) {
       onProgress?.(imgs.length - 1, imgs.length, 'Bundle adjustment…')
 
       await runBundleAdjust('bundle adjustment', baIterations)
       logOutlierShare('pre-filter residuals')
+
+      // A3: retriangulate missed matches + merge split tracks under the improved
+      // poses, then one more BA so the new/merged structure settles jointly.
+      {
+        const before = trackHist()
+        const { added } = await retriangulatePairs({
+          points3d, cameras, pairs: donePairs, keypointOf,
+          maxReprojPx: filterMaxReprojPx, triangulate: triangulateDlt,
+        })
+        const mres = mergeSplitTracks({ points3d, cameras, pairs: donePairs, keypointOf, maxReprojPx: filterMaxReprojPx })
+        points3d = mres.points3d
+        const merged = mres.merged
+        if (added || merged) {
+          const after = trackHist()
+          log(`Reconstruction: retriangulation +${added} point(s), merged ${merged} split track(s); `
+            + `${points3d.length} points`, 'info', 'Reconstruction')
+          log(`Reconstruction: track lengths (2/3/4+ view) ${before.t2}/${before.t3}/${before.t4} → `
+            + `${after.t2}/${after.t3}/${after.t4}`, 'info', 'Reconstruction')
+          await runBundleAdjust('post-retriangulation bundle adjustment', baIterations)
+        } else {
+          log('Reconstruction: retriangulation found no missed structure', 'debug', 'Reconstruction')
+        }
+      }
 
       // Filter → re-BA, twice: a generous pass to strip gross junk, then a tighter
       // pass once the model has settled. Each re-solve runs on the cleaned set.
@@ -812,13 +1034,7 @@ export async function reconstruct(input, hooks = {}) {
 
     // Track-length histogram: points seen by only 2 images are the fragile ones;
     // a model dominated by 2-view tracks is weakly constrained.
-    let tracks2 = 0, tracks3 = 0, tracks4 = 0
-    for (const pt of points3d) {
-      const n = pt.views.size
-      if (n <= 2) tracks2++
-      else if (n === 3) tracks3++
-      else tracks4++
-    }
+    const { t2: tracks2, t3: tracks3, t4: tracks4 } = trackHist()
     const totalMs = performance.now() - t0
     log(`Reconstruction: track lengths — ${tracks2} ×2-view, ${tracks3} ×3-view, ${tracks4} ×4+-view`, 'info', 'Reconstruction')
     log(`Reconstruction: total time ${(totalMs / 1000).toFixed(1)}s `

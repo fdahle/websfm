@@ -15,6 +15,7 @@ const props = defineProps({
   depthMapCount: { type: Number, default: 0 },
   cloudReady: { type: Boolean, default: false },
   demReady: { type: Boolean, default: false },
+  orthoReady: { type: Boolean, default: false },
   productReady: { type: Boolean, default: false },
   activeImageId: { type: String, default: null },
   activeImageName: { type: String, default: null },
@@ -141,7 +142,8 @@ const tabs = [
         commands: [
           { id: 'export-cameras', label: 'Camera\nPoses', icon: 'camera', needsPoses: true },
           { id: 'export-sensors', label: 'Sensors',       icon: 'target', needsSensors: true },
-          { id: 'export-cloud',   label: 'Point\nCloud',  icon: 'point-cloud', disabled: true },
+          { id: 'export-cloud',   label: 'Point\nCloud',  icon: 'point-cloud', needsCloud: true },
+          { id: 'export-model',   label: 'Model\nJSON',   icon: 'cube',        needsCloud: true },
         ],
       },
       {
@@ -154,8 +156,8 @@ const tabs = [
       {
         label: 'Products',
         commands: [
-          { id: 'export-dem',   label: 'DEM',   icon: 'dem',   disabled: true },
-          { id: 'export-ortho', label: 'Ortho', icon: 'ortho', disabled: true },
+          { id: 'export-dem',   label: 'DEM',   icon: 'dem',   needsDem: true },
+          { id: 'export-ortho', label: 'Ortho', icon: 'ortho', needsOrtho: true },
         ],
       },
     ],
@@ -349,6 +351,7 @@ function isDisabled(cmd) {
   if (cmd.needsDepthMaps && props.depthMapCount === 0) return true
   if (cmd.needsCloud     && !props.cloudReady)        return true
   if (cmd.needsDem       && !props.demReady)          return true
+  if (cmd.needsOrtho     && !props.orthoReady)        return true
   if (cmd.needsProducts  && !props.productReady)      return true
   if (cmd.needsKeypoints && props.kpImageCount === 0) return true
   if (cmd.needsGcps     && props.gcpCount === 0)   return true
@@ -370,6 +373,7 @@ function disabledReason(cmd) {
   if (cmd.needsDepthMaps && props.depthMapCount === 0) return 'Compute depth maps first'
   if (cmd.needsCloud     && !props.cloudReady)        return 'Build a point cloud first'
   if (cmd.needsDem       && !props.demReady)          return 'Build a DEM first'
+  if (cmd.needsOrtho     && !props.orthoReady)        return 'Build an orthophoto first'
   if (cmd.needsProducts  && !props.productReady)      return 'Build a DEM or orthophoto first'
   if (cmd.needsKeypoints && props.kpImageCount === 0) return 'Detect keypoints first'
   if (cmd.needsGcps     && props.gcpCount === 0)   return 'Import GCPs first'

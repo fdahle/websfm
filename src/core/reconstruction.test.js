@@ -349,4 +349,50 @@ describe('bundleAdjust', () => {
     const { cameras, intrinsics, points3d } = exactScene()
     expect(await bundleAdjust(cameras, intrinsics, points3d, [])).toBeNull()
   })
+
+  // A2 self-calibration through the JS↔WASM boundary: a scene rendered with a focal
+  // 10% higher than the seed K, refined with one shared focal. Validates the new
+  // marshalling (sensorOfCam + refineIntrinsics in, refined intrinsics out).
+  it('refines a shared focal toward the true value', async () => {
+    const rng = mulberry32(31)
+    const fTrue = KPIX.fx * 1.1
+    const projTrue = (R, t, X) => {
+      const xc = R[0][0]*X[0] + R[0][1]*X[1] + R[0][2]*X[2] + t[0]
+      const yc = R[1][0]*X[0] + R[1][1]*X[1] + R[1][2]*X[2] + t[1]
+      const zc = R[2][0]*X[0] + R[2][1]*X[1] + R[2][2]*X[2] + t[2]
+      return { x: fTrue * (xc/zc) + KPIX.cx, y: fTrue * (yc/zc) + KPIX.cy }
+    }
+    // Four genuinely different viewpoints so the shared focal is observable.
+    const centers = [[0, 0, 0], [2, 0.3, 0], [-1.5, 0.5, 0.4], [0.6, -0.8, 0.3]]
+    const rots = [rotY(0), rotY(0.2), rotY(-0.18), rotY(0.1)]
+    const poses = rots.map((R, i) => ({ R, t: poseFromCenter(R, centers[i]) }))
+    const world = Array.from({ length: 60 }, () => [
+      (rng() - 0.5) * 4, (rng() - 0.5) * 3, 8 + rng() * 4,
+    ])
+    const cameras = poses.map(({ R, t }) => ({ R, t }))
+    const intrinsics = poses.map(() => ({ ...KPIX }))  // seed with the WRONG focal
+    const points3d = world.map(([x, y, z]) => ({ x, y, z }))
+    const observations = []
+    points3d.forEach((P, ptIdx) => poses.forEach((p, camIdx) => {
+      const o = projTrue(p.R, p.t, [P.x, P.y, P.z])
+      observations.push({ camIdx, ptIdx, x: o.x, y: o.y })
+    }))
+
+    const res = await bundleAdjust(cameras, intrinsics, points3d, observations, {
+      maxIters: 80, refineIntrinsics: 'f', sensorOfCam: [0, 0, 0, 0],
+    })
+    expect(res).not.toBeNull()
+    expect(res.intrinsics).toHaveLength(4)
+    // Every camera's refined focal is pulled from the 5833 seed toward ~6417 (1.1×).
+    for (const k of res.intrinsics) {
+      expect(Math.abs(k.fx - fTrue) / fTrue).toBeLessThan(0.02)
+      expect(Math.abs(k.fy - k.fx)).toBeLessThan(1)
+    }
+  })
+
+  it('leaves intrinsics unchanged when refineIntrinsics is off', async () => {
+    const { cameras, intrinsics, points3d, observations } = exactScene()
+    const res = await bundleAdjust(cameras, intrinsics, points3d, observations, { maxIters: 20 })
+    expect(res.intrinsics[0].fx).toBeCloseTo(KPIX.fx, 3)
+  })
 })

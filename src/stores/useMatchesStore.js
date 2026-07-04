@@ -1,19 +1,26 @@
-import { ref, computed } from 'vue'
+import { shallowRef, triggerRef, computed } from 'vue'
 import { defineStore } from 'pinia'
 import * as opfs from '../utils/opfs.js'
-import { matchDescriptors, verifyMatches } from '../workers/computeClient.js'
+import { matchDescriptors, verifyMatches, POOL_SIZE } from '../workers/computeClient.js'
 import { useLog } from '../composables/useLog.js'
+import { preselectPairs } from '../core/preselect.js'
 import { registerProjectStore } from './projectStores.js'
 import { useProjectsStore } from './useProjectsStore.js'
+import { usePosesStore } from './usePosesStore.js'
 
 // Project-scoped store: pairwise feature matches. Reads persistence flags from the
 // projects store; restore/clear run through the project-store registry.
 export const useMatchesStore = registerProjectStore(defineStore('matches', () => {
   const { log } = useLog()
   const projects = useProjectsStore()
+  const posesStore = usePosesStore()
 
-  // pairId → { idA, idB, rawCount, inlierCount, F, matches: [[ia,ib],...], status }
-  const matchStore = ref(new Map())
+  // pairId → { idA, idB, rawCount, inlierCount, F, matches: [[ia,ib],...], status }.
+  // shallowRef + in-place mutation + triggerRef (NOT a whole-Map copy per write):
+  // this is what makes concurrent matchPair() calls safe — copying the Map on every
+  // write races (one writer's snapshot clobbers another's set). See P2 in HANDOVER.
+  const matchStore = shallowRef(new Map())
+  const touch = () => triggerRef(matchStore)
 
   // Persist only when a project is open and OPFS is usable (see useProjectsStore).
   const isPersisting = () => projects.isPersisting
@@ -46,7 +53,7 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
     const entry = { idA, idB, rawCount: 0, inlierCount: 0, F: null, matches: [], status: 'running' }
     matchStore.value.set(pid, entry)
     // Trigger reactivity
-    matchStore.value = new Map(matchStore.value)
+    touch()
 
     try {
       const projectId = projects.currentProjectId
@@ -54,11 +61,15 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
       const srcA = idA === imgA.uuid ? imgA : imgB
       const srcB = idA === imgA.uuid ? imgB : imgA
 
-      const loadDesc = async (id, src) => {
+      // Cache the in-flight PROMISE (not just the result) so that concurrent pairs
+      // sharing an image load its descriptors from OPFS exactly once.
+      const loadDesc = (id, src) => {
         if (descCache?.has(id)) return descCache.get(id)
-        const d = isPersisting() ? await opfs.loadDescriptors(projectId, id) : (src.descriptors ?? null)
-        if (d && descCache) descCache.set(id, d)
-        return d
+        const p = isPersisting()
+          ? opfs.loadDescriptors(projectId, id)
+          : Promise.resolve(src.descriptors ?? null)
+        descCache?.set(id, p)
+        return p
       }
       const descA = await loadDesc(idA, srcA)
       const descB = await loadDesc(idB, srcB)
@@ -67,7 +78,7 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
         entry.status = 'error'
         const names = `${imgA.name} / ${imgB.name}`
         log(`Match failed: descriptors missing for ${names} — re-run feature detection`, 'error', 'Matching')
-        matchStore.value = new Map(matchStore.value)
+        touch()
         return
       }
 
@@ -83,7 +94,7 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
         entry.status = 'done'
         const label = `${imgA.name} ↔ ${imgB.name}`
         log(`Skip: ${label} — only ${raw.length} raw matches (need ${minMatches})`, 'warn', 'Matching')
-        matchStore.value = new Map(matchStore.value)
+        touch()
         onDone?.(pid, entry)
         return
       }
@@ -153,15 +164,25 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
       log(`Match error: ${imgA.name} ↔ ${imgB.name} — ${err?.message ?? err}`, 'error', 'Matching')
     }
 
-    matchStore.value = new Map(matchStore.value)
+    touch()
     onDone?.(pairId(imgA.uuid, imgB.uuid), entry)
+  }
+
+  // Camera positions (project CRS) from imported poses, keyed by image uuid — the
+  // signal proximity preselection uses. Only resolved poses (imageId set) count.
+  function positionsByUuid() {
+    const m = new Map()
+    for (const p of posesStore.poses) {
+      if (p.imageId && p.x != null && p.y != null) m.set(p.imageId, [p.x, p.y, p.z ?? 0])
+    }
+    return m
   }
 
   async function matchAll(images, settings = {}, onProgress, shouldCancel) {
     const ready = images.filter(img => img.kpStatus === 'done')
     const strategy = settings.strategy ?? 'exhaustive'
 
-    const pairs = []
+    let pairs = []
     if (strategy === 'sequential') {
       for (let i = 0; i < ready.length - 1; i++) pairs.push([ready[i], ready[i + 1]])
     } else {
@@ -170,12 +191,34 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
           pairs.push([ready[i], ready[j]])
     }
 
+    // Proximity preselection: prune the exhaustive set to each image's nearest
+    // neighbours by camera position, so ordered strips cost ~O(N·k) not O(N²). A
+    // pair with an unpositioned endpoint can't be judged, so it's kept.
+    if (strategy === 'preselect') {
+      const pos = positionsByUuid()
+      const positioned = ready.filter(im => pos.has(im.uuid))
+      if (positioned.length < 2) {
+        log('Preselection: fewer than 2 images have camera positions — matching exhaustively instead', 'warn', 'Matching')
+      } else {
+        const keep = preselectPairs(
+          positioned.map(im => ({ uuid: im.uuid, pos: pos.get(im.uuid) })),
+          { maxNeighbors: settings.maxNeighbors ?? 10 },
+        )
+        const before = pairs.length
+        pairs = pairs.filter(([a, b]) =>
+          (pos.has(a.uuid) && pos.has(b.uuid)) ? keep.has(pairId(a.uuid, b.uuid)) : true)
+        log(`Preselection: ${pairs.length}/${before} pair(s) kept, ${before - pairs.length} skipped `
+          + `(camera proximity, ≤${settings.maxNeighbors ?? 10} neighbours)`, 'info', 'Matching')
+      }
+    }
+
     if (pairs.length === 0) {
       log('Match: no image pairs to process (need at least 2 images with keypoints)', 'warn', 'Matching')
       return
     }
 
-    log(`Matching: ${pairs.length} pair(s) — ${strategy}`, 'info', 'Matching')
+    const concurrency = Math.max(1, Math.min(POOL_SIZE, pairs.length))
+    log(`Matching: ${pairs.length} pair(s) — ${strategy}${concurrency > 1 ? `, ${concurrency}× parallel` : ''}`, 'info', 'Matching')
     let done = 0
     // Tally this run's outcomes for the completion summary. Skipped = too few raw
     // matches to bother verifying; rejected = verified but failed the count/ratio
@@ -190,24 +233,29 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
       } else if (entry.rawCount >= minMatches) stats.rejected++
       else stats.skipped++
     }
+
     // Load each image's descriptors from OPFS at most once for the whole run.
     const descCache = new Map()
-    for (const [a, b] of pairs) {
-      if (shouldCancel?.()) { log(`Matching cancelled — ${done}/${pairs.length} done`, 'warn', 'Matching'); return }
-      await matchPair(a, b, settings, tally, descCache)
-      // matchPair writes its entry into the store as it goes, so a cancel pressed
-      // while this pair was in flight leaves a finished result behind — drop it
-      // and stop, so cancellation doesn't silently attach one more pair.
-      if (shouldCancel?.()) {
-        const pid = pairId(a.uuid, b.uuid)
-        matchStore.value.delete(pid)
-        matchStore.value = new Map(matchStore.value)
-        if (isPersisting()) opfs.deleteMatches(projects.currentProjectId, pid).catch(() => {})
-        log(`Matching cancelled — ${done}/${pairs.length} done`, 'warn', 'Matching')
-        return
+    // Concurrency-limited dispatch: `concurrency` drain loops pull from a shared
+    // cursor so up to POOL_SIZE pairs are matched at once (each matchPair issues its
+    // own round-robin worker calls). Cancellation is cooperative — stop pulling.
+    let cursor = 0
+    let cancelled = false
+    const drain = async () => {
+      while (true) {
+        if (cancelled || shouldCancel?.()) { cancelled = true; return }
+        const i = cursor++
+        if (i >= pairs.length) return
+        const [a, b] = pairs[i]
+        await matchPair(a, b, settings, tally, descCache)
+        done++
+        onProgress?.(done, pairs.length)
       }
-      done++
-      onProgress?.(done, pairs.length)
+    }
+    await Promise.all(Array.from({ length: concurrency }, drain))
+    if (cancelled || shouldCancel?.()) {
+      log(`Matching cancelled — ${done}/${pairs.length} done`, 'warn', 'Matching')
+      return
     }
     const meanRatio = stats.ratios.length
       ? stats.ratios.reduce((s, r) => s + r, 0) / stats.ratios.length : 0
@@ -230,7 +278,7 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
       }
     }
     if (removed) {
-      matchStore.value = new Map(matchStore.value)
+      touch()
       log(`Matches invalidated: ${removed} pair(s) — keypoints changed, re-match these`, 'warn', 'Matching')
     }
     return removed

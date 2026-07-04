@@ -16,6 +16,7 @@ import {
   selectSourceViews, scaleK, rgbaToGray, depthMapForImage, fuseDepthMaps, filterDepthMap, autoBestK,
 } from '../core/mvs.js'
 import { buildMaskLookup } from '../core/mask.js'
+import { distortPixel, hasDistortion } from '../core/distortion.js'
 import { depthColor } from '../core/colormap.js'
 import { buildLocalFrame, makeFrame } from '../core/projection.js'
 import { frameFromSimilarity } from '../core/georef.js'
@@ -51,6 +52,58 @@ async function rasterize(url, maxDim) {
   const { data } = ctx.getImageData(0, 0, width, height)
   bmp.close()
   return { data, width, height, scale, natW, natH }
+}
+
+// Bilinear-sample an RGBA buffer at (x,y); clamps to the edge. Writes into `out`
+// at offset `oi` (4 bytes). Used by the raster undistortion below.
+function sampleRgbaBilinear(data, w, h, x, y, out, oi) {
+  const x0 = Math.max(0, Math.min(w - 1, Math.floor(x)))
+  const y0 = Math.max(0, Math.min(h - 1, Math.floor(y)))
+  const x1 = Math.min(w - 1, x0 + 1), y1 = Math.min(h - 1, y0 + 1)
+  const fx = x - x0, fy = y - y0
+  const i00 = (y0 * w + x0) * 4, i10 = (y0 * w + x1) * 4
+  const i01 = (y1 * w + x0) * 4, i11 = (y1 * w + x1) * 4
+  for (let c = 0; c < 4; c++) {
+    const top = data[i00 + c] * (1 - fx) + data[i10 + c] * fx
+    const bot = data[i01 + c] * (1 - fx) + data[i11 + c] * fx
+    out[oi + c] = top * (1 - fy) + bot * fy
+  }
+}
+
+// Remove lens distortion from a working-resolution raster: for each output (ideal
+// pinhole) pixel, sample the source at the distorted pixel the lens recorded there
+// (closed-form forward map + bilinear). Kfull is the native-resolution K; the map
+// runs in working-res K = scaleK(Kfull, scale). Returns a new raster; a no-op when
+// dist is empty. This is what keeps depth maps / fusion / DEM / ortho pinhole.
+function undistortRaster(r, Kfull, dist) {
+  if (!hasDistortion(dist)) return r
+  const { data, width: w, height: h, scale } = r
+  const Kw = scaleK(Kfull, scale)
+  const out = new Uint8ClampedArray(data.length)
+  for (let v = 0; v < h; v++) {
+    for (let u = 0; u < w; u++) {
+      const { x: ud, y: vd } = distortPixel(u, v, Kw, dist)
+      sampleRgbaBilinear(data, w, h, ud, vd, out, (v * w + u) * 4)
+    }
+  }
+  return { ...r, data: out }
+}
+
+// Undistort a boolean mask LUT with the same forward map (nearest sample) so a
+// distorted-space film-frame mask lines up with the now-undistorted raster.
+function undistortMaskLut(lut, w, h, Kfull, dist, scale) {
+  if (!hasDistortion(dist)) return lut
+  const Kw = scaleK(Kfull, scale)
+  const out = new Uint8Array(lut.length)
+  for (let v = 0; v < h; v++) {
+    for (let u = 0; u < w; u++) {
+      const { x: ud, y: vd } = distortPixel(u, v, Kw, dist)
+      const su = Math.max(0, Math.min(w - 1, Math.round(ud)))
+      const sv = Math.max(0, Math.min(h - 1, Math.round(vd)))
+      out[v * w + u] = lut[sv * w + su]
+    }
+  }
+  return out
 }
 
 // Mirrors utils/detection.js's detectKeypoints, but worker-side. Keypoint coords
@@ -255,6 +308,9 @@ async function computeDepthMaps([input], { emit }) {
   const srcUuidsByImg = images.map((img) =>
     selectSourceViews(cameras, points, img.uuid, { maxSources, minAngleDeg }))
   const urlByUuid = new Map(images.map((im) => [im.uuid, im.url]))
+  // Per-url intrinsics + distortion, so getRaster can undistort each source once
+  // (url↔image is 1:1, and undistortion is independent of ref/source role).
+  const metaByUrl = new Map(images.map((im) => [im.url, { K: im.K, dist: im.dist || null }]))
   const usedSets = srcUuidsByImg.map((srcUuids, i) => {
     const set = new Set([images[i].url])
     for (const u of srcUuids) { const url = urlByUuid.get(u); if (url) set.add(url) }
@@ -267,7 +323,10 @@ async function computeDepthMaps([input], { emit }) {
   const rasterCache = new Map() // url → { data, width, height, scale }
   const getRaster = async (url) => {
     if (!rasterCache.has(url)) {
-      const r = await rasterize(url, maxDim)
+      let r = await rasterize(url, maxDim)
+      // Undistort at ingest so every dense consumer stays pinhole (mirrors sparse).
+      const meta = metaByUrl.get(url)
+      if (meta?.dist) r = undistortRaster(r, meta.K, meta.dist)
       rasterCache.set(url, r)
       ledger.track(`raster:${url}`, r.width * r.height * 4)
     }
@@ -312,7 +371,9 @@ async function computeDepthMaps([input], { emit }) {
       // not just from the reference's own depth: otherwise a reference pixel finds a
       // spurious low-cost match against a neighbour's high-contrast border, leaking
       // those edges into the depth map. Build the LUT at the source's working size.
-      const srcMask = s.mask ? await buildMaskLookup(s.mask, rs.width, rs.height) : null
+      let srcMask = s.mask ? await buildMaskLookup(s.mask, rs.width, rs.height) : null
+      // The raster was undistorted; move the (distorted-space) mask the same way.
+      if (srcMask && s.dist) srcMask = undistortMaskLut(srcMask, rs.width, rs.height, s.K, s.dist, rs.scale)
       sources.push({
         gray: rgbaToGray(rs.data, rs.width, rs.height),
         w: rs.width, h: rs.height,
