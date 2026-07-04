@@ -18,6 +18,7 @@ import ProgressModal from './components/modals/ProgressModal.vue'
 import SettingsModal from './components/modals/SettingsModal.vue'
 import AboutModal from './components/modals/AboutModal.vue'
 import NewProjectModal from './components/modals/NewProjectModal.vue'
+import HelpPanelStack from './components/help/HelpPanelStack.vue'
 import ProjectPicker from './components/layout/ProjectPicker.vue'
 import DevConsole from './components/layout/DevConsole.vue'
 import { useImagesStore } from './stores/useImagesStore.js'
@@ -1125,6 +1126,10 @@ function onRibbonPick(event) {
         @create="handleCreateProject"
         @cancel="handleCancelNewProject"
       />
+    </Teleport>
+
+    <Teleport to="body">
+      <HelpPanelStack />
     </Teleport>
 
     <div class="layout">

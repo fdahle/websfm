@@ -10,69 +10,17 @@ Baselines to beat are in `HANDOVER.md` §Baselines.
 
 ---
 
-## Now — R track: registration robustness (sparse)
+## Now — verify the R track on real data
 
-Root cause of the bad building-set run (HANDOVER baseline B1): the sparse model
-is poisoned *during* incremental registration; dense symptoms (speckle, 5%
-fusion keep) are downstream. Do in order.
-
-### R1 — Honest PnP acceptance
-`sfm.js` accepts any pose with ≥6 absolute inliers (`inlierCount < 6`, ~line
-674). Require `inliers ≥ max(minPnpInliers, minPnpInlierRatio · correspondences)`
-(defaults ~15 / 0.15, settings-exposed). A pose supported by 4% of its
-correspondences (IMG_4315: 6/137) is a coincidence fit; deferring is cheap
-because the sweep loop retries every pass.
-
-### R2 — Kill the adaptive-gate doom loop
-The per-pass PnP gate `min(reprjThreshold·maxGateScale, max(reprjThreshold, p95))`
-escalates exactly when the model is worst (pass 2 ran at 32px on B1). Replace
-with a fixed gate (reprjThreshold, at most a 2× cap) + rely on R3: images that
-can't clear a tight gate should wait for BA to improve the model, not have the
-gate loosened for them. Never-registered images stay out and are reported (that
-report already exists).
-
-### R3 — Interleaved bundle adjustment (the big one)
-All 50 cameras register in one 164ms sweep with zero intermediate BA; the single
-global BA then can't recover (B1: pre-BA p95 282px, post-retriangulation BA
-rejected). COLMAP-style: after every K new registrations (K≈5, or ~25% model
-growth), run global BA + a track-filter pass, then continue the sweep against
-the tightened model. Reuse `runBundleAdjust` + `filterTracks` as-is; fewer iters
-(10–15) per interim solve. Expect: pre-BA p95 < 20px, deferred images
-registering at the *tight* gate in later passes, final BA starting near the
-optimum.
-
-### R4 — Track extension beyond PnP inliers
-Only PnP-inlier correspondences extend tracks; outlier correspondences are
-dropped and pair-matches touching an existing track are skipped for
-triangulation — the observation is simply lost, so tracks stay 2-view (9.5%
-≥3-view on B1). After a pose is accepted (and again after each interim BA), fold
-in one-endpoint-assigned matches whose reprojection against the existing point
-is ≤ gate. Direct lever on the ≥3-view share and on BA conditioning.
-
-### R5 — Matching: absolute-inlier override on the ratio gate
-`useMatchesStore` rejects any pair with inlier ratio < 0.25 regardless of count.
-Accept when `inlierCount ≥ overrideInliers` (~30) even at low ratio —
-120-putative/27-inlier bridge pairs are real geometry on repetitive facades, and
-they're the glue that closes loops + makes ≥3-view tracks. Keep the ratio gate
-for the 15–25-putative junk it was built for.
-
-### R6 — Distortion: refine k1 in BA (`refineIntrinsics: 'f,k1'`)
-Undistort-at-ingest plumbing exists (`core/distortion.js`) but nothing *solves*
-for k1, and the building set shows classic radial residuals (init reproj grows
-with parallax: 0.64px @ 6° vs 16.6px @ 16.5°). Add a shared per-sensor k1 to the
-BA intrinsic block (`bundle.rs`, analytic Jacobian like the focal scale), report
-it like the focal log; the user copies it into the sensor table. Also restrict
-`f,cxcy`/`f,k1` refinement to the *post-filter* BAs — refining intrinsics
-against the pre-filter mess is how cy drifted 180px on B1.
-
-**Acceptance (vs baseline B1):** all 50 cameras registered at the tight gate;
-pre-BA p95 < 20px; ≥3-view track share > 30% (from 9.5%); no BA-rejected passes;
-self-calib cx/cy stable within ~10px. Then re-run dense: per-image cost median
-≤ 0.45, fusion kept fraction > 20% (from 5%).
-
-**Instrumentation to add alongside:** per-camera median-residual table after the
-final BA, flagging cameras > 2× the global median (would have exposed the
-pass-2 cameras immediately, where the global median hides them).
+R1–R6 (registration robustness) shipped 2026-07-04 (see HANDOVER done log) but
+are only unit-tested. **Re-run the Metashape building set (B1) and confirm the
+acceptance targets:** all 50 cameras registered at the *tight* fixed gate; pre-BA
+p95 < 20px (from 282px); ≥3-view track share > 30% (from 9.5%); no BA-rejected
+passes; with `refineIntrinsics: 'f,k1'`, self-calib cx/cy stable within ~10px and
+a plausible k1. Then re-run dense: per-image cost median ≤ 0.45, fusion kept
+fraction > 20% (from 5%). If a target misses, the per-camera residual table (new)
+names the offending cameras; tune `interimBaEvery` / `minPnpInlierRatio` /
+`overrideInliers` from there. Record the new numbers as baseline B2 in HANDOVER.
 
 ---
 

@@ -68,6 +68,43 @@ fiducials; self-calibration (A2) + fiducials (F4) are the code-side support.
 
 ## Done log (most recent first)
 
+- **2026-07-04 · R1–R6 registration-robustness track (sparse)** — the fix for B1's
+  poisoned-during-registration model. All six landed; **acceptance still owed on the
+  real building set** (see Owed validations in TODO.md). Where each lives:
+  - **R1 honest PnP acceptance** (`core/sfm.js`): a pose now needs
+    `inliers ≥ max(minPnpInliers=15, minPnpInlierRatio=0.15·correspondences)`, not the
+    old bare `≥6`. Kills the 6/137 (4%) coincidence fits; deferring is cheap (the sweep
+    retries every pass).
+  - **R2 fixed PnP gate** (`sfm.js`): the adaptive `min(reprj·maxGateScale, max(reprj,
+    p95))` gate — which ballooned to 32px on B1 exactly when the model was worst — is
+    replaced by a fixed `reprjThreshold × min(pnpGateScale=2, 2)`. Images that can't
+    clear it wait for the next pass's tighter model rather than being let in loose.
+  - **R3 interleaved bundle adjustment** (`sfm.js`, the big one): after every
+    `interimBaEvery=5` new cameras, run a global BA (`interimBaIterations=12`, poses+
+    points only) + a track-filter pass, `rebuildViewIndex()`, then continue the sweep
+    against the tightened model. Reuses `runBundleAdjust`/`filterTracks`; BA + filter
+    settings + the sensor-group map were hoisted above the registration loop.
+  - **R4 track extension beyond PnP inliers** (`sfm.js`): `foldOneEndpointMatches(gate)`
+    — for a verified match between two registered images with exactly one endpoint
+    already on a track, add the other endpoint's observation when it reprojects ≤ gate.
+    Called at each pass end + after each interim BA. Directly raises the ≥3-view share.
+  - **R5 matching absolute-inlier override** (`stores/useMatchesStore.js`): accept a pair
+    below the 0.25 ratio gate when `inlierCount ≥ overrideInliers=30` — the medium-overlap
+    bridge pairs (27 inliers @ 0.23) that close building loops. Ratio gate still guards
+    the low-count junk. Logs a `ratio-override` note.
+  - **R6 solve for radial k1 in BA** (`crates/reconstruction/src/bundle.rs` +
+    `core/reconstruction.js` + `sfm.js` + modal): new `refine_mode==3` ('f,k1') adds a
+    shared per-sensor `k1` (Brown r²) to the intrinsic block with the **full analytic
+    Jacobian** (distortion folded into `dudc/dvdc`, focal column, + a k1 column);
+    `project_k1` applies it in the cost. Output intrinsics widened 4→**5** per camera
+    (`fx,fy,cx,cy,k1`) — reconstruction.js parses the new stride; refined k1 is logged
+    for the user to copy into the sensor table. Intrinsic refinement (f,cxcy/f,k1) is now
+    restricted to the **post-filter** BAs (refining against the pre-filter mess drifted
+    cy 180px on B1). WASM rebuilt. Tests: Rust `bundle_adjust_refines_shared_k1`
+    (recovers k1 <0.02, sub-px), JS `refines a shared radial k1`, existing tests moved to
+    the 5-wide stride.
+  - **Instrumentation**: per-camera median-residual table after the final BA, flagging
+    cameras > 2× the global median (would have surfaced B1's pass-2 cameras by name).
 - **2026-07-04 · Docs restructure** — CLAUDE.md = evergreen, TODO.md = the one
   plan, HANDOVER.md = record (baselines + done log). Duplicated status text
   removed from all three.

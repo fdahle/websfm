@@ -240,12 +240,14 @@ export async function solvePnp(pts3d, pts2d, K, opts = {}) {
 // costBefore/costAfter are RMS reprojection error (px) from the WASM solver.
 // `opts`:
 //   maxIters          — outer LM iterations (default 30)
-//   refineIntrinsics  — 'none' | 'f' | 'f,cxcy' (self-calibration; default 'none')
+//   refineIntrinsics  — 'none' | 'f' | 'f,cxcy' | 'f,k1' (self-calibration; default
+//                       'none'). 'f,k1' also solves a shared radial distortion coeff.
 //   sensorOfCam       — per-camera integer sensor id (cameras sharing an id share
 //                       one focal); required for refinement, ignored for 'none'.
 // Returns { cameras, points3d, intrinsics, costBefore, costAfter, costTrace } —
-// `intrinsics` is the refined effective K per camera (unchanged when 'none').
-const REFINE_MODE = { none: 0, f: 1, 'f,cxcy': 2 }
+// `intrinsics` is the refined effective K per camera `{ fx, fy, cx, cy, k1 }`
+// (unchanged, k1 = 0, when 'none').
+const REFINE_MODE = { none: 0, f: 1, 'f,cxcy': 2, 'f,k1': 3 }
 export async function bundleAdjust(cameras, intrinsics, points3d, observations, opts = {}) {
   await ensureWasm()
   const { maxIters = 30, refineIntrinsics = 'none', sensorOfCam = null } = opts
@@ -283,10 +285,10 @@ export async function bundleAdjust(cameras, intrinsics, points3d, observations, 
   }
 
   const raw = bundle_adjust(camFlat, kFlat, ptsFlat, obsFlat, maxIters, sensorFlat, refineMode)
-  // Layout: cameras(nCam×12), points(nPts×3), intrinsics(nCam×4), costBefore,
-  // costAfter, then a variable-length per-iteration RMS convergence trace.
+  // Layout: cameras(nCam×12), points(nPts×3), intrinsics(nCam×5 = fx,fy,cx,cy,k1),
+  // costBefore, costAfter, then a variable-length per-iteration RMS convergence trace.
   const intrBase = nCam * 12 + nPts * 3
-  const base = intrBase + nCam * 4
+  const base = intrBase + nCam * 5
   if (!raw || raw.length < base + 2) return null
   const costBefore = raw[base]
   const costAfter  = raw[base + 1]
@@ -306,8 +308,8 @@ export async function bundleAdjust(cameras, intrinsics, points3d, observations, 
   }))
 
   const outIntrinsics = cameras.map((_, c) => {
-    const b = intrBase + c * 4
-    return { fx: raw[b], fy: raw[b+1], cx: raw[b+2], cy: raw[b+3] }
+    const b = intrBase + c * 5
+    return { fx: raw[b], fy: raw[b+1], cx: raw[b+2], cy: raw[b+3], k1: raw[b+4] }
   })
 
   return { cameras: outCameras, points3d: outPoints, intrinsics: outIntrinsics, costBefore, costAfter, costTrace }

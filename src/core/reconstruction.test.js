@@ -394,5 +394,44 @@ describe('bundleAdjust', () => {
     const { cameras, intrinsics, points3d, observations } = exactScene()
     const res = await bundleAdjust(cameras, intrinsics, points3d, observations, { maxIters: 20 })
     expect(res.intrinsics[0].fx).toBeCloseTo(KPIX.fx, 3)
+    expect(res.intrinsics[0].k1).toBeCloseTo(0, 6) // pinhole: no radial term
+  })
+
+  // R6 self-calibration through the JS↔WASM boundary: a scene rendered with a known
+  // radial distortion, seeded pinhole, refined with one shared k1 ('f,k1'). Validates
+  // the widened (5-per-camera) intrinsics marshalling carries k1 back out.
+  it('refines a shared radial k1 toward the true value', async () => {
+    const rng = mulberry32(37)
+    const k1True = -0.15
+    const projDist = (R, t, X) => {
+      const xc = R[0][0]*X[0] + R[0][1]*X[1] + R[0][2]*X[2] + t[0]
+      const yc = R[1][0]*X[0] + R[1][1]*X[1] + R[1][2]*X[2] + t[1]
+      const zc = R[2][0]*X[0] + R[2][1]*X[1] + R[2][2]*X[2] + t[2]
+      const a = xc/zc, b = yc/zc
+      const d = 1 + k1True * (a*a + b*b)
+      return { x: KPIX.fx * a * d + KPIX.cx, y: KPIX.fy * b * d + KPIX.cy }
+    }
+    const centers = [[0, 0, 0], [2, 0.3, 0], [-1.5, 0.5, 0.4], [0.6, -0.8, 0.3]]
+    const rots = [rotY(0), rotY(0.2), rotY(-0.18), rotY(0.1)]
+    const poses = rots.map((R, i) => ({ R, t: poseFromCenter(R, centers[i]) }))
+    const world = Array.from({ length: 60 }, () => [
+      (rng() - 0.5) * 4, (rng() - 0.5) * 3, 8 + rng() * 4,
+    ])
+    const cameras = poses.map(({ R, t }) => ({ R, t }))
+    const intrinsics = poses.map(() => ({ ...KPIX })) // seed pinhole (k1 = 0)
+    const points3d = world.map(([x, y, z]) => ({ x, y, z }))
+    const observations = []
+    points3d.forEach((P, ptIdx) => poses.forEach((p, camIdx) => {
+      const o = projDist(p.R, p.t, [P.x, P.y, P.z])
+      observations.push({ camIdx, ptIdx, x: o.x, y: o.y })
+    }))
+
+    const res = await bundleAdjust(cameras, intrinsics, points3d, observations, {
+      maxIters: 100, refineIntrinsics: 'f,k1', sensorOfCam: [0, 0, 0, 0],
+    })
+    expect(res).not.toBeNull()
+    expect(res.costBefore).toBeGreaterThan(1) // the unmodelled distortion really hurt
+    for (const k of res.intrinsics) expect(Math.abs(k.k1 - k1True)).toBeLessThan(0.02)
+    expect(res.costAfter).toBeLessThan(0.5)
   })
 })

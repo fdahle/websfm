@@ -28,13 +28,15 @@
  * - `max_iters`: outer LM iterations
  * - `sensor_of_cam`: n_cam ints — per-camera sensor id (shared → shared focal);
  *   `< 0` (or a short/empty list) ⇒ that camera is its own group
- * - `refine_mode`: 0 = none (poses+points only), 1 = focal, 2 = focal + cx,cy
+ * - `refine_mode`: 0 = none (poses+points only), 1 = focal, 2 = focal + cx,cy,
+ *   3 = focal + a shared radial k1 (Brown r² distortion)
  *
  * # Output
- * `[cameras_flat(n_cam×12), pts_flat(n_pts×3), intrinsics_flat(n_cam×4),
+ * `[cameras_flat(n_cam×12), pts_flat(n_pts×3), intrinsics_flat(n_cam×5),
  *   cost_before, cost_after, cost_trace…]` — the returned intrinsics are the
- * **refined** effective K per camera (identical to the input when
- * `refine_mode == 0`); cost_* are RMS reprojection error in pixels.
+ * **refined** effective K per camera as `[fx,fy,cx,cy,k1]` (k1 = 0 unless
+ * `refine_mode == 3`, identical to the input K when `refine_mode == 0`); cost_*
+ * are RMS reprojection error in pixels.
  * @param {Float32Array} cameras_flat
  * @param {Float32Array} intrinsics_flat
  * @param {Float32Array} pts_flat

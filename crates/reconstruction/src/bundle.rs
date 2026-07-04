@@ -50,6 +50,18 @@ pub(crate) fn chol_solve(n: usize, a: &[f64], b: &[f64]) -> Option<Vec<f64>> {
     Some(x)
 }
 
+// Pinhole projection with one shared radial term k1 (Brown r² model):
+// u = fx·a·(1+k1·r²)+cx, v = fy·b·(1+k1·r²)+cy, with a,b = normalised camera
+// coords (xc/zc, yc/zc). k1 = 0 reduces to the plain pinhole projection.
+fn project_k1(r: &M3, t: &V3, fx: f64, fy: f64, cx: f64, cy: f64, k1: f64, x: &V3) -> (f64, f64) {
+    let pc = mat3_vec(r, x);
+    let (xc, yc, zc) = (pc[0] + t[0], pc[1] + t[1], pc[2] + t[2]);
+    if zc.abs() < 1e-9 { return (f64::NAN, f64::NAN); }
+    let a = xc / zc; let b = yc / zc;
+    let r2 = a * a + b * b; let d = 1.0 + k1 * r2;
+    (fx * a * d + cx, fy * b * d + cy)
+}
+
 // ── Reduced-variable coupling blocks (Schur assembly) ─────────────────────────
 
 // One point's merged Jvarᵀ·Jp coupling block, keyed by its reduced-variable offset
@@ -113,13 +125,15 @@ fn build_groups(ids: &[i32], n_cam: usize) -> (Vec<usize>, usize) {
 /// - `max_iters`: outer LM iterations
 /// - `sensor_of_cam`: n_cam ints — per-camera sensor id (shared → shared focal);
 ///   `< 0` (or a short/empty list) ⇒ that camera is its own group
-/// - `refine_mode`: 0 = none (poses+points only), 1 = focal, 2 = focal + cx,cy
+/// - `refine_mode`: 0 = none (poses+points only), 1 = focal, 2 = focal + cx,cy,
+///   3 = focal + a shared radial k1 (Brown r² distortion)
 ///
 /// # Output
-/// `[cameras_flat(n_cam×12), pts_flat(n_pts×3), intrinsics_flat(n_cam×4),
+/// `[cameras_flat(n_cam×12), pts_flat(n_pts×3), intrinsics_flat(n_cam×5),
 ///   cost_before, cost_after, cost_trace…]` — the returned intrinsics are the
-/// **refined** effective K per camera (identical to the input when
-/// `refine_mode == 0`); cost_* are RMS reprojection error in pixels.
+/// **refined** effective K per camera as `[fx,fy,cx,cy,k1]` (k1 = 0 unless
+/// `refine_mode == 3`, identical to the input K when `refine_mode == 0`); cost_*
+/// are RMS reprojection error in pixels.
 #[wasm_bindgen]
 pub fn bundle_adjust(
     cameras_flat: &[f32],
@@ -163,21 +177,26 @@ pub fn bundle_adjust(
     for &(ci, pi, ox, oy) in &obs { pt_obs[pi].push((ci, ox, oy)); }
 
     // ── Intrinsic self-calibration setup ─────────────────────────────────────────
-    let kdim = match refine_mode { 1 => 1, 2 => 3, _ => 0 };
+    // refine_mode: 1 = focal only [s]; 2 = focal + principal point [s, dcx, dcy];
+    // 3 = focal + shared radial k1 [s, k1]. Per-group params are stored in a fixed
+    // [f64;3] slot; the layout depends on kdim (1 → [s], 2 → [s,k1], 3 → [s,dcx,dcy]).
+    let kdim = match refine_mode { 1 => 1, 2 => 3, 3 => 2, _ => 0 };
     let (grp, g_count) = if kdim > 0 { build_groups(sensor_of_cam, n_cam) } else { (vec![0usize; n_cam], 0) };
     let refine = kdim > 0 && g_count > 0;
     let group_off = 6 * n_cam;            // intrinsic params follow the camera poses
     let n = group_off + if refine { g_count * kdim } else { 0 };
-    // Per-group params [s, dcx, dcy]: s multiplies fx/fy, dcx/dcy offset the centre.
+    // Per-group params: s multiplies fx/fy; for kdim==3 slots 1,2 are dcx,dcy; for
+    // kdim==2 slot 1 is the shared radial k1 (init 0 = no distortion).
     let mut gpar = vec![[1.0f64, 0.0, 0.0]; g_count.max(1)];
 
-    // Effective K for a camera under the current group params.
-    let eff = |ci: usize, gpar: &Vec<[f64; 3]>| -> (f64, f64, f64, f64) {
+    // Effective K + radial k1 for a camera under the current group params.
+    let eff = |ci: usize, gpar: &Vec<[f64; 3]>| -> (f64, f64, f64, f64, f64) {
         let (fx0, fy0, cx0, cy0) = ks[ci];
-        if !refine { return (fx0, fy0, cx0, cy0); }
+        if !refine { return (fx0, fy0, cx0, cy0, 0.0); }
         let p = gpar[grp[ci]];
         let (dcx, dcy) = if kdim == 3 { (p[1], p[2]) } else { (0.0, 0.0) };
-        (p[0] * fx0, p[0] * fy0, cx0 + dcx, cy0 + dcy)
+        let k1 = if kdim == 2 { p[1] } else { 0.0 };
+        (p[0] * fx0, p[0] * fy0, cx0 + dcx, cy0 + dcy, k1)
     };
 
     // Plain RMS reprojection error over all observations (reported to the caller).
@@ -185,8 +204,8 @@ pub fn bundle_adjust(
         let mut sse = 0.0f64; let mut cnt = 0usize;
         for &(ci, pi, ox, oy) in &obs {
             let (r, t) = &cams[ci];
-            let (fx, fy, cx, cy) = eff(ci, gpar);
-            let (px, py) = project(&make_p34(r, t), fx, fy, cx, cy, &pts[pi]);
+            let (fx, fy, cx, cy, k1) = eff(ci, gpar);
+            let (px, py) = project_k1(r, t, fx, fy, cx, cy, k1, &pts[pi]);
             if px.is_nan() { continue; }
             sse += (px - ox).powi(2) + (py - oy).powi(2); cnt += 1;
         }
@@ -198,8 +217,8 @@ pub fn bundle_adjust(
         let mut sum = 0.0f64;
         for &(ci, pi, ox, oy) in &obs {
             let (r, t) = &cams[ci];
-            let (fx, fy, cx, cy) = eff(ci, gpar);
-            let (px, py) = project(&make_p34(r, t), fx, fy, cx, cy, &pts[pi]);
+            let (fx, fy, cx, cy, k1) = eff(ci, gpar);
+            let (px, py) = project_k1(r, t, fx, fy, cx, cy, k1, &pts[pi]);
             if px.is_nan() { sum += dh * dh; continue; }
             let e2 = (px - ox).powi(2) + (py - oy).powi(2);
             let e = e2.sqrt();
@@ -214,8 +233,8 @@ pub fn bundle_adjust(
         let mut es: Vec<f64> = Vec::with_capacity(obs.len());
         for &(ci, pi, ox, oy) in &obs {
             let (r, t) = &cams[ci];
-            let (fx, fy, cx, cy) = eff(ci, gpar);
-            let (px, py) = project(&make_p34(r, t), fx, fy, cx, cy, &pts[pi]);
+            let (fx, fy, cx, cy, k1) = eff(ci, gpar);
+            let (px, py) = project_k1(r, t, fx, fy, cx, cy, k1, &pts[pi]);
             if px.is_nan() { continue; }
             es.push(((px - ox).powi(2) + (py - oy).powi(2)).sqrt());
         }
@@ -245,16 +264,22 @@ pub fn bundle_adjust(
         for pi in 0..n_pts {
             for &(ci, ox, oy) in &pt_obs[pi] {
                 let (r, t) = &cams[ci];
-                let (fx, fy, cx, cy) = eff(ci, &gpar);
+                let (fx, fy, cx, cy, k1) = eff(ci, &gpar);
                 let pc = mat3_vec(r, &pts[pi]); // R·X
                 let xc = pc[0] + t[0]; let yc = pc[1] + t[1]; let zc = pc[2] + t[2];
                 if zc.abs() < 1e-9 { continue; }
                 let inv = 1.0 / zc;
-                let ru = fx * xc * inv + cx - ox;
-                let rv = fy * yc * inv + cy - oy;
-                // ∂proj/∂x_cam (2×3).
-                let dudc = [fx * inv, 0.0, -fx * xc * inv * inv];
-                let dvdc = [0.0, fy * inv, -fy * yc * inv * inv];
+                // Normalised coords + the shared radial factor d = 1 + k1·r² (d ≡ 1,
+                // and every derivative below reduces to the pinhole case, when k1 = 0).
+                let a = xc * inv; let b = yc * inv;
+                let r2 = a * a + b * b; let d = 1.0 + k1 * r2;
+                let ru = fx * a * d + cx - ox;
+                let rv = fy * b * d + cy - oy;
+                // ∂proj/∂x_cam (2×3) including the radial term (exact analytic):
+                //   ∂u/∂xc = (fx/zc)(d+2k1·a²), ∂u/∂yc = (fx/zc)(2k1·a·b),
+                //   ∂u/∂zc = −(fx·a/zc)(d+2k1·r²)  (and symmetrically for v).
+                let dudc = [fx * inv * (d + 2.0*k1*a*a), fx * inv * (2.0*k1*a*b), -fx * a * inv * (d + 2.0*k1*r2)];
+                let dvdc = [fy * inv * (2.0*k1*a*b), fy * inv * (d + 2.0*k1*b*b), -fy * b * inv * (d + 2.0*k1*r2)];
                 // Camera Jacobian Jc (2×6): [I | −[pc]_×] through ∂proj/∂x_cam.
                 let sp = skew(&pc);
                 let mut ju = [0f64; 6]; let mut jv = [0f64; 6];
@@ -270,13 +295,14 @@ pub fn bundle_adjust(
                     jpu[k] = dudc[0]*r[0][k] + dudc[1]*r[1][k] + dudc[2]*r[2][k];
                     jpv[k] = dvdc[0]*r[0][k] + dvdc[1]*r[1][k] + dvdc[2]*r[2][k];
                 }
-                // Intrinsic Jacobian Jk (2×kdim): ∂/∂s = (fx0·xc/zc, fy0·yc/zc);
-                // ∂/∂dcx = (1,0); ∂/∂dcy = (0,1). (fy col carried in jkv.)
+                // Intrinsic Jacobian Jk (2×kdim). Focal scale s: ∂/∂s = (fx0·a·d, fy0·b·d).
+                // kdim==3 → dcx,dcy: (1,0),(0,1). kdim==2 → radial k1: ∂/∂k1 = (fx·a·r², fy·b·r²).
                 let mut jku = [0f64; 3]; let mut jkv = [0f64; 3];
                 if refine {
                     let (fx0, fy0, _, _) = ks[ci];
-                    jku[0] = fx0 * xc * inv; jkv[0] = fy0 * yc * inv;
+                    jku[0] = fx0 * a * d; jkv[0] = fy0 * b * d;
                     if kdim == 3 { jku[1] = 1.0; jkv[2] = 1.0; }
+                    if kdim == 2 { jku[1] = fx * a * r2; jkv[1] = fy * b * r2; }
                 }
                 // Huber IRLS weight.
                 let e = (ru*ru + rv*rv).sqrt();
@@ -398,8 +424,8 @@ pub fn bundle_adjust(
             if refine {
                 for g in 0..g_count {
                     let goff = group_off + g * kdim;
-                    tent_gpar[g][0] += dsol[goff];
-                    if kdim == 3 { tent_gpar[g][1] += dsol[goff+1]; tent_gpar[g][2] += dsol[goff+2]; }
+                    // Slots are contiguous per group; kdim picks how many (1/2/3).
+                    for a in 0..kdim { tent_gpar[g][a] += dsol[goff + a]; }
                 }
             }
             let mut tent_pts = pts.clone();
@@ -425,8 +451,9 @@ pub fn bundle_adjust(
     let cost_after = rms(&cams, &pts, &gpar);
 
     // Pack output: cameras (12 each), points (3 each), refined effective intrinsics
-    // (4 each), [cost_before, cost_after], then the RMS convergence trace.
-    let mut out = Vec::with_capacity(n_cam * 12 + n_pts * 3 + n_cam * 4 + 2 + trace.len());
+    // (5 each: fx,fy,cx,cy,k1 — k1 is the shared radial coeff, 0 unless refine_mode==3),
+    // [cost_before, cost_after], then the RMS convergence trace.
+    let mut out = Vec::with_capacity(n_cam * 12 + n_pts * 3 + n_cam * 5 + 2 + trace.len());
     for (r, t) in &cams {
         for row in r { for &v in row { out.push(v as f32); } }
         for &v in t { out.push(v as f32); }
@@ -435,8 +462,8 @@ pub fn bundle_adjust(
         for &v in pt { out.push(v as f32); }
     }
     for c in 0..n_cam {
-        let (fx, fy, cx, cy) = eff(c, &gpar);
-        out.push(fx as f32); out.push(fy as f32); out.push(cx as f32); out.push(cy as f32);
+        let (fx, fy, cx, cy, k1) = eff(c, &gpar);
+        out.push(fx as f32); out.push(fy as f32); out.push(cx as f32); out.push(cy as f32); out.push(k1 as f32);
     }
     out.push(cost_before as f32);
     out.push(cost_after as f32);
