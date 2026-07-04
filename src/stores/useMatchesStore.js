@@ -111,7 +111,16 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
         // Admitting the false ones corrupts SfM registration, so reject them here.
         const minInlierRatio = settings.minInlierRatio ?? 0.25
         const ratio = result ? result.inlierCount / Math.max(1, raw.length) : 0
-        if (result && result.inlierCount >= minMatches && ratio >= minInlierRatio) {
+        // R5: absolute-inlier override. A medium-overlap bridge pair (e.g. 120
+        // putatives / 27 inliers @ 0.23 across a repetitive façade) is real geometry
+        // — a solid RANSAC fit with dozens of inliers is not the ~12/100 spurious fit
+        // the ratio gate was built to kill. Accept on a high absolute inlier count
+        // even below the ratio floor; these bridges are the glue that closes loops
+        // and builds ≥3-view tracks. The ratio gate still guards the low-count junk.
+        const overrideInliers = settings.overrideInliers ?? 30
+        const ratioOk = ratio >= minInlierRatio
+        const overrode = !ratioOk && result != null && result.inlierCount >= overrideInliers
+        if (result && result.inlierCount >= minMatches && (ratioOk || overrode)) {
           entry.F = result.F
           entry.inlierCount = result.inlierCount
           entry.matches = raw
@@ -126,7 +135,8 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
         // the gate/threshold that decided the outcome — for every verified pair,
         // not just rejects (marginal accepts are the interesting ones to audit).
         log(`Match ${imgA.name} ↔ ${imgB.name} — ${raw.length} putatives → `
-          + `${result?.inlierCount ?? 0} inliers (ratio ${ratio.toFixed(2)}, gate ${minInlierRatio}), `
+          + `${result?.inlierCount ?? 0} inliers (ratio ${ratio.toFixed(2)}, gate ${minInlierRatio}`
+          + `${overrode ? `, ratio-override on ${result.inlierCount}≥${overrideInliers} inliers` : ''}), `
           + `RANSAC ${settings.ransacThreshPx ?? 2.0}px`, 'debug', 'Matching')
       } else {
         entry.matches = raw.map(m => [m.ia, m.ib])

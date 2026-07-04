@@ -157,8 +157,8 @@ mod tests {
         }
 
         let out = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &obs, 60, &[], 0);
-        let base = n_cam * 12 + n_pts * 3 + n_cam * 4;
-        // cameras + points + intrinsics + [cost_before, cost_after] + trace.
+        let base = n_cam * 12 + n_pts * 3 + n_cam * 5;
+        // cameras + points + intrinsics (5 each: fx,fy,cx,cy,k1) + [cost_before, cost_after] + trace.
         assert!(out.len() >= base + 2, "unexpected BA output length");
         let cost_before = out[base];
         let cost_after = out[base + 1];
@@ -227,7 +227,7 @@ mod tests {
         }
 
         let out = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &obs, 80, &[], 0);
-        let base = n_cam * 12 + n_pts * 3 + n_cam * 4;
+        let base = n_cam * 12 + n_pts * 3 + n_cam * 5;
         let cost_before = out[base];
         let cost_after = out[base + 1];
         let trace = &out[base + 2..];
@@ -291,14 +291,79 @@ mod tests {
 
         let out = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &obs, 100, &sensor_of_cam, 1);
         let intr_base = n_cam * 12 + n_pts * 3;
-        let cost_after = out[intr_base + n_cam * 4 + 1];
+        let cost_after = out[intr_base + n_cam * 5 + 1];
         // Refined focal is returned per camera; sharing ⇒ all equal, ≈ f_true.
         for c in 0..n_cam {
-            let fx = out[intr_base + c * 4] as f64;
-            let fy = out[intr_base + c * 4 + 1] as f64;
+            let fx = out[intr_base + c * 5] as f64;
+            let fy = out[intr_base + c * 5 + 1] as f64;
             assert!((fx - f_true).abs() / f_true < 0.01, "focal not recovered: cam {c} fx {fx} vs {f_true}");
             assert!((fy - fx).abs() < 1e-3, "fx and fy diverged: {fx} vs {fy}");
         }
         assert!(cost_after < 0.2, "BA did not fit the refined focal: {cost_after}px");
+    }
+
+    // Self-calibration (R6): a scene rendered with a known radial distortion k1, but
+    // BA seeded with a pinhole model (k1 = 0) and asked to refine one shared radial
+    // coefficient (refine_mode = 3). It must recover k1 and drive the fit to sub-pixel
+    // — the check the k1-refinement path exists to pass.
+    #[test]
+    fn bundle_adjust_refines_shared_k1() {
+        let (fx, fy, cx, cy) = (800.0_f64, 800.0_f64, 320.0_f64, 240.0_f64);
+        let k1_true = -0.15_f64; // barrel distortion
+        let gt_cams: Vec<(M3, V3)> = vec![
+            (so3_exp(&[0.0, 0.0, 0.0]),      [0.0, 0.0, 6.0]),
+            (so3_exp(&[0.10, -0.14, 0.03]),  [0.8, 0.15, 6.3]),
+            (so3_exp(&[-0.12, 0.10, -0.05]), [-0.7, 0.25, 5.7]),
+            (so3_exp(&[0.05, 0.18, 0.06]),   [0.3, -0.4, 6.2]),
+        ];
+        let n_cam = gt_cams.len();
+        let mut gt_pts: Vec<V3> = Vec::new();
+        for ix in -2..=2 {
+            for iy in -2..=2 {
+                gt_pts.push([ix as f64 * 0.7, iy as f64 * 0.7, 0.3 * ((ix + 2 * iy) as f64).sin()]);
+            }
+        }
+        let n_pts = gt_pts.len();
+
+        // Distorted projection with the true k1 (Brown r² model; matches project_k1).
+        let proj_d = |r: &M3, t: &V3, x: &V3| -> (f64, f64) {
+            let p = mat3_vec(r, x);
+            let (xc, yc, zc) = (p[0] + t[0], p[1] + t[1], p[2] + t[2]);
+            let (a, b) = (xc / zc, yc / zc);
+            let d = 1.0 + k1_true * (a * a + b * b);
+            (fx * a * d + cx, fy * b * d + cy)
+        };
+        let mut obs: Vec<f32> = Vec::new();
+        for (ci, (r, t)) in gt_cams.iter().enumerate() {
+            for (pi, x) in gt_pts.iter().enumerate() {
+                let (u, v) = proj_d(r, t, x);
+                obs.extend_from_slice(&[ci as f32, pi as f32, u as f32, v as f32]);
+            }
+        }
+        // Seed intrinsics with the true focal but no distortion; one shared sensor.
+        let mut k_flat: Vec<f32> = Vec::new();
+        for _ in 0..n_cam { k_flat.extend_from_slice(&[fx as f32, fy as f32, cx as f32, cy as f32]); }
+        let sensor_of_cam: Vec<i32> = vec![0; n_cam];
+
+        // Seed poses + points at ground truth (only the distortion is unmodelled).
+        let mut cam_flat: Vec<f32> = Vec::new();
+        for (r, t) in &gt_cams {
+            for row in r { for &v in row { cam_flat.push(v as f32); } }
+            for &v in t { cam_flat.push(v as f32); }
+        }
+        let mut pt_flat: Vec<f32> = Vec::new();
+        for x in &gt_pts { for &v in x { pt_flat.push(v as f32); } }
+
+        let out = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &obs, 100, &sensor_of_cam, 3);
+        let intr_base = n_cam * 12 + n_pts * 3;
+        let cost_before = out[intr_base + n_cam * 5];
+        let cost_after = out[intr_base + n_cam * 5 + 1];
+        assert!(cost_before > 1.0, "test setup too easy: before {cost_before}px");
+        // Refined k1 is returned per camera (index 4 of the 5-wide K); sharing ⇒ all equal.
+        for c in 0..n_cam {
+            let k1 = out[intr_base + c * 5 + 4] as f64;
+            assert!((k1 - k1_true).abs() < 0.02, "k1 not recovered: cam {c} k1 {k1} vs {k1_true}");
+        }
+        assert!(cost_after < 0.2, "BA did not fit the refined k1: {cost_after}px");
     }
 }

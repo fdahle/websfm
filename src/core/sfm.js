@@ -560,15 +560,97 @@ export async function reconstruct(input, hooks = {}) {
       m.set(kpIdx, pt)
     })
 
+    // Rebuild the whole keypoint→point index from the current tracks. Interim
+    // bundle adjustment (R3) replaces every point *object* (BA returns fresh
+    // structs), so the index — which holds references to the old objects — must be
+    // regenerated before registration continues against the tightened model.
+    const rebuildViewIndex = () => {
+      viewIndex.clear()
+      for (const pt of points3d) pt.views.forEach((kpIdx, uuid) => {
+        let m = viewIndex.get(uuid)
+        if (!m) { m = new Map(); viewIndex.set(uuid, m) }
+        m.set(kpIdx, pt)
+      })
+    }
+
+    // ── Bundle-adjustment / filtering settings + helpers (hoisted for R3) ────────
+    // These are needed *during* incremental registration now (interleaved BA), not
+    // just after it, so their config + the sensor-group map live here. The BA and
+    // track-filter functions themselves are hoisted `function` declarations below.
+    const {
+      baIterations = 30,
+      filterMaxReprojPx = 4.0,    // observation pruning threshold (px)
+      filterMinTriAngleDeg = 1.5, // drop points whose rays are too parallel
+      refineIntrinsics = 'none',  // self-calibration: 'none' | 'f' | 'f,cxcy' | 'f,k1'
+      interimBaEvery = 5,         // R3: run a global BA after this many new cameras
+      interimBaIterations = 12,   // fewer iters for the interim solves
+    } = settings
+
+    // Map each image's sensor to a stable integer so BA can share one focal across
+    // all cameras on the same sensor. Images without an assigned sensor get their
+    // own group (−1 sentinel); reconstruction still runs pinhole otherwise.
+    const sensorIntByUuid = new Map()
+    {
+      const idToInt = new Map()
+      for (const img of imgs) {
+        const sid = img.sensorId ?? null
+        if (sid == null) { sensorIntByUuid.set(img.uuid, -1); continue }
+        if (!idToInt.has(sid)) idToInt.set(sid, idToInt.size)
+        sensorIntByUuid.set(img.uuid, idToInt.get(sid))
+      }
+    }
+
+    // R4: fold one-endpoint-assigned matches into existing tracks. Only PnP-inlier
+    // correspondences extend tracks during registration, and matches touching an
+    // existing track are skipped for triangulation — so an observation whose *other*
+    // endpoint already belongs to a point is simply lost, leaving tracks 2-view. For
+    // every verified match between two registered images where exactly one endpoint
+    // is assigned, add the unassigned endpoint's observation to that point when it
+    // reprojects within `gate`. Directly raises the ≥3-view share and BA conditioning.
+    const foldOneEndpointMatches = (gate) => {
+      let folded = 0
+      for (const entry of donePairs) {
+        if (!registeredUuids.has(entry.idA) || !registeredUuids.has(entry.idB)) continue
+        const mapA = viewIndex.get(entry.idA)
+        const mapB = viewIndex.get(entry.idB)
+        for (const [ia, ib] of entry.matches) {
+          const ptA = mapA?.get(ia)
+          const ptB = mapB?.get(ib)
+          // Only the exactly-one-assigned case: both/neither are handled elsewhere
+          // (extension, triangulation, retriangulation, split-track merge).
+          if (!!ptA === !!ptB) continue
+          const pt = ptA || ptB
+          const tgtUuid = ptA ? entry.idB : entry.idA
+          const tgtKp = ptA ? ib : ia
+          if (pt.views.has(tgtUuid)) continue // image already in this track → skip
+          const cam = cameras.get(tgtUuid)
+          const kp = imageByUuid(tgtUuid)?.keypoints?.[tgtKp]
+          if (!cam || !kp) continue
+          if (reprojErr(cam, pt.x, pt.y, pt.z, kp) > gate) continue
+          addView(pt, tgtUuid, tgtKp) // updates viewIndex (mapA/mapB mutate in place)
+          folded++
+        }
+      }
+      return folded
+    }
+
     // ── Incremental registration ───────────────────────────────────────────
-    // `reprjThreshold` is the *target* PnP inlier gate, but a fixed pixel gate
-    // tighter than the model's own reprojection error rejects every otherwise-good
-    // pose — you can't fit new observations to within 4px when the existing points
-    // already sit at ~10px. So the gate adapts per pass to the current model
-    // (p95 reprojection), clamped to [reprjThreshold, reprjThreshold·maxGateScale].
-    // This lets registration proceed on a noisy seed; the final bundle adjust
-    // tightens everything afterwards. As the seed improves the gate self-tightens.
-    const { minMatchesForRegistration = 12, reprjThreshold = 4.0, maxGateScale = 8 } = settings
+    // R2: the PnP inlier gate is now *fixed* (reprjThreshold, capped at a small
+    // multiple), not an adaptive gate that tracked the model p95. The old adaptive
+    // gate escalated exactly when the model was worst — a bad seed inflated p95, the
+    // gate loosened to match, and every subsequent pose was admitted at that loose
+    // gate (32px on baseline B1), poisoning the model further. With R3's interleaved
+    // bundle adjustment keeping the model tight between passes, images that can't
+    // clear a tight gate simply wait for a later pass rather than being let in loose.
+    const {
+      minMatchesForRegistration = 12,
+      reprjThreshold = 4.0,
+      pnpGateScale = 2,          // fixed gate = reprjThreshold × min(pnpGateScale, 2)
+      minPnpInliers = 15,        // R1: absolute PnP-inlier floor to accept a pose
+      minPnpInlierRatio = 0.15,  // R1: …and a fraction of the correspondences
+    } = settings
+    // Fixed PnP gate for the whole run (never chases the model p95 upward).
+    const pnpThresh = reprjThreshold * Math.max(1, Math.min(pnpGateScale, 2))
     const registeredUuids = new Set([bestPair.idA, bestPair.idB])
 
     // Total inliers linking `uuid` to the already-registered set (ordering heuristic).
@@ -624,6 +706,7 @@ export async function reconstruct(input, hooks = {}) {
     const deferReasons = new Map() // uuid → last reason it failed to register
     let progressed = true
     let pass = 0
+    let registeredSinceBA = 0 // R3: cameras added since the last interim bundle adjust
     while (progressed) {
       progressed = false
       pass++
@@ -631,14 +714,11 @@ export async function reconstruct(input, hooks = {}) {
         .filter((img) => !registeredUuids.has(img.uuid))
         .sort((a, b) => countMatchesToRegistered(b.uuid) - countMatchesToRegistered(a.uuid))
 
-      // Adaptive PnP gate for this pass, driven by the current model's spread.
+      // R2: gate is fixed (pnpThresh, set once above); log it against the model p95
+      // so a diverging model is still visible without loosening the gate to match it.
       const modelStats = modelReprojStats()
-      const pnpThresh = Math.min(
-        reprjThreshold * maxGateScale,
-        Math.max(reprjThreshold, modelStats.p95 || reprjThreshold),
-      )
       log(`Reconstruction: registration pass ${pass} — ${remaining.length} image(s) remaining `
-        + `(PnP gate ${pnpThresh.toFixed(1)}px, model p95 ${modelStats.p95.toFixed(1)}px)`, 'debug', 'Reconstruction')
+        + `(fixed PnP gate ${pnpThresh.toFixed(1)}px, model p95 ${modelStats.p95.toFixed(1)}px)`, 'debug', 'Reconstruction')
 
       for (const img of remaining) {
         const K = Kmap.get(img.uuid)
@@ -656,8 +736,8 @@ export async function reconstruct(input, hooks = {}) {
           // Diagnostic: the solver returns nothing when it can't gather ≥6 inliers
           // at the gate. Re-probe at looser thresholds — if a 2×/4× gate suddenly
           // finds inliers, the pose is recoverable and the model points are just
-          // noisier than the gate (improve the seed / raise maxGateScale). If even
-          // 4× finds nothing, the correspondences themselves are wrong.
+          // noisier than the gate (the interim BA should tighten it on a later pass).
+          // If even 4× finds nothing, the correspondences themselves are wrong.
           const probe = []
           for (const thr of [pnpThresh * 2, pnpThresh * 4]) {
             const p = await solvePnp(pts3, pts2, K, { ransacThreshPx: thr, maxIters: 200 })
@@ -670,9 +750,17 @@ export async function reconstruct(input, hooks = {}) {
           log(`Reconstruction: ${reason} for ${img.name}`, 'warn', 'Reconstruction')
           continue
         }
+        // R1: honest acceptance. The solver only needs ≥6 inliers to return a pose,
+        // but a pose supported by a handful of its correspondences (IMG_4315: 6/137
+        // = 4% on baseline B1) is a coincidence fit that poisons the model. Require
+        // both an absolute floor AND a fraction of the correspondences; deferring is
+        // cheap because the sweep loop retries this image on every later pass.
         const inlierCount = pnp.inlierMask.filter((v) => v > 0.5).length
-        if (inlierCount < 6) {
-          const reason = `too few PnP inliers (${inlierCount}/${pts3.length}, gate ${pnpThresh.toFixed(1)}px)`
+        const minInliersNeeded = Math.max(minPnpInliers, Math.ceil(minPnpInlierRatio * pts3.length))
+        if (inlierCount < minInliersNeeded) {
+          const reason = `too few PnP inliers (${inlierCount}/${pts3.length} = `
+            + `${(100 * inlierCount / pts3.length).toFixed(0)}%, need ≥${minInliersNeeded} `
+            + `[max(${minPnpInliers}, ${(100 * minPnpInlierRatio).toFixed(0)}%)], gate ${pnpThresh.toFixed(1)}px)`
           deferReasons.set(img.uuid, reason)
           log(`Reconstruction: ${reason} for ${img.name}`, 'warn', 'Reconstruction')
           continue
@@ -774,7 +862,33 @@ export async function reconstruct(input, hooks = {}) {
         const pct = triTotal ? (100 * added / triTotal).toFixed(0) : '0'
         log(`Reconstruction: ${img.name} — extended ${extended} track(s), `
           + `+${added} new points (${added}/${triTotal} survived cheirality, ${pct}%)`, 'debug', 'Reconstruction')
+
+        // R3: interleaved bundle adjustment. Registering all cameras in one sweep
+        // with zero intermediate BA lets the model drift far from the optimum before
+        // the single global solve ever runs (B1: pre-BA p95 282px, then BA stuck in a
+        // bad minimum). COLMAP-style, run a global BA + a track-filter pass after every
+        // `interimBaEvery` new cameras, then continue the sweep against the tightened
+        // model — so later PnP registers at the *tight* gate and the final BA starts
+        // near the optimum. Poses/points only here (no self-calibration on the pre-
+        // filter mess — that's deferred to the post-filter passes, R6).
+        registeredSinceBA++
+        if (baIterations > 0 && interimBaEvery > 0 && registeredSinceBA >= interimBaEvery
+            && cameras.size >= 3 && points3d.length >= 10) {
+          await runBundleAdjust(`interim BA (${cameras.size} cameras)`, interimBaIterations, 'none')
+          const f = filterTracks({ maxReprojPx: filterMaxReprojPx * 2, minTriAngleDeg: filterMinTriAngleDeg })
+          rebuildViewIndex() // BA + filter replaced/dropped point objects; refresh first
+          const folded = foldOneEndpointMatches(filterMaxReprojPx)
+          log(`Reconstruction: interim BA cleanup — filtered ${f.obsRemoved} obs + ${f.ptsRemoved} points, `
+            + `folded ${folded} track observation(s); ${points3d.length} points`, 'debug', 'Reconstruction')
+          registeredSinceBA = 0
+        }
       }
+
+      // R4: after each sweep, fold every one-endpoint-assigned match between two
+      // registered images into its existing track (raises the ≥3-view share).
+      const foldedPass = foldOneEndpointMatches(pnpThresh)
+      if (foldedPass) log(`Reconstruction: pass ${pass} folded ${foldedPass} one-endpoint `
+        + `observation(s) into existing tracks`, 'debug', 'Reconstruction')
     }
 
     // Report any images that never registered, with the reason they last failed
@@ -806,31 +920,15 @@ export async function reconstruct(input, hooks = {}) {
     markStage('registration')
 
     // ── Bundle adjustment + track filtering (Phase 2 + 3) ────────────────────
-    const {
-      baIterations = 30,
-      filterMaxReprojPx = 4.0,   // observation pruning threshold (px)
-      filterMinTriAngleDeg = 1.5, // drop points whose rays are too parallel
-      refineIntrinsics = 'none', // self-calibration: 'none' | 'f' | 'f,cxcy'
-    } = settings
-
-    // Map each image's sensor to a stable integer so BA can share one focal across
-    // all cameras on the same sensor. Images without an assigned sensor get their
-    // own group (−1 sentinel below); reconstruction still runs pinhole otherwise.
-    const sensorIntByUuid = new Map()
-    {
-      const idToInt = new Map()
-      for (const img of imgs) {
-        const sid = img.sensorId ?? null
-        if (sid == null) { sensorIntByUuid.set(img.uuid, -1); continue }
-        if (!idToInt.has(sid)) idToInt.set(sid, idToInt.size)
-        sensorIntByUuid.set(img.uuid, idToInt.get(sid))
-      }
-    }
+    // (BA settings + the sensor-group map are hoisted above the registration loop
+    // so R3's interleaved solves can reuse them.)
 
     // Run one global bundle adjustment, apply it (guarded: never commit a result
-    // that worsens the cost), and log RMS / convergence trace. Reused for the
-    // initial solve and each post-filter re-solve.
-    async function runBundleAdjust(label, iters) {
+    // that worsens the cost), and log RMS / convergence trace. Reused for the interim
+    // (R3) solves and each post-filter re-solve. `refineMode` overrides `refineIntrinsics`
+    // per call: interim/pre-filter solves pass 'none' (self-calibration against the
+    // pre-filter mess drifted cx/cy 180px on B1), only post-filter passes refine.
+    async function runBundleAdjust(label, iters, refineMode = refineIntrinsics) {
       if (!(cameras.size >= 2 && points3d.length >= 10 && iters > 0)) {
         log(`Reconstruction: ${label} skipped (cameras=${cameras.size}, `
           + `points=${points3d.length}, iters=${iters})`, 'debug', 'Reconstruction')
@@ -855,7 +953,7 @@ export async function reconstruct(input, hooks = {}) {
         + `${observations.length} observations, ${iters} iters`, 'info', 'Reconstruction')
 
       const result = await bundleAdjust(camList, kList, points3d, observations,
-        { maxIters: iters, refineIntrinsics, sensorOfCam })
+        { maxIters: iters, refineIntrinsics: refineMode, sensorOfCam })
       if (!result) {
         log(`Reconstruction: ${label} returned no result (skipped)`, 'warn', 'Reconstruction')
         return
@@ -881,7 +979,7 @@ export async function reconstruct(input, hooks = {}) {
         const old = cameras.get(uuid)
         // Merge refined intrinsics into K (keeps impliedFilmWidthMm / source meta)
         // so subsequent BA passes and reprojection stats use the calibrated focal.
-        const K = refineIntrinsics !== 'none' && result.intrinsics
+        const K = refineMode !== 'none' && result.intrinsics
           ? { ...old.K, ...result.intrinsics[ci] }
           : old.K
         cameras.set(uuid, { ...old, ...result.cameras[ci], K })
@@ -891,7 +989,7 @@ export async function reconstruct(input, hooks = {}) {
       // Self-calibration report: one line per sensor group (before → after focal +
       // the implied film width, tying back to the Q4 sanity check). Never written
       // back to the sensor table — the user decides whether to adopt it.
-      if (refineIntrinsics !== 'none' && result.intrinsics) {
+      if (refineMode !== 'none' && result.intrinsics) {
         const seen = new Set()
         uuidList.forEach((uuid, ci) => {
           const g = sensorOfCam[ci]
@@ -902,11 +1000,14 @@ export async function reconstruct(input, hooks = {}) {
           let implied = ''
           const w0 = kList[ci].impliedFilmWidthMm
           if (w0 != null && fx1) implied = `, implied film width ${w0.toFixed(0)}mm → ${(w0 * fx0 / fx1).toFixed(0)}mm`
-          const cxcy = refineIntrinsics === 'f,cxcy'
+          const cxcy = refineMode === 'f,cxcy'
             ? `, cx ${kList[ci].cx.toFixed(1)}→${result.intrinsics[ci].cx.toFixed(1)}, `
               + `cy ${kList[ci].cy.toFixed(1)}→${result.intrinsics[ci].cy.toFixed(1)}` : ''
+          // R6: report the refined shared radial coefficient (copy into the sensor table's k1).
+          const kdist = refineMode === 'f,k1' && result.intrinsics[ci].k1 != null
+            ? `, k1 ${result.intrinsics[ci].k1.toFixed(5)}` : ''
           log(`Reconstruction: ${label} self-calibration — sensor group ${g}: `
-            + `fx ${fx0.toFixed(1)} → ${fx1.toFixed(1)} (${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%)${cxcy}${implied}`,
+            + `fx ${fx0.toFixed(1)} → ${fx1.toFixed(1)} (${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%)${cxcy}${kdist}${implied}`,
             'info', 'Reconstruction')
         })
         log(`Reconstruction: ${label} self-calibration is weakly observed on short/single strips `
@@ -990,7 +1091,10 @@ export async function reconstruct(input, hooks = {}) {
     if (cameras.size >= 2 && points3d.length >= 10 && baIterations > 0) {
       onProgress?.(imgs.length - 1, imgs.length, 'Bundle adjustment…')
 
-      await runBundleAdjust('bundle adjustment', baIterations)
+      // Pre-filter solves stay pinhole ('none'): self-calibration against the
+      // unfiltered outlier soup drifts cx/cy badly (R6). Intrinsics are refined only
+      // in the post-filter passes below, once the gross junk is gone.
+      await runBundleAdjust('bundle adjustment', baIterations, 'none')
       logOutlierShare('pre-filter residuals')
 
       // A3: retriangulate missed matches + merge split tracks under the improved
@@ -1010,7 +1114,7 @@ export async function reconstruct(input, hooks = {}) {
             + `${points3d.length} points`, 'info', 'Reconstruction')
           log(`Reconstruction: track lengths (2/3/4+ view) ${before.t2}/${before.t3}/${before.t4} → `
             + `${after.t2}/${after.t3}/${after.t4}`, 'info', 'Reconstruction')
-          await runBundleAdjust('post-retriangulation bundle adjustment', baIterations)
+          await runBundleAdjust('post-retriangulation bundle adjustment', baIterations, 'none')
         } else {
           log('Reconstruction: retriangulation found no missed structure', 'debug', 'Reconstruction')
         }
@@ -1031,6 +1135,35 @@ export async function reconstruct(input, hooks = {}) {
         + `points=${points3d.length}, iters=${baIterations})`, 'debug', 'Reconstruction')
     }
     markStage('bundleAdjust')
+
+    // Per-camera median-residual table (flags cameras > 2× the global median). The
+    // global stats hide a handful of badly-placed cameras that each still triangulate
+    // hundreds of points at their own bad quality (the pass-2 cameras on B1); this
+    // surfaces them by name so a bad registration is diagnosable at a glance.
+    {
+      const perCam = new Map() // uuid → residuals[]
+      for (const pt of points3d) pt.views.forEach((kpIdx, uuid) => {
+        const cam = cameras.get(uuid), img = imageByUuid(uuid)
+        const kp = img?.keypoints?.[kpIdx]
+        if (!cam || !kp) return
+        const proj = projectPoint(cam, pt.x, pt.y, pt.z)
+        if (!proj) return
+        if (!perCam.has(uuid)) perCam.set(uuid, [])
+        perCam.get(uuid).push(Math.hypot(proj.u - kp.x, proj.v - kp.y))
+      })
+      const globalMed = numStats(modelResiduals()).median || 0
+      const rows = [...perCam.entries()]
+        .map(([uuid, rs]) => ({ uuid, name: imageByUuid(uuid)?.name ?? uuid, s: numStats(rs) }))
+        .sort((a, b) => b.s.median - a.s.median)
+      const flagged = rows.filter((r) => globalMed > 0 && r.s.median > 2 * globalMed)
+      log(`Reconstruction: per-camera residuals — global median ${globalMed.toFixed(2)}px; `
+        + `${flagged.length}/${rows.length} camera(s) over 2× (${(2 * globalMed).toFixed(2)}px)`,
+        flagged.length ? 'warn' : 'info', 'Reconstruction')
+      for (const r of flagged) {
+        log(`Reconstruction:   ⚠ ${r.name} — median ${r.s.median.toFixed(2)}px, `
+          + `p95 ${r.s.p95.toFixed(2)}px (${r.s.count} obs)`, 'warn', 'Reconstruction')
+      }
+    }
 
     // Track-length histogram: points seen by only 2 images are the fragile ones;
     // a model dominated by 2-view tracks is weakly constrained.

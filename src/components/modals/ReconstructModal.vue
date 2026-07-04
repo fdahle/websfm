@@ -1,5 +1,6 @@
 <script setup>
 import { ref } from 'vue'
+import GlossaryTerm from '../help/GlossaryTerm.vue'
 
 const emit = defineEmits(['close', 'run'])
 
@@ -7,7 +8,7 @@ const settings = ref({
   minMatchesForRegistration: 20,
   reprjThreshold: 4.0,
   baIterations: 30,
-  refineIntrinsics: 'none',   // self-calibration in BA: 'none' | 'f' | 'f,cxcy'
+  refineIntrinsics: 'none',   // self-calibration in BA: 'none' | 'f' | 'f,cxcy' | 'f,k1'
 })
 
 function run() {
@@ -41,7 +42,10 @@ function run() {
         <div class="section-sep"></div>
 
         <div class="field">
-          <label class="field-label" for="reprj">Reprojection threshold (PnP RANSAC)</label>
+          <label class="field-label" for="reprj">
+            <GlossaryTerm id="reprojection-error">Reprojection threshold</GlossaryTerm>
+            (PnP RANSAC)
+          </label>
           <div class="input-row">
             <input
               id="reprj"
@@ -57,7 +61,9 @@ function run() {
         <div class="section-sep"></div>
 
         <div class="field">
-          <label class="field-label" for="baIter">Bundle adjustment iterations</label>
+          <label class="field-label" for="baIter">
+            <GlossaryTerm id="bundle-adjustment">Bundle adjustment</GlossaryTerm> iterations
+          </label>
           <input
             id="baIter"
             v-model.number="settings.baIterations"
@@ -75,11 +81,13 @@ function run() {
             <option value="none">Off (use sensor table)</option>
             <option value="f">Focal length</option>
             <option value="f,cxcy">Focal + principal point</option>
+            <option value="f,k1">Focal + radial k1</option>
           </select>
           <span class="field-hint">
-            Lets bundle adjustment solve one shared focal per sensor. Weakly observed
-            on short/single strips — the refined value is logged, never written back to
-            the sensor table.
+            Lets bundle adjustment solve one shared focal (and optionally principal
+            point or a radial k1) per sensor, in the post-filter passes only. Weakly
+            observed on short/single strips — the refined value is logged, never written
+            back to the sensor table.
           </span>
         </div>
       </div>
