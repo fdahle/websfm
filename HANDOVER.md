@@ -23,6 +23,77 @@ order within a track; tracks A → F are the priority, P/I as capacity allows.
 
 ## Done log (most recent first)
 
+- **2026-07-04 · P2 parallel + preselected matching** — matching was serial O(N²).
+  (1) **Concurrency-safe match store**: `useMatchesStore` now `shallowRef` + in-place
+  mutate + `triggerRef` (was `matchStore.value = new Map(...)` on every write, which
+  races under concurrency — a snapshot clobbers a concurrent set). `descCache` caches
+  the in-flight *promise* so shared images load once. (2) **Parallel `matchAll`**: a
+  concurrency-limited pool of `POOL_SIZE` drain loops over a shared cursor; POOL_SIZE
+  raised `min(2,…)` → `min(8, hc−1)`. Cancellation is cooperative (stop pulling).
+  (3) **Preselection**: new `preselect` strategy + pure `core/preselect.js`
+  (`preselectPairs` — k-nearest by camera position); `matchAll` prunes the exhaustive
+  set using imported-pose positions (`positionsByUuid`), keeps pairs with an
+  unpositioned endpoint, logs `N/M kept, K skipped`. Modal exposes it + a
+  "neighbours per image" knob. Tests: `preselect.test.js`. **Owed:** GPS-from-EXIF
+  fallback when no poses imported; a thumbnail-overlap preselector for the
+  no-pose case; and a real multi-image timing check (can't run browser here).
+- **2026-07-04 · A3 retriangulation + track merging** — post-BA structure recovery
+  in `core/sfm.js`, factored into two pure exported functions: `retriangulatePairs`
+  (matches with *both* keypoints unassigned → triangulate with the improved poses,
+  keep if in front of both cams + reprojects ≤ `filterMaxReprojPx`; injected
+  `triangulate` = WASM DLT) and `mergeSplitTracks` (a match whose endpoints belong
+  to two *different* points = the same feature split → fold together when the union
+  is consistent and reprojects ≤ gate). Wired into `reconstruct` right after the
+  first global BA, then one more BA; logs the 2/3/4+ track-histogram delta. Unit-
+  tested directly (`sfm.test.js`: add + gate-reject + merge + conflict-skip). Note:
+  registration already triangulates most neither-assigned matches under clean data,
+  so A3's real yield is on **noisy/real** sets (cheirality misses under the noisy
+  seed, plus init-pair matches never revisited) — validate on the CA…V run.
+- **2026-07-04 · F1 export dialogs + GeoTIFF** — each export now goes through a
+  reusable `ExportModal.vue` (`kind` = cloud|model|dem|ortho) with a format select
+  + a few settings (some disabled placeholders for later: LAS, COLMAP, hillshade,
+  JPEG, compression, downsample). New dependency-free **GeoTIFF** writer
+  `core/geotiff.js` (`writeGeoTiff` + `geoKeysForEpsg`; LE, uncompressed, single
+  strip, ModelPixelScale/Tiepoint + GeoKeyDirectory, GDAL_NODATA); exporters gained
+  `demToGeoTiff` (float32, NaN→nodata) + `orthoToGeoTiff` (RGBA + alpha extra-
+  sample), and `cloudToPly` now takes `{ binary, color }`. `App.vue` opens the modal
+  per command and `onExportRun` dispatches by format; CRS→EPSG code parsed from the
+  working CRS for the GeoKeys / `.prj`. Formats: cloud PLY binary/ascii, model JSON
+  (±tracks), DEM GeoTIFF or `.asc`, ortho GeoTIFF or PNG+`.wld`. Tests:
+  `geotiff.test.js` (parse-back) + `exporters.test.js`; build green.
+- **2026-07-04 · F1 exports (the tool finally has an exit)** — pure
+  `core/exporters.js`: `cloudToPly` (binary LE, sparse+dense), `reconstructionToJson`
+  (SfM cameras+centres+tracks), `demToAsciiGrid` (ESRI .asc, NaN→NODATA),
+  `rasterWorldFile` (.wld). UI-layer `utils/download.js` (`downloadBlob`,
+  `dataUrlToBlob`) does the Blob/anchor download. Ribbon's pre-scaffolded
+  export-cloud/dem/ortho are now enabled (+ new "Model JSON"; `orthoReady` gate
+  added); handlers in `App.vue`.
+- **2026-07-04 · A4 radial/tangential distortion (undistort-at-ingest)** — new pure
+  `core/distortion.js` (Brown–Conrady forward + iterative inverse, k1,k2,k3,p1,p2;
+  round-trip < 0.05px tested). Sparse: `sfm.js` undistorts keypoints once after the
+  K map is built, so init/PnP/triangulation/BA stay pinhole (the init-pair `F` is
+  still the distorted-space fit — BA corrects it). Dense/ortho: `compute.worker.js`
+  `undistortRaster` remaps each working-res source raster (forward map + bilinear)
+  and `undistortMaskLut` moves masks to match, in `getRaster`; DEM + ortho inherit
+  it for free (ortho reuses the dense maps' undistorted RGB). Coeffs flow via the
+  store (`sensor.k1..p2` to reconstruct, per-image `dist` to dense). **The sensor
+  table already had k1..p2 columns + persistence** — only the compute path was
+  missing. Tests: `distortion.test.js` + an sfm end-to-end test (corrected < 1px,
+  uncorrected > 2× worse). No WASM change. Next distortion step (optional): let A2
+  refine k1 (`refineIntrinsics: 'f,k1'`) now that the plumbing exists.
+- **2026-07-03 · A2 intrinsics self-calibration** — `crates/reconstruction/src/
+  bundle.rs` generalised: points are still Schur-eliminated, but the reduced
+  system now carries optional **shared per-sensor intrinsic** blocks (focal scale
+  `s`, and `dcx,dcy` for `f,cxcy`) with analytic Jacobians. New wasm-bindgen args
+  `sensor_of_cam` + `refine_mode`; output now includes refined per-camera K.
+  Wired through `core/reconstruction.js` `bundleAdjust`, `sfm.js` (sensor→group
+  map, refined K applied back to cameras, before→after focal + implied-film-width
+  log with the weak-observability caveat), `useReconstructionStore` (passes
+  `sensorId`), and the reconstruct modal (`refineIntrinsics: none|f|f,cxcy`,
+  default off). Tests: `bundle_adjust_refines_shared_focal` (Rust, recovers a
+  1.1× focal <1%), a JS boundary test in `reconstruction.test.js`, and an
+  off-path no-op test. WASM rebuilt. **Mode-0 behaviour is byte-unchanged (the
+  existing pose-only tests still pass).**
 - **2026-07-03 · A1 LM bundle adjustment** — found already implemented
   (`crates/reconstruction/src/bundle.rs`: LM + Schur complement + analytic
   Jacobians + adaptive Huber; wired via `core/reconstruction.js` `bundleAdjust`).
@@ -94,62 +165,30 @@ signature (`bundle_adjust` → `core/reconstruction.js` `bundleAdjust`), returns
 in `sfm.test.js` (the old integration test only ran `baIterations: 0`). The WASM
 was already rebuilt (`src/wasm/reconstruction/*` in the working tree).
 
-### A2 — Optional intrinsics refinement in BA (self-calibration) ← **next accuracy step**
-Now that A1 is in place, add optional shared-per-sensor parameters to the LM problem:
-`refineIntrinsics: 'none' | 'f' | 'f,cxcy'` (setting, default `'none'`,
-exposed in the reconstruct modal's advanced section).
-- All images sharing a sensor share one f (and optionally cx,cy) — one extra
-  1–3 column block in the Jacobian, shared across those cameras.
-- Log before → after fx and the **implied film width** (ties to Q4): if the
-  user's 154mm/0.025mm entry is wrong, refinement should pull fx toward
-  ~6700 and the log makes that visible and physically interpretable.
-- Caveat to encode in the log: a 5-image single strip observes f weakly;
-  recommend ≥2° tilt variation / longer strips for trustworthy values. Never
-  silently write the refined value back to the sensor table — log it and let
-  the user update the table.
-- Test: synthetic scene generated with fx′ = 1.1×fx prior — refinement must
-  recover fx′ within 1%.
+### A2 — Optional intrinsics refinement in BA (self-calibration) — ✅ DONE (2026-07-03, see Done log)
+Shipped: `refineIntrinsics: 'none' | 'f' | 'f,cxcy'` in the reconstruct modal
+(default off), shared per-sensor focal (+cx,cy) refined inside the LM problem,
+before→after focal + implied-film-width logging with the weak-strip caveat.
+**Runtime validation still owed on the CA…V set**: does refined-f pull toward
+~6700 and reduce the dome/tilt z-spread? That evidence decides whether A4
+(radial) and F4 (fiducials) are still needed — the next accuracy step is now
+**A3 (retriangulation/track-merging)**, which is pure JS.
 
-### A3 — Retriangulation + track merging after BA
-Directly attacks the 88%-2-view-track problem; standard COLMAP practice.
-After the first global BA in `core/sfm.js` (before the filter/re-BA loop):
-1. **Retriangulate**: sweep all verified pair matches; for matches where
-   *neither* endpoint belongs to a point (they were skipped or failed
-   cheirality under the early, noisier poses), triangulate with the current
-   (post-BA) poses and add points that pass cheirality + reprojection ≤
-   `filterMaxReprojPx` in both views.
-2. **Merge**: matches where both endpoints belong to *different* points are
-   the same physical point split in two. Merge when the union's observations
-   all reproject within the gate against the merged (re-triangulated)
-   position; keep the union's views map; drop the loser.
-3. Run one more BA (A1) after.
-- Reuse `viewIndex`/`addView`; keep everything inside `sfm.js` (pure).
-- Expected on the test set: total points up (3k → noticeably more), and the
-  **×3-view+ share up** (baseline 354/3066 ≈ 12%); log the histogram delta.
-- Tests in `sfm.test.js`: synthetic 3-view scene where pair (A,C) matches are
-  withheld from init but present in `donePairs` — retriangulation must
-  produce 3-view tracks; a split-track fixture must merge.
+### A3 — Retriangulation + track merging after BA — ✅ DONE (2026-07-04, see Done log)
+Shipped as pure `retriangulatePairs` + `mergeSplitTracks` in `sfm.js`, run after the
+first global BA + one more BA; logs the 2/3/4+ histogram delta. **Runtime yield
+still owed on CA…V**: on clean synthetic data registration already triangulates
+most neither-assigned matches, so the ×3-view lift shows up on noisy/real sets —
+confirm the baseline (325 ×3-view / 0 ×4+) actually rises there. Possible follow-up
+if it under-delivers: also fold the *one-endpoint-assigned* (extension) case here,
+and re-triangulate merged points from all views rather than reusing the winner's xyz.
 
-### A4 — Radial distortion support (undistort-at-ingest design)
-Scanned film + old lenses ⇒ radial distortion the pinhole model can't absorb;
-it's a classic source of dome-shaped DEMs and cross-view depth disagreement.
-Design decision: **undistort pixel data and keypoints once, keep every
-downstream consumer pinhole** — do NOT thread k1 through the three PatchMatch
-kernels (WGSL/JS/Rust homography warps assume pinhole; changing them breaks
-the lockstep invariant for little gain).
-- Add `k1` (Brown, optionally `k2`) to the sensor table + `Intrinsics` type.
-- Sparse: undistort keypoint coordinates (iterative inverse, ~3 Newton steps)
-  in `sfm.js`/`reconstruct` marshalling before use, when the sensor has k≠0.
-- Dense/ortho: undistort during `rasterize()` in `compute.worker.js` (inverse
-  map + bilinear sample — cheap at working scale) so depth maps, fusion, DEM,
-  ortho all stay pinhole.
-- Where does k1 come from? Manual sensor-table entry now; A2's machinery can
-  optionally refine it later (`'f,k1'`) once the undistort plumbing exists.
-- Tests: round-trip distort→undistort ≤ 0.05px over the frame; sfm synthetic
-  with known k1.
-- This is the largest A-item; fine to defer behind A1–A3 and re-evaluate — if
-  Q4/A2 show the *focal* was the whole problem, k1 may be unnecessary for the
-  metric-camera Antarctic sets.
+### A4 — Radial/tangential distortion — ✅ DONE (2026-07-04, see Done log)
+Undistort-at-ingest shipped (Brown–Conrady k1..p2, `core/distortion.js`). Sparse
+keypoints + dense/ortho rasters are undistorted once; everything downstream stays
+pinhole. **Runtime validation owed on real distorted imagery** (drone/phone set):
+does it remove the dome and lift the dense photoconsistency? Optional follow-up:
+A2 `refineIntrinsics: 'f,k1'` to *solve* for k1 instead of hand-entering it.
 
 ### A5 — Per-depth-map geometric consistency filter (dense)
 The original MVS design listed a forward-backward reprojection check that was
@@ -174,18 +213,13 @@ adapter. Flip the modal default to on-when-adapter-exists (label "Use GPU
 the first image. Keep opt-out. Needs a browser check (Safari + Chrome) —
 flag for the user if this environment can't run one.
 
-### P2 — Parallel + preselected matching
-Exhaustive matching is the felt bottleneck vs Metashape (see TODO backlog for
-full context; SIMD is already done):
-1. Fix the two concurrency hazards blocking pool parallelism: matches store
-   replaces the whole Map per pair (mutate-in-place + targeted reactivity),
-   and confirm `useImagesStore.sync()` coalescing suffices for concurrent
-   completions. Then raise `POOL_SIZE` (computeClient) toward
-   `hardwareConcurrency − 1`.
-2. Pair preselection: match heavily downscaled thumbnails (or use imported
-   pose/GPS when present) to score pair overlap; run the full matcher only on
-   plausible pairs. For ordered flight strips this cuts O(N²) to ~O(N·k).
-   Log skipped pairs as `skipped (preselection)` so the count is auditable.
+### P2 — Parallel + preselected matching — ✅ DONE (2026-07-04, see Done log)
+Shipped: concurrency-safe match store (shallowRef + triggerRef), parallel
+`matchAll` (POOL_SIZE drains), and pose-proximity preselection (`core/preselect.js`
++ modal strategy). Note: `useImagesStore.sync()` was *not* a hazard here — matching
+writes matches, not the image doc. **Remaining:** GPS-from-EXIF positions when no
+poses are imported; a thumbnail-overlap preselector for the no-pose/no-GPS case
+(the universal fallback); real multi-image (50–500) timing validation.
 
 ### P3 — OPFS quantize + spill of depth maps (carried from previous handover)
 Deferred because it needs browser runtime validation. Full design intent:
@@ -210,16 +244,13 @@ matching throughput. Design in its own right when picked up.
 
 ## F. Feature track (new capabilities)
 
-### F1 — Exports (highest user value per effort)
-Everything currently lives and dies in the browser. Add, in order:
-- **PLY** (binary little-endian) export for sparse + dense clouds — trivial
-  writer, `core/` pure function → Blob download in the UI layer.
-- **DEM/ortho GeoTIFF** (or PNG + world file + `.prj` as the cheap first
-  step). When a georef fit exists, write the project CRS; else local frame
-  with a clear filename suffix. A minimal single-strip GeoTIFF writer
-  (uncompressed, tiled off) is ~200 lines and dependency-free; a UI-layer
-  dependency is also acceptable per the layering rules if preferred.
-- Camera poses / sparse tracks as JSON (interchange with external tools).
+### F1 — Exports — ✅ DONE (2026-07-04, see Done log)
+Shipped: export dialogs (`ExportModal.vue`) + formats — cloud PLY (binary/ascii),
+model JSON, DEM GeoTIFF/`.asc`, ortho GeoTIFF/PNG+`.wld`, all georeferenced.
+**Polish left:** GeoTIFF compression (writer is uncompressed) + tiling for very
+large rasters; proper **WKT** in `.prj` (currently raw proj4/EPSG); the disabled
+modal placeholders (LAS, COLMAP, hillshade, JPEG, downsample). Needs a real-file
+sanity check in QGIS/ArcGIS (can't run the browser here).
 
 ### F2 — GCP-driven georeferencing
 `core/georef.js` `fitSimilarity` (Horn) currently fits SfM camera centres ↔

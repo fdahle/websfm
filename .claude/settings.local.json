@@ -37,7 +37,8 @@
       "Bash(npx eslint *)",
       "Bash(timeout 180 npx vite build)",
       "Bash(command -v wasm-pack cargo)",
-      "Bash(node -e ' *)"
+      "Bash(node -e ' *)",
+      "Bash(perl -0pi -e 's/matchStore\\\\.value = new Map\\\\\\(matchStore\\\\.value\\\\\\)/touch\\(\\)/g' src/stores/useMatchesStore.js)"
     ],
     "additionalDirectories": [
       "/Users/fhdahle/Documents/GitHub/websfm/src/wasm/*",

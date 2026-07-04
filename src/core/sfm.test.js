@@ -3,7 +3,8 @@ import { fileURLToPath } from 'node:url'
 import { beforeAll, describe, it, expect } from 'vitest'
 
 import initRecon from '../wasm/reconstruction/reconstruction.js'
-import { reconstruct } from './sfm.js'
+import { reconstruct, retriangulatePairs, mergeSplitTracks } from './sfm.js'
+import { distortPixel } from './distortion.js'
 
 beforeAll(async () => {
   const wasmUrl = new URL('../wasm/reconstruction/reconstruction_bg.wasm', import.meta.url)
@@ -193,6 +194,49 @@ describe('reconstruct (incremental SfM, synthetic 3-view scene)', () => {
     expect(out.summary.perPairInitReproj.length).toBeGreaterThan(0)
   })
 
+  it('undistorts keypoints from a sensor with known radial distortion', async () => {
+    const rng = mulberry32(99)
+    const N = 60
+    const world = Array.from({ length: N }, () => [
+      (rng() - 0.5) * 4, (rng() - 0.5) * 3, 8 + rng() * 4,
+    ])
+    const centers = [[0, 0, 0], [2, 0, 0], [-2, 0, 0]]
+    const Rs = [rotY(0), rotY(0.15), rotY(-0.15)]
+    const ts = Rs.map((R, i) => mv(R, centers[i]).map((v) => -v))
+    const uuids = ['c0', 'c1', 'c2']
+    const dist = { k1: -0.08, k2: 0.01, k3: 0, p1: 0, p2: 0 }
+    const sensor = { focal: FX, focalUnit: 'px', cx: META.width / 2, cy: META.height / 2, ...dist }
+
+    // Observed keypoints = ideal pinhole projection pushed through the lens.
+    const distorted = uuids.map((uuid, ci) =>
+      world.map((X) => distortPixel(project(Rs[ci], ts[ci], X).x, project(Rs[ci], ts[ci], X).y, Kobj, dist)))
+    const matches = world.map((_, i) => [i, i])
+    const pairs = []
+    for (let a = 0; a < 3; a++) for (let b = a + 1; b < 3; b++) {
+      pairs.push({
+        idA: uuids[a], idB: uuids[b],
+        F: fundamental(Rs[a], ts[a], Rs[b], ts[b]),  // the ideal (pinhole) epipolar geometry
+        matches, inlierCount: N, status: 'done',
+      })
+    }
+    const build = (withSensor) => uuids.map((uuid, ci) => ({
+      uuid, name: uuid, kpStatus: 'done', meta: META,
+      sensor: withSensor ? sensor : null,
+      keypoints: distorted[ci].map((p) => ({ x: p.x, y: p.y })),
+    }))
+
+    // With the sensor's k1/k2, keypoints are undistorted at ingest → clean pinhole
+    // model. Without it, the lens error leaks straight into the reconstruction.
+    const corrected = await reconstruct({ images: build(true), pairs, settings: { baIterations: 20 } }, { onLog: () => {} })
+    const uncorrected = await reconstruct({ images: build(false), pairs, settings: { baIterations: 20 } }, { onLog: () => {} })
+
+    expect(corrected.status).toBe('done')
+    expect(corrected.cameras).toHaveLength(3)
+    expect(corrected.summary.postBaMedianPx).toBeLessThan(1.0)
+    // The correction demonstrably helps: uncorrected residual is much worse.
+    expect(uncorrected.summary.postBaMedianPx).toBeGreaterThan(2 * corrected.summary.postBaMedianPx)
+  })
+
   it('returns status "idle" when fewer than two images have keypoints', async () => {
     const out = await reconstruct(
       { images: [{ uuid: 'c0', name: 'c0', kpStatus: 'done', meta: META, keypoints: [{ x: 1, y: 2 }] }], pairs: [], settings: {} },
@@ -203,3 +247,68 @@ describe('reconstruct (incremental SfM, synthetic 3-view scene)', () => {
     expect(out.points).toHaveLength(0)
   })
 })
+
+// A3: retriangulation + track merging (pure helpers, tested directly).
+describe('retriangulatePairs / mergeSplitTracks (A3)', () => {
+  // Three cameras looking at a world point W; keypoint index 0 in each is W's
+  // exact projection, so reprojection is zero and gates always pass.
+  const W = [0, 0, 10]
+  const Rs = [rotY(0), rotY(0.15), rotY(-0.15)]
+  const centers = [[0, 0, 0], [2, 0, 0], [-2, 0, 0]]
+  const ts = Rs.map((R, i) => mv(R, centers[i]).map((v) => -v))
+  const uuids = ['c0', 'c1', 'c2']
+  const cameras = new Map(uuids.map((u, i) => [u, { R: Rs[i], t: ts[i], K: Kobj }]))
+  const kpOf = new Map(uuids.map((u, i) => [u, [project(Rs[i], ts[i], W)]])) // one kp each
+  const keypointOf = (uuid, kp) => kpOf.get(uuid)?.[kp] ?? null
+
+  it('retriangulates an unassigned match into a new 2-view point', async () => {
+    const points3d = []
+    const triangulate = async () => [{ x: W[0], y: W[1], z: W[2], srcIdx: 0 }]
+    const { added } = await retriangulatePairs({
+      points3d, cameras, pairs: [{ idA: 'c0', idB: 'c1', matches: [[0, 0]] }],
+      keypointOf, maxReprojPx: 2, triangulate,
+    })
+    expect(added).toBe(1)
+    expect(points3d).toHaveLength(1)
+    expect([...points3d[0].views.entries()].sort()).toEqual([['c0', 0], ['c1', 0]])
+  })
+
+  it('rejects a retriangulated point that reprojects outside the gate', async () => {
+    const points3d = []
+    const triangulate = async () => [{ x: 5, y: 5, z: 10, srcIdx: 0 }] // wrong position
+    const { added } = await retriangulatePairs({
+      points3d, cameras, pairs: [{ idA: 'c0', idB: 'c1', matches: [[0, 0]] }],
+      keypointOf, maxReprojPx: 2, triangulate,
+    })
+    expect(added).toBe(0)
+    expect(points3d).toHaveLength(0)
+  })
+
+  it('merges two points that are the same feature split across a match', () => {
+    const p1 = { ...ptAt(W), views: new Map([['c0', 0], ['c1', 0]]) }
+    const p2 = { ...ptAt(W), views: new Map([['c2', 0]]) }
+    const res = mergeSplitTracks({
+      points3d: [p1, p2], cameras,
+      pairs: [{ idA: 'c0', idB: 'c2', matches: [[0, 0]] }], // links p1(c0) ↔ p2(c2)
+      keypointOf, maxReprojPx: 2,
+    })
+    expect(res.merged).toBe(1)
+    expect(res.points3d).toHaveLength(1)
+    expect([...res.points3d[0].views.keys()].sort()).toEqual(['c0', 'c1', 'c2'])
+  })
+
+  it('does not merge when the union would put two keypoints in one image', () => {
+    const p1 = { ...ptAt(W), views: new Map([['c0', 0], ['c2', 0]]) }
+    const p2 = { ...ptAt(W), views: new Map([['c2', 1]]) } // c2 already in p1 at kp 0
+    const res = mergeSplitTracks({
+      points3d: [p1, p2], cameras,
+      pairs: [{ idA: 'c0', idB: 'c2', matches: [[0, 1]] }],
+      keypointOf: (uuid, kp) => (uuid === 'c2' && kp === 1 ? project(Rs[2], ts[2], W) : keypointOf(uuid, kp)),
+      maxReprojPx: 2,
+    })
+    expect(res.merged).toBe(0)
+    expect(res.points3d).toHaveLength(2)
+  })
+})
+
+function ptAt([x, y, z]) { return { x, y, z } }

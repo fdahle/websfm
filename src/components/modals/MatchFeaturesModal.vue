@@ -7,6 +7,7 @@ const strategy = ref('exhaustive')
 const strategies = [
   { id: 'exhaustive', label: 'Exhaustive' },
   { id: 'sequential', label: 'Sequential' },
+  { id: 'preselect', label: 'Preselect' },
 ]
 
 const settings = ref({
@@ -17,6 +18,7 @@ const settings = ref({
   ransacThreshPx: 2.0,
   minInlierRatio: 0.25,
   maxIters: 1000,
+  maxNeighbors: 10,
 })
 
 const runSettings = computed(() => ({
@@ -50,8 +52,20 @@ function run() {
             >{{ s.label }}</button>
           </div>
           <span class="field-hint">
-            Exhaustive matches all pairs. Sequential matches consecutive images (aerial strips).
+            Exhaustive matches all pairs. Sequential matches consecutive images.
+            Preselect uses imported camera positions to match only nearby images (cuts O(N²) on strips/blocks).
           </span>
+        </div>
+
+        <div v-if="strategy === 'preselect'" class="field">
+          <label class="field-label" for="maxNeighbors">Neighbours per image</label>
+          <input
+            id="maxNeighbors"
+            v-model.number="settings.maxNeighbors"
+            type="number" min="1" max="50" step="1"
+            class="field-input"
+          />
+          <span class="field-hint">Match each image to its N nearest by camera position. Needs imported poses; images without a pose fall back to exhaustive.</span>
         </div>
 
         <div class="section-sep"></div>

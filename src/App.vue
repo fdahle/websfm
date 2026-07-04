@@ -35,6 +35,7 @@ import { useSensorsStore } from './stores/useSensorsStore.js'
 import { usePosesStore } from './stores/usePosesStore.js'
 import './stores/useLogStore.js'   // registers the console as a project-scoped store
 import ReconstructModal from './components/modals/ReconstructModal.vue'
+import ExportModal from './components/modals/ExportModal.vue'
 import DepthMapsModal from './components/modals/DepthMapsModal.vue'
 import DenseModal from './components/modals/DenseModal.vue'
 import DemModal from './components/modals/DemModal.vue'
@@ -51,6 +52,8 @@ import { parseGeoJson, looksLikeGeoJson, geoJsonToGcps, guessNameKey } from './c
 import { detectCameraMode } from './utils/camera.js'
 import { detectFileKind } from './utils/importKind.js'
 import { buildPosesCsv, buildSensorsCsv, downloadCsv } from './utils/exportCsv.js'
+import { cloudToPly, reconstructionToJson, demToAsciiGrid, demToGeoTiff, orthoToGeoTiff, rasterWorldFile } from './core/exporters.js'
+import { downloadBlob, dataUrlToBlob } from './utils/download.js'
 import * as opfs from './utils/opfs.js'
 import { ensureProjection } from './core/crs.js'
 
@@ -162,6 +165,7 @@ const depthMapCount = computed(() => depthMaps.value.size)
 // the preview needs a built product.
 const cloudReady = computed(() => clouds.value.some((c) => c.points.length > 0))
 const demReady = computed(() => !!dem.value)
+const orthoReady = computed(() => !!ortho.value)
 const productReady = computed(() => !!dem.value || !!ortho.value)
 
 // ── Derived state ──────────────────────────────────────────────────────────────
@@ -572,6 +576,82 @@ function exportMatches() {
   saveJson(data, `matches-${stamp}.json`)
 }
 
+const projectBase = () => currentProjectName.value || 'project'
+
+// Which export dialog is open ('cloud' | 'model' | 'dem' | 'ortho'), or null.
+const exportKind = ref(null)
+
+// Parse the current DEM's CRS into an EPSG code + geographic flag for GeoTIFF /
+// .prj. The working CRS is a proj4 string or "EPSG:xxxx"; only the latter yields a
+// code (else the geotransform is still written, without a CRS).
+function crsInfo(source) {
+  const crs = source?.crs
+  if (!crs || crs === 'local') return { crs: null, code: null, geographic: false }
+  const m = /EPSG:(\d+)/i.exec(crs)
+  const code = m ? Number(m[1]) : null
+  const geographic = code === 4326 || /degree|deg\b/i.test(source.unit || '')
+  return { crs, code, geographic }
+}
+
+function onExportRun(settings) {
+  const kind = exportKind.value
+  exportKind.value = null
+  if (kind === 'cloud') doExportCloud(settings)
+  else if (kind === 'model') doExportModel(settings)
+  else if (kind === 'dem') doExportDem(settings)
+  else if (kind === 'ortho') doExportOrtho(settings)
+}
+
+// Point cloud (selected, else the first non-empty) → PLY.
+function doExportCloud({ format, includeColor }) {
+  const cloud = selectedCloud.value?.points?.length
+    ? selectedCloud.value
+    : clouds.value.find((c) => c.points.length > 0)
+  if (!cloud) return
+  const binary = format !== 'ply-ascii'
+  const ply = cloudToPly(cloud.points, { binary, color: includeColor })
+  downloadBlob(`${projectBase()}-${cloud.kind}.ply`, ply, binary ? 'application/octet-stream' : 'text/plain;charset=utf-8')
+}
+
+// SfM cameras (+ optional tracks) → JSON interchange (uses the sparse cloud).
+function doExportModel({ includeTracks }) {
+  const cloud = clouds.value.find((c) => c.kind === 'sparse')
+    ?? (selectedCloud.value?.cameras?.size ? selectedCloud.value : null)
+  if (!cloud) return
+  const cams = [...cloud.cameras.entries()].map(([uuid, c]) => ({ uuid, R: c.R, t: c.t, K: c.K }))
+  const pts = cloud.points.map((p) => ({
+    x: p.x, y: p.y, z: p.z, color: p.color,
+    views: includeTracks && p.views ? [...p.views.entries()] : [],
+  }))
+  saveJson(reconstructionToJson(cams, pts, currentCrs.value), `${projectBase()}-model.json`)
+}
+
+// DEM → GeoTIFF, or ESRI ASCII grid (+ .prj sidecar carrying the CRS).
+function doExportDem({ format, nodata }) {
+  if (!dem.value) return
+  const info = crsInfo(dem.value)
+  if (format === 'geotiff') {
+    downloadBlob(`${projectBase()}-dem.tif`, demToGeoTiff(dem.value, { crs: info, nodata }), 'image/tiff')
+    return
+  }
+  downloadBlob(`${projectBase()}-dem.asc`, demToAsciiGrid(dem.value, { nodata }), 'text/plain;charset=utf-8')
+  if (info.crs) downloadBlob(`${projectBase()}-dem.prj`, info.crs, 'text/plain;charset=utf-8')
+}
+
+// Ortho → GeoTIFF, or PNG + world file (.wld) + .prj. Shares the DEM's geotransform.
+async function doExportOrtho({ format }) {
+  if (!ortho.value || !dem.value) return
+  const info = crsInfo(dem.value)
+  if (format === 'geotiff') {
+    downloadBlob(`${projectBase()}-ortho.tif`, orthoToGeoTiff(ortho.value, dem.value, { crs: info }), 'image/tiff')
+    return
+  }
+  if (!ortho.value.previewDataUrl) return
+  downloadBlob(`${projectBase()}-ortho.png`, await dataUrlToBlob(ortho.value.previewDataUrl))
+  downloadBlob(`${projectBase()}-ortho.wld`, rasterWorldFile(dem.value), 'text/plain;charset=utf-8')
+  if (info.crs) downloadBlob(`${projectBase()}-ortho.prj`, info.crs, 'text/plain;charset=utf-8')
+}
+
 // ── Project picker actions ────────────────────────────────────────────────────
 async function handleSwitchProject(id) {
   if (id === currentProjectId.value) { projectPickerOpen.value = false; return }
@@ -666,6 +746,10 @@ function handleCommand(id) {
     case 'import-calib':         cameraPickMode.value = 'sensor'; cameraInput.value.click(); break
     case 'export-cameras':       exportPoses(); break
     case 'export-sensors':       exportSensors(); break
+    case 'export-cloud':         exportKind.value = 'cloud'; break
+    case 'export-model':         exportKind.value = 'model'; break
+    case 'export-dem':           exportKind.value = 'dem'; break
+    case 'export-ortho':         exportKind.value = 'ortho'; break
     case 'export-keypoints':     exportKeypoints(); break
     case 'export-matches':       exportMatches(); break
     case 'clear-all':            clearAll(resetToViewer); clearSensors(); clearProjectStores({ purge: true }); viewerRef.value?.clearReconstructionData(); break
@@ -771,6 +855,7 @@ function onRibbonPick(event) {
       :depth-map-count="depthMapCount"
       :cloud-ready="cloudReady"
       :dem-ready="demReady"
+      :ortho-ready="orthoReady"
       :product-ready="productReady"
       :active-image-id="activeImageTab?.id ?? null"
       :active-image-name="activeImageTab?.name ?? null"
@@ -822,6 +907,15 @@ function onRibbonPick(event) {
         v-if="reconstructOpen"
         @close="reconstructOpen = false"
         @run="onReconstructRun"
+      />
+    </Teleport>
+
+    <Teleport to="body">
+      <ExportModal
+        v-if="exportKind"
+        :kind="exportKind"
+        @close="exportKind = null"
+        @run="onExportRun"
       />
     </Teleport>
 

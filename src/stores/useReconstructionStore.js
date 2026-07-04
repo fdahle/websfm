@@ -13,6 +13,7 @@ import { fitSimilarity } from '../core/georef.js'
 import { aerialUpRotation, rotateReconstruction } from '../core/projection.js'
 import { cameraCenter } from '../core/geometry.js'
 import { qualityToMaxDim } from '../core/mvs.js'
+import { distortionOf } from '../core/distortion.js'
 import { registerProjectStore } from './projectStores.js'
 import { useImagesStore } from './useImagesStore.js'
 import { useMatchesStore } from './useMatchesStore.js'
@@ -215,10 +216,15 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
       // reactive Pinia state, and Vue's Proxy wrappers can't be structured-cloned
       // to the worker ("object can not be cloned").
       const imgByUuid = new Map(images.value.map((im) => [im.uuid, im]))
+      const sensorById = new Map(sensors.value.map((s) => [s.id, s]))
       const inputImages = []
       for (const [uuid, cam] of cloud.cameras) {
         const im = imgByUuid.get(uuid)
         if (!im) continue
+        // Lens distortion for this image's sensor — the worker undistorts the raster
+        // so depth maps / fusion / DEM / ortho all stay pinhole (matches sparse).
+        const s = im.sensorId ? sensorById.get(im.sensorId) : null
+        const dist = s ? distortionOf(s) : null
         inputImages.push({
           uuid, name: im.name, url: im.url,
           // Per-image mask (if any) so masked regions are excluded from the dense cloud.
@@ -226,6 +232,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
           R: cam.R.map((row) => [...row]),
           t: [...cam.t],
           K: { fx: cam.K.fx, fy: cam.K.fy, cx: cam.K.cx, cy: cam.K.cy },
+          dist,
         })
       }
       const points = cloud.points.map((p) => ({
@@ -420,6 +427,9 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
             uuid: img.uuid,
             name: img.name,
             kpStatus: img.kpStatus,
+            // Sensor id lets BA share one focal across images on the same sensor
+            // (self-calibration); null → the image is its own intrinsics group.
+            sensorId: img.sensorId ?? null,
             keypoints: (img.keypoints || []).map((kp) => ({ x: kp.x, y: kp.y, color: kp.color })),
             meta: img.meta
               ? {
@@ -438,6 +448,9 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
                   focal: s.focal, focalUnit: s.focalUnit, pixelSize: s.pixelSize,
                   sensorWidthMm: s.sensorWidthMm,
                   cx: s.cx, cy: s.cy, width: s.width, height: s.height,
+                  // Lens distortion (Brown–Conrady) — undistorted at ingest so the
+                  // pipeline stays pinhole. Null coeffs are treated as zero.
+                  k1: s.k1, k2: s.k2, k3: s.k3, p1: s.p1, p2: s.p2,
                 }
               : null,
           }

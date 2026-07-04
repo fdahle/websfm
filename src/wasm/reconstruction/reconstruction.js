@@ -4,35 +4,47 @@
  * Bundle adjustment by sparse Levenberg–Marquardt with the Schur complement.
  *
  * Jointly refines every camera pose (6-DOF: left-perturbed so(3) rotation +
- * translation; intrinsics held fixed) and every 3D point to minimise a
- * Huber-robustified reprojection error. The normal equations are reduced with
- * the Schur complement (points eliminated against the cameras) into a dense
- * reduced-camera system solved by Cholesky — true global BA, not the old
- * coordinate descent. The Huber threshold adapts to the residual median, so
- * surviving gross mis-triangulations cannot drag the solution.
+ * translation) and every 3D point, and — when `refine_mode > 0` — a small set of
+ * shared per-sensor intrinsic parameters (self-calibration). Points are always
+ * eliminated by the Schur complement; the reduced system holds the camera poses
+ * plus the intrinsic groups, solved by dense Cholesky. Huber robustification (an
+ * adaptive threshold tracking the residual median) keeps surviving gross
+ * mis-triangulations from dragging the solution.
+ *
+ * Intrinsic self-calibration is opt-in and modest: each sensor group carries a
+ * focal **scale** `s` (init 1, multiplying every member camera's fx/fy) and,
+ * for `refine_mode == 2`, shared principal-point offsets `dcx, dcy`. Modelling
+ * the focal as a scale (not an absolute) preserves any per-camera differences in
+ * the seed intrinsics while still sharing one degree of freedom across the group.
  *
  * At large camera counts the dense reduced-camera Cholesky (`chol_solve`) is the
- * only part that needs swapping for an iterative Schur solve; assembly and the
- * rest of the loop are size-independent.
+ * only part that needs swapping for an iterative Schur solve.
  *
  * # Inputs
- * - `cameras_flat`: n_cam × 12 floats `[R(9)|t(3), R(9)|t(3), …]`
- * - `intrinsics_flat`: n_cam × 4 floats `[fx,fy,cx,cy, …]`
+ * - `cameras_flat`: n_cam × 12 floats `[R(9)|t(3), …]`
+ * - `intrinsics_flat`: n_cam × 4 floats `[fx,fy,cx,cy, …]` (the seed / base K)
  * - `pts_flat`: n_pts × 3 floats `[x,y,z, …]`
  * - `obs_flat`: n_obs × 4 floats `[cam_i, pt_i, pixel_x, pixel_y, …]`
  * - `max_iters`: outer LM iterations
+ * - `sensor_of_cam`: n_cam ints — per-camera sensor id (shared → shared focal);
+ *   `< 0` (or a short/empty list) ⇒ that camera is its own group
+ * - `refine_mode`: 0 = none (poses+points only), 1 = focal, 2 = focal + cx,cy
  *
  * # Output
- * `[cameras_flat(n_cam×12), pts_flat(n_pts×3), cost_before, cost_after]`
- * (cost_* are RMS reprojection error in pixels).
+ * `[cameras_flat(n_cam×12), pts_flat(n_pts×3), intrinsics_flat(n_cam×4),
+ *   cost_before, cost_after, cost_trace…]` — the returned intrinsics are the
+ * **refined** effective K per camera (identical to the input when
+ * `refine_mode == 0`); cost_* are RMS reprojection error in pixels.
  * @param {Float32Array} cameras_flat
  * @param {Float32Array} intrinsics_flat
  * @param {Float32Array} pts_flat
  * @param {Float32Array} obs_flat
  * @param {number} max_iters
+ * @param {Int32Array} sensor_of_cam
+ * @param {number} refine_mode
  * @returns {Float32Array}
  */
-export function bundle_adjust(cameras_flat, intrinsics_flat, pts_flat, obs_flat, max_iters) {
+export function bundle_adjust(cameras_flat, intrinsics_flat, pts_flat, obs_flat, max_iters, sensor_of_cam, refine_mode) {
     const ptr0 = passArrayF32ToWasm0(cameras_flat, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
     const ptr1 = passArrayF32ToWasm0(intrinsics_flat, wasm.__wbindgen_malloc);
@@ -41,10 +53,12 @@ export function bundle_adjust(cameras_flat, intrinsics_flat, pts_flat, obs_flat,
     const len2 = WASM_VECTOR_LEN;
     const ptr3 = passArrayF32ToWasm0(obs_flat, wasm.__wbindgen_malloc);
     const len3 = WASM_VECTOR_LEN;
-    const ret = wasm.bundle_adjust(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, max_iters);
-    var v5 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
+    const ptr4 = passArray32ToWasm0(sensor_of_cam, wasm.__wbindgen_malloc);
+    const len4 = WASM_VECTOR_LEN;
+    const ret = wasm.bundle_adjust(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, max_iters, ptr4, len4, refine_mode);
+    var v6 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
     wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
-    return v5;
+    return v6;
 }
 
 /**
