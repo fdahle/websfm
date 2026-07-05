@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed } from 'vue'
 import ViewerMatch from '../viewers/ViewerMatch.vue'
+import MatchGraph from '../viewers/MatchGraph.vue'
 
 const props = defineProps({
   matchSummaries: { type: Array,  default: () => [] },
@@ -9,9 +10,21 @@ const props = defineProps({
   // True once a sparse cloud exists — enables the "Used" column (matches that
   // became tie-points) and dims pairs that contributed nothing to the model.
   hasSparse:      { type: Boolean, default: false },
+  // UUIDs registered in the sparse model — for colouring nodes in the graph view.
+  alignedUuids:   { type: Object, default: () => new Set() },
 })
 
-const emit = defineEmits(['close'])
+const emit = defineEmits(['close', 'toggle-disabled'])
+
+// List ⇄ Graph toggle.
+const viewMode = ref('list')  // 'list' | 'graph'
+
+// Flip a pair's exclusion from reconstruction. Emits the target state (not a toggle
+// verb) so the parent action is idempotent.
+function toggleDisabled(pairId) {
+  const s = props.matchSummaries.find((m) => m.pairId === pairId)
+  emit('toggle-disabled', pairId, !s?.disabled)
+}
 
 function trimExt(name) {
   return name.replace(/\.[^.]+$/, '')
@@ -85,12 +98,26 @@ function selectMatch(pairId) {
       <div class="modal-header">
         <span class="modal-title">Matches</span>
         <span v-if="matchSummaries.length" class="modal-count">{{ matchSummaries.length }} pair{{ matchSummaries.length !== 1 ? 's' : '' }}</span>
+        <div class="view-toggle">
+          <button class="view-btn" :class="{ active: viewMode === 'list' }" @click="viewMode = 'list'">List</button>
+          <button class="view-btn" :class="{ active: viewMode === 'graph' }" @click="viewMode = 'graph'">Graph</button>
+        </div>
         <button class="modal-close" title="Close" @click="emit('close')">×</button>
       </div>
 
       <div class="modal-main">
-        <!-- Left: match list -->
-        <div class="list-panel">
+        <!-- Left: match list (or graph) -->
+        <div v-if="viewMode === 'graph'" class="graph-panel">
+          <MatchGraph
+            :match-summaries="matchSummaries"
+            :aligned-uuids="alignedUuids"
+            :has-sparse="hasSparse"
+            :selected-pair-id="selectedPairId"
+            @select="selectMatch"
+            @toggle-disabled="toggleDisabled"
+          />
+        </div>
+        <div v-else class="list-panel">
           <div v-if="!matchSummaries.length" class="empty">No matches yet — run Match Features first.</div>
           <template v-else>
             <div class="filter-bar">
@@ -118,10 +145,14 @@ function selectMatch(pairId) {
                   v-for="m in displayedSummaries"
                   :key="m.pairId"
                   class="match-row"
-                  :class="{ active: m.pairId === selectedPairId, unused: hasSparse && !m.usedCount }"
+                  :class="{ active: m.pairId === selectedPairId, unused: hasSparse && !m.usedCount, disabled: m.disabled }"
+                  :title="m.disabled ? 'Excluded from reconstruction' : ''"
                   @click="selectMatch(m.pairId)"
                 >
-                  <td class="name-cell">{{ trimExt(m.nameA) }}</td>
+                  <td class="name-cell">
+                    <span v-if="m.disabled" class="excluded-tag" title="Excluded from reconstruction">⦸</span>
+                    {{ trimExt(m.nameA) }}
+                  </td>
                   <td class="name-cell">{{ trimExt(m.nameB) }}</td>
                   <td class="num-col">{{ m.inlierCount }}</td>
                   <td class="num-col dim">{{ m.rawCount }}</td>
@@ -134,14 +165,25 @@ function selectMatch(pairId) {
 
         <!-- Right: match viewer preview -->
         <div class="preview-panel">
-          <ViewerMatch
-            v-if="selectedImgA && selectedImgB"
-            :image-a="selectedImgA"
-            :image-b="selectedImgB"
-            :matches="selectedEntry?.matches ?? []"
-          />
-          <div v-else class="preview-placeholder">
-            <span>Select a pair to preview matches</span>
+          <div v-if="selectedSummary" class="preview-bar">
+            <span class="preview-name">{{ trimExt(selectedSummary.nameA) }} ↔ {{ trimExt(selectedSummary.nameB) }}</span>
+            <button
+              class="exclude-btn"
+              :class="{ on: selectedSummary.disabled }"
+              :title="selectedSummary.disabled ? 'Include this pair in reconstruction' : 'Exclude this pair from reconstruction (obviously-wrong match)'"
+              @click="toggleDisabled(selectedSummary.pairId)"
+            >{{ selectedSummary.disabled ? 'Excluded — click to restore' : 'Exclude from reconstruction' }}</button>
+          </div>
+          <div class="preview-body">
+            <ViewerMatch
+              v-if="selectedImgA && selectedImgB"
+              :image-a="selectedImgA"
+              :image-b="selectedImgB"
+              :matches="selectedEntry?.matches ?? []"
+            />
+            <div v-else class="preview-placeholder">
+              <span>Select a pair to preview matches</span>
+            </div>
           </div>
         </div>
       </div>
@@ -192,6 +234,27 @@ function selectMatch(pairId) {
   font-size: 12px;
   color: var(--text-dim);
 }
+
+/* List / Graph segmented toggle */
+.view-toggle {
+  display: flex;
+  border: 1px solid var(--panel-border);
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+.view-btn {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 12px;
+  padding: 3px 12px;
+  cursor: pointer;
+}
+
+.view-btn:hover { background: var(--hover-bg); color: var(--text); }
+.view-btn.active { background: var(--accent); color: #fff; }
 
 .modal-close {
   background: none;
@@ -325,6 +388,12 @@ function selectMatch(pairId) {
 /* A verified pair that contributed no tie-points to the sparse model. */
 .match-row.unused .name-cell { color: var(--text-dim); }
 
+/* A user-excluded pair — greyed with a struck-through name. */
+.match-row.disabled td { color: var(--text-dim); }
+.match-row.disabled .name-cell { text-decoration: line-through; opacity: 0.75; }
+
+.excluded-tag { color: #e06060; margin-right: 3px; }
+
 .match-row td {
   padding: 7px 12px;
   border-bottom: 1px solid var(--panel-border);
@@ -346,11 +415,66 @@ function selectMatch(pairId) {
 
 .dim { color: var(--text-dim); }
 
+/* Left graph panel (replaces the list when the Graph view is active) — wider than
+   the list since a force layout needs room to breathe. */
+.graph-panel {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+  border-right: 1px solid var(--panel-border);
+}
+
 /* Right preview */
 .preview-panel {
   flex: 1;
-  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
   overflow: hidden;
+}
+
+/* Selected-pair action bar above the preview */
+.preview-bar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--panel-border);
+}
+
+.preview-name {
+  flex: 1;
+  font-size: 12px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.exclude-btn {
+  flex-shrink: 0;
+  background: none;
+  border: 1px solid var(--panel-border);
+  border-radius: 5px;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 12px;
+  cursor: pointer;
+}
+
+.exclude-btn:hover { background: var(--hover-bg); color: var(--text); }
+.exclude-btn.on {
+  border-color: #e06060;
+  color: #e06060;
+}
+
+/* Fills the remaining preview height; ViewerMatch positions itself absolute inset:0 */
+.preview-body {
+  flex: 1;
+  position: relative;
+  min-height: 0;
 }
 
 .preview-placeholder {

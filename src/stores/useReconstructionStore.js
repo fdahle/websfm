@@ -456,7 +456,9 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
           }
         }),
         pairs: [...matchStore.value.values()]
-          .filter((e) => e.status === 'done')
+          // Skip pairs the user has excluded (obviously-wrong matches) as well as
+          // any still in flight/errored.
+          .filter((e) => e.status === 'done' && !e.disabled)
           .map((e) => ({
             idA: e.idA, idB: e.idB,
             // F (3×3) and matches come from reactive store entries; rebuild them

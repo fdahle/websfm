@@ -5,11 +5,14 @@
  *
  * Returns a flat `Float32Array` with `STRIDE` (133) values per keypoint:
  * `[x, y, scale, response, angle, d0..d127, ...]`
- * where `x`/`y` are in input-image pixel coordinates, followed by a SINGLE
- * trailing value = the total keypoints found *before* the `max_keypoints` cap
- * (so callers can report how many were dropped to the cap). A degenerate input
+ * where `x`/`y` are in input-image pixel coordinates, followed by TWO trailing
+ * values: `raw_found` = keypoints surviving near-duplicate suppression but *before*
+ * the `max_keypoints` cap (so callers can report how many were dropped to the cap),
+ * then `suppressed` = keypoints dropped as near-duplicate positions (multiple
+ * scale/octave DoG extrema collapsing onto one visual location). A degenerate input
  * (zero-size / short buffer) returns an empty vec; a valid image with no extrema
- * returns `[0.0]`. Parse as `kept = floor((len - 1) / STRIDE)`, `raw = last`.
+ * returns `[0.0, 0.0]`. Parse as `kept = floor((len - 2) / STRIDE)`,
+ * `raw = flat[len-2]`, `suppressed = flat[len-1]`.
  * @param {Uint8Array} rgba
  * @param {number} width
  * @param {number} height

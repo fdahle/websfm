@@ -121,10 +121,12 @@ async function detect([url, options = {}]) {
   const flat = detect_sift(new Uint8Array(data.buffer), width, height, contrastThreshold, maxKeypoints)
   const ms = performance.now() - t0
 
-  // Layout: STRIDE floats per kept keypoint, then a single trailing raw-count
-  // (total detected before the max_keypoints cap). Empty (degenerate input) ⇒ 0.
-  const rawFound = flat.length > 0 ? flat[flat.length - 1] : 0
-  const n = flat.length > 0 ? Math.floor((flat.length - 1) / STRIDE) : 0
+  // Layout: STRIDE floats per kept keypoint, then two trailing scalars — rawFound
+  // (survivors of near-duplicate suppression, before the max_keypoints cap) and
+  // suppressed (near-duplicate positions dropped). Empty (degenerate input) ⇒ 0.
+  const rawFound = flat.length >= 2 ? flat[flat.length - 2] : 0
+  const suppressed = flat.length >= 2 ? flat[flat.length - 1] : 0
+  const n = flat.length >= 2 ? Math.floor((flat.length - 2) / STRIDE) : 0
   // Smallest kept response = last entry (the crate returns them response-desc);
   // the point at which the max_keypoints cap started discarding features.
   const minResponse = n > 0 ? flat[(n - 1) * STRIDE + 3] : 0
@@ -161,7 +163,7 @@ async function detect([url, options = {}]) {
   const at = (q) => (responses.length ? responses[Math.min(responses.length - 1, Math.round(q * (responses.length - 1)))] : 0)
   const diag = {
     detectWidth: width, detectHeight: height, natW, natH, scale,
-    rawFound, capped: n, kept, maskedDropped: n - kept,
+    rawFound, suppressed, capped: n, kept, maskedDropped: n - kept,
     capHit: maxKeypoints > 0 && rawFound > maxKeypoints, minResponse,
     respP50: at(0.5), respP95: at(0.95),
   }
@@ -244,7 +246,7 @@ async function computeDepthMaps([input], { emit }) {
   const { images, points, settings = {} } = input
   const {
     maxDim = 800, maxSources = 6, minAngleDeg = 3, window = 3, iterations = 3, bestK = null,
-    speckleFilter = true, filterRadius = 1, filterRelTol = 0.1,
+    speckleFilter = true, filterRadius = 1, filterRelTol = 0.1, coarseLong = 600,
   } = settings
   // Auto best-K per image (Step 3) when the user hasn't overridden it: derive from
   // that image's source count (clamp(ceil(nSources/2),1,4)) rather than a fixed 3.
@@ -392,7 +394,7 @@ async function computeDepthMaps([input], { emit }) {
     }
     let dm
     try {
-      dm = await depthMapForImage(ref, sources, points, { window, iterations, bestK: imgBestK }, backend, hooks)
+      dm = await depthMapForImage(ref, sources, points, { window, iterations, bestK: imgBestK, coarseLong }, backend, hooks)
     } catch (err) {
       // A GPU failure mid-run must not abort the whole batch: log it, drop to WASM
       // for this image and every image after, and retry once on the CPU path.
@@ -400,7 +402,7 @@ async function computeDepthMaps([input], { emit }) {
         emit('log', [`Depth maps: GPU error on ${img.name} (${err?.message ?? err}) — falling back to WASM`,
           'warn', 'Dense'])
         backend = undefined
-        dm = await depthMapForImage(ref, sources, points, { window, iterations, bestK: imgBestK }, backend)
+        dm = await depthMapForImage(ref, sources, points, { window, iterations, bestK: imgBestK, coarseLong }, backend)
       } else {
         throw err
       }

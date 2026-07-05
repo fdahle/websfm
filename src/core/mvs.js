@@ -161,8 +161,10 @@ function scaleKxy(K, sx, sy) {
 }
 
 // Number of pyramid levels so the coarsest longest side is ≈ `coarseLong` (default
-// 1000). 1 level (no pyramid) when the working image is already at/under that.
-function pyramidLevelCount(w, h, coarseLong = 1000) {
+// 600 — low enough that even a Medium-quality working image gets a coarse level to
+// carry global propagation). 1 level (no pyramid) when the working image is already
+// at/under that.
+function pyramidLevelCount(w, h, coarseLong = 600) {
   const long = Math.max(w, h)
   if (long <= coarseLong) return 1
   return Math.floor(Math.log2(long / coarseLong)) + 1
@@ -178,7 +180,7 @@ function pyramidLevelCount(w, h, coarseLong = 1000) {
 // share the (refGray, refW, refH, refK, sources, opts) → { depth, cost, w, h }
 // contract, so this orchestration is backend-agnostic.
 export async function depthMapForImage(ref, sources, points, settings = {}, computeDepthMapFn = computeDepthMap, hooks = {}) {
-  const { window = 3, iterations = 3, bestK = 3, coarseLong = 1000 } = settings
+  const { window = 3, iterations = 3, bestK = 3, coarseLong = 600 } = settings
   const refCamScaled = { R: ref.cam.R, t: ref.cam.t, K: ref.K }
   // Depth range is view-space (resolution-invariant): derive it once from the
   // working-res projection (most sparse points visible → tightest percentiles).

@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url'
 import { beforeAll, describe, it, expect } from 'vitest'
 
 import initRecon from '../wasm/reconstruction/reconstruction.js'
-import { reconstruct, retriangulatePairs, mergeSplitTracks } from './sfm.js'
+import { reconstruct, retriangulatePairs, mergeSplitTracks, rotationCycleFilter } from './sfm.js'
 import { distortPixel } from './distortion.js'
 
 beforeAll(async () => {
@@ -312,3 +312,55 @@ describe('retriangulatePairs / mergeSplitTracks (A3)', () => {
 })
 
 function ptAt([x, y, z]) { return { x, y, z } }
+
+describe('rotationCycleFilter (repetitive-structure defense)', () => {
+  const I = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
+  const rotZ = (deg) => {
+    const a = deg * Math.PI / 180, c = Math.cos(a), s = Math.sin(a)
+    return [[c, -s, 0], [s, c, 0], [0, 0, 1]]
+  }
+
+  it('drops the one graph-inconsistent edge in a K4 and keeps the rest', () => {
+    // Nodes a<b<c<d fully connected; every true relative rotation is identity, so
+    // every cycle closes to 0° — except edge c–d, which carries a bogus 30° pose.
+    // c–d sits in 2 triangles (a-c-d, b-c-d), both broken → 0% support → dropped.
+    const edges = [
+      { idA: 'a', idB: 'b', R: I }, { idA: 'a', idB: 'c', R: I }, { idA: 'a', idB: 'd', R: I },
+      { idA: 'b', idB: 'c', R: I }, { idA: 'b', idB: 'd', R: I },
+      { idA: 'c', idB: 'd', R: rotZ(30) }, // false pair
+    ]
+    const { drop } = rotationCycleFilter(edges)
+    expect(drop).toHaveLength(1)
+    expect(drop[0]).toMatchObject({ idA: 'c', idB: 'd', tri: 2, good: 0 })
+  })
+
+  it('keeps everything when all cycles are consistent', () => {
+    const edges = [
+      { idA: 'a', idB: 'b', R: I }, { idA: 'a', idB: 'c', R: I }, { idA: 'a', idB: 'd', R: I },
+      { idA: 'b', idB: 'c', R: I }, { idA: 'b', idB: 'd', R: I }, { idA: 'c', idB: 'd', R: I },
+    ]
+    expect(rotationCycleFilter(edges).drop).toHaveLength(0)
+  })
+
+  it('canonicalises reversed edges (idA>idB) by transposing R', () => {
+    // Same K4 as above but c–d supplied reversed (d,c) — the filter must transpose
+    // R to the min→max direction and still flag the pair as (c,d).
+    const edges = [
+      { idA: 'a', idB: 'b', R: I }, { idA: 'a', idB: 'c', R: I }, { idA: 'a', idB: 'd', R: I },
+      { idA: 'b', idB: 'c', R: I }, { idA: 'b', idB: 'd', R: I },
+      { idA: 'd', idB: 'c', R: rotZ(30) }, // reversed direction
+    ]
+    const { drop } = rotationCycleFilter(edges)
+    expect(drop).toHaveLength(1)
+    expect(drop[0]).toMatchObject({ idA: 'c', idB: 'd' })
+  })
+
+  it('will not judge an edge in fewer than minTriangles triangles', () => {
+    // A single triangle: each edge is in only 1 triangle (< default minTriangles=2),
+    // so even a broken cycle leaves everything unjudged.
+    const edges = [
+      { idA: 'a', idB: 'b', R: I }, { idA: 'b', idB: 'c', R: rotZ(40) }, { idA: 'a', idB: 'c', R: I },
+    ]
+    expect(rotationCycleFilter(edges).drop).toHaveLength(0)
+  })
+})

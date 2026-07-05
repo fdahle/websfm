@@ -1,6 +1,9 @@
 <script setup>
 import { ref } from 'vue'
 import CrsPicker from '../controls/CrsPicker.vue'
+import { useGlossarySettings } from '../../composables/useGlossarySettings.js'
+
+const { glossaryTermsEnabled, setGlossaryTermsEnabled } = useGlossarySettings()
 
 defineProps({
   theme: String,
@@ -96,6 +99,21 @@ const verboseLogging = ref(false)
               <button :class="{ active: theme === 'dark' }" @click="emit('set-theme', 'dark')">Dark</button>
               <button :class="{ active: theme === 'light' }" @click="emit('set-theme', 'light')">Light</button>
             </div>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-info">
+              <span class="setting-label">Glossary terms</span>
+              <span class="setting-desc">Highlight explained keywords in the UI; hover one for a definition and “Read more”.</span>
+            </div>
+            <label class="switch">
+              <input
+                type="checkbox"
+                :checked="glossaryTermsEnabled"
+                @change="setGlossaryTermsEnabled($event.target.checked)"
+              >
+              <span class="slider"></span>
+            </label>
           </div>
 
           <div class="setting-row">

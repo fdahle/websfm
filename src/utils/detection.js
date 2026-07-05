@@ -60,9 +60,10 @@ export async function detectKeypoints(url, options = {}) {
   const flat = detect_sift(new Uint8Array(data.buffer), width, height, contrastThreshold, maxKeypoints)
   const ms = performance.now() - t0
 
-  // detect_sift appends a trailing raw-count scalar after the STRIDE-packed
-  // keypoints, so kept = floor((len - 1) / STRIDE). See crates/sift/src/lib.rs.
-  const n = flat.length > 0 ? Math.floor((flat.length - 1) / STRIDE) : 0
+  // detect_sift appends two trailing scalars after the STRIDE-packed keypoints:
+  // raw_found (post-dedup, pre-cap) then suppressed (near-duplicate positions
+  // dropped), so kept = floor((len - 2) / STRIDE). See crates/sift/src/lib.rs.
+  const n = flat.length >= 2 ? Math.floor((flat.length - 2) / STRIDE) : 0
   const keypoints = []
   const descriptors = new Float32Array(n * DESC_LEN)
 

@@ -66,3 +66,49 @@ export async function verifyMatches(kpsA, kpsB, matches, options = {}) {
 
   return { F, inlierMask, inlierCount }
 }
+
+/**
+ * Positional spread of the accepted (inlier) correspondences — a geometry check no
+ * count/ratio/H-vs-F gate can see. Two failure modes leave a positional fingerprint:
+ *
+ *   - many-to-one convergence: several distinct points in image A all match keypoints
+ *     stacked at ~one location in image B (e.g. duplicate scale/octave SIFT keypoints
+ *     on one strong blob — each index-distinct, so cross-check and the ratio test both
+ *     pass, and a homography can't fit them so the H/F flag reads healthy). The image-B
+ *     positions collapse to a handful of unique spots.
+ *   - epipole degeneracy: RANSAC satisfies every epipolar constraint by piling the
+ *     inliers into one tiny image region.
+ *
+ * Returns, over the inlier set: `count`, the number of unique rounded positions in
+ * each image (`uniqueA`/`uniqueB`), and the bounding-box diagonal in px (`extentA`/
+ * `extentB`). The caller rejects either signature. `matches[i]` must align with
+ * `inlierMask[i]` (i.e. the same putative list handed to `verifyMatches`).
+ */
+export function inlierSpread(kpsA, kpsB, matches, inlierMask, roundPx = 1) {
+  const seenA = new Set(), seenB = new Set()
+  let minAx = Infinity, minAy = Infinity, maxAx = -Infinity, maxAy = -Infinity
+  let minBx = Infinity, minBy = Infinity, maxBx = -Infinity, maxBy = -Infinity
+  let count = 0
+  for (let i = 0; i < matches.length; i++) {
+    if (!(inlierMask[i] > 0.5)) continue
+    const a = kpsA[matches[i].ia], b = kpsB[matches[i].ib]
+    count++
+    seenA.add(`${Math.round(a.x / roundPx)},${Math.round(a.y / roundPx)}`)
+    seenB.add(`${Math.round(b.x / roundPx)},${Math.round(b.y / roundPx)}`)
+    if (a.x < minAx) minAx = a.x
+    if (a.x > maxAx) maxAx = a.x
+    if (a.y < minAy) minAy = a.y
+    if (a.y > maxAy) maxAy = a.y
+    if (b.x < minBx) minBx = b.x
+    if (b.x > maxBx) maxBx = b.x
+    if (b.y < minBy) minBy = b.y
+    if (b.y > maxBy) maxBy = b.y
+  }
+  return {
+    count,
+    uniqueA: seenA.size,
+    uniqueB: seenB.size,
+    extentA: count ? Math.hypot(maxAx - minAx, maxAy - minAy) : 0,
+    extentB: count ? Math.hypot(maxBx - minBx, maxBy - minBy) : 0,
+  }
+}

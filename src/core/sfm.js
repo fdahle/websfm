@@ -99,6 +99,98 @@ function camToP34flat(cam) {
   return makeP34flat(cam.R, cam.t)
 }
 
+// ── 3×3 rotation helpers (rotation-cycle-consistency match filter) ────────────
+function matMul3(A, B) {
+  const C = [[0, 0, 0], [0, 0, 0], [0, 0, 0]]
+  for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) {
+    let s = 0
+    for (let k = 0; k < 3; k++) s += A[i][k] * B[k][j]
+    C[i][j] = s
+  }
+  return C
+}
+function matT3(A) {
+  return [[A[0][0], A[1][0], A[2][0]], [A[0][1], A[1][1], A[2][1]], [A[0][2], A[1][2], A[2][2]]]
+}
+// Geodesic angle (deg) of a rotation matrix from identity: θ = acos((tr R − 1)/2).
+function rotAngleDeg(R) {
+  const tr = R[0][0] + R[1][1] + R[2][2]
+  return Math.acos(Math.max(-1, Math.min(1, (tr - 1) / 2))) * 180 / Math.PI
+}
+
+// ── Rotation-cycle consistency filter (repetitive-structure defense, pure) ────
+// A verified pair can still be false: on repetitive structure (a row of near-
+// identical façades) RANSAC fits a clean fundamental matrix to the WRONG
+// correspondences, yielding a high inlier count but a bogus relative pose. Such a
+// pair clears every count/ratio gate. What it CANNOT do is agree with the rest of
+// the graph: decompose each pair's essential matrix into a relative rotation R_ij,
+// then for every triangle (i,j,k) the cycle R_ik⁻¹·R_jk·R_ij must be ≈ identity.
+// A true edge is cycle-consistent in nearly all its triangles; a false edge breaks
+// essentially every cycle it sits in, regardless of inlier count. Greedily drop the
+// least-consistent edge until every survivor with enough triangles clears the
+// support floor. Edges in fewer than `minTriangles` triangles are unjudgeable → kept.
+//
+// `edges`: [{ idA, idB, R }] — R is the relative rotation idA→idB (from essential
+// decomposition). Pure graph reasoning so it can be unit-tested without WASM; the
+// caller (reconstruct) supplies R via recoverPose. Returns { drop } where each entry
+// is { idA, idB, tri, good, ratio } for a removed pair (idA<idB canonical order).
+export function rotationCycleFilter(edges, opts = {}) {
+  const cycleErrDeg = opts.cycleErrorDeg ?? 5
+  const minTri = opts.minTriangles ?? 2
+  const minSupport = opts.minSupport ?? 0.3
+  const pk = (a, b) => (a < b ? `${a}--${b}` : `${b}--${a}`)
+
+  // pid → { a, b, R, active } with a<b, so R (a→b) is canonical min→max direction.
+  const E = new Map()
+  for (const e of edges) {
+    if (!e.R) continue
+    const [a, b] = e.idA < e.idB ? [e.idA, e.idB] : [e.idB, e.idA]
+    E.set(pk(a, b), { a, b, R: e.idA < e.idB ? e.R : matT3(e.R), active: true })
+  }
+
+  // Per-edge { tri, good } over every triangle in the currently-active graph. Each
+  // triangle {i<j<k} is generated exactly once — from its (min,mid) edge, scanning
+  // for a common neighbour k>j — then credited to all three of its edges.
+  const support = () => {
+    const stats = new Map()
+    const bump = (pid, ok) => { const s = stats.get(pid) ?? { tri: 0, good: 0 }; s.tri++; if (ok) s.good++; stats.set(pid, s) }
+    const adj = new Map()
+    const add = (u, v) => { if (!adj.has(u)) adj.set(u, new Set()); adj.get(u).add(v) }
+    for (const e of E.values()) if (e.active) { add(e.a, e.b); add(e.b, e.a) }
+    for (const e of E.values()) {
+      if (!e.active) continue
+      const i = e.a, j = e.b // i<j
+      const ni = adj.get(i), nj = adj.get(j)
+      for (const k of ni) {
+        if (k <= j || !nj.has(k)) continue // i<j<k, each triangle once
+        const Rij = E.get(pk(i, j)).R, Rjk = E.get(pk(j, k)).R, Rik = E.get(pk(i, k)).R
+        const ok = rotAngleDeg(matMul3(matT3(Rik), matMul3(Rjk, Rij))) <= cycleErrDeg
+        bump(pk(i, j), ok); bump(pk(j, k), ok); bump(pk(i, k), ok)
+      }
+    }
+    return stats
+  }
+
+  const drop = []
+  while (true) {
+    const stats = support()
+    let worst = null
+    for (const [pid, s] of stats) {
+      if (s.tri < minTri) continue
+      const ratio = s.good / s.tri
+      if (ratio >= minSupport) continue
+      if (!worst || ratio < worst.ratio || (ratio === worst.ratio && s.tri > worst.tri)) {
+        worst = { pid, ratio, tri: s.tri, good: s.good }
+      }
+    }
+    if (!worst) break
+    const e = E.get(worst.pid)
+    e.active = false
+    drop.push({ idA: e.a, idB: e.b, tri: worst.tri, good: worst.good, ratio: worst.ratio })
+  }
+  return { drop }
+}
+
 // ── Retriangulation + track merging (A3, pure) ───────────────────────────────
 // Standard COLMAP-style post-BA structure recovery, factored out of `reconstruct`
 // so it's testable in isolation. Shared signature:
@@ -227,8 +319,9 @@ export async function reconstruct(input, hooks = {}) {
   let points3d = []          // [{ x, y, z, views: Map<uuid, kpIdx> }]
 
   // Only 'done' pairs participate (the store passes those, but keep the guard
-  // so the algorithm reads identically to the original).
-  const donePairs = pairs.filter((e) => e.status === 'done')
+  // so the algorithm reads identically to the original). Not const: the
+  // rotation-cycle filter (below) prunes cycle-inconsistent pairs before SfM.
+  let donePairs = pairs.filter((e) => e.status === 'done')
 
   // Reprojection-error statistics (pixels) over every observation currently in
   // the model: project each 3D point into each camera that sees it and compare
@@ -388,6 +481,54 @@ export async function reconstruct(input, hooks = {}) {
         + `Wrong intrinsics distort the geometry and commonly prevent cameras from registering; `
         + `supply a focal length or sensor size for reliable results.`,
         defaultKCount === imgs.length ? 'warn' : 'info', 'Reconstruction')
+    }
+
+    // ── Rotation-cycle consistency filter ────────────────────────────────────
+    // Drop verified-but-false pairs (spurious epipolar fits on repetitive
+    // structure) that no count/ratio gate can catch: their relative rotation is
+    // inconsistent with the rest of the match graph. See rotationCycleFilter.
+    if (settings.rotationCycleFilter !== false && donePairs.length >= 3) {
+      // Relative rotation R (idA→idB) per pair, via essential decomposition. The
+      // pose args only disambiguate the cheirality branch, so post-undistort vs
+      // raw keypoints barely shift R — F/K drive it. Skip pairs without an F.
+      const relRot = async (e) => {
+        if (!e.F) return null
+        const iA = imageByUuid(e.idA), iB = imageByUuid(e.idB)
+        if (!iA || !iB) return null
+        const E = fundamentalToEssential(e.F, Kmap.get(e.idA), Kmap.get(e.idB))
+        const pose = await recoverPose(
+          e.matches.map(([ia]) => iA.keypoints[ia]),
+          e.matches.map(([, ib]) => iB.keypoints[ib]),
+          E, Kmap.get(e.idA),
+        )
+        return pose ? pose.R : null
+      }
+      const Rs = await Promise.all(donePairs.map(relRot))
+      const { drop } = rotationCycleFilter(
+        donePairs.map((e, i) => ({ idA: e.idA, idB: e.idB, R: Rs[i] })),
+        {
+          cycleErrorDeg: settings.cycleErrorDeg,
+          minTriangles: settings.cycleMinTriangles,
+          minSupport: settings.cycleMinSupport,
+        },
+      )
+      if (drop.length) {
+        const nm = (u) => imageByUuid(u)?.name ?? u
+        const pk = (a, b) => (a < b ? `${a}--${b}` : `${b}--${a}`)
+        const rm = new Set(drop.map((d) => pk(d.idA, d.idB)))
+        const needSupport = settings.cycleMinSupport ?? 0.3
+        for (const d of drop) {
+          log(`Reconstruction: rotation-cycle filter dropped ${nm(d.idA)} ↔ ${nm(d.idB)} — `
+            + `cycle-consistent in only ${d.good}/${d.tri} triangles `
+            + `(${(100 * d.ratio).toFixed(0)}%, need ≥${(100 * needSupport).toFixed(0)}%) — `
+            + `likely false match on repetitive structure`, 'warn', 'Reconstruction')
+        }
+        donePairs = donePairs.filter((e) => !rm.has(pk(e.idA, e.idB)))
+        log(`Reconstruction: rotation-cycle filter removed ${drop.length} inconsistent pair(s); `
+          + `${donePairs.length} verified pair(s) remain`, 'info', 'Reconstruction')
+      } else {
+        log('Reconstruction: rotation-cycle filter — all pairs cycle-consistent', 'debug', 'Reconstruction')
+      }
     }
 
     // Two-view initialisation for one matched pair: recover pose, triangulate,
@@ -665,14 +806,25 @@ export async function reconstruct(input, hooks = {}) {
 
     // Gather 2D-3D correspondences between an unregistered image and the model:
     // for each match to a registered image, look up (via the index) the 3D point
-    // that registered keypoint already belongs to. Deduped to one observation per
-    // point; if the same point is reached with conflicting keypoints (an ambiguous
-    // match), it is dropped rather than risk a bad correspondence. Returns the new
-    // image's keypoint index per correspondence too, so successful matches can
-    // *extend* the track after PnP confirms the pose.
+    // that registered keypoint already belongs to. A correspondence is only
+    // trustworthy when it is *bijective* — one 3D point ↔ one new-image keypoint.
+    // Two failure modes break that, and each poisons PnP if kept:
+    //   • many→one: one 3D point reached via two different new keypoints (an
+    //     ambiguous match);
+    //   • one→many: one new keypoint mapping to two different 3D points (a split
+    //     track / repetitive structure). At most one can ever be a geometric
+    //     inlier, so the extras inflate the correspondence count and mechanically
+    //     depress the PnP inlier ratio (the minPnpInlierRatio gate) while feeding
+    //     RANSAC contradictory constraints — the classic "many correspondences,
+    //     few inliers" registration stall on chain-like / repetitive datasets.
+    // Detect both directions and drop the offending point/keypoint entirely.
+    // Returns the new image's keypoint index per correspondence too, so successful
+    // matches can *extend* the track after PnP confirms the pose.
     function collectCorrespondences(img) {
-      const byPoint = new Map()    // pt → newIdx
-      const conflicted = new Set() // pts reached with inconsistent newIdx
+      const ptToIdx = new Map()    // pt → newIdx (first seen)
+      const idxToPt = new Map()    // newIdx → pt (first seen)
+      const badPts = new Set()     // pts reached with ≥2 distinct newIdx (many→one)
+      const badIdx = new Set()     // newIdx reached from ≥2 distinct pts (one→many)
       for (const entry of donePairs) {
         let regUuid = null
         if (entry.idA === img.uuid && registeredUuids.has(entry.idB)) regUuid = entry.idB
@@ -682,17 +834,21 @@ export async function reconstruct(input, hooks = {}) {
         if (!regMap) continue
         const imgIsA = entry.idA === img.uuid
         for (const [ia, ib] of entry.matches) {
-          const newIdx = imgIsA ? ia : ib
+          const nIdx = imgIsA ? ia : ib
           const regIdx = imgIsA ? ib : ia
           const pt = regMap.get(regIdx)
           if (!pt) continue
-          if (byPoint.has(pt) && byPoint.get(pt) !== newIdx) conflicted.add(pt)
-          else byPoint.set(pt, newIdx)
+          const prevIdx = ptToIdx.get(pt)
+          if (prevIdx === undefined) ptToIdx.set(pt, nIdx)
+          else if (prevIdx !== nIdx) badPts.add(pt)
+          const prevPt = idxToPt.get(nIdx)
+          if (prevPt === undefined) idxToPt.set(nIdx, pt)
+          else if (prevPt !== pt) badIdx.add(nIdx)
         }
       }
-      for (const pt of conflicted) byPoint.delete(pt)
       const pts3 = []; const pts2 = []; const newIdx = []
-      for (const [pt, idx] of byPoint) {
+      for (const [pt, idx] of ptToIdx) {
+        if (badPts.has(pt) || badIdx.has(idx)) continue
         const kp = img.keypoints[idx]
         if (!kp) continue
         pts3.push(pt); pts2.push({ x: kp.x, y: kp.y }); newIdx.push(idx)
