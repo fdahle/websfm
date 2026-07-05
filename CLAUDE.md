@@ -52,6 +52,11 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
 - `useImagesStore` — source images, keypoints, masks, depth maps, sensor assignments.
   `sync()` writes the whole `project.json`.
 - `useMatchesStore` — pairwise matches; `pairId = sorted([uuidA,uuidB]).join('--')`.
+  Entries carry a persisted `disabled` flag (`setPairDisabled`) — a reversible user
+  exclusion of an obviously-wrong pair; disabled pairs are filtered out where
+  reconstruction reads the store (`useReconstructionStore` pair marshalling) and
+  don't count as `verified` in `matchStats`. Toggled from `MatchListModal` (list
+  row / preview / graph-edge double-click; `MatchGraph.vue` is the graph view).
 - `useReconstructionStore` — clouds (sparse + dense), depth-map cache (`shallowRef`,
   not persisted), georef fit, run summaries; runs reconstruct / computeDepthMaps /
   densify / generateDem / generateOrtho.
@@ -60,13 +65,26 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
 
 ## Pipelines
 1. **Detect** (SIFT, `crates/sift`) → keypoints (+colours) + 128-d descriptors.
+   Near-duplicate keypoints (one strong blob firing as a DoG extremum across
+   adjacent scales/octaves → several index-distinct points within ~2px) are
+   suppressed at detection (`suppress_duplicate_positions`, response-desc NMS);
+   `detect_sift` output carries **two** trailing sentinels (`raw_found`,
+   `suppressed`), so parse `kept = floor((len-2)/STRIDE)`.
 2. **Match** (`crates/matching`) → Lowe ratio test + RANSAC fundamental-matrix
    verification, with an inlier-**ratio** gate (rejects spurious epipolar fits on
-   repetitive structure). Optional pair **preselection** (`core/preselect.js`,
-   k-nearest by imported camera position) prunes the exhaustive O(N²) set;
-   `matchAll` runs on a concurrency-limited worker pool with a per-run descriptor
-   cache.
-3. **Sparse SfM** (`core/sfm.js`): pick init pair (inliers + parallax + lowest init
+   repetitive structure) and a **positional-spread** reject (`core/matching.js`
+   `inlierSpread`, gated in `useMatchesStore`): drop a pair whose accepted inliers
+   collapse to few unique locations (many-to-one convergence) or a pinhead region
+   (epipole degeneracy) — signatures no count/ratio/H-F gate can see. Optional pair
+   **preselection** (`core/preselect.js`, k-nearest by imported camera position)
+   prunes the exhaustive O(N²) set; `matchAll` runs on a concurrency-limited worker
+   pool with a per-run descriptor cache.
+3. **Sparse SfM** (`core/sfm.js`): a **rotation-cycle consistency filter**
+   (`rotationCycleFilter`) first prunes verified-but-false pairs — spurious epipolar
+   fits on repetitive structure that clear every count/ratio gate but whose relative
+   rotation is inconsistent with the match graph (each triangle's `R_ik⁻¹·R_jk·R_ij`
+   must be ≈ identity; greedily drop the edge that fails most of its triangles). Then
+   pick init pair (inliers + parallax + lowest init
    reprojection), incremental PnP registration (P3P + MSAC + Gauss-Newton polish in
    `crates/reconstruction/src/pose.rs`), track extension, then LM bundle adjustment
    (`bundle.rs`: Schur complement, analytic Jacobians, adaptive Huber; optional
@@ -100,6 +118,26 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
    SfM centres ↔ imported poses). Exports in `core/exporters.js` +
    `core/geotiff.js` (PLY, model JSON, DEM GeoTIFF/.asc, ortho GeoTIFF/PNG+.wld)
    through `ExportModal.vue`. Products persist to OPFS (`products/…`).
+
+## In-app glossary (help)
+Cross-linked term explanations. **Content**: `src/help/*.md`, frontmatter
+(`id`/`title`/`summary`/optional `aliases`) + markdown body; images under
+`src/help/assets/`. `core/glossary.js` is the pure loader/renderer — parses
+frontmatter, renders via `marked` + KaTeX (`$…$`/`$$…$$`), resolves `assets/*`
+image URLs, and **auto-links** any occurrence of another entry's title/alias to
+its tab (first hit per term; opt out one occurrence with
+`<span class="no-help">…</span>`); also `getAllHelpEntries`/`searchGlossary`.
+**UI**: `<GlossaryTerm id>` (`components/glossary/`) wraps inline keywords —
+hover shows `GlossaryTooltip` with a border **progress ring** that, once filled,
+**pins** the popup (interactive: cross-links + "Read more"). The term itself is
+not clickable; "Read more" opens the single centered tabbed `GlossaryModal`
+(home/index + search + one closeable tab per term), driven by `useGlossaryStore`
+(`isOpen`/`tabs`/`activeId`). Ribbon *Other ▸ Glossary* → `open-glossary` opens
+the home page. Highlighting is gated by the persisted `glossaryTermsEnabled`
+toggle (`composables/useGlossarySettings.js`, Settings ▸ Display). **Adding a
+term**: drop `src/help/<id>.md` (auto-registered by the glob) — it auto-links
+wherever its title/aliases appear; wrap UI text in `<GlossaryTerm id>` only where
+you want an explicit hover affordance.
 
 ## CRS / GCP / poses
 Per-project working CRS (proj4). GCPs, footprints, and camera poses store positions in

@@ -4,6 +4,7 @@ import * as opfs from '../utils/opfs.js'
 import { matchDescriptors, verifyMatches, POOL_SIZE } from '../workers/computeClient.js'
 import { useLog } from '../composables/useLog.js'
 import { preselectPairs } from '../core/preselect.js'
+import { inlierSpread } from '../core/matching.js'
 import { registerProjectStore } from './projectStores.js'
 import { useProjectsStore } from './useProjectsStore.js'
 import { usePosesStore } from './usePosesStore.js'
@@ -15,7 +16,9 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
   const projects = useProjectsStore()
   const posesStore = usePosesStore()
 
-  // pairId → { idA, idB, rawCount, inlierCount, F, matches: [[ia,ib],...], status }.
+  // pairId → { idA, idB, rawCount, inlierCount, F, matches: [[ia,ib],...], status,
+  //            disabled }. `disabled` is a user override that excludes an otherwise-
+  //            verified pair from reconstruction (obviously-wrong matches) — reversible.
   // shallowRef + in-place mutation + triggerRef (NOT a whole-Map copy per write):
   // this is what makes concurrent matchPair() calls safe — copying the Map on every
   // write races (one writer's snapshot clobbers another's set). See P2 in HANDOVER.
@@ -50,7 +53,7 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
       ? [imgA.keypoints, imgB.keypoints]
       : [imgB.keypoints, imgA.keypoints]
 
-    const entry = { idA, idB, rawCount: 0, inlierCount: 0, F: null, matches: [], status: 'running' }
+    const entry = { idA, idB, rawCount: 0, inlierCount: 0, F: null, matches: [], status: 'running', disabled: false }
     matchStore.value.set(pid, entry)
     // Trigger reactivity
     touch()
@@ -120,7 +123,37 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
         const overrideInliers = settings.overrideInliers ?? 30
         const ratioOk = ratio >= minInlierRatio
         const overrode = !ratioOk && result != null && result.inlierCount >= overrideInliers
+<<<<<<< Updated upstream
         if (result && result.inlierCount >= minMatches && (ratioOk || overrode)) {
+=======
+        // H-vs-F degeneracy: when a homography captures nearly as many inliers as the
+        // fundamental matrix, the pair's scene is planar or its motion a pure rotation
+        // (a flat façade, a spin-in-place). Such pairs still bridge the match graph, so
+        // we keep them — but they make poor SfM *seeds* (the essential-matrix pose
+        // recovery is ambiguous under planar degeneracy), so flag them for the seed
+        // selector. Not a rejection, just a quality label riding through to the pair.
+        const degenRatioThresh = settings.hfDegenerateRatio ?? 0.8
+        const hfRatio = result && result.inlierCount > 0
+          ? result.hInlierCount / result.inlierCount : 0
+        entry.hInlierCount = result?.hInlierCount ?? 0
+        entry.hfRatio = hfRatio
+        entry.degenerate = result != null && hfRatio >= degenRatioThresh
+        // Positional-degeneracy REJECT (see core/matching.js inlierSpread): the inlier
+        // set has enough points and clears every count/ratio/H-F gate, yet its positions
+        // in one image collapse — many-to-one convergence (unique spots ≪ inliers) or
+        // epipole degeneracy (all inliers in a pinhead region). Neither is real geometry.
+        // Unlike `degenerate` (a seed-quality label), this is a hard reject.
+        const minUniqueFrac = settings.minInlierUniqueFrac ?? 0.5
+        const minSpreadPx = settings.minInlierSpreadPx ?? 8
+        const spread = result ? inlierSpread(kpsA, kpsB, raw, result.inlierMask) : null
+        let spreadDegenerate = false
+        if (spread && spread.count >= minMatches) {
+          const collapsed = Math.min(spread.uniqueA, spread.uniqueB) < minUniqueFrac * spread.count
+          const tiny = Math.min(spread.extentA, spread.extentB) < minSpreadPx
+          spreadDegenerate = collapsed || tiny
+        }
+        if (result && result.inlierCount >= minMatches && (ratioOk || overrode) && !spreadDegenerate) {
+>>>>>>> Stashed changes
           entry.F = result.F
           entry.inlierCount = result.inlierCount
           entry.matches = raw
@@ -129,7 +162,23 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
         } else {
           entry.inlierCount = 0
           entry.matches = []
-          entry.rejectRatio = ratio // for the diagnostic log below
+          entry.rejectRatio = ratio // for the run summary stats
+          // Record the ACTUAL cause. A pair can fail the absolute inlier floor
+          // (minMatches) even when its ratio clears the gate — don't blame the
+          // ratio unconditionally, that misreads as "ratio too low" at ratio 0.43.
+          if (!result) {
+            entry.rejectReason = 'no fundamental matrix could be fit'
+          } else if (spreadDegenerate) {
+            entry.rejectReason = `inliers collapse positionally — ${result.inlierCount} inliers map to only `
+              + `${spread.uniqueA}/${spread.uniqueB} unique spots (A/B), extent ${spread.extentA.toFixed(0)}/`
+              + `${spread.extentB.toFixed(0)}px — many-to-one / epipole degeneracy, not real geometry`
+          } else if (result.inlierCount < minMatches) {
+            entry.rejectReason = `only ${result.inlierCount} inliers — below the ${minMatches} `
+              + `absolute floor (ratio ${ratio.toFixed(2)} cleared its ${minInlierRatio} gate)`
+          } else {
+            entry.rejectReason = `inlier ratio ${ratio.toFixed(2)} below gate ${minInlierRatio} `
+              + `and ${result.inlierCount} < ${overrideInliers} override — likely false match on repetitive structure`
+          }
         }
         // Detailed diagnostics (debug level): putatives, inliers, the ratio, and
         // the gate/threshold that decided the outcome — for every verified pair,
@@ -137,6 +186,12 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
         log(`Match ${imgA.name} ↔ ${imgB.name} — ${raw.length} putatives → `
           + `${result?.inlierCount ?? 0} inliers (ratio ${ratio.toFixed(2)}, gate ${minInlierRatio}`
           + `${overrode ? `, ratio-override on ${result.inlierCount}≥${overrideInliers} inliers` : ''}), `
+<<<<<<< Updated upstream
+=======
+          + `H/F ${hfRatio.toFixed(2)}${entry.degenerate ? ' (degenerate — planar/pure-rotation, poor seed)' : ''}, `
+          + `${spread ? `spread ${spread.uniqueA}/${spread.uniqueB} unique, ${spread.extentA.toFixed(0)}/${spread.extentB.toFixed(0)}px` : 'spread n/a'}`
+          + `${spreadDegenerate ? ' (positional collapse — REJECTED)' : ''}, `
+>>>>>>> Stashed changes
           + `RANSAC ${settings.ransacThreshPx ?? 2.0}px`, 'debug', 'Matching')
       } else {
         entry.matches = raw.map(m => [m.ia, m.ib])
@@ -152,6 +207,7 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
           inlierCount: entry.inlierCount,
           F: entry.F,
           matches: entry.matches,
+          disabled: entry.disabled,
         }).catch(() => {})
       }
 
@@ -160,14 +216,11 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
       // match, so don't report it in green as a success.
       if (entry.inlierCount > 0) {
         log(`Matched: ${label} — ${entry.inlierCount}/${entry.rawCount} inliers`, 'success', 'Matching')
-      } else if (entry.rejectRatio != null && entry.rejectRatio > 0) {
-        // Failed the inlier-ratio gate: likely a spurious epipolar fit on repetitive
-        // structure, not a real overlap.
-        log(`Rejected: ${label} — ${entry.rawCount} raw matches, inlier ratio `
-          + `${entry.rejectRatio.toFixed(2)} too low (likely false match on repetitive structure)`,
-          'warn', 'Matching')
       } else {
-        log(`Rejected: ${label} — ${entry.rawCount} raw matches, none passed geometric verification`, 'warn', 'Matching')
+        // Report the recorded cause (ratio-gate vs absolute-inlier floor vs no model),
+        // not a blanket "ratio too low" that misreads floor rejections.
+        log(`Rejected: ${label} — ${entry.rawCount} raw matches, `
+          + `${entry.rejectReason ?? 'none passed geometric verification'}`, 'warn', 'Matching')
       }
     } catch (err) {
       entry.status = 'error'
@@ -228,7 +281,13 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
     }
 
     const concurrency = Math.max(1, Math.min(POOL_SIZE, pairs.length))
-    log(`Matching: ${pairs.length} pair(s) — ${strategy}${concurrency > 1 ? `, ${concurrency}× parallel` : ''}`, 'info', 'Matching')
+    // Log the descriptor-matching knobs so a run's settings are auditable — in
+    // particular whether cross-check (mutual nearest neighbour) is active, which
+    // otherwise leaves no trace in the console yet meaningfully changes putatives.
+    const crossCheck = settings.crossCheck ?? false
+    log(`Matching: ${pairs.length} pair(s) — ${strategy}${concurrency > 1 ? `, ${concurrency}× parallel` : ''}`
+      + `; cross-check ${crossCheck ? 'on (mutual NN)' : 'off'}, ratio ${settings.ratioThreshold ?? 0.75}`,
+      'info', 'Matching')
     let done = 0
     // Tally this run's outcomes for the completion summary. Skipped = too few raw
     // matches to bother verifying; rejected = verified but failed the count/ratio
@@ -294,11 +353,29 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
     return removed
   }
 
+  // Toggle a verified pair's exclusion from reconstruction. A reversible user
+  // override for obviously-wrong matches that clear every automatic gate; disabled
+  // pairs stay stored (and re-enablable) but are filtered out at reconstruct time.
+  function setPairDisabled(pid, disabled) {
+    const entry = matchStore.value.get(pid)
+    if (!entry || !!entry.disabled === !!disabled) return
+    entry.disabled = !!disabled
+    touch()
+    if (isPersisting() && entry.matches.length) {
+      opfs.saveMatches(projects.currentProjectId, pid, {
+        idA: entry.idA, idB: entry.idB,
+        rawCount: entry.rawCount, inlierCount: entry.inlierCount,
+        F: entry.F, matches: entry.matches, disabled: entry.disabled,
+      }).catch(() => {})
+    }
+    log(`Pair ${disabled ? 'excluded from' : 'restored to'} reconstruction`, 'info', 'Matching')
+  }
+
   // Project-store contract.
   async function restore({ projectId }) {
     const all = await opfs.loadAllMatches(projectId)
     const newMap = new Map()
-    for (const { pairId, idA, idB, rawCount, inlierCount, F, matches } of all) {
+    for (const { pairId, idA, idB, rawCount, inlierCount, F, matches, disabled } of all) {
       newMap.set(pairId, {
         idA, idB,
         rawCount:     rawCount    ?? 0,
@@ -306,6 +383,7 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
         F:            F           ?? null,
         matches:      matches     ?? [],
         status: 'done',
+        disabled:     disabled    ?? false,
       })
     }
     matchStore.value = newMap
@@ -320,5 +398,5 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
     }
   }
 
-  return { matchStore, pairId, getMatch, verifiedPairs, matchPair, matchAll, removeMatchesForImage, restore, clear }
+  return { matchStore, pairId, getMatch, verifiedPairs, matchPair, matchAll, removeMatchesForImage, setPairDisabled, restore, clear }
 }))

@@ -41,7 +41,11 @@
       "Bash(perl -0pi -e 's/matchStore\\\\.value = new Map\\\\\\(matchStore\\\\.value\\\\\\)/touch\\(\\)/g' src/stores/useMatchesStore.js)",
       "Bash(cd /Users/fhdahle/Documents/GitHub/websfm && wasm-pack build crates/reconstruction --target web --out-dir ../../src/wasm/reconstruction 2>&1 | tail -20 && rm -f src/wasm/*/.gitignore)",
       "Bash(echo \"exit: $?\")",
-      "Bash(lsof -i:5173)"
+      "Bash(lsof -i:5173)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(node -e \"console.log\\(require\\('marked/package.json'\\).version\\)\")",
+      "Bash(git rm *)"
     ],
     "additionalDirectories": [
       "/Users/fhdahle/Documents/GitHub/websfm/src/wasm/*",

@@ -175,6 +175,7 @@ const tabs = [
       {
         label: 'App',
         commands: [
+          { id: 'open-glossary', label: 'Glossary', icon: 'book' },
           { id: 'open-settings', label: 'Settings', icon: 'settings' },
           { id: 'open-about',    label: 'About',    icon: 'info' },
         ],

@@ -5,12 +5,30 @@ import { useLog } from '../../composables/useLog.js'
 const { entries, clear } = useLog()
 const body = ref(null)
 
-watch(entries, async () => {
-  await nextTick()
+// "Stick to bottom": follow new log lines automatically, but only while the user
+// hasn't manually scrolled up. Scrolling back down to within THRESHOLD px re-sticks.
+const THRESHOLD = 60
+const stickToBottom = ref(true)
+
+function atBottom(el) {
+  return el.scrollHeight - el.scrollTop - el.clientHeight < THRESHOLD
+}
+
+function onScroll() {
+  const el = body.value
+  if (el) stickToBottom.value = atBottom(el)
+}
+
+function scrollToBottom() {
   const el = body.value
   if (!el) return
-  const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60
-  if (nearBottom) el.scrollTop = el.scrollHeight
+  el.scrollTop = el.scrollHeight
+  stickToBottom.value = true
+}
+
+watch(entries, async () => {
+  await nextTick()
+  if (stickToBottom.value) scrollToBottom()
 }, { deep: true })
 
 // Drag-to-resize from the top edge.
@@ -154,7 +172,7 @@ function saveTxt() {
       </div>
     </div>
     <div class="console-main">
-      <div ref="body" class="console-body" tabindex="0" @keydown="onKeyDown">
+      <div ref="body" class="console-body" tabindex="0" @keydown="onKeyDown" @scroll.passive="onScroll">
         <div
           v-for="entry in filteredEntries"
           :key="entry.id"
@@ -173,6 +191,13 @@ function saveTxt() {
           {{ entries.length === 0 ? 'No output yet.' : 'No entries match the current filter.' }}
         </div>
       </div>
+
+      <button
+        v-if="!stickToBottom"
+        class="jump-btn"
+        title="Jump to newest log entries"
+        @click="scrollToBottom"
+      >↓ New logs</button>
 
       <div v-if="filterOpen" class="filter-panel">
         <div class="filter-header">
@@ -291,7 +316,29 @@ function saveTxt() {
   flex: 1;
   display: flex;
   overflow: hidden;
+  position: relative;
 }
+
+/* Floating "jump to newest" chip — shown only when the user has scrolled up. */
+.jump-btn {
+  position: absolute;
+  bottom: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 12px;
+  font-family: inherit;
+  font-size: 11px;
+  padding: 3px 12px;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  opacity: 0.92;
+}
+
+.jump-btn:hover { opacity: 1; }
 
 .console-body {
   flex: 1;

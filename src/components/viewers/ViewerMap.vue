@@ -24,6 +24,10 @@ const props = defineProps({
   footprints: { type: Array,  default: () => [] },
   poses:      { type: Array,  default: () => [] },
   selectedId: { type: String, default: null },
+  // UUIDs registered in the sparse model; `hasSparse` gates whether "not in this
+  // set" means unaligned (vs. reconstruction simply not having run yet).
+  alignedUuids: { type: Object, default: () => new Set() },
+  hasSparse:    { type: Boolean, default: false },
   crs:        { type: String, default: 'EPSG:4326' },
 })
 
@@ -57,8 +61,24 @@ const selectedStyle = new Style({
   }),
 })
 
+// Faded marker for an image that failed to register into the sparse model.
+const unalignedStyle = new Style({
+  image: new CircleStyle({
+    radius: 6,
+    fill:   new Fill({ color: 'rgba(120, 130, 140, 0.5)' }),
+    stroke: new Stroke({ color: 'rgba(255, 255, 255, 0.6)', width: 1.5 }),
+  }),
+})
+
+// True once a sparse model exists but this image's uuid wasn't registered into it.
+function featureUnaligned(feature) {
+  const uuid = feature.get('uuid')
+  return props.hasSparse && uuid != null && !props.alignedUuids.has(uuid)
+}
+
 function styleFor(feature) {
-  return feature.get('imgId') === props.selectedId ? selectedStyle : normalStyle
+  if (feature.get('imgId') === props.selectedId) return selectedStyle
+  return featureUnaligned(feature) ? unalignedStyle : normalStyle
 }
 
 // GCP markers: green diamond, visually distinct from the blue image-GPS circles.
@@ -146,9 +166,10 @@ function projectLonLat(lon, lat) {
   return transform([lon, lat], 'EPSG:4326', props.crs)
 }
 
-function makeFeature({ id, name, meta }) {
+function makeFeature({ id, uuid, name, meta }) {
   const f = new Feature({ geometry: new Point(projectLonLat(meta.gpsLon, meta.gpsLat)) })
   f.set('imgId', id)
+  f.set('uuid', uuid)
   f.set('name', name)
   return f
 }
@@ -303,10 +324,11 @@ async function build() {
       const gcpName = hit.get('gcpName')
       const fpName = hit.get('footprintName')
       const poseName = hit.get('poseName')
+      const imgName = hit.get('name')
       const text = gcpName ? `GCP: ${gcpName}`
         : fpName ? `Footprint: ${fpName}`
         : poseName ? `Camera: ${poseName}`
-        : hit.get('name')
+        : featureUnaligned(hit) ? `${imgName} (not aligned)` : imgName
       hover.value = { text, x: e.pixel[0], y: e.pixel[1] }
     } else {
       hover.value = null
@@ -342,6 +364,10 @@ watch(mapPoses, refreshPoses, { deep: true })
 
 // Re-style on selection change without rebuilding features
 watch(() => props.selectedId, () => { vSource?.changed(); footprintSource?.changed(); poseSource?.changed() })
+
+// Re-style image markers when the registered set changes (reconstruction finished
+// or a different cloud was selected) — the features themselves don't move.
+watch(() => props.alignedUuids, () => vSource?.changed())
 
 // Rebuild the whole map when the project CRS changes
 watch(() => props.crs, async () => {

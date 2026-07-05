@@ -7,15 +7,24 @@ const DESC_LEN: usize = N_HIST * N_HIST * N_ORI; // 128
 /// Output stride per keypoint: x, y, scale, response, angle, desc[128]
 const STRIDE: usize = 5 + DESC_LEN; // 133
 
+/// Near-duplicate suppression radius (input pixels). A strong blob fires as a DoG
+/// extremum at several adjacent scale levels and again in the next octave; mapped
+/// back through the octave scale factor those land several keypoints within a pixel
+/// of each other. Keep only the strongest at each visual location.
+const DEDUP_RADIUS_PX: f32 = 2.0;
+
 /// Detect SIFT keypoints and compute 128-d descriptors.
 ///
 /// Returns a flat `Float32Array` with `STRIDE` (133) values per keypoint:
 /// `[x, y, scale, response, angle, d0..d127, ...]`
-/// where `x`/`y` are in input-image pixel coordinates, followed by a SINGLE
-/// trailing value = the total keypoints found *before* the `max_keypoints` cap
-/// (so callers can report how many were dropped to the cap). A degenerate input
+/// where `x`/`y` are in input-image pixel coordinates, followed by TWO trailing
+/// values: `raw_found` = keypoints surviving near-duplicate suppression but *before*
+/// the `max_keypoints` cap (so callers can report how many were dropped to the cap),
+/// then `suppressed` = keypoints dropped as near-duplicate positions (multiple
+/// scale/octave DoG extrema collapsing onto one visual location). A degenerate input
 /// (zero-size / short buffer) returns an empty vec; a valid image with no extrema
-/// returns `[0.0]`. Parse as `kept = floor((len - 1) / STRIDE)`, `raw = last`.
+/// returns `[0.0, 0.0]`. Parse as `kept = floor((len - 2) / STRIDE)`,
+/// `raw = flat[len-2]`, `suppressed = flat[len-1]`.
 #[wasm_bindgen]
 pub fn detect_sift(
     rgba: &[u8],
@@ -29,10 +38,16 @@ pub fn detect_sift(
     }
 
     let gray = to_gray(rgba, width, height);
-    let mut kps = sift_keypoints(&gray, width, height, contrast_threshold);
-    let raw_found = kps.len(); // total detected before the max_keypoints cap
+    let kps = sift_keypoints(&gray, width, height, contrast_threshold);
+    let detected = kps.len(); // total extrema, before dedup and before the cap
 
+    // Response-desc first so near-duplicate suppression keeps the strongest at each
+    // location, then feeds the max_keypoints cap the best survivors.
+    let mut kps = kps;
     kps.sort_by(|a, b| b.response.partial_cmp(&a.response).unwrap_or(std::cmp::Ordering::Equal));
+    let mut kps = suppress_duplicate_positions(kps, DEDUP_RADIUS_PX);
+    let suppressed = detected - kps.len();
+    let raw_found = kps.len(); // post-dedup, before the max_keypoints cap
     if max_keypoints > 0 && kps.len() > max_keypoints {
         kps.truncate(max_keypoints);
     }
@@ -46,8 +61,50 @@ pub fn detect_sift(
         out.push(k.angle);
         out.extend_from_slice(&k.desc);
     }
-    out.push(raw_found as f32); // trailing raw-count sentinel
+    out.push(raw_found as f32); // trailing sentinels: post-dedup count …
+    out.push(suppressed as f32); // … then near-duplicates suppressed
     out
+}
+
+/// Drop near-duplicate keypoints: for a response-desc–sorted list, keep a keypoint
+/// only when no already-kept (stronger) one lies within `radius` px. A spatial hash
+/// (cell = `radius`) keeps this ~O(n): a candidate only compares against kept points
+/// in its own and adjacent cells. See `DEDUP_RADIUS_PX` for why duplicates arise.
+fn suppress_duplicate_positions(kps: Vec<Kp>, radius: f32) -> Vec<Kp> {
+    if kps.is_empty() {
+        return kps;
+    }
+    let r2 = radius * radius;
+    let cell = radius.max(1.0);
+    let mut grid: std::collections::HashMap<(i32, i32), Vec<usize>> =
+        std::collections::HashMap::new();
+    let mut kept: Vec<Kp> = Vec::with_capacity(kps.len());
+    for kp in kps {
+        let cx = (kp.x / cell).floor() as i32;
+        let cy = (kp.y / cell).floor() as i32;
+        let mut dup = false;
+        'search: for gx in cx - 1..=cx + 1 {
+            for gy in cy - 1..=cy + 1 {
+                if let Some(idxs) = grid.get(&(gx, gy)) {
+                    for &i in idxs {
+                        let dx = kept[i].x - kp.x;
+                        let dy = kept[i].y - kp.y;
+                        if dx * dx + dy * dy <= r2 {
+                            dup = true;
+                            break 'search;
+                        }
+                    }
+                }
+            }
+        }
+        if dup {
+            continue;
+        }
+        let idx = kept.len();
+        grid.entry((cx, cy)).or_default().push(idx);
+        kept.push(kp);
+    }
+    kept
 }
 
 struct Kp {
@@ -518,14 +575,28 @@ mod tests {
         }
 
         let out = detect_sift(&rgba, w, h, 0.02, 1000);
-        // Trailing raw-count sentinel ⇒ (len - 1) is a multiple of STRIDE.
-        assert_eq!((out.len() - 1) % STRIDE, 0, "output must be groups of {} + 1", STRIDE);
-        let kept = (out.len() - 1) / STRIDE;
+        // Two trailing sentinels (raw_found, suppressed) ⇒ (len - 2) is a STRIDE multiple.
+        assert_eq!((out.len() - 2) % STRIDE, 0, "output must be groups of {} + 2", STRIDE);
+        let kept = (out.len() - 2) / STRIDE;
         assert!(kept > 0, "expected keypoints on blobs");
-        let raw = *out.last().unwrap();
+        let raw = out[out.len() - 2];
+        let suppressed = out[out.len() - 1];
         assert!(raw >= kept as f32, "raw-found count must be ≥ kept count");
+        assert!(suppressed >= 0.0, "suppressed count must be non-negative");
 
-        for chunk in out[..out.len() - 1].chunks(STRIDE) {
+        // No two kept keypoints may sit within the dedup radius of each other.
+        let kps: Vec<(f32, f32)> = out[..out.len() - 2]
+            .chunks(STRIDE)
+            .map(|c| (c[0], c[1]))
+            .collect();
+        for i in 0..kps.len() {
+            for j in i + 1..kps.len() {
+                let d = (kps[i].0 - kps[j].0).hypot(kps[i].1 - kps[j].1);
+                assert!(d > DEDUP_RADIUS_PX, "kept keypoints {i},{j} within dedup radius: {d}");
+            }
+        }
+
+        for chunk in out[..out.len() - 2].chunks(STRIDE) {
             assert!(chunk[0] >= 0.0 && chunk[0] < w as f32, "x out of bounds");
             assert!(chunk[1] >= 0.0 && chunk[1] < h as f32, "y out of bounds");
             assert!(chunk[3] > 0.0, "response should be positive");
@@ -541,8 +612,9 @@ mod tests {
         let (w, h) = (48usize, 48usize);
         let rgba = vec![128u8; w * h * 4];
         let out = detect_sift(&rgba, w, h, 0.03, 1000);
-        // No extrema ⇒ just the trailing raw-count sentinel, which is 0.
-        assert_eq!(out.len(), 1, "a flat image yields only the raw-count sentinel");
+        // No extrema ⇒ just the two trailing sentinels (raw_found, suppressed), both 0.
+        assert_eq!(out.len(), 2, "a flat image yields only the trailing sentinels");
         assert_eq!(out[0], 0.0, "raw-found count should be 0 on a flat image");
+        assert_eq!(out[1], 0.0, "suppressed count should be 0 on a flat image");
     }
 }

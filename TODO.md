@@ -26,6 +26,74 @@ names the offending cameras; tune `interimBaEvery` / `minPnpInlierRatio` /
 
 ## Next
 
+### P5–P9 — Matching & detection throughput (plan of 2026-07-04)
+Exhaustive matching on the building set (50 imgs × ≤5000 kp → 1225 pairs) takes
+minutes. Diagnosis: (a) the brute-force NN is O(pairs · M²) and every pair pays
+full price even with zero overlap; (b) RANSAC always runs 1000 F iterations
+**plus** 1000 H iterations per pair, each iteration doing a 9×9 Jacobi eig;
+(c) every pair structured-clones ~5 MB of descriptors into a worker
+(`computeClient.js` `matchDescriptors`, deliberately no transfer) and a second
+`verifyMatches` call clones both keypoint arrays — ≈6 GB of copies per run.
+Everything below keeps `core/` pure and the store gates unchanged. Suggested
+order **P5 → P6 → P7 → P8 → P9**; measure matching wall-clock on the building
+set before starting and after each item, record in HANDOVER §Baselines.
+
+**P5 — Parallelize `detectAll`.** `useImagesStore.detectAll` awaits one
+`detectOne` at a time despite the POOL_SIZE worker pool. Reuse `matchAll`'s
+shared-cursor drain-loop pattern (`useMatchesStore.js` ~l.265); keep cooperative
+cancellation and per-image progress callbacks. Expect ~POOL_SIZE× on detection.
+Trivial.
+
+**P6 — Adaptive RANSAC termination (`crates/matching`).** In
+`ransac_fundamental` / `ransac_homography`: after each new best model, recompute
+the needed iteration count from the inlier ratio w
+(`n = ln(1−0.99)/ln(1−w^s)`, s = 8 resp. 4) and stop at `min(needed,
+max_iters)`. Good pairs finish in <100 iterations instead of 1000. Also let
+`verify_matches_hf` skip the H-RANSAC when F inliers land below a new
+`h_skip_below` param (store passes `minMatches` — the pair is rejected anyway
+and `hInlierCount` is only meaningful on kept pairs). Bonus if cheap:
+PROSAC-style sampling — matches arrive sorted-ish by Lowe distance. Pure Rust;
+rebuild wasm + commit `src/wasm/*` per convention. Expect 2–5× on the verify
+stage.
+
+**P7 — Two-stage exhaustive matching ("generic preselection",
+Metashape-style).** The structural fix for the no-poses/no-footprints case.
+SIFT keypoints are already response-sorted descending (`crates/sift` sorts
+before output), so each image's strongest K descriptors are just
+`descriptors.subarray(0, K*128)` — free, and served by the existing per-run
+`descCache`. New `matchAll` stage for the exhaustive strategy (on by default,
+toggleable in the modal): stage 1 mini-matches **every** pair with K≈300
+descriptors (ratio test only, no RANSAC, no cross-check); pairs with ≥T putative
+mini-matches (T≈10, setting) go to stage 2 = today's full match+verify; the
+rest are recorded as skipped. Log kept/pruned counts like the proximity
+preselector does. Supersedes the thumbnail-overlap preselector idea (removed
+from P2 remnants). Expect 4–8× on building-style sets where each image truly
+overlaps ~10–15 others.
+
+**P8 — GEMM-form NN kernel (`crates/matching`).** Replace the early-exit scan
+in `nn2`/`l2_sq_early` with a blocked top-2 distance computation: precompute
+row norms, use d² = |a|²+|b|²−2a·b, compute dot products in cache-sized tiles
+(e.g. 8 queries × 64 db rows staying in L1, f32x4 mul-add), track best/second
+per query. Branch-free inner loop, full SIMD utilization; expect 3–8× over the
+early-exit path. Keep the `match_descriptors` signature; existing tests must
+pass (borderline ratio-test ties may flip — same caveat as the SIMD note at the
+top of `lib.rs`). Optional follow-up, separate commit, only if still needed:
+quantize descriptors to u8 at detect time + integer SIMD dot products (4× less
+memory traffic, ~2× again) — touches the descriptor persistence shape, so gate
+on measured need.
+
+**P9 — Fused match+verify worker op + worker-side descriptor cache.** Add a
+`matchPairFull` op to `compute.worker.js`: takes image ids, runs
+match_descriptors + verify_matches_hf in one call, returns what the current two
+calls return combined (raw count, F, hInlierCount, inlier-filtered matches) —
+the gate logic stays in the store. Workers cache descriptors+keypoints keyed by
+uuid + a revision bumped on re-detect (LRU-capped, ~100 MB); the client posts
+an image's buffers to a worker only on cache miss and dispatches pairs grouped
+by shared image (block order, not round-robin) to maximize hits. While in
+`matchAll`: skip pairs already `done` under identical settings unless
+`overwrite`, so interrupted runs resume. Expect 1.3–2× wall-clock and much less
+GC churn; kills the ≈6 GB clone traffic.
+
 ### A5 — Per-depth-map geometric consistency filter (dense)
 Fusion is currently the only cross-view test and runs too late to stop freckle.
 After Stage A completes all maps (in the worker, where all maps are in the
@@ -57,11 +125,15 @@ keep opt-out. Needs a browser check (Safari + Chrome).
   landed without browser timing).
 - **Products** runtime test on the real aerial set; exported GeoTIFFs sanity-
   checked in QGIS/ArcGIS.
+- **Rotation-cycle match filter** on B1: does it drop the 4289↔4324 window-swap
+  pair (and kin) before registration, without removing genuine weak-baseline
+  bridges? Watch the `rotation-cycle filter dropped …` warn lines; if it culls
+  real edges, loosen `cycleErrorDeg`/`cycleMinSupport`.
 
 ### P2 remnants — preselection fallbacks
-- GPS-from-EXIF positions when no poses are imported.
-- Thumbnail-overlap preselector for the no-pose/no-GPS case (the universal
-  fallback).
+- GPS-from-EXIF positions when no poses are imported. (The no-pose/no-GPS
+  fallback is now P7's descriptor prefilter, which superseded the earlier
+  thumbnail-overlap idea.)
 
 ### P3 — OPFS quantize + spill of depth maps
 Quantize Stage-A output (depth → Uint16 + per-map min/max, cost → Uint8), write
@@ -102,6 +174,39 @@ instead of scan centre + guessed pitch. Applies to keypoints + rasterisation
 like the undistort path. **Decision gate:** only if A2's refined-f evidence on
 CA…V doesn't fix the film set on its own.
 
+### F5 — Pluggable detector/matcher backend (learned features)
+Make feature extraction + matching swappable so the user can pick SIFT (today),
+SuperPoint+LightGlue, DISK, RoMa/LoFTR, etc. **The SfM core is already neutral**:
+everything downstream consumes a pair as `{ F, matches: [[ia,ib],…], inlierCount }`
+— index pairs into per-image keypoints whose only load-bearing fields are `x,y`
+— and `sfm.js` never touches a descriptor. RANSAC F/H verification is correspondence-
+level, so it's reusable or skippable. The coupling is all in the extract+match front
+end. Two matcher *shapes* to support behind one output contract (per-image keypoints
++ index-pair correspondences + optional confidence):
+- **Detect → match, two stages (SIFT, SuperPoint+LightGlue, DISK).** The staging
+  survives; what changes is the match *algorithm*. Today `matchDescriptors(descA,
+  descB)` does independent brute-force NN + Lowe ratio + cross-check and gets **only
+  descriptors**. LightGlue is a *joint* matcher: it needs both feature sets together
+  **plus keypoint positions** (attention input) and emits correspondences directly
+  (no ratio/cross-check). So the concrete change is a `match` op that also receives
+  keypoint coords, not just descriptor buffers.
+- **Detector-free, one stage (RoMa, LoFTR).** These take an *image pair* and emit
+  dense correspondences with no per-image keypoint stage — needs a `match(imgA,imgB)`
+  op shape.
+Front-end coupling to unpick, all upstream of the neutral pair interface:
+(1) fixed 128-d float descriptor — `DESC_LEN=128`/`STRIDE=133` hardcoded in
+`utils/detection.js` + `compute.worker.js`, and OPFS persists an untyped N×128 blob
+(SuperPoint is 256-d); carry descriptor width with the buffer instead of as a const.
+(2) the `detect→match` two-stage assumption baked into the worker op-map (`detect`,
+`match` are separate ops) — add the joint/detector-free op shape alongside.
+(3) keypoint shape `{x,y,nx,ny,scale,response,color}` — learned detectors give
+`{x,y,score}`, mostly harmless since only `x,y` is load-bearing downstream.
+Execution: run models via ONNX Runtime Web / WebGPU; the `src/workers/gpu/` device
+singleton + op-map are the seams. Keep verification + the pairs graph exactly as-is
+(the neutral meeting point). **Do the interface design before adding the first learned
+backend**, so the two shapes above are both expressible from day one. Pairs with P4
+(GPU matcher) and the GPU-SIFT idea.
+
 ### F1 polish — exports
 GeoTIFF compression (writer is uncompressed) + tiling for very large rasters;
 proper WKT in `.prj` (currently raw proj4/EPSG); the disabled modal placeholders
@@ -119,7 +224,9 @@ JS proves slow on large grids; optional manual "Flip Z" for object scenes.
 - **P4 — GPU matcher (WebGPU).** Descriptor-distance matrix in a compute shader
   (`src/workers/gpu/`, `device.js` singleton exists). The real path to
   Metashape-class matching throughput (100×+); largest effort; design when
-  picked up. Pairs with a GPU SIFT detector later.
+  picked up. Pairs with a GPU SIFT detector later. Revisit only after P5–P9
+  land and are measured — they may already suffice; reuse P8's GEMM
+  formulation (norms + dot-product matrix + top-2 reduction) in WGSL.
 - **Stream partial reconstruction snapshots** from the worker so the 3D viewer
   builds up live (the `emit` channel exists; post periodic camera/point
   snapshots between stages).
@@ -148,6 +255,10 @@ JS proves slow on large grids; optional manual "Flip Z" for object scenes.
 ---
 
 ## Parked / rejected
+- **wasm threads (rayon + SharedArrayBuffer) for matching** — rejected
+  2026-07-04. The pair-level worker pool already saturates cores, and
+  SharedArrayBuffer requires cross-origin isolation (COOP/COEP headers), which
+  complicates deployment for no throughput gain.
 - **Global undo/redo command layer** — rejected. Metashape has none; per-entity
   delete/edit (already in the stores) is enough.
 - **Full 3D meshing (Poisson)** — parked in favour of F3's 2.5D DEM mesh.

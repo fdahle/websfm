@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 300" font-family="sans-serif" font-size="13">
+  <rect width="520" height="300" fill="#1b1f27"/>
+
+  <!-- 3D scene point -->
+  <circle cx="260" cy="40" r="5" fill="#e6b84f"/>
+  <text x="270" y="36" fill="#e6b84f">X</text>
+
+  <!-- Camera centres -->
+  <circle cx="90" cy="230" r="6" fill="#5aa9e6"/>
+  <text x="66" y="252" fill="#5aa9e6">C</text>
+  <circle cx="430" cy="230" r="6" fill="#5aa9e6"/>
+  <text x="438" y="252" fill="#5aa9e6">C'</text>
+
+  <!-- Baseline -->
+  <line x1="90" y1="230" x2="430" y2="230" stroke="#6b7280" stroke-width="1.5" stroke-dasharray="5 4"/>
+  <text x="240" y="248" fill="#9ca3af">baseline</text>
+
+  <!-- Epipoles -->
+  <circle cx="150" cy="230" r="3.5" fill="#ef6f6c"/>
+  <text x="140" y="222" fill="#ef6f6c">e</text>
+  <circle cx="370" cy="230" r="3.5" fill="#ef6f6c"/>
+  <text x="372" y="222" fill="#ef6f6c">e'</text>
+
+  <!-- Image planes -->
+  <line x1="120" y1="150" x2="200" y2="150" stroke="#c9d1d9" stroke-width="2"/>
+  <line x1="330" y1="150" x2="410" y2="150" stroke="#c9d1d9" stroke-width="2"/>
+
+  <!-- Rays C->X and C'->X -->
+  <line x1="90" y1="230" x2="260" y2="40" stroke="#5aa9e6" stroke-width="1.5"/>
+  <line x1="430" y1="230" x2="260" y2="40" stroke="#5aa9e6" stroke-width="1.5"/>
+
+  <!-- Image points -->
+  <circle cx="165" cy="150" r="4" fill="#7ee787"/>
+  <text x="150" y="142" fill="#7ee787">x</text>
+  <circle cx="358" cy="150" r="4" fill="#7ee787"/>
+  <text x="360" y="142" fill="#7ee787">x'</text>
+
+  <!-- Epipolar line in right image (through x' and e') -->
+  <line x1="330" y1="150" x2="410" y2="150" stroke="#ef6f6c" stroke-width="1" opacity="0.6"/>
+  <text x="330" y="176" fill="#ef6f6c" font-size="11">epipolar line l' = F x</text>
+</svg>

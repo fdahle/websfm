@@ -1,19 +1,24 @@
 <!--
-  Help entry schema (documented once here, applies to every file in src/help/):
+  Glossary entry schema (documented once here, applies to every file in src/help/):
 
   ---
   id: kebab-case-id       # required, must match the filename (without .md)
-  title: Display Title    # required, shown as the panel/tooltip heading
+  title: Display Title    # required, shown as the tab/tooltip heading; also an auto-link alias
   summary: One or two sentences shown in the hover tooltip. Keep it short.
+  aliases: extra phrase, another one   # optional; extra words that auto-link to this entry
   ---
-  Markdown body shown in the full panel when the term is clicked.
-  Link to another entry with [label](help:other-entry-id) — clicking it
-  pushes that entry onto the panel stack instead of navigating away.
+  Markdown body shown in the full modal tab when the term is opened.
+  - Link explicitly with [label](help:other-entry-id) — opens/focuses that tab.
+  - Any occurrence of another entry's title/alias auto-links; to suppress a
+    specific one, wrap it: <span class="no-help">bundle adjustment</span>.
+  - Math: $inline$ and $$block$$ via KaTeX. Images: ![alt](assets/foo.png)
+    (files under src/help/assets/). Standard markdown otherwise.
 -->
 ---
 id: reprojection-error
 title: Reprojection Error
 summary: The pixel distance between a 3D point projected through a camera and the 2D keypoint it was actually observed at.
+aliases: reprojection errors
 ---
 
 Reprojection error is the residual that camera pose estimation and

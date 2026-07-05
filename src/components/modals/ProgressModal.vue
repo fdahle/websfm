@@ -28,19 +28,43 @@ let ticker = null
 
 const elapsed = computed(() => formatClock((now.value - startedAt.value) / 1000))
 
-// ── ETA via run-wide average ─────────────────────────────────────────────────
-// Estimate from the whole run, not a short trailing window: per-item time is
-// highly variable here (e.g. match pairs rejected early finish in a fraction of
-// the time a fully-verified pair takes), so a small window made the estimate
-// swing wildly. The cumulative mean (elapsed ÷ completed) integrates over that
-// variance and only nudges as the run proceeds. ETA = mean × remaining, minus the
-// time already spent on the in-flight item so the countdown decays smoothly.
-const lastStamp = ref(0) // wall-clock of the most recent completion
+// ── ETA: cumulative mean anchored, EMA-reactive, display-smoothed ────────────
+// Per-item time is highly variable here (e.g. match pairs rejected early finish in
+// a fraction of the time a fully-verified pair takes), so a naive trailing window
+// swings wildly. We blend two estimators: the cumulative mean (elapsed ÷ completed)
+// is a stable anchor that integrates over the variance, while an exponential moving
+// average of recent per-item times reacts when the workload shifts phase (e.g. the
+// run crosses from cheap rejects into expensive verified pairs). The blend of the
+// two, times the remaining count, minus the time already spent on the in-flight
+// item, is the raw estimate — then eased into `smoothedEta` so the shown countdown
+// glides instead of jumping at each completion.
+const lastStamp   = ref(0)  // wall-clock of the most recent completion
+const emaPerItem  = ref(0)  // exponential moving average of per-item seconds
+const smoothedEta = ref(null)
+const EMA_ALPHA   = 0.25    // weight of the newest sample in the EMA
+const DISP_EASE   = 0.25    // per-tick easing of the displayed value toward the raw ETA
 
 watch(() => props.current, (val, prev) => {
+  const p = prev ?? 0
   // Reset if the counter restarts (e.g. a new phase reusing the same modal).
-  if (val < (prev ?? 0)) { startedAt.value = Date.now(); lastStamp.value = 0; return }
-  if (val > (prev ?? 0)) lastStamp.value = Date.now()
+  if (val < p) {
+    startedAt.value = Date.now(); lastStamp.value = 0
+    emaPerItem.value = 0; smoothedEta.value = null
+    return
+  }
+  if (val > p) {
+    const t = Date.now()
+    if (lastStamp.value) {
+      // Divide by the number of items closed since the last stamp (usually 1).
+      const dt = (t - lastStamp.value) / 1000 / (val - p)
+      if (dt >= 0) {
+        emaPerItem.value = emaPerItem.value > 0
+          ? EMA_ALPHA * dt + (1 - EMA_ALPHA) * emaPerItem.value
+          : dt
+      }
+    }
+    lastStamp.value = t
+  }
 })
 
 const etaSeconds = computed(() => {
@@ -49,14 +73,25 @@ const etaSeconds = computed(() => {
   const remaining = props.total - props.current
   if (props.total <= 0 || props.current < 2 || !lastStamp.value) return null
   if (remaining <= 0) return 0
-  const perItem = ((lastStamp.value - startedAt.value) / 1000) / props.current
-  if (!(perItem > 0)) return null
+  const cumMean = ((lastStamp.value - startedAt.value) / 1000) / props.current
+  if (!(cumMean > 0)) return null
+  // Blend the stable cumulative mean with the reactive EMA (equal weight once the
+  // EMA has a sample; cumulative mean alone until then).
+  const perItem = emaPerItem.value > 0 ? 0.5 * cumMean + 0.5 * emaPerItem.value : cumMean
   // Subtract time already spent on the in-flight item so the estimate decays.
   const sinceLast = (now.value - lastStamp.value) / 1000
   return Math.max(0, perItem * remaining - sinceLast)
 })
 
-const eta = computed(() => etaSeconds.value == null ? null : formatClock(etaSeconds.value))
+// Ease the displayed value toward the raw estimate so completions don't jolt it.
+watch(etaSeconds, (v) => {
+  if (v == null) { smoothedEta.value = null; return }
+  smoothedEta.value = smoothedEta.value == null
+    ? v
+    : smoothedEta.value + (v - smoothedEta.value) * DISP_EASE
+})
+
+const eta = computed(() => smoothedEta.value == null ? null : formatClock(smoothedEta.value))
 
 onMounted(() => {
   startedAt.value = Date.now()

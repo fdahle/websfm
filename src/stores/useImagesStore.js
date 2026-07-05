@@ -205,6 +205,7 @@ export const useImagesStore = defineStore('images', () => {
             + `(${d.scale.toFixed(3)}× of ${d.natW}×${d.natH})`, 'debug', 'SIFT')
           log(`SIFT ${found.name} — ${d.rawFound} found → ${d.capped}`
             + `${d.capHit ? ` capped (min response ${d.minResponse.toFixed(3)})` : ' (under cap)'}`
+            + `${d.suppressed > 0 ? `, −${d.suppressed} duplicate-position keypoints suppressed` : ''}`
             + `${d.maskedDropped > 0 ? `, −${d.maskedDropped} in mask → ${d.kept}` : ''}`
             + `; response p50 ${d.respP50.toFixed(3)} / p95 ${d.respP95.toFixed(3)}`, 'debug', 'SIFT')
         }

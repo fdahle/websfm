@@ -68,6 +68,131 @@ fiducials; self-calibration (A2) + fiducials (F4) are the code-side support.
 
 ## Done log (most recent first)
 
+<<<<<<< Updated upstream
+=======
+- **2026-07-05 · Six UX/quality improvements** — (1) Console
+  (`DevConsole.vue`) sticky-bottom auto-scroll made explicit (`stickToBottom` set
+  from a `@scroll` handler) + floating "↓ New logs" chip when detached. (2)
+  Unaligned images: `App.vue` `alignedUuids` (union of sparse-cloud camera uuids)
+  dims/flags unregistered images in the sidebar (`Sidebar.vue` `isUnaligned`) and
+  fades their markers on the map (`ViewerMap.vue`); the 3D view already only draws
+  registered-camera frustums. (3) Removed the "run reconstruction" link in the
+  empty Point Clouds state. (4) Match **soft-disable**: `useMatchesStore`
+  `setPairDisabled` adds a persisted `disabled` flag (excluded at reconstruct time
+  in `useReconstructionStore.js`); toggled from `MatchListModal` (row/preview) —
+  reversible, survives reload. (5) Connected-Papers-style **graph view**
+  (`components/viewers/MatchGraph.vue`, canvas force layout, no dep) as a
+  List/Graph toggle in `MatchListModal`; click edge → preview, double-click →
+  exclude/restore, node colour = aligned/unaligned. (6) Progress ETA
+  (`ProgressModal.vue`) now blends the cumulative mean with a per-item EMA and
+  eases the displayed value (`smoothedEta`) for a smoother countdown.
+
+- **2026-07-05 · Glossary (in-app help) overhaul** — replaced the CK3-style
+  cascading side panels with a single centered **tabbed** modal
+  (`components/glossary/GlossaryModal.vue`, `useGlossaryStore` = `tabs`/`activeId`)
+  with a home index + search. Hover popup (`GlossaryTooltip.vue`) now shows a
+  **border progress ring** that pins the popup once filled (interactive:
+  cross-links + "Read more"); the keyword itself is no longer a click target
+  (`GlossaryTerm.vue`, hover-only, setting-gated). `core/help.js` →
+  `core/glossary.js`: adds `getAllHelpEntries`/`searchGlossary`, KaTeX
+  (`$…$`/`$$…$$`, `marked-katex-extension` + `katex/dist/katex.min.css` in
+  `main.js`), `assets/*` image resolution, and **auto-linking** of any entry
+  title/alias (opt out with `<span class="no-help">`). New persisted
+  `glossaryTermsEnabled` toggle (`composables/useGlossarySettings.js`, wired into
+  Settings ▸ Display) and Ribbon *Other ▸ Glossary* entry (`open-glossary`, new
+  `book` icon). Verified: `npm test` (164, incl. 16 new glossary), `typecheck`,
+  `npm run build` all green. **Not browser-verified here**: the ring/pin hover
+  interaction, tab management, and KaTeX/image rendering need a manual run.
+
+- **2026-07-04 · Duplicate-keypoint suppression + inlier-spread reject (two more
+  repetitive-structure defenses)** — closes the many-to-one escape hatch: the SIFT
+  detector emitted several index-distinct keypoints within ~1px of one strong blob
+  (same DoG extremum across adjacent scales/octaves), letting a repetitive-structure
+  pair pass cross-check + ratio (each duplicate is a *distinct* index) and then get
+  RANSAC-blessed by a degenerate F that parks the epipole at the shared point — while
+  the H/F flag reads *healthy* (a homography can't fit a many-to-one bundle). Two layers:
+  - **Detection-side dedup (root fix, `crates/sift/src/lib.rs`, WASM rebuilt):**
+    `suppress_duplicate_positions` runs after response-desc sort, before the
+    `max_keypoints` cap — spatial-hash NMS (cell = radius) keeping the strongest
+    keypoint within `DEDUP_RADIUS_PX` (2px). `detect_sift` now emits a *second* trailing
+    sentinel (`suppressed`) after `raw_found`; parse is `kept = floor((len-2)/STRIDE)`,
+    updated in both parsers (`utils/detection.js`, `workers/compute.worker.js`) and
+    logged per image (`SIFT … −N duplicate-position keypoints suppressed`).
+  - **Position-aware reject (belt-and-suspenders for old keypoints / future matchers,
+    JS only):** `inlierSpread` (`core/matching.js`, pure/exported/unit-tested) measures
+    the accepted inliers' unique rounded positions + bounding-box diagonal per image;
+    `useMatchesStore.matchPair` hard-rejects a pair whose inliers collapse — unique spots
+    < `minInlierUniqueFrac` (0.5) × inliers (many-to-one) **or** extent < `minInlierSpreadPx`
+    (8px) in either image (epipole degeneracy). Distinct from the `degenerate` label
+    (planar/pure-rotation, a seed-quality tag): this is a hard drop with its own
+    `rejectReason` + debug spread line. **Acceptance owed on the real building set**
+    (browser run): confirm the stone many-to-one bundles from B1 are gone and the
+    suppressed-count log is non-trivial on the building images.
+
+- **2026-07-04 · Rotation-cycle match filter + match-run logging (sparse)** — a fourth
+  repetitive-structure defense plus two smaller diagnostics. **Acceptance owed on the
+  real building set** (browser run): the target is B1's 4289↔4324 window-swap pair being
+  dropped before it poisons registration. Where each lives:
+  - **Rotation-cycle consistency filter** (`core/sfm.js` `rotationCycleFilter` + call site
+    in `reconstruct()`, pure/exported, no WASM change): the graph-level catch for pairs
+    that clear every count/ratio gate but are geometrically false. Decomposes each
+    verified pair's essential matrix into a relative rotation (reuses existing
+    `fundamentalToEssential`/`recoverPose`), then for every triangle `{i<j<k}` (enumerated
+    once from its min–mid edge) measures the cycle error `‖R_ik⁻¹·R_jk·R_ij‖` as a geodesic
+    angle and credits all three edges. **Greedy** removal: drop the single least
+    cycle-consistent edge, recompute support (so a good edge dragged down by a bad
+    neighbour recovers), repeat until every survivor with ≥`minTriangles` triangles clears
+    the support floor. Runs after K-map/undistort, before init-pair selection; prunes
+    `donePairs` in-memory only (store/OPFS untouched — recomputable). Unjudgeable edges
+    (< `minTriangles`, or no `F`) are kept. Knobs: `cycleErrorDeg` 5°, `cycleMinTriangles`
+    2, `cycleMinSupport` 0.3, gated by `rotationCycleFilter` (default on). A false edge
+    breaks essentially every cycle it sits in, so it separates cleanly from true edges
+    (~few°) regardless of inlier count. Tests: K4-with-one-bad-edge, all-consistent,
+    reversed-edge canonicalisation, single-triangle-unjudged.
+  - **Match-run knob logging** (`stores/useMatchesStore.js` `matchAll`): the run-start line
+    now reports `cross-check on (mutual NN)/off` + `ratio`. cross-check was already wired
+    (modal → `settings.crossCheck` → WASM matcher) but defaults **off** and left no console
+    trace, so a run's putative-matching behaviour was unauditable. No behaviour change.
+  - Not touched (owner's runtime call): the PnP inlier-fraction floor `minPnpInlierRatio`
+    (`core/sfm.js`, default 0.15) — raising it to 0.30–0.40 gates borderline cameras but
+    has no modal control yet.
+  - Verified: `npm test` (155) + typecheck clean. No `crates/` change → no WASM rebuild.
+- **2026-07-04 · Repetitive-structure defenses (sparse)** — three COLMAP/Metashape-parity
+  guards against matches that survive fundamental-matrix RANSAC but link the wrong
+  repeated feature (window↔window on B1's building façade: epipolar-consistent yet
+  geometrically wrong). Landed as three separate commits on branch
+  `matching-degeneracy-robust-tri`; **acceptance owed on the real building set** (a
+  browser run — this env can't drive OPFS/WGSL). Where each lives:
+  - **Robust multi-view track triangulation** (`crates/reconstruction/src/pose.rs`
+    `triangulate_tracks` + `core/reconstruction.js` `triangulateTracks` +
+    `core/sfm.js` `robustRetriangulateTracks`, the high-leverage one): batched RANSAC
+    over a track's view pairs (parallax-gated seeds) → largest consensus → N-view DLT
+    refine → per-observation inlier mask. In sfm.js it re-votes each ≥3-view track
+    after retriangulation/merge and before the filter passes, dropping the
+    observations that disagree with the majority + a settling BA. Fixes the case
+    `filterTracks` can't: when the 2-view seed was the wrong window, the point sits
+    wrong and the old filter deleted the *good* views to fit it. 2-view tracks pass
+    through untouched. Toggle `robustRetriangulate` (default on). Tests: Rust
+    `triangulate_tracks_recovers_point_and_rejects_outlier`, JS batch-marshalling case.
+  - **H-vs-F degeneracy flag** (`crates/matching/src/lib.rs` `verify_matches_hf` +
+    `homography_dlt`/`ransac_homography`; `core/matching.js`; `stores/useMatchesStore.js`;
+    seed tweak in `sfm.js`): fit a homography via RANSAC alongside F, compare inlier
+    counts. `hfRatio ≥ 0.8` ⇒ `entry.degenerate` (planar façade / pure rotation — a
+    poor SfM seed with an ambiguous E decomposition). Not a rejection (the pair still
+    bridges the graph); the flag rides through `useReconstructionStore` into SfM, where
+    seed selection prefers non-degenerate adequate pairs. Output layout of the verify
+    call grew by one (`hInlierCount`). Tests: Rust planar (H≈F) vs general (H≪F), JS
+    parse guard.
+  - **Min-views-per-point gate** (`core/sfm.js` `minTrackViews` + `ReconstructModal.vue`):
+    drop points seen by < N images, applied **once** after all BA/filter passes
+    (earlier would starve registration). Default 2 = no-op; 3 mirrors Metashape's
+    "image count" gradual selection and kills 2-view window-swap residue at the cost of
+    cloud density. Recorded in the run summary. Test: a scene with genuine 2-view tracks
+    asserts the ≥3-view gate drops exactly those.
+  - Both crates rebuilt (`src/wasm/*` committed with source). Verified: `cargo test`
+    (matching 2, reconstruction 8) + `npm test` (147) + typecheck. The end-to-end effect
+    on B1's window-swap matches is the number still to measure in-browser.
+>>>>>>> Stashed changes
 - **2026-07-04 · R1–R6 registration-robustness track (sparse)** — the fix for B1's
   poisoned-during-registration model. All six landed; **acceptance still owed on the
   real building set** (see Owed validations in TODO.md). Where each lives:

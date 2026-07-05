@@ -120,6 +120,9 @@ export const icons = {
     <circle cx="12" cy="12" r="8.5" />
     <path d="M12 11v5" />
     <circle cx="12" cy="7.8" r="0.6" fill="currentColor" stroke="none" />`,
+  book: `
+    <path d="M4 5.5A1.5 1.5 0 0 1 5.5 4H12v15H5.5A1.5 1.5 0 0 0 4 20.5z" />
+    <path d="M20 5.5A1.5 1.5 0 0 0 18.5 4H12v15h6.5a1.5 1.5 0 0 1 1.5 1.5z" />`,
 
   // ── Picture (image context) ─────────────────────────────────────────────────
   keypoints: `

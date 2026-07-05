@@ -1,6 +1,6 @@
 <script setup>
 import { ref } from 'vue'
-import GlossaryTerm from '../help/GlossaryTerm.vue'
+import GlossaryTerm from '../glossary/GlossaryTerm.vue'
 
 const emit = defineEmits(['close', 'run'])
 

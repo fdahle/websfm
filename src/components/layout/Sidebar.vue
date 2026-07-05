@@ -18,6 +18,10 @@ const props = defineProps({
   // (sensorId) => number of images using that sensor
   sensorImageCount: { type: Function, default: () => 0 },
   selectedId: { type: String, default: null },
+  // UUIDs registered in the sparse model; `hasSparse` gates whether "not in this
+  // set" means unaligned (vs. reconstruction simply not having run yet).
+  alignedUuids: { type: Object, default: () => new Set() },
+  hasSparse:    { type: Boolean, default: false },
 })
 
 const emit = defineEmits([
@@ -175,6 +179,12 @@ function poseStatus(img) {
 // Label of the sensor an image is bound to.
 function sensorLabel(img) {
   return props.sensors.find((s) => s.id === img.sensorId)?.label || '—'
+}
+
+// True once a sparse model exists but this image wasn't registered into it — the
+// reconstruction couldn't place its camera. Meaningless before reconstruction runs.
+function isUnaligned(img) {
+  return props.hasSparse && !props.alignedUuids.has(img.uuid)
 }
 
 const round = (n, d = 1) => (n == null ? null : Number(n.toFixed(d)))
@@ -357,8 +367,8 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenus))
         <template v-for="img in images" :key="img.id">
           <li
             class="list-item"
-            :class="{ selected: localSelected.includes(img.id) }"
-            :title="img.name"
+            :class="{ selected: localSelected.includes(img.id), unaligned: isUnaligned(img) }"
+            :title="isUnaligned(img) ? `${img.name} — not aligned (no camera in the sparse model)` : img.name"
             @click="handleItemClick($event, img)"
             @dblclick="emit('open', img.id)"
             @contextmenu="onRightClick($event, img)"
@@ -372,6 +382,7 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenus))
             <span v-if="img.kpStatus === 'running'" class="status-dot running"></span>
             <span v-else-if="img.kpStatus === 'error'" class="status-dot error"></span>
             <span class="item-name">{{ img.name }}</span>
+            <span v-if="isUnaligned(img)" class="unaligned-tag" title="Not aligned — no camera in the sparse model">⚠</span>
           </li>
           <li v-if="expanded[img.id]" class="img-details" @contextmenu.stop>
             <div class="detail-row">
@@ -399,6 +410,10 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenus))
             <div class="detail-row">
               <span class="detail-label">Pose</span>
               <span class="detail-value" :class="{ 'detail-dim': poseStatus(img) === '—' }">{{ poseStatus(img) }}</span>
+            </div>
+            <div v-if="hasSparse" class="detail-row">
+              <span class="detail-label">Registered</span>
+              <span class="detail-value" :class="{ 'detail-error': isUnaligned(img) }">{{ isUnaligned(img) ? 'no' : 'yes' }}</span>
             </div>
           </li>
         </template>
@@ -497,6 +512,10 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenus))
             <div v-if="matchStats.used != null" class="detail-row">
               <span class="detail-label">Used in model</span>
               <span class="detail-value">{{ matchStats.used.toLocaleString() }}</span>
+            </div>
+            <div v-if="matchStats.disabled" class="detail-row">
+              <span class="detail-label">Excluded</span>
+              <span class="detail-value">{{ matchStats.disabled.toLocaleString() }}</span>
             </div>
             <div v-if="matchStats.error" class="detail-row">
               <span class="detail-label">Failed</span>
@@ -624,9 +643,7 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenus))
           </li>
         </template>
         <li v-if="reconStatus === 'running' && !clouds.length" class="empty">Reconstructing…</li>
-        <li v-else-if="!clouds.length" class="empty">
-          No point clouds — <button class="link-btn" @click="emit('reconstruct')">run reconstruction</button>
-        </li>
+        <li v-else-if="!clouds.length" class="empty">No point clouds yet</li>
       </ul>
     </div>
 
@@ -880,6 +897,16 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenus))
   overflow: hidden;
   text-overflow: ellipsis;
   color: var(--text);
+}
+
+/* Image not registered into the sparse model — dim it and flag with a warning tag. */
+.list-item.unaligned .item-name { color: var(--text-dim); opacity: 0.65; }
+
+.unaligned-tag {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: #d4900a;
+  line-height: 1;
 }
 
 /* Inline rename field (point cloud rows) */

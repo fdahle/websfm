@@ -18,7 +18,7 @@ import ProgressModal from './components/modals/ProgressModal.vue'
 import SettingsModal from './components/modals/SettingsModal.vue'
 import AboutModal from './components/modals/AboutModal.vue'
 import NewProjectModal from './components/modals/NewProjectModal.vue'
-import HelpPanelStack from './components/help/HelpPanelStack.vue'
+import GlossaryModal from './components/glossary/GlossaryModal.vue'
 import ProjectPicker from './components/layout/ProjectPicker.vue'
 import DevConsole from './components/layout/DevConsole.vue'
 import { useImagesStore } from './stores/useImagesStore.js'
@@ -27,6 +27,7 @@ import { useTabs } from './composables/useTabs.js'
 import { useProjectsStore } from './stores/useProjectsStore.js'
 import { useTheme } from './composables/useTheme.js'
 import { useModalsStore } from './stores/useModalsStore.js'
+import { useGlossaryStore } from './stores/useGlossaryStore.js'
 import { usePipeline } from './composables/usePipeline.js'
 import { useReconstructionStore } from './stores/useReconstructionStore.js'
 import { useGcpsStore } from './stores/useGcpsStore.js'
@@ -85,7 +86,7 @@ const {
 // Project-scoped store; restore/clear run through the project-store registry.
 const matchesStore = useMatchesStore()
 const { matchStore } = storeToRefs(matchesStore)
-const { matchAll } = matchesStore
+const { matchAll, setPairDisabled } = matchesStore
 
 // ── Tabs ──────────────────────────────────────────────────────────────────────
 const showMap = computed(() => currentSceneType.value !== 'object')
@@ -148,6 +149,8 @@ const {
   infoImageId,
 } = storeToRefs(useModalsStore())
 
+const glossaryStore = useGlossaryStore()
+
 // Resolved image for the Image Info modal. Lives here (not in the modals store)
 // because it needs the image list; moves into the store once images is one too.
 const infoImage = computed(() => infoImageId.value ? imageById(infoImageId.value) : null)
@@ -175,6 +178,11 @@ const selected = computed(() => images.value.find((img) => img.id === selectedId
 const kpImageCount = computed(() => images.value.filter(img => img.kpStatus === 'done').length)
 
 const hasSparse = computed(() => clouds.value.some((c) => c.kind === 'sparse'))
+
+// UUIDs of images registered (aligned) in the sparse model. Empty until a sparse
+// cloud exists — so `hasSparse` gates whether "not in this set" means "unaligned"
+// versus "reconstruction hasn't run yet". Used to dim unregistered images.
+const alignedUuids = computed(() => new Set(sparseCameras.value.keys()))
 
 // Per-pair count of matches that became tie-points in the sparse model.
 // Walk every tie-point's view-track ([uuid, kpIdx] observations); a pair of
@@ -213,11 +221,14 @@ const matchSummaries = computed(() => {
       pairId:      pid,
       idA:         imgA.id,
       idB:         imgB.id,
+      idAUuid:     imgA.uuid,
+      idBUuid:     imgB.uuid,
       nameA:       imgA.name,
       nameB:       imgB.name,
       inlierCount: entry.inlierCount,
       rawCount:    entry.rawCount,
       usedCount:   usedMatchesByPair.value.get(pid)?.size ?? 0,
+      disabled:    entry.disabled ?? false,
     })
   }
   return result
@@ -227,17 +238,22 @@ const matchSummaries = computed(() => {
 // `verified` mirrors matchSummaries.length (done + inliers), but we walk the store
 // once here to also surface in-flight and failed pairs at a glance.
 const matchStats = computed(() => {
-  let total = 0, verified = 0, running = 0, error = 0
+  let total = 0, verified = 0, running = 0, error = 0, disabled = 0
   for (const [, entry] of matchStore.value) {
     total++
     if (entry.status === 'running') running++
     else if (entry.status === 'error') error++
-    else if (entry.status === 'done' && entry.inlierCount > 0) verified++
+    else if (entry.status === 'done' && entry.inlierCount > 0) {
+      // A user-excluded pair is still geometrically verified, but it won't feed
+      // reconstruction — count it separately so "verified" reflects usable pairs.
+      if (entry.disabled) disabled++
+      else verified++
+    }
   }
   // Pairs that contributed at least one tie-point to the sparse model (0 until
   // reconstruction has run).
   const used = hasSparse.value ? usedMatchesByPair.value.size : null
-  return { total, verified, running, error, used }
+  return { total, verified, running, error, used, disabled }
 })
 
 const activeImageViewState = computed(() => {
@@ -785,6 +801,7 @@ function handleCommand(id) {
     case 'match-features':       matchFeaturesOpen.value = true; break
     case 'open-settings':        settingsOpen.value = true; break
     case 'open-about':           aboutOpen.value = true; break
+    case 'open-glossary':        glossaryStore.openHome(); break
     case 'open-project-picker':  projectPickerOpen.value = !projectPickerOpen.value; break
     case 'toggle-console':       consoleOpen.value = !consoleOpen.value; break
     case 'img-show-info':        if (activeImageTab.value) infoImageId.value = activeImageTab.value.id; break
@@ -1115,6 +1132,8 @@ function onRibbonPick(event) {
         :images="images"
         :match-store="matchStore"
         :has-sparse="hasSparse"
+        :aligned-uuids="alignedUuids"
+        @toggle-disabled="setPairDisabled"
         @close="matchListOpen = false"
       />
     </Teleport>
@@ -1128,9 +1147,7 @@ function onRibbonPick(event) {
       />
     </Teleport>
 
-    <Teleport to="body">
-      <HelpPanelStack />
-    </Teleport>
+    <GlossaryModal />
 
     <div class="layout">
       <Sidebar
@@ -1144,6 +1161,8 @@ function onRibbonPick(event) {
         :match-stats="matchStats"
         :sensor-image-count="sensorImageCount"
         :selected-id="selectedId"
+        :aligned-uuids="alignedUuids"
+        :has-sparse="hasSparse"
         :dem="dem"
         :ortho="ortho"
         @open-product="openProductTab"
@@ -1182,7 +1201,7 @@ function onRibbonPick(event) {
 
         <div class="content">
           <Viewer3D ref="viewerRef" v-show="activeTabId === 'viewer'" :theme="theme" :images="images" :show-cameras="showCameras" :show-graticule="showGraticule" />
-          <ViewerMap ref="mapViewerRef" v-show="activeTabId === 'map'" :images="images" :gcps="gcps" :footprints="footprints" :poses="poses" :selected-id="selectedId" :crs="currentCrs" @select="selectImage" />
+          <ViewerMap ref="mapViewerRef" v-show="activeTabId === 'map'" :images="images" :gcps="gcps" :footprints="footprints" :poses="poses" :selected-id="selectedId" :aligned-uuids="alignedUuids" :has-sparse="hasSparse" :crs="currentCrs" @select="selectImage" />
           <template v-for="tab in tabs" :key="tab.id">
             <ViewerImage
               v-if="tab.type === 'image' && imageById(tab.imageId)"
