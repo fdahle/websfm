@@ -9,10 +9,11 @@
 // rasterisation, which on a worker uses OffscreenCanvas + createImageBitmap
 // instead of the DOM <canvas>/<img> path — hence its own implementation here.
 
-import initSift, { detect_sift } from '../wasm/detection/sift.js'
+import { detectSift } from '../core/features/sift.js'
 import { detectSuperPoint } from '../core/features/superpoint.js'
 import { matchLightGlue } from '../core/features/lightglue.js'
-import { matchDescriptors, verifyMatches } from '../core/features/matching.js'
+import { matchDescriptors } from '../core/features/bruteforce.js'
+import { verifyMatches } from '../core/features/verify.js'
 import { reconstruct as sfmReconstruct } from '../core/sfm/sfm.js'
 import {
   selectSourceViews, scaleK, rgbaToGray, depthMapForImage, fuseDepthMaps, filterDepthMap, autoBestK,
@@ -33,9 +34,6 @@ import {
 // Must match STRIDE in crates/sift/src/lib.rs: [x, y, scale, response, angle, d0..d127]
 const STRIDE = 133
 const DESC_LEN = 128
-
-let siftReady = null
-const ensureSift = () => (siftReady ??= initSift())
 
 // Decode an image URL (blob: URLs work in a worker) and draw it into an
 // OffscreenCanvas, downscaled so the longest side is ≤ maxDim. Returns RGBA
@@ -116,10 +114,9 @@ function percentile(sorted, q) {
 // SIFT detector → a uniform feature bundle (see detect() for the shared shape):
 // count, per-keypoint accessors, a descriptor-row view, and detector-specific diag.
 async function runSift(data, width, height, { contrastThreshold, maxKeypoints }) {
-  await ensureSift()
-  const t0 = performance.now()
-  const flat = detect_sift(new Uint8Array(data.buffer), width, height, contrastThreshold, maxKeypoints)
-  const ms = performance.now() - t0
+  // wasm init + detect_sift now live in core/features/sift.js; the STRIDE parse
+  // into the shared feature bundle (below) stays worker-side.
+  const { flat, ms } = await detectSift(data, width, height, { contrastThreshold, maxKeypoints })
 
   // Layout: STRIDE floats per kept keypoint [x,y,scale,response,angle,d0..d127],
   // then two trailing scalars — rawFound (survivors of near-duplicate suppression,

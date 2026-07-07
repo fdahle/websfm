@@ -64,7 +64,15 @@
       "Bash(curl -sL -o lg_fused_cpu.onnx \"https://github.com/fabio-sim/LightGlue-ONNX/releases/download/v1.0.0/superpoint_lightglue_fused_cpu.onnx\")",
       "Bash(echo \"=== TYPECHECK EXIT $? ===\")",
       "Bash(echo \"=== BUILD EXIT $? ===\")",
-      "Bash(git commit -q -m 'Update RESTRUCTURE.md plan before executing restructure *)"
+      "Bash(git commit -q -m 'Update RESTRUCTURE.md plan before executing restructure *)",
+      "Bash(set -e)",
+      "Bash(git mv *)",
+      "Bash(perl -i -pe \"s{'\\\\.\\\\./core/io/}{'./}g\" src/core/io/cameraKind.js src/core/io/importKind.js)",
+      "Bash(perl -i -pe \"s{'\\\\./utils/camera\\\\.js'}{'./core/io/cameraKind.js'}g; s{'\\\\./utils/importKind\\\\.js'}{'./core/io/importKind.js'}g\" src/App.vue)",
+      "Bash(perl -i -pe \"s{mirrors utils/detection\\\\.js \\\\+ core/features/matching\\\\.js}{mirrors core/features/sift.js + core/features/{bruteforce,verify}.js}\" src/workers/computeClient.js)",
+      "Bash(perl -i -pe \"s{core/features/matching\\\\.js}{core/features/bruteforce.js}g\" src/core/features/ort.js src/core/features/superpoint.js)",
+      "Bash(perl -i -pe \"s{see core/features/matching\\\\.js inlierSpread}{see core/features/verify.js inlierSpread}\" src/stores/useMatchesStore.js)",
+      "Bash(git commit -q -m 'Phase 2: dissolve utils/ grab-bag, split matching.js *)"
     ],
     "additionalDirectories": [
       "/Users/fhdahle/Documents/GitHub/websfm/src/wasm/*",

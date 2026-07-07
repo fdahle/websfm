@@ -33,15 +33,16 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
 - **`src/core/**/*.js` is PURE compute**: no Vue/Pinia/OPFS/DOM. Plain data in, plain
   data out, side effects via injected `onLog`/`onProgress` hooks. This is what lets the
   same code run inside the worker. Grouped by pipeline stage into subfolders:
-  `core/features/` (detectors/matchers: `superpoint.js`, `lightglue.js`, `matching.js`,
+  `core/features/` (detectors `sift.js` / `superpoint.js`, matchers `bruteforce.js` /
+  `lightglue.js`, shared geometric gate `verify.js` — F-RANSAC + inlierSpread — plus
   `ort.js`, `preselect.js`), `core/sfm/`
   (`sfm.js` incremental SfM orchestrator, `reconstruction.js` JS↔WASM
   marshalling, `geometry.js` shared pinhole-camera helpers — cameraCenter, project*,
-  triangulationAngle, scaleK, rgbaToGray — `distortion.js`),
+  triangulationAngle, scaleK, rgbaToGray — `distortion.js`, `cameraEstimated.js`),
   `core/dense/` (`mvs.js` dense MVS orchestrator, `planeCost.js`, `memBudget.js`),
   `core/products/` (`dem.js`, `ortho.js`, `projection.js`, `georef.js`, `exporters.js`,
   `geotiff.js`, `colormap.js`), `core/io/` (`gcp.js`, `pose.js`, `sensor.js`,
-  `geojson.js`, `metadata.js`), `core/help/`
+  `geojson.js`, `metadata.js`, `cameraKind.js`, `importKind.js`), `core/help/`
   (`glossary.js`, `guide.js`, `commands.js`); cross-cutting stragglers stay flat at
   `core/` root (`crs.js`, `footprint.js`, `mask.js`, `types.ts`).
 - **`src/stores/*.js`** own reactive state + OPFS persistence. They marshal reactive
