@@ -1,0 +1,143 @@
+import { ref } from 'vue'
+import { buildPosesCsv, buildSensorsCsv, downloadCsv } from '../utils/exportCsv.js'
+import { cloudToPly, reconstructionToJson, demToAsciiGrid, demToGeoTiff, orthoToGeoTiff, rasterWorldFile } from '../core/products/exporters.js'
+import { downloadBlob, dataUrlToBlob } from '../utils/download.js'
+
+// Camera-params + product export funnel, lifted out of App.vue. Owns `exportKind`
+// (which export dialog is open); the Ribbon command dispatch sets it and the
+// template's ExportModal binds to it. The reactive state it reads is injected as
+// refs so the composable stays free of store wiring. Injected deps (all refs):
+//   poses, sensors, images, matchStore, clouds, selectedCloud, dem, ortho,
+//   currentProjectName, currentCrs
+export function useExports({
+  poses, sensors, images, matchStore, clouds, selectedCloud, dem, ortho,
+  currentProjectName, currentCrs,
+}) {
+  function exportPoses() {
+    if (!poses.value.length) return
+    downloadCsv(`${currentProjectName.value || 'project'}-poses.csv`, buildPosesCsv(poses.value, currentCrs.value))
+  }
+
+  function exportSensors() {
+    if (!sensors.value.length) return
+    downloadCsv(`${currentProjectName.value || 'project'}-sensors.csv`, buildSensorsCsv(sensors.value))
+  }
+
+  function saveJson(data, filename) {
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  function exportKeypoints() {
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-')
+    const data = images.value
+      .filter(img => img.kpStatus === 'done' && img.keypoints?.length)
+      .map(img => ({
+        image: img.name,
+        uuid: img.uuid,
+        kpCount: img.kpCount,
+        keypoints: img.keypoints.map(kp => ({ x: kp.x, y: kp.y, scale: kp.scale, response: kp.response })),
+      }))
+    saveJson(data, `keypoints-${stamp}.json`)
+  }
+
+  function exportMatches() {
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-')
+    const byUuid = Object.fromEntries(images.value.map(img => [img.uuid, img.name]))
+    const data = []
+    for (const [, entry] of matchStore.value) {
+      if (entry.status !== 'done') continue
+      data.push({
+        imageA: byUuid[entry.idA] ?? entry.idA,
+        imageB: byUuid[entry.idB] ?? entry.idB,
+        rawCount: entry.rawCount,
+        inlierCount: entry.inlierCount,
+        matches: entry.matches,
+      })
+    }
+    saveJson(data, `matches-${stamp}.json`)
+  }
+
+  const projectBase = () => currentProjectName.value || 'project'
+
+  // Which export dialog is open ('cloud' | 'model' | 'dem' | 'ortho'), or null.
+  const exportKind = ref(null)
+
+  // Parse the current DEM's CRS into an EPSG code + geographic flag for GeoTIFF /
+  // .prj. The working CRS is a proj4 string or "EPSG:xxxx"; only the latter yields a
+  // code (else the geotransform is still written, without a CRS).
+  function crsInfo(source) {
+    const crs = source?.crs
+    if (!crs || crs === 'local') return { crs: null, code: null, geographic: false }
+    const m = /EPSG:(\d+)/i.exec(crs)
+    const code = m ? Number(m[1]) : null
+    const geographic = code === 4326 || /degree|deg\b/i.test(source.unit || '')
+    return { crs, code, geographic }
+  }
+
+  function onExportRun(settings) {
+    const kind = exportKind.value
+    exportKind.value = null
+    if (kind === 'cloud') doExportCloud(settings)
+    else if (kind === 'model') doExportModel(settings)
+    else if (kind === 'dem') doExportDem(settings)
+    else if (kind === 'ortho') doExportOrtho(settings)
+  }
+
+  // Point cloud (selected, else the first non-empty) → PLY.
+  function doExportCloud({ format, includeColor }) {
+    const cloud = selectedCloud.value?.points?.length
+      ? selectedCloud.value
+      : clouds.value.find((c) => c.points.length > 0)
+    if (!cloud) return
+    const binary = format !== 'ply-ascii'
+    const ply = cloudToPly(cloud.points, { binary, color: includeColor })
+    downloadBlob(`${projectBase()}-${cloud.kind}.ply`, ply, binary ? 'application/octet-stream' : 'text/plain;charset=utf-8')
+  }
+
+  // SfM cameras (+ optional tracks) → JSON interchange (uses the sparse cloud).
+  function doExportModel({ includeTracks }) {
+    const cloud = clouds.value.find((c) => c.kind === 'sparse')
+      ?? (selectedCloud.value?.cameras?.size ? selectedCloud.value : null)
+    if (!cloud) return
+    const cams = [...cloud.cameras.entries()].map(([uuid, c]) => ({ uuid, R: c.R, t: c.t, K: c.K }))
+    const pts = cloud.points.map((p) => ({
+      x: p.x, y: p.y, z: p.z, color: p.color,
+      views: includeTracks && p.views ? [...p.views.entries()] : [],
+    }))
+    saveJson(reconstructionToJson(cams, pts, currentCrs.value), `${projectBase()}-model.json`)
+  }
+
+  // DEM → GeoTIFF, or ESRI ASCII grid (+ .prj sidecar carrying the CRS).
+  function doExportDem({ format, nodata }) {
+    if (!dem.value) return
+    const info = crsInfo(dem.value)
+    if (format === 'geotiff') {
+      downloadBlob(`${projectBase()}-dem.tif`, demToGeoTiff(dem.value, { crs: info, nodata }), 'image/tiff')
+      return
+    }
+    downloadBlob(`${projectBase()}-dem.asc`, demToAsciiGrid(dem.value, { nodata }), 'text/plain;charset=utf-8')
+    if (info.crs) downloadBlob(`${projectBase()}-dem.prj`, info.crs, 'text/plain;charset=utf-8')
+  }
+
+  // Ortho → GeoTIFF, or PNG + world file (.wld) + .prj. Shares the DEM's geotransform.
+  async function doExportOrtho({ format }) {
+    if (!ortho.value || !dem.value) return
+    const info = crsInfo(dem.value)
+    if (format === 'geotiff') {
+      downloadBlob(`${projectBase()}-ortho.tif`, orthoToGeoTiff(ortho.value, dem.value, { crs: info }), 'image/tiff')
+      return
+    }
+    if (!ortho.value.previewDataUrl) return
+    downloadBlob(`${projectBase()}-ortho.png`, await dataUrlToBlob(ortho.value.previewDataUrl))
+    downloadBlob(`${projectBase()}-ortho.wld`, rasterWorldFile(dem.value), 'text/plain;charset=utf-8')
+    if (info.crs) downloadBlob(`${projectBase()}-ortho.prj`, info.crs, 'text/plain;charset=utf-8')
+  }
+
+  return { exportKind, exportPoses, exportSensors, exportKeypoints, exportMatches, onExportRun }
+}
