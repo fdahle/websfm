@@ -48,6 +48,48 @@ describe('fitSimilarity', () => {
   it('returns null with fewer than 3 correspondences', () => {
     expect(fitSimilarity([{ src: [0, 0, 0], dst: [1, 1, 1] }])).toBeNull()
   })
+
+  it('recovers a pure uniform scale (no rotation, no translation)', () => {
+    const src = [[1, 0, 0], [0, 1, 0], [0, 0, 1], [1, 1, 1]]
+    const pairs = src.map((p) => ({ src: p, dst: [p[0] * 3, p[1] * 3, p[2] * 3] }))
+    const fit = fitSimilarity(pairs)
+    close(fit.scale, 3)
+    close(fit.rms, 0, 1e-6)
+    // Rotation is (close to) identity.
+    close(fit.R[0][0], 1); close(fit.R[1][1], 1); close(fit.R[2][2], 1)
+  })
+
+  it('recovers a pure translation (unit scale, identity rotation)', () => {
+    const src = [[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]]
+    const t = [7, -3, 11]
+    const pairs = src.map((p) => ({ src: p, dst: [p[0] + t[0], p[1] + t[1], p[2] + t[2]] }))
+    const fit = fitSimilarity(pairs)
+    close(fit.scale, 1)
+    close(fit.t[0], 7); close(fit.t[1], -3); close(fit.t[2], 11)
+    close(fit.rms, 0, 1e-6)
+  })
+
+  it('returns null for a degenerate (collinear, zero-variance) source', () => {
+    // All source points identical → srcVar ≈ 0 → unrecoverable.
+    const pairs = [
+      { src: [1, 1, 1], dst: [0, 0, 0] },
+      { src: [1, 1, 1], dst: [1, 0, 0] },
+      { src: [1, 1, 1], dst: [0, 1, 0] },
+    ]
+    expect(fitSimilarity(pairs)).toBeNull()
+  })
+
+  it('fits collinear points without mirroring (residual stays small)', () => {
+    // A straight line still admits a valid similarity; just underdetermined about
+    // the axis. The fit should not blow up or reflect.
+    const s = 2, R = rotZ(0.5), t = [1, 2, 3]
+    const src = [[0, 0, 0], [1, 0, 0], [2, 0, 0], [3, 0, 0]]
+    const pairs = src.map((p) => ({ src: p, dst: applySimilarity({ scale: s, R, t }, p) }))
+    const fit = fitSimilarity(pairs)
+    expect(fit).not.toBeNull()
+    expect(fit.scale).toBeGreaterThan(0)
+    expect(fit.rms).toBeLessThan(1e-6)
+  })
 })
 
 describe('frameFromSimilarity', () => {

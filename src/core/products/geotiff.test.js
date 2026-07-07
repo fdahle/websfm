@@ -78,4 +78,37 @@ describe('writeGeoTiff', () => {
     // No EPSG → user-defined model type, still a valid geotransform.
     expect(tags.get(34735).slice(0, 4)).toEqual([1, 1, 0, 2])
   })
+
+  it('emits a GDAL_NODATA tag only when a nodata value is given', () => {
+    const base = {
+      width: 1, height: 1,
+      samples: [{ bits: 32, format: 3 }],
+      photometric: 1, extraSamples: null,
+      data: new Uint8Array(new Float32Array([0]).buffer),
+      pixelScale: [1, 1, 0], tiepoint: [0, 0, 0, 0, 0, 0],
+      geoKeys: geoKeysForEpsg(3031, false),
+    }
+    const withNoData = parseTiff(writeGeoTiff({ ...base, gdalNoData: -9999 }))
+    expect(withNoData.tags.has(42113)).toBe(true)
+    const without = parseTiff(writeGeoTiff(base))
+    expect(without.tags.has(42113)).toBe(false)
+  })
+})
+
+describe('geoKeysForEpsg', () => {
+  it('sets a projected model type + ProjectedCSType key', () => {
+    expect(geoKeysForEpsg(3031, false)).toEqual([
+      [1024, 0, 1, 1], [1025, 0, 1, 1], [3072, 0, 1, 3031],
+    ])
+  })
+
+  it('sets a geographic model type + GeographicType key', () => {
+    expect(geoKeysForEpsg(4326, true)).toEqual([
+      [1024, 0, 1, 2], [1025, 0, 1, 1], [2048, 0, 1, 4326],
+    ])
+  })
+
+  it('falls back to a user-defined model when no code is given', () => {
+    expect(geoKeysForEpsg(null, false)).toEqual([[1024, 0, 1, 32767], [1025, 0, 1, 1]])
+  })
 })

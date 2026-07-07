@@ -45,4 +45,46 @@ describe('preselectPairs', () => {
     expect(keep.has('p00--p10')).toBe(true)
     expect(keep.has('p00--p01')).toBe(true)
   })
+
+  it('keeps every pair when maxNeighbors ≥ N-1 (degrades to exhaustive)', () => {
+    const keep = preselectPairs(strip, { maxNeighbors: 10 })
+    expect(keep.size).toBe(10) // C(5,2)
+    for (const a of ['a', 'b', 'c', 'd', 'e']) {
+      for (const b of ['a', 'b', 'c', 'd', 'e']) {
+        if (a < b) expect(keep.has(`${a}--${b}`)).toBe(true)
+      }
+    }
+  })
+
+  it('returns an empty set for a single item (no pairs possible)', () => {
+    expect(preselectPairs([{ uuid: 'a', pos: [0, 0, 0] }]).size).toBe(0)
+  })
+
+  it('returns an empty set for no items', () => {
+    expect(preselectPairs([]).size).toBe(0)
+  })
+
+  it('treats a missing z as 0 in the distance', () => {
+    // 2D positions (no z) must not throw and should rank by planar distance.
+    const items = [
+      { uuid: 'a', pos: [0, 0] },
+      { uuid: 'b', pos: [1, 0] },
+      { uuid: 'c', pos: [5, 0] },
+    ]
+    const keep = preselectPairs(items, { maxNeighbors: 1 })
+    expect(keep.has('a--b')).toBe(true)
+    expect(keep.has('a--c')).toBe(false)
+  })
+
+  it('breaks distance ties by keeping enough neighbours to cover them', () => {
+    // b and c are equidistant from a; with k=2 both are kept.
+    const items = [
+      { uuid: 'a', pos: [0, 0, 0] },
+      { uuid: 'b', pos: [1, 0, 0] },
+      { uuid: 'c', pos: [-1, 0, 0] },
+    ]
+    const keep = preselectPairs(items, { maxNeighbors: 2 })
+    expect(keep.has('a--b')).toBe(true)
+    expect(keep.has('a--c')).toBe(true)
+  })
 })
