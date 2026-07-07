@@ -133,6 +133,10 @@ function init() {
   controls = new OrbitControls(camera, renderer.domElement)
   controls.enableDamping = true
   controls.dampingFactor = 0.08
+  // Zoom toward the cursor and drag the orbit pivot in with it: when zoomed deep
+  // into the tie-points, orbit/pan then work around the region under the cursor
+  // instead of the far scene centre (which otherwise makes navigation fiddly).
+  controls.zoomToCursor = true
   controls.update()
 
   resizeObserver = new ResizeObserver(onResize)

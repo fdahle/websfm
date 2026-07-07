@@ -545,8 +545,10 @@ function editMask(id) {
 function onDepthMapsRun(settings)   { depthMapsOpen.value      = false;  runComputeDepthMaps(settings) }
 function onDenseRun(settings)       { denseOpen.value          = false;  runDensify(settings) }
 // Products: build, then pop the preview so the result is immediately visible.
-async function onDemRun(settings)   { demOpen.value = false;   await runGenerateDem(settings);   if (dem.value) openProductTab('dem') }
-async function onOrthoRun(settings) { orthoOpen.value = false; await runGenerateOrtho(settings); if (ortho.value) openProductTab('ortho') }
+// No auto-preview: generation just produces the product; the user opens it via
+// Products ▸ Preview (or the sidebar) when they want to inspect it.
+async function onDemRun(settings)   { demOpen.value = false;   await runGenerateDem(settings) }
+async function onOrthoRun(settings) { orthoOpen.value = false; await runGenerateOrtho(settings) }
 
 // ── Image deletion (with confirmation) ────────────────────────────────────────
 // Removing images is irreversible (drops keypoints/masks/matches), so route every
