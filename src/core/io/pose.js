@@ -43,7 +43,7 @@ export const POSE_ROLE_LABELS = {
 
 // Returns each role mapped to a column index (or null). Header text first, then
 // a positional fallback for image/x/y/z/omega/phi/kappa.
-export function guessMapping(headerCells, columnCount, hasHeader) {
+export function guessMapping(headerCells, columnCount, hasHeader, { positional = true } = {}) {
   const mapping = Object.fromEntries(POSE_ROLES.map((r) => [r, null]))
 
   if (hasHeader) {
@@ -53,6 +53,8 @@ export function guessMapping(headerCells, columnCount, hasHeader) {
       }
     })
   }
+
+  if (!positional) return mapping
 
   const used = new Set(Object.values(mapping).filter((v) => v != null))
   const order = ['image', 'x', 'y', 'z', 'omega', 'phi', 'kappa']

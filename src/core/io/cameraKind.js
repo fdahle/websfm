@@ -13,8 +13,10 @@ export function detectCameraMode(text) {
   const header = rows[0]
   const columnCount = rows.reduce((m, r) => Math.max(m, r.length), 0)
 
-  const poseMap = guessPoses(header, columnCount, true)
-  const sensorMap = guessSensors(header, columnCount, true)
+  // Header-only signals — positional fallbacks would fabricate an image/
+  // orientation column on every file and always look like a pose.
+  const poseMap = guessPoses(header, columnCount, true, { positional: false })
+  const sensorMap = guessSensors(header, columnCount, true, { positional: false })
 
   // A per-row image name + position is the hallmark of a pose file. Distortion /
   // focal / sensor-dimension columns mark an intrinsics file.

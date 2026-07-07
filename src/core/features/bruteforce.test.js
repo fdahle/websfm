@@ -58,4 +58,23 @@ describe('matchDescriptors (SIMD wasm)', () => {
     const { matches } = await matchDescriptors(A, B, { ratioThreshold: 0.75 })
     expect(matches.length).toBe(0)
   })
+
+  it('cross-check is symmetric in the pairs it keeps', async () => {
+    const A = pack([oneHot(0), oneHot(40), oneHot(127)])
+    const B = pack([oneHot(0, 101), oneHot(40, 99), oneHot(127, 100)])
+
+    const fwd = await matchDescriptors(A, B, { crossCheck: true })
+    const rev = await matchDescriptors(B, A, { crossCheck: true })
+    // Same mutual pairs, with the two indices swapped between directions.
+    const fwdPairs = fwd.matches.map((m) => `${m.ia}-${m.ib}`).sort()
+    const revPairs = rev.matches.map((m) => `${m.ib}-${m.ia}`).sort()
+    expect(fwdPairs).toEqual(revPairs)
+  })
+
+  it('reports count consistent with the matches array length', async () => {
+    const A = pack([oneHot(0), oneHot(40)])
+    const B = pack([oneHot(0, 100), oneHot(40, 100)])
+    const { matches, count } = await matchDescriptors(A, B)
+    expect(count).toBe(matches.length)
+  })
 })

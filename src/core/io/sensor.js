@@ -52,7 +52,7 @@ export const SENSOR_ROLE_LABELS = {
 
 // Returns each role mapped to a column index (or null). Header text first, then
 // a small positional fallback for label/width/height/focal.
-export function guessMapping(headerCells, columnCount, hasHeader) {
+export function guessMapping(headerCells, columnCount, hasHeader, { positional = true } = {}) {
   const mapping = Object.fromEntries(SENSOR_ROLES.map((r) => [r, null]))
 
   if (hasHeader) {
@@ -62,6 +62,8 @@ export function guessMapping(headerCells, columnCount, hasHeader) {
       }
     })
   }
+
+  if (!positional) return mapping
 
   const used = new Set(Object.values(mapping).filter((v) => v != null))
   const freeAt = (i) => i < columnCount && !used.has(i)

@@ -35,9 +35,12 @@ export function detectFileKind(text, fileName = '') {
   const header = rows[0]
   const columnCount = rows.reduce((m, r) => Math.max(m, r.length), 0)
 
-  const gcpMap = guessGcps(header, columnCount, true)
-  const poseMap = guessPoses(header, columnCount, true)
-  const sensorMap = guessSensors(header, columnCount, true)
+  // Header-only signals: positional fallbacks would fabricate matches (every
+  // file gets an image/orientation/focal column by position) and defeat the
+  // mutually-distinctive checks below.
+  const gcpMap = guessGcps(header, columnCount, true, { positional: false })
+  const poseMap = guessPoses(header, columnCount, true, { positional: false })
+  const sensorMap = guessSensors(header, columnCount, true, { positional: false })
 
   // Strong, mutually-distinctive signals.
   const hasPixels = gcpMap.px != null && gcpMap.py != null

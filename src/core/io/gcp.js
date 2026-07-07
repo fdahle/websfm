@@ -61,7 +61,7 @@ const ROLES = ['name', 'x', 'y', 'z', 'image', 'px', 'py']
 
 // Returns { name, x, y, z, image, px, py } mapping each role to a column index
 // (or null). Uses header text when present, otherwise positional defaults.
-export function guessMapping(headerCells, columnCount, hasHeader) {
+export function guessMapping(headerCells, columnCount, hasHeader, { positional = true } = {}) {
   const mapping = { name: null, x: null, y: null, z: null, image: null, px: null, py: null }
 
   if (hasHeader) {
@@ -71,6 +71,8 @@ export function guessMapping(headerCells, columnCount, hasHeader) {
       }
     })
   }
+
+  if (!positional) return mapping
 
   // Positional fallback for anything still unassigned.
   const used = new Set(Object.values(mapping).filter((v) => v != null))
