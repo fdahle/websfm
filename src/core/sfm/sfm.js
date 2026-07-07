@@ -17,15 +17,20 @@
 //     points:  [{ x, y, z, views: [[uuid, kpIdx], …] }] }
 
 import {
-  resolveK, fundamentalToEssential, makeP34flat,
+  resolveK, fundamentalToEssential,
   recoverPose, triangulateDlt, solvePnp, bundleAdjust,
 } from './reconstruction.js'
-import { projectPoint, projectWithDepth, medianTriangulationAngle } from './geometry.js'
+import { projectPoint, medianTriangulationAngle } from './geometry.js'
 import { undistortPixel, distortionOf } from './distortion.js'
+import { rotationCycleFilter } from './cycleFilter.js'
+import { toNorm, camToP34flat, reprojErr, retriangulatePairs, mergeSplitTracks } from './tracks.js'
+import { selectInitPair } from './initPair.js'
+
+// Re-export the extracted pure modules so existing importers (sfm.test.js and any
+// others that reached for these through sfm.js) keep working unchanged.
+export { rotationCycleFilter, retriangulatePairs, mergeSplitTracks }
 
 // ── Geometry helpers ────────────────────────────────────────────────────────────
-const I3 = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
-
 // Depth of world point (x,y,z) along a flat 3×4 projection matrix's principal
 // axis. P is row-major [r0(4), r1(4), r2(4)]; depth = r2 · [x, y, z, 1].
 // Positive ⇒ the point is in front of that camera (cheirality).
@@ -48,263 +53,6 @@ function numStats(arr) {
 function fmtStats(s) {
   return `mean ${s.mean.toFixed(2)}px, median ${s.median.toFixed(2)}px, `
     + `p95 ${s.p95.toFixed(2)}px, max ${s.max.toFixed(2)}px (${s.count} obs)`
-}
-
-// Convert pixel coord to normalised (K^-1 applied).
-function toNorm(px, py, K) {
-  return { x: (px - K.cx) / K.fx, y: (py - K.cy) / K.fy }
-}
-
-// Eigenvalues of a symmetric 3×3 matrix, descending (analytic, Smith 1961).
-function eigSym3(a) {
-  const p1 = a[0][1] ** 2 + a[0][2] ** 2 + a[1][2] ** 2
-  if (p1 === 0) return [a[0][0], a[1][1], a[2][2]].sort((x, y) => y - x)
-  const q = (a[0][0] + a[1][1] + a[2][2]) / 3
-  const p2 = (a[0][0] - q) ** 2 + (a[1][1] - q) ** 2 + (a[2][2] - q) ** 2 + 2 * p1
-  const p = Math.sqrt(p2 / 6)
-  const B = [[0, 0, 0], [0, 0, 0], [0, 0, 0]]
-  for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) B[i][j] = (a[i][j] - (i === j ? q : 0)) / p
-  const detB =
-      B[0][0] * (B[1][1] * B[2][2] - B[1][2] * B[2][1])
-    - B[0][1] * (B[1][0] * B[2][2] - B[1][2] * B[2][0])
-    + B[0][2] * (B[1][0] * B[2][1] - B[1][1] * B[2][0])
-  const phi = Math.acos(Math.max(-1, Math.min(1, detB / 2))) / 3
-  const e1 = q + 2 * p * Math.cos(phi)
-  const e3 = q + 2 * p * Math.cos(phi + (2 * Math.PI) / 3)
-  return [e1, 3 * q - e1 - e3, e3]
-}
-
-// Singular values of the essential matrix E (flat row-major, 9 elements), as
-// √eig(EᵀE). A true essential matrix has σ1≈σ2 and σ3≈0; when the intrinsics
-// (focal length) are wrong, F→E conversion yields σ2/σ1 well below 1 — a direct
-// signal that K is off. Returns { s1, s2, s3 } descending.
-function essentialSingularValues(Eflat) {
-  const E = [
-    [Eflat[0], Eflat[1], Eflat[2]],
-    [Eflat[3], Eflat[4], Eflat[5]],
-    [Eflat[6], Eflat[7], Eflat[8]],
-  ]
-  const M = [[0, 0, 0], [0, 0, 0], [0, 0, 0]] // EᵀE
-  for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) {
-    let s = 0
-    for (let k = 0; k < 3; k++) s += E[k][i] * E[k][j]
-    M[i][j] = s
-  }
-  const [a, b, c] = eigSym3(M).map((v) => Math.sqrt(Math.max(0, v)))
-  return { s1: a, s2: b, s3: c }
-}
-
-// Build flat P34 for a camera in *normalised* image coords (no K).
-function camToP34flat(cam) {
-  return makeP34flat(cam.R, cam.t)
-}
-
-// ── 3×3 rotation helpers (rotation-cycle-consistency match filter) ────────────
-function matMul3(A, B) {
-  const C = [[0, 0, 0], [0, 0, 0], [0, 0, 0]]
-  for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) {
-    let s = 0
-    for (let k = 0; k < 3; k++) s += A[i][k] * B[k][j]
-    C[i][j] = s
-  }
-  return C
-}
-function matT3(A) {
-  return [[A[0][0], A[1][0], A[2][0]], [A[0][1], A[1][1], A[2][1]], [A[0][2], A[1][2], A[2][2]]]
-}
-// Geodesic angle (deg) of a rotation matrix from identity: θ = acos((tr R − 1)/2).
-function rotAngleDeg(R) {
-  const tr = R[0][0] + R[1][1] + R[2][2]
-  return Math.acos(Math.max(-1, Math.min(1, (tr - 1) / 2))) * 180 / Math.PI
-}
-
-// ── Rotation-cycle consistency filter (repetitive-structure defense, pure) ────
-// A verified pair can still be false: on repetitive structure (a row of near-
-// identical façades) RANSAC fits a clean fundamental matrix to the WRONG
-// correspondences, yielding a high inlier count but a bogus relative pose. Such a
-// pair clears every count/ratio gate. What it CANNOT do is agree with the rest of
-// the graph: decompose each pair's essential matrix into a relative rotation R_ij,
-// then for every triangle (i,j,k) the cycle R_ik⁻¹·R_jk·R_ij must be ≈ identity.
-// A true edge is cycle-consistent in nearly all its triangles; a false edge breaks
-// essentially every cycle it sits in, regardless of inlier count. Greedily drop the
-// least-consistent edge until every survivor with enough triangles clears the
-// support floor. Edges in fewer than `minTriangles` triangles are unjudgeable → kept.
-//
-// `edges`: [{ idA, idB, R }] — R is the relative rotation idA→idB (from essential
-// decomposition). Pure graph reasoning so it can be unit-tested without WASM; the
-// caller (reconstruct) supplies R via recoverPose. Returns { drop } where each entry
-// is { idA, idB, tri, good, ratio } for a removed pair (idA<idB canonical order).
-export function rotationCycleFilter(edges, opts = {}) {
-  const cycleErrDeg = opts.cycleErrorDeg ?? 5
-  const minTri = opts.minTriangles ?? 2
-  const minSupport = opts.minSupport ?? 0.3
-  const pk = (a, b) => (a < b ? `${a}--${b}` : `${b}--${a}`)
-
-  // pid → { a, b, R, active } with a<b, so R (a→b) is canonical min→max direction.
-  const E = new Map()
-  for (const e of edges) {
-    if (!e.R) continue
-    const [a, b] = e.idA < e.idB ? [e.idA, e.idB] : [e.idB, e.idA]
-    E.set(pk(a, b), { a, b, R: e.idA < e.idB ? e.R : matT3(e.R), active: true })
-  }
-
-  // Per-edge { tri, good } over every triangle in the currently-active graph. Each
-  // triangle {i<j<k} is generated exactly once — from its (min,mid) edge, scanning
-  // for a common neighbour k>j — then credited to all three of its edges.
-  const support = () => {
-    const stats = new Map()
-    const bump = (pid, ok) => { const s = stats.get(pid) ?? { tri: 0, good: 0 }; s.tri++; if (ok) s.good++; stats.set(pid, s) }
-    const adj = new Map()
-    const add = (u, v) => { if (!adj.has(u)) adj.set(u, new Set()); adj.get(u).add(v) }
-    for (const e of E.values()) if (e.active) { add(e.a, e.b); add(e.b, e.a) }
-    for (const e of E.values()) {
-      if (!e.active) continue
-      const i = e.a, j = e.b // i<j
-      const ni = adj.get(i), nj = adj.get(j)
-      for (const k of ni) {
-        if (k <= j || !nj.has(k)) continue // i<j<k, each triangle once
-        const Rij = E.get(pk(i, j)).R, Rjk = E.get(pk(j, k)).R, Rik = E.get(pk(i, k)).R
-        const ok = rotAngleDeg(matMul3(matT3(Rik), matMul3(Rjk, Rij))) <= cycleErrDeg
-        bump(pk(i, j), ok); bump(pk(j, k), ok); bump(pk(i, k), ok)
-      }
-    }
-    return stats
-  }
-
-  const drop = []
-  while (true) {
-    const stats = support()
-    let worst = null
-    for (const [pid, s] of stats) {
-      if (s.tri < minTri) continue
-      const ratio = s.good / s.tri
-      if (ratio >= minSupport) continue
-      if (!worst || ratio < worst.ratio || (ratio === worst.ratio && s.tri > worst.tri)) {
-        worst = { pid, ratio, tri: s.tri, good: s.good }
-      }
-    }
-    if (!worst) break
-    const e = E.get(worst.pid)
-    e.active = false
-    drop.push({ idA: e.a, idB: e.b, tri: worst.tri, good: worst.good, ratio: worst.ratio })
-  }
-  return { drop }
-}
-
-// ── Retriangulation + track merging (A3, pure) ───────────────────────────────
-// Standard COLMAP-style post-BA structure recovery, factored out of `reconstruct`
-// so it's testable in isolation. Shared signature:
-//   points3d : [{ x, y, z, views: Map<uuid,kpIdx> }]
-//   cameras  : Map<uuid, { R, t, K }>
-//   pairs    : verified match pairs [{ idA, idB, matches: [[iaKp, ibKp], …] }]
-//   keypointOf(uuid, kpIdx) → { x, y } | null
-//   maxReprojPx : reprojection gate (px)
-
-// uuid → Map<kpIdx, point> reverse index over a track list.
-function buildViewIndex(points3d) {
-  const index = new Map()
-  for (const pt of points3d) {
-    for (const [uuid, kp] of pt.views) {
-      let m = index.get(uuid)
-      if (!m) { m = new Map(); index.set(uuid, m) }
-      m.set(kp, pt)
-    }
-  }
-  return index
-}
-
-const reprojErr = (cam, x, y, z, kp) => {
-  const p = projectWithDepth(cam, x, y, z) // null when behind the camera
-  return p ? Math.hypot(p.u - kp.x, p.v - kp.y) : Infinity
-}
-
-// Retriangulate matches whose *both* keypoints are still unassigned, using the
-// current (post-BA) poses. Adds a point when it's in front of both cameras and
-// reprojects ≤ gate in both. `triangulate(nA, nB, PA, PB)` is injected (WASM DLT
-// in production). Mutates + returns `points3d`; returns { added }.
-export async function retriangulatePairs({ points3d, cameras, pairs, keypointOf, maxReprojPx, triangulate }) {
-  const index = buildViewIndex(points3d)
-  const addIndexed = (pt, uuid, kp) => {
-    pt.views.set(uuid, kp)
-    let m = index.get(uuid); if (!m) { m = new Map(); index.set(uuid, m) }
-    m.set(kp, pt)
-  }
-  let added = 0
-  for (const e of pairs) {
-    const camA = cameras.get(e.idA), camB = cameras.get(e.idB)
-    if (!camA || !camB) continue // both endpoints must be registered
-    const idxA = index.get(e.idA), idxB = index.get(e.idB)
-    const fresh = e.matches.filter(([ia, ib]) => !idxA?.has(ia) && !idxB?.has(ib))
-    if (!fresh.length) continue
-
-    const KA = camA.K, KB = camB.K
-    const PA = camToP34flat(camA), PB = camToP34flat(camB)
-    const nA = [], nB = [], keep = []
-    for (const [ia, ib] of fresh) {
-      const kA = keypointOf(e.idA, ia), kB = keypointOf(e.idB, ib)
-      if (!kA || !kB) continue
-      nA.push(toNorm(kA.x, kA.y, KA)); nB.push(toNorm(kB.x, kB.y, KB)); keep.push([ia, ib])
-    }
-    if (!keep.length) continue
-
-    const tri = await triangulate(nA, nB, PA, PB) // [{ x, y, z, srcIdx }]
-    for (const { x, y, z, srcIdx } of tri) {
-      const [ia, ib] = keep[srcIdx]
-      // A point added earlier in this batch may already own one endpoint.
-      if (index.get(e.idA)?.has(ia) || index.get(e.idB)?.has(ib)) continue
-      const kA = keypointOf(e.idA, ia), kB = keypointOf(e.idB, ib)
-      if (reprojErr(camA, x, y, z, kA) > maxReprojPx) continue
-      if (reprojErr(camB, x, y, z, kB) > maxReprojPx) continue
-      const pt = { x, y, z, views: new Map() }
-      addIndexed(pt, e.idA, ia)
-      addIndexed(pt, e.idB, ib)
-      points3d.push(pt)
-      added++
-    }
-  }
-  return { added }
-}
-
-// Merge tracks split across two points: a match whose endpoints belong to two
-// *different* points means the same physical feature was reconstructed twice.
-// Fold the loser into the winner when the union is consistent (no image twice) and
-// every added observation still reprojects ≤ gate against the winner. Returns the
-// surviving array + { merged }.
-export function mergeSplitTracks({ points3d, cameras, pairs, keypointOf, maxReprojPx }) {
-  const index = buildViewIndex(points3d)
-  let merged = 0
-  for (const e of pairs) {
-    if (!cameras.has(e.idA) || !cameras.has(e.idB)) continue
-    const idxA = index.get(e.idA), idxB = index.get(e.idB)
-    for (const [ia, ib] of e.matches) {
-      const p1 = idxA?.get(ia), p2 = idxB?.get(ib)
-      if (!p1 || !p2 || p1 === p2 || p1._dead || p2._dead) continue
-      // No image may be observed with two different keypoints across the union.
-      let conflict = false
-      for (const [uuid, kp] of p2.views) {
-        if (p1.views.has(uuid) && p1.views.get(uuid) !== kp) { conflict = true; break }
-      }
-      if (conflict) continue
-      // Every added observation must still reproject within the gate against p1.
-      let ok = true
-      for (const [uuid, kp] of p2.views) {
-        const cam = cameras.get(uuid), kpt = keypointOf(uuid, kp)
-        if (!cam || !kpt || reprojErr(cam, p1.x, p1.y, p1.z, kpt) > maxReprojPx) { ok = false; break }
-      }
-      if (!ok) continue
-      for (const [uuid, kp] of p2.views) {
-        p1.views.set(uuid, kp)
-        let m = index.get(uuid); if (!m) { m = new Map(); index.set(uuid, m) }
-        m.set(kp, p1)
-      }
-      p2._dead = true
-      merged++
-    }
-  }
-  if (!merged) return { points3d, merged }
-  const out = points3d.filter((p) => !p._dead)
-  for (const p of out) delete p._dead
-  return { points3d: out, merged }
 }
 
 export async function reconstruct(input, hooks = {}) {
@@ -344,27 +92,6 @@ export async function reconstruct(input, hooks = {}) {
   }
   function modelReprojStats() {
     return numStats(modelResiduals())
-  }
-
-  // Reprojection stats for one *candidate* two-view init (its own cA/cB + points),
-  // before it is committed to the model. Lets us compare seeds and pick the
-  // geometrically cleanest one rather than the first that clears the parallax floor.
-  function initReprojStats(init) {
-    const residuals = []
-    const camById = new Map([[init.entry.idA, init.cA], [init.entry.idB, init.cB]])
-    for (const pt of init.points) {
-      pt.views.forEach((kpIdx, uuid) => {
-        const cam = camById.get(uuid)
-        const img = imageByUuid(uuid)
-        if (!cam || !img) return
-        const kp = img.keypoints?.[kpIdx]
-        if (!kp) return
-        const proj = projectPoint(cam, pt.x, pt.y, pt.z)
-        if (!proj) return
-        residuals.push(Math.hypot(proj.u - kp.x, proj.v - kp.y))
-      })
-    }
-    return numStats(residuals)
   }
 
   const t0 = performance.now()
@@ -531,131 +258,16 @@ export async function reconstruct(input, hooks = {}) {
       }
     }
 
-    // Two-view initialisation for one matched pair: recover pose, triangulate,
-    // and measure the median parallax angle. Returns null if it cannot init.
-    // Returns { ok: false, reason } when a pair cannot initialise, or
-    // { ok: true, entry, iA, iB, cA, cB, points, angle, inliers, triCount,
-    //   cheiralKept } on success. The extra fields feed diagnostic logging.
-    async function tryInitPair(entry) {
-      const iA = imageByUuid(entry.idA)
-      const iB = imageByUuid(entry.idB)
-      if (!iA || !iB || !entry.F) return { ok: false, reason: 'missing image or fundamental matrix' }
-      const KA = Kmap.get(entry.idA)
-      const KB = Kmap.get(entry.idB)
-      const E = fundamentalToEssential(entry.F, KA, KB)
-      const esv = essentialSingularValues(E)
-      const matches = entry.matches // [[ia, ib], ...]
-      const pa = matches.map(([ia]) => iA.keypoints[ia])
-      const pb = matches.map(([, ib]) => iB.keypoints[ib])
-      const pose = await recoverPose(pa, pb, E, KA)
-      if (!pose) return { ok: false, reason: 'pose recovery (essential decomposition) failed' }
-
-      const cA = { R: I3, t: [0, 0, 0], K: KA }
-      const cB = { R: pose.R, t: pose.t, K: KB }
-      const PA = camToP34flat(cA)
-      const PB = camToP34flat(cB)
-      const tri = await triangulateDlt(
-        pa.map((p) => toNorm(p.x, p.y, KA)),
-        pb.map((p) => toNorm(p.x, p.y, KB)),
-        PA, PB,
-      )
-      const points = []
-      for (const { x, y, z, srcIdx } of tri) {
-        if (projDepth(PA, x, y, z) > 0 && projDepth(PB, x, y, z) > 0) {
-          const [ia, ib] = matches[srcIdx]
-          points.push({ x, y, z, views: new Map([[entry.idA, ia], [entry.idB, ib]]) })
-        }
-      }
-      const angle = medianTriangulationAngle(cA, cB, points)
-      return {
-        ok: true, entry, iA, iB, cA, cB, points, angle, esv,
-        inliers: entry.inlierCount, triCount: tri.length, cheiralKept: points.length,
-      }
-    }
-
-    // ── Select initial pair: enough inliers AND a wide-enough baseline ──────
-    // Picking purely by inlier count tends to choose near-identical viewpoints
-    // (tiny parallax) whose triangulated points collapse onto a line. Probe the
-    // top candidates and take the first with adequate parallax.
-    const { minInitInliers = 15, minInitAngleDeg = 2.0, initCandidates = 8 } = settings
-    const candidates = donePairs
-      .filter((e) => e.inlierCount >= minInitInliers
-        && Kmap.has(e.idA) && Kmap.has(e.idB) && e.F)
-      .sort((a, b) => b.inlierCount - a.inlierCount)
-      .slice(0, initCandidates)
-
-    log(`Reconstruction: ${candidates.length} init candidate(s) of ${donePairs.length} done pairs `
-      + `(≥${minInitInliers} inliers, need ≥${minInitAngleDeg}° parallax)`, 'info', 'Reconstruction')
-
-    if (candidates.length === 0) {
-      log('Reconstruction: no valid matched pair found — check inlier counts and metadata', 'warn', 'Reconstruction')
-      return done('idle')
-    }
-
-    // Probe *every* candidate (don't stop at the first adequate one) so we can both
-    // log the full table and pick the geometrically cleanest seed. A seed's init
-    // reprojection is the single best predictor of how well the model will grow:
-    // a wide-baseline, low-reprojection pair gives clean 3D points that PnP can
-    // then register against. Picking the first pair over the parallax floor — as
-    // before — often locks in a noisy seed that stalls registration.
-    const viable = []
-    for (const entry of candidates) {
-      const init = await tryInitPair(entry)
-      const nameA = imageByUuid(entry.idA)?.name ?? entry.idA
-      const nameB = imageByUuid(entry.idB)?.name ?? entry.idB
-      if (!init.ok) {
-        log(`Reconstruction: candidate ${nameA} ↔ ${nameB} rejected — ${init.reason}`, 'debug', 'Reconstruction')
-        continue
-      }
-      // Cheirality survival = how many triangulated points are in front of both
-      // cameras. A low ratio almost always means the recovered pose is wrong.
-      const kept = init.cheiralKept, tri = init.triCount
-      const pct = tri ? (100 * kept / tri).toFixed(0) : '0'
-      if (kept < 10) {
-        log(`Reconstruction: candidate ${nameA} ↔ ${nameB} rejected — only ${kept}/${tri} pts `
-          + `survived cheirality (${pct}%), need ≥10`, 'debug', 'Reconstruction')
-        continue
-      }
-      init.reproj = initReprojStats(init)
-      init.nameA = nameA
-      init.nameB = nameB
-      const candRatio = init.esv.s1 > 0 ? init.esv.s2 / init.esv.s1 : 0
-      log(`Reconstruction: candidate ${nameA} ↔ ${nameB} — ${init.inliers} inliers, `
-        + `${kept}/${tri} pts kept after cheirality (${pct}%), median parallax ${init.angle.toFixed(2)}°, `
-        + `init reproj median ${init.reproj.median.toFixed(2)}px, E σ2/σ1 ${candRatio.toFixed(2)}`,
-        'debug', 'Reconstruction')
-      viable.push(init)
-    }
-
-    // Per-pair init reprojection (for the run summary / cross-run comparison).
-    const perPairInitReproj = viable.map((v) => ({
-      pair: `${v.nameA} ↔ ${v.nameB}`,
-      medianPx: v.reproj.median,
-      parallaxDeg: v.angle,
-    }))
-
-    // Among candidates clearing the parallax floor, take the lowest-reprojection
-    // seed. If none clear it, fall back to the widest baseline available.
-    const adequate = viable.filter((v) => v.angle >= minInitAngleDeg)
-    let best = null
-    if (adequate.length) {
-      best = adequate.reduce((a, b) => (b.reproj.median < a.reproj.median ? b : a))
-      log(`Reconstruction: selected seed ${best.nameA} ↔ ${best.nameB} of ${adequate.length} `
-        + `pair(s) over ${minInitAngleDeg}° parallax (lowest init reproj, median ${best.reproj.median.toFixed(2)}px)`,
-        'info', 'Reconstruction')
-    } else if (viable.length) {
-      best = viable.reduce((a, b) => (b.angle > a.angle ? b : a))
-    }
-
-    if (!best) {
-      log('Reconstruction: pose recovery failed for all candidate pairs '
-        + '(toggle "Detail" in the console to see per-candidate reasons)', 'error', 'Reconstruction')
-      return done('error')
-    }
-    if (best.angle < minInitAngleDeg) {
-      log(`Reconstruction: best initial parallax is only ${best.angle.toFixed(2)}° `
-        + `(< ${minInitAngleDeg}°) — the sparse cloud may look flat/linear`, 'warn', 'Reconstruction')
-    }
+    // Two-view initialisation + seed selection lives in initPair.js. It probes
+    // every candidate (pose recovery + triangulation + cheirality + init reproj)
+    // and returns the geometrically cleanest seed; the reconstruct-local helpers
+    // it needs are injected so it stays pure (no cycle back into this file).
+    const initSel = await selectInitPair(
+      { donePairs, Kmap, settings, imageByUuid, numStats, projDepth },
+      { onLog: log },
+    )
+    if (initSel.status !== 'ok') return done(initSel.status)
+    const { best, perPairInitReproj } = initSel
 
     const bestPair = best.entry
     const imgA = best.iA
