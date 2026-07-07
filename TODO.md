@@ -10,7 +10,9 @@ Baselines to beat are in `HANDOVER.md` §Baselines.
 
 ---
 
-## Now — verify the R track on real data
+## Now
+
+### R — verify the R track on real data
 
 R1–R6 (registration robustness) shipped 2026-07-04 (see HANDOVER done log) but
 are only unit-tested. **Re-run the Metashape building set (B1) and confirm the
@@ -25,6 +27,100 @@ names the offending cameras; tune `interimBaEvery` / `minPnpInlierRatio` /
 ---
 
 ## Next
+
+### RESTRUCT — codebase restructuring
+Execute `RESTRUCTURE.md` (root): subfolder `core/`, dissolve `utils/` grab-bag,
+split the god files (`sfm.js`, `App.vue`, `Sidebar.vue`, `compute.worker.js`).
+Six phases, one commit each, no behaviour changes; verification steps and
+out-of-scope list are in the plan file. Delete the plan file (and this entry)
+when done. Prereq: commit the current working tree first, and decide what to do
+with the untracked 49 MB `public/models/*.onnx` (gitignore+fetch script vs LFS).
+
+### SP — SuperPoint + LightGlue backend (first learned front end; realizes F5)
+Add SuperPoint (detector) and LightGlue (joint matcher) as **selectable
+alternatives** to SIFT + brute-force/RANSAC, run via **ONNX Runtime Web**
+(`executionProviders: ['webgpu','wasm']` — WebGPU when an adapter exists,
+per-session WASM fallback). Detector and matcher are two independent selectors,
+but not orthogonal: LightGlue's weights are trained on SuperPoint descriptors, so
+guard the invalid combos — SIFT(128-d)→brute-force ✓ (today), SuperPoint(256-d)→
+LightGlue ✓ (new, the recommended path), SuperPoint→brute-force ✓ (kept as a
+deliberate user-choice fallback — expected to underperform LightGlue, but the user
+keeps the freedom to run classic RANSAC matching on learned descriptors),
+**SIFT→LightGlue ✗ (disallow)**. Keep the SfM core, F/H verification,
+`inlierSpread`, and the pairs graph exactly as-is (the neutral meeting point per
+F5) — LightGlue just replaces `matchDescriptors` + the Lowe ratio test, and its
+output still flows through `verifyMatches`. User supplies `.onnx` files; SP4 adds
+custom-model upload. **MAGSAC++ is out of scope here** — it's an orthogonal
+upgrade to `verify_matches_hf` that would benefit both pipelines; file separately.
+Do **SP0 → SP1 → SP2** in order (proves runtime + persistence before LightGlue's
+coord-normalization risk); SP3/SP4/SP5 fold in after. Browser-only inference —
+say so; vitest can't run ORT-WebGPU (mock the session).
+
+**SP0 — Runtime + assets.** Add `onnxruntime-web`; set `ort.env.wasm.wasmPaths`
+(Vite static copy or CDN). Bundled models live in `public/models/` (`superpoint.onnx`,
+`lightglue.onnx`), lazy-`fetch`ed on first use. Check whether the dev server / deploy
+already sets COOP/COEP (cross-origin isolation) — ORT threaded WASM needs it; if
+absent, force single-threaded ORT. No behaviour change yet; just the runtime in place.
+
+**SP1 — SuperPoint detector (alternate `detect` path).** New `src/core/superpoint.js`
+mirroring `core/matching.js`'s lazy-init wrapper: cached `InferenceSession` +
+`detectSuperPoint(gray,w,h,{maxKeypoints})` → `{keypoints:[{x,y,score}],
+descriptors:Float32Array(N*256), dim:256}`. Branch `compute.worker.js` `detect()`
+(l.112) on `options.detector`, **reusing** `rasterize`, the mask LUT, and the
+colour-sampling + `x/scale,y/scale` back-map loop (l.138–157) unchanged — only the
+feature call swaps. Make `DESC_LEN`/`STRIDE` (l.33) per-detector, not the `128`
+const. Tag results with `detector`+`descDim` and persist (small add to what
+`useImagesStore` writes to `project.json`; carry descriptor width with the OPFS
+blob per F5 note (1), so `descriptors/{uuid}.bin` is no longer assumed N×128).
+Wire the enabled `superpoint` option into `DetectFeaturesModal.vue`'s `detectors`
+array with its own settings block (maxDim, maxKeypoints). Prove detection +
+persistence end-to-end first by matching on brute-force — this needs
+`crates/matching` to match descriptors at their **native width** (dispatch on
+`DESC = descA.len()/n`: keep the existing hand-unrolled 128-d `l2_sq_early`, add a
+sibling 256-d kernel = 8 blocks of 32; **no padding 128→256** — that would dilute
+SIFT's ratio-test distances; each width is matched in its own space, zero quality
+change). Rebuild wasm + commit `src/wasm/*` per convention. This same 256-d path
+also serves the SuperPoint→brute-force user-choice fallback above.
+
+**SP2 — LightGlue matcher (alternate match path).** New `src/core/lightglue.js`:
+cached session + `matchLightGlue({kpsA,descA,wA,hA,kpsB,descB,wB,hB,minConf})` →
+`[{ia,ib,score}]`. This is a **new worker op**, not a drop-in for `match()`
+(l.177): brute-force is descriptor-only + symmetric, LightGlue needs both keypoint
+sets. **Model is now fabio-sim v1.0.0 `superpoint_lightglue_fused_cpu`** (swapped
+2026-07-06; the old v0.1.0 export's 9.7k-node graph hung ORT's WebGPU warm-up —
+see HANDOVER): inputs `kpts0,kpts1,desc0,desc1` — **no image-size input**, so
+normalize keypoints in JS before feeding, fabio-sim convention
+`(kpt − [w/2,h/2]) / (max(w,h)/2)` (validated offline: outputs bit-identical to
+the old export); outputs `matches0` **[M,2] index pairs** + `mscores0` confidence
+(the parser also still accepts the old per-kpt assignment format). **Remaining:
+manual browser run** (CPU + GPU paths) — offline ORT-wasm validation passed but
+per Verification policy the in-browser run is unproven. Branch `matchAll`
+(`useMatchesStore.js`) on `settings.matcher`: LightGlue skips `matchDescriptors`/
+ratio (l.88), builds the putative list directly, then **keeps** `verifyMatches`
+(l.106) + `inlierSpread` (l.145) so SfM still gets `F`/`inlierMask`/`inlierCount`/
+stats; feed LightGlue confidence as an extra low-conf prune before verify. Add the
+matcher selector + validity guard (dim mismatch → clear log line, heavy-logging
+convention) to `MatchFeaturesModal.vue`.
+
+**SP3 — Concurrency & memory.** `matchAll`/`detectAll` fan out over the POOL_SIZE
+pool; a LightGlue session is ~45 MB **per worker** plus WebGPU buffers. Route the
+NN ops through a single dedicated inference worker (or cap NN-path concurrency to
+1–2); SuperPoint/LightGlue are GPU-bound so per-image parallelism helps less than
+it does for CPU SIFT. Measure memory + wall-clock; record in HANDOVER §Baselines.
+
+**SP4 — Custom model upload (Settings ▸ Advanced).** Add an **Advanced** tab to
+`SettingsModal.vue` (tabs today: project/display/storage/debug) letting the user
+upload their own `superpoint.onnx` / `lightglue.onnx`. New `opfs.js` **Models**
+section (`models/…`, follow the section-docstring pattern) + a small
+`useModelSettings` composable/store; `core/superpoint.js`/`core/lightglue.js`
+prefer an OPFS-stored override, else fall back to the bundled `public/models/`
+default. Log which model file (custom vs bundled, + size/hash) each session loads.
+
+**SP5 — Tests + verification.** Unit-test the JS marshalling (coord back-map, gate
+wiring, validity guard) with a **mocked** `InferenceSession`. Real model inference
+needs a **manual browser run** (Safari + Chrome) — flag explicitly, don't claim
+verification (Verification policy). ORT-WebGPU vs WASM differ by float rounding —
+don't assert exact equality (same caution as the SIMD/scalar + GPU/CPU A/B notes).
 
 ### P5–P9 — Matching & detection throughput (plan of 2026-07-04)
 Exhaustive matching on the building set (50 imgs × ≤5000 kp → 1225 pairs) takes
@@ -174,7 +270,21 @@ instead of scan centre + guessed pitch. Applies to keypoints + rasterisation
 like the undistort path. **Decision gate:** only if A2's refined-f evidence on
 CA…V doesn't fix the film set on its own.
 
+### F6 — Fisheye distortion model (the one D3 couldn't absorb)
+The distortion-model selector (D3) covers Pinhole/Radial/Brown, all of which the
+undistort-at-ingest architecture handles (`distortion.js` `DISTORTION_MODELS`).
+Fisheye (equidistant/equisolid θ-model) is the exception: a ≥180° FOV has no
+pinhole equivalent, so undistort-to-pinhole can't represent it. Add the θ-model
+to `distortNormalized`/`undistortNormalized`, and for **dense** undistort to a
+*virtual pinhole with cropped FOV* (COLMAP's approach) rather than the full frame.
+Also needs BA self-cal support for the fisheye params in `bundle.rs` (today only a
+shared radial k1). Gate on a real fisheye/action-cam dataset — irrelevant to the
+aerial + close-range workflows the tool targets today.
+
 ### F5 — Pluggable detector/matcher backend (learned features)
+**The first concrete backend (SuperPoint+LightGlue) is now tracked under `Next ▸
+SP`; this item remains the general design umbrella for later backends (DISK,
+RoMa/LoFTR — incl. the detector-free one-stage `match(imgA,imgB)` shape).**
 Make feature extraction + matching swappable so the user can pick SIFT (today),
 SuperPoint+LightGlue, DISK, RoMa/LoFTR, etc. **The SfM core is already neutral**:
 everything downstream consumes a pair as `{ F, matches: [[ia,ib],…], inlierCount }`
@@ -207,6 +317,44 @@ singleton + op-map are the seams. Keep verification + the pairs graph exactly as
 backend**, so the two shapes above are both expressible from day one. Pairs with P4
 (GPU matcher) and the GPU-SIFT idea.
 
+### CC — Command console (power-user command line)
+
+A typed command line that drives the **existing** command dispatch
+(`handleCommand(id)` in `App.vue`) — every ribbon button is already a named
+command, so this is a text front end over the same registry, not new pipeline
+logic. Lives **inside the existing DevConsole panel** (a prompt line below the
+log stream, REPL-style; toggled from *Other ▸ Console*). Output reuses `useLog`,
+so typed commands and their results read inline with the pipeline logs.
+
+Architecture (keep the layering): `src/core/commands.js` **pure** registry
+(`{name, aliases, args, run, help, guard}` + arg parse/validate, Vitest-tested,
+no Vue/DOM) → `src/composables/useCommands.js` binds registry entries to actions
+(most just call `handleCommand(id)`; a few take args) → DevConsole prompt UI
+(input, ↑/↓ history, tab-completion, inline usage/error). Extract the ribbon's
+`isDisabled`/`disabledReason` guard so ribbon **and** console share one gate —
+typing `dense` before depth maps exist prints "Compute depth maps first" rather
+than silently no-op'ing. Destructive commands (`clear-all`, `remove`) need
+`--yes`/confirm.
+
+Command tiers: **T1 parity** — aliases auto-derived from the ribbon table (never
+drifts): `detect`, `match`, `sparse`, `depth`, `dense`, `dem`, `ortho`,
+`export cloud|dem|ortho`, `settings`, … **T2 power moves** (no button today):
+`run detect match sparse` (chain the pipeline); `set sfm.minPnpInlierRatio 0.5`
+(poke `core/sfm.js` knobs without a modal, echo old→new); `stats [matches]`
+(dump match/track/registration counts); `pair disable|enable <A> <B>` (drive
+`useMatchesStore.setPairDisabled` from the console — today only via
+MatchListModal double-click); `select <imageName>`, `goto image|map`.
+**T3 introspection**: `help [cmd]`, `log detail on|off`, `log clear`, `echo`.
+
+Slices: **C1 ✅ (2026-07-06)** registry + `useCommands` + prompt UI + T1 parity +
+help/history/completion — shipped, see HANDOVER. **C2** `run` chaining + `stats` +
+`set`. **C3** `pair`/`select` store commands + `Cmd/Ctrl-K` open-and-focus
+shortcut + per-command usage.
+Verify: `npm test` on `core/commands.js` (parse, alias resolution, guard msgs);
+UI/dispatch wiring is browser-only — flag as manual, don't claim verified.
+Follow-up (C1 owed): manual browser pass on the prompt; consider auto-deriving
+the T1 list from the ribbon table (extract it from `Ribbon.vue`) so it can't drift.
+
 ### F1 polish — exports
 GeoTIFF compression (writer is uncompressed) + tiling for very large rasters;
 proper WKT in `.prj` (currently raw proj4/EPSG); the disabled modal placeholders
@@ -232,6 +380,24 @@ JS proves slow on large grids; optional manual "Flip Z" for object scenes.
   snapshots between stages).
 - **Surface worker errors in the UI** — currently a per-request reject logs; an
   `onerror` fail-all path exists but isn't user-visible.
+
+**Sparse / SfM**
+- **Up-front feature-track builder (union-find), gated on measured need.**
+  Establish tracks from the full pairwise-match graph *before* incremental
+  mapping (COLMAP/Theia "track establishment"): union-find over
+  `(image, keypointIndex)` nodes, so a feature chained A→B→C is one track
+  regardless of triangulation order, with **conflict splitting** (a track must
+  never observe one image with two keypoints — reuse the guard in
+  `mergeSplitTracks`, `core/sfm.js` ~l.284). websfm already forms these tracks
+  *implicitly* via the shared-index reverse map during registration
+  (`core/sfm.js` ~l.684), so the win is narrow: (a) robust track topology
+  independent of registration order, and (b) extra transitive 2D-3D
+  correspondences that can rescue borderline PnP on **sequential strips** (B1's
+  4308 missed the R1 gate by one inlier, 38/39). **Not** a substitute for graph
+  connectivity — a chain with one bad link still isolates a downstream strip,
+  and transitive closure trusts unverified A↔C links (error propagation). So
+  only pursue if a real sequential-strip run shows exhaustive matching isn't an
+  option and the implicit tracks under-deliver. Pure function in `core/sfm.js`.
 
 **Dense tuning**
 - Depth-map modal defaults for large film scans: `maxDim` is conservative for

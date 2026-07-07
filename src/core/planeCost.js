@@ -58,10 +58,14 @@ export function planeCostRef(ref, src, u, v, depth, n, radius) {
       if (xi < 0 || yi < 0 || xi >= ref.w || yi >= ref.h) continue
       const ray = [(xi - ref.cx) / ref.fx, (yi - ref.cy) / ref.fy, 1]
       const nr = n[0] * ray[0] + n[1] * ray[1] + n[2] * ray[2]
+      // Plane-induced homography R + t·nᵀ/d for the plane n·X = d (d = n·P above).
+      // The "+" (not the Hartley–Zisserman "−", which is the n·X + d = 0 convention)
+      // is what makes the cost bottom out at the true depth — see mvs.rs for the
+      // derivation and the freckle bug it fixes. Keep the three kernels in lockstep.
       const xs = [
-        R[0][0] * ray[0] + R[0][1] * ray[1] + R[0][2] * ray[2] - t[0] * nr / d,
-        R[1][0] * ray[0] + R[1][1] * ray[1] + R[1][2] * ray[2] - t[1] * nr / d,
-        R[2][0] * ray[0] + R[2][1] * ray[1] + R[2][2] * ray[2] - t[2] * nr / d,
+        R[0][0] * ray[0] + R[0][1] * ray[1] + R[0][2] * ray[2] + t[0] * nr / d,
+        R[1][0] * ray[0] + R[1][1] * ray[1] + R[1][2] * ray[2] + t[1] * nr / d,
+        R[2][0] * ray[0] + R[2][1] * ray[1] + R[2][2] * ray[2] + t[2] * nr / d,
       ]
       if (Math.abs(xs[2]) < 1e-9) continue
       const su = src.fx * (xs[0] / xs[2]) + src.cx

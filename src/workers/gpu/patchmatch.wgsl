@@ -92,9 +92,12 @@ fn planeCost(si : u32, u : u32, v : u32, depth : f32, n : vec3<f32>) -> f32 {
       let ray = vec3<f32>((f32(xi) - params.rcx) / params.rfx,
                           (f32(yi) - params.rcy) / params.rfy, 1.0);
       let nr  = dot(n, ray);
-      let xs  = vec3<f32>(dot(R0, ray) - T.x * nr / d,
-                          dot(R1, ray) - T.y * nr / d,
-                          dot(R2, ray) - T.z * nr / d);
+      // Plane-induced homography R + t·nᵀ/d for n·X = d (d = n·P). The "+" (not the
+      // H&Z "−") is required by this d-sign convention — see mvs.rs. Lockstep w/ the
+      // Rust + planeCost.js kernels.
+      let xs  = vec3<f32>(dot(R0, ray) + T.x * nr / d,
+                          dot(R1, ray) + T.y * nr / d,
+                          dot(R2, ray) + T.z * nr / d);
       if (abs(xs.z) < 1e-9) { continue; }
       let su = s.fx * (xs.x / xs.z) + s.cx;
       let sv = s.fy * (xs.y / xs.z) + s.cy;

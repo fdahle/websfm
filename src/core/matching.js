@@ -1,4 +1,4 @@
-import init, { match_descriptors, verify_matches } from '../wasm/matching/matching.js'
+import init, { match_descriptors, verify_matches_hf } from '../wasm/matching/matching.js'
 
 let initPromise = null
 
@@ -34,7 +34,7 @@ export async function matchDescriptors(descA, descB, options = {}) {
  * @param {Array<{x,y}>} kpsB - keypoints from image B (original pixel coords)
  * @param {Array<{ia,ib}>} matches - putative match pairs (indices into kpsA/kpsB)
  * @param {object} options
- * @returns {Promise<{ F: number[][], inlierMask: Float32Array, inlierCount: number } | null>}
+ * @returns {Promise<{ F: number[][], inlierMask: Float32Array, inlierCount: number, hInlierCount: number } | null>}
  */
 export async function verifyMatches(kpsA, kpsB, matches, options = {}) {
   const { ransacThreshPx = 2.0, maxIters = 1000 } = options
@@ -53,7 +53,8 @@ export async function verifyMatches(kpsA, kpsB, matches, options = {}) {
     ptsB[i * 2 + 1] = kpsB[ib].y
   }
 
-  const raw = verify_matches(ptsA, ptsB, ransacThreshPx, maxIters)
+  // Layout: [F00..F22, hInlierCount, inlier_0, inlier_1, …] (see verify_matches_hf).
+  const raw = verify_matches_hf(ptsA, ptsB, ransacThreshPx, maxIters)
   if (raw.length === 0) return null
 
   const F = [
@@ -61,10 +62,11 @@ export async function verifyMatches(kpsA, kpsB, matches, options = {}) {
     [raw[3], raw[4], raw[5]],
     [raw[6], raw[7], raw[8]],
   ]
-  const inlierMask = raw.slice(9)
+  const hInlierCount = raw[9]
+  const inlierMask = raw.slice(10)
   const inlierCount = inlierMask.reduce((s, v) => s + (v > 0.5 ? 1 : 0), 0)
 
-  return { F, inlierMask, inlierCount }
+  return { F, inlierMask, inlierCount, hInlierCount }
 }
 
 /**

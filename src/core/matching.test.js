@@ -3,11 +3,7 @@ import { fileURLToPath } from 'node:url'
 import { beforeAll, describe, it, expect } from 'vitest'
 
 import initMatching from '../wasm/matching/matching.js'
-<<<<<<< Updated upstream
-import { matchDescriptors } from './matching.js'
-=======
 import { matchDescriptors, verifyMatches, inlierSpread } from './matching.js'
->>>>>>> Stashed changes
 
 // Load the matching wasm bytes ourselves (Node can't fetch() the .wasm URL the
 // glue defaults to); the module-level singleton then makes the core module's own
@@ -63,8 +59,6 @@ describe('matchDescriptors (SIMD wasm)', () => {
     expect(matches.length).toBe(0)
   })
 })
-<<<<<<< Updated upstream
-=======
 
 describe('verifyMatches (F + H-vs-F degeneracy)', () => {
   // Deterministic two-view projection: camera A at identity, camera B rotated
@@ -165,4 +159,3 @@ describe('inlierSpread (positional degeneracy)', () => {
     expect(s.extentA).toBe(0)
   })
 })
->>>>>>> Stashed changes

@@ -80,8 +80,12 @@ pub(crate) fn plane_cost(
     let d = dot3(n, &p);
     if d.abs() < 1e-9 { return 2.0; }
 
-    // H = K_s (R − t·nᵀ/d) K_r⁻¹, accumulated directly per reference pixel.
-    // For a reference pixel (x,y): ray = K_r⁻¹[x,y,1]; warped = K_s (R·ray − t·(n·ray)/d).
+    // H = K_s (R + t·nᵀ/d) K_r⁻¹, accumulated directly per reference pixel.
+    // Plane convention: n·X = d with d = n·P (below), so the induced homography is
+    // R + t·nᵀ/d — NOT the Hartley–Zisserman R − t·nᵀ/d, which assumes n·X + d = 0
+    // (the opposite sign of d). A previous "−" here mirrored the warp across the
+    // epipolar line, so PatchMatch never bottomed out at the true depth (freckle).
+    // For a reference pixel (x,y): ray = K_r⁻¹[x,y,1]; warped = K_s (R·ray + t·(n·ray)/d).
     // ZNCC needs only running sums, so the full window contributes regardless of
     // size (a previous fixed 32-sample buffer silently truncated window≥3 to a
     // top-biased patch).
@@ -101,9 +105,9 @@ pub(crate) fn plane_cost(
             let nr = dot3(n, &ray);
             // X_src direction = R·ray − t·(n·ray)/d  (up to the plane scale).
             let xs = [
-                src.r[0][0]*ray[0] + src.r[0][1]*ray[1] + src.r[0][2]*ray[2] - src.t[0]*nr/d,
-                src.r[1][0]*ray[0] + src.r[1][1]*ray[1] + src.r[1][2]*ray[2] - src.t[1]*nr/d,
-                src.r[2][0]*ray[0] + src.r[2][1]*ray[1] + src.r[2][2]*ray[2] - src.t[2]*nr/d,
+                src.r[0][0]*ray[0] + src.r[0][1]*ray[1] + src.r[0][2]*ray[2] + src.t[0]*nr/d,
+                src.r[1][0]*ray[0] + src.r[1][1]*ray[1] + src.r[1][2]*ray[2] + src.t[1]*nr/d,
+                src.r[2][0]*ray[0] + src.r[2][1]*ray[1] + src.r[2][2]*ray[2] + src.t[2]*nr/d,
             ];
             if xs[2].abs() < 1e-9 { x += 1; continue; }
             let su = src.fx * (xs[0] / xs[2]) + src.cx;

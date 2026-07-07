@@ -29,7 +29,7 @@ const emit = defineEmits([
   'remove-sensor', 'merge-sensors', 'assign-sensor', 'remove-pose',
   'select', 'open', 'show-info', 'delete-keypoints', 'zoom-to-image',
   'select-cloud', 'remove-cloud', 'rename-cloud', 'reconstruct',
-  'open-matches', 'open-product',
+  'open-matches', 'open-product', 'zoom-to-cloud',
 ])
 
 // Whole-sidebar drag-and-drop (counter avoids false dragleave on children)
@@ -144,7 +144,7 @@ function onCloudRightClick(e, cloud) {
   e.preventDefault()
   ctxMenu.value = null
   sensorCtx.value = null
-  const menuW = 180, menuH = 120
+  const menuW = 180, menuH = 156
   cloudCtx.value = {
     x: Math.min(e.clientX, window.innerWidth - menuW),
     y: Math.min(e.clientY, window.innerHeight - menuH),
@@ -152,6 +152,7 @@ function onCloudRightClick(e, cloud) {
   }
 }
 
+function ctxZoomCloud()    { emit('zoom-to-cloud', cloudCtx.value.cloud.id); closeMenus() }
 function ctxRenameCloud()  { startRename(cloudCtx.value.cloud); closeMenus() }
 function ctxRebuildCloud() { emit('reconstruct'); closeMenus() }
 function ctxRemoveCloud()  { emit('remove-cloud', cloudCtx.value.cloud.id); closeMenus() }
@@ -760,6 +761,7 @@ onBeforeUnmount(() => document.removeEventListener('click', closeMenus))
         :style="{ left: cloudCtx.x + 'px', top: cloudCtx.y + 'px' }"
         @click.stop
       >
+        <button class="ctx-item" @click="ctxZoomCloud">Zoom to</button>
         <button class="ctx-item" @click="ctxRenameCloud">Rename</button>
         <button class="ctx-item" @click="ctxRebuildCloud">Rebuild sparse cloud</button>
         <div class="ctx-sep"></div>

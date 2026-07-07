@@ -91,8 +91,20 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
    shared per-sensor intrinsics refinement via `refineIntrinsics`), retriangulation
    + split-track merging (`retriangulatePairs`/`mergeSplitTracks`), and 2-pass track
    filtering. Brown–Conrady distortion (`core/distortion.js`) is removed once at
-   ingest so the whole pipeline stays pinhole. Heavily instrumented via `onLog`
-   (toggle "Detail"/debug in DevConsole).
+   ingest so the whole pipeline stays pinhole — `projectPoint`, the track filter,
+   reprojection stats and the dense/ortho warp all assume it. A sensor declares which
+   coefficients it uses via a **distortion model** (`DISTORTION_MODELS`:
+   pinhole/radial/radial2/brown; `distortionOf` applies only the active model's
+   coefficients; undefined ⇒ all five, back-compat) — chosen in `SensorTable.vue`.
+   Optional BA **self-calibration** of a shared radial `k1` (`refineIntrinsics:
+   'f,k1'`) must never leave `k1` on the model (nothing downstream applies it): after
+   each self-cal pass `runBundleAdjust` **folds** it back into the keypoints
+   (`undistortPixel` is the exact inverse of BA's `project_k1`), resets the model `k1`
+   to 0, and accumulates it per sensor into `summary.selfCalDistortion` so the dense
+   stage can add it to that sensor's raster undistortion (dense's camera K is the
+   BA-refined K the fold used, so the frame matches) — one single-source-of-truth for
+   distortion, from ingest through dense. Heavily instrumented via `onLog` (toggle
+   "Detail"/debug in DevConsole).
 4. **Dense MVS** (`core/mvs.js` + `crates/reconstruction/src/mvs.rs`): Stage A build
    per-image PatchMatch depth maps → optional `filterDepthMap` (median/speckle cleanup)
    → Stage B `fuseDepthMaps` (cross-view geometric consistency). Both stages log
@@ -120,7 +132,10 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
    through `ExportModal.vue`. Products persist to OPFS (`products/…`).
 
 ## In-app glossary (help)
-Cross-linked term explanations. **Content**: `src/help/*.md`, frontmatter
+Cross-linked term explanations. **Content**: `src/help/**/*.md` (organised into
+topic sub-folders — `algorithms/`, `camera-sensor/`, `core-sfm/`,
+`dense-reconstruction/`, `products/` — but folders are authoring-only; the flat
+`id` is the key, so entries link by id regardless of path), frontmatter
 (`id`/`title`/`summary`/optional `aliases`) + markdown body; images under
 `src/help/assets/`. `core/glossary.js` is the pure loader/renderer — parses
 frontmatter, renders via `marked` + KaTeX (`$…$`/`$$…$$`), resolves `assets/*`
@@ -135,7 +150,7 @@ not clickable; "Read more" opens the single centered tabbed `GlossaryModal`
 (`isOpen`/`tabs`/`activeId`). Ribbon *Other ▸ Glossary* → `open-glossary` opens
 the home page. Highlighting is gated by the persisted `glossaryTermsEnabled`
 toggle (`composables/useGlossarySettings.js`, Settings ▸ Display). **Adding a
-term**: drop `src/help/<id>.md` (auto-registered by the glob) — it auto-links
+term**: drop `src/help/<folder>/<id>.md` (auto-registered by the recursive glob) — it auto-links
 wherever its title/aliases appear; wrap UI text in `<GlossaryTerm id>` only where
 you want an explicit hover affordance.
 
@@ -162,7 +177,13 @@ the project CRS and are reprojected on CRS change (`handleSetCrs` in App.vue). S
 - The three PatchMatch kernels (`patchmatch.wgsl`, `core/planeCost.js`,
   `crates/reconstruction/src/mvs.rs`) implement the same math; the first-image
   GPU↔CPU A/B check must stay RMS < 5e-3. Change all three (and the `aggRef`
-  closure in `core/mvs.js`) in lockstep or not at all.
+  closure in `core/mvs.js`) in lockstep or not at all. Their plane-induced
+  homography is `R + t·nᵀ/d` for the plane `n·X = d` with `d = n·P` — the `+`
+  is load-bearing (the Hartley–Zisserman `R − t·nᵀ/d` assumes the opposite
+  `n·X + d = 0`; a `−` here mirrors the warp across the epipolar line and the
+  cost never bottoms out at the true depth — the 2026-07 freckle bug). The A/B
+  check only proves the three agree, NOT that the warp is correct, so validate
+  any homography change against a non-zero-baseline ground-truth warp.
 - After any `crates/` change: `npm run build:wasm`, commit `src/wasm/*` with the
   source change.
 - Keep the heavy logging style — every derived/auto value gets a log line the user

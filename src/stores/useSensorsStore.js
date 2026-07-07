@@ -2,6 +2,7 @@ import { ref, watch, computed } from 'vue'
 import { defineStore, storeToRefs } from 'pinia'
 import { useLog } from '../composables/useLog.js'
 import { exifSignature, sensorFromExif } from '../core/sensor.js'
+import { DISTORTION_MODELS, inferDistortionModel } from '../core/distortion.js'
 import * as opfs from '../utils/opfs.js'
 import { useImagesStore } from './useImagesStore.js'
 import { useProjectsStore } from './useProjectsStore.js'
@@ -27,10 +28,27 @@ export const useSensorsStore = defineStore('sensors', () => {
   // Persist only when a project is open and OPFS is usable (see useProjectsStore).
   const isPersisting = () => projects.isPersisting
 
+  // `save()` fires from the EXIF-grouping watcher, which re-runs once per image
+  // as metadata lands during a bulk add. Overlapping `createWritable` streams on
+  // the same sensors.json race the OPFS backend (Chrome: "Failed to create swap
+  // file"), so writes are coalesced exactly like `useImagesStore.sync()`: at most
+  // one in flight, a request arriving mid-write schedules a single trailing re-run
+  // that captures the latest state.
+  let writing = false
+  let rerun = false
   async function save() {
     if (!isPersisting()) return
-    await opfs.saveSensors(projects.currentProjectId, { sensors: sensors.value })
-      .catch((err) => log(`Sensor save failed — ${err?.message ?? err}`, 'error', 'Sensor'))
+    if (writing) { rerun = true; return }
+    writing = true
+    try {
+      do {
+        rerun = false
+        await opfs.saveSensors(projects.currentProjectId, { sensors: sensors.value })
+          .catch((err) => log(`Sensor save failed — ${err?.message ?? err}`, 'error', 'Sensor'))
+      } while (rerun)
+    } finally {
+      writing = false
+    }
   }
 
   // How many images currently reference a sensor.
@@ -56,6 +74,9 @@ export const useSensorsStore = defineStore('sensors', () => {
         sensor = {
           id: crypto.randomUUID(),
           ...sensorFromExif(img.meta),
+          // EXIF carries no lens coefficients — start pinhole; the user opts into a
+          // distortion model (and self-calibration) in the sensor table (D3).
+          distortionModel: 'pinhole',
           signature: sig,
           source: 'exif',
         }
@@ -95,6 +116,9 @@ export const useSensorsStore = defineStore('sensors', () => {
         cy: raw.cy ?? null,
         k1: raw.k1 ?? null, k2: raw.k2 ?? null, k3: raw.k3 ?? null,
         p1: raw.p1 ?? null, p2: raw.p2 ?? null,
+        // Seed the model from whatever coefficients the calibration carried; the
+        // user can change it in the sensor table (D3).
+        distortionModel: raw.distortionModel ?? inferDistortionModel(raw),
         pixelSize: raw.pixelSize ?? null,
         signature: null,
         source: 'imported',
@@ -119,6 +143,10 @@ export const useSensorsStore = defineStore('sensors', () => {
       // Toggle between a focal length in pixels and one in millimetres. Only
       // these two are valid; anything else leaves it as-is.
       if (value === 'px' || value === 'mm') { s.focalUnit = value; save() }
+      return
+    } else if (field === 'distortionModel') {
+      // Lens distortion model (D3): which Brown coefficients this sensor uses.
+      if (DISTORTION_MODELS.some((m) => m.id === value)) { s.distortionModel = value; save() }
       return
     } else if (NUMERIC_FIELDS.has(field)) {
       if (value === '' || value == null) { s[field] = null }

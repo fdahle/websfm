@@ -2,8 +2,10 @@
 import { ref } from 'vue'
 import CrsPicker from '../controls/CrsPicker.vue'
 import { useGlossarySettings } from '../../composables/useGlossarySettings.js'
+import { useComputeSettings } from '../../composables/useComputeSettings.js'
 
 const { glossaryTermsEnabled, setGlossaryTermsEnabled } = useGlossarySettings()
+const { memBudgetGb, setMemBudgetGb } = useComputeSettings()
 
 defineProps({
   theme: String,
@@ -15,6 +17,7 @@ const emit = defineEmits(['close', 'set-theme', 'set-crs'])
 const tabs = [
   { id: 'project', label: 'Project' },
   { id: 'display', label: 'Display' },
+  { id: 'compute', label: 'Compute' },
   { id: 'storage', label: 'Storage' },
   { id: 'debug', label: 'Debug' },
 ]
@@ -142,6 +145,24 @@ const verboseLogging = ref(false)
               <span class="setting-label">Keypoint marker size <span class="badge">Coming soon</span></span>
             </div>
             <input v-model.number="markerSize" type="range" min="2" max="14" disabled>
+          </div>
+        </template>
+
+        <!-- Compute -->
+        <template v-else-if="activeTab === 'compute'">
+          <div class="setting-row">
+            <div class="setting-info">
+              <span class="setting-label">Memory budget</span>
+              <span class="setting-desc">Dense depth-map runs refuse to start if projected peak memory exceeds this. Set it to how much RAM this browser can safely use — prevents the tab being killed on large projects.</span>
+            </div>
+            <div class="num-input">
+              <input
+                type="number" min="0.25" step="0.5"
+                :value="memBudgetGb"
+                @change="setMemBudgetGb($event.target.value)"
+              >
+              <span class="num-unit">GB</span>
+            </div>
           </div>
         </template>
 
@@ -431,6 +452,29 @@ input[type="range"]:disabled {
 .btn-group {
   display: flex;
   gap: 8px;
+}
+
+.num-input {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.num-input input {
+  width: 80px;
+  background: var(--input-bg, var(--panel));
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 8px;
+}
+
+.num-unit {
+  font-size: 12px;
+  color: var(--text-dim);
 }
 
 .usage-bar {

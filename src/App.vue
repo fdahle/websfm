@@ -19,6 +19,7 @@ import SettingsModal from './components/modals/SettingsModal.vue'
 import AboutModal from './components/modals/AboutModal.vue'
 import NewProjectModal from './components/modals/NewProjectModal.vue'
 import GlossaryModal from './components/glossary/GlossaryModal.vue'
+import GuideModal from './components/guide/GuideModal.vue'
 import ProjectPicker from './components/layout/ProjectPicker.vue'
 import DevConsole from './components/layout/DevConsole.vue'
 import { useImagesStore } from './stores/useImagesStore.js'
@@ -28,6 +29,7 @@ import { useProjectsStore } from './stores/useProjectsStore.js'
 import { useTheme } from './composables/useTheme.js'
 import { useModalsStore } from './stores/useModalsStore.js'
 import { useGlossaryStore } from './stores/useGlossaryStore.js'
+import { useGuideStore } from './stores/useGuideStore.js'
 import { usePipeline } from './composables/usePipeline.js'
 import { useReconstructionStore } from './stores/useReconstructionStore.js'
 import { useGcpsStore } from './stores/useGcpsStore.js'
@@ -95,8 +97,81 @@ const {
   tabs, activeTabId,
   activeTab, activeImageTab, activeView,
   activateTab, openImageTab, openProductTab,
-  closeTab, closeTabForImage, onImageDetected, resetToViewer,
+  closeTab, closeTabForImage, moveTab,
+  closeAllTabs, closeOtherTabs, closeTabsToLeft, closeTabsToRight,
+  onImageDetected, resetToViewer, rememberOverlayPrefs,
 } = useTabs(imageById, showMap)
+
+// ── Tab drag-reorder + context menu ─────────────────────────────────────────────
+const draggedTabId = ref(null)
+const dragOverTabId = ref(null)
+
+function onTabDragStart(e, tab) {
+  if (!tab.closable) { e.preventDefault(); return }
+  draggedTabId.value = tab.id
+  e.dataTransfer.effectAllowed = 'move'
+}
+function onTabDragOver(e, tab) {
+  if (!draggedTabId.value || !tab.closable) return
+  e.preventDefault()
+  dragOverTabId.value = tab.id
+}
+function onTabDrop(tab) {
+  if (draggedTabId.value && tab.closable) moveTab(draggedTabId.value, tab.id)
+  draggedTabId.value = null
+  dragOverTabId.value = null
+}
+function onTabDragEnd() {
+  draggedTabId.value = null
+  dragOverTabId.value = null
+}
+
+// Right-click context menu for closable tabs: { x, y, id }.
+const tabCtx = ref(null)
+function onTabRightClick(e, tab) {
+  if (!tab.closable) return
+  e.preventDefault()
+  const menuW = 150, menuH = 132
+  tabCtx.value = {
+    x: Math.min(e.clientX, window.innerWidth - menuW),
+    y: Math.min(e.clientY, window.innerHeight - menuH),
+    id: tab.id,
+  }
+}
+function closeTabCtx() { tabCtx.value = null }
+// Are there any closable tabs to the left / right of the menu target?
+const tabCtxHasLeft = computed(() => {
+  if (!tabCtx.value) return false
+  const idx = tabs.value.findIndex((t) => t.id === tabCtx.value.id)
+  return tabs.value.some((t, i) => t.closable && i < idx)
+})
+const tabCtxHasRight = computed(() => {
+  if (!tabCtx.value) return false
+  const idx = tabs.value.findIndex((t) => t.id === tabCtx.value.id)
+  return tabs.value.some((t, i) => t.closable && i > idx)
+})
+const tabCtxHasOthers = computed(() =>
+  tabCtx.value ? tabs.value.some((t) => t.closable && t.id !== tabCtx.value.id) : false
+)
+
+// ── Sidebar resize ──────────────────────────────────────────────────────────────
+const sidebarWidth = ref(Number(localStorage.getItem('sidebarWidth')) || 220)
+watch(sidebarWidth, (w) => localStorage.setItem('sidebarWidth', w))
+let sidebarDrag = null
+function startSidebarResize(e) {
+  sidebarDrag = { x: e.clientX, w: sidebarWidth.value }
+  window.addEventListener('mousemove', onSidebarResize)
+  window.addEventListener('mouseup', endSidebarResize)
+}
+function onSidebarResize(e) {
+  if (!sidebarDrag) return
+  sidebarWidth.value = Math.max(160, Math.min(520, sidebarDrag.w + (e.clientX - sidebarDrag.x)))
+}
+function endSidebarResize() {
+  sidebarDrag = null
+  window.removeEventListener('mousemove', onSidebarResize)
+  window.removeEventListener('mouseup', endSidebarResize)
+}
 
 // ── Reconstruction ────────────────────────────────────────────────────────────
 // Project-scoped store; restore/clear run through the project-store registry.
@@ -108,6 +183,14 @@ const { reconstruct, computeDepthMaps, densify, generateDem, generateOrtho, geor
 function showCloud(id) {
   selectCloud(id)
   activateTab('viewer')
+}
+
+// Context-menu "Zoom to": show the cloud in the 3D viewer and re-frame the camera
+// on it (resetView frames the freshly-loaded bounding sphere).
+function zoomToCloud(id) {
+  selectCloud(id)
+  activateTab('viewer')
+  nextTick(() => viewerRef.value?.resetView())
 }
 
 // ── Ground Control Points ───────────────────────────────────────────────────────
@@ -150,6 +233,7 @@ const {
 } = storeToRefs(useModalsStore())
 
 const glossaryStore = useGlossaryStore()
+const guideStore = useGuideStore()
 
 // Resolved image for the Image Info modal. Lives here (not in the modals store)
 // because it needs the image list; moves into the store once images is one too.
@@ -176,6 +260,23 @@ const productReady = computed(() => !!dem.value || !!ortho.value)
 const selected = computed(() => images.value.find((img) => img.id === selectedId.value) || null)
 
 const kpImageCount = computed(() => images.value.filter(img => img.kpStatus === 'done').length)
+
+// Guard state for the DevConsole command line — same prerequisite flags the
+// ribbon uses to enable/disable buttons (see core/commands.js guardReason).
+const commandState = computed(() => ({
+  imageCount:    images.value.length,
+  kpImageCount:  kpImageCount.value,
+  matchCount:    matchSummaries.value.length,
+  gcpCount:      gcps.value.length,
+  poseCount:     poses.value.length,
+  sensorCount:   sensors.value.length,
+  sparseReady:   sparseReady.value,
+  depthMapCount: depthMapCount.value,
+  cloudReady:    cloudReady.value,
+  demReady:      demReady.value,
+  orthoReady:    orthoReady.value,
+  productReady:  productReady.value,
+}))
 
 const hasSparse = computed(() => clouds.value.some((c) => c.kind === 'sparse'))
 
@@ -232,6 +333,23 @@ const matchSummaries = computed(() => {
     })
   }
   return result
+})
+
+// Imported camera positions keyed by image uuid, in the project working CRS — feeds
+// the match graph's optional geographic layout (place nodes where the photos were
+// actually taken). Only poses that resolved to an image and carry x/y are included.
+const matchNodePositions = computed(() => {
+  const out = {}
+  const poseByImageId = new Map()
+  for (const p of poses.value) {
+    if (p.imageId == null || p.x == null || p.y == null) continue
+    poseByImageId.set(p.imageId, p)
+  }
+  for (const img of images.value) {
+    const p = poseByImageId.get(img.id)
+    if (p) out[img.uuid] = { x: p.x, y: p.y }
+  }
+  return out
 })
 
 // Sidebar summary of the pairwise match store: verified/total/running/failed counts.
@@ -308,8 +426,51 @@ const showCameras = ref(true)
 const showGraticule = ref(true)
 
 // ── Console ───────────────────────────────────────────────────────────────────
+// True while a project is being restored — drives the interaction-blocking overlay.
+const projectLoading = ref(false)
+
 const consoleOpen = ref(localStorage.getItem('consoleOpen') === 'true')
 watch(consoleOpen, (v) => localStorage.setItem('consoleOpen', v))
+
+// ── Escape closes the top-most open modal ───────────────────────────────────────
+// One ordered list of [is-open, close] pairs, most-transient (stacked-on-top)
+// first; Escape dismisses the first that's open and stops. Modals with their own
+// overlay Escape handling (glossary/guide) are included so it works even when
+// focus isn't inside the overlay. Blocking dialogs stay open unless dismissible
+// (ProgressModal is never here; NewProject/ProjectPicker only when cancellable).
+function closeTopModal() {
+  const closers = [
+    [pendingImageDelete.value, () => { pendingImageDelete.value = null }],
+    [importKindOpen.value,     () => { importKindOpen.value = false; importKindFile.value = null }],
+    [exportKind.value,         () => { exportKind.value = null }],
+    [infoImageId.value,        () => { infoImageId.value = null }],
+    [gcpImportOpen.value,      () => { gcpImportOpen.value = false; gcpImportGeojson.value = null; gcpImportText.value = ''; gcpImportCrs.value = null }],
+    [footprintImportOpen.value,   () => { footprintImportOpen.value = false; footprintImportData.value = null }],
+    [footprintFromPosesOpen.value, () => { footprintFromPosesOpen.value = false }],
+    [cameraImportOpen.value,   () => { cameraImportOpen.value = false }],
+    [detectFeaturesOpen.value, () => { detectFeaturesOpen.value = false }],
+    [matchFeaturesOpen.value,  () => { matchFeaturesOpen.value = false }],
+    [reconstructOpen.value,    () => { reconstructOpen.value = false }],
+    [depthMapsOpen.value,      () => { depthMapsOpen.value = false }],
+    [denseOpen.value,          () => { denseOpen.value = false }],
+    [demOpen.value,            () => { demOpen.value = false }],
+    [orthoOpen.value,          () => { orthoOpen.value = false }],
+    [imageTableOpen.value,     () => { imageTableOpen.value = false }],
+    [maskManagerOpen.value,    () => { maskManagerOpen.value = false }],
+    [autoMaskOpen.value,       () => { autoMaskOpen.value = false }],
+    [sensorTableOpen.value,    () => { sensorTableOpen.value = false }],
+    [gcpTableOpen.value,       () => { gcpTableOpen.value = false }],
+    [matchListOpen.value,      () => { matchListOpen.value = false }],
+    [settingsOpen.value,       () => { settingsOpen.value = false }],
+    [aboutOpen.value,          () => { aboutOpen.value = false }],
+    [glossaryStore.isOpen,     () => glossaryStore.close()],
+    [guideStore.isOpen,        () => guideStore.close()],
+    [newProjectOpen.value && newProjectCanCancel.value, () => handleCancelNewProject()],
+    [projectPickerOpen.value && !!currentProjectId.value, () => { projectPickerOpen.value = false }],
+  ]
+  const hit = closers.find(([open]) => open)
+  if (hit) hit[1]()
+}
 
 // ── Bootstrap ─────────────────────────────────────────────────────────────────
 onMounted(async () => {
@@ -318,8 +479,12 @@ onMounted(async () => {
     if (e.key === '`' && (e.ctrlKey || e.metaKey)) {
       e.preventDefault()
       consoleOpen.value = !consoleOpen.value
+    } else if (e.key === 'Escape') {
+      if (tabCtx.value) closeTabCtx()
+      else closeTopModal()
     }
   })
+  document.addEventListener('click', () => { if (tabCtx.value) closeTabCtx() })
 
   const available = await opfs.isAvailable()
   if (!available) {
@@ -342,18 +507,30 @@ onMounted(async () => {
 async function openProject(id) {
   const projectData = await switchProject(id)
   if (!projectData) return
-  if (projectData.crs) await ensureProjection(projectData.crs).catch(() => {})
-  resetToViewer()
-  viewerRef.value?.clearReconstructionData()
-  // Restore sensors before images: EXIF auto-grouping reacts to the image list,
-  // so the saved sensors must already be in place or it would mint duplicates
-  // and clobber manual sensor assignments. Both have bespoke restore signatures,
-  // so they stay manual; every other project-scoped store restores through the
-  // registry below (matches, reconstruction, GCPs, footprints, poses).
-  await restoreSensors(id)
-  await restoreImages(projectData.images || [], id)
-  await restoreProjectStores({ projectId: id, projectData })
-  // restore() sets selectedCloud, which the watcher pushes into the viewer.
+  // Gate interaction while a project restores. Restoring a model still does a
+  // burst of synchronous work (decoding point buffers, rebuilding tracks); the
+  // overlay stops the user acting on a half-loaded project and then hitting the
+  // freeze mid-click.
+  projectLoading.value = true
+  try {
+    if (projectData.crs) await ensureProjection(projectData.crs).catch(() => {})
+    resetToViewer()
+    viewerRef.value?.clearReconstructionData()
+    // Let the overlay actually paint before the synchronous restore work runs.
+    await nextTick()
+    await new Promise((r) => requestAnimationFrame(() => r()))
+    // Restore sensors before images: EXIF auto-grouping reacts to the image list,
+    // so the saved sensors must already be in place or it would mint duplicates
+    // and clobber manual sensor assignments. Both have bespoke restore signatures,
+    // so they stay manual; every other project-scoped store restores through the
+    // registry below (matches, reconstruction, GCPs, footprints, poses).
+    await restoreSensors(id)
+    await restoreImages(projectData.images || [], id)
+    await restoreProjectStores({ projectId: id, projectData })
+    // restore() sets selectedCloud, which the watcher pushes into the viewer.
+  } finally {
+    projectLoading.value = false
+  }
 }
 
 // ── New project ───────────────────────────────────────────────────────────────
@@ -802,13 +979,14 @@ function handleCommand(id) {
     case 'open-settings':        settingsOpen.value = true; break
     case 'open-about':           aboutOpen.value = true; break
     case 'open-glossary':        glossaryStore.openHome(); break
+    case 'open-guide':           guideStore.openHome(); break
     case 'open-project-picker':  projectPickerOpen.value = !projectPickerOpen.value; break
     case 'toggle-console':       consoleOpen.value = !consoleOpen.value; break
     case 'img-show-info':        if (activeImageTab.value) infoImageId.value = activeImageTab.value.id; break
     case 'img-remove':           if (activeImageTab.value) requestRemoveImages(activeImageTab.value.id); break
     case 'img-toggle-keypoints': {
       const tab = activeTab.value
-      if (tab?.type === 'image') tab.showKeypoints = !tab.showKeypoints
+      if (tab?.type === 'image') { tab.showKeypoints = !tab.showKeypoints; rememberOverlayPrefs(tab) }
       break
     }
     case 'img-toggle-mask': {
@@ -817,6 +995,7 @@ function handleCommand(id) {
       if (tab?.type === 'image') {
         tab.showMask = !tab.showMask
         if (tab.showMask) tab.showDepth = false
+        rememberOverlayPrefs(tab)
       }
       break
     }
@@ -825,12 +1004,13 @@ function handleCommand(id) {
       if (tab?.type === 'image') {
         tab.showDepth = !tab.showDepth
         if (tab.showDepth) tab.showMask = false
+        rememberOverlayPrefs(tab)
       }
       break
     }
     case 'img-toggle-gcps': {
       const tab = activeTab.value
-      if (tab?.type === 'image') tab.showGcps = !tab.showGcps
+      if (tab?.type === 'image') { tab.showGcps = !tab.showGcps; rememberOverlayPrefs(tab) }
       break
     }
     case 'img-mask-draw': {
@@ -892,6 +1072,13 @@ function onRibbonPick(event) {
 
     <div v-if="projectPickerOpen && !currentProjectId" class="project-backdrop" />
 
+    <div v-if="projectLoading" class="loading-overlay">
+      <div class="loading-card">
+        <div class="loading-spinner" />
+        <span>Loading project…</span>
+      </div>
+    </div>
+
     <ProjectPicker
       v-if="projectPickerOpen"
       :projects="projects"
@@ -907,6 +1094,7 @@ function onRibbonPick(event) {
     <Teleport to="body">
       <DetectFeaturesModal
         v-if="detectFeaturesOpen"
+        :images="images"
         @close="detectFeaturesOpen = false"
         @run="onDetectRun"
       />
@@ -1133,6 +1321,7 @@ function onRibbonPick(event) {
         :match-store="matchStore"
         :has-sparse="hasSparse"
         :aligned-uuids="alignedUuids"
+        :node-positions="matchNodePositions"
         @toggle-disabled="setPairDisabled"
         @close="matchListOpen = false"
       />
@@ -1148,9 +1337,11 @@ function onRibbonPick(event) {
     </Teleport>
 
     <GlossaryModal />
+    <GuideModal />
 
     <div class="layout">
       <Sidebar
+        :style="{ width: sidebarWidth + 'px' }"
         :images="images"
         :gcps="gcps"
         :sensors="sensors"
@@ -1184,15 +1375,27 @@ function onRibbonPick(event) {
         @show-info="infoImageId = $event"
         @delete-keypoints="clearKeypoints"
         @zoom-to-image="zoomToImagePosition"
+        @zoom-to-cloud="zoomToCloud"
       />
+      <div class="sidebar-resizer" title="Drag to resize" @mousedown.prevent="startSidebarResize" />
       <main class="main">
         <div class="tabstrip">
           <button
             v-for="tab in tabs"
             :key="tab.id"
             class="tab"
-            :class="{ active: tab.id === activeTabId }"
+            :class="{
+              active: tab.id === activeTabId,
+              dragging: tab.id === draggedTabId,
+              'drag-over': tab.id === dragOverTabId && tab.id !== draggedTabId,
+            }"
+            :draggable="tab.closable"
             @click="activateTab(tab.id)"
+            @contextmenu="onTabRightClick($event, tab)"
+            @dragstart="onTabDragStart($event, tab)"
+            @dragover="onTabDragOver($event, tab)"
+            @drop="onTabDrop(tab)"
+            @dragend="onTabDragEnd"
           >
             <span class="tab-title">{{ tab.title }}</span>
             <span v-if="tab.closable" class="tab-close" title="Close" @click.stop="closeTab(tab.id)">×</span>
@@ -1237,7 +1440,24 @@ function onRibbonPick(event) {
       </main>
     </div>
 
-    <DevConsole v-if="consoleOpen" />
+    <!-- Tab context menu (closable tabs only) -->
+    <Teleport to="body">
+      <div
+        v-if="tabCtx"
+        class="tab-ctx-menu"
+        :style="{ left: tabCtx.x + 'px', top: tabCtx.y + 'px' }"
+        @click.stop
+      >
+        <button class="tab-ctx-item" @click="closeTab(tabCtx.id); closeTabCtx()">Close</button>
+        <button class="tab-ctx-item" :disabled="!tabCtxHasOthers" @click="closeOtherTabs(tabCtx.id); closeTabCtx()">Close others</button>
+        <button class="tab-ctx-item" :disabled="!tabCtxHasLeft" @click="closeTabsToLeft(tabCtx.id); closeTabCtx()">Close to the left</button>
+        <button class="tab-ctx-item" :disabled="!tabCtxHasRight" @click="closeTabsToRight(tabCtx.id); closeTabCtx()">Close to the right</button>
+        <div class="tab-ctx-sep" />
+        <button class="tab-ctx-item" @click="closeAllTabs(); closeTabCtx()">Close all</button>
+      </div>
+    </Teleport>
+
+    <DevConsole v-if="consoleOpen" :dispatch="handleCommand" :command-state="commandState" />
   </div>
 </template>
 
@@ -1249,6 +1469,41 @@ function onRibbonPick(event) {
   background: rgba(0, 0, 0, 0.45);
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
+}
+
+/* Interaction-blocking overlay shown while a project restores. */
+.loading-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 400;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+}
+.loading-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 22px;
+  border-radius: 10px;
+  background: var(--panel, #1e1e24);
+  color: var(--text, #e8e8ec);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
+  font-size: 14px;
+}
+.loading-spinner {
+  width: 20px;
+  height: 20px;
+  border: 3px solid rgba(255, 255, 255, 0.2);
+  border-top-color: var(--accent, #44aaff);
+  border-radius: 50%;
+  animation: loading-spin 0.8s linear infinite;
+}
+@keyframes loading-spin {
+  to { transform: rotate(360deg); }
 }
 
 .app {
@@ -1305,6 +1560,11 @@ function onRibbonPick(event) {
   box-shadow: inset 0 2px 0 var(--accent);
 }
 
+.tab.dragging { opacity: 0.45; }
+
+/* Drop indicator: accent bar on the leading edge of the hovered tab. */
+.tab.drag-over { box-shadow: inset 3px 0 0 var(--accent); }
+
 .tab-title {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1327,6 +1587,55 @@ function onRibbonPick(event) {
   flex: 1;
   position: relative;
   min-height: 0;
+}
+
+/* Sidebar resize handle — a thin draggable strip between sidebar and main. */
+.sidebar-resizer {
+  flex-shrink: 0;
+  width: 5px;
+  cursor: ew-resize;
+  background: transparent;
+  z-index: 5;
+}
+.sidebar-resizer:hover { background: var(--accent); }
+
+/* Tab context menu */
+.tab-ctx-menu {
+  position: fixed;
+  z-index: 300;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  padding: 4px;
+  min-width: 140px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+
+.tab-ctx-item {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tab-ctx-item:hover:not(:disabled) { background: var(--hover-bg); }
+
+.tab-ctx-item:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.tab-ctx-sep {
+  height: 1px;
+  background: var(--panel-border);
+  margin: 4px 0;
 }
 
 </style>

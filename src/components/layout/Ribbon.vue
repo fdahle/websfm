@@ -176,6 +176,7 @@ const tabs = [
         label: 'App',
         commands: [
           { id: 'open-glossary', label: 'Glossary', icon: 'book' },
+          { id: 'open-guide',    label: 'Guide',    icon: 'book' },
           { id: 'open-settings', label: 'Settings', icon: 'settings' },
           { id: 'open-about',    label: 'About',    icon: 'info' },
         ],
@@ -583,7 +584,13 @@ function run(cmd) {
 }
 
 .group-label {
-  text-align: center;
+  /* Fixed content height + centering so the bordered dynamic badge (3D/2D)
+     can't grow the label's line-box and push the whole ribbon 1px taller. */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 12px;
+  box-sizing: content-box;
   font-size: 10px;
   color: var(--text-dim);
   padding-top: 4px;
@@ -663,6 +670,7 @@ function run(cmd) {
   border-radius: 6px;
   font-size: 8px;
   font-weight: 700;
+  line-height: 1;
   letter-spacing: 0.03em;
   color: #e8a820;
   border: 1px solid rgba(232, 168, 32, 0.5);

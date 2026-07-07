@@ -12,6 +12,9 @@ const props = defineProps({
   hasSparse:      { type: Boolean, default: false },
   // UUIDs registered in the sparse model — for colouring nodes in the graph view.
   alignedUuids:   { type: Object, default: () => new Set() },
+  // Imported camera positions keyed by uuid ({ x, y } in project CRS) — enables the
+  // graph's geographic layout. Empty when no poses have been imported.
+  nodePositions:  { type: Object, default: () => ({}) },
 })
 
 const emit = defineEmits(['close', 'toggle-disabled'])
@@ -112,6 +115,7 @@ function selectMatch(pairId) {
             :match-summaries="matchSummaries"
             :aligned-uuids="alignedUuids"
             :has-sparse="hasSparse"
+            :node-positions="nodePositions"
             :selected-pair-id="selectedPairId"
             @select="selectMatch"
             @toggle-disabled="toggleDisabled"

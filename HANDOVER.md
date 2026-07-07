@@ -68,8 +68,122 @@ fiducials; self-calibration (A2) + fiducials (F4) are the code-side support.
 
 ## Done log (most recent first)
 
-<<<<<<< Updated upstream
-=======
+- **2026-07-07 · DX · Dense plane-cost homography sign (freckle root cause)** — the
+  plane-induced homography in all three PatchMatch kernels computed `R·ray −
+  t·(n·ray)/d`, but with the code's plane convention `d = n·P` (`n·X = d`) the correct
+  sign is **`+`** (the `R − t·nᵀ/d` form assumes the opposite `n·X + d = 0`). Verified
+  numerically: at the true depth/normal the old sign scores cost 0.11 (never bottoms
+  out) vs 0.0000 flipped. Effect: PatchMatch settled on wrong depths everywhere → cost
+  median ~0.7 (ZNCC ~0.29) *regardless of resolution/iterations* (the tell — a High-vs-
+  Medium run left cost identical) → freckle + source-overlap seams, while sparse stayed
+  clean (it uses `projectPoint`/`project_k1`, not `plane_cost`). Fixed in lockstep:
+  `crates/reconstruction/src/mvs.rs`, `core/planeCost.js`, `workers/gpu/patchmatch.wgsl`
+  (rebuilt `src/wasm/*`). Hidden for so long because `planeCost.test.js` only ever
+  passed `t=[0,0,0]`, vanishing the term — now a non-zero-baseline ground-truth warp
+  test guards it. Owed: re-run dense on CA…V to confirm cost medians fall to ~0.2–0.35
+  and the freckle clears.
+
+- **2026-07-06 · D3 · Distortion-model selector (general-SfM)** — sensors now declare
+  a Brown-Conrady model — Pinhole / Radial (k1) / Radial (k1,k2) / Brown
+  (k1,k2,k3,p1,p2) — in `core/distortion.js` (`DISTORTION_MODELS`, `coeffsForModel`,
+  `inferDistortionModel`; `distortionOf` applies only the active model's coefficients,
+  so a stale term from a model switch can't leak; undefined model ⇒ all five,
+  back-compat). Store: `distortionModel` field on every sensor (EXIF → `pinhole`,
+  imported → inferred from coefficients), validated edit path (`useSensorsStore`). UI:
+  a Distortion column in `SensorTable.vue` (dropdown in Initial, read-only label
+  elsewhere; inactive coefficient inputs disabled). Tests in `distortion.test.js`.
+  Fisheye deferred to F6 (needs a virtual-pinhole dense undistort). UI is browser-only
+  — unverified in-app.
+
+- **2026-07-06 · D2 · Propagate self-calibrated distortion to dense** — the k1 D1
+  folds into the sparse keypoints was lost at densify (dense undistorts rasters with
+  the *sensor's* coefficients only), leaving the dense cloud in a slightly distorted
+  frame vs the sparse cloud. `reconstruct` now accumulates the self-calibrated k1 per
+  sensor across passes and exports it (`summary.selfCalDistortion`); the reconstruction
+  store adds it to each sensor's dense `dist` (dense's camera K is the same BA-refined K
+  the fold used, so applying k1 there reproduces the sparse frame — passes compose ≈
+  additively for small residuals). Logs the applied calibration ('Dense' category).
+  Covered by the D1 test's summary assertions (`sfm.test.js`). Pure JS — no wasm rebuild.
+
+- **2026-07-06 · D1 · Fold self-calibrated k1 back into keypoints** — `refineIntrinsics:
+  'f,k1'` estimated a shared radial k1 inside BA (`project_k1`, bundle.rs) that no
+  downstream consumer applied — `projectPoint`, the track filter, reprojection stats,
+  and the dense/ortho warp are all pinhole — so the model K carried a stranded k1: BA
+  reported RMS 0.83px while pinhole stats read 7.35px, the pass-2 filter then gutted
+  2862 → 737 points and dense froze on a k1-inflated fx (freckle). Fix in
+  `runBundleAdjust` (`core/sfm.js`): after each self-cal pass, re-undistort each
+  image's keypoints with the estimated k1 (`undistortPixel` is the exact inverse of
+  BA's `project_k1`) and reset the model k1 to 0, so the pinhole invariant holds and
+  stats/filter agree with BA. Logs the fold (image count + mean px shift). Test in
+  `sfm.test.js` (distorted synthetic, no sensor, `f,k1` → K.k1 = 0, postBA median <
+  1px, model survives). Pure JS — no wasm rebuild. D2 (propagate the calibration to
+  dense) + D3 (distortion-model selector UI) remain in TODO.
+
+- **2026-07-06 · LightGlue un-hang: fused model + keypoint cap + wasm threads** —
+  the "stuck on one-time graph warm-up" had three stacked causes. (1) Bundled
+  `lightglue.onnx` was the fabio-sim **v0.1.0** export: 9,729 nodes of dynamic-shape
+  bookkeeping that hang ORT's WebGPU EP in shader-compile warm-up → replaced with
+  **v1.0.0 `superpoint_lightglue_fused_cpu`** (1,359 nodes, fused MHA/LayerNorm/Gelu;
+  offline-verified **bit-identical matches** and runnable on the repo's
+  onnxruntime-web 1.27 wasm EP; outputs are now `matches0` [M,2] + `mscores0` [M] —
+  parser already handled both formats). (2) CPU fallback fed up to 5000 kpts/image
+  into O(N²) attention (~45–60 s/pair measured) → new `maxKeypoints` cap in
+  `matchLightGlue` (default 2048, strongest-first prefix so indices stay valid;
+  `lgMaxKeypoints` in MatchFeaturesModal). (3) The 15 s "still matching" watchdog
+  could never fire on CPU (ORT wasm `run()` blocks the worker event loop) → watchdog
+  now GPU-only, CPU logs honest post-hoc timing. Also: COOP + **COEP credentialless**
+  headers in `vite.config.js` (dev+preview) → cross-origin isolation → multi-threaded
+  ORT wasm (~3× measured at 4 threads; credentialless keeps basemap tiles working,
+  Safari degrades to single-thread); `classifyOutputs` in `core/superpoint.js`
+  hardened against N=256 shape-collision. Offline validation also confirmed
+  SuperPoint emits **(x,y)** keypoints + L2-normed descriptors (SP1 risk retired).
+  **Browser run still unverified** — needs a manual Chrome + Safari pass (tiles
+  under COEP, GPU warm-up, thread pickup).
+
+- **2026-07-06 · Fix project-open freeze on projects with a saved model** — three
+  causes. (1) `clouds` was a plain `ref`, so every point object + its `views` Map
+  became deeply reactive → `markRaw` the per-cloud `points`/`cameras` at all
+  construction sites (`useReconstructionStore.js`). (2) `reconstruction.json` stored
+  the whole point cloud as JSON, so restore did a multi-MB main-thread `JSON.parse`
+  → new **version-2 binary format**: metadata (cameras, viewUuids) in JSON, point
+  data in transferable `recon.{cloudId}.{pos|col|vcount|vcam|vkp}.bin` sidecars
+  (positions Float64, colours Uint8, view-tracks CSR); `opfs.js` splits/reassembles,
+  store `serializeCloud`/`deserializeCloud` pack/unpack. Legacy inline shape still
+  reads. (3) added an interaction-blocking "Loading project…" overlay
+  (`projectLoading` in `App.vue`) so users can't act on a half-restored project.
+  Also fixed doubled console lines on reopen: log ids are now globally unique
+  (`useLog.js`, was `++_seq` which reset per page-load → duplicate Vue `:key`s) and
+  the log-store restore trims the previous open's re-logged banner lines
+  (`useLogStore.js`).
+
+- **2026-07-06 · 3D viewer: frustum size ← camera spacing, not cloud extent**
+  — camera frustums / image thumbnails were sized off the point-cloud bounding
+  radius (`radius * 0.15`), so a small or outlier-inflated sparse cloud made every
+  quad the same big size and they overlapped heavily. Now `cameraFrustumDepth`
+  (`Viewer3D.vue`) uses the **median nearest-neighbour distance between camera
+  centres** (`× 0.6`, invariant to cloud outliers + absolute scale), with a robust
+  95th-pctile point radius as the <2-camera fallback.
+
+- **2026-07-06 · 3D viewer: "View options" popover** — a viewer-local gear popover
+  (top-right of `Viewer3D.vue`, NOT the ribbon / global Settings — these are
+  ephemeral session-scoped display tweaks) with live **Camera size** (`cameraScale`
+  multiplier on the auto frustum depth; rebuilds frustums via `buildFrustums` with
+  no cloud recompute) and **Point size** sliders. Room to grow (background,
+  thumbnail on/off); the ribbon "Cameras" toggle can migrate in later.
+
+- **2026-07-06 · Command console C1 (power-user command line)** — a typed prompt
+  in the DevConsole that drives the *same* dispatch as the ribbon
+  (`handleCommand(id)`). Pure registry `core/commands.js` (tokenize / resolve /
+  alias / completions / `guardReason` mirroring the ribbon's disabled-tooltips /
+  help) with 30 Tier-1 parity commands incl. 2-token `export <what>`; unit-tested
+  (`core/commands.test.js`, 17 cases). Impure binding `composables/useCommands.js`
+  (echo → resolve → guard → dispatch, plus `help`/`clear` built-ins). `DevConsole.vue`
+  gains a prompt (↑/↓ history persisted to localStorage, Tab completion to longest
+  shared prefix, auto-focus on open); `App.vue` passes `handleCommand` +
+  `commandState`. Tier-2/3 (`run` chaining, `set`, `stats`, `pair`, Cmd/Ctrl-K)
+  remain in TODO CC. `npm test` + typecheck + `vite build` green; runtime prompt
+  behaviour is browser-only, not yet manually exercised here.
+
 - **2026-07-05 · Six UX/quality improvements** — (1) Console
   (`DevConsole.vue`) sticky-bottom auto-scroll made explicit (`stickToBottom` set
   from a `@scroll` handler) + floating "↓ New logs" chip when detached. (2)
@@ -192,7 +306,6 @@ fiducials; self-calibration (A2) + fiducials (F4) are the code-side support.
   - Both crates rebuilt (`src/wasm/*` committed with source). Verified: `cargo test`
     (matching 2, reconstruction 8) + `npm test` (147) + typecheck. The end-to-end effect
     on B1's window-swap matches is the number still to measure in-browser.
->>>>>>> Stashed changes
 - **2026-07-04 · R1–R6 registration-robustness track (sparse)** — the fix for B1's
   poisoned-during-registration model. All six landed; **acceptance still owed on the
   real building set** (see Owed validations in TODO.md). Where each lives:
