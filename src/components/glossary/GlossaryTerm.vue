@@ -2,7 +2,7 @@
 import { ref, computed, onBeforeUnmount } from 'vue'
 import { useGlossaryStore } from '../../stores/useGlossaryStore.js'
 import { useGlossarySettings } from '../../composables/useGlossarySettings.js'
-import { getHelpEntry, renderHelpMarkdown } from '../../core/glossary.js'
+import { getHelpEntry, renderHelpMarkdown } from '../../core/help/glossary.js'
 import GlossaryTooltip from './GlossaryTooltip.vue'
 
 // Inline glossary keyword. Hovering shows a mini popup with a progress ring;

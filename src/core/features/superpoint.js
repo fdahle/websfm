@@ -1,5 +1,5 @@
 // SuperPoint detector wrapper — the learned alternative to detect_sift.
-// Wraps an ONNX SuperPoint model via core/ort.js, mirroring how core/matching.js
+// Wraps an ONNX SuperPoint model via core/features/ort.js, mirroring how core/features/matching.js
 // wraps its wasm (lazy, cached, plain-data in / plain-data out).
 //
 // Contract (matches the SIFT path so the worker's detect() can branch cleanly):

@@ -3,7 +3,7 @@ import { ref } from 'vue'
 
 // Build DEM (Digital Surface Model). Rasterises the point cloud into a height
 // grid in the chosen frame. Defaults mirror the worker's rasterizeDem fallbacks
-// (core/dem.js). `canGeoreference` / `projectCrs` come from the reconstruction
+// (core/products/dem.js). `canGeoreference` / `projectCrs` come from the reconstruction
 // store: the CRS selector offers the local frame always, and the project CRS
 // only when a georeference can be fit from camera poses.
 defineProps({

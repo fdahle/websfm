@@ -9,11 +9,11 @@ import {
 } from '../workers/computeClient.js'
 import { useLog } from '../composables/useLog.js'
 import * as opfs from '../utils/opfs.js'
-import { fitSimilarity } from '../core/georef.js'
-import { aerialUpRotation, rotateReconstruction } from '../core/projection.js'
-import { cameraCenter } from '../core/geometry.js'
-import { qualityToMaxDim } from '../core/mvs.js'
-import { distortionOf } from '../core/distortion.js'
+import { fitSimilarity } from '../core/products/georef.js'
+import { aerialUpRotation, rotateReconstruction } from '../core/products/projection.js'
+import { cameraCenter } from '../core/sfm/geometry.js'
+import { qualityToMaxDim } from '../core/dense/mvs.js'
+import { distortionOf } from '../core/sfm/distortion.js'
 import { registerProjectStore } from './projectStores.js'
 import { useImagesStore } from './useImagesStore.js'
 import { useMatchesStore } from './useMatchesStore.js'
@@ -467,7 +467,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
   }
 
   // Run incremental SfM in the compute worker (off the main thread). The heavy
-  // orchestration lives in core/sfm.js; this gathers the plain inputs it needs
+  // orchestration lives in core/sfm/sfm.js; this gathers the plain inputs it needs
   // (keypoints + match graph + settings), streams its log/progress back through
   // the usual hooks, then writes the returned model into reactive state and
   // persists it. (The model now lands all at once at the end rather than building

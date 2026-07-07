@@ -2,7 +2,7 @@
 import { ref, computed, onBeforeUnmount } from 'vue'
 import { useGuideStore } from '../../stores/useGuideStore.js'
 import { useGlossaryStore } from '../../stores/useGlossaryStore.js'
-import { getParam, renderGuide } from '../../core/guide.js'
+import { getParam, renderGuide } from '../../core/help/guide.js'
 import GlossaryTooltip from '../glossary/GlossaryTooltip.vue'
 
 // The per-parameter `?` affordance next to a modal field label. Hovering shows a

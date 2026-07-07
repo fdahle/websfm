@@ -1,7 +1,7 @@
 import { ref, markRaw } from 'vue'
 import { defineStore } from 'pinia'
 import { createImage } from '../utils/image.js'
-import { extractMetadata } from '../core/metadata.js'
+import { extractMetadata } from '../core/io/metadata.js'
 import { detectKeypoints } from '../workers/computeClient.js'
 import { useLog } from '../composables/useLog.js'
 import * as opfs from '../utils/opfs.js'

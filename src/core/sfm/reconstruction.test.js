@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { beforeAll, describe, it, expect } from 'vitest'
 
-import initRecon from '../wasm/reconstruction/reconstruction.js'
+import initRecon from '../../wasm/reconstruction/reconstruction.js'
 import {
   makeP34flat,
   triangulateDlt,
@@ -17,7 +17,7 @@ import {
 // Load the bytes ourselves and hand them to init(); the module-level `wasm` is a
 // singleton, so the core module's own init() call then resolves immediately.
 beforeAll(async () => {
-  const wasmUrl = new URL('../wasm/reconstruction/reconstruction_bg.wasm', import.meta.url)
+  const wasmUrl = new URL('../../wasm/reconstruction/reconstruction_bg.wasm', import.meta.url)
   const bytes = await readFile(fileURLToPath(wasmUrl))
   await initRecon({ module_or_path: bytes })
 })

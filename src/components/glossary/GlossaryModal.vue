@@ -4,7 +4,7 @@ import { storeToRefs } from 'pinia'
 import { useGlossaryStore } from '../../stores/useGlossaryStore.js'
 import {
   getHelpEntry, getAllHelpEntries, searchGlossary, renderHelpMarkdown,
-} from '../../core/glossary.js'
+} from '../../core/help/glossary.js'
 
 // Single centered modal holding the glossary. A Home/index tab plus one tab per
 // opened term (unlimited, closeable). Cross-links inside a term open more tabs.

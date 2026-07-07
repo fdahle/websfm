@@ -1,7 +1,7 @@
 <script setup>
 import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import { maskFromSource } from '../../core/mask.js'
-import { depthColor } from '../../core/colormap.js'
+import { depthColor } from '../../core/products/colormap.js'
 
 const props = defineProps({
   image:         { type: Object,  required: true },

@@ -1,9 +1,9 @@
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
 import CrsPicker from '../controls/CrsPicker.vue'
-import { DELIMITER_OPTIONS, sniffDelimiter, parseRows } from '../../core/gcp.js'
-import { SENSOR_ROLES, SENSOR_ROLE_LABELS, guessMapping as guessSensors, buildSensors } from '../../core/sensor.js'
-import { POSE_ROLES, POSE_ROLE_LABELS, guessMapping as guessPoses, buildPoses } from '../../core/pose.js'
+import { DELIMITER_OPTIONS, sniffDelimiter, parseRows } from '../../core/io/gcp.js'
+import { SENSOR_ROLES, SENSOR_ROLE_LABELS, guessMapping as guessSensors, buildSensors } from '../../core/io/sensor.js'
+import { POSE_ROLES, POSE_ROLE_LABELS, guessMapping as guessPoses, buildPoses } from '../../core/io/pose.js'
 
 // Imports camera parameters from delimited text in one of two modes:
 //   - 'sensor' : shared intrinsics (one row per sensor) — no CRS
