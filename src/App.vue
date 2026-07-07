@@ -31,6 +31,9 @@ import { useModalsStore } from './stores/useModalsStore.js'
 import { useGlossaryStore } from './stores/useGlossaryStore.js'
 import { useGuideStore } from './stores/useGuideStore.js'
 import { usePipeline } from './composables/usePipeline.js'
+import { useTabDrag } from './composables/useTabDrag.js'
+import { useSidebarResize } from './composables/useSidebarResize.js'
+import { useImportRouting } from './composables/useImportRouting.js'
 import { useReconstructionStore } from './stores/useReconstructionStore.js'
 import { useGcpsStore } from './stores/useGcpsStore.js'
 import { restoreProjectStores, clearProjectStores } from './stores/projectStores.js'
@@ -52,9 +55,6 @@ import FootprintImportModal from './components/modals/FootprintImportModal.vue'
 import FootprintFromPosesModal from './components/modals/FootprintFromPosesModal.vue'
 import CameraImportModal from './components/modals/CameraImportModal.vue'
 import ImportKindModal from './components/modals/ImportKindModal.vue'
-import { parseGeoJson, looksLikeGeoJson, geoJsonToGcps, guessNameKey } from './core/io/geojson.js'
-import { detectCameraMode } from './core/io/cameraKind.js'
-import { detectFileKind } from './core/io/importKind.js'
 import { buildPosesCsv, buildSensorsCsv, downloadCsv } from './utils/exportCsv.js'
 import { cloudToPly, reconstructionToJson, demToAsciiGrid, demToGeoTiff, orthoToGeoTiff, rasterWorldFile } from './core/products/exporters.js'
 import { downloadBlob, dataUrlToBlob } from './utils/download.js'
@@ -103,75 +103,15 @@ const {
 } = useTabs(imageById, showMap)
 
 // ── Tab drag-reorder + context menu ─────────────────────────────────────────────
-const draggedTabId = ref(null)
-const dragOverTabId = ref(null)
-
-function onTabDragStart(e, tab) {
-  if (!tab.closable) { e.preventDefault(); return }
-  draggedTabId.value = tab.id
-  e.dataTransfer.effectAllowed = 'move'
-}
-function onTabDragOver(e, tab) {
-  if (!draggedTabId.value || !tab.closable) return
-  e.preventDefault()
-  dragOverTabId.value = tab.id
-}
-function onTabDrop(tab) {
-  if (draggedTabId.value && tab.closable) moveTab(draggedTabId.value, tab.id)
-  draggedTabId.value = null
-  dragOverTabId.value = null
-}
-function onTabDragEnd() {
-  draggedTabId.value = null
-  dragOverTabId.value = null
-}
-
-// Right-click context menu for closable tabs: { x, y, id }.
-const tabCtx = ref(null)
-function onTabRightClick(e, tab) {
-  if (!tab.closable) return
-  e.preventDefault()
-  const menuW = 150, menuH = 132
-  tabCtx.value = {
-    x: Math.min(e.clientX, window.innerWidth - menuW),
-    y: Math.min(e.clientY, window.innerHeight - menuH),
-    id: tab.id,
-  }
-}
-function closeTabCtx() { tabCtx.value = null }
-// Are there any closable tabs to the left / right of the menu target?
-const tabCtxHasLeft = computed(() => {
-  if (!tabCtx.value) return false
-  const idx = tabs.value.findIndex((t) => t.id === tabCtx.value.id)
-  return tabs.value.some((t, i) => t.closable && i < idx)
-})
-const tabCtxHasRight = computed(() => {
-  if (!tabCtx.value) return false
-  const idx = tabs.value.findIndex((t) => t.id === tabCtx.value.id)
-  return tabs.value.some((t, i) => t.closable && i > idx)
-})
-const tabCtxHasOthers = computed(() =>
-  tabCtx.value ? tabs.value.some((t) => t.closable && t.id !== tabCtx.value.id) : false
-)
+const {
+  draggedTabId, dragOverTabId,
+  onTabDragStart, onTabDragOver, onTabDrop, onTabDragEnd,
+  tabCtx, onTabRightClick, closeTabCtx,
+  tabCtxHasLeft, tabCtxHasRight, tabCtxHasOthers,
+} = useTabDrag({ tabs, moveTab })
 
 // ── Sidebar resize ──────────────────────────────────────────────────────────────
-const sidebarWidth = ref(Number(localStorage.getItem('sidebarWidth')) || 220)
-watch(sidebarWidth, (w) => localStorage.setItem('sidebarWidth', w))
-let sidebarDrag = null
-function startSidebarResize(e) {
-  sidebarDrag = { x: e.clientX, w: sidebarWidth.value }
-  window.addEventListener('mousemove', onSidebarResize)
-  window.addEventListener('mouseup', endSidebarResize)
-}
-function onSidebarResize(e) {
-  if (!sidebarDrag) return
-  sidebarWidth.value = Math.max(160, Math.min(520, sidebarDrag.w + (e.clientX - sidebarDrag.x)))
-}
-function endSidebarResize() {
-  sidebarDrag = null
-  window.removeEventListener('mousemove', onSidebarResize)
-  window.removeEventListener('mouseup', endSidebarResize)
-}
+const { sidebarWidth, startSidebarResize } = useSidebarResize()
 
 // ── Reconstruction ────────────────────────────────────────────────────────────
 // Project-scoped store; restore/clear run through the project-store registry.
@@ -564,94 +504,16 @@ async function handleSetCrs(crs) {
   })
 }
 
-// ── Import (GCPs / footprints) ──────────────────────────────────────────────────
-// A delimited text file is always GCPs. A GeoJSON file is routed by geometry:
-// point features → GCP import, polygon features → footprint import.
-async function openImportFile(file) {
-  if (!file) return
-  let text
-  try {
-    text = await file.text()
-  } catch (err) {
-    console.error('Could not read import file', err)
-    return
-  }
-
-  if (looksLikeGeoJson(file.name, text)) {
-    const parsed = parseGeoJson(text)
-    if (parsed.kind === 'polygons' || parsed.kind === 'mixed') {
-      footprintImportData.value = {
-        features: parsed.features,
-        propertyKeys: parsed.propertyKeys,
-        detectedCrs: parsed.sourceCrs,
-        fileName: file.name,
-      }
-      footprintImportOpen.value = true
-    }
-    if (parsed.kind === 'points' || parsed.kind === 'mixed') {
-      const nameKey = guessNameKey(parsed.propertyKeys)
-      gcpImportGeojson.value = geoJsonToGcps(parsed.features, nameKey)
-      gcpImportCrs.value = parsed.sourceCrs
-      gcpImportName.value = file.name
-      gcpImportOpen.value = true
-    }
-    return
-  }
-
-  // Delimited-text GCP file.
-  gcpImportGeojson.value = null
-  gcpImportCrs.value = null
-  gcpImportText.value = text
-  gcpImportName.value = file.name
-  gcpImportOpen.value = true
-}
-
-// Sidebar drag-and-drop has no declared intent, so classify the dropped file and
-// route it: GCPs/footprints → GCP importer, poses/intrinsics → camera importer,
-// and anything ambiguous (a bare name + X/Y/Z list) → a small chooser.
-async function openDroppedImport(file) {
-  if (!file) return
-  let text
-  try {
-    text = await file.text()
-  } catch (err) {
-    console.error('Could not read dropped file', err)
-    return
-  }
-  routeImport(file, detectFileKind(text, file.name).kind)
-}
-
-function routeImport(file, kind) {
-  if (kind === 'pose' || kind === 'sensor') openCameraImport(file, kind)
-  else if (kind === 'gcp' || kind === 'footprint') openImportFile(file)
-  else { importKindFile.value = file; importKindOpen.value = true }
-}
-
-// User answered the "what is this file?" chooser.
-function onImportKindChosen(kind) {
-  const file = importKindFile.value
-  importKindOpen.value = false
-  importKindFile.value = null
-  if (file) routeImport(file, kind)
-}
-
-// User re-classified the file from inside an open import modal ("Import as …").
-function onImportSwitchKind({ kind, rawText, fileName }) {
-  gcpImportOpen.value = false
-  cameraImportOpen.value = false
-  if (kind === 'gcp') {
-    gcpImportGeojson.value = null
-    gcpImportCrs.value = null
-    gcpImportText.value = rawText
-    gcpImportName.value = fileName
-    gcpImportOpen.value = true
-  } else {
-    cameraImportText.value = rawText
-    cameraImportName.value = fileName
-    cameraImportMode.value = kind // 'pose' | 'sensor'
-    cameraImportOpen.value = true
-  }
-}
+// ── Import (dropped / picked files) ──────────────────────────────────────────────
+// The whole import funnel lives in useImportRouting; it drives the import modals
+// (state in useModalsStore) and commits through these store actions.
+const {
+  cameraPickMode,
+  openImportFile, openDroppedImport, routeImport,
+  onImportKindChosen, onImportSwitchKind,
+  openCameraImport, onCameraImport, onGcpImport, onFootprintImport,
+  onGcpPick, onCameraPick,
+} = useImportRouting({ addGcps, addFootprints, addSensors, addPoses, activateTab })
 
 // Switch to the map and centre it on an image's position (pose or EXIF GPS).
 function zoomToImagePosition(imgId) {
@@ -659,64 +521,11 @@ function zoomToImagePosition(imgId) {
   nextTick(() => mapViewerRef.value?.zoomToImage(imgId))
 }
 
-async function onGcpImport({ gcps: parsed, sourceCrs }) {
-  gcpImportOpen.value = false
-  gcpImportGeojson.value = null
-  await addGcps(parsed, sourceCrs)
-  activateTab('map')
-}
-
+// Footprints from imported camera poses (opens the map when any were built).
 function onFootprintFromPoses(settings) {
   footprintFromPosesOpen.value = false
   const { computed: n } = computeFootprints(settings)
   if (n > 0) activateTab('map')
-}
-
-async function onFootprintImport({ footprints: parsed, sourceCrs }) {
-  footprintImportOpen.value = false
-  footprintImportData.value = null
-  await addFootprints(parsed, sourceCrs)
-  activateTab('map')
-}
-
-function onGcpPick(event) {
-  const file = event.target.files?.[0]
-  if (file) openImportFile(file)
-  event.target.value = ''
-}
-
-// ── Import (camera intrinsics / extrinsics) ──────────────────────────────────────
-// A delimited camera file opens the import modal in the sniffed mode (sensor vs
-// pose); `forceMode` lets the Ribbon's two commands hint a default.
-async function openCameraImport(file, forceMode = null) {
-  if (!file) return
-  let text
-  try {
-    text = await file.text()
-  } catch (err) {
-    console.error('Could not read camera file', err)
-    return
-  }
-  cameraImportText.value = text
-  cameraImportName.value = file.name
-  cameraImportMode.value = forceMode || detectCameraMode(text)
-  cameraImportOpen.value = true
-}
-
-async function onCameraImport(payload) {
-  cameraImportOpen.value = false
-  if (payload.mode === 'sensor') {
-    await addSensors(payload.sensors)
-  } else {
-    await addPoses(payload.poses, payload.sourceCrs)
-    activateTab('map')
-  }
-}
-
-function onCameraPick(event) {
-  const file = event.target.files?.[0]
-  if (file) openCameraImport(file, cameraPickMode.value)
-  event.target.value = ''
 }
 
 // ── Export (camera params) ───────────────────────────────────────────────────────
@@ -929,7 +738,8 @@ const imageViewerRefs = reactive({})
 const ribbonInput = ref(null)
 const gcpInput = ref(null)
 const cameraInput = ref(null)
-const cameraPickMode = ref(null) // sensor | pose | null, set before opening the file picker
+// cameraPickMode comes from useImportRouting (above); the command dispatch sets it
+// before opening the hidden camera-file <input>.
 
 // ── Commands ──────────────────────────────────────────────────────────────────
 function handleCommand(id) {
