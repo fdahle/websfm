@@ -61,7 +61,10 @@
       "Bash(python3 -c ' *)",
       "Bash(curl -sL --max-time 15 \"https://api.github.com/repos/fabio-sim/LightGlue-ONNX/releases\")",
       "Bash(curl -sL -o lg_fused.onnx \"https://github.com/fabio-sim/LightGlue-ONNX/releases/download/v1.0.0/superpoint_lightglue_fused.onnx\")",
-      "Bash(curl -sL -o lg_fused_cpu.onnx \"https://github.com/fabio-sim/LightGlue-ONNX/releases/download/v1.0.0/superpoint_lightglue_fused_cpu.onnx\")"
+      "Bash(curl -sL -o lg_fused_cpu.onnx \"https://github.com/fabio-sim/LightGlue-ONNX/releases/download/v1.0.0/superpoint_lightglue_fused_cpu.onnx\")",
+      "Bash(echo \"=== TYPECHECK EXIT $? ===\")",
+      "Bash(echo \"=== BUILD EXIT $? ===\")",
+      "Bash(git commit -q -m 'Update RESTRUCTURE.md plan before executing restructure *)"
     ],
     "additionalDirectories": [
       "/Users/fhdahle/Documents/GitHub/websfm/src/wasm/*",

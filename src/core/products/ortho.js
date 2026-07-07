@@ -7,7 +7,7 @@
 // simple nadir paste.
 //
 // The clever reuse: the dense pipeline already produced, per image, a depth map
-// (working-res depth + cost + RGB planes; see core/mvs.js / the depthMaps cache).
+// (working-res depth + cost + RGB planes; see core/dense/mvs.js / the depthMaps cache).
 // Those depth planes ARE per-image z-buffers, so occlusion is a cheap lookup —
 // no re-rendering. A cell is visible in image m iff it reprojects to a pixel
 // whose stored depth equals the cell's own depth-from-camera (within tolerance);

@@ -1,5 +1,5 @@
 // Dense reconstruction (Multi-View Stereo) — pure compute, no Vue/Pinia/OPFS/DOM.
-// Mirrors core/sfm.js: plain data in, plain data out, side effects via hooks. The
+// Mirrors core/sfm/sfm.js: plain data in, plain data out, side effects via hooks. The
 // worker (compute.worker.js) decodes image pixels (OffscreenCanvas) and calls
 // these; the store keeps reactive state + persistence.
 //
@@ -11,11 +11,11 @@
 //   B. fuseDepthMaps    — reproject depth pixels to 3D, keep those consistent
 //      across ≥k views, colour from the reference pixel. Produces a dense cloud.
 
-import { computeDepthMap } from './reconstruction.js'
+import { computeDepthMap } from '../sfm/reconstruction.js'
 import { planeCostRef, aggregateValidCosts } from './planeCost.js'
 import {
   cameraCenter, projectWithDepth, triangulationAngle, scaleK, rgbaToGray,
-} from './geometry.js'
+} from '../sfm/geometry.js'
 
 // Re-exported for the compute worker, which imports them from this module.
 export { cameraCenter, scaleK, rgbaToGray }

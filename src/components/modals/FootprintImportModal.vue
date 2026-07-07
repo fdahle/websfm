@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed } from 'vue'
 import CrsPicker from '../controls/CrsPicker.vue'
-import { geoJsonToFootprints, guessNameKey } from '../../core/geojson.js'
+import { geoJsonToFootprints, guessNameKey } from '../../core/io/geojson.js'
 
 const props = defineProps({
   features:     { type: Array,  default: () => [] },

@@ -1,4 +1,4 @@
-import init, { match_descriptors, verify_matches_hf } from '../wasm/matching/matching.js'
+import init, { match_descriptors, verify_matches_hf } from '../../wasm/matching/matching.js'
 
 let initPromise = null
 

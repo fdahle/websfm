@@ -4,7 +4,7 @@ import { ref } from 'vue'
 // Build Orthophoto. Reprojects each DEM cell through the cached depth maps
 // (occlusion via their depth planes, colour from their RGB planes). Requires a
 // DEM (built first) and depth maps. Defaults mirror the worker's ortho fallbacks
-// (core/ortho.js). The output raster is aligned to the DEM grid.
+// (core/products/ortho.js). The output raster is aligned to the DEM grid.
 defineProps({
   demCrs: { type: String, default: null },   // frame the DEM was built in (label only)
   demSize: { type: String, default: null },  // e.g. "1024×768" (label only)

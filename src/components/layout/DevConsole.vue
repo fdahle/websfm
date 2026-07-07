@@ -2,7 +2,7 @@
 import { ref, computed, watch, nextTick, onMounted } from 'vue'
 import { useLog } from '../../composables/useLog.js'
 import { useCommands } from '../../composables/useCommands.js'
-import { completions, commonPrefix } from '../../core/commands.js'
+import { completions, commonPrefix } from '../../core/help/commands.js'
 
 // The command prompt drives App.vue's handleCommand (same registry as the
 // ribbon); commandState carries the guard flags (counts / ready-booleans).

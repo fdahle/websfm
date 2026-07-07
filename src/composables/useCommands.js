@@ -1,4 +1,4 @@
-// Binds the pure command registry (core/commands.js) to real actions: reads
+// Binds the pure command registry (core/help/commands.js) to real actions: reads
 // current guard state, dispatches to App.vue's handleCommand(), and echoes
 // everything to the shared log. This is the impure half — the DevConsole prompt
 // calls runLine(); the pure parsing/validation stays testable in core.
@@ -7,7 +7,7 @@ import {
   guardReason,
   helpLines,
   helpFor,
-} from '../core/commands.js'
+} from '../core/help/commands.js'
 import { useLog } from './useLog.js'
 
 const SOURCE = 'Console'

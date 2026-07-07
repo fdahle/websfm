@@ -1,5 +1,5 @@
 import init, { recover_pose, triangulate_dlt, solve_pnp, bundle_adjust, compute_depth_map }
-  from '../wasm/reconstruction/reconstruction.js'
+  from '../../wasm/reconstruction/reconstruction.js'
 
 let initPromise = null
 function ensureWasm() {

@@ -3,7 +3,7 @@ import { ref, computed, watch, nextTick } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useGuideStore } from '../../stores/useGuideStore.js'
 import { useGlossaryStore } from '../../stores/useGlossaryStore.js'
-import { getGuideDoc, getAllGuideDocs, searchGuide, renderGuide } from '../../core/guide.js'
+import { getGuideDoc, getAllGuideDocs, searchGuide, renderGuide } from '../../core/help/guide.js'
 
 // Single centered modal holding the Guide. A Home/index tab lists every pipeline
 // operation; each opened operation gets a closeable tab showing its intro plus one

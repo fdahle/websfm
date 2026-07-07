@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onMounted, onBeforeUnmount } from 'vue'
-import { FIELD_DEFS } from '../../core/metadata.js'
+import { FIELD_DEFS } from '../../core/io/metadata.js'
 
 const props = defineProps({
   image: { type: Object, required: true },

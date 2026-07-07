@@ -4,7 +4,7 @@ import { ref } from 'vue'
 const emit = defineEmits(['close', 'run'])
 
 // Stage B — Build Dense Cloud (fuse depth maps). `depthTolPct` is exposed as a
-// percentage; converted to the fraction core/mvs.js fuseDepthMaps expects. In
+// percentage; converted to the fraction core/dense/mvs.js fuseDepthMaps expects. In
 // Auto mode minViews + maxCost are derived by fusion from the data (minViews =
 // min(2, nMaps−1); maxCost = p70 of the pooled valid-pixel costs).
 const settings = ref({

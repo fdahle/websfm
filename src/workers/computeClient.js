@@ -69,7 +69,7 @@ function call(op, args, { transfer = [], onEvent, worker: pinned } = {}) {
   })
 }
 
-// ── Drop-in compute API (mirrors utils/detection.js + core/matching.js) ─────────
+// ── Drop-in compute API (mirrors utils/detection.js + core/features/matching.js) ─────────
 
 export function detectKeypoints(url, options = {}, { onLog } = {}) {
   // SuperPoint/ONNX loads a heavy runtime (~26 MB wasm + model + a WebGPU device)
@@ -117,11 +117,11 @@ function streamingOp(op) {
     })
 }
 
-// Incremental SfM (see core/sfm.js). `onLog`/`onProgress` fire during the run;
+// Incremental SfM (see core/sfm/sfm.js). `onLog`/`onProgress` fire during the run;
 // resolves to { status, cameras, points } when the model is complete.
 export const reconstruct = streamingOp('reconstruct')
 
-// Dense Stage A — Build Depth Maps (PatchMatch MVS, see core/mvs.js). Resolves to
+// Dense Stage A — Build Depth Maps (PatchMatch MVS, see core/dense/mvs.js). Resolves to
 // { maps: [{ uuid, width, height, K, R, t, depth, cost, rgb, displayDataUrl }] }.
 export const computeDepthMaps = streamingOp('computeDepthMaps')
 
@@ -131,10 +131,10 @@ export const densify = streamingOp('densify')
 
 // Products — DEM (rasterise a height grid in the chosen frame). Resolves to the
 // grid { width, height, gsd, originX, originY, data, mask, zMin, zMax, frame,
-// crs, unit, previewDataUrl }. See core/dem.js.
+// crs, unit, previewDataUrl }. See core/products/dem.js.
 export const generateDem = streamingOp('generateDem')
 
 // Products — orthophoto (reproject each DEM cell into the cached depth maps).
 // Resolves to { width, height, rgba:Uint8Array, covered, previewDataUrl }.
-// See core/ortho.js.
+// See core/products/ortho.js.
 export const generateOrtho = streamingOp('generateOrtho')

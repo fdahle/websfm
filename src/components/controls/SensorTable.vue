@@ -1,8 +1,8 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { estimatedIntrinsics } from '../../utils/cameraEstimated.js'
-import { resolveK } from '../../core/reconstruction.js'
-import { DISTORTION_MODELS, coeffsForModel } from '../../core/distortion.js'
+import { resolveK } from '../../core/sfm/reconstruction.js'
+import { DISTORTION_MODELS, coeffsForModel } from '../../core/sfm/distortion.js'
 
 // Editable table of sensors (shared intrinsics). In 'initial' mode the numeric
 // cells are editable inputs (the source of truth); in 'estimated' mode they show

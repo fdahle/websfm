@@ -1,6 +1,6 @@
 // Shared ONNX Runtime Web bootstrap for the learned-feature backends
 // (SuperPoint detection, LightGlue matching). One place owns the runtime config
-// and the lazy-init pattern, mirroring the `initPromise` that core/matching.js
+// and the lazy-init pattern, mirroring the `initPromise` that core/features/matching.js
 // uses for its wasm.
 //
 // Execution providers: WebGPU first, WASM fallback — ORT tries them in order per
@@ -81,7 +81,7 @@ export async function createSession(model, opts = {}, onLog, backendOverride) {
   const ort = await getOrt(onLog)
   // `backendOverride` lets a caller pin a backend regardless of the machine —
   // e.g. LightGlue drives this to try 'webgpu' (opt-in) or 'wasm', managing its
-  // own GPU→CPU fallback in core/lightglue.js rather than trusting ORT's EP order.
+  // own GPU→CPU fallback in core/features/lightglue.js rather than trusting ORT's EP order.
   const backend = backendOverride || await resolveBackend()
   onLog?.(`ORT: compiling wasm + creating session (${backend})…`)
   // A watchdog line so a hang here is visible and reportable — session creation

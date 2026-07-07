@@ -2,12 +2,12 @@ import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { beforeAll, describe, it, expect } from 'vitest'
 
-import initRecon from '../wasm/reconstruction/reconstruction.js'
+import initRecon from '../../wasm/reconstruction/reconstruction.js'
 import { reconstruct, retriangulatePairs, mergeSplitTracks, rotationCycleFilter } from './sfm.js'
 import { distortPixel } from './distortion.js'
 
 beforeAll(async () => {
-  const wasmUrl = new URL('../wasm/reconstruction/reconstruction_bg.wasm', import.meta.url)
+  const wasmUrl = new URL('../../wasm/reconstruction/reconstruction_bg.wasm', import.meta.url)
   await initRecon({ module_or_path: await readFile(fileURLToPath(wasmUrl)) })
 })
 

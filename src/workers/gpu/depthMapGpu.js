@@ -1,4 +1,4 @@
-// WebGPU depth-map backend. Drop-in alternative to core/reconstruction.js's
+// WebGPU depth-map backend. Drop-in alternative to core/sfm/reconstruction.js's
 // `computeDepthMap` (same args; returns { depth, cost, width, height, normals }),
 // so the worker can pick GPU vs WASM per run with zero changes elsewhere.
 //

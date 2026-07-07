@@ -1,4 +1,4 @@
-// UI-layer download helpers (DOM). Pure encoders live in core/exporters.js; these
+// UI-layer download helpers (DOM). Pure encoders live in core/products/exporters.js; these
 // wrap the bytes/text/Blob in an object URL and trigger a browser download.
 
 // Trigger a download of `data` (a Blob, or bytes/string wrapped with `mime`).

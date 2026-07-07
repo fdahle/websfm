@@ -1,5 +1,5 @@
 // Shared pinhole-camera geometry — pure, no Vue/Pinia/OPFS/DOM/WASM. Used by both
-// the sparse pipeline (core/sfm.js) and the dense pipeline (core/mvs.js), which
+// the sparse pipeline (core/sfm/sfm.js) and the dense pipeline (core/dense/mvs.js), which
 // previously each carried their own copies of these helpers.
 //
 // Conventions: rotation R is row-major [[…],[…],[…]]; translation t is [x,y,z];

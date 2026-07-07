@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { beforeAll, describe, it, expect } from 'vitest'
 
-import initMatching from '../wasm/matching/matching.js'
+import initMatching from '../../wasm/matching/matching.js'
 import { matchDescriptors, verifyMatches, inlierSpread } from './matching.js'
 
 // Load the matching wasm bytes ourselves (Node can't fetch() the .wasm URL the
@@ -10,7 +10,7 @@ import { matchDescriptors, verifyMatches, inlierSpread } from './matching.js'
 // init() resolve immediately. Mirrors reconstruction.test.js. This also exercises
 // the SIMD (`f32x4`) descriptor-distance path that the wasm is built with.
 beforeAll(async () => {
-  const wasmUrl = new URL('../wasm/matching/matching_bg.wasm', import.meta.url)
+  const wasmUrl = new URL('../../wasm/matching/matching_bg.wasm', import.meta.url)
   await initMatching({ module_or_path: await readFile(fileURLToPath(wasmUrl)) })
 })
 

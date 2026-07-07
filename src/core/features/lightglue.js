@@ -1,6 +1,6 @@
 // LightGlue matcher wrapper — the learned joint matcher paired with SuperPoint.
 // Replaces brute-force NN + Lowe ratio: it takes BOTH images' keypoints +
-// descriptors and emits correspondences directly. Runs via core/ort.js (same
+// descriptors and emits correspondences directly. Runs via core/features/ort.js (same
 // lazy/cached session pattern as superpoint.js). Its output still flows through
 // the store's verifyMatches (F-RANSAC) + inlierSpread gates unchanged.
 //

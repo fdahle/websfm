@@ -30,12 +30,20 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
                          ▼                                              ▼
                     utils/opfs.js                              core/*.js (pure)  ──► wasm/*
 ```
-- **`src/core/*.js` is PURE compute**: no Vue/Pinia/OPFS/DOM. Plain data in, plain data
-  out, side effects via injected `onLog`/`onProgress` hooks. This is what lets the same
-  code run inside the worker. `sfm.js` (incremental SfM) and `mvs.js` (dense MVS) are the
-  big orchestrators; `reconstruction.js` is the JS↔WASM marshalling layer; `geometry.js`
-  holds the shared pinhole-camera helpers (cameraCenter, project*, triangulationAngle,
-  scaleK, rgbaToGray) used by both pipelines.
+- **`src/core/**/*.js` is PURE compute**: no Vue/Pinia/OPFS/DOM. Plain data in, plain
+  data out, side effects via injected `onLog`/`onProgress` hooks. This is what lets the
+  same code run inside the worker. Grouped by pipeline stage into subfolders:
+  `core/features/` (detectors/matchers: `superpoint.js`, `lightglue.js`, `matching.js`,
+  `ort.js`, `preselect.js`), `core/sfm/`
+  (`sfm.js` incremental SfM orchestrator, `reconstruction.js` JS↔WASM
+  marshalling, `geometry.js` shared pinhole-camera helpers — cameraCenter, project*,
+  triangulationAngle, scaleK, rgbaToGray — `distortion.js`),
+  `core/dense/` (`mvs.js` dense MVS orchestrator, `planeCost.js`, `memBudget.js`),
+  `core/products/` (`dem.js`, `ortho.js`, `projection.js`, `georef.js`, `exporters.js`,
+  `geotiff.js`, `colormap.js`), `core/io/` (`gcp.js`, `pose.js`, `sensor.js`,
+  `geojson.js`, `metadata.js`), `core/help/`
+  (`glossary.js`, `guide.js`, `commands.js`); cross-cutting stragglers stay flat at
+  `core/` root (`crs.js`, `footprint.js`, `mask.js`, `types.ts`).
 - **`src/stores/*.js`** own reactive state + OPFS persistence. They marshal reactive
   state into **plain** arrays/objects before posting to the worker (Vue Proxies can't be
   structured-cloned — a recurring footgun; see the `.map(row => [...row])` patterns).
@@ -196,6 +204,6 @@ environment may not support — say so explicitly rather than claiming verificat
 
 ## Where things live
 - Models / on-disk shapes: docstrings at the top of each `opfs.js` section.
-- SfM tuning knobs: destructured `settings` in `core/sfm.js` (init/PnP/BA/filter).
+- SfM tuning knobs: destructured `settings` in `core/sfm/sfm.js` (init/PnP/BA/filter).
 - Type hints: `src/core/types.ts` (+ `npm run typecheck`).
 - The plan: `TODO.md`. Baselines + done log: `HANDOVER.md`.

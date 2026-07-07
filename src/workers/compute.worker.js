@@ -10,25 +10,25 @@
 // instead of the DOM <canvas>/<img> path — hence its own implementation here.
 
 import initSift, { detect_sift } from '../wasm/detection/sift.js'
-import { detectSuperPoint } from '../core/superpoint.js'
-import { matchLightGlue } from '../core/lightglue.js'
-import { matchDescriptors, verifyMatches } from '../core/matching.js'
-import { reconstruct as sfmReconstruct } from '../core/sfm.js'
+import { detectSuperPoint } from '../core/features/superpoint.js'
+import { matchLightGlue } from '../core/features/lightglue.js'
+import { matchDescriptors, verifyMatches } from '../core/features/matching.js'
+import { reconstruct as sfmReconstruct } from '../core/sfm/sfm.js'
 import {
   selectSourceViews, scaleK, rgbaToGray, depthMapForImage, fuseDepthMaps, filterDepthMap, autoBestK,
-} from '../core/mvs.js'
+} from '../core/dense/mvs.js'
 import { buildMaskLookup } from '../core/mask.js'
-import { distortPixel, hasDistortion } from '../core/distortion.js'
-import { depthColor } from '../core/colormap.js'
-import { buildLocalFrame, makeFrame } from '../core/projection.js'
-import { frameFromSimilarity } from '../core/georef.js'
-import { rasterizeDem } from '../core/dem.js'
-import { orthorectify } from '../core/ortho.js'
+import { distortPixel, hasDistortion } from '../core/sfm/distortion.js'
+import { depthColor } from '../core/products/colormap.js'
+import { buildLocalFrame, makeFrame } from '../core/products/projection.js'
+import { frameFromSimilarity } from '../core/products/georef.js'
+import { rasterizeDem } from '../core/products/dem.js'
+import { orthorectify } from '../core/products/ortho.js'
 import { isGpuAvailable, ensureDevice } from './gpu/device.js'
 import { computeDepthMapGPU } from './gpu/depthMapGpu.js'
 import {
   createMemLedger, projectDensePeakBytes, formatBytes, DEFAULT_BUDGET_BYTES,
-} from '../core/memBudget.js'
+} from '../core/dense/memBudget.js'
 
 // Must match STRIDE in crates/sift/src/lib.rs: [x, y, scale, response, angle, d0..d127]
 const STRIDE = 133
@@ -146,12 +146,12 @@ async function runSift(data, width, height, { contrastThreshold, maxKeypoints })
   }
 }
 
-// SuperPoint detector (ONNX via core/superpoint.js) → the same feature bundle.
+// SuperPoint detector (ONNX via core/features/superpoint.js) → the same feature bundle.
 // Descriptors are 256-d here, not 128 — carried through as descLen so persistence
 // and matching read the width off the buffer rather than a hardcoded const.
 async function runSuperPoint(data, width, height, { maxKeypoints, onLog }) {
   // SuperPoint wants single-channel float [0,1]; build it from the RGBA raster
-  // (Rec. 601 luma, matching core/geometry.js rgbaToGray, then /255).
+  // (Rec. 601 luma, matching core/sfm/geometry.js rgbaToGray, then /255).
   const gray = new Float32Array(width * height)
   for (let i = 0; i < width * height; i++) {
     const o = i * 4
@@ -308,7 +308,7 @@ async function depthToDataUrl(depth, w, h) {
 // Stage A — Build Depth Maps. Rasterises each registered image (and its source
 // neighbours), runs PatchMatch MVS, and returns one depth map per reference image
 // (raw depth/cost planes + colours for fusion, plus a display PNG). Pure compute
-// lives in core/mvs.js; pixel decoding is worker-only (OffscreenCanvas).
+// lives in core/dense/mvs.js; pixel decoding is worker-only (OffscreenCanvas).
 async function computeDepthMaps([input], { emit }) {
   const { images, points, settings = {} } = input
   const {
@@ -529,7 +529,7 @@ async function computeDepthMaps([input], { emit }) {
 }
 
 // Stage B — Build Point Cloud (dense). Fuses the depth maps from Stage A into a
-// single coloured point cloud (pure compute in core/mvs.js).
+// single coloured point cloud (pure compute in core/dense/mvs.js).
 async function densify([input], { emit }) {
   const { maps, settings = {} } = input
   emit('progress', [0, 1, 'Fusing depth maps…'])
@@ -652,7 +652,7 @@ async function generateDem([input], { emit }) {
 
 // Build an orthophoto by reprojecting each DEM cell into the cached depth maps
 // (their depth planes double as occlusion z-buffers; their RGB planes supply the
-// colour). Pure compute lives in core/ortho.js.
+// colour). Pure compute lives in core/products/ortho.js.
 async function generateOrtho([input], { emit }) {
   const { dem, maps, settings = {} } = input
   emit('progress', [0, dem.height, 'Orthorectifying…'])

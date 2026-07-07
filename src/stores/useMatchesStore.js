@@ -3,8 +3,8 @@ import { defineStore } from 'pinia'
 import * as opfs from '../utils/opfs.js'
 import { matchDescriptors, matchLightGlue, verifyMatches, POOL_SIZE } from '../workers/computeClient.js'
 import { useLog } from '../composables/useLog.js'
-import { preselectPairs } from '../core/preselect.js'
-import { inlierSpread } from '../core/matching.js'
+import { preselectPairs } from '../core/features/preselect.js'
+import { inlierSpread } from '../core/features/matching.js'
 import { registerProjectStore } from './projectStores.js'
 import { useProjectsStore } from './useProjectsStore.js'
 import { usePosesStore } from './usePosesStore.js'
@@ -164,7 +164,7 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
         entry.hInlierCount = result?.hInlierCount ?? 0
         entry.hfRatio = hfRatio
         entry.degenerate = result != null && hfRatio >= degenRatioThresh
-        // Positional-degeneracy REJECT (see core/matching.js inlierSpread): the inlier
+        // Positional-degeneracy REJECT (see core/features/matching.js inlierSpread): the inlier
         // set has enough points and clears every count/ratio/H-F gate, yet its positions
         // in one image collapse — many-to-one convergence (unique spots ≪ inliers) or
         // epipole degeneracy (all inliers in a pinhead region). Neither is real geometry.

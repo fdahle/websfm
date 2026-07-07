@@ -1,5 +1,5 @@
 <script setup>
-import { formatFileSize } from '../../core/metadata.js'
+import { formatFileSize } from '../../core/io/metadata.js'
 
 defineProps({
   images: {

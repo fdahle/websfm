@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
 import CrsPicker from '../controls/CrsPicker.vue'
-import { DELIMITER_OPTIONS, sniffDelimiter, parseRows, guessMapping, buildGcps } from '../../core/gcp.js'
+import { DELIMITER_OPTIONS, sniffDelimiter, parseRows, guessMapping, buildGcps } from '../../core/io/gcp.js'
 import { axisLabels } from '../../core/crs.js'
 
 const props = defineProps({

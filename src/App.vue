@@ -52,11 +52,11 @@ import FootprintImportModal from './components/modals/FootprintImportModal.vue'
 import FootprintFromPosesModal from './components/modals/FootprintFromPosesModal.vue'
 import CameraImportModal from './components/modals/CameraImportModal.vue'
 import ImportKindModal from './components/modals/ImportKindModal.vue'
-import { parseGeoJson, looksLikeGeoJson, geoJsonToGcps, guessNameKey } from './core/geojson.js'
+import { parseGeoJson, looksLikeGeoJson, geoJsonToGcps, guessNameKey } from './core/io/geojson.js'
 import { detectCameraMode } from './utils/camera.js'
 import { detectFileKind } from './utils/importKind.js'
 import { buildPosesCsv, buildSensorsCsv, downloadCsv } from './utils/exportCsv.js'
-import { cloudToPly, reconstructionToJson, demToAsciiGrid, demToGeoTiff, orthoToGeoTiff, rasterWorldFile } from './core/exporters.js'
+import { cloudToPly, reconstructionToJson, demToAsciiGrid, demToGeoTiff, orthoToGeoTiff, rasterWorldFile } from './core/products/exporters.js'
 import { downloadBlob, dataUrlToBlob } from './utils/download.js'
 import * as opfs from './utils/opfs.js'
 import { ensureProjection } from './core/crs.js'
@@ -262,7 +262,7 @@ const selected = computed(() => images.value.find((img) => img.id === selectedId
 const kpImageCount = computed(() => images.value.filter(img => img.kpStatus === 'done').length)
 
 // Guard state for the DevConsole command line — same prerequisite flags the
-// ribbon uses to enable/disable buttons (see core/commands.js guardReason).
+// ribbon uses to enable/disable buttons (see core/help/commands.js guardReason).
 const commandState = computed(() => ({
   imageCount:    images.value.length,
   kpImageCount:  kpImageCount.value,
