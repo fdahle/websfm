@@ -28,14 +28,6 @@ names the offending cameras; tune `interimBaEvery` / `minPnpInlierRatio` /
 
 ## Next
 
-### RESTRUCT — codebase restructuring
-Execute `RESTRUCTURE.md` (root): subfolder `core/`, dissolve `utils/` grab-bag,
-split the god files (`sfm.js`, `App.vue`, `Sidebar.vue`, `compute.worker.js`).
-Six phases, one commit each, no behaviour changes; verification steps and
-out-of-scope list are in the plan file. Delete the plan file (and this entry)
-when done. Prereq: commit the current working tree first, and decide what to do
-with the untracked 49 MB `public/models/*.onnx` (gitignore+fetch script vs LFS).
-
 ### SP — SuperPoint + LightGlue backend (first learned front end; realizes F5)
 Add SuperPoint (detector) and LightGlue (joint matcher) as **selectable
 alternatives** to SIFT + brute-force/RANSAC, run via **ONNX Runtime Web**

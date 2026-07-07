@@ -49,8 +49,21 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
   state into **plain** arrays/objects before posting to the worker (Vue Proxies can't be
   structured-cloned — a recurring footgun; see the `.map(row => [...row])` patterns).
 - **`workers/computeClient.js`** is the typed async client (worker pool, request/response
-  with streaming `ev` events); **`compute.worker.js`** decodes pixels (OffscreenCanvas)
-  and calls `core/*`.
+  with streaming `ev` events); **`compute.worker.js`** keeps the OffscreenCanvas pixel
+  decoder (`rasterize`), the message loop, and the merged op registry. The op handlers
+  live in **`workers/ops/<domain>.js`** (`detect`/`match`/`sfm`/`dense`/`products`), each
+  a factory `makeXOps(deps)` returning `{ opName: handler }`; `rasterize` is injected into
+  the two that need it (detect + dense), everything else is domain-local. Handlers call
+  `core/*` and keep their `transfer` lists next to them.
+- **`App.vue`** is layout + store wiring + the Ribbon command dispatch; self-contained
+  concerns are extracted to **`composables/*`** (`useTabDrag`, `useSidebarResize`,
+  `useImportRouting` = dropped/picked-file funnel, `useExports` = camera-params/product
+  export, `useModalEscape` = Escape-closes-top-modal, plus `usePipeline`/`useTabs`/etc.).
+  **`Sidebar.vue`** is a shell (drop-zone + section open/close + re-emit); each
+  collapsible section is a component under **`components/layout/sidebar/`**
+  (`ImagesSection`/`SensorsSection`/`MatchesSection`/`GcpsSection`/`CloudsSection`/
+  `ProductsSection`), sharing `sidebar-sections.css` (via `<style scoped src>`) and
+  `composables/useContextMenu.js` for the mutually-exclusive right-click menus.
 
 ## Stores (`src/stores/`)
 - **`projectStores.js`** — registry. Project-scoped stores register via
@@ -81,14 +94,14 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
    `suppressed`), so parse `kept = floor((len-2)/STRIDE)`.
 2. **Match** (`crates/matching`) → Lowe ratio test + RANSAC fundamental-matrix
    verification, with an inlier-**ratio** gate (rejects spurious epipolar fits on
-   repetitive structure) and a **positional-spread** reject (`core/matching.js`
+   repetitive structure) and a **positional-spread** reject (`core/features/verify.js`
    `inlierSpread`, gated in `useMatchesStore`): drop a pair whose accepted inliers
    collapse to few unique locations (many-to-one convergence) or a pinhead region
    (epipole degeneracy) — signatures no count/ratio/H-F gate can see. Optional pair
-   **preselection** (`core/preselect.js`, k-nearest by imported camera position)
+   **preselection** (`core/features/preselect.js`, k-nearest by imported camera position)
    prunes the exhaustive O(N²) set; `matchAll` runs on a concurrency-limited worker
    pool with a per-run descriptor cache.
-3. **Sparse SfM** (`core/sfm.js`): a **rotation-cycle consistency filter**
+3. **Sparse SfM** (`core/sfm/sfm.js`): a **rotation-cycle consistency filter**
    (`rotationCycleFilter`) first prunes verified-but-false pairs — spurious epipolar
    fits on repetitive structure that clear every count/ratio gate but whose relative
    rotation is inconsistent with the match graph (each triangle's `R_ik⁻¹·R_jk·R_ij`
@@ -99,7 +112,7 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
    (`bundle.rs`: Schur complement, analytic Jacobians, adaptive Huber; optional
    shared per-sensor intrinsics refinement via `refineIntrinsics`), retriangulation
    + split-track merging (`retriangulatePairs`/`mergeSplitTracks`), and 2-pass track
-   filtering. Brown–Conrady distortion (`core/distortion.js`) is removed once at
+   filtering. Brown–Conrady distortion (`core/sfm/distortion.js`) is removed once at
    ingest so the whole pipeline stays pinhole — `projectPoint`, the track filter,
    reprojection stats and the dense/ortho warp all assume it. A sensor declares which
    coefficients it uses via a **distortion model** (`DISTORTION_MODELS`:
@@ -114,7 +127,7 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
    BA-refined K the fold used, so the frame matches) — one single-source-of-truth for
    distortion, from ingest through dense. Heavily instrumented via `onLog` (toggle
    "Detail"/debug in DevConsole).
-4. **Dense MVS** (`core/mvs.js` + `crates/reconstruction/src/mvs.rs`): Stage A build
+4. **Dense MVS** (`core/dense/mvs.js` + `crates/reconstruction/src/mvs.rs`): Stage A build
    per-image PatchMatch depth maps → optional `filterDepthMap` (median/speckle cleanup)
    → Stage B `fuseDepthMaps` (cross-view geometric consistency). Both stages log
    per-image timing, depth range, cost distribution, and fusion cull breakdown ('Dense'
@@ -132,12 +145,12 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
      clamped to each layer's valid (w,h)) + per-source pose storage buffer; one `main`
      entry driven by `ctrl` (mode/parity/iter). The worker A/B-validates GPU vs CPU on
      the first image and logs `GPU validate: … RMS …`.
-5. **Products**: local vertical frame (`core/projection.js`, aerial Z-up auto-orient) →
-   DEM (`core/dem.js`, binned heights + IDW fill, hillshaded preview) → orthophoto
-   (`core/ortho.js`, true reprojection reusing the cached depth maps as z-buffer +
-   colour). Optional georeferencing via `core/georef.js` (Horn 7-param similarity,
-   SfM centres ↔ imported poses). Exports in `core/exporters.js` +
-   `core/geotiff.js` (PLY, model JSON, DEM GeoTIFF/.asc, ortho GeoTIFF/PNG+.wld)
+5. **Products**: local vertical frame (`core/products/projection.js`, aerial Z-up auto-orient) →
+   DEM (`core/products/dem.js`, binned heights + IDW fill, hillshaded preview) → orthophoto
+   (`core/products/ortho.js`, true reprojection reusing the cached depth maps as z-buffer +
+   colour). Optional georeferencing via `core/products/georef.js` (Horn 7-param similarity,
+   SfM centres ↔ imported poses). Exports in `core/products/exporters.js` +
+   `core/products/geotiff.js` (PLY, model JSON, DEM GeoTIFF/.asc, ortho GeoTIFF/PNG+.wld)
    through `ExportModal.vue`. Products persist to OPFS (`products/…`).
 
 ## In-app glossary (help)
@@ -146,7 +159,7 @@ topic sub-folders — `algorithms/`, `camera-sensor/`, `core-sfm/`,
 `dense-reconstruction/`, `products/` — but folders are authoring-only; the flat
 `id` is the key, so entries link by id regardless of path), frontmatter
 (`id`/`title`/`summary`/optional `aliases`) + markdown body; images under
-`src/help/assets/`. `core/glossary.js` is the pure loader/renderer — parses
+`src/help/assets/`. `core/help/glossary.js` is the pure loader/renderer — parses
 frontmatter, renders via `marked` + KaTeX (`$…$`/`$$…$$`), resolves `assets/*`
 image URLs, and **auto-links** any occurrence of another entry's title/alias to
 its tab (first hit per term; opt out one occurrence with
@@ -183,10 +196,10 @@ the project CRS and are reprojected on CRS change (`handleSetCrs` in App.vue). S
   matches (also on image removal).
 - Rotation matrices are row-major `[[…],[…],[…]]`; `t` is `[x,y,z]`; camera centre
   `C = -Rᵀt`; projection matrices are flat 12-elem `[R|t]` (no K).
-- The three PatchMatch kernels (`patchmatch.wgsl`, `core/planeCost.js`,
+- The three PatchMatch kernels (`patchmatch.wgsl`, `core/dense/planeCost.js`,
   `crates/reconstruction/src/mvs.rs`) implement the same math; the first-image
   GPU↔CPU A/B check must stay RMS < 5e-3. Change all three (and the `aggRef`
-  closure in `core/mvs.js`) in lockstep or not at all. Their plane-induced
+  closure in `core/dense/mvs.js`) in lockstep or not at all. Their plane-induced
   homography is `R + t·nᵀ/d` for the plane `n·X = d` with `d = n·P` — the `+`
   is load-bearing (the Hartley–Zisserman `R − t·nᵀ/d` assumes the opposite
   `n·X + d = 0`; a `−` here mirrors the warp across the epipolar line and the

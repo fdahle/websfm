@@ -72,7 +72,12 @@
       "Bash(perl -i -pe \"s{mirrors utils/detection\\\\.js \\\\+ core/features/matching\\\\.js}{mirrors core/features/sift.js + core/features/{bruteforce,verify}.js}\" src/workers/computeClient.js)",
       "Bash(perl -i -pe \"s{core/features/matching\\\\.js}{core/features/bruteforce.js}g\" src/core/features/ort.js src/core/features/superpoint.js)",
       "Bash(perl -i -pe \"s{see core/features/matching\\\\.js inlierSpread}{see core/features/verify.js inlierSpread}\" src/stores/useMatchesStore.js)",
-      "Bash(git commit -q -m 'Phase 2: dissolve utils/ grab-bag, split matching.js *)"
+      "Bash(git commit -q -m 'Phase 2: dissolve utils/ grab-bag, split matching.js *)",
+      "Bash(python3 -)",
+      "Bash(git commit -q -m 'Phase 3: split core/sfm/sfm.js into focused modules *)",
+      "Bash(awk 'NR>=719 && NR<=723{print NR\": \"$0}' src/App.vue)",
+      "Bash(git commit -q -m 'Phase 4: decompose App.vue into composables *)",
+      "Bash(awk '/<Sidebar/{f=1} f{print NR\": \"$0} /\\\\/>/{if\\(f\\)exit}' src/App.vue)"
     ],
     "additionalDirectories": [
       "/Users/fhdahle/Documents/GitHub/websfm/src/wasm/*",

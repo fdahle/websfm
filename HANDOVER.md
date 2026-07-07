@@ -68,6 +68,24 @@ fiducials; self-calibration (A2) + fiducials (F4) are the code-side support.
 
 ## Done log (most recent first)
 
+- **2026-07-07 · RESTRUCT · codebase reorganisation (RESTRUCTURE.md, all phases)** —
+  mechanical, behaviour-preserving. `src/core/` grouped into `features/ sfm/ dense/
+  products/ io/ help/` (crs/footprint/mask/types stay flat); `utils/` grab-bag
+  dissolved (`detection.js`→pure `core/features/sift.js` + worker routed through it,
+  `camera.js`→`io/cameraKind.js`, `importKind.js`→`io/importKind.js`,
+  `cameraEstimated.js`→`sfm/cameraEstimated.js`); `matching.js` split into
+  `features/bruteforce.js` + `features/verify.js`. God files broken up: `sfm.js`
+  1417→1029 (`rotations`/`cycleFilter`/`tracks`/`initPair`); `App.vue` 1641→1297
+  (composables `useTabDrag`/`useSidebarResize`/`useImportRouting`/`useExports`/
+  `useModalEscape`); `Sidebar.vue` 1118→181 (6 section components under
+  `components/layout/sidebar/` + `useContextMenu`); `compute.worker.js` 694→65
+  (`workers/ops/{detect,match,sfm,dense,products}.js`). Each phase: `npm test`
+  (188 pass) + typecheck + build green; the Vue/worker phases are browser-runtime
+  and were NOT verified in a real browser (typecheck/build + binding audits only —
+  needs a manual run). App.vue's remaining length is the flat template modal stack,
+  left intact by choice (extracting a `<ModalStack>` would add prop/emit indirection
+  for a cosmetic line win).
+
 - **2026-07-07 · DX · Dense plane-cost homography sign (freckle root cause)** — the
   plane-induced homography in all three PatchMatch kernels computed `R·ray −
   t·(n·ray)/d`, but with the code's plane convention `d = n·P` (`n·X = d`) the correct
