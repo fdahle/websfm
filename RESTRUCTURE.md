@@ -37,7 +37,7 @@ unchanged. Each `*.test.js` moves with its module. `types.ts` stays at
 
 | New folder | Files (from `core/`) |
 |---|---|
-| `core/features/` | `matching.js`, `superpoint.js`, `lightglue.js`, `ort.js`, `preselect.js` |
+| `core/features/` | `matching.js` (split/renamed in Phase 2), `superpoint.js`, `lightglue.js`, `ort.js`, `preselect.js` |
 | `core/sfm/` | `sfm.js`, `reconstruction.js`, `geometry.js`, `distortion.js` |
 | `core/dense/` | `mvs.js`, `planeCost.js`, `memBudget.js` |
 | `core/products/` | `dem.js`, `ortho.js`, `projection.js`, `georef.js`, `exporters.js`, `geotiff.js`, `colormap.js` |
@@ -65,10 +65,33 @@ Also check `src/core/types.ts` and any JSDoc `@typedef import(...)` path strings
 `utils/` mixes pure compute (belongs in `core/`) with DOM/browser helpers
 (stays). Apply the rule from CLAUDE.md: pure → `core/`, browser/DOM → `utils/`.
 
+First, fix the misleading generic names in `core/features/` so the classic and
+learned paths are symmetric. `matching.js` is not an orchestrator (that's
+`matchAll` in `useMatchesStore`); it bundles one classic-specific function with
+two shared ones. Split it:
+- `core/features/bruteforce.js` — `matchDescriptors` (brute-force NN + Lowe
+  ratio, wasm). The classic counterpart of `lightglue.js`; keep the wasm
+  `ensureWasm` lazy-init here.
+- `core/features/verify.js` — `verifyMatches` (F-RANSAC) + `inlierSpread`.
+  Shared by BOTH pipelines (LightGlue output flows through these too — see the
+  `lightglue.js` header). Needs its own `ensureWasm` for `verify_matches_hf`
+  (same `init` from `wasm/matching`; calling init twice is safe — it's a cached
+  promise inside the wasm-bindgen glue, but keep each file's local
+  `initPromise` pattern for consistency).
+- Delete `core/features/matching.js` after the split; update every importer
+  (`useMatchesStore`, `compute.worker.js`, tests). Split `matching.test.js`
+  along the same line.
+
+Naming result: detectors `sift.js` / `superpoint.js`, matchers
+`bruteforce.js` / `lightglue.js`, shared gate `verify.js`.
+
 Moves:
-- `utils/detection.js` → `core/features/detection.js` — it's the SIFT wasm
-  wrapper (twin of `core/features/matching.js`); it was always core-shaped.
-  Note it's imported by the worker — update `compute.worker.js`.
+- `utils/detection.js` → `core/features/sift.js` — it's the SIFT wasm wrapper
+  (twin of `superpoint.js`); it was always core-shaped, and `detection.js` says
+  nothing. Note `compute.worker.js` also calls `detect_sift` directly (line
+  ~121) — while touching this, check whether that's a duplicate of the wrapper
+  and if so route it through `core/features/sift.js` instead (behaviour must
+  stay identical, including the two-trailing-sentinels parse).
 - `utils/camera.js` → `core/io/cameraKind.js` — pure sensor-vs-pose classifier
   built on `core/io/gcp.js` parsing. Rename because `camera.js` says nothing.
 - `utils/importKind.js` → `core/io/importKind.js` — pure dropped-file
@@ -162,7 +185,7 @@ that logic intact inside the dense op module.
 
 - **No `@/` path alias**, no barrel/`index.js` files — barrels hide the
   dependency graph and hurt tree-shaking for the wasm-adjacent modules.
-- **No renames beyond the two in Phase 2**; renaming while moving doubles
+- **No renames beyond those listed in Phase 2**; renaming while moving doubles
   review difficulty.
 - **No splitting of `useReconstructionStore` (715 ln)** — it's big but coherent
   (one store, one domain). Revisit only if it grows past ~1000.
