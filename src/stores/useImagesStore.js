@@ -1,6 +1,7 @@
 import { ref, markRaw } from 'vue'
 import { defineStore } from 'pinia'
 import { createImage } from '../utils/image.js'
+import { isTiff, tiffToDisplayBlob } from '../utils/tiff.js'
 import { extractMetadata } from '../core/io/metadata.js'
 import { detectKeypoints } from '../workers/computeClient.js'
 import { useLog } from '../composables/useLog.js'
@@ -76,7 +77,7 @@ export const useImagesStore = defineStore('images', () => {
     selectedId.value = id
   }
 
-  function addImages(files) {
+  async function addImages(files) {
     let added = 0
     for (const file of files) {
       const item = createImage(file)
@@ -87,6 +88,26 @@ export const useImagesStore = defineStore('images', () => {
       images.value.push(item)
       added++
       log(`Added image: ${file.name} (${(file.size / 1024).toFixed(0)} KB)`, 'info', 'Images')
+
+      // Browsers (bar Safari) can't decode TIFF natively, so createImage's blob
+      // URL renders blank and dimensions never load. Transcode to a PNG blob and
+      // use that as the display/compute URL; the original TIFF still goes to OPFS.
+      if (isTiff(file)) {
+        URL.revokeObjectURL(item.url)
+        item.url = null
+        try {
+          const { blob: png, width, height } = await tiffToDisplayBlob(file)
+          const found = images.value.find((img) => img.id === item.id)
+          if (!found) continue // removed mid-decode
+          found.url = URL.createObjectURL(png)
+          log(`Decoded TIFF: ${file.name} — ${width}×${height}`, 'info', 'Images')
+        } catch (err) {
+          const found = images.value.find((img) => img.id === item.id)
+          if (found) found.loading = false
+          log(`TIFF decode failed: ${file.name} — ${err?.message ?? err}`, 'error', 'Images')
+          continue
+        }
+      }
 
       if (isPersisting()) {
         opfs.saveImage(projects.currentProjectId, item.uuid, file)
@@ -240,8 +261,16 @@ export const useImagesStore = defineStore('images', () => {
         onDetected?.(id)
       }
     } catch (err) {
-      log(`${tag} error: ${img.name} — ${err?.message ?? err}`, 'error', tag)
       const found = images.value.find((i) => i.id === id)
+      // A cancel hard-terminates the worker pool, which rejects the in-flight
+      // call — that's the user stopping the run, not a detector failure, so
+      // revert the image to its prior state instead of flagging an error.
+      if (shouldCancel?.()) {
+        if (found) found.kpStatus = hadKeypoints ? 'done' : null
+        log(`${tag} aborted (cancelled): ${img.name}`, 'warn', tag)
+        return
+      }
+      log(`${tag} error: ${img.name} — ${err?.message ?? err}`, 'error', tag)
       if (found) found.kpStatus = 'error'
     }
   }
@@ -259,15 +288,15 @@ export const useImagesStore = defineStore('images', () => {
       'info', batchTag)
     let done = 0
     for (const img of pending) {
-      if (shouldCancel?.()) { log(`SIFT cancelled — ${done}/${total} done`, 'warn', 'SIFT'); return }
+      if (shouldCancel?.()) { log(`${batchTag} cancelled — ${done}/${total} done`, 'warn', batchTag); return }
       await detectOne(img.id, settings, onDetected, shouldCancel)
       // Cancelled mid-image: detectOne already discarded the result, so stop here
       // without counting it as done.
-      if (shouldCancel?.()) { log(`SIFT cancelled — ${done}/${total} done`, 'warn', 'SIFT'); return }
+      if (shouldCancel?.()) { log(`${batchTag} cancelled — ${done}/${total} done`, 'warn', batchTag); return }
       done++
       onProgress?.(done, total, img.name)
     }
-    log('SIFT batch complete', 'success', 'SIFT')
+    log(`${batchTag} batch complete`, 'success', batchTag)
   }
 
   function clearKeypoints(id) {
@@ -306,7 +335,11 @@ export const useImagesStore = defineStore('images', () => {
     for (const record of records) {
       try {
         const blob = await opfs.loadImageBlob(projectId, record.uuid)
-        const url = URL.createObjectURL(blob)
+        // OPFS keeps the original file, so TIFFs need the same transcode-to-PNG
+        // as on ingest (the Blob has no name, so classify by the record's name).
+        const url = isTiff(record.name)
+          ? URL.createObjectURL((await tiffToDisplayBlob(blob)).blob)
+          : URL.createObjectURL(blob)
         const img = {
           id: record.id,
           uuid: record.uuid,

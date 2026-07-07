@@ -23,10 +23,23 @@ const staleDetectorImages = computed(() =>
 )
 const showMixWarning = computed(() => !overwrite.value && staleDetectorImages.value.length > 0)
 
+// SuperPoint's GPU path (ONNX Runtime's WebGPU EP) is gated to Chromium in
+// core/features/ort.js (resolveBackend) — on Safari/Firefox it always runs on
+// CPU WASM (and Safari ignores COEP `credentialless`, so single-threaded too).
+// Surface that here, before the user commits to a slow run.
+const isChromium = /Chrome\//.test(globalThis.navigator?.userAgent || '')
+
+// Tiling defaults (Advanced): 'off' | 'auto' | 'manual'. When on, detection runs
+// per overlapping tile at native-ish resolution then merges — more, better-
+// localised keypoints, and it sidesteps the SuperPoint WebGPU OOM. `tileSize` 0
+// means auto-derive; `overlap` dedups seam duplicates.
 const siftSettings = ref({
   maxDim: 1200,
   contrastThreshold: 0.01,
   maxKeypoints: 5000,
+  tiling: 'off',
+  tileSize: 1024,
+  overlap: 64,
 })
 
 // SuperPoint has no contrast knob (learned detection threshold is baked into the
@@ -35,6 +48,9 @@ const siftSettings = ref({
 const superpointSettings = ref({
   maxDim: 1200,
   maxKeypoints: 2048,
+  tiling: 'off',
+  tileSize: 1024,
+  overlap: 64,
 })
 
 const detectors = [
@@ -113,20 +129,26 @@ function run() {
           <div class="section-sep"></div>
 
           <div class="field">
-            <label class="field-label" for="maxDim">Max resolution</label>
+            <label class="field-label" for="maxDim">Detection resolution</label>
             <div class="input-row">
               <input
                 id="maxDim"
                 v-model.number="siftSettings.maxDim"
                 type="number"
                 min="100"
-                max="4000"
+                max="10000"
                 step="100"
                 class="field-input"
               />
               <span class="field-unit">px</span>
             </div>
-            <span class="field-hint">Longest side used for detection. Lower = faster.</span>
+            <span class="field-hint">
+              Images are downscaled to this longest side <em>before</em> detection
+              (keypoint coordinates map back to native pixels). Tiling off: the
+              detector sees the whole downscaled image in one pass. Tiling on: the
+              same downscaled image is split into overlapping tiles, so you can
+              raise this toward native resolution without a huge single pass.
+            </span>
           </div>
 
           <div class="field">
@@ -155,26 +177,72 @@ function run() {
               class="field-input"
             />
           </div>
+
+          <details class="advanced">
+            <summary>Advanced</summary>
+            <div class="advanced-body">
+              <div class="field">
+                <label class="field-label" for="sift-tiling">Tiling</label>
+                <select id="sift-tiling" v-model="siftSettings.tiling" class="field-select">
+                  <option value="off">Off</option>
+                  <option value="auto">Auto (fit tile size)</option>
+                  <option value="manual">Manual</option>
+                </select>
+                <span class="field-hint">
+                  Detect on overlapping tiles at full resolution, then merge — more,
+                  better-localised keypoints. Off = single downsampled pass.
+                </span>
+              </div>
+              <div v-if="siftSettings.tiling === 'manual'" class="field">
+                <label class="field-label" for="sift-tileSize">Tile size</label>
+                <div class="input-row">
+                  <input id="sift-tileSize" v-model.number="siftSettings.tileSize" type="number" min="256" max="4096" step="64" class="field-input" />
+                  <span class="field-unit">px</span>
+                </div>
+              </div>
+              <div v-if="siftSettings.tiling !== 'off'" class="field">
+                <label class="field-label" for="sift-overlap">Tile overlap</label>
+                <div class="input-row">
+                  <input id="sift-overlap" v-model.number="siftSettings.overlap" type="number" min="0" max="512" step="16" class="field-input" />
+                  <span class="field-unit">px</span>
+                </div>
+                <span class="field-hint">Seam margin so edge features aren't clipped; duplicates are merged.</span>
+              </div>
+            </div>
+          </details>
         </template>
 
         <template v-else-if="detector === 'superpoint'">
           <div class="section-sep"></div>
 
+          <div v-if="!isChromium" class="warn-box">
+            This browser can't run SuperPoint on the GPU — WebGPU inference is
+            Chromium-only for now, so it will run on the <strong>CPU</strong>
+            (much slower; expect minutes per image at high resolution or with
+            tiling). Use <strong>Chrome or Edge</strong> for GPU speed.
+          </div>
+
           <div class="field">
-            <label class="field-label" for="sp-maxDim">Max resolution</label>
+            <label class="field-label" for="sp-maxDim">Detection resolution</label>
             <div class="input-row">
               <input
                 id="sp-maxDim"
                 v-model.number="superpointSettings.maxDim"
                 type="number"
                 min="100"
-                max="4000"
+                max="10000"
                 step="100"
                 class="field-input"
               />
               <span class="field-unit">px</span>
             </div>
-            <span class="field-hint">Longest side used for detection. Lower = faster.</span>
+            <span class="field-hint">
+              Images are downscaled to this longest side <em>before</em> detection
+              (keypoint coordinates map back to native pixels). Raising it only
+              helps with tiling on: tiles keep each network input small (≤ ~1024px
+              on GPU), so high resolutions neither OOM the GPU nor cap keypoint
+              density at the network's output grid.
+            </span>
           </div>
 
           <div class="field">
@@ -188,8 +256,42 @@ function run() {
               step="128"
               class="field-input"
             />
-            <span class="field-hint">Top-K by score. LightGlue matching cost grows with this.</span>
+            <span class="field-hint">Top-K by score (global, after tile merge). LightGlue matching cost grows with this.</span>
           </div>
+
+          <details class="advanced">
+            <summary>Advanced</summary>
+            <div class="advanced-body">
+              <div class="field">
+                <label class="field-label" for="sp-tiling">Tiling</label>
+                <select id="sp-tiling" v-model="superpointSettings.tiling" class="field-select">
+                  <option value="off">Off</option>
+                  <option value="auto">Auto (fit GPU memory)</option>
+                  <option value="manual">Manual</option>
+                </select>
+                <span class="field-hint">
+                  Detect on overlapping tiles at full resolution, then merge — more
+                  keypoints, and each tile fits GPU memory (avoids the OOM). Auto
+                  derives the tile size from the GPU's buffer limit.
+                </span>
+              </div>
+              <div v-if="superpointSettings.tiling === 'manual'" class="field">
+                <label class="field-label" for="sp-tileSize">Tile size</label>
+                <div class="input-row">
+                  <input id="sp-tileSize" v-model.number="superpointSettings.tileSize" type="number" min="256" max="4096" step="64" class="field-input" />
+                  <span class="field-unit">px</span>
+                </div>
+              </div>
+              <div v-if="superpointSettings.tiling !== 'off'" class="field">
+                <label class="field-label" for="sp-overlap">Tile overlap</label>
+                <div class="input-row">
+                  <input id="sp-overlap" v-model.number="superpointSettings.overlap" type="number" min="0" max="512" step="16" class="field-input" />
+                  <span class="field-unit">px</span>
+                </div>
+                <span class="field-hint">Seam margin so edge features aren't clipped; duplicates are merged.</span>
+              </div>
+            </div>
+          </details>
 
           <div class="field">
             <span class="field-hint">
@@ -340,6 +442,31 @@ function run() {
   height: 1px;
   background: var(--panel-border);
   margin: 2px 0;
+}
+
+/* Advanced disclosure */
+.advanced {
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  padding: 2px 10px;
+}
+
+.advanced > summary {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+  cursor: pointer;
+  padding: 6px 0;
+  user-select: none;
+}
+
+.advanced > summary:hover { color: var(--text); }
+
+.advanced-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 6px 0 10px;
 }
 
 /* Inputs */

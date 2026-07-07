@@ -1,7 +1,7 @@
 /* tslint:disable */
 /* eslint-disable */
 export const memory: WebAssembly.Memory;
-export const match_descriptors: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
+export const match_descriptors: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];
 export const verify_matches: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
 export const verify_matches_hf: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
 export const __wbindgen_externrefs: WebAssembly.Table;

@@ -20,10 +20,19 @@ import { createSession, tensor, resolveBackend } from './ort.js'
 
 export const SUPERPOINT_DESC_DIM = 256
 
-// One cached session per model key (default bundle, or a custom upload later).
+// One cached session per `${modelKey}:${backend}` — a modelKey can hold both a
+// WebGPU and a WASM session if we fall back mid-run (see detectSuperPoint).
 const sessions = new Map()
 // Model keys whose first (shader-compiling) inference has already run.
 const warmedUp = new Set()
+// Once the WebGPU path fails for a modelKey (OOM / device error on a run) we
+// remember the SMALLEST input (pixel count) it failed at and use CPU WASM for
+// any input that big or bigger, so we don't pay the failed-GPU cost on every
+// image. SuperPoint is fully convolutional and runs its early layers at full
+// input resolution, so a large image can exhaust GPU memory (std::bad_alloc
+// from ORT's WebGPU EP) where a smaller one fits — which is why the pin is
+// size-aware: a 10000px full-frame failure must not condemn 1024px tiles.
+const gpuFailedAtPx = new Map() // modelKey → smallest failed npix
 
 function defaultModelUrl() {
   // Bundled default under public/models/ (SP0); SP4 lets a custom upload override.
@@ -46,17 +55,31 @@ async function loadModelBytes(model, onLog) {
   return buf
 }
 
-// Build the session once per model key. The first call is the expensive one and
-// is logged in phases so a stall is attributable to a specific step.
-function getSession(model, key, onLog) {
+// Resolve which backend to *try* for this model + input size: WASM if the GPU
+// path already failed at this size or smaller (see gpuFailedAtPx), or if the
+// machine has no usable WebGPU adapter (resolveBackend gates that to Chromium +
+// adapter); else WebGPU. Returns { backend, reason } so the caller can log an
+// honest explanation instead of the generic "Chromium-only" line.
+async function chooseBackend(modelKey, npix) {
+  const failedAt = gpuFailedAtPx.get(modelKey)
+  if (failedAt !== undefined && npix >= failedAt) {
+    return { backend: 'wasm', reason: `WebGPU failed earlier at ${failedAt} px — inputs that size or larger stay on CPU` }
+  }
+  const backend = await resolveBackend()
+  return { backend, reason: backend === 'webgpu' ? '' : 'WebGPU via ORT is Chromium-only for now — use Chrome/Edge for GPU speed' }
+}
+
+// Build the session once per `${modelKey}:${backend}`. The first call is the
+// expensive one and is logged in phases so a stall is attributable to a step.
+function getSession(model, modelKey, backend, onLog, reason = '') {
+  const key = `${modelKey}:${backend}`
   if (!sessions.has(key)) {
     sessions.set(key, (async () => {
-      const backend = await resolveBackend()
       onLog?.(`SuperPoint: first run — backend ${backend}`
-        + `${backend === 'webgpu' ? '' : ' (CPU; WebGPU via ORT is Chromium-only for now — use Chrome/Edge for GPU speed)'}; fetching model…`)
+        + `${reason ? ` (CPU; ${reason})` : ''}; fetching model…`)
       const bytes = await loadModelBytes(model, onLog)
       const t = performance.now()
-      const session = await createSession(bytes, {}, onLog)
+      const session = await createSession(bytes, {}, onLog, backend)
       onLog?.(`SuperPoint: runtime ready in ${Math.round(performance.now() - t)} ms `
         + `(backend ${backend}; inputs [${session.inputNames}] → outputs [${session.outputNames}])`)
       return session
@@ -103,18 +126,40 @@ function classifyOutputs(results, outputNames) {
  */
 export async function detectSuperPoint(gray, w, h, opts = {}) {
   const { maxKeypoints = 5000, model = defaultModelUrl(), modelKey = 'default', onLog } = opts
-  const session = await getSession(model, modelKey, onLog)
+  let { backend, reason } = await chooseBackend(modelKey, w * h)
+  let session = await getSession(model, modelKey, backend, onLog, reason)
 
-  const input = await tensor('float32', gray, [1, 1, h, w])
+  // Tensor data is consumed by run(); build fresh copies so the WASM re-run after
+  // a WebGPU failure isn't handed an already-consumed buffer.
+  const makeInput = () => tensor('float32', gray.slice(), [1, 1, h, w])
   // On WebGPU the first run() compiles the graph's shaders — often the real
   // first-image cost (not createSession). Time it once so a stall here is visible.
   const first = !warmedUp.has(modelKey)
-  if (first) onLog?.(`SuperPoint: first inference on ${w}×${h} (compiling GPU shaders — one-time)…`)
+  if (first) onLog?.(`SuperPoint: first inference on ${w}×${h} on ${backend}`
+    + `${backend === 'webgpu' ? ' (compiling GPU shaders — one-time)' : ''}…`)
   const tRun = performance.now()
-  const results = await session.run({ [session.inputNames[0]]: input })
+  let results
+  try {
+    results = await session.run({ [session.inputNames[0]]: await makeInput() })
+  } catch (err) {
+    if (backend !== 'webgpu') throw err
+    // GPU path failed (OOM/std::bad_alloc at this resolution, unsupported op,
+    // device lost). Record the failure SIZE for this model — smaller inputs
+    // (e.g. tiles) may still fit — drop the bad session, and re-run this image
+    // on CPU WASM: same graph, same outputs, just slower.
+    onLog?.(`SuperPoint: WebGPU path failed at ${w}×${h} (${err?.message || err}) — `
+      + 'falling back to CPU WASM for inputs this size or larger')
+    const npix = w * h
+    const prev = gpuFailedAtPx.get(modelKey)
+    gpuFailedAtPx.set(modelKey, prev === undefined ? npix : Math.min(prev, npix))
+    sessions.delete(`${modelKey}:webgpu`)
+    backend = 'wasm'
+    session = await getSession(model, modelKey, 'wasm', onLog)
+    results = await session.run({ [session.inputNames[0]]: await makeInput() })
+  }
   if (first) {
     warmedUp.add(modelKey)
-    onLog?.(`SuperPoint: first inference done in ${Math.round(performance.now() - tRun)} ms; subsequent images reuse the compiled graph`)
+    onLog?.(`SuperPoint: first inference done in ${Math.round(performance.now() - tRun)} ms on ${backend}; subsequent images reuse the compiled graph`)
   }
   const { kp, desc, score } = classifyOutputs(results, session.outputNames)
   if (!kp || !desc) {

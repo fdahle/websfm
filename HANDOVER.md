@@ -68,6 +68,91 @@ fiducials; self-calibration (A2) + fiducials (F4) are the code-side support.
 
 ## Done log (most recent first)
 
+- **2026-07-07 · Full-app audit vs COLMAP/Metashape + docs rebuild** — genuine
+  state check of code vs docs. Findings: (1) tiled detection (TD) and
+  native-width matching were implemented but **uncommitted and undocumented**
+  (entries below); (2) `handover_gpu.md` held open work outside TODO.md,
+  violating the three-doc rule — its open items are folded into TODO.md
+  (Now ▸ G1, Backlog ▸ GPU/WASM dense perf), its verification record into the
+  entry below, and the file is marked as an archived deep-dive reference;
+  (3) EXIF GPS is parsed (`core/io/metadata.js`) but unconsumed — now TODO F10;
+  (4) stale backlog line (`utils/detection.js` already deleted by RESTRUCT)
+  removed. TODO.md rewritten with an explicit "general SfM tool" goal + gap
+  analysis: new feature tracks F7 (COLMAP model import/export), F8 (processing
+  report), F9 (cloud editing/gradual selection), F10 (EXIF-GPS priors), F11
+  (scale bars), LAS + undistorted-image export under F1 polish, video import +
+  16-bit TIFF + deploy story in Backlog. Test suite at audit time: 340/340,
+  typecheck clean (per the GPU review run, same tree).
+
+- **2026-07-07 · GPU/WASM compute review (record; plan folded into TODO)** —
+  line-by-line review of the three PatchMatch kernels + orchestration at
+  `89977ee`. **Verified**: cost math/aggregation/struct layouts/red-black
+  semantics/bilinear edge behaviour in lockstep across WGSL↔JS↔Rust; committed
+  wasm in sync with crate sources; 340/340 tests + typecheck green; fallback
+  paths correct. **Issues found** (all secondary, none invalidates current
+  defaults — fixes tracked as TODO G1): GPU silently truncates sources to 16
+  while WASM/validation use all; no texture-dimension pre-flight (>8192px
+  cameras fail opaquely); mid-run fallback retry drops the `onLog` hook; GPU
+  lacks Rust's depth-range clamps; two stale comments; no GPU error scopes.
+  Perf/quality follow-ups (half-grid dispatch, CPU/GPU overlap, on-GPU
+  pyramid, f32 WASM loop, Stage-A geometric term) → TODO Backlog. Full detail
+  survives in `handover_gpu.md` (archived reference).
+
+- **2026-07-07 · TD1–TD4 tiled detection (native-resolution keypoints)** —
+  **in working tree, uncommitted** (ship = TODO W0; browser run owed). Pure
+  helpers `core/features/tiling.js` (`planTiles` edge-flushed overlapping grid,
+  `sliceRaster`, `nmsByPosition` seam dedup, `autoTileSize` from GPU
+  `maxStorageBufferBindingSize`; unit-tested in `tiling.test.js`).
+  Orchestration in `workers/ops/detect.js` (`runTiled` wraps both SIFT and
+  SuperPoint runners; per-tile coord offset → merged set → positional NMS →
+  global top-K; adapter limit queried once; per-run tile-size resolve with a
+  conservative SuperPoint GPU cap). UI: `DetectFeaturesModal.vue` Advanced
+  disclosure per detector (Tiling Off/Auto/Manual, tile size, overlap px;
+  "Max resolution" relabelled "Detection resolution"). Off by default
+  (single-tile path == before). Kills the SuperPoint grid-density cap + the
+  WebGPU OOM at source (the 2026-07-07 per-image fallback remains as belt).
+
+- **2026-07-07 · Native-width descriptor matching (128/256; completes SP1's
+  SuperPoint→brute-force path)** — **in working tree, uncommitted** (ship =
+  TODO W0). `crates/matching` `l2_sq_early`/`match_descriptors` take a `dim`
+  param (SIMD 32-dim block loop + scalar tail; no 128→256 padding, each width
+  matched in its own space); `core/features/bruteforce.js` passes
+  `options.dim`; `useMatchesStore.matchPair` supplies `srcA.descDim ?? 128`
+  (wrong dim mis-slices into phantom rows → out-of-range indices — the
+  `reading 'x'` crash in verify, hence the loud comments). WASM rebuilt
+  (`src/wasm/matching/*` in tree).
+
+- **2026-07-07 · TIFF input support (Chrome/Firefox)** — source TIFFs were
+  invisible in every browser but Safari (WebKit decodes TIFF via system ImageIO;
+  Skia/Gecko don't), so `<img>`, the metadata dimension probe, and the worker's
+  `createImageBitmap` rasterize all failed silently. New `utils/tiff.js`
+  (`isTiff` + `tiffToDisplayBlob` via the `geotiff` dep) transcodes TIFF→PNG at
+  ingest (`addImages`) and restore (`restoreImages`) so `image.url` is always a
+  browser-native raster; every downstream consumer works unchanged. Original TIFF
+  still persists to OPFS.
+- **2026-07-07 · Detect UX: size-aware GPU pin, non-Chromium warning, hard
+  cancel** — `core/features/superpoint.js` (the WASM pin is now per input size:
+  `gpuFailedAtPx` Map replaces the all-or-nothing `pinnedWasm` set, so a
+  full-frame OOM no longer condemns small tiles; backend log states the real
+  reason), `components/modals/DetectFeaturesModal.vue` (warn-box on
+  Safari/Firefox that SuperPoint runs CPU-only + rewritten detection-resolution
+  hints explaining the tiling interaction), `composables/usePipeline.js` +
+  `stores/useImagesStore.js` (detect Cancel now hard-terminates the worker pool
+  like reconstruct; a cancelled in-flight image reverts instead of erroring).
+  Needs a manual browser run (Safari warn-box, cancel mid-SuperPoint).
+
+- **2026-07-07 · SuperPoint per-image GPU→CPU fallback** —
+  `core/features/superpoint.js`. WebGPU EP was hard-failing on large inputs
+  (`std::bad_alloc` from a full-res convolutional activation exceeding the GPU
+  buffer limit — e.g. 1200×1136), killing every image with no recovery. Mirrored
+  LightGlue's self-healing pattern: sessions keyed `${modelKey}:${backend}`,
+  `pinnedWasm` set + `chooseBackend`, and a try/catch around `session.run` that on
+  a WebGPU failure pins CPU WASM for the rest of the run and re-runs the image on
+  CPU (input tensor rebuilt per attempt so the re-run isn't handed a consumed
+  buffer). Stopgap until tiled detection (TODO.md TD) removes the OOM at source.
+  Typecheck + 330 tests green; in-browser fallback path unverified (Verification
+  policy).
+
 - **2026-07-07 · RESTRUCT · codebase reorganisation (RESTRUCTURE.md, all phases)** —
   mechanical, behaviour-preserving. `src/core/` grouped into `features/ sfm/ dense/
   products/ io/ help/` (crs/footprint/mask/types stay flat); `utils/` grab-bag

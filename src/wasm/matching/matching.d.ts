@@ -2,13 +2,14 @@
 /* eslint-disable */
 
 /**
- * Match 128-d SIFT descriptors using Lowe's ratio test.
+ * Match descriptors using Lowe's ratio test.
  *
- * `desc_a` / `desc_b`: flat `Float32Array`s — one row of 128 floats per keypoint.
- * Returns flat `[idx_a, idx_b, dist, ...]` triples as a `Float32Array`.
- * `cross_check = true` requires mutual nearest-neighbour consistency.
+ * `desc_a` / `desc_b`: flat `Float32Array`s — one row of `dim` floats per keypoint
+ * (`dim` = 128 for SIFT, 256 for SuperPoint). Returns flat `[idx_a, idx_b, dist,
+ * ...]` triples as a `Float32Array`. `cross_check = true` requires mutual
+ * nearest-neighbour consistency.
  */
-export function match_descriptors(desc_a: Float32Array, desc_b: Float32Array, ratio_threshold: number, cross_check: boolean): Float32Array;
+export function match_descriptors(desc_a: Float32Array, desc_b: Float32Array, dim: number, ratio_threshold: number, cross_check: boolean): Float32Array;
 
 /**
  * RANSAC fundamental matrix estimation on a set of putative matches.
@@ -34,7 +35,7 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
-    readonly match_descriptors: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
+    readonly match_descriptors: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];
     readonly verify_matches: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
     readonly verify_matches_hf: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
     readonly __wbindgen_externrefs: WebAssembly.Table;

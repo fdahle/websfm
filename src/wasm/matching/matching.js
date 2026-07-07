@@ -1,23 +1,25 @@
 /* @ts-self-types="./matching.d.ts" */
 
 /**
- * Match 128-d SIFT descriptors using Lowe's ratio test.
+ * Match descriptors using Lowe's ratio test.
  *
- * `desc_a` / `desc_b`: flat `Float32Array`s — one row of 128 floats per keypoint.
- * Returns flat `[idx_a, idx_b, dist, ...]` triples as a `Float32Array`.
- * `cross_check = true` requires mutual nearest-neighbour consistency.
+ * `desc_a` / `desc_b`: flat `Float32Array`s — one row of `dim` floats per keypoint
+ * (`dim` = 128 for SIFT, 256 for SuperPoint). Returns flat `[idx_a, idx_b, dist,
+ * ...]` triples as a `Float32Array`. `cross_check = true` requires mutual
+ * nearest-neighbour consistency.
  * @param {Float32Array} desc_a
  * @param {Float32Array} desc_b
+ * @param {number} dim
  * @param {number} ratio_threshold
  * @param {boolean} cross_check
  * @returns {Float32Array}
  */
-export function match_descriptors(desc_a, desc_b, ratio_threshold, cross_check) {
+export function match_descriptors(desc_a, desc_b, dim, ratio_threshold, cross_check) {
     const ptr0 = passArrayF32ToWasm0(desc_a, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
     const ptr1 = passArrayF32ToWasm0(desc_b, wasm.__wbindgen_malloc);
     const len1 = WASM_VECTOR_LEN;
-    const ret = wasm.match_descriptors(ptr0, len0, ptr1, len1, ratio_threshold, cross_check);
+    const ret = wasm.match_descriptors(ptr0, len0, ptr1, len1, dim, ratio_threshold, cross_check);
     var v3 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
     wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
     return v3;

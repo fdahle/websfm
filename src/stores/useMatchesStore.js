@@ -115,6 +115,10 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
         const res = await matchDescriptors(descA, descB, {
           ratioThreshold: settings.ratioThreshold ?? 0.75,
           crossCheck: settings.crossCheck ?? false,
+          // Descriptor width must match the detector: 128 (SIFT) vs 256 (SuperPoint).
+          // The crate slices the flat buffer by `dim`; a wrong dim yields phantom
+          // rows and out-of-range match indices → the `reading 'x'` crash in verify.
+          dim: srcA.descDim ?? 128,
         })
         raw = res.matches
       }

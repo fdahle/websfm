@@ -1,5 +1,6 @@
 import { detectSift } from '../../core/features/sift.js'
 import { detectSuperPoint } from '../../core/features/superpoint.js'
+import { planTiles, sliceRaster, nmsByPosition, autoTileSize } from '../../core/features/tiling.js'
 import { buildMaskLookup } from '../../core/mask.js'
 
 // Detection ops (SIFT / SuperPoint). `rasterize` (OffscreenCanvas pixel decode)
@@ -9,6 +10,13 @@ export function makeDetectOps({ rasterize }) {
   // Must match STRIDE in crates/sift/src/lib.rs: [x, y, scale, response, angle, d0..d127]
   const STRIDE = 133
   const DESC_LEN = 128
+  // GPU storage-buffer binding limit, queried once for auto tile sizing (0 once we
+  // know there's no adapter; undefined = not yet asked).
+  let gpuBindingBytes
+
+  // Detect-space px within which two merged keypoints are the same blob (seam
+  // duplicate). ~3 px matches the crate's near-duplicate suppression radius.
+  const NMS_RADIUS = 3
 
   // Percentile helper over a value array (sorted ascending in place by caller).
   function percentile(sorted, q) {
@@ -76,13 +84,96 @@ export function makeDetectOps({ rasterize }) {
     }
   }
 
+  // Query the adapter's storage-buffer binding limit once (just the adapter — no
+  // device, so we don't spin up a second WebGPU device competing with ORT's for
+  // memory). 0 when there's no adapter.
+  async function queryGpuBindingBytes() {
+    try {
+      if (typeof navigator === 'undefined' || !navigator.gpu) return 0
+      const adapter = await navigator.gpu.requestAdapter()
+      return adapter?.limits?.maxStorageBufferBindingSize ?? 0
+    } catch { return 0 }
+  }
+
+  // Resolve the working tile size for a run: an explicit `manual` size, else auto.
+  // SuperPoint runs on ORT's WebGPU EP, whose real allocation ceiling is well below
+  // the adapter's *reported* binding limit (Apple/unified-memory GPUs advertise
+  // multiple GB but OOM'd at 1200px here), so the reported limit only *lowers* the
+  // tile on constrained GPUs — the effective cap is a conservative SP_GPU_TILE_MAX
+  // that stays under that empirical failure point. SIFT is CPU, so memory isn't the
+  // constraint and it gets the larger default.
+  const SP_GPU_TILE_MAX = 1024
+  async function resolveTileSize(detector, tiling, tileSize) {
+    if (tiling === 'manual' && tileSize > 0) return tileSize
+    if (detector !== 'superpoint') return autoTileSize({ maxBindingBytes: 0 })
+    if (gpuBindingBytes === undefined) gpuBindingBytes = await queryGpuBindingBytes()
+    return autoTileSize({ maxBindingBytes: gpuBindingBytes, max: SP_GPU_TILE_MAX })
+  }
+
+  // Run the detector tile-by-tile over an already-rasterised full raster and merge
+  // into ONE feature bundle in full detect-space coords — the shared shape, so the
+  // caller's mask/colour/back-map loop consumes it unchanged. Per-tile keypoints are
+  // offset by the tile origin, seam duplicates are NMS'd away, and a global top-K by
+  // response keeps the strongest (LightGlue caps keypoints anyway, so favour the
+  // best overall rather than the union).
+  async function runTiled(raster, detector, tileSize, { contrastThreshold, maxKeypoints, overlap, onLog }) {
+    const { data, width, height } = raster
+    const tiles = planTiles(width, height, tileSize, overlap)
+    const label = detector === 'superpoint' ? 'SuperPoint' : 'SIFT'
+    onLog?.(`${label}: tiling ${width}×${height} → ${tiles.length} tile(s) @ ${tileSize}px, overlap ${overlap}px`)
+
+    const xs = [], ys = [], scales = [], resps = [], descChunks = []
+    let descLen = detector === 'superpoint' ? 256 : DESC_LEN
+    let totalMs = 0
+    for (const tile of tiles) {
+      const sub = sliceRaster(data, width, height, tile)
+      const bundle = detector === 'superpoint'
+        ? await runSuperPoint(sub, tile.w, tile.h, { maxKeypoints, onLog })
+        : await runSift(sub, tile.w, tile.h, { contrastThreshold, maxKeypoints })
+      descLen = bundle.descLen
+      totalMs += bundle.ms
+      for (let i = 0; i < bundle.count; i++) {
+        const f = bundle.at(i)
+        xs.push(f.x + tile.x); ys.push(f.y + tile.y)
+        scales.push(f.scale); resps.push(f.response)
+        descChunks.push(bundle.desc(i).slice()) // detach from the tile bundle's buffer
+      }
+    }
+
+    const rawFound = xs.length
+    const items = xs.map((x, i) => ({ x, y: ys[i], response: resps[i] }))
+    let keep = nmsByPosition(items, NMS_RADIUS) // strongest-first, seam dupes gone
+    const afterNms = keep.length
+    if (maxKeypoints > 0 && keep.length > maxKeypoints) keep = keep.slice(0, maxKeypoints)
+
+    const keptResp = keep.map((i) => resps[i]).sort((a, b) => a - b)
+    const diag = {
+      tiles: tiles.length, tileSize, overlap,
+      rawFound, suppressed: rawFound - afterNms,
+      capHit: maxKeypoints > 0 && afterNms > keep.length,
+      minResponse: keep.length ? resps[keep[keep.length - 1]] : 0,
+      respP50: percentile(keptResp, 0.5), respP95: percentile(keptResp, 0.95),
+      scoreP50: percentile(keptResp, 0.5), scoreP95: percentile(keptResp, 0.95),
+    }
+    return {
+      descLen, ms: totalMs, count: keep.length,
+      at: (i) => ({ x: xs[keep[i]], y: ys[keep[i]], scale: scales[keep[i]], response: resps[keep[i]] }),
+      desc: (i) => descChunks[keep[i]],
+      diag,
+    }
+  }
+
   // Detect keypoints + descriptors for one image. Coords map back to original-image
   // pixels; descriptors return as a transferable Float32Array (N×descDim, row-major).
   // The detector (SIFT or SuperPoint) only produces the raw feature bundle — the
   // mask filter, colour sampling, back-map to original px, and trim are shared here.
   async function detect([url, options = {}], { emit } = {}) {
-    const { detector = 'sift', maxDim = 1200, contrastThreshold = 0.01, maxKeypoints = 5000, mask = null } = options
-    const { data, width, height, scale, natW, natH } = await rasterize(url, maxDim)
+    const {
+      detector = 'sift', maxDim = 1200, contrastThreshold = 0.01, maxKeypoints = 5000, mask = null,
+      tiling = 'off', tileSize = 0, overlap = 64,
+    } = options
+    const raster = await rasterize(url, maxDim)
+    const { data, width, height, scale, natW, natH } = raster
 
     // Masked regions are excluded: keypoints landing on a masked pixel are dropped.
     const maskLut = mask ? await buildMaskLookup(mask, width, height) : null
@@ -90,9 +181,17 @@ export function makeDetectOps({ rasterize }) {
     // Learned detectors stream init/backend lines (first-run runtime load is slow)
     // so the UI shows progress instead of a silent stall.
     const onLog = emit ? (msg) => emit('log', [msg]) : undefined
-    const feats = detector === 'superpoint'
-      ? await runSuperPoint(data, width, height, { maxKeypoints, onLog })
-      : await runSift(data, width, height, { contrastThreshold, maxKeypoints })
+
+    // Tiling kicks in only when it'd actually split — a raster ≤ tile size runs the
+    // plain single-pass path (identical to the pre-tiling behaviour).
+    const resolvedTile = tiling !== 'off' ? await resolveTileSize(detector, tiling, tileSize) : 0
+    const tilingActive = tiling !== 'off' && (width > resolvedTile || height > resolvedTile)
+
+    const feats = tilingActive
+      ? await runTiled(raster, detector, resolvedTile, { contrastThreshold, maxKeypoints, overlap, onLog })
+      : detector === 'superpoint'
+        ? await runSuperPoint(data, width, height, { maxKeypoints, onLog })
+        : await runSift(data, width, height, { contrastThreshold, maxKeypoints })
 
     const keypoints = []
     // Upper bound; the descriptor buffer is trimmed to the kept count below.

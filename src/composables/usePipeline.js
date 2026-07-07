@@ -43,7 +43,11 @@ export function usePipeline({ images, detectAll, matchAll, onImageDetected, reco
       ? images.value
       : images.value.filter((img) => img.kpStatus !== 'done')
     if (pending.length === 0) return
-    openProgress('Detecting Features', pending.length)
+    // Detection polls `aborted` between images, but ONE image can be a long
+    // worker call (SuperPoint on CPU WASM, or a tiled native-res run), so Cancel
+    // also hard-terminates the pool — the in-flight detect rejects, detectOne
+    // reverts that image, and the batch loop exits on the aborted flag.
+    openProgress('Detecting Features', pending.length, () => terminateAll('detection cancelled'))
     await detectAll(settings, onImageDetected, (done, total, name) => {
       progressCurrent.value = done
       progressTotal.value   = total

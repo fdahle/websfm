@@ -1,31 +1,33 @@
 use wasm_bindgen::prelude::*;
 
-const DESC: usize = 128;
-
 // ─── Descriptor matching ──────────────────────────────────────────────────────
 
-// Squared-L2 distance between two 128-d descriptors, exiting early once the
-// partial sum already exceeds `limit` (safe for the ratio test, where `limit` is
-// the current second-best). The brute-force NN scan over every pair of
-// descriptors is the matcher's hot loop, so this is the function to vectorise.
+// Squared-L2 distance between two descriptor rows (`a`/`b` are each exactly `dim`
+// floats), exiting early once the partial sum already exceeds `limit` (safe for
+// the ratio test, where `limit` is the current second-best). The brute-force NN
+// scan over every pair of descriptors is the matcher's hot loop, so this is the
+// function to vectorise. `dim` is the descriptor width — 128 for SIFT, 256 for
+// SuperPoint; both are multiples of 32 so the SIMD block loop covers them fully.
 
-// SIMD path: 128 dims = 4 blocks of 32 (8× f32x4). Accumulate squared diffs in a
+// SIMD path: process 32-dim blocks (8× f32x4). Accumulate squared diffs in a
 // vector, fold to scalar after each block, and bail when the running distance
-// crosses `limit`. Four early-exit checkpoints instead of the scalar path's
-// per-element check — far fewer instructions per element, at the cost of letting
-// a doomed candidate run up to 31 extra dims before bailing. Summation order
-// differs from the scalar path, so distances can differ by float rounding; that
-// only matters for borderline ratio-test ties, which RANSAC then re-filters.
+// crosses `limit`. One early-exit checkpoint per 32 dims instead of the scalar
+// path's per-element check — far fewer instructions per element, at the cost of
+// letting a doomed candidate run up to 31 extra dims before bailing. A `dim` that
+// isn't a multiple of 32 has its tail handled scalar. Summation order differs
+// from the scalar path, so distances can differ by float rounding; that only
+// matters for borderline ratio-test ties, which RANSAC then re-filters.
 #[cfg(target_feature = "simd128")]
-fn l2_sq_early(a: &[f32], b: &[f32], limit: f32) -> f32 {
+fn l2_sq_early(a: &[f32], b: &[f32], limit: f32, dim: usize) -> f32 {
     use core::arch::wasm32::*;
     let mut d = 0.0f32;
-    // SAFETY: callers always pass full 128-float descriptor rows; wasm v128 loads
-    // are unaligned-safe (alignment is only a hint in the wasm spec).
+    let blocks = dim - dim % 32; // full 32-dim blocks; scalar tail handles the rest
+    // SAFETY: `a`/`b` are `dim`-float rows and we only v128_load within `blocks`
+    // (≤ dim); wasm v128 loads are unaligned-safe (alignment is a hint only).
     unsafe {
         let (pa, pb) = (a.as_ptr(), b.as_ptr());
         let mut k = 0usize;
-        while k < DESC {
+        while k < blocks {
             let mut acc = f32x4_splat(0.0);
             let block_end = k + 32;
             while k < block_end {
@@ -42,15 +44,19 @@ fn l2_sq_early(a: &[f32], b: &[f32], limit: f32) -> f32 {
                 return d;
             }
         }
+        while k < dim {
+            d += (a[k] - b[k]) * (a[k] - b[k]);
+            k += 1;
+        }
     }
     d
 }
 
 // Scalar fallback for non-SIMD targets (e.g. native `cargo test`/`cargo check`).
 #[cfg(not(target_feature = "simd128"))]
-fn l2_sq_early(a: &[f32], b: &[f32], limit: f32) -> f32 {
+fn l2_sq_early(a: &[f32], b: &[f32], limit: f32, dim: usize) -> f32 {
     let mut d = 0.0f32;
-    for k in 0..DESC {
+    for k in 0..dim {
         d += (a[k] - b[k]) * (a[k] - b[k]);
         if d >= limit {
             return d;
@@ -60,12 +66,12 @@ fn l2_sq_early(a: &[f32], b: &[f32], limit: f32) -> f32 {
 }
 
 // Returns (best_idx, best_sq, second_sq) for descriptor q against database db.
-fn nn2(q: &[f32], db: &[f32], n_db: usize) -> (usize, f32, f32) {
+fn nn2(q: &[f32], db: &[f32], n_db: usize, dim: usize) -> (usize, f32, f32) {
     let mut best_i = 0;
     let mut best = f32::MAX;
     let mut second = f32::MAX;
     for j in 0..n_db {
-        let d = l2_sq_early(q, &db[j * DESC..(j + 1) * DESC], second);
+        let d = l2_sq_early(q, &db[j * dim..(j + 1) * dim], second, dim);
         if d < best {
             second = best;
             best = d;
@@ -77,20 +83,25 @@ fn nn2(q: &[f32], db: &[f32], n_db: usize) -> (usize, f32, f32) {
     (best_i, best, second)
 }
 
-/// Match 128-d SIFT descriptors using Lowe's ratio test.
+/// Match descriptors using Lowe's ratio test.
 ///
-/// `desc_a` / `desc_b`: flat `Float32Array`s — one row of 128 floats per keypoint.
-/// Returns flat `[idx_a, idx_b, dist, ...]` triples as a `Float32Array`.
-/// `cross_check = true` requires mutual nearest-neighbour consistency.
+/// `desc_a` / `desc_b`: flat `Float32Array`s — one row of `dim` floats per keypoint
+/// (`dim` = 128 for SIFT, 256 for SuperPoint). Returns flat `[idx_a, idx_b, dist,
+/// ...]` triples as a `Float32Array`. `cross_check = true` requires mutual
+/// nearest-neighbour consistency.
 #[wasm_bindgen]
 pub fn match_descriptors(
     desc_a: &[f32],
     desc_b: &[f32],
+    dim: usize,
     ratio_threshold: f32,
     cross_check: bool,
 ) -> Vec<f32> {
-    let n_a = desc_a.len() / DESC;
-    let n_b = desc_b.len() / DESC;
+    if dim == 0 {
+        return vec![];
+    }
+    let n_a = desc_a.len() / dim;
+    let n_b = desc_b.len() / dim;
     if n_a == 0 || n_b == 0 {
         return vec![];
     }
@@ -101,7 +112,7 @@ pub fn match_descriptors(
     let mut fwd_d = vec![0.0f32; n_a];
     let mut fwd_ok = vec![false; n_a];
     for i in 0..n_a {
-        let (j, d1, d2) = nn2(&desc_a[i * DESC..(i + 1) * DESC], desc_b, n_b);
+        let (j, d1, d2) = nn2(&desc_a[i * dim..(i + 1) * dim], desc_b, n_b, dim);
         if d1 < ratio_sq * d2 {
             fwd_j[i] = j;
             fwd_d[i] = d1.sqrt();
@@ -125,7 +136,7 @@ pub fn match_descriptors(
     let mut bwd_i = vec![0usize; n_b];
     let mut bwd_ok = vec![false; n_b];
     for j in 0..n_b {
-        let (i, d1, d2) = nn2(&desc_b[j * DESC..(j + 1) * DESC], desc_a, n_a);
+        let (i, d1, d2) = nn2(&desc_b[j * dim..(j + 1) * dim], desc_a, n_a, dim);
         if d1 < ratio_sq * d2 {
             bwd_i[j] = i;
             bwd_ok[j] = true;

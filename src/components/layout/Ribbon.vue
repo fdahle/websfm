@@ -96,8 +96,8 @@ const tabs = [
       {
         label: 'Products',
         commands: [
-          { id: 'gen-dem',       label: 'DEM',     icon: 'dem',   needsCloud: true },
-          { id: 'gen-ortho',     label: 'Ortho',   icon: 'ortho', needsDem: true, needsDepthMaps: true },
+          { id: 'gen-dem',       label: 'DEM',     icon: 'dem',   needsCloud: true, aerialOnly: true },
+          { id: 'gen-ortho',     label: 'Ortho',   icon: 'ortho', needsDem: true, needsDepthMaps: true, aerialOnly: true },
           { id: 'view-products', label: 'Preview', icon: 'image', needsProducts: true },
         ],
       },
@@ -156,8 +156,8 @@ const tabs = [
       {
         label: 'Products',
         commands: [
-          { id: 'export-dem',   label: 'DEM',   icon: 'dem',   needsDem: true },
-          { id: 'export-ortho', label: 'Ortho', icon: 'ortho', needsOrtho: true },
+          { id: 'export-dem',   label: 'DEM',   icon: 'dem',   needsDem: true, aerialOnly: true },
+          { id: 'export-ortho', label: 'Ortho', icon: 'ortho', needsOrtho: true, aerialOnly: true },
         ],
       },
     ],

@@ -35,7 +35,9 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
   same code run inside the worker. Grouped by pipeline stage into subfolders:
   `core/features/` (detectors `sift.js` / `superpoint.js`, matchers `bruteforce.js` /
   `lightglue.js`, shared geometric gate `verify.js` — F-RANSAC + inlierSpread — plus
-  `ort.js`, `preselect.js`), `core/sfm/`
+  `ort.js`, `preselect.js`, and `tiling.js` — pure tile-grid/seam-NMS/auto-size math
+  behind tiled detection; the per-tile detector loop lives in `workers/ops/detect.js`),
+  `core/sfm/`
   (`sfm.js` incremental SfM orchestrator, `reconstruction.js` JS↔WASM
   marshalling, `geometry.js` shared pinhole-camera helpers — cameraCenter, project*,
   triangulationAngle, scaleK, rgbaToGray — `distortion.js`, `cameraEstimated.js`),
@@ -185,6 +187,17 @@ the project CRS and are reprojected on CRS change (`handleSetCrs` in App.vue). S
 - `markRaw`/`shallowRef` for big typed arrays (keypoints, descriptors, depth planes):
   reactivity is wasteful AND a Vue Proxy can't be `postMessage`d to the worker.
 - Worker results transfer ArrayBuffers (see each op's `transfer`).
+- **`image.url` must always be a browser-native raster** (JPEG/PNG/…): the
+  viewer `<img>`, the metadata dimension probe (`new Image()`), and the worker's
+  `rasterize` (`createImageBitmap`) all decode it through the browser. TIFF is
+  the trap — only Safari/WebKit decodes it (system ImageIO); Chrome/Firefox
+  don't. `utils/tiff.js` transcodes TIFF→PNG at ingest + restore so nothing
+  downstream ever sees a TIFF; the original still lives in OPFS. Any new source
+  format the browser can't decode needs the same ingest-time transcode.
+- **Descriptor width is per-detector, never a constant**: 128 (SIFT) vs 256
+  (SuperPoint), carried as `descDim` on the feature bundle / OPFS blob and passed
+  as `dim` into `crates/matching`. A wrong dim mis-slices the flat buffer into
+  phantom rows whose indices overflow the keypoint arrays downstream.
 - OPFS JSON helpers swallow errors and return `null`/`[]` on miss — callers treat absence
   as empty.
 - `useImagesStore.sync()` rewrites the whole `project.json` and is fired from many
