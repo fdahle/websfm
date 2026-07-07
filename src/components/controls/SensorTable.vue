@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed } from 'vue'
-import { estimatedIntrinsics } from '../../utils/cameraEstimated.js'
+import { estimatedIntrinsics } from '../../core/sfm/cameraEstimated.js'
 import { resolveK } from '../../core/sfm/reconstruction.js'
 import { DISTORTION_MODELS, coeffsForModel } from '../../core/sfm/distortion.js'
 

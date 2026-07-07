@@ -7,10 +7,10 @@
 // pose, intrinsics → sensor), fall back to weak header hints, and otherwise
 // report 'ambiguous' so the caller can ask the user.
 
-import { sniffDelimiter, parseRows, guessMapping as guessGcps } from '../core/io/gcp.js'
-import { guessMapping as guessPoses } from '../core/io/pose.js'
-import { guessMapping as guessSensors } from '../core/io/sensor.js'
-import { looksLikeGeoJson, parseGeoJson } from '../core/io/geojson.js'
+import { sniffDelimiter, parseRows, guessMapping as guessGcps } from './gcp.js'
+import { guessMapping as guessPoses } from './pose.js'
+import { guessMapping as guessSensors } from './sensor.js'
+import { looksLikeGeoJson, parseGeoJson } from './geojson.js'
 
 // GCP-specific vs. image/photo-specific header tokens (the shared 'label' token
 // is deliberately excluded — it tells us nothing either way).

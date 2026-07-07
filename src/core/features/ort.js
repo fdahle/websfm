@@ -1,6 +1,6 @@
 // Shared ONNX Runtime Web bootstrap for the learned-feature backends
 // (SuperPoint detection, LightGlue matching). One place owns the runtime config
-// and the lazy-init pattern, mirroring the `initPromise` that core/features/matching.js
+// and the lazy-init pattern, mirroring the `initPromise` that core/features/bruteforce.js
 // uses for its wasm.
 //
 // Execution providers: WebGPU first, WASM fallback — ORT tries them in order per

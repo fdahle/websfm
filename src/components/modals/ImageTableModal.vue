@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed } from 'vue'
 import MetadataTable from '../controls/MetadataTable.vue'
-import { estimatedIntrinsics, estimatedCenter, estimatedAngles } from '../../utils/cameraEstimated.js'
+import { estimatedIntrinsics, estimatedCenter, estimatedAngles } from '../../core/sfm/cameraEstimated.js'
 
 // Per-image inspector with three tabs:
 //   - Metadata   : raw EXIF (incl. GPS)            — MetadataTable

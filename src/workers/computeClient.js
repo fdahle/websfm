@@ -69,7 +69,7 @@ function call(op, args, { transfer = [], onEvent, worker: pinned } = {}) {
   })
 }
 
-// ── Drop-in compute API (mirrors utils/detection.js + core/features/matching.js) ─────────
+// ── Drop-in compute API (mirrors core/features/sift.js + core/features/{bruteforce,verify}.js) ─────────
 
 export function detectKeypoints(url, options = {}, { onLog } = {}) {
   // SuperPoint/ONNX loads a heavy runtime (~26 MB wasm + model + a WebGPU device)
