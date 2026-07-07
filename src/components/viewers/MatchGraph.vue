@@ -1,11 +1,19 @@
 <script setup>
-import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 
 // Connected-Papers-style match graph: one node per image that appears in a verified
 // pair, one edge per verified pair (thickness ∝ inlier count). Hand-rolled force
-// layout on a canvas (no dependency), matching the ViewerMatch overlay style. Nodes
-// are draggable; clicking an edge selects the pair (drives the preview), double-
-// clicking an edge toggles its exclusion from reconstruction.
+// layout on a canvas (no dependency), matching the ViewerMatch overlay style.
+//
+// Node coordinates live in a fixed "world" space; a pan/zoom view transform maps
+// world → screen so the graph can be panned (drag empty space) and zoomed (wheel /
+// buttons). The layout is pre-warmed to rest *before* the first paint so it opens
+// settled rather than visibly drifting. When imported camera positions are available
+// they can drive a geographic layout (nodes placed where the photos were taken).
+//
+// Nodes are draggable; clicking an edge selects the pair (drives the preview),
+// double-clicking an edge toggles its exclusion from reconstruction. "Reset layout"
+// recomputes the default arrangement, discarding any manual drags.
 const props = defineProps({
   // From App.vue matchSummaries: { pairId, idAUuid, idBUuid, nameA, nameB,
   //   inlierCount, disabled }.
@@ -13,6 +21,9 @@ const props = defineProps({
   alignedUuids:   { type: Object, default: () => new Set() },
   hasSparse:      { type: Boolean, default: false },
   selectedPairId: { type: String, default: null },
+  // Imported camera positions keyed by uuid ({ x, y } in project CRS). When present,
+  // the geographic layout places those nodes at their real-world location.
+  nodePositions:  { type: Object, default: () => ({}) },
 })
 
 const emit = defineEmits(['select', 'toggle-disabled'])
@@ -21,38 +32,49 @@ const canvasEl  = ref(null)
 const wrapEl    = ref(null)
 const hoverText = ref(null)  // { text, x, y }
 
+// Layout mode: 'force' (spring layout) or 'geo' (imported camera positions). Only
+// meaningful when positions exist; defaults to geo when they do.
+const layoutMode  = ref('force')
+const hasPositions = computed(() => Object.keys(props.nodePositions || {}).length > 0)
+
 let ctx = null
-let nodes = []   // { uuid, name, x, y, vx, vy, aligned, deg }
+let nodes = []   // { uuid, name, x, y, vx, vy, aligned, deg, pinned }
 let edges = []   // { a, b, pairId, inlierCount, disabled, w }
 let nodeByUuid = new Map()
 let topoKey = ''  // signature of the pair set; a change forces a full re-layout
 let raf = null
-let ticks = 0
 let dragNode = null
 let dragMoved = false
+let panning = false
+let panMoved = false
+let lastPan = { x: 0, y: 0 }
 let W = 0, H = 0
+// View transform: screen = world * scale + offset.
+let scale = 1, ox = 0, oy = 0
 const DPR = () => window.devicePixelRatio || 1
+
+// ── World ⇄ screen ────────────────────────────────────────────────────────────
+const sx = (wx) => wx * scale + ox
+const sy = (wy) => wy * scale + oy
+const wxFromScreen = (x) => (x - ox) / scale
+const wyFromScreen = (y) => (y - oy) / scale
 
 // ── Build graph from summaries ─────────────────────────────────────────────────
 function build() {
   nodes = []
   edges = []
   nodeByUuid = new Map()
-  const cx = W / 2, cy = H / 2
 
   const ensureNode = (uuid, name) => {
     let idx = nodeByUuid.get(uuid)
     if (idx == null) {
       idx = nodes.length
-      // Seed on a circle so the layout unfolds cleanly rather than from a single point.
-      const a = (idx * 2.399963)   // golden-angle scatter
       nodes.push({
         uuid, name,
-        x: cx + Math.cos(a) * 120 + (Math.random() - 0.5) * 20,
-        y: cy + Math.sin(a) * 120 + (Math.random() - 0.5) * 20,
-        vx: 0, vy: 0,
+        x: 0, y: 0, vx: 0, vy: 0,
         aligned: props.alignedUuids.has(uuid),
         deg: 0,
+        pinned: false,
       })
       nodeByUuid.set(uuid, idx)
     }
@@ -74,8 +96,64 @@ function build() {
       w: 0.8 + 3.2 * (m.inlierCount / maxInliers),  // 0.8–4 px
     })
   }
-  topoKey = props.matchSummaries.map((m) => m.pairId).sort().join('|')
-  ticks = 0
+  topoKey = pairSetKey()
+  seedPositions()
+}
+
+// Assign initial node coordinates for the current layout mode. Geographic mode pins
+// nodes with a known camera position at their (y-flipped, screen-space normalised)
+// location and seeds the rest near their pinned neighbours; force mode scatters all
+// nodes on a golden-angle spiral so the spring layout unfolds cleanly.
+function seedPositions() {
+  const cx = W / 2, cy = H / 2
+  const geo = layoutMode.value === 'geo' && hasPositions.value
+
+  if (geo) {
+    let minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity
+    for (const p of nodes) {
+      const pos = props.nodePositions[p.uuid]
+      if (!pos) continue
+      minx = Math.min(minx, pos.x); maxx = Math.max(maxx, pos.x)
+      miny = Math.min(miny, pos.y); maxy = Math.max(maxy, pos.y)
+    }
+    const spanX = maxx - minx || 1, spanY = maxy - miny || 1
+    // Fit the position cloud into 80% of the world box (fitView zooms it further).
+    const s = Math.min((W * 0.8) / spanX, (H * 0.8) / spanY)
+    for (const p of nodes) {
+      const pos = props.nodePositions[p.uuid]
+      if (pos) {
+        // Flip northing so north is up (canvas y grows downward).
+        p.x = (pos.x - minx) * s + W * 0.1
+        p.y = (maxy - pos.y) * s + H * 0.1
+        p.pinned = true
+      } else {
+        p.pinned = false
+      }
+      p.vx = 0; p.vy = 0
+    }
+    // Seed unpinned nodes near the centroid of their pinned neighbours.
+    const acc = nodes.map(() => ({ x: 0, y: 0, n: 0 }))
+    for (const e of edges) {
+      const a = nodes[e.a], b = nodes[e.b]
+      if (a.pinned && !b.pinned) { acc[e.b].x += a.x; acc[e.b].y += a.y; acc[e.b].n++ }
+      if (b.pinned && !a.pinned) { acc[e.a].x += b.x; acc[e.a].y += b.y; acc[e.a].n++ }
+    }
+    nodes.forEach((p, i) => {
+      if (p.pinned) return
+      const s2 = acc[i]
+      if (s2.n) { p.x = s2.x / s2.n + (Math.random() - 0.5) * 30; p.y = s2.y / s2.n + (Math.random() - 0.5) * 30 }
+      else { p.x = cx + (Math.random() - 0.5) * 60; p.y = cy + (Math.random() - 0.5) * 60 }
+    })
+    return
+  }
+
+  nodes.forEach((p, idx) => {
+    const a = idx * 2.399963   // golden-angle scatter
+    p.x = cx + Math.cos(a) * 120 + (Math.random() - 0.5) * 20
+    p.y = cy + Math.sin(a) * 120 + (Math.random() - 0.5) * 20
+    p.vx = 0; p.vy = 0
+    p.pinned = false
+  })
 }
 
 // Signature of the pair set — unchanged when only per-pair flags (disabled) toggle.
@@ -94,20 +172,29 @@ function patch() {
   for (const p of nodes) p.aligned = props.alignedUuids.has(p.uuid)
 }
 
-// Rebuild only when the topology changed; otherwise patch in place.
+// Rebuild + relayout when the topology changed; otherwise patch in place.
 function sync() {
   if (pairSetKey() === topoKey) patch()
-  else build()
+  else applyLayout()
+}
+
+// Full (re)layout: build the graph, settle it to rest, then fit it to the viewport.
+// Used on first mount, topology change, mode switch, and "Reset layout".
+function applyLayout() {
+  build()
+  relax()
+  fitView()
 }
 
 // ── Force simulation ────────────────────────────────────────────────────────────
-const REPULSE = 5200      // node-node repulsion strength
+const REPULSE = 6400      // node-node repulsion strength (raised → less overlap)
 const SPRING  = 0.008     // edge spring constant
-const REST    = 90        // spring rest length
+const REST    = 100       // spring rest length
 const CENTER  = 0.002     // pull toward centre
 const DAMP    = 0.86      // velocity damping
 const MAX_TICKS = 480
 
+// One integration step; returns total kinetic energy so relax() can detect rest.
 function step() {
   const n = nodes.length
   for (let i = 0; i < n; i++) {
@@ -134,22 +221,74 @@ function step() {
     b.vx -= fx; b.vy -= fy
   }
   const cx = W / 2, cy = H / 2
+  let ke = 0
   for (const p of nodes) {
-    if (p === dragNode) { p.vx = 0; p.vy = 0; continue }
+    // Pinned (geo) nodes and the one being dragged stay put.
+    if (p === dragNode || p.pinned) { p.vx = 0; p.vy = 0; continue }
     p.vx += (cx - p.x) * CENTER
     p.vy += (cy - p.y) * CENTER
     p.vx *= DAMP; p.vy *= DAMP
     p.x += p.vx; p.y += p.vy
+    ke += p.vx * p.vx + p.vy * p.vy
+  }
+  return ke
+}
+
+// Settle the layout to rest synchronously, so the graph appears static on open
+// instead of animating into place. Early-exits once kinetic energy is negligible;
+// caps iterations (and drops the cap for large graphs, where step() is O(n²)).
+function relax() {
+  if (!nodes.length) return
+  const cap = nodes.length > 200 ? 200 : MAX_TICKS
+  for (let i = 0; i < cap; i++) {
+    const ke = step()
+    if (i > 30 && ke < 0.05 * nodes.length) break
   }
 }
 
+// ── View fitting ─────────────────────────────────────────────────────────────────
+function nodeBounds() {
+  let minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity
+  for (const p of nodes) {
+    minx = Math.min(minx, p.x); maxx = Math.max(maxx, p.x)
+    miny = Math.min(miny, p.y); maxy = Math.max(maxy, p.y)
+  }
+  return { minx, miny, maxx, maxy }
+}
+
+// Zoom/pan so the whole graph fits the viewport with padding.
+function fitView() {
+  if (!nodes.length) { scale = 1; ox = 0; oy = 0; return }
+  const { minx, miny, maxx, maxy } = nodeBounds()
+  const bw = maxx - minx || 1, bh = maxy - miny || 1
+  const pad = 48
+  scale = Math.max(0.05, Math.min((W - pad * 2) / bw, (H - pad * 2) / bh, 3))
+  ox = (W - bw * scale) / 2 - minx * scale
+  oy = (H - bh * scale) / 2 - miny * scale
+}
+
+// Zoom about a screen point, keeping that point fixed under the cursor.
+function zoomAt(x, y, factor) {
+  const ns = Math.max(0.05, Math.min(scale * factor, 6))
+  const wx = wxFromScreen(x), wy = wyFromScreen(y)
+  scale = ns
+  ox = x - wx * scale
+  oy = y - wy * scale
+}
+
+function onWheel(e) {
+  const { x, y } = pos(e)
+  zoomAt(x, y, Math.exp(-e.deltaY * 0.0015))
+}
+
+function zoomButton(factor) { zoomAt(W / 2, H / 2, factor) }
+
+// ── Rendering ───────────────────────────────────────────────────────────────────
 function loop() {
-  if (ticks < MAX_TICKS && !dragNode) { step(); ticks++ }
   draw()
   raf = requestAnimationFrame(loop)
 }
 
-// ── Rendering ───────────────────────────────────────────────────────────────────
 function draw() {
   if (!ctx) return
   const dpr = DPR()
@@ -161,8 +300,8 @@ function draw() {
     const a = nodes[e.a], b = nodes[e.b]
     const sel = e.pairId === props.selectedPairId
     ctx.beginPath()
-    ctx.moveTo(a.x, a.y)
-    ctx.lineTo(b.x, b.y)
+    ctx.moveTo(sx(a.x), sy(a.y))
+    ctx.lineTo(sx(b.x), sy(b.y))
     ctx.lineWidth = sel ? e.w + 1.5 : e.w
     if (e.disabled) {
       ctx.strokeStyle = sel ? 'rgba(240,80,80,0.9)' : 'rgba(150,150,150,0.4)'
@@ -178,7 +317,7 @@ function draw() {
   // Nodes
   for (const p of nodes) {
     ctx.beginPath()
-    ctx.arc(p.x, p.y, 7, 0, Math.PI * 2)
+    ctx.arc(sx(p.x), sy(p.y), 7, 0, Math.PI * 2)
     if (props.hasSparse && !p.aligned) {
       ctx.fillStyle = 'rgba(120,130,140,0.55)'  // unaligned: faded grey
     } else {
@@ -191,7 +330,7 @@ function draw() {
   }
 }
 
-// ── Hit testing ─────────────────────────────────────────────────────────────────
+// ── Hit testing (screen space) ────────────────────────────────────────────────────
 function pos(e) {
   const r = canvasEl.value.getBoundingClientRect()
   return { x: e.clientX - r.left, y: e.clientY - r.top }
@@ -200,7 +339,7 @@ function pos(e) {
 function nodeAt(x, y) {
   for (let i = nodes.length - 1; i >= 0; i--) {
     const p = nodes[i]
-    if ((x - p.x) ** 2 + (y - p.y) ** 2 <= 100) return p
+    if ((x - sx(p.x)) ** 2 + (y - sy(p.y)) ** 2 <= 100) return p
   }
   return null
 }
@@ -219,7 +358,7 @@ function edgeAt(x, y) {
   let best = null, bestD = 6
   for (const e of edges) {
     const a = nodes[e.a], b = nodes[e.b]
-    const d = distToSeg(x, y, a.x, a.y, b.x, b.y)
+    const d = distToSeg(x, y, sx(a.x), sy(a.y), sx(b.x), sy(b.y))
     if (d < bestD) { bestD = d; best = e }
   }
   return best
@@ -229,15 +368,25 @@ function edgeAt(x, y) {
 function onDown(e) {
   const { x, y } = pos(e)
   const node = nodeAt(x, y)
-  if (node) { dragNode = node; dragMoved = false }
+  if (node) { dragNode = node; dragMoved = false; return }
+  // Empty space → pan.
+  panning = true; panMoved = false; lastPan = { x, y }
 }
 
 function onMove(e) {
   const { x, y } = pos(e)
   if (dragNode) {
-    dragNode.x = x; dragNode.y = y
+    dragNode.x = wxFromScreen(x); dragNode.y = wyFromScreen(y)
     dragNode.vx = 0; dragNode.vy = 0
     dragMoved = true
+    return
+  }
+  if (panning) {
+    ox += x - lastPan.x; oy += y - lastPan.y
+    lastPan = { x, y }
+    panMoved = true
+    hoverText.value = null
+    canvasEl.value.style.cursor = 'grabbing'
     return
   }
   // Hover label for nodes and edges.
@@ -260,9 +409,13 @@ function onMove(e) {
 
 function onUp(e) {
   if (dragNode) {
-    // A click without drag on a node isn't a selection target; just release.
     dragNode = null
     if (dragMoved) return
+  }
+  if (panning) {
+    panning = false
+    canvasEl.value.style.cursor = 'default'
+    if (panMoved) return   // a pan gesture, not a click
   }
   const { x, y } = pos(e)
   if (nodeAt(x, y)) return
@@ -276,25 +429,41 @@ function onDblClick(e) {
   if (edge) emit('toggle-disabled', edge.pairId)
 }
 
-function onLeave() { dragNode = null; hoverText.value = null }
+function onLeave() {
+  dragNode = null; panning = false; hoverText.value = null
+  if (canvasEl.value) canvasEl.value.style.cursor = 'default'
+}
+
+// ── Toolbar actions ───────────────────────────────────────────────────────────────
+function setMode(mode) {
+  if (layoutMode.value === mode) return
+  layoutMode.value = mode
+  applyLayout()
+}
+
+function resetLayout() { applyLayout() }
 
 // ── Sizing / lifecycle ──────────────────────────────────────────────────────────
 function resize() {
   const el = wrapEl.value
   if (!el || !canvasEl.value) return
+  const prevW = W, prevH = H
   W = el.clientWidth; H = el.clientHeight
   const dpr = DPR()
   canvasEl.value.width = Math.round(W * dpr)
   canvasEl.value.height = Math.round(H * dpr)
   canvasEl.value.style.width = `${W}px`
   canvasEl.value.style.height = `${H}px`
+  // Keep the graph framed after the first real size is known.
+  if (!prevW && !prevH && nodes.length) fitView()
 }
 
 let ro = null
 onMounted(() => {
   ctx = canvasEl.value.getContext('2d')
   resize()
-  build()
+  if (hasPositions.value) layoutMode.value = 'geo'
+  applyLayout()
   ro = new ResizeObserver(() => resize())
   ro.observe(wrapEl.value)
   loop()
@@ -309,6 +478,11 @@ onBeforeUnmount(() => {
 // when only flags (disabled/aligned) toggled.
 watch(() => props.matchSummaries, () => sync(), { deep: true })
 watch(() => props.alignedUuids, () => patch())
+// Positions may arrive after the modal opens (poses import / restore); adopt a geo
+// layout the first time they show up.
+watch(hasPositions, (has) => {
+  if (has && layoutMode.value === 'force') { layoutMode.value = 'geo'; applyLayout() }
+})
 </script>
 
 <template>
@@ -321,12 +495,28 @@ watch(() => props.alignedUuids, () => patch())
       @mouseup="onUp"
       @mouseleave="onLeave"
       @dblclick="onDblClick"
+      @wheel.prevent="onWheel"
     />
+
+    <!-- Toolbar: layout mode, reset, zoom -->
+    <div class="graph-toolbar">
+      <div v-if="hasPositions" class="mode-toggle" title="Force = spring layout · Geographic = imported camera positions">
+        <button class="mode-btn" :class="{ active: layoutMode === 'force' }" @click="setMode('force')">Force</button>
+        <button class="mode-btn" :class="{ active: layoutMode === 'geo' }" @click="setMode('geo')">Geographic</button>
+      </div>
+      <button class="tool-btn" title="Reset layout (discard manual moves)" @click="resetLayout">Reset layout</button>
+      <div class="zoom-group">
+        <button class="tool-btn icon" title="Zoom in" @click="zoomButton(1.25)">+</button>
+        <button class="tool-btn icon" title="Zoom out" @click="zoomButton(0.8)">−</button>
+        <button class="tool-btn icon" title="Fit to view" @click="fitView">⤢</button>
+      </div>
+    </div>
+
     <div v-if="!matchSummaries.length" class="graph-empty">No verified pairs to graph.</div>
     <div v-if="hoverText" class="graph-hover" :style="{ left: hoverText.x + 12 + 'px', top: hoverText.y + 12 + 'px' }">
       {{ hoverText.text }}
     </div>
-    <div class="graph-hint">Click an edge to preview · double-click to exclude/restore · drag nodes to arrange</div>
+    <div class="graph-hint">Click edge to preview · double-click to exclude/restore · drag node to move · drag background to pan · scroll to zoom</div>
   </div>
 </template>
 
@@ -349,6 +539,61 @@ watch(() => props.alignedUuids, () => patch())
   font-size: 13px;
   color: var(--text-dim);
   font-style: italic;
+}
+
+/* Top-left controls */
+.graph-toolbar {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  z-index: 3;
+}
+
+.mode-toggle {
+  display: flex;
+  border: 1px solid var(--panel-border);
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+.mode-btn {
+  background: var(--panel);
+  border: none;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 11px;
+  padding: 3px 9px;
+  cursor: pointer;
+}
+.mode-btn:hover { background: var(--hover-bg); color: var(--text); }
+.mode-btn.active { background: var(--accent); color: #fff; }
+
+.tool-btn {
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 5px;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 11px;
+  padding: 3px 9px;
+  cursor: pointer;
+}
+.tool-btn:hover { background: var(--hover-bg); color: var(--text); }
+
+.zoom-group {
+  display: flex;
+  gap: 4px;
+}
+
+.tool-btn.icon {
+  width: 24px;
+  padding: 3px 0;
+  text-align: center;
+  font-size: 13px;
+  line-height: 1;
 }
 
 .graph-hover {

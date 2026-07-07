@@ -3,7 +3,7 @@
 // Parsing is a pure function (no Vue/DOM) so it stays unit-testable and the
 // loader can run in the worker or main thread alike; rendering (markdown +
 // KaTeX + auto-linking) only ever runs on the main thread in the glossary
-// modal. See src/help/reprojection-error.md for the schema.
+// modal. See src/help/core-sfm/reprojection-error.md for the schema.
 import { Marked } from 'marked'
 import markedKatex from 'marked-katex-extension'
 
@@ -53,6 +53,11 @@ const markdown = new Marked({
       const text = this.parser.parseInline(tokens)
       if (href && href.startsWith('help:')) {
         return `<a href="#" class="glossary-link" data-help-id="${href.slice(5)}">${text}</a>`
+      }
+      // `guide:op-id` links open (or focus) an operation tab in the Guide modal.
+      // Guide docs reuse this renderer, so both schemes resolve from either place.
+      if (href && href.startsWith('guide:')) {
+        return `<a href="#" class="guide-link" data-guide-id="${href.slice(6)}">${text}</a>`
       }
       return `<a href="${href}" target="_blank" rel="noopener">${text}</a>`
     },
@@ -160,7 +165,9 @@ let entriesCache = null
 
 function loadEntries() {
   if (entriesCache) return entriesCache
-  const modules = import.meta.glob('/src/help/*.md', { eager: true, query: '?raw', import: 'default' })
+  // Recursive: entries are organised into topic sub-folders (algorithms/,
+  // core-sfm/, …). Folders are purely for authoring; the flat `id` is the key.
+  const modules = import.meta.glob('/src/help/**/*.md', { eager: true, query: '?raw', import: 'default' })
   const entries = new Map()
   for (const [path, raw] of Object.entries(modules)) {
     // One malformed file must not break every glossary term in the app: warn

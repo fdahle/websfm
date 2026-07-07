@@ -1,4 +1,4 @@
-import { ref, shallowRef, computed } from 'vue'
+import { ref, shallowRef, computed, markRaw } from 'vue'
 import { defineStore, storeToRefs } from 'pinia'
 import {
   reconstruct as workerReconstruct,
@@ -117,19 +117,61 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
   // Persist only when a project is open and OPFS is usable (see useProjectsStore).
   const isPersisting = () => projects.isPersisting
 
-  // Serialise every cloud to the on-disk shape (Maps → entry arrays).
+  // Pack one cloud into the on-disk shape: small metadata (cameras stay JSON —
+  // ~hundreds at most) plus binary buffers for the heavy per-point data. Colour is
+  // whole-cloud (the colouring pass runs over every point), so a single hasColor
+  // flag governs the col buffer. View-tracks use a CSR layout: vcount[i] tracks for
+  // point i, flattened into vcam/vkp; camera uuids are dictionary-encoded via
+  // viewUuids (seeded from the cloud's cameras, extended for any stray uuid).
+  function serializeCloud(c) {
+    const pts = c.points
+    const N = pts.length
+    const pos = new Float64Array(N * 3)
+    const hasColor = pts.some((p) => p.color)
+    const col = hasColor ? new Uint8Array(N * 3) : null
+
+    const camIndex = new Map()
+    const viewUuids = []
+    for (const uuid of c.cameras.keys()) { camIndex.set(uuid, viewUuids.length); viewUuids.push(uuid) }
+
+    const vcount = new Uint32Array(N)
+    let totalViews = 0
+    for (const p of pts) totalViews += p.views ? p.views.size : 0
+    const vcam = new Uint32Array(totalViews)
+    const vkp = new Uint32Array(totalViews)
+
+    let vi = 0
+    for (let i = 0; i < N; i++) {
+      const p = pts[i]
+      pos[i * 3] = p.x; pos[i * 3 + 1] = p.y; pos[i * 3 + 2] = p.z
+      if (col && p.color) { col[i * 3] = p.color[0]; col[i * 3 + 1] = p.color[1]; col[i * 3 + 2] = p.color[2] }
+      if (p.views && p.views.size) {
+        vcount[i] = p.views.size
+        for (const [uuid, kp] of p.views) {
+          let ci = camIndex.get(uuid)
+          if (ci === undefined) { ci = viewUuids.length; camIndex.set(uuid, ci); viewUuids.push(uuid) }
+          vcam[vi] = ci; vkp[vi] = kp; vi++
+        }
+      }
+    }
+    return {
+      id: c.id, name: c.name, kind: c.kind, createdAt: c.createdAt,
+      cameras: [...c.cameras.entries()].map(([uuid, cam]) => ({ uuid, ...cam })),
+      pointCount: N, hasColor, viewUuids,
+      buffers: {
+        pos: pos.buffer,
+        col: col ? col.buffer : null,
+        vcount: vcount.buffer,
+        vcam: vcam.buffer,
+        vkp: vkp.buffer,
+      },
+    }
+  }
+
+  // Serialise every cloud to the on-disk shape (metadata + binary buffers).
   function serialize() {
     return {
-      clouds: clouds.value.map((c) => ({
-        id: c.id, name: c.name, kind: c.kind, createdAt: c.createdAt,
-        cameras: [...c.cameras.entries()].map(([uuid, cam]) => ({ uuid, ...cam })),
-        // Persist view-tracks ([uuid, kpIdx] pairs) so dense MVS can run on a
-        // restored project without rebuilding the sparse model. Dense clouds
-        // carry no tracks; their points serialize the empty array.
-        points: c.points.map(({ x, y, z, color, views }) => ({
-          x, y, z, color, views: views ? [...views.entries()] : [],
-        })),
-      })),
+      clouds: clouds.value.map(serializeCloud),
       // Small + reusable across sessions; the DEM/ortho rasters themselves are
       // recomputable and stay out of the persisted doc.
       georef: georef.value,
@@ -155,8 +197,9 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
       name: prev?.name ?? 'Sparse cloud',
       kind: 'sparse',
       createdAt: Date.now(),
-      cameras,
-      points,
+      // markRaw: keep the big point/camera data out of Vue's reactivity (see restore).
+      cameras: markRaw(cameras),
+      points: markRaw(points),
     }
     if (idx >= 0) clouds.value.splice(idx, 1, cloud)
     else clouds.value.push(cloud)
@@ -174,8 +217,8 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
       name: prev?.name ?? 'Dense cloud',
       kind: 'dense',
       createdAt: Date.now(),
-      cameras: new Map(),
-      points,
+      cameras: markRaw(new Map()),
+      points: markRaw(points),
     }
     if (idx >= 0) clouds.value.splice(idx, 1, cloud)
     else clouds.value.push(cloud)
@@ -217,6 +260,12 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
       // to the worker ("object can not be cloned").
       const imgByUuid = new Map(images.value.map((im) => [im.uuid, im]))
       const sensorById = new Map(sensors.value.map((s) => [s.id, s]))
+      // D2: radial k1 the sparse run self-calibrated per sensor (folded into the
+      // keypoints there). Add it to that sensor's undistortion so the dense rasters
+      // land in the same pinhole frame as the sparse cloud — dense's camera K is the
+      // BA-refined K the fold used, so applying k1 here reproduces it. Empty ⇒ no-op.
+      const selfCalBySensor = new Map(
+        (summary.value?.selfCalDistortion ?? []).map((d) => [d.sensorId, d.k1]))
       const inputImages = []
       for (const [uuid, cam] of cloud.cameras) {
         const im = imgByUuid.get(uuid)
@@ -224,7 +273,14 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
         // Lens distortion for this image's sensor — the worker undistorts the raster
         // so depth maps / fusion / DEM / ortho all stay pinhole (matches sparse).
         const s = im.sensorId ? sensorById.get(im.sensorId) : null
-        const dist = s ? distortionOf(s) : null
+        let dist = s ? distortionOf(s) : null
+        const selfK1 = im.sensorId ? (selfCalBySensor.get(im.sensorId) || 0) : 0
+        if (selfK1) {
+          dist = {
+            k1: (dist?.k1 || 0) + selfK1, k2: dist?.k2 || 0, k3: dist?.k3 || 0,
+            p1: dist?.p1 || 0, p2: dist?.p2 || 0,
+          }
+        }
         inputImages.push({
           uuid, name: im.name, url: im.url,
           // Per-image mask (if any) so masked regions are excluded from the dense cloud.
@@ -234,6 +290,12 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
           K: { fx: cam.K.fx, fy: cam.K.fy, cx: cam.K.cx, cy: cam.K.cy },
           dist,
         })
+      }
+      if (selfCalBySensor.size) {
+        const parts = [...selfCalBySensor].map(([id, k1]) =>
+          `${sensorById.get(id)?.label ?? id.slice(0, 6)} k1 ${k1.toFixed(5)}`)
+        log(`Dense: applying self-calibrated distortion from the sparse run — ${parts.join(', ')}`,
+          'info', 'Dense')
       }
       const points = cloud.points.map((p) => ({
         x: p.x, y: p.y, z: p.z,
@@ -527,6 +589,63 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     }
   }
 
+  // Rebuild one cloud from version-2 metadata + binary buffers (inverse of
+  // serializeCloud). markRaw: point clouds are large and only ever replaced
+  // wholesale, never mutated per-point — deep reactivity freezes render/restore.
+  function deserializeCloud(c) {
+    const N = c.pointCount ?? 0
+    const b = c.buffers || {}
+    const pos = b.pos ? new Float64Array(b.pos) : new Float64Array(0)
+    const col = c.hasColor && b.col ? new Uint8Array(b.col) : null
+    const vcount = b.vcount ? new Uint32Array(b.vcount) : null
+    const vcam = b.vcam ? new Uint32Array(b.vcam) : null
+    const vkp = b.vkp ? new Uint32Array(b.vkp) : null
+    const viewUuids = c.viewUuids || []
+
+    const cameras = new Map()
+    for (const cam of c.cameras || []) { const { uuid, R, t, K } = cam; cameras.set(uuid, { R, t, K }) }
+
+    const points = new Array(N)
+    let vi = 0
+    for (let i = 0; i < N; i++) {
+      const views = new Map()
+      if (vcount && vcam && vkp) {
+        const k = vcount[i]
+        for (let j = 0; j < k; j++) { views.set(viewUuids[vcam[vi]], vkp[vi]); vi++ }
+      }
+      points[i] = {
+        x: pos[i * 3], y: pos[i * 3 + 1], z: pos[i * 3 + 2],
+        color: col ? [col[i * 3], col[i * 3 + 1], col[i * 3 + 2]] : undefined,
+        views,
+      }
+    }
+    return {
+      id: c.id ?? makeCloudId(),
+      name: c.name ?? 'Sparse cloud',
+      kind: c.kind ?? 'sparse',
+      createdAt: c.createdAt ?? Date.now(),
+      cameras: markRaw(cameras),
+      points: markRaw(points),
+    }
+  }
+
+  // Legacy inline shape (points embedded in JSON) — kept so a pre-binary project
+  // still opens. New projects always write version 2.
+  function legacyDeserializeCloud(c) {
+    const map = new Map()
+    for (const cam of c.cameras || []) { const { uuid, R, t, K } = cam; map.set(uuid, { R, t, K }) }
+    return {
+      id: c.id ?? makeCloudId(),
+      name: c.name ?? 'Sparse cloud',
+      kind: c.kind ?? 'sparse',
+      createdAt: c.createdAt ?? Date.now(),
+      cameras: markRaw(map),
+      points: markRaw((c.points || []).map(({ x, y, z, color, views }) => ({
+        x, y, z, color, views: new Map(views || []),
+      }))),
+    }
+  }
+
   async function restore({ projectId }) {
     // Reset first so switching to a project without a saved model doesn't leave
     // the previous project's clouds in memory (loadReconstruction returns null for
@@ -543,24 +662,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
         ? [{ name: 'Sparse cloud', kind: 'sparse', ...data }]
         : []
 
-    clouds.value = raw.map((c) => {
-      const map = new Map()
-      for (const cam of c.cameras || []) {
-        const { uuid, R, t, K } = cam
-        map.set(uuid, { R, t, K })
-      }
-      return {
-        id: c.id ?? makeCloudId(),
-        name: c.name ?? 'Sparse cloud',
-        kind: c.kind ?? 'sparse',
-        createdAt: c.createdAt ?? Date.now(),
-        cameras: map,
-        // Restore view-tracks if persisted (legacy clouds saved none → empty Map).
-        points: (c.points || []).map(({ x, y, z, color, views }) => ({
-          x, y, z, color, views: new Map(views || []),
-        })),
-      }
-    })
+    clouds.value = raw.map((c) => (c.buffers ? deserializeCloud(c) : legacyDeserializeCloud(c)))
     selectedCloudId.value = clouds.value[0]?.id ?? null
     georef.value = data.georef ?? null
     summary.value = data.summary ?? null

@@ -15,7 +15,7 @@ const props = defineProps({
   pinned: { type: Boolean, default: false },
   ringMs: { type: Number, default: 700 },
 })
-const emit = defineEmits(['read-more', 'link', 'mouseenter'])
+const emit = defineEmits(['read-more', 'link', 'guide-link', 'mouseenter'])
 
 const rootEl = ref(null)
 const style = ref({})
@@ -26,12 +26,14 @@ onMounted(() => {
   style.value = { left: `${Math.max(8, left)}px`, top: `${rect.bottom + 8}px` }
 })
 
-// Cross-links inside the summary open a tab instead of navigating.
+// Cross-links inside the summary open a tab instead of navigating. Glossary
+// (`data-help-id`) and Guide (`data-guide-id`) links are relayed separately so a
+// shared tooltip works from both the glossary term and the Guide field affordance.
 function onBodyClick(e) {
-  const link = e.target.closest('a[data-help-id]')
-  if (!link) return
-  e.preventDefault()
-  emit('link', link.dataset.helpId)
+  const help = e.target.closest('a[data-help-id]')
+  if (help) { e.preventDefault(); emit('link', help.dataset.helpId); return }
+  const guide = e.target.closest('a[data-guide-id]')
+  if (guide) { e.preventDefault(); emit('guide-link', guide.dataset.guideId) }
 }
 
 defineExpose({ rootEl })
@@ -101,7 +103,8 @@ defineExpose({ rootEl })
 .tt-title { font-size: 12px; font-weight: 600; color: var(--text); margin-bottom: 4px; }
 .tt-summary { font-size: 11.5px; color: var(--text-dim); line-height: 1.45; }
 .tt-summary :deep(p) { margin: 0; }
-.tt-summary :deep(a.glossary-link) {
+.tt-summary :deep(a.glossary-link),
+.tt-summary :deep(a.guide-link) {
   color: var(--accent); cursor: pointer; text-decoration: underline dotted;
 }
 .tt-more {

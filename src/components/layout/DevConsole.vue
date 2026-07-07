@@ -1,8 +1,17 @@
 <script setup>
-import { ref, computed, watch, nextTick } from 'vue'
+import { ref, computed, watch, nextTick, onMounted } from 'vue'
 import { useLog } from '../../composables/useLog.js'
+import { useCommands } from '../../composables/useCommands.js'
+import { completions, commonPrefix } from '../../core/commands.js'
 
-const { entries, clear } = useLog()
+// The command prompt drives App.vue's handleCommand (same registry as the
+// ribbon); commandState carries the guard flags (counts / ready-booleans).
+const props = defineProps({
+  dispatch: { type: Function, default: null },
+  commandState: { type: Object, default: () => ({}) },
+})
+
+const { entries, clear, log } = useLog()
 const body = ref(null)
 
 // "Stick to bottom": follow new log lines automatically, but only while the user
@@ -99,6 +108,7 @@ const SOURCE_COLORS = {
   'Matching': '#1abc9c',
   'Project':  '#2ecc71',
   'Reconstruction': '#e0518a',
+  'Console':  '#c0a020',
 }
 
 function sourceColor(source) {
@@ -109,6 +119,75 @@ function sourceStyle(source) {
   const c = sourceColor(source)
   return { color: c, borderColor: c + '60', background: c + '18' }
 }
+
+// --- Command prompt -------------------------------------------------------
+const { runLine } = useCommands(
+  (id) => props.dispatch?.(id),
+  () => props.commandState,
+)
+
+const promptInput = ref(null)
+const command = ref('')
+
+// Recent command history, newest last; persisted so it survives reloads.
+const HISTORY_KEY = 'consoleHistory'
+const HISTORY_MAX = 50
+function loadHistory() {
+  try { return JSON.parse(localStorage.getItem(HISTORY_KEY)) || [] } catch { return [] }
+}
+const history = ref(loadHistory())
+// -1 == editing a fresh line; 0..n-1 index into history from the newest end.
+const histCursor = ref(-1)
+
+function submitCommand() {
+  const line = command.value.trim()
+  if (!line) return
+  runLine(line)
+  if (history.value[history.value.length - 1] !== line) {
+    history.value.push(line)
+    if (history.value.length > HISTORY_MAX) history.value.shift()
+    try { localStorage.setItem(HISTORY_KEY, JSON.stringify(history.value)) } catch { /* ignore quota */ }
+  }
+  command.value = ''
+  histCursor.value = -1
+}
+
+function recallHistory(delta) {
+  if (!history.value.length) return
+  // cursor counts back from the newest entry; -1 is the live (empty-ish) line.
+  let next = histCursor.value + delta
+  if (next < -1) next = -1
+  if (next > history.value.length - 1) next = history.value.length - 1
+  histCursor.value = next
+  command.value = next === -1 ? '' : history.value[history.value.length - 1 - next]
+  nextTick(() => {
+    const el = promptInput.value
+    if (el) el.setSelectionRange(el.value.length, el.value.length)
+  })
+}
+
+// Tab: complete to the single match, or to the longest shared prefix and list
+// the candidates in the log so the user can see where it forked.
+function completeCommand() {
+  const matches = completions(command.value)
+  if (matches.length === 0) return
+  if (matches.length === 1) { command.value = matches[0]; return }
+  const shared = commonPrefix(matches)
+  if (shared && shared.length > command.value.trimStart().length) command.value = shared
+  log(matches.join('   '), 'debug', 'Console')
+}
+
+function onPromptKey(e) {
+  switch (e.key) {
+    case 'Enter':      e.preventDefault(); submitCommand(); break
+    case 'ArrowUp':    e.preventDefault(); recallHistory(+1); break
+    case 'ArrowDown':  e.preventDefault(); recallHistory(-1); break
+    case 'Tab':        e.preventDefault(); completeCommand(); break
+  }
+}
+
+defineExpose({ focusPrompt: () => promptInput.value?.focus() })
+onMounted(() => promptInput.value?.focus())
 
 function onKeyDown(e) {
   if ((e.ctrlKey || e.metaKey) && e.key === 'a') {
@@ -225,6 +304,21 @@ function saveTxt() {
         </div>
       </div>
     </div>
+
+    <div class="console-prompt">
+      <span class="prompt-caret">›</span>
+      <input
+        ref="promptInput"
+        v-model="command"
+        class="prompt-input"
+        type="text"
+        spellcheck="false"
+        autocomplete="off"
+        autocapitalize="off"
+        placeholder="Type a command — try &quot;help&quot;"
+        @keydown="onPromptKey"
+      />
+    </div>
   </div>
 </template>
 
@@ -309,6 +403,37 @@ function saveTxt() {
 .btn-clear:hover {
   color: var(--console-text);
   background: var(--console-btn-hover);
+}
+
+/* Command prompt — the power-user command line, always pinned to the bottom. */
+.console-prompt {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  padding: 4px 10px;
+  border-top: 1px solid var(--console-border);
+}
+
+.prompt-caret {
+  color: var(--accent);
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.prompt-input {
+  flex: 1;
+  background: none;
+  border: none;
+  outline: none;
+  color: var(--console-text);
+  font-family: inherit;
+  font-size: 12px;
+  padding: 2px 0;
+}
+
+.prompt-input::placeholder {
+  color: var(--console-text-dim);
 }
 
 /* Body row: entries + optional filter panel side by side */

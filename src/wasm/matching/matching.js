@@ -46,6 +46,30 @@ export function verify_matches(pts_a, pts_b, ransac_thresh_px, max_iters) {
     wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
     return v3;
 }
+
+/**
+ * Like `verify_matches`, but also fits a homography via RANSAC and reports its
+ * inlier count so the caller can compute the H-vs-F degeneracy ratio.
+ *
+ * Output layout: `[F00..F22, h_inlier_count, inlier_0, inlier_1, ...]` — the
+ * fundamental matrix (9), then the homography inlier count (1), then the F
+ * inlier flags (n). Empty if < 8 correspondences or RANSAC finds no F.
+ * @param {Float32Array} pts_a
+ * @param {Float32Array} pts_b
+ * @param {number} ransac_thresh_px
+ * @param {number} max_iters
+ * @returns {Float32Array}
+ */
+export function verify_matches_hf(pts_a, pts_b, ransac_thresh_px, max_iters) {
+    const ptr0 = passArrayF32ToWasm0(pts_a, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArrayF32ToWasm0(pts_b, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ret = wasm.verify_matches_hf(ptr0, len0, ptr1, len1, ransac_thresh_px, max_iters);
+    var v3 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+    return v3;
+}
 function __wbg_get_imports() {
     const import0 = {
         __proto__: null,

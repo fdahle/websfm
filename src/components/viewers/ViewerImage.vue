@@ -77,6 +77,42 @@ function zoomOut() { applyZoom(1 / 1.5) }
 
 // ── Overlay canvas (mask + keypoints + brush cursor) ─────────────────────────
 
+// Legend colour ramps as [offset, cssColor] stops.
+const KEYPOINT_STOPS = [
+  [0,   'hsl(240,100%,55%)'],
+  [0.5, 'hsl(120,100%,55%)'],
+  [1,   'hsl(0,100%,55%)'],
+]
+// Sample the depth ramp (core/colormap depthColor) at a few points for the gradient.
+const DEPTH_STOPS = [0, 0.25, 0.5, 0.75, 1].map((t) => {
+  const [r, g, b] = depthColor(t)
+  return [t, `rgb(${r},${g},${b})`]
+})
+
+// Draw a labelled colour-ramp legend stacked up from the bottom-left corner.
+// `slot` (0-based) offsets successive legends vertically so they don't overlap.
+function drawLegend(ctx, h, slot, stops, leftLabel, rightLabel, title) {
+  const LW = 72, LH = 8, ROW = 34
+  const LX = 12
+  const LY = h - 36 - slot * ROW
+  ctx.save()
+  const grad = ctx.createLinearGradient(LX, 0, LX + LW, 0)
+  for (const [offset, color] of stops) grad.addColorStop(offset, color)
+  ctx.fillStyle = 'rgba(0,0,0,0.45)'
+  ctx.fillRect(LX - 4, LY - 14, LW + 8, LH + 22)
+  ctx.fillStyle = grad
+  ctx.fillRect(LX, LY, LW, LH)
+  ctx.font = '9px sans-serif'
+  ctx.fillStyle = 'rgba(255,255,255,0.75)'
+  ctx.textAlign = 'left'
+  ctx.fillText(leftLabel, LX, LY + LH + 10)
+  ctx.textAlign = 'right'
+  ctx.fillText(rightLabel, LX + LW, LY + LH + 10)
+  ctx.textAlign = 'center'
+  ctx.fillText(title, LX + LW / 2, LY - 3)
+  ctx.restore()
+}
+
 function drawOverlay() {
   const c   = overlayCanvas.value
   const img = imgEl.value
@@ -103,12 +139,16 @@ function drawOverlay() {
   const dispW = img.naturalWidth  * scale.value
   const dispH = img.naturalHeight * scale.value
 
+  // Colour legends stack up from the bottom-left corner (one row per active overlay).
+  let legendSlot = 0
+
   // Depth — colorized semi-transparent overlay at image position
   if (depthOffscreen && hasDepth.value && props.showDepth) {
     ctx.save()
     ctx.globalAlpha = 0.6
     ctx.drawImage(depthOffscreen, tx.value, ty.value, dispW, dispH)
     ctx.restore()
+    drawLegend(ctx, h, legendSlot++, DEPTH_STOPS, 'near', 'far', 'depth')
   }
 
   // Mask — red semi-transparent overlay at image position
@@ -139,26 +179,7 @@ function drawOverlay() {
       ctx.fill()
     }
 
-    // Colour legend — bottom-left corner of the viewport
-    const LX = 12, LY = h - 36, LW = 72, LH = 8
-    ctx.save()
-    const grad = ctx.createLinearGradient(LX, 0, LX + LW, 0)
-    grad.addColorStop(0,   'hsl(240,100%,55%)')
-    grad.addColorStop(0.5, 'hsl(120,100%,55%)')
-    grad.addColorStop(1,   'hsl(0,100%,55%)')
-    ctx.fillStyle = 'rgba(0,0,0,0.45)'
-    ctx.fillRect(LX - 4, LY - 14, LW + 8, LH + 22)
-    ctx.fillStyle = grad
-    ctx.fillRect(LX, LY, LW, LH)
-    ctx.font = '9px sans-serif'
-    ctx.fillStyle = 'rgba(255,255,255,0.75)'
-    ctx.textAlign = 'left'
-    ctx.fillText('low', LX, LY + LH + 10)
-    ctx.textAlign = 'right'
-    ctx.fillText('high', LX + LW, LY + LH + 10)
-    ctx.textAlign = 'center'
-    ctx.fillText('response', LX + LW / 2, LY - 3)
-    ctx.restore()
+    drawLegend(ctx, h, legendSlot++, KEYPOINT_STOPS, 'low', 'high', 'response')
   }
 
   // GCP markers — observation pixel positions on this image

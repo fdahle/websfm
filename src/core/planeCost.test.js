@@ -24,6 +24,34 @@ describe('planeCostRef', () => {
     expect(c).toBeLessThan(1e-6)
   })
 
+  it('bottoms out at the TRUE depth through a non-zero baseline (homography sign)', () => {
+    // The t=0 cases above can't catch a wrong sign on the t·nᵀ/d term (it vanishes).
+    // Build a real disparity: ref cam = world, src cam translated +tx in x ⇒ relative
+    // pose R=I, t=[tx,0,0]. For a fronto-parallel plane at depth Z (n=[0,0,-1]) the
+    // exact warp is su = u + fx·tx/Z, sv = v. Synthesize src so src(u+shift,v)=ref(u,v);
+    // the cost at the true (Z, n) must be ~0 — and higher at a wrong depth.
+    const w = 64, h = 64, k = { fx: 80, fy: 80, cx: 32, cy: 32 }
+    const Z = 5, tx = 0.6, shift = k.fx * tx / Z
+    // Smooth (band-limited) texture so the horizontal-shift round-trip is exact
+    // under bilinear sampling; a wrong depth then stands out cleanly.
+    const refG = new Uint8Array(w * h)
+    for (let vv = 0; vv < h; vv++) for (let uu = 0; uu < w; uu++)
+      refG[vv * w + uu] = Math.round(128 + 120 * Math.sin(uu * 0.7) * Math.cos(vv * 0.5)) & 255
+    const srcG = new Uint8Array(w * h)
+    for (let vv = 0; vv < h; vv++) for (let uu = 0; uu < w; uu++) {
+      const rx = uu - shift
+      const x0 = Math.floor(rx), f = rx - x0
+      srcG[vv * w + uu] = (rx < 0 || rx > w - 2) ? 0
+        : Math.round(refG[vv * w + x0] * (1 - f) + refG[vv * w + x0 + 1] * f)
+    }
+    const refO = { gray: refG, w, h, ...k }
+    const srcO = { gray: srcG, w, h, ...k, R: I, t: [tx, 0, 0] }
+    const cTrue = planeCostRef(refO, srcO, 32, 32, Z, [0, 0, -1], 2)
+    const cWrong = planeCostRef(refO, srcO, 32, 32, Z * 1.5, [0, 0, -1], 2)
+    expect(cTrue).toBeLessThan(1e-3)     // near-perfect correlation at the true geometry
+    expect(cWrong).toBeGreaterThan(0.2)  // a wrong depth is clearly worse
+  })
+
   it('is ~2 when the source is the photometric inverse (anti-correlation)', () => {
     const inv = gray.map((g) => 255 - g)
     const c = planeCostRef(refOf(gray), srcOf(inv), 8, 8, 5, n, 2)

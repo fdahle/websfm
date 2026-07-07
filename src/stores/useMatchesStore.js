@@ -1,13 +1,24 @@
 import { shallowRef, triggerRef, computed } from 'vue'
 import { defineStore } from 'pinia'
 import * as opfs from '../utils/opfs.js'
-import { matchDescriptors, verifyMatches, POOL_SIZE } from '../workers/computeClient.js'
+import { matchDescriptors, matchLightGlue, verifyMatches, POOL_SIZE } from '../workers/computeClient.js'
 import { useLog } from '../composables/useLog.js'
 import { preselectPairs } from '../core/preselect.js'
 import { inlierSpread } from '../core/matching.js'
 import { registerProjectStore } from './projectStores.js'
 import { useProjectsStore } from './useProjectsStore.js'
 import { usePosesStore } from './usePosesStore.js'
+
+// Original image dimensions (px) in the same space as keypoint x,y — needed by
+// LightGlue's coord normalization. Prefer EXIF meta; else recover from a keypoint
+// (x = nx·natW, where nx is the detect-normalized coord stored alongside).
+function imageDims(img) {
+  const w = img.meta?.width, h = img.meta?.height
+  if (w && h) return [w, h]
+  const kp = img.keypoints?.find((k) => k.nx > 0 && k.ny > 0)
+  if (kp) return [Math.round(kp.x / kp.nx), Math.round(kp.y / kp.ny)]
+  return [1, 1]
+}
 
 // Project-scoped store: pairwise feature matches. Reads persistence flags from the
 // projects store; restore/clear run through the project-store registry.
@@ -85,10 +96,28 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
         return
       }
 
-      const { matches: raw } = await matchDescriptors(descA, descB, {
-        ratioThreshold: settings.ratioThreshold ?? 0.75,
-        crossCheck: settings.crossCheck ?? false,
-      })
+      // Putative correspondences: LightGlue (learned joint matcher) or brute-force
+      // NN + Lowe ratio. LightGlue needs keypoints + image sizes (it normalizes
+      // coords internally); brute-force needs only descriptors. Either way `raw`
+      // is a [{ia,ib}] list that flows through the same verify/gate path below.
+      let raw
+      if (settings.matcher === 'lightglue') {
+        const [wA, hA] = imageDims(srcA)
+        const [wB, hB] = imageDims(srcB)
+        const res = await matchLightGlue({
+          kpsA, descA, wA, hA, kpsB, descB, wB, hB,
+          minConf: settings.lgMinConf ?? 0,
+          maxKeypoints: settings.lgMaxKeypoints ?? 2048,
+          useGpu: settings.useGpu ?? false,
+        }, { onLog: (msg) => log(msg, 'info', 'Matching') })
+        raw = res.matches
+      } else {
+        const res = await matchDescriptors(descA, descB, {
+          ratioThreshold: settings.ratioThreshold ?? 0.75,
+          crossCheck: settings.crossCheck ?? false,
+        })
+        raw = res.matches
+      }
       entry.rawCount = raw.length
 
       const minMatches = settings.minMatches ?? 15
@@ -123,9 +152,6 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
         const overrideInliers = settings.overrideInliers ?? 30
         const ratioOk = ratio >= minInlierRatio
         const overrode = !ratioOk && result != null && result.inlierCount >= overrideInliers
-<<<<<<< Updated upstream
-        if (result && result.inlierCount >= minMatches && (ratioOk || overrode)) {
-=======
         // H-vs-F degeneracy: when a homography captures nearly as many inliers as the
         // fundamental matrix, the pair's scene is planar or its motion a pure rotation
         // (a flat façade, a spin-in-place). Such pairs still bridge the match graph, so
@@ -153,7 +179,6 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
           spreadDegenerate = collapsed || tiny
         }
         if (result && result.inlierCount >= minMatches && (ratioOk || overrode) && !spreadDegenerate) {
->>>>>>> Stashed changes
           entry.F = result.F
           entry.inlierCount = result.inlierCount
           entry.matches = raw
@@ -186,12 +211,9 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
         log(`Match ${imgA.name} ↔ ${imgB.name} — ${raw.length} putatives → `
           + `${result?.inlierCount ?? 0} inliers (ratio ${ratio.toFixed(2)}, gate ${minInlierRatio}`
           + `${overrode ? `, ratio-override on ${result.inlierCount}≥${overrideInliers} inliers` : ''}), `
-<<<<<<< Updated upstream
-=======
           + `H/F ${hfRatio.toFixed(2)}${entry.degenerate ? ' (degenerate — planar/pure-rotation, poor seed)' : ''}, `
           + `${spread ? `spread ${spread.uniqueA}/${spread.uniqueB} unique, ${spread.extentA.toFixed(0)}/${spread.extentB.toFixed(0)}px` : 'spread n/a'}`
           + `${spreadDegenerate ? ' (positional collapse — REJECTED)' : ''}, `
->>>>>>> Stashed changes
           + `RANSAC ${settings.ransacThreshPx ?? 2.0}px`, 'debug', 'Matching')
       } else {
         entry.matches = raw.map(m => [m.ia, m.ib])
@@ -245,6 +267,21 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
     const ready = images.filter(img => img.kpStatus === 'done')
     const strategy = settings.strategy ?? 'exhaustive'
 
+    // LightGlue's weights are trained on SuperPoint's 256-d descriptors — refuse
+    // to run it on SIFT (128-d) features, which would silently produce garbage.
+    if (settings.matcher === 'lightglue') {
+      const bad = ready.filter((im) => im.detector !== 'superpoint' || (im.descDim ?? 128) !== 256)
+      if (bad.length) {
+        const names = bad.map((im) => `"${im.name}" (${im.detector ?? 'sift'}/${im.descDim ?? 128}-d)`)
+        const shown = names.slice(0, 5).join(', ')
+        const more = names.length > 5 ? `, +${names.length - 5} more` : ''
+        log(`LightGlue needs SuperPoint (256-d) descriptors, but ${bad.length} of ${ready.length} `
+          + `image(s) are not: ${shown}${more} — re-detect these with SuperPoint (Overwrite mode), `
+          + 'or switch the matcher to brute-force.', 'error', 'Matching')
+        return
+      }
+    }
+
     let pairs = []
     if (strategy === 'sequential') {
       for (let i = 0; i < ready.length - 1; i++) pairs.push([ready[i], ready[i + 1]])
@@ -285,8 +322,10 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
     // particular whether cross-check (mutual nearest neighbour) is active, which
     // otherwise leaves no trace in the console yet meaningfully changes putatives.
     const crossCheck = settings.crossCheck ?? false
+    const lightglue = settings.matcher === 'lightglue'
     log(`Matching: ${pairs.length} pair(s) — ${strategy}${concurrency > 1 ? `, ${concurrency}× parallel` : ''}`
-      + `; cross-check ${crossCheck ? 'on (mutual NN)' : 'off'}, ratio ${settings.ratioThreshold ?? 0.75}`,
+      + `; matcher ${lightglue ? 'LightGlue (learned)' : 'brute-force'}`
+      + `${lightglue ? '' : `, cross-check ${crossCheck ? 'on (mutual NN)' : 'off'}, ratio ${settings.ratioThreshold ?? 0.75}`}`,
       'info', 'Matching')
     let done = 0
     // Tally this run's outcomes for the completion summary. Skipped = too few raw

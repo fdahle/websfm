@@ -18,6 +18,20 @@ export function useTabs(imageById, showMap) {
     }
   })
 
+  // Sticky overlay toggles: remember the last state so a freshly opened image tab
+  // inherits it instead of resetting. Keypoints still gate on detection status.
+  const overlayPrefs = ref({ showKeypoints: true, showMask: false, showDepth: false, showGcps: false })
+
+  function rememberOverlayPrefs(tab) {
+    if (tab?.type !== 'image') return
+    overlayPrefs.value = {
+      showKeypoints: tab.showKeypoints,
+      showMask:      tab.showMask,
+      showDepth:     tab.showDepth,
+      showGcps:      tab.showGcps,
+    }
+  }
+
   const activeTab = computed(() => tabs.value.find((t) => t.id === activeTabId.value) || null)
 
   const activeImageTab = computed(() => {
@@ -46,10 +60,10 @@ export function useTabs(imageById, showMap) {
         title: imageName ?? img?.name ?? imageId,
         imageId,
         closable: true,
-        showKeypoints: img?.kpStatus === 'done',
-        showMask: false,
-        showDepth: false,
-        showGcps: false,
+        showKeypoints: img?.kpStatus === 'done' ? overlayPrefs.value.showKeypoints : false,
+        showMask: overlayPrefs.value.showMask,
+        showDepth: overlayPrefs.value.showDepth,
+        showGcps: overlayPrefs.value.showGcps,
         maskMode: 'none',
         brushRadius: 20,
       })
@@ -111,6 +125,55 @@ export function useTabs(imageById, showMap) {
     closeTab(`img:${imageId}`)
   }
 
+  // Drag-reorder a closable tab next to another closable tab. Fixed tabs
+  // (3D/2D, `closable: false`) stay pinned to the left and never move.
+  function moveTab(draggedId, targetId) {
+    if (draggedId === targetId) return
+    const arr = [...tabs.value]
+    const from = arr.findIndex((t) => t.id === draggedId)
+    const to = arr.findIndex((t) => t.id === targetId)
+    if (from < 0 || to < 0 || !arr[from].closable || !arr[to].closable) return
+    const [moved] = arr.splice(from, 1)
+    const target = arr.findIndex((t) => t.id === targetId)
+    // Dropping onto a tab to the right lands after it; to the left, before it.
+    arr.splice(from < to ? target + 1 : target, 0, moved)
+    tabs.value = arr
+  }
+
+  // Bulk close operations for the tab context menu. All operate on closable tabs
+  // only; fixed tabs are always kept. `id` is the right-clicked tab.
+  function keepActiveValid(fallbackId) {
+    if (!tabs.value.some((t) => t.id === activeTabId.value)) {
+      activeTabId.value = fallbackId && tabs.value.some((t) => t.id === fallbackId)
+        ? fallbackId
+        : (tabs.value[0]?.id ?? 'viewer')
+    }
+  }
+
+  function closeAllTabs() {
+    tabs.value = tabs.value.filter((t) => !t.closable)
+    keepActiveValid()
+  }
+
+  function closeOtherTabs(id) {
+    tabs.value = tabs.value.filter((t) => !t.closable || t.id === id)
+    activeTabId.value = id
+  }
+
+  function closeTabsToLeft(id) {
+    const idx = tabs.value.findIndex((t) => t.id === id)
+    if (idx < 0) return
+    tabs.value = tabs.value.filter((t, i) => !t.closable || i >= idx)
+    keepActiveValid(id)
+  }
+
+  function closeTabsToRight(id) {
+    const idx = tabs.value.findIndex((t) => t.id === id)
+    if (idx < 0) return
+    tabs.value = tabs.value.filter((t, i) => !t.closable || i <= idx)
+    keepActiveValid(id)
+  }
+
   function onImageDetected(imageId) {
     for (const tab of tabs.value) {
       if (tab.imageId === imageId) tab.showKeypoints = true
@@ -135,7 +198,13 @@ export function useTabs(imageById, showMap) {
     openProductTab,
     closeTab,
     closeTabForImage,
+    moveTab,
+    closeAllTabs,
+    closeOtherTabs,
+    closeTabsToLeft,
+    closeTabsToRight,
     onImageDetected,
     resetToViewer,
+    rememberOverlayPrefs,
   }
 }

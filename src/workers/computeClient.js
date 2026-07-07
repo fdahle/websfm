@@ -57,9 +57,11 @@ export function terminateAll(reason = 'cancelled') {
   for (const [id, entry] of pending) { pending.delete(id); entry.reject(new Error(reason)) }
 }
 
-function call(op, args, { transfer = [], onEvent } = {}) {
+function call(op, args, { transfer = [], onEvent, worker: pinned } = {}) {
   const pool = getPool()
-  const worker = pool[rr++ % pool.length]
+  // `pinned` forces a specific worker (learned backends load a heavy per-worker
+  // runtime once — see detectKeypoints); otherwise round-robin across the pool.
+  const worker = pinned != null ? pool[pinned % pool.length] : pool[rr++ % pool.length]
   const id = nextId++
   return new Promise((resolve, reject) => {
     pending.set(id, { resolve, reject, onEvent })
@@ -69,14 +71,33 @@ function call(op, args, { transfer = [], onEvent } = {}) {
 
 // ── Drop-in compute API (mirrors utils/detection.js + core/matching.js) ─────────
 
-export function detectKeypoints(url, options = {}) {
-  return call('detect', [url, options])
+export function detectKeypoints(url, options = {}, { onLog } = {}) {
+  // SuperPoint/ONNX loads a heavy runtime (~26 MB wasm + model + a WebGPU device)
+  // per worker on first use. Round-robining it across the pool makes the first
+  // POOL_SIZE images each initialize independently — in parallel, contending for
+  // the GPU — which stalls hard. Pin it to one worker so that happens exactly
+  // once; SIFT (tiny wasm) stays round-robin. Streams init/backend log lines.
+  const learned = options.detector === 'superpoint'
+  return call('detect', [url, options], {
+    worker: learned ? 0 : undefined,
+    onEvent: onLog ? (ev, a) => { if (ev === 'log') onLog(...a) } : undefined,
+  })
 }
 
 export function matchDescriptors(descA, descB, options = {}) {
   // No transfer: structured-clone copies the descriptors so the caller's
   // in-memory buffers (reused across pairs) are not detached.
   return call('match', [descA, descB, options])
+}
+
+// LightGlue joint match. Pinned to worker 0 for the same reason SuperPoint is —
+// one heavy ORT session, loaded once — so concurrent pairs serialize on it rather
+// than each booting their own runtime. Streams first-run init log lines.
+export function matchLightGlue(args, { onLog } = {}) {
+  return call('matchLightGlue', [args], {
+    worker: 0,
+    onEvent: onLog ? (ev, a) => { if (ev === 'log') onLog(...a) } : undefined,
+  })
 }
 
 export function verifyMatches(kpsA, kpsB, matches, options = {}) {

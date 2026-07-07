@@ -59,7 +59,17 @@ export const useLogStore = registerProjectStore(defineStore('log', () => {
     const saved = await opfs.loadLog(projectId)
     if (!Array.isArray(saved) || saved.length === 0) return
     internal = true
-    entries.value = [...saved, ...entries.value]
+    // The stores that restore before us (sensors/images/matches/reconstruction)
+    // have already logged this open's banner lines ("… restored"). The saved
+    // console ends with the *previous* open's identical banners, so prepending it
+    // verbatim stacks a duplicate copy on every reopen. Trim the contiguous tail
+    // of `saved` whose content matches a fresh line before prepending; older
+    // history (different content) is untouched.
+    const sig = (e) => `${e.level}|${e.source}|${e.message}`
+    const freshSigs = new Set(entries.value.map(sig))
+    let end = saved.length
+    while (end > 0 && freshSigs.has(sig(saved[end - 1]))) end--
+    entries.value = [...saved.slice(0, end), ...entries.value]
     internal = false
   }
 

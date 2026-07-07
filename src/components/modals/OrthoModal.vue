@@ -102,7 +102,8 @@ function run() {
   background: var(--panel);
   border: 1px solid var(--panel-border);
   border-radius: 8px;
-  width: 380px; max-width: 90vw;
+  width: 480px; max-width: 90vw;
+  max-height: 90vh;
   box-shadow: 0 8px 32px rgba(0,0,0,0.4);
   display: flex; flex-direction: column;
 }
@@ -117,7 +118,7 @@ function run() {
   font-size: 20px; line-height: 1; cursor: pointer; padding: 1px 6px; border-radius: 4px;
 }
 .modal-close:hover { background: var(--hover-bg); color: var(--text); }
-.modal-body { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.modal-body { padding: 16px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; min-height: 0; }
 .modal-footer {
   display: flex; justify-content: flex-end; gap: 8px;
   padding: 12px 16px; border-top: 1px solid var(--panel-border);

@@ -24,6 +24,6 @@ When the intrinsics $K$ are unknown you work with the fundamental matrix
 $F = K'^{-\top} E K^{-1}$ instead — the uncalibrated analogue used during
 [epipolar geometry](help:epipolar-geometry) verification. Decomposing $E$ (via
 SVD) yields four candidate poses; the correct one is the single solution that
-triangulates points *in front of* both cameras, which is why a good spread of
-[reprojection error](help:reprojection-error) inliers matters for a stable
-recovery.
+triangulates points *in front of* both cameras (the [cheirality](help:cheirality)
+check), which is why a good spread of [reprojection error](help:reprojection-error)
+inliers matters for a stable recovery.

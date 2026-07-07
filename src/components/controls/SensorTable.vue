@@ -2,6 +2,7 @@
 import { ref, computed } from 'vue'
 import { estimatedIntrinsics } from '../../utils/cameraEstimated.js'
 import { resolveK } from '../../core/reconstruction.js'
+import { DISTORTION_MODELS, coeffsForModel } from '../../core/distortion.js'
 
 // Editable table of sensors (shared intrinsics). In 'initial' mode the numeric
 // cells are editable inputs (the source of truth); in 'estimated' mode they show
@@ -113,6 +114,16 @@ const NUM_COLS = [
 // width to convert, so the mm-only columns are dimmed when the unit is px.
 const focalInMm = (s) => s.focalUnit !== 'px'
 
+// Distortion model (D3): which Brown coefficients this sensor uses. A coefficient
+// input outside the active model is disabled (a stale value would not be applied
+// anyway — distortionOf ignores it). No explicit model ⇒ all coefficients live
+// (back-compat with sensors saved before models existed).
+const DISTORTION_COEFFS = new Set(['k1', 'k2', 'k3', 'p1', 'p2'])
+const activeCoeffs = (s) => new Set(coeffsForModel(s.distortionModel))
+const coeffOff = (s, key) => DISTORTION_COEFFS.has(key) && !activeCoeffs(s).has(key)
+const modelLabel = (s) =>
+  DISTORTION_MODELS.find((m) => m.id === (s.distortionModel || 'pinhole'))?.label ?? '—'
+
 function onEdit(id, field, e) {
   emit('update', { id, field, value: e.target.value })
 }
@@ -147,6 +158,7 @@ function onEdit(id, field, e) {
         <tr>
           <th>Label</th>
           <th>Source</th>
+          <th>Distortion</th>
           <th v-for="c in NUM_COLS" :key="c.key">{{ c.label }}</th>
           <th>Images</th>
           <th></th>
@@ -171,6 +183,21 @@ function onEdit(id, field, e) {
             </span>
           </td>
           <td class="dim">{{ s.source === 'exif' ? 'EXIF' : 'imported' }}</td>
+
+          <!-- Distortion model: editable selector in Initial, read-only elsewhere.
+               Rendered once per row (outside the per-mode column templates). -->
+          <td>
+            <select
+              v-if="mode === 'initial'"
+              class="unit-select model-select"
+              :value="s.distortionModel || 'pinhole'"
+              title="Lens distortion model — which Brown coefficients this sensor uses (removed at ingest; the pipeline stays pinhole)"
+              @change="onEdit(s.id, 'distortionModel', $event)"
+            >
+              <option v-for="m in DISTORTION_MODELS" :key="m.id" :value="m.id">{{ m.label }}</option>
+            </select>
+            <span v-else class="dim">{{ modelLabel(s) }}</span>
+          </td>
 
           <template v-if="mode === 'initial'">
             <td v-for="c in NUM_COLS" :key="c.key">
@@ -209,6 +236,8 @@ function onEdit(id, field, e) {
                 class="cell-input"
                 type="number"
                 step="any"
+                :disabled="coeffOff(s, c.key)"
+                :title="coeffOff(s, c.key) ? `Not used by the ${modelLabel(s)} model` : ''"
                 :value="s[c.key] ?? ''"
                 @change="onEdit(s.id, c.key, $event)"
               />
@@ -312,6 +341,7 @@ tbody td.dim { color: var(--text-dim); }
   color: var(--text); font: inherit; font-size: 11px; padding: 3px 2px; outline: none; cursor: pointer;
 }
 .unit-select:focus { border-color: var(--accent); }
+.model-select { max-width: 180px; }
 
 /* Numeric input without the up/down spinners — stepping makes no sense for
    calibration values, but we keep type=number for numeric keyboards/validation. */

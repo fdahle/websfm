@@ -9,7 +9,9 @@ Epipolar geometry is the intrinsic geometry of two views of the same scene. Once
 the relative pose is fixed, a point $x$ in the left image cannot match *anywhere*
 in the right image — its correspondence must lie on a single **epipolar line**.
 That is exactly the constraint SfM uses to verify feature matches and reject
-outliers.
+outliers: a candidate match whose partner sits far from the predicted line is an
+outlier, which is how [RANSAC](help:ransac) separates true matches from false
+ones during pair verification.
 
 ![Two cameras C and C' viewing a scene point X, with image points x and x', the baseline, epipoles e and e', and the epipolar line in the right image.](assets/epipolar-geometry.svg)
 

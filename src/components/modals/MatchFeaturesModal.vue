@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed } from 'vue'
+import FieldHelp from '../guide/FieldHelp.vue'
 
 const emit = defineEmits(['close', 'run'])
 
@@ -8,6 +9,14 @@ const strategies = [
   { id: 'exhaustive', label: 'Exhaustive' },
   { id: 'sequential', label: 'Sequential' },
   { id: 'preselect', label: 'Preselect' },
+]
+
+// Matcher: brute-force NN + Lowe ratio (works on any descriptor) or LightGlue
+// (learned; requires SuperPoint 256-d descriptors — the store guards mismatches).
+const matcher = ref('bruteforce')
+const matchers = [
+  { id: 'bruteforce', label: 'Brute-force + RANSAC' },
+  { id: 'lightglue', label: 'LightGlue (learned)' },
 ]
 
 const settings = ref({
@@ -19,10 +28,13 @@ const settings = ref({
   minInlierRatio: 0.25,
   maxIters: 1000,
   maxNeighbors: 10,
+  useGpu: false,       // experimental WebGPU backend for LightGlue
+  lgMaxKeypoints: 2048, // per-image cap fed to LightGlue (attention is O(N²))
 })
 
 const runSettings = computed(() => ({
   strategy: strategy.value,
+  matcher: matcher.value,
   ...settings.value,
 }))
 
@@ -58,7 +70,8 @@ function run() {
         </div>
 
         <div v-if="strategy === 'preselect'" class="field">
-          <label class="field-label" for="maxNeighbors">Neighbours per image</label>
+          <label class="field-label" for="maxNeighbors">Neighbours per image
+            <FieldHelp op="match-features" param="maxNeighbors" :default-value="settings.maxNeighbors" /></label>
           <input
             id="maxNeighbors"
             v-model.number="settings.maxNeighbors"
@@ -71,7 +84,26 @@ function run() {
         <div class="section-sep"></div>
 
         <div class="field">
-          <label class="field-label" for="ratio">Ratio threshold</label>
+          <span class="field-label">Matcher</span>
+          <div class="detector-row">
+            <button
+              v-for="m in matchers"
+              :key="m.id"
+              class="detector-btn"
+              :class="{ active: matcher === m.id }"
+              @click="matcher = m.id"
+            >{{ m.label }}</button>
+          </div>
+          <span class="field-hint">
+            {{ matcher === 'lightglue'
+              ? 'Learned joint matcher — requires images detected with SuperPoint. Geometric verification still applies.'
+              : 'Nearest-neighbour descriptor matching with Lowe\'s ratio test.' }}
+          </span>
+        </div>
+
+        <div v-if="matcher === 'bruteforce'" class="field">
+          <label class="field-label" for="ratio">Ratio threshold
+            <FieldHelp op="match-features" param="ratioThreshold" :default-value="settings.ratioThreshold" /></label>
           <div class="input-row">
             <input
               id="ratio"
@@ -84,7 +116,8 @@ function run() {
         </div>
 
         <div class="field">
-          <label class="field-label" for="minMatches">Min matches per pair</label>
+          <label class="field-label" for="minMatches">Min matches per pair
+            <FieldHelp op="match-features" param="minMatches" :default-value="settings.minMatches" /></label>
           <input
             id="minMatches"
             v-model.number="settings.minMatches"
@@ -94,12 +127,34 @@ function run() {
           <span class="field-hint">Pairs below this threshold are discarded.</span>
         </div>
 
-        <div class="field">
+        <div v-if="matcher === 'bruteforce'" class="field">
           <label class="checkbox-row">
             <input v-model="settings.crossCheck" type="checkbox" class="checkbox" />
             <span class="field-label">Cross-check (mutual NN)</span>
           </label>
           <span class="field-hint">Keeps only matches that are mutual nearest neighbours. Slower but more precise.</span>
+        </div>
+
+        <div v-if="matcher === 'lightglue'" class="field">
+          <label class="field-label" for="lgMaxKpts">Max keypoints per image</label>
+          <input
+            id="lgMaxKpts"
+            v-model.number="settings.lgMaxKeypoints"
+            type="number" min="256" max="8192" step="256"
+            class="field-input"
+          />
+          <span class="field-hint">
+            Strongest-first cap fed to LightGlue. Runtime grows with the square of this —
+            2048 ≈ 7 s/pair on CPU, 1024 ≈ 2 s/pair; 0 = no cap.
+          </span>
+        </div>
+
+        <div v-if="matcher === 'lightglue'" class="field">
+          <label class="checkbox-row">
+            <input v-model="settings.useGpu" type="checkbox" class="checkbox" />
+            <span class="field-label">Use GPU (experimental)</span>
+          </label>
+          <span class="field-hint">Run LightGlue on WebGPU (Chrome/Edge only). Much faster than the CPU path; automatically falls back to CPU if the GPU can't run the model.</span>
         </div>
 
         <div class="section-sep"></div>
@@ -114,7 +169,8 @@ function run() {
 
         <template v-if="settings.geometricVerification">
           <div class="field">
-            <label class="field-label" for="ransacThresh">RANSAC threshold</label>
+            <label class="field-label" for="ransacThresh">RANSAC threshold
+              <FieldHelp op="match-features" param="ransacThreshPx" :default-value="settings.ransacThreshPx" /></label>
             <div class="input-row">
               <input
                 id="ransacThresh"
@@ -128,7 +184,8 @@ function run() {
           </div>
 
           <div class="field">
-            <label class="field-label" for="minInlierRatio">Min inlier ratio</label>
+            <label class="field-label" for="minInlierRatio">Min inlier ratio
+              <FieldHelp op="match-features" param="minInlierRatio" :default-value="settings.minInlierRatio" /></label>
             <input
               id="minInlierRatio"
               v-model.number="settings.minInlierRatio"
@@ -139,7 +196,8 @@ function run() {
           </div>
 
           <div class="field">
-            <label class="field-label" for="maxIters">RANSAC iterations</label>
+            <label class="field-label" for="maxIters">RANSAC iterations
+              <FieldHelp op="match-features" param="maxIters" :default-value="settings.maxIters" /></label>
             <input
               id="maxIters"
               v-model.number="settings.maxIters"

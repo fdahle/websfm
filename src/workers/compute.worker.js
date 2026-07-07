@@ -10,6 +10,8 @@
 // instead of the DOM <canvas>/<img> path — hence its own implementation here.
 
 import initSift, { detect_sift } from '../wasm/detection/sift.js'
+import { detectSuperPoint } from '../core/superpoint.js'
+import { matchLightGlue } from '../core/lightglue.js'
 import { matchDescriptors, verifyMatches } from '../core/matching.js'
 import { reconstruct as sfmReconstruct } from '../core/sfm.js'
 import {
@@ -106,38 +108,97 @@ function undistortMaskLut(lut, w, h, Kfull, dist, scale) {
   return out
 }
 
-// Mirrors utils/detection.js's detectKeypoints, but worker-side. Keypoint coords
-// map back to original-image pixels; descriptors are returned as a transferable
-// Float32Array (N×128, row-major).
-async function detect([url, options = {}]) {
-  const { maxDim = 1200, contrastThreshold = 0.01, maxKeypoints = 5000, mask = null } = options
+// Percentile helper over a value array (sorted ascending in place by caller).
+function percentile(sorted, q) {
+  return sorted.length ? sorted[Math.min(sorted.length - 1, Math.round(q * (sorted.length - 1)))] : 0
+}
+
+// SIFT detector → a uniform feature bundle (see detect() for the shared shape):
+// count, per-keypoint accessors, a descriptor-row view, and detector-specific diag.
+async function runSift(data, width, height, { contrastThreshold, maxKeypoints }) {
   await ensureSift()
+  const t0 = performance.now()
+  const flat = detect_sift(new Uint8Array(data.buffer), width, height, contrastThreshold, maxKeypoints)
+  const ms = performance.now() - t0
+
+  // Layout: STRIDE floats per kept keypoint [x,y,scale,response,angle,d0..d127],
+  // then two trailing scalars — rawFound (survivors of near-duplicate suppression,
+  // before the max_keypoints cap) and suppressed. Empty (degenerate input) ⇒ 0.
+  const rawFound = flat.length >= 2 ? flat[flat.length - 2] : 0
+  const suppressed = flat.length >= 2 ? flat[flat.length - 1] : 0
+  const n = flat.length >= 2 ? Math.floor((flat.length - 2) / STRIDE) : 0
+  // Smallest kept response = last entry (crate returns them response-desc); the
+  // point at which the max_keypoints cap started discarding features.
+  const minResponse = n > 0 ? flat[(n - 1) * STRIDE + 3] : 0
+  const responses = []
+  for (let i = 0; i < n; i++) responses.push(flat[i * STRIDE + 3])
+  responses.sort((a, b) => a - b)
+
+  return {
+    descLen: DESC_LEN, ms, count: n,
+    at: (i) => ({ x: flat[i * STRIDE], y: flat[i * STRIDE + 1], scale: flat[i * STRIDE + 2], response: flat[i * STRIDE + 3] }),
+    desc: (i) => flat.subarray(i * STRIDE + 5, i * STRIDE + 5 + DESC_LEN),
+    diag: {
+      rawFound, suppressed,
+      capHit: maxKeypoints > 0 && rawFound > maxKeypoints, minResponse,
+      respP50: percentile(responses, 0.5), respP95: percentile(responses, 0.95),
+    },
+  }
+}
+
+// SuperPoint detector (ONNX via core/superpoint.js) → the same feature bundle.
+// Descriptors are 256-d here, not 128 — carried through as descLen so persistence
+// and matching read the width off the buffer rather than a hardcoded const.
+async function runSuperPoint(data, width, height, { maxKeypoints, onLog }) {
+  // SuperPoint wants single-channel float [0,1]; build it from the RGBA raster
+  // (Rec. 601 luma, matching core/geometry.js rgbaToGray, then /255).
+  const gray = new Float32Array(width * height)
+  for (let i = 0; i < width * height; i++) {
+    const o = i * 4
+    gray[i] = (data[o] * 0.299 + data[o + 1] * 0.587 + data[o + 2] * 0.114) / 255
+  }
+  const t0 = performance.now()
+  const { keypoints, descriptors, dim } = await detectSuperPoint(gray, width, height, { maxKeypoints, onLog })
+  const ms = performance.now() - t0
+
+  const n = keypoints.length
+  const scores = keypoints.map((k) => k.score).sort((a, b) => a - b)
+  return {
+    descLen: dim, ms, count: n,
+    // No blob scale from a learned detector — report score as the "response".
+    at: (i) => ({ x: keypoints[i].x, y: keypoints[i].y, scale: 0, response: keypoints[i].score }),
+    desc: (i) => descriptors.subarray(i * dim, (i + 1) * dim),
+    diag: {
+      capHit: maxKeypoints > 0 && n >= maxKeypoints,
+      scoreP50: percentile(scores, 0.5), scoreP95: percentile(scores, 0.95),
+    },
+  }
+}
+
+// Detect keypoints + descriptors for one image. Coords map back to original-image
+// pixels; descriptors return as a transferable Float32Array (N×descDim, row-major).
+// The detector (SIFT or SuperPoint) only produces the raw feature bundle — the
+// mask filter, colour sampling, back-map to original px, and trim are shared here.
+async function detect([url, options = {}], { emit } = {}) {
+  const { detector = 'sift', maxDim = 1200, contrastThreshold = 0.01, maxKeypoints = 5000, mask = null } = options
   const { data, width, height, scale, natW, natH } = await rasterize(url, maxDim)
 
   // Masked regions are excluded: keypoints landing on a masked pixel are dropped.
   const maskLut = mask ? await buildMaskLookup(mask, width, height) : null
 
-  const t0 = performance.now()
-  const flat = detect_sift(new Uint8Array(data.buffer), width, height, contrastThreshold, maxKeypoints)
-  const ms = performance.now() - t0
+  // Learned detectors stream init/backend lines (first-run runtime load is slow)
+  // so the UI shows progress instead of a silent stall.
+  const onLog = emit ? (msg) => emit('log', [msg]) : undefined
+  const feats = detector === 'superpoint'
+    ? await runSuperPoint(data, width, height, { maxKeypoints, onLog })
+    : await runSift(data, width, height, { contrastThreshold, maxKeypoints })
 
-  // Layout: STRIDE floats per kept keypoint, then two trailing scalars — rawFound
-  // (survivors of near-duplicate suppression, before the max_keypoints cap) and
-  // suppressed (near-duplicate positions dropped). Empty (degenerate input) ⇒ 0.
-  const rawFound = flat.length >= 2 ? flat[flat.length - 2] : 0
-  const suppressed = flat.length >= 2 ? flat[flat.length - 1] : 0
-  const n = flat.length >= 2 ? Math.floor((flat.length - 2) / STRIDE) : 0
-  // Smallest kept response = last entry (the crate returns them response-desc);
-  // the point at which the max_keypoints cap started discarding features.
-  const minResponse = n > 0 ? flat[(n - 1) * STRIDE + 3] : 0
   const keypoints = []
-  const responses = []
   // Upper bound; the descriptor buffer is trimmed to the kept count below.
-  const descBuf = new Float32Array(n * DESC_LEN)
+  const descBuf = new Float32Array(feats.count * feats.descLen)
   let kept = 0
-  for (let i = 0; i < n; i++) {
-    const base = i * STRIDE
-    const dx = flat[base], dy = flat[base + 1]
+  for (let i = 0; i < feats.count; i++) {
+    const { x: dx, y: dy, scale: kscale, response } = feats.at(i)
     // Sample the source RGB at the keypoint (detect-space pixel) so the sparse
     // cloud can be coloured later. Clamp to the raster bounds; single-pixel
     // nearest sample is plenty for per-track median aggregation.
@@ -148,34 +209,40 @@ async function detect([url, options = {}]) {
     keypoints.push({
       x: dx / scale, y: dy / scale,
       nx: dx / width, ny: dy / height,
-      scale: flat[base + 2] / scale, response: flat[base + 3],
+      scale: kscale / scale, response,
       color: [data[o], data[o + 1], data[o + 2]],
     })
-    responses.push(flat[base + 3])
-    descBuf.set(flat.subarray(base + 5, base + 5 + DESC_LEN), kept * DESC_LEN)
+    descBuf.set(feats.desc(i), kept * feats.descLen)
     kept++
   }
   // Trim to the kept keypoints (copy so the transferred buffer is exactly sized).
-  const descriptors = kept === n ? descBuf : descBuf.slice(0, kept * DESC_LEN)
+  const descriptors = kept === feats.count ? descBuf : descBuf.slice(0, kept * feats.descLen)
 
-  // Diagnostics for the detailed (debug) log: what the run actually did.
-  responses.sort((a, b) => a - b)
-  const at = (q) => (responses.length ? responses[Math.min(responses.length - 1, Math.round(q * (responses.length - 1)))] : 0)
   const diag = {
     detectWidth: width, detectHeight: height, natW, natH, scale,
-    rawFound, suppressed, capped: n, kept, maskedDropped: n - kept,
-    capHit: maxKeypoints > 0 && rawFound > maxKeypoints, minResponse,
-    respP50: at(0.5), respP95: at(0.95),
+    capped: feats.count, kept, maskedDropped: feats.count - kept,
+    ...feats.diag,
   }
 
   return {
-    result: { keypoints, descriptors, width: natW, height: natH, detectWidth: width, detectHeight: height, ms, diag },
+    result: {
+      keypoints, descriptors, descDim: feats.descLen, detector,
+      width: natW, height: natH, detectWidth: width, detectHeight: height, ms: feats.ms, diag,
+    },
     transfer: [descriptors.buffer],
   }
 }
 
 async function match([descA, descB, options = {}]) {
   return { result: await matchDescriptors(descA, descB, options) }
+}
+
+// LightGlue joint matcher (ONNX). Unlike `match`, it needs both keypoint sets +
+// image sizes (attention input + internal coord normalization), so it takes one
+// args object. Streams first-run init/backend log lines like SuperPoint.
+async function matchLightGluePair([args = {}], { emit } = {}) {
+  const onLog = emit ? (msg) => emit('log', [msg]) : undefined
+  return { result: await matchLightGlue({ ...args, onLog }) }
 }
 
 async function verify([kpsA, kpsB, matches, options = {}]) {
@@ -607,7 +674,7 @@ async function generateOrtho([input], { emit }) {
   }
 }
 
-const ops = { detect, match, verify, reconstruct, computeDepthMaps, densify, generateDem, generateOrtho }
+const ops = { detect, match, matchLightGlue: matchLightGluePair, verify, reconstruct, computeDepthMaps, densify, generateDem, generateOrtho }
 
 self.onmessage = async (e) => {
   const { id, op, args } = e.data

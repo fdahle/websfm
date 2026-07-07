@@ -470,21 +470,68 @@ export async function deletePoses(projectId) {
 }
 
 // ── Reconstruction ────────────────────────────────────────────────────────────
-// JSON: { clouds: [{ id, name, kind, createdAt,
-//                    cameras: [{ uuid, R, t, K }],
-//                    points: [{ x, y, z, color, views: [[uuid, kpIdx], …] }] }] }
-// Legacy single-model files { cameras: [...], points: [...] } are still read and
-// wrapped into one sparse cloud on restore.
+// Metadata → reconstruction.json (version 2):
+//   { version: 2, clouds: [{ id, name, kind, createdAt, pointCount, hasColor,
+//       cameras: [{ uuid, R, t, K }], viewUuids: [uuid, …] }],
+//     georef, summary, denseSummary }
+// The heavy per-point data lives in binary sidecars, one set per cloud, named
+// `recon.{cloudId}.{key}.bin`:
+//   pos    Float64  3·N   x,y,z (world-frame precision)
+//   col    Uint8    3·N   r,g,b (present only when hasColor)
+//   vcount Uint32   N     view-tracks per point (CSR row lengths)
+//   vcam   Uint32   ΣV    camera index into the cloud's viewUuids, per view
+//   vkp    Uint32   ΣV    keypoint index, per view
+// This replaces a multi-MB JSON.parse (which froze the main thread on open) with
+// a transferable typed-array read. The store passes each cloud's typed arrays as
+// `buffers: { pos, col, vcount, vcam, vkp }` (ArrayBuffers); load returns them the
+// same way for the store to rebuild the point objects.
+const RECON_BIN_KEYS = ['pos', 'col', 'vcount', 'vcam', 'vkp']
+
+async function removeStaleReconBins(dir, keepIds) {
+  const stale = []
+  for await (const name of dir.keys()) {
+    const m = name.match(/^recon\.(.+)\.(?:pos|col|vcount|vcam|vkp)\.bin$/)
+    if (m && !keepIds.has(m[1])) stale.push(name)
+  }
+  for (const name of stale) await dir.removeEntry(name).catch(() => {})
+}
 
 export async function saveReconstruction(projectId, data) {
   const dir = await getProjectDir(projectId, true)
-  await writeJson(dir, 'reconstruction.json', data)
+  const { clouds = [], ...rest } = data
+  const meta = { version: 2, ...rest, clouds: [] }
+  const keepIds = new Set()
+  for (const c of clouds) {
+    keepIds.add(c.id)
+    const { buffers, ...cmeta } = c
+    meta.clouds.push(cmeta)
+    for (const key of RECON_BIN_KEYS) {
+      const buf = buffers?.[key]
+      const name = `recon.${c.id}.${key}.bin`
+      if (buf && buf.byteLength) await writeBin(dir, name, buf)
+      else await dir.removeEntry(name).catch(() => {})   // e.g. col absent, or empty view set
+    }
+  }
+  await writeJson(dir, 'reconstruction.json', meta)
+  await removeStaleReconBins(dir, keepIds)               // drop sidecars of removed clouds
 }
 
 export async function loadReconstruction(projectId) {
   try {
     const dir = await getProjectDir(projectId)
-    return readJson(dir, 'reconstruction.json')
+    const meta = await readJson(dir, 'reconstruction.json')
+    if (!meta) return null
+    // Legacy inline shape (points embedded in JSON) — hand back untouched; the
+    // store still understands it. New projects always write version 2.
+    if (meta.version !== 2) return meta
+    for (const c of meta.clouds || []) {
+      const buffers = {}
+      for (const key of RECON_BIN_KEYS) {
+        buffers[key] = await readBin(dir, `recon.${c.id}.${key}.bin`).catch(() => null)
+      }
+      c.buffers = buffers
+    }
+    return meta
   } catch {
     return null
   }
@@ -493,7 +540,8 @@ export async function loadReconstruction(projectId) {
 export async function deleteReconstruction(projectId) {
   try {
     const dir = await getProjectDir(projectId)
-    await dir.removeEntry('reconstruction.json')
+    await dir.removeEntry('reconstruction.json').catch(() => {})
+    await removeStaleReconBins(dir, new Set())
   } catch {}
 }
 

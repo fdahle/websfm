@@ -237,6 +237,67 @@ describe('reconstruct (incremental SfM, synthetic 3-view scene)', () => {
     expect(uncorrected.summary.postBaMedianPx).toBeGreaterThan(2 * corrected.summary.postBaMedianPx)
   })
 
+  it('folds self-calibrated k1 back into the keypoints, keeping the model pinhole (D1)', async () => {
+    const rng = mulberry32(7)
+    const N = 80
+    const world = Array.from({ length: N }, () => [
+      (rng() - 0.5) * 4, (rng() - 0.5) * 3, 8 + rng() * 4,
+    ])
+    const centers = [[0, 0, 0], [2, 0, 0], [-2, 0, 0]]
+    const Rs = [rotY(0), rotY(0.15), rotY(-0.15)]
+    const ts = Rs.map((R, i) => mv(R, centers[i]).map((v) => -v))
+    const uuids = ['c0', 'c1', 'c2']
+    // Pure radial k1 (Brown r²) = exactly BA's shared-k1 model, so self-cal can
+    // capture it fully. No sensor → ingest does NOT undistort; BA must self-calibrate.
+    const dist = { k1: -0.05, k2: 0, k3: 0, p1: 0, p2: 0 }
+    const distorted = uuids.map((uuid, ci) =>
+      world.map((X) => {
+        const p = project(Rs[ci], ts[ci], X)
+        return distortPixel(p.x, p.y, Kobj, dist)
+      }))
+    const matches = world.map((_, i) => [i, i])
+    const pairs = []
+    for (let a = 0; a < 3; a++) for (let b = a + 1; b < 3; b++) {
+      pairs.push({
+        idA: uuids[a], idB: uuids[b],
+        F: fundamental(Rs[a], ts[a], Rs[b], ts[b]),
+        matches, inlierCount: N, status: 'done',
+      })
+    }
+    // Shared sensor id on every image so the run reports one self-cal group (D2).
+    const images = uuids.map((uuid, ci) => ({
+      uuid, name: uuid, kpStatus: 'done', meta: META, sensor: null, sensorId: 'sensorA',
+      keypoints: distorted[ci].map((p) => ({ x: p.x, y: p.y })),
+    }))
+
+    const logs = []
+    // Wide filter gate so the (still-distorted) pre-self-cal residuals survive the
+    // filter passes and self-cal actually runs on the full set.
+    const out = await reconstruct(
+      { images, pairs, settings: { baIterations: 40, refineIntrinsics: 'f,k1', filterMaxReprojPx: 30 } },
+      { onLog: (m, level, cat) => logs.push([level, cat, m]) },
+    )
+
+    expect(out.status).toBe('done')
+    expect(out.cameras).toHaveLength(3)
+    // The distortion was folded into the keypoints, not left stranded on the model:
+    // every camera K is pinhole (k1 = 0) at the end.
+    for (const c of out.cameras) expect(c.K.k1 || 0).toBe(0)
+    // Pinhole reprojection stats are now consistent with BA's own RMS — the point of
+    // D1. With a stranded k1 this would stay large and the filter would gut the model.
+    expect(out.summary.postBaMedianPx).toBeLessThan(1.0)
+    expect(out.points.length).toBeGreaterThan(30)
+    expect(logs.some(([, , m]) => /folded self-calibrated k1/.test(m))).toBe(true)
+
+    // D2: the run exports the self-calibrated distortion so dense can reproduce the
+    // fold. One sensor group, a k1 near the true −0.05 that BA recovered.
+    expect(out.summary.selfCalDistortion).toHaveLength(1)
+    const [scd] = out.summary.selfCalDistortion
+    expect(scd.sensorId).toBe('sensorA')
+    expect(scd.k1).toBeLessThan(0)          // barrel, matching the injected sign
+    expect(Math.abs(scd.k1 - (-0.05))).toBeLessThan(0.02)
+  })
+
   it('returns status "idle" when fewer than two images have keypoints', async () => {
     const out = await reconstruct(
       { images: [{ uuid: 'c0', name: 'c0', kpStatus: 'done', meta: META, keypoints: [{ x: 1, y: 2 }] }], pairs: [], settings: {} },

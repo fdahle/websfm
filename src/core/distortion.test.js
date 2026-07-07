@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   hasDistortion, distortNormalized, undistortNormalized,
   undistortPixel, distortPixel, distortionOf,
+  coeffsForModel, inferDistortionModel, DISTORTION_MODELS,
 } from './distortion.js'
 
 // A realistic mid-frame camera (1920×1080) with moderate barrel distortion + a
@@ -16,6 +17,36 @@ describe('distortion (Brown–Conrady)', () => {
     expect(hasDistortion({ k1: -0.1 })).toBe(true)
     expect(distortionOf({ k1: 0, k2: 0, p1: 0 })).toBeNull()
     expect(distortionOf({ k1: -0.1 })).toMatchObject({ k1: -0.1 })
+  })
+
+  it('distortion models gate which coefficients distortionOf applies (D3)', () => {
+    // Unknown/undefined model → all coefficients (back-compat with pre-model sensors).
+    expect(coeffsForModel(undefined)).toEqual(['k1', 'k2', 'k3', 'p1', 'p2'])
+    expect(coeffsForModel('radial')).toEqual(['k1'])
+    expect(coeffsForModel('pinhole')).toEqual([])
+
+    const full = { k1: -0.1, k2: 0.02, k3: 0.001, p1: 3e-4, p2: -2e-4 }
+    // Pinhole ignores every coefficient (a model switch can't leave a term applied).
+    expect(distortionOf({ ...full, distortionModel: 'pinhole' })).toBeNull()
+    // Radial(k1) applies only k1; k2/k3/p1/p2 are zeroed even though present.
+    expect(distortionOf({ ...full, distortionModel: 'radial' }))
+      .toEqual({ k1: -0.1, k2: 0, k3: 0, p1: 0, p2: 0 })
+    // Radial(k1,k2) keeps k1,k2 only.
+    expect(distortionOf({ ...full, distortionModel: 'radial2' }))
+      .toEqual({ k1: -0.1, k2: 0.02, k3: 0, p1: 0, p2: 0 })
+    // Brown keeps all five.
+    expect(distortionOf({ ...full, distortionModel: 'brown' })).toEqual(full)
+  })
+
+  it('inferDistortionModel picks the tightest model covering the coefficients (D3)', () => {
+    expect(inferDistortionModel(null)).toBe('pinhole')
+    expect(inferDistortionModel({})).toBe('pinhole')
+    expect(inferDistortionModel({ k1: -0.1 })).toBe('radial')
+    expect(inferDistortionModel({ k1: -0.1, k2: 0.02 })).toBe('radial2')
+    expect(inferDistortionModel({ k1: -0.1, p1: 1e-4 })).toBe('brown')
+    // Every inferred id is a real model.
+    for (const s of [{}, { k1: 1 }, { k2: 1 }, { p2: 1 }])
+      expect(DISTORTION_MODELS.some((m) => m.id === inferDistortionModel(s))).toBe(true)
   })
 
   it('forward and inverse are no-ops with zero coefficients', () => {

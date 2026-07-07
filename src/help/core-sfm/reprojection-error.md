@@ -22,10 +22,16 @@ aliases: reprojection errors
 ---
 
 Reprojection error is the residual that camera pose estimation and
-[bundle adjustment](help:bundle-adjustment) try to minimize: take a 3D point,
-project it through a camera's pose and intrinsics, and measure the distance
-in pixels between that projection and the keypoint it was matched from.
+[bundle adjustment](help:bundle-adjustment) try to minimize: take a 3D
+[tie point](help:tie-point), project it through a camera's pose and
+[intrinsics](help:camera-intrinsics), and measure the distance in pixels between
+that projection and the [keypoint](help:keypoint) it was matched from. A low
+reprojection error means the recovered geometry is self-consistent — the cameras
+and the 3D structure genuinely agree on where each feature is.
 
-A lower threshold during PnP RANSAC is stricter — fewer correspondences pass
-as inliers, but the ones that do are better localized. Typical values are
-1-4 px depending on image resolution and keypoint precision.
+It is the common currency of quality across the pipeline. Pose estimation and
+bundle adjustment minimise it; [RANSAC](help:ransac) uses it as the inlier test
+that separates good correspondences from outliers. A lower threshold during PnP
+RANSAC is stricter — fewer correspondences pass as inliers, but the ones that do
+are better localized. Typical values are 1–4 px depending on image resolution and
+keypoint precision.

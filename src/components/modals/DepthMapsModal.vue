@@ -1,12 +1,12 @@
 <script setup>
-import { ref, watch } from 'vue'
+import { ref } from 'vue'
+import { useComputeSettings } from '../../composables/useComputeSettings.js'
 
 const emit = defineEmits(['close', 'run'])
 
-// Memory budget for the dense pre-flight (Step 5). Persisted across sessions so a
-// user who raised it for large projects doesn't have to redo it each run.
-const BUDGET_KEY = 'websfm.dense.memBudgetGb'
-const savedBudgetGb = Number(localStorage.getItem(BUDGET_KEY)) || 2
+// Memory budget for the dense pre-flight (Step 5) is a machine-level limit — it lives
+// in Settings ▸ Compute now; read the persisted value here and apply it on run.
+const { memBudgetGb } = useComputeSettings()
 
 // Stage A — Build Depth Maps (PatchMatch MVS). Quality is the primary control
 // (Metashape-style relative preset → the store resolves it to a working maxDim
@@ -22,19 +22,14 @@ const settings = ref({
   speckleFilter: true,
   filterRelTol: 10,    // exposed as a percentage; converted to a relative fraction on run
   useGpu: false,       // experimental WebGPU backend
-  memBudgetGb: savedBudgetGb, // dense pre-flight budget (Step 5)
-})
-
-watch(() => settings.value.memBudgetGb, (v) => {
-  if (v > 0) localStorage.setItem(BUDGET_KEY, String(v))
 })
 
 function run() {
-  const { filterRelTol, maxDim, bestK, memBudgetGb, ...rest } = settings.value
+  const { filterRelTol, maxDim, bestK, ...rest } = settings.value
   const out = {
     ...rest,
     filterRelTol: filterRelTol / 100,
-    memBudgetBytes: Math.max(0.25, memBudgetGb || 2) * 1024 * 1024 * 1024,
+    memBudgetBytes: Math.max(0.25, memBudgetGb.value || 2) * 1024 * 1024 * 1024,
   }
   // Only forward the numeric overrides when actually set — otherwise let the
   // store/worker derive them (maxDim from quality, bestK per image).
@@ -166,20 +161,6 @@ function run() {
               />
               <span class="field-hint">Propagation/refinement sweeps at the finest pyramid level (coarser levels get more).</span>
             </div>
-
-            <div class="field">
-              <label class="field-label" for="memBudget">Memory budget</label>
-              <div class="input-row">
-                <input
-                  id="memBudget"
-                  v-model.number="settings.memBudgetGb"
-                  type="number" min="0.25" step="0.5"
-                  class="field-input"
-                />
-                <span class="field-unit">GB</span>
-              </div>
-              <span class="field-hint">Pre-flight refuses to start if the projected peak exceeds this (prevents the browser killing the tab). Persisted across sessions.</span>
-            </div>
           </div>
         </details>
       </div>
@@ -203,7 +184,8 @@ function run() {
   background: var(--panel);
   border: 1px solid var(--panel-border);
   border-radius: 8px;
-  width: 380px; max-width: 90vw;
+  width: 480px; max-width: 90vw;
+  max-height: 90vh;
   box-shadow: 0 8px 32px rgba(0,0,0,0.4);
   display: flex; flex-direction: column;
 }
@@ -218,7 +200,7 @@ function run() {
   font-size: 20px; line-height: 1; cursor: pointer; padding: 1px 6px; border-radius: 4px;
 }
 .modal-close:hover { background: var(--hover-bg); color: var(--text); }
-.modal-body { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.modal-body { padding: 16px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; min-height: 0; }
 .modal-footer {
   display: flex; justify-content: flex-end; gap: 8px;
   padding: 12px 16px; border-top: 1px solid var(--panel-border);

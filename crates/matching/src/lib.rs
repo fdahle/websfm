@@ -405,6 +405,19 @@ fn sample8(rng: &mut Xorshift, n: usize) -> [usize; 8] {
     s
 }
 
+fn sample4(rng: &mut Xorshift, n: usize) -> [usize; 4] {
+    let mut s = [0usize; 4];
+    let mut k = 0;
+    while k < 4 {
+        let idx = rng.below(n);
+        if s[..k].iter().all(|&x| x != idx) {
+            s[k] = idx;
+            k += 1;
+        }
+    }
+    s
+}
+
 fn ransac_fundamental(
     pa: &[(f64, f64)],
     pb: &[(f64, f64)],
@@ -462,6 +475,99 @@ fn ransac_fundamental(
     Some((f_ref, final_mask))
 }
 
+// ─── Homography (4-point DLT + RANSAC) — H-vs-F degeneracy test ────────────────
+// A homography explains a pair whose scene is planar or whose motion is a pure
+// rotation. When H captures nearly as many inliers as F, the pair is degenerate
+// for triangulation (a near-planar building façade, a spin-in-place). The ratio
+// H_inliers / F_inliers is the signal COLMAP uses to down-rank such pairs as SfM
+// seeds; we compute it here and let the store/reconstruction flag the pair.
+
+// Inverse of a Hartley normalization matrix [[s,0,-s·cx],[0,s,-s·cy],[0,0,1]].
+fn inv_norm_matrix(t: &M3) -> M3 {
+    let s = t[0][0];
+    let cx = -t[0][2] / s;
+    let cy = -t[1][2] / s;
+    [[1.0 / s, 0.0, cx], [0.0, 1.0 / s, cy], [0.0, 0.0, 1.0]]
+}
+
+// Homography H mapping pts_a → pts_b via the normalized DLT (2 rows/correspondence,
+// null vector of AᵀA, then denormalized H = Tb⁻¹·Ĥ·Ta). Returns None if < 4 points.
+fn homography_dlt(pts_a: &[(f64, f64)], pts_b: &[(f64, f64)]) -> Option<M3> {
+    let n = pts_a.len().min(pts_b.len());
+    if n < 4 {
+        return None;
+    }
+    let ta = norm_matrix(pts_a);
+    let tb = norm_matrix(pts_b);
+
+    let mut ata = [[0.0f64; 9]; 9];
+    for k in 0..n {
+        let (x, y) = apply_t(&ta, pts_a[k]);
+        let (xp, yp) = apply_t(&tb, pts_b[k]);
+        let row1 = [-x, -y, -1.0, 0.0, 0.0, 0.0, xp * x, xp * y, xp];
+        let row2 = [0.0, 0.0, 0.0, -x, -y, -1.0, yp * x, yp * y, yp];
+        for i in 0..9 {
+            for j in 0..9 {
+                ata[i][j] += row1[i] * row1[j] + row2[i] * row2[j];
+            }
+        }
+    }
+
+    let v9 = jacobi_eig_9(&mut ata);
+    let mut min_col = 0;
+    for i in 1..9 {
+        if ata[i][i] < ata[min_col][min_col] {
+            min_col = i;
+        }
+    }
+    let mut h_hat: M3 = [[0.0; 3]; 3];
+    for r in 0..3 {
+        for c in 0..3 {
+            h_hat[r][c] = v9[r * 3 + c][min_col];
+        }
+    }
+    Some(mat3_mul(inv_norm_matrix(&tb), mat3_mul(h_hat, ta)))
+}
+
+// Forward transfer squared error ‖(H·pa)_xy − pb‖² in pixel space — directly
+// comparable to the Sampson threshold used for F inliers.
+fn transfer_sq(h: &M3, pa: (f64, f64), pb: (f64, f64)) -> f64 {
+    let hp = mat3_v(h, [pa.0, pa.1, 1.0]);
+    if hp[2].abs() < 1e-12 {
+        return 1e18;
+    }
+    let dx = hp[0] / hp[2] - pb.0;
+    let dy = hp[1] / hp[2] - pb.1;
+    dx * dx + dy * dy
+}
+
+// RANSAC homography; returns the best inlier count (the model itself is unused
+// downstream — only the count feeds the H-vs-F degeneracy ratio).
+fn ransac_homography(pa: &[(f64, f64)], pb: &[(f64, f64)], thresh_sq: f64, max_iters: usize) -> usize {
+    let n = pa.len().min(pb.len());
+    if n < 4 {
+        return 0;
+    }
+    let mut rng = Xorshift::new(n as u32 * 2657 + 13);
+    let mut best_count = 0usize;
+    for _ in 0..max_iters {
+        let idx = sample4(&mut rng, n);
+        let sub_a: Vec<_> = idx.iter().map(|&i| pa[i]).collect();
+        let sub_b: Vec<_> = idx.iter().map(|&i| pb[i]).collect();
+        let Some(h) = homography_dlt(&sub_a, &sub_b) else { continue };
+        let mut count = 0;
+        for i in 0..n {
+            if transfer_sq(&h, pa[i], pb[i]) < thresh_sq {
+                count += 1;
+            }
+        }
+        if count > best_count {
+            best_count = count;
+        }
+    }
+    best_count
+}
+
 // ─── Exported WASM API ────────────────────────────────────────────────────────
 
 /// RANSAC fundamental matrix estimation on a set of putative matches.
@@ -501,4 +607,122 @@ pub fn verify_matches(
         out.push(if flag { 1.0 } else { 0.0 });
     }
     out
+}
+
+/// Like `verify_matches`, but also fits a homography via RANSAC and reports its
+/// inlier count so the caller can compute the H-vs-F degeneracy ratio.
+///
+/// Output layout: `[F00..F22, h_inlier_count, inlier_0, inlier_1, ...]` — the
+/// fundamental matrix (9), then the homography inlier count (1), then the F
+/// inlier flags (n). Empty if < 8 correspondences or RANSAC finds no F.
+#[wasm_bindgen]
+pub fn verify_matches_hf(
+    pts_a: &[f32],
+    pts_b: &[f32],
+    ransac_thresh_px: f32,
+    max_iters: u32,
+) -> Vec<f32> {
+    let n = pts_a.len() / 2;
+    if n != pts_b.len() / 2 || n < 8 {
+        return vec![];
+    }
+    let pa: Vec<(f64, f64)> =
+        (0..n).map(|i| (pts_a[i * 2] as f64, pts_a[i * 2 + 1] as f64)).collect();
+    let pb: Vec<(f64, f64)> =
+        (0..n).map(|i| (pts_b[i * 2] as f64, pts_b[i * 2 + 1] as f64)).collect();
+    let thresh_sq = (ransac_thresh_px as f64).powi(2);
+
+    let Some((f, mask)) = ransac_fundamental(&pa, &pb, thresh_sq, max_iters as usize) else {
+        return vec![];
+    };
+    let h_inliers = ransac_homography(&pa, &pb, thresh_sq, max_iters as usize);
+
+    let mut out = Vec::with_capacity(9 + 1 + n);
+    for row in &f {
+        for &v in row {
+            out.push(v as f32);
+        }
+    }
+    out.push(h_inliers as f32);
+    for &flag in &mask {
+        out.push(if flag { 1.0 } else { 0.0 });
+    }
+    out
+}
+
+// ─── Tests ────────────────────────────────────────────────────────────────────
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Tiny deterministic LCG for reproducible synthetic scenes.
+    struct Lcg(u64);
+    impl Lcg {
+        fn f(&mut self) -> f64 {
+            self.0 = self
+                .0
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            ((self.0 >> 33) as f64) / (1u64 << 31) as f64 // ∈ [0,1)
+        }
+        fn range(&mut self, a: f64, b: f64) -> f64 {
+            a + (b - a) * self.f()
+        }
+    }
+
+    fn roty(a: f64) -> M3 {
+        [[a.cos(), 0.0, a.sin()], [0.0, 1.0, 0.0], [-a.sin(), 0.0, a.cos()]]
+    }
+
+    // Pinhole projection of a world point through (R, t) with focal f, principal c.
+    fn proj(r: &M3, t: &V3, x: V3, f: f64, c: f64) -> (f64, f64) {
+        let xc = mat3_v(r, x);
+        let z = xc[2] + t[2];
+        (f * (xc[0] + t[0]) / z + c, f * (xc[1] + t[1]) / z + c)
+    }
+
+    // Two-view scene: camera A at identity, camera B rotated + translated. `planar`
+    // pins all points to one depth (near-planar → a homography fits the whole pair);
+    // otherwise depth varies widely (general motion → no single homography fits).
+    fn scene(planar: bool) -> (Vec<f32>, Vec<f32>) {
+        let mut rng = Lcg(0x1234_5678);
+        let ra: M3 = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let ta: V3 = [0.0, 0.0, 0.0];
+        let rb = roty(0.12);
+        let tb: V3 = [0.6, 0.0, 0.0];
+        let (f, c) = (1000.0, 500.0);
+        let (mut pa, mut pb) = (Vec::new(), Vec::new());
+        for _ in 0..60 {
+            let z = if planar { 6.0 + rng.range(-0.03, 0.03) } else { rng.range(3.0, 10.0) };
+            let x: V3 = [rng.range(-2.0, 2.0), rng.range(-2.0, 2.0), z];
+            let (ax, ay) = proj(&ra, &ta, x, f, c);
+            let (bx, by) = proj(&rb, &tb, x, f, c);
+            pa.push(ax as f32);
+            pa.push(ay as f32);
+            pb.push(bx as f32);
+            pb.push(by as f32);
+        }
+        (pa, pb)
+    }
+
+    #[test]
+    fn homography_dominates_on_planar_scene() {
+        let (pa, pb) = scene(true);
+        let out = verify_matches_hf(&pa, &pb, 2.0, 2000);
+        assert!(!out.is_empty(), "verification should succeed on a planar scene");
+        let h = out[9];
+        let f_inliers: f32 = out[10..].iter().sum();
+        assert!(h / f_inliers > 0.9, "planar H/F ratio too low: {h} / {f_inliers}");
+    }
+
+    #[test]
+    fn homography_underfits_general_scene() {
+        let (pa, pb) = scene(false);
+        let out = verify_matches_hf(&pa, &pb, 2.0, 2000);
+        assert!(!out.is_empty(), "verification should succeed on a general scene");
+        let h = out[9];
+        let f_inliers: f32 = out[10..].iter().sum();
+        assert!(f_inliers > 40.0, "general F should fit most points: {f_inliers}");
+        assert!(h / f_inliers < 0.8, "general H/F ratio too high: {h} / {f_inliers}");
+    }
 }
