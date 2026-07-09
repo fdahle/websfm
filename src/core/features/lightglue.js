@@ -20,6 +20,11 @@
 //        keeps working. The first run logs the actual dims so it's auditable.
 
 import { createSession, tensor, resolveBackend } from './ort.js'
+import {
+  estimateHomographyRansac, planGuidedTiles, kptIndicesInRect,
+  dedupeGuidedMatches, marginFromResiduals,
+} from './guidedTiles.js'
+import { sliceDescriptorRows } from './subsetGate.js'
 
 // Sessions are cached per `${modelKey}:${backend}` — a modelKey can hold both a
 // WebGPU and a WASM session if we fall back mid-run (see below).
@@ -279,6 +284,145 @@ export async function matchLightGlue(args) {
     // Per-pair timing at 'debug' for EVERY pair — a slow-but-alive run is then
     // distinguishable from a hang in the console.
     onLog?.(`LightGlue: ${spec.nA}×${spec.nB} kpts → ${matches.length} matches in ${ms} ms on ${backend}`, 'debug')
+    return { matches }
+  })
+}
+
+/**
+ * Coarse-to-fine tiled LightGlue: match a pair at full keypoint density in bounded
+ * memory. Match a capped coarse subset → fit a homography H (A→B) on the verified
+ * coarse matches → tile A, map each tile through H (+ parallax margin) into B → run
+ * LightGlue tile-vs-region at full local density → merge with one-to-one dedupe.
+ *
+ * Falls back cleanly to the plain capped path (identical output shape) when there
+ * aren't enough coarse matches or H is a poor guide (scene too 3D / too little
+ * overlap) — a fallback, not a failure. Return shape is identical to
+ * matchLightGlue, so the store's verify/gate path is untouched.
+ *
+ * @param {object} args  matchLightGlue args, plus:
+ * @param {number} [args.coarseKeypoints=1024]  per-image cap for the coarse pass
+ * @param {number} [args.tileBudget=2048]  max keypoints per tile side (attention budget)
+ * @param {number} [args.guideMinMatches=24]  min coarse matches to attempt a guide
+ * @param {number} [args.guideMinInliers=15]  min H-inliers for a usable guide
+ * @param {number} [args.guideMinInlierRatio=0.3]  min H-inlier fraction for a usable guide
+ * @param {number} [args.tileMinKps=32]  skip a tile with fewer kps than this on either side
+ * @returns {Promise<{ matches: {ia:number,ib:number,score:number}[] }>}
+ */
+export async function matchLightGlueTiled(args) {
+  const {
+    kpsA, descA, wA, hA, kpsB, descB, wB, hB, minConf = 0,
+    maxKeypoints = 2048,       // cap for the plain fallback path
+    coarseKeypoints = 1024,
+    tileBudget = 2048,
+    guideMinMatches = 24,
+    guideMinInliers = 15,
+    guideMinInlierRatio = 0.3,
+    tileMinKps = 32,
+    useGpu = false, model = defaultModelUrl(), modelKey = 'default', onLog,
+  } = args
+  const dim = kpsA.length ? descA.length / kpsA.length : 256
+
+  // One mutex acquisition for the WHOLE tiled run (coarse + every tile) — all runs
+  // reuse the single session `run` opened here. The fallback path stays inside too,
+  // so it must NOT call the public matchLightGlue (which would re-enter this same
+  // mutex and deadlock); it runs a prefix pass through `run` directly.
+  return serialized(async () => {
+    const { run } = await openRun(modelKey, model, useGpu, minConf, onLog)
+    // Consume the one-time warm-up flag on the first sub-run of this invocation.
+    let first = !warmedUp.has(modelKey)
+    if (first) warmedUp.add(modelKey)
+    const consumeFirst = () => { const f = first; first = false; return f }
+
+    // Plain prefix run through the already-open session (fallback + coarse pass).
+    const runPrefix = async (cap) => {
+      const { spec } = prefixFeeds(kpsA, descA, wA, hA, kpsB, descB, wB, hB, cap)
+      const { matches } = await run(spec, { first: consumeFirst() })
+      return matches
+    }
+
+    // 1. Coarse pass on the strongest coarseKeypoints per image.
+    const nCoarseA = Math.min(kpsA.length, coarseKeypoints)
+    const nCoarseB = Math.min(kpsB.length, coarseKeypoints)
+    if (first) {
+      onLog?.(`LightGlue tiled: first match — one-time graph warm-up on the coarse pass; `
+        + `single-thread wasm can take tens of seconds per pair…`)
+    }
+    const coarse = (await runPrefix(coarseKeypoints)).filter((m) => m.score >= minConf)
+
+    // 2. Guard: too few coarse matches to fit a guide → plain capped fallback.
+    if (coarse.length < guideMinMatches) {
+      onLog?.(`LightGlue tiled: coarse ${nCoarseA}×${nCoarseB} → ${coarse.length} matches `
+        + `(< ${guideMinMatches} needed to guide) — falling back to plain ${maxKeypoints}-cap match`, 'info')
+      return { matches: await runPrefix(maxKeypoints) }
+    }
+
+    // 3. Fit H (A→B) on the coarse matches.
+    const ptsA = coarse.map((m) => [kpsA[m.ia].x, kpsA[m.ia].y])
+    const ptsB = coarse.map((m) => [kpsB[m.ib].x, kpsB[m.ib].y])
+    const fit = estimateHomographyRansac(ptsA, ptsB, { threshPx: 3, iters: 500 })
+    const ratio = fit ? fit.inlierCount / coarse.length : 0
+    if (!fit || fit.inlierCount < guideMinInliers || ratio < guideMinInlierRatio) {
+      onLog?.(`LightGlue tiled: coarse ${nCoarseA}×${nCoarseB} → ${coarse.length} matches, `
+        + `H ${fit ? `${fit.inlierCount} inliers (ratio ${ratio.toFixed(2)})` : 'not estimable'} — `
+        + `guide too weak (need ≥${guideMinInliers} inliers, ratio ≥${guideMinInlierRatio}) — `
+        + `falling back to plain ${maxKeypoints}-cap match`, 'info')
+      return { matches: await runPrefix(maxKeypoints) }
+    }
+    onLog?.(`LightGlue tiled: coarse ${nCoarseA}×${nCoarseB} → ${coarse.length} matches, `
+      + `${fit.inlierCount} H-inliers (ratio ${ratio.toFixed(2)}), p95 err ${fit.p95ErrPx.toFixed(1)} px`, 'info')
+
+    // 4. Plan tiles. Margin from the actual H fit; tile size from keypoint density
+    // so an average tile holds ≤ tileBudget keypoints.
+    const marginPx = marginFromResiduals(fit.p95ErrPx)
+    const density = (kpsA.length) / Math.max(1, wA * hA)
+    const tileSize = density > 0
+      ? Math.max(512, Math.min(4096, Math.round(Math.sqrt(tileBudget / density))))
+      : 4096
+    const plan = planGuidedTiles({ wA, hA, wB, hB, H: fit.H, tileSize, marginPx })
+    onLog?.(`LightGlue tiled: margin ${marginPx} px, tileSize ${tileSize} px → ${plan.length} tiles`, 'info')
+
+    // 5. Per-tile full-density match.
+    const all = []
+    let skipped = 0
+    for (let ti = 0; ti < plan.length; ti++) {
+      const { tileA, regionB } = plan[ti]
+      let idxA = kptIndicesInRect(kpsA, tileA)
+      let idxB = kptIndicesInRect(kpsB, regionB)
+      if (idxA.length < tileMinKps || idxB.length < tileMinKps) { skipped++; continue }
+      // Cap each side to the attention budget (indices are score-ordered, so a
+      // prefix keeps the strongest).
+      if (idxA.length > tileBudget) idxA = idxA.slice(0, tileBudget)
+      if (idxB.length > tileBudget) idxB = idxB.slice(0, tileBudget)
+
+      const subKpsA = idxA.map((i) => kpsA[i])
+      const subKpsB = idxB.map((i) => kpsB[i])
+      const spec = {
+        kptsA: normalizeKpts(subKpsA, wA, hA),
+        kptsB: normalizeKpts(subKpsB, wB, hB),
+        descsA: sliceDescriptorRows(descA, idxA, dim),
+        descsB: sliceDescriptorRows(descB, idxB, dim),
+        nA: idxA.length, nB: idxB.length, dim,
+      }
+      const { matches: tileMatches } = await run(spec, { first: consumeFirst() })
+      // Remap tile-local indices back to full-array indices.
+      for (const m of tileMatches) {
+        if (m.score < minConf) continue
+        all.push({ ia: idxA[m.ia], ib: idxB[m.ib], score: m.score })
+      }
+      onLog?.(`LightGlue tiled: tile ${ti + 1}/${plan.length} — ${idxA.length}×${idxB.length} kps `
+        + `→ ${tileMatches.length} matches`, 'debug')
+    }
+
+    // 6. Merge tile matches + the coarse H-inliers (so skipped tiles still
+    // contribute), then enforce one-to-one. Chaining SfM tracks depends on this
+    // dedupe + the index remap above — neither may be dropped.
+    for (let i = 0; i < coarse.length; i++) {
+      if (fit.inlierMask[i]) all.push(coarse[i])
+    }
+    const rawCount = all.length
+    const matches = dedupeGuidedMatches(all)
+    onLog?.(`LightGlue tiled: ${rawCount} raw → ${matches.length} after dedupe `
+      + `(${plan.length - skipped} tiles matched, ${skipped} skipped; coarse-only would have been ${coarse.length})`, 'info')
     return { matches }
   })
 }

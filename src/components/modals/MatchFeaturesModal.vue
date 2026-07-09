@@ -173,6 +173,18 @@ function run() {
 
         <div v-if="matcher === 'lightglue'" class="field">
           <label class="checkbox-row">
+            <input v-model="settings.lgTiled" type="checkbox" class="checkbox" />
+            <span class="field-label">Tiled guided matching (full resolution)</span>
+          </label>
+          <span class="field-hint">
+            Matches all keypoints in homography-guided tiles instead of only the strongest
+            {{ settings.lgMaxKeypoints }}. Slower — best with GPU + tiled detection. Only pays
+            off when detection produced far more keypoints than the cap; else it falls back.
+          </span>
+        </div>
+
+        <div v-if="matcher === 'lightglue'" class="field">
+          <label class="checkbox-row">
             <input v-model="settings.useGpu" type="checkbox" class="checkbox" />
             <span class="field-label">Use GPU (experimental)</span>
           </label>

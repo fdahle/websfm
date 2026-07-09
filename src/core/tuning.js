@@ -36,6 +36,12 @@ export const MATCH_TUNING = {
   hfDegenerateRatio: 0.8,  // homography-vs-fundamental ratio flagging a degenerate fit
   minInlierUniqueFrac: 0.5, // reject a pair whose inliers collapse to few unique locations
   minInlierSpreadPx: 8,    // …or into a pinhead region (epipole degeneracy), in px
+  // ── Tiled guided matching (core/features/guidedTiles.js, gated by lgTiled) ──
+  lgCoarseKeypoints: 1024,   // per-image cap for the coarse pass that fits the guide H
+  lgGuideMinMatches: 24,     // min coarse matches before attempting a homography guide
+  lgGuideMinInliers: 15,     // min H-inliers for the guide to be trusted (else fall back)
+  lgGuideMinInlierRatio: 0.3, // …and a min inlier fraction (scene too 3D ⇒ fall back)
+  lgTileMinKps: 32,          // skip a tile with fewer keypoints than this on either side
 }
 
 // Dense MVS knobs read in core/dense/mvs.js but NOT exposed in DepthMapsModal /

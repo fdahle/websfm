@@ -153,6 +153,16 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
           minConf: settings.lgMinConf,
           maxKeypoints: settings.lgMaxKeypoints,
           useGpu: settings.useGpu,
+          // Coarse-to-fine tiled guided matching (opt-in). When off, `tiled` is
+          // falsy and the worker routes to the plain capped path. The guide
+          // thresholds come from MATCH_TUNING via the settings merge above.
+          tiled: settings.lgTiled,
+          coarseKeypoints: settings.lgCoarseKeypoints,
+          tileBudget: settings.lgTileBudget,
+          guideMinMatches: settings.lgGuideMinMatches,
+          guideMinInliers: settings.lgGuideMinInliers,
+          guideMinInlierRatio: settings.lgGuideMinInlierRatio,
+          tileMinKps: settings.lgTileMinKps,
         }, { onLog: (msg, level = 'info') => log(msg, level, 'Matching') })
         raw = res.matches
       } else {
