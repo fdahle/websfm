@@ -13,7 +13,8 @@ export function makeMatchOps() {
   // image sizes (attention input + internal coord normalization), so it takes one
   // args object. Streams first-run init/backend log lines like SuperPoint.
   async function matchLightGluePair([args = {}], { emit } = {}) {
-    const onLog = emit ? (msg) => emit('log', [msg]) : undefined
+    // Thread the log level (default 'info') so per-pair timing can land at 'debug'.
+    const onLog = emit ? (msg, level) => emit('log', [msg, level]) : undefined
     return { result: await matchLightGlue({ ...args, onLog }) }
   }
 

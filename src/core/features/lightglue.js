@@ -30,6 +30,20 @@ const warmedUp = new Set()
 // the failed-GPU cost on every pair.
 const pinnedWasm = new Set()
 
+// ORT InferenceSessions are NOT reentrant: two concurrent `session.run()` calls on
+// one wasm session deadlock/corrupt (the 7-way freeze this module used to hit).
+// LightGlue is pinned to worker 0 (one heavy session), so serialize every run
+// through a promise chain — any caller, present or future, queues rather than
+// interleaves. Defense in depth alongside the store's serial dispatch for the
+// LightGlue matcher. `fn` is retried-agnostic: the chain advances on both fulfil
+// and reject so one failed pair can't wedge the queue.
+let runChain = Promise.resolve()
+function serialized(fn) {
+  const p = runChain.then(fn, fn)
+  runChain = p.then(() => {}, () => {})
+  return p
+}
+
 // LightGlue's transformer used to be hard-pinned to CPU: the old fabio-sim export
 // (opset-lower, ~9.7k nodes dominated by dynamic-shape bookkeeping) thrashed on
 // ORT's WebGPU EP. On ORT 1.27's much-improved JSEP it can run on the GPU, so the
@@ -99,83 +113,8 @@ function normalizeKpts(kps, w, h) {
   return out
 }
 
-/**
- * Match two images with LightGlue.
- *
- * @param {object} args
- * @param {{x:number,y:number}[]} args.kpsA  keypoints of image A (original px)
- * @param {Float32Array} args.descA          A's descriptors, N_a × dim row-major
- * @param {number} args.wA @param {number} args.hA  A's original image size (px)
- * @param {{x:number,y:number}[]} args.kpsB
- * @param {Float32Array} args.descB
- * @param {number} args.wB @param {number} args.hB
- * @param {number} [args.minConf=0]  drop matches below this LightGlue confidence
- * @param {number} [args.maxKeypoints=2048]  cap per image (0 = all). Attention is
- *        O(N²) so this is THE runtime lever; keypoints arrive score-sorted from
- *        detection, so taking the prefix keeps the strongest — and because it's a
- *        prefix, returned indices are valid in the caller's full arrays as-is.
- * @param {boolean} [args.useGpu=false]  opt into the experimental WebGPU backend
- *        (Chromium + adapter only; self-heals to CPU WASM on failure)
- * @returns {Promise<{ matches: {ia:number,ib:number,score:number}[] }>}
- *          ia indexes kpsA, ib indexes kpsB (same convention as the brute-force path)
- */
-export async function matchLightGlue(args) {
-  const {
-    kpsA, descA, wA, hA, kpsB, descB, wB, hB, minConf = 0, maxKeypoints = 2048,
-    useGpu = false, model = defaultModelUrl(), modelKey = 'default', onLog,
-  } = args
-  let backend = await chooseBackend(modelKey, useGpu)
-  let session = await getSession(model, modelKey, backend, onLog)
-
-  const dim = kpsA.length ? descA.length / kpsA.length : 256
-  const cap = maxKeypoints > 0 ? maxKeypoints : Infinity
-  const nA = Math.min(kpsA.length, cap)
-  const nB = Math.min(kpsB.length, cap)
-  const feeds = {
-    kpts0: await tensor('float32', normalizeKpts(kpsA.slice(0, nA), wA, hA), [1, nA, 2]),
-    kpts1: await tensor('float32', normalizeKpts(kpsB.slice(0, nB), wB, hB), [1, nB, 2]),
-    desc0: await tensor('float32', descA.subarray(0, nA * dim), [1, nA, dim]),
-    desc1: await tensor('float32', descB.subarray(0, nB * dim), [1, nB, dim]),
-  }
-
-  const first = !warmedUp.has(modelKey)
-  if (first) {
-    const capped = nA < kpsA.length || nB < kpsB.length
-    onLog?.(`LightGlue: first match ${nA}×${nB} keypoints on ${backend}`
-      + `${capped ? ` (capped from ${kpsA.length}×${kpsB.length}, strongest kept)` : ''}`
-      + ' — one-time graph warm-up…')
-  }
-  // Watchdog for the GPU path only: session.run there is genuinely async so the
-  // interval can fire. On CPU WASM run() blocks the worker's event loop — an
-  // interval would silently never fire (looks like a hang), so instead the CPU
-  // path logs its per-pair cost after the fact (see the `first` log below).
-  const watchdog = (first && backend === 'webgpu') ? setInterval(() => {
-    onLog?.(`LightGlue: still matching ${nA}×${nB} on ${backend}… if this drags for minutes, `
-      + 'the GPU warm-up will time out and fall back to CPU')
-  }, 15000) : null
-  const tRun = performance.now()
-  let out
-  try {
-    // Guard only the first WebGPU run with a timeout — that's where a bad JSEP
-    // graph would hang; steady-state runs on a proven session run unguarded.
-    out = (backend === 'webgpu' && first)
-      ? await withTimeout(session.run(feeds), GPU_WARMUP_TIMEOUT_MS, 'LightGlue WebGPU warm-up')
-      : await session.run(feeds)
-  } catch (err) {
-    if (backend !== 'webgpu') throw err
-    // GPU path failed (hang→timeout, unsupported op, device lost). Disprove it for
-    // this model, drop the bad session, and re-run this same pair on CPU WASM.
-    onLog?.(`LightGlue: WebGPU path failed (${err?.message || err}) — falling back to CPU WASM for the rest of this run`)
-    if (watchdog) clearInterval(watchdog)
-    pinnedWasm.add(modelKey)
-    sessions.delete(`${modelKey}:webgpu`)
-    backend = 'wasm'
-    session = await getSession(model, modelKey, 'wasm', onLog)
-    out = await session.run(feeds)
-  } finally {
-    if (watchdog) clearInterval(watchdog)
-  }
-
+// Parse an ONNX LightGlue output map into {ia,ib,score}[] (ia→image A, ib→image B).
+function parseMatches(out, session, minConf) {
   // Locate matches0 + mscores0 by name (fall back to output order).
   const names = session.outputNames
   const mName = names.find((nm) => /matches0/i.test(nm)) || names[0]
@@ -205,11 +144,141 @@ export async function matchLightGlue(args) {
       matches.push({ ia: i, ib: j, score })
     }
   }
+  return { matches, dims, sName }
+}
 
-  if (first) {
-    warmedUp.add(modelKey)
-    onLog?.(`LightGlue: first match ${nA}×${nB} kpts → ${matches.length} correspondences in `
-      + `${Math.round(performance.now() - tRun)} ms on ${backend} (matches0 dims [${dims}]${sName ? '' : ', no score output'})`)
+// One session.run on already-prepared, already-normalized feed arrays → parsed
+// matches. THROWS on run failure so the caller decides whether to fall back to
+// another backend (it does NOT itself switch backends). `first` guards the WebGPU
+// warm-up with a timeout + watchdog; on CPU WASM run() blocks the worker loop so
+// no watchdog fires there (its per-pair cost is logged after the fact by callers).
+//
+// feedsSpec: { kptsA:Float32Array(nA·2), kptsB, descsA:Float32Array(nA·dim), descsB,
+//              nA, nB, dim } — coords already normalized, descriptors already sliced.
+async function runPair(session, backend, feedsSpec, { minConf = 0, first = false, onLog } = {}) {
+  const { kptsA, kptsB, descsA, descsB, nA, nB, dim } = feedsSpec
+  const feeds = {
+    kpts0: await tensor('float32', kptsA, [1, nA, 2]),
+    kpts1: await tensor('float32', kptsB, [1, nB, 2]),
+    desc0: await tensor('float32', descsA, [1, nA, dim]),
+    desc1: await tensor('float32', descsB, [1, nB, dim]),
   }
-  return { matches }
+  const watchdog = (first && backend === 'webgpu') ? setInterval(() => {
+    onLog?.(`LightGlue: still matching ${nA}×${nB} on ${backend}… if this drags for minutes, `
+      + 'the GPU warm-up will time out and fall back to CPU')
+  }, 15000) : null
+  let out
+  try {
+    // Guard only the first WebGPU run with a timeout — that's where a bad JSEP
+    // graph would hang; steady-state runs on a proven session run unguarded.
+    out = (backend === 'webgpu' && first)
+      ? await withTimeout(session.run(feeds), GPU_WARMUP_TIMEOUT_MS, 'LightGlue WebGPU warm-up')
+      : await session.run(feeds)
+  } finally {
+    if (watchdog) clearInterval(watchdog)
+  }
+  return parseMatches(out, session, minConf)
+}
+
+// Resolve a session + backend for one serialized LightGlue invocation and return a
+// `run(feedsSpec, { first })` bound to it that transparently self-heals a failed
+// WebGPU run to CPU WASM (pins WASM for the rest of the session). Resolving the
+// session once here lets a multi-tile run (matchLightGlueTiled) reuse it across
+// coarse pass + every tile instead of re-choosing per call.
+async function openRun(modelKey, model, useGpu, minConf, onLog) {
+  let backend = await chooseBackend(modelKey, useGpu)
+  let session = await getSession(model, modelKey, backend, onLog)
+  const run = async (feedsSpec, { first = false } = {}) => {
+    try {
+      const r = await runPair(session, backend, feedsSpec, { minConf, first, onLog })
+      return { ...r, backend }
+    } catch (err) {
+      if (backend !== 'webgpu') throw err
+      // GPU path failed (hang→timeout, unsupported op, device lost). Disprove it
+      // for this model, drop the bad session, and re-run this feed on CPU WASM.
+      onLog?.(`LightGlue: WebGPU path failed (${err?.message || err}) — falling back to CPU WASM for the rest of this run`)
+      pinnedWasm.add(modelKey)
+      sessions.delete(`${modelKey}:webgpu`)
+      backend = 'wasm'
+      session = await getSession(model, modelKey, 'wasm', onLog)
+      const r = await runPair(session, backend, feedsSpec, { minConf, first, onLog })
+      return { ...r, backend }
+    }
+  }
+  return { run, getBackend: () => backend }
+}
+
+// Build a feedsSpec for a prefix-capped image pair (the plain, non-tiled path).
+// Prefix cap keeps the strongest (keypoints arrive score-sorted), and because
+// it's a prefix the returned indices are valid in the caller's full arrays as-is.
+function prefixFeeds(kpsA, descA, wA, hA, kpsB, descB, wB, hB, maxKeypoints) {
+  const dim = kpsA.length ? descA.length / kpsA.length : 256
+  const cap = maxKeypoints > 0 ? maxKeypoints : Infinity
+  const nA = Math.min(kpsA.length, cap)
+  const nB = Math.min(kpsB.length, cap)
+  return {
+    spec: {
+      kptsA: normalizeKpts(kpsA.slice(0, nA), wA, hA),
+      kptsB: normalizeKpts(kpsB.slice(0, nB), wB, hB),
+      descsA: descA.subarray(0, nA * dim),
+      descsB: descB.subarray(0, nB * dim),
+      nA, nB, dim,
+    },
+    capped: nA < kpsA.length || nB < kpsB.length,
+  }
+}
+
+/**
+ * Match two images with LightGlue.
+ *
+ * @param {object} args
+ * @param {{x:number,y:number}[]} args.kpsA  keypoints of image A (original px)
+ * @param {Float32Array} args.descA          A's descriptors, N_a × dim row-major
+ * @param {number} args.wA @param {number} args.hA  A's original image size (px)
+ * @param {{x:number,y:number}[]} args.kpsB
+ * @param {Float32Array} args.descB
+ * @param {number} args.wB @param {number} args.hB
+ * @param {number} [args.minConf=0]  drop matches below this LightGlue confidence
+ * @param {number} [args.maxKeypoints=2048]  cap per image (0 = all). Attention is
+ *        O(N²) so this is THE runtime lever; keypoints arrive score-sorted from
+ *        detection, so taking the prefix keeps the strongest.
+ * @param {boolean} [args.useGpu=false]  opt into the experimental WebGPU backend
+ *        (Chromium + adapter only; self-heals to CPU WASM on failure)
+ * @returns {Promise<{ matches: {ia:number,ib:number,score:number}[] }>}
+ *          ia indexes kpsA, ib indexes kpsB (same convention as the brute-force path)
+ */
+export async function matchLightGlue(args) {
+  const {
+    kpsA, descA, wA, hA, kpsB, descB, wB, hB, minConf = 0, maxKeypoints = 2048,
+    useGpu = false, model = defaultModelUrl(), modelKey = 'default', onLog,
+  } = args
+  const { spec, capped } = prefixFeeds(kpsA, descA, wA, hA, kpsB, descB, wB, hB, maxKeypoints)
+
+  // Serialize: ORT sessions are not reentrant (see `serialized`). Everything from
+  // session resolution through run() lives inside the mutex; only the feed arrays
+  // (already built above) are prepared outside it.
+  return serialized(async () => {
+    const { run } = await openRun(modelKey, model, useGpu, minConf, onLog)
+    // Mark warm-up STARTED (not finished): with serial dispatch pairs run one at a
+    // time now, but flipping the flag before the first await also stops any future
+    // re-entrant caller from each claiming to be "first".
+    const first = !warmedUp.has(modelKey)
+    if (first) {
+      warmedUp.add(modelKey)
+      onLog?.(`LightGlue: first match ${spec.nA}×${spec.nB} keypoints`
+        + `${capped ? ` (capped from ${kpsA.length}×${kpsB.length}, strongest kept)` : ''}`
+        + ' — one-time graph warm-up; single-thread wasm can take tens of seconds per pair…')
+    }
+    const tRun = performance.now()
+    const { matches, dims, sName, backend } = await run(spec, { first })
+    const ms = Math.round(performance.now() - tRun)
+    if (first) {
+      onLog?.(`LightGlue: first match ${spec.nA}×${spec.nB} kpts → ${matches.length} correspondences in `
+        + `${ms} ms on ${backend} (matches0 dims [${dims}]${sName ? '' : ', no score output'})`)
+    }
+    // Per-pair timing at 'debug' for EVERY pair — a slow-but-alive run is then
+    // distinguishable from a hang in the console.
+    onLog?.(`LightGlue: ${spec.nA}×${spec.nB} kpts → ${matches.length} matches in ${ms} ms on ${backend}`, 'debug')
+    return { matches }
+  })
 }

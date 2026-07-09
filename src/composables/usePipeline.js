@@ -59,7 +59,13 @@ export function usePipeline({ images, detectAll, matchAll, onImageDetected, reco
   async function runMatch(settings) {
     const ready = images.value.filter((img) => img.kpStatus === 'done')
     if (ready.length < 2) return
-    openProgress('Matching Features')
+    // Matching polls `aborted` between pairs, but ONE pair can be a long,
+    // uninterruptible worker call (LightGlue on CPU WASM, or a hung run), so
+    // Cancel also hard-terminates the pool — the in-flight matchPair's worker
+    // promise rejects, matchPair catches it and marks the pair, and the drain
+    // loops exit on the aborted flag. Cost: worker 0 drops its cached ORT/LightGlue
+    // session (~model reload next run); acceptable for an explicit user cancel.
+    openProgress('Matching Features', 0, () => terminateAll('matching cancelled'))
     await matchAll(images.value, settings, (done, total) => {
       progressCurrent.value = done
       progressTotal.value   = total

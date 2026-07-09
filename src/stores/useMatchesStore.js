@@ -153,7 +153,7 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
           minConf: settings.lgMinConf,
           maxKeypoints: settings.lgMaxKeypoints,
           useGpu: settings.useGpu,
-        }, { onLog: (msg) => log(msg, 'info', 'Matching') })
+        }, { onLog: (msg, level = 'info') => log(msg, level, 'Matching') })
         raw = res.matches
       } else {
         const res = await matchDescriptors(descA, descB, {
@@ -293,8 +293,15 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
           + `${entry.rejectReason ?? 'none passed geometric verification'}`, 'warn', 'Matching')
       }
     } catch (err) {
+      // A cancelled run hard-terminates the worker pool, so the in-flight worker
+      // call rejects here — that's an expected user action, not a failure. Mark the
+      // pair and return quietly (warn, not error) rather than throwing out of the
+      // drain loop.
       entry.status = 'error'
-      log(`Match error: ${imgA.name} ↔ ${imgB.name} — ${err?.message ?? err}`, 'error', 'Matching')
+      const msg = err?.message ?? String(err)
+      const cancelled = /cancel/i.test(msg)
+      log(`Match ${cancelled ? 'cancelled' : 'error'}: ${imgA.name} ↔ ${imgB.name}`
+        + `${cancelled ? '' : ` — ${msg}`}`, cancelled ? 'warn' : 'error', 'Matching')
     }
 
     touch()
@@ -368,7 +375,14 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
       return
     }
 
-    const concurrency = Math.max(1, Math.min(POOL_SIZE, pairs.length))
+    // LightGlue is pinned to worker 0 and its ORT session is not reentrant (two
+    // concurrent session.run() on one wasm session deadlock — the old 7-way freeze).
+    // Parallel drain loops would all pile onto worker 0 and wedge it, so dispatch
+    // LightGlue serially; serial also keeps the progress bar honest. Brute-force
+    // keeps the full pool (each matchPair issues its own round-robin worker calls).
+    const concurrency = settings.matcher === 'lightglue'
+      ? 1
+      : Math.max(1, Math.min(POOL_SIZE, pairs.length))
     // Log the descriptor-matching knobs so a run's settings are auditable — in
     // particular whether cross-check (mutual nearest neighbour) is active, which
     // otherwise leaves no trace in the console yet meaningfully changes putatives.
