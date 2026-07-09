@@ -3,7 +3,7 @@ import { ref, computed } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useGlossaryStore } from '../../stores/useGlossaryStore.js'
 import {
-  getHelpEntry, getAllHelpEntries, searchGlossary, renderHelpMarkdown,
+  getGlossaryEntry, getGlossaryEntriesByTopic, searchGlossary, renderHelpMarkdown,
 } from '../../core/help/glossary.js'
 
 // Single centered modal holding the glossary. A Home/index tab plus one tab per
@@ -16,13 +16,19 @@ const query = ref('')
 // Typing in search jumps to Home so the results are visible.
 function onSearch() { glossary.setActive('home') }
 
-const results = computed(() => (query.value.trim() ? searchGlossary(query.value) : getAllHelpEntries()))
+// No query: the pipeline map (stage cards joined by arrows, plus any plain
+// non-pipeline sections after). With a query: a flat ranked result list
+// (grouping ranked results would fight the ranking).
+const sections = computed(() => (query.value.trim() ? null : getGlossaryEntriesByTopic()))
+const pipelineSections = computed(() => sections.value?.filter(s => s.pipeline) ?? [])
+const extraSections = computed(() => sections.value?.filter(s => !s.pipeline) ?? [])
+const results = computed(() => (query.value.trim() ? searchGlossary(query.value) : []))
 
-const activeEntry = computed(() => (activeId.value === 'home' ? null : getHelpEntry(activeId.value)))
+const activeEntry = computed(() => (activeId.value === 'home' ? null : getGlossaryEntry(activeId.value)))
 const activeHtml = computed(() =>
   activeEntry.value ? renderHelpMarkdown(activeEntry.value.body, { selfId: activeEntry.value.id }) : '')
 
-const tabEntries = computed(() => tabs.value.map(id => ({ id, entry: getHelpEntry(id) })))
+const tabEntries = computed(() => tabs.value.map(id => ({ id, entry: getGlossaryEntry(id) })))
 
 // Internal [label](help:id) / auto-links open (or focus) a tab.
 function onBodyClick(e) {
@@ -51,28 +57,70 @@ function onBodyClick(e) {
 
         <div class="tab-strip" role="tablist">
           <button
-            class="gtab"
+            class="gtab gtab-home"
             :class="{ active: activeId === 'home' }"
             role="tab"
             @click="glossary.setActive('home')"
           >Home</button>
-          <button
-            v-for="t in tabEntries"
-            :key="t.id"
-            class="gtab"
-            :class="{ active: activeId === t.id }"
-            role="tab"
-            @click="glossary.setActive(t.id)"
-          >
-            {{ t.entry?.title ?? t.id }}
-            <span class="gtab-close" title="Close tab" @click.stop="glossary.closeTab(t.id)">×</span>
-          </button>
+          <div class="tab-scroll">
+            <button
+              v-for="t in tabEntries"
+              :key="t.id"
+              class="gtab"
+              :class="{ active: activeId === t.id }"
+              role="tab"
+              @click="glossary.setActive(t.id)"
+            >
+              {{ t.entry?.title ?? t.id }}
+              <span class="gtab-close" title="Close tab" @click.stop="glossary.closeTab(t.id)">×</span>
+            </button>
+          </div>
         </div>
 
         <div class="modal-body">
           <!-- Home / index + search results -->
           <template v-if="activeId === 'home'">
-            <p v-if="!results.length" class="empty">No terms match “{{ query }}”.</p>
+            <!-- Browsing: the SfM pipeline as connected stage cards -->
+            <template v-if="sections">
+              <p class="map-intro">The photogrammetry pipeline, stage by stage — click a term to read about it.</p>
+              <template v-for="(s, i) in pipelineSections" :key="s.topic">
+                <section class="stage">
+                  <div class="stage-head">
+                    <span class="stage-icon" aria-hidden="true">{{ s.icon }}</span>
+                    <div class="stage-text">
+                      <h3 class="stage-title">{{ s.label }}</h3>
+                      <p class="stage-blurb">{{ s.blurb }}</p>
+                    </div>
+                  </div>
+                  <div class="chips">
+                    <button
+                      v-for="e in s.entries"
+                      :key="e.id"
+                      class="chip"
+                      :title="e.summary"
+                      @click="glossary.openTerm(e.id)"
+                    >{{ e.title }}</button>
+                  </div>
+                </section>
+                <div v-if="i < pipelineSections.length - 1" class="connector" aria-hidden="true"></div>
+              </template>
+              <section v-for="s in extraSections" :key="s.topic" class="stage stage-extra">
+                <div class="stage-head">
+                  <div class="stage-text"><h3 class="stage-title">{{ s.label }}</h3></div>
+                </div>
+                <div class="chips">
+                  <button
+                    v-for="e in s.entries"
+                    :key="e.id"
+                    class="chip"
+                    :title="e.summary"
+                    @click="glossary.openTerm(e.id)"
+                  >{{ e.title }}</button>
+                </div>
+              </section>
+            </template>
+            <!-- Searching: flat ranked list -->
+            <p v-else-if="!results.length" class="empty">No terms match “{{ query }}”.</p>
             <ul v-else class="index-list">
               <li v-for="e in results" :key="e.id">
                 <button class="index-item" @click="glossary.openTerm(e.id)">
@@ -143,13 +191,24 @@ function onBodyClick(e) {
 }
 .modal-close:hover { background: var(--hover-bg); color: var(--text); }
 
+/* Home sits outside the scroll area (fixed); only the term tabs scroll. */
 .tab-strip {
   display: flex;
-  gap: 2px;
-  padding: 6px 10px 0;
+  padding: 6px 0 0;
   border-bottom: 1px solid var(--panel-border);
-  overflow-x: auto;
   flex-shrink: 0;
+}
+.tab-scroll {
+  display: flex;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+  padding: 0 10px 0 8px;
+  overflow-x: auto;
+  /* overflow-x:auto alone makes the browser compute overflow-y to auto too,
+     which adds a stray vertical scrollbar and fights touchpad h-scroll. */
+  overflow-y: hidden;
+  scrollbar-width: thin;
 }
 .gtab {
   display: inline-flex;
@@ -158,16 +217,23 @@ function onBodyClick(e) {
   white-space: nowrap;
   background: none;
   border: none;
-  border-bottom: 2px solid transparent;
   color: var(--text-dim);
   font: inherit;
   font-size: 12.5px;
-  padding: 7px 10px;
-  margin-bottom: -1px;
+  /* Extra bottom padding gives the thin horizontal scrollbar its own lane so it
+     doesn't crowd the tab text. Active underline is an inset shadow (not a
+     border) so it survives overflow-y:hidden without a negative-margin trick. */
+  padding: 7px 10px 11px;
   cursor: pointer;
 }
+/* Home is fixed at the left, divided from the scrolling tabs by a thin rule. */
+.gtab-home {
+  flex-shrink: 0;
+  padding-left: 12px;
+  border-right: 1px solid var(--panel-border);
+}
 .gtab:hover:not(.active) { color: var(--text); }
-.gtab.active { color: var(--text); border-bottom-color: var(--accent); }
+.gtab.active { color: var(--text); box-shadow: inset 0 -2px 0 var(--accent); }
 .gtab-close {
   font-size: 13px; line-height: 1; color: var(--text-dim);
   border-radius: 3px; padding: 0 2px;
@@ -184,6 +250,61 @@ function onBodyClick(e) {
 }
 .empty { color: var(--text-dim); font-style: italic; }
 
+/* ── Pipeline map (home, no query) ── */
+.map-intro { margin: 0 0 12px; font-size: 12px; color: var(--text-dim); }
+.stage {
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: var(--hover-bg);
+}
+.stage-extra { margin-top: 14px; }
+.stage-head { display: flex; align-items: flex-start; gap: 9px; margin-bottom: 8px; }
+.stage-icon { font-size: 17px; line-height: 1.25; }
+.stage-text { min-width: 0; }
+.stage-title { margin: 0; font-size: 13px; font-weight: 600; color: var(--text); }
+.stage-blurb { margin: 1px 0 0; font-size: 11.5px; color: var(--text-dim); line-height: 1.4; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip {
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 999px;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  padding: 3px 10px;
+  cursor: pointer;
+}
+.chip:hover { border-color: var(--accent); color: var(--accent); }
+/* Line + arrowhead both drawn inside the element's own height, so the tip
+   can't overlap the stage card below. */
+.connector {
+  width: 8px;
+  height: 18px;
+  margin: 4px auto;
+  position: relative;
+}
+.connector::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 0;
+  height: 13px;
+  transform: translateX(-50%);
+  border-left: 2px solid var(--panel-border);
+}
+.connector::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  transform: translateX(-50%);
+  border: 4px solid transparent;
+  border-top: 5px solid var(--panel-border);
+  border-bottom: none;
+}
+
+/* ── Flat ranked list (search results) ── */
 .index-list { list-style: none; margin: 0; padding: 0; }
 .index-item {
   display: flex; flex-direction: column; gap: 2px;

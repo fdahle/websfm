@@ -1,5 +1,5 @@
 <!--
-  Glossary entry schema (documented once here, applies to every file in src/help/):
+  Glossary entry schema (documented once here, applies to every file in src/glossary/):
 
   ---
   id: kebab-case-id       # required, must match the filename (without .md)
@@ -12,7 +12,7 @@
   - Any occurrence of another entry's title/alias auto-links; to suppress a
     specific one, wrap it: <span class="no-help">bundle adjustment</span>.
   - Math: $inline$ and $$block$$ via KaTeX. Images: ![alt](assets/foo.png)
-    (files under src/help/assets/). Standard markdown otherwise.
+    (files under src/glossary/assets/). Standard markdown otherwise.
 -->
 ---
 id: reprojection-error

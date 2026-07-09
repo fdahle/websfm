@@ -2,7 +2,7 @@
 import { ref, computed, onBeforeUnmount } from 'vue'
 import { useGlossaryStore } from '../../stores/useGlossaryStore.js'
 import { useGlossarySettings } from '../../composables/useGlossarySettings.js'
-import { getHelpEntry, renderHelpMarkdown } from '../../core/help/glossary.js'
+import { getGlossaryEntry, renderHelpMarkdown } from '../../core/help/glossary.js'
 import GlossaryTooltip from './GlossaryTooltip.vue'
 
 // Inline glossary keyword. Hovering shows a mini popup with a progress ring;
@@ -14,7 +14,7 @@ const props = defineProps({ id: { type: String, required: true } })
 
 const glossary = useGlossaryStore()
 const { glossaryTermsEnabled } = useGlossarySettings()
-const entry = getHelpEntry(props.id)
+const entry = getGlossaryEntry(props.id)
 const active = computed(() => glossaryTermsEnabled.value && !!entry)
 
 const RING_MS = 700

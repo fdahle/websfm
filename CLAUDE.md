@@ -180,16 +180,23 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
    through `ExportModal.vue`. Products persist to OPFS (`products/…`).
 
 ## In-app glossary (help)
-Cross-linked term explanations. **Content**: `src/help/**/*.md` (organised into
+Cross-linked term explanations. **Content**: `src/glossary/**/*.md` (organised into
 topic sub-folders — `algorithms/`, `camera-sensor/`, `core-sfm/`,
-`dense-reconstruction/`, `products/` — but folders are authoring-only; the flat
-`id` is the key, so entries link by id regardless of path), frontmatter
+`dense-reconstruction/`, `products/` — the flat `id` is the key, so entries
+link by id regardless of path, but the folder is kept as the entry's `topic`:
+the modal home renders a **pipeline map** — stage cards (label/icon/blurb from
+`GLOSSARY_TOPICS`) joined by arrows in workflow order, terms as clickable chips;
+unknown folders appended after as plain sections), frontmatter
 (`id`/`title`/`summary`/optional `aliases`) + markdown body; images under
-`src/help/assets/`. `core/help/glossary.js` is the pure loader/renderer — parses
+`src/glossary/assets/`. `core/help/glossary.js` is the pure loader/renderer — parses
 frontmatter, renders via `marked` + KaTeX (`$…$`/`$$…$$`), resolves `assets/*`
 image URLs, and **auto-links** any occurrence of another entry's title/alias to
 its tab (first hit per term; opt out one occurrence with
-`<span class="no-help">…</span>`); also `getAllHelpEntries`/`searchGlossary`.
+`<span class="no-help">…</span>`); also `getAllGlossaryEntries`/
+`getGlossaryEntriesByTopic`/`searchGlossary`. (The `core/help/` *code* dir stays
+"help" — it's a shared umbrella for glossary + `guide.js` + `commands.js`, and the
+`help:` cross-link scheme + `renderHelpMarkdown` renderer are shared with Guide;
+only the glossary-specific content folder and symbols carry the "glossary" name.)
 **UI**: `<GlossaryTerm id>` (`components/glossary/`) wraps inline keywords —
 hover shows `GlossaryTooltip` with a border **progress ring** that, once filled,
 **pins** the popup (interactive: cross-links + "Read more"). The term itself is
@@ -198,7 +205,7 @@ not clickable; "Read more" opens the single centered tabbed `GlossaryModal`
 (`isOpen`/`tabs`/`activeId`). Ribbon *Other ▸ Glossary* → `open-glossary` opens
 the home page. Highlighting is gated by the persisted `glossaryTermsEnabled`
 toggle (`composables/useGlossarySettings.js`, Settings ▸ Display). **Adding a
-term**: drop `src/help/<folder>/<id>.md` (auto-registered by the recursive glob) — it auto-links
+term**: drop `src/glossary/<folder>/<id>.md` (auto-registered by the recursive glob) — it auto-links
 wherever its title/aliases appear; wrap UI text in `<GlossaryTerm id>` only where
 you want an explicit hover affordance.
 
@@ -263,7 +270,20 @@ convergence".
   (lossless PNG) — every raster-consuming call (`detectKeypoints`, the dense-op
   image marshalling in `useReconstructionStore`) must read `img.computeUrl ??
   img.url`, never `img.url` alone, or JPEG artifacts leak into keypoints/depth.
-  Any new source format the browser can't decode needs the same treatment.
+  Any new source format the browser can't decode needs the same treatment. Both
+  transcode outputs are **cached in OPFS** (`images-derived/{uuid}.display|.compute`,
+  `opfs.saveImageDerived`/`loadImageDerivedBlob`/`deleteImageDerived`) at ingest;
+  restore reads the cache and skips the (multi-second) re-decode+re-encode,
+  transcoding + backfilling only on a miss (older projects heal on reopen — both
+  blobs required, a partial cache re-transcodes). The original TIFF stays the
+  source of truth; the cache assumes fixed transcode params. Ingest encodes
+  **display-first** (`tiffToDisplayBlob` serial JPEG→PNG, streams a `display`
+  event) so the viewer is usable while the slower PNG encodes; a TIFF's
+  `computeUrl` is therefore briefly null after ingest, so the two compute entry
+  points `await imagesStore.whenComputeReady(img)` first (a per-uuid promise,
+  rejected if the transcode failed — detection/dense error loudly rather than
+  fall back to the lossy JPEG). Non-TIFF/native-decode/restored images are ready
+  immediately.
 - **Descriptor width is per-detector, never a constant**: 128 (SIFT) vs 256
   (SuperPoint), carried as `descDim` on the feature bundle / OPFS blob and passed
   as `dim` into `crates/matching`. A wrong dim mis-slices the flat buffer into

@@ -68,6 +68,24 @@ fiducials; self-calibration (A2) + fiducials (F4) are the code-side support.
 
 ## Done log (most recent first)
 
+- **2026-07-09 · TIFF transcode OPFS cache + display-first ingest** — reopening a
+  project with TIFFs no longer re-runs the multi-second decode+re-encode: both
+  transcode outputs (display JPEG + lossless compute PNG) are cached in OPFS under
+  `images-derived/{uuid}.display|.compute` (`opfs.saveImageDerived`/
+  `loadImageDerivedBlob`/`deleteImageDerived`), written at ingest and read on
+  restore; cache miss (older project / partial write) transcodes + backfills so
+  projects heal on reopen. Ingest now encodes **display-first** (`tiffToDisplayBlob`
+  serial JPEG→PNG + streamed `display` event through the tiff op/computeClient) so
+  the viewer shows the full-res image while the PNG still encodes; a per-uuid
+  `whenComputeReady` promise gates the two compute entry points (`detectOne`, dense
+  marshalling in `useReconstructionStore`) and rejects on transcode failure so
+  compute errors loudly instead of falling back to the lossy JPEG. Files:
+  `utils/opfs.js`, `utils/tiff.js` (+`nativeTiffDecodeResult`), `workers/ops/tiff.js`,
+  `workers/computeClient.js`, `stores/useImagesStore.js`, `stores/useReconstructionStore.js`.
+  Phase 2b (geotiff decoder pool) left as measure-first/optional. Not yet
+  browser-verified (OPFS + OffscreenCanvas are runtime-only). Lives in the TIFF
+  gotcha paragraph of CLAUDE.md.
+
 - **2026-07-08 · F4 — Fiducial-mark interior orientation for film scans** — treats
   scan geometry like lens distortion: removed once at ingest so the pipeline stays
   pinhole with one shared K per sensor. New pure core `core/sfm/fiducials.js`

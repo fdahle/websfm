@@ -92,6 +92,7 @@
 
 .status-dot.error   { background: #e55; }
 .status-dot.running { background: #fa0; animation: pulse 0.9s ease-in-out infinite; }
+.status-dot.loading { background: #6aa9d9; animation: pulse 0.9s ease-in-out infinite; }
 
 @keyframes pulse {
   0%, 100% { opacity: 1; }
@@ -109,10 +110,27 @@
 /* Image not registered into the sparse model — dim it and flag with a warning tag. */
 .list-item.unaligned .item-name { color: var(--text-dim); opacity: 0.65; }
 
+/* Still decoding (e.g. a large TIFF being transcoded) — grey the row out so it
+   reads as not-yet-ready rather than a fully loaded image. */
+.list-item.loading .item-name { color: var(--text-dim); opacity: 0.55; font-style: italic; }
+
+/* Decode failed — the image can never be shown; flag it distinctly in red. */
+.list-item.failed .item-name { color: #e06767; }
+
 .unaligned-tag {
   flex-shrink: 0;
   font-size: 11px;
   color: #d4900a;
+  line-height: 1;
+}
+
+.unaligned-tag.failed-tag { color: #e06767; }
+
+.load-tag {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--text-dim);
+  font-style: italic;
   line-height: 1;
 }
 

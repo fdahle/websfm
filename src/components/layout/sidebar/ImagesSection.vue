@@ -54,6 +54,14 @@ function isUnaligned(img) {
   return props.hasSparse && !props.alignedUuids.has(img.uuid)
 }
 
+// Tooltip for the image row, reflecting its load state.
+function rowTitle(img) {
+  if (img.previewPending) return `${img.name} — decoding…`
+  if (img.previewFailed) return `${img.name} — failed to load (could not decode image)`
+  if (isUnaligned(img)) return `${img.name} — not aligned (no camera in the sparse model)`
+  return img.name
+}
+
 // Multi-select: local array of selected ids + anchor for shift-range
 const localSelected = ref([])
 const anchor = ref(null)
@@ -143,8 +151,8 @@ function ctxAssignSensor(sensorId) {
       <template v-for="img in images" :key="img.id">
         <li
           class="list-item"
-          :class="{ selected: localSelected.includes(img.id), unaligned: isUnaligned(img) }"
-          :title="isUnaligned(img) ? `${img.name} — not aligned (no camera in the sparse model)` : img.name"
+          :class="{ selected: localSelected.includes(img.id), unaligned: isUnaligned(img), loading: img.previewPending, failed: img.previewFailed }"
+          :title="rowTitle(img)"
           @click="handleItemClick($event, img)"
           @dblclick="emit('open', img.id)"
           @contextmenu="onRightClick($event, img)"
@@ -155,10 +163,13 @@ function ctxAssignSensor(sensorId) {
             @click.stop="toggleExpand(img.id)"
             :title="expanded[img.id] ? 'Collapse' : 'Expand'"
           ></button>
-          <span v-if="img.kpStatus === 'running'" class="status-dot running"></span>
+          <span v-if="img.previewPending" class="status-dot loading"></span>
+          <span v-else-if="img.kpStatus === 'running'" class="status-dot running"></span>
           <span v-else-if="img.kpStatus === 'error'" class="status-dot error"></span>
           <span class="item-name">{{ img.name }}</span>
-          <span v-if="isUnaligned(img)" class="unaligned-tag" title="Not aligned — no camera in the sparse model">⚠</span>
+          <span v-if="img.previewPending" class="load-tag" title="Decoding image…">decoding…</span>
+          <span v-else-if="img.previewFailed" class="unaligned-tag failed-tag" title="Failed to load — image could not be decoded">⚠</span>
+          <span v-else-if="isUnaligned(img)" class="unaligned-tag" title="Not aligned — no camera in the sparse model">⚠</span>
         </li>
         <li v-if="expanded[img.id]" class="img-details" @contextmenu.stop>
           <div class="detail-row">
