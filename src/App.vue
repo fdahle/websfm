@@ -36,6 +36,7 @@ import { useSidebarResize } from './composables/useSidebarResize.js'
 import { useImportRouting } from './composables/useImportRouting.js'
 import { useExports } from './composables/useExports.js'
 import { useModalEscape } from './composables/useModalEscape.js'
+import { useBeforeUnload } from './composables/useBeforeUnload.js'
 import { useReconstructionStore } from './stores/useReconstructionStore.js'
 import { useGcpsStore } from './stores/useGcpsStore.js'
 import { restoreProjectStores, clearProjectStores } from './stores/projectStores.js'
@@ -632,6 +633,9 @@ const pendingImageDelete = ref(null)
 const { closeTopModal } = useModalEscape({
   pendingImageDelete, exportKind, onCancelNewProject: handleCancelNewProject,
 })
+
+// Site-wide confirm before the tab is closed / reloaded / navigated away.
+useBeforeUnload()
 
 function requestRemoveImages(idOrIds) {
   const ids = (Array.isArray(idOrIds) ? idOrIds : [idOrIds]).filter(Boolean)

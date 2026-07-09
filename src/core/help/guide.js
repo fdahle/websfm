@@ -1,6 +1,6 @@
 // In-app "Guide": task-oriented help for the pipeline *operations* and their
 // parameters — the "how do I choose this value" companion to the concept-oriented
-// glossary (src/help/**, core/help/glossary.js). One markdown file per operation lives
+// glossary (src/glossary/**, core/help/glossary.js). One markdown file per operation lives
 // under src/guide/, with a frontmatter block (id/title/summary), an intro, and a
 // `## ` section per parameter. Each parameter section binds to a settings key via
 // a `<!-- param: key  default: … -->` marker.

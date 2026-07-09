@@ -122,6 +122,43 @@ export async function deleteImage(projectId, uuid) {
   } catch {}
 }
 
+// ── Derived (transcoded) image blobs ──────────────────────────────────────────
+// Pure cache of the TIFF→JPEG/PNG transcode. `kind` is 'display' (JPEG, the
+// viewer <img>) or 'compute' (lossless PNG, detection/dense). Recomputable
+// from the immutable original at any time, so absence is never an error.
+// NOTE: this cache assumes fixed transcode params (jpegQuality etc.); if those
+// ever become user-configurable it needs a version/params check to invalidate.
+
+async function derivedName(uuid, kind) {
+  return `${uuid}.${kind === 'compute' ? 'compute' : 'display'}`
+}
+
+export async function saveImageDerived(projectId, uuid, kind, blob) {
+  const dir = await getSubDir(projectId, 'images-derived')
+  const fh = await dir.getFileHandle(await derivedName(uuid, kind), { create: true })
+  const writable = await fh.createWritable()
+  await writable.write(blob)
+  await writable.close()
+}
+
+export async function loadImageDerivedBlob(projectId, uuid, kind) {
+  try {
+    const dir = await getSubDir(projectId, 'images-derived')
+    const fh = await dir.getFileHandle(await derivedName(uuid, kind))
+    return await fh.getFile()
+  } catch {
+    return null
+  }
+}
+
+export async function deleteImageDerived(projectId, uuid) {
+  try {
+    const dir = await getSubDir(projectId, 'images-derived')
+    await dir.removeEntry(await derivedName(uuid, 'display')).catch(() => {})
+    await dir.removeEntry(await derivedName(uuid, 'compute')).catch(() => {})
+  } catch {}
+}
+
 // ── Keypoints ─────────────────────────────────────────────────────────────────
 
 export async function saveKeypoints(projectId, uuid, keypoints) {

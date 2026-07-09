@@ -35,6 +35,13 @@ export async function canDecodeTiffNatively(blob) {
   return nativeDecodeCache
 }
 
+// The session-cached native-decode result (true/false), or null if not yet
+// probed. Lets callers avoid loading an original blob just to feed the probe
+// when the answer is already known (e.g. restore's per-image cache lookup).
+export function nativeTiffDecodeResult() {
+  return nativeDecodeCache
+}
+
 // Header-only read: width/height via the IFD, without the expensive full
 // pixel decode (readRGB, below) — lets callers show real dimensions near-
 // instantly while the slow decode+encode still runs in the background.
@@ -59,7 +66,7 @@ export async function readTiffDimensions(blob) {
 // `onThumbnail` callback fires with a small (≤512px) preview blob *before*
 // the two full-res encodes run, so callers can show something well before
 // the (comparatively slow) full JPEG+PNG encode finishes.
-export async function tiffToDisplayBlob(blob, { jpegQuality = 0.92, onThumbnail } = {}) {
+export async function tiffToDisplayBlob(blob, { jpegQuality = 0.92, onThumbnail, onDisplay } = {}) {
   const tiff = await fromBlob(blob)
   const image = await tiff.getImage()
   const width = image.getWidth()
@@ -88,10 +95,16 @@ export async function tiffToDisplayBlob(blob, { jpegQuality = 0.92, onThumbnail 
     onThumbnail(await thumbCanvas.convertToBlob({ type: 'image/jpeg', quality: 0.7 }), tw, th)
   }
 
-  const [displayBlob, computeBlob] = await Promise.all([
-    canvas.convertToBlob({ type: 'image/jpeg', quality: jpegQuality }),
-    canvas.convertToBlob({ type: 'image/png' }),
-  ])
+  // Kick off both encodes concurrently (convertToBlob offloads to the browser's
+  // codec threads, so JPEG and PNG genuinely overlap — do NOT serialize them or
+  // ingest slows by the JPEG time per image). But hand the display JPEG back via
+  // onDisplay the moment it lands (well before the slower PNG) so the viewer is
+  // fully usable while compute (computeUrl) waits on the final result — nothing
+  // lossy ever reaches detection/dense.
+  const displayPromise = canvas.convertToBlob({ type: 'image/jpeg', quality: jpegQuality })
+  const computePromise = canvas.convertToBlob({ type: 'image/png' })
+  if (onDisplay) displayPromise.then(onDisplay).catch(() => {})
+  const [displayBlob, computeBlob] = await Promise.all([displayPromise, computePromise])
   return { displayBlob, computeBlob, width, height }
 }
 

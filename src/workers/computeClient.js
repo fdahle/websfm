@@ -109,9 +109,14 @@ export function verifyMatches(kpsA, kpsB, matches, options = {}) {
 // across the pool instead of blocking the main thread one file at a time.
 // `onThumbnail(blob, width, height)` fires once decode finishes, well before
 // the full-res result resolves, so callers can show a preview early.
-export function transcodeTiff(blob, jpegQuality, { onThumbnail } = {}) {
+export function transcodeTiff(blob, jpegQuality, { onThumbnail, onDisplay } = {}) {
   return call('transcodeTiff', [blob, jpegQuality], {
-    onEvent: onThumbnail ? (ev, a) => { if (ev === 'thumbnail') onThumbnail(...a) } : undefined,
+    onEvent: (onThumbnail || onDisplay)
+      ? (ev, a) => {
+          if (ev === 'thumbnail') onThumbnail?.(...a)
+          else if (ev === 'display') onDisplay?.(...a)
+        }
+      : undefined,
   })
 }
 

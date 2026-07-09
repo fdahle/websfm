@@ -1,9 +1,9 @@
-// In-app glossary/help content: markdown files under src/help/, each with a
+// In-app glossary content: markdown files under src/glossary/, each with a
 // small frontmatter block (id/title/summary/aliases) and a markdown body.
 // Parsing is a pure function (no Vue/DOM) so it stays unit-testable and the
 // loader can run in the worker or main thread alike; rendering (markdown +
 // KaTeX + auto-linking) only ever runs on the main thread in the glossary
-// modal. See src/help/core-sfm/reprojection-error.md for the schema.
+// modal. See src/glossary/core-sfm/reprojection-error.md for the schema.
 import { Marked } from 'marked'
 import markedKatex from 'marked-katex-extension'
 
@@ -15,9 +15,42 @@ function stripLeadingComment(raw) {
   return raw.replace(/^\s*<!--[\s\S]*?-->\s*/, '')
 }
 
-export function parseHelpEntry(raw, sourcePath = '<string>') {
+// Stages of the glossary home's pipeline map, in workflow order. `topic` is the
+// src/glossary/ folder name; label/icon/blurb are the stage card's header. A folder
+// not listed here still shows up, appended after the pipeline as a plain section.
+export const GLOSSARY_TOPICS = [
+  {
+    topic: 'camera-sensor', label: 'Camera & sensor', icon: '📷',
+    blurb: 'How a physical camera maps the world onto pixels.',
+  },
+  {
+    topic: 'algorithms', label: 'Geometry & algorithms', icon: '📐',
+    blurb: 'The two-view math relating overlapping image pairs.',
+  },
+  {
+    topic: 'core-sfm', label: 'Sparse SfM', icon: '🕸️',
+    blurb: 'Camera poses and tie points recovered from feature matches.',
+  },
+  {
+    topic: 'dense-reconstruction', label: 'Dense reconstruction', icon: '🧱',
+    blurb: 'Per-pixel depth from the posed images, fused to a dense cloud.',
+  },
+  {
+    topic: 'products', label: 'Products', icon: '🗺️',
+    blurb: 'Mapping outputs derived from the reconstruction.',
+  },
+]
+
+// The folder an entry was authored in, e.g. '/src/glossary/core-sfm/foo.md' →
+// 'core-sfm'. Linking is still by flat id — the topic only groups the home page.
+function topicOf(sourcePath) {
+  const m = /\/glossary\/([^/]+)\//.exec(sourcePath)
+  return m && m[1] !== 'assets' ? m[1] : null
+}
+
+export function parseGlossaryEntry(raw, sourcePath = '<string>') {
   const match = FRONTMATTER_RE.exec(stripLeadingComment(raw))
-  if (!match) throw new Error(`Help entry missing frontmatter: ${sourcePath}`)
+  if (!match) throw new Error(`Glossary entry missing frontmatter: ${sourcePath}`)
   const [, frontmatter, body] = match
 
   const meta = {}
@@ -27,7 +60,7 @@ export function parseHelpEntry(raw, sourcePath = '<string>') {
     if (i === -1) continue
     meta[line.slice(0, i).trim()] = line.slice(i + 1).trim()
   }
-  if (!meta.id) throw new Error(`Help entry missing id: ${sourcePath}`)
+  if (!meta.id) throw new Error(`Glossary entry missing id: ${sourcePath}`)
 
   // aliases: comma-separated extra phrases that auto-link to this entry (the
   // title is always an alias). Lower-cased + de-duped for matching.
@@ -39,6 +72,7 @@ export function parseHelpEntry(raw, sourcePath = '<string>') {
     title: meta.title || meta.id,
     summary: meta.summary || '',
     aliases: [...aliases],
+    topic: topicOf(sourcePath),
     body: body.trim(),
   }
 }
@@ -75,7 +109,7 @@ let assetMap = null
 function assetUrl(href) {
   if (!href || /^(https?:)?\/\//.test(href) || href.startsWith('data:')) return null
   if (!assetMap) {
-    const mods = import.meta.glob('/src/help/assets/*', { eager: true, query: '?url', import: 'default' })
+    const mods = import.meta.glob('/src/glossary/assets/*', { eager: true, query: '?url', import: 'default' })
     assetMap = new Map(Object.entries(mods).map(([p, url]) => [p.split('/').pop(), url]))
   }
   return assetMap.get(href.replace(/^\.?\/?assets\//, '')) || null
@@ -167,13 +201,13 @@ function loadEntries() {
   if (entriesCache) return entriesCache
   // Recursive: entries are organised into topic sub-folders (algorithms/,
   // core-sfm/, …). Folders are purely for authoring; the flat `id` is the key.
-  const modules = import.meta.glob('/src/help/**/*.md', { eager: true, query: '?raw', import: 'default' })
+  const modules = import.meta.glob('/src/glossary/**/*.md', { eager: true, query: '?raw', import: 'default' })
   const entries = new Map()
   for (const [path, raw] of Object.entries(modules)) {
     // One malformed file must not break every glossary term in the app: warn
     // and skip it (the term degrades to plain text) rather than throw.
     try {
-      const entry = parseHelpEntry(raw, path)
+      const entry = parseGlossaryEntry(raw, path)
       entries.set(entry.id, entry)
     } catch (err) {
       console.warn(`[glossary] skipping ${path}: ${err.message}`)
@@ -183,19 +217,42 @@ function loadEntries() {
   return entries
 }
 
-export function getHelpEntry(id) {
+export function getGlossaryEntry(id) {
   return loadEntries().get(id) ?? null
 }
 
-export function getAllHelpEntries() {
+export function getAllGlossaryEntries() {
   return [...loadEntries().values()].sort((a, b) => a.title.localeCompare(b.title))
+}
+
+// Home-page view: entries grouped by topic folder, sections in GLOSSARY_TOPICS
+// (pipeline) order, alphabetical within a section. Pipeline sections carry the
+// stage's icon/blurb and `pipeline: true` (the home page draws them as a
+// connected flow); folders not in GLOSSARY_TOPICS (and topic-less entries, as
+// 'Other') are appended after as plain sections.
+export function getGlossaryEntriesByTopic() {
+  const byTopic = new Map()
+  for (const e of getAllGlossaryEntries()) {
+    const key = e.topic ?? 'other'
+    if (!byTopic.has(key)) byTopic.set(key, [])
+    byTopic.get(key).push(e)
+  }
+  const sections = []
+  for (const { topic, label, icon, blurb } of GLOSSARY_TOPICS) {
+    const entries = byTopic.get(topic)
+    if (entries) { sections.push({ topic, label, icon, blurb, pipeline: true, entries }); byTopic.delete(topic) }
+  }
+  for (const [topic, entries] of byTopic) {
+    sections.push({ topic, label: topic === 'other' ? 'Other' : topic, pipeline: false, entries })
+  }
+  return sections
 }
 
 // Case-insensitive search over title/summary/aliases/body. Returns entries
 // ranked title-match first, then body, so the home tab's search box is useful.
 export function searchGlossary(query) {
   const q = query.trim().toLowerCase()
-  if (!q) return getAllHelpEntries()
+  if (!q) return getAllGlossaryEntries()
   const scored = []
   for (const e of loadEntries().values()) {
     const inTitle = e.title.toLowerCase().includes(q) ||

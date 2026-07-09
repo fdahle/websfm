@@ -288,6 +288,10 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
             + `re-run the sparse reconstruction before densifying (skipping this image)`, 'error', 'Dense')
           continue
         }
+        // A TIFF's lossless compute PNG may still be encoding right after ingest;
+        // wait for it (rejects if its transcode failed) so dense reads the PNG,
+        // never the lossy display JPEG — see the computeUrl invariant.
+        await imagesStore.whenComputeReady(im)
         let dist = s ? distortionOf(s) : null
         const selfK1 = im.sensorId ? (selfCalBySensor.get(im.sensorId) || 0) : 0
         if (selfK1) {

@@ -1,7 +1,7 @@
 import { ref, markRaw } from 'vue'
 import { defineStore } from 'pinia'
 import { createImage } from '../utils/image.js'
-import { isTiff, canDecodeTiffNatively, readTiffDimensions } from '../utils/tiff.js'
+import { isTiff, canDecodeTiffNatively, nativeTiffDecodeResult, readTiffDimensions } from '../utils/tiff.js'
 import { extractMetadata } from '../core/io/metadata.js'
 import { detectKeypoints, transcodeTiff } from '../workers/computeClient.js'
 import { useLog } from '../composables/useLog.js'
@@ -22,6 +22,37 @@ export const useImagesStore = defineStore('images', () => {
 
   // Persist only when a project is open and OPFS is usable (see useProjectsStore).
   const isPersisting = () => projects.isPersisting
+
+  // TIFF compute-source readiness. A TIFF's `computeUrl` (lossless PNG) is encoded
+  // *after* the display JPEG so the viewer is usable sooner (see addImages), which
+  // means a detection/dense request can race ingest and find `computeUrl` still
+  // null. Compute consumers must `await whenComputeReady(img)` first. Keyed by
+  // uuid; absent ⇒ ready now (non-TIFF, native-decode, restored-from-cache, or the
+  // PNG already landed). Plain Map (never reactive, never persisted).
+  const computeReady = new Map() // uuid -> { promise, resolve, reject }
+
+  function markComputePending(uuid) {
+    let resolve, reject
+    const promise = new Promise((res, rej) => { resolve = res; reject = rej })
+    // Swallow the "unhandled rejection" warning if nothing is awaiting at the
+    // moment we reject; real awaiters await `promise` directly and still see it.
+    promise.catch(() => {})
+    computeReady.set(uuid, { promise, resolve, reject })
+  }
+  function resolveComputeReady(uuid) {
+    const e = computeReady.get(uuid)
+    if (e) { computeReady.delete(uuid); e.resolve() }
+  }
+  function rejectComputeReady(uuid, err) {
+    const e = computeReady.get(uuid)
+    if (e) { computeReady.delete(uuid); e.reject(err) }
+  }
+  // Compute entry points call this before reading `computeUrl`. Resolves
+  // immediately for anything that never had a pending PNG encode.
+  async function whenComputeReady(img) {
+    const e = computeReady.get(img?.uuid)
+    if (e) await e.promise
+  }
 
   // Write the project document with the current image list (project record +
   // per-image metadata). Was App.vue's `syncProject`; lives here now since this
@@ -126,6 +157,9 @@ export const useImagesStore = defineStore('images', () => {
       // broken image while that runs.
       if (isTiff(file)) {
         item.previewPending = true
+        // A TIFF's compute PNG isn't ready until the transcode finishes (or the
+        // native-decode probe passes) — gate compute consumers until then.
+        markComputePending(item.uuid)
         tiffItems.push({ item, file })
         // EXIF + dimensions don't need the slow full pixel decode — the TIFF
         // header gives real width/height near-instantly (readTiffDimensions),
@@ -148,6 +182,7 @@ export const useImagesStore = defineStore('images', () => {
             // raw object URL) works as-is for both display and compute.
             const found = images.value.find((img) => img.id === item.id)
             if (found) { found.computeUrl = found.url; found.previewPending = false }
+            resolveComputeReady(item.uuid)
             return
           }
           const { displayBlob, computeBlob, width, height } = await transcodeTiff(file, undefined, {
@@ -161,17 +196,47 @@ export const useImagesStore = defineStore('images', () => {
               found.url = URL.createObjectURL(thumbBlob)
               found.previewPending = false
             },
+            // Fires when the full-res display JPEG is encoded, before the slower
+            // compute PNG — swap in the full-quality display so the viewer is
+            // fully usable while the PNG (computeUrl) is still encoding.
+            onDisplay: (dispBlob) => {
+              const found = images.value.find((img) => img.id === item.id)
+              if (!found) return
+              URL.revokeObjectURL(found.url)
+              found.url = URL.createObjectURL(dispBlob)
+              found.previewPending = false
+            },
           })
           const found = images.value.find((img) => img.id === item.id)
-          if (!found) return // removed mid-decode
-          URL.revokeObjectURL(found.url)
-          found.url = URL.createObjectURL(displayBlob)
+          if (!found) { resolveComputeReady(item.uuid); return } // removed mid-decode
+          // onDisplay already set found.url from displayBlob; if the display
+          // event never fired (older worker), fall back to setting it here.
+          if (found.previewPending) {
+            URL.revokeObjectURL(found.url)
+            found.url = URL.createObjectURL(displayBlob)
+            found.previewPending = false
+          }
           found.computeUrl = URL.createObjectURL(computeBlob)
-          found.previewPending = false
+          resolveComputeReady(item.uuid)
           log(`Decoded TIFF: ${file.name} — ${width}×${height}`, 'info', 'Images')
+          // Cache the transcode outputs in OPFS so reopening the project skips
+          // the (multi-second) re-decode + re-encode — see the TIFF gotcha in
+          // CLAUDE.md. Pure function of the immutable original; fire-and-forget.
+          if (isPersisting()) {
+            const pid = projects.currentProjectId
+            log(`Caching TIFF derived blobs: ${file.name} — display ${(displayBlob.size / 1024).toFixed(0)} KB, compute ${(computeBlob.size / 1024).toFixed(0)} KB`, 'info', 'Images')
+            opfs.saveImageDerived(pid, item.uuid, 'display', displayBlob)
+              .catch((err) => log(`OPFS derived save failed (display): ${file.name} — ${err?.message ?? err}`, 'error', 'Images'))
+            opfs.saveImageDerived(pid, item.uuid, 'compute', computeBlob)
+              .catch((err) => log(`OPFS derived save failed (compute): ${file.name} — ${err?.message ?? err}`, 'error', 'Images'))
+          }
         } catch (err) {
           const found = images.value.find((img) => img.id === item.id)
           if (found) { found.loading = false; found.previewPending = false; found.previewFailed = true }
+          // Reject readiness so compute consumers error loudly rather than
+          // silently fall back to the lossy display JPEG for a TIFF (that would
+          // leak JPEG artifacts into keypoints/depth — the computeUrl invariant).
+          rejectComputeReady(item.uuid, err instanceof Error ? err : new Error(String(err)))
           log(`TIFF decode failed: ${file.name} — ${err?.message ?? err}`, 'error', 'Images')
         } finally {
           done++
@@ -197,6 +262,7 @@ export const useImagesStore = defineStore('images', () => {
       if (isPersisting()) {
         const pid = projects.currentProjectId
         opfs.deleteImage(pid, img.uuid).catch(() => {})
+        opfs.deleteImageDerived(pid, img.uuid).catch(() => {})
         opfs.deleteKeypoints(pid, img.uuid).catch(() => {})
         opfs.deleteDescriptors(pid, img.uuid).catch(() => {})
         opfs.deleteMask(pid, img.uuid).catch(() => {})
@@ -294,6 +360,10 @@ export const useImagesStore = defineStore('images', () => {
     img.kpStatus = 'running'
     log(`${tag} start: ${img.name}`, 'info', tag)
     try {
+      // A TIFF's lossless compute PNG may still be encoding (ingest sets the
+      // display JPEG first) — wait for it, or reject if its transcode failed,
+      // rather than detecting on the lossy display blob (computeUrl invariant).
+      await whenComputeReady(img)
       // Pass the per-image mask (if any) so keypoints inside masked regions are
       // dropped at detection — this propagates to matching and reconstruction.
       const res = await detectKeypoints(
@@ -447,21 +517,48 @@ export const useImagesStore = defineStore('images', () => {
     let done = 0
     const restored = await Promise.all(records.map(async (record) => {
       try {
-        const blob = await opfs.loadImageBlob(projectId, record.uuid)
+        // Load the original lazily — a TIFF cache hit needs neither the
+        // original nor a (re-)decode, so we skip the OPFS read entirely there.
+        let blob = null
+        const loadOriginal = async () => (blob ??= await opfs.loadImageBlob(projectId, record.uuid))
         // OPFS keeps the original file, so TIFFs need the same transcode as on
         // ingest (the Blob has no name, so classify by the record's name).
         let url, computeUrl
         if (isTiff(record.name)) {
-          if (await canDecodeTiffNatively(blob)) {
-            url = URL.createObjectURL(blob)
+          // Native-decode probe is session-cached; only feed it the original on
+          // the first TIFF, when the result isn't known yet.
+          const known = nativeTiffDecodeResult()
+          const native = known !== null ? known : await canDecodeTiffNatively(await loadOriginal())
+          if (native) {
+            url = URL.createObjectURL(await loadOriginal())
             computeUrl = url
           } else {
-            const { displayBlob, computeBlob } = await transcodeTiff(blob)
-            url = URL.createObjectURL(displayBlob)
-            computeUrl = URL.createObjectURL(computeBlob)
+            // Prefer the OPFS transcode cache (both blobs required — a partial
+            // cache must not leave computeUrl pointing at nothing). Fall back to
+            // a fresh transcode and backfill so older projects heal on reopen.
+            const [displayBlob, computeBlob] = await Promise.all([
+              opfs.loadImageDerivedBlob(projectId, record.uuid, 'display'),
+              opfs.loadImageDerivedBlob(projectId, record.uuid, 'compute'),
+            ])
+            if (displayBlob && computeBlob) {
+              url = URL.createObjectURL(displayBlob)
+              computeUrl = URL.createObjectURL(computeBlob)
+              log(`Restored TIFF from cache: ${record.name}`, 'info', 'Images')
+            } else {
+              log(`Transcoding TIFF (no cache): ${record.name}`, 'info', 'Images')
+              const t = await transcodeTiff(await loadOriginal())
+              url = URL.createObjectURL(t.displayBlob)
+              computeUrl = URL.createObjectURL(t.computeBlob)
+              if (isPersisting()) {
+                opfs.saveImageDerived(projectId, record.uuid, 'display', t.displayBlob)
+                  .catch((err) => log(`OPFS derived save failed (display): ${record.name} — ${err?.message ?? err}`, 'error', 'Images'))
+                opfs.saveImageDerived(projectId, record.uuid, 'compute', t.computeBlob)
+                  .catch((err) => log(`OPFS derived save failed (compute): ${record.name} — ${err?.message ?? err}`, 'error', 'Images'))
+              }
+            }
           }
         } else {
-          url = URL.createObjectURL(blob)
+          url = URL.createObjectURL(await loadOriginal())
           computeUrl = url
         }
         const img = {
@@ -532,6 +629,7 @@ export const useImagesStore = defineStore('images', () => {
     addFiducialObservations,
     detectOne,
     detectAll,
+    whenComputeReady,
     clearKeypoints,
     clearAll,
     restoreImages,

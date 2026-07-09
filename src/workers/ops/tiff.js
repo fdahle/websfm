@@ -9,6 +9,10 @@ export function makeTiffOps() {
     const { displayBlob, computeBlob, width, height } = await tiffToDisplayBlob(blob, {
       jpegQuality,
       onThumbnail: emit ? (thumbBlob, tw, th) => emit('thumbnail', [thumbBlob, tw, th]) : undefined,
+      // Stream the full-res display JPEG as soon as it's encoded, before the
+      // slower compute PNG — lets the main thread make the viewer fully usable
+      // while the PNG (returned in the final result) is still encoding.
+      onDisplay: emit ? (dispBlob) => emit('display', [dispBlob]) : undefined,
     })
     return { result: { displayBlob, computeBlob, width, height } }
   }
