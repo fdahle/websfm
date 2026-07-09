@@ -5,6 +5,9 @@ import { matchDescriptors, matchLightGlue, verifyMatches, POOL_SIZE } from '../w
 import { useLog } from '../composables/useLog.js'
 import { preselectPairs } from '../core/features/preselect.js'
 import { inlierSpread } from '../core/features/verify.js'
+import { pickSpreadIndices, sliceDescriptorRows } from '../core/features/subsetGate.js'
+import { MATCH_DEFAULTS } from '../core/defaults.user.js'
+import { MATCH_TUNING } from '../core/tuning.js'
 import { registerProjectStore } from './projectStores.js'
 import { useProjectsStore } from './useProjectsStore.js'
 import { usePosesStore } from './usePosesStore.js'
@@ -57,6 +60,9 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
   // image's descriptors are loaded from OPFS once instead of once per pair (an
   // image appears in N−1 pairs, so this turns O(N²) loads into O(N)).
   async function matchPair(imgA, imgB, settings = {}, onDone, descCache = null) {
+    // Resolve every knob from the single source of truth (defaults.user.js +
+    // tuning.js), caller's `settings` winning. Downstream reads `settings.X` directly.
+    settings = { ...MATCH_DEFAULTS, ...MATCH_TUNING, ...settings }
     const [idA, idB] = [imgA.uuid, imgB.uuid].sort()
     const pid = pairId(idA, idB)
     // Ensure descriptors are ordered the same way as IDs
@@ -96,6 +102,44 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
         return
       }
 
+      // Subset gate (brute-force only): a cheap coarse pre-test that rejects
+      // non-overlapping pairs before the full O(Na·Nb) match. Match a small
+      // spatially-uniform subset of each image's descriptors; if too few survive,
+      // skip the pair entirely. Keeps exhaustive *coverage* (loop closures are
+      // still found anywhere in the graph) at a fraction of the cost per pair —
+      // the win when there are no poses for proximity preselection. Only kicks in
+      // when both images have meaningfully more keypoints than the subset, so
+      // small images just pay the full match. See core/features/subsetGate.js.
+      const gateEnabled = settings.subsetGate !== false && settings.matcher !== 'lightglue'
+      if (gateEnabled) {
+        const gateSize = settings.subsetGateSize
+        const dim = srcA.descDim ?? 128
+        if (kpsA.length > gateSize * 1.5 && kpsB.length > gateSize * 1.5) {
+          const idxA = pickSpreadIndices(kpsA, gateSize)
+          const idxB = pickSpreadIndices(kpsB, gateSize)
+          const subA = sliceDescriptorRows(descA, idxA, dim)
+          const subB = sliceDescriptorRows(descB, idxB, dim)
+          const gate = await matchDescriptors(subA, subB, {
+            ratioThreshold: settings.ratioThreshold,
+            crossCheck: settings.crossCheck,
+            dim,
+          })
+          const gateThreshold = settings.subsetGateThreshold
+          if (gate.matches.length < gateThreshold) {
+            entry.rawCount = 0
+            entry.status = 'done'
+            entry.gated = true
+            log(`Gated: ${imgA.name} ↔ ${imgB.name} — subset gate ${gate.matches.length}/${gateThreshold} `
+              + `putatives on ${idxA.length}×${idxB.length}-kp subsets — skipping full match`, 'debug', 'Matching')
+            touch()
+            onDone?.(pid, entry)
+            return
+          }
+          log(`Gate passed: ${imgA.name} ↔ ${imgB.name} — ${gate.matches.length} subset putatives `
+            + `(≥${gateThreshold}) → full match`, 'debug', 'Matching')
+        }
+      }
+
       // Putative correspondences: LightGlue (learned joint matcher) or brute-force
       // NN + Lowe ratio. LightGlue needs keypoints + image sizes (it normalizes
       // coords internally); brute-force needs only descriptors. Either way `raw`
@@ -106,15 +150,15 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
         const [wB, hB] = imageDims(srcB)
         const res = await matchLightGlue({
           kpsA, descA, wA, hA, kpsB, descB, wB, hB,
-          minConf: settings.lgMinConf ?? 0,
-          maxKeypoints: settings.lgMaxKeypoints ?? 2048,
-          useGpu: settings.useGpu ?? false,
+          minConf: settings.lgMinConf,
+          maxKeypoints: settings.lgMaxKeypoints,
+          useGpu: settings.useGpu,
         }, { onLog: (msg) => log(msg, 'info', 'Matching') })
         raw = res.matches
       } else {
         const res = await matchDescriptors(descA, descB, {
-          ratioThreshold: settings.ratioThreshold ?? 0.75,
-          crossCheck: settings.crossCheck ?? false,
+          ratioThreshold: settings.ratioThreshold,
+          crossCheck: settings.crossCheck,
           // Descriptor width must match the detector: 128 (SIFT) vs 256 (SuperPoint).
           // The crate slices the flat buffer by `dim`; a wrong dim yields phantom
           // rows and out-of-range match indices → the `reading 'x'` crash in verify.
@@ -124,7 +168,7 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
       }
       entry.rawCount = raw.length
 
-      const minMatches = settings.minMatches ?? 15
+      const minMatches = settings.minMatches
 
       if (raw.length < minMatches) {
         entry.status = 'done'
@@ -137,15 +181,15 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
 
       if (settings.geometricVerification !== false) {
         const result = await verifyMatches(kpsA, kpsB, raw, {
-          ransacThreshPx: settings.ransacThreshPx ?? 2.0,
-          maxIters: settings.maxIters ?? 1000,
+          ransacThreshPx: settings.ransacThreshPx,
+          maxIters: settings.maxIters,
         })
         // Inlier-RATIO gate, on top of the absolute count. On repetitive/near-planar
         // scenes (e.g. a building façade) the fundamental-matrix RANSAC can scrape a
         // dozen "inliers" out of ~100 putatives by fitting a bogus epipolar geometry.
         // True pairs sit well above this ratio (~0.5+); false pairs cluster ~0.15.
         // Admitting the false ones corrupts SfM registration, so reject them here.
-        const minInlierRatio = settings.minInlierRatio ?? 0.25
+        const minInlierRatio = settings.minInlierRatio
         const ratio = result ? result.inlierCount / Math.max(1, raw.length) : 0
         // R5: absolute-inlier override. A medium-overlap bridge pair (e.g. 120
         // putatives / 27 inliers @ 0.23 across a repetitive façade) is real geometry
@@ -153,7 +197,7 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
         // the ratio gate was built to kill. Accept on a high absolute inlier count
         // even below the ratio floor; these bridges are the glue that closes loops
         // and builds ≥3-view tracks. The ratio gate still guards the low-count junk.
-        const overrideInliers = settings.overrideInliers ?? 30
+        const overrideInliers = settings.overrideInliers
         const ratioOk = ratio >= minInlierRatio
         const overrode = !ratioOk && result != null && result.inlierCount >= overrideInliers
         // H-vs-F degeneracy: when a homography captures nearly as many inliers as the
@@ -162,7 +206,7 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
         // we keep them — but they make poor SfM *seeds* (the essential-matrix pose
         // recovery is ambiguous under planar degeneracy), so flag them for the seed
         // selector. Not a rejection, just a quality label riding through to the pair.
-        const degenRatioThresh = settings.hfDegenerateRatio ?? 0.8
+        const degenRatioThresh = settings.hfDegenerateRatio
         const hfRatio = result && result.inlierCount > 0
           ? result.hInlierCount / result.inlierCount : 0
         entry.hInlierCount = result?.hInlierCount ?? 0
@@ -173,8 +217,8 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
         // in one image collapse — many-to-one convergence (unique spots ≪ inliers) or
         // epipole degeneracy (all inliers in a pinhead region). Neither is real geometry.
         // Unlike `degenerate` (a seed-quality label), this is a hard reject.
-        const minUniqueFrac = settings.minInlierUniqueFrac ?? 0.5
-        const minSpreadPx = settings.minInlierSpreadPx ?? 8
+        const minUniqueFrac = settings.minInlierUniqueFrac
+        const minSpreadPx = settings.minInlierSpreadPx
         const spread = result ? inlierSpread(kpsA, kpsB, raw, result.inlierMask) : null
         let spreadDegenerate = false
         if (spread && spread.count >= minMatches) {
@@ -218,7 +262,7 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
           + `H/F ${hfRatio.toFixed(2)}${entry.degenerate ? ' (degenerate — planar/pure-rotation, poor seed)' : ''}, `
           + `${spread ? `spread ${spread.uniqueA}/${spread.uniqueB} unique, ${spread.extentA.toFixed(0)}/${spread.extentB.toFixed(0)}px` : 'spread n/a'}`
           + `${spreadDegenerate ? ' (positional collapse — REJECTED)' : ''}, `
-          + `RANSAC ${settings.ransacThreshPx ?? 2.0}px`, 'debug', 'Matching')
+          + `RANSAC ${settings.ransacThreshPx}px`, 'debug', 'Matching')
       } else {
         entry.matches = raw.map(m => [m.ia, m.ib])
         entry.inlierCount = raw.length
@@ -268,6 +312,9 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
   }
 
   async function matchAll(images, settings = {}, onProgress, shouldCancel) {
+    // Same merge as matchPair so this function's own settings reads (and its
+    // matchPair calls) all draw from the single source of truth.
+    settings = { ...MATCH_DEFAULTS, ...MATCH_TUNING, ...settings }
     const ready = images.filter(img => img.kpStatus === 'done')
     const strategy = settings.strategy ?? 'exhaustive'
 
@@ -306,13 +353,13 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
       } else {
         const keep = preselectPairs(
           positioned.map(im => ({ uuid: im.uuid, pos: pos.get(im.uuid) })),
-          { maxNeighbors: settings.maxNeighbors ?? 10 },
+          { maxNeighbors: settings.maxNeighbors },
         )
         const before = pairs.length
         pairs = pairs.filter(([a, b]) =>
           (pos.has(a.uuid) && pos.has(b.uuid)) ? keep.has(pairId(a.uuid, b.uuid)) : true)
         log(`Preselection: ${pairs.length}/${before} pair(s) kept, ${before - pairs.length} skipped `
-          + `(camera proximity, ≤${settings.maxNeighbors ?? 10} neighbours)`, 'info', 'Matching')
+          + `(camera proximity, ≤${settings.maxNeighbors} neighbours)`, 'info', 'Matching')
       }
     }
 
@@ -325,24 +372,25 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
     // Log the descriptor-matching knobs so a run's settings are auditable — in
     // particular whether cross-check (mutual nearest neighbour) is active, which
     // otherwise leaves no trace in the console yet meaningfully changes putatives.
-    const crossCheck = settings.crossCheck ?? false
+    const crossCheck = settings.crossCheck
     const lightglue = settings.matcher === 'lightglue'
     log(`Matching: ${pairs.length} pair(s) — ${strategy}${concurrency > 1 ? `, ${concurrency}× parallel` : ''}`
       + `; matcher ${lightglue ? 'LightGlue (learned)' : 'brute-force'}`
-      + `${lightglue ? '' : `, cross-check ${crossCheck ? 'on (mutual NN)' : 'off'}, ratio ${settings.ratioThreshold ?? 0.75}`}`,
+      + `${lightglue ? '' : `, cross-check ${crossCheck ? 'on (mutual NN)' : 'off'}, ratio ${settings.ratioThreshold}`}`,
       'info', 'Matching')
     let done = 0
     // Tally this run's outcomes for the completion summary. Skipped = too few raw
     // matches to bother verifying; rejected = verified but failed the count/ratio
     // gate; matched = kept (with ≥1 inlier).
-    const minMatches = settings.minMatches ?? 15
-    const stats = { matched: 0, rejected: 0, skipped: 0, inliers: 0, ratios: [] }
+    const minMatches = settings.minMatches
+    const stats = { matched: 0, rejected: 0, skipped: 0, gated: 0, inliers: 0, ratios: [] }
     const tally = (_pid, entry) => {
       if (entry.status !== 'done') return
       if (entry.inlierCount > 0) {
         stats.matched++; stats.inliers += entry.inlierCount
         if (entry.rawCount) stats.ratios.push(entry.inlierCount / entry.rawCount)
-      } else if (entry.rawCount >= minMatches) stats.rejected++
+      } else if (entry.gated) stats.gated++
+      else if (entry.rawCount >= minMatches) stats.rejected++
       else stats.skipped++
     }
 
@@ -372,7 +420,9 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
     const meanRatio = stats.ratios.length
       ? stats.ratios.reduce((s, r) => s + r, 0) / stats.ratios.length : 0
     log(`Matching complete: ${done} pair(s) — ${stats.matched} matched, ${stats.rejected} rejected, `
-      + `${stats.skipped} skipped; ${stats.inliers} total inliers, mean inlier ratio ${meanRatio.toFixed(2)}`,
+      + `${stats.skipped} skipped`
+      + `${stats.gated ? `, ${stats.gated} gated (subset pre-test)` : ''}`
+      + `; ${stats.inliers} total inliers, mean inlier ratio ${meanRatio.toFixed(2)}`,
       'success', 'Matching')
   }
 
@@ -433,10 +483,13 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
     if (all.length > 0) log(`Matches restored: ${all.length} pair(s)`, 'success', 'Matching')
   }
 
-  function clear() {
+  // Reset in-memory matches. Only purge deletes the persisted match files — a plain
+  // clear (project switch/close) must leave them, since restore reads them back and
+  // currentProjectId still points at the project being left.
+  function clear({ purge = false } = {}) {
     matchStore.value.clear()
     matchStore.value = new Map()
-    if (isPersisting()) {
+    if (purge && isPersisting()) {
       opfs.clearAllMatches(projects.currentProjectId).catch(() => {})
     }
   }

@@ -5,6 +5,7 @@ import { beforeAll, describe, it, expect } from 'vitest'
 import initRecon from '../../wasm/reconstruction/reconstruction.js'
 import { reconstruct, retriangulatePairs, mergeSplitTracks, rotationCycleFilter } from './sfm.js'
 import { distortPixel } from './distortion.js'
+import { canonicalFrame } from './fiducials.js'
 
 beforeAll(async () => {
   const wasmUrl = new URL('../../wasm/reconstruction/reconstruction_bg.wasm', import.meta.url)
@@ -309,6 +310,113 @@ describe('reconstruct (incremental SfM, synthetic 3-view scene)', () => {
   })
 })
 
+describe('reconstruct — GCP-anchored bundle adjustment (F2)', () => {
+  // Same noise-free 3-camera rig as the first describe block, plus 3 "GCPs" (world
+  // points 0/1/2, observed in cameras 0+1) whose surveyed position is their exact
+  // true world position — this synthetic rig's SfM frame coincides with the true
+  // world frame, so the anchor should hold with near-zero residual and not break
+  // the reconstruction.
+  it('runs the GCP-anchored BA pass end-to-end without regressing the model', async () => {
+    const rng = mulberry32(42)
+    const N = 60
+    const world = Array.from({ length: N }, () => [
+      (rng() - 0.5) * 4, (rng() - 0.5) * 3, 8 + rng() * 4,
+    ])
+    const centers = [[0, 0, 0], [2, 0, 0], [-2, 0, 0]]
+    const Rs = [rotY(0), rotY(0.15), rotY(-0.15)]
+    const ts = Rs.map((R, i) => mv(R, centers[i]).map((v) => -v))
+    const uuids = ['c0', 'c1', 'c2']
+
+    const images = uuids.map((uuid, ci) => ({
+      uuid, name: uuid, kpStatus: 'done', meta: META,
+      keypoints: world.map((X) => project(Rs[ci], ts[ci], X)),
+    }))
+    const matches = world.map((_, i) => [i, i])
+    const pairs = []
+    for (let a = 0; a < 3; a++) for (let b = a + 1; b < 3; b++) {
+      pairs.push({
+        idA: uuids[a], idB: uuids[b],
+        F: fundamental(Rs[a], ts[a], Rs[b], ts[b]),
+        matches, inlierCount: N, status: 'done',
+      })
+    }
+
+    const gcps = [0, 1, 2].map((i) => ({
+      x: world[i][0], y: world[i][1], z: world[i][2],
+      accuracyX: 0.1, accuracyY: 0.1, accuracyZ: 0.1,
+      observations: [
+        { uuid: 'c0', px: images[0].keypoints[i].x, py: images[0].keypoints[i].y },
+        { uuid: 'c1', px: images[1].keypoints[i].x, py: images[1].keypoints[i].y },
+      ],
+    }))
+
+    const logs = []
+    const out = await reconstruct(
+      { images, pairs, gcps, settings: { baIterations: 25 } },
+      { onLog: (m, level, cat) => logs.push([level, cat, m]) },
+    )
+
+    expect(out.status).toBe('done')
+    expect(out.cameras).toHaveLength(3)
+    expect(logs.some(([, , m]) => m.includes('GCP-anchored bundle adjustment RMS'))).toBe(true)
+    expect(logs.some(([level, , m]) => level === 'warn' && m.includes('GCP anchoring'))).toBe(false)
+
+    // Reconstruction quality is unaffected (still sub-pixel median reprojection).
+    const camByUuid = new Map(out.cameras.map((c) => [c.uuid, c]))
+    const residuals = []
+    for (const pt of out.points) {
+      for (const [uuid, kpIdx] of pt.views) {
+        const cam = camByUuid.get(uuid)
+        const c = mv(cam.R, [pt.x, pt.y, pt.z]).map((v, i) => v + cam.t[i])
+        const u = Kobj.fx * (c[0] / c[2]) + Kobj.cx
+        const v = Kobj.fy * (c[1] / c[2]) + Kobj.cy
+        const kp = images.find((im) => im.uuid === uuid).keypoints[kpIdx]
+        residuals.push(Math.hypot(u - kp.x, v - kp.y))
+      }
+    }
+    residuals.sort((a, b) => a - b)
+    expect(residuals[residuals.length >> 1]).toBeLessThan(1.0)
+  })
+
+  it('skips anchoring quietly with fewer than 3 qualifying GCPs', async () => {
+    const rng = mulberry32(42)
+    const N = 60
+    const world = Array.from({ length: N }, () => [
+      (rng() - 0.5) * 4, (rng() - 0.5) * 3, 8 + rng() * 4,
+    ])
+    const centers = [[0, 0, 0], [2, 0, 0], [-2, 0, 0]]
+    const Rs = [rotY(0), rotY(0.15), rotY(-0.15)]
+    const ts = Rs.map((R, i) => mv(R, centers[i]).map((v) => -v))
+    const uuids = ['c0', 'c1', 'c2']
+    const images = uuids.map((uuid, ci) => ({
+      uuid, name: uuid, kpStatus: 'done', meta: META,
+      keypoints: world.map((X) => project(Rs[ci], ts[ci], X)),
+    }))
+    const matches = world.map((_, i) => [i, i])
+    const pairs = []
+    for (let a = 0; a < 3; a++) for (let b = a + 1; b < 3; b++) {
+      pairs.push({
+        idA: uuids[a], idB: uuids[b],
+        F: fundamental(Rs[a], ts[a], Rs[b], ts[b]),
+        matches, inlierCount: N, status: 'done',
+      })
+    }
+    // Only 2 GCPs — below the ≥3 threshold to attempt a similarity fit.
+    const gcps = [0, 1].map((i) => ({
+      x: world[i][0], y: world[i][1], z: world[i][2],
+      observations: [{ uuid: 'c0', px: images[0].keypoints[i].x, py: images[0].keypoints[i].y },
+        { uuid: 'c1', px: images[1].keypoints[i].x, py: images[1].keypoints[i].y }],
+    }))
+    const logs = []
+    const out = await reconstruct(
+      { images, pairs, gcps, settings: { baIterations: 25 } },
+      { onLog: (m, level, cat) => logs.push([level, cat, m]) },
+    )
+    expect(out.status).toBe('done')
+    expect(logs.some(([, , m]) => m.includes('GCP anchoring skipped'))).toBe(true)
+  })
+})
+
 // A3: retriangulation + track merging (pure helpers, tested directly).
 describe('retriangulatePairs / mergeSplitTracks (A3)', () => {
   // Three cameras looking at a world point W; keypoint index 0 in each is W's
@@ -423,5 +531,119 @@ describe('rotationCycleFilter (repetitive-structure defense)', () => {
       { idA: 'a', idB: 'b', R: I }, { idA: 'b', idB: 'c', R: rotZ(40) }, { idA: 'a', idB: 'c', R: I },
     ]
     expect(rotationCycleFilter(edges).drop).toHaveLength(0)
+  })
+})
+
+// ── F4: fiducial interior orientation ─────────────────────────────────────────
+// A synthetic film scene: each "scan" is a rotated/offset copy of the same
+// canonical camera. The pipeline must fit each image's scan→canonical affine
+// from the clicked fiducials, reconstruct in the shared canonical frame, and
+// report a canonical K equal to focalMm ÷ pitch.
+describe('reconstruct (film scans, fiducial interior orientation)', () => {
+  const FID = {
+    marks: [
+      { id: 'F1', xMm: -106, yMm: -106 }, { id: 'F2', xMm: 106, yMm: -106 },
+      { id: 'F3', xMm: 106, yMm: 106 }, { id: 'F4', xMm: -106, yMm: 106 },
+    ],
+    ppxMm: 0, ppyMm: 0, focalMm: 153,
+  }
+  const PITCH = 0.02 // mm/px
+  const frame = canonicalFrame(FID, PITCH)
+  const cK = frame.K // { fx = 153/0.02 = 7650, fy, cx, cy }
+  const cKINV = [[1 / cK.fx, 0, -cK.cx / cK.fx], [0, 1 / cK.fy, -cK.cy / cK.fy], [0, 0, 1]]
+
+  // Project world point through pose into the CANONICAL pixel frame.
+  const projC = (R, t, X) => {
+    const c = mv(R, X).map((v, i) => v + t[i])
+    if (c[2] <= 0) return null
+    return { x: cK.fx * (c[0] / c[2]) + cK.cx, y: cK.fy * (c[1] / c[2]) + cK.cy }
+  }
+  // canonical px → camera mm (inverse of canonicalFrame's mm→px map).
+  const c2mm = (p) => [frame.originX + p.x * PITCH, frame.originY + p.y * PITCH]
+  // camera mm → scan px for a scanner placement (rotation θ, offset ox/oy).
+  const mm2scan = (mm, th, ox, oy) => {
+    const c = Math.cos(th), s = Math.sin(th)
+    return { x: (c * mm[0] - s * mm[1]) / PITCH + ox, y: (s * mm[0] + c * mm[1]) / PITCH + oy }
+  }
+  // Fundamental in the canonical frame (keypoints land there after the fiducial move).
+  const fundC = (Ri, ti, Rj, tj) => {
+    const Rrel = mul(Rj, T(Ri))
+    const trel = tj.map((v, k) => v - mv(Rrel, ti)[k])
+    const E = mul(skew(trel), Rrel)
+    return mul(mul(T(cKINV), E), cKINV)
+  }
+
+  it('registers all film cameras and reports canonical K = focal ÷ pitch', async () => {
+    const rng = mulberry32(11)
+    const N = 60
+    const world = Array.from({ length: N }, () => [
+      (rng() - 0.5) * 4, (rng() - 0.5) * 3, 8 + rng() * 4,
+    ])
+    const centers = [[0, 0, 0], [2, 0, 0], [-2, 0, 0]]
+    const Rs = [rotY(0), rotY(0.15), rotY(-0.15)]
+    const ts = Rs.map((R, i) => mv(R, centers[i]).map((v) => -v))
+    const uuids = ['f0', 'f1', 'f2']
+    // Each scan gets its own placement: rotation + offset (the scanner geometry
+    // the fit must remove). Noise-free ⇒ the fit is exact, so post-move keypoints
+    // land exactly in the canonical frame.
+    const scan = [{ th: 0.0, ox: 40, oy: -25 }, { th: 0.08, ox: -60, oy: 30 }, { th: -0.05, ox: 15, oy: 55 }]
+
+    const images = uuids.map((uuid, ci) => {
+      const kpCanon = world.map((X) => projC(Rs[ci], ts[ci], X))
+      const { th, ox, oy } = scan[ci]
+      return {
+        uuid, name: uuid, kpStatus: 'done',
+        meta: { width: frame.width, height: frame.height },
+        sensor: { kind: 'film', fiducials: FID },
+        // Keypoints are stored in SCAN space (what the app persists).
+        keypoints: kpCanon.map((p) => mm2scan(c2mm(p), th, ox, oy)),
+        // Clicked fiducial observations: each mark's scan pixel under this placement.
+        fiducialObs: FID.marks.map((m) => {
+          const s = mm2scan([m.xMm, m.yMm], th, ox, oy)
+          return { fidId: m.id, px: s.x, py: s.y }
+        }),
+      }
+    })
+    for (const img of images) expect(img.keypoints.every(Boolean)).toBe(true)
+
+    const matches = world.map((_, i) => [i, i])
+    const pairs = []
+    for (let a = 0; a < 3; a++) for (let b = a + 1; b < 3; b++) {
+      pairs.push({ idA: uuids[a], idB: uuids[b], F: fundC(Rs[a], ts[a], Rs[b], ts[b]), matches, inlierCount: N, status: 'done' })
+    }
+
+    const out = await reconstruct(
+      { images, pairs, settings: { baIterations: 0 } },
+      { onLog: () => {}, onProgress: () => {} },
+    )
+
+    expect(out.status).toBe('done')
+    expect(out.cameras).toHaveLength(3)
+    // Canonical K equals focalMm ÷ pitch, shared by every film camera.
+    for (const cam of out.cameras) {
+      expect(cam.K.fx).toBeCloseTo(FID.focalMm / PITCH, 3)
+      expect(cam.K.cx).toBeCloseTo(cK.cx, 3)
+      expect(cam.K.cy).toBeCloseTo(cK.cy, 3)
+    }
+    // Reprojection (in the canonical frame) is sub-pixel — the scan geometry was
+    // removed exactly at ingest.
+    const camByUuid = new Map(out.cameras.map((c) => [c.uuid, c]))
+    const residuals = []
+    for (const pt of out.points) {
+      for (const [uuid, kpIdx] of pt.views) {
+        const cam = camByUuid.get(uuid)
+        const c = mv(cam.R, [pt.x, pt.y, pt.z]).map((v, i) => v + cam.t[i])
+        const u = cK.fx * (c[0] / c[2]) + cK.cx
+        const v = cK.fy * (c[1] / c[2]) + cK.cy
+        const kpCanon = projC(Rs[uuids.indexOf(uuid)], ts[uuids.indexOf(uuid)], world[kpIdx])
+        residuals.push(Math.hypot(u - kpCanon.x, v - kpCanon.y))
+      }
+    }
+    residuals.sort((a, b) => a - b)
+    expect(residuals[residuals.length >> 1]).toBeLessThan(1.0)
+
+    // The run records a per-image scan→canonical transform for the dense stage.
+    expect(out.summary.fiducialTransforms).toHaveLength(3)
+    expect(new Set(out.summary.fiducialTransforms.map((t) => t.uuid))).toEqual(new Set(uuids))
   })
 })

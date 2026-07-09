@@ -191,9 +191,11 @@ export const useFootprintsStore = registerProjectStore(defineStore('footprints',
     save()
   }
 
-  function clear() {
+  // Only { purge: true } deletes persisted data; a plain clear (project
+  // switch/close) leaves OPFS intact so restore can read it back.
+  function clear({ purge = false } = {}) {
     footprints.value = []
-    if (isPersisting()) opfs.deleteFootprints(projects.currentProjectId).catch(() => {})
+    if (purge && isPersisting()) opfs.deleteFootprints(projects.currentProjectId).catch(() => {})
   }
 
   async function restore({ projectId, projectData }) {

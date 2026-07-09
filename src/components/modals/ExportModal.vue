@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed } from 'vue'
+import { EXPORT_DEFAULTS } from '../../core/defaults.user.js'
 
 // One reusable export dialog, parameterised by `kind`. It collects a format + a
 // few settings and emits them on run; App.vue maps the result to the right
@@ -44,12 +45,11 @@ const CONFIG = {
 
 const cfg = computed(() => CONFIG[props.kind])
 
+// `format` is chosen dynamically per kind; the rest are the single source of truth
+// in core/defaults.user.js.
 const settings = ref({
   format: cfg.value.formats.find((f) => !f.disabled)?.value,
-  includeColor: true,   // cloud
-  includeTracks: true,  // model
-  nodata: -9999,        // dem
-  compression: 'none',  // dem/ortho (placeholder)
+  ...EXPORT_DEFAULTS,
 })
 
 // GeoTIFF compression is a placeholder (writer is uncompressed for now).

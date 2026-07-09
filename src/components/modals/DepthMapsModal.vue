@@ -1,6 +1,7 @@
 <script setup>
 import { ref } from 'vue'
 import { useComputeSettings } from '../../composables/useComputeSettings.js'
+import { DEPTHMAP_DEFAULTS } from '../../core/defaults.user.js'
 
 const emit = defineEmits(['close', 'run'])
 
@@ -12,17 +13,9 @@ const { memBudgetGb } = useComputeSettings()
 // (Metashape-style relative preset → the store resolves it to a working maxDim
 // from the largest native image dimension). Advanced overrides are optional:
 // maxDim (null ⇒ derive from quality) and bestK (null ⇒ auto per image).
-const settings = ref({
-  quality: 'medium',   // low = ⅛, medium = ¼, high = ½, ultra = full native
-  maxDim: null,        // Advanced override; null = derive from quality
-  maxSources: 6,
-  window: 3,            // 7×7 ZNCC — 5×5 is matching noise on grainy quarter-scale film
-  iterations: 3,
-  bestK: null,         // Advanced override; null = auto per image (ceil(nSrc/2), 1..4)
-  speckleFilter: true,
-  filterRelTol: 10,    // exposed as a percentage; converted to a relative fraction on run
-  useGpu: false,       // experimental WebGPU backend
-})
+// Defaults are the single source of truth in core/defaults.user.js; run() below
+// transforms filterRelTol (%) and drops null overrides before dispatch.
+const settings = ref({ ...DEPTHMAP_DEFAULTS })
 
 function run() {
   const { filterRelTol, maxDim, bestK, ...rest } = settings.value

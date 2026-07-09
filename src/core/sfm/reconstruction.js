@@ -65,6 +65,15 @@ export function resolveK(meta, sensor = null) {
   const cx = sensor?.cx ?? w / 2
   const cy = sensor?.cy ?? h / 2
 
+  // 0. Fiducial interior orientation (F4): a film sensor whose per-image affine
+  //    fit gave a canonical pixel frame. sfm.js computes the frame and stashes it
+  //    on the sensor as `_fiducialK` (a plain K + a source label) — it is
+  //    authoritative, the whole reason the keypoints were moved into that frame.
+  if (sensor?._fiducialK) {
+    const { fx, fy, cx: fcx, cy: fcy } = sensor._fiducialK
+    return { fx, fy, cx: fcx, cy: fcy, source: sensor._fiducialK.source ?? 'fiducial interior orientation' }
+  }
+
   // A focal in mm only — px focals are handled separately in path 1.
   const sensorFocalMm = (sensor?.focal != null && sensor.focalUnit !== 'px') ? sensor.focal : null
 
@@ -244,13 +253,19 @@ export async function solvePnp(pts3d, pts2d, K, opts = {}) {
 //                       'none'). 'f,k1' also solves a shared radial distortion coeff.
 //   sensorOfCam       — per-camera integer sensor id (cameras sharing an id share
 //                       one focal); required for refinement, ignored for 'none'.
-// Returns { cameras, points3d, intrinsics, costBefore, costAfter, costTrace } —
-// `intrinsics` is the refined effective K per camera `{ fx, fy, cx, cy, k1 }`
-// (unchanged, k1 = 0, when 'none').
+//   gcpAnchors        — [{ ptIdx, target:[x,y,z], weight }] — GCP-anchored 3D
+//                       points (see core/sfm/sfm.js), pulled toward `target`
+//                       (already in this same SfM frame) with residual
+//                       weight·‖pt−target‖² on top of their normal reprojection
+//                       observations. Omit/empty for plain SfM-only BA.
+// Returns { cameras, points3d, intrinsics, costBefore, costAfter, costTrace,
+//   anchorRmsAfter } — `intrinsics` is the refined effective K per camera
+// `{ fx, fy, cx, cy, k1 }` (unchanged, k1 = 0, when 'none'); anchorRmsAfter is
+// the RMS anchor residual in world units (0 when there are no anchors).
 const REFINE_MODE = { none: 0, f: 1, 'f,cxcy': 2, 'f,k1': 3 }
 export async function bundleAdjust(cameras, intrinsics, points3d, observations, opts = {}) {
   await ensureWasm()
-  const { maxIters = 30, refineIntrinsics = 'none', sensorOfCam = null } = opts
+  const { maxIters = 30, refineIntrinsics = 'none', sensorOfCam = null, gcpAnchors = [] } = opts
   const refineMode = REFINE_MODE[refineIntrinsics] ?? 0
   const nCam = cameras.length
   const nPts = points3d.length
@@ -276,6 +291,13 @@ export async function bundleAdjust(cameras, intrinsics, points3d, observations, 
     obsFlat.set([camIdx, ptIdx, x, y], i * 4)
   })
 
+  const anchorFlat  = new Float32Array(gcpAnchors.length * 4)
+  const anchorWFlat = new Float32Array(gcpAnchors.length)
+  gcpAnchors.forEach(({ ptIdx, target, weight }, i) => {
+    anchorFlat.set([ptIdx, target[0], target[1], target[2]], i * 4)
+    anchorWFlat[i] = weight
+  })
+
   // sensor_of_cam: aligned to `cameras`; -1 (own group) where unknown. Empty/all-−1
   // is fine — the solver only uses it when refineMode > 0.
   const sensorFlat = new Int32Array(nCam)
@@ -284,15 +306,17 @@ export async function bundleAdjust(cameras, intrinsics, points3d, observations, 
     sensorFlat[c] = Number.isInteger(id) ? id : -1
   }
 
-  const raw = bundle_adjust(camFlat, kFlat, ptsFlat, obsFlat, maxIters, sensorFlat, refineMode)
+  const raw = bundle_adjust(camFlat, kFlat, ptsFlat, obsFlat, anchorFlat, anchorWFlat, maxIters, sensorFlat, refineMode)
   // Layout: cameras(nCam×12), points(nPts×3), intrinsics(nCam×5 = fx,fy,cx,cy,k1),
-  // costBefore, costAfter, then a variable-length per-iteration RMS convergence trace.
+  // costBefore, costAfter, anchorRmsAfter, then a variable-length per-iteration
+  // RMS convergence trace.
   const intrBase = nCam * 12 + nPts * 3
   const base = intrBase + nCam * 5
-  if (!raw || raw.length < base + 2) return null
+  if (!raw || raw.length < base + 3) return null
   const costBefore = raw[base]
   const costAfter  = raw[base + 1]
-  const costTrace  = raw.length > base + 2 ? Array.from(raw.slice(base + 2)) : []
+  const anchorRmsAfter = raw[base + 2]
+  const costTrace  = raw.length > base + 3 ? Array.from(raw.slice(base + 3)) : []
 
   const outCameras = cameras.map((_, c) => {
     const b = c * 12
@@ -312,7 +336,7 @@ export async function bundleAdjust(cameras, intrinsics, points3d, observations, 
     return { fx: raw[b], fy: raw[b+1], cx: raw[b+2], cy: raw[b+3], k1: raw[b+4] }
   })
 
-  return { cameras: outCameras, points3d: outPoints, intrinsics: outIntrinsics, costBefore, costAfter, costTrace }
+  return { cameras: outCameras, points3d: outPoints, intrinsics: outIntrinsics, costBefore, costAfter, costTrace, anchorRmsAfter }
 }
 
 // PatchMatch multi-view-stereo depth map for one reference image (dense recon).

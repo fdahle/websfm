@@ -10,6 +10,7 @@
 import { sniffDelimiter, parseRows, guessMapping as guessGcps } from './gcp.js'
 import { guessMapping as guessPoses } from './pose.js'
 import { guessMapping as guessSensors } from './sensor.js'
+import { guessMapping as guessFiducials } from './fiducialObs.js'
 import { looksLikeGeoJson, parseGeoJson } from './geojson.js'
 
 // GCP-specific vs. image/photo-specific header tokens (the shared 'label' token
@@ -41,13 +42,20 @@ export function detectFileKind(text, fileName = '') {
   const gcpMap = guessGcps(header, columnCount, true, { positional: false })
   const poseMap = guessPoses(header, columnCount, true, { positional: false })
   const sensorMap = guessSensors(header, columnCount, true, { positional: false })
+  const fidMap = guessFiducials(header, columnCount, true, { positional: false })
 
   // Strong, mutually-distinctive signals.
   const hasPixels = gcpMap.px != null && gcpMap.py != null
   const hasOrientation = poseMap.omega != null || poseMap.phi != null || poseMap.kappa != null
   const hasIntrinsics = INTRINSIC_KEYS.some((k) => sensorMap[k] != null)
+  // Fiducial obs hallmark: an image column + a fiducial-id column + px/py, and no
+  // ground coordinates (which would make it a GCP). Checked before GCP because a
+  // GCP file also carries image+px+py — the fiducial-id column is the tie-breaker.
+  const hasFiducialCol = fidMap.fiducial != null && fidMap.image != null && fidMap.px != null && fidMap.py != null
+  const hasGroundCoords = gcpMap.x != null && gcpMap.y != null
 
   if (hasIntrinsics && poseMap.image == null) return { kind: 'sensor', confidence: 'high' }
+  if (hasFiducialCol && !hasGroundCoords) return { kind: 'fiducialObs', confidence: 'high' }
   if (hasPixels) return { kind: 'gcp', confidence: 'high' }
   if (hasOrientation) return { kind: 'pose', confidence: 'high' }
 

@@ -117,11 +117,21 @@ fn build_groups(ids: &[i32], n_cam: usize) -> (Vec<usize>, usize) {
 /// At large camera counts the dense reduced-camera Cholesky (`chol_solve`) is the
 /// only part that needs swapping for an iterative Schur solve.
 ///
+/// GCP support: `anchor_flat`/`anchor_weight` optionally pull specific 3D points
+/// toward a known target position (e.g. a GCP triangulated in this same SfM
+/// frame) with an extra quadratic residual `w·‖pt − target‖²`. This only ever
+/// touches that point's own 3×3 block (gradient + diagonal Hessian) — no camera
+/// Jacobian, no new coupling — so it folds into the existing per-point Schur
+/// elimination for free. Empty anchor arrays reduce to today's behaviour exactly.
+///
 /// # Inputs
 /// - `cameras_flat`: n_cam × 12 floats `[R(9)|t(3), …]`
 /// - `intrinsics_flat`: n_cam × 4 floats `[fx,fy,cx,cy, …]` (the seed / base K)
 /// - `pts_flat`: n_pts × 3 floats `[x,y,z, …]`
 /// - `obs_flat`: n_obs × 4 floats `[cam_i, pt_i, pixel_x, pixel_y, …]`
+/// - `anchor_flat`: n_anchor × 4 floats `[pt_i, target_x, target_y, target_z, …]`
+/// - `anchor_weight`: n_anchor floats, one `1/sigma²` weight per anchor (aligned
+///   with `anchor_flat`'s rows; missing entries default to weight 1)
 /// - `max_iters`: outer LM iterations
 /// - `sensor_of_cam`: n_cam ints — per-camera sensor id (shared → shared focal);
 ///   `< 0` (or a short/empty list) ⇒ that camera is its own group
@@ -130,16 +140,20 @@ fn build_groups(ids: &[i32], n_cam: usize) -> (Vec<usize>, usize) {
 ///
 /// # Output
 /// `[cameras_flat(n_cam×12), pts_flat(n_pts×3), intrinsics_flat(n_cam×5),
-///   cost_before, cost_after, cost_trace…]` — the returned intrinsics are the
-/// **refined** effective K per camera as `[fx,fy,cx,cy,k1]` (k1 = 0 unless
-/// `refine_mode == 3`, identical to the input K when `refine_mode == 0`); cost_*
-/// are RMS reprojection error in pixels.
+///   cost_before, cost_after, anchor_rms_after, cost_trace…]` — the returned
+/// intrinsics are the **refined** effective K per camera as `[fx,fy,cx,cy,k1]`
+/// (k1 = 0 unless `refine_mode == 3`, identical to the input K when
+/// `refine_mode == 0`); cost_before/cost_after are RMS reprojection error in
+/// pixels (anchors do not affect them); anchor_rms_after is the RMS anchor
+/// residual in the caller's world units (0 when there are no anchors).
 #[wasm_bindgen]
 pub fn bundle_adjust(
     cameras_flat: &[f32],
     intrinsics_flat: &[f32],
     pts_flat: &[f32],
     obs_flat: &[f32],
+    anchor_flat: &[f32],
+    anchor_weight: &[f32],
     max_iters: u32,
     sensor_of_cam: &[i32],
     refine_mode: u32,
@@ -148,6 +162,36 @@ pub fn bundle_adjust(
     let n_pts = pts_flat.len() / 3;
     let n_obs = obs_flat.len() / 4;
     if n_cam == 0 || n_pts == 0 || n_obs == 0 { return vec![]; }
+
+    // Anchors: (point_idx, target position, weight). Points outside range are
+    // dropped rather than panicking on a malformed caller payload.
+    let n_anchor = anchor_flat.len() / 4;
+    let anchors: Vec<(usize, V3, f64)> = (0..n_anchor).map(|i| {
+        let b = i * 4;
+        let pi = anchor_flat[b] as usize;
+        let target: V3 = [anchor_flat[b+1] as f64, anchor_flat[b+2] as f64, anchor_flat[b+3] as f64];
+        let w = anchor_weight.get(i).copied().unwrap_or(1.0) as f64;
+        (pi, target, w)
+    }).filter(|&(pi, _, _)| pi < n_pts).collect();
+    let mut anchored = vec![false; n_pts];
+    for &(pi, _, _) in &anchors { anchored[pi] = true; }
+    let anchor_sse = |pts: &Vec<V3>| -> f64 {
+        let mut sum = 0.0f64;
+        for &(pi, target, w) in &anchors {
+            let dx = pts[pi][0] - target[0]; let dy = pts[pi][1] - target[1]; let dz = pts[pi][2] - target[2];
+            sum += w * (dx*dx + dy*dy + dz*dz);
+        }
+        sum
+    };
+    let anchor_rms = |pts: &Vec<V3>| -> f64 {
+        if anchors.is_empty() { return 0.0; }
+        let mut sse = 0.0f64;
+        for &(pi, target, _) in &anchors {
+            let dx = pts[pi][0] - target[0]; let dy = pts[pi][1] - target[1]; let dz = pts[pi][2] - target[2];
+            sse += dx*dx + dy*dy + dz*dz;
+        }
+        (sse / anchors.len() as f64).sqrt()
+    };
 
     // Unpack cameras / base intrinsics / points / observations.
     let mut cams: Vec<(M3, V3)> = (0..n_cam).map(|c| {
@@ -212,7 +256,8 @@ pub fn bundle_adjust(
         if cnt == 0 { 0.0 } else { (sse / cnt as f64).sqrt() }
     };
 
-    // Huber-robustified cost Σ ρ(‖r‖) at pixel threshold δ.
+    // Huber-robustified cost Σ ρ(‖r‖) at pixel threshold δ, plus the (unrobustified,
+    // quadratic) GCP anchor term — same total objective the LM step below descends.
     let robust_cost = |cams: &Vec<(M3, V3)>, pts: &Vec<V3>, gpar: &Vec<[f64; 3]>, dh: f64| -> f64 {
         let mut sum = 0.0f64;
         for &(ci, pi, ox, oy) in &obs {
@@ -224,7 +269,7 @@ pub fn bundle_adjust(
             let e = e2.sqrt();
             sum += if e <= dh { e2 } else { 2.0 * dh * e - dh * dh };
         }
-        sum
+        sum + anchor_sse(pts)
     };
 
     // Adaptive Huber threshold: a multiple of the residual median, so it tracks the
@@ -260,6 +305,15 @@ pub fn bundle_adjust(
         let mut cmat = vec![[[0f64; 3]; 3]; n_pts];
         let mut gpv = vec![[0f64; 3]; n_pts];
         let mut emap: Vec<Vec<EBlock>> = (0..n_pts).map(|_| Vec::new()).collect();
+
+        // GCP anchors: gradient/Hessian of w·‖pt−target‖² touches only that
+        // point's own 3×3 block — no camera coupling, so it's just added here.
+        for &(pi, target, w) in &anchors {
+            gpv[pi][0] += w * (pts[pi][0] - target[0]);
+            gpv[pi][1] += w * (pts[pi][1] - target[1]);
+            gpv[pi][2] += w * (pts[pi][2] - target[2]);
+            cmat[pi][0][0] += w; cmat[pi][1][1] += w; cmat[pi][2][2] += w;
+        }
 
         for pi in 0..n_pts {
             for &(ci, ox, oy) in &pt_obs[pi] {
@@ -356,7 +410,10 @@ pub fn bundle_adjust(
             let mut tmp_store: Vec<V3> = vec![[0.0; 3]; n_pts];
             let mut ok = true;
             for pi in 0..n_pts {
-                if emap[pi].is_empty() { continue; }
+                // An anchored point with no camera coupling (edge case: every
+                // observing camera failed cheirality) still needs its C⁻¹·gp
+                // computed so the back-substitution below moves it toward the anchor.
+                if emap[pi].is_empty() && !anchored[pi] { continue; }
                 let mut cp = cmat[pi];
                 for i in 0..3 { cp[i][i] = cp[i][i] * (1.0 + lambda) + 1e-12; }
                 let cinv = match inv3(&cp) { Some(m) => m, None => { ok = false; break; } };
@@ -449,11 +506,12 @@ pub fn bundle_adjust(
     }
 
     let cost_after = rms(&cams, &pts, &gpar);
+    let anchor_rms_after = anchor_rms(&pts);
 
     // Pack output: cameras (12 each), points (3 each), refined effective intrinsics
     // (5 each: fx,fy,cx,cy,k1 — k1 is the shared radial coeff, 0 unless refine_mode==3),
-    // [cost_before, cost_after], then the RMS convergence trace.
-    let mut out = Vec::with_capacity(n_cam * 12 + n_pts * 3 + n_cam * 5 + 2 + trace.len());
+    // [cost_before, cost_after, anchor_rms_after], then the RMS convergence trace.
+    let mut out = Vec::with_capacity(n_cam * 12 + n_pts * 3 + n_cam * 5 + 3 + trace.len());
     for (r, t) in &cams {
         for row in r { for &v in row { out.push(v as f32); } }
         for &v in t { out.push(v as f32); }
@@ -467,6 +525,7 @@ pub fn bundle_adjust(
     }
     out.push(cost_before as f32);
     out.push(cost_after as f32);
+    out.push(anchor_rms_after as f32);
     for &c in &trace { out.push(c as f32); }
     out
 }

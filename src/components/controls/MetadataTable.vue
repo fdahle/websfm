@@ -42,7 +42,11 @@ const round = (n, d = 1) => (n == null ? null : Number(n.toFixed(d)))
           @click="$emit('select', img.id)"
           @dblclick="$emit('open', img.id)"
         >
-          <td class="thumb-cell"><img :src="img.url" :alt="img.name" class="thumb" /></td>
+          <td class="thumb-cell">
+            <img v-if="!img.previewPending && !img.previewFailed" :src="img.url" :alt="img.name" class="thumb" />
+            <div v-else-if="img.previewFailed" class="thumb thumb-error" title="Preview unavailable — decode failed">!</div>
+            <div v-else class="thumb thumb-pending" title="Decoding image…" />
+          </td>
           <td class="name-cell" :title="img.name">{{ img.name }}</td>
 
           <template v-if="img.loading || !img.meta">
@@ -133,6 +137,27 @@ tbody tr.selected {
   border-radius: 4px;
   background: #000;
   display: block;
+}
+
+.thumb-pending {
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(90deg, #000 25%, #222 37%, #000 63%);
+  background-size: 400% 100%;
+  animation: thumb-pending-shimmer 1.4s ease infinite;
+}
+
+@keyframes thumb-pending-shimmer {
+  0% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+.thumb-error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-dim);
+  font-weight: 600;
 }
 
 .name-cell {

@@ -1,5 +1,6 @@
 <script setup>
 import { ref } from 'vue'
+import { DENSE_FUSE_DEFAULTS } from '../../core/defaults.user.js'
 
 const emit = defineEmits(['close', 'run'])
 
@@ -7,13 +8,8 @@ const emit = defineEmits(['close', 'run'])
 // percentage; converted to the fraction core/dense/mvs.js fuseDepthMaps expects. In
 // Auto mode minViews + maxCost are derived by fusion from the data (minViews =
 // min(2, nMaps−1); maxCost = p70 of the pooled valid-pixel costs).
-const settings = ref({
-  auto: true,
-  minViews: 2,
-  depthTolPct: 1.0,
-  maxCost: 0.6,
-  step: 2,
-})
+// Defaults live in core/defaults.user.js; run() transforms depthTolPct (%) below.
+const settings = ref({ ...DENSE_FUSE_DEFAULTS })
 
 function run() {
   const { auto, minViews, depthTolPct, maxCost, step } = settings.value

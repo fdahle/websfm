@@ -156,13 +156,13 @@ mod tests {
             pt_flat.push((x[2] + d * 0.5) as f32);
         }
 
-        let out = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &obs, 60, &[], 0);
+        let out = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &obs, &[], &[], 60, &[], 0);
         let base = n_cam * 12 + n_pts * 3 + n_cam * 5;
         // cameras + points + intrinsics (5 each: fx,fy,cx,cy,k1) + [cost_before, cost_after] + trace.
-        assert!(out.len() >= base + 2, "unexpected BA output length");
+        assert!(out.len() >= base + 3, "unexpected BA output length");
         let cost_before = out[base];
         let cost_after = out[base + 1];
-        let trace = &out[base + 2..];
+        let trace = &out[base + 3..];
         assert!(!trace.is_empty(), "no convergence trace emitted");
         assert!(*trace.last().unwrap() <= cost_after + 1e-3, "trace tail should match final RMS");
         assert!(cost_before > 1.0, "test setup too easy: before {cost_before}px");
@@ -226,11 +226,11 @@ mod tests {
             pt_flat.push((x[2] + d * 0.5) as f32);
         }
 
-        let out = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &obs, 80, &[], 0);
+        let out = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &obs, &[], &[], 80, &[], 0);
         let base = n_cam * 12 + n_pts * 3 + n_cam * 5;
         let cost_before = out[base];
         let cost_after = out[base + 1];
-        let trace = &out[base + 2..];
+        let trace = &out[base + 3..];
         assert!(!trace.is_empty(), "no convergence trace emitted");
         // The accepted-step RMS trace is monotonically non-increasing (LM never
         // commits a worsening step — the property Q2's guard relies on).
@@ -289,7 +289,7 @@ mod tests {
         let mut pt_flat: Vec<f32> = Vec::new();
         for x in &gt_pts { for &v in x { pt_flat.push(v as f32); } }
 
-        let out = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &obs, 100, &sensor_of_cam, 1);
+        let out = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &obs, &[], &[], 100, &sensor_of_cam, 1);
         let intr_base = n_cam * 12 + n_pts * 3;
         let cost_after = out[intr_base + n_cam * 5 + 1];
         // Refined focal is returned per camera; sharing ⇒ all equal, ≈ f_true.
@@ -300,6 +300,82 @@ mod tests {
             assert!((fy - fx).abs() < 1e-3, "fx and fy diverged: {fx} vs {fy}");
         }
         assert!(cost_after < 0.2, "BA did not fit the refined focal: {cost_after}px");
+    }
+
+    // GCP anchor: a point pulled toward a known target position via the anchor
+    // residual, on top of its normal reprojection observations. The scene is the
+    // same 4-camera/25-point rig as `bundle_adjust_reduces_reprojection`, but one
+    // point's *observations* are rendered from a slightly WRONG position (so
+    // reprojection alone would settle it there) while the anchor pulls it back
+    // toward the true position — this is exactly the GCP-in-BA use case: the
+    // anchor should measurably win given a high weight.
+    #[test]
+    fn bundle_adjust_gcp_anchor_pulls_point() {
+        let (fx, fy, cx, cy) = (800.0_f64, 800.0_f64, 320.0_f64, 240.0_f64);
+        let gt_cams: Vec<(M3, V3)> = vec![
+            (so3_exp(&[0.0, 0.0, 0.0]),       [0.0, 0.0, 6.0]),
+            (so3_exp(&[0.05, -0.1, 0.02]),    [0.5, 0.1, 6.2]),
+            (so3_exp(&[-0.08, 0.06, -0.03]),  [-0.4, 0.2, 5.8]),
+            (so3_exp(&[0.03, 0.12, 0.05]),    [0.2, -0.3, 6.1]),
+        ];
+        let n_cam = gt_cams.len();
+        let mut gt_pts: Vec<V3> = Vec::new();
+        for ix in -2..=2 {
+            for iy in -2..=2 {
+                gt_pts.push([ix as f64 * 0.5, iy as f64 * 0.5, 0.2 * ((ix * iy) as f64).cos()]);
+            }
+        }
+        let n_pts = gt_pts.len();
+
+        // Point 0's true ("GCP") position, vs. a nearby but wrong position its
+        // observations are actually rendered from (simulating a slightly
+        // mis-triangulated SIFT track sharing that index).
+        let anchor_target = gt_pts[0];
+        let mut render_pts = gt_pts.clone();
+        render_pts[0] = [anchor_target[0] + 0.3, anchor_target[1] - 0.2, anchor_target[2] + 0.1];
+
+        let mut obs: Vec<f32> = Vec::new();
+        for (ci, (r, t)) in gt_cams.iter().enumerate() {
+            for (pi, x) in render_pts.iter().enumerate() {
+                let (u, v) = project_px(r, t, fx, fy, cx, cy, x);
+                obs.extend_from_slice(&[ci as f32, pi as f32, u as f32, v as f32]);
+            }
+        }
+        let mut k_flat: Vec<f32> = Vec::new();
+        for _ in 0..n_cam { k_flat.extend_from_slice(&[fx as f32, fy as f32, cx as f32, cy as f32]); }
+
+        // Seed cameras/points at ground truth (so only point 0's error is at play).
+        let mut cam_flat: Vec<f32> = Vec::new();
+        for (r, t) in &gt_cams {
+            for row in r { for &v in row { cam_flat.push(v as f32); } }
+            for &v in t { cam_flat.push(v as f32); }
+        }
+        let mut pt_flat: Vec<f32> = Vec::new();
+        for x in &render_pts { for &v in x { pt_flat.push(v as f32); } }
+
+        let anchor_flat: Vec<f32> = vec![0.0, anchor_target[0] as f32, anchor_target[1] as f32, anchor_target[2] as f32];
+        let anchor_weight: Vec<f32> = vec![1e4]; // heavily outweighs the ~4-observation reprojection pull
+
+        let out_no_anchor = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &obs, &[], &[], 60, &[], 0);
+        let out_anchor = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &obs, &anchor_flat, &anchor_weight, 60, &[], 0);
+
+        let pts_base = n_cam * 12;
+        let dist = |out: &Vec<f32>| -> f64 {
+            let p = [out[pts_base] as f64, out[pts_base+1] as f64, out[pts_base+2] as f64];
+            vec_diff(&p, &anchor_target)
+        };
+        let d_no_anchor = dist(&out_no_anchor);
+        let d_anchor = dist(&out_anchor);
+        assert!(d_anchor < d_no_anchor * 0.1,
+            "anchor should pull point 0 much closer to the target: {d_anchor} vs (no anchor) {d_no_anchor}");
+        assert!(d_anchor < 0.05, "anchored point not close enough to target: {d_anchor}");
+
+        // anchor_rms_after is reported right after cost_after.
+        let base = n_cam * 12 + n_pts * 3 + n_cam * 5;
+        let anchor_rms_after = out_anchor[base + 2];
+        assert!(anchor_rms_after < 0.05, "anchor_rms_after too high: {anchor_rms_after}");
+        let anchor_rms_no_anchor = out_no_anchor[base + 2];
+        assert_eq!(anchor_rms_no_anchor, 0.0, "anchor_rms_after must be 0 with no anchors");
     }
 
     // Self-calibration (R6): a scene rendered with a known radial distortion k1, but
@@ -354,7 +430,7 @@ mod tests {
         let mut pt_flat: Vec<f32> = Vec::new();
         for x in &gt_pts { for &v in x { pt_flat.push(v as f32); } }
 
-        let out = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &obs, 100, &sensor_of_cam, 3);
+        let out = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &obs, &[], &[], 100, &sensor_of_cam, 3);
         let intr_base = n_cam * 12 + n_pts * 3;
         let cost_before = out[intr_base + n_cam * 5];
         let cost_after = out[intr_base + n_cam * 5 + 1];

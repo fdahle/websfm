@@ -1,10 +1,12 @@
 <script setup>
 import { ref } from 'vue'
+import { ORTHO_DEFAULTS } from '../../core/defaults.user.js'
 
 // Build Orthophoto. Reprojects each DEM cell through the cached depth maps
 // (occlusion via their depth planes, colour from their RGB planes). Requires a
-// DEM (built first) and depth maps. Defaults mirror the worker's ortho fallbacks
-// (core/products/ortho.js). The output raster is aligned to the DEM grid.
+// DEM (built first) and depth maps. Defaults are the single source of truth in
+// core/defaults.user.js (core/products/ortho.js keeps defensive fallbacks); run()
+// transforms depthTolRel (%) and maxCost (0 ⇒ Infinity). Output is aligned to the DEM.
 defineProps({
   demCrs: { type: String, default: null },   // frame the DEM was built in (label only)
   demSize: { type: String, default: null },  // e.g. "1024×768" (label only)
@@ -12,11 +14,7 @@ defineProps({
 
 const emit = defineEmits(['close', 'run'])
 
-const settings = ref({
-  blend: 'best',       // 'best' (sharpest) | 'average' (smoother seams)
-  depthTolRel: 2,      // occlusion tolerance, % of depth
-  maxCost: 0,          // 0 = no cost gate; else drop matches above this cost
-})
+const settings = ref({ ...ORTHO_DEFAULTS })
 
 function run() {
   const { depthTolRel, maxCost, ...rest } = settings.value

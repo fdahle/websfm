@@ -96,6 +96,37 @@ export interface Sensor {
   /** Film/sensor format width in mm — the alternative mm→px conversion for
    *  film cameras (fx = focal / sensorWidthMm × width). */
   sensorWidthMm?: number | null
+  /** Digital (default) vs scanned film (fiducial interior orientation, F4).
+   *  Absent ⇒ 'digital' (back-compat). */
+  kind?: 'digital' | 'film'
+  /** Calibrated interior orientation for a film sensor (only when kind==='film'). */
+  fiducials?: Fiducials
+}
+
+// ── Fiducial-mark interior orientation (F4) ───────────────────────────────────
+
+/** One calibrated fiducial mark, position in mm in the certificate's camera frame. */
+export interface FiducialMark {
+  id: string
+  xMm: number
+  yMm: number
+}
+
+/** A film sensor's calibrated fiducial layout + principal point + focal, all mm. */
+export interface Fiducials {
+  marks: FiducialMark[]
+  /** Principal point (autocollimation), mm, same origin as the marks. */
+  ppxMm: number
+  ppyMm: number
+  /** Calibrated focal length (certificate value), mm. */
+  focalMm: number
+}
+
+/** One clicked scan-pixel observation of a fiducial mark on an image (F4). */
+export interface FiducialObservation {
+  fidId: string
+  px: number
+  py: number
 }
 
 // ── CRS-tagged coordinates ────────────────────────────────────────────────────

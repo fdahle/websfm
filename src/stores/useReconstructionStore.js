@@ -9,9 +9,10 @@ import {
 } from '../workers/computeClient.js'
 import { useLog } from '../composables/useLog.js'
 import * as opfs from '../utils/opfs.js'
-import { fitSimilarity } from '../core/products/georef.js'
+import { fitSimilarity, applySimilarity } from '../core/products/georef.js'
 import { aerialUpRotation, rotateReconstruction } from '../core/products/projection.js'
 import { cameraCenter } from '../core/sfm/geometry.js'
+import { triangulateAllGcps } from '../core/sfm/gcpTriangulation.js'
 import { qualityToMaxDim } from '../core/dense/mvs.js'
 import { distortionOf } from '../core/sfm/distortion.js'
 import { registerProjectStore } from './projectStores.js'
@@ -20,6 +21,7 @@ import { useMatchesStore } from './useMatchesStore.js'
 import { useProjectsStore } from './useProjectsStore.js'
 import { useSensorsStore } from './useSensorsStore.js'
 import { usePosesStore } from './usePosesStore.js'
+import { useGcpsStore } from './useGcpsStore.js'
 
 // Project-scoped store: the sparse model (camera poses + 3D points) from
 // incremental SfM. Reads the image list and match graph from their stores;
@@ -32,6 +34,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
   const { matchStore } = storeToRefs(useMatchesStore())
   const { sensors } = storeToRefs(useSensorsStore())
   const posesStore = usePosesStore()
+  const gcpsStore = useGcpsStore()
 
   // Point clouds produced for this project. Each is an independent layer the user
   // can select in the sidebar and view in the 3D viewer (sparse now; dense later).
@@ -266,6 +269,12 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
       // BA-refined K the fold used, so applying k1 here reproduces it. Empty ⇒ no-op.
       const selfCalBySensor = new Map(
         (summary.value?.selfCalDistortion ?? []).map((d) => [d.sensorId, d.k1]))
+      // F4: per-image scan→canonical transform from the sparse run. The dense
+      // stage reproduces that exact frame (it must NOT re-fit) — the sparse run
+      // defines it. Fail loudly if a film image is in the cloud but its transform
+      // is missing (a stale/partial summary would silently mis-warp its raster).
+      const fidByUuid = new Map(
+        (summary.value?.fiducialTransforms ?? []).map((t) => [t.uuid, { A: t.A, frame: t.frame }]))
       const inputImages = []
       for (const [uuid, cam] of cloud.cameras) {
         const im = imgByUuid.get(uuid)
@@ -273,6 +282,12 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
         // Lens distortion for this image's sensor — the worker undistorts the raster
         // so depth maps / fusion / DEM / ortho all stay pinhole (matches sparse).
         const s = im.sensorId ? sensorById.get(im.sensorId) : null
+        const fid = fidByUuid.get(uuid) ?? null
+        if (s?.kind === 'film' && !fid) {
+          log(`Dense: ${im.name} is on a film sensor but has no fiducial transform from the sparse run — `
+            + `re-run the sparse reconstruction before densifying (skipping this image)`, 'error', 'Dense')
+          continue
+        }
         let dist = s ? distortionOf(s) : null
         const selfK1 = im.sensorId ? (selfCalBySensor.get(im.sensorId) || 0) : 0
         if (selfK1) {
@@ -282,13 +297,15 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
           }
         }
         inputImages.push({
-          uuid, name: im.name, url: im.url,
+          uuid, name: im.name, url: im.computeUrl ?? im.url,
           // Per-image mask (if any) so masked regions are excluded from the dense cloud.
           mask: im.mask?.dataUrl ?? null,
           R: cam.R.map((row) => [...row]),
           t: [...cam.t],
           K: { fx: cam.K.fx, fy: cam.K.fy, cx: cam.K.cx, cy: cam.K.cy },
           dist,
+          // Film scan→canonical warp (plain data; the frame is already a plain object).
+          fid,
         })
       }
       if (selfCalBySensor.size) {
@@ -367,31 +384,102 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     return pairs
   }
 
-  // True when a georeference can be fit (≥3 pose↔camera correspondences), so the
-  // product modals can offer a real-CRS output alongside the local frame.
-  const canGeoreference = computed(() => georefPairs().length >= 3)
+  // Maps needed to resolve a GCP observation's imageId → its registered camera:
+  // imageId → image (for .uuid), and the sparse cloud's cameras (uuid-keyed).
+  function imagesById() {
+    return new Map(images.value.map((im) => [im.id, im]))
+  }
 
-  // Fit (or refit) the SfM→CRS similarity from camera poses, targeting the current
-  // project CRS. Returns the georef record or null.
-  function georeference() {
-    const pairs = georefPairs()
+  // Fit-eligible GCPs: enabled, with ≥2 observations that resolve to a
+  // *registered* camera — cheap sync check, no triangulation, used to gate
+  // `canGeoreferenceGcps` and to decide whether it's worth triangulating at all.
+  function qualifyingGcps() {
+    const cams = sparseCameras.value
+    if (!cams.size) return []
+    const imgById = imagesById()
+    return gcpsStore.gcps.filter((g) => {
+      if (g.enabled === false) return false
+      const nRegistered = (g.observations || []).filter((o) => {
+        const uuid = imgById.get(o.imageId)?.uuid
+        return uuid != null && cams.has(uuid)
+      }).length
+      return nRegistered >= 2
+    })
+  }
+
+  // True when a GCP-based fit is *plausible* (≥3 GCPs each with ≥2 registered
+  // observations) — cheap, does not triangulate.
+  const canGeoreferenceGcps = computed(() => qualifyingGcps().length >= 3)
+
+  // 3D-3D correspondences for the SfM→CRS fit from GCPs: triangulate each
+  // qualifying GCP in the current SfM frame, pair with its surveyed position.
+  async function gcpGeorefPairs() {
+    const qualifying = qualifyingGcps()
+    if (!qualifying.length) return []
+    const results = await triangulateAllGcps(qualifying, sparseCameras.value, imagesById())
+    return results
+      .filter(({ tri }) => tri != null)
+      .map(({ gcp, tri }) => ({ src: [tri.x, tri.y, tri.z], dst: [gcp.x, gcp.y, gcp.z ?? 0] }))
+  }
+
+  // True when a georeference can be fit (≥3 correspondences from GCPs or poses),
+  // so the product modals can offer a real-CRS output alongside the local frame.
+  const canGeoreference = computed(() => canGeoreferenceGcps.value || georefPairs().length >= 3)
+
+  // Fit (or refit) the SfM→CRS similarity, targeting the current project CRS.
+  // GCPs are the accuracy-defining source and win when ≥3 triangulate; imported
+  // camera poses are the fallback. Returns the georef record or null.
+  async function georeference() {
+    const gcpPairs = await gcpGeorefPairs()
+    const usingGcps = gcpPairs.length >= 3
+    const pairs = usingGcps ? gcpPairs : georefPairs()
     if (pairs.length < 3) {
-      log('Georeference: need ≥3 camera poses matching registered images', 'warn', 'Products')
+      log('Georeference: need ≥3 GCPs or camera poses matching registered images', 'warn', 'Products')
       return null
     }
     const fit = fitSimilarity(pairs)
     if (!fit) {
-      log('Georeference: fit failed (degenerate pose configuration)', 'warn', 'Products')
+      log('Georeference: fit failed (degenerate configuration)', 'warn', 'Products')
       return null
     }
     georef.value = {
       sim: { scale: fit.scale, R: fit.R, t: fit.t },
-      crs: projects.currentCrs, rms: fit.rms, count: fit.count, method: 'poses',
+      crs: projects.currentCrs, rms: fit.rms, count: fit.count, method: usingGcps ? 'gcps' : 'poses',
     }
-    log(`Georeference: ${fit.count} poses → ${projects.currentCrs}, `
+    log(`Georeference: ${fit.count} ${usingGcps ? 'GCPs' : 'poses'} → ${projects.currentCrs}, `
       + `scale ${fit.scale.toPrecision(4)}, RMS ${fit.rms.toPrecision(3)}`, 'success', 'Products')
     persist()
     return georef.value
+  }
+
+  // Per-GCP accuracy report against the current georeference: triangulate every
+  // enabled GCP, apply the fitted similarity, and diff against its surveyed CRS
+  // position — plus the per-observation reprojection residual already computed
+  // by triangulateGcp. Pure read against already-fitted state; cheap to recompute
+  // on demand (e.g. every time the GCP table is shown or a mark is placed).
+  // Returns [{ gcpId, name, viewCount, dx, dy, dz, dTotal, observations }] —
+  // entries for untriangulable GCPs still appear with residuals `null`.
+  async function gcpAccuracyReport() {
+    const sim = georef.value?.sim
+    const enabled = gcpsStore.gcps.filter((g) => g.enabled !== false)
+    if (!enabled.length) return []
+    const results = await triangulateAllGcps(enabled, sparseCameras.value, imagesById())
+    return results.map(({ gcp, tri }) => {
+      if (!tri) {
+        return { gcpId: gcp.id, name: gcp.name, viewCount: 0,
+          dx: null, dy: null, dz: null, dTotal: null, observations: [] }
+      }
+      let dx = null, dy = null, dz = null, dTotal = null
+      if (sim && gcp.x != null && gcp.y != null) {
+        const p = applySimilarity(sim, [tri.x, tri.y, tri.z])
+        dx = p[0] - gcp.x; dy = p[1] - gcp.y; dz = p[2] - (gcp.z ?? 0)
+        dTotal = Math.hypot(dx, dy, dz)
+      }
+      return {
+        gcpId: gcp.id, name: gcp.name, viewCount: tri.viewCount,
+        dx, dy, dz, dTotal, observations: tri.perViewReprojPx,
+      }
+    })
   }
 
   // Build a DEM from the densest available cloud, in the requested frame
@@ -408,7 +496,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     // refit if the CRS changed since); fall back to local if it can't be built.
     let frameSpec = { kind: 'local' }
     if (settings.crs && settings.crs !== 'local') {
-      const g = georef.value?.crs === projects.currentCrs ? georef.value : georeference()
+      const g = georef.value?.crs === projects.currentCrs ? georef.value : await georeference()
       if (g) frameSpec = { kind: 'similarity', ...g.sim, crs: g.crs }
       else log('DEM: no georeference available — using the local frame', 'warn', 'Products')
     }
@@ -493,6 +581,10 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
             // (self-calibration); null → the image is its own intrinsics group.
             sensorId: img.sensorId ?? null,
             keypoints: (img.keypoints || []).map((kp) => ({ x: kp.x, y: kp.y, color: kp.color })),
+            // Fiducial-mark observations (F4) — scan-pixel clicks the sfm ingest
+            // uses to fit this image's scan→canonical affine. Spread to plain
+            // objects (the Vue proxy can't be structured-cloned).
+            fiducialObs: (img.fiducialObs || []).map((o) => ({ fidId: o.fidId, px: o.px, py: o.py })),
             meta: img.meta
               ? {
                   width: img.meta.width,
@@ -513,6 +605,17 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
                   // Lens distortion (Brown–Conrady) — undistorted at ingest so the
                   // pipeline stays pinhole. Null coeffs are treated as zero.
                   k1: s.k1, k2: s.k2, k3: s.k3, p1: s.p1, p2: s.p2,
+                  distortionModel: s.distortionModel,
+                  // Film-scan interior orientation (F4): kind + calibrated fiducial
+                  // layout. The sfm ingest fits a per-image affine and builds one
+                  // canonical K per sensor (resolveK path 0). Plain-copy the marks.
+                  kind: s.kind ?? 'digital',
+                  fiducials: s.fiducials
+                    ? {
+                        marks: (s.fiducials.marks || []).map((m) => ({ id: m.id, xMm: m.xMm, yMm: m.yMm })),
+                        ppxMm: s.fiducials.ppxMm, ppyMm: s.fiducials.ppyMm, focalMm: s.fiducials.focalMm,
+                      }
+                    : null,
                 }
               : null,
           }
@@ -530,6 +633,21 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
             matches: e.matches.map((m) => [m[0], m[1]]),
             inlierCount: e.inlierCount, status: 'done',
           })),
+        // GCPs, pre-resolved to plain data + imageId → uuid (the worker only knows
+        // images by uuid): [{ x, y, z, accuracy*, observations: [{ uuid, px, py }] }].
+        // Feeds the optional GCP-anchored bundle-adjust pass in core/sfm/sfm.js.
+        gcps: (() => {
+          const imgById = imagesById()
+          return gcpsStore.gcps
+            .filter((g) => g.enabled !== false && g.x != null && g.y != null)
+            .map((g) => ({
+              x: g.x, y: g.y, z: g.z ?? 0,
+              accuracyX: g.accuracyX, accuracyY: g.accuracyY, accuracyZ: g.accuracyZ,
+              observations: (g.observations || [])
+                .map((o) => ({ uuid: imgById.get(o.imageId)?.uuid, px: o.px, py: o.py }))
+                .filter((o) => o.uuid != null),
+            }))
+        })(),
         settings,
       }
 
@@ -700,7 +818,9 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     dem,
     ortho,
     canGeoreference,
+    canGeoreferenceGcps,
     georeference,
+    gcpAccuracyReport,
     generateDem,
     generateOrtho,
     reconstruct,

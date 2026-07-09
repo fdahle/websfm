@@ -1,9 +1,9 @@
 import { ref, markRaw } from 'vue'
 import { defineStore } from 'pinia'
 import { createImage } from '../utils/image.js'
-import { isTiff, tiffToDisplayBlob } from '../utils/tiff.js'
+import { isTiff, canDecodeTiffNatively, readTiffDimensions } from '../utils/tiff.js'
 import { extractMetadata } from '../core/io/metadata.js'
-import { detectKeypoints } from '../workers/computeClient.js'
+import { detectKeypoints, transcodeTiff } from '../workers/computeClient.js'
 import { useLog } from '../composables/useLog.js'
 import * as opfs from '../utils/opfs.js'
 import { useProjectsStore } from './useProjectsStore.js'
@@ -63,6 +63,9 @@ export const useImagesStore = defineStore('images', () => {
           detector: img.detector ?? null, descDim: img.descDim ?? null,
           hasMask: !!img.mask, hasDepth: !!img.depth,
           sensorId: img.sensorId ?? null,
+          // Fiducial observations (F4) are user clicks on the raster — tiny, and
+          // persisted inline (independent of keypoint indices).
+          fiducialObs: img.fiducialObs?.length ? img.fiducialObs.map((o) => ({ ...o })) : [],
           meta: img.meta ? metaToSave : null,
         }
       }),
@@ -77,8 +80,30 @@ export const useImagesStore = defineStore('images', () => {
     selectedId.value = id
   }
 
-  async function addImages(files) {
+  function extractMetadataFor(item, file, presetDims) {
+    extractMetadata(file, item.url, presetDims)
+      .then((meta) => {
+        const found = images.value.find((img) => img.id === item.id)
+        if (found) {
+          found.meta = meta
+          found.loading = false
+          const cam = [meta.make, meta.model].filter(Boolean).join(' ') || 'unknown camera'
+          const dim = meta.width && meta.height ? ` ${meta.width}×${meta.height}` : ''
+          log(`Metadata: ${file.name} — ${cam}${dim}`, 'success', 'Metadata')
+          if (isPersisting()) sync()
+        }
+      })
+      .catch((err) => {
+        const found = images.value.find((img) => img.id === item.id)
+        if (found) found.loading = false
+        log(`Metadata failed: ${file.name} — ${err?.message ?? err}`, 'error', 'Metadata')
+        if (isPersisting()) sync()
+      })
+  }
+
+  async function addImages(files, onProgress) {
     let added = 0
+    const tiffItems = []
     for (const file of files) {
       const item = createImage(file)
       if (images.value.some((img) => img.id === item.id)) {
@@ -89,50 +114,72 @@ export const useImagesStore = defineStore('images', () => {
       added++
       log(`Added image: ${file.name} (${(file.size / 1024).toFixed(0)} KB)`, 'info', 'Images')
 
-      // Browsers (bar Safari) can't decode TIFF natively, so createImage's blob
-      // URL renders blank and dimensions never load. Transcode to a PNG blob and
-      // use that as the display/compute URL; the original TIFF still goes to OPFS.
-      if (isTiff(file)) {
-        URL.revokeObjectURL(item.url)
-        item.url = null
-        try {
-          const { blob: png, width, height } = await tiffToDisplayBlob(file)
-          const found = images.value.find((img) => img.id === item.id)
-          if (!found) continue // removed mid-decode
-          found.url = URL.createObjectURL(png)
-          log(`Decoded TIFF: ${file.name} — ${width}×${height}`, 'info', 'Images')
-        } catch (err) {
-          const found = images.value.find((img) => img.id === item.id)
-          if (found) found.loading = false
-          log(`TIFF decode failed: ${file.name} — ${err?.message ?? err}`, 'error', 'Images')
-          continue
-        }
-      }
-
       if (isPersisting()) {
         opfs.saveImage(projects.currentProjectId, item.uuid, file)
           .catch((err) => log(`OPFS save failed: ${file.name} — ${err?.message ?? err}`, 'error', 'Images'))
       }
 
-      extractMetadata(file, item.url)
-        .then((meta) => {
-          const found = images.value.find((img) => img.id === item.id)
-          if (found) {
-            found.meta = meta
-            found.loading = false
-            const cam = [meta.make, meta.model].filter(Boolean).join(' ') || 'unknown camera'
-            const dim = meta.width && meta.height ? ` ${meta.width}×${meta.height}` : ''
-            log(`Metadata: ${file.name} — ${cam}${dim}`, 'success', 'Metadata')
-            if (isPersisting()) sync()
-          }
-        })
-        .catch((err) => {
-          const found = images.value.find((img) => img.id === item.id)
-          if (found) found.loading = false
-          log(`Metadata failed: ${file.name} — ${err?.message ?? err}`, 'error', 'Metadata')
-          if (isPersisting()) sync()
-        })
+      // Browsers (bar Safari) can't decode TIFF natively, so createImage's blob
+      // URL renders blank until transcoded. Batch the transcode below — off the
+      // main thread, in parallel — instead of blocking this loop per file; mark
+      // the thumbnail as pending so the UI can show a placeholder instead of a
+      // broken image while that runs.
+      if (isTiff(file)) {
+        item.previewPending = true
+        tiffItems.push({ item, file })
+        // EXIF + dimensions don't need the slow full pixel decode — the TIFF
+        // header gives real width/height near-instantly (readTiffDimensions),
+        // so metadata shows up right away instead of waiting on the transcode.
+        readTiffDimensions(file)
+          .then((dims) => extractMetadataFor(item, file, dims))
+          .catch(() => extractMetadataFor(item, file))
+      } else {
+        extractMetadataFor(item, file)
+      }
     }
+
+    if (tiffItems.length) {
+      let done = 0
+      const total = tiffItems.length
+      await Promise.all(tiffItems.map(async ({ item, file }) => {
+        try {
+          if (await canDecodeTiffNatively(file)) {
+            // This engine renders the raw TIFF natively — item.url (already the
+            // raw object URL) works as-is for both display and compute.
+            const found = images.value.find((img) => img.id === item.id)
+            if (found) { found.computeUrl = found.url; found.previewPending = false }
+            return
+          }
+          const { displayBlob, computeBlob, width, height } = await transcodeTiff(file, undefined, {
+            // Fires once the decode finishes, well before the full-res JPEG+PNG
+            // encode below — swap in a quick low-res preview so the user sees
+            // something long before the full-quality one is ready.
+            onThumbnail: (thumbBlob) => {
+              const found = images.value.find((img) => img.id === item.id)
+              if (!found || !found.previewPending) return
+              URL.revokeObjectURL(found.url)
+              found.url = URL.createObjectURL(thumbBlob)
+              found.previewPending = false
+            },
+          })
+          const found = images.value.find((img) => img.id === item.id)
+          if (!found) return // removed mid-decode
+          URL.revokeObjectURL(found.url)
+          found.url = URL.createObjectURL(displayBlob)
+          found.computeUrl = URL.createObjectURL(computeBlob)
+          found.previewPending = false
+          log(`Decoded TIFF: ${file.name} — ${width}×${height}`, 'info', 'Images')
+        } catch (err) {
+          const found = images.value.find((img) => img.id === item.id)
+          if (found) { found.loading = false; found.previewPending = false; found.previewFailed = true }
+          log(`TIFF decode failed: ${file.name} — ${err?.message ?? err}`, 'error', 'Images')
+        } finally {
+          done++
+          onProgress?.(done, total, file.name)
+        }
+      }))
+    }
+
     if (added > 1) log(`Added ${added} images`, 'success', 'Images')
     if (isPersisting()) sync()
   }
@@ -142,6 +189,7 @@ export const useImagesStore = defineStore('images', () => {
     if (idx !== -1) {
       const img = images.value[idx]
       URL.revokeObjectURL(img.url)
+      if (img.computeUrl && img.computeUrl !== img.url) URL.revokeObjectURL(img.computeUrl)
       images.value.splice(idx, 1)
       if (selectedId.value === id) selectedId.value = null
       log(`Removed image: ${img.name}`, 'info', 'Images')
@@ -185,6 +233,56 @@ export const useImagesStore = defineStore('images', () => {
     }
   }
 
+  // Upsert a fiducial-mark observation (scan pixels) for an image (F4), replacing
+  // any existing observation of the same mark — mirrors the GCP setObservation
+  // shape. Re-detecting keypoints does NOT invalidate these (they're user clicks
+  // on the raster, independent of keypoint indices).
+  function setFiducialObservation(imageId, fidId, px, py) {
+    const img = imageById(imageId)
+    if (!img || !Number.isFinite(px) || !Number.isFinite(py)) return
+    if (!Array.isArray(img.fiducialObs)) img.fiducialObs = []
+    const existing = img.fiducialObs.find((o) => o.fidId === fidId)
+    if (existing) { existing.px = px; existing.py = py }
+    else img.fiducialObs.push({ fidId, px, py })
+    log(`Fiducial ${fidId} marked on ${img.name} (${px.toFixed(1)}, ${py.toFixed(1)})`, 'info', 'Sensor')
+    if (isPersisting()) sync()
+  }
+
+  // Bulk-import fiducial observations parsed from a file (F4). `rows` are
+  // `[{ imageName, fidId, px, py }]`; each is matched to an image by name
+  // (case-insensitive, extension-tolerant) and upserted. Returns the count applied.
+  function addFiducialObservations(rows) {
+    let applied = 0, unmatched = 0
+    for (const r of rows || []) {
+      const lc = String(r.imageName || '').toLowerCase()
+      const base = lc.replace(/\.[^.]+$/, '')
+      const img = images.value.find((i) => {
+        const n = i.name.toLowerCase()
+        return n === lc || n.replace(/\.[^.]+$/, '') === base
+      })
+      if (!img) { unmatched++; continue }
+      if (!Array.isArray(img.fiducialObs)) img.fiducialObs = []
+      const existing = img.fiducialObs.find((o) => o.fidId === r.fidId)
+      if (existing) { existing.px = r.px; existing.py = r.py }
+      else img.fiducialObs.push({ fidId: r.fidId, px: r.px, py: r.py })
+      applied++
+    }
+    log(`Fiducial observations imported: ${applied}${unmatched ? `, ${unmatched} unmatched image(s)` : ''}`,
+      applied ? 'success' : 'warn', 'Sensor')
+    if (applied && isPersisting()) sync()
+    return applied
+  }
+
+  function removeFiducialObservation(imageId, fidId) {
+    const img = imageById(imageId)
+    if (!img || !Array.isArray(img.fiducialObs)) return
+    const idx = img.fiducialObs.findIndex((o) => o.fidId === fidId)
+    if (idx === -1) return
+    img.fiducialObs.splice(idx, 1)
+    log(`Fiducial ${fidId} cleared on ${img.name}`, 'info', 'Sensor')
+    if (isPersisting()) sync()
+  }
+
   async function detectOne(id, settings = {}, onDetected, shouldCancel) {
     const img = images.value.find((i) => i.id === id)
     if (!img || img.kpStatus === 'running') return
@@ -199,7 +297,7 @@ export const useImagesStore = defineStore('images', () => {
       // Pass the per-image mask (if any) so keypoints inside masked regions are
       // dropped at detection — this propagates to matching and reconstruction.
       const res = await detectKeypoints(
-        img.url,
+        img.computeUrl ?? img.url,
         { ...settings, mask: img.mask?.dataUrl ?? null },
         { onLog: (msg) => log(msg, 'info', tag) },
       )
@@ -316,35 +414,62 @@ export const useImagesStore = defineStore('images', () => {
     }
   }
 
-  function clearAll(onCleared) {
+  // Reset the in-memory image session. Pass { purge: true } to also persist the
+  // emptied list (overwriting project.json) — do NOT purge on project switch/close,
+  // since that would clobber the project being left with an empty image list, and
+  // restore reads project.json back. Only the explicit "clear-all" command purges.
+  function clearAll(onCleared, { purge = false } = {}) {
     const n = images.value.length
-    for (const img of images.value) URL.revokeObjectURL(img.url)
+    for (const img of images.value) {
+      URL.revokeObjectURL(img.url)
+      if (img.computeUrl && img.computeUrl !== img.url) URL.revokeObjectURL(img.computeUrl)
+    }
     images.value = []
     selectedId.value = null
     if (n > 0) log(`Session cleared (${n} image${n !== 1 ? 's' : ''} removed)`, 'warn', 'Images')
-    if (isPersisting()) sync()
+    if (purge && isPersisting()) sync()
     onCleared?.()
   }
 
-  // Restore images from OPFS project records (used on session load / project switch)
-  async function restoreImages(records, projectId) {
-    for (const img of images.value) URL.revokeObjectURL(img.url)
+  // Restore images from OPFS project records (used on session load / project
+  // switch). Runs every record's OPFS reads + TIFF transcode in parallel
+  // (Promise.all) instead of one at a time — order is preserved since
+  // Promise.all resolves in input order regardless of completion order.
+  async function restoreImages(records, projectId, onProgress) {
+    for (const img of images.value) {
+      URL.revokeObjectURL(img.url)
+      if (img.computeUrl && img.computeUrl !== img.url) URL.revokeObjectURL(img.computeUrl)
+    }
     images.value = []
     selectedId.value = null
 
-    for (const record of records) {
+    const total = records.length
+    let done = 0
+    const restored = await Promise.all(records.map(async (record) => {
       try {
         const blob = await opfs.loadImageBlob(projectId, record.uuid)
-        // OPFS keeps the original file, so TIFFs need the same transcode-to-PNG
-        // as on ingest (the Blob has no name, so classify by the record's name).
-        const url = isTiff(record.name)
-          ? URL.createObjectURL((await tiffToDisplayBlob(blob)).blob)
-          : URL.createObjectURL(blob)
+        // OPFS keeps the original file, so TIFFs need the same transcode as on
+        // ingest (the Blob has no name, so classify by the record's name).
+        let url, computeUrl
+        if (isTiff(record.name)) {
+          if (await canDecodeTiffNatively(blob)) {
+            url = URL.createObjectURL(blob)
+            computeUrl = url
+          } else {
+            const { displayBlob, computeBlob } = await transcodeTiff(blob)
+            url = URL.createObjectURL(displayBlob)
+            computeUrl = URL.createObjectURL(computeBlob)
+          }
+        } else {
+          url = URL.createObjectURL(blob)
+          computeUrl = url
+        }
         const img = {
           id: record.id,
           uuid: record.uuid,
           name: record.name,
           url,
+          computeUrl,
           file: null,
           meta: record.meta,
           sensorId: record.sensorId ?? null,
@@ -358,6 +483,8 @@ export const useImagesStore = defineStore('images', () => {
           descDim: record.descDim ?? 128,
           mask: null,
           depth: null,
+          // Back-compat: older projects predate fiducials ⇒ empty.
+          fiducialObs: Array.isArray(record.fiducialObs) ? record.fiducialObs.map((o) => ({ ...o })) : [],
         }
         if (record.kpStatus === 'done') {
           const kps = await opfs.loadKeypoints(projectId, record.uuid)
@@ -377,12 +504,17 @@ export const useImagesStore = defineStore('images', () => {
           const depthDataUrl = await opfs.loadDepthDataUrl(projectId, record.uuid)
           if (depthDataUrl) img.depth = { dataUrl: depthDataUrl }
         }
-        images.value.push(img)
+        return img
       } catch (err) {
         log(`Restore failed: ${record.name} — ${err?.message ?? err}`, 'error', 'Project')
+        return null
+      } finally {
+        done++
+        onProgress?.(done, total, record.name)
       }
-    }
-    log(`Project loaded: ${records.length} image${records.length !== 1 ? 's' : ''}`, 'success', 'Project')
+    }))
+    images.value = restored.filter(Boolean)
+    log(`Project loaded: ${images.value.length} image${images.value.length !== 1 ? 's' : ''}`, 'success', 'Project')
   }
 
   return {
@@ -395,6 +527,9 @@ export const useImagesStore = defineStore('images', () => {
     removeImage,
     updateMask,
     updateDepth,
+    setFiducialObservation,
+    removeFiducialObservation,
+    addFiducialObservations,
     detectOne,
     detectAll,
     clearKeypoints,

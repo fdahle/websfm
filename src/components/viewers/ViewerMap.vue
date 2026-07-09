@@ -29,6 +29,7 @@ const props = defineProps({
   alignedUuids: { type: Object, default: () => new Set() },
   hasSparse:    { type: Boolean, default: false },
   crs:        { type: String, default: 'EPSG:4326' },
+  showFootprints: { type: Boolean, default: true },
 })
 
 const emit = defineEmits(['select'])
@@ -41,6 +42,7 @@ let map             = null
 let vSource         = null
 let gcpSource       = null
 let footprintSource = null
+let footprintLayer  = null
 let poseSource      = null
 
 // ── Styles ────────────────────────────────────────────────────────────────────
@@ -272,6 +274,7 @@ async function build() {
   vSource = new VectorSource({ features: gpsImages.value.map(makeFeature) })
   gcpSource = new VectorSource({ features: mapGcps.value.map(makeGcpFeature) })
   footprintSource = new VectorSource({ features: mapFootprints.value.map(makeFootprintFeature) })
+  footprintLayer = new VectorLayer({ source: footprintSource, style: footprintStyleFor, visible: props.showFootprints })
   poseSource = new VectorSource({ features: mapPoses.value.map(makePoseFeature) })
 
   const graticule = new Graticule({
@@ -284,7 +287,7 @@ async function build() {
     target: mapEl.value,
     layers: [
       graticule,
-      new VectorLayer({ source: footprintSource, style: footprintStyleFor }),
+      footprintLayer,
       new VectorLayer({ source: vSource, style: styleFor }),
       new VectorLayer({ source: gcpSource, style: gcpStyle }),
       new VectorLayer({ source: poseSource, style: poseStyleFor }),
@@ -342,6 +345,7 @@ function destroy() {
   vSource = null
   gcpSource = null
   footprintSource = null
+  footprintLayer = null
   poseSource = null
   hover.value = null
 }
@@ -361,6 +365,9 @@ watch(mapFootprints, refreshFootprints, { deep: true })
 // Rebuild pose markers when the pose list changes (deep: imageId may be
 // re-resolved in place by retroactive matching)
 watch(mapPoses, refreshPoses, { deep: true })
+
+// Show/hide the footprint layer from the ribbon toggle.
+watch(() => props.showFootprints, (v) => footprintLayer?.setVisible(v))
 
 // Re-style on selection change without rebuilding features
 watch(() => props.selectedId, () => { vSource?.changed(); footprintSource?.changed(); poseSource?.changed() })

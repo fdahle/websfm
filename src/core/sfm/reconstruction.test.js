@@ -350,6 +350,28 @@ describe('bundleAdjust', () => {
     expect(await bundleAdjust(cameras, intrinsics, points3d, [])).toBeNull()
   })
 
+  // GCP anchor marshalling through the JS↔WASM boundary: nudge one point away
+  // from its optimum and anchor it back toward the original (true) position
+  // with a heavy weight — it should end up much closer to the target than
+  // without the anchor, and anchorRmsAfter should reflect a small residual.
+  it('pulls an anchored point toward its target (gcpAnchors)', async () => {
+    const { cameras, intrinsics, points3d, observations } = exactScene(7, 40)
+    const target = [points3d[0].x, points3d[0].y, points3d[0].z]
+    const nudged = points3d.map((p, i) => i === 0 ? { x: p.x + 0.5, y: p.y - 0.3, z: p.z + 0.2 } : p)
+
+    const noAnchor = await bundleAdjust(cameras, intrinsics, nudged, observations, { maxIters: 40 })
+    const withAnchor = await bundleAdjust(cameras, intrinsics, nudged, observations, {
+      maxIters: 40, gcpAnchors: [{ ptIdx: 0, target, weight: 1e4 }],
+    })
+    expect(noAnchor).not.toBeNull()
+    expect(withAnchor).not.toBeNull()
+    expect(noAnchor.anchorRmsAfter).toBe(0)
+
+    const dist = (p) => Math.hypot(p.x - target[0], p.y - target[1], p.z - target[2])
+    expect(dist(withAnchor.points3d[0])).toBeLessThan(dist(noAnchor.points3d[0]) * 0.1)
+    expect(withAnchor.anchorRmsAfter).toBeLessThan(0.05)
+  })
+
   // A2 self-calibration through the JS↔WASM boundary: a scene rendered with a focal
   // 10% higher than the seed K, refined with one shared focal. Validates the new
   // marshalling (sensorOfCam + refineIntrinsics in, refined intrinsics out).

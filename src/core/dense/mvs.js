@@ -13,6 +13,7 @@
 
 import { computeDepthMap } from '../sfm/reconstruction.js'
 import { planeCostRef, aggregateValidCosts } from './planeCost.js'
+import { DENSE_TUNING } from '../tuning.js'
 import {
   cameraCenter, projectWithDepth, triangulationAngle, scaleK, rgbaToGray,
 } from '../sfm/geometry.js'
@@ -53,7 +54,8 @@ const project = projectWithDepth
 // up to `maxSources` source uuids, best first.
 //   cameras: Map<uuid, { R, t, K }>   points: [{ x, y, z, views: [[uuid,kpIdx],…] }]
 export function selectSourceViews(cameras, points, refUuid, opts = {}) {
-  const { maxSources = 6, minAngleDeg = 3, maxAngleDeg = 60 } = opts
+  // maxSources is user-facing (DEPTHMAP_DEFAULTS); the angle window is internal (tuning.js).
+  const { maxSources = 6, minAngleDeg = DENSE_TUNING.minAngleDeg, maxAngleDeg = DENSE_TUNING.maxAngleDeg } = opts
   const refCam = cameras.get(refUuid)
   if (!refCam) return []
   const Cref = cameraCenter(refCam)
@@ -164,7 +166,7 @@ function scaleKxy(K, sx, sy) {
 // 600 — low enough that even a Medium-quality working image gets a coarse level to
 // carry global propagation). 1 level (no pyramid) when the working image is already
 // at/under that.
-function pyramidLevelCount(w, h, coarseLong = 600) {
+function pyramidLevelCount(w, h, coarseLong = DENSE_TUNING.coarseLong) {
   const long = Math.max(w, h)
   if (long <= coarseLong) return 1
   return Math.floor(Math.log2(long / coarseLong)) + 1
@@ -180,7 +182,8 @@ function pyramidLevelCount(w, h, coarseLong = 600) {
 // share the (refGray, refW, refH, refK, sources, opts) → { depth, cost, w, h }
 // contract, so this orchestration is backend-agnostic.
 export async function depthMapForImage(ref, sources, points, settings = {}, computeDepthMapFn = computeDepthMap, hooks = {}) {
-  const { window = 3, iterations = 3, bestK = 3, coarseLong = 600 } = settings
+  // window/iterations/bestK are user-facing (DEPTHMAP_DEFAULTS); coarseLong is internal (tuning.js).
+  const { window = 3, iterations = 3, bestK = 3, coarseLong = DENSE_TUNING.coarseLong } = settings
   const refCamScaled = { R: ref.cam.R, t: ref.cam.t, K: ref.K }
   // Depth range is view-space (resolution-invariant): derive it once from the
   // working-res projection (most sparse points visible → tightest percentiles).
@@ -384,7 +387,8 @@ export function autoFusionMaxCost(maps, { percentile = 0.7, lo = 0.3, hi = 0.45 
 // Returns [{ x, y, z, color:[r,g,b] }]. `onLog(msg, level, category)` (optional)
 // receives a breakdown of why pixels were kept or culled.
 export function fuseDepthMaps(maps, opts = {}, onLog = () => {}) {
-  const { consistencyPx = 2, depthTolRel = 0.01, step = 2 } = opts
+  // depthTolRel/step are user-facing (DENSE_FUSE_DEFAULTS); consistencyPx is internal (tuning.js).
+  const { consistencyPx = DENSE_TUNING.consistencyPx, depthTolRel = 0.01, step = 2 } = opts
 
   // Derived defaults (Step 3): when the user hasn't overridden them, adapt to the
   // data. minViews = min(2, nMaps−1) so a 2-image project can still fuse (needs 1

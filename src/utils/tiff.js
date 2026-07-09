@@ -17,11 +17,49 @@ export function isTiff(fileOrName) {
   return type === 'image/tiff' || type === 'image/tif' || name.endsWith('.tif') || name.endsWith('.tiff')
 }
 
-// Decode a TIFF blob (handles BigTIFF / tiled / compressed / geo, via geotiff)
-// into a PNG blob the browser renders natively. Returns { blob, width, height }.
-// readRGB() resolves photometric interpretation (RGB / grayscale / palette /
-// CMYK / YCbCr) to 8-bit RGB, so we just pack it into RGBA and re-encode.
-export async function tiffToDisplayBlob(blob) {
+// Cached per session: can this engine decode TIFF natively (Safari/WebKit via
+// ImageIO), meaning the JS transcode below can be skipped entirely? Probed
+// lazily against the first real TIFF blob encountered (cheap either way — a
+// native decode is near-instant, and a rejection on Chrome/Firefox is too),
+// then reused for every subsequent TIFF in the session.
+let nativeDecodeCache = null
+export async function canDecodeTiffNatively(blob) {
+  if (nativeDecodeCache !== null) return nativeDecodeCache
+  try {
+    const bmp = await createImageBitmap(blob)
+    bmp.close()
+    nativeDecodeCache = true
+  } catch {
+    nativeDecodeCache = false
+  }
+  return nativeDecodeCache
+}
+
+// Header-only read: width/height via the IFD, without the expensive full
+// pixel decode (readRGB, below) — lets callers show real dimensions near-
+// instantly while the slow decode+encode still runs in the background.
+export async function readTiffDimensions(blob) {
+  const tiff = await fromBlob(blob)
+  const image = await tiff.getImage()
+  return { width: image.getWidth(), height: image.getHeight() }
+}
+
+// Decode a TIFF blob (handles BigTIFF / tiled / compressed / geo, via geotiff),
+// once, then encode it two ways from the same decoded pixels: a JPEG for
+// display (fast + small — this is what the viewer shows) and a lossless PNG
+// for compute (SIFT detection, dense MVS both read pixels back out of the
+// image, not the original TIFF — see useImagesStore's `computeUrl`), so the
+// JPEG's quantization never reaches the reconstruction pipeline. readRGB()
+// resolves photometric interpretation (RGB / grayscale / palette / CMYK /
+// YCbCr) to 8-bit RGB, so we just pack it into RGBA and re-encode both.
+//
+// The full-res decode is unavoidably the dominant cost (geotiff.js decodes
+// every compressed tile/strip at native resolution — there's no pyramid/
+// overview to read a cheap low-res version from). Once decoded, though, an
+// `onThumbnail` callback fires with a small (≤512px) preview blob *before*
+// the two full-res encodes run, so callers can show something well before
+// the (comparatively slow) full JPEG+PNG encode finishes.
+export async function tiffToDisplayBlob(blob, { jpegQuality = 0.92, onThumbnail } = {}) {
   const tiff = await fromBlob(blob)
   const image = await tiff.getImage()
   const width = image.getWidth()
@@ -39,17 +77,33 @@ export async function tiffToDisplayBlob(blob) {
 
   const canvas = new OffscreenCanvas(width, height)
   canvas.getContext('2d').putImageData(new ImageData(rgba, width, height), 0, 0)
-  const out = await canvas.convertToBlob({ type: 'image/png' })
-  return { blob: out, width, height }
+
+  if (onThumbnail) {
+    const maxDim = 512
+    const scale = Math.min(1, maxDim / Math.max(width, height))
+    const tw = Math.max(1, Math.round(width * scale))
+    const th = Math.max(1, Math.round(height * scale))
+    const thumbCanvas = new OffscreenCanvas(tw, th)
+    thumbCanvas.getContext('2d').drawImage(canvas, 0, 0, tw, th)
+    onThumbnail(await thumbCanvas.convertToBlob({ type: 'image/jpeg', quality: 0.7 }), tw, th)
+  }
+
+  const [displayBlob, computeBlob] = await Promise.all([
+    canvas.convertToBlob({ type: 'image/jpeg', quality: jpegQuality }),
+    canvas.convertToBlob({ type: 'image/png' }),
+  ])
+  return { displayBlob, computeBlob, width, height }
 }
 
 // Convenience: given a File/Blob (+ optional name for restore Blobs), return a
 // browser-displayable object URL — transcoding TIFF, passing everything else
-// straight through URL.createObjectURL.
+// straight through URL.createObjectURL. Skips the transcode when the engine
+// can already decode the TIFF itself.
 export async function displayUrlFor(blob, name = null) {
   if (isTiff(name ?? blob)) {
-    const { blob: png } = await tiffToDisplayBlob(blob)
-    return URL.createObjectURL(png)
+    if (await canDecodeTiffNatively(blob)) return URL.createObjectURL(blob)
+    const { displayBlob } = await tiffToDisplayBlob(blob)
+    return URL.createObjectURL(displayBlob)
   }
   return URL.createObjectURL(blob)
 }

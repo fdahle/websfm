@@ -80,6 +80,7 @@ const {
   imageById, selectImage,
   addImages, removeImage,
   updateMask, updateDepth, detectAll, clearKeypoints, clearAll,
+  setFiducialObservation, addFiducialObservations,
   restoreImages,
 } = imagesStore
 
@@ -116,7 +117,7 @@ const { sidebarWidth, startSidebarResize } = useSidebarResize()
 // Project-scoped store; restore/clear run through the project-store registry.
 const reconstructionStore = useReconstructionStore()
 const { cameras, sparseCameras, points3d, reconStatus, clouds, selectedCloudId, selectedCloud, depthMaps, dem, ortho, georef, canGeoreference } = storeToRefs(reconstructionStore)
-const { reconstruct, computeDepthMaps, densify, generateDem, generateOrtho, georeference, selectCloud, removeCloud, renameCloud } = reconstructionStore
+const { reconstruct, computeDepthMaps, densify, generateDem, generateOrtho, georeference, gcpAccuracyReport, selectCloud, removeCloud, renameCloud } = reconstructionStore
 
 // Clicking a point cloud in the sidebar shows it in the 3D viewer.
 function showCloud(id) {
@@ -135,12 +136,55 @@ function zoomToCloud(id) {
 // ── Ground Control Points ───────────────────────────────────────────────────────
 const gcpsStore = useGcpsStore()
 const { gcps } = storeToRefs(gcpsStore)
-const { addGcps, setGcpAccuracy, removeGcp, reprojectGcps } = gcpsStore
+const { addGcps, addGcp, setGcpName, setGcpPosition, setGcpAccuracy, setObservation, removeObservation, removeGcp, reprojectGcps } = gcpsStore
+
+// Per-GCP accuracy report (triangulated residual vs. surveyed position + per-
+// observation reprojection error) — refreshed on demand since it triangulates
+// against the current sparse cloud; cheap enough to just re-run each open/refresh
+// and after every mark so the reprojection feedback stays live.
+const gcpReport = ref([])
+async function refreshGcpReport() {
+  gcpReport.value = await gcpAccuracyReport()
+}
+
+// `selectedGcpId` highlights a GCP's marker in the image view + its row in the
+// table; set by clicking a GCP row (highlight only — marking is via right-click).
+const selectedGcpId = ref(null)
+function selectGcp(id) { selectedGcpId.value = id }
+
+// Turn on the GCP overlay for an image's tab so a freshly-placed mark is visible.
+function ensureGcpsVisible(imageId) {
+  const tab = tabs.value.find((t) => t.type === 'image' && t.imageId === imageId)
+  if (tab && !tab.showGcps) { tab.showGcps = true; rememberOverlayPrefs(tab) }
+}
+
+// Right-click marking in the image view. Assign attaches the clicked pixel to an
+// existing GCP; add-here creates a new GCP already marked at that pixel and
+// selects it. Both refresh the accuracy report so reprojection feedback is live.
+function assignGcpObservation(imageId, imageName, { gcpId, px, py }) {
+  setObservation(gcpId, imageId, imageName, px, py)
+  selectedGcpId.value = gcpId
+  ensureGcpsVisible(imageId)
+  refreshGcpReport()
+}
+function addGcpAtObservation(imageId, imageName, { px, py }) {
+  const id = addGcp()
+  setObservation(id, imageId, imageName, px, py)
+  selectedGcpId.value = id
+  ensureGcpsVisible(imageId)
+  refreshGcpReport()
+}
+// Sidebar observation-list actions.
+function jumpToImage({ imageId }) { if (imageId != null) openImageTab(imageId) }
+function removeGcpObservation({ gcpId, imageId }) {
+  removeObservation(gcpId, imageId)
+  refreshGcpReport()
+}
 
 // ── Footprints ──────────────────────────────────────────────────────────────────
 const footprintsStore = useFootprintsStore()
 const { footprints } = storeToRefs(footprintsStore)
-const { addFootprints, computeFootprints, reprojectFootprints } = footprintsStore
+const { addFootprints, computeFootprints, reprojectFootprints, removeFootprint } = footprintsStore
 
 // ── Sensors (shared intrinsics) ───────────────────────────────────────────────────
 // Project-scoped, but restored/cleared manually (must precede images — its EXIF
@@ -149,7 +193,7 @@ const sensorsStore = useSensorsStore()
 const { sensors } = storeToRefs(sensorsStore)
 const {
   imageCount: sensorImageCount,
-  addSensors, updateSensor, toggleSensorFixed, assignSensor, mergeSensors, removeSensor, clearSensors, restoreSensors,
+  addSensors, updateSensor, toggleSensorFixed, setFiducialMarks, assignSensor, mergeSensors, removeSensor, clearSensors, restoreSensors,
 } = sensorsStore
 
 // ── Camera poses (extrinsics) ─────────────────────────────────────────────────────
@@ -323,6 +367,8 @@ const activeImageViewState = computed(() => {
     showMask:      tab.showMask,
     showDepth:     tab.showDepth,
     showGcps:      tab.showGcps,
+    showFiducials: tab.showFiducials,
+    isFilm:        sensorForImage(tab.imageId)?.kind === 'film',
     maskMode:      tab.maskMode,
     brushRadius:   tab.brushRadius,
     kpStatus:      img.kpStatus,
@@ -330,24 +376,39 @@ const activeImageViewState = computed(() => {
     hasMask:       !!img.mask,
     hasDepth:      !!img.depth,
     gcpCount:      activeImageGcps.value.length,
+    fidCount:      (img.fiducialObs?.length ?? 0),
   }
 })
 
-// GCP observations falling on the active image tab (for marker overlay).
+// GCP observations falling on the active image tab (for marker overlay), each
+// tagged with its live reprojection error (px) from the accuracy report so the
+// viewer can flag a bad mark.
 const activeImageGcps = computed(() => {
   const tab = activeTab.value
   if (!tab || tab.type !== 'image') return []
   const out = []
   for (const g of gcps.value) {
     if (g.enabled === false) continue
+    const rep = gcpReport.value.find((r) => r.gcpId === g.id)
     for (const obs of g.observations || []) {
       if (obs.imageId === tab.imageId && obs.px != null && obs.py != null) {
-        out.push({ name: g.name, px: obs.px, py: obs.py })
+        const reprojPx = rep?.observations?.find((o) => o.imageId === obs.imageId)?.reprojPx ?? null
+        out.push({ id: g.id, name: g.name, px: obs.px, py: obs.py, reprojPx })
       }
     }
   }
   return out
 })
+
+// Just [{ id, name }] of every GCP — the image viewer's right-click "assign to
+// existing" submenu.
+const allGcpsBrief = computed(() => gcps.value.map((g) => ({ id: g.id, name: g.name })))
+
+// Resolve the (film) sensor for an image id — feeds the viewer's fiducial menu.
+function sensorForImage(imageId) {
+  const img = imageById(imageId)
+  return img?.sensorId ? sensors.value.find((s) => s.id === img.sensorId) : null
+}
 
 // ── Viewer ref (for imperative point-cloud updates) ───────────────────────────
 const viewerRef = ref(null)
@@ -363,10 +424,15 @@ watch(selectedCloud, (c) => {
 // ── 3D scene display toggles ───────────────────────────────────────────────────
 const showCameras = ref(true)
 const showGraticule = ref(true)
+// ── Map display toggles ────────────────────────────────────────────────────────
+const showFootprints = ref(true)
 
 // ── Console ───────────────────────────────────────────────────────────────────
 // True while a project is being restored — drives the interaction-blocking overlay.
 const projectLoading = ref(false)
+// { done, total, label } while restoreImages streams progress, else null — lets
+// the loading overlay show "Loading image 3/5 — name.tif" instead of a static spinner.
+const projectLoadingProgress = ref(null)
 
 const consoleOpen = ref(localStorage.getItem('consoleOpen') === 'true')
 watch(consoleOpen, (v) => localStorage.setItem('consoleOpen', v))
@@ -424,20 +490,26 @@ async function openProject(id) {
     // so they stay manual; every other project-scoped store restores through the
     // registry below (matches, reconstruction, GCPs, footprints, poses).
     await restoreSensors(id)
-    await restoreImages(projectData.images || [], id)
+    await restoreImages(projectData.images || [], id, (done, total, label) => {
+      projectLoadingProgress.value = { done, total, label }
+    })
+    projectLoadingProgress.value = null
     await restoreProjectStores({ projectId: id, projectData })
     // restore() sets selectedCloud, which the watcher pushes into the viewer.
   } finally {
     projectLoading.value = false
+    projectLoadingProgress.value = null
   }
 }
 
 // ── New project ───────────────────────────────────────────────────────────────
 async function handleCreateProject({ name, sceneType, crs }) {
   newProjectOpen.value = false
+  // Leaving the current project to create a new one: reset in-memory state only.
+  // Purging here would delete the previously-open project's persisted data.
   clearAll(resetToViewer)
   clearSensors()
-  clearProjectStores({ purge: true })   // matches, reconstruction, GCPs, footprints, poses
+  clearProjectStores()   // matches, reconstruction, GCPs, footprints, poses
   viewerRef.value?.clearReconstructionData()
   if (crs) await ensureProjection(crs).catch(() => {})
   await createProject(name, sceneType, crs)
@@ -472,7 +544,7 @@ const {
   onImportKindChosen, onImportSwitchKind,
   openCameraImport, onCameraImport, onGcpImport, onFootprintImport,
   onGcpPick, onCameraPick,
-} = useImportRouting({ addGcps, addFootprints, addSensors, addPoses, activateTab })
+} = useImportRouting({ addGcps, addFootprints, addSensors, addPoses, addFiducialObs: addFiducialObservations, activateTab })
 
 // Switch to the map and centre it on an image's position (pose or EXIF GPS).
 function zoomToImagePosition(imgId) {
@@ -604,7 +676,7 @@ function handleCommand(id) {
     case 'export-ortho':         exportKind.value = 'ortho'; break
     case 'export-keypoints':     exportKeypoints(); break
     case 'export-matches':       exportMatches(); break
-    case 'clear-all':            clearAll(resetToViewer); clearSensors(); clearProjectStores({ purge: true }); viewerRef.value?.clearReconstructionData(); break
+    case 'clear-all':            clearAll(resetToViewer, { purge: true }); clearSensors({ purge: true }); clearProjectStores({ purge: true }); viewerRef.value?.clearReconstructionData(); break
     case 'remove-selected':      if (selectedId.value) requestRemoveImages(selectedId.value); break
     case 'view-viewer':          activateTab('viewer'); break
     case 'view-map':             activateTab('map'); break
@@ -618,11 +690,12 @@ function handleCommand(id) {
     case 'view-toggle-cameras':  showCameras.value = !showCameras.value; break
     case 'view-toggle-graticule': showGraticule.value = !showGraticule.value; break
     case 'map-fit-view':         mapViewerRef.value?.fitView(); break
+    case 'map-toggle-footprints': showFootprints.value = !showFootprints.value; break
     case 'open-image-table':     imageTableOpen.value = true; break
     case 'open-mask-manager':    maskManagerOpen.value = true; break
     case 'auto-mask':            autoMaskOpen.value = true; break
     case 'open-sensor-table':    sensorTableOpen.value = true; break
-    case 'open-gcp-table':       gcpTableOpen.value = true; break
+    case 'open-gcp-table':       gcpTableOpen.value = true; refreshGcpReport(); break
     case 'open-match-list':      matchListOpen.value = true; break
     case 'reconstruct':          reconstructOpen.value = true; break
     case 'compute-depth':        depthMapsOpen.value = true; break
@@ -669,6 +742,11 @@ function handleCommand(id) {
     case 'img-toggle-gcps': {
       const tab = activeTab.value
       if (tab?.type === 'image') { tab.showGcps = !tab.showGcps; rememberOverlayPrefs(tab) }
+      break
+    }
+    case 'img-toggle-fiducials': {
+      const tab = activeTab.value
+      if (tab?.type === 'image') { tab.showFiducials = !tab.showFiducials; rememberOverlayPrefs(tab) }
       break
     }
     case 'img-mask-draw': {
@@ -722,6 +800,8 @@ function onRibbonPick(event) {
       :scene-type="currentSceneType"
       :show-cameras="showCameras"
       :show-graticule="showGraticule"
+      :show-footprints="showFootprints"
+      :footprint-count="footprints.length"
       @command="handleCommand"
     />
     <input ref="ribbonInput" type="file" accept="image/*" multiple hidden @change="onRibbonPick" />
@@ -733,7 +813,13 @@ function onRibbonPick(event) {
     <div v-if="projectLoading" class="loading-overlay">
       <div class="loading-card">
         <div class="loading-spinner" />
-        <span>Loading project…</span>
+        <div class="loading-text">
+          <span>Loading project…</span>
+          <span v-if="projectLoadingProgress" class="loading-detail">
+            Loading image {{ projectLoadingProgress.done }}/{{ projectLoadingProgress.total }}
+            — {{ projectLoadingProgress.label }}
+          </span>
+        </div>
       </div>
     </div>
 
@@ -956,6 +1042,7 @@ function onRibbonPick(event) {
         @close="sensorTableOpen = false"
         @update="({ id, field, value }) => updateSensor(id, field, value)"
         @toggle-fixed="({ id, field }) => toggleSensorFixed(id, field)"
+        @set-fiducial-marks="({ id, marks }) => setFiducialMarks(id, marks)"
         @remove="removeSensor"
       />
     </Teleport>
@@ -965,9 +1052,16 @@ function onRibbonPick(event) {
         v-if="gcpTableOpen"
         :gcps="gcps"
         :crs="currentCrs"
+        :report="gcpReport"
+        :selected-gcp-id="selectedGcpId"
         @close="gcpTableOpen = false"
         @remove="removeGcp"
         @update-accuracy="({ id, kind, value }) => setGcpAccuracy(id, kind, value)"
+        @update-name="({ id, name }) => setGcpName(id, name)"
+        @update-position="({ id, axis, value }) => setGcpPosition(id, axis, value)"
+        @refresh-report="refreshGcpReport"
+        @select="selectGcp"
+        @add="addGcp"
       />
     </Teleport>
 
@@ -1002,8 +1096,11 @@ function onRibbonPick(event) {
         :style="{ width: sidebarWidth + 'px' }"
         :images="images"
         :gcps="gcps"
+        :gcp-report="gcpReport"
+        :selected-gcp-id="selectedGcpId"
         :sensors="sensors"
         :poses="poses"
+        :footprints="footprints"
         :clouds="clouds"
         :selected-cloud-id="selectedCloudId"
         :recon-status="reconStatus"
@@ -1024,10 +1121,14 @@ function onRibbonPick(event) {
         @import-file="openDroppedImport"
         @remove-image="requestRemoveImages"
         @remove-gcp="removeGcp"
+        @select-gcp="selectGcp"
+        @jump-to-image="jumpToImage"
+        @remove-gcp-observation="removeGcpObservation"
         @remove-sensor="removeSensor"
         @merge-sensors="({ target, source }) => mergeSensors(target, source)"
         @assign-sensor="({ imageId, sensorId }) => assignSensor(imageId, sensorId)"
         @remove-pose="removePose"
+        @remove-footprint="removeFootprint"
         @select="selectImage"
         @open="(id) => openImageTab(id)"
         @show-info="infoImageId = $event"
@@ -1062,7 +1163,7 @@ function onRibbonPick(event) {
 
         <div class="content">
           <Viewer3D ref="viewerRef" v-show="activeTabId === 'viewer'" :theme="theme" :images="images" :show-cameras="showCameras" :show-graticule="showGraticule" />
-          <ViewerMap ref="mapViewerRef" v-show="activeTabId === 'map'" :images="images" :gcps="gcps" :footprints="footprints" :poses="poses" :selected-id="selectedId" :aligned-uuids="alignedUuids" :has-sparse="hasSparse" :crs="currentCrs" @select="selectImage" />
+          <ViewerMap ref="mapViewerRef" v-show="activeTabId === 'map'" :images="images" :gcps="gcps" :footprints="footprints" :poses="poses" :selected-id="selectedId" :aligned-uuids="alignedUuids" :has-sparse="hasSparse" :crs="currentCrs" :show-footprints="showFootprints" @select="selectImage" />
           <template v-for="tab in tabs" :key="tab.id">
             <ViewerImage
               v-if="tab.type === 'image' && imageById(tab.imageId)"
@@ -1074,10 +1175,19 @@ function onRibbonPick(event) {
               :show-depth="tab.showDepth"
               :show-gcps="tab.showGcps"
               :gcps="activeTabId === tab.id ? activeImageGcps : []"
+              :all-gcps="allGcpsBrief"
+              :selected-gcp-id="selectedGcpId"
               :mask-mode="tab.maskMode"
               :brush-radius="tab.brushRadius"
               @update-mask="(dataUrl) => updateMask(tab.imageId, dataUrl)"
               @update-depth="(dataUrl) => updateDepth(tab.imageId, dataUrl)"
+              :is-film="sensorForImage(tab.imageId)?.kind === 'film'"
+              :show-fiducials="tab.showFiducials"
+              :fiducial-marks="sensorForImage(tab.imageId)?.fiducials?.marks ?? []"
+              :fiducial-obs="imageById(tab.imageId)?.fiducialObs ?? []"
+              @mark-gcp="(pt) => assignGcpObservation(tab.imageId, imageById(tab.imageId)?.name, pt)"
+              @add-gcp="(pt) => addGcpAtObservation(tab.imageId, imageById(tab.imageId)?.name, pt)"
+              @mark-fiducial="({ fidId, px, py }) => setFiducialObservation(tab.imageId, fidId, px, py)"
             />
             <ProductViewer
               v-else-if="tab.type === 'product'"
@@ -1155,10 +1265,20 @@ function onRibbonPick(event) {
 .loading-spinner {
   width: 20px;
   height: 20px;
+  flex: none;
   border: 3px solid rgba(255, 255, 255, 0.2);
   border-top-color: var(--accent, #44aaff);
   border-radius: 50%;
   animation: loading-spin 0.8s linear infinite;
+}
+.loading-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.loading-detail {
+  font-size: 12px;
+  color: var(--text-dim, #9a9aa4);
 }
 @keyframes loading-spin {
   to { transform: rotate(360deg); }

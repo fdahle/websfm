@@ -104,6 +104,17 @@ export function verifyMatches(kpsA, kpsB, matches, options = {}) {
   return call('verify', [kpsA, kpsB, matches, options])
 }
 
+// TIFF decode + re-encode (geotiff, ~seconds for a large raster) — dispatched
+// round-robin like detect/match so a batch of TIFFs transcodes in parallel
+// across the pool instead of blocking the main thread one file at a time.
+// `onThumbnail(blob, width, height)` fires once decode finishes, well before
+// the full-res result resolves, so callers can show a preview early.
+export function transcodeTiff(blob, jpegQuality, { onThumbnail } = {}) {
+  return call('transcodeTiff', [blob, jpegQuality], {
+    onEvent: onThumbnail ? (ev, a) => { if (ev === 'thumbnail') onThumbnail(...a) } : undefined,
+  })
+}
+
 // The three long-running ops share one streaming shape: intermediate `log` /
 // `progress` events during the run, a final result on resolve. This factory wires
 // the { onLog, onProgress } hooks to the worker's event stream.

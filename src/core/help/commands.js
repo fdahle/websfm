@@ -23,7 +23,6 @@ const NEED_CHECKS = {
   dem:       { ok: (s) => s.demReady,         reason: 'Build a DEM first' },
   ortho:     { ok: (s) => s.orthoReady,       reason: 'Build an orthophoto first' },
   products:  { ok: (s) => s.productReady,     reason: 'Build a DEM or orthophoto first' },
-  gcps:      { ok: (s) => s.gcpCount    > 0,  reason: 'Import GCPs first' },
   poses:     { ok: (s) => s.poseCount   > 0,  reason: 'Import camera poses first' },
   sensors:   { ok: (s) => s.sensorCount > 0,  reason: 'No sensors available' },
 }
@@ -52,7 +51,7 @@ export const COMMANDS = [
   { name: 'images',   aliases: ['image-table'],     dispatch: 'open-image-table',  needs: ['images'],  group: 'View', help: 'Open the image table' },
   { name: 'masks',    aliases: ['mask-manager'],    dispatch: 'open-mask-manager', needs: ['images'],  group: 'View', help: 'Open the mask manager' },
   { name: 'sensors',  aliases: ['sensor-table'],    dispatch: 'open-sensor-table', needs: ['sensors'], group: 'View', help: 'Open the sensor table' },
-  { name: 'gcps',     aliases: ['gcp-table'],       dispatch: 'open-gcp-table',    needs: ['gcps'],    group: 'View', help: 'Open the GCP table' },
+  { name: 'gcps',     aliases: ['gcp-table'],       dispatch: 'open-gcp-table',                       group: 'View', help: 'Open the GCP table' },
   { name: 'matchlist', aliases: ['match-list'],     dispatch: 'open-match-list',   needs: ['matches'], group: 'View', help: 'Open the match list' },
   { name: 'viewer',   aliases: ['3d'],              dispatch: 'view-viewer',       group: 'View', help: 'Switch to the 3D viewer' },
   { name: 'map',      aliases: ['2d'],              dispatch: 'view-map',          group: 'View', help: 'Switch to the map view' },

@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed } from 'vue'
 import FieldHelp from '../guide/FieldHelp.vue'
+import { MATCH_DEFAULTS } from '../../core/defaults.user.js'
 
 const emit = defineEmits(['close', 'run'])
 
@@ -19,18 +20,9 @@ const matchers = [
   { id: 'lightglue', label: 'LightGlue (learned)' },
 ]
 
-const settings = ref({
-  ratioThreshold: 0.75,
-  crossCheck: false,
-  minMatches: 15,
-  geometricVerification: true,
-  ransacThreshPx: 2.0,
-  minInlierRatio: 0.25,
-  maxIters: 1000,
-  maxNeighbors: 10,
-  useGpu: false,       // experimental WebGPU backend for LightGlue
-  lgMaxKeypoints: 2048, // per-image cap fed to LightGlue (attention is O(N²))
-})
+// Prefill from the single source of truth (core/defaults.user.js); useMatchesStore
+// falls back to the same values. Cloned so edits don't mutate the shared constant.
+const settings = ref({ ...MATCH_DEFAULTS })
 
 const runSettings = computed(() => ({
   strategy: strategy.value,
@@ -133,6 +125,36 @@ function run() {
             <span class="field-label">Cross-check (mutual NN)</span>
           </label>
           <span class="field-hint">Keeps only matches that are mutual nearest neighbours. Slower but more precise.</span>
+        </div>
+
+        <div v-if="matcher === 'bruteforce'" class="field">
+          <label class="checkbox-row">
+            <input v-model="settings.subsetGate" type="checkbox" class="checkbox" />
+            <span class="field-label">Subset gate (fast pre-test)</span>
+          </label>
+          <span class="field-hint">
+            Match a small spatially-uniform keypoint subset first; skip the full match for pairs
+            that clearly don't overlap. Big speedup on exhaustive runs with no imported poses
+            (a building shot in a circle). Only affects images with many keypoints.
+          </span>
+          <div v-if="settings.subsetGate" class="input-row" style="margin-top: 6px; gap: 8px;">
+            <label class="field-label" for="gateSize" style="flex: 1;">Subset size
+              <input
+                id="gateSize"
+                v-model.number="settings.subsetGateSize"
+                type="number" min="50" max="1000" step="10"
+                class="field-input"
+              />
+            </label>
+            <label class="field-label" for="gateThresh" style="flex: 1;">Min subset matches
+              <input
+                id="gateThresh"
+                v-model.number="settings.subsetGateThreshold"
+                type="number" min="1" max="100" step="1"
+                class="field-input"
+              />
+            </label>
+          </div>
         </div>
 
         <div v-if="matcher === 'lightglue'" class="field">

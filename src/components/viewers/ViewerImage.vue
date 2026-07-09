@@ -1,7 +1,8 @@
 <script setup>
-import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ref, watch, computed, onMounted, onBeforeUnmount } from 'vue'
 import { maskFromSource } from '../../core/mask.js'
 import { depthColor } from '../../core/products/colormap.js'
+import { fitFiducialAffine, mmToScan } from '../../core/sfm/fiducials.js'
 
 const props = defineProps({
   image:         { type: Object,  required: true },
@@ -9,12 +10,86 @@ const props = defineProps({
   showMask:      { type: Boolean, default: false },
   showDepth:     { type: Boolean, default: false },
   showGcps:      { type: Boolean, default: false },
-  gcps:          { type: Array,   default: () => [] }, // [{ name, px, py }] observations on this image
+  gcps:          { type: Array,   default: () => [] }, // [{ id, name, px, py, reprojPx? }] observations on this image
+  allGcps:       { type: Array,   default: () => [] }, // [{ id, name }] every GCP, for the right-click "assign" menu
+  selectedGcpId: { type: String,  default: null },
   maskMode:      { type: String,  default: 'none' }, // 'none' | 'draw' | 'erase'
   brushRadius:   { type: Number,  default: 20 },     // screen pixels
+  // Film sensor (F4): the sensor's calibrated fiducial marks + this image's
+  // clicked observations. isFilm gates the "Mark fiducial…" menu + overlay.
+  isFilm:        { type: Boolean, default: false },
+  showFiducials: { type: Boolean, default: false }, // overlay toggle for fiducial marks
+  fiducialMarks: { type: Array,   default: () => [] }, // [{ id, xMm, yMm }]
+  fiducialObs:   { type: Array,   default: () => [] }, // [{ fidId, px, py }]
 })
 
-const emit = defineEmits(['update-mask', 'update-depth'])
+// mark-gcp: assign this pixel to an existing GCP { gcpId, px, py }.
+// add-gcp:  create a new GCP marked at this pixel { px, py }.
+// mark-fiducial: assign this pixel to a fiducial mark { fidId, px, py }.
+const emit = defineEmits(['update-mask', 'update-depth', 'mark-gcp', 'add-gcp', 'mark-fiducial'])
+
+// Live fiducial fit (F4): join this image's observations with the sensor's
+// calibrated marks and fit the scan→mm affine once ≥3 land, so per-mark residual
+// (µm) can be shown next to each marker — the same live feedback as GCP reproj.
+const fidFit = computed(() => {
+  if (!props.isFilm || !props.fiducialObs?.length) return { obs: [], fit: null }
+  const byId = new Map(props.fiducialMarks.map((m) => [m.id, m]))
+  const obs = props.fiducialObs
+    .map((o) => {
+      const m = byId.get(o.fidId)
+      return m ? { fidId: o.fidId, px: o.px, py: o.py, xMm: m.xMm, yMm: m.yMm } : null
+    })
+    .filter(Boolean)
+  return { obs, fit: obs.length >= 3 ? fitFiducialAffine(obs) : null }
+})
+// fidId → residual µm (aligned with fidFit.obs order).
+const fidResidual = computed(() => {
+  const { obs, fit } = fidFit.value
+  const m = new Map()
+  if (fit) obs.forEach((o, i) => m.set(o.fidId, fit.residualsUm[i]))
+  return m
+})
+// Which mark ids are already placed on this image (for the menu ✓).
+const markedFidIds = computed(() => new Set(props.fiducialObs.map((o) => o.fidId)))
+
+// Rough position label per mark ("top-left", "mid-top", "center"…) derived from
+// its calibrated mm coordinates relative to the layout centroid. A guide only —
+// tells the user which physical corner/edge a mark id refers to. mm frame is
+// camera-standard (x right, y up), so larger yMm ⇒ top.
+const fidMarkPos = computed(() => {
+  const marks = props.fiducialMarks.filter((m) => Number.isFinite(m.xMm) && Number.isFinite(m.yMm))
+  const out = new Map()
+  if (!marks.length) return out
+  let cx = 0, cy = 0, ext = 0
+  for (const m of marks) { cx += m.xMm; cy += m.yMm }
+  cx /= marks.length; cy /= marks.length
+  for (const m of marks) ext = Math.max(ext, Math.abs(m.xMm - cx), Math.abs(m.yMm - cy))
+  const tol = 0.15 * (ext || 1)
+  for (const m of marks) {
+    const dx = m.xMm - cx, dy = m.yMm - cy
+    const v = dy > tol ? 'top' : dy < -tol ? 'bottom' : ''
+    const h = dx > tol ? 'right' : dx < -tol ? 'left' : ''
+    const label = [v, h].filter(Boolean).join('-') || 'center'
+    out.set(m.id, v && h ? label : (v || h ? `mid-${label}` : 'center'))
+  }
+  return out
+})
+
+// Ghost guides: once a fit exists (≥3 marks placed), predict where each
+// not-yet-placed mark should land on the raster (mm → scan px), so the user can
+// aim at the remaining fiducials. [{ id, px, py }] in native image pixels.
+const fidGhosts = computed(() => {
+  const { fit } = fidFit.value
+  if (!fit) return []
+  const placed = markedFidIds.value
+  const out = []
+  for (const m of props.fiducialMarks) {
+    if (placed.has(m.id) || !Number.isFinite(m.xMm) || !Number.isFinite(m.yMm)) continue
+    const p = mmToScan(m.xMm, m.yMm, fit.A)
+    if (p && Number.isFinite(p.x) && Number.isFinite(p.y)) out.push({ id: m.id, px: p.x, py: p.y })
+  }
+  return out
+})
 
 const container      = ref(null)
 const imgEl          = ref(null)
@@ -28,6 +103,11 @@ const tx       = ref(0)
 const ty       = ref(0)
 const dragging = ref(false)
 const hoverPx  = ref(null)
+
+// True once the current image has loaded AND been fitted to the viewport —
+// gates the <img> visibility so the browser never paints it at native
+// (potentially huge) size for a frame before fit() scales it down.
+const imageReady = ref(false)
 
 // Mask canvas state
 const hasMask = ref(!!props.image.mask)
@@ -59,17 +139,20 @@ function fit() {
   drawOverlay()
 }
 
-function applyZoom(factor) {
-  const c = container.value
-  if (!c) return
-  const cx = c.clientWidth  / 2
-  const cy = c.clientHeight / 2
+// Zoom by `factor` keeping the viewport point (cx, cy) fixed on screen.
+function zoomAt(factor, cx, cy) {
   const newScale = clamp(scale.value * factor, MIN_SCALE, MAX_SCALE)
   const ratio = newScale / scale.value
   tx.value = cx - (cx - tx.value) * ratio
   ty.value = cy - (cy - ty.value) * ratio
   scale.value = newScale
   drawOverlay()
+}
+
+function applyZoom(factor) {
+  const c = container.value
+  if (!c) return
+  zoomAt(factor, c.clientWidth / 2, c.clientHeight / 2)
 }
 
 function zoomIn()  { applyZoom(1.5) }
@@ -188,10 +271,11 @@ function drawOverlay() {
       if (g.px == null || g.py == null) continue
       const x = (g.px / img.naturalWidth)  * dispW + tx.value
       const y = (g.py / img.naturalHeight) * dispH + ty.value
+      const isSelected = g.id != null && g.id === props.selectedGcpId
       ctx.save()
       // Ring
-      ctx.strokeStyle = 'rgba(255,210,0,0.95)'
-      ctx.lineWidth = 1.5
+      ctx.strokeStyle = isSelected ? 'rgba(80,200,255,0.95)' : 'rgba(255,210,0,0.95)'
+      ctx.lineWidth = isSelected ? 2.5 : 1.5
       ctx.beginPath()
       ctx.arc(x, y, 7, 0, Math.PI * 2)
       ctx.stroke()
@@ -202,19 +286,86 @@ function drawOverlay() {
       ctx.moveTo(x, y - 11);  ctx.lineTo(x, y - 3)
       ctx.moveTo(x, y + 3);   ctx.lineTo(x, y + 11)
       ctx.stroke()
-      // Label
+      // Label — name, plus the live reprojection error (px) when available so a
+      // bad mark is obvious. Colour the error red once it's clearly off (>5px).
       if (g.name) {
+        const reproj = g.reprojPx != null ? `  ${g.reprojPx.toFixed(1)}px` : ''
+        const label = g.name + reproj
         ctx.font = '11px sans-serif'
-        const tw = ctx.measureText(g.name).width
+        const tw = ctx.measureText(label).width
         ctx.fillStyle = 'rgba(0,0,0,0.55)'
         ctx.fillRect(x + 9, y - 16, tw + 6, 14)
-        ctx.fillStyle = 'rgba(255,210,0,0.95)'
         ctx.textAlign = 'left'
         ctx.textBaseline = 'middle'
+        ctx.fillStyle = isSelected ? 'rgba(80,200,255,0.95)' : 'rgba(255,210,0,0.95)'
         ctx.fillText(g.name, x + 12, y - 9)
+        if (reproj) {
+          const nameW = ctx.measureText(g.name).width
+          ctx.fillStyle = g.reprojPx > 5 ? 'rgba(255,90,90,0.95)' : 'rgba(160,230,160,0.95)'
+          ctx.fillText(reproj, x + 12 + nameW, y - 9)
+        }
       }
       ctx.restore()
     }
+  }
+
+  // Fiducial markers (F4) — distinct from GCPs: magenta squares with a diagonal
+  // cross. Show the per-mark fit residual (µm) once ≥3 marks give a fit.
+  if (props.showFiducials && props.isFilm && props.fiducialObs?.length && img.naturalWidth) {
+    for (const o of props.fiducialObs) {
+      if (o.px == null || o.py == null) continue
+      const x = (o.px / img.naturalWidth)  * dispW + tx.value
+      const y = (o.py / img.naturalHeight) * dispH + ty.value
+      ctx.save()
+      ctx.strokeStyle = 'rgba(255,80,220,0.95)'
+      ctx.lineWidth = 1.5
+      ctx.strokeRect(x - 6, y - 6, 12, 12)
+      ctx.beginPath()
+      ctx.moveTo(x - 6, y - 6); ctx.lineTo(x + 6, y + 6)
+      ctx.moveTo(x - 6, y + 6); ctx.lineTo(x + 6, y - 6)
+      ctx.stroke()
+      const res = fidResidual.value.get(o.fidId)
+      const label = o.fidId + (res != null ? `  ${res.toFixed(1)}µm` : '')
+      ctx.font = '11px sans-serif'
+      const tw = ctx.measureText(label).width
+      ctx.fillStyle = 'rgba(0,0,0,0.55)'
+      ctx.fillRect(x + 9, y - 16, tw + 6, 14)
+      ctx.textAlign = 'left'; ctx.textBaseline = 'middle'
+      ctx.fillStyle = 'rgba(255,120,230,0.95)'
+      ctx.fillText(o.fidId, x + 12, y - 9)
+      if (res != null) {
+        const nameW = ctx.measureText(o.fidId).width
+        // Warn (red) once residual exceeds ~½ a 23µm pixel — scanner-noise scale.
+        ctx.fillStyle = res > 12 ? 'rgba(255,90,90,0.95)' : 'rgba(160,230,160,0.95)'
+        ctx.fillText(`  ${res.toFixed(1)}µm`, x + 12 + nameW, y - 9)
+      }
+      ctx.restore()
+    }
+
+    // Ghost guides — faint dashed squares at the predicted location of each
+    // not-yet-placed mark, so the user can aim at the remaining fiducials.
+    for (const g of fidGhosts.value) {
+      const x = (g.px / img.naturalWidth)  * dispW + tx.value
+      const y = (g.py / img.naturalHeight) * dispH + ty.value
+      ctx.save()
+      ctx.strokeStyle = 'rgba(255,80,220,0.5)'
+      ctx.lineWidth = 1
+      ctx.setLineDash([3, 3])
+      ctx.strokeRect(x - 6, y - 6, 12, 12)
+      ctx.setLineDash([])
+      ctx.font = '11px sans-serif'
+      ctx.textAlign = 'left'; ctx.textBaseline = 'middle'
+      ctx.fillStyle = 'rgba(255,120,230,0.55)'
+      ctx.fillText(g.id, x + 10, y)
+      ctx.restore()
+    }
+  }
+
+  // Magnifier loupe — a zoomed inset around the cursor while working with GCPs,
+  // so marks can be placed precisely without zooming the whole view. Drawn last
+  // (on top), pinned to a corner so it never covers the point being marked.
+  if ((props.showGcps || (props.showFiducials && props.isFilm)) && mousePos) {
+    drawLoupe(ctx, w, h)
   }
 
   // Brush cursor circle
@@ -225,6 +376,39 @@ function drawOverlay() {
     ctx.lineWidth = 1.5
     ctx.stroke()
   }
+}
+
+// Magnified inset of the image around the cursor's pixel, pinned to the top-right
+// corner. Sampled straight from the <img> element (natural resolution) so it's
+// crisp regardless of the current zoom. A centre crosshair marks the exact pixel.
+function drawLoupe(ctx, w) {
+  const img = imgEl.value
+  if (!img?.naturalWidth) return
+  const ipx = (mousePos.x - tx.value) / scale.value
+  const ipy = (mousePos.y - ty.value) / scale.value
+  if (ipx < 0 || ipy < 0 || ipx >= img.naturalWidth || ipy >= img.naturalHeight) return
+
+  const SIZE = 128, ZOOM = 8, src = SIZE / ZOOM
+  const lx = w - SIZE - 12, ly = 12
+
+  ctx.save()
+  ctx.beginPath(); ctx.rect(lx, ly, SIZE, SIZE); ctx.clip()
+  ctx.fillStyle = '#000'; ctx.fillRect(lx, ly, SIZE, SIZE)
+  ctx.imageSmoothingEnabled = false
+  try {
+    ctx.drawImage(img, ipx - src / 2, ipy - src / 2, src, src, lx, ly, SIZE, SIZE)
+  } catch { /* source rect off-image near the edge — skip */ }
+  // Centre crosshair (the pixel that a mark would land on).
+  const cx = lx + SIZE / 2, cy = ly + SIZE / 2
+  ctx.strokeStyle = 'rgba(255,210,0,0.95)'; ctx.lineWidth = 1
+  ctx.beginPath()
+  ctx.moveTo(cx - 8, cy); ctx.lineTo(cx + 8, cy)
+  ctx.moveTo(cx, cy - 8); ctx.lineTo(cx, cy + 8)
+  ctx.stroke()
+  ctx.restore()
+  // Border.
+  ctx.strokeStyle = 'rgba(255,255,255,0.4)'; ctx.lineWidth = 1
+  ctx.strokeRect(lx + 0.5, ly + 0.5, SIZE, SIZE)
 }
 
 // ── Mask operations ───────────────────────────────────────────────────────────
@@ -408,7 +592,77 @@ function getViewportCoords(e) {
   return { x: e.clientX - rect.left, y: e.clientY - rect.top }
 }
 
+// Convert viewport coords to native image pixel coords (clamped to the image).
+function toImagePixel(sx, sy) {
+  const img = imgEl.value
+  if (!img || !img.naturalWidth) return null
+  return {
+    px: clamp((sx - tx.value) / scale.value, 0, img.naturalWidth),
+    py: clamp((sy - ty.value) / scale.value, 0, img.naturalHeight),
+  }
+}
+
+// ── Right-click context menu ──────────────────────────────────────────────────
+// Two-stage: a general 'main' menu whose "Add GCP here…" entry switches the same
+// popup to 'gcp' mode (new-vs-existing chooser at the same anchor).
+// { x, y (viewport, for positioning), px, py (image pixel), mode } or null.
+const menu = ref(null)
+
+function onContextMenu(e) {
+  if (props.maskMode !== 'none') return // don't hijack right-click while masking
+  e.preventDefault()
+  const { x, y } = getViewportCoords(e)
+  const pix = toImagePixel(x, y)
+  if (!pix) return
+  const cw = container.value?.clientWidth ?? 0
+  const ch = container.value?.clientHeight ?? 0
+  menu.value = {
+    x: Math.min(x, Math.max(0, cw - 200)),
+    y: Math.min(y, Math.max(0, ch - 240)),
+    px: pix.px, py: pix.py, mode: 'main',
+  }
+}
+
+function closeMenu() { menu.value = null }
+function menuBack()  { if (menu.value) menu.value = { ...menu.value, mode: 'main' } }
+
+// "Add GCP here…" → switch the popup to the new-vs-existing chooser.
+function menuAddGcp() { if (menu.value) menu.value = { ...menu.value, mode: 'gcp' } }
+function menuNewGcp() {
+  if (menu.value) emit('add-gcp', { px: menu.value.px, py: menu.value.py })
+  closeMenu()
+}
+function menuAssign(gcpId) {
+  if (menu.value) emit('mark-gcp', { gcpId, px: menu.value.px, py: menu.value.py })
+  closeMenu()
+}
+
+// "Mark fiducial…" (film sensors) → the mark chooser sub-menu.
+function menuAddFiducial() { if (menu.value) menu.value = { ...menu.value, mode: 'fiducial' } }
+function menuMarkFiducial(fidId) {
+  if (menu.value) emit('mark-fiducial', { fidId, px: menu.value.px, py: menu.value.py })
+  closeMenu()
+}
+
+async function menuCopyCoords() {
+  if (menu.value) {
+    try { await navigator.clipboard.writeText(`${Math.round(menu.value.px)}, ${Math.round(menu.value.py)}`) } catch { /* clipboard blocked */ }
+  }
+  closeMenu()
+}
+async function menuCopyColor() {
+  if (menu.value && offscreenCtx) {
+    const px = Math.floor(menu.value.px), py = Math.floor(menu.value.py)
+    const d = offscreenCtx.getImageData(px, py, 1, 1).data
+    try { await navigator.clipboard.writeText(`rgb(${d[0]}, ${d[1]}, ${d[2]})`) } catch { /* clipboard blocked */ }
+  }
+  closeMenu()
+}
+function menuZoomIn() { if (menu.value) zoomAt(1.8, menu.value.x, menu.value.y); closeMenu() }
+function menuFit()    { fit(); closeMenu() }
+
 function onMouseDown(e) {
+  if (menu.value && e.button === 0) { closeMenu(); return }
   if (props.maskMode !== 'none' && e.button === 0) {
     isDrawing = true
     const { x, y } = getViewportCoords(e)
@@ -474,6 +728,7 @@ function onMouseLeave() {
 
 function onWheel(e) {
   e.preventDefault()
+  closeMenu() // its anchor pixel would drift under the zoom
   const rect     = container.value.getBoundingClientRect()
   const cx       = e.clientX - rect.left
   const cy       = e.clientY - rect.top
@@ -505,7 +760,13 @@ function onImgLoad() {
   setupOffscreenCanvas()
   initMaskCanvas()
   initDepthCanvas()
+  imageReady.value = true
 }
+
+// A new `url` means a new decode (image switch, or the TIFF thumbnail →
+// full-res swap) — hide the old frame until the new one has loaded and been
+// fitted, instead of flashing native size or a stale image.
+watch(() => props.image.url, () => { imageReady.value = false })
 
 // Redraw when keypoints arrive or showKeypoints changes
 watch(() => props.image.kpStatus,    () => drawOverlay())
@@ -515,6 +776,11 @@ watch(() => props.showMask,          () => drawOverlay())
 watch(() => props.showDepth,         () => drawOverlay())
 watch(() => props.showGcps,          () => drawOverlay())
 watch(() => props.gcps,              () => drawOverlay(), { deep: true })
+watch(() => props.selectedGcpId,     () => drawOverlay())
+watch(() => props.fiducialObs,       () => drawOverlay(), { deep: true })
+watch(() => props.isFilm,            () => drawOverlay())
+watch(() => props.showFiducials,     () => drawOverlay())
+watch(() => props.fiducialMarks,     () => drawOverlay(), { deep: true })
 watch(() => props.maskMode,          () => drawOverlay())
 
 // Sync mask canvas when parent clears or replaces the mask externally
@@ -566,18 +832,70 @@ defineExpose({ fit, zoomIn, zoomOut, triggerMaskImport, clearMask, triggerDepthI
       @mouseup="onMouseUp"
       @mouseleave="onMouseLeave"
       @dblclick="maskMode === 'none' && fit()"
+      @contextmenu="onContextMenu"
     >
       <img
+        v-if="!image.previewPending && !image.previewFailed"
         ref="imgEl"
         :src="image.url"
         :alt="image.name"
         class="image"
+        :class="{ pending: !imageReady }"
         :style="{ transform: `translate(${tx}px, ${ty}px) scale(${scale})` }"
         draggable="false"
         @load="onImgLoad"
       />
+      <div v-else-if="image.previewFailed" class="image-pending image-error" title="Preview unavailable — decode failed">
+        Preview unavailable
+      </div>
+      <div v-else class="image-pending" title="Decoding image…">
+        <span class="spinner" />
+      </div>
 
       <canvas ref="overlayCanvas" class="overlay-canvas" />
+
+      <!-- Right-click context menu (general → GCP chooser sub-mode). -->
+      <div v-if="menu" class="ctx-menu" :style="{ left: menu.x + 'px', top: menu.y + 'px' }" @mousedown.stop @contextmenu.prevent>
+        <template v-if="menu.mode === 'main'">
+          <button class="ctx-item add" @click="menuAddGcp">Add GCP here…</button>
+          <button v-if="isFilm" class="ctx-item add" @click="menuAddFiducial">Mark fiducial…</button>
+          <div class="ctx-sep"></div>
+          <button class="ctx-item" @click="menuCopyCoords">Copy pixel (X,&nbsp;Y)</button>
+          <button class="ctx-item" @click="menuCopyColor">Copy color (RGB)</button>
+          <div class="ctx-sep"></div>
+          <button class="ctx-item" @click="menuZoomIn">Zoom in here</button>
+          <button class="ctx-item" @click="menuFit">Fit to view</button>
+        </template>
+        <template v-else-if="menu.mode === 'fiducial'">
+          <div class="ctx-hd">Mark fiducial here</div>
+          <template v-if="fiducialMarks.length">
+            <button
+              v-for="m in fiducialMarks"
+              :key="m.id"
+              class="ctx-item"
+              @click="menuMarkFiducial(m.id)"
+            >{{ markedFidIds.has(m.id) ? '✓ ' : '' }}{{ m.id }}<span class="ctx-pos">{{ fidMarkPos.get(m.id) }}</span></button>
+          </template>
+          <div v-else class="ctx-sub">No marks defined — add them in the Sensor table.</div>
+          <div class="ctx-sep"></div>
+          <button class="ctx-item back" @click="menuBack">‹ Back</button>
+        </template>
+        <template v-else>
+          <div class="ctx-hd">Add ground control point</div>
+          <button class="ctx-item add" @click="menuNewGcp">＋ New GCP here</button>
+          <template v-if="allGcps.length">
+            <div class="ctx-sub">Assign to existing</div>
+            <button
+              v-for="g in allGcps"
+              :key="g.id"
+              class="ctx-item"
+              @click="menuAssign(g.id)"
+            >{{ g.name }}</button>
+          </template>
+          <div class="ctx-sep"></div>
+          <button class="ctx-item back" @click="menuBack">‹ Back</button>
+        </template>
+      </div>
 
       <div class="hud">
         <span>{{ Math.round(scale * 100) }}%</span>
@@ -629,6 +947,60 @@ defineExpose({ fit, zoomIn, zoomOut, triggerMaskImport, clearMask, triggerDepthI
 .viewport.grabbing { cursor: grabbing; }
 .viewport.drawing  { cursor: none; }
 
+.ctx-menu {
+  position: absolute;
+  z-index: 20;
+  min-width: 180px;
+  max-height: 70%;
+  overflow-y: auto;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+  padding: 4px;
+}
+
+.ctx-hd {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+  padding: 4px 8px 2px;
+}
+
+.ctx-sub {
+  font-size: 10px;
+  color: var(--text-dim);
+  padding: 6px 8px 2px;
+}
+
+.ctx-sep {
+  height: 1px;
+  background: var(--panel-border);
+  margin: 4px 2px;
+}
+
+.ctx-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 5px 8px;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ctx-item:hover { background: var(--hover-bg); }
+.ctx-item.add { color: var(--accent, #5cf); font-weight: 500; }
+.ctx-item.back { color: var(--text-dim); }
+.ctx-pos { float: right; margin-left: 12px; color: var(--text-dim); font-size: 11px; }
+
 .image {
   position: absolute;
   top: 0;
@@ -636,6 +1008,39 @@ defineExpose({ fit, zoomIn, zoomOut, triggerMaskImport, clearMask, triggerDepthI
   transform-origin: 0 0;
   image-rendering: auto;
   will-change: transform;
+}
+
+/* Hidden until fit() has scaled it — avoids a flash of the image at native
+   (possibly huge) resolution before the transform applies. */
+.image.pending {
+  visibility: hidden;
+}
+
+.image-pending {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+}
+
+.image-pending .spinner {
+  width: 28px;
+  height: 28px;
+  border: 3px solid var(--panel-border);
+  border-top-color: var(--accent, #5cf);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.image-pending.image-error {
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 
 .overlay-canvas {

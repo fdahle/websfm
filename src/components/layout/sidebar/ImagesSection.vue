@@ -39,6 +39,15 @@ function poseStatus(img) {
 function sensorLabel(img) {
   return props.sensors.find((s) => s.id === img.sensorId)?.label || '—'
 }
+// Film sensor (F4) an image belongs to, or null — gates the fiducial-marks flag.
+function filmSensor(img) {
+  const s = props.sensors.find((x) => x.id === img.sensorId)
+  return s?.kind === 'film' ? s : null
+}
+// Marks placed on this image (F4). <3 ⇒ interior orientation incomplete.
+function fiducialCount(img) {
+  return img.fiducialObs?.length ?? 0
+}
 // True once a sparse model exists but this image wasn't registered into it — the
 // reconstruction couldn't place its camera. Meaningless before reconstruction runs.
 function isUnaligned(img) {
@@ -177,6 +186,14 @@ function ctxAssignSensor(sensorId) {
           <div class="detail-row">
             <span class="detail-label">Pose</span>
             <span class="detail-value" :class="{ 'detail-dim': poseStatus(img) === '—' }">{{ poseStatus(img) }}</span>
+          </div>
+          <div v-if="filmSensor(img)" class="detail-row">
+            <span class="detail-label">Fiducials</span>
+            <span
+              class="detail-value"
+              :class="{ 'detail-error': fiducialCount(img) < 3 }"
+              :title="fiducialCount(img) < 3 ? 'Interior orientation incomplete — mark ≥3 fiducials' : ''"
+            >{{ fiducialCount(img) }}{{ fiducialCount(img) < 3 ? ' (incomplete)' : '' }}</span>
           </div>
           <div v-if="hasSparse" class="detail-row">
             <span class="detail-label">Registered</span>

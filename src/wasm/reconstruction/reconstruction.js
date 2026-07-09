@@ -20,11 +20,21 @@
  * At large camera counts the dense reduced-camera Cholesky (`chol_solve`) is the
  * only part that needs swapping for an iterative Schur solve.
  *
+ * GCP support: `anchor_flat`/`anchor_weight` optionally pull specific 3D points
+ * toward a known target position (e.g. a GCP triangulated in this same SfM
+ * frame) with an extra quadratic residual `w·‖pt − target‖²`. This only ever
+ * touches that point's own 3×3 block (gradient + diagonal Hessian) — no camera
+ * Jacobian, no new coupling — so it folds into the existing per-point Schur
+ * elimination for free. Empty anchor arrays reduce to today's behaviour exactly.
+ *
  * # Inputs
  * - `cameras_flat`: n_cam × 12 floats `[R(9)|t(3), …]`
  * - `intrinsics_flat`: n_cam × 4 floats `[fx,fy,cx,cy, …]` (the seed / base K)
  * - `pts_flat`: n_pts × 3 floats `[x,y,z, …]`
  * - `obs_flat`: n_obs × 4 floats `[cam_i, pt_i, pixel_x, pixel_y, …]`
+ * - `anchor_flat`: n_anchor × 4 floats `[pt_i, target_x, target_y, target_z, …]`
+ * - `anchor_weight`: n_anchor floats, one `1/sigma²` weight per anchor (aligned
+ *   with `anchor_flat`'s rows; missing entries default to weight 1)
  * - `max_iters`: outer LM iterations
  * - `sensor_of_cam`: n_cam ints — per-camera sensor id (shared → shared focal);
  *   `< 0` (or a short/empty list) ⇒ that camera is its own group
@@ -33,20 +43,24 @@
  *
  * # Output
  * `[cameras_flat(n_cam×12), pts_flat(n_pts×3), intrinsics_flat(n_cam×5),
- *   cost_before, cost_after, cost_trace…]` — the returned intrinsics are the
- * **refined** effective K per camera as `[fx,fy,cx,cy,k1]` (k1 = 0 unless
- * `refine_mode == 3`, identical to the input K when `refine_mode == 0`); cost_*
- * are RMS reprojection error in pixels.
+ *   cost_before, cost_after, anchor_rms_after, cost_trace…]` — the returned
+ * intrinsics are the **refined** effective K per camera as `[fx,fy,cx,cy,k1]`
+ * (k1 = 0 unless `refine_mode == 3`, identical to the input K when
+ * `refine_mode == 0`); cost_before/cost_after are RMS reprojection error in
+ * pixels (anchors do not affect them); anchor_rms_after is the RMS anchor
+ * residual in the caller's world units (0 when there are no anchors).
  * @param {Float32Array} cameras_flat
  * @param {Float32Array} intrinsics_flat
  * @param {Float32Array} pts_flat
  * @param {Float32Array} obs_flat
+ * @param {Float32Array} anchor_flat
+ * @param {Float32Array} anchor_weight
  * @param {number} max_iters
  * @param {Int32Array} sensor_of_cam
  * @param {number} refine_mode
  * @returns {Float32Array}
  */
-export function bundle_adjust(cameras_flat, intrinsics_flat, pts_flat, obs_flat, max_iters, sensor_of_cam, refine_mode) {
+export function bundle_adjust(cameras_flat, intrinsics_flat, pts_flat, obs_flat, anchor_flat, anchor_weight, max_iters, sensor_of_cam, refine_mode) {
     const ptr0 = passArrayF32ToWasm0(cameras_flat, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
     const ptr1 = passArrayF32ToWasm0(intrinsics_flat, wasm.__wbindgen_malloc);
@@ -55,12 +69,16 @@ export function bundle_adjust(cameras_flat, intrinsics_flat, pts_flat, obs_flat,
     const len2 = WASM_VECTOR_LEN;
     const ptr3 = passArrayF32ToWasm0(obs_flat, wasm.__wbindgen_malloc);
     const len3 = WASM_VECTOR_LEN;
-    const ptr4 = passArray32ToWasm0(sensor_of_cam, wasm.__wbindgen_malloc);
+    const ptr4 = passArrayF32ToWasm0(anchor_flat, wasm.__wbindgen_malloc);
     const len4 = WASM_VECTOR_LEN;
-    const ret = wasm.bundle_adjust(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, max_iters, ptr4, len4, refine_mode);
-    var v6 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
+    const ptr5 = passArrayF32ToWasm0(anchor_weight, wasm.__wbindgen_malloc);
+    const len5 = WASM_VECTOR_LEN;
+    const ptr6 = passArray32ToWasm0(sensor_of_cam, wasm.__wbindgen_malloc);
+    const len6 = WASM_VECTOR_LEN;
+    const ret = wasm.bundle_adjust(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4, ptr5, len5, max_iters, ptr6, len6, refine_mode);
+    var v8 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
     wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
-    return v6;
+    return v8;
 }
 
 /**

@@ -4,14 +4,20 @@ import ImagesSection from './sidebar/ImagesSection.vue'
 import SensorsSection from './sidebar/SensorsSection.vue'
 import MatchesSection from './sidebar/MatchesSection.vue'
 import GcpsSection from './sidebar/GcpsSection.vue'
+import FootprintsSection from './sidebar/FootprintsSection.vue'
 import CloudsSection from './sidebar/CloudsSection.vue'
 import ProductsSection from './sidebar/ProductsSection.vue'
 
 defineProps({
   images:     { type: Array,  required: true },
   gcps:       { type: Array,  default: () => [] },
+  gcpReport:  { type: Array,  default: () => [] },
+  selectedGcpId: { type: String, default: null },
   sensors:    { type: Array,  default: () => [] },
   poses:      { type: Array,  default: () => [] },
+  // Image footprint polygons (imported or computed from poses); the section only
+  // renders when at least one exists.
+  footprints: { type: Array,  default: () => [] },
   // Point clouds: [{ id, name, kind, createdAt, cameras: Map, points: [] }]
   clouds:     { type: Array,  default: () => [] },
   selectedCloudId: { type: String, default: null },
@@ -31,8 +37,10 @@ defineProps({
 })
 
 const emit = defineEmits([
-  'add-images', 'import-file', 'remove-image', 'remove-gcp',
+  'add-images', 'import-file', 'remove-image', 'remove-gcp', 'select-gcp',
+  'jump-to-image', 'remove-gcp-observation',
   'remove-sensor', 'merge-sensors', 'assign-sensor', 'remove-pose',
+  'remove-footprint',
   'select', 'open', 'show-info', 'delete-keypoints', 'zoom-to-image',
   'select-cloud', 'remove-cloud', 'rename-cloud', 'reconstruct',
   'open-matches', 'open-product', 'zoom-to-cloud',
@@ -67,7 +75,7 @@ function onDrop(e) {
 
 // Collapsible section open/close state (kept here; sections receive it as a prop
 // and emit `toggle`). Each section owns its own row rendering + context menu.
-const open = ref({ images: true, gcps: true, sensors: false, matches: true, clouds: true, products: true })
+const open = ref({ images: true, gcps: true, footprints: true, sensors: false, matches: true, clouds: true, products: true })
 
 function toggle(key) {
   open.value[key] = !open.value[key]
@@ -123,8 +131,23 @@ function toggle(key) {
     <GcpsSection
       :open="open.gcps"
       :gcps="gcps"
+      :report="gcpReport"
+      :selected-gcp-id="selectedGcpId"
       @toggle="toggle('gcps')"
       @remove-gcp="emit('remove-gcp', $event)"
+      @select="emit('select-gcp', $event)"
+      @jump-to-image="emit('jump-to-image', $event)"
+      @remove-observation="emit('remove-gcp-observation', $event)"
+    />
+
+    <!-- Footprints are optional: only show the section when some exist. -->
+    <FootprintsSection
+      v-if="footprints.length"
+      :open="open.footprints"
+      :footprints="footprints"
+      @toggle="toggle('footprints')"
+      @remove-footprint="emit('remove-footprint', $event)"
+      @jump-to-image="emit('jump-to-image', $event)"
     />
 
     <CloudsSection

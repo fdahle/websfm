@@ -393,15 +393,62 @@ export async function deleteFootprints(projectId) {
 }
 
 // ── Dev console log ──────────────────────────────────────────────────────────────
-// JSON: [{ id, time, level, message, source }] — the console entries, so reopening
-// a project shows its previous console output.
+// Append-only NDJSON stream (`log.ndjson`): one { id, time, level, message,
+// source } object per line. The console keeps only a bounded live *tail* in
+// memory (SfM runs are verbose — thousands of lines); the file is the full
+// record, so scroll-back and TXT export read from it rather than memory.
+// Callers must serialise appends (≤1 in flight) — see useLogStore — since each
+// append reads the current size to seek to the end.
+// (Legacy `log.json` was a single rewritten array; migrated on first restore.)
 
-export async function saveLog(projectId, entries) {
+export async function appendLog(projectId, entries) {
+  if (!entries || entries.length === 0) return
   const dir = await getProjectDir(projectId, true)
-  await writeJson(dir, 'log.json', entries)
+  const fh = await dir.getFileHandle('log.ndjson', { create: true })
+  const size = (await fh.getFile()).size
+  const writable = await fh.createWritable({ keepExistingData: true })
+  await writable.seek(size)
+  await writable.write(entries.map(e => JSON.stringify(e)).join('\n') + '\n')
+  await writable.close()
 }
 
-export async function loadLog(projectId) {
+export async function readLog(projectId) {
+  try {
+    const dir = await getProjectDir(projectId)
+    const fh = await dir.getFileHandle('log.ndjson')
+    const text = await (await fh.getFile()).text()
+    const out = []
+    for (const line of text.split('\n')) {
+      if (!line) continue
+      try { out.push(JSON.parse(line)) } catch {}
+    }
+    return out
+  } catch {
+    return null
+  }
+}
+
+export async function truncateLog(projectId) {
+  try {
+    const dir = await getProjectDir(projectId, true)
+    const fh = await dir.getFileHandle('log.ndjson', { create: true })
+    const writable = await fh.createWritable() // no keepExistingData ⇒ truncates
+    await writable.close()
+  } catch {}
+}
+
+export async function deleteLog(projectId) {
+  for (const name of ['log.ndjson', 'log.json' /* legacy */]) {
+    try {
+      const dir = await getProjectDir(projectId)
+      await dir.removeEntry(name)
+    } catch {}
+  }
+}
+
+// One-time migration off the legacy whole-array `log.json`. Returns its entries
+// (to seed the stream) or null; caller appends them and removes the old file.
+export async function loadLegacyLog(projectId) {
   try {
     const dir = await getProjectDir(projectId)
     return readJson(dir, 'log.json')
@@ -410,7 +457,7 @@ export async function loadLog(projectId) {
   }
 }
 
-export async function deleteLog(projectId) {
+export async function deleteLegacyLog(projectId) {
   try {
     const dir = await getProjectDir(projectId)
     await dir.removeEntry('log.json')

@@ -42,7 +42,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 
       <div class="modal-body">
         <div class="preview">
-          <img :src="image.url" :alt="image.name" class="preview-img" />
+          <img v-if="!image.previewPending && !image.previewFailed" :src="image.url" :alt="image.name" class="preview-img" />
+          <div v-else-if="image.previewFailed" class="preview-img preview-pending">Preview unavailable — decode failed</div>
+          <div v-else class="preview-img preview-pending">Decoding image…</div>
         </div>
 
         <div v-if="image.kpStatus !== null" class="kp-bar">
@@ -146,6 +148,15 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
   max-width: 100%;
   max-height: 200px;
   object-fit: contain;
+}
+
+.preview-pending {
+  height: 200px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-dim);
+  font-size: 13px;
 }
 
 .kp-bar {
