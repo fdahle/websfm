@@ -2,6 +2,7 @@
 import { ref, computed } from 'vue'
 import { focalPx } from '../../core/footprint.js'
 import { useFootprintsStore } from '../../stores/useFootprintsStore.js'
+import { FOOTPRINT_DEFAULTS } from '../../core/defaults.user.js'
 
 const props = defineProps({
   poses:   { type: Array, default: () => [] },
@@ -12,13 +13,8 @@ const emit = defineEmits(['close', 'run'])
 
 const { resolveIntrinsics } = useFootprintsStore()
 
-const settings = ref({
-  useAgl: false,
-  groundElev: 0,
-  agl: 1000,
-  assumeNadir: true,
-  overwrite: true,
-})
+// Defaults live in core/defaults.user.js (single source of truth).
+const settings = ref({ ...FOOTPRINT_DEFAULTS })
 
 // Manual intrinsics override, for poses with no calibrated sensor (e.g. poses
 // imported without their images). Prefilled from the first known sensor — its

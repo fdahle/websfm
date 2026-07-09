@@ -1,6 +1,8 @@
 <script setup>
 import { ref, computed, watch, nextTick, onMounted } from 'vue'
 import { useLog } from '../../composables/useLog.js'
+import { useLogStore } from '../../stores/useLogStore.js'
+import { useProjectsStore } from '../../stores/useProjectsStore.js'
 import { useCommands } from '../../composables/useCommands.js'
 import { completions, commonPrefix } from '../../core/help/commands.js'
 
@@ -11,7 +13,11 @@ const props = defineProps({
   commandState: { type: Object, default: () => ({}) },
 })
 
-const { entries, clear, log } = useLog()
+const { entries, log } = useLog()
+// Instantiating the store here also activates its log→OPFS streaming from app
+// boot; it owns the on-disk record that scroll-back and export read from.
+const logStore = useLogStore()
+const projects = useProjectsStore()
 const body = ref(null)
 
 // "Stick to bottom": follow new log lines automatically, but only while the user
@@ -19,20 +25,73 @@ const body = ref(null)
 const THRESHOLD = 60
 const stickToBottom = ref(true)
 
+// Scroll-back: the in-memory `entries` are only the live tail (capped at
+// MAX_BUFFER). Older lines live in the on-disk stream. When the user scrolls to
+// the top we read the previous chunk from the file (via the store) and prepend
+// it to `earlier`, which is rendered ahead of the live tail. `fullCache` is the
+// once-read parsed stream; we only ever slice its *older* (immutable) portion.
+const CHUNK = 500
+const earlier = ref([])
+let fullCache = null
+let loadingEarlier = false
+const allEarlierLoaded = ref(false)
+
+function resetEarlier() {
+  earlier.value = []
+  fullCache = null
+  loadingEarlier = false
+  allEarlierLoaded.value = false
+}
+
+// Switching projects replaces the console contents; the cached stream is now a
+// different project's, so drop the scroll-back state.
+watch(() => projects.currentProjectId, resetEarlier)
+
+async function loadEarlier() {
+  if (loadingEarlier || allEarlierLoaded.value) return
+  loadingEarlier = true
+  try {
+    if (!fullCache) fullCache = await logStore.readAll()
+    if (!fullCache.length) { allEarlierLoaded.value = true; return }
+    // Anchor on the oldest line currently shown; load the chunk before it.
+    const firstId = earlier.value.length ? earlier.value[0].id : entries.value[0]?.id
+    let idx = firstId ? fullCache.findIndex(e => e.id === firstId) : fullCache.length
+    if (idx < 0) idx = fullCache.length // not yet on disk ⇒ everything is earlier
+    if (idx <= 0) { allEarlierLoaded.value = true; return }
+    const start = Math.max(0, idx - CHUNK)
+    const chunk = fullCache.slice(start, idx)
+    // Preserve the viewport: prepending grows scrollHeight, so re-offset scrollTop.
+    const el = body.value
+    const before = el ? el.scrollHeight : 0
+    earlier.value = [...chunk, ...earlier.value]
+    if (start === 0) allEarlierLoaded.value = true
+    await nextTick()
+    if (el) el.scrollTop += el.scrollHeight - before
+  } finally {
+    loadingEarlier = false
+  }
+}
+
 function atBottom(el) {
   return el.scrollHeight - el.scrollTop - el.clientHeight < THRESHOLD
 }
 
 function onScroll() {
   const el = body.value
-  if (el) stickToBottom.value = atBottom(el)
+  if (!el) return
+  stickToBottom.value = atBottom(el)
+  if (el.scrollTop < THRESHOLD) loadEarlier()
 }
 
 function scrollToBottom() {
   const el = body.value
   if (!el) return
-  el.scrollTop = el.scrollHeight
-  stickToBottom.value = true
+  // Drop the loaded history to free the DOM; scrolling up re-loads it.
+  if (earlier.value.length) resetEarlier()
+  nextTick(() => {
+    el.scrollTop = el.scrollHeight
+    stickToBottom.value = true
+  })
 }
 
 watch(entries, async () => {
@@ -74,16 +133,23 @@ const hiddenSources = ref(new Set())
 
 const allSources = computed(() => {
   const s = new Set()
+  for (const e of earlier.value) if (e.source) s.add(e.source)
   for (const e of entries.value) if (e.source) s.add(e.source)
   return [...s].sort()
 })
 
+function passesFilter(e) {
+  if (!showDetail.value && e.level === 'debug') return false
+  if (hiddenSources.value.has(e.source)) return false
+  return true
+}
+
+// The rendered list: loaded scroll-back history followed by the live tail.
 const filteredEntries = computed(() => {
-  return entries.value.filter(e => {
-    if (!showDetail.value && e.level === 'debug') return false
-    if (hiddenSources.value.has(e.source)) return false
-    return true
-  })
+  const out = []
+  for (const e of earlier.value) if (passesFilter(e)) out.push(e)
+  for (const e of entries.value) if (passesFilter(e)) out.push(e)
+  return out
 })
 
 function toggleSource(source) {
@@ -202,13 +268,20 @@ function onKeyDown(e) {
   }
 }
 
-// Save visible entries to a .txt file
-function saveTxt() {
-  const lines = filteredEntries.value.map(e => {
-    const src = (e.source ?? '').padEnd(10)
-    const lvl = e.level.padEnd(7)
-    return `${e.time}  ${src}  ${lvl}  ${e.message}`
-  })
+// Wipe the console — both the display and the on-disk stream for this project.
+async function onClear() {
+  resetEarlier()
+  await logStore.clearConsole()
+}
+
+// Save the *complete* stream to a .txt file — the whole on-disk record, not the
+// capped live window and not filtered (Detail/source toggles are view-only).
+// Falls back to what's in memory if the stream can't be read.
+async function saveTxt() {
+  const fmt = e => `${e.time}  ${(e.source ?? '').padEnd(10)}  ${e.level.padEnd(7)}  ${e.message}`
+  let src = await logStore.readAll()
+  if (!src || src.length === 0) src = [...earlier.value, ...entries.value]
+  const lines = src.map(fmt)
   const blob = new Blob([lines.join('\n')], { type: 'text/plain' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
@@ -247,7 +320,7 @@ function saveTxt() {
           @click="filterOpen = !filterOpen"
         >Filter</button>
         <button class="btn-action" title="Save visible entries to TXT" @click="saveTxt">Save TXT</button>
-        <button class="btn-clear" title="Clear" @click="clear">Clear</button>
+        <button class="btn-clear" title="Clear" @click="onClear">Clear</button>
       </div>
     </div>
     <div class="console-main">
@@ -267,7 +340,7 @@ function saveTxt() {
           <span class="entry-msg">{{ entry.message }}</span>
         </div>
         <div v-if="filteredEntries.length === 0" class="empty">
-          {{ entries.length === 0 ? 'No output yet.' : 'No entries match the current filter.' }}
+          {{ entries.length === 0 && earlier.length === 0 ? 'No output yet.' : 'No entries match the current filter.' }}
         </div>
       </div>
 

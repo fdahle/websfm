@@ -12,10 +12,13 @@ function loadDimensions(url) {
 /**
  * Parse EXIF + basic dimensions for an image file.
  * Returns a flat, normalized metadata object (null fields when absent).
+ * `presetDims` skips the `<img>`-based probe (used for a TIFF whose `url` isn't
+ * browser-decodable yet — the caller reads dimensions from the TIFF header
+ * instead, which doesn't need to wait for the full transcode).
  */
-export async function extractMetadata(file, url) {
+export async function extractMetadata(file, url, presetDims = null) {
   const [dims, exif] = await Promise.all([
-    loadDimensions(url),
+    presetDims ? Promise.resolve(presetDims) : loadDimensions(url),
     // Default parse merges TIFF/EXIF/GPS and adds computed latitude/longitude.
     exifr.parse(file).catch(() => null),
   ])

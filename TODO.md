@@ -17,12 +17,13 @@ better for a browser tool: two detector/matcher front ends (SIFT + SuperPoint/
 LightGlue, tiled detection), F/H-RANSAC verification with four repetitive-
 structure defenses, incremental SfM with LM/Schur BA + f/k1 self-calibration,
 distortion models, PatchMatch MVS on CPU **and** WebGPU, DEM + true ortho,
-GeoTIFF export, OPFS projects, in-app glossary + command console. The real gaps
-to "general tool" (tracked in Later ▸ features): GCP-driven georeferencing +
-accuracy report (F2), any mesh output (F3), interop with the ecosystem — COLMAP
+GeoTIFF export, OPFS projects, in-app glossary + command console, GCP-driven
+georeferencing (post-hoc similarity fit *and* GCP-anchored BA) with a per-GCP
+accuracy report. The real gaps to "general tool" (tracked in Later ▸
+features): any mesh output (F3), interop with the ecosystem — COLMAP
 model import/export (F7), LAS point clouds (F1 polish) — processing report
 (F8), point-cloud editing/gradual selection (F9), EXIF-GPS pair preselection
-(F10), scale bars (F11), fiducials for film (F4), fisheye (F6). The biggest
+(F10), scale bars (F11), fisheye (F6). The biggest
 *credibility* gap is not a feature: it's that the R-track robustness work is
 still unvalidated on real data (Now ▸ R).
 
@@ -43,6 +44,30 @@ brute-force path. Owed before/at commit:
   mid-SuperPoint, Safari warn-box.
 - Commit `src/wasm/*` with the crate change per convention; split commits
   (tiling / dim / TIFF+UX) if practical.
+
+### W1 — GCP georeferencing + BA anchoring (F2, uncommitted): owed manual verification
+Full GCP-in-BA support + a GCP-marking UX overhaul just landed (see HANDOVER
+2026-07-07 and 2026-07-08 entries): 2-view DLT triangulation
+(`core/sfm/gcpTriangulation.js`), GCP-preferred `georeference()` + per-GCP
+`gcpAccuracyReport()` (`useReconstructionStore`), **right-click marking** in
+`ViewerImage.vue` (add-new / assign-existing) with a magnifier loupe + live
+reprojection feedback, sidebar observation list (jump-to-image + remove) +
+coverage flags, and a GCP anchor residual in `bundle.rs` (own point-index
+space, weighted `‖pt−target‖²`, `crates/reconstruction` wasm rebuilt) wired
+through `core/sfm/sfm.js`'s post-pipeline `runGcpAnchoredBundleAdjust`.
+Unit-tested (Rust `bundle_adjust_gcp_anchor_pulls_point`, JS
+`gcpTriangulation.test.js` + `sfm.test.js` GCP describe block); the interactive
+UI + end-to-end georeference/DEM-in-CRS path still need a real browser run:
+- "+ Add GCP" (table) or right-click "Add new GCP here" in an image → confirm
+  a GCP appears, the overlay turns on, and the loupe/marker render correctly at
+  various zoom/pan (click accuracy is the main thing to eyeball).
+- Mark ≥3 GCPs on ≥2 images each, edit their surveyed X/Y/Z, run reconstruct,
+  confirm the "GCP-anchored bundle adjustment" log line + plausible per-GCP
+  residual (table) and live reprojection px (marker + sidebar).
+- Build a DEM in the project CRS and confirm it uses the GCP-based georeference
+  (`georef.value.method === 'gcps'`) over the pose-based fallback.
+- Commit `src/wasm/reconstruction/*` alongside the `crates/reconstruction`
+  diff per convention.
 
 ### R — verify the R track on real data (the acceptance run; unchanged)
 R1–R6 (registration robustness) shipped 2026-07-04 but are only unit-tested.
@@ -111,9 +136,9 @@ minutes. Diagnosis: (a) brute-force NN is O(pairs·M²) and every pair pays full
 price even with zero overlap; (b) RANSAC always runs 1000 F + 1000 H iterations
 per pair, each doing a 9×9 Jacobi eig; (c) every pair structured-clones ~5 MB of
 descriptors into a worker plus both keypoint arrays for verify — ≈6 GB of copies
-per run. Keep `core/` pure and the store gates unchanged. Order **P5 → P6 → P7
-→ P8 → P9**; measure matching wall-clock before starting and after each item,
-record in HANDOVER §Baselines.
+per run. Keep `core/` pure and the store gates unchanged. Order **P5 → P6 → P8 → P9**
+(P7 shipped 2026-07-08, see HANDOVER); measure matching wall-clock before
+starting and after each item, record in HANDOVER §Baselines.
 
 **P5 — Parallelize `detectAll`.** `useImagesStore.detectAll` awaits one
 `detectOne` at a time despite the pool. Reuse `matchAll`'s shared-cursor
@@ -128,17 +153,6 @@ stop at `min(needed, max_iters)`. Good pairs finish in <100 iterations. Also
 skip H-RANSAC when F inliers < `h_skip_below` (pair is rejected anyway). Bonus
 if cheap: PROSAC-style sampling (matches arrive sorted-ish by Lowe distance).
 Pure Rust; rebuild wasm + commit `src/wasm/*`. Expect 2–5× on verify.
-
-**P7 — Two-stage exhaustive matching ("generic preselection",
-Metashape-style).** The structural fix for the no-poses/no-GPS case (websfm's
-analog of COLMAP's vocab-tree retrieval, without shipping a vocab tree). SIFT
-keypoints are response-sorted, so each image's strongest K descriptors are
-`descriptors.subarray(0, K*128)` — free via `descCache`. Stage 1 mini-matches
-**every** pair with K≈300 descriptors (ratio only, no RANSAC/cross-check);
-pairs with ≥T putative mini-matches (T≈10) go to stage 2 = today's full
-match+verify; rest recorded skipped. On by default for exhaustive, toggleable.
-Log kept/pruned like the proximity preselector. Expect 4–8× on building-style
-sets. Note: works on SuperPoint descriptors too (scores sort at detect).
 
 **P8 — GEMM-form NN kernel (`crates/matching`).** Replace the early-exit scan
 with blocked top-2: precompute row norms, d² = |a|²+|b|²−2a·b, dot products in
@@ -174,7 +188,8 @@ browser check (Safari + Chrome).
 
 ### Owed runtime validations (shipped code, unproven on real data)
 - **A2 self-calibration** on CA…V: does refined-f pull toward ~6700 and reduce
-  the dome/tilt z-spread? Evidence decides whether F4 (fiducials) is needed.
+  the dome/tilt z-spread? (F4 fiducial interior orientation now shipped as the
+  alternative fix — validate both on the film set.)
 - **A3 retriangulation** on CA…V: does ×3-view share rise on noisy real data?
 - **A4 undistort** on genuinely distorted imagery (drone/phone).
 - **P2 matching throughput** on a real 50–500-image set.
@@ -201,19 +216,8 @@ ortho; `layout:'auto'` bind groups + the 64-byte Params uniform in
 ## Later — features (the road to a general SfM tool)
 
 Ordered by how much each closes the COLMAP/Metashape gap per unit effort.
-F2 → F3 → F7 → F8 are the spine: accuracy story, visible 3D product,
-ecosystem interop, deliverable report.
-
-### F2 — GCP-driven georeferencing + accuracy report (Antarctica use case)
-`core/products/georef.js` `fitSimilarity` (Horn) currently fits SfM camera
-centres ↔ imported poses. Add the GCP path: user marks GCP image observations
-(GCP store + image-viewer marking exist), triangulate marked GCPs in the SfM
-frame from ≥2 registered views, then `fitSimilarity(sfmGcp, projectCrsGcp)`
-and report **per-GCP residuals in a table** — the accuracy report users
-actually trust, and the single most Metashape-defining feature websfm lacks.
-Later: GCP observations as weighted constraints inside BA (check-point vs
-control-point split). See memories `gcp-crs-architecture`,
-`works-in-antarctica`.
+F3 → F7 → F8 are the spine: visible 3D product, ecosystem interop, deliverable
+report (F2 — accuracy story — shipped 2026-07-07, see HANDOVER).
 
 ### F3 — 2.5D mesh from the DEM (+ texture)
 Skip full 3D meshing (Poisson in WASM is a project of its own — parked). For
@@ -269,14 +273,6 @@ For close-range/object work without GCPs: user marks two image points across
 ≥2 views (reuse the GCP marking UI), enters a known distance, app scales the
 model (and reports residual). Metashape staple; small once F2's
 triangulate-marked-points helper exists.
-
-### F4 — Fiducial-mark interior orientation (film scans)
-The proper fix for "scan geometry ≠ camera geometry" on historical film. Per
-sensor: user clicks 4/8 fiducial marks, app fits the affine scan→frame
-transform; principal point + pitch derive from calibrated fiducial coordinates
-instead of scan centre + guessed pitch. Applies to keypoints + rasterisation
-like the undistort path. **Decision gate:** only if A2's refined-f evidence on
-CA…V doesn't fix the film set on its own.
 
 ### F6 — Fisheye distortion model
 D3's selector covers Pinhole/Radial/Brown — all undistort-to-pinhole-able.
@@ -390,7 +386,13 @@ JS proves slow on large grids; optional manual "Flip Z" for object scenes.
   stores is enough (Metashape has none either).
 - **Full 3D meshing (Poisson/Delaunay)** — parked in favour of F3's 2.5D DEM
   mesh; revisit only if object-scene (non-aerial) demand materialises.
-- **Vocabulary-tree retrieval** — P7's descriptor mini-match covers the same
-  need without shipping/training a vocab tree; revisit at 1000+ image scale.
+- **Vocabulary-tree / global-descriptor image retrieval** — the scale-up path
+  for candidate-pair selection with no poses/GPS. The shipped subset gate (P7,
+  `core/features/subsetGate.js`) covers the same need at <100s–low-100s images
+  without shipping/training a vocab tree, but still *tests* every pair (O(N²)
+  pairs, cheap each). A retrieval stage (compact per-image global descriptor —
+  BoW/VLAD/aggregated SIFT — + kNN to propose candidates) drops the O(N²) pair
+  count itself; revisit at 1000+ image scale where the gate's per-pair floor
+  starts to dominate.
 - **Multi-camera rigs, rolling-shutter model, Metashape-style chunks** — out of
   scope for the target workflows; record demand before designing.

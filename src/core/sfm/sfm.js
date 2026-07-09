@@ -22,9 +22,14 @@ import {
 } from './reconstruction.js'
 import { projectPoint, medianTriangulationAngle } from './geometry.js'
 import { undistortPixel, distortionOf } from './distortion.js'
+import { fitFiducialAffine, canonicalFrame, scanToCanonical } from './fiducials.js'
 import { rotationCycleFilter } from './cycleFilter.js'
 import { toNorm, camToP34flat, reprojErr, retriangulatePairs, mergeSplitTracks } from './tracks.js'
 import { selectInitPair } from './initPair.js'
+import { triangulateGcp } from './gcpTriangulation.js'
+import { fitSimilarity, frameFromSimilarity } from '../products/georef.js'
+import { RECONSTRUCT_DEFAULTS } from '../defaults.user.js'
+import { SFM_TUNING } from '../tuning.js'
 
 // Re-export the extracted pure modules so existing importers (sfm.test.js and any
 // others that reached for these through sfm.js) keep working unchanged.
@@ -56,7 +61,11 @@ function fmtStats(s) {
 }
 
 export async function reconstruct(input, hooks = {}) {
-  const { images, pairs, settings = {} } = input
+  const { images, pairs, settings = {}, gcps = [] } = input
+  // Resolve knobs from the single-source-of-truth constants, letting caller-supplied
+  // `settings` (from the modal / a dev experiment override) win. User-facing defaults
+  // live in defaults.user.js (mirrored by ReconstructModal); internal ones in tuning.js.
+  const cfg = { ...RECONSTRUCT_DEFAULTS, ...SFM_TUNING, ...settings }
   const log = hooks.onLog ?? (() => {})
   const onProgress = hooks.onProgress
 
@@ -161,6 +170,92 @@ export async function reconstruct(input, hooks = {}) {
         (sizes[0] ?? 0) < imgs.length ? 'warn' : 'info', 'Reconstruction')
     }
 
+    // ── Fiducial interior orientation (F4) ───────────────────────────────────
+    // Scanned film: fit each image's scan→mm affine from its clicked fiducial
+    // marks, build ONE canonical pixel frame per sensor (median fitted pitch),
+    // and move that image's keypoints into the frame. This is the exact analogue
+    // of the distortion undistort below — scan geometry removed once at ingest,
+    // keypoint indices preserved (matches reference them), so the whole pipeline
+    // stays pinhole with one shared K per sensor. resolveK then returns the
+    // canonical K via `sensor._fiducialK` (path 0). Runs BEFORE the K-map so the
+    // resolveK below sees the stashed frame.
+    const fiducialTransforms = new Map() // uuid → { A, frame }
+    {
+      const filmGroups = new Map() // sensorId → [{ img, fit }]
+      for (const img of imgs) {
+        const s = img.sensor
+        if (s?.kind !== 'film' || !s.fiducials?.marks?.length) continue
+        const byId = new Map(s.fiducials.marks.map((m) => [m.id, m]))
+        const obs = (img.fiducialObs || [])
+          .map((o) => {
+            const m = byId.get(o.fidId)
+            return m ? { px: o.px, py: o.py, xMm: m.xMm, yMm: m.yMm } : null
+          })
+          .filter(Boolean)
+        const fit = fitFiducialAffine(obs)
+        if (!fit) {
+          log(`Reconstruction: ${img.name} — fiducial fit failed (${obs.length} usable mark(s), `
+            + `need ≥3); falling back to standard intrinsics`, 'warn', 'Reconstruction')
+          continue
+        }
+        const pitchUm = fit.pitchMm * 1000
+        log(`Reconstruction: ${img.name} — fiducial fit: pitch ${pitchUm.toFixed(2)}µm/px, `
+          + `rot ${fit.rotDeg.toFixed(2)}°, shear ${fit.shear.toFixed(4)}, RMS ${fit.rmsUm.toFixed(1)}µm`,
+          'info', 'Reconstruction')
+        if (fit.rmsUm > 0.5 * pitchUm) {
+          log(`Reconstruction: ${img.name} — fiducial residual ${fit.rmsUm.toFixed(1)}µm exceeds `
+            + `½ pixel (${(0.5 * pitchUm).toFixed(1)}µm) — check the clicked marks`, 'warn', 'Reconstruction')
+        }
+        const sid = img.sensorId ?? '__nosensor__'
+        if (!filmGroups.has(sid)) filmGroups.set(sid, [])
+        filmGroups.get(sid).push({ img, fit })
+      }
+      for (const [sid, entries] of filmGroups) {
+        const pitches = entries.map((e) => e.fit.pitchMm).sort((a, b) => a - b)
+        const pitchMm = pitches[Math.floor(pitches.length / 2)] // median: one frame doesn't chase a single scan
+        const fiducials = entries[0].img.sensor.fiducials
+        const frame = canonicalFrame(fiducials, pitchMm)
+        if (!frame) {
+          log(`Reconstruction: sensor ${sid} — could not build canonical frame (need ≥3 marks); `
+            + `film images fall back to standard intrinsics`, 'warn', 'Reconstruction')
+          continue
+        }
+        const source = `fiducial interior orientation (${fiducials.focalMm}mm ÷ ${(pitchMm * 1000).toFixed(2)}µm/px)`
+        log(`Reconstruction: sensor ${sid} — canonical frame ${frame.width}×${frame.height}px, `
+          + `K fx=${frame.K.fx.toFixed(1)} cx=${frame.K.cx.toFixed(1)} cy=${frame.K.cy.toFixed(1)} `
+          + `(median pitch ${(pitchMm * 1000).toFixed(2)}µm/px over ${entries.length} image(s))`,
+          'info', 'Reconstruction')
+        for (const { img, fit } of entries) {
+          img.sensor._fiducialK = { fx: frame.K.fx, fy: frame.K.fy, cx: frame.K.cx, cy: frame.K.cy, source }
+          if (img.keypoints?.length) {
+            img.keypoints = img.keypoints.map((kp) => {
+              const c = scanToCanonical(kp.x, kp.y, fit.A, frame)
+              return { ...kp, x: c.x, y: c.y }
+            })
+          }
+          fiducialTransforms.set(img.uuid, { A: fit.A, frame })
+        }
+      }
+      // GCP observations are in scan space too — push film-image observations
+      // through the same scan→canonical map, or their reprojection residuals
+      // explode only on film projects (they meet the same camera K downstream).
+      if (fiducialTransforms.size && gcps.length) {
+        let remapped = 0
+        for (const g of gcps) {
+          for (const o of g.observations || []) {
+            const t = fiducialTransforms.get(o.uuid)
+            if (!t) continue
+            const c = scanToCanonical(o.px, o.py, t.A, t.frame)
+            o.px = c.x; o.py = c.y; remapped++
+          }
+        }
+        if (remapped) {
+          log(`Reconstruction: remapped ${remapped} GCP observation(s) on film images `
+            + `into the canonical frame`, 'info', 'Reconstruction')
+        }
+      }
+    }
+
     // ── Build K map ────────────────────────────────────────────────────────
     const Kmap = new Map() // uuid → K
     let defaultKCount = 0
@@ -185,8 +280,9 @@ export async function reconstruct(input, hooks = {}) {
     // Remove Brown–Conrady lens distortion once, up front, so every downstream
     // step (init, PnP, triangulation, BA) is pure pinhole. Keypoint indices are
     // preserved (matches reference them), only positions move. The pairwise F used
-    // for the init pair is still the distorted-space fit from matching — a slight
-    // approximation the global BA corrects; everything else is exact pinhole.
+    // for the init pair is still the distorted-space (and, for film, scan-space)
+    // fit from matching — a slight approximation the global BA corrects;
+    // everything else is exact pinhole.
     let undistortedImgs = 0
     for (const img of imgs) {
       const dist = distortionOf(img.sensor)
@@ -330,14 +426,16 @@ export async function reconstruct(input, hooks = {}) {
     // These are needed *during* incremental registration now (interleaved BA), not
     // just after it, so their config + the sensor-group map live here. The BA and
     // track-filter functions themselves are hoisted `function` declarations below.
+    // Defaults + rationale for these live in defaults.user.js (baIterations,
+    // refineIntrinsics) and tuning.js (the rest); `cfg` already merged them.
     const {
-      baIterations = 30,
-      filterMaxReprojPx = 4.0,    // observation pruning threshold (px)
-      filterMinTriAngleDeg = 1.5, // drop points whose rays are too parallel
-      refineIntrinsics = 'none',  // self-calibration: 'none' | 'f' | 'f,cxcy' | 'f,k1'
-      interimBaEvery = 5,         // R3: run a global BA after this many new cameras
-      interimBaIterations = 12,   // fewer iters for the interim solves
-    } = settings
+      baIterations,
+      filterMaxReprojPx,
+      filterMinTriAngleDeg,
+      refineIntrinsics,
+      interimBaEvery,
+      interimBaIterations,
+    } = cfg
 
     // Map each image's sensor to a stable integer so BA can share one focal across
     // all cameras on the same sensor. Images without an assigned sensor get their
@@ -395,13 +493,15 @@ export async function reconstruct(input, hooks = {}) {
     // gate (32px on baseline B1), poisoning the model further. With R3's interleaved
     // bundle adjustment keeping the model tight between passes, images that can't
     // clear a tight gate simply wait for a later pass rather than being let in loose.
+    // Defaults + rationale in defaults.user.js (minMatchesForRegistration,
+    // reprjThreshold) and tuning.js (the PnP-gate trio); `cfg` already merged them.
     const {
-      minMatchesForRegistration = 12,
-      reprjThreshold = 4.0,
-      pnpGateScale = 2,          // fixed gate = reprjThreshold × min(pnpGateScale, 2)
-      minPnpInliers = 15,        // R1: absolute PnP-inlier floor to accept a pose
-      minPnpInlierRatio = 0.15,  // R1: …and a fraction of the correspondences
-    } = settings
+      minMatchesForRegistration,
+      reprjThreshold,
+      pnpGateScale,
+      minPnpInliers,
+      minPnpInlierRatio,
+    } = cfg
     // Fixed PnP gate for the whole run (never chases the model p95 upward).
     const pnpThresh = reprjThreshold * Math.max(1, Math.min(pnpGateScale, 2))
     const registeredUuids = new Set([bestPair.idA, bestPair.idB])
@@ -854,6 +954,129 @@ export async function reconstruct(input, hooks = {}) {
       log(`Reconstruction: ${label} reprojection — ${fmtStats(modelReprojStats())}`, 'info', 'Reconstruction')
     }
 
+    // GCP-in-BA (F2, deferred half): once the pipeline has settled, pull the
+    // triangulated position of each GCP toward its surveyed position via
+    // bundle.rs's anchor residual — GCPs constrain the reconstruction directly
+    // rather than only fitting a post-hoc similarity. `gcps[].observations` are
+    // pre-resolved to `{ uuid, px, py }` (the store maps imageId → uuid before
+    // crossing into the worker).
+    //
+    // Runs (triangulate → fit → anchored BA) twice — hard-coded, not a user
+    // setting — as cheap insurance against a poor seed similarity on the first
+    // pass; the *actual* georeference used for products is a fresh post-hoc fit
+    // (useReconstructionStore.georeference()) run on demand against whatever
+    // cameras this leaves in the sparse cloud, so this step only needs to be
+    // "good enough to help the poses converge", not final.
+    async function runGcpAnchoredBundleAdjust() {
+      const qualifying = gcps.filter((g) => {
+        if (g.enabled === false) return false
+        const nReg = (g.observations || []).filter((o) => cameras.has(o.uuid)).length
+        return nReg >= 2
+      })
+      if (qualifying.length < 3) {
+        if (gcps.length) {
+          log(`Reconstruction: GCP anchoring skipped (${qualifying.length}/3 GCPs `
+            + `with ≥2 registered views)`, 'debug', 'Reconstruction')
+        }
+        return
+      }
+
+      async function triangulateQualifying() {
+        const out = []
+        for (const g of qualifying) {
+          const obsWithCam = (g.observations || []).filter((o) => cameras.has(o.uuid))
+          const tri = await triangulateGcp(
+            obsWithCam.map((o) => ({ imageId: o.uuid, px: o.px, py: o.py })),
+            cameras,
+          )
+          out.push({ g, tri, obsWithCam })
+        }
+        return out
+      }
+
+      for (let round = 0; round < 2; round++) {
+        const tri = await triangulateQualifying()
+        const pairs = tri.filter((r) => r.tri)
+          .map((r) => ({ src: [r.tri.x, r.tri.y, r.tri.z], dst: [r.g.x, r.g.y, r.g.z ?? 0] }))
+        if (pairs.length < 3) {
+          log('Reconstruction: GCP anchoring stopped (fewer than 3 GCPs triangulated)', 'warn', 'Reconstruction')
+          return
+        }
+        const fit = fitSimilarity(pairs)
+        if (!fit) {
+          log('Reconstruction: GCP anchoring stopped (similarity fit failed — degenerate configuration)',
+            'warn', 'Reconstruction')
+          return
+        }
+        const frame = frameFromSimilarity(fit, 'gcp')
+
+        const uuidList = [...cameras.keys()]
+        const camList = uuidList.map((u) => cameras.get(u))
+        const kList = camList.map((c) => c.K)
+        const sensorOfCam = uuidList.map((u) => sensorIntByUuid.get(u) ?? -1)
+        const camIdxOf = new Map(uuidList.map((u, i) => [u, i]))
+
+        const observations = []
+        points3d.forEach((pt, pi) => {
+          pt.views.forEach((kpIdx, uuid) => {
+            const ci = camIdxOf.get(uuid)
+            const img = imageByUuid(uuid)
+            if (ci == null || !img) return
+            const kp = img.keypoints[kpIdx]
+            if (kp) observations.push({ camIdx: ci, ptIdx: pi, x: kp.x, y: kp.y })
+          })
+        })
+
+        // Anchor points are injected as extra 3D points (their own index space,
+        // appended after the normal SIFT points) with normal reprojection
+        // observations of their own PLUS the one anchor residual pulling them
+        // toward the GCP-implied SfM-frame position.
+        const anchorPts = []
+        const anchors = []
+        tri.forEach(({ g, tri: t, obsWithCam }) => {
+          if (!t) return
+          const pi = points3d.length + anchorPts.length
+          anchorPts.push({ x: t.x, y: t.y, z: t.z })
+          const target = frame.toSfm([g.x, g.y, g.z ?? 0])
+          const accuracy = ((g.accuracyX ?? 1) + (g.accuracyY ?? 1) + (g.accuracyZ ?? 1)) / 3
+          // Accuracy is a std-dev in CRS units; the anchor residual is measured in
+          // the SfM frame, `fit.scale` apart from CRS — weight = 1/sigma_sfm².
+          const weight = (fit.scale * fit.scale) / Math.max(1e-6, accuracy * accuracy)
+          anchors.push({ ptIdx: pi, target, weight })
+          for (const o of obsWithCam) {
+            const ci = camIdxOf.get(o.uuid)
+            if (ci != null) observations.push({ camIdx: ci, ptIdx: pi, x: o.px, y: o.py })
+          }
+        })
+        if (!anchors.length) return
+
+        log(`Reconstruction: GCP-anchored bundle adjustment (round ${round + 1}/2) — `
+          + `${anchors.length} GCP(s), seed scale ${fit.scale.toPrecision(4)}, `
+          + `seed RMS ${fit.rms.toPrecision(3)}`, 'info', 'Reconstruction')
+
+        const result = await bundleAdjust(camList, kList, [...points3d, ...anchorPts], observations,
+          { maxIters: baIterations, refineIntrinsics: 'none', sensorOfCam, gcpAnchors: anchors })
+        if (!result) {
+          log('Reconstruction: GCP-anchored bundle adjustment returned no result (skipped)', 'warn', 'Reconstruction')
+          return
+        }
+        if (result.costAfter > result.costBefore + 0.01) {
+          log(`Reconstruction: GCP-anchored bundle adjustment REJECTED — would worsen reprojection RMS `
+            + `${result.costBefore.toFixed(2)}px → ${result.costAfter.toFixed(2)}px`, 'warn', 'Reconstruction')
+          return
+        }
+        uuidList.forEach((uuid, ci) => {
+          cameras.set(uuid, { ...cameras.get(uuid), ...result.cameras[ci] })
+        })
+        // Only the original (non-anchor) points are kept — the synthetic anchor
+        // points were scratch space for this BA pass, not real SIFT tracks.
+        points3d = points3d.map((pt, i) => ({ ...pt, x: result.points3d[i].x, y: result.points3d[i].y, z: result.points3d[i].z }))
+        log(`Reconstruction: GCP-anchored bundle adjustment RMS ${result.costBefore.toFixed(2)}px → `
+          + `${result.costAfter.toFixed(2)}px, anchor residual (SfM units) → ${result.anchorRmsAfter.toFixed(4)}`,
+          'success', 'Reconstruction')
+      }
+    }
+
     // What fraction of observations are still gross outliers (the junk tracks BA
     // can only down-weight, not delete). Logged before/after filtering.
     const logOutlierShare = (label) => {
@@ -954,6 +1177,9 @@ export async function reconstruct(input, hooks = {}) {
       log(`Reconstruction: bundle adjustment skipped (cameras=${cameras.size}, `
         + `points=${points3d.length}, iters=${baIterations})`, 'debug', 'Reconstruction')
     }
+    if (gcps.length && cameras.size >= 2 && points3d.length >= 10) {
+      await runGcpAnchoredBundleAdjust()
+    }
     markStage('bundleAdjust')
 
     // Per-camera median-residual table (flags cameras > 2× the global median). The
@@ -1013,6 +1239,10 @@ export async function reconstruct(input, hooks = {}) {
       selfCalDistortion: [...selfCalK1BySensor]
         .filter(([, k1]) => k1)
         .map(([sensorId, k1]) => ({ sensorId, k1 })),
+      // F4: per-image scan→canonical transform for each film image, so the dense
+      // stage reproduces the exact same frame (it must NOT re-fit — the sparse run
+      // defines the frame). Empty for all-digital projects.
+      fiducialTransforms: [...fiducialTransforms].map(([uuid, t]) => ({ uuid, A: t.A, frame: t.frame })),
     }
 
     onProgress?.(imgs.length, imgs.length, 'Done')

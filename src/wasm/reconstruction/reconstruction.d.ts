@@ -21,11 +21,21 @@
  * At large camera counts the dense reduced-camera Cholesky (`chol_solve`) is the
  * only part that needs swapping for an iterative Schur solve.
  *
+ * GCP support: `anchor_flat`/`anchor_weight` optionally pull specific 3D points
+ * toward a known target position (e.g. a GCP triangulated in this same SfM
+ * frame) with an extra quadratic residual `w·‖pt − target‖²`. This only ever
+ * touches that point's own 3×3 block (gradient + diagonal Hessian) — no camera
+ * Jacobian, no new coupling — so it folds into the existing per-point Schur
+ * elimination for free. Empty anchor arrays reduce to today's behaviour exactly.
+ *
  * # Inputs
  * - `cameras_flat`: n_cam × 12 floats `[R(9)|t(3), …]`
  * - `intrinsics_flat`: n_cam × 4 floats `[fx,fy,cx,cy, …]` (the seed / base K)
  * - `pts_flat`: n_pts × 3 floats `[x,y,z, …]`
  * - `obs_flat`: n_obs × 4 floats `[cam_i, pt_i, pixel_x, pixel_y, …]`
+ * - `anchor_flat`: n_anchor × 4 floats `[pt_i, target_x, target_y, target_z, …]`
+ * - `anchor_weight`: n_anchor floats, one `1/sigma²` weight per anchor (aligned
+ *   with `anchor_flat`'s rows; missing entries default to weight 1)
  * - `max_iters`: outer LM iterations
  * - `sensor_of_cam`: n_cam ints — per-camera sensor id (shared → shared focal);
  *   `< 0` (or a short/empty list) ⇒ that camera is its own group
@@ -34,12 +44,14 @@
  *
  * # Output
  * `[cameras_flat(n_cam×12), pts_flat(n_pts×3), intrinsics_flat(n_cam×5),
- *   cost_before, cost_after, cost_trace…]` — the returned intrinsics are the
- * **refined** effective K per camera as `[fx,fy,cx,cy,k1]` (k1 = 0 unless
- * `refine_mode == 3`, identical to the input K when `refine_mode == 0`); cost_*
- * are RMS reprojection error in pixels.
+ *   cost_before, cost_after, anchor_rms_after, cost_trace…]` — the returned
+ * intrinsics are the **refined** effective K per camera as `[fx,fy,cx,cy,k1]`
+ * (k1 = 0 unless `refine_mode == 3`, identical to the input K when
+ * `refine_mode == 0`); cost_before/cost_after are RMS reprojection error in
+ * pixels (anchors do not affect them); anchor_rms_after is the RMS anchor
+ * residual in the caller's world units (0 when there are no anchors).
  */
-export function bundle_adjust(cameras_flat: Float32Array, intrinsics_flat: Float32Array, pts_flat: Float32Array, obs_flat: Float32Array, max_iters: number, sensor_of_cam: Int32Array, refine_mode: number): Float32Array;
+export function bundle_adjust(cameras_flat: Float32Array, intrinsics_flat: Float32Array, pts_flat: Float32Array, obs_flat: Float32Array, anchor_flat: Float32Array, anchor_weight: Float32Array, max_iters: number, sensor_of_cam: Int32Array, refine_mode: number): Float32Array;
 
 export function compute_depth_map(ref_gray: Uint8Array, ref_w: number, ref_h: number, ref_k: Float32Array, src_gray: Uint8Array, src_dims: Uint32Array, src_k: Float32Array, src_rel: Float32Array, src_mask: Uint8Array, seed_depth: Float32Array, depth_min: number, depth_max: number, window: number, iterations: number, best_k: number, seed: number): Float32Array;
 
@@ -99,7 +111,7 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
-    readonly bundle_adjust: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => [number, number];
+    readonly bundle_adjust: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number) => [number, number];
     readonly compute_depth_map: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number, s: number, t: number, u: number, v: number, w: number, x: number) => [number, number];
     readonly recover_pose: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number];
     readonly solve_pnp: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number];

@@ -11,6 +11,7 @@ const OPTIONS = [
   { kind: 'gcp',    title: 'Ground Control Points', desc: 'Named survey points with absolute coordinates.' },
   { kind: 'pose',   title: 'Camera Positions',      desc: 'Per-image exterior orientation (position, optionally angles).' },
   { kind: 'sensor', title: 'Camera Intrinsics',     desc: 'Shared sensor parameters (focal length, distortion…).' },
+  { kind: 'fiducialObs', title: 'Fiducial Observations', desc: 'Clicked fiducial-mark pixels per image (film scans).' },
 ]
 </script>
 

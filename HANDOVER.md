@@ -68,6 +68,141 @@ fiducials; self-calibration (A2) + fiducials (F4) are the code-side support.
 
 ## Done log (most recent first)
 
+- **2026-07-08 · F4 — Fiducial-mark interior orientation for film scans** — treats
+  scan geometry like lens distortion: removed once at ingest so the pipeline stays
+  pinhole with one shared K per sensor. New pure core `core/sfm/fiducials.js`
+  (`fitFiducialAffine` least-squares scan→mm, `canonicalFrame`, `scanToCanonical`/
+  `canonicalToScan`; `fiducials.test.js`). Data model: `kind`/`fiducials` on
+  sensors (`useSensorsStore.setFiducialMarks`), `fiducialObs` on images
+  (`setFiducialObservation`/`addFiducialObservations`), both persisted. UI: film
+  Kind + fiducial editor (marks table + certificate paste) in `SensorTable.vue`;
+  "Mark fiducial…" right-click flow + distinct overlay + live per-mark residual in
+  `ViewerImage.vue`; `<3`-marks flag in `ImagesSection`. Import: `core/io/fiducialObs.js`
+  parser routed via `importKind.js`/`useImportRouting`. Sparse: `sfm.js` ingest fits
+  per film image, builds one canonical frame per sensor (median pitch), moves the
+  worker's keypoints + GCP observations, adds `resolveK` **path 0** (`_fiducialK`),
+  records `summary.fiducialTransforms`. Dense: `workers/ops/dense.js` warps each film
+  raster+mask into the canonical frame (`warpFilmRaster`/`filmMaskLut`) from the
+  sparse run's stored transform (never re-fits). Method in METHODS.md §5.1, invariant
+  in CLAUDE.md. `npm test` (film reconstruction test in `sfm.test.js`) + typecheck +
+  build green; browser run (mark fiducials on CA…V scans, check the pitch log,
+  compare §B0 baselines) still pending — this environment can't drive it.
+
+- **2026-07-08 · Fix: project switch/close silently destroyed the left project**
+  — teardown ran *before* the project switch, so every `clear*` operated on the
+  still-current (old) project. `useImagesStore.clearAll` `sync()`'d an empty
+  image list over its `project.json`, and `useSensorsStore.clearSensors` +
+  `useMatchesStore/useGcpsStore/useFootprintsStore/usePosesStore.clear()`
+  unconditionally deleted their OPFS files — wiping images/sensors/keypoints/
+  matches/GCPs/etc. on switch or "new project" (only reconstruction survived,
+  as its `clear({ purge })` already gated OPFS deletion). Fix: all six teardowns
+  now take `{ purge = false }` and only touch OPFS when purged; only the explicit
+  `clear-all` command purges (App.vue), switch/create do not. Lives in the six
+  stores + `App.vue` dispatch.
+
+- **2026-07-08 · Console = append-only OPFS stream** — the dev console no longer
+  loses verbose SfM output to the buffer cap. `utils/opfs.js` `log.ndjson` is an
+  append-only NDJSON stream (`appendLog`/`readLog`/`truncateLog`, legacy
+  `log.json` migrated once); `useLogStore` batches every logged line onto it
+  (single-flight, `flushNow`/`readAll`/`clearConsole`) while `useLog` keeps only
+  a capped display tail (`MAX_BUFFER` 1000→5000, still shift-on-overflow but no
+  longer lossy). `DevConsole.vue` scroll-to-top progressively prepends older
+  chunks from the file (500/chunk, scroll-anchored) and Save TXT exports the
+  whole unfiltered stream. Browser-runtime (OPFS writable) — not verified here.
+
+- **2026-07-08 · P7 subset gate (two-stage exhaustive matching)** — the
+  structural fix for the no-poses/no-GPS exhaustive case (a building shot in a
+  circle: sequential misses the loop closures, exhaustive is too slow, preselect
+  has no positions to work with). New pure helper `core/features/subsetGate.js`
+  (`pickSpreadIndices` grid-buckets keypoints and keeps one per cell — spatially
+  uniform, not response-sorted top-K, so it doesn't collapse onto a façade's
+  repeated high-contrast blobs; `sliceDescriptorRows` gathers the subset into a
+  compact buffer) + `subsetGate.test.js` (6 tests). Wired into
+  `useMatchesStore.matchPair` before the full match (brute-force only, skipped
+  for LightGlue): match a ~200-kp spatially-uniform subset per image, and if
+  fewer than `subsetGateThreshold` (default 8) putatives survive, mark the pair
+  `gated` and skip the O(Na·Nb) full match. Only engages when both images have
+  >1.5× the subset size in keypoints (small images pay the full match). Keeps
+  exhaustive *coverage* (loop closures still found anywhere in the graph) at a
+  fraction of the per-pair cost. Toggle + subset-size/threshold controls in
+  `MatchFeaturesModal` (on by default for brute-force); gated count reported in
+  the run summary; per-pair gate decisions logged at debug. This is TODO's P7
+  with a spatial-spread refinement over the planned response-sorted `subarray`;
+  the scale-up beyond it (global-descriptor / vocab-tree retrieval to cut the
+  O(N²) pair count itself) stays Parked for 1000+ image sets. `npm test` +
+  typecheck clean. Owed: a real browser run on the circular building set to tune
+  `subsetGateThreshold` (watch the `Gated:`/`Gate passed:` debug lines and the
+  `N gated` summary — if genuine weak-overlap pairs get gated, lower the
+  threshold or keep a sequential band unconditionally).
+
+- **2026-07-08 · GCP UX overhaul** — reworked the GCP workflow per user
+  feedback on the F2 landing below. (1) Removed the control/check `role` split
+  entirely (every enabled GCP is now used); dropped it from `useGcpsStore`,
+  `useReconstructionStore` (qualify/report/marshalling), `sfm.js` anchoring,
+  and the UI. (2) Split the single image (marker) accuracy into per-axis
+  `accuracyImgX`/`accuracyImgY` px (2D — no Z); back-compat seeds both from the
+  old `accuracyRel`. (3) Moved marking out of the table into the **image
+  view's right-click menu** (`ViewerImage.vue` `@contextmenu`): "Add new GCP
+  here" (`addGcp` + `setObservation`, auto-selects + enables the GCP overlay)
+  or "Assign to existing ▸ <list>" (`allGcps` prop). Removed the table/sidebar
+  "Mark" buttons and the old select-then-left-click `gcpMarkMode`. (4) Added
+  the requested extras: a magnifier **loupe** (zoomed inset sampled from the
+  `<img>`, shown while the GCP overlay is on), **live reprojection** error
+  drawn next to each marker + in the sidebar observation list (refreshed after
+  every mark), a per-GCP **observation list** in the sidebar (jump-to-image +
+  per-observation remove via new `jump-to-image`/`remove-gcp-observation`
+  events), and **coverage** flags (⚠ on GCPs with <2 marks) in table + sidebar.
+  Table row-click now highlights (`selectedGcpId`) instead of a Mark button.
+  Follow-ups same day: the image-view right-click is now a **general** context
+  menu (Add GCP here… / Copy pixel / Copy color / Zoom in here / Fit to view);
+  "Add GCP here…" flips the same popup to the new-vs-existing chooser in place.
+  The sidebar lost its "+ Add GCP" and per-GCP "Remove GCP" buttons — removal is
+  now a right-click context menu on the GCP row (`useContextMenu`, matching the
+  other sidebar sections); adding is via the table or image right-click only.
+  Docs (CLAUDE.md CRS/GCP section) updated; `sfm.test.js` fixtures dropped
+  `role`. 347/347 tests, typecheck + build clean. Still owed the same manual
+  browser verification as the entry below (marking click accuracy at zoom,
+  loupe, end-to-end georeference).
+
+- **2026-07-07 · GCP-driven georeferencing + GCP-in-BA (F2, full scope)** —
+  GCPs now participate in georeferencing, not just display. Data model: GCPs
+  get a `role: 'control' | 'check'` (`useGcpsStore`) plus `setObservation`/
+  `removeObservation` mutations for interactive marking. New pure
+  `core/sfm/gcpTriangulation.js` (`triangulateGcp`/`triangulateAllGcps`)
+  2-view-DLT-triangulates a GCP's registered-image observations into the
+  current SfM frame. `useReconstructionStore`: `georeference()` now prefers a
+  GCP-based Horn fit (`method: 'gcps'`) over the pose-based one when ≥3 control
+  GCPs triangulate, and a new `gcpAccuracyReport()` surfaces per-GCP CRS
+  residual + mean reprojection px in `GcpTable`/`GcpTableModal`/`GcpsSection`
+  (role toggle + a refresh button). `ViewerImage.vue` gained click-to-mark:
+  select a GCP (table "Mark" button or sidebar), click a pixel in an open
+  image tab, it upserts that GCP's observation for the active image
+  (`gcpMarkMode`/`selectedGcpId` props, `mark-gcp` emit). `GcpTable.vue` also
+  gained a "+ Add GCP" toolbar button (`useGcpsStore.addGcp()` — a blank
+  control GCP at the origin, no import needed) and made name/X/Y/Z editable
+  inline (`setGcpName`/`setGcpPosition`), so a project with zero imported GCPs
+  can still build one entirely from clicks: add → edit position → mark
+  observations. Deepest part: GCPs
+  now also constrain bundle adjustment directly (previously TODO's explicit
+  "later") — `bundle_adjust` (`crates/reconstruction/src/bundle.rs`) takes new
+  `anchor_flat`/`anchor_weight` params, adding a `Σ w·‖pt−target‖²` residual
+  that only touches each anchored point's own 3×3 Schur block (no camera
+  Jacobian changes; empty arrays ⇒ identical to prior behavior). `sfm.js`'s
+  new `runGcpAnchoredBundleAdjust` runs after the main pipeline settles:
+  triangulate control GCPs → Horn-fit → inverse-transform each GCP's CRS
+  position into the SfM frame as the anchor target → re-run BA with the
+  GCP observations injected as extra points/residuals → repeat once more
+  (hard-coded, not a setting) as insurance against a poor seed fit; only the
+  refined camera poses + original points are kept, so the *final* georeference
+  used for products is still a fresh post-hoc fit, not the anchoring pass's
+  scratch state. wasm rebuilt (`src/wasm/reconstruction/*`, not yet
+  committed — see TODO ▸ Now ▸ W1). Tested: new Rust unit test
+  (`bundle_adjust_gcp_anchor_pulls_point`), JS unit tests
+  (`gcpTriangulation.test.js`, `reconstruction.test.js` gcpAnchors case,
+  `sfm.test.js` GCP describe block) — 347/347 passing, typecheck clean. Owed:
+  manual browser verification of the marking UI + end-to-end georeference/DEM
+  path (TODO ▸ Now ▸ W1) before this is fully done.
+
 - **2026-07-07 · Full-app audit vs COLMAP/Metashape + docs rebuild** — genuine
   state check of code vs docs. Findings: (1) tiled detection (TD) and
   native-width matching were implemented but **uncommitted and undocumented**

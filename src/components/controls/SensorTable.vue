@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import { estimatedIntrinsics } from '../../core/sfm/cameraEstimated.js'
 import { resolveK } from '../../core/sfm/reconstruction.js'
 import { DISTORTION_MODELS, coeffsForModel } from '../../core/sfm/distortion.js'
+import { parseRows, sniffDelimiter } from '../../core/io/gcp.js'
 
 // Editable table of sensors (shared intrinsics). In 'initial' mode the numeric
 // cells are editable inputs (the source of truth); in 'estimated' mode they show
@@ -13,9 +14,59 @@ const props = defineProps({
   cameras: { type: Map,    default: () => new Map() }, // uuid → { R, t, K }
 })
 
-const emit = defineEmits(['update', 'remove', 'toggle-fixed'])
+const emit = defineEmits(['update', 'remove', 'toggle-fixed', 'set-fiducial-marks'])
 
 const isFixed = (s, field) => !!s.fixed?.[field]
+
+// ── Film sensors: fiducial-mark interior orientation (F4) ─────────────────────
+// A film sensor carries a calibrated fiducial layout (mm) + focal + principal
+// point. The editor is an expandable detail row (only in Initial mode); marks are
+// edited inline or pasted as `id, xMm, yMm` CSV. Digital is the default.
+const isFilm = (s) => s.kind === 'film'
+const expanded = ref(new Set())
+function toggleExpand(id) {
+  const next = new Set(expanded.value)
+  next.has(id) ? next.delete(id) : next.add(id)
+  expanded.value = next
+}
+const fidMarks = (s) => s.fiducials?.marks ?? []
+const fidCount = (s) => fidMarks(s).length
+
+// Emit the full updated marks array (marks are few; simplest source of truth).
+function editMark(s, idx, field, value) {
+  const marks = fidMarks(s).map((m) => ({ ...m }))
+  if (!marks[idx]) return
+  if (field === 'id') marks[idx].id = String(value).trim() || marks[idx].id
+  else marks[idx][field] = value === '' ? NaN : Number(value)
+  emit('set-fiducial-marks', { id: s.id, marks })
+}
+function addMark(s) {
+  const marks = fidMarks(s).map((m) => ({ ...m }))
+  marks.push({ id: `F${marks.length + 1}`, xMm: 0, yMm: 0 })
+  emit('set-fiducial-marks', { id: s.id, marks })
+}
+function removeMark(s, idx) {
+  const marks = fidMarks(s).map((m) => ({ ...m }))
+  marks.splice(idx, 1)
+  emit('set-fiducial-marks', { id: s.id, marks })
+}
+// Parse a pasted certificate block (`id, xMm, yMm` per line) into marks.
+const pasteText = ref({})
+function applyPaste(s) {
+  const text = pasteText.value[s.id] || ''
+  if (!text.trim()) return
+  const rows = parseRows(text, sniffDelimiter(text))
+  const marks = []
+  for (const cells of rows) {
+    if (cells.length < 3) continue
+    // Tolerate a header row: skip when the numeric columns aren't numbers.
+    const xMm = Number(cells[1]), yMm = Number(cells[2])
+    if (!Number.isFinite(xMm) || !Number.isFinite(yMm)) continue
+    marks.push({ id: cells[0] || `F${marks.length + 1}`, xMm, yMm })
+  }
+  if (marks.length) emit('set-fiducial-marks', { id: s.id, marks })
+  pasteText.value = { ...pasteText.value, [s.id]: '' }
+}
 
 const mode = ref('initial') // 'initial' | 'estimated' | 'diff'
 
@@ -127,6 +178,10 @@ const modelLabel = (s) =>
 function onEdit(id, field, e) {
   emit('update', { id, field, value: e.target.value })
 }
+
+// Total column count (Label, Source, Distortion, Kind, NUM_COLS, Images, ×) —
+// the colspan for the full-width fiducial detail row.
+const totalCols = computed(() => 4 + NUM_COLS.length + 2)
 </script>
 
 <template>
@@ -159,13 +214,15 @@ function onEdit(id, field, e) {
           <th>Label</th>
           <th>Source</th>
           <th>Distortion</th>
+          <th>Kind</th>
           <th v-for="c in NUM_COLS" :key="c.key">{{ c.label }}</th>
           <th>Images</th>
           <th></th>
         </tr>
       </thead>
       <tbody>
-        <tr v-for="s in sensors" :key="s.id">
+        <template v-for="s in sensors" :key="s.id">
+        <tr>
           <td class="label-cell">
             <span class="label-wrap">
               <span
@@ -199,26 +256,64 @@ function onEdit(id, field, e) {
             <span v-else class="dim">{{ modelLabel(s) }}</span>
           </td>
 
+          <!-- Kind: digital (default) vs scanned film (fiducial interior orientation). -->
+          <td>
+            <span v-if="mode === 'initial'" class="kind-cell">
+              <select
+                class="unit-select"
+                :value="s.kind || 'digital'"
+                title="Camera kind — Film enables fiducial-mark interior orientation for scanned frames"
+                @change="onEdit(s.id, 'kind', $event)"
+              >
+                <option value="digital">Digital</option>
+                <option value="film">Film</option>
+              </select>
+              <button
+                v-if="isFilm(s)"
+                class="expand-btn"
+                :class="{ open: expanded.has(s.id) }"
+                :title="expanded.has(s.id) ? 'Hide fiducials' : `Edit fiducials (${fidCount(s)} mark${fidCount(s) === 1 ? '' : 's'})`"
+                @click="toggleExpand(s.id)"
+              >⛶ {{ fidCount(s) }}</button>
+            </span>
+            <span v-else class="dim">{{ isFilm(s) ? 'Film' : 'Digital' }}</span>
+          </td>
+
           <template v-if="mode === 'initial'">
             <td v-for="c in NUM_COLS" :key="c.key">
-              <!-- Focal: numeric input + px/mm unit toggle. -->
+              <!-- Focal: numeric input + px/mm unit toggle. For a film sensor the
+                   focal lives in the fiducial editor (mm, authoritative for the
+                   interior orientation) — show it read-only here to avoid two
+                   editable focal fields that could drift. -->
               <span v-if="c.key === 'focal'" class="focal-cell">
-                <input
-                  class="cell-input focal-input"
-                  type="number"
-                  step="any"
-                  :value="s.focal ?? ''"
-                  @change="onEdit(s.id, 'focal', $event)"
-                />
-                <select
-                  class="unit-select"
-                  :value="s.focalUnit === 'px' ? 'px' : 'mm'"
-                  title="Focal length unit"
-                  @change="onEdit(s.id, 'focalUnit', $event)"
-                >
-                  <option value="mm">mm</option>
-                  <option value="px">px</option>
-                </select>
+                <template v-if="isFilm(s)">
+                  <input
+                    class="cell-input focal-input"
+                    type="number"
+                    disabled
+                    title="Set in the fiducial editor (⛶) — Focal (mm)"
+                    :value="s.fiducials?.focalMm ?? ''"
+                  />
+                  <span class="unit-static" title="Focal is in mm for a film sensor">mm</span>
+                </template>
+                <template v-else>
+                  <input
+                    class="cell-input focal-input"
+                    type="number"
+                    step="any"
+                    :value="s.focal ?? ''"
+                    @change="onEdit(s.id, 'focal', $event)"
+                  />
+                  <select
+                    class="unit-select"
+                    :value="s.focalUnit === 'px' ? 'px' : 'mm'"
+                    title="Focal length unit"
+                    @change="onEdit(s.id, 'focalUnit', $event)"
+                  >
+                    <option value="mm">mm</option>
+                    <option value="px">px</option>
+                  </select>
+                </template>
               </span>
               <!-- Pixel size / format only apply to an mm focal. -->
               <input
@@ -281,6 +376,55 @@ function onEdit(id, field, e) {
           <td class="count">{{ imageCount(s.id) }}</td>
           <td><button class="remove" title="Remove sensor" @click="emit('remove', s.id)">×</button></td>
         </tr>
+
+        <!-- Fiducial editor: expandable detail row for a film sensor (Initial mode). -->
+        <tr v-if="mode === 'initial' && isFilm(s) && expanded.has(s.id)" class="fid-row">
+          <td :colspan="totalCols">
+            <div class="fid-editor">
+              <div class="fid-io">
+                <label>Focal (mm)
+                  <input class="cell-input" type="number" step="any" :value="s.fiducials?.focalMm ?? ''"
+                    @change="onEdit(s.id, 'focalMm', $event)" /></label>
+                <label>Principal x (mm)
+                  <input class="cell-input" type="number" step="any" :value="s.fiducials?.ppxMm ?? ''"
+                    @change="onEdit(s.id, 'ppxMm', $event)" /></label>
+                <label>Principal y (mm)
+                  <input class="cell-input" type="number" step="any" :value="s.fiducials?.ppyMm ?? ''"
+                    @change="onEdit(s.id, 'ppyMm', $event)" /></label>
+                <span class="fid-note" :class="{ warn: fidCount(s) < 3 }">
+                  {{ fidCount(s) < 3 ? `≥3 marks needed (have ${fidCount(s)})` : `${fidCount(s)} marks` }}
+                </span>
+              </div>
+
+              <table class="fid-marks">
+                <thead><tr><th>ID</th><th>x (mm)</th><th>y (mm)</th><th></th></tr></thead>
+                <tbody>
+                  <tr v-for="(m, i) in fidMarks(s)" :key="i">
+                    <td><input class="cell-input mark-id" :value="m.id"
+                      @change="editMark(s, i, 'id', $event.target.value)" /></td>
+                    <td><input class="cell-input" type="number" step="any" :value="Number.isFinite(m.xMm) ? m.xMm : ''"
+                      @change="editMark(s, i, 'xMm', $event.target.value)" /></td>
+                    <td><input class="cell-input" type="number" step="any" :value="Number.isFinite(m.yMm) ? m.yMm : ''"
+                      @change="editMark(s, i, 'yMm', $event.target.value)" /></td>
+                    <td><button class="remove" title="Remove mark" @click="removeMark(s, i)">×</button></td>
+                  </tr>
+                </tbody>
+              </table>
+              <button class="add-mark" @click="addMark(s)">+ Add mark</button>
+
+              <div class="fid-paste">
+                <textarea
+                  class="paste-area"
+                  placeholder="Paste calibration: one line per mark — id, xMm, yMm"
+                  :value="pasteText[s.id] || ''"
+                  @input="pasteText = { ...pasteText, [s.id]: $event.target.value }"
+                ></textarea>
+                <button class="add-mark" @click="applyPaste(s)">Import pasted marks</button>
+              </div>
+            </div>
+          </td>
+        </tr>
+        </template>
       </tbody>
     </table>
 
@@ -341,6 +485,7 @@ tbody td.dim { color: var(--text-dim); }
   color: var(--text); font: inherit; font-size: 11px; padding: 3px 2px; outline: none; cursor: pointer;
 }
 .unit-select:focus { border-color: var(--accent); }
+.unit-static { font-size: 11px; color: var(--text-dim); }
 .model-select { max-width: 180px; }
 
 /* Numeric input without the up/down spinners — stepping makes no sense for
@@ -360,4 +505,38 @@ tbody td.dim { color: var(--text-dim); }
 .remove:hover { color: #e55; background: rgba(220, 80, 80, 0.12); }
 
 .empty { padding: 40px; text-align: center; color: var(--text-dim); }
+
+/* Film sensor: Kind cell + expandable fiducial editor (F4). */
+.kind-cell { display: inline-flex; gap: 6px; align-items: center; }
+.expand-btn {
+  background: var(--bg); border: 1px solid var(--panel-border); border-radius: 4px;
+  color: var(--text-dim); font: inherit; font-size: 11px; padding: 2px 6px; cursor: pointer;
+}
+.expand-btn.open, .expand-btn:hover { border-color: var(--accent); color: var(--text); }
+
+.fid-row td { background: var(--panel); }
+.fid-editor { display: flex; flex-direction: column; gap: 10px; padding: 10px 4px; max-width: 640px; }
+.fid-io { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
+.fid-io label { display: inline-flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--text-dim); }
+.fid-note { font-size: 11px; color: var(--text-dim); align-self: center; }
+.fid-note.warn { color: #e0a020; }
+
+.fid-marks { width: auto; border-collapse: collapse; }
+.fid-marks th { position: static; background: transparent; padding: 2px 8px 4px; font-size: 11px; }
+.fid-marks td { padding: 2px 8px; border-bottom: none; }
+.mark-id { width: 48px; }
+
+.add-mark {
+  align-self: flex-start;
+  background: var(--bg); border: 1px solid var(--panel-border); border-radius: 4px;
+  color: var(--text); font: inherit; font-size: 11px; padding: 4px 10px; cursor: pointer;
+}
+.add-mark:hover { border-color: var(--accent); }
+.fid-paste { display: flex; flex-direction: column; gap: 6px; }
+.paste-area {
+  width: 100%; min-height: 60px; resize: vertical;
+  background: var(--bg); border: 1px solid var(--panel-border); border-radius: 4px;
+  color: var(--text); font: inherit; font-size: 11px; padding: 6px; outline: none;
+}
+.paste-area:focus { border-color: var(--accent); }
 </style>

@@ -20,7 +20,7 @@ export function useTabs(imageById, showMap) {
 
   // Sticky overlay toggles: remember the last state so a freshly opened image tab
   // inherits it instead of resetting. Keypoints still gate on detection status.
-  const overlayPrefs = ref({ showKeypoints: true, showMask: false, showDepth: false, showGcps: false })
+  const overlayPrefs = ref({ showKeypoints: true, showMask: false, showDepth: false, showGcps: false, showFiducials: true })
 
   function rememberOverlayPrefs(tab) {
     if (tab?.type !== 'image') return
@@ -29,6 +29,7 @@ export function useTabs(imageById, showMap) {
       showMask:      tab.showMask,
       showDepth:     tab.showDepth,
       showGcps:      tab.showGcps,
+      showFiducials: tab.showFiducials,
     }
   }
 
@@ -64,6 +65,7 @@ export function useTabs(imageById, showMap) {
         showMask: overlayPrefs.value.showMask,
         showDepth: overlayPrefs.value.showDepth,
         showGcps: overlayPrefs.value.showGcps,
+        showFiducials: overlayPrefs.value.showFiducials,
         maskMode: 'none',
         brushRadius: 20,
       })

@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed } from 'vue'
+import { DETECT_SIFT_DEFAULTS, DETECT_SUPERPOINT_DEFAULTS } from '../../core/defaults.user.js'
 
 const props = defineProps({
   // Current image list — used to warn when Append mode would leave a mix of
@@ -33,25 +34,10 @@ const isChromium = /Chrome\//.test(globalThis.navigator?.userAgent || '')
 // per overlapping tile at native-ish resolution then merges — more, better-
 // localised keypoints, and it sidesteps the SuperPoint WebGPU OOM. `tileSize` 0
 // means auto-derive; `overlap` dedups seam duplicates.
-const siftSettings = ref({
-  maxDim: 1200,
-  contrastThreshold: 0.01,
-  maxKeypoints: 5000,
-  tiling: 'off',
-  tileSize: 1024,
-  overlap: 64,
-})
-
-// SuperPoint has no contrast knob (learned detection threshold is baked into the
-// model); keep the cap modest — LightGlue's attention cost grows with keypoint
-// count, so 2048 is the usual sweet spot.
-const superpointSettings = ref({
-  maxDim: 1200,
-  maxKeypoints: 2048,
-  tiling: 'off',
-  tileSize: 1024,
-  overlap: 64,
-})
+// Prefill from the single source of truth (see core/defaults.user.js). Cloned so
+// edits don't mutate the shared constants.
+const siftSettings = ref({ ...DETECT_SIFT_DEFAULTS })
+const superpointSettings = ref({ ...DETECT_SUPERPOINT_DEFAULTS })
 
 const detectors = [
   { id: 'sift',       label: 'SIFT' },

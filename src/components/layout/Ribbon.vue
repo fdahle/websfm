@@ -10,6 +10,7 @@ const props = defineProps({
   kpImageCount: { type: Number, default: 0 },
   gcpCount: { type: Number, default: 0 },
   poseCount: { type: Number, default: 0 },
+  footprintCount: { type: Number, default: 0 },
   sensorCount: { type: Number, default: 0 },
   sparseReady: { type: Boolean, default: false },
   depthMapCount: { type: Number, default: 0 },
@@ -26,6 +27,7 @@ const props = defineProps({
   sceneType: { type: String, default: null },
   showCameras: { type: Boolean, default: true },
   showGraticule: { type: Boolean, default: true },
+  showFootprints: { type: Boolean, default: true },
 })
 
 const emit = defineEmits(['command'])
@@ -41,7 +43,7 @@ const tabs = [
           { id: 'open-image-table',  label: 'Images',  icon: 'table',   needsImages: true },
           { id: 'open-mask-manager', label: 'Masks',   icon: 'mask',    needsImages: true },
           { id: 'open-sensor-table', label: 'Sensors', icon: 'camera',  needsSensors: true },
-          { id: 'open-gcp-table',    label: 'GCPs',    icon: 'map-pin', needsGcps: true, aerialOnly: true },
+          { id: 'open-gcp-table',    label: 'GCPs',    icon: 'map-pin', aerialOnly: true, needsImages: true },
           { id: 'open-match-list',   label: 'Matches', icon: 'list',    needsMatches: true },
         ],
       },
@@ -69,7 +71,7 @@ const tabs = [
       {
         label: 'Ground Control',
         commands: [
-          { id: 'import-gcps', label: 'GCP\nFile', icon: 'map-pin', aerialOnly: true },
+          { id: 'import-gcps', label: 'GCP\nFile', icon: 'map-pin', aerialOnly: true, needsImages: true },
         ],
       },
     ],
@@ -224,7 +226,7 @@ const mapGroup = {
   commands: [
     { id: 'map-fit-view',          label: 'Fit\nView',   icon: 'fit-view' },
     { id: 'map-toggle-graticule',  label: 'Graticule',   icon: 'grid',      disabled: true },
-    { id: 'map-toggle-footprints', label: 'Footprints',  icon: 'footprint', disabled: true },
+    { id: 'map-toggle-footprints', label: 'Footprints',  icon: 'footprint', activeKey: 'showFootprints', needsFootprints: true },
     { id: 'map-toggle-poses',      label: 'Poses',       icon: 'camera',    disabled: true },
   ],
 }
@@ -271,6 +273,13 @@ const pictureTab = {
           icon: 'map-pin',
           activeKey: 'showGcps',
           disableKey: 'noGcps',
+        },
+        {
+          id: 'img-toggle-fiducials',
+          label: 'Fiducials',
+          icon: 'target',
+          activeKey: 'showFiducials',
+          filmOnly: true,
         },
       ],
     },
@@ -320,7 +329,10 @@ const currentTab = computed(() => {
 })
 
 function isHidden(cmd) {
-  return cmd.aerialOnly && props.sceneType === 'object'
+  if (cmd.aerialOnly && props.sceneType === 'object') return true
+  // Film-only overlays (fiducial marks) show only for a scanned-film image tab.
+  if (cmd.filmOnly && !props.imageViewState?.isFilm) return true
+  return false
 }
 
 function isActive(cmd) {
@@ -328,6 +340,7 @@ function isActive(cmd) {
   if (cmd.activeKey === 'consoleOpen')   return props.consoleOpen
   if (cmd.activeKey === 'showCameras')   return props.showCameras
   if (cmd.activeKey === 'showGraticule') return props.showGraticule
+  if (cmd.activeKey === 'showFootprints') return props.showFootprints
   const s = props.imageViewState
   if (!s || !cmd.activeKey) return false
   switch (cmd.activeKey) {
@@ -335,6 +348,7 @@ function isActive(cmd) {
     case 'showMask':      return s.showMask
     case 'showDepth':     return s.showDepth
     case 'showGcps':      return s.showGcps
+    case 'showFiducials': return s.showFiducials
     case 'maskDraw':      return s.maskMode === 'draw'
     case 'maskErase':     return s.maskMode === 'erase'
     case 'brushS':        return s.brushRadius === 10
@@ -358,6 +372,7 @@ function isDisabled(cmd) {
   if (cmd.needsKeypoints && props.kpImageCount === 0) return true
   if (cmd.needsGcps     && props.gcpCount === 0)   return true
   if (cmd.needsPoses    && props.poseCount === 0)  return true
+  if (cmd.needsFootprints && props.footprintCount === 0) return true
   if (cmd.needsSensors  && props.sensorCount === 0) return true
   const s = props.imageViewState
   if (cmd.disableKey === 'kpNotDone' && s?.kpStatus !== 'done') return true

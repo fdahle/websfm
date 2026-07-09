@@ -1,11 +1,16 @@
 <script setup>
 import { ref } from 'vue'
+import { useContextMenu } from '../../../composables/useContextMenu.js'
 
-defineProps({
-  open: { type: Boolean, default: true },
-  gcps: { type: Array, default: () => [] },
+const props = defineProps({
+  open:          { type: Boolean, default: true },
+  gcps:          { type: Array,   default: () => [] },
+  // Per-GCP accuracy report (useReconstructionStore.gcpAccuracyReport()):
+  // [{ gcpId, dTotal, observations: [{ imageId, reprojPx }] }] — empty until refreshed.
+  report:        { type: Array,   default: () => [] },
+  selectedGcpId: { type: String,  default: null },
 })
-const emit = defineEmits(['toggle', 'remove-gcp'])
+const emit = defineEmits(['toggle', 'remove-gcp', 'select', 'jump-to-image', 'remove-observation'])
 
 const gcpExpanded = ref({})
 function toggleGcpExpand(id) {
@@ -13,10 +18,25 @@ function toggleGcpExpand(id) {
   else gcpExpanded.value[id] = true
 }
 
+// Right-click a GCP row → context menu (Remove).
+const { menu: gcpCtx, open: openGcpCtx, close: closeMenu } = useContextMenu()
+function onGcpRightClick(e, gcp) {
+  emit('select', gcp.id)
+  openGcpCtx(e, { gcp }, { w: 160, h: 44 })
+}
+function ctxRemoveGcp() { emit('remove-gcp', gcpCtx.value.gcp.id); closeMenu() }
+
 // Compact coordinate formatting (projected metres vs. lat/lon degrees).
 function fmtCoord(v) {
   if (v == null || Number.isNaN(v)) return '—'
   return Math.abs(v) >= 1000 ? v.toFixed(2) : v.toFixed(6)
+}
+
+// Live reprojection error (px) for one observation, from the accuracy report.
+function reprojFor(gcpId, imageId) {
+  const entry = props.report.find((r) => r.gcpId === gcpId)
+  const obs = entry?.observations?.find((o) => o.imageId === imageId)
+  return obs?.reprojPx ?? null
 }
 </script>
 
@@ -31,8 +51,10 @@ function fmtCoord(v) {
       <template v-for="gcp in gcps" :key="gcp.id">
         <li
           class="list-item"
+          :class="{ selected: gcp.id === selectedGcpId }"
           :title="gcp.name"
-          @click="toggleGcpExpand(gcp.id)"
+          @click="emit('select', gcp.id); toggleGcpExpand(gcp.id)"
+          @contextmenu="onGcpRightClick($event, gcp)"
         >
           <button
             class="expand-btn"
@@ -41,8 +63,12 @@ function fmtCoord(v) {
             :title="gcpExpanded[gcp.id] ? 'Collapse' : 'Expand'"
           ></button>
           <span class="item-name">{{ gcp.name }}</span>
-          <span v-if="gcp.observations?.length" class="obs-badge" :title="`${gcp.observations.length} observation(s)`">
-            {{ gcp.observations.length }}
+          <span
+            class="obs-badge"
+            :class="{ low: (gcp.observations?.length || 0) < 2 }"
+            :title="(gcp.observations?.length || 0) < 2 ? 'Needs ≥2 marked images to be usable' : `${gcp.observations.length} observation(s)`"
+          >
+            {{ gcp.observations?.length || 0 }}<template v-if="(gcp.observations?.length || 0) < 2"> ⚠</template>
           </span>
         </li>
         <li v-if="gcpExpanded[gcp.id]" class="img-details">
@@ -61,16 +87,86 @@ function fmtCoord(v) {
               <span v-else class="detail-dim">—</span>
             </span>
           </div>
-          <div class="detail-row">
-            <span class="detail-label">Observations</span>
-            <span class="detail-value">{{ gcp.observations?.length || 0 }}</span>
-          </div>
-          <button class="gcp-remove" @click.stop="emit('remove-gcp', gcp.id)">Remove</button>
+
+          <div class="obs-header">Marked images ({{ gcp.observations?.length || 0 }})</div>
+          <ul v-if="gcp.observations?.length" class="obs-list">
+            <li v-for="obs in gcp.observations" :key="obs.imageId ?? obs.imageName" class="obs-item">
+              <button
+                class="obs-jump"
+                :title="`Open ${obs.imageName}`"
+                @click.stop="emit('jump-to-image', { imageId: obs.imageId })"
+              >{{ obs.imageName }}</button>
+              <span v-if="reprojFor(gcp.id, obs.imageId) != null" class="obs-reproj" title="Reprojection error (px)">
+                {{ reprojFor(gcp.id, obs.imageId).toFixed(1) }}px
+              </span>
+              <button class="obs-remove" title="Remove this observation" @click.stop="emit('remove-observation', { gcpId: gcp.id, imageId: obs.imageId })">×</button>
+            </li>
+          </ul>
+          <div v-else class="obs-empty">Right-click a position in an image tab to mark this GCP.</div>
         </li>
       </template>
-      <li v-if="!gcps.length" class="empty">No GCPs — import a control-point file</li>
+      <li v-if="!gcps.length" class="empty">No GCPs — right-click in an image tab to add one, or import a control-point file</li>
     </ul>
+
+    <!-- GCP context menu -->
+    <Teleport to="body">
+      <div
+        v-if="gcpCtx"
+        class="ctx-menu"
+        :style="{ left: gcpCtx.x + 'px', top: gcpCtx.y + 'px' }"
+        @click.stop
+      >
+        <button class="ctx-item danger" @click="ctxRemoveGcp">Remove GCP</button>
+      </div>
+    </Teleport>
   </div>
 </template>
 
 <style scoped src="./sidebar-sections.css"></style>
+<style scoped>
+.list-item.selected { background: rgba(80, 200, 255, 0.1); }
+
+.obs-badge.low { color: #e0a030; }
+
+.obs-header {
+  margin: 6px 0 2px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+.obs-list { list-style: none; margin: 0; padding: 0; }
+.obs-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 0;
+}
+.obs-jump {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+  background: none;
+  border: none;
+  color: var(--accent, #5cf);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  padding: 0;
+}
+.obs-jump:hover { text-decoration: underline; }
+.obs-reproj { font-size: 10px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.obs-remove {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 3px;
+}
+.obs-remove:hover { color: #e55; }
+.obs-empty { font-size: 11px; color: var(--text-dim); font-style: italic; margin: 2px 0; }
+</style>

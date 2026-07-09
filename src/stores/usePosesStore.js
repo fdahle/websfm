@@ -110,9 +110,11 @@ export const usePosesStore = registerProjectStore(defineStore('poses', () => {
     save()
   }
 
-  function clear() {
+  // Only { purge: true } deletes persisted data; a plain clear (project
+  // switch/close) leaves OPFS intact so restore can read it back.
+  function clear({ purge = false } = {}) {
     poses.value = []
-    if (isPersisting()) opfs.deletePoses(projects.currentProjectId).catch(() => {})
+    if (purge && isPersisting()) opfs.deletePoses(projects.currentProjectId).catch(() => {})
   }
 
   async function restore({ projectId, projectData }) {

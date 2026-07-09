@@ -251,6 +251,25 @@
   border-color: #c33;
 }
 
+.role-toggle {
+  padding: 2px 6px;
+  background: none;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.role-toggle:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.role-toggle.marking {
+  border-color: rgb(80, 200, 255);
+  color: rgb(80, 200, 255);
+}
+
 /* Context menu */
 .ctx-menu {
   position: fixed;

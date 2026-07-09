@@ -2,11 +2,16 @@
 import GcpTable from '../controls/GcpTable.vue'
 
 defineProps({
-  gcps: { type: Array,  required: true },
-  crs:  { type: String, default: null },
+  gcps:          { type: Array,  required: true },
+  crs:           { type: String, default: null },
+  report:        { type: Array,  default: () => [] },
+  selectedGcpId: { type: String, default: null },
 })
 
-const emit = defineEmits(['close', 'remove', 'update-accuracy'])
+const emit = defineEmits([
+  'close', 'remove', 'update-accuracy', 'update-name', 'update-position',
+  'refresh-report', 'select', 'add',
+])
 </script>
 
 <template>
@@ -14,14 +19,23 @@ const emit = defineEmits(['close', 'remove', 'update-accuracy'])
     <div class="modal" role="dialog" aria-modal="true" aria-label="Ground Control Points Table">
       <div class="modal-header">
         <span class="modal-title">Ground Control Points</span>
-        <button class="modal-close" title="Close" @click="emit('close')">×</button>
+        <div class="modal-actions">
+          <button class="modal-refresh" title="Refresh accuracy report" @click="emit('refresh-report')">⟳</button>
+          <button class="modal-close" title="Close" @click="emit('close')">×</button>
+        </div>
       </div>
       <div class="modal-body">
         <GcpTable
           :gcps="gcps"
           :crs="crs"
+          :report="report"
+          :selected-gcp-id="selectedGcpId"
           @remove="emit('remove', $event)"
           @update-accuracy="emit('update-accuracy', $event)"
+          @update-name="emit('update-name', $event)"
+          @update-position="emit('update-position', $event)"
+          @select="emit('select', $event)"
+          @add="emit('add')"
         />
       </div>
     </div>
@@ -66,7 +80,14 @@ const emit = defineEmits(['close', 'remove', 'update-accuracy'])
   color: var(--text);
 }
 
-.modal-close {
+.modal-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.modal-close,
+.modal-refresh {
   background: none;
   border: none;
   color: var(--text-dim);
@@ -77,7 +98,12 @@ const emit = defineEmits(['close', 'remove', 'update-accuracy'])
   border-radius: 4px;
 }
 
-.modal-close:hover {
+.modal-refresh {
+  font-size: 16px;
+}
+
+.modal-close:hover,
+.modal-refresh:hover {
   background: var(--hover-bg);
   color: var(--text);
 }

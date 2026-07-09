@@ -1,11 +1,13 @@
 <script setup>
 import { ref } from 'vue'
+import { DEM_DEFAULTS } from '../../core/defaults.user.js'
 
 // Build DEM (Digital Surface Model). Rasterises the point cloud into a height
-// grid in the chosen frame. Defaults mirror the worker's rasterizeDem fallbacks
-// (core/products/dem.js). `canGeoreference` / `projectCrs` come from the reconstruction
-// store: the CRS selector offers the local frame always, and the project CRS
-// only when a georeference can be fit from camera poses.
+// grid in the chosen frame. Defaults are the single source of truth in
+// core/defaults.user.js (core/products/dem.js keeps matching defensive fallbacks).
+// `canGeoreference` / `projectCrs` come from the reconstruction store: the CRS
+// selector offers the local frame always, and the project CRS only when a
+// georeference can be fit from camera poses.
 defineProps({
   canGeoreference: { type: Boolean, default: false },
   projectCrs: { type: String, default: null },
@@ -13,12 +15,7 @@ defineProps({
 
 const emit = defineEmits(['close', 'run'])
 
-const settings = ref({
-  crs: 'local',        // 'local' | 'project'
-  gsd: 0,              // 0 = auto (√(area/n))
-  aggregate: 'max',    // DSM top surface
-  fillRadius: 2,       // IDW hole-fill radius (cells); 0 = none
-})
+const settings = ref({ ...DEM_DEFAULTS })
 
 function run() {
   // Pass gsd only when set (0 ⇒ let the worker auto-suggest).

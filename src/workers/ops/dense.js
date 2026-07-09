@@ -3,6 +3,7 @@ import {
 } from '../../core/dense/mvs.js'
 import { buildMaskLookup } from '../../core/mask.js'
 import { distortPixel, hasDistortion } from '../../core/sfm/distortion.js'
+import { canonicalToScan } from '../../core/sfm/fiducials.js'
 import { depthColor } from '../../core/products/colormap.js'
 import { isGpuAvailable, ensureDevice } from '../gpu/device.js'
 import { computeDepthMapGPU } from '../gpu/depthMapGpu.js'
@@ -62,6 +63,59 @@ export function makeDenseOps({ rasterize }) {
         const su = Math.max(0, Math.min(w - 1, Math.round(ud)))
         const sv = Math.max(0, Math.min(h - 1, Math.round(vd)))
         out[v * w + u] = lut[sv * w + su]
+      }
+    }
+    return out
+  }
+
+  // ── Film scan → canonical warp (F4) ─────────────────────────────────────────
+  // A film image's sparse cameras use the canonical K, so its dense reference
+  // raster must live in the canonical pixel frame too. We warp the scan raster
+  // into that frame with the SAME transform chain the sparse ingest applied, only
+  // inverted (output canonical px → sample the scan): canonical px →(distort, in
+  // canonical, which equals distort in mm)→ distorted canonical →(canonicalToScan)
+  // → scan full-res → ×scanScale → scan working px. The canonical working grid is
+  // sized so its long side ≈ maxDim (matching non-film rasters). Returns a raster
+  // carrying the info the mask warp needs (scanDims, fid, canonK, dist).
+  function canonWorkingToScan(u, v, cScale, canonK, dist, fid, scanScale) {
+    const cx = u / cScale, cy = v / cScale                       // full-res canonical px
+    const d = dist ? distortPixel(cx, cy, canonK, dist) : { x: cx, y: cy }
+    const s = canonicalToScan(d.x, d.y, fid.A, fid.frame)        // scan full-res px
+    return { x: s.x * scanScale, y: s.y * scanScale }            // scan working px
+  }
+
+  function warpFilmRaster(r, canonK, dist, fid, maxDim) {
+    const { data, width: sw, height: sh, scale: scanScale } = r
+    const { frame } = fid
+    const cScale = maxDim / Math.max(frame.width, frame.height)
+    const ow = Math.max(1, Math.round(frame.width * cScale))
+    const oh = Math.max(1, Math.round(frame.height * cScale))
+    const out = new Uint8ClampedArray(ow * oh * 4)
+    const useDist = hasDistortion(dist) ? dist : null
+    for (let v = 0; v < oh; v++) {
+      for (let u = 0; u < ow; u++) {
+        const s = canonWorkingToScan(u, v, cScale, canonK, useDist, fid, scanScale)
+        sampleRgbaBilinear(data, sw, sh, s.x, s.y, out, (v * ow + u) * 4)
+      }
+    }
+    return {
+      data: out, width: ow, height: oh, scale: cScale,
+      fid, canonK, dist: useDist, scanDims: { w: sw, h: sh, scale: scanScale },
+    }
+  }
+
+  // Warp a scan-space mask LUT (built at scan working size) into the canonical
+  // working grid of raster `r` (a warpFilmRaster output). Nearest sample.
+  async function filmMaskLut(maskDataUrl, r) {
+    const sd = r.scanDims
+    const scanLut = await buildMaskLookup(maskDataUrl, sd.w, sd.h)
+    const out = new Uint8Array(r.width * r.height)
+    for (let v = 0; v < r.height; v++) {
+      for (let u = 0; u < r.width; u++) {
+        const s = canonWorkingToScan(u, v, r.scale, r.canonK, r.dist, r.fid, sd.scale)
+        const su = Math.max(0, Math.min(sd.w - 1, Math.round(s.x)))
+        const sv = Math.max(0, Math.min(sd.h - 1, Math.round(s.y)))
+        out[v * r.width + u] = scanLut[sv * sd.w + su]
       }
     }
     return out
@@ -183,7 +237,7 @@ export function makeDenseOps({ rasterize }) {
     const urlByUuid = new Map(images.map((im) => [im.uuid, im.url]))
     // Per-url intrinsics + distortion, so getRaster can undistort each source once
     // (url↔image is 1:1, and undistortion is independent of ref/source role).
-    const metaByUrl = new Map(images.map((im) => [im.url, { K: im.K, dist: im.dist || null }]))
+    const metaByUrl = new Map(images.map((im) => [im.url, { K: im.K, dist: im.dist || null, fid: im.fid || null }]))
     const usedSets = srcUuidsByImg.map((srcUuids, i) => {
       const set = new Set([images[i].url])
       for (const u of srcUuids) { const url = urlByUuid.get(u); if (url) set.add(url) }
@@ -199,7 +253,12 @@ export function makeDenseOps({ rasterize }) {
         let r = await rasterize(url, maxDim)
         // Undistort at ingest so every dense consumer stays pinhole (mirrors sparse).
         const meta = metaByUrl.get(url)
-        if (meta?.dist) r = undistortRaster(r, meta.K, meta.dist)
+        if (meta?.fid) {
+          // Film scan: warp into the canonical frame (composes any distortion).
+          r = warpFilmRaster(r, meta.K, meta.dist, meta.fid, maxDim)
+        } else if (meta?.dist) {
+          r = undistortRaster(r, meta.K, meta.dist)
+        }
         rasterCache.set(url, r)
         ledger.track(`raster:${url}`, r.width * r.height * 4)
       }
@@ -244,9 +303,16 @@ export function makeDenseOps({ rasterize }) {
         // not just from the reference's own depth: otherwise a reference pixel finds a
         // spurious low-cost match against a neighbour's high-contrast border, leaking
         // those edges into the depth map. Build the LUT at the source's working size.
-        let srcMask = s.mask ? await buildMaskLookup(s.mask, rs.width, rs.height) : null
-        // The raster was undistorted; move the (distorted-space) mask the same way.
-        if (srcMask && s.dist) srcMask = undistortMaskLut(srcMask, rs.width, rs.height, s.K, s.dist, rs.scale)
+        // The mask is drawn in scan space; move it the same way the raster moved —
+        // the film scan→canonical warp, or the plain distortion map.
+        let srcMask = null
+        if (s.mask) {
+          if (rs.fid) srcMask = await filmMaskLut(s.mask, rs)
+          else {
+            srcMask = await buildMaskLookup(s.mask, rs.width, rs.height)
+            if (s.dist) srcMask = undistortMaskLut(srcMask, rs.width, rs.height, s.K, s.dist, rs.scale)
+          }
+        }
         sources.push({
           gray: rgbaToGray(rs.data, rs.width, rs.height),
           w: rs.width, h: rs.height,
@@ -296,11 +362,19 @@ export function makeDenseOps({ rasterize }) {
       // Drop masked regions from the dense cloud: zero the depth there so fusion
       // (which treats depth <= 0 as "no data") skips those pixels.
       if (img.mask) {
-        const maskLut = await buildMaskLookup(img.mask, dm.width, dm.height)
+        const maskLut = rRef.fid
+          ? await filmMaskLut(img.mask, rRef)
+          : await buildMaskLookup(img.mask, dm.width, dm.height)
         for (let k = 0; k < dm.depth.length; k++) if (maskLut[k]) dm.depth[k] = 0
       }
       const rgb = rgbFromRgba(rRef.data, rRef.width, rRef.height)
       const displayDataUrl = await depthToDataUrl(dm.depth, dm.width, dm.height)
+      // F4: for film images the depth preview is in the canonical frame, not scan
+      // space, so it won't line up with the scan in the viewer (v1 limitation).
+      if (rRef.fid) {
+        emit('log', [`Depth maps: ${img.name} — preview is in the canonical fiducial frame `
+          + `(${dm.width}×${dm.height}), not scan space`, 'debug', 'Dense'])
+      }
       // Per-pixel diagnostics: how many pixels got a depth, and the matching-cost
       // distribution over those pixels (low cost = confident; high = likely junk
       // that fusion's maxCost gate will drop — the key signal for dense quality).

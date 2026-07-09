@@ -8,12 +8,12 @@ import { useImagesStore } from './useImagesStore.js'
 import { useProjectsStore } from './useProjectsStore.js'
 
 // Default measurement accuracies for a new GCP.
-//   x / y / z — per-axis accuracy of the ground coordinates, in project-CRS units (e.g. metres)
-//   rel       — accuracy of the image observations (marker projections), in pixels
+//   x / y / z    — per-axis accuracy of the ground coordinates, in project-CRS units (e.g. metres)
+//   imgX / imgY  — accuracy of the image observations (marker projections), in pixels
 const DEFAULT_ACCURACY_X   = 1.0
 const DEFAULT_ACCURACY_Y   = 1.0
 const DEFAULT_ACCURACY_Z   = 1.0
-const DEFAULT_ACCURACY_REL = 1.0
+const DEFAULT_ACCURACY_IMG = 1.0
 
 // Project-scoped store: ground control points, stored in the project's working CRS.
 //
@@ -24,19 +24,24 @@ export const useGcpsStore = registerProjectStore(defineStore('gcps', () => {
   const imagesStore = useImagesStore()
   const projects = useProjectsStore()
 
-  // [{ id, name, x, y, z, accuracyX, accuracyY, accuracyZ, accuracyRel,
+  // [{ id, name, x, y, z, accuracyX, accuracyY, accuracyZ, accuracyImgX, accuracyImgY,
   //    observations: [{ imageId, imageName, px, py }], enabled }]
+  // `enabled` = ignored entirely (excluded from georeference/BA + accuracy report).
   const gcps = ref([])
 
   // Backfill accuracy fields on GCPs loaded from older saved projects.
-  // (Pre-split `accuracyAbs`/`accuracyXY` seed the per-axis values.)
+  // (Pre-split `accuracyAbs`/`accuracyXY` seed the per-axis ground values; the
+  // former single `accuracyRel` seeds both image axes; `role` is dropped.)
   function normalize(g) {
-    if (g.accuracyX   == null) g.accuracyX   = g.accuracyXY ?? g.accuracyAbs ?? DEFAULT_ACCURACY_X
-    if (g.accuracyY   == null) g.accuracyY   = g.accuracyXY ?? g.accuracyAbs ?? DEFAULT_ACCURACY_Y
-    if (g.accuracyZ   == null) g.accuracyZ   = g.accuracyAbs ?? DEFAULT_ACCURACY_Z
-    if (g.accuracyRel == null) g.accuracyRel = DEFAULT_ACCURACY_REL
+    if (g.accuracyX    == null) g.accuracyX    = g.accuracyXY ?? g.accuracyAbs ?? DEFAULT_ACCURACY_X
+    if (g.accuracyY    == null) g.accuracyY    = g.accuracyXY ?? g.accuracyAbs ?? DEFAULT_ACCURACY_Y
+    if (g.accuracyZ    == null) g.accuracyZ    = g.accuracyAbs ?? DEFAULT_ACCURACY_Z
+    if (g.accuracyImgX == null) g.accuracyImgX = g.accuracyRel ?? DEFAULT_ACCURACY_IMG
+    if (g.accuracyImgY == null) g.accuracyImgY = g.accuracyRel ?? DEFAULT_ACCURACY_IMG
     delete g.accuracyAbs
     delete g.accuracyXY
+    delete g.accuracyRel
+    delete g.role
     return g
   }
 
@@ -102,10 +107,11 @@ export const useGcpsStore = registerProjectStore(defineStore('gcps', () => {
           id: crypto.randomUUID(),
           name: raw.name,
           x, y, z: raw.z != null ? z : null,
-          accuracyX:   DEFAULT_ACCURACY_X,
-          accuracyY:   DEFAULT_ACCURACY_Y,
-          accuracyZ:   DEFAULT_ACCURACY_Z,
-          accuracyRel: DEFAULT_ACCURACY_REL,
+          accuracyX:    DEFAULT_ACCURACY_X,
+          accuracyY:    DEFAULT_ACCURACY_Y,
+          accuracyZ:    DEFAULT_ACCURACY_Z,
+          accuracyImgX: DEFAULT_ACCURACY_IMG,
+          accuracyImgY: DEFAULT_ACCURACY_IMG,
           observations,
           enabled: true,
         })
@@ -118,13 +124,52 @@ export const useGcpsStore = registerProjectStore(defineStore('gcps', () => {
     return added
   }
 
-  // Update one accuracy field ('x' | 'y' | 'z' | 'rel') of a GCP. Empty/invalid
-  // input falls back to that field's default so we never persist a NaN.
+  // Manually create a blank GCP (no import needed) — position defaults to the
+  // origin and is edited afterward in the table; observations are marked
+  // interactively via setObservation. Returns the new GCP's id.
+  function addGcp() {
+    const n = gcps.value.length + 1
+    const id = crypto.randomUUID()
+    gcps.value.push({
+      id, name: `GCP ${n}`, x: 0, y: 0, z: 0,
+      accuracyX: DEFAULT_ACCURACY_X, accuracyY: DEFAULT_ACCURACY_Y, accuracyZ: DEFAULT_ACCURACY_Z,
+      accuracyImgX: DEFAULT_ACCURACY_IMG, accuracyImgY: DEFAULT_ACCURACY_IMG,
+      observations: [], enabled: true,
+    })
+    log(`GCP added: ${gcps.value[gcps.value.length - 1].name}`, 'success', 'GCP')
+    save()
+    return id
+  }
+
+  function setGcpName(id, name) {
+    const g = gcps.value.find((x) => x.id === id)
+    const trimmed = (name ?? '').trim()
+    if (!g || !trimmed) return
+    g.name = trimmed
+    save()
+  }
+
+  // Update one ground-position axis ('x' | 'y' | 'z') of a GCP, in project-CRS
+  // units. Empty/invalid input is ignored (keeps the previous value) rather
+  // than silently persisting a NaN.
+  function setGcpPosition(id, axis, value) {
+    const g = gcps.value.find((x) => x.id === id)
+    if (!g || (axis !== 'x' && axis !== 'y' && axis !== 'z')) return
+    const num = Number(value)
+    if (!Number.isFinite(num)) return
+    g[axis] = num
+    save()
+  }
+
+  // Update one accuracy field of a GCP: ground 'x'|'y'|'z' (CRS units) or image
+  // 'imgx'|'imgy' (pixels). Empty/invalid input falls back to that field's
+  // default so we never persist a NaN.
   const ACCURACY_FIELDS = {
-    x:   { prop: 'accuracyX',   def: DEFAULT_ACCURACY_X   },
-    y:   { prop: 'accuracyY',   def: DEFAULT_ACCURACY_Y   },
-    z:   { prop: 'accuracyZ',   def: DEFAULT_ACCURACY_Z   },
-    rel: { prop: 'accuracyRel', def: DEFAULT_ACCURACY_REL },
+    x:    { prop: 'accuracyX',    def: DEFAULT_ACCURACY_X   },
+    y:    { prop: 'accuracyY',    def: DEFAULT_ACCURACY_Y   },
+    z:    { prop: 'accuracyZ',    def: DEFAULT_ACCURACY_Z   },
+    imgx: { prop: 'accuracyImgX', def: DEFAULT_ACCURACY_IMG },
+    imgy: { prop: 'accuracyImgY', def: DEFAULT_ACCURACY_IMG },
   }
   function setGcpAccuracy(id, kind, value) {
     const field = ACCURACY_FIELDS[kind]
@@ -142,10 +187,32 @@ export const useGcpsStore = registerProjectStore(defineStore('gcps', () => {
     save()
   }
 
-  // Project-store contract: reset state and purge persisted data.
-  function clear() {
+  // Upsert a pixel observation for `imageId` on a GCP (replacing any existing
+  // observation for that image) — used by interactive click-to-mark.
+  function setObservation(gcpId, imageId, imageName, px, py) {
+    const g = gcps.value.find((x) => x.id === gcpId)
+    if (!g) return
+    const existing = g.observations.find((o) => o.imageId === imageId)
+    if (existing) { existing.px = px; existing.py = py; existing.imageName = imageName }
+    else g.observations.push({ imageId, imageName, px, py })
+    save()
+  }
+
+  function removeObservation(gcpId, imageId) {
+    const g = gcps.value.find((x) => x.id === gcpId)
+    if (!g) return
+    const idx = g.observations.findIndex((o) => o.imageId === imageId)
+    if (idx === -1) return
+    g.observations.splice(idx, 1)
+    save()
+  }
+
+  // Project-store contract: reset state; only { purge: true } deletes persisted
+  // data. A plain clear (project switch/close) must leave OPFS intact — restore
+  // reads it back and currentProjectId still points at the project being left.
+  function clear({ purge = false } = {}) {
     gcps.value = []
-    if (isPersisting()) opfs.deleteGcps(projects.currentProjectId).catch(() => {})
+    if (purge && isPersisting()) opfs.deleteGcps(projects.currentProjectId).catch(() => {})
   }
 
   // Project-store contract: load this project's GCPs, re-projecting if the stored
@@ -186,7 +253,12 @@ export const useGcpsStore = registerProjectStore(defineStore('gcps', () => {
   return {
     gcps,
     addGcps,
+    addGcp,
+    setGcpName,
+    setGcpPosition,
     setGcpAccuracy,
+    setObservation,
+    removeObservation,
     removeGcp,
     reprojectGcps,
     // project-store contract

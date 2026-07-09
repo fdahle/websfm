@@ -4,6 +4,7 @@ import { useModalsStore } from '../stores/useModalsStore.js'
 import { parseGeoJson, looksLikeGeoJson, geoJsonToGcps, guessNameKey } from '../core/io/geojson.js'
 import { detectCameraMode } from '../core/io/cameraKind.js'
 import { detectFileKind } from '../core/io/importKind.js'
+import { parseFiducialObs } from '../core/io/fiducialObs.js'
 
 // The dropped/picked-file import funnel, lifted out of App.vue. It drives the
 // import-related modals (all state lives in useModalsStore, pulled in here) and
@@ -12,7 +13,7 @@ import { detectFileKind } from '../core/io/importKind.js'
 //   activateTab(id) — switch the active tab (to 'map' after a spatial import)
 // `cameraPickMode` is returned so the Ribbon command dispatch (still in App.vue)
 // can hint the file-picker mode before opening the hidden <input>.
-export function useImportRouting({ addGcps, addFootprints, addSensors, addPoses, activateTab }) {
+export function useImportRouting({ addGcps, addFootprints, addSensors, addPoses, addFiducialObs, activateTab }) {
   const {
     gcpImportOpen, gcpImportText, gcpImportName, gcpImportGeojson, gcpImportCrs,
     footprintImportOpen, footprintImportData,
@@ -83,7 +84,19 @@ export function useImportRouting({ addGcps, addFootprints, addSensors, addPoses,
   function routeImport(file, kind) {
     if (kind === 'pose' || kind === 'sensor') openCameraImport(file, kind)
     else if (kind === 'gcp' || kind === 'footprint') openImportFile(file)
+    else if (kind === 'fiducialObs') openFiducialObsImport(file)
     else { importKindFile.value = file; importKindOpen.value = true }
+  }
+
+  // Fiducial-mark pixel observations (F4) commit directly — a row is (image,
+  // fiducial, px, py) matched to an image by name, no CRS or column ambiguity
+  // that would need a modal.
+  async function openFiducialObsImport(file) {
+    if (!file || !addFiducialObs) return
+    let text
+    try { text = await file.text() } catch (err) { console.error('Could not read fiducial file', err); return }
+    const { rows } = parseFiducialObs(text)
+    addFiducialObs(rows)
   }
 
   // User answered the "what is this file?" chooser.
@@ -168,7 +181,7 @@ export function useImportRouting({ addGcps, addFootprints, addSensors, addPoses,
 
   return {
     cameraPickMode,
-    openImportFile, openDroppedImport, routeImport,
+    openImportFile, openDroppedImport, routeImport, openFiducialObsImport,
     onImportKindChosen, onImportSwitchKind,
     openCameraImport, onCameraImport, onGcpImport, onFootprintImport,
     onGcpPick, onCameraPick,

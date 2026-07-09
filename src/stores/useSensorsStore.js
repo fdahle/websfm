@@ -56,6 +56,17 @@ export const useSensorsStore = defineStore('sensors', () => {
     return images.value.filter((img) => img.sensorId === sensorId).length ?? 0
   }
 
+  // Next free "Sensor N" index — one past the highest already in use, so
+  // auto-named sensors get a stable, continuous number even after removals.
+  function nextSensorNumber() {
+    let max = 0
+    for (const s of sensors.value) {
+      const m = /^Sensor (\d+)\b/.exec(s.label || '')
+      if (m) max = Math.max(max, Number(m[1]))
+    }
+    return max + 1
+  }
+
   // Auto-create / assign sensors from EXIF. Images with an identical signature
   // collapse into one sensor; only images lacking a sensorId are touched, so a
   // manual reassignment is never overwritten.
@@ -71,9 +82,16 @@ export const useSensorsStore = defineStore('sensors', () => {
       if (!sig) continue
       let sensor = sensors.value.find((s) => s.signature === sig)
       if (!sensor) {
+        const seed = sensorFromExif(img.meta)
+        // No make/model in EXIF (scanned/historic imagery): give it a numbered
+        // "Sensor N" name instead of the generic "Unknown camera", keeping any
+        // focal suffix exifLabel added.
+        if (!(img.meta.make || img.meta.model)) {
+          seed.label = seed.label.replace('Unknown camera', `Sensor ${nextSensorNumber()}`)
+        }
         sensor = {
           id: crypto.randomUUID(),
-          ...sensorFromExif(img.meta),
+          ...seed,
           // EXIF carries no lens coefficients — start pinhole; the user opts into a
           // distortion model (and self-calibration) in the sensor table (D3).
           distortionModel: 'pinhole',
@@ -134,11 +152,39 @@ export const useSensorsStore = defineStore('sensors', () => {
   // to null; `label` is free text, everything else is numeric.
   const NUMERIC_FIELDS = new Set(['width', 'height', 'focal', 'cx', 'cy', 'k1', 'k2', 'k3', 'p1', 'p2', 'pixelSize', 'sensorWidthMm'])
 
+  // Film-camera fiducial fields (F4): the calibrated interior orientation. Numeric
+  // and edited inline like the intrinsics above, but only meaningful when the
+  // sensor's kind is 'film'. `focalMm` is authoritative for resolveK on the
+  // fiducial path; keep `focal`/`focalUnit` in sync so the rest of the UI reads
+  // sensibly (done here so the two can't drift).
+  const FIDUCIAL_NUMERIC = new Set(['ppxMm', 'ppyMm', 'focalMm'])
+
   function updateSensor(id, field, value) {
     const s = sensors.value.find((x) => x.id === id)
     if (!s) return
     if (field === 'label') {
       s.label = String(value).trim() || s.label
+    } else if (field === 'kind') {
+      // Digital (default) vs film (fiducial interior orientation).
+      if (value !== 'digital' && value !== 'film') return
+      s.kind = value
+      if (value === 'film' && !s.fiducials) {
+        s.fiducials = { marks: [], ppxMm: 0, ppyMm: 0, focalMm: s.focalUnit === 'mm' ? (s.focal ?? 0) : 0 }
+      }
+      log(`Sensor ${s.label}: kind set to ${value}`, 'info', 'Sensor')
+      save()
+      if (isPersisting()) imagesStore.sync()
+      return
+    } else if (FIDUCIAL_NUMERIC.has(field)) {
+      if (!s.fiducials) s.fiducials = { marks: [], ppxMm: 0, ppyMm: 0, focalMm: 0 }
+      const num = Number(value)
+      if (!Number.isFinite(num)) return
+      s.fiducials[field] = num
+      // focalMm is authoritative on the fiducial path — mirror it into focal/focalUnit.
+      if (field === 'focalMm') { s.focal = num; s.focalUnit = 'mm' }
+      log(`Sensor ${s.label}: ${field} = ${num}`, 'info', 'Sensor')
+      save()
+      return
     } else if (field === 'focalUnit') {
       // Toggle between a focal length in pixels and one in millimetres. Only
       // these two are valid; anything else leaves it as-is.
@@ -174,6 +220,21 @@ export const useSensorsStore = defineStore('sensors', () => {
     save()
   }
 
+  // Replace a film sensor's calibrated fiducial marks (F4). `marks` is
+  // `[{ id, xMm, yMm }]`; non-finite rows are dropped. Ensures kind:'film'.
+  function setFiducialMarks(id, marks) {
+    const s = sensors.value.find((x) => x.id === id)
+    if (!s) return
+    const clean = (marks || [])
+      .filter((m) => m && Number.isFinite(Number(m.xMm)) && Number.isFinite(Number(m.yMm)))
+      .map((m, i) => ({ id: String(m.id ?? `F${i + 1}`), xMm: Number(m.xMm), yMm: Number(m.yMm) }))
+    if (!s.fiducials) s.fiducials = { marks: [], ppxMm: 0, ppyMm: 0, focalMm: 0 }
+    s.fiducials.marks = clean
+    if (!s.kind) s.kind = 'film'
+    log(`Sensor ${s.label}: ${clean.length} fiducial mark(s) set`, 'info', 'Sensor')
+    save()
+  }
+
   function assignSensor(imageId, sensorId) {
     const img = images.value.find((i) => i.id === imageId)
     if (!img) return
@@ -204,9 +265,12 @@ export const useSensorsStore = defineStore('sensors', () => {
     if (isPersisting()) imagesStore.sync()
   }
 
-  function clearSensors() {
+  // Reset in-memory sensors. Pass { purge: true } to also delete the persisted
+  // sensors file — do NOT purge on project switch/close, since currentProjectId
+  // still points at the project being left and restore reads its sensors back.
+  function clearSensors({ purge = false } = {}) {
     sensors.value = []
-    if (isPersisting()) opfs.deleteSensors(projects.currentProjectId).catch(() => {})
+    if (purge && isPersisting()) opfs.deleteSensors(projects.currentProjectId).catch(() => {})
   }
 
   async function restoreSensors(projectId) {
@@ -227,6 +291,7 @@ export const useSensorsStore = defineStore('sensors', () => {
     addSensors,
     updateSensor,
     toggleSensorFixed,
+    setFiducialMarks,
     assignSensor,
     mergeSensors,
     removeSensor,

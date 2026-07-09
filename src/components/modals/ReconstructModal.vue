@@ -1,15 +1,13 @@
 <script setup>
 import { ref } from 'vue'
 import GlossaryTerm from '../glossary/GlossaryTerm.vue'
+import { RECONSTRUCT_DEFAULTS } from '../../core/defaults.user.js'
 
 const emit = defineEmits(['close', 'run'])
 
-const settings = ref({
-  minMatchesForRegistration: 20,
-  reprjThreshold: 4.0,
-  baIterations: 30,
-  refineIntrinsics: 'none',   // self-calibration in BA: 'none' | 'f' | 'f,cxcy' | 'f,k1'
-})
+// Prefill from the single source of truth (core/sfm/sfm.js falls back to the same
+// values). Clone so edits don't mutate the shared constant.
+const settings = ref({ ...RECONSTRUCT_DEFAULTS })
 
 function run() {
   emit('run', { ...settings.value })

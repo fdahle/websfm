@@ -4,15 +4,21 @@ Browser-based Structure-from-Motion / photogrammetry app. Vue 3 + Pinia front en
 heavy CV math in Rust→WASM, everything runs client-side (no server). Targets polar /
 non-WGS84 projects (Antarctica), so CRS handling is first-class.
 
-## The three docs (keep the roles strict)
-- **CLAUDE.md** (this file) — evergreen architecture, layering, invariants, "where
-  things live". No status, no tasks; if a sentence can go stale, it belongs elsewhere.
+## The four docs (keep the roles strict)
+- **CLAUDE.md** (this file) — evergreen *code* architecture, layering, invariants,
+  "where things live". No status, no tasks; if a sentence can go stale, it belongs
+  elsewhere.
+- **METHODS.md** — the *SfM/photogrammetry science*: which algorithms and why
+  (which bundle adjustment, which distortion model, which P3P, how georeferencing
+  works). Implementation-light, method-heavy — the doc to read before talking to a
+  photogrammetry colleague. Update it when a *method* changes, not on code churn.
 - **TODO.md** — the single prioritized plan: Now → Next → Backlog → Parked. All open
   work lives there, nowhere else.
 - **HANDOVER.md** — the record: measured baselines (before/after yardsticks) and a
   reverse-chronological done log.
 When an item ships: delete it from TODO.md, add one done-log line to HANDOVER.md
-(date · what · where it lives), and fold any *evergreen* lesson into this file.
+(date · what · where it lives), fold any *evergreen* code lesson into this file, and
+if the *method* changed, update METHODS.md.
 
 ## Stack
 - **UI**: Vue 3 (`<script setup>`), Pinia stores, OpenLayers (map), Three.js (3D).
@@ -99,10 +105,17 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
    repetitive structure) and a **positional-spread** reject (`core/features/verify.js`
    `inlierSpread`, gated in `useMatchesStore`): drop a pair whose accepted inliers
    collapse to few unique locations (many-to-one convergence) or a pinhead region
-   (epipole degeneracy) — signatures no count/ratio/H-F gate can see. Optional pair
-   **preselection** (`core/features/preselect.js`, k-nearest by imported camera position)
-   prunes the exhaustive O(N²) set; `matchAll` runs on a concurrency-limited worker
-   pool with a per-run descriptor cache.
+   (epipole degeneracy) — signatures no count/ratio/H-F gate can see. Two cheap
+   prefilters cut the exhaustive O(N²) cost: **preselection**
+   (`core/features/preselect.js`, k-nearest by imported camera position) prunes pairs
+   before matching *when poses exist*; the **subset gate**
+   (`core/features/subsetGate.js`, brute-force only) handles the no-poses case —
+   before the full match, match a small spatially-uniform keypoint subset
+   (`pickSpreadIndices` grid-buckets so a repetitive façade doesn't collapse the
+   sample onto its few strong blobs) and skip the O(Na·Nb) full match if too few
+   survive, keeping exhaustive *coverage* (loop closures still found anywhere in the
+   graph) at a fraction of the per-pair cost. `matchAll` runs on a concurrency-limited
+   worker pool with a per-run descriptor cache.
 3. **Sparse SfM** (`core/sfm/sfm.js`): a **rotation-cycle consistency filter**
    (`rotationCycleFilter`) first prunes verified-but-false pairs — spurious epipolar
    fits on repetitive structure that clear every count/ratio gate but whose relative
@@ -129,6 +142,17 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
    BA-refined K the fold used, so the frame matches) — one single-source-of-truth for
    distortion, from ingest through dense. Heavily instrumented via `onLog` (toggle
    "Detail"/debug in DevConsole).
+   - **Film-scan interior orientation** (F4, `core/sfm/fiducials.js`): scan
+     geometry, like lens distortion, is removed **once at ingest** — a `kind:'film'`
+     sensor's calibrated fiducial marks (mm) + each image's clicked scan-pixel
+     observations fit a per-image affine `scan px → mm`, from which one **canonical
+     pixel frame per sensor** (median fitted pitch) gives a single shared K. Sparse
+     ingest moves the worker's keypoint copy `scanToCanonical` (store keypoints stay
+     in **scan space** — viewer/GCP marking assume it), stashes the canonical K on
+     `sensor._fiducialK` (resolveK **path 0**), remaps GCP observations the same way,
+     and records each `{A, frame}` in `summary.fiducialTransforms`. Dense reproduces
+     that exact transform (never re-fits) via `canonicalToScan` composed into its
+     raster+mask sample map. Everything between stays pinhole.
 4. **Dense MVS** (`core/dense/mvs.js` + `crates/reconstruction/src/mvs.rs`): Stage A build
    per-image PatchMatch depth maps → optional `filterDepthMap` (median/speckle cleanup)
    → Stage B `fuseDepthMaps` (cross-view geometric consistency). Both stages log
@@ -183,6 +207,43 @@ Per-project working CRS (proj4). GCPs, footprints, and camera poses store positi
 the project CRS and are reprojected on CRS change (`handleSetCrs` in App.vue). See memory
 `gcp-crs-architecture` and `works-in-antarctica`.
 
+A GCP has surveyed ground coords (`x/y/z` + per-axis `accuracyX/Y/Z`), pixel
+`observations` (`[{ imageId, imageName, px, py }]`, with per-axis image accuracy
+`accuracyImgX/Y`), and an `enabled` flag; there is no control/check role (every
+enabled GCP is used). GCPs are created three ways: CSV import (`GcpImportModal`),
+the GCP table's "+ Add GCP" (a blank GCP at the origin, edited inline —
+`useGcpsStore.addGcp`), or **right-click in the image view**. That right-click
+opens `ViewerImage.vue`'s general context menu (copy pixel/colour, zoom, fit)
+whose "Add GCP here…" entry switches the same popup to a new-vs-existing chooser
+("New GCP here" → `add-gcp`; an existing name → `mark-gcp`), both landing in
+`setObservation`. The image view also shows a magnifier **loupe** (when the GCP
+overlay is on) and each marker's **live reprojection error** from the accuracy
+report; the sidebar's GCP detail lists per-image observations (jump-to-image +
+remove), flags GCPs with <2 marks (unusable), and right-clicking a GCP row
+removes it (`useContextMenu`). GCPs are removed only from the sidebar
+right-click or the table's × — there is no add/remove button in the sidebar.
+
+`core/sfm/gcpTriangulation.js` 2-view-DLT-triangulates a GCP's registered-image
+observations into the current SfM frame; `core/products/georef.js`'s Horn
+similarity fit then pairs those against the GCP's surveyed CRS position
+(`useReconstructionStore.georeference()` prefers this over the pose-based fit
+whenever ≥3 GCPs triangulate), and `gcpAccuracyReport()` reports per-GCP CRS
+residual + per-observation reprojection px. GCPs also constrain **bundle
+adjustment** directly, not just this post-hoc fit: `bundle_adjust`
+(`crates/reconstruction/src/bundle.rs`) takes an `anchor_flat`/`anchor_weight`
+pair injecting a `Σ w·‖pt−target‖²` residual on specific 3D points (their own
+point-index space, appended after the normal SIFT points, each with normal
+reprojection observations of its own) — the anchor only touches that point's own
+3×3 Schur block, no camera-side Jacobian, so it's free to add and a no-op with
+empty arrays. `core/sfm/sfm.js`'s `runGcpAnchoredBundleAdjust` runs this after
+the main pipeline settles: triangulate GCPs → Horn-fit → inverse-transform
+(`toSfm`) each GCP's CRS position into the SfM frame as the anchor target →
+re-run BA with the GCPs injected → repeat once more (hard-coded) as insurance
+against a poor seed fit. The *final* georeference used for DEM/ortho is still a
+fresh post-hoc fit against whatever cameras this leaves in the sparse cloud, not
+this pass's scratch state — anchoring only needs to be "good enough to help
+convergence".
+
 ## Conventions, invariants & gotchas
 - `markRaw`/`shallowRef` for big typed arrays (keypoints, descriptors, depth planes):
   reactivity is wasteful AND a Vue Proxy can't be `postMessage`d to the worker.
@@ -191,15 +252,44 @@ the project CRS and are reprojected on CRS change (`handleSetCrs` in App.vue). S
   viewer `<img>`, the metadata dimension probe (`new Image()`), and the worker's
   `rasterize` (`createImageBitmap`) all decode it through the browser. TIFF is
   the trap — only Safari/WebKit decodes it (system ImageIO); Chrome/Firefox
-  don't. `utils/tiff.js` transcodes TIFF→PNG at ingest + restore so nothing
-  downstream ever sees a TIFF; the original still lives in OPFS. Any new source
-  format the browser can't decode needs the same ingest-time transcode.
+  don't. `utils/tiff.js` transcodes at ingest + restore (off-main-thread, via a
+  `workers/ops/tiff.js` op) so nothing downstream ever sees a TIFF; the original
+  still lives in OPFS but is **only** ever read back to regenerate the display
+  blob on restore — nothing compute-side reads it. `canDecodeTiffNatively()`
+  skips the transcode entirely on engines that can already decode TIFF (Safari).
+  Detection (SIFT/SuperPoint) and dense MVS both read pixels back out of the
+  image via `rasterize`/`getRaster`, so the transcode produces **two** blobs
+  from one decode: `image.url` (JPEG, fast, display-only) and `image.computeUrl`
+  (lossless PNG) — every raster-consuming call (`detectKeypoints`, the dense-op
+  image marshalling in `useReconstructionStore`) must read `img.computeUrl ??
+  img.url`, never `img.url` alone, or JPEG artifacts leak into keypoints/depth.
+  Any new source format the browser can't decode needs the same treatment.
 - **Descriptor width is per-detector, never a constant**: 128 (SIFT) vs 256
   (SuperPoint), carried as `descDim` on the feature bundle / OPFS blob and passed
   as `dim` into `crates/matching`. A wrong dim mis-slices the flat buffer into
   phantom rows whose indices overflow the keypoint arrays downstream.
 - OPFS JSON helpers swallow errors and return `null`/`[]` on miss — callers treat absence
   as empty.
+- **Default settings have one home, split by audience.** *User-tunable* defaults (knobs
+  a modal exposes) live in `src/core/defaults.user.js`; the modal prefills from it AND
+  core falls back to the same object, so the two can't drift — never hardcode such a knob
+  in both. *Internal dev-tuning* knobs (never shown to the user, swept during
+  development) live in `src/core/tuning.js`, grouped by stage, with their rationale
+  comment moved next to the value. Core merges them caller-last
+  (`{ ...RECONSTRUCT_DEFAULTS, ...SFM_TUNING, ...settings }`) so `settings` still wins.
+  Exception: a self-contained pure sub-module (e.g. `core/sfm/initPair.js`,
+  `core/sfm/cycleFilter.js`) keeps its own defaults co-located with its algorithm —
+  `tuning.js` points to it rather than duplicating the value. **All pipeline-stage
+  modals are wired**: detection (`DETECT_SIFT_DEFAULTS`/`DETECT_SUPERPOINT_DEFAULTS`),
+  matching (`MatchFeaturesModal`↔`useMatchesStore`, `MATCH_DEFAULTS`+`MATCH_TUNING`),
+  sparse SfM (`ReconstructModal`↔`core/sfm/sfm.js`, `RECONSTRUCT_DEFAULTS`+`SFM_TUNING`),
+  dense depth/fuse (`DepthMapsModal`/`DenseModal`, `DEPTHMAP_DEFAULTS`/`DENSE_FUSE_DEFAULTS`
+  +`DENSE_TUNING` in `core/dense/mvs.js`), DEM/ortho (`DemModal`/`OrthoModal`,
+  `DEM_DEFAULTS`/`ORTHO_DEFAULTS`), export (`ExportModal`, `EXPORT_DEFAULTS`; `format`
+  stays dynamic per kind), footprints (`FootprintFromPosesModal`, `FOOTPRINT_DEFAULTS`).
+  Note: modals holding UI-unit values transform them in their own `run()` (e.g. a `%`
+  ÷100, `0`⇒`Infinity`), so those defaults must live in the modal-facing constant, not a
+  store-side merge that would double-apply the transform.
 - `useImagesStore.sync()` rewrites the whole `project.json` and is fired from many
   concurrent callbacks; it **coalesces** writes (≤1 in flight, one trailing re-run) so
   concurrent callers don't race the file. Persistence is gated by `projects.isPersisting`
@@ -222,7 +312,11 @@ the project CRS and are reprojected on CRS change (`handleSetCrs` in App.vue). S
 - After any `crates/` change: `npm run build:wasm`, commit `src/wasm/*` with the
   source change.
 - Keep the heavy logging style — every derived/auto value gets a log line the user
-  can audit.
+  can audit. The dev console keeps only a **capped display tail** in memory
+  (`useLog` `MAX_BUFFER`), but every line is streamed to an **append-only OPFS
+  NDJSON** file (`log.ndjson`, owned by `useLogStore`) — that file is the full
+  record (scroll-back prepends older chunks from it; Save TXT exports all of it),
+  so the buffer cap is a view limit, never data loss.
 
 ## Verification
 Per change: `npm test` + `npm run typecheck`. WASM changes: rebuild + rerun.

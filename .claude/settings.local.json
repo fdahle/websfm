@@ -80,7 +80,14 @@
       "Bash(awk '/<Sidebar/{f=1} f{print NR\": \"$0} /\\\\/>/{if\\(f\\)exit}' src/App.vue)",
       "Bash(timeout 240 npx vite build)",
       "Bash(node -e \"console.log\\(require\\('./node_modules/geotiff/package.json'\\).version\\)\")",
-      "Bash(node -e \"import\\('geotiff'\\).then\\(m => console.log\\('exports:', Object.keys\\(m\\).filter\\(k=>/from|GeoTIFF/.test\\(k\\)\\).join\\(', '\\)\\)\\)\")"
+      "Bash(node -e \"import\\('geotiff'\\).then\\(m => console.log\\('exports:', Object.keys\\(m\\).filter\\(k=>/from|GeoTIFF/.test\\(k\\)\\).join\\(', '\\)\\)\\)\")",
+      "Bash(grep -rn \"} = settings\\\\|= settings$\\\\|settings\\\\.\\\\w\\\\+ ??\\\\|settings\\\\.\\\\w\\\\+ ||\" src/core/)",
+      "Bash(grep -E \"ref\\\\\\(\\\\{$\")",
+      "Bash(xargs -n1 basename)",
+      "Bash(grep -n \"updateMask, updateDepth\\\\|= imagesStore\\\\|useImagesStore\\(\\)\\\\|const {.*imagesStore\\\\|updateMask\" src/App.vue)",
+      "Bash(grep -iA12 \"fail\\\\|AssertionError\\\\|expected\")",
+      "Bash(grep -iA14 \"fail\\\\|expected\\\\|AssertionError\")",
+      "Bash(grep -n \"cameras:\\\\|K:\\\\|kMap\\\\|Kmap\\\\|cam.K\\\\|, K }\\\\|return done\\\\|cameras.set\\\\|{ R, t\" src/core/sfm/sfm.js)"
     ],
     "additionalDirectories": [
       "/Users/fhdahle/Documents/GitHub/websfm/src/wasm/*",
