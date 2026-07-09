@@ -42,7 +42,9 @@ export const MATCH_DEFAULTS = {
   maxIters: 1000,              // F-RANSAC iterations
   maxNeighbors: 10,            // preselect: k-nearest cameras to consider per image
   useGpu: false,               // experimental WebGPU LightGlue backend
-  lgMaxKeypoints: 2048,        // per-image cap fed to LightGlue
+  lgMaxKeypoints: 2048,        // per-image cap fed to LightGlue (plain path)
+  lgTiled: false,              // coarse-to-fine tiled guided matching (full density)
+  lgTileBudget: 2048,          // max keypoints per tile side when tiled (attention budget)
   subsetGate: true,            // cheap coarse pre-test to skip non-overlapping pairs
   subsetGateSize: 200,         // spatially-uniform keypoints per image in the pre-test
   subsetGateThreshold: 8,      // min subset putatives required to run the full match

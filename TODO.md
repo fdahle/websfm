@@ -31,6 +31,14 @@ still unvalidated on real data (Now ▸ R).
 
 ## Now
 
+### LG — LightGlue: fix concurrency freeze, then tiled guided matching
+LightGlue currently wedges: all LightGlue calls are pinned to worker 0 but
+`matchAll` dispatches POOL_SIZE pairs concurrently → concurrent `session.run`
+on one (non-reentrant) ORT session; cancel is cooperative so the hang is
+permanent. Fix (serialize + mutex + real cancel), then coarse-to-fine
+homography-guided tile matching so pairs match at full keypoint density.
+Full executable spec: `PLAN-lightglue-tiled-matching.md` (delete both when shipped).
+
 ### W0 — Ship the working tree (uncommitted feature work)
 The tree currently holds two finished-but-uncommitted features (see HANDOVER
 2026-07-07 entries): **tiled detection TD1–TD4** (`core/features/tiling.js` +

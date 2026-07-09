@@ -1,5 +1,5 @@
 import { matchDescriptors } from '../../core/features/bruteforce.js'
-import { matchLightGlue } from '../../core/features/lightglue.js'
+import { matchLightGlue, matchLightGlueTiled } from '../../core/features/lightglue.js'
 import { verifyMatches } from '../../core/features/verify.js'
 
 // Matching + geometric-verification ops. No worker-local pixel helpers needed —
@@ -15,7 +15,10 @@ export function makeMatchOps() {
   async function matchLightGluePair([args = {}], { emit } = {}) {
     // Thread the log level (default 'info') so per-pair timing can land at 'debug'.
     const onLog = emit ? (msg, level) => emit('log', [msg, level]) : undefined
-    return { result: await matchLightGlue({ ...args, onLog }) }
+    // One op name, one pinned worker: route to the coarse-to-fine tiled variant
+    // when the caller asked for it, else the plain capped match.
+    const fn = args.tiled ? matchLightGlueTiled : matchLightGlue
+    return { result: await fn({ ...args, onLog }) }
   }
 
   async function verify([kpsA, kpsB, matches, options = {}]) {
