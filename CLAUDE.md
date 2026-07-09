@@ -288,6 +288,16 @@ convergence".
   (SuperPoint), carried as `descDim` on the feature bundle / OPFS blob and passed
   as `dim` into `crates/matching`. A wrong dim mis-slices the flat buffer into
   phantom rows whose indices overflow the keypoint arrays downstream.
+- **ORT `InferenceSession`s are NOT reentrant** — two concurrent `session.run()`
+  on one wasm session deadlock/corrupt. LightGlue (`core/features/lightglue.js`)
+  is pinned to worker 0 with one heavy session, so runs are serialized two ways:
+  a module-scoped promise-chain mutex (`serialized`) wraps every run, and the
+  store dispatches the LightGlue matcher at concurrency 1 (`useMatchesStore.matchAll`;
+  brute-force keeps the pool). The tiled path (`matchLightGlueTiled`) holds the
+  mutex for its whole coarse+tiles run and must never call the public
+  `matchLightGlue` (re-entering the same mutex would deadlock) — it runs prefixes
+  through the already-open session. Match Cancel hard-terminates the pool
+  (`terminateAll`) so a wedged/long run actually aborts.
 - OPFS JSON helpers swallow errors and return `null`/`[]` on miss — callers treat absence
   as empty.
 - **Default settings have one home, split by audience.** *User-tunable* defaults (knobs
