@@ -74,6 +74,12 @@ const tabs = [
           { id: 'import-gcps', label: 'GCP\nFile', icon: 'map-pin', aerialOnly: true, needsImages: true },
         ],
       },
+      {
+        label: 'Interop',
+        commands: [
+          { id: 'import-colmap', label: 'COLMAP\nModel', icon: 'cube', needsImages: true },
+        ],
+      },
     ],
   },
   {

@@ -10,10 +10,10 @@ import { zipStore } from '../utils/zip.js'
 // (which export dialog is open); the Ribbon command dispatch sets it and the
 // template's ExportModal binds to it. The reactive state it reads is injected as
 // refs so the composable stays free of store wiring. Injected deps (all refs):
-//   poses, sensors, images, matchStore, clouds, selectedCloud, dem, ortho,
-//   currentProjectName, currentCrs
+//   poses, sensors, images, matchStore, clouds, selectedCloud, mainSparseCloud,
+//   dem, ortho, currentProjectName, currentCrs
 export function useExports({
-  poses, sensors, images, matchStore, clouds, selectedCloud, dem, ortho,
+  poses, sensors, images, matchStore, clouds, selectedCloud, mainSparseCloud, dem, ortho,
   currentProjectName, currentCrs,
 }) {
   function exportPoses() {
@@ -93,10 +93,10 @@ export function useExports({
     else if (kind === 'ortho') doExportOrtho(settings)
   }
 
-  // The sparse cloud, or the selected cloud if it carries cameras. Shared by the
-  // two model exporters.
+  // The main sparse cloud (what downstream stages consume — MC), or the selected
+  // cloud if it carries cameras. Shared by the two model exporters.
   function sparseCloud() {
-    return clouds.value.find((c) => c.kind === 'sparse')
+    return mainSparseCloud.value
       ?? (selectedCloud.value?.cameras?.size ? selectedCloud.value : null)
   }
 

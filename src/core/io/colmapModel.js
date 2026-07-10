@@ -350,3 +350,82 @@ export function readColmapModel(model) {
 
   return { images, points, droppedDistortion: [...droppedDistortion] }
 }
+
+// Build a tiered COLMAP-name → uuid resolver over the loaded images. COLMAP stores
+// whatever path was given at reconstruction time (often a bare filename, sometimes a
+// relative path); websfm images key by `name`. Match progressively looser: exact →
+// basename → case-insensitive basename → basename without extension. First match
+// wins per tier; an unmatched name returns null.
+//   loaded: [{ uuid, name }]
+export function makeNameResolver(loaded) {
+  const basename = (n) => String(n).split(/[\\/]/).pop()
+  const stem = (n) => basename(n).replace(/\.[^.]+$/, '')
+  const exact = new Map(), base = new Map(), baseLower = new Map(), stemLower = new Map()
+  for (const { uuid, name } of loaded) {
+    if (name == null) continue
+    if (!exact.has(name)) exact.set(name, uuid)
+    const b = basename(name)
+    if (!base.has(b)) base.set(b, uuid)
+    const bl = b.toLowerCase()
+    if (!baseLower.has(bl)) baseLower.set(bl, uuid)
+    const sl = stem(name).toLowerCase()
+    if (!stemLower.has(sl)) stemLower.set(sl, uuid)
+  }
+  return (name) => {
+    if (name == null) return null
+    return exact.get(name)
+      ?? base.get(basename(name))
+      ?? baseLower.get(basename(name).toLowerCase())
+      ?? stemLower.get(stem(name).toLowerCase())
+      ?? null
+  }
+}
+
+// Turn `readColmapModel` output into websfm store shapes (a sparse cloud). Pure —
+// `resolveUuid(name)` (e.g. from `makeNameResolver`) maps a COLMAP image name to a
+// loaded-image uuid, or null when unmatched. Cameras/observations of unmatched
+// images are dropped, as are points left with no matched view.
+//
+// Imported points carry no websfm keypoint indices (there are no store keypoints
+// behind them), so `views` gets a synthetic per-image running index — dense only
+// reads the view *uuids* (`mvs.js` `pt.views.map(([u])=>u)`), never the index — while
+// the real pixel rides in `viewsPx`, the frame COLMAP re-export reads.
+//   → { cameras: Map<uuid,{R,t,K}>,
+//       points: [{ x, y, z, color, error, views: Map<uuid,idx>, viewsPx: Map<uuid,[x,y]> }],
+//       matched: [{ name, uuid }], unmatched: [name] }
+export function colmapToSparse({ images, points }, resolveUuid) {
+  const uuidByImageId = new Map()
+  const kpNext = new Map() // uuid → next synthetic keypoint index
+  const cameras = new Map()
+  const matched = []
+  const unmatched = []
+
+  for (const im of images) {
+    const uuid = resolveUuid(im.name)
+    if (!uuid) { unmatched.push(im.name); continue }
+    uuidByImageId.set(im.imageId, uuid)
+    kpNext.set(uuid, 0)
+    cameras.set(uuid, { R: im.R, t: [...im.t], K: { ...im.K } })
+    matched.push({ name: im.name, uuid })
+  }
+
+  const outPoints = []
+  for (const p of points) {
+    const views = new Map()
+    const viewsPx = new Map()
+    for (const v of p.views) {
+      const uuid = uuidByImageId.get(v.imageId)
+      if (!uuid || views.has(uuid)) continue // unmatched image, or a repeat obs
+      const idx = kpNext.get(uuid); kpNext.set(uuid, idx + 1)
+      views.set(uuid, idx)
+      viewsPx.set(uuid, [v.x, v.y])
+    }
+    if (!views.size) continue // observed only in unmatched images
+    outPoints.push({
+      x: p.xyz[0], y: p.xyz[1], z: p.xyz[2],
+      color: p.color, error: p.error, views, viewsPx,
+    })
+  }
+
+  return { cameras, points: outPoints, matched, unmatched }
+}

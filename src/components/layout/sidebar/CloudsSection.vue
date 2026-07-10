@@ -6,9 +6,10 @@ defineProps({
   open:            { type: Boolean, default: true },
   clouds:          { type: Array, default: () => [] },
   selectedCloudId: { type: String, default: null },
+  mainSparseId:    { type: String, default: null }, // sparse cloud downstream stages consume
   reconStatus:     { type: String, default: 'idle' }, // 'idle'|'running'|'done'|'error'
 })
-const emit = defineEmits(['toggle', 'select-cloud', 'remove-cloud', 'rename-cloud', 'reconstruct', 'zoom-to-cloud'])
+const emit = defineEmits(['toggle', 'select-cloud', 'remove-cloud', 'rename-cloud', 'set-main-cloud', 'reconstruct', 'zoom-to-cloud'])
 
 const cloudExpanded = ref({})
 function toggleCloudExpand(id) {
@@ -60,8 +61,11 @@ function cancelRename() {
 // Point cloud context menu (right-click). { x, y, cloud }
 const { menu: cloudCtx, open: openCloudCtx, close: closeMenu } = useContextMenu()
 function onCloudRightClick(e, cloud) {
-  openCloudCtx(e, { cloud }, { w: 180, h: 156 })
+  // "Set as main" adds a row for sparse clouds that aren't already main.
+  const extra = cloud.kind === 'sparse' && cloud.id !== cloudCtx.value?.cloud?.id ? 28 : 0
+  openCloudCtx(e, { cloud }, { w: 180, h: 156 + extra })
 }
+function ctxSetMain()      { emit('set-main-cloud', cloudCtx.value.cloud.id); closeMenu() }
 function ctxZoomCloud()    { emit('zoom-to-cloud', cloudCtx.value.cloud.id); closeMenu() }
 function ctxRenameCloud()  { startRename(cloudCtx.value.cloud); closeMenu() }
 function ctxRebuildCloud() { emit('reconstruct'); closeMenu() }
@@ -104,6 +108,11 @@ function ctxRemoveCloud()  { emit('remove-cloud', cloudCtx.value.cloud.id); clos
             @blur="commitRename"
           />
           <span v-else class="item-name">{{ cloud.name }}</span>
+          <span
+            v-if="cloud.id === mainSparseId"
+            class="main-badge"
+            title="Main sparse cloud — used for dense / DEM / ortho / export"
+          >main</span>
           <span class="obs-badge" :title="`${cloud.cameras.size} camera(s)`">{{ cloud.cameras.size }}</span>
         </li>
         <li v-if="cloudExpanded[cloud.id]" class="img-details" @contextmenu.stop>
@@ -141,6 +150,11 @@ function ctxRemoveCloud()  { emit('remove-cloud', cloudCtx.value.cloud.id); clos
         :style="{ left: cloudCtx.x + 'px', top: cloudCtx.y + 'px' }"
         @click.stop
       >
+        <button
+          v-if="cloudCtx.cloud.kind === 'sparse' && cloudCtx.cloud.id !== mainSparseId"
+          class="ctx-item"
+          @click="ctxSetMain"
+        >Set as main</button>
         <button class="ctx-item" @click="ctxZoomCloud">Zoom to</button>
         <button class="ctx-item" @click="ctxRenameCloud">Rename</button>
         <button class="ctx-item" @click="ctxRebuildCloud">Rebuild sparse cloud</button>
@@ -152,3 +166,17 @@ function ctxRemoveCloud()  { emit('remove-cloud', cloudCtx.value.cloud.id); clos
 </template>
 
 <style scoped src="./sidebar-sections.css"></style>
+<style scoped>
+/* Marks the sparse cloud downstream stages consume (MC). */
+.main-badge {
+  flex-shrink: 0;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--accent, #4a9eff);
+  border: 1px solid var(--accent, #4a9eff);
+  padding: 0 5px;
+  border-radius: 8px;
+  line-height: 15px;
+}
+</style>

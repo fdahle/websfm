@@ -21,6 +21,7 @@ defineProps({
   // Point clouds: [{ id, name, kind, createdAt, cameras: Map, points: [] }]
   clouds:     { type: Array,  default: () => [] },
   selectedCloudId: { type: String, default: null },
+  mainSparseId:    { type: String, default: null },
   // Raster products (recomputable): DEM / orthophoto, or null when not built.
   dem:        { type: Object, default: null },
   ortho:      { type: Object, default: null },
@@ -42,7 +43,7 @@ const emit = defineEmits([
   'remove-sensor', 'merge-sensors', 'assign-sensor', 'remove-pose',
   'remove-footprint',
   'select', 'open', 'show-info', 'delete-keypoints', 'zoom-to-image',
-  'select-cloud', 'remove-cloud', 'rename-cloud', 'reconstruct',
+  'select-cloud', 'remove-cloud', 'rename-cloud', 'set-main-cloud', 'reconstruct',
   'open-matches', 'open-product', 'zoom-to-cloud',
 ])
 
@@ -154,11 +155,13 @@ function toggle(key) {
       :open="open.clouds"
       :clouds="clouds"
       :selected-cloud-id="selectedCloudId"
+      :main-sparse-id="mainSparseId"
       :recon-status="reconStatus"
       @toggle="toggle('clouds')"
       @select-cloud="emit('select-cloud', $event)"
       @remove-cloud="emit('remove-cloud', $event)"
       @rename-cloud="emit('rename-cloud', $event)"
+      @set-main-cloud="emit('set-main-cloud', $event)"
       @reconstruct="emit('reconstruct')"
       @zoom-to-cloud="emit('zoom-to-cloud', $event)"
     />

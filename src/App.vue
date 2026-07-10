@@ -122,8 +122,8 @@ const { sidebarWidth, startSidebarResize } = useSidebarResize()
 // ── Reconstruction ────────────────────────────────────────────────────────────
 // Project-scoped store; restore/clear run through the project-store registry.
 const reconstructionStore = useReconstructionStore()
-const { cameras, sparseCameras, points3d, reconStatus, clouds, selectedCloudId, selectedCloud, depthMaps, dem, ortho, georef, canGeoreference } = storeToRefs(reconstructionStore)
-const { reconstruct, computeDepthMaps, densify, generateDem, generateOrtho, georeference, gcpAccuracyReport, selectCloud, removeCloud, renameCloud } = reconstructionStore
+const { cameras, sparseCameras, points3d, reconStatus, clouds, selectedCloudId, selectedCloud, mainSparseId, mainSparseCloud, depthMaps, dem, ortho, georef, canGeoreference } = storeToRefs(reconstructionStore)
+const { reconstruct, importColmapModel, computeDepthMaps, densify, generateDem, generateOrtho, georeference, gcpAccuracyReport, selectCloud, removeCloud, renameCloud, setMainSparse } = reconstructionStore
 
 // Clicking a point cloud in the sidebar shows it in the 3D viewer.
 function showCloud(id) {
@@ -549,8 +549,8 @@ const {
   openImportFile, openDroppedImport, routeImport,
   onImportKindChosen, onImportSwitchKind,
   openCameraImport, onCameraImport, onGcpImport, onFootprintImport,
-  onGcpPick, onCameraPick,
-} = useImportRouting({ addGcps, addFootprints, addSensors, addPoses, addFiducialObs: addFiducialObservations, activateTab })
+  onGcpPick, onCameraPick, onColmapPick,
+} = useImportRouting({ addGcps, addFootprints, addSensors, addPoses, addFiducialObs: addFiducialObservations, importColmap: importColmapModel, activateTab })
 
 // Switch to the map and centre it on an image's position (pose or EXIF GPS).
 function zoomToImagePosition(imgId) {
@@ -569,7 +569,7 @@ function onFootprintFromPoses(settings) {
 const {
   exportKind, exportPoses, exportSensors, exportKeypoints, exportMatches, onExportRun,
 } = useExports({
-  poses, sensors, images, matchStore, clouds, selectedCloud, dem, ortho,
+  poses, sensors, images, matchStore, clouds, selectedCloud, mainSparseCloud, dem, ortho,
   currentProjectName, currentCrs,
 })
 
@@ -674,6 +674,7 @@ const imageViewerRefs = reactive({})
 const ribbonInput = ref(null)
 const gcpInput = ref(null)
 const cameraInput = ref(null)
+const colmapInput = ref(null)
 // cameraPickMode comes from useImportRouting (above); the command dispatch sets it
 // before opening the hidden camera-file <input>.
 
@@ -684,6 +685,7 @@ function handleCommand(id) {
     case 'import-gcps':          gcpInput.value.click(); break
     case 'import-camera-list':   cameraPickMode.value = 'pose';   cameraInput.value.click(); break
     case 'import-calib':         cameraPickMode.value = 'sensor'; cameraInput.value.click(); break
+    case 'import-colmap':        colmapInput.value.click(); break
     case 'export-cameras':       exportPoses(); break
     case 'export-sensors':       exportSensors(); break
     case 'export-cloud':         exportKind.value = 'cloud'; break
@@ -823,6 +825,7 @@ function onRibbonPick(event) {
     <input ref="ribbonInput" type="file" accept="image/*" multiple hidden @change="onRibbonPick" />
     <input ref="gcpInput" type="file" accept=".csv,.txt,.tsv,.gcp,.pts,.geojson,.json,application/geo+json,text/*" hidden @change="onGcpPick" />
     <input ref="cameraInput" type="file" accept=".csv,.txt,.tsv,.cam,text/*" hidden @change="onCameraPick" />
+    <input ref="colmapInput" type="file" accept=".txt,.bin,.zip" multiple hidden @change="onColmapPick" />
 
     <div v-if="projectPickerOpen && !currentProjectId" class="project-backdrop" />
 
@@ -1132,6 +1135,7 @@ function onRibbonPick(event) {
         :footprints="footprints"
         :clouds="clouds"
         :selected-cloud-id="selectedCloudId"
+        :main-sparse-id="mainSparseId"
         :recon-status="reconStatus"
         :match-stats="matchStats"
         :sensor-image-count="sensorImageCount"
@@ -1145,6 +1149,7 @@ function onRibbonPick(event) {
         @select-cloud="showCloud"
         @remove-cloud="removeCloud"
         @rename-cloud="({ id, name }) => renameCloud(id, name)"
+        @set-main-cloud="setMainSparse"
         @reconstruct="reconstructOpen = true"
         @add-images="addImages"
         @import-file="openDroppedImport"

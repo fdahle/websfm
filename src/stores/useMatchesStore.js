@@ -195,6 +195,10 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
         const result = await verifyMatches(kpsA, kpsB, raw, {
           ransacThreshPx: settings.ransacThreshPx,
           maxIters: settings.maxIters,
+          // Skip H-RANSAC on pairs below the hard acceptance floor: they're rejected
+          // regardless of H, so the H/F degeneracy label is never consulted (see
+          // verify_matches_hf). minMatches is the one un-overridable accept gate.
+          hSkipBelow: minMatches,
         })
         // Inlier-RATIO gate, on top of the absolute count. On repetitive/near-planar
         // scenes (e.g. a building façade) the fundamental-matrix RANSAC can scrape a

@@ -21,7 +21,11 @@ function ensureWasm() {
  * @returns {Promise<{ F: number[][], inlierMask: Float32Array, inlierCount: number, hInlierCount: number } | null>}
  */
 export async function verifyMatches(kpsA, kpsB, matches, options = {}) {
-  const { ransacThreshPx = 2.0, maxIters = 1000 } = options
+  // hSkipBelow: skip the homography RANSAC (only the H/F degeneracy label needs it)
+  // for pairs the caller will reject anyway. Pass the caller's own hard acceptance
+  // floor (`minMatches`) so a skipped pair is guaranteed rejected before its label
+  // is read; default 0 ⇒ never skip.
+  const { ransacThreshPx = 2.0, maxIters = 1000, hSkipBelow = 0 } = options
   await ensureWasm()
 
   const n = matches.length
@@ -38,7 +42,7 @@ export async function verifyMatches(kpsA, kpsB, matches, options = {}) {
   }
 
   // Layout: [F00..F22, hInlierCount, inlier_0, inlier_1, …] (see verify_matches_hf).
-  const raw = verify_matches_hf(ptsA, ptsB, ransacThreshPx, maxIters)
+  const raw = verify_matches_hf(ptsA, ptsB, ransacThreshPx, maxIters, hSkipBelow)
   if (raw.length === 0) return null
 
   const F = [

@@ -1,7 +1,16 @@
 import { describe, it, expect } from 'vitest'
-import { detectFileKind } from './importKind.js'
+import { detectFileKind, isColmapFile } from './importKind.js'
 
 describe('detectFileKind', () => {
+  it('detects COLMAP model files by name (case-insensitive, path-stripped)', () => {
+    expect(detectFileKind('anything', 'cameras.txt')).toEqual({ kind: 'colmap', confidence: 'high' })
+    expect(detectFileKind('', 'sparse/0/images.bin')).toEqual({ kind: 'colmap', confidence: 'high' })
+    expect(detectFileKind('', 'Points3D.TXT')).toEqual({ kind: 'colmap', confidence: 'high' })
+    expect(isColmapFile('cameras.txt')).toBe(true)
+    expect(isColmapFile('mycameras.txt')).toBe(false)
+    expect(isColmapFile('cameras.csv')).toBe(false)
+  })
+
   it('routes a GeoJSON point file to gcp', () => {
     const text = '{"type":"FeatureCollection","features":[{"type":"Feature","geometry":{"type":"Point","coordinates":[1,2]},"properties":{}}]}'
     expect(detectFileKind(text, 'pts.geojson')).toEqual({ kind: 'gcp', confidence: 'high' })

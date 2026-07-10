@@ -429,12 +429,41 @@ fn sample4(rng: &mut Xorshift, n: usize) -> [usize; 4] {
     s
 }
 
+// Adaptive RANSAC stopping rule: the number of iterations needed to draw at least
+// one all-inlier minimal sample with probability `p`, given inlier ratio `w` and
+// sample size `s`:  N = ln(1−p) / ln(1−w^s). Returns `usize::MAX` when `w` is too
+// small to bound the count (keep iterating up to the caller's cap); `1` once a
+// single sample is essentially certain to be clean (`w^s ≈ 1`). A good pair with
+// a high inlier ratio collapses this to well under 100 iterations.
+fn adaptive_iters(w: f64, s: u32, p: f64) -> usize {
+    if w <= 0.0 {
+        return usize::MAX;
+    }
+    let ws = w.powi(s as i32);
+    if ws >= 1.0 {
+        return 1;
+    }
+    let denom = (1.0 - ws).ln();
+    if denom >= 0.0 {
+        return usize::MAX;
+    }
+    let n = (1.0 - p).ln() / denom;
+    if !n.is_finite() || n < 0.0 {
+        return usize::MAX;
+    }
+    (n.ceil() as usize).max(1)
+}
+
+// RANSAC confidence for the adaptive stop (probability of having sampled a clean
+// minimal set). 0.99 is the COLMAP/OpenCV default.
+const RANSAC_CONFIDENCE: f64 = 0.99;
+
 fn ransac_fundamental(
     pa: &[(f64, f64)],
     pb: &[(f64, f64)],
     thresh_sq: f64,
     max_iters: usize,
-) -> Option<(M3, Vec<bool>)> {
+) -> Option<(M3, Vec<bool>, usize)> {
     let n = pa.len().min(pb.len());
     if n < 8 {
         return None;
@@ -444,7 +473,12 @@ fn ransac_fundamental(
     let mut best_mask = vec![false; n];
     let mut best_f: Option<M3> = None;
 
-    for _ in 0..max_iters {
+    // Adaptive termination: `limit` starts at the cap and shrinks as the best inlier
+    // ratio improves. Monotone (best_count only grows), so recompute on each new best.
+    let mut limit = max_iters;
+    let mut iters = 0usize;
+    while iters < limit {
+        iters += 1;
         let idx = sample8(&mut rng, n);
         let sub_a: Vec<_> = idx.iter().map(|&i| pa[i]).collect();
         let sub_b: Vec<_> = idx.iter().map(|&i| pb[i]).collect();
@@ -463,6 +497,8 @@ fn ransac_fundamental(
             best_count = count;
             best_mask = mask;
             best_f = Some(f);
+            let w = best_count as f64 / n as f64;
+            limit = max_iters.min(adaptive_iters(w, 8, RANSAC_CONFIDENCE));
         }
     }
 
@@ -483,7 +519,7 @@ fn ransac_fundamental(
         return None;
     }
 
-    Some((f_ref, final_mask))
+    Some((f_ref, final_mask, iters))
 }
 
 // ─── Homography (4-point DLT + RANSAC) — H-vs-F degeneracy test ────────────────
@@ -561,7 +597,11 @@ fn ransac_homography(pa: &[(f64, f64)], pb: &[(f64, f64)], thresh_sq: f64, max_i
     }
     let mut rng = Xorshift::new(n as u32 * 2657 + 13);
     let mut best_count = 0usize;
-    for _ in 0..max_iters {
+    // Same adaptive stop as F-RANSAC, with the 4-point minimal-sample size.
+    let mut limit = max_iters;
+    let mut iters = 0usize;
+    while iters < limit {
+        iters += 1;
         let idx = sample4(&mut rng, n);
         let sub_a: Vec<_> = idx.iter().map(|&i| pa[i]).collect();
         let sub_b: Vec<_> = idx.iter().map(|&i| pb[i]).collect();
@@ -574,6 +614,8 @@ fn ransac_homography(pa: &[(f64, f64)], pb: &[(f64, f64)], thresh_sq: f64, max_i
         }
         if count > best_count {
             best_count = count;
+            let w = best_count as f64 / n as f64;
+            limit = max_iters.min(adaptive_iters(w, 4, RANSAC_CONFIDENCE));
         }
     }
     best_count
@@ -604,7 +646,7 @@ pub fn verify_matches(
         (0..n).map(|i| (pts_b[i * 2] as f64, pts_b[i * 2 + 1] as f64)).collect();
     let thresh_sq = (ransac_thresh_px as f64).powi(2);
 
-    let Some((f, mask)) = ransac_fundamental(&pa, &pb, thresh_sq, max_iters as usize) else {
+    let Some((f, mask, _iters)) = ransac_fundamental(&pa, &pb, thresh_sq, max_iters as usize) else {
         return vec![];
     };
 
@@ -623,6 +665,13 @@ pub fn verify_matches(
 /// Like `verify_matches`, but also fits a homography via RANSAC and reports its
 /// inlier count so the caller can compute the H-vs-F degeneracy ratio.
 ///
+/// `h_skip_below`: skip the (expensive) homography RANSAC entirely when the F
+/// inlier count is below this value, reporting `h_inlier_count = 0`. The caller
+/// MUST pass its own hard acceptance floor (`minMatches`): a pair below that floor
+/// is rejected regardless of H, so its degeneracy label is never consulted, and the
+/// H/F ratio of 0 (= "non-degenerate") can never mislabel a pair that survives.
+/// Pass 0 (or ≤8) to disable the skip and reproduce the pre-adaptive behaviour.
+///
 /// Output layout: `[F00..F22, h_inlier_count, inlier_0, inlier_1, ...]` — the
 /// fundamental matrix (9), then the homography inlier count (1), then the F
 /// inlier flags (n). Empty if < 8 correspondences or RANSAC finds no F.
@@ -632,6 +681,7 @@ pub fn verify_matches_hf(
     pts_b: &[f32],
     ransac_thresh_px: f32,
     max_iters: u32,
+    h_skip_below: u32,
 ) -> Vec<f32> {
     let n = pts_a.len() / 2;
     if n != pts_b.len() / 2 || n < 8 {
@@ -643,10 +693,17 @@ pub fn verify_matches_hf(
         (0..n).map(|i| (pts_b[i * 2] as f64, pts_b[i * 2 + 1] as f64)).collect();
     let thresh_sq = (ransac_thresh_px as f64).powi(2);
 
-    let Some((f, mask)) = ransac_fundamental(&pa, &pb, thresh_sq, max_iters as usize) else {
+    let Some((f, mask, _iters)) = ransac_fundamental(&pa, &pb, thresh_sq, max_iters as usize) else {
         return vec![];
     };
-    let h_inliers = ransac_homography(&pa, &pb, thresh_sq, max_iters as usize);
+    // Skip H on a pair the caller will reject anyway (F inliers below its floor):
+    // the H/F degeneracy label only matters for pairs that survive to seed SfM.
+    let f_inliers = mask.iter().filter(|&&x| x).count();
+    let h_inliers = if (f_inliers as u32) < h_skip_below {
+        0
+    } else {
+        ransac_homography(&pa, &pb, thresh_sq, max_iters as usize)
+    };
 
     let mut out = Vec::with_capacity(9 + 1 + n);
     for row in &f {
@@ -719,7 +776,7 @@ mod tests {
     #[test]
     fn homography_dominates_on_planar_scene() {
         let (pa, pb) = scene(true);
-        let out = verify_matches_hf(&pa, &pb, 2.0, 2000);
+        let out = verify_matches_hf(&pa, &pb, 2.0, 2000, 0);
         assert!(!out.is_empty(), "verification should succeed on a planar scene");
         let h = out[9];
         let f_inliers: f32 = out[10..].iter().sum();
@@ -729,11 +786,65 @@ mod tests {
     #[test]
     fn homography_underfits_general_scene() {
         let (pa, pb) = scene(false);
-        let out = verify_matches_hf(&pa, &pb, 2.0, 2000);
+        let out = verify_matches_hf(&pa, &pb, 2.0, 2000, 0);
         assert!(!out.is_empty(), "verification should succeed on a general scene");
         let h = out[9];
         let f_inliers: f32 = out[10..].iter().sum();
         assert!(f_inliers > 40.0, "general F should fit most points: {f_inliers}");
         assert!(h / f_inliers < 0.8, "general H/F ratio too high: {h} / {f_inliers}");
+    }
+
+    // The adaptive-iters formula itself: high inlier ratio ⇒ tiny count; low ratio
+    // ⇒ unbounded (fall back to the cap); saturated ratio ⇒ a single sample.
+    #[test]
+    fn adaptive_iters_shrinks_with_inlier_ratio() {
+        // Clean pair (w=0.9, s=8): well under 100 iterations at 99% confidence.
+        assert!(adaptive_iters(0.9, 8, 0.99) < 100);
+        // Noisy pair (w=0.2, s=8): a huge finite count → clamped to the cap by the
+        // caller (min(max_iters, …)), i.e. "keep going", never an early stop.
+        assert!(adaptive_iters(0.2, 8, 0.99) > 100_000);
+        // All inliers ⇒ one sample suffices; zero inliers ⇒ unbounded.
+        assert_eq!(adaptive_iters(1.0, 8, 0.99), 1);
+        assert_eq!(adaptive_iters(0.0, 8, 0.99), usize::MAX);
+        // Monotone: a better ratio never needs more iterations.
+        assert!(adaptive_iters(0.8, 8, 0.99) <= adaptive_iters(0.5, 8, 0.99));
+    }
+
+    // A high-inlier pair terminates in far fewer than max_iters, and its inlier set
+    // is unchanged from a full-length run (adaptive stop only cuts wasted iterations).
+    #[test]
+    fn fundamental_terminates_early_on_clean_pair() {
+        let (pa, pb) = scene(false); // general motion → most points are F inliers
+        let n = pa.len() / 2;
+        let a: Vec<(f64, f64)> =
+            (0..n).map(|i| (pa[i * 2] as f64, pa[i * 2 + 1] as f64)).collect();
+        let b: Vec<(f64, f64)> =
+            (0..n).map(|i| (pb[i * 2] as f64, pb[i * 2 + 1] as f64)).collect();
+
+        let (_, mask_cap, iters) = ransac_fundamental(&a, &b, 4.0, 5000).unwrap();
+        assert!(iters < 200, "clean pair should stop early, took {iters} iters");
+        // Same inlier set as a short run — adaptive stop is behaviour-preserving.
+        let (_, mask_short, _) = ransac_fundamental(&a, &b, 4.0, iters.max(50)).unwrap();
+        assert_eq!(mask_cap, mask_short, "adaptive stop changed the inlier set");
+    }
+
+    // h_skip_below suppresses the homography count once F inliers fall below the
+    // floor, and leaves it intact above the floor.
+    #[test]
+    fn h_skip_below_suppresses_homography_on_weak_pairs() {
+        let (pa, pb) = scene(true); // planar → strong H
+        let full = verify_matches_hf(&pa, &pb, 2.0, 2000, 0);
+        let f_inliers: f32 = full[10..].iter().sum();
+        assert!(full[9] > 0.0, "baseline H should be non-zero on a planar pair");
+
+        // Floor just above this pair's F-inlier count ⇒ H skipped ⇒ reported 0.
+        let skipped = verify_matches_hf(&pa, &pb, 2.0, 2000, f_inliers as u32 + 1);
+        assert_eq!(skipped[9], 0.0, "H should be skipped below the floor");
+        // F side is untouched by the skip.
+        assert_eq!(&skipped[10..], &full[10..], "skip must not affect F inliers");
+
+        // Floor at/below the count ⇒ H still computed.
+        let kept = verify_matches_hf(&pa, &pb, 2.0, 2000, f_inliers as u32);
+        assert!(kept[9] > 0.0, "H should run when F inliers meet the floor");
     }
 }
