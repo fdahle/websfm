@@ -160,6 +160,33 @@ none invalidates current defaults):
 
 ## Next
 
+### MC — Multiple result clouds (sparse + dense) with lineage
+Today the pipeline assumes exactly one `kind:'sparse'` cloud (every downstream
+stage does `clouds.find(c => c.kind==='sparse')`) and one `dem`/`ortho`. Lift
+that for the two artifacts users actually compare — **sparse and dense clouds** —
+so a COLMAP import (F7) can sit next to a computed reconstruction instead of
+destructively replacing it, and so re-running with different settings can keep
+both. This is the useful 20% of Metashape "chunks" without the project-management
+overhead (chunks themselves stay Parked — decide consciously to stop here).
+
+**Design principle:** multiplicity is for artifacts you'd *compare or keep
+provenance of*; the payoff is **lineage**, not just a "main" pointer. `selectedCloud`
+(viewer focus) already exists and is multi-cloud; what's missing is the *downstream*
+selection — which cloud each stage consumes.
+
+- **Phase 0 — sparse multiplicity + `mainSparseId`.** ✅ landed 2026-07-10 (see
+  HANDOVER); **browser run owed** (set-main + delete-main promotion + persistence
+  round-trip in the real app — OPFS/Vue can't be driven here).
+- **Phase 0b — dense multiplicity + `mainDenseId` + `parentSparseId`.** Nearly free
+  once 0 lands (`clouds` already holds both kinds): stop replacing on `upsertDenseCloud`,
+  add `mainDenseId` + a `parentSparseId` on each dense cloud (which sparse it fused
+  from) so lineage is explicit. **Depth maps become a child of their dense run** —
+  key the cache by parent dense id rather than exposing "multiple depth-map sets".
+- **Deferred (Tier 2/3, don't build yet):** DEM/ortho stay single refs until a real
+  compare-two-DEMs need appears (cheap to regenerate, undercuts keeping several);
+  matches/keypoints/georef stay single (one converged config in practice — a plural
+  match graph is a bigger store rework for a workflow most users don't run).
+
 ### SP — SuperPoint + LightGlue: remaining slices
 SP0–SP2 shipped (runtime + assets, SuperPoint detect path, LightGlue match op —
 see HANDOVER 2026-07-06/07 entries; W0 ships the last SP1 piece). Remaining:
@@ -301,18 +328,21 @@ the **BA (pinhole) frame** — the sparse run bakes each view's undistorted /
 fiducial-canonical / self-cal-folded pixel into the cloud (`viewsPx`, persisted as
 `recon.*.vx/vy.bin`), so distortion / film-scan / self-cal projects export
 observations coherent with the exported K/R/t (B2 fix, 2026-07-10). Remaining:
-- **Import** — `parseColmapModel` → `readColmapModel` → match names to loaded
-  images → `upsertSparseCloud`, letting users bring a COLMAP reconstruction in
-  for dense/DEM/ortho/georef. Needs a multi-file/zip picker (COLMAP is a file
-  *set*), `importKind.js` filename sniffing (`cameras.txt`/…), and a
-  `useImportRouting` route. Distortion coeffs of RADIAL/OPENCV cameras are read
-  for fx/fy/cx/cy only (`readColmapModel.droppedDistortion` → warn).
+- **Import (text)** — ✅ shipped 2026-07-10 (see HANDOVER): `colmapToSparse` +
+  `makeNameResolver` (colmapModel.js), `unzipStore` (zip.js), `isColmapFile`
+  sniffing, `useReconstructionStore.importColmapModel`, Ribbon *Import ▸ Interop ▸
+  COLMAP Model* + multi-file/zip picker (`useImportRouting.openColmapImport`). Adds a
+  new sparse cloud via MC (never replaces). **Browser run still owed** — see below.
 - **`.bin` variants** — LE-binary mirror of the txt read/write (fast follow).
-- **Browser manual run (owed verification)** — export a real sparse model, open the
-  zip in COLMAP / another importer; confirm cameras + points land with low
+- **Browser manual run (owed verification)** — (a) export a real sparse model, open
+  the zip in COLMAP / another importer; confirm cameras + points land with low
   reprojection error. Specifically exercise a **film-scan** and a **self-cal** (`f,k1`)
-  project now that observations export in the BA frame (B2) — this is the round-trip
-  the unit tests can't cover.
+  project now that observations export in the BA frame (B2) — the round-trip the unit
+  tests can't cover. (b) **Import** the same zip back (or a COLMAP model from
+  elsewhere) into a project with the matching images loaded: confirm the new
+  "Imported (COLMAP)" sparse cloud appears alongside the computed one, name-matching
+  hits the loaded images, and it can be set main → dense/DEM run off it. Best
+  end-to-end check: export→import round-trip lands cameras in ~the same frame.
 
 ### F8 — Processing report **[new 2026-07-07]**
 Metashape's PDF report is half its survey-market credibility. Generate a

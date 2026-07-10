@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   filterDepthMap, depthMapForImage, qualityToMaxDim, autoBestK, autoFusionMaxCost,
-  fuseDepthMaps,
+  fuseDepthMaps, mergePointsSpatial,
 } from './mvs.js'
 
 // Build a w×h Float32Array depth plane from a 2-D array of numbers (0 = hole).
@@ -168,5 +168,56 @@ describe('quality presets & derived params (Step 3)', () => {
     // Summary is attached to the returned array for cross-run comparison (Q3).
     expect(out.summary).toBeTruthy()
     expect(out.summary.cullBreakdown).toHaveProperty('lowViewsPct')
+  })
+})
+
+describe('mergePointsSpatial (fusion dedupe)', () => {
+  it('collapses near-coincident points in one cell to one averaged point', () => {
+    // Three duplicate-shell points (same surface from three views) within one cell,
+    // plus one distinct point a cell away.
+    const pts = [
+      { x: 0.00, y: 0.0, z: 0.0, color: [90, 0, 0] },
+      { x: 0.01, y: 0.0, z: 0.0, color: [120, 0, 0] },
+      { x: 0.02, y: 0.0, z: 0.0, color: [150, 0, 0] },
+      { x: 5.00, y: 0.0, z: 0.0, color: [0, 200, 0] },
+    ]
+    const out = mergePointsSpatial(pts, 1.0)
+    expect(out.length).toBe(2)
+    const merged = out.find((p) => p.x < 1)
+    expect(merged.x).toBeCloseTo(0.01, 6)          // averaged position
+    expect(merged.color).toEqual([120, 0, 0])       // averaged colour
+  })
+
+  it('is order-independent (same cells regardless of input order)', () => {
+    const a = { x: 0.1, y: 0.1, z: 0.1, color: [10, 20, 30] }
+    const b = { x: 0.2, y: 0.2, z: 0.2, color: [40, 50, 60] }
+    const fwd = mergePointsSpatial([a, b], 1.0)
+    const rev = mergePointsSpatial([b, a], 1.0)
+    expect(fwd).toEqual(rev)
+    expect(fwd.length).toBe(1)
+  })
+
+  it('returns the input unchanged when the cell size is non-positive', () => {
+    const pts = [{ x: 0, y: 0, z: 0, color: [1, 2, 3] }]
+    expect(mergePointsSpatial(pts, 0)).toBe(pts)
+    expect(mergePointsSpatial(pts, -1)).toBe(pts)
+  })
+
+  it('fuseDepthMaps dedupes cross-view shells into fewer points than kept', () => {
+    // Two 2×2 maps viewing the same fronto-parallel plane at depth 1 from identical
+    // poses: every kept pixel in map B coincides in world space with map A's, so the
+    // spatial merge must roughly halve the raw fused count.
+    const mk = (uuid) => ({
+      uuid, width: 2, height: 2,
+      K: { fx: 100, fy: 100, cx: 1, cy: 1 }, R: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], t: [0, 0, 0],
+      depth: Float32Array.from([1, 1, 1, 1]),
+      cost: Float32Array.from([0.1, 0.1, 0.1, 0.1]),
+      rgb: new Uint8Array(2 * 2 * 3).fill(128),
+    })
+    const out = fuseDepthMaps([mk('a'), mk('b')], {}, () => {})
+    // 8 candidate px kept (both maps agree everywhere) but 4 distinct world cells.
+    expect(out.summary.keptPct).toBeGreaterThan(0)
+    expect(out.summary.mergedPct).toBeGreaterThan(0)
+    expect(out.length).toBeLessThanOrEqual(4)
   })
 })

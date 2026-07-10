@@ -386,9 +386,60 @@ export function autoFusionMaxCost(maps, { percentile = 0.7, lo = 0.3, hi = 0.45 
 //            rgb:Uint8Array(w*h*3) }]
 // Returns [{ x, y, z, color:[r,g,b] }]. `onLog(msg, level, category)` (optional)
 // receives a breakdown of why pixels were kept or culled.
+/**
+ * Spatial (voxel) merge of a fused point set: collapse points that fall in the same
+ * world-space cell into a single averaged point (position + colour). Order-independent,
+ * so it's the principled way to kill the per-source-pixel "duplicate shells" a
+ * multi-view fusion emits — the same surface point reconstructed from several views
+ * lands in one cell and becomes one point. `cellSize` is in world units (≈ one
+ * ground-sample-distance ⇒ one point per ground pixel-footprint: dedupes overlap while
+ * preserving resolution). `cellSize <= 0` disables the merge (returns the input).
+ */
+export function mergePointsSpatial(points, cellSize) {
+  if (!(cellSize > 0) || points.length === 0) return points
+  const inv = 1 / cellSize
+  const cells = new Map()
+  for (const p of points) {
+    const key = `${Math.floor(p.x * inv)},${Math.floor(p.y * inv)},${Math.floor(p.z * inv)}`
+    let acc = cells.get(key)
+    if (!acc) { acc = { x: 0, y: 0, z: 0, r: 0, g: 0, b: 0, n: 0 }; cells.set(key, acc) }
+    acc.x += p.x; acc.y += p.y; acc.z += p.z
+    acc.r += p.color[0]; acc.g += p.color[1]; acc.b += p.color[2]
+    acc.n++
+  }
+  const out = []
+  for (const a of cells.values()) {
+    const k = 1 / a.n
+    out.push({
+      x: a.x * k, y: a.y * k, z: a.z * k,
+      color: [Math.round(a.r * k), Math.round(a.g * k), Math.round(a.b * k)],
+    })
+  }
+  return out
+}
+
+// Auto voxel size for the spatial merge: the median ground-sample-distance across
+// maps (median valid depth / fx = the world-space span of one pixel). One cell ≈ one
+// pixel footprint, so cross-view overlap dedupes without discarding real resolution.
+function autoMergeCell(maps) {
+  const gsds = []
+  for (const m of maps) {
+    const { depth } = m
+    const ds = []
+    for (let i = 0; i < depth.length; i++) if (depth[i] > 0) ds.push(depth[i])
+    if (!ds.length) continue
+    ds.sort((a, b) => a - b)
+    const fx = m.K?.fx || 0
+    if (fx > 0) gsds.push(ds[ds.length >> 1] / fx)
+  }
+  if (!gsds.length) return 0
+  gsds.sort((a, b) => a - b)
+  return gsds[gsds.length >> 1]
+}
+
 export function fuseDepthMaps(maps, opts = {}, onLog = () => {}) {
   // depthTolRel/step are user-facing (DENSE_FUSE_DEFAULTS); consistencyPx is internal (tuning.js).
-  const { consistencyPx = DENSE_TUNING.consistencyPx, depthTolRel = 0.01, step = 2 } = opts
+  const { consistencyPx = DENSE_TUNING.consistencyPx, depthTolRel = 0.01, step = 1 } = opts
 
   // Derived defaults (Step 3): when the user hasn't overridden them, adapt to the
   // data. minViews = min(2, nMaps−1) so a 2-image project can still fuse (needs 1
@@ -493,19 +544,35 @@ export function fuseDepthMaps(maps, opts = {}, onLog = () => {}) {
     + `${noDepth} no-depth (${pct(noDepth)}%), ${highCost} cost>${maxCost} (${pct(highCost)}%), `
     + `${failedConsistency} <${minViews} views (${pct(failedConsistency)}%)`, 'info', 'Dense')
 
+  // Spatial dedupe: fusion emits one point per source pixel, so a surface seen by k
+  // views yields k near-coincident "shell" points. Collapse them in world space (one
+  // averaged point per cell) — order-independent, and it recovers full resolution: at
+  // step 1 the raw count is 4× but the merge brings the output back to ~one point per
+  // ground pixel. mergeCell: null ⇒ auto (median GSD), 0 ⇒ disabled.
+  const rawCount = out.length
+  const mergeCell = opts.mergeCell != null ? opts.mergeCell : autoMergeCell(maps)
+  const merged = mergePointsSpatial(out, mergeCell)
+  if (merged.length !== rawCount) {
+    onLog(`Fusion: spatial merge cell ${mergeCell.toExponential(2)} — ${rawCount} → ${merged.length} pts `
+      + `(−${rawCount - merged.length} dupes, ${(100 * (rawCount - merged.length) / Math.max(1, rawCount)).toFixed(1)}%)`,
+      'info', 'Dense')
+  }
+
   // Q3: a small, persistable summary so successive dense runs are comparable
   // (attached to the returned array — non-breaking for callers that just iterate).
   const denom = Math.max(1, considered)
-  out.summary = {
+  merged.summary = {
     costMedian: medianOf(maps),
     keptPct: 100 * kept / denom,
+    mergeCell,
+    mergedPct: rawCount ? 100 * (rawCount - merged.length) / rawCount : 0,
     cullBreakdown: {
       noDepthPct: 100 * noDepth / denom,
       highCostPct: 100 * highCost / denom,
       lowViewsPct: 100 * failedConsistency / denom,
     },
   }
-  return out
+  return merged
 }
 
 // Median of the pooled valid-pixel costs across depth maps (dense-summary helper).

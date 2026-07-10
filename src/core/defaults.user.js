@@ -87,7 +87,7 @@ export const DENSE_FUSE_DEFAULTS = {
   minViews: 2,       // manual cross-view consistency count (when not auto)
   depthTolPct: 1.0,  // manual depth agreement tolerance, % of depth
   maxCost: 0.6,      // manual per-pixel cost gate (when not auto)
-  step: 2,           // fusion pixel stride
+  step: 1,           // fusion pixel stride (full res; spatial merge dedupes overlap)
 }
 
 // DEM (core/products/dem.js). Mirrored by DemModal.vue; gsd 0 ⇒ worker auto-suggests.

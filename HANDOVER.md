@@ -68,6 +68,48 @@ fiducials; self-calibration (A2) + fiducials (F4) are the code-side support.
 
 ## Done log (most recent first)
 
+- **2026-07-10 · COLMAP model import (F7, text half)** — completes the F7 round-trip
+  (export shipped earlier same day). Pure core: `colmapToSparse({images,points},
+  resolveUuid)` + `makeNameResolver` (tiered name→uuid: exact → basename →
+  case-insensitive → extension-stripped) in `core/io/colmapModel.js`; imported points
+  carry a synthetic per-image `views` index (dense reads only view *uuids*) with the
+  real pixel in `viewsPx` for coherent re-export. `utils/zip.js` gains `unzipStore`
+  (STORE-method inverse of `zipStore`, EOCD+central-directory reader, throws on
+  compressed/malformed). `core/io/importKind.js` gains `isColmapFile` +
+  a `'colmap'` kind. Store: `useReconstructionStore.importColmapModel(files)` parses →
+  reads → matches names to loaded images → `upsertSparseCloud(…, { replaceId:null,
+  asMain:!main })` so the import is a NEW sparse cloud alongside any computed one (MC
+  Phase 0), with heavy logging of matched/unmatched/dropped-distortion counts and a
+  <2-match guard. UI: Ribbon *Import ▸ Interop ▸ COLMAP Model* (+ console `import
+  colmap`) → hidden multi-file/zip `<input>` → `useImportRouting.openColmapImport`
+  (accepts a `.zip` or the loose `cameras.txt`/`images.txt`/`points3D.txt` set,
+  case-insensitive, canonicalising keys). Tests: `colmapToSparse` + `makeNameResolver`
+  round-trip/unmatched-drop cases, `unzipStore` round-trip + comment-scan + non-zip
+  throw, `isColmapFile` sniffing. **Also fixed a latent gap:** `vitest.config.js` only
+  globbed `src/core/**`, so `src/utils/zip.test.js` never ran — added
+  `src/utils/**/*.test.{js,ts}` (utils tests must stay Vue/Pinia/DOM-free). `npm test`
+  (418) + typecheck + build green. Owed: **browser run** — import a real model into a
+  project with matching images, confirm the cloud lands + set-main → dense; plus `.bin`
+  variants (fast follow). See TODO ▸ Later ▸ F7. Lives in the `core/io/` line of CLAUDE.md.
+
+- **2026-07-10 · MC Phase 0 — multiple sparse clouds with a "main" designation** —
+  groundwork so a COLMAP import (F7) can sit alongside a computed reconstruction
+  instead of destructively replacing it. `useReconstructionStore` gains `mainSparseId`
+  + `mainSparseCloud` getter (fallback: first sparse) + `setMainSparse`; the invariant
+  *one sparse cloud is always main whenever any exists* is held by `ensureMainSparse`
+  (after `removeCloud`/`restore`/`clear`). Downstream consumers repointed from
+  `find(kind==='sparse')` → `mainSparseCloud`: `sparseCameras`, `computeDepthMaps`,
+  `generateDem`'s sparse source, and `useExports.sparseCloud()`. `upsertSparseCloud`
+  grew an `{ replaceId, asMain, name }` intent — reconstruct replaces the main in place
+  (id/name carried forward, default `replaceId = mainSparseId`); import will pass
+  `replaceId:null` to add a fresh cloud, `asMain` only when none exists. `mainSparseId`
+  persists in `reconstruction.json` (absent ⇒ first sparse, back-compat). UI:
+  `CloudsSection.vue` right-click "Set as main" (sparse, non-main only) + a "main"
+  badge, wired through `Sidebar.vue`/`App.vue`. `npm test` (406) + typecheck + build
+  green. Store/UI is browser-runtime — **owed** a real-app run (set-main, delete-main
+  promotion, persistence round-trip). Lives in the `useReconstructionStore` paragraph of
+  CLAUDE.md. Next: Phase 0b (dense multiplicity + lineage) then F7 import (TODO ▸ Next ▸ MC).
+
 - **2026-07-10 · Stalled-strip rescue for registration (S1, `register.js`)** — when a
   sweep registers nothing but images still link to the model (short film strips: end
   frames fail on a ~10%-wrong focal + a strip-end structure gap), run one rescue round:

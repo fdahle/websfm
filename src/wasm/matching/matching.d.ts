@@ -25,11 +25,18 @@ export function verify_matches(pts_a: Float32Array, pts_b: Float32Array, ransac_
  * Like `verify_matches`, but also fits a homography via RANSAC and reports its
  * inlier count so the caller can compute the H-vs-F degeneracy ratio.
  *
+ * `h_skip_below`: skip the (expensive) homography RANSAC entirely when the F
+ * inlier count is below this value, reporting `h_inlier_count = 0`. The caller
+ * MUST pass its own hard acceptance floor (`minMatches`): a pair below that floor
+ * is rejected regardless of H, so its degeneracy label is never consulted, and the
+ * H/F ratio of 0 (= "non-degenerate") can never mislabel a pair that survives.
+ * Pass 0 (or ≤8) to disable the skip and reproduce the pre-adaptive behaviour.
+ *
  * Output layout: `[F00..F22, h_inlier_count, inlier_0, inlier_1, ...]` — the
  * fundamental matrix (9), then the homography inlier count (1), then the F
  * inlier flags (n). Empty if < 8 correspondences or RANSAC finds no F.
  */
-export function verify_matches_hf(pts_a: Float32Array, pts_b: Float32Array, ransac_thresh_px: number, max_iters: number): Float32Array;
+export function verify_matches_hf(pts_a: Float32Array, pts_b: Float32Array, ransac_thresh_px: number, max_iters: number, h_skip_below: number): Float32Array;
 
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
@@ -37,7 +44,7 @@ export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly match_descriptors: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];
     readonly verify_matches: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
-    readonly verify_matches_hf: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
+    readonly verify_matches_hf: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];
     readonly __wbindgen_externrefs: WebAssembly.Table;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_free: (a: number, b: number, c: number) => void;

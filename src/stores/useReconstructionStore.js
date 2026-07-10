@@ -15,6 +15,7 @@ import { cameraCenter } from '../core/sfm/geometry.js'
 import { triangulateAllGcps } from '../core/sfm/gcpTriangulation.js'
 import { qualityToMaxDim } from '../core/dense/mvs.js'
 import { distortionOf } from '../core/sfm/distortion.js'
+import { parseColmapModel, readColmapModel, makeNameResolver, colmapToSparse } from '../core/io/colmapModel.js'
 import { registerProjectStore } from './projectStores.js'
 import { useImagesStore } from './useImagesStore.js'
 import { useMatchesStore } from './useMatchesStore.js'
@@ -42,6 +43,12 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
   //     cameras: Map<uuid, { R, t, K }>, points: [{ x, y, z, views, color }] }
   const clouds = ref([])
   const selectedCloudId = ref(null)
+  // The sparse cloud downstream stages (dense / DEM / ortho / export / the sensor
+  // table) consume. Distinct from `selectedCloudId` (viewer focus): multiple sparse
+  // clouds can coexist — a computed reconstruction alongside a COLMAP import — but
+  // exactly one is "main". Invariant: whenever any sparse cloud exists, this points
+  // at one of them (see `ensureMainSparse`). Persisted in reconstruction.json.
+  const mainSparseId = ref(null)
   const reconStatus = ref('idle') // last run: 'idle' | 'running' | 'done' | 'error'
 
   // Per-image depth maps from the dense Stage A (Build Depth Maps). Transient,
@@ -91,9 +98,33 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
   // bundle-adjusted poses/intrinsics. The sensor table reads estimated values
   // from these, so it must not follow the viewer's selection (selecting the
   // dense cloud, whose camera Map is empty, would otherwise blank the table).
-  const sparseCameras = computed(
-    () => clouds.value.find((c) => c.kind === 'sparse')?.cameras ?? new Map(),
+  // The main sparse cloud — what downstream stages consume. Falls back to the first
+  // sparse cloud when `mainSparseId` is stale/unset (legacy projects, post-delete).
+  const mainSparseCloud = computed(
+    () => clouds.value.find((c) => c.id === mainSparseId.value && c.kind === 'sparse')
+      ?? clouds.value.find((c) => c.kind === 'sparse')
+      ?? null,
   )
+
+  const sparseCameras = computed(() => mainSparseCloud.value?.cameras ?? new Map())
+
+  // Re-establish the "one sparse cloud is always main" invariant after any change
+  // to the cloud list (delete, restore). If the current main is gone but sparse
+  // clouds remain, promote the first; if none remain, clear it.
+  function ensureMainSparse() {
+    const stillMain = clouds.value.some((c) => c.id === mainSparseId.value && c.kind === 'sparse')
+    if (stillMain) return
+    mainSparseId.value = clouds.value.find((c) => c.kind === 'sparse')?.id ?? null
+  }
+
+  // Promote a sparse cloud to main (right-click "Set as main" in the sidebar).
+  function setMainSparse(id) {
+    const cloud = clouds.value.find((c) => c.id === id && c.kind === 'sparse')
+    if (!cloud || mainSparseId.value === id) return
+    mainSparseId.value = id
+    log(`Main sparse cloud → "${cloud.name}"`, 'info', 'Reconstruction')
+    persist()
+  }
 
   function selectCloud(id) {
     selectedCloudId.value = id
@@ -103,6 +134,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     clouds.value = clouds.value.filter((c) => c.id !== id)
     if (selectedCloudId.value === id)
       selectedCloudId.value = clouds.value[0]?.id ?? null
+    ensureMainSparse()
     persist()
   }
 
@@ -184,6 +216,9 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
   function serialize() {
     return {
       clouds: clouds.value.map(serializeCloud),
+      // Which sparse cloud downstream stages consume (MC). Absent in legacy docs ⇒
+      // restore falls back to the first sparse cloud.
+      mainSparseId: mainSparseId.value,
       // Small + reusable across sessions; the DEM/ortho rasters themselves are
       // recomputable and stay out of the persisted doc.
       georef: georef.value,
@@ -198,15 +233,24 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     await opfs.saveReconstruction(projects.currentProjectId, serialize()).catch(() => {})
   }
 
-  // Insert the freshly-computed sparse model, replacing any existing sparse cloud.
+  // Insert a sparse model. Two intents via `opts`:
+  //   • reconstruct (default) — replace the *main* sparse cloud in place, carrying
+  //     its id/name forward, and keep it main. `replaceId` defaults to the current
+  //     main so a rebuild updates the model the pipeline was consuming.
+  //   • import (COLMAP) — pass `replaceId: null` to add a NEW cloud alongside any
+  //     existing ones (so it can be compared), with `asMain` only when there's no
+  //     main yet, and an explicit `name`.
   // A new object (not an in-place mutation) so consumers watching `selectedCloud`
   // by reference re-render after a rebuild.
-  function upsertSparseCloud(cameras, points) {
-    const idx = clouds.value.findIndex((c) => c.kind === 'sparse')
+  function upsertSparseCloud(cameras, points, opts = {}) {
+    const { replaceId = mainSparseId.value, asMain = true, name } = opts
+    const idx = replaceId
+      ? clouds.value.findIndex((c) => c.id === replaceId && c.kind === 'sparse')
+      : -1
     const prev = idx >= 0 ? clouds.value[idx] : null
     const cloud = {
       id: prev?.id ?? makeCloudId(),
-      name: prev?.name ?? 'Sparse cloud',
+      name: name ?? prev?.name ?? 'Sparse cloud',
       kind: 'sparse',
       createdAt: Date.now(),
       // markRaw: keep the big point/camera data out of Vue's reactivity (see restore).
@@ -216,6 +260,58 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     if (idx >= 0) clouds.value.splice(idx, 1, cloud)
     else clouds.value.push(cloud)
     selectedCloudId.value = cloud.id
+    if (asMain || !mainSparseCloud.value) mainSparseId.value = cloud.id
+  }
+
+  // Import a COLMAP sparse text model as a NEW sparse cloud (never replaces a
+  // computed one — MC lets both coexist for comparison; becomes main only when no
+  // sparse cloud exists yet). `files` is a { 'cameras.txt': text, … } map; images are
+  // matched to the loaded set by name. Returns true on success. Distortion coeffs of
+  // RADIAL/OPENCV cameras are read for fx/fy/cx/cy only — the model is treated as
+  // pinhole (consistent with the whole pipeline), and dropped terms are warned.
+  function importColmapModel(files) {
+    let colImages, colPoints, droppedDistortion
+    try {
+      ({ images: colImages, points: colPoints, droppedDistortion } =
+        readColmapModel(parseColmapModel(files)))
+    } catch (err) {
+      log(`COLMAP import: could not parse model — ${err?.message ?? err}`, 'error', 'Reconstruction')
+      return false
+    }
+    if (!colImages.length) {
+      log('COLMAP import: no images found (need cameras.txt + images.txt)', 'warn', 'Reconstruction')
+      return false
+    }
+
+    const resolve = makeNameResolver(images.value.map((im) => ({ uuid: im.uuid, name: im.name })))
+    const { cameras, points, matched, unmatched } = colmapToSparse(
+      { images: colImages, points: colPoints }, resolve)
+
+    log(`COLMAP import: matched ${matched.length}/${colImages.length} images by name`
+      + `, ${points.length}/${colPoints.length} points`, 'info', 'Reconstruction')
+    if (unmatched.length) {
+      log(`COLMAP import: ${unmatched.length} image(s) not in this project (skipped): `
+        + unmatched.slice(0, 8).join(', ') + (unmatched.length > 8 ? '…' : ''), 'warn', 'Reconstruction')
+    }
+    if (droppedDistortion.length) {
+      log(`COLMAP import: dropped distortion of ${droppedDistortion.join(', ')} camera(s) `
+        + '— intrinsics read as pinhole (fx/fy/cx/cy)', 'warn', 'Reconstruction')
+    }
+    if (cameras.size < 2) {
+      log('COLMAP import: fewer than 2 images matched the loaded set — nothing to import. '
+        + 'Load the matching images first (names must correspond).', 'warn', 'Reconstruction')
+      return false
+    }
+
+    upsertSparseCloud(cameras, points, {
+      replaceId: null,
+      asMain: !mainSparseCloud.value,
+      name: 'Imported (COLMAP)',
+    })
+    log(`COLMAP import: added sparse cloud (${cameras.size} cameras, ${points.length} points)`
+      + `${mainSparseId.value === selectedCloudId.value ? ' — set as main' : ''}`, 'success', 'Reconstruction')
+    persist()
+    return true
   }
 
   // Insert the fused dense model, replacing any existing dense cloud (carries the
@@ -244,7 +340,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
   // project works without rebuilding (legacy models saved before this still need
   // a Reconstruct re-run).
   async function computeDepthMaps(settings = {}, onProgress) {
-    const cloud = clouds.value.find((c) => c.kind === 'sparse')
+    const cloud = mainSparseCloud.value
     if (!cloud || cloud.cameras.size < 2) {
       log('Dense: need a sparse cloud with ≥2 cameras first', 'warn', 'Dense')
       return
@@ -499,7 +595,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
   // (settings.crs: 'local' | 'project'). A new DEM invalidates the old ortho.
   async function generateDem(settings = {}, onProgress) {
     const dense = clouds.value.find((c) => c.kind === 'dense')
-    const sparse = clouds.value.find((c) => c.kind === 'sparse')
+    const sparse = mainSparseCloud.value
     const src = dense?.points?.length ? dense : sparse
     if (!src || !src.points.length) {
       log('DEM: build a point cloud first', 'warn', 'Products')
@@ -716,6 +812,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
   function clear({ purge = false } = {}) {
     clouds.value = []
     selectedCloudId.value = null
+    mainSparseId.value = null
     reconStatus.value = 'idle'
     depthMaps.value = new Map()
     dem.value = null
@@ -815,6 +912,8 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
 
     clouds.value = raw.map((c) => (c.buffers ? deserializeCloud(c) : legacyDeserializeCloud(c)))
     selectedCloudId.value = clouds.value[0]?.id ?? null
+    mainSparseId.value = data.mainSparseId ?? null
+    ensureMainSparse() // legacy docs (no mainSparseId) → first sparse cloud
     georef.value = data.georef ?? null
     summary.value = data.summary ?? null
     denseSummary.value = data.denseSummary ?? null
@@ -840,6 +939,9 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     clouds,
     selectedCloudId,
     selectedCloud,
+    mainSparseId,
+    mainSparseCloud,
+    setMainSparse,
     cameras,
     sparseCameras,
     points3d,
@@ -857,6 +959,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     generateDem,
     generateOrtho,
     reconstruct,
+    importColmapModel,
     computeDepthMaps,
     densify,
     restore,

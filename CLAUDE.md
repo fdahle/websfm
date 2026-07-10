@@ -52,9 +52,12 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
   `core/dense/` (`mvs.js` dense MVS orchestrator, `planeCost.js`, `memBudget.js`),
   `core/products/` (`dem.js`, `ortho.js`, `projection.js`, `georef.js`, `exporters.js`,
   `geotiff.js`, `colormap.js`), `core/io/` (`gcp.js`, `pose.js`, `sensor.js`,
-  `geojson.js`, `metadata.js`, `cameraKind.js`, `importKind.js`, `colmapModel.js`
+  `geojson.js`, `metadata.js`, `cameraKind.js`, `importKind.js` — filename/content
+  sniffing incl. `isColmapFile`, `colmapModel.js`
   — pure COLMAP text-model read/write: R↔quaternion + serialize/parse +
-  websfm↔ColmapModel adapters), `core/help/`
+  websfm↔ColmapModel adapters both ways (`buildColmapModel` export;
+  `readColmapModel`→`colmapToSparse` import via `makeNameResolver` name→uuid
+  matching, dropping unmatched images/observations)), `core/help/`
   (`glossary.js`, `guide.js`, `commands.js`); cross-cutting stragglers stay flat at
   `core/` root (`crs.js`, `footprint.js`, `mask.js`, `types.ts`).
 - **`src/stores/*.js`** own reactive state + OPFS persistence. They marshal reactive
@@ -93,7 +96,16 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
   row / preview / graph-edge double-click; `MatchGraph.vue` is the graph view).
 - `useReconstructionStore` — clouds (sparse + dense), depth-map cache (`shallowRef`,
   not persisted), georef fit, run summaries; runs reconstruct / computeDepthMaps /
-  densify / generateDem / generateOrtho.
+  densify / generateDem / generateOrtho. Multiple `kind:'sparse'` clouds can coexist
+  (a computed reconstruction alongside a COLMAP import); `selectedCloudId` is *viewer
+  focus*, but downstream stages (dense / DEM / ortho / export / the sensor table)
+  consume the **main** sparse cloud — `mainSparseCloud` (getter: `mainSparseId` else
+  first sparse). Invariant *exactly one sparse cloud is main whenever any exists*
+  (`ensureMainSparse` after delete/restore; `setMainSparse` = sidebar "Set as main").
+  `upsertSparseCloud(cams, pts, opts)`: reconstruct replaces the main in place
+  (`replaceId` defaults to it); import passes `replaceId:null` to add a new cloud,
+  `asMain` only when none exists. `mainSparseId` persists in `reconstruction.json`
+  (absent ⇒ first sparse, back-compat).
 - `useSensorsStore`, `useProjectsStore`, `useGcpsStore`, `useFootprintsStore`,
   `usePosesStore`, `useModalsStore`.
 

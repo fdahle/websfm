@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { zipStore } from './zip.js'
+import { zipStore, unzipStore } from './zip.js'
 
 // Parse zipStore's own output structurally: signatures at the recorded offsets, name
 // round-trip, CRC of known bytes, and the EOCD's central-directory size/offset. A
@@ -64,5 +64,36 @@ describe('zipStore', () => {
     const dv = new DataView(out.buffer)
     expect(dv.getUint32(0, true)).toBe(0x06054b50)
     expect(dv.getUint16(10, true)).toBe(0) // total entries
+  })
+})
+
+describe('unzipStore', () => {
+  const dec = new TextDecoder()
+
+  it('round-trips zipStore output (names + bytes)', () => {
+    const entries = [
+      { name: 'cameras.txt', data: enc.encode('1 PINHOLE 640 480 500 500 320 240\n') },
+      { name: 'sub/points3D.txt', data: enc.encode('') }, // empty entry
+      { name: 'images.txt', data: enc.encode('1 1 0 0 0 0 0 0 1 img.jpg\n\n') },
+    ]
+    const back = unzipStore(zipStore(entries))
+    expect(back.map((e) => e.name)).toEqual(entries.map((e) => e.name))
+    back.forEach((e, i) => expect(dec.decode(e.data)).toBe(dec.decode(entries[i].data)))
+  })
+
+  it('reads an archive that carries a trailing EOCD comment', () => {
+    const zip = zipStore([{ name: 'a.txt', data: enc.encode('hi') }])
+    const withComment = new Uint8Array(zip.length + 3)
+    withComment.set(zip)
+    // Bump the EOCD comment-length field so the reader must scan past the comment.
+    new DataView(withComment.buffer).setUint16(zip.length - 2, 3, true)
+    withComment.set(enc.encode('xyz'), zip.length)
+    const back = unzipStore(withComment)
+    expect(back).toHaveLength(1)
+    expect(dec.decode(back[0].data)).toBe('hi')
+  })
+
+  it('throws on a non-ZIP buffer', () => {
+    expect(() => unzipStore(enc.encode('not a zip'))).toThrow(/not a ZIP/)
   })
 })

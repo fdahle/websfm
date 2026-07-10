@@ -55,6 +55,18 @@ describe('verifyMatches (F + H-vs-F degeneracy)', () => {
     expect(res).toBeTruthy()
     expect(res.hInlierCount / res.inlierCount).toBeGreaterThan(0.9)
   })
+
+  it('skips the homography count when F inliers are below hSkipBelow', async () => {
+    const { kpsA, kpsB, matches } = scene(true) // planar → strong H when computed
+    const base = await verifyMatches(kpsA, kpsB, matches, { ransacThreshPx: 2.0, maxIters: 2000 })
+    expect(base.hInlierCount).toBeGreaterThan(0)
+
+    // Floor above this pair's F-inlier count ⇒ H skipped ⇒ reported 0, F untouched.
+    const skipped = await verifyMatches(kpsA, kpsB, matches,
+      { ransacThreshPx: 2.0, maxIters: 2000, hSkipBelow: base.inlierCount + 1 })
+    expect(skipped.hInlierCount).toBe(0)
+    expect(skipped.inlierCount).toBe(base.inlierCount)
+  })
 })
 
 describe('inlierSpread (positional degeneracy)', () => {

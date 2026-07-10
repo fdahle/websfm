@@ -19,11 +19,20 @@ const GCP_NAME_TOKEN = /^(name|id|gcp|point|pt)$/i
 const IMAGE_TOKEN = /^(image|img|photo|file|filename|picture)$/i
 const INTRINSIC_KEYS = ['focal', 'k1', 'k2', 'k3', 'p1', 'p2', 'cx', 'cy', 'pixelSize']
 
+// A COLMAP sparse model is a *set* of files recognised by name, not content —
+// `cameras.txt` / `images.txt` / `points3D.txt` (or their `.bin` variants). Detected
+// up front so a dropped model file (or `.zip`) routes to the COLMAP importer.
+const COLMAP_FILE = /^(cameras|images|points3D)\.(txt|bin)$/i
+export function isColmapFile(fileName = '') {
+  return COLMAP_FILE.test(String(fileName).split(/[\\/]/).pop() || '')
+}
+
 // Returns { kind, confidence } where
-//   kind:       'gcp' | 'footprint' | 'pose' | 'sensor' | 'ambiguous'
+//   kind:       'colmap' | 'gcp' | 'footprint' | 'pose' | 'sensor' | 'ambiguous'
 //   confidence: 'high' | 'low'
 // 'gcp' and 'footprint' both route through the GeoJSON/GCP importer.
 export function detectFileKind(text, fileName = '') {
+  if (isColmapFile(fileName)) return { kind: 'colmap', confidence: 'high' }
   if (looksLikeGeoJson(fileName, text)) {
     const parsed = parseGeoJson(text)
     // points/mixed are handled by the GCP importer, polygons by the footprint one.

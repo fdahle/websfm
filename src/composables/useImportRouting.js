@@ -3,8 +3,9 @@ import { storeToRefs } from 'pinia'
 import { useModalsStore } from '../stores/useModalsStore.js'
 import { parseGeoJson, looksLikeGeoJson, geoJsonToGcps, guessNameKey } from '../core/io/geojson.js'
 import { detectCameraMode } from '../core/io/cameraKind.js'
-import { detectFileKind } from '../core/io/importKind.js'
+import { detectFileKind, isColmapFile } from '../core/io/importKind.js'
 import { parseFiducialObs } from '../core/io/fiducialObs.js'
+import { unzipStore } from '../utils/zip.js'
 
 // The dropped/picked-file import funnel, lifted out of App.vue. It drives the
 // import-related modals (all state lives in useModalsStore, pulled in here) and
@@ -13,7 +14,7 @@ import { parseFiducialObs } from '../core/io/fiducialObs.js'
 //   activateTab(id) — switch the active tab (to 'map' after a spatial import)
 // `cameraPickMode` is returned so the Ribbon command dispatch (still in App.vue)
 // can hint the file-picker mode before opening the hidden <input>.
-export function useImportRouting({ addGcps, addFootprints, addSensors, addPoses, addFiducialObs, activateTab }) {
+export function useImportRouting({ addGcps, addFootprints, addSensors, addPoses, addFiducialObs, importColmap, activateTab }) {
   const {
     gcpImportOpen, gcpImportText, gcpImportName, gcpImportGeojson, gcpImportCrs,
     footprintImportOpen, footprintImportData,
@@ -85,7 +86,35 @@ export function useImportRouting({ addGcps, addFootprints, addSensors, addPoses,
     if (kind === 'pose' || kind === 'sensor') openCameraImport(file, kind)
     else if (kind === 'gcp' || kind === 'footprint') openImportFile(file)
     else if (kind === 'fiducialObs') openFiducialObsImport(file)
+    else if (kind === 'colmap') openColmapImport([file])
     else { importKindFile.value = file; importKindOpen.value = true }
+  }
+
+  // COLMAP sparse model — a file *set*, so accept either a `.zip` or the loose
+  // `cameras.txt` / `images.txt` / `points3D.txt` (case-insensitive, path-stripped).
+  // Build the { canonicalName: text } map `importColmapModel` expects and commit.
+  const COLMAP_CANON = { 'cameras.txt': 'cameras.txt', 'images.txt': 'images.txt', 'points3d.txt': 'points3D.txt' }
+  async function openColmapImport(fileList) {
+    const files = [...(fileList || [])]
+    if (!files.length || !importColmap) return
+    const model = {}
+    try {
+      const zip = files.find((f) => /\.zip$/i.test(f.name))
+      const dec = new TextDecoder()
+      const add = (name, text) => {
+        const key = COLMAP_CANON[String(name).split(/[\\/]/).pop().toLowerCase()]
+        if (key) model[key] = text
+      }
+      if (zip) {
+        for (const e of unzipStore(new Uint8Array(await zip.arrayBuffer()))) add(e.name, dec.decode(e.data))
+      } else {
+        for (const f of files) if (isColmapFile(f.name)) add(f.name, await f.text())
+      }
+    } catch (err) {
+      console.error('Could not read COLMAP model', err)
+      return
+    }
+    if (importColmap(model)) activateTab('viewer')
   }
 
   // Fiducial-mark pixel observations (F4) commit directly — a row is (image,
@@ -179,11 +208,16 @@ export function useImportRouting({ addGcps, addFootprints, addSensors, addPoses,
     event.target.value = ''
   }
 
+  function onColmapPick(event) {
+    openColmapImport(event.target.files)
+    event.target.value = ''
+  }
+
   return {
     cameraPickMode,
-    openImportFile, openDroppedImport, routeImport, openFiducialObsImport,
+    openImportFile, openDroppedImport, routeImport, openFiducialObsImport, openColmapImport,
     onImportKindChosen, onImportSwitchKind,
     openCameraImport, onCameraImport, onGcpImport, onFootprintImport,
-    onGcpPick, onCameraPick,
+    onGcpPick, onCameraPick, onColmapPick,
   }
 }

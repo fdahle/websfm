@@ -53,6 +53,13 @@ export function verify_matches(pts_a, pts_b, ransac_thresh_px, max_iters) {
  * Like `verify_matches`, but also fits a homography via RANSAC and reports its
  * inlier count so the caller can compute the H-vs-F degeneracy ratio.
  *
+ * `h_skip_below`: skip the (expensive) homography RANSAC entirely when the F
+ * inlier count is below this value, reporting `h_inlier_count = 0`. The caller
+ * MUST pass its own hard acceptance floor (`minMatches`): a pair below that floor
+ * is rejected regardless of H, so its degeneracy label is never consulted, and the
+ * H/F ratio of 0 (= "non-degenerate") can never mislabel a pair that survives.
+ * Pass 0 (or ≤8) to disable the skip and reproduce the pre-adaptive behaviour.
+ *
  * Output layout: `[F00..F22, h_inlier_count, inlier_0, inlier_1, ...]` — the
  * fundamental matrix (9), then the homography inlier count (1), then the F
  * inlier flags (n). Empty if < 8 correspondences or RANSAC finds no F.
@@ -60,14 +67,15 @@ export function verify_matches(pts_a, pts_b, ransac_thresh_px, max_iters) {
  * @param {Float32Array} pts_b
  * @param {number} ransac_thresh_px
  * @param {number} max_iters
+ * @param {number} h_skip_below
  * @returns {Float32Array}
  */
-export function verify_matches_hf(pts_a, pts_b, ransac_thresh_px, max_iters) {
+export function verify_matches_hf(pts_a, pts_b, ransac_thresh_px, max_iters, h_skip_below) {
     const ptr0 = passArrayF32ToWasm0(pts_a, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
     const ptr1 = passArrayF32ToWasm0(pts_b, wasm.__wbindgen_malloc);
     const len1 = WASM_VECTOR_LEN;
-    const ret = wasm.verify_matches_hf(ptr0, len0, ptr1, len1, ransac_thresh_px, max_iters);
+    const ret = wasm.verify_matches_hf(ptr0, len0, ptr1, len1, ransac_thresh_px, max_iters, h_skip_below);
     var v3 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
     wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
     return v3;

@@ -7,6 +7,8 @@ import {
   parseColmapModel,
   buildColmapModel,
   readColmapModel,
+  makeNameResolver,
+  colmapToSparse,
 } from './colmapModel.js'
 
 // A non-trivial proper rotation (30° about a tilted axis), row-major.
@@ -205,5 +207,73 @@ describe('buildColmapModel / readColmapModel', () => {
     const back = readColmapModel(model)
     expect(back.droppedDistortion).toEqual(['RADIAL'])
     expect(back.images[0].K).toMatchObject({ fx: 900, fy: 900, cx: 320, cy: 240 })
+  })
+})
+
+describe('makeNameResolver', () => {
+  const loaded = [
+    { uuid: 'u1', name: 'IMG_0001.JPG' },
+    { uuid: 'u2', name: 'sub/dir/photo_2.tif' },
+  ]
+  const resolve = makeNameResolver(loaded)
+
+  it('matches exact, basename, case-insensitive, and extension-stripped', () => {
+    expect(resolve('IMG_0001.JPG')).toBe('u1')          // exact
+    expect(resolve('images/IMG_0001.JPG')).toBe('u1')   // basename of a path
+    expect(resolve('img_0001.jpg')).toBe('u1')          // case-insensitive basename
+    expect(resolve('photo_2.tif')).toBe('u2')           // basename of a stored path
+    expect(resolve('photo_2.png')).toBe('u2')           // stem match, different extension
+  })
+
+  it('returns null for an unmatched or nullish name', () => {
+    expect(resolve('nope.jpg')).toBeNull()
+    expect(resolve(null)).toBeNull()
+  })
+})
+
+describe('colmapToSparse', () => {
+  // Round-trip a real reconstruction: build → read → colmapToSparse recovers the
+  // store shapes, matching COLMAP image names to uuids.
+  const images = [
+    { uuid: 'ua', name: 'a.jpg', width: 640, height: 480, K: { fx: 1000, fy: 1000, cx: 320, cy: 240 }, R: R30, t: [1, 2, 3] },
+    { uuid: 'ub', name: 'b.jpg', width: 640, height: 480, K: { fx: 900, fy: 900, cx: 320, cy: 240 }, R: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], t: [4, 5, 6] },
+  ]
+  const points = [
+    { xyz: [0.1, 0.2, 0.3], color: [10, 20, 30], views: [{ uuid: 'ua', x: 100, y: 200 }, { uuid: 'ub', x: 110, y: 210 }] },
+    { xyz: [1, 1, 1], color: [200, 100, 50], views: [{ uuid: 'ua', x: 5, y: 6 }] },
+  ]
+  const read = readColmapModel(buildColmapModel({ images, points }))
+  const resolve = makeNameResolver(images.map(({ uuid, name }) => ({ uuid, name })))
+
+  it('recovers cameras (R/t/K) into a uuid-keyed Map', () => {
+    const { cameras } = colmapToSparse(read, resolve)
+    expect([...cameras.keys()].sort()).toEqual(['ua', 'ub'])
+    expect(cameras.get('ua').K).toMatchObject({ fx: 1000, fy: 1000, cx: 320, cy: 240 })
+    expectMatClose(cameras.get('ua').R, R30)
+    expect(cameras.get('ua').t).toEqual([1, 2, 3])
+  })
+
+  it('recovers points with view uuids + BA-frame pixels in viewsPx', () => {
+    const { points: pts } = colmapToSparse(read, resolve)
+    expect(pts).toHaveLength(2)
+    expect([...pts[0].views.keys()].sort()).toEqual(['ua', 'ub'])
+    expect(pts[0].viewsPx.get('ua')).toEqual([100, 200])
+    expect(pts[0].viewsPx.get('ub')).toEqual([110, 210])
+    expect(pts[0].color).toEqual([10, 20, 30])
+    expect(pts[1].views.size).toBe(1)
+  })
+
+  it('drops unmatched images, their observations, and now-empty points', () => {
+    // Only 'a.jpg' is loaded; the point seen solely by 'b.jpg' must vanish.
+    const partial = makeNameResolver([{ uuid: 'ua', name: 'a.jpg' }])
+    const onlyB = readColmapModel(buildColmapModel({
+      images,
+      points: [{ xyz: [7, 8, 9], color: [0, 0, 0], views: [{ uuid: 'ub', x: 1, y: 2 }] }],
+    }))
+    const { cameras, points: pts, matched, unmatched } = colmapToSparse(onlyB, partial)
+    expect(matched.map((m) => m.name)).toEqual(['a.jpg'])
+    expect(unmatched).toEqual(['b.jpg'])
+    expect(cameras.has('ub')).toBe(false)
+    expect(pts).toHaveLength(0) // point observed only by the dropped image
   })
 })

@@ -57,6 +57,7 @@ export const COMMANDS = [
 
   // --- Import ---
   { name: 'import',   aliases: ['import-images'],   dispatch: 'import-images',     group: 'Import', help: 'Import images' },
+  { name: 'import colmap', aliases: ['colmap-import'], dispatch: 'import-colmap', needs: ['images'], group: 'Import', help: 'Import a COLMAP sparse model (.zip or .txt set)' },
 
   // --- Export (multi-word: "export <what>") ---
   { name: 'export cloud',     dispatch: 'export-cloud',     needs: ['cloud'],     group: 'Export', help: 'Export the point cloud' },
