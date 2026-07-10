@@ -3,6 +3,11 @@ import { ref, computed } from 'vue'
 import FieldHelp from '../guide/FieldHelp.vue'
 import { MATCH_DEFAULTS } from '../../core/defaults.user.js'
 
+const props = defineProps({
+  // Largest detected keypoint count over all images (for the density auto-hint).
+  detectedMaxKeypoints: { type: Number, default: 0 },
+})
+
 const emit = defineEmits(['close', 'run'])
 
 const strategy = ref('exhaustive')
@@ -23,6 +28,22 @@ const matchers = [
 // Prefill from the single source of truth (core/defaults.user.js); useMatchesStore
 // falls back to the same values. Cloned so edits don't mutate the shared constant.
 const settings = ref({ ...MATCH_DEFAULTS })
+
+// P6: one "matching density" mental model instead of three overlapping caps. Fast =
+// strongest N keypoints (plain path, lgTiled off); Full = tiled, uses every detected
+// keypoint. The numeric caps stay under Advanced. `density` is a view over lgTiled.
+const density = computed({
+  get: () => (settings.value.lgTiled ? 'full' : 'fast'),
+  set: (v) => { settings.value.lgTiled = v === 'full' },
+})
+const showAdvanced = ref(false)
+
+// Auto-hint: on the Fast path, warn when detection stored far more keypoints than the
+// cap will use, so the loss is visible before running (the same is logged at match time).
+const capBites = computed(() =>
+  matcher.value === 'lightglue' && !settings.value.lgTiled
+  && settings.value.lgMaxKeypoints > 0 // 0 = uncapped, nothing is dropped
+  && props.detectedMaxKeypoints > settings.value.lgMaxKeypoints)
 
 const runSettings = computed(() => ({
   strategy: strategy.value,
@@ -158,7 +179,40 @@ function run() {
         </div>
 
         <div v-if="matcher === 'lightglue'" class="field">
-          <label class="field-label" for="lgMaxKpts">Max keypoints per image</label>
+          <span class="field-label">Matching density</span>
+          <div class="detector-row">
+            <button
+              class="detector-btn"
+              :class="{ active: density === 'fast' }"
+              @click="density = 'fast'"
+            >Fast ({{ settings.lgMaxKeypoints > 0 ? 'strongest ' + settings.lgMaxKeypoints : 'all — uncapped' }})</button>
+            <button
+              class="detector-btn"
+              :class="{ active: density === 'full' }"
+              @click="density = 'full'"
+            >Full (tiled — all keypoints)</button>
+          </div>
+          <span class="field-hint">
+            {{ density === 'full'
+              ? 'Matches every detected keypoint in homography-guided tiles. Slower — best with GPU + tiled detection.'
+              : (settings.lgMaxKeypoints > 0
+                ? 'Matches only the strongest ' + settings.lgMaxKeypoints + ' keypoints per image (LightGlue attention is O(N²)).'
+                : 'Matches every detected keypoint per image (no cap — LightGlue attention is O(N²)).') }}
+          </span>
+          <span v-if="capBites" class="field-hint cap-warn">
+            ⚠ Detection stored up to {{ detectedMaxKeypoints }} keypoints — only the strongest
+            {{ settings.lgMaxKeypoints }} will be matched. Switch to <b>Full</b> density to use all of them.
+          </span>
+        </div>
+
+        <div v-if="matcher === 'lightglue'" class="field">
+          <button class="link-btn" @click="showAdvanced = !showAdvanced">
+            {{ showAdvanced ? '▾' : '▸' }} Advanced (keypoint caps)
+          </button>
+        </div>
+
+        <div v-if="matcher === 'lightglue' && showAdvanced" class="field">
+          <label class="field-label" for="lgMaxKpts">Max keypoints per image (Fast path only)</label>
           <input
             id="lgMaxKpts"
             v-model.number="settings.lgMaxKeypoints"
@@ -166,21 +220,21 @@ function run() {
             class="field-input"
           />
           <span class="field-hint">
-            Strongest-first cap fed to LightGlue. Runtime grows with the square of this —
-            2048 ≈ 7 s/pair on CPU, 1024 ≈ 2 s/pair; 0 = no cap.
+            Strongest-first cap fed to LightGlue on the <b>Fast</b> path. Runtime grows with the
+            square of this — 2048 ≈ 7 s/pair on CPU, 1024 ≈ 2 s/pair; 0 = no cap. Ignored on the
+            <b>Full</b> (tiled) path, which caps per tile instead.
           </span>
         </div>
 
-        <div v-if="matcher === 'lightglue'" class="field">
-          <label class="checkbox-row">
-            <input v-model="settings.lgTiled" type="checkbox" class="checkbox" />
-            <span class="field-label">Tiled guided matching (full resolution)</span>
-          </label>
-          <span class="field-hint">
-            Matches all keypoints in homography-guided tiles instead of only the strongest
-            {{ settings.lgMaxKeypoints }}. Slower — best with GPU + tiled detection. Only pays
-            off when detection produced far more keypoints than the cap; else it falls back.
-          </span>
+        <div v-if="matcher === 'lightglue' && showAdvanced && settings.lgTiled" class="field">
+          <label class="field-label" for="lgTileBudget">Keypoints per tile (Full path)</label>
+          <input
+            id="lgTileBudget"
+            v-model.number="settings.lgTileBudget"
+            type="number" min="256" max="8192" step="256"
+            class="field-input"
+          />
+          <span class="field-hint">Per-tile attention budget when tiled. Higher = denser matches per tile, slower.</span>
         </div>
 
         <div v-if="matcher === 'lightglue'" class="field">
@@ -265,7 +319,7 @@ function run() {
   background: var(--panel);
   border: 1px solid var(--panel-border);
   border-radius: 8px;
-  width: 400px;
+  width: 600px;
   max-width: 90vw;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
   display: flex;
@@ -317,6 +371,21 @@ function run() {
 .field-label { font-size: 12px; font-weight: 600; color: var(--text); }
 
 .field-hint { font-size: 11px; color: var(--text-dim); }
+
+.cap-warn { color: var(--warn, #d08a2a); }
+
+.link-btn {
+  background: none;
+  border: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: 12px;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+}
+
+.link-btn:hover { text-decoration: underline; }
 
 .detector-row { display: flex; gap: 4px; }
 

@@ -44,13 +44,17 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
   `ort.js`, `preselect.js`, and `tiling.js` — pure tile-grid/seam-NMS/auto-size math
   behind tiled detection; the per-tile detector loop lives in `workers/ops/detect.js`),
   `core/sfm/`
-  (`sfm.js` incremental SfM orchestrator, `reconstruction.js` JS↔WASM
+  (`sfm.js` incremental SfM orchestrator, `register.js` the incremental-resection
+  stage lifted out of it — next-best-view ordering + two-gate PnP + interleaved BA,
+  `registerImages(ctx)` mutating the caller's model in place, `reconstruction.js` JS↔WASM
   marshalling, `geometry.js` shared pinhole-camera helpers — cameraCenter, project*,
   triangulationAngle, scaleK, rgbaToGray — `distortion.js`, `cameraEstimated.js`),
   `core/dense/` (`mvs.js` dense MVS orchestrator, `planeCost.js`, `memBudget.js`),
   `core/products/` (`dem.js`, `ortho.js`, `projection.js`, `georef.js`, `exporters.js`,
   `geotiff.js`, `colormap.js`), `core/io/` (`gcp.js`, `pose.js`, `sensor.js`,
-  `geojson.js`, `metadata.js`, `cameraKind.js`, `importKind.js`), `core/help/`
+  `geojson.js`, `metadata.js`, `cameraKind.js`, `importKind.js`, `colmapModel.js`
+  — pure COLMAP text-model read/write: R↔quaternion + serialize/parse +
+  websfm↔ColmapModel adapters), `core/help/`
   (`glossary.js`, `guide.js`, `commands.js`); cross-cutting stragglers stay flat at
   `core/` root (`crs.js`, `footprint.js`, `mask.js`, `types.ts`).
 - **`src/stores/*.js`** own reactive state + OPFS persistence. They marshal reactive
@@ -120,10 +124,23 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
    (`rotationCycleFilter`) first prunes verified-but-false pairs — spurious epipolar
    fits on repetitive structure that clear every count/ratio gate but whose relative
    rotation is inconsistent with the match graph (each triangle's `R_ik⁻¹·R_jk·R_ij`
-   must be ≈ identity; greedily drop the edge that fails most of its triangles). Then
-   pick init pair (inliers + parallax + lowest init
-   reprojection), incremental PnP registration (P3P + MSAC + Gauss-Newton polish in
-   `crates/reconstruction/src/pose.rs`), track extension, then LM bundle adjustment
+   must be ≈ identity; greedily drop the edge that fails most of its triangles). The
+   filter weights each triangle's verdict by its weakest edge's inlier count, adapts
+   the pass/fail angle to the graph's median cycle error, and shields high-inlier
+   edges — all of which auto-disable on a uniform-quality graph (no/equal inlier
+   counts), recovering the plain unweighted filter. Then
+   pick init pair (inliers + parallax + lowest init reprojection) and grow the model
+   by **incremental registration** (`core/sfm/register.js`, `registerImages(ctx)`):
+   each pass orders the unregistered images by a next-best-view score
+   (correspondences to well-triangulated, spatially-spread points) and registers by
+   two-gate PnP — a P3P + MSAC + Gauss-Newton solve (`crates/reconstruction/src/pose.rs`)
+   accepted only if it clears an inlier-**ratio** gate at the PnP threshold AND, after
+   the pose polish, a second ratio gate at the *tight* reprojection threshold (a pose
+   that only holds at the loose gate is deferred to a later, better-constrained pass).
+   Correspondences are swept once per pass and cached (reused for scoring + the attempt
+   until a registration grows the model). If a sweep stalls with images still linked to
+   the model (short film strips), a one-shot **rescue** runs a focal-only BA +
+   retriangulation and retries once with a relaxed recheck (`rescueStalled`). Then track extension, then LM bundle adjustment
    (`bundle.rs`: Schur complement, analytic Jacobians, adaptive Huber; optional
    shared per-sensor intrinsics refinement via `refineIntrinsics`), retriangulation
    + split-track merging (`retriangulatePairs`/`mergeSplitTracks`), and 2-pass track
@@ -133,8 +150,13 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
    coefficients it uses via a **distortion model** (`DISTORTION_MODELS`:
    pinhole/radial/radial2/brown; `distortionOf` applies only the active model's
    coefficients; undefined ⇒ all five, back-compat) — chosen in `SensorTable.vue`.
-   Optional BA **self-calibration** of a shared radial `k1` (`refineIntrinsics:
-   'f,k1'`) must never leave `k1` on the model (nothing downstream applies it): after
+   BA **self-calibration** is **on by default**: `refineIntrinsics` defaults to
+   `'auto'` (`defaults.user.js`), which `sfm.js` resolves to `'f,k1'` when no sensor
+   carries a calibrated distortion model (EXIF-only cameras / film scans — a guessed
+   pinhole is the biggest downstream error source) and to `'none'` when a calibrated
+   Brown model already removed distortion at ingest (don't double-correct). Self-cal of
+   a shared radial `k1` (`refineIntrinsics: 'f,k1'`) must never leave `k1` on the model
+   (nothing downstream applies it): after
    each self-cal pass `runBundleAdjust` **folds** it back into the keypoints
    (`undistortPixel` is the exact inverse of BA's `project_k1`), resets the model `k1`
    to 0, and accumulates it per sensor into `summary.selfCalDistortion` so the dense
@@ -338,7 +360,13 @@ convergence".
   `n·X + d = 0`; a `−` here mirrors the warp across the epipolar line and the
   cost never bottoms out at the true depth — the 2026-07 freckle bug). The A/B
   check only proves the three agree, NOT that the warp is correct, so validate
-  any homography change against a non-zero-baseline ground-truth warp.
+  any homography change against a non-zero-baseline ground-truth warp. **Spatial
+  propagation** likewise lives in the sweep of `mvs.rs` + `patchmatch.wgsl` (not
+  planeCost.js, which is only the cost fn): it intersects *this* pixel's viewing ray
+  with the neighbour's **plane** — `cand_d = depth[j]·(n·ray_j)/(n·ray_i)` — never
+  the neighbour's raw depth (that only holds fronto-parallel and is the depth-map
+  "freckle" bug; a slanted-plane convergence test lives in `planeCost.test.js`). The
+  ZNCC half-window cap is 5 (11×11) in both kernels — keep them equal.
 - After any `crates/` change: `npm run build:wasm`, commit `src/wasm/*` with the
   source change.
 - Keep the heavy logging style — every derived/auto value gets a log line the user
@@ -355,6 +383,7 @@ environment may not support — say so explicitly rather than claiming verificat
 
 ## Where things live
 - Models / on-disk shapes: docstrings at the top of each `opfs.js` section.
-- SfM tuning knobs: destructured `settings` in `core/sfm/sfm.js` (init/PnP/BA/filter).
+- SfM tuning knobs: destructured `cfg` in `core/sfm/sfm.js` (init/BA/filter) and
+  `core/sfm/register.js` (PnP-gate + interim-BA knobs).
 - Type hints: `src/core/types.ts` (+ `npm run typecheck`).
 - The plan: `TODO.md`. Baselines + done log: `HANDOVER.md`.

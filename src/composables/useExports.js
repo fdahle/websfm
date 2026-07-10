@@ -1,7 +1,10 @@
 import { ref } from 'vue'
 import { buildPosesCsv, buildSensorsCsv, downloadCsv } from '../utils/exportCsv.js'
 import { cloudToPly, reconstructionToJson, demToAsciiGrid, demToGeoTiff, orthoToGeoTiff, rasterWorldFile } from '../core/products/exporters.js'
+import { buildColmapModel, serializeColmapModel } from '../core/io/colmapModel.js'
+import { distortionOf } from '../core/sfm/distortion.js'
 import { downloadBlob, dataUrlToBlob } from '../utils/download.js'
+import { zipStore } from '../utils/zip.js'
 
 // Camera-params + product export funnel, lifted out of App.vue. Owns `exportKind`
 // (which export dialog is open); the Ribbon command dispatch sets it and the
@@ -65,7 +68,7 @@ export function useExports({
 
   const projectBase = () => currentProjectName.value || 'project'
 
-  // Which export dialog is open ('cloud' | 'model' | 'dem' | 'ortho'), or null.
+  // Which export dialog is open ('cloud' | 'model' | 'colmap' | 'dem' | 'ortho'), or null.
   const exportKind = ref(null)
 
   // Parse the current DEM's CRS into an EPSG code + geographic flag for GeoTIFF /
@@ -85,8 +88,16 @@ export function useExports({
     exportKind.value = null
     if (kind === 'cloud') doExportCloud(settings)
     else if (kind === 'model') doExportModel(settings)
+    else if (kind === 'colmap') doExportColmap(settings)
     else if (kind === 'dem') doExportDem(settings)
     else if (kind === 'ortho') doExportOrtho(settings)
+  }
+
+  // The sparse cloud, or the selected cloud if it carries cameras. Shared by the
+  // two model exporters.
+  function sparseCloud() {
+    return clouds.value.find((c) => c.kind === 'sparse')
+      ?? (selectedCloud.value?.cameras?.size ? selectedCloud.value : null)
   }
 
   // Point cloud (selected, else the first non-empty) → PLY.
@@ -102,8 +113,7 @@ export function useExports({
 
   // SfM cameras (+ optional tracks) → JSON interchange (uses the sparse cloud).
   function doExportModel({ includeTracks }) {
-    const cloud = clouds.value.find((c) => c.kind === 'sparse')
-      ?? (selectedCloud.value?.cameras?.size ? selectedCloud.value : null)
+    const cloud = sparseCloud()
     if (!cloud) return
     const cams = [...cloud.cameras.entries()].map(([uuid, c]) => ({ uuid, R: c.R, t: c.t, K: c.K }))
     const pts = cloud.points.map((p) => ({
@@ -111,6 +121,68 @@ export function useExports({
       views: includeTracks && p.views ? [...p.views.entries()] : [],
     }))
     saveJson(reconstructionToJson(cams, pts, currentCrs.value), `${projectBase()}-model.json`)
+  }
+
+  // Sparse model → COLMAP text model (cameras/images/points3D.txt) zipped into
+  // one download. One PINHOLE camera per image. The exported K/R/t are in the
+  // BA (pinhole) frame, so the 2D observations MUST be too: prefer the cloud's
+  // `viewsPx` (uuid→[x,y] BA-frame pixels the SfM run baked in — undistorted /
+  // fiducial-canonical / self-cal-folded), and fall back to the store keypoints
+  // only when it's absent (pure pinhole with no self-cal, where the two frames are
+  // identical, or a legacy cloud persisted before viewsPx existed — which we warn
+  // about, since a distorted/film/self-cal project would export inconsistently).
+  // Only cameras with a matching loaded image + resolved K are exported (COLMAP
+  // needs width/height/name). Output is in the local SfM frame.
+  function doExportColmap() {
+    const cloud = sparseCloud()
+    if (!cloud) return
+    const imgByUuid = new Map(images.value.map((im) => [im.uuid, im]))
+
+    const exportImages = [...cloud.cameras.entries()]
+      .map(([uuid, cam]) => {
+        const im = imgByUuid.get(uuid)
+        if (!im || !cam.K || !im.meta?.width || !im.meta?.height) return null
+        return { uuid, name: im.name, width: im.meta.width, height: im.meta.height, K: cam.K, R: cam.R, t: cam.t }
+      })
+      .filter(Boolean)
+    if (!exportImages.length) return
+    const exported = new Set(exportImages.map((im) => im.uuid))
+
+    // Warn if we're about to fall back to raw store keypoints for a project whose BA
+    // frame differs from scan/distorted space (distortion, film, or self-cal) but no
+    // viewsPx is present — those observations won't match the exported cameras.
+    const anyViewsPx = cloud.points.some((p) => p.viewsPx && p.viewsPx.size)
+    if (!anyViewsPx) {
+      const risky = exportImages.some(({ uuid }) => {
+        const im = imgByUuid.get(uuid)
+        return im?.sensor?.kind === 'film' || !!distortionOf(im?.sensor)
+      })
+      if (risky) {
+        console.warn('[COLMAP export] No BA-frame pixels (viewsPx) available and this project '
+          + 'uses lens distortion or film scans — 2D observations may not match the exported '
+          + 'cameras. Re-run reconstruction to regenerate the model with coherent observations.')
+      }
+    }
+
+    const points = cloud.points.map((p) => ({
+      xyz: [p.x, p.y, p.z],
+      color: p.color,
+      views: p.views
+        ? [...p.views.entries()]
+            .map(([uuid, kpIdx]) => {
+              if (!exported.has(uuid)) return null
+              const px = p.viewsPx?.get(uuid)
+              if (px) return { uuid, x: px[0], y: px[1] }
+              const kp = imgByUuid.get(uuid)?.keypoints?.[kpIdx]
+              return kp ? { uuid, x: kp.x, y: kp.y } : null
+            })
+            .filter(Boolean)
+        : [],
+    }))
+
+    const files = serializeColmapModel(buildColmapModel({ images: exportImages, points }))
+    const entries = Object.entries(files).map(([name, text]) => ({ name, data: new TextEncoder().encode(text) }))
+    downloadBlob(`${projectBase()}-colmap.zip`, zipStore(entries), 'application/zip')
   }
 
   // DEM → GeoTIFF, or ESRI ASCII grid (+ .prj sidecar carrying the CRS).

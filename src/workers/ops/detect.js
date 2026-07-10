@@ -116,7 +116,7 @@ export function makeDetectOps({ rasterize }) {
   // offset by the tile origin, seam duplicates are NMS'd away, and a global top-K by
   // response keeps the strongest (LightGlue caps keypoints anyway, so favour the
   // best overall rather than the union).
-  async function runTiled(raster, detector, tileSize, { contrastThreshold, maxKeypoints, overlap, onLog }) {
+  async function runTiled(raster, detector, tileSize, { contrastThreshold, maxKeypoints, overlap, maskLut, onLog }) {
     const { data, width, height } = raster
     const tiles = planTiles(width, height, tileSize, overlap)
     const label = detector === 'superpoint' ? 'SuperPoint' : 'SIFT'
@@ -125,6 +125,7 @@ export function makeDetectOps({ rasterize }) {
     const xs = [], ys = [], scales = [], resps = [], descChunks = []
     let descLen = detector === 'superpoint' ? 256 : DESC_LEN
     let totalMs = 0
+    let maskedPreCap = 0
     for (const tile of tiles) {
       const sub = sliceRaster(data, width, height, tile)
       const bundle = detector === 'superpoint'
@@ -134,7 +135,16 @@ export function makeDetectOps({ rasterize }) {
       totalMs += bundle.ms
       for (let i = 0; i < bundle.count; i++) {
         const f = bundle.at(i)
-        xs.push(f.x + tile.x); ys.push(f.y + tile.y)
+        const gx = f.x + tile.x, gy = f.y + tile.y
+        // Drop masked keypoints BEFORE the global top-K, so masked regions don't
+        // consume cap slots (a masked border can otherwise eat ~20% of the budget;
+        // the caller's post-cap mask check then finds nothing left to drop).
+        if (maskLut) {
+          const px = Math.min(width - 1, Math.max(0, Math.round(gx)))
+          const py = Math.min(height - 1, Math.max(0, Math.round(gy)))
+          if (maskLut[py * width + px]) { maskedPreCap++; continue }
+        }
+        xs.push(gx); ys.push(gy)
         scales.push(f.scale); resps.push(f.response)
         descChunks.push(bundle.desc(i).slice()) // detach from the tile bundle's buffer
       }
@@ -148,7 +158,7 @@ export function makeDetectOps({ rasterize }) {
 
     const keptResp = keep.map((i) => resps[i]).sort((a, b) => a - b)
     const diag = {
-      tiles: tiles.length, tileSize, overlap,
+      tiles: tiles.length, tileSize, overlap, maskedPreCap,
       rawFound, suppressed: rawFound - afterNms,
       capHit: maxKeypoints > 0 && afterNms > keep.length,
       minResponse: keep.length ? resps[keep[keep.length - 1]] : 0,
@@ -188,7 +198,7 @@ export function makeDetectOps({ rasterize }) {
     const tilingActive = tiling !== 'off' && (width > resolvedTile || height > resolvedTile)
 
     const feats = tilingActive
-      ? await runTiled(raster, detector, resolvedTile, { contrastThreshold, maxKeypoints, overlap, onLog })
+      ? await runTiled(raster, detector, resolvedTile, { contrastThreshold, maxKeypoints, overlap, maskLut, onLog })
       : detector === 'superpoint'
         ? await runSuperPoint(data, width, height, { maxKeypoints, onLog })
         : await runSift(data, width, height, { contrastThreshold, maxKeypoints })

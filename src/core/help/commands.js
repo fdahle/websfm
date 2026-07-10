@@ -40,7 +40,6 @@ export const COMMANDS = [
   { name: 'dense',    aliases: [],                  dispatch: 'dense',           needs: ['depthMaps'], group: 'Pipeline', help: 'Open the dense reconstruction dialog' },
   { name: 'dem',      aliases: [],                  dispatch: 'gen-dem',         needs: ['cloud'],     group: 'Pipeline', help: 'Open the DEM generation dialog' },
   { name: 'ortho',    aliases: [],                  dispatch: 'gen-ortho',       needs: ['dem', 'depthMaps'], group: 'Pipeline', help: 'Open the orthophoto dialog' },
-  { name: 'preview',  aliases: ['products'],        dispatch: 'view-products',   needs: ['products'],  group: 'Pipeline', help: 'Open the product preview' },
 
   // --- Tools ---
   { name: 'georeference', aliases: ['georef'],      dispatch: 'auto-georeference',  needs: ['sparse', 'poses'], group: 'Tools', help: 'Auto-georeference from imported poses' },

@@ -409,12 +409,14 @@ export const useImagesStore = defineStore('images', () => {
             // the cap + mask drops and the keypoint-score spread instead.
             log(`${tag} ${found.name} — ${d.capped} keypoints`
               + `${d.capHit ? ' (top-K cap hit)' : ''}`
+              + `${d.maskedPreCap > 0 ? `, −${d.maskedPreCap} masked before cap` : ''}`
               + `${d.maskedDropped > 0 ? `, −${d.maskedDropped} in mask → ${d.kept}` : ''}`
               + `; score p50 ${d.scoreP50.toFixed(3)} / p95 ${d.scoreP95.toFixed(3)}`, 'debug', tag)
           } else {
             log(`${tag} ${found.name} — ${d.rawFound} found → ${d.capped}`
               + `${d.capHit ? ` capped (min response ${d.minResponse.toFixed(3)})` : ' (under cap)'}`
               + `${d.suppressed > 0 ? `, −${d.suppressed} duplicate-position keypoints suppressed` : ''}`
+              + `${d.maskedPreCap > 0 ? `, −${d.maskedPreCap} masked before cap` : ''}`
               + `${d.maskedDropped > 0 ? `, −${d.maskedDropped} in mask → ${d.kept}` : ''}`
               + `; response p50 ${d.respP50.toFixed(3)} / p95 ${d.respP95.toFixed(3)}`, 'debug', tag)
           }

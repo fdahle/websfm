@@ -68,6 +68,83 @@ fiducials; self-calibration (A2) + fiducials (F4) are the code-side support.
 
 ## Done log (most recent first)
 
+- **2026-07-10 · Stalled-strip rescue for registration (S1, `register.js`)** — when a
+  sweep registers nothing but images still link to the model (short film strips: end
+  frames fail on a ~10%-wrong focal + a strip-end structure gap), run one rescue round:
+  focal-only BA (`refineIntrinsics 'f'`, safe pre-filter) + retriangulation, then a
+  single relaxed-recheck retry (recount at the PnP gate, ratio `rescueRefineRatio 0.2`).
+  Guarded one-shot (`rescued`), knob `rescueStalled` (default on). Absolute inlier floor
+  + gate-1 + final track filter still apply, so it can't manufacture a pose. Motivated by
+  a B0 run (2026-07-10) that registered only 3/5 with the film flag *off*: `0033` failed
+  the tight 4px recheck (18/29 held at 8px), `0032` starved (0/20 usable correspondences).
+  `npm test` (406) + typecheck green; **owed** a real B0 re-run to confirm it lifts the
+  count (expected 4/5 — `0033` via relaxed recheck; `0032` depends on retriangulation
+  reaching its overlap). NB the proper fix for film is still the fiducial/interior-
+  orientation path (mark the sensor film) — this only hardens the no-film case.
+
+- **2026-07-10 · Code-review batch (cycle filter, COLMAP export frame, perf, hardening)** —
+  from a review of the working tree. **B1** cycle filter: strong-edge protection now
+  auto-disables on a uniform-quality graph (no/equal inlier counts) instead of shielding
+  every edge (`cycleFilter.js` + regression test). **B2** COLMAP export: 2D observations
+  now export in the **BA (pinhole) frame** — `sfm.js` bakes each view's
+  undistorted/canonical/self-cal-folded pixel into the returned points, the store carries
+  it as `viewsPx` and persists it (`recon.*.vx/vy.bin`, `RECON_BIN_KEYS`), and
+  `doExportColmap` prefers it (falls back to store keypoints + warns for distortion/film
+  projects). Fixes silently-inconsistent exports for distortion/film/self-cal projects.
+  **B3/B4** UI: LightGlue `lgMaxKeypoints:0` reads as uncapped (no false cap warning);
+  `formatClock` floors minutes (no "1h 60m"). **B5** `colmapModel.fmt` throws on non-finite
+  instead of writing 0. **P1** correspondences swept once per registration pass and cached
+  (reused for NBV scoring + PnP attempt). **P2** cycle filter reuses its initial full-graph
+  pass. **G2** `utils/zip.test.js` structural round-trip test. Docs: CLAUDE.md §3 +
+  METHODS.md §4.3 (NBV ordering, two-gate PnP), TODO F7. `npm test` (406) + typecheck green;
+  a real COLMAP round-trip (film + self-cal projects) is still owed — see TODO F7.
+- **2026-07-10 · Extracted `core/sfm/register.js` (G1)** — lifted the incremental-resection
+  stage (next-best-view ordering, two-gate PnP, track extension/triangulation, interleaved
+  BA + its `collectCorrespondences`/`nextViewScore`/`countMatchesToRegistered` helpers) out
+  of the 1349-line `sfm.js` into `registerImages(ctx)`. `sfm.js` → 1019 lines. Shared model
+  state passed via `ctx` and mutated in place (Maps/Sets by reference; the reassignable
+  `points3d` via a live `getPoints3d()` getter, since injected BA/filter closures replace
+  the array). `registeredUuids` stays in `sfm.js` (the `foldOneEndpointMatches` closure
+  reads it). Behaviour-preserving move — `npm test` (406) + typecheck green; owed a real-data
+  reconstruction run to confirm no regression vs. the pre-extraction pipeline.
+- **2026-07-10 · COLMAP model export (F7, export half)** — pure
+  `core/io/colmapModel.js` (R↔quaternion, `serialize/parseColmapModel` text
+  round-trip, `build/readColmapModel` websfm↔COLMAP adapters; 15 unit tests) +
+  dependency-free `utils/zip.js` (STORE ZIP, verified against the `unzip`
+  binary). Wired *Export ▸ Interop ▸ COLMAP Model* (new Ribbon group) →
+  `useExports.doExportColmap` resolves each point's `views` to pixel
+  observations from keypoints, emits a zipped 3-file PINHOLE model in the local
+  SfM frame. `npm test` (404) + typecheck green. Import half + `.bin` +
+  browser run still owed — see TODO F7.
+
+- **2026-07-10 · Reconstruction-quality overhaul (PLAN-reconstruction-quality.md, P0/P1/P2/P3/P4/P6)** —
+  from the 2026-07-10 building + aerial log audit. **P0** intrinsics: `refineIntrinsics`
+  now defaults to `'auto'` (`defaults.user.js`), resolved in `core/sfm/sfm.js` to
+  `'f,k1'` when no sensor carries a calibrated distortion model (EXIF-only / film) and
+  `'none'` otherwise — self-calibration on by default, the biggest single lever for both
+  datasets. **P1** PatchMatch freckle fix: spatial propagation now intersects the pixel's
+  ray with the neighbour's *plane* (`cand_d = (n·P_j)/(n·ray_i)`) instead of copying the
+  neighbour's raw depth (fronto-parallel-only) — fixed in lockstep in
+  `crates/reconstruction/src/mvs.rs` + `src/workers/gpu/patchmatch.wgsl`, plus the two
+  decoupled refinement hypotheses (random-normal / depth-only); pure-JS slanted-plane
+  convergence test in `planeCost.test.js` (≥95% within 1%, vs raw-depth <50%). **P2.1**
+  no-measurement pixels (cost≈2.0) are zeroed before the speckle filter (`workers/ops/dense.js`);
+  **P2.3** ZNCC half-window cap lifted 3→5 (11×11) across `mvs.rs`/`patchmatch.wgsl`/
+  `depthMapGpu.js`/`mvs.js` + `DepthMapsModal`. **P3** rotation-cycle filter
+  (`core/sfm/cycleFilter.js`) now evidence-weights each triangle by its weakest edge's
+  inlier count, uses an adaptive+capped threshold (`max(5°, 2×median)`, ≤15°), shields
+  strong edges, and logs a single summary; new noisy-graph + strong-edge unit tests.
+  **P4** registration: next-best-view ordering by correspondences to well-triangulated,
+  spatially-spread points; `minPnpInlierRatio` 0.15→0.3 (`tuning.js`); refine-then-recheck
+  at the tight `reprjThreshold`; new points gated on ≥`filterMinTriAngleDeg` parallax not
+  cheirality alone. **P6** Match modal: one "Matching density" Fast/Full radio over
+  `lgTiled`, caps moved under Advanced, auto-hint when the Fast cap discards most detected
+  keypoints. wasm rebuilt + committed. **Not verified in-browser** (dense visual quality,
+  GPU↔CPU A/B, real-data reconstruction deltas) — needs a manual run. Deferred: P0.2 (k2
+  self-cal), P0.3 (film-width sensor field), P2.2/P2.4/P2.5 (bilateral ZNCC, geometric
+  consistency, fusion dedupe), P5 (matching speed: retrieval preselection, escalation
+  gating, parallel LightGlue). Remaining items now live in TODO ▸ Now ▸ Q (the plan
+  file was folded in + deleted 2026-07-10).
 - **2026-07-09 · TIFF transcode OPFS cache + display-first ingest** — reopening a
   project with TIFFs no longer re-runs the multi-second decode+re-encode: both
   transcode outputs (display JPEG + lossless compute PNG) are cached in OPFS under

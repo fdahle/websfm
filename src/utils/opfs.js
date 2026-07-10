@@ -567,9 +567,10 @@ export async function deletePoses(projectId) {
 //   vkp    Uint32   ΣV    keypoint index, per view
 // This replaces a multi-MB JSON.parse (which froze the main thread on open) with
 // a transferable typed-array read. The store passes each cloud's typed arrays as
-// `buffers: { pos, col, vcount, vcam, vkp }` (ArrayBuffers); load returns them the
-// same way for the store to rebuild the point objects.
-const RECON_BIN_KEYS = ['pos', 'col', 'vcount', 'vcam', 'vkp']
+// `buffers: { pos, col, vcount, vcam, vkp, vx, vy }` (ArrayBuffers); load returns
+// them the same way for the store to rebuild the point objects. vx/vy carry the
+// per-view BA-frame pixels (COLMAP export) and are absent on dense/legacy clouds.
+const RECON_BIN_KEYS = ['pos', 'col', 'vcount', 'vcam', 'vkp', 'vx', 'vy']
 
 async function removeStaleReconBins(dir, keepIds) {
   const stale = []

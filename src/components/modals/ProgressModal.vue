@@ -14,8 +14,16 @@ const pct = computed(() =>
   props.total > 0 ? Math.round((props.current / props.total) * 100) : 0
 )
 
+// Under an hour: M:SS. From an hour up: "Xh Ym" — a long run otherwise renders
+// as e.g. "9000:00", unbounded minutes that read as anything but 150 hours.
 function formatClock(secs) {
   const s = Math.max(0, Math.round(secs))
+  if (s >= 3600) {
+    // Floor the minutes so a value like 7170 s can't round up to "1h 60m".
+    const h = Math.floor(s / 3600)
+    const m = Math.floor((s % 3600) / 60)
+    return m > 0 ? `${h}h ${m}m` : `${h}h`
+  }
   const m = Math.floor(s / 60)
   return `${m}:${String(s % 60).padStart(2, '0')}`
 }
@@ -71,7 +79,12 @@ const etaSeconds = computed(() => {
   // Depend on `now` so the countdown ticks down between completions.
   void now.value
   const remaining = props.total - props.current
-  if (props.total <= 0 || props.current < 2 || !lastStamp.value) return null
+  // Withhold the estimate until a representative sample: on a big batch the first
+  // items are systematically the expensive ones (exhaustive matching visits an
+  // image's overlapping neighbours first), and extrapolating them 4000× over
+  // shows an ETA wrong by an order of magnitude — worse than no number.
+  const minSamples = Math.min(30, Math.max(2, Math.ceil(props.total * 0.01)))
+  if (props.total <= 0 || props.current < minSamples || !lastStamp.value) return null
   if (remaining <= 0) return 0
   const cumMean = ((lastStamp.value - startedAt.value) / 1000) / props.current
   if (!(cumMean > 0)) return null

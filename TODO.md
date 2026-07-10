@@ -31,6 +31,49 @@ still unvalidated on real data (Now ▸ R).
 
 ## Now
 
+### Q — Reconstruction quality/speed overhaul (2026-07-10 log audit)
+Two real runs (aerial CA213732V… film scans + 50-image building set) exposed a
+chain of quality problems. **P0.1/P1/P2.1/P2.3/P3/P4/P6 shipped** (see HANDOVER
+2026-07-10 done-log). Diagnosis lives in HANDOVER §Baselines B0/B1. **First owed:
+the in-browser verification of what shipped** — re-run both datasets and record
+deltas in HANDOVER §Baselines (verified pairs/rejected/cycle-drops, cameras
+registered, post-BA median+p95 reproj, ≥3-view %, dense cost median, fusion
+kept-%), plus dense visual quality + GPU↔CPU A/B RMS. This tells you whether P0.2
+(k2) is even needed. Remaining items (ordered by impact/effort; delete each line
+as it ships, HANDOVER done-log line each):
+
+- **P0.2 — extend self-cal to k2** *(gated: measure P0.1 first)*. 24 mm lenses
+  leave residual corner barrel after k1-only. Add shared `k2` to the BA intrinsic
+  block (`crates/reconstruction/src/bundle.rs`) + extend the exact-inverse fold
+  (`undistortPixel` ↔ a `project_k1k2`). Rebuild wasm, commit `src/wasm/*`.
+- **P0.3 — first-class "film width (mm)" input.** In `SensorTable.vue`, for
+  scan/film sensors offer format-width-mm as the primary field (pitch derived) +
+  surface a store suggestion when the implied-width warning fires ("set to 230 mm?").
+  The `sfm.js` K path already supports width-derived focal.
+- **P2.2 — bilateral-weighted ZNCC (COLMAP-style).** Weight window samples by
+  grayscale similarity + spatial distance. Change all three kernels
+  (`mvs.rs`/`patchmatch.wgsl`/`planeCost.js`) + the A/B reference in lockstep.
+- **P2.4 — geometric-consistency dense pass.** The heavier successor to **A5**
+  (below) — do A5 first, then the in-optimiser term (also Backlog "Stage-A
+  geometric consistency term inside PatchMatch"). COLMAP `--geom_consistency`.
+- **P2.5 — fusion dedupe + `step: 1`.** `fuseDepthMaps` (`core/dense/mvs.js`)
+  emits one point per source pixel → duplicate shells while `step: 2` throws away
+  75% of resolution. Consume agreeing pixels on a pass, emit one averaged point;
+  then `step: 1` is affordable at the same output size.
+- **P5 — matching speed** (37 min → <8 min for 50 imgs). (1) retrieval
+  preselection without poses — build-now variant of Parked ▸ vocab-tree (aggregate
+  existing SuperPoint descriptors → cosine kNN → top-k + sequential ±2); (2) don't
+  escalate hopeless pairs (F-verify the *coarse* matches first, only run the capped
+  match if coarse F-inliers ≥ ~8; `matchLightGlueTiled`); (3) parallel LightGlue
+  across workers — **⚠ conflicts with SP3** (resolve together, measure GPU
+  utilisation first); (4) demote per-tile logs to debug. Acceptance: <10 min with
+  ≥95% of currently-verified pairs still found; no ORT deadlock on Cancel+rerun.
+
+Verification per change: `npm test` + `npm run typecheck`; `crates/` change →
+`npm run build:wasm` + commit `src/wasm/*`; kernel changes → keep the three
+PatchMatch kernels in lockstep + re-check GPU↔CPU A/B RMS < 5e-3 **and** the P1
+slanted-plane test.
+
 ### LG — LightGlue: fix concurrency freeze, then tiled guided matching
 Code landed on branch `lightglue-tiled-matching` (Part A freeze fix + Part B
 tiled guided matching): serial dispatch + module mutex + real cancel; coarse-
@@ -126,7 +169,9 @@ POOL_SIZE pool; a LightGlue session is ~45 MB **per worker** plus WebGPU
 buffers. Route NN ops through a single dedicated inference worker (or cap
 NN-path concurrency to 1–2); SuperPoint/LightGlue are GPU-bound so per-image
 parallelism helps less than for CPU SIFT. Measure memory + wall-clock; record
-in HANDOVER §Baselines.
+in HANDOVER §Baselines. **⚠ Conflicts with Q ▸ P5(3)** (which proposes N=2–3
+parallel LightGlue workers) — resolve together: measure single-session GPU
+utilisation, then pick one stance and update both.
 
 **SP4 — Custom model upload (Settings ▸ Advanced).** Advanced tab in
 `SettingsModal.vue` for user `superpoint.onnx` / `lightglue.onnx`. New `opfs.js`
@@ -179,6 +224,13 @@ Workers cache descriptors+keypoints keyed by uuid + re-detect revision
 grouped by shared image. Skip pairs already `done` under identical settings
 unless `overwrite` (resume interrupted runs). Expect 1.3–2× and far less GC;
 kills the ≈6 GB clone traffic.
+
+### G2 — Glossary entries for the newly load-bearing terms (folded from PLAN P6.3)
+Add `src/glossary/algorithms/` entries for **"matching density"** (Fast/Full — the
+LightGlue tiled vs capped path), **"self-calibration"** (`refineIntrinsics: 'auto'`,
+now on by default), and **"cycle consistency"** (the rotation-cycle match filter) —
+the pipeline now leans on all three and they auto-link wherever their title/aliases
+appear (see CLAUDE.md "Adding a term"). Small; pure content.
 
 ### A5 — Per-depth-map geometric consistency filter (dense)
 Fusion is currently the only cross-view test and runs too late to stop freckle.
@@ -240,15 +292,27 @@ exporter) so results drop into any 3D viewer.
 
 ### F7 — COLMAP model import/export (ecosystem interop) **[new 2026-07-07]**
 Read/write COLMAP's sparse-model format (`cameras.txt/images.txt/points3D.txt`
-+ the `.bin` variants — well documented, stable). **Export** makes websfm a
-front end for the entire downstream ecosystem (NeRF/3D-Gaussian-Splatting
-tooling, Metashape/RealityCapture importers, research code) — likely the
-single cheapest credibility feature on this list. **Import** lets users bring
-a COLMAP reconstruction in for dense/DEM/ortho/georef. Pure parser/serializer
-in `core/io/colmapModel.js` (fits the io/ pattern, unit-testable); wire into
-ExportModal + the import funnel (`useImportRouting`). Mind conventions:
-COLMAP is qvec/tvec world-to-cam (matches websfm's R,t), cameras carry model
-ids (SIMPLE_RADIAL ↔ radial, OPENCV ↔ brown).
++ the `.bin` variants — well documented, stable). Pure core
+(`core/io/colmapModel.js` — R↔quaternion, text serialize/parse, websfm↔ColmapModel
+adapters) + a dependency-free `utils/zip.js` **shipped & unit-tested** (2026-07-10).
+**Export shipped**: Ribbon *Export ▸ Interop ▸ COLMAP Model* → zipped `.txt`
+model (PINHOLE per image, local SfM frame). The 2D observations are exported in
+the **BA (pinhole) frame** — the sparse run bakes each view's undistorted /
+fiducial-canonical / self-cal-folded pixel into the cloud (`viewsPx`, persisted as
+`recon.*.vx/vy.bin`), so distortion / film-scan / self-cal projects export
+observations coherent with the exported K/R/t (B2 fix, 2026-07-10). Remaining:
+- **Import** — `parseColmapModel` → `readColmapModel` → match names to loaded
+  images → `upsertSparseCloud`, letting users bring a COLMAP reconstruction in
+  for dense/DEM/ortho/georef. Needs a multi-file/zip picker (COLMAP is a file
+  *set*), `importKind.js` filename sniffing (`cameras.txt`/…), and a
+  `useImportRouting` route. Distortion coeffs of RADIAL/OPENCV cameras are read
+  for fx/fy/cx/cy only (`readColmapModel.droppedDistortion` → warn).
+- **`.bin` variants** — LE-binary mirror of the txt read/write (fast follow).
+- **Browser manual run (owed verification)** — export a real sparse model, open the
+  zip in COLMAP / another importer; confirm cameras + points land with low
+  reprojection error. Specifically exercise a **film-scan** and a **self-cal** (`f,k1`)
+  project now that observations export in the BA frame (B2) — this is the round-trip
+  the unit tests can't cover.
 
 ### F8 — Processing report **[new 2026-07-07]**
 Metashape's PDF report is half its survey-market credibility. Generate a
@@ -404,6 +468,8 @@ JS proves slow on large grids; optional manual "Flip Z" for object scenes.
   pairs, cheap each). A retrieval stage (compact per-image global descriptor —
   BoW/VLAD/aggregated SIFT — + kNN to propose candidates) drops the O(N²) pair
   count itself; revisit at 1000+ image scale where the gate's per-pair floor
-  starts to dominate.
+  starts to dominate. (Q ▸ P5(1) proposes a lighter build-now variant — aggregated
+  existing SuperPoint descriptors, no vocab tree — for the no-poses case; adopt
+  that there rather than duplicating the design here.)
 - **Multi-camera rigs, rolling-shutter model, Metashape-style chunks** — out of
   scope for the target workflows; record demand before designing.

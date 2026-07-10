@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { DETECT_SIFT_DEFAULTS, DETECT_SUPERPOINT_DEFAULTS } from '../../core/defaults.user.js'
+import { DETECT_TUNING } from '../../core/tuning.js'
 
 const props = defineProps({
   // Current image list — used to warn when Append mode would leave a mix of
@@ -52,8 +53,36 @@ const settings = computed(() => {
   return {}
 })
 
-function run() {
+// SuperPoint is fully convolutional, so a single untiled pass on a very large network
+// input overflows ONNX Runtime's int32 tensor-size math and OrtRun fails outright (see
+// DETECT_TUNING.spMaxUntiledInputPx + the backstop in core/features/superpoint.js). Flag
+// images that would exceed it at the chosen resolution with tiling OFF — the network
+// input is the native size downscaled so its longest side ≤ maxDim — so we can offer to
+// auto-tile before dispatching instead of letting the run fail per image.
+const oversizedSpImages = computed(() => {
+  if (detector.value !== 'superpoint' || superpointSettings.value.tiling !== 'off') return []
+  const maxDim = superpointSettings.value.maxDim || Infinity
+  return props.images.filter((img) => {
+    if (!overwrite.value && img.kpStatus === 'done') return false // skipped in Append mode
+    const w = img.meta?.width, h = img.meta?.height
+    if (!w || !h) return false
+    const scale = Math.min(1, maxDim / Math.max(w, h))
+    return Math.round(w * scale) * Math.round(h * scale) > DETECT_TUNING.spMaxUntiledInputPx
+  })
+})
+
+// Clicking Run while images are oversized opens a confirmation dialog rather than
+// dispatching straight into a failure — the user goes back to adjust Tiling/resolution
+// themselves, or runs anyway.
+const awaitingOversizeChoice = ref(false)
+
+function doRun() {
+  awaitingOversizeChoice.value = false
   emit('run', { detector: detector.value, overwrite: overwrite.value, ...settings.value })
+}
+function attemptRun() {
+  if (oversizedSpImages.value.length > 0) { awaitingOversizeChoice.value = true; return }
+  doRun()
 }
 </script>
 
@@ -231,6 +260,14 @@ function run() {
             </span>
           </div>
 
+          <div v-if="oversizedSpImages.length" class="warn-box">
+            {{ oversizedSpImages.length }} image{{ oversizedSpImages.length !== 1 ? 's' : '' }}
+            will exceed SuperPoint's single-pass size limit at this resolution and
+            <strong>fail</strong> (ONNX Runtime overflows its 32-bit tensor limit on
+            very large inputs). Turn <strong>Tiling</strong> on below, or lower the
+            resolution — tiling splits the image into small passes and sidesteps the limit.
+          </div>
+
           <div class="field">
             <label class="field-label" for="sp-maxKp">Max keypoints</label>
             <input
@@ -291,7 +328,39 @@ function run() {
 
       <div class="modal-footer">
         <button class="btn" @click="emit('close')">Cancel</button>
-        <button class="btn btn-primary" @click="run">Run on All Images</button>
+        <button class="btn btn-primary" @click="attemptRun">Run on All Images</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Oversized-input confirmation: SuperPoint would overflow ORT on these images. -->
+  <div
+    v-if="awaitingOversizeChoice"
+    class="overlay confirm-overlay"
+    @click.self="awaitingOversizeChoice = false"
+    @keydown.esc="awaitingOversizeChoice = false"
+  >
+    <div class="modal confirm-modal" role="dialog" aria-modal="true" aria-label="Large images">
+      <div class="modal-header">
+        <span class="modal-title">Large images may fail</span>
+        <button class="modal-close" title="Close" @click="awaitingOversizeChoice = false">×</button>
+      </div>
+      <div class="modal-body">
+        <p class="confirm-text">
+          {{ oversizedSpImages.length }} image{{ oversizedSpImages.length !== 1 ? 's' : '' }}
+          exceed SuperPoint's single-pass size limit at this resolution and will likely
+          <strong>fail</strong> (ONNX Runtime overflows its 32-bit tensor limit on very
+          large inputs).
+        </p>
+        <p class="confirm-text">
+          Go back to turn <strong>Tiling</strong> on (splits each image into small passes
+          and sidesteps the limit) or lower the <strong>Detection resolution</strong> —
+          or run anyway.
+        </p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" @click="awaitingOversizeChoice = false">Go back</button>
+        <button class="btn btn-primary" @click="doRun">Run anyway</button>
       </div>
     </div>
   </div>
@@ -312,11 +381,23 @@ function run() {
   background: var(--panel);
   border: 1px solid var(--panel-border);
   border-radius: 8px;
-  width: 380px;
+  width: 600px;
   max-width: 90vw;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
   display: flex;
   flex-direction: column;
+}
+
+/* Oversized-input confirmation dialog — sits above the main modal. */
+.confirm-overlay { z-index: 210; }
+
+.confirm-modal { width: 340px; }
+
+.confirm-text {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text);
+  margin: 0;
 }
 
 .modal-header {

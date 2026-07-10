@@ -117,7 +117,7 @@ function run() {
   background: var(--panel);
   border: 1px solid var(--panel-border);
   border-radius: 8px;
-  width: 480px; max-width: 90vw;
+  width: 600px; max-width: 90vw;
   max-height: 90vh;
   box-shadow: 0 8px 32px rgba(0,0,0,0.4);
   display: flex; flex-direction: column;

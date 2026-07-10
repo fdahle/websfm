@@ -76,6 +76,7 @@ function run() {
         <div class="field">
           <label class="field-label" for="refineIntr">Refine intrinsics (self-calibration)</label>
           <select id="refineIntr" v-model="settings.refineIntrinsics" class="field-input field-select">
+            <option value="auto">Auto — self-calibrate focal + radial k1 for EXIF-only cameras (recommended)</option>
             <option value="none">Off (use sensor table)</option>
             <option value="f">Focal length</option>
             <option value="f,cxcy">Focal + principal point</option>
@@ -85,7 +86,8 @@ function run() {
             Lets bundle adjustment solve one shared focal (and optionally principal
             point or a radial k1) per sensor, in the post-filter passes only. Weakly
             observed on short/single strips — the refined value is logged, never written
-            back to the sensor table.
+            back to the sensor table. <b>Auto</b> uses focal + radial k1 unless the
+            sensor already has a calibrated distortion model.
           </span>
         </div>
       </div>
@@ -109,7 +111,7 @@ function run() {
   background: var(--panel);
   border: 1px solid var(--panel-border);
   border-radius: 8px;
-  width: 480px; max-width: 90vw;
+  width: 600px; max-width: 90vw;
   max-height: 90vh;
   box-shadow: 0 8px 32px rgba(0,0,0,0.4);
   display: flex; flex-direction: column;

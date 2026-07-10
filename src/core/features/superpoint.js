@@ -17,8 +17,25 @@
 // #1 thing to validate on a known image (see TODO.md SP1).
 
 import { createSession, tensor, resolveBackend } from './ort.js'
+import { DETECT_TUNING } from '../tuning.js'
 
 export const SUPERPOINT_DESC_DIM = 256
+
+// ONNX Runtime raises an "Integer overflow" / SafeIntOnOverflow when a single untiled
+// pass on a very large image blows past its int32 tensor-size math (see
+// DETECT_TUNING.spMaxUntiledInputPx). It is NOT a GPU-memory failure, so we don't fall
+// back GPU→CPU (WASM overflows the same way) — we rethrow an actionable message.
+function isSizeOverflow(err) {
+  return /integer overflow|safeint/i.test(String(err?.message || err))
+}
+function sizeOverflowError(w, h) {
+  const mp = ((w * h) / 1e6).toFixed(1)
+  return new Error(
+    `SuperPoint: input ${w}×${h} (${mp} MP) is too large for a single pass — ONNX `
+    + `Runtime overflowed its 32-bit tensor-size limit. Enable Tiling in the Detect `
+    + `Features dialog (recommended) or lower the Detection resolution.`,
+  )
+}
 
 // One cached session per `${modelKey}:${backend}` — a modelKey can hold both a
 // WebGPU and a WASM session if we fall back mid-run (see detectSuperPoint).
@@ -142,6 +159,10 @@ export async function detectSuperPoint(gray, w, h, opts = {}) {
   try {
     results = await session.run({ [session.inputNames[0]]: await makeInput() })
   } catch (err) {
+    // A size overflow is a hard int32 ceiling, not a GPU-memory issue — falling back
+    // to WASM would overflow identically, so rethrow a clear "enable tiling" message
+    // (on either backend) instead of the raw SafeIntOnOverflow.
+    if (isSizeOverflow(err)) throw sizeOverflowError(w, h)
     if (backend !== 'webgpu') throw err
     // GPU path failed (OOM/std::bad_alloc at this resolution, unsupported op,
     // device lost). Record the failure SIZE for this model — smaller inputs
@@ -155,7 +176,12 @@ export async function detectSuperPoint(gray, w, h, opts = {}) {
     sessions.delete(`${modelKey}:webgpu`)
     backend = 'wasm'
     session = await getSession(model, modelKey, 'wasm', onLog)
-    results = await session.run({ [session.inputNames[0]]: await makeInput() })
+    try {
+      results = await session.run({ [session.inputNames[0]]: await makeInput() })
+    } catch (err2) {
+      if (isSizeOverflow(err2)) throw sizeOverflowError(w, h)
+      throw err2
+    }
   }
   if (first) {
     warmedUp.add(modelKey)

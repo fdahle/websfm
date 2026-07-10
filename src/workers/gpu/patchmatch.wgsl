@@ -181,21 +181,43 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
 
   let W = i32(params.refW);
   let H = i32(params.refH);
+  // 1. Spatial propagation from the 4-neighbours' PLANES: intersect THIS pixel's
+  // viewing ray with the neighbour's plane rather than copying its raw depth (which
+  // only holds fronto-parallel — the depth-map "freckle" bug). Kept in lockstep with
+  // mvs.rs / planeCost.js.
+  let rxI = (f32(u) - params.rcx) / params.rfx;
+  let ryI = (f32(v) - params.rcy) / params.rfy;
   var off = array<vec2<i32>, 4>(vec2<i32>(-1, 0), vec2<i32>(1, 0), vec2<i32>(0, -1), vec2<i32>(0, 1));
   for (var k = 0; k < 4; k = k + 1) {
     let nu = i32(u) + off[k].x;
     let nv = i32(v) + off[k].y;
     if (nu < 0 || nv < 0 || nu >= W || nv >= H) { continue; }
     let j = u32(nv) * params.refW + u32(nu);
-    let candD = state[j].x;
     let candN = state[j].yzw;
+    let rxJ = (f32(nu) - params.rcx) / params.rfx;
+    let ryJ = (f32(nv) - params.rcy) / params.rfy;
+    let dPlane = state[j].x * (candN.x * rxJ + candN.y * ryJ + candN.z);
+    let denom = candN.x * rxI + candN.y * ryI + candN.z;
+    if (abs(denom) < 1e-9) { continue; }
+    let candD = dPlane / denom;
+    if (candD <= params.depthMin || candD >= params.depthMax) { continue; }
     let c = aggCost(u, v, candD, candN);
     if (c < bestC) { bestC = c; bestD = candD; bestN = candN; }
   }
 
+  // 2. Refinement: decoupled (a) random normal, (b) depth-only, then (c) joint.
   var rng = seedRng(i, it + 1u, ctrl.parity + 1u, params.seed);
   let shrink = pow(0.5, f32(it));
   let dspan = (params.depthMax - params.depthMin) * 0.5 * shrink;
+  // (a) current depth + random new normal.
+  let randN = randNormal(&rng);
+  let ca = aggCost(u, v, bestD, randN);
+  if (ca < bestC) { bestC = ca; bestN = randN; }
+  // (b) current normal + perturbed depth.
+  let pertDonly = clamp(bestD + (randf(&rng) * 2.0 - 1.0) * dspan, params.depthMin, params.depthMax);
+  let cb = aggCost(u, v, pertDonly, bestN);
+  if (cb < bestC) { bestC = cb; bestD = pertDonly; }
+  // (c) joint perturbation.
   let pertD = clamp(bestD + (randf(&rng) * 2.0 - 1.0) * dspan, params.depthMin, params.depthMax);
   let pertN = normalize(vec3<f32>(
     bestN.x + (randf(&rng) * 2.0 - 1.0) * 0.5 * shrink,

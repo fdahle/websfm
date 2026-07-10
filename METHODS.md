@@ -200,17 +200,41 @@ are detected and dropped, because the extras mechanically depress the PnP inlier
 ratio while feeding RANSAC contradictory constraints (the "many correspondences,
 few inliers" stall).
 
-**Acceptance gating** (deliberately conservative):
+**Acceptance gating — two gates** (deliberately conservative):
 - a **fixed** PnP inlier threshold for the whole run (`pnpThresh`) — it never
   chases the model's p95 upward (an adaptive gate loosens exactly when the model
   is worst, admitting bad poses that poison it further);
-- require **both** an absolute inlier floor (`minPnpInliers`) **and** an inlier
-  fraction (`minPnpInlierRatio`) — a 6/137 = 4% "coincidence fit" is rejected.
-  Deferral is cheap: the sweep retries the image on every later pass, by which
+- **Gate 1 (at the PnP threshold):** require **both** an absolute inlier floor
+  (`minPnpInliers`) **and** an inlier fraction (`minPnpInlierRatio`) — a 6/137 = 4%
+  "coincidence fit" is rejected.
+- **Gate 2 (refine-then-recheck):** after the Gauss–Newton polish, recount how many
+  correspondences fall within the *tight* reprojection threshold (not the looser PnP
+  gate) and require the fraction again (`minPnpRefineInlierRatio`). A pose that only
+  holds up at the loose gate is a weak fit — deferred, not accepted.
+- Deferral is cheap: the sweep retries the image on every later pass, by which
   point interleaved BA has tightened the model.
 
-Ordering: at each pass, unregistered images are tried most-connected-first (total
-inliers to the registered set).
+**Ordering — next-best-view (COLMAP-style):** at each pass, unregistered images are
+tried in order of a next-best-view score = count of correspondences to
+**well-triangulated** (≥2-view) points, weighted by how spatially spread those
+observations are (a 4×4 grid-bucket occupancy fraction — a pose constrained by a
+tight cluster is ill-conditioned). Raw inlier connectivity to the registered set is
+the tie-break (and the fallback for candidates with no well-triangulated
+correspondences yet). Correspondences are swept once per pass and cached — reused for
+both the score and the subsequent PnP attempt until a registration grows the model.
+
+**Stalled-strip rescue (one shot).** A full sweep that registers nothing while images
+still *link* to the model is the signature failure of short film strips: the end
+frames fail on a slightly-wrong focal (self-calibration only runs post-filter, after
+registration) plus a structure gap in their overlap. Before giving up, run one rescue
+round — a **focal-only** bundle adjustment (`refineIntrinsics: 'f'`, well-constrained
+even on the pre-filter set, unlike cx/cy or k1) to correct the focal, plus a
+**retriangulation** pass to grow structure into the stalled overlaps — then retry the
+sweep **once** with a relaxed refine-recheck (recount at the PnP gate instead of the
+tight reprojection threshold, ratio `rescueRefineRatio`). The absolute inlier floor
+and the first PnP gate still apply, and the final BA + track filter clean any loose
+observations, so this rescues genuinely-linked end frames without manufacturing a
+pose. Off via `rescueStalled: false`.
 
 ### 4.4 Track management
 
@@ -264,6 +288,13 @@ Modes (`refineIntrinsics`):
 - `f,cxcy` — focal scale + shared principal-point offsets `dcx, dcy`.
 - `f,k1` — focal scale + a shared radial `k1` (Brown r² term). The BA forward
   model is `u = fx·a·(1+k1·r²)+cx` with exact analytic Jacobians.
+
+**Self-calibration is on by default.** The shipped default is `refineIntrinsics:
+'auto'`, which `sfm.js` resolves per run: `'f,k1'` when **no** sensor carries a
+calibrated distortion model (EXIF-only cameras / film scans — a guessed pinhole is
+the single biggest downstream error source, so refine focal + k1), and `'none'`
+when a calibrated Brown model already removed distortion at ingest (don't
+double-correct). The explicit modes above override the resolution.
 
 Self-calibration is **only** run on post-filter passes (never on the pre-filter
 mess — it drifted cx/cy ~180 px on a test set), and it is **weakly observed** on

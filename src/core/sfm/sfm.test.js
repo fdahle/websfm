@@ -532,6 +532,77 @@ describe('rotationCycleFilter (repetitive-structure defense)', () => {
     ]
     expect(rotationCycleFilter(edges).drop).toHaveLength(0)
   })
+
+  it('drops ≥90% of false edges and ≤2% of true edges under 2° rotation noise', () => {
+    // Deterministic pseudo-random small-angle noise about a varying axis, applied to
+    // every true edge (true relative rotation = identity, so cycles close to 0°); a
+    // handful of edges carry a large bogus rotation (repetitive-structure false pair).
+    let seed = 12345
+    const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff }
+    const rodrigues = (ax, deg) => {
+      const a = deg * Math.PI / 180, c = Math.cos(a), s = Math.sin(a)
+      const n = Math.hypot(...ax) || 1, [x, y, z] = ax.map((v) => v / n)
+      const C = 1 - c
+      return [
+        [c + x * x * C, x * y * C - z * s, x * z * C + y * s],
+        [y * x * C + z * s, c + y * y * C, y * z * C - x * s],
+        [z * x * C - y * s, z * y * C + x * s, c + z * z * C],
+      ]
+    }
+    const N = 10
+    const falseSet = new Set(['1--4', '2--7', '3--8', '5--9', '0--6']) // 5 of 45
+    const edges = []
+    for (let i = 0; i < N; i++) for (let j = i + 1; j < N; j++) {
+      const key = `${i}--${j}`
+      if (falseSet.has(key)) {
+        edges.push({ idA: String(i), idB: String(j), R: rotZ(35), inliers: 400 })
+      } else {
+        // ≤2° noise about a pseudo-random axis on the identity relative rotation.
+        const R = rodrigues([rnd() - 0.5, rnd() - 0.5, rnd() - 0.5], (rnd() * 2))
+        edges.push({ idA: String(i), idB: String(j), R, inliers: 4000 })
+      }
+    }
+    const { drop } = rotationCycleFilter(edges)
+    const dropped = new Set(drop.map((d) => `${d.idA}--${d.idB}`))
+    let falseDropped = 0, trueDropped = 0
+    for (const key of dropped) { if (falseSet.has(key)) falseDropped++; else trueDropped++ }
+    // ≥90% of the 5 false edges (≥5), and ≤2% of the 40 true edges (0).
+    expect(falseDropped).toBeGreaterThanOrEqual(Math.ceil(0.9 * falseSet.size))
+    expect(trueDropped).toBeLessThanOrEqual(Math.floor(0.02 * (edges.length - falseSet.size)))
+  })
+
+  it('protects a strong edge whose weighted support is low but non-zero', () => {
+    // Sequential edge a–b (5000 inliers, TRUE identity) is the only judgeable edge:
+    // its neighbours c–f are pendant (each connects only to a,b → their edges sit in
+    // one triangle, below minTriangles, so they are never dropped). a–b's support is
+    // 14% (one good triangle a-b-c weight 50 vs three broken a-b-{d,e,f} weight 300),
+    // below the 30% floor — without strong-edge protection it would be dropped.
+    const edges = [
+      { idA: 'a', idB: 'b', R: I, inliers: 5000 },
+      { idA: 'a', idB: 'c', R: I, inliers: 50 }, { idA: 'b', idB: 'c', R: I, inliers: 50 },
+      { idA: 'a', idB: 'd', R: rotZ(30), inliers: 100 }, { idA: 'b', idB: 'd', R: I, inliers: 100 },
+      { idA: 'a', idB: 'e', R: rotZ(30), inliers: 100 }, { idA: 'b', idB: 'e', R: I, inliers: 100 },
+      { idA: 'a', idB: 'f', R: rotZ(30), inliers: 100 }, { idA: 'b', idB: 'f', R: I, inliers: 100 },
+    ]
+    const { drop } = rotationCycleFilter(edges)
+    expect(drop.some((d) => d.idA === 'a' && d.idB === 'b')).toBe(false)
+  })
+
+  it('drops a low-support false edge when no inlier counts are supplied (protection self-disables)', () => {
+    // Uniform-quality graph: no `inliers` fields, so all default to 1 → the strong-edge
+    // floor must NOT shield every edge. K5 of true (identity) edges plus one false edge
+    // c–d that breaks all its triangles (a-c-d, b-c-d, c-d-e → ~0% support < 30% floor).
+    // With the B1 bug, the percentile floor equalled 1 and every edge was "strong", so
+    // c–d escaped on any non-zero support — the old (correct) behaviour must drop it.
+    const edges = [
+      { idA: 'a', idB: 'b', R: I }, { idA: 'a', idB: 'c', R: I }, { idA: 'a', idB: 'd', R: I }, { idA: 'a', idB: 'e', R: I },
+      { idA: 'b', idB: 'c', R: I }, { idA: 'b', idB: 'd', R: I }, { idA: 'b', idB: 'e', R: I },
+      { idA: 'c', idB: 'e', R: I }, { idA: 'd', idB: 'e', R: I },
+      { idA: 'c', idB: 'd', R: rotZ(30) }, // false pair, breaks every triangle it sits in
+    ]
+    const { drop } = rotationCycleFilter(edges)
+    expect(drop.some((d) => d.idA === 'c' && d.idB === 'd')).toBe(true)
+  })
 })
 
 // ── F4: fiducial interior orientation ─────────────────────────────────────────

@@ -21,8 +21,14 @@ const CONFIG = {
   model: {
     title: 'Export Model',
     formats: [
-      { value: 'json',   label: 'JSON — cameras + tracks' },
-      { value: 'colmap', label: 'COLMAP (text)', disabled: true },
+      { value: 'json', label: 'JSON — cameras + tracks' },
+    ],
+  },
+  colmap: {
+    title: 'Export COLMAP Model',
+    formats: [
+      { value: 'txt', label: 'Text (.txt) — zipped' },
+      { value: 'bin', label: 'Binary (.bin)', disabled: true },
     ],
   },
   dem: {
@@ -96,6 +102,15 @@ function run() {
             <input type="checkbox" v-model="settings.includeTracks" />
             <span>Include point tracks (image observations)</span>
           </label>
+        </template>
+
+        <!-- COLMAP model -->
+        <template v-else-if="kind === 'colmap'">
+          <p class="field-hint">
+            Exports the sparse model as COLMAP <code>cameras.txt</code>, <code>images.txt</code>
+            and <code>points3D.txt</code> in a ZIP — one PINHOLE camera per image, in the local
+            SfM frame. Reads into COLMAP, Metashape/RealityCapture and NeRF / Gaussian-Splatting tools.
+          </p>
         </template>
 
         <!-- DEM -->

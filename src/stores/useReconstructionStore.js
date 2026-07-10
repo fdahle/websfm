@@ -142,6 +142,11 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     for (const p of pts) totalViews += p.views ? p.views.size : 0
     const vcam = new Uint32Array(totalViews)
     const vkp = new Uint32Array(totalViews)
+    // Per-view BA-frame pixel (COLMAP export). Only allocated when some point carries
+    // it (sparse clouds from a real reconstruct); NaN marks a view without a pixel.
+    const hasViewPx = pts.some((p) => p.viewsPx && p.viewsPx.size)
+    const vx = hasViewPx ? new Float32Array(totalViews).fill(NaN) : null
+    const vy = hasViewPx ? new Float32Array(totalViews).fill(NaN) : null
 
     let vi = 0
     for (let i = 0; i < N; i++) {
@@ -153,7 +158,9 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
         for (const [uuid, kp] of p.views) {
           let ci = camIndex.get(uuid)
           if (ci === undefined) { ci = viewUuids.length; camIndex.set(uuid, ci); viewUuids.push(uuid) }
-          vcam[vi] = ci; vkp[vi] = kp; vi++
+          vcam[vi] = ci; vkp[vi] = kp
+          if (vx) { const px = p.viewsPx?.get(uuid); if (px) { vx[vi] = px[0]; vy[vi] = px[1] } }
+          vi++
         }
       }
     }
@@ -167,6 +174,8 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
         vcount: vcount.buffer,
         vcam: vcam.buffer,
         vkp: vkp.buffer,
+        vx: vx ? vx.buffer : null,
+        vy: vy ? vy.buffer : null,
       },
     }
   }
@@ -660,12 +669,21 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
         onProgress: (done, total, label) => onProgress?.(done, total, label),
       })
 
-      // Apply the model. Point view-tracks come back as [[uuid, kpIdx], …];
-      // rebuild them as Maps to match the in-memory shape.
+      // Apply the model. Point view-tracks come back as [[uuid, kpIdx, x, y], …];
+      // rebuild `views` (uuid→kpIdx) plus a parallel `viewsPx` (uuid→[x,y]) carrying
+      // the BA-frame keypoint pixels (undistorted / canonical / self-cal-folded) —
+      // the only pixels coherent with the exported K/R/t (COLMAP export reads them).
       if (result.status === 'done') {
         let camMap = new Map()
         for (const { uuid, R, t, K } of result.cameras) camMap.set(uuid, { R, t, K })
-        let pts = result.points.map(({ x, y, z, views, color }) => ({ x, y, z, views: new Map(views), color }))
+        let pts = result.points.map(({ x, y, z, views, color }) => {
+          const v = new Map(), vpx = new Map()
+          for (const entry of views) {
+            v.set(entry[0], entry[1])
+            if (entry.length >= 4) vpx.set(entry[0], [entry[2], entry[3]])
+          }
+          return { x, y, z, views: v, viewsPx: vpx.size ? vpx : undefined, color }
+        })
 
         // Aerial auto-orient: SfM leaves the model in an arbitrary frame (it can
         // come out upside-down). For aerial surveys the cameras look down, so we
@@ -722,6 +740,8 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     const vcount = b.vcount ? new Uint32Array(b.vcount) : null
     const vcam = b.vcam ? new Uint32Array(b.vcam) : null
     const vkp = b.vkp ? new Uint32Array(b.vkp) : null
+    const vx = b.vx ? new Float32Array(b.vx) : null
+    const vy = b.vy ? new Float32Array(b.vy) : null
     const viewUuids = c.viewUuids || []
 
     const cameras = new Map()
@@ -731,14 +751,23 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     let vi = 0
     for (let i = 0; i < N; i++) {
       const views = new Map()
+      let viewsPx
       if (vcount && vcam && vkp) {
         const k = vcount[i]
-        for (let j = 0; j < k; j++) { views.set(viewUuids[vcam[vi]], vkp[vi]); vi++ }
+        for (let j = 0; j < k; j++) {
+          const uuid = viewUuids[vcam[vi]]
+          views.set(uuid, vkp[vi])
+          if (vx && vy && Number.isFinite(vx[vi])) {
+            (viewsPx ??= new Map()).set(uuid, [vx[vi], vy[vi]])
+          }
+          vi++
+        }
       }
       points[i] = {
         x: pos[i * 3], y: pos[i * 3 + 1], z: pos[i * 3 + 2],
         color: col ? [col[i * 3], col[i * 3 + 1], col[i * 3 + 2]] : undefined,
         views,
+        viewsPx,
       }
     }
     return {

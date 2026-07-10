@@ -136,12 +136,13 @@ function run() {
                 <input
                   id="window"
                   v-model.number="settings.window"
-                  type="number" min="1" max="3" step="1"
+                  type="number" min="1" max="5" step="1"
                   class="field-input"
                 />
                 <span class="field-unit">px</span>
               </div>
-              <span class="field-hint">Half-size of the correlation window (1–3 ⇒ 3×3…7×7).</span>
+              <span class="field-hint">Half-size of the correlation window (1–5 ⇒ 3×3…11×11). Larger helps
+                low-texture / film-grain surfaces, at higher cost.</span>
             </div>
 
             <div class="field">
@@ -177,7 +178,7 @@ function run() {
   background: var(--panel);
   border: 1px solid var(--panel-border);
   border-radius: 8px;
-  width: 480px; max-width: 90vw;
+  width: 600px; max-width: 90vw;
   max-height: 90vh;
   box-shadow: 0 8px 32px rgba(0,0,0,0.4);
   display: flex; flex-direction: column;

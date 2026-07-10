@@ -87,7 +87,10 @@
       "Bash(grep -n \"updateMask, updateDepth\\\\|= imagesStore\\\\|useImagesStore\\(\\)\\\\|const {.*imagesStore\\\\|updateMask\" src/App.vue)",
       "Bash(grep -iA12 \"fail\\\\|AssertionError\\\\|expected\")",
       "Bash(grep -iA14 \"fail\\\\|expected\\\\|AssertionError\")",
-      "Bash(grep -n \"cameras:\\\\|K:\\\\|kMap\\\\|Kmap\\\\|cam.K\\\\|, K }\\\\|return done\\\\|cameras.set\\\\|{ R, t\" src/core/sfm/sfm.js)"
+      "Bash(grep -n \"cameras:\\\\|K:\\\\|kMap\\\\|Kmap\\\\|cam.K\\\\|, K }\\\\|return done\\\\|cameras.set\\\\|{ R, t\" src/core/sfm/sfm.js)",
+      "Bash(SFM_DEBUG=1 npx vitest run src/core/sfm/sfm.test.js -t \"synthetic 3-view\")",
+      "Bash(SFM_DEBUG=1 npx vitest run src/core/sfm/sfm.test.js)",
+      "Bash(timeout 300 npx vite build)"
     ],
     "additionalDirectories": [
       "/Users/fhdahle/Documents/GitHub/websfm/src/wasm/*",

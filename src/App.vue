@@ -85,6 +85,11 @@ const {
   restoreImages,
 } = imagesStore
 
+// Largest detected keypoint count over all images — lets the Match modal warn when
+// a LightGlue cap would discard most of them (P6 auto-hint).
+const detectedMaxKeypoints = computed(() =>
+  images.value.reduce((m, img) => Math.max(m, img.kpCount || 0), 0))
+
 // ── Matches ───────────────────────────────────────────────────────────────────
 // Project-scoped store; restore/clear run through the project-store registry.
 const matchesStore = useMatchesStore()
@@ -617,9 +622,8 @@ function editMask(id) {
 }
 function onDepthMapsRun(settings)   { depthMapsOpen.value      = false;  runComputeDepthMaps(settings) }
 function onDenseRun(settings)       { denseOpen.value          = false;  runDensify(settings) }
-// Products: build, then pop the preview so the result is immediately visible.
-// No auto-preview: generation just produces the product; the user opens it via
-// Products ▸ Preview (or the sidebar) when they want to inspect it.
+// Products: generation just produces the product; the user opens it via the
+// Products sidebar section (double-click / "Open in tab") when they want to inspect it.
 async function onDemRun(settings)   { demOpen.value = false;   await runGenerateDem(settings) }
 async function onOrthoRun(settings) { orthoOpen.value = false; await runGenerateOrtho(settings) }
 
@@ -628,10 +632,18 @@ async function onOrthoRun(settings) { orthoOpen.value = false; await runGenerate
 // delete request through a confirm dialog. Holds the pending image ids + names.
 const pendingImageDelete = ref(null)
 
+// Clearing an image's mask is irreversible (drops the painted region), so route it
+// through a confirm dialog. Holds the tab/image id whose mask is pending clear.
+const pendingMaskClear = ref(null)
+function confirmMaskClear() {
+  imageViewerRefs[pendingMaskClear.value]?.clearMask()
+  pendingMaskClear.value = null
+}
+
 // Escape-closes-top-most-modal (pulls modal state from the stores; the few local
 // bits are injected). Used by the global keydown handler in the bootstrap below.
 const { closeTopModal } = useModalEscape({
-  pendingImageDelete, exportKind, onCancelNewProject: handleCancelNewProject,
+  pendingImageDelete, pendingMaskClear, exportKind, onCancelNewProject: handleCancelNewProject,
 })
 
 // Site-wide confirm before the tab is closed / reloaded / navigated away.
@@ -676,6 +688,7 @@ function handleCommand(id) {
     case 'export-sensors':       exportSensors(); break
     case 'export-cloud':         exportKind.value = 'cloud'; break
     case 'export-model':         exportKind.value = 'model'; break
+    case 'export-colmap':        exportKind.value = 'colmap'; break
     case 'export-dem':           exportKind.value = 'dem'; break
     case 'export-ortho':         exportKind.value = 'ortho'; break
     case 'export-keypoints':     exportKeypoints(); break
@@ -706,7 +719,6 @@ function handleCommand(id) {
     case 'dense':                denseOpen.value = true; break
     case 'gen-dem':              demOpen.value = true; break
     case 'gen-ortho':            orthoOpen.value = true; break
-    case 'view-products':        openProductTab(dem.value ? 'dem' : 'ortho'); break
     case 'auto-georeference':    georeference(); break
     case 'footprints-from-poses': footprintFromPosesOpen.value = true; break
     case 'detect-features':      detectFeaturesOpen.value = true; break
@@ -764,7 +776,7 @@ function handleCommand(id) {
       break
     }
     case 'img-mask-import': imageViewerRefs[activeImageTab.value?.id]?.triggerMaskImport(); break
-    case 'img-mask-clear':  imageViewerRefs[activeImageTab.value?.id]?.clearMask(); break
+    case 'img-mask-clear':  pendingMaskClear.value = activeImageTab.value?.id ?? null; break
     case 'img-brush-s': { const t = activeTab.value; if (t?.type === 'image') t.brushRadius = 10; break }
     case 'img-brush-m': { const t = activeTab.value; if (t?.type === 'image') t.brushRadius = 20; break }
     case 'img-brush-l': { const t = activeTab.value; if (t?.type === 'image') t.brushRadius = 40; break }
@@ -851,6 +863,7 @@ function onRibbonPick(event) {
     <Teleport to="body">
       <MatchFeaturesModal
         v-if="matchFeaturesOpen"
+        :detected-max-keypoints="detectedMaxKeypoints"
         @close="matchFeaturesOpen = false"
         @run="onMatchRun"
       />
@@ -908,6 +921,18 @@ function onRibbonPick(event) {
         danger
         @confirm="confirmRemoveImages"
         @cancel="pendingImageDelete = null"
+      />
+    </Teleport>
+
+    <Teleport to="body">
+      <ConfirmModal
+        v-if="pendingMaskClear"
+        title="Clear mask?"
+        message="This removes the painted mask for this image. This can't be undone."
+        confirm-label="Clear"
+        danger
+        @confirm="confirmMaskClear"
+        @cancel="pendingMaskClear = null"
       />
     </Teleport>
 

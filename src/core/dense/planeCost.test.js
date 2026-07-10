@@ -82,6 +82,124 @@ describe('planeCostRef', () => {
   })
 })
 
+// P1: PatchMatch spatial propagation must intersect a pixel's ray with the
+// neighbour's PLANE, not copy the neighbour's raw depth (which only holds fronto-
+// parallel). This is a pure-JS reference of the exact propagation the mvs.rs / wgsl
+// kernels now run, driven by the real planeCostRef, on a synthetic slanted plane.
+describe('PatchMatch propagation on a slanted plane (P1 freckle fix)', () => {
+  const norm3 = (v) => { const m = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / m, v[1] / m, v[2] / m] }
+
+  // Two views of ONE slanted plane, rendered by sampling a smooth world-space
+  // texture at each pixel's 3D point — so matching intensities are exactly
+  // photo-consistent and ZNCC bottoms out at the true (depth, normal).
+  function slantedScene() {
+    const W = 32, H = 32, k = { fx: 48, fy: 48, cx: 16, cy: 16 }
+    const N = norm3([0.35, 0.0, -1])   // tilted about x, facing the camera (nz<0)
+    const D = -5                        // plane N·X = D (D<0 ⇒ positive depths)
+    const t = [0.25, 0, 0], R = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
+    const dmin = 3, dmax = 8
+    const tex = (x, y) => 128 + 110 * Math.sin(1.6 * x + 0.3) * Math.cos(1.8 * y - 0.2)
+    const clip = (g) => Math.max(0, Math.min(255, Math.round(g)))
+    const rayOf = (u, v) => [(u - k.cx) / k.fx, (v - k.cy) / k.fy, 1]
+
+    const refG = new Uint8Array(W * H), gtDepth = new Float64Array(W * H)
+    for (let v = 0; v < H; v++) for (let u = 0; u < W; u++) {
+      const r = rayOf(u, v)
+      const Z = D / (N[0] * r[0] + N[1] * r[1] + N[2])
+      gtDepth[v * W + u] = Z
+      refG[v * W + u] = clip(tex(Z * r[0], Z * r[1]))
+    }
+    // Same plane in the source frame (R=I): N·Xs = D + N·t.
+    const Ds = D + (N[0] * t[0] + N[1] * t[1] + N[2] * t[2])
+    const srcG = new Uint8Array(W * H)
+    for (let v = 0; v < H; v++) for (let u = 0; u < W; u++) {
+      const r = rayOf(u, v)
+      const Zs = Ds / (N[0] * r[0] + N[1] * r[1] + N[2])
+      srcG[v * W + u] = clip(tex(Zs * r[0] - t[0], Zs * r[1] - t[1]))
+    }
+    return {
+      ref: { gray: refG, w: W, h: H, ...k }, src: { gray: srcG, w: W, h: H, ...k, R, t },
+      gtDepth, N, dmin, dmax, W, H, k,
+    }
+  }
+
+  // One PatchMatch run with the normal fixed to ground truth (isolating depth
+  // propagation) and a bad constant init (dmax, so nothing is a lucky low), then one
+  // seeded GT anchor COLUMN and no random refinement — so the ONLY way GT depth
+  // reaches a pixel is propagation. `mode` selects the fixed plane-intersection
+  // candidate ('plane') vs the old raw-depth copy ('depth'). The plane is slanted in
+  // x, so raw-depth copies across a row are maximally wrong.
+  function run(scene, mode, passes = 8) {
+    const { ref, src, N, dmin, dmax, W, H, k, gtDepth } = scene
+    const radius = 2
+    const agg = (u, v, d) => aggregateValidCosts([planeCostRef(ref, src, u, v, d, N, radius)], 1)
+    const rayx = (u) => (u - k.cx) / k.fx, rayy = (v) => (v - k.cy) / k.fy
+    const depth = new Float64Array(W * H), cost = new Float64Array(W * H)
+    for (let v = 0; v < H; v++) for (let u = 0; u < W; u++) {
+      const i = v * W + u
+      depth[i] = dmax        // deliberately-bad constant init
+      cost[i] = agg(u, v, depth[i])
+    }
+    const anchorCol = 3
+    for (let v = 0; v < H; v++) {
+      const i = v * W + anchorCol
+      depth[i] = gtDepth[i]; cost[i] = agg(anchorCol, v, depth[i])
+    }
+    const candidate = (u, v, ju, jv) => {
+      const j = jv * W + ju
+      if (mode === 'depth') return depth[j]
+      const nrj = N[0] * rayx(ju) + N[1] * rayy(jv) + N[2]
+      const denom = N[0] * rayx(u) + N[1] * rayy(v) + N[2]
+      return (depth[j] * nrj) / denom
+    }
+    const relaxAt = (u, v) => {
+      const i = v * W + u
+      const neigh = [[u - 1, v], [u + 1, v], [u, v - 1], [u, v + 1]]
+      for (const [ju, jv] of neigh) {
+        if (ju < 0 || jv < 0 || ju >= W || jv >= H) continue
+        const cd = candidate(u, v, ju, jv)
+        if (cd <= dmin || cd >= dmax) continue
+        const c = agg(u, v, cd)
+        if (c < cost[i]) { cost[i] = c; depth[i] = cd }
+      }
+    }
+    for (let p = 0; p < passes; p++) {
+      for (let v = 0; v < H; v++) for (let u = 0; u < W; u++) relaxAt(u, v)         // forward
+      for (let v = H - 1; v >= 0; v--) for (let u = W - 1; u >= 0; u--) relaxAt(u, v) // backward
+    }
+    return depth
+  }
+
+  // Accuracy over the *scorable* pixels (where a source measurement exists at GT —
+  // border pixels whose warp leaves the source can't be estimated by any method).
+  function fracWithin(scene, depth, tol = 0.01) {
+    const { ref, src, N, gtDepth, W, H } = scene
+    let ok = 0, total = 0
+    for (let v = 0; v < H; v++) for (let u = 0; u < W; u++) {
+      if (planeCostRef(ref, src, u, v, gtDepth[v * W + u], N, 2) >= 1e8) continue
+      total++
+      const i = v * W + u
+      if (Math.abs(depth[i] - gtDepth[i]) / gtDepth[i] <= tol) ok++
+    }
+    return ok / total
+  }
+
+  it('fills a slanted plane to ≥95% within 1% via plane-intersection propagation', () => {
+    const scene = slantedScene()
+    const frac = fracWithin(scene, run(scene, 'plane'))
+    expect(frac).toBeGreaterThanOrEqual(0.95)
+  })
+
+  it('raw-depth propagation (the old bug) fails on the same slanted plane', () => {
+    const scene = slantedScene()
+    const planeFrac = fracWithin(scene, run(scene, 'plane'))
+    const depthFrac = fracWithin(scene, run(scene, 'depth'))
+    // The correct method vastly outperforms copying raw neighbour depth.
+    expect(depthFrac).toBeLessThan(0.5)
+    expect(planeFrac).toBeGreaterThan(depthFrac + 0.4)
+  })
+})
+
 describe('aggregateValidCosts (best-K over valid sources)', () => {
   it('excludes an out-of-bounds source; agg == mean of the two valid costs', () => {
     // One INVALID (no measurement) + two valid ⇒ mean of the two valid only.
