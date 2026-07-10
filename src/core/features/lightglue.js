@@ -99,6 +99,15 @@ function withTimeout(promise, ms, label) {
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer))
 }
 
+// Backend-aware tail for the one-time warm-up log line: the "tens of seconds"
+// warning is a CPU-WASM fact — printing it on the (sub-second-per-pair) WebGPU
+// path is misleading exactly when the user is watching for a hang.
+function warmupHint(backend) {
+  return backend === 'webgpu'
+    ? ' (compiling GPU shaders; times out + falls back to CPU if it hangs)…'
+    : '; single-thread wasm can take tens of seconds per pair…'
+}
+
 // int64 (BigInt64Array) / int32 → plain number.
 function num(data, i) {
   const v = data[i]
@@ -263,7 +272,7 @@ export async function matchLightGlue(args) {
   // session resolution through run() lives inside the mutex; only the feed arrays
   // (already built above) are prepared outside it.
   return serialized(async () => {
-    const { run } = await openRun(modelKey, model, useGpu, minConf, onLog)
+    const { run, getBackend } = await openRun(modelKey, model, useGpu, minConf, onLog)
     // Mark warm-up STARTED (not finished): with serial dispatch pairs run one at a
     // time now, but flipping the flag before the first await also stops any future
     // re-entrant caller from each claiming to be "first".
@@ -272,7 +281,7 @@ export async function matchLightGlue(args) {
       warmedUp.add(modelKey)
       onLog?.(`LightGlue: first match ${spec.nA}×${spec.nB} keypoints`
         + `${capped ? ` (capped from ${kpsA.length}×${kpsB.length}, strongest kept)` : ''}`
-        + ' — one-time graph warm-up; single-thread wasm can take tens of seconds per pair…')
+        + ` — one-time graph warm-up${warmupHint(getBackend())}`)
     }
     const tRun = performance.now()
     const { matches, dims, sName, backend } = await run(spec, { first })
@@ -301,10 +310,19 @@ export async function matchLightGlue(args) {
  *
  * @param {object} args  matchLightGlue args, plus:
  * @param {number} [args.coarseKeypoints=1024]  per-image cap for the coarse pass
+ * @param {number} [args.coarseGateMin=8]  coarse matches below this ⇒ the pair
+ *        doesn't overlap: return the coarse result directly (the caller's
+ *        minMatches gate skips the pair) instead of falling back to the plain
+ *        capped match. The coarse pass is the LightGlue pair gate — the store's
+ *        brute-force subset gate never runs for this matcher.
  * @param {number} [args.tileBudget=2048]  max keypoints per tile side (attention budget)
  * @param {number} [args.guideMinMatches=24]  min coarse matches to attempt a guide
  * @param {number} [args.guideMinInliers=15]  min H-inliers for a usable guide
- * @param {number} [args.guideMinInlierRatio=0.3]  min H-inlier fraction for a usable guide
+ * @param {number} [args.guideMinInlierRatio=0.15]  min H-inlier fraction for a usable guide
+ * @param {number} [args.guideRelThresh=0.001]  guide-H RANSAC threshold as a fraction
+ *        of the image diagonal (floored at 3 px). The guide only needs locality —
+ *        the margin absorbs looseness — so on large frames with relief this must be
+ *        far looser than a verification threshold or every real pair falls back.
  * @param {number} [args.tileMinKps=32]  skip a tile with fewer kps than this on either side
  * @returns {Promise<{ matches: {ia:number,ib:number,score:number}[] }>}
  */
@@ -313,10 +331,12 @@ export async function matchLightGlueTiled(args) {
     kpsA, descA, wA, hA, kpsB, descB, wB, hB, minConf = 0,
     maxKeypoints = 2048,       // cap for the plain fallback path
     coarseKeypoints = 1024,
+    coarseGateMin = 8,
     tileBudget = 2048,
     guideMinMatches = 24,
     guideMinInliers = 15,
-    guideMinInlierRatio = 0.3,
+    guideMinInlierRatio = 0.15,
+    guideRelThresh = 0.001,
     tileMinKps = 32,
     useGpu = false, model = defaultModelUrl(), modelKey = 'default', onLog,
   } = args
@@ -327,7 +347,7 @@ export async function matchLightGlueTiled(args) {
   // so it must NOT call the public matchLightGlue (which would re-enter this same
   // mutex and deadlock); it runs a prefix pass through `run` directly.
   return serialized(async () => {
-    const { run } = await openRun(modelKey, model, useGpu, minConf, onLog)
+    const { run, getBackend } = await openRun(modelKey, model, useGpu, minConf, onLog)
     // Consume the one-time warm-up flag on the first sub-run of this invocation.
     let first = !warmedUp.has(modelKey)
     if (first) warmedUp.add(modelKey)
@@ -344,32 +364,50 @@ export async function matchLightGlueTiled(args) {
     const nCoarseA = Math.min(kpsA.length, coarseKeypoints)
     const nCoarseB = Math.min(kpsB.length, coarseKeypoints)
     if (first) {
-      onLog?.(`LightGlue tiled: first match — one-time graph warm-up on the coarse pass; `
-        + `single-thread wasm can take tens of seconds per pair…`)
+      onLog?.(`LightGlue tiled: first match — one-time graph warm-up on the coarse pass`
+        + warmupHint(getBackend()))
     }
     const coarse = (await runPrefix(coarseKeypoints)).filter((m) => m.score >= minConf)
 
-    // 2. Guard: too few coarse matches to fit a guide → plain capped fallback.
+    // 2. Guard: too few coarse matches to fit a guide. Two very different causes,
+    // two very different moves:
+    //  - near-zero coarse matches ⇒ the pair does NOT overlap. This is the gate:
+    //    return the coarse result as-is (the caller's minMatches then skips the
+    //    pair) — escalating to the plain capped match, the most expensive path in
+    //    the matcher, would spend its worst case confirming a non-overlap.
+    //  - a moderate count ⇒ real overlap the coarse subset undersampled; that one
+    //    earns the plain fallback.
+    if (coarse.length < coarseGateMin) {
+      onLog?.(`LightGlue tiled: gated — coarse ${nCoarseA}×${nCoarseB} → ${coarse.length} matches `
+        + `(< ${coarseGateMin}): pair doesn't overlap, skipping full match`, 'info')
+      return { matches: coarse }
+    }
     if (coarse.length < guideMinMatches) {
       onLog?.(`LightGlue tiled: coarse ${nCoarseA}×${nCoarseB} → ${coarse.length} matches `
         + `(< ${guideMinMatches} needed to guide) — falling back to plain ${maxKeypoints}-cap match`, 'info')
       return { matches: await runPrefix(maxKeypoints) }
     }
 
-    // 3. Fit H (A→B) on the coarse matches.
+    // 3. Fit H (A→B) on the coarse matches. The RANSAC threshold scales with the
+    // image diagonal: the guide only predicts where a tile lands (the margin
+    // absorbs the slack), and a fixed few-px threshold on a 10k-px frame with
+    // terrain relief would reject nearly every real aerial pair.
     const ptsA = coarse.map((m) => [kpsA[m.ia].x, kpsA[m.ia].y])
     const ptsB = coarse.map((m) => [kpsB[m.ib].x, kpsB[m.ib].y])
-    const fit = estimateHomographyRansac(ptsA, ptsB, { threshPx: 3, iters: 500 })
+    const guideThreshPx = Math.max(3, Math.ceil(
+      Math.hypot(Math.max(wA, wB), Math.max(hA, hB)) * guideRelThresh))
+    const fit = estimateHomographyRansac(ptsA, ptsB, { threshPx: guideThreshPx, iters: 500 })
     const ratio = fit ? fit.inlierCount / coarse.length : 0
     if (!fit || fit.inlierCount < guideMinInliers || ratio < guideMinInlierRatio) {
       onLog?.(`LightGlue tiled: coarse ${nCoarseA}×${nCoarseB} → ${coarse.length} matches, `
-        + `H ${fit ? `${fit.inlierCount} inliers (ratio ${ratio.toFixed(2)})` : 'not estimable'} — `
+        + `H ${fit ? `${fit.inlierCount} inliers (ratio ${ratio.toFixed(2)})` : 'not estimable'} @ ${guideThreshPx}px — `
         + `guide too weak (need ≥${guideMinInliers} inliers, ratio ≥${guideMinInlierRatio}) — `
         + `falling back to plain ${maxKeypoints}-cap match`, 'info')
       return { matches: await runPrefix(maxKeypoints) }
     }
     onLog?.(`LightGlue tiled: coarse ${nCoarseA}×${nCoarseB} → ${coarse.length} matches, `
-      + `${fit.inlierCount} H-inliers (ratio ${ratio.toFixed(2)}), p95 err ${fit.p95ErrPx.toFixed(1)} px`, 'info')
+      + `${fit.inlierCount} H-inliers (ratio ${ratio.toFixed(2)} @ ${guideThreshPx}px), `
+      + `p95 err ${fit.p95ErrPx.toFixed(1)} px`, 'info')
 
     // 4. Plan tiles. Margin from the actual H fit; tile size from keypoint density
     // so an average tile holds ≤ tileBudget keypoints.

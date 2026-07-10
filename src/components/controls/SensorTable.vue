@@ -142,14 +142,98 @@ function diff(sensorId, key) {
   return est[key] - Number(init)
 }
 
+// Bundle adjustment optimises the focal as **fx in pixels** (~6160 for a 154 mm lens
+// at 25 µm). Shown raw next to the 154 mm the user typed it reads as an alarming
+// "blow-up", so the table splits the two like Metashape does: the **Focal** column is
+// the human/physical focal (mm), and a dedicated **fx (px)** column carries the pixel
+// calibration in every mode — initial 6160 → estimated 6120 is then a small px-to-px
+// change, not a unit shock.
+//
+// mm-per-pixel for this sensor's current calibration = entered mm focal ÷ resolved fx.
+// null when the focal was entered in px (already pixel-native; the fx column shows it)
+// or there's no resolvable mm scale (default-FOV fallback, or a film sensor whose
+// canonical pixel scale isn't reconstructable from the stored sensor).
+function focalMmPerPx(s) {
+  if (!isFilm(s) && s.focalUnit === 'px') return null
+  const focalMm = isFilm(s) ? s.fiducials?.focalMm : s.focal
+  if (focalMm == null || focalMm === '') return null
+  const img = props.images.find((i) => i.sensorId === s.id)
+  const k = resolveK(img?.meta ?? null, s)
+  if (!k.fx || k.source.startsWith('default')) return null
+  return Number(focalMm) / k.fx
+}
+
+// Estimated focal in mm (the entered unit), or null when there's no mm scale — px-only
+// sensors leave this blank and read the fx column instead, so the two never duplicate.
+function estFocal(s) {
+  const est = estimated(s.id)
+  if (!est || est.focal == null) return null
+  const mmpp = focalMmPerPx(s)
+  return mmpp ? { value: est.focal * mmpp, unit: 'mm' } : null
+}
+
+// Estimated − initial focal (mm), or null when not mm-convertible.
+function focalDiff(s) {
+  const ef = estFocal(s)
+  if (!ef) return null
+  const init = isFilm(s) ? s.fiducials?.focalMm : s.focal
+  if (init == null || init === '') return null
+  return { value: ef.value - Number(init), unit: ef.unit }
+}
+
+// ── fx (px) column: the pixel focal BA actually optimises ────────────────────────
+// Resolved initial fx (px) for a real calibration, else null (a default-FOV fallback
+// or a film sensor whose canonical fx isn't known until reconstruction).
+function initFx(s) {
+  const img = props.images.find((i) => i.sensorId === s.id)
+  const k = resolveK(img?.meta ?? null, s)
+  return k.fx && !k.source.startsWith('default') ? k.fx : null
+}
+// Estimated fx (px) = mean cam.K.fx — the estimated() focal is already fx in pixels.
+const estFx = (s) => estimated(s.id)?.focal ?? null
+// Estimated − initial fx (px).
+function fxDiff(s) {
+  const est = estFx(s), init = initFx(s)
+  return est != null && init != null ? est - init : null
+}
+// Initial-mode fx: blank when the focal was entered directly in px — it would just
+// echo the Focal cell. Shown only when fx *adds* information (mm→px, or EXIF-derived).
+const initFxShown = (s) => (!isFilm(s) && s.focalUnit === 'px' ? null : initFx(s))
+
+// Whether pixel size / format apply to a sensor at all — they only convert an mm
+// focal, so on a px-focal (or EXIF-only) digital sensor they're inert.
+const usesMmScale = (s) => focalInMm(s)
+
+// ── Per-cell content for the read-only Estimated / Δ modes (column-driven) ───────
+// Returns { text, unit? } so the two mode blocks can iterate NUM_COLS like the
+// editable modes — a hidden column then can't misalign a hardcoded <td> sequence.
+function estCell(s, key) {
+  if (key === 'width')  return { text: s.width ?? '—' }
+  if (key === 'height') return { text: s.height ?? '—' }
+  if (key === 'focal')  { const f = estFocal(s); return f ? { text: round(f.value), unit: f.unit } : { text: '—' } }
+  if (key === 'fx')     { const v = estFx(s); return v == null ? { text: '—' } : { text: round(v, 0), unit: 'px' } }
+  if (key === 'cx' || key === 'cy') { const v = estimated(s.id)?.[key]; return { text: v == null ? '—' : round(v) } }
+  return { text: '—' } // pixelSize / format / distortion — not estimated per sensor here
+}
+function diffCell(s, key) {
+  if (key === 'focal') { const d = focalDiff(s); return d ? { text: signed(d.value), unit: d.unit } : { text: '—' } }
+  if (key === 'fx')    { const d = fxDiff(s); return d == null ? { text: '—' } : { text: signed(d, 0), unit: 'px' } }
+  if (key === 'cx' || key === 'cy') { const d = diff(s.id, key); return { text: d == null ? '—' : signed(d) } }
+  return { text: '—' } // width / height / pixelSize / format / distortion — no Δ
+}
+
 // Editable numeric columns (label handled separately). `focal` carries a
 // px/mm unit toggle; `pixelSize`/`sensorWidthMm` convert an mm focal to pixels
 // (a film/scanned-aerial camera: focal length + film format from a calibration
-// sheet — fill either pixel size or format width, not both).
+// sheet — fill either pixel size or format width, not both). The columns are always
+// present — applicability is a per-*cell* concern (a px-focal sensor shows '—', see
+// the initial-mode cell) rather than a whole-column hide, which caused chicken-and-egg
+// (couldn't reveal a hidden column to type into) and dropped px size on film scans.
 const NUM_COLS = [
   { key: 'width',        label: 'W' },
   { key: 'height',       label: 'H' },
   { key: 'focal',        label: 'Focal', lockable: true },
+  { key: 'fx',           label: 'fx (px)', readonly: true },
   { key: 'pixelSize',    label: 'px size (mm)' },
   { key: 'sensorWidthMm', label: 'format (mm)' },
   { key: 'cx',           label: 'cx', lockable: true },
@@ -208,6 +292,7 @@ const totalCols = computed(() => 4 + NUM_COLS.length + 2)
       <span class="hint">{{ hint }}</span>
     </div>
 
+    <div class="table-scroll">
     <table v-if="sensors.length">
       <thead>
         <tr>
@@ -291,7 +376,7 @@ const totalCols = computed(() => 4 + NUM_COLS.length + 2)
                     class="cell-input focal-input"
                     type="number"
                     disabled
-                    title="Set in the fiducial editor (⛶) — Focal (mm)"
+                    title="Film sensor: the focal (mm) is set in the fiducial editor below — open it with the ⛶ button in the Kind column. It lives there (alongside the fiducial marks) because interior orientation needs it; this field is read-only to avoid two focal values drifting apart."
                     :value="s.fiducials?.focalMm ?? ''"
                   />
                   <span class="unit-static" title="Focal is in mm for a film sensor">mm</span>
@@ -315,17 +400,33 @@ const totalCols = computed(() => 4 + NUM_COLS.length + 2)
                   </select>
                 </template>
               </span>
-              <!-- Pixel size / format only apply to an mm focal. -->
+              <!-- fx: the pixel focal, resolved read-only from the calibration
+                   (Focal ÷ px size, or Focal/format × width). Blank when the focal was
+                   entered directly in px (it would just echo the Focal cell), or until
+                   there's a real scale — e.g. a film sensor before reconstruction. -->
+              <span
+                v-else-if="c.key === 'fx'"
+                :class="{ dim: initFxShown(s) == null }"
+                :title="!isFilm(s) && s.focalUnit === 'px'
+                  ? 'Focal is already in pixels — see the Focal column'
+                  : 'Focal in pixels (fx) — the parameter bundle adjustment optimises; derived from the Focal + px size / format'"
+              >{{ round(initFxShown(s), 0) ?? '—' }}</span>
+              <!-- Pixel size / format only convert an mm focal. On a px-focal (or EXIF)
+                   sensor they don't apply, so show '—' rather than a dimmed stale value
+                   that reads as "still used". -->
               <input
-                v-else-if="c.key === 'pixelSize' || c.key === 'sensorWidthMm'"
+                v-else-if="(c.key === 'pixelSize' || c.key === 'sensorWidthMm') && usesMmScale(s)"
                 class="cell-input"
                 type="number"
                 step="any"
-                :disabled="!focalInMm(s)"
-                :title="focalInMm(s) ? '' : 'Only used when focal is in mm'"
                 :value="s[c.key] ?? ''"
                 @change="onEdit(s.id, c.key, $event)"
               />
+              <span
+                v-else-if="c.key === 'pixelSize' || c.key === 'sensorWidthMm'"
+                class="dim"
+                title="Only used when the focal is in mm (converts it to pixels)"
+              >—</span>
               <input
                 v-else
                 class="cell-input"
@@ -351,26 +452,17 @@ const totalCols = computed(() => 4 + NUM_COLS.length + 2)
               <span v-else class="dim">—</span>
             </td>
           </template>
+          <!-- Read-only modes iterate the SAME NUM_COLS as the editable ones, so a
+               hidden column can't misalign a hardcoded <td> sequence. -->
           <template v-else-if="mode === 'estimated'">
-            <td>{{ s.width ?? '—' }}</td>
-            <td>{{ s.height ?? '—' }}</td>
-            <td :class="{ dim: !estimated(s.id) }">{{ round(estimated(s.id)?.focal) ?? '—' }}</td>
-            <td class="dim">—</td>
-            <td class="dim">—</td>
-            <td :class="{ dim: !estimated(s.id) }">{{ round(estimated(s.id)?.cx) ?? '—' }}</td>
-            <td :class="{ dim: !estimated(s.id) }">{{ round(estimated(s.id)?.cy) ?? '—' }}</td>
-            <td v-for="c in ['k1','k2','k3','p1','p2']" :key="c" class="dim">—</td>
+            <td v-for="c in NUM_COLS" :key="c.key" :class="{ dim: estCell(s, c.key).text === '—' }">
+              {{ estCell(s, c.key).text }}<span v-if="estCell(s, c.key).unit" class="unit-dim"> {{ estCell(s, c.key).unit }}</span>
+            </td>
           </template>
           <template v-else>
-            <td class="dim">—</td>
-            <td class="dim">—</td>
-            <td :class="{ dim: diff(s.id, 'focal') == null }">{{ signed(diff(s.id, 'focal')) ?? '—' }}</td>
-            <td class="dim">—</td>
-            <td class="dim">—</td>
-            <td v-for="c in ['cx','cy']" :key="c" :class="{ dim: diff(s.id, c) == null }">
-              {{ signed(diff(s.id, c)) ?? '—' }}
+            <td v-for="c in NUM_COLS" :key="c.key" :class="{ dim: diffCell(s, c.key).text === '—' }">
+              {{ diffCell(s, c.key).text }}<span v-if="diffCell(s, c.key).unit" class="unit-dim"> {{ diffCell(s, c.key).unit }}</span>
             </td>
-            <td v-for="c in ['k1','k2','k3','p1','p2']" :key="c" class="dim">—</td>
           </template>
 
           <td class="count">{{ imageCount(s.id) }}</td>
@@ -429,14 +521,19 @@ const totalCols = computed(() => 4 + NUM_COLS.length + 2)
     </table>
 
     <div v-else class="empty">No sensors yet — add images (auto-detected from EXIF) or import a calibration file.</div>
+    </div>
   </div>
 </template>
 
 <style scoped>
-.table-wrap { position: absolute; inset: 0; overflow: auto; background: var(--bg); display: flex; flex-direction: column; }
+.table-wrap { position: absolute; inset: 0; overflow: hidden; background: var(--bg); display: flex; flex-direction: column; }
+
+/* Only the table scrolls (both axes); the toolbar above stays put so a wide table
+   can't push the mode buttons out of view horizontally. */
+.table-scroll { flex: 1; min-height: 0; overflow: auto; }
 
 .toolbar {
-  position: sticky; top: 0; z-index: 2;
+  flex-shrink: 0;
   display: flex; align-items: center; gap: 14px;
   padding: 8px 12px; background: var(--panel); border-bottom: 1px solid var(--panel-border);
 }
@@ -454,7 +551,7 @@ const totalCols = computed(() => 4 + NUM_COLS.length + 2)
 table { width: 100%; border-collapse: collapse; font-size: 12px; }
 
 thead th {
-  position: sticky; top: 41px; z-index: 1;
+  position: sticky; top: 0; z-index: 1;
   background: var(--panel); text-align: left; padding: 8px 10px;
   font-weight: 600; color: var(--text-dim); border-bottom: 1px solid var(--panel-border); white-space: nowrap;
 }
@@ -486,6 +583,7 @@ tbody td.dim { color: var(--text-dim); }
 }
 .unit-select:focus { border-color: var(--accent); }
 .unit-static { font-size: 11px; color: var(--text-dim); }
+.unit-dim { font-size: 11px; color: var(--text-dim); }
 .model-select { max-width: 180px; }
 
 /* Numeric input without the up/down spinners — stepping makes no sense for

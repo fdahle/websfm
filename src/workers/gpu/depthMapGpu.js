@@ -56,7 +56,7 @@ export async function computeDepthMapGPU(refGray, refW, refH, refK, sources, opt
     depthMin = 0, depthMax = 0, seedDepth = null,
     window = 2, iterations = 3, bestK = 3, seed = 1,
   } = opts
-  const radius = Math.min(3, Math.max(1, window))
+  const radius = Math.min(5, Math.max(1, window)) // match mvs.rs radius cap (≤11×11)
   const iters = Math.max(1, iterations)
   const hasSeed = seedDepth && seedDepth.length >= npix
   const MAX_SRC = 16

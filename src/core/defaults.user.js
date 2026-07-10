@@ -56,7 +56,12 @@ export const RECONSTRUCT_DEFAULTS = {
   minMatchesForRegistration: 20, // min correspondences to a registered image to try PnP
   reprjThreshold: 4.0,           // reprojection inlier threshold (px)
   baIterations: 30,              // bundle-adjustment iterations
-  refineIntrinsics: 'none',      // BA self-calibration: 'none' | 'f' | 'f,cxcy' | 'f,k1'
+  // BA self-calibration: 'auto' | 'none' | 'f' | 'f,cxcy' | 'f,k1'. 'auto' (the
+  // default) resolves in core/sfm/sfm.js to 'f,k1' when no sensor carries a
+  // calibrated distortion model (EXIF-only cameras / film scans — solve one shared
+  // focal + radial k1 rather than trusting a guessed pinhole), and to 'none' when a
+  // calibrated Brown model already exists (don't double-correct).
+  refineIntrinsics: 'auto',
 }
 
 // Dense — Stage A depth maps (PatchMatch MVS). Mirrored by DepthMapsModal.vue.

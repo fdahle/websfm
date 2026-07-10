@@ -158,10 +158,12 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
           // thresholds come from MATCH_TUNING via the settings merge above.
           tiled: settings.lgTiled,
           coarseKeypoints: settings.lgCoarseKeypoints,
+          coarseGateMin: settings.lgCoarseGateMin,
           tileBudget: settings.lgTileBudget,
           guideMinMatches: settings.lgGuideMinMatches,
           guideMinInliers: settings.lgGuideMinInliers,
           guideMinInlierRatio: settings.lgGuideMinInlierRatio,
+          guideRelThresh: settings.lgGuideRelThresh,
           tileMinKps: settings.lgTileMinKps,
         }, { onLog: (msg, level = 'info') => log(msg, level, 'Matching') })
         raw = res.matches

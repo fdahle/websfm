@@ -185,7 +185,10 @@ pub fn compute_depth_map(
         (ref_k[0] as f64, ref_k[1] as f64, ref_k[2] as f64, ref_k[3] as f64);
     let dmin = depth_min.max(1e-4) as f64;
     let dmax = (depth_max as f64).max(dmin * 1.001);
-    let radius = (window.max(1) as i32).min(3); // ≤ 7×7 window (32-sample cap)
+    // Half-window, up to 11×11. The old ≤3 cap dated to a fixed 32-sample buffer
+    // that no longer exists (ZNCC now accumulates running sums, so any window size
+    // contributes in full); film scans / low-texture surfaces need the larger window.
+    let radius = (window.max(1) as i32).min(5);
 
     // Unpack source views (slice the concatenated pixel buffer by dimensions).
     let mut srcs: Vec<SrcView> = Vec::with_capacity(n_src);
@@ -260,7 +263,17 @@ pub fn compute_depth_map(
                     let mut best_n = [nx[i], ny[i], nz[i]];
                     let mut best_c = cost[i];
 
-                    // 1. Spatial propagation from the 4-neighbours' planes.
+                    // 1. Spatial propagation from the 4-neighbours' PLANES. The
+                    // neighbour holds a plane (its depth + normal); the correct
+                    // hypothesis at THIS pixel is where this pixel's viewing ray
+                    // pierces that plane — NOT the neighbour's raw depth (which only
+                    // holds on a fronto-parallel surface). Copying the raw depth means
+                    // the true depth can never propagate across any slanted surface, so
+                    // pixels converge to per-pixel noise (the depth-map "freckles").
+                    //   ray_i = ((u−cx)/fx, (v−cy)/fy, 1);  plane_j: n·X = n·P_j,
+                    //   P_j = depth[j]·ray_j;  cand_d = (n·P_j)/(n·ray_i).
+                    let rx_i = (u as f64 - rcx) / rfx;
+                    let ry_i = (v as f64 - rcy) / rfy;
                     let neigh = [
                         (u.wrapping_sub(1), v), (u + 1, v),
                         (u, v.wrapping_sub(1)), (u, v + 1),
@@ -268,14 +281,32 @@ pub fn compute_depth_map(
                     for (nu, nv) in neigh {
                         if nu >= rw || nv >= rh { continue; }
                         let j = nv * rw + nu;
-                        let cand_d = depth[j];
                         let cand_n = [nx[j], ny[j], nz[j]];
+                        let rx_j = (nu as f64 - rcx) / rfx;
+                        let ry_j = (nv as f64 - rcy) / rfy;
+                        let d_plane = depth[j] * (cand_n[0] * rx_j + cand_n[1] * ry_j + cand_n[2]);
+                        let denom = cand_n[0] * rx_i + cand_n[1] * ry_i + cand_n[2];
+                        if denom.abs() < 1e-9 { continue; }
+                        let cand_d = d_plane / denom;
+                        if cand_d <= dmin || cand_d >= dmax { continue; } // ≤0 / out of range
                         let c = agg_cost(ref_gray, rw, rh, rfx, rfy, rcx, rcy, &srcs, bk, u, v, cand_d, &cand_n, radius);
                         if c < best_c { best_c = c; best_d = cand_d; best_n = cand_n; }
                     }
 
-                    // 2. Random refinement: perturb depth and normal at decaying scale.
+                    // 2. Refinement. A single joint depth+normal perturbation couples
+                    // the two and converges slowly, so also try the two decoupled
+                    // hypotheses COLMAP uses: (a) keep depth, draw a fresh random
+                    // normal; (b) keep normal, perturb depth only.
                     let dspan = (dmax - dmin) * 0.5 * shrink;
+                    // (a) current depth + random new normal.
+                    let rand_n = rand_normal(&mut rng);
+                    let c = agg_cost(ref_gray, rw, rh, rfx, rfy, rcx, rcy, &srcs, bk, u, v, best_d, &rand_n, radius);
+                    if c < best_c { best_c = c; best_n = rand_n; }
+                    // (b) current normal + perturbed depth.
+                    let pert_d_only = (best_d + (randf(&mut rng) * 2.0 - 1.0) * dspan).clamp(dmin, dmax);
+                    let c = agg_cost(ref_gray, rw, rh, rfx, rfy, rcx, rcy, &srcs, bk, u, v, pert_d_only, &best_n, radius);
+                    if c < best_c { best_c = c; best_d = pert_d_only; }
+                    // (c) joint perturbation (kept — helps escape coupled local minima).
                     let pert_d = (best_d + (randf(&mut rng) * 2.0 - 1.0) * dspan).clamp(dmin, dmax);
                     let pert_n = normalize3(&[
                         best_n[0] + (randf(&mut rng) * 2.0 - 1.0) * 0.5 * shrink,

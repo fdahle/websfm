@@ -9,9 +9,10 @@ import { useProjectsStore } from '../stores/useProjectsStore.js'
 // dismisses the first that's open and stops. Modal state lives in the stores
 // (pulled in here); the handful of App-local refs/handlers are injected:
 //   pendingImageDelete  — ref, the batch-delete confirm
+//   pendingMaskClear    — ref, the clear-mask confirm
 //   exportKind          — ref (from useExports), which export dialog is open
 //   onCancelNewProject  — fn, cancels the (cancellable) New Project dialog
-export function useModalEscape({ pendingImageDelete, exportKind, onCancelNewProject }) {
+export function useModalEscape({ pendingImageDelete, pendingMaskClear, exportKind, onCancelNewProject }) {
   const glossaryStore = useGlossaryStore()
   const guideStore = useGuideStore()
   const { currentProjectId } = storeToRefs(useProjectsStore())
@@ -36,6 +37,7 @@ export function useModalEscape({ pendingImageDelete, exportKind, onCancelNewProj
   function closeTopModal() {
     const closers = [
       [pendingImageDelete.value, () => { pendingImageDelete.value = null }],
+      [pendingMaskClear.value,   () => { pendingMaskClear.value = null }],
       [importKindOpen.value,     () => { importKindOpen.value = false; importKindFile.value = null }],
       [exportKind.value,         () => { exportKind.value = null }],
       [infoImageId.value,        () => { infoImageId.value = null }],

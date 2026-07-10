@@ -257,7 +257,7 @@ export async function depthMapForImage(ref, sources, points, settings = {}, comp
   //   2. convergence — the median final cost; PatchMatch should pull this well
   //      below the ~1.0 of random/unmatched (the signal the sweeps actually work).
   if (hooks.validate && src.length) {
-    const radius = Math.min(3, Math.max(1, window))
+    const radius = Math.min(5, Math.max(1, window)) // match mvs.rs / wgsl radius cap
     const refC = { gray: ref.gray, w: ref.width, h: ref.height, fx: ref.K.fx, fy: ref.K.fy, cx: ref.K.cx, cy: ref.K.cy }
     const srcCs = src.map((s) => ({ gray: s.gray, w: s.w, h: s.h, fx: s.K.fx, fy: s.K.fy, cx: s.K.cx, cy: s.K.cy, R: s.R, t: s.t, mask: s.mask }))
     const k = Math.min(Math.max(bestK, 1), srcCs.length) // reported best-K (upper bound)

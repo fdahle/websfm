@@ -350,6 +350,18 @@ export function makeDenseOps({ rasterize }) {
         releaseAfter(i)
         continue
       }
+      // P2.1: invalidate "no measurement" pixels before filtering. A pixel no source
+      // ever saw keeps its random init depth at the max cost 2.0; left in place, the
+      // speckle filter's median mixes that junk into good neighbours. Zero its depth
+      // so it reads as a hole (depth<=0) everywhere downstream.
+      {
+        let culled = 0
+        for (let k = 0; k < dm.depth.length; k++) {
+          if (dm.depth[k] > 0 && dm.cost[k] >= 1.99) { dm.depth[k] = 0; culled++ }
+        }
+        if (culled) emit('log', [`Depth maps: ${img.name} — invalidated ${culled} no-measurement px (cost≈2.0)`,
+          'debug', 'Dense'])
+      }
       // Median / speckle filter: clean per-image noise before the cross-view fusion
       // gate sees it (the per-image PatchMatch has no geometric consistency check).
       if (speckleFilter) {
