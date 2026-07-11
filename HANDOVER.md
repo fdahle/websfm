@@ -68,6 +68,28 @@ fiducials; self-calibration (A2) + fiducials (F4) are the code-side support.
 
 ## Done log (most recent first)
 
+- **2026-07-10 · P2.5 — fusion dedupe + `step: 1` (`core/dense/mvs.js`)** — multi-view
+  fusion emitted one point per source pixel, so a surface seen by k views produced k
+  near-coincident "shell" points, and `step: 2` was throwing away 75% of resolution to
+  keep the count down. New pure `mergePointsSpatial(points, cellSize)` does an
+  order-independent world-space voxel merge (one averaged position+colour per cell);
+  `autoMergeCell` sizes the cell at the median GSD (median depth / fx ≈ one ground-pixel
+  footprint). `fuseDepthMaps` now fuses at full res and merges its output (logs
+  `raw → merged` dupes; `mergeCell`/`mergedPct` in the summary). Default `step` flipped
+  to **1** (`DENSE_FUSE_DEFAULTS` + core fallback). Tests in `mvs.test.js`.
+  **⚠ Provisional pending B2**: the `step:1` default and auto cell-size want validation
+  against a real dense re-run — the step-1 fuse does ~4× the consistency-check work, and
+  the cell-size is an eyeball until measured. Revisit both after B2 lands its baseline.
+- **2026-07-10 · P6 — adaptive RANSAC termination (`crates/matching`)** — F/H RANSAC ran
+  a fixed 1000 iters/pair regardless of pair quality. `ransac_fundamental` (s=8) and
+  `ransac_homography` (s=4) now shrink their iteration cap after each new best model via
+  `adaptive_iters` (`N = ln(1−0.99)/ln(1−wˢ)`) — clean pairs stop in <100 iters, noisy
+  pairs still run to the cap. `verify_matches_hf` gained an `h_skip_below` param wired to
+  the store's `minMatches` (`verify.js` `hSkipBelow`): H is skipped (reported 0) on pairs
+  below the hard acceptance floor, since the H/F degeneracy label is only read for pairs
+  that survive to seed SfM. Behaviour-preserving inlier sets; cargo + JS tests added.
+  **Not runtime-verified here** (wasm path) — needs the owed matching wall-clock re-run to
+  confirm the 2–5× on verify. wasm rebuilt + committed.
 - **2026-07-10 · COLMAP model import (F7, text half)** — completes the F7 round-trip
   (export shipped earlier same day). Pure core: `colmapToSparse({images,points},
   resolveUuid)` + `makeNameResolver` (tiered name→uuid: exact → basename →

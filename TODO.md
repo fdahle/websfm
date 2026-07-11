@@ -56,10 +56,6 @@ as it ships, HANDOVER done-log line each):
 - **P2.4 — geometric-consistency dense pass.** The heavier successor to **A5**
   (below) — do A5 first, then the in-optimiser term (also Backlog "Stage-A
   geometric consistency term inside PatchMatch"). COLMAP `--geom_consistency`.
-- **P2.5 — fusion dedupe + `step: 1`.** `fuseDepthMaps` (`core/dense/mvs.js`)
-  emits one point per source pixel → duplicate shells while `step: 2` throws away
-  75% of resolution. Consume agreeing pixels on a pass, emit one averaged point;
-  then `step: 1` is affordable at the same output size.
 - **P5 — matching speed** (37 min → <8 min for 50 imgs). (1) retrieval
   preselection without poses — build-now variant of Parked ▸ vocab-tree (aggregate
   existing SuperPoint descriptors → cosine kNN → top-k + sequential ±2); (2) don't
@@ -219,23 +215,15 @@ minutes. Diagnosis: (a) brute-force NN is O(pairs·M²) and every pair pays full
 price even with zero overlap; (b) RANSAC always runs 1000 F + 1000 H iterations
 per pair, each doing a 9×9 Jacobi eig; (c) every pair structured-clones ~5 MB of
 descriptors into a worker plus both keypoint arrays for verify — ≈6 GB of copies
-per run. Keep `core/` pure and the store gates unchanged. Order **P5 → P6 → P8 → P9**
-(P7 shipped 2026-07-08, see HANDOVER); measure matching wall-clock before
-starting and after each item, record in HANDOVER §Baselines.
+per run. Keep `core/` pure and the store gates unchanged. Order **P5 → P8 → P9**
+(P6 shipped 2026-07-10, P7 shipped 2026-07-08 — see HANDOVER); measure matching
+wall-clock before starting and after each item, record in HANDOVER §Baselines.
 
 **P5 — Parallelize `detectAll`.** `useImagesStore.detectAll` awaits one
 `detectOne` at a time despite the pool. Reuse `matchAll`'s shared-cursor
 drain-loop; keep cooperative cancellation + per-image progress. ~POOL_SIZE× on
 detection. Trivial. Caveat (new since SP): respect SP3's NN-concurrency cap —
 parallel SuperPoint sessions multiply GPU memory.
-
-**P6 — Adaptive RANSAC termination (`crates/matching`).** In
-`ransac_fundamental`/`ransac_homography`: after each new best model, recompute
-needed iterations from the inlier ratio (`n = ln(1−0.99)/ln(1−w^s)`, s = 8/4),
-stop at `min(needed, max_iters)`. Good pairs finish in <100 iterations. Also
-skip H-RANSAC when F inliers < `h_skip_below` (pair is rejected anyway). Bonus
-if cheap: PROSAC-style sampling (matches arrive sorted-ish by Lowe distance).
-Pure Rust; rebuild wasm + commit `src/wasm/*`. Expect 2–5× on verify.
 
 **P8 — GEMM-form NN kernel (`crates/matching`).** Replace the early-exit scan
 with blocked top-2: precompute row norms, d² = |a|²+|b|²−2a·b, dot products in

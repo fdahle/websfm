@@ -117,11 +117,20 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
    `detect_sift` output carries **two** trailing sentinels (`raw_found`,
    `suppressed`), so parse `kept = floor((len-2)/STRIDE)`.
 2. **Match** (`crates/matching`) → Lowe ratio test + RANSAC fundamental-matrix
-   verification, with an inlier-**ratio** gate (rejects spurious epipolar fits on
-   repetitive structure) and a **positional-spread** reject (`core/features/verify.js`
-   `inlierSpread`, gated in `useMatchesStore`): drop a pair whose accepted inliers
-   collapse to few unique locations (many-to-one convergence) or a pinhead region
-   (epipole degeneracy) — signatures no count/ratio/H-F gate can see. Two cheap
+   verification (**adaptive termination**: after each new best model the iteration
+   cap shrinks to `ln(1−0.99)/ln(1−wˢ)` for inlier ratio `w`, s=8 for F / 4 for H,
+   so clean pairs finish in <100 iters and only junk runs the full cap), with an
+   inlier-**ratio** gate (rejects spurious epipolar fits on repetitive structure)
+   and a **positional-spread** reject (`core/features/verify.js` `inlierSpread`,
+   gated in `useMatchesStore`): drop a pair whose accepted inliers collapse to few
+   unique locations (many-to-one convergence) or a pinhead region (epipole
+   degeneracy) — signatures no count/ratio/H-F gate can see. The H-vs-F degeneracy
+   count is a **seed-quality label only, never an accept gate** — so
+   `verify_matches_hf`'s `h_skip_below` (wired to the store's `minMatches`,
+   `verify.js` `hSkipBelow`) skips H entirely for pairs below the hard acceptance
+   floor: they're rejected regardless of H, and the resulting H/F ratio of 0 is
+   never read. Keep that param ≤ `minMatches`, or a still-accepted pair (incl. the
+   low-ratio absolute-inlier override) gets mislabelled non-degenerate. Two cheap
    prefilters cut the exhaustive O(N²) cost: **preselection**
    (`core/features/preselect.js`, k-nearest by imported camera position) prunes pairs
    before matching *when poses exist*; the **subset gate**
@@ -189,10 +198,17 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
      raster+mask sample map. Everything between stays pinhole.
 4. **Dense MVS** (`core/dense/mvs.js` + `crates/reconstruction/src/mvs.rs`): Stage A build
    per-image PatchMatch depth maps → optional `filterDepthMap` (median/speckle cleanup)
-   → Stage B `fuseDepthMaps` (cross-view geometric consistency). Both stages log
-   per-image timing, depth range, cost distribution, and fusion cull breakdown ('Dense'
-   category). **Perf**: cost scales with overlap×sources×pixels²; levers are
-   `maxDim`/`maxSources`/`iterations`. **Quality** is gated by correct intrinsics —
+   → Stage B `fuseDepthMaps` (cross-view geometric consistency, then a **spatial
+   dedupe**). Both stages log per-image timing, depth range, cost distribution, and
+   fusion cull breakdown ('Dense' category). Fusion emits one point per source pixel,
+   so a surface seen by k views yields k near-coincident "shell" points;
+   `mergePointsSpatial` collapses them in world space (order-independent voxel merge,
+   one averaged point per cell), sized by `autoMergeCell` at the median GSD
+   (depth/fx ≈ one ground-pixel footprint). This makes `step` a **speed lever, not the
+   density knob** — density is controlled by the merge cell in world units, and `step`
+   defaults to 1 (full res in, dedupe out). **Perf**: cost scales with
+   overlap×sources×pixels²; levers are `maxDim`/`maxSources`/`iterations` (and `step`
+   for the fusion sweep). **Quality** is gated by correct intrinsics —
    `resolveK` falling back to "default FOV" (fx=image width) directly distorts depth.
    - **Two depth-map backends**: WASM (CPU, default) and WebGPU (opt-in "Use GPU
      (experimental)" in the modal; ~0.1s/img vs minutes on CPU). `depthMapForImage`
