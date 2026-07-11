@@ -54,8 +54,13 @@ export async function computeDepthMapGPU(refGray, refW, refH, refK, sources, opt
 
   const {
     depthMin = 0, depthMax = 0, seedDepth = null,
-    window = 2, iterations = 3, bestK = 3, seed = 1,
+    window = 3, iterations = 3, bestK = 3, seed = 1,
   } = opts
+  // Mirror mvs.rs's depth-range guards (dmin ≥ 1e-4, dmax ≥ dmin·1.001) so the GPU
+  // and WASM backends init PatchMatch over the same interval — a zero/degenerate
+  // range would otherwise make the two diverge (and trip the A/B validation).
+  const dMin = Math.max(1e-4, depthMin)
+  const dMax = Math.max(depthMax, dMin * 1.001)
   const radius = Math.min(5, Math.max(1, window)) // match mvs.rs radius cap (≤11×11)
   const iters = Math.max(1, iterations)
   const hasSeed = seedDepth && seedDepth.length >= npix
@@ -64,7 +69,27 @@ export async function computeDepthMapGPU(refGray, refW, refH, refK, sources, opt
   const nSrc = srcList.length
   const maxW = Math.max(...srcList.map((s) => s.w))
   const maxH = Math.max(...srcList.map((s) => s.h))
+
+  // Pre-flight the texture dimensions (device.js raised this to the adapter max).
+  // The ref and every source upload as an r8unorm texture, so any side exceeding
+  // maxTextureDimension2D fails opaquely in createTexture; a clear "lower maxDim"
+  // message here lets the worker fall back to WASM knowingly.
+  const texCap = device.limits.maxTextureDimension2D ?? Infinity
+  const maxSide = Math.max(refW, refH, maxW, maxH)
+  if (maxSide > texCap) {
+    throw new Error(
+      `image ${maxSide}px exceeds GPU texture limit ${texCap}px — lower maxDim (working resolution)`,
+    )
+  }
   const { pipeline, sampler } = getPipeline(device)
+
+  // Capture allocation/validation failures over the whole setup + first dispatch.
+  // WebGPU surfaces these asynchronously (an oversized or invalid resource doesn't
+  // throw at creation — it silently invalidates and later fails the readback with an
+  // opaque "mapAsync was not successful"). Scoping them turns that into a specific
+  // reason the worker can log before falling back to WASM. LIFO: validation pops first.
+  device.pushErrorScope('out-of-memory')
+  device.pushErrorScope('validation')
 
   const refTex = uploadGray(device, refGray, refW, refH)
 
@@ -107,7 +132,7 @@ export async function computeDepthMapGPU(refGray, refW, refH, refK, sources, opt
   pv.setInt32(8, radius, true); pv.setUint32(12, hasSeed ? 1 : 0, true)
   pv.setFloat32(16, refK.fx, true); pv.setFloat32(20, refK.fy, true)
   pv.setFloat32(24, refK.cx, true); pv.setFloat32(28, refK.cy, true)
-  pv.setFloat32(32, depthMin, true); pv.setFloat32(36, depthMax, true)
+  pv.setFloat32(32, dMin, true); pv.setFloat32(36, dMax, true)
   pv.setUint32(40, seed >>> 0, true); pv.setUint32(44, iters, true)
   pv.setUint32(48, nSrc, true); pv.setUint32(52, Math.max(1, bestK), true)
   pv.setUint32(56, maxW, true); pv.setUint32(60, maxH, true)
@@ -187,6 +212,15 @@ export async function computeDepthMapGPU(refGray, refW, refH, refK, sources, opt
   // Init, then iterations × {parity 0, parity 1}. Each writeCtrl is ordered before
   // its dispatch's submit, so the GPU runs them in sequence on the queue.
   writeCtrl(0, 0, 0); dispatch()
+
+  // Resolve the error scopes now that every resource exists and the init pass has
+  // been submitted. Throwing here (worker → WASM fallback) beats an opaque readback
+  // failure later, and names the actual cause.
+  const valErr = await device.popErrorScope()
+  const oomErr = await device.popErrorScope()
+  const gpuErr = valErr || oomErr
+  if (gpuErr) throw new Error(`GPU depth-map setup failed: ${gpuErr.message}`)
+
   for (let it = 0; it < iters; it++) {
     writeCtrl(1, 0, it); dispatch()
     writeCtrl(1, 1, it); dispatch()

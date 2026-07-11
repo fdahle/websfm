@@ -68,6 +68,50 @@ fiducials; self-calibration (A2) + fiducials (F4) are the code-side support.
 
 ## Done log (most recent first)
 
+- **2026-07-11 · P8 — GEMM-form NN matcher kernel (`crates/matching`)** — replaced the
+  per-pair early-exit L2 scan (`l2_sq_early`/`nn2`) with the norm-identity form
+  `‖a−b‖² = ‖a‖² + ‖b‖² − 2·a·b`: row norms precomputed once (`descriptor_norms`), and
+  the nearest-neighbour search reduced to a branch-free multiply-add dot product
+  (`dots_tile`) that register-blocks BQ=4 queries against each database row (one SIMD
+  load of the row reused across four f32x4 accumulators). The distance search runs in
+  "s-space" (`s = ‖b‖² − 2·a·b`, dropping the per-query constant `‖a‖²`); the query norm
+  is folded back only to materialise true squared distances for the ratio test + reported
+  distance (`ratio_pass`), clamped ≥0 against cancellation. `match_descriptors` signature
+  unchanged (dim-parametric); A→B and B→A both go through the shared `ratio_pass`. SIMD
+  path behind `target_feature = "simd128"` with a structurally-identical scalar fallback
+  (native tests exercise the search/ratio logic; SIMD dot is validated by the wasm build +
+  the owed browser run). New cargo tests: `match_descriptors_agrees_with_naive` (exact
+  match-set equality vs a naive diff-square reference across cross-check on/off and a
+  non-multiple-of-4 `dim`) + `match_descriptors_reports_l2_distance`. Expected 3–8× on the
+  matcher hot loop; **actual speedup unmeasured** — folds into the owed matching wall-clock
+  re-run (TODO ▸ Now ▸ Q ▸ P5). `cargo test` (7) + `npm test` (423) + typecheck green; wasm
+  rebuilt + committed (`src/wasm/matching/*`; signature identical so only the binary
+  changed). Lives in `crates/matching/src/lib.rs`. TODO ▸ Next ▸ P5–P9.
+
+- **2026-07-11 · G1 — GPU/WASM correctness batch** (folded from the 2026-07-07 compute
+  review). Six small hardening fixes so the WebGPU dense backend agrees with WASM and
+  fails diagnosably. (1) `maxSources` clamped to 16 where dense settings resolve
+  (`workers/ops/dense.js`) — the GPU kernel packs a fixed MAX_SRC=16 and silently drops
+  the rest while WASM + the first-image A/B check use all, so >16 sources tripped a
+  spurious RMS-divergence warning. (2) Texture-dimension pre-flight: `device.js` now
+  raises `maxTextureDimension2D` to the adapter max alongside the buffer limits, and
+  `computeDepthMapGPU` pre-flights `max(refW,refH,maxW,maxH)` against it with a "lower
+  maxDim" error instead of an opaque createTexture failure. (3) The mid-run GPU→WASM
+  fallback retry now passes `{ onLog: hooks.onLog }` so the coarse-to-fine plan keeps
+  streaming after the drop. (4) `computeDepthMapGPU` mirrors mvs.rs's depth-range guards
+  (`dmin ≥ 1e-4`, `dmax ≥ dmin·1.001`) before packing params. (5) Comment hygiene:
+  `computeDepthMap` docstring/default were `window=2` while the pipeline passes 3
+  (reconstruction.js) — aligned to 3 (the `mvs.rs:188` "32-sample" note was already
+  corrected). (6) `pushErrorScope`/`popErrorScope` (out-of-memory + validation) wrap
+  resource creation + the init dispatch in `computeDepthMapGPU`, so a GPU failure throws
+  a named cause the worker logs before falling back to WASM, rather than an opaque
+  "mapAsync was not successful" at readback. Pure JS (no crate/wasm change). `npm test`
+  (423) + typecheck green. **Browser-runtime paths unverified here** (the error-scope
+  trigger, texture pre-flight on a >8192px scan, and the GPU→WASM fallback all need a
+  real WebGPU run) — fold into the owed dense browser session. Lives in
+  `src/workers/gpu/{device,depthMapGpu}.js`, `src/workers/ops/dense.js`,
+  `src/core/sfm/reconstruction.js`.
+
 - **2026-07-10 · P2.5 — fusion dedupe + `step: 1` (`core/dense/mvs.js`)** — multi-view
   fusion emitted one point per source pixel, so a surface seen by k views produced k
   near-coincident "shell" points, and `step: 2` was throwing away 75% of resolution to

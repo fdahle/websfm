@@ -133,25 +133,6 @@ residual table names the offending cameras; tune `interimBaEvery` /
 baseline **B2** in HANDOVER. Same session: re-run dense on CA…V (freckle-fix
 confirmation owed since 2026-07-07).
 
-### G1 — GPU/WASM correctness batch (folded from the 2026-07-07 compute review)
-Small, ship together (detail in HANDOVER's review entry; all verified-by-reading,
-none invalidates current defaults):
-1. Clamp `maxSources` to 16 where settings are resolved in `workers/ops/dense.js`
-   — the GPU kernel silently truncates to MAX_SRC=16 while WASM + the A/B
-   validation use all sources (spurious RMS warning, backend divergence >16).
-2. Texture-limit pre-flight: request `maxTextureDimension2D` up to the adapter
-   limit in `device.js` `initDevice()`; pre-flight `max(refW,refH,maxW,maxH)` in
-   `computeDepthMapGPU` with an actionable "lower maxDim" error (today: opaque
-   createTexture validation failure → fallback).
-3. Mid-run GPU→WASM fallback retry drops hooks: pass `{ onLog: hooks.onLog }`
-   in the `workers/ops/dense.js` catch (not `validate`).
-4. Mirror Rust's depth-range clamps (`dmin ≥ 1e-4`, `dmax ≥ dmin·1.001`) in
-   `computeDepthMapGPU` before packing params.
-5. Comment hygiene: stale "32-sample cap" note at `mvs.rs:188`; `computeDepthMap`
-   docstring says `window=2` but pipeline passes 3.
-6. (P2 of the review) `pushErrorScope`/`popErrorScope` around GPU resource
-   creation + first dispatch so the fallback log says *why* the GPU failed.
-
 ---
 
 ## Next
@@ -215,9 +196,10 @@ minutes. Diagnosis: (a) brute-force NN is O(pairs·M²) and every pair pays full
 price even with zero overlap; (b) RANSAC always runs 1000 F + 1000 H iterations
 per pair, each doing a 9×9 Jacobi eig; (c) every pair structured-clones ~5 MB of
 descriptors into a worker plus both keypoint arrays for verify — ≈6 GB of copies
-per run. Keep `core/` pure and the store gates unchanged. Order **P5 → P8 → P9**
-(P6 shipped 2026-07-10, P7 shipped 2026-07-08 — see HANDOVER); measure matching
-wall-clock before starting and after each item, record in HANDOVER §Baselines.
+per run. Keep `core/` pure and the store gates unchanged. Order **P5 → P9**
+(P6 shipped 2026-07-10, P7 shipped 2026-07-08, P8 shipped 2026-07-11 — see
+HANDOVER); measure matching wall-clock before starting and after each item,
+record in HANDOVER §Baselines.
 
 **P5 — Parallelize `detectAll`.** `useImagesStore.detectAll` awaits one
 `detectOne` at a time despite the pool. Reuse `matchAll`'s shared-cursor
@@ -225,12 +207,10 @@ drain-loop; keep cooperative cancellation + per-image progress. ~POOL_SIZE× on
 detection. Trivial. Caveat (new since SP): respect SP3's NN-concurrency cap —
 parallel SuperPoint sessions multiply GPU memory.
 
-**P8 — GEMM-form NN kernel (`crates/matching`).** Replace the early-exit scan
-with blocked top-2: precompute row norms, d² = |a|²+|b|²−2a·b, dot products in
-cache-sized tiles (8 queries × 64 rows, f32x4 mul-add), track best/second per
-query. Branch-free, full SIMD; expect 3–8×. Keep the `match_descriptors`
-signature (now dim-parametric). Optional follow-up gated on measured need:
-u8-quantized descriptors + integer SIMD (touches persistence shape).
+**P8 — GEMM-form NN kernel** — ✅ shipped 2026-07-11 (see HANDOVER). Optional
+follow-up gated on measured need: u8-quantized descriptors + integer SIMD (touches
+persistence shape). The matching wall-clock re-run (owed under Q ▸ P5) will measure
+the actual speedup.
 
 **P9 — Fused match+verify worker op + worker-side descriptor cache.** One
 `matchPairFull` op (match + verify in one call; gate logic stays in the store).
