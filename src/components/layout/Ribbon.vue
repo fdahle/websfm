@@ -296,21 +296,10 @@ const pictureTab = {
     },
     {
       label: 'Mask',
+      // One toggle — the tools themselves (brush/eraser/rect/invert/undo/…)
+      // live in the floating MaskToolbar over the image view.
       commands: [
-        { id: 'img-mask-draw',   label: 'Draw',   icon: 'pencil',   activeKey: 'maskDraw' },
-        { id: 'img-mask-erase',  label: 'Erase',  icon: 'eraser',   activeKey: 'maskErase' },
-        { id: 'img-mask-import', label: 'Import', icon: 'download' },
-        { id: 'img-mask-clear',  label: 'Clear',  icon: 'x', disableKey: 'noMask' },
-      ],
-    },
-    {
-      id: 'brush',
-      label: 'Brush',
-      maskOnly: true,
-      commands: [
-        { id: 'img-brush-s', label: 'Small',  icon: 'brush-s', activeKey: 'brushS' },
-        { id: 'img-brush-m', label: 'Medium', icon: 'brush-m', activeKey: 'brushM' },
-        { id: 'img-brush-l', label: 'Large',  icon: 'brush-l', activeKey: 'brushL' },
+        { id: 'img-mask-edit', label: 'Edit\nMask', icon: 'pencil', activeKey: 'maskEdit' },
       ],
     },
   ],
@@ -360,11 +349,7 @@ function isActive(cmd) {
     case 'showDepth':     return s.showDepth
     case 'showGcps':      return s.showGcps
     case 'showFiducials': return s.showFiducials
-    case 'maskDraw':      return s.maskMode === 'draw'
-    case 'maskErase':     return s.maskMode === 'erase'
-    case 'brushS':        return s.brushRadius === 10
-    case 'brushM':        return s.brushRadius === 20
-    case 'brushL':        return s.brushRadius === 40
+    case 'maskEdit':      return s.maskEdit
   }
   return false
 }
@@ -464,10 +449,7 @@ function run(cmd) {
 
     <div class="ribbon-body">
       <template v-for="group in currentTab.groups" :key="group.label">
-        <div
-          v-if="!group.maskOnly || imageViewState?.maskMode !== 'none'"
-          class="group"
-        >
+        <div class="group">
           <div class="group-commands">
             <template v-for="(item, i) in group.commands" :key="item.id || `pair-${i}`">
               <!-- A stacked pair of two half-height buttons in one button's footprint -->

@@ -9,10 +9,9 @@ import { useProjectsStore } from '../stores/useProjectsStore.js'
 // dismisses the first that's open and stops. Modal state lives in the stores
 // (pulled in here); the handful of App-local refs/handlers are injected:
 //   pendingImageDelete  — ref, the batch-delete confirm
-//   pendingMaskClear    — ref, the clear-mask confirm
 //   exportKind          — ref (from useExports), which export dialog is open
 //   onCancelNewProject  — fn, cancels the (cancellable) New Project dialog
-export function useModalEscape({ pendingImageDelete, pendingMaskClear, exportKind, onCancelNewProject }) {
+export function useModalEscape({ pendingImageDelete, exportKind, onCancelNewProject }) {
   const glossaryStore = useGlossaryStore()
   const guideStore = useGuideStore()
   const { currentProjectId } = storeToRefs(useProjectsStore())
@@ -33,11 +32,11 @@ export function useModalEscape({ pendingImageDelete, pendingMaskClear, exportKin
   // Modals with their own overlay Escape handling (glossary/guide) are included so
   // it works even when focus isn't inside the overlay. Blocking dialogs stay open
   // unless dismissible (ProgressModal is never here; NewProject/ProjectPicker only
-  // when cancellable).
+  // when cancellable). Returns whether anything was closed, so the caller can fall
+  // through to non-modal Escape behaviour (e.g. exiting mask-edit mode).
   function closeTopModal() {
     const closers = [
       [pendingImageDelete.value, () => { pendingImageDelete.value = null }],
-      [pendingMaskClear.value,   () => { pendingMaskClear.value = null }],
       [importKindOpen.value,     () => { importKindOpen.value = false; importKindFile.value = null }],
       [exportKind.value,         () => { exportKind.value = null }],
       [infoImageId.value,        () => { infoImageId.value = null }],
@@ -67,6 +66,7 @@ export function useModalEscape({ pendingImageDelete, pendingMaskClear, exportKin
     ]
     const hit = closers.find(([open]) => open)
     if (hit) hit[1]()
+    return !!hit
   }
 
   return { closeTopModal }

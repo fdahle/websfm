@@ -1,8 +1,9 @@
 <script setup>
 import { ref, watch, computed, onMounted, onBeforeUnmount } from 'vue'
-import { maskFromSource } from '../../core/mask.js'
+import { maskFromSource, invertMaskPixels, anyExcluded } from '../../core/mask.js'
 import { depthColor } from '../../core/products/colormap.js'
 import { fitFiducialAffine, mmToScan } from '../../core/sfm/fiducials.js'
+import MaskToolbar from './MaskToolbar.vue'
 
 const props = defineProps({
   image:         { type: Object,  required: true },
@@ -13,8 +14,7 @@ const props = defineProps({
   gcps:          { type: Array,   default: () => [] }, // [{ id, name, px, py, reprojPx? }] observations on this image
   allGcps:       { type: Array,   default: () => [] }, // [{ id, name }] every GCP, for the right-click "assign" menu
   selectedGcpId: { type: String,  default: null },
-  maskMode:      { type: String,  default: 'none' }, // 'none' | 'draw' | 'erase'
-  brushRadius:   { type: Number,  default: 20 },     // screen pixels
+  maskEdit:      { type: Boolean, default: false }, // mask-edit mode (floating toolbar)
   // Film sensor (F4): the sensor's calibrated fiducial marks + this image's
   // clicked observations. isFilm gates the "Mark fiducial…" menu + overlay.
   isFilm:        { type: Boolean, default: false },
@@ -26,7 +26,8 @@ const props = defineProps({
 // mark-gcp: assign this pixel to an existing GCP { gcpId, px, py }.
 // add-gcp:  create a new GCP marked at this pixel { px, py }.
 // mark-fiducial: assign this pixel to a fiducial mark { fidId, px, py }.
-const emit = defineEmits(['update-mask', 'update-depth', 'mark-gcp', 'add-gcp', 'mark-fiducial'])
+// exit-mask-edit: user closed the mask toolbar (×) — parent owns the maskEdit flag.
+const emit = defineEmits(['update-mask', 'update-depth', 'mark-gcp', 'add-gcp', 'mark-fiducial', 'exit-mask-edit'])
 
 // Live fiducial fit (F4): join this image's observations with the sensor's
 // calibrated marks and fit the scan→mm affine once ≥3 land, so per-mark residual
@@ -112,11 +113,26 @@ const imageReady = ref(false)
 // Mask canvas state
 const hasMask = ref(!!props.image.mask)
 
+// Mask-edit tool state (local: the floating toolbar and this viewer are the
+// only consumers; per-tab persistence comes free from v-show-kept instances).
+const tool        = ref(null)   // 'brush' | 'erase' | 'rect' | null (pan while editing)
+const brushRadius = ref(20)     // screen pixels — constant on screen, ÷scale in image space
+const maskOpacity = ref(0.45)   // red-overlay alpha while editing/viewing
+// Undo/redo as stacks of persisted mask dataUrls (null = no mask). Snapshots are
+// the *previous* store value taken just before each committed change, so memory
+// cost is a handful of compressed PNG strings, not raw pixel buffers.
+const undoStack = ref([])
+const redoStack = ref([])
+const UNDO_MAX = 10
+
+let rectDrag = null // { x0, y0, x1, y1, erase } image-px corners of an in-flight rectangle
+
 let maskOffscreen  = null  // OffscreenCanvas at native image resolution
 let depthOffscreen = null  // OffscreenCanvas holding colorized depth at native resolution
 const hasDepth = ref(!!props.image.depth)
 let mousePos      = null  // { x, y } screen coords for brush cursor
 let isDrawing     = false
+let strokeHit     = false // did the in-flight brush/erase stroke touch the image?
 let startX = 0, startY = 0, startTx = 0, startTy = 0
 let resizeObserver = null
 let offscreenCtx   = null
@@ -237,7 +253,7 @@ function drawOverlay() {
   // Mask — red semi-transparent overlay at image position
   if (maskOffscreen && hasMask.value && props.showMask) {
     ctx.save()
-    ctx.globalAlpha = 0.45
+    ctx.globalAlpha = maskOpacity.value
     ctx.drawImage(maskOffscreen, tx.value, ty.value, dispW, dispH)
     ctx.restore()
   }
@@ -368,13 +384,27 @@ function drawOverlay() {
     drawLoupe(ctx, w, h)
   }
 
-  // Brush cursor circle
-  if (props.maskMode !== 'none' && mousePos) {
+  // Brush cursor circle (brush/eraser tools)
+  if (props.maskEdit && (tool.value === 'brush' || tool.value === 'erase') && mousePos) {
     ctx.beginPath()
-    ctx.arc(mousePos.x, mousePos.y, props.brushRadius, 0, Math.PI * 2)
-    ctx.strokeStyle = props.maskMode === 'draw' ? 'rgba(255,80,80,0.9)' : 'rgba(100,180,255,0.9)'
+    ctx.arc(mousePos.x, mousePos.y, brushRadius.value, 0, Math.PI * 2)
+    ctx.strokeStyle = tool.value === 'brush' ? 'rgba(255,80,80,0.9)' : 'rgba(100,180,255,0.9)'
     ctx.lineWidth = 1.5
     ctx.stroke()
+  }
+
+  // In-flight rectangle preview (dashed; blue while Alt = erase)
+  if (rectDrag) {
+    const rx = Math.min(rectDrag.x0, rectDrag.x1) * scale.value + tx.value
+    const ry = Math.min(rectDrag.y0, rectDrag.y1) * scale.value + ty.value
+    const rw = Math.abs(rectDrag.x1 - rectDrag.x0) * scale.value
+    const rh = Math.abs(rectDrag.y1 - rectDrag.y0) * scale.value
+    ctx.save()
+    ctx.setLineDash([5, 4])
+    ctx.strokeStyle = rectDrag.erase ? 'rgba(100,180,255,0.9)' : 'rgba(255,80,80,0.9)'
+    ctx.lineWidth = 1.5
+    ctx.strokeRect(rx, ry, rw, rh)
+    ctx.restore()
   }
 }
 
@@ -433,44 +463,158 @@ async function loadMaskFromDataUrl(dataUrl) {
   } catch {}
 }
 
-// Paint or erase a circle at screen position onto the mask canvas.
-// Brush radius stays constant in screen space (divided by scale → image coords).
+// Does a brush circle (image coords, radius r) overlap the image rectangle at
+// all? The mask canvas is exactly image-sized, so a stroke fully outside paints
+// zero pixels — without this test it would still flip hasMask + save an empty
+// mask. Uses the closest point on [0,w]×[0,h] to the circle centre.
+function circleIntersectsImage(cx, cy, r) {
+  const img = imgEl.value
+  if (!img?.naturalWidth) return false
+  const dx = cx - clamp(cx, 0, img.naturalWidth)
+  const dy = cy - clamp(cy, 0, img.naturalHeight)
+  return dx * dx + dy * dy <= r * r
+}
+
+// Paint or erase a circle at screen position onto the mask canvas. Brush radius
+// stays constant in screen space (divided by scale → image coords). Returns
+// whether the stroke actually touched the image (so a fully-outside stroke can
+// be discarded rather than committed as an empty mask).
 function paintAt(sx, sy) {
-  if (!maskOffscreen) return
+  if (!maskOffscreen) return false
   const imgX = (sx - tx.value) / scale.value
   const imgY = (sy - ty.value) / scale.value
-  const r    = props.brushRadius / scale.value
+  const r    = brushRadius.value / scale.value
+  if (!circleIntersectsImage(imgX, imgY, r)) return false
   const ctx  = maskOffscreen.getContext('2d')
 
-  if (props.maskMode === 'draw') {
+  if (tool.value === 'brush') {
     ctx.globalCompositeOperation = 'source-over'
     ctx.fillStyle = 'red'
     ctx.beginPath()
     ctx.arc(imgX, imgY, r, 0, Math.PI * 2)
     ctx.fill()
     hasMask.value = true
-  } else if (props.maskMode === 'erase') {
+  } else if (tool.value === 'erase') {
     ctx.globalCompositeOperation = 'destination-out'
     ctx.beginPath()
     ctx.arc(imgX, imgY, r, 0, Math.PI * 2)
     ctx.fill()
     ctx.globalCompositeOperation = 'source-over'
   }
+  return true
 }
 
-async function exportMask() {
+// ── Undo / redo ────────────────────────────────────────────────────────────────
+// Push the *current persisted* mask (still the pre-change value — commits happen
+// after the snapshot) onto the undo stack. Every committed change (stroke end,
+// rectangle, invert, import, clear) snapshots first, so undo restores exactly
+// the states the store has seen.
+function snapshotForUndo() {
+  undoStack.value.push(props.image.mask?.dataUrl ?? null)
+  if (undoStack.value.length > UNDO_MAX) undoStack.value.shift()
+  redoStack.value = []
+}
+
+const canUndo = computed(() => undoStack.value.length > 0)
+const canRedo = computed(() => redoStack.value.length > 0)
+
+// Restore a snapshot onto the canvas and re-emit it as the persisted mask.
+function applyMaskUrl(url) {
+  if (url) {
+    loadMaskFromDataUrl(url)
+  } else if (maskOffscreen) {
+    maskOffscreen.getContext('2d').clearRect(0, 0, maskOffscreen.width, maskOffscreen.height)
+    hasMask.value = false
+    drawOverlay()
+  }
+  emit('update-mask', url)
+}
+
+function undoMask() {
+  if (!undoStack.value.length) return
+  redoStack.value.push(props.image.mask?.dataUrl ?? null)
+  applyMaskUrl(undoStack.value.pop())
+}
+
+function redoMask() {
+  if (!redoStack.value.length) return
+  undoStack.value.push(props.image.mask?.dataUrl ?? null)
+  applyMaskUrl(redoStack.value.pop())
+}
+
+// ── Rectangle & invert ─────────────────────────────────────────────────────────
+
+async function commitRect() {
+  if (!rectDrag || !maskOffscreen) { rectDrag = null; return }
+  const { x0, y0, x1, y1, erase } = rectDrag
+  rectDrag = null
+  const x = Math.min(x0, x1), y = Math.min(y0, y1)
+  const w = Math.abs(x1 - x0), h = Math.abs(y1 - y0)
+  if (w < 1 || h < 1) { drawOverlay(); return }
+  snapshotForUndo()
+  const ctx = maskOffscreen.getContext('2d')
+  if (erase) {
+    ctx.globalCompositeOperation = 'destination-out'
+    ctx.fillRect(x, y, w, h)
+    ctx.globalCompositeOperation = 'source-over'
+  } else {
+    ctx.fillStyle = 'red'
+    ctx.fillRect(x, y, w, h)
+    hasMask.value = true
+  }
+  drawOverlay()
+  await exportMask(erase) // an erase-rectangle can empty the mask
+}
+
+// Swap excluded ↔ kept over the whole canvas. An inversion that leaves nothing
+// excluded commits `null` (no mask) rather than an all-transparent PNG.
+async function invertMask() {
   if (!maskOffscreen) return
+  const ctx = maskOffscreen.getContext('2d')
+  const id  = ctx.getImageData(0, 0, maskOffscreen.width, maskOffscreen.height)
+  const excluded = invertMaskPixels(id.data)
+  ctx.putImageData(id, 0, 0)
+  snapshotForUndo()
+  hasMask.value = excluded > 0
+  drawOverlay()
+  if (excluded > 0) await exportMask()
+  else emit('update-mask', null)
+}
+
+// True when the mask canvas has no excluded pixels left (e.g. after erasing the
+// last of a mask). Reads the whole canvas, so only call on commits that can
+// empty it (erase/rect-erase/import) — a draw is trivially non-empty.
+function maskCanvasEmpty() {
+  if (!maskOffscreen) return true
+  const ctx = maskOffscreen.getContext('2d')
+  const id  = ctx.getImageData(0, 0, maskOffscreen.width, maskOffscreen.height)
+  return !anyExcluded(id.data)
+}
+
+// Persist the current mask canvas. With `checkEmpty` (erase-type commits), first
+// tests whether anything is still masked and commits `null` (no mask) if not —
+// so erasing the last pixels clears the mask instead of saving an empty PNG.
+async function exportMask(checkEmpty = false) {
+  if (!maskOffscreen) return
+  if (checkEmpty && maskCanvasEmpty()) {
+    hasMask.value = false
+    emit('update-mask', null)
+    return
+  }
   const blob   = await maskOffscreen.convertToBlob({ type: 'image/png' })
   const dataUrl = await new Promise((resolve) => {
     const fr = new FileReader()
     fr.onload = () => resolve(fr.result)
     fr.readAsDataURL(blob)
   })
+  hasMask.value = true
   emit('update-mask', dataUrl)
 }
 
+// Clear is undoable (snapshot first) — no confirm dialog needed anymore.
 function clearMask() {
-  if (!maskOffscreen) return
+  if (!maskOffscreen || !hasMask.value) return
+  snapshotForUndo()
   maskOffscreen.getContext('2d').clearRect(0, 0, maskOffscreen.width, maskOffscreen.height)
   hasMask.value = false
   emit('update-mask', null)
@@ -489,8 +633,9 @@ async function onMaskFileChange(e) {
   if (!file || !maskOffscreen) return
   try {
     const dataUrl = await maskFromSource(file, maskOffscreen.width, maskOffscreen.height)
+    snapshotForUndo()
     await loadMaskFromDataUrl(dataUrl)
-    await exportMask()
+    await exportMask(true) // a blank imported image shouldn't register as a mask
   } catch (err) {
     console.error('Failed to import mask:', err)
   }
@@ -609,7 +754,7 @@ function toImagePixel(sx, sy) {
 const menu = ref(null)
 
 function onContextMenu(e) {
-  if (props.maskMode !== 'none') return // don't hijack right-click while masking
+  if (props.maskEdit && tool.value) return // don't hijack right-click while a mask tool is active
   e.preventDefault()
   const { x, y } = getViewportCoords(e)
   const pix = toImagePixel(x, y)
@@ -663,10 +808,17 @@ function menuFit()    { fit(); closeMenu() }
 
 function onMouseDown(e) {
   if (menu.value && e.button === 0) { closeMenu(); return }
-  if (props.maskMode !== 'none' && e.button === 0) {
-    isDrawing = true
+  const activeTool = props.maskEdit ? tool.value : null
+  if (activeTool === 'rect' && e.button === 0) {
     const { x, y } = getViewportCoords(e)
-    paintAt(x, y)
+    const pix = toImagePixel(x, y)
+    if (pix) rectDrag = { x0: pix.px, y0: pix.py, x1: pix.px, y1: pix.py, erase: e.altKey }
+    drawOverlay()
+  } else if ((activeTool === 'brush' || activeTool === 'erase') && e.button === 0) {
+    isDrawing = true
+    strokeHit = false
+    const { x, y } = getViewportCoords(e)
+    strokeHit = paintAt(x, y) || strokeHit
     drawOverlay()
   } else if (e.button === 0) {
     dragging.value = true
@@ -681,8 +833,11 @@ function onMouseMove(e) {
   const { x, y } = getViewportCoords(e)
   mousePos = { x, y }
 
-  if (isDrawing && props.maskMode !== 'none') {
-    paintAt(x, y)
+  if (rectDrag) {
+    const pix = toImagePixel(x, y)
+    if (pix) { rectDrag.x1 = pix.px; rectDrag.y1 = pix.py; rectDrag.erase = e.altKey }
+  } else if (isDrawing && tool.value) {
+    strokeHit = paintAt(x, y) || strokeHit
   } else if (dragging.value) {
     tx.value = startTx + (e.clientX - startX)
     ty.value = startTy + (e.clientY - startY)
@@ -711,16 +866,20 @@ function onMouseMove(e) {
 }
 
 async function onMouseUp() {
+  if (rectDrag) { await commitRect(); return }
   if (isDrawing) {
     isDrawing = false
-    await exportMask()
+    // A stroke that never touched the image is a no-op — don't save an empty mask.
+    // An erase can empty the mask, so re-check on that path.
+    if (strokeHit) { snapshotForUndo(); await exportMask(tool.value === 'erase') }
   }
   dragging.value = false
 }
 
 function onMouseLeave() {
   dragging.value = false
-  if (isDrawing) { isDrawing = false; exportMask() }
+  rectDrag = null // cancel an in-flight rectangle rather than guessing its corner
+  if (isDrawing) { isDrawing = false; if (strokeHit) { snapshotForUndo(); exportMask(tool.value === 'erase') } }
   mousePos      = null
   hoverPx.value = null
   drawOverlay()
@@ -781,7 +940,14 @@ watch(() => props.fiducialObs,       () => drawOverlay(), { deep: true })
 watch(() => props.isFilm,            () => drawOverlay())
 watch(() => props.showFiducials,     () => drawOverlay())
 watch(() => props.fiducialMarks,     () => drawOverlay(), { deep: true })
-watch(() => props.maskMode,          () => drawOverlay())
+
+// Entering edit mode arms the brush; leaving drops the tool + any in-flight rect.
+watch(() => props.maskEdit, (on) => {
+  tool.value = on ? 'brush' : null
+  if (!on) rectDrag = null
+  drawOverlay()
+})
+watch(tool, () => { rectDrag = null; drawOverlay() })
 
 // Sync mask canvas when parent clears or replaces the mask externally
 watch(() => props.image.mask, (mask, prev) => {
@@ -807,12 +973,38 @@ watch(() => props.image.depth, (depth, prev) => {
   }
 })
 
+// Mask-edit keyboard shortcuts. Instances are kept alive per tab via v-show, so
+// gate on being the *visible* one (offsetParent is null while display:none) and
+// on edit mode; skip while typing in a field. Escape is handled globally in
+// App.vue (it must yield to open modals first).
+function onKeydown(e) {
+  if (!props.maskEdit || container.value?.offsetParent === null) return
+  const t = e.target
+  if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
+  const k = e.key.toLowerCase()
+  if ((e.ctrlKey || e.metaKey) && k === 'z') { e.preventDefault(); e.shiftKey ? redoMask() : undoMask(); return }
+  if ((e.ctrlKey || e.metaKey) && k === 'y') { e.preventDefault(); redoMask(); return }
+  if (e.ctrlKey || e.metaKey || e.altKey) return
+  if      (k === 'b') tool.value = 'brush'
+  else if (k === 'e') tool.value = 'erase'
+  else if (k === 'r') tool.value = 'rect'
+  else if (k === 'i') invertMask()
+  else if (e.key === '[') brushRadius.value = Math.max(4, brushRadius.value - 4)
+  else if (e.key === ']') brushRadius.value = Math.min(80, brushRadius.value + 4)
+  else return
+  drawOverlay()
+}
+
 onMounted(() => {
   resizeObserver = new ResizeObserver(() => fit())
   if (container.value) resizeObserver.observe(container.value)
+  document.addEventListener('keydown', onKeydown)
 })
 
-onBeforeUnmount(() => resizeObserver?.disconnect())
+onBeforeUnmount(() => {
+  resizeObserver?.disconnect()
+  document.removeEventListener('keydown', onKeydown)
+})
 
 defineExpose({ fit, zoomIn, zoomOut, triggerMaskImport, clearMask, triggerDepthImport, clearDepth })
 </script>
@@ -825,13 +1017,17 @@ defineExpose({ fit, zoomIn, zoomOut, triggerMaskImport, clearMask, triggerDepthI
     <div
       ref="container"
       class="viewport"
-      :class="{ grabbing: dragging && maskMode === 'none', drawing: maskMode !== 'none' }"
+      :class="{
+        grabbing: dragging && (!maskEdit || !tool),
+        drawing: maskEdit && (tool === 'brush' || tool === 'erase'),
+        crosshair: maskEdit && tool === 'rect',
+      }"
       @wheel="onWheel"
       @mousedown="onMouseDown"
       @mousemove="onMouseMove"
       @mouseup="onMouseUp"
       @mouseleave="onMouseLeave"
-      @dblclick="maskMode === 'none' && fit()"
+      @dblclick="(!maskEdit || !tool) && fit()"
       @contextmenu="onContextMenu"
     >
       <img
@@ -853,6 +1049,25 @@ defineExpose({ fit, zoomIn, zoomOut, triggerMaskImport, clearMask, triggerDepthI
       </div>
 
       <canvas ref="overlayCanvas" class="overlay-canvas" />
+
+      <MaskToolbar
+        v-if="maskEdit"
+        :tool="tool"
+        :brush-radius="brushRadius"
+        :opacity="maskOpacity"
+        :has-mask="hasMask"
+        :can-undo="canUndo"
+        :can-redo="canRedo"
+        @set-tool="(t) => (tool = t)"
+        @update:brush-radius="(r) => (brushRadius = r)"
+        @update:opacity="(o) => { maskOpacity = o; drawOverlay() }"
+        @invert="invertMask"
+        @undo="undoMask"
+        @redo="redoMask"
+        @import="triggerMaskImport"
+        @clear="clearMask"
+        @close="emit('exit-mask-edit')"
+      />
 
       <!-- Right-click context menu (general → GCP chooser sub-mode). -->
       <div v-if="menu" class="ctx-menu" :style="{ left: menu.x + 'px', top: menu.y + 'px' }" @mousedown.stop @contextmenu.prevent>
@@ -944,8 +1159,9 @@ defineExpose({ fit, zoomIn, zoomOut, triggerMaskImport, clearMask, triggerDepthI
   cursor: grab;
 }
 
-.viewport.grabbing { cursor: grabbing; }
-.viewport.drawing  { cursor: none; }
+.viewport.grabbing  { cursor: grabbing; }
+.viewport.drawing   { cursor: none; }
+.viewport.crosshair { cursor: crosshair; }
 
 .ctx-menu {
   position: absolute;

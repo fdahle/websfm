@@ -6,6 +6,7 @@ import Sidebar from './components/layout/Sidebar.vue'
 import Viewer3D from './components/viewers/Viewer3D.vue'
 import ViewerMap from './components/viewers/ViewerMap.vue'
 import ViewerImage from './components/viewers/ViewerImage.vue'
+import ViewerGcp from './components/viewers/ViewerGcp.vue'
 import ImageInfoModal from './components/modals/ImageInfoModal.vue'
 import DetectFeaturesModal from './components/modals/DetectFeaturesModal.vue'
 import MatchFeaturesModal from './components/modals/MatchFeaturesModal.vue'
@@ -102,7 +103,7 @@ const showMap = computed(() => currentSceneType.value !== 'object')
 const {
   tabs, activeTabId,
   activeTab, activeImageTab, activeView,
-  activateTab, openImageTab, openProductTab,
+  activateTab, openImageTab, openProductTab, openGcpTab,
   closeTab, closeTabForImage, moveTab,
   closeAllTabs, closeOtherTabs, closeTabsToLeft, closeTabsToRight,
   onImageDetected, resetToViewer, rememberOverlayPrefs,
@@ -182,6 +183,18 @@ function addGcpAtObservation(imageId, imageName, { px, py }) {
 }
 // Sidebar observation-list actions.
 function jumpToImage({ imageId }) { if (imageId != null) openImageTab(imageId) }
+
+// Double-click a GCP in the sidebar → multi-image inspector tab.
+function openGcpView(gcpId) {
+  const g = gcps.value.find((x) => x.id === gcpId)
+  if (g) openGcpTab(gcpId, g.name)
+}
+
+// Remove a GCP and close its inspector tab if one is open.
+function removeGcpAndCloseTab(gcpId) {
+  removeGcp(gcpId)
+  closeTab(`gcp:${gcpId}`)
+}
 function removeGcpObservation({ gcpId, imageId }) {
   removeObservation(gcpId, imageId)
   refreshGcpReport()
@@ -375,8 +388,7 @@ const activeImageViewState = computed(() => {
     showGcps:      tab.showGcps,
     showFiducials: tab.showFiducials,
     isFilm:        sensorForImage(tab.imageId)?.kind === 'film',
-    maskMode:      tab.maskMode,
-    brushRadius:   tab.brushRadius,
+    maskEdit:      !!tab.maskEdit,
     kpStatus:      img.kpStatus,
     kpCount:       img.kpCount,
     hasMask:       !!img.mask,
@@ -452,7 +464,11 @@ onMounted(async () => {
       consoleOpen.value = !consoleOpen.value
     } else if (e.key === 'Escape') {
       if (tabCtx.value) closeTabCtx()
-      else closeTopModal()
+      else if (!closeTopModal()) {
+        // Nothing modal to dismiss — Escape exits mask-edit mode on the active tab.
+        const tab = activeTab.value
+        if (tab?.type === 'image' && tab.maskEdit) tab.maskEdit = false
+      }
     }
   })
   document.addEventListener('click', () => { if (tabCtx.value) closeTabCtx() })
@@ -613,12 +629,12 @@ function onDetectRun(settings)      { detectFeaturesOpen.value = false;  runDete
 function onMatchRun(settings)       { matchFeaturesOpen.value  = false;  runMatch(settings)       }
 function onReconstructRun(settings) { reconstructOpen.value    = false;  runReconstruct(settings) }
 
-// Open an image from the Mask Manager and drop straight into mask-draw mode.
+// Open an image from the Mask Manager and drop straight into mask-edit mode.
 function editMask(id) {
   maskManagerOpen.value = false
   openImageTab(id)
   const tab = activeTab.value
-  if (tab?.type === 'image') { tab.showMask = true; tab.showDepth = false; tab.maskMode = 'draw' }
+  if (tab?.type === 'image') { tab.showMask = true; tab.showDepth = false; tab.maskEdit = true }
 }
 function onDepthMapsRun(settings)   { depthMapsOpen.value      = false;  runComputeDepthMaps(settings) }
 function onDenseRun(settings)       { denseOpen.value          = false;  runDensify(settings) }
@@ -632,18 +648,10 @@ async function onOrthoRun(settings) { orthoOpen.value = false; await runGenerate
 // delete request through a confirm dialog. Holds the pending image ids + names.
 const pendingImageDelete = ref(null)
 
-// Clearing an image's mask is irreversible (drops the painted region), so route it
-// through a confirm dialog. Holds the tab/image id whose mask is pending clear.
-const pendingMaskClear = ref(null)
-function confirmMaskClear() {
-  imageViewerRefs[pendingMaskClear.value]?.clearMask()
-  pendingMaskClear.value = null
-}
-
 // Escape-closes-top-most-modal (pulls modal state from the stores; the few local
 // bits are injected). Used by the global keydown handler in the bootstrap below.
 const { closeTopModal } = useModalEscape({
-  pendingImageDelete, pendingMaskClear, exportKind, onCancelNewProject: handleCancelNewProject,
+  pendingImageDelete, exportKind, onCancelNewProject: handleCancelNewProject,
 })
 
 // Site-wide confirm before the tab is closed / reloaded / navigated away.
@@ -767,21 +775,15 @@ function handleCommand(id) {
       if (tab?.type === 'image') { tab.showFiducials = !tab.showFiducials; rememberOverlayPrefs(tab) }
       break
     }
-    case 'img-mask-draw': {
+    case 'img-mask-edit': {
       const tab = activeTab.value
-      if (tab?.type === 'image') tab.maskMode = tab.maskMode === 'draw' ? 'none' : 'draw'
+      if (tab?.type === 'image') {
+        tab.maskEdit = !tab.maskEdit
+        // Editing implies seeing the mask; depth is mutually exclusive with it.
+        if (tab.maskEdit) { tab.showMask = true; tab.showDepth = false }
+      }
       break
     }
-    case 'img-mask-erase': {
-      const tab = activeTab.value
-      if (tab?.type === 'image') tab.maskMode = tab.maskMode === 'erase' ? 'none' : 'erase'
-      break
-    }
-    case 'img-mask-import': imageViewerRefs[activeImageTab.value?.id]?.triggerMaskImport(); break
-    case 'img-mask-clear':  pendingMaskClear.value = activeImageTab.value?.id ?? null; break
-    case 'img-brush-s': { const t = activeTab.value; if (t?.type === 'image') t.brushRadius = 10; break }
-    case 'img-brush-m': { const t = activeTab.value; if (t?.type === 'image') t.brushRadius = 20; break }
-    case 'img-brush-l': { const t = activeTab.value; if (t?.type === 'image') t.brushRadius = 40; break }
   }
 }
 
@@ -924,18 +926,6 @@ function onRibbonPick(event) {
         danger
         @confirm="confirmRemoveImages"
         @cancel="pendingImageDelete = null"
-      />
-    </Teleport>
-
-    <Teleport to="body">
-      <ConfirmModal
-        v-if="pendingMaskClear"
-        title="Clear mask?"
-        message="This removes the painted mask for this image. This can't be undone."
-        confirm-label="Clear"
-        danger
-        @confirm="confirmMaskClear"
-        @cancel="pendingMaskClear = null"
       />
     </Teleport>
 
@@ -1087,7 +1077,7 @@ function onRibbonPick(event) {
         :report="gcpReport"
         :selected-gcp-id="selectedGcpId"
         @close="gcpTableOpen = false"
-        @remove="removeGcp"
+        @remove="removeGcpAndCloseTab"
         @update-accuracy="({ id, kind, value }) => setGcpAccuracy(id, kind, value)"
         @update-name="({ id, name }) => setGcpName(id, name)"
         @update-position="({ id, axis, value }) => setGcpPosition(id, axis, value)"
@@ -1154,10 +1144,11 @@ function onRibbonPick(event) {
         @add-images="addImages"
         @import-file="openDroppedImport"
         @remove-image="requestRemoveImages"
-        @remove-gcp="removeGcp"
+        @remove-gcp="removeGcpAndCloseTab"
         @select-gcp="selectGcp"
         @jump-to-image="jumpToImage"
         @remove-gcp-observation="removeGcpObservation"
+        @open-gcp="openGcpView"
         @remove-sensor="removeSensor"
         @merge-sensors="({ target, source }) => mergeSensors(target, source)"
         @assign-sensor="({ imageId, sensorId }) => assignSensor(imageId, sensorId)"
@@ -1211,8 +1202,8 @@ function onRibbonPick(event) {
               :gcps="activeTabId === tab.id ? activeImageGcps : []"
               :all-gcps="allGcpsBrief"
               :selected-gcp-id="selectedGcpId"
-              :mask-mode="tab.maskMode"
-              :brush-radius="tab.brushRadius"
+              :mask-edit="tab.maskEdit"
+              @exit-mask-edit="tab.maskEdit = false"
               @update-mask="(dataUrl) => updateMask(tab.imageId, dataUrl)"
               @update-depth="(dataUrl) => updateDepth(tab.imageId, dataUrl)"
               :is-film="sensorForImage(tab.imageId)?.kind === 'film'"
@@ -1222,6 +1213,14 @@ function onRibbonPick(event) {
               @mark-gcp="(pt) => assignGcpObservation(tab.imageId, imageById(tab.imageId)?.name, pt)"
               @add-gcp="(pt) => addGcpAtObservation(tab.imageId, imageById(tab.imageId)?.name, pt)"
               @mark-fiducial="({ fidId, px, py }) => setFiducialObservation(tab.imageId, fidId, px, py)"
+            />
+            <ViewerGcp
+              v-else-if="tab.type === 'gcp'"
+              v-show="activeTabId === tab.id"
+              :gcp="gcps.find((g) => g.id === tab.gcpId) ?? null"
+              :images="images"
+              :report="gcpReport.find((r) => r.gcpId === tab.gcpId) ?? null"
+              @jump-to-image="jumpToImage"
             />
             <ProductViewer
               v-else-if="tab.type === 'product'"

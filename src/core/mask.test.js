@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { maskLookupFromRgba, normalizeMaskPixels, paintBorderExclude } from './mask.js'
+import { maskLookupFromRgba, normalizeMaskPixels, paintBorderExclude, invertMaskPixels, anyExcluded } from './mask.js'
 
 // Build a flat RGBA buffer (Uint8ClampedArray-like) of w*h pixels from a list
 // of [r,g,b,a] tuples.
@@ -44,6 +44,42 @@ describe('normalizeMaskPixels', () => {
     const once = Array.from(data)
     normalizeMaskPixels(data)
     expect(Array.from(data)).toEqual(once)
+  })
+})
+
+describe('anyExcluded', () => {
+  it('is false for an all-transparent (empty) mask', () => {
+    expect(anyExcluded(rgba([[0, 0, 0, 0], [255, 0, 0, 0], [10, 10, 10, 100]]))).toBe(false)
+  })
+  it('is true when at least one pixel is opaque', () => {
+    expect(anyExcluded(rgba([[0, 0, 0, 0], [255, 0, 0, 255]]))).toBe(true)
+  })
+})
+
+describe('invertMaskPixels', () => {
+  it('swaps excluded and kept pixels and returns the new excluded count', () => {
+    const data = rgba([
+      [255, 0, 0, 255], // excluded → kept
+      [0, 0, 0, 0],     // kept → excluded
+      [255, 0, 0, 128], // alpha just over threshold → kept
+      [10, 10, 10, 100], // partial alpha under threshold (brush AA edge) → excluded
+    ])
+    const excluded = invertMaskPixels(data)
+    expect(excluded).toBe(2)
+    expect(Array.from(maskLookupFromRgba(data, 4, 1))).toEqual([0, 1, 0, 1])
+  })
+
+  it('double inversion restores the lookup (normalized input)', () => {
+    const data = rgba([[255, 0, 0, 255], [0, 0, 0, 0], [255, 0, 0, 255]])
+    const before = Array.from(maskLookupFromRgba(data, 3, 1))
+    invertMaskPixels(data)
+    invertMaskPixels(data)
+    expect(Array.from(maskLookupFromRgba(data, 3, 1))).toEqual(before)
+  })
+
+  it('returns 0 when inverting a fully-excluded mask (caller can drop it)', () => {
+    const data = rgba([[255, 0, 0, 255], [255, 0, 0, 255]])
+    expect(invertMaskPixels(data)).toBe(0)
   })
 })
 

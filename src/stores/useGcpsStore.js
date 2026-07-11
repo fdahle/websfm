@@ -1,4 +1,4 @@
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { defineStore } from 'pinia'
 import { useLog } from '../composables/useLog.js'
 import { ensureProjection, transform } from '../core/crs.js'
@@ -68,6 +68,29 @@ export const useGcpsStore = registerProjectStore(defineStore('gcps', () => {
     })
     return hit?.id ?? null
   }
+
+  // Re-resolve every observation's `imageId` against the current image list.
+  // Observations imported/marked before their image was loaded carry a null
+  // `imageId` (image doesn't exist yet); this backfills them once the image
+  // arrives, and drops the id again if that image is later removed. Keeps the
+  // stored `imageId` authoritative so the sidebar can gate the jump-to-image
+  // link on "image actually exists". Runs on every image-list change.
+  function reconcileObservationImageIds() {
+    let changed = false
+    for (const g of gcps.value) {
+      for (const o of g.observations || []) {
+        const resolved = resolveImageId(o.imageName)
+        if (resolved !== o.imageId) { o.imageId = resolved; changed = true }
+      }
+    }
+    if (changed) save()
+  }
+  // The image list changes identity on add/remove (and names on rename); re-run
+  // resolution so GCP links track it.
+  watch(
+    () => imagesStore.images.map((img) => `${img.id}:${img.name}`).join('|'),
+    () => reconcileObservationImageIds(),
+  )
 
   // Add parsed GCPs (given in `sourceCrs`), transforming positions into the project CRS.
   async function addGcps(rawGcps, sourceCrs) {

@@ -10,7 +10,7 @@ const props = defineProps({
   report:        { type: Array,   default: () => [] },
   selectedGcpId: { type: String,  default: null },
 })
-const emit = defineEmits(['toggle', 'remove-gcp', 'select', 'jump-to-image', 'remove-observation'])
+const emit = defineEmits(['toggle', 'remove-gcp', 'select', 'jump-to-image', 'remove-observation', 'open-gcp'])
 
 const gcpExpanded = ref({})
 function toggleGcpExpand(id) {
@@ -54,6 +54,7 @@ function reprojFor(gcpId, imageId) {
           :class="{ selected: gcp.id === selectedGcpId }"
           :title="gcp.name"
           @click="emit('select', gcp.id); toggleGcpExpand(gcp.id)"
+          @dblclick="emit('open-gcp', gcp.id)"
           @contextmenu="onGcpRightClick($event, gcp)"
         >
           <button
@@ -92,10 +93,16 @@ function reprojFor(gcpId, imageId) {
           <ul v-if="gcp.observations?.length" class="obs-list">
             <li v-for="obs in gcp.observations" :key="obs.imageId ?? obs.imageName" class="obs-item">
               <button
+                v-if="obs.imageId != null"
                 class="obs-jump"
                 :title="`Open ${obs.imageName}`"
                 @click.stop="emit('jump-to-image', { imageId: obs.imageId })"
               >{{ obs.imageName }}</button>
+              <span
+                v-else
+                class="obs-missing"
+                :title="`${obs.imageName} — not loaded yet; add this image to enable its link`"
+              >{{ obs.imageName }}</span>
               <span v-if="reprojFor(gcp.id, obs.imageId) != null" class="obs-reproj" title="Reprojection error (px)">
                 {{ reprojFor(gcp.id, obs.imageId).toFixed(1) }}px
               </span>
@@ -157,6 +164,17 @@ function reprojFor(gcpId, imageId) {
   padding: 0;
 }
 .obs-jump:hover { text-decoration: underline; }
+.obs-missing {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--text-dim);
+  font-style: italic;
+  cursor: default;
+}
 .obs-reproj { font-size: 10px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
 .obs-remove {
   background: none;

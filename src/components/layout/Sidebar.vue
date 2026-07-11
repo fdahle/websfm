@@ -39,7 +39,7 @@ defineProps({
 
 const emit = defineEmits([
   'add-images', 'import-file', 'remove-image', 'remove-gcp', 'select-gcp',
-  'jump-to-image', 'remove-gcp-observation',
+  'jump-to-image', 'remove-gcp-observation', 'open-gcp',
   'remove-sensor', 'merge-sensors', 'assign-sensor', 'remove-pose',
   'remove-footprint',
   'select', 'open', 'show-info', 'delete-keypoints', 'zoom-to-image',
@@ -139,6 +139,7 @@ function toggle(key) {
       @select="emit('select-gcp', $event)"
       @jump-to-image="emit('jump-to-image', $event)"
       @remove-observation="emit('remove-gcp-observation', $event)"
+      @open-gcp="emit('open-gcp', $event)"
     />
 
     <!-- Footprints are optional: only show the section when some exist. -->
