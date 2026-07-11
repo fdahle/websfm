@@ -32,8 +32,12 @@ async function initDevice() {
     // pixels (npix×16 B) — at maxDim≈5000 the state buffer alone is ~380 MB and
     // would blow the default cap. Requesting up to `adapter.limits` is always
     // valid (those values are the supported maxima).
+    // maxTextureDimension2D joins the buffer limits: the depth-map backend uploads
+    // each image as an r8unorm texture, so a working raster wider/taller than the
+    // (default 8192) texture cap fails in createTexture. Raise it to the adapter max
+    // so large film scans work, and let computeDepthMapGPU pre-flight against it.
     const requiredLimits = {}
-    for (const k of ['maxBufferSize', 'maxStorageBufferBindingSize']) {
+    for (const k of ['maxBufferSize', 'maxStorageBufferBindingSize', 'maxTextureDimension2D']) {
       const v = adapter.limits?.[k]
       if (typeof v === 'number') requiredLimits[k] = v
     }

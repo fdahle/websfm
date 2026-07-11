@@ -170,9 +170,15 @@ export function makeDenseOps({ rasterize }) {
   async function computeDepthMaps([input], { emit }) {
     const { images, points, settings = {} } = input
     const {
-      maxDim = 800, maxSources = 6, minAngleDeg = 3, window = 3, iterations = 3, bestK = null,
+      maxDim = 800, maxSources: maxSourcesReq = 6, minAngleDeg = 3, window = 3, iterations = 3, bestK = null,
       speckleFilter = true, filterRadius = 1, filterRelTol = 0.1, coarseLong = 600,
     } = settings
+    // The GPU kernel packs sources into a fixed MAX_SRC=16 array and silently drops
+    // any beyond that (depthMapGpu.js), while the WASM path + the first-image A/B
+    // validation use every source. Clamp here so both backends see the same source
+    // count — otherwise >16 sources makes GPU vs WASM diverge and trips a spurious
+    // A/B RMS warning.
+    const maxSources = Math.min(16, maxSourcesReq)
     // Auto best-K per image (Step 3) when the user hasn't overridden it: derive from
     // that image's source count (clamp(ceil(nSources/2),1,4)) rather than a fixed 3.
     const autoBestKMode = !(bestK > 0)
@@ -339,7 +345,9 @@ export function makeDenseOps({ rasterize }) {
           emit('log', [`Depth maps: GPU error on ${img.name} (${err?.message ?? err}) — falling back to WASM`,
             'warn', 'Dense'])
           backend = undefined
-          dm = await depthMapForImage(ref, sources, points, { window, iterations, bestK: imgBestK, coarseLong }, backend)
+          // Keep streaming the coarse-to-fine plan log on the retry (validate no
+          // longer applies once we've dropped off the GPU path).
+          dm = await depthMapForImage(ref, sources, points, { window, iterations, bestK: imgBestK, coarseLong }, backend, { onLog: hooks.onLog })
         } else {
           throw err
         }

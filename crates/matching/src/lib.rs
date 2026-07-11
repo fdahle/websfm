@@ -2,85 +2,181 @@ use wasm_bindgen::prelude::*;
 
 // ─── Descriptor matching ──────────────────────────────────────────────────────
 
-// Squared-L2 distance between two descriptor rows (`a`/`b` are each exactly `dim`
-// floats), exiting early once the partial sum already exceeds `limit` (safe for
-// the ratio test, where `limit` is the current second-best). The brute-force NN
-// scan over every pair of descriptors is the matcher's hot loop, so this is the
-// function to vectorise. `dim` is the descriptor width — 128 for SIFT, 256 for
-// SuperPoint; both are multiples of 32 so the SIMD block loop covers them fully.
+// Nearest-neighbour matching via the GEMM identity. The brute-force NN scan over
+// every descriptor pair is the matcher's hot loop; expressing the squared-L2
+// distance as
+//     ‖a − b‖² = ‖a‖² + ‖b‖² − 2·(a·b)
+// turns it into precomputed row norms plus a dot product. The dot is a branch-free
+// multiply-add (no per-candidate early-exit test to mispredict), so it vectorises
+// fully and register-blocks: four queries are matched against each database row at
+// once, reusing that row's SIMD load across all four. Row norms are computed once.
+// `dim` is the descriptor width — 128 (SIFT) / 256 (SuperPoint), both multiples of
+// 4 so the f32x4 loop covers them; a non-multiple tail is handled scalar.
+//
+// The distance search runs in "s-space": s(a,b) = ‖b‖² − 2·(a·b), dropping the
+// query norm ‖a‖² (a per-query constant that can't change which database row is
+// nearest). ‖a‖² is added back only when materialising the true squared distance
+// for the ratio test and the reported distance. Because this is a difference of
+// larger magnitudes rather than a direct diff-square, it can round differently
+// (and go slightly negative for near-identical rows — clamped to 0); as before,
+// that only perturbs borderline ratio-test ties, which RANSAC then re-filters.
 
-// SIMD path: process 32-dim blocks (8× f32x4). Accumulate squared diffs in a
-// vector, fold to scalar after each block, and bail when the running distance
-// crosses `limit`. One early-exit checkpoint per 32 dims instead of the scalar
-// path's per-element check — far fewer instructions per element, at the cost of
-// letting a doomed candidate run up to 31 extra dims before bailing. A `dim` that
-// isn't a multiple of 32 has its tail handled scalar. Summation order differs
-// from the scalar path, so distances can differ by float rounding; that only
-// matters for borderline ratio-test ties, which RANSAC then re-filters.
+const BQ: usize = 4; // queries matched per database-row load (register blocking)
+
+// ‖row‖² for each of `n` descriptor rows.
+fn descriptor_norms(desc: &[f32], n: usize, dim: usize) -> Vec<f32> {
+    let mut norms = vec![0.0f32; n];
+    for (i, norm) in norms.iter_mut().enumerate() {
+        let row = &desc[i * dim..(i + 1) * dim];
+        *norm = row.iter().map(|&x| x * x).sum();
+    }
+    norms
+}
+
 #[cfg(target_feature = "simd128")]
-fn l2_sq_early(a: &[f32], b: &[f32], limit: f32, dim: usize) -> f32 {
+#[inline]
+fn hsum(v: core::arch::wasm32::v128) -> f32 {
     use core::arch::wasm32::*;
-    let mut d = 0.0f32;
-    let blocks = dim - dim % 32; // full 32-dim blocks; scalar tail handles the rest
-    // SAFETY: `a`/`b` are `dim`-float rows and we only v128_load within `blocks`
-    // (≤ dim); wasm v128 loads are unaligned-safe (alignment is a hint only).
-    unsafe {
-        let (pa, pb) = (a.as_ptr(), b.as_ptr());
-        let mut k = 0usize;
-        while k < blocks {
-            let mut acc = f32x4_splat(0.0);
-            let block_end = k + 32;
-            while k < block_end {
-                let diff = f32x4_sub(
-                    v128_load(pa.add(k) as *const v128),
-                    v128_load(pb.add(k) as *const v128),
-                );
-                acc = f32x4_add(acc, f32x4_mul(diff, diff));
+    f32x4_extract_lane::<0>(v) + f32x4_extract_lane::<1>(v)
+        + f32x4_extract_lane::<2>(v) + f32x4_extract_lane::<3>(v)
+}
+
+// Fill `out[0..bq]` (bq ≤ BQ) with the dot products of each query row against `b`.
+// SIMD path: the bq==BQ case reuses each `b` load across four accumulators.
+#[cfg(target_feature = "simd128")]
+fn dots_tile(qs: &[&[f32]], b: &[f32], dim: usize, out: &mut [f32]) {
+    use core::arch::wasm32::*;
+    let blocks = dim - dim % 4;
+    // SAFETY: every `qs[t]` and `b` is a `dim`-float row; v128 loads stay within
+    // `blocks` (≤ dim) and are unaligned-safe on wasm.
+    if qs.len() == BQ {
+        let (mut a0, mut a1, mut a2, mut a3) =
+            (f32x4_splat(0.0), f32x4_splat(0.0), f32x4_splat(0.0), f32x4_splat(0.0));
+        unsafe {
+            let pb = b.as_ptr();
+            let (p0, p1, p2, p3) =
+                (qs[0].as_ptr(), qs[1].as_ptr(), qs[2].as_ptr(), qs[3].as_ptr());
+            let mut k = 0usize;
+            while k < blocks {
+                let bv = v128_load(pb.add(k) as *const v128);
+                a0 = f32x4_add(a0, f32x4_mul(v128_load(p0.add(k) as *const v128), bv));
+                a1 = f32x4_add(a1, f32x4_mul(v128_load(p1.add(k) as *const v128), bv));
+                a2 = f32x4_add(a2, f32x4_mul(v128_load(p2.add(k) as *const v128), bv));
+                a3 = f32x4_add(a3, f32x4_mul(v128_load(p3.add(k) as *const v128), bv));
                 k += 4;
             }
-            d += f32x4_extract_lane::<0>(acc) + f32x4_extract_lane::<1>(acc)
-               + f32x4_extract_lane::<2>(acc) + f32x4_extract_lane::<3>(acc);
-            if d >= limit {
-                return d;
+            out[0] = hsum(a0); out[1] = hsum(a1); out[2] = hsum(a2); out[3] = hsum(a3);
+            while k < dim {
+                let bk = b[k];
+                out[0] += qs[0][k] * bk; out[1] += qs[1][k] * bk;
+                out[2] += qs[2][k] * bk; out[3] += qs[3][k] * bk;
+                k += 1;
             }
         }
-        while k < dim {
-            d += (a[k] - b[k]) * (a[k] - b[k]);
-            k += 1;
+        return;
+    }
+    // Remainder tile (1..BQ-1 queries): one branch-free SIMD dot each.
+    for (t, &q) in qs.iter().enumerate() {
+        let mut acc = f32x4_splat(0.0);
+        unsafe {
+            let (pq, pb) = (q.as_ptr(), b.as_ptr());
+            let mut k = 0usize;
+            while k < blocks {
+                acc = f32x4_add(
+                    acc,
+                    f32x4_mul(v128_load(pq.add(k) as *const v128), v128_load(pb.add(k) as *const v128)),
+                );
+                k += 4;
+            }
+            let mut s = hsum(acc);
+            while k < dim { s += q[k] * b[k]; k += 1; }
+            out[t] = s;
         }
     }
-    d
 }
 
-// Scalar fallback for non-SIMD targets (e.g. native `cargo test`/`cargo check`).
+// Scalar fallback (native `cargo test`/`cargo check`; no simd128 feature). Same
+// math and tiling as the SIMD path, so the search/ratio logic is exercised here.
 #[cfg(not(target_feature = "simd128"))]
-fn l2_sq_early(a: &[f32], b: &[f32], limit: f32, dim: usize) -> f32 {
-    let mut d = 0.0f32;
-    for k in 0..dim {
-        d += (a[k] - b[k]) * (a[k] - b[k]);
-        if d >= limit {
-            return d;
+fn dots_tile(qs: &[&[f32]], b: &[f32], dim: usize, out: &mut [f32]) {
+    for (t, &q) in qs.iter().enumerate() {
+        let mut s = 0.0f32;
+        for k in 0..dim {
+            s += q[k] * b[k];
         }
+        out[t] = s;
     }
-    d
 }
 
-// Returns (best_idx, best_sq, second_sq) for descriptor q against database db.
-fn nn2(q: &[f32], db: &[f32], n_db: usize, dim: usize) -> (usize, f32, f32) {
-    let mut best_i = 0;
-    let mut best = f32::MAX;
-    let mut second = f32::MAX;
-    for j in 0..n_db {
-        let d = l2_sq_early(q, &db[j * dim..(j + 1) * dim], second, dim);
-        if d < best {
-            second = best;
-            best = d;
-            best_i = j;
-        } else if d < second {
-            second = d;
+// Best/second nearest neighbour of every query against `db`, in s-space
+// (s = ‖b‖² − 2·a·b). Returns per-query (best_idx, best_s, second_s). Queries are
+// register-blocked in tiles of BQ; each tile streams the whole database once.
+fn nn2_all(
+    queries: &[f32],
+    n_q: usize,
+    db: &[f32],
+    n_db: usize,
+    dim: usize,
+    norms_db: &[f32],
+) -> (Vec<usize>, Vec<f32>, Vec<f32>) {
+    let mut best_j = vec![0usize; n_q];
+    let mut best_s = vec![f32::MAX; n_q];
+    let mut second_s = vec![f32::MAX; n_q];
+    let mut dots = [0.0f32; BQ];
+    let mut qrefs: Vec<&[f32]> = Vec::with_capacity(BQ);
+
+    let mut q0 = 0usize;
+    while q0 < n_q {
+        let bq = BQ.min(n_q - q0);
+        qrefs.clear();
+        for t in 0..bq {
+            qrefs.push(&queries[(q0 + t) * dim..(q0 + t + 1) * dim]);
+        }
+        for j in 0..n_db {
+            let brow = &db[j * dim..(j + 1) * dim];
+            dots_tile(&qrefs, brow, dim, &mut dots[..bq]);
+            let nb = norms_db[j];
+            for t in 0..bq {
+                let s = nb - 2.0 * dots[t];
+                let qi = q0 + t;
+                if s < best_s[qi] {
+                    second_s[qi] = best_s[qi];
+                    best_s[qi] = s;
+                    best_j[qi] = j;
+                } else if s < second_s[qi] {
+                    second_s[qi] = s;
+                }
+            }
+        }
+        q0 += bq;
+    }
+    (best_j, best_s, second_s)
+}
+
+// Ratio-test survivors A→B: (best_j, dist, ok) per query, with the query norm
+// folded back in to recover true squared distances for the comparison.
+fn ratio_pass(
+    queries: &[f32],
+    n_q: usize,
+    db: &[f32],
+    n_db: usize,
+    dim: usize,
+    norms_q: &[f32],
+    norms_db: &[f32],
+    ratio_sq: f32,
+) -> (Vec<usize>, Vec<f32>, Vec<bool>) {
+    let (best_j, best_s, second_s) = nn2_all(queries, n_q, db, n_db, dim, norms_db);
+    let mut ok = vec![false; n_q];
+    let mut dist = vec![0.0f32; n_q];
+    for i in 0..n_q {
+        let d1 = (norms_q[i] + best_s[i]).max(0.0);
+        let d2 = (norms_q[i] + second_s[i]).max(0.0);
+        if d1 < ratio_sq * d2 {
+            ok[i] = true;
+            dist[i] = d1.sqrt();
         }
     }
-    (best_i, best, second)
+    (best_j, dist, ok)
 }
 
 /// Match descriptors using Lowe's ratio test.
@@ -106,19 +202,12 @@ pub fn match_descriptors(
         return vec![];
     }
     let ratio_sq = ratio_threshold * ratio_threshold;
+    let norms_a = descriptor_norms(desc_a, n_a, dim);
+    let norms_b = descriptor_norms(desc_b, n_b, dim);
 
     // A → B
-    let mut fwd_j = vec![0usize; n_a];
-    let mut fwd_d = vec![0.0f32; n_a];
-    let mut fwd_ok = vec![false; n_a];
-    for i in 0..n_a {
-        let (j, d1, d2) = nn2(&desc_a[i * dim..(i + 1) * dim], desc_b, n_b, dim);
-        if d1 < ratio_sq * d2 {
-            fwd_j[i] = j;
-            fwd_d[i] = d1.sqrt();
-            fwd_ok[i] = true;
-        }
-    }
+    let (fwd_j, fwd_d, fwd_ok) =
+        ratio_pass(desc_a, n_a, desc_b, n_b, dim, &norms_a, &norms_b, ratio_sq);
 
     if !cross_check {
         let mut out = Vec::new();
@@ -132,16 +221,9 @@ pub fn match_descriptors(
         return out;
     }
 
-    // B → A
-    let mut bwd_i = vec![0usize; n_b];
-    let mut bwd_ok = vec![false; n_b];
-    for j in 0..n_b {
-        let (i, d1, d2) = nn2(&desc_b[j * dim..(j + 1) * dim], desc_a, n_a, dim);
-        if d1 < ratio_sq * d2 {
-            bwd_i[j] = i;
-            bwd_ok[j] = true;
-        }
-    }
+    // B → A (only the argmin is needed for the mutual-consistency filter)
+    let (bwd_i, _bwd_d, bwd_ok) =
+        ratio_pass(desc_b, n_b, desc_a, n_a, dim, &norms_b, &norms_a, ratio_sq);
 
     // Mutual NN filter
     let mut out = Vec::new();
@@ -826,6 +908,103 @@ mod tests {
         // Same inlier set as a short run — adaptive stop is behaviour-preserving.
         let (_, mask_short, _) = ransac_fundamental(&a, &b, 4.0, iters.max(50)).unwrap();
         assert_eq!(mask_cap, mask_short, "adaptive stop changed the inlier set");
+    }
+
+    // ── Descriptor matching (GEMM kernel vs naive reference) ─────────────────
+
+    fn random_descriptors(rng: &mut Lcg, n: usize, dim: usize) -> Vec<f32> {
+        (0..n * dim).map(|_| rng.range(-1.0, 1.0) as f32).collect()
+    }
+
+    // Straightforward diff-square ratio-test matcher, the ground truth the GEMM
+    // kernel must reproduce. Returns the sorted set of (i, j) matches.
+    fn naive_match(
+        a: &[f32], b: &[f32], dim: usize, ratio: f32, cross: bool,
+    ) -> Vec<(usize, usize)> {
+        let n_a = a.len() / dim;
+        let n_b = b.len() / dim;
+        let d2 = |x: &[f32], y: &[f32]| -> f32 {
+            (0..dim).map(|k| (x[k] - y[k]) * (x[k] - y[k])).sum()
+        };
+        let nn2 = |q: &[f32], db: &[f32], n_db: usize| -> (usize, f32, f32) {
+            let (mut bi, mut best, mut second) = (0usize, f32::MAX, f32::MAX);
+            for j in 0..n_db {
+                let d = d2(q, &db[j * dim..(j + 1) * dim]);
+                if d < best { second = best; best = d; bi = j; }
+                else if d < second { second = d; }
+            }
+            (bi, best, second)
+        };
+        let ratio_sq = ratio * ratio;
+        let mut fwd = vec![None; n_a];
+        for i in 0..n_a {
+            let (j, d1, dd2) = nn2(&a[i * dim..(i + 1) * dim], b, n_b);
+            if d1 < ratio_sq * dd2 { fwd[i] = Some(j); }
+        }
+        let mut out = Vec::new();
+        if !cross {
+            for i in 0..n_a {
+                if let Some(j) = fwd[i] { out.push((i, j)); }
+            }
+        } else {
+            let mut bwd = vec![None; n_b];
+            for j in 0..n_b {
+                let (i, d1, dd2) = nn2(&b[j * dim..(j + 1) * dim], a, n_a);
+                if d1 < ratio_sq * dd2 { bwd[j] = Some(i); }
+            }
+            for i in 0..n_a {
+                if let Some(j) = fwd[i] {
+                    if bwd[j] == Some(i) { out.push((i, j)); }
+                }
+            }
+        }
+        out.sort_unstable();
+        out
+    }
+
+    fn kernel_pairs(out: &[f32]) -> Vec<(usize, usize)> {
+        let mut v: Vec<(usize, usize)> = out
+            .chunks_exact(3)
+            .map(|c| (c[0] as usize, c[1] as usize))
+            .collect();
+        v.sort_unstable();
+        v
+    }
+
+    // On continuous random descriptors (ties are measure-zero), the GEMM kernel
+    // must produce exactly the same match set as the naive diff-square matcher —
+    // across cross-check on/off and a `dim` with a non-multiple-of-4 tail.
+    #[test]
+    fn match_descriptors_agrees_with_naive() {
+        let mut rng = Lcg(0xC0FFEE);
+        for &dim in &[128usize, 130, 8] {
+            let a = random_descriptors(&mut rng, 37, dim);
+            let b = random_descriptors(&mut rng, 41, dim);
+            for &cross in &[false, true] {
+                let got = kernel_pairs(&match_descriptors(&a, &b, dim, 0.8, cross));
+                let want = naive_match(&a, &b, dim, 0.8, cross);
+                assert_eq!(got, want, "dim={dim} cross={cross}");
+            }
+        }
+    }
+
+    // Reported distances are the true L2 (√ of squared) to each matched row.
+    #[test]
+    fn match_descriptors_reports_l2_distance() {
+        let dim = 16;
+        // Two A rows; B row 0 equals A row 0 (dist 0), B row 1 offset from A row 1.
+        let a: Vec<f32> = (0..2 * dim).map(|k| (k % dim) as f32).collect();
+        let mut b = a.clone();
+        for k in 0..dim { b[dim + k] += 3.0; } // B row 1 = A row 1 + 3 per dim
+        let out = match_descriptors(&a, &b, dim, 0.99, false);
+        let pairs = kernel_pairs(&out);
+        assert!(pairs.contains(&(0, 0)), "identical row should match itself");
+        // Find the (0,0) triple and confirm distance ≈ 0.
+        for c in out.chunks_exact(3) {
+            if c[0] as usize == 0 && c[1] as usize == 0 {
+                assert!(c[2].abs() < 1e-3, "self-match distance should be ~0, got {}", c[2]);
+            }
+        }
     }
 
     // h_skip_below suppresses the homography count once F inliers fall below the
