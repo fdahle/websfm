@@ -22,6 +22,7 @@ import {
 } from './reconstruction.js'
 import { projectPoint, medianTriangulationAngle, triangulationAngle, cameraCenter } from './geometry.js'
 import { undistortPixel, distortionOf } from './distortion.js'
+import { fitFundamental, sampsonRmsPx } from './fundamental.js'
 import { fitFiducialAffine, canonicalFrame, scanToCanonical } from './fiducials.js'
 import { rotationCycleFilter } from './cycleFilter.js'
 import { toNorm, camToP34flat, reprojErr, retriangulatePairs, mergeSplitTracks } from './tracks.js'
@@ -271,6 +272,7 @@ export async function reconstruct(input, hooks = {}) {
     // ── Build K map ────────────────────────────────────────────────────────
     const Kmap = new Map() // uuid → K
     let defaultKCount = 0
+    const ppWarned = new Set() // sensorId (or uuid) already warned about an off-centre principal point
     for (const img of imgs) {
       const K = resolveK(img.meta, img.sensor)
       Kmap.set(img.uuid, K)
@@ -280,6 +282,24 @@ export async function reconstruct(input, hooks = {}) {
       log(`Reconstruction: K[${img.name}] fx=${K.fx.toFixed(1)} fy=${K.fy.toFixed(1)} `
         + `cx=${K.cx.toFixed(1)} cy=${K.cy.toFixed(1)} — ${K.source}${implied}`,
         'debug', 'Reconstruction')
+      // A real principal point sits within a few % of the image centre. A cx/cy
+      // far outside that is virtually always a convention mix-up — Metashape and
+      // friends export cx/cy as OFFSETS from the centre, while websfm's sensor
+      // table takes absolute pixels. Warn once per sensor, loudly: a corner
+      // principal point silently destroys every downstream geometry gate.
+      const iw = img.sensor?.width || img.meta?.width
+      const ih = img.sensor?.height || img.meta?.height
+      if (iw && ih && (Math.abs(K.cx - iw / 2) > 0.05 * iw || Math.abs(K.cy - ih / 2) > 0.05 * ih)) {
+        const key = img.sensorId ?? img.uuid
+        if (!ppWarned.has(key)) {
+          ppWarned.add(key)
+          log(`Reconstruction: principal point cx=${K.cx.toFixed(1)} cy=${K.cy.toFixed(1)} is far from `
+            + `the image centre (${(iw / 2).toFixed(0)}, ${(ih / 2).toFixed(0)}) — the sensor table takes `
+            + `ABSOLUTE pixels. If this calibration came from Metashape (which reports centre offsets), `
+            + `enter ${(iw / 2).toFixed(1)} + cx and ${(ih / 2).toFixed(1)} + cy instead.`,
+            'warn', 'Reconstruction')
+        }
+      }
       // The pixel-pitch path can silently produce an off-standard film width (a
       // ~9% focal error on the CA…V set). Flag it so the user checks pitch/format.
       if (K.impliedFilmWidthMm != null && K.filmWidthOk === false) {
@@ -291,12 +311,11 @@ export async function reconstruct(input, hooks = {}) {
     // ── Undistort keypoints at ingest ────────────────────────────────────────
     // Remove Brown–Conrady lens distortion once, up front, so every downstream
     // step (init, PnP, triangulation, BA) is pure pinhole. Keypoint indices are
-    // preserved (matches reference them), only positions move. The pairwise F used
-    // for the init pair is still the distorted-space (and, for film, scan-space)
-    // fit from matching — a slight approximation the global BA corrects;
-    // everything else is exact pinhole.
+    // preserved (matches reference them), only positions move.
     let undistortedImgs = 0
     let anyCalibratedDistortion = false
+    const undistortedUuids = new Set()
+    let shiftSum = 0, shiftMax = 0, shiftN = 0
     for (const img of imgs) {
       const dist = distortionOf(img.sensor)
       if (!dist || !img.keypoints?.length) continue
@@ -304,13 +323,54 @@ export async function reconstruct(input, hooks = {}) {
       const K = Kmap.get(img.uuid)
       img.keypoints = img.keypoints.map((kp) => {
         const u = undistortPixel(kp.x, kp.y, K, dist)
+        const d = Math.hypot(u.x - kp.x, u.y - kp.y)
+        shiftSum += d; if (d > shiftMax) shiftMax = d; shiftN++
         return { ...kp, x: u.x, y: u.y }
       })
       undistortedImgs++
+      undistortedUuids.add(img.uuid)
     }
     if (undistortedImgs > 0) {
       log(`Reconstruction: undistorted keypoints on ${undistortedImgs}/${imgs.length} image(s) `
-        + `(lens distortion removed at ingest — pipeline stays pinhole)`, 'info', 'Reconstruction')
+        + `(lens distortion removed at ingest — pipeline stays pinhole; `
+        + `mean shift ${(shiftSum / Math.max(1, shiftN)).toFixed(2)}px, max ${shiftMax.toFixed(2)}px)`,
+        'info', 'Reconstruction')
+    }
+
+    // ── Re-fit pairwise F on the moved keypoints ─────────────────────────────
+    // Each pair's F was fitted during matching, on RAW (distorted / scan-space)
+    // keypoints. Everything that reads e.F — the rotation-cycle filter's relative
+    // rotations, the init pair's essential decomposition — would otherwise keep
+    // operating on the stale geometry, which for a wide-angle lens (tens of px of
+    // displacement) systematically bends every relative rotation. The stored
+    // matches are already RANSAC inliers, so a trimmed least-squares 8-point on
+    // the moved coordinates is enough — no re-RANSAC. Applies to both keypoint
+    // moves above: Brown undistortion and the film scan→canonical affine.
+    const movedUuids = new Set([...undistortedUuids, ...fiducialTransforms.keys()])
+    if (movedUuids.size > 0) {
+      let refit = 0, skipped = 0
+      const before = [], after = []
+      for (const e of donePairs) {
+        if (!e.F) continue
+        if (!movedUuids.has(e.idA) && !movedUuids.has(e.idB)) continue
+        const iA = imageByUuid(e.idA), iB = imageByUuid(e.idB)
+        if (!iA || !iB || (e.matches?.length ?? 0) < 8) { skipped++; continue }
+        const ptsA = e.matches.map(([ia]) => iA.keypoints[ia])
+        const ptsB = e.matches.map(([, ib]) => iB.keypoints[ib])
+        const fit = fitFundamental(ptsA, ptsB)
+        if (!fit) { skipped++; continue }
+        before.push(sampsonRmsPx(e.F, ptsA, ptsB))
+        e.F = fit.F
+        after.push(fit.rmsPx)
+        refit++
+      }
+      if (refit > 0) {
+        const med = (a) => [...a].sort((x, y) => x - y)[a.length >> 1]
+        log(`Reconstruction: re-fitted F on undistorted keypoints for ${refit} pair(s)`
+          + `${skipped ? ` (${skipped} skipped)` : ''} — median epipolar RMS `
+          + `${med(before).toFixed(2)}px → ${med(after).toFixed(2)}px (stale distorted-space fit replaced)`,
+          'info', 'Reconstruction')
+      }
     }
 
     // ── Resolve 'auto' self-calibration ──────────────────────────────────────
@@ -366,7 +426,14 @@ export async function reconstruct(input, hooks = {}) {
           minSupport: settings.cycleMinSupport,
         },
       )
-      if (drop.length) {
+      if (summary.aborted) {
+        log(`Reconstruction: rotation-cycle filter SKIPPED — median triangle cycle error `
+          + `${summary.medianTriErrDeg.toFixed(1)}° (over ${summary.triangles} triangles) is far beyond the `
+          + `${summary.abortErrDeg.toFixed(0)}° sanity ceiling, so the pairwise rotations are globally `
+          + `untrustworthy and dropping edges would execute true pairs. Common causes: wrong or `
+          + `uncalibrated intrinsics (focal / lens distortion) or many low-parallax rotation-only pairs. `
+          + `Keeping all ${donePairs.length} pairs.`, 'warn', 'Reconstruction')
+      } else if (drop.length) {
         const nm = (u) => imageByUuid(u)?.name ?? u
         const pk = (a, b) => (a < b ? `${a}--${b}` : `${b}--${a}`)
         const rm = new Set(drop.map((d) => pk(d.idA, d.idB)))

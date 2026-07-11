@@ -93,7 +93,9 @@
       "Bash(timeout 300 npx vite build)",
       "Bash(awk '/## Done log|Done log|^### Done|^## .*[Dd]one/{print NR\": \"$0}' HANDOVER.md)",
       "Bash(useContextMenu)",
-      "Bash(grep -n \"GCPs are removed only\\\\|jump-to-image\\\\|sidebar's GCP detail\\\\|removes it \\(`useContextMenu`\\)\" CLAUDE.md)"
+      "Bash(grep -n \"GCPs are removed only\\\\|jump-to-image\\\\|sidebar's GCP detail\\\\|removes it \\(`useContextMenu`\\)\" CLAUDE.md)",
+      "PowerShell(npm test -- --run 2>&1)",
+      "PowerShell(npm run typecheck 2>&1)"
     ],
     "additionalDirectories": [
       "/Users/fhdahle/Documents/GitHub/websfm/src/wasm/*",

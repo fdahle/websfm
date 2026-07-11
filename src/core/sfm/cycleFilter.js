@@ -32,7 +32,9 @@ import { matMul3, matT3, rotAngleDeg } from './rotations.js'
 // reasoning so it can be unit-tested without WASM; the caller (reconstruct) supplies
 // R via recoverPose. Returns { drop, summary } where each drop entry is
 // { idA, idB, tri, good, ratio, inliers } (idA<idB canonical order) and summary
-// carries the effective threshold + counts for a single log line.
+// carries the effective threshold + counts for a single log line. When the median
+// triangle error exceeds `abortErrDeg` (default 2 × maxErrorDeg) the filter drops
+// NOTHING and sets `summary.aborted` — see the sanity-abort comment below.
 export function rotationCycleFilter(edges, opts = {}) {
   const baseErrDeg = opts.cycleErrorDeg ?? 5
   // Ceiling on the adaptive threshold: a genuinely noisy graph should loosen the
@@ -111,6 +113,26 @@ export function rotationCycleFilter(edges, opts = {}) {
   errs.sort((x, y) => x - y)
   const medErr = errs.length ? errs[Math.floor(errs.length / 2)] : 0
   const effErrDeg = Math.min(maxErrDeg, Math.max(baseErrDeg, adaptiveMult * medErr))
+
+  // Sanity abort: the filter's premise is that MOST edges are true, so a false
+  // edge stands out by breaking its cycles. When the MEDIAN triangle error is
+  // far beyond the consistency ceiling, the pairwise rotations are globally
+  // untrustworthy (wrong/uncalibrated intrinsics, uncorrected distortion, or
+  // rotation-degenerate low-parallax pairs) — every edge fails its triangles and
+  // greedy dropping would mass-execute true pairs, gutting the match graph before
+  // SfM even starts. Dropping nothing is strictly safer: downstream PnP gates
+  // catch individual false pairs, whereas a destroyed graph cannot recover.
+  const abortErrDeg = opts.abortErrDeg ?? 2 * maxErrDeg
+  if (errs.length && medErr > abortErrDeg) {
+    return {
+      drop: [],
+      summary: {
+        effErrDeg, baseErrDeg, medianTriErrDeg: medErr,
+        triangles: errs.length, dropped: 0, strongInlierFloor,
+        aborted: true, abortErrDeg,
+      },
+    }
+  }
 
   const drop = []
   // Reuse the initial full-graph pass for the first iteration when the adaptive
