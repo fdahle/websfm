@@ -279,6 +279,19 @@ report; the sidebar's GCP detail lists per-image observations (jump-to-image +
 remove), flags GCPs with <2 marks (unusable), and right-clicking a GCP row
 removes it (`useContextMenu`). GCPs are removed only from the sidebar
 right-click or the table's × — there is no add/remove button in the sidebar.
+An observation's `imageId` is the authoritative "does this image exist" flag:
+resolved by name at import/marking, then **re-resolved on every image-list
+change** (`useGcpsStore.reconcileObservationImageIds`, a `watch` on the image
+ids+names) so an observation for a not-yet-loaded image backfills its id (and
+its jump-to-image link activates) the moment that image is added — and clears it
+if the image is removed. The sidebar renders an observation as a clickable link
+only when `imageId != null`, else a dimmed non-clickable label.
+**Double-clicking a GCP** opens a multi-image inspector tab
+(`components/viewers/ViewerGcp.vue`, `type:'gcp'` in `useTabs.openGcpTab`): one
+panel per registered observation, each cropped + zoomed (shared zoom) to centre
+the marked pixel under a crosshair, with the observation's reprojection error and
+a jump-to-image link. Read-only — marking still happens in the full image view.
+Removing a GCP closes its inspector tab (`removeGcpAndCloseTab` in App.vue).
 
 `core/sfm/gcpTriangulation.js` 2-view-DLT-triangulates a GCP's registered-image
 observations into the current SfM frame; `core/products/georef.js`'s Horn

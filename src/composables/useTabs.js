@@ -66,8 +66,7 @@ export function useTabs(imageById, showMap) {
         showDepth: overlayPrefs.value.showDepth,
         showGcps: overlayPrefs.value.showGcps,
         showFiducials: overlayPrefs.value.showFiducials,
-        maskMode: 'none',
-        brushRadius: 20,
+        maskEdit: false,
       })
     }
     activeTabId.value = tabId
@@ -83,6 +82,22 @@ export function useTabs(imageById, showMap) {
         pairId,
         imageIdA: imgIdA,
         imageIdB: imgIdB,
+        closable: true,
+      })
+    }
+    activeTabId.value = tabId
+  }
+
+  // Open a multi-image GCP inspector (one panel per observation, zoomed to the
+  // marked pixel). One tab per GCP; re-opening focuses the existing tab.
+  function openGcpTab(gcpId, gcpName) {
+    const tabId = `gcp:${gcpId}`
+    if (!tabs.value.some((t) => t.id === tabId)) {
+      tabs.value.push({
+        id: tabId,
+        type: 'gcp',
+        title: gcpName ? `GCP ${gcpName}` : 'GCP',
+        gcpId,
         closable: true,
       })
     }
@@ -196,6 +211,7 @@ export function useTabs(imageById, showMap) {
     activateTab,
     openImageTab,
     openMatchTab,
+    openGcpTab,
     openMetadataTab,
     openProductTab,
     closeTab,

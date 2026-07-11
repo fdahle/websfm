@@ -68,6 +68,47 @@ fiducials; self-calibration (A2) + fiducials (F4) are the code-side support.
 
 ## Done log (most recent first)
 
+- **2026-07-11 · GCP sidebar link correctness + multi-image inspector view** —
+  observation jump-to-image links now render only for images that actually exist:
+  `useGcpsStore` gained `reconcileObservationImageIds` + a `watch` on the image
+  list that re-resolves every observation's `imageId` by name on any add/remove/
+  rename (backfills when a referenced image is added later, clears it on removal),
+  and `GcpsSection.vue` renders a dimmed non-clickable label when `imageId` is
+  null. **Double-clicking a GCP** now opens a read-only multi-image inspector tab
+  (`components/viewers/ViewerGcp.vue`, `type:'gcp'` via `useTabs.openGcpTab`): a
+  grid of panels, one per registered observation, each cropped + zoomed (shared
+  zoom control) to centre the marked pixel under a crosshair, with per-observation
+  reproj error + jump-to-image link. Wired sidebar `open-gcp` → App `openGcpView`;
+  `removeGcpAndCloseTab` closes the tab when its GCP is deleted. (The panel image
+  transform pins the corner to the viewport centre and offsets by `−px·s,−py·s` —
+  a naïve `translate(calc(50% − …))` resolves `50%` against the image's own huge
+  scaled size and flings the raster off-screen.)
+
+- **2026-07-11 · M1+M2 — mask editing overhaul (floating toolbar + tools)** — the
+  ribbon's Picture tab dropped its Mask (Draw/Erase/Import/Clear) + Brush (S/M/L)
+  groups for a single **"Edit Mask" toggle** (`img-mask-edit`, per-tab `maskEdit`
+  flag in `useTabs`); the tools moved to a floating draggable panel over the image
+  view (`components/viewers/MaskToolbar.vue`). Tool state (brush/eraser/rectangle,
+  brush-size + overlay-opacity sliders) lives locally in `ViewerImage.vue`, which
+  gained: a **rectangle** drag-fill tool (dashed preview, Alt = erase), **invert**
+  (`invertMaskPixels` pure op in `core/mask.js`, unit-tested — returns the excluded
+  count so an all-clear inversion commits `null`), an **undo/redo** stack of the
+  persisted mask dataUrls (cap 10, snapshot before each committed stroke/rect/
+  invert/import/clear), and keyboard shortcuts (B/E/R/I, `[`/`]` size, Ctrl+Z /
+  Ctrl+Shift+Z / Ctrl+Y, Esc exits via App's global handler — `closeTopModal` now
+  returns whether it consumed the Escape). Clear became undoable, so its confirm
+  dialog + `pendingMaskClear` plumbing were removed (`useModalEscape` signature
+  slimmed). **Empty-mask invariant** (never persist an all-transparent PNG / show
+  Mask ✓ for a mask that excludes nothing): a brush/erase stroke fully outside the
+  image rectangle is a no-op (`circleIntersectsImage` gate + a `strokeHit`
+  accumulator over the drag — the mask canvas is image-sized, so an outside stroke
+  paints zero pixels), and erase-type commits (erase stroke / erase-rectangle /
+  import) pass `checkEmpty` to `exportMask`, which scans via the new pure
+  `anyExcluded` op (`core/mask.js`, unit-tested) and commits `null` + `hasMask =
+  false` when nothing remains masked (draws skip the scan — trivially non-empty).
+  `npm test` (428) + typecheck + build green; **browser-manual run owed** (toolbar
+  drag, tools, undo across tab switches, Esc ordering vs modals; confirm
+  draw-outside and erase-to-empty both leave no mask).
 - **2026-07-11 · P8 — GEMM-form NN matcher kernel (`crates/matching`)** — replaced the
   per-pair early-exit L2 scan (`l2_sq_early`/`nn2`) with the norm-identity form
   `‖a−b‖² = ‖a‖² + ‖b‖² − 2·a·b`: row norms precomputed once (`descriptor_norms`), and

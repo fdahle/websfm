@@ -90,7 +90,10 @@
       "Bash(grep -n \"cameras:\\\\|K:\\\\|kMap\\\\|Kmap\\\\|cam.K\\\\|, K }\\\\|return done\\\\|cameras.set\\\\|{ R, t\" src/core/sfm/sfm.js)",
       "Bash(SFM_DEBUG=1 npx vitest run src/core/sfm/sfm.test.js -t \"synthetic 3-view\")",
       "Bash(SFM_DEBUG=1 npx vitest run src/core/sfm/sfm.test.js)",
-      "Bash(timeout 300 npx vite build)"
+      "Bash(timeout 300 npx vite build)",
+      "Bash(awk '/## Done log|Done log|^### Done|^## .*[Dd]one/{print NR\": \"$0}' HANDOVER.md)",
+      "Bash(useContextMenu)",
+      "Bash(grep -n \"GCPs are removed only\\\\|jump-to-image\\\\|sidebar's GCP detail\\\\|removes it \\(`useContextMenu`\\)\" CLAUDE.md)"
     ],
     "additionalDirectories": [
       "/Users/fhdahle/Documents/GitHub/websfm/src/wasm/*",

@@ -220,6 +220,20 @@ grouped by shared image. Skip pairs already `done` under identical settings
 unless `overwrite` (resume interrupted runs). Expect 1.3–2× and far less GC;
 kills the ≈6 GB clone traffic.
 
+### M — Mask editing overhaul (floating toolbar + tools; SAM2 is F12)
+**M1+M2 shipped 2026-07-11** (see HANDOVER): "Edit Mask" ribbon toggle +
+floating `MaskToolbar.vue`, rectangle/invert/undo-redo/sliders/shortcuts.
+Remaining:
+- **Browser-manual run (owed verification).** Toolbar drag + all tools on a
+  real image (brush/eraser/rect incl. Alt-erase, invert, import, clear); undo/
+  redo across a tab switch (v-show-kept state); Esc ordering (modal open →
+  closes modal, else exits edit mode); shortcut gating while typing in inputs;
+  Mask Manager "Edit" still lands in edit mode; keypoint re-detect after a mask
+  edit actually drops masked keypoints (regression).
+- **M3 (optional polish, gate on use):** polygon/lasso tool; "apply mask to all
+  images of this sensor" (`maskFromSource` already rescales); masked-% readout;
+  mask badge in the sidebar ImagesSection.
+
 ### G2 — Glossary entries for the newly load-bearing terms (folded from PLAN P6.3)
 Add `src/glossary/algorithms/` entries for **"matching density"** (Fast/Full — the
 LightGlue tiled vs capped path), **"self-calibration"** (`refineIntrinsics: 'auto'`,
@@ -346,6 +360,29 @@ For close-range/object work without GCPs: user marks two image points across
 ≥2 views (reuse the GCP marking UI), enters a known distance, app scales the
 model (and reports residual). Metashape staple; small once F2's
 triangulate-marked-points helper exists.
+
+### F12 — SAM2 smart mask selection **[new 2026-07-11; builds on Next ▸ M]**
+Client-side Segment-Anything-2 for "intelligent" mask selection: click an
+object → segmented region → add/subtract from the mask. SAM2 splits into an
+**image encoder** (hiera-tiny ONNX, ~35–40 MB, 1024×1024 input, run once per
+image → ~4 MB embedding, cache per uuid) and a **prompt decoder** (~5–16 MB,
+~10–50 ms per click: embedding + positive/negative points → candidate mask).
+- `core/segment/sam2.js` (pure, worker-side) via the existing
+  `core/features/ort.js` loader (WebGPU-preferred, wasm fallback). **ORT
+  sessions are not reentrant** — pin + promise-chain mutex, like LightGlue.
+- `workers/ops/segment.js`: `segmentEncode(uuid)` (rasterize `computeUrl ??
+  url`, resize, cache embedding) + `segmentDecode(uuid, points)` (transfer mask
+  buffer at image resolution).
+- UI: "Smart Select" tool in the M1 toolbar — activating encodes (progress
+  shown); left-click positive / Alt-click negative point, live region preview;
+  Enter commits add (modifier = subtract) onto the mask canvas; M2's undo
+  covers mistakes.
+- Model hosting: lazy-fetch on first use + OPFS cache (encoder is too big to
+  bundle; reuse the derived-blob pattern), or SP4's custom-model upload path.
+- **De-risk first**: verify a specific image-mode SAM2 ONNX export actually
+  runs under onnxruntime-web 1.27 before building UI (fallback: MobileSAM /
+  SAM1 exports, battle-tested in browsers). Later: "segment everything" grid
+  prompts; batch encode as an Auto-Mask strategy.
 
 ### F6 — Fisheye distortion model
 D3's selector covers Pinhole/Radial/Brown — all undistort-to-pinhole-able.

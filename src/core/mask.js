@@ -32,6 +32,32 @@ export function normalizeMaskPixels(data) {
   return data
 }
 
+// Does an RGBA buffer contain any excluded (opaque, alpha > 127) pixel? Used to
+// detect when an erase has removed the last of a mask so it can be dropped
+// rather than persisted as an all-transparent PNG. Mirrors the alpha test in
+// maskLookupFromRgba.
+export function anyExcluded(data) {
+  for (let i = 3; i < data.length; i += 4) if (data[i] > 127) return true
+  return false
+}
+
+// Invert a normalized mask in place: excluded pixels (opaque, alpha > 127)
+// become kept (transparent), kept pixels become excluded (opaque red). Returns
+// the number of excluded pixels AFTER inversion so callers can tell an
+// all-clear result (0) from a mask worth keeping.
+export function invertMaskPixels(data) {
+  let excluded = 0
+  for (let i = 0; i < data.length; i += 4) {
+    if (data[i + 3] > 127) {
+      data[i + 3] = 0
+    } else {
+      data[i] = 255; data[i + 1] = 0; data[i + 2] = 0; data[i + 3] = 255
+      excluded++
+    }
+  }
+  return excluded
+}
+
 // Paint the outer border of an RGBA buffer to the red-exclude convention. `sides`
 // gives the per-edge margin in pixels (top/right/bottom/left, default 0). Margins
 // are clamped to half the corresponding dimension, so a side ≥ w/2 (or h/2) simply

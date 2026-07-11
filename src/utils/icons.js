@@ -143,9 +143,17 @@ export const icons = {
     <path d="M8 17l-3-3a1.5 1.5 0 0 1 0-2L13 4a1.5 1.5 0 0 1 2 0l4 4a1.5 1.5 0 0 1 0 2l-7 7z" />
     <path d="M8 17h11" />`,
   x: `<path d="M6 6l12 12M18 6L6 18" />`,
-  'brush-s': `<circle cx="12" cy="12" r="2" fill="currentColor" stroke="none" />`,
-  'brush-m': `<circle cx="12" cy="12" r="4" />`,
-  'brush-l': `<circle cx="12" cy="12" r="7" />`,
+  brush: `<circle cx="12" cy="12" r="5" />`,
+  rect: `<rect x="5" y="7" width="14" height="10" rx="1" />`,
+  invert: `
+    <circle cx="12" cy="12" r="8.5" />
+    <path d="M12 3.5a8.5 8.5 0 0 1 0 17z" fill="currentColor" stroke="none" />`,
+  undo: `
+    <path d="M8 6L4 10l4 4" />
+    <path d="M4 10h10a5 5 0 0 1 0 10h-3" />`,
+  redo: `
+    <path d="M16 6l4 4-4 4" />
+    <path d="M20 10H10a5 5 0 0 0 0 10h3" />`,
   remove: `
     <circle cx="12" cy="12" r="8.5" />
     <path d="M9 9l6 6M15 9l-6 6" />`,
