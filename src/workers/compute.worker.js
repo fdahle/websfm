@@ -17,7 +17,10 @@ import { makeMatchOps } from './ops/match.js'
 import { makeSfmOps } from './ops/sfm.js'
 import { makeDenseOps } from './ops/dense.js'
 import { makeProductsOps } from './ops/products.js'
+import { makeMeshOps } from './ops/mesh.js'
 import { makeTiffOps } from './ops/tiff.js'
+import { makeSegmentOps } from './ops/segment.js'
+import { makeIoOps } from './ops/io.js'
 
 // Decode an image URL (blob: URLs work in a worker) and draw it into an
 // OffscreenCanvas, downscaled so the longest side is ≤ maxDim. Returns RGBA
@@ -46,7 +49,10 @@ const ops = {
   ...makeSfmOps(),
   ...makeDenseOps({ rasterize }),
   ...makeProductsOps(),
+  ...makeMeshOps(),
   ...makeTiffOps(),
+  ...makeSegmentOps({ rasterize }),
+  ...makeIoOps(),
 }
 
 self.onmessage = async (e) => {

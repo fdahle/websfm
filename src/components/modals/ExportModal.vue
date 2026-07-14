@@ -6,7 +6,11 @@ import { EXPORT_DEFAULTS } from '../../core/defaults.user.js'
 // few settings and emits them on run; App.vue maps the result to the right
 // exporter. Options marked `disabled` are placeholders for formats/settings not
 // wired up yet (kept visible so the surface is discoverable).
-const props = defineProps({ kind: { type: String, required: true } })
+const props = defineProps({
+  kind: { type: String, required: true },
+  // A georef fit exists → the cloud export can transform into the project CRS.
+  hasGeoref: { type: Boolean, default: false },
+})
 const emit = defineEmits(['close', 'run'])
 
 const CONFIG = {
@@ -15,20 +19,32 @@ const CONFIG = {
     formats: [
       { value: 'ply-binary', label: 'PLY — binary (compact)' },
       { value: 'ply-ascii',  label: 'PLY — ASCII (text)' },
-      { value: 'las',        label: 'LAS / LAZ', disabled: true },
+      { value: 'las',        label: 'LAS 1.2 (surveying standard)' },
+      { value: 'xyz',        label: 'XYZ — plain text (x y z r g b)' },
+    ],
+  },
+  mesh: {
+    title: 'Export Mesh',
+    formats: [
+      { value: 'ply-binary', label: 'PLY — binary (faces)' },
+      { value: 'ply-ascii',  label: 'PLY — ASCII (text)' },
+      { value: 'glb',        label: 'glTF binary (.glb)' },
+      { value: 'obj',        label: 'Wavefront OBJ (.obj)' },
+      { value: 'stl',        label: 'STL — binary (no colour)' },
     ],
   },
   model: {
     title: 'Export Model',
     formats: [
       { value: 'json', label: 'JSON — cameras + tracks' },
+      { value: 'transforms', label: 'transforms.json — NeRF / 3DGS' },
     ],
   },
   colmap: {
     title: 'Export COLMAP Model',
     formats: [
       { value: 'txt', label: 'Text (.txt) — zipped' },
-      { value: 'bin', label: 'Binary (.bin)', disabled: true },
+      { value: 'bin', label: 'Binary (.bin) — zipped' },
     ],
   },
   dem: {
@@ -36,7 +52,7 @@ const CONFIG = {
     formats: [
       { value: 'geotiff', label: 'GeoTIFF (.tif) — georeferenced' },
       { value: 'asc',     label: 'ESRI ASCII grid (.asc)' },
-      { value: 'png',     label: 'Hillshade PNG', disabled: true },
+      { value: 'png',     label: 'Hillshade PNG + world file' },
     ],
   },
   ortho: {
@@ -44,7 +60,7 @@ const CONFIG = {
     formats: [
       { value: 'geotiff', label: 'GeoTIFF (.tif) — georeferenced' },
       { value: 'png',     label: 'PNG + world file (.wld)' },
-      { value: 'jpeg',    label: 'JPEG + world file', disabled: true },
+      { value: 'jpeg',    label: 'JPEG + world file' },
     ],
   },
 }
@@ -90,18 +106,35 @@ function run() {
             <input type="checkbox" v-model="settings.includeColor" />
             <span>Include vertex colours</span>
           </label>
-          <label class="check-row disabled">
-            <input type="checkbox" disabled />
-            <span>Downsample / voxel filter <em>(coming soon)</em></span>
+          <label v-if="hasGeoref" class="check-row">
+            <input type="checkbox" v-model="settings.applyGeoref" />
+            <span>Georeference (transform into the project CRS)</span>
+          </label>
+          <div class="field">
+            <label class="field-label" for="dscell">Voxel downsample cell</label>
+            <input id="dscell" v-model.number="settings.downsampleCell" type="number" min="0" step="any" class="field-input short" />
+            <span class="field-hint">World units{{ hasGeoref ? ' (project CRS when georeferenced)' : '' }}; 0 = keep every point.</span>
+          </div>
+        </template>
+
+        <!-- Mesh -->
+        <template v-else-if="kind === 'mesh'">
+          <label class="check-row" :class="{ disabled: settings.format === 'stl' }">
+            <input type="checkbox" v-model="settings.includeColor" :disabled="settings.format === 'stl'" />
+            <span>Include vertex colours{{ settings.format === 'stl' ? ' (STL has no colour)' : '' }}</span>
           </label>
         </template>
 
         <!-- Model JSON -->
         <template v-else-if="kind === 'model'">
-          <label class="check-row">
+          <label v-if="settings.format === 'json'" class="check-row">
             <input type="checkbox" v-model="settings.includeTracks" />
             <span>Include point tracks (image observations)</span>
           </label>
+          <p v-else class="field-hint">
+            Camera-to-world poses (OpenGL convention) + intrinsics for nerfstudio,
+            instant-ngp and 3D Gaussian Splatting. Local SfM frame; pinhole.
+          </p>
         </template>
 
         <!-- COLMAP model -->
@@ -120,21 +153,27 @@ function run() {
             <input id="nodata" v-model.number="settings.nodata" type="number" step="any" class="field-input short" />
             <span class="field-hint">Written for empty cells (holes with no measurement).</span>
           </div>
-          <div class="field" :class="{ disabled: !isTiff }">
-            <label class="field-label" for="comp">Compression <em>(coming soon)</em></label>
-            <select id="comp" class="field-input" disabled>
-              <option>None (uncompressed)</option>
+          <div v-if="isTiff" class="field">
+            <label class="field-label" for="comp">Compression</label>
+            <select id="comp" v-model="settings.compression" class="field-input">
+              <option value="none">None (uncompressed)</option>
+              <option value="deflate">DEFLATE (lossless)</option>
             </select>
           </div>
         </template>
 
         <!-- Ortho -->
         <template v-else-if="kind === 'ortho'">
-          <div class="field disabled">
-            <label class="field-label" for="ocomp">Compression <em>(coming soon)</em></label>
-            <select id="ocomp" class="field-input" disabled>
-              <option>None (uncompressed)</option>
+          <div v-if="isTiff" class="field">
+            <label class="field-label" for="ocomp">Compression</label>
+            <select id="ocomp" v-model="settings.compression" class="field-input">
+              <option value="none">None (uncompressed)</option>
+              <option value="deflate">DEFLATE (lossless)</option>
             </select>
+          </div>
+          <div v-if="settings.format === 'jpeg'" class="field">
+            <label class="field-label" for="jq">JPEG quality: {{ settings.jpegQuality.toFixed(2) }}</label>
+            <input id="jq" v-model.number="settings.jpegQuality" type="range" min="0.1" max="1" step="0.05" class="field-input" />
           </div>
         </template>
       </div>

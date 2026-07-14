@@ -378,6 +378,99 @@ mod tests {
         assert_eq!(anchor_rms_no_anchor, 0.0, "anchor_rms_after must be 0 with no anchors");
     }
 
+    // Dense MVS (Poisson prep): compute_depth_map must export per-pixel converged
+    // plane normals in the trailing 3·npix f32 (camera-frame, unit, nz<0). Render a
+    // slanted textured plane into a reference + one source view with known geometry,
+    // seed the true depth, and check the recovered normals match the plane normal to
+    // within a few degrees over the central region (borders clip the ZNCC window).
+    #[test]
+    fn compute_depth_map_exports_slanted_normals() {
+        let (w, h) = (64usize, 48usize);
+        let (fx, fy, cx, cy) = (80.0_f64, 80.0_f64, 32.0_f64, 24.0_f64);
+        let npix = w * h;
+        // Ground-truth plane normal in the reference/world frame (ref cam = identity
+        // at origin). nz<0 ⇒ facing the camera; nonzero nx ⇒ slanted about the y axis.
+        let n_true = normalize3(&[0.30, 0.0, -1.0]);
+        // Plane n·X = c chosen so the principal ray hits depth 5.
+        let c = 5.0 * n_true[2];
+
+        // Deterministic surface texture as a function of the 3D point (world frame).
+        let bright = |p: &V3| -> u8 {
+            let s = 128.0 + 60.0 * (2.0 * p[0] + 1.0).sin()
+                + 60.0 * (2.5 * p[1] - 0.5).sin()
+                + 40.0 * (1.5 * (p[0] + p[1])).sin();
+            s.clamp(0.0, 255.0) as u8
+        };
+
+        // Reference view: each pixel's ray hits the plane directly.
+        let ray = |u: usize, v: usize| -> V3 {
+            [(u as f64 - cx) / fx, (v as f64 - cy) / fy, 1.0]
+        };
+        let mut ref_gray = vec![0u8; npix];
+        let mut seed = vec![0.0f32; npix];
+        for v in 0..h {
+            for u in 0..w {
+                let r = ray(u, v);
+                let depth = c / dot3(&n_true, &r); // n·(t·r)=c
+                let p = [r[0] * depth, r[1] * depth, r[2] * depth];
+                ref_gray[v * w + u] = bright(&p);
+                seed[v * w + u] = depth as f32;
+            }
+        }
+
+        // Source view: R = I, camera centre offset sideways (baseline). t = -R·C.
+        let r_s: M3 = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let c_s: V3 = [-0.6, 0.1, 0.0];
+        let t_s: V3 = [-c_s[0], -c_s[1], -c_s[2]];
+        let r_st = mat3_transpose(&r_s);
+        let mut src_gray = vec![0u8; npix];
+        for v in 0..h {
+            for u in 0..w {
+                // Ray in source frame → world direction, intersect the plane.
+                let rs = ray(u, v);
+                let dir = mat3_vec(&r_st, &rs);
+                let denom = dot3(&n_true, &dir);
+                if denom.abs() < 1e-9 { continue; }
+                let s = (c - dot3(&n_true, &c_s)) / denom;
+                if s <= 0.0 { continue; }
+                let p = [c_s[0] + s * dir[0], c_s[1] + s * dir[1], c_s[2] + s * dir[2]];
+                src_gray[v * w + u] = bright(&p);
+            }
+        }
+
+        let ref_k = [fx as f32, fy as f32, cx as f32, cy as f32];
+        let src_dims = [w as u32, h as u32];
+        let src_k = [fx as f32, fy as f32, cx as f32, cy as f32];
+        let mut src_rel = Vec::new();
+        for row in &r_s { for &x in row { src_rel.push(x as f32); } }
+        for &x in &t_s { src_rel.push(x as f32); }
+
+        let out = compute_depth_map(
+            &ref_gray, w as u32, h as u32, &ref_k,
+            &src_gray, &src_dims, &src_k, &src_rel, &[],
+            &seed, 3.0, 8.0,
+            3, 8, 1, 12345,
+        );
+        assert_eq!(out.len(), npix * 5, "output must be depth+cost+3·normals");
+
+        // Average recovered normal over the central region; borders clip the window.
+        let (mut ax, mut ay, mut az, mut cnt) = (0.0f64, 0.0f64, 0.0f64, 0usize);
+        for v in 8..h - 8 {
+            for u in 8..w - 8 {
+                let i = v * w + u;
+                let n = [
+                    out[npix * 2 + i * 3] as f64,
+                    out[npix * 2 + i * 3 + 1] as f64,
+                    out[npix * 2 + i * 3 + 2] as f64,
+                ];
+                ax += n[0]; ay += n[1]; az += n[2]; cnt += 1;
+            }
+        }
+        let avg = normalize3(&[ax / cnt as f64, ay / cnt as f64, az / cnt as f64]);
+        let ang = dot3(&avg, &n_true).clamp(-1.0, 1.0).acos().to_degrees();
+        assert!(ang < 12.0, "recovered normal off by {ang:.1}° (avg {avg:?} vs {n_true:?})");
+    }
+
     // Self-calibration (R6): a scene rendered with a known radial distortion k1, but
     // BA seeded with a pinhole model (k1 = 0) and asked to refine one shared radial
     // coefficient (refine_mode = 3). It must recover k1 and drive the fit to sub-pixel

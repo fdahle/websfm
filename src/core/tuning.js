@@ -96,4 +96,21 @@ export const DENSE_TUNING = {
   minAngleDeg: 3,     // source-view triangulation angle floor (too small = degenerate)
   maxAngleDeg: 60,    // …and ceiling (too wide = poor photo-consistency)
   consistencyPx: 2,   // fusion reprojection agreement threshold (px)
+  // ── Stage B streaming fusion (core/dense/mvs.js fuseDepthMaps) ──
+  // Fusion accumulates kept pixels directly into a voxel-merge structure (never a
+  // raw per-pixel point list — that was the OOM). The scene bbox that sizes the
+  // packed cell keys is estimated from a coarse pixel grid: every Nth row/col of
+  // each depth map (~few k unprojections/map, negligible vs the full fuse).
+  fuseBboxStride: 16,     // coarse-grid stride for the scene-bbox estimate
+  fuseProgressMs: 250,    // min ms between fusion progress emits (~4/s; no postMessage spam)
+  fuseCostMaxSamples: 2_000_000, // cost-histogram sample budget (stride-subsampled, sorted once)
+  fuseMaxCells: 2 ** 50,  // packed-key exactness ceiling (float64); clamp cellSize up past this
+}
+
+// Mesh (screened Poisson) internals read in core/products/mesh.js but NOT exposed in
+// MeshModal — the user-facing knobs (depth/screening/trimFactor/colorize) live in
+// defaults.user.js (MESH_DEFAULTS). `settings` from the caller override.
+export const MESH_TUNING = {
+  colorSearchRadius: 1,        // vertex-colour transfer: search ±N voxel cells (3³ nhood)
+  grayFallback: [180, 180, 180], // colour for a vertex with no dense point nearby
 }

@@ -10,11 +10,15 @@
 //   samples: [{ bits, format }]   // format: 1=uint, 2=int, 3=float
 //   photometric: 1 (BlackIsZero / grayscale) | 2 (RGB)
 //   extraSamples: number[] | null // e.g. [2] = unassociated alpha (RGBA)
-//   data: Uint8Array              // raw interleaved pixel bytes, row-major
+//   data: Uint8Array              // strip bytes (raw, or already-compressed), row-major
 //   pixelScale: [sx, sy, sz]      // ModelPixelScaleTag
 //   tiepoint: [i, j, k, X, Y, Z]  // ModelTiepointTag (pixel → world)
 //   geoKeys: [[keyId, loc, count, value], ...]  // GeoKeyDirectory entries
 //   gdalNoData?: string           // GDAL_NODATA tag
+//   compression?: number          // TIFF Compression tag (1 = none, 8 = Adobe DEFLATE).
+//                                  // The writer stays sync: when 8, `data` must ALREADY be
+//                                  // zlib-deflated by the caller (CompressionStream lives in
+//                                  // the DOM/worker layer, not this pure path).
 
 const TYPE = { SHORT: 3, LONG: 4, DOUBLE: 12, ASCII: 2 }
 
@@ -33,7 +37,7 @@ function doubleArrayBytes(vals) {
 
 export function writeGeoTiff(spec) {
   const { width, height, samples, photometric, extraSamples, data,
-          pixelScale, tiepoint, geoKeys, gdalNoData } = spec
+          pixelScale, tiepoint, geoKeys, gdalNoData, compression = 1 } = spec
   const spp = samples.length
 
   // Entries are appended in ascending tag order (TIFF requires sorted IFD).
@@ -51,7 +55,7 @@ export function writeGeoTiff(spec) {
   inline(256, TYPE.LONG, width)                     // ImageWidth
   inline(257, TYPE.LONG, height)                    // ImageLength
   shortField(258, samples.map((s) => s.bits))       // BitsPerSample
-  inline(259, TYPE.SHORT, 1)                        // Compression = none
+  inline(259, TYPE.SHORT, compression)             // Compression (1=none, 8=Adobe DEFLATE)
   inline(262, TYPE.SHORT, photometric)              // PhotometricInterpretation
   inline(273, TYPE.LONG, 8)                         // StripOffsets = right after header
   inline(277, TYPE.SHORT, spp)                      // SamplesPerPixel

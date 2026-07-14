@@ -18,7 +18,7 @@ import { projectPoint, medianTriangulationAngle } from './geometry.js'
 // where `best` carries { entry, iA, iB, cA, cB, points, angle, esv, inliers, … }.
 export async function selectInitPair(
   { donePairs, Kmap, settings, imageByUuid, numStats, projDepth },
-  { onLog } = {},
+  { onLog, onProgress } = {},
 ) {
   const log = onLog ?? (() => {})
 
@@ -106,7 +106,16 @@ export async function selectInitPair(
   // then register against. Picking the first pair over the parallax floor — as
   // before — often locks in a noisy seed that stalls registration.
   const viable = []
-  for (const entry of candidates) {
+  // Init-pair scoring is otherwise a silent stretch with the bar dead at 0 (no
+  // cameras yet); emit a throttled label-only tick so the user sees it working.
+  let lastEmit = 0
+  const nowMs = () => (typeof performance !== 'undefined' ? performance.now() : Date.now())
+  for (let ci = 0; ci < candidates.length; ci++) {
+    const entry = candidates[ci]
+    if (onProgress) {
+      const t = nowMs()
+      if (t - lastEmit >= 250) { lastEmit = t; onProgress(ci, candidates.length) }
+    }
     const init = await tryInitPair(entry)
     const nameA = imageByUuid(entry.idA)?.name ?? entry.idA
     const nameB = imageByUuid(entry.idB)?.name ?? entry.idB

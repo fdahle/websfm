@@ -273,10 +273,15 @@ export const useImagesStore = defineStore('images', () => {
     }
   }
 
-  function updateMask(imageId, dataUrl) {
+  // `persist` false updates only the in-memory mask (so undo/redo, the viewer
+  // overlay, and the sidebar badge stay live) WITHOUT the OPFS write, log line,
+  // or project sync — used for the many intermediate commits during a mask-edit
+  // session, which flushes once (persist true) when editing closes.
+  function updateMask(imageId, dataUrl, persist = true) {
     const img = imageById(imageId)
     if (!img) return
     img.mask = dataUrl ? { dataUrl } : null
+    if (!persist) return
     log(dataUrl ? `Mask saved: ${img.name}` : `Mask cleared: ${img.name}`, 'info', 'Images')
     if (isPersisting()) {
       const pid = projects.currentProjectId

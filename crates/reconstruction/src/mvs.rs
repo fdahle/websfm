@@ -323,11 +323,16 @@ pub fn compute_depth_map(
         }
     }
 
-    // Emit depth plane followed by cost plane.
-    let mut out = vec![0.0f32; npix * 2];
+    // Emit depth plane, cost plane, then interleaved converged plane normals
+    // (nx ny nz per pixel, camera-frame, unit length, nz<0 = facing the camera).
+    // Downstream (fusion → Poisson) reuses these instead of re-estimating normals.
+    let mut out = vec![0.0f32; npix * 5];
     for i in 0..npix {
         out[i] = depth[i] as f32;
         out[npix + i] = cost[i] as f32;
+        out[npix * 2 + i * 3] = nx[i] as f32;
+        out[npix * 2 + i * 3 + 1] = ny[i] as f32;
+        out[npix * 2 + i * 3 + 2] = nz[i] as f32;
     }
     out
 }

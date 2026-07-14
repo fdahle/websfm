@@ -253,6 +253,211 @@ function parsePoints3D(text) {
   return points
 }
 
+// ── Binary format (LE) ↔ ColmapModel ─────────────────────────────────────────
+// The binary sparse model mirrors the text one exactly (same ColmapModel struct,
+// same adapters) — only the on-disk encoding differs. All fields little-endian.
+// Layout (COLMAP src/base/reconstruction.cc):
+//   cameras.bin:  u64 count; per camera: i32 camera_id, i32 model_id, u64 width,
+//                 u64 height, f64 params×(model param count).
+//   images.bin:   u64 count; per image: i32 image_id, f64 qw,qx,qy,qz,
+//                 f64 tx,ty,tz, i32 camera_id, name bytes to '\0',
+//                 u64 num_points2D, then per obs: f64 x, f64 y, i64 point3D_id.
+//   points3D.bin: u64 count; per point: u64 point3D_id, f64 x,y,z, u8 r,g,b,
+//                 f64 error, u64 track_len, then per elem: i32 image_id, i32 point2D_idx.
+
+// COLMAP numeric model ids (we write PINHOLE=1; read the pinhole subset of the
+// common models, warning on any that carry distortion). paramCount is what the
+// binary stream carries, so the reader steps correctly even for models we don't
+// fully support.
+const MODEL_BY_ID = {
+  0: { name: 'SIMPLE_PINHOLE', paramCount: 3 },
+  1: { name: 'PINHOLE', paramCount: 4 },
+  2: { name: 'SIMPLE_RADIAL', paramCount: 4 },
+  3: { name: 'RADIAL', paramCount: 5 },
+  4: { name: 'OPENCV', paramCount: 8 },
+  5: { name: 'OPENCV_FISHEYE', paramCount: 8 },
+  6: { name: 'FULL_OPENCV', paramCount: 12 },
+  7: { name: 'FOV', paramCount: 5 },
+  8: { name: 'SIMPLE_RADIAL_FISHEYE', paramCount: 4 },
+  9: { name: 'RADIAL_FISHEYE', paramCount: 5 },
+  10: { name: 'THIN_PRISM_FISHEYE', paramCount: 12 },
+}
+const ID_BY_MODEL = Object.fromEntries(Object.entries(MODEL_BY_ID).map(([id, m]) => [m.name, Number(id)]))
+
+// A tiny growable little-endian byte writer (the models are small — hundreds of
+// cameras, up to ~millions of points, but each record is a fixed handful of writes).
+function makeWriter() {
+  let buf = new ArrayBuffer(1 << 16)
+  let dv = new DataView(buf)
+  let len = 0
+  const ensure = (extra) => {
+    if (len + extra <= buf.byteLength) return
+    let cap = buf.byteLength
+    while (len + extra > cap) cap *= 2
+    const nb = new ArrayBuffer(cap)
+    new Uint8Array(nb).set(new Uint8Array(buf, 0, len))
+    buf = nb; dv = new DataView(buf)
+  }
+  return {
+    u8(v) { ensure(1); dv.setUint8(len, v); len += 1 },
+    i32(v) { ensure(4); dv.setInt32(len, v, true); len += 4 },
+    u64(v) { ensure(8); dv.setBigUint64(len, BigInt(v), true); len += 8 },
+    i64(v) { ensure(8); dv.setBigInt64(len, BigInt(v), true); len += 8 },
+    f64(v) { if (!Number.isFinite(v)) throw new Error(`COLMAP bin serialize: non-finite value ${v}`); ensure(8); dv.setFloat64(len, v, true); len += 8 },
+    bytes(arr) { ensure(arr.length); new Uint8Array(buf).set(arr, len); len += arr.length },
+    done() { return new Uint8Array(buf, 0, len) },
+  }
+}
+
+function serializeCamerasBin(cameras) {
+  const w = makeWriter()
+  w.u64(cameras.length)
+  for (const c of cameras) {
+    const modelId = ID_BY_MODEL[c.model]
+    if (modelId === undefined) throw new Error(`COLMAP bin serialize: unknown camera model ${c.model}`)
+    w.i32(c.cameraId); w.i32(modelId); w.u64(c.width); w.u64(c.height)
+    for (const p of c.params) w.f64(p)
+  }
+  return w.done()
+}
+
+function serializeImagesBin(images) {
+  const w = makeWriter()
+  w.u64(images.length)
+  const enc = new TextEncoder()
+  for (const im of images) {
+    w.i32(im.imageId)
+    for (const q of im.q) w.f64(q)
+    for (const t of im.t) w.f64(t)
+    w.i32(im.cameraId)
+    w.bytes(enc.encode(im.name)); w.u8(0) // NUL-terminated name
+    w.u64(im.points2D.length)
+    for (const [x, y, id] of im.points2D) { w.f64(x); w.f64(y); w.i64(id) }
+  }
+  return w.done()
+}
+
+function serializePoints3DBin(points) {
+  const w = makeWriter()
+  w.u64(points.length)
+  for (const p of points) {
+    w.u64(p.point3dId)
+    w.f64(p.xyz[0]); w.f64(p.xyz[1]); w.f64(p.xyz[2])
+    w.u8(byte255(p.rgb[0])); w.u8(byte255(p.rgb[1])); w.u8(byte255(p.rgb[2]))
+    w.f64(p.error ?? -1)
+    w.u64(p.track.length)
+    for (const [imageId, idx] of p.track) { w.i32(imageId); w.i32(idx) }
+  }
+  return w.done()
+}
+
+const byte255 = (v) => Math.max(0, Math.min(255, Math.round(v ?? 0)))
+
+// Serialize a ColmapModel to the three .bin files ({ name: Uint8Array }).
+export function serializeColmapModelBin(model) {
+  return {
+    'cameras.bin': serializeCamerasBin(model.cameras),
+    'images.bin': serializeImagesBin(model.images),
+    'points3D.bin': serializePoints3DBin(model.points3D),
+  }
+}
+
+// A little-endian reader with a u64→Number guard (COLMAP counts fit Number in
+// practice, but a corrupt/huge field must fail loudly, not silently truncate).
+function makeReader(buffer) {
+  const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer)
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  let p = 0
+  const num64 = (big) => {
+    if (big > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error('COLMAP bin: 64-bit value exceeds safe integer range')
+    return Number(big)
+  }
+  return {
+    get pos() { return p },
+    get length() { return bytes.length },
+    u8() { return bytes[p++] },
+    i32() { const v = dv.getInt32(p, true); p += 4; return v },
+    u64() { const v = num64(dv.getBigUint64(p, true)); p += 8; return v },
+    i64() { const v = num64Signed(dv.getBigInt64(p, true)); p += 8; return v },
+    f64() { const v = dv.getFloat64(p, true); p += 8; return v },
+    strZ() { let s = ''; while (p < bytes.length && bytes[p] !== 0) s += String.fromCharCode(bytes[p++]); p++; return s },
+  }
+}
+// point3D_id can be -1 (no track); keep the sign, guard the magnitude.
+function num64Signed(big) {
+  if (big > BigInt(Number.MAX_SAFE_INTEGER) || big < BigInt(Number.MIN_SAFE_INTEGER)) {
+    throw new Error('COLMAP bin: signed 64-bit value exceeds safe integer range')
+  }
+  return Number(big)
+}
+
+function parseCamerasBin(buffer) {
+  if (!buffer) return []
+  const r = makeReader(buffer)
+  const n = r.u64()
+  const cameras = []
+  for (let i = 0; i < n; i++) {
+    const cameraId = r.i32()
+    const modelId = r.i32()
+    const width = r.u64()
+    const height = r.u64()
+    const spec = MODEL_BY_ID[modelId]
+    if (!spec) throw new Error(`COLMAP bin: unknown camera model id ${modelId}`)
+    const params = []
+    for (let k = 0; k < spec.paramCount; k++) params.push(r.f64())
+    cameras.push({ cameraId, model: spec.name, width, height, params })
+  }
+  return cameras
+}
+
+function parseImagesBin(buffer) {
+  if (!buffer) return []
+  const r = makeReader(buffer)
+  const n = r.u64()
+  const images = []
+  for (let i = 0; i < n; i++) {
+    const imageId = r.i32()
+    const q = [r.f64(), r.f64(), r.f64(), r.f64()]
+    const t = [r.f64(), r.f64(), r.f64()]
+    const cameraId = r.i32()
+    const name = r.strZ()
+    const numPts = r.u64()
+    const points2D = new Array(numPts)
+    for (let k = 0; k < numPts; k++) points2D[k] = [r.f64(), r.f64(), r.i64()]
+    images.push({ imageId, q, t, cameraId, name, points2D })
+  }
+  return images
+}
+
+function parsePoints3DBin(buffer) {
+  if (!buffer) return []
+  const r = makeReader(buffer)
+  const n = r.u64()
+  const points = []
+  for (let i = 0; i < n; i++) {
+    const point3dId = r.u64()
+    const xyz = [r.f64(), r.f64(), r.f64()]
+    const rgb = [r.u8(), r.u8(), r.u8()]
+    const error = r.f64()
+    const trackLen = r.u64()
+    const track = new Array(trackLen)
+    for (let k = 0; k < trackLen; k++) track[k] = [r.i32(), r.i32()]
+    points.push({ point3dId, xyz, rgb, error, track })
+  }
+  return points
+}
+
+// Parse the three .bin files ({ 'cameras.bin': ArrayBuffer|Uint8Array, … }) into
+// a ColmapModel — the same struct parseColmapModel yields, so readColmapModel /
+// colmapToSparse consume it unchanged.
+export function parseColmapModelBin(files) {
+  return {
+    cameras: parseCamerasBin(files['cameras.bin']),
+    images: parseImagesBin(files['images.bin']),
+    points3D: parsePoints3DBin(files['points3D.bin']),
+  }
+}
+
 // ── websfm ↔ ColmapModel adapters (pure; caller injects resolved pixels) ─────
 
 // Build a ColmapModel from websfm sparse data. One COLMAP camera per image

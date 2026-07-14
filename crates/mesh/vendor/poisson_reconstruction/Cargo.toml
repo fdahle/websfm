@@ -1,0 +1,23 @@
+# Vendored copy of poisson_reconstruction 0.4.0 (Dimforge / Foresight Mining),
+# MIT OR Apache-2.0. Patched for wasm32-unknown-unknown: rayon removed and its two
+# `par_iter_mut()` call sites replaced with sequential `iter_mut()` (wasm without
+# the atomics/threads feature cannot spawn rayon's worker threads — it panics at
+# runtime). No other changes. Upstream:
+# https://github.com/ForesightMiningSoftwareCorporation/PoissonReconstruction
+[package]
+name = "poisson_reconstruction"
+version = "0.4.0"
+edition = "2021"
+description = "Screened Poisson Reconstruction (vendored, rayon removed for wasm)"
+license = "MIT OR Apache-2.0"
+
+[lib]
+name = "poisson_reconstruction"
+path = "src/lib.rs"
+
+[dependencies]
+fnv = "1"
+itertools = "0.14"
+nalgebra = "0.33"
+nalgebra-sparse = "0.10"
+parry3d-f64 = "0.21"

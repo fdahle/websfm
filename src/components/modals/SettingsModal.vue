@@ -3,9 +3,11 @@ import { ref } from 'vue'
 import CrsPicker from '../controls/CrsPicker.vue'
 import { useGlossarySettings } from '../../composables/useGlossarySettings.js'
 import { useComputeSettings } from '../../composables/useComputeSettings.js'
+import { useViewerSettings } from '../../composables/useViewerSettings.js'
 
 const { glossaryTermsEnabled, setGlossaryTermsEnabled } = useGlossarySettings()
 const { memBudgetGb, setMemBudgetGb } = useComputeSettings()
+const { graticuleZ, setGraticuleZ } = useViewerSettings()
 
 defineProps({
   theme: String,
@@ -117,6 +119,18 @@ const verboseLogging = ref(false)
               >
               <span class="slider"></span>
             </label>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-info">
+              <span class="setting-label">Graticule height</span>
+              <span class="setting-desc">Where the 3D-view ground grid sits along the vertical axis of the point cloud.</span>
+            </div>
+            <div class="seg-toggle">
+              <button :class="{ active: graticuleZ === 'min' }" @click="setGraticuleZ('min')">Bottom</button>
+              <button :class="{ active: graticuleZ === 'avg' }" @click="setGraticuleZ('avg')">Middle</button>
+              <button :class="{ active: graticuleZ === 'max' }" @click="setGraticuleZ('max')">Top</button>
+            </div>
           </div>
 
           <div class="setting-row">

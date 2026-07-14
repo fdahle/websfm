@@ -387,10 +387,13 @@ export async function computeDepthMap(refGray, refW, refH, refK, sources, opts =
     window, iterations, bestK, seed >>> 0,
   )
   const npix = refW * refH
-  if (!raw || raw.length < npix * 2) return null
+  if (!raw || raw.length < npix * 5) return null
   return {
     depth: raw.slice(0, npix),
     cost: raw.slice(npix, npix * 2),
+    // Per-pixel converged plane normals (camera-frame, unit, nz<0), same shape as
+    // the GPU backend returns — reused by fusion → Poisson meshing.
+    normals: raw.slice(npix * 2, npix * 5),
     width: refW, height: refH,
   }
 }

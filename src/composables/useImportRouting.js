@@ -5,7 +5,11 @@ import { parseGeoJson, looksLikeGeoJson, geoJsonToGcps, guessNameKey } from '../
 import { detectCameraMode } from '../core/io/cameraKind.js'
 import { detectFileKind, isColmapFile } from '../core/io/importKind.js'
 import { parseFiducialObs } from '../core/io/fiducialObs.js'
+import { sniffCloudFormat } from '../core/io/cloudImport.js'
+import { applyImportTransform } from '../core/io/cloudImport.js'
+import { parseCloudFile as parseCloudFileWorker } from '../workers/computeClient.js'
 import { unzipStore } from '../utils/zip.js'
+import { useLog } from './useLog.js'
 
 // The dropped/picked-file import funnel, lifted out of App.vue. It drives the
 // import-related modals (all state lives in useModalsStore, pulled in here) and
@@ -14,13 +18,15 @@ import { unzipStore } from '../utils/zip.js'
 //   activateTab(id) — switch the active tab (to 'map' after a spatial import)
 // `cameraPickMode` is returned so the Ribbon command dispatch (still in App.vue)
 // can hint the file-picker mode before opening the hidden <input>.
-export function useImportRouting({ addGcps, addFootprints, addSensors, addPoses, addFiducialObs, importColmap, activateTab }) {
+export function useImportRouting({ addGcps, addFootprints, addSensors, addPoses, addFiducialObs, importColmap, importCloud, activateTab }) {
   const {
     gcpImportOpen, gcpImportText, gcpImportName, gcpImportGeojson, gcpImportCrs,
     footprintImportOpen, footprintImportData,
     cameraImportOpen, cameraImportText, cameraImportName, cameraImportMode,
     importKindOpen, importKindFile,
+    importCloudOpen, importCloudData,
   } = storeToRefs(useModalsStore())
+  const { log } = useLog()
 
   // sensor | pose | null, set before opening the file picker (by the command dispatch).
   const cameraPickMode = ref(null)
@@ -72,6 +78,14 @@ export function useImportRouting({ addGcps, addFootprints, addSensors, addPoses,
   // and anything ambiguous (a bare name + X/Y/Z list) → a small chooser.
   async function openDroppedImport(file) {
     if (!file) return
+    // Binary cloud formats (PLY/LAS) must be sniffed by magic bytes BEFORE any
+    // text decode — decoding a 500 MB LAS as a string would blow up. Peek the head.
+    try {
+      const head = new Uint8Array(await file.slice(0, 8).arrayBuffer())
+      const fmt = sniffCloudFormat(head, file.name)
+      if (fmt === 'ply' || fmt === 'las') { openCloudImport(file); return }
+    } catch { /* fall through to text routing */ }
+
     let text
     try {
       text = await file.text()
@@ -87,13 +101,54 @@ export function useImportRouting({ addGcps, addFootprints, addSensors, addPoses,
     else if (kind === 'gcp' || kind === 'footprint') openImportFile(file)
     else if (kind === 'fiducialObs') openFiducialObsImport(file)
     else if (kind === 'colmap') openColmapImport([file])
+    else if (kind === 'cloud') openCloudImport(file)
     else { importKindFile.value = file; importKindOpen.value = true }
   }
 
+  // ── Import (point cloud / mesh) ─────────────────────────────────────────────
+  // Parse the file off the main thread (the parseCloud worker op), then open the
+  // settings modal with the parsed cloud + stats. The parse buffer is transferred
+  // to the worker and back, so it never clones dense-scale data.
+  async function openCloudImport(file) {
+    if (!file || !importCloud) return
+    try {
+      const buffer = await file.arrayBuffer()
+      const { parsed, stats } = await parseCloudFileWorker(buffer, file.name, {
+        onLog: (m, l, c) => log(m, l, c),
+      })
+      importCloudData.value = { parsed, stats, fileName: file.name }
+      importCloudOpen.value = true
+    } catch (err) {
+      log(`Cloud import: ${err?.message ?? err}`, 'error', 'Import')
+    }
+  }
+
+  // User confirmed the cloud-import settings: apply the transform + commit.
+  function onCloudImport(settings) {
+    const data = importCloudData.value
+    importCloudOpen.value = false
+    importCloudData.value = null
+    if (!data) return
+    const transformed = applyImportTransform(data.parsed, { ...settings, onLog: (m, l, c) => log(m, l, c) })
+    if (importCloud(transformed, data.fileName)) activateTab('viewer')
+  }
+
+  function onCloudPick(event) {
+    const file = event.target.files?.[0]
+    if (file) openCloudImport(file)
+    event.target.value = ''
+  }
+
   // COLMAP sparse model — a file *set*, so accept either a `.zip` or the loose
-  // `cameras.txt` / `images.txt` / `points3D.txt` (case-insensitive, path-stripped).
-  // Build the { canonicalName: text } map `importColmapModel` expects and commit.
-  const COLMAP_CANON = { 'cameras.txt': 'cameras.txt', 'images.txt': 'images.txt', 'points3d.txt': 'points3D.txt' }
+  // `cameras.{txt,bin}` / `images.{txt,bin}` / `points3D.{txt,bin}`
+  // (case-insensitive, path-stripped). Text entries carry strings, binary entries
+  // carry Uint8Array — the store's importColmapModel picks the parser by key
+  // suffix. A model must not mix text + binary of the same table; the binary
+  // variant wins when both appear (unlikely; a defensive tie-break).
+  const COLMAP_CANON = {
+    'cameras.txt': 'cameras.txt', 'images.txt': 'images.txt', 'points3d.txt': 'points3D.txt',
+    'cameras.bin': 'cameras.bin', 'images.bin': 'images.bin', 'points3d.bin': 'points3D.bin',
+  }
   async function openColmapImport(fileList) {
     const files = [...(fileList || [])]
     if (!files.length || !importColmap) return
@@ -101,14 +156,16 @@ export function useImportRouting({ addGcps, addFootprints, addSensors, addPoses,
     try {
       const zip = files.find((f) => /\.zip$/i.test(f.name))
       const dec = new TextDecoder()
-      const add = (name, text) => {
+      // Binary entries stay bytes; text entries decode to a string.
+      const add = (name, data) => {
         const key = COLMAP_CANON[String(name).split(/[\\/]/).pop().toLowerCase()]
-        if (key) model[key] = text
+        if (!key) return
+        model[key] = key.endsWith('.bin') ? new Uint8Array(data) : (typeof data === 'string' ? data : dec.decode(data))
       }
       if (zip) {
-        for (const e of unzipStore(new Uint8Array(await zip.arrayBuffer()))) add(e.name, dec.decode(e.data))
+        for (const e of unzipStore(new Uint8Array(await zip.arrayBuffer()))) add(e.name, e.data)
       } else {
-        for (const f of files) if (isColmapFile(f.name)) add(f.name, await f.text())
+        for (const f of files) if (isColmapFile(f.name)) add(f.name, await f.arrayBuffer())
       }
     } catch (err) {
       console.error('Could not read COLMAP model', err)
@@ -216,6 +273,7 @@ export function useImportRouting({ addGcps, addFootprints, addSensors, addPoses,
   return {
     cameraPickMode,
     openImportFile, openDroppedImport, routeImport, openFiducialObsImport, openColmapImport,
+    openCloudImport, onCloudImport, onCloudPick,
     onImportKindChosen, onImportSwitchKind,
     openCameraImport, onCameraImport, onGcpImport, onFootprintImport,
     onGcpPick, onCameraPick, onColmapPick,

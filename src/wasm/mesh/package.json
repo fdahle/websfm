@@ -1,0 +1,17 @@
+{
+  "name": "mesh",
+  "type": "module",
+  "description": "Screened Poisson surface reconstruction compiled to WebAssembly",
+  "version": "0.1.0",
+  "license": "MIT OR Apache-2.0",
+  "files": [
+    "mesh_bg.wasm",
+    "mesh.js",
+    "mesh.d.ts"
+  ],
+  "main": "mesh.js",
+  "types": "mesh.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}

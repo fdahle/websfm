@@ -6,6 +6,7 @@ import {
   densify as workerDensify,
   generateDem as workerGenerateDem,
   generateOrtho as workerGenerateOrtho,
+  meshify as workerMeshify,
 } from '../workers/computeClient.js'
 import { useLog } from '../composables/useLog.js'
 import * as opfs from '../utils/opfs.js'
@@ -14,8 +15,9 @@ import { aerialUpRotation, rotateReconstruction } from '../core/products/project
 import { cameraCenter } from '../core/sfm/geometry.js'
 import { triangulateAllGcps } from '../core/sfm/gcpTriangulation.js'
 import { qualityToMaxDim } from '../core/dense/mvs.js'
+import { projectDensifyPeakBytes, formatBytes, DEFAULT_BUDGET_BYTES } from '../core/dense/memBudget.js'
 import { distortionOf } from '../core/sfm/distortion.js'
-import { parseColmapModel, readColmapModel, makeNameResolver, colmapToSparse } from '../core/io/colmapModel.js'
+import { parseColmapModel, parseColmapModelBin, readColmapModel, makeNameResolver, colmapToSparse } from '../core/io/colmapModel.js'
 import { registerProjectStore } from './projectStores.js'
 import { useImagesStore } from './useImagesStore.js'
 import { useMatchesStore } from './useMatchesStore.js'
@@ -158,7 +160,48 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
   // flag governs the col buffer. View-tracks use a CSR layout: vcount[i] tracks for
   // point i, flattened into vcam/vkp; camera uuids are dictionary-encoded via
   // viewUuids (seeded from the cloud's cameras, extended for any stray uuid).
+  // Dense clouds are already flat ({ count, pos:Float32, col:Uint8 }) with no
+  // view-tracks, so serialization is near-passthrough. pos is widened to Float64 on
+  // disk to match the sparse sidecar format (so the reader stays dtype-uniform and
+  // dense clouds persisted before the flat rework still load through this branch).
+  function serializeDenseCloud(c) {
+    const N = c.count || 0
+    const pos = new Float64Array(N * 3)
+    pos.set(c.pos.subarray(0, N * 3))
+    const col = c.col ? c.col.slice(0, N * 3) : null
+    // World-space normals stay Float32 on disk (unit scale — no precision gain from
+    // widening). Absent on normal-less/legacy runs; the reader leaves nrm undefined.
+    const nrm = c.nrm ? c.nrm.slice(0, N * 3) : null
+    return {
+      id: c.id, name: c.name, kind: 'dense', createdAt: c.createdAt,
+      imported: !!c.imported,
+      cameras: [], pointCount: N, hasColor: !!col, hasNormals: !!nrm, viewUuids: [],
+      buffers: { pos: pos.buffer, col: col ? col.buffer : null, nrm: nrm ? nrm.buffer : null,
+        vcount: null, vcam: null, vkp: null, vx: null, vy: null },
+    }
+  }
+
+  // Mesh cloud on-disk shape: pos (Float64, per-vertex, uniform sidecar dtype) + col
+  // (Uint8, per-vertex) + idx (Uint32, 3·triangles). nVerts + count(=tris) in metadata.
+  function serializeMeshCloud(c) {
+    const nVerts = c.nVerts || 0
+    const pos = new Float64Array(nVerts * 3)
+    pos.set(c.pos.subarray(0, nVerts * 3))
+    const col = c.col ? c.col.slice(0, nVerts * 3) : null
+    const idx = c.idx ? Uint32Array.from(c.idx) : new Uint32Array(0)
+    return {
+      id: c.id, name: c.name, kind: 'mesh', createdAt: c.createdAt,
+      imported: !!c.imported,
+      cameras: [], pointCount: nVerts, nVerts, triCount: c.count || 0,
+      hasColor: !!col, viewUuids: [],
+      buffers: { pos: pos.buffer, col: col ? col.buffer : null, idx: idx.buffer,
+        vcount: null, vcam: null, vkp: null, vx: null, vy: null },
+    }
+  }
+
   function serializeCloud(c) {
+    if (c.kind === 'dense') return serializeDenseCloud(c)
+    if (c.kind === 'mesh') return serializeMeshCloud(c)
     const pts = c.points
     const N = pts.length
     const pos = new Float64Array(N * 3)
@@ -263,17 +306,20 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     if (asMain || !mainSparseCloud.value) mainSparseId.value = cloud.id
   }
 
-  // Import a COLMAP sparse text model as a NEW sparse cloud (never replaces a
-  // computed one — MC lets both coexist for comparison; becomes main only when no
-  // sparse cloud exists yet). `files` is a { 'cameras.txt': text, … } map; images are
-  // matched to the loaded set by name. Returns true on success. Distortion coeffs of
-  // RADIAL/OPENCV cameras are read for fx/fy/cx/cy only — the model is treated as
-  // pinhole (consistent with the whole pipeline), and dropped terms are warned.
+  // Import a COLMAP sparse model (text OR binary) as a NEW sparse cloud (never
+  // replaces a computed one — MC lets both coexist for comparison; becomes main
+  // only when no sparse cloud exists yet). `files` is a map keyed by canonical
+  // name — `cameras.txt`/`images.txt`/`points3D.txt` (string values) or the `.bin`
+  // variants (Uint8Array values); the presence of a `.bin` key selects the binary
+  // parser. Images are matched to the loaded set by name. Returns true on success.
+  // Distortion coeffs of RADIAL/OPENCV cameras are read for fx/fy/cx/cy only — the
+  // model is treated as pinhole (consistent with the pipeline), dropped terms warned.
   function importColmapModel(files) {
+    const isBin = files['cameras.bin'] || files['images.bin'] || files['points3D.bin']
     let colImages, colPoints, droppedDistortion
     try {
-      ({ images: colImages, points: colPoints, droppedDistortion } =
-        readColmapModel(parseColmapModel(files)))
+      const model = isBin ? parseColmapModelBin(files) : parseColmapModel(files)
+      ;({ images: colImages, points: colPoints, droppedDistortion } = readColmapModel(model))
     } catch (err) {
       log(`COLMAP import: could not parse model — ${err?.message ?? err}`, 'error', 'Reconstruction')
       return false
@@ -316,9 +362,15 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
 
   // Insert the fused dense model, replacing any existing dense cloud (carries the
   // previous name/id forward so a rename survives a re-fuse). Dense clouds have no
-  // cameras of their own — the viewer renders their points.
-  function upsertDenseCloud(points) {
-    const idx = clouds.value.findIndex((c) => c.kind === 'dense')
+  // cameras of their own — the viewer renders their points. Unlike sparse clouds
+  // (arrays of {x,y,z,color,views} objects — they carry per-point tracks), a dense
+  // cloud is stored **flat**: { count, pos:Float32Array(3N), col:Uint8Array(3N) }.
+  // Millions of fused points as JS objects were ~110 B each (hundreds of MB, the
+  // fusion OOM's main-thread tail); the flat buffers are ~15 B/point and feed the
+  // viewer / PLY / DEM directly with no per-point object churn.
+  function upsertDenseCloud({ count, pos, col, nrm }) {
+    // Never replace an *imported* cloud — a re-fuse targets the computed one only.
+    const idx = clouds.value.findIndex((c) => c.kind === 'dense' && !c.imported)
     const prev = idx >= 0 ? clouds.value[idx] : null
     const cloud = {
       id: prev?.id ?? makeCloudId(),
@@ -326,11 +378,74 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
       kind: 'dense',
       createdAt: Date.now(),
       cameras: markRaw(new Map()),
-      points: markRaw(points),
+      count,
+      pos: markRaw(pos),
+      col: markRaw(col),
+      // World-space per-point unit normals (3N Float32), when the dense run produced
+      // them (Poisson mesh input). Undefined on legacy/normal-less runs.
+      ...(nrm ? { nrm: markRaw(nrm) } : {}),
     }
     if (idx >= 0) clouds.value.splice(idx, 1, cloud)
     else clouds.value.push(cloud)
     selectedCloudId.value = cloud.id
+  }
+
+  // Insert/replace the single mesh cloud (kind:'mesh'). Flat like the dense cloud:
+  // per-vertex pos/col + triangle idx, no per-vertex objects. count = triangles.
+  function upsertMeshCloud({ nVerts, count, pos, idx: triIdx, col }) {
+    // As with dense: a re-mesh replaces the computed mesh, never an imported one.
+    const i = clouds.value.findIndex((c) => c.kind === 'mesh' && !c.imported)
+    const prev = i >= 0 ? clouds.value[i] : null
+    const cloud = {
+      id: prev?.id ?? makeCloudId(),
+      name: prev?.name ?? 'Mesh',
+      kind: 'mesh',
+      createdAt: Date.now(),
+      cameras: markRaw(new Map()),
+      count, nVerts,
+      pos: markRaw(pos),
+      idx: markRaw(triIdx),
+      col: markRaw(col),
+    }
+    if (i >= 0) clouds.value.splice(i, 1, cloud)
+    else clouds.value.push(cloud)
+    selectedCloudId.value = cloud.id
+  }
+
+  // Import an external point cloud or mesh (parsed off-thread by the `parseCloud`
+  // worker op, transformed by applyImportTransform). Always ADDS a new cloud —
+  // never replaces computed ones — flagged `imported: true` so upsertDense/Mesh
+  // skip it on a re-fuse/re-mesh. Coordinates land verbatim in the current frame
+  // (no CRS reprojection). pos is narrowed to Float32 in memory (the DenseCloud/
+  // MeshCloud convention — the viewer feeds it straight to Three.js). Returns true
+  // on success.
+  function importCloud(parsed, fileName = 'file') {
+    const isMesh = !!parsed.idx
+    const n = isMesh ? (parsed.nVerts ?? 0) : (parsed.count ?? 0)
+    if (!n) {
+      log(`Cloud import: ${fileName} contained no points`, 'warn', 'Reconstruction')
+      return false
+    }
+    const pos = parsed.pos instanceof Float32Array ? parsed.pos : Float32Array.from(parsed.pos)
+    const cloud = {
+      id: makeCloudId(),
+      name: `Imported (${fileName})`,
+      kind: isMesh ? 'mesh' : 'dense',
+      createdAt: Date.now(),
+      imported: true,
+      cameras: markRaw(new Map()),
+      pos: markRaw(pos),
+      ...(parsed.col ? { col: markRaw(parsed.col) } : { col: null }),
+      ...(isMesh
+        ? { nVerts: n, count: parsed.count, idx: markRaw(parsed.idx) }
+        : { count: n, ...(parsed.nrm ? { nrm: markRaw(parsed.nrm) } : {}) }),
+    }
+    clouds.value.push(cloud)
+    selectedCloudId.value = cloud.id
+    log(`Cloud import: added "${cloud.name}" — ${n.toLocaleString()} ${isMesh ? `vertices, ${parsed.count.toLocaleString()} triangles` : 'points'}`
+      + `${parsed.col ? ', color' : ''}${parsed.nrm ? ', normals' : ''}`, 'success', 'Reconstruction')
+    persist()
+    return true
   }
 
   // Dense Stage A — Build Depth Maps. Runs PatchMatch MVS in the worker over the
@@ -453,22 +568,118 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
       log('Dense: compute depth maps before building the dense cloud', 'warn', 'Dense')
       return
     }
+    // Stage B pre-flight (Phase 7): project the fusion peak from the real depth maps
+    // and refuse before starting, rather than OOM-killing the tab mid-fuse. Run it
+    // here — before the buffers are transferred to the worker — so a refusal leaves
+    // the depth maps intact (a worker-side gate would throw after transfer and lose
+    // them). Same budget knob as Stage A.
+    const budget = settings.memBudgetBytes > 0 ? settings.memBudgetBytes : DEFAULT_BUDGET_BYTES
+    const proj = projectDensifyPeakBytes({ maps })
+    log(`Dense fuse: projected peak memory ≈ ${formatBytes(proj.total)} `
+      + `(input ${formatBytes(proj.input)} + accumulator ${formatBytes(proj.accumulator)} + `
+      + `output ${formatBytes(proj.output)}; ${proj.validPx.toLocaleString()} valid px → `
+      + `~${proj.cells.toLocaleString()} cells) vs budget ${formatBytes(budget)}`,
+      proj.total > budget ? 'error' : 'info', 'Dense')
+    if (proj.total > budget) {
+      log('Dense: aborting fusion before start — projected memory exceeds the budget. '
+        + 'Re-run depth maps at a lower Quality, use a larger merge cell / fusion step, '
+        + 'or raise the memory budget, then retry.', 'error', 'Dense')
+      reconStatus.value = 'error'
+      return
+    }
     reconStatus.value = 'running'
+    // Transfer (not clone) each map's depth/cost/rgb buffers to the worker — they're
+    // the bulk of dense memory, and a clone briefly doubles it (the fusion OOM's
+    // secondary contributor). The heavy per-map displayDataUrl PNG is display-only,
+    // so strip it from the wire payload entirely. The worker returns the buffers so
+    // we re-attach them below; until then the store's copies are detached.
+    const mapsInput = maps.map((m) => ({
+      uuid: m.uuid, width: m.width, height: m.height, K: m.K, R: m.R, t: m.t,
+      depth: m.depth, cost: m.cost, rgb: m.rgb, normals: m.normals || null,
+    }))
+    const transfer = []
+    for (const m of mapsInput) {
+      transfer.push(m.depth.buffer, m.cost.buffer, m.rgb.buffer)
+      if (m.normals) transfer.push(m.normals.buffer)
+    }
     try {
-      const { points: flat, summary: dSummary } = await workerDensify(
-        { maps, settings },
-        { onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl) => onProgress?.(d, t, lbl) },
+      const { points: flat, nrm, summary: dSummary, mapBuffers } = await workerDensify(
+        { maps: mapsInput, settings },
+        { onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl) => onProgress?.(d, t, lbl), transfer },
       )
-      const pts = []
-      for (let i = 0; i < flat.length; i += 6) {
-        pts.push({ x: flat[i], y: flat[i+1], z: flat[i+2], color: [flat[i+3], flat[i+4], flat[i+5]] })
+      // Re-attach the round-tripped buffers so ortho / a second densify still work.
+      if (mapBuffers) {
+        for (const mb of mapBuffers) {
+          const m = depthMaps.value.get(mb.uuid)
+          if (m) { m.depth = mb.depth; m.cost = mb.cost; m.rgb = mb.rgb; if (mb.normals) m.normals = mb.normals }
+        }
       }
-      upsertDenseCloud(pts)
+      // De-interleave the worker's flat [x,y,z,r,g,b] into the dense cloud's split
+      // position/colour buffers (one typed-array pass, no per-point objects).
+      const n = flat.length / 6
+      const pos = new Float32Array(n * 3)
+      const col = new Uint8Array(n * 3)
+      for (let i = 0; i < n; i++) {
+        const s = i * 6, d = i * 3
+        pos[d] = flat[s]; pos[d+1] = flat[s+1]; pos[d+2] = flat[s+2]
+        col[d] = flat[s+3]; col[d+1] = flat[s+4]; col[d+2] = flat[s+5]
+      }
+      // nrm (world-space unit normals, 3N) rides along when present — the Poisson
+      // mesh stage consumes it; absent on GPU-less legacy runs (upsert leaves it off).
+      upsertDenseCloud({ count: n, pos, col, ...(nrm ? { nrm } : {}) })
       denseSummary.value = dSummary ?? null
       reconStatus.value = 'done'
       await persist()
     } catch (err) {
-      log(`Densify error: ${err?.message ?? err}`, 'error', 'Dense')
+      // The buffers were transferred out; if the worker failed before returning them
+      // they're detached (dead). Drop the depth-map cache so ortho / re-densify don't
+      // read empty buffers — the user must recompute depth maps. Truthful > silent.
+      depthMaps.value = new Map()
+      log(`Densify error: ${err?.message ?? err}. Depth maps were released to the worker `
+        + `and must be recomputed before retrying.`, 'error', 'Dense')
+      reconStatus.value = 'error'
+    }
+  }
+
+  // Mesh — screened Poisson over the main dense cloud (needs its oriented normals).
+  // Consumes the dense cloud's pos/col/nrm; the worker round-trips them home so the
+  // dense cloud stays usable. Upserts a single kind:'mesh' cloud.
+  async function generateMesh(settings = {}, onProgress) {
+    const dense = clouds.value.find((c) => c.kind === 'dense')
+    if (!dense?.count) { log('Mesh: build a dense point cloud first', 'warn', 'Products'); return }
+    if (!dense.nrm || dense.nrm.length < dense.count * 3) {
+      log('Mesh: the dense cloud has no per-point normals — re-run Densify to compute them', 'warn', 'Products')
+      return
+    }
+    // Pass the dense merge cell (GSD) so the worker sizes the trim radius + colour grid.
+    const mergeCell = denseSummary.value?.mergeCell ?? 0
+    // Transfer (not clone) the dense buffers; the worker returns them for re-attach.
+    const input = {
+      dense: { count: dense.count, pos: dense.pos, col: dense.col || null, nrm: dense.nrm },
+      settings: { ...settings, mergeCell },
+    }
+    const transfer = [dense.pos.buffer]
+    if (dense.col) transfer.push(dense.col.buffer)
+    transfer.push(dense.nrm.buffer)
+    reconStatus.value = 'running'
+    try {
+      const { mesh, denseHome } = await workerMeshify(input,
+        { onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl) => onProgress?.(d, t, lbl), transfer })
+      // Re-attach the round-tripped dense buffers (mesh generation is non-destructive).
+      if (denseHome) {
+        const d = clouds.value.find((c) => c.kind === 'dense')
+        if (d) { d.pos = markRaw(denseHome.pos); if (denseHome.col) d.col = markRaw(denseHome.col); if (denseHome.nrm) d.nrm = markRaw(denseHome.nrm) }
+      }
+      if (!mesh || !mesh.nVerts) {
+        log('Mesh: Poisson produced no surface — try a lower depth or check the cloud/normals', 'warn', 'Products')
+        reconStatus.value = 'done'
+        return
+      }
+      upsertMeshCloud(mesh)
+      reconStatus.value = 'done'
+      await persist()
+    } catch (err) {
+      log(`Mesh error: ${err?.message ?? err}`, 'error', 'Products')
       reconStatus.value = 'error'
     }
   }
@@ -596,8 +807,9 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
   async function generateDem(settings = {}, onProgress) {
     const dense = clouds.value.find((c) => c.kind === 'dense')
     const sparse = mainSparseCloud.value
-    const src = dense?.points?.length ? dense : sparse
-    if (!src || !src.points.length) {
+    const src = dense?.count ? dense : sparse
+    const srcCount = src ? (src.kind === 'dense' ? src.count : src.points.length) : 0
+    if (!src || !srcCount) {
       log('DEM: build a point cloud first', 'warn', 'Products')
       return
     }
@@ -611,8 +823,11 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     }
     reconStatus.value = 'running'
     try {
-      // Plain copies: cloud state is reactive (Vue proxies can't be cloned).
-      const points = src.points.map((p) => ({ x: p.x, y: p.y, z: p.z }))
+      // Plain copies: cloud state is reactive (Vue proxies can't be cloned). Dense
+      // clouds are flat typed arrays — read xyz straight out (colour isn't needed).
+      const points = src.kind === 'dense'
+        ? Array.from({ length: src.count }, (_, i) => ({ x: src.pos[i*3], y: src.pos[i*3+1], z: src.pos[i*3+2] }))
+        : src.points.map((p) => ({ x: p.x, y: p.y, z: p.z }))
       const cameras = [...(sparse?.cameras ?? new Map()).entries()].map(([uuid, cam]) => ({
         uuid, R: cam.R.map((r) => [...r]), t: [...cam.t], K: { ...cam.K },
       }))
@@ -639,6 +854,13 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     if (!dem.value) { log('Ortho: build a DEM first', 'warn', 'Products'); return }
     const maps = [...depthMaps.value.values()]
     if (!maps.length) { log('Ortho: compute depth maps first', 'warn', 'Products'); return }
+    // A failed densify transfers (and loses) the depth buffers; a detached typed
+    // array reports byteLength 0. Refuse rather than reproject empty planes.
+    if (maps.some((m) => m.depth.byteLength === 0 || m.rgb.byteLength === 0)) {
+      depthMaps.value = new Map()
+      log('Ortho: depth maps were released by a prior densify — recompute them first', 'warn', 'Products')
+      return
+    }
     reconStatus.value = 'running'
     try {
       const d = dem.value
@@ -832,6 +1054,34 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
   function deserializeCloud(c) {
     const N = c.pointCount ?? 0
     const b = c.buffers || {}
+    // Dense clouds restore into the flat { count, pos:Float32, col:Uint8 } shape.
+    // On-disk pos is Float64 (uniform sidecar format); narrow it to Float32 in memory.
+    if (c.kind === 'dense') {
+      const posF = b.pos ? Float32Array.from(new Float64Array(b.pos)) : new Float32Array(0)
+      const col = c.hasColor && b.col ? new Uint8Array(b.col) : null
+      // Normals stay Float32 on disk; undefined when the run produced none (no heal).
+      const nrm = c.hasNormals && b.nrm ? new Float32Array(b.nrm) : null
+      return {
+        id: c.id ?? makeCloudId(), name: c.name ?? 'Dense cloud', kind: 'dense',
+        createdAt: c.createdAt ?? Date.now(), cameras: markRaw(new Map()),
+        ...(c.imported ? { imported: true } : {}),
+        count: N, pos: markRaw(posF), col: markRaw(col),
+        ...(nrm ? { nrm: markRaw(nrm) } : {}),
+      }
+    }
+    if (c.kind === 'mesh') {
+      const nVerts = c.nVerts ?? N
+      const posF = b.pos ? Float32Array.from(new Float64Array(b.pos)) : new Float32Array(0)
+      const col = c.hasColor && b.col ? new Uint8Array(b.col) : null
+      const idx = b.idx ? new Uint32Array(b.idx) : new Uint32Array(0)
+      return {
+        id: c.id ?? makeCloudId(), name: c.name ?? 'Mesh', kind: 'mesh',
+        createdAt: c.createdAt ?? Date.now(), cameras: markRaw(new Map()),
+        ...(c.imported ? { imported: true } : {}),
+        count: c.triCount ?? (idx.length / 3), nVerts,
+        pos: markRaw(posF), idx: markRaw(idx), col: markRaw(col),
+      }
+    }
     const pos = b.pos ? new Float64Array(b.pos) : new Float64Array(0)
     const col = c.hasColor && b.col ? new Uint8Array(b.col) : null
     const vcount = b.vcount ? new Uint32Array(b.vcount) : null
@@ -880,6 +1130,24 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
   // Legacy inline shape (points embedded in JSON) — kept so a pre-binary project
   // still opens. New projects always write version 2.
   function legacyDeserializeCloud(c) {
+    // Legacy dense clouds embedded points as objects; fold them into the flat shape.
+    if (c.kind === 'dense') {
+      const src = c.points || []
+      const n = src.length
+      const pos = new Float32Array(n * 3)
+      const col = new Uint8Array(n * 3)
+      for (let i = 0; i < n; i++) {
+        const p = src[i]
+        pos[i*3] = p.x; pos[i*3+1] = p.y; pos[i*3+2] = p.z
+        const cc = p.color || [200, 200, 200]
+        col[i*3] = cc[0]; col[i*3+1] = cc[1]; col[i*3+2] = cc[2]
+      }
+      return {
+        id: c.id ?? makeCloudId(), name: c.name ?? 'Dense cloud', kind: 'dense',
+        createdAt: c.createdAt ?? Date.now(), cameras: markRaw(new Map()),
+        count: n, pos: markRaw(pos), col: markRaw(col),
+      }
+    }
     const map = new Map()
     for (const cam of c.cameras || []) { const { uuid, R, t, K } = cam; map.set(uuid, { R, t, K }) }
     return {
@@ -958,8 +1226,10 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     gcpAccuracyReport,
     generateDem,
     generateOrtho,
+    generateMesh,
     reconstruct,
     importColmapModel,
+    importCloud,
     computeDepthMaps,
     densify,
     restore,

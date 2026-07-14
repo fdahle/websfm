@@ -3,6 +3,8 @@ import { ref, watch, computed, onMounted, onBeforeUnmount } from 'vue'
 import { maskFromSource, invertMaskPixels, anyExcluded } from '../../core/mask.js'
 import { depthColor } from '../../core/products/colormap.js'
 import { fitFiducialAffine, mmToScan } from '../../core/sfm/fiducials.js'
+import { segmentEncode, segmentDecode, segmentForget } from '../../workers/computeClient.js'
+import { logitsToBinaryMask } from '../../core/segment/sam2.js'
 import MaskToolbar from './MaskToolbar.vue'
 
 const props = defineProps({
@@ -115,15 +117,30 @@ const hasMask = ref(!!props.image.mask)
 
 // Mask-edit tool state (local: the floating toolbar and this viewer are the
 // only consumers; per-tab persistence comes free from v-show-kept instances).
-const tool        = ref(null)   // 'brush' | 'erase' | 'rect' | null (pan while editing)
+const tool        = ref(null)   // 'brush' | 'erase' | 'rect' | 'smart' | null (pan while editing)
 const brushRadius = ref(20)     // screen pixels — constant on screen, ÷scale in image space
 const maskOpacity = ref(0.45)   // red-overlay alpha while editing/viewing
+
+// Smart Select (SAM2 click-to-segment). The image is encoded once when the tool
+// is activated; each click decodes a *fresh* candidate segment (clicks are
+// independent — a plain click resets to one positive point at that spot), which
+// is previewed (cyan) until the user commits it into the red mask or discards it.
+const smartStatus     = ref('')      // toolbar status line
+const smartHasPreview = ref(false)   // a candidate segment is currently shown
+let smartEnc = null                  // { width, height } of the encoded raster (aspect-preserved ≤ maxDim)
+let smartPoints = []                 // [{ x, y, positive }] in encoded-raster px
+let smartResult = null               // { logits:Float32Array, mw, mh } last decode (raw low-res)
+let smartPreviewCanvas = null        // OffscreenCanvas cyan candidate overlay
+let smartBusy = false, smartDirty = false // coalesce overlapping decodes
+let smartDown = null                 // { x, y, alt } pending click-vs-drag while Smart tool active
+let smartMoved = false               // pointer moved past the click threshold → it's a pan, not a click
 // Undo/redo as stacks of persisted mask dataUrls (null = no mask). Snapshots are
 // the *previous* store value taken just before each committed change, so memory
 // cost is a handful of compressed PNG strings, not raw pixel buffers.
 const undoStack = ref([])
 const redoStack = ref([])
 const UNDO_MAX = 10
+let maskDirty = false // uncommitted mask edits pending a flush to the store on close
 
 let rectDrag = null // { x0, y0, x1, y1, erase } image-px corners of an in-flight rectangle
 
@@ -250,11 +267,21 @@ function drawOverlay() {
     drawLegend(ctx, h, legendSlot++, DEPTH_STOPS, 'near', 'far', 'depth')
   }
 
-  // Mask — red semi-transparent overlay at image position
-  if (maskOffscreen && hasMask.value && props.showMask) {
+  // Mask — red semi-transparent overlay at image position. Always shown while
+  // editing (regardless of the view toggle) so you can see what you're painting.
+  if (maskOffscreen && hasMask.value && (props.showMask || props.maskEdit)) {
     ctx.save()
     ctx.globalAlpha = maskOpacity.value
     ctx.drawImage(maskOffscreen, tx.value, ty.value, dispW, dispH)
+    ctx.restore()
+  }
+
+  // Smart Select candidate — cyan preview overlay (uncommitted) while the tool is active.
+  if (props.maskEdit && tool.value === 'smart' && smartPreviewCanvas) {
+    ctx.save()
+    ctx.imageSmoothingEnabled = true // smooth the low-res preview edges
+    ctx.globalAlpha = 0.55
+    ctx.drawImage(smartPreviewCanvas, tx.value, ty.value, dispW, dispH)
     ctx.restore()
   }
 
@@ -518,7 +545,25 @@ function snapshotForUndo() {
 const canUndo = computed(() => undoStack.value.length > 0)
 const canRedo = computed(() => redoStack.value.length > 0)
 
-// Restore a snapshot onto the canvas and re-emit it as the persisted mask.
+// Push the mask to the store. While mask-edit is open we DON'T persist every
+// commit (no OPFS write / log / sync per stroke or Smart click) — the store just
+// updates its in-memory copy (so undo/redo, overlay, and the sidebar badge stay
+// live) and we mark it dirty; the single flush happens when editing closes
+// (flushMask). Outside edit mode (ribbon/sidebar clear/import) we persist at once.
+function persistMask(url) {
+  if (props.maskEdit) { maskDirty = true; emit('update-mask', url, false) }
+  else emit('update-mask', url, true)
+}
+
+// Persist the current in-memory mask once (on closing edit / unmount) if any
+// edit happened this session.
+function flushMask() {
+  if (!maskDirty) return
+  maskDirty = false
+  emit('update-mask', props.image.mask?.dataUrl ?? null, true)
+}
+
+// Restore a snapshot onto the canvas and re-emit it as the (deferred) mask.
 function applyMaskUrl(url) {
   if (url) {
     loadMaskFromDataUrl(url)
@@ -527,7 +572,7 @@ function applyMaskUrl(url) {
     hasMask.value = false
     drawOverlay()
   }
-  emit('update-mask', url)
+  persistMask(url)
 }
 
 function undoMask() {
@@ -578,7 +623,7 @@ async function invertMask() {
   hasMask.value = excluded > 0
   drawOverlay()
   if (excluded > 0) await exportMask()
-  else emit('update-mask', null)
+  else persistMask(null)
 }
 
 // True when the mask canvas has no excluded pixels left (e.g. after erasing the
@@ -598,7 +643,7 @@ async function exportMask(checkEmpty = false) {
   if (!maskOffscreen) return
   if (checkEmpty && maskCanvasEmpty()) {
     hasMask.value = false
-    emit('update-mask', null)
+    persistMask(null)
     return
   }
   const blob   = await maskOffscreen.convertToBlob({ type: 'image/png' })
@@ -608,7 +653,7 @@ async function exportMask(checkEmpty = false) {
     fr.readAsDataURL(blob)
   })
   hasMask.value = true
-  emit('update-mask', dataUrl)
+  persistMask(dataUrl)
 }
 
 // Clear is undoable (snapshot first) — no confirm dialog needed anymore.
@@ -617,8 +662,121 @@ function clearMask() {
   snapshotForUndo()
   maskOffscreen.getContext('2d').clearRect(0, 0, maskOffscreen.width, maskOffscreen.height)
   hasMask.value = false
-  emit('update-mask', null)
+  persistMask(null)
   drawOverlay()
+}
+
+// ── Smart Select (SAM2) ─────────────────────────────────────────────────────────
+
+// Build an OffscreenCanvas(w,h) painting `rgba` where the binary mask is 1, else
+// transparent. Used for both the cyan preview and the red commit blit.
+function buildMaskCanvas(mask, w, h, rgba) {
+  const c = new OffscreenCanvas(w, h)
+  const cx = c.getContext('2d')
+  const id = cx.createImageData(w, h)
+  const d = id.data
+  for (let i = 0; i < w * h; i++) {
+    if (mask[i]) { d[i * 4] = rgba[0]; d[i * 4 + 1] = rgba[1]; d[i * 4 + 2] = rgba[2]; d[i * 4 + 3] = rgba[3] }
+  }
+  cx.putImageData(id, 0, 0)
+  return c
+}
+
+// Encode the current image once (heavy, ~1s; the model itself loads once for the
+// whole session). Cached per uuid in the worker; smartEnc caches the raster dims.
+async function ensureEncoded() {
+  if (smartEnc || smartStatus.value === 'encoding') return
+  const img = props.image
+  if (!img?.uuid) return
+  smartStatus.value = 'encoding'
+  try {
+    const r = await segmentEncode(img.uuid, img.computeUrl ?? img.url)
+    smartEnc = { width: r.width, height: r.height }
+    smartStatus.value = 'ready — click an object'
+  } catch (err) {
+    smartStatus.value = 'encode failed'
+    console.error('SAM2 encode failed:', err)
+  }
+}
+
+// Decode the current smartPoints into a candidate segment, coalescing overlapping
+// clicks (one decode in flight; a click mid-decode re-runs afterward).
+async function runSmartDecode() {
+  if (!smartEnc || !smartPoints.length) return
+  if (smartBusy) { smartDirty = true; return }
+  smartBusy = true
+  smartStatus.value = 'segmenting…'
+  try {
+    do {
+      smartDirty = false
+      const pts = smartPoints.map((p) => ({ ...p }))
+      const res = await segmentDecode(props.image.uuid, pts)
+      smartResult = { logits: res.logits, mw: res.mw, mh: res.mh }
+      // Preview at the encoded raster resolution (fast); the smoothed overlay hides
+      // its coarseness. The COMMIT re-upsamples the same logits to native res.
+      const pv = logitsToBinaryMask(res.logits, res.mw, res.mh, smartEnc.width, smartEnc.height)
+      smartPreviewCanvas = buildMaskCanvas(pv, smartEnc.width, smartEnc.height, [80, 200, 255, 255])
+      smartHasPreview.value = true
+      smartStatus.value = `preview · IoU ${res.iou?.toFixed?.(2) ?? '—'} — Enter to add`
+      drawOverlay()
+    } while (smartDirty)
+  } catch (err) {
+    smartStatus.value = 'segment failed'
+    console.error('SAM2 decode failed:', err)
+  } finally {
+    smartBusy = false
+  }
+}
+
+// A click in the image (native px). Plain click = fresh single-point segment
+// (independent). Alt-click refines the current candidate by adding a negative
+// point (carves the region back). Coords map native px → encoded-raster px.
+async function smartClick(px, py, negative) {
+  if (!smartEnc) { await ensureEncoded(); if (!smartEnc) return }
+  const img = imgEl.value
+  const ex = px * smartEnc.width / img.naturalWidth
+  const ey = py * smartEnc.height / img.naturalHeight
+  if (negative && smartPoints.length) smartPoints.push({ x: ex, y: ey, positive: false })
+  else smartPoints = [{ x: ex, y: ey, positive: true }]
+  await runSmartDecode()
+}
+
+// Commit the previewed segment into the red mask canvas (add), then clear the
+// preview so the next click starts fresh. Undoable like every other mask edit.
+async function commitSmart() {
+  if (!smartResult || !maskOffscreen) return
+  // Upsample the raw 256² logits straight to NATIVE image resolution (bilinear +
+  // threshold) — a much finer boundary than scaling a pre-thresholded low-res
+  // mask up. The red canvas is then blitted 1:1 into the (native-sized) mask.
+  const { logits, mw, mh } = smartResult
+  const nat = logitsToBinaryMask(logits, mw, mh, maskOffscreen.width, maskOffscreen.height)
+  const red = buildMaskCanvas(nat, maskOffscreen.width, maskOffscreen.height, [255, 0, 0, 255])
+  snapshotForUndo()
+  const ctx = maskOffscreen.getContext('2d')
+  ctx.globalCompositeOperation = 'source-over'
+  ctx.drawImage(red, 0, 0)
+  hasMask.value = true
+  discardSmart()
+  await exportMask()
+}
+
+// Drop the current candidate without touching the committed mask.
+function discardSmart() {
+  smartPoints = []
+  smartResult = null
+  smartPreviewCanvas = null
+  smartHasPreview.value = false
+  if (smartStatus.value !== 'encoding') smartStatus.value = smartEnc ? 'ready — click an object' : ''
+  drawOverlay()
+}
+
+// Reset all Smart state (image switch / leaving edit). Frees the worker's cached
+// embedding for the old image.
+function resetSmart(forgetUuid) {
+  discardSmart()
+  smartEnc = null
+  smartStatus.value = ''
+  if (forgetUuid) segmentForget(forgetUuid)
 }
 
 function triggerMaskImport() {
@@ -820,6 +978,15 @@ function onMouseDown(e) {
     const { x, y } = getViewportCoords(e)
     strokeHit = paintAt(x, y) || strokeHit
     drawOverlay()
+  } else if (activeTool === 'smart' && e.button === 0) {
+    // Arm BOTH a pan and a pending segment click — a real drag pans, a click (no
+    // movement past the threshold, decided in onMouseUp) segments. So the Smart
+    // tool still lets you move around without a modifier.
+    const { x, y } = getViewportCoords(e)
+    smartDown = { x, y, alt: e.altKey }
+    smartMoved = false
+    dragging.value = true
+    startX = e.clientX; startY = e.clientY; startTx = tx.value; startTy = ty.value
   } else if (e.button === 0) {
     dragging.value = true
     startX  = e.clientX
@@ -839,6 +1006,9 @@ function onMouseMove(e) {
   } else if (isDrawing && tool.value) {
     strokeHit = paintAt(x, y) || strokeHit
   } else if (dragging.value) {
+    // Once the pointer moves past a small threshold, a Smart-tool press is a pan,
+    // not a segment click.
+    if (smartDown && !smartMoved && Math.hypot(e.clientX - startX, e.clientY - startY) > 4) smartMoved = true
     tx.value = startTx + (e.clientX - startX)
     ty.value = startTy + (e.clientY - startY)
   }
@@ -866,6 +1036,16 @@ function onMouseMove(e) {
 }
 
 async function onMouseUp() {
+  // Smart tool: a press that didn't drag is a segment click; a drag was a pan.
+  if (smartDown) {
+    const down = smartDown, moved = smartMoved
+    smartDown = null; smartMoved = false; dragging.value = false
+    if (!moved) {
+      const pix = toImagePixel(down.x, down.y)
+      if (pix) await smartClick(pix.px, pix.py, down.alt) // Alt-click = refine (negative)
+    }
+    return
+  }
   if (rectDrag) { await commitRect(); return }
   if (isDrawing) {
     isDrawing = false
@@ -879,6 +1059,7 @@ async function onMouseUp() {
 function onMouseLeave() {
   dragging.value = false
   rectDrag = null // cancel an in-flight rectangle rather than guessing its corner
+  smartDown = null; smartMoved = false // cancel a pending Smart click/pan
   if (isDrawing) { isDrawing = false; if (strokeHit) { snapshotForUndo(); exportMask(tool.value === 'erase') } }
   mousePos      = null
   hoverPx.value = null
@@ -941,13 +1122,26 @@ watch(() => props.isFilm,            () => drawOverlay())
 watch(() => props.showFiducials,     () => drawOverlay())
 watch(() => props.fiducialMarks,     () => drawOverlay(), { deep: true })
 
-// Entering edit mode arms the brush; leaving drops the tool + any in-flight rect.
+// Entering edit mode arms the brush; leaving drops the tool + any in-flight rect
+// and clears any Smart Select candidate.
 watch(() => props.maskEdit, (on) => {
   tool.value = on ? 'brush' : null
-  if (!on) rectDrag = null
+  if (!on) { rectDrag = null; discardSmart(); flushMask() } // persist the session's edits once
   drawOverlay()
 })
-watch(tool, () => { rectDrag = null; drawOverlay() })
+watch(tool, (t, prev) => {
+  rectDrag = null
+  if (t === 'smart') ensureEncoded()       // encode this image (once) so clicks are ready
+  else if (prev === 'smart') discardSmart() // dropped Smart Select — clear its preview
+  drawOverlay()
+})
+
+// Switching the viewed image invalidates the SAM2 embedding — reset + free the
+// old one, and re-encode if Smart Select is the active tool.
+watch(() => props.image?.uuid, (uuid, prev) => {
+  resetSmart(prev)
+  if (props.maskEdit && tool.value === 'smart') ensureEncoded()
+})
 
 // Sync mask canvas when parent clears or replaces the mask externally
 watch(() => props.image.mask, (mask, prev) => {
@@ -984,10 +1178,16 @@ function onKeydown(e) {
   const k = e.key.toLowerCase()
   if ((e.ctrlKey || e.metaKey) && k === 'z') { e.preventDefault(); e.shiftKey ? redoMask() : undoMask(); return }
   if ((e.ctrlKey || e.metaKey) && k === 'y') { e.preventDefault(); redoMask(); return }
+  // Smart Select: Enter commits the previewed segment, Del/Backspace discards it.
+  if (tool.value === 'smart') {
+    if (e.key === 'Enter') { e.preventDefault(); if (smartHasPreview.value) commitSmart(); return }
+    if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); discardSmart(); return }
+  }
   if (e.ctrlKey || e.metaKey || e.altKey) return
   if      (k === 'b') tool.value = 'brush'
   else if (k === 'e') tool.value = 'erase'
   else if (k === 'r') tool.value = 'rect'
+  else if (k === 's') tool.value = 'smart'
   else if (k === 'i') invertMask()
   else if (e.key === '[') brushRadius.value = Math.max(4, brushRadius.value - 4)
   else if (e.key === ']') brushRadius.value = Math.min(80, brushRadius.value + 4)
@@ -1002,8 +1202,10 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  flushMask() // persist any pending mask edits if the tab is closed mid-edit
   resizeObserver?.disconnect()
   document.removeEventListener('keydown', onKeydown)
+  if (props.image?.uuid) segmentForget(props.image.uuid) // free the SAM2 embedding
 })
 
 defineExpose({ fit, zoomIn, zoomOut, triggerMaskImport, clearMask, triggerDepthImport, clearDepth })
@@ -1020,7 +1222,7 @@ defineExpose({ fit, zoomIn, zoomOut, triggerMaskImport, clearMask, triggerDepthI
       :class="{
         grabbing: dragging && (!maskEdit || !tool),
         drawing: maskEdit && (tool === 'brush' || tool === 'erase'),
-        crosshair: maskEdit && tool === 'rect',
+        crosshair: maskEdit && (tool === 'rect' || tool === 'smart'),
       }"
       @wheel="onWheel"
       @mousedown="onMouseDown"
@@ -1058,6 +1260,8 @@ defineExpose({ fit, zoomIn, zoomOut, triggerMaskImport, clearMask, triggerDepthI
         :has-mask="hasMask"
         :can-undo="canUndo"
         :can-redo="canRedo"
+        :smart-status="smartStatus"
+        :smart-has-preview="smartHasPreview"
         @set-tool="(t) => (tool = t)"
         @update:brush-radius="(r) => (brushRadius = r)"
         @update:opacity="(o) => { maskOpacity = o; drawOverlay() }"
@@ -1066,6 +1270,8 @@ defineExpose({ fit, zoomIn, zoomOut, triggerMaskImport, clearMask, triggerDepthI
         @redo="redoMask"
         @import="triggerMaskImport"
         @clear="clearMask"
+        @smart-commit="commitSmart"
+        @smart-discard="discardSmart"
         @close="emit('exit-mask-edit')"
       />
 

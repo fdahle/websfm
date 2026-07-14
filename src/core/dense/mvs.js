@@ -231,6 +231,12 @@ export async function depthMapForImage(ref, sources, points, settings = {}, comp
     hooks.onLog?.(`Dense: coarse-to-fine ${levels.length} levels (${sources.length} src) — ${plan}`, 'debug', 'Dense')
   }
   const baseSeed = (ref.width * 73856093) ^ (ref.height * 19349663)
+  // Per-level progress weights (this image is 0..1): a level's cost ≈ its pixels ×
+  // its iteration count, so the finest level dominates — the fraction advances after
+  // each level resolves (per-sweep would need a callback from the Rust kernel).
+  const levelWeight = levels.map((L, li) => L.w * L.h * (iterations + (levels.length - 1 - li)))
+  const totalWeight = levelWeight.reduce((a, b) => a + b, 0) || 1
+  let doneWeight = 0
   let dm = null, prevDepth = null, prevW = 0, prevH = 0
   for (let li = 0; li < levels.length; li++) {
     const L = levels[li]
@@ -248,6 +254,8 @@ export async function depthMapForImage(ref, sources, points, settings = {}, comp
     })
     if (!dm) return null
     prevDepth = dm.depth; prevW = L.w; prevH = L.h
+    doneWeight += levelWeight[li]
+    hooks.onProgress?.(doneWeight / totalWeight)
   }
 
   // GPU↔CPU validation (WebGPU port). Two checks against the first source:
@@ -355,24 +363,47 @@ export function autoBestK(nSources) {
   return Math.min(4, Math.max(1, Math.ceil(nSources / 2)))
 }
 
-// Auto fusion cost threshold: the `percentile` (default p70) of the pooled
-// valid-pixel costs across all depth maps, clamped to [lo, hi]. After Step 1 the
+// Auto fusion cost threshold + median: the `percentile` (default p70) and median of
+// the valid-pixel costs across all depth maps, clamped to [lo, hi]. After Step 1 the
 // per-pixel cost histogram is meaningful (no-measurement sources no longer floor
 // it), so the gate can adapt to the data instead of a fixed 0.6. The upper clamp
 // is deliberately tight (0.45): a genuine ZNCC match is ≥ ~0.55 (cost ≤ 0.45), so
 // a p70 above that means the distribution itself is weak (bad intrinsics / window
-// / working resolution) — keeping such points would only fuse junk. Returns
-// { maxCost, n, raw } (raw = unclamped p70, so callers can flag a weak signal).
-export function autoFusionMaxCost(maps, { percentile = 0.7, lo = 0.3, hi = 0.45 } = {}) {
-  const costs = []
+// / working resolution) — keeping such points would only fuse junk.
+//
+// Costs are **stride-subsampled** into a single Float32Array and sorted once, so
+// the whole set can pool tens of millions of pixels without a per-pixel JS-boxed
+// array (the double-sort memory hog). `n` is the true valid-pixel count; `median`
+// feeds the run summary (replaces the old second full pool + sort in medianOf).
+// Returns { maxCost, n, raw, median } (raw = unclamped p70, so callers can flag a
+// weak signal).
+export function autoFusionMaxCost(maps, {
+  percentile = 0.7, lo = 0.3, hi = 0.45, maxSamples = DENSE_TUNING.fuseCostMaxSamples,
+} = {}) {
+  // One cheap scan for the true valid count → a stride that caps the sample budget.
+  let totalValid = 0
+  for (const m of maps) {
+    const { depth } = m
+    for (let i = 0; i < depth.length; i++) if (depth[i] > 0) totalValid++
+  }
+  if (!totalValid) return { maxCost: hi, n: 0, raw: hi, median: 0 }
+  const stride = Math.max(1, Math.floor(totalValid / maxSamples))
+  const samples = new Float32Array(Math.ceil(totalValid / stride) + 1)
+  let s = 0, vi = 0
   for (const m of maps) {
     const { depth, cost } = m
-    for (let i = 0; i < depth.length; i++) if (depth[i] > 0) costs.push(cost[i])
+    for (let i = 0; i < depth.length; i++) {
+      if (depth[i] > 0) {
+        if (vi % stride === 0 && s < samples.length) samples[s++] = cost[i]
+        vi++
+      }
+    }
   }
-  if (!costs.length) return { maxCost: hi, n: 0, raw: hi }
-  costs.sort((a, b) => a - b)
-  const q = costs[Math.min(costs.length - 1, Math.max(0, Math.round(percentile * (costs.length - 1))))]
-  return { maxCost: Math.min(hi, Math.max(lo, q)), n: costs.length, raw: q }
+  const arr = samples.subarray(0, s)
+  arr.sort() // TypedArray.sort is numeric ascending
+  const at = (q) => arr[Math.min(s - 1, Math.max(0, Math.round(q * (s - 1))))]
+  const q = at(percentile)
+  return { maxCost: Math.min(hi, Math.max(lo, q)), n: totalValid, raw: q, median: at(0.5) }
 }
 
 // ── Stage B: fusion ──────────────────────────────────────────────────────────
@@ -402,18 +433,23 @@ export function mergePointsSpatial(points, cellSize) {
   for (const p of points) {
     const key = `${Math.floor(p.x * inv)},${Math.floor(p.y * inv)},${Math.floor(p.z * inv)}`
     let acc = cells.get(key)
-    if (!acc) { acc = { x: 0, y: 0, z: 0, r: 0, g: 0, b: 0, n: 0 }; cells.set(key, acc) }
+    if (!acc) { acc = { x: 0, y: 0, z: 0, r: 0, g: 0, b: 0, nx: 0, ny: 0, nz: 0, n: 0 }; cells.set(key, acc) }
     acc.x += p.x; acc.y += p.y; acc.z += p.z
     acc.r += p.color[0]; acc.g += p.color[1]; acc.b += p.color[2]
+    if (p.normal) { acc.nx += p.normal[0]; acc.ny += p.normal[1]; acc.nz += p.normal[2] }
     acc.n++
   }
   const out = []
   for (const a of cells.values()) {
     const k = 1 / a.n
-    out.push({
+    const o = {
       x: a.x * k, y: a.y * k, z: a.z * k,
       color: [Math.round(a.r * k), Math.round(a.g * k), Math.round(a.b * k)],
-    })
+    }
+    // Renormalized averaged normal (matches finalizeNormals); (0,0,1) fallback.
+    const mag = Math.hypot(a.nx, a.ny, a.nz)
+    o.normal = mag > 1e-9 ? [a.nx / mag, a.ny / mag, a.nz / mag] : [0, 0, 1]
+    out.push(o)
   }
   return out
 }
@@ -437,9 +473,117 @@ function autoMergeCell(maps) {
   return gsds[gsds.length >> 1]
 }
 
-export function fuseDepthMaps(maps, opts = {}, onLog = () => {}) {
+// Streaming voxel accumulator: the fusion loop feeds kept pixels **one at a time**
+// into this, so the raw per-source-pixel point list — the fusion OOM (25–30 M boxed
+// {x,y,z,color} objects ≈ 3 GB on a 50-image set) — never materializes. It's the
+// spatial merge of `mergePointsSpatial` done incrementally: cells are anchored at
+// the world origin (`floor(coord/cell)`), identical to that function, so the merged
+// cells/averages match exactly. Storage is a `Map<numeric key → slot idx>` plus
+// parallel growable typed-array sums (~44 B per *merged cell* ≈ one ground pixel,
+// vs ~200 B per raw point). Cell keys are packed numerically — `(dix·ny+diy)·nz+diz`
+// — from per-axis offsets/counts derived from `bounds`; the caller keeps the product
+// < 2^53 (float64-exact) via clampCellForBounds. `bounds` may be a coarse estimate:
+// out-of-range offsets clamp into the border cell (a rare, negligible quality nick,
+// never a key collision).
+export function createVoxelAccumulator(cellSize, bounds) {
+  const inv = 1 / cellSize
+  const ix0 = Math.floor(bounds.minX * inv), iy0 = Math.floor(bounds.minY * inv), iz0 = Math.floor(bounds.minZ * inv)
+  const ix1 = Math.floor(bounds.maxX * inv), iy1 = Math.floor(bounds.maxY * inv), iz1 = Math.floor(bounds.maxZ * inv)
+  // Pad one cell each side so a point just past a coarse-estimated bound still packs
+  // to a unique in-range key instead of aliasing onto the opposite face.
+  const bx = ix0 - 1, by = iy0 - 1, bz = iz0 - 1
+  const nx = (ix1 - ix0) + 3, ny = (iy1 - iy0) + 3, nz = (iz1 - iz0) + 3
+  const slot = new Map()
+  let cap = 1024, n = 0
+  let sx = new Float64Array(cap), sy = new Float64Array(cap), sz = new Float64Array(cap)
+  let sr = new Float64Array(cap), sg = new Float64Array(cap), sb = new Float64Array(cap)
+  // World-space normal sums (Phase: Poisson meshing). Averaging unit normals then
+  // renormalizing is a valid orientation estimate; the k coincident shell points a
+  // surface produces all carry ~the same normal, so the sum stays well-conditioned.
+  let snx = new Float64Array(cap), sny = new Float64Array(cap), snz = new Float64Array(cap)
+  let cnt = new Uint32Array(cap)
+  const grow = () => {
+    cap *= 2
+    const g = (a, T) => { const b = new T(cap); b.set(a); return b } // tail zero-filled
+    sx = g(sx, Float64Array); sy = g(sy, Float64Array); sz = g(sz, Float64Array)
+    sr = g(sr, Float64Array); sg = g(sg, Float64Array); sb = g(sb, Float64Array)
+    snx = g(snx, Float64Array); sny = g(sny, Float64Array); snz = g(snz, Float64Array)
+    cnt = g(cnt, Uint32Array)
+  }
+  const clamp = (i, hi) => (i < 0 ? 0 : (i >= hi ? hi - 1 : i))
+  return {
+    // Normals (nx,ny,nz) are optional (world-space, unit) — omitted callers still
+    // get the exact same cells/averages for the 6-float wire format.
+    add(x, y, z, r, g, b, nx_ = 0, ny_ = 0, nz_ = 0) {
+      const dix = clamp(Math.floor(x * inv) - bx, nx)
+      const diy = clamp(Math.floor(y * inv) - by, ny)
+      const diz = clamp(Math.floor(z * inv) - bz, nz)
+      const key = (dix * ny + diy) * nz + diz
+      let s = slot.get(key)
+      if (s === undefined) { if (n === cap) grow(); s = n++; slot.set(key, s) } // fresh slot is zeroed
+      sx[s] += x; sy[s] += y; sz[s] += z
+      sr[s] += r; sg[s] += g; sb[s] += b
+      snx[s] += nx_; sny[s] += ny_; snz[s] += nz_
+      cnt[s]++
+    },
+    get count() { return n },
+    // Finalize straight into the wire format the densify op returns: a flat
+    // Float32Array of [x,y,z,r,g,b] per merged cell (no intermediate objects).
+    finalizeFlat() {
+      const out = new Float32Array(n * 6)
+      for (let s = 0; s < n; s++) {
+        const k = 1 / cnt[s], o = s * 6
+        out[o] = sx[s] * k; out[o + 1] = sy[s] * k; out[o + 2] = sz[s] * k
+        out[o + 3] = Math.round(sr[s] * k); out[o + 4] = Math.round(sg[s] * k); out[o + 5] = Math.round(sb[s] * k)
+      }
+      return out
+    },
+    // Averaged, renormalized world-space normals as a flat Float32Array(3N) — the
+    // Poisson solver's oriented-normal input. Cells whose contributors cancelled to
+    // a near-zero vector (disagreeing views) fall back to (0,0,1); count returned.
+    finalizeNormals() {
+      const out = new Float32Array(n * 3)
+      let degenerate = 0
+      for (let s = 0; s < n; s++) {
+        const o = s * 3
+        const ax = snx[s], ay = sny[s], az = snz[s]
+        const mag = Math.hypot(ax, ay, az)
+        if (mag > 1e-9) { out[o] = ax / mag; out[o + 1] = ay / mag; out[o + 2] = az / mag }
+        else { out[o] = 0; out[o + 1] = 0; out[o + 2] = 1; degenerate++ }
+      }
+      return { nrm: out, degenerate }
+    },
+  }
+}
+
+// Packed-key cell count for `bounds` at `cell` (matches createVoxelAccumulator's
+// nx·ny·nz). Used to keep the key float64-exact.
+function boundsCellProduct(bounds, cell) {
+  const inv = 1 / cell
+  const nx = Math.floor(bounds.maxX * inv) - Math.floor(bounds.minX * inv) + 3
+  const ny = Math.floor(bounds.maxY * inv) - Math.floor(bounds.minY * inv) + 3
+  const nz = Math.floor(bounds.maxZ * inv) - Math.floor(bounds.minZ * inv) + 3
+  return nx * ny * nz
+}
+
+// Clamp a requested cell size UP until the packed cell key stays exact in float64
+// (product < fuseMaxCells). A degenerate/huge scene (or a near-zero requested cell)
+// would otherwise overflow 2^53 and alias distinct cells together.
+function clampCellForBounds(bounds, cell) {
+  let c = cell > 0 ? cell : 1e-6
+  let iter = 0
+  while (boundsCellProduct(bounds, c) > DENSE_TUNING.fuseMaxCells && iter++ < 64) c *= 2
+  return c
+}
+
+export function fuseDepthMaps(maps, opts = {}, onLog = () => {}, hooks = {}) {
   // depthTolRel/step are user-facing (DENSE_FUSE_DEFAULTS); consistencyPx is internal (tuning.js).
   const { consistencyPx = DENSE_TUNING.consistencyPx, depthTolRel = 0.01, step = 1 } = opts
+  const { onProgress } = hooks
+
+  // Cost histogram (sampled, one sort) — drives both the auto gate and the summary
+  // median, so it's computed once regardless of whether maxCost is overridden.
+  const costStats = autoFusionMaxCost(maps)
 
   // Derived defaults (Step 3): when the user hasn't overridden them, adapt to the
   // data. minViews = min(2, nMaps−1) so a 2-image project can still fuse (needs 1
@@ -447,14 +591,13 @@ export function fuseDepthMaps(maps, opts = {}, onLog = () => {}) {
   const minViews = opts.minViews != null ? opts.minViews : Math.max(1, Math.min(2, maps.length - 1))
   let maxCost = opts.maxCost
   if (maxCost == null) {
-    const auto = autoFusionMaxCost(maps)
-    maxCost = auto.maxCost
-    onLog(`Fusion: auto maxCost ${maxCost.toFixed(2)} (p70 of ${auto.n} valid px, raw ${auto.raw.toFixed(2)})`, 'info', 'Dense')
+    maxCost = costStats.maxCost
+    onLog(`Fusion: auto maxCost ${maxCost.toFixed(2)} (p70 of ${costStats.n} valid px, raw ${costStats.raw.toFixed(2)})`, 'info', 'Dense')
     // A real ZNCC match is ≥ ~0.55 (cost ≤ 0.45). A raw p70 above 0.55 means the
     // photoconsistency signal is weak across the whole set — the problem is
     // upstream, not the fusion gate; say so instead of silently keeping junk.
-    if (auto.raw > 0.55) {
-      onLog(`Fusion: weak cost distribution — raw p70 ${auto.raw.toFixed(2)} > 0.55 (median ZNCC < 0.45). `
+    if (costStats.raw > 0.55) {
+      onLog(`Fusion: weak cost distribution — raw p70 ${costStats.raw.toFixed(2)} > 0.55 (median ZNCC < 0.45). `
         + `Check intrinsics / window size / working resolution; the kept fraction below will be low by design.`,
         'warn', 'Dense')
     }
@@ -466,9 +609,6 @@ export function fuseDepthMaps(maps, opts = {}, onLog = () => {}) {
 
   // Cameras for reprojection consistency checks.
   const cams = maps.map((m) => ({ R: m.R, t: m.t, K: m.K, m }))
-
-  // Cull accounting (summed across all maps) so the user can see where pixels go.
-  let considered = 0, noDepth = 0, highCost = 0, failedConsistency = 0, kept = 0
 
   // Back-project a working pixel (u,v,depth) of map m to a world point.
   const unproject = (m, u, v, depth) => {
@@ -484,11 +624,71 @@ export function fuseDepthMaps(maps, opts = {}, onLog = () => {}) {
     }
   }
 
-  const out = []
+  // Scene bounds from a coarse valid-depth grid (fuseBboxStride-th row/col of each
+  // map) — enough to size the voxel-key packing without a full unprojection pass.
+  const bounds = { minX: Infinity, minY: Infinity, minZ: Infinity, maxX: -Infinity, maxY: -Infinity, maxZ: -Infinity }
+  const bboxStride = DENSE_TUNING.fuseBboxStride
   for (const m of maps) {
-    const { width: w, height: h, depth, cost, rgb } = m
+    const { width: w, height: h, depth } = m
+    for (let v = 0; v < h; v += bboxStride) {
+      for (let u = 0; u < w; u += bboxStride) {
+        const d = depth[v * w + u]
+        if (!(d > 0)) continue
+        const P = unproject(m, u, v, d)
+        if (P.x < bounds.minX) bounds.minX = P.x; if (P.x > bounds.maxX) bounds.maxX = P.x
+        if (P.y < bounds.minY) bounds.minY = P.y; if (P.y > bounds.maxY) bounds.maxY = P.y
+        if (P.z < bounds.minZ) bounds.minZ = P.z; if (P.z > bounds.maxZ) bounds.maxZ = P.z
+      }
+    }
+  }
+  const hasBounds = Number.isFinite(bounds.minX)
+  if (!hasBounds) { bounds.minX = bounds.minY = bounds.minZ = 0; bounds.maxX = bounds.maxY = bounds.maxZ = 0 }
+
+  // Merge cell in world units (≈ one ground-sample-distance), clamped up if the
+  // packed key would overflow float64. mergeCell: null ⇒ auto (median GSD); ≤0 ⇒
+  // "disabled" — streamed as a tiny cell so the flat output ≈ raw count but never a
+  // per-point object list (a true no-merge would resurrect the OOM). autoMergeCell
+  // and the cost histogram only read `maps`, so both resolve before the loop.
+  let mergeCell = opts.mergeCell != null ? opts.mergeCell : autoMergeCell(maps)
+  if (!(mergeCell > 0)) {
+    const auto = autoMergeCell(maps)
+    mergeCell = (auto > 0 ? auto : 1) * 1e-3
+    onLog(`Fusion: merge disabled — streaming near-unmerged at cell ${mergeCell.toExponential(2)} `
+      + `(flat output, no raw point objects)`, 'warn', 'Dense')
+  }
+  mergeCell = clampCellForBounds(bounds, mergeCell)
+  const acc = createVoxelAccumulator(mergeCell, bounds)
+
+  // Cull accounting (summed across all maps) so the user can see where pixels go.
+  let considered = 0, noDepth = 0, highCost = 0, failedConsistency = 0, kept = 0
+  let lastEmit = 0
+  const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now())
+
+  // Rotate a camera-frame direction to world: n_world = Rᵀ · n_cam (same convention
+  // as unproject's rotation block; no translation for a direction).
+  const rotToWorld = (m, nx_, ny_, nz_) => ({
+    x: m.R[0][0]*nx_ + m.R[1][0]*ny_ + m.R[2][0]*nz_,
+    y: m.R[0][1]*nx_ + m.R[1][1]*ny_ + m.R[2][1]*nz_,
+    z: m.R[0][2]*nx_ + m.R[1][2]*ny_ + m.R[2][2]*nz_,
+  })
+  let noNormalMaps = 0
+
+  for (let mi = 0; mi < maps.length; mi++) {
+    const m = maps[mi]
+    const { width: w, height: h, depth, cost, rgb, normals } = m
+    if (!normals) noNormalMaps++
+    // Camera centre C = −Rᵀt, for the view-direction normal fallback (stale caches).
+    const C = rotToWorld(m, -m.t[0], -m.t[1], -m.t[2])
     let mapKept = 0, mapConsidered = 0
     for (let v = 0; v < h; v += step) {
+      // Throttled progress: done = mapIdx + rowsDone/h, so the bar glides within a map.
+      if (onProgress) {
+        const t = now()
+        if (t - lastEmit >= DENSE_TUNING.fuseProgressMs) {
+          lastEmit = t
+          onProgress(mi + v / h, maps.length, m.uuid?.slice(0, 8) ?? '')
+        }
+      }
       for (let u = 0; u < w; u += step) {
         considered++; mapConsidered++
         const idx = v * w + u
@@ -529,8 +729,23 @@ export function fuseDepthMaps(maps, opts = {}, onLog = () => {}) {
         }
         if (agree < minViews) { failedConsistency++; continue }
 
+        // World-space oriented normal: rotate the converged camera-frame normal
+        // (nz<0 ⇒ facing camera ⇒ outward for aerial). No normals (stale cache) ⇒
+        // view direction (C − P) normalized — always camera-facing, never skipped.
+        let nwx, nwy, nwz
+        if (normals) {
+          const no = idx * 3
+          const nw = rotToWorld(m, normals[no], normals[no+1], normals[no+2])
+          nwx = nw.x; nwy = nw.y; nwz = nw.z
+        } else {
+          nwx = C.x - P.x; nwy = C.y - P.y; nwz = C.z - P.z
+        }
+        const nm = Math.hypot(nwx, nwy, nwz)
+        if (nm > 1e-9) { nwx /= nm; nwy /= nm; nwz /= nm } else { nwx = 0; nwy = 0; nwz = 1 }
+
+        // Stream straight into the voxel merge — no raw point ever exists.
         const o = idx * 3
-        out.push({ x: P.x, y: P.y, z: P.z, color: [rgb[o], rgb[o+1], rgb[o+2]] })
+        acc.add(P.x, P.y, P.z, rgb[o], rgb[o+1], rgb[o+2], nwx, nwy, nwz)
         kept++; mapKept++
       }
     }
@@ -538,51 +753,48 @@ export function fuseDepthMaps(maps, opts = {}, onLog = () => {}) {
       + `(${(100 * mapKept / Math.max(1, mapConsidered)).toFixed(1)}%)`, 'debug', 'Dense')
   }
 
+  onProgress?.(maps.length - 0.02 * maps.length, maps.length, 'Packing points…')
+
   // Where did the candidate pixels go? (kept + the three cull buckets = considered.)
   const pct = (n) => (100 * n / Math.max(1, considered)).toFixed(1)
   onLog(`Fusion: ${considered} candidate px → ${kept} kept (${pct(kept)}%); culled `
     + `${noDepth} no-depth (${pct(noDepth)}%), ${highCost} cost>${maxCost} (${pct(highCost)}%), `
     + `${failedConsistency} <${minViews} views (${pct(failedConsistency)}%)`, 'info', 'Dense')
 
-  // Spatial dedupe: fusion emits one point per source pixel, so a surface seen by k
-  // views yields k near-coincident "shell" points. Collapse them in world space (one
-  // averaged point per cell) — order-independent, and it recovers full resolution: at
-  // step 1 the raw count is 4× but the merge brings the output back to ~one point per
-  // ground pixel. mergeCell: null ⇒ auto (median GSD), 0 ⇒ disabled.
-  const rawCount = out.length
-  const mergeCell = opts.mergeCell != null ? opts.mergeCell : autoMergeCell(maps)
-  const merged = mergePointsSpatial(out, mergeCell)
-  if (merged.length !== rawCount) {
-    onLog(`Fusion: spatial merge cell ${mergeCell.toExponential(2)} — ${rawCount} → ${merged.length} pts `
-      + `(−${rawCount - merged.length} dupes, ${(100 * (rawCount - merged.length) / Math.max(1, rawCount)).toFixed(1)}%)`,
+  // The voxel merge already collapsed the per-source-pixel "shell" duplicates (a
+  // surface seen by k views → k coincident points → one averaged cell). Report it.
+  const cells = acc.count
+  if (cells !== kept) {
+    onLog(`Fusion: spatial merge cell ${mergeCell.toExponential(2)} — ${kept} → ${cells} pts `
+      + `(−${kept - cells} dupes, ${(100 * (kept - cells) / Math.max(1, kept)).toFixed(1)}%)`,
       'info', 'Dense')
   }
 
+  const flat = acc.finalizeFlat()
+  const { nrm, degenerate } = acc.finalizeNormals()
+  flat.nrm = nrm
+  if (noNormalMaps) {
+    onLog(`Fusion: ${noNormalMaps}/${maps.length} map(s) had no per-pixel normals — `
+      + `used view-direction fallback (re-run depth maps to refresh)`, 'warn', 'Dense')
+  }
+  if (degenerate) {
+    onLog(`Fusion: ${degenerate}/${cells} cell(s) had cancelling normals — set to (0,0,1)`, 'debug', 'Dense')
+  }
+
   // Q3: a small, persistable summary so successive dense runs are comparable
-  // (attached to the returned array — non-breaking for callers that just iterate).
+  // (attached to the returned typed array — non-breaking for callers that iterate).
   const denom = Math.max(1, considered)
-  merged.summary = {
-    costMedian: medianOf(maps),
+  flat.summary = {
+    costMedian: costStats.median,
     keptPct: 100 * kept / denom,
     mergeCell,
-    mergedPct: rawCount ? 100 * (rawCount - merged.length) / rawCount : 0,
+    mergedPct: kept ? 100 * (kept - cells) / kept : 0,
     cullBreakdown: {
       noDepthPct: 100 * noDepth / denom,
       highCostPct: 100 * highCost / denom,
       lowViewsPct: 100 * failedConsistency / denom,
     },
   }
-  return merged
-}
-
-// Median of the pooled valid-pixel costs across depth maps (dense-summary helper).
-function medianOf(maps) {
-  const costs = []
-  for (const m of maps) {
-    const { depth, cost } = m
-    for (let i = 0; i < depth.length; i++) if (depth[i] > 0) costs.push(cost[i])
-  }
-  if (!costs.length) return 0
-  costs.sort((a, b) => a - b)
-  return costs[costs.length >> 1]
+  flat.count = cells
+  return flat
 }

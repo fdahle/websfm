@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onBeforeUnmount } from 'vue'
 import ViewerMatch from '../viewers/ViewerMatch.vue'
 import MatchGraph from '../viewers/MatchGraph.vue'
 
@@ -12,6 +12,9 @@ const props = defineProps({
   hasSparse:      { type: Boolean, default: false },
   // UUIDs registered in the sparse model — for colouring nodes in the graph view.
   alignedUuids:   { type: Object, default: () => new Set() },
+  // pairId → Set("kpA:kpB") of correspondences that became surviving tie-points.
+  // Feeds the preview's aligned/unused (green/red) match colouring.
+  usedMatchesByPair: { type: Object, default: () => new Map() },
   // Imported camera positions keyed by uuid ({ x, y } in project CRS) — enables the
   // graph's geographic layout. Empty when no poses have been imported.
   nodePositions:  { type: Object, default: () => ({}) },
@@ -93,6 +96,36 @@ const selectedImgB = computed(() => {
 function selectMatch(pairId) {
   selectedPairId.value = selectedPairId.value === pairId ? null : pairId
 }
+
+// Draggable width of the left list panel (px). Clamped so it can't swallow the
+// preview or shrink below the table's usable width.
+const listWidth = ref(320)
+let resizing = null
+function startResize(e) {
+  resizing = { startX: e.clientX, startW: listWidth.value }
+  window.addEventListener('mousemove', onResize)
+  window.addEventListener('mouseup', stopResize)
+  e.preventDefault()
+}
+function onResize(e) {
+  if (!resizing) return
+  const w = resizing.startW + (e.clientX - resizing.startX)
+  listWidth.value = Math.max(220, Math.min(700, w))
+}
+function stopResize() {
+  resizing = null
+  window.removeEventListener('mousemove', onResize)
+  window.removeEventListener('mouseup', stopResize)
+}
+onBeforeUnmount(stopResize)
+
+// Used-correspondence keys for the selected pair — null until a sparse model
+// exists, so the preview draws neutral (undifferentiated) matches pre-alignment.
+const selectedUsedKeys = computed(() =>
+  props.hasSparse && selectedPairId.value
+    ? (props.usedMatchesByPair.get(selectedPairId.value) ?? new Set())
+    : null
+)
 </script>
 
 <template>
@@ -121,7 +154,7 @@ function selectMatch(pairId) {
             @toggle-disabled="toggleDisabled"
           />
         </div>
-        <div v-else class="list-panel">
+        <div v-else class="list-panel" :style="{ width: listWidth + 'px' }">
           <div v-if="!matchSummaries.length" class="empty">No matches yet — run Match Features first.</div>
           <template v-else>
             <div class="filter-bar">
@@ -131,19 +164,19 @@ function selectMatch(pairId) {
               </select>
               <button v-if="filterA" class="filter-clear" title="Clear filter" @click="filterA = ''">×</button>
             </div>
+            <div class="table-scroll">
             <table v-col-resize class="match-table">
               <thead>
                 <tr>
                   <th class="sortable" @click="sortBy('nameA')">Image A<span class="arrow">{{ sortKey === 'nameA' ? (sortDir === 'asc' ? '▲' : '▼') : '' }}</span></th>
                   <th class="sortable" @click="sortBy('nameB')">Image B<span class="arrow">{{ sortKey === 'nameB' ? (sortDir === 'asc' ? '▲' : '▼') : '' }}</span></th>
                   <th class="sortable num-col" @click="sortBy('inlierCount')">Matches<span class="arrow">{{ sortKey === 'inlierCount' ? (sortDir === 'asc' ? '▲' : '▼') : '' }}</span></th>
-                  <th class="sortable num-col" @click="sortBy('rawCount')">Candidates<span class="arrow">{{ sortKey === 'rawCount' ? (sortDir === 'asc' ? '▲' : '▼') : '' }}</span></th>
                   <th v-if="hasSparse" class="sortable num-col" @click="sortBy('usedCount')" title="Matches that became tie-points in the sparse model">Used<span class="arrow">{{ sortKey === 'usedCount' ? (sortDir === 'asc' ? '▲' : '▼') : '' }}</span></th>
                 </tr>
               </thead>
               <tbody>
                 <tr v-if="!displayedSummaries.length">
-                  <td :colspan="hasSparse ? 5 : 4" class="empty-row">No pairs match “{{ filterA }}”.</td>
+                  <td :colspan="hasSparse ? 4 : 3" class="empty-row">No pairs match “{{ filterA }}”.</td>
                 </tr>
                 <tr
                   v-for="m in displayedSummaries"
@@ -159,13 +192,16 @@ function selectMatch(pairId) {
                   </td>
                   <td class="name-cell">{{ trimExt(m.nameB) }}</td>
                   <td class="num-col">{{ m.inlierCount }}</td>
-                  <td class="num-col dim">{{ m.rawCount }}</td>
                   <td v-if="hasSparse" class="num-col" :class="{ dim: !m.usedCount }">{{ m.usedCount }}</td>
                 </tr>
               </tbody>
             </table>
+            </div>
           </template>
         </div>
+
+        <!-- Drag handle to resize the list panel (list view only). -->
+        <div v-if="viewMode === 'list'" class="resizer" title="Drag to resize" @mousedown="startResize" />
 
         <!-- Right: match viewer preview -->
         <div class="preview-panel">
@@ -184,6 +220,7 @@ function selectMatch(pairId) {
               :image-a="selectedImgA"
               :image-b="selectedImgB"
               :matches="selectedEntry?.matches ?? []"
+              :used-keys="selectedUsedKeys"
             />
             <div v-else class="preview-placeholder">
               <span>Select a pair to preview matches</span>
@@ -284,13 +321,32 @@ function selectMatch(pairId) {
   overflow: hidden;
 }
 
-/* Left list */
+/* Left list. Width is driven inline (draggable); scrolling lives in .table-scroll
+   so the filter bar stays put and only the table overflows. */
 .list-panel {
-  width: 320px;
   flex-shrink: 0;
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
   border-right: 1px solid var(--panel-border);
 }
+
+/* Only the table scrolls — horizontally (wide/resized columns) and vertically —
+   keeping the filter select above it always visible. */
+.table-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* Drag handle between the list and the preview. */
+.resizer {
+  flex-shrink: 0;
+  width: 5px;
+  cursor: col-resize;
+  background: transparent;
+}
+.resizer:hover { background: var(--accent); }
 
 .empty {
   padding: 24px 16px;
@@ -301,9 +357,7 @@ function selectMatch(pairId) {
 }
 
 .filter-bar {
-  position: sticky;
-  top: 0;
-  z-index: 4;
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -353,7 +407,7 @@ function selectMatch(pairId) {
   letter-spacing: 0.04em;
   border-bottom: 1px solid var(--panel-border);
   position: sticky;
-  top: 37px;
+  top: 0;
   background: var(--panel);
 }
 

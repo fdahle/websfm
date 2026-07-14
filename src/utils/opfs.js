@@ -562,20 +562,23 @@ export async function deletePoses(projectId) {
 // `recon.{cloudId}.{key}.bin`:
 //   pos    Float64  3·N   x,y,z (world-frame precision)
 //   col    Uint8    3·N   r,g,b (present only when hasColor)
+//   nrm    Float32  3·N   world-space unit normals (dense-only; Poisson mesh input;
+//                         absent on old projects / normal-less runs — do NOT heal)
+//   idx    Uint32   3·T   triangle vertex indices (mesh clouds only)
 //   vcount Uint32   N     view-tracks per point (CSR row lengths)
 //   vcam   Uint32   ΣV    camera index into the cloud's viewUuids, per view
 //   vkp    Uint32   ΣV    keypoint index, per view
 // This replaces a multi-MB JSON.parse (which froze the main thread on open) with
 // a transferable typed-array read. The store passes each cloud's typed arrays as
-// `buffers: { pos, col, vcount, vcam, vkp, vx, vy }` (ArrayBuffers); load returns
-// them the same way for the store to rebuild the point objects. vx/vy carry the
+// `buffers: { pos, col, nrm, idx, vcount, vcam, vkp, vx, vy }` (ArrayBuffers); load
+// returns them the same way for the store to rebuild the point objects. vx/vy carry
 // per-view BA-frame pixels (COLMAP export) and are absent on dense/legacy clouds.
-const RECON_BIN_KEYS = ['pos', 'col', 'vcount', 'vcam', 'vkp', 'vx', 'vy']
+const RECON_BIN_KEYS = ['pos', 'col', 'nrm', 'idx', 'vcount', 'vcam', 'vkp', 'vx', 'vy']
 
 async function removeStaleReconBins(dir, keepIds) {
   const stale = []
   for await (const name of dir.keys()) {
-    const m = name.match(/^recon\.(.+)\.(?:pos|col|vcount|vcam|vkp)\.bin$/)
+    const m = name.match(/^recon\.(.+)\.(?:pos|col|nrm|idx|vcount|vcam|vkp|vx|vy)\.bin$/)
     if (m && !keepIds.has(m[1])) stale.push(name)
   }
   for (const name of stale) await dir.removeEntry(name).catch(() => {})

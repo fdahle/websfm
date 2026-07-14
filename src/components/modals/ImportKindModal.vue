@@ -12,6 +12,7 @@ const OPTIONS = [
   { kind: 'pose',   title: 'Camera Positions',      desc: 'Per-image exterior orientation (position, optionally angles).' },
   { kind: 'sensor', title: 'Camera Intrinsics',     desc: 'Shared sensor parameters (focal length, distortion…).' },
   { kind: 'fiducialObs', title: 'Fiducial Observations', desc: 'Clicked fiducial-mark pixels per image (film scans).' },
+  { kind: 'cloud',  title: 'Point Cloud',            desc: 'Bare X/Y/Z (optionally RGB) points to view or mesh.' },
 ]
 </script>
 

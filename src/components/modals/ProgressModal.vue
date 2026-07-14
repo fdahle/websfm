@@ -129,7 +129,7 @@ onBeforeUnmount(() => {
       </div>
       <div class="progress-sub">
         <span class="progress-count">
-          {{ current }} / {{ total }}
+          {{ Math.floor(current) }} / {{ total }}
           <span class="progress-time" title="Elapsed time">· ⏱ {{ elapsed }}</span>
           <span v-if="eta" class="progress-time" title="Estimated time remaining">· ~{{ eta }} left</span>
         </span>

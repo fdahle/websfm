@@ -1,6 +1,7 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import MetadataTable from '../controls/MetadataTable.vue'
+import { useTableSort } from '../../composables/useTableSort.js'
 import { estimatedIntrinsics, estimatedCenter, estimatedAngles } from '../../core/sfm/cameraEstimated.js'
 
 // Per-image inspector with three tabs:
@@ -71,6 +72,35 @@ function poseStatus(img) {
 
 function onSelect(id)  { emit('select', id) }
 function onOpen(id)    { emit('open', id) }
+
+// ── Header-click sorting (Intrinsics & Extrinsics) ────────────────────────────
+// One accessor covers both tabs (column keys are distinct); values resolve through
+// the same intrinsics()/extrinsics() helpers, so sorting tracks the Initial⇄Estimated
+// mode. Sort resets when the tab changes so a stale column key never lingers.
+function rowVal(img, key) {
+  switch (key) {
+    case 'name':   return img.name?.toLowerCase() ?? ''
+    case 'sensor': return sensorFor(img)?.label?.toLowerCase() ?? ''
+    case 'focal':  return intrinsics(img)?.focal
+    case 'cx':     return intrinsics(img)?.cx
+    case 'cy':     return intrinsics(img)?.cy
+    case 'k1':     return intrinsics(img)?.k1
+    case 'k2':     return intrinsics(img)?.k2
+    case 'k3':     return intrinsics(img)?.k3
+    case 'p1':     return intrinsics(img)?.p1
+    case 'p2':     return intrinsics(img)?.p2
+    case 'x':      return extrinsics(img)?.x
+    case 'y':      return extrinsics(img)?.y
+    case 'z':      return extrinsics(img)?.z
+    case 'omega':  return extrinsics(img)?.omega
+    case 'phi':    return extrinsics(img)?.phi
+    case 'kappa':  return extrinsics(img)?.kappa
+    case 'status': return mode.value === 'estimated' ? (extrinsics(img) ? 'estimated' : '') : poseStatus(img)
+    default:       return null
+  }
+}
+const { toggleSort, sortArrow, resetSort, sorted: sortedImages } = useTableSort(() => props.images, rowVal)
+watch(tab, resetSort)
 </script>
 
 <template>
@@ -122,21 +152,21 @@ function onOpen(id)    { emit('open', id) }
           <table v-if="images.length" v-col-resize>
             <thead>
               <tr>
-                <th>Name</th>
-                <th>Sensor</th>
-                <th>Focal</th>
-                <th>cx</th>
-                <th>cy</th>
-                <th>k1</th>
-                <th>k2</th>
-                <th>k3</th>
-                <th>p1</th>
-                <th>p2</th>
+                <th class="sortable" @click="toggleSort('name')">Name <span class="arrow">{{ sortArrow('name') }}</span></th>
+                <th class="sortable" @click="toggleSort('sensor')">Sensor <span class="arrow">{{ sortArrow('sensor') }}</span></th>
+                <th class="sortable" @click="toggleSort('focal')">Focal <span class="arrow">{{ sortArrow('focal') }}</span></th>
+                <th class="sortable" @click="toggleSort('cx')">cx <span class="arrow">{{ sortArrow('cx') }}</span></th>
+                <th class="sortable" @click="toggleSort('cy')">cy <span class="arrow">{{ sortArrow('cy') }}</span></th>
+                <th class="sortable" @click="toggleSort('k1')">k1 <span class="arrow">{{ sortArrow('k1') }}</span></th>
+                <th class="sortable" @click="toggleSort('k2')">k2 <span class="arrow">{{ sortArrow('k2') }}</span></th>
+                <th class="sortable" @click="toggleSort('k3')">k3 <span class="arrow">{{ sortArrow('k3') }}</span></th>
+                <th class="sortable" @click="toggleSort('p1')">p1 <span class="arrow">{{ sortArrow('p1') }}</span></th>
+                <th class="sortable" @click="toggleSort('p2')">p2 <span class="arrow">{{ sortArrow('p2') }}</span></th>
               </tr>
             </thead>
             <tbody>
               <tr
-                v-for="img in images"
+                v-for="img in sortedImages"
                 :key="img.id"
                 :class="{ selected: img.id === selectedId }"
                 @click="onSelect(img.id)"
@@ -179,19 +209,19 @@ function onOpen(id)    { emit('open', id) }
           <table v-if="images.length" v-col-resize>
             <thead>
               <tr>
-                <th>Name</th>
-                <th>X</th>
-                <th>Y</th>
-                <th>Z</th>
-                <th>ω</th>
-                <th>φ</th>
-                <th>κ</th>
-                <th>Status</th>
+                <th class="sortable" @click="toggleSort('name')">Name <span class="arrow">{{ sortArrow('name') }}</span></th>
+                <th class="sortable" @click="toggleSort('x')">X <span class="arrow">{{ sortArrow('x') }}</span></th>
+                <th class="sortable" @click="toggleSort('y')">Y <span class="arrow">{{ sortArrow('y') }}</span></th>
+                <th class="sortable" @click="toggleSort('z')">Z <span class="arrow">{{ sortArrow('z') }}</span></th>
+                <th class="sortable" @click="toggleSort('omega')">ω <span class="arrow">{{ sortArrow('omega') }}</span></th>
+                <th class="sortable" @click="toggleSort('phi')">φ <span class="arrow">{{ sortArrow('phi') }}</span></th>
+                <th class="sortable" @click="toggleSort('kappa')">κ <span class="arrow">{{ sortArrow('kappa') }}</span></th>
+                <th class="sortable" @click="toggleSort('status')">Status <span class="arrow">{{ sortArrow('status') }}</span></th>
               </tr>
             </thead>
             <tbody>
               <tr
-                v-for="img in images"
+                v-for="img in sortedImages"
                 :key="img.id"
                 :class="{ selected: img.id === selectedId }"
                 @click="onSelect(img.id)"
@@ -275,6 +305,9 @@ thead th {
   position: sticky; top: 0; background: var(--panel); text-align: left; padding: 10px 12px;
   font-weight: 600; color: var(--text-dim); border-bottom: 1px solid var(--panel-border); white-space: nowrap;
 }
+thead th.sortable { cursor: pointer; user-select: none; }
+thead th.sortable:hover { color: var(--text); }
+.arrow { font-size: 9px; color: var(--accent); }
 tbody td { padding: 8px 12px; border-bottom: 1px solid var(--panel-border); white-space: nowrap; color: var(--text); font-variant-numeric: tabular-nums; }
 tbody tr { cursor: pointer; }
 tbody tr:hover { background: rgba(255, 255, 255, 0.04); }

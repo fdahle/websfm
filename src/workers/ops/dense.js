@@ -333,6 +333,9 @@ export function makeDenseOps({ rasterize }) {
       // validate the GPU cost kernel against the CPU reference on the first image only.
       const hooks = {
         onLog: (m, l, c) => emit('log', [`${img.name}: ${m}`, l, c]),
+        // Fractional within-image progress (0..1 across pyramid levels), folded into
+        // the per-image emit so the bar glides through a minute-long WASM image.
+        onProgress: (f) => emit('progress', [i + f, images.length, img.name]),
         validate: backend && i === 0,
       }
       let dm
@@ -347,7 +350,7 @@ export function makeDenseOps({ rasterize }) {
           backend = undefined
           // Keep streaming the coarse-to-fine plan log on the retry (validate no
           // longer applies once we've dropped off the GPU path).
-          dm = await depthMapForImage(ref, sources, points, { window, iterations, bestK: imgBestK, coarseLong }, backend, { onLog: hooks.onLog })
+          dm = await depthMapForImage(ref, sources, points, { window, iterations, bestK: imgBestK, coarseLong }, backend, { onLog: hooks.onLog, onProgress: hooks.onProgress })
         } else {
           throw err
         }
@@ -414,9 +417,14 @@ export function makeDenseOps({ rasterize }) {
       maps.push({
         uuid: img.uuid, width: dm.width, height: dm.height,
         K: ref.K, R: img.R, t: img.t,
-        depth: dm.depth, cost: dm.cost, rgb, displayDataUrl,
+        // Per-pixel converged plane normals (camera-frame, unit, nz<0). Kept
+        // alongside depth for fusion → Poisson meshing. Holes are defined by
+        // depth<=0 everywhere downstream, so stale normals under a zeroed depth are
+        // harmless and deliberately NOT cleaned up.
+        depth: dm.depth, cost: dm.cost, normals: dm.normals || null, rgb, displayDataUrl,
       })
       transfer.push(dm.depth.buffer, dm.cost.buffer, rgb.buffer)
+      if (dm.normals) transfer.push(dm.normals.buffer)
       releaseAfter(i) // evict rasters this image was the last consumer of
     }
 
@@ -430,18 +438,28 @@ export function makeDenseOps({ rasterize }) {
   // single coloured point cloud (pure compute in core/dense/mvs.js).
   async function densify([input], { emit }) {
     const { maps, settings = {} } = input
-    emit('progress', [0, 1, 'Fusing depth maps…'])
+    const total = Math.max(1, maps.length)
+    emit('progress', [0, total, 'Fusing depth maps…'])
     const tFuse = performance.now()
-    const points = fuseDepthMaps(maps, settings, (m, l, c) => emit('log', [m, l, c]))
-    emit('log', [`Dense cloud: fused ${maps.length} depth maps → ${points.length} points `
+    // fuseDepthMaps streams kept pixels straight into the voxel merge and returns the
+    // packed flat buffer [x,y,z,r,g,b] per point — no per-point object list (the OOM).
+    const flat = fuseDepthMaps(maps, settings,
+      (m, l, c) => emit('log', [m, l, c]),
+      { onProgress: (d, t, lbl) => emit('progress', [d, t, lbl]) })
+    emit('log', [`Dense cloud: fused ${maps.length} depth maps → ${flat.length / 6} points `
       + `in ${((performance.now() - tFuse) / 1000).toFixed(1)}s`, 'success', 'Dense'])
-    emit('progress', [1, 1, 'Done'])
-    // Pack points into a transferable flat buffer: [x,y,z,r,g,b] per point.
-    const flat = new Float32Array(points.length * 6)
-    points.forEach((p, i) => {
-      flat.set([p.x, p.y, p.z, p.color[0], p.color[1], p.color[2]], i * 6)
-    })
-    return { result: { points: flat, summary: points.summary ?? null }, transfer: [flat.buffer] }
+    emit('progress', [total, total, 'Done'])
+    // The store transfers each map's depth/cost/rgb/normals buffers in (no clone), so
+    // return them so they round-trip home and the store can re-attach them to its
+    // depthMaps cache (ortho reuses them). dims/K/R/t never left the main thread.
+    const mapBuffers = maps.map((m) => ({ uuid: m.uuid, depth: m.depth, cost: m.cost, rgb: m.rgb, normals: m.normals || null }))
+    const transfer = [flat.buffer]
+    if (flat.nrm) transfer.push(flat.nrm.buffer)
+    for (const m of maps) {
+      transfer.push(m.depth.buffer, m.cost.buffer, m.rgb.buffer)
+      if (m.normals) transfer.push(m.normals.buffer)
+    }
+    return { result: { points: flat, nrm: flat.nrm ?? null, summary: flat.summary ?? null, mapBuffers }, transfer }
   }
 
   return { computeDepthMaps, densify }

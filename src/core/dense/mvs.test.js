@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   filterDepthMap, depthMapForImage, qualityToMaxDim, autoBestK, autoFusionMaxCost,
-  fuseDepthMaps, mergePointsSpatial,
+  fuseDepthMaps, mergePointsSpatial, createVoxelAccumulator,
 } from './mvs.js'
 
 // Build a w×h Float32Array depth plane from a 2-D array of numbers (0 = hole).
@@ -165,9 +165,24 @@ describe('quality presets & derived params (Step 3)', () => {
     const logs = []
     const out = fuseDepthMaps([map], {}, (m, level) => logs.push({ m, level }))
     expect(logs.some((l) => l.level === 'warn' && /weak cost distribution/.test(l.m))).toBe(true)
-    // Summary is attached to the returned array for cross-run comparison (Q3).
+    // Summary is attached to the returned flat typed array for cross-run comparison (Q3).
+    expect(out).toBeInstanceOf(Float32Array)
     expect(out.summary).toBeTruthy()
     expect(out.summary.cullBreakdown).toHaveProperty('lowViewsPct')
+  })
+
+  it('autoFusionMaxCost returns the median and matches an exact sort on sampled input', () => {
+    // A distribution large enough to force subsampling (maxSamples tiny) — the sampled
+    // p50/p70 must land within a small tolerance of the exact percentiles.
+    const N = 50_000
+    const depth = new Float32Array(N).fill(1)
+    const cost = new Float32Array(N)
+    for (let i = 0; i < N; i++) cost[i] = i / (N - 1) // uniform 0..1
+    const exactMedian = 0.5, exactP70 = 0.7
+    const { median, raw, n } = autoFusionMaxCost([{ depth, cost }], { maxSamples: 2000, lo: 0, hi: 1 })
+    expect(n).toBe(N)                         // true valid count, not the sample size
+    expect(median).toBeCloseTo(exactMedian, 2)
+    expect(raw).toBeCloseTo(exactP70, 2)
   })
 })
 
@@ -218,6 +233,100 @@ describe('mergePointsSpatial (fusion dedupe)', () => {
     // 8 candidate px kept (both maps agree everywhere) but 4 distinct world cells.
     expect(out.summary.keptPct).toBeGreaterThan(0)
     expect(out.summary.mergedPct).toBeGreaterThan(0)
-    expect(out.length).toBeLessThanOrEqual(4)
+    expect(out).toBeInstanceOf(Float32Array)
+    expect(out.count).toBeLessThanOrEqual(4)   // merged cell count
+    expect(out.length).toBe(out.count * 6)      // flat [x,y,z,r,g,b] per point
+  })
+})
+
+describe('createVoxelAccumulator (streaming fusion merge)', () => {
+  // Bounds over a point set, matching how fuseDepthMaps derives them.
+  const boundsOf = (pts) => {
+    const b = { minX: Infinity, minY: Infinity, minZ: Infinity, maxX: -Infinity, maxY: -Infinity, maxZ: -Infinity }
+    for (const p of pts) {
+      b.minX = Math.min(b.minX, p.x); b.maxX = Math.max(b.maxX, p.x)
+      b.minY = Math.min(b.minY, p.y); b.maxY = Math.max(b.maxY, p.y)
+      b.minZ = Math.min(b.minZ, p.z); b.maxZ = Math.max(b.maxZ, p.z)
+    }
+    return b
+  }
+
+  it('streaming accumulation produces the same cells + averages as mergePointsSpatial', () => {
+    // Random point set spread over a few cells, with colours.
+    let seed = 12345
+    const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff }
+    const pts = Array.from({ length: 4000 }, () => {
+      const nx = rnd() * 2 - 1, ny = rnd() * 2 - 1, nz = rnd() * 2 - 1
+      const m = Math.hypot(nx, ny, nz) || 1
+      return {
+        x: rnd() * 10 - 5, y: rnd() * 10 - 5, z: rnd() * 10 - 5,
+        color: [Math.floor(rnd() * 256), Math.floor(rnd() * 256), Math.floor(rnd() * 256)],
+        normal: [nx / m, ny / m, nz / m],
+      }
+    })
+    const cell = 1.0
+
+    const ref = mergePointsSpatial(pts, cell)
+    const acc = createVoxelAccumulator(cell, boundsOf(pts))
+    for (const p of pts) acc.add(p.x, p.y, p.z, p.color[0], p.color[1], p.color[2], p.normal[0], p.normal[1], p.normal[2])
+    const flat = acc.finalizeFlat()
+    const { nrm } = acc.finalizeNormals()
+
+    // Same number of merged cells.
+    expect(acc.count).toBe(ref.length)
+    // Same averaged points (order differs, so match by rounded position key).
+    const key = (x, y, z) => `${Math.round(x * 1e3)},${Math.round(y * 1e3)},${Math.round(z * 1e3)}`
+    const refMap = new Map(ref.map((p) => [key(p.x, p.y, p.z), p]))
+    for (let s = 0; s < acc.count; s++) {
+      const o = s * 6
+      const r = refMap.get(key(flat[o], flat[o + 1], flat[o + 2]))
+      expect(r).toBeTruthy()
+      expect(flat[o]).toBeCloseTo(r.x, 3)
+      expect(flat[o + 1]).toBeCloseTo(r.y, 3)
+      expect(flat[o + 2]).toBeCloseTo(r.z, 3)
+      expect(flat[o + 3]).toBe(r.color[0])
+      expect(flat[o + 4]).toBe(r.color[1])
+      expect(flat[o + 5]).toBe(r.color[2])
+      // Normals match the reference (unit, renormalized average).
+      const no = s * 3
+      expect(nrm[no]).toBeCloseTo(r.normal[0], 4)
+      expect(nrm[no + 1]).toBeCloseTo(r.normal[1], 4)
+      expect(nrm[no + 2]).toBeCloseTo(r.normal[2], 4)
+      expect(Math.hypot(nrm[no], nrm[no + 1], nrm[no + 2])).toBeCloseTo(1, 5)
+    }
+  })
+
+  it('grows past the initial capacity without losing cells', () => {
+    // > 1024 distinct cells forces at least one internal doubling.
+    const pts = Array.from({ length: 3000 }, (_, i) => ({ x: i * 10, y: 0, z: 0, color: [1, 2, 3] }))
+    const acc = createVoxelAccumulator(1.0, boundsOf(pts))
+    for (const p of pts) acc.add(p.x, p.y, p.z, 1, 2, 3)
+    expect(acc.count).toBe(3000)
+    const flat = acc.finalizeFlat()
+    expect(flat.length).toBe(3000 * 6)
+  })
+})
+
+describe('fuseDepthMaps progress emits', () => {
+  it('emits monotonic, throttled progress bounded by the map count', () => {
+    // Several maps of valid pixels; collect onProgress calls.
+    const mk = (uuid) => ({
+      uuid, width: 8, height: 8,
+      K: { fx: 100, fy: 100, cx: 4, cy: 4 }, R: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], t: [0, 0, 0],
+      depth: new Float32Array(64).fill(1),
+      cost: new Float32Array(64).fill(0.1),
+      rgb: new Uint8Array(64 * 3).fill(100),
+    })
+    const maps = [mk('a'), mk('b'), mk('c')]
+    const emits = []
+    fuseDepthMaps(maps, {}, () => {}, { onProgress: (d, t, l) => emits.push({ d, t, l }) })
+    expect(emits.length).toBeGreaterThan(0)
+    let prev = -Infinity
+    for (const e of emits) {
+      expect(e.t).toBe(maps.length)          // total is the map count
+      expect(e.d).toBeGreaterThanOrEqual(prev) // monotonic non-decreasing
+      expect(e.d).toBeLessThanOrEqual(e.t)     // never exceeds total
+      prev = e.d
+    }
   })
 })

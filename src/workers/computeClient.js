@@ -104,6 +104,34 @@ export function verifyMatches(kpsA, kpsB, matches, options = {}) {
   return call('verify', [kpsA, kpsB, matches, options])
 }
 
+// SAM2 smart-mask selection (F12). All three ops pin worker 0 so the heavy ORT
+// encoder/decoder sessions load once AND the per-uuid embedding cache (held in
+// workers/ops/segment.js module scope) is on the worker every call reaches.
+//
+// segmentEncode: run the image encoder once, cache embeddings under `uuid`.
+// Streams first-run init/log lines. Resolves to { uuid, width, height, ms }.
+export function segmentEncode(uuid, url, options = {}, { onLog } = {}) {
+  return call('segmentEncode', [uuid, url, options], {
+    worker: 0,
+    onEvent: onLog ? (ev, a) => { if (ev === 'log') onLog(...a) } : undefined,
+  })
+}
+
+// segmentDecode: run the decoder for `points` ([{ x, y, positive }] in the
+// encoded raster's pixel space) against the cached embedding. Resolves to
+// { uuid, width, height, mask: Uint8Array(w·h), iou, ms }.
+export function segmentDecode(uuid, points, options = {}, { onLog } = {}) {
+  return call('segmentDecode', [uuid, points, options], {
+    worker: 0,
+    onEvent: onLog ? (ev, a) => { if (ev === 'log') onLog(...a) } : undefined,
+  })
+}
+
+// segmentForget: drop cached embeddings (one uuid, or all when uuid is null).
+export function segmentForget(uuid = null) {
+  return call('segmentForget', [uuid], { worker: 0 })
+}
+
 // TIFF decode + re-encode (geotiff, ~seconds for a large raster) — dispatched
 // round-robin like detect/match so a batch of TIFFs transcodes in parallel
 // across the pool instead of blocking the main thread one file at a time.
@@ -124,8 +152,9 @@ export function transcodeTiff(blob, jpegQuality, { onThumbnail, onDisplay } = {}
 // `progress` events during the run, a final result on resolve. This factory wires
 // the { onLog, onProgress } hooks to the worker's event stream.
 function streamingOp(op) {
-  return (input, { onLog, onProgress } = {}) =>
+  return (input, { onLog, onProgress, transfer = [] } = {}) =>
     call(op, [input], {
+      transfer,
       onEvent: (ev, args) => {
         if (ev === 'log') onLog?.(...args)
         else if (ev === 'progress') onProgress?.(...args)
@@ -154,3 +183,18 @@ export const generateDem = streamingOp('generateDem')
 // Resolves to { width, height, rgba:Uint8Array, covered, previewDataUrl }.
 // See core/products/ortho.js.
 export const generateOrtho = streamingOp('generateOrtho')
+
+// Products — mesh (screened Poisson over the dense cloud, see core/products/mesh.js).
+// Input { dense:{ count, pos, col, nrm }, settings }; resolves to
+// { mesh:{ nVerts, count, pos, idx, col }, denseHome:{ pos, col, nrm } }.
+export const meshify = streamingOp('meshify')
+
+// Import — parse a point-cloud / mesh file (PLY / LAS / XYZ text) off the main
+// thread. The buffer is transferred in (detached for the caller); resolves to
+// { parsed, stats } with the flat cloud buffers transferred back.
+export function parseCloudFile(buffer, name, { onLog } = {}) {
+  return call('parseCloud', [{ buffer, name }], {
+    transfer: [buffer],
+    onEvent: onLog ? (ev, a) => { if (ev === 'log') onLog(...a) } : undefined,
+  })
+}
