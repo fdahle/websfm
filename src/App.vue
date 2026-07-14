@@ -50,6 +50,7 @@ import ExportModal from './components/modals/ExportModal.vue'
 import DepthMapsModal from './components/modals/DepthMapsModal.vue'
 import DenseModal from './components/modals/DenseModal.vue'
 import DemModal from './components/modals/DemModal.vue'
+import MeshModal from './components/modals/MeshModal.vue'
 import OrthoModal from './components/modals/OrthoModal.vue'
 import ConfirmModal from './components/modals/ConfirmModal.vue'
 import ProductViewer from './components/viewers/ProductViewer.vue'
@@ -59,6 +60,7 @@ import FootprintImportModal from './components/modals/FootprintImportModal.vue'
 import FootprintFromPosesModal from './components/modals/FootprintFromPosesModal.vue'
 import CameraImportModal from './components/modals/CameraImportModal.vue'
 import ImportKindModal from './components/modals/ImportKindModal.vue'
+import ImportCloudModal from './components/modals/ImportCloudModal.vue'
 import * as opfs from './utils/opfs.js'
 import { ensureProjection } from './core/crs.js'
 
@@ -124,7 +126,7 @@ const { sidebarWidth, startSidebarResize } = useSidebarResize()
 // Project-scoped store; restore/clear run through the project-store registry.
 const reconstructionStore = useReconstructionStore()
 const { cameras, sparseCameras, points3d, reconStatus, clouds, selectedCloudId, selectedCloud, mainSparseId, mainSparseCloud, depthMaps, dem, ortho, georef, canGeoreference } = storeToRefs(reconstructionStore)
-const { reconstruct, importColmapModel, computeDepthMaps, densify, generateDem, generateOrtho, georeference, gcpAccuracyReport, selectCloud, removeCloud, renameCloud, setMainSparse } = reconstructionStore
+const { reconstruct, importColmapModel, importCloud, computeDepthMaps, densify, generateDem, generateOrtho, generateMesh, georeference, gcpAccuracyReport, selectCloud, removeCloud, renameCloud, setMainSparse } = reconstructionStore
 
 // Clicking a point cloud in the sidebar shows it in the 3D viewer.
 function showCloud(id) {
@@ -226,11 +228,12 @@ const {
   projectPickerOpen, newProjectOpen, newProjectCanCancel,
   detectFeaturesOpen, matchFeaturesOpen,
   imageTableOpen, maskManagerOpen, autoMaskOpen, sensorTableOpen, gcpTableOpen, matchListOpen, reconstructOpen,
-  depthMapsOpen, denseOpen, demOpen, orthoOpen,
+  depthMapsOpen, denseOpen, demOpen, orthoOpen, meshOpen,
   gcpImportOpen, gcpImportText, gcpImportName, gcpImportGeojson, gcpImportCrs,
   footprintImportOpen, footprintImportData, footprintFromPosesOpen,
   cameraImportOpen, cameraImportText, cameraImportName, cameraImportMode,
   importKindOpen, importKindFile,
+  importCloudOpen, importCloudData,
   infoImageId,
 } = storeToRefs(useModalsStore())
 
@@ -245,15 +248,19 @@ const infoImage = computed(() => infoImageId.value ? imageById(infoImageId.value
 const {
   progressOpen, progressTitle, progressCurrent, progressTotal, progressLabel,
   cancelRun, runDetect, runMatch, runReconstruct, runComputeDepthMaps, runDensify,
-  runGenerateDem, runGenerateOrtho,
-} = usePipeline({ images, detectAll, matchAll, onImageDetected, reconstruct, computeDepthMaps, densify, generateDem, generateOrtho })
+  runGenerateDem, runGenerateOrtho, runGenerateMesh,
+} = usePipeline({ images, detectAll, matchAll, onImageDetected, reconstruct, computeDepthMaps, densify, generateDem, generateOrtho, generateMesh })
 
 // Dense pipeline gating for the Ribbon.
 const sparseReady = computed(() => clouds.value.some((c) => c.kind === 'sparse' && c.cameras.size >= 2))
 const depthMapCount = computed(() => depthMaps.value.size)
 // Products gating: a DEM needs any cloud; an ortho needs a DEM (+ depth maps);
 // the preview needs a built product.
-const cloudReady = computed(() => clouds.value.some((c) => c.points.length > 0))
+const cloudReady = computed(() => clouds.value.some((c) =>
+  c.kind === 'dense' ? c.count > 0 : c.points.length > 0))
+// Mesh needs a dense cloud (Poisson input); the modal further checks it has normals.
+const denseReady = computed(() => clouds.value.some((c) => c.kind === 'dense' && c.count > 0))
+const meshReady = computed(() => clouds.value.some((c) => c.kind === 'mesh' && c.count > 0))
 const demReady = computed(() => !!dem.value)
 const orthoReady = computed(() => !!ortho.value)
 const productReady = computed(() => !!dem.value || !!ortho.value)
@@ -263,10 +270,16 @@ const selected = computed(() => images.value.find((img) => img.id === selectedId
 
 const kpImageCount = computed(() => images.value.filter(img => img.kpStatus === 'done').length)
 
+// True while any image is still decoding or transcoding (TIFF PNG encode /
+// preview pending). Pixel-reading compute ops (Detect, Auto-mask) gate on this so
+// they can't be launched mid-import against not-yet-ready images.
+const imagesLoading = computed(() => images.value.some(img => img.loading || img.previewPending))
+
 // Guard state for the DevConsole command line — same prerequisite flags the
 // ribbon uses to enable/disable buttons (see core/help/commands.js guardReason).
 const commandState = computed(() => ({
   imageCount:    images.value.length,
+  imagesLoading: imagesLoading.value,
   kpImageCount:  kpImageCount.value,
   matchCount:    matchSummaries.value.length,
   gcpCount:      gcps.value.length,
@@ -435,8 +448,15 @@ const mapViewerRef = ref(null)
 // Push the selected point cloud into the 3D viewer. Reference changes on select,
 // rebuild (a fresh object replaces the sparse cloud), and restore.
 watch(selectedCloud, (c) => {
-  if (c) viewerRef.value?.setReconstructionData(c.cameras, c.points)
-  else viewerRef.value?.clearReconstructionData()
+  // Dense clouds are flat typed arrays; sparse clouds are point-object arrays; mesh
+  // clouds are indexed triangle buffers. The viewer accepts all three (it hands the
+  // dense/mesh position buffers straight to Three.js).
+  if (!c) { viewerRef.value?.clearReconstructionData(); return }
+  let data
+  if (c.kind === 'dense') data = { count: c.count, pos: c.pos, col: c.col }
+  else if (c.kind === 'mesh') data = { kind: 'mesh', nVerts: c.nVerts, count: c.count, pos: c.pos, idx: c.idx, col: c.col }
+  else data = c.points
+  viewerRef.value?.setReconstructionData(c.cameras, data)
 })
 
 // ── 3D scene display toggles ───────────────────────────────────────────────────
@@ -564,9 +584,10 @@ const {
   cameraPickMode,
   openImportFile, openDroppedImport, routeImport,
   onImportKindChosen, onImportSwitchKind,
+  onCloudImport, onCloudPick,
   openCameraImport, onCameraImport, onGcpImport, onFootprintImport,
   onGcpPick, onCameraPick, onColmapPick,
-} = useImportRouting({ addGcps, addFootprints, addSensors, addPoses, addFiducialObs: addFiducialObservations, importColmap: importColmapModel, activateTab })
+} = useImportRouting({ addGcps, addFootprints, addSensors, addPoses, addFiducialObs: addFiducialObservations, importColmap: importColmapModel, importCloud, activateTab })
 
 // Switch to the map and centre it on an image's position (pose or EXIF GPS).
 function zoomToImagePosition(imgId) {
@@ -586,7 +607,7 @@ const {
   exportKind, exportPoses, exportSensors, exportKeypoints, exportMatches, onExportRun,
 } = useExports({
   poses, sensors, images, matchStore, clouds, selectedCloud, mainSparseCloud, dem, ortho,
-  currentProjectName, currentCrs,
+  georef, currentProjectName, currentCrs,
 })
 
 // ── Project picker actions ────────────────────────────────────────────────────
@@ -634,7 +655,7 @@ function editMask(id) {
   maskManagerOpen.value = false
   openImageTab(id)
   const tab = activeTab.value
-  if (tab?.type === 'image') { tab.showMask = true; tab.showDepth = false; tab.maskEdit = true }
+  if (tab?.type === 'image') { tab.showDepth = false; tab.maskEdit = true }
 }
 function onDepthMapsRun(settings)   { depthMapsOpen.value      = false;  runComputeDepthMaps(settings) }
 function onDenseRun(settings)       { denseOpen.value          = false;  runDensify(settings) }
@@ -642,6 +663,7 @@ function onDenseRun(settings)       { denseOpen.value          = false;  runDens
 // Products sidebar section (double-click / "Open in tab") when they want to inspect it.
 async function onDemRun(settings)   { demOpen.value = false;   await runGenerateDem(settings) }
 async function onOrthoRun(settings) { orthoOpen.value = false; await runGenerateOrtho(settings) }
+async function onMeshRun(settings)  { meshOpen.value = false;  await runGenerateMesh(settings) }
 
 // ── Image deletion (with confirmation) ────────────────────────────────────────
 // Removing images is irreversible (drops keypoints/masks/matches), so route every
@@ -683,6 +705,7 @@ const ribbonInput = ref(null)
 const gcpInput = ref(null)
 const cameraInput = ref(null)
 const colmapInput = ref(null)
+const cloudInput = ref(null)
 // cameraPickMode comes from useImportRouting (above); the command dispatch sets it
 // before opening the hidden camera-file <input>.
 
@@ -694,9 +717,11 @@ function handleCommand(id) {
     case 'import-camera-list':   cameraPickMode.value = 'pose';   cameraInput.value.click(); break
     case 'import-calib':         cameraPickMode.value = 'sensor'; cameraInput.value.click(); break
     case 'import-colmap':        colmapInput.value.click(); break
+    case 'import-cloud':         cloudInput.value.click(); break
     case 'export-cameras':       exportPoses(); break
     case 'export-sensors':       exportSensors(); break
     case 'export-cloud':         exportKind.value = 'cloud'; break
+    case 'export-mesh':          exportKind.value = 'mesh'; break
     case 'export-model':         exportKind.value = 'model'; break
     case 'export-colmap':        exportKind.value = 'colmap'; break
     case 'export-dem':           exportKind.value = 'dem'; break
@@ -729,6 +754,7 @@ function handleCommand(id) {
     case 'dense':                denseOpen.value = true; break
     case 'gen-dem':              demOpen.value = true; break
     case 'gen-ortho':            orthoOpen.value = true; break
+    case 'gen-mesh':             meshOpen.value = true; break
     case 'auto-georeference':    georeference(); break
     case 'footprints-from-poses': footprintFromPosesOpen.value = true; break
     case 'detect-features':      detectFeaturesOpen.value = true; break
@@ -779,8 +805,10 @@ function handleCommand(id) {
       const tab = activeTab.value
       if (tab?.type === 'image') {
         tab.maskEdit = !tab.maskEdit
-        // Editing implies seeing the mask; depth is mutually exclusive with it.
-        if (tab.maskEdit) { tab.showMask = true; tab.showDepth = false }
+        // Mask-edit mode always renders the mask overlay itself (ViewerImage keys
+        // it on `showMask || maskEdit`), so don't touch the user's showMask toggle
+        // here — just make sure depth (mutually exclusive) is off while editing.
+        if (tab.maskEdit) tab.showDepth = false
       }
       break
     }
@@ -800,6 +828,7 @@ function onRibbonPick(event) {
       :active-view="activeView"
       :has-selection="!!selected"
       :image-count="images.length"
+      :images-loading="imagesLoading"
       :match-count="matchSummaries.length"
       :kp-image-count="kpImageCount"
       :gcp-count="gcps.length"
@@ -808,6 +837,8 @@ function onRibbonPick(event) {
       :sparse-ready="sparseReady"
       :depth-map-count="depthMapCount"
       :cloud-ready="cloudReady"
+      :dense-ready="denseReady"
+      :mesh-ready="meshReady"
       :dem-ready="demReady"
       :ortho-ready="orthoReady"
       :product-ready="productReady"
@@ -828,6 +859,7 @@ function onRibbonPick(event) {
     <input ref="gcpInput" type="file" accept=".csv,.txt,.tsv,.gcp,.pts,.geojson,.json,application/geo+json,text/*" hidden @change="onGcpPick" />
     <input ref="cameraInput" type="file" accept=".csv,.txt,.tsv,.cam,text/*" hidden @change="onCameraPick" />
     <input ref="colmapInput" type="file" accept=".txt,.bin,.zip" multiple hidden @change="onColmapPick" />
+    <input ref="cloudInput" type="file" accept=".ply,.las,.laz,.xyz,.pts" hidden @change="onCloudPick" />
 
     <div v-if="projectPickerOpen && !currentProjectId" class="project-backdrop" />
 
@@ -886,6 +918,7 @@ function onRibbonPick(event) {
       <ExportModal
         v-if="exportKind"
         :kind="exportKind"
+        :has-georef="!!georef"
         @close="exportKind = null"
         @run="onExportRun"
       />
@@ -940,6 +973,16 @@ function onRibbonPick(event) {
     </Teleport>
 
     <Teleport to="body">
+      <MeshModal
+        v-if="meshOpen"
+        :has-dense="clouds.some((c) => c.kind === 'dense' && c.count > 0)"
+        :has-dense-normals="clouds.some((c) => c.kind === 'dense' && !!c.nrm)"
+        @close="meshOpen = false"
+        @run="onMeshRun"
+      />
+    </Teleport>
+
+    <Teleport to="body">
       <GcpImportModal
         v-if="gcpImportOpen"
         :raw-text="gcpImportText"
@@ -959,6 +1002,15 @@ function onRibbonPick(event) {
         :file-name="importKindFile.name"
         @close="importKindOpen = false; importKindFile = null"
         @select="onImportKindChosen"
+      />
+    </Teleport>
+
+    <Teleport to="body">
+      <ImportCloudModal
+        v-if="importCloudOpen && importCloudData"
+        :data="importCloudData"
+        @close="importCloudOpen = false; importCloudData = null"
+        @run="onCloudImport"
       />
     </Teleport>
 
@@ -1095,6 +1147,7 @@ function onRibbonPick(event) {
         :match-store="matchStore"
         :has-sparse="hasSparse"
         :aligned-uuids="alignedUuids"
+        :used-matches-by-pair="usedMatchesByPair"
         :node-positions="matchNodePositions"
         @toggle-disabled="setPairDisabled"
         @close="matchListOpen = false"
@@ -1151,6 +1204,7 @@ function onRibbonPick(event) {
         @open-gcp="openGcpView"
         @remove-sensor="removeSensor"
         @merge-sensors="({ target, source }) => mergeSensors(target, source)"
+        @open-sensor="sensorTableOpen = true"
         @assign-sensor="({ imageId, sensorId }) => assignSensor(imageId, sensorId)"
         @remove-pose="removePose"
         @remove-footprint="removeFootprint"
@@ -1204,7 +1258,7 @@ function onRibbonPick(event) {
               :selected-gcp-id="selectedGcpId"
               :mask-edit="tab.maskEdit"
               @exit-mask-edit="tab.maskEdit = false"
-              @update-mask="(dataUrl) => updateMask(tab.imageId, dataUrl)"
+              @update-mask="(dataUrl, persist) => updateMask(tab.imageId, dataUrl, persist)"
               @update-depth="(dataUrl) => updateDepth(tab.imageId, dataUrl)"
               :is-film="sensorForImage(tab.imageId)?.kind === 'film'"
               :show-fiducials="tab.showFiducials"

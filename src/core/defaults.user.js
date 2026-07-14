@@ -112,7 +112,30 @@ export const EXPORT_DEFAULTS = {
   includeColor: true,   // point cloud RGB
   includeTracks: true,  // model tracks
   nodata: -9999,        // DEM no-data sentinel
-  compression: 'none',  // DEM/ortho GeoTIFF (placeholder; writer is uncompressed)
+  compression: 'none',  // DEM/ortho GeoTIFF: 'none' | 'deflate'
+  applyGeoref: true,    // cloud: transform into the project CRS when a georef fit exists
+  downsampleCell: 0,    // cloud: voxel downsample cell in world units; 0 = off
+  jpegQuality: 0.9,     // ortho JPEG quality (0–1)
+}
+
+// Point-cloud / mesh import (ImportCloudModal.vue → useReconstructionStore.importCloud).
+// Coordinates import verbatim into the current frame — no CRS reprojection.
+export const IMPORT_CLOUD_DEFAULTS = {
+  unitScale: 1,      // multiply coordinates: 1 = m, 0.01 = cm, 0.001 = mm source units
+  swapYZ: false,     // Y-up source (many mesh tools) → Z-up
+  subsampleCell: 0,  // voxel subsample cell in world units after scaling; 0 = off
+}
+
+// Mesh (screened Poisson, core/products/mesh.js + crates/mesh). Mirrored by
+// MeshModal.vue. `screening` is the Poisson point-fitting weight (the vendored
+// library's quality lever; the classic PoissonRecon "samples per node" knob is not
+// exposed — see crates/mesh/src/lib.rs). `trimFactor` multiplies the dense cloud's
+// merge cell to set the world-unit trim radius. UI: trimFactor 0 ⇒ no trimming.
+export const MESH_DEFAULTS = {
+  depth: 8,          // octree max depth (detail vs cost/RAM)
+  screening: 4,      // Poisson point-fitting weight; 0 disables screening
+  trimFactor: 6,     // trim radius = trimFactor × dense mergeCell; 0 = no trim
+  colorize: true,    // transfer dense-cloud colour onto the mesh vertices
 }
 
 // Footprints from imported poses (core/footprint.js). Mirrored by

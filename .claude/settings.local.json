@@ -95,7 +95,19 @@
       "Bash(useContextMenu)",
       "Bash(grep -n \"GCPs are removed only\\\\|jump-to-image\\\\|sidebar's GCP detail\\\\|removes it \\(`useContextMenu`\\)\" CLAUDE.md)",
       "PowerShell(npm test -- --run 2>&1)",
-      "PowerShell(npm run typecheck 2>&1)"
+      "PowerShell(npm run typecheck 2>&1)",
+      "Bash(node -e \"console.log\\(require\\('./package.json'\\).scripts['build:wasm']\\)\")",
+      "Bash(rustup target *)",
+      "Bash(cargo search *)",
+      "Bash(curl -s https://crates.io/api/v1/crates/poisson_reconstruction)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('max_version:', d['crate']['max_stable_version']\\); \")",
+      "Bash(sed -i.bak 's/members = \\\\[\"sift\", \"matching\", \"reconstruction\"\\\\]/members = [\"sift\", \"matching\", \"reconstruction\", \"mesh\"]/' Cargo.toml)",
+      "Read(//Users/fhdahle/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/poisson_reconstruction-0.4.0/src/**)",
+      "Bash(mkdir -p vendor/poisson_reconstruction/src)",
+      "Bash(cp __TRACKED_VAR__/src/*.rs vendor/poisson_reconstruction/src/)",
+      "Bash(cp __TRACKED_VAR__/README.md vendor/poisson_reconstruction/)",
+      "Bash(grep -E \"test result:|FAILED|ok$|panicked\")",
+      "Bash(echo \"exit=$?\")"
     ],
     "additionalDirectories": [
       "/Users/fhdahle/Documents/GitHub/websfm/src/wasm/*",

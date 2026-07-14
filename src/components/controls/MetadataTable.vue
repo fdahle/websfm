@@ -1,7 +1,8 @@
 <script setup>
 import { formatFileSize } from '../../core/io/metadata.js'
+import { useTableSort } from '../../composables/useTableSort.js'
 
-defineProps({
+const props = defineProps({
   images: {
     type: Array,
     required: true,
@@ -15,6 +16,24 @@ defineProps({
 defineEmits(['select', 'open'])
 
 const round = (n, d = 1) => (n == null ? null : Number(n.toFixed(d)))
+
+// Header-click sorting. Column key → comparable value on each image.
+function metaVal(img, key) {
+  const m = img.meta || {}
+  switch (key) {
+    case 'name':      return img.name?.toLowerCase() ?? ''
+    case 'dimensions': return m.width ? m.width * (m.height || 1) : null
+    case 'camera':    return m.model?.toLowerCase() ?? ''
+    case 'focal':     return m.focalLength
+    case 'aperture':  return m.fNumber
+    case 'iso':       return m.iso
+    case 'gps':       return m.gpsLat
+    case 'keypoints': return img.kpStatus === 'done' ? img.kpCount : null
+    case 'size':      return m.fileSize
+    default:          return null
+  }
+}
+const { toggleSort, sortArrow, sorted: sortedImages } = useTableSort(() => props.images, metaVal)
 </script>
 
 <template>
@@ -23,20 +42,20 @@ const round = (n, d = 1) => (n == null ? null : Number(n.toFixed(d)))
       <thead>
         <tr>
           <th></th>
-          <th>Name</th>
-          <th>Dimensions</th>
-          <th>Camera</th>
-          <th>Focal</th>
-          <th>Aperture</th>
-          <th>ISO</th>
-          <th>GPS</th>
-          <th>Keypoints</th>
-          <th>Size</th>
+          <th class="sortable" @click="toggleSort('name')">Name <span class="arrow">{{ sortArrow('name') }}</span></th>
+          <th class="sortable" @click="toggleSort('dimensions')">Dimensions <span class="arrow">{{ sortArrow('dimensions') }}</span></th>
+          <th class="sortable" @click="toggleSort('camera')">Camera <span class="arrow">{{ sortArrow('camera') }}</span></th>
+          <th class="sortable" @click="toggleSort('focal')">Focal <span class="arrow">{{ sortArrow('focal') }}</span></th>
+          <th class="sortable" @click="toggleSort('aperture')">Aperture <span class="arrow">{{ sortArrow('aperture') }}</span></th>
+          <th class="sortable" @click="toggleSort('iso')">ISO <span class="arrow">{{ sortArrow('iso') }}</span></th>
+          <th class="sortable" @click="toggleSort('gps')">GPS <span class="arrow">{{ sortArrow('gps') }}</span></th>
+          <th class="sortable" @click="toggleSort('keypoints')">Keypoints <span class="arrow">{{ sortArrow('keypoints') }}</span></th>
+          <th class="sortable" @click="toggleSort('size')">Size <span class="arrow">{{ sortArrow('size') }}</span></th>
         </tr>
       </thead>
       <tbody>
         <tr
-          v-for="img in images"
+          v-for="img in sortedImages"
           :key="img.id"
           :class="{ selected: img.id === selectedId }"
           @click="$emit('select', img.id)"
@@ -107,6 +126,10 @@ thead th {
   border-bottom: 1px solid var(--panel-border);
   white-space: nowrap;
 }
+
+thead th.sortable { cursor: pointer; user-select: none; }
+thead th.sortable:hover { color: var(--text); }
+.arrow { font-size: 9px; color: var(--accent); }
 
 tbody td {
   padding: 8px 12px;

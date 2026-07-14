@@ -8,7 +8,7 @@ const props = defineProps({
   // (sensorId) => number of images using that sensor
   sensorImageCount: { type: Function, default: () => 0 },
 })
-const emit = defineEmits(['toggle', 'remove-sensor', 'merge-sensors'])
+const emit = defineEmits(['toggle', 'remove-sensor', 'merge-sensors', 'open-sensor'])
 
 // Per-sensor expand state
 const sensorExpanded = ref({})
@@ -56,6 +56,7 @@ function ctxMergeSensor(targetId) {
           class="list-item"
           :title="sensor.label"
           @click="toggleSensorExpand(sensor.id)"
+          @dblclick="emit('open-sensor', sensor.id)"
           @contextmenu="onSensorRightClick($event, sensor)"
         >
           <button

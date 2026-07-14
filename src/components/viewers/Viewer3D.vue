@@ -2,6 +2,9 @@
 import { onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
+import { useViewerSettings } from '../../composables/useViewerSettings.js'
+
+const { graticuleZ } = useViewerSettings()
 
 const props = defineProps({
   theme: { type: String, default: 'dark' },
@@ -65,6 +68,7 @@ function cameraFrustumDepth(centres, points3d) {
 
 // Reconstruction scene objects (replaced on each setReconstructionData call)
 let pointCloud = null
+let meshObject = null // THREE.Mesh for kind:'mesh' clouds
 const frustumGroup = new THREE.Group()
 // Thumbnail textures live as long as their frustum; tracked so we can dispose
 // them when the scene is rebuilt (frustumGroup.clear() drops the meshes but not
@@ -74,6 +78,9 @@ let thumbTextures = []
 // Bounding sphere of the loaded scene — drives the camera view presets.
 const sceneCenter = new THREE.Vector3(0, 0, 0)
 let sceneRadius = 5
+// Vertical extent of the loaded cloud/mesh — drives the graticule's min/avg/max
+// placement (see updateGrid). Default to the sphere centre until a cloud loads.
+let sceneZMin = 0, sceneZMax = 0
 
 // ── View options (ephemeral, session-scoped display tweaks) ───────────────────
 // Live in a viewer-local popover, deliberately NOT in the ribbon or global
@@ -100,6 +107,20 @@ function makeGrid(t) {
   g.rotation.x = Math.PI / 2
   g.visible = props.showGraticule
   return g
+}
+
+// Sit the graticule under the loaded scene (centred on the point cloud, spanning
+// its extent) rather than at the world origin — which is usually where the camera
+// cluster sits, leaving the grid stranded away from the points. Its vertical
+// placement follows the user's graticuleZ setting (bottom / middle / top).
+function updateGrid() {
+  if (!grid) return
+  const span = Math.max(sceneRadius * 2, 1)
+  grid.scale.setScalar(span / 10) // GridHelper(10,…) is 10 world units wide by default
+  const z = graticuleZ.value === 'min' ? sceneZMin
+          : graticuleZ.value === 'max' ? sceneZMax
+          : 0.5 * (sceneZMin + sceneZMax) // 'avg' → middle of the cloud's Z extent
+  grid.position.set(sceneCenter.x, sceneCenter.y, z)
 }
 
 function init() {
@@ -148,8 +169,15 @@ function init() {
 // ── Reconstruction visualisation ─────────────────────────────────────────────
 
 // cameras: Map<uuid, { R, t, K }>   points3d: [{ x, y, z }]
+// `points3d` is either a sparse cloud's array of { x, y, z, color? } objects, or a
+// dense cloud's flat descriptor { count, pos:Float32Array(3N), col?:Uint8Array(3N) }.
+// The flat path hands its position buffer straight to Three.js (no per-point object
+// walk — the win for million-point dense clouds).
 function setReconstructionData(cameras, points3d) {
   if (!scene) return
+  const isMesh = points3d?.kind === 'mesh'
+  const flat = !isMesh && points3d && points3d.pos ? points3d : null
+  const pointCount = isMesh ? 0 : (flat ? flat.count : (points3d?.length ?? 0))
 
   // Was a model already loaded? If so we keep the current camera framing when the
   // data is swapped (e.g. sparse ↔ dense of the same scene) rather than snapping
@@ -158,32 +186,47 @@ function setReconstructionData(cameras, points3d) {
 
   // Remove previous
   if (pointCloud) { scene.remove(pointCloud); pointCloud.geometry.dispose(); pointCloud = null }
+  if (meshObject) { scene.remove(meshObject); meshObject.geometry.dispose(); meshObject.material.dispose(); meshObject = null }
   frustumGroup.clear()
   for (const tex of thumbTextures) tex.dispose()
   thumbTextures = []
 
-  if (points3d.length === 0 && cameras.size === 0) {
+  if (pointCount === 0 && !isMesh && cameras.size === 0) {
     sceneCenter.set(0, 0, 0)
     sceneRadius = 5
+    sceneZMin = 0; sceneZMax = 0
+    updateGrid()
     return
   }
 
   // ── Point cloud ────────────────────────────────────────────────────────────
-  if (points3d.length > 0) {
-    const positions = new Float32Array(points3d.length * 3)
-    // Per-point RGB sampled from the source images (median over each track). Fall
-    // back to the flat blue when a point has no colour (e.g. a restored model from
-    // before colouring, or keypoints detected without colour).
-    const hasColor = points3d.some((p) => p.color)
-    const colors = hasColor ? new Float32Array(points3d.length * 3) : null
-    for (let i = 0; i < points3d.length; i++) {
-      positions[i*3]   = points3d[i].x
-      positions[i*3+1] = points3d[i].y
-      positions[i*3+2] = points3d[i].z
-      if (colors) {
-        const c = points3d[i].color
-        if (c) { colors[i*3] = c[0]/255; colors[i*3+1] = c[1]/255; colors[i*3+2] = c[2]/255 }
-        else   { colors[i*3] = 0.27; colors[i*3+1] = 0.67; colors[i*3+2] = 1.0 } // 0x44aaff
+  if (pointCount > 0) {
+    let positions, colors
+    if (flat) {
+      // Dense: reuse the position buffer directly; normalise colours to 0..1.
+      positions = flat.pos
+      if (flat.col) {
+        colors = new Float32Array(pointCount * 3)
+        for (let i = 0; i < colors.length; i++) colors[i] = flat.col[i] / 255
+      } else {
+        colors = null
+      }
+    } else {
+      positions = new Float32Array(pointCount * 3)
+      // Per-point RGB sampled from the source images (median over each track). Fall
+      // back to the flat blue when a point has no colour (e.g. a restored model from
+      // before colouring, or keypoints detected without colour).
+      const hasColor = points3d.some((p) => p.color)
+      colors = hasColor ? new Float32Array(pointCount * 3) : null
+      for (let i = 0; i < pointCount; i++) {
+        positions[i*3]   = points3d[i].x
+        positions[i*3+1] = points3d[i].y
+        positions[i*3+2] = points3d[i].z
+        if (colors) {
+          const c = points3d[i].color
+          if (c) { colors[i*3] = c[0]/255; colors[i*3+1] = c[1]/255; colors[i*3+2] = c[2]/255 }
+          else   { colors[i*3] = 0.27; colors[i*3+1] = 0.67; colors[i*3+2] = 1.0 } // 0x44aaff
+        }
       }
     }
 
@@ -191,6 +234,7 @@ function setReconstructionData(cameras, points3d) {
     geo.setAttribute('position', new THREE.BufferAttribute(positions, 3))
     if (colors) geo.setAttribute('color', new THREE.BufferAttribute(colors, 3))
     geo.computeBoundingSphere()
+    geo.computeBoundingBox()
 
     const mat = new THREE.PointsMaterial(
       colors
@@ -206,11 +250,50 @@ function setReconstructionData(cameras, points3d) {
       const r = sphere.radius || 1
       sceneCenter.copy(sphere.center)
       sceneRadius = r
+      if (geo.boundingBox) { sceneZMin = geo.boundingBox.min.z; sceneZMax = geo.boundingBox.max.z }
       camera.near = r * 0.001
       camera.far  = r * 100
       camera.updateProjectionMatrix()
       // Only auto-frame the very first model; swapping between clouds of an
       // already-loaded scene leaves the user's viewpoint untouched.
+      if (!hadContent) resetView()
+    }
+  }
+
+  // ── Mesh ─────────────────────────────────────────────────────────────────────
+  // Indexed triangle mesh (screened Poisson). Vertex colours when present; normals
+  // are recomputed on the GPU-side geometry (cheaper than shipping them) so the
+  // scene's Directional + Ambient lights shade both faces (DoubleSide).
+  if (isMesh && points3d.nVerts > 0) {
+    const geo = new THREE.BufferGeometry()
+    geo.setAttribute('position', new THREE.BufferAttribute(points3d.pos, 3))
+    if (points3d.col) {
+      const colors = new Float32Array(points3d.nVerts * 3)
+      for (let i = 0; i < colors.length; i++) colors[i] = points3d.col[i] / 255
+      geo.setAttribute('color', new THREE.BufferAttribute(colors, 3))
+    }
+    geo.setIndex(new THREE.BufferAttribute(points3d.idx, 1))
+    geo.computeVertexNormals()
+    geo.computeBoundingSphere()
+    geo.computeBoundingBox()
+
+    const mat = new THREE.MeshStandardMaterial({
+      vertexColors: !!points3d.col,
+      color: points3d.col ? 0xffffff : 0xb0b0b0,
+      side: THREE.DoubleSide, flatShading: false, roughness: 0.95, metalness: 0.0,
+    })
+    meshObject = new THREE.Mesh(geo, mat)
+    scene.add(meshObject)
+
+    const sphere = geo.boundingSphere
+    if (sphere) {
+      const r = sphere.radius || 1
+      sceneCenter.copy(sphere.center)
+      sceneRadius = r
+      if (geo.boundingBox) { sceneZMin = geo.boundingBox.min.z; sceneZMax = geo.boundingBox.max.z }
+      camera.near = r * 0.001
+      camera.far = r * 100
+      camera.updateProjectionMatrix()
       if (!hadContent) resetView()
     }
   }
@@ -235,6 +318,8 @@ function setReconstructionData(cameras, points3d) {
   lastCams = cams
   lastBaseDepth = cameraFrustumDepth(cams.map((c) => c.centre), points3d)
   buildFrustums(lastCams, lastBaseDepth * cameraScale.value)
+
+  updateGrid()
 }
 
 // (Re)build the camera-frustum lines + image-thumbnail quads at the given depth.
@@ -369,11 +454,13 @@ watch(() => props.theme, (t) => {
   scene.background = new THREE.Color(BG[t] ?? BG.dark)
   scene.remove(grid)
   grid = makeGrid(t)
+  updateGrid()
   scene.add(grid)
 })
 
 watch(() => props.showCameras, (v) => { if (frustumGroup) frustumGroup.visible = v })
 watch(() => props.showGraticule, (v) => { if (grid) grid.visible = v })
+watch(graticuleZ, () => updateGrid())
 
 // View-options sliders — cheap live updates, no cloud recompute.
 watch(cameraScale, () => { if (lastCams.length) buildFrustums(lastCams, lastBaseDepth * cameraScale.value) })
@@ -386,6 +473,8 @@ onBeforeUnmount(() => {
   resizeObserver?.disconnect()
   for (const tex of thumbTextures) tex.dispose()
   thumbTextures = []
+  if (pointCloud) { pointCloud.geometry.dispose(); pointCloud = null }
+  if (meshObject) { meshObject.geometry.dispose(); meshObject.material.dispose(); meshObject = null }
   controls?.dispose()
   renderer?.dispose()
   renderer?.domElement.remove()

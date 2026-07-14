@@ -79,6 +79,27 @@ describe('writeGeoTiff', () => {
     expect(tags.get(34735).slice(0, 4)).toEqual([1, 1, 0, 2])
   })
 
+  it('writes the Compression tag (1 default, 8 when compressed) with the strip as-is', () => {
+    const base = {
+      width: 1, height: 1,
+      samples: [{ bits: 32, format: 3 }],
+      photometric: 1, extraSamples: null,
+      pixelScale: [1, 1, 0], tiepoint: [0, 0, 0, 0, 0, 0],
+      geoKeys: geoKeysForEpsg(null, false),
+    }
+    const uncompressed = parseTiff(writeGeoTiff({ ...base, data: new Uint8Array(4) }))
+    expect(uncompressed.tags.get(259)).toEqual([1]) // no compression
+
+    // Compressed path: caller passes pre-deflated bytes + tag 8; the writer stores
+    // them verbatim and records StripByteCounts = their length.
+    const fakeCompressed = new Uint8Array([9, 9, 9])
+    const t = parseTiff(writeGeoTiff({ ...base, data: fakeCompressed, compression: 8 }))
+    expect(t.tags.get(259)).toEqual([8])            // Adobe DEFLATE
+    expect(t.tags.get(279)).toEqual([3])            // StripByteCounts = compressed length
+    const off = t.tags.get(273)[0]
+    expect([t.dv.getUint8(off), t.dv.getUint8(off + 1), t.dv.getUint8(off + 2)]).toEqual([9, 9, 9])
+  })
+
   it('emits a GDAL_NODATA tag only when a nodata value is given', () => {
     const base = {
       width: 1, height: 1,

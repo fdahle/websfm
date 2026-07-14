@@ -12,6 +12,7 @@ import { guessMapping as guessPoses } from './pose.js'
 import { guessMapping as guessSensors } from './sensor.js'
 import { guessMapping as guessFiducials } from './fiducialObs.js'
 import { looksLikeGeoJson, parseGeoJson } from './geojson.js'
+import { looksLikeXyzText } from './cloudImport.js'
 
 // GCP-specific vs. image/photo-specific header tokens (the shared 'label' token
 // is deliberately excluded — it tells us nothing either way).
@@ -28,11 +29,18 @@ export function isColmapFile(fileName = '') {
 }
 
 // Returns { kind, confidence } where
-//   kind:       'colmap' | 'gcp' | 'footprint' | 'pose' | 'sensor' | 'ambiguous'
+//   kind:       'colmap' | 'gcp' | 'footprint' | 'pose' | 'sensor' | 'cloud' | 'ambiguous'
 //   confidence: 'high' | 'low'
-// 'gcp' and 'footprint' both route through the GeoJSON/GCP importer.
+// 'gcp' and 'footprint' both route through the GeoJSON/GCP importer. NOTE: this
+// takes decoded TEXT — binary cloud formats (PLY/LAS) are sniffed by magic bytes
+// in the routing layer (sniffCloudFormat) BEFORE the text decode ever happens;
+// only text-shaped clouds (a bare numeric xyz table) are detected here.
 export function detectFileKind(text, fileName = '') {
   if (isColmapFile(fileName)) return { kind: 'colmap', confidence: 'high' }
+  // A pure-numeric 3–7 column table with no header is a point cloud, not a
+  // labelled GCP/pose list (those lead with a name/image column). Checked before
+  // the delimited-table guessing so xyz files don't land in 'ambiguous'.
+  if (looksLikeXyzText(text)) return { kind: 'cloud', confidence: 'low' }
   if (looksLikeGeoJson(fileName, text)) {
     const parsed = parseGeoJson(text)
     // points/mixed are handled by the GCP importer, polygons by the footprint one.

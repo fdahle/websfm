@@ -15,6 +15,7 @@
 // two gates never disagree. Each: does `state` satisfy it, and why not.
 const NEED_CHECKS = {
   images:    { ok: (s) => s.imageCount   > 0, reason: 'Import images first' },
+  imagesReady: { ok: (s) => !s.imagesLoading, reason: 'Images still loading…' },
   keypoints: { ok: (s) => s.kpImageCount > 0, reason: 'Detect keypoints first' },
   matches:   { ok: (s) => s.matchCount   > 0, reason: 'Run feature matching first' },
   sparse:    { ok: (s) => s.sparseReady,      reason: 'Build the sparse model first' },
@@ -33,7 +34,7 @@ const NEED_CHECKS = {
 // are resolved before single-word ones so `export` + subcommand works.
 export const COMMANDS = [
   // --- Pipeline ---
-  { name: 'detect',   aliases: ['detect-features'], dispatch: 'detect-features', needs: ['images'],    group: 'Pipeline', help: 'Open the feature-detection dialog' },
+  { name: 'detect',   aliases: ['detect-features'], dispatch: 'detect-features', needs: ['images', 'imagesReady'], group: 'Pipeline', help: 'Open the feature-detection dialog' },
   { name: 'match',    aliases: ['match-features'],  dispatch: 'match-features',  needs: ['keypoints'], group: 'Pipeline', help: 'Open the feature-matching dialog' },
   { name: 'sparse',   aliases: ['reconstruct'],     dispatch: 'reconstruct',     needs: ['matches'],   group: 'Pipeline', help: 'Open the sparse reconstruction dialog' },
   { name: 'depth',    aliases: ['depthmaps'],       dispatch: 'compute-depth',   needs: ['sparse'],    group: 'Pipeline', help: 'Open the depth-map dialog' },
@@ -43,7 +44,7 @@ export const COMMANDS = [
 
   // --- Tools ---
   { name: 'georeference', aliases: ['georef'],      dispatch: 'auto-georeference',  needs: ['sparse', 'poses'], group: 'Tools', help: 'Auto-georeference from imported poses' },
-  { name: 'automask',     aliases: ['auto-mask'],   dispatch: 'auto-mask',          needs: ['images'],  group: 'Tools', help: 'Open the auto-mask dialog' },
+  { name: 'automask',     aliases: ['auto-mask'],   dispatch: 'auto-mask',          needs: ['images', 'imagesReady'], group: 'Tools', help: 'Open the auto-mask dialog' },
   { name: 'footprints',   aliases: [],              dispatch: 'footprints-from-poses', needs: ['poses', 'sensors'], group: 'Tools', help: 'Build footprints from poses' },
 
   // --- Tables / views ---

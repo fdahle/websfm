@@ -1,11 +1,30 @@
 <script setup>
-import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 
 const props = defineProps({
   imageA: { type: Object, required: true },
   imageB: { type: Object, required: true },
   matches: { type: Array, default: () => [] },  // [[ia, ib], ...]
+  // Correspondences that became surviving tie-points in the sparse model, as a
+  // Set of "ia:ib" keys (kpIdx in the same sorted-uuid order as `matches`). When
+  // provided, matches are two-tone: green = aligned (used in the cloud), red =
+  // verified inlier that never triangulated. Null ⇒ no sparse model yet, draw
+  // every inlier one neutral colour (nothing to distinguish pre-alignment).
+  usedKeys: { type: Object, default: null },
 })
+
+// aligned / unused split for the status-bar legend (only meaningful with usedKeys).
+const usedStats = computed(() => {
+  if (!props.usedKeys) return null
+  let used = 0
+  for (const [ia, ib] of props.matches) if (props.usedKeys.has(`${ia}:${ib}`)) used++
+  return { used, unused: props.matches.length - used }
+})
+
+// Colour palette, mirroring Metashape's aligned/not-aligned convention.
+const C_USED = '#00e676'     // green — became a tie-point
+const C_UNUSED = '#ff5252'   // red — verified inlier, not in the model
+const C_NEUTRAL = '#ffd700'  // gold — no sparse model to judge against
 
 const panelsEl       = ref(null)
 const leftContainer  = ref(null)
@@ -133,29 +152,39 @@ function drawOverlay() {
   function lPos(kp) { return { x: kp.nx * lNW * ls + ltx, y: kp.ny * lNH * ls + lty } }
   function rPos(kp) { return { x: kp.nx * rNW * rs + rtx, y: kp.ny * rNH * rs + rty } }
 
-  // Lines (drawn under dots)
+  const used = props.usedKeys
+  const colorOf = (ia, ib) =>
+    used ? (used.has(`${ia}:${ib}`) ? C_USED : C_UNUSED) : C_NEUTRAL
+
+  // Lines (drawn under dots). Draw unused (red) first so aligned (green) lands on
+  // top — the aligned tie-points are the signal, and shouldn't be occluded.
   ctx.save()
-  ctx.globalAlpha = 0.35
-  ctx.strokeStyle = '#ffd700'
-  ctx.lineWidth   = 1
-  for (const [ia, ib] of pairs) {
-    const a = kpsA[ia], b = kpsB[ib]
-    if (!a || !b) continue
-    const pa = lPos(a), pb = rPos(b)
-    ctx.beginPath()
-    ctx.moveTo(pa.x, pa.y)
-    ctx.lineTo(pb.x, pb.y)
-    ctx.stroke()
+  ctx.lineWidth = 1
+  const drawLines = (wantUsed) => {
+    for (const [ia, ib] of pairs) {
+      const a = kpsA[ia], b = kpsB[ib]
+      if (!a || !b) continue
+      const isUsed = used ? used.has(`${ia}:${ib}`) : true
+      if (used && isUsed !== wantUsed) continue
+      ctx.globalAlpha = used ? (isUsed ? 0.45 : 0.2) : 0.35
+      ctx.strokeStyle = colorOf(ia, ib)
+      ctx.beginPath()
+      ctx.moveTo(lPos(a).x, lPos(a).y)
+      ctx.lineTo(rPos(b).x, rPos(b).y)
+      ctx.stroke()
+    }
   }
+  if (used) { drawLines(false); drawLines(true) } else drawLines(true)
   ctx.restore()
 
-  // Dots
+  // Dots — coloured by the same aligned/unused status on both panels.
   const DOT = 4
   for (const [ia, ib] of pairs) {
+    const c = colorOf(ia, ib)
     const a = kpsA[ia]
     if (a) {
       const pa = lPos(a)
-      ctx.fillStyle = '#00e676'
+      ctx.fillStyle = c
       ctx.beginPath()
       ctx.arc(pa.x, pa.y, DOT, 0, Math.PI * 2)
       ctx.fill()
@@ -163,7 +192,7 @@ function drawOverlay() {
     const b = kpsB[ib]
     if (b) {
       const pb = rPos(b)
-      ctx.fillStyle = '#4fc3f7'
+      ctx.fillStyle = c
       ctx.beginPath()
       ctx.arc(pb.x, pb.y, DOT, 0, Math.PI * 2)
       ctx.fill()
@@ -183,6 +212,7 @@ onMounted(() => {
 onBeforeUnmount(() => resizeObserver?.disconnect())
 
 watch(() => props.matches,          () => drawOverlay(), { deep: false })
+watch(() => props.usedKeys,         () => drawOverlay())
 watch(() => props.imageA.keypoints, () => drawOverlay())
 watch(() => props.imageB.keypoints, () => drawOverlay())
 
@@ -248,7 +278,11 @@ function onImgLoad(side) {
     <!-- Status bar -->
     <div class="status-bar">
       <span class="panel-label">{{ imageA.name }}</span>
-      <span class="match-count">{{ matches.length }} tie points</span>
+      <span v-if="usedStats" class="match-legend">
+        <span class="swatch used" /> {{ usedStats.used }} aligned
+        <span class="swatch unused" /> {{ usedStats.unused }} unused
+      </span>
+      <span v-else class="match-count">{{ matches.length }} tie points</span>
       <span class="panel-label">{{ imageB.name }}</span>
     </div>
   </div>
@@ -321,6 +355,25 @@ function onImgLoad(side) {
   color: #4c9;
   font-variant-numeric: tabular-nums;
 }
+
+.match-legend {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+.match-legend .swatch {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-left: 6px;
+}
+
+.match-legend .swatch:first-child { margin-left: 0; }
+.match-legend .swatch.used   { background: #00e676; }
+.match-legend .swatch.unused { background: #ff5252; }
 
 .panel-label {
   max-width: 40%;

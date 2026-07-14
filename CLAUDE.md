@@ -22,8 +22,13 @@ if the *method* changed, update METHODS.md.
 
 ## Stack
 - **UI**: Vue 3 (`<script setup>`), Pinia stores, OpenLayers (map), Three.js (3D).
-- **Compute**: three Rust crates compiled to WASM (`crates/{sift,matching,reconstruction}`),
-  run **off the main thread** in a worker.
+- **Compute**: four Rust crates compiled to WASM (`crates/{sift,matching,reconstruction,mesh}`),
+  run **off the main thread** in a worker. `crates/mesh` is screened-Poisson meshing;
+  it vendors a **rayon-stripped** copy of Dimforge's `poisson_reconstruction` under
+  `crates/mesh/vendor/` (rayon's worker threads panic on threadless wasm) with a
+  marching-cubes iso patch — it is the one crate allowed a dependency, kept isolated
+  so it doesn't leak into `crates/reconstruction` (which stays wasm-bindgen-only).
+  Its Rust tests need release mode (`cargo test -p mesh --release`; debug is ~40× slower).
 - **Persistence**: OPFS (Origin Private File System) via `src/utils/opfs.js`. Per-project
   directory tree; everything recomputable is recomputed rather than stored.
 - **Build/test**: Vite, Vitest (`npm test`), `tsc --noEmit` (`npm run typecheck`),
@@ -50,15 +55,37 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
   marshalling, `geometry.js` shared pinhole-camera helpers — cameraCenter, project*,
   triangulationAngle, scaleK, rgbaToGray — `distortion.js`, `cameraEstimated.js`),
   `core/dense/` (`mvs.js` dense MVS orchestrator, `planeCost.js`, `memBudget.js`),
-  `core/products/` (`dem.js`, `ortho.js`, `projection.js`, `georef.js`, `exporters.js`,
-  `geotiff.js`, `colormap.js`), `core/io/` (`gcp.js`, `pose.js`, `sensor.js`,
+  `core/products/` (`dem.js`, `ortho.js`, `mesh.js` screened-Poisson mesh orchestrator
+  — byte-buffer parse + nearest-voxel vertex-colour transfer, wasm solver injected,
+  `projection.js`, `georef.js`, `exporters.js` — cloud/mesh/DEM/ortho writers incl.
+  `prepareCloudForExport` (georef-then-voxel-downsample, streams the dense
+  accumulator — no per-point objects) + `meshToObj`/`meshToStl`, `geotiff.js`
+  (sync writer; DEFLATE via an injected `deflate` callback since `CompressionStream`
+  is DOM/worker-only — the pure path never compresses), `wkt.js` — minimal OGC WKT1
+  for `.prj` (WGS84 geographic + UTM zones formulaic, else null → caller writes the
+  raw proj4/EPSG string), `colormap.js`), `core/io/` (`gcp.js`, `pose.js`, `sensor.js`,
   `geojson.js`, `metadata.js`, `cameraKind.js`, `importKind.js` — filename/content
-  sniffing incl. `isColmapFile`, `colmapModel.js`
-  — pure COLMAP text-model read/write: R↔quaternion + serialize/parse +
-  websfm↔ColmapModel adapters both ways (`buildColmapModel` export;
-  `readColmapModel`→`colmapToSparse` import via `makeNameResolver` name→uuid
-  matching, dropping unmatched images/observations)), `core/help/`
-  (`glossary.js`, `guide.js`, `commands.js`); cross-cutting stragglers stay flat at
+  sniffing incl. `isColmapFile` + text-xyz cloud sniff, `colmapModel.js`
+  — pure COLMAP text **and** binary model read/write: R↔quaternion +
+  `serialize/parseColmapModel` (txt) + `serialize/parseColmapModelBin` (LE, same
+  ColmapModel struct) + websfm↔ColmapModel adapters both ways (`buildColmapModel`
+  export; `readColmapModel`→`colmapToSparse` import via `makeNameResolver` name→uuid
+  matching, dropping unmatched images/observations), `las.js` — LAS 1.2 writer
+  (point format 2) + reader (formats 0–3/6–8, **stride is header-authoritative** —
+  read `headerSize`/`offsetToPointData`/`pointDataRecordLength`, never assume from
+  the format id; LAZ rejected), `cloudText.js` — XYZ writer/reader, `ply.js` —
+  ascii + binary-LE reader (points + faces; unknown props skipped by computed
+  stride; big-endian rejected), `cloudImport.js` — magic-byte format sniff +
+  parser dispatch + the import transform (unit-scale / Y-up→Z-up proper rotation /
+  voxel subsample), `transforms.js` — nerfstudio/3DGS `transforms.json` export
+  (camera-to-world **OpenGL** poses: `c2w_cv = [Rᵀ|C]` then negate rot columns 1,2
+  for the OpenCV→OpenGL axis flip)), `core/help/`
+  (`glossary.js`, `guide.js`, `commands.js`), `core/segment/` (`sam2.js` — SAM2
+  click-to-segment for the "Smart Select" mask tool: pure image→CHW-tensor /
+  points→1024-space / logits→binary-mask math + ORT encoder/decoder glue, same
+  lazy/cached/serialized-session pattern as LightGlue; encoder runs on WebGPU,
+  decoder is WASM-pinned — ORT's WebGPU EP crashes on the per-click varying
+  point-count shape); cross-cutting stragglers stay flat at
   `core/` root (`crs.js`, `footprint.js`, `mask.js`, `types.ts`).
 - **`src/stores/*.js`** own reactive state + OPFS persistence. They marshal reactive
   state into **plain** arrays/objects before posting to the worker (Vue Proxies can't be
@@ -66,9 +93,12 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
 - **`workers/computeClient.js`** is the typed async client (worker pool, request/response
   with streaming `ev` events); **`compute.worker.js`** keeps the OffscreenCanvas pixel
   decoder (`rasterize`), the message loop, and the merged op registry. The op handlers
-  live in **`workers/ops/<domain>.js`** (`detect`/`match`/`sfm`/`dense`/`products`), each
-  a factory `makeXOps(deps)` returning `{ opName: handler }`; `rasterize` is injected into
-  the two that need it (detect + dense), everything else is domain-local. Handlers call
+  live in **`workers/ops/<domain>.js`** (`detect`/`match`/`sfm`/`dense`/`products`/`mesh`/`io`),
+  each a factory `makeXOps(deps)` returning `{ opName: handler }`; `rasterize` is injected
+  into the two that need it (detect + dense), everything else is domain-local. `mesh`
+  owns the mesh wasm module (lazy init, like `reconstruction.js`); `io` (`parseCloud`)
+  parses an imported PLY/LAS/XYZ file off-thread (a 500 MB LAS on the UI thread is the
+  trap it avoids), buffers in `transfer`. Handlers call
   `core/*` and keep their `transfer` lists next to them.
 - **`App.vue`** is layout + store wiring + the Ribbon command dispatch; self-contained
   concerns are extracted to **`composables/*`** (`useTabDrag`, `useSidebarResize`,
@@ -105,7 +135,28 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
   `upsertSparseCloud(cams, pts, opts)`: reconstruct replaces the main in place
   (`replaceId` defaults to it); import passes `replaceId:null` to add a new cloud,
   `asMain` only when none exists. `mainSparseId` persists in `reconstruction.json`
-  (absent ⇒ first sparse, back-compat).
+  (absent ⇒ first sparse, back-compat). **Cloud shape differs by kind**: a
+  `kind:'sparse'` cloud is an array of `{x,y,z,color,views,viewsPx}` point objects
+  (it carries per-point tracks); a `kind:'dense'` cloud is **flat** —
+  `{ count, pos:Float32Array(3N), col:Uint8Array(3N), nrm?:Float32Array(3N) }`
+  (`DenseCloud` in `types.ts`), no per-point objects (millions of fused points as
+  objects was the OOM's main-thread tail); a `kind:'mesh'` cloud is a flat indexed
+  triangle mesh — `{ count /* triangles */, nVerts, pos:Float32Array(3·nVerts),
+  idx:Uint32Array(3·count), col:Uint8Array(3·nVerts) }` (`MeshCloud`). Every dense
+  consumer branches on kind (`Viewer3D` hands `pos` straight to Three.js as
+  `THREE.Points`, or builds an indexed `THREE.Mesh` for `'mesh'`;
+  `cloudToPly`/DEM marshalling/persist accept dense+sparse, `meshToPly`/`meshToGlb`
+  handle mesh; sidebar count = points, or triangles for a mesh; DEM/ortho/densify
+  input pickers select `kind:'dense'` so mesh clouds are never a source). On-disk
+  dense/mesh `pos` is widened to Float64 to share the sparse sidecar format; dense
+  `nrm` (Float32 3N world-space normals, the Poisson mesh input — reused PatchMatch
+  plane normals) and mesh `idx` are extra per-cloud sidecar bins (`nrm`/`idx` keys),
+  **absent on old projects ⇒ undefined, do NOT heal** (legacy object-shape dense
+  clouds still heal via a back-compat path on restore). An **imported** dense/mesh
+  cloud (`importCloud`, from a dropped/picked PLY/LAS/XYZ — parsed by the `io`
+  worker op, transformed by `applyImportTransform`) carries `imported:true` (persisted)
+  and is never touched by a re-fuse/re-mesh (`upsertDense/MeshCloud` skip `imported`
+  clouds) — coordinates land verbatim in the current frame, no CRS reprojection.
 - `useSensorsStore`, `useProjectsStore`, `useGcpsStore`, `useFootprintsStore`,
   `usePosesStore`, `useModalsStore`.
 
@@ -200,16 +251,28 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
    per-image PatchMatch depth maps → optional `filterDepthMap` (median/speckle cleanup)
    → Stage B `fuseDepthMaps` (cross-view geometric consistency, then a **spatial
    dedupe**). Both stages log per-image timing, depth range, cost distribution, and
-   fusion cull breakdown ('Dense' category). Fusion emits one point per source pixel,
-   so a surface seen by k views yields k near-coincident "shell" points;
-   `mergePointsSpatial` collapses them in world space (order-independent voxel merge,
-   one averaged point per cell), sized by `autoMergeCell` at the median GSD
-   (depth/fx ≈ one ground-pixel footprint). This makes `step` a **speed lever, not the
-   density knob** — density is controlled by the merge cell in world units, and `step`
-   defaults to 1 (full res in, dedupe out). **Perf**: cost scales with
-   overlap×sources×pixels²; levers are `maxDim`/`maxSources`/`iterations` (and `step`
-   for the fusion sweep). **Quality** is gated by correct intrinsics —
-   `resolveK` falling back to "default FOV" (fx=image width) directly distorts depth.
+   fusion cull breakdown ('Dense' category). A surface seen by k views yields k
+   near-coincident "shell" points, collapsed in world space to one averaged point
+   per voxel cell, sized by `autoMergeCell` at the median GSD (depth/fx ≈ one
+   ground-pixel footprint). **Invariant — fusion must never materialize a
+   per-pixel point-object list** (25–30 M boxed `{x,y,z,color}` ≈ 3 GB was the
+   2026-07-12 OOM). Kept pixels stream **directly** into `createVoxelAccumulator`
+   (SoA typed-array sums, numeric packed cell keys sized from a coarse scene bbox
+   — `mergePointsSpatial` is the equivalent-but-batch reference kept for tests) and
+   finalize straight to the flat wire buffer `[x,y,z,r,g,b]` per point. This makes
+   `step` a **speed lever, not the density knob** — density is controlled by the
+   merge cell in world units, and `step` defaults to 1 (full res in, dedupe out).
+   Progress: depth maps emit fractional within-image ticks (pyramid-level weighted);
+   fusion emits per-map (throttled). A **Stage B pre-flight**
+   (`projectDensifyPeakBytes`, `memBudget.js`) projects the fusion peak (input +
+   accumulator + output) from the real maps and the store refuses over budget
+   **before transferring** the buffers (so a refusal keeps the depth maps). The
+   store↔worker densify **transfers** the depth/cost/rgb buffers (no clone; strips
+   `displayDataUrl`) and the op round-trips them home for ortho reuse. **Perf**:
+   cost scales with overlap×sources×pixels²; levers are `maxDim`/`maxSources`/
+   `iterations` (and `step` for the fusion sweep). **Quality** is gated by correct
+   intrinsics — `resolveK` falling back to "default FOV" (fx=image width) directly
+   distorts depth.
    - **Two depth-map backends**: WASM (CPU, default) and WebGPU (opt-in "Use GPU
      (experimental)" in the modal; ~0.1s/img vs minutes on CPU). `depthMapForImage`
      takes the kernel as an injected arg; the worker swaps in `computeDepthMapGPU`
@@ -228,6 +291,16 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
    SfM centres ↔ imported poses). Exports in `core/products/exporters.js` +
    `core/products/geotiff.js` (PLY, model JSON, DEM GeoTIFF/.asc, ortho GeoTIFF/PNG+.wld)
    through `ExportModal.vue`. Products persist to OPFS (`products/…`).
+6. **Mesh** (`core/products/mesh.js` + `crates/mesh`): **screened Poisson** over the
+   main dense cloud, reusing its per-point normals (`DenseCloud.nrm`, the PatchMatch
+   plane normals — no separate normal estimation). The wasm `poisson_mesh` returns one
+   flat byte buffer `[u32 nVerts, u32 nTris, f32 pos, u32 idx]`; the crate extracts at
+   the **sample-average iso** (not 0 — the naive iso inflates the surface ~8%) and
+   **trims** triangles farther than `trimFactor × mergeCell` from any input point.
+   Vertex colour is transferred from the nearest dense voxel cell. Output is a
+   `kind:'mesh'` cloud (`useReconstructionStore.generateMesh`), shown as a lit
+   `THREE.Mesh`, exported PLY (faces) / GLB. Non-destructive: the worker round-trips
+   the dense buffers home.
 
 ## In-app glossary (help)
 Cross-linked term explanations. **Content**: `src/glossary/**/*.md` (organised into
@@ -378,7 +451,8 @@ convergence".
   sparse SfM (`ReconstructModal`↔`core/sfm/sfm.js`, `RECONSTRUCT_DEFAULTS`+`SFM_TUNING`),
   dense depth/fuse (`DepthMapsModal`/`DenseModal`, `DEPTHMAP_DEFAULTS`/`DENSE_FUSE_DEFAULTS`
   +`DENSE_TUNING` in `core/dense/mvs.js`), DEM/ortho (`DemModal`/`OrthoModal`,
-  `DEM_DEFAULTS`/`ORTHO_DEFAULTS`), export (`ExportModal`, `EXPORT_DEFAULTS`; `format`
+  `DEM_DEFAULTS`/`ORTHO_DEFAULTS`), mesh (`MeshModal`↔`core/products/mesh.js`,
+  `MESH_DEFAULTS`+`MESH_TUNING`), export (`ExportModal`, `EXPORT_DEFAULTS`; `format`
   stays dynamic per kind), footprints (`FootprintFromPosesModal`, `FOOTPRINT_DEFAULTS`).
   Note: modals holding UI-unit values transform them in their own `run()` (e.g. a `%`
   ÷100, `0`⇒`Infinity`), so those defaults must live in the modal-facing constant, not a
@@ -391,7 +465,12 @@ convergence".
   `useImagesStore` calls `matchesStore.removeMatchesForImage(uuid)` to drop now-stale
   matches (also on image removal).
 - Rotation matrices are row-major `[[…],[…],[…]]`; `t` is `[x,y,z]`; camera centre
-  `C = -Rᵀt`; projection matrices are flat 12-elem `[R|t]` (no K).
+  `C = -Rᵀt`; projection matrices are flat 12-elem `[R|t]` (no K). websfm is
+  OpenCV-convention (world-to-cam R,t; camera looks down **+z**, image **+y down**).
+  Interop conversions are the #1 bug source, so each lives in one place with a
+  convention comment + a round-trip test: COLMAP's qvec/tvec **is** websfm R,t
+  (only R↔quaternion); `transforms.json` needs camera-to-world **OpenGL** (looks
+  down −z, +y up) — negate rot columns 1,2 of `c2w_cv=[Rᵀ|C]`.
 - The three PatchMatch kernels (`patchmatch.wgsl`, `core/dense/planeCost.js`,
   `crates/reconstruction/src/mvs.rs`) implement the same math; the first-image
   GPU↔CPU A/B check must stay RMS < 5e-3. Change all three (and the `aggRef`

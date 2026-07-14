@@ -5,6 +5,8 @@ import {
   intrinsicsFromCamera,
   serializeColmapModel,
   parseColmapModel,
+  serializeColmapModelBin,
+  parseColmapModelBin,
   buildColmapModel,
   readColmapModel,
   makeNameResolver,
@@ -131,6 +133,52 @@ describe('serialize → parse round-trip', () => {
     expect(files['cameras.txt']).toMatch(/# Number of cameras: 2/)
     expect(files['images.txt']).toMatch(/# Number of images: 2/)
     expect(files['points3D.txt']).toMatch(/# Number of points: 2/)
+  })
+
+  it('binary serialize → parse survives unchanged', () => {
+    const parsed = parseColmapModelBin(serializeColmapModelBin(model))
+    expect(parsed).toEqual(model)
+  })
+
+  it('txt and bin encode the SAME model identically', () => {
+    // The two encodings must decode to the same ColmapModel — the property that
+    // lets a downstream tool read either interchangeably.
+    const fromTxt = parseColmapModel(serializeColmapModel(model))
+    const fromBin = parseColmapModelBin(serializeColmapModelBin(model))
+    expect(fromBin).toEqual(fromTxt)
+  })
+
+  it('binary emits the three .bin files as bytes', () => {
+    const files = serializeColmapModelBin(model)
+    expect(Object.keys(files).sort()).toEqual(['cameras.bin', 'images.bin', 'points3D.bin'])
+    for (const b of Object.values(files)) expect(b).toBeInstanceOf(Uint8Array)
+  })
+
+  it('binary serialize throws on a non-finite value', () => {
+    const bad = {
+      cameras: [{ cameraId: 1, model: 'PINHOLE', width: 640, height: 480, params: [1000, 1000, 320, 240] }],
+      images: [{ imageId: 1, q: [1, 0, 0, 0], t: [Infinity, 0, 5], cameraId: 1, name: 'a.jpg', points2D: [] }],
+      points3D: [],
+    }
+    expect(() => serializeColmapModelBin(bad)).toThrow(/non-finite/)
+  })
+})
+
+describe('COLMAP binary — non-PINHOLE cameras (warn+ignore distortion)', () => {
+  it('reads fx/fy/cx/cy from a RADIAL camera and reports it dropped via readColmapModel', () => {
+    // Hand-build a binary model with a RADIAL camera (params f, cx, cy, k1, k2) —
+    // readColmapModel must take f→fx/fy and flag the distortion as dropped.
+    const model = {
+      cameras: [{ cameraId: 7, model: 'RADIAL', width: 1000, height: 800, params: [900, 500, 400, 0.01, -0.002] }],
+      images: [{ imageId: 1, q: [1, 0, 0, 0], t: [0, 0, 0], cameraId: 7, name: 'r.jpg', points2D: [[1, 2, -1]] }],
+      points3D: [],
+    }
+    const parsed = parseColmapModelBin(serializeColmapModelBin(model))
+    expect(parsed.cameras[0].model).toBe('RADIAL')
+    expect(parsed.cameras[0].params).toEqual([900, 500, 400, 0.01, -0.002])
+    const { images, droppedDistortion } = readColmapModel(parsed)
+    expect(images[0].K).toEqual({ fx: 900, fy: 900, cx: 500, cy: 400 })
+    expect(droppedDistortion).toContain('RADIAL')
   })
 })
 

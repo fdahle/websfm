@@ -469,7 +469,12 @@ export async function reconstruct(input, hooks = {}) {
     // it needs are injected so it stays pure (no cycle back into this file).
     const initSel = await selectInitPair(
       { donePairs, Kmap, settings, imageByUuid, numStats, projDepth },
-      { onLog: log },
+      {
+        onLog: log,
+        onProgress: onProgress
+          ? (k, m) => onProgress(0, imgs.length, `Scoring init pairs ${k + 1}/${m}…`)
+          : undefined,
+      },
     )
     if (initSel.status !== 'ok') return done(initSel.status)
     const { best, perPairInitReproj } = initSel
@@ -970,6 +975,7 @@ export async function reconstruct(input, hooks = {}) {
       // A3: retriangulate missed matches + merge split tracks under the improved
       // poses, then one more BA so the new/merged structure settles jointly.
       {
+        onProgress?.(imgs.length - 1, imgs.length, 'Retriangulating + merging tracks…')
         const before = trackHist()
         const { added } = await retriangulatePairs({
           points3d, cameras, pairs: donePairs, keypointOf,
@@ -993,6 +999,7 @@ export async function reconstruct(input, hooks = {}) {
       // Filter → re-BA, twice: a generous pass to strip gross junk, then a tighter
       // pass once the model has settled. Each re-solve runs on the cleaned set.
       for (const [round, maxPx] of [[1, filterMaxReprojPx * 2], [2, filterMaxReprojPx]]) {
+        onProgress?.(imgs.length - 1, imgs.length, `Track filter + bundle adjustment (pass ${round})…`)
         const { obsRemoved, ptsRemoved } = filterTracks({ maxReprojPx: maxPx, minTriAngleDeg: filterMinTriAngleDeg })
         log(`Reconstruction: track filter pass ${round} (≤${maxPx.toFixed(1)}px, ≥${filterMinTriAngleDeg}° parallax) — `
           + `removed ${obsRemoved} obs + ${ptsRemoved} points; ${points3d.length} points remain`, 'info', 'Reconstruction')
@@ -1005,6 +1012,7 @@ export async function reconstruct(input, hooks = {}) {
         + `points=${points3d.length}, iters=${baIterations})`, 'debug', 'Reconstruction')
     }
     if (gcps.length && cameras.size >= 2 && points3d.length >= 10) {
+      onProgress?.(imgs.length - 1, imgs.length, 'GCP-anchored bundle adjustment…')
       await runGcpAnchoredBundleAdjust()
     }
     markStage('bundleAdjust')

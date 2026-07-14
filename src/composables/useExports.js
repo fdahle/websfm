@@ -1,7 +1,12 @@
 import { ref } from 'vue'
 import { buildPosesCsv, buildSensorsCsv, downloadCsv } from '../utils/exportCsv.js'
-import { cloudToPly, reconstructionToJson, demToAsciiGrid, demToGeoTiff, orthoToGeoTiff, rasterWorldFile } from '../core/products/exporters.js'
-import { buildColmapModel, serializeColmapModel } from '../core/io/colmapModel.js'
+import { cloudToPly, meshToPly, meshToGlb, meshToObj, meshToStl, reconstructionToJson, demToAsciiGrid, demToGeoTiff, orthoToGeoTiff, rasterWorldFile, prepareCloudForExport } from '../core/products/exporters.js'
+import { cloudToLas } from '../core/io/las.js'
+import { cloudToXyz } from '../core/io/cloudText.js'
+import { buildColmapModel, serializeColmapModel, serializeColmapModelBin } from '../core/io/colmapModel.js'
+import { buildTransformsJson } from '../core/io/transforms.js'
+import { epsgToWkt } from '../core/products/wkt.js'
+import { useLog } from './useLog.js'
 import { distortionOf } from '../core/sfm/distortion.js'
 import { downloadBlob, dataUrlToBlob } from '../utils/download.js'
 import { zipStore } from '../utils/zip.js'
@@ -11,11 +16,12 @@ import { zipStore } from '../utils/zip.js'
 // template's ExportModal binds to it. The reactive state it reads is injected as
 // refs so the composable stays free of store wiring. Injected deps (all refs):
 //   poses, sensors, images, matchStore, clouds, selectedCloud, mainSparseCloud,
-//   dem, ortho, currentProjectName, currentCrs
+//   dem, ortho, georef, currentProjectName, currentCrs
 export function useExports({
   poses, sensors, images, matchStore, clouds, selectedCloud, mainSparseCloud, dem, ortho,
-  currentProjectName, currentCrs,
+  georef, currentProjectName, currentCrs,
 }) {
+  const { log } = useLog()
   function exportPoses() {
     if (!poses.value.length) return
     downloadCsv(`${currentProjectName.value || 'project'}-poses.csv`, buildPosesCsv(poses.value, currentCrs.value))
@@ -87,6 +93,7 @@ export function useExports({
     const kind = exportKind.value
     exportKind.value = null
     if (kind === 'cloud') doExportCloud(settings)
+    else if (kind === 'mesh') doExportMesh(settings)
     else if (kind === 'model') doExportModel(settings)
     else if (kind === 'colmap') doExportColmap(settings)
     else if (kind === 'dem') doExportDem(settings)
@@ -100,21 +107,86 @@ export function useExports({
       ?? (selectedCloud.value?.cameras?.size ? selectedCloud.value : null)
   }
 
-  // Point cloud (selected, else the first non-empty) → PLY.
-  function doExportCloud({ format, includeColor }) {
-    const cloud = selectedCloud.value?.points?.length
+  // Point cloud (selected, else the first non-empty) → PLY / LAS / XYZ, with an
+  // optional georeference transform (the stored Horn fit → project CRS) and an
+  // optional voxel downsample (cell in target-frame units, applied after georef).
+  const cloudHasPoints = (c) => c && (c.kind === 'dense' ? c.count > 0 : c.points?.length > 0)
+  function doExportCloud({ format, includeColor, applyGeoref, downsampleCell }) {
+    const cloud = cloudHasPoints(selectedCloud.value)
       ? selectedCloud.value
-      : clouds.value.find((c) => c.points.length > 0)
+      : clouds.value.find(cloudHasPoints)
     if (!cloud) return
-    const binary = format !== 'ply-ascii'
-    const ply = cloudToPly(cloud.points, { binary, color: includeColor })
-    downloadBlob(`${projectBase()}-${cloud.kind}.ply`, ply, binary ? 'application/octet-stream' : 'text/plain;charset=utf-8')
+    // cloudToPly/Las/Xyz all accept either the sparse point-object array or the
+    // dense flat shape; prepareCloudForExport normalizes when georef/downsample apply.
+    const raw = cloud.kind === 'dense'
+      ? { count: cloud.count, pos: cloud.pos, col: cloud.col, nrm: cloud.nrm }
+      : cloud.points
+    const g = applyGeoref ? georef?.value : null
+    const src = prepareCloudForExport(raw, {
+      sim: g?.sim ?? null,
+      cell: downsampleCell > 0 ? downsampleCell : 0,
+      onLog: log,
+    })
+    if (g) log(`Cloud export: georeferenced to ${g.crs}`, 'info', 'Export')
+    const base = `${projectBase()}-${cloud.kind}`
+    if (format === 'las') {
+      const m = g ? /EPSG:(\d+)/i.exec(g.crs) : null
+      const las = cloudToLas(src, {
+        crsCode: m ? Number(m[1]) : null,
+        geographic: m ? Number(m[1]) === 4326 : false,
+        onLog: log,
+      })
+      downloadBlob(`${base}.las`, las, 'application/octet-stream')
+    } else if (format === 'xyz') {
+      downloadBlob(`${base}.xyz`, cloudToXyz(src, { color: includeColor }), 'text/plain;charset=utf-8')
+    } else {
+      const binary = format !== 'ply-ascii'
+      const ply = cloudToPly(src, { binary, color: includeColor })
+      downloadBlob(`${base}.ply`, ply, binary ? 'application/octet-stream' : 'text/plain;charset=utf-8')
+    }
   }
 
-  // SfM cameras (+ optional tracks) → JSON interchange (uses the sparse cloud).
-  function doExportModel({ includeTracks }) {
+  // Mesh (screened Poisson) → PLY (faces) or GLB. Uses the selected mesh cloud, else
+  // the first mesh cloud.
+  function doExportMesh({ format, includeColor }) {
+    const cloud = selectedCloud.value?.kind === 'mesh'
+      ? selectedCloud.value
+      : clouds.value.find((c) => c.kind === 'mesh' && c.count > 0)
+    if (!cloud) return
+    const mesh = { nVerts: cloud.nVerts, count: cloud.count, pos: cloud.pos, idx: cloud.idx, col: cloud.col }
+    if (format === 'glb') {
+      downloadBlob(`${projectBase()}-mesh.glb`, meshToGlb(mesh, { color: includeColor }), 'model/gltf-binary')
+    } else if (format === 'obj') {
+      downloadBlob(`${projectBase()}-mesh.obj`, meshToObj(mesh, { color: includeColor }), 'text/plain;charset=utf-8')
+    } else if (format === 'stl') {
+      downloadBlob(`${projectBase()}-mesh.stl`, meshToStl(mesh), 'model/stl')
+    } else {
+      const binary = format !== 'ply-ascii'
+      const ply = meshToPly(mesh, { binary, color: includeColor })
+      downloadBlob(`${projectBase()}-mesh.ply`, ply, binary ? 'application/octet-stream' : 'text/plain;charset=utf-8')
+    }
+  }
+
+  // SfM cameras → websfm JSON (cameras + optional tracks), or a NeRF/3DGS
+  // transforms.json (camera-to-world OpenGL poses + intrinsics). Both use the
+  // sparse cloud; transforms.json needs each camera's loaded image (width/height).
+  function doExportModel({ format, includeTracks }) {
     const cloud = sparseCloud()
     if (!cloud) return
+    if (format === 'transforms') {
+      const imgByUuid = new Map(images.value.map((im) => [im.uuid, im]))
+      const transformImages = [...cloud.cameras.entries()]
+        .map(([uuid, cam]) => {
+          const im = imgByUuid.get(uuid)
+          if (!im || !cam.K || !im.meta?.width || !im.meta?.height) return null
+          return { name: im.name, R: cam.R, t: cam.t, K: cam.K, width: im.meta.width, height: im.meta.height }
+        })
+        .filter(Boolean)
+      if (!transformImages.length) return
+      saveJson(buildTransformsJson({ images: transformImages }), `${projectBase()}-transforms.json`)
+      log(`transforms.json export: ${transformImages.length} camera(s)`, 'success', 'Export')
+      return
+    }
     const cams = [...cloud.cameras.entries()].map(([uuid, c]) => ({ uuid, R: c.R, t: c.t, K: c.K }))
     const pts = cloud.points.map((p) => ({
       x: p.x, y: p.y, z: p.z, color: p.color,
@@ -133,7 +205,7 @@ export function useExports({
   // about, since a distorted/film/self-cal project would export inconsistently).
   // Only cameras with a matching loaded image + resolved K are exported (COLMAP
   // needs width/height/name). Output is in the local SfM frame.
-  function doExportColmap() {
+  function doExportColmap({ format } = {}) {
     const cloud = sparseCloud()
     if (!cloud) return
     const imgByUuid = new Map(images.value.map((im) => [im.uuid, im]))
@@ -180,35 +252,95 @@ export function useExports({
         : [],
     }))
 
-    const files = serializeColmapModel(buildColmapModel({ images: exportImages, points }))
-    const entries = Object.entries(files).map(([name, text]) => ({ name, data: new TextEncoder().encode(text) }))
-    downloadBlob(`${projectBase()}-colmap.zip`, zipStore(entries), 'application/zip')
+    const model = buildColmapModel({ images: exportImages, points })
+    // Binary (.bin) or text (.txt) — both share the ColmapModel struct; only the
+    // encoding differs. Binary files are already Uint8Array; text is UTF-8 encoded.
+    const files = format === 'bin' ? serializeColmapModelBin(model) : serializeColmapModel(model)
+    const entries = Object.entries(files).map(([name, data]) => ({
+      name, data: typeof data === 'string' ? new TextEncoder().encode(data) : data,
+    }))
+    downloadBlob(`${projectBase()}-colmap-${format === 'bin' ? 'bin' : 'txt'}.zip`, zipStore(entries), 'application/zip')
+    log(`COLMAP export: ${exportImages.length} cameras, ${points.length} points → ${format === 'bin' ? '.bin' : '.txt'} zip`, 'success', 'Export')
   }
 
-  // DEM → GeoTIFF, or ESRI ASCII grid (+ .prj sidecar carrying the CRS).
-  function doExportDem({ format, nodata }) {
+  // zlib-DEFLATE a byte buffer via the browser-native CompressionStream (DOM/
+  // worker-only — hence injected into the pure GeoTIFF writer rather than living
+  // in it). Produces a zlib stream, exactly what TIFF Adobe DEFLATE (tag 8) wants.
+  async function deflateBytes(bytes) {
+    const cs = new CompressionStream('deflate')
+    const stream = new Blob([bytes]).stream().pipeThrough(cs)
+    return new Uint8Array(await new Response(stream).arrayBuffer())
+  }
+
+  // `.prj` contents for a CRS: real OGC WKT1 when we can build a correct one for
+  // the EPSG code (WGS84 geographic / UTM zones), else the raw proj4/EPSG string.
+  function prjText(info) {
+    const wkt = epsgToWkt(info.code)
+    if (wkt) return wkt
+    log(`.prj: no WKT template for ${info.crs} — writing the raw proj4/EPSG string`, 'info', 'Export')
+    return info.crs
+  }
+
+  // Re-encode a data: URL (a canvas PNG) to a JPEG/PNG Blob at the given quality.
+  async function reencodeDataUrl(dataUrl, mime = 'image/jpeg', quality = 0.9) {
+    const img = await new Promise((resolve, reject) => {
+      const el = new Image(); el.onload = () => resolve(el); el.onerror = reject; el.src = dataUrl
+    })
+    const canvas = document.createElement('canvas')
+    canvas.width = img.naturalWidth; canvas.height = img.naturalHeight
+    canvas.getContext('2d').drawImage(img, 0, 0)
+    return new Promise((resolve) => canvas.toBlob(resolve, mime, quality))
+  }
+
+  // DEM → GeoTIFF (optional DEFLATE), ESRI ASCII grid, or hillshade PNG — each
+  // with a .prj sidecar carrying the CRS (real WKT where possible).
+  async function doExportDem({ format, nodata, compression }) {
     if (!dem.value) return
     const info = crsInfo(dem.value)
     if (format === 'geotiff') {
-      downloadBlob(`${projectBase()}-dem.tif`, demToGeoTiff(dem.value, { crs: info, nodata }), 'image/tiff')
+      const deflate = compression === 'deflate' ? deflateBytes : null
+      const tif = await demToGeoTiff(dem.value, { crs: info, nodata, deflate })
+      downloadBlob(`${projectBase()}-dem.tif`, tif, 'image/tiff')
+      log(`DEM export: GeoTIFF${deflate ? ' (DEFLATE)' : ''}`, 'success', 'Export')
+      return
+    }
+    if (format === 'png') {
+      // Hillshade PNG — the DEM's hillshaded preview canvas + world file + .prj.
+      if (!dem.value.previewDataUrl) { log('DEM: no hillshade preview to export', 'warn', 'Export'); return }
+      downloadBlob(`${projectBase()}-dem-hillshade.png`, await dataUrlToBlob(dem.value.previewDataUrl))
+      downloadBlob(`${projectBase()}-dem-hillshade.wld`, rasterWorldFile(dem.value), 'text/plain;charset=utf-8')
+      if (info.crs) downloadBlob(`${projectBase()}-dem-hillshade.prj`, prjText(info), 'text/plain;charset=utf-8')
+      log('DEM export: hillshade PNG + world file', 'success', 'Export')
       return
     }
     downloadBlob(`${projectBase()}-dem.asc`, demToAsciiGrid(dem.value, { nodata }), 'text/plain;charset=utf-8')
-    if (info.crs) downloadBlob(`${projectBase()}-dem.prj`, info.crs, 'text/plain;charset=utf-8')
+    if (info.crs) downloadBlob(`${projectBase()}-dem.prj`, prjText(info), 'text/plain;charset=utf-8')
   }
 
-  // Ortho → GeoTIFF, or PNG + world file (.wld) + .prj. Shares the DEM's geotransform.
-  async function doExportOrtho({ format }) {
+  // Ortho → GeoTIFF (optional DEFLATE), or PNG/JPEG + world file (.wld) + .prj.
+  // Shares the DEM's geotransform.
+  async function doExportOrtho({ format, compression, jpegQuality }) {
     if (!ortho.value || !dem.value) return
     const info = crsInfo(dem.value)
     if (format === 'geotiff') {
-      downloadBlob(`${projectBase()}-ortho.tif`, orthoToGeoTiff(ortho.value, dem.value, { crs: info }), 'image/tiff')
+      const deflate = compression === 'deflate' ? deflateBytes : null
+      const tif = await orthoToGeoTiff(ortho.value, dem.value, { crs: info, deflate })
+      downloadBlob(`${projectBase()}-ortho.tif`, tif, 'image/tiff')
+      log(`Ortho export: GeoTIFF${deflate ? ' (DEFLATE)' : ''}`, 'success', 'Export')
       return
     }
     if (!ortho.value.previewDataUrl) return
-    downloadBlob(`${projectBase()}-ortho.png`, await dataUrlToBlob(ortho.value.previewDataUrl))
+    const jpeg = format === 'jpeg'
+    const ext = jpeg ? 'jpg' : 'png'
+    const blob = jpeg
+      ? await reencodeDataUrl(ortho.value.previewDataUrl, 'image/jpeg', jpegQuality ?? 0.9)
+      : await dataUrlToBlob(ortho.value.previewDataUrl)
+    downloadBlob(`${projectBase()}-ortho.${ext}`, blob)
+    // World file extension mirrors the image (.wld works for both; .jgw/.pgw are the
+    // strict siblings — .wld is universally accepted, so keep it simple).
     downloadBlob(`${projectBase()}-ortho.wld`, rasterWorldFile(dem.value), 'text/plain;charset=utf-8')
-    if (info.crs) downloadBlob(`${projectBase()}-ortho.prj`, info.crs, 'text/plain;charset=utf-8')
+    if (info.crs) downloadBlob(`${projectBase()}-ortho.prj`, prjText(info), 'text/plain;charset=utf-8')
+    log(`Ortho export: ${jpeg ? 'JPEG' : 'PNG'} + world file`, 'success', 'Export')
   }
 
   return { exportKind, exportPoses, exportSensors, exportKeypoints, exportMatches, onExportRun }

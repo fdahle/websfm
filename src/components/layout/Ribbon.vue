@@ -6,6 +6,9 @@ const props = defineProps({
   activeView: { type: String, default: 'viewer' },
   hasSelection: { type: Boolean, default: false },
   imageCount: { type: Number, default: 0 },
+  // True while any imported image is still decoding/transcoding (TIFF PNG encode,
+  // preview pending). Compute ops that read pixels are gated on this.
+  imagesLoading: { type: Boolean, default: false },
   matchCount: { type: Number, default: 0 },
   kpImageCount: { type: Number, default: 0 },
   gcpCount: { type: Number, default: 0 },
@@ -15,6 +18,8 @@ const props = defineProps({
   sparseReady: { type: Boolean, default: false },
   depthMapCount: { type: Number, default: 0 },
   cloudReady: { type: Boolean, default: false },
+  denseReady: { type: Boolean, default: false },
+  meshReady: { type: Boolean, default: false },
   demReady: { type: Boolean, default: false },
   orthoReady: { type: Boolean, default: false },
   productReady: { type: Boolean, default: false },
@@ -78,6 +83,7 @@ const tabs = [
         label: 'Interop',
         commands: [
           { id: 'import-colmap', label: 'COLMAP\nModel', icon: 'cube', needsImages: true },
+          { id: 'import-cloud', label: 'Point Cloud\n/ Mesh', icon: 'point-cloud' },
         ],
       },
     ],
@@ -89,7 +95,7 @@ const tabs = [
       {
         label: 'Features',
         commands: [
-          { id: 'detect-features', label: 'Detect\nFeatures', icon: 'sparkles', needsImages: true },
+          { id: 'detect-features', label: 'Detect\nFeatures', icon: 'sparkles', needsImages: true, needsImagesReady: true },
           { id: 'match-features', label: 'Match\nFeatures', icon: 'link', needsKeypoints: true },
         ],
       },
@@ -106,6 +112,7 @@ const tabs = [
         commands: [
           { id: 'gen-dem',       label: 'DEM',     icon: 'dem',   needsCloud: true, aerialOnly: true },
           { id: 'gen-ortho',     label: 'Ortho',   icon: 'ortho', needsDem: true, needsDepthMaps: true, aerialOnly: true },
+          { id: 'gen-mesh',      label: 'Mesh',    icon: 'cube',  needsDense: true },
         ],
       },
     ],
@@ -129,13 +136,49 @@ const tabs = [
       {
         label: 'Masks',
         commands: [
-          { id: 'auto-mask', label: 'Auto\nMask', icon: 'mask', needsImages: true },
+          { id: 'auto-mask', label: 'Auto\nMask', icon: 'mask', needsImages: true, needsImagesReady: true },
         ],
       },
       {
         label: 'Point Cloud',
         commands: [
           { id: 'filter-cloud', label: 'Filter\nCloud', icon: 'point-cloud', disabled: true },
+        ],
+      },
+    ],
+  },
+  {
+    // Quality/accuracy views over existing pipeline state (run summaries,
+    // gcpAccuracyReport, match graph). All placeholders for now — see TODO F13.
+    id: 'evaluate',
+    label: 'Evaluate',
+    groups: [
+      {
+        label: 'Sparse',
+        commands: [
+          { id: 'eval-reconstruction', label: 'Recon\nReport',   icon: 'cube',   disabled: true },
+          { id: 'eval-images',         label: 'Image\nErrors',   icon: 'table',  disabled: true },
+          { id: 'eval-calibration',    label: 'Calibration',     icon: 'target', disabled: true },
+        ],
+      },
+      {
+        label: 'Georeferencing',
+        commands: [
+          { id: 'eval-gcps',  label: 'GCP\nAccuracy',   icon: 'map-pin', disabled: true, aerialOnly: true },
+          { id: 'eval-poses', label: 'Pose\nResiduals', icon: 'camera',  disabled: true, aerialOnly: true },
+        ],
+      },
+      {
+        label: 'Matching',
+        commands: [
+          { id: 'eval-match-graph', label: 'Graph\nHealth', icon: 'link', disabled: true },
+        ],
+      },
+      {
+        label: 'Dense',
+        commands: [
+          { id: 'eval-depth-coverage', label: 'Depth\nCoverage', icon: 'depth', disabled: true },
+          { id: 'eval-dem-gcps',       label: 'DEM vs\nGCPs',    icon: 'dem',   disabled: true, aerialOnly: true },
         ],
       },
     ],
@@ -163,6 +206,7 @@ const tabs = [
       {
         label: 'Products',
         commands: [
+          { id: 'export-mesh',  label: 'Mesh',  icon: 'cube',  needsMesh: true },
           { id: 'export-dem',   label: 'DEM',   icon: 'dem',   needsDem: true, aerialOnly: true },
           { id: 'export-ortho', label: 'Ortho', icon: 'ortho', needsOrtho: true, aerialOnly: true },
         ],
@@ -358,10 +402,13 @@ function isDisabled(cmd) {
   if (cmd.disabled) return true
   if (cmd.needsSelection && !props.hasSelection) return true
   if (cmd.needsImages   && props.imageCount === 0) return true
+  if (cmd.needsImagesReady && props.imagesLoading) return true
   if (cmd.needsMatches   && props.matchCount === 0)   return true
   if (cmd.needsSparse    && !props.sparseReady)       return true
   if (cmd.needsDepthMaps && props.depthMapCount === 0) return true
   if (cmd.needsCloud     && !props.cloudReady)        return true
+  if (cmd.needsDense     && !props.denseReady)        return true
+  if (cmd.needsMesh      && !props.meshReady)         return true
   if (cmd.needsDem       && !props.demReady)          return true
   if (cmd.needsOrtho     && !props.orthoReady)        return true
   if (cmd.needsProducts  && !props.productReady)      return true
@@ -381,10 +428,13 @@ function isDisabled(cmd) {
 function disabledReason(cmd) {
   if (cmd.disabled) return 'Coming soon'
   if (cmd.needsImages   && props.imageCount === 0) return 'Import images first'
+  if (cmd.needsImagesReady && props.imagesLoading) return 'Images still loading…'
   if (cmd.needsMatches   && props.matchCount === 0)   return 'Run feature matching first'
   if (cmd.needsSparse    && !props.sparseReady)       return 'Build the sparse model first'
   if (cmd.needsDepthMaps && props.depthMapCount === 0) return 'Compute depth maps first'
   if (cmd.needsCloud     && !props.cloudReady)        return 'Build a point cloud first'
+  if (cmd.needsDense     && !props.denseReady)        return 'Build a dense cloud first'
+  if (cmd.needsMesh      && !props.meshReady)         return 'Build a mesh first'
   if (cmd.needsDem       && !props.demReady)          return 'Build a DEM first'
   if (cmd.needsOrtho     && !props.orthoReady)        return 'Build an orthophoto first'
   if (cmd.needsProducts  && !props.productReady)      return 'Build a DEM or orthophoto first'

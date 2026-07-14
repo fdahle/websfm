@@ -40,7 +40,7 @@ defineProps({
 const emit = defineEmits([
   'add-images', 'import-file', 'remove-image', 'remove-gcp', 'select-gcp',
   'jump-to-image', 'remove-gcp-observation', 'open-gcp',
-  'remove-sensor', 'merge-sensors', 'assign-sensor', 'remove-pose',
+  'remove-sensor', 'merge-sensors', 'open-sensor', 'assign-sensor', 'remove-pose',
   'remove-footprint',
   'select', 'open', 'show-info', 'delete-keypoints', 'zoom-to-image',
   'select-cloud', 'remove-cloud', 'rename-cloud', 'set-main-cloud', 'reconstruct',
@@ -120,6 +120,7 @@ function toggle(key) {
       @toggle="toggle('sensors')"
       @remove-sensor="emit('remove-sensor', $event)"
       @merge-sensors="emit('merge-sensors', $event)"
+      @open-sensor="emit('open-sensor', $event)"
     />
 
     <MatchesSection

@@ -68,6 +68,154 @@ fiducials; self-calibration (A2) + fiducials (F4) are the code-side support.
 
 ## Done log (most recent first)
 
+- **2026-07-12 · Import/export interop (PLAN-import-export.md, Phases 1–6)** —
+  broadened format coverage across the pipeline. **Cloud export** (Phase 1):
+  `core/io/las.js` (LAS 1.2 point-format-2 writer + a header-authoritative
+  reader supporting formats 0–3/6–8, LAZ rejected) and `core/io/cloudText.js`
+  (XYZ writer/reader); the export modal's cloud kind gained LAS/XYZ formats, a
+  georeference toggle (Horn fit → project CRS) and a voxel-downsample cell, via a
+  new pure `prepareCloudForExport` (georef-then-downsample, streams through the
+  dense voxel accumulator — no per-point objects). **Cloud/mesh import**
+  (Phase 2): `core/io/ply.js` (ascii + binary-LE reader, points + faces, unknown
+  props skipped by stride) and `core/io/cloudImport.js` (magic-byte sniff, parser
+  dispatch, unit-scale/Y-up→Z-up/subsample transform); parsed off-thread by a new
+  `workers/ops/io.js` `parseCloud` op; `useReconstructionStore.importCloud` adds
+  an `imported`-flagged `dense`/`mesh` cloud (never replaced by a re-fuse/re-mesh);
+  routing sniffs binary magic before any text decode; new `ImportCloudModal` +
+  Ribbon *Import ▸ Interop ▸ Point Cloud / Mesh*. **COLMAP `.bin`** (Phase 3,
+  finishes F7): `serializeColmapModelBin`/`parseColmapModelBin` share the
+  ColmapModel struct (txt↔bin equivalence tested); export modal `bin` format,
+  import routes `.bin` keys through the binary parser (warn+ignore non-PINHOLE
+  distortion). **Mesh export** (Phase 4): `meshToObj` (1-based faces, 0–1 vertex
+  colour) + `meshToStl` (binary, per-face normals, degenerate → zero not NaN);
+  modal mesh kind gained OBJ/STL (STL disables colour). **transforms.json**
+  (Phase 5): `core/io/transforms.js` — camera-to-world OpenGL poses (OpenCV→GL
+  column flip, round-trip tested) for nerfstudio/instant-ngp/3DGS; model kind's
+  `transforms` format. (Bundler/NVM import — Phase 5b — skipped as time-boxed.)
+  **Raster polish** (Phase 6): GeoTIFF DEFLATE (writer stays sync; the caller
+  injects a `CompressionStream` deflater, tag 8), DEM hillshade PNG + world file,
+  JPEG ortho with a quality slider, and real OGC WKT1 `.prj` via `core/products/
+  wkt.js` (WGS84 geographic + UTM zones formulaic, else proj4 fallback). All pure
+  writers/readers unit-tested (round-trip / byte-layout / convention). **Owed:
+  in-browser verification** — headless can't open the downloads or drive the
+  import pickers. Manual checks: open exported LAS/PLY/XYZ in CloudCompare,
+  OBJ/STL in MeshLab, GeoTIFF (incl. DEFLATE) in QGIS, COLMAP `.bin` in COLMAP,
+  `transforms.json` in nerfstudio; import each of our own exports back
+  (round-trip is the cheapest end-to-end check); confirm imported clouds render
+  in Viewer3D and can feed DEM/mesh.
+
+- **2026-07-12 · Mesh product — screened Poisson from the dense cloud (PLAN-mesh-poisson.md, all 6 phases)** —
+  a vertex-coloured triangle mesh product, generated in-browser via screened
+  Poisson (Rust→WASM), rendered in Viewer3D, persisted to OPFS, exportable as
+  PLY (faces) + GLB. **Phase 1 — normals through the dense pipeline**: the WASM
+  PatchMatch kernel (`crates/reconstruction/src/mvs.rs` `compute_depth_map`) now
+  emits its converged plane normals as a trailing `3·npix` block (output widened
+  `2·npix`→`5·npix`; JS unwrap in `core/sfm/reconstruction.js`), matching the GPU
+  backend's existing camera-frame convention; fusion (`core/dense/mvs.js`
+  `fuseDepthMaps`) rotates each kept pixel's normal to world (`Rᵀ·n_cam`) and the
+  voxel accumulator averages+renormalizes them into a flat `DenseCloud.nrm`
+  (Float32 3N), threaded op→cache→store→OPFS sidecar (`recon.{id}.nrm.bin`) and
+  optional in PLY export. **Phase 2 — `crates/mesh`**: wraps Dimforge's
+  `poisson_reconstruction`, **vendored + patched** (rayon removed — its two
+  `par_iter_mut()` sites made threadless-wasm panic; plus a marching-cubes
+  iso-value patch: extract at the sample-average iso, not 0, fixing an ~8%
+  surface-inflation bias). One flat wasm entry `poisson_mesh(pos,nrm,depth,
+  screening,trim)→bytes` with voxel-hash trimming of far-from-data triangles.
+  **Phase 3** `core/products/mesh.js` (byte-buffer parse + nearest-cell colour
+  transfer), worker op `workers/ops/mesh.js`. **Phase 4** store `generateMesh()`
+  + `kind:'mesh'` cloud (flat pos/idx/col), Viewer3D `THREE.Mesh`
+  (MeshStandardMaterial, computed normals, DoubleSide), sidebar row (triangles/
+  vertices), OPFS persist/restore. **Phase 5** `MeshModal.vue` + Ribbon `gen-mesh`
+  / `export-mesh`, `meshToPly`/`meshToGlb` exporters. **Phase 6 (decimation) —
+  PARKED** per the plan (adds an npm dep; ship without). **Naming note:** the
+  library exposes a *screening* weight, not PoissonRecon's samples-per-node, so
+  `MESH_DEFAULTS.screening` replaces the plan's `samplesPerNode`. **Tests:** Rust
+  slanted-plane normal-export + sphere/trim (run `cargo test -p mesh --release` —
+  debug is ~40× slower); JS accumulator-normal parity, mesh parse/colour, PLY/GLB
+  round-trip. **Owed: in-browser verification** — headless can't drive the full
+  detect→…→densify→mesh flow, Viewer3D rendering, OPFS restore, or open the
+  exported PLY/GLB in CloudCompare/MeshLab/a glTF viewer. Also confirm GPU-vs-WASM
+  normal agreement on the first depth map (Phase 1b diagnostic not yet auto-logged).
+
+- **2026-07-12 · Match preview aligned/unused colouring + drop Candidates column** —
+  `ViewerMatch.vue` now two-tones tie-point lines/dots once a sparse cloud exists
+  (green = aligned/became a surviving tie-point, red = verified inlier that never
+  triangulated — Metashape's aligned/not-aligned convention), via a `usedKeys`
+  prop threaded `App.vue` (`usedMatchesByPair`, already computed) → `MatchListModal`
+  → `ViewerMatch`; falls back to neutral gold pre-alignment (`usedKeys===null`).
+  Also **dropped the "Candidates" (`rawCount`) column** from the match table as
+  redundant UI noise. **NOTE — the data is NOT gone**: `rawCount` is still stored
+  on every match entry (`useMatchesStore.matchPair`, persisted to OPFS) and still
+  carried on `matchSummaries[].rawCount` in `App.vue`; it's logged per pair
+  ("N/M inliers") and the inlier *ratio* it feeds still drives `minInlierRatio`.
+  Only the table cell/header were removed — to resurface it (or a ratio column),
+  re-add a `<th sortBy('rawCount')>`/`<td>{{ m.rawCount }}</td>` and bump the
+  empty-row colspan. RANSAC outliers, however, ARE discarded (only inliers kept in
+  `entry.matches`), so they can never be drawn/tabulated without a store change.
+- **2026-07-12 · F12 — SAM2 smart mask selection (click-to-segment)** — new
+  `core/segment/` module: `sam2.js` (pure preprocessing/decoding math + ORT
+  encoder/decoder glue, same lazy/cached/serialized-session pattern as LightGlue;
+  15-test `sam2.test.js` locks the shape/normalization math + the decoder
+  input-name resolution against both onnx-community *and* Meta export names) and
+  `workers/ops/segment.js` (`segmentEncode` once-per-image + worker-side LRU
+  embedding cache, `segmentDecode` per-click returning the **raw 256² logits**,
+  `segmentForget`; pinned to worker 0 via `computeClient.js`). UI: "Smart Select"
+  (`sparkles`) tool in `MaskToolbar.vue` — click an object → cyan candidate preview
+  (independent per click; Alt-click refines with a negative point), Enter/"Add to
+  mask" commits into the red mask canvas (undoable), Del discards. **Click vs drag**:
+  a Smart-tool press that doesn't move segments; a drag pans (so you can still move
+  around without a modifier). **Finer boundary**: the decoder's fixed 256² logits
+  are bilinear-upsampled straight to **native image resolution** at commit (not
+  nearest-scaled from a pre-thresholded ≤1024 mask). Wired through `ViewerImage.vue`
+  (encode on tool activate, reset+forget on image switch/unmount). **Mask-edit save
+  behavior** (all tools, not just Smart): commits during an edit session now update
+  only the in-memory mask (undo/redo/overlay/badge stay live) and persist once —
+  one OPFS write + "Mask saved" log — when edit mode closes (`updateMask(…, persist)`
+  in `useImagesStore`; `ViewerImage.persistMask`/`flushMask`). The mask overlay is
+  also always visible while editing regardless of the view toggle. **Verified end-to-end in-browser**
+  on onnx-community/sam2-hiera-tiny: encoder on **WebGPU** (~1.2 s/img, once),
+  decoder on **WASM** (ORT's WebGPU EP crashes when re-run with a varying point
+  count — `getBindGroupLayout` undefined / wasm OOB — so the decoder is CPU-pinned).
+  The downloaded exports needed a one-time fix: their `/conv_s0,s1/Conv` nodes had
+  bad rank-0 `value_info` that failed ORT shape inference — stripped all internal
+  `value_info` from both `.onnx` files (they re-infer at load). Models bundled at
+  `public/models/sam2_{encoder,decoder}.onnx` (encoder fp32 **128 MB** — TODO F12:
+  quantize / OPFS-cache / LFS). Contract + gotchas in `src/core/segment/README.md`.
+
+- **2026-07-12 · Dense-fusion OOM fix + smooth pipeline progress (7 phases)** —
+  the 50-image building set OOM-killed the tab at Build Dense Cloud. Fixed +
+  flattened the whole dense memory path (all unit-tested; **in-browser
+  verification still owed — see TODO ▸ Now ▸ M**):
+  - **P1+2 (fusion crash):** `fuseDepthMaps` (`core/dense/mvs.js`) no longer
+    materializes a per-pixel point-object list (~3 GB). Kept pixels stream
+    straight into a numeric-keyed **voxel accumulator** (`createVoxelAccumulator`
+    — SoA typed-array sums, world-origin cell anchoring identical to
+    `mergePointsSpatial`, packed `(dix·ny+diy)·nz+diz` keys sized from a coarse
+    scene bbox, float64-exactness clamp) and finalize straight to the flat wire
+    buffer. Cost histogram is sampled + sorted **once** (`autoFusionMaxCost` now
+    returns the median too; `medianOf` deleted). New `DENSE_TUNING` knobs
+    (`fuseBboxStride`/`fuseProgressMs`/`fuseCostMaxSamples`/`fuseMaxCells`).
+    `ProgressModal` renders `Math.floor(current)` so fractional emits read clean.
+  - **P3 (transfer, not clone):** `streamingOp` takes a `transfer` list; the
+    store transfers each depth map's depth/cost/rgb buffers to the worker (strips
+    the heavy `displayDataUrl`), the `densify` op round-trips them home, the store
+    re-attaches them (ortho reuse). Densify error clears the (now-detached)
+    depth-map cache; ortho guards on `byteLength === 0`.
+  - **P4/P5 (progress):** depth maps emit fractional within-image progress
+    (pyramid-level weighted); sparse SfM emits during init-pair scoring
+    (`initPair.js`), interim BA / rescue (`register.js`), and the final BA /
+    retriangulation / filter / GCP-anchor stretch (`sfm.js`).
+  - **P6 (flat dense cloud):** a `kind:'dense'` cloud is stored **flat**
+    (`{ count, pos:Float32Array(3N), col:Uint8Array(3N) }`, `DenseCloud` in
+    `types.ts`), not point objects — the viewer (`Viewer3D`), PLY (`cloudToPly`),
+    DEM marshalling, persist/restore (`serialize/deserializeCloud` + legacy
+    back-compat), sidebar count, and `App.vue`/`useExports` all branch on kind.
+    Sparse clouds keep their object/track shape.
+  - **P7 (Stage B pre-flight):** `projectDensifyPeakBytes` (`memBudget.js`)
+    projects the fusion peak (input + voxel accumulator + flat output) from the
+    real maps; the store gates **before transferring** so a refusal keeps the
+    depth maps, logging an actionable breakdown vs `memBudgetBytes`.
+
 - **2026-07-11 · GCP sidebar link correctness + multi-image inspector view** —
   observation jump-to-image links now render only for images that actually exist:
   `useGcpsStore` gained `reconcileObservationImageIds` + a `watch` on the image

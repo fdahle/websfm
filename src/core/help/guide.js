@@ -17,8 +17,13 @@ const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/
 const PARAM_RE = /<!--\s*param:\s*([A-Za-z0-9_]+)(?:\s+default:\s*([^>]*?))?\s*-->/
 
 // Strip a leading HTML comment (schema doc) so frontmatter needn't be byte 0.
+// The schema doc itself contains a nested `<!-- param: … -->` example, so a plain
+// non-greedy match would stop at that inner `-->` and leave prose before the real
+// frontmatter. Anchor the end to the `-->` that is actually followed by the `---`
+// frontmatter opener (the lookahead makes the non-greedy match extend past inner
+// `-->`s until the frontmatter follows).
 function stripLeadingComment(raw) {
-  return raw.replace(/^\s*<!--[\s\S]*?-->\s*/, '')
+  return raw.replace(/^\s*<!--[\s\S]*?-->\s*(?=---)/, '')
 }
 
 export function parseGuideDoc(raw, sourcePath = '<string>') {

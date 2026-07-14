@@ -8,23 +8,29 @@ import Icon from '../Icon.vue'
 // header; the position is module-scoped so it sticks across images and tabs
 // for the session (not persisted).
 const props = defineProps({
-  tool:        { type: String,  default: null }, // 'brush' | 'erase' | 'rect' | null (pan)
+  tool:        { type: String,  default: null }, // 'brush' | 'erase' | 'rect' | 'smart' | null (pan)
   brushRadius: { type: Number,  default: 20 },
   opacity:     { type: Number,  default: 0.45 },
   hasMask:     { type: Boolean, default: false },
   canUndo:     { type: Boolean, default: false },
   canRedo:     { type: Boolean, default: false },
+  // Smart Select (SAM2): a human-readable status line + whether a candidate
+  // segment is currently previewed (enables Add/Clear).
+  smartStatus:     { type: String,  default: '' },
+  smartHasPreview: { type: Boolean, default: false },
 })
 
 const emit = defineEmits([
   'set-tool', 'update:brushRadius', 'update:opacity',
   'invert', 'undo', 'redo', 'import', 'clear', 'close',
+  'smart-commit', 'smart-discard',
 ])
 
 const TOOLS = [
-  { id: 'brush', icon: 'brush',  title: 'Brush — paint mask (B)' },
-  { id: 'erase', icon: 'eraser', title: 'Eraser — unpaint mask (E)' },
-  { id: 'rect',  icon: 'rect',   title: 'Rectangle — drag to mask, hold Alt to erase (R)' },
+  { id: 'brush', icon: 'brush',    title: 'Brush — paint mask (B)' },
+  { id: 'erase', icon: 'eraser',   title: 'Eraser — unpaint mask (E)' },
+  { id: 'rect',  icon: 'rect',     title: 'Rectangle — drag to mask, hold Alt to erase (R)' },
+  { id: 'smart', icon: 'sparkles', title: 'Smart Select — click an object to segment it (SAM2) (S)' },
 ]
 
 // Clicking the active tool deselects it → pan/zoom without leaving edit mode.
@@ -77,6 +83,26 @@ function onHeaderUp() {
       <button class="mt-btn" :class="{ disabled: !canRedo }" title="Redo (Ctrl+Shift+Z)" @click="canRedo && emit('redo')">
         <Icon name="redo" class="mt-icon" />
       </button>
+    </div>
+
+    <!-- Smart Select panel: status + commit/discard of the previewed segment. -->
+    <div v-if="tool === 'smart'" class="mt-smart">
+      <div class="mt-smart-status">{{ smartStatus || 'click an object to segment it' }}</div>
+      <div class="mt-hint">Click = segment · drag = pan · Alt-click = refine · Enter = add</div>
+      <div class="mt-row mt-smart-actions">
+        <button
+          class="mt-textbtn add"
+          :class="{ disabled: !smartHasPreview }"
+          title="Add the previewed segment to the mask (Enter)"
+          @click="smartHasPreview && emit('smart-commit')"
+        >Add to mask</button>
+        <button
+          class="mt-textbtn"
+          :class="{ disabled: !smartHasPreview }"
+          title="Discard the previewed segment (Del)"
+          @click="smartHasPreview && emit('smart-discard')"
+        >Clear</button>
+      </div>
     </div>
 
     <div class="mt-row">
@@ -189,6 +215,53 @@ function onHeaderUp() {
 .mt-btn.disabled:hover { background: none; color: var(--text); }
 
 .mt-icon { width: 16px; height: 16px; }
+
+/* Smart Select panel */
+.mt-smart {
+  margin: 0 -4px 6px;
+  padding: 6px;
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  background: var(--hover-bg);
+}
+.mt-smart-status {
+  font-size: 11px;
+  color: var(--text);
+  margin-bottom: 3px;
+  min-height: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mt-hint {
+  font-size: 9px;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+  line-height: 1.3;
+}
+.mt-smart-actions { gap: 6px; margin-bottom: 0; }
+.mt-textbtn {
+  flex: 1;
+  padding: 4px 6px;
+  font-size: 11px;
+  background: none;
+  border: 1px solid var(--panel-border);
+  border-radius: 5px;
+  color: var(--text);
+  cursor: pointer;
+}
+.mt-textbtn:hover { background: var(--panel); }
+.mt-textbtn.add {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.mt-textbtn.disabled {
+  opacity: 0.4;
+  cursor: default;
+  border-color: var(--panel-border);
+  color: var(--text-dim);
+}
+.mt-textbtn.disabled:hover { background: none; }
 
 .mt-slider {
   display: flex;

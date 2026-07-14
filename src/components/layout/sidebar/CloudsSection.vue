@@ -17,13 +17,24 @@ function toggleCloudExpand(id) {
   else cloudExpanded.value[id] = true
 }
 
-const cloudKindLabel = (kind) => (kind === 'dense' ? 'Dense' : 'Sparse')
+const cloudKindLabel = (kind) => (kind === 'dense' ? 'Dense' : kind === 'mesh' ? 'Mesh' : 'Sparse')
 
-// Tie-points = sparse points carrying at least one view-track. (Dense clouds have
-// no tracks, so this is only shown for sparse clouds.)
+// Tie-points = sparse points carrying at least one view-track. (Dense/mesh clouds
+// have no tracks, so this is only shown for sparse clouds.)
 function tiePointCount(cloud) {
-  return cloud.points.reduce((n, p) => n + (p.views?.size > 0 ? 1 : 0), 0)
+  // Only sparse clouds carry tracks; dense/mesh clouds are flat (no per-point objects).
+  return (cloud.kind === 'dense' || cloud.kind === 'mesh')
+    ? 0 : cloud.points.reduce((n, p) => n + (p.views?.size > 0 ? 1 : 0), 0)
 }
+
+// Primary count across shapes: triangles for a mesh, points otherwise (sparse array
+// vs dense flat { count }). Mesh `count` is the triangle count (nVerts is separate).
+function pointCount(cloud) {
+  if (cloud.kind === 'mesh') return cloud.count ?? 0
+  return cloud.kind === 'dense' ? (cloud.count ?? 0) : cloud.points.length
+}
+// Label for the primary count row — "Triangles" for a mesh, "Points" otherwise.
+const countLabel = (cloud) => (cloud.kind === 'mesh' ? 'Triangles' : 'Points')
 
 function fmtCreated(ts) {
   if (!ts) return '—'
@@ -125,8 +136,12 @@ function ctxRemoveCloud()  { emit('remove-cloud', cloudCtx.value.cloud.id); clos
             <span class="detail-value">{{ cloud.cameras.size }}</span>
           </div>
           <div class="detail-row">
-            <span class="detail-label">Points</span>
-            <span class="detail-value">{{ cloud.points.length.toLocaleString() }}</span>
+            <span class="detail-label">{{ countLabel(cloud) }}</span>
+            <span class="detail-value">{{ pointCount(cloud).toLocaleString() }}</span>
+          </div>
+          <div v-if="cloud.kind === 'mesh'" class="detail-row">
+            <span class="detail-label">Vertices</span>
+            <span class="detail-value">{{ (cloud.nVerts ?? 0).toLocaleString() }}</span>
           </div>
           <div v-if="cloud.kind === 'sparse'" class="detail-row">
             <span class="detail-label">Tie-points</span>
@@ -157,7 +172,7 @@ function ctxRemoveCloud()  { emit('remove-cloud', cloudCtx.value.cloud.id); clos
         >Set as main</button>
         <button class="ctx-item" @click="ctxZoomCloud">Zoom to</button>
         <button class="ctx-item" @click="ctxRenameCloud">Rename</button>
-        <button class="ctx-item" @click="ctxRebuildCloud">Rebuild sparse cloud</button>
+        <button v-if="cloudCtx.cloud.kind === 'sparse'" class="ctx-item" @click="ctxRebuildCloud">Rebuild sparse cloud</button>
         <div class="ctx-sep"></div>
         <button class="ctx-item danger" @click="ctxRemoveCloud">Remove</button>
       </div>

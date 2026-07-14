@@ -27,6 +27,7 @@ export const useModalsStore = defineStore('modals', () => {
   const denseOpen           = ref(false)
   const demOpen             = ref(false)
   const orthoOpen           = ref(false)
+  const meshOpen            = ref(false)
   const gcpImportOpen       = ref(false)
   const gcpImportText       = ref('')
   const gcpImportName       = ref('')
@@ -41,6 +42,8 @@ export const useModalsStore = defineStore('modals', () => {
   const cameraImportMode    = ref('pose') // sniffed default: 'sensor' | 'pose'
   const importKindOpen      = ref(false)  // "what is this dropped file?" chooser
   const importKindFile      = ref(null)   // the File awaiting a kind choice, or null
+  const importCloudOpen     = ref(false)  // point-cloud / mesh import settings
+  const importCloudData     = ref(null)   // { parsed, stats, fileName } from the parseCloud op
   const infoImageId         = ref(null)
 
   return {
@@ -62,6 +65,7 @@ export const useModalsStore = defineStore('modals', () => {
     denseOpen,
     demOpen,
     orthoOpen,
+    meshOpen,
     gcpImportOpen,
     gcpImportText,
     gcpImportName,
@@ -76,6 +80,8 @@ export const useModalsStore = defineStore('modals', () => {
     cameraImportMode,
     importKindOpen,
     importKindFile,
+    importCloudOpen,
+    importCloudData,
     infoImageId,
   }
 })

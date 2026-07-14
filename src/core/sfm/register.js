@@ -408,6 +408,7 @@ export async function registerImages(ctx) {
       registeredSinceBA++
       if (baIterations > 0 && interimBaEvery > 0 && registeredSinceBA >= interimBaEvery
           && cameras.size >= 3 && getPoints3d().length >= 10) {
+        onProgress?.(cameras.size, imgs.length, `Bundle adjustment (${cameras.size} cameras)…`)
         await runBundleAdjust(`interim BA (${cameras.size} cameras)`, interimBaIterations, 'none')
         const f = filterTracks({ maxReprojPx: filterMaxReprojPx * 2, minTriAngleDeg: filterMinTriAngleDeg })
         rebuildViewIndex() // BA + filter replaced/dropped point objects; refresh first
@@ -437,9 +438,11 @@ export async function registerImages(ctx) {
         log(`Reconstruction: registration stalled — ${stalledLinked.length} linked image(s) still `
           + `unregistered; rescue (focal solve + retriangulation, then a relaxed retry)`, 'info', 'Reconstruction')
         if (baIterations > 0 && rescueRefine !== 'none' && cameras.size >= 3 && getPoints3d().length >= 10) {
+          onProgress?.(cameras.size, imgs.length, 'Rescue: focal solve…')
           await runBundleAdjust('rescue focal solve', interimBaIterations, rescueRefine)
           rebuildViewIndex()
         }
+        onProgress?.(cameras.size, imgs.length, 'Rescue: retriangulating…')
         const { added } = await retriangulatePairs({
           points3d: getPoints3d(), cameras, pairs: donePairs,
           keypointOf, maxReprojPx: filterMaxReprojPx, triangulate: triangulateDlt,

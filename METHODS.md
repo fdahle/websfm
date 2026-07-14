@@ -444,6 +444,13 @@ support planes, in `core/dense/mvs.js` + `crates/reconstruction/src/mvs.rs`.
 - **Stage B — fusion** (`fuseDepthMaps`): cross-view **geometric consistency**
   (a depth survives only if it reprojects consistently in enough neighbour views)
   → fused dense point cloud.
+- **Oriented normals for free**: PatchMatch already estimates a per-pixel plane
+  `(depth, normal)`. Rather than re-estimating normals later (k-NN PCA +
+  orientation propagation, the usual Poisson prerequisite), both backends export
+  the converged **camera-frame** normal; fusion rotates it to world (`Rᵀ·n_cam`)
+  and voxel-averages+renormalizes it onto each dense point (`DenseCloud.nrm`).
+  Because the kernel keeps `n_z < 0` (facing the camera), aerial coverage yields
+  consistently **outward-oriented** normals — exactly what screened Poisson needs.
 
 **Two backends**, same math: **WASM/CPU** (default) and an opt-in **WebGPU**
 kernel (`workers/gpu/patchmatch.wgsl`, ~0.1 s/img vs minutes on CPU), with
@@ -475,8 +482,37 @@ must stay < 5e-3).
 4. **Georeference** (optional, §6) — when present, products carry CRS coordinates
    and true scale; otherwise they live in the local frame.
 
-Exports: PLY, model JSON, DEM GeoTIFF/.asc, ortho GeoTIFF/PNG+.wld
+Exports: PLY, model JSON, DEM GeoTIFF/.asc, ortho GeoTIFF/PNG+.wld, mesh PLY/GLB
 (`exporters.js`, `geotiff.js`).
+
+### 8.5 Mesh — screened Poisson surface reconstruction
+
+**Method**: **screened Poisson surface reconstruction** (Kazhdan & Hoppe 2013),
+`crates/mesh` (WASM) + `core/products/mesh.js`. It solves for an implicit
+indicator function whose gradient matches the oriented point normals (the
+"screening" term additionally pulls the zero level set toward the sample points),
+then extracts the surface with marching cubes.
+
+- **Why Poisson, and why it's cheap here**: Poisson needs *oriented* per-point
+  normals. Normally that's a separate estimation stage; we reuse the dense
+  PatchMatch plane normals (§7), so the only new heavy compute is the multigrid
+  solve itself.
+- **Iso-value**: the reconstructed surface is the level set at the **average of
+  the implicit function evaluated at the input samples**, not the naive `0` — the
+  vendored library hard-coded `0`, which inflated the surface ~8% (a patch extracts
+  at the sample-average iso, matching the reference implementation).
+- **Trimming**: Poisson closes over holes with extrapolated "bulges". We cull any
+  triangle whose three vertices are all farther than `trimFactor × mergeCell` from
+  the input cloud (a voxel-hash proximity test), keeping only surface supported by
+  data. `trimFactor 0` keeps the full watertight hull.
+- **Colour**: Poisson vertices are new points, so colour is transferred from the
+  nearest dense-cloud voxel cell (3³ neighbourhood search).
+- **Knobs**: octree `depth` (detail vs cost/RAM), `screening` weight (fit
+  tightness; **not** PoissonRecon's samples-per-node — this library exposes
+  screening instead), `trimFactor`.
+- **Implementation note**: the solver is a **vendored, rayon-stripped** copy of
+  Dimforge's `poisson_reconstruction` — rayon's worker threads panic on
+  threadless wasm, so its two `par_iter_mut()` sites run sequentially.
 
 ---
 
@@ -536,6 +572,8 @@ film-format handling with sanity checks); and the WebGPU PatchMatch path.
 - Georef: `src/core/products/georef.js`; GCP triangulation: `gcpTriangulation.js`
 - Dense: `src/core/dense/mvs.js`, `crates/reconstruction/src/mvs.rs`, `workers/gpu/`
 - Products: `src/core/products/{projection,dem,ortho}.js`
+- Mesh (screened Poisson): `src/core/products/mesh.js`, `crates/mesh/` (vendored
+  `poisson_reconstruction` under `crates/mesh/vendor/`)
 - Tunable knobs & their rationale: `src/core/defaults.user.js`, `src/core/tuning.js`
 
 *In-app glossary*: many of these terms also have cross-linked explanations under

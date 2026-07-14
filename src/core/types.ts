@@ -61,6 +61,45 @@ export interface Point3 {
   z: number
 }
 
+/**
+ * Dense point cloud — stored **flat**, not as an array of point objects. A fused
+ * dense cloud is millions of points; boxed `{x,y,z,color}` objects were ~110 B each
+ * (the fusion OOM's main-thread tail). Position/colour live in split typed arrays
+ * (Structure-of-Arrays), fed straight to the viewer / PLY / DEM. Sparse clouds keep
+ * the object-array shape (they carry per-point view-tracks). See useReconstructionStore.
+ */
+export interface DenseCloud {
+  count: number
+  /** xyz per point, length 3·count. */
+  pos: Float32Array
+  /** rgb (0–255) per point, length 3·count; null when uncoloured. */
+  col: Uint8Array | null
+  /**
+   * World-space unit normals, length 3·count. Present when the dense run produced
+   * them (reused PatchMatch plane normals) — the oriented-normal input to screened
+   * Poisson meshing. Undefined on legacy/normal-less runs (do NOT heal).
+   */
+  nrm?: Float32Array
+}
+
+/**
+ * Triangle mesh product — screened-Poisson surface over a dense cloud. Flat, like
+ * DenseCloud (no per-vertex objects). `count` is the triangle count; `nVerts` the
+ * vertex count. Positions/colours are per-vertex; `idx` indexes triangles into them.
+ */
+export interface MeshCloud {
+  /** triangle count. */
+  count: number
+  /** vertex count. */
+  nVerts: number
+  /** xyz per vertex, length 3·nVerts. */
+  pos: Float32Array
+  /** triangle vertex indices, length 3·count. */
+  idx: Uint32Array
+  /** rgb (0–255) per vertex, length 3·nVerts; null when uncoloured. */
+  col: Uint8Array | null
+}
+
 /** A 2D observation of a 3D point in a given camera, in pixel coords. */
 export interface Observation {
   camIdx: number

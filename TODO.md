@@ -31,6 +31,22 @@ still unvalidated on real data (Now ▸ R).
 
 ## Now
 
+### M — Dense-fusion OOM + pipeline progress (2026-07-12)
+**All 7 phases shipped** (code + unit tests + typecheck) — see HANDOVER
+2026-07-12 done-log. **First owed: in-browser verification** (headless can't
+observe OOM, viewer rendering, transfer round-trip, or restore). Re-run the
+50-image building set at medium quality end-to-end and confirm:
+- Build Dense Cloud no longer OOM-kills the tab; watch `performance.memory` /
+  Task Manager during densify (peak should track the "Dense fuse: projected peak
+  memory" log line).
+- Progress bars glide: sparse (init-pair scoring, interim BA, final stretch),
+  depth maps (fractional within-image), densify (per-map fusion + "Packing…").
+- Ortho still works after a densify (Phase 3 buffer round-trip), and a *second*
+  densify run works (buffers re-attached).
+- Dense cloud renders in the 3D viewer (Phase 6 flat shape), PLY export opens,
+  DEM builds from the dense cloud, and a saved→reopened project restores the
+  dense cloud (Phase 6 flat persist/restore + the legacy-object back-compat path).
+
 ### Q — Reconstruction quality/speed overhaul (2026-07-10 log audit)
 Two real runs (aerial CA213732V… film scans + 50-image building set) exposed a
 chain of quality problems. **P0.1/P1/P2.1/P2.3/P3/P4/P6 shipped** (see HANDOVER
@@ -291,13 +307,14 @@ Ordered by how much each closes the COLMAP/Metashape gap per unit effort.
 F3 → F7 → F8 are the spine: visible 3D product, ecosystem interop, deliverable
 report (F2 — accuracy story — shipped 2026-07-07, see HANDOVER).
 
-### F3 — 2.5D mesh from the DEM (+ texture)
-Skip full 3D meshing (Poisson in WASM is a project of its own — parked). For
-aerial: regular-grid triangulation of the DEM (two triangles per cell, skip
-holes), draped with the orthophoto as texture → `THREE.Mesh` in Viewer3D, plus
-PLY/OBJ export via the export modal. Cheap, and it makes the products feel
-real. Follow-up: glTF/GLB export (the web-native mesh format; three.js has an
-exporter) so results drop into any 3D viewer.
+### F3 — mesh output — **full 3D screened Poisson SHIPPED 2026-07-12**
+Full 3D screened-Poisson meshing landed instead of the planned 2.5D-DEM shortcut
+(reusing the dense PatchMatch plane normals made it tractable in WASM — see
+`PLAN-mesh-poisson.md` + HANDOVER 2026-07-12). Vertex-coloured `THREE.Mesh` in
+Viewer3D, PLY + GLB export. **Owed: in-browser verification** (headless can't run
+densify→mesh, rendering, restore, or open the exports). *Optional follow-ups (not
+required):* orthophoto-textured 2.5D DEM mesh for aerial (cheaper, drapes the true
+ortho); meshoptimizer decimation (Phase 6, parked); a UV-textured export.
 
 ### F7 — COLMAP model import/export (ecosystem interop) **[new 2026-07-07]**
 Read/write COLMAP's sparse-model format (`cameras.txt/images.txt/points3D.txt`
@@ -315,7 +332,10 @@ observations coherent with the exported K/R/t (B2 fix, 2026-07-10). Remaining:
   sniffing, `useReconstructionStore.importColmapModel`, Ribbon *Import ▸ Interop ▸
   COLMAP Model* + multi-file/zip picker (`useImportRouting.openColmapImport`). Adds a
   new sparse cloud via MC (never replaces). **Browser run still owed** — see below.
-- **`.bin` variants** — LE-binary mirror of the txt read/write (fast follow).
+- **`.bin` variants** — ✅ shipped (PLAN-import-export Phase 3): LE-binary
+  `serializeColmapModelBin`/`parseColmapModelBin` share the ColmapModel struct;
+  export modal `bin` format (zipped `.bin`), import routes `.bin` keys through the
+  binary parser. Txt↔bin equivalence unit-tested.
 - **Browser manual run (owed verification)** — (a) export a real sparse model, open
   the zip in COLMAP / another importer; confirm cameras + points land with low
   reprojection error. Specifically exercise a **film-scan** and a **self-cal** (`f,k1`)
@@ -334,7 +354,8 @@ table, match graph stats, track-length histogram, reprojection stats, georef/
 GCP residuals (F2), DEM/ortho previews + GSD, run settings + timings. Most
 numbers already exist in run summaries (`reconstruction.json`) and the
 per-camera residual table — this is largely presentation. Pure
-`core/products/report.js` + an export entry.
+`core/products/report.js` + an export entry. F13's Evaluate-tab views are the
+interactive form of the same data — building them first makes F8 an assembly job.
 
 ### F9 — Point-cloud editing + gradual selection **[new 2026-07-07]**
 Metashape-parity model cleanup. Two halves:
@@ -361,28 +382,50 @@ For close-range/object work without GCPs: user marks two image points across
 model (and reports residual). Metashape staple; small once F2's
 triangulate-marked-points helper exists.
 
-### F12 — SAM2 smart mask selection **[new 2026-07-11; builds on Next ▸ M]**
-Client-side Segment-Anything-2 for "intelligent" mask selection: click an
-object → segmented region → add/subtract from the mask. SAM2 splits into an
-**image encoder** (hiera-tiny ONNX, ~35–40 MB, 1024×1024 input, run once per
-image → ~4 MB embedding, cache per uuid) and a **prompt decoder** (~5–16 MB,
-~10–50 ms per click: embedding + positive/negative points → candidate mask).
-- `core/segment/sam2.js` (pure, worker-side) via the existing
-  `core/features/ort.js` loader (WebGPU-preferred, wasm fallback). **ORT
-  sessions are not reentrant** — pin + promise-chain mutex, like LightGlue.
-- `workers/ops/segment.js`: `segmentEncode(uuid)` (rasterize `computeUrl ??
-  url`, resize, cache embedding) + `segmentDecode(uuid, points)` (transfer mask
-  buffer at image resolution).
-- UI: "Smart Select" tool in the M1 toolbar — activating encodes (progress
-  shown); left-click positive / Alt-click negative point, live region preview;
-  Enter commits add (modifier = subtract) onto the mask canvas; M2's undo
-  covers mistakes.
-- Model hosting: lazy-fetch on first use + OPFS cache (encoder is too big to
-  bundle; reuse the derived-blob pattern), or SP4's custom-model upload path.
-- **De-risk first**: verify a specific image-mode SAM2 ONNX export actually
-  runs under onnxruntime-web 1.27 before building UI (fallback: MobileSAM /
-  SAM1 exports, battle-tested in browsers). Later: "segment everything" grid
-  prompts; batch encode as an Auto-Mask strategy.
+### F12 — SAM2 smart mask selection **[shipped 2026-07-12; see HANDOVER]**
+Core (`core/segment/sam2.js` + `workers/ops/segment.js`) and the "Smart Select"
+tool in `MaskToolbar.vue`/`ViewerImage.vue` are done — click-to-segment, cyan
+preview, Enter/Add to commit, undo. Verified end-to-end on WebGPU encoder + WASM
+decoder with onnx-community/sam2-hiera-tiny. Remaining polish (gate on use):
+- **Model hosting**: the fp32 encoder is **128 MB** bundled in `public/models/`.
+  Consider the quantized (`_q4`/`fp16`) encoder variant, and/or lazy-fetch + OPFS
+  cache (reuse the derived-blob pattern) or SP4's custom-upload path instead of
+  bundling. If keeping in-repo, Git LFS.
+- **Subtract-from-mask commit**: Smart commit is add-only today (Alt-click already
+  refines the candidate; a modifier on commit to *subtract* the segment is TODO).
+- **WebGPU decoder**: pinned to WASM (per-click ORT WebGPU EP crashes on the
+  varying point-count shape); revisit when ORT fixes it — `{ backend:'webgpu' }`.
+- Later: "segment everything" grid prompts; batch encode as an Auto-Mask strategy.
+
+### F13 — Evaluate ribbon tab (quality/accuracy views) **[new 2026-07-12]**
+The ribbon tab exists (`Ribbon.vue`, between Tools and Export) with disabled
+placeholders; each item below wires one up. These are **views over existing
+state** (run summaries, `gcpAccuracyReport()`, matches store) — modals/tabs plus
+a small pure `core/eval/` module for anything derived, not new pipeline stages.
+F8 (processing report) is the exportable form of the same data — build these
+views first, then F8 largely assembles them. Ordered by value/effort:
+- **eval-gcps — GCP accuracy table** (start here; data function exists):
+  per-GCP CRS residual X/Y/Z + per-observation reprojection px, RMSE totals,
+  worst-first sort, enable/disable toggles for iterative drop-and-refit.
+- **eval-reconstruction — reconstruction report**: registered/total images,
+  points, mean+median reprojection, track-length histogram — surfaces what the
+  run summary already holds instead of console archaeology.
+- **eval-images — per-image diagnostics**: sortable table (reprojection RMS,
+  triangulated observations, registration pass, self-cal drift); reuse the
+  ImageTableModal pattern. Sorting by RMS names the poisoning images.
+- **eval-calibration — calibration check**: BA-refined focal vs EXIF/sensor
+  focal per sensor, folded k1 (`summary.selfCalDistortion`) — flags bad sensor
+  guesses on film scans.
+- **eval-poses — pose residuals**: per-camera distance Horn-fit SfM centre ↔
+  imported pose (drift / bad EXIF positions).
+- **eval-match-graph — graph health**: connected components, weakly-connected
+  images, pairs killed by cycle filter / spread gate — answers "why did only 40
+  of 60 register".
+- **eval-depth-coverage — dense diagnostics**: per-image % valid depth pixels,
+  fusion cull breakdown (already logged under 'Dense'), effective GSD.
+- **eval-dem-gcps — DEM vs GCP check**: sample the DEM at each GCP's XY,
+  report ΔZ vs surveyed elevation — an *independent* end-to-end accuracy check,
+  not a fit residual.
 
 ### F6 — Fisheye distortion model
 D3's selector covers Pinhole/Radial/Brown — all undistort-to-pinhole-able.
@@ -408,14 +451,17 @@ C1 shipped 2026-07-06. **C2**: `run detect match sparse` chaining, `stats
 open-and-focus, per-command usage. Owed from C1: manual browser pass; consider
 auto-deriving the T1 list from the ribbon table so it can't drift.
 
-### F1 polish — exports
-LAS export for point clouds (the surveyor default; PLY alone reads as
-"research tool") — LAS 1.2 point format 2 is a simple binary header + records,
-dependency-free like `geotiff.js`. GeoTIFF compression + tiling for very large
-rasters; proper WKT in `.prj` (currently raw proj4/EPSG); undistorted-image
-export (COLMAP `image_undistorter` parity — the raster remap already exists in
-the dense path); remaining disabled modal placeholders (COLMAP → now F7,
-hillshade, JPEG, downsample).
+### F1 polish — exports **[shipped 2026-07-12 via PLAN-import-export.md]**
+Phases 1–6 of `PLAN-import-export.md` shipped (see HANDOVER): LAS 1.2 + XYZ
+cloud export with georef/voxel-downsample options; PLY/LAS/XYZ cloud & mesh
+**import** (off-thread parse → `importCloud`); COLMAP `.bin` (F7); OBJ/STL mesh
+export; nerfstudio/3DGS `transforms.json` export; GeoTIFF DEFLATE, hillshade
+PNG, JPEG ortho, real WKT `.prj` (WGS84 geographic + UTM zones, else proj4
+fallback). **Still parked**: Bundler/NVM import (Phase 5b, optional — skipped as
+time-boxed), LAZ (Phase 7 stretch — needs a WASM codec crate), GeoTIFF tiling
+for very large rasters, undistorted-image export (COLMAP `image_undistorter`
+parity). **Owed: in-browser verification** — headless can't open the exports;
+see the per-phase manual-check list in HANDOVER.
 
 ### Products follow-ups
 Real-world map-viewer overlay for the ortho; ortho GPU/WASM kernel if per-cell
@@ -494,8 +540,8 @@ JS proves slow on large grids; optional manual "Flip Z" for object scenes.
   already-landed mechanism.)
 - **Global undo/redo command layer** — rejected. Per-entity delete/edit in the
   stores is enough (Metashape has none either).
-- **Full 3D meshing (Poisson/Delaunay)** — parked in favour of F3's 2.5D DEM
-  mesh; revisit only if object-scene (non-aerial) demand materialises.
+- **Full 3D meshing (Poisson/Delaunay)** — **SHIPPED 2026-07-12** (screened
+  Poisson, `crates/mesh` + `core/products/mesh.js`; see F3 above / HANDOVER).
 - **Vocabulary-tree / global-descriptor image retrieval** — the scale-up path
   for candidate-pair selection with no poses/GPS. The shipped subset gate (P7,
   `core/features/subsetGate.js`) covers the same need at <100s–low-100s images

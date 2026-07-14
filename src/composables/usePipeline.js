@@ -8,7 +8,7 @@ import { terminateAll } from '../workers/computeClient.js'
 // reconstruct:      function      — from useReconstructionStore
 // computeDepthMaps:  function      — from useReconstructionStore (dense Stage A)
 // densify:          function      — from useReconstructionStore (dense Stage B)
-export function usePipeline({ images, detectAll, matchAll, onImageDetected, reconstruct, computeDepthMaps, densify, generateDem, generateOrtho }) {
+export function usePipeline({ images, detectAll, matchAll, onImageDetected, reconstruct, computeDepthMaps, densify, generateDem, generateOrtho, generateMesh }) {
   const progressOpen    = ref(false)
   const progressTitle   = ref('')
   const progressCurrent = ref(0)
@@ -133,6 +133,18 @@ export function usePipeline({ images, detectAll, matchAll, onImageDetected, reco
     progressOpen.value = false
   }
 
+  // Products — mesh (screened Poisson over the dense cloud). Single worker call;
+  // cancel by terminating the worker (the store catches the rejection).
+  async function runGenerateMesh(settings) {
+    openProgress('Building Mesh', 1, () => terminateAll('mesh cancelled'))
+    await generateMesh(settings, (done, total, label) => {
+      progressCurrent.value = done
+      progressTotal.value   = total
+      progressLabel.value   = label ?? ''
+    })
+    progressOpen.value = false
+  }
+
   return {
     progressOpen,
     progressTitle,
@@ -147,5 +159,6 @@ export function usePipeline({ images, detectAll, matchAll, onImageDetected, reco
     runDensify,
     runGenerateDem,
     runGenerateOrtho,
+    runGenerateMesh,
   }
 }
