@@ -38,15 +38,17 @@
  * - `max_iters`: outer LM iterations
  * - `sensor_of_cam`: n_cam ints — per-camera sensor id (shared → shared focal);
  *   `< 0` (or a short/empty list) ⇒ that camera is its own group
- * - `refine_mode`: 0 = none (poses+points only), 1 = focal, 2 = focal + cx,cy,
- *   3 = focal + a shared radial k1 (Brown r² distortion)
+ * - `refine_mask`: **bitmask** of the shared per-sensor intrinsics to self-calibrate:
+ *   1 = focal scale s, 2 = principal point (dcx,dcy), 4 = radial k1, 8 = k2, 16 = k3.
+ *   0 ⇒ poses+points only. The per-group param vector is the ordered subset
+ *   `[s?, dcx?, dcy?, k1?, k2?, k3?]` (kdim ≤ 6). fy stays locked to fx (single scale).
  *
  * # Output
- * `[cameras_flat(n_cam×12), pts_flat(n_pts×3), intrinsics_flat(n_cam×5),
+ * `[cameras_flat(n_cam×12), pts_flat(n_pts×3), intrinsics_flat(n_cam×7),
  *   cost_before, cost_after, anchor_rms_after, cost_trace…]` — the returned
- * intrinsics are the **refined** effective K per camera as `[fx,fy,cx,cy,k1]`
- * (k1 = 0 unless `refine_mode == 3`, identical to the input K when
- * `refine_mode == 0`); cost_before/cost_after are RMS reprojection error in
+ * intrinsics are the **refined** effective K per camera as `[fx,fy,cx,cy,k1,k2,k3]`
+ * (radial coeffs 0 for the bits not set in `refine_mask`, identical to the input K
+ * when `refine_mask == 0`); cost_before/cost_after are RMS reprojection error in
  * pixels (anchors do not affect them); anchor_rms_after is the RMS anchor
  * residual in the caller's world units (0 when there are no anchors).
  * @param {Float32Array} cameras_flat
@@ -57,10 +59,10 @@
  * @param {Float32Array} anchor_weight
  * @param {number} max_iters
  * @param {Int32Array} sensor_of_cam
- * @param {number} refine_mode
+ * @param {number} refine_mask
  * @returns {Float32Array}
  */
-export function bundle_adjust(cameras_flat, intrinsics_flat, pts_flat, obs_flat, anchor_flat, anchor_weight, max_iters, sensor_of_cam, refine_mode) {
+export function bundle_adjust(cameras_flat, intrinsics_flat, pts_flat, obs_flat, anchor_flat, anchor_weight, max_iters, sensor_of_cam, refine_mask) {
     const ptr0 = passArrayF32ToWasm0(cameras_flat, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
     const ptr1 = passArrayF32ToWasm0(intrinsics_flat, wasm.__wbindgen_malloc);
@@ -75,7 +77,7 @@ export function bundle_adjust(cameras_flat, intrinsics_flat, pts_flat, obs_flat,
     const len5 = WASM_VECTOR_LEN;
     const ptr6 = passArray32ToWasm0(sensor_of_cam, wasm.__wbindgen_malloc);
     const len6 = WASM_VECTOR_LEN;
-    const ret = wasm.bundle_adjust(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4, ptr5, len5, max_iters, ptr6, len6, refine_mode);
+    const ret = wasm.bundle_adjust(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4, ptr5, len5, max_iters, ptr6, len6, refine_mask);
     var v8 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
     wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
     return v8;

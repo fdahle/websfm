@@ -39,19 +39,21 @@
  * - `max_iters`: outer LM iterations
  * - `sensor_of_cam`: n_cam ints — per-camera sensor id (shared → shared focal);
  *   `< 0` (or a short/empty list) ⇒ that camera is its own group
- * - `refine_mode`: 0 = none (poses+points only), 1 = focal, 2 = focal + cx,cy,
- *   3 = focal + a shared radial k1 (Brown r² distortion)
+ * - `refine_mask`: **bitmask** of the shared per-sensor intrinsics to self-calibrate:
+ *   1 = focal scale s, 2 = principal point (dcx,dcy), 4 = radial k1, 8 = k2, 16 = k3.
+ *   0 ⇒ poses+points only. The per-group param vector is the ordered subset
+ *   `[s?, dcx?, dcy?, k1?, k2?, k3?]` (kdim ≤ 6). fy stays locked to fx (single scale).
  *
  * # Output
- * `[cameras_flat(n_cam×12), pts_flat(n_pts×3), intrinsics_flat(n_cam×5),
+ * `[cameras_flat(n_cam×12), pts_flat(n_pts×3), intrinsics_flat(n_cam×7),
  *   cost_before, cost_after, anchor_rms_after, cost_trace…]` — the returned
- * intrinsics are the **refined** effective K per camera as `[fx,fy,cx,cy,k1]`
- * (k1 = 0 unless `refine_mode == 3`, identical to the input K when
- * `refine_mode == 0`); cost_before/cost_after are RMS reprojection error in
+ * intrinsics are the **refined** effective K per camera as `[fx,fy,cx,cy,k1,k2,k3]`
+ * (radial coeffs 0 for the bits not set in `refine_mask`, identical to the input K
+ * when `refine_mask == 0`); cost_before/cost_after are RMS reprojection error in
  * pixels (anchors do not affect them); anchor_rms_after is the RMS anchor
  * residual in the caller's world units (0 when there are no anchors).
  */
-export function bundle_adjust(cameras_flat: Float32Array, intrinsics_flat: Float32Array, pts_flat: Float32Array, obs_flat: Float32Array, anchor_flat: Float32Array, anchor_weight: Float32Array, max_iters: number, sensor_of_cam: Int32Array, refine_mode: number): Float32Array;
+export function bundle_adjust(cameras_flat: Float32Array, intrinsics_flat: Float32Array, pts_flat: Float32Array, obs_flat: Float32Array, anchor_flat: Float32Array, anchor_weight: Float32Array, max_iters: number, sensor_of_cam: Int32Array, refine_mask: number): Float32Array;
 
 export function compute_depth_map(ref_gray: Uint8Array, ref_w: number, ref_h: number, ref_k: Float32Array, src_gray: Uint8Array, src_dims: Uint32Array, src_k: Float32Array, src_rel: Float32Array, src_mask: Uint8Array, seed_depth: Float32Array, depth_min: number, depth_max: number, window: number, iterations: number, best_k: number, seed: number): Float32Array;
 

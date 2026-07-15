@@ -29,6 +29,8 @@ import { toNorm, camToP34flat, reprojErr, retriangulatePairs, mergeSplitTracks }
 import { selectInitPair } from './initPair.js'
 import { registerImages } from './register.js'
 import { triangulateGcp } from './gcpTriangulation.js'
+import { stagedSelfCalTerms, stagedSelfCalDeferred, SELF_CAL_BASE_TERMS } from './selfCalSchedule.js'
+import { fitComposedRadial, radialCurveOk } from './selfCalCompose.js'
 import { fitSimilarity, frameFromSimilarity } from '../products/georef.js'
 import { RECONSTRUCT_DEFAULTS } from '../defaults.user.js'
 import { SFM_TUNING } from '../tuning.js'
@@ -392,12 +394,22 @@ export async function reconstruct(input, hooks = {}) {
     // calibrated Brown model already removed distortion at ingest, leave it off so
     // we don't double-correct.
     if (cfg.refineIntrinsics === 'auto') {
-      cfg.refineIntrinsics = anyCalibratedDistortion ? 'none' : 'f,k1'
-      log(`Reconstruction: refineIntrinsics 'auto' → '${cfg.refineIntrinsics}' `
-        + (anyCalibratedDistortion
-          ? '(a calibrated distortion model exists — self-cal off to avoid double-correcting)'
-          : '(no calibrated distortion — self-calibrating shared focal + radial k1)'),
-        'info', 'Reconstruction')
+      if (anyCalibratedDistortion) {
+        cfg.refineIntrinsics = 'none'
+        log(`Reconstruction: refineIntrinsics 'auto' → 'none' `
+          + '(a calibrated distortion model exists — self-cal off to avoid double-correcting)',
+          'info', 'Reconstruction')
+      } else {
+        // Staged self-cal (WS2): registration + rescue solve the base 'f,k1'; the
+        // post-filter passes escalate to k2 / principal-point / k3 as the camera and
+        // observation counts allow (selfCalSchedule.js). `selfCalStaged` flags that the
+        // post-filter refineMode is computed per pass rather than fixed.
+        cfg.refineIntrinsics = SELF_CAL_BASE_TERMS
+        cfg.selfCalStaged = true
+        log(`Reconstruction: refineIntrinsics 'auto' → staged (base '${SELF_CAL_BASE_TERMS}', `
+          + 'escalating to cx,cy / k2 / k3 in post-filter passes as the model grows)',
+          'info', 'Reconstruction')
+      }
     }
 
     if (defaultKCount > 0) {
@@ -635,14 +647,17 @@ export async function reconstruct(input, hooks = {}) {
       return res.merged
     }
 
-    // Accumulated self-calibrated radial k1 per sensor id (D2). Each self-cal BA
-    // pass folds its k1 into the keypoints (D1) and adds it here; the run exports the
-    // total so dense can undistort its rasters with the same calibration the sparse
-    // cloud was built on (otherwise the folded distortion is lost at densify). Declared
-    // *before* registerImages: the interim BA now self-calibrates f,k1 mid-registration
-    // (D3), so runBundleAdjust's fold reads this during the registration call — leaving
-    // it below would put it in the temporal dead zone ("Cannot access … before init").
-    const selfCalK1BySensor = new Map()
+    // Self-calibrated distortion bookkeeping (WS2). The sparse pipeline folds the
+    // distortion out of the keypoints each self-cal pass (exact, in place); dense and
+    // the run summary need ONE composed {k1,k2,k3} bag per sensor to reproduce that
+    // fold on the rasters. `pristineKpByUuid` snapshots each eligible image's keypoints
+    // *before the first fold* (post-ingest = pristine), and `selfCalDistBySensor` holds
+    // the composed bag fitted from pristine→folded after each pass (selfCalCompose.js) —
+    // replacing the old additive-k1 sum, which was wrong beyond first order. Declared
+    // *before* registerImages: the interim BA self-calibrates f,k1 mid-registration
+    // (D3), so runBundleAdjust's fold reads these during the registration call.
+    const pristineKpByUuid = new Map()      // uuid → keypoints snapshot (pre-fold)
+    const selfCalDistBySensor = new Map()   // sensorId → { k1, k2, k3, fitRmsPx }
 
     // ── Incremental registration ───────────────────────────────────────────
     // Grow the sparse model one camera at a time — next-best-view ordering,
@@ -735,26 +750,29 @@ export async function reconstruct(input, hooks = {}) {
       })
       points3d = result.points3d.map((pt, i) => ({ ...pt, views: points3d[i].views }))
 
-      // Self-calibration report: one line per sensor group (before → after focal +
-      // the implied film width, tying back to the Q4 sanity check). Never written
-      // back to the sensor table — the user decides whether to adopt it.
+      // Self-calibration report: one line per sensor group (before → after focal, the
+      // refined principal-point offset + radial coeffs, and the implied film width).
+      // Never written back to the sensor table — the user decides whether to adopt it.
+      const wantsCxcy = refineMode.includes('cxcy')
       if (refineMode !== 'none' && result.intrinsics) {
         const seen = new Set()
         uuidList.forEach((uuid, ci) => {
           const g = sensorOfCam[ci]
           if (g < 0 || seen.has(g)) return
           seen.add(g)
-          const fx0 = kList[ci].fx, fx1 = result.intrinsics[ci].fx
+          const rk = result.intrinsics[ci]
+          const fx0 = kList[ci].fx, fx1 = rk.fx
           const pct = fx0 ? (100 * (fx1 - fx0) / fx0) : 0
           let implied = ''
           const w0 = kList[ci].impliedFilmWidthMm
           if (w0 != null && fx1) implied = `, implied film width ${w0.toFixed(0)}mm → ${(w0 * fx0 / fx1).toFixed(0)}mm`
-          const cxcy = refineMode === 'f,cxcy'
-            ? `, cx ${kList[ci].cx.toFixed(1)}→${result.intrinsics[ci].cx.toFixed(1)}, `
-              + `cy ${kList[ci].cy.toFixed(1)}→${result.intrinsics[ci].cy.toFixed(1)}` : ''
-          // R6: report the refined shared radial coefficient (copy into the sensor table's k1).
-          const kdist = refineMode === 'f,k1' && result.intrinsics[ci].k1 != null
-            ? `, k1 ${result.intrinsics[ci].k1.toFixed(5)}` : ''
+          const cxcy = wantsCxcy
+            ? `, cx ${kList[ci].cx.toFixed(1)}→${rk.cx.toFixed(1)}, cy ${kList[ci].cy.toFixed(1)}→${rk.cy.toFixed(1)}` : ''
+          // Refined shared radial coeffs (copy the non-zero ones into the sensor table).
+          const kterms = ['k1', 'k2', 'k3']
+            .filter((k) => rk[k])
+            .map((k) => `${k} ${rk[k].toFixed(5)}`)
+          const kdist = kterms.length ? `, ${kterms.join(', ')}` : ''
           log(`Reconstruction: ${label} self-calibration — sensor group ${g}: `
             + `fx ${fx0.toFixed(1)} → ${fx1.toFixed(1)} (${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%)${cxcy}${kdist}${implied}`,
             'info', 'Reconstruction')
@@ -764,69 +782,97 @@ export async function reconstruct(input, hooks = {}) {
           'debug', 'Reconstruction')
       }
 
-      // ── Fold self-calibrated distortion back into the keypoints (D1) ──────────
-      // BA estimates a shared radial k1, but the rest of the pipeline is pure
-      // pinhole (projectPoint, the track filter, reprojection stats, the dense/ortho
-      // warp) — a k1 left on the model would be invisible to all of them, so the
-      // pinhole stats would disagree with BA's RMS and the track filter would cut a
-      // model that is actually fine. Instead we re-undistort the observations with
-      // the estimated k1 (exactly what ingest does with the sensor's coefficients)
-      // and reset the model k1 to 0, keeping the pinhole invariant. BA's forward
-      // model (project_k1: u = fx·a·(1+k1·r²)+cx) is the inverse of undistortPixel
-      // with the same {k1}, so the fold is exact to first order; the next self-cal
-      // pass then estimates only the tiny residual on the already-folded keypoints.
-      if (refineMode === 'f,k1' && result.intrinsics) {
-        // Collect the refined intrinsics per sensor group. BA shares one focal + k1
-        // across a group, so any registered camera in it carries the group's values;
-        // `rk` (fx/fy/cx/cy) drives both the keypoint undistort and the Kmap update.
-        const groupCal = new Map() // sensorInt → { rk, k1 }
+      // ── Fold self-calibrated distortion back into the keypoints (WS2) ─────────
+      // BA estimates shared radial coeffs (k1,k2,k3), but the rest of the pipeline is
+      // pure pinhole (projectPoint, the track filter, reprojection stats, the
+      // dense/ortho warp) — coeffs left on the model would be invisible to all of them.
+      // So we re-undistort the observations with the full estimated bag (exactly what
+      // ingest does with the sensor's coefficients) and reset the model radial coeffs
+      // to 0, keeping the pinhole invariant. BA's forward model is the inverse of
+      // undistortPixel with the same bag, so the in-place fold is exact; the next
+      // self-cal pass estimates only the residual on the already-folded keypoints.
+      //
+      // cx/cy stay ON K (not folded) — projectPoint reads them; only the radial terms
+      // move into the keypoints. For dense + the summary we need ONE composed {k1,k2,k3}
+      // bag per sensor, so after folding we fit it from the pristine (pre-fold) keypoints
+      // to their folded positions (selfCalCompose.js) — correct across multiple passes,
+      // unlike the old additive-k1 sum.
+      if (refineMode.includes('k1') && result.intrinsics) {
+        // Refined intrinsics per sensor group (BA shares them across a group).
+        const groupCal = new Map() // sensorInt → rk (with fx/fy/cx/cy/k1/k2/k3)
         uuidList.forEach((uuid, ci) => {
           const cam = cameras.get(uuid)
-          if (cam?.K) cam.K = { ...cam.K, k1: 0 } // keypoints will carry the distortion
+          if (cam?.K) cam.K = { ...cam.K, k1: 0, k2: 0, k3: 0 } // keypoints carry the distortion
           const g = sensorOfCam[ci]
           if (g < 0 || groupCal.has(g)) return
           const rk = result.intrinsics[ci]
-          if (rk?.k1) groupCal.set(g, { rk, k1: rk.k1 })
+          if (rk && (rk.k1 || rk.k2 || rk.k3)) groupCal.set(g, rk)
         })
         if (groupCal.size) {
-          // Fold the calibrated k1 into EVERY image on a solved sensor group — not
-          // just the registered ones. When this runs *during* registration (interim
-          // BA / rescue), the next candidate to be resected must already have
-          // undistorted keypoints and a pinhole Kmap, or its PnP re-applies the
-          // now-removed distortion and fails the gate — the exact failure this fix
-          // targets. Post-registration the unregistered images are inert, so folding
-          // them is harmless. Kmap is the source of truth every subsequent PnP /
-          // triangulation reads, so it gets the refined focal + k1=0 too (leaving it
-          // stale would keep the EXIF focal and re-apply the removed distortion).
-          let foldedImgs = 0, foldedShift = 0, foldedN = 0
-          const passSeen = new Set() // accumulate each sensor's k1 once per pass
+          const active = { k2: refineMode.includes('k2'), k3: refineMode.includes('k3') }
+          // Group the images so the composed fit can pool all keypoints of a sensor.
+          const groupImgs = new Map() // sensorInt → [img,…]
           for (const img of imgs) {
             const g = sensorIntByUuid.get(img.uuid) ?? -1
-            const cal = groupCal.get(g)
-            if (!cal || !img.keypoints?.length) continue
-            const { rk, k1 } = cal
-            img.keypoints = img.keypoints.map((kp) => {
-              const u = undistortPixel(kp.x, kp.y, rk, { k1 })
-              foldedShift += Math.hypot(u.x - kp.x, u.y - kp.y); foldedN++
-              return { ...kp, x: u.x, y: u.y }
-            })
-            const k = Kmap.get(img.uuid)
-            if (k) Kmap.set(img.uuid,
-              { ...k, fx: rk.fx, fy: rk.fy, cx: rk.cx, cy: rk.cy, k1: 0, k2: 0, k3: 0, p1: 0, p2: 0 })
-            foldedImgs++
-            // D2: record the calibrated k1 per sensor (once per pass — all cameras in a
-            // group share it) so dense reproduces the fold. k1 is a normalised-coord
-            // coefficient and dense's camera K is this same refined K, so the accumulated
-            // value applies directly there; passes compose ≈ additively (small residuals).
-            const sid = img.sensorId ?? null
-            if (sid != null && !passSeen.has(sid)) {
-              passSeen.add(sid)
-              selfCalK1BySensor.set(sid, (selfCalK1BySensor.get(sid) || 0) + k1)
+            if (!groupCal.has(g) || !img.keypoints?.length) continue
+            if (!groupImgs.has(g)) groupImgs.set(g, [])
+            groupImgs.get(g).push(img)
+          }
+          let foldedImgs = 0, foldedShift = 0, foldedN = 0
+          for (const [g, gimgs] of groupImgs) {
+            const rk = groupCal.get(g)
+            const bag = { k1: rk.k1 || 0, k2: rk.k2 || 0, k3: rk.k3 || 0 }
+            for (const img of gimgs) {
+              // Snapshot the pristine (post-ingest, pre-first-fold) keypoints once, so
+              // the composed fit below always maps pristine → fully-folded.
+              if (!pristineKpByUuid.has(img.uuid)) {
+                pristineKpByUuid.set(img.uuid, img.keypoints.map((kp) => ({ ...kp })))
+              }
+              // Fold EVERY image on a solved group — not just the registered ones. When
+              // this runs during registration, the next candidate to resect must already
+              // have undistorted keypoints + a pinhole Kmap or its PnP re-applies the
+              // now-removed distortion. Kmap is the source of truth every PnP reads.
+              img.keypoints = img.keypoints.map((kp) => {
+                const u = undistortPixel(kp.x, kp.y, rk, bag)
+                foldedShift += Math.hypot(u.x - kp.x, u.y - kp.y); foldedN++
+                return { ...kp, x: u.x, y: u.y }
+              })
+              const k = Kmap.get(img.uuid)
+              if (k) Kmap.set(img.uuid,
+                { ...k, fx: rk.fx, fy: rk.fy, cx: rk.cx, cy: rk.cy, k1: 0, k2: 0, k3: 0, p1: 0, p2: 0 })
+              foldedImgs++
+            }
+            // Compose the net distortion (pristine → folded) into one bag for dense +
+            // the summary. Pool all group keypoints for a well-constrained radial fit.
+            const sid = gimgs[0].sensorId ?? null
+            if (sid != null) {
+              const pris = [], fold = []
+              for (const img of gimgs) {
+                const p = pristineKpByUuid.get(img.uuid)
+                if (!p) continue
+                for (let i = 0; i < img.keypoints.length; i++) { pris.push(p[i]); fold.push(img.keypoints[i]) }
+              }
+              const composed = fitComposedRadial(pris, fold, rk, active)
+              // Guard: sample the composed radial map to the image corner; a non-monotonic
+              // curve or a runaway corner shift means the higher-order fit overfit. Warn
+              // (staged gating makes this rare) so a bad calibration is visible in the log.
+              const im0 = gimgs[0]
+              const w = im0.meta?.width ?? im0.width ?? 2 * rk.cx
+              const h = im0.meta?.height ?? im0.height ?? 2 * rk.cy
+              const maxNormR = Math.hypot(Math.max(rk.cx, w - rk.cx) / rk.fx, Math.max(rk.cy, h - rk.cy) / rk.fy)
+              const guard = radialCurveOk(composed, maxNormR, rk.fx)
+              if (!guard.ok) {
+                log(`Reconstruction: ${label} self-cal composed radial fit looks unreliable — ${guard.reason}; `
+                  + `dense will use it as-is but review the calibration`, 'warn', 'Reconstruction')
+              }
+              selfCalDistBySensor.set(sid, {
+                k1: composed.k1, k2: composed.k2, k3: composed.k3, fitRmsPx: composed.fitRmsPx,
+              })
             }
           }
           if (foldedImgs > 0) {
-            log(`Reconstruction: ${label} folded self-calibrated k1 into ${foldedImgs} image(s)' keypoints `
-              + `(mean shift ${(foldedShift / Math.max(1, foldedN)).toFixed(2)}px; model stays pinhole)`,
+            log(`Reconstruction: ${label} folded self-calibrated distortion into ${foldedImgs} image(s)' `
+              + `keypoints (mean shift ${(foldedShift / Math.max(1, foldedN)).toFixed(2)}px; model stays pinhole)`,
               'info', 'Reconstruction')
           }
         }
@@ -1069,7 +1115,20 @@ export async function reconstruct(input, hooks = {}) {
         const { obsRemoved, ptsRemoved } = filterTracks({ maxReprojPx: maxPx, minTriAngleDeg: filterMinTriAngleDeg })
         log(`Reconstruction: track filter pass ${round} (≤${maxPx.toFixed(1)}px, ≥${filterMinTriAngleDeg}° parallax) — `
           + `removed ${obsRemoved} obs + ${ptsRemoved} points; ${points3d.length} points remain`, 'info', 'Reconstruction')
-        await runBundleAdjust(`post-filter bundle adjustment ${round}`, baIterations)
+        // Staged self-cal (WS2): under 'auto' the post-filter passes escalate the refined
+        // terms (k2 / cx,cy / k3) as the camera + observation counts clear each gate; an
+        // explicit user refine string is used verbatim (selfCalStaged is false).
+        let refineMode = refineIntrinsics
+        if (cfg.selfCalStaged) {
+          const nObs = points3d.reduce((s, p) => s + p.views.size, 0)
+          const counts = { nCams: cameras.size, nObs }
+          refineMode = stagedSelfCalTerms(counts)
+          const deferred = stagedSelfCalDeferred(counts)
+          log(`Reconstruction: post-filter pass ${round} self-cal terms '${refineMode}'`
+            + `${deferred.length ? ` — deferred ${deferred.join('; ')}` : ' — all terms unlocked'}`,
+            'info', 'Reconstruction')
+        }
+        await runBundleAdjust(`post-filter bundle adjustment ${round}`, baIterations, refineMode)
       }
       logOutlierShare('post-filter residuals')
       log('Reconstruction: bundle adjustment + filtering complete', 'success', 'Reconstruction')
@@ -1134,12 +1193,14 @@ export async function reconstruct(input, hooks = {}) {
       preBaP95px: preBaStats.p95,
       postBaMedianPx: finalStats.median,
       perPairInitReproj,
-      // D2: self-calibrated radial distortion per sensor (folded into keypoints for
-      // the sparse solve; the dense stage adds it to the sensor's undistortion so its
-      // rasters land in the same pinhole frame). Empty when self-calibration was off.
-      selfCalDistortion: [...selfCalK1BySensor]
-        .filter(([, k1]) => k1)
-        .map(([sensorId, k1]) => ({ sensorId, k1 })),
+      // WS2: composed self-calibrated radial distortion per sensor {k1,k2,k3} (folded
+      // into keypoints for the sparse solve; the dense stage applies it to the sensor's
+      // undistortion so its rasters land in the same pinhole frame). Empty when
+      // self-calibration was off. `fitRmsPx` is the composed-fit residual (a health
+      // signal — warn if it drifts above ~0.05px).
+      selfCalDistortion: [...selfCalDistBySensor]
+        .filter(([, d]) => d.k1 || d.k2 || d.k3)
+        .map(([sensorId, d]) => ({ sensorId, k1: d.k1, k2: d.k2, k3: d.k3, fitRmsPx: d.fitRmsPx })),
       // F4: per-image scan→canonical transform for each film image, so the dense
       // stage reproduces the exact same frame (it must NOT re-fit — the sparse run
       // defines the frame). Empty for all-digital projects.

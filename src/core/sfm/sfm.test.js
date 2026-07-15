@@ -355,15 +355,65 @@ describe('reconstruct (incremental SfM, synthetic 3-view scene)', () => {
     // D1. With a stranded k1 this would stay large and the filter would gut the model.
     expect(out.summary.postBaMedianPx).toBeLessThan(1.0)
     expect(out.points.length).toBeGreaterThan(30)
-    expect(logs.some(([, , m]) => /folded self-calibrated k1/.test(m))).toBe(true)
+    expect(logs.some(([, , m]) => /folded self-calibrated distortion/.test(m))).toBe(true)
 
-    // D2: the run exports the self-calibrated distortion so dense can reproduce the
-    // fold. One sensor group, a k1 near the true −0.05 that BA recovered.
+    // D2: the run exports the composed self-calibrated distortion so dense can reproduce
+    // the fold. One sensor group, a k1 near the true −0.05 that BA recovered; k2/k3 = 0
+    // (not refined) and a tiny composed-fit residual.
     expect(out.summary.selfCalDistortion).toHaveLength(1)
     const [scd] = out.summary.selfCalDistortion
     expect(scd.sensorId).toBe('sensorA')
     expect(scd.k1).toBeLessThan(0)          // barrel, matching the injected sign
     expect(Math.abs(scd.k1 - (-0.05))).toBeLessThan(0.02)
+    expect(scd.k2).toBe(0)
+    expect(scd.k3).toBe(0)
+    expect(scd.fitRmsPx).toBeLessThan(0.5)
+  })
+
+  it('self-calibrates and folds a 2-coefficient radial bag (k1,k2) (WS2)', async () => {
+    const rng = mulberry32(11)
+    const N = 90
+    const world = Array.from({ length: N }, () => [
+      (rng() - 0.5) * 4, (rng() - 0.5) * 3, 8 + rng() * 4,
+    ])
+    const centers = [[0, 0, 0], [2, 0.2, 0], [-2, -0.2, 0], [0.5, 1.5, 0.3]]
+    const Rs = [rotY(0), rotY(0.15), rotY(-0.15), rotY(0.08)]
+    const ts = Rs.map((R, i) => mv(R, centers[i]).map((v) => -v))
+    const uuids = ['c0', 'c1', 'c2', 'c3']
+    const dist = { k1: -0.12, k2: 0.04, k3: 0, p1: 0, p2: 0 }
+    const distorted = uuids.map((uuid, ci) =>
+      world.map((X) => {
+        const p = project(Rs[ci], ts[ci], X)
+        return distortPixel(p.x, p.y, Kobj, dist)
+      }))
+    const matches = world.map((_, i) => [i, i])
+    const pairs = []
+    for (let a = 0; a < 4; a++) for (let b = a + 1; b < 4; b++) {
+      pairs.push({
+        idA: uuids[a], idB: uuids[b],
+        F: fundamental(Rs[a], ts[a], Rs[b], ts[b]),
+        matches, inlierCount: N, status: 'done',
+      })
+    }
+    const images = uuids.map((uuid, ci) => ({
+      uuid, name: uuid, kpStatus: 'done', meta: META, sensor: null, sensorId: 'sensorA',
+      keypoints: distorted[ci].map((p) => ({ x: p.x, y: p.y })),
+    }))
+
+    const out = await reconstruct(
+      { images, pairs, settings: { baIterations: 50, refineIntrinsics: 'f,k1,k2', filterMaxReprojPx: 30 } },
+      { onLog: () => {} },
+    )
+    expect(out.status).toBe('done')
+    // Model stays pinhole (all radial folded into keypoints).
+    for (const c of out.cameras) { expect(c.K.k1 || 0).toBe(0); expect(c.K.k2 || 0).toBe(0) }
+    expect(out.summary.postBaMedianPx).toBeLessThan(1.0)
+    // Composed bag recovers both injected coefficients.
+    expect(out.summary.selfCalDistortion).toHaveLength(1)
+    const [scd] = out.summary.selfCalDistortion
+    expect(Math.abs(scd.k1 - (-0.12))).toBeLessThan(0.03)
+    expect(Math.abs(scd.k2 - 0.04)).toBeLessThan(0.03)
+    expect(scd.fitRmsPx).toBeLessThan(0.5)
   })
 
   it('returns status "idle" when fewer than two images have keypoints', async () => {

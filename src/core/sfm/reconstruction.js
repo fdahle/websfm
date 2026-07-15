@@ -249,8 +249,10 @@ export async function solvePnp(pts3d, pts2d, K, opts = {}) {
 // costBefore/costAfter are RMS reprojection error (px) from the WASM solver.
 // `opts`:
 //   maxIters          — outer LM iterations (default 30)
-//   refineIntrinsics  — 'none' | 'f' | 'f,cxcy' | 'f,k1' (self-calibration; default
-//                       'none'). 'f,k1' also solves a shared radial distortion coeff.
+//   refineIntrinsics  — comma-separated self-calibration terms, any subset of
+//                       'f','cxcy','k1','k2','k3' (e.g. 'f,k1' or 'f,cxcy,k1,k2,k3');
+//                       'none'/'' disables. Parsed to the crate's refine BITMASK
+//                       (1=f, 2=cxcy, 4=k1, 8=k2, 16=k3) by refineModeMask.
 //   sensorOfCam       — per-camera integer sensor id (cameras sharing an id share
 //                       one focal); required for refinement, ignored for 'none'.
 //   gcpAnchors        — [{ ptIdx, target:[x,y,z], weight }] — GCP-anchored 3D
@@ -260,13 +262,21 @@ export async function solvePnp(pts3d, pts2d, K, opts = {}) {
 //                       observations. Omit/empty for plain SfM-only BA.
 // Returns { cameras, points3d, intrinsics, costBefore, costAfter, costTrace,
 //   anchorRmsAfter } — `intrinsics` is the refined effective K per camera
-// `{ fx, fy, cx, cy, k1 }` (unchanged, k1 = 0, when 'none'); anchorRmsAfter is
-// the RMS anchor residual in world units (0 when there are no anchors).
-const REFINE_MODE = { none: 0, f: 1, 'f,cxcy': 2, 'f,k1': 3 }
+// `{ fx, fy, cx, cy, k1, k2, k3 }` (radial coeffs 0 for terms not refined); anchorRmsAfter
+// is the RMS anchor residual in world units (0 when there are no anchors).
+const REFINE_BIT = { f: 1, cxcy: 2, k1: 4, k2: 8, k3: 16 }
+// Parse a refine-terms string into the crate's bitmask. Unknown / 'none' tokens
+// contribute nothing (so 'none', '', undefined → 0).
+export function refineModeMask(spec) {
+  if (!spec || spec === 'none') return 0
+  let mask = 0
+  for (const tok of String(spec).split(',')) mask |= REFINE_BIT[tok.trim()] ?? 0
+  return mask
+}
 export async function bundleAdjust(cameras, intrinsics, points3d, observations, opts = {}) {
   await ensureWasm()
   const { maxIters = 30, refineIntrinsics = 'none', sensorOfCam = null, gcpAnchors = [] } = opts
-  const refineMode = REFINE_MODE[refineIntrinsics] ?? 0
+  const refineMode = refineModeMask(refineIntrinsics)
   const nCam = cameras.length
   const nPts = points3d.length
   const nObs = observations.length
@@ -307,11 +317,11 @@ export async function bundleAdjust(cameras, intrinsics, points3d, observations, 
   }
 
   const raw = bundle_adjust(camFlat, kFlat, ptsFlat, obsFlat, anchorFlat, anchorWFlat, maxIters, sensorFlat, refineMode)
-  // Layout: cameras(nCam×12), points(nPts×3), intrinsics(nCam×5 = fx,fy,cx,cy,k1),
+  // Layout: cameras(nCam×12), points(nPts×3), intrinsics(nCam×7 = fx,fy,cx,cy,k1,k2,k3),
   // costBefore, costAfter, anchorRmsAfter, then a variable-length per-iteration
   // RMS convergence trace.
   const intrBase = nCam * 12 + nPts * 3
-  const base = intrBase + nCam * 5
+  const base = intrBase + nCam * 7
   if (!raw || raw.length < base + 3) return null
   const costBefore = raw[base]
   const costAfter  = raw[base + 1]
@@ -332,8 +342,8 @@ export async function bundleAdjust(cameras, intrinsics, points3d, observations, 
   }))
 
   const outIntrinsics = cameras.map((_, c) => {
-    const b = intrBase + c * 5
-    return { fx: raw[b], fy: raw[b+1], cx: raw[b+2], cy: raw[b+3], k1: raw[b+4] }
+    const b = intrBase + c * 7
+    return { fx: raw[b], fy: raw[b+1], cx: raw[b+2], cy: raw[b+3], k1: raw[b+4], k2: raw[b+5], k3: raw[b+6] }
   })
 
   return { cameras: outCameras, points3d: outPoints, intrinsics: outIntrinsics, costBefore, costAfter, costTrace, anchorRmsAfter }
