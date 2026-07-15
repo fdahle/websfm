@@ -109,6 +109,16 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
   (`ImagesSection`/`SensorsSection`/`MatchesSection`/`GcpsSection`/`CloudsSection`/
   `ProductsSection`), sharing `sidebar-sections.css` (via `<style scoped src>`) and
   `composables/useContextMenu.js` for the mutually-exclusive right-click menus.
+- **Shared modal framework** (`components/modals/ui/`): pipeline-stage modals build from
+  `ModalShell` (overlay/header/close/footer; preserves esc + click-backdrop close, so
+  `useModalEscape` is unchanged), `SettingsField`/`SettingsSection`/`AdvancedDisclosure`/
+  `SegmentedControl`/`WarnBox`/`PresetSelector`, all consuming a shared `modal.css` via
+  `<style scoped src>`. `.btn`/`.btn-primary` live in global `style.css`. **Gotcha**: a
+  field control (`.field-input`/`.field-select`) is passed as *slot content* — compiled in
+  the parent modal's scope — so the migrated modal must import `ui/modal.css` in its own
+  `<style scoped src>` for those classes to apply (SettingsField's scoped styles don't reach
+  slotted content). Presets are per-modal `*_PRESETS` deltas over the defaults (medium ≡
+  defaults). `ReconstructModal` is the migrated template; the rest migrate incrementally.
 
 ## Stores (`src/stores/`)
 - **`projectStores.js`** — registry. Project-scoped stores register via
@@ -191,7 +201,14 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
    sample onto its few strong blobs) and skip the O(Na·Nb) full match if too few
    survive, keeping exhaustive *coverage* (loop closures still found anywhere in the
    graph) at a fraction of the per-pair cost. `matchAll` runs on a concurrency-limited
-   worker pool with a per-run descriptor cache.
+   worker pool with a per-run descriptor cache. The accept/weak/reject decision is a pure
+   function (`core/features/pairGate.js` `evaluatePairAcceptance`); its floors are
+   **decoupled** (`minMatches` = accept + H-skip floor; `MATCH_TUNING.rawSkipFloor`, clamped
+   ≤ minMatches, = the raw-putative skip) so raising one never severs the graph. A valid-F
+   pair with ≥ `weakMinInliers` inliers but below the accept gate is kept flagged **`weak`**
+   (persisted, marshalled) — a **PnP registration bridge only**: `sfm.js` feeds it to
+   `register.js` correspondence collection (`corrPairs = strong + weak`) but never lets it
+   seed init/cycle-filter/triangulation. `verifiedPairs`/`matchStats` exclude weak.
 3. **Sparse SfM** (`core/sfm/sfm.js`): a **rotation-cycle consistency filter**
    (`rotationCycleFilter`) first prunes verified-but-false pairs — spurious epipolar
    fits on repetitive structure that clear every count/ratio gate but whose relative
@@ -200,7 +217,12 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
    filter weights each triangle's verdict by its weakest edge's inlier count, adapts
    the pass/fail angle to the graph's median cycle error, and shields high-inlier
    edges — all of which auto-disable on a uniform-quality graph (no/equal inlier
-   counts), recovering the plain unweighted filter. Then
+   counts), recovering the plain unweighted filter. Because it runs **before** self-cal,
+   uncorrected distortion can make it drop TRUE edges, so dropped edges are stashed and
+   **re-admitted after the first self-cal fold** (`reevaluateDroppedEdges` + a final
+   second-chance sweep in `sfm.js`: re-fit F on folded keypoints, recompute rotations for
+   candidates AND survivors with the refined Kmap, re-admit the consistent ones, then one
+   more `registerImages` sweep). Then
    pick init pair (inliers + parallax + lowest init reprojection) and grow the model
    by **incremental registration** (`core/sfm/register.js`, `registerImages(ctx)`):
    each pass orders the unregistered images by a next-best-view score
@@ -222,20 +244,24 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
    coefficients it uses via a **distortion model** (`DISTORTION_MODELS`:
    pinhole/radial/radial2/brown; `distortionOf` applies only the active model's
    coefficients; undefined ⇒ all five, back-compat) — chosen in `SensorTable.vue`.
-   BA **self-calibration** is **on by default**: `refineIntrinsics` defaults to
-   `'auto'` (`defaults.user.js`), which `sfm.js` resolves to `'f,k1'` when no sensor
-   carries a calibrated distortion model (EXIF-only cameras / film scans — a guessed
-   pinhole is the biggest downstream error source) and to `'none'` when a calibrated
-   Brown model already removed distortion at ingest (don't double-correct). Self-cal of
-   a shared radial `k1` (`refineIntrinsics: 'f,k1'`) must never leave `k1` on the model
-   (nothing downstream applies it): after
-   each self-cal pass `runBundleAdjust` **folds** it back into the keypoints
-   (`undistortPixel` is the exact inverse of BA's `project_k1`), resets the model `k1`
-   to 0, and accumulates it per sensor into `summary.selfCalDistortion` so the dense
-   stage can add it to that sensor's raster undistortion (dense's camera K is the
-   BA-refined K the fold used, so the frame matches) — one single-source-of-truth for
-   distortion, from ingest through dense. Heavily instrumented via `onLog` (toggle
-   "Detail"/debug in DevConsole).
+   BA **self-calibration** is **on by default**. `bundle_adjust`'s refine terms are a
+   **bitmask** (`bundle.rs` `refine_mask`: 1=f, 2=cxcy, 4=k1, 8=k2, 16=k3; JS parses a
+   comma string via `refineModeMask` — output intrinsics are nCam×7 `[fx,fy,cx,cy,k1,k2,k3]`).
+   `refineIntrinsics` defaults to `'auto'` (`defaults.user.js`): when no sensor carries a
+   calibrated distortion model (EXIF-only / film scans) `sfm.js` runs a **staged schedule**
+   (`core/sfm/selfCalSchedule.js`) — base `f,k1` during registration, escalating to
+   `k2`/`cx,cy`/`k3` in the post-filter passes as cam+obs counts clear each gate; `'none'`
+   when a calibrated Brown model already removed distortion at ingest (don't double-correct).
+   An explicit comma string bypasses staging. **Pinhole-fold invariant**: radial coeffs must
+   never be left on the model (nothing downstream applies them). After each self-cal pass
+   `runBundleAdjust` **folds the full `{k1,k2,k3}` bag** out of the keypoints (`undistortPixel`
+   is the exact inverse of BA's forward model), resets the model coeffs to 0 (cx/cy stay on
+   K), and records the **composed** distortion per sensor via a pristine-keypoint snapshot +
+   linear-LSQ fit (`core/sfm/selfCalCompose.js` — NOT an additive per-pass k1 sum, which is
+   wrong beyond first order) into `summary.selfCalDistortion` (`[{sensorId,k1,k2,k3,fitRmsPx}]`).
+   Dense reproduces it as a **second bag** applied after any calibrated `dist` (`workers/ops/
+   dense.js` `distortComposed`), so the raster frame matches the sparse cloud. Heavily
+   instrumented via `onLog` (toggle "Detail"/debug in DevConsole).
    - **Film-scan interior orientation** (F4, `core/sfm/fiducials.js`): scan
      geometry, like lens distortion, is removed **once at ingest** — a `kind:'film'`
      sensor's calibrated fiducial marks (mm) + each image's clicked scan-pixel
@@ -250,8 +276,14 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
 4. **Dense MVS** (`core/dense/mvs.js` + `crates/reconstruction/src/mvs.rs`): Stage A build
    per-image PatchMatch depth maps → optional `filterDepthMap` (median/speckle cleanup)
    → Stage B `fuseDepthMaps` (cross-view geometric consistency, then a **spatial
-   dedupe**). Both stages log per-image timing, depth range, cost distribution, and
-   fusion cull breakdown ('Dense' category). A surface seen by k views yields k
+   dedupe**). Stage B also runs three **opt-out geometric outlier filters**
+   (`DENSE_FUSE_DEFAULTS`): a **min-triangulation-angle** gate (widest parallax among
+   agreeing views must clear `minTriAngleDeg`, kills ~0°-parallax sky), a
+   **grazing-incidence** reject (`|n·(C−P)|` below `cos(maxIncidenceDeg)`; view-direction
+   fallback normals are inert), and a post-fusion **isolated-cell removal**
+   (`createVoxelAccumulator.filterIsolated` — lone low-support cells with too few occupied
+   26-neighbours; the finalizers compact around zeroed cells). Both stages log per-image
+   timing, depth range, cost distribution, and fusion cull breakdown ('Dense' category). A surface seen by k views yields k
    near-coincident "shell" points, collapsed in world space to one averaged point
    per voxel cell, sized by `autoMergeCell` at the median GSD (depth/fx ≈ one
    ground-pixel footprint). **Invariant — fusion must never materialize a

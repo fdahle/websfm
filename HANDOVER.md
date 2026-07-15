@@ -68,6 +68,39 @@ fiducials; self-calibration (A2) + fiducials (F4) are the code-side support.
 
 ## Done log (most recent first)
 
+- **2026-07-16 · SfM quality overhaul WS1–WS5 (plan modular-cuddling-beaver)** —
+  five workstreams toward COLMAP/Metashape parity, on branch `sfm-quality-overhaul`.
+  **WS1 matching acceptance** (`core/features/pairGate.js` new): decoupled the three
+  gates `minMatches` conflated — it stays the accept + H-skip floor, new
+  `MATCH_TUNING.rawSkipFloor` (clamped ≤ minMatches) drives the raw-putative skip. Added
+  **weak pairs**: a valid F with ≥ `weakMinInliers` inliers below the accept gate is kept
+  (`entry.weak`, persisted) as a registration-only bridge — fed ONLY to `register.js`
+  PnP correspondence collection (`corrPairs = strong + weak`), never seeding init/cycle
+  filter/triangulation. `verifiedPairs`/`matchStats` exclude weak; MatchFeaturesModal cap
+  500→100 + warn-box. **WS2 self-calibration** (`crates/reconstruction/src/bundle.rs`,
+  wasm rebuilt): `refine_mode` enum → **bitmask** (1=f,2=cxcy,4=k1,8=k2,16=k3), full
+  radial polynomial `1+k1r²+k2r⁴+k3r⁶` with analytic Jacobians (g ≡ k1+2k2r²+3k3r⁴),
+  output intrinsics nCam×5→×7. JS: `refineModeMask` parser; staged schedule
+  (`core/sfm/selfCalSchedule.js` — base f,k1 during registration, escalate k2/cx,cy/k3 in
+  post-filter passes by cam+obs counts); **fold rework** (`core/sfm/selfCalCompose.js` —
+  pristine-keypoint snapshot + linear-LSQ composed {k1,k2,k3} bag replacing the wrong
+  additive-k1 sum; monotonicity guard warns on runaway). Dense applies `dist` then a
+  second `selfCal` bag sequentially. **WS3 cycle filter** (`core/sfm/cycleFilter.js`):
+  `protectBridges` (never sever the graph — provably a no-op for the current cycle-edge
+  drop gate, kept as insurance) + `reevaluateDroppedEdges` (weighted-support re-vote); a
+  final second-chance sweep re-fits F on folded keypoints, re-admits mis-dropped edges on
+  the self-calibrated graph, and re-runs registration (rescue off). **WS4 dense filters**
+  (`core/dense/mvs.js`): min-triangulation-angle (kills ~0°-parallax sky, default 2°),
+  grazing-incidence reject (edge-on vegetation, default 80°, fallback normals inert),
+  post-fusion isolated-cell removal (`filterIsolated`, default on) — all opt-out, cull
+  breakdown extended, DenseModal Advanced section. **WS5 modal framework**
+  (`components/modals/ui/`): ModalShell/SettingsField/SettingsSection/AdvancedDisclosure/
+  SegmentedControl/WarnBox/PresetSelector + shared `modal.css`; `.btn` hoisted to global
+  `style.css`; `RECONSTRUCT_PRESETS` (deltas over defaults); ReconstructModal migrated as
+  the template. **Owed: browser verification** (WS5 remaining 8 modal migrations + the
+  Phase-0/Verification dataset runs — see TODO.md ▸ Now ▸ V). 567 unit tests pass +
+  Rust crate tests + production build clean.
+
 - **2026-07-12 · Import/export interop (PLAN-import-export.md, Phases 1–6)** —
   broadened format coverage across the pipeline. **Cloud export** (Phase 1):
   `core/io/las.js` (LAS 1.2 point-format-2 writer + a header-authoritative

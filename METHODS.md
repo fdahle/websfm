@@ -122,6 +122,20 @@ pipeline. Every candidate pair (both matcher paths) passes through
    (epipole degeneracy). Measured as unique rounded positions + bounding-box
    diagonal, per image.
 
+The accept/reject decision is a pure function (`core/features/pairGate.js`
+`evaluatePairAcceptance`). Its floors are **decoupled** so one knob can't sever
+the graph: `minMatches` is the accept + H-skip floor, a separate `rawSkipFloor`
+(clamped ≤ minMatches) gates the pre-verification raw-putative skip.
+
+**Weak pairs** (COLMAP-style registration robustness): a pair with a valid F and
+enough inliers (`weakMinInliers`) but below the accept gate is not discarded — it's
+kept flagged `weak`. Weak pairs are **registration bridges only**: they feed 2D-3D
+correspondences to PnP (`register.js`, via `corrPairs = strong + weak`) but never
+seed initialisation, the rotation-cycle filter, or fresh triangulation (their
+geometry isn't trusted enough to build structure). This keeps a low-overlap chain
+link (e.g. a 227-inlier film pair a user's raised `minMatches=500` would sever) in
+the graph. Positionally-degenerate pairs stay hard-rejected, never weak.
+
 **Disabled-pair flag**: a user can reversibly exclude an obviously-wrong pair
 (`setPairDisabled`); disabled pairs are filtered wherever SfM reads matches.
 
@@ -151,6 +165,20 @@ pairs, the composed relative rotation `R_ik⁻¹ · R_jk · R_ij` must be ≈ id
 greedily drop the edge that fails the most of its triangles. Relative rotations
 come from decomposing each pair's essential matrix. This is the classic loop-
 consistency idea applied as a cheap graph cleaning step.
+
+Because the filter runs **before self-calibration**, uncorrected lens distortion
+biases the pairwise rotations and it can drop **true** edges. Two guards
+(`core/sfm/cycleFilter.js`): (1) **bridge protection** never drops the sole link
+between two sub-graphs (severing is unrecoverable; a bad pose is caught downstream
+by the PnP gates — though, since a drop candidate always lies on a 3-cycle, this is
+provably a no-op for the current drop gate and is kept only as insurance). (2)
+**Post-self-cal re-admission** (`reevaluateDroppedEdges` + the final second-chance
+sweep in `sfm.js`): once the first fold has corrected the keypoints, dropped edges
+are re-judged — F is re-fit on the folded keypoints, rotations recomputed for
+candidates **and** survivors with the refined Kmap (so corrected candidates aren't
+judged against uncorrected survivors), and consistent ones re-admitted, then one
+more registration sweep runs in case a re-admitted bridge lets a stranded camera
+resect.
 
 ### 4.1 Intrinsics resolution (`resolveK`)
 
@@ -281,34 +309,49 @@ lands in a bad minimum.
 
 BA can refine a **small, shared** set of intrinsics per **sensor group** (cameras
 sharing a sensor id share the parameters; unassigned cameras are their own group).
-Modes (`refineIntrinsics`):
-- `f` — a focal **scale** `s` (init 1, multiplies fx/fy). Modelling focal as a
-  scale, not an absolute, preserves per-camera seed differences while sharing one
-  DOF across the group.
-- `f,cxcy` — focal scale + shared principal-point offsets `dcx, dcy`.
-- `f,k1` — focal scale + a shared radial `k1` (Brown r² term). The BA forward
-  model is `u = fx·a·(1+k1·r²)+cx` with exact analytic Jacobians.
+The terms are a **bitmask** (`bundle.rs` `refine_mask`: 1=f, 2=cxcy, 4=k1, 8=k2,
+16=k3; the JS `refineModeMask` parses a comma string like `'f,cxcy,k1,k2,k3'`):
+- `f` — a focal **scale** `s` (init 1, multiplies fx/fy; fy stays locked to fx).
+  Modelling focal as a scale, not an absolute, preserves per-camera seed
+  differences while sharing one DOF across the group.
+- `cxcy` — shared principal-point offsets `dcx, dcy`.
+- `k1,k2,k3` — the shared radial polynomial. The BA forward model is
+  `u = fx·a·(1 + k1·r² + k2·r⁴ + k3·r⁶) + cx` with **exact analytic Jacobians**
+  (the pose/point terms generalise the pinhole+k1 case by replacing `k1` with
+  `g ≡ k1 + 2k2·r² + 3k3·r⁴`). Tangential `p1,p2` are out of scope for self-cal.
 
 **Self-calibration is on by default.** The shipped default is `refineIntrinsics:
-'auto'`, which `sfm.js` resolves per run: `'f,k1'` when **no** sensor carries a
+'auto'`, which `sfm.js` resolves per run: **staged** when **no** sensor carries a
 calibrated distortion model (EXIF-only cameras / film scans — a guessed pinhole is
-the single biggest downstream error source, so refine focal + k1), and `'none'`
-when a calibrated Brown model already removed distortion at ingest (don't
-double-correct). The explicit modes above override the resolution.
+the single biggest downstream error source), and `'none'` when a calibrated Brown
+model already removed distortion at ingest (don't double-correct). An explicit
+comma string overrides the resolution and bypasses staging.
 
-Self-calibration is **only** run on post-filter passes (never on the pre-filter
-mess — it drifted cx/cy ~180 px on a test set), and it is **weakly observed** on
-short/single strips (needs ≥2° tilt variation for a trustworthy focal). Results
-are logged (before→after focal, implied film width) but **never** written back to
-the sensor table automatically — the user adopts them.
+**Staged schedule** (`core/sfm/selfCalSchedule.js`, `auto` only): distortion is
+barely observable on a thin model, so the terms unlock as it grows. Registration
+(interim/rescue BA) solves the base `f,k1`; the **post-filter** passes escalate —
+add `k2` at ≥8 cams & ≥10k obs, principal point at ≥10 cams, `k3` at ≥20 cams &
+≥30k obs. Deferred terms are logged. Self-cal is **only** run on post-filter passes
+(and the in-registration interim BA once `distortionCalMinCams` cameras are in —
+never on the pre-filter mess, which drifted cx/cy ~180 px on a test set), and it is
+**weakly observed** on short/single strips (needs ≥2° tilt variation). Results are
+logged but **never** written back to the sensor table automatically.
 
-**Important invariant** for the `k1` mode: because the rest of the pipeline is
-pure pinhole, a `k1` left on the model would be invisible to reprojection stats,
-the track filter, and the dense/ortho warp. So after each self-cal pass we **fold
-k1 back into the keypoints** (`undistortPixel` is the exact inverse of BA's
-`project_k1`), reset the model `k1` to 0, and **accumulate** it per sensor into
-`summary.selfCalDistortion` so the dense stage can reproduce the same
-undistortion. One single source of truth for distortion, ingest → dense.
+**Important invariant — the pinhole fold.** Because the rest of the pipeline is
+pure pinhole, radial coeffs left on the model would be invisible to reprojection
+stats, the track filter, and the dense/ortho warp. So after each self-cal pass we
+**fold the full `{k1,k2,k3}` bag into the keypoints** (`undistortPixel` is the
+exact inverse of BA's forward model) and reset the model coeffs to 0; `cx/cy` stay
+on K (projectPoint reads them). Multi-pass composition is handled by snapshotting
+each image's **pristine** (pre-first-fold) keypoints and, after each pass,
+fitting **one composed `{k1,k2,k3}` bag** that maps pristine → fully-folded via a
+linear least-squares (`core/sfm/selfCalCompose.js`, `fitComposedRadial` — the
+forward radial model is linear in the coeffs given the radius). That single
+composed bag — not a per-pass sum, which is wrong beyond first order — is what
+`summary.selfCalDistortion` carries so the **dense** stage reproduces the exact
+same undistortion (applied as a second bag after any calibrated `dist`). A
+monotonicity guard warns if a higher-order fit runs away. One single source of
+truth for distortion, ingest → dense.
 
 ### 4.7 Retriangulation, split-track merge, track filtering
 
@@ -443,7 +486,15 @@ support planes, in `core/dense/mvs.js` + `crates/reconstruction/src/mvs.rs`.
   (median/speckle cleanup).
 - **Stage B — fusion** (`fuseDepthMaps`): cross-view **geometric consistency**
   (a depth survives only if it reprojects consistently in enough neighbour views)
-  → fused dense point cloud.
+  → fused dense point cloud. Three **geometric outlier filters** clean the fused
+  cloud without a segmentation model (all opt-out): a **min-triangulation-angle**
+  gate keeps a pixel only if it agrees with a neighbour at ≥ `minTriAngleDeg`
+  parallax (kills sky/haze that "agree" at ~0°); a **grazing-incidence** reject
+  drops surfaces seen edge-on (`|n·(C−P)|` below `cos(maxIncidenceDeg)` — thins
+  vegetation shells; view-direction fallback normals are inert); and a post-fusion
+  **isolated-cell removal** drops lone low-support voxel cells whose 26-neighbourhood
+  is nearly empty (fusion flyers). The prior gates (per-pixel cost `maxCost`,
+  cross-view agreement count `minViews`) still run first.
 - **Oriented normals for free**: PatchMatch already estimates a per-pixel plane
   `(depth, normal)`. Rather than re-estimating normals later (k-NN PCA +
   orientation propagation, the usual Poisson prerequisite), both backends export

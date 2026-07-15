@@ -47,6 +47,26 @@ observe OOM, viewer rendering, transfer round-trip, or restore). Re-run the
   DEM builds from the dense cloud, and a saved→reopened project restores the
   dense cloud (Phase 6 flat persist/restore + the legacy-object back-compat path).
 
+### V — SfM quality overhaul (WS1–5) verification + finish (2026-07-16)
+**WS1–WS5 code shipped** on branch `sfm-quality-overhaul` (see HANDOVER 2026-07-16
+done-log): matching weak-pairs + decoupled floors, self-cal f/cx,cy/k1,k2,k3 (bitmask BA,
+wasm rebuilt) with staged schedule + composed-bag fold, cycle-filter bridge protection +
+post-self-cal re-admission, dense geometric filters, and the modal ui/ framework +
+presets. Owed (this is the credibility step — headless can't observe it):
+- **Phase 0 + Verification runs (defaults).** Re-run the **building** set (50× Canon 5D)
+  and **TMA** film set at *default* settings and record deltas in HANDOVER §Baselines:
+  registered cams (target building ≥45/50, TMA 5/5), post-BA median px, %≥3-view, self-cal
+  fx + full k-bag (compare the distortion *curve* Δr(r) to Metashape k1 −0.137/k2 +0.101/
+  k3 −0.027 @ f 2983, target ≲1px max dev), cycle-filter drops + "re-admitted N pairs"
+  line, dense cull breakdown (lowParallax/grazing/isolated) + a manual sky/veg look.
+- **Tell Felix:** the "500 floor / 0.4 ratio" in the baseline logs were *user-set*, not
+  defaults (`minMatches` defaults to 15) — WS1 makes the pipeline robust to it, but the
+  defaults were never the problem there.
+- **WS5 remaining migrations** (one commit each, visual QA per modal): Dense → DepthMaps →
+  Dem → Ortho → Mesh → Export → Match → Detect. ReconstructModal is the migrated template;
+  ProgressModal + utility modals stay as-is. Add `*_PRESETS` per modal as needed.
+- Then fold shipped WS-notes into METHODS.md/CLAUDE.md are already done; delete this item.
+
 ### Q — Reconstruction quality/speed overhaul (2026-07-10 log audit)
 Two real runs (aerial CA213732V… film scans + 50-image building set) exposed a
 chain of quality problems. **P0.1/P1/P2.1/P2.3/P3/P4/P6 shipped** (see HANDOVER
