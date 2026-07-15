@@ -33,6 +33,15 @@ export const SFM_TUNING = {
   filterMinTriAngleDeg: 1.5, // drop points whose rays are too parallel
   interimBaEvery: 5,         // run a global BA after this many newly-registered cameras
   interimBaIterations: 12,   // fewer iters for the interim solves than the final BA
+  // ── In-registration distortion self-calibration (D3) ──
+  // Once the model has this many cameras, the interim BA refines a shared focal + radial
+  // k1 and folds the distortion out of the keypoints (+ Kmap) mid-registration, instead
+  // of deferring it to the post-filter passes. A 2-view model hides distortion in its
+  // points (init reproj looks perfect, 3rd-view PnP collapses at ~13% inliers), so k1 is
+  // only identifiable once several cameras at different angles are in — below this count
+  // the interim BA stays pose/points-only and the fold (which mutates keypoints) is held
+  // back. Only active when refineIntrinsics self-calibrates (no calibrated model at ingest).
+  distortionCalMinCams: 6,
   // ── PnP registration gate ──
   pnpGateScale: 2,           // fixed inlier gate = reprjThreshold × min(pnpGateScale, 2)
   minPnpInliers: 15,         // absolute PnP-inlier floor to accept a pose

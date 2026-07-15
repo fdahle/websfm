@@ -504,8 +504,21 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
         const s = im.sensorId ? sensorById.get(im.sensorId) : null
         const fid = fidByUuid.get(uuid) ?? null
         if (s?.kind === 'film' && !fid) {
-          log(`Dense: ${im.name} is on a film sensor but has no fiducial transform from the sparse run — `
-            + `re-run the sparse reconstruction before densifying (skipping this image)`, 'error', 'Dense')
+          // Three distinct causes — point the user at the actual fix, not always "re-run".
+          const nMarks = s.fiducials?.marks?.length || 0
+          const nObs = im.fiducialObs?.length || 0
+          let why
+          if (nMarks < 3) {
+            why = `its film sensor has no fiducial marks configured (${nMarks} set, need ≥3) — `
+              + `add fiducial marks to the sensor, click them on each image, then re-run the sparse reconstruction`
+          } else if (nObs < 3) {
+            why = `this image has ${nObs} clicked fiducial observation(s) (need ≥3) — `
+              + `mark its fiducials, then re-run the sparse reconstruction`
+          } else {
+            why = `the last sparse run produced no interior-orientation transform for it — `
+              + `re-run the sparse reconstruction before densifying`
+          }
+          log(`Dense: ${im.name} skipped — ${why}.`, 'error', 'Dense')
           continue
         }
         // A TIFF's lossless compute PNG may still be encoding right after ingest;

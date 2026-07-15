@@ -1,8 +1,15 @@
 <script setup>
 import { ref } from 'vue'
+import { useComputeSettings } from '../../composables/useComputeSettings.js'
 import { DENSE_FUSE_DEFAULTS } from '../../core/defaults.user.js'
 
 const emit = defineEmits(['close', 'run'])
+
+// Memory budget for the fusion pre-flight is a machine-level limit — it lives in
+// Settings ▸ Compute (shared with Build Depth Maps); read the persisted value here
+// and forward it on run, or the store falls back to the 2 GB default and the
+// Settings change appears to do nothing.
+const { memBudgetGb } = useComputeSettings()
 
 // Stage B — Build Dense Cloud (fuse depth maps). `depthTolPct` is exposed as a
 // percentage; converted to the fraction core/dense/mvs.js fuseDepthMaps expects. In
@@ -18,6 +25,7 @@ function run() {
     maxCost: auto ? null : maxCost,
     depthTolRel: depthTolPct / 100,
     step,
+    memBudgetBytes: Math.max(0.25, memBudgetGb.value || 2) * 1024 * 1024 * 1024,
   })
 }
 </script>
