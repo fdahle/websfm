@@ -17,14 +17,19 @@ const { memBudgetGb } = useComputeSettings()
 // min(2, nMaps−1); maxCost = p70 of the pooled valid-pixel costs).
 // Defaults live in core/defaults.user.js; run() transforms depthTolPct (%) below.
 const settings = ref({ ...DENSE_FUSE_DEFAULTS })
+const showAdvanced = ref(false)
 
 function run() {
-  const { auto, minViews, depthTolPct, maxCost, step } = settings.value
+  const { auto, minViews, depthTolPct, maxCost, step, minTriAngleDeg, maxIncidenceDeg, removeIsolated } = settings.value
   emit('run', {
     minViews: auto ? null : minViews,
     maxCost: auto ? null : maxCost,
     depthTolRel: depthTolPct / 100,
     step,
+    // WS4 geometric filters (0 disables angle gates; pass through to fuseDepthMaps).
+    minTriAngleDeg,
+    maxIncidenceDeg,
+    removeIsolated,
     memBudgetBytes: Math.max(0.25, memBudgetGb.value || 2) * 1024 * 1024 * 1024,
   })
 }
@@ -104,6 +109,50 @@ function run() {
           </div>
           <span class="field-hint">Emit one point every N pixels. 1 = densest (largest cloud); higher = decimated.</span>
         </div>
+
+        <div class="section-sep"></div>
+
+        <button class="link-btn" @click="showAdvanced = !showAdvanced">
+          {{ showAdvanced ? '▾' : '▸' }} Advanced — geometric outlier filters
+        </button>
+
+        <template v-if="showAdvanced">
+          <div class="field">
+            <label class="field-label" for="minTriAngle">Min triangulation angle</label>
+            <div class="input-row">
+              <input
+                id="minTriAngle"
+                v-model.number="settings.minTriAngleDeg"
+                type="number" min="0" max="20" step="0.5"
+                class="field-input"
+              />
+              <span class="field-unit">°</span>
+            </div>
+            <span class="field-hint">Drop points whose agreeing views are near-parallel (sky, distant haze). 0 disables.</span>
+          </div>
+
+          <div class="field">
+            <label class="field-label" for="maxIncidence">Max surface incidence angle</label>
+            <div class="input-row">
+              <input
+                id="maxIncidence"
+                v-model.number="settings.maxIncidenceDeg"
+                type="number" min="0" max="90" step="5"
+                class="field-input"
+              />
+              <span class="field-unit">°</span>
+            </div>
+            <span class="field-hint">Drop points seen edge-on (thin vegetation, silhouettes). 0 or 90 disables.</span>
+          </div>
+
+          <div class="field">
+            <label class="field-label">
+              <input v-model="settings.removeIsolated" type="checkbox" />
+              Remove isolated points
+            </label>
+            <span class="field-hint">Drop lone low-support cells with too few neighbours (fusion flyers).</span>
+          </div>
+        </template>
       </div>
 
       <div class="modal-footer">
@@ -158,6 +207,11 @@ function run() {
 }
 .field-input:focus { outline: none; border-color: var(--accent); }
 .field-unit { font-size: 12px; color: var(--text-dim); }
+.link-btn {
+  background: none; border: none; color: var(--accent);
+  font: inherit; font-size: 12px; padding: 0; cursor: pointer; text-align: left;
+}
+.link-btn:hover { text-decoration: underline; }
 .btn {
   background: none; border: 1px solid var(--panel-border);
   border-radius: 5px; color: var(--text); font: inherit; font-size: 13px;

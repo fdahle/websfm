@@ -229,7 +229,10 @@ describe('mergePointsSpatial (fusion dedupe)', () => {
       cost: Float32Array.from([0.1, 0.1, 0.1, 0.1]),
       rgb: new Uint8Array(2 * 2 * 3).fill(128),
     })
-    const out = fuseDepthMaps([mk('a'), mk('b')], {}, () => {})
+    // Disable the WS4 geometric filters: this fixture's two cameras share a pose
+    // (zero parallax), which the min-triangulation-angle gate would correctly cull —
+    // but here we're exercising only the spatial merge.
+    const out = fuseDepthMaps([mk('a'), mk('b')], { minTriAngleDeg: 0, maxIncidenceDeg: 0, removeIsolated: false }, () => {})
     // 8 candidate px kept (both maps agree everywhere) but 4 distinct world cells.
     expect(out.summary.keptPct).toBeGreaterThan(0)
     expect(out.summary.mergedPct).toBeGreaterThan(0)
@@ -304,6 +307,80 @@ describe('createVoxelAccumulator (streaming fusion merge)', () => {
     expect(acc.count).toBe(3000)
     const flat = acc.finalizeFlat()
     expect(flat.length).toBe(3000 * 6)
+  })
+
+  it('filterIsolated (WS4) removes a lone cell but keeps a neighbour cluster', () => {
+    // A 2×2×2 block of 8 single-support cells (each has ≥2 occupied neighbours) plus one
+    // far-away lone cell. filterIsolated must drop only the lone cell, and finalizeFlat/
+    // finalizeNormals must compact around it (stay row-aligned).
+    const block = []
+    for (let x = 0; x < 2; x++) for (let y = 0; y < 2; y++) for (let z = 0; z < 2; z++)
+      block.push({ x: x + 0.5, y: y + 0.5, z: z + 0.5 })
+    const lone = { x: 50.5, y: 50.5, z: 50.5 }
+    const pts = [...block, lone]
+    const acc = createVoxelAccumulator(1.0, boundsOf(pts))
+    for (const p of pts) acc.add(p.x, p.y, p.z, 10, 20, 30, 0, 0, 1)
+    expect(acc.count).toBe(9)
+    const removed = acc.filterIsolated({ radius: 1, minNeighbors: 2, maxSupport: 2 })
+    expect(removed).toBe(1)
+    expect(acc.count).toBe(8)
+    const flat = acc.finalizeFlat()
+    const { nrm } = acc.finalizeNormals()
+    expect(flat.length).toBe(8 * 6)   // compacted, lone cell gone
+    expect(nrm.length).toBe(8 * 3)    // row-aligned with flat
+    // The surviving points are all in the block (none near the lone cell's 50,50,50).
+    for (let s = 0; s < 8; s++) expect(flat[s * 6]).toBeLessThan(10)
+  })
+})
+
+describe('fuseDepthMaps geometric filters (WS4)', () => {
+  // Two cameras sharing a pose (zero parallax) viewing a fronto-parallel plane at depth 1.
+  // `normal` (camera-frame) is optional; omit for the view-direction fallback.
+  const mk = (uuid, normal) => {
+    const m = {
+      uuid, width: 4, height: 4,
+      K: { fx: 100, fy: 100, cx: 2, cy: 2 }, R: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], t: [0, 0, 0],
+      depth: new Float32Array(16).fill(1),
+      cost: new Float32Array(16).fill(0.1),
+      rgb: new Uint8Array(16 * 3).fill(120),
+    }
+    if (normal) {
+      m.normals = new Float32Array(16 * 3)
+      for (let i = 0; i < 16; i++) { m.normals[i*3] = normal[0]; m.normals[i*3+1] = normal[1]; m.normals[i*3+2] = normal[2] }
+    }
+    return m
+  }
+
+  it('min triangulation angle culls zero-parallax agreement, but keeps it at 0°', () => {
+    const maps = () => [mk('a'), mk('b')] // coincident cameras ⇒ 0° parallax
+    const culled = fuseDepthMaps(maps(), { minTriAngleDeg: 2.0, maxIncidenceDeg: 0, removeIsolated: false }, () => {})
+    expect(culled.count).toBe(0)               // everything culled as low-parallax
+    expect(culled.summary.cullBreakdown.lowParallaxPct).toBeGreaterThan(0)
+    const kept = fuseDepthMaps(maps(), { minTriAngleDeg: 0, maxIncidenceDeg: 0, removeIsolated: false }, () => {})
+    expect(kept.count).toBeGreaterThan(0)      // disabled ⇒ points survive
+  })
+
+  it('grazing-angle reject culls edge-on normals but leaves fallback normals untouched', () => {
+    // Edge-on: world normal (1,0,0) ⊥ the near-(0,0,1) viewing ray ⇒ ~90° incidence.
+    const edgeOn = fuseDepthMaps([mk('a', [1, 0, 0]), mk('b', [1, 0, 0])],
+      { minTriAngleDeg: 0, maxIncidenceDeg: 80, removeIsolated: false }, () => {})
+    expect(edgeOn.count).toBe(0)
+    expect(edgeOn.summary.cullBreakdown.grazingPct).toBeGreaterThan(0)
+    // No per-pixel normals ⇒ view-direction fallback ⇒ cosInc = 1 ⇒ never culled.
+    const fallback = fuseDepthMaps([mk('a'), mk('b')],
+      { minTriAngleDeg: 0, maxIncidenceDeg: 80, removeIsolated: false }, () => {})
+    expect(fallback.count).toBeGreaterThan(0)
+    expect(fallback.summary.cullBreakdown.grazingPct).toBe(0)
+  })
+
+  it('all filters disabled reproduces the unfiltered output (regression guard)', () => {
+    const maps = () => [mk('a'), mk('b')]
+    const off = fuseDepthMaps(maps(), { minTriAngleDeg: 0, maxIncidenceDeg: 0, removeIsolated: false }, () => {})
+    // With every geometric filter off, nothing is culled beyond the pre-existing gates.
+    expect(off.summary.cullBreakdown.lowParallaxPct).toBe(0)
+    expect(off.summary.cullBreakdown.grazingPct).toBe(0)
+    expect(off.summary.isolatedRemoved).toBe(0)
+    expect(off.count).toBeGreaterThan(0)
   })
 })
 

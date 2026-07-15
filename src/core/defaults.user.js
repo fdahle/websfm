@@ -88,6 +88,12 @@ export const DENSE_FUSE_DEFAULTS = {
   depthTolPct: 1.0,  // manual depth agreement tolerance, % of depth
   maxCost: 0.6,      // manual per-pixel cost gate (when not auto)
   step: 1,           // fusion pixel stride (full res; spatial merge dedupes overlap)
+  // ── Geometric outlier filters (WS4; 0 disables each) ──
+  minTriAngleDeg: 2.0, // min triangulation angle between the reference and an agreeing
+                       // view — kills sky/haze pixels that only "agree" at ~0° parallax
+  maxIncidenceDeg: 80, // max angle between the surface normal and the viewing ray —
+                       // thins edge-on vegetation shells (0/90 disables; fallback normals inert)
+  removeIsolated: true, // drop low-support voxel cells with too few occupied neighbours
 }
 
 // DEM (core/products/dem.js). Mirrored by DemModal.vue; gsd 0 ⇒ worker auto-suggests.
