@@ -975,7 +975,10 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
             // worker ("[object Array] could not be cloned").
             F: e.F ? e.F.map((row) => [...row]) : null,
             matches: e.matches.map((m) => [m[0], m[1]]),
-            inlierCount: e.inlierCount, status: 'done',
+            // WS1: weak pairs (valid F below the accept gate) ride through with the flag.
+            // sfm.js keeps them out of the cycle filter / init / triangulation and feeds
+            // them only to PnP correspondence collection (register.js).
+            inlierCount: e.inlierCount, weak: e.weak ?? false, status: 'done',
           })),
         // GCPs, pre-resolved to plain data + imageId → uuid (the worker only knows
         // images by uuid): [{ x, y, z, accuracy*, observations: [{ uuid, px, py }] }].

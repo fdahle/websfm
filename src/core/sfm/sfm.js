@@ -80,7 +80,15 @@ export async function reconstruct(input, hooks = {}) {
   // Only 'done' pairs participate (the store passes those, but keep the guard
   // so the algorithm reads identically to the original). Not const: the
   // rotation-cycle filter (below) prunes cycle-inconsistent pairs before SfM.
-  let donePairs = pairs.filter((e) => e.status === 'done')
+  //
+  // WS1 — strong vs weak split. A WEAK pair (valid F, enough inliers, but below the
+  // match accept gate) is a registration-only bridge: it must NEVER drive the rotation-
+  // cycle filter, init-pair selection, or fresh triangulation (its geometry isn't trusted
+  // enough to seed structure). It only contributes 2D-3D correspondences to PnP. So
+  // `donePairs` (everything the strong path reads) excludes weak pairs; `weakPairs` is
+  // merged back in solely for register.js's correspondence collection (`corrPairs`).
+  let donePairs = pairs.filter((e) => e.status === 'done' && !e.weak)
+  const weakPairs = pairs.filter((e) => e.status === 'done' && e.weak && e.inlierCount > 0)
 
   // Reprojection-error statistics (pixels) over every observation currently in
   // the model: project each 3D point into each camera that sees it and compare
@@ -155,7 +163,9 @@ export async function reconstruct(input, hooks = {}) {
       log('Reconstruction: need at least 2 images with keypoints', 'warn', 'Reconstruction')
       return done('idle')
     }
-    log(`Reconstruction: starting with ${imgs.length} images, ${donePairs.length} match pairs`, 'info', 'Reconstruction')
+    log(`Reconstruction: starting with ${imgs.length} images, ${donePairs.length} match pairs`
+      + `${weakPairs.length ? ` (+${weakPairs.length} weak PnP bridge${weakPairs.length === 1 ? '' : 's'})` : ''}`,
+      'info', 'Reconstruction')
 
     // ── Match-graph health ───────────────────────────────────────────────────
     // SfM can only grow within a connected component. If the largest component is
@@ -644,6 +654,10 @@ export async function reconstruct(input, hooks = {}) {
     const registeredUuids = new Set([bestPair.idA, bestPair.idB])
     await registerImages({
       imgs, donePairs, Kmap, cfg,
+      // corrPairs = strong (post-cycle-filter) + weak bridges. register.js draws PnP
+      // correspondences from this superset but triangulates fresh structure only from
+      // donePairs — weak pairs extend registration reach without seeding geometry.
+      corrPairs: [...donePairs, ...weakPairs],
       cameras, viewIndex, registeredUuids,
       getPoints3d: () => points3d,
       addView, rebuildViewIndex, foldOneEndpointMatches, mergeTracks,

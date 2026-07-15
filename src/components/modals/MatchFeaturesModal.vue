@@ -134,10 +134,16 @@ function run() {
           <input
             id="minMatches"
             v-model.number="settings.minMatches"
-            type="number" min="4" max="500" step="1"
+            type="number" min="4" max="100" step="1"
             class="field-input"
           />
-          <span class="field-hint">Pairs below this threshold are discarded.</span>
+          <span class="field-hint">Accept floor: pairs whose inliers fall below this aren't accepted as verified.</span>
+          <span v-if="settings.minMatches > 30" class="warn-box">
+            ⚠ A high min-matches threshold can sever the match graph on low-overlap
+            datasets (film strips, sparse blocks). Pairs above the weak-pair floor are now
+            kept as <b>PnP registration bridges</b> rather than discarded, but the default of
+            15 is recommended unless you have a specific reason to raise it.
+          </span>
         </div>
 
         <div v-if="matcher === 'bruteforce'" class="field">
@@ -373,6 +379,17 @@ function run() {
 .field-hint { font-size: 11px; color: var(--text-dim); }
 
 .cap-warn { color: var(--warn, #d08a2a); }
+
+.warn-box {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text);
+  background: rgba(230, 160, 30, 0.12);
+  border: 1px solid rgba(230, 160, 30, 0.45);
+  border-radius: 5px;
+  padding: 7px 9px;
+  margin-top: 2px;
+}
 
 .link-btn {
   background: none;
