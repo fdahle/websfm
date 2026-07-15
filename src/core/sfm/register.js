@@ -42,6 +42,9 @@ export async function registerImages(ctx) {
   // still read `donePairs` only, so weak pairs never seed fresh structure. Defaults to
   // donePairs when the caller doesn't split (older tests), so behaviour is unchanged there.
   const corrPairs = ctx.corrPairs ?? donePairs
+  // WS3 final second-chance sweep runs with rescue OFF (the rescue path already ran in
+  // the main registration; a re-admission sweep only wants the plain PnP retries).
+  const finalSweep = ctx.finalSweep === true
 
   // ── Incremental registration ───────────────────────────────────────────
   // R2: the PnP inlier gate is now *fixed* (reprjThreshold, capped at a small
@@ -455,7 +458,7 @@ export async function registerImages(ctx) {
     // fail on a slightly-wrong focal + a structure gap in their overlap. Correct the
     // focal (focal-only BA, safe pre-filter), retriangulate to grow structure into
     // the stalled overlaps, then force ONE more sweep with a relaxed refine-recheck.
-    if (!progressed && !rescued && rescueStalled && cameras.size >= 3) {
+    if (!progressed && !rescued && rescueStalled && !finalSweep && cameras.size >= 3) {
       const stalledLinked = imgs.filter((img) =>
         !registeredUuids.has(img.uuid) && countMatchesToRegistered(img.uuid) > 0)
       if (stalledLinked.length) {

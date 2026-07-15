@@ -24,7 +24,7 @@ import { projectPoint, medianTriangulationAngle, triangulationAngle, cameraCente
 import { undistortPixel, distortionOf } from './distortion.js'
 import { fitFundamental, sampsonRmsPx } from './fundamental.js'
 import { fitFiducialAffine, canonicalFrame, scanToCanonical } from './fiducials.js'
-import { rotationCycleFilter } from './cycleFilter.js'
+import { rotationCycleFilter, reevaluateDroppedEdges } from './cycleFilter.js'
 import { toNorm, camToP34flat, reprojErr, retriangulatePairs, mergeSplitTracks } from './tracks.js'
 import { selectInitPair } from './initPair.js'
 import { registerImages } from './register.js'
@@ -91,6 +91,9 @@ export async function reconstruct(input, hooks = {}) {
   // merged back in solely for register.js's correspondence collection (`corrPairs`).
   let donePairs = pairs.filter((e) => e.status === 'done' && !e.weak)
   const weakPairs = pairs.filter((e) => e.status === 'done' && e.weak && e.inlierCount > 0)
+  // WS3: pairs the rotation-cycle filter dropped, stashed for post-self-cal re-admission
+  // (they may be TRUE edges the filter mis-judged with pre-fold, uncorrected rotations).
+  let droppedPairs = []
 
   // Reprojection-error statistics (pixels) over every observation currently in
   // the model: project each 3D point into each camera that sees it and compare
@@ -440,12 +443,20 @@ export async function reconstruct(input, hooks = {}) {
         return pose ? pose.R : null
       }
       const Rs = await Promise.all(donePairs.map(relRot))
+      // Cache each pair's pre-fold rotation so the re-admission pass (WS3) can tell
+      // which survived and recompute only what it needs after the self-cal fold.
+      const relRotByPid = new Map()
+      const pkId = (a, b) => (a < b ? `${a}--${b}` : `${b}--${a}`)
+      donePairs.forEach((e, i) => relRotByPid.set(pkId(e.idA, e.idB), Rs[i]))
       const { drop, summary } = rotationCycleFilter(
         donePairs.map((e, i) => ({ idA: e.idA, idB: e.idB, R: Rs[i], inliers: e.inlierCount })),
         {
           cycleErrorDeg: settings.cycleErrorDeg,
           minTriangles: settings.cycleMinTriangles,
           minSupport: settings.cycleMinSupport,
+          // WS3: never drop the sole link between two components — severing the graph is
+          // unrecoverable, whereas a bad pose is caught downstream by the PnP gates.
+          protectBridges: true,
         },
       )
       if (summary.aborted) {
@@ -475,8 +486,12 @@ export async function reconstruct(input, hooks = {}) {
             + `(${(100 * d.ratio).toFixed(0)}%, ${d.inliers} inliers) — likely false match`,
             'debug', 'Reconstruction')
         }
+        // Stash the dropped entries so the post-fold re-admission (WS3) can revisit
+        // them once the keypoints are self-cal-corrected.
+        droppedPairs = donePairs.filter((e) => rm.has(pk(e.idA, e.idB)))
         donePairs = donePairs.filter((e) => !rm.has(pk(e.idA, e.idB)))
-        log(`Reconstruction: ${donePairs.length} verified pair(s) remain after cycle filter`,
+        log(`Reconstruction: ${donePairs.length} verified pair(s) remain after cycle filter`
+          + `${summary.bridgeProtected ? ` (${summary.bridgeProtected} bridge edge(s) protected from dropping)` : ''}`,
           'info', 'Reconstruction')
       } else {
         log('Reconstruction: rotation-cycle filter — all pairs cycle-consistent '
@@ -1131,6 +1146,82 @@ export async function reconstruct(input, hooks = {}) {
         await runBundleAdjust(`post-filter bundle adjustment ${round}`, baIterations, refineMode)
       }
       logOutlierShare('post-filter residuals')
+
+      // ── WS3 final second-chance sweep ────────────────────────────────────────
+      // The rotation-cycle filter ran BEFORE self-calibration, so it may have dropped
+      // TRUE edges whose rotations only looked inconsistent under the uncorrected
+      // intrinsics. Now that the keypoints + Kmap are folded, re-judge those dropped
+      // edges (re-fit F on the folded keypoints, recompute rotations for candidates AND
+      // survivors, vote against the active graph) and re-admit the consistent ones; then
+      // run one more registration sweep (rescue off) in case a re-admitted bridge lets a
+      // stranded camera resect. Only worth it when images remain unregistered.
+      const stillUnregistered = imgs.filter((im) => !cameras.has(im.uuid))
+      if (droppedPairs.length && stillUnregistered.length && cameras.size >= 2 && points3d.length >= 10) {
+        const pkId = (a, b) => (a < b ? `${a}--${b}` : `${b}--${a}`)
+        // Re-fit F on the folded keypoints, then recover the relative rotation.
+        const relRotFolded = async (e) => {
+          const iA = imageByUuid(e.idA), iB = imageByUuid(e.idB)
+          if (!iA || !iB || (e.matches?.length ?? 0) < 8) return null
+          const ptsA = e.matches.map(([ia]) => iA.keypoints[ia])
+          const ptsB = e.matches.map(([, ib]) => iB.keypoints[ib])
+          const fit = fitFundamental(ptsA, ptsB)
+          if (!fit) return null
+          const Emat = fundamentalToEssential(fit.F, Kmap.get(e.idA), Kmap.get(e.idB))
+          const pose = await recoverPose(ptsA, ptsB, Emat, Kmap.get(e.idA))
+          return pose ? { R: pose.R, F: fit.F } : null
+        }
+        const activeEdges = []
+        for (const e of donePairs) {
+          const r = await relRotFolded(e)
+          if (r) activeEdges.push({ idA: e.idA, idB: e.idB, R: r.R, inliers: e.inlierCount })
+        }
+        const candRot = []
+        for (const e of droppedPairs) {
+          const r = await relRotFolded(e)
+          if (r) candRot.push({ entry: e, R: r.R, F: r.F })
+        }
+        const { readmit } = reevaluateDroppedEdges(
+          activeEdges,
+          candRot.map((c) => ({ idA: c.entry.idA, idB: c.entry.idB, R: c.R, inliers: c.entry.inlierCount })),
+          { cycleErrorDeg: settings.cycleErrorDeg, minTriangles: settings.cycleMinTriangles, minSupport: settings.cycleMinSupport },
+        )
+        if (readmit.length) {
+          const readmitSet = new Set(readmit.map((r) => pkId(r.idA, r.idB)))
+          for (const c of candRot) {
+            if (!readmitSet.has(pkId(c.entry.idA, c.entry.idB))) continue
+            c.entry.F = c.F // adopt the folded-keypoint refit
+            donePairs.push(c.entry)
+          }
+          droppedPairs = droppedPairs.filter((e) => !readmitSet.has(pkId(e.idA, e.idB)))
+          const nm = (u) => imageByUuid(u)?.name ?? u
+          log(`Reconstruction: re-admitted ${readmit.length} cycle-filter-dropped pair(s) after self-cal `
+            + `(${readmit.slice(0, 6).map((r) => `${nm(r.idA)}↔${nm(r.idB)}`).join(', ')}${readmit.length > 6 ? ', …' : ''}); `
+            + `re-attempting registration`, 'info', 'Reconstruction')
+          const before = cameras.size
+          await registerImages({
+            imgs, donePairs, Kmap, cfg, finalSweep: true,
+            corrPairs: [...donePairs, ...weakPairs],
+            cameras, viewIndex, registeredUuids,
+            getPoints3d: () => points3d,
+            addView, rebuildViewIndex, foldOneEndpointMatches, mergeTracks,
+            runBundleAdjust, filterTracks, modelReprojStats, imageByUuid, numStats,
+            log, onProgress,
+          })
+          if (cameras.size > before) {
+            log(`Reconstruction: final sweep registered ${cameras.size - before} more camera(s) `
+              + `(${cameras.size}/${imgs.length}); re-solving`, 'info', 'Reconstruction')
+            await runBundleAdjust('final second-chance bundle adjustment', baIterations,
+              cfg.selfCalStaged ? stagedSelfCalTerms({ nCams: cameras.size, nObs: points3d.reduce((s, p) => s + p.views.size, 0) }) : refineIntrinsics)
+            filterTracks({ maxReprojPx: filterMaxReprojPx, minTriAngleDeg: filterMinTriAngleDeg })
+          } else {
+            log('Reconstruction: final sweep re-admitted pairs but registered no new cameras', 'debug', 'Reconstruction')
+          }
+        } else {
+          log(`Reconstruction: re-admission — 0/${droppedPairs.length} dropped pair(s) cleared the `
+            + `consistency vote on the self-calibrated graph`, 'debug', 'Reconstruction')
+        }
+      }
+
       log('Reconstruction: bundle adjustment + filtering complete', 'success', 'Reconstruction')
     } else {
       log(`Reconstruction: bundle adjustment skipped (cameras=${cameras.size}, `
