@@ -502,6 +502,7 @@ export function createVoxelAccumulator(cellSize, bounds) {
   // surface produces all carry ~the same normal, so the sum stays well-conditioned.
   let snx = new Float64Array(cap), sny = new Float64Array(cap), snz = new Float64Array(cap)
   let cnt = new Uint32Array(cap)
+  let removed = 0 // cells zeroed by filterIsolated (WS4); excluded from count + finalize
   const grow = () => {
     cap *= 2
     const g = (a, T) => { const b = new T(cap); b.set(a); return b } // tail zero-filled
@@ -526,30 +527,70 @@ export function createVoxelAccumulator(cellSize, bounds) {
       snx[s] += nx_; sny[s] += ny_; snz[s] += nz_
       cnt[s]++
     },
-    get count() { return n },
+    get count() { return n - removed },
+    // Post-fusion isolated-cell removal (WS4): a real surface cell has occupied
+    // neighbours; a lone low-support cell is fusion noise (a sky/vegetation flyer that
+    // slipped the consistency gate). Only *low-support* cells (cnt ≤ maxSupport) are
+    // tested — a ≥3-pixel cell is never a floater — so this stays O(noise tail), not
+    // O(all cells). For each tested cell, probe the 26 (radius 1) neighbour keys
+    // arithmetically; if fewer than `minNeighbors` are occupied, zero its count so the
+    // finalizers skip it. Cell indices are recovered from the packed key. Returns the
+    // number removed.
+    filterIsolated({ radius = 1, minNeighbors = 2, maxSupport = 2 } = {}) {
+      let dropped = 0
+      for (const [key, s] of slot) {
+        if (cnt[s] === 0 || cnt[s] > maxSupport) continue
+        const diz = key % nz
+        const diy = Math.floor(key / nz) % ny
+        const dix = Math.floor(key / (nz * ny))
+        let neigh = 0
+        for (let ddx = -radius; ddx <= radius && neigh < minNeighbors; ddx++) {
+          const nix = dix + ddx; if (nix < 0 || nix >= nx) continue
+          for (let ddy = -radius; ddy <= radius && neigh < minNeighbors; ddy++) {
+            const niy = diy + ddy; if (niy < 0 || niy >= ny) continue
+            for (let ddz = -radius; ddz <= radius; ddz++) {
+              if (ddx === 0 && ddy === 0 && ddz === 0) continue
+              const niz = diz + ddz; if (niz < 0 || niz >= nz) continue
+              const ns = slot.get((nix * ny + niy) * nz + niz)
+              if (ns !== undefined && cnt[ns] > 0) { neigh++; if (neigh >= minNeighbors) break }
+            }
+          }
+        }
+        if (neigh < minNeighbors) { cnt[s] = 0; dropped++ }
+      }
+      removed += dropped
+      return dropped
+    },
     // Finalize straight into the wire format the densify op returns: a flat
-    // Float32Array of [x,y,z,r,g,b] per merged cell (no intermediate objects).
+    // Float32Array of [x,y,z,r,g,b] per merged cell (no intermediate objects). Cells
+    // zeroed by filterIsolated (cnt === 0) are skipped and the output is compacted.
     finalizeFlat() {
-      const out = new Float32Array(n * 6)
+      const out = new Float32Array((n - removed) * 6)
+      let o = 0
       for (let s = 0; s < n; s++) {
-        const k = 1 / cnt[s], o = s * 6
+        if (cnt[s] === 0) continue
+        const k = 1 / cnt[s]
         out[o] = sx[s] * k; out[o + 1] = sy[s] * k; out[o + 2] = sz[s] * k
         out[o + 3] = Math.round(sr[s] * k); out[o + 4] = Math.round(sg[s] * k); out[o + 5] = Math.round(sb[s] * k)
+        o += 6
       }
       return out
     },
     // Averaged, renormalized world-space normals as a flat Float32Array(3N) — the
     // Poisson solver's oriented-normal input. Cells whose contributors cancelled to
     // a near-zero vector (disagreeing views) fall back to (0,0,1); count returned.
+    // Iterates in the SAME order as finalizeFlat (skipping cnt === 0), so the two
+    // arrays stay row-aligned.
     finalizeNormals() {
-      const out = new Float32Array(n * 3)
-      let degenerate = 0
+      const out = new Float32Array((n - removed) * 3)
+      let degenerate = 0, o = 0
       for (let s = 0; s < n; s++) {
-        const o = s * 3
+        if (cnt[s] === 0) continue
         const ax = snx[s], ay = sny[s], az = snz[s]
         const mag = Math.hypot(ax, ay, az)
         if (mag > 1e-9) { out[o] = ax / mag; out[o + 1] = ay / mag; out[o + 2] = az / mag }
         else { out[o] = 0; out[o + 1] = 0; out[o + 2] = 1; degenerate++ }
+        o += 3
       }
       return { nrm: out, degenerate }
     },
@@ -579,6 +620,13 @@ function clampCellForBounds(bounds, cell) {
 export function fuseDepthMaps(maps, opts = {}, onLog = () => {}, hooks = {}) {
   // depthTolRel/step are user-facing (DENSE_FUSE_DEFAULTS); consistencyPx is internal (tuning.js).
   const { consistencyPx = DENSE_TUNING.consistencyPx, depthTolRel = 0.01, step = 1 } = opts
+  // WS4 geometric filters (0 disables each; fall back to DENSE_FUSE_DEFAULTS values).
+  const minTriAngleDeg = opts.minTriAngleDeg ?? 2.0
+  const maxIncidenceDeg = opts.maxIncidenceDeg ?? 80
+  const removeIsolated = opts.removeIsolated ?? true
+  // cos of the incidence gate; ≤0 or ≥90 ⇒ disabled (cosInc ≥ 0 always passes).
+  const incidenceOn = maxIncidenceDeg > 0 && maxIncidenceDeg < 90
+  const cosIncGate = incidenceOn ? Math.cos(maxIncidenceDeg * Math.PI / 180) : -1
   const { onProgress } = hooks
 
   // Cost histogram (sampled, one sort) — drives both the auto gate and the summary
@@ -661,6 +709,9 @@ export function fuseDepthMaps(maps, opts = {}, onLog = () => {}, hooks = {}) {
 
   // Cull accounting (summed across all maps) so the user can see where pixels go.
   let considered = 0, noDepth = 0, highCost = 0, failedConsistency = 0, kept = 0
+  let lowParallax = 0, grazing = 0 // WS4 geometric-filter culls
+  // Precompute each camera centre for the triangulation-angle check (WS4).
+  const camCenters = cams.map((c) => cameraCenter(c))
   let lastEmit = 0
   const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now())
 
@@ -704,8 +755,9 @@ export function fuseDepthMaps(maps, opts = {}, onLog = () => {}, hooks = {}) {
         // points (and `consistencyPx` was previously inert: added to a world-unit
         // depth tolerance scaled by 1e-3, i.e. ≈0).
         const rad = Math.max(0, Math.round(consistencyPx))
-        let agree = 0
-        for (const c of cams) {
+        let agree = 0, maxAngle = 0
+        for (let ci = 0; ci < cams.length; ci++) {
+          const c = cams[ci]
           if (c.m === m) continue
           const p = project(c, P.x, P.y, P.z)
           if (!p) continue
@@ -724,10 +776,19 @@ export function fuseDepthMaps(maps, opts = {}, onLog = () => {}, hooks = {}) {
           }
           if (hit) {
             agree++
-            if (agree >= minViews) break
+            // WS4: track the widest triangulation angle among agreeing views. A pixel
+            // that only "agrees" at ~0° parallax (sky / distant haze) never reaches
+            // minTriAngleDeg, so it is culled below rather than fused into a flyer.
+            if (minTriAngleDeg > 0) {
+              const ang = triangulationAngle(C, camCenters[ci], P)
+              if (ang > maxAngle) maxAngle = ang
+            }
+            // Stop only when BOTH enough views AND enough parallax are satisfied.
+            if (agree >= minViews && (minTriAngleDeg <= 0 || maxAngle >= minTriAngleDeg)) break
           }
         }
         if (agree < minViews) { failedConsistency++; continue }
+        if (minTriAngleDeg > 0 && maxAngle < minTriAngleDeg) { lowParallax++; continue }
 
         // World-space oriented normal: rotate the converged camera-frame normal
         // (nz<0 ⇒ facing camera ⇒ outward for aerial). No normals (stale cache) ⇒
@@ -743,6 +804,22 @@ export function fuseDepthMaps(maps, opts = {}, onLog = () => {}, hooks = {}) {
         const nm = Math.hypot(nwx, nwy, nwz)
         if (nm > 1e-9) { nwx /= nm; nwy /= nm; nwz /= nm } else { nwx = 0; nwy = 0; nwz = 1 }
 
+        // WS4 grazing-angle reject: the incidence angle between the surface normal and
+        // the viewing ray (C − P). A grazing (edge-on) surface — thin vegetation shells,
+        // silhouette fringes — is seen at ~90° incidence (cosInc ≈ 0), where depth is
+        // least reliable. Cull below cos(maxIncidenceDeg). The view-direction fallback
+        // normal (no per-pixel normal) equals the viewing ray, so cosInc = 1 and it is
+        // never culled — the filter is automatically inert on stale/normal-less maps.
+        if (incidenceOn) {
+          let vx = C.x - P.x, vy = C.y - P.y, vz = C.z - P.z
+          const vm = Math.hypot(vx, vy, vz)
+          if (vm > 1e-9) {
+            vx /= vm; vy /= vm; vz /= vm
+            const cosInc = Math.abs(nwx * vx + nwy * vy + nwz * vz)
+            if (cosInc < cosIncGate) { grazing++; continue }
+          }
+        }
+
         // Stream straight into the voxel merge — no raw point ever exists.
         const o = idx * 3
         acc.add(P.x, P.y, P.z, rgb[o], rgb[o+1], rgb[o+2], nwx, nwy, nwz)
@@ -755,20 +832,38 @@ export function fuseDepthMaps(maps, opts = {}, onLog = () => {}, hooks = {}) {
 
   onProgress?.(maps.length - 0.02 * maps.length, maps.length, 'Packing points…')
 
-  // Where did the candidate pixels go? (kept + the three cull buckets = considered.)
+  // Where did the candidate pixels go? (kept + the cull buckets = considered.)
   const pct = (n) => (100 * n / Math.max(1, considered)).toFixed(1)
   onLog(`Fusion: ${considered} candidate px → ${kept} kept (${pct(kept)}%); culled `
     + `${noDepth} no-depth (${pct(noDepth)}%), ${highCost} cost>${maxCost} (${pct(highCost)}%), `
-    + `${failedConsistency} <${minViews} views (${pct(failedConsistency)}%)`, 'info', 'Dense')
+    + `${failedConsistency} <${minViews} views (${pct(failedConsistency)}%)`
+    + `${minTriAngleDeg > 0 ? `, ${lowParallax} <${minTriAngleDeg}° parallax (${pct(lowParallax)}%)` : ''}`
+    + `${incidenceOn ? `, ${grazing} >${maxIncidenceDeg}° grazing (${pct(grazing)}%)` : ''}`, 'info', 'Dense')
 
   // The voxel merge already collapsed the per-source-pixel "shell" duplicates (a
   // surface seen by k views → k coincident points → one averaged cell). Report it.
-  const cells = acc.count
-  if (cells !== kept) {
-    onLog(`Fusion: spatial merge cell ${mergeCell.toExponential(2)} — ${kept} → ${cells} pts `
-      + `(−${kept - cells} dupes, ${(100 * (kept - cells) / Math.max(1, kept)).toFixed(1)}%)`,
+  const mergedCells = acc.count
+  if (mergedCells !== kept) {
+    onLog(`Fusion: spatial merge cell ${mergeCell.toExponential(2)} — ${kept} → ${mergedCells} pts `
+      + `(−${kept - mergedCells} dupes, ${(100 * (kept - mergedCells) / Math.max(1, kept)).toFixed(1)}%)`,
       'info', 'Dense')
   }
+
+  // WS4 post-fusion isolated-cell removal: drop lone low-support cells (fusion noise
+  // that slipped the per-pixel gates) with too few occupied neighbours.
+  let isolatedRemoved = 0
+  if (removeIsolated) {
+    isolatedRemoved = acc.filterIsolated({
+      radius: DENSE_TUNING.isolatedRadius,
+      minNeighbors: DENSE_TUNING.isolatedMinNeighbors,
+      maxSupport: DENSE_TUNING.isolatedMaxSupport,
+    })
+    if (isolatedRemoved) {
+      onLog(`Fusion: isolated-cell removal — dropped ${isolatedRemoved} lone cell(s) `
+        + `(${(100 * isolatedRemoved / Math.max(1, mergedCells)).toFixed(1)}% of merged)`, 'info', 'Dense')
+    }
+  }
+  const cells = acc.count // after isolated-cell removal
 
   const flat = acc.finalizeFlat()
   const { nrm, degenerate } = acc.finalizeNormals()
@@ -788,11 +883,14 @@ export function fuseDepthMaps(maps, opts = {}, onLog = () => {}, hooks = {}) {
     costMedian: costStats.median,
     keptPct: 100 * kept / denom,
     mergeCell,
-    mergedPct: kept ? 100 * (kept - cells) / kept : 0,
+    mergedPct: kept ? 100 * (kept - mergedCells) / kept : 0,
+    isolatedRemoved,
     cullBreakdown: {
       noDepthPct: 100 * noDepth / denom,
       highCostPct: 100 * highCost / denom,
       lowViewsPct: 100 * failedConsistency / denom,
+      lowParallaxPct: 100 * lowParallax / denom,
+      grazingPct: 100 * grazing / denom,
     },
   }
   flat.count = cells

@@ -121,6 +121,13 @@ export const DENSE_TUNING = {
   fuseProgressMs: 250,    // min ms between fusion progress emits (~4/s; no postMessage spam)
   fuseCostMaxSamples: 2_000_000, // cost-histogram sample budget (stride-subsampled, sorted once)
   fuseMaxCells: 2 ** 50,  // packed-key exactness ceiling (float64); clamp cellSize up past this
+  // ── Post-fusion isolated-cell removal (WS4, gated by removeIsolated) ──
+  // Only low-support cells are tested (a ≥3-pixel cell is never a floater), so this stays
+  // O(noise tail). A tested cell survives if ≥ isolatedMinNeighbors of its 26 (radius 1)
+  // neighbour cells are occupied; otherwise it's a lone flyer (sky/vegetation) and dropped.
+  isolatedRadius: 1,        // neighbour search radius in cells (26-neighbourhood)
+  isolatedMinNeighbors: 2,  // min occupied neighbours to keep a low-support cell
+  isolatedMaxSupport: 2,    // only cells with ≤ this many contributing pixels are tested
 }
 
 // Mesh (screened Poisson) internals read in core/products/mesh.js but NOT exposed in
