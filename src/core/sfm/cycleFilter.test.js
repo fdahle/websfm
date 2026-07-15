@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { rotationCycleFilter } from './cycleFilter.js'
+import { rotationCycleFilter, reevaluateDroppedEdges } from './cycleFilter.js'
 import { matMul3, matT3 } from './rotations.js'
 
 // Deterministic LCG for reproducible "random" rotations.
@@ -87,5 +87,50 @@ describe('rotationCycleFilter sanity abort', () => {
     const { drop, summary } = rotationCycleFilter(edges, { abortErrDeg: Infinity })
     expect(summary.aborted).toBeUndefined()
     expect(drop.length).toBeGreaterThan(0)
+  })
+
+  it('protectBridges leaves a fully consistent graph unchanged (no false protection)', () => {
+    const edges = consistentEdges()
+    const bad = edges.find((e) => e.idA === 'b' && e.idB === 'e')
+    bad.R = matMul3(rodrigues([0, 0, 1], 40), bad.R)
+    const { drop, summary } = rotationCycleFilter(edges, { protectBridges: true })
+    // The bad edge sits in many triangles (not a bridge), so it is still dropped.
+    expect(drop).toHaveLength(1)
+    expect(drop[0].idB).toBe('e')
+    expect(summary.bridgeProtected).toBe(0)
+  })
+})
+
+describe('reevaluateDroppedEdges (post-self-cal re-admission)', () => {
+  // Build the consistent complete graph, then pretend one TRUE edge was dropped:
+  // move it to `candidates` with its correct rotation. It should be re-admitted.
+  it('re-admits a consistent candidate against the active graph', () => {
+    const all = consistentEdges()
+    const dropped = all.find((e) => e.idA === 'b' && e.idB === 'e')
+    const active = all.filter((e) => e !== dropped)
+    const { readmit } = reevaluateDroppedEdges(active, [dropped])
+    expect(readmit).toHaveLength(1)
+    expect(readmit[0].idA).toBe('b')
+    expect(readmit[0].idB).toBe('e')
+    expect(readmit[0].support).toBeGreaterThan(0.9)
+  })
+
+  it('refuses a candidate whose rotation is inconsistent with the graph', () => {
+    const all = consistentEdges()
+    const dropped = all.find((e) => e.idA === 'b' && e.idB === 'e')
+    const active = all.filter((e) => e !== dropped)
+    const corrupted = { ...dropped, R: matMul3(rodrigues([0, 1, 0], 45), dropped.R) }
+    const { readmit } = reevaluateDroppedEdges(active, [corrupted])
+    expect(readmit).toHaveLength(0)
+  })
+
+  it('refuses a candidate with too few triangles against the active graph', () => {
+    // Only two active edges sharing no common neighbour with the candidate ⇒ 0 triangles.
+    const active = [
+      { idA: 'x', idB: 'y', R: rodrigues([0, 1, 0], 5), inliers: 100 },
+    ]
+    const cand = { idA: 'p', idB: 'q', R: rodrigues([0, 1, 0], 5), inliers: 100 }
+    const { readmit } = reevaluateDroppedEdges(active, [cand], { minTriangles: 2 })
+    expect(readmit).toHaveLength(0)
   })
 })

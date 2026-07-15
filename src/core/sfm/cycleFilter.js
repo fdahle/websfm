@@ -134,7 +134,39 @@ export function rotationCycleFilter(edges, opts = {}) {
     }
   }
 
+  // Bridge protection (WS3): never drop the sole link holding two sub-graphs together —
+  // severing the match graph strands those cameras (unrecoverable), whereas a bad pose is
+  // caught downstream by the PnP gates. `isBridge(pid)` tests whether removing that edge
+  // disconnects its endpoints over the currently-active graph (BFS excluding the edge).
+  //
+  // Note: a *drop candidate* always lies in ≥ minTriangles active triangles, i.e. on a
+  // 3-cycle, and removing a cycle edge can never disconnect a graph — so with the current
+  // drop gate this guard is provably a no-op. It is kept as cheap insurance: if the drop
+  // criteria ever admit an edge that is not on an active cycle, this stops it severing the
+  // graph. Opt-in via protectBridges.
+  const protectBridges = opts.protectBridges === true
+  const isBridge = (pid) => {
+    const target = E.get(pid)
+    const adj = new Map()
+    for (const e of E.values()) {
+      if (!e.active || pk(e.a, e.b) === pid) continue
+      if (!adj.has(e.a)) adj.set(e.a, [])
+      if (!adj.has(e.b)) adj.set(e.b, [])
+      adj.get(e.a).push(e.b); adj.get(e.b).push(e.a)
+    }
+    const seen = new Set([target.a])
+    const stack = [target.a]
+    while (stack.length) {
+      const u = stack.pop()
+      if (u === target.b) return false // still connected without the edge → not a bridge
+      for (const v of adj.get(u) ?? []) if (!seen.has(v)) { seen.add(v); stack.push(v) }
+    }
+    return true // target.b unreachable → the edge is the sole connection
+  }
+
   const drop = []
+  let bridgeProtected = 0
+  const protectedPids = new Set() // bridges we declined to drop (excluded from re-selection)
   // Reuse the initial full-graph pass for the first iteration when the adaptive
   // threshold didn't move (effErrDeg === baseErrDeg) — the stats are identical, so
   // recomputing them is pure waste. Nulled after each drop (the graph changed).
@@ -143,7 +175,7 @@ export function rotationCycleFilter(edges, opts = {}) {
     if (!stats) stats = support(effErrDeg)
     let worst = null
     for (const [pid, s] of stats) {
-      if (s.tri < minTri) continue
+      if (s.tri < minTri || protectedPids.has(pid)) continue
       const ratio = s.wTri > 0 ? s.wGood / s.wTri : (s.good / s.tri)
       if (ratio >= minSupport) continue
       // Shield strong edges: only condemn one whose weighted support is ~0.
@@ -153,6 +185,12 @@ export function rotationCycleFilter(edges, opts = {}) {
       }
     }
     if (!worst) break
+    // Bridge protection: never drop the sole link between two components.
+    if (protectBridges && isBridge(worst.pid)) {
+      protectedPids.add(worst.pid)
+      bridgeProtected++
+      continue // stats unchanged → next iteration re-picks the next-worst
+    }
     const e = E.get(worst.pid)
     e.active = false
     drop.push({ idA: e.a, idB: e.b, tri: worst.tri, good: worst.good, ratio: worst.ratio, inliers: e.inliers })
@@ -167,6 +205,69 @@ export function rotationCycleFilter(edges, opts = {}) {
       triangles: errs.length,
       dropped: drop.length,
       strongInlierFloor,
+      bridgeProtected,
     },
   }
+}
+
+// ── Re-admission of dropped edges (WS3) ──────────────────────────────────────
+// The cycle filter runs BEFORE self-calibration, so on distorted / mis-calibrated
+// input it can drop TRUE edges whose rotations only look inconsistent because they
+// were computed with the wrong intrinsics. After the first self-cal fold the keypoints
+// (and Kmap) are corrected, so those edges deserve a second look. Given the surviving
+// `activeEdges` and the `candidates` (dropped edges, rotations recomputed on the folded
+// keypoints), vote each candidate's triangles against the ACTIVE graph and re-admit any
+// that are now cycle-consistent. Judging corrected candidates against uncorrected
+// survivors would re-create the original bias, so the caller must recompute BOTH edge
+// sets' rotations with the refined Kmap before calling this.
+//
+// `activeEdges`/`candidates`: [{ idA, idB, R, inliers }] (R the relative rotation
+// idA→idB). Returns { readmit, summary } — readmit is the subset of candidates that
+// cleared support ≥ minSupport over ≥ minTriangles triangles.
+export function reevaluateDroppedEdges(activeEdges, candidates, opts = {}) {
+  const errDeg = opts.cycleErrorDeg ?? 5
+  const minTri = opts.minTriangles ?? 2
+  const minSupport = opts.minSupport ?? 0.3
+  const weightCap = opts.weightCap ?? 200
+  const pk = (a, b) => (a < b ? `${a}--${b}` : `${b}--${a}`)
+
+  // Canonicalise the active edges (a<b, R min→max) into a lookup + adjacency.
+  const A = new Map()
+  const adj = new Map()
+  const addAdj = (u, v) => { if (!adj.has(u)) adj.set(u, new Set()); adj.get(u).add(v) }
+  for (const e of activeEdges) {
+    if (!e.R) continue
+    const [a, b] = e.idA < e.idB ? [e.idA, e.idB] : [e.idB, e.idA]
+    A.set(pk(a, b), { a, b, R: e.idA < e.idB ? e.R : matT3(e.R), inliers: Math.max(1, e.inliers ?? 1) })
+    addAdj(a, b); addAdj(b, a)
+  }
+
+  const readmit = []
+  for (const cand of candidates) {
+    if (!cand.R) continue
+    const [a, b] = cand.idA < cand.idB ? [cand.idA, cand.idB] : [cand.idB, cand.idA]
+    const Rc = cand.idA < cand.idB ? cand.R : matT3(cand.R)
+    const inl = Math.max(1, cand.inliers ?? 1)
+    // Triangles the candidate forms with the active graph: common neighbours k of a,b.
+    let tri = 0, wTri = 0, wGood = 0
+    for (const k of adj.get(a) ?? []) {
+      if (!(adj.get(b) ?? new Set()).has(k)) continue
+      // Edges (a,k) and (b,k) from the active graph; (a,b) is the candidate. Build the
+      // canonical i<j<k cycle so matMul orientation matches rotationCycleFilter.
+      const eak = A.get(pk(a, k)), ebk = A.get(pk(b, k))
+      if (!eak || !ebk) continue
+      // Cycle over {a,b,k}: R_ak⁻¹ · R_bk · R_ab, oriented a→b→k→a with a<b.
+      const Rab = Rc                              // a→b (candidate, a<b)
+      const Rbk = k > b ? ebk.R : matT3(ebk.R)    // b→k
+      const Rak = k > a ? eak.R : matT3(eak.R)    // a→k
+      const deg = rotAngleDeg(matMul3(matT3(Rak), matMul3(Rbk, Rab)))
+      const w = Math.min(weightCap, Math.min(inl, eak.inliers, ebk.inliers))
+      tri++; wTri += w; if (deg <= errDeg) wGood += w
+    }
+    const support = wTri > 0 ? wGood / wTri : 0
+    if (tri >= minTri && support >= minSupport) {
+      readmit.push({ idA: cand.idA, idB: cand.idB, tri, support })
+    }
+  }
+  return { readmit, summary: { candidates: candidates.length, readmitted: readmit.length, errDeg, minSupport } }
 }
