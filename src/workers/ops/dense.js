@@ -32,19 +32,37 @@ export function makeDenseOps({ rasterize }) {
     }
   }
 
+  // Any distortion to remove (calibrated OR self-calibrated)?
+  function hasAnyDistortion(dist, selfCal) {
+    return hasDistortion(dist) || hasDistortion(selfCal)
+  }
+
+  // Composed forward distortion map (WS2): an ideal pinhole pixel → the pixel the raw
+  // raster recorded. Self-cal was removed AFTER the calibrated bag at ingest
+  // (kp_raw = distort_cal(distort_self(kp_ideal))), so apply `selfCal` first, then
+  // `dist`, about the same working K. The common EXIF-only case has dist = null and
+  // only a self-cal bag; a fully-calibrated sensor has selfCal = null. Either bag empty
+  // ⇒ that stage is a no-op.
+  function distortComposed(u, v, Kw, dist, selfCal) {
+    let x = u, y = v
+    if (hasDistortion(selfCal)) { const p = distortPixel(x, y, Kw, selfCal); x = p.x; y = p.y }
+    if (hasDistortion(dist))    { const p = distortPixel(x, y, Kw, dist);    x = p.x; y = p.y }
+    return { x, y }
+  }
+
   // Remove lens distortion from a working-resolution raster: for each output (ideal
   // pinhole) pixel, sample the source at the distorted pixel the lens recorded there
   // (closed-form forward map + bilinear). Kfull is the native-resolution K; the map
   // runs in working-res K = scaleK(Kfull, scale). Returns a new raster; a no-op when
-  // dist is empty. This is what keeps depth maps / fusion / DEM / ortho pinhole.
-  function undistortRaster(r, Kfull, dist) {
-    if (!hasDistortion(dist)) return r
+  // both bags are empty. This is what keeps depth maps / fusion / DEM / ortho pinhole.
+  function undistortRaster(r, Kfull, dist, selfCal) {
+    if (!hasAnyDistortion(dist, selfCal)) return r
     const { data, width: w, height: h, scale } = r
     const Kw = scaleK(Kfull, scale)
     const out = new Uint8ClampedArray(data.length)
     for (let v = 0; v < h; v++) {
       for (let u = 0; u < w; u++) {
-        const { x: ud, y: vd } = distortPixel(u, v, Kw, dist)
+        const { x: ud, y: vd } = distortComposed(u, v, Kw, dist, selfCal)
         sampleRgbaBilinear(data, w, h, ud, vd, out, (v * w + u) * 4)
       }
     }
@@ -53,13 +71,13 @@ export function makeDenseOps({ rasterize }) {
 
   // Undistort a boolean mask LUT with the same forward map (nearest sample) so a
   // distorted-space film-frame mask lines up with the now-undistorted raster.
-  function undistortMaskLut(lut, w, h, Kfull, dist, scale) {
-    if (!hasDistortion(dist)) return lut
+  function undistortMaskLut(lut, w, h, Kfull, dist, scale, selfCal) {
+    if (!hasAnyDistortion(dist, selfCal)) return lut
     const Kw = scaleK(Kfull, scale)
     const out = new Uint8Array(lut.length)
     for (let v = 0; v < h; v++) {
       for (let u = 0; u < w; u++) {
-        const { x: ud, y: vd } = distortPixel(u, v, Kw, dist)
+        const { x: ud, y: vd } = distortComposed(u, v, Kw, dist, selfCal)
         const su = Math.max(0, Math.min(w - 1, Math.round(ud)))
         const sv = Math.max(0, Math.min(h - 1, Math.round(vd)))
         out[v * w + u] = lut[sv * w + su]
@@ -77,14 +95,14 @@ export function makeDenseOps({ rasterize }) {
   // → scan full-res → ×scanScale → scan working px. The canonical working grid is
   // sized so its long side ≈ maxDim (matching non-film rasters). Returns a raster
   // carrying the info the mask warp needs (scanDims, fid, canonK, dist).
-  function canonWorkingToScan(u, v, cScale, canonK, dist, fid, scanScale) {
+  function canonWorkingToScan(u, v, cScale, canonK, dist, fid, scanScale, selfCal) {
     const cx = u / cScale, cy = v / cScale                       // full-res canonical px
-    const d = dist ? distortPixel(cx, cy, canonK, dist) : { x: cx, y: cy }
+    const d = distortComposed(cx, cy, canonK, dist, selfCal)     // remove self-cal + calibrated
     const s = canonicalToScan(d.x, d.y, fid.A, fid.frame)        // scan full-res px
     return { x: s.x * scanScale, y: s.y * scanScale }            // scan working px
   }
 
-  function warpFilmRaster(r, canonK, dist, fid, maxDim) {
+  function warpFilmRaster(r, canonK, dist, fid, maxDim, selfCal) {
     const { data, width: sw, height: sh, scale: scanScale } = r
     const { frame } = fid
     const cScale = maxDim / Math.max(frame.width, frame.height)
@@ -92,15 +110,16 @@ export function makeDenseOps({ rasterize }) {
     const oh = Math.max(1, Math.round(frame.height * cScale))
     const out = new Uint8ClampedArray(ow * oh * 4)
     const useDist = hasDistortion(dist) ? dist : null
+    const useSelf = hasDistortion(selfCal) ? selfCal : null
     for (let v = 0; v < oh; v++) {
       for (let u = 0; u < ow; u++) {
-        const s = canonWorkingToScan(u, v, cScale, canonK, useDist, fid, scanScale)
+        const s = canonWorkingToScan(u, v, cScale, canonK, useDist, fid, scanScale, useSelf)
         sampleRgbaBilinear(data, sw, sh, s.x, s.y, out, (v * ow + u) * 4)
       }
     }
     return {
       data: out, width: ow, height: oh, scale: cScale,
-      fid, canonK, dist: useDist, scanDims: { w: sw, h: sh, scale: scanScale },
+      fid, canonK, dist: useDist, selfCal: useSelf, scanDims: { w: sw, h: sh, scale: scanScale },
     }
   }
 
@@ -112,7 +131,7 @@ export function makeDenseOps({ rasterize }) {
     const out = new Uint8Array(r.width * r.height)
     for (let v = 0; v < r.height; v++) {
       for (let u = 0; u < r.width; u++) {
-        const s = canonWorkingToScan(u, v, r.scale, r.canonK, r.dist, r.fid, sd.scale)
+        const s = canonWorkingToScan(u, v, r.scale, r.canonK, r.dist, r.fid, sd.scale, r.selfCal)
         const su = Math.max(0, Math.min(sd.w - 1, Math.round(s.x)))
         const sv = Math.max(0, Math.min(sd.h - 1, Math.round(s.y)))
         out[v * r.width + u] = scanLut[sv * sd.w + su]
@@ -243,7 +262,8 @@ export function makeDenseOps({ rasterize }) {
     const urlByUuid = new Map(images.map((im) => [im.uuid, im.url]))
     // Per-url intrinsics + distortion, so getRaster can undistort each source once
     // (url↔image is 1:1, and undistortion is independent of ref/source role).
-    const metaByUrl = new Map(images.map((im) => [im.url, { K: im.K, dist: im.dist || null, fid: im.fid || null }]))
+    const metaByUrl = new Map(images.map((im) =>
+      [im.url, { K: im.K, dist: im.dist || null, selfCal: im.selfCal || null, fid: im.fid || null }]))
     const usedSets = srcUuidsByImg.map((srcUuids, i) => {
       const set = new Set([images[i].url])
       for (const u of srcUuids) { const url = urlByUuid.get(u); if (url) set.add(url) }
@@ -260,10 +280,10 @@ export function makeDenseOps({ rasterize }) {
         // Undistort at ingest so every dense consumer stays pinhole (mirrors sparse).
         const meta = metaByUrl.get(url)
         if (meta?.fid) {
-          // Film scan: warp into the canonical frame (composes any distortion).
-          r = warpFilmRaster(r, meta.K, meta.dist, meta.fid, maxDim)
-        } else if (meta?.dist) {
-          r = undistortRaster(r, meta.K, meta.dist)
+          // Film scan: warp into the canonical frame (composes calibrated + self-cal).
+          r = warpFilmRaster(r, meta.K, meta.dist, meta.fid, maxDim, meta.selfCal)
+        } else if (meta?.dist || meta?.selfCal) {
+          r = undistortRaster(r, meta.K, meta.dist, meta.selfCal)
         }
         rasterCache.set(url, r)
         ledger.track(`raster:${url}`, r.width * r.height * 4)
@@ -316,7 +336,7 @@ export function makeDenseOps({ rasterize }) {
           if (rs.fid) srcMask = await filmMaskLut(s.mask, rs)
           else {
             srcMask = await buildMaskLookup(s.mask, rs.width, rs.height)
-            if (s.dist) srcMask = undistortMaskLut(srcMask, rs.width, rs.height, s.K, s.dist, rs.scale)
+            if (s.dist || s.selfCal) srcMask = undistortMaskLut(srcMask, rs.width, rs.height, s.K, s.dist, rs.scale, s.selfCal)
           }
         }
         sources.push({

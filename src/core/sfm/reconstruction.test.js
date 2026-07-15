@@ -11,6 +11,7 @@ import {
   solvePnp,
   bundleAdjust,
   resolveK,
+  refineModeMask,
 } from './reconstruction.js'
 
 // The wasm glue defaults to fetch()ing its .wasm via a URL, which Node can't do.
@@ -298,6 +299,19 @@ describe('solvePnp', () => {
   })
 })
 
+describe('refineModeMask', () => {
+  it('maps refine terms to the crate bitmask (1=f,2=cxcy,4=k1,8=k2,16=k3)', () => {
+    expect(refineModeMask('none')).toBe(0)
+    expect(refineModeMask('')).toBe(0)
+    expect(refineModeMask(undefined)).toBe(0)
+    expect(refineModeMask('f')).toBe(1)
+    expect(refineModeMask('f,k1')).toBe(1 | 4)
+    expect(refineModeMask('f,cxcy,k1,k2,k3')).toBe(1 | 2 | 4 | 8 | 16)
+    expect(refineModeMask('f, k1 , k2')).toBe(1 | 4 | 8) // tolerant of whitespace
+    expect(refineModeMask('f,bogus,k1')).toBe(1 | 4)     // unknown tokens ignored
+  })
+})
+
 describe('bundleAdjust', () => {
   // Two cameras with a real rotation + off-origin baseline and a cloud of points,
   // all consistent to machine precision. This is the case that exposed the
@@ -410,6 +424,50 @@ describe('bundleAdjust', () => {
       expect(Math.abs(k.fx - fTrue) / fTrue).toBeLessThan(0.02)
       expect(Math.abs(k.fy - k.fx)).toBeLessThan(1)
     }
+  })
+
+  // WS2 full-bag self-cal: a scene rendered with k1,k2 radial distortion AND a shifted
+  // principal point, refined with 'f,cxcy,k1,k2'. Validates the bitmask refine modes,
+  // the k2 Jacobian, and the nCam×7 intrinsics unpack across the JS↔WASM boundary.
+  it('refines a full radial bag + principal point (f,cxcy,k1,k2)', async () => {
+    const rng = mulberry32(41)
+    const kTrue = { k1: -0.15, k2: 0.08 }
+    const cxTrue = KPIX.cx + 30, cyTrue = KPIX.cy - 20   // shifted principal point
+    const projDist = (R, t, X) => {
+      const xc = R[0][0]*X[0] + R[0][1]*X[1] + R[0][2]*X[2] + t[0]
+      const yc = R[1][0]*X[0] + R[1][1]*X[1] + R[1][2]*X[2] + t[1]
+      const zc = R[2][0]*X[0] + R[2][1]*X[1] + R[2][2]*X[2] + t[2]
+      const a = xc / zc, b = yc / zc
+      const r2 = a*a + b*b
+      const d = 1 + kTrue.k1*r2 + kTrue.k2*r2*r2
+      return { x: KPIX.fx * a * d + cxTrue, y: KPIX.fy * b * d + cyTrue }
+    }
+    const centers = [[0, 0, 0], [2, 0.3, 0], [-1.5, 0.5, 0.4], [0.6, -0.8, 0.3], [-0.4, -0.6, 0.2]]
+    const rots = [rotY(0), rotY(0.2), rotY(-0.18), rotY(0.1), rotY(-0.08)]
+    const poses = rots.map((R, i) => ({ R, t: poseFromCenter(R, centers[i]) }))
+    const world = Array.from({ length: 80 }, () => [
+      (rng() - 0.5) * 4, (rng() - 0.5) * 3, 8 + rng() * 4,
+    ])
+    const cameras = poses.map(({ R, t }) => ({ R, t }))
+    const intrinsics = poses.map(() => ({ ...KPIX }))  // seed pinhole at the true focal, centre unshifted
+    const points3d = world.map(([x, y, z]) => ({ x, y, z }))
+    const observations = []
+    points3d.forEach((P, ptIdx) => poses.forEach((p, camIdx) => {
+      const o = projDist(p.R, p.t, [P.x, P.y, P.z])
+      observations.push({ camIdx, ptIdx, x: o.x, y: o.y })
+    }))
+    const res = await bundleAdjust(cameras, intrinsics, points3d, observations, {
+      maxIters: 120, refineIntrinsics: 'f,cxcy,k1,k2', sensorOfCam: [0, 0, 0, 0, 0],
+    })
+    expect(res).not.toBeNull()
+    for (const k of res.intrinsics) {
+      expect(Math.abs(k.k1 - kTrue.k1)).toBeLessThan(0.03)
+      expect(Math.abs(k.k2 - kTrue.k2)).toBeLessThan(0.03)
+      expect(Math.abs(k.cx - cxTrue)).toBeLessThan(3)
+      expect(Math.abs(k.cy - cyTrue)).toBeLessThan(3)
+      expect(k.k3).toBe(0)  // k3 bit not set → stays exactly 0
+    }
+    expect(res.costAfter).toBeLessThan(0.5)
   })
 
   it('leaves intrinsics unchanged when refineIntrinsics is off', async () => {

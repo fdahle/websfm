@@ -483,12 +483,14 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
       // to the worker ("object can not be cloned").
       const imgByUuid = new Map(images.value.map((im) => [im.uuid, im]))
       const sensorById = new Map(sensors.value.map((s) => [s.id, s]))
-      // D2: radial k1 the sparse run self-calibrated per sensor (folded into the
-      // keypoints there). Add it to that sensor's undistortion so the dense rasters
-      // land in the same pinhole frame as the sparse cloud — dense's camera K is the
-      // BA-refined K the fold used, so applying k1 here reproduces it. Empty ⇒ no-op.
+      // WS2: composed radial distortion {k1,k2,k3} the sparse run self-calibrated per
+      // sensor (folded into the keypoints there). Passed to dense as a SECOND bag
+      // (`selfCal`) applied after the calibrated `dist` — dense's camera K is the
+      // BA-refined K the fold used, so it reproduces the same pinhole frame as the
+      // sparse cloud. Empty ⇒ no-op (the normal EXIF-only case has no calibrated dist,
+      // so selfCal is the only bag).
       const selfCalBySensor = new Map(
-        (summary.value?.selfCalDistortion ?? []).map((d) => [d.sensorId, d.k1]))
+        (summary.value?.selfCalDistortion ?? []).map((d) => [d.sensorId, { k1: d.k1, k2: d.k2, k3: d.k3 }]))
       // F4: per-image scan→canonical transform from the sparse run. The dense
       // stage reproduces that exact frame (it must NOT re-fit) — the sparse run
       // defines it. Fail loudly if a film image is in the cloud but its transform
@@ -525,14 +527,12 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
         // wait for it (rejects if its transcode failed) so dense reads the PNG,
         // never the lossy display JPEG — see the computeUrl invariant.
         await imagesStore.whenComputeReady(im)
-        let dist = s ? distortionOf(s) : null
-        const selfK1 = im.sensorId ? (selfCalBySensor.get(im.sensorId) || 0) : 0
-        if (selfK1) {
-          dist = {
-            k1: (dist?.k1 || 0) + selfK1, k2: dist?.k2 || 0, k3: dist?.k3 || 0,
-            p1: dist?.p1 || 0, p2: dist?.p2 || 0,
-          }
-        }
+        const dist = s ? distortionOf(s) : null
+        // Composed self-cal bag for this image's sensor (a second undistortion applied
+        // after `dist`). Null when self-cal was off for it.
+        const sc = im.sensorId ? selfCalBySensor.get(im.sensorId) : null
+        const selfCal = sc && (sc.k1 || sc.k2 || sc.k3)
+          ? { k1: sc.k1 || 0, k2: sc.k2 || 0, k3: sc.k3 || 0 } : null
         inputImages.push({
           uuid, name: im.name, url: im.computeUrl ?? im.url,
           // Per-image mask (if any) so masked regions are excluded from the dense cloud.
@@ -541,14 +541,16 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
           t: [...cam.t],
           K: { fx: cam.K.fx, fy: cam.K.fy, cx: cam.K.cx, cy: cam.K.cy },
           dist,
+          selfCal,
           // Film scan→canonical warp (plain data; the frame is already a plain object).
           fid,
         })
       }
       if (selfCalBySensor.size) {
-        const parts = [...selfCalBySensor].map(([id, k1]) =>
-          `${sensorById.get(id)?.label ?? id.slice(0, 6)} k1 ${k1.toFixed(5)}`)
-        log(`Dense: applying self-calibrated distortion from the sparse run — ${parts.join(', ')}`,
+        const parts = [...selfCalBySensor].map(([id, d]) =>
+          `${sensorById.get(id)?.label ?? id.slice(0, 6)} k1 ${(d.k1 || 0).toFixed(5)}`
+          + `${d.k2 ? `, k2 ${d.k2.toFixed(5)}` : ''}${d.k3 ? `, k3 ${d.k3.toFixed(5)}` : ''}`)
+        log(`Dense: applying self-calibrated distortion from the sparse run — ${parts.join('; ')}`,
           'info', 'Dense')
       }
       const points = cloud.points.map((p) => ({
