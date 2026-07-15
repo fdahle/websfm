@@ -14,7 +14,7 @@
 //   imgs, donePairs, Kmap, cfg, bestPair-seeded registeredUuids,
 //   cameras, viewIndex,                       // Maps, mutated by reference
 //   getPoints3d,                              // () => live points3d array
-//   addView, rebuildViewIndex, foldOneEndpointMatches,
+//   addView, rebuildViewIndex, foldOneEndpointMatches, mergeTracks,
 //   runBundleAdjust, filterTracks, modelReprojStats, imageByUuid, numStats,
 //   log, onProgress,
 // }
@@ -32,7 +32,7 @@ export async function registerImages(ctx) {
   const {
     imgs, donePairs, Kmap, cfg,
     cameras, viewIndex, registeredUuids, getPoints3d,
-    addView, rebuildViewIndex, foldOneEndpointMatches,
+    addView, rebuildViewIndex, foldOneEndpointMatches, mergeTracks,
     runBundleAdjust, filterTracks, modelReprojStats, imageByUuid, numStats,
     log, onProgress,
   } = ctx
@@ -69,12 +69,26 @@ export async function registerImages(ctx) {
   } = cfg
   // Fixed PnP gate for the whole run (never chases the model p95 upward).
   const pnpThresh = reprjThreshold * Math.max(1, Math.min(pnpGateScale, 2))
-  // (2) Focal-refine mode for the stalled-strip rescue below. Focal-only ('f') stays
-  // well-constrained even on the pre-filter set (unlike cx/cy or k1, deferred to
-  // post-filter, R6), so a ~10%-wrong film focal is corrected mid-registration rather
-  // than only after it. 'none' when self-cal is off (a calibrated model exists). The
-  // regular interim BA stays strictly pose/points ('none') — only the rescue refocals.
-  const rescueRefine = cfg.refineIntrinsics !== 'none' ? 'f' : 'none'
+  // (D3) Self-calibrate lens distortion *during* registration once the model is large
+  // enough to observe it. A 2-view model absorbs radial distortion into the point
+  // positions, so init reprojection looks perfect while the geometry is wrong — the
+  // 3rd-view PnP is the first to expose it (a distorted consumer-camera pair fits
+  // two views at <2px yet resects the next camera at ~13% inliers). Deferring the k1
+  // solve to the post-filter passes (R6) is therefore too late: registration has
+  // already stalled. Instead, once `distortionCalMinCams` cameras are in (enough
+  // parallax for k1 to be identifiable), the interim BA refines f,k1 and runBundleAdjust
+  // folds the distortion out of every image on the sensor (+ into Kmap), so subsequent
+  // PnP sees pinhole geometry. Below the threshold the interim BA stays pose/points-only
+  // as before — a k1 fit from 2–3 views is unreliable and the fold is destructive. When
+  // self-cal is off (a calibrated model already removed distortion at ingest) this is a
+  // no-op. The stalled-strip rescue keeps its focal-only solve for tiny models but adopts
+  // the same f,k1 mode once past the threshold, so a stall caused by distortion escapes too.
+  const selfCalOn = cfg.refineIntrinsics !== 'none'
+  const distortionCalMinCams = cfg.distortionCalMinCams ?? 6
+  const distortionRefine = (n) =>
+    selfCalOn && n >= distortionCalMinCams ? cfg.refineIntrinsics : 'none'
+  const rescueRefine = (n) =>
+    !selfCalOn ? 'none' : n >= distortionCalMinCams ? cfg.refineIntrinsics : 'f'
   const keypointOf = (uuid, kpIdx) => imageByUuid(uuid)?.keypoints?.[kpIdx] ?? null
 
   // Total inliers linking `uuid` to the already-registered set (cheap fallback
@@ -409,12 +423,15 @@ export async function registerImages(ctx) {
       if (baIterations > 0 && interimBaEvery > 0 && registeredSinceBA >= interimBaEvery
           && cameras.size >= 3 && getPoints3d().length >= 10) {
         onProgress?.(cameras.size, imgs.length, `Bundle adjustment (${cameras.size} cameras)…`)
-        await runBundleAdjust(`interim BA (${cameras.size} cameras)`, interimBaIterations, 'none')
+        await runBundleAdjust(`interim BA (${cameras.size} cameras)`, interimBaIterations,
+          distortionRefine(cameras.size))
         const f = filterTracks({ maxReprojPx: filterMaxReprojPx * 2, minTriAngleDeg: filterMinTriAngleDeg })
-        rebuildViewIndex() // BA + filter replaced/dropped point objects; refresh first
+        const mergedTr = mergeTracks(filterMaxReprojPx) // fold split tracks (both-endpoint case)
+        rebuildViewIndex() // BA + filter + merge replaced/dropped point objects; refresh first
         const folded = foldOneEndpointMatches(filterMaxReprojPx)
         log(`Reconstruction: interim BA cleanup — filtered ${f.obsRemoved} obs + ${f.ptsRemoved} points, `
-          + `folded ${folded} track observation(s); ${getPoints3d().length} points`, 'debug', 'Reconstruction')
+          + `merged ${mergedTr} split track(s), folded ${folded} track observation(s); `
+          + `${getPoints3d().length} points`, 'debug', 'Reconstruction')
         registeredSinceBA = 0
       }
     }
@@ -437,9 +454,10 @@ export async function registerImages(ctx) {
         rescued = true
         log(`Reconstruction: registration stalled — ${stalledLinked.length} linked image(s) still `
           + `unregistered; rescue (focal solve + retriangulation, then a relaxed retry)`, 'info', 'Reconstruction')
-        if (baIterations > 0 && rescueRefine !== 'none' && cameras.size >= 3 && getPoints3d().length >= 10) {
+        const rescueMode = rescueRefine(cameras.size)
+        if (baIterations > 0 && rescueMode !== 'none' && cameras.size >= 3 && getPoints3d().length >= 10) {
           onProgress?.(cameras.size, imgs.length, 'Rescue: focal solve…')
-          await runBundleAdjust('rescue focal solve', interimBaIterations, rescueRefine)
+          await runBundleAdjust('rescue focal solve', interimBaIterations, rescueMode)
           rebuildViewIndex()
         }
         onProgress?.(cameras.size, imgs.length, 'Rescue: retriangulating…')

@@ -496,8 +496,15 @@ export async function reconstruct(input, hooks = {}) {
     {
       const { s1, s2, s3 } = best.esv
       const ratio = s1 > 0 ? s2 / s1 : 0
+      // Only flag intrinsics when the ratio is genuinely low. A healthy E sits at
+      // ~0.95–1.0, so the old unconditional "well below 1 → wrong focal" note fired on
+      // every init (0.98 is fine) and read as an alarm — append it only below 0.9.
+      const conditioning = ratio < 0.9
+        ? ' — well below 1 points to wrong intrinsics (focal / principal point), which '
+          + 'inflates init reprojection and typically blocks PnP registration'
+        : ''
       log(`Reconstruction: essential matrix σ = [${s1.toFixed(3)}, ${s2.toFixed(3)}, ${s3.toFixed(3)}] — `
-        + `σ2/σ1 ${ratio.toFixed(2)} (ideal ≈ 1.0; well below 1 points to a wrong focal length / intrinsics)`,
+        + `σ2/σ1 ${ratio.toFixed(2)} (ideal ≈ 1.0)${conditioning}`,
         ratio < 0.7 ? 'warn' : 'debug', 'Reconstruction')
     }
     markStage('init')
@@ -599,6 +606,34 @@ export async function reconstruct(input, hooks = {}) {
       return folded
     }
 
+    // Consolidate split tracks: the *both*-endpoints-assigned case foldOneEndpointMatches
+    // skips (line above) — a verified match whose two ends already belong to two DIFFERENT
+    // points means one physical feature was reconstructed twice. mergeSplitTracks folds the
+    // loser into the winner (conflict- + reproj-gated). It ran only once post-BA before, so
+    // the model grew mostly 2-view during registration (the building run finished at 15%
+    // ≥3-view tracks); running it in the interim cleanup as the model builds raises track
+    // multiplicity early, which both conditions BA better and gives later PnP longer, more
+    // stable points. Reassigns points3d (the module `let`) like filterTracks; callers
+    // rebuildViewIndex afterwards. Same maxReprojPx gate as the post-BA merge.
+    const mergeTracks = (gate) => {
+      const res = mergeSplitTracks({
+        points3d, cameras, pairs: donePairs,
+        keypointOf: (uuid, k) => imageByUuid(uuid)?.keypoints?.[k] ?? null,
+        maxReprojPx: gate,
+      })
+      points3d = res.points3d
+      return res.merged
+    }
+
+    // Accumulated self-calibrated radial k1 per sensor id (D2). Each self-cal BA
+    // pass folds its k1 into the keypoints (D1) and adds it here; the run exports the
+    // total so dense can undistort its rasters with the same calibration the sparse
+    // cloud was built on (otherwise the folded distortion is lost at densify). Declared
+    // *before* registerImages: the interim BA now self-calibrates f,k1 mid-registration
+    // (D3), so runBundleAdjust's fold reads this during the registration call — leaving
+    // it below would put it in the temporal dead zone ("Cannot access … before init").
+    const selfCalK1BySensor = new Map()
+
     // ── Incremental registration ───────────────────────────────────────────
     // Grow the sparse model one camera at a time — next-best-view ordering,
     // two-gate PnP, track extension/triangulation, interleaved BA. Extracted to
@@ -611,7 +646,7 @@ export async function reconstruct(input, hooks = {}) {
       imgs, donePairs, Kmap, cfg,
       cameras, viewIndex, registeredUuids,
       getPoints3d: () => points3d,
-      addView, rebuildViewIndex, foldOneEndpointMatches,
+      addView, rebuildViewIndex, foldOneEndpointMatches, mergeTracks,
       runBundleAdjust, filterTracks, modelReprojStats, imageByUuid, numStats,
       log, onProgress,
     })
@@ -622,12 +657,6 @@ export async function reconstruct(input, hooks = {}) {
     // ── Bundle adjustment + track filtering (Phase 2 + 3) ────────────────────
     // (BA settings + the sensor-group map are hoisted above the registration loop
     // so R3's interleaved solves can reuse them.)
-
-    // Accumulated self-calibrated radial k1 per sensor id (D2). Each self-cal BA
-    // pass folds its k1 into the keypoints (D1) and adds it here; the run exports
-    // the total so dense can undistort its rasters with the same calibration the
-    // sparse cloud was built on (otherwise the folded distortion is lost at densify).
-    const selfCalK1BySensor = new Map()
 
     // Run one global bundle adjustment, apply it (guarded: never commit a result
     // that worsens the cost), and log RMS / convergence trace. Reused for the interim
@@ -733,36 +762,59 @@ export async function reconstruct(input, hooks = {}) {
       // with the same {k1}, so the fold is exact to first order; the next self-cal
       // pass then estimates only the tiny residual on the already-folded keypoints.
       if (refineMode === 'f,k1' && result.intrinsics) {
-        let foldedImgs = 0, foldedShift = 0, foldedN = 0
-        const passSeen = new Set() // accumulate each sensor's k1 once per pass
+        // Collect the refined intrinsics per sensor group. BA shares one focal + k1
+        // across a group, so any registered camera in it carries the group's values;
+        // `rk` (fx/fy/cx/cy) drives both the keypoint undistort and the Kmap update.
+        const groupCal = new Map() // sensorInt → { rk, k1 }
         uuidList.forEach((uuid, ci) => {
           const cam = cameras.get(uuid)
           if (cam?.K) cam.K = { ...cam.K, k1: 0 } // keypoints will carry the distortion
+          const g = sensorOfCam[ci]
+          if (g < 0 || groupCal.has(g)) return
           const rk = result.intrinsics[ci]
-          const k1 = rk?.k1 || 0
-          if (!k1) return
-          const img = imageByUuid(uuid)
-          if (!img?.keypoints?.length) return
-          img.keypoints = img.keypoints.map((kp) => {
-            const u = undistortPixel(kp.x, kp.y, rk, { k1 })
-            foldedShift += Math.hypot(u.x - kp.x, u.y - kp.y); foldedN++
-            return { ...kp, x: u.x, y: u.y }
-          })
-          foldedImgs++
-          // D2: record the calibrated k1 per sensor (once per pass — all cameras in a
-          // group share it) so dense reproduces the fold. k1 is a normalised-coord
-          // coefficient and dense's camera K is this same refined K, so the accumulated
-          // value applies directly there; passes compose ≈ additively (small residuals).
-          const sid = img.sensorId ?? null
-          if (sid != null && !passSeen.has(sid)) {
-            passSeen.add(sid)
-            selfCalK1BySensor.set(sid, (selfCalK1BySensor.get(sid) || 0) + k1)
-          }
+          if (rk?.k1) groupCal.set(g, { rk, k1: rk.k1 })
         })
-        if (foldedImgs > 0) {
-          log(`Reconstruction: ${label} folded self-calibrated k1 into ${foldedImgs} image(s)' keypoints `
-            + `(mean shift ${(foldedShift / Math.max(1, foldedN)).toFixed(2)}px; model stays pinhole)`,
-            'info', 'Reconstruction')
+        if (groupCal.size) {
+          // Fold the calibrated k1 into EVERY image on a solved sensor group — not
+          // just the registered ones. When this runs *during* registration (interim
+          // BA / rescue), the next candidate to be resected must already have
+          // undistorted keypoints and a pinhole Kmap, or its PnP re-applies the
+          // now-removed distortion and fails the gate — the exact failure this fix
+          // targets. Post-registration the unregistered images are inert, so folding
+          // them is harmless. Kmap is the source of truth every subsequent PnP /
+          // triangulation reads, so it gets the refined focal + k1=0 too (leaving it
+          // stale would keep the EXIF focal and re-apply the removed distortion).
+          let foldedImgs = 0, foldedShift = 0, foldedN = 0
+          const passSeen = new Set() // accumulate each sensor's k1 once per pass
+          for (const img of imgs) {
+            const g = sensorIntByUuid.get(img.uuid) ?? -1
+            const cal = groupCal.get(g)
+            if (!cal || !img.keypoints?.length) continue
+            const { rk, k1 } = cal
+            img.keypoints = img.keypoints.map((kp) => {
+              const u = undistortPixel(kp.x, kp.y, rk, { k1 })
+              foldedShift += Math.hypot(u.x - kp.x, u.y - kp.y); foldedN++
+              return { ...kp, x: u.x, y: u.y }
+            })
+            const k = Kmap.get(img.uuid)
+            if (k) Kmap.set(img.uuid,
+              { ...k, fx: rk.fx, fy: rk.fy, cx: rk.cx, cy: rk.cy, k1: 0, k2: 0, k3: 0, p1: 0, p2: 0 })
+            foldedImgs++
+            // D2: record the calibrated k1 per sensor (once per pass — all cameras in a
+            // group share it) so dense reproduces the fold. k1 is a normalised-coord
+            // coefficient and dense's camera K is this same refined K, so the accumulated
+            // value applies directly there; passes compose ≈ additively (small residuals).
+            const sid = img.sensorId ?? null
+            if (sid != null && !passSeen.has(sid)) {
+              passSeen.add(sid)
+              selfCalK1BySensor.set(sid, (selfCalK1BySensor.get(sid) || 0) + k1)
+            }
+          }
+          if (foldedImgs > 0) {
+            log(`Reconstruction: ${label} folded self-calibrated k1 into ${foldedImgs} image(s)' keypoints `
+              + `(mean shift ${(foldedShift / Math.max(1, foldedN)).toFixed(2)}px; model stays pinhole)`,
+              'info', 'Reconstruction')
+          }
         }
       }
 

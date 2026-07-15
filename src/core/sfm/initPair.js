@@ -150,14 +150,34 @@ export async function selectInitPair(
     parallaxDeg: v.angle,
   }))
 
-  // Among candidates clearing the parallax floor, take the lowest-reprojection
-  // seed. If none clear it, fall back to the widest baseline available.
+  // Among candidates clearing the parallax floor, pick the best-*conditioned* seed —
+  // NOT simply the lowest init reprojection. Reprojection alone biases hard toward
+  // near-zero-parallax pairs: a two-view fit trivially explains a tiny baseline (points
+  // collapse along the epipolar geometry, reproj ~1px) yet those points are depth-
+  // uncertain and stall registration — the 2026-07 building seed picked 2.57°/2.26px over
+  // 9.8°/100%-cheirality pairs, seeding a model that only reached 17/50 cameras. Score
+  // each seed by the count of points that survived cheirality (pose correctness × scene
+  // coverage) weighted by a parallax-health factor that saturates at initAngleTargetDeg
+  // (a wider baseline stops helping past the sweet spot, and grazing >4× baselines — low
+  // overlap — are mildly discounted), divided by a gentle reprojection penalty. Reprojection
+  // is a weak signal here (it is measured before any distortion self-cal), so it only
+  // breaks ties / rejects the wrong-pose high-reproj seeds cheirality misses; it never
+  // dominates. If none clear the floor, fall back to the widest baseline available.
+  const { initAngleTargetDeg = 8 } = settings
+  const parallaxHealth = (a) => {
+    if (a <= minInitAngleDeg) return 0
+    if (a < initAngleTargetDeg) return (a - minInitAngleDeg) / (initAngleTargetDeg - minInitAngleDeg)
+    const wide = initAngleTargetDeg * 4 // grazing baselines: overlap decays, so does benefit
+    return a <= wide ? 1 : Math.max(0.4, wide / a)
+  }
+  const seedScore = (v) => v.cheiralKept * parallaxHealth(v.angle) / (1 + v.reproj.median / 4)
   const adequate = viable.filter((v) => v.angle >= minInitAngleDeg)
   let best = null
   if (adequate.length) {
-    best = adequate.reduce((a, b) => (b.reproj.median < a.reproj.median ? b : a))
+    best = adequate.reduce((a, b) => (seedScore(b) > seedScore(a) ? b : a))
     log(`Reconstruction: selected seed ${best.nameA} ↔ ${best.nameB} of ${adequate.length} `
-      + `pair(s) over ${minInitAngleDeg}° parallax (lowest init reproj, median ${best.reproj.median.toFixed(2)}px)`,
+      + `pair(s) over ${minInitAngleDeg}° parallax (best-conditioned: ${best.cheiralKept} pts, `
+      + `${best.angle.toFixed(2)}° parallax, init reproj median ${best.reproj.median.toFixed(2)}px)`,
       'info', 'Reconstruction')
   } else if (viable.length) {
     best = viable.reduce((a, b) => (b.angle > a.angle ? b : a))
