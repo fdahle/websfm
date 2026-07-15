@@ -71,3 +71,21 @@ body {
   background: var(--accent);
   opacity: 0.5;
 }
+
+/* Shared button styles (WS5). Hoisted out of the ~16 modals that each redefined them
+   identically; the new modals/ui/ framework relies on these globals, and existing
+   modals keep their scoped copies until migrated. */
+.btn {
+  background: none;
+  border: 1px solid var(--panel-border);
+  border-radius: 5px;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  padding: 5px 14px;
+  cursor: pointer;
+}
+.btn:hover { background: var(--hover-bg); }
+.btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn-primary:hover { opacity: 0.88; }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
