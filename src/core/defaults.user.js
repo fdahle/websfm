@@ -64,6 +64,16 @@ export const RECONSTRUCT_DEFAULTS = {
   refineIntrinsics: 'auto',
 }
 
+// Quality presets (WS5): per-modal deltas OVER the defaults above, so `medium` ≡ the
+// defaults (empty delta) and the single-source-of-truth contract is preserved. A modal's
+// PresetSelector applies `{ ...DEFAULTS, ...PRESET[id] }`; editing any field afterwards
+// flips the selector to 'custom'. Values are UI units (same as the defaults they patch).
+export const RECONSTRUCT_PRESETS = {
+  low:    { baIterations: 15, reprjThreshold: 6.0 }, // fast: fewer BA iters, looser gate
+  medium: {},                                        // = RECONSTRUCT_DEFAULTS
+  high:   { baIterations: 60, reprjThreshold: 3.0 }, // thorough: more iters, tighter gate
+}
+
 // Dense — Stage A depth maps (PatchMatch MVS). Mirrored by DepthMapsModal.vue.
 // NOTE: values here are UI units; the modal's run() transforms some before dispatch
 // (filterRelTol is a %, ÷100 on run; maxDim/bestK null ⇒ store/worker auto-derive).
