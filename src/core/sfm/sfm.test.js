@@ -149,6 +149,73 @@ describe('reconstruct (incremental SfM, synthetic 3-view scene)', () => {
     }
   })
 
+  // WS1 — weak-pair registration bridge. A third camera whose only links to the model
+  // are WEAK pairs (valid F below the accept gate) must still register via PnP, but weak
+  // pairs must never seed initialization or triangulate fresh structure.
+  it('registers a camera linked to the model only through weak PnP bridges', async () => {
+    const rng = mulberry32(123)
+    const N = 60
+    const world = Array.from({ length: N }, () => [
+      (rng() - 0.5) * 4, (rng() - 0.5) * 3, 8 + rng() * 4,
+    ])
+    const centers = [[0, 0, 0], [2, 0, 0], [-2, 0, 0]]
+    const Rs = [rotY(0), rotY(0.15), rotY(-0.15)]
+    const ts = Rs.map((R, i) => mv(R, centers[i]).map((v) => -v))
+    const uuids = ['c0', 'c1', 'c2']
+    const images = uuids.map((uuid, ci) => ({
+      uuid, name: uuid, kpStatus: 'done', meta: META,
+      keypoints: world.map((X) => project(Rs[ci], ts[ci], X)),
+    }))
+    const matches = world.map((_, i) => [i, i])
+    // Only c0↔c1 is strong (seeds init + triangulates all structure). Both links to c2
+    // are marked weak, so c2 can register only by PnP against points triangulated from
+    // the strong pair.
+    const mk = (a, b, weak) => ({
+      idA: uuids[a], idB: uuids[b],
+      F: fundamental(Rs[a], ts[a], Rs[b], ts[b]),
+      matches, inlierCount: N, status: 'done', weak,
+    })
+    const pairs = [mk(0, 1, false), mk(0, 2, true), mk(1, 2, true)]
+
+    const out = await reconstruct(
+      { images, pairs, settings: { baIterations: 0 } },
+      { onLog: () => {} },
+    )
+    expect(out.status).toBe('done')
+    // All three register: c0/c1 from the strong seed, c2 via the weak PnP bridges.
+    expect(new Set(out.cameras.map((c) => c.uuid))).toEqual(new Set(uuids))
+  })
+
+  it('cannot seed initialization from weak pairs alone', async () => {
+    const rng = mulberry32(321)
+    const N = 60
+    const world = Array.from({ length: N }, () => [
+      (rng() - 0.5) * 4, (rng() - 0.5) * 3, 8 + rng() * 4,
+    ])
+    const centers = [[0, 0, 0], [2, 0, 0], [-2, 0, 0]]
+    const Rs = [rotY(0), rotY(0.15), rotY(-0.15)]
+    const ts = Rs.map((R, i) => mv(R, centers[i]).map((v) => -v))
+    const uuids = ['c0', 'c1', 'c2']
+    const images = uuids.map((uuid, ci) => ({
+      uuid, name: uuid, kpStatus: 'done', meta: META,
+      keypoints: world.map((X) => project(Rs[ci], ts[ci], X)),
+    }))
+    const matches = world.map((_, i) => [i, i])
+    // Every pair weak → no strong pair to seed init. The reconstruction can't bootstrap.
+    const pairs = []
+    for (let a = 0; a < 3; a++) for (let b = a + 1; b < 3; b++) {
+      pairs.push({
+        idA: uuids[a], idB: uuids[b],
+        F: fundamental(Rs[a], ts[a], Rs[b], ts[b]),
+        matches, inlierCount: N, status: 'done', weak: true,
+      })
+    }
+    const out = await reconstruct({ images, pairs, settings: { baIterations: 0 } }, { onLog: () => {} })
+    // No strong pair ⇒ init returns 'idle', no cameras committed.
+    expect(out.status).toBe('idle')
+    expect(out.cameras).toHaveLength(0)
+  })
+
   it('runs LM bundle adjustment end-to-end on a noisy scene', async () => {
     const rng = mulberry32(7)
     const N = 60

@@ -76,6 +76,13 @@ export const MATCH_TUNING = {
   hfDegenerateRatio: 0.8,  // homography-vs-fundamental ratio flagging a degenerate fit
   minInlierUniqueFrac: 0.5, // reject a pair whose inliers collapse to few unique locations
   minInlierSpreadPx: 8,    // …or into a pinhead region (epipole degeneracy), in px
+  // ── Decoupled match-acceptance floors (WS1) ──
+  // `minMatches` (defaults.user.js, user-facing) is the ACCEPT floor + the H-skip floor.
+  // These two are the other two gates it used to conflate, split out so raising minMatches
+  // (e.g. to 500) can never widen the pre-verification kill zone or sever the match graph:
+  rawSkipFloor: 15,        // skip verification below this many RAW putatives (clamped to ≤ minMatches)
+  weakMinInliers: 15,      // valid-F pairs with ≥ this many inliers but below the accept gate → WEAK
+                           // (kept for PnP registration only; never seed init or triangulate)
   // ── Tiled guided matching (core/features/guidedTiles.js, gated by lgTiled) ──
   lgCoarseKeypoints: 1024,   // per-image cap for the coarse pass that fits the guide H
   // The coarse pass doubles as the LightGlue pair GATE (the brute-force subset gate

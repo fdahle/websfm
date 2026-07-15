@@ -264,7 +264,8 @@ export async function deleteDescriptors(projectId, uuid) {
 }
 
 // ── Matches ───────────────────────────────────────────────────────────────────
-// JSON: { idA, idB, rawCount, inlierCount, F, matches: [[ia,ib],...] }
+// JSON: { idA, idB, rawCount, inlierCount, F, matches: [[ia,ib],...], disabled, weak }
+//   weak: valid-F pair below the accept gate — kept as a PnP registration bridge only.
 // pairId = sorted([uuidA, uuidB]).join('--')
 
 export async function saveMatches(projectId, pairId, data) {

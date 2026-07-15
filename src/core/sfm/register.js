@@ -36,6 +36,12 @@ export async function registerImages(ctx) {
     runBundleAdjust, filterTracks, modelReprojStats, imageByUuid, numStats,
     log, onProgress,
   } = ctx
+  // WS1 — correspondence-pair superset. `corrPairs` = strong donePairs + weak PnP
+  // bridges; it drives 2D-3D correspondence collection and connectivity scoring (a weak
+  // pair is a legitimate link for resecting a camera). Triangulation and retriangulation
+  // still read `donePairs` only, so weak pairs never seed fresh structure. Defaults to
+  // donePairs when the caller doesn't split (older tests), so behaviour is unchanged there.
+  const corrPairs = ctx.corrPairs ?? donePairs
 
   // ── Incremental registration ───────────────────────────────────────────
   // R2: the PnP inlier gate is now *fixed* (reprjThreshold, capped at a small
@@ -95,7 +101,7 @@ export async function registerImages(ctx) {
   // heuristic — used only to break ties when the model has no points yet).
   function countMatchesToRegistered(uuid) {
     let count = 0
-    for (const e of donePairs) {
+    for (const e of corrPairs) {
       const other = e.idA === uuid ? e.idB : e.idB === uuid ? e.idA : null
       if (other && registeredUuids.has(other)) count += e.inlierCount
     }
@@ -150,7 +156,9 @@ export async function registerImages(ctx) {
     const idxToPt = new Map()    // newIdx → pt (first seen)
     const badPts = new Set()     // pts reached with ≥2 distinct newIdx (many→one)
     const badIdx = new Set()     // newIdx reached from ≥2 distinct pts (one→many)
-    for (const entry of donePairs) {
+    // corrPairs (strong + weak): a weak bridge can supply the 2D-3D links that resect a
+    // camera even though it never triangulated the points it links to.
+    for (const entry of corrPairs) {
       let regUuid = null
       if (entry.idA === img.uuid && registeredUuids.has(entry.idB)) regUuid = entry.idB
       else if (entry.idB === img.uuid && registeredUuids.has(entry.idA)) regUuid = entry.idA
@@ -485,15 +493,18 @@ export async function registerImages(ctx) {
   if (unregistered.length) {
     log(`Reconstruction: ${unregistered.length} image(s) never registered:`, 'warn', 'Reconstruction')
     for (const img of unregistered) {
-      let regLinks = 0, regInliers = 0, unregLinks = 0
-      for (const e of donePairs) {
+      let regLinks = 0, regInliers = 0, unregLinks = 0, weakRegLinks = 0
+      for (const e of corrPairs) {
         const other = e.idA === img.uuid ? e.idB : e.idB === img.uuid ? e.idA : null
         if (!other || !(e.inlierCount > 0)) continue
-        if (registeredUuids.has(other)) { regLinks++; regInliers += e.inlierCount }
+        const toReg = registeredUuids.has(other)
+        if (e.weak) { if (toReg) weakRegLinks++; continue }
+        if (toReg) { regLinks++; regInliers += e.inlierCount }
         else unregLinks++
       }
       log(`Reconstruction:   • ${img.name} — ${deferReasons.get(img.uuid) ?? 'no link to the model'} `
-        + `[verified pairs: ${regLinks} to registered (${regInliers} inliers), ${unregLinks} to unregistered]`,
+        + `[verified pairs: ${regLinks} to registered (${regInliers} inliers), ${unregLinks} to unregistered`
+        + `${weakRegLinks ? `; ${weakRegLinks} weak bridge(s) to registered` : ''}]`,
         'warn', 'Reconstruction')
     }
   }
