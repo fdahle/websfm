@@ -14,8 +14,13 @@ import { fitSimilarity, applySimilarity } from '../core/products/georef.js'
 import { aerialUpRotation, rotateReconstruction } from '../core/products/projection.js'
 import { cameraCenter } from '../core/sfm/geometry.js'
 import { triangulateAllGcps } from '../core/sfm/gcpTriangulation.js'
+import { gcpGuidesForImage } from '../core/sfm/gcpGuides.js'
 import { qualityToMaxDim } from '../core/dense/mvs.js'
 import { projectDensifyPeakBytes, formatBytes, DEFAULT_BUDGET_BYTES } from '../core/dense/memBudget.js'
+import {
+  serializeDepthMap, deserializeDepthMap, depthPlanesMissing,
+  buildDepthIndex, isDepthIndexStale, depthMapBytes,
+} from '../core/dense/depthMapCodec.js'
 import { distortionOf } from '../core/sfm/distortion.js'
 import { parseColmapModel, parseColmapModelBin, readColmapModel, makeNameResolver, colmapToSparse } from '../core/io/colmapModel.js'
 import { registerProjectStore } from './projectStores.js'
@@ -53,13 +58,22 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
   const mainSparseId = ref(null)
   const reconStatus = ref('idle') // last run: 'idle' | 'running' | 'done' | 'error'
 
-  // Per-image depth maps from the dense Stage A (Build Depth Maps). Transient,
-  // recomputable cache keyed by image uuid — NOT persisted to OPFS (raw float
-  // planes are large; recompute from the sparse cloud instead). Stage B (densify)
-  // reads these. Each: { uuid, width, height, K, R, t, depth, cost, rgb }.
+  // Per-image depth maps from the dense Stage A (Build Depth Maps), keyed by image
+  // uuid. Each: { uuid, width, height, K, R, t, depth, cost, rgb, normals }.
   // shallowRef so the large typed-array planes (and the rest) stay PLAIN — a
   // reactive Proxy wrapper can't be structured-cloned to the densify worker.
+  //
+  // These ARE persisted (depthmaps/, see core/dense/depthMapCodec.js) — the one
+  // recomputable artifact expensive enough to earn disk (minutes/image), without
+  // which reopening a project forced a full Stage A re-run before densify/ortho.
+  // Persistence is LAZY on the way back in: `restore` reads only the tiny index
+  // into `depthMapsMeta`, and `ensureDepthMapsLoaded()` hydrates the planes on
+  // first use — eagerly pulling hundreds of MB into memory on every project open
+  // would undo the fusion memory budget for opens that never densify.
   const depthMaps = shallowRef(new Map())
+  // Restored index entries for planes still on disk but not yet hydrated. Empty
+  // once loaded (the maps themselves are then the source of truth).
+  const depthMapsMeta = shallowRef([])
 
   // Georeference: a fitted SfM→CRS similarity (scale + rotation + translation),
   // or null in the local frame. { sim:{scale,R,t}, crs, rms, count, method }.
@@ -274,6 +288,103 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
   async function persist() {
     if (!isPersisting()) return
     await opfs.saveReconstruction(projects.currentProjectId, serialize()).catch(() => {})
+  }
+
+  // How many depth maps this project has, hydrated or merely on disk. The ribbon /
+  // command guards for Densify + Ortho read this, so it must count the restored-but-
+  // not-yet-loaded ones too — otherwise reopening a project leaves both stages gated
+  // off despite the planes sitting in OPFS.
+  const depthMapCount = computed(() => depthMaps.value.size || depthMapsMeta.value.length)
+
+  // Write the depth planes + index. Stamped with the sparse cloud's identity so a
+  // later reconstruction re-run can be detected as invalidating (see the codec).
+  async function persistDepthMaps(maps, settings) {
+    if (!isPersisting() || !maps.length) return
+    const index = buildDepthIndex(maps, { sparseCloud: mainSparseCloud.value, settings })
+    const entries = maps.map((m) => ({ uuid: m.uuid, buffers: serializeDepthMap(m).buffers }))
+    try {
+      await opfs.saveDepthPlanes(projects.currentProjectId, index, entries)
+      log(`Dense: ${maps.length} depth map(s) saved (${formatBytes(depthMapBytes(index.maps))}) `
+        + `— reopening this project will not need a Stage A re-run`, 'info', 'Dense')
+    } catch (err) {
+      // Non-fatal: the maps are live in memory, this run still works.
+      log(`Dense: could not save depth maps — ${err?.message ?? err}. They will be lost on reload.`,
+        'warn', 'Dense')
+    }
+  }
+
+  // Hydrate the planes for a restored project on first use. Returns true when
+  // `depthMaps` holds usable maps. Cheap no-op once loaded (or when Stage A ran
+  // this session).
+  async function ensureDepthMapsLoaded() {
+    if (depthMaps.value.size) return true
+    const metas = depthMapsMeta.value
+    if (!metas.length) return false
+    const t0 = performance.now()
+    log(`Dense: loading ${metas.length} saved depth map(s) (${formatBytes(depthMapBytes(metas))})…`,
+      'info', 'Dense')
+    try {
+      const loaded = await opfs.loadDepthPlanes(projects.currentProjectId, metas)
+      const byUuid = new Map(loaded.map((e) => [e.uuid, e.buffers]))
+      const maps = new Map()
+      const gone = []      // image removed since — its planes went with it
+      const corrupt = []   // present but truncated / wrong size
+      for (const meta of metas) {
+        const buffers = byUuid.get(meta.uuid)
+        if (depthPlanesMissing(buffers)) { gone.push(meta.uuid); continue }
+        const m = deserializeDepthMap(meta, buffers)
+        if (m) maps.set(m.uuid, m)
+        else corrupt.push(meta.uuid)
+      }
+      if (corrupt.length) {
+        // Fusing a truncated plane yields a silently wrong cloud — refuse the set.
+        log(`Dense: ${corrupt.length} saved depth map(s) are corrupt — discarding the saved set; `
+          + `recompute depth maps before densifying`, 'error', 'Dense')
+        depthMapsMeta.value = []
+        await opfs.deleteDepthPlanes(projects.currentProjectId).catch(() => {})
+        return false
+      }
+      if (gone.length) {
+        // Fusion is happy with fewer maps, and a removed image *should* stop
+        // contributing — drop those entries and re-stamp the index.
+        log(`Dense: ${gone.length} saved depth map(s) dropped — their images are no longer in `
+          + `this project`, 'info', 'Dense')
+        await opfs.saveDepthIndex(projects.currentProjectId,
+          buildDepthIndex([...maps.values()], { sparseCloud: mainSparseCloud.value })).catch(() => {})
+      }
+      depthMaps.value = maps
+      depthMapsMeta.value = []
+      if (!maps.size) return false
+      log(`Dense: ${maps.size} depth map(s) restored in ${((performance.now() - t0) / 1000).toFixed(1)}s`,
+        'success', 'Dense')
+      return true
+    } catch (err) {
+      log(`Dense: could not load saved depth maps — ${err?.message ?? err}. Recompute them.`,
+        'error', 'Dense')
+      depthMapsMeta.value = []
+      return false
+    }
+  }
+
+  // Point `depthMapsMeta` at the saved index, unless it is stale against the current
+  // main sparse cloud — depth is in that cloud's frame, so a reconstruction re-run
+  // invalidates it. Returns true when usable saved maps are now advertised.
+  // `projectId` is explicit for the restore path (which is handed one), defaulting
+  // to the open project for the in-session callers.
+  async function loadDepthIndexIntoMeta(projectId = projects.currentProjectId) {
+    if (!isPersisting()) return false
+    const index = await opfs.loadDepthIndex(projectId).catch(() => null)
+    if (!index?.maps?.length) { depthMapsMeta.value = []; return false }
+    if (isDepthIndexStale(index, mainSparseCloud.value)) {
+      log(`Dense: discarding ${index.maps.length} saved depth map(s) — they belong to an older `
+        + `sparse reconstruction and no longer match the current model; recompute them`,
+        'warn', 'Dense')
+      depthMapsMeta.value = []
+      await opfs.deleteDepthPlanes(projectId).catch(() => {})
+      return false
+    }
+    depthMapsMeta.value = index.maps
+    return true
   }
 
   // Insert a sparse model. Two intents via `opts`:
@@ -564,12 +675,16 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
       )
 
       depthMaps.value = new Map(maps.map((m) => [m.uuid, m]))
+      depthMapsMeta.value = []   // the fresh maps supersede any restored index
       for (const m of maps) {
         const im = imgByUuid.get(m.uuid)
         if (im && m.displayDataUrl) imagesStore.updateDepth(im.id, m.displayDataUrl)
       }
       log(`Dense: ${maps.length} depth map(s) computed`, 'success', 'Dense')
       reconStatus.value = 'done'
+      // Persist before densify can transfer the buffers away. Writing does not
+      // detach them, so the live cache is untouched.
+      await persistDepthMaps(maps, settings)
     } catch (err) {
       log(`Depth-map error: ${err?.message ?? err}`, 'error', 'Dense')
       reconStatus.value = 'error'
@@ -578,6 +693,8 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
 
   // Dense Stage B — fuse the Stage A depth maps into a coloured dense cloud.
   async function densify(settings = {}, onProgress) {
+    // Hydrate a restored project's saved planes (no-op if Stage A ran this session).
+    await ensureDepthMapsLoaded()
     const maps = [...depthMaps.value.values()]
     if (!maps.length) {
       log('Dense: compute depth maps before building the dense cloud', 'warn', 'Dense')
@@ -647,11 +764,15 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
       await persist()
     } catch (err) {
       // The buffers were transferred out; if the worker failed before returning them
-      // they're detached (dead). Drop the depth-map cache so ortho / re-densify don't
-      // read empty buffers — the user must recompute depth maps. Truthful > silent.
+      // they're detached (dead). Drop the in-memory cache so ortho / re-densify don't
+      // read empty buffers. The planes are on disk now, so point the store back at the
+      // saved index: a retry rehydrates from OPFS instead of forcing a Stage A re-run.
       depthMaps.value = new Map()
-      log(`Densify error: ${err?.message ?? err}. Depth maps were released to the worker `
-        + `and must be recomputed before retrying.`, 'error', 'Dense')
+      const recovered = await loadDepthIndexIntoMeta()
+      log(`Densify error: ${err?.message ?? err}. Depth maps were released to the worker`
+        + (recovered
+          ? ' — they will be reloaded from disk on the next attempt.'
+          : ' and must be recomputed before retrying.'), 'error', 'Dense')
       reconStatus.value = 'error'
     }
   }
@@ -817,6 +938,16 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     })
   }
 
+  // Guided marking: for every enabled GCP not yet marked on `imageId`, where the
+  // current cloud's poses say it must lie in that image — a predicted pixel
+  // (≥2 other observations) or an epipolar line (exactly 1). Empty when the
+  // image isn't registered. Cheap read against already-fitted state, recomputed
+  // on demand like gcpAccuracyReport.
+  async function gcpGuides(imageId) {
+    if (imageId == null || !gcpsStore.gcps.length) return []
+    return gcpGuidesForImage(gcpsStore.gcps, imageId, sparseCameras.value, imagesById())
+  }
+
   // Build a DEM from the densest available cloud, in the requested frame
   // (settings.crs: 'local' | 'project'). A new DEM invalidates the old ortho.
   async function generateDem(settings = {}, onProgress) {
@@ -867,14 +998,22 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
   // depth planes, colour from their RGB planes). Needs a DEM + depth maps.
   async function generateOrtho(settings = {}, onProgress) {
     if (!dem.value) { log('Ortho: build a DEM first', 'warn', 'Products'); return }
-    const maps = [...depthMaps.value.values()]
+    // Hydrate a restored project's saved planes (no-op if they're already in memory).
+    await ensureDepthMapsLoaded()
+    let maps = [...depthMaps.value.values()]
     if (!maps.length) { log('Ortho: compute depth maps first', 'warn', 'Products'); return }
     // A failed densify transfers (and loses) the depth buffers; a detached typed
-    // array reports byteLength 0. Refuse rather than reproject empty planes.
+    // array reports byteLength 0. Reload them from disk if they were saved, and only
+    // refuse when nothing usable is left — never reproject empty planes.
     if (maps.some((m) => m.depth.byteLength === 0 || m.rgb.byteLength === 0)) {
       depthMaps.value = new Map()
-      log('Ortho: depth maps were released by a prior densify — recompute them first', 'warn', 'Products')
-      return
+      const recovered = await loadDepthIndexIntoMeta() && await ensureDepthMapsLoaded()
+      maps = [...depthMaps.value.values()]
+      if (!recovered || !maps.length) {
+        log('Ortho: depth maps were released by a prior densify — recompute them first',
+          'warn', 'Products')
+        return
+      }
     }
     reconStatus.value = 'running'
     try {
@@ -1055,6 +1194,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     mainSparseId.value = null
     reconStatus.value = 'idle'
     depthMaps.value = new Map()
+    depthMapsMeta.value = []
     dem.value = null
     ortho.value = null
     georef.value = null
@@ -1063,6 +1203,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     if (purge && isPersisting()) {
       opfs.deleteReconstruction(projects.currentProjectId).catch(() => {})
       opfs.deleteProducts(projects.currentProjectId).catch(() => {})
+      opfs.deleteDepthPlanes(projects.currentProjectId).catch(() => {})
     }
   }
 
@@ -1186,7 +1327,13 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     // an empty project and would otherwise no-op).
     clear()
     const data = await opfs.loadReconstruction(projectId)
-    if (!data) return
+    if (!data) {
+      // No sparse model, so any saved depth planes are orphans (they only exist in a
+      // sparse cloud's frame). Let the staleness check collect them rather than leak
+      // hundreds of MB of OPFS forever.
+      await loadDepthIndexIntoMeta(projectId)
+      return
+    }
 
     // New shape: { clouds: [...] }. Legacy shape: a single model
     // { cameras: [...], points: [...] } — wrap it as one sparse cloud.
@@ -1219,6 +1366,14 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
       const camTotal = clouds.value.reduce((n, c) => n + c.cameras.size, 0)
       log(`Reconstruction restored: ${clouds.value.length} cloud(s), ${camTotal} cameras`, 'success', 'Reconstruction')
     }
+
+    // Advertise saved depth maps without loading their planes — densify / ortho
+    // hydrate them on demand. Runs after ensureMainSparse() so the staleness check
+    // compares against the cloud the pipeline will actually consume.
+    if (await loadDepthIndexIntoMeta(projectId)) {
+      log(`Dense: ${depthMapsMeta.value.length} saved depth map(s) available `
+        + `(${formatBytes(depthMapBytes(depthMapsMeta.value))}, loaded on demand)`, 'success', 'Dense')
+    }
   }
 
   return {
@@ -1233,6 +1388,8 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     points3d,
     reconStatus,
     depthMaps,
+    depthMapsMeta,
+    depthMapCount,
     georef,
     summary,
     denseSummary,
@@ -1242,6 +1399,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     canGeoreferenceGcps,
     georeference,
     gcpAccuracyReport,
+    gcpGuides,
     generateDem,
     generateOrtho,
     generateMesh,

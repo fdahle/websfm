@@ -18,20 +18,9 @@ export function useTabs(imageById, showMap) {
     }
   })
 
-  // Sticky overlay toggles: remember the last state so a freshly opened image tab
-  // inherits it instead of resetting. Keypoints still gate on detection status.
-  const overlayPrefs = ref({ showKeypoints: true, showMask: false, showDepth: false, showGcps: false, showFiducials: true })
-
-  function rememberOverlayPrefs(tab) {
-    if (tab?.type !== 'image') return
-    overlayPrefs.value = {
-      showKeypoints: tab.showKeypoints,
-      showMask:      tab.showMask,
-      showDepth:     tab.showDepth,
-      showGcps:      tab.showGcps,
-      showFiducials: tab.showFiducials,
-    }
-  }
+  // Overlay + edit toggles are NOT per-tab — they live in useImageViewSettings as one
+  // global, localStorage-persisted preference the image view reads directly. A tab is
+  // just an image reference.
 
   const activeTab = computed(() => tabs.value.find((t) => t.id === activeTabId.value) || null)
 
@@ -61,12 +50,6 @@ export function useTabs(imageById, showMap) {
         title: imageName ?? img?.name ?? imageId,
         imageId,
         closable: true,
-        showKeypoints: img?.kpStatus === 'done' ? overlayPrefs.value.showKeypoints : false,
-        showMask: overlayPrefs.value.showMask,
-        showDepth: overlayPrefs.value.showDepth,
-        showGcps: overlayPrefs.value.showGcps,
-        showFiducials: overlayPrefs.value.showFiducials,
-        maskEdit: false,
       })
     }
     activeTabId.value = tabId
@@ -191,12 +174,6 @@ export function useTabs(imageById, showMap) {
     keepActiveValid(id)
   }
 
-  function onImageDetected(imageId) {
-    for (const tab of tabs.value) {
-      if (tab.imageId === imageId) tab.showKeypoints = true
-    }
-  }
-
   function resetToViewer() {
     tabs.value = tabs.value.filter((t) => !t.closable)
     activeTabId.value = 'viewer'
@@ -221,8 +198,6 @@ export function useTabs(imageById, showMap) {
     closeOtherTabs,
     closeTabsToLeft,
     closeTabsToRight,
-    onImageDetected,
     resetToViewer,
-    rememberOverlayPrefs,
   }
 }

@@ -217,9 +217,20 @@ function drawOverlay() {
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
 
 let resizeObserver = null
+let lastSize = null // { w, h } last non-zero panel size the observer fitted to
 
 onMounted(() => {
-  resizeObserver = new ResizeObserver(() => fitBoth())
+  // Only refit on a *real* viewport change — a v-show-hidden tab collapses to 0×0
+  // and springs back on reactivation, which must not reset the user's zoom/pan.
+  resizeObserver = new ResizeObserver(() => {
+    const el = panelsEl.value
+    if (!el) return
+    const w = el.clientWidth, h = el.clientHeight
+    if (!w || !h) return
+    if (lastSize && lastSize.w === w && lastSize.h === h) return
+    lastSize = { w, h }
+    fitBoth()
+  })
   if (panelsEl.value) resizeObserver.observe(panelsEl.value)
 })
 

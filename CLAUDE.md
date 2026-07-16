@@ -34,7 +34,9 @@ if the *method* changed, update METHODS.md.
   decoder that replaces the slow pure-JS geotiff.js decode at ingest (see the TIFF gotcha),
   likewise isolated from `reconstruction`.
 - **Persistence**: OPFS (Origin Private File System) via `src/utils/opfs.js`. Per-project
-  directory tree; everything recomputable is recomputed rather than stored.
+  directory tree; everything recomputable is recomputed rather than stored — the one
+  exception is **dense Stage A depth maps** (minutes/image to rebuild), persisted to
+  `depthmaps/` and loaded lazily; see `core/dense/depthMapCodec.js`.
 - **Build/test**: Vite, Vitest (`npm test`), `tsc --noEmit` (`npm run typecheck`),
   `npm run build:wasm` (needs `wasm-pack`).
 
@@ -58,7 +60,9 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
   `registerImages(ctx)` mutating the caller's model in place, `reconstruction.js` JS↔WASM
   marshalling, `geometry.js` shared pinhole-camera helpers — cameraCenter, project*,
   triangulationAngle, scaleK, rgbaToGray — `distortion.js`, `cameraEstimated.js`),
-  `core/dense/` (`mvs.js` dense MVS orchestrator, `planeCost.js`, `memBudget.js`),
+  `core/dense/` (`mvs.js` dense MVS orchestrator, `planeCost.js`, `memBudget.js`,
+  `depthMapCodec.js` — pure depth-map↔sidecar (de)serialization + index stamping/
+  staleness for the persisted Stage A output),
   `core/products/` (`dem.js`, `ortho.js`, `mesh.js` screened-Poisson mesh orchestrator
   — byte-buffer parse + nearest-voxel vertex-colour transfer, wasm solver injected,
   `projection.js`, `georef.js`, `exporters.js` — cloud/mesh/DEM/ortho writers incl.
@@ -107,7 +111,13 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
 - **`App.vue`** is layout + store wiring + the Ribbon command dispatch; self-contained
   concerns are extracted to **`composables/*`** (`useTabDrag`, `useSidebarResize`,
   `useImportRouting` = dropped/picked-file funnel, `useExports` = camera-params/product
-  export, `useModalEscape` = Escape-closes-top-modal, plus `usePipeline`/`useTabs`/etc.).
+  export, `useModalEscape` = Escape-closes-top-modal, `useImageViewSettings` = the image
+  view's overlay/edit toggles, plus `usePipeline`/`useTabs`/etc.). Those image-view
+  toggles (keypoints/mask/depth/GCPs/fiducials + mask-edit/gcp-edit) are **global, not
+  per-tab**: one localStorage-persisted ref every image tab renders from, so switching
+  images never changes them and a tab stays a bare image reference. The single per-image
+  gate is keypoints (drawable only once `kpStatus === 'done'`), applied at render rather
+  than stored on the pref.
   **`Sidebar.vue`** is a shell (drop-zone + section open/close + re-emit); each
   collapsible section is a component under **`components/layout/sidebar/`**
   (`ImagesSection`/`SensorsSection`/`MatchesSection`/`GcpsSection`/`CloudsSection`/
@@ -149,7 +159,8 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
   don't count as `verified` in `matchStats`. Toggled from `MatchListModal` (list
   row / preview / graph-edge double-click; `MatchGraph.vue` is the graph view).
 - `useReconstructionStore` — clouds (sparse + dense), depth-map cache (`shallowRef`,
-  not persisted), georef fit, run summaries; runs reconstruct / computeDepthMaps /
+  persisted + lazily loaded — see the depth-map persistence note under Pipelines ▸ 4),
+  georef fit, run summaries; runs reconstruct / computeDepthMaps /
   densify / generateDem / generateOrtho. Multiple `kind:'sparse'` clouds can coexist
   (a computed reconstruction alongside a COLMAP import); `selectedCloudId` is *viewer
   focus*, but downstream stages (dense / DEM / ortho / export / the sensor table)
@@ -319,6 +330,25 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
    `iterations` (and `step` for the fusion sweep). **Quality** is gated by correct
    intrinsics — `resolveK` falling back to "default FOV" (fx=image width) directly
    distorts depth.
+   - **Depth maps persist** (`depthmaps/`, the sole exception to "recompute rather
+     than store" — Stage A is minutes/image). Pure codec: `core/dense/depthMapCodec.js`;
+     I/O: `utils/opfs.js`; wiring: `useReconstructionStore`. A tiny `index.json`
+     (dims/K/R/t per map + the stamp) plus per-image binary sidecars
+     `{uuid}.{depth|cost|nrm|rgb}.bin`. **Load is lazy and that's load-bearing**:
+     `restore` reads only the index into `depthMapsMeta`, and `ensureDepthMapsLoaded()`
+     (called by densify + ortho) hydrates the planes on first use — eagerly loading
+     hundreds of MB on every project open would undo the fusion memory budget. So
+     **`depthMapCount` is a store getter over `depthMaps.size || depthMapsMeta.length`**;
+     anything gating on "are there depth maps" must use it, never `depthMaps.size`
+     (which is 0 on a fresh reopen). **Staleness**: depth lives in the main sparse
+     cloud's frame, so the index stamps that cloud's `id` **and `createdAt`** —
+     `upsertSparseCloud` carries the id forward on a rebuild but refreshes `createdAt`,
+     so `createdAt` is the part that actually detects a re-run; a mismatch (or an
+     unstamped index) discards the set. A map whose sidecars are **missing** (its image
+     was removed) drops alone; a **corrupt** one (truncated / wrong size for the
+     recorded dims) discards the whole set — a partial plane fuses into a silently
+     wrong cloud. Writing does not detach buffers, so persisting after Stage A leaves
+     the live cache usable for densify's transfer.
    - **Two depth-map backends**: WASM (CPU, default) and WebGPU (opt-in "Use GPU
      (experimental)" in the modal; ~0.1s/img vs minutes on CPU). `depthMapForImage`
      takes the kernel as an injected arg; the worker swaps in `computeDepthMapGPU`
@@ -411,6 +441,24 @@ panel per registered observation, each cropped + zoomed (shared zoom) to centre
 the marked pixel under a crosshair, with the observation's reprojection error and
 a jump-to-image link. Read-only — marking still happens in the full image view.
 Removing a GCP closes its inspector tab (`removeGcpAndCloseTab` in App.vue).
+
+**Guided marking** (`core/sfm/gcpGuides.js`, pure): once cameras are posed, a GCP
+already marked elsewhere is constrained in every other registered image — to an
+**epipolar line** (1 other observation; `fundamentalFromCams` builds F from the two
+world→cam poses) or to a **single predicted pixel** (≥2, triangulate + reproject).
+`gcpGuidesForImage` returns guides only for GCPs *not yet* marked on the target
+image (a marked one already shows its reprojection error); `useReconstructionStore.
+gcpGuides(imageId)` is the store entry point, App.vue keeps a `activeImageGcpGuides`
+ref refreshed on tab/marks/cloud change, and `ViewerImage.vue` draws them dashed
+green under the real markers (lines only for the *selected* GCP — all of them at
+once is a spider web). Guides are **advisory, never inputs to the fit**, and share
+`gcpAccuracyReport`'s raw-pixel/pinhole frame (see METHODS.md §6.4) — consistent
+with the reprojection numbers, approximate on a heavily distorted lens.
+**Never add snap-to-guide.** A guide comes *from* the reconstruction, so snapping a
+mark to it feeds the model's estimate back in as ground truth; GCPs must stay
+independent evidence that can correct the model, and the guide-vs-click gap is the
+diagnostic — it matters most exactly when the reconstruction is wrong (METHODS.md
+§6.4).
 
 `core/sfm/gcpTriangulation.js` 2-view-DLT-triangulates a GCP's registered-image
 observations into the current SfM frame; `core/products/georef.js`'s Horn

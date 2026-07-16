@@ -472,6 +472,54 @@ Surveyed ground coords `x/y/z` with per-axis accuracy, pixel `observations`
 is **no control/check split** — every enabled GCP is used. A GCP with <2 marks is
 unusable (flagged).
 
+### 6.4 Guided marking (`core/sfm/gcpGuides.js`)
+
+Marking the same GCP across dozens of images is the tedious part of georeferencing,
+and once the cameras are posed it is also largely *redundant*: the existing
+observations already constrain where the next mark can be. We exploit **epipolar
+geometry** to aim the user (the same idea as Metashape's guided marker placement).
+
+For a target image with pose `(R_t, t_t)` and a GCP marked on other **registered**
+images:
+
+- **One other observation** → the mark is confined to that observation's
+  **epipolar line**. From the two world→camera poses, the relative pose is
+  `R_rel = R_B·R_Aᵀ`, `t_rel = t_B − R_rel·t_A`; then the essential and fundamental
+  matrices are `E = [t_rel]ₓ·R_rel` and `F = K_B⁻ᵀ·E·K_A⁻¹`, and the line in the
+  target is `l = F·x_A` (corresponding pixels satisfy `x_Bᵀ·F·x_A = 0`). We
+  normalise `l` so `a²+b²=1`, making `|a·u+b·v+c|` a true pixel distance. A
+  pure-rotation (zero-baseline) pair has no epipolar constraint and is rejected.
+  With several single-view candidates the **widest-baseline** source is used — the
+  most stable line and the least foreshortened.
+- **Two or more other observations** → the GCP triangulates (2-view DLT,
+  `gcpTriangulation.js`) and reprojects to a **single predicted pixel** —
+  a 0-D constraint. Cheirality is enforced: a point behind the target camera
+  falls back to the epipolar line rather than projecting to a meaningless pixel.
+
+Guides are **advisory only** — nothing about them enters the fit. They are drawn
+for GCPs not yet marked on the image; an already-marked GCP shows its measured
+reprojection error instead.
+
+**The guide is never applied to the mark** (no snap-to-guide — a deliberate
+design decision, not a missing feature). A guide is *derived from* the current
+reconstruction, so snapping a mark onto it would feed the model's own estimate
+back in as ground truth. GCPs exist to be **independent** evidence that can
+correct the reconstruction — anchored BA (§6.2) and the similarity fit (§6.1)
+both assume the marks are measurements of the *world*, not of the model. A
+snapped mark could only ever confirm the model, and would erase the
+guide-vs-mark disagreement precisely when the reconstruction is wrong, which is
+when that disagreement is the most valuable signal the user has. The gap between
+the guide and where the user actually clicks **is** the diagnostic.
+
+**Frame caveat**: like `gcpAccuracyReport`, guides are computed in the **raw
+observation pixel frame** against the pinhole model — no calibrated or
+self-cal-composed distortion is re-applied, and film scans are not mapped through
+`canonicalToScan`. This keeps a guide consistent with the reprojection numbers
+shown beside each marker, but on a strongly distorted lens the true epipolar
+"line" is a slight **curve**, so the guide is a first-order approximation. The
+exact form would sample the pinhole line and push each sample through the composed
+distortion into a polyline.
+
 ---
 
 ## 7. Dense multi-view stereo

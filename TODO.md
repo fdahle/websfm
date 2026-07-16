@@ -176,6 +176,20 @@ confirmation owed since 2026-07-07).
 
 ## Next
 
+### GG — Guided GCP marking: follow-ups (shipped + verified 2026-07-16, see HANDOVER)
+Guides themselves are in (`core/sfm/gcpGuides.js`), rendering confirmed in-browser.
+**Snap-to-guide is rejected, not deferred** — see METHODS.md §6.4 / CLAUDE.md: a
+guide is derived from the reconstruction, so snapping would feed the model back in
+as ground truth and erase the guide-vs-mark disagreement exactly when the
+reconstruction is wrong. The mark stays the user's. Remaining, both optional:
+- **Distortion-exact guides.** The guide uses the raw-pixel/pinhole frame
+  (METHODS.md §6.4), so on a strongly distorted lens the true epipolar line is a
+  slight curve. Sample the pinhole line, push each sample through the composed
+  self-cal distortion (+ `canonicalToScan` for film) → draw a polyline. Only worth
+  it if the browser pass shows a visible offset on the wide-angle building set.
+- **Guides in the GCP inspector tab** (`ViewerGcp.vue`) — it already crops to each
+  observation; a predicted-vs-marked delta there would make a bad mark obvious.
+
 ### U — "It just works" usability track (audit 2026-07-12)
 The real gap vs Metashape/COLMAP is **usability**, not algorithms: there is no
 "just works" path — detection `maxDim` is a flat 1200 whether the input is a 2k
@@ -401,18 +415,31 @@ browser check (Safari + Chrome).
 - **Rotation-cycle filter** on B1: drops 4289↔4324 (window-swap) without
   culling genuine weak-baseline bridges? Watch the `rotation-cycle filter
   dropped …` warns; loosen `cycleErrorDeg`/`cycleMinSupport` if it over-culls.
+- **Depth-map persistence** (shipped 2026-07-16, browser-only paths unproven):
+  Stage A → reopen → Densify loads from disk and fuses to the same cloud;
+  Ortho likewise; a sparse re-run discards the saved set (stale stamp); removing
+  one image drops only its map; measure the real bytes/image + reload seconds and
+  record them as a baseline (the ~50 MB/image figure is projected, not measured).
 (The tiling/SuperPoint/LightGlue/TIFF browser runs are under W0/SP5.)
 
 ### P3 — OPFS quantize + spill of depth maps
-Quantize Stage-A output (depth → Uint16 + per-map min/max, cost → Uint8), write
-per image to OPFS (`depthmaps/<uuid>.bin` + JSON meta) as each completes;
-densify/ortho read + dequantize **in the worker** (core stays pure); store
-cache holds metadata instead of float planes; raster cache goes gray-only
-(+rgb for ref); GPU state packs f16 via `pack2x16float` with chunked readback.
-Bonus: depth maps survive reload — update the "not persisted" comments in
-`useReconstructionStore`. Gotchas: transfer lists detach buffers shared with
-ortho; `layout:'auto'` bind groups + the 64-byte Params uniform in
-`depthMapGpu.js` move together. Validate in Safari before calling done.
+**Persistence shipped 2026-07-16** (unquantized float planes + lazy load; see
+HANDOVER). What remains here is the *memory/size* half:
+- **Quantize** the planes (depth → Uint16 + per-map min/max, cost → Uint8,
+  normals → 3×Int8 — normals are >half the bytes and Poisson won't notice ~0.5°).
+  Roughly 4× off the ~50 MB/image at medium quality. Version the sidecars
+  (`index.json` has `version: 1`) and keep reading v1 float planes.
+- **Spill per image as each completes**, rather than one write after Stage A, so
+  peak memory is one map rather than all of them; densify/ortho then read +
+  dequantize **in the worker** (core stays pure) and the store cache holds
+  metadata instead of float planes — `depthMapsMeta` already models exactly that
+  state, so the lazy-load path is the seam to build on.
+- Raster cache goes gray-only (+rgb for ref); GPU state packs f16 via
+  `pack2x16float` with chunked readback.
+Gotchas: transfer lists detach buffers shared with ortho (the densify error path
+now recovers by reloading from disk — keep that working); `layout:'auto'` bind
+groups + the 64-byte Params uniform in `depthMapGpu.js` move together. Validate
+in Safari before calling done.
 
 ---
 

@@ -105,8 +105,20 @@ const fmt = (v, d = 3) => (v == null ? '—' : (Math.abs(v) >= 1000 ? v.toFixed(
 
 watch(() => props.product, () => { hover.value = null; requestAnimationFrame(fit) })
 
+let lastSize = null // { w, h } last non-zero container size the observer fitted to
+
 onMounted(() => {
-  resizeObserver = new ResizeObserver(() => fit())
+  // Only refit on a *real* viewport change — a v-show-hidden tab collapses to 0×0
+  // and springs back on reactivation, which must not reset the user's zoom/pan.
+  resizeObserver = new ResizeObserver(() => {
+    const c = container.value
+    if (!c) return
+    const w = c.clientWidth, h = c.clientHeight
+    if (!w || !h) return
+    if (lastSize && lastSize.w === w && lastSize.h === h) return
+    lastSize = { w, h }
+    fit()
+  })
   if (container.value) resizeObserver.observe(container.value)
   requestAnimationFrame(fit)
 })

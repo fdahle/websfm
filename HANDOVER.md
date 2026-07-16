@@ -79,6 +79,57 @@ fiducials; self-calibration (A2) + fiducials (F4) are the code-side support.
 
 ## Done log (most recent first)
 
+- **2026-07-16 · Guided GCP marking (epipolar guides in the image view)** — marking
+  a GCP across dozens of images was unassisted hunting, even though the posed
+  cameras already say where it must be. Now, for GCPs not yet marked on the open
+  image: ≥2 other observations ⇒ a ghost cross-hair at the triangulated-and-
+  reprojected pixel; exactly 1 ⇒ the epipolar line the mark must lie on (drawn for
+  the selected GCP only). Pure math + F-from-poses in `core/sfm/gcpGuides.js`
+  (`fundamentalFromCams`/`epipolarLine`/`clipLineToRect`/`closestPointOnLine`/
+  `gcpGuideForImage`/`gcpGuidesForImage`), 16 unit tests on a *rotated* 3-camera rig
+  (an identity-R rig hides transpose/convention bugs); store entry point
+  `useReconstructionStore.gcpGuides(imageId)`; `activeImageGcpGuides` + two watchers
+  in App.vue; dashed-green rendering in `ViewerImage.vue`. Method + the raw-pixel/
+  pinhole frame caveat in METHODS.md §6.4.
+  **No snap-to-guide, by design** (rejected, not deferred — METHODS.md §6.4): a
+  guide is derived from the reconstruction, so snapping a mark onto it would feed
+  the model's own estimate back in as ground truth. GCPs must stay independent
+  evidence that can *correct* the model; the guide-vs-click gap is the diagnostic,
+  and it matters most exactly when the reconstruction is wrong. The user's mark
+  stays the user's. (`closestPointOnLine` was written for snap and deleted with
+  it — don't reintroduce.)
+  Verified: `npm test` (599) + typecheck + `npm run build` green; **overlay
+  rendering confirmed in a browser by Felix** (the one part unit tests can't
+  reach).
+
+- **2026-07-16 · Depth maps persist across a project reopen (P3, persistence half)** —
+  Stage A output was the one expensive artifact that died on reload: only its
+  display PNG was saved, so `depthMaps` came back empty and Densify/Ortho were
+  gated off pending a full (minutes/image) re-run. Now persisted to `depthmaps/`
+  — tiny `index.json` + per-image binary sidecars `{uuid}.{depth|cost|nrm|rgb}.bin`,
+  mirroring the reconstruction cloud sidecars. Pure codec in
+  `core/dense/depthMapCodec.js` (serialize/deserialize + index stamping + size
+  math, unit-tested); I/O in `utils/opfs.js` (`saveDepthPlanes`/`loadDepthIndex`/
+  `loadDepthPlanes`/`saveDepthIndex`/`deleteDepthPlanes`); wiring in
+  `useReconstructionStore` (`persistDepthMaps` after Stage A,
+  `ensureDepthMapsLoaded` from densify/ortho, `loadDepthIndexIntoMeta` on restore).
+  **Load is lazy** — restore reads only the index into `depthMapsMeta`; the planes
+  (hundreds of MB) hydrate on first use, so opens that never densify don't pay.
+  `depthMapCount` moved to a store getter counting saved-but-unhydrated maps, or
+  the reopened project would show both stages gated despite the data being there.
+  Staleness: the index stamps the main sparse cloud's `id` + `createdAt`
+  (`upsertSparseCloud` carries the id forward on a rebuild but refreshes
+  `createdAt`, so `createdAt` is what detects a re-run) and a mismatch discards the
+  set; an unstamped index is treated as stale. A missing map (its image was
+  removed) drops alone and re-stamps the index; a *corrupt* one (truncated/wrong
+  size) discards the whole set rather than fusing a partial plane. The densify
+  error path now reloads from disk instead of demanding a Stage A re-run.
+  Types: `DepthMap`/`DepthMapMeta` in `core/types.ts`. `npm test` (583) +
+  `typecheck` green; **browser paths unproven — see TODO ▸ Owed runtime
+  validations** (incl. measuring real bytes/image; the ~50 MB/image at medium
+  quality is projected, not measured). Remaining P3 work: quantization + per-image
+  spill.
+
 - **2026-07-16 · LightGlue concurrency freeze fix + tiled guided matching (LG, plan `PLAN-lightglue-tiled-matching.md`)** —
   Part A: ORT sessions are not reentrant, so LightGlue runs are now serialized two
   ways — a module-scoped promise-chain mutex (`serialized` in
