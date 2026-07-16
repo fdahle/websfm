@@ -16,10 +16,20 @@ watch(memBudgetGb, (v) => {
   if (v > 0) localStorage.setItem(BUDGET_KEY, String(v))
 })
 
+// useGpu: opt into the experimental WebGPU backends (LightGlue matching + PatchMatch
+// depth maps). A property of *this browser/GPU*, not of a project or run — so it lives
+// here rather than duplicated as a per-modal checkbox. Both consumers fall back to CPU
+// automatically when the adapter can't run the model, so leaving it on is safe.
+const GPU_KEY = 'websfm.compute.useGpu'
+const useGpu = ref(localStorage.getItem(GPU_KEY) === 'true') // default off (experimental)
+
+watch(useGpu, (v) => localStorage.setItem(GPU_KEY, String(!!v)))
+
 export function useComputeSettings() {
   function setMemBudgetGb(v) {
     const n = Number(v)
     if (n > 0) memBudgetGb.value = n
   }
-  return { memBudgetGb, setMemBudgetGb, DEFAULT_BUDGET_GB }
+  function setUseGpu(v) { useGpu.value = !!v }
+  return { memBudgetGb, setMemBudgetGb, DEFAULT_BUDGET_GB, useGpu, setUseGpu }
 }
