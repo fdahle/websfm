@@ -109,16 +109,26 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
   (`ImagesSection`/`SensorsSection`/`MatchesSection`/`GcpsSection`/`CloudsSection`/
   `ProductsSection`), sharing `sidebar-sections.css` (via `<style scoped src>`) and
   `composables/useContextMenu.js` for the mutually-exclusive right-click menus.
-- **Shared modal framework** (`components/modals/ui/`): pipeline-stage modals build from
-  `ModalShell` (overlay/header/close/footer; preserves esc + click-backdrop close, so
-  `useModalEscape` is unchanged), `SettingsField`/`SettingsSection`/`AdvancedDisclosure`/
-  `SegmentedControl`/`WarnBox`/`PresetSelector`, all consuming a shared `modal.css` via
+- **Shared modal framework** (`components/modals/ui/`): every pipeline-stage modal builds
+  from `ModalShell` (overlay/header/close/footer; preserves esc + click-backdrop close, so
+  `useModalEscape` is unchanged), `SettingsField`/`SettingsGroup`/`AdvancedDisclosure`/
+  `SegmentedControl`/`WarnBox`/`PresetCards`, all consuming a shared `modal.css` via
   `<style scoped src>`. `.btn`/`.btn-primary` live in global `style.css`. **Gotcha**: a
   field control (`.field-input`/`.field-select`) is passed as *slot content* — compiled in
-  the parent modal's scope — so the migrated modal must import `ui/modal.css` in its own
+  the parent modal's scope — so the modal must import `ui/modal.css` in its own
   `<style scoped src>` for those classes to apply (SettingsField's scoped styles don't reach
-  slotted content). Presets are per-modal `*_PRESETS` deltas over the defaults (medium ≡
-  defaults). `ReconstructModal` is the migrated template; the rest migrate incrementally.
+  slotted content). **Layout pattern** (redesign): `PresetCards` is the hero (label+blurb
+  cards, one always active; deviation shows a "· modified · Reset" status, NOT a clickable
+  Custom chip) → `AdvancedDisclosure` (its initial open state is the persisted
+  `advancedSettingsExpanded` preference, `useUiSettings`, wired in Settings ▸ Display) →
+  fields grouped under named `SettingsGroup` headings. Hints stay one line; long prose goes
+  to the glossary (a `<GlossaryTerm>` in the label) or a per-selection hint, never an
+  overflowing `<option>`. Presets are per-modal `*_PRESETS` deltas over the defaults +
+  a `*_PRESET_META` card list (medium ≡ defaults); a modal with a first-class quality
+  field instead of deltas (`DepthMapsModal`'s `quality`) drives `PresetCards` off that
+  value directly (no Custom). `ReconstructModal` is the reference template. **GPU is not a
+  per-modal knob**: the experimental WebGPU opt-in lives in Settings ▸ Compute
+  (`useComputeSettings.useGpu`); MatchFeatures + DepthMaps inject it at `run()`.
 
 ## Stores (`src/stores/`)
 - **`projectStores.js`** — registry. Project-scoped stores register via

@@ -3,7 +3,7 @@
 // detector-row/detector-btn pattern. v-model binds the selected option id.
 //   options: [{ id, label }]
 defineProps({
-  modelValue: { type: [String, Number], default: null },
+  modelValue: { type: [String, Number, Boolean], default: null },
   options: { type: Array, required: true },
 })
 defineEmits(['update:modelValue'])

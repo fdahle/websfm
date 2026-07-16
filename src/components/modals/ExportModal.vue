@@ -1,11 +1,12 @@
 <script setup>
 import { ref, computed } from 'vue'
+import ModalShell from './ui/ModalShell.vue'
+import SettingsField from './ui/SettingsField.vue'
 import { EXPORT_DEFAULTS } from '../../core/defaults.user.js'
 
 // One reusable export dialog, parameterised by `kind`. It collects a format + a
 // few settings and emits them on run; App.vue maps the result to the right
-// exporter. Options marked `disabled` are placeholders for formats/settings not
-// wired up yet (kept visible so the surface is discoverable).
+// exporter.
 const props = defineProps({
   kind: { type: String, required: true },
   // A georef fit exists → the cloud export can transform into the project CRS.
@@ -74,7 +75,7 @@ const settings = ref({
   ...EXPORT_DEFAULTS,
 })
 
-// GeoTIFF compression is a placeholder (writer is uncompressed for now).
+// GeoTIFF compression selector shows only for the geotiff format.
 const isTiff = computed(() => settings.value.format === 'geotiff')
 
 function run() {
@@ -83,159 +84,91 @@ function run() {
 </script>
 
 <template>
-  <div class="overlay" @click.self="emit('close')" @keydown.esc="emit('close')">
-    <div class="modal" role="dialog" aria-modal="true" :aria-label="cfg.title">
-      <div class="modal-header">
-        <span class="modal-title">{{ cfg.title }}</span>
-        <button class="modal-close" title="Close" @click="emit('close')">×</button>
-      </div>
+  <ModalShell :title="cfg.title" @close="emit('close')">
+    <SettingsField label="Format" label-for="fmt">
+      <select id="fmt" v-model="settings.format" class="field-input field-select">
+        <option v-for="f in cfg.formats" :key="f.value" :value="f.value" :disabled="f.disabled">
+          {{ f.label }}{{ f.disabled ? ' — coming soon' : '' }}
+        </option>
+      </select>
+    </SettingsField>
 
-      <div class="modal-body">
-        <div class="field">
-          <label class="field-label" for="fmt">Format</label>
-          <select id="fmt" v-model="settings.format" class="field-input">
-            <option v-for="f in cfg.formats" :key="f.value" :value="f.value" :disabled="f.disabled">
-              {{ f.label }}{{ f.disabled ? ' — coming soon' : '' }}
-            </option>
-          </select>
-        </div>
+    <!-- Point cloud -->
+    <template v-if="kind === 'cloud'">
+      <label class="checkbox-row"><input type="checkbox" v-model="settings.includeColor" class="checkbox" /> Include vertex colours</label>
+      <label v-if="hasGeoref" class="checkbox-row"><input type="checkbox" v-model="settings.applyGeoref" class="checkbox" /> Georeference (transform into the project CRS)</label>
+      <SettingsField label="Voxel downsample cell" label-for="dscell"
+        :hint="`World units${hasGeoref ? ' (project CRS when georeferenced)' : ''}; 0 = keep every point.`">
+        <input id="dscell" v-model.number="settings.downsampleCell" type="number" min="0" step="any" class="field-input" />
+      </SettingsField>
+    </template>
 
-        <!-- Point cloud -->
-        <template v-if="kind === 'cloud'">
-          <label class="check-row">
-            <input type="checkbox" v-model="settings.includeColor" />
-            <span>Include vertex colours</span>
-          </label>
-          <label v-if="hasGeoref" class="check-row">
-            <input type="checkbox" v-model="settings.applyGeoref" />
-            <span>Georeference (transform into the project CRS)</span>
-          </label>
-          <div class="field">
-            <label class="field-label" for="dscell">Voxel downsample cell</label>
-            <input id="dscell" v-model.number="settings.downsampleCell" type="number" min="0" step="any" class="field-input short" />
-            <span class="field-hint">World units{{ hasGeoref ? ' (project CRS when georeferenced)' : '' }}; 0 = keep every point.</span>
-          </div>
-        </template>
+    <!-- Mesh -->
+    <template v-else-if="kind === 'mesh'">
+      <label class="checkbox-row" :class="{ disabled: settings.format === 'stl' }">
+        <input type="checkbox" v-model="settings.includeColor" :disabled="settings.format === 'stl'" class="checkbox" />
+        Include vertex colours{{ settings.format === 'stl' ? ' (STL has no colour)' : '' }}
+      </label>
+    </template>
 
-        <!-- Mesh -->
-        <template v-else-if="kind === 'mesh'">
-          <label class="check-row" :class="{ disabled: settings.format === 'stl' }">
-            <input type="checkbox" v-model="settings.includeColor" :disabled="settings.format === 'stl'" />
-            <span>Include vertex colours{{ settings.format === 'stl' ? ' (STL has no colour)' : '' }}</span>
-          </label>
-        </template>
+    <!-- Model JSON -->
+    <template v-else-if="kind === 'model'">
+      <label v-if="settings.format === 'json'" class="checkbox-row">
+        <input type="checkbox" v-model="settings.includeTracks" class="checkbox" /> Include point tracks (image observations)
+      </label>
+      <p v-else class="field-hint">
+        Camera-to-world poses (OpenGL convention) + intrinsics for nerfstudio,
+        instant-ngp and 3D Gaussian Splatting. Local SfM frame; pinhole.
+      </p>
+    </template>
 
-        <!-- Model JSON -->
-        <template v-else-if="kind === 'model'">
-          <label v-if="settings.format === 'json'" class="check-row">
-            <input type="checkbox" v-model="settings.includeTracks" />
-            <span>Include point tracks (image observations)</span>
-          </label>
-          <p v-else class="field-hint">
-            Camera-to-world poses (OpenGL convention) + intrinsics for nerfstudio,
-            instant-ngp and 3D Gaussian Splatting. Local SfM frame; pinhole.
-          </p>
-        </template>
+    <!-- COLMAP model -->
+    <template v-else-if="kind === 'colmap'">
+      <p class="field-hint">
+        Exports the sparse model as COLMAP <code>cameras.txt</code>, <code>images.txt</code>
+        and <code>points3D.txt</code> in a ZIP — one PINHOLE camera per image, in the local
+        SfM frame. Reads into COLMAP, Metashape/RealityCapture and NeRF / Gaussian-Splatting tools.
+      </p>
+    </template>
 
-        <!-- COLMAP model -->
-        <template v-else-if="kind === 'colmap'">
-          <p class="field-hint">
-            Exports the sparse model as COLMAP <code>cameras.txt</code>, <code>images.txt</code>
-            and <code>points3D.txt</code> in a ZIP — one PINHOLE camera per image, in the local
-            SfM frame. Reads into COLMAP, Metashape/RealityCapture and NeRF / Gaussian-Splatting tools.
-          </p>
-        </template>
+    <!-- DEM -->
+    <template v-else-if="kind === 'dem'">
+      <SettingsField label="NODATA value" label-for="nodata"
+        hint="Written for empty cells (holes with no measurement).">
+        <input id="nodata" v-model.number="settings.nodata" type="number" step="any" class="field-input" />
+      </SettingsField>
+      <SettingsField v-if="isTiff" label="Compression" label-for="comp">
+        <select id="comp" v-model="settings.compression" class="field-input field-select">
+          <option value="none">None (uncompressed)</option>
+          <option value="deflate">DEFLATE (lossless)</option>
+        </select>
+      </SettingsField>
+    </template>
 
-        <!-- DEM -->
-        <template v-else-if="kind === 'dem'">
-          <div class="field">
-            <label class="field-label" for="nodata">NODATA value</label>
-            <input id="nodata" v-model.number="settings.nodata" type="number" step="any" class="field-input short" />
-            <span class="field-hint">Written for empty cells (holes with no measurement).</span>
-          </div>
-          <div v-if="isTiff" class="field">
-            <label class="field-label" for="comp">Compression</label>
-            <select id="comp" v-model="settings.compression" class="field-input">
-              <option value="none">None (uncompressed)</option>
-              <option value="deflate">DEFLATE (lossless)</option>
-            </select>
-          </div>
-        </template>
+    <!-- Ortho -->
+    <template v-else-if="kind === 'ortho'">
+      <SettingsField v-if="isTiff" label="Compression" label-for="ocomp">
+        <select id="ocomp" v-model="settings.compression" class="field-input field-select">
+          <option value="none">None (uncompressed)</option>
+          <option value="deflate">DEFLATE (lossless)</option>
+        </select>
+      </SettingsField>
+      <SettingsField v-if="settings.format === 'jpeg'" :label="`JPEG quality: ${settings.jpegQuality.toFixed(2)}`" label-for="jq">
+        <input id="jq" v-model.number="settings.jpegQuality" type="range" min="0.1" max="1" step="0.05" class="field-input range" />
+      </SettingsField>
+    </template>
 
-        <!-- Ortho -->
-        <template v-else-if="kind === 'ortho'">
-          <div v-if="isTiff" class="field">
-            <label class="field-label" for="ocomp">Compression</label>
-            <select id="ocomp" v-model="settings.compression" class="field-input">
-              <option value="none">None (uncompressed)</option>
-              <option value="deflate">DEFLATE (lossless)</option>
-            </select>
-          </div>
-          <div v-if="settings.format === 'jpeg'" class="field">
-            <label class="field-label" for="jq">JPEG quality: {{ settings.jpegQuality.toFixed(2) }}</label>
-            <input id="jq" v-model.number="settings.jpegQuality" type="range" min="0.1" max="1" step="0.05" class="field-input" />
-          </div>
-        </template>
-      </div>
-
-      <div class="modal-footer">
-        <button class="btn" @click="emit('close')">Cancel</button>
-        <button class="btn btn-primary" @click="run">Export</button>
-      </div>
-    </div>
-  </div>
+    <template #footer>
+      <button class="btn" @click="emit('close')">Cancel</button>
+      <button class="btn btn-primary" @click="run">Export</button>
+    </template>
+  </ModalShell>
 </template>
 
+<style scoped src="./ui/modal.css"></style>
 <style scoped>
-.overlay {
-  position: fixed; inset: 0;
-  background: rgba(0,0,0,0.55);
-  display: flex; align-items: center; justify-content: center;
-  z-index: 200;
-}
-.modal {
-  background: var(--panel);
-  border: 1px solid var(--panel-border);
-  border-radius: 8px;
-  width: 380px; max-width: 90vw;
-  box-shadow: 0 8px 32px rgba(0,0,0,0.4);
-  display: flex; flex-direction: column;
-}
-.modal-header {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 13px 16px; border-bottom: 1px solid var(--panel-border);
-}
-.modal-title { font-size: 14px; font-weight: 600; color: var(--text); }
-.modal-close {
-  background: none; border: none; color: var(--text-dim);
-  font-size: 20px; line-height: 1; cursor: pointer; padding: 1px 6px; border-radius: 4px;
-}
-.modal-close:hover { background: var(--hover-bg); color: var(--text); }
-.modal-body { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
-.modal-footer {
-  display: flex; justify-content: flex-end; gap: 8px;
-  padding: 12px 16px; border-top: 1px solid var(--panel-border);
-}
-.field { display: flex; flex-direction: column; gap: 5px; }
-.field-label { font-size: 12px; font-weight: 600; color: var(--text); }
-.field-label em, .check-row em { font-style: italic; color: var(--text-dim); font-weight: 400; }
-.field-hint { font-size: 11px; color: var(--text-dim); }
-.field-input {
-  background: var(--bg); border: 1px solid var(--panel-border);
-  border-radius: 5px; color: var(--text); font: inherit; font-size: 13px; padding: 4px 8px;
-}
-.field-input.short { width: 110px; }
-.field-input:focus { outline: none; border-color: var(--accent); }
-.check-row { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text); cursor: pointer; }
-.check-row input { accent-color: var(--accent); width: 15px; height: 15px; }
-.disabled { opacity: 0.5; }
-.disabled .check-row, .check-row.disabled { cursor: not-allowed; }
-.btn {
-  background: none; border: 1px solid var(--panel-border);
-  border-radius: 5px; color: var(--text); font: inherit; font-size: 13px;
-  padding: 5px 14px; cursor: pointer;
-}
-.btn:hover { background: var(--hover-bg); }
-.btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-.btn-primary:hover { opacity: 0.88; }
+.checkbox-row { font-size: 13px; color: var(--text); }
+.checkbox-row.disabled { opacity: 0.5; cursor: not-allowed; }
+.field-input.range { width: 100%; padding: 0; }
+code { font-size: 11px; }
 </style>
