@@ -6,6 +6,7 @@ import { fitFiducialAffine, mmToScan } from '../../core/sfm/fiducials.js'
 import { segmentEncode, segmentDecode, segmentForget } from '../../workers/computeClient.js'
 import { logitsToBinaryMask } from '../../core/segment/sam2.js'
 import MaskToolbar from './MaskToolbar.vue'
+import GcpToolbar from './GcpToolbar.vue'
 
 const props = defineProps({
   image:         { type: Object,  required: true },
@@ -17,6 +18,7 @@ const props = defineProps({
   allGcps:       { type: Array,   default: () => [] }, // [{ id, name }] every GCP, for the right-click "assign" menu
   selectedGcpId: { type: String,  default: null },
   maskEdit:      { type: Boolean, default: false }, // mask-edit mode (floating toolbar)
+  gcpEdit:       { type: Boolean, default: false }, // GCP-edit mode: click to add/mark a GCP
   // Film sensor (F4): the sensor's calibrated fiducial marks + this image's
   // clicked observations. isFilm gates the "Mark fiducial…" menu + overlay.
   isFilm:        { type: Boolean, default: false },
@@ -29,7 +31,13 @@ const props = defineProps({
 // add-gcp:  create a new GCP marked at this pixel { px, py }.
 // mark-fiducial: assign this pixel to a fiducial mark { fidId, px, py }.
 // exit-mask-edit: user closed the mask toolbar (×) — parent owns the maskEdit flag.
-const emit = defineEmits(['update-mask', 'update-depth', 'mark-gcp', 'add-gcp', 'mark-fiducial', 'exit-mask-edit'])
+const emit = defineEmits(['update-mask', 'update-depth', 'mark-gcp', 'add-gcp', 'select-gcp', 'delete-gcp', 'mark-fiducial', 'exit-mask-edit', 'exit-gcp-edit'])
+
+// Ids of GCPs already marked on this image, shown with a dot in the GCP-edit
+// toolbar's target list.
+const markedGcpIds = computed(() =>
+  (props.gcps ?? []).map((g) => g.id).filter((id) => id != null)
+)
 
 // Live fiducial fit (F4): join this image's observations with the sensor's
 // calibrated marks and fit the scan→mm affine once ≥3 land, so per-mark residual
@@ -134,6 +142,8 @@ let smartPreviewCanvas = null        // OffscreenCanvas cyan candidate overlay
 let smartBusy = false, smartDirty = false // coalesce overlapping decodes
 let smartDown = null                 // { x, y, alt } pending click-vs-drag while Smart tool active
 let smartMoved = false               // pointer moved past the click threshold → it's a pan, not a click
+let gcpDown = null                   // { x, y } pending click-vs-drag while GCP-edit mode active
+let gcpMoved = false                 // pointer moved past the click threshold → it's a pan, not a GCP click
 // Undo/redo as stacks of persisted mask dataUrls (null = no mask). Snapshots are
 // the *previous* store value taken just before each committed change, so memory
 // cost is a handful of compressed PNG strings, not raw pixel buffers.
@@ -987,6 +997,14 @@ function onMouseDown(e) {
     smartMoved = false
     dragging.value = true
     startX = e.clientX; startY = e.clientY; startTx = tx.value; startTy = ty.value
+  } else if (props.gcpEdit && e.button === 0) {
+    // Like the Smart tool: arm a pending click AND a pan; a real drag pans, a click
+    // (no movement past the threshold, decided in onMouseUp) places/marks a GCP.
+    const { x, y } = getViewportCoords(e)
+    gcpDown = { x, y }
+    gcpMoved = false
+    dragging.value = true
+    startX = e.clientX; startY = e.clientY; startTx = tx.value; startTy = ty.value
   } else if (e.button === 0) {
     dragging.value = true
     startX  = e.clientX
@@ -1009,6 +1027,7 @@ function onMouseMove(e) {
     // Once the pointer moves past a small threshold, a Smart-tool press is a pan,
     // not a segment click.
     if (smartDown && !smartMoved && Math.hypot(e.clientX - startX, e.clientY - startY) > 4) smartMoved = true
+    if (gcpDown && !gcpMoved && Math.hypot(e.clientX - startX, e.clientY - startY) > 4) gcpMoved = true
     tx.value = startTx + (e.clientX - startX)
     ty.value = startTy + (e.clientY - startY)
   }
@@ -1046,6 +1065,21 @@ async function onMouseUp() {
     }
     return
   }
+  // GCP-edit: a press that didn't drag places a GCP; a drag was a pan.
+  if (gcpDown) {
+    const down = gcpDown, moved = gcpMoved
+    gcpDown = null; gcpMoved = false; dragging.value = false
+    if (!moved) {
+      const pix = toImagePixel(down.x, down.y)
+      if (pix) {
+        // A selected GCP → mark this image's observation of it; otherwise create a
+        // new GCP here (parent owns both, same handlers as the right-click menu).
+        if (props.selectedGcpId != null) emit('mark-gcp', { gcpId: props.selectedGcpId, px: pix.px, py: pix.py })
+        else emit('add-gcp', { px: pix.px, py: pix.py })
+      }
+    }
+    return
+  }
   if (rectDrag) { await commitRect(); return }
   if (isDrawing) {
     isDrawing = false
@@ -1060,6 +1094,7 @@ function onMouseLeave() {
   dragging.value = false
   rectDrag = null // cancel an in-flight rectangle rather than guessing its corner
   smartDown = null; smartMoved = false // cancel a pending Smart click/pan
+  gcpDown = null; gcpMoved = false     // cancel a pending GCP click/pan
   if (isDrawing) { isDrawing = false; if (strokeHit) { snapshotForUndo(); exportMask(tool.value === 'erase') } }
   mousePos      = null
   hoverPx.value = null
@@ -1220,16 +1255,16 @@ defineExpose({ fit, zoomIn, zoomOut, triggerMaskImport, clearMask, triggerDepthI
       ref="container"
       class="viewport"
       :class="{
-        grabbing: dragging && (!maskEdit || !tool),
+        grabbing: dragging && (!maskEdit || !tool) && !gcpEdit,
         drawing: maskEdit && (tool === 'brush' || tool === 'erase'),
-        crosshair: maskEdit && (tool === 'rect' || tool === 'smart'),
+        crosshair: (maskEdit && (tool === 'rect' || tool === 'smart')) || gcpEdit,
       }"
       @wheel="onWheel"
       @mousedown="onMouseDown"
       @mousemove="onMouseMove"
       @mouseup="onMouseUp"
       @mouseleave="onMouseLeave"
-      @dblclick="(!maskEdit || !tool) && fit()"
+      @dblclick="(!maskEdit || !tool) && !gcpEdit && fit()"
       @contextmenu="onContextMenu"
     >
       <img
@@ -1273,6 +1308,16 @@ defineExpose({ fit, zoomIn, zoomOut, triggerMaskImport, clearMask, triggerDepthI
         @smart-commit="commitSmart"
         @smart-discard="discardSmart"
         @close="emit('exit-mask-edit')"
+      />
+
+      <GcpToolbar
+        v-if="gcpEdit"
+        :all-gcps="allGcps"
+        :selected-id="selectedGcpId"
+        :marked-ids="markedGcpIds"
+        @select="(id) => emit('select-gcp', id)"
+        @delete="(id) => emit('delete-gcp', id)"
+        @close="emit('exit-gcp-edit')"
       />
 
       <!-- Right-click context menu (general → GCP chooser sub-mode). -->

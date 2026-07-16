@@ -1,0 +1,17 @@
+[package]
+name = "imagecodec"
+version = "0.1.0"
+edition = "2021"
+description = "Native TIFF decoder compiled to WebAssembly (ingest speedup)"
+license = "MIT OR Apache-2.0"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+# Isolated like `crates/mesh`: this crate is allowed a dependency (the `tiff`
+# decoder) that must NOT leak into `crates/reconstruction`. It replaces the slow
+# pure-JS geotiff.js decode at ingest — decode is ~87% of TIFF ingest time on the
+# 97 MP aerial scans (see TODO ▸ TC). wasm-bindgen-only otherwise.
+[dependencies]
+wasm-bindgen = "0.2"
+tiff = "0.9"

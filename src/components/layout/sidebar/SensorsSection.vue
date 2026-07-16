@@ -7,6 +7,8 @@ const props = defineProps({
   sensors: { type: Array, default: () => [] },
   // (sensorId) => number of images using that sensor
   sensorImageCount: { type: Function, default: () => 0 },
+  // Set of sensor ids with no usable calibration — flagged with a ⚠.
+  incompleteSensorIds: { type: Object, default: () => new Set() },
 })
 const emit = defineEmits(['toggle', 'remove-sensor', 'merge-sensors', 'open-sensor'])
 
@@ -66,6 +68,11 @@ function ctxMergeSensor(targetId) {
             :title="sensorExpanded[sensor.id] ? 'Collapse' : 'Expand'"
           ></button>
           <span class="item-name">{{ sensor.label }}</span>
+          <span
+            v-if="incompleteSensorIds.has(sensor.id)"
+            class="unaligned-tag"
+            title="No usable calibration — intrinsics fall back to a default field-of-view guess, which distorts SfM and depth maps. Set a focal length in the sensor table."
+          >⚠</span>
           <span class="obs-badge" :title="`${sensorImageCount(sensor.id)} image(s)`">{{ sensorImageCount(sensor.id) }}</span>
         </li>
         <li v-if="sensorExpanded[sensor.id]" class="img-details" @contextmenu.stop>

@@ -30,6 +30,9 @@ defineProps({
   matchStats: { type: Object, default: () => ({ total: 0, verified: 0, running: 0, error: 0 }) },
   // (sensorId) => number of images using that sensor
   sensorImageCount: { type: Function, default: () => 0 },
+  // Set of sensor ids with no usable calibration (intrinsics fall back to a
+  // default-FOV guess) — flagged with a ⚠ in the sensor list.
+  incompleteSensorIds: { type: Object, default: () => new Set() },
   selectedId: { type: String, default: null },
   // UUIDs registered in the sparse model; `hasSparse` gates whether "not in this
   // set" means unaligned (vs. reconstruction simply not having run yet).
@@ -110,13 +113,13 @@ function toggle(key) {
       @zoom-to-image="emit('zoom-to-image', $event)"
       @delete-keypoints="emit('delete-keypoints', $event)"
       @remove-image="emit('remove-image', $event)"
-      @assign-sensor="emit('assign-sensor', $event)"
     />
 
     <SensorsSection
       :open="open.sensors"
       :sensors="sensors"
       :sensor-image-count="sensorImageCount"
+      :incomplete-sensor-ids="incompleteSensorIds"
       @toggle="toggle('sensors')"
       @remove-sensor="emit('remove-sensor', $event)"
       @merge-sensors="emit('merge-sensors', $event)"

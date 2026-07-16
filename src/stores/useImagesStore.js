@@ -185,7 +185,7 @@ export const useImagesStore = defineStore('images', () => {
             resolveComputeReady(item.uuid)
             return
           }
-          const { displayBlob, computeBlob, width, height } = await transcodeTiff(file, undefined, {
+          const { displayBlob, computeBlob, width, height, timings, srcInfo } = await transcodeTiff(file, undefined, {
             // Fires once the decode finishes, well before the full-res JPEG+PNG
             // encode below — swap in a quick low-res preview so the user sees
             // something long before the full-quality one is ready.
@@ -219,6 +219,18 @@ export const useImagesStore = defineStore('images', () => {
           found.computeUrl = URL.createObjectURL(computeBlob)
           resolveComputeReady(item.uuid)
           log(`Decoded TIFF: ${file.name} — ${width}×${height}`, 'info', 'Images')
+          if (timings) {
+            // Per-stage baseline for the TIFF-codec plan (TODO.md): which stage
+            // dominates decides whether/what to move to a Rust/WASM codec.
+            const c = { 1: 'none', 5: 'LZW', 7: 'JPEG', 8: 'Deflate', 32773: 'PackBits' }[srcInfo?.compression] ?? srcInfo?.compression
+            const p = { 1: 'gray', 2: 'RGB', 3: 'palette', 6: 'YCbCr' }[srcInfo?.photometric] ?? srcInfo?.photometric
+            const srcMB = srcInfo?.srcBytes ? (srcInfo.srcBytes / 1048576).toFixed(1) : '?'
+            log(
+              `TIFF timing (${timings.backend ?? '?'}): ${file.name} — decode ${timings.decodeMs?.toFixed(0)}ms · repack ${timings.repackMs?.toFixed(0)}ms · JPEG ${timings.jpegMs?.toFixed(0)}ms · PNG ${timings.pngMs?.toFixed(0)}ms · total ${timings.totalMs?.toFixed(0)}ms  ` +
+              `[${p}/${srcInfo?.bitsPerSample ?? '?'}-bit/${srcInfo?.samplesPerPixel ?? '?'}spp/${c}, src ${srcMB} MB]`,
+              'info', 'Images',
+            )
+          }
           // Cache the transcode outputs in OPFS so reopening the project skips
           // the (multi-second) re-decode + re-encode — see the TIFF gotcha in
           // CLAUDE.md. Pure function of the immutable original; fire-and-forget.

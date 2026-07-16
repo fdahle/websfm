@@ -780,7 +780,10 @@ export function fuseDepthMaps(maps, opts = {}, onLog = () => {}, hooks = {}) {
             // that only "agrees" at ~0° parallax (sky / distant haze) never reaches
             // minTriAngleDeg, so it is culled below rather than fused into a flyer.
             if (minTriAngleDeg > 0) {
-              const ang = triangulationAngle(C, camCenters[ci], P)
+              // camCenters[mi] is the reference centre as an array — triangulationAngle
+              // indexes both centres as [x,y,z], so C ({x,y,z}) must NOT be passed here
+              // (it reads C[0] as undefined → NaN angle → every pixel culled as low-parallax).
+              const ang = triangulationAngle(camCenters[mi], camCenters[ci], P)
               if (ang > maxAngle) maxAngle = ang
             }
             // Stop only when BOTH enough views AND enough parallax are satisfied.

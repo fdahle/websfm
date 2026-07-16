@@ -150,6 +150,8 @@ function onHeaderUp() {
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
   padding: 0 8px 8px;
   user-select: none;
+  /* Restore a normal cursor over the toolbar (the viewport underneath is crosshair/none). */
+  cursor: default;
 }
 
 .mt-header {

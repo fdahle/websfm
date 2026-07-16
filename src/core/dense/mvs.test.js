@@ -360,6 +360,25 @@ describe('fuseDepthMaps geometric filters (WS4)', () => {
     expect(kept.count).toBeGreaterThan(0)      // disabled ⇒ points survive
   })
 
+  it('keeps genuine wide-parallax agreement (reference centre passed as array, not object)', () => {
+    // Regression: the parallax gate read the reference camera centre as an array while
+    // it was passed as {x,y,z}, so the angle came back NaN → maxAngle stayed 0 → every
+    // consistency-passing pixel was culled as low-parallax (fusion always yielded 0).
+    // Two cameras offset along x by 0.1 at depth 1 give ~5.7° parallax; a fronto-parallel
+    // plane at world z=1 reprojects with an exact 10 px shift (fx·b/D = 100·0.1/1), so
+    // agreement is exact and only the (correct) angle decides survival.
+    const plane = (uuid, tx) => ({
+      uuid, width: 32, height: 32,
+      K: { fx: 100, fy: 100, cx: 16, cy: 16 }, R: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], t: [tx, 0, 0],
+      depth: new Float32Array(32 * 32).fill(1),
+      cost: new Float32Array(32 * 32).fill(0.1),
+      rgb: new Uint8Array(32 * 32 * 3).fill(120),
+    })
+    const maps = [plane('a', 0), plane('b', -0.1)] // centres (0,0,0) and (0.1,0,0)
+    const out = fuseDepthMaps(maps, { minTriAngleDeg: 2.0, maxIncidenceDeg: 0, removeIsolated: false }, () => {})
+    expect(out.count).toBeGreaterThan(0) // ~5.7° parallax clears the 2° gate — must survive
+  })
+
   it('grazing-angle reject culls edge-on normals but leaves fallback normals untouched', () => {
     // Edge-on: world normal (1,0,0) ⊥ the near-(0,0,1) viewing ray ⇒ ~90° incidence.
     const edgeOn = fuseDepthMaps([mk('a', [1, 0, 0]), mk('b', [1, 0, 0])],

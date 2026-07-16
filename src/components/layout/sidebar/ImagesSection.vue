@@ -15,7 +15,7 @@ const props = defineProps({
 })
 const emit = defineEmits([
   'toggle', 'select', 'open', 'show-info', 'zoom-to-image',
-  'delete-keypoints', 'remove-image', 'assign-sensor',
+  'delete-keypoints', 'remove-image',
 ])
 
 // Per-image expand state
@@ -116,26 +116,23 @@ function onRightClick(e, img) {
     suppressWatch = true
     emit('select', img.id)
   }
-  openImageCtx(e, { img }, { w: 200, h: 248 })
+  openImageCtx(e, { img }, { w: 200, h: 180 })
 }
 
 function ctxOpen()     { emit('open', ctxMenu.value.img.id); closeMenu() }
 function ctxInfo()     { emit('show-info', ctxMenu.value.img.id); closeMenu() }
 function ctxZoom()     { emit('zoom-to-image', ctxMenu.value.img.id); closeMenu() }
 function ctxDeleteKp() {
-  ctxTargets.value.forEach((img) => {
-    if (img.kpStatus === 'done') emit('delete-keypoints', img.id)
-  })
+  // Emit the whole target set at once so the parent confirms a batch with a single
+  // prompt (matches the remove-image path).
+  const ids = ctxTargets.value.filter((img) => img.kpStatus === 'done').map((img) => img.id)
+  if (ids.length) emit('delete-keypoints', ids)
   closeMenu()
 }
 function ctxRemove() {
   // Emit the whole target set at once so the parent can confirm a batch delete
   // with a single prompt.
   emit('remove-image', ctxTargets.value.map((img) => img.id))
-  closeMenu()
-}
-function ctxAssignSensor(sensorId) {
-  ctxTargets.value.forEach((img) => emit('assign-sensor', { imageId: img.id, sensorId }))
   closeMenu()
 }
 </script>
@@ -226,23 +223,9 @@ function ctxAssignSensor(sensorId) {
         <button class="ctx-item" :class="{ 'ctx-disabled': ctxIsMulti }" :disabled="ctxIsMulti" @click="ctxOpen">Open in tab</button>
         <button class="ctx-item" :class="{ 'ctx-disabled': ctxIsMulti }" :disabled="ctxIsMulti" @click="ctxInfo">Show information</button>
         <button class="ctx-item" :class="{ 'ctx-disabled': ctxIsMulti || !ctxHasPosition }" :disabled="ctxIsMulti || !ctxHasPosition" @click="ctxZoom">Zoom to position on map</button>
-        <template v-if="sensors.length">
-          <div class="ctx-sep"></div>
-          <div class="ctx-sub-wrap">
-            <button class="ctx-item ctx-has-sub">Assign sensor<span class="ctx-arrow">▸</span></button>
-            <div class="ctx-submenu">
-              <button class="ctx-item" @click="ctxAssignSensor(null)">None</button>
-              <div class="ctx-sep"></div>
-              <button v-for="s in sensors" :key="s.id" class="ctx-item" @click="ctxAssignSensor(s.id)">{{ s.label }}</button>
-            </div>
-          </div>
-        </template>
-        <template v-if="ctxHasKp">
-          <div class="ctx-sep"></div>
-          <button class="ctx-item" @click="ctxDeleteKp">Delete keypoints</button>
-        </template>
         <div class="ctx-sep"></div>
-        <button class="ctx-item danger" @click="ctxRemove">Remove</button>
+        <button v-if="ctxHasKp" class="ctx-item danger" @click="ctxDeleteKp">Delete keypoints</button>
+        <button class="ctx-item danger" @click="ctxRemove">Remove image</button>
       </div>
     </Teleport>
   </div>
