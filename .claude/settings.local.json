@@ -114,7 +114,9 @@
       "Bash(wsl -e bash -lc 'which cargo wasm-pack rustc 2>&1; echo \"---\"; cargo --version 2>&1; wasm-pack --version 2>&1')",
       "Bash(git checkout *)",
       "Bash(git commit -q -m ' *)",
-      "Bash(wsl -e bash -lc 'cd /mnt/c/Users/Felix/Documents/GitHub/websfm/crates/reconstruction && grep -n \"n_cam \\\\* 5\\\\|c \\\\* 5\\\\| \\\\* 5 \\\\| \\\\* 5]\\\\| \\\\* 5;\" src/lib.rs')"
+      "Bash(wsl -e bash -lc 'cd /mnt/c/Users/Felix/Documents/GitHub/websfm/crates/reconstruction && grep -n \"n_cam \\\\* 5\\\\|c \\\\* 5\\\\| \\\\* 5 \\\\| \\\\* 5]\\\\| \\\\* 5;\" src/lib.rs')",
+      "Bash(git restore *)",
+      "PowerShell(npm test 2>&1)"
     ],
     "additionalDirectories": [
       "/Users/fhdahle/Documents/GitHub/websfm/src/wasm/*",

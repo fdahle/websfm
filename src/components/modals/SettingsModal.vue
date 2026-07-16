@@ -4,9 +4,11 @@ import CrsPicker from '../controls/CrsPicker.vue'
 import { useGlossarySettings } from '../../composables/useGlossarySettings.js'
 import { useComputeSettings } from '../../composables/useComputeSettings.js'
 import { useViewerSettings } from '../../composables/useViewerSettings.js'
+import { useUiSettings } from '../../composables/useUiSettings.js'
 
 const { glossaryTermsEnabled, setGlossaryTermsEnabled } = useGlossarySettings()
-const { memBudgetGb, setMemBudgetGb } = useComputeSettings()
+const { memBudgetGb, setMemBudgetGb, useGpu, setUseGpu } = useComputeSettings()
+const { advancedSettingsExpanded, setAdvancedSettingsExpanded } = useUiSettings()
 const { graticuleZ, setGraticuleZ } = useViewerSettings()
 
 defineProps({
@@ -123,6 +125,21 @@ const verboseLogging = ref(false)
 
           <div class="setting-row">
             <div class="setting-info">
+              <span class="setting-label">Expand advanced settings</span>
+              <span class="setting-desc">Open pipeline modals with all knobs showing instead of tucked behind the “Advanced settings” disclosure.</span>
+            </div>
+            <label class="switch">
+              <input
+                type="checkbox"
+                :checked="advancedSettingsExpanded"
+                @change="setAdvancedSettingsExpanded($event.target.checked)"
+              >
+              <span class="slider"></span>
+            </label>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-info">
               <span class="setting-label">Graticule height</span>
               <span class="setting-desc">Where the 3D-view ground grid sits along the vertical axis of the point cloud.</span>
             </div>
@@ -177,6 +194,21 @@ const verboseLogging = ref(false)
               >
               <span class="num-unit">GB</span>
             </div>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-info">
+              <span class="setting-label">Use GPU (experimental)</span>
+              <span class="setting-desc">Run LightGlue matching and dense depth maps on WebGPU (Chrome/Edge). Much faster; falls back to CPU automatically when the GPU can't run a model.</span>
+            </div>
+            <label class="switch">
+              <input
+                type="checkbox"
+                :checked="useGpu"
+                @change="setUseGpu($event.target.checked)"
+              >
+              <span class="slider"></span>
+            </label>
           </div>
         </template>
 

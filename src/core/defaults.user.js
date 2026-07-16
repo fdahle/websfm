@@ -29,6 +29,25 @@ export const DETECT_SUPERPOINT_DEFAULTS = {
   overlap: 64,
 }
 
+// Detection quality presets (deltas over the per-detector defaults; medium ≡ defaults).
+// One shared card set (meta), two delta maps — the modal applies whichever matches the
+// active detector. Only resolution + keypoint budget vary (contrast too for SIFT).
+export const DETECT_SIFT_PRESETS = {
+  low:    { maxDim: 900,  maxKeypoints: 3000, contrastThreshold: 0.02 },
+  medium: {},
+  high:   { maxDim: 1600, maxKeypoints: 8000, contrastThreshold: 0.006 },
+}
+export const DETECT_SUPERPOINT_PRESETS = {
+  low:    { maxDim: 900,  maxKeypoints: 1024 },
+  medium: {},
+  high:   { maxDim: 1600, maxKeypoints: 4096 },
+}
+export const DETECT_PRESET_META = [
+  { id: 'low',    label: 'Fast',     blurb: 'Lower resolution, fewer keypoints' },
+  { id: 'medium', label: 'Balanced', blurb: 'Default resolution and cap' },
+  { id: 'high',   label: 'Detailed', blurb: 'Higher resolution, more keypoints — slower' },
+]
+
 // Tie-point matching (crates/matching via useMatchesStore). Mirrored by
 // MatchFeaturesModal.vue's `settings` ref. Internal-only match knobs (not shown to the
 // user) live in tuning.js ▸ MATCH_TUNING.
@@ -41,7 +60,6 @@ export const MATCH_DEFAULTS = {
   minInlierRatio: 0.25,        // reject pairs whose inlier fraction is below this
   maxIters: 1000,              // F-RANSAC iterations
   maxNeighbors: 10,            // preselect: k-nearest cameras to consider per image
-  useGpu: false,               // experimental WebGPU LightGlue backend
   lgMaxKeypoints: 2048,        // per-image cap fed to LightGlue (plain path)
   lgTiled: false,              // coarse-to-fine tiled guided matching (full density)
   lgTileBudget: 2048,          // max keypoints per tile side when tiled (attention budget)
@@ -49,6 +67,19 @@ export const MATCH_DEFAULTS = {
   subsetGateSize: 200,         // spatially-uniform keypoints per image in the pre-test
   subsetGateThreshold: 8,      // min subset putatives required to run the full match
 }
+// Matching quality presets — tune the geometric-verification strictness (deltas over
+// the defaults; medium ≡ defaults). Strategy/matcher are separate primary choices, not
+// preset-controlled. ratioThreshold is inert on the LightGlue path (no ratio test there).
+export const MATCH_PRESETS = {
+  low:    { ratioThreshold: 0.80, minInlierRatio: 0.20 },
+  medium: {},
+  high:   { ratioThreshold: 0.70, minInlierRatio: 0.35, maxIters: 2000 },
+}
+export const MATCH_PRESET_META = [
+  { id: 'low',    label: 'Lenient',  blurb: 'More matches, looser verification' },
+  { id: 'medium', label: 'Balanced', blurb: 'Default ratio and inlier gates' },
+  { id: 'high',   label: 'Strict',   blurb: 'Fewer, high-confidence matches' },
+]
 
 // Sparse reconstruction (crates/reconstruction via core/sfm/sfm.js).
 // Mirrored by ReconstructModal.vue's `settings` ref.
@@ -66,13 +97,20 @@ export const RECONSTRUCT_DEFAULTS = {
 
 // Quality presets (WS5): per-modal deltas OVER the defaults above, so `medium` ≡ the
 // defaults (empty delta) and the single-source-of-truth contract is preserved. A modal's
-// PresetSelector applies `{ ...DEFAULTS, ...PRESET[id] }`; editing any field afterwards
+// PresetCards applies `{ ...DEFAULTS, ...PRESET[id] }`; editing any field afterwards
 // flips the selector to 'custom'. Values are UI units (same as the defaults they patch).
 export const RECONSTRUCT_PRESETS = {
   low:    { baIterations: 15, reprjThreshold: 6.0 }, // fast: fewer BA iters, looser gate
   medium: {},                                        // = RECONSTRUCT_DEFAULTS
   high:   { baIterations: 60, reprjThreshold: 3.0 }, // thorough: more iters, tighter gate
 }
+// Card metadata for the PresetCards hero (label + one-line "what you get"). Ordered.
+// Kept beside the deltas so a preset's copy and its values live together.
+export const RECONSTRUCT_PRESET_META = [
+  { id: 'low',    label: 'Low',    blurb: 'Faster · looser gate, fewer BA iterations' },
+  { id: 'medium', label: 'Medium', blurb: 'Balanced default for most projects' },
+  { id: 'high',   label: 'High',   blurb: 'Slower · tighter gate, more BA iterations' },
+]
 
 // Dense — Stage A depth maps (PatchMatch MVS). Mirrored by DepthMapsModal.vue.
 // NOTE: values here are UI units; the modal's run() transforms some before dispatch
@@ -86,8 +124,16 @@ export const DEPTHMAP_DEFAULTS = {
   bestK: null,         // advanced override; null ⇒ auto per image
   speckleFilter: true, // median/speckle cleanup on each depth map
   filterRelTol: 10,    // speckle relative tolerance, % (÷100 on run)
-  useGpu: false,       // experimental WebGPU backend
 }
+// Depth-map quality cards. Unlike the other presets these are NOT deltas — `quality` is
+// itself a first-class setting the store resolves to a working resolution; the cards are
+// a nicer picker over its four values (there is no "custom" quality).
+export const DEPTHMAP_QUALITY_META = [
+  { id: 'low',    label: 'Low',    blurb: '⅛ native · fastest' },
+  { id: 'medium', label: 'Medium', blurb: '¼ native · balanced' },
+  { id: 'high',   label: 'High',   blurb: '½ native · denser, slower' },
+  { id: 'ultra',  label: 'Ultra',  blurb: 'Full native · slowest' },
+]
 
 // Dense — Stage B fusion (fuseDepthMaps). Mirrored by DenseModal.vue.
 // UI units: depthTolPct is a %, ÷100 on run; in `auto` mode minViews/maxCost are
@@ -153,6 +199,17 @@ export const MESH_DEFAULTS = {
   trimFactor: 6,     // trim radius = trimFactor × dense mergeCell; 0 = no trim
   colorize: true,    // transfer dense-cloud colour onto the mesh vertices
 }
+// Mesh quality presets — octree depth is the detail/cost lever (deltas; medium ≡ defaults).
+export const MESH_PRESETS = {
+  low:    { depth: 6 },
+  medium: {},
+  high:   { depth: 10 },
+}
+export const MESH_PRESET_META = [
+  { id: 'low',    label: 'Coarse',   blurb: 'Octree depth 6 · quick preview' },
+  { id: 'medium', label: 'Balanced', blurb: 'Octree depth 8 · default' },
+  { id: 'high',   label: 'Fine',     blurb: 'Octree depth 10 · detailed, slow' },
+]
 
 // Footprints from imported poses (core/footprint.js). Mirrored by
 // FootprintFromPosesModal.vue's `settings` ref (the intrinsics override is seeded

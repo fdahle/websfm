@@ -1,13 +1,16 @@
 <script setup>
 // Collapsible "Advanced" section (WS5), harvested from the DetectFeaturesModal <details>
 // pattern. A link-styled toggle reveals its slotted fields. `open` is internal state;
-// pass `default-open` to start expanded.
+// its initial value is the user's "Expand advanced settings by default" preference
+// (Settings ▸ Display, via useUiSettings), unless the caller forces `default-open`.
 import { ref } from 'vue'
+import { useUiSettings } from '../../../composables/useUiSettings.js'
 const props = defineProps({
   label: { type: String, default: 'Advanced' },
   defaultOpen: { type: Boolean, default: false },
 })
-const open = ref(props.defaultOpen)
+const { advancedSettingsExpanded } = useUiSettings()
+const open = ref(props.defaultOpen || advancedSettingsExpanded.value)
 </script>
 
 <template>
