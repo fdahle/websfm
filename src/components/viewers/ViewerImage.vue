@@ -3,6 +3,7 @@ import { ref, watch, computed, onMounted, onBeforeUnmount } from 'vue'
 import { maskFromSource, invertMaskPixels, anyExcluded } from '../../core/mask.js'
 import { depthColor } from '../../core/products/colormap.js'
 import { fitFiducialAffine, mmToScan } from '../../core/sfm/fiducials.js'
+import { clipLineToRect } from '../../core/sfm/gcpGuides.js'
 import { segmentEncode, segmentDecode, segmentForget } from '../../workers/computeClient.js'
 import { logitsToBinaryMask } from '../../core/segment/sam2.js'
 import MaskToolbar from './MaskToolbar.vue'
@@ -15,6 +16,10 @@ const props = defineProps({
   showDepth:     { type: Boolean, default: false },
   showGcps:      { type: Boolean, default: false },
   gcps:          { type: Array,   default: () => [] }, // [{ id, name, px, py, reprojPx? }] observations on this image
+  // Guided marking (core/sfm/gcpGuides.js): predicted position of GCPs *not yet*
+  // marked on this image — [{ gcpId, name, kind:'point', u, v } | { gcpId, name,
+  // kind:'line', line:[a,b,c] }], all in native image pixels.
+  gcpGuides:     { type: Array,   default: () => [] },
   allGcps:       { type: Array,   default: () => [] }, // [{ id, name }] every GCP, for the right-click "assign" menu
   selectedGcpId: { type: String,  default: null },
   maskEdit:      { type: Boolean, default: false }, // mask-edit mode (floating toolbar)
@@ -162,6 +167,7 @@ let isDrawing     = false
 let strokeHit     = false // did the in-flight brush/erase stroke touch the image?
 let startX = 0, startY = 0, startTx = 0, startTy = 0
 let resizeObserver = null
+let lastSize       = null // { w, h } last non-zero container size the observer fitted to
 let offscreenCtx   = null
 
 const MIN_SCALE = 0.05
@@ -236,6 +242,22 @@ function drawLegend(ctx, h, slot, stops, leftLabel, rightLabel, title) {
   ctx.fillText(rightLabel, LX + LW, LY + LH + 10)
   ctx.textAlign = 'center'
   ctx.fillText(title, LX + LW / 2, LY - 3)
+  ctx.restore()
+}
+
+// Small boxed caption at (x, y) — the guide equivalent of the marker labels,
+// kept solid-line so the dashed guide stroke doesn't bleed into the text.
+function drawGuideLabel(ctx, x, y, text, color) {
+  ctx.save()
+  ctx.setLineDash([])
+  ctx.font = '11px sans-serif'
+  const tw = ctx.measureText(text).width
+  ctx.fillStyle = 'rgba(0,0,0,0.55)'
+  ctx.fillRect(x - 3, y - 7, tw + 6, 14)
+  ctx.textAlign = 'left'
+  ctx.textBaseline = 'middle'
+  ctx.fillStyle = color
+  ctx.fillText(text, x, y)
   ctx.restore()
 }
 
@@ -316,6 +338,58 @@ function drawOverlay() {
     }
 
     drawLegend(ctx, h, legendSlot++, KEYPOINT_STOPS, 'low', 'high', 'response')
+  }
+
+  // Guided marking — where the posed cameras say a not-yet-marked GCP must lie
+  // in this image. Drawn under the real markers, in a distinct dashed green so a
+  // prediction is never mistaken for a placed mark:
+  //   • point (≥2 other views) — ghost cross-hair at the predicted pixel;
+  //   • line (1 other view) — the epipolar line the mark must sit on. Only for
+  //     the selected GCP: every GCP's line at once is a spider web.
+  if ((props.showGcps || props.gcpEdit) && props.gcpGuides?.length && img.naturalWidth) {
+    const nw = img.naturalWidth, nh = img.naturalHeight
+    const toDisp = (px, py) => ({ x: (px / nw) * dispW + tx.value, y: (py / nh) * dispH + ty.value })
+
+    for (const g of props.gcpGuides) {
+      const isSelected = g.gcpId != null && g.gcpId === props.selectedGcpId
+      const strong = 'rgba(120,230,180,0.95)'
+      const faint  = 'rgba(120,230,180,0.45)'
+      ctx.save()
+      ctx.setLineDash([5, 4])
+      ctx.lineWidth = isSelected ? 1.8 : 1.2
+      ctx.strokeStyle = isSelected ? strong : faint
+
+      if (g.kind === 'line' && isSelected) {
+        const seg = clipLineToRect(g.line, nw, nh)
+        if (seg) {
+          const p0 = toDisp(seg[0].x, seg[0].y)
+          const p1 = toDisp(seg[1].x, seg[1].y)
+          ctx.beginPath()
+          ctx.moveTo(p0.x, p0.y)
+          ctx.lineTo(p1.x, p1.y)
+          ctx.stroke()
+          if (g.name) {
+            drawGuideLabel(ctx, (p0.x + p1.x) / 2, (p0.y + p1.y) / 2, `${g.name} — on this line`, strong)
+          }
+        }
+      } else if (g.kind === 'point') {
+        // A prediction outside the frame just means the GCP isn't visible here.
+        if (g.u >= 0 && g.u <= nw && g.v >= 0 && g.v <= nh) {
+          const { x, y } = toDisp(g.u, g.v)
+          ctx.beginPath()
+          ctx.arc(x, y, 7, 0, Math.PI * 2)
+          ctx.stroke()
+          ctx.beginPath()
+          ctx.moveTo(x - 11, y); ctx.lineTo(x - 3, y)
+          ctx.moveTo(x + 3, y);  ctx.lineTo(x + 11, y)
+          ctx.moveTo(x, y - 11); ctx.lineTo(x, y - 3)
+          ctx.moveTo(x, y + 3);  ctx.lineTo(x, y + 11)
+          ctx.stroke()
+          if (g.name && isSelected) drawGuideLabel(ctx, x + 12, y - 9, `${g.name} — mark here`, strong)
+        }
+      }
+      ctx.restore()
+    }
   }
 
   // GCP markers — observation pixel positions on this image
@@ -1151,6 +1225,8 @@ watch(() => props.showMask,          () => drawOverlay())
 watch(() => props.showDepth,         () => drawOverlay())
 watch(() => props.showGcps,          () => drawOverlay())
 watch(() => props.gcps,              () => drawOverlay(), { deep: true })
+watch(() => props.gcpGuides,         () => drawOverlay())
+watch(() => props.gcpEdit,           () => drawOverlay()) // gates the guides too
 watch(() => props.selectedGcpId,     () => drawOverlay())
 watch(() => props.fiducialObs,       () => drawOverlay(), { deep: true })
 watch(() => props.isFilm,            () => drawOverlay())
@@ -1231,7 +1307,18 @@ function onKeydown(e) {
 }
 
 onMounted(() => {
-  resizeObserver = new ResizeObserver(() => fit())
+  // Only refit on a *real* viewport change. A v-show-hidden tab collapses to 0×0
+  // and springs back to its old size when reactivated — refitting on that would
+  // throw away the zoom/pan the user left the tab with.
+  resizeObserver = new ResizeObserver(() => {
+    const c = container.value
+    if (!c) return
+    const w = c.clientWidth, h = c.clientHeight
+    if (!w || !h) return
+    if (lastSize && lastSize.w === w && lastSize.h === h) return
+    lastSize = { w, h }
+    fit()
+  })
   if (container.value) resizeObserver.observe(container.value)
   document.addEventListener('keydown', onKeydown)
 })

@@ -4,11 +4,10 @@ import { terminateAll } from '../workers/computeClient.js'
 // images:           Ref<Array>    — current image list, used to count pending work
 // detectAll:        function      — from useImagesStore
 // matchAll:         function      — from useMatchesStore
-// onImageDetected:  function      — from useTabs, called after each detection to update overlays
 // reconstruct:      function      — from useReconstructionStore
 // computeDepthMaps:  function      — from useReconstructionStore (dense Stage A)
 // densify:          function      — from useReconstructionStore (dense Stage B)
-export function usePipeline({ images, detectAll, matchAll, onImageDetected, reconstruct, computeDepthMaps, densify, generateDem, generateOrtho, generateMesh }) {
+export function usePipeline({ images, detectAll, matchAll, reconstruct, computeDepthMaps, densify, generateDem, generateOrtho, generateMesh }) {
   const progressOpen    = ref(false)
   const progressTitle   = ref('')
   const progressCurrent = ref(0)
@@ -48,7 +47,9 @@ export function usePipeline({ images, detectAll, matchAll, onImageDetected, reco
     // also hard-terminates the pool — the in-flight detect rejects, detectOne
     // reverts that image, and the batch loop exits on the aborted flag.
     openProgress('Detecting Features', pending.length, () => terminateAll('detection cancelled'))
-    await detectAll(settings, onImageDetected, (done, total, name) => {
+    // No per-image overlay callback: the keypoint overlay is a global toggle gated on
+    // the image's own kpStatus, so it lights up reactively as each detection lands.
+    await detectAll(settings, null, (done, total, name) => {
       progressCurrent.value = done
       progressTotal.value   = total
       progressLabel.value   = name ?? ''

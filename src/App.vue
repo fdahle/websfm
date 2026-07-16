@@ -26,6 +26,7 @@ import DevConsole from './components/layout/DevConsole.vue'
 import { useImagesStore } from './stores/useImagesStore.js'
 import { useMatchesStore } from './stores/useMatchesStore.js'
 import { useTabs } from './composables/useTabs.js'
+import { useImageViewSettings } from './composables/useImageViewSettings.js'
 import { useProjectsStore } from './stores/useProjectsStore.js'
 import { useTheme } from './composables/useTheme.js'
 import { useModalsStore } from './stores/useModalsStore.js'
@@ -109,8 +110,20 @@ const {
   activateTab, openImageTab, openProductTab, openGcpTab,
   closeTab, closeTabForImage, moveTab,
   closeAllTabs, closeOtherTabs, closeTabsToLeft, closeTabsToRight,
-  onImageDetected, resetToViewer, rememberOverlayPrefs,
+  resetToViewer,
 } = useTabs(imageById, showMap)
+
+// Image-view overlay + edit toggles: one global, persisted preference shared by every
+// image tab (switching images never changes them), not per-tab state.
+const { imageViewPrefs, setImageViewPrefs } = useImageViewSettings()
+function patchImageView(patch) {
+  setImageViewPrefs({ ...imageViewPrefs.value, ...patch })
+}
+// Keypoints can only draw once the image has been detected, so the global toggle is
+// gated per image rather than forced off on the preference itself.
+function showKeypointsFor(img) {
+  return imageViewPrefs.value.showKeypoints && img?.kpStatus === 'done'
+}
 
 // ── Tab drag-reorder + context menu ─────────────────────────────────────────────
 const {
@@ -126,8 +139,8 @@ const { sidebarWidth, startSidebarResize } = useSidebarResize()
 // ── Reconstruction ────────────────────────────────────────────────────────────
 // Project-scoped store; restore/clear run through the project-store registry.
 const reconstructionStore = useReconstructionStore()
-const { cameras, sparseCameras, points3d, reconStatus, clouds, selectedCloudId, selectedCloud, mainSparseId, mainSparseCloud, depthMaps, dem, ortho, georef, canGeoreference } = storeToRefs(reconstructionStore)
-const { reconstruct, importColmapModel, importCloud, computeDepthMaps, densify, generateDem, generateOrtho, generateMesh, georeference, gcpAccuracyReport, selectCloud, removeCloud, renameCloud, setMainSparse } = reconstructionStore
+const { cameras, sparseCameras, points3d, reconStatus, clouds, selectedCloudId, selectedCloud, mainSparseId, mainSparseCloud, depthMapCount, dem, ortho, georef, canGeoreference } = storeToRefs(reconstructionStore)
+const { reconstruct, importColmapModel, importCloud, computeDepthMaps, densify, generateDem, generateOrtho, generateMesh, georeference, gcpAccuracyReport, gcpGuides, selectCloud, removeCloud, renameCloud, setMainSparse } = reconstructionStore
 
 // Clicking a point cloud in the sidebar shows it in the 3D viewer.
 function showCloud(id) {
@@ -162,10 +175,9 @@ async function refreshGcpReport() {
 const selectedGcpId = ref(null)
 function selectGcp(id) { selectedGcpId.value = id }
 
-// Turn on the GCP overlay for an image's tab so a freshly-placed mark is visible.
-function ensureGcpsVisible(imageId) {
-  const tab = tabs.value.find((t) => t.type === 'image' && t.imageId === imageId)
-  if (tab && !tab.showGcps) { tab.showGcps = true; rememberOverlayPrefs(tab) }
+// Turn on the GCP overlay so a freshly-placed mark is visible.
+function ensureGcpsVisible() {
+  if (!imageViewPrefs.value.showGcps) patchImageView({ showGcps: true })
 }
 
 // Right-click marking in the image view. Assign attaches the clicked pixel to an
@@ -174,14 +186,14 @@ function ensureGcpsVisible(imageId) {
 function assignGcpObservation(imageId, imageName, { gcpId, px, py }) {
   setObservation(gcpId, imageId, imageName, px, py)
   selectedGcpId.value = gcpId
-  ensureGcpsVisible(imageId)
+  ensureGcpsVisible()
   refreshGcpReport()
 }
 function addGcpAtObservation(imageId, imageName, { px, py }) {
   const id = addGcp()
   setObservation(id, imageId, imageName, px, py)
   selectedGcpId.value = id
-  ensureGcpsVisible(imageId)
+  ensureGcpsVisible()
   refreshGcpReport()
 }
 // Sidebar observation-list actions.
@@ -271,11 +283,12 @@ const {
   progressOpen, progressTitle, progressCurrent, progressTotal, progressLabel,
   cancelRun, runDetect, runMatch, runReconstruct, runComputeDepthMaps, runDensify,
   runGenerateDem, runGenerateOrtho, runGenerateMesh,
-} = usePipeline({ images, detectAll, matchAll, onImageDetected, reconstruct, computeDepthMaps, densify, generateDem, generateOrtho, generateMesh })
+} = usePipeline({ images, detectAll, matchAll, reconstruct, computeDepthMaps, densify, generateDem, generateOrtho, generateMesh })
 
 // Dense pipeline gating for the Ribbon.
 const sparseReady = computed(() => clouds.value.some((c) => c.kind === 'sparse' && c.cameras.size >= 2))
-const depthMapCount = computed(() => depthMaps.value.size)
+// From the store: counts saved-but-not-yet-hydrated maps too, so Densify / Ortho
+// stay enabled after a project reopen (the planes load on demand).
 // Products gating: a DEM needs any cloud; an ortho needs a DEM (+ depth maps);
 // the preview needs a built product.
 const cloudReady = computed(() => clouds.value.some((c) =>
@@ -419,15 +432,16 @@ const activeImageViewState = computed(() => {
   if (!tab || tab.type !== 'image') return null
   const img = imageById(tab.imageId)
   if (!img) return null
+  const prefs = imageViewPrefs.value
   return {
-    showKeypoints: tab.showKeypoints,
-    showMask:      tab.showMask,
-    showDepth:     tab.showDepth,
-    showGcps:      tab.showGcps,
-    showFiducials: tab.showFiducials,
+    showKeypoints: showKeypointsFor(img),
+    showMask:      prefs.showMask,
+    showDepth:     prefs.showDepth,
+    showGcps:      prefs.showGcps,
+    showFiducials: prefs.showFiducials,
     isFilm:        sensorForImage(tab.imageId)?.kind === 'film',
-    maskEdit:      !!tab.maskEdit,
-    gcpEdit:       !!tab.gcpEdit,
+    maskEdit:      prefs.maskEdit,
+    gcpEdit:       prefs.gcpEdit,
     kpStatus:      img.kpStatus,
     kpCount:       img.kpCount,
     hasMask:       !!img.mask,
@@ -456,6 +470,36 @@ const activeImageGcps = computed(() => {
   }
   return out
 })
+
+// Guided marking: for GCPs *not yet* marked on the active image, where the
+// current cloud's poses say they must lie — a predicted pixel (≥2 other
+// observations) or an epipolar line (exactly 1). Async (triangulation goes
+// through wasm), so a token drops out-of-order results; empty unless the image
+// is registered and the GCP overlay is being looked at.
+const activeImageGcpGuides = ref([])
+let guideToken = 0
+async function refreshGcpGuides() {
+  const tab = activeTab.value
+  const prefs = imageViewPrefs.value
+  if (tab?.type !== 'image' || !(prefs.showGcps || prefs.gcpEdit)) {
+    activeImageGcpGuides.value = []
+    return
+  }
+  const token = ++guideToken
+  const res = await gcpGuides(tab.imageId)
+  if (token === guideToken) activeImageGcpGuides.value = res
+}
+// Cameras change on a rebuild (`sparseCameras` is a fresh Map), so a shallow
+// watch catches it — no deep traversal of every camera's R/t/K.
+watch(
+  [() => activeTab.value?.imageId, () => imageViewPrefs.value.showGcps,
+   () => imageViewPrefs.value.gcpEdit, sparseCameras],
+  refreshGcpGuides,
+  { immediate: true },
+)
+// Marks mutate in place, so this one needs to be deep — it's what retires a
+// guide the moment its GCP is marked on this image.
+watch(gcps, refreshGcpGuides, { deep: true })
 
 // Just [{ id, name }] of every GCP — the image viewer's right-click "assign to
 // existing" submenu.
@@ -536,8 +580,8 @@ onMounted(async () => {
       else if (!closeTopModal()) {
         // Nothing modal to dismiss — Escape exits mask/GCP-edit mode on the active tab.
         const tab = activeTab.value
-        if (tab?.type === 'image' && tab.maskEdit) tab.maskEdit = false
-        else if (tab?.type === 'image' && tab.gcpEdit) tab.gcpEdit = false
+        if (tab?.type === 'image' && imageViewPrefs.value.maskEdit) patchImageView({ maskEdit: false })
+        else if (tab?.type === 'image' && imageViewPrefs.value.gcpEdit) patchImageView({ gcpEdit: false })
       }
     }
   })
@@ -704,8 +748,7 @@ function onReconstructRun(settings) { reconstructOpen.value    = false;  runReco
 function editMask(id) {
   maskManagerOpen.value = false
   openImageTab(id)
-  const tab = activeTab.value
-  if (tab?.type === 'image') { tab.showDepth = false; tab.maskEdit = true }
+  patchImageView({ showDepth: false, maskEdit: true, gcpEdit: false })
 }
 function onDepthMapsRun(settings)   { depthMapsOpen.value      = false;  runComputeDepthMaps(settings) }
 function onDenseRun(settings)       { denseOpen.value          = false;  runDensify(settings) }
@@ -876,57 +919,50 @@ function handleCommand(id) {
     case 'img-show-info':        if (activeImageTab.value) infoImageId.value = activeImageTab.value.id; break
     case 'img-remove':           if (activeImageTab.value) requestRemoveImages(activeImageTab.value.id); break
     case 'img-toggle-keypoints': {
-      const tab = activeTab.value
-      if (tab?.type === 'image') { tab.showKeypoints = !tab.showKeypoints; rememberOverlayPrefs(tab) }
+      // The toggle is global, but the overlay only draws on detected images
+      // (showKeypointsFor), so flipping it here reads the preference, not the gate.
+      if (activeTab.value?.type === 'image') patchImageView({ showKeypoints: !imageViewPrefs.value.showKeypoints })
       break
     }
     case 'img-toggle-mask': {
-      const tab = activeTab.value
       // Mask and depth overlays are mutually exclusive — turning one on clears the other.
-      if (tab?.type === 'image') {
-        tab.showMask = !tab.showMask
-        if (tab.showMask) tab.showDepth = false
-        rememberOverlayPrefs(tab)
+      if (activeTab.value?.type === 'image') {
+        const on = !imageViewPrefs.value.showMask
+        patchImageView({ showMask: on, ...(on ? { showDepth: false } : {}) })
       }
       break
     }
     case 'img-toggle-depth': {
-      const tab = activeTab.value
-      if (tab?.type === 'image') {
-        tab.showDepth = !tab.showDepth
-        if (tab.showDepth) tab.showMask = false
-        rememberOverlayPrefs(tab)
+      if (activeTab.value?.type === 'image') {
+        const on = !imageViewPrefs.value.showDepth
+        patchImageView({ showDepth: on, ...(on ? { showMask: false } : {}) })
       }
       break
     }
     case 'img-toggle-gcps': {
-      const tab = activeTab.value
-      if (tab?.type === 'image') { tab.showGcps = !tab.showGcps; rememberOverlayPrefs(tab) }
+      if (activeTab.value?.type === 'image') patchImageView({ showGcps: !imageViewPrefs.value.showGcps })
       break
     }
     case 'img-toggle-fiducials': {
-      const tab = activeTab.value
-      if (tab?.type === 'image') { tab.showFiducials = !tab.showFiducials; rememberOverlayPrefs(tab) }
+      if (activeTab.value?.type === 'image') patchImageView({ showFiducials: !imageViewPrefs.value.showFiducials })
       break
     }
     case 'img-mask-edit': {
-      const tab = activeTab.value
-      if (tab?.type === 'image') {
-        tab.maskEdit = !tab.maskEdit
+      if (activeTab.value?.type === 'image') {
+        const on = !imageViewPrefs.value.maskEdit
         // Mask-edit mode always renders the mask overlay itself (ViewerImage keys
         // it on `showMask || maskEdit`), so don't touch the user's showMask toggle
         // here — just make sure depth (mutually exclusive) is off while editing.
-        if (tab.maskEdit) { tab.showDepth = false; tab.gcpEdit = false }
+        patchImageView({ maskEdit: on, ...(on ? { showDepth: false, gcpEdit: false } : {}) })
       }
       break
     }
     case 'img-gcp-edit': {
-      const tab = activeTab.value
-      if (tab?.type === 'image') {
-        tab.gcpEdit = !tab.gcpEdit
+      if (activeTab.value?.type === 'image') {
+        const on = !imageViewPrefs.value.gcpEdit
         // GCP-edit needs the markers visible and is mutually exclusive with mask
         // editing; leave depth alone (GCPs draw over it fine).
-        if (tab.gcpEdit) { tab.showGcps = true; tab.maskEdit = false; rememberOverlayPrefs(tab) }
+        patchImageView({ gcpEdit: on, ...(on ? { showGcps: true, maskEdit: false } : {}) })
       }
       break
     }
@@ -1381,21 +1417,22 @@ function onRibbonPick(event) {
               v-show="activeTabId === tab.id"
               :ref="(el) => { if (el) imageViewerRefs[tab.imageId] = el; else delete imageViewerRefs[tab.imageId] }"
               :image="imageById(tab.imageId)"
-              :show-keypoints="tab.showKeypoints"
-              :show-mask="tab.showMask"
-              :show-depth="tab.showDepth"
-              :show-gcps="tab.showGcps"
+              :show-keypoints="showKeypointsFor(imageById(tab.imageId))"
+              :show-mask="imageViewPrefs.showMask"
+              :show-depth="imageViewPrefs.showDepth"
+              :show-gcps="imageViewPrefs.showGcps"
               :gcps="activeTabId === tab.id ? activeImageGcps : []"
+              :gcp-guides="activeTabId === tab.id ? activeImageGcpGuides : []"
               :all-gcps="allGcpsBrief"
               :selected-gcp-id="selectedGcpId"
-              :mask-edit="tab.maskEdit"
-              :gcp-edit="tab.gcpEdit"
-              @exit-mask-edit="tab.maskEdit = false"
-              @exit-gcp-edit="tab.gcpEdit = false"
+              :mask-edit="imageViewPrefs.maskEdit"
+              :gcp-edit="imageViewPrefs.gcpEdit"
+              @exit-mask-edit="patchImageView({ maskEdit: false })"
+              @exit-gcp-edit="patchImageView({ gcpEdit: false })"
               @update-mask="(dataUrl, persist) => updateMask(tab.imageId, dataUrl, persist)"
               @update-depth="(dataUrl) => updateDepth(tab.imageId, dataUrl)"
               :is-film="sensorForImage(tab.imageId)?.kind === 'film'"
-              :show-fiducials="tab.showFiducials"
+              :show-fiducials="imageViewPrefs.showFiducials"
               :fiducial-marks="sensorForImage(tab.imageId)?.fiducials?.marks ?? []"
               :fiducial-obs="imageById(tab.imageId)?.fiducialObs ?? []"
               @mark-gcp="(pt) => assignGcpObservation(tab.imageId, imageById(tab.imageId)?.name, pt)"

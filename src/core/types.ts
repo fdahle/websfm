@@ -100,6 +100,44 @@ export interface MeshCloud {
   col: Uint8Array | null
 }
 
+/**
+ * Per-image dense Stage A output: four per-pixel planes at working resolution,
+ * plus the pose/intrinsics they were computed against. Stage B (fusion) and the
+ * orthophoto both consume these. Persisted to OPFS (depthmaps/) — the metadata to
+ * index.json, the planes to binary sidecars; see core/dense/depthMapCodec.js.
+ */
+export interface DepthMapMeta {
+  /** image uuid. */
+  uuid: string
+  width: number
+  height: number
+  /** intrinsics at working resolution (scaled from the sensor's K). */
+  K: { fx: number; fy: number; cx: number; cy: number }
+  /** world-to-cam rotation, row-major. */
+  R: number[][]
+  /** world-to-cam translation. */
+  t: number[]
+  /** whether the `normals` plane exists for this map. */
+  hasNormals?: boolean
+}
+
+export interface DepthMap extends DepthMapMeta {
+  /** metres along the camera ray, length W·H; <= 0 means "no data" everywhere. */
+  depth: Float32Array
+  /** ZNCC matching cost, length W·H (fusion's maxCost gate reads it). */
+  cost: Float32Array
+  /** working-resolution rgb (0–255), length 3·W·H. */
+  rgb: Uint8Array
+  /**
+   * Camera-frame unit plane normals, length 3·W·H; null when the run produced
+   * none. Holes are defined by depth <= 0, so stale normals under a zeroed depth
+   * are harmless and deliberately not cleaned up.
+   */
+  normals: Float32Array | null
+  /** display-only preview PNG; not persisted here (the images store owns it). */
+  displayDataUrl?: string
+}
+
 /** A 2D observation of a 3D point in a given camera, in pixel coords. */
 export interface Observation {
   camIdx: number

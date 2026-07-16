@@ -1,3 +1,5 @@
+import { DEPTH_BIN_KEYS } from '../core/dense/depthMapCodec.js'
+
 const FLOATS_PER_KP = 6 // x, y, nx, ny, scale, response
 
 async function getRoot() {
@@ -348,7 +350,9 @@ export async function deleteMask(projectId, uuid) {
   } catch {}
 }
 
-// ── Depth maps ────────────────────────────────────────────────────────────────
+// ── Depth maps (display previews) ─────────────────────────────────────────────
+// The per-image preview PNG shown in the viewer. The heavy float planes behind
+// it are a separate concern — see "Depth-map planes" below.
 
 export async function saveDepth(projectId, uuid, dataUrl) {
   const res = await fetch(dataUrl)
@@ -378,7 +382,90 @@ export async function loadDepthDataUrl(projectId, uuid) {
 export async function deleteDepth(projectId, uuid) {
   try {
     const dir = await getSubDir(projectId, 'depthmaps')
-    await dir.removeEntry(uuid + '.png')
+    await dir.removeEntry(uuid + '.png').catch(() => {})
+    // The float planes belong to the same image — drop them together, or an
+    // image removal would leave orphaned (and much larger) sidecars behind.
+    for (const key of DEPTH_BIN_KEYS) {
+      await dir.removeEntry(`${uuid}.${key}.bin`).catch(() => {})
+    }
+  } catch {}
+}
+
+// ── Depth-map planes ──────────────────────────────────────────────────────────
+// The dense Stage A output: minutes of PatchMatch per image, so it is persisted
+// rather than recomputed (the one exception to "everything recomputable is
+// recomputed" — see core/dense/depthMapCodec.js for the layout and why).
+// Metadata → depthmaps/index.json:
+//   { version: 1, sparseCloudId, sparseCreatedAt, settings,
+//     maps: [{ uuid, width, height, K, R, t, hasNormals }] }
+// The per-pixel planes go in sibling binaries, `{uuid}.{depth|cost|nrm|rgb}.bin`,
+// so the store can read the index (tiny) on project open and hydrate the planes
+// (hundreds of MB) only when densify / ortho actually need them.
+
+async function removeStaleDepthBins(dir, keepUuids) {
+  const stale = []
+  for await (const name of dir.keys()) {
+    const m = name.match(/^(.+)\.(?:depth|cost|nrm|rgb)\.bin$/)
+    if (m && !keepUuids.has(m[1])) stale.push(name)
+  }
+  for (const name of stale) await dir.removeEntry(name).catch(() => {})
+}
+
+// `entries`: [{ uuid, buffers: { depth, cost, nrm, rgb } }] — buffers as
+// ArrayBuffers (writing does not detach them, so the caller's cache stays live).
+export async function saveDepthPlanes(projectId, index, entries) {
+  const dir = await getSubDir(projectId, 'depthmaps')
+  const keep = new Set()
+  for (const { uuid, buffers } of entries) {
+    keep.add(uuid)
+    for (const key of DEPTH_BIN_KEYS) {
+      const buf = buffers?.[key]
+      const name = `${uuid}.${key}.bin`
+      if (buf && buf.byteLength) await writeBin(dir, name, buf)
+      else await dir.removeEntry(name).catch(() => {})   // e.g. nrm absent
+    }
+  }
+  await writeJson(dir, 'index.json', index)
+  await removeStaleDepthBins(dir, keep)   // drop planes of images no longer mapped
+}
+
+// Rewrite the index alone, leaving the planes untouched (e.g. after dropping the
+// entries of images that were removed).
+export async function saveDepthIndex(projectId, index) {
+  const dir = await getSubDir(projectId, 'depthmaps')
+  await writeJson(dir, 'index.json', index)
+}
+
+export async function loadDepthIndex(projectId) {
+  try {
+    const dir = await getSubDir(projectId, 'depthmaps')
+    return await readJson(dir, 'index.json')
+  } catch {
+    return null
+  }
+}
+
+// Read the planes for the given metadata entries. A map whose sidecars are
+// missing comes back with null buffers; the caller (codec) rejects it rather
+// than fusing a partial set.
+export async function loadDepthPlanes(projectId, metas) {
+  const dir = await getSubDir(projectId, 'depthmaps')
+  const out = []
+  for (const meta of metas) {
+    const buffers = {}
+    for (const key of DEPTH_BIN_KEYS) {
+      buffers[key] = await readBin(dir, `${meta.uuid}.${key}.bin`).catch(() => null)
+    }
+    out.push({ uuid: meta.uuid, buffers })
+  }
+  return out
+}
+
+export async function deleteDepthPlanes(projectId) {
+  try {
+    const dir = await getSubDir(projectId, 'depthmaps')
+    await dir.removeEntry('index.json').catch(() => {})
+    await removeStaleDepthBins(dir, new Set())
   } catch {}
 }
 
