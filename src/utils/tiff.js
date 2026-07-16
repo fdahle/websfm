@@ -66,20 +66,68 @@ export async function readTiffDimensions(blob) {
 // `onThumbnail` callback fires with a small (≤512px) preview blob *before*
 // the two full-res encodes run, so callers can show something well before
 // the (comparatively slow) full JPEG+PNG encode finishes.
-export async function tiffToDisplayBlob(blob, { jpegQuality = 0.92, onThumbnail, onDisplay } = {}) {
-  const tiff = await fromBlob(blob)
-  const image = await tiff.getImage()
-  const width = image.getWidth()
-  const height = image.getHeight()
+export async function tiffToDisplayBlob(blob, { jpegQuality = 0.92, onThumbnail, onDisplay, decoder } = {}) {
+  // Per-stage wall-clock timings (ms), surfaced in the returned result so the
+  // caller can log the decode/repack/JPEG/PNG split — the baseline that showed
+  // decode (pure-JS geotiff) is ~87% of ingest and drove the native decoder. See
+  // the TIFF-codec plan (TODO ▸ TC).
+  const timings = {}
+  const t0 = performance.now()
 
-  const rgb = await image.readRGB({ interleave: true })
-  const spp = rgb.length / (width * height) // 3 (RGB) or 4 (RGBA)
-  const rgba = new Uint8ClampedArray(width * height * 4)
-  for (let px = 0, s = 0; px < width * height; px++, s += spp) {
-    rgba[px * 4]     = rgb[s]
-    rgba[px * 4 + 1] = rgb[s + 1]
-    rgba[px * 4 + 2] = rgb[s + 2]
-    rgba[px * 4 + 3] = spp === 4 ? rgb[s + 3] : 255
+  // Decode is the dominant cost. Prefer the injected native (Rust/WASM) decoder,
+  // which returns interleaved 8-bit RGBA directly (no repack); on ANY failure
+  // (exotic photometric / JPEG-in-TIFF / float the `tiff` crate can't handle)
+  // fall back to the pure-JS geotiff path so no input regresses. `srcInfo` is
+  // diagnostic only (compression/bit-depth for the baseline log).
+  let width, height, rgba
+  const srcInfo = { srcBytes: blob.size }
+  timings.backend = 'geotiff'
+
+  if (decoder) {
+    try {
+      const dec = await decoder(blob)               // { width, height, rgba: Uint8Array(RGBA) }
+      width = dec.width
+      height = dec.height
+      rgba = dec.rgba instanceof Uint8ClampedArray ? dec.rgba : new Uint8ClampedArray(dec.rgba.buffer, dec.rgba.byteOffset, dec.rgba.byteLength)
+      timings.backend = 'wasm'
+      timings.decodeMs = performance.now() - t0
+      timings.repackMs = 0
+    } catch {
+      // fall through to geotiff below
+    }
+  }
+
+  if (!rgba) {
+    const tiff = await fromBlob(blob)
+    const image = await tiff.getImage()
+    width = image.getWidth()
+    height = image.getHeight()
+
+    // Source shape (before readRGB collapses everything to 8-bit RGB): grayscale
+    // / high-bit-depth / compression — the factors that sized the native win.
+    // Prefer geotiff's accessor methods (fileDirectory tag names can be absent on
+    // some IFDs); fall back to the raw directory for the compression tag.
+    const fd = (typeof image.getFileDirectory === 'function' ? image.getFileDirectory() : image.fileDirectory) || {}
+    const bps = typeof image.getBitsPerSample === 'function' ? image.getBitsPerSample() : fd.BitsPerSample
+    srcInfo.photometric = typeof image.getPhotometricInterpretation === 'function'
+      ? image.getPhotometricInterpretation() : fd.PhotometricInterpretation // 1=gray, 2=RGB, 3=palette, 6=YCbCr…
+    srcInfo.samplesPerPixel = typeof image.getSamplesPerPixel === 'function' ? image.getSamplesPerPixel() : fd.SamplesPerPixel
+    srcInfo.bitsPerSample = Array.isArray(bps) ? bps[0] : bps
+    srcInfo.compression = fd.Compression             // 1=none, 5=LZW, 8=Deflate, 32773=PackBits, 7=JPEG…
+
+    const rgb = await image.readRGB({ interleave: true })
+    timings.decodeMs = performance.now() - t0
+
+    const tRepack = performance.now()
+    const spp = rgb.length / (width * height) // 3 (RGB) or 4 (RGBA)
+    rgba = new Uint8ClampedArray(width * height * 4)
+    for (let px = 0, s = 0; px < width * height; px++, s += spp) {
+      rgba[px * 4]     = rgb[s]
+      rgba[px * 4 + 1] = rgb[s + 1]
+      rgba[px * 4 + 2] = rgb[s + 2]
+      rgba[px * 4 + 3] = spp === 4 ? rgb[s + 3] : 255
+    }
+    timings.repackMs = performance.now() - tRepack
   }
 
   const canvas = new OffscreenCanvas(width, height)
@@ -101,11 +149,19 @@ export async function tiffToDisplayBlob(blob, { jpegQuality = 0.92, onThumbnail,
   // onDisplay the moment it lands (well before the slower PNG) so the viewer is
   // fully usable while compute (computeUrl) waits on the final result — nothing
   // lossy ever reaches detection/dense.
+  const tEncode = performance.now()
   const displayPromise = canvas.convertToBlob({ type: 'image/jpeg', quality: jpegQuality })
   const computePromise = canvas.convertToBlob({ type: 'image/png' })
+  let jpegDoneAt = null
   if (onDisplay) displayPromise.then(onDisplay).catch(() => {})
+  displayPromise.then(() => { jpegDoneAt = performance.now() }).catch(() => {})
   const [displayBlob, computeBlob] = await Promise.all([displayPromise, computePromise])
-  return { displayBlob, computeBlob, width, height }
+  // JPEG and PNG encode concurrently, so these overlap rather than sum: jpegMs
+  // is time-to-JPEG, pngMs is total encode time (dominated by the slower PNG).
+  timings.jpegMs = (jpegDoneAt ?? performance.now()) - tEncode
+  timings.pngMs = performance.now() - tEncode
+  timings.totalMs = performance.now() - t0
+  return { displayBlob, computeBlob, width, height, timings, srcInfo }
 }
 
 // Convenience: given a File/Blob (+ optional name for restore Blobs), return a

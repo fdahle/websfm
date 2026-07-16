@@ -13,13 +13,23 @@ const props = defineProps({
   usedKeys: { type: Object, default: null },
 })
 
-// aligned / unused split for the status-bar legend (only meaningful with usedKeys).
+// aligned / unused / via-PnP split for the status-bar legend (only meaningful with
+// usedKeys). `used` = direct matches that triangulated; `unused` = verified inliers
+// that never made the model; `viaPnp` = tie-point correspondences between these two
+// images that are NOT among this pair's direct matches — they entered the model via
+// PnP registration / track extension elsewhere (this is why "Used" can exceed
+// "Matches" in the list).
 const usedStats = computed(() => {
   if (!props.usedKeys) return null
   let used = 0
   for (const [ia, ib] of props.matches) if (props.usedKeys.has(`${ia}:${ib}`)) used++
-  return { used, unused: props.matches.length - used }
+  const unused = props.matches.length - used
+  const viaPnp = Math.max(0, props.usedKeys.size - used)
+  return { used, unused, viaPnp }
 })
+
+// Hide the unused (red) matches — dots + lines — in the preview. Preview-local.
+const hideUnused = ref(false)
 
 // Colour palette, mirroring Metashape's aligned/not-aligned convention.
 const C_USED = '#00e676'     // green — became a tie-point
@@ -174,12 +184,16 @@ function drawOverlay() {
       ctx.stroke()
     }
   }
-  if (used) { drawLines(false); drawLines(true) } else drawLines(true)
+  if (used) {
+    if (!hideUnused.value) drawLines(false)  // unused (red) — suppressed when hiding
+    drawLines(true)
+  } else drawLines(true)
   ctx.restore()
 
   // Dots — coloured by the same aligned/unused status on both panels.
   const DOT = 4
   for (const [ia, ib] of pairs) {
+    if (used && hideUnused.value && !used.has(`${ia}:${ib}`)) continue
     const c = colorOf(ia, ib)
     const a = kpsA[ia]
     if (a) {
@@ -213,6 +227,7 @@ onBeforeUnmount(() => resizeObserver?.disconnect())
 
 watch(() => props.matches,          () => drawOverlay(), { deep: false })
 watch(() => props.usedKeys,         () => drawOverlay())
+watch(hideUnused,                   () => drawOverlay())
 watch(() => props.imageA.keypoints, () => drawOverlay())
 watch(() => props.imageB.keypoints, () => drawOverlay())
 
@@ -281,6 +296,14 @@ function onImgLoad(side) {
       <span v-if="usedStats" class="match-legend">
         <span class="swatch used" /> {{ usedStats.used }} aligned
         <span class="swatch unused" /> {{ usedStats.unused }} unused
+        <template v-if="usedStats.viaPnp"><span class="swatch pnp" /> {{ usedStats.viaPnp }} via PnP</template>
+        <button
+          v-if="usedStats.unused"
+          class="legend-toggle"
+          :class="{ on: hideUnused }"
+          :title="hideUnused ? 'Show unused matches' : 'Hide unused (red) matches'"
+          @click="hideUnused = !hideUnused"
+        >{{ hideUnused ? 'Show unused' : 'Hide unused' }}</button>
       </span>
       <span v-else class="match-count">{{ matches.length }} tie points</span>
       <span class="panel-label">{{ imageB.name }}</span>
@@ -374,6 +397,21 @@ function onImgLoad(side) {
 .match-legend .swatch:first-child { margin-left: 0; }
 .match-legend .swatch.used   { background: #00e676; }
 .match-legend .swatch.unused { background: #ff5252; }
+.match-legend .swatch.pnp    { background: #40a0ff; }
+
+.legend-toggle {
+  margin-left: 10px;
+  background: none;
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 10px;
+  padding: 1px 7px;
+  cursor: pointer;
+}
+.legend-toggle:hover { background: var(--hover-bg); color: var(--text); }
+.legend-toggle.on { border-color: var(--accent); color: var(--accent); }
 
 .panel-label {
   max-width: 40%;

@@ -466,8 +466,11 @@ export function makeDenseOps({ rasterize }) {
     const flat = fuseDepthMaps(maps, settings,
       (m, l, c) => emit('log', [m, l, c]),
       { onProgress: (d, t, lbl) => emit('progress', [d, t, lbl]) })
-    emit('log', [`Dense cloud: fused ${maps.length} depth maps → ${flat.length / 6} points `
-      + `in ${((performance.now() - tFuse) / 1000).toFixed(1)}s`, 'success', 'Dense'])
+    const nPoints = flat.length / 6
+    emit('log', [`Dense cloud: fused ${maps.length} depth maps → ${nPoints} points `
+      + `in ${((performance.now() - tFuse) / 1000).toFixed(1)}s`
+      + (nPoints === 0 ? ' — no pixels survived cross-view consistency; check intrinsics/distortion, Quality, or fusion gates (maxCost / minViews / parallax)' : ''),
+      nPoints === 0 ? 'error' : 'success', 'Dense'])
     emit('progress', [total, total, 'Done'])
     // The store transfers each map's depth/cost/rgb/normals buffers in (no clone), so
     // return them so they round-trip home and the store can re-attach them to its

@@ -63,6 +63,7 @@ import ImportKindModal from './components/modals/ImportKindModal.vue'
 import ImportCloudModal from './components/modals/ImportCloudModal.vue'
 import * as opfs from './utils/opfs.js'
 import { ensureProjection } from './core/crs.js'
+import { resolveK } from './core/sfm/reconstruction.js'
 
 // ── Theme ─────────────────────────────────────────────────────────────────────
 const { theme, applyTheme, setTheme } = useTheme()
@@ -197,6 +198,13 @@ function removeGcpAndCloseTab(gcpId) {
   removeGcp(gcpId)
   closeTab(`gcp:${gcpId}`)
 }
+// Delete from the image-view GCP-edit toolbar: drop it, clear selection if it was
+// the target, and refresh reprojection feedback.
+function deleteGcpFromEditor(gcpId) {
+  removeGcpAndCloseTab(gcpId)
+  if (selectedGcpId.value === gcpId) selectedGcpId.value = null
+  refreshGcpReport()
+}
 function removeGcpObservation({ gcpId, imageId }) {
   removeObservation(gcpId, imageId)
   refreshGcpReport()
@@ -216,6 +224,20 @@ const {
   imageCount: sensorImageCount,
   addSensors, updateSensor, toggleSensorFixed, setFiducialMarks, assignSensor, mergeSensors, removeSensor, clearSensors, restoreSensors,
 } = sensorsStore
+
+// Sensor ids whose intrinsics fall back to the default-FOV guess for at least one
+// assigned image (or, with no images, on their own) — i.e. no usable calibration.
+// Surfaced with a ⚠ in the sidebar so an uncalibrated/incomplete sensor is visible
+// before reconstruction (same test SensorTable uses for its warn badge).
+const incompleteSensorIds = computed(() => {
+  const bad = new Set()
+  for (const s of sensors.value) {
+    const imgs = images.value.filter((i) => i.sensorId === s.id)
+    const probe = imgs.length ? imgs : [{ meta: null }]
+    if (probe.some((img) => resolveK(img.meta, s).source.startsWith('default FOV'))) bad.add(s.id)
+  }
+  return bad
+})
 
 // ── Camera poses (extrinsics) ─────────────────────────────────────────────────────
 const posesStore = usePosesStore()
@@ -405,6 +427,7 @@ const activeImageViewState = computed(() => {
     showFiducials: tab.showFiducials,
     isFilm:        sensorForImage(tab.imageId)?.kind === 'film',
     maskEdit:      !!tab.maskEdit,
+    gcpEdit:       !!tab.gcpEdit,
     kpStatus:      img.kpStatus,
     kpCount:       img.kpCount,
     hasMask:       !!img.mask,
@@ -450,23 +473,46 @@ const mapViewerRef = ref(null)
 
 // Push the selected point cloud into the 3D viewer. Reference changes on select,
 // rebuild (a fresh object replaces the sparse cloud), and restore.
+//
+// Building the Three.js scene (point buffers + per-camera frustum geometry/textures)
+// is heavy main-thread work, so we only do it while the 3D tab is actually shown.
+// Selecting/restoring a cloud while working in an image/map tab just stashes it as
+// `pendingScene`; it's flushed when the viewer tab becomes active. This keeps that
+// cost off the critical path (e.g. project restore lands on a different tab, or the
+// user selects clouds from the sidebar while in 2D).
+let pendingScene = null // { cameras, data } — the scene owed to the (possibly hidden) viewer
+function flushScene() {
+  if (!pendingScene) return
+  const { cameras, data } = pendingScene
+  pendingScene = null
+  if (data == null) viewerRef.value?.clearReconstructionData()
+  else viewerRef.value?.setReconstructionData(cameras, data)
+}
 watch(selectedCloud, (c) => {
   // Dense clouds are flat typed arrays; sparse clouds are point-object arrays; mesh
   // clouds are indexed triangle buffers. The viewer accepts all three (it hands the
   // dense/mesh position buffers straight to Three.js).
-  if (!c) { viewerRef.value?.clearReconstructionData(); return }
-  let data
-  if (c.kind === 'dense') data = { count: c.count, pos: c.pos, col: c.col }
-  else if (c.kind === 'mesh') data = { kind: 'mesh', nVerts: c.nVerts, count: c.count, pos: c.pos, idx: c.idx, col: c.col }
-  else data = c.points
-  viewerRef.value?.setReconstructionData(c.cameras, data)
+  let data = null
+  const cameras = c?.cameras ?? new Map()
+  if (c) {
+    if (c.kind === 'dense') data = { count: c.count, pos: c.pos, col: c.col }
+    else if (c.kind === 'mesh') data = { kind: 'mesh', nVerts: c.nVerts, count: c.count, pos: c.pos, idx: c.idx, col: c.col }
+    else data = c.points
+  }
+  pendingScene = { cameras, data }
+  if (activeTabId.value === 'viewer') flushScene()
 })
+// Build any scene owed to the viewer the moment its tab is shown.
+watch(activeTabId, (id) => { if (id === 'viewer') flushScene() })
 
 // ── 3D scene display toggles ───────────────────────────────────────────────────
 const showCameras = ref(true)
 const showGraticule = ref(true)
 // ── Map display toggles ────────────────────────────────────────────────────────
-const showFootprints = ref(true)
+// Footprints default off — they clutter the basemap and are only meaningful once
+// imported/computed; the ribbon toggle turns them on.
+const showFootprints = ref(false)
+const showMapGraticule = ref(true)
 
 // ── Console ───────────────────────────────────────────────────────────────────
 // True while a project is being restored — drives the interaction-blocking overlay.
@@ -488,9 +534,10 @@ onMounted(async () => {
     } else if (e.key === 'Escape') {
       if (tabCtx.value) closeTabCtx()
       else if (!closeTopModal()) {
-        // Nothing modal to dismiss — Escape exits mask-edit mode on the active tab.
+        // Nothing modal to dismiss — Escape exits mask/GCP-edit mode on the active tab.
         const tab = activeTab.value
         if (tab?.type === 'image' && tab.maskEdit) tab.maskEdit = false
+        else if (tab?.type === 'image' && tab.gcpEdit) tab.gcpEdit = false
       }
     }
   })
@@ -702,6 +749,63 @@ const deleteMessage = computed(() => {
   return `Remove ${p.ids.length} images? This also deletes their keypoints, masks, depth maps and matches. This can't be undone.`
 })
 
+// ── Generic confirm-before-delete (sidebar removals) ──────────────────────────
+// Every destructive sidebar action routes through one confirm dialog. Holds
+// { title, message, confirmLabel, onConfirm }; `askConfirm` opens it, the dialog
+// runs onConfirm on accept.
+const pendingConfirm = ref(null)
+function askConfirm(opts) { pendingConfirm.value = opts }
+function runPendingConfirm() {
+  const fn = pendingConfirm.value?.onConfirm
+  pendingConfirm.value = null
+  fn?.()
+}
+
+function confirmRemoveSensor(id) {
+  const s = sensors.value.find((x) => x.id === id)
+  askConfirm({
+    title: 'Remove sensor?',
+    message: `Remove sensor “${s?.label ?? id}”? Images assigned to it will be left without a sensor.`,
+    onConfirm: () => removeSensor(id),
+  })
+}
+function confirmRemoveCloud(id) {
+  const c = clouds.value.find((x) => x.id === id)
+  askConfirm({
+    title: 'Remove cloud?',
+    message: `Remove “${c?.name ?? 'this cloud'}”? This can't be undone.`,
+    onConfirm: () => removeCloud(id),
+  })
+}
+function confirmRemoveGcp(id) {
+  const g = gcps.value.find((x) => x.id === id)
+  askConfirm({
+    title: 'Remove GCP?',
+    message: `Remove GCP “${g?.name ?? id}” and all its image observations? This can't be undone.`,
+    onConfirm: () => removeGcpAndCloseTab(id),
+  })
+}
+function confirmRemoveFootprint(id) {
+  askConfirm({
+    title: 'Remove footprint?',
+    message: `Remove this footprint? This can't be undone.`,
+    onConfirm: () => removeFootprint(id),
+  })
+}
+function confirmClearKeypoints(idOrIds) {
+  const ids = (Array.isArray(idOrIds) ? idOrIds : [idOrIds]).filter(Boolean)
+  if (!ids.length) return
+  const msg = ids.length === 1
+    ? `Delete keypoints for “${imageById(ids[0])?.name ?? 'this image'}”? Its matches are dropped too and it must be re-detected before matching.`
+    : `Delete keypoints for ${ids.length} images? Their matches are dropped too and they must be re-detected before matching.`
+  askConfirm({
+    title: ids.length > 1 ? 'Delete keypoints?' : 'Delete keypoints?',
+    message: msg,
+    confirmLabel: 'Delete',
+    onConfirm: () => ids.forEach((id) => clearKeypoints(id)),
+  })
+}
+
 // ── ImageViewer refs (for imperative mask ops) ────────────────────────────────
 const imageViewerRefs = reactive({})
 const ribbonInput = ref(null)
@@ -745,6 +849,7 @@ function handleCommand(id) {
     case 'view-toggle-cameras':  showCameras.value = !showCameras.value; break
     case 'view-toggle-graticule': showGraticule.value = !showGraticule.value; break
     case 'map-fit-view':         mapViewerRef.value?.fitView(); break
+    case 'map-toggle-graticule': showMapGraticule.value = !showMapGraticule.value; break
     case 'map-toggle-footprints': showFootprints.value = !showFootprints.value; break
     case 'open-image-table':     imageTableOpen.value = true; break
     case 'open-mask-manager':    maskManagerOpen.value = true; break
@@ -811,7 +916,17 @@ function handleCommand(id) {
         // Mask-edit mode always renders the mask overlay itself (ViewerImage keys
         // it on `showMask || maskEdit`), so don't touch the user's showMask toggle
         // here — just make sure depth (mutually exclusive) is off while editing.
-        if (tab.maskEdit) tab.showDepth = false
+        if (tab.maskEdit) { tab.showDepth = false; tab.gcpEdit = false }
+      }
+      break
+    }
+    case 'img-gcp-edit': {
+      const tab = activeTab.value
+      if (tab?.type === 'image') {
+        tab.gcpEdit = !tab.gcpEdit
+        // GCP-edit needs the markers visible and is mutually exclusive with mask
+        // editing; leave depth alone (GCPs draw over it fine).
+        if (tab.gcpEdit) { tab.showGcps = true; tab.maskEdit = false; rememberOverlayPrefs(tab) }
       }
       break
     }
@@ -854,6 +969,7 @@ function onRibbonPick(event) {
       :scene-type="currentSceneType"
       :show-cameras="showCameras"
       :show-graticule="showGraticule"
+      :show-map-graticule="showMapGraticule"
       :show-footprints="showFootprints"
       :footprint-count="footprints.length"
       @command="handleCommand"
@@ -962,6 +1078,18 @@ function onRibbonPick(event) {
         danger
         @confirm="confirmRemoveImages"
         @cancel="pendingImageDelete = null"
+      />
+    </Teleport>
+
+    <Teleport to="body">
+      <ConfirmModal
+        v-if="pendingConfirm"
+        :title="pendingConfirm.title"
+        :message="pendingConfirm.message"
+        :confirm-label="pendingConfirm.confirmLabel || 'Remove'"
+        danger
+        @confirm="runPendingConfirm"
+        @cancel="pendingConfirm = null"
       />
     </Teleport>
 
@@ -1185,6 +1313,7 @@ function onRibbonPick(event) {
         :recon-status="reconStatus"
         :match-stats="matchStats"
         :sensor-image-count="sensorImageCount"
+        :incomplete-sensor-ids="incompleteSensorIds"
         :selected-id="selectedId"
         :aligned-uuids="alignedUuids"
         :has-sparse="hasSparse"
@@ -1193,28 +1322,28 @@ function onRibbonPick(event) {
         @open-product="openProductTab"
         @open-matches="matchListOpen = true"
         @select-cloud="showCloud"
-        @remove-cloud="removeCloud"
+        @remove-cloud="confirmRemoveCloud"
         @rename-cloud="({ id, name }) => renameCloud(id, name)"
         @set-main-cloud="setMainSparse"
         @reconstruct="reconstructOpen = true"
         @add-images="addImages"
         @import-file="openDroppedImport"
         @remove-image="requestRemoveImages"
-        @remove-gcp="removeGcpAndCloseTab"
+        @remove-gcp="confirmRemoveGcp"
         @select-gcp="selectGcp"
         @jump-to-image="jumpToImage"
         @remove-gcp-observation="removeGcpObservation"
         @open-gcp="openGcpView"
-        @remove-sensor="removeSensor"
+        @remove-sensor="confirmRemoveSensor"
         @merge-sensors="({ target, source }) => mergeSensors(target, source)"
         @open-sensor="sensorTableOpen = true"
         @assign-sensor="({ imageId, sensorId }) => assignSensor(imageId, sensorId)"
         @remove-pose="removePose"
-        @remove-footprint="removeFootprint"
+        @remove-footprint="confirmRemoveFootprint"
         @select="selectImage"
         @open="(id) => openImageTab(id)"
         @show-info="infoImageId = $event"
-        @delete-keypoints="clearKeypoints"
+        @delete-keypoints="confirmClearKeypoints"
         @zoom-to-image="zoomToImagePosition"
         @zoom-to-cloud="zoomToCloud"
       />
@@ -1244,8 +1373,8 @@ function onRibbonPick(event) {
         </div>
 
         <div class="content">
-          <Viewer3D ref="viewerRef" v-show="activeTabId === 'viewer'" :theme="theme" :images="images" :show-cameras="showCameras" :show-graticule="showGraticule" />
-          <ViewerMap ref="mapViewerRef" v-show="activeTabId === 'map'" :images="images" :gcps="gcps" :footprints="footprints" :poses="poses" :selected-id="selectedId" :aligned-uuids="alignedUuids" :has-sparse="hasSparse" :crs="currentCrs" :show-footprints="showFootprints" @select="selectImage" />
+          <Viewer3D ref="viewerRef" v-show="activeTabId === 'viewer'" :theme="theme" :images="images" :show-cameras="showCameras" :show-graticule="showGraticule" @command="handleCommand" />
+          <ViewerMap ref="mapViewerRef" v-show="activeTabId === 'map'" :images="images" :gcps="gcps" :footprints="footprints" :poses="poses" :selected-id="selectedId" :aligned-uuids="alignedUuids" :has-sparse="hasSparse" :crs="currentCrs" :show-footprints="showFootprints" :show-graticule="showMapGraticule" @select="selectImage" @command="handleCommand" />
           <template v-for="tab in tabs" :key="tab.id">
             <ViewerImage
               v-if="tab.type === 'image' && imageById(tab.imageId)"
@@ -1260,7 +1389,9 @@ function onRibbonPick(event) {
               :all-gcps="allGcpsBrief"
               :selected-gcp-id="selectedGcpId"
               :mask-edit="tab.maskEdit"
+              :gcp-edit="tab.gcpEdit"
               @exit-mask-edit="tab.maskEdit = false"
+              @exit-gcp-edit="tab.gcpEdit = false"
               @update-mask="(dataUrl, persist) => updateMask(tab.imageId, dataUrl, persist)"
               @update-depth="(dataUrl) => updateDepth(tab.imageId, dataUrl)"
               :is-film="sensorForImage(tab.imageId)?.kind === 'film'"
@@ -1269,6 +1400,8 @@ function onRibbonPick(event) {
               :fiducial-obs="imageById(tab.imageId)?.fiducialObs ?? []"
               @mark-gcp="(pt) => assignGcpObservation(tab.imageId, imageById(tab.imageId)?.name, pt)"
               @add-gcp="(pt) => addGcpAtObservation(tab.imageId, imageById(tab.imageId)?.name, pt)"
+              @select-gcp="selectGcp"
+              @delete-gcp="deleteGcpFromEditor"
               @mark-fiducial="({ fidId, px, py }) => setFiducialObservation(tab.imageId, fidId, px, py)"
             />
             <ViewerGcp

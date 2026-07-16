@@ -10,7 +10,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "build:wasm": "wasm-pack build crates/sift --target web --out-dir ../../src/wasm/detection && wasm-pack build crates/matching --target web --out-dir ../../src/wasm/matching && wasm-pack build crates/reconstruction --target web --out-dir ../../src/wasm/reconstruction && wasm-pack build crates/mesh --target web --out-dir ../../src/wasm/mesh && rm -f src/wasm/*/.gitignore"
+    "build:wasm": "wasm-pack build crates/sift --target web --out-dir ../../src/wasm/detection && wasm-pack build crates/matching --target web --out-dir ../../src/wasm/matching && wasm-pack build crates/reconstruction --target web --out-dir ../../src/wasm/reconstruction && wasm-pack build crates/mesh --target web --out-dir ../../src/wasm/mesh && wasm-pack build crates/imagecodec --target web --out-dir ../../src/wasm/imagecodec && rm -f src/wasm/*/.gitignore"
   },
   "dependencies": {
     "exifr": "^7.1.3",

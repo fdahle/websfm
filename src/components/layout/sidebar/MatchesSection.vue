@@ -59,7 +59,6 @@ const matchesExpanded = ref(false)
             <span class="detail-label">Failed</span>
             <span class="detail-value detail-error">{{ matchStats.error }}</span>
           </div>
-          <button class="link-btn matches-view" @click.stop="emit('open-matches')">View match list</button>
         </li>
       </template>
       <li v-else-if="matchStats.running" class="empty">Matching…</li>

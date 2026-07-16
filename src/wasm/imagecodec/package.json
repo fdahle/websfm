@@ -1,0 +1,17 @@
+{
+  "name": "imagecodec",
+  "type": "module",
+  "description": "Native TIFF decoder compiled to WebAssembly (ingest speedup)",
+  "version": "0.1.0",
+  "license": "MIT OR Apache-2.0",
+  "files": [
+    "imagecodec_bg.wasm",
+    "imagecodec.js",
+    "imagecodec.d.ts"
+  ],
+  "main": "imagecodec.js",
+  "types": "imagecodec.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}

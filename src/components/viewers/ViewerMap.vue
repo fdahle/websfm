@@ -17,6 +17,8 @@ import { get as getOlProjection } from 'ol/proj'
 import { Attribution } from 'ol/control'
 import { createEmpty, extend } from 'ol/extent'
 import { ensureProjection, transform, crsInfo } from '../../core/crs.js'
+import { useContextMenu } from '../../composables/useContextMenu.js'
+import ViewerContextMenu from './ViewerContextMenu.vue'
 
 const props = defineProps({
   images:     { type: Array,  default: () => [] },
@@ -30,19 +32,41 @@ const props = defineProps({
   hasSparse:    { type: Boolean, default: false },
   crs:        { type: String, default: 'EPSG:4326' },
   showFootprints: { type: Boolean, default: true },
+  showGraticule:  { type: Boolean, default: true },
 })
 
-const emit = defineEmits(['select'])
+// 'command' bubbles ribbon command ids to App (toggles/fit live there).
+const emit = defineEmits(['select', 'command'])
 
 const mapEl = ref(null)
 const basemapNote = ref('')
 const hover = ref(null)   // { text, x, y }
+
+// ── Right-click context menu ────────────────────────────────────────────────────
+const { menu: ctxMenu, open: openCtx, close: closeCtx } = useContextMenu()
+let ctxCoord = null // [x, y] map-projection coordinate under the last right-click
+function onContextMenu(e) {
+  ctxCoord = map ? map.getEventCoordinate(e) : null
+  openCtx(e, {}, { w: 190, h: 60 })
+}
+const ctxItems = computed(() => [
+  { id: 'copy-coords', label: 'Copy coordinates', disabled: !ctxCoord },
+])
+async function onCtxSelect(id) {
+  closeCtx()
+  if (id === 'copy-coords' && ctxCoord) {
+    // Coordinates are in the project CRS (the map view projection).
+    const text = `${ctxCoord[0].toFixed(3)}, ${ctxCoord[1].toFixed(3)}`
+    try { await navigator.clipboard.writeText(text) } catch { /* clipboard blocked */ }
+  }
+}
 
 let map             = null
 let vSource         = null
 let gcpSource       = null
 let footprintSource = null
 let footprintLayer  = null
+let graticuleLayer  = null
 let poseSource      = null
 
 // ── Styles ────────────────────────────────────────────────────────────────────
@@ -281,7 +305,9 @@ async function build() {
     strokeStyle: new Stroke({ color: 'rgba(140,140,140,0.45)', width: 1 }),
     showLabels: true,
     wrapX: false,
+    visible: props.showGraticule,
   })
+  graticuleLayer = graticule
 
   map = new Map({
     target: mapEl.value,
@@ -346,6 +372,7 @@ function destroy() {
   gcpSource = null
   footprintSource = null
   footprintLayer = null
+  graticuleLayer = null
   poseSource = null
   hover.value = null
 }
@@ -368,6 +395,9 @@ watch(mapPoses, refreshPoses, { deep: true })
 
 // Show/hide the footprint layer from the ribbon toggle.
 watch(() => props.showFootprints, (v) => footprintLayer?.setVisible(v))
+
+// Show/hide the graticule from the ribbon toggle.
+watch(() => props.showGraticule, (v) => graticuleLayer?.setVisible(v))
 
 // Re-style on selection change without rebuilding features
 watch(() => props.selectedId, () => { vSource?.changed(); footprintSource?.changed(); poseSource?.changed() })
@@ -422,8 +452,9 @@ defineExpose({ zoomToImage, fitView: fitToMarkers })
 </script>
 
 <template>
-  <div class="map-viewer">
+  <div class="map-viewer" @contextmenu.prevent="onContextMenu">
     <div ref="mapEl" class="ol-map" />
+    <ViewerContextMenu :menu="ctxMenu" :items="ctxItems" @select="onCtxSelect" />
     <div v-if="!hasGps && !hasGcps && !hasFootprints && !hasPoses" class="no-gps-hint">
       No coordinates found — images with geotags, imported GCPs, or camera positions appear as markers here.
     </div>

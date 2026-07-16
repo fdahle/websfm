@@ -35,6 +35,17 @@ contaminating the model. The R track in TODO.md exists to move these numbers:
   **5.0%**, 55.5% cost-culled; many depth maps report min depth **0.00**
   (degenerate planes surviving to output).
 
+### B0-ingest — CA213732V… TIFF ingest (2026-07-16, 5 scans, 10137×9600 ≈ 97 MP gray)
+Per-image transcode (decode → JPEG display + lossless PNG compute), Chrome, worker pool.
+| stage | geotiff.js (before) | wasm `tiff` crate (after) |
+| --- | --- | --- |
+| decode | ≈34.0 s | ≈1.0 s |
+| repack | ≈0.7 s | 0 (wasm returns RGBA) |
+| JPEG+PNG encode (overlapping) | ≈4 s | ≈4 s |
+| **total / image** | **≈39 s** | **≈5.3 s** |
+Decode ~34× faster; total ingest ~7.4×. Compute-PNG blob sizes unchanged (≈103–108 MB),
+i.e. identical decoded pixels. Next tall pole is the canvas PNG encode (~4 s).
+
 ### B0 — CA213732V… aerial film strip (2026-07-03 00:12 run, 5 images, Medium dense, GPU)
 The intrinsics-limited case (contrast with B1):
 
@@ -67,6 +78,33 @@ fiducials; self-calibration (A2) + fiducials (F4) are the code-side support.
 ---
 
 ## Done log (most recent first)
+
+- **2026-07-16 · LightGlue concurrency freeze fix + tiled guided matching (LG, plan `PLAN-lightglue-tiled-matching.md`)** —
+  Part A: ORT sessions are not reentrant, so LightGlue runs are now serialized two
+  ways — a module-scoped promise-chain mutex (`serialized` in
+  `core/features/lightglue.js`) and serial store dispatch (`useMatchesStore.matchAll`
+  concurrency 1 for LightGlue); cancel hard-terminates the pool
+  (`terminateAll`, wired in `usePipeline.js`). Part B: coarse-to-fine
+  homography-guided tile matching (`core/features/guidedTiles.js` pure math +
+  `matchLightGlueTiled`) matches at full keypoint density in bounded memory,
+  opt-in via `lgTiled` (Fast/Full toggle in `MatchFeaturesModal`); routed on
+  `args.tiled` in `workers/ops/match.js`, defaults in `defaults.user.js` /
+  `tuning.js`. `npm test`/`typecheck` green; browser-verified (no freeze, serial
+  progress, tiled matching works).
+
+- **2026-07-16 · Native TIFF decoder to speed up ingest (TC) — SHIPPED + verified** —
+  new `crates/imagecodec` (the `tiff` crate → interleaved 8-bit RGBA), injected as
+  the `decoder` into `tiffToDisplayBlob` (`src/utils/tiff.js`) by `workers/ops/tiff.js`
+  (lazy wasm init like the mesh op), with a full geotiff.js fallback on any unsupported
+  variant. Motivated by per-stage timing added the same day: on the CA213732V strip
+  (10137×9600 ≈ 97 MP grayscale scans) **decode was ≈34 s of ≈39 s ingest (87%)**.
+  **Browser-verified 2026-07-16** on the same 5 scans, `wasm` backend confirmed active:
+  **decode ≈34 s → ≈1.0 s (~34×); total ingest ≈39 s → ≈5.3 s/image (~7.4×)** — see
+  §Baselines B0-ingest. Correctness signal: the compute-PNG blob sizes came out
+  byte-identical to the geotiff path (103.1/108.2/… MB), i.e. identical decoded pixels.
+  Rust round-trip tests (gray8/rgb8) + full JS suite + typecheck + vite build green.
+  **New tall pole: the canvas PNG encode (~4 s, ~75% of the remaining 5.3 s)** — a Rust
+  grayscale PNG encoder is the obvious follow-up if ingest needs to go lower (TODO ▸ TC).
 
 - **2026-07-16 · SfM quality overhaul WS1–WS5 (plan modular-cuddling-beaver)** —
   five workstreams toward COLMAP/Metashape parity, on branch `sfm-quality-overhaul`.
@@ -137,7 +175,7 @@ fiducials; self-calibration (A2) + fiducials (F4) are the code-side support.
   (round-trip is the cheapest end-to-end check); confirm imported clouds render
   in Viewer3D and can feed DEM/mesh.
 
-- **2026-07-12 · Mesh product — screened Poisson from the dense cloud (PLAN-mesh-poisson.md, all 6 phases)** —
+- **2026-07-12 · Mesh product — screened Poisson from the dense cloud (all 6 phases)** —
   a vertex-coloured triangle mesh product, generated in-browser via screened
   Poisson (Rust→WASM), rendered in Viewer3D, persisted to OPFS, exportable as
   PLY (faces) + GLB. **Phase 1 — normals through the dense pipeline**: the WASM
@@ -655,8 +693,9 @@ fiducials; self-calibration (A2) + fiducials (F4) are the code-side support.
   cameras fail opaquely); mid-run fallback retry drops the `onLog` hook; GPU
   lacks Rust's depth-range clamps; two stale comments; no GPU error scopes.
   Perf/quality follow-ups (half-grid dispatch, CPU/GPU overlap, on-GPU
-  pyramid, f32 WASM loop, Stage-A geometric term) → TODO Backlog. Full detail
-  survives in `handover_gpu.md` (archived reference).
+  pyramid, f32 WASM loop, Stage-A geometric term) → TODO Backlog.
+  (`handover_gpu.md`, which held the full deep-dive, was deleted 2026-07-16 once
+  its open items were confirmed folded into TODO — this entry is the record.)
 
 - **2026-07-07 · TD1–TD4 tiled detection (native-resolution keypoints)** —
   **in working tree, uncommitted** (ship = TODO W0; browser run owed). Pure

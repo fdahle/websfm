@@ -4,6 +4,12 @@ The single prioritized plan. Roles: `CLAUDE.md` = architecture/conventions,
 `HANDOVER.md` = record (baselines + done log), this file = **all open work**.
 When an item ships: delete it here, add one done-log line to HANDOVER.md.
 
+A handful of **not-yet-started features keep a detailed executable spec** in a
+`PLAN-<feature>.md` file at the repo root (linked from the relevant TODO item
+below). The TODO line is the source of truth for *whether/when*; the PLAN file
+holds the step-by-step *how*. Delete the PLAN file when the feature ships (fold
+the done-log line into HANDOVER.md per the four-docs rule).
+
 **Goal (updated 2026-07-07):** a general browser-based SfM/photogrammetry tool
 in the COLMAP/Metashape class — full pipeline (detect → match → sparse → dense →
 DEM/ortho/mesh) for arbitrary image sets, with the existing differentiators
@@ -114,17 +120,6 @@ Verification per change: `npm test` + `npm run typecheck`; `crates/` change →
 PatchMatch kernels in lockstep + re-check GPU↔CPU A/B RMS < 5e-3 **and** the P1
 slanted-plane test.
 
-### LG — LightGlue: fix concurrency freeze, then tiled guided matching
-Code landed on branch `lightglue-tiled-matching` (Part A freeze fix + Part B
-tiled guided matching): serial dispatch + module mutex + real cancel; coarse-
-to-fine homography-guided tile matching (`core/features/guidedTiles.js` +
-`matchLightGlueTiled`, opt-in via `lgTiled`). `npm test`/`typecheck` green.
-**Remaining: B4 browser-manual validation** (ONNX/worker code can't run in
-vitest) — verify no freeze + serial progress on a real LightGlue run, then the
-before/after track-length comparison for tiled mode. Delete
-`PLAN-lightglue-tiled-matching.md` + this entry and add a HANDOVER done-log line
-once B4 confirms.
-
 ### W0 — Ship the working tree (uncommitted feature work)
 The tree currently holds two finished-but-uncommitted features (see HANDOVER
 2026-07-07 entries): **tiled detection TD1–TD4** (`core/features/tiling.js` +
@@ -180,6 +175,78 @@ confirmation owed since 2026-07-07).
 ---
 
 ## Next
+
+### U — "It just works" usability track (audit 2026-07-12)
+The real gap vs Metashape/COLMAP is **usability**, not algorithms: there is no
+"just works" path — detection `maxDim` is a flat 1200 whether the input is a 2k
+phone photo or a 10k film scan, `maxKeypoints` a flat 5000 whether 5 or 500
+images; no one-click run-all; no post-run verdict. Metashape model: autos are
+good, experts keep every knob. All derived values get an `onLog` line and stay
+overridable. **Order: U1 → U2 (+C1) → U4 → U5 → U3 → U6.** U1/U2/U5/U6 are pure
++ unit-testable (no browser); U3/U4 need a browser-manual pass — say so.
+- **U1 — Dataset profiler.** New pure `src/core/profile.js`:
+  `profileDataset({images, sensors, poses, gcps}) → { nImages, minDim, maxDim,
+  medianMP, kind:'film'|'drone'|'phone'|'unknown', hasGps, hasPoses,
+  hasCalibratedDistortion, sequentialNames, scale }` from metadata only (no pixel
+  reads); every decision gets a `notes[]` rationale. Type in `types.ts`. Unit-test
+  film/drone/no-metadata/sequential-name cases.
+- **U2 — Recommended settings.** New pure `src/core/recommend.js`:
+  `recommendSettings(profile, budget) → { detect, match, sfm, depthmap, fuse }`,
+  same shapes as `defaults.user.js` but derived (e.g. `maxDim =
+  clamp(round(0.5·nativeMax), 1200, 3200)` for film/large; `maxKeypoints` scaled
+  by count; strategy from poses/GPS/sequential). Returns `{value, reason}` pairs.
+  Pin expected outputs for the B0/B1 profiles.
+- **C1 — Hardware-aware memory budget.** `core/memBudget.js` gains
+  `deviceBudget()` reading `navigator.deviceMemory` / `performance.memory` (main
+  thread — pass the number *into* core; core stays pure). Seeds the dense gate,
+  feeds U2's dense quality pick, warns in U5. Unit-test the derivation with
+  injected values; log detected budget + source.
+- **U3 — "Recommended for this dataset" prefill** in each stage modal: banner
+  showing derived values that differ from static defaults, one-click apply,
+  hover shows `reason`. Prefill only, never a hidden override.
+- **U4 — One-click "Run All".** New `RunPipelineModal.vue` (stage checkboxes,
+  one Low/Med/High selector → U2, U5 checklist) + `runAll(stages, settings)` in
+  `composables/usePipeline.js` chaining the existing `runDetect/…` with the
+  `aborted` flag; also the `run all` console command (CC ▸ C2 — same `runAll`).
+- **U5 — Pre-flight checks.** Pure `core/preflight.js` → `[{level, msg, fix}]`:
+  no focal ⇒ warn; film without fiducials ⇒ warn; dense memory projection
+  (`projectDensifyPeakBytes`) + GPU adapter check; <2 images / no keypoints /
+  all pairs disabled ⇒ block. `block` disables Run.
+- **U6 — Post-run verdict.** Pure `core/sfm/verdict.js`: run summary → traffic
+  light + next-steps (registered <80% ⇒ list unregistered + overlap/minMatches;
+  p95 reproj >3× median ⇒ suspect distortion; ≥3-view share <20% ⇒ weakly
+  constrained). Encode the B0/B1 fingerprints as thresholds; this is the cheap
+  20% of F8 — keep the rule engine pure so F8 reuses it.
+- **§A6 — Adaptive bridge-pair gate** *(gated on the B1 re-run under R)*: B1
+  showed `minInlierRatio 0.25` rejecting genuine loop-closing bridges (27 inliers
+  @ 0.23). Evaluate lowering `MATCH_TUNING.overrideInliers` (30) to ~25 **or** an
+  explicit "bridge exception" (ratio ≥ 0.2 AND inliers ≥ 25 AND passes spread
+  gate). Decide from logs, not a priori; one knob, one test.
+
+### TC-2 — Rust TIFF **encoder** (optional follow-up to the shipped decoder)
+The native decoder shipped 2026-07-16 (decode 34 s → 1 s; see HANDOVER §B0-ingest).
+The remaining ingest cost is now the **canvas PNG encode (~4 s, ~75% of ~5.3 s/img)** —
+Chrome's PNG encoder is slow and canvas forces 4-channel RGBA even for grayscale film
+scans. Only worth doing if ingest needs to go lower. Sketch:
+- Add `encode_png(pixels, w, h, channels)` to `crates/imagecodec` (`png` + `fdeflate`),
+  emitting **true grayscale** PNG for gray sources (¼ the data to filter+deflate).
+- Keep the display JPEG on canvas (fast + small) OR add `encode_jpeg` too.
+- Wire in `workers/ops/tiff.js` alongside the decoder; same fallback discipline.
+- Watch the transfer cost of handing the ~390 MB RGBA buffer between decode and
+  encode — doing both in one Rust call (decode→encode, never returning raw pixels
+  to JS) may beat two hops. Measure before committing to a shape.
+- Verify: PNG round-trips to identical pixels (still lossless for `computeUrl`);
+  before/after `TIFF timing` → HANDOVER.
+
+### TC-3 — Log source compression/bit-depth on the wasm decode path (diagnostic)
+The `TIFF timing (wasm):` line shows `[undefined/?-bit/?spp/undefined]` because
+only the geotiff fallback branch fills `srcInfo` (photometric/bit-depth/spp/
+compression) — the fast wasm path never reads it. Cheap and nice-to-have: have
+`crates/imagecodec`'s `decode_tiff` also return the source photometric / bits-per-
+sample / samples-per-pixel / compression tag (the `tiff` crate exposes these on
+the decoder) and populate `srcInfo` from the wasm result in `workers/ops/tiff.js`,
+so the audit line reports what was actually decoded on the fast path. Diagnostic
+only — no behaviour change.
 
 ### MC — Multiple result clouds (sparse + dense) with lineage
 Today the pipeline assumes exactly one `kind:'sparse'` cloud (every downstream
@@ -278,6 +345,26 @@ Remaining:
   images of this sensor" (`maskFromSource` already rescales); masked-% readout;
   mask badge in the sidebar ImagesSection.
 
+### M4 — Content-based Auto-Mask strategies — spec: `PLAN-automask-strategies.md`
+Not started. Auto-Mask today has one strategy (fixed-px border); add three
+content-based ones (detect film frame per scan, colour/luminance key, low-texture
+regions) as a worker op reading downscaled rasters. Pure `core/maskAuto.js` +
+`workers/ops/mask.js` + a strategy-picker rework of `AutoMaskModal.vue`. Full
+step-by-step spec (module API, tests, UI, defaults) in the linked PLAN file.
+Parked out of scope there: SAM2-propagation auto-masking (see F12).
+
+### FD — Auto-detect fiducial marks on film scans — spec: `PLAN-fiducial-autodetect.md`
+Not started. Marking fiducials by hand on every scan is tedious. Mark all
+fiducials on **one reference image per film sensor**, then ZNCC template-match the
+same marks on every other image of that sensor (the HSfM/Kugelhupf approach:
+within a scan batch the frame lands in nearly the same position). Coarse-to-fine
++ sub-pixel peak; QC = absolute score floor + per-mark population median band +
+affine-RMS refit gate. Pure `core/sfm/fiducialDetect.js` + two `ops/detect.js`
+ops + `FiducialDetectModal.vue`, entry from the film-sensor editor in
+`SensorTable.vue`. Builds on the shipped F4 interior-orientation math
+(`fitFiducialAffine`/`mmToScan`). Full spec (module API, memory guardrails for
+10k×10k scans, rotation-mapping gotchas, tests) in the linked PLAN file.
+
 ### G2 — Glossary entries for the newly load-bearing terms (folded from PLAN P6.3)
 Add `src/glossary/algorithms/` entries for **"matching density"** (Fast/Full — the
 LightGlue tiled vs capped path), **"self-calibration"** (`refineIntrinsics: 'auto'`,
@@ -338,7 +425,7 @@ report (F2 — accuracy story — shipped 2026-07-07, see HANDOVER).
 ### F3 — mesh output — **full 3D screened Poisson SHIPPED 2026-07-12**
 Full 3D screened-Poisson meshing landed instead of the planned 2.5D-DEM shortcut
 (reusing the dense PatchMatch plane normals made it tractable in WASM — see
-`PLAN-mesh-poisson.md` + HANDOVER 2026-07-12). Vertex-coloured `THREE.Mesh` in
+HANDOVER 2026-07-12). Vertex-coloured `THREE.Mesh` in
 Viewer3D, PLY + GLB export. **Owed: in-browser verification** (headless can't run
 densify→mesh, rendering, restore, or open the exports). *Optional follow-ups (not
 required):* orthophoto-textured 2.5D DEM mesh for aerial (cheaper, drapes the true

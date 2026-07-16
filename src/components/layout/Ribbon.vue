@@ -32,6 +32,7 @@ const props = defineProps({
   sceneType: { type: String, default: null },
   showCameras: { type: Boolean, default: true },
   showGraticule: { type: Boolean, default: true },
+  showMapGraticule: { type: Boolean, default: true },
   showFootprints: { type: Boolean, default: true },
 })
 
@@ -280,7 +281,7 @@ const mapGroup = {
   dynamic: '2D',
   commands: [
     { id: 'map-fit-view',          label: 'Fit\nView',   icon: 'fit-view' },
-    { id: 'map-toggle-graticule',  label: 'Graticule',   icon: 'grid',      disabled: true },
+    { id: 'map-toggle-graticule',  label: 'Graticule',   icon: 'grid',      activeKey: 'showMapGraticule' },
     { id: 'map-toggle-footprints', label: 'Footprints',  icon: 'footprint', activeKey: 'showFootprints', needsFootprints: true },
     { id: 'map-toggle-poses',      label: 'Poses',       icon: 'camera',    disabled: true },
   ],
@@ -346,6 +347,14 @@ const pictureTab = {
         { id: 'img-mask-edit', label: 'Edit\nMask', icon: 'pencil', activeKey: 'maskEdit' },
       ],
     },
+    {
+      label: 'GCPs',
+      // One toggle — in GCP-edit mode a click on the image adds a new GCP (or marks
+      // the sidebar-selected one). The floating GcpToolbar sits over the image view.
+      commands: [
+        { id: 'img-gcp-edit', label: 'Edit\nGCPs', icon: 'map-pin', activeKey: 'gcpEdit' },
+      ],
+    },
   ],
 }
 
@@ -384,6 +393,7 @@ function isActive(cmd) {
   if (cmd.activeKey === 'consoleOpen')   return props.consoleOpen
   if (cmd.activeKey === 'showCameras')   return props.showCameras
   if (cmd.activeKey === 'showGraticule') return props.showGraticule
+  if (cmd.activeKey === 'showMapGraticule') return props.showMapGraticule
   if (cmd.activeKey === 'showFootprints') return props.showFootprints
   const s = props.imageViewState
   if (!s || !cmd.activeKey) return false
@@ -394,6 +404,7 @@ function isActive(cmd) {
     case 'showGcps':      return s.showGcps
     case 'showFiducials': return s.showFiducials
     case 'maskEdit':      return s.maskEdit
+    case 'gcpEdit':       return s.gcpEdit
   }
   return false
 }

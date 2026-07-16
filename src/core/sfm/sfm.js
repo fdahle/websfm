@@ -1299,8 +1299,12 @@ export async function reconstruct(input, hooks = {}) {
     }
 
     onProgress?.(imgs.length, imgs.length, 'Done')
+    // A run that finishes with no points (or a single camera) is a failed
+    // reconstruction, not a success — log it red so it doesn't read as green.
+    const degenerate = points3d.length === 0 || cameras.size < 2
     log(`Reconstruction complete: ${cameras.size} cameras, ${points3d.length} points, `
-      + `final reprojection ${fmtStats(finalStats)}`, 'success', 'Reconstruction')
+      + `final reprojection ${fmtStats(finalStats)}`,
+      degenerate ? 'error' : 'success', 'Reconstruction')
     log(`Reconstruction summary: ${summary.nCameras} cameras, ${summary.nPoints} points, `
       + `${pct3plusViewTracks.toFixed(1)}% ≥3-view tracks, pre-BA p95 ${preBaStats.p95.toFixed(1)}px, `
       + `post-BA median ${finalStats.median.toFixed(2)}px`, 'success', 'Reconstruction')

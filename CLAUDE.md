@@ -22,13 +22,17 @@ if the *method* changed, update METHODS.md.
 
 ## Stack
 - **UI**: Vue 3 (`<script setup>`), Pinia stores, OpenLayers (map), Three.js (3D).
-- **Compute**: four Rust crates compiled to WASM (`crates/{sift,matching,reconstruction,mesh}`),
+- **Compute**: five Rust crates compiled to WASM
+  (`crates/{sift,matching,reconstruction,mesh,imagecodec}`),
   run **off the main thread** in a worker. `crates/mesh` is screened-Poisson meshing;
   it vendors a **rayon-stripped** copy of Dimforge's `poisson_reconstruction` under
   `crates/mesh/vendor/` (rayon's worker threads panic on threadless wasm) with a
-  marching-cubes iso patch — it is the one crate allowed a dependency, kept isolated
+  marching-cubes iso patch — it is one of two crates allowed a dependency, kept isolated
   so it doesn't leak into `crates/reconstruction` (which stays wasm-bindgen-only).
   Its Rust tests need release mode (`cargo test -p mesh --release`; debug is ~40× slower).
+  `crates/imagecodec` is the other dep-carrying crate: the `tiff` crate as a native TIFF
+  decoder that replaces the slow pure-JS geotiff.js decode at ingest (see the TIFF gotcha),
+  likewise isolated from `reconstruction`.
 - **Persistence**: OPFS (Origin Private File System) via `src/utils/opfs.js`. Per-project
   directory tree; everything recomputable is recomputed rather than stored.
 - **Build/test**: Vite, Vitest (`npm test`), `tsc --noEmit` (`npm run typecheck`),
@@ -438,7 +442,13 @@ convergence".
   `rasterize` (`createImageBitmap`) all decode it through the browser. TIFF is
   the trap — only Safari/WebKit decodes it (system ImageIO); Chrome/Firefox
   don't. `utils/tiff.js` transcodes at ingest + restore (off-main-thread, via a
-  `workers/ops/tiff.js` op) so nothing downstream ever sees a TIFF; the original
+  `workers/ops/tiff.js` op) so nothing downstream ever sees a TIFF. **Decode is
+  the dominant cost** (~87% of ingest on 97 MP scans), so the op injects a native
+  Rust/WASM decoder (`crates/imagecodec`, the `tiff` crate → interleaved 8-bit
+  RGBA) into `tiffToDisplayBlob`; on any wasm decode failure (exotic photometric /
+  JPEG-in-TIFF / float) it **falls back to the pure-JS geotiff.js path**, so no
+  input regresses. The two canvas encodes (display JPEG + lossless compute PNG)
+  are cheap and stay in JS. The original
   still lives in OPFS but is **only** ever read back to regenerate the display
   blob on restore — nothing compute-side reads it. `canDecodeTiffNatively()`
   skips the transcode entirely on engines that can already decode TIFF (Safari).

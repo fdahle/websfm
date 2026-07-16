@@ -1,8 +1,10 @@
 <script setup>
-import { onMounted, onBeforeUnmount, ref, watch } from 'vue'
+import { onMounted, onBeforeUnmount, ref, watch, computed } from 'vue'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { useViewerSettings } from '../../composables/useViewerSettings.js'
+import { useContextMenu } from '../../composables/useContextMenu.js'
+import ViewerContextMenu from './ViewerContextMenu.vue'
 
 const { graticuleZ } = useViewerSettings()
 
@@ -13,6 +15,8 @@ const props = defineProps({
   showCameras: { type: Boolean, default: true },
   showGraticule: { type: Boolean, default: true },
 })
+// Emits ribbon command ids so App's handleCommand routes them (toggles live in App).
+const emit = defineEmits(['command'])
 
 const container = ref(null)
 let renderer, scene, camera, controls, animationId, resizeObserver, grid
@@ -466,6 +470,63 @@ watch(graticuleZ, () => updateGrid())
 watch(cameraScale, () => { if (lastCams.length) buildFrustums(lastCams, lastBaseDepth * cameraScale.value) })
 watch(pointSize, (v) => { if (pointCloud) pointCloud.material.size = v })
 
+// ── Right-click context menu ────────────────────────────────────────────────────
+// OrbitControls uses the right mouse button to pan, so distinguish a click (show
+// menu) from a right-drag (pan) by a small movement threshold.
+const { menu: ctxMenu, open: openCtx, close: closeCtx } = useContextMenu()
+let rmbDown = null
+let rmbMoved = false
+function onCtxPointerDown(e) {
+  if (e.button === 2) { rmbDown = { x: e.clientX, y: e.clientY }; rmbMoved = false }
+}
+function onCtxPointerMove(e) {
+  if (rmbDown && Math.hypot(e.clientX - rmbDown.x, e.clientY - rmbDown.y) > 4) rmbMoved = true
+}
+let ctxClient = null // { x, y } client position of the last right-click, for picking
+function onContextMenu(e) {
+  e.preventDefault()
+  const moved = rmbMoved
+  rmbDown = null; rmbMoved = false
+  if (moved) return  // it was a pan, not a click
+  ctxClient = { x: e.clientX, y: e.clientY }
+  openCtx(e, {}, { w: 180, h: 60 })
+}
+const ctxItems = computed(() => [
+  { id: 'copy-coords', label: 'Copy coordinates' },
+])
+// Raycast the cursor into the scene: nearest point/mesh surface, else the ground
+// plane through the scene centre. Returns a THREE.Vector3 in the cloud's frame.
+const raycaster = new THREE.Raycaster()
+function pickCoordinate(clientX, clientY) {
+  if (!renderer || !camera) return null
+  const rect = renderer.domElement.getBoundingClientRect()
+  const ndc = new THREE.Vector2(
+    ((clientX - rect.left) / rect.width) * 2 - 1,
+    -((clientY - rect.top) / rect.height) * 2 + 1,
+  )
+  raycaster.setFromCamera(ndc, camera)
+  raycaster.params.Points.threshold = Math.max(sceneRadius * 0.01, 1e-6)
+  const targets = []
+  if (meshObject) targets.push(meshObject)
+  if (pointCloud) targets.push(pointCloud)
+  const hits = targets.length ? raycaster.intersectObjects(targets, false) : []
+  if (hits.length) return hits[0].point.clone()
+  // Fallback: horizontal plane through the scene centre (Z-up).
+  const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), -sceneCenter.z)
+  const pt = new THREE.Vector3()
+  return raycaster.ray.intersectPlane(plane, pt) ? pt : null
+}
+async function onCtxSelect(id) {
+  closeCtx()
+  if (id === 'copy-coords') {
+    const p = ctxClient ? pickCoordinate(ctxClient.x, ctxClient.y) : null
+    if (p) {
+      const text = `${p.x.toFixed(4)}, ${p.y.toFixed(4)}, ${p.z.toFixed(4)}`
+      try { await navigator.clipboard.writeText(text) } catch { /* clipboard blocked */ }
+    }
+  }
+}
+
 onMounted(init)
 
 onBeforeUnmount(() => {
@@ -482,8 +543,14 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div ref="container" class="viewer">
-    <div class="overlay">three.js viewer</div>
+  <div
+    ref="container"
+    class="viewer"
+    @mousedown="onCtxPointerDown"
+    @mousemove="onCtxPointerMove"
+    @contextmenu="onContextMenu"
+  >
+    <ViewerContextMenu :menu="ctxMenu" :items="ctxItems" @select="onCtxSelect" />
 
     <!-- Viewer-local view options popover (ephemeral display tweaks) -->
     <div class="view-options">
