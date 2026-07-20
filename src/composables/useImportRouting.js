@@ -9,6 +9,7 @@ import { sniffCloudFormat } from '../core/io/cloudImport.js'
 import { applyImportTransform } from '../core/io/cloudImport.js'
 import { parseCloudFile as parseCloudFileWorker } from '../workers/computeClient.js'
 import { unzipStore } from '../utils/zip.js'
+import { isTiff, isGeoreferencedTiff, probeTiffGeoTags } from '../utils/tiff.js'
 import { useLog } from './useLog.js'
 
 // The dropped/picked-file import funnel, lifted out of App.vue. It drives the
@@ -18,13 +19,14 @@ import { useLog } from './useLog.js'
 //   activateTab(id) — switch the active tab (to 'map' after a spatial import)
 // `cameraPickMode` is returned so the Ribbon command dispatch (still in App.vue)
 // can hint the file-picker mode before opening the hidden <input>.
-export function useImportRouting({ addGcps, addFootprints, addSensors, addPoses, addFiducialObs, importColmap, importCloud, activateTab }) {
+export function useImportRouting({ addGcps, addFootprints, addSensors, addPoses, addFiducialObs, importColmap, importCloud, importRaster, addImages, activateTab }) {
   const {
     gcpImportOpen, gcpImportText, gcpImportName, gcpImportGeojson, gcpImportCrs,
     footprintImportOpen, footprintImportData,
     cameraImportOpen, cameraImportText, cameraImportName, cameraImportMode,
     importKindOpen, importKindFile,
     importCloudOpen, importCloudData,
+    importRasterOpen, importRasterData,
   } = storeToRefs(useModalsStore())
   const { log } = useLog()
 
@@ -78,6 +80,13 @@ export function useImportRouting({ addGcps, addFootprints, addSensors, addPoses,
   // and anything ambiguous (a bare name + X/Y/Z list) → a small chooser.
   async function openDroppedImport(file) {
     if (!file) return
+    // A TIFF that reached the non-image path (no `image/tiff` MIME type, e.g. a
+    // bare `.tif` from some file managers) still has to be checked for geokeys
+    // before anything tries to decode it as text.
+    if (importRaster && isTiff(file)) {
+      if (await isGeoreferencedTiff(file)) { await openRasterImport(file); return }
+      if (addImages) { addImages([file]); return } // a plain TIFF is a source photo
+    }
     // Binary cloud formats (PLY/LAS) must be sniffed by magic bytes BEFORE any
     // text decode — decoding a 500 MB LAS as a string would blow up. Peek the head.
     try {
@@ -103,6 +112,90 @@ export function useImportRouting({ addGcps, addFootprints, addSensors, addPoses,
     else if (kind === 'colmap') openColmapImport([file])
     else if (kind === 'cloud') openCloudImport(file)
     else { importKindFile.value = file; importKindOpen.value = true }
+  }
+
+  // ── Import (georeferenced reference raster) ─────────────────────────────────
+  //
+  // ⚠ The routing conflict this solves: `useImagesStore` ingests ANY TIFF as a
+  // source image, and a dropped `.tif` arrives with type `image/tiff`, so it
+  // lands in the image path before any importer sees it. Every dropped/picked
+  // image batch therefore gets forked here FIRST: a TIFF carrying GeoTIFF
+  // geolocation tags is a reference raster, not a source photo. Aerial scans
+  // carry no geokeys, so the split is clean in practice — and when it isn't, the
+  // import modal offers "…or import as source image" as the escape hatch.
+  //
+  // Returns the files that really are source images, for the caller to ingest.
+  async function forkGeoreferencedRasters(files) {
+    const photos = []
+    for (const file of [...(files || [])]) {
+      if (importRaster && isTiff(file)) {
+        const probe = await probeTiffGeoTags(file)
+        if (probe.georeferenced) {
+          await openRasterImport(file)
+          continue
+        }
+        // Not georeferenced ⇒ source photo. Say so, with the tags that were
+        // missing: this is the branch that surprises people (a GeoTIFF written
+        // without a pixel scale, or one geotiff.js can't parse, becomes a very
+        // confused source image), and the sidebar's "Convert to reference
+        // data…" is the manual override for exactly this line.
+        log(`${file.name}: ${probe.degenerate
+          ? 'placeholder GeoTIFF tags (identity transform at origin 0,0, no CRS) — not georeferencing'
+          : 'no GeoTIFF geolocation tags'}`
+          + `${probe.error ? ` (header unreadable: ${probe.error})` : ''}`
+          + ` [tiepoint ${probe.hasTiepoint ? 'yes' : 'no'},`
+          + ` pixelscale ${probe.hasPixelScale ? 'yes' : 'no'},`
+          + ` transformation ${probe.hasTransformation ? 'yes' : 'no'},`
+          + ` crs ${probe.hasCrs ? 'yes' : 'no'}]`
+          + ' — ingesting as a source image', 'info', 'Import')
+      }
+      photos.push(file)
+    }
+    return photos
+  }
+
+  // Dropped/picked image batch: fork the reference rasters out, ingest the rest.
+  async function addImagesRouted(files) {
+    const photos = await forkGeoreferencedRasters(files)
+    if (photos.length && addImages) addImages(photos)
+  }
+
+  // Decode + classify off-thread, then either commit straight away (the sniff
+  // was decisive) or open the modal pre-selected to the guess.
+  //
+  // Confidence gating differs deliberately from `importKind.js`, which always
+  // routes ambiguity to a modal: here a `high` verdict imports directly and
+  // logs its reasons. That is only safe because the kind stays editable
+  // afterwards ("Treat as DEM / orthophoto" on the Reference Data row) — without
+  // that escape hatch a silent misclassification would be a delete-and-reimport.
+  //
+  // `alwaysConfirm` overrides that gating for the manual "Convert to reference
+  // data…" path: the auto-sniff already declined that file once, so its verdict
+  // has not earned a silent import however confident it sounds.
+  //
+  // Returns the raster record (null if the parse failed), so a caller that is
+  // *moving* a file into reference data can tell whether the move succeeded
+  // before deleting the source.
+  async function openRasterImport(file, { forceKind = null, alwaysConfirm = false } = {}) {
+    if (!file || !importRaster) return null
+    const record = await importRaster(file, { forceKind })
+    if (!record) return null
+
+    if (alwaysConfirm || (!forceKind && record.classification?.confidence === 'low')) {
+      // Ambiguous (a 1-band int16/uint16 resolved only by histogram, or by
+      // filename alone) — show the user what it guessed and why, and let them
+      // correct it before they build anything on top of it.
+      importRasterData.value = { raster: record, fileName: file.name }
+      importRasterOpen.value = true
+    }
+    activateTab('map')
+    return record
+  }
+
+  function onRasterPick(event) {
+    const file = event.target.files?.[0]
+    if (file) openRasterImport(file)
+    event.target.value = ''
   }
 
   // ── Import (point cloud / mesh) ─────────────────────────────────────────────
@@ -274,6 +367,7 @@ export function useImportRouting({ addGcps, addFootprints, addSensors, addPoses,
     cameraPickMode,
     openImportFile, openDroppedImport, routeImport, openFiducialObsImport, openColmapImport,
     openCloudImport, onCloudImport, onCloudPick,
+    openRasterImport, onRasterPick, forkGeoreferencedRasters, addImagesRouted,
     onImportKindChosen, onImportSwitchKind,
     openCameraImport, onCameraImport, onGcpImport, onFootprintImport,
     onGcpPick, onCameraPick, onColmapPick,

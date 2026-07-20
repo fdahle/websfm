@@ -28,23 +28,31 @@ function handleMessage(e) {
   else entry.reject(new Error(error))
 }
 
-function spawn() {
+function spawn(index) {
   const w = new Worker(new URL('./compute.worker.js', import.meta.url), {
     type: 'module',
     name: 'compute',
   })
   w.onmessage = handleMessage
   w.onerror = (e) => {
-    // A worker-level error has no request id; fail everything in flight so callers
-    // don't hang. (Rare — per-request errors come back as { ok: false }.)
+    // A worker-level error has no request id. Pending entries retain their worker,
+    // so only jobs on this failed slot are rejected; healthy slots keep running.
     const err = new Error(e.message || 'compute worker error')
-    for (const [id, entry] of pending) { pending.delete(id); entry.reject(err) }
+    for (const [id, entry] of pending) {
+      if (entry.worker !== w) continue
+      pending.delete(id)
+      entry.reject(err)
+    }
+    if (workers?.[index] === w) {
+      w.terminate()
+      workers[index] = spawn(index)
+    }
   }
   return w
 }
 
 function getPool() {
-  if (!workers) workers = Array.from({ length: POOL_SIZE }, spawn)
+  if (!workers) workers = Array.from({ length: POOL_SIZE }, (_, index) => spawn(index))
   return workers
 }
 
@@ -52,8 +60,9 @@ function getPool() {
 // pool respawns lazily on the next call. Used to abort a running op (e.g. a long
 // reconstruct) that can't be interrupted cooperatively mid-call.
 export function terminateAll(reason = 'cancelled') {
-  if (workers) for (const w of workers) w.terminate()
+  const oldWorkers = workers
   workers = null
+  if (oldWorkers) for (const w of oldWorkers) w.terminate()
   for (const [id, entry] of pending) { pending.delete(id); entry.reject(new Error(reason)) }
 }
 
@@ -64,8 +73,13 @@ function call(op, args, { transfer = [], onEvent, worker: pinned } = {}) {
   const worker = pinned != null ? pool[pinned % pool.length] : pool[rr++ % pool.length]
   const id = nextId++
   return new Promise((resolve, reject) => {
-    pending.set(id, { resolve, reject, onEvent })
-    worker.postMessage({ id, op, args }, transfer)
+    pending.set(id, { resolve, reject, onEvent, worker })
+    try {
+      worker.postMessage({ id, op, args }, transfer)
+    } catch (err) {
+      pending.delete(id)
+      reject(err)
+    }
   })
 }
 
@@ -80,6 +94,39 @@ export function detectKeypoints(url, options = {}, { onLog } = {}) {
   const learned = options.detector === 'superpoint'
   return call('detect', [url, options], {
     worker: learned ? 0 : undefined,
+    onEvent: onLog ? (ev, a) => { if (ev === 'log') onLog(...a) } : undefined,
+  })
+}
+
+// Cut ZNCC templates out of the reference film scan (F4 auto-measurement). Once
+// per run; round-robin is fine (no heavy per-worker runtime to warm up).
+export function prepareFiducialTemplates(url, obs, options = {}, { onLog } = {}) {
+  return call('prepareFiducialTemplates', [url, obs, options], {
+    onEvent: onLog ? (ev, a) => { if (ev === 'log') onLog(...a) } : undefined,
+  })
+}
+
+// Match those templates in one target scan. `templates` are structured-cloned
+// into every call by design — do NOT add their buffers to a transfer list here,
+// they are reused across all images of the sensor and transferring would detach
+// them after the first.
+export function detectFiducials(url, templates, predictions, options = {}, { onLog } = {}) {
+  return call('detectFiducials', [url, templates, predictions, options], {
+    onEvent: onLog ? (ev, a) => { if (ev === 'log') onLog(...a) } : undefined,
+  })
+}
+
+export function bootstrapFiducials(url, marks, options = {}, { onLog } = {}) {
+  return call('bootstrapFiducials', [url, marks, options], {
+    onEvent: onLog ? (ev, a) => { if (ev === 'log') onLog(...a) } : undefined,
+  })
+}
+
+export function detectFiducialSpots(url, options = {}, { onLog } = {}) {
+  // Modal settings are commonly a Vue reactive Proxy. Proxies are not supported
+  // by the browser's structured-clone algorithm, so materialize the small,
+  // primitive-only options bag before it crosses postMessage.
+  return call('detectFiducialSpots', [url, { ...options }], {
     onEvent: onLog ? (ev, a) => { if (ev === 'log') onLog(...a) } : undefined,
   })
 }
@@ -194,6 +241,28 @@ export const meshify = streamingOp('meshify')
 // { parsed, stats } with the flat cloud buffers transferred back.
 export function parseCloudFile(buffer, name, { onLog } = {}) {
   return call('parseCloud', [{ buffer, name }], {
+    transfer: [buffer],
+    onEvent: onLog ? (ev, a) => { if (ev === 'log') onLog(...a) } : undefined,
+  })
+}
+
+// Decode + classify a georeferenced raster (reference DEM / orthophoto) off the
+// main thread — a 200 MB REMA tile decoded on the UI thread is the same trap
+// parseCloudFile exists to avoid. `forceKind` ('dem'|'ortho') skips the sniff.
+// Resolves to { meta, plane }; `plane` is transferred both ways (no clone).
+export function parseRasterFile(buffer, name, { forceKind = null, style = null, onLog } = {}) {
+  return call('parseRaster', [{ buffer, name, forceKind, style }], {
+    transfer: [buffer],
+    onEvent: onLog ? (ev, a) => { if (ev === 'log') onLog(...a) } : undefined,
+  })
+}
+
+// Recompute only a styled raster's ≤1024 px preview PNG for a new style — no
+// full-resolution plane, no OPFS write. Milliseconds where parseRasterFile is
+// seconds, which is what lets a restyle repaint immediately; the full plane is
+// re-decoded lazily on the next sample. Resolves to { style, previewDataUrl }.
+export function restyleRasterPreview(buffer, name, style, { onLog } = {}) {
+  return call('restyleRasterPreview', [{ buffer, name, style }], {
     transfer: [buffer],
     onEvent: onLog ? (ev, a) => { if (ev === 'log') onLog(...a) } : undefined,
   })

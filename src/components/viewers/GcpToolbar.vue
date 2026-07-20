@@ -14,31 +14,44 @@ defineProps({
   selectedId: { type: String, default: null },
   // Ids of GCPs already marked on this image (shown with a dot).
   markedIds:  { type: Array,  default: () => [] },
+  // What a click acts on — 'image' (mark a pixel observation) or 'map' (set the
+  // GCP's ground position). Only changes the instruction wording.
+  noun:       { type: String, default: 'image' },
 })
 
 const emit = defineEmits(['close', 'select', 'delete'])
 
-// ── Drag by the header (module-scoped position, mirrors MaskToolbar) ─────────────
+// ── Drag (module-scoped position, mirrors MaskToolbar) ───────────────────────────
+// Grab either by the header (left button) or by middle-clicking anywhere on the card.
 const pos = ref({ x: 12, y: 12 })
 let dragStart = null
-function onHeaderDown(e) {
+function startDrag(e) {
   dragStart = { x: e.clientX - pos.value.x, y: e.clientY - pos.value.y }
-  window.addEventListener('mousemove', onHeaderMove)
-  window.addEventListener('mouseup', onHeaderUp)
+  window.addEventListener('mousemove', onDragMove)
+  window.addEventListener('mouseup', onDragUp)
 }
-function onHeaderMove(e) {
+// Left button on the header; middle-button (button 1) falls through to onCardDown.
+function onHeaderDown(e) { if (e.button === 0) startDrag(e) }
+// Middle mouse button drags from anywhere on the card (preventDefault stops the
+// browser's middle-click autoscroll).
+function onCardDown(e) {
+  if (e.button !== 1) return
+  e.preventDefault()
+  startDrag(e)
+}
+function onDragMove(e) {
   if (!dragStart) return
   pos.value = { x: Math.max(0, e.clientX - dragStart.x), y: Math.max(0, e.clientY - dragStart.y) }
 }
-function onHeaderUp() {
+function onDragUp() {
   dragStart = null
-  window.removeEventListener('mousemove', onHeaderMove)
-  window.removeEventListener('mouseup', onHeaderUp)
+  window.removeEventListener('mousemove', onDragMove)
+  window.removeEventListener('mouseup', onDragUp)
 }
 </script>
 
 <template>
-  <div class="gcp-toolbar" :style="{ left: pos.x + 'px', top: pos.y + 'px' }" @mousedown.stop @wheel.stop @dblclick.stop @contextmenu.stop.prevent>
+  <div class="gcp-toolbar" :style="{ left: pos.x + 'px', top: pos.y + 'px' }" @mousedown.stop="onCardDown" @wheel.stop @dblclick.stop @contextmenu.stop.prevent>
     <div class="gt-header" @mousedown.prevent="onHeaderDown">
       <span class="gt-title">GCPs</span>
       <button class="gt-close" title="Exit GCP editing (Esc)" @click="emit('close')">×</button>
@@ -46,7 +59,9 @@ function onHeaderUp() {
 
     <div class="gt-body">
       <div class="gt-line">
-        {{ selectedId != null ? 'Click the image to mark:' : 'Click the image to add a new GCP' }}
+        {{ selectedId != null
+          ? `Click the ${noun} to ${noun === 'map' ? 'set its position' : 'mark'}:`
+          : `Click the ${noun} to add a new GCP` }}
       </div>
 
       <div class="gt-list">

@@ -4,16 +4,22 @@ import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { useViewerSettings } from '../../composables/useViewerSettings.js'
 import { useContextMenu } from '../../composables/useContextMenu.js'
+import { copyToClipboard } from '../../composables/useToasts.js'
+import { estimateUpFromCameras } from '../../core/sfm/geometry.js'
 import ViewerContextMenu from './ViewerContextMenu.vue'
 
-const { graticuleZ } = useViewerSettings()
+const { gridZ } = useViewerSettings()
 
 const props = defineProps({
   theme: { type: String, default: 'dark' },
   // Source images ({ uuid, url, … }) — used to texture camera-frustum thumbnails.
   images: { type: Array, default: () => [] },
   showCameras: { type: Boolean, default: true },
-  showGraticule: { type: Boolean, default: true },
+  showGrid: { type: Boolean, default: true },
+  // Estimated scene "up" (unit [x,y,z]) from the reconstruction's camera poses, so a
+  // dense/mesh cloud — which carries no cameras of its own — still frames level (see
+  // estimateUpFromCameras). null ⇒ fall back to the viewer's own cameras, else +Z.
+  sceneUp: { type: Array, default: null },
 })
 // Emits ribbon command ids so App's handleCommand routes them (toggles live in App).
 const emit = defineEmits(['command'])
@@ -70,6 +76,35 @@ function cameraFrustumDepth(centres, points3d) {
   return 0.15
 }
 
+// Robust scene bounds from a flat position buffer: a per-axis *median* centre and a
+// 95th-percentile radius, so a handful of stray far points (common in sparse clouds)
+// can't inflate the framing or the grid span — the raw Three.js bounding sphere
+// (Ritter) is outlier-sensitive and made sparse↔dense frame very differently. Also
+// returns the 2nd/98th-percentile extent *along `up`* for grid placement. Sub-
+// samples to ≤ SAMPLE points so million-point dense clouds stay cheap on the main
+// thread.
+const BOUNDS_SAMPLE = 20000
+function robustBounds(positions, count, up) {
+  const step = Math.max(1, Math.floor(count / BOUNDS_SAMPLE))
+  const xs = [], ys = [], zs = []
+  for (let i = 0; i < count; i += step) {
+    xs.push(positions[i * 3]); ys.push(positions[i * 3 + 1]); zs.push(positions[i * 3 + 2])
+  }
+  const cx = median(xs), cy = median(ys), cz = median(zs)
+  const dists = [], alongs = []
+  for (let k = 0; k < xs.length; k++) {
+    const dx = xs[k] - cx, dy = ys[k] - cy, dz = zs[k] - cz
+    dists.push(Math.hypot(dx, dy, dz))
+    alongs.push(dx * up.x + dy * up.y + dz * up.z)
+  }
+  return {
+    center: new THREE.Vector3(cx, cy, cz),
+    radius: percentile(dists, 0.95) || 1,
+    alongMin: percentile(alongs, 0.02),
+    alongMax: percentile(alongs, 0.98),
+  }
+}
+
 // Reconstruction scene objects (replaced on each setReconstructionData call)
 let pointCloud = null
 let meshObject = null // THREE.Mesh for kind:'mesh' clouds
@@ -79,12 +114,15 @@ const frustumGroup = new THREE.Group()
 // the GPU textures they reference).
 let thumbTextures = []
 
-// Bounding sphere of the loaded scene — drives the camera view presets.
+// Robust bounds of the loaded scene — drive the camera view presets and grid.
 const sceneCenter = new THREE.Vector3(0, 0, 0)
 let sceneRadius = 5
-// Vertical extent of the loaded cloud/mesh — drives the graticule's min/avg/max
-// placement (see updateGrid). Default to the sphere centre until a cloud loads.
-let sceneZMin = 0, sceneZMax = 0
+// Estimated scene up (unit); orients the initial view + grid so the model reads
+// level without georeferencing (see estimateUpFromCameras). Default world +Z.
+const sceneUp = new THREE.Vector3(0, 0, 1)
+// Signed extent of the cloud/mesh *along sceneUp*, relative to sceneCenter — drives
+// the grid's min/avg/max placement (see updateGrid). 0 until a cloud loads.
+let sceneAlongMin = 0, sceneAlongMax = 0
 
 // ── View options (ephemeral, session-scoped display tweaks) ───────────────────
 // Live in a viewer-local popover, deliberately NOT in the ribbon or global
@@ -106,25 +144,27 @@ const GRID = {
 function makeGrid(t) {
   const [mc, gc] = GRID[t] ?? GRID.dark
   const g = new THREE.GridHelper(10, 10, mc, gc)
-  // GridHelper lies in the XZ plane (three.js is Y-up); our scenes are Z-up, so
-  // rotate it onto the XY plane to act as the ground graticule.
-  g.rotation.x = Math.PI / 2
-  g.visible = props.showGraticule
+  // GridHelper lies in the XZ plane (normal +Y). updateGrid orients it so its normal
+  // matches the estimated scene up (world +Z by default).
+  g.visible = props.showGrid
   return g
 }
 
-// Sit the graticule under the loaded scene (centred on the point cloud, spanning
-// its extent) rather than at the world origin — which is usually where the camera
-// cluster sits, leaving the grid stranded away from the points. Its vertical
-// placement follows the user's graticuleZ setting (bottom / middle / top).
+const GRID_NORMAL = new THREE.Vector3(0, 1, 0) // GridHelper's default plane normal
+
+// Sit the grid under the loaded scene (centred on the cloud, spanning its
+// extent, its plane perpendicular to the estimated up) rather than at the world
+// origin — which is usually where the camera cluster sits, leaving the grid stranded
+// away from the points. Its placement along up follows the gridZ setting.
 function updateGrid() {
   if (!grid) return
   const span = Math.max(sceneRadius * 2, 1)
   grid.scale.setScalar(span / 10) // GridHelper(10,…) is 10 world units wide by default
-  const z = graticuleZ.value === 'min' ? sceneZMin
-          : graticuleZ.value === 'max' ? sceneZMax
-          : 0.5 * (sceneZMin + sceneZMax) // 'avg' → middle of the cloud's Z extent
-  grid.position.set(sceneCenter.x, sceneCenter.y, z)
+  grid.quaternion.setFromUnitVectors(GRID_NORMAL, sceneUp) // lay it perpendicular to up
+  const off = gridZ.value === 'min' ? sceneAlongMin
+            : gridZ.value === 'max' ? sceneAlongMax
+            : 0.5 * (sceneAlongMin + sceneAlongMax) // 'avg' → middle of the extent
+  grid.position.copy(sceneCenter).addScaledVector(sceneUp, off)
 }
 
 function init() {
@@ -146,6 +186,7 @@ function init() {
   el.appendChild(renderer.domElement)
 
   grid = makeGrid(props.theme)
+  updateGrid() // orient the (empty) grid to the default up before any cloud loads
   scene.add(grid)
   frustumGroup.visible = props.showCameras
   scene.add(frustumGroup)
@@ -155,14 +196,7 @@ function init() {
   scene.add(dir)
   scene.add(new THREE.AmbientLight(0xffffff, 0.4))
 
-  controls = new OrbitControls(camera, renderer.domElement)
-  controls.enableDamping = true
-  controls.dampingFactor = 0.08
-  // Zoom toward the cursor and drag the orbit pivot in with it: when zoomed deep
-  // into the tie-points, orbit/pan then work around the region under the cursor
-  // instead of the far scene centre (which otherwise makes navigation fiddly).
-  controls.zoomToCursor = true
-  controls.update()
+  controls = makeControls()
 
   resizeObserver = new ResizeObserver(onResize)
   resizeObserver.observe(el)
@@ -198,10 +232,33 @@ function setReconstructionData(cameras, points3d) {
   if (pointCount === 0 && !isMesh && cameras.size === 0) {
     sceneCenter.set(0, 0, 0)
     sceneRadius = 5
-    sceneZMin = 0; sceneZMax = 0
+    sceneAlongMin = 0; sceneAlongMax = 0
+    sceneUp.set(0, 0, 1)
     updateGrid()
     return
   }
+
+  // ── Camera centres + estimated scene up ──────────────────────────────────────
+  // Centres (C = -Rᵀt) size the frustums (see cameraFrustumDepth). The up vector
+  // orients the initial view + grid so the model reads level without georef
+  // (see estimateUpFromCameras). Prefer the reconstruction-level up passed as a prop
+  // (a dense/mesh cloud carries no cameras of its own), else derive from these
+  // cameras, else world +Z.
+  const cams = []
+  for (const [uuid, cam] of cameras) {
+    const { R, t } = cam
+    cams.push({
+      uuid, R,
+      centre: new THREE.Vector3(
+        -(R[0][0]*t[0] + R[1][0]*t[1] + R[2][0]*t[2]),
+        -(R[0][1]*t[0] + R[1][1]*t[1] + R[2][1]*t[2]),
+        -(R[0][2]*t[0] + R[1][2]*t[1] + R[2][2]*t[2]),
+      ),
+    })
+  }
+  const up = (props.sceneUp && props.sceneUp.length === 3) ? props.sceneUp : estimateUpFromCameras(cams)
+  if (up) sceneUp.set(up[0], up[1], up[2]).normalize()
+  else sceneUp.set(0, 0, 1)
 
   // ── Point cloud ────────────────────────────────────────────────────────────
   if (pointCount > 0) {
@@ -237,8 +294,7 @@ function setReconstructionData(cameras, points3d) {
     const geo = new THREE.BufferGeometry()
     geo.setAttribute('position', new THREE.BufferAttribute(positions, 3))
     if (colors) geo.setAttribute('color', new THREE.BufferAttribute(colors, 3))
-    geo.computeBoundingSphere()
-    geo.computeBoundingBox()
+    geo.computeBoundingSphere() // for Three's frustum culling (framing uses robustBounds)
 
     const mat = new THREE.PointsMaterial(
       colors
@@ -248,20 +304,18 @@ function setReconstructionData(cameras, points3d) {
     pointCloud = new THREE.Points(geo, mat)
     scene.add(pointCloud)
 
-    // Fit camera to bounding sphere
-    const sphere = geo.boundingSphere
-    if (sphere) {
-      const r = sphere.radius || 1
-      sceneCenter.copy(sphere.center)
-      sceneRadius = r
-      if (geo.boundingBox) { sceneZMin = geo.boundingBox.min.z; sceneZMax = geo.boundingBox.max.z }
-      camera.near = r * 0.001
-      camera.far  = r * 100
-      camera.updateProjectionMatrix()
-      // Only auto-frame the very first model; swapping between clouds of an
-      // already-loaded scene leaves the user's viewpoint untouched.
-      if (!hadContent) resetView()
-    }
+    // Fit camera + grid to robust bounds (median centre, 95th-pct radius) so stray
+    // far points don't inflate the framing or the grid span.
+    const b = robustBounds(positions, pointCount, sceneUp)
+    sceneCenter.copy(b.center)
+    sceneRadius = b.radius
+    sceneAlongMin = b.alongMin; sceneAlongMax = b.alongMax
+    camera.near = sceneRadius * 0.001
+    camera.far  = sceneRadius * 100
+    camera.updateProjectionMatrix()
+    // Only auto-frame the very first model; swapping between clouds of an
+    // already-loaded scene leaves the user's viewpoint untouched.
+    if (!hadContent) resetView()
   }
 
   // ── Mesh ─────────────────────────────────────────────────────────────────────
@@ -278,8 +332,7 @@ function setReconstructionData(cameras, points3d) {
     }
     geo.setIndex(new THREE.BufferAttribute(points3d.idx, 1))
     geo.computeVertexNormals()
-    geo.computeBoundingSphere()
-    geo.computeBoundingBox()
+    geo.computeBoundingSphere() // for Three's frustum culling (framing uses robustBounds)
 
     const mat = new THREE.MeshStandardMaterial({
       vertexColors: !!points3d.col,
@@ -289,41 +342,31 @@ function setReconstructionData(cameras, points3d) {
     meshObject = new THREE.Mesh(geo, mat)
     scene.add(meshObject)
 
-    const sphere = geo.boundingSphere
-    if (sphere) {
-      const r = sphere.radius || 1
-      sceneCenter.copy(sphere.center)
-      sceneRadius = r
-      if (geo.boundingBox) { sceneZMin = geo.boundingBox.min.z; sceneZMax = geo.boundingBox.max.z }
-      camera.near = r * 0.001
-      camera.far = r * 100
-      camera.updateProjectionMatrix()
-      if (!hadContent) resetView()
-    }
+    const b = robustBounds(points3d.pos, points3d.nVerts, sceneUp)
+    sceneCenter.copy(b.center)
+    sceneRadius = b.radius
+    sceneAlongMin = b.alongMin; sceneAlongMax = b.alongMax
+    camera.near = sceneRadius * 0.001
+    camera.far = sceneRadius * 100
+    camera.updateProjectionMatrix()
+    if (!hadContent) resetView()
   }
 
   // ── Camera frustums ────────────────────────────────────────────────────────
-  // Precompute all camera centres (C = -Rᵀt) so the frustum size can be derived
-  // from camera spacing rather than point-cloud extent (see cameraFrustumDepth).
-  const cams = []
-  for (const [uuid, cam] of cameras) {
-    const { R, t } = cam
-    cams.push({
-      uuid, R,
-      centre: new THREE.Vector3(
-        -(R[0][0]*t[0] + R[1][0]*t[1] + R[2][0]*t[2]),
-        -(R[0][1]*t[0] + R[1][1]*t[1] + R[2][1]*t[2]),
-        -(R[0][2]*t[0] + R[1][2]*t[1] + R[2][2]*t[2]),
-      ),
-    })
-  }
+  // `cams` (centres for cameraFrustumDepth) was computed above alongside the up est.
   // Cache inputs so the "Camera size" slider can rebuild frustums without
   // recomputing the cloud (see the cameraScale watcher).
   lastCams = cams
   lastBaseDepth = cameraFrustumDepth(cams.map((c) => c.centre), points3d)
   buildFrustums(lastCams, lastBaseDepth * cameraScale.value)
 
-  updateGrid()
+  // Only (re)fit the grid to the scene on a fresh load. Swapping sparse ↔ dense
+  // (or mesh) of the same scene keeps the user's viewpoint (see `hadContent`), so the
+  // grid must stay put too — sparse and dense have different bounding-sphere radii
+  // (dense extent / stray sparse points), and refitting here made the grid visibly
+  // jump size on every swap. sceneCenter/Radius above still track the current cloud so
+  // an explicit Reset View / gridZ change reframes it.
+  if (!hadContent) updateGrid()
 }
 
 // (Re)build the camera-frustum lines + image-thumbnail quads at the given depth.
@@ -393,45 +436,86 @@ function clearReconstructionData() {
 }
 
 // ── Camera view presets ──────────────────────────────────────────────────────
-// Scenes are Z-up (elevation along +Z): Top/Bottom look down the vertical Z axis,
-// while Front/Back/Left/Right are the horizontal side views. Place the camera
-// along the chosen axis, looking at the scene centre, framing the bounding sphere.
-const VIEW_OFFSETS = {
-  top:    [0,  0,  1],
-  bottom: [0,  0, -1],
-  front:  [0, -1,  0],
-  back:   [0,  1,  0],
-  left:   [-1, 0,  0],
-  right:  [1,  0,  0],
+// Presets are relative to the estimated scene up (sceneUp), not world axes, so a
+// model in a tilted SfM frame still frames level (Top looks down sceneUp, the four
+// sides are horizontal about it). Build an orthonormal {right, fwd, up} basis around
+// sceneUp with a stable horizontal reference.
+function upBasis() {
+  const up = sceneUp.clone().normalize()
+  // Reference axis to derive "horizontal" from — avoid the degenerate case where it
+  // is parallel to up.
+  const ref = Math.abs(up.z) < 0.9 ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(0, 1, 0)
+  const right = new THREE.Vector3().crossVectors(up, ref).normalize()
+  const fwd = new THREE.Vector3().crossVectors(right, up).normalize()
+  return { up, right, fwd }
+}
+
+// Build the orbit controls against the camera's *current* `up`. Split out because
+// OrbitControls derives its orbit axis from camera.up in its constructor and never
+// recomputes it (no public setter, and the cached `_quat`/`_quatInverse` are
+// private) — so retargeting up means rebuilding the controls; see syncControlsUp.
+function makeControls() {
+  const c = new OrbitControls(camera, renderer.domElement)
+  c.enableDamping = true
+  c.dampingFactor = 0.08
+  // Zoom toward the cursor and drag the orbit pivot in with it: when zoomed deep
+  // into the tie-points, orbit/pan then work around the region under the cursor
+  // instead of the far scene centre (which otherwise makes navigation fiddly).
+  c.zoomToCursor = true
+  c.update()
+  return c
+}
+
+// Whenever we retarget camera.up (the estimated scene up), rebuild the controls so
+// their orbit axis follows — otherwise a horizontal drag twists instead of orbiting.
+// Rebuilding uses only public API; poking the private `_quat` cache instead worked
+// but silently breaks on a three.js upgrade. Callers set camera.up first, and the
+// target is carried across (it is the one piece of state a fresh instance loses).
+function syncControlsUp() {
+  if (!controls || !camera || !renderer) return
+  const target = controls.target.clone()
+  controls.dispose()
+  controls = makeControls()
+  controls.target.copy(target)
+  controls.update()
 }
 
 function setView(dir) {
   if (!camera || !controls) return
-  const o = VIEW_OFFSETS[dir] || VIEW_OFFSETS.front
+  const { up, right, fwd } = upBasis()
   const d = sceneRadius * 2.5
-  // For top/bottom the view direction is parallel to the up axis (Z), so pick an
-  // in-plane up (Y) to avoid OrbitControls gimbal-locking.
-  if (dir === 'top' || dir === 'bottom') camera.up.set(0, 1, 0)
-  else                                   camera.up.set(0, 0, 1)
+  let dirVec, camUp
+  switch (dir) {
+    // Top/bottom look along the up axis, so use an in-plane up (fwd) to avoid
+    // OrbitControls gimbal-locking.
+    case 'top':    dirVec = up.clone();            camUp = fwd.clone(); break
+    case 'bottom': dirVec = up.clone().negate();   camUp = fwd.clone(); break
+    case 'back':   dirVec = fwd.clone();           camUp = up.clone(); break
+    case 'left':   dirVec = right.clone().negate(); camUp = up.clone(); break
+    case 'right':  dirVec = right.clone();         camUp = up.clone(); break
+    case 'front':
+    default:       dirVec = fwd.clone().negate();  camUp = up.clone(); break
+  }
+  camera.up.copy(camUp)
+  syncControlsUp()
   controls.target.copy(sceneCenter)
-  camera.position.set(
-    sceneCenter.x + o[0] * d,
-    sceneCenter.y + o[1] * d,
-    sceneCenter.z + o[2] * d,
-  )
+  camera.position.copy(sceneCenter).addScaledVector(dirVec, d)
   camera.updateProjectionMatrix()
   controls.update()
 }
 
 function resetView() {
   if (!camera || !controls) return
-  camera.up.set(0, 0, 1)
+  const { up, right, fwd } = upBasis()
+  camera.up.copy(up)
+  syncControlsUp()
   controls.target.copy(sceneCenter)
-  camera.position.set(
-    sceneCenter.x + sceneRadius * 1.8,
-    sceneCenter.y - sceneRadius * 1.8,
-    sceneCenter.z + sceneRadius * 1.4,
-  )
+  // Oblique bird's-eye: behind + to the side + above the scene centre, all relative
+  // to the estimated up so the horizon is level.
+  camera.position.copy(sceneCenter)
+    .addScaledVector(fwd, -sceneRadius * 1.8)
+    .addScaledVector(right, sceneRadius * 1.2)
+    .addScaledVector(up, sceneRadius * 1.2)
   camera.updateProjectionMatrix()
   controls.update()
 }
@@ -463,8 +547,14 @@ watch(() => props.theme, (t) => {
 })
 
 watch(() => props.showCameras, (v) => { if (frustumGroup) frustumGroup.visible = v })
-watch(() => props.showGraticule, (v) => { if (grid) grid.visible = v })
-watch(graticuleZ, () => updateGrid())
+watch(() => props.showGrid, (v) => { if (grid) grid.visible = v })
+watch(gridZ, () => updateGrid())
+// The reconstruction's up estimate can arrive/refine after content is already shown
+// (e.g. a dense cloud selected before the sparse cameras are pushed). Re-orient the
+// grid to it without yanking the user's current viewpoint.
+watch(() => props.sceneUp, (u) => {
+  if (u && u.length === 3) { sceneUp.set(u[0], u[1], u[2]).normalize(); updateGrid() }
+})
 
 // View-options sliders — cheap live updates, no cloud recompute.
 watch(cameraScale, () => { if (lastCams.length) buildFrustums(lastCams, lastBaseDepth * cameraScale.value) })
@@ -511,18 +601,17 @@ function pickCoordinate(clientX, clientY) {
   if (pointCloud) targets.push(pointCloud)
   const hits = targets.length ? raycaster.intersectObjects(targets, false) : []
   if (hits.length) return hits[0].point.clone()
-  // Fallback: horizontal plane through the scene centre (Z-up).
-  const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), -sceneCenter.z)
+  // Fallback: the ground plane through the scene centre (perpendicular to sceneUp).
+  const plane = new THREE.Plane(sceneUp.clone(), -sceneUp.dot(sceneCenter))
   const pt = new THREE.Vector3()
   return raycaster.ray.intersectPlane(plane, pt) ? pt : null
 }
-async function onCtxSelect(id) {
+function onCtxSelect(id) {
   closeCtx()
   if (id === 'copy-coords') {
     const p = ctxClient ? pickCoordinate(ctxClient.x, ctxClient.y) : null
     if (p) {
-      const text = `${p.x.toFixed(4)}, ${p.y.toFixed(4)}, ${p.z.toFixed(4)}`
-      try { await navigator.clipboard.writeText(text) } catch { /* clipboard blocked */ }
+      copyToClipboard(`${p.x.toFixed(4)}, ${p.y.toFixed(4)}, ${p.z.toFixed(4)}`, 'coordinate')
     }
   }
 }

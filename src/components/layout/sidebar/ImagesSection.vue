@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import { useContextMenu } from '../../../composables/useContextMenu.js'
+import { isTiff } from '../../../utils/tiff.js'
 
 const props = defineProps({
   open:       { type: Boolean, default: true },
@@ -12,10 +13,11 @@ const props = defineProps({
   // set" means unaligned (vs. reconstruction simply not having run yet).
   alignedUuids: { type: Object, default: () => new Set() },
   hasSparse:    { type: Boolean, default: false },
+  openTabIds:   { type: Object, default: () => new Set() },
 })
 const emit = defineEmits([
   'toggle', 'select', 'open', 'show-info', 'zoom-to-image',
-  'delete-keypoints', 'remove-image',
+  'delete-keypoints', 'remove-image', 'convert-to-raster',
 ])
 
 // Per-image expand state
@@ -108,6 +110,14 @@ const ctxHasPosition = computed(() => {
   return !!img && (!!poseFor(img) || (img.meta?.gpsLat != null && img.meta?.gpsLon != null))
 })
 
+// Only a TIFF can carry GeoTIFF geolocation tags, so only a TIFF is worth
+// offering to re-route into reference data. The offer is deliberately not
+// gated on the tags actually being *present* — the whole point of this action
+// is that the ingest-time sniff already said "no" and the user disagrees; the
+// import itself is what decides, and it fails loudly if there is no
+// geotransform.
+const ctxIsTiff = computed(() => !ctxIsMulti.value && isTiff(ctxMenu.value?.img?.name))
+
 function onRightClick(e, img) {
   // Right-clicking outside the current selection collapses to that single image
   if (!localSelected.value.includes(img.id)) {
@@ -119,6 +129,11 @@ function onRightClick(e, img) {
   openImageCtx(e, { img }, { w: 200, h: 180 })
 }
 
+// The action is the same either way (openImageTab focuses an existing tab), but
+// the label should tell you which one you'll get. Tab id per useTabs.openImageTab.
+const ctxOpenLabel = computed(() =>
+  props.openTabIds.has(`img:${ctxMenu.value?.img?.id}`) ? 'Switch to tab' : 'Open in tab')
+
 function ctxOpen()     { emit('open', ctxMenu.value.img.id); closeMenu() }
 function ctxInfo()     { emit('show-info', ctxMenu.value.img.id); closeMenu() }
 function ctxZoom()     { emit('zoom-to-image', ctxMenu.value.img.id); closeMenu() }
@@ -127,6 +142,10 @@ function ctxDeleteKp() {
   // prompt (matches the remove-image path).
   const ids = ctxTargets.value.filter((img) => img.kpStatus === 'done').map((img) => img.id)
   if (ids.length) emit('delete-keypoints', ids)
+  closeMenu()
+}
+function ctxToRaster() {
+  emit('convert-to-raster', ctxMenu.value.img.id)
   closeMenu()
 }
 function ctxRemove() {
@@ -220,9 +239,20 @@ function ctxRemove() {
         :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }"
         @click.stop
       >
-        <button class="ctx-item" :class="{ 'ctx-disabled': ctxIsMulti }" :disabled="ctxIsMulti" @click="ctxOpen">Open in tab</button>
-        <button class="ctx-item" :class="{ 'ctx-disabled': ctxIsMulti }" :disabled="ctxIsMulti" @click="ctxInfo">Show information</button>
+        <!-- Groups, in the order every sidebar menu uses: go there → inspect →
+             change what it is → destructive. -->
+        <button class="ctx-item" :class="{ 'ctx-disabled': ctxIsMulti }" :disabled="ctxIsMulti" @click="ctxOpen">{{ ctxOpenLabel }}</button>
         <button class="ctx-item" :class="{ 'ctx-disabled': ctxIsMulti || !ctxHasPosition }" :disabled="ctxIsMulti || !ctxHasPosition" @click="ctxZoom">Zoom to position on map</button>
+        <div class="ctx-sep"></div>
+        <button class="ctx-item" :class="{ 'ctx-disabled': ctxIsMulti }" :disabled="ctxIsMulti" @click="ctxInfo">Show information</button>
+        <template v-if="ctxIsTiff">
+          <div class="ctx-sep"></div>
+          <button
+            class="ctx-item"
+            title="Re-import this GeoTIFF as an imported DEM / orthophoto"
+            @click="ctxToRaster"
+          >Convert to reference data</button>
+        </template>
         <div class="ctx-sep"></div>
         <button v-if="ctxHasKp" class="ctx-item danger" @click="ctxDeleteKp">Delete keypoints</button>
         <button class="ctx-item danger" @click="ctxRemove">Remove image</button>

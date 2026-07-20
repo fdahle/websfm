@@ -1,4 +1,5 @@
-import { depthColor } from '../../core/products/colormap.js'
+import { hillshadeRgba } from '../../core/products/colormap.js'
+import { rasterToDataUrl } from '../rasterPreview.js'
 import { buildLocalFrame, makeFrame } from '../../core/products/projection.js'
 import { frameFromSimilarity } from '../../core/products/georef.js'
 import { rasterizeDem } from '../../core/products/dem.js'
@@ -32,45 +33,11 @@ export function makeProductsOps() {
     }
   }
 
-  // Colourise + hillshade a DEM height grid to a PNG data URL for the preview. Uses
-  // the shared depth ramp for elevation, multiplied by a simple Lambertian
-  // hillshade from the height gradient. Nodata cells are transparent.
+  // Colourise + hillshade a DEM height grid to a PNG data URL for the preview.
+  // The pixel math is shared with the imported reference-DEM preview
+  // (core/products/colormap.js `hillshadeRgba`) so the two look identical.
   async function demToDataUrl(grid) {
-    const { width: w, height: h, data, mask, gsd, zMin, zMax } = grid
-    const span = zMax > zMin ? zMax - zMin : 1
-    const img = new ImageData(w, h)
-    // Light from the north-west, 45° up.
-    const lx = -0.7071, ly = 0.7071, lz = 1
-    const at = (c, r) => (mask[r * w + c] ? data[r * w + c] : NaN)
-    for (let r = 0; r < h; r++) {
-      for (let c = 0; c < w; c++) {
-        const o = (r * w + c) * 4
-        const z = at(c, r)
-        if (Number.isNaN(z)) { img.data[o + 3] = 0; continue }
-        const [cr, cg, cb] = depthColor((z - zMin) / span)
-        // Central-difference slope (fall back to same cell at borders/holes).
-        const zl = mask[r * w + Math.max(0, c - 1)] ? data[r * w + Math.max(0, c - 1)] : z
-        const zr = mask[r * w + Math.min(w - 1, c + 1)] ? data[r * w + Math.min(w - 1, c + 1)] : z
-        const zt = mask[Math.max(0, r - 1) * w + c] ? data[Math.max(0, r - 1) * w + c] : z
-        const zb = mask[Math.min(h - 1, r + 1) * w + c] ? data[Math.min(h - 1, r + 1) * w + c] : z
-        const dzdx = (zr - zl) / (2 * gsd), dzdy = (zb - zt) / (2 * gsd)
-        const nlen = Math.hypot(dzdx, dzdy, 1)
-        const shade = Math.max(0.25, Math.min(1, (-dzdx * lx - dzdy * ly + lz) / (nlen * Math.hypot(lx, ly, lz))))
-        img.data[o] = cr * shade; img.data[o + 1] = cg * shade; img.data[o + 2] = cb * shade; img.data[o + 3] = 255
-      }
-    }
-    return rasterToDataUrl(img, w, h)
-  }
-
-  async function rasterToDataUrl(imageData, w, h) {
-    const canvas = new OffscreenCanvas(w, h)
-    canvas.getContext('2d').putImageData(imageData, 0, 0)
-    const blob = await canvas.convertToBlob({ type: 'image/png' })
-    return await new Promise((resolve) => {
-      const fr = new FileReader()
-      fr.onload = () => resolve(fr.result)
-      fr.readAsDataURL(blob)
-    })
+    return rasterToDataUrl(hillshadeRgba(grid), grid.width, grid.height)
   }
 
   // Build a DEM: transform the (dense) points into the chosen frame, rasterise a

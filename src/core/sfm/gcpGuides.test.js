@@ -5,7 +5,7 @@ import { beforeAll, describe, it, expect } from 'vitest'
 import initRecon from '../../wasm/reconstruction/reconstruction.js'
 import {
   fundamentalFromCams, epipolarLine, clipLineToRect,
-  gcpGuideForImage, gcpGuidesForImage,
+  gcpGuideForImage, gcpGuidesForImage, gcpEstimateForImage,
 } from './gcpGuides.js'
 
 beforeAll(async () => {
@@ -47,6 +47,50 @@ const camA = makeCam([0, 0, 0], rotY(0))
 const camB = makeCam([1, 0, 0], rotY(-6))
 const camC = makeCam([0.4, 0.9, -0.2], rotY(3))
 const X = { x: 0.2, y: -0.1, z: 5 }
+
+describe('gcpEstimateForImage', () => {
+  const cams = new Map([['imgA', camA], ['imgB', camB], ['imgC', camC]])
+  const marksAt = (target, offset) => [
+    { imageId: 'imgA', ...project(camA, X) },
+    { imageId: 'imgB', ...project(camB, X) },
+    // The target image's own mark, deliberately pulled off the true position.
+    { imageId: target, px: project(camC, X).px + offset, py: project(camC, X).py },
+  ]
+
+  it('includes the target image\'s own mark, unlike a guide', async () => {
+    // 2px off — inside the robust cut's absolute floor, so the mark is kept.
+    const obs = marksAt('imgC', 2)
+    const guide = await gcpGuideForImage(obs, 'imgC', camC, cams)
+    const est = await gcpEstimateForImage(obs, camC, cams)
+    // The guide ignores imgC's mark (that independence is the diagnostic); the
+    // estimate is fitted with it, so it must be pulled toward the offset.
+    const truth = project(camC, X)
+    expect(guide.kind).toBe('point')
+    expect(Math.abs(guide.u - truth.px)).toBeLessThan(1)
+    expect(est.u).toBeGreaterThan(guide.u)
+    expect(est.viewCount).toBe(3)
+  })
+
+  it('does not move when the robust fit rejects the new mark', async () => {
+    // 60px off against two mutually-consistent marks ⇒ rejected, so the estimate
+    // sits exactly where the guide predicted. This is the "did not move the
+    // estimate" case the mark log reports: a stuck-looking number that actually
+    // means "your mark disagreed and was left out", NOT a broken refinement.
+    const obs = marksAt('imgC', 60)
+    const guide = await gcpGuideForImage(obs, 'imgC', camC, cams)
+    const est = await gcpEstimateForImage(obs, camC, cams)
+    expect(Math.hypot(est.u - guide.u, est.v - guide.v)).toBeLessThan(1e-9)
+  })
+
+  it('returns null below 2 registered marks', async () => {
+    const obs = [{ imageId: 'imgA', ...project(camA, X) }]
+    expect(await gcpEstimateForImage(obs, camC, cams)).toBeNull()
+  })
+
+  it('returns null without a target camera', async () => {
+    expect(await gcpEstimateForImage(marksAt('imgC', 0), null, cams)).toBeNull()
+  })
+})
 
 describe('fundamentalFromCams / epipolarLine', () => {
   it('puts the true correspondence on the epipolar line (xBᵀ·F·xA = 0)', () => {

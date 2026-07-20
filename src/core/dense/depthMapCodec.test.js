@@ -102,12 +102,18 @@ describe('buildDepthIndex', () => {
     const cloud = { id: 'cloud-1', createdAt: 1000 }
     const index = buildDepthIndex([makeMap(), makeMap({ uuid: 'img-b' })],
       { sparseCloud: cloud, settings: { quality: 'high' } })
-    expect(index.version).toBe(1)
+    expect(index.version).toBe(3)
     expect(index.sparseCloudId).toBe('cloud-1')
     expect(index.sparseCreatedAt).toBe(1000)
     expect(index.settings).toEqual({ quality: 'high' })
     expect(index.maps.map((m) => m.uuid)).toEqual(['img-a', 'img-b'])
     expect(index.maps[0].hasNormals).toBe(true)
+    // coverage fields: all six depths are > 0, spanning 0.5..5.5.
+    expect(index.maps[0].validPx).toBe(6)
+    expect(index.maps[0].depthMin).toBeCloseTo(0.5, 6)
+    expect(index.maps[0].depthMax).toBeCloseTo(5.5, 6)
+    // v3 median: sorted [0.5,1.5,2.5,3.5,4.5,5.5], upper-middle = 3.5.
+    expect(index.maps[0].depthMedian).toBeCloseTo(3.5, 6)
   })
 })
 

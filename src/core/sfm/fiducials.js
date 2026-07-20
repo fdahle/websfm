@@ -28,6 +28,8 @@
 // distortion code. (Fitting k1/k2 from a certificate distortion table is a
 // follow-up, out of v1.)
 
+import { applyFiducialTransform, invertFiducialTransform } from './fiducialCalibration.js'
+
 const DEG = 180 / Math.PI
 
 // Solve a symmetric 3×3 system N·x = b (Cramer's rule). Returns null if singular.
@@ -140,7 +142,8 @@ export function fitFiducialAffine(obs) {
  */
 export function canonicalFrame(fiducials, pitchMm) {
   const marks = fiducials?.marks || []
-  if (!Number.isFinite(pitchMm) || pitchMm <= 0 || marks.length < 3) return null
+  if (!Number.isFinite(pitchMm) || pitchMm <= 0 || !Number.isFinite(fiducials?.focalMm)
+    || fiducials.focalMm <= 0 || marks.length < 3) return null
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
   for (const m of marks) {
     if (!Number.isFinite(m.xMm) || !Number.isFinite(m.yMm)) continue
@@ -172,8 +175,10 @@ export function canonicalFrame(fiducials, pitchMm) {
  * @returns {{ x:number, y:number }}
  */
 export function scanToCanonical(px, py, A, frame) {
-  const mmX = A[0] * px + A[1] * py + A[2]
-  const mmY = A[3] * px + A[4] * py + A[5]
+  const mm = Array.isArray(A)
+    ? { x: A[0] * px + A[1] * py + A[2], y: A[3] * px + A[4] * py + A[5] }
+    : applyFiducialTransform({ x: px, y: py }, A)
+  const mmX = mm.x, mmY = mm.y
   return {
     x: (mmX - frame.originX) / frame.pitchMm,
     y: (mmY - frame.originY) / frame.pitchMm,
@@ -202,6 +207,7 @@ export function mmToScan(xMm, yMm, A) {
 export function canonicalToScan(x, y, A, frame) {
   const mmX = x * frame.pitchMm + frame.originX
   const mmY = y * frame.pitchMm + frame.originY
+  if (!Array.isArray(A)) return invertFiducialTransform({ x: mmX, y: mmY }, A)
   const [a, b, c, d, e, f] = A
   const det = a * e - b * d
   const rx = mmX - c, ry = mmY - f

@@ -3,7 +3,15 @@ import { defineStore } from 'pinia'
 import { createImage } from '../utils/image.js'
 import { isTiff, canDecodeTiffNatively, nativeTiffDecodeResult, readTiffDimensions } from '../utils/tiff.js'
 import { extractMetadata } from '../core/io/metadata.js'
-import { detectKeypoints, transcodeTiff } from '../workers/computeClient.js'
+import {
+  detectKeypoints, transcodeTiff, prepareFiducialTemplates, detectFiducials, bootstrapFiducials,
+  detectFiducialSpots as detectFiducialSpotsWorker, POOL_SIZE,
+} from '../workers/computeClient.js'
+import { fitFiducialAffine, mmToScan } from '../core/sfm/fiducials.js'
+import { gateFiducialDetections, FIDUCIAL_DETECT_TUNING } from '../core/sfm/fiducialDetect.js'
+import { FIDUCIAL_DETECT_DEFAULTS } from '../core/defaults.user.js'
+import { migrateLegacyFiducialImage } from '../core/sfm/fiducialModel.js'
+import { buildBorderMask } from '../core/mask.js'
 import { useLog } from '../composables/useLog.js'
 import * as opfs from '../utils/opfs.js'
 import { useProjectsStore } from './useProjectsStore.js'
@@ -97,6 +105,7 @@ export const useImagesStore = defineStore('images', () => {
           // Fiducial observations (F4) are user clicks on the raster — tiny, and
           // persisted inline (independent of keypoint indices).
           fiducialObs: img.fiducialObs?.length ? img.fiducialObs.map((o) => ({ ...o })) : [],
+          fiducialDetections: img.fiducialDetections?.length ? img.fiducialDetections.map((d) => ({ ...d })) : [],
           meta: img.meta ? metaToSave : null,
         }
       }),
@@ -366,6 +375,418 @@ export const useImagesStore = defineStore('images', () => {
     if (isPersisting()) sync()
   }
 
+  // ── automatic fiducial measurement (F4) ──────────────────────────────────
+  //
+  // Mark all fiducials once on ONE reference scan, then find the same marks on
+  // every other image of that film sensor by ZNCC template matching (see
+  // core/sfm/fiducialDetect.js for the method and the QC gates).
+  //
+  // Two rules shape this function:
+  //  • Detections are BUFFERED, not written as they arrive. Gate 2 compares each
+  //    detection against the batch median for its mark, which does not exist
+  //    until every image has been matched — so application is a second pass.
+  //  • Nothing is written for a failed image. A wrong interior orientation is
+  //    worse than a missing one: it silently poisons every pose downstream,
+  //    whereas a missing one just asks the user to click.
+  //
+  // @param {{ sensor: object, refId: string, settings?: object,
+  //           onProgress?: (done:number,total:number)=>void }} args
+  //   `refId` is the reference image's `id` (the key `imageById` takes).
+  // @returns {Promise<{ perImage: object[], rotationK: number }>}
+  async function autonomousFiducials(sensor, cfg, onProgress) {
+    const marks = sensor?.fiducials?.marks || []
+    const markIds = new Set(marks.map((m) => m.id))
+    const targets = images.value.filter((img) => img.sensorId === sensor.id)
+    const queue = targets.filter((img) => cfg.overwrite
+      || ![...markIds].every((id) => (img.fiducialObs || []).some((o) => o.fidId === id)))
+    const skipped = targets.filter((img) => !queue.includes(img)).map((img) => ({
+      id: img.id, name: img.name, status: 'skipped', applied: 0, rejected: 0, rmsUm: null, rotationK: cfg.rotationK,
+    }))
+    log(`Fiducial autonomous detect: ${cfg.family} marks on ${queue.length} image(s), orientation ${cfg.rotationK * 90}°`, 'info', 'Fiducial')
+    const buffered = []; let cursor = 0, done = 0
+    const drain = async () => {
+      while (true) {
+        const i = cursor++
+        if (i >= queue.length) return
+        const img = queue[i]
+        try {
+          await whenComputeReady(img)
+          const out = await bootstrapFiducials(img.computeUrl ?? img.url,
+            marks.map((m) => ({ id: m.id, xMm: m.xMm, yMm: m.yMm })),
+            { family: cfg.family, rotationK: cfg.rotationK },
+            { onLog: (m) => log(m, 'info', 'Fiducial') })
+          buffered.push({ id: img.id, name: img.name, detections: out.detections })
+        } catch (err) {
+          log(`${img.name}: autonomous fiducial detection failed — ${err.message}`, 'error', 'Fiducial')
+          buffered.push({ id: img.id, name: img.name, detections: [] })
+        }
+        onProgress?.(++done, queue.length)
+      }
+    }
+    await Promise.all(Array.from({ length: Math.max(1, Math.min(POOL_SIZE, queue.length)) }, drain))
+    let gated = gateFiducialDetections(
+      buffered.map((b) => ({ uuid: b.id, name: b.name, detections: b.detections })),
+      marks, { minScore: cfg.bootstrapMinScore, maxRmsUm: cfg.maxRmsUm })
+
+    // Bootstrap the existing, more discriminating ZNCC path from the strongest
+    // autonomous image. This is the key payoff: no user-supplied reference, but
+    // weak scans still receive real scan-derived templates rather than only the
+    // analytic family prototype.
+    const donor = gated.filter((g) => g.status !== 'failed')
+      .sort((a, b) => b.accepted.length - a.accepted.length || (a.rmsUm ?? Infinity) - (b.rmsUm ?? Infinity))[0]
+    const retry = gated.filter((g) => g.status === 'failed')
+    if (donor && retry.length) {
+      const donorImg = imageById(donor.uuid)
+      if (donorImg) {
+        await whenComputeReady(donorImg)
+        const prepared = await prepareFiducialTemplates(donorImg.computeUrl ?? donorImg.url,
+          donor.accepted.map((d) => ({ fidId: d.fidId, px: d.px, py: d.py })),
+          { templateHalf: FIDUCIAL_DETECT_TUNING.templateHalf })
+        for (const failed of retry) {
+          const img = imageById(failed.uuid)
+          if (!img) continue
+          try {
+            await whenComputeReady(img)
+            const w = img.meta?.width || prepared.natW, h = img.meta?.height || prepared.natH
+            const sx = w / prepared.natW, sy = h / prepared.natH
+            const radius = Math.max(8, (cfg.searchRadiusPct / 100) * Math.max(w, h))
+            const predictions = donor.accepted.map((d) => ({ fidId: d.fidId, px: d.px * sx, py: d.py * sy, radius }))
+            const recovered = await detectFiducials(img.computeUrl ?? img.url, prepared.templates, predictions,
+              { ...FIDUCIAL_DETECT_TUNING, tryRotations: false })
+            const row = buffered.find((b) => b.id === failed.uuid)
+            if (row) row.detections = recovered.results.map((d) => ({ ...d, source: 'template' }))
+            log(`${img.name}: retrying from automatically learned templates`, 'info', 'Fiducial')
+          } catch (err) {
+            log(`${img.name}: learned-template retry failed — ${err.message}`, 'warn', 'Fiducial')
+          }
+        }
+        gated = gateFiducialDetections(
+          buffered.map((b) => ({ uuid: b.id, name: b.name, detections: b.detections })),
+          marks, { minScore: Math.min(cfg.minScore, cfg.bootstrapMinScore), maxRmsUm: cfg.maxRmsUm })
+      }
+    }
+    const perImage = []; let totalApplied = 0
+    for (const g of gated) {
+      const img = imageById(g.uuid)
+      if (!img || g.status === 'failed') {
+        perImage.push({ id: g.uuid, name: g.name, status: 'failed', applied: 0,
+          rejected: g.rejected.length, rmsUm: g.rmsUm, rotationK: cfg.rotationK })
+        continue
+      }
+      if (!Array.isArray(img.fiducialObs)) img.fiducialObs = []
+      let applied = 0
+      for (const d of g.accepted) {
+        const existing = img.fiducialObs.find((o) => o.fidId === d.fidId)
+        if (existing && !cfg.overwrite) continue
+        if (existing) { existing.px = d.px; existing.py = d.py }
+        else img.fiducialObs.push({ fidId: d.fidId, px: d.px, py: d.py })
+        applied++
+      }
+      totalApplied += applied
+      perImage.push({ id: g.uuid, name: g.name, status: g.status, applied,
+        rejected: g.rejected.length, rmsUm: g.rmsUm, rotationK: cfg.rotationK })
+    }
+    if (totalApplied && isPersisting()) sync()
+    const failed = perImage.filter((p) => p.status === 'failed').length
+    log(`Fiducial autonomous detect complete: ${totalApplied} observation(s), ${failed} image(s) need guidance`,
+      failed ? 'warn' : 'success', 'Fiducial')
+    return { perImage: [...perImage, ...skipped], rotationK: cfg.rotationK }
+  }
+
+  function setFiducialDetection(imageId, detection) {
+    const img = imageById(imageId)
+    if (!img || !detection?.slot || !Number.isFinite(detection.px) || !Number.isFinite(detection.py)) return
+    if (!Array.isArray(img.fiducialDetections)) img.fiducialDetections = []
+    const clean = { slot: String(detection.slot), px: detection.px, py: detection.py,
+      family: detection.family ?? 'generic', source: detection.source ?? 'manual',
+      confidence: Number.isFinite(detection.confidence) ? detection.confidence : 1,
+      reviewed: detection.reviewed !== false }
+    const existing = img.fiducialDetections.find((d) => d.slot === clean.slot)
+    if (existing) Object.assign(existing, clean)
+    else img.fiducialDetections.push(clean)
+    if (isPersisting()) sync()
+  }
+
+  function removeFiducialDetection(imageId, slot) {
+    const img = imageById(imageId)
+    const i = img?.fiducialDetections?.findIndex((d) => d.slot === slot) ?? -1
+    if (i < 0) return
+    img.fiducialDetections.splice(i, 1)
+    if (isPersisting()) sync()
+  }
+
+  async function detectFiducialsForSensor({ sensor, imageIds = null, settings = {}, overwrite = false, onProgress } = {}) {
+    if (!sensor?.id) throw new Error('Choose a film sensor')
+    // Pinia/Vue callers may supply a reactive Proxy. Keep worker input plain even
+    // if this action is reused without the compute-client safeguard.
+    settings = { ...settings }
+    const selected = new Set(imageIds || [])
+    const targets = images.value.filter((img) => img.sensorId === sensor.id && (!selected.size || selected.has(img.id)))
+    if (!targets.length) return { perImage: [], drafts: [] }
+    const buffered = []; let cursor = 0, done = 0
+    const drain = async () => {
+      while (true) {
+        const i = cursor++
+        if (i >= targets.length) return
+        const img = targets[i]
+        try {
+          await whenComputeReady(img)
+          const out = await detectFiducialSpotsWorker(img.computeUrl ?? img.url, settings,
+            { onLog: (m) => log(`${img.name}: ${m}`, 'info', 'Fiducial') })
+          buffered.push({ id: img.id, name: img.name, out })
+        } catch (err) {
+          log(`${img.name}: fiducial spot detection failed — ${err.message}`, 'error', 'Fiducial')
+          buffered.push({ id: img.id, name: img.name, out: { accepted: [], drafts: [], requested: 0, frame: null, ms: 0 }, error: err.message })
+        }
+        onProgress?.(++done, targets.length)
+      }
+    }
+    await Promise.all(Array.from({ length: Math.max(1, Math.min(POOL_SIZE, targets.length)) }, drain))
+
+    // Learn real scan templates from the strongest anonymous detection per slot,
+    // then retry incomplete images at the batch-median raster-relative position.
+    // This remains detection-only: slots and image geometry, never metric marks.
+    const donors = new Map(), normBySlot = new Map()
+    for (const row of buffered) for (const d of row.out.accepted || []) {
+      if (!donors.has(d.slot) || d.confidence > donors.get(d.slot).d.confidence) donors.set(d.slot, { row, d })
+      if (!normBySlot.has(d.slot)) normBySlot.set(d.slot, [])
+      normBySlot.get(d.slot).push({ x: d.px / row.out.natW, y: d.py / row.out.natH })
+    }
+    const templates = []
+    for (const { row, d } of donors.values()) {
+      const img = imageById(row.id)
+      if (!img) continue
+      try {
+        const p = await prepareFiducialTemplates(img.computeUrl ?? img.url,
+          [{ fidId: d.slot, px: d.px, py: d.py }], { templateHalf: FIDUCIAL_DETECT_TUNING.templateHalf })
+        templates.push(...p.templates)
+      } catch (err) { log(`${img.name}: donor crop failed — ${err.message}`, 'warn', 'Fiducial') }
+    }
+    const median = (v) => { const s = [...v].sort((a, b) => a - b), m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2 }
+    if (templates.length) for (const row of buffered) {
+      if ((row.out.accepted?.length ?? 0) >= (row.out.requested ?? 0)) continue
+      const img = imageById(row.id); if (!img) continue
+      const have = new Set((row.out.accepted || []).map((d) => d.slot))
+      const predictions = templates.flatMap((t) => {
+        if (have.has(t.fidId)) return []
+        const pts = normBySlot.get(t.fidId); if (!pts?.length) return []
+        return [{ fidId: t.fidId, px: median(pts.map((p) => p.x)) * row.out.natW,
+          py: median(pts.map((p) => p.y)) * row.out.natH,
+          radius: 0.06 * Math.max(row.out.natW, row.out.natH) }]
+      })
+      if (!predictions.length) continue
+      try {
+        const retry = await detectFiducials(img.computeUrl ?? img.url, templates, predictions,
+          { ...FIDUCIAL_DETECT_TUNING, tryRotations: false })
+        for (const d of retry.results.filter((x) => x.score >= 0.7)) {
+          row.out.accepted.push({ slot: d.fidId, px: d.px, py: d.py, family: settings.family,
+            source: 'template', confidence: d.score, score: d.score, peakMargin: null, reviewed: false })
+          row.out.drafts = (row.out.drafts || []).filter((x) => x.slot !== d.fidId)
+        }
+      } catch (err) { log(`${img.name}: anonymous template retry failed — ${err.message}`, 'warn', 'Fiducial') }
+    }
+    let applied = 0, masksGenerated = 0
+    for (const row of buffered) {
+      const img = imageById(row.id)
+      if (!img) continue
+      if (!Array.isArray(img.fiducialDetections)) img.fiducialDetections = []
+      for (const d of row.out.accepted || []) {
+        const old = img.fiducialDetections.find((x) => x.slot === d.slot)
+        if (old && !overwrite) continue
+        const clean = { slot: d.slot, px: d.px, py: d.py, family: d.family,
+          source: d.source, confidence: d.confidence, reviewed: false }
+        if (old) Object.assign(old, clean); else img.fiducialDetections.push(clean)
+        applied++
+      }
+      const f = row.out.frame
+      if (settings.generateMasks && f?.confidence >= 0.06 && row.out.natW > 0 && row.out.natH > 0) {
+        try {
+          const sides = { left: f.left, top: f.top,
+            right: row.out.natW - 1 - f.right, bottom: row.out.natH - 1 - f.bottom }
+          const dataUrl = await buildBorderMask(row.out.natW, row.out.natH, sides,
+            settings.overwrite ? null : img.mask?.dataUrl ?? null)
+          updateMask(img.id, dataUrl, true)
+          masksGenerated++
+        } catch (err) { log(`${img.name}: frame mask failed — ${err.message}`, 'warn', 'Fiducial') }
+      }
+    }
+    if (applied && isPersisting()) sync()
+    const perImage = buffered.map((r) => ({ id: r.id, name: r.name,
+      accepted: r.out.accepted?.length ?? 0, drafts: r.out.drafts?.length ?? 0,
+      requested: r.out.requested ?? 0, confidence: r.out.accepted?.length
+        ? r.out.accepted.reduce((s, d) => s + d.confidence, 0) / r.out.accepted.length : 0,
+      frameConfidence: r.out.frame?.confidence ?? 0, ms: r.out.ms ?? 0, error: r.error ?? null }))
+    return { perImage, drafts: buffered.flatMap((r) => (r.out.drafts || []).map((d) => ({ ...d, imageId: r.id, imageName: r.name }))), applied, masksGenerated }
+  }
+
+  async function autoDetectFiducials({ sensor, refId, settings = {}, onProgress } = {}) {
+    const cfg = { ...FIDUCIAL_DETECT_DEFAULTS, ...settings }
+    const marks = sensor?.fiducials?.marks || []
+    const markIds = new Set(marks.map((m) => m.id))
+    if (marks.length < 3) {
+      const msg = `Sensor ${sensor?.label ?? '?'} has ${marks.length} calibrated fiducial mark(s) — need at least 3`
+      log(msg, 'error', 'Fiducial'); throw new Error(msg)
+    }
+
+    if (cfg.mode === 'automatic' || !refId) return autonomousFiducials(sensor, cfg, onProgress)
+
+    const refImg = imageById(refId)
+    const refObs = (refImg?.fiducialObs || []).filter((o) => markIds.has(o.fidId))
+    if (!refImg || refObs.length < 3) {
+      const msg = `Reference image needs at least 3 marked fiducials (has ${refObs.length})`
+      log(msg, 'error', 'Fiducial'); throw new Error(msg)
+    }
+
+    const targets = images.value.filter((img) => img.sensorId === sensor.id && img.id !== refId)
+    if (!targets.length) {
+      log('No other images assigned to this sensor — nothing to detect', 'warn', 'Fiducial')
+      return { perImage: [], rotationK: 0 }
+    }
+
+    log(`Fiducial auto-detect: ${refObs.length} template(s) from ${refImg.name} → ${targets.length} image(s); `
+      + `search ±${cfg.searchRadiusPct}%, min score ${cfg.minScore}, max RMS ${cfg.maxRmsUm} µm`
+      + `${cfg.tryRotations ? ', rotation probe on' : ''}${cfg.overwrite ? ', overwriting existing' : ''}`,
+      'info', 'Fiducial')
+
+    // Templates: cut once from the reference image, reused for every target.
+    // TIFF scans encode their lossless compute blob after the display JPEG, so
+    // the compute source may not exist yet — and JPEG artifacts in a template
+    // would bias every match made with it.
+    await whenComputeReady(refImg)
+    const { templates, natW: refW, natH: refH } = await prepareFiducialTemplates(
+      refImg.computeUrl ?? refImg.url,
+      // Vue proxies do not structured-clone.
+      refObs.map((o) => ({ fidId: o.fidId, px: o.px, py: o.py })),
+      { templateHalf: FIDUCIAL_DETECT_TUNING.templateHalf },
+      { onLog: (m) => log(m, 'info', 'Fiducial') },
+    )
+
+    // Predictions for one target, in the REFERENCE frame (the detector's rotation
+    // probe remaps them if the scan went through the scanner sideways).
+    function predictionsFor(img) {
+      const w = img.meta?.width || refW
+      const h = img.meta?.height || refH
+      const radius = Math.max(8, (cfg.searchRadiusPct / 100) * Math.max(w, h))
+      // Best case: this image already has ≥3 marks, so its own interior
+      // orientation pins where the rest must be — far tighter than a scaled
+      // guess from the reference.
+      const own = (img.fiducialObs || []).filter((o) => markIds.has(o.fidId))
+      if (own.length >= 3) {
+        const fit = fitFiducialAffine(own.map((o) => {
+          const m = marks.find((mm) => mm.id === o.fidId)
+          return { px: o.px, py: o.py, xMm: m.xMm, yMm: m.yMm }
+        }))
+        if (fit) {
+          const out = []
+          for (const t of templates) {
+            const m = marks.find((mm) => mm.id === t.fidId)
+            const p = m && mmToScan(m.xMm, m.yMm, fit.A)
+            if (p) out.push({ fidId: t.fidId, px: p.x, py: p.y, radius })
+          }
+          if (out.length) return out
+        }
+      }
+      // Fallback: the reference's own click positions, scaled for a differing
+      // scan size. Within one batch the frame lands in nearly the same place.
+      const sx = w / refW, sy = h / refH
+      return refObs.map((o) => ({ fidId: o.fidId, px: o.px * sx, py: o.py * sy, radius }))
+    }
+
+    // ── detection pass (buffered) ────────────────────────────────────────────
+    const buffered = []
+    const skipped = []
+    let done = 0
+    const queue = targets.filter((img) => {
+      const have = new Set((img.fiducialObs || []).map((o) => o.fidId))
+      const complete = [...markIds].every((id) => have.has(id))
+      if (complete && !cfg.overwrite) {
+        skipped.push({ id: img.id, uuid: img.uuid, name: img.name, status: 'skipped', applied: 0, rejected: 0, rmsUm: null, rotationK: 0 })
+        return false
+      }
+      return true
+    })
+    if (skipped.length) log(`${skipped.length} image(s) already fully marked — skipped (enable overwrite to redo)`, 'info', 'Fiducial')
+
+    // Concurrency-limited drain loops pulling from a shared cursor — the same
+    // shape as useMatchesStore.matchAll. No pinning: these ops carry no heavy
+    // per-worker runtime.
+    let cursor = 0
+    const concurrency = Math.max(1, Math.min(POOL_SIZE, queue.length))
+    const drain = async () => {
+      while (true) {
+        const i = cursor++
+        if (i >= queue.length) return
+        const img = queue[i]
+        try {
+          await whenComputeReady(img)
+          const { results, ms } = await detectFiducials(
+            img.computeUrl ?? img.url,
+            templates,
+            predictionsFor(img),
+            { ...FIDUCIAL_DETECT_TUNING, tryRotations: cfg.tryRotations },
+          )
+          buffered.push({ id: img.id, uuid: img.uuid, name: img.name, detections: results })
+          const mean = results.length ? results.reduce((s, r) => s + r.score, 0) / results.length : 0
+          log(`${img.name}: ${results.length} mark(s) matched, mean zncc ${mean.toFixed(3)}`
+            + `${results[0]?.rotationK ? `, scan rotated ${results[0].rotationK * 90}°` : ''} (${Math.round(ms)} ms)`,
+            'info', 'Fiducial')
+        } catch (err) {
+          log(`${img.name}: fiducial detection failed — ${err.message}`, 'error', 'Fiducial')
+          buffered.push({ id: img.id, uuid: img.uuid, name: img.name, detections: [] })
+        }
+        done++
+        onProgress?.(done, queue.length)
+      }
+    }
+    await Promise.all(Array.from({ length: concurrency }, drain))
+
+    // ── QC gates (need the whole population) + application ───────────────────
+    const gated = gateFiducialDetections(
+      buffered.map((b) => ({ uuid: b.id, name: b.name, detections: b.detections })),
+      marks, { minScore: cfg.minScore, maxRmsUm: cfg.maxRmsUm },
+    )
+
+    const perImage = []
+    let totalApplied = 0
+    for (const g of gated) {
+      const img = imageById(g.uuid) // gate carries our `id` through as `uuid`
+      const rejected = g.rejected.length
+      for (const r of g.rejected) {
+        log(`${g.name}: ${r.fidId} rejected — ${r.reason}`, 'warn', 'Fiducial')
+      }
+      if (g.status === 'failed' || !img) {
+        log(`${g.name}: FAILED QC (${g.rmsUm == null ? 'too few marks survived' : `affine RMS ${g.rmsUm.toFixed(1)} µm > ${cfg.maxRmsUm}`}) — nothing written, mark manually`,
+          'warn', 'Fiducial')
+        perImage.push({ id: g.uuid, name: g.name, status: 'failed', applied: 0, rejected, rmsUm: g.rmsUm, rotationK: g.rotationK })
+        continue
+      }
+      // Apply in bulk: setFiducialObservation() sync()s and logs per call, which
+      // would be hundreds of whole-project writes for one run.
+      if (!Array.isArray(img.fiducialObs)) img.fiducialObs = []
+      let applied = 0
+      for (const d of g.accepted) {
+        const existing = img.fiducialObs.find((o) => o.fidId === d.fidId)
+        if (existing && !cfg.overwrite) continue
+        if (existing) { existing.px = d.px; existing.py = d.py }
+        else img.fiducialObs.push({ fidId: d.fidId, px: d.px, py: d.py })
+        applied++
+      }
+      totalApplied += applied
+      log(`${g.name}: ${applied} mark(s) written${rejected ? `, ${rejected} rejected` : ''}, affine RMS ${g.rmsUm.toFixed(1)} µm`,
+        'success', 'Fiducial')
+      perImage.push({ id: g.uuid, name: g.name, status: g.status, applied, rejected, rmsUm: g.rmsUm, rotationK: g.rotationK })
+    }
+
+    const failed = perImage.filter((p) => p.status === 'failed').length
+    log(`Fiducial auto-detect complete: ${totalApplied} observation(s) across ${perImage.length - failed} image(s)`
+      + `${failed ? `, ${failed} failed QC` : ''}${skipped.length ? `, ${skipped.length} skipped` : ''}`,
+      failed ? 'warn' : 'success', 'Fiducial')
+
+    // One whole-project write for the entire run.
+    if (totalApplied && isPersisting()) sync()
+    return { perImage: [...perImage, ...skipped], rotationK: gated[0]?.rotationK ?? 0 }
+  }
+
   async function detectOne(id, settings = {}, onDetected, shouldCancel) {
     const img = images.value.find((i) => i.id === id)
     if (!img || img.kpStatus === 'running') return
@@ -601,6 +1022,7 @@ export const useImagesStore = defineStore('images', () => {
           depth: null,
           // Back-compat: older projects predate fiducials ⇒ empty.
           fiducialObs: Array.isArray(record.fiducialObs) ? record.fiducialObs.map((o) => ({ ...o })) : [],
+          fiducialDetections: Array.isArray(record.fiducialDetections) ? record.fiducialDetections.map((d) => ({ ...d })) : [],
         }
         if (record.kpStatus === 'done') {
           const kps = await opfs.loadKeypoints(projectId, record.uuid)
@@ -633,6 +1055,18 @@ export const useImagesStore = defineStore('images', () => {
     log(`Project loaded: ${images.value.length} image${images.value.length !== 1 ? 's' : ''}`, 'success', 'Project')
   }
 
+  function migrateLegacyFiducialDetections(sensors) {
+    const byId = new Map((sensors || []).map((s) => [s.id, s]))
+    let count = 0
+    for (const img of images.value) {
+      if (img.fiducialDetections?.length || !img.fiducialObs?.length) continue
+      img.fiducialDetections = migrateLegacyFiducialImage(img, byId.get(img.sensorId))
+      count += img.fiducialDetections.length
+    }
+    if (count) { log(`Migrated ${count} legacy fiducial observation(s) to anonymous slots`, 'info', 'Fiducial'); if (isPersisting()) sync() }
+    return count
+  }
+
   return {
     images,
     selectedId,
@@ -646,11 +1080,16 @@ export const useImagesStore = defineStore('images', () => {
     setFiducialObservation,
     removeFiducialObservation,
     addFiducialObservations,
+    autoDetectFiducials,
+    setFiducialDetection,
+    removeFiducialDetection,
+    detectFiducialsForSensor,
     detectOne,
     detectAll,
     whenComputeReady,
     clearKeypoints,
     clearAll,
     restoreImages,
+    migrateLegacyFiducialDetections,
   }
 })

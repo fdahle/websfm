@@ -14,7 +14,7 @@ const props = defineProps({
   cameras: { type: Map,    default: () => new Map() }, // uuid → { R, t, K }
 })
 
-const emit = defineEmits(['update', 'remove', 'toggle-fixed', 'set-fiducial-marks'])
+const emit = defineEmits(['update', 'remove', 'toggle-fixed', 'set-fiducial-marks', 'detect-fiducials', 'calibrate-fiducials'])
 
 const isFixed = (s, field) => !!s.fixed?.[field]
 
@@ -513,6 +513,17 @@ const totalCols = computed(() => 4 + NUM_COLS.length + 2)
                 ></textarea>
                 <button class="add-mark" @click="applyPaste(s)">Import pasted marks</button>
               </div>
+
+              <!-- Detection is an image task and has no calibration prerequisite. -->
+              <div class="fid-auto">
+                <button
+                  class="add-mark"
+                  title="Detect anonymous fiducial spots without a calibration or marked reference"
+                  @click="emit('detect-fiducials', s.id)"
+                >Detect fiducials…</button>
+                <button class="add-mark" title="Map detected raster slots to a certificate or estimate a batch layout"
+                  @click="emit('calibrate-fiducials', s.id)">Calibrate fiducials…</button>
+              </div>
             </div>
           </td>
         </tr>
@@ -629,7 +640,9 @@ tbody td.dim { color: var(--text-dim); }
   background: var(--bg); border: 1px solid var(--panel-border); border-radius: 4px;
   color: var(--text); font: inherit; font-size: 11px; padding: 4px 10px; cursor: pointer;
 }
-.add-mark:hover { border-color: var(--accent); }
+.add-mark:hover:not(:disabled) { border-color: var(--accent); }
+.add-mark:disabled { opacity: 0.45; cursor: default; }
+.fid-auto { display: flex; }
 .fid-paste { display: flex; flex-direction: column; gap: 6px; }
 .paste-area {
   width: 100%; min-height: 60px; resize: vertical;

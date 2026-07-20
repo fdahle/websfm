@@ -26,6 +26,7 @@ const NEED_CHECKS = {
   products:  { ok: (s) => s.productReady,     reason: 'Build a DEM or orthophoto first' },
   poses:     { ok: (s) => s.poseCount   > 0,  reason: 'Import camera poses first' },
   sensors:   { ok: (s) => s.sensorCount > 0,  reason: 'No sensors available' },
+  filmSensor: { ok: (s) => s.filmSensorCount > 0, reason: 'Set at least one sensor to Film first' },
 }
 
 // The command catalogue. `group` only drives help layout. `dispatch` is the
@@ -46,6 +47,8 @@ export const COMMANDS = [
   { name: 'georeference', aliases: ['georef'],      dispatch: 'auto-georeference',  needs: ['sparse', 'poses'], group: 'Tools', help: 'Auto-georeference from imported poses' },
   { name: 'automask',     aliases: ['auto-mask'],   dispatch: 'auto-mask',          needs: ['images', 'imagesReady'], group: 'Tools', help: 'Open the auto-mask dialog' },
   { name: 'footprints',   aliases: [],              dispatch: 'footprints-from-poses', needs: ['poses', 'sensors'], group: 'Tools', help: 'Build footprints from poses' },
+  { name: 'fiducials',    aliases: ['detect-fiducials'], dispatch: 'detect-fiducials', needs: ['filmSensor'], group: 'Tools', help: 'Auto-detect fiducial marks on film scans' },
+  { name: 'calibrate-fiducials', aliases: ['fiducial-calibration'], dispatch: 'calibrate-fiducials', needs: ['filmSensor'], group: 'Tools', help: 'Calibrate detected film fiducials' },
 
   // --- Tables / views ---
   { name: 'images',   aliases: ['image-table'],     dispatch: 'open-image-table',  needs: ['images'],  group: 'View', help: 'Open the image table' },

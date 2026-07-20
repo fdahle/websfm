@@ -8,6 +8,8 @@
 //     line* in this image (a 1-D constraint) — returned as `{ kind:'line' }`.
 //   • ≥2 other observations → the GCP triangulates to a 3D point, which
 //     reprojects to a single predicted pixel — returned as `{ kind:'point' }`.
+//     Every observation refines that point (robust N-view fit), so each extra
+//     mark the user places tightens the guide in the images still unmarked.
 // The viewer draws these as aiming guides (see ViewerImage.vue), the same idea
 // as the fiducial ghost guides.
 //
@@ -141,7 +143,12 @@ function baseline(camA, camB) {
 //   targetImageId:    image the guide is drawn in
 //   targetCam:        that image's { R, t, K } (null ⇒ unregistered ⇒ no guide)
 //   camerasByImageId: Map<imageId, { R, t, K }> for *registered* images only
-// Returns { kind:'point', u, v, viewCount } | { kind:'line', line, viewCount } | null.
+// Returns { kind:'point', u, v, viewCount, rejectedCount } |
+// { kind:'line', line, viewCount } | null.
+//   rejectedCount — how many of the GCP's other marks the robust fit left out as
+//     inconsistent. Scoped to *this prediction*: the marks remain part of the GCP
+//     everywhere else (georef fit, accuracy report, anchored BA). A nonzero value
+//     is a hint that one of those marks is a misclick, not a verdict on the GCP.
 export async function gcpGuideForImage(observations, targetImageId, targetCam, camerasByImageId) {
   if (!targetCam) return null
   const views = (observations || []).filter(
@@ -149,14 +156,23 @@ export async function gcpGuideForImage(observations, targetImageId, targetCam, c
   )
   if (!views.length) return null
 
-  // ≥2 views → triangulate and reproject to a single predicted pixel.
+  // ≥2 views → triangulate and reproject to a single predicted pixel. Every
+  // mark refines the point (not just the widest-baseline pair), and `robust`
+  // discards a mark that disagrees with the consensus — a misclick on one image
+  // must not drag the aiming guide in all the others. Rejection is right for a
+  // guide and wrong for the georeference fit; see gcpTriangulation.js.
   if (views.length >= 2) {
-    const tri = await triangulateGcp(views, camerasByImageId)
+    const tri = await triangulateGcp(views, camerasByImageId, { robust: true })
     if (tri && Number.isFinite(tri.x)) {
       // projectWithDepth enforces cheirality: a point behind the target camera
       // would still project to a (meaningless) pixel via projectPoint.
       const p = projectWithDepth(targetCam, tri.x, tri.y, tri.z)
-      if (p) return { kind: 'point', u: p.u, v: p.v, viewCount: views.length }
+      if (p) {
+        return {
+          kind: 'point', u: p.u, v: p.v,
+          viewCount: views.length, rejectedCount: tri.rejectedImageIds.length,
+        }
+      }
     }
     // Fall through: a failed or behind-camera triangulation still leaves the
     // (weaker but valid) epipolar constraint from a single view.
@@ -172,6 +188,36 @@ export async function gcpGuideForImage(observations, targetImageId, targetCam, c
   const F = fundamentalFromCams(camerasByImageId.get(src.imageId), targetCam)
   const line = epipolarLine(F, src.px, src.py)
   return line ? { kind: 'line', line, viewCount: views.length } : null
+}
+
+// Where the model currently thinks a GCP is, seen from `targetCam` — using EVERY
+// registered mark, **including the target image's own**.
+//
+// This is NOT a guide, and must never be drawn as one. A guide deliberately
+// excludes the target image's mark so it stays an *independent* prediction the
+// user's click can disagree with (that disagreement is the whole diagnostic). This
+// includes it, so it is the model's fitted estimate, not a prediction — circular by
+// construction if you compared it against the very mark that shaped it.
+//
+// It exists for one job: measuring how far a newly placed mark moved the estimate.
+// Bracketing a mark with this (before: N marks, after: N+1) is the only way to
+// observe the N-view refinement acting on the image the user is looking at, since
+// marking a GCP retires its guide there.
+//
+// Returns { u, v, viewCount } or null (fewer than 2 registered marks, failed
+// triangulation, or an estimate behind the target camera).
+export async function gcpEstimateForImage(observations, targetCam, camerasByImageId) {
+  if (!targetCam) return null
+  const views = (observations || []).filter(
+    (o) => o.px != null && o.py != null && camerasByImageId.get(o.imageId)
+  )
+  if (views.length < 2) return null
+  // Robust, to match the guide: a mark the guide would reject must not appear to
+  // move the estimate just because this call weighted it differently.
+  const tri = await triangulateGcp(views, camerasByImageId, { robust: true })
+  if (!tri || !Number.isFinite(tri.x)) return null
+  const p = projectWithDepth(targetCam, tri.x, tri.y, tri.z)
+  return p ? { u: p.u, v: p.v, viewCount: views.length } : null
 }
 
 // Guides for every enabled GCP not yet marked on the target image (an already

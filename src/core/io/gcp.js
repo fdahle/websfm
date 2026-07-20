@@ -17,6 +17,12 @@ const DELIMITERS = [
 
 export const DELIMITER_OPTIONS = DELIMITERS
 
+// Elevation presence is about nullability, not truthiness: zero is a legitimate
+// sea-level measurement and must never be treated as an empty placeholder.
+export function hasGcpElevation(gcp) {
+  return gcp?.z != null
+}
+
 // Strip comment (#) and blank lines.
 function contentLines(text) {
   return text.split(/\r?\n/).map((l) => l.trimEnd()).filter((l) => l.trim() && !l.trimStart().startsWith('#'))

@@ -6,9 +6,16 @@ const props = defineProps({
   // [{ gcpId, dTotal, viewCount, observations }] — empty until refreshed.
   report:        { type: Array,  default: () => [] },
   selectedGcpId: { type: String, default: null },
+  // Whether any reference DEM has been imported (useExternalStore.hasReferenceDem).
+  // Reads the INDEX, never a loaded plane — the planes hydrate lazily, so a
+  // freshly reopened project has rasters but no sources in memory.
+  hasReferenceDem: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['remove', 'update-accuracy', 'update-name', 'update-position', 'select', 'add'])
+const emit = defineEmits([
+  'remove', 'update-accuracy', 'update-name', 'update-position', 'select', 'add',
+  'fill-z', 'check-z',
+])
 
 // Compact coordinate formatting (projected metres vs. degrees in a geographic CRS).
 function fmtCoord(v) {
@@ -50,6 +57,21 @@ function onPositionInput(gcp, axis, e) {
   <div class="table-wrap">
     <div class="toolbar">
       <button class="add-gcp" @click="emit('add')">+ Add GCP</button>
+      <!-- Only offered once a reference DEM is imported; a greyed-out button
+           with no explanation is worse than no button. -->
+      <template v-if="hasReferenceDem">
+        <span class="toolbar-sep"></span>
+        <button
+          class="tool-btn"
+          title="Set Z (and its accuracy) from the imported reference DEM for every GCP that has no elevation yet"
+          @click="emit('fill-z')"
+        >Fill Z from reference DEM</button>
+        <button
+          class="tool-btn"
+          title="Report reference-DEM minus GCP elevation for every GCP — non-destructive"
+          @click="emit('check-z')"
+        >Check Z</button>
+      </template>
     </div>
     <table v-if="gcps.length">
       <thead>
@@ -113,7 +135,7 @@ function onPositionInput(gcp, axis, e) {
               class="coord-input"
               type="number"
               step="any"
-              :value="gcp.z ?? 0"
+              :value="gcp.z ?? ''"
               @change="onPositionInput(gcp, 'z', $event)"
             />
           </td>
@@ -235,7 +257,30 @@ tbody tr:hover {
 .toolbar {
   padding: 8px 12px;
   border-bottom: 1px solid var(--panel-border);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
+
+.toolbar-sep {
+  width: 1px;
+  align-self: stretch;
+  background: var(--panel-border);
+}
+
+.tool-btn {
+  padding: 4px 10px;
+  background: none;
+  border: 1px solid var(--panel-border);
+  border-radius: 5px;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.tool-btn:hover { background: var(--hover-bg); }
 
 .add-gcp {
   padding: 4px 10px;

@@ -29,5 +29,8 @@ export function createImage(file) {
     // Clicked scan-pixel observations of the film sensor's fiducial marks (F4).
     // [{ fidId, px, py }]; only meaningful when the image's sensor is kind:'film'.
     fiducialObs: [],
+    // Anonymous raster-relative detections. Calibration lives on the sensor and
+    // is deliberately not required to populate these.
+    fiducialDetections: [],
   }
 }

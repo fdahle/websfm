@@ -14,7 +14,7 @@ import { fitSimilarity, applySimilarity } from '../core/products/georef.js'
 import { aerialUpRotation, rotateReconstruction } from '../core/products/projection.js'
 import { cameraCenter } from '../core/sfm/geometry.js'
 import { triangulateAllGcps } from '../core/sfm/gcpTriangulation.js'
-import { gcpGuidesForImage } from '../core/sfm/gcpGuides.js'
+import { gcpGuidesForImage, gcpEstimateForImage } from '../core/sfm/gcpGuides.js'
 import { qualityToMaxDim } from '../core/dense/mvs.js'
 import { projectDensifyPeakBytes, formatBytes, DEFAULT_BUDGET_BYTES } from '../core/dense/memBudget.js'
 import {
@@ -87,6 +87,17 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
   //   denseSummary: { costMedian, keptPct, cullBreakdown }
   const summary = ref(null)
   const denseSummary = ref(null)
+
+  // The last few sparse-run summaries (newest last), so the Quality Report can answer
+  // "did that tweak help?" across runs (WS5). Summaries only — cheap JSON, no cloud
+  // diffing. Persisted in reconstruction.json; absent on legacy docs ⇒ empty.
+  const summaryHistory = ref([])
+  const SUMMARY_HISTORY_MAX = 5
+
+  // Monotonic counter bumped whenever something the Quality Report overview derives
+  // from changes (a georef refit, a GCP toggle). The hub caches the async GCP report
+  // per open and re-runs when this moves, so pruning a bad GCP updates the overview.
+  const healthDirty = ref(0)
 
   // Products (DEM + orthophoto). Transient, recomputable rasters (large typed
   // arrays) — shallowRef so the planes stay PLAIN, NOT persisted (like depthMaps).
@@ -255,6 +266,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     }
     return {
       id: c.id, name: c.name, kind: c.kind, createdAt: c.createdAt,
+      imported: !!c.imported,
       cameras: [...c.cameras.entries()].map(([uuid, cam]) => ({ uuid, ...cam })),
       pointCount: N, hasColor, viewUuids,
       buffers: {
@@ -282,6 +294,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
       // Run-quality summaries (Q3) — tiny, kept for cross-run comparison.
       summary: summary.value,
       denseSummary: denseSummary.value,
+      summaryHistory: summaryHistory.value,
     }
   }
 
@@ -397,7 +410,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
   // A new object (not an in-place mutation) so consumers watching `selectedCloud`
   // by reference re-render after a rebuild.
   function upsertSparseCloud(cameras, points, opts = {}) {
-    const { replaceId = mainSparseId.value, asMain = true, name } = opts
+    const { replaceId = mainSparseId.value, asMain = true, name, imported = false } = opts
     const idx = replaceId
       ? clouds.value.findIndex((c) => c.id === replaceId && c.kind === 'sparse')
       : -1
@@ -407,6 +420,11 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
       name: name ?? prev?.name ?? 'Sparse cloud',
       kind: 'sparse',
       createdAt: Date.now(),
+      // Provenance, not a role: a COLMAP-imported sparse cloud still lives in the
+      // Reconstruction section (it IS the model) but carries the chip. NOT
+      // inherited from `prev` — a reconstruct that replaces an imported cloud
+      // in place has genuinely recomputed it, so the flag must clear.
+      ...(imported ? { imported: true } : {}),
       // markRaw: keep the big point/camera data out of Vue's reactivity (see restore).
       cameras: markRaw(cameras),
       points: markRaw(points),
@@ -464,6 +482,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
       replaceId: null,
       asMain: !mainSparseCloud.value,
       name: 'Imported (COLMAP)',
+      imported: true,
     })
     log(`COLMAP import: added sparse cloud (${cameras.size} cameras, ${points.length} points)`
       + `${mainSparseId.value === selectedCloudId.value ? ' — set as main' : ''}`, 'success', 'Reconstruction')
@@ -607,7 +626,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
       // defines it. Fail loudly if a film image is in the cloud but its transform
       // is missing (a stale/partial summary would silently mis-warp its raster).
       const fidByUuid = new Map(
-        (summary.value?.fiducialTransforms ?? []).map((t) => [t.uuid, { A: t.A, frame: t.frame }]))
+        (summary.value?.fiducialTransforms ?? []).map((t) => [t.uuid, { A: t.A, transform: t.transform ?? null, frame: t.frame }]))
       const inputImages = []
       for (const [uuid, cam] of cloud.cameras) {
         const im = imgByUuid.get(uuid)
@@ -618,15 +637,15 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
         const fid = fidByUuid.get(uuid) ?? null
         if (s?.kind === 'film' && !fid) {
           // Three distinct causes — point the user at the actual fix, not always "re-run".
-          const nMarks = s.fiducials?.marks?.length || 0
-          const nObs = im.fiducialObs?.length || 0
+          const nMarks = s.fiducialCalibration?.marks?.length || s.fiducials?.marks?.length || 0
+          const nObs = im.fiducialDetections?.length || im.fiducialObs?.length || 0
           let why
           if (nMarks < 3) {
-            why = `its film sensor has no fiducial marks configured (${nMarks} set, need ≥3) — `
-              + `add fiducial marks to the sensor, click them on each image, then re-run the sparse reconstruction`
+            why = `its detected fiducials are not calibrated (${nMarks} metric marks, need ≥3) — `
+              + `run Calibrate Fiducials, then re-run the sparse reconstruction`
           } else if (nObs < 3) {
-            why = `this image has ${nObs} clicked fiducial observation(s) (need ≥3) — `
-              + `mark its fiducials, then re-run the sparse reconstruction`
+            why = `this image has ${nObs} accepted fiducial detection(s) (need ≥3) — `
+              + `run Detect Fiducials or review its spots, then re-run the sparse reconstruction`
           } else {
             why = `the last sparse run produced no interior-orientation transform for it — `
               + `re-run the sparse reconstruction before densifying`
@@ -904,8 +923,32 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     }
     log(`Georeference: ${fit.count} ${usingGcps ? 'GCPs' : 'poses'} → ${projects.currentCrs}, `
       + `scale ${fit.scale.toPrecision(4)}, RMS ${fit.rms.toPrecision(3)}`, 'success', 'Products')
+    healthDirty.value++   // GCP prune / refit → the hub overview must recompute
     persist()
     return georef.value
+  }
+
+  // Per-image pose residuals against the current georeference (Evaluate ▸ Pose
+  // Residuals): apply the fitted similarity to each registered camera centre and
+  // diff against the imported pose. Mirrors gcpAccuracyReport's shape and its
+  // no-robust stance — dropping a camera from the diff would hide the drift this
+  // report exists to surface. Returns [{ uuid, name, dx, dy, dz, dTotal }].
+  function poseResidualReport() {
+    const sim = georef.value?.sim
+    const cams = sparseCameras.value
+    if (!sim || !cams.size) return []
+    const imgById = new Map(images.value.map((im) => [im.id, im]))
+    const out = []
+    for (const p of posesStore.poses) {
+      if (p.enabled === false || p.imageId == null || p.x == null || p.y == null) continue
+      const im = imgById.get(p.imageId)
+      const cam = im && cams.get(im.uuid)
+      if (!cam) continue
+      const fit = applySimilarity(sim, cameraCenter(cam))
+      const dx = fit[0] - p.x, dy = fit[1] - p.y, dz = fit[2] - (p.z ?? 0)
+      out.push({ uuid: im.uuid, name: im.name, dx, dy, dz, dTotal: Math.hypot(dx, dy, dz) })
+    }
+    return out
   }
 
   // Per-GCP accuracy report against the current georeference: triangulate every
@@ -943,9 +986,32 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
   // (≥2 other observations) or an epipolar line (exactly 1). Empty when the
   // image isn't registered. Cheap read against already-fitted state, recomputed
   // on demand like gcpAccuracyReport.
+  //
+  // Deliberately silent. This runs on every tab switch, selection change and
+  // re-render, so logging here reports the app's own recomputation rather than
+  // anything the user did — it buried the console in lines that repeated whatever
+  // was already on screen. The one moment worth a line is when a mark is *placed*;
+  // App.vue's `logGcpMark` does that, comparing the click against this guide.
   async function gcpGuides(imageId) {
     if (imageId == null || !gcpsStore.gcps.length) return []
     return gcpGuidesForImage(gcpsStore.gcps, imageId, sparseCameras.value, imagesById())
+  }
+
+  // Where the model thinks `gcpId` is, projected into `imageId`, from *all* its
+  // marks including that image's own. NOT a guide (see gcpEstimateForImage) — it's
+  // for bracketing a mark to measure how far the new mark moved the estimate.
+  async function gcpEstimate(gcpId, imageId) {
+    const gcp = gcpsStore.gcps.find((g) => g.id === gcpId)
+    if (!gcp || imageId == null) return null
+    const byId = imagesById()
+    const targetCam = sparseCameras.value.get(byId.get(imageId)?.uuid)
+    if (!targetCam) return null
+    const camerasByImageId = new Map()
+    for (const o of gcp.observations || []) {
+      const cam = sparseCameras.value.get(byId.get(o.imageId)?.uuid)
+      if (cam) camerasByImageId.set(o.imageId, cam)
+    }
+    return gcpEstimateForImage(gcp.observations, targetCam, camerasByImageId)
   }
 
   // Build a DEM from the densest available cloud, in the requested frame
@@ -1070,6 +1136,8 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
             // uses to fit this image's scan→canonical affine. Spread to plain
             // objects (the Vue proxy can't be structured-cloned).
             fiducialObs: (img.fiducialObs || []).map((o) => ({ fidId: o.fidId, px: o.px, py: o.py })),
+            fiducialDetections: (img.fiducialDetections || []).map((d) => ({ slot: d.slot, px: d.px, py: d.py,
+              family: d.family, source: d.source, confidence: d.confidence, reviewed: d.reviewed })),
             meta: img.meta
               ? {
                   width: img.meta.width,
@@ -1100,6 +1168,9 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
                         marks: (s.fiducials.marks || []).map((m) => ({ id: m.id, xMm: m.xMm, yMm: m.yMm })),
                         ppxMm: s.fiducials.ppxMm, ppyMm: s.fiducials.ppyMm, focalMm: s.fiducials.focalMm,
                       }
+                    : null,
+                  fiducialCalibration: s.fiducialCalibration
+                    ? JSON.parse(JSON.stringify(s.fiducialCalibration))
                     : null,
                 }
               : null,
@@ -1173,7 +1244,13 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
           }
         }
         upsertSparseCloud(camMap, pts)
+        // Retire the outgoing summary into the run history before overwriting it, so
+        // "vs previous run" compares against what was on screen a moment ago (WS5).
+        if (summary.value) {
+          summaryHistory.value = [...summaryHistory.value, summary.value].slice(-SUMMARY_HISTORY_MAX)
+        }
         summary.value = result.summary ?? null
+        healthDirty.value++
         reconStatus.value = 'done'
         await persist()
       } else {
@@ -1200,6 +1277,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     georef.value = null
     summary.value = null
     denseSummary.value = null
+    summaryHistory.value = []
     if (purge && isPersisting()) {
       opfs.deleteReconstruction(projects.currentProjectId).catch(() => {})
       opfs.deleteProducts(projects.currentProjectId).catch(() => {})
@@ -1281,6 +1359,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
       name: c.name ?? 'Sparse cloud',
       kind: c.kind ?? 'sparse',
       createdAt: c.createdAt ?? Date.now(),
+      ...(c.imported ? { imported: true } : {}),
       cameras: markRaw(cameras),
       points: markRaw(points),
     }
@@ -1350,6 +1429,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     georef.value = data.georef ?? null
     summary.value = data.summary ?? null
     denseSummary.value = data.denseSummary ?? null
+    summaryHistory.value = Array.isArray(data.summaryHistory) ? data.summaryHistory : []
 
     // Restore persisted raster products (DEM / ortho), if any.
     const [savedDem, savedOrtho] = await Promise.all([
@@ -1393,13 +1473,17 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     georef,
     summary,
     denseSummary,
+    summaryHistory,
+    healthDirty,
     dem,
     ortho,
     canGeoreference,
     canGeoreferenceGcps,
     georeference,
     gcpAccuracyReport,
+    poseResidualReport,
     gcpGuides,
+    gcpEstimate,
     generateDem,
     generateOrtho,
     generateMesh,

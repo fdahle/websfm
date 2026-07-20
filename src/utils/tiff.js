@@ -42,6 +42,163 @@ export function nativeTiffDecodeResult() {
   return nativeDecodeCache
 }
 
+// Read one IFD tag by name — the ONLY correct way to touch a file directory.
+//
+// ⚠ geotiff 3.x made the IFD lazy: `getImage().getFileDirectory()` returns an
+// `ImageFileDirectory` whose tags live in internal Maps and are fetched from
+// the source on demand. Plain property access (`fd.ModelTiepoint`) is therefore
+// ALWAYS `undefined` — it doesn't throw, it silently reads a field that isn't
+// there, so every `fd.Foo?.[0] ?? fallback` quietly becomes the fallback. That
+// is exactly how a properly georeferenced REMA tile came to be ingested as a
+// source photo (`fd.ModelTiepoint` → undefined → "no geolocation tags").
+//
+// Accessor *methods* (`getWidth`, `getSamplesPerPixel`, `getGeoKeys`,
+// `getOrigin`, `getResolution`) resolve deferred fields internally and are
+// unaffected — prefer them where one exists, and use this helper otherwise.
+// Falls back to plain property access so an older/eager geotiff still works.
+export async function readTiffTag(fd, name) {
+  if (!fd) return undefined
+  if (typeof fd.loadValue === 'function') return fd.loadValue(name)
+  return fd[name]
+}
+
+// The raster model stores only an origin plus independent X/Y scales. A full
+// GeoTIFF ModelTransformation can also rotate or shear pixels; silently
+// collapsing those terms changes every sample location and displayed bound.
+// Keep the format boundary explicit until the raster model grows a full affine.
+export function isAxisAlignedModelTransformation(matrix, epsilon = 1e-12) {
+  if (!matrix?.length || matrix.length < 16) return false
+  const m = Array.from(matrix, Number)
+  if (!m.every(Number.isFinite)) return false
+  // x = m0*col + m1*row + m3; y = m4*col + m5*row + m7.
+  // The final row must describe an affine (not perspective) transform.
+  return Math.abs(m[1]) <= epsilon
+    && Math.abs(m[4]) <= epsilon
+    && Math.abs(m[12]) <= epsilon
+    && Math.abs(m[13]) <= epsilon
+    && Math.abs(m[14]) <= epsilon
+    && Math.abs(m[15] - 1) <= epsilon
+}
+
+// Is this TIFF a *georeferenced raster* (a reference DEM / orthophoto) rather
+// than a source photo?
+//
+// The discriminator is the GeoTIFF geolocation tags — ModelTiepoint +
+// ModelPixelScale, or a full ModelTransformation. Aerial film scans carry none
+// of them, so the split is clean in practice, and it has to happen BEFORE the
+// image path: `useImagesStore` ingests any TIFF as a source image, so a dropped
+// GeoTIFF DEM would otherwise become a very confused source photo.
+//
+// Header-only — geotiff parses the IFD without decoding any pixels, the same
+// cheap read `readTiffDimensions` does, so this is safe on the main thread even
+// for a 200 MB tile. Returns false for anything unreadable (fall back to the
+// image path, which is the pre-existing behaviour).
+export async function isGeoreferencedTiff(blob) {
+  return (await probeTiffGeoTags(blob)).georeferenced
+}
+
+// The same header-only probe, but reporting *why* — which of the geolocation
+// tags were present, or what went wrong reading the IFD. The verdict silently
+// sends a file down one of two very different paths, so the reason has to be
+// auditable in the log; "my GeoTIFF was ingested as a photo" is otherwise
+// undebuggable without the file.
+// Are these geolocation tags *present but meaningless*?
+//
+// Scanners and TIFF-writing toolchains routinely emit placeholder tags: tiepoint
+// (0,0,0 → 0,0,0), pixel scale (1,1,0), no CRS geokey. That is the identity
+// transform — pixel coordinates relabelled as world coordinates — which is not
+// georeferencing, it is a file saying nothing. Aerial film scans arrive exactly
+// like this, and taking the tags at face value routed a whole flight strip into
+// Reference Data as "orthophotos" at origin 0/0, scale 1/-1.
+//
+// A declared CRS overrides all of this: a raster that names EPSG:xxxx is
+// georeferenced even at an unlikely origin, so we only call it degenerate when
+// there is no CRS to give those numbers meaning.
+export function isDegenerateGeoTransform({ pixelScale, tiepoint, transformation, hasCrs }) {
+  if (hasCrs) return false
+
+  // The same scanner placeholder can be written as a 4×4
+  // ModelTransformation instead of ModelTiepoint + ModelPixelScale. The TMA
+  // CA213732V00xx scans use exactly this form: x=column, y=row, origin 0/0,
+  // no CRS. It is merely the pixel coordinate system encoded as a GeoTIFF
+  // transform, not a placement on the ground.
+  if (transformation?.length >= 16) {
+    const m = Array.from(transformation, Number)
+    const near = (a, b = 0) => Number.isFinite(a) && Math.abs(a - b) <= 1e-12
+    return near(Math.abs(m[0]), 1)
+      && near(Math.abs(m[5]), 1)
+      && near(m[1])
+      && near(m[4])
+      && near(m[3])
+      && near(m[7])
+      && near(m[12])
+      && near(m[13])
+      && near(m[14])
+      && near(m[15], 1)
+  }
+
+  const sx = pixelScale?.[0]
+  const sy = pixelScale?.[1]
+  // Unit scale (the identity) or a zero/absent scale (no scale at all).
+  const unitScale = (Math.abs(sx) === 1 && Math.abs(sy) === 1) || (!sx && !sy)
+  if (!unitScale) return false
+  // The tiepoint's WORLD half (indices 3,4,5) — a raster placed at the origin.
+  const world = [tiepoint?.[3] ?? 0, tiepoint?.[4] ?? 0, tiepoint?.[5] ?? 0]
+  return world.every((v) => v === 0)
+}
+
+// Does this file's GeoKeyDirectory name an actual CRS? 32767 is "user-defined",
+// which names nothing.
+function geoKeysDeclareCrs(geoKeys) {
+  if (!geoKeys) return false
+  const proj = geoKeys.ProjectedCSTypeGeoKey
+  const geog = geoKeys.GeographicTypeGeoKey
+  const real = (c) => c != null && c !== 0 && c !== 32767
+  return real(proj) || real(geog)
+}
+
+export async function probeTiffGeoTags(blob) {
+  try {
+    const tiff = await fromBlob(blob)
+    const image = await tiff.getImage()
+    const fd = image.getFileDirectory()
+    const tiepoint = await readTiffTag(fd, 'ModelTiepoint')
+    const pixelScale = await readTiffTag(fd, 'ModelPixelScale')
+    const hasTiepoint = !!tiepoint?.length
+    const hasPixelScale = !!pixelScale?.length
+    const transformation = await readTiffTag(fd, 'ModelTransformation')
+    const hasTransformation = !!transformation?.length
+    // getGeoKeys is an accessor method, so it resolves the deferred field itself.
+    const hasCrs = geoKeysDeclareCrs(image.getGeoKeys?.())
+    const degenerate = (hasTransformation || (hasTiepoint && hasPixelScale))
+      && isDegenerateGeoTransform({
+        pixelScale,
+        tiepoint,
+        transformation,
+        hasCrs,
+      })
+    return {
+      georeferenced: !degenerate && ((hasTiepoint && hasPixelScale) || hasTransformation),
+      hasTiepoint,
+      hasPixelScale,
+      hasTransformation,
+      hasCrs,
+      degenerate,
+      error: null,
+    }
+  } catch (err) {
+    return {
+      georeferenced: false,
+      hasTiepoint: false,
+      hasPixelScale: false,
+      hasTransformation: false,
+      hasCrs: false,
+      degenerate: false,
+      error: err?.message ?? String(err),
+    }
+  }
+}
+
 // Header-only read: width/height via the IFD, without the expensive full
 // pixel decode (readRGB, below) — lets callers show real dimensions near-
 // instantly while the slow decode+encode still runs in the background.

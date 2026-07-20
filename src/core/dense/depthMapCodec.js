@@ -27,10 +27,35 @@ function bufferOf(ta) {
     : ta.buffer.slice(ta.byteOffset, ta.byteOffset + ta.byteLength)
 }
 
+// Coverage summary of a depth plane, computed once at write time (when the plane is
+// already in hand) so the Quality Report ▸ Coverage view can read it from the tiny
+// index without hydrating hundreds of MB of planes. validPx = count of depth > 0;
+// depthMin/Max span the valid depths (null when none); depthMedian is the median
+// valid depth (v3, PLAN-eval-quality-hub WS2.4 — the real representative depth for a
+// true GSD, replacing the midpoint approximation). Collecting the valid depths to
+// sort is a one-time cost at write, dwarfed by the minutes already spent computing
+// the map.
+function depthCoverage(depth) {
+  if (!depth || !depth.length) return { validPx: 0, depthMin: null, depthMax: null, depthMedian: null }
+  let min = Infinity, max = -Infinity
+  const vals = []
+  for (let i = 0; i < depth.length; i++) {
+    const d = depth[i]
+    if (d > 0) { vals.push(d); if (d < min) min = d; if (d > max) max = d }
+  }
+  if (!vals.length) return { validPx: 0, depthMin: null, depthMax: null, depthMedian: null }
+  vals.sort((a, b) => a - b)
+  return {
+    validPx: vals.length, depthMin: min, depthMax: max,
+    depthMedian: vals[vals.length >> 1],
+  }
+}
+
 // Split one in-memory depth map into { meta, buffers } for the writer. The
 // display PNG (`displayDataUrl`) is deliberately dropped: the images store
 // already persists it per image, and it is display-only.
 export function serializeDepthMap(m) {
+  const cov = depthCoverage(m.depth)
   return {
     meta: {
       uuid: m.uuid,
@@ -40,6 +65,10 @@ export function serializeDepthMap(m) {
       R: m.R.map((row) => [...row]),
       t: [...m.t],
       hasNormals: !!m.normals,
+      validPx: cov.validPx,
+      depthMin: cov.depthMin,
+      depthMax: cov.depthMax,
+      depthMedian: cov.depthMedian,
     },
     buffers: {
       depth: bufferOf(m.depth),
@@ -98,9 +127,14 @@ export function deserializeDepthMap(meta, buffers) {
 // sparse reconstruction invalidates them. The cloud id is NOT enough on its own:
 // `upsertSparseCloud` carries the previous id forward on a rebuild. Its
 // `createdAt` is refreshed by every upsert, so id+createdAt is the fingerprint.
+// version 2 added validPx/depthMin/depthMax to each map's meta; version 3 adds
+// depthMedian (the real GSD basis). A v1/v2 index simply lacks the newer fields —
+// the coverage view falls back (midpoint for GSD, "—" for the rest) rather than
+// refusing or re-hydrating; a missing field must never trip the staleness path
+// (isDepthIndexStale is about the sparse-cloud stamp only).
 export function buildDepthIndex(maps, { sparseCloud, settings } = {}) {
   return {
-    version: 1,
+    version: 3,
     sparseCloudId: sparseCloud?.id ?? null,
     sparseCreatedAt: sparseCloud?.createdAt ?? null,
     settings: settings ?? null,

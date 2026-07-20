@@ -735,6 +735,9 @@ describe('reconstruct (film scans, fiducial interior orientation)', () => {
     ],
     ppxMm: 0, ppyMm: 0, focalMm: 153,
   }
+  const SLOTS = ['corner-tl', 'corner-tr', 'corner-br', 'corner-bl']
+  const CAL = { ...FID, transform: 'affine',
+    slotMap: Object.fromEntries(SLOTS.map((slot, i) => [slot, FID.marks[i].id])) }
   const PITCH = 0.02 // mm/px
   const frame = canonicalFrame(FID, PITCH)
   const cK = frame.K // { fx = 153/0.02 = 7650, fy, cx, cy }
@@ -782,13 +785,13 @@ describe('reconstruct (film scans, fiducial interior orientation)', () => {
       return {
         uuid, name: uuid, kpStatus: 'done',
         meta: { width: frame.width, height: frame.height },
-        sensor: { kind: 'film', fiducials: FID },
+        sensor: { kind: 'film', fiducialCalibration: CAL },
         // Keypoints are stored in SCAN space (what the app persists).
         keypoints: kpCanon.map((p) => mm2scan(c2mm(p), th, ox, oy)),
-        // Clicked fiducial observations: each mark's scan pixel under this placement.
-        fiducialObs: FID.marks.map((m) => {
+        // Detection stores anonymous raster slots; calibration assigns metric IDs.
+        fiducialDetections: FID.marks.map((m, i) => {
           const s = mm2scan([m.xMm, m.yMm], th, ox, oy)
-          return { fidId: m.id, px: s.x, py: s.y }
+          return { slot: SLOTS[i], px: s.x, py: s.y, confidence: 1 }
         }),
       }
     })

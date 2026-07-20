@@ -58,6 +58,27 @@ function run() {
           hint="Drop a pixel whose depth differs from its 3×3 median by more than this. Lower = more aggressive.">
           <input id="filterRelTol" v-model.number="settings.filterRelTol" type="number" min="1" max="50" step="1" class="field-input" />
         </SettingsField>
+
+        <SettingsField
+          hint="Keeps only pixels whose depth other views independently agree with. Removes sky and vegetation, which no photometric gate can catch.">
+          <template #label>Cross-view consistency</template>
+          <label class="checkbox-row"><input v-model="settings.geomConsistency" type="checkbox" class="checkbox" /> Enabled</label>
+        </SettingsField>
+
+        <SettingsField v-if="settings.geomConsistency" label="Agreement tolerance" label-for="maxGeomCost" unit="px"
+          hint="How closely another view's own depth must round-trip back to this pixel. Lower = stricter.">
+          <input id="maxGeomCost" v-model.number="settings.maxGeomCost" type="number" min="0.1" max="10" step="0.1" class="field-input" />
+        </SettingsField>
+
+        <SettingsField v-if="settings.geomConsistency" label="Consistent views" label-for="minConsistent"
+          hint="Minimum other views that must agree. Raise for cleaner but sparser clouds.">
+          <input id="minConsistent" v-model.number="settings.minConsistent" type="number" min="1" max="8" step="1" class="field-input" />
+        </SettingsField>
+
+        <SettingsField v-if="settings.geomConsistency" label="Minimum NCC" label-for="minNcc"
+          hint="Absolute photometric floor per pixel (0–1). Unlike the fusion gate this does not adapt to the data.">
+          <input id="minNcc" v-model.number="settings.minNcc" type="number" min="0" max="0.9" step="0.05" class="field-input" />
+        </SettingsField>
       </SettingsGroup>
 
       <SettingsGroup title="Resolution & sources">

@@ -88,9 +88,17 @@ export function fitComposedRadial(pristineKps, foldedKps, K, active = {}) {
 // Guard against a runaway higher-order fit. Sample the radial map r → r·(1 + k1·r² +
 // k2·r⁴ + k3·r⁶) out to `maxNormR` (the image-corner normalised radius) and require it
 // to stay monotonically increasing (a fold that reverses would mirror pixels) and the
-// corner displacement to stay under `maxShiftPx` (~a lens, not a fisheye). `fxApprox`
-// converts the normalised corner displacement to pixels. Returns { ok, reason }.
-export function radialCurveOk(bag, maxNormR, fxApprox, maxShiftPx = 50) {
+// corner displacement to stay a sane FRACTION of the corner radius (~a lens, not a
+// fisheye). `fxApprox` converts normalised radii to pixels. Returns { ok, reason }.
+//
+// The bound is relative, not an absolute pixel count, because the pixel shift a real
+// lens produces scales with both resolution and focal length — an absolute ceiling is
+// only ever right for one camera. It was previously 50px, which flagged *correct*
+// calibrations as runaway: COLMAP's own SIMPLE_RADIAL solve for the building set's
+// Canon 24mm is k1 = −0.085 → a 174px corner shift (6.6% of the 2624px corner radius),
+// and our composed fits reported 158–201px against the same lens. 0.25 (25%) still
+// catches genuine overfit — the k1=−0.5/k3=3 runaway sits at ~119%.
+export function radialCurveOk(bag, maxNormR, fxApprox, maxShiftFrac = 0.25) {
   const { k1 = 0, k2 = 0, k3 = 0 } = bag || {}
   const steps = 40
   let prevMapped = -Infinity
@@ -104,9 +112,14 @@ export function radialCurveOk(bag, maxNormR, fxApprox, maxShiftPx = 50) {
     }
     prevMapped = mapped
   }
-  const cornerShift = Math.abs(maxNormR * (k1 * maxNormR ** 2 + k2 * maxNormR ** 4 + k3 * maxNormR ** 6)) * fxApprox
-  if (cornerShift > maxShiftPx) {
-    return { ok: false, reason: `corner shift ${cornerShift.toFixed(0)}px exceeds ${maxShiftPx}px (runaway distortion)` }
+  const shiftFrac = Math.abs(k1 * maxNormR ** 2 + k2 * maxNormR ** 4 + k3 * maxNormR ** 6)
+  if (shiftFrac > maxShiftFrac) {
+    const cornerShiftPx = shiftFrac * maxNormR * fxApprox
+    return {
+      ok: false,
+      reason: `corner shift ${cornerShiftPx.toFixed(0)}px is ${(100 * shiftFrac).toFixed(0)}% of the corner `
+        + `radius, over the ${(100 * maxShiftFrac).toFixed(0)}% ceiling (runaway distortion)`,
+    }
   }
   return { ok: true, reason: '' }
 }

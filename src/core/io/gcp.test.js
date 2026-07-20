@@ -4,7 +4,16 @@ import {
   parseRows,
   guessMapping,
   buildGcps,
+  hasGcpElevation,
 } from './gcp.js'
+
+describe('hasGcpElevation', () => {
+  it('distinguishes a real zero elevation from a missing value', () => {
+    expect(hasGcpElevation({ z: 0 })).toBe(true)
+    expect(hasGcpElevation({ z: null })).toBe(false)
+    expect(hasGcpElevation({})).toBe(false)
+  })
+})
 
 describe('sniffDelimiter', () => {
   it('detects comma-separated data', () => {

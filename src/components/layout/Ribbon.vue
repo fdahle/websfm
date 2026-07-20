@@ -15,6 +15,9 @@ const props = defineProps({
   poseCount: { type: Number, default: 0 },
   footprintCount: { type: Number, default: 0 },
   sensorCount: { type: Number, default: 0 },
+  // Film sensors available for the setup/detection modal. Calibration
+  // prerequisites are validated inside the modal so its guidance is reachable.
+  filmSensorCount: { type: Number, default: 0 },
   sparseReady: { type: Boolean, default: false },
   depthMapCount: { type: Number, default: 0 },
   cloudReady: { type: Boolean, default: false },
@@ -26,13 +29,17 @@ const props = defineProps({
   activeImageId: { type: String, default: null },
   activeImageName: { type: String, default: null },
   imageViewState: { type: Object, default: null },
+  // The raster tab currently in front, if any: { kind: 'dem'|'ortho',
+  // imported: boolean, onMap: boolean }. Drives the contextual Raster tab, the
+  // exact mirror of `pictureTab` for an image tab.
+  activeRaster: { type: Object, default: null },
   consoleOpen: { type: Boolean, default: false },
   persistenceEnabled: { type: Boolean, default: false },
   currentProjectName: { type: String, default: null },
   sceneType: { type: String, default: null },
   showCameras: { type: Boolean, default: true },
-  showGraticule: { type: Boolean, default: true },
-  showMapGraticule: { type: Boolean, default: true },
+  showGrid: { type: Boolean, default: true },
+  showMapGrid: { type: Boolean, default: true },
   showFootprints: { type: Boolean, default: true },
 })
 
@@ -68,10 +75,10 @@ const tabs = [
         ],
       },
       {
-        label: 'Camera',
+        label: 'Cameras',
         commands: [
-          { id: 'import-camera-list', label: 'Camera\nPoses', icon: 'camera' },
-          { id: 'import-calib', label: 'Calibration', icon: 'target' },
+          { id: 'import-camera-list', label: 'Camera\nPoses', icon: 'camera-pose' },
+          { id: 'import-calib', label: 'Calibration', icon: 'calibration' },
         ],
       },
       {
@@ -81,10 +88,21 @@ const tabs = [
         ],
       },
       {
-        label: 'Interop',
+        // Evidence the user brought in; the pipeline never overwrites it. Mirrors the
+        // sidebar's Reference Data section, which is where an imported cloud lands too —
+        // hence the point cloud / mesh import sits here, not with COLMAP.
+        label: 'Reference Data',
+        commands: [
+          // Explicit entry point, so the user never has to rely on the dropped-TIFF
+          // geokey sniff.
+          { id: 'import-raster', label: 'Reference\nDEM / Ortho', icon: 'layers' },
+          { id: 'import-cloud', label: 'Point Cloud\n/ Mesh', icon: 'point-cloud' },
+        ],
+      },
+      {
+        label: 'Reconstruction',
         commands: [
           { id: 'import-colmap', label: 'COLMAP\nModel', icon: 'cube', needsImages: true },
-          { id: 'import-cloud', label: 'Point Cloud\n/ Mesh', icon: 'point-cloud' },
         ],
       },
     ],
@@ -100,11 +118,19 @@ const tabs = [
           { id: 'match-features', label: 'Match\nFeatures', icon: 'link', needsKeypoints: true },
         ],
       },
+      // The groups are pipeline *stages*, in order: features → sparse → dense →
+      // deliverables. Dense stays a reconstruction stage rather than a product: it is
+      // still the scene geometry, and DEM/Ortho/Mesh are all derived *from* it.
       {
-        label: 'Reconstruction',
+        label: 'Sparse',
         commands: [
-          { id: 'reconstruct',   label: 'Sparse\nModel', icon: 'cube',        needsMatches: true },
-          { id: 'compute-depth', label: 'Depth\nMaps',   icon: 'cloud',       needsSparse: true },
+          { id: 'reconstruct',   label: 'Sparse\nModel', icon: 'sparse-model', needsMatches: true },
+        ],
+      },
+      {
+        label: 'Dense',
+        commands: [
+          { id: 'compute-depth', label: 'Depth\nMaps',   icon: 'depth',       needsSparse: true },
           { id: 'dense',         label: 'Dense\nModel',  icon: 'point-cloud', needsDepthMaps: true },
         ],
       },
@@ -122,64 +148,82 @@ const tabs = [
     id: 'tools',
     label: 'Tools',
     groups: [
+      // Grouped by the *object* each tool acts on, ordered the way the data flows:
+      // images → cameras/scene → georeferencing → the resulting cloud. `disabled: true`
+      // entries are deliberate placeholders — they exist so each group reads as a
+      // category rather than a single orphan button.
       {
-        label: 'Footprints',
+        label: 'Images',
         commands: [
-          { id: 'footprints-from-poses', label: 'From\nPoses', icon: 'footprint', needsPoses: true, needsSensors: true, aerialOnly: true },
+          { id: 'auto-mask',        label: 'Auto\nMask',      icon: 'mask',   needsImages: true, needsImagesReady: true },
+          { id: 'detect-fiducials', label: 'Detect\nFiducials', icon: 'target', needsFilmSensor: true },
+          { id: 'calibrate-fiducials', label: 'Calibrate\nFiducials', icon: 'sensor', needsFilmSensor: true },
         ],
       },
       {
+        label: 'Scene',
+        commands: [
+          { id: 'footprints-from-poses', label: 'Footprints\nfrom Poses', icon: 'footprint', needsPoses: true, needsSensors: true, aerialOnly: true },
+        ],
+      },
+      {
+        // No "Project CRS" entry here: CRS is project *configuration*, set from the
+        // Settings modal (App.vue `handleSetCrs`), not a tool that transforms data.
         label: 'Georeferencing',
         commands: [
-          { id: 'auto-georeference', label: 'Auto\nGeoref', icon: 'target', needsSparse: true, needsPoses: true, aerialOnly: true },
-        ],
-      },
-      {
-        label: 'Masks',
-        commands: [
-          { id: 'auto-mask', label: 'Auto\nMask', icon: 'mask', needsImages: true, needsImagesReady: true },
+          { id: 'auto-georeference', label: 'Auto\nGeoref',        icon: 'target', needsSparse: true, needsPoses: true, aerialOnly: true },
+          // Placeholder: fit the reconstruction to an imported reference DEM *surface*
+          // (ICP over the Horn 7-param similarity), rather than to point correspondences
+          // the way georef.js does today. The one control path that needs neither GCPs
+          // nor pose priors — the historical-film case.
+          { id: 'align-reference',   label: 'Align to\nReference', icon: 'layers', disabled: true },
         ],
       },
       {
         label: 'Point Cloud',
         commands: [
-          { id: 'filter-cloud', label: 'Filter\nCloud', icon: 'point-cloud', disabled: true },
+          { id: 'filter-cloud',    label: 'Filter\nCloud',  icon: 'point-cloud', disabled: true },
+          { id: 'crop-cloud',      label: 'Crop\nCloud',    icon: 'rect',        disabled: true },
+          { id: 'merge-clouds',    label: 'Merge\nClouds',  icon: 'link',        disabled: true },
         ],
       },
     ],
   },
   {
-    // Quality/accuracy views over existing pipeline state (run summaries,
-    // gcpAccuracyReport, match graph). All placeholders for now — see TODO F13.
+    // The Quality Report hub — one modal with an overview landing page + section tabs.
+    // These buttons deep-link into it; the hub's own nav (with greyed prerequisites) is
+    // the real discoverability surface, so a handful of entry points in workflow order
+    // is enough. See PLAN-eval-quality-hub.
     id: 'evaluate',
     label: 'Evaluate',
     groups: [
+      // Grouped to mirror the Reconstruct tab's stages, so the same mental model
+      // ("where in the pipeline am I?") carries across tabs.
+      {
+        label: 'Report',
+        commands: [
+          { id: 'eval-overview', label: 'Quality\nReport', icon: 'report' },
+        ],
+      },
+      {
+        label: 'Features',
+        commands: [
+          { id: 'eval-match-graph', label: 'Matching', icon: 'link', needsMatches: true },
+        ],
+      },
       {
         label: 'Sparse',
         commands: [
-          { id: 'eval-reconstruction', label: 'Recon\nReport',   icon: 'cube',   disabled: true },
-          { id: 'eval-images',         label: 'Image\nErrors',   icon: 'table',  disabled: true },
-          { id: 'eval-calibration',    label: 'Calibration',     icon: 'target', disabled: true },
-        ],
-      },
-      {
-        label: 'Georeferencing',
-        commands: [
-          { id: 'eval-gcps',  label: 'GCP\nAccuracy',   icon: 'map-pin', disabled: true, aerialOnly: true },
-          { id: 'eval-poses', label: 'Pose\nResiduals', icon: 'camera',  disabled: true, aerialOnly: true },
-        ],
-      },
-      {
-        label: 'Matching',
-        commands: [
-          { id: 'eval-match-graph', label: 'Graph\nHealth', icon: 'link', disabled: true },
+          { id: 'eval-reconstruction', label: 'Sparse\nModel',  icon: 'sparse-model', needsSparse: true },
+          { id: 'eval-calibration',    label: 'Calibration',    icon: 'calibration',  needsSparse: true },
+          { id: 'eval-gcps',           label: 'Accuracy',       icon: 'map-pin',      needsSparse: true },
+          { id: 'eval-coverage',       label: 'Coverage',       icon: 'grid',         needsSparse: true },
         ],
       },
       {
         label: 'Dense',
         commands: [
-          { id: 'eval-depth-coverage', label: 'Depth\nCoverage', icon: 'depth', disabled: true },
-          { id: 'eval-dem-gcps',       label: 'DEM vs\nGCPs',    icon: 'dem',   disabled: true, aerialOnly: true },
+          { id: 'eval-depth-coverage', label: 'Depth\nCoverage', icon: 'depth', needsDepthMaps: true },
         ],
       },
     ],
@@ -188,13 +232,13 @@ const tabs = [
     id: 'export',
     label: 'Export',
     groups: [
+      // Group names are deliberately the SAME vocabulary as the Import tab
+      // (Cameras / Reconstruction / Products), so a round trip reads symmetrically.
       {
-        label: 'Scene',
+        label: 'Cameras',
         commands: [
-          { id: 'export-cameras', label: 'Camera\nPoses', icon: 'camera', needsPoses: true },
-          { id: 'export-sensors', label: 'Sensors',       icon: 'target', needsSensors: true },
-          { id: 'export-cloud',   label: 'Point\nCloud',  icon: 'point-cloud', needsCloud: true },
-          { id: 'export-model',   label: 'Model\nJSON',   icon: 'cube',        needsCloud: true },
+          { id: 'export-cameras', label: 'Camera\nPoses', icon: 'camera-pose', needsPoses: true },
+          { id: 'export-sensors', label: 'Sensors',       icon: 'camera',      needsSensors: true },
         ],
       },
       {
@@ -205,17 +249,19 @@ const tabs = [
         ],
       },
       {
-        label: 'Products',
+        label: 'Reconstruction',
         commands: [
-          { id: 'export-mesh',  label: 'Mesh',  icon: 'cube',  needsMesh: true },
-          { id: 'export-dem',   label: 'DEM',   icon: 'dem',   needsDem: true, aerialOnly: true },
-          { id: 'export-ortho', label: 'Ortho', icon: 'ortho', needsOrtho: true, aerialOnly: true },
+          { id: 'export-cloud',  label: 'Point\nCloud',  icon: 'point-cloud', needsCloud: true },
+          { id: 'export-model',  label: 'Model\nJSON',   icon: 'cube',        needsCloud: true },
+          { id: 'export-colmap', label: 'COLMAP\nModel', icon: 'cube',        needsCloud: true },
         ],
       },
       {
-        label: 'Interop',
+        label: 'Products',
         commands: [
-          { id: 'export-colmap', label: 'COLMAP\nModel', icon: 'cube', needsCloud: true },
+          { id: 'export-dem',   label: 'DEM',   icon: 'dem',   needsDem: true, aerialOnly: true },
+          { id: 'export-ortho', label: 'Ortho', icon: 'ortho', needsOrtho: true, aerialOnly: true },
+          { id: 'export-mesh',  label: 'Mesh',  icon: 'cube',  needsMesh: true },
         ],
       },
     ],
@@ -265,14 +311,14 @@ const cameraGroup = {
   ],
 }
 
-// 3D scene display toggles (cameras / graticule). Sits beside the camera presets
+// 3D scene display toggles (cameras / grid). Sits beside the camera presets
 // when the 3D viewer is active.
 const sceneGroup = {
   label: 'Scene',
   dynamic: '3D',
   commands: [
     { id: 'view-toggle-cameras',   label: 'Cameras',   icon: 'camera', activeKey: 'showCameras' },
-    { id: 'view-toggle-graticule', label: 'Graticule', icon: 'grid',   activeKey: 'showGraticule' },
+    { id: 'view-toggle-grid', label: 'Grid', icon: 'grid',   activeKey: 'showGrid' },
   ],
 }
 
@@ -281,7 +327,7 @@ const mapGroup = {
   dynamic: '2D',
   commands: [
     { id: 'map-fit-view',          label: 'Fit\nView',   icon: 'fit-view' },
-    { id: 'map-toggle-graticule',  label: 'Graticule',   icon: 'grid',      activeKey: 'showMapGraticule' },
+    { id: 'map-toggle-grid',  label: 'Grid',   icon: 'grid',      activeKey: 'showMapGrid' },
     { id: 'map-toggle-footprints', label: 'Footprints',  icon: 'footprint', activeKey: 'showFootprints', needsFootprints: true },
     { id: 'map-toggle-poses',      label: 'Poses',       icon: 'camera',    disabled: true },
   ],
@@ -331,6 +377,13 @@ const pictureTab = {
           disableKey: 'noGcps',
         },
         {
+          id: 'img-toggle-residuals',
+          label: 'Residuals',
+          icon: 'target',
+          activeKey: 'showResiduals',
+          needsSparse: true,
+        },
+        {
           id: 'img-toggle-fiducials',
           label: 'Fiducials',
           icon: 'target',
@@ -358,6 +411,48 @@ const pictureTab = {
   ],
 }
 
+// The raster counterpart of pictureTab. Its second group depends on provenance:
+// a *computed* product can be rebuilt and exported, an *imported* reference
+// raster can be restyled, drawn on the map, or removed — the pipeline never
+// rebuilds one.
+const rasterTab = computed(() => {
+  const r = props.activeRaster
+  const isOrtho = r?.kind === 'ortho'
+  return {
+    id: 'raster',
+    label: isOrtho ? 'Orthophoto' : 'DEM',
+    contextual: true,
+    groups: [
+      {
+        label: 'View',
+        commands: [
+          { id: 'raster-fit',      label: 'Fit\nView', icon: 'fit-view' },
+          { id: 'raster-zoom-in',  label: 'Zoom\nIn',  icon: 'zoom-in' },
+          { id: 'raster-zoom-out', label: 'Zoom\nOut', icon: 'zoom-out' },
+        ],
+      },
+      r?.imported
+        ? {
+            label: 'Reference',
+            commands: [
+              { id: 'raster-style',      label: 'Style…',  icon: 'settings' },
+              { id: 'raster-toggle-map', label: 'On\nMap', icon: 'layers', activeKey: 'rasterOnMap' },
+              { id: 'raster-remove',     label: 'Remove',  icon: 'remove', danger: true },
+            ],
+          }
+        : {
+            label: isOrtho ? 'Orthophoto' : 'DEM',
+            commands: [
+              isOrtho
+                ? { id: 'gen-ortho', label: 'Rebuild', icon: 'ortho', needsDem: true, needsDepthMaps: true }
+                : { id: 'gen-dem',   label: 'Rebuild', icon: 'dem',   needsCloud: true },
+              { id: isOrtho ? 'export-ortho' : 'export-dem', label: 'Export',  icon: 'download' },
+            ],
+          },
+    ],
+  }
+})
+
 const activeTab = ref('view')
 
 watch(() => !!props.activeImageId, (hasImage) => {
@@ -368,7 +463,20 @@ watch(() => !!props.activeImageId, (hasImage) => {
   }
 })
 
-const allTabs = computed(() => (props.activeImageId ? [...tabs, pictureTab] : tabs))
+watch(() => !!props.activeRaster, (hasRaster) => {
+  if (hasRaster) {
+    activeTab.value = 'raster'
+  } else if (activeTab.value === 'raster') {
+    activeTab.value = 'view'
+  }
+})
+
+const allTabs = computed(() => {
+  const extra = []
+  if (props.activeImageId) extra.push(pictureTab)
+  if (props.activeRaster) extra.push(rasterTab.value)
+  return extra.length ? [...tabs, ...extra] : tabs
+})
 const currentTab = computed(() => {
   const tab = allTabs.value.find((t) => t.id === activeTab.value) || tabs[0]
   if (tab.id === 'view') {
@@ -392,9 +500,10 @@ function isActive(cmd) {
   if (cmd.view != null && cmd.view === props.activeView) return true
   if (cmd.activeKey === 'consoleOpen')   return props.consoleOpen
   if (cmd.activeKey === 'showCameras')   return props.showCameras
-  if (cmd.activeKey === 'showGraticule') return props.showGraticule
-  if (cmd.activeKey === 'showMapGraticule') return props.showMapGraticule
+  if (cmd.activeKey === 'showGrid') return props.showGrid
+  if (cmd.activeKey === 'showMapGrid') return props.showMapGrid
   if (cmd.activeKey === 'showFootprints') return props.showFootprints
+  if (cmd.activeKey === 'rasterOnMap')    return !!props.activeRaster?.onMap
   const s = props.imageViewState
   if (!s || !cmd.activeKey) return false
   switch (cmd.activeKey) {
@@ -402,6 +511,7 @@ function isActive(cmd) {
     case 'showMask':      return s.showMask
     case 'showDepth':     return s.showDepth
     case 'showGcps':      return s.showGcps
+    case 'showResiduals': return s.showResiduals
     case 'showFiducials': return s.showFiducials
     case 'maskEdit':      return s.maskEdit
     case 'gcpEdit':       return s.gcpEdit
@@ -428,6 +538,7 @@ function isDisabled(cmd) {
   if (cmd.needsPoses    && props.poseCount === 0)  return true
   if (cmd.needsFootprints && props.footprintCount === 0) return true
   if (cmd.needsSensors  && props.sensorCount === 0) return true
+  if (cmd.needsFilmSensor && props.filmSensorCount === 0) return true
   const s = props.imageViewState
   if (cmd.disableKey === 'kpNotDone' && s?.kpStatus !== 'done') return true
   if (cmd.disableKey === 'noMask'    && !s?.hasMask)            return true
@@ -453,6 +564,7 @@ function disabledReason(cmd) {
   if (cmd.needsGcps     && props.gcpCount === 0)   return 'Import GCPs first'
   if (cmd.needsPoses    && props.poseCount === 0)  return 'Import camera poses first'
   if (cmd.needsSensors  && props.sensorCount === 0) return 'No sensors available'
+  if (cmd.needsFilmSensor && props.filmSensorCount === 0) return 'Set at least one sensor to Film first'
   if (cmd.needsSelection && !props.hasSelection)   return 'Select an image first'
   const s = props.imageViewState
   if (cmd.disableKey === 'kpNotDone' && s?.kpStatus !== 'done') return 'Detect keypoints first'
@@ -504,6 +616,17 @@ function run(cmd) {
           @click="activeTab = 'picture'"
         >
           {{ activeImageName || 'Image' }}
+        </button>
+      </template>
+
+      <template v-if="activeRaster">
+        <div class="ctx-separator"></div>
+        <button
+          class="tab ctx-tab"
+          :class="{ active: activeTab === 'raster' }"
+          @click="activeTab = 'raster'"
+        >
+          {{ activeRaster.name || rasterTab.label }}
         </button>
       </template>
     </div>
@@ -650,6 +773,10 @@ function run(cmd) {
   gap: 3px;
   flex: 1;
   align-items: flex-start;
+  /* A group is as wide as its widest child — which is often the *label*, not the
+     buttons ("Ground Control" over one narrow GCP button). Without this the buttons
+     hug the left edge while the centered label makes them look mis-aligned. */
+  justify-content: center;
 }
 
 .group-label {

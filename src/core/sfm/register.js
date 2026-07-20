@@ -83,8 +83,9 @@ export async function registerImages(ctx) {
   // positions, so init reprojection looks perfect while the geometry is wrong — the
   // 3rd-view PnP is the first to expose it (a distorted consumer-camera pair fits
   // two views at <2px yet resects the next camera at ~13% inliers). Deferring the k1
-  // solve to the post-filter passes (R6) is therefore too late: registration has
-  // already stalled. Instead, once `distortionCalMinCams` cameras are in (enough
+  // solve to the post-filter passes (R6) is therefore too late: registration would
+  // stall at the seed and never reach them (the failure mode the 2-camera rescue
+  // below exists to break out of). Instead, once `distortionCalMinCams` cameras are in (enough
   // parallax for k1 to be identifiable), the interim BA refines f,k1 and runBundleAdjust
   // folds the distortion out of every image on the sensor (+ into Kmap), so subsequent
   // PnP sees pinhole geometry. Below the threshold the interim BA stays pose/points-only
@@ -458,15 +459,32 @@ export async function registerImages(ctx) {
     // fail on a slightly-wrong focal + a structure gap in their overlap. Correct the
     // focal (focal-only BA, safe pre-filter), retriangulate to grow structure into
     // the stalled overlaps, then force ONE more sweep with a relaxed refine-recheck.
-    if (!progressed && !rescued && rescueStalled && !finalSweep && cameras.size >= 3) {
+    //
+    // The guard is `>= 2`, i.e. the seed pair itself qualifies. The 2-camera stall is
+    // not a rarity to be excluded — it is the *dominant* failure on a distorted
+    // consumer lens: the seed absorbs the radial error, every 3rd-view PnP misses the
+    // ratio gates, and the D3 in-registration self-cal above (which would fix it) never
+    // engages because the model never reaches `distortionCalMinCams`. Chicken-and-egg;
+    // the relaxed sweep is what breaks it, after which the model grows past the self-cal
+    // threshold, folds the distortion out, and continues on strict gates. This stays
+    // self-limiting: the focal-solve guard below is still `>= 3`, so a 2-camera rescue
+    // is only retriangulation + one relaxed sweep (f/k1 are not observable from 2 views),
+    // and `rescued` keeps it to a single shot.
+    if (!progressed && !rescued && rescueStalled && !finalSweep && cameras.size >= 2) {
       const stalledLinked = imgs.filter((img) =>
         !registeredUuids.has(img.uuid) && countMatchesToRegistered(img.uuid) > 0)
       if (stalledLinked.length) {
         rescued = true
-        log(`Reconstruction: registration stalled — ${stalledLinked.length} linked image(s) still `
-          + `unregistered; rescue (focal solve + retriangulation, then a relaxed retry)`, 'info', 'Reconstruction')
         const rescueMode = rescueRefine(cameras.size)
-        if (baIterations > 0 && rescueMode !== 'none' && cameras.size >= 3 && getPoints3d().length >= 10) {
+        // At the 2-camera seed the focal solve is skipped (guard below), so say so
+        // rather than logging a step that never runs.
+        const focalSolve = baIterations > 0 && rescueMode !== 'none' && cameras.size >= 3
+          && getPoints3d().length >= 10
+        log(`Reconstruction: registration stalled at ${cameras.size} camera(s) — ${stalledLinked.length} `
+          + `linked image(s) still unregistered; rescue (${focalSolve ? `intrinsics solve '${rescueMode}' + ` : ''}`
+          + `retriangulation, then a relaxed retry${focalSolve ? '' : '; intrinsics not solvable at 2 views'})`,
+          'info', 'Reconstruction')
+        if (focalSolve) {
           onProgress?.(cameras.size, imgs.length, 'Rescue: focal solve…')
           await runBundleAdjust('rescue focal solve', interimBaIterations, rescueMode)
           rebuildViewIndex()
