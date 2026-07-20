@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  estimateUpFromCameras, estimateUpFromCloud, buildLocalFrame, makeFrame,
+  estimateUpFromViewingDirs, estimateUpFromCloud, buildLocalFrame, makeFrame,
   aerialUpRotation, rotateReconstruction,
 } from './projection.js'
 
@@ -22,10 +22,10 @@ function nadirCam(cx, cy, cz) {
 
 const close = (a, b, eps = 1e-6) => expect(Math.abs(a - b)).toBeLessThan(eps)
 
-describe('estimateUpFromCameras', () => {
+describe('estimateUpFromViewingDirs', () => {
   it('recovers +Z up from a nadir flight strip looking down −Z', () => {
     const cams = [nadirCam(0, 0, 10), nadirCam(5, 0, 10), nadirCam(10, 2, 10)]
-    const up = estimateUpFromCameras(cams)
+    const up = estimateUpFromViewingDirs(cams)
     close(up[0], 0); close(up[1], 0); close(up[2], 1)
   })
 
@@ -33,7 +33,7 @@ describe('estimateUpFromCameras', () => {
     // Two cameras looking at each other along ±Z → mean viewing dir ≈ 0.
     const a = nadirCam(0, 0, 0)          // looks −Z
     const b = { R: [[1, 0, 0], [0, -1, 0], [0, 0, 1]], t: [0, 0, 0] } // looks +Z
-    expect(estimateUpFromCameras([a, b])).toBeNull()
+    expect(estimateUpFromViewingDirs([a, b])).toBeNull()
   })
 })
 

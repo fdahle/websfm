@@ -24,6 +24,8 @@ import { projectPoint, medianTriangulationAngle, triangulationAngle, cameraCente
 import { undistortPixel, distortionOf } from './distortion.js'
 import { fitFundamental, sampsonRmsPx } from './fundamental.js'
 import { fitFiducialAffine, canonicalFrame, scanToCanonical } from './fiducials.js'
+import { calibratedFiducialPairs } from './fiducialModel.js'
+import { fitFiducialTransform } from './fiducialCalibration.js'
 import { rotationCycleFilter, reevaluateDroppedEdges } from './cycleFilter.js'
 import { toNorm, camToP34flat, reprojErr, retriangulatePairs, mergeSplitTracks } from './tracks.js'
 import { selectInitPair } from './initPair.js'
@@ -89,7 +91,10 @@ export async function reconstruct(input, hooks = {}) {
   // enough to seed structure). It only contributes 2D-3D correspondences to PnP. So
   // `donePairs` (everything the strong path reads) excludes weak pairs; `weakPairs` is
   // merged back in solely for register.js's correspondence collection (`corrPairs`).
-  let donePairs = pairs.filter((e) => e.status === 'done' && !e.weak)
+  // A REJECTED pair also carries status 'done' (with inlierCount 0 / no matches / no F),
+  // so both filters must gate on inlierCount — otherwise rejects ride into donePairs and
+  // the graph-health union-find fuses the whole set into one phantom component.
+  let donePairs = pairs.filter((e) => e.status === 'done' && !e.weak && e.inlierCount > 0)
   const weakPairs = pairs.filter((e) => e.status === 'done' && e.weak && e.inlierCount > 0)
   // WS3: pairs the rotation-cycle filter dropped, stashed for post-self-cal re-admission
   // (they may be TRUE edges the filter mis-judged with pre-fold, uncorrected rotations).
@@ -212,23 +217,19 @@ export async function reconstruct(input, hooks = {}) {
       const filmGroups = new Map() // sensorId → [{ img, fit }]
       for (const img of imgs) {
         const s = img.sensor
-        if (s?.kind !== 'film' || !s.fiducials?.marks?.length) continue
-        const byId = new Map(s.fiducials.marks.map((m) => [m.id, m]))
-        const obs = (img.fiducialObs || [])
-          .map((o) => {
-            const m = byId.get(o.fidId)
-            return m ? { px: o.px, py: o.py, xMm: m.xMm, yMm: m.yMm } : null
-          })
-          .filter(Boolean)
-        const fit = fitFiducialAffine(obs)
+        const cal = s?.fiducialCalibration
+        const legacy = s?.fiducials
+        if (s?.kind !== 'film' || !(cal?.marks?.length || legacy?.marks?.length)) continue
+        const obs = calibratedFiducialPairs(img, s)
+        const fit = cal ? fitFiducialTransform(obs, cal.transform || 'affine') : fitFiducialAffine(obs)
         if (!fit) {
           log(`Reconstruction: ${img.name} — fiducial fit failed (${obs.length} usable mark(s), `
             + `need ≥3); falling back to standard intrinsics`, 'warn', 'Reconstruction')
           continue
         }
         const pitchUm = fit.pitchMm * 1000
-        log(`Reconstruction: ${img.name} — fiducial fit: pitch ${pitchUm.toFixed(2)}µm/px, `
-          + `rot ${fit.rotDeg.toFixed(2)}°, shear ${fit.shear.toFixed(4)}, RMS ${fit.rmsUm.toFixed(1)}µm`,
+        log(`Reconstruction: ${img.name} — fiducial ${cal?.transform || 'affine'} fit: pitch ${pitchUm.toFixed(2)}µm/px, `
+          + `${fit.rotDeg == null ? '' : `rot ${fit.rotDeg.toFixed(2)}°, shear ${fit.shear.toFixed(4)}, `}RMS ${fit.rmsUm.toFixed(1)}µm`,
           'info', 'Reconstruction')
         if (fit.rmsUm > 0.5 * pitchUm) {
           log(`Reconstruction: ${img.name} — fiducial residual ${fit.rmsUm.toFixed(1)}µm exceeds `
@@ -236,12 +237,12 @@ export async function reconstruct(input, hooks = {}) {
         }
         const sid = img.sensorId ?? '__nosensor__'
         if (!filmGroups.has(sid)) filmGroups.set(sid, [])
-        filmGroups.get(sid).push({ img, fit })
+        filmGroups.get(sid).push({ img, fit, calibration: cal || legacy })
       }
       for (const [sid, entries] of filmGroups) {
         const pitches = entries.map((e) => e.fit.pitchMm).sort((a, b) => a - b)
         const pitchMm = pitches[Math.floor(pitches.length / 2)] // median: one frame doesn't chase a single scan
-        const fiducials = entries[0].img.sensor.fiducials
+        const fiducials = entries[0].calibration
         const frame = canonicalFrame(fiducials, pitchMm)
         if (!frame) {
           log(`Reconstruction: sensor ${sid} — could not build canonical frame (need ≥3 marks); `
@@ -254,14 +255,15 @@ export async function reconstruct(input, hooks = {}) {
           + `(median pitch ${(pitchMm * 1000).toFixed(2)}µm/px over ${entries.length} image(s))`,
           'info', 'Reconstruction')
         for (const { img, fit } of entries) {
+          const scanTransform = fit.forward ? fit : fit.A
           img.sensor._fiducialK = { fx: frame.K.fx, fy: frame.K.fy, cx: frame.K.cx, cy: frame.K.cy, source }
           if (img.keypoints?.length) {
             img.keypoints = img.keypoints.map((kp) => {
-              const c = scanToCanonical(kp.x, kp.y, fit.A, frame)
+              const c = scanToCanonical(kp.x, kp.y, scanTransform, frame)
               return { ...kp, x: c.x, y: c.y }
             })
           }
-          fiducialTransforms.set(img.uuid, { A: fit.A, frame })
+          fiducialTransforms.set(img.uuid, { A: fit.A ?? null, transform: fit.forward ? fit : null, frame })
         }
       }
       // GCP observations are in scan space too — push film-image observations
@@ -273,7 +275,7 @@ export async function reconstruct(input, hooks = {}) {
           for (const o of g.observations || []) {
             const t = fiducialTransforms.get(o.uuid)
             if (!t) continue
-            const c = scanToCanonical(o.px, o.py, t.A, t.frame)
+            const c = scanToCanonical(o.px, o.py, t.transform ?? t.A, t.frame)
             o.px = c.x; o.py = c.y; remapped++
           }
         }
@@ -1143,6 +1145,19 @@ export async function reconstruct(input, hooks = {}) {
             + `${deferred.length ? ` — deferred ${deferred.join('; ')}` : ' — all terms unlocked'}`,
             'info', 'Reconstruction')
         }
+        // WS-C1: k1 is not identifiable from a 2-camera model — the seed pair can absorb
+        // any radial coefficient into its point positions, so BA "converges" on whatever
+        // the noise prefers. Observed on the 5-image TMA baselines, whose 2-camera models
+        // flipped k1 between passes (+0.032 → −0.010) and tripped the composed-fit runaway
+        // warning every time. A fold is destructive (it moves keypoints), so refusing to
+        // fit noise beats folding it in. register.js's stalled-model rescue normally keeps
+        // models off this floor; this protects genuinely tiny projects.
+        if (refineMode !== 'none' && cameras.size < 3) {
+          log(`Reconstruction: post-filter pass ${round} self-cal skipped — ${cameras.size} camera(s) `
+            + `cannot identify intrinsics (a 2-view model hides distortion in its points); `
+            + `keeping '${refineMode}' unrefined`, 'info', 'Reconstruction')
+          refineMode = 'none'
+        }
         await runBundleAdjust(`post-filter bundle adjustment ${round}`, baIterations, refineMode)
       }
       logOutlierShare('post-filter residuals')
@@ -1295,7 +1310,7 @@ export async function reconstruct(input, hooks = {}) {
       // F4: per-image scan→canonical transform for each film image, so the dense
       // stage reproduces the exact same frame (it must NOT re-fit — the sparse run
       // defines the frame). Empty for all-digital projects.
-      fiducialTransforms: [...fiducialTransforms].map(([uuid, t]) => ({ uuid, A: t.A, frame: t.frame })),
+      fiducialTransforms: [...fiducialTransforms].map(([uuid, t]) => ({ uuid, A: t.A, transform: t.transform, frame: t.frame })),
     }
 
     onProgress?.(imgs.length, imgs.length, 'Done')

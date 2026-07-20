@@ -5,11 +5,13 @@ import { useGlossarySettings } from '../../composables/useGlossarySettings.js'
 import { useComputeSettings } from '../../composables/useComputeSettings.js'
 import { useViewerSettings } from '../../composables/useViewerSettings.js'
 import { useUiSettings } from '../../composables/useUiSettings.js'
+import { useBrowserWarning } from '../../composables/useBrowserWarning.js'
 
+const { isChromium, warningEnabled, setEnabled: setBrowserWarningEnabled } = useBrowserWarning()
 const { glossaryTermsEnabled, setGlossaryTermsEnabled } = useGlossarySettings()
 const { memBudgetGb, setMemBudgetGb, useGpu, setUseGpu } = useComputeSettings()
 const { advancedSettingsExpanded, setAdvancedSettingsExpanded } = useUiSettings()
-const { graticuleZ, setGraticuleZ } = useViewerSettings()
+const { gridZ, setGridZ } = useViewerSettings()
 
 defineProps({
   theme: String,
@@ -123,6 +125,21 @@ const verboseLogging = ref(false)
             </label>
           </div>
 
+          <div v-if="!isChromium" class="setting-row">
+            <div class="setting-info">
+              <span class="setting-label">Warn on unsupported browser</span>
+              <span class="setting-desc">Show a reminder that websfm works best in a Chromium-based browser (Chrome, Edge); some features like GPU depth maps may be unavailable here.</span>
+            </div>
+            <label class="switch">
+              <input
+                type="checkbox"
+                :checked="warningEnabled"
+                @change="setBrowserWarningEnabled($event.target.checked)"
+              >
+              <span class="slider"></span>
+            </label>
+          </div>
+
           <div class="setting-row">
             <div class="setting-info">
               <span class="setting-label">Expand advanced settings</span>
@@ -140,13 +157,13 @@ const verboseLogging = ref(false)
 
           <div class="setting-row">
             <div class="setting-info">
-              <span class="setting-label">Graticule height</span>
+              <span class="setting-label">Grid height</span>
               <span class="setting-desc">Where the 3D-view ground grid sits along the vertical axis of the point cloud.</span>
             </div>
             <div class="seg-toggle">
-              <button :class="{ active: graticuleZ === 'min' }" @click="setGraticuleZ('min')">Bottom</button>
-              <button :class="{ active: graticuleZ === 'avg' }" @click="setGraticuleZ('avg')">Middle</button>
-              <button :class="{ active: graticuleZ === 'max' }" @click="setGraticuleZ('max')">Top</button>
+              <button :class="{ active: gridZ === 'min' }" @click="setGridZ('min')">Bottom</button>
+              <button :class="{ active: gridZ === 'avg' }" @click="setGridZ('avg')">Middle</button>
+              <button :class="{ active: gridZ === 'max' }" @click="setGridZ('max')">Top</button>
             </div>
           </div>
 

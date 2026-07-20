@@ -55,4 +55,27 @@ describe('radialCurveOk', () => {
     expect(res.ok).toBe(false)
     expect(res.reason).toMatch(/non-monotonic|corner shift/)
   })
+
+  // Regression (2026-07-17 building baseline): the guard used an absolute 50px corner-shift
+  // ceiling and so flagged *correct* calibrations as runaway on every pass of the run.
+  // These are COLMAP's own SIMPLE_RADIAL numbers for that set's Canon EOS 5D + 24mm:
+  // f=2970.13, principal point (2184, 1456) on 4368×2912, k1=-0.0852 — a 174px corner
+  // shift, 3.5× the old ceiling, on a perfectly ordinary lens.
+  it('accepts a real 24mm full-frame calibration (174px corner shift)', () => {
+    const fx = 2970.13
+    const maxNormR = Math.hypot(2184 / fx, 1456 / fx)
+    const res = radialCurveOk({ k1: -0.0852, k2: 0, k3: 0 }, maxNormR, fx)
+    const cornerShiftPx = 0.0852 * maxNormR ** 3 * fx
+    expect(cornerShiftPx).toBeGreaterThan(150) // the shift really is large in absolute px…
+    expect(res.ok).toBe(true)                  // …yet only ~7% of the corner radius
+  })
+
+  // The relative ceiling must still bite on an over-bent map. k1 is chosen to stay
+  // monotonic (|k1|·r² < ⅓, so the curve never folds) while displacing 30% of the corner
+  // radius — i.e. it can only be caught by the corner-shift branch, not the fold branch.
+  it('still rejects an over-bent radial map that stays monotonic', () => {
+    const res = radialCurveOk({ k1: -0.387, k2: 0, k3: 0 }, 0.88, K.fx)
+    expect(res.ok).toBe(false)
+    expect(res.reason).toMatch(/corner shift/)
+  })
 })

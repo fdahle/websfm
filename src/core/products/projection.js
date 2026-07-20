@@ -52,11 +52,16 @@ function viewingDir({ R }) {
 
 // ── vertical estimation ──────────────────────────────────────────────────────
 
-// Estimate "up" from the cameras: nadir aerial cameras all look roughly down, so
-// the mean viewing direction is roughly the ground direction and up = −that.
-// Returns a unit vector, or null if the cameras give no coherent direction (e.g.
-// a convergent object-scan rig, where the mean viewing dir cancels out).
-export function estimateUpFromCameras(cameras) {
+// Estimate "up" from the cameras' *viewing directions*: nadir aerial cameras all
+// look roughly down, so the mean viewing direction is roughly the ground direction
+// and up = −that. Returns a unit vector, or null if the cameras give no coherent
+// direction (e.g. a convergent object-scan rig, where the mean viewing dir cancels).
+//
+// Deliberately named for the signal it uses, not "…FromCameras": geometry.js has a
+// same-shaped estimator for the *viewer* that weighs this against the image-up axes.
+// This one stays viewing-dir-only — DEM/ortho geometry depends on its exact null
+// semantics (null ⇒ buildLocalFrame falls through to the cloud-PCA vertical).
+export function estimateUpFromViewingDirs(cameras) {
   let sx = 0, sy = 0, sz = 0, n = 0
   for (const cam of cameras) {
     const d = viewingDir(cam)
@@ -159,7 +164,7 @@ function basisFromUp(up) {
 //   cameras: iterable of { R, t }   points: [{ x, y, z }]
 export function buildLocalFrame(cameras = [], points = []) {
   const cams = [...cameras]
-  let up = estimateUpFromCameras(cams)
+  let up = estimateUpFromViewingDirs(cams)
   let source = 'cameras'
   if (!up) {
     up = estimateUpFromCloud(points, null)
@@ -193,7 +198,7 @@ export function buildLocalFrame(cameras = [], points = []) {
 // lifts them above the ground (fixes the SfM gauge/flip ambiguity).
 export function aerialUpRotation(cameras) {
   const cams = cameras instanceof Map ? [...cameras.values()] : [...cameras]
-  const up = estimateUpFromCameras(cams)
+  const up = estimateUpFromViewingDirs(cams)
   if (!up) return null
   const { east, north, up: u } = basisFromUp(up)
   return [east.slice(), north.slice(), u.slice()]

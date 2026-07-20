@@ -44,7 +44,25 @@ export const useModalsStore = defineStore('modals', () => {
   const importKindFile      = ref(null)   // the File awaiting a kind choice, or null
   const importCloudOpen     = ref(false)  // point-cloud / mesh import settings
   const importCloudData     = ref(null)   // { parsed, stats, fileName } from the parseCloud op
+  // Reference-raster import. Only opened when the DEM-vs-ortho sniff was LOW
+  // confidence — a high-confidence sniff imports silently (the kind stays
+  // editable on the sidebar row, which is what makes that defensible).
+  const importRasterOpen    = ref(false)
+  const importRasterData    = ref(null)   // { raster: RasterMeta, fileName }
+  // Band math / stretch for a multi-band raster. Holds the raster id, not the
+  // record — the record is replaced wholesale by a restyle's re-decode.
+  const rasterStyleId       = ref(null)
   const infoImageId         = ref(null)
+  // Automatic fiducial measurement on film scans. Holds the sensor id, not the
+  // record — the modal reads the live sensor back out of the sensors store.
+  const fiducialDetectOpen     = ref(false)
+  const fiducialDetectSensorId = ref(null)
+  const fiducialCalibrateOpen     = ref(false)
+  const fiducialCalibrateSensorId = ref(null)
+  // Evaluate tab — the Quality Report hub (PLAN-eval-quality-hub). One modal, opened
+  // on a given section; the old per-view flags collapsed into these two.
+  const qualityOpen         = ref(false)
+  const qualitySection      = ref('overview')
 
   return {
     settingsOpen,
@@ -82,6 +100,15 @@ export const useModalsStore = defineStore('modals', () => {
     importKindFile,
     importCloudOpen,
     importCloudData,
+    importRasterOpen,
+    importRasterData,
+    rasterStyleId,
     infoImageId,
+    fiducialDetectOpen,
+    fiducialDetectSensorId,
+    fiducialCalibrateOpen,
+    fiducialCalibrateSensorId,
+    qualityOpen,
+    qualitySection,
   }
 })

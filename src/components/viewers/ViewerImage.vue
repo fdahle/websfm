@@ -6,6 +6,7 @@ import { fitFiducialAffine, mmToScan } from '../../core/sfm/fiducials.js'
 import { clipLineToRect } from '../../core/sfm/gcpGuides.js'
 import { segmentEncode, segmentDecode, segmentForget } from '../../workers/computeClient.js'
 import { logitsToBinaryMask } from '../../core/segment/sam2.js'
+import { copyToClipboard } from '../../composables/useToasts.js'
 import MaskToolbar from './MaskToolbar.vue'
 import GcpToolbar from './GcpToolbar.vue'
 
@@ -30,6 +31,10 @@ const props = defineProps({
   showFiducials: { type: Boolean, default: false }, // overlay toggle for fiducial marks
   fiducialMarks: { type: Array,   default: () => [] }, // [{ id, xMm, yMm }]
   fiducialObs:   { type: Array,   default: () => [] }, // [{ fidId, px, py }]
+  // Reprojection residual overlay (WS3): per-observation vectors in native image
+  // pixels — [{ px, py, du, dv, mag }] (du,dv = observation − projection).
+  showResiduals: { type: Boolean, default: false },
+  residuals:     { type: Array,   default: () => [] },
 })
 
 // mark-gcp: assign this pixel to an existing GCP { gcpId, px, py }.
@@ -245,6 +250,21 @@ function drawLegend(ctx, h, slot, stops, leftLabel, rightLabel, title) {
   ctx.restore()
 }
 
+// Caption for the residual overlay: notes the ×25 amplification + colour meaning.
+function drawResidualLegend(ctx, h, slot) {
+  const ROW = 34, LX = 12, LY = h - 36 - slot * ROW
+  ctx.save()
+  const text = '×25  red > 2 px'
+  ctx.font = '9px sans-serif'
+  const tw = ctx.measureText(text).width
+  ctx.fillStyle = 'rgba(0,0,0,0.45)'
+  ctx.fillRect(LX - 4, LY - 6, tw + 8, 16)
+  ctx.fillStyle = 'rgba(255,255,255,0.8)'
+  ctx.textAlign = 'left'
+  ctx.fillText(text, LX, LY + 5)
+  ctx.restore()
+}
+
 // Small boxed caption at (x, y) — the guide equivalent of the marker labels,
 // kept solid-line so the dashed guide stroke doesn't bleed into the text.
 function drawGuideLabel(ctx, x, y, text, color) {
@@ -340,13 +360,43 @@ function drawOverlay() {
     drawLegend(ctx, h, legendSlot++, KEYPOINT_STOPS, 'low', 'high', 'response')
   }
 
+  // Reprojection residual vectors (WS3): observation → (observation + AMP·residual),
+  // amplified ×25 so sub-pixel misfits are visible. A radial pattern = distortion
+  // misfit, a coherent translation = bad pose, random speckle = fine. Colour by raw
+  // magnitude (green < 1px, amber < 2px, red ≥ 2px). Native-pixel frame, like GCPs.
+  if (props.showResiduals && props.residuals?.length && img.naturalWidth) {
+    const nw = img.naturalWidth, nh = img.naturalHeight
+    const AMP = 25
+    const toDisp = (px, py) => ({ x: (px / nw) * dispW + tx.value, y: (py / nh) * dispH + ty.value })
+    ctx.save()
+    ctx.lineWidth = 1.2
+    for (const r of props.residuals) {
+      const a = toDisp(r.px, r.py)
+      const b = toDisp(r.px + r.du * AMP, r.py + r.dv * AMP)
+      ctx.strokeStyle = r.mag >= 2 ? '#e0533d' : (r.mag >= 1 ? '#e6a01e' : '#3fca77')
+      ctx.beginPath()
+      ctx.moveTo(a.x, a.y)
+      ctx.lineTo(b.x, b.y)
+      ctx.stroke()
+      ctx.fillStyle = ctx.strokeStyle
+      ctx.beginPath()
+      ctx.arc(a.x, a.y, 1.4, 0, Math.PI * 2)
+      ctx.fill()
+    }
+    ctx.restore()
+    drawResidualLegend(ctx, h, legendSlot++)
+  }
+
   // Guided marking — where the posed cameras say a not-yet-marked GCP must lie
   // in this image. Drawn under the real markers, in a distinct dashed green so a
   // prediction is never mistaken for a placed mark:
   //   • point (≥2 other views) — ghost cross-hair at the predicted pixel;
   //   • line (1 other view) — the epipolar line the mark must sit on. Only for
   //     the selected GCP: every GCP's line at once is a spider web.
-  if ((props.showGcps || props.gcpEdit) && props.gcpGuides?.length && img.naturalWidth) {
+  // Gated on `gcpEdit` alone (not showGcps): a guide is an aid for *placing* a
+  // mark, so it has no business on screen once the user leaves edit mode. App.vue
+  // stops computing them on the same condition.
+  if (props.gcpEdit && props.gcpGuides?.length && img.naturalWidth) {
     const nw = img.naturalWidth, nh = img.naturalHeight
     const toDisp = (px, py) => ({ x: (px / nw) * dispW + tx.value, y: (py / nh) * dispH + ty.value })
 
@@ -385,7 +435,19 @@ function drawOverlay() {
           ctx.moveTo(x, y - 11); ctx.lineTo(x, y - 3)
           ctx.moveTo(x, y + 3);  ctx.lineTo(x, y + 11)
           ctx.stroke()
-          if (g.name && isSelected) drawGuideLabel(ctx, x + 12, y - 9, `${g.name} — mark here`, strong)
+          // The mark count is the visible proof that the prediction is N-view:
+          // it climbs as the user marks the GCP elsewhere, and the cross-hair
+          // shifts with it. "7 of 9 marks" (rather than "9 marks, 2 ignored")
+          // because a left-out mark is dropped from *this prediction only* — it
+          // stays in the georeference fit and the accuracy report — and there is
+          // no room on a canvas label to say so; a bare "ignored" would imply the
+          // GCP itself was discarded.
+          // (A point guide always has ≥2 views — 1 would be an epipolar line.)
+          if (g.name && isSelected) {
+            const used = g.viewCount - (g.rejectedCount ?? 0)
+            const marks = g.rejectedCount ? `${used} of ${g.viewCount} marks` : `${g.viewCount} marks`
+            drawGuideLabel(ctx, x + 12, y - 9, `${g.name} — mark here (${marks})`, strong)
+          }
         }
       }
       ctx.restore()
@@ -1031,17 +1093,17 @@ function menuMarkFiducial(fidId) {
   closeMenu()
 }
 
-async function menuCopyCoords() {
+function menuCopyCoords() {
   if (menu.value) {
-    try { await navigator.clipboard.writeText(`${Math.round(menu.value.px)}, ${Math.round(menu.value.py)}`) } catch { /* clipboard blocked */ }
+    copyToClipboard(`${Math.round(menu.value.px)}, ${Math.round(menu.value.py)}`, 'pixel')
   }
   closeMenu()
 }
-async function menuCopyColor() {
+function menuCopyColor() {
   if (menu.value && offscreenCtx) {
     const px = Math.floor(menu.value.px), py = Math.floor(menu.value.py)
     const d = offscreenCtx.getImageData(px, py, 1, 1).data
-    try { await navigator.clipboard.writeText(`rgb(${d[0]}, ${d[1]}, ${d[2]})`) } catch { /* clipboard blocked */ }
+    copyToClipboard(`rgb(${d[0]}, ${d[1]}, ${d[2]})`, 'color')
   }
   closeMenu()
 }
@@ -1231,6 +1293,8 @@ watch(() => props.selectedGcpId,     () => drawOverlay())
 watch(() => props.fiducialObs,       () => drawOverlay(), { deep: true })
 watch(() => props.isFilm,            () => drawOverlay())
 watch(() => props.showFiducials,     () => drawOverlay())
+watch(() => props.showResiduals,     () => drawOverlay())
+watch(() => props.residuals,         () => drawOverlay(), { deep: false })
 watch(() => props.fiducialMarks,     () => drawOverlay(), { deep: true })
 
 // Entering edit mode arms the brush; leaving drops the tool + any in-flight rect
@@ -1490,11 +1554,20 @@ defineExpose({ fit, zoomIn, zoomOut, triggerMaskImport, clearMask, triggerDepthI
   user-select: none;
 }
 
+/* Checkerboard backdrop (same as the raster viewer) — makes the image edges and
+   any transparency read clearly against the empty viewport. */
 .viewport {
   position: relative;
   flex: 1;
   overflow: hidden;
   cursor: grab;
+  background-image:
+    linear-gradient(45deg, rgba(128,128,128,0.10) 25%, transparent 25%),
+    linear-gradient(-45deg, rgba(128,128,128,0.10) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, rgba(128,128,128,0.10) 75%),
+    linear-gradient(-45deg, transparent 75%, rgba(128,128,128,0.10) 75%);
+  background-size: 20px 20px;
+  background-position: 0 0, 0 10px, 10px -10px, -10px 0;
 }
 
 .viewport.grabbing  { cursor: grabbing; }

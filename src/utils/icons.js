@@ -48,6 +48,14 @@ export const icons = {
     <path d="M20 9V5a1 1 0 0 0-1-1h-4" />
     <path d="M4 15v4a1 1 0 0 0 1 1h4" />
     <path d="M20 15v4a1 1 0 0 1-1 1h-4" />`,
+  'zoom-in': `
+    <circle cx="11" cy="11" r="6" />
+    <path d="M15.5 15.5L21 21" />
+    <path d="M8.5 11h5M11 8.5v5" />`,
+  'zoom-out': `
+    <circle cx="11" cy="11" r="6" />
+    <path d="M15.5 15.5L21 21" />
+    <path d="M8.5 11h5" />`,
   console: `
     <rect x="3" y="5" width="18" height="14" rx="2" />
     <path d="M7 10l3 2.5L7 15" />
@@ -61,6 +69,18 @@ export const icons = {
   camera: `
     <path d="M3 8a2 2 0 0 1 2-2h2l1.5-2h7L17 6h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
     <circle cx="12" cy="12.5" r="3.5" />`,
+  // Camera *pose*, not the physical sensor: the classic SfM frustum — image plane
+  // plus two rays converging on the projection centre. Deliberately distinct from
+  // `camera` (a photo camera = a sensor / calibration group).
+  'camera-pose': `
+    <rect x="5" y="4" width="14" height="9.5" rx="1" />
+    <path d="M12 19L5 13.5M12 19l7-5.5" />
+    <circle cx="12" cy="19.5" r="1.3" />`,
+  // Lens calibration: the checkerboard target, the universal symbol for it.
+  calibration: `
+    <rect x="4" y="4" width="16" height="16" rx="1" />
+    <path d="M4 12h16M12 4v16" />
+    <path d="M4 4h8v8H4zM12 12h8v8h-8z" fill="currentColor" stroke="none" />`,
   target: `
     <circle cx="12" cy="12" r="8" />
     <circle cx="12" cy="12" r="3.5" />
@@ -84,6 +104,16 @@ export const icons = {
   cloud: `
     <path d="M7 18a4 4 0 0 1-.5-7.97A5 5 0 0 1 16 9.5a3.5 3.5 0 0 1 .5 6.96" />
     <path d="M7 18h9.5" />`,
+  // Sparse model = tie points triangulated from two camera frustums. The rays are
+  // what separates it from `point-cloud` (dense, no cameras).
+  'sparse-model': `
+    <path d="M4.5 18l3-2.2v4.4z" />
+    <path d="M19.5 18l-3-2.2v4.4z" />
+    <path d="M7 16L12 7M17 16L12 7" opacity="0.35" />
+    <circle cx="12" cy="6.5" r="1.1" />
+    <circle cx="8.8" cy="10.5" r="1.1" />
+    <circle cx="15.2" cy="10" r="1.1" />
+    <circle cx="12" cy="13" r="1.1" />`,
   table: `
     <rect x="3" y="4" width="18" height="16" rx="1.5" />
     <path d="M3 9h18M3 14h18M9 4v16M15 4v16" />`,
@@ -97,10 +127,18 @@ export const icons = {
   dem: `
     <path d="M3 18l5-8 3 4 3-5 4 6 3-3" />
     <path d="M3 21h18" />`,
+  // Orthophoto = a *rectified image*, so it reads as a photo (sun + terrain) with a
+  // faint map grid over it — not the old cube, which said "3D model".
   ortho: `
-    <path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z" />
-    <path d="M4 7.5l8 4.5 8-4.5M12 12v9" />
-    <path d="M8 5.2l8 4.6M8 9.5l8 4.6" opacity="0.5" />`,
+    <rect x="3.5" y="5" width="17" height="14" rx="1.5" />
+    <path d="M3.5 16.5l4.5-4.5 3.5 3 4-4.5 5 6" />
+    <circle cx="8" cy="9" r="1.3" />
+    <path d="M9.5 5v14M15 5v14M3.5 10h17" opacity="0.28" />`,
+  // Stacked georeferenced tiles — imported reference raster (DEM *or* orthophoto).
+  layers: `
+    <path d="M12 3.5l8.5 4.5-8.5 4.5L3.5 8z" />
+    <path d="M3.5 12.5L12 17l8.5-4.5" opacity="0.7" />
+    <path d="M3.5 16.5L12 21l8.5-4.5" opacity="0.45" />`,
 
   // ── Export ──────────────────────────────────────────────────────────────────
   'point-cloud': `
@@ -120,6 +158,11 @@ export const icons = {
     <circle cx="12" cy="12" r="8.5" />
     <path d="M12 11v5" />
     <circle cx="12" cy="7.8" r="0.6" fill="currentColor" stroke="none" />`,
+  // Quality report: a document with a bar chart.
+  report: `
+    <path d="M6 3.5h8l4 4v13H6z" />
+    <path d="M14 3.5v4h4" />
+    <path d="M9 17v-3.5M12 17v-6M15 17v-2.5" />`,
   book: `
     <path d="M4 5.5A1.5 1.5 0 0 1 5.5 4H12v15H5.5A1.5 1.5 0 0 0 4 20.5z" />
     <path d="M20 5.5A1.5 1.5 0 0 0 18.5 4H12v15h6.5a1.5 1.5 0 0 1 1.5 1.5z" />`,
@@ -132,10 +175,14 @@ export const icons = {
   mask: `
     <circle cx="12" cy="12" r="8.5" />
     <path d="M12 3.5a8.5 8.5 0 0 0 0 17z" fill="currentColor" stroke="none" />`,
+  // Depth map = an image frame holding a near→far ramp. The old stacked-planes
+  // shape read as "layers" (it is now the `layers` icon) rather than as depth.
   depth: `
-    <path d="M12 3l8 4-8 4-8-4z" />
-    <path d="M4 12l8 4 8-4" opacity="0.7" />
-    <path d="M4 17l8 4 8-4" opacity="0.4" />`,
+    <rect x="3.5" y="5" width="17" height="14" rx="1.5" />
+    <path d="M7 19V8.5" />
+    <path d="M10.5 19v-6.5" opacity="0.75" />
+    <path d="M14 19v-4.5" opacity="0.5" />
+    <path d="M17.5 19v-2.5" opacity="0.3" />`,
   pencil: `
     <path d="M5 19l1-4L16 5l3 3L9 18z" />
     <path d="M14 7l3 3" />`,

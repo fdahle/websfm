@@ -146,33 +146,137 @@ fn gaussian_kernel(sigma: f32) -> Vec<f32> {
     k
 }
 
+/// `acc[i] += src[i] * kv` over all of `acc`. The vertical blur pass's hot loop:
+/// `kv` is loop-invariant and both slices are contiguous, so this is a clean f32x4
+/// multiply-add. (The naive `for y { for x { for ki } }` vertical loop strides by `w`
+/// on its innermost index and LLVM will not vectorise it.)
+#[cfg(target_feature = "simd128")]
+fn fma_scaled(acc: &mut [f32], src: &[f32], kv: f32) {
+    use core::arch::wasm32::*;
+    let n = acc.len().min(src.len());
+    let n4 = n & !3;
+    unsafe {
+        let kvv = f32x4_splat(kv);
+        let pa = acc.as_mut_ptr();
+        let ps = src.as_ptr();
+        let mut i = 0;
+        while i < n4 {
+            let a = v128_load(pa.add(i) as *const v128);
+            let s = v128_load(ps.add(i) as *const v128);
+            v128_store(pa.add(i) as *mut v128, f32x4_add(a, f32x4_mul(s, kvv)));
+            i += 4;
+        }
+    }
+    for i in n4..n {
+        acc[i] += src[i] * kv;
+    }
+}
+
+/// Scalar fallback (native `cargo test`/`cargo check`; no simd128 feature).
+#[cfg(not(target_feature = "simd128"))]
+fn fma_scaled(acc: &mut [f32], src: &[f32], kv: f32) {
+    let n = acc.len().min(src.len());
+    for i in 0..n {
+        acc[i] += src[i] * kv;
+    }
+}
+
+/// One clamp-to-edge convolution tap sum at `x` — used only for the ≤`radius`
+/// border columns, where the clamp makes the read index data-dependent.
+fn conv_clamped(row: &[f32], w: usize, x: usize, k: &[f32], radius: usize) -> f32 {
+    let mut acc = 0.0f32;
+    for (ki, &kv) in k.iter().enumerate() {
+        let sx = clampi(x as i32 + ki as i32 - radius as i32, 0, w as i32 - 1) as usize;
+        acc += row[sx] * kv;
+    }
+    acc
+}
+
+/// Horizontal convolution of the interior columns `radius..w-radius`, where every
+/// tap is in-bounds and the clamp drops out — so the window reads are contiguous and
+/// vectorise 4 output columns at a time. Border columns are the caller's job.
+#[cfg(target_feature = "simd128")]
+fn conv_row_interior(row: &[f32], out: &mut [f32], k: &[f32], radius: usize) {
+    use core::arch::wasm32::*;
+    let w = row.len();
+    if w < 2 * radius + 1 {
+        return; // no interior; caller's border sweep covers the whole row
+    }
+    let hi = w - radius;
+    let n4 = radius + ((hi - radius) & !3);
+    unsafe {
+        let ps = row.as_ptr();
+        let po = out.as_mut_ptr();
+        let mut x = radius;
+        while x < n4 {
+            let base = x - radius;
+            let mut acc = f32x4_splat(0.0);
+            for (ki, &kv) in k.iter().enumerate() {
+                // Widest read is base+ki+3 ≤ (n4-4-radius)+2·radius+3 ≤ w-1.
+                acc = f32x4_add(
+                    acc,
+                    f32x4_mul(v128_load(ps.add(base + ki) as *const v128), f32x4_splat(kv)),
+                );
+            }
+            v128_store(po.add(x) as *mut v128, acc);
+            x += 4;
+        }
+    }
+    for x in n4..hi {
+        let mut acc = 0.0f32;
+        for (ki, &kv) in k.iter().enumerate() {
+            acc += row[x - radius + ki] * kv;
+        }
+        out[x] = acc;
+    }
+}
+
+/// Scalar fallback (native `cargo test`/`cargo check`; no simd128 feature).
+#[cfg(not(target_feature = "simd128"))]
+fn conv_row_interior(row: &[f32], out: &mut [f32], k: &[f32], radius: usize) {
+    let w = row.len();
+    if w < 2 * radius + 1 {
+        return;
+    }
+    for x in radius..w - radius {
+        let mut acc = 0.0f32;
+        for (ki, &kv) in k.iter().enumerate() {
+            acc += row[x - radius + ki] * kv;
+        }
+        out[x] = acc;
+    }
+}
+
 /// Separable Gaussian blur with clamp-to-edge borders.
+///
+/// Both passes are split into clamped borders (scalar, ≤`radius` rows/columns) and an
+/// unclamped interior (contiguous, vectorised). The vertical pass accumulates into a
+/// single row buffer with the clamp hoisted out of the inner loop, which also keeps
+/// only one source row in flight instead of `2·radius+1` rows strided across the image.
 fn blur(src: &[f32], w: usize, h: usize, sigma: f32) -> Vec<f32> {
     let k = gaussian_kernel(sigma);
-    let radius = (k.len() / 2) as i32;
+    let radius = k.len() / 2;
 
     let mut tmp = vec![0f32; w * h];
     for y in 0..h {
-        for x in 0..w {
-            let mut acc = 0.0f32;
-            for (ki, &kv) in k.iter().enumerate() {
-                let sx = clampi(x as i32 + ki as i32 - radius, 0, w as i32 - 1) as usize;
-                acc += src[y * w + sx] * kv;
-            }
-            tmp[y * w + x] = acc;
-        }
+        let row  = &src[y * w..(y + 1) * w];
+        let orow = &mut tmp[y * w..(y + 1) * w];
+        let lo = radius.min(w);
+        let hi = w.saturating_sub(radius).max(lo);
+        for x in 0..lo  { orow[x] = conv_clamped(row, w, x, &k, radius); }
+        for x in hi..w  { orow[x] = conv_clamped(row, w, x, &k, radius); }
+        conv_row_interior(row, orow, &k, radius);
     }
 
     let mut out = vec![0f32; w * h];
+    let mut accrow = vec![0f32; w];
     for y in 0..h {
-        for x in 0..w {
-            let mut acc = 0.0f32;
-            for (ki, &kv) in k.iter().enumerate() {
-                let sy = clampi(y as i32 + ki as i32 - radius, 0, h as i32 - 1) as usize;
-                acc += tmp[sy * w + x] * kv;
-            }
-            out[y * w + x] = acc;
+        accrow.iter_mut().for_each(|v| *v = 0.0);
+        for (ki, &kv) in k.iter().enumerate() {
+            let sy = clampi(y as i32 + ki as i32 - radius as i32, 0, h as i32 - 1) as usize;
+            fma_scaled(&mut accrow, &tmp[sy * w..(sy + 1) * w], kv);
         }
+        out[y * w..(y + 1) * w].copy_from_slice(&accrow);
     }
     out
 }
@@ -458,11 +562,23 @@ fn sift_keypoints(gray: &[f32], width: usize, height: usize, contrast_threshold:
 
         let scale_factor = (1usize << octave) as f32;
 
-        // Gaussian scale-space for this octave.
+        // Gaussian scale-space for this octave, built INCREMENTALLY: level i is level
+        // i-1 blurred by just the increment that takes σ_{i-1} → σ_i, rather than the
+        // octave base re-blurred by the full σ_i. Gaussians compose in quadrature
+        // (blur(σa)∘blur(σb) ≡ blur(√(σa²+σb²))), so the levels are the same, but the
+        // increments are √(k²−1) ≈ 0.77× the absolute sigmas and the kernel radius is
+        // 3σ — which cuts the octave from ~124 taps to ~82 (~71 for octaves 1+).
+        //
+        // The octave base already carries σ0: octave 0's is the σ0-blurred input, and
+        // octaves 1+ inherit it from `gauss[scales_per_octave]` (σ = σ0·k³ = 2σ0)
+        // halved by `downsample`. So level 0 IS the base — do not blur it again.
         let mut gauss: Vec<Vec<f32>> = Vec::with_capacity(num_gauss);
-        for i in 0..num_gauss {
-            let sigma = sigma0 * k.powi(i as i32);
-            gauss.push(blur(&cur, w, h, sigma));
+        gauss.push(if octave == 0 { blur(&cur, w, h, sigma0) } else { cur.clone() });
+        for i in 1..num_gauss {
+            let sigma_prev = sigma0 * k.powi(i as i32 - 1);
+            let increment  = sigma_prev * (k * k - 1.0).sqrt();
+            let prev = &gauss[i - 1];
+            gauss.push(blur(prev, w, h, increment));
         }
 
         // Difference of Gaussians.
@@ -605,6 +721,206 @@ mod tests {
                 assert!(d >= 0.0 && d <= 1.0001, "descriptor value out of range: {}", d);
             }
         }
+    }
+
+    /// The pre-optimisation blur: naive, fully clamped, no border/interior split.
+    /// Kept as the reference `blur` must reproduce.
+    fn blur_naive(src: &[f32], w: usize, h: usize, sigma: f32) -> Vec<f32> {
+        let k = gaussian_kernel(sigma);
+        let radius = (k.len() / 2) as i32;
+        let mut tmp = vec![0f32; w * h];
+        for y in 0..h {
+            for x in 0..w {
+                let mut acc = 0.0f32;
+                for (ki, &kv) in k.iter().enumerate() {
+                    let sx = clampi(x as i32 + ki as i32 - radius, 0, w as i32 - 1) as usize;
+                    acc += src[y * w + sx] * kv;
+                }
+                tmp[y * w + x] = acc;
+            }
+        }
+        let mut out = vec![0f32; w * h];
+        for y in 0..h {
+            for x in 0..w {
+                let mut acc = 0.0f32;
+                for (ki, &kv) in k.iter().enumerate() {
+                    let sy = clampi(y as i32 + ki as i32 - radius, 0, h as i32 - 1) as usize;
+                    acc += tmp[sy * w + x] * kv;
+                }
+                out[y * w + x] = acc;
+            }
+        }
+        out
+    }
+
+    fn ramp_image(w: usize, h: usize) -> Vec<f32> {
+        (0..w * h)
+            .map(|i| {
+                let (x, y) = ((i % w) as f32, (i / w) as f32);
+                (x * 0.7).sin() * (y * 0.3).cos() + x * 0.01
+            })
+            .collect()
+    }
+
+    /// The border/interior split and the row-accumulator vertical pass must be exactly
+    /// the old naive blur. Sizes deliberately straddle the SIMD tail and the
+    /// `w < 2·radius+1` no-interior case.
+    #[test]
+    fn blur_matches_naive_reference() {
+        for &(w, h) in &[(37usize, 23usize), (64, 64), (9, 40), (5, 5)] {
+            let src = ramp_image(w, h);
+            for &sigma in &[0.8f32, 1.6, 3.2] {
+                let got  = blur(&src, w, h, sigma);
+                let want = blur_naive(&src, w, h, sigma);
+                for i in 0..w * h {
+                    assert!(
+                        (got[i] - want[i]).abs() < 1e-4,
+                        "blur mismatch at {i} ({w}×{h}, σ={sigma}): {} vs {}",
+                        got[i], want[i]
+                    );
+                }
+            }
+        }
+    }
+
+    /// Gaussians compose in quadrature — the identity the incremental scale-space
+    /// relies on. Blurring by σ0 then the increment must equal one blur by σ0·k.
+    #[test]
+    fn incremental_blur_composes_in_quadrature() {
+        let (w, h) = (48usize, 48usize);
+        // Deliberately smooth/low-frequency: the quadrature identity is exact for a
+        // true Gaussian, so any gap here is 3σ-kernel truncation. A high-frequency
+        // image would measure that truncation instead of the identity under test.
+        let src: Vec<f32> = (0..w * h)
+            .map(|i| {
+                let (x, y) = ((i % w) as f32, (i / w) as f32);
+                let (dx, dy) = (x - 24.0, y - 24.0);
+                (-(dx * dx + dy * dy) / (2.0 * 9.0 * 9.0)).exp()
+            })
+            .collect();
+        let sigma0 = 1.6f32;
+        let k = 2f32.powf(1.0 / 3.0);
+
+        let increment = sigma0 * (k * k - 1.0).sqrt();
+        let staged = blur(&blur(&src, w, h, sigma0), w, h, increment);
+        let direct = blur(&src, w, h, sigma0 * k);
+
+        // Interior only: clamp-to-edge borders are not quadrature-exact.
+        let m = 12;
+        for y in m..h - m {
+            for x in m..w - m {
+                let i = y * w + x;
+                assert!(
+                    (staged[i] - direct[i]).abs() < 2e-3,
+                    "staged vs direct blur diverge at ({x},{y}): {} vs {}",
+                    staged[i], direct[i]
+                );
+            }
+        }
+    }
+
+    /// Not a correctness test — a stopwatch for the two blur optimisations.
+    /// `cargo test --release -- --ignored --nocapture bench`
+    #[test]
+    #[ignore]
+    fn bench_pyramid() {
+        use std::time::Instant;
+
+        let (w, h) = (2048usize, 2048usize);
+        let src = ramp_image(w, h);
+        let sigma0 = 1.6f32;
+        let k = 2f32.powf(1.0 / 3.0);
+        let num_gauss = 6;
+
+        // Old: every level re-blurred from the octave base with its full absolute σ.
+        let abs_sigmas: Vec<f32> = (0..num_gauss).map(|i| sigma0 * k.powi(i)).collect();
+        // New: level 0 is the base; each later level adds only the increment.
+        let inc_sigmas: Vec<f32> = (1..num_gauss)
+            .map(|i| sigma0 * k.powi(i - 1) * (k * k - 1.0).sqrt())
+            .collect();
+
+        let taps = |ss: &[f32]| -> usize {
+            ss.iter().map(|&s| gaussian_kernel(s).len()).sum()
+        };
+        println!("\n  taps/octave: old {} → new {} (+{} for octave 0's base σ0)",
+                 taps(&abs_sigmas), taps(&inc_sigmas), gaussian_kernel(sigma0).len());
+
+        let t = Instant::now();
+        for &s in &abs_sigmas { std::hint::black_box(blur_naive(&src, w, h, s)); }
+        let old_ms = t.elapsed().as_secs_f64() * 1e3;
+
+        let t = Instant::now();
+        let mut prev = blur(&src, w, h, sigma0);
+        for &s in &inc_sigmas { prev = blur(&prev, w, h, s); }
+        std::hint::black_box(prev);
+        let new_ms = t.elapsed().as_secs_f64() * 1e3;
+
+        // Isolate the two effects: same σ, old vs new blur = the restructure/SIMD win.
+        let t = Instant::now();
+        std::hint::black_box(blur_naive(&src, w, h, sigma0));
+        let naive_one = t.elapsed().as_secs_f64() * 1e3;
+        let t = Instant::now();
+        std::hint::black_box(blur(&src, w, h, sigma0));
+        let new_one = t.elapsed().as_secs_f64() * 1e3;
+
+        println!("  one blur σ=1.6 @ {w}×{h}: naive {naive_one:.1}ms → new {new_one:.1}ms  ({:.2}×)",
+                 naive_one / new_one);
+        println!("  full octave  @ {w}×{h}: old {old_ms:.1}ms → new {new_ms:.1}ms  ({:.2}×)\n",
+                 old_ms / new_ms);
+    }
+
+    /// Deterministic integer-only test image, byte-identical to the JS twin in
+    /// `scripts/simd-parity.mjs` — the shared input for the wasm-SIMD parity check.
+    /// Integer-only so both languages produce the same bytes exactly; blobs at several
+    /// radii so the digest covers keypoints from every octave, not just fine texture.
+    fn parity_image(w: usize, h: usize) -> Vec<u8> {
+        let mut rgba = vec![0u8; w * h * 4];
+        let blobs: [(usize, usize, usize); 7] = [
+            (20, 18, 3), (48, 30, 5), (95, 22, 8), (130, 60, 12),
+            (35, 80, 6), (75, 95, 4), (120, 100, 9),
+        ];
+        for y in 0..h {
+            for x in 0..w {
+                let i = (y * w + x) * 4;
+                // Mild deterministic texture so flat regions still carry gradient.
+                let mut v = 40 + ((x * 3 + y * 5 + ((x * y) % 17) * 2) % 24);
+                for &(cx, cy, r) in &blobs {
+                    let dx = x as i64 - cx as i64;
+                    let dy = y as i64 - cy as i64;
+                    if dx * dx + dy * dy < (r * r) as i64 {
+                        v += 170;
+                    }
+                }
+                let v = v.min(255) as u8;
+                rgba[i] = v;
+                rgba[i + 1] = ((v as usize * 3 + x) % 256) as u8;
+                rgba[i + 2] = ((v as usize * 5 + y) % 256) as u8;
+                rgba[i + 3] = 255;
+            }
+        }
+        rgba
+    }
+
+    /// Prints a digest of `detect_sift` on a fixed input. The scalar-fallback half of
+    /// the SIMD parity check: the wasm build must reproduce these numbers.
+    /// `cargo test --release -- --ignored --nocapture parity_digest`
+    #[test]
+    #[ignore]
+    fn parity_digest() {
+        // Not a multiple of 4: exercises the f32x4 tail and the border/interior split.
+        let (w, h) = (157usize, 113usize);
+        let out = detect_sift(&parity_image(w, h), w, h, 0.02, 1000);
+        let kept = (out.len() - 2) / STRIDE;
+        let sx: f64 = out[..out.len() - 2].chunks(STRIDE).map(|c| c[0] as f64).sum();
+        let sy: f64 = out[..out.len() - 2].chunks(STRIDE).map(|c| c[1] as f64).sum();
+        let sd: f64 = out[..out.len() - 2]
+            .chunks(STRIDE)
+            .map(|c| c[5..].iter().map(|&v| v as f64).sum::<f64>())
+            .sum();
+        println!(
+            "\n  DIGEST kept={kept} raw={} sup={} sumX={sx:.4} sumY={sy:.4} sumDesc={sd:.4}\n",
+            out[out.len() - 2], out[out.len() - 1]
+        );
     }
 
     #[test]

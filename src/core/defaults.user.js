@@ -53,11 +53,22 @@ export const DETECT_PRESET_META = [
 // user) live in tuning.js ▸ MATCH_TUNING.
 export const MATCH_DEFAULTS = {
   ratioThreshold: 0.75,        // Lowe ratio test
-  crossCheck: false,           // mutual-nearest-neighbour cross-check (brute-force)
+  // Mutual-nearest-neighbour cross-check. ON by default (COLMAP parity): without it a
+  // brute-force pass is one-directional, so many A keypoints may claim the SAME B
+  // keypoint. Those many-to-one putatives (a) inflate the raw count and depress every
+  // pair's inlier ratio, and (b) let F-RANSAC fit a degenerate model through a pencil of
+  // epipolar lines — the signature the `inlierSpread` gate then rejects as "positional
+  // collapse" (always A-side-full / B-side-collapsed, never the reverse: see the
+  // 2026-07-17 building baseline). Cross-check removes the cause rather than the symptom.
+  crossCheck: true,
   minMatches: 15,              // min surviving matches to keep a pair
   geometricVerification: true, // run F-RANSAC verification
   ransacThreshPx: 2.0,         // F-RANSAC inlier threshold (px)
-  minInlierRatio: 0.25,        // reject pairs whose inlier fraction is below this
+  // Reject pairs whose inlier fraction is below this. COLMAP has no ratio gate at all
+  // (only min_num_inliers=15) and verifies ~3× more pairs on the building set — that tail
+  // of 15–40-inlier pairs is what carries its 3.6 mean track length vs our 2.6. 0.15 keeps
+  // a guard against the ~0.06 spurious fits while re-admitting the tail.
+  minInlierRatio: 0.15,
   maxIters: 1000,              // F-RANSAC iterations
   maxNeighbors: 10,            // preselect: k-nearest cameras to consider per image
   lgMaxKeypoints: 2048,        // per-image cap fed to LightGlue (plain path)
@@ -71,9 +82,9 @@ export const MATCH_DEFAULTS = {
 // the defaults; medium ≡ defaults). Strategy/matcher are separate primary choices, not
 // preset-controlled. ratioThreshold is inert on the LightGlue path (no ratio test there).
 export const MATCH_PRESETS = {
-  low:    { ratioThreshold: 0.80, minInlierRatio: 0.20 },
+  low:    { ratioThreshold: 0.80, minInlierRatio: 0.10 },
   medium: {},
-  high:   { ratioThreshold: 0.70, minInlierRatio: 0.35, maxIters: 2000 },
+  high:   { ratioThreshold: 0.70, minInlierRatio: 0.25, maxIters: 2000 },
 }
 export const MATCH_PRESET_META = [
   { id: 'low',    label: 'Lenient',  blurb: 'More matches, looser verification' },
@@ -124,6 +135,15 @@ export const DEPTHMAP_DEFAULTS = {
   bestK: null,         // advanced override; null ⇒ auto per image
   speckleFilter: true, // median/speckle cleanup on each depth map
   filterRelTol: 10,    // speckle relative tolerance, % (÷100 on run)
+  // ── Cross-view geometric consistency (COLMAP's filter pass; mvs.js
+  // filterDepthMapsGeometric). Runs once after all maps exist and zeroes rejected
+  // pixels in the maps themselves, so the orthophoto (which reuses them as a
+  // z-buffer) is cleaned too. This is the filter that removes sky/vegetation
+  // freckles — the photometric gates below cannot: a bush has genuinely high NCC.
+  geomConsistency: true, // enable the cross-view check
+  maxGeomCost: 1.0,      // max forward–backward reprojection error (px) to call a view consistent
+  minConsistent: 2,      // min consistent views to keep a pixel
+  minNcc: 0.1,           // absolute per-pixel ZNCC floor (drops cost > 1 − minNcc)
 }
 // Depth-map quality cards. Unlike the other presets these are NOT deltas — `quality` is
 // itself a first-class setting the store resolves to a working resolution; the cards are
@@ -220,4 +240,32 @@ export const FOOTPRINT_DEFAULTS = {
   agl: 1000,          // above-ground-level height (when useAgl)
   assumeNadir: true,  // treat cameras as looking straight down when angles are missing
   overwrite: true,    // replace existing footprints
+}
+
+// Automatic fiducial measurement on film scans (core/sfm/fiducialDetect.js,
+// driven by useImagesStore.autoDetectFiducials). Mirrored by
+// FiducialDetectModal.vue. The algorithm's own knobs (template size, coarse
+// scale, refine window) are NOT here — they are co-located with the algorithm as
+// FIDUCIAL_DETECT_TUNING, per the self-contained-module exception.
+export const FIDUCIAL_DETECT_DEFAULTS = {
+  mode: 'automatic',     // generated family prototypes; no marked reference scan
+  family: 'generic',     // generic | right-angle | cut-45 | frame
+  rotationK: 0,          // clockwise quarter-turns relative to certificate layout
+  bootstrapMinScore: 0.28,
+  searchRadiusPct: 4,   // search window half-size, % of max(image w, h)
+  minScore: 0.7,        // absolute ZNCC floor
+  maxRmsUm: 30,         // affine-fit RMS gate (µm) — matches manual-marking quality
+  overwrite: false,     // replace existing (manual) observations
+  tryRotations: true,   // probe for a 90° scan rotation before searching
+}
+
+// Anonymous structural detection. Calibration has a separate modal/defaults.
+export const FIDUCIAL_SPOT_DEFAULTS = {
+  family: 'generic',
+  positions: 'corners',
+  polarity: 'auto',
+  tolerance: 0.5,
+  overwrite: false,
+  generateMasks: false,
+  maskDarkPixels: false,
 }

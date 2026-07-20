@@ -24,6 +24,12 @@ export function useTabs(imageById, showMap) {
 
   const activeTab = computed(() => tabs.value.find((t) => t.id === activeTabId.value) || null)
 
+  // Which tabs are open, by id — so a sidebar "Open in tab" action can say
+  // "Switch to tab" instead when the target is already there. Tab ids are built
+  // by the open* helpers below (`img:<uuid>`, `raster:<id>`, `product:<kind>`…),
+  // so a caller asks with the same key it would open with.
+  const openTabIds = computed(() => new Set(tabs.value.map((t) => t.id)))
+
   const activeImageTab = computed(() => {
     const tab = activeTab.value
     return tab?.type === 'image' ? imageById(tab.imageId) : null
@@ -110,6 +116,31 @@ export function useTabs(imageById, showMap) {
     activeTabId.value = tabId
   }
 
+  // An imported reference raster opens in its own tab, exactly like an image or a
+  // computed product — same viewer component, different descriptor source.
+  function openRasterTab(id, title) {
+    const tabId = `raster:${id}`
+    const existing = tabs.value.find((t) => t.id === tabId)
+    if (existing) { if (title) existing.title = title }
+    else {
+      tabs.value.push({
+        id: tabId,
+        type: 'raster',
+        rasterId: id,
+        title: title || 'Raster',
+        closable: true,
+      })
+    }
+    activeTabId.value = tabId
+  }
+
+  // Removing a raster must close its tab, or the tab renders an empty viewer
+  // forever (cf. removeGcpAndCloseTab).
+  function closeTabForRaster(id) {
+    const tabId = `raster:${id}`
+    if (tabs.value.some((t) => t.id === tabId)) closeTab(tabId)
+  }
+
   function closeTab(id) {
     const idx = tabs.value.findIndex((t) => t.id === id)
     if (idx === -1 || !tabs.value[idx].closable) return
@@ -185,12 +216,15 @@ export function useTabs(imageById, showMap) {
     activeTab,
     activeImageTab,
     activeView,
+    openTabIds,
     activateTab,
     openImageTab,
     openMatchTab,
     openGcpTab,
     openMetadataTab,
     openProductTab,
+    openRasterTab,
+    closeTabForRaster,
     closeTab,
     closeTabForImage,
     moveTab,

@@ -1,14 +1,16 @@
 <script setup>
-import { ref } from 'vue'
+import { computed, ref, watch } from 'vue'
+import { useProjectsStore } from '../../stores/useProjectsStore.js'
 import ImagesSection from './sidebar/ImagesSection.vue'
 import SensorsSection from './sidebar/SensorsSection.vue'
 import MatchesSection from './sidebar/MatchesSection.vue'
 import GcpsSection from './sidebar/GcpsSection.vue'
 import FootprintsSection from './sidebar/FootprintsSection.vue'
-import CloudsSection from './sidebar/CloudsSection.vue'
+import ReconstructionSection from './sidebar/ReconstructionSection.vue'
 import ProductsSection from './sidebar/ProductsSection.vue'
+import ReferenceSection from './sidebar/ReferenceSection.vue'
 
-defineProps({
+const props = defineProps({
   images:     { type: Array,  required: true },
   gcps:       { type: Array,  default: () => [] },
   gcpReport:  { type: Array,  default: () => [] },
@@ -25,6 +27,10 @@ defineProps({
   // Raster products (recomputable): DEM / orthophoto, or null when not built.
   dem:        { type: Object, default: null },
   ortho:      { type: Object, default: null },
+  // Imported georeferenced rasters (useExternalStore) — metadata only, planes lazy.
+  rasters:    { type: Array,  default: () => [] },
+  // Transient rows created as soon as a reference GeoTIFF starts parsing.
+  pendingRasters: { type: Array, default: () => [] },
   reconStatus: { type: String, default: 'idle' }, // 'idle'|'running'|'done'|'error'
   // Pairwise-match summary: { total, verified, running, error }
   matchStats: { type: Object, default: () => ({ total: 0, verified: 0, running: 0, error: 0 }) },
@@ -38,17 +44,31 @@ defineProps({
   // set" means unaligned (vs. reconstruction simply not having run yet).
   alignedUuids: { type: Object, default: () => new Set() },
   hasSparse:    { type: Boolean, default: false },
+  // Ids of the tabs currently open (useTabs.openTabIds), so an "Open in tab"
+  // action can read "Switch to tab" when its target is already open.
+  openTabIds:   { type: Object, default: () => new Set() },
 })
 
 const emit = defineEmits([
-  'add-images', 'import-file', 'remove-image', 'remove-gcp', 'select-gcp',
+  'add-images', 'import-file', 'remove-image', 'convert-image-to-raster', 'remove-gcp', 'select-gcp',
   'jump-to-image', 'remove-gcp-observation', 'open-gcp',
   'remove-sensor', 'merge-sensors', 'open-sensor', 'assign-sensor', 'remove-pose',
   'remove-footprint',
   'select', 'open', 'show-info', 'delete-keypoints', 'zoom-to-image',
   'select-cloud', 'remove-cloud', 'rename-cloud', 'set-main-cloud', 'reconstruct',
   'open-matches', 'open-product', 'zoom-to-cloud',
+  'open-raster', 'remove-raster', 'set-raster-kind', 'style-raster',
+  'set-raster-on-map', 'set-raster-opacity', 'convert-raster-to-image',
 ])
+
+// The provenance+role split behind the three cloud sections. Sparse is the model
+// (Reconstruction) regardless of whether it was computed or COLMAP-imported;
+// everything else divides on the already-persisted `imported` flag — computed
+// outputs the pipeline may replace (Products) vs. evidence it must never touch
+// (Reference Data). Filtering here keeps the sections dumb.
+const sparseClouds    = computed(() => props.clouds.filter((c) => c.kind === 'sparse'))
+const productClouds   = computed(() => props.clouds.filter((c) => c.kind !== 'sparse' && !c.imported))
+const referenceClouds = computed(() => props.clouds.filter((c) => c.kind !== 'sparse' && c.imported))
 
 // Whole-sidebar drag-and-drop (counter avoids false dragleave on children)
 const isDragging = ref(false)
@@ -79,11 +99,28 @@ function onDrop(e) {
 
 // Collapsible section open/close state (kept here; sections receive it as a prop
 // and emit `toggle`). Each section owns its own row rendering + context menu.
-const open = ref({ images: true, gcps: true, footprints: true, sensors: false, matches: true, clouds: true, products: true })
+// Sections start collapsed on load and re-collapse whenever a project is
+// created/opened, so a new project always presents the same tidy sidebar.
+function allClosed() {
+  return {
+    images: false, gcps: false, footprints: false, sensors: false, matches: false,
+    reconstruction: false, products: false, reference: false,
+  }
+}
+
+const open = ref(allClosed())
 
 function toggle(key) {
   open.value[key] = !open.value[key]
 }
+
+// The sidebar stays mounted across project switches, so the initial value alone
+// wouldn't reset it.
+const projects = useProjectsStore()
+watch(() => projects.currentProjectId, () => { open.value = allClosed() })
+watch(() => props.pendingRasters.length, (count, previous) => {
+  if (count > previous) open.value.reference = true
+})
 </script>
 
 <template>
@@ -106,6 +143,7 @@ function toggle(key) {
       :selected-id="selectedId"
       :aligned-uuids="alignedUuids"
       :has-sparse="hasSparse"
+      :open-tab-ids="openTabIds"
       @toggle="toggle('images')"
       @select="emit('select', $event)"
       @open="emit('open', $event)"
@@ -113,6 +151,7 @@ function toggle(key) {
       @zoom-to-image="emit('zoom-to-image', $event)"
       @delete-keypoints="emit('delete-keypoints', $event)"
       @remove-image="emit('remove-image', $event)"
+      @convert-to-raster="emit('convert-image-to-raster', $event)"
     />
 
     <SensorsSection
@@ -156,13 +195,13 @@ function toggle(key) {
       @jump-to-image="emit('jump-to-image', $event)"
     />
 
-    <CloudsSection
-      :open="open.clouds"
-      :clouds="clouds"
+    <ReconstructionSection
+      :open="open.reconstruction"
+      :clouds="sparseClouds"
       :selected-cloud-id="selectedCloudId"
       :main-sparse-id="mainSparseId"
       :recon-status="reconStatus"
-      @toggle="toggle('clouds')"
+      @toggle="toggle('reconstruction')"
       @select-cloud="emit('select-cloud', $event)"
       @remove-cloud="emit('remove-cloud', $event)"
       @rename-cloud="emit('rename-cloud', $event)"
@@ -173,10 +212,41 @@ function toggle(key) {
 
     <ProductsSection
       :open="open.products"
+      :clouds="productClouds"
+      :selected-cloud-id="selectedCloudId"
       :dem="dem"
       :ortho="ortho"
+      :open-tab-ids="openTabIds"
       @toggle="toggle('products')"
       @open-product="emit('open-product', $event)"
+      @select-cloud="emit('select-cloud', $event)"
+      @remove-cloud="emit('remove-cloud', $event)"
+      @rename-cloud="emit('rename-cloud', $event)"
+      @zoom-to-cloud="emit('zoom-to-cloud', $event)"
+    />
+
+    <!-- Only shown once something imported exists — an always-empty section is
+         noise in a sidebar this dense. -->
+    <ReferenceSection
+      v-if="referenceClouds.length || rasters.length || pendingRasters.length"
+      :open="open.reference"
+      :clouds="referenceClouds"
+      :selected-cloud-id="selectedCloudId"
+      :rasters="rasters"
+      :pending-rasters="pendingRasters"
+      :open-tab-ids="openTabIds"
+      @toggle="toggle('reference')"
+      @select-cloud="emit('select-cloud', $event)"
+      @remove-cloud="emit('remove-cloud', $event)"
+      @rename-cloud="emit('rename-cloud', $event)"
+      @zoom-to-cloud="emit('zoom-to-cloud', $event)"
+      @open-raster="emit('open-raster', $event)"
+      @remove-raster="emit('remove-raster', $event)"
+      @set-raster-kind="emit('set-raster-kind', $event)"
+      @style-raster="emit('style-raster', $event)"
+      @set-raster-on-map="emit('set-raster-on-map', $event)"
+      @set-raster-opacity="emit('set-raster-opacity', $event)"
+      @convert-to-image="emit('convert-raster-to-image', $event)"
     />
   </aside>
 </template>

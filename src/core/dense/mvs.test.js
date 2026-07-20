@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   filterDepthMap, depthMapForImage, qualityToMaxDim, autoBestK, autoFusionMaxCost,
-  fuseDepthMaps, mergePointsSpatial, createVoxelAccumulator,
+  fuseDepthMaps, mergePointsSpatial, createVoxelAccumulator, filterDepthMapsGeometric,
 } from './mvs.js'
 
 // Build a w×h Float32Array depth plane from a 2-D array of numbers (0 = hole).
@@ -330,6 +330,83 @@ describe('createVoxelAccumulator (streaming fusion merge)', () => {
     expect(nrm.length).toBe(8 * 3)    // row-aligned with flat
     // The surviving points are all in the block (none near the lone cell's 50,50,50).
     for (let s = 0; s < 8; s++) expect(flat[s * 6]).toBeLessThan(10)
+  })
+})
+
+describe('filterDepthMapsGeometric (cross-view consistency)', () => {
+  // Two cameras offset along x by 0.1, both viewing a fronto-parallel plane at depth 1.
+  // The reprojection is an exact 10 px shift (fx·b/D = 100·0.1/1), so a pixel on the
+  // true surface round-trips back to itself with 0 error and only the filter decides.
+  const W = 32, H = 32
+  const mkPlane = (uuid, tx) => ({
+    uuid, width: W, height: H,
+    K: { fx: 100, fy: 100, cx: 16, cy: 16 }, R: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], t: [tx, 0, 0],
+    depth: new Float32Array(W * H).fill(1),
+    cost: new Float32Array(W * H).fill(0.1),
+    rgb: new Uint8Array(W * H * 3).fill(120),
+  })
+  const at = (u, v) => v * W + u
+  const CENTER = at(16, 16)
+
+  it('keeps a pixel both views independently agree on', () => {
+    const maps = [mkPlane('a', 0), mkPlane('b', -0.1)]
+    const s = filterDepthMapsGeometric(maps, { minConsistent: 1 }, () => {})
+    expect(maps[0].depth[CENTER]).toBeGreaterThan(0)
+    expect(s.kept).toBeGreaterThan(0)
+    expect(s.inconsistent).toBeLessThan(s.considered)
+  })
+
+  it('drops a flying pixel no other view supports', () => {
+    const maps = [mkPlane('a', 0), mkPlane('b', -0.1)]
+    maps[0].depth[CENTER] = 2 // a flyer at 2× the true depth, low cost (looks confident)
+    filterDepthMapsGeometric(maps, { minConsistent: 1 }, () => {})
+    // The round trip through b's own depth lands ~5 px away ⇒ b does not vouch for it.
+    expect(maps[0].depth[CENTER]).toBe(0)
+    // …and its neighbours, which are on the true surface, are untouched.
+    expect(maps[0].depth[at(10, 16)]).toBeGreaterThan(0)
+  })
+
+  it('applies the absolute NCC floor regardless of cross-view agreement', () => {
+    const maps = [mkPlane('a', 0), mkPlane('b', -0.1)]
+    maps[0].cost[CENTER] = 0.95 // ncc 0.05 < 0.1 floor — geometrically fine, photometrically junk
+    const s = filterDepthMapsGeometric(maps, { minConsistent: 1, minNcc: 0.1 }, () => {})
+    expect(maps[0].depth[CENTER]).toBe(0)
+    expect(s.lowNcc).toBe(1)
+  })
+
+  it('skips the cross-view check for a single map rather than rejecting everything', () => {
+    const maps = [mkPlane('a', 0)]
+    const s = filterDepthMapsGeometric(maps, { minConsistent: 2 }, () => {})
+    // No other view exists — "no evidence" must not read as "inconsistent".
+    expect(s.inconsistent).toBe(0)
+    expect(maps[0].depth[CENTER]).toBeGreaterThan(0)
+  })
+
+  it('judges every map against the unfiltered planes (no order-dependent cascade)', () => {
+    // Regression: filtering in place would let map A's rejections remove the evidence
+    // map B is judged against, cascading drops in map order. Here A is entirely
+    // rejected by the NCC floor; B's geometry is sound and must survive on A's
+    // *original* depths — exactly as COLMAP filters against the pass-1 maps.
+    const maps = [mkPlane('a', 0), mkPlane('b', -0.1)]
+    maps[0].cost.fill(0.95) // every pixel of A fails the NCC floor
+    filterDepthMapsGeometric(maps, { minConsistent: 1, minNcc: 0.1 }, () => {})
+    expect(maps[0].depth[CENTER]).toBe(0)        // A dropped on NCC
+    expect(maps[1].depth[CENTER]).toBeGreaterThan(0) // B still vouched for by A's real surface
+
+    // And the verdict must not depend on which map is listed first.
+    const rev = [mkPlane('b', -0.1), mkPlane('a', 0)]
+    rev[1].cost.fill(0.95)
+    filterDepthMapsGeometric(rev, { minConsistent: 1, minNcc: 0.1 }, () => {})
+    expect(rev[0].depth[CENTER]).toBeGreaterThan(0)
+    expect(rev[1].depth[CENTER]).toBe(0)
+  })
+
+  it('is disabled by minConsistent 0 (NCC floor only)', () => {
+    const maps = [mkPlane('a', 0), mkPlane('b', -0.1)]
+    maps[0].depth[CENTER] = 2 // a flyer that the cross-view check would drop
+    const s = filterDepthMapsGeometric(maps, { minConsistent: 0 }, () => {})
+    expect(maps[0].depth[CENTER]).toBe(2)
+    expect(s.inconsistent).toBe(0)
   })
 })
 

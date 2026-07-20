@@ -52,9 +52,10 @@ export function isKnownAerialFilmWidth(mm) {
 // Resolve K intrinsics (pixels) for one image, preferring the (user-editable)
 // assigned sensor over raw EXIF. Order of reliability:
 //   1. sensor focal already in pixels        (table value — authoritative)
-//   2. sensor focal (mm) ÷ pixel size         (table value)
-//   3. sensor focal (mm) × imageWidth ÷ sensor/film width (mm) (table value —
+//   2. sensor focal (mm) × imageWidth ÷ sensor/film width (mm) (table value —
 //      the natural film-camera input: focal + format from a calibration sheet)
+//   3. sensor focal (mm) ÷ pixel size         (table value — a scan pitch is more
+//      often wrong than a declared format, so it ranks below it; see path 2)
 //   4. EXIF 35mm-equivalent focal
 //   5. focal (mm, from sensor or EXIF) × imageWidth ÷ derivable sensor width
 //   6. default-FOV guess (fx = max(w,h)) — poor; registration may fail
@@ -82,7 +83,20 @@ export function resolveK(meta, sensor = null) {
     return { fx: sensor.focal, fy: sensor.focal, cx, cy, source: 'sensor table (focal in px)' }
   }
 
-  // 2. Sensor focal in mm + a pixel size → fx = focal / pixelSize.
+  // 2. Sensor focal in mm + film/sensor width in mm → fx = focal/widthMm × w.
+  //    The standard scanned-aerial-film input: focal length and format size from the
+  //    camera calibration certificate, no pixel size needed. This is checked BEFORE the
+  //    pixel-size path because a declared format is measured ground truth, whereas a
+  //    scan pitch is usually inferred from the scanner setting and is the value that
+  //    goes wrong (the CA…V set's 0.025mm/px implies a 253mm frame — no such film
+  //    exists — for a ~9% focal error). When both are present the certificate wins, and
+  //    the pitch is then only a cross-check.
+  if (sensorFocalMm != null && sensor.sensorWidthMm) {
+    const fx = (sensorFocalMm / sensor.sensorWidthMm) * w
+    return { fx, fy: fx, cx, cy, source: `sensor table (${sensorFocalMm}mm, ${sensor.sensorWidthMm}mm format)` }
+  }
+
+  // 3. Sensor focal in mm + a pixel size → fx = focal / pixelSize.
   if (sensorFocalMm != null && sensor.pixelSize) {
     const fx = sensorFocalMm / sensor.pixelSize
     // Sanity check: widthPx × pitch is the physical film width the scan implies.
@@ -95,14 +109,6 @@ export function resolveK(meta, sensor = null) {
       impliedFilmWidthMm,
       filmWidthOk: isKnownAerialFilmWidth(impliedFilmWidthMm),
     }
-  }
-
-  // 3. Sensor focal in mm + film/sensor width in mm → fx = focal/widthMm × w.
-  //    The standard scanned-aerial-film input: focal length and format size
-  //    from the camera calibration certificate, no pixel size needed.
-  if (sensorFocalMm != null && sensor.sensorWidthMm) {
-    const fx = (sensorFocalMm / sensor.sensorWidthMm) * w
-    return { fx, fy: fx, cx, cy, source: `sensor table (${sensorFocalMm}mm, ${sensor.sensorWidthMm}mm format)` }
   }
 
   // 4. EXIF 35mm-equivalent focal length.

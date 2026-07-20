@@ -84,6 +84,20 @@ describe('resolveK (intrinsics resolution)', () => {
     expect(K.source).toMatch(/format/)
   })
 
+  // WS-C2: a declared format comes off a calibration certificate; a scan pitch is
+  // typically inferred from the scanner setting and is the value that goes wrong (a
+  // 0.025mm/px pitch implies a 253mm frame — no such aerial film exists). So when the
+  // sensor table carries both, the format wins and the pitch is ignored.
+  it('prefers an explicit film format over the scan pixel pitch when both are set', () => {
+    const K = resolveK(meta, {
+      width: 10137, focal: 152, focalUnit: 'mm',
+      sensorWidthMm: 230,
+      pixelSize: 0.025, // implies a bogus 253mm frame
+    })
+    expect(K.fx).toBeCloseTo((152 / 230) * 10137, 3)
+    expect(K.source).toMatch(/format/)
+  })
+
   it('falls back to a default FOV with no calibration', () => {
     const K = resolveK(meta, null)
     expect(K.fx).toBe(10137) // max(w, h)

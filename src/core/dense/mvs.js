@@ -14,6 +14,7 @@
 import { computeDepthMap } from '../sfm/reconstruction.js'
 import { planeCostRef, aggregateValidCosts } from './planeCost.js'
 import { DENSE_TUNING } from '../tuning.js'
+import { DEPTHMAP_DEFAULTS } from '../defaults.user.js'
 import {
   cameraCenter, projectWithDepth, triangulationAngle, scaleK, rgbaToGray,
 } from '../sfm/geometry.js'
@@ -46,6 +47,23 @@ export function relativePose(refCam, srcCam) {
 
 // Local alias: dense reprojection wants the in-front-only projector (returns depth).
 const project = projectWithDepth
+
+// Back-project a working pixel (u,v,depth) of map `m` to a world point.
+//   X_cam = ((u−cx)/fx·d, (v−cy)/fy·d, d);  X_world = Rᵀ(X_cam − t)
+// Shared by fuseDepthMaps and filterDepthMapsGeometric — both need the exact same
+// inverse of `project`, and a divergence between them would silently misreport
+// cross-view agreement.
+function unprojectPixel(m, u, v, depth) {
+  const xc = (u - m.K.cx) / m.K.fx * depth
+  const yc = (v - m.K.cy) / m.K.fy * depth
+  const zc = depth
+  const ax = xc - m.t[0], ay = yc - m.t[1], az = zc - m.t[2]
+  return {
+    x: m.R[0][0]*ax + m.R[1][0]*ay + m.R[2][0]*az,
+    y: m.R[0][1]*ax + m.R[1][1]*ay + m.R[2][1]*az,
+    z: m.R[0][2]*ax + m.R[1][2]*ay + m.R[2][2]*az,
+  }
+}
 
 // ── Stage A helpers ──────────────────────────────────────────────────────────
 
@@ -342,6 +360,123 @@ export function filterDepthMap(depth, w, h, opts = {}) {
     }
   }
   return { depth: out, removed, smoothed }
+}
+
+// ── Cross-view geometric consistency (COLMAP's `filter` pass) ────────────────────
+// Stage A is photometric only, and `filterDepthMap` above is a *neighbourhood* test —
+// neither can see that a pixel's depth disagrees with what other views independently
+// believe. That blind spot is what leaves sky and vegetation freckled:
+//
+//   • Vegetation is strongly textured, so its ZNCC is genuinely high. No cost gate can
+//     ever reject a bush — cost is not measuring the thing that's wrong with it.
+//   • Gradient sky / cloud correlates well at *any* depth: high NCC, arbitrary depth.
+//
+// Both fail only on cross-view depth disagreement. This runs COLMAP's forward–backward
+// reprojection test per pixel (patch_match.cc `filter=true`):
+//
+//   P  = unproject(ref, u, v, d)          the reference's claim
+//   p  = project(src, P)                  where the source should see it
+//   P' = unproject(src, p, srcDepth(p))   what the source *actually* has there
+//   e  = ‖project(ref, P') − (u,v)‖       forward–backward reprojection error, px
+//
+// A view counts as consistent when e ≤ maxGeomCost. Requiring `minConsistent` such
+// views kills anything only one view believes in. Note this samples the source's depth
+// at ONE pixel, which is what makes it strict: fuseDepthMaps' own check searches a
+// (2·consistencyPx+1)² window and accepts if *any* pixel there is within tolerance, so
+// a noisy depth cloud (a bush) passes it by chance. That check stays as a cheap second
+// line of defence; this is the one that discriminates.
+//
+// Also applies an absolute per-pixel photometric floor (`minNcc`, COLMAP's
+// filter_min_ncc): distinct from fusion's *adaptive* p70 maxCost, which by construction
+// keeps 70% of pixels no matter how bad the whole distribution is.
+//
+// Runs across all maps at once (needs every view's depth), and zeroes rejected pixels
+// in the maps themselves — so the persisted depth maps, and therefore the orthophoto
+// that reuses them as a z-buffer, get the benefit too, not just the fused cloud.
+//
+// IMPORTANT: evidence is read from the *unfiltered* planes. Rejections are collected
+// into per-map masks and applied only after every map has been tested — filtering map i
+// in place would make map i+1 judge itself against already-thinned evidence, cascading
+// rejections in map order (an order-dependent, irreproducible result).
+//
+// Cost is O(maps² · px) worst case, the same shape as fusion's loop, with an early
+// break once `minConsistent` views agree. Pure: maps are mutated only via the returned
+// planes; no I/O.
+export function filterDepthMapsGeometric(maps, opts = {}, onLog = () => {}, hooks = {}) {
+  const {
+    minNcc = DEPTHMAP_DEFAULTS.minNcc,
+    maxGeomCost = DEPTHMAP_DEFAULTS.maxGeomCost,
+    minConsistent = DEPTHMAP_DEFAULTS.minConsistent,
+  } = opts
+  const { onProgress } = hooks
+
+  // A lone map has no cross-view evidence — the test is meaningless, not "everything
+  // fails". Apply the NCC floor only.
+  const nMaps = maps.length
+  const maxCostGate = 1 - minNcc // ZNCC ncc ≥ minNcc  ⇔  cost ≤ 1 − minNcc
+
+  const masks = maps.map((m) => new Uint8Array(m.width * m.height)) // 1 = drop
+  let considered = 0, lowNcc = 0, inconsistent = 0, kept = 0
+
+  for (let mi = 0; mi < nMaps; mi++) {
+    const m = maps[mi]
+    const { width: w, height: h, depth, cost } = m
+    const mask = masks[mi]
+    onProgress?.(mi, nMaps, m.uuid?.slice(0, 8) ?? '')
+    let mapLowNcc = 0, mapInconsistent = 0
+    for (let v = 0; v < h; v++) {
+      for (let u = 0; u < w; u++) {
+        const idx = v * w + u
+        const d = depth[idx]
+        if (!(d > 0)) continue // already a hole
+        considered++
+        if (cost[idx] > maxCostGate) { mask[idx] = 1; lowNcc++; mapLowNcc++; continue }
+        if (nMaps < 2 || minConsistent <= 0) { kept++; continue }
+
+        const P = unprojectPixel(m, u, v, d)
+        let agree = 0
+        for (let ci = 0; ci < nMaps && agree < minConsistent; ci++) {
+          if (ci === mi) continue
+          const c = maps[ci]
+          const p = project(c, P.x, P.y, P.z)
+          if (!p) continue // behind the source camera
+          const cu = Math.round(p.u), cv = Math.round(p.v)
+          if (cu < 0 || cu >= c.width || cv < 0 || cv >= c.height) continue
+          const od = c.depth[cv * c.width + cu]
+          if (!(od > 0)) continue // source has no depth here — no evidence either way
+          // The source's own surface point at that pixel. If the source is looking at
+          // something else entirely (occluder, or noise), the round trip lands far from
+          // (u,v) and this view simply doesn't vouch for the pixel.
+          const P2 = unprojectPixel(c, cu, cv, od)
+          const q = project(m, P2.x, P2.y, P2.z)
+          if (!q) continue
+          if (Math.hypot(q.u - u, q.v - v) <= maxGeomCost) agree++
+        }
+        if (agree < minConsistent) { mask[idx] = 1; inconsistent++; mapInconsistent++; continue }
+        kept++
+      }
+    }
+    onLog(`Depth filter: ${m.uuid?.slice(0, 8) ?? '?'} — dropped ${mapLowNcc} low-NCC, `
+      + `${mapInconsistent} geometrically inconsistent px`, 'debug', 'Dense')
+  }
+
+  // Apply now that every map has been judged against the original evidence.
+  for (let mi = 0; mi < nMaps; mi++) {
+    const { depth, width, height } = maps[mi]
+    const mask = masks[mi]
+    for (let k = 0; k < width * height; k++) if (mask[k]) depth[k] = 0
+  }
+
+  const pct = (n) => (100 * n / Math.max(1, considered)).toFixed(1)
+  if (nMaps < 2) {
+    onLog(`Depth filter: only ${nMaps} map — cross-view check skipped, NCC floor only`, 'warn', 'Dense')
+  }
+  onLog(`Depth filter: ${considered} px with depth → ${kept} kept (${pct(kept)}%); dropped `
+    + `${lowNcc} NCC<${minNcc} (${pct(lowNcc)}%), `
+    + `${inconsistent} <${minConsistent} consistent views @${maxGeomCost}px (${pct(inconsistent)}%)`,
+    'info', 'Dense')
+
+  return { considered, kept, lowNcc, inconsistent }
 }
 
 // ── Step 3: quality presets + derived params ─────────────────────────────────
@@ -658,19 +793,7 @@ export function fuseDepthMaps(maps, opts = {}, onLog = () => {}, hooks = {}) {
   // Cameras for reprojection consistency checks.
   const cams = maps.map((m) => ({ R: m.R, t: m.t, K: m.K, m }))
 
-  // Back-project a working pixel (u,v,depth) of map m to a world point.
-  const unproject = (m, u, v, depth) => {
-    const xc = (u - m.K.cx) / m.K.fx * depth
-    const yc = (v - m.K.cy) / m.K.fy * depth
-    const zc = depth
-    // X_world = Rᵀ(X_cam − t)
-    const ax = xc - m.t[0], ay = yc - m.t[1], az = zc - m.t[2]
-    return {
-      x: m.R[0][0]*ax + m.R[1][0]*ay + m.R[2][0]*az,
-      y: m.R[0][1]*ax + m.R[1][1]*ay + m.R[2][1]*az,
-      z: m.R[0][2]*ax + m.R[1][2]*ay + m.R[2][2]*az,
-    }
-  }
+  const unproject = unprojectPixel
 
   // Scene bounds from a coarse valid-depth grid (fuseBboxStride-th row/col of each
   // map) — enough to size the voxel-key packing without a full unprojection pass.

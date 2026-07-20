@@ -1,8 +1,10 @@
 import {
-  selectSourceViews, scaleK, rgbaToGray, depthMapForImage, fuseDepthMaps, filterDepthMap, autoBestK,
+  selectSourceViews, scaleK, rgbaToGray, depthMapForImage, fuseDepthMaps, filterDepthMap,
+  filterDepthMapsGeometric, autoBestK,
 } from '../../core/dense/mvs.js'
 import { buildMaskLookup } from '../../core/mask.js'
 import { distortPixel, hasDistortion } from '../../core/sfm/distortion.js'
+import { distortComposed } from '../../core/sfm/displayFrame.js'
 import { canonicalToScan } from '../../core/sfm/fiducials.js'
 import { depthColor } from '../../core/products/colormap.js'
 import { isGpuAvailable, ensureDevice } from '../gpu/device.js'
@@ -39,16 +41,11 @@ export function makeDenseOps({ rasterize }) {
 
   // Composed forward distortion map (WS2): an ideal pinhole pixel → the pixel the raw
   // raster recorded. Self-cal was removed AFTER the calibrated bag at ingest
-  // (kp_raw = distort_cal(distort_self(kp_ideal))), so apply `selfCal` first, then
+  // (kp_raw = distort_cal(distort_self(kp_ideal))), so `selfCal` applies first, then
   // `dist`, about the same working K. The common EXIF-only case has dist = null and
   // only a self-cal bag; a fully-calibrated sensor has selfCal = null. Either bag empty
-  // ⇒ that stage is a no-op.
-  function distortComposed(u, v, Kw, dist, selfCal) {
-    let x = u, y = v
-    if (hasDistortion(selfCal)) { const p = distortPixel(x, y, Kw, selfCal); x = p.x; y = p.y }
-    if (hasDistortion(dist))    { const p = distortPixel(x, y, Kw, dist);    x = p.x; y = p.y }
-    return { x, y }
-  }
+  // ⇒ that stage is a no-op. Shared with the image view's residual overlay, which has
+  // to undo the same folds to draw a computed pixel on the raw image.
 
   // Remove lens distortion from a working-resolution raster: for each output (ideal
   // pinhole) pixel, sample the source at the distorted pixel the lens recorded there
@@ -98,7 +95,7 @@ export function makeDenseOps({ rasterize }) {
   function canonWorkingToScan(u, v, cScale, canonK, dist, fid, scanScale, selfCal) {
     const cx = u / cScale, cy = v / cScale                       // full-res canonical px
     const d = distortComposed(cx, cy, canonK, dist, selfCal)     // remove self-cal + calibrated
-    const s = canonicalToScan(d.x, d.y, fid.A, fid.frame)        // scan full-res px
+    const s = canonicalToScan(d.x, d.y, fid.transform ?? fid.A, fid.frame) // scan full-res px
     return { x: s.x * scanScale, y: s.y * scanScale }            // scan working px
   }
 
@@ -191,6 +188,7 @@ export function makeDenseOps({ rasterize }) {
     const {
       maxDim = 800, maxSources: maxSourcesReq = 6, minAngleDeg = 3, window = 3, iterations = 3, bestK = null,
       speckleFilter = true, filterRadius = 1, filterRelTol = 0.1, coarseLong = 600,
+      geomConsistency = true, maxGeomCost, minConsistent, minNcc,
     } = settings
     // The GPU kernel packs sources into a fixed MAX_SRC=16 array and silently drops
     // any beyond that (depthMapGpu.js), while the WASM path + the first-image A/B
@@ -448,9 +446,26 @@ export function makeDenseOps({ rasterize }) {
       releaseAfter(i) // evict rasters this image was the last consumer of
     }
 
-    emit('progress', [images.length, images.length, 'Done'])
     emit('log', [`Depth maps: ${maps.length}/${images.length} computed in ${((performance.now() - t0) / 1000).toFixed(1)}s; `
       + `raster cache peak ${formatBytes(ledger.peak())}`, 'success', 'Dense'])
+
+    // Cross-view geometric consistency — the only filter that sees sky/vegetation for
+    // what it is (both have high NCC; only their cross-view *disagreement* gives them
+    // away). Runs here, after the loop, because it needs every map's depth at once; it
+    // zeroes rejected pixels in `maps`, so what we persist and hand to the ortho is the
+    // filtered plane. The display PNGs above were rendered pre-filter and are only a
+    // preview, so they intentionally still show the raw plane.
+    if (geomConsistency && maps.length) {
+      emit('progress', [0, maps.length, 'Filtering depth maps…'])
+      const tFilt = performance.now()
+      filterDepthMapsGeometric(maps, { maxGeomCost, minConsistent, minNcc },
+        (m, l, c) => emit('log', [m, l, c]),
+        { onProgress: (d, t, lbl) => emit('progress', [d, t, lbl]) })
+      emit('log', [`Depth filter: cross-view consistency in ${((performance.now() - tFilt) / 1000).toFixed(1)}s`,
+        'info', 'Dense'])
+    }
+
+    emit('progress', [images.length, images.length, 'Done'])
     return { result: { maps }, transfer }
   }
 

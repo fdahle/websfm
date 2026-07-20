@@ -5,6 +5,7 @@ import { exifSignature, sensorFromExif } from '../core/io/sensor.js'
 import { DISTORTION_MODELS, inferDistortionModel } from '../core/sfm/distortion.js'
 import * as opfs from '../utils/opfs.js'
 import { useImagesStore } from './useImagesStore.js'
+import { deriveLegacyCalibration } from '../core/sfm/fiducialModel.js'
 import { useProjectsStore } from './useProjectsStore.js'
 
 // Sensors are shared camera intrinsics. Each image references one via
@@ -235,6 +236,29 @@ export const useSensorsStore = defineStore('sensors', () => {
     save()
   }
 
+  function setFiducialCalibration(id, calibration) {
+    const s = sensors.value.find((x) => x.id === id)
+    if (!s) return
+    s.kind = 'film'
+    s.fiducialCalibration = calibration ? JSON.parse(JSON.stringify(calibration)) : null
+    if (calibration?.focalMm > 0) { s.focal = calibration.focalMm; s.focalUnit = 'mm' }
+    log(`Sensor ${s.label}: fiducial calibration ${calibration ? 'applied' : 'cleared'}`, calibration ? 'success' : 'info', 'Sensor')
+    save()
+    if (isPersisting()) imagesStore.sync()
+  }
+
+  function migrateLegacyFiducialCalibrations(imageList) {
+    let count = 0
+    for (const s of sensors.value) {
+      if (s.fiducialCalibration || !s.fiducials?.marks?.length) continue
+      const detections = (imageList || []).filter((i) => i.sensorId === s.id).flatMap((i) => i.fiducialDetections || [])
+      const cal = deriveLegacyCalibration(s, detections)
+      if (cal) { s.fiducialCalibration = cal; count++ }
+    }
+    if (count) save()
+    return count
+  }
+
   function assignSensor(imageId, sensorId) {
     const img = images.value.find((i) => i.id === imageId)
     if (!img) return
@@ -292,6 +316,8 @@ export const useSensorsStore = defineStore('sensors', () => {
     updateSensor,
     toggleSensorFixed,
     setFiducialMarks,
+    setFiducialCalibration,
+    migrateLegacyFiducialCalibrations,
     assignSensor,
     mergeSensors,
     removeSensor,

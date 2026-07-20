@@ -6,11 +6,12 @@ defineProps({
   crs:           { type: String, default: null },
   report:        { type: Array,  default: () => [] },
   selectedGcpId: { type: String, default: null },
+  hasReferenceDem: { type: Boolean, default: false },
 })
 
 const emit = defineEmits([
   'close', 'remove', 'update-accuracy', 'update-name', 'update-position',
-  'refresh-report', 'select', 'add',
+  'refresh-report', 'select', 'add', 'fill-z', 'check-z',
 ])
 </script>
 
@@ -30,6 +31,9 @@ const emit = defineEmits([
           :crs="crs"
           :report="report"
           :selected-gcp-id="selectedGcpId"
+          :has-reference-dem="hasReferenceDem"
+          @fill-z="emit('fill-z')"
+          @check-z="emit('check-z')"
           @remove="emit('remove', $event)"
           @update-accuracy="emit('update-accuracy', $event)"
           @update-name="emit('update-name', $event)"

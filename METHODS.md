@@ -77,6 +77,27 @@ inherently sequential; stages 4–5 are per-image then fused/rasterised.
 Difference-of-Gaussians scale space, orientation assignment, 128-d gradient
 histogram descriptors, sub-pixel + sub-scale extremum refinement.
 
+**Scale-space construction** (Lowe §3, and worth stating because we got it wrong
+until 2026-07-17): each octave holds `s+3` Gaussians at σ_i = σ0·k^i (σ0 = 1.6,
+k = 2^(1/3), s = 3), and the octave's **base already carries σ0** — octave 0's from
+blurring the input, octaves 1+ from halving the previous octave's σ0·k³ = 2σ0 level,
+which lands back at σ0 in the new pixel grid. So level 0 *is* the base and must not
+be re-blurred, and each later level adds only the **increment** σ_{i-1}·√(k²−1)
+rather than being re-blurred from the base by the full σ_i (Gaussians compose in
+quadrature, so the levels are identical either way — but the increments are ~0.77×
+the absolute sigmas, and with a 3σ kernel radius that is most of the pyramid's cost).
+
+We previously re-blurred every octave base by σ0, giving octaves 1+ an effective
+σ0·√2 at level 0 and a uniformly over-blurred pyramid. Two consequences, the second
+of which is the one that matters: reported keypoint `scale` was wrong above octave 0
+(it sizes the descriptor window), and — because adjacent over-blurred levels differ
+*less* — the DoG response was flattened, so coarse-scale extrema failed the contrast
+threshold and were **silently discarded**. Fine texture still fired in octave 0, so
+the symptom was not "no keypoints" but a quiet loss of large-scale structure and a
+`contrastThreshold` whose effective meaning was scale-dependent. Fixing it materially
+raises keypoint yield at a given threshold and shifts the mix toward coarse scales,
+so the `DETECT_SIFT_DEFAULTS` presets are calibrated against the corrected pyramid.
+
 **Non-standard bits worth mentioning to a colleague:**
 - **Duplicate-keypoint suppression** (`suppress_duplicate_positions`,
   response-weighted descriptor NMS): one strong blob can fire as a DoG extremum
@@ -186,7 +207,10 @@ resect.
 sensor-table calibration. For scanned aerial film there is a **pixel-pitch path**
 (scan resolution × format) that can silently produce an off-standard implied film
 width (~9% focal error observed on a real set) — flagged in the log against the
-standard ~230/240 mm aerial format. If nothing is known, a **default-FOV guess**
+standard ~230/240 mm aerial format. A declared **film/sensor format therefore
+outranks the pitch** when both are known: a format comes off a calibration
+certificate and is measured, whereas a pitch is typically inferred from the scanner
+setting and is the value that goes wrong. If nothing is known, a **default-FOV guess**
 (`fx = image width`) is used and loudly warned: wrong intrinsics both distort the
 geometry and commonly *prevent* cameras from registering.
 
@@ -251,18 +275,38 @@ the tie-break (and the fallback for candidates with no well-triangulated
 correspondences yet). Correspondences are swept once per pass and cached — reused for
 both the score and the subsequent PnP attempt until a registration grows the model.
 
-**Stalled-strip rescue (one shot).** A full sweep that registers nothing while images
-still *link* to the model is the signature failure of short film strips: the end
+**Stalled-model rescue (one shot).** A full sweep that registers nothing while images
+still *link* to the model has two signature causes. On short film strips the end
 frames fail on a slightly-wrong focal (self-calibration only runs post-filter, after
-registration) plus a structure gap in their overlap. Before giving up, run one rescue
-round — a **focal-only** bundle adjustment (`refineIntrinsics: 'f'`, well-constrained
-even on the pre-filter set, unlike cx/cy or k1) to correct the focal, plus a
-**retriangulation** pass to grow structure into the stalled overlaps — then retry the
-sweep **once** with a relaxed refine-recheck (recount at the PnP gate instead of the
-tight reprojection threshold, ratio `rescueRefineRatio`). The absolute inlier floor
-and the first PnP gate still apply, and the final BA + track filter clean any loose
-observations, so this rescues genuinely-linked end frames without manufacturing a
-pose. Off via `rescueStalled: false`.
+registration) plus a structure gap in their overlap. The other — and on consumer
+wide-angle imagery the more common — is a **distortion deadlock at the seed pair**: a
+2-view model can absorb radial distortion into its point positions, so the seed's
+reprojection looks excellent while the geometry is wrong, and the third view is the
+first to expose it (inlier ratios in the 10–30% band against the acceptance gate). The
+in-registration self-calibration that would break this (§4.6) only engages once the
+model has `distortionCalMinCams` cameras, which it never reaches. Chicken-and-egg: a
+model can be *stuck at exactly two cameras*, which is why the rescue triggers from two
+cameras up rather than three.
+
+Before giving up, run one rescue round — a **focal-only** bundle adjustment
+(`refineIntrinsics: 'f'`, well-constrained even on the pre-filter set, unlike cx/cy or
+k1) to correct the focal, plus a **retriangulation** pass to grow structure into the
+stalled overlaps — then retry the sweep **once** with a relaxed refine-recheck (recount
+at the PnP gate instead of the tight reprojection threshold, ratio `rescueRefineRatio`).
+At a 2-camera stall the focal solve is skipped and only retriangulation + the relaxed
+sweep run: *no* intrinsic is identifiable from two views, so a focal fitted there would
+be fitting noise. The relaxed sweep is not a lowering of standards but a bootstrap — the
+cameras it admits carry the model past the self-calibration threshold, at which point
+the distortion is measured and folded out of the keypoints (§5) and every subsequent
+sweep runs against pinhole geometry at the strict gates. The absolute inlier floor and
+the first PnP gate still apply throughout, and the final BA + track filter clean any
+loose observations, so this rescues genuinely-linked frames without manufacturing a
+pose. One shot, by design. Off via `rescueStalled: false`.
+
+Corollary: **self-calibration is refused below 3 cameras** in the post-filter passes
+too (§4.6). A 2-camera model returns whatever k1 the noise prefers — observed flipping
+sign between passes on a 5-image set — and the fold that follows is destructive
+(it moves keypoints), so no refinement beats a confident wrong one.
 
 ### 4.4 Track management
 
@@ -394,13 +438,17 @@ centre, user-entered pitch). A metric film camera exposes **fiducial marks** (4 
 8) whose positions the calibration certificate gives in **millimetres in the camera
 frame**, plus the calibrated focal length and principal point.
 
-A sensor is declared **`kind: 'film'`** and carries the calibrated `fiducials`
-(marks in mm, principal point in mm, focal in mm). Each image carries clicked
-**scan-pixel observations** of those marks. At SfM ingest we:
+A sensor is declared **`kind: 'film'`**. The current model deliberately separates
+`image.fiducialDetections` (anonymous raster slots and scan-pixel centres) from
+`sensor.fiducialCalibration` (slot-to-mark identity, metric coordinates, focal
+length and principal point). Detection can therefore run and be reviewed before a
+camera certificate is available. At SfM ingest, and only there, the two records are
+joined into calibrated point pairs and we:
 
-1. **Fit a per-image affine** `scan px → camera mm` by least squares from the
-   ≥3 paired observations (`fitFiducialAffine`) — recovering true pixel pitch,
-   scan rotation, shear, and the RMS residual (µm) as the audit number.
+1. **Fit a per-image transform** `scan px → camera mm` by least squares from the
+   paired observations (`fitFiducialTransform`): conformal, affine (default), or
+   projective according to calibration. This recovers pixel pitch and the RMS
+   residual (µm) as the audit number; affine also reports rotation/shear.
 2. **Define one canonical pixel frame per sensor** (`canonicalFrame`): a virtual
    pixel grid at the **median** fitted pitch, with `fx = fy = focalMm / pitch` and
    the principal point mapped into the grid — so all images of the sensor share
@@ -427,6 +475,104 @@ init-pair caveat as distortion: pairwise F from matching is a scan-space fit tha
 BA corrects. (Fitting k1/k2 from a certificate's distortion *table* is a follow-up,
 out of v1.)
 
+#### Anonymous fiducial detection (`core/sfm/fiducialDetection.js`)
+
+**Detect Fiducials** is an image-measurement task and does not read certificate
+marks, focal length, principal point or a pre-marked reference image. The user
+declares only image priors: Generic, Right angle, 45° cut or Frame; corner, side or
+combined positions; polarity; and tolerance. A coarse grayscale analysis finds the
+film bounds and searches the corresponding anonymous raster slots. Accepted peaks
+are refined in native-resolution crops. Frame mode measures the frame intersections
+themselves and is explicitly not presented as a substitute for physical camera
+fiducials.
+
+Across a batch, normalized positions are combined per slot and the strongest safe
+scan supplies real ZNCC donor patches. Incomplete scans are retried around those
+batch-relative positions. This improves appearance matching without introducing a
+metric layout dependency. Confident candidates are persisted as
+`fiducialDetections`; uncertain candidates remain drafts until explicitly accepted
+or rejected. A confident measured frame may also generate a mask for scanner
+background outside the film rectangle.
+
+**Calibrate Fiducials** is a separate task (`core/sfm/fiducialCalibration.js`). In
+certificate mode, raster slots are mapped to named metric marks. In batch mode, a
+robust centred layout is estimated from repeated detections and a declared scan
+pitch fixes its scale. Both paths validate per-image fits and report RMS/p95; a
+positive calibrated focal length is required before applying the calibration.
+Uncalibrated detections remain useful for review but have no effect on sparse or
+dense reconstruction. Legacy observation/layout records are migrated on project
+restore.
+
+#### Legacy calibrated-layout measurement (`core/sfm/fiducialDetect.js`)
+
+The earlier layout-dependent detector remains compatibility code for migrated
+projects and unusual prepared-reference workflows; it is no longer the Detect
+Fiducials UI path.
+
+Clicking 4–8 marks on every frame of a film block is the most tedious step above.
+The default path therefore starts without a marked reference image. Analytic,
+scale-pyramidal prototypes cover generic dot/ring/crosshair, right-angle and
+45-degree-cut marks; strong row/column transitions provide the separate frame
+mode. The calibration-certificate layout is normalized into the measured film
+rectangle, rotated by the user-declared batch orientation, and each physical mark
+is searched only in its predicted edge/corner region. Detection is followed by a
+native-resolution crop refinement and the same affine geometry gate used by the
+interior orientation. Certificate coordinates are still required: autonomy removes
+scan-pixel clicking, not metric camera calibration.
+
+The strongest geometrically accepted image then becomes an **automatic template
+donor**. Real scan patches are cut around its refined centres and the existing ZNCC
+matcher retries images that the analytic prototypes could not measure. Thus the
+detector learns the batch appearance without requiring the user to prepare a
+reference first. Unresolved images remain untouched and open in the existing image
+fiducial editor, whose three placed marks predict ghost locations for the rest.
+The legacy explicitly marked-reference path remains available for unusual designs.
+
+A square template is cut around each accepted donor (or legacy reference) fiducial and
+matched, **coarse to fine**, in each target: a downscaled pass over a search window
+around the predicted position, then a full-resolution pass around that peak, then a
+sub-pixel refinement fitting a separable parabola to the ZNCC peak's 3×3
+neighbourhood. Predictions come from the target's own interior orientation when it
+already has ≥3 marks (`fitFiducialAffine` + `mmToScan`), otherwise from the
+reference's click positions scaled by the size ratio. **ZNCC** rather than plain
+correlation because scans of one batch differ in exposure and development density;
+zero-mean + energy normalization makes the score invariant to exactly that affine
+intensity change.
+
+An optional probe resolves a **90° scan rotation** (a frame fed through the scanner
+sideways) by scoring all four orientations at their respectively-rotated predicted
+positions and taking the winner only if it beats *every* alternative by a margin.
+This is decidable far less often than it looks: fiducial marks are identical to one
+another, so under the textbook symmetric 4-corner layout every rotation aligns every
+mark with *some* real mark and no template evidence separates the hypotheses. The
+margin rule then keeps k=0 — the correct failure, since a batch is normally scanned
+in one consistent orientation, and a confident wrong k would mis-assign every mark
+id at once.
+
+**QC is the point of the feature** — an automatically mismeasured mark is worse than
+an unmeasured one, because a wrong interior orientation propagates silently into
+every pose. Three gates run in order:
+
+1. **Absolute** — a detection below the ZNCC floor is rejected.
+2. **Population** — per mark, the median score across the whole batch; detections
+   far below their own mark's median are rejected. This is what catches
+   *confident-wrong* matches: a mark that locks onto the wrong feature can still
+   clear an absolute floor, but not the standard its own mark sets on every other
+   scan of the batch. It needs the whole batch, so detections are buffered and
+   applied in a second pass.
+3. **Geometric** — fit the interior-orientation affine to the survivors; over the
+   RMS gate, drop the single worst mark (chosen by leave-one-out refit, not by
+   largest residual, which masking makes unreliable) and refit once. Still over ⇒
+   the image fails and **nothing is written** for it.
+
+Gate 3's repair requires **≥5 marks**. An affine has 6 DOF, so any 3 points fit one
+exactly: with the common 4-mark camera, dropping the true outlier and dropping a
+good mark both leave a 3-point exact fit, and the outlier is mathematically
+unlocalizable. Four-mark images that miss the gate therefore fail outright rather
+than have a coin flip decide their interior orientation — the same lesson as the GCP
+robust fit (§6.5): never let a fit the outlier has already dragged decide which point
+is the outlier.
+
 ---
 
 ## 6. Ground control points & georeferencing
@@ -444,9 +590,14 @@ spirit.
 
 Correspondences are either **camera centres ↔ imported camera poses** (pose-based
 fit) or **triangulated GCPs ↔ surveyed GCP coordinates**. When ≥3 GCPs triangulate
-into the current SfM frame (2-view DLT, `gcpTriangulation.js`), the **GCP fit is
+into the current SfM frame (§6.5, `gcpTriangulation.js`), the **GCP fit is
 preferred** over the pose-based one. `gcpAccuracyReport()` reports per-GCP CRS
 residual + per-observation reprojection px.
+
+The fit and the report consume the **non-robust** triangulation (§6.5): every mark
+the user placed reaches them, outliers included. This is deliberate — silently
+dropping a GCP observation from the fit would hide exactly the disagreement the
+accuracy report exists to surface.
 
 ### 6.2 GCPs inside bundle adjustment (anchored BA)
 
@@ -491,10 +642,18 @@ images:
   pure-rotation (zero-baseline) pair has no epipolar constraint and is rejected.
   With several single-view candidates the **widest-baseline** source is used — the
   most stable line and the least foreshortened.
-- **Two or more other observations** → the GCP triangulates (2-view DLT,
-  `gcpTriangulation.js`) and reprojects to a **single predicted pixel** —
+- **Two or more other observations** → the GCP triangulates (§6.5,
+  **robust** mode) and reprojects to a **single predicted pixel** —
   a 0-D constraint. Cheirality is enforced: a point behind the target camera
   falls back to the epipolar line rather than projecting to a meaningless pixel.
+
+Because the triangulation is N-view, **every** mark the user places sharpens the
+guide in the images still unmarked — the 5th mark constrains the prediction more
+than the 2nd did. Guides use the **robust** variant (§6.5): a single misclick must
+not drag the aiming prediction in every other image. This is the mirror image of
+§6.1's choice, and the asymmetry is the point — a guide is a convenience whose
+only job is to be *useful*, so discarding a bad mark costs nothing; the fit is a
+measurement whose job is to be *honest*, so discarding one would hide a defect.
 
 Guides are **advisory only** — nothing about them enters the fit. They are drawn
 for GCPs not yet marked on the image; an already-marked GCP shows its measured
@@ -520,6 +679,71 @@ shown beside each marker, but on a strongly distorted lens the true epipolar
 exact form would sample the pinhole line and push each sample through the composed
 distortion into a polyline.
 
+### 6.5 GCP triangulation (N-view, optionally robust)
+
+`gcpTriangulation.js` places a GCP's pixel marks into the current SfM frame. It
+feeds the georeference fit (§6.1), the accuracy report, the anchored-BA targets
+(§6.2) and the marking guides (§6.4). Camera poses are **fixed input** — only the
+3D point moves; refining poses against GCPs is anchored BA's job, not this.
+
+**Seed** — the widest-baseline pair (camera-centre distance, a parallax proxy
+usable before the point is known) is triangulated by two-view DLT, reusing the
+same WASM routine as SfM point triangulation. This is the best-conditioned
+two-view solve available, but only a *seed*.
+
+**Refinement** — the seed is then refined against **every** observation by
+Gauss-Newton on summed reprojection error (pure JS: a handful of points per
+project, not millions, so no WASM routine is warranted). The Jacobian of a
+projection w.r.t. the point, for `x_cam = R·X + t`, is
+`∂u/∂X = (fx/z_c)·(R₀ − (x_c/z_c)·R₂)` and `∂v/∂X = (fy/z_c)·(R₁ − (y_c/z_c)·R₂)`.
+This is what makes a 3rd..Nth mark worth placing: the DLT pair alone ignores them,
+so marking a GCP in eight images used to yield precisely what the best two yielded.
+
+**Robust mode** (opt-in; guides only, §6.4) rejects marks in two stages, and the
+**order is the whole method**:
+
+1. An **IRLS fit under a Huber loss** (δ = 2 px; weight `w = min(1, δ/|r|)`), so a
+   wild mark pulls with bounded force rather than in proportion to its error.
+2. A **median cut** on *that* fit's residuals — drop views beyond
+   `max(3 × median, 3 px)`, and only when ≥2 marks survive.
+
+Stage 1 is not an optimisation, it is what makes stage 2 possible. Least-squares
+has a breakdown point of zero: the outlier drags the point toward itself until it
+stops looking like an outlier. Measured on a 4-view GCP with one ~108 px misclick,
+the plain LSQ fit smears it into residuals of **42 / 11 / 50 / 27 px** — median 34,
+so a 3× cut of 103 clears the outlier's own 50 px and rejects **nothing**. Under
+the Huber fit the bad mark is downweighted, the point settles on the good marks'
+consensus, and the residuals separate cleanly (≈0 vs ≈108) so the cut fires. Judging
+marks against a fit those same marks corrupted is circular; the Huber stage breaks
+the circle. The **absolute 3 px floor** guards the other direction: on a clean set
+the median residual is ~0, and a pure multiple of it would reject honest marks over
+sub-pixel noise.
+
+The **final fit is plain least-squares over the survivors** — the Huber stage exists
+only to *identify* outliers; once they are gone, the efficient unbiased estimate is
+the one to keep. Rejected marks are still reported in `perViewReprojPx` (and counted
+in the guide's `rejectedCount`): a discarded mark did not steer the point, but the
+user should still see that it disagreed. Rejection is **scoped to the one prediction**
+— the mark remains a full member of the GCP in the georeference fit, the accuracy
+report and anchored BA — so the UI says "7 of 9 marks", never "2 ignored", which
+would imply the GCP itself was discarded.
+
+**Observability**: the refinement is invisible by construction — a better prediction
+just looks like a prediction. One log line per *placed mark* reports the
+**guide-vs-click gap** (§6.4): where the model predicted the mark against where the
+user actually clicked. It should shrink as marks accumulate; a large one means model
+and user disagree. A detail-level companion **brackets** the mark — the guide before
+(fitted from the GCP's N other marks) against `gcpEstimateForImage` after (fitted
+from all N+1, *including* the new one) — reporting the shift and its direction. That
+bracket is the only way to watch the N-view refinement act on the image being worked
+on, because marking a GCP retires its guide there. Expect the shift to point toward
+the click and to shrink as N grows (one vote in N+1); a **zero** shift usually means
+the robust stage rejected the new mark, not that the estimate is stuck.
+
+Logging the guides themselves was tried and removed: guides recompute on every tab
+switch, selection and re-render, so those lines reported the app re-rendering rather
+than the user working.
+
 ---
 
 ## 7. Dense multi-view stereo
@@ -532,6 +756,33 @@ support planes, in `core/dense/mvs.js` + `crates/reconstruction/src/mvs.rs`.
   is photometric consistency of the **plane-induced homography** warp into source
   views (best-K aggregation over neighbours). Optional `filterDepthMap`
   (median/speckle cleanup).
+- **Stage A′ — cross-view consistency filter** (`filterDepthMapsGeometric`): the
+  equivalent of COLMAP's `filter` pass (`filter_min_ncc`, `filter_min_num_consistent`,
+  `filter_geom_consistency_max_cost`). Runs once after all depth maps exist and
+  **zeroes rejected pixels in the maps themselves**, so the persisted planes — and the
+  orthophoto that reuses them as a z-buffer — are cleaned, not only the fused cloud.
+
+  Why it is needed, and why no photometric gate can substitute: **sky and vegetation
+  both have high NCC**. Vegetation is strongly textured, so its photo-consistency is
+  genuine — cost is simply not measuring what is wrong with it. Gradient sky and cloud
+  correlate well at *any* depth, so they too are confidently wrong. Both are exposed
+  only by **disagreement between views**. Per pixel: unproject to `P`, project into a
+  source, read **that source's own depth at that single pixel**, unproject it to `P′`,
+  reproject `P′` into the reference — the **forward–backward reprojection error** `e`.
+  A view is consistent when `e ≤ maxGeomCost` (px); `minConsistent` such views are
+  required. An absolute `minNcc` floor also applies, distinct from fusion's *adaptive*
+  p70 `maxCost` which by construction keeps 70% of pixels however bad the distribution.
+
+  Sampling **one** source pixel is what makes this discriminate. Fusion's own check
+  (below) searches a `(2·consistencyPx+1)²` window and accepts if *any* pixel there is
+  within a relative depth tolerance — a noisy depth cloud such as a bush almost always
+  has *some* pixel near the right depth by chance, so it passes. That is why freckles
+  survived fusion before this stage existed.
+
+  **Order-independence**: all maps are judged against the *unfiltered* planes
+  (rejections are staged in per-map masks and applied afterwards). Filtering in place
+  would let map *i*'s rejections remove the evidence map *i+1* is judged against,
+  cascading drops in map order. COLMAP likewise filters against the pass-1 maps.
 - **Stage B — fusion** (`fuseDepthMaps`): cross-view **geometric consistency**
   (a depth survives only if it reprojects consistently in enough neighbour views)
   → fused dense point cloud. Three **geometric outlier filters** clean the fused
@@ -565,6 +816,17 @@ must stay < 5e-3).
   warnings matter downstream.
 - Perf scales as overlap × sources × pixels²; the levers are `maxDim`,
   `maxSources`, `iterations`.
+- We run COLMAP's **filter** pass but not (yet) its second **`geom_consistency`
+  optimisation** pass, which re-runs PatchMatch with the forward–backward error added
+  to the cost so hypotheses are *pulled toward* the cross-view-consistent solution
+  rather than only rejected afterwards. Filtering recovers the precision (freckles go);
+  the second pass would add **completeness** on weakly-textured surfaces, at ~2× Stage A
+  cost. Deliberate deferral, not an oversight.
+- Neither COLMAP nor Metashape does **sky segmentation**; both compute depth everywhere
+  and discard. Metashape additionally offers manual masking, which websfm supports
+  (masked pixels are excluded as ZNCC source texels, not merely zeroed). Automatic sky
+  detection by a blue/brightness prior is actively unsafe for polar imagery, where
+  snow/ice vs sky is genuinely ambiguous.
 
 ---
 
@@ -659,6 +921,23 @@ film-format handling with sanity checks); and the WebGPU PatchMatch path.
   depth.
 - Fitting the init F in **distorted space** is a first-order approximation
   (global BA corrects it).
+
+### 11.1 Quality diagnostics (read-only, Quality Report hub)
+
+These derive from the finished cloud/graph and change nothing in the pipeline; they
+exist to tell the user *where* a reconstruction is weak.
+
+- **Match-graph bridge edges** (`core/eval/matchGraph.js` `bridgeEdges`): the
+  articulation edges of the accepted-edge graph, found by iterative Tarjan low-link.
+  A bridge is a pair whose removal raises the component count — the single link holding
+  two sub-blocks together; if it were a false match the block would split. Surfaced as
+  "fragile links", weakest (fewest inliers) first, so a thin loop closure is inspectable
+  before it fails.
+- **Coverage binning** (`core/eval/coverage.js` `coverageGrid`): tie points binned into
+  a top-down XY grid (auto cell from the bbox), each cell carrying its point count and
+  its **max view count** — how many images see that patch of ground (2 = the triangulation
+  minimum, ≥3 comfortable). It's the photogrammetric "where is my overlap thin" map,
+  read straight off the already-Z-up-oriented sparse points, not a new solve.
 
 ## 12. Where to read the code (pointers, not content)
 

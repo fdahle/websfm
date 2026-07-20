@@ -46,6 +46,59 @@ Per-image transcode (decode → JPEG display + lossless PNG compute), Chrome, wo
 Decode ~34× faster; total ingest ~7.4×. Compute-PNG blob sizes unchanged (≈103–108 MB),
 i.e. identical decoded pixels. Next tall pole is the canvas PNG encode (~4 s).
 
+### B-detect — SIFT detection throughput (2026-07-17)
+The "before" is the pre-`2026-07-17` pyramid (blur-from-base + no SIMD). Two measurements,
+because the isolated and end-to-end numbers differ and both are worth keeping:
+
+**Blur, isolated** (native `cargo test --release -- --ignored bench_pyramid`, 2048²; x86
+SSE stands in for wasm simd128, so treat as indicative):
+| | before | after |
+| --- | --- | --- |
+| taps / octave | 124 | **82** (octave 0) / **71** (octaves 1+) |
+| one σ=1.6 blur | 174.9 ms | **43.3 ms** (4.04×) |
+| full octave (6 levels) | 1836.8 ms | **291.3 ms** (6.30×) |
+
+**End-to-end**, the real wasm binary under Node/V8 (5000×5000 synthetic, `contrast_threshold`
+0.003, ~18.4k raw keypoints capped to 10k — both builds given the same workload):
+**12.7 s → 4.1 s (3.1×)**. Lower than the blur's 6.3× because the extrema scan and
+descriptors are now the tall poles (Amdahl). At the cap the run computes **18288
+descriptors to keep 10000** — ~45% thrown away, the obvious next lever.
+
+Not measured here: real scans in a browser (this box has no browser); the synthetic
+image's keypoint mix is not a photo's. The 3.1× is the honest order of magnitude, not a
+promise about a specific project.
+
+### B3 — the 2-camera registration stall (2026-07-16, four runs, default settings)
+The "before" for TODO ▸ Now ▸ RS. Building set = 50× Canon 5D (24mm full-frame);
+TMA = 5 film scans. Each dataset run twice, SIFT/brute-force and SuperPoint/LightGlue:
+
+| run | matching | reconstruction |
+| --- | --- | --- |
+| building + SIFT | 166/1225 pairs, 13k inliers | **2/50 cams** |
+| building + LightGlue | 1112/1225 pairs, 163k inliers | **2/50 cams** |
+| TMA + SIFT | 6/10 pairs, 391 inliers | 2/5 cams |
+| TMA + LightGlue | 8/10 pairs, 1445 inliers | **5/5 cams** (rescue fired) → dense OK |
+
+The diagnostic pair is the two building runs: **12× the matching quality, identical
+result** ⇒ the bottleneck is registration, not matching. Fingerprints of the deadlock:
+- Init reproj median **1.77px** — the seed looks perfect because the 2-view model
+  absorbs the radial distortion into its point positions.
+- Third-view PnP inlier ratios **10–29%** against the 30% gate; the "pose fits loosely"
+  defers show ~half the correspondences holding at the 8px gate but not the 4px
+  recheck (IMG_4326: 259/596 @ 8px, only 128 within 4px) — a radial gradient, exactly
+  what `register.js`'s D3 comment predicts.
+- The run's own later self-cal measures k1 ≈ **−0.025** (~58px corner shift) — the
+  thing that would fix it, unreachable at 2 cameras (`distortionCalMinCams` = 6).
+- Only TMA+LightGlue escaped, via the rescue — which is why the rescue guard was the
+  fix (see done log 2026-07-16).
+- Both TMA runs: k1 oscillates between post-filter passes (+0.032 → −0.010; −0.049 →
+  −0.005), every composed fit trips the "corner shift exceeds 50px" runaway warning
+  (⇒ the <3-camera self-cal skip), and both warn `implied film width 253mm is not a
+  standard aerial format` (⇒ the resolveK format-over-pitch flip; also check the TMA
+  sensor config — 253mm is no real format).
+- Rotation-cycle filter: never engaged on any of the four (median cycle error always
+  under the 30° ceiling).
+
 ### B0 — CA213732V… aerial film strip (2026-07-03 00:12 run, 5 images, Medium dense, GPU)
 The intrinsics-limited case (contrast with B1):
 
@@ -78,6 +131,298 @@ fiducials; self-calibration (A2) + fiducials (F4) are the code-side support.
 ---
 
 ## Done log (most recent first)
+
+- **2026-07-20 · FDR — detection/calibration separation** — **Detect
+  Fiducials** is now a calibration-free image task. `core/sfm/fiducialDetection.js`
+  searches anonymous corner and side slots with Generic/right-angle/45°/Frame
+  families, polarity and tolerance controls; the worker performs coarse detection
+  plus native-resolution refinement. Batch-relative consensus and anonymous donor
+  patches retry incomplete scans without reading metric marks. Accepted centres
+  persist as `image.fiducialDetections`; uncertain centres stay in an explicit
+  accept/reject queue, and confident frames can generate background masks.
+  **Calibrate Fiducials** is a separate ribbon/sensor command and modal backed by
+  `core/sfm/fiducialCalibration.js`: certificate or batch layout,
+  conformal/affine/projective fitting, slot identity mapping, residual validation,
+  focal/principal-point fields and `sensor.fiducialCalibration`. Legacy projects
+  migrate on restore. Sparse and dense join detections to calibration only for
+  interior orientation; uncalibrated detections remain viewable and do not affect
+  reconstruction. Automated tests/typecheck/build are the code acceptance;
+  representative real-scan browser acceptance remains tracked in TODO.
+
+- **2026-07-20 · FDA — autonomous fiducial bootstrap** — film scans no longer
+  require a hand-marked reference. `core/sfm/fiducialBootstrap.js` generates
+  multi-scale Generic/right-angle/45° prototypes, measures strong film bounds for
+  Frame mode, maps the calibrated layout under an explicit batch orientation and
+  refines centres in native-resolution worker crops. `bootstrapFiducials` is wired
+  through the compute client and `useImagesStore`; results stay buffered behind the
+  existing score/population/affine gates. The strongest safe scan automatically
+  donates real ZNCC templates to retry failures; the old marked-reference mode
+  remains available. `FiducialDetectModal` exposes family/orientation and failed
+  rows continue into the viewer's manual + ghost-guide workflow. Verified: 807
+  tests, typecheck and production build; browser acceptance on representative real
+  scans is still owed (tracked in TODO).
+
+- **2026-07-20 · FD — auto-detect fiducial marks on film scans** — mark the
+  fiducials once on one reference image per film sensor, then measure them on
+  every other image of that sensor by ZNCC template matching (coarse→fine→
+  sub-pixel). Pure math + QC gates in `core/sfm/fiducialDetect.js`
+  (`FIDUCIAL_DETECT_TUNING` co-located); worker ops `prepareFiducialTemplates` /
+  `detectFiducials` in `workers/ops/detect.js` (ImageBitmap + source-rect crops —
+  never a full-res raster of a 10k×10k scan); orchestration in
+  `useImagesStore.autoDetectFiducials` (buffered detections, one `sync()`);
+  user knobs `FIDUCIAL_DETECT_DEFAULTS`; UI `FiducialDetectModal.vue` reached
+  from the film-sensor fiducial editor. Method + QC rationale in METHODS.md §5.1.
+  Three findings worth keeping: (1) `downscalePatch` could return an **even**
+  template size, making `half` a half-integer and every ZNCC read a fractional
+  array index — NaN laundered by the zero-denominator guard into a plausible
+  score of 0, which with the shipped defaults (65px ÷ 8 → 8) would have zeroed
+  the whole coarse pass; sizes are now forced odd and `znccAt` floors defensively.
+  (2) The planned whole-image rotation probe cannot work — an 8px coarse template
+  over ~1.5M positions hits spurious ZNCC ≈ 1.0 for every k — so each k is probed
+  in its own rotated *predicted window*, scored across all marks, and accepted
+  only if it beats every alternative (a tie ⇒ k=0, since identical marks in a
+  symmetric layout are genuinely undecidable). (3) The affine drop-and-refit
+  requires ≥5 marks: with a 4-mark camera any 3 points fit a 6-DOF affine
+  exactly, so the outlier is unlocalizable and the image fails instead.
+  **Not browser-verified** — the modal flow and both worker ops need
+  OffscreenCanvas/`createImageBitmap`, which this environment cannot run.
+
+- **2026-07-20 · Logic/robustness audit fixes** — reference-raster sampling now
+  treats failed CRS resolution as runtime-only/retryable state and refuses unsafe
+  identity fallback; map probes use the tuple-shaped raster bounds; rotated,
+  sheared, and perspective GeoTIFF transforms are rejected explicitly. Blank GCPs
+  use `z:null` while a real `z:0` is preserved, Quality Overview leaves match-graph
+  health missing until matching has a terminal result, and a crashed compute worker
+  rejects only its own calls before its pool slot is replaced. Regression coverage
+  lives in `utils/tiff.test.js`, `core/io/gcp.test.js`,
+  `core/eval/matchGraph.test.js`, and `utils/computeClient.test.js`; 775 tests,
+  typecheck, and production build pass.
+
+- **2026-07-20 · COG writer, Phase 1 (plan-reference-raster-rearchitecture)** —
+  `writeCog(spec)` in `core/products/geotiff.js` alongside `writeGeoTiff`: internally
+  tiled, multi-IFD (full resolution + halving overviews down to a single tile), COG
+  layout rules honoured (all IFDs before all image data, overview tile data first,
+  full-res last, offsets ascending). Unlike `writeGeoTiff` it takes a **TypedArray**,
+  not raw bytes — it has to interpret pixels to tile and downsample. Overviews are
+  box-averaged with nodata skipped (a cell whose whole source block is nodata stays
+  nodata); decimation would render a noisy DEM as noise. Uncompressed only: per-tile
+  DEFLATE would need the injected async callback for every tile of every level, and
+  the plan's open question says measure first. Single-tile levels keep TileOffsets/
+  TileByteCounts **inline** (count·size ≤ 4) — externalising them makes a reader take
+  the offset as a pointer to the offset. 13 tests round-trip through the real `geotiff`
+  reader (pixel-exact full-res, int16/uint16/float32, 6-band interleave, non-multiple
+  dims, nodata-aware averaging, overview selection on a downscaled read, byte layout).
+  Pure + sync; no store, no UI, nothing wired to it yet. Phases 0 and 2–6 are browser
+  work and remain open.
+
+- **2026-07-18 · Reference rasters on the map, A-4 (plan-external-reference-data)** —
+  per-raster "Display on map" toggle in the Reference Data right-click menu, an accent
+  ◉ row indicator (the state is otherwise invisible until you reopen the menu), and an
+  opacity slider in the row's expanded detail, shown only while the layer is up.
+  `onMap`/`opacity` persist in `external/index.json` as view state (absent on older
+  projects ⇒ hidden at full opacity, no file rewrite). `ViewerMap` gains a raster
+  `LayerGroup` above the basemap and below every project vector layer; the group is
+  diffed rather than rebuilt so dragging the opacity slider doesn't tear down and reload
+  the image. **The layer renders `previewDataUrl`, not the pixel plane** — it never calls
+  `ensureRasterLoaded`, so a REMA tile on the map costs no decode and the lazy-loading
+  invariant holds; and the extent is handed to OL in the raster's *native* CRS so
+  reprojection is on-the-fly and `handleSetCrs` needs no resampling. Sidebar list order
+  is draw order. **Not browser-verified** — it is almost entirely OpenLayers runtime.
+- **2026-07-18 · Review fixes: viewer up-vector, GCP seed/step guards, residual frame** —
+  five correctness fixes from a working-diff review.
+  (1) Two different `estimateUpFromCameras` existed; the one `Viewer3D` used averaged the
+  cameras' *image-up* axes, which is horizontal on nadir aerial — an Antarctic block
+  framed 90° tilted. `core/sfm/geometry.js` now weighs that candidate against the
+  viewing-direction one using the camera-centre covariance (thin axis = vertical,
+  dominant axis = travel), falling back to the historical answer when ambiguous;
+  `core/products/projection.js`'s copy is renamed `estimateUpFromViewingDirs` with its
+  DEM/ortho null semantics deliberately unchanged.
+  (2) `refineGcpPoint` accepted a Gauss-Newton step that made a view unprojectable —
+  the lost view's error dropped out of the sum, so a worse point looked cheaper; the
+  step is now refused.
+  (3) `triangulateGcp`'s robust path seeded from the single widest-baseline pair, so a
+  misclick *inside* that pair poisoned the basin. Measured: a 300 px misclick on the
+  seed pair landed the point **270 world units** from truth (600 px → ~7e5) even though
+  stage 2 rejected it. Now seeds from the 3 widest pairs by Huber cost — every magnitude
+  recovers exactly. Regression test pins it.
+  (4) `useQualityReport.buildExportReport` ran the GCP report twice (re-triangulating
+  every GCP, and able to straddle a mid-edit change); `computeHealth` returns the reports
+  it already pulled.
+  (5) The image-view residual overlay drew BA-pinhole-frame vectors on the raw image.
+  New pure `core/sfm/displayFrame.js` (`makeCanonicalToScan` + the `distortComposed`
+  that `workers/ops/dense.js` now shares) maps both endpoints back; `mag` stays the
+  pinhole-frame error so the overlay agrees with the tables.
+  Also: `Viewer3D` rebuilds OrbitControls instead of poking its private `_quat` cache;
+  `CloudRows` hides the camera badge/detail row on dense/mesh clouds (always an empty
+  Map) and shows the imported chip alongside `main` rather than instead of it; removed
+  the unused `needsGeoref`/`georefReady` ribbon gate.
+- **2026-07-18 · Sidebar provenance taxonomy (plan-external-reference-data WS B)** — split
+  the type-based "Point Clouds vs Products" sections by **provenance + role**:
+  `ReconstructionSection.vue` (all sparse clouds, computed or COLMAP-imported),
+  `ProductsSection.vue` (computed dense/mesh + DEM/ortho), new `ReferenceSection.vue`
+  (imported clouds + imported rasters). Shared row rendering extracted to
+  `CloudRows.vue`; Sidebar owns the three computeds over the already-persisted
+  `imported` flag. `useReconstructionStore` now sets/persists/restores `imported` on a
+  COLMAP-imported *sparse* cloud too, which renders an "imported" chip. No migration.
+- **2026-07-18 · External reference rasters, A-1…A-3 (plan-external-reference-data)** —
+  import a georeferenced DEM/orthophoto you did not produce and use it as ground truth.
+  New pure `core/io/rasterKind.js` (DEM-vs-ortho classifier → `{kind,confidence,reasons}`),
+  `core/io/rasterSample.js` (**the** bilinear/nodata sampler; `core/eval/demCheck.js`
+  reduced to an adapter over it), `core/io/rasterSource.js` (the `RasterSource` accessor
+  boundary that makes remote-COG a second implementation, not a rewrite). New `parseRaster`
+  worker op (geotiff decode + classify + preview off-thread, plane transferred), new
+  `useExternalStore` (index-only restore + `ensureRasterLoaded`, native-CRS rasters with
+  reprojected *queries*, `verticalDatum`/`verticalAccuracy` first-class). Dropped/picked
+  TIFFs now fork through `forkGeoreferencedRasters` before the image path. `ProductViewer`
+  generalised to any raster descriptor (computed product *or* imported raster) and gained a
+  `raster:` tab. GCP **Fill Z / Check Z from reference DEM** in the GCP table — Fill refuses
+  when the dataset declares no vertical accuracy, Check flags a mean-dominates-scatter
+  offset as a probable vertical-datum mismatch. Hillshade math extracted to
+  `core/products/colormap.js` `hillshadeRgba` (shared by both previews).
+  **Not browser-verified** — see the plan file's remaining phases A-4…A-7.
+
+- **2026-07-17 · Quality Report hub (plan-eval-quality-hub WS0–WS6)** — replaced the eight
+  isolated Evaluate modals with one `QualityReportModal.vue` (left section nav + Overview
+  landing page; greyed nav entries with a prerequisite hint are the discoverability surface
+  that replaced the per-button ribbon gating). Section bodies extracted to
+  `components/modals/eval/Eval{Overview,Sparse,Calibration,Accuracy,Matching,Dense,Coverage}Section.vue`
+  (old 8 modals deleted; `useModalsStore` 8 `eval*Open` flags → `qualityOpen`+`qualitySection`;
+  old command ids deep-link into hub sections). New pure core (each +test): `core/eval/health.js`
+  (`EVAL_THRESHOLDS` single threshold table + `projectHealth(snapshot)` overview rows),
+  `core/eval/coverage.js` (top-down `coverageGrid`), `core/eval/compareRuns.js` (`diffSummaries`),
+  `core/products/report.js` (`buildReportHtml` self-contained export). Extended
+  `core/eval/matchGraph.js` (`bridgeEdges` articulation edges + `componentIndex`),
+  `core/eval/imageStats.js` (`unregisteredReason` + `imageResidualVectors`). Assembly composable
+  `composables/useQualityReport.js` feeds both the Overview and the export from one snapshot.
+  WS2 fixes: consistent derived Sparse tiles + labelled run-summary strip, per-image
+  keypoint/edge columns + unregistered reasons, graph component membership + fragile links,
+  pose XY/Z split, depth-coverage split + real median-depth GSD (`depthMapCodec` index → **v3**,
+  adds `depthMedian`; v1/v2 fall back). WS3 residual overlay: `showResiduals` in
+  `useImageViewSettings` + ribbon toggle + `ViewerImage.vue` ×25 amplified vectors; Sparse row
+  click opens the image with the overlay on. WS5: `summaryHistory` (last 5) + `healthDirty` in
+  `useReconstructionStore` (persisted in `reconstruction.json`). WS6 = F8 (see Later). All
+  numbers stay derive-from-the-cloud so an imported COLMAP model works. `npm test` (673) /
+  `typecheck` / `vite build` green; **all UI unverified in-browser** (headless) — see TODO ▸ QH.
+
+- **2026-07-17 · Evaluate ribbon tab: 8 quality/accuracy views** — wired all eight
+  placeholder commands in the Evaluate tab (`Ribbon.vue`) to read-only modals over
+  existing state (no new pipeline stage; only eval-gcps writes, via GCP enable/disable
+  toggles). Shared UI: `components/modals/ui/DataTable.vue` (sortable, nulls-last,
+  `cell-<key>`/`expanded` slots) + `StatTiles.vue`, table/tile classes in `ui/modal.css`.
+  Pure derive-from-the-cloud modules under `src/core/eval/` (each +test): `reconStats.js`
+  (track-length histogram + reprojection stats), `imageStats.js` (per-image residuals),
+  `calibration.js` (radial curve + focal delta), `matchGraph.js` (union-find graph health),
+  `demCheck.js` (bilinear DEM-at-GCP sampler). Modals: `ReconReportModal`, `ImageErrorsModal`,
+  `CalibrationModal`, `GcpAccuracyModal`, `PoseResidualsModal`, `MatchGraphHealthModal`,
+  `DepthCoverageModal`, `DemGcpCheckModal`. Store: `poseResidualReport()` added to
+  `useReconstructionStore`; `depthMapCodec` index bumped to **v2** (per-map `validPx`/
+  `depthMin`/`depthMax` written at Stage A so Depth Coverage never re-hydrates planes;
+  v1 still reads, shows "—"). New `georefReady` Ribbon prop (+ `needsGeoref` gate) for
+  eval-poses. **Intentionally deferred** (the three F13 "known gaps", nobody may miss
+  them): registration-pass-per-image + self-cal-drift-per-image on eval-images, and
+  cycle-filter/spread-gate kill counts on eval-match-graph — each would need a small new
+  `summary` field. **Not yet browser-verified** — the modals need a manual run; 645 unit
+  tests + typecheck + production build pass. Fold into the F8 report + TODO ▸ V baseline
+  session (these views display exactly the numbers §Baselines wants recorded by hand).
+
+- **2026-07-17 · Dense: cross-view consistency filter (sky/vegetation freckles)** —
+  sky and bush pixels reached the dense cloud as freckles because **every** outlier
+  filter ran at fusion, per-point, and fusion's "geometric consistency" check was too
+  weak to see them: it searched a `(2·consistencyPx+1)²` = 5×5 window in each source
+  and accepted if *any* pixel there had a depth within 1%. A bush is a cloud of depths
+  spanning a range, so some pixel in a 5×5 window is near the right depth by chance —
+  it passed trivially. Nor could any *cost* gate help: vegetation is strongly textured
+  (genuinely high NCC) and gradient sky correlates at any depth. New
+  `filterDepthMapsGeometric` (`core/dense/mvs.js`) is COLMAP's `filter` pass — a true
+  forward–backward reprojection through **one** source pixel (`maxGeomCost` px,
+  `minConsistent` views) plus an absolute `minNcc` floor. Runs once after the Stage A
+  loop in `workers/ops/dense.js` and zeroes pixels **in the maps**, so the persisted
+  planes and the ortho (z-buffer reuse) are cleaned too. Judged against *unfiltered*
+  planes via staged masks — in-place filtering would cascade drops in map order. Knobs
+  in `DEPTHMAP_DEFAULTS` + `DepthMapsModal`; fusion's filters kept as a second line of
+  defence. COLMAP's second `geom_consistency` *optimisation* pass (a completeness win,
+  ~2× Stage A) is deliberately deferred — see TODO. **Not yet measured on real data**:
+  the before/after baseline below is owed.
+- **2026-07-17 · GCP triangulation: N-view refinement + robust guides** — a GCP's
+  3rd..Nth mark did nothing: `gcpTriangulation.js` DLT-triangulated the
+  widest-baseline *pair* and used every other observation only as a reprojection
+  diagnostic, so marking a GCP in eight images predicted exactly what the best two
+  did (and one misclick in the chosen pair silently poisoned it). The pair now only
+  **seeds** a Gauss-Newton refinement over all observations (`refineGcpPoint`, pure
+  JS — a handful of points, no WASM needed). `opts.robust` adds outlier rejection,
+  taken by the guide path (`gcpGuides.js`) and deliberately *not* by the georef fit /
+  accuracy report. **The lesson worth keeping**: the first cut of robust mode was a
+  median cut on a plain-LSQ fit's residuals and rejected nothing — LSQ has a
+  breakdown point of zero, so the outlier drags the point toward itself until it
+  stops looking like one (measured: a 4-view GCP with a ~108px misclick fits to
+  residuals 42/11/50/27, median 34, 3× cut 103 > the outlier's own 50). Rejection now
+  runs a Huber/IRLS fit *first* and cuts on **its** residuals, which separate ≈0 vs
+  ≈108. Method + numbers in METHODS.md §6.5. Guide-vs-mark stays advisory —
+  no snap-to-guide. Observability: the guide label shows "7 of 9 marks", and one
+  **info line per placed mark** (`logGcpMark`, App.vue) reports the guide-vs-click
+  gap. Two earlier cuts were removed for a shared reason worth remembering — both
+  logged inside `gcpGuides()`, which recomputes on every tab switch, selection and
+  re-render, so they narrated the app's re-rendering instead of the user's work
+  (movement-since-last-prediction only ever printed "first prediction", since marking
+  retires that image's guide; the per-recompute lines then repeated whatever was
+  already on screen). Also fixed en route: guides gated on `showGcps || gcpEdit` kept
+  drawing after edit mode was switched off (enabling gcpEdit force-enables showGcps),
+  and two watchers feeding one refresh double-logged every line (now coalesced per
+  tick).
+- **2026-07-17 · SIFT: incremental scale-space + vectorised blur (and the
+  over-blur bug it uncovered)** — detection was ~7 s on a 5000px scan; the pyramid was
+  the reason. `blur()` re-blurred the octave base with the *full* σ_i at every level
+  (124 taps/octave vs 82 incremental, `crates/sift/src/lib.rs`), and neither pass
+  vectorised: the horizontal one clamped a data-dependent index in its inner loop, the
+  vertical one strided by `w` on its innermost index, so LLVM declined both despite
+  `simd128` being on globally. Both passes now split into clamped borders + an
+  unclamped contiguous interior (`conv_row_interior`, `fma_scaled`, explicit f32x4 with
+  a scalar fallback, same shape as `crates/matching`); the vertical pass accumulates
+  into one row buffer with the clamp hoisted, which also drops it from 2·radius+1
+  strided rows in flight to one. B-detect above: 6.3× on a full octave, 3.1×
+  end-to-end. **The real find was a correctness bug**: making the incremental build
+  correct forced the octave-base question, and the old code was re-blurring a base that
+  already carried σ0 — over-blurring every octave above the first by √2, which flattened
+  DoG contrast so coarse-scale extrema failed `contrastThreshold` and vanished. On a
+  smooth synthetic at threshold 0.02 the old build found **0** keypoints where the new
+  one finds 18278 (at 0.003 both find ~18.4k — the extrema were always there, the
+  contrast gate was eating them). Real photos kept firing in octave 0, so this never
+  looked like breakage — just quietly missing large-scale structure. Verified in the
+  browser: detection faster, keypoints look right. See METHODS.md §2. **Gotcha worth
+  keeping**: `cargo test` compiles the *scalar* fallbacks (x86 has no simd128), so the
+  f32x4 kernels are unexercised by the suite — `scripts/simd-parity.mjs` runs the built
+  wasm under Node against the crate's `parity_digest` test on identical input; the two
+  digests must match exactly.
+
+- **2026-07-16 · Registration stall: let the rescue fire at the 2-camera seed
+  (WS-A + WS-C)** — four baselines (B3 below) showed matching quality moving 12×
+  between the building set's SIFT and LightGlue runs while the result did not move at
+  all: **2/50 cameras both times**. The bottleneck was registration, and specifically a
+  deadlock: uncorrected radial distortion (24mm full-frame, self-cal later measures
+  k1 ≈ −0.025 ≈ 58px of corner shift) is absorbed by the 2-view seed, so init
+  reprojection looks perfect (median 1.77px) while every third-view PnP misses the
+  acceptance ratios — and the designed mitigation, in-registration self-cal at
+  `distortionCalMinCams` = 6 cameras, can never engage because the model never leaves
+  2. The stalled-model rescue (retriangulate + one relaxed sweep) is exactly the escape
+  hatch, and it saved the TMA+LightGlue run, but its guard was `cameras.size >= 3` —
+  unreachable from a 2-camera stall. Relaxed to `>= 2` (`core/sfm/register.js`); the
+  inner focal-solve guard stays `>= 3` (f/k1 are not observable from 2 views), so a
+  2-camera rescue is retriangulation + one relaxed sweep and `rescued` keeps it
+  one-shot. Rescue log line now reports the stall's camera count and no longer claims a
+  focal solve it skips. Also (WS-C): post-filter self-cal is skipped below 3 cameras
+  with a reason line — the TMA runs' 2-camera models flipped k1 between passes
+  (+0.032 → −0.010) and tripped the composed-fit runaway warning every time, i.e. BA
+  was fitting noise into a destructive keypoint fold; and `resolveK`
+  (`core/sfm/reconstruction.js`) now ranks an explicit **film format above the scan
+  pixel pitch** — a certificate is measured, a pitch is inferred and is the value that
+  goes wrong (both TMA runs warn `implied film width 253mm`). New `register.test.js`
+  (5 tests, mocked ctx) pins the guard, the skipped intrinsics solve, one-shot-ness,
+  and the `rescueStalled: false` / no-linked-images negatives; 3 of them fail on the old
+  `>= 3` guard. `npm test` (604) + `typecheck` green. **Not verified: the recovery
+  itself.** A synthetic scene would not reproduce the stall (a noise-free co-visible
+  rig registers all 8 cameras even at k1 = −0.35), and the browser re-baselines cannot
+  run headlessly — see TODO ▸ Now ▸ RS. WS-B (obs-aware earlier f,k1) deliberately NOT
+  built: it is gated on those baselines showing WS-A alone is insufficient.
 
 - **2026-07-16 · Guided GCP marking (epipolar guides in the image view)** — marking
   a GCP across dozens of images was unassisted hunting, even though the posed

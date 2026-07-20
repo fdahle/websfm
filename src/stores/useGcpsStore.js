@@ -2,6 +2,7 @@ import { ref, watch } from 'vue'
 import { defineStore } from 'pinia'
 import { useLog } from '../composables/useLog.js'
 import { ensureProjection, transform } from '../core/crs.js'
+import { hasGcpElevation } from '../core/io/gcp.js'
 import * as opfs from '../utils/opfs.js'
 import { registerProjectStore } from './projectStores.js'
 import { useImagesStore } from './useImagesStore.js'
@@ -147,14 +148,15 @@ export const useGcpsStore = registerProjectStore(defineStore('gcps', () => {
     return added
   }
 
-  // Manually create a blank GCP (no import needed) — position defaults to the
-  // origin and is edited afterward in the table; observations are marked
+  // Manually create a blank GCP (no import needed) — horizontal position defaults
+  // to the origin while elevation is explicitly missing until entered or filled
+  // from a reference DEM. Observations are marked
   // interactively via setObservation. Returns the new GCP's id.
   function addGcp() {
     const n = gcps.value.length + 1
     const id = crypto.randomUUID()
     gcps.value.push({
-      id, name: `GCP ${n}`, x: 0, y: 0, z: 0,
+      id, name: `GCP ${n}`, x: 0, y: 0, z: null,
       accuracyX: DEFAULT_ACCURACY_X, accuracyY: DEFAULT_ACCURACY_Y, accuracyZ: DEFAULT_ACCURACY_Z,
       accuracyImgX: DEFAULT_ACCURACY_IMG, accuracyImgY: DEFAULT_ACCURACY_IMG,
       observations: [], enabled: true,
@@ -178,6 +180,11 @@ export const useGcpsStore = registerProjectStore(defineStore('gcps', () => {
   function setGcpPosition(id, axis, value) {
     const g = gcps.value.find((x) => x.id === id)
     if (!g || (axis !== 'x' && axis !== 'y' && axis !== 'z')) return
+    if (axis === 'z' && String(value ?? '').trim() === '') {
+      g.z = null
+      save()
+      return
+    }
     const num = Number(value)
     if (!Number.isFinite(num)) return
     g[axis] = num
@@ -203,12 +210,124 @@ export const useGcpsStore = registerProjectStore(defineStore('gcps', () => {
     save()
   }
 
+  // Include/exclude a GCP from the georeference fit, BA anchoring and the
+  // accuracy report. The visible, reversible way to drop a GCP the accuracy
+  // table shows to be bad — see CLAUDE.md on why that report never rejects
+  // marks on its own.
+  function setGcpEnabled(id, enabled) {
+    const g = gcps.value.find((x) => x.id === id)
+    if (!g) return
+    g.enabled = !!enabled
+    log(`GCP ${g.name}: ${g.enabled ? 'enabled' : 'disabled'}`, 'info', 'GCP')
+    save()
+  }
+
   function removeGcp(id) {
     const idx = gcps.value.findIndex((g) => g.id === id)
     if (idx === -1) return
     gcps.value.splice(idx, 1)
     save()
   }
+
+  // ── Reference DEM: fill / check GCP elevations ──────────────────────────────
+  //
+  // The payoff of the external-reference-data feature: a GCP placed on a map has
+  // no elevation, and a reference DEM has one everywhere.
+  //
+  // ⚠ The accuracy is not optional. `accuracyZ` feeds the bundle-adjustment
+  // anchor weight and the Horn fit, so a GCP whose Z came off a 30 m COP30 tile
+  // but still claims survey-grade σ will quietly dominate both. The reference
+  // raster must therefore carry a *declared* vertical accuracy before it can
+  // fill anything — we refuse rather than invent one.
+  //
+  // `sampleDem(x, y)` is injected (useExternalStore.sampleReferenceDem) so this
+  // store keeps no dependency on the external store, and resolves to
+  // { z, accuracy, datum, rasterName } | null.
+  async function fillZFromReferenceDem(sampleDem, { ids = null, overwrite = false } = {}) {
+    const targets = gcps.value.filter((g) => (ids ? ids.includes(g.id) : true))
+    let filled = 0, skippedHasZ = 0, skippedNoData = 0, refused = 0
+
+    for (const g of targets) {
+      // Null means missing; zero is a valid measured sea-level elevation.
+      const hasZ = hasGcpElevation(g)
+      if (hasZ && !overwrite) { skippedHasZ++; continue }
+
+      const hit = await sampleDem(g.x, g.y)
+      if (!hit || hit.z == null) {
+        log(`GCP ${g.name}: outside the reference DEM (or on nodata) — Z left unchanged`, 'warn', 'GCP')
+        skippedNoData++
+        continue
+      }
+      if (hit.accuracy == null) {
+        log(`GCP ${g.name}: reference DEM "${hit.rasterName}" has no declared vertical `
+          + 'accuracy, so filling Z would make this GCP claim survey-grade accuracy it '
+          + 'does not have. Set the dataset\'s vertical accuracy first.', 'warn', 'GCP')
+        refused++
+        continue
+      }
+
+      const before = g.z
+      g.z = hit.z
+      g.accuracyZ = hit.accuracy
+      filled++
+      log(`GCP ${g.name}: Z ${before == null ? '—' : fmtNum(before)} → ${fmtNum(hit.z)} `
+        + `from "${hit.rasterName}" (σ ${hit.accuracy}, ${hit.datum})`, 'info', 'GCP')
+      if (hit.datum === 'unknown') {
+        log(`GCP ${g.name}: ⚠ that DEM's vertical datum is undeclared — an ellipsoid/geoid `
+          + 'mismatch is tens of metres in polar regions.', 'warn', 'GCP')
+      }
+    }
+
+    log(`Fill Z from reference DEM: ${filled} filled`
+      + `${skippedHasZ ? `, ${skippedHasZ} already had Z` : ''}`
+      + `${skippedNoData ? `, ${skippedNoData} outside/nodata` : ''}`
+      + `${refused ? `, ${refused} refused (no declared vertical accuracy)` : ''}`,
+    filled ? 'success' : 'warn', 'GCP')
+    if (filled) save()
+    return { filled, skippedHasZ, skippedNoData, refused }
+  }
+
+  // Non-destructive counterpart: report DEM-minus-GCP per GCP without touching
+  // anything. Feeds the Quality Report's reference-DEM section (A-6).
+  // → [{ gcpId, name, x, y, gcpZ, demZ, dz, datum, rasterName }]
+  async function checkZAgainstReferenceDem(sampleDem, { ids = null } = {}) {
+    const targets = gcps.value.filter((g) => (ids ? ids.includes(g.id) : true))
+    const rows = []
+    for (const g of targets) {
+      const hit = await sampleDem(g.x, g.y)
+      const demZ = hit?.z ?? null
+      const gcpZ = g.z ?? null
+      rows.push({
+        gcpId: g.id, name: g.name, x: g.x, y: g.y,
+        gcpZ, demZ,
+        dz: (demZ != null && gcpZ != null) ? demZ - gcpZ : null,
+        datum: hit?.datum ?? null,
+        rasterName: hit?.rasterName ?? null,
+      })
+      log(`GCP ${g.name}: reference DEM ${demZ == null ? 'no data' : fmtNum(demZ)}`
+        + `, GCP ${gcpZ == null ? '—' : fmtNum(gcpZ)}`
+        + `${rows.at(-1).dz != null ? `, Δ ${fmtNum(rows.at(-1).dz)}` : ''}`, 'info', 'GCP')
+    }
+    const withDz = rows.filter((r) => r.dz != null)
+    if (withDz.length) {
+      const mean = withDz.reduce((s, r) => s + r.dz, 0) / withDz.length
+      const rms = Math.sqrt(withDz.reduce((s, r) => s + r.dz * r.dz, 0) / withDz.length)
+      // Scatter about the mean, i.e. what's left once a constant offset is removed.
+      const sd = Math.sqrt(Math.max(0, rms * rms - mean * mean))
+      // An offset that dominates the scatter is the ellipsoid-vs-geoid signature:
+      // systematic and slowly varying. Worth naming, because a similarity fit
+      // can't absorb it but *will* soak it into a scale/tilt error instead.
+      const systematic = withDz.length >= 3 && Math.abs(mean) > 2 * sd
+      log(`Check Z against reference DEM: ${withDz.length} GCP(s), mean Δ ${fmtNum(mean)}, `
+        + `RMS ${fmtNum(rms)}, scatter ${fmtNum(sd)}`
+        + `${systematic ? ' — the offset dominates the scatter, which usually means a '
+          + 'vertical datum mismatch (ellipsoid vs geoid) rather than DEM error' : ''}`,
+      systematic ? 'warn' : 'info', 'GCP')
+    }
+    return rows
+  }
+
+  const fmtNum = (v) => (v == null ? '—' : (Math.abs(v) >= 1000 ? v.toFixed(2) : Number(v.toPrecision(6))))
 
   // Upsert a pixel observation for `imageId` on a GCP (replacing any existing
   // observation for that image) — used by interactive click-to-mark.
@@ -283,6 +402,8 @@ export const useGcpsStore = registerProjectStore(defineStore('gcps', () => {
     setObservation,
     removeObservation,
     removeGcp,
+    fillZFromReferenceDem,
+    checkZAgainstReferenceDem,
     reprojectGcps,
     // project-store contract
     clear,

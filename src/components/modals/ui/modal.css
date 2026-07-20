@@ -127,3 +127,47 @@
   padding: 7px 9px;
   margin-top: 2px;
 }
+
+/* ── Evaluate views: stat tiles (StatTiles.vue) ─────────────────────────────── */
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px;
+}
+.tile {
+  background: var(--bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  padding: 9px 11px;
+}
+.tile-value { font-size: 19px; font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
+.tile-unit { font-size: 12px; font-weight: 400; color: var(--text-dim); }
+.tile-label { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+.tile-hint { font-size: 10px; color: var(--text-dim); margin-top: 3px; opacity: 0.8; }
+.tile.tone-ok   .tile-value { color: var(--accent); }
+.tile.tone-warn .tile-value { color: #e6a01e; }
+.tile.tone-bad  .tile-value { color: #e0533d; }
+
+/* ── Evaluate views: data table (DataTable.vue) ─────────────────────────────── */
+.dt-wrap { width: 100%; overflow-x: auto; }
+.dt { width: 100%; border-collapse: collapse; font-size: 13px; }
+.dt thead th {
+  position: sticky; top: 0; z-index: 1;
+  background: var(--panel); text-align: left; padding: 8px 10px;
+  font-weight: 600; color: var(--text-dim); white-space: nowrap;
+  border-bottom: 1px solid var(--panel-border);
+}
+.dt thead th.sortable { cursor: pointer; user-select: none; }
+.dt thead th.sortable:hover { color: var(--text); }
+.dt-arrow { font-size: 9px; color: var(--accent); margin-left: 3px; }
+.dt tbody td {
+  padding: 7px 10px; border-bottom: 1px solid var(--panel-border);
+  white-space: nowrap; color: var(--text); font-variant-numeric: tabular-nums;
+}
+.dt .align-right  { text-align: right; }
+.dt .align-center { text-align: center; }
+.dt-row { cursor: default; }
+.dt-row.expandable { cursor: pointer; }
+.dt-row:hover { background: rgba(255, 255, 255, 0.04); }
+.dt-detail > td { background: var(--bg); padding: 8px 12px; white-space: normal; }
+.dt-empty { padding: 32px; text-align: center; color: var(--text-dim); font-size: 13px; }

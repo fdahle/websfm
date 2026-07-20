@@ -14,7 +14,10 @@ import ImageTableModal from './components/modals/ImageTableModal.vue'
 import MaskManagerModal from './components/modals/MaskManagerModal.vue'
 import AutoMaskModal from './components/modals/AutoMaskModal.vue'
 import SensorTableModal from './components/modals/SensorTableModal.vue'
+import FiducialDetectModal from './components/modals/FiducialDetectModal.vue'
+import FiducialCalibrateModal from './components/modals/FiducialCalibrateModal.vue'
 import MatchListModal from './components/modals/MatchListModal.vue'
+import QualityReportModal from './components/modals/QualityReportModal.vue'
 import ProgressModal from './components/modals/ProgressModal.vue'
 import SettingsModal from './components/modals/SettingsModal.vue'
 import AboutModal from './components/modals/AboutModal.vue'
@@ -23,10 +26,15 @@ import GlossaryModal from './components/glossary/GlossaryModal.vue'
 import GuideModal from './components/guide/GuideModal.vue'
 import ProjectPicker from './components/layout/ProjectPicker.vue'
 import DevConsole from './components/layout/DevConsole.vue'
+import BrowserWarning from './components/layout/BrowserWarning.vue'
+import ToastStack from './components/layout/ToastStack.vue'
 import { useImagesStore } from './stores/useImagesStore.js'
 import { useMatchesStore } from './stores/useMatchesStore.js'
 import { useTabs } from './composables/useTabs.js'
 import { useImageViewSettings } from './composables/useImageViewSettings.js'
+import { imageResidualVectors } from './core/eval/imageStats.js'
+import { makeCanonicalToScan } from './core/sfm/displayFrame.js'
+import { distortionOf } from './core/sfm/distortion.js'
 import { useProjectsStore } from './stores/useProjectsStore.js'
 import { useTheme } from './composables/useTheme.js'
 import { useModalsStore } from './stores/useModalsStore.js'
@@ -40,12 +48,14 @@ import { useExports } from './composables/useExports.js'
 import { useModalEscape } from './composables/useModalEscape.js'
 import { useBeforeUnload } from './composables/useBeforeUnload.js'
 import { useReconstructionStore } from './stores/useReconstructionStore.js'
+import { useExternalStore } from './stores/useExternalStore.js'
 import { useGcpsStore } from './stores/useGcpsStore.js'
 import { restoreProjectStores, clearProjectStores } from './stores/projectStores.js'
 import { useFootprintsStore } from './stores/useFootprintsStore.js'
 import { useSensorsStore } from './stores/useSensorsStore.js'
 import { usePosesStore } from './stores/usePosesStore.js'
 import './stores/useLogStore.js'   // registers the console as a project-scoped store
+import { useLog } from './composables/useLog.js'
 import ReconstructModal from './components/modals/ReconstructModal.vue'
 import ExportModal from './components/modals/ExportModal.vue'
 import DepthMapsModal from './components/modals/DepthMapsModal.vue'
@@ -62,9 +72,12 @@ import FootprintFromPosesModal from './components/modals/FootprintFromPosesModal
 import CameraImportModal from './components/modals/CameraImportModal.vue'
 import ImportKindModal from './components/modals/ImportKindModal.vue'
 import ImportCloudModal from './components/modals/ImportCloudModal.vue'
+import ImportRasterModal from './components/modals/ImportRasterModal.vue'
+import RasterStyleModal from './components/modals/RasterStyleModal.vue'
 import * as opfs from './utils/opfs.js'
 import { ensureProjection } from './core/crs.js'
 import { resolveK } from './core/sfm/reconstruction.js'
+import { estimateUpFromCameras } from './core/sfm/geometry.js'
 
 // ── Theme ─────────────────────────────────────────────────────────────────────
 const { theme, applyTheme, setTheme } = useTheme()
@@ -86,7 +99,7 @@ const {
   imageById, selectImage,
   addImages, removeImage,
   updateMask, updateDepth, detectAll, clearKeypoints, clearAll,
-  setFiducialObservation, addFiducialObservations,
+  setFiducialObservation, setFiducialDetection, addFiducialObservations, migrateLegacyFiducialDetections,
   restoreImages,
 } = imagesStore
 
@@ -106,8 +119,11 @@ const showMap = computed(() => currentSceneType.value !== 'object')
 
 const {
   tabs, activeTabId,
-  activeTab, activeImageTab, activeView,
+  activeTab, activeImageTab, activeView, openTabIds,
   activateTab, openImageTab, openProductTab, openGcpTab,
+  // Aliased: App.vue wraps this in an `openRasterTab` that also kicks off the
+  // lazy plane hydration.
+  openRasterTab: openRasterTabRaw, closeTabForRaster,
   closeTab, closeTabForImage, moveTab,
   closeAllTabs, closeOtherTabs, closeTabsToLeft, closeTabsToRight,
   resetToViewer,
@@ -140,7 +156,14 @@ const { sidebarWidth, startSidebarResize } = useSidebarResize()
 // Project-scoped store; restore/clear run through the project-store registry.
 const reconstructionStore = useReconstructionStore()
 const { cameras, sparseCameras, points3d, reconStatus, clouds, selectedCloudId, selectedCloud, mainSparseId, mainSparseCloud, depthMapCount, dem, ortho, georef, canGeoreference } = storeToRefs(reconstructionStore)
-const { reconstruct, importColmapModel, importCloud, computeDepthMaps, densify, generateDem, generateOrtho, generateMesh, georeference, gcpAccuracyReport, gcpGuides, selectCloud, removeCloud, renameCloud, setMainSparse } = reconstructionStore
+const { reconstruct, importColmapModel, importCloud, computeDepthMaps, densify, generateDem, generateOrtho, generateMesh, georeference, gcpAccuracyReport, gcpGuides, gcpEstimate, selectCloud, removeCloud, renameCloud, setMainSparse } = reconstructionStore
+
+// ── External reference data (imported DEMs / orthophotos) ─────────────────────
+// Project-scoped; restore/clear run through the project-store registry. Only the
+// index is in memory — pixel planes hydrate on first use (useExternalStore).
+const externalStore = useExternalStore()
+const { rasters, pendingRasters, sources: rasterSources, hasReferenceDem, mapRasters } = storeToRefs(externalStore)
+const { importRaster, setRasterKind, setRasterStyle, setVerticalInfo, setRasterOnMap, setRasterOpacity, removeRaster, rasterById, probeRasterAt, ensureRasterLoaded } = externalStore
 
 // Clicking a point cloud in the sidebar shows it in the 3D viewer.
 function showCloud(id) {
@@ -157,9 +180,27 @@ function zoomToCloud(id) {
 }
 
 // ── Ground Control Points ───────────────────────────────────────────────────────
+const { log } = useLog()
 const gcpsStore = useGcpsStore()
 const { gcps } = storeToRefs(gcpsStore)
 const { addGcps, addGcp, setGcpName, setGcpPosition, setGcpAccuracy, setObservation, removeObservation, removeGcp, reprojectGcps } = gcpsStore
+
+// GCP elevations from an imported reference DEM (the stated goal of the
+// external-reference-data work). The sampler is *injected* rather than imported
+// so useGcpsStore keeps no dependency on the external store; it reprojects the
+// GCP's project-CRS position into the raster's native CRS (the raster itself is
+// never warped) and carries the raster's declared vertical accuracy back with
+// the value, so a filled Z can never claim an accuracy it doesn't have.
+const sampleReferenceDem = (x, y) => externalStore.sampleReferenceDem(x, y)
+
+async function fillGcpZFromReferenceDem() {
+  const res = await gcpsStore.fillZFromReferenceDem(sampleReferenceDem)
+  if (res.filled) refreshGcpReport()
+}
+
+async function checkGcpZAgainstReferenceDem() {
+  await gcpsStore.checkZAgainstReferenceDem(sampleReferenceDem)
+}
 
 // Per-GCP accuracy report (triangulated residual vs. surveyed position + per-
 // observation reprojection error) — refreshed on demand since it triangulates
@@ -180,14 +221,87 @@ function ensureGcpsVisible() {
   if (!imageViewPrefs.value.showGcps) patchImageView({ showGcps: true })
 }
 
+// One line per placed mark — the *only* GCP-guide logging in the app. `guide` is
+// read from activeImageGcpGuides by the caller BEFORE setObservation: marking a GCP
+// retires its guide on that image, so the prediction being compared against only
+// exists until the click lands.
+//
+// The info line reports the gap between where the model predicted the mark and
+// where the user actually clicked. That gap is the diagnostic (METHODS.md §6.4) —
+// it should shrink as marks accumulate, and a large one means the reconstruction
+// and the user disagree. Logging the guides themselves instead (on every recompute)
+// reported the app re-rendering, not the user working.
+async function logGcpMark(gcpId, imageId, imageName, px, py, guide) {
+  const gcp = gcps.value.find((g) => g.id === gcpId)
+  const name = gcp?.name ?? 'GCP'
+  const at = `(${px.toFixed(0)}, ${py.toFixed(0)}) on ${imageName}`
+  // Runs after setObservation, but this excludes the target image, so 0 still
+  // means "the mark just placed is this GCP's first".
+  const otherMarks = (gcp?.observations ?? [])
+    .filter((o) => o.imageId !== imageId && o.px != null && o.py != null).length
+  // Guides are only computed in gcpEdit mode, so an absent guide means either
+  // nothing could be predicted yet, or the user is marking with guides off — say
+  // which, rather than implying a prediction existed and was missed.
+  if (!guide) {
+    const why = otherMarks === 0 ? ' — first mark for this GCP, nothing to predict from yet' : ''
+    log(`GCP "${name}" marked at ${at}${why}`, 'info', 'GCP')
+  } else if (guide.kind === 'line') {
+    // `line` is normalised (a²+b²=1), so |a·u+b·v+c| is a true pixel distance.
+    const d = Math.abs(guide.line[0] * px + guide.line[1] * py + guide.line[2])
+    log(`GCP "${name}" marked at ${at} — ${d.toFixed(1)}px off the epipolar line predicted `
+      + `from its 1 other mark`, 'info', 'GCP')
+  } else {
+    const d = Math.hypot(guide.u - px, guide.v - py)
+    const used = guide.viewCount - (guide.rejectedCount ?? 0)
+    const from = guide.rejectedCount
+      ? `${used} of its ${guide.viewCount} other marks (${guide.rejectedCount} inconsistent with `
+        + `the rest, left out of that prediction only)`
+      : `its ${guide.viewCount} other marks`
+    log(`GCP "${name}" marked at ${at} — ${d.toFixed(1)}px from the position predicted by `
+      + `${from}`, 'info', 'GCP')
+  }
+  await logGcpEstimateShift(gcpId, imageId, px, py, name, guide)
+}
+
+// Detail-only: proof that the new mark actually moved the model's estimate, and
+// which way. Runs AFTER setObservation, so `gcpEstimate` sees the new mark.
+//
+// `guide` (pre-mark) is the prediction from the GCP's *other* N marks; the estimate
+// after the click is fitted from all N+1. Their difference is this mark's influence
+// on where the model puts the GCP, seen on the image being worked on — the only
+// place it's observable, since the guide here retires the moment the mark lands.
+// Expect it to move toward the click and to shrink as N grows (each mark is one
+// vote of N+1). A 0.0px move with the mark counted as inconsistent is the robust
+// fit rejecting it, not a stuck estimate.
+async function logGcpEstimateShift(gcpId, imageId, px, py, name, guide) {
+  if (guide?.kind !== 'point') return   // nothing predicted here before the mark
+  const after = await gcpEstimate(gcpId, imageId)
+  if (!after) return
+  const dx = after.u - guide.u, dy = after.v - guide.v
+  const moved = Math.hypot(dx, dy)
+  // Sign against the click: a mark should pull the estimate toward itself.
+  const toClick = Math.hypot(px - guide.u, py - guide.v)
+  const towards = toClick > 1e-6 && ((px - guide.u) * dx + (py - guide.v) * dy) > 0
+  const dir = moved < 0.05
+    ? 'did not move the estimate (mark consistent with it, or rejected as inconsistent)'
+    : `moved the estimate ${moved.toFixed(1)}px ${towards ? 'toward' : 'away from'} your click `
+      + `(Δx ${dx >= 0 ? '+' : ''}${dx.toFixed(1)}, Δy ${dy >= 0 ? '+' : ''}${dy.toFixed(1)}), `
+      + `now (${after.u.toFixed(1)}, ${after.v.toFixed(1)}) from ${after.viewCount} marks`
+  log(`GCP "${name}": this mark ${dir}`, 'debug', 'GCP')
+}
+
 // Right-click marking in the image view. Assign attaches the clicked pixel to an
 // existing GCP; add-here creates a new GCP already marked at that pixel and
 // selects it. Both refresh the accuracy report so reprojection feedback is live.
+// The guide is captured before setObservation retires it; logging then runs async
+// so the mark itself stays instant.
 function assignGcpObservation(imageId, imageName, { gcpId, px, py }) {
+  const guide = activeImageGcpGuides.value.find((g) => g.gcpId === gcpId)
   setObservation(gcpId, imageId, imageName, px, py)
   selectedGcpId.value = gcpId
   ensureGcpsVisible()
   refreshGcpReport()
+  logGcpMark(gcpId, imageId, imageName, px, py, guide)
 }
 function addGcpAtObservation(imageId, imageName, { px, py }) {
   const id = addGcp()
@@ -195,9 +309,43 @@ function addGcpAtObservation(imageId, imageName, { px, py }) {
   selectedGcpId.value = id
   ensureGcpsVisible()
   refreshGcpReport()
+  logGcpMark(id, imageId, imageName, px, py, null)  // new GCP — never has a guide
+}
+
+// ── GCP ground-position editing from the 2D map ─────────────────────────────────
+// Map coordinates are already in the project CRS (= GCP storage CRS), so a click /
+// drag sets X/Y directly. Z has no top-down axis and is left to the table.
+function setGcpGroundPosition({ id, x, y }) {
+  setGcpPosition(id, 'x', x)
+  setGcpPosition(id, 'y', y)
+  selectedGcpId.value = id
+  const g = gcps.value.find((gg) => gg.id === id)
+  log(`GCP "${g?.name ?? id}" position set to (${x.toFixed(3)}, ${y.toFixed(3)}) ${currentCrs.value}`, 'info', 'GCP')
+  refreshGcpReport()
+}
+function addGcpAtCoord({ x, y }) {
+  const id = addGcp()
+  setGcpPosition(id, 'x', x)
+  setGcpPosition(id, 'y', y)
+  selectedGcpId.value = id
+  refreshGcpReport()
 }
 // Sidebar observation-list actions.
 function jumpToImage({ imageId }) { if (imageId != null) openImageTab(imageId) }
+
+// Quality Report hub: open on a given section.
+function openQuality(section = 'overview') {
+  qualitySection.value = section
+  qualityOpen.value = true
+}
+// From the hub's Image Errors row → open the image AND enable the residual overlay
+// (it's a global toggle, so setting it from here is legitimate — WS3).
+function openImageWithResiduals(imageId) {
+  if (imageId == null) return
+  setImageViewPrefs({ ...imageViewPrefs.value, showResiduals: true })
+  openImageTab(imageId)
+  qualityOpen.value = false
+}
 
 // Double-click a GCP in the sidebar → multi-image inspector tab.
 function openGcpView(gcpId) {
@@ -234,7 +382,7 @@ const sensorsStore = useSensorsStore()
 const { sensors } = storeToRefs(sensorsStore)
 const {
   imageCount: sensorImageCount,
-  addSensors, updateSensor, toggleSensorFixed, setFiducialMarks, assignSensor, mergeSensors, removeSensor, clearSensors, restoreSensors,
+  addSensors, updateSensor, toggleSensorFixed, setFiducialMarks, setFiducialCalibration, migrateLegacyFiducialCalibrations, assignSensor, mergeSensors, removeSensor, clearSensors, restoreSensors,
 } = sensorsStore
 
 // Sensor ids whose intrinsics fall back to the default-FOV guess for at least one
@@ -268,7 +416,10 @@ const {
   cameraImportOpen, cameraImportText, cameraImportName, cameraImportMode,
   importKindOpen, importKindFile,
   importCloudOpen, importCloudData,
+  importRasterOpen, importRasterData, rasterStyleId,
   infoImageId,
+  fiducialDetectOpen, fiducialDetectSensorId, fiducialCalibrateOpen, fiducialCalibrateSensorId,
+  qualityOpen, qualitySection,
 } = storeToRefs(useModalsStore())
 
 const glossaryStore = useGlossaryStore()
@@ -277,6 +428,67 @@ const guideStore = useGuideStore()
 // Resolved image for the Image Info modal. Lives here (not in the modals store)
 // because it needs the image list; moves into the store once images is one too.
 const infoImage = computed(() => infoImageId.value ? imageById(infoImageId.value) : null)
+
+// Detection and calibration target one film sensor independently. Detection only
+// sees that sensor's images; calibration joins the stored anonymous slots later.
+const fiducialDetectSensor = computed(() =>
+  fiducialDetectSensorId.value ? sensors.value.find((s) => s.id === fiducialDetectSensorId.value) ?? null : null)
+const fiducialDetectImages = computed(() =>
+  fiducialDetectSensor.value ? images.value.filter((i) => i.sensorId === fiducialDetectSensor.value.id) : [])
+const fiducialCalibrateSensor = computed(() =>
+  fiducialCalibrateSensorId.value ? sensors.value.find((s) => s.id === fiducialCalibrateSensorId.value) ?? null : null)
+const fiducialCalibrateImages = computed(() =>
+  fiducialCalibrateSensor.value ? images.value.filter((i) => i.sensorId === fiducialCalibrateSensor.value.id) : [])
+
+// Both entry points stay reachable for every film sensor. Calibration directs the
+// user to detection when no accepted spots exist yet.
+const filmSensors = computed(() => sensors.value.filter((s) => s.kind === 'film'))
+
+function fiducialDisplayForImage(imageId) {
+  const img = imageById(imageId), sensor = sensorForImage(imageId)
+  const detections = img?.fiducialDetections || []
+  const cal = sensor?.fiducialCalibration
+  if (cal?.marks?.length) {
+    const byId = new Map(cal.marks.map((m) => [m.id, m]))
+    return {
+      marks: cal.marks,
+      obs: detections.flatMap((d) => { const fidId = cal.slotMap?.[d.slot]; return byId.has(fidId) ? [{ fidId, px: d.px, py: d.py, slot: d.slot }] : [] }),
+    }
+  }
+  return { marks: detections.map((d) => ({ id: d.slot })), obs: detections.map((d) => ({ fidId: d.slot, px: d.px, py: d.py, slot: d.slot })) }
+}
+
+function markDisplayedFiducial(imageId, { fidId, px, py }) {
+  const sensor = sensorForImage(imageId), cal = sensor?.fiducialCalibration
+  const slot = cal ? Object.keys(cal.slotMap || {}).find((s) => cal.slotMap[s] === fidId) : fidId
+  if (slot) setFiducialDetection(imageId, { slot, px, py, family: 'manual', source: 'manual', confidence: 1, reviewed: true })
+}
+
+// Ribbon entry. With one candidate sensor go straight to the modal; with several
+// there is no way to know which is meant, so hand off to the sensor table — the
+// home of film-sensor actions, where each row has its own button.
+function openFiducialDetect() {
+  const candidates = filmSensors.value
+  if (candidates.length === 1) {
+    fiducialDetectSensorId.value = candidates[0].id
+    fiducialDetectOpen.value = true
+    return
+  }
+  sensorTableOpen.value = true
+  log(`${candidates.length} film sensors available — pick one and use "Detect fiducials…"`,
+    'info', 'Fiducial')
+}
+
+function openFiducialCalibrate() {
+  const candidates = filmSensors.value
+  if (candidates.length === 1) {
+    fiducialCalibrateSensorId.value = candidates[0].id
+    fiducialCalibrateOpen.value = true
+    return
+  }
+  sensorTableOpen.value = true
+  log(`${candidates.length} film sensors available — pick one and use "Calibrate fiducials…"`, 'info', 'Fiducial')
+}
 
 // ── Pipeline ──────────────────────────────────────────────────────────────────
 const {
@@ -320,6 +532,7 @@ const commandState = computed(() => ({
   gcpCount:      gcps.value.length,
   poseCount:     poses.value.length,
   sensorCount:   sensors.value.length,
+  filmSensorCount: filmSensors.value.length,
   sparseReady:   sparseReady.value,
   depthMapCount: depthMapCount.value,
   cloudReady:    cloudReady.value,
@@ -438,6 +651,7 @@ const activeImageViewState = computed(() => {
     showMask:      prefs.showMask,
     showDepth:     prefs.showDepth,
     showGcps:      prefs.showGcps,
+    showResiduals: prefs.showResiduals,
     showFiducials: prefs.showFiducials,
     isFilm:        sensorForImage(tab.imageId)?.kind === 'film',
     maskEdit:      prefs.maskEdit,
@@ -454,6 +668,36 @@ const activeImageViewState = computed(() => {
 // GCP observations falling on the active image tab (for marker overlay), each
 // tagged with its live reprojection error (px) from the accuracy report so the
 // viewer can flag a bad mark.
+// Per-observation reprojection residual vectors for the active image (WS3 overlay).
+// Only computed when the overlay is on and the image is registered — otherwise empty.
+const activeImageResiduals = computed(() => {
+  if (!imageViewPrefs.value.showResiduals) return []
+  const tab = activeTab.value
+  if (!tab || tab.type !== 'image') return []
+  const img = imageById(tab.imageId)
+  const cam = img && reconstructionStore.sparseCameras.get(img.uuid)
+  if (!cam) return []
+  return imageResidualVectors(
+    cam, reconstructionStore.mainSparseCloud?.points ?? [], img.uuid,
+    canonicalToScanFor(img, cam),
+  )
+})
+
+// The residual overlay draws computed (pinhole-frame) pixels on the RAW image, so it
+// has to undo what ingest folded out: the distortion bags and, for a film scan, the
+// scan→canonical affine. Returns null when the image needs neither — the common
+// EXIF-only digital case, where the overlay is already in the right frame.
+function canonicalToScanFor(img, cam) {
+  const summary = reconstructionStore.summary
+  const sensor = img.sensorId ? sensors.value.find((s) => s.id === img.sensorId) : null
+  return makeCanonicalToScan({
+    K: cam.K,
+    dist: sensor ? distortionOf(sensor) : null,
+    selfCal: (summary?.selfCalDistortion ?? []).find((d) => d.sensorId === img.sensorId) ?? null,
+    fiducial: (summary?.fiducialTransforms ?? []).find((t) => t.uuid === img.uuid) ?? null,
+  })
+}
+
 const activeImageGcps = computed(() => {
   const tab = activeTab.value
   if (!tab || tab.type !== 'image') return []
@@ -478,10 +722,13 @@ const activeImageGcps = computed(() => {
 // is registered and the GCP overlay is being looked at.
 const activeImageGcpGuides = ref([])
 let guideToken = 0
+// Guides follow `gcpEdit` alone, NOT `showGcps`. They are an aiming aid for
+// *placing* a mark, so they have no purpose while merely viewing GCPs — and since
+// turning gcpEdit on force-enables showGcps (see the ribbon command), gating on
+// `showGcps || gcpEdit` left the guides drawn after the user switched editing off.
 async function refreshGcpGuides() {
   const tab = activeTab.value
-  const prefs = imageViewPrefs.value
-  if (tab?.type !== 'image' || !(prefs.showGcps || prefs.gcpEdit)) {
+  if (tab?.type !== 'image' || !imageViewPrefs.value.gcpEdit) {
     activeImageGcpGuides.value = []
     return
   }
@@ -489,17 +736,30 @@ async function refreshGcpGuides() {
   const res = await gcpGuides(tab.imageId)
   if (token === guideToken) activeImageGcpGuides.value = res
 }
+// Two watchers below feed one refresh, and a single user action commonly trips
+// both (adding/marking a GCP mutates `gcps` *and* selects it), which ran the
+// guides twice and double-logged every line. They can't merge into one watcher:
+// a combined `deep: true` would deep-traverse `sparseCameras`. So coalesce —
+// at most one refresh per tick, after both watchers have fired.
+let guideRefreshQueued = false
+function queueGcpGuidesRefresh() {
+  if (guideRefreshQueued) return
+  guideRefreshQueued = true
+  nextTick(() => { guideRefreshQueued = false; refreshGcpGuides() })
+}
 // Cameras change on a rebuild (`sparseCameras` is a fresh Map), so a shallow
 // watch catches it — no deep traversal of every camera's R/t/K.
+// Not selectedGcpId: the guide set doesn't depend on it (every unmarked GCP gets
+// one; selection only changes which are drawn boldly, which is ViewerImage's own
+// prop). Watching it here just recomputed the identical set on every row click.
 watch(
-  [() => activeTab.value?.imageId, () => imageViewPrefs.value.showGcps,
-   () => imageViewPrefs.value.gcpEdit, sparseCameras],
-  refreshGcpGuides,
+  [() => activeTab.value?.imageId, () => imageViewPrefs.value.gcpEdit, sparseCameras],
+  queueGcpGuidesRefresh,
   { immediate: true },
 )
 // Marks mutate in place, so this one needs to be deep — it's what retires a
 // guide the moment its GCP is marked on this image.
-watch(gcps, refreshGcpGuides, { deep: true })
+watch(gcps, queueGcpGuidesRefresh, { deep: true })
 
 // Just [{ id, name }] of every GCP — the image viewer's right-click "assign to
 // existing" submenu.
@@ -514,6 +774,12 @@ function sensorForImage(imageId) {
 // ── Viewer ref (for imperative point-cloud updates) ───────────────────────────
 const viewerRef = ref(null)
 const mapViewerRef = ref(null)
+
+// Estimated scene "up" from the reconstruction's camera poses — passed to Viewer3D so
+// a dense/mesh cloud (which carries no cameras of its own) still frames level, the
+// same way COLMAP/Metashape orient the view (see estimateUpFromCameras). Derived from
+// the sparse cameras, so it's stable across sparse↔dense↔mesh selections.
+const viewerSceneUp = computed(() => estimateUpFromCameras(sparseCameras.value))
 
 // Push the selected point cloud into the 3D viewer. Reference changes on select,
 // rebuild (a fresh object replaces the sparse cloud), and restore.
@@ -551,12 +817,12 @@ watch(activeTabId, (id) => { if (id === 'viewer') flushScene() })
 
 // ── 3D scene display toggles ───────────────────────────────────────────────────
 const showCameras = ref(true)
-const showGraticule = ref(true)
+const showGrid = ref(true)
 // ── Map display toggles ────────────────────────────────────────────────────────
 // Footprints default off — they clutter the basemap and are only meaningful once
 // imported/computed; the ribbon toggle turns them on.
 const showFootprints = ref(false)
-const showMapGraticule = ref(true)
+const showMapGrid = ref(true)
 
 // ── Console ───────────────────────────────────────────────────────────────────
 // True while a project is being restored — drives the interaction-blocking overlay.
@@ -629,6 +895,8 @@ async function openProject(id) {
     await restoreImages(projectData.images || [], id, (done, total, label) => {
       projectLoadingProgress.value = { done, total, label }
     })
+    migrateLegacyFiducialDetections(sensors.value)
+    migrateLegacyFiducialCalibrations(images.value)
     projectLoadingProgress.value = null
     await restoreProjectStores({ projectId: id, projectData })
     // restore() sets selectedCloud, which the watcher pushes into the viewer.
@@ -679,9 +947,17 @@ const {
   openImportFile, openDroppedImport, routeImport,
   onImportKindChosen, onImportSwitchKind,
   onCloudImport, onCloudPick,
+  openRasterImport, onRasterPick, addImagesRouted,
   openCameraImport, onCameraImport, onGcpImport, onFootprintImport,
   onGcpPick, onCameraPick, onColmapPick,
-} = useImportRouting({ addGcps, addFootprints, addSensors, addPoses, addFiducialObs: addFiducialObservations, importColmap: importColmapModel, importCloud, activateTab })
+} = useImportRouting({
+  addGcps, addFootprints, addSensors, addPoses, addFiducialObs: addFiducialObservations,
+  importColmap: importColmapModel, importCloud,
+  // A dropped `.tif` arrives as `image/tiff` and would otherwise be ingested as
+  // a source photo, so the image path is routed through the georeference fork.
+  importRaster, addImages,
+  activateTab,
+})
 
 // Switch to the map and centre it on an image's position (pose or EXIF GPS).
 function zoomToImagePosition(imgId) {
@@ -715,6 +991,8 @@ async function handleSwitchProject(id) {
 }
 
 async function handleDeleteProject(id) {
+  // Capture before deleting: deleteProjectById nulls currentProjectId itself.
+  const wasCurrent = id === currentProjectId.value
   const nextId = await deleteProjectById(id)
 
   // Deleting the last project leaves nothing to pick — close the picker and go
@@ -723,17 +1001,17 @@ async function handleDeleteProject(id) {
     projectPickerOpen.value = false
     clearAll(resetToViewer)
     clearSensors()
-    clearProjectStores({ purge: true })
+    clearProjectStores()
     viewerRef.value?.clearReconstructionData()
     newProjectCanCancel.value = false
     newProjectOpen.value = true
     return
   }
 
-  if (id === currentProjectId.value) {
+  if (wasCurrent) {
     clearAll(resetToViewer)
     clearSensors()
-    clearProjectStores({ purge: true })
+    clearProjectStores()
     viewerRef.value?.clearReconstructionData()
     if (nextId) await openProject(nextId)
   }
@@ -820,6 +1098,108 @@ function confirmRemoveCloud(id) {
     onConfirm: () => removeCloud(id),
   })
 }
+// Open an imported reference raster in its own tab. The tab opens immediately
+// (the preview PNG is in the index, so there's something to look at at once) and
+// the full plane hydrates behind it — a REMA tile is hundreds of MB and must not
+// block the tab switch.
+function openRasterTab(id) {
+  const meta = externalStore.rasterById(id)
+  if (!meta) return
+  openRasterTabRaw(id, meta.name)
+  externalStore.ensureRasterLoaded(id)
+}
+
+// The import modal's escape hatch: the geokey sniff said "reference raster" but
+// this really is a source photo (a georeferenced aerial frame is unusual, not
+// impossible — and a scan carrying a degenerate identity geotransform trips it).
+// Pull the original back out, hand it to the image ingest, and drop the
+// reference-data record.
+//
+// Via the store, NOT opfs directly: `external/{id}.src` is only written when the
+// project persists, so in a non-persisting project the sole copy is the in-memory
+// one the store holds — reading OPFS here made the escape hatch fail on exactly
+// the freshly-imported raster the user was trying to rescue.
+async function onRasterImportAsImage({ id }) {
+  const meta = externalStore.rasterById(id)
+  if (!meta) return
+  importRasterOpen.value = false
+  importRasterData.value = null
+  const file = await externalStore.originalFile(id)
+  if (!file) {
+    log(`Could not re-read "${meta.name}" to import it as an image — re-add the file.`, 'warn', 'Import')
+    return
+  }
+  // Reachable from the Reference Data right-click too, where the raster may have
+  // an open tab — it would otherwise linger showing an empty viewer.
+  closeTabForRaster(id)
+  await removeRaster(id)
+  addImages([new File([file], meta.name, { type: 'image/tiff' })])
+}
+
+// The mirror of onRasterImportAsImage: a GeoTIFF that the ingest-time geokey
+// sniff sent down the source-photo path (tags written in a form geotiff.js
+// couldn't read, or absent when the user expected them). Re-read the original
+// TIFF out of OPFS, import it as a reference raster, and drop the image entry —
+// but ONLY if the raster import actually succeeded, so a file with no
+// geotransform stays where it is instead of vanishing from both sections.
+async function convertImageToRaster(imageId) {
+  const img = imageById(imageId)
+  if (!img) return
+  askConfirm({
+    title: 'Convert to reference data?',
+    message: `Re-import “${img.name}” as an imported DEM / orthophoto? It is removed from `
+      + 'the source images, along with its keypoints, mask, depth map and matches.',
+    confirmLabel: 'Convert',
+    onConfirm: async () => {
+      // Two sources for the ORIGINAL TIFF, and both are needed: a freshly added
+      // image still holds its File in memory (and in a non-persisting project
+      // that is the ONLY copy — addImages only writes to OPFS when persisting),
+      // while a restored image has `file: null` and lives in OPFS. Note the OPFS
+      // key is `uuid`, NOT `id` (which is name-size-lastModified) — getFileHandle
+      // throws NotFoundError rather than returning null, so this must be caught.
+      let file = img.file
+      if (!file) {
+        try {
+          const blob = await opfs.loadImageBlob(projects.currentProjectId, img.uuid)
+          if (blob) file = new File([blob], img.name, { type: 'image/tiff' })
+        } catch { /* fall through to the warning below */ }
+      }
+      if (!file) {
+        log(`Could not re-read “${img.name}” to convert it — re-add the file.`, 'warn', 'Import')
+        return
+      }
+      // alwaysConfirm: the auto-sniff already declined this file once, so its
+      // DEM-vs-ortho guess has not earned a silent import here.
+      const record = await openRasterImport(file, { alwaysConfirm: true })
+      if (!record) return // importRaster already logged why; keep the image
+      removeImage(imageId, closeTabForImage)
+    },
+  })
+}
+
+// The raster the Style modal is editing, resolved live from the store: a
+// restyle replaces the record, so holding the object would leave the modal
+// showing the pre-restyle preview.
+const rasterBeingStyled = computed(() =>
+  rasterStyleId.value ? externalStore.rasterById(rasterStyleId.value) : null)
+
+async function onRasterStyleApply({ id, style }) {
+  rasterStyleId.value = null
+  await setRasterStyle(id, style)
+}
+
+function confirmRemoveRaster(id) {
+  const r = externalStore.rasterById(id)
+  askConfirm({
+    title: 'Remove reference raster?',
+    message: `Remove “${r?.name ?? 'this raster'}”? The imported file is deleted from the project. This can't be undone.`,
+    onConfirm: async () => {
+      closeTabForRaster(id)
+      await removeRaster(id)
+    },
+  })
+}
+
 function confirmRemoveGcp(id) {
   const g = gcps.value.find((x) => x.id === id)
   askConfirm({
@@ -851,11 +1231,44 @@ function confirmClearKeypoints(idOrIds) {
 
 // ── ImageViewer refs (for imperative mask ops) ────────────────────────────────
 const imageViewerRefs = reactive({})
+
+// ── Raster tabs (DEM / orthophoto / imported reference) ───────────────────────
+// One ProductViewer ref per open raster tab, for the Ribbon's contextual tab to
+// drive fit/zoom imperatively (mirrors imageViewerRefs).
+const productViewerRefs = reactive({})
+
+// The raster tab in front, if any — the Ribbon's contextual-tab trigger and the
+// target of every `raster-*` command. A computed product has no id/name of its
+// own; an imported one carries its record so the tab can label + restyle it.
+const activeRasterTab = computed(() => {
+  const tab = activeTab.value
+  if (tab?.type === 'product') {
+    return { tabId: tab.id, kind: tab.productKind, imported: false, name: tab.title }
+  }
+  if (tab?.type === 'raster') {
+    const r = rasterById(tab.rasterId)
+    return {
+      tabId: tab.id,
+      rasterId: tab.rasterId,
+      kind: r?.kind ?? 'dem',
+      imported: true,
+      name: r?.name ?? 'Raster',
+      onMap: !!r?.onMap,
+    }
+  }
+  return null
+})
+
+function activeProductViewer() {
+  const t = activeRasterTab.value
+  return t ? productViewerRefs[t.tabId] ?? null : null
+}
 const ribbonInput = ref(null)
 const gcpInput = ref(null)
 const cameraInput = ref(null)
 const colmapInput = ref(null)
 const cloudInput = ref(null)
+const rasterInput = ref(null)
 // cameraPickMode comes from useImportRouting (above); the command dispatch sets it
 // before opening the hidden camera-file <input>.
 
@@ -868,6 +1281,7 @@ function handleCommand(id) {
     case 'import-calib':         cameraPickMode.value = 'sensor'; cameraInput.value.click(); break
     case 'import-colmap':        colmapInput.value.click(); break
     case 'import-cloud':         cloudInput.value.click(); break
+    case 'import-raster':        rasterInput.value.click(); break
     case 'export-cameras':       exportPoses(); break
     case 'export-sensors':       exportSensors(); break
     case 'export-cloud':         exportKind.value = 'cloud'; break
@@ -890,13 +1304,15 @@ function handleCommand(id) {
     case 'view-preset-back':     viewerRef.value?.setView('back'); break
     case 'reset-view':           viewerRef.value?.resetView(); break
     case 'view-toggle-cameras':  showCameras.value = !showCameras.value; break
-    case 'view-toggle-graticule': showGraticule.value = !showGraticule.value; break
+    case 'view-toggle-grid': showGrid.value = !showGrid.value; break
     case 'map-fit-view':         mapViewerRef.value?.fitView(); break
-    case 'map-toggle-graticule': showMapGraticule.value = !showMapGraticule.value; break
+    case 'map-toggle-grid': showMapGrid.value = !showMapGrid.value; break
     case 'map-toggle-footprints': showFootprints.value = !showFootprints.value; break
     case 'open-image-table':     imageTableOpen.value = true; break
     case 'open-mask-manager':    maskManagerOpen.value = true; break
     case 'auto-mask':            autoMaskOpen.value = true; break
+    case 'detect-fiducials':     openFiducialDetect(); break
+    case 'calibrate-fiducials':  openFiducialCalibrate(); break
     case 'open-sensor-table':    sensorTableOpen.value = true; break
     case 'open-gcp-table':       gcpTableOpen.value = true; refreshGcpReport(); break
     case 'open-match-list':      matchListOpen.value = true; break
@@ -907,6 +1323,18 @@ function handleCommand(id) {
     case 'gen-ortho':            orthoOpen.value = true; break
     case 'gen-mesh':             meshOpen.value = true; break
     case 'auto-georeference':    georeference(); break
+    // Quality Report hub — old command ids kept as deep-links into hub sections so
+    // muscle memory / logs stay valid (PLAN-eval-quality-hub WS0).
+    case 'eval-overview':        openQuality('overview'); break
+    case 'eval-reconstruction':
+    case 'eval-images':          openQuality('sparse'); break
+    case 'eval-calibration':     openQuality('calibration'); break
+    case 'eval-gcps':
+    case 'eval-poses':
+    case 'eval-dem-gcps':        openQuality('accuracy'); break
+    case 'eval-match-graph':     openQuality('matching'); break
+    case 'eval-coverage':        openQuality('coverage'); break
+    case 'eval-depth-coverage':  openQuality('dense'); break
     case 'footprints-from-poses': footprintFromPosesOpen.value = true; break
     case 'detect-features':      detectFeaturesOpen.value = true; break
     case 'match-features':       matchFeaturesOpen.value = true; break
@@ -916,6 +1344,16 @@ function handleCommand(id) {
     case 'open-guide':           guideStore.openHome(); break
     case 'open-project-picker':  projectPickerOpen.value = !projectPickerOpen.value; break
     case 'toggle-console':       consoleOpen.value = !consoleOpen.value; break
+    case 'raster-fit':           activeProductViewer()?.fit(); break
+    case 'raster-zoom-in':       activeProductViewer()?.zoomBy(1.4); break
+    case 'raster-zoom-out':      activeProductViewer()?.zoomBy(1 / 1.4); break
+    case 'raster-style':         if (activeRasterTab.value?.rasterId) rasterStyleId.value = activeRasterTab.value.rasterId; break
+    case 'raster-toggle-map': {
+      const r = activeRasterTab.value
+      if (r?.rasterId) setRasterOnMap(r.rasterId, !r.onMap)
+      break
+    }
+    case 'raster-remove':        if (activeRasterTab.value?.rasterId) confirmRemoveRaster(activeRasterTab.value.rasterId); break
     case 'img-show-info':        if (activeImageTab.value) infoImageId.value = activeImageTab.value.id; break
     case 'img-remove':           if (activeImageTab.value) requestRemoveImages(activeImageTab.value.id); break
     case 'img-toggle-keypoints': {
@@ -941,6 +1379,10 @@ function handleCommand(id) {
     }
     case 'img-toggle-gcps': {
       if (activeTab.value?.type === 'image') patchImageView({ showGcps: !imageViewPrefs.value.showGcps })
+      break
+    }
+    case 'img-toggle-residuals': {
+      if (activeTab.value?.type === 'image') patchImageView({ showResiduals: !imageViewPrefs.value.showResiduals })
       break
     }
     case 'img-toggle-fiducials': {
@@ -971,13 +1413,17 @@ function handleCommand(id) {
 
 function onRibbonPick(event) {
   const files = [...event.target.files].filter((f) => f.type.startsWith('image/'))
-  if (files.length) addImages(files)
+  // Same georeference fork as the drop path: a picked GeoTIFF DEM is reference
+  // data, not a source photo, and it arrives here as `image/tiff`.
+  if (files.length) addImagesRouted(files)
   event.target.value = ''
 }
 </script>
 
 <template>
   <div class="app">
+    <BrowserWarning />
+    <ToastStack />
     <Ribbon
       :active-view="activeView"
       :has-selection="!!selected"
@@ -988,6 +1434,7 @@ function onRibbonPick(event) {
       :gcp-count="gcps.length"
       :pose-count="poses.length"
       :sensor-count="sensors.length"
+      :film-sensor-count="filmSensors.length"
       :sparse-ready="sparseReady"
       :depth-map-count="depthMapCount"
       :cloud-ready="cloudReady"
@@ -999,13 +1446,14 @@ function onRibbonPick(event) {
       :active-image-id="activeImageTab?.id ?? null"
       :active-image-name="activeImageTab?.name ?? null"
       :image-view-state="activeImageViewState"
+      :active-raster="activeRasterTab"
       :console-open="consoleOpen"
       :persistence-enabled="persistenceAvailable"
       :current-project-name="currentProjectName"
       :scene-type="currentSceneType"
       :show-cameras="showCameras"
-      :show-graticule="showGraticule"
-      :show-map-graticule="showMapGraticule"
+      :show-grid="showGrid"
+      :show-map-grid="showMapGrid"
       :show-footprints="showFootprints"
       :footprint-count="footprints.length"
       @command="handleCommand"
@@ -1015,6 +1463,7 @@ function onRibbonPick(event) {
     <input ref="cameraInput" type="file" accept=".csv,.txt,.tsv,.cam,text/*" hidden @change="onCameraPick" />
     <input ref="colmapInput" type="file" accept=".txt,.bin,.zip" multiple hidden @change="onColmapPick" />
     <input ref="cloudInput" type="file" accept=".ply,.las,.laz,.xyz,.pts" hidden @change="onCloudPick" />
+    <input ref="rasterInput" type="file" accept=".tif,.tiff" hidden @change="onRasterPick" />
 
     <div v-if="projectPickerOpen && !currentProjectId" class="project-backdrop" />
 
@@ -1182,6 +1631,26 @@ function onRibbonPick(event) {
     </Teleport>
 
     <Teleport to="body">
+      <ImportRasterModal
+        v-if="importRasterOpen && importRasterData"
+        :data="importRasterData"
+        @close="importRasterOpen = false; importRasterData = null"
+        @set-kind="({ id, kind }) => setRasterKind(id, kind)"
+        @set-vertical="({ id, ...v }) => setVerticalInfo(id, v)"
+        @import-as-image="onRasterImportAsImage"
+      />
+    </Teleport>
+
+    <Teleport to="body">
+      <RasterStyleModal
+        v-if="rasterBeingStyled"
+        :raster="rasterBeingStyled"
+        @close="rasterStyleId = null"
+        @apply="onRasterStyleApply"
+      />
+    </Teleport>
+
+    <Teleport to="body">
       <FootprintImportModal
         v-if="footprintImportOpen && footprintImportData"
         :features="footprintImportData.features"
@@ -1284,7 +1753,29 @@ function onRibbonPick(event) {
         @update="({ id, field, value }) => updateSensor(id, field, value)"
         @toggle-fixed="({ id, field }) => toggleSensorFixed(id, field)"
         @set-fiducial-marks="({ id, marks }) => setFiducialMarks(id, marks)"
+        @detect-fiducials="(id) => { fiducialDetectSensorId = id; fiducialDetectOpen = true }"
+        @calibrate-fiducials="(id) => { fiducialCalibrateSensorId = id; fiducialCalibrateOpen = true }"
         @remove="removeSensor"
+      />
+    </Teleport>
+
+    <Teleport to="body">
+      <FiducialCalibrateModal
+        v-if="fiducialCalibrateOpen && fiducialCalibrateSensor"
+        :sensor="fiducialCalibrateSensor"
+        :images="fiducialCalibrateImages"
+        @close="fiducialCalibrateOpen = false"
+        @detect="() => { fiducialCalibrateOpen = false; fiducialDetectSensorId = fiducialCalibrateSensor.id; fiducialDetectOpen = true }"
+      />
+    </Teleport>
+
+    <Teleport to="body">
+      <FiducialDetectModal
+        v-if="fiducialDetectOpen && fiducialDetectSensor"
+        :sensor="fiducialDetectSensor"
+        :images="fiducialDetectImages"
+        @close="fiducialDetectOpen = false"
+        @open-image="(id) => { openImageTab(id); fiducialDetectOpen = false; sensorTableOpen = false }"
       />
     </Teleport>
 
@@ -1295,6 +1786,9 @@ function onRibbonPick(event) {
         :crs="currentCrs"
         :report="gcpReport"
         :selected-gcp-id="selectedGcpId"
+        :has-reference-dem="hasReferenceDem"
+        @fill-z="fillGcpZFromReferenceDem"
+        @check-z="checkGcpZAgainstReferenceDem"
         @close="gcpTableOpen = false"
         @remove="removeGcpAndCloseTab"
         @update-accuracy="({ id, kind, value }) => setGcpAccuracy(id, kind, value)"
@@ -1330,6 +1824,18 @@ function onRibbonPick(event) {
       />
     </Teleport>
 
+    <!-- Evaluate tab: the Quality Report hub (PLAN-eval-quality-hub) -->
+    <Teleport to="body">
+      <QualityReportModal
+        v-if="qualityOpen"
+        :section="qualitySection"
+        @close="qualityOpen = false"
+        @open-image="(id) => { openImageTab(id); qualityOpen = false }"
+        @open-image-residuals="openImageWithResiduals"
+        @open-match-list="qualityOpen = false; matchListOpen = true"
+      />
+    </Teleport>
+
     <GlossaryModal />
     <GuideModal />
 
@@ -1355,16 +1861,27 @@ function onRibbonPick(event) {
         :has-sparse="hasSparse"
         :dem="dem"
         :ortho="ortho"
+        :rasters="rasters"
+        :pending-rasters="pendingRasters"
+        :open-tab-ids="openTabIds"
         @open-product="openProductTab"
+        @open-raster="openRasterTab"
+        @convert-raster-to-image="(id) => onRasterImportAsImage({ id })"
+        @remove-raster="confirmRemoveRaster"
+        @set-raster-kind="({ id, kind }) => setRasterKind(id, kind)"
+        @style-raster="(id) => (rasterStyleId = id)"
+        @set-raster-on-map="({ id, onMap }) => setRasterOnMap(id, onMap)"
+        @set-raster-opacity="({ id, opacity }) => setRasterOpacity(id, opacity)"
         @open-matches="matchListOpen = true"
         @select-cloud="showCloud"
         @remove-cloud="confirmRemoveCloud"
         @rename-cloud="({ id, name }) => renameCloud(id, name)"
         @set-main-cloud="setMainSparse"
         @reconstruct="reconstructOpen = true"
-        @add-images="addImages"
+        @add-images="addImagesRouted"
         @import-file="openDroppedImport"
         @remove-image="requestRemoveImages"
+        @convert-image-to-raster="convertImageToRaster"
         @remove-gcp="confirmRemoveGcp"
         @select-gcp="selectGcp"
         @jump-to-image="jumpToImage"
@@ -1409,8 +1926,8 @@ function onRibbonPick(event) {
         </div>
 
         <div class="content">
-          <Viewer3D ref="viewerRef" v-show="activeTabId === 'viewer'" :theme="theme" :images="images" :show-cameras="showCameras" :show-graticule="showGraticule" @command="handleCommand" />
-          <ViewerMap ref="mapViewerRef" v-show="activeTabId === 'map'" :images="images" :gcps="gcps" :footprints="footprints" :poses="poses" :selected-id="selectedId" :aligned-uuids="alignedUuids" :has-sparse="hasSparse" :crs="currentCrs" :show-footprints="showFootprints" :show-graticule="showMapGraticule" @select="selectImage" @command="handleCommand" />
+          <Viewer3D ref="viewerRef" v-show="activeTabId === 'viewer'" :theme="theme" :images="images" :show-cameras="showCameras" :show-grid="showGrid" :scene-up="viewerSceneUp" @command="handleCommand" />
+          <ViewerMap ref="mapViewerRef" v-show="activeTabId === 'map'" :images="images" :gcps="gcps" :footprints="footprints" :poses="poses" :selected-id="selectedId" :selected-gcp-id="selectedGcpId" :aligned-uuids="alignedUuids" :has-sparse="hasSparse" :crs="currentCrs" :show-footprints="showFootprints" :show-grid="showMapGrid" :rasters="mapRasters" :probe-raster="probeRasterAt" :load-raster="ensureRasterLoaded" @select="selectImage" @command="handleCommand" @select-gcp="selectGcp" @set-gcp-position="setGcpGroundPosition" @add-gcp-at="addGcpAtCoord" @delete-gcp="deleteGcpFromEditor" />
           <template v-for="tab in tabs" :key="tab.id">
             <ViewerImage
               v-if="tab.type === 'image' && imageById(tab.imageId)"
@@ -1423,6 +1940,8 @@ function onRibbonPick(event) {
               :show-gcps="imageViewPrefs.showGcps"
               :gcps="activeTabId === tab.id ? activeImageGcps : []"
               :gcp-guides="activeTabId === tab.id ? activeImageGcpGuides : []"
+              :show-residuals="imageViewPrefs.showResiduals"
+              :residuals="activeTabId === tab.id ? activeImageResiduals : []"
               :all-gcps="allGcpsBrief"
               :selected-gcp-id="selectedGcpId"
               :mask-edit="imageViewPrefs.maskEdit"
@@ -1433,13 +1952,13 @@ function onRibbonPick(event) {
               @update-depth="(dataUrl) => updateDepth(tab.imageId, dataUrl)"
               :is-film="sensorForImage(tab.imageId)?.kind === 'film'"
               :show-fiducials="imageViewPrefs.showFiducials"
-              :fiducial-marks="sensorForImage(tab.imageId)?.fiducials?.marks ?? []"
-              :fiducial-obs="imageById(tab.imageId)?.fiducialObs ?? []"
+              :fiducial-marks="fiducialDisplayForImage(tab.imageId).marks"
+              :fiducial-obs="fiducialDisplayForImage(tab.imageId).obs"
               @mark-gcp="(pt) => assignGcpObservation(tab.imageId, imageById(tab.imageId)?.name, pt)"
               @add-gcp="(pt) => addGcpAtObservation(tab.imageId, imageById(tab.imageId)?.name, pt)"
               @select-gcp="selectGcp"
               @delete-gcp="deleteGcpFromEditor"
-              @mark-fiducial="({ fidId, px, py }) => setFiducialObservation(tab.imageId, fidId, px, py)"
+              @mark-fiducial="(event) => markDisplayedFiducial(tab.imageId, event)"
             />
             <ViewerGcp
               v-else-if="tab.type === 'gcp'"
@@ -1452,8 +1971,18 @@ function onRibbonPick(event) {
             <ProductViewer
               v-else-if="tab.type === 'product'"
               v-show="activeTabId === tab.id"
+              :ref="(el) => { if (el) productViewerRefs[tab.id] = el; else delete productViewerRefs[tab.id] }"
               :kind="tab.productKind"
               :product="tab.productKind === 'ortho' ? ortho : dem"
+            />
+            <!-- Same viewer, imported raster instead of a computed product. -->
+            <ProductViewer
+              v-else-if="tab.type === 'raster'"
+              v-show="activeTabId === tab.id"
+              :ref="(el) => { if (el) productViewerRefs[tab.id] = el; else delete productViewerRefs[tab.id] }"
+              :kind="rasterById(tab.rasterId)?.kind ?? 'dem'"
+              :product="rasterById(tab.rasterId)"
+              :source="rasterSources.get(tab.rasterId) ?? null"
             />
           </template>
 
@@ -1627,13 +2156,24 @@ function onRibbonPick(event) {
   min-height: 0;
 }
 
-/* Sidebar resize handle — a thin draggable strip between sidebar and main. */
+/* Sidebar resize handle. Takes NO layout width (1px basis cancelled by a -1px
+   margin), so the sidebar's own border-right stays the visual seam instead of a
+   gap of page background sitting between the panels. The grab target is widened
+   to ~7px by the ::after overlay, which is invisible but hoverable — so dragging
+   is as easy as before while the handle only shows itself (accent line) on hover. */
 .sidebar-resizer {
-  flex-shrink: 0;
-  width: 5px;
+  flex: 0 0 1px;
+  margin-right: -1px;
+  position: relative;
   cursor: ew-resize;
   background: transparent;
+  transition: background 0.12s;
   z-index: 5;
+}
+.sidebar-resizer::after {
+  content: '';
+  position: absolute;
+  inset: 0 -3px;
 }
 .sidebar-resizer:hover { background: var(--accent); }
 

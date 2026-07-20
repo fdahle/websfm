@@ -99,6 +99,16 @@ export async function selectInitPair(
     return { status: 'idle' }
   }
 
+  // Match-graph degree per image, for the seed's connectivity health (scored below).
+  const degree = new Map()
+  for (const e of donePairs) {
+    degree.set(e.idA, (degree.get(e.idA) ?? 0) + 1)
+    degree.set(e.idB, (degree.get(e.idB) ?? 0) + 1)
+  }
+  const degs = [...degree.values()].sort((a, b) => a - b)
+  const medianDegree = degs.length ? degs[degs.length >> 1] : 0
+  const pairDegree = (entry) => Math.min(degree.get(entry.idA) ?? 0, degree.get(entry.idB) ?? 0)
+
   // Probe *every* candidate (don't stop at the first adequate one) so we can both
   // log the full table and pick the geometrically cleanest seed. A seed's init
   // reprojection is the single best predictor of how well the model will grow:
@@ -138,7 +148,8 @@ export async function selectInitPair(
     const candRatio = init.esv.s1 > 0 ? init.esv.s2 / init.esv.s1 : 0
     log(`Reconstruction: candidate ${nameA} ↔ ${nameB} — ${init.inliers} inliers, `
       + `${kept}/${tri} pts kept after cheirality (${pct}%), median parallax ${init.angle.toFixed(2)}°, `
-      + `init reproj median ${init.reproj.median.toFixed(2)}px, E σ2/σ1 ${candRatio.toFixed(2)}`,
+      + `init reproj median ${init.reproj.median.toFixed(2)}px, E σ2/σ1 ${candRatio.toFixed(2)}, `
+      + `graph degree ${pairDegree(entry)} (median ${medianDegree})`,
       'debug', 'Reconstruction')
     viable.push(init)
   }
@@ -163,21 +174,38 @@ export async function selectInitPair(
   // is a weak signal here (it is measured before any distortion self-cal), so it only
   // breaks ties / rejects the wrong-pose high-reproj seeds cheirality misses; it never
   // dominates. If none clear the floor, fall back to the widest baseline available.
-  const { initAngleTargetDeg = 8 } = settings
+  const { initAngleTargetDeg = 8, initConnFloor = 0.4 } = settings
   const parallaxHealth = (a) => {
     if (a <= minInitAngleDeg) return 0
     if (a < initAngleTargetDeg) return (a - minInitAngleDeg) / (initAngleTargetDeg - minInitAngleDeg)
     const wide = initAngleTargetDeg * 4 // grazing baselines: overlap decays, so does benefit
     return a <= wide ? 1 : Math.max(0.4, wide / a)
   }
-  const seedScore = (v) => v.cheiralKept * parallaxHealth(v.angle) / (1 + v.reproj.median / 4)
+
+  // Connectivity health: how well-connected the seed's two images are in the match graph,
+  // relative to the median image. A geometrically perfect pair inside a small, weakly-
+  // attached sub-block (e.g. the building set's close-range tail images, which match each
+  // other by 1000+ inliers but reach the main block only through a few edges) seeds a model
+  // that grows into a corner and stalls — the 2026-07-17 baseline picked exactly such a
+  // seed and stalled at 3 cameras, while COLMAP seeded mid-sequence and registered 50/50.
+  // Discount, never disqualify: capped at 1 (extra connectivity past the median buys
+  // nothing) and floored at initConnFloor (a great pair in a thin neighbourhood is still a
+  // candidate). On a uniformly-connected graph every seed scores ~1 and this is inert.
+  const connectivityHealth = (v) => (medianDegree
+    ? Math.max(initConnFloor, Math.min(1, pairDegree(v.entry) / medianDegree))
+    : 1)
+
+  const seedScore = (v) => v.cheiralKept * parallaxHealth(v.angle) * connectivityHealth(v)
+    / (1 + v.reproj.median / 4)
   const adequate = viable.filter((v) => v.angle >= minInitAngleDeg)
   let best = null
   if (adequate.length) {
     best = adequate.reduce((a, b) => (seedScore(b) > seedScore(a) ? b : a))
     log(`Reconstruction: selected seed ${best.nameA} ↔ ${best.nameB} of ${adequate.length} `
       + `pair(s) over ${minInitAngleDeg}° parallax (best-conditioned: ${best.cheiralKept} pts, `
-      + `${best.angle.toFixed(2)}° parallax, init reproj median ${best.reproj.median.toFixed(2)}px)`,
+      + `${best.angle.toFixed(2)}° parallax, init reproj median ${best.reproj.median.toFixed(2)}px, `
+      + `connectivity ${connectivityHealth(best).toFixed(2)} at graph degree ${pairDegree(best.entry)} `
+      + `vs median ${medianDegree})`,
       'info', 'Reconstruction')
   } else if (viable.length) {
     best = viable.reduce((a, b) => (b.angle > a.angle ? b : a))

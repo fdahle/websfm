@@ -37,6 +37,114 @@ still unvalidated on real data (Now ▸ R).
 
 ## Now
 
+### FDR — fiducial split: browser verification owed (shipped 2026-07-20)
+The code-side rework is complete: **Detect Fiducials** finds anonymous corner/side
+structures without metric calibration or a prepared reference. **Calibrate
+Fiducials** is an independent command for certificate mapping or batch layout
+estimation. Persistence migration and sparse/dense reconstruction use the new
+joined model. Owed: exercise Generic, Right angle, 45° and Frame modes on
+representative real scans; review tolerance/drafts and generated frame masks; then
+validate certificate and batch RMS. Acceptance record:
+`PLAN-fiducial-detection-calibration.md`.
+
+### RR — Reference rasters: raw storage + COG + draw-time styling (2026-07-20)
+Re-architecture, **not** a fix: the imported-raster path stores a *baked* plane (RGBA
+for orthos), so styling is a ~10 s re-decode of the original, the ortho bake has no
+reader (`readWindow` has no consumers; `sampleAt` is null for orthos), and raw values —
+needed for automatic GCP finding against satellite imagery — are unrecoverable.
+Target: originals + COG as the source of truth, style as pure view state applied at
+draw time on the GPU (`ol/source/GeoTIFF` + `ol/layer/WebGLTile`, both already in
+OL 10.9), fast-first import with background conversion. **No back-compat / no
+migration** — re-import is expected. Full spec: `plan-reference-raster-rearchitecture.md`.
+- **Start with Phase 0 spikes.** 0a (EPSG:3031 under WebGLTileLayer) is the assumption
+  phases 3–5 rest on; 0d replaces every timing estimate in the plan with measurements.
+  Do not start Phase 1 before they answer.
+- Supersedes §A of `plan-external-reference-data.md` (storage + display); that file's
+  §B taxonomy shipped and is unaffected.
+- Deletes the 2026-07-20 restyle work (`styleStamp`/`planeStyleStamp`/`redecodePlane`/
+  `restyleRasterPreview` + the `previewUrl` layer-rebuild fix) — correct for the
+  architecture they patched, dead weight in this one.
+- **Unexplained, chase if it recurs:** `Reference rasters restored:` logged ~7× at ~21 ms
+  intervals on 2026-07-20. `restore()` has one caller (`openProject`) and no watcher;
+  suspected Vite HMR re-running restore per hot update, not reproduced cold.
+
+### QH — Quality Report hub: browser verification owed (shipped 2026-07-17)
+**All of `plan-eval-quality-hub.md` (WS0–WS6) shipped** — see HANDOVER 2026-07-17
+done-log. The eight isolated Evaluate modals are folded into one `QualityReportModal`
+(Overview landing page + section nav: Matching / Sparse / Calibration / Accuracy /
+Coverage / Dense), backed by pure `core/eval/{health,coverage,compareRuns}.js` +
+`core/products/report.js` (all unit-tested), the residual overlay in the image view
+(WS3), the coverage density canvas (WS4), run comparison (WS5, `summaryHistory` in
+`reconstruction.json`), and HTML report export (WS6 = F8). `npm test`/`typecheck`/
+`vite build` green. **Owed — headless can't drive any of it:**
+- Open the hub from each ribbon entry; confirm the Overview health list computes,
+  greyed nav entries match missing prerequisites, and clicking a health row jumps to
+  its section. Toggle a GCP in Accuracy → the overview RMSE + tiles refit (healthDirty).
+- Residual overlay: enable the ribbon **Residuals** toggle (or click a Sparse-section
+  image row) → vectors draw on a registered image, ×25 legend shows, radial-vs-coherent
+  pattern is legible; the toggle persists across a reload.
+- Coverage canvas renders top-down with camera dots; the run-comparison strip shows
+  deltas after a second reconstruct; **Export report** downloads a self-contained HTML
+  that opens/prints cleanly. Delete `plan-eval-quality-hub.md` once verified.
+
+### DF — Dense sky/vegetation freckles: verify + follow-ups (2026-07-17)
+**Stage A′ shipped** (`filterDepthMapsGeometric`, see HANDOVER done-log + METHODS §7):
+COLMAP's `filter` pass — forward–backward reprojection per pixel + an absolute NCC
+floor — running once after the Stage A loop and zeroing pixels in the maps themselves.
+Unit-tested (order-independence, flyer rejection, single-map guard); **unmeasured on
+real data** — headless cannot run dense. Plan doc: `plan-dense-sky-vegetation.md`
+(delete once this closes).
+- **Baseline it** on a sky-heavy and a vegetation-heavy set; record in HANDOVER
+  §Baselines: dense point count (and count inside a hand-boxed sky region → target
+  ~0), the new `Depth filter:` cull percentages, Stage A′ wall clock (it is O(maps²·px)
+  worst case — if it is not negligible beside PatchMatch, restrict the source loop to
+  each map's own `selectSourceViews` neighbours rather than all maps), and an ortho
+  visual check over vegetation (the ortho reuses the now-filtered planes).
+- **Retune the defaults from that data.** `maxGeomCost 1.0` / `minConsistent 2` /
+  `minNcc 0.1` are COLMAP's numbers, adopted untested at our working resolutions.
+  Watch for over-culling on legitimately weak-texture surfaces (snow/ice — the polar
+  case is exactly where a photometric floor is most likely to be wrong).
+- **Then consider a Metashape-style mild/moderate/aggressive preset** over these three,
+  once real numbers say what the useful range is. Do not invent the deltas first.
+- **Deferred: COLMAP's second `geom_consistency` optimisation pass.** Re-runs PatchMatch
+  with the fwd-bwd error in the cost, so hypotheses are pulled toward the consistent
+  solution instead of only being rejected. Buys **completeness** on weak texture, not
+  precision (the filter already got that). ~2× Stage A, touches all three kernels
+  (`mvs.rs` / `patchmatch.wgsl` / `planeCost.js`) under the lockstep + A/B RMS < 5e-3
+  invariant, and needs `memBudget.js` to learn a Stage A peak (it models only fusion).
+  Only worth it if the baseline shows holes, not freckles.
+- **Not doing: automatic sky segmentation.** A blue/brightness prior is unsafe in
+  Antarctica (snow vs sky). Manual masking already works and is what Metashape users do;
+  if this ever resurfaces, it is a SAM2-seeded feature, not a heuristic.
+
+### RS — 2-camera registration stall: re-baseline (2026-07-16)
+**WS-A + WS-C shipped** (see HANDOVER 2026-07-16 done-log): the stalled-model rescue
+now fires at the 2-camera seed (`register.js`), post-filter self-cal is skipped below
+3 cameras, and an explicit film format outranks the scan pixel pitch in `resolveK`.
+Diagnosis + the four stall baselines live in `plan-registration-stall.md` (delete it
+once this item closes). The fix is **unproven on real data** — headless cannot run it,
+and the synthetic scene would not reproduce the stall (a noise-free co-visible rig
+absorbs even k1 = −0.35), so `register.test.js` pins the *guard*, not the recovery.
+Owed, ideally folded into the V ▸ verification session:
+- **Re-run all four baselines** — building×{SIFT, SP+LightGlue}, TMA×{SIFT,
+  SP+LightGlue} — and record in HANDOVER §Baselines. Targets: building+LightGlue
+  ≥45/50 cams and post-BA median ≲1px (from 2/50); building+SIFT materially >2 cams
+  (its 166-pair graph is sparse — report, don't force); TMA+LightGlue still 5/5, fusion
+  kept-fraction no worse. Watch for the `registration stalled at 2 camera(s)` line.
+- **WS-B — earlier f,k1 self-cal, *only if* WS-A alone doesn't register the building
+  set.** Make `distortionRefine`/`rescueRefine` (`register.js`) obs-aware instead of
+  camera-count-only: engage f,k1 at `cameras.size >= 4 && totalObservations >= ~2000`
+  (new knob next to `distortionCalMinCams` in `tuning.js`, with rationale). Never below
+  3 cameras — a 2–3-view k1 fit is noise (the D3 comment's warning).
+- **Second rescue, only if the logs show it.** `rescued` is one-shot: if the relaxed
+  sweep admits a few cameras and stalls again *before* the distortion fold at 6 cams,
+  allow one more rescue after the first fold ("folded since last rescue", max 2 total).
+  Do NOT make rescue unbounded.
+- **Rotation-cycle filter — decide its fate.** It has never engaged on any baseline
+  (median cycle error always under the 30° ceiling). Check whether an earlier
+  distortion fold changes that; if it still always skips, it is dead weight and this
+  becomes a remove-or-retune item.
+
 ### M — Dense-fusion OOM + pipeline progress (2026-07-12)
 **All 7 phases shipped** (code + unit tests + typecheck) — see HANDOVER
 2026-07-12 done-log. **First owed: in-browser verification** (headless can't
@@ -99,7 +207,10 @@ as it ships, HANDOVER done-log line each):
 - **P0.3 — first-class "film width (mm)" input.** In `SensorTable.vue`, for
   scan/film sensors offer format-width-mm as the primary field (pitch derived) +
   surface a store suggestion when the implied-width warning fires ("set to 230 mm?").
-  The `sfm.js` K path already supports width-derived focal.
+  The `sfm.js` K path already supports width-derived focal, and as of 2026-07-16 an
+  explicit format **outranks** the pitch in `resolveK`, so the warning's advice ("use
+  the film/sensor-format field instead of pixel size") is now literally actionable —
+  this item is just the UI half.
 - **P2.2 — bilateral-weighted ZNCC (COLMAP-style).** Weight window samples by
   grayscale similarity + spatial distance. Change all three kernels
   (`mvs.rs`/`patchmatch.wgsl`/`planeCost.js`) + the A/B reference in lockstep.
@@ -175,6 +286,35 @@ confirmation owed since 2026-07-07).
 ---
 
 ## Next
+
+### EX — External reference data (DEM / ortho) — spec: `plan-external-reference-data.md`
+Import georeferenced rasters you did **not** produce, and use them as ground
+truth. The immediate driver: map-placed GCPs have no elevation source.
+
+**Workstream B + phases A-1…A-3 shipped 2026-07-18** (see HANDOVER) — sidebar
+provenance split, `rasterKind.js`/`rasterSample.js`/`rasterSource.js`, the
+`parseRaster` op, `useExternalStore`, the georeferenced-TIFF routing fork, the
+generalised `ProductViewer` + `raster:` tab, and GCP Fill Z / Check Z.
+
+**Owed: a browser verification run.** Nothing in this feature has been exercised
+in a browser — the pure modules have unit tests, but the geotiff decode, the
+OPFS index/sidecar round-trip (import → reopen → lazy hydrate → sample), the
+routing fork on a real dropped GeoTIFF, the import modal and the raster tab are
+all browser-runtime. Do this before building A-4+ on top. Bring a real REMA or
+COP30 tile *and* a reference ortho, ideally in a CRS ≠ the project CRS (the
+reproject-the-query path is the one most likely to be wrong).
+
+**Remaining phases** (still specced in the plan file): A-4 map-overlay toggle +
+per-layer opacity; A-5 picking GCP x/y/z straight off a reference ortho/DEM with
+accuracy from GSD — **georeferencing with zero survey data**, often the only
+option for historical Antarctic imagery, and the phase that makes the feature
+pay for itself; A-6 reference-vs-reconstruction DEM diff as a Quality Report
+section (`checkZAgainstReferenceDem` already returns the rows); A-7 COG/remote
+rasters (a second `RasterSource` behind the existing boundary); A-8 GeoJSON +
+shapefile vector layers. Standing trap to keep in mind: vertical datum
+(ellipsoidal vs geoid) differs by tens of metres in Antarctica — the store
+carries `verticalDatum`/`verticalAccuracy` and Fill Z refuses without the
+latter, but nothing yet *applies* a geoid separation. See also F13.
 
 ### GG — Guided GCP marking: follow-ups (shipped + verified 2026-07-16, see HANDOVER)
 Guides themselves are in (`core/sfm/gcpGuides.js`), rendering confirmed in-browser.
@@ -337,6 +477,21 @@ follow-up gated on measured need: u8-quantized descriptors + integer SIMD (touch
 persistence shape). The matching wall-clock re-run (owed under Q ▸ P5) will measure
 the actual speedup.
 
+**P10 — Don't compute descriptors for keypoints the cap throws away.**
+`sift_keypoints` computes orientation + the 128-d descriptor inline for *every*
+surviving extremum, but `detect_sift` then response-sorts, dedupes, and truncates to
+`max_keypoints`. Measured 2026-07-17 (B-detect): **18288 descriptors computed to keep
+10000** on a 5000px image — ~45% wasted, and now a tall pole since the pyramid got
+6.3× faster. Response (`|contrast|`) is known *before* orientation/descriptor, so the
+scan can collect bare `(x, y, scale, response, octave, s)`, sort/dedupe/cap globally,
+then describe only survivors. **The catch**: dedup is deliberately cross-octave, so the
+cap is global and the survivors' Gaussian levels must still be live when it's known —
+octave 0's six levels are ~600 MB at 25 MP, so keeping every pyramid is not an option.
+Either re-blur per octave in a second pass (only worth it now that blur is cheap) or
+group survivors by octave and describe them octave-by-octave on the way down. Measure
+the extrema count on real scans first — the win scales with how hard the cap binds, and
+`detect_sift`'s `raw_found` sentinel is post-dedup so it does not currently tell us.
+
 **P9 — Fused match+verify worker op + worker-side descriptor cache.** One
 `matchPairFull` op (match + verify in one call; gate logic stays in the store).
 Workers cache descriptors+keypoints keyed by uuid + re-detect revision
@@ -366,18 +521,6 @@ regions) as a worker op reading downscaled rasters. Pure `core/maskAuto.js` +
 `workers/ops/mask.js` + a strategy-picker rework of `AutoMaskModal.vue`. Full
 step-by-step spec (module API, tests, UI, defaults) in the linked PLAN file.
 Parked out of scope there: SAM2-propagation auto-masking (see F12).
-
-### FD — Auto-detect fiducial marks on film scans — spec: `PLAN-fiducial-autodetect.md`
-Not started. Marking fiducials by hand on every scan is tedious. Mark all
-fiducials on **one reference image per film sensor**, then ZNCC template-match the
-same marks on every other image of that sensor (the HSfM/Kugelhupf approach:
-within a scan batch the frame lands in nearly the same position). Coarse-to-fine
-+ sub-pixel peak; QC = absolute score floor + per-mark population median band +
-affine-RMS refit gate. Pure `core/sfm/fiducialDetect.js` + two `ops/detect.js`
-ops + `FiducialDetectModal.vue`, entry from the film-sensor editor in
-`SensorTable.vue`. Builds on the shipped F4 interior-orientation math
-(`fitFiducialAffine`/`mmToScan`). Full spec (module API, memory guardrails for
-10k×10k scans, rotation-mapping gotchas, tests) in the linked PLAN file.
 
 ### G2 — Glossary entries for the newly load-bearing terms (folded from PLAN P6.3)
 Add `src/glossary/algorithms/` entries for **"matching density"** (Fast/Full — the
@@ -488,16 +631,14 @@ observations coherent with the exported K/R/t (B2 fix, 2026-07-10). Remaining:
   hits the loaded images, and it can be set main → dense/DEM run off it. Best
   end-to-end check: export→import round-trip lands cameras in ~the same frame.
 
-### F8 — Processing report **[new 2026-07-07]**
-Metashape's PDF report is half its survey-market credibility. Generate a
-self-contained HTML report (print-to-PDF; no new deps): project summary,
-image/sensor table, calibrated intrinsics + distortion, per-camera residual
-table, match graph stats, track-length histogram, reprojection stats, georef/
-GCP residuals (F2), DEM/ortho previews + GSD, run settings + timings. Most
-numbers already exist in run summaries (`reconstruction.json`) and the
-per-camera residual table — this is largely presentation. Pure
-`core/products/report.js` + an export entry. F13's Evaluate-tab views are the
-interactive form of the same data — building them first makes F8 an assembly job.
+### F8 — Processing report **[shipped 2026-07-17 via Quality Report hub WS6]**
+Self-contained HTML report (print-to-PDF; no new deps) shipped as `core/products/
+report.js` (`buildReportHtml`) + the **Export report** button in the Quality Report
+hub footer. Assembled by `composables/useQualityReport.js` from the *same* plain
+snapshot + pure `core/eval/*` fns the hub renders, so report and hub can't drift:
+overview health table + sparse tiles/worst-images + calibration + GCP accuracy.
+*Optional follow-ups (gate on use):* DEM/ortho preview images, run settings/timings
+strip, inline SVG track-length histogram in the export (the hub shows it live).
 
 ### F9 — Point-cloud editing + gradual selection **[new 2026-07-07]**
 Metashape-parity model cleanup. Two halves:
@@ -539,35 +680,18 @@ decoder with onnx-community/sam2-hiera-tiny. Remaining polish (gate on use):
   varying point-count shape); revisit when ORT fixes it — `{ backend:'webgpu' }`.
 - Later: "segment everything" grid prompts; batch encode as an Auto-Mask strategy.
 
-### F13 — Evaluate ribbon tab (quality/accuracy views) **[new 2026-07-12]**
-The ribbon tab exists (`Ribbon.vue`, between Tools and Export) with disabled
-placeholders; each item below wires one up. These are **views over existing
-state** (run summaries, `gcpAccuracyReport()`, matches store) — modals/tabs plus
-a small pure `core/eval/` module for anything derived, not new pipeline stages.
-F8 (processing report) is the exportable form of the same data — build these
-views first, then F8 largely assembles them. Ordered by value/effort:
-- **eval-gcps — GCP accuracy table** (start here; data function exists):
-  per-GCP CRS residual X/Y/Z + per-observation reprojection px, RMSE totals,
-  worst-first sort, enable/disable toggles for iterative drop-and-refit.
-- **eval-reconstruction — reconstruction report**: registered/total images,
-  points, mean+median reprojection, track-length histogram — surfaces what the
-  run summary already holds instead of console archaeology.
-- **eval-images — per-image diagnostics**: sortable table (reprojection RMS,
-  triangulated observations, registration pass, self-cal drift); reuse the
-  ImageTableModal pattern. Sorting by RMS names the poisoning images.
-- **eval-calibration — calibration check**: BA-refined focal vs EXIF/sensor
-  focal per sensor, folded k1 (`summary.selfCalDistortion`) — flags bad sensor
-  guesses on film scans.
-- **eval-poses — pose residuals**: per-camera distance Horn-fit SfM centre ↔
-  imported pose (drift / bad EXIF positions).
-- **eval-match-graph — graph health**: connected components, weakly-connected
-  images, pairs killed by cycle filter / spread gate — answers "why did only 40
-  of 60 register".
-- **eval-depth-coverage — dense diagnostics**: per-image % valid depth pixels,
-  fusion cull breakdown (already logged under 'Dense'), effective GSD.
-- **eval-dem-gcps — DEM vs GCP check**: sample the DEM at each GCP's XY,
-  report ΔZ vs surveyed elevation — an *independent* end-to-end accuracy check,
-  not a fit residual.
+### F13 — Reference-DEM-constrained bundle adjustment **[new 2026-07-18]**
+Anchor sparse points to an imported reference DEM surface as a weak "the ground
+is roughly here" prior — a soft constraint that kills dome/bowl distortion on
+long strips **without any GCPs**. `bundle_adjust` already takes
+`anchor_flat`/`anchor_weight` on arbitrary point indices (built for F2's GCP
+anchoring), so the wiring exists; what's new is the method: per-point targets
+are not fixed positions but *projections onto a surface*, so the anchor target
+must be recomputed each iteration (point x/y → DEM z) rather than set once, and
+the weight has to reflect the DEM's vertical accuracy or it fights the
+observations. Requires the external-raster import (see
+`plan-external-reference-data.md`) to land first. **Research-grade — METHODS.md
+would need a section; do not start on a whim.**
 
 ### F6 — Fisheye distortion model
 D3's selector covers Pinhole/Radial/Brown — all undistort-to-pinhole-able.
@@ -680,6 +804,21 @@ JS proves slow on large grids; optional manual "Flip Z" for object scenes.
   2026-07-04: the pair-level worker pool already saturates cores. (Note ORT
   wasm threads *are* enabled via the COOP/COEP headers — that's a different,
   already-landed mechanism.)
+- **SIFT-GPU (WGSL detection kernel, à la COLMAP's SiftGPU)** — parked
+  2026-07-17, revisit only with profiling that puts detection back on top. The
+  COLMAP comparison doesn't transfer cleanly: (a) after the pyramid fix detection is
+  ~3.1× faster and was already not the dominant stage (TIFF decode and O(N²) matching
+  are), (b) WebGPU gives **one** device, so a GPU detector pins to a single worker like
+  LightGlue does — versus a CPU pool detecting POOL_SIZE images concurrently, making
+  the realistic *throughput* win ~1.5–2×, not the ~10× the per-image latency suggests
+  (and roughly a wash on an integrated GPU sharing bandwidth with those cores), (c) the
+  WASM path must stay fast regardless as the no-WebGPU fallback, so the CPU work was
+  never an alternative, and (d) two backends producing subtly different 128-d
+  descriptors feeding a ratio test is a correctness surface pure-CPU doesn't have — a
+  per-image GPU→WASM fallback (as dense uses) would be actively wrong here; it'd have
+  to be per-run. If detection *does* return to the top, **GPU brute-force matching is
+  the better first target**: bigger share of wall-clock, and a far simpler kernel
+  (tiled dot-product + ratio test, fixed-size output, no compaction, no sort).
 - **Global undo/redo command layer** — rejected. Per-entity delete/edit in the
   stores is enough (Metashape has none either).
 - **Full 3D meshing (Poisson/Delaunay)** — **SHIPPED 2026-07-12** (screened

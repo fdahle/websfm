@@ -21,9 +21,9 @@ import { get as getOlProjection } from 'ol/proj'
 //   'osm'  → OpenStreetMap (OL reprojects raster tiles to the view CRS)
 //   'gibs' → NASA GIBS WMTS in a matching polar projection (see gibs field)
 // extent: validity extent in the projection's own units (projected CRS only),
-//         used for the map view and the graticule.
+//         used for the map view and the grid.
 // worldExtent: geographic area of use [west, south, east, north] in degrees.
-//         Required by the graticule; derived automatically when omitted.
+//         Required by the grid; derived automatically when omitted.
 
 export const CRS_CATALOG = [
   {
@@ -160,7 +160,7 @@ function projectExtent(world, code) {
 }
 
 // Give the OpenLayers projection both a projected extent and a geographic
-// worldExtent. The graticule layer requires both; without them it throws on
+// worldExtent. The OL graticule layer requires both; without them it throws on
 // every render. Catalog values win; otherwise we derive from the proj4 def.
 function setProjectionExtents(code, def, { extent, worldExtent } = {}) {
   const proj = getOlProjection(code)

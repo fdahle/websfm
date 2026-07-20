@@ -68,10 +68,45 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
   `projection.js`, `georef.js`, `exporters.js` — cloud/mesh/DEM/ortho writers incl.
   `prepareCloudForExport` (georef-then-voxel-downsample, streams the dense
   accumulator — no per-point objects) + `meshToObj`/`meshToStl`, `geotiff.js`
-  (sync writer; DEFLATE via an injected `deflate` callback since `CompressionStream`
-  is DOM/worker-only — the pure path never compresses), `wkt.js` — minimal OGC WKT1
+  (sync writers; DEFLATE via an injected `deflate` callback since `CompressionStream`
+  is DOM/worker-only — the pure path never compresses. `writeGeoTiff` = baseline
+  single-strip, the *export* path. `writeCog` = internally tiled + halving overviews
+  for imported reference rasters; it takes a **TypedArray**, not raw bytes, because
+  it must interpret pixels to tile and downsample, and is uncompressed — per-tile
+  DEFLATE would need the async callback per tile per level. Overviews box-average
+  with nodata skipped; a single-tile level keeps TileOffsets/TileByteCounts inline,
+  since count·size ≤ 4 means a reader takes the field as the value, not a pointer),
+  `wkt.js` — minimal OGC WKT1
   for `.prj` (WGS84 geographic + UTM zones formulaic, else null → caller writes the
-  raw proj4/EPSG string), `colormap.js`), `core/io/` (`gcp.js`, `pose.js`, `sensor.js`,
+  raw proj4/EPSG string), `colormap.js`, `report.js` — `buildReportHtml` assembles one
+  self-contained (inline CSS, no external assets, no scripts) Quality Report HTML from a
+  plain report object; the user prints it to PDF), `core/io/` (`gcp.js`, `pose.js`, `sensor.js`,
+  `rasterKind.js` — pure DEM-vs-orthophoto classification of an imported GeoTIFF
+  from extracted tags + a decimated sample → `{ kind, confidence, reasons }`,
+  signals ordered by strength (float sampleformat / nodata tag / band count /
+  bit depth / VerticalCSTypeGeoKey / histogram / filename);
+  `rasterStyle.js` — pure band math for an imported raster (`needsStyling`
+  gate, `defaultRasterStyle`/`resolveRasterStyle`, `bandsUsedBy`, percentile/
+  min-max/manual `resolveRange`, `composeStyledRgba` for grey / RGB-composite /
+  normalised-difference-index modes). Exists because geotiff's `readRGB()`
+  scales by the DECLARED bit depth, so 16-bit Sentinel-2 reflectance (~3000 of
+  65535) renders as pixel value ~19 — black. Anything >3 bands or deeper than
+  8-bit takes the styled path; an 8-bit 1–3 band ortho keeps the old `readRGB`
+  fast path untouched. An index renders on its own fixed −1…1 scale and is
+  never stretched (a stretch would move the zero crossing that gives NDVI its
+  meaning). A restyle is a **re-decode from the retained original**
+  (`useExternalStore.setRasterStyle`, mirroring `setRasterKind`) — the stored
+  plane is baked 8-bit RGBA, and keeping raw uint16 bands would cost ~300 MB
+  per scene,
+  `rasterSample.js` — **THE** raster sampler (bilinear + nodata/mask/NaN, plus
+  `worldToPixel`/`pixelToWorld`/`rasterBounds`) over a
+  `{ width, height, data, geoTransform }` descriptor — `core/eval/demCheck.js`
+  is now a thin adapter over it, so there is exactly one half-pixel/nodata
+  convention; `rasterSource.js` — the `RasterSource` accessor boundary
+  (`{ meta, sampleAt, readWindow, previewDataUrl }`, `createFlatRasterSource`
+  behind it) that consumers use instead of a public `data[]`, so a remote-COG
+  source lands as a second implementation rather than a rewrite of every call
+  site,
   `geojson.js`, `metadata.js`, `cameraKind.js`, `importKind.js` — filename/content
   sniffing incl. `isColmapFile` + text-xyz cloud sniff, `colmapModel.js`
   — pure COLMAP text **and** binary model read/write: R↔quaternion +
@@ -93,13 +128,31 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
   points→1024-space / logits→binary-mask math + ORT encoder/decoder glue, same
   lazy/cached/serialized-session pattern as LightGlue; encoder runs on WebGPU,
   decoder is WASM-pinned — ORT's WebGPU EP crashes on the per-click varying
-  point-count shape); cross-cutting stragglers stay flat at
+  point-count shape); `core/eval/` (pure read-only stats for the **Quality Report** hub
+  — `reconStats.js` track-length histogram + reprojection stats, `imageStats.js`
+  per-image residuals + `unregisteredReason` + `imageResidualVectors` (the image-view
+  residual overlay — computed in the BA pinhole frame, so it takes an optional
+  `toScan` mapper from `core/sfm/displayFrame.js` `makeCanonicalToScan` to land on
+  the **raw** displayed image; without it a calibrated lens is off by its distortion
+  and a film scan by the entire scan→canonical affine. `mag` stays the pinhole-frame
+  error so the overlay agrees with the tables), `calibration.js` radial curve + focal delta, `matchGraph.js`
+  union-find graph health + `bridgeEdges` (articulation edges / "fragile links") +
+  `componentIndex`, `demCheck.js` bilinear DEM-at-GCP sampler, `coverage.js` top-down
+  tie-point density grid, `compareRuns.js` run-to-run summary diff, and `health.js`
+  — the **single** `EVAL_THRESHOLDS` warn/bad table (every hub tile that colours by
+  tone reads it; no scattered magic numbers) + `projectHealth(snapshot)` → the Overview
+  status rows; the tab's rule is **derive from the cloud, don't extend the summary** —
+  recompute from `views`/`viewsPx` + cameras so the views also work on an imported
+  COLMAP cloud with no run summary); cross-cutting stragglers stay flat at
   `core/` root (`crs.js`, `footprint.js`, `mask.js`, `types.ts`).
 - **`src/stores/*.js`** own reactive state + OPFS persistence. They marshal reactive
   state into **plain** arrays/objects before posting to the worker (Vue Proxies can't be
   structured-cloned — a recurring footgun; see the `.map(row => [...row])` patterns).
 - **`workers/computeClient.js`** is the typed async client (worker pool, request/response
-  with streaming `ev` events); **`compute.worker.js`** keeps the OffscreenCanvas pixel
+  with streaming `ev` events). Pending calls retain their assigned worker: a
+  worker-level crash rejects only that slot's calls and immediately replaces the
+  slot; healthy workers and their in-flight calls continue. **`compute.worker.js`**
+  keeps the OffscreenCanvas pixel
   decoder (`rasterize`), the message loop, and the merged op registry. The op handlers
   live in **`workers/ops/<domain>.js`** (`detect`/`match`/`sfm`/`dense`/`products`/`mesh`/`io`),
   each a factory `makeXOps(deps)` returning `{ opName: handler }`; `rasterize` is injected
@@ -120,14 +173,37 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
   than stored on the pref.
   **`Sidebar.vue`** is a shell (drop-zone + section open/close + re-emit); each
   collapsible section is a component under **`components/layout/sidebar/`**
-  (`ImagesSection`/`SensorsSection`/`MatchesSection`/`GcpsSection`/`CloudsSection`/
-  `ProductsSection`), sharing `sidebar-sections.css` (via `<style scoped src>`) and
+  (`ImagesSection`/`SensorsSection`/`MatchesSection`/`GcpsSection`/
+  `ReconstructionSection`/`ProductsSection`/`ReferenceSection`), sharing
+  `sidebar-sections.css` (via `<style scoped src>`) and
   `composables/useContextMenu.js` for the mutually-exclusive right-click menus.
+  Those three cloud-bearing sections split by **provenance + role**, not data
+  type: **Reconstruction** = every `kind:'sparse'` cloud (computed *or*
+  COLMAP-imported — it's the *model*, and `mainSparseCloud` is a first-class role
+  with a set-as-main action); **Products** = computed `dense`/`mesh` + DEM/ortho
+  (the app made it, a re-fuse/rebuild may replace it); **Reference Data** =
+  `imported:true` clouds + imported rasters (evidence; the pipeline never
+  overwrites it). The discriminator is the already-persisted `imported` flag
+  (now also set + persisted on a COLMAP-imported *sparse* cloud, which renders
+  an "imported" chip). Sidebar computes the three lists and the sections stay
+  dumb; the shared row rendering/rename/context-menu lives in one `CloudRows.vue`.
+  The Ribbon stays as-is — its groups are verbs, not these nouns.
 - **Shared modal framework** (`components/modals/ui/`): every pipeline-stage modal builds
   from `ModalShell` (overlay/header/close/footer; preserves esc + click-backdrop close, so
   `useModalEscape` is unchanged), `SettingsField`/`SettingsGroup`/`AdvancedDisclosure`/
   `SegmentedControl`/`WarnBox`/`PresetCards`, all consuming a shared `modal.css` via
-  `<style scoped src>`. `.btn`/`.btn-primary` live in global `style.css`. **Gotcha**: a
+  `<style scoped src>`. The **Evaluate** tab is one **Quality Report hub**
+  (`QualityReportModal.vue` — wide own-chrome modal, left section nav + an Overview
+  landing page; section bodies are `components/modals/eval/Eval*Section.vue`, NOT
+  `ModalShell` wrappers, so each imports `../ui/modal.css` itself). A greyed nav entry
+  (prerequisite data missing) with a hint IS the discoverability mechanism — there is no
+  per-view ribbon gating any more; the ribbon buttons just deep-link into hub sections.
+  Sections + the HTML export are assembled from ONE plain snapshot by
+  `composables/useQualityReport.js` (Overview health rows + `buildExportReport`) so they
+  can't drift. These read-only views share `ui/DataTable.vue` (sortable table,
+  nulls-sort-last both directions, `cell-<key>` + `expanded` slots) and `ui/StatTiles.vue`
+  (headline stat strip) — these are NOT settings modals, so `PresetCards`/`SettingsField`
+  do not apply. `.btn`/`.btn-primary` live in global `style.css`. **Gotcha**: a
   field control (`.field-input`/`.field-select`) is passed as *slot content* — compiled in
   the parent modal's scope — so the modal must import `ui/modal.css` in its own
   `<style scoped src>` for those classes to apply (SettingsField's scoped styles don't reach
@@ -192,6 +268,36 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
   worker op, transformed by `applyImportTransform`) carries `imported:true` (persisted)
   and is never touched by a re-fuse/re-mesh (`upsertDense/MeshCloud` skip `imported`
   clouds) — coordinates land verbatim in the current frame, no CRS reprojection.
+- **`useExternalStore`** — imported **reference rasters** (georeferenced DEMs /
+  orthophotos the user brought in, never produced). Two invariants carry it:
+  (1) **loading is lazy** — `restore` reads only `external/index.json` (metadata
+  + a ≤1024 px preview PNG); `ensureRasterLoaded(id)` hydrates the plane from
+  `external/{id}.bin` on first sample/draw, because a REMA tile is hundreds of
+  MB and eager loading would undo the dense memory budget. So **any "do we have
+  a reference DEM" gate reads `hasReferenceDem`/`rasters` (the index), never
+  `sources`** (empty on a fresh reopen) — the same trap as `depthMapCount`.
+  (2) **the raster keeps its native CRS and the *query* is reprojected**
+  (`toRasterCoords`/`toProjectCoords`); warping the raster at import would
+  resample once, cost minutes, and have to redo itself on every `handleSetCrs`.
+  A failed projection lookup sets runtime-only `crsUnresolved` (never persisted);
+  restore/use retries it and clears it on success. While unresolved, sampling and
+  map placement return/refuse safely — never fall back to an identity transform.
+  The original file is also kept (`external/{id}.src`) because "Treat as DEM /
+  orthophoto" is a **re-decode**, not a relabel (a DEM plane is Float32
+  elevations, an ortho plane is RGBA). `verticalDatum` + `verticalAccuracy` are
+  first-class: `sampleReferenceDem` returns the declared σ alongside the value,
+  and `useGcpsStore.fillZFromReferenceDem` **refuses** to fill a Z from a raster
+  with no declared vertical accuracy rather than let a GCP claim survey-grade Z
+  in the BA anchor / Horn fit.
+  (3) **map display draws the preview, never the plane** — `onMap`/`opacity` are
+  persisted view state (`setRasterOnMap`/`setRasterOpacity`, `mapRasters` getter),
+  and `ViewerMap`'s raster `LayerGroup` renders each raster's `previewDataUrl`
+  (already in the index) as an `ol/source/ImageStatic` over `rasterBounds` **in the
+  raster's native CRS**, letting OL reproject on the fly. So the map layer calls
+  `ensureRasterLoaded` never — showing a REMA tile costs no decode, and this
+  survives `handleSetCrs` with no resampling, for the same reason the sampler
+  reprojects the query. The group sits above the basemap and below every project
+  vector layer, so GCPs/footprints stay legible; sidebar list order is draw order.
 - `useSensorsStore`, `useProjectsStore`, `useGcpsStore`, `useFootprintsStore`,
   `usePosesStore`, `useModalsStore`.
 
@@ -298,10 +404,46 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
      and records each `{A, frame}` in `summary.fiducialTransforms`. Dense reproduces
      that exact transform (never re-fits) via `canonicalToScan` composed into its
      raster+mask sample map. Everything between stays pinhole.
+     Detection and calibration are now separate domains. Anonymous scan-pixel
+     centres live in `image.fiducialDetections[{slot,px,py,...}]`; metric identity,
+     camera coordinates, focal/principal point and the slot map live in
+     `sensor.fiducialCalibration`. `core/sfm/fiducialDetection.js` must remain free
+     of calibration/layout imports: it searches declared corner/side slots with
+     Generic/right-angle/45°/Frame image prototypes, then the worker refines native
+     crops. `useImagesStore.detectFiducialsForSensor` learns anonymous batch donors,
+     queues uncertain candidates for review and can derive border masks. The
+     independent `FiducialCalibrateModal` imports certificate coordinates or
+     estimates a batch layout; `core/sfm/fiducialCalibration.js` validates
+     conformal/affine/projective fits. Reconstruction is the join point via
+     `calibratedFiducialPairs`; detections without calibration never alter SfM.
+     Legacy `fiducialObs`/`sensor.fiducials` migrate on restore and their original
+     detector remains compatibility code. **A ZNCC template must be odd-sized** — `znccAt` derives
+     `half = (size−1)/2`, and an even size makes every pixel read a fractional
+     index, i.e. `undefined` → NaN → a score of 0 that looks like an honest
+     "no match" (`downscalePatch` forces odd; 65px ÷ 8 → 8 was the live bug).
 4. **Dense MVS** (`core/dense/mvs.js` + `crates/reconstruction/src/mvs.rs`): Stage A build
    per-image PatchMatch depth maps → optional `filterDepthMap` (median/speckle cleanup)
-   → Stage B `fuseDepthMaps` (cross-view geometric consistency, then a **spatial
-   dedupe**). Stage B also runs three **opt-out geometric outlier filters**
+   → `filterDepthMapsGeometric` (cross-view consistency) → Stage B `fuseDepthMaps`
+   (cross-view geometric consistency, then a **spatial dedupe**).
+   `filterDepthMapsGeometric` is COLMAP's `filter` pass and the **only** filter that
+   removes sky/vegetation: both have genuinely high NCC (a bush is strongly textured;
+   gradient sky correlates at *any* depth), so no cost gate can ever reject them — they
+   give themselves away only by cross-view depth *disagreement*. Per pixel it runs a
+   forward–backward reprojection (unproject → project into a source → unproject **that
+   source's own depth at that one pixel** → reproject home; error ≤ `maxGeomCost` px ⇒
+   that view is consistent) and needs `minConsistent` such views, plus an absolute
+   `minNcc` floor. Sampling one source pixel is what makes it strict, and is the
+   difference from `fuseDepthMaps`' own check, which searches a
+   (2·`consistencyPx`+1)² window and accepts if *any* pixel there is within tolerance —
+   a noisy depth cloud (vegetation) passes that by chance. Fusion's check stays as a
+   cheap second line of defence. It runs **once after the whole Stage A loop** (it needs
+   every map's depth) and zeroes rejected pixels **in the maps**, so the persisted depth
+   maps — and the ortho that reuses them as a z-buffer — are cleaned too, not just the
+   fused cloud. **Invariant: evidence is read from the unfiltered planes** — rejections
+   go to per-map masks applied only after every map is judged; filtering in place would
+   make map i+1 judge itself against map i's already-thinned depths, cascading drops in
+   map order (order-dependent, irreproducible). The display PNGs are rendered pre-filter
+   and are deliberately still the raw plane. Stage B also runs three **opt-out geometric outlier filters**
    (`DENSE_FUSE_DEFAULTS`): a **min-triangulation-angle** gate (widest parallax among
    agreeing views must clear `minTriAngleDeg`, kills ~0°-parallax sky), a
    **grazing-incidence** reject (`|n·(C−P)|` below `cos(maxIncidenceDeg)`; view-direction
@@ -417,7 +559,8 @@ A GCP has surveyed ground coords (`x/y/z` + per-axis `accuracyX/Y/Z`), pixel
 `observations` (`[{ imageId, imageName, px, py }]`, with per-axis image accuracy
 `accuracyImgX/Y`), and an `enabled` flag; there is no control/check role (every
 enabled GCP is used). GCPs are created three ways: CSV import (`GcpImportModal`),
-the GCP table's "+ Add GCP" (a blank GCP at the origin, edited inline —
+the GCP table's "+ Add GCP" (`x/y = 0`, **`z = null`** until measured or filled;
+zero is a valid sea-level elevation, never a missing-value sentinel), edited inline —
 `useGcpsStore.addGcp`), or **right-click in the image view**. That right-click
 opens `ViewerImage.vue`'s general context menu (copy pixel/colour, zoom, fit)
 whose "Add GCP here…" entry switches the same popup to a new-vs-existing chooser
@@ -448,10 +591,29 @@ already marked elsewhere is constrained in every other registered image — to a
 world→cam poses) or to a **single predicted pixel** (≥2, triangulate + reproject).
 `gcpGuidesForImage` returns guides only for GCPs *not yet* marked on the target
 image (a marked one already shows its reprojection error); `useReconstructionStore.
-gcpGuides(imageId)` is the store entry point, App.vue keeps a `activeImageGcpGuides`
-ref refreshed on tab/marks/cloud change, and `ViewerImage.vue` draws them dashed
-green under the real markers (lines only for the *selected* GCP — all of them at
-once is a spider web). Guides are **advisory, never inputs to the fit**, and share
+gcpGuides(imageId)` is the store entry point — it returns guides for *every*
+unmarked GCP and the selection filter is applied at **draw** time, so switching the
+selected GCP never re-triangulates. App.vue keeps a
+`activeImageGcpGuides` ref refreshed on tab/marks/cloud/selection change, and
+`ViewerImage.vue` draws them dashed green under the real markers (lines only for the
+*selected* GCP — all of them at once is a spider web). Both the compute and the draw
+gate on **`gcpEdit` alone, never `showGcps`**: a guide aids *placing* a mark, and
+since enabling gcpEdit force-enables showGcps, an `||` of the two leaves guides on
+screen after the user leaves edit mode. Two watchers feed one refresh (a shallow one
+for tab/mode/cameras — `sparseCameras` must never be deep-watched — plus a deep one
+for marks), and a single user action trips both, so the refresh is **coalesced to one
+per tick** (`queueGcpGuidesRefresh`). `gcpGuides()` is **silent**: it recomputes on
+every tab switch and re-render, so logging there narrates the app, not the user. The
+one line worth emitting is App.vue's `logGcpMark`, fired per *placed mark* (the caller
+grabs the guide before `setObservation` retires it) and reporting the **guide-vs-click
+gap**; a debug-level companion brackets the mark with `gcpEstimateForImage` (store:
+`gcpEstimate`) to show how far that mark moved the model's estimate, and which way.
+That function is **not a guide and must never be drawn as one** — it *includes* the
+target image's own mark, so it's the fitted estimate, not an independent prediction;
+it exists only because the guide on the marked image retires, making this the one way
+to observe the refinement where the user is looking. A "did not move" reading usually
+means the robust fit **rejected** the new mark, not that refinement is stuck.
+Guides are **advisory, never inputs to the fit**, and share
 `gcpAccuracyReport`'s raw-pixel/pinhole frame (see METHODS.md §6.4) — consistent
 with the reprojection numbers, approximate on a heavily distorted lens.
 **Never add snap-to-guide.** A guide comes *from* the reconstruction, so snapping a
@@ -460,8 +622,18 @@ independent evidence that can correct the model, and the guide-vs-click gap is t
 diagnostic — it matters most exactly when the reconstruction is wrong (METHODS.md
 §6.4).
 
-`core/sfm/gcpTriangulation.js` 2-view-DLT-triangulates a GCP's registered-image
-observations into the current SfM frame; `core/products/georef.js`'s Horn
+`core/sfm/gcpTriangulation.js` triangulates a GCP's registered-image observations
+into the current SfM frame: a widest-baseline 2-view DLT **seeds** a Gauss-Newton
+refinement (`refineGcpPoint`, pure JS) over *every* observation, so each extra mark
+tightens the point. `opts.robust` adds outlier rejection — a Huber/IRLS fit, then a
+median cut on **its** residuals (never on a plain-LSQ fit's: the outlier drags that
+fit toward itself until it no longer looks like an outlier — see METHODS.md §6.5,
+which records the measured numbers). Robust is **opt-in and correctly asymmetric**:
+`gcpGuides.js` wants it (a misclick must not drag the aiming guide in every other
+image); the georef fit / `gcpAccuracyReport` must NOT (dropping a mark from the fit
+would hide the very disagreement the report exists to surface). Rejection is scoped to
+the single prediction, so user-facing text says "7 of 9 marks", never "2 ignored" —
+which reads as if the GCP were discarded. `core/products/georef.js`'s Horn
 similarity fit then pairs those against the GCP's surveyed CRS position
 (`useReconstructionStore.georeference()` prefers this over the pose-based fit
 whenever ≥3 GCPs triangulate), and `gcpAccuracyReport()` reports per-GCP CRS
@@ -506,6 +678,45 @@ convergence".
   (lossless PNG) — every raster-consuming call (`detectKeypoints`, the dense-op
   image marshalling in `useReconstructionStore`) must read `img.computeUrl ??
   img.url`, never `img.url` alone, or JPEG artifacts leak into keypoints/depth.
+  **A TIFF is not necessarily a photo**: `useImagesStore` ingests any TIFF as a
+  source image, and a dropped `.tif` arrives with MIME `image/tiff`, so it
+  reaches the image path before any importer sees it. Every dropped/picked image
+  batch is therefore forked FIRST through `useImportRouting.addImagesRouted` →
+  `forkGeoreferencedRasters`: a TIFF carrying GeoTIFF geolocation tags
+  (`ModelTiepoint`+`ModelPixelScale`, or `ModelTransformation` — probed
+  header-only by `utils/tiff.js` `isGeoreferencedTiff`, no pixel decode) is a
+  **reference raster**, not a source photo. Aerial film scans carry no geokeys,
+  so the split is clean in practice; the import modal offers "import as a source
+  image instead" for the rare georeferenced photo. Any new image entry point
+  must route through `addImagesRouted`, not `addImages`. The sniff is a **guess
+  with an escape hatch in both directions**, because a GeoTIFF can be written
+  with geolocation tags `geotiff.js` won't read: raster→image is
+  `onRasterImportAsImage` (the import modal's link), image→raster is the image
+  row's right-click **"Convert to reference data"** (`convertImageToRaster`,
+  TIFF-named images only) — it re-reads the ORIGINAL from OPFS, imports it with
+  `alwaysConfirm` (a sniff that already misrouted the file hasn't earned a
+  silent DEM-vs-ortho verdict), and removes the image **only if the raster
+  import returned a record**, so a file with no geotransform stays put instead
+  of vanishing from both sections. The fork also logs which tags were missing
+  (`probeTiffGeoTags`) whenever it sends a TIFF down the photo path — the
+  verdict is otherwise undebuggable without the file.
+- Imported raster geometry is currently axis-aligned
+  (`originX/originY/scaleX/scaleY`). A `ModelTransformation` containing rotation,
+  shear, or perspective is rejected explicitly by the IO worker; never collapse
+  it through `getResolution()` and silently move pixels. Full affine support
+  requires changing sampling, bounds, display, and persistence together.
+- **NEVER read a geotiff IFD tag by property access.** geotiff 3.x made the
+  file directory lazy: `image.getFileDirectory()` returns an
+  `ImageFileDirectory` holding tags in internal Maps, fetched on demand. So
+  `fd.ModelTiepoint` is **always `undefined`** — it does not throw, it silently
+  reads a field that isn't there, and every `fd.Foo?.[0] ?? fallback` quietly
+  becomes the fallback. Use `utils/tiff.js` **`readTiffTag(fd, name)`** (async;
+  falls back to property access on older/eager geotiff), or better an accessor
+  *method* (`getWidth`/`getSamplesPerPixel`/`getBitsPerSample`/`getGeoKeys`/
+  `getOrigin`/`getResolution`) — those resolve deferred fields internally, which
+  is why they kept working while the raw reads silently broke. This bit twice at
+  once: `isGeoreferencedTiff` declared every GeoTIFF a source photo, and
+  `parseRaster` fed `classifyRasterKind` "uint8, no nodata" for every raster.
   Any new source format the browser can't decode needs the same treatment. Both
   transcode outputs are **cached in OPFS** (`images-derived/{uuid}.display|.compute`,
   `opfs.saveImageDerived`/`loadImageDerivedBlob`/`deleteImageDerived`) at ingest;
@@ -589,6 +800,20 @@ convergence".
   ZNCC half-window cap is 5 (11×11) in both kernels — keep them equal.
 - After any `crates/` change: `npm run build:wasm`, commit `src/wasm/*` with the
   source change.
+- **`cargo test` does NOT exercise the SIMD kernels.** `simd128` is enabled for the
+  wasm target only (`.cargo/config.toml`), so a native `cargo test` compiles the
+  `#[cfg(not(target_feature = "simd128"))]` scalar fallbacks — the `f32x4` paths in
+  `crates/sift` (`blur`) and `crates/matching` (L2 hot loop) are unrun, `unsafe`
+  pointer math included. Keep every SIMD kernel paired with a scalar fallback that a
+  native test pins to a naive reference, and verify the *real* build with
+  `scripts/simd-parity.mjs`: it runs the built wasm under Node (V8, same engine as
+  Chrome) on the same fixed input as the crate's `#[ignore]`d `parity_digest` test —
+  the two digests must match exactly. `cargo check --target wasm32-unknown-unknown`
+  at minimum proves the intrinsics still compile.
+- SIFT's scale-space is built **incrementally** and each octave's base already carries
+  σ0 — do not re-blur it (see METHODS.md §2; re-blurring flattens DoG contrast and
+  silently eats coarse-scale keypoints). Kernel radius is 3σ, so blur cost is dominated
+  by the *absolute* sigmas: keep the increments, not the full σ_i, in the inner loop.
 - Keep the heavy logging style — every derived/auto value gets a log line the user
   can audit. The dev console keeps only a **capped display tail** in memory
   (`useLog` `MAX_BUFFER`), but every line is streamed to an **append-only OPFS

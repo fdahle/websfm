@@ -7,6 +7,7 @@ import {
   medianTriangulationAngle,
   scaleK,
   rgbaToGray,
+  estimateUpFromCameras,
 } from './geometry.js'
 
 const I3 = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
@@ -109,6 +110,83 @@ describe('scaleK', () => {
   it('scales every intrinsic component', () => {
     expect(scaleK({ fx: 100, fy: 200, cx: 320, cy: 240 }, 0.5))
       .toEqual({ fx: 50, fy: 100, cx: 160, cy: 120 })
+  })
+})
+
+describe('estimateUpFromCameras', () => {
+  it('returns null with fewer than 2 cameras', () => {
+    expect(estimateUpFromCameras([])).toBeNull()
+    expect(estimateUpFromCameras([{ R: I3 }])).toBeNull()
+  })
+
+  it('recovers world +Y up for upright cameras (identity R)', () => {
+    // Identity R: image-y (down) = world +Y, so estimated up = world -Y.
+    const up = estimateUpFromCameras([{ R: I3 }, { R: I3 }])
+    expect(up[0]).toBeCloseTo(0, 10)
+    expect(up[1]).toBeCloseTo(-1, 10)
+    expect(up[2]).toBeCloseTo(0, 10)
+  })
+
+  it('recovers up for a Z-up rig looking along +Y (image-down = world -Z)', () => {
+    // Camera looks +Y (world), x-right = +X, image-y (down) = world -Z.
+    // world→cam rows: x_cam=+X, y_cam=-Z, z_cam(view)=+Y.
+    const R = [[1, 0, 0], [0, 0, -1], [0, 1, 0]]
+    const up = estimateUpFromCameras([{ R }, { R }])
+    // up = -(row 1) = -(0,0,-1) = (0,0,1) → world +Z.
+    expect(up[0]).toBeCloseTo(0, 10)
+    expect(up[1]).toBeCloseTo(0, 10)
+    expect(up[2]).toBeCloseTo(1, 10)
+  })
+
+  it('averages a small roll away and returns a unit vector', () => {
+    // Two cameras rolled ±θ about the view axis average back to straight up.
+    const th = 0.2
+    const c = Math.cos(th), s = Math.sin(th)
+    const Rp = [[c, -s, 0], [s, c, 0], [0, 0, 1]]
+    const Rm = [[c, s, 0], [-s, c, 0], [0, 0, 1]]
+    const up = estimateUpFromCameras([{ R: Rp }, { R: Rm }])
+    expect(Math.hypot(up[0], up[1], up[2])).toBeCloseTo(1, 10)
+    expect(up[0]).toBeCloseTo(0, 10)  // rolls cancel
+    expect(up[1]).toBeCloseTo(-1, 10)
+  })
+
+  it('accepts a Map of cameras', () => {
+    const m = new Map([['a', { R: I3 }], ['b', { R: I3 }]])
+    expect(estimateUpFromCameras(m)).not.toBeNull()
+  })
+
+  // A nadir camera at (cx,cy,cz) looking down world −Z. Its image-up axis is
+  // horizontal (+Y here), so the image-axis mean alone would return a sideways up.
+  const nadirCam = (cx, cy, cz) => {
+    const R = [[1, 0, 0], [0, -1, 0], [0, 0, -1]]
+    return { R, t: [-cx, cy, cz] } // t = -R·C
+  }
+
+  it('prefers the viewing-direction up for a nadir aerial block', () => {
+    const cams = []
+    for (let i = 0; i < 4; i++) {
+      for (let j = 0; j < 4; j++) cams.push(nadirCam(i * 20, j * 20, 500))
+    }
+    const up = estimateUpFromCameras(cams)
+    expect(up[0]).toBeCloseTo(0, 6)
+    expect(up[1]).toBeCloseTo(0, 6)
+    expect(up[2]).toBeCloseTo(1, 6) // world +Z, not the sideways image axis
+  })
+
+  it('keeps the image-up axis for a horizontal terrestrial strip', () => {
+    // Cameras walking along +X at constant height, all looking at a wall (+Y).
+    // world→cam rows: x_cam=+X, y_cam(down)=-Z, z_cam(view)=+Y.
+    const R = [[1, 0, 0], [0, 0, -1], [0, 1, 0]]
+    const cams = []
+    for (let i = 0; i < 6; i++) cams.push({ R, t: [-i * 2, 0, 0] })
+    const up = estimateUpFromCameras(cams)
+    expect(up[2]).toBeCloseTo(1, 6) // +Z from the image axes; view-dir up would be -Y
+  })
+
+  it('ignores the baseline when the centres are a tight cluster', () => {
+    const cams = [{ R: I3, t: [0, 0, 0] }, { R: I3, t: [0, 0, 0] }]
+    const up = estimateUpFromCameras(cams)
+    expect(up[1]).toBeCloseTo(-1, 6)
   })
 })
 
