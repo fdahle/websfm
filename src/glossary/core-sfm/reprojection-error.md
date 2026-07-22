@@ -13,6 +13,22 @@
     specific one, wrap it: <span class="no-help">bundle adjustment</span>.
   - Math: $inline$ and $$block$$ via KaTeX. Images: ![alt](assets/foo.png)
     (files under src/glossary/assets/). Standard markdown otherwise.
+
+  Wanted-image markers: a figure that would help but does not exist yet is
+  recorded as an HTML comment at the spot it belongs, so it renders as nothing
+  and stays greppable — `grep -rn 'TODO(image)' src/glossary`. The marker is an
+  HTML comment whose text starts "TODO(image): assets/NAME.svg - " followed by a
+  description of what the figure must show. To fulfil it, drop the file in
+  src/glossary/assets/ and replace the comment with a normal
+  ![alt](assets/NAME.svg).
+
+  Two rules for those comments (both enforced by glossary.test.js):
+    - no '>' inside them. The auto-linker walks rendered HTML as a tag/text
+      stream, and a '>' would end the pseudo-tag early, leaking the rest as
+      visible text.
+    - no comment-closing sequence inside THIS block either — the leading-comment
+      strip is non-greedy and would end the schema block at the first one,
+      leaving the rest above the frontmatter.
 -->
 ---
 id: reprojection-error

@@ -433,7 +433,7 @@ export function makeDenseOps({ rasterize }) {
         'info', 'Dense'])
 
       maps.push({
-        uuid: img.uuid, width: dm.width, height: dm.height,
+        uuid: img.uuid, name: img.name, width: dm.width, height: dm.height,
         K: ref.K, R: img.R, t: img.t,
         // Per-pixel converged plane normals (camera-frame, unit, nz<0). Kept
         // alongside depth for fusion → Poisson meshing. Holes are defined by
@@ -461,6 +461,15 @@ export function makeDenseOps({ rasterize }) {
       filterDepthMapsGeometric(maps, { maxGeomCost, minConsistent, minNcc },
         (m, l, c) => emit('log', [m, l, c]),
         { onProgress: (d, t, lbl) => emit('progress', [d, t, lbl]) })
+      const marginal = maps.filter((m) => (m.filterStats?.considered ?? 0) > 0 && m.filterStats.keptPct < 1)
+      if (marginal.length) {
+        const names = marginal.slice(0, 12)
+          .map((m) => `${m.name || m.uuid} ${m.filterStats.keptPct.toFixed(1)}%`).join('; ')
+        emit('log', [`Depth filter: ${marginal.length} marginal map(s) kept <1% after cross-view filtering — `
+          + `${names}${marginal.length > 12 ? `; +${marginal.length - 12} more` : ''}. `
+          + 'They remain cached for diagnostics/orthophoto use but will contribute little to fusion.',
+        'warn', 'Dense'])
+      }
       emit('log', [`Depth filter: cross-view consistency in ${((performance.now() - tFilt) / 1000).toFixed(1)}s`,
         'info', 'Dense'])
     }

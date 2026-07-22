@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useGlossaryStore } from '../../stores/useGlossaryStore.js'
 import {
@@ -29,6 +29,22 @@ const activeHtml = computed(() =>
   activeEntry.value ? renderHelpMarkdown(activeEntry.value.body, { selfId: activeEntry.value.id }) : '')
 
 const tabEntries = computed(() => tabs.value.map(id => ({ id, entry: getGlossaryEntry(id) })))
+
+// A newly opened tab is appended at the right of the strip and can land past
+// the visible edge — scroll it into view so the user sees where it went.
+// Manual scrollLeft (not scrollIntoView) so only this strip ever moves.
+const tabScroll = ref(null)
+watch([activeId, tabs], async () => {
+  if (!isOpen.value || activeId.value === 'home') return
+  await nextTick()
+  const strip = tabScroll.value
+  const el = strip?.querySelector('.gtab.active')
+  if (!el) return
+  const sr = strip.getBoundingClientRect()
+  const er = el.getBoundingClientRect()
+  if (er.left < sr.left) strip.scrollLeft -= sr.left - er.left
+  else if (er.right > sr.right) strip.scrollLeft += er.right - sr.right
+})
 
 // Internal [label](help:id) / auto-links open (or focus) a tab.
 function onBodyClick(e) {
@@ -62,7 +78,7 @@ function onBodyClick(e) {
             role="tab"
             @click="glossary.setActive('home')"
           >Home</button>
-          <div class="tab-scroll">
+          <div ref="tabScroll" class="tab-scroll">
             <button
               v-for="t in tabEntries"
               :key="t.id"

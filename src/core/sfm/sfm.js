@@ -34,8 +34,10 @@ import { triangulateGcp } from './gcpTriangulation.js'
 import { stagedSelfCalTerms, stagedSelfCalDeferred, SELF_CAL_BASE_TERMS } from './selfCalSchedule.js'
 import { fitComposedRadial, radialCurveOk } from './selfCalCompose.js'
 import { fitSimilarity, frameFromSimilarity } from '../products/georef.js'
+import { graphHealth } from '../eval/matchGraph.js'
 import { RECONSTRUCT_DEFAULTS } from '../defaults.user.js'
 import { SFM_TUNING } from '../tuning.js'
+import { secondaryJobs, alignSecondary, mergeAligned } from './multiModel.js'
 
 // Re-export the extracted pure modules so existing importers (sfm.test.js and any
 // others that reached for these through sfm.js) keep working unchanged.
@@ -66,7 +68,7 @@ function fmtStats(s) {
     + `p95 ${s.p95.toFixed(2)}px, max ${s.max.toFixed(2)}px (${s.count} obs)`
 }
 
-export async function reconstruct(input, hooks = {}) {
+async function reconstructSingleModel(input, hooks = {}) {
   const { images, pairs, settings = {}, gcps = [] } = input
   // Resolve knobs from the single-source-of-truth constants, letting caller-supplied
   // `settings` (from the modal / a dev experiment override) win. User-facing defaults
@@ -1095,9 +1097,24 @@ export async function reconstruct(input, hooks = {}) {
     if (cameras.size >= 2 && points3d.length >= 10 && baIterations > 0) {
       onProgress?.(imgs.length - 1, imgs.length, 'Bundle adjustment…')
 
-      // Pre-filter solves stay pinhole ('none'): self-calibration against the
-      // unfiltered outlier soup drifts cx/cy badly (R6). Intrinsics are refined only
-      // in the post-filter passes below, once the gross junk is gone.
+      // Registration can leave a tiny tail of catastrophic observations (the South
+      // Building baseline had a 180px maximum). Running global BA on that known
+      // outlier soup was both wasted work and capable of producing two guarded
+      // rejections before the existing filter finally cleaned it. Strip only gross
+      // residuals here using the same generous first-pass gate used below; the tighter
+      // pass and all parallax checks remain unchanged.
+      const preClean = filterTracks({
+        maxReprojPx: filterMaxReprojPx * 2,
+        minTriAngleDeg: filterMinTriAngleDeg,
+      })
+      log(`Reconstruction: pre-BA gross cleanup (≤${(filterMaxReprojPx * 2).toFixed(1)}px, `
+        + `≥${filterMinTriAngleDeg}° parallax) — removed ${preClean.obsRemoved} obs + `
+        + `${preClean.ptsRemoved} points; ${points3d.length} points remain`,
+      preClean.obsRemoved || preClean.ptsRemoved ? 'info' : 'debug', 'Reconstruction')
+      rebuildViewIndex()
+
+      // Pre-filter solve stays pinhole ('none'): self-calibration before the tighter
+      // cleanup can drift cx/cy badly (R6). Intrinsics are refined only below.
       await runBundleAdjust('bundle adjustment', baIterations, 'none')
       logOutlierShare('pre-filter residuals')
 
@@ -1291,6 +1308,30 @@ export async function reconstruct(input, hooks = {}) {
     const finalStats = modelReprojStats()
     const nPoints = points3d.length
     const pct3plusViewTracks = nPoints ? (100 * (tracks3 + tracks4) / nPoints) : 0
+    // Diagnose coherent blocks left outside the chosen incremental model. This is
+    // materially different from isolated failures: a sizeable remaining component
+    // has enough internal geometry to seed a second model and should be routed to a
+    // future multi-model/merge pass, not described as "too few keypoints".
+    const unregisteredIds = imgs.filter((im) => !cameras.has(im.uuid)).map((im) => im.uuid)
+    const unregisteredSet = new Set(unregisteredIds)
+    const remainingGraph = graphHealth(
+      donePairs.filter((e) => unregisteredSet.has(e.idA) && unregisteredSet.has(e.idB)),
+      unregisteredIds,
+    )
+    const remainingComponents = remainingGraph.components
+      .filter((c) => c.length >= 2)
+      .map((c) => ({
+        size: c.length,
+        imageUuids: c,
+        imageNames: c.map((u) => imageByUuid(u)?.name ?? u),
+      }))
+    if (remainingComponents.length) {
+      log(`Reconstruction: ${remainingComponents.length} reconstructable-looking unregistered component(s) remain `
+        + `(${remainingComponents.map((c) => c.size).join(', ')} images); largest starts `
+        + `${remainingComponents[0].imageNames.slice(0, 4).join(', ')}`
+        + `${remainingComponents[0].size > 4 ? ', …' : ''}. Routing viable blocks to secondary-model recovery; `
+        + `looser global PnP gates are not used.`, 'warn', 'Reconstruction')
+    }
     const summary = {
       date: new Date().toISOString(),
       nCameras: cameras.size,
@@ -1298,6 +1339,8 @@ export async function reconstruct(input, hooks = {}) {
       pct3plusViewTracks,
       preBaP95px: preBaStats.p95,
       postBaMedianPx: finalStats.median,
+      initPair: { idA: bestPair.idA, idB: bestPair.idB, nameA: imgA.name, nameB: imgB.name },
+      unregisteredComponents: remainingComponents,
       perPairInitReproj,
       // WS2: composed self-calibrated radial distortion per sensor {k1,k2,k3} (folded
       // into keypoints for the sparse solve; the dense stage applies it to the sensor's
@@ -1328,4 +1371,129 @@ export async function reconstruct(input, hooks = {}) {
     log(`Reconstruction error: ${err?.message ?? err}`, 'error', 'Reconstruction')
     return done('error')
   }
+}
+
+// Public orchestration: build the normal primary model first, then independently
+// reconstruct each sizeable coherent block it stranded. Each secondary gets a halo
+// of registered boundary images. A similarity merge is accepted only when >=3 halo
+// cameras independently agree in position, orientation and leave-one-out scale;
+// otherwise the valid model is returned separately for the store to preserve.
+export async function reconstruct(input, hooks = {}) {
+  const cfg = { ...SFM_TUNING, ...(input.settings || {}) }
+  const clone = (value) => structuredClone(value)
+  let primary = await reconstructSingleModel(clone(input), hooks)
+  if (primary.status !== 'done' || cfg.secondaryModels === false) return primary
+
+  // Seed choice is noisy on difficult wide-angle sets because each pair's F/RANSAC
+  // estimate can move its recovered parallax enough to reorder otherwise plausible
+  // seeds. A tiny completed model is not a result to build secondary recovery around:
+  // retry alternate seeds and retain the largest valid primary. This directly guards
+  // the South Building regression where a 3-camera seed replaced the prior 86-camera
+  // solution and the secondary pass merely repeated the same seed.
+  const log = hooks.onLog ?? (() => {})
+  const excluded = new Set()
+  const pairKey = (p) => p ? (p.idA < p.idB ? `${p.idA}--${p.idB}` : `${p.idB}--${p.idA}`) : null
+  const nInputImages = (input.images || []).filter((im) => im.kpStatus === 'done').length
+  const maxRetries = Math.max(0, cfg.seedRetryMax ?? 0)
+  const initialKey = pairKey(primary.summary?.initPair)
+  if (initialKey) excluded.add(initialKey)
+  for (let attempt = 0; attempt < maxRetries && primary.cameras.length < cfg.seedRetryMinFraction * nInputImages; attempt++) {
+    log(`Reconstruction: primary registered only ${primary.cameras.length}/${nInputImages}; `
+      + `retrying with alternate seed (${attempt + 1}/${maxRetries}, ${excluded.size} prior seed(s) excluded)`,
+    'warn', 'Reconstruction')
+    const candidate = await reconstructSingleModel({
+      ...clone(input),
+      settings: { ...(input.settings || {}), secondaryModels: false, excludedInitPairs: [...excluded] },
+    }, {
+      onLog: (message, level, category) => log(`Seed retry ${attempt + 1}: ${message}`, level, category),
+      onProgress: hooks.onProgress
+        ? (done, total, label) => hooks.onProgress(done, total, `Seed retry ${attempt + 1}: ${label}`)
+        : undefined,
+    })
+    if (candidate.status !== 'done') continue
+    if (candidate.cameras.length > primary.cameras.length
+      || (candidate.cameras.length === primary.cameras.length && candidate.points.length > primary.points.length)) {
+      log(`Reconstruction: alternate seed improved primary ${primary.cameras.length} → ${candidate.cameras.length} cameras; keeping it`,
+        'success', 'Reconstruction')
+      primary = candidate
+    } else {
+      log(`Reconstruction: alternate seed reached ${candidate.cameras.length} cameras; keeping ${primary.cameras.length}-camera primary`,
+        'info', 'Reconstruction')
+    }
+    const candidateKey = pairKey(candidate.summary?.initPair)
+    if (candidateKey) excluded.add(candidateKey)
+  }
+  if (primary.cameras.length < 0.25 * nInputImages) {
+    log(`Reconstruction: primary remains too small after alternate-seed retries `
+      + `(${primary.cameras.length}/${nInputImages}); secondary recovery suppressed because it cannot `
+      + `reliably align against a tiny primary`, 'error', 'Reconstruction')
+    primary.secondaryModels = []
+    primary.summary = { ...(primary.summary || {}), secondaryMerges: [] }
+    return primary
+  }
+
+  const jobs = secondaryJobs(input, primary, {
+    minImages: cfg.secondaryMinImages,
+    maxBoundary: cfg.secondaryBoundaryImages,
+  })
+  if (!jobs.length) return primary
+
+  const secondaryModels = []
+  const mergeReports = []
+  log(`Reconstruction: secondary-model recovery — ${jobs.length} viable stranded component(s)`,
+    'info', 'Reconstruction')
+  for (let ji = 0; ji < jobs.length; ji++) {
+    const job = jobs[ji]
+    log(`Reconstruction: secondary ${ji + 1}/${jobs.length} — ${job.componentIds.length} stranded + `
+      + `${job.boundaryIds.length} primary boundary image(s), ${job.pairs.length} pair(s)`,
+    'info', 'Reconstruction')
+    const secondary = await reconstructSingleModel({
+      ...clone(input),
+      images: clone(job.images),
+      pairs: clone(job.pairs),
+      gcps: [], // GCP anchoring belongs to the merged/final project model, not a local frame
+      settings: { ...(input.settings || {}), secondaryModels: false },
+    }, {
+      onLog: (message, level, category) => log(`Secondary ${ji + 1}: ${message}`, level, category),
+      onProgress: hooks.onProgress
+        ? (done, total, label) => hooks.onProgress(done, total, `Secondary ${ji + 1}: ${label}`)
+        : undefined,
+    })
+    if (secondary.status !== 'done' || secondary.cameras.length < 2 || !secondary.points.length) {
+      log(`Reconstruction: secondary ${ji + 1} failed to form a usable model`, 'warn', 'Reconstruction')
+      continue
+    }
+    const aligned = alignSecondary(primary, secondary, job.componentIds)
+    if (!aligned.accepted) {
+      log(`Reconstruction: secondary ${ji + 1} kept separate — ${aligned.reason}`, 'warn', 'Reconstruction')
+      secondaryModels.push({
+        ...secondary,
+        name: `Secondary sparse ${ji + 1}`,
+        componentImageUuids: job.componentIds,
+        alignment: { accepted: false, reason: aligned.reason, sharedCameras: aligned.common?.length ?? 0 },
+      })
+      continue
+    }
+    primary = mergeAligned(primary, aligned)
+    primary.summary.unregisteredComponents = (primary.summary.unregisteredComponents || [])
+      .filter((c) => !c.imageUuids?.some((u) => job.componentIds.includes(u)))
+    const report = {
+      componentImages: job.componentIds.length,
+      addedCameras: primary.summary.secondaryMerge.addedCameras,
+      addedPoints: primary.summary.secondaryMerge.addedPoints,
+      sharedCameras: aligned.common.length,
+      alignmentRmsFrac: aligned.rmsFrac,
+      medianRotationDeg: aligned.medianRotationDeg,
+      scaleSpread: aligned.scaleSpread,
+    }
+    mergeReports.push(report)
+    log(`Reconstruction: secondary ${ji + 1} merged — +${report.addedCameras} cameras, `
+      + `+${report.addedPoints} points; ${report.sharedCameras} shared cameras, `
+      + `position RMS ${(100 * report.alignmentRmsFrac).toFixed(2)}% of span, `
+      + `rotation median ${report.medianRotationDeg.toFixed(2)}°, scale spread `
+      + `${(100 * report.scaleSpread).toFixed(2)}%`, 'success', 'Reconstruction')
+  }
+  primary.secondaryModels = secondaryModels
+  primary.summary = { ...(primary.summary || {}), secondaryMerges: mergeReports }
+  return primary
 }

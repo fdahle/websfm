@@ -358,10 +358,16 @@ describe('filterDepthMapsGeometric (cross-view consistency)', () => {
 
   it('drops a flying pixel no other view supports', () => {
     const maps = [mkPlane('a', 0), mkPlane('b', -0.1)]
+    maps[0].name = 'reference.jpg'
     maps[0].depth[CENTER] = 2 // a flyer at 2× the true depth, low cost (looks confident)
-    filterDepthMapsGeometric(maps, { minConsistent: 1 }, () => {})
+    const logs = []
+    filterDepthMapsGeometric(maps, { minConsistent: 1 }, (m) => logs.push(m))
     // The round trip through b's own depth lands ~5 px away ⇒ b does not vouch for it.
     expect(maps[0].depth[CENTER]).toBe(0)
+    expect(maps[0].filterStats.inconsistent).toBeGreaterThan(0)
+    expect(maps[0].filterStats.keptPct).toBeGreaterThanOrEqual(0)
+    expect(maps[0].filterStats.keptPct).toBeLessThanOrEqual(100)
+    expect(logs.some((m) => m.includes('reference.jpg'))).toBe(true)
     // …and its neighbours, which are on the true surface, are untouched.
     expect(maps[0].depth[at(10, 16)]).toBeGreaterThan(0)
   })

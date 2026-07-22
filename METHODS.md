@@ -175,7 +175,19 @@ the graph. Positionally-degenerate pairs stay hard-rejected, never weak.
 
 Orchestrated in `core/sfm/sfm.js`; the numerical kernels are in
 `crates/reconstruction`. This is a **sequential/incremental** SfM (add one camera
-at a time), not global/hierarchical.
+at a time), not global/hierarchical. After the primary model finishes, a conservative
+multi-model wrapper (`core/sfm/multiModel.js`) examines coherent components in the
+remaining induced match graph. Components with at least eight images are reconstructed
+with up to twelve already-registered boundary cameras. The overlap estimates a 7-DOF
+similarity between the arbitrary frames. A merge requires at least three shared cameras
+plus low centre-alignment RMS, camera-rotation and focal agreement, compatible radial
+self-calibration, and stable leave-one-camera-out scale. A failed gate preserves the
+secondary as a separate sparse model; it never relaxes PnP or forces an alignment.
+Before secondary recovery, a primary registering less than half the input is retried
+with up to four alternate initial pairs, retaining the largest result. This prevents a
+stochastic F/essential estimate from making one locally clean but non-growing seed the
+foundation for every later model. Secondary recovery is suppressed if all retries leave
+fewer than 25% registered, because a tiny primary is not a trustworthy alignment frame.
 
 ### 4.0 Rotation-cycle consistency filter (pre-SfM pruning)
 

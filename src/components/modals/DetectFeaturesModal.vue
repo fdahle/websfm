@@ -7,6 +7,7 @@ import AdvancedDisclosure from './ui/AdvancedDisclosure.vue'
 import SegmentedControl from './ui/SegmentedControl.vue'
 import PresetCards from './ui/PresetCards.vue'
 import WarnBox from './ui/WarnBox.vue'
+import GlossaryTerm from '../glossary/GlossaryTerm.vue'
 import {
   DETECT_SIFT_DEFAULTS, DETECT_SUPERPOINT_DEFAULTS,
   DETECT_SIFT_PRESETS, DETECT_SUPERPOINT_PRESETS, DETECT_PRESET_META,
@@ -123,8 +124,11 @@ function attemptRun() {
 
 <template>
   <ModalShell title="Detect Features" @close="emit('close')">
-    <SettingsField label="Detector" label-for="detector-sel"
+    <SettingsField label-for="detector-sel"
       hint="SIFT works on any image; SuperPoint (learned) pairs with LightGlue matching.">
+      <template #label>
+        <GlossaryTerm id="sift">Detector</GlossaryTerm>
+      </template>
       <select id="detector-sel" v-model="detector" class="field-input field-select">
         <option v-for="d in detectors" :key="d.id" :value="d.id" :disabled="d.disabled">{{ d.label }}</option>
       </select>
@@ -166,16 +170,22 @@ function attemptRun() {
           <input id="sp-maxDim" v-model.number="superpointSettings.maxDim" type="number" min="100" max="10000" step="100" class="field-input" />
         </SettingsField>
 
-        <SettingsField v-if="!isSp" label="Contrast threshold" label-for="contrast"
+        <SettingsField v-if="!isSp" label-for="contrast"
           hint="Higher = fewer but more distinctive keypoints.">
+          <template #label>
+            <GlossaryTerm id="keypoint">Contrast threshold</GlossaryTerm>
+          </template>
           <input id="contrast" v-model.number="siftSettings.contrastThreshold" type="number" min="0.001" max="0.5" step="0.001" class="field-input" />
         </SettingsField>
 
         <SettingsField v-if="!isSp" label="Max keypoints" label-for="maxKp">
           <input id="maxKp" v-model.number="siftSettings.maxKeypoints" type="number" min="100" max="50000" step="100" class="field-input" />
         </SettingsField>
-        <SettingsField v-else label="Max keypoints" label-for="sp-maxKp"
+        <SettingsField v-else label-for="sp-maxKp"
           hint="Top-K by score after tile merge. LightGlue matching cost grows with this.">
+          <template #label>
+            Max <GlossaryTerm id="descriptor">keypoints</GlossaryTerm>
+          </template>
           <input id="sp-maxKp" v-model.number="superpointSettings.maxKeypoints" type="number" min="128" max="8192" step="128" class="field-input" />
         </SettingsField>
       </SettingsGroup>

@@ -65,6 +65,12 @@ export const SFM_TUNING = {
   // end images, never manufactures a pose. Set false to restore the strict sweep.
   rescueStalled: true,
   rescueRefineRatio: 0.2,    // relaxed refine-recheck ratio used on the rescue retry
+  // ── Secondary-model recovery ──
+  secondaryModels: true,      // reconstruct coherent blocks stranded outside the primary
+  secondaryMinImages: 8,      // avoid recursively solving tiny/noisy leftovers
+  secondaryBoundaryImages: 12, // registered overlap halo used to align arbitrary frames
+  seedRetryMax: 4,          // retry alternate initial pairs when the primary stalls tiny
+  seedRetryMinFraction: 0.5, // below this registered share, seed choice is still suspect
 }
 
 // Tie-point matching knobs read in useMatchesStore but NOT exposed in

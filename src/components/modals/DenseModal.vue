@@ -4,6 +4,7 @@ import ModalShell from './ui/ModalShell.vue'
 import SettingsField from './ui/SettingsField.vue'
 import SettingsGroup from './ui/SettingsGroup.vue'
 import AdvancedDisclosure from './ui/AdvancedDisclosure.vue'
+import GlossaryTerm from '../glossary/GlossaryTerm.vue'
 import { useComputeSettings } from '../../composables/useComputeSettings.js'
 import { DENSE_FUSE_DEFAULTS } from '../../core/defaults.user.js'
 
@@ -51,23 +52,32 @@ function run() {
         <input id="depthTol" v-model.number="settings.depthTolPct" type="number" min="0.1" max="10" step="0.1" class="field-input" />
       </SettingsField>
 
-      <SettingsField v-if="!settings.auto" label="Max matching cost" label-for="maxCost"
+      <SettingsField v-if="!settings.auto" label-for="maxCost"
         hint="Discard pixels whose PatchMatch cost exceeds this (0 = perfect … 2 = none). Lower = stricter.">
+        <template #label>
+          Max <GlossaryTerm id="photometric-consistency">matching cost</GlossaryTerm>
+        </template>
         <input id="maxCost" v-model.number="settings.maxCost" type="number" min="0.1" max="2" step="0.1" class="field-input" />
       </SettingsField>
     </SettingsGroup>
 
     <SettingsGroup title="Density">
-      <SettingsField label="Point density (sample step)" label-for="step" unit="px"
+      <SettingsField label-for="step" unit="px"
         hint="Emit one point every N pixels. 1 = densest (largest cloud); higher = decimated.">
+        <template #label>
+          <GlossaryTerm id="point-cloud">Point density (sample step)</GlossaryTerm>
+        </template>
         <input id="step" v-model.number="settings.step" type="number" min="1" max="8" step="1" class="field-input" />
       </SettingsField>
     </SettingsGroup>
 
     <AdvancedDisclosure label="Geometric outlier filters">
       <SettingsGroup title="Outlier removal">
-        <SettingsField label="Min triangulation angle" label-for="minTriAngle" unit="°"
+        <SettingsField label-for="minTriAngle" unit="°"
           hint="Drop points whose agreeing views are near-parallel (sky, distant haze). 0 disables.">
+          <template #label>
+            Min <GlossaryTerm id="baseline">triangulation angle</GlossaryTerm>
+          </template>
           <input id="minTriAngle" v-model.number="settings.minTriAngleDeg" type="number" min="0" max="20" step="0.5" class="field-input" />
         </SettingsField>
 

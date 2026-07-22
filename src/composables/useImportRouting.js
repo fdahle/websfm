@@ -6,9 +6,11 @@ import { detectCameraMode } from '../core/io/cameraKind.js'
 import { detectFileKind, isColmapFile } from '../core/io/importKind.js'
 import { parseFiducialObs } from '../core/io/fiducialObs.js'
 import { sniffCloudFormat } from '../core/io/cloudImport.js'
+import { looksLikeZipHead, isProjectArchiveName } from '../core/io/projectArchive.js'
 import { applyImportTransform } from '../core/io/cloudImport.js'
 import { parseCloudFile as parseCloudFileWorker } from '../workers/computeClient.js'
 import { unzipStore } from '../utils/zip.js'
+import { peekArchiveManifest } from '../utils/projectFile.js'
 import { isTiff, isGeoreferencedTiff, probeTiffGeoTags } from '../utils/tiff.js'
 import { useLog } from './useLog.js'
 
@@ -19,7 +21,7 @@ import { useLog } from './useLog.js'
 //   activateTab(id) — switch the active tab (to 'map' after a spatial import)
 // `cameraPickMode` is returned so the Ribbon command dispatch (still in App.vue)
 // can hint the file-picker mode before opening the hidden <input>.
-export function useImportRouting({ addGcps, addFootprints, addSensors, addPoses, addFiducialObs, importColmap, importCloud, importRaster, addImages, activateTab }) {
+export function useImportRouting({ addGcps, addFootprints, addSensors, addPoses, addFiducialObs, importColmap, importCloud, importRaster, importProjectFile, addImages, activateTab }) {
   const {
     gcpImportOpen, gcpImportText, gcpImportName, gcpImportGeojson, gcpImportCrs,
     footprintImportOpen, footprintImportData,
@@ -80,6 +82,11 @@ export function useImportRouting({ addGcps, addFootprints, addSensors, addPoses,
   // and anything ambiguous (a bare name + X/Y/Z list) → a small chooser.
   async function openDroppedImport(file) {
     if (!file) return
+    // A `.websfm` project file is a whole *project*, not data to merge into the
+    // open one, so it is checked first and short-circuits every other route. The
+    // gate is magic bytes + a manifest peek, never the extension alone: a COLMAP
+    // model also arrives as a `.zip`, and the manifest is what tells them apart.
+    if (importProjectFile && await isProjectArchive(file)) { await importProjectFile(file); return }
     // A TIFF that reached the non-image path (no `image/tiff` MIME type, e.g. a
     // bare `.tif` from some file managers) still has to be checked for geokeys
     // before anything tries to decode it as text.
@@ -103,6 +110,20 @@ export function useImportRouting({ addGcps, addFootprints, addSensors, addPoses,
       return
     }
     routeImport(file, detectFileKind(text, file.name).kind)
+  }
+
+  // Cheap two-step: ZIP magic (4 bytes) then, only for a zip, the manifest peek
+  // (a few kB). Never text-decodes, never reads the whole file.
+  async function isProjectArchive(file) {
+    try {
+      const head = new Uint8Array(await file.slice(0, 4).arrayBuffer())
+      if (!looksLikeZipHead(head)) return false
+      if (isProjectArchiveName(file.name)) return true
+      const manifest = await peekArchiveManifest(file)
+      return !!manifest
+    } catch {
+      return false
+    }
   }
 
   function routeImport(file, kind) {
@@ -365,7 +386,8 @@ export function useImportRouting({ addGcps, addFootprints, addSensors, addPoses,
 
   return {
     cameraPickMode,
-    openImportFile, openDroppedImport, routeImport, openFiducialObsImport, openColmapImport,
+    openImportFile, openDroppedImport, routeImport, isProjectArchive,
+    openFiducialObsImport, openColmapImport,
     openCloudImport, onCloudImport, onCloudPick,
     openRasterImport, onRasterPick, forkGeoreferencedRasters, addImagesRouted,
     onImportKindChosen, onImportSwitchKind,

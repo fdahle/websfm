@@ -8,6 +8,7 @@ import AdvancedDisclosure from './ui/AdvancedDisclosure.vue'
 import SegmentedControl from './ui/SegmentedControl.vue'
 import PresetCards from './ui/PresetCards.vue'
 import WarnBox from './ui/WarnBox.vue'
+import GlossaryTerm from '../glossary/GlossaryTerm.vue'
 import { useComputeSettings } from '../../composables/useComputeSettings.js'
 import { MATCH_DEFAULTS, MATCH_PRESETS, MATCH_PRESET_META } from '../../core/defaults.user.js'
 
@@ -97,7 +98,7 @@ function run() {
 
       <SettingsField v-if="strategy === 'preselect'" label-for="maxNeighbors"
         hint="Match each image to its N nearest by camera position. Needs imported poses.">
-        <template #label>Neighbours per image
+        <template #label><GlossaryTerm id="camera-pose">Neighbours per image</GlossaryTerm>
           <FieldHelp op="match-features" param="maxNeighbors" :default-value="settings.maxNeighbors" /></template>
         <input id="maxNeighbors" v-model.number="settings.maxNeighbors" type="number" min="1" max="50" step="1" class="field-input" />
       </SettingsField>
@@ -114,7 +115,7 @@ function run() {
 
       <SettingsField v-if="matcher === 'bruteforce'" label-for="ratio"
         hint="Lowe's ratio test. Lower = fewer but more reliable matches.">
-        <template #label>Ratio threshold
+        <template #label><GlossaryTerm id="lowe-ratio-test">Ratio threshold</GlossaryTerm>
           <FieldHelp op="match-features" param="ratioThreshold" :default-value="settings.ratioThreshold" /></template>
         <input id="ratio" v-model.number="settings.ratioThreshold" type="number" min="0.5" max="0.95" step="0.01" class="field-input" />
       </SettingsField>
@@ -138,7 +139,7 @@ function run() {
       <SettingsGroup title="Acceptance">
         <SettingsField label-for="minMatches"
           hint="Accept floor: pairs whose inliers fall below this aren't accepted as verified.">
-          <template #label>Min matches per pair
+          <template #label>Min matches per <GlossaryTerm id="match-graph">pair</GlossaryTerm>
             <FieldHelp op="match-features" param="minMatches" :default-value="settings.minMatches" /></template>
           <input id="minMatches" v-model.number="settings.minMatches" type="number" min="4" max="100" step="1" class="field-input" />
         </SettingsField>
@@ -150,7 +151,7 @@ function run() {
 
         <SettingsField v-if="matcher === 'bruteforce'"
           hint="Keeps only mutual nearest neighbours. Slower but more precise.">
-          <template #label>Cross-check (mutual NN)</template>
+          <template #label><GlossaryTerm id="lowe-ratio-test">Cross-check (mutual NN)</GlossaryTerm></template>
           <label class="checkbox-row"><input v-model="settings.crossCheck" type="checkbox" class="checkbox" /> Enabled</label>
         </SettingsField>
 
@@ -182,14 +183,17 @@ function run() {
 
       <SettingsGroup title="Geometric verification">
         <SettingsField hint="Filter outliers using the fundamental matrix. Strongly recommended.">
-          <template #label>RANSAC verification</template>
+          <template #label>
+            <GlossaryTerm id="ransac">RANSAC</GlossaryTerm>
+            <GlossaryTerm id="fundamental-matrix">verification</GlossaryTerm>
+          </template>
           <label class="checkbox-row"><input v-model="settings.geometricVerification" type="checkbox" class="checkbox" /> Enabled</label>
         </SettingsField>
 
         <template v-if="settings.geometricVerification">
           <SettingsField label-for="ransacThresh" unit="px"
             hint="Sampson distance threshold for inlier classification.">
-            <template #label>RANSAC threshold
+            <template #label><GlossaryTerm id="epipolar-geometry">RANSAC threshold</GlossaryTerm>
               <FieldHelp op="match-features" param="ransacThreshPx" :default-value="settings.ransacThreshPx" /></template>
             <input id="ransacThresh" v-model.number="settings.ransacThreshPx" type="number" min="0.5" max="8.0" step="0.5" class="field-input" />
           </SettingsField>

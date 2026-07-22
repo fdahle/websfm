@@ -17,7 +17,7 @@ export function useModalEscape({ pendingImageDelete, exportKind, onCancelNewProj
   const { currentProjectId } = storeToRefs(useProjectsStore())
   const {
     settingsOpen, aboutOpen,
-    projectPickerOpen, newProjectOpen, newProjectCanCancel,
+    projectPickerOpen, newProjectOpen, newProjectCanCancel, saveProjectOpen,
     detectFeaturesOpen, matchFeaturesOpen,
     imageTableOpen, maskManagerOpen, autoMaskOpen, sensorTableOpen, gcpTableOpen, matchListOpen, reconstructOpen,
     depthMapsOpen, denseOpen, demOpen, orthoOpen, meshOpen,
@@ -58,6 +58,7 @@ export function useModalEscape({ pendingImageDelete, exportKind, onCancelNewProj
       [sensorTableOpen.value,    () => { sensorTableOpen.value = false }],
       [gcpTableOpen.value,       () => { gcpTableOpen.value = false }],
       [matchListOpen.value,      () => { matchListOpen.value = false }],
+      [saveProjectOpen.value,    () => { saveProjectOpen.value = false }],
       [settingsOpen.value,       () => { settingsOpen.value = false }],
       [aboutOpen.value,          () => { aboutOpen.value = false }],
       [glossaryStore.isOpen,     () => glossaryStore.close()],

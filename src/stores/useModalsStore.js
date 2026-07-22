@@ -14,6 +14,7 @@ export const useModalsStore = defineStore('modals', () => {
   const projectPickerOpen   = ref(false)
   const newProjectOpen      = ref(false)
   const newProjectCanCancel = ref(true)
+  const saveProjectOpen     = ref(false)  // "Save project as…" (.websfm) options
   const detectFeaturesOpen  = ref(false)
   const matchFeaturesOpen   = ref(false)
   const imageTableOpen      = ref(false)
@@ -28,6 +29,10 @@ export const useModalsStore = defineStore('modals', () => {
   const demOpen             = ref(false)
   const orthoOpen           = ref(false)
   const meshOpen            = ref(false)
+  // Cloud editing (crop / filter / merge over dense clouds).
+  const cropCloudOpen       = ref(false)
+  const filterCloudOpen     = ref(false)
+  const mergeCloudsOpen     = ref(false)
   const gcpImportOpen       = ref(false)
   const gcpImportText       = ref('')
   const gcpImportName       = ref('')
@@ -70,6 +75,7 @@ export const useModalsStore = defineStore('modals', () => {
     projectPickerOpen,
     newProjectOpen,
     newProjectCanCancel,
+    saveProjectOpen,
     detectFeaturesOpen,
     matchFeaturesOpen,
     imageTableOpen,
@@ -84,6 +90,9 @@ export const useModalsStore = defineStore('modals', () => {
     demOpen,
     orthoOpen,
     meshOpen,
+    cropCloudOpen,
+    filterCloudOpen,
+    mergeCloudsOpen,
     gcpImportOpen,
     gcpImportText,
     gcpImportName,

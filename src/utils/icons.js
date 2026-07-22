@@ -149,6 +149,14 @@ export const icons = {
     <path d="M12 4v10" />
     <path d="M8 11l4 4 4-4" />
     <path d="M5 19h14" />`,
+  // Floppy-disk "save" and an open folder — whole-project file I/O (.websfm).
+  save: `
+    <path d="M4 5.5A1.5 1.5 0 0 1 5.5 4h9.7L20 8.8v9.7A1.5 1.5 0 0 1 18.5 20h-13A1.5 1.5 0 0 1 4 18.5z" />
+    <path d="M8 4v5h7V4" />
+    <path d="M7.5 20v-6h9v6" />`,
+  'folder-open': `
+    <path d="M3 8.5V6.2A1.2 1.2 0 0 1 4.2 5h4.3l2 2.4h6.3A1.2 1.2 0 0 1 18 8.6v1.4" />
+    <path d="M3 8.5h17.2a.9.9 0 0 1 .87 1.14l-2.1 8A1.2 1.2 0 0 1 17.8 18.5H4.2A1.2 1.2 0 0 1 3 17.3z" />`,
 
   // ── Other ───────────────────────────────────────────────────────────────────
   settings: `

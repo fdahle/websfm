@@ -37,6 +37,8 @@ if the *method* changed, update METHODS.md.
   directory tree; everything recomputable is recomputed rather than stored — the one
   exception is **dense Stage A depth maps** (minutes/image to rebuild), persisted to
   `depthmaps/` and loaded lazily; see `core/dense/depthMapCodec.js`.
+  **The per-project directory IS the project format** — that one fact carries both
+  save/load and folder-backed storage (below), and is why neither invents a format.
 - **Build/test**: Vite, Vitest (`npm test`), `tsc --noEmit` (`npm run typecheck`),
   `npm run build:wasm` (needs `wasm-pack`).
 
@@ -55,7 +57,9 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
   `ort.js`, `preselect.js`, and `tiling.js` — pure tile-grid/seam-NMS/auto-size math
   behind tiled detection; the per-tile detector loop lives in `workers/ops/detect.js`),
   `core/sfm/`
-  (`sfm.js` incremental SfM orchestrator, `register.js` the incremental-resection
+  (`sfm.js` incremental SfM orchestrator + primary/secondary driver,
+  `multiModel.js` conservative stranded-component reconstruction and shared-camera
+  similarity validation/merge, `register.js` the incremental-resection
   stage lifted out of it — next-best-view ordering + two-gate PnP + interleaved BA,
   `registerImages(ctx)` mutating the caller's model in place, `reconstruction.js` JS↔WASM
   marshalling, `geometry.js` shared pinhole-camera helpers — cameraCenter, project*,
@@ -220,6 +224,57 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
   per-modal knob**: the experimental WebGPU opt-in lives in Settings ▸ Compute
   (`useComputeSettings.useGpu`); MatchFeatures + DepthMaps inject it at `run()`.
 
+## Project storage: `.websfm` files + folder-backed projects
+Both features fall out of one fact — the per-project OPFS directory
+(`project.json` + `images/` + `matches/` + `recon.*.bin` + …) is already a
+self-contained, file-based project format.
+- **UI home**: every project-*scoped* command (new, open file/folder, rename,
+  save a copy, storage migration, delete) lives behind the project button's
+  `ProjectPicker` — new/open in the footer, per-project actions in the row's
+  `⋯` / right-click menu. The ribbon keeps exactly one entry, `Other ▸ Project ▸
+  Save a Copy…`, and it is deliberately **not** labelled "Save": work is
+  continuously autosaved into OPFS, so the only thing a user can "save" is a
+  portable copy. Save/migrate act on the **open** project only (they need its
+  root registered), so those menu entries are shown disabled with the reason on
+  other rows rather than hidden. Don't re-add project I/O to the ribbon.
+- **Save/load** (`Other ▸ Project ▸ Save a Copy…`, the picker row menu, or drop
+  a `.websfm` on the window) is a
+  zip/unzip of that directory: `core/io/projectArchive.js` holds the pure rules
+  (manifest build/validate, what's included, per-entry compression, entry-path
+  safety, the 4 GB pre-flight), `utils/projectFile.js` the fflate + OPFS + save-
+  picker I/O, `useProjectsStore.exportProject/importProject` the index side.
+  Both directions **stream** — a 3 GB project must never be assembled in memory;
+  peak is one entry. Entry 0 is always `manifest.json`, which is what lets
+  `peekArchiveManifest` validate (and reject a newer-format file, or a COLMAP
+  `.zip`) after a few kB instead of a multi-GB unpack-then-reject. `log.ndjson`
+  is never archived (session record, not project data); `images-derived/`,
+  `depthmaps/`, `products/` are the opt-out "cached & derived" set — safe to drop
+  precisely because restore heals all three. Import always lands in a **fresh**
+  `crypto.randomUUID()` project (internal uuids are project-scoped, so nothing
+  needs rewriting but `project.json`'s own id). **We write plain ZIP, not ZIP64**,
+  hence the hard 4 GB ceiling and an explicit pre-flight rather than a corrupt
+  file at the boundary.
+- **Folder-backed projects** swap the root `FileSystemDirectoryHandle`: OPFS and
+  `showDirectoryPicker()` handles expose the *identical* async API, so
+  `opfs.setProjectRoot(id, handle)` is the whole mechanism and every other helper
+  in opfs.js is untouched. The on-disk layout is byte-identical to the OPFS one,
+  which is what makes the zip export, migration (a plain tree copy) and the single
+  restore path all work unchanged. Chromium-only — `core/io/folderProject.js`
+  `folderStorageSupported()` gates the UI, OPFS stays the default and the fallback.
+  Invariants: the project **index** (`websfm/index.json`) always stays in OPFS
+  (it must be readable before any folder permission exists); the directory handle
+  lives in IndexedDB (`utils/handleStore.js` — localStorage physically cannot hold
+  one, a handle is structured-cloneable, not a string); an index entry's
+  `storage: 'opfs' | 'folder'` is absent on old projects ⇒ opfs. **Opening a
+  folder project must consult `openPlan(id)` before `switchProject`** — it
+  registers the root when permission is already granted and otherwise returns
+  `reconnect` / `repick`, because `requestPermission` needs a **user gesture** and
+  a silent retry is simply rejected (FolderReconnectModal supplies the button).
+  **websfm never deletes files on the user's disk**: deleting a folder project
+  forgets it (`opfs.deleteProject` enforces this, not the call site), and "move
+  into browser storage" copies and detaches. Only the OPFS source tree is deleted
+  after a migration, and only once `copyVerified` matches file count *and* bytes.
+
 ## Stores (`src/stores/`)
 - **`projectStores.js`** — registry. Project-scoped stores register via
   `registerProjectStore()` and implement `restore(ctx)` / `clear(opts)`;
@@ -298,7 +353,12 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
   survives `handleSetCrs` with no resampling, for the same reason the sampler
   reprojects the query. The group sits above the basemap and below every project
   vector layer, so GCPs/footprints stay legible; sidebar list order is draw order.
-- `useSensorsStore`, `useProjectsStore`, `useGcpsStore`, `useFootprintsStore`,
+- `useProjectsStore` — the project *index* (not content): list, current id, CRS,
+  plus `.websfm` export/import and the folder-backed-storage actions
+  (`openPlan` / `reconnectProjectFolder` / `createFolderProject` /
+  `adoptFolderProject` / `moveProjectTo{Folder,Browser}`). See
+  "Project storage" above.
+- `useSensorsStore`, `useGcpsStore`, `useFootprintsStore`,
   `usePosesStore`, `useModalsStore`.
 
 ## Pipelines
@@ -509,7 +569,25 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
    SfM centres ↔ imported poses). Exports in `core/products/exporters.js` +
    `core/products/geotiff.js` (PLY, model JSON, DEM GeoTIFF/.asc, ortho GeoTIFF/PNG+.wld)
    through `ExportModal.vue`. Products persist to OPFS (`products/…`).
-6. **Mesh** (`core/products/mesh.js` + `crates/mesh`): **screened Poisson** over the
+6. **Cloud editing** (`core/products/cloudEdit.js` + `workers/ops/cloud.js`, Tools ▸
+   Point Cloud): crop (axis-aligned box, invertible, per-side-nullable bounds),
+   filter (an **ordered** method chain — `range` → `voxel` → `isolated` → `sor`,
+   each stage feeding the next, so the O(N·27-cell) neighbour sweep runs last over
+   the smallest cloud), merge (concat + optional seam dedupe). Three invariants:
+   (1) **dense clouds only** — a `kind:'sparse'` cloud's points carry the
+   view-tracks dense/ortho/COLMAP-export read, so thinning one would silently
+   invalidate the depth-map staleness stamp and the track stats; cropping the
+   *model* is a different operation from cropping a *product*. (2) **Non-destructive**
+   — every edit ADDS a cloud flagged `derived: true` (persisted; absent ⇒ false),
+   which `upsertDenseCloud` skips exactly as it skips `imported`, while `imported`
+   is *inherited* from the source so the sidebar's Products-vs-Reference split still
+   holds. (3) **`editCloud` never throws**: the store transfers the source buffers
+   in, so a rejected call would leave the user's cloud detached — failures return
+   `{ cloud: null, error }` with the inputs round-tripped home under `home[]`, and
+   the store re-attaches those *before* any early return. `removeIsolated` is the
+   standalone cousin of the dense accumulator's `filterIsolated` — it scores
+   occupancy on a grid but keeps the original points (a cleanup, not a resample).
+7. **Mesh** (`core/products/mesh.js` + `crates/mesh`): **screened Poisson** over the
    main dense cloud, reusing its per-point normals (`DenseCloud.nrm`, the PatchMatch
    plane normals — no separate normal estimation). The wasm `poisson_mesh` returns one
    flat byte buffer `[u32 nVerts, u32 nTris, f32 pos, u32 idx]`; the crate extracts at
@@ -523,7 +601,7 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
 ## In-app glossary (help)
 Cross-linked term explanations. **Content**: `src/glossary/**/*.md` (organised into
 topic sub-folders — `algorithms/`, `camera-sensor/`, `core-sfm/`,
-`dense-reconstruction/`, `products/` — the flat `id` is the key, so entries
+`dense-reconstruction/`, `georeferencing/`, `products/` — the flat `id` is the key, so entries
 link by id regardless of path, but the folder is kept as the entry's `topic`:
 the modal home renders a **pipeline map** — stage cards (label/icon/blurb from
 `GLOSSARY_TOPICS`) joined by arrows in workflow order, terms as clickable chips;
@@ -548,7 +626,15 @@ the home page. Highlighting is gated by the persisted `glossaryTermsEnabled`
 toggle (`composables/useGlossarySettings.js`, Settings ▸ Display). **Adding a
 term**: drop `src/glossary/<folder>/<id>.md` (auto-registered by the recursive glob) — it auto-links
 wherever its title/aliases appear; wrap UI text in `<GlossaryTerm id>` only where
-you want an explicit hover affordance.
+you want an explicit hover affordance. **Wanted figures** are recorded in-place as
+`<!-- TODO(image): assets/NAME.svg - what it must show -->` comments (grep them to
+find the backlog); such a comment must contain no `>`, since `autoLinkHtml` walks
+the rendered HTML as a tag/text stream and would end the pseudo-tag early — and the
+schema block at the top of `reprojection-error.md` must contain no comment-*closing*
+sequence either, since `stripLeadingComment` is non-greedy and would end the schema
+block there, pushing the rest above the frontmatter (i.e. "missing frontmatter").
+`glossary.test.js` pins both, plus id↔filename, a non-empty title/summary/body, and
+that every explicit `help:` id resolves.
 
 ## CRS / GCP / poses
 Per-project working CRS (proj4). GCPs, footprints, and camera poses store positions in

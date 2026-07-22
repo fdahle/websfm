@@ -132,6 +132,98 @@ fiducials; self-calibration (A2) + fiducials (F4) are the code-side support.
 
 ## Done log (most recent first)
 
+- **2026-07-22 · Project I/O gathered behind the project picker** — UX follow-up to
+  the save/load feature the same day. `ProjectPicker`'s footer is now a primary
+  "+ New project" plus an "Open existing" pair whose sublabels finally state the
+  file-vs-folder difference (a `.websfm` is *copied into* the browser; a folder is
+  *edited in place*) — it was nowhere explained. The per-row ✏/✕ pair became one
+  `⋯` (also right-click) menu: Rename · Save a copy… · Move to folder… / Move to
+  browser storage · Delete/Remove; the storage entries are shown **disabled with
+  the reason** on non-open projects, since both need the project's root
+  registered. The ribbon's `Project` + `Project Folder` groups collapsed to a
+  single `Save a Copy…` — "Save Project" implied work wasn't autosaved, when the
+  only real action is writing a portable copy. `projectStorage`/
+  `needsBrowserProject`/`needsFolderProject` dropped from `Ribbon.vue` with them.
+  The row menu is teleported to `<body>` (the picker clips, and its centered
+  variant is a transformed ancestor that would re-root `position: fixed`).
+
+- **2026-07-22 · Cloud editing: Filter / Crop / Merge (Tools ▸ Point Cloud)** — the
+  three placeholder ribbon buttons are now live. Pure math in
+  `core/products/cloudEdit.js` (+ 34 tests): `cropCloud` (axis-aligned box, invert,
+  per-side-nullable bounds), `filterCloud` — an *ordered* method chain over
+  `statisticalOutlierFilter` (grid-accelerated kNN mean-distance, mean+ratio·σ),
+  `removeIsolated` (occupancy grid, keeps points rather than merging — unlike the
+  dense accumulator's `filterIsolated`), `voxelDownsample` (reuses
+  `createVoxelAccumulator`, origin-shifted for CRS-sized coords), `filterRange`
+  (elevation + Rec.709 luma band) — and `mergeClouds` (concat + optional seam
+  dedupe). Worker op `editCloud` (`workers/ops/cloud.js`), store action
+  `useReconstructionStore.editClouds`, three modals, `usePipeline.runEditClouds`.
+  Two invariants worth remembering: the op **never throws** (source buffers are
+  transferred in, so a rejection would destroy the user's cloud — failures come back
+  as `{ cloud: null, error }` with the buffers round-tripped home), and results are
+  new `derived: true` clouds that `upsertDenseCloud` refuses to overwrite. Scope is
+  `kind:'dense'` only — a sparse cloud carries the view-tracks dense/ortho/COLMAP
+  read. Not yet exercised in a browser on a real multi-million-point cloud.
+
+- **2026-07-22 · Project save/load (`.websfm`) + folder-backed projects** — both
+  from one enabling fact: the per-project OPFS directory already *is* a
+  file-based project format, so save/load is a zip/unzip of it and folder storage
+  is a swapped root handle. **Phase 1**: `core/io/projectArchive.js` (pure rules —
+  manifest, include/exclude, per-entry compression, entry-path safety, the 4 GB
+  ZIP32 pre-flight) + `utils/projectFile.js` (fflate, streaming both ways, save
+  picker with a buffered `<a download>` fallback) + `opfs.walkProjectFiles` /
+  `writeProjectFile` + `useProjectsStore.exportProject/importProject`. Entry 0 is
+  the manifest, so `peekArchiveManifest` rejects a foreign zip / newer format
+  after a few kB. UI: Ribbon ▸ Other ▸ Project, `SaveProjectModal` (with live
+  size + a cached/derived opt-out), the project picker + first-run New Project
+  dialog, and drag-and-drop (magic bytes + manifest peek, so a COLMAP `.zip` is
+  never mistaken for a project). **Phase 2**: `opfs.setProjectRoot` registry +
+  `utils/handleStore.js` (IndexedDB — a directory handle is cloneable, not a
+  string) + `core/io/folderProject.js` (storage flag, the open/reconnect/repick
+  state machine, adopt/new-folder verdicts, copy verification) +
+  `NewProjectModal` storage choice, `FolderReconnectModal`, picker badges,
+  "Open project folder…", and verified-copy migration both ways. websfm never
+  deletes files on the user's disk; only the OPFS source tree is dropped after a
+  migration, and only once file count *and* bytes match. **Not runtime-verified**:
+  OPFS, File System Access and IndexedDB need a real browser — `npm test` (869)
+  + `npm run typecheck` + `npm run build` pass, and the archive round trip is
+  covered against an in-memory OPFS fake plus the independent `utils/zip.js`
+  writer, but nothing here has been exercised in Chromium yet. New dep: `fflate`.
+  Where it lives: `core/io/projectArchive.js`, `core/io/folderProject.js`,
+  `utils/projectFile.js`, `utils/handleStore.js`, `utils/opfs.js`,
+  `stores/useProjectsStore.js`. (`plan-project-save-load.md` deleted per the
+  four-docs rule.)
+
+- **2026-07-21 · Glossary content pass** — the 8 stub entries (descriptor, sift,
+  track, baseline, fundamental-matrix, focal-length, principal-point, depth-map)
+  are written out; 18 new entries added across a new `georeferencing/` topic
+  (ground-control-point, georeferencing, coordinate-reference-system) plus
+  sensor / camera-pose / ground-sample-distance / fiducial-marks, triangulation /
+  homography / pnp / lowe-ratio-test, structure-from-motion / match-graph /
+  self-calibration, patchmatch / photometric-consistency / point-cloud, and mesh.
+  36 wanted figures are recorded in-place as `TODO(image)` comments
+  (`grep -rn 'TODO(image)' src/glossary`) — none exist yet, so the entries render
+  text-only until they are drawn. `<GlossaryTerm>` wired into Detect / Match /
+  Reconstruct / DepthMaps / Dense / Mesh / DEM / Ortho modals. New
+  `glossary.test.js` content block pins id↔filename, non-empty title/summary/body,
+  and that every `help:` cross-link resolves — it caught a nested `-->` in the
+  schema header that had silently broken `reprojection-error.md`'s frontmatter.
+
+- **2026-07-21 · South Building run-driven hardening** — the 128-image medium
+  run (86 registered, 13,942 sparse points, 5.96M dense points) drives four
+  guarded improvements: final sparse BA removes gross tracks before its first
+  global solve; WebGPU depth setup reports cached `device.lost` details when an
+  error scope collapses and the dense worker remains pinned to WASM for the run;
+  depth-filter diagnostics use image names, retain per-map survival stats and warn
+  for <1%-survival marginal maps; sparse summaries persist coherent
+  `unregisteredComponents`. `sfm.js` now reconstructs viable stranded components
+  with a primary overlap halo; `multiModel.js` accepts a merge only after shared-camera
+  position/rotation/focal/radial/scale gates, otherwise the store persists a named
+  non-main secondary sparse cloud. The first browser rerun exposed seed-lock rather
+  than a bad merge (primary 3/128; merge rejected): primaries below 50% now retry up to
+  four excluded initial pairs, keep the largest model, and suppress secondary recovery
+  if every retry remains below 25%.
+
 - **2026-07-20 · FDR — detection/calibration separation** — **Detect
   Fiducials** is now a calibration-free image task. `core/sfm/fiducialDetection.js`
   searches anonymous corner and side slots with Generic/right-angle/45°/Frame

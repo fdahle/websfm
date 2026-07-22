@@ -7,7 +7,7 @@ import { terminateAll } from '../workers/computeClient.js'
 // reconstruct:      function      — from useReconstructionStore
 // computeDepthMaps:  function      — from useReconstructionStore (dense Stage A)
 // densify:          function      — from useReconstructionStore (dense Stage B)
-export function usePipeline({ images, detectAll, matchAll, reconstruct, computeDepthMaps, densify, generateDem, generateOrtho, generateMesh }) {
+export function usePipeline({ images, detectAll, matchAll, reconstruct, computeDepthMaps, densify, generateDem, generateOrtho, generateMesh, editClouds }) {
   const progressOpen    = ref(false)
   const progressTitle   = ref('')
   const progressCurrent = ref(0)
@@ -146,6 +146,19 @@ export function usePipeline({ images, detectAll, matchAll, reconstruct, computeD
     progressOpen.value = false
   }
 
+  // Tools — cloud editing (crop / filter / merge). Single worker call, same
+  // cancel-by-terminate contract as the mesh run.
+  async function runEditClouds(request) {
+    const titles = { crop: 'Cropping Cloud', filter: 'Filtering Cloud', merge: 'Merging Clouds' }
+    openProgress(titles[request.mode] ?? 'Editing Cloud', 1, () => terminateAll('cloud edit cancelled'))
+    await editClouds(request, (done, total, label) => {
+      progressCurrent.value = done
+      progressTotal.value   = total
+      progressLabel.value   = label ?? ''
+    })
+    progressOpen.value = false
+  }
+
   return {
     progressOpen,
     progressTitle,
@@ -161,5 +174,6 @@ export function usePipeline({ images, detectAll, matchAll, reconstruct, computeD
     runGenerateDem,
     runGenerateOrtho,
     runGenerateMesh,
+    runEditClouds,
   }
 }

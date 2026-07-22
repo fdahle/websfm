@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 import ModalShell from './ui/ModalShell.vue'
 import SettingsField from './ui/SettingsField.vue'
+import GlossaryTerm from '../glossary/GlossaryTerm.vue'
 import { ORTHO_DEFAULTS } from '../../core/defaults.user.js'
 
 // Build Orthophoto. Reprojects each DEM cell through the cached depth maps
@@ -42,13 +43,19 @@ function run() {
       </select>
     </SettingsField>
 
-    <SettingsField label="Occlusion tolerance" label-for="ortho-tol" unit="%"
+    <SettingsField label-for="ortho-tol" unit="%"
       hint="How closely a cell's depth must match a view's depth map to count as visible.">
+      <template #label>
+        <GlossaryTerm id="depth-map">Occlusion tolerance</GlossaryTerm>
+      </template>
       <input id="ortho-tol" v-model.number="settings.depthTolRel" type="number" min="0.5" max="10" step="0.5" class="field-input" />
     </SettingsField>
 
-    <SettingsField label="Max match cost" label-for="ortho-cost"
+    <SettingsField label-for="ortho-cost"
       hint="Drop colours from poorly-matched (high-cost) pixels. 0 = keep all.">
+      <template #label>
+        Max <GlossaryTerm id="photometric-consistency">match cost</GlossaryTerm>
+      </template>
       <input id="ortho-cost" v-model.number="settings.maxCost" type="number" min="0" max="2" step="0.1" class="field-input" />
     </SettingsField>
 

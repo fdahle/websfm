@@ -37,6 +37,33 @@ still unvalidated on real data (Now ▸ R).
 
 ## Now
 
+### SB — South Building completeness + dense backend follow-up (2026-07-21)
+The 128-image medium baseline produced an accurate primary model (86 cameras,
+13,942 sparse points, 0.53px median reprojection) and a good 5.96M-point dense
+cloud, but exposed two distinct gaps. The diagnostic/performance batch shipped:
+gross-track cleanup now precedes final global BA (the baseline previously wasted two
+rejected solves on a 180px residual tail); WebGPU error-scope failures retain the
+device-loss reason before run-wide WASM fallback; geometric-filter logs use image
+names and flag <1%-survival marginal maps; and the sparse summary persists coherent
+unregistered components rather than mislabelling them as isolated weak images.
+- **Re-run South Building medium** and record whether the initial/follow-up global BA
+  now commits without the two 4.03→4.21px rejections. Final camera/point counts and
+  median/p95 must be no worse than 86 / 13,942 / 0.53px / 2.03px.
+- **Re-run with WebGPU enabled**. If it still drops at the first 768×576 six-source
+  map, record the new device-loss reason; fix the browser/device-specific cause rather
+  than weakening the CPU fallback. Target: all 86 maps remain on GPU.
+- **Verify the shipped secondary-model recovery + merge.** Each viable unregistered
+  component now reconstructs with a primary-camera overlap halo; ≥3 shared cameras must
+  pass position/rotation/focal/radial/leave-one-out-scale gates before its new cameras
+  and component-observed points merge. Failed alignment appears as a separate sparse
+  cloud. Record recovered cameras and alignment diagnostics. Do not lower the global
+  30% PnP gate to force the P1180182 near-miss (38/140 at 4px) into the primary model.
+- **Verify alternate-seed regression guard.** The 13:30 rerun selected
+  P1180205↔P1180316, stalled at 3/128, then repeated that seed in secondary recovery.
+  A primary below 50% now retries up to four excluded seeds and keeps the largest;
+  secondary recovery is suppressed below 25% after retries. The next run must recover
+  the former ≥86-camera primary before any merge is considered.
+
 ### FDR — fiducial split: browser verification owed (shipped 2026-07-20)
 The code-side rework is complete: **Detect Fiducials** finds anonymous corner/side
 structures without metric calibration or a prepared reference. **Calibrate
@@ -563,6 +590,21 @@ browser check (Safari + Chrome).
   Ortho likewise; a sparse re-run discards the saved set (stale stamp); removing
   one image drops only its map; measure the real bytes/image + reload seconds and
   record them as a baseline (the ~50 MB/image figure is projected, not measured).
+- **Project save/load + folder-backed projects** (shipped 2026-07-22, browser-only
+  paths entirely unproven — OPFS, File System Access and IndexedDB do not exist in
+  the test environment). Owed, in Chromium unless noted: save a real project →
+  reopen the `.websfm` in a fresh profile → the reconstruction, GCPs and images
+  all come back; the "exclude cached & derived data" file still opens and heals
+  (transcodes re-run, depth maps absent, products regenerate); drag-and-drop of a
+  `.websfm` routes to the project importer while a COLMAP `.zip` still routes to
+  the COLMAP importer; the buffered `<a download>` fallback path in **Firefox and
+  Safari** (no `showSaveFilePicker`); a project just under the 4 GB pre-flight
+  actually produces a readable archive. Folder projects: create in a folder →
+  reload → the reconnect prompt appears and Connect works; move the folder on
+  disk → "Choose folder…" re-links; "Open project folder…" adopts a project
+  copied from another machine; both migration directions verify and leave the
+  disk folder in place. Measure export/import throughput on the 128-image set and
+  record it as a baseline.
 (The tiling/SuperPoint/LightGlue/TIFF browser runs are under W0/SP5.)
 
 ### P3 — OPFS quantize + spill of depth maps
@@ -641,15 +683,24 @@ overview health table + sparse tiles/worst-images + calibration + GCP accuracy.
 strip, inline SVG track-length histogram in the export (the hub shows it live).
 
 ### F9 — Point-cloud editing + gradual selection **[new 2026-07-07]**
-Metashape-parity model cleanup. Two halves:
+Metashape-parity model cleanup. The **numeric dense half shipped 2026-07-22**
+(Tools ▸ Point Cloud: filter / crop / merge, `core/products/cloudEdit.js` — see
+HANDOVER). What remains is the two halves that need *interaction* or touch the
+*sparse* model, which the shipped work deliberately excluded:
 - **Interactive**: box/lasso select in Viewer3D → delete selected points
-  (three.js raycast/frustum selection; store already owns clouds — needs a
-  persisted delete mask or filtered rewrite).
-- **Gradual selection** (the higher-value, cheaper half): filter sparse points
-  by reprojection error / track length / triangulation angle with a live-count
-  slider, then delete + re-run BA. The stats all exist in the track filter
-  (`core/sfm/sfm.js`); this exposes them as a user-driven post-pass. UI as a
-  modal like MatchList.
+  (three.js raycast/frustum selection). Now cheaper than it was: the delete is
+  `cropCloud`/`selectPoints` with a caller-supplied mask, so this is a
+  selection-UI task plus one core entry point, not a data-model task. Still
+  needs the same "new derived cloud vs. persisted delete mask" decision.
+- **Gradual selection** (the higher-value, cheaper half): filter **sparse**
+  points by reprojection error / track length / triangulation angle with a
+  live-count slider, then delete + re-run BA. The stats all exist in the track
+  filter (`core/sfm/sfm.js`); this exposes them as a user-driven post-pass. UI
+  as a modal like MatchList. Note this is a genuinely different operation from
+  the shipped dense filters and must stay separate: a sparse point carries the
+  view-tracks dense/ortho/COLMAP-export read, so deleting one has to invalidate
+  the depth-map staleness stamp and re-run BA — which is exactly why
+  `cloudEdit.js` refuses sparse clouds.
 
 ### F10 — EXIF-GPS pose priors + preselection **[new 2026-07-07; absorbs "P2 remnants"]**
 `core/io/metadata.js` already parses `gpsLat/gpsLon/gpsAlt` — nothing consumes
@@ -737,6 +788,20 @@ JS proves slow on large grids; optional manual "Flip Z" for object scenes.
 
 ## Backlog
 
+**Project storage**
+- **ZIP64 writer**, to lift the 4 GB `.websfm` ceiling. fflate reads ZIP64 but
+  does not write it, so today a too-large project is refused up front
+  (`archiveSizeVerdict`) rather than silently corrupted. Wanted only once
+  someone actually hits it — the folder backend is the better answer for a
+  project that size, and the refusal message says so.
+- **Human-friendly filenames in a folder project** (real extensions on image
+  blobs, original names). Genuinely nicer on disk, but it forks the layout from
+  the OPFS one — and layout identity is what makes the zip export, the migration
+  copy and the single restore path all free. Parked deliberately; only revisit
+  with a plan for keeping one canonical layout.
+- **Two tabs on one folder project can race.** Same pre-existing situation as two
+  tabs on one OPFS project; out of scope until either is addressed.
+
 **Compute & workers**
 - **P4 — GPU matcher (WebGPU).** Descriptor-distance matrix in a compute shader
   (`src/workers/gpu/`, device singleton exists). The real path to
@@ -771,6 +836,23 @@ JS proves slow on large grids; optional manual "Flip Z" for object scenes.
   best-K only).
 
 **Import / formats**
+- **COPC reader for large reference clouds** (LOD, not storage). Decided
+  2026-07-22: COPC must **not** become websfm's own cloud format. Its value is
+  HTTP-range streaming of a remote octree, which a fully client-side app never
+  issues; internally we'd pay laz-perf as a dependency, LASzip compress/
+  decompress on every read and write, and int32 coordinate quantization
+  (a real precision loss in the polar/survey-CRS case) to buy nothing. The flat
+  typed-array sidecars already parse in zero time. Where it *does* pay is as a
+  **reader** for imported Reference Data: a dropped 500 MB LAS is already a
+  pain point, and an octree with LOD is the correct fix for "view a huge
+  external cloud without hydrating it" — the same lazy pattern as
+  `ensureRasterLoaded` / `depthMapsMeta`, and the point-cloud analogue of the
+  `RasterSource` accessor boundary (`core/io/rasterSource.js`), which exists so
+  a lazy source lands as a second implementation rather than a rewrite of every
+  call site. So: introduce the equivalent `CloudSource` boundary first, then a
+  COPC implementation behind it. Note this also means accepting LAZ, which
+  `core/io/las.js` rejects today on purpose. Gate on someone actually hitting
+  the wall with a real reference cloud.
 - **Video import** (extract frames at interval/overlap heuristic) — cheap via
   `<video>` + canvas; opens the largest casual-user funnel.
 - **16-bit / multi-band TIFF**: `utils/tiff.js` currently transcodes to 8-bit

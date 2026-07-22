@@ -37,7 +37,40 @@ async function readBin(dir, filename) {
   return file.arrayBuffer()
 }
 
+// ── Pluggable project root ────────────────────────────────────────────────────
+// A project normally lives at OPFS `websfm/projects/{id}`, but it can instead be
+// a directory the user picked on disk (File System Access). The two handle types
+// expose the IDENTICAL async API, so registering a picked handle here is the
+// whole of the feature: every helper below is untouched and neither knows which
+// backend it is writing to.
+//
+// The project *index* (`websfm/index.json`) always stays in OPFS — it is the list
+// of projects, not project content, and must be readable before any folder
+// permission has been granted.
+//
+// Registration is runtime-only and deliberately not persisted here: the handle
+// itself lives in IndexedDB (utils/handleStore.js), and re-registering it needs a
+// permission check, which is the store's job.
+const projectRoots = new Map()
+
+export function setProjectRoot(projectId, dirHandle) {
+  projectRoots.set(projectId, dirHandle)
+}
+
+export function clearProjectRoot(projectId) {
+  projectRoots.delete(projectId)
+}
+
+export function hasProjectRoot(projectId) {
+  return projectRoots.has(projectId)
+}
+
 async function getProjectDir(projectId, create = false) {
+  const registered = projectRoots.get(projectId)
+  // A folder-backed project's directory always exists — `create` is moot, and
+  // honouring it would be wrong anyway (we must never mint a subdirectory named
+  // after the project id inside the user's folder).
+  if (registered) return registered
   const root = await getRoot()
   const projects = await root.getDirectoryHandle('projects', { create: true })
   return projects.getDirectoryHandle(projectId, { create })
@@ -95,10 +128,122 @@ export async function writeProject(projectId, data) {
   await writeJson(dir, 'project.json', data)
 }
 
+// Remove the project's OPFS tree. A folder-backed project has none — its files
+// are on the user's disk, and deleting them is not ours to do (the store forgets
+// the project instead and says so). This is why the check is here rather than at
+// the call site: every path into deletion has to obey it.
 export async function deleteProject(projectId) {
+  if (projectRoots.has(projectId)) return
   const root = await getRoot()
   const projects = await root.getDirectoryHandle('projects', { create: true })
-  await projects.removeEntry(projectId, { recursive: true })
+  await projects.removeEntry(projectId, { recursive: true }).catch(() => {})
+}
+
+// Delete the OPFS tree regardless of any registered folder root — used by the
+// OPFS→folder migration once the copy has been verified, where the source is
+// known to be the OPFS tree even though the root is by then re-registered.
+export async function deleteOpfsProjectTree(projectId) {
+  const root = await getRoot()
+  const projects = await root.getDirectoryHandle('projects', { create: true })
+  await projects.removeEntry(projectId, { recursive: true }).catch(() => {})
+}
+
+// ── Whole-project file walk / write ───────────────────────────────────────────
+// The per-project directory IS the project format: `project.json` + the sidecar
+// trees below. These two helpers treat it as one opaque tree, which is what lets
+// a project be zipped into a `.websfm` file (core/io/projectArchive.js) and, in
+// future, copied between storage backends — without either of them knowing what
+// any individual file means.
+//
+// `walkProjectFiles` yields `{ relPath, file }` depth-first, `relPath` always
+// '/'-joined and relative to the project dir. `skip(relPath, kind)` is consulted
+// for both files and directories, so skipping a directory prunes the subtree
+// (that is what makes "exclude derived data" cheap rather than a per-file test).
+
+async function* walkDir(dir, prefix, skip) {
+  for await (const [name, handle] of dir) {
+    const relPath = prefix ? `${prefix}/${name}` : name
+    if (skip?.(relPath, handle.kind)) continue
+    if (handle.kind === 'directory') yield* walkDir(handle, relPath, skip)
+    else yield { relPath, file: await handle.getFile() }
+  }
+}
+
+export async function* walkProjectFiles(projectId, { skip = null } = {}) {
+  let dir
+  try {
+    dir = await getProjectDir(projectId)
+  } catch {
+    return   // no such project — an empty walk, matching the "absence is empty" convention
+  }
+  yield* walkDir(dir, '', skip)
+}
+
+// Write one file at `relPath` inside the project dir, creating intermediate
+// directories. `data` is anything createWritable() accepts (Blob / ArrayBuffer /
+// TypedArray / string). Rejects traversal outside the project dir — `relPath`
+// can come from a zip entry name, which is attacker-controlled data.
+export async function writeProjectFile(projectId, relPath, data) {
+  const dir = await getProjectDir(projectId, true)
+  await writeFileAt(dir, relPath, data)
+}
+
+// ── Directory-handle utilities (folder-backed projects / migration) ───────────
+// These take a raw FileSystemDirectoryHandle rather than a project id, because
+// migration has to hold BOTH roots at once — the registry can only name one.
+
+export async function writeFileAt(dirHandle, relPath, data) {
+  const parts = String(relPath).split('/').filter((p) => p !== '' && p !== '.')
+  if (!parts.length || parts.some((p) => p === '..')) {
+    throw new Error(`writeFileAt: unsafe path "${relPath}"`)
+  }
+  let dir = dirHandle
+  for (const part of parts.slice(0, -1)) dir = await dir.getDirectoryHandle(part, { create: true })
+  const fh = await dir.getFileHandle(parts[parts.length - 1], { create: true })
+  const writable = await fh.createWritable()
+  await writable.write(data)
+  await writable.close()
+}
+
+export async function readJsonAt(dirHandle, filename) {
+  return readJson(dirHandle, filename)
+}
+
+export async function dirIsEmpty(dirHandle) {
+  for await (const _ of dirHandle.keys()) return false   // eslint-disable-line no-unused-vars
+  return true
+}
+
+// The raw OPFS location of a project, ignoring any registered folder root. Only
+// migration needs this — everything else must go through getProjectDir so it
+// honours the backend the project is actually on.
+export async function getOpfsProjectDir(projectId, create = false) {
+  const root = await getRoot()
+  const projects = await root.getDirectoryHandle('projects', { create: true })
+  return projects.getDirectoryHandle(projectId, { create })
+}
+
+// Copy every file under `from` into `to`, preserving the layout. Returns
+// { files, bytes }. Verified by the caller (byte totals) before it deletes the
+// source — a half-copied project must never be the only copy.
+export async function copyTree(from, to, { onProgress = null } = {}) {
+  let files = 0
+  let bytes = 0
+  for await (const { relPath, file } of walkDir(from, '', null)) {
+    await writeFileAt(to, relPath, file)
+    files++
+    bytes += file.size
+    onProgress?.({ files, bytes, label: relPath })
+  }
+  return { files, bytes }
+}
+
+// Total file count + byte size of a tree, for verifying a copy.
+export async function measureTree(dirHandle) {
+  let files = 0
+  let bytes = 0
+  for await (const { file } of walkDir(dirHandle, '', null)) { files++; bytes += file.size }
+  return { files, bytes }
 }
 
 // ── Images ────────────────────────────────────────────────────────────────────

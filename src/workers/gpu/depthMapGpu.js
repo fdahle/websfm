@@ -216,10 +216,23 @@ export async function computeDepthMapGPU(refGray, refW, refH, refK, sources, opt
   // Resolve the error scopes now that every resource exists and the init pass has
   // been submitted. Throwing here (worker → WASM fallback) beats an opaque readback
   // failure later, and names the actual cause.
-  const valErr = await device.popErrorScope()
-  const oomErr = await device.popErrorScope()
+  let valErr, oomErr
+  try {
+    valErr = await device.popErrorScope()
+    oomErr = await device.popErrorScope()
+  } catch (err) {
+    const lost = state.lossInfo
+    const detail = lost
+      ? `device lost (${lost.reason || 'unknown'}${lost.message ? `: ${lost.message}` : ''})`
+      : 'device state unavailable (the browser dropped the WebGPU instance while resolving an error scope)'
+    throw new Error(`GPU depth-map setup failed: ${err?.message || err}; ${detail}`)
+  }
   const gpuErr = valErr || oomErr
-  if (gpuErr) throw new Error(`GPU depth-map setup failed: ${gpuErr.message}`)
+  if (gpuErr) {
+    const lost = state.lossInfo
+    const suffix = lost ? `; device lost (${lost.reason || 'unknown'}${lost.message ? `: ${lost.message}` : ''})` : ''
+    throw new Error(`GPU depth-map setup failed: ${gpuErr.message}${suffix}`)
+  }
 
   for (let it = 0; it < iters; it++) {
     writeCtrl(1, 0, it); dispatch()

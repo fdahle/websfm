@@ -19,6 +19,8 @@ copes by working iteratively:
    tolerance — these are the **inliers**.
 4. Repeat many times and keep the model with the most inliers.
 
+<!-- TODO(image): assets/ransac.svg - a 2D scatter with a clear linear trend plus scattered outliers, showing a least-squares fit dragged off by the outliers versus the RANSAC fit with its inlier band drawn, and one sampled minimal subset circled. -->
+
 Matches that disagree with the winning model are discarded as outliers, so a
 handful of bad correspondences can't skew the reconstruction. WebSfM applies
 this idea in two places: verifying pairwise matches via the fundamental matrix

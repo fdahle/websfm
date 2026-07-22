@@ -4,14 +4,24 @@ title: Digital Elevation Model
 aliases: DEM, elevation model, digital elevation models, height map
 summary: A raster grid of terrain heights — a top-down map where each cell stores the elevation of the ground at that location.
 ---
-A **Digital Elevation Model (DEM)** is a regular grid laid over the survey area in which every cell stores a single height value. It is the map-form summary of the reconstruction's shape: where the sparse and dense clouds are irregular
+A **Digital Elevation Model (DEM)** is a regular grid laid over the survey area
+in which every cell stores a single height value. It is the map-form summary of
+the reconstruction's shape: where the sparse and dense clouds are irregular
 scatterings of 3D points, the DEM resamples them into an evenly-spaced raster
 that GIS tools and downstream analysis can consume directly.
 
-WebSfM builds the DEM by projecting the dense point cloud onto a local
-horizontal plane, binning the points into grid cells, and taking a
+WebSfM builds the DEM by projecting the dense [point cloud](help:point-cloud)
+onto a local horizontal plane, binning the points into grid cells, and taking a
 representative height per cell. Cells with no points are filled by
-inverse-distance-weighted interpolation from their neighbours, and a hillshaded spreview is rendered so relief is easy to read at a glance.
+inverse-distance-weighted interpolation from their neighbours, and a hillshaded
+preview is rendered so relief is easy to read at a glance.
+
+<!-- TODO(image): assets/dem-binning.svg - a side-by-side of a scattered dense cloud and the regular grid it bins into, one cell blown up to show several points collapsing to a single representative height, and an empty cell marked as filled by interpolation from its neighbours. -->
+
+The cell size is the DEM's [ground sample distance](help:ground-sample-distance),
+and choosing it is the main decision the user makes: finer than the point
+spacing produces holes that have to be interpolated, coarser throws away
+resolution the dense cloud actually contains.
 
 The DEM records terrain height; the [Orthophoto](help:orthophoto) records
 appearance over the same footprint. Both are derived from the dense geometry

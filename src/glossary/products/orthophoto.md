@@ -13,8 +13,15 @@ and areas directly off the image.
 A raw photo cannot do this — objects lean away from the image centre and tall
 terrain is displaced — because the camera sees the world in perspective. WebSfM
 removes those effects by reprojecting the source photos through the recovered
-camera poses and the scene geometry, reusing the cached depth maps as a z-buffer
-so that only the surface actually visible in each direction contributes colour.
+camera poses and the scene geometry, reusing the cached
+[depth maps](help:depth-map) as a z-buffer so that only the surface actually
+visible in each direction contributes colour.
+
+<!-- TODO(image): assets/orthophoto-vs-perspective.svg - a terrain profile with a building, showing the perspective camera's rays making the building lean and displacing a hilltop, next to the parallel top-down rays of the ortho projection, with one occluded facade greyed out to motivate the z-buffer. -->
+
+Where a surface is hidden from every camera, no colour can be recovered — the
+orthophoto's holes are an honest map of what the block did not see, and are best
+fixed by taking more photos rather than by interpolation.
 
 Orthophoto generation therefore depends on the dense geometry produced by
 [Multi-View Stereo](help:multi-view-stereo) and pairs naturally with the

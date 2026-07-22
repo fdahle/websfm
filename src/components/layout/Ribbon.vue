@@ -22,6 +22,9 @@ const props = defineProps({
   depthMapCount: { type: Number, default: 0 },
   cloudReady: { type: Boolean, default: false },
   denseReady: { type: Boolean, default: false },
+  // How many clouds the crop/filter/merge tools can act on (kind:'dense',
+  // computed or imported). Merge needs two; the rest gate on denseReady.
+  editableCloudCount: { type: Number, default: 0 },
   meshReady: { type: Boolean, default: false },
   demReady: { type: Boolean, default: false },
   orthoReady: { type: Boolean, default: false },
@@ -182,9 +185,12 @@ const tabs = [
       {
         label: 'Point Cloud',
         commands: [
-          { id: 'filter-cloud',    label: 'Filter\nCloud',  icon: 'point-cloud', disabled: true },
-          { id: 'crop-cloud',      label: 'Crop\nCloud',    icon: 'rect',        disabled: true },
-          { id: 'merge-clouds',    label: 'Merge\nClouds',  icon: 'link',        disabled: true },
+          // These edit **dense** clouds (computed or imported) and always produce a
+          // new cloud — the source is never modified. A sparse cloud is deliberately
+          // not editable: its points carry the view-tracks dense/ortho/COLMAP read.
+          { id: 'filter-cloud',    label: 'Filter\nCloud',  icon: 'point-cloud', needsDense: true },
+          { id: 'crop-cloud',      label: 'Crop\nCloud',    icon: 'rect',        needsDense: true },
+          { id: 'merge-clouds',    label: 'Merge\nClouds',  icon: 'link',        needsTwoClouds: true },
         ],
       },
     ],
@@ -270,6 +276,17 @@ const tabs = [
     id: 'other',
     label: 'Other',
     groups: [
+      {
+        // Everything project-*scoped* (new / open / storage migration / delete)
+        // lives behind the project button's picker, which is the project's one
+        // home. The ribbon keeps only this: work is autosaved into invisible
+        // browser storage, so writing a portable `.websfm` copy is a frequent,
+        // verb-shaped action — and it is a *copy*, never "the save".
+        label: 'Project',
+        commands: [
+          { id: 'save-project-file', label: 'Save a\nCopy…', icon: 'save', needsProject: true },
+        ],
+      },
       {
         label: 'Panels',
         commands: [
@@ -527,8 +544,10 @@ function isDisabled(cmd) {
   if (cmd.needsMatches   && props.matchCount === 0)   return true
   if (cmd.needsSparse    && !props.sparseReady)       return true
   if (cmd.needsDepthMaps && props.depthMapCount === 0) return true
+  if (cmd.needsProject   && !props.currentProjectName) return true
   if (cmd.needsCloud     && !props.cloudReady)        return true
   if (cmd.needsDense     && !props.denseReady)        return true
+  if (cmd.needsTwoClouds && props.editableCloudCount < 2) return true
   if (cmd.needsMesh      && !props.meshReady)         return true
   if (cmd.needsDem       && !props.demReady)          return true
   if (cmd.needsOrtho     && !props.orthoReady)        return true
@@ -554,8 +573,11 @@ function disabledReason(cmd) {
   if (cmd.needsMatches   && props.matchCount === 0)   return 'Run feature matching first'
   if (cmd.needsSparse    && !props.sparseReady)       return 'Build the sparse model first'
   if (cmd.needsDepthMaps && props.depthMapCount === 0) return 'Compute depth maps first'
+  if (cmd.needsProject   && !props.currentProjectName) return 'No project open'
   if (cmd.needsCloud     && !props.cloudReady)        return 'Build a point cloud first'
   if (cmd.needsDense     && !props.denseReady)        return 'Build a dense cloud first'
+  if (cmd.needsTwoClouds && props.editableCloudCount < 2)
+    return 'Merging needs at least two dense clouds'
   if (cmd.needsMesh      && !props.meshReady)         return 'Build a mesh first'
   if (cmd.needsDem       && !props.demReady)          return 'Build a DEM first'
   if (cmd.needsOrtho     && !props.orthoReady)        return 'Build an orthophoto first'
@@ -633,7 +655,7 @@ function run(cmd) {
 
     <div class="ribbon-body">
       <template v-for="group in currentTab.groups" :key="group.label">
-        <div class="group">
+        <div v-if="!group.hidden" class="group">
           <div class="group-commands">
             <template v-for="(item, i) in group.commands" :key="item.id || `pair-${i}`">
               <!-- A stacked pair of two half-height buttons in one button's footprint -->

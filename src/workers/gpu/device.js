@@ -45,7 +45,9 @@ async function initDevice() {
 
     // Drop the cached promise if this device is lost, so ensureDevice() re-inits.
     // (Ignore the 'destroyed' reason — that's our own teardown, not a failure.)
+    const state = { device, adapter, info: {}, limits: device.limits, isFallback: !!adapter.isFallbackAdapter, lossInfo: null }
     device.lost.then((info) => {
+      state.lossInfo = info ?? { reason: 'unknown', message: 'WebGPU device lost without details' }
       if (info?.reason !== 'destroyed') devicePromise = null
     })
 
@@ -56,8 +58,12 @@ async function initDevice() {
       info = adapter.info ?? (adapter.requestAdapterInfo ? await adapter.requestAdapterInfo() : {})
     } catch { /* info is best-effort */ }
 
-    return { device, adapter, info, limits: device.limits, isFallback: !!adapter.isFallbackAdapter }
-  } catch {
+    state.info = info
+    return state
+  } catch (err) {
+    // Keep acquisition failures inspectable by callers in browser logs. There is no
+    // device to cache here, so the public contract remains null → CPU fallback.
+    console.warn?.('WebGPU device acquisition failed', err)
     // Any failure (no adapter, device request rejected) → treat as "no GPU".
     return null
   }

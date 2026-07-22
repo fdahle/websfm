@@ -236,6 +236,13 @@ export const generateOrtho = streamingOp('generateOrtho')
 // { mesh:{ nVerts, count, pos, idx, col }, denseHome:{ pos, col, nrm } }.
 export const meshify = streamingOp('meshify')
 
+// Cloud editing — crop / filter / merge over flat (dense) clouds. See
+// core/products/cloudEdit.js. Input { mode, clouds:[{ id, count, pos, col, nrm }],
+// settings }; the source buffers are TRANSFERRED in and round-tripped back under
+// `home[]` (keyed by cloud id) so the store can re-attach them. Resolves to
+// { cloud:{ count, pos, col?, nrm? }, home }.
+export const editCloud = streamingOp('editCloud')
+
 // Import — parse a point-cloud / mesh file (PLY / LAS / XYZ text) off the main
 // thread. The buffer is transferred in (detached for the caller); resolves to
 // { parsed, stats } with the flat cloud buffers transferred back.
