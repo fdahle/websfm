@@ -1,23 +1,50 @@
 <script setup>
 import { ref } from 'vue'
 import CrsPicker from '../controls/CrsPicker.vue'
+import { folderStorageSupported } from '../../core/io/folderProject.js'
 
 defineProps({
   canCancel: { type: Boolean, default: true },
 })
 
-const emit = defineEmits(['create', 'cancel'])
+const emit = defineEmits(['create', 'cancel', 'open-file'])
 
 const name = ref('My Project')
 const sceneType = ref('aerial')
 const crs = ref('EPSG:4326')
 
+// Storage backend. OPFS ('browser') is the default everywhere; the folder option
+// needs showDirectoryPicker, which is Chromium-only — hidden, not disabled,
+// elsewhere, so the choice never looks broken.
+const canUseFolder = folderStorageSupported()
+const storage = ref('browser')
+// Picked here rather than at submit time: the directory picker itself needs a
+// user gesture, and it is also the only way to show *which* folder was chosen.
+const folderHandle = ref(null)
+const folderError = ref('')
+
+async function pickFolder() {
+  folderError.value = ''
+  try {
+    folderHandle.value = await window.showDirectoryPicker({ mode: 'readwrite' })
+    storage.value = 'folder'
+  } catch (err) {
+    if (err?.name !== 'AbortError') folderError.value = String(err?.message ?? err)
+  }
+}
+
 function submit() {
   const n = name.value.trim()
   if (!n) return
+  if (storage.value === 'folder' && !folderHandle.value) { folderError.value = 'Choose a folder first.'; return }
   // Object-capture projects have no geographic CRS (scale is set manually).
   const crsValue = sceneType.value === 'object' ? null : crs.value
-  emit('create', { name: n, sceneType: sceneType.value, crs: crsValue })
+  emit('create', {
+    name: n,
+    sceneType: sceneType.value,
+    crs: crsValue,
+    dirHandle: storage.value === 'folder' ? folderHandle.value : null,
+  })
 }
 </script>
 
@@ -63,6 +90,35 @@ function submit() {
           </button>
         </div>
 
+        <template v-if="canUseFolder">
+          <label class="field-label" style="margin-top: 20px">Where to keep the files</label>
+          <div class="scene-cards">
+            <button
+              class="scene-card"
+              :class="{ active: storage === 'browser' }"
+              @click="storage = 'browser'"
+            >
+              <span class="scene-icon">▤</span>
+              <span class="scene-name">In this browser</span>
+              <span class="scene-desc">Private browser storage. Nothing to manage — save a
+                <code>.websfm</code> file when you want a copy.</span>
+            </button>
+            <button
+              class="scene-card"
+              :class="{ active: storage === 'folder' }"
+              @click="pickFolder"
+            >
+              <span class="scene-icon">🗀</span>
+              <span class="scene-name">In a folder…</span>
+              <span class="scene-desc">
+                <template v-if="folderHandle">Chosen: <code>{{ folderHandle.name }}</code></template>
+                <template v-else>A folder on this computer, so the project lives with your other files.</template>
+              </span>
+            </button>
+          </div>
+          <span v-if="folderError" class="crs-hint error">{{ folderError }}</span>
+        </template>
+
         <label class="field-label" style="margin-top: 20px">Coordinate system</label>
         <CrsPicker v-model="crs" :disabled="sceneType === 'object'" />
         <span class="crs-hint">{{
@@ -73,6 +129,10 @@ function submit() {
       </div>
 
       <div class="modal-footer">
+        <!-- On first launch this dialog is not cancellable, so it is also the only
+             way in for someone whose project lives in a .websfm file. -->
+        <button class="link-btn" @click="emit('open-file')">Open a project file…</button>
+        <span class="footer-spacer" />
         <button v-if="canCancel" class="btn-secondary" @click="emit('cancel')">Cancel</button>
         <button class="btn-primary" :disabled="!name.trim()" @click="submit">Create project</button>
       </div>
@@ -217,13 +277,36 @@ function submit() {
   line-height: 1.4;
 }
 
+.crs-hint.error { color: #e55; }
+
+.scene-desc code {
+  font-size: 10px;
+  padding: 0 3px;
+  border-radius: 3px;
+  background: var(--hover-bg);
+}
+
 .modal-footer {
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
   gap: 8px;
   padding: 12px 16px;
   border-top: 1px solid var(--panel-border);
 }
+
+.footer-spacer { flex: 1; }
+
+.link-btn {
+  background: none;
+  border: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 2px;
+  cursor: pointer;
+}
+
+.link-btn:hover { text-decoration: underline; }
 
 .btn-secondary {
   background: none;

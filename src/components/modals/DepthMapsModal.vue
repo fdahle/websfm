@@ -5,6 +5,7 @@ import SettingsField from './ui/SettingsField.vue'
 import SettingsGroup from './ui/SettingsGroup.vue'
 import AdvancedDisclosure from './ui/AdvancedDisclosure.vue'
 import PresetCards from './ui/PresetCards.vue'
+import GlossaryTerm from '../glossary/GlossaryTerm.vue'
 import { useComputeSettings } from '../../composables/useComputeSettings.js'
 import { DEPTHMAP_DEFAULTS, DEPTHMAP_QUALITY_META } from '../../core/defaults.user.js'
 
@@ -61,7 +62,7 @@ function run() {
 
         <SettingsField
           hint="Keeps only pixels whose depth other views independently agree with. Removes sky and vegetation, which no photometric gate can catch.">
-          <template #label>Cross-view consistency</template>
+          <template #label><GlossaryTerm id="depth-map">Cross-view consistency</GlossaryTerm></template>
           <label class="checkbox-row"><input v-model="settings.geomConsistency" type="checkbox" class="checkbox" /> Enabled</label>
         </SettingsField>
 
@@ -75,8 +76,11 @@ function run() {
           <input id="minConsistent" v-model.number="settings.minConsistent" type="number" min="1" max="8" step="1" class="field-input" />
         </SettingsField>
 
-        <SettingsField v-if="settings.geomConsistency" label="Minimum NCC" label-for="minNcc"
+        <SettingsField v-if="settings.geomConsistency" label-for="minNcc"
           hint="Absolute photometric floor per pixel (0–1). Unlike the fusion gate this does not adapt to the data.">
+          <template #label>
+            Minimum <GlossaryTerm id="photometric-consistency">NCC</GlossaryTerm>
+          </template>
           <input id="minNcc" v-model.number="settings.minNcc" type="number" min="0" max="0.9" step="0.05" class="field-input" />
         </SettingsField>
       </SettingsGroup>
@@ -99,8 +103,11 @@ function run() {
       </SettingsGroup>
 
       <SettingsGroup title="PatchMatch">
-        <SettingsField label="Patch window radius" label-for="window" unit="px"
+        <SettingsField label-for="window" unit="px"
           hint="Half-size of the correlation window (1–5 ⇒ 3×3…11×11). Larger helps low-texture surfaces.">
+          <template #label>
+            <GlossaryTerm id="patchmatch">Patch window radius</GlossaryTerm>
+          </template>
           <input id="window" v-model.number="settings.window" type="number" min="1" max="5" step="1" class="field-input" />
         </SettingsField>
 

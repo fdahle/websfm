@@ -231,6 +231,54 @@ export const MESH_PRESET_META = [
   { id: 'high',   label: 'Fine',     blurb: 'Octree depth 10 · detailed, slow' },
 ]
 
+// Cloud editing (core/products/cloudEdit.js). Mirrored by FilterCloudModal.vue /
+// CropCloudModal.vue / MergeCloudsModal.vue. These edit **dense** clouds only — a
+// sparse cloud carries the per-point view-tracks the dense/ortho/COLMAP paths read,
+// so it is not editable here (see the module docstring).
+//
+// The filter's `methods` list is ordered and each stage feeds the next, so the
+// default order is deliberate: cheap linear rejections first, the O(N·27-cell)
+// neighbour sweep last, over the smallest cloud.
+export const FILTER_CLOUD_DEFAULTS = {
+  methods: ['sor'],   // any of 'range' | 'voxel' | 'isolated' | 'sor', in run order
+  // Statistical outlier removal.
+  sorK: 12,           // neighbours averaged per point
+  sorStdRatio: 1.5,   // drop above mean + ratio·σ; lower = more aggressive
+  // Voxel downsample. 0 ⇒ auto (the dense run's merge cell, filled in by the store).
+  voxelCell: 0,
+  // Isolated-cluster removal. 0 ⇒ auto (4× the estimated point spacing).
+  isolatedCell: 0,
+  isolatedMinNeighbors: 2,  // occupied neighbour cells needed to keep a low-support cell
+  isolatedMaxSupport: 2,    // cells with more points than this are never tested
+  // Elevation / brightness band. null ⇒ unbounded on that side.
+  zMin: null, zMax: null, lumaMin: null, lumaMax: null,
+}
+// Filter presets — deltas over the defaults; 'medium' ≡ defaults.
+export const FILTER_CLOUD_PRESETS = {
+  light:  { methods: ['sor'], sorStdRatio: 2.5 },
+  medium: {},
+  strong: { methods: ['isolated', 'sor'], sorStdRatio: 1.0 },
+}
+export const FILTER_CLOUD_PRESET_META = [
+  { id: 'light',  label: 'Light',    blurb: 'Outlier removal only · trims obvious flyers' },
+  { id: 'medium', label: 'Balanced', blurb: 'Outlier removal at 1.5σ · default' },
+  { id: 'strong', label: 'Strong',   blurb: 'Isolated clusters + 1.0σ · may bite into thin detail' },
+]
+
+// Crop. Bounds are prefilled from the source cloud's bbox by the modal; a null
+// component means "unbounded on that side", so a Z-only crop needs no X/Y numbers.
+export const CROP_CLOUD_DEFAULTS = {
+  minX: null, minY: null, minZ: null,
+  maxX: null, maxY: null, maxZ: null,
+  invert: false,      // keep what falls OUTSIDE the box instead
+}
+
+// Merge. `cell` voxel-dedupes the result — the seam where two overlapping clouds
+// meet is otherwise double-density. 0 ⇒ plain concatenation.
+export const MERGE_CLOUDS_DEFAULTS = {
+  cell: 0,
+}
+
 // Footprints from imported poses (core/footprint.js). Mirrored by
 // FootprintFromPosesModal.vue's `settings` ref (the intrinsics override is seeded
 // from sensor data, not a static default).

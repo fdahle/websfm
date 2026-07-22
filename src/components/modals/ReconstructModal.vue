@@ -64,8 +64,11 @@ function run() {
 
     <AdvancedDisclosure label="Advanced settings">
       <SettingsGroup title="Registration">
-        <SettingsField label="Min correspondences" label-for="minMatches" unit="pts"
+        <SettingsField label-for="minMatches" unit="pts"
           hint="Minimum 3D–2D pairs required to register a new camera via PnP.">
+          <template #label>
+            <GlossaryTerm id="pnp">Min correspondences</GlossaryTerm>
+          </template>
           <input
             id="minMatches"
             v-model.number="settings.minMatchesForRegistration"
@@ -106,7 +109,7 @@ function run() {
       <SettingsGroup title="Calibration">
         <SettingsField label-for="refineIntr">
           <template #label>
-            <GlossaryTerm id="camera-intrinsics">Self-calibration</GlossaryTerm>
+            <GlossaryTerm id="self-calibration">Self-calibration</GlossaryTerm>
           </template>
           <select id="refineIntr" v-model="settings.refineIntrinsics" class="field-input field-select">
             <option value="auto">Auto (recommended)</option>

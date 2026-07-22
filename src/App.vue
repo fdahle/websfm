@@ -22,6 +22,8 @@ import ProgressModal from './components/modals/ProgressModal.vue'
 import SettingsModal from './components/modals/SettingsModal.vue'
 import AboutModal from './components/modals/AboutModal.vue'
 import NewProjectModal from './components/modals/NewProjectModal.vue'
+import SaveProjectModal from './components/modals/SaveProjectModal.vue'
+import FolderReconnectModal from './components/modals/FolderReconnectModal.vue'
 import GlossaryModal from './components/glossary/GlossaryModal.vue'
 import GuideModal from './components/guide/GuideModal.vue'
 import ProjectPicker from './components/layout/ProjectPicker.vue'
@@ -46,6 +48,8 @@ import { useSidebarResize } from './composables/useSidebarResize.js'
 import { useImportRouting } from './composables/useImportRouting.js'
 import { useExports } from './composables/useExports.js'
 import { useModalEscape } from './composables/useModalEscape.js'
+import { showToast } from './composables/useToasts.js'
+import { formatBytes } from './core/io/projectArchive.js'
 import { useBeforeUnload } from './composables/useBeforeUnload.js'
 import { useReconstructionStore } from './stores/useReconstructionStore.js'
 import { useExternalStore } from './stores/useExternalStore.js'
@@ -62,6 +66,9 @@ import DepthMapsModal from './components/modals/DepthMapsModal.vue'
 import DenseModal from './components/modals/DenseModal.vue'
 import DemModal from './components/modals/DemModal.vue'
 import MeshModal from './components/modals/MeshModal.vue'
+import FilterCloudModal from './components/modals/FilterCloudModal.vue'
+import CropCloudModal from './components/modals/CropCloudModal.vue'
+import MergeCloudsModal from './components/modals/MergeCloudsModal.vue'
 import OrthoModal from './components/modals/OrthoModal.vue'
 import ConfirmModal from './components/modals/ConfirmModal.vue'
 import ProductViewer from './components/viewers/ProductViewer.vue'
@@ -89,7 +96,9 @@ const {
 } = storeToRefs(projectsStore)
 const {
   setPersistenceAvailable, loadIndex, createProject, setProjectCrs, switchProject, renameProject,
-  deleteProjectById,
+  deleteProjectById, exportProject, importProject,
+  folderSupported, openPlan, reconnectProjectFolder, relinkProjectFolder,
+  createFolderProject, adoptFolderProject, moveProjectToFolder, moveProjectToBrowser,
 } = projectsStore
 
 // ── Images ────────────────────────────────────────────────────────────────────
@@ -155,8 +164,8 @@ const { sidebarWidth, startSidebarResize } = useSidebarResize()
 // ── Reconstruction ────────────────────────────────────────────────────────────
 // Project-scoped store; restore/clear run through the project-store registry.
 const reconstructionStore = useReconstructionStore()
-const { cameras, sparseCameras, points3d, reconStatus, clouds, selectedCloudId, selectedCloud, mainSparseId, mainSparseCloud, depthMapCount, dem, ortho, georef, canGeoreference } = storeToRefs(reconstructionStore)
-const { reconstruct, importColmapModel, importCloud, computeDepthMaps, densify, generateDem, generateOrtho, generateMesh, georeference, gcpAccuracyReport, gcpGuides, gcpEstimate, selectCloud, removeCloud, renameCloud, setMainSparse } = reconstructionStore
+const { cameras, sparseCameras, points3d, reconStatus, clouds, selectedCloudId, selectedCloud, mainSparseId, mainSparseCloud, depthMapCount, dem, ortho, georef, canGeoreference, denseSummary } = storeToRefs(reconstructionStore)
+const { reconstruct, importColmapModel, importCloud, editClouds, computeDepthMaps, densify, generateDem, generateOrtho, generateMesh, georeference, gcpAccuracyReport, gcpGuides, gcpEstimate, selectCloud, removeCloud, renameCloud, setMainSparse } = reconstructionStore
 
 // ── External reference data (imported DEMs / orthophotos) ─────────────────────
 // Project-scoped; restore/clear run through the project-store registry. Only the
@@ -407,10 +416,11 @@ const { addPoses, removePose, reprojectPoses } = posesStore
 // ── Modals ────────────────────────────────────────────────────────────────────
 const {
   settingsOpen, aboutOpen,
-  projectPickerOpen, newProjectOpen, newProjectCanCancel,
+  projectPickerOpen, newProjectOpen, newProjectCanCancel, saveProjectOpen,
   detectFeaturesOpen, matchFeaturesOpen,
   imageTableOpen, maskManagerOpen, autoMaskOpen, sensorTableOpen, gcpTableOpen, matchListOpen, reconstructOpen,
   depthMapsOpen, denseOpen, demOpen, orthoOpen, meshOpen,
+  cropCloudOpen, filterCloudOpen, mergeCloudsOpen,
   gcpImportOpen, gcpImportText, gcpImportName, gcpImportGeojson, gcpImportCrs,
   footprintImportOpen, footprintImportData, footprintFromPosesOpen,
   cameraImportOpen, cameraImportText, cameraImportName, cameraImportMode,
@@ -494,8 +504,8 @@ function openFiducialCalibrate() {
 const {
   progressOpen, progressTitle, progressCurrent, progressTotal, progressLabel,
   cancelRun, runDetect, runMatch, runReconstruct, runComputeDepthMaps, runDensify,
-  runGenerateDem, runGenerateOrtho, runGenerateMesh,
-} = usePipeline({ images, detectAll, matchAll, reconstruct, computeDepthMaps, densify, generateDem, generateOrtho, generateMesh })
+  runGenerateDem, runGenerateOrtho, runGenerateMesh, runEditClouds,
+} = usePipeline({ images, detectAll, matchAll, reconstruct, computeDepthMaps, densify, generateDem, generateOrtho, generateMesh, editClouds })
 
 // Dense pipeline gating for the Ribbon.
 const sparseReady = computed(() => clouds.value.some((c) => c.kind === 'sparse' && c.cameras.size >= 2))
@@ -508,6 +518,10 @@ const cloudReady = computed(() => clouds.value.some((c) =>
 // Mesh needs a dense cloud (Poisson input); the modal further checks it has normals.
 const denseReady = computed(() => clouds.value.some((c) => c.kind === 'dense' && c.count > 0))
 const meshReady = computed(() => clouds.value.some((c) => c.kind === 'mesh' && c.count > 0))
+// What the crop/filter/merge tools can act on: every non-empty dense cloud, computed
+// or imported. Sparse clouds are excluded on purpose — their points carry the
+// view-tracks dense/ortho/COLMAP-export read (see core/products/cloudEdit.js).
+const editableClouds = computed(() => clouds.value.filter((c) => c.kind === 'dense' && c.count > 0))
 const demReady = computed(() => !!dem.value)
 const orthoReady = computed(() => !!ortho.value)
 const productReady = computed(() => !!dem.value || !!ortho.value)
@@ -830,6 +844,10 @@ const projectLoading = ref(false)
 // { done, total, label } while restoreImages streams progress, else null — lets
 // the loading overlay show "Loading image 3/5 — name.tif" instead of a static spinner.
 const projectLoadingProgress = ref(null)
+// Headline for the same overlay. Project save/load reuses it (both block the UI
+// for the same reason — the project is mid-flight), so the text is a ref rather
+// than the hardcoded "Loading project…" it started as.
+const projectLoadingLabel = ref('Loading project…')
 
 const consoleOpen = ref(localStorage.getItem('consoleOpen') === 'true')
 watch(consoleOpen, (v) => localStorage.setItem('consoleOpen', v))
@@ -872,6 +890,16 @@ onMounted(async () => {
 })
 
 async function openProject(id) {
+  // A folder-backed project has to be reachable before anything reads it: the
+  // stored directory handle may need a permission grant (which needs a user
+  // gesture) or may be dead. `openPlan` registers the root when it can and
+  // otherwise tells us which prompt to raise — reading project.json first would
+  // just fail in a way indistinguishable from a corrupt project.
+  const plan = await openPlan(id)
+  if (plan.action !== 'open') {
+    folderPrompt.value = { id, action: plan.action, error: '' }
+    return
+  }
   const projectData = await switchProject(id)
   if (!projectData) return
   // Gate interaction while a project restores. Restoring a model still does a
@@ -907,7 +935,7 @@ async function openProject(id) {
 }
 
 // ── New project ───────────────────────────────────────────────────────────────
-async function handleCreateProject({ name, sceneType, crs }) {
+async function handleCreateProject({ name, sceneType, crs, dirHandle = null }) {
   newProjectOpen.value = false
   // Leaving the current project to create a new one: reset in-memory state only.
   // Purging here would delete the previously-open project's persisted data.
@@ -916,7 +944,23 @@ async function handleCreateProject({ name, sceneType, crs }) {
   clearProjectStores()   // matches, reconstruction, GCPs, footprints, poses
   viewerRef.value?.clearReconstructionData()
   if (crs) await ensureProjection(crs).catch(() => {})
-  await createProject(name, sceneType, crs)
+  if (!dirHandle) { await createProject(name, sceneType, crs); return }
+
+  // Folder-backed: the directory must be empty (websfm writes a whole tree into
+  // it and prunes stale sidecars), so a non-empty one asks once.
+  let res = await createFolderProject(name, sceneType, crs, dirHandle)
+  if (!res.ok && res.needsConfirm
+      && confirm(`"${dirHandle.name}" is not empty. Create the project in it anyway?`)) {
+    res = await createFolderProject(name, sceneType, crs, dirHandle, { confirmed: true })
+  }
+  if (res.ok) {
+    log(`Project "${name}" created in folder "${dirHandle.name}"`, 'info', 'Project')
+    return
+  }
+  log(`Could not create project in folder: ${res.error}`, 'error', 'Project')
+  showToast('Could not use that folder', { detail: res.error, kind: 'error', ms: 6000 })
+  newProjectCanCancel.value = !!currentProjectId.value
+  newProjectOpen.value = true
 }
 
 // Cancelling the New Project dialog falls back to the picker when no project is
@@ -926,6 +970,186 @@ function handleCancelNewProject() {
   if (!currentProjectId.value && projects.value.length > 0) {
     projectPickerOpen.value = true
   }
+}
+
+// ── Folder-backed projects ────────────────────────────────────────────────────
+// { id, action: 'reconnect' | 'repick', error } while a folder project is
+// waiting to be reached, else null. Held here (not in the modals store) because
+// it is a step *inside* opening a project, not a modal the user opens.
+const folderPrompt = ref(null)
+
+const folderPromptProject = computed(() =>
+  folderPrompt.value ? projects.value.find((p) => p.id === folderPrompt.value.id) || null : null)
+
+async function pickDirectory() {
+  try {
+    return await window.showDirectoryPicker({ mode: 'readwrite' })
+  } catch (err) {
+    if (err?.name !== 'AbortError') {
+      log(`Folder picker: ${err?.message ?? err}`, 'error', 'Project')
+    }
+    return null
+  }
+}
+
+// "Connect" in the reconnect dialog — the user gesture requestPermission needs.
+async function onFolderConnect() {
+  const prompt = folderPrompt.value
+  if (!prompt) return
+  const res = await reconnectProjectFolder(prompt.id)
+  if (!res.ok) { folderPrompt.value = { ...prompt, action: 'repick', error: res.error }; return }
+  folderPrompt.value = null
+  await openProject(prompt.id)
+}
+
+// "Choose folder…" — re-point the project at a freshly picked directory.
+async function onFolderRepick() {
+  const prompt = folderPrompt.value
+  if (!prompt) return
+  const dirHandle = await pickDirectory()
+  if (!dirHandle) return
+  const res = await relinkProjectFolder(prompt.id, dirHandle)
+  if (!res.ok) { folderPrompt.value = { ...prompt, error: res.error }; return }
+  folderPrompt.value = null
+  await openProject(prompt.id)
+}
+
+// Adopt a directory that already holds a project.json — the Dropbox/git sharing
+// path. Its internal ids are kept, so the same folder is the same project
+// wherever it is opened.
+async function openProjectFolder() {
+  const dirHandle = await pickDirectory()
+  if (!dirHandle) return
+  const res = await adoptFolderProject(dirHandle)
+  if (!res.ok) {
+    log(`Open project folder: ${res.error}`, 'error', 'Project')
+    showToast('Not a project folder', { detail: res.error, kind: 'error', ms: 6000 })
+    return
+  }
+  projectPickerOpen.value = false
+  clearAll(resetToViewer)
+  clearSensors()
+  clearProjectStores()
+  viewerRef.value?.clearReconstructionData()
+  await openProject(res.id)
+}
+
+// Migration between backends. Both directions are a verified tree copy; only the
+// OPFS source is deleted afterwards — files on the user's disk are never removed
+// by websfm, so "move into browser storage" leaves the folder in place.
+async function moveCurrentProjectToFolder(id = currentProjectId.value) {
+  if (!id) return
+  const dirHandle = await pickDirectory()
+  if (!dirHandle) return
+  projectLoadingLabel.value = 'Moving project to folder…'
+  projectLoading.value = true
+  try {
+    await nextTick()
+    let res = await moveProjectToFolder(id, dirHandle, {
+      onProgress: ({ files, label }) => { projectLoadingProgress.value = { done: files, total: 0, label: `${files} files — ${label}` } },
+    })
+    if (!res.ok && res.needsConfirm
+        && confirm(`"${dirHandle.name}" is not empty. Move the project into it anyway?`)) {
+      res = await moveProjectToFolder(id, dirHandle, { confirmed: true })
+    }
+    if (res.ok) {
+      log(`Project moved to folder "${dirHandle.name}" (${res.files} files)`, 'info', 'Project')
+      showToast('Project moved to folder', { detail: dirHandle.name })
+    } else {
+      log(`Move to folder failed: ${res.error}`, 'error', 'Project')
+      showToast('Could not move project', { detail: res.error, kind: 'error', ms: 6000 })
+    }
+  } finally {
+    projectLoading.value = false
+    projectLoadingProgress.value = null
+    projectLoadingLabel.value = 'Loading project…'
+  }
+}
+
+async function moveCurrentProjectToBrowser(id = currentProjectId.value) {
+  if (!id) return
+  if (!confirm('Copy this project into browser storage? The folder on disk is left in place, '
+    + 'and websfm will stop writing to it.')) return
+  projectLoadingLabel.value = 'Moving project into browser storage…'
+  projectLoading.value = true
+  try {
+    await nextTick()
+    const res = await moveProjectToBrowser(id, {
+      onProgress: ({ files, label }) => { projectLoadingProgress.value = { done: files, total: 0, label: `${files} files — ${label}` } },
+    })
+    if (res.ok) {
+      log(`Project moved into browser storage (${res.files} files)`, 'info', 'Project')
+      showToast('Project moved into browser storage')
+    } else {
+      log(`Move into browser storage failed: ${res.error}`, 'error', 'Project')
+      showToast('Could not move project', { detail: res.error, kind: 'error', ms: 6000 })
+    }
+  } finally {
+    projectLoading.value = false
+    projectLoadingProgress.value = null
+    projectLoadingLabel.value = 'Loading project…'
+  }
+}
+
+// ── Project file (.websfm) ────────────────────────────────────────────────────
+// Save/load of a whole project as one file. Both directions block the UI behind
+// the same overlay as a project open: they rewrite (or create) a project on
+// disk, and a half-unpacked project must not be clickable.
+
+async function onSaveProject({ includeDerived }) {
+  saveProjectOpen.value = false
+  const id = currentProjectId.value
+  if (!id) return
+  try {
+    const res = await exportProject(id, { includeDerived, onLog: (m, l, c) => log(m, l, c) })
+    if (res?.cancelled) return
+    showToast('Project saved', { detail: `${res.fileName} · ${formatBytes(res.archiveBytes)}` })
+  } catch (err) {
+    const detail = String(err?.message ?? err)
+    log(`Save project failed: ${detail}`, 'error', 'Project')
+    showToast('Could not save project', { detail, kind: 'error', ms: 6000 })
+  }
+}
+
+// A `.websfm` file always lands as a NEW project — never merged into the open
+// one. Importing then switching is therefore non-destructive, so it needs no
+// confirmation: the current project is untouched and still in the picker.
+async function importProjectFile(file) {
+  if (!file) return
+  projectLoadingLabel.value = 'Opening project file…'
+  projectLoading.value = true
+  let id = null
+  try {
+    await nextTick()
+    id = await importProject(file, {
+      onLog: (m, l, c) => log(m, l, c),
+      onProgress: ({ done, label }) => {
+        projectLoadingProgress.value = { done, total: 0, label: `${done} files — ${label}` }
+      },
+    })
+  } catch (err) {
+    const detail = String(err?.message ?? err)
+    log(`Open project file failed: ${detail}`, 'error', 'Project')
+    showToast('Could not open project file', { detail, kind: 'error', ms: 6000 })
+  } finally {
+    projectLoading.value = false
+    projectLoadingProgress.value = null
+    projectLoadingLabel.value = 'Loading project…'
+  }
+  if (!id) return
+  projectPickerOpen.value = false
+  clearAll(resetToViewer)
+  clearSensors()
+  clearProjectStores()
+  viewerRef.value?.clearReconstructionData()
+  await openProject(id)
+  showToast('Project opened', { detail: currentProjectName.value || '' })
+}
+
+function onProjectFilePick(event) {
+  const file = event.target.files?.[0]
+  if (file) importProjectFile(file)
+  event.target.value = ''
 }
 
 // ── Coordinate system ─────────────────────────────────────────────────────────
@@ -955,7 +1179,7 @@ const {
   importColmap: importColmapModel, importCloud,
   // A dropped `.tif` arrives as `image/tiff` and would otherwise be ingested as
   // a source photo, so the image path is routed through the georeference fork.
-  importRaster, addImages,
+  importRaster, addImages, importProjectFile,
   activateTab,
 })
 
@@ -1035,6 +1259,11 @@ function onDenseRun(settings)       { denseOpen.value          = false;  runDens
 async function onDemRun(settings)   { demOpen.value = false;   await runGenerateDem(settings) }
 async function onOrthoRun(settings) { orthoOpen.value = false; await runGenerateOrtho(settings) }
 async function onMeshRun(settings)  { meshOpen.value = false;  await runGenerateMesh(settings) }
+// Cloud editing. Each modal emits a ready-made request ({ sourceIds, settings, name });
+// the mode is fixed by which modal sent it. Always adds a new cloud — non-destructive.
+async function onCropCloudRun(req)   { cropCloudOpen.value = false;   await runEditClouds({ ...req, mode: 'crop' }) }
+async function onFilterCloudRun(req) { filterCloudOpen.value = false; await runEditClouds({ ...req, mode: 'filter' }) }
+async function onMergeCloudsRun(req) { mergeCloudsOpen.value = false; await runEditClouds({ ...req, mode: 'merge' }) }
 
 // ── Image deletion (with confirmation) ────────────────────────────────────────
 // Removing images is irreversible (drops keypoints/masks/matches), so route every
@@ -1269,6 +1498,7 @@ const cameraInput = ref(null)
 const colmapInput = ref(null)
 const cloudInput = ref(null)
 const rasterInput = ref(null)
+const projectFileInput = ref(null)
 // cameraPickMode comes from useImportRouting (above); the command dispatch sets it
 // before opening the hidden camera-file <input>.
 
@@ -1282,6 +1512,7 @@ function handleCommand(id) {
     case 'import-colmap':        colmapInput.value.click(); break
     case 'import-cloud':         cloudInput.value.click(); break
     case 'import-raster':        rasterInput.value.click(); break
+    case 'save-project-file':    saveProjectOpen.value = true; break
     case 'export-cameras':       exportPoses(); break
     case 'export-sensors':       exportSensors(); break
     case 'export-cloud':         exportKind.value = 'cloud'; break
@@ -1322,6 +1553,9 @@ function handleCommand(id) {
     case 'gen-dem':              demOpen.value = true; break
     case 'gen-ortho':            orthoOpen.value = true; break
     case 'gen-mesh':             meshOpen.value = true; break
+    case 'filter-cloud':         filterCloudOpen.value = true; break
+    case 'crop-cloud':           cropCloudOpen.value = true; break
+    case 'merge-clouds':         mergeCloudsOpen.value = true; break
     case 'auto-georeference':    georeference(); break
     // Quality Report hub — old command ids kept as deep-links into hub sections so
     // muscle memory / logs stay valid (PLAN-eval-quality-hub WS0).
@@ -1439,6 +1673,7 @@ function onRibbonPick(event) {
       :depth-map-count="depthMapCount"
       :cloud-ready="cloudReady"
       :dense-ready="denseReady"
+      :editable-cloud-count="editableClouds.length"
       :mesh-ready="meshReady"
       :dem-ready="demReady"
       :ortho-ready="orthoReady"
@@ -1464,6 +1699,7 @@ function onRibbonPick(event) {
     <input ref="colmapInput" type="file" accept=".txt,.bin,.zip" multiple hidden @change="onColmapPick" />
     <input ref="cloudInput" type="file" accept=".ply,.las,.laz,.xyz,.pts" hidden @change="onCloudPick" />
     <input ref="rasterInput" type="file" accept=".tif,.tiff" hidden @change="onRasterPick" />
+    <input ref="projectFileInput" type="file" accept=".websfm,.zip" hidden @change="onProjectFilePick" />
 
     <div v-if="projectPickerOpen && !currentProjectId" class="project-backdrop" />
 
@@ -1471,10 +1707,13 @@ function onRibbonPick(event) {
       <div class="loading-card">
         <div class="loading-spinner" />
         <div class="loading-text">
-          <span>Loading project…</span>
+          <span>{{ projectLoadingLabel }}</span>
           <span v-if="projectLoadingProgress" class="loading-detail">
-            Loading image {{ projectLoadingProgress.done }}/{{ projectLoadingProgress.total }}
-            — {{ projectLoadingProgress.label }}
+            <template v-if="projectLoadingProgress.total">
+              Loading image {{ projectLoadingProgress.done }}/{{ projectLoadingProgress.total }}
+              — {{ projectLoadingProgress.label }}
+            </template>
+            <template v-else>{{ projectLoadingProgress.label }}</template>
           </span>
         </div>
       </div>
@@ -1485,10 +1724,16 @@ function onRibbonPick(event) {
       :projects="projects"
       :current-project-id="currentProjectId"
       :dismissible="!!currentProjectId"
+      :folder-supported="folderSupported"
       @switch="handleSwitchProject"
       @rename="(id, name) => renameProject(id, name)"
       @delete="handleDeleteProject"
       @new="() => { projectPickerOpen = false; newProjectCanCancel = true; newProjectOpen = true }"
+      @open-file="projectFileInput.click()"
+      @open-folder="() => { projectPickerOpen = false; openProjectFolder() }"
+      @save-copy="() => { projectPickerOpen = false; saveProjectOpen = true }"
+      @move-to-folder="(id) => { projectPickerOpen = false; moveCurrentProjectToFolder(id) }"
+      @move-to-browser="(id) => { projectPickerOpen = false; moveCurrentProjectToBrowser(id) }"
       @close="projectPickerOpen = false"
     />
 
@@ -1595,6 +1840,35 @@ function onRibbonPick(event) {
         :has-dense-normals="clouds.some((c) => c.kind === 'dense' && !!c.nrm)"
         @close="meshOpen = false"
         @run="onMeshRun"
+      />
+    </Teleport>
+
+    <Teleport to="body">
+      <FilterCloudModal
+        v-if="filterCloudOpen"
+        :clouds="editableClouds"
+        :merge-cell="denseSummary?.mergeCell ?? 0"
+        @close="filterCloudOpen = false"
+        @run="onFilterCloudRun"
+      />
+    </Teleport>
+
+    <Teleport to="body">
+      <CropCloudModal
+        v-if="cropCloudOpen"
+        :clouds="editableClouds"
+        @close="cropCloudOpen = false"
+        @run="onCropCloudRun"
+      />
+    </Teleport>
+
+    <Teleport to="body">
+      <MergeCloudsModal
+        v-if="mergeCloudsOpen"
+        :clouds="editableClouds"
+        :merge-cell="denseSummary?.mergeCell ?? 0"
+        @close="mergeCloudsOpen = false"
+        @run="onMergeCloudsRun"
       />
     </Teleport>
 
@@ -1821,6 +2095,30 @@ function onRibbonPick(event) {
         :can-cancel="newProjectCanCancel"
         @create="handleCreateProject"
         @cancel="handleCancelNewProject"
+        @open-file="projectFileInput.click()"
+      />
+    </Teleport>
+
+    <Teleport to="body">
+      <FolderReconnectModal
+        v-if="folderPrompt"
+        :project-name="folderPromptProject?.name || 'This project'"
+        :folder-name="folderPromptProject?.folderName || ''"
+        :mode="folderPrompt.action === 'repick' ? 'repick' : 'prompt'"
+        :error="folderPrompt.error"
+        @connect="onFolderConnect"
+        @repick="onFolderRepick"
+        @cancel="folderPrompt = null"
+      />
+    </Teleport>
+
+    <Teleport to="body">
+      <SaveProjectModal
+        v-if="saveProjectOpen && currentProjectId"
+        :project-id="currentProjectId"
+        :project-name="currentProjectName"
+        @close="saveProjectOpen = false"
+        @run="onSaveProject"
       />
     </Teleport>
 

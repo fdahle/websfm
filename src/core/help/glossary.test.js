@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   parseGlossaryEntry, renderHelpMarkdown, autoLinkHtml, searchGlossary,
-  getGlossaryEntriesByTopic, GLOSSARY_TOPICS,
+  getGlossaryEntriesByTopic, GLOSSARY_TOPICS, getAllGlossaryEntries,
 } from './glossary.js'
 
 describe('parseGlossaryEntry', () => {
@@ -139,6 +139,57 @@ describe('autoLinkHtml', () => {
   it('skips the entry linking to itself', () => {
     const html = autoLinkHtml('<p>bundle adjustment</p>', index)
     expect(html).not.toContain('data-help-id="bundle-adjustment"')
+  })
+})
+
+// Content checks over the entries actually shipped in src/glossary/. These are
+// the ones that catch authoring mistakes — a typo'd cross-link id renders as a
+// dead anchor in the app with no error anywhere.
+describe('shipped glossary content', () => {
+  const raws = import.meta.glob('/src/glossary/**/*.md', { eager: true, query: '?raw', import: 'default' })
+  const entries = getAllGlossaryEntries()
+  const ids = new Set(entries.map(e => e.id))
+
+  it('parses every file (no entry silently skipped)', () => {
+    expect(entries.length).toBe(Object.keys(raws).length)
+  })
+
+  it('gives every entry an id matching its filename, a title and a summary', () => {
+    for (const [path, raw] of Object.entries(raws)) {
+      const entry = parseGlossaryEntry(raw, path)
+      expect(entry.id, path).toBe(path.split('/').pop().replace(/\.md$/, ''))
+      expect(entry.title, path).toBeTruthy()
+      expect(entry.summary, path).toBeTruthy()
+      expect(entry.body.length, path).toBeGreaterThan(0)
+    }
+  })
+
+  it('resolves every explicit help: cross-link to a real entry', () => {
+    for (const e of entries) {
+      for (const [, id] of e.body.matchAll(/\]\(help:([^)]+)\)/g)) {
+        expect(ids.has(id), `${e.id} links to unknown help:${id}`).toBe(true)
+      }
+    }
+  })
+
+  it('files every entry under a known topic folder', () => {
+    const topics = new Set(GLOSSARY_TOPICS.map(t => t.topic))
+    for (const e of entries) expect(topics.has(e.topic), `${e.id} in topic ${e.topic}`).toBe(true)
+  })
+
+  // The auto-linker walks rendered HTML as a tag/text stream, so a '>' inside an
+  // HTML comment terminates the pseudo-tag early and leaks the rest as visible
+  // text. Applies to the TODO(image) markers standing in for missing figures.
+  it('keeps HTML comments free of > so the auto-linker cannot split them', () => {
+    for (const e of entries) {
+      for (const [comment] of e.body.matchAll(/<!--[\s\S]*?-->/g)) {
+        expect(comment.slice(4, -3).includes('>'), `${e.id}: ${comment}`).toBe(false)
+      }
+    }
+  })
+
+  it('renders every entry without throwing', () => {
+    for (const e of entries) expect(() => renderHelpMarkdown(e.body, { selfId: e.id })).not.toThrow()
   })
 })
 

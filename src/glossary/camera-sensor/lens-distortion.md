@@ -11,6 +11,8 @@ lenses bow lines outward (*barrel* distortion), and some lenses pull them inward
 (*pincushion* distortion). The effect grows with distance from the image centre
 and is largest in the corners.
 
+<!-- TODO(image): assets/lens-distortion.svg - a square grid shown three times: undistorted, barrel (edges bowed outward), pincushion (edges pulled inward), with an arrow field on one of them showing the displacement growing with radius from the principal point. -->
+
 Left uncorrected, distortion pushes keypoints off their true projected positions
 and inflates [Reprojection Error](help:reprojection-error), because the geometry
 of the rest of the pipeline assumes a perfect pinhole camera.

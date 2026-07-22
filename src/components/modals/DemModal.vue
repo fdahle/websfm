@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 import ModalShell from './ui/ModalShell.vue'
 import SettingsField from './ui/SettingsField.vue'
+import GlossaryTerm from '../glossary/GlossaryTerm.vue'
 import { DEM_DEFAULTS } from '../../core/defaults.user.js'
 
 // Build DEM (Digital Surface Model). Rasterises the point cloud into a height
@@ -26,8 +27,11 @@ function run() {
 
 <template>
   <ModalShell title="Build DEM" @close="emit('close')">
-    <SettingsField label="Coordinate frame" label-for="dem-crs"
+    <SettingsField label-for="dem-crs"
       hint="Local uses a camera-estimated up-vector (up-to-scale); the project CRS fits a similarity to imported poses for real-world heights & GSD.">
+      <template #label>
+        <GlossaryTerm id="coordinate-reference-system">Coordinate frame</GlossaryTerm>
+      </template>
       <select id="dem-crs" v-model="settings.crs" class="field-input field-select">
         <option value="local">Local (model units)</option>
         <option value="project" :disabled="!canGeoreference">
@@ -36,9 +40,12 @@ function run() {
       </select>
     </SettingsField>
 
-    <SettingsField label="Ground sample distance" label-for="dem-gsd"
+    <SettingsField label-for="dem-gsd"
       :unit="settings.crs === 'project' ? 'm/px' : 'units/px'"
       hint="Cell size. 0 = auto (≈ one point per cell). Smaller = finer & slower.">
+      <template #label>
+        <GlossaryTerm id="ground-sample-distance">Ground sample distance</GlossaryTerm>
+      </template>
       <input id="dem-gsd" v-model.number="settings.gsd" type="number" min="0" step="0.1" class="field-input" />
     </SettingsField>
 

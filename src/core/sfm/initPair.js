@@ -84,10 +84,12 @@ export async function selectInitPair(
   // Picking purely by inlier count tends to choose near-identical viewpoints
   // (tiny parallax) whose triangulated points collapse onto a line. Probe the
   // top candidates and take the first with adequate parallax.
-  const { minInitInliers = 15, minInitAngleDeg = 2.0, initCandidates = 8 } = settings
+  const { minInitInliers = 15, minInitAngleDeg = 2.0, initCandidates = 8, excludedInitPairs = [] } = settings
+  const excluded = new Set(excludedInitPairs)
+  const pairId = (a, b) => (a < b ? `${a}--${b}` : `${b}--${a}`)
   const candidates = donePairs
     .filter((e) => e.inlierCount >= minInitInliers
-      && Kmap.has(e.idA) && Kmap.has(e.idB) && e.F)
+      && Kmap.has(e.idA) && Kmap.has(e.idB) && e.F && !excluded.has(pairId(e.idA, e.idB)))
     .sort((a, b) => b.inlierCount - a.inlierCount)
     .slice(0, initCandidates)
 

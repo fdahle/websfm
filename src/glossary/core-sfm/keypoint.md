@@ -16,7 +16,10 @@ it appears large or small. Each keypoint carries a position, scale, and a
 128-dimensional **descriptor** — a compact fingerprint of the surrounding pixels
 that lets two keypoints be compared numerically.
 
+<!-- TODO(image): assets/keypoint-matches.svg - two overlapping photos of the same scene side by side, detected keypoints drawn as circles sized by scale with an orientation tick, and a handful of correct matches joined by lines plus one obviously wrong match in a contrasting colour. -->
+
 When a keypoint in one image is paired with a keypoint in another (see
 [RANSAC](help:ransac) for how spurious pairs are filtered), the result is a
-match. A keypoint that survives matching and is triangulated in 3D becomes a
+match. Chaining matches of the same feature across many images forms a
+[Track](help:track), and a track that is triangulated in 3D becomes a
 [Tie Point](help:tie-point).

@@ -91,11 +91,11 @@ function scene() {
 // (no F ⇒ excluded by selectInitPair's candidate filter).
 const filler = (idA, idB) => ({ idA, idB, F: null, matches: [], inlierCount: 20 })
 
-async function pick(donePairs, images, Kmap) {
+async function pick(donePairs, images, Kmap, settings = {}) {
   const res = await selectInitPair({
     donePairs,
     Kmap,
-    settings: {},
+    settings,
     imageByUuid: (uuid) => images[uuid] ?? null,
     numStats,
     projDepth,
@@ -117,6 +117,14 @@ describe('selectInitPair — match-graph connectivity bias', () => {
     const res = await pick(donePairs, images, Kmap)
     expect(res.status).toBe('ok')
     expect([res.best.entry.idA, res.best.entry.idB]).toEqual(['richA', 'richB'])
+  })
+
+  it('can exclude a previously stalled seed for an alternate-seed retry', async () => {
+    const { lean, rich, images, Kmap } = scene()
+    const res = await pick([lean.entry, rich.entry], images, Kmap,
+      { excludedInitPairs: ['richA--richB'] })
+    expect(res.status).toBe('ok')
+    expect([res.best.entry.idA, res.best.entry.idB]).toEqual(['leanA', 'leanB'])
   })
 
   it('discounts a geometrically-ideal seed stranded in a weakly-attached cluster', async () => {

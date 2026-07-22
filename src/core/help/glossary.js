@@ -36,6 +36,10 @@ export const GLOSSARY_TOPICS = [
     blurb: 'Per-pixel depth from the posed images, fused to a dense cloud.',
   },
   {
+    topic: 'georeferencing', label: 'Georeferencing', icon: '🌍',
+    blurb: 'Tying the scale-free reconstruction to real-world coordinates.',
+  },
+  {
     topic: 'products', label: 'Products', icon: '🗺️',
     blurb: 'Mapping outputs derived from the reconstruction.',
   },

@@ -18,6 +18,8 @@ Jacobians, which scales far better than a dense solve as the point count grows.
 Optionally it also refines the shared per-sensor [camera intrinsics](help:camera-intrinsics)
 in the same optimisation.
 
+<!-- TODO(image): assets/bundle-adjustment.svg - a small block of cameras and points before and after BA: before, each observation's projected point sits off its measured keypoint with a residual arrow; after, the arrows have shrunk. Include the sparse Jacobian block structure (camera blocks, point blocks) beside it to motivate the Schur complement. -->
+
 An adaptive Huber loss down-weights outlier observations so a handful of
 bad matches can't drag the whole solution off course. Setting the iteration
 count to 0 skips BA entirely, leaving the incremental PnP poses unrefined.

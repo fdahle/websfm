@@ -6,6 +6,7 @@ import SettingsGroup from './ui/SettingsGroup.vue'
 import AdvancedDisclosure from './ui/AdvancedDisclosure.vue'
 import PresetCards from './ui/PresetCards.vue'
 import WarnBox from './ui/WarnBox.vue'
+import GlossaryTerm from '../glossary/GlossaryTerm.vue'
 import { MESH_DEFAULTS, MESH_PRESETS, MESH_PRESET_META } from '../../core/defaults.user.js'
 
 // Build Mesh (screened Poisson over the dense cloud). Defaults are the single source
@@ -61,8 +62,11 @@ function run() {
 
     <AdvancedDisclosure label="Advanced settings">
       <SettingsGroup title="Surface">
-        <SettingsField label="Octree depth" label-for="mesh-depth" unit="levels"
+        <SettingsField label-for="mesh-depth" unit="levels"
           hint="Surface resolution. Higher = more detail & triangles (much slower / more RAM).">
+          <template #label>
+            <GlossaryTerm id="mesh">Octree depth</GlossaryTerm>
+          </template>
           <input id="mesh-depth" v-model.number="settings.depth" type="number" min="4" max="12" step="1" class="field-input" />
         </SettingsField>
 
@@ -79,7 +83,8 @@ function run() {
 
       <SettingsGroup title="Colour">
         <SettingsField hint="Colour each mesh vertex from the nearest dense point.">
-          <template #label>Transfer colour from the dense cloud</template>
+          <template #label>Transfer colour from the
+            <GlossaryTerm id="point-cloud">dense cloud</GlossaryTerm></template>
           <label class="checkbox-row"><input v-model="settings.colorize" type="checkbox" class="checkbox" /> Enabled</label>
         </SettingsField>
       </SettingsGroup>

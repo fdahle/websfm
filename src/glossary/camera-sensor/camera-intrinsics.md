@@ -15,7 +15,10 @@ $$K = \begin{bmatrix} f_x & 0 & c_x \\ 0 & f_y & c_y \\ 0 & 0 & 1 \end{bmatrix}$
 - $c_x, c_y$ — the **principal point**, where the optical axis pierces the
   sensor, ideally near the image centre.
 
-A 3D point in the camera frame projects to a pixel via $x = K\,[R \mid t]\,X$, so
+<!-- TODO(image): assets/pinhole-projection.svg - the pinhole model in one figure: world point X, camera centre, optical axis, image plane at distance f, the projected pixel, and the principal point offset (cx, cy) from the pixel-array origin - annotated to match the terms of K. -->
+
+A 3D point in the camera frame projects to a pixel via $x = K\,[R \mid t]\,X$,
+where $[R \mid t]$ is the [camera pose](help:camera-pose). So
 accurate intrinsics are essential: if $K$ is wrong, every triangulated
 [Tie Point](help:tie-point) and every depth estimate is systematically
 distorted, and it shows up as a high [Reprojection Error](help:reprojection-error).

@@ -7,6 +7,7 @@ import {
   generateDem as workerGenerateDem,
   generateOrtho as workerGenerateOrtho,
   meshify as workerMeshify,
+  editCloud as workerEditCloud,
 } from '../workers/computeClient.js'
 import { useLog } from '../composables/useLog.js'
 import * as opfs from '../utils/opfs.js'
@@ -199,7 +200,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     const nrm = c.nrm ? c.nrm.slice(0, N * 3) : null
     return {
       id: c.id, name: c.name, kind: 'dense', createdAt: c.createdAt,
-      imported: !!c.imported,
+      imported: !!c.imported, derived: !!c.derived, secondary: !!c.secondary,
       cameras: [], pointCount: N, hasColor: !!col, hasNormals: !!nrm, viewUuids: [],
       buffers: { pos: pos.buffer, col: col ? col.buffer : null, nrm: nrm ? nrm.buffer : null,
         vcount: null, vcam: null, vkp: null, vx: null, vy: null },
@@ -216,7 +217,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     const idx = c.idx ? Uint32Array.from(c.idx) : new Uint32Array(0)
     return {
       id: c.id, name: c.name, kind: 'mesh', createdAt: c.createdAt,
-      imported: !!c.imported,
+      imported: !!c.imported, secondary: !!c.secondary,
       cameras: [], pointCount: nVerts, nVerts, triCount: c.count || 0,
       hasColor: !!col, viewUuids: [],
       buffers: { pos: pos.buffer, col: col ? col.buffer : null, idx: idx.buffer,
@@ -266,7 +267,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     }
     return {
       id: c.id, name: c.name, kind: c.kind, createdAt: c.createdAt,
-      imported: !!c.imported,
+      imported: !!c.imported, secondary: !!c.secondary,
       cameras: [...c.cameras.entries()].map(([uuid, cam]) => ({ uuid, ...cam })),
       pointCount: N, hasColor, viewUuids,
       buffers: {
@@ -410,7 +411,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
   // A new object (not an in-place mutation) so consumers watching `selectedCloud`
   // by reference re-render after a rebuild.
   function upsertSparseCloud(cameras, points, opts = {}) {
-    const { replaceId = mainSparseId.value, asMain = true, name, imported = false } = opts
+    const { replaceId = mainSparseId.value, asMain = true, name, imported = false, secondary = false, select = true } = opts
     const idx = replaceId
       ? clouds.value.findIndex((c) => c.id === replaceId && c.kind === 'sparse')
       : -1
@@ -425,13 +426,14 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
       // inherited from `prev` — a reconstruct that replaces an imported cloud
       // in place has genuinely recomputed it, so the flag must clear.
       ...(imported ? { imported: true } : {}),
+      ...(secondary ? { secondary: true } : {}),
       // markRaw: keep the big point/camera data out of Vue's reactivity (see restore).
       cameras: markRaw(cameras),
       points: markRaw(points),
     }
     if (idx >= 0) clouds.value.splice(idx, 1, cloud)
     else clouds.value.push(cloud)
-    selectedCloudId.value = cloud.id
+    if (select) selectedCloudId.value = cloud.id
     if (asMain || !mainSparseCloud.value) mainSparseId.value = cloud.id
   }
 
@@ -499,8 +501,9 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
   // fusion OOM's main-thread tail); the flat buffers are ~15 B/point and feed the
   // viewer / PLY / DEM directly with no per-point object churn.
   function upsertDenseCloud({ count, pos, col, nrm }) {
-    // Never replace an *imported* cloud — a re-fuse targets the computed one only.
-    const idx = clouds.value.findIndex((c) => c.kind === 'dense' && !c.imported)
+    // Never replace an *imported* or *derived* (crop/filter/merge output) cloud — a
+    // re-fuse targets the densify stage's own slot only.
+    const idx = clouds.value.findIndex((c) => c.kind === 'dense' && !c.imported && !c.derived)
     const prev = idx >= 0 ? clouds.value[idx] : null
     const cloud = {
       id: prev?.id ?? makeCloudId(),
@@ -836,6 +839,97 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     } catch (err) {
       log(`Mesh error: ${err?.message ?? err}`, 'error', 'Products')
       reconStatus.value = 'error'
+    }
+  }
+
+  // ── Cloud editing (crop / filter / merge) ────────────────────────────────────
+
+  // Add a cloud produced by an edit. Always a NEW cloud — editing is
+  // non-destructive, so the source stays exactly as it was and the user can compare
+  // or discard. Flagged `derived: true` so upsertDenseCloud never replaces it with a
+  // re-fuse's output (the same protection `imported` gives an imported cloud, for
+  // the same reason: neither is the densify stage's own slot). `imported` is
+  // INHERITED from the source, because that flag is what sorts the sidebar into
+  // Products vs Reference Data — a crop of imported evidence is still evidence.
+  function addDerivedCloud(flat, { name, imported = false }) {
+    const cloud = {
+      id: makeCloudId(),
+      name,
+      kind: 'dense',
+      createdAt: Date.now(),
+      derived: true,
+      ...(imported ? { imported: true } : {}),
+      cameras: markRaw(new Map()),
+      count: flat.count,
+      pos: markRaw(flat.pos),
+      col: markRaw(flat.col || null),
+      ...(flat.nrm ? { nrm: markRaw(flat.nrm) } : {}),
+    }
+    clouds.value.push(cloud)
+    selectedCloudId.value = cloud.id
+    return cloud
+  }
+
+  // Crop / filter / merge dense clouds in the worker. `sourceIds` are cloud ids
+  // (one for crop/filter, two or more for merge); `settings` is already in the
+  // core/products/cloudEdit.js shape (the modals do the UI→core mapping in run()).
+  //
+  // The source buffers are transferred to the worker and round-tripped home, so the
+  // op is non-destructive but the sources are briefly detached — the op is written
+  // to never throw for exactly that reason (see workers/ops/cloud.js).
+  async function editClouds({ mode, sourceIds = [], settings = {}, name } = {}, onProgress) {
+    const sources = sourceIds
+      .map((id) => clouds.value.find((c) => c.id === id))
+      .filter((c) => c && c.kind === 'dense' && c.count > 0)
+    if (!sources.length) {
+      log('Cloud edit: no dense source cloud selected', 'warn', 'Products')
+      return null
+    }
+    if (mode === 'merge' && sources.length < 2) {
+      log('Cloud edit: merge needs at least two dense clouds', 'warn', 'Products')
+      return null
+    }
+    const transfer = []
+    const payload = sources.map((c) => {
+      transfer.push(c.pos.buffer)
+      if (c.col) transfer.push(c.col.buffer)
+      if (c.nrm) transfer.push(c.nrm.buffer)
+      return { id: c.id, count: c.count, pos: c.pos, col: c.col || null, nrm: c.nrm || null }
+    })
+    reconStatus.value = 'running'
+    try {
+      const { cloud: edited, error, home } = await workerEditCloud(
+        { mode, clouds: payload, settings },
+        { onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl) => onProgress?.(d, t, lbl), transfer },
+      )
+      // Re-attach the round-tripped source buffers FIRST — before any early return —
+      // or a failed/empty edit leaves every source cloud holding a detached buffer.
+      for (const h of home || []) {
+        const c = clouds.value.find((x) => x.id === h.id)
+        if (!c) continue
+        c.pos = markRaw(h.pos)
+        if (h.col) c.col = markRaw(h.col)
+        if (h.nrm) c.nrm = markRaw(h.nrm)
+      }
+      if (error) throw new Error(error)
+      if (!edited?.count) {
+        log('Cloud edit: the result is empty — nothing was added', 'warn', 'Products')
+        reconStatus.value = 'done'
+        return null
+      }
+      const cloud = addDerivedCloud(edited, {
+        name: name || `${sources[0].name} (${mode})`,
+        imported: sources.every((c) => c.imported),
+      })
+      log(`Cloud edit: added "${cloud.name}" — ${cloud.count.toLocaleString()} points`,
+        'success', 'Products')
+      reconStatus.value = 'done'
+      await persist()
+      return cloud
+    } catch (err) {
+      log(`Cloud edit error: ${err?.message ?? err}`, 'error', 'Products')
+      reconStatus.value = 'error'
+      return null
     }
   }
 
@@ -1244,6 +1338,33 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
           }
         }
         upsertSparseCloud(camMap, pts)
+        // A secondary component that could not satisfy the conservative shared-camera
+        // alignment gates is still a valid reconstruction. Preserve it as a separate
+        // sparse cloud rather than discarding it or forcing it into the primary frame.
+        clouds.value = clouds.value.filter((c) => !(c.kind === 'sparse' && c.secondary))
+        for (const [si, model] of (result.secondaryModels || []).entries()) {
+          let secondaryCameras = new Map(model.cameras.map(({ uuid, R, t, K }) => [uuid, { R, t, K }]))
+          let secondaryPoints = model.points.map(({ x, y, z, views, color }) => {
+            const v = new Map(), vpx = new Map()
+            for (const entry of views) {
+              v.set(entry[0], entry[1])
+              if (entry.length >= 4) vpx.set(entry[0], [entry[2], entry[3]])
+            }
+            return { x, y, z, views: v, viewsPx: vpx.size ? vpx : undefined, color }
+          })
+          if (projects.currentSceneType === 'aerial') {
+            const R = aerialUpRotation(secondaryCameras)
+            if (R) ({ cameras: secondaryCameras, points: secondaryPoints } =
+              rotateReconstruction(secondaryCameras, secondaryPoints, R))
+          }
+          upsertSparseCloud(secondaryCameras, secondaryPoints, {
+            replaceId: null,
+            asMain: false,
+            select: false,
+            secondary: true,
+            name: model.name || `Secondary sparse ${si + 1}`,
+          })
+        }
         // Retire the outgoing summary into the run history before overwriting it, so
         // "vs previous run" compares against what was on screen a moment ago (WS5).
         if (summary.value) {
@@ -1302,6 +1423,8 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
         id: c.id ?? makeCloudId(), name: c.name ?? 'Dense cloud', kind: 'dense',
         createdAt: c.createdAt ?? Date.now(), cameras: markRaw(new Map()),
         ...(c.imported ? { imported: true } : {}),
+        // Absent on projects saved before cloud editing existed ⇒ not derived.
+        ...(c.derived ? { derived: true } : {}),
         count: N, pos: markRaw(posF), col: markRaw(col),
         ...(nrm ? { nrm: markRaw(nrm) } : {}),
       }
@@ -1360,6 +1483,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
       kind: c.kind ?? 'sparse',
       createdAt: c.createdAt ?? Date.now(),
       ...(c.imported ? { imported: true } : {}),
+      ...(c.secondary ? { secondary: true } : {}),
       cameras: markRaw(cameras),
       points: markRaw(points),
     }
@@ -1490,6 +1614,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     reconstruct,
     importColmapModel,
     importCloud,
+    editClouds,
     computeDepthMaps,
     densify,
     restore,

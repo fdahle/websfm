@@ -422,7 +422,7 @@ export function filterDepthMapsGeometric(maps, opts = {}, onLog = () => {}, hook
     const m = maps[mi]
     const { width: w, height: h, depth, cost } = m
     const mask = masks[mi]
-    onProgress?.(mi, nMaps, m.uuid?.slice(0, 8) ?? '')
+    onProgress?.(mi, nMaps, m.name ?? m.uuid?.slice(0, 8) ?? '')
     let mapLowNcc = 0, mapInconsistent = 0
     for (let v = 0; v < h; v++) {
       for (let u = 0; u < w; u++) {
@@ -456,7 +456,15 @@ export function filterDepthMapsGeometric(maps, opts = {}, onLog = () => {}, hook
         kept++
       }
     }
-    onLog(`Depth filter: ${m.uuid?.slice(0, 8) ?? '?'} — dropped ${mapLowNcc} low-NCC, `
+    m.filterStats = {
+      considered: (() => { let n = 0; for (const d of depth) if (d > 0) n++; return n })(),
+      lowNcc: mapLowNcc,
+      inconsistent: mapInconsistent,
+    }
+    m.filterStats.kept = m.filterStats.considered - mapLowNcc - mapInconsistent
+    m.filterStats.keptPct = m.filterStats.considered
+      ? 100 * m.filterStats.kept / m.filterStats.considered : 0
+    onLog(`Depth filter: ${m.name ?? m.uuid?.slice(0, 8) ?? '?'} — dropped ${mapLowNcc} low-NCC, `
       + `${mapInconsistent} geometrically inconsistent px`, 'debug', 'Dense')
   }
 
