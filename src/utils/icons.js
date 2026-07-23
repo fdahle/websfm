@@ -88,6 +88,10 @@ export const icons = {
   'map-pin': `
     <path d="M12 21s7-6.3 7-11a7 7 0 1 0-14 0c0 4.7 7 11 7 11z" />
     <circle cx="12" cy="10" r="2.5" />`,
+  // Aerial survey: an aircraft seen from below, i.e. the nadir view the imagery
+  // is taken from.
+  plane: `
+    <path d="M12 3a1.6 1.6 0 0 1 1.6 1.6v3.7l7.4 4.3v2l-7.4-2.2v3.9l2.3 1.7v1.6L12 18.9l-3.9 1.6v-1.6l2.3-1.7v-3.9L3 15.5v-2l7.4-4.3V4.6A1.6 1.6 0 0 1 12 3z" />`,
 
   // ── Reconstruct ─────────────────────────────────────────────────────────────
   sparkles: `
@@ -149,6 +153,12 @@ export const icons = {
     <path d="M12 4v10" />
     <path d="M8 11l4 4 4-4" />
     <path d="M5 19h14" />`,
+  // A document with a folded corner — a single project file (.websfm).
+  file: `
+    <path d="M6.5 3.5h6.6L17.5 8v11.3a1.2 1.2 0 0 1-1.2 1.2H6.5a1.2 1.2 0 0 1-1.2-1.2V4.7a1.2 1.2 0 0 1 1.2-1.2z" />
+    <path d="M13 3.6V8h4.4" />
+    <path d="M8.3 12.5h5.4" />
+    <path d="M8.3 15.5h5.4" />`,
   // Floppy-disk "save" and an open folder — whole-project file I/O (.websfm).
   save: `
     <path d="M4 5.5A1.5 1.5 0 0 1 5.5 4h9.7L20 8.8v9.7A1.5 1.5 0 0 1 18.5 20h-13A1.5 1.5 0 0 1 4 18.5z" />
@@ -157,6 +167,17 @@ export const icons = {
   'folder-open': `
     <path d="M3 8.5V6.2A1.2 1.2 0 0 1 4.2 5h4.3l2 2.4h6.3A1.2 1.2 0 0 1 18 8.6v1.4" />
     <path d="M3 8.5h17.2a.9.9 0 0 1 .87 1.14l-2.1 8A1.2 1.2 0 0 1 17.8 18.5H4.2A1.2 1.2 0 0 1 3 17.3z" />`,
+  // A closed folder on disk — the counterpart of `browser`, for "where do the
+  // project files live", not for an open/browse action (`folder-open`).
+  folder: `
+    <path d="M3.5 7.2A1.7 1.7 0 0 1 5.2 5.5h3.9l2 2.6h7.7a1.7 1.7 0 0 1 1.7 1.7v7.5a1.7 1.7 0 0 1-1.7 1.7H5.2a1.7 1.7 0 0 1-1.7-1.7z" />`,
+  // Browser storage (OPFS): a browser window, not a disk/database — what the
+  // user sees is "the files stay inside this browser".
+  browser: `
+    <rect x="3" y="4.5" width="18" height="15" rx="2" />
+    <path d="M3 9h18" />
+    <circle cx="6.2" cy="6.8" r="0.7" fill="currentColor" stroke="none" />
+    <circle cx="8.8" cy="6.8" r="0.7" fill="currentColor" stroke="none" />`,
 
   // ── Other ───────────────────────────────────────────────────────────────────
   settings: `
@@ -166,6 +187,11 @@ export const icons = {
     <circle cx="12" cy="12" r="8.5" />
     <path d="M12 11v5" />
     <circle cx="12" cy="7.8" r="0.6" fill="currentColor" stroke="none" />`,
+  // System info: a processor chip with pins — reads as "hardware / diagnostics".
+  cpu: `
+    <rect x="7" y="7" width="10" height="10" rx="1.5" />
+    <rect x="10" y="10" width="4" height="4" rx="0.5" />
+    <path d="M9 4v3M12 4v3M15 4v3M9 17v3M12 17v3M15 17v3M4 9h3M4 12h3M4 15h3M17 9h3M17 12h3M17 15h3" />`,
   // Quality report: a document with a bar chart.
   report: `
     <path d="M6 3.5h8l4 4v13H6z" />

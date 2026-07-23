@@ -1,68 +1,182 @@
 # websfm
 
-Structure-from-Motion in the browser. The heavy numerical work (SIFT feature
-detection, descriptor matching, sparse reconstruction) is written in Rust and
-compiled to WebAssembly; the UI is Vue + Vite.
+**Structure-from-Motion and photogrammetry, entirely in your browser.**
 
-## Running the app
+websfm turns overlapping photographs into 3D reconstructions — sparse and dense
+point clouds, meshes, digital elevation models and orthophotos — without
+installing anything and **without uploading your images anywhere**. All the
+computation runs locally: the heavy numerical work (feature detection, matching,
+bundle adjustment, dense multi-view stereo) is written in Rust, compiled to
+WebAssembly, and executed in a background worker thread. Your photos never leave
+your machine.
 
-The generated WASM bindings in `src/wasm/**` are committed to the repository, so
-you do **not** need a Rust toolchain just to run or develop the front end. This
-works the same on macOS, Windows, and Linux:
+It is built with a focus on **polar / non-WGS84 projects** (e.g. historical
+aerial imagery of Antarctica), so coordinate-reference-system handling and ground
+control are first-class throughout.
+
+> ⚠️ **Early test release.** This is a first public build put out to gather
+> feedback. Expect rough edges. Please report anything that breaks or feels wrong
+> using the **🐞 button** in the bottom-right corner of the app, or open an issue
+> directly at
+> [github.com/fdahle/websfm/issues](https://github.com/fdahle/websfm/issues).
+
+---
+
+## What it does
+
+A full photogrammetry pipeline, stage by stage:
+
+1. **Detect** – SIFT (Rust/WASM) or the learned SuperPoint detector.
+2. **Match** – brute-force descriptor matching or the learned LightGlue matcher,
+   with fundamental-matrix RANSAC verification.
+3. **Sparse SfM** – incremental reconstruction with P3P resection, LM bundle
+   adjustment, self-calibration, and track filtering.
+4. **Dense MVS** – PatchMatch depth maps fused into a dense point cloud
+   (CPU/WASM, or an experimental WebGPU backend).
+5. **Products** – DEM, true orthophoto, and screened-Poisson mesh.
+6. **Georeferencing** – ground control points, camera poses, and reference DEMs,
+   with reprojection into any project CRS (proj4).
+
+There's also an in-app glossary, a quality-report hub, point-cloud editing, and
+COLMAP / PLY / LAS / GeoTIFF import & export.
+
+## Browser requirements
+
+- A **Chromium-based browser** (Chrome, Edge, Brave, …) is recommended. The app
+  uses [OPFS](https://developer.mozilla.org/docs/Web/API/File_System_API/Origin_private_file_system)
+  for local project storage; folder-backed projects and WebGPU acceleration are
+  Chromium-only. Firefox and Safari work with reduced acceleration.
+- The learned backends (SuperPoint, LightGlue, Smart Select) download their model
+  weights on first use — you'll be asked to confirm, and each file is cached
+  locally afterwards (see [Model files](#model-files)).
+
+---
+
+## Running it locally
+
+The generated WASM bindings in `src/wasm/**` are committed, so you do **not** need
+a Rust toolchain just to run or develop the front end:
 
 ```bash
 npm install
 npm run dev
 ```
 
-## Rebuilding the WASM crates
+The ONNX model files are **not** committed (they are large). To exercise the
+learned backends locally, drop the four `.onnx` files into `public/models/` — see
+[Model files](#model-files).
 
-You only need this when you change Rust code under `crates/`. It requires the
-Rust toolchain plus `wasm-pack`.
-
-### One-time setup (per machine)
-
-The toolchain installer configures your PATH for whatever OS/shell you're on —
-this step is inherently machine-specific and is not something the repo can
-provide.
-
-- **macOS / Linux:** install rustup, then `wasm-pack`:
-  ```bash
-  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-  cargo install wasm-pack
-  ```
-  Open a new terminal (or `source "$HOME/.cargo/env"`) so `cargo` is on PATH.
-
-- **Windows:** download and run [`rustup-init.exe`](https://rustup.rs), then in a
-  new terminal:
-  ```powershell
-  cargo install wasm-pack
-  ```
-
-Verify on any OS:
+### Tests & type-checking
 
 ```bash
-cargo --version
-wasm-pack --version
+npm test           # vitest
+npm run typecheck  # tsc --noEmit
 ```
 
-`wasm-pack` adds the `wasm32-unknown-unknown` target automatically on first
-build; if needed you can add it manually with
-`rustup target add wasm32-unknown-unknown`.
+---
 
-### Build
+## Building & self-hosting
 
 ```bash
+npm run build      # → dist/
+npm run preview    # serve the production build locally
+```
+
+`dist/` is a static site and can be hosted on any static file server. Two things
+to configure on the host:
+
+- **Model files.** Serve the four `.onnx` weights (see below) at `<site>/models/`,
+  or point the app elsewhere at build time with
+  `VITE_MODEL_BASE_URL=https://your-cdn/models/ npm run build`.
+
+- **Cross-origin isolation (optional, for speed).** For multi-threaded ONNX
+  (~3× faster matching) the host must send these two response headers:
+
+  ```
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Embedder-Policy: credentialless
+  ```
+
+  These are already set for `npm run dev` / `npm run preview`. Without them the
+  app still works, single-threaded (the same graceful path as Safari).
+
+### Model files
+
+The learned-model weights are downloaded on demand and cached in the browser
+(Cache Storage), so they are **not** part of the repository. The app fetches them
+from `<site>/models/` by default. The four files are:
+
+| File | Used by | Approx. size |
+| --- | --- | --- |
+| `superpoint.onnx` | SuperPoint detector | 5 MB |
+| `lightglue.onnx` | LightGlue matcher | 45 MB |
+| `sam2_encoder.onnx` | Smart Select (SAM2) | 128 MB |
+| `sam2_decoder.onnx` | Smart Select (SAM2) | 21 MB |
+
+Place them wherever `VITE_MODEL_BASE_URL` (or the default `public/models/`)
+points. The first time a user runs a learned backend, a modal asks to download
+the required file(s) and shows progress; nothing is fetched until they agree.
+
+---
+
+## Rebuilding the WASM crates
+
+You only need this when you change Rust code under `crates/`. It requires the Rust
+toolchain plus [`wasm-pack`](https://rustwasm.github.io/wasm-pack/).
+
+```bash
+# one-time, per machine:
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh   # macOS/Linux
+cargo install wasm-pack
+
+# build all crates into src/wasm/<crate>/:
 npm run build:wasm
 ```
 
-This compiles all three crates — `sift`, `matching`, and `reconstruction` — into
-`src/wasm/<crate>/`. Commit the regenerated bindings so other machines (and fresh
-clones) keep working without a toolchain.
+On Windows, install Rust via [`rustup-init.exe`](https://rustup.rs), then
+`cargo install wasm-pack`. Commit the regenerated `src/wasm/*` bindings alongside
+the Rust change so fresh clones keep working without a toolchain.
 
-## Production build
+---
 
-```bash
-npm run build
-npm run preview
-```
+## Tech stack
+
+- **UI:** Vue 3 (`<script setup>`), Pinia, OpenLayers (map), Three.js (3D).
+- **Compute:** five Rust crates (`sift`, `matching`, `reconstruction`, `mesh`,
+  `imagecodec`) compiled to WASM and run off the main thread.
+- **Learned models:** ONNX Runtime Web (WebGPU + WASM backends).
+- **Storage:** OPFS; projects are self-contained on-disk directories, also
+  exportable as `.websfm` archives.
+- **Build/test:** Vite, Vitest.
+
+Architecture notes for contributors live in [`CLAUDE.md`](CLAUDE.md) (code layout)
+and [`METHODS.md`](METHODS.md) (the photogrammetry/SfM methods). Planning docs are
+under [`docs/planning/`](docs/planning/).
+
+## Development & AI assistance
+
+I want to be upfront about how this is built. websfm is developed with substantial
+help from AI coding tools (primarily [Claude Code](https://claude.com/claude-code);
+AI-assisted commits are marked as such in the git history). The **direction, the
+photogrammetry/SfM methods, and the review of every change are mine** — the tools
+accelerate implementation, they don't decide what the software should do or vouch
+for whether it's correct.
+
+What that means for you:
+
+- Treat outputs as you would from any early research tool: **verify reconstructions
+  and measurements** before relying on them, and sanity-check georeferenced results
+  against known control.
+- Not all code paths have been exercised on real data yet; bug reports are genuinely
+  useful and very welcome.
+- The methods behind each stage are documented in [`METHODS.md`](METHODS.md) so you
+  can see *what* the algorithms do and judge them on their merits, independent of how
+  the code was written.
+
+If this approach affects whether you'd use or trust the tool, I'd rather you know
+than guess.
+
+## Feedback
+
+Found a bug or have a suggestion? Use the 🐞 button in the app, or open an issue:
+**[github.com/fdahle/websfm/issues](https://github.com/fdahle/websfm/issues)**.

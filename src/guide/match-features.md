@@ -85,3 +85,13 @@ imported camera position. Lower N is faster but risks missing real overlap on
 cross-strip or looping flight lines; raise it when the flight geometry is dense or
 irregular. Needs imported poses — images without one fall back to exhaustive
 matching.
+
+## Following images
+<!-- param: sequentialOverlap  default: 10 -->
+Used by the **Sequential** strategy when GPS or imported camera positions are not
+available. Each image is matched to the next N images in capture order, retaining
+overlapping views while reducing exhaustive $O(N^2)$ matching to approximately
+$O(N \cdot w)$ for a window of $w$ images. Ten is a good starting point for a smoothly captured orbit.
+Enable **Close capture loop** when the sequence makes a complete circuit so the
+last frames also match the first frames. This assumes the image list follows
+capture order (normally filename/EXIF order).

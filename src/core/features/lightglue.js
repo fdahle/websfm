@@ -25,6 +25,8 @@ import {
   dedupeGuidedMatches, marginFromResiduals,
 } from './guidedTiles.js'
 import { sliceDescriptorRows } from './subsetGate.js'
+import { modelUrl } from '../models/registry.js'
+import { loadModelBytes } from '../models/modelCache.js'
 
 // Sessions are cached per `${modelKey}:${backend}` — a modelKey can hold both a
 // WebGPU and a WASM session if we fall back mid-run (see below).
@@ -59,8 +61,9 @@ function serialized(fn) {
 const GPU_WARMUP_TIMEOUT_MS = 30000
 
 function defaultModelUrl() {
-  const base = (import.meta.env && import.meta.env.BASE_URL) || '/'
-  return `${base}models/lightglue.onnx`
+  // Downloaded-on-demand; served from Cache Storage once fetched with consent
+  // (see core/models/). getSession resolves this URL to bytes before createSession.
+  return modelUrl('lightglue')
 }
 
 // Resolve which backend to *try* for this run. WASM if the GPU path was already
@@ -80,7 +83,8 @@ function getSession(model, modelKey, backend, onLog) {
         + `${backend === 'webgpu'
           ? ' (experimental GPU path; auto-falls back to CPU on failure)'
           : ' (CPU WASM)'}; loading model…`)
-      const session = await createSession(model, {}, onLog, backend)
+      const bytes = await loadModelBytes(model, onLog, 'LightGlue')
+      const session = await createSession(bytes, {}, onLog, backend)
       onLog?.(`LightGlue: runtime ready (backend ${backend}; inputs [${session.inputNames}] → outputs [${session.outputNames}])`)
       return session
     })())
@@ -378,13 +382,14 @@ export async function matchLightGlueTiled(args) {
     //  - a moderate count ⇒ real overlap the coarse subset undersampled; that one
     //    earns the plain fallback.
     if (coarse.length < coarseGateMin) {
-      onLog?.(`LightGlue tiled: gated — coarse ${nCoarseA}×${nCoarseB} → ${coarse.length} matches `
-        + `(< ${coarseGateMin}): pair doesn't overlap, skipping full match`, 'info')
+      onLog?.(`LightGlue tiled: coarse probe ${nCoarseA}×${nCoarseB} keypoints → ${coarse.length} matches `
+        + `(< ${coarseGateMin}): no convincing overlap; skipping the full match`, 'info')
       return { matches: coarse }
     }
     if (coarse.length < guideMinMatches) {
-      onLog?.(`LightGlue tiled: coarse ${nCoarseA}×${nCoarseB} → ${coarse.length} matches `
-        + `(< ${guideMinMatches} needed to guide) — falling back to plain ${maxKeypoints}-cap match`, 'info')
+      onLog?.(`LightGlue tiled: coarse probe ${nCoarseA}×${nCoarseB} keypoints → ${coarse.length} matches; `
+        + `too few to guide tiles (need ≥${guideMinMatches}) — retrying unguided with the strongest `
+        + `${maxKeypoints} keypoints`, 'info')
       return { matches: await runPrefix(maxKeypoints) }
     }
 
@@ -399,13 +404,13 @@ export async function matchLightGlueTiled(args) {
     const fit = estimateHomographyRansac(ptsA, ptsB, { threshPx: guideThreshPx, iters: 500 })
     const ratio = fit ? fit.inlierCount / coarse.length : 0
     if (!fit || fit.inlierCount < guideMinInliers || ratio < guideMinInlierRatio) {
-      onLog?.(`LightGlue tiled: coarse ${nCoarseA}×${nCoarseB} → ${coarse.length} matches, `
+      onLog?.(`LightGlue tiled: coarse probe ${nCoarseA}×${nCoarseB} keypoints → ${coarse.length} matches; `
         + `H ${fit ? `${fit.inlierCount} inliers (ratio ${ratio.toFixed(2)})` : 'not estimable'} @ ${guideThreshPx}px — `
-        + `guide too weak (need ≥${guideMinInliers} inliers, ratio ≥${guideMinInlierRatio}) — `
-        + `falling back to plain ${maxKeypoints}-cap match`, 'info')
+        + `tile guide rejected (requires both ≥${guideMinInliers} inliers and ratio ≥${guideMinInlierRatio}); `
+        + `retrying unguided with the strongest ${maxKeypoints} keypoints`, 'info')
       return { matches: await runPrefix(maxKeypoints) }
     }
-    onLog?.(`LightGlue tiled: coarse ${nCoarseA}×${nCoarseB} → ${coarse.length} matches, `
+    onLog?.(`LightGlue tiled: coarse probe ${nCoarseA}×${nCoarseB} keypoints → ${coarse.length} matches; `
       + `${fit.inlierCount} H-inliers (ratio ${ratio.toFixed(2)} @ ${guideThreshPx}px), `
       + `p95 err ${fit.p95ErrPx.toFixed(1)} px`, 'info')
 

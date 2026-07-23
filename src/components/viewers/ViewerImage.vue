@@ -7,8 +7,12 @@ import { clipLineToRect } from '../../core/sfm/gcpGuides.js'
 import { segmentEncode, segmentDecode, segmentForget } from '../../workers/computeClient.js'
 import { logitsToBinaryMask } from '../../core/segment/sam2.js'
 import { copyToClipboard } from '../../composables/useToasts.js'
+import { useModelsStore } from '../../stores/useModelsStore.js'
 import MaskToolbar from './MaskToolbar.vue'
 import GcpToolbar from './GcpToolbar.vue'
+
+// Smart Select (SAM2) fetches its learned weights on demand via this store.
+const modelsStore = useModelsStore()
 
 const props = defineProps({
   image:         { type: Object,  required: true },
@@ -834,6 +838,13 @@ async function ensureEncoded() {
   if (smartEnc || smartStatus.value === 'encoding') return
   const img = props.image
   if (!img?.uuid) return
+  // SAM2 runs learned encoder + decoder models — fetch their weights (with
+  // consent) before the first encode. Declining leaves Smart Select idle.
+  smartStatus.value = 'loading model…'
+  if (!(await modelsStore.ensureReady(['sam2_encoder', 'sam2_decoder']))) {
+    smartStatus.value = 'model not downloaded'
+    return
+  }
   smartStatus.value = 'encoding'
   try {
     const r = await segmentEncode(img.uuid, img.computeUrl ?? img.url)

@@ -18,6 +18,8 @@
 
 import { createSession, tensor, resolveBackend } from './ort.js'
 import { DETECT_TUNING } from '../tuning.js'
+import { modelUrl } from '../models/registry.js'
+import { loadModelBytes } from '../models/modelCache.js'
 
 export const SUPERPOINT_DESC_DIM = 256
 
@@ -52,25 +54,14 @@ const warmedUp = new Set()
 const gpuFailedAtPx = new Map() // modelKey → smallest failed npix
 
 function defaultModelUrl() {
-  // Bundled default under public/models/ (SP0); SP4 lets a custom upload override.
-  const base = (import.meta.env && import.meta.env.BASE_URL) || '/'
-  return `${base}models/superpoint.onnx`
+  // Downloaded-on-demand default (SP0); SP4 lets a custom upload override. The
+  // bytes are served from Cache Storage once the main thread has fetched them
+  // with consent — see core/models/. A string URL routes through loadModelBytes.
+  return modelUrl('superpoint')
 }
 
-// Fetch the model bytes ourselves (when given a URL) so the download phase is
-// timed + logged separately from ORT init — otherwise a slow createSession is
-// ambiguous between "downloading model", "compiling 26 MB wasm", and "building
-// the WebGPU device". A Uint8Array/ArrayBuffer is passed through untouched.
-async function loadModelBytes(model, onLog) {
-  if (typeof model !== 'string') return model
-  const t = performance.now()
-  const resp = await fetch(model)
-  if (!resp.ok) throw new Error(`SuperPoint model fetch failed: HTTP ${resp.status} for ${model}`)
-  const buf = await resp.arrayBuffer()
-  onLog?.(`SuperPoint: model downloaded (${(buf.byteLength / 1e6).toFixed(1)} MB) in `
-    + `${Math.round(performance.now() - t)} ms — now compiling ONNX runtime + WebGPU device (first run only)…`)
-  return buf
-}
+// loadModelBytes (imported from core/models/modelCache.js): cache-first, else a
+// plain fetch, timed + logged. A Uint8Array/ArrayBuffer is passed through untouched.
 
 // Resolve which backend to *try* for this model + input size: WASM if the GPU
 // path already failed at this size or smaller (see gpuFailedAtPx), or if the
@@ -94,7 +85,7 @@ function getSession(model, modelKey, backend, onLog, reason = '') {
     sessions.set(key, (async () => {
       onLog?.(`SuperPoint: first run — backend ${backend}`
         + `${reason ? ` (CPU; ${reason})` : ''}; fetching model…`)
-      const bytes = await loadModelBytes(model, onLog)
+      const bytes = await loadModelBytes(model, onLog, 'SuperPoint')
       const t = performance.now()
       const session = await createSession(bytes, {}, onLog, backend)
       onLog?.(`SuperPoint: runtime ready in ${Math.round(performance.now() - t)} ms `

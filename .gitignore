@@ -11,6 +11,12 @@ crates/target/
 # Test images / datasets — keep large binaries out of git
 data/
 
+# ONNX model weights — large (the SAM2 encoder alone is >GitHub's 100 MB limit)
+# and downloaded on demand at runtime with user consent (see src/core/models/).
+# Host these files at VITE_MODEL_BASE_URL (defaults to <site>/models/) instead of
+# committing them.
+public/models/*.onnx
+
 # Editor / OS
 .DS_Store
 .vscode/*

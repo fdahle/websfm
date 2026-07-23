@@ -4,6 +4,7 @@ import * as opfs from '../utils/opfs.js'
 import { matchDescriptors, matchLightGlue, verifyMatches, POOL_SIZE } from '../workers/computeClient.js'
 import { useLog } from '../composables/useLog.js'
 import { preselectPairs } from '../core/features/preselect.js'
+import { sequentialPairs } from '../core/features/sequentialPairs.js'
 import { inlierSpread } from '../core/features/verify.js'
 import { evaluatePairAcceptance } from '../core/features/pairGate.js'
 import { pickSpreadIndices, sliceDescriptorRows } from '../core/features/subsetGate.js'
@@ -12,6 +13,7 @@ import { MATCH_TUNING } from '../core/tuning.js'
 import { registerProjectStore } from './projectStores.js'
 import { useProjectsStore } from './useProjectsStore.js'
 import { usePosesStore } from './usePosesStore.js'
+import { useModelsStore } from './useModelsStore.js'
 
 // Original image dimensions (px) in the same space as keypoint x,y — needed by
 // LightGlue's coord normalization. Prefer EXIF meta; else recover from a keypoint
@@ -328,11 +330,22 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
           + 'or switch the matcher to brute-force.', 'error', 'Matching')
         return
       }
+      // Fetch the LightGlue weights (with consent) before dispatching to the worker.
+      if (!(await useModelsStore().ensureReady(['lightglue']))) {
+        log('Matching cancelled — LightGlue model was not downloaded.', 'warn', 'Matching')
+        return
+      }
     }
 
     let pairs = []
     if (strategy === 'sequential') {
-      for (let i = 0; i < ready.length - 1; i++) pairs.push([ready[i], ready[i + 1]])
+      pairs = sequentialPairs(ready, {
+        overlap: settings.sequentialOverlap,
+        loopClosure: settings.sequentialLoopClosure,
+      })
+      log(`Sequential pairing: each image ↔ next ${settings.sequentialOverlap} in capture order`
+        + `${settings.sequentialLoopClosure ? ', with end-to-start loop closure' : ''}`
+        + ` — ${pairs.length} pair(s)`, 'info', 'Matching')
     } else {
       for (let i = 0; i < ready.length; i++)
         for (let j = i + 1; j < ready.length; j++)

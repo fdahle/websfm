@@ -77,6 +77,7 @@ export const COMMANDS = [
   { name: 'settings', aliases: [],                  dispatch: 'open-settings', group: 'App', help: 'Open settings' },
   { name: 'glossary', aliases: [],                  dispatch: 'open-glossary', group: 'App', help: 'Open the glossary' },
   { name: 'about',    aliases: [],                  dispatch: 'open-about',    group: 'App', help: 'Open the about dialog' },
+  { name: 'system info', aliases: ['diagnostics'],  dispatch: 'open-system-info', group: 'App', help: 'Open system / hardware diagnostics' },
 ]
 
 // name/alias (lowercased) -> command. Built once at module load.

@@ -71,6 +71,8 @@ export const MATCH_DEFAULTS = {
   minInlierRatio: 0.15,
   maxIters: 1000,              // F-RANSAC iterations
   maxNeighbors: 10,            // preselect: k-nearest cameras to consider per image
+  sequentialOverlap: 10,       // sequential: match each image to the next N capture-order images
+  sequentialLoopClosure: false, // circular sequence: also connect its end back to its start
   lgMaxKeypoints: 2048,        // per-image cap fed to LightGlue (plain path)
   lgTiled: false,              // coarse-to-fine tiled guided matching (full density)
   lgTileBudget: 2048,          // max keypoints per tile side when tiled (attention budget)

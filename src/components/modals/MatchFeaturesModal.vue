@@ -91,10 +91,24 @@ function run() {
 
     <SettingsGroup title="Strategy">
       <SettingsField
-        hint="Exhaustive matches all pairs. Sequential matches consecutive images. Preselect uses imported camera positions to match only nearby images.">
+        hint="Exhaustive matches all pairs. Sequential uses a capture-order neighbour window and needs no GPS. Preselect uses imported camera positions.">
         <template #label>Pairing</template>
         <SegmentedControl v-model="strategy" :options="strategies" />
       </SettingsField>
+
+      <template v-if="strategy === 'sequential'">
+        <SettingsField label-for="sequentialOverlap"
+          hint="Match each image to this many following images in capture order. Ten is a strong starting point for an orbit and is much denser than adjacent-only matching.">
+          <template #label>Following images
+            <FieldHelp op="match-features" param="sequentialOverlap" :default-value="settings.sequentialOverlap" /></template>
+          <input id="sequentialOverlap" v-model.number="settings.sequentialOverlap" type="number" min="1" max="50" step="1" class="field-input" />
+        </SettingsField>
+        <SettingsField
+          hint="For a complete orbit, also match the last images to the first images so the match graph closes around the object.">
+          <template #label>Close capture loop</template>
+          <label class="checkbox-row"><input v-model="settings.sequentialLoopClosure" type="checkbox" class="checkbox" /> Enabled</label>
+        </SettingsField>
+      </template>
 
       <SettingsField v-if="strategy === 'preselect'" label-for="maxNeighbors"
         hint="Match each image to its N nearest by camera position. Needs imported poses.">

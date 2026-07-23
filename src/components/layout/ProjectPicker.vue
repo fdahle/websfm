@@ -1,6 +1,7 @@
 <script setup>
 import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { isFolderProject, folderLabel } from '../../core/io/folderProject.js'
+import Icon from '../Icon.vue'
 
 const props = defineProps({
   projects: { type: Array, required: true },
@@ -157,14 +158,14 @@ onBeforeUnmount(() => {
            in place. -->
       <div class="footer-label">Open existing</div>
       <button class="open-btn" @click="emit('open-file')">
-        <span class="open-icon">↥</span>
+        <span class="open-icon"><Icon name="file" /></span>
         <span class="open-text">
           <span class="open-title">Project file…</span>
           <span class="open-sub">A <code>.websfm</code> file, copied into this browser</span>
         </span>
       </button>
       <button v-if="folderSupported" class="open-btn" @click="emit('open-folder')">
-        <span class="open-icon">🗀</span>
+        <span class="open-icon"><Icon name="folder-open" /></span>
         <span class="open-text">
           <span class="open-title">Project folder…</span>
           <span class="open-sub">A folder on your disk, edited in place</span>
@@ -396,9 +397,9 @@ onBeforeUnmount(() => {
 }
 
 .open-icon {
-  font-size: 13px;
+  width: 18px;
+  height: 18px;
   color: var(--accent);
-  line-height: 1.35;
   flex-shrink: 0;
 }
 
