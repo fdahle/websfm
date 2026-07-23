@@ -46,9 +46,28 @@ rejected solves on a 180px residual tail); WebGPU error-scope failures retain th
 device-loss reason before run-wide WASM fallback; geometric-filter logs use image
 names and flag <1%-survival marginal maps; and the sparse summary persists coherent
 unregistered components rather than mislabelling them as isolated weak images.
-- **Re-run South Building medium** and record whether the initial/follow-up global BA
-  now commits without the two 4.03→4.21px rejections. Final camera/point counts and
-  median/p95 must be no worse than 86 / 13,942 / 0.53px / 2.03px.
+- ~~Re-run South Building medium~~ **done 2026-07-22 — see HANDOVER §B4.** BA commits
+  without the 4.03→4.21px rejections; 122/128 cams, 20,953 pts, 0.52/2.05px.
+- ~~Fix init-pair selection~~ **done 2026-07-22 — parallax is a gate, and graph degree now
+  outranks point count** (`initPair.js`; see HANDOVER done-log + METHODS §4.2). The gate
+  alone regressed SB to 86/128, so connectivity gained an above-median reward
+  (`initConnCeil`) and point count went to `√`. The first browser acceptance run still
+  started from a 4-camera seed and recovered to 86/128 only after retry: the desired seed
+  was ninth (outside the 8-pair probe), and degree 20/22 both saturated. The selector now
+  probes 24 and directly rewards PnP-ready third views with shared seed tracks.
+  A follow-up reached **123/128**, but via retry 1: the stalled first seed had 20 ready
+  views and the successful seed had 23, which exposed over-compression in the initial
+  logarithmic growth term. Growth is now proportional. **One final browser run is owed; it is the
+  acceptance test:** re-run SB medium/SIFT and confirm the seed picked on the *first*
+  attempt is the high-degree pair (P1180215↔P1180321 / P1180320↔P1180213 shape — check the
+  logged `score (parallax ×p, connectivity ×c)` line names it), no `retrying with alternate
+  seed` line appears, fx settles at ~2566 from the first interim BA, and ≥122/128 cameras
+  register. Also re-run the **50-image building set (B1)**, which currently reaches 17/50
+  and is graph-limited, not seed-limited (median 6 pairs/image, 33 images with zero
+  correspondences to the registered set) — confirm the seed change leaves it no worse, then
+  treat B1 as a *matching* problem, not an init-pair one. If a barely-passing ~2.5° seed
+  does win badly anywhere, the E-conditioning σ2/σ1 term (already computed + logged per
+  candidate) is the fix, with that run as its evidence.
 - **Re-run with WebGPU enabled**. If it still drops at the first 768×576 six-source
   map, record the new device-loss reason; fix the browser/device-specific cause rather
   than weakening the CPU fallback. Target: all 86 maps remain on GPU.
@@ -58,11 +77,11 @@ unregistered components rather than mislabelling them as isolated weak images.
   and component-observed points merge. Failed alignment appears as a separate sparse
   cloud. Record recovered cameras and alignment diagnostics. Do not lower the global
   30% PnP gate to force the P1180182 near-miss (38/140 at 4px) into the primary model.
-- **Verify alternate-seed regression guard.** The 13:30 rerun selected
-  P1180205↔P1180316, stalled at 3/128, then repeated that seed in secondary recovery.
-  A primary below 50% now retries up to four excluded seeds and keeps the largest;
-  secondary recovery is suppressed below 25% after retries. The next run must recover
-  the former ≥86-camera primary before any merge is considered.
+- ~~Verify alternate-seed regression guard.~~ **done 2026-07-22 — validated**: the
+  guard turned a 19-camera primary into 122 (retry 2 of 4), clearing the ≥86 bar.
+  Note what it does *not* do — it is a safety net that runs after a bad seed has
+  already burned a full reconstruction, and the run's own metrics never flagged the
+  19-camera model as wrong (median 1.28px on 1360 surviving points).
 
 ### FDR — fiducial split: browser verification owed (shipped 2026-07-20)
 The code-side rework is complete: **Detect Fiducials** finds anonymous corner/side
@@ -167,10 +186,12 @@ Owed, ideally folded into the V ▸ verification session:
   sweep admits a few cameras and stalls again *before* the distortion fold at 6 cams,
   allow one more rescue after the first fold ("folded since last rescue", max 2 total).
   Do NOT make rescue unbounded.
-- **Rotation-cycle filter — decide its fate.** It has never engaged on any baseline
-  (median cycle error always under the 30° ceiling). Check whether an earlier
-  distortion fold changes that; if it still always skips, it is dead weight and this
-  becomes a remove-or-retune item.
+- **Rotation-cycle filter — decide its fate.** It has never engaged on any baseline,
+  and now for both possible reasons: B0/B1/B3 sit under the 30° ceiling, while B4
+  (South Building) skipped at **42.3° median cycle error — above** it. B4 also shows
+  why: it runs before self-cal on a focal that is 7.4% wrong, so its rotations are
+  garbage exactly when it would have the most to say. Either move it after the first
+  distortion fold or remove it; "always skips" is now measured at both ends.
 
 ### M — Dense-fusion OOM + pipeline progress (2026-07-12)
 **All 7 phases shipped** (code + unit tests + typecheck) — see HANDOVER

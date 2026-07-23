@@ -11,6 +11,7 @@ import { defineStore } from 'pinia'
 export const useModalsStore = defineStore('modals', () => {
   const settingsOpen        = ref(false)
   const aboutOpen           = ref(false)
+  const systemInfoOpen      = ref(false)
   const projectPickerOpen   = ref(false)
   const newProjectOpen      = ref(false)
   const newProjectCanCancel = ref(true)
@@ -72,6 +73,7 @@ export const useModalsStore = defineStore('modals', () => {
   return {
     settingsOpen,
     aboutOpen,
+    systemInfoOpen,
     projectPickerOpen,
     newProjectOpen,
     newProjectCanCancel,

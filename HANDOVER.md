@@ -10,6 +10,77 @@ Git history holds the detail.
 
 ## Baselines (before/after yardsticks)
 
+### B4 — South Building, 128 images (2026-07-22, two runs) — supersedes the 86-camera SB number
+Two front ends on the same set: **SIFT/brute-force** (17:27–17:38 console log, dense
+on CPU) and **SuperPoint/LightGlue** (`south_gpu` quality report, 19:45). This is the
+SB re-run acceptance record.
+
+| run | registered | points | reproj median / p95 | ≥3-view | graph |
+| --- | --- | --- | --- | --- | --- |
+| SIFT + brute-force | **122 / 128** | 20,953 | **0.52 / 2.05 px** | 51.2% | 2 components |
+| SuperPoint + LightGlue | 85 / 128 | 27,104 | 1.07 / 2.64 px | 54.0% | **1 component** |
+| (previous, 2026-07-21) | 86 / 128 | 13,942 | 0.53 / 2.03 px | — | — |
+
+**The focal is settled: fx ≈ 2566, EXIF nominal 2389.3 is wrong by +7.4%.** The two
+runs land on **2565.9** and **2565.8** — independent detectors, matchers and seeds
+agreeing to 0.1px. Read every self-cal number on this set against 2566, not 2389.
+(LightGlue's report: self-cal fit RMS 0.153px, Δ 7.385%.)
+
+**Seed choice — not matching — decided the run.** The SIFT run's three attempts:
+- primary **P1180211↔P1180210** (5.21° parallax, 496 pts): **19/128 cams**, and the
+  staged self-cal *ran away* — fx 2389 → 2879 → 3162 → 3655 → 4087 → 4685 → **4796
+  (+101%)**, cx/cy walking 1536/1152 → 1669/888. Its own final "median 1.28px" on
+  1360 points is survivor bias; the model is wrong and does not say so.
+- retry 1 **P1180204↔P1180205** (11.54°): **4/128**.
+- retry 2 **P1180215↔P1180321** (2.68°, 640 pts, init reproj 0.63px): **122/128**,
+  with fx pinned at ~2566 from the *first* interim BA and never moving again.
+- ⇒ the 2026-07-21 alternate-seed guard is what produced this model (**19 → 122
+  cams**). Without it the run ships a 19-camera cloud that looks healthy by its own
+  metrics. The guard is validated; the *selection* heuristic is not.
+- ⚠ **The seed heuristic changed twice on 2026-07-22** (parallax became a gate; then graph
+  degree was made to outrank point count — see the done log). A future SB run is therefore
+  *not* comparing like with like against the attempts below; those are the record of the old
+  scorer's failure. The measured intermediate state — gate only, connectivity still capped
+  at 1 — reached **86/128** (first seed attempt 3/128), *worse* than the 122 the retry guard
+  had been producing; that regression is what motivated the second change. Target for the
+  next run: the 122-camera model on the first attempt, no retry line.
+- The heuristic picked wrong: only **2 of 8** init candidates clear the 2° parallax
+  bar (a high-overlap set — candidate medians 0.23–5.21°), and it preferred the
+  higher-parallax pair over one with more points (640 vs 496), lower init reproj
+  (0.63 vs 0.79px) and higher graph degree (21 vs 18). Parallax is outranking the
+  three signals that actually predicted the outcome here.
+
+**Matching / graph** (SIFT run): exhaustive 8128 pairs → subset gate skipped **7446
+(91.6%)**, 647 accepted, 15 rejected, 20 skipped; 145,289 inliers, mean ratio 0.85;
+≈4 min. Median **8 pairs/image**, 2 components (largest 126/128). LightGlue reaches a
+**connected** graph and still registers 37 *fewer* cameras — the B3 finding again:
+better matching does not move a registration/seed-bound failure.
+
+**Rotation-cycle filter skipped for the opposite reason to every prior baseline**:
+median triangle cycle error **42.3°** over 2010 triangles, *above* the 30° sanity
+ceiling, so it declined to drop edges. Expected — it runs before self-cal, on a focal
+that is 7.4% wrong. Correction to TODO ▸ Later: it is no longer true that the ceiling
+is never approached.
+
+**BA committed cleanly** (the SB acceptance item): global 1.17→1.17, post-retriangulation
+already converged (1.15, no-op), post-filter 1 1.16→1.13, post-filter 2 0.96→0.96 — the
+two 4.03→4.21px *rejections* from the 2026-07-21 run are gone. (One REJECT survives, in
+the discarded 4-camera retry.)
+
+**Dense** (CPU/WASM, medium, ≤768px, ≤6 sources, 3 iters) — throughput is now the
+bottleneck, not photometrics:
+- **≈40 s/image** (38.0–41.3 s over the 4 maps before the user cancelled) ⇒ **≈81 min
+  for 122 images**.
+- Per-map 78–86% pixels with depth; cost median **0.14–0.16**, p95 0.49–0.57 ⇒ median
+  ZNCC ≈0.85. Compare B0/B1's 0.51–0.70 medians: this set is well-textured and the
+  MVS cost function is behaving.
+- Projected fusion peak **1.81 GB** vs the 12 GB budget.
+- LightGlue run's report: **depth-map coverage 49.4%** (warn, threshold 50%).
+
+Not measured here: whether the LightGlue run also needed a seed retry (only its report
+survives, not its log); WebGPU depth (this console log is WASM-pinned); fused dense
+cloud / DEM / ortho for either run.
+
 ### B1 — Metashape building set (2026-07-04 15:09 run, 50 images)
 Intrinsics are *right* here (seed E σ2/σ1 = 1.00) — the failure is registration
 contaminating the model. The R track in TODO.md exists to move these numbers:
@@ -131,6 +202,46 @@ fiducials; self-calibration (A2) + fiducials (F4) are the code-side support.
 ---
 
 ## Done log (most recent first)
+
+- **2026-07-22 · Init selection now scores real one-step growth** — the first browser
+  acceptance run exposed two remaining blind spots in the seed heuristic: the good South
+  Building seed ranked ninth while only eight candidates were probed, and graph-degree
+  reward saturated so degree 20 and 22 were indistinguishable. `core/sfm/initPair.js`
+  now probes 24 candidates and scores the number of third images with enough distinct
+  triangulated seed-point correspondences for PnP (`growthHealth`), rather than treating
+  nominal graph edges as proof that a seed can grow. The per-pair summary and diagnostic
+  log carry ready-view support; the synthetic regression holds degree equal while only
+  one seed has reusable tracks.
+  **Acceptance follow-up:** the next run reached **123/128**, 20,723 points and 0.53px
+  median, but through retry 1: the first seed had 20 PnP-ready views and stalled at 3,
+  while the retry seed had 23 and reached 123. The initial logarithmic growth factor
+  compressed 23:20 to 1.04× and still selected the richer stalled pair; growth is now
+  proportional, with that measured 23-versus-20 shape pinned in a regression.
+
+- **2026-07-22 · Init-pair selection: parallax is a gate, not a ranking** — `parallaxHealth`
+  (`core/sfm/initPair.js`) no longer ramps from `minInitAngleDeg`; it is flat at 1 between a
+  soft band (`initSoftFloorFactor`, default 1.25 ⇒ 2.5°) and the unchanged grazing knee, so
+  the seed is decided by cheirality-surviving points, init reprojection and graph
+  connectivity. The old ramp turned B4's 5.21° vs 2.68° into a 4.7× factor and picked the
+  19-camera seed over the 122-camera one. Seed scores + their factors are now logged per
+  candidate and per selection (with the runner-up), and `summary.perPairInitReproj` carries
+  `score`/`cheiralKept`/`degree`/`selected`. Regression pinned in `initPair.test.js` (it fails
+  on the old curve); METHODS §4.2 rewritten (it also still described a "lowest init
+  reprojection" rule the scorer had outgrown).
+  **Follow-up the same day — graph degree now outranks point count.** The first SB run
+  under the gate regressed to 86/128 (3/128 on the first seed attempt): with parallax flat,
+  the score ranked by raw point count and took a 1177-point pair at graph degree 7 over a
+  670-point pair at degree 22, because `connectivityHealth` capped at 1 scored degree 22 and
+  degree 8 alike. Fixed by (a) clamping connectivity to `[initConnFloor, initConnCeil]` =
+  0.4–2 so a hub is *rewarded*, not just a satellite penalised, and (b) taking `√cheiralKept`
+  so a big match count cannot dominate. Both pinned by a new `initPair.test.js` case that
+  fails on the capped/linear score. **Browser acceptance run owed — see TODO ▸ SB.**
+
+- **2026-07-22 · No-GPS sequential-window matching + clearer LightGlue fallback logs** —
+  Sequential pairing now matches a configurable number of following capture-order
+  images and can close circular orbits end-to-start (`sequentialPairs.js`, Match
+  Features modal/store). LightGlue tiled logs now distinguish a coarse keypoint
+  probe, a rejected tile guide, and the ensuing unguided retry.
 
 - **2026-07-22 · Project I/O gathered behind the project picker** — UX follow-up to
   the save/load feature the same day. `ProjectPicker`'s footer is now a primary

@@ -57,13 +57,15 @@ const numStats = (arr) => {
   return { mean: sorted.reduce((s, v) => s + v, 0) / n, median: at(0.5), p95: at(0.95), max: sorted[n - 1], count: n }
 }
 
-// A sideways-stereo two-view pair: camera A at the origin, camera B shifted +0.7 in x,
-// points at z≈4–6 ⇒ ~8° parallax (right at initAngleTargetDeg, so parallaxHealth = 1 for
-// both pairs and the score reduces to cheiralKept × connectivityHealth).
-function makePair(idA, idB, nPoints, seed) {
+// A sideways-stereo two-view pair: camera A at the origin, camera B shifted by `baseline`
+// in x, points at z≈4–6. Parallax scales with the baseline: 0.7 ⇒ ~8°, 0.45 ⇒ ~5°,
+// 0.23 ⇒ ~2.7°, 0.18 ⇒ ~2.1°. The default 0.7 sits well inside the flat region of
+// parallaxHealth, so both pairs score 1 there and the score reduces to
+// cheiralKept × connectivityHealth / reprojection penalty.
+function makePair(idA, idB, nPoints, seed, baseline = 0.7) {
   const rng = mulberry32(seed)
   const RA = [[1, 0, 0], [0, 1, 0], [0, 0, 1]], tA = [0, 0, 0]
-  const RB = [[1, 0, 0], [0, 1, 0], [0, 0, 1]], tB = [-0.7, 0, 0]
+  const RB = [[1, 0, 0], [0, 1, 0], [0, 0, 1]], tB = [-baseline, 0, 0]
   const kpA = [], kpB = [], matches = []
   for (let i = 0; i < nPoints; i++) {
     const X = [(rng() - 0.5) * 3, (rng() - 0.5) * 3, 4 + rng() * 2]
@@ -90,6 +92,13 @@ function scene() {
 // Filler graph edges: real accepted pairs that carry degree but are not init candidates
 // (no F ⇒ excluded by selectInitPair's candidate filter).
 const filler = (idA, idB) => ({ idA, idB, F: null, matches: [], inlierCount: 20 })
+const growthEdge = (seedId, thirdId, count) => ({
+  idA: seedId,
+  idB: thirdId,
+  F: null,
+  matches: Array.from({ length: count }, (_, i) => [i, i]),
+  inlierCount: count,
+})
 
 async function pick(donePairs, images, Kmap, settings = {}) {
   const res = await selectInitPair({
@@ -102,6 +111,59 @@ async function pick(donePairs, images, Kmap, settings = {}) {
   })
   return res
 }
+
+// Two candidates that differ in BOTH parallax and point count, the South Building
+// shape: a wider-baseline pair with fewer points against a modest-baseline pair with
+// more. Both clear the 2° floor.
+function b4Scene({ wideBaseline = 0.45, wideCount = 50, nearBaseline = 0.23, nearCount = 64 } = {}) {
+  const wide = makePair('wideA', 'wideB', wideCount, 3, wideBaseline)
+  const near = makePair('nearA', 'nearB', nearCount, 5, nearBaseline)
+  const images = { ...wide.images, ...near.images }
+  const Kmap = new Map(Object.keys(images).map((uuid) => [uuid, K]))
+  return { wide, near, images, Kmap }
+}
+
+const angleOf = (res, name) => res.perPairInitReproj.find((r) => r.pair.startsWith(name))?.parallaxDeg
+
+describe('selectInitPair — parallax is a gate, not a ranking', () => {
+  // The B4 regression: the old ramp anchored at minInitAngleDeg turned 5.1° vs 2.6°
+  // into a 4.7× score factor, swamping the richer seed's point-count edge. On South
+  // Building that cost 122 → 19 registered cameras.
+  it('prefers the richer seed over a wider-baseline one when both clear the floor', async () => {
+    const { wide, near, images, Kmap } = b4Scene()
+    const res = await pick([wide.entry, near.entry], images, Kmap)
+    expect(res.status).toBe('ok')
+    // Pin the scene: both above the 2° floor, wide genuinely wider.
+    expect(angleOf(res, 'nearA')).toBeGreaterThan(2)
+    expect(angleOf(res, 'wideA')).toBeGreaterThan(angleOf(res, 'nearA'))
+    expect([res.best.entry.idA, res.best.entry.idB]).toEqual(['nearA', 'nearB'])
+  })
+
+  // ...but the gate must not extend down to the floor itself: a barely-passing pair is
+  // still discounted by the soft band, so it cannot buy the seed with point count alone.
+  it('still discounts a barely-above-floor seed despite more points', async () => {
+    const { wide, near, images, Kmap } = b4Scene({ nearBaseline: 0.18, nearCount: 70 })
+    const res = await pick([wide.entry, near.entry], images, Kmap)
+    expect(res.status).toBe('ok')
+    expect(angleOf(res, 'nearA')).toBeLessThan(2.5) // inside the soft band
+    expect([res.best.entry.idA, res.best.entry.idB]).toEqual(['wideA', 'wideB'])
+  })
+
+  // The opposite end is unchanged: past 4× initAngleTargetDeg, decaying overlap costs
+  // more than the extra parallax buys.
+  it('discounts a grazing baseline past the wide knee', async () => {
+    // ~76° parallax vs ~8°, with the grazing pair holding a 1.5× point-count edge that
+    // the discount (0.4 floor at this angle) must overturn.
+    const grazing = makePair('grazeA', 'grazeB', 60, 3, 20)
+    const normal = makePair('normA', 'normB', 40, 5)
+    const images = { ...grazing.images, ...normal.images }
+    const Kmap = new Map(Object.keys(images).map((uuid) => [uuid, K]))
+    const res = await pick([grazing.entry, normal.entry], images, Kmap)
+    expect(res.status).toBe('ok')
+    expect(angleOf(res, 'grazeA')).toBeGreaterThan(32) // past initAngleTargetDeg × 4
+    expect([res.best.entry.idA, res.best.entry.idB]).toEqual(['normA', 'normB'])
+  })
+})
 
 describe('selectInitPair — match-graph connectivity bias', () => {
   it('is inert on a uniformly-connected graph (richer geometry still wins)', async () => {
@@ -127,6 +189,32 @@ describe('selectInitPair — match-graph connectivity bias', () => {
     expect([res.best.entry.idA, res.best.entry.idB]).toEqual(['leanA', 'leanB'])
   })
 
+  // The 2026-07-22 South Building regression: with parallax gated flat, a 1177-point
+  // pair at graph degree 7 outscored a 670-point hub at degree 22 and registered 3/128
+  // cameras against the hub's 86. Capping connectivityHealth at 1 made the hub's real
+  // advantage invisible — degree 22 and degree 8 scored identically — so raw point count
+  // decided the run. A hub must be able to outrank a richer pair sitting at the median.
+  it('prefers a well-connected hub over a richer pair at the graph median', async () => {
+    const { lean, rich, images, Kmap } = scene()
+    // `lean` (40 pts) sits at degree 6, `rich` (60 pts) at the median degree 3.
+    const donePairs = [
+      lean.entry, rich.entry,
+      filler('leanA', 'x1'), filler('leanA', 'x2'), filler('leanA', 'x3'),
+      filler('leanA', 'x4'), filler('leanA', 'x5'),
+      filler('leanB', 'x1'), filler('leanB', 'x2'), filler('leanB', 'x3'),
+      filler('leanB', 'x4'), filler('leanB', 'x5'),
+      filler('richA', 'x1'), filler('richA', 'x2'),
+      filler('richB', 'x1'), filler('richB', 'x2'),
+    ]
+    const res = await pick(donePairs, images, Kmap)
+    expect(res.status).toBe('ok')
+    const row = (name) => res.perPairInitReproj.find((r) => r.pair.startsWith(name))
+    expect(row('richA').degree).toBe(3) // the median
+    expect(row('leanA').degree).toBe(6)
+    expect(row('richA').cheiralKept).toBeGreaterThan(row('leanA').cheiralKept)
+    expect([res.best.entry.idA, res.best.entry.idB]).toEqual(['leanA', 'leanB'])
+  })
+
   it('discounts a geometrically-ideal seed stranded in a weakly-attached cluster', async () => {
     const { lean, rich, images, Kmap } = scene()
     // Same two candidates, but now `rich` is a satellite: its images touch nothing but
@@ -141,5 +229,42 @@ describe('selectInitPair — match-graph connectivity bias', () => {
     const res = await pick(donePairs, images, Kmap)
     expect(res.status).toBe('ok')
     expect([res.best.entry.idA, res.best.entry.idB]).toEqual(['leanA', 'leanB'])
+  })
+
+  it('prefers seed features observed by PnP-ready third views over nominal degree', async () => {
+    const { lean, rich, images, Kmap } = scene()
+    const donePairs = [
+      lean.entry, rich.entry,
+      growthEdge('leanA', 'next1', 25), growthEdge('leanB', 'next1', 25),
+      growthEdge('leanA', 'next2', 22), growthEdge('leanB', 'next2', 22),
+      // Same degree, but these edges repeatedly observe too few seed points to
+      // supply the default 20-correspondence registration gate.
+      growthEdge('richA', 'dead1', 8), growthEdge('richB', 'dead1', 8),
+      growthEdge('richA', 'dead2', 8), growthEdge('richB', 'dead2', 8),
+    ]
+    const res = await pick(donePairs, images, Kmap)
+    expect(res.status).toBe('ok')
+    const row = (name) => res.perPairInitReproj.find((r) => r.pair.startsWith(name))
+    expect(row('leanA').degree).toBe(row('richA').degree)
+    expect(row('leanA').growthViews).toBe(2)
+    expect(row('richA').growthViews).toBe(0)
+    expect([res.best.entry.idA, res.best.entry.idB]).toEqual(['leanA', 'leanB'])
+  })
+
+  it('lets 23 ready views outrank a richer seed with only 20', async () => {
+    const stalled = makePair('stalledA', 'stalledB', 76, 21)
+    const growing = makePair('growingA', 'growingB', 64, 23)
+    const images = { ...stalled.images, ...growing.images }
+    const Kmap = new Map(Object.keys(images).map((uuid) => [uuid, K]))
+    const donePairs = [stalled.entry, growing.entry]
+    for (let i = 0; i < 20; i++) donePairs.push(growthEdge('stalledA', `s${i}`, 25))
+    for (let i = 0; i < 23; i++) donePairs.push(growthEdge('growingA', `g${i}`, 25))
+    const res = await pick(donePairs, images, Kmap)
+    expect(res.status).toBe('ok')
+    const row = (name) => res.perPairInitReproj.find((r) => r.pair.startsWith(name))
+    expect(row('stalledA').cheiralKept).toBeGreaterThan(row('growingA').cheiralKept)
+    expect(row('stalledA').growthViews).toBe(20)
+    expect(row('growingA').growthViews).toBe(23)
+    expect([res.best.entry.idA, res.best.entry.idB]).toEqual(['growingA', 'growingB'])
   })
 })

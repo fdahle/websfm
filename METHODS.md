@@ -119,8 +119,10 @@ SuperPoint (learned, better on low-texture / repetitive scenes, needs the model)
 
 ## 3. Feature matching & geometric verification
 
-Pairwise, exhaustive by default (every image pair), with two cost-cutting
-prefilters.
+Pairwise, exhaustive by default (every image pair), with two cost-cutting pairing
+alternatives: position-based nearest-neighbour preselection when camera positions
+exist, or a configurable capture-order window (optionally wrapping end-to-start for
+a closed orbit) when they do not.
 
 **Descriptor matching** (`core/features/bruteforce.js` or the learned
 `lightglue.js`): mutual nearest-neighbour (**cross-check**) + **Lowe ratio test**
@@ -229,7 +231,7 @@ geometry and commonly *prevent* cameras from registering.
 ### 4.2 Two-view initialisation (`core/sfm/initPair.js`)
 
 The seed pair is the single best predictor of how the model grows, so we do **not**
-just take the highest inlier count. We probe up to `initCandidates` (default 8)
+just take the highest inlier count. We probe up to `initCandidates` (default 24)
 pairs with the most inliers and for each:
 - `F → E` (`fundamentalToEssential`, applying `K_A`, `K_B`),
 - **pose recovery** by essential-matrix decomposition (`recoverPose`) with
@@ -239,11 +241,56 @@ pairs with the most inliers and for each:
 - record **median triangulation angle** (parallax) and **init reprojection**.
 
 Selection rule: among candidates clearing the **parallax floor** (`minInitAngleDeg`,
-default 2°) take the **lowest init reprojection** seed; if none clear it, fall back
-to the widest baseline. A quality signal logged here is the **essential-matrix
-conditioning** σ2/σ1 (ideal ≈ 1; well below 1 ⇒ wrong focal length). Picking by
-parallax + reprojection, not inlier count, avoids locking onto a near-degenerate
-tiny-baseline seed whose points collapse to a line.
+default 2°) take the highest-scoring seed; if none clear it, fall back to the widest
+baseline. The score is
+
+```
+√cheiralKept × parallaxHealth(angle) × connectivityHealth × growthHealth / (1 + initReproj_median / 4)
+```
+
+— cheirality-surviving point count (pose correctness × scene coverage) as the base,
+scaled by the seed's position in the match graph, with reprojection as a gentle
+tie-breaker only (it is measured *before* any distortion self-cal, so it is a weak
+signal that must not dominate).
+
+`growthHealth = max(1, readyViews)` measures the seed's immediate ability to
+grow. A third image is ready only when verified edges from either seed image observe at
+least `minMatchesForRegistration` **distinct triangulated seed points** in it. This is
+more specific than graph degree: degree measures neighbourhood reach, while ready-view
+support proves that the neighbours reuse enough of the seed's 3D tracks to attempt PnP.
+It is proportional because each independently ready view is a real opportunity to grow;
+the parallax and geometry checks are applied before this ranking.
+
+**Match-graph degree outranks point count.** `connectivityHealth` is the pair's
+degree (the lower of its two images') over the median image's, clamped to
+`[initConnFloor, initConnCeil]` (0.4–2) — it *rewards* a hub, not merely penalises a
+satellite. Point count enters as a **square root**: a pair with twice the surviving
+points is better conditioned, not twice as likely to grow the model. Both dampers are
+measured, not aesthetic. With parallax gated flat (below), the first South Building
+run under the new rule ranked by raw point count and picked a 1177-point pair at
+degree 7 over a 670-point pair at degree 22 — capping connectivity at 1 had made the
+hub's advantage invisible, since degree 22 and degree 8 scored identically. That seed
+registered **3/128** cameras; the hub reached **86/128**. Across every measured run
+graph degree separated the good seed from the bad one and point count separated
+neither.
+
+**Parallax is a gate, not a ranking.** `parallaxHealth` is flat at 1 for every angle
+between a soft band just above the floor (`minInitAngleDeg × initSoftFloorFactor`,
+default 2.5°) and a grazing knee at `initAngleTargetDeg × 4` (default 32°), beyond
+which decaying overlap is discounted. A *ranked* parallax term anchored at the floor
+is unstable by construction: small absolute angle differences near the floor become
+large multiplicative ones. On South Building (HANDOVER §B4) it scored a 5.21° seed
+over a 2.68° one by 4.7×, swamping the latter's combined 1.34× advantage in points,
+reprojection and graph degree — and the seed it picked registered **19/128** cameras
+with a self-calibration that ran away to fx +101%, against **122/128** for the seed
+it beat. Sufficient triangulation angle is a threshold (COLMAP's stance), so above
+the band the decision belongs to the other signals. The soft band keeps a
+barely-passing pair discounted rather than cliff-edged at exactly the floor.
+
+A quality signal logged per candidate — not currently scored — is the
+**essential-matrix conditioning** σ2/σ1 (ideal ≈ 1; well below 1 ⇒ wrong focal
+length). It is the term to add if a barely-passing seed ever wins badly on the flat
+gate, which is this rule's remaining known risk.
 
 ### 4.3 Incremental resection (PnP)
 

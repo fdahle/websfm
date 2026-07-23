@@ -19,8 +19,10 @@ import FiducialCalibrateModal from './components/modals/FiducialCalibrateModal.v
 import MatchListModal from './components/modals/MatchListModal.vue'
 import QualityReportModal from './components/modals/QualityReportModal.vue'
 import ProgressModal from './components/modals/ProgressModal.vue'
+import ModelDownloadModal from './components/modals/ModelDownloadModal.vue'
 import SettingsModal from './components/modals/SettingsModal.vue'
 import AboutModal from './components/modals/AboutModal.vue'
+import SystemInfoModal from './components/modals/SystemInfoModal.vue'
 import NewProjectModal from './components/modals/NewProjectModal.vue'
 import SaveProjectModal from './components/modals/SaveProjectModal.vue'
 import FolderReconnectModal from './components/modals/FolderReconnectModal.vue'
@@ -415,7 +417,7 @@ const { addPoses, removePose, reprojectPoses } = posesStore
 
 // ── Modals ────────────────────────────────────────────────────────────────────
 const {
-  settingsOpen, aboutOpen,
+  settingsOpen, aboutOpen, systemInfoOpen,
   projectPickerOpen, newProjectOpen, newProjectCanCancel, saveProjectOpen,
   detectFeaturesOpen, matchFeaturesOpen,
   imageTableOpen, maskManagerOpen, autoMaskOpen, sensorTableOpen, gcpTableOpen, matchListOpen, reconstructOpen,
@@ -1574,6 +1576,7 @@ function handleCommand(id) {
     case 'match-features':       matchFeaturesOpen.value = true; break
     case 'open-settings':        settingsOpen.value = true; break
     case 'open-about':           aboutOpen.value = true; break
+    case 'open-system-info':     systemInfoOpen.value = true; break
     case 'open-glossary':        glossaryStore.openHome(); break
     case 'open-guide':           guideStore.openHome(); break
     case 'open-project-picker':  projectPickerOpen.value = !projectPickerOpen.value; break
@@ -1988,6 +1991,7 @@ function onRibbonPick(event) {
 
     <Teleport to="body">
       <AboutModal v-if="aboutOpen" @close="aboutOpen = false" />
+      <SystemInfoModal v-if="systemInfoOpen" @close="systemInfoOpen = false" />
     </Teleport>
 
     <Teleport to="body">
@@ -2095,7 +2099,6 @@ function onRibbonPick(event) {
         :can-cancel="newProjectCanCancel"
         @create="handleCreateProject"
         @cancel="handleCancelNewProject"
-        @open-file="projectFileInput.click()"
       />
     </Teleport>
 
@@ -2312,11 +2315,60 @@ function onRibbonPick(event) {
       </div>
     </Teleport>
 
+    <!-- On-demand ONNX model download (consent + progress). Self-mounts from its
+         store's `request` state whenever a learned backend needs uncached weights. -->
+    <ModelDownloadModal />
+
+    <!-- Floating "report a bug" button → opens a new GitHub issue in a new tab. -->
+    <a
+      class="bug-report-fab"
+      href="https://github.com/fdahle/websfm/issues/new"
+      target="_blank"
+      rel="noopener noreferrer"
+      title="Report a bug or give feedback on GitHub"
+      aria-label="Report a bug on GitHub"
+    >
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor"
+           stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M8 2l1.88 1.88M16 2l-1.88 1.88" />
+        <path d="M9 7.13V6a3 3 0 1 1 6 0v1.13" />
+        <path d="M12 20c-3.31 0-6-2.69-6-6v-3a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v3c0 3.31-2.69 6-6 6z" />
+        <line x1="12" y1="10" x2="12" y2="18" />
+        <path d="M6 13H3M21 13h-3M6 9l-2.5-1M20.5 8L18 9M6 17l-2.5 1M20.5 18L18 17" />
+      </svg>
+    </a>
+
     <DevConsole v-if="consoleOpen" :dispatch="handleCommand" :command-state="commandState" />
   </div>
 </template>
 
 <style scoped>
+/* Floating "report a bug" button, bottom-right. Sits above normal content but
+   below modals/overlays (z 299+) so it never covers a dialog. */
+.bug-report-fab {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 200;
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--panel, #2a2a2a);
+  color: var(--text, #e6e6e6);
+  border: 1px solid var(--panel-border, rgba(255, 255, 255, 0.15));
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+  transition: transform 0.12s ease, background 0.12s ease, color 0.12s ease;
+}
+.bug-report-fab:hover {
+  transform: translateY(-2px);
+  background: var(--accent, #3b82f6);
+  color: #fff;
+}
+
 .project-backdrop {
   position: fixed;
   inset: 0;

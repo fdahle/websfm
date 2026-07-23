@@ -160,7 +160,7 @@ const tabs = [
         commands: [
           { id: 'auto-mask',        label: 'Auto\nMask',      icon: 'mask',   needsImages: true, needsImagesReady: true },
           { id: 'detect-fiducials', label: 'Detect\nFiducials', icon: 'target', needsFilmSensor: true },
-          { id: 'calibrate-fiducials', label: 'Calibrate\nFiducials', icon: 'sensor', needsFilmSensor: true },
+          { id: 'calibrate-fiducials', label: 'Calibrate\nFiducials', icon: 'calibration', needsFilmSensor: true },
         ],
       },
       {
@@ -298,8 +298,9 @@ const tabs = [
         commands: [
           { id: 'open-glossary', label: 'Glossary', icon: 'book' },
           { id: 'open-guide',    label: 'Guide',    icon: 'book' },
-          { id: 'open-settings', label: 'Settings', icon: 'settings' },
-          { id: 'open-about',    label: 'About',    icon: 'info' },
+          { id: 'open-settings',    label: 'Settings',    icon: 'settings' },
+          { id: 'open-system-info', label: 'System info', icon: 'cpu' },
+          { id: 'open-about',       label: 'About',       icon: 'info' },
         ],
       },
     ],
@@ -507,7 +508,10 @@ const currentTab = computed(() => {
 })
 
 function isHidden(cmd) {
-  if (cmd.aerialOnly && props.sceneType === 'object') return true
+  // `aerialOnly` deliberately does NOT hide: an object-capture project greys the
+  // command out with a reason instead, the same discoverability rule the Evaluate
+  // hub follows. Hiding made a whole ribbon group silently vanish, which reads as
+  // a broken build rather than as "not applicable here".
   // Film-only overlays (fiducial marks) show only for a scanned-film image tab.
   if (cmd.filmOnly && !props.imageViewState?.isFilm) return true
   return false
@@ -538,6 +542,7 @@ function isActive(cmd) {
 
 function isDisabled(cmd) {
   if (cmd.disabled) return true
+  if (cmd.aerialOnly && props.sceneType === 'object') return true
   if (cmd.needsSelection && !props.hasSelection) return true
   if (cmd.needsImages   && props.imageCount === 0) return true
   if (cmd.needsImagesReady && props.imagesLoading) return true
@@ -568,6 +573,8 @@ function isDisabled(cmd) {
 
 function disabledReason(cmd) {
   if (cmd.disabled) return 'Coming soon'
+  if (cmd.aerialOnly && props.sceneType === 'object')
+    return 'Only for aerial projects — an object capture has no coordinate system'
   if (cmd.needsImages   && props.imageCount === 0) return 'Import images first'
   if (cmd.needsImagesReady && props.imagesLoading) return 'Images still loading…'
   if (cmd.needsMatches   && props.matchCount === 0)   return 'Run feature matching first'

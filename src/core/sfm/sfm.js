@@ -506,10 +506,10 @@ async function reconstructSingleModel(input, hooks = {}) {
 
     // Two-view initialisation + seed selection lives in initPair.js. It probes
     // every candidate (pose recovery + triangulation + cheirality + init reproj)
-    // and returns the geometrically cleanest seed; the reconstruct-local helpers
+    // and returns a sound seed with strong one-step growth support; the local helpers
     // it needs are injected so it stays pure (no cycle back into this file).
     const initSel = await selectInitPair(
-      { donePairs, Kmap, settings, imageByUuid, numStats, projDepth },
+      { donePairs, Kmap, settings: cfg, imageByUuid, numStats, projDepth },
       {
         onLog: log,
         onProgress: onProgress

@@ -1,13 +1,14 @@
 <script setup>
 import { ref } from 'vue'
 import CrsPicker from '../controls/CrsPicker.vue'
+import Icon from '../Icon.vue'
 import { folderStorageSupported } from '../../core/io/folderProject.js'
 
 defineProps({
   canCancel: { type: Boolean, default: true },
 })
 
-const emit = defineEmits(['create', 'cancel', 'open-file'])
+const emit = defineEmits(['create', 'cancel'])
 
 const name = ref('My Project')
 const sceneType = ref('aerial')
@@ -75,7 +76,7 @@ function submit() {
             :class="{ active: sceneType === 'aerial' }"
             @click="sceneType = 'aerial'"
           >
-            <span class="scene-icon">✈</span>
+            <span class="scene-icon"><Icon name="plane" /></span>
             <span class="scene-name">Aerial survey</span>
             <span class="scene-desc">Drone or aerial imagery with GPS coordinates, geo-referenced output</span>
           </button>
@@ -84,7 +85,7 @@ function submit() {
             :class="{ active: sceneType === 'object' }"
             @click="sceneType = 'object'"
           >
-            <span class="scene-icon">◼</span>
+            <span class="scene-icon"><Icon name="cube" /></span>
             <span class="scene-name">Object capture</span>
             <span class="scene-desc">Objects or scenes without GPS — scale set manually</span>
           </button>
@@ -98,7 +99,7 @@ function submit() {
               :class="{ active: storage === 'browser' }"
               @click="storage = 'browser'"
             >
-              <span class="scene-icon">▤</span>
+              <span class="scene-icon"><Icon name="browser" /></span>
               <span class="scene-name">In this browser</span>
               <span class="scene-desc">Private browser storage. Nothing to manage — save a
                 <code>.websfm</code> file when you want a copy.</span>
@@ -108,7 +109,7 @@ function submit() {
               :class="{ active: storage === 'folder' }"
               @click="pickFolder"
             >
-              <span class="scene-icon">🗀</span>
+              <span class="scene-icon"><Icon name="folder" /></span>
               <span class="scene-name">In a folder…</span>
               <span class="scene-desc">
                 <template v-if="folderHandle">Chosen: <code>{{ folderHandle.name }}</code></template>
@@ -129,9 +130,6 @@ function submit() {
       </div>
 
       <div class="modal-footer">
-        <!-- On first launch this dialog is not cancellable, so it is also the only
-             way in for someone whose project lives in a .websfm file. -->
-        <button class="link-btn" @click="emit('open-file')">Open a project file…</button>
         <span class="footer-spacer" />
         <button v-if="canCancel" class="btn-secondary" @click="emit('cancel')">Cancel</button>
         <button class="btn-primary" :disabled="!name.trim()" @click="submit">Create project</button>
@@ -222,17 +220,23 @@ function submit() {
   border-color: var(--accent);
 }
 
+/* The pair shares one row track set (icon / name / description) and each card
+   is a `subgrid` over it, so the two headings sit on the same baseline even when
+   one description wraps to more lines. Where subgrid is unsupported it degrades
+   to plain auto rows, which the fixed-size icon box already keeps aligned. */
 .scene-cards {
   display: grid;
   grid-template-columns: 1fr 1fr;
+  grid-template-rows: auto auto 1fr;
   gap: 10px;
 }
 
 .scene-card {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 6px;
+  display: grid;
+  grid-row: span 3;
+  grid-template-rows: subgrid;
+  justify-items: start;
+  gap: 8px;
   padding: 14px;
   background: var(--bg);
   border: 2px solid var(--panel-border);
@@ -253,9 +257,18 @@ function submit() {
   background: rgba(14, 99, 156, 0.1);
 }
 
+/* Fixed box, so every card's heading starts at the same y regardless of the
+   glyph inside it (the old text icons each had their own size and baseline). */
 .scene-icon {
-  font-size: 22px;
-  line-height: 1;
+  display: block;
+  width: 22px;
+  height: 22px;
+  color: var(--text-dim);
+}
+
+.scene-card.active .scene-icon,
+.scene-card:hover .scene-icon {
+  color: var(--accent);
 }
 
 .scene-name {
@@ -295,18 +308,6 @@ function submit() {
 }
 
 .footer-spacer { flex: 1; }
-
-.link-btn {
-  background: none;
-  border: none;
-  color: var(--accent);
-  font: inherit;
-  font-size: 12px;
-  padding: 4px 2px;
-  cursor: pointer;
-}
-
-.link-btn:hover { text-decoration: underline; }
 
 .btn-secondary {
   background: none;

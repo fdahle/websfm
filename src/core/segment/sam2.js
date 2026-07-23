@@ -27,6 +27,8 @@
 // only the ORT glue needs a browser.
 
 import { createSession, tensor, resolveBackend } from '../features/ort.js'
+import { modelUrl } from '../models/registry.js'
+import { loadModelBytes } from '../models/modelCache.js'
 
 export const SAM2_INPUT_SIZE = 1024
 // ImageNet normalization — SAM2's SAM2Transforms resizes the image straight to
@@ -131,14 +133,10 @@ export function logitsToBinaryMask(logits, mw, mh, w, h, threshold = 0) {
 
 // ── ORT glue (browser-only; validate the export before trusting names) ─────────
 
-function defaultEncoderUrl() {
-  const base = (import.meta.env && import.meta.env.BASE_URL) || '/'
-  return `${base}models/sam2_encoder.onnx`
-}
-function defaultDecoderUrl() {
-  const base = (import.meta.env && import.meta.env.BASE_URL) || '/'
-  return `${base}models/sam2_decoder.onnx`
-}
+// Downloaded-on-demand; served from Cache Storage once fetched with consent
+// (see core/models/). loadModelBytes resolves each URL to bytes.
+function defaultEncoderUrl() { return modelUrl('sam2_encoder') }
+function defaultDecoderUrl() { return modelUrl('sam2_decoder') }
 
 // One cached session per `${role}:${backend}` (role = encoder | decoder). Like
 // LightGlue, a role can hold both a WebGPU and a WASM session if we fall back.
@@ -155,16 +153,8 @@ export function serialized(fn) {
   return p
 }
 
-async function loadModelBytes(model, onLog, label) {
-  if (typeof model !== 'string') return model
-  const t = performance.now()
-  const resp = await fetch(model)
-  if (!resp.ok) throw new Error(`SAM2 ${label} fetch failed: HTTP ${resp.status} for ${model}`)
-  const buf = await resp.arrayBuffer()
-  onLog?.(`SAM2: ${label} downloaded (${(buf.byteLength / 1e6).toFixed(1)} MB) in `
-    + `${Math.round(performance.now() - t)} ms`)
-  return buf
-}
+// loadModelBytes (imported from core/models/modelCache.js): cache-first, else a
+// plain fetch. Non-string (already bytes) passes through untouched.
 
 function getSession(role, model, backend, onLog, sessionOpts = {}) {
   // Cache key includes the optimization level so a de-risk retry with a different
@@ -174,7 +164,7 @@ function getSession(role, model, backend, onLog, sessionOpts = {}) {
     sessions.set(key, (async () => {
       onLog?.(`SAM2: first use — ${role} on backend ${backend}`
         + `${sessionOpts.graphOptimizationLevel ? ` (opt=${sessionOpts.graphOptimizationLevel})` : ''}; fetching model…`)
-      const bytes = await loadModelBytes(model, onLog, role)
+      const bytes = await loadModelBytes(model, onLog, `SAM2 ${role}`)
       const session = await createSession(bytes, sessionOpts, onLog, backend)
       onLog?.(`SAM2: ${role} ready (backend ${backend}; inputs [${session.inputNames}] → outputs [${session.outputNames}])`)
       return session

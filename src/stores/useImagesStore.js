@@ -16,6 +16,7 @@ import { useLog } from '../composables/useLog.js'
 import * as opfs from '../utils/opfs.js'
 import { useProjectsStore } from './useProjectsStore.js'
 import { useMatchesStore } from './useMatchesStore.js'
+import { useModelsStore } from './useModelsStore.js'
 
 // The image set: source images, their metadata, keypoints, masks, depth maps, and
 // sensor assignments. Project-scoped and persisted, but its restore/clear have
@@ -790,6 +791,11 @@ export const useImagesStore = defineStore('images', () => {
   async function detectOne(id, settings = {}, onDetected, shouldCancel) {
     const img = images.value.find((i) => i.id === id)
     if (!img || img.kpStatus === 'running') return
+    // SuperPoint runs a learned model — fetch its weights (with consent) first.
+    if (settings.detector === 'superpoint' && !(await useModelsStore().ensureReady(['superpoint']))) {
+      log('Detection cancelled — SuperPoint model was not downloaded.', 'warn', 'SuperPoint')
+      return
+    }
     // Re-detecting renumbers keypoints, so any existing matches for this image
     // become stale — invalidate them once detection succeeds (below).
     const hadKeypoints = img.kpStatus === 'done'
@@ -891,6 +897,12 @@ export const useImagesStore = defineStore('images', () => {
     // Echo the settings actually in effect so the console records what was run.
     const { detector = 'sift', maxDim = 1200, contrastThreshold = 0.01, maxKeypoints = 5000 } = settings
     const batchTag = detector === 'superpoint' ? 'SuperPoint' : 'SIFT'
+    // SuperPoint runs a learned model — fetch its weights (with consent) once for
+    // the whole batch before dispatching any image.
+    if (detector === 'superpoint' && !(await useModelsStore().ensureReady(['superpoint']))) {
+      log('Detection cancelled — SuperPoint model was not downloaded.', 'warn', batchTag)
+      return
+    }
     log(`${batchTag} batch: ${total} image(s) queued — ≤${maxDim}px`
       + `${detector === 'superpoint' ? '' : `, contrast ${contrastThreshold}`}, ≤${maxKeypoints} kp`,
       'info', batchTag)

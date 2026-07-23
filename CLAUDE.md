@@ -54,7 +54,8 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
   same code run inside the worker. Grouped by pipeline stage into subfolders:
   `core/features/` (detectors `sift.js` / `superpoint.js`, matchers `bruteforce.js` /
   `lightglue.js`, shared geometric gate `verify.js` — F-RANSAC + inlierSpread — plus
-  `ort.js`, `preselect.js`, and `tiling.js` — pure tile-grid/seam-NMS/auto-size math
+  `ort.js`, `preselect.js`, `sequentialPairs.js` (capture-order window + optional orbit
+  closure), and `tiling.js` — pure tile-grid/seam-NMS/auto-size math
   behind tiled detection; the per-tile detector loop lives in `workers/ops/detect.js`),
   `core/sfm/`
   (`sfm.js` incremental SfM orchestrator + primary/secondary driver,
@@ -132,7 +133,22 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
   points→1024-space / logits→binary-mask math + ORT encoder/decoder glue, same
   lazy/cached/serialized-session pattern as LightGlue; encoder runs on WebGPU,
   decoder is WASM-pinned — ORT's WebGPU EP crashes on the per-click varying
-  point-count shape); `core/eval/` (pure read-only stats for the **Quality Report** hub
+  point-count shape); `core/models/` (`registry.js` — the ONNX-weight registry:
+  id→{file,size} + `modelUrl(id)` URL resolution from `VITE_MODEL_BASE_URL`
+  (default `<BASE_URL>models/`) + the Cache Storage bucket name; `modelCache.js`
+  — cache-first `loadModelBytes(url)`/`isModelCached`. The weights are NOT in the
+  repo (the SAM2 encoder alone is >GitHub's 100 MB limit) — they're **downloaded
+  on demand with consent**: `stores/useModelsStore.js` `ensureReady([ids])` (main
+  thread) opens `ModelDownloadModal.vue` for any uncached id, streams it into
+  Cache Storage with progress, and the worker's core backends then read the
+  cached bytes — SuperPoint/LightGlue/SAM2 resolve their URL via `registry.js`
+  and load through `modelCache.js`, no re-download/re-consent. Both sides MUST
+  resolve a model to the **identical** URL string or the worker's cache lookup
+  misses. The dispatch gates live in `useImagesStore` detect (SuperPoint),
+  `useMatchesStore.matchAll` (LightGlue), and `ViewerImage.ensureEncoded` (SAM2);
+  a declined download returns `false` and the op aborts cleanly. Dev keeps the
+  files at `public/models/` (gitignored) so `loadModelBytes`' plain-fetch
+  fallback needs no consent flow); `core/eval/` (pure read-only stats for the **Quality Report** hub
   — `reconStats.js` track-length histogram + reprojection stats, `imageStats.js`
   per-image residuals + `unregisteredReason` + `imageResidualVectors` (the image-view
   residual overlay — computed in the BA pinhole frame, so it takes an optional
@@ -414,7 +430,11 @@ self-contained, file-based project format.
    second-chance sweep in `sfm.js`: re-fit F on folded keypoints, recompute rotations for
    candidates AND survivors with the refined Kmap, re-admit the consistent ones, then one
    more `registerImages` sweep). Then
-   pick init pair (inliers + parallax + lowest init reprojection) and grow the model
+   pick init pair (`core/sfm/initPair.js`: score = cheirality-surviving points ×
+   graph connectivity ÷ a gentle init-reprojection penalty, with **parallax as a
+   gate, not a ranking** — flat between a soft band above `minInitAngleDeg` and a
+   grazing knee; a ranked parallax term near the floor swings scores 4.7× on
+   sub-degree differences and picked B4's 19-camera seed over its 122) and grow the model
    by **incremental registration** (`core/sfm/register.js`, `registerImages(ctx)`):
    each pass orders the unregistered images by a next-best-view score
    (correspondences to well-triangulated, spatially-spread points) and registers by
@@ -906,6 +926,18 @@ convergence".
   NDJSON** file (`log.ndjson`, owned by `useLogStore`) — that file is the full
   record (scroll-back prepends older chunks from it; Save TXT exports all of it),
   so the buffer cap is a view limit, never data loss.
+- **Attribution/licenses have one home: `src/core/help/licenses.js`.** When you add
+  any dependency whose license requires its notice to travel with the shipped app —
+  a bundled npm package, a crate compiled into a WASM module (including vendored code
+  under `crates/*/vendor/`), or a downloadable model weight — add an entry to
+  `THIRD_PARTY` there (real SPDX id + upstream URL; paste the full text into `notice`
+  for attribution-heavy/copyleft licenses). A model weight ALSO carries its own
+  `license` in `core/models/registry.js` `MODELS` (shown at the download prompt). The
+  About modal renders `licenses.js`; there is no build-time scanner, so a stale file
+  = an incomplete legal notice. Courtesy credit for *ideas*/prior art (no legal duty)
+  goes in the same file's `ACKNOWLEDGMENTS`. Our own code stays MIT — that is separate
+  from and unaffected by bundled third-party licenses; never relabel a third party's
+  license as ours.
 
 ## Verification
 Per change: `npm test` + `npm run typecheck`. WASM changes: rebuild + rerun.
