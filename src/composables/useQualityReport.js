@@ -19,6 +19,7 @@ import { projectHealth } from '../core/eval/health.js'
 import { estimatedIntrinsics } from '../core/sfm/cameraEstimated.js'
 import { resolveK } from '../core/sfm/reconstruction.js'
 import { buildReportHtml } from '../core/products/report.js'
+import { buildProjectDigest, digestToMarkdown, digestToJson } from '../core/eval/summaryDigest.js'
 
 export function useQualityReport() {
   const recon = useReconstructionStore()
@@ -177,10 +178,46 @@ export function useQualityReport() {
     })
   }
 
+  // The compact copy-pasteable digest (PLAN-debug-summary): the same classified health
+  // rows as the hub, plus top offenders + run figures, in ONE structured object the two
+  // renderers turn into markdown or JSON. Async for the GCP report (via computeHealth).
+  async function computeDigest(projectName) {
+    const { snapshot, rows } = await computeHealth()
+
+    // Top offenders — worst images by reprojection RMS + unregistered-with-reason.
+    const residuals = perImageResiduals(cameras.value, points.value)
+      .filter((r) => r.rmsPx != null)
+      .sort((a, b) => b.rmsPx - a.rmsPx)
+      .slice(0, 10)
+      .map((r) => ({ name: nameByUuid.value.get(r.uuid) ?? r.uuid, nObs: r.nObs, rmsPx: r.rmsPx }))
+
+    const g = graph.value
+    const unregistered = imagesStore.images
+      .filter((im) => !cameras.value.has(im.uuid))
+      .map((im) => ({
+        name: im.name,
+        reason: unregisteredReason({
+          kpCount: im.kpCount ?? null,
+          degree: g?.degrees?.get(im.uuid) ?? 0,
+          componentIndex: g?.componentIndex?.get(im.uuid) ?? null,
+        }) ?? 'unregistered',
+      }))
+      .slice(0, 20)
+
+    const digest = buildProjectDigest({
+      projectName, date: new Date().toISOString(), crsUnit: crsUnit.value,
+      rows, snapshot,
+      offenders: { residuals, unregistered },
+      summary: recon.summary ?? null,
+      denseSummary: recon.denseSummary ?? null,
+    })
+    return { digest, markdown: digestToMarkdown(digest), json: digestToJson(digest) }
+  }
+
   return {
     cameras, points, imageIds, nameByUuid, crsUnit,
     reproj, histogram, graph, selfCal, sensorRows, focalDeltas, depth,
     perImageResiduals, unregisteredReason,
-    computeHealth, buildExportReport,
+    computeHealth, buildExportReport, computeDigest,
   }
 }

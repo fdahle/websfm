@@ -150,7 +150,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     const cloud = clouds.value.find((c) => c.id === id && c.kind === 'sparse')
     if (!cloud || mainSparseId.value === id) return
     mainSparseId.value = id
-    log(`Main sparse cloud → "${cloud.name}"`, 'info', 'Reconstruction')
+    log(`Main sparse cloud → "${cloud.name}"`, 'info', 'Reconstruction', { channel: 'activity' })
     persist()
   }
 
@@ -159,10 +159,12 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
   }
 
   function removeCloud(id) {
+    const removed = clouds.value.find((c) => c.id === id)
     clouds.value = clouds.value.filter((c) => c.id !== id)
     if (selectedCloudId.value === id)
       selectedCloudId.value = clouds.value[0]?.id ?? null
     ensureMainSparse()
+    if (removed) log(`Removed cloud "${removed.name}"`, 'info', 'Reconstruction', { channel: 'activity' })
     persist()
   }
 
@@ -173,7 +175,9 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     const cloud = clouds.value.find((c) => c.id === id)
     const trimmed = name.trim()
     if (!cloud || !trimmed || trimmed === cloud.name) return
+    const prev = cloud.name
     cloud.name = trimmed
+    log(`Renamed cloud "${prev}" → "${trimmed}"`, 'info', 'Reconstruction', { channel: 'activity' })
     persist()
   }
 

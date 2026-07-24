@@ -4,6 +4,7 @@ import ModalShell from './ui/ModalShell.vue'
 import SettingsField from './ui/SettingsField.vue'
 import WarnBox from './ui/WarnBox.vue'
 import { focalPx } from '../../core/footprint.js'
+import { isGeographic } from '../../core/crs.js'
 import { useFootprintsStore } from '../../stores/useFootprintsStore.js'
 import { FOOTPRINT_DEFAULTS } from '../../core/defaults.user.js'
 
@@ -11,7 +12,12 @@ const props = defineProps({
   poses:   { type: Array, default: () => [] },
   sensors: { type: Array, default: () => [] },
   images:  { type: Array, default: () => [] },
+  projectCrs: { type: String, default: null },
 })
+
+// A geographic (lat/lon) project CRS is fine — the store ray-casts in a local
+// metric frame and maps the result back. Just note it so the units aren't a surprise.
+const geographicCrs = computed(() => isGeographic(props.projectCrs))
 const emit = defineEmits(['close', 'run'])
 
 const { resolveIntrinsics } = useFootprintsStore()
@@ -23,7 +29,9 @@ const settings = ref({ ...FOOTPRINT_DEFAULTS })
 // imported without their images). Prefilled from the first known sensor.
 const seed = props.sensors[0] || null
 const ov = ref({
-  enabled: !props.sensors.some((s) => focalPx(s) != null),   // on when nothing is usable as-is
+  // On only when no pose resolves as-is (same resolver the breakdown uses, so the
+  // manual fallback doesn't default-on for EXIF-derivable focals).
+  enabled: !props.poses.some((p) => resolveIntrinsics(p, null) != null),
   focal: seed?.focal ?? null,
   unit: seed?.focalUnit === 'px' ? 'px' : 'mm',
   pixelSize: seed?.pixelSize ?? null,
@@ -131,8 +139,12 @@ function run() {
     </SettingsField>
 
     <label class="checkbox-row"><input type="checkbox" v-model="settings.assumeNadir" class="checkbox" /> Assume nadir for images without orientation angles</label>
-    <label class="checkbox-row"><input type="checkbox" v-model="settings.overwrite" class="checkbox" /> Replace previously computed footprints</label>
+    <p class="intro">Runs into one “footprints” layer under Shapefiles, replacing any previous computed one.</p>
 
+    <p v-if="geographicCrs" class="intro">
+      Working CRS {{ projectCrs }} is geographic — footprints are computed in a local
+      metric frame and stored back in lat/lon.
+    </p>
     <div v-if="breakdown.ok > 0" class="summary">
       {{ breakdown.ok }} of {{ total }} pose{{ total === 1 ? '' : 's' }} will produce a footprint
       <ul v-if="reasonLines.length" class="reasons">

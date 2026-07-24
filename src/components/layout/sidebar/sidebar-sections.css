@@ -51,6 +51,32 @@
   border-radius: 8px;
 }
 
+/* Async metadata-extraction progress, shown under the Images header while a
+   freshly-added batch is still reading EXIF/dimensions. */
+.meta-progress {
+  padding: 4px 14px 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.meta-progress-track {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--hover-bg);
+  overflow: hidden;
+}
+.meta-progress-fill {
+  height: 100%;
+  background: #6aa9d9;
+  border-radius: 2px;
+  transition: width 0.2s ease;
+}
+.meta-progress-label {
+  font-size: 11px;
+  color: var(--text-dim);
+  font-style: italic;
+}
+
 .placeholder {
   padding: 8px 14px;
   font-size: 12px;

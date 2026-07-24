@@ -1,5 +1,5 @@
 import { beforeAll, describe, it, expect } from 'vitest'
-import { ensureProjection, transform, isGeographic, axisLabels } from './crs.js'
+import { ensureProjection, transform, isGeographic, axisLabels, localMetricFrame } from './crs.js'
 
 // Catalog CRS resolve from their built-in proj4 def — no network or OPFS needed.
 // EPSG:3031 is the Antarctic Polar Stereographic case the project relies on.
@@ -28,6 +28,30 @@ describe('transform', () => {
     const back = transform(utm, 'EPSG:32632', 'EPSG:4326')
     expect(back[0]).toBeCloseTo(lonlat[0], 6)
     expect(back[1]).toBeCloseTo(lonlat[1], 6)
+  })
+})
+
+describe('localMetricFrame (used for footprints in a geographic CRS)', () => {
+  // Central Iran — the geographic test-dataset case.
+  const lon0 = 53.5, lat0 = 32.5
+
+  it('is metric: 1 unit ≈ 1 metre near the centre', () => {
+    const code = localMetricFrame(lon0, lat0)
+    // The centre maps to the origin, and a point one arc-second north is ~30.9 m.
+    const centre = transform([lon0, lat0], 'EPSG:4326', code)
+    expect(centre[0]).toBeCloseTo(0, 3)
+    expect(centre[1]).toBeCloseTo(0, 3)
+    const north = transform([lon0, lat0 + 1 / 3600], 'EPSG:4326', code)
+    expect(north[1]).toBeGreaterThan(29)
+    expect(north[1]).toBeLessThan(32)
+  })
+
+  it('round-trips lon/lat → local metres → lon/lat', () => {
+    const code = localMetricFrame(lon0, lat0)
+    const pt = [lon0 + 0.02, lat0 - 0.01]
+    const back = transform(transform(pt, 'EPSG:4326', code), code, 'EPSG:4326')
+    expect(back[0]).toBeCloseTo(pt[0], 7)
+    expect(back[1]).toBeCloseTo(pt[1], 7)
   })
 })
 

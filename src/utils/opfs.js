@@ -731,8 +731,11 @@ export async function deleteGcps(projectId) {
   } catch {}
 }
 
-// ── Footprints ──────────────────────────────────────────────────────────────────
-// JSON: { crs, footprints: [{ id, name, imageId, imageName, rings, enabled }] }
+// ── Shapefiles (footprint / polygon vector layers) ────────────────────────────────
+// JSON: { crs, sets: [{ id, name, source, onMap,
+//         footprints: [{ id, imageId, imageName, rings }] }] }
+// Older projects carry a flat { footprints: [...] } array — the store wraps those
+// into one set on restore (see useFootprintsStore.normalizeStored).
 
 export async function saveFootprints(projectId, data) {
   const dir = await getProjectDir(projectId, true)

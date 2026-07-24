@@ -223,3 +223,17 @@ export async function transformAsync(coord, from, to) {
   await ensureProjection(to)
   return transform(coord, from, to)
 }
+
+// Register a local azimuthal-equidistant *metric* frame centred on (lon, lat)
+// (WGS84 degrees) and return its synthetic proj4 code. Used to do metric geometry
+// (e.g. footprint ray-casting, which needs 1 unit = 1 metre) when the working CRS
+// is geographic: transform into this frame, compute in metres, transform back.
+// aeqd is valid everywhere — including the poles, where UTM is undefined. Only
+// registered with proj4 (not OpenLayers), since it exists purely for `transform`.
+export function localMetricFrame(lon, lat) {
+  const code = `LOCAL:aeqd:${lon.toFixed(5)}:${lat.toFixed(5)}`
+  if (!proj4.defs(code)) {
+    proj4.defs(code, `+proj=aeqd +lat_0=${lat} +lon_0=${lon} +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs`)
+  }
+  return code
+}

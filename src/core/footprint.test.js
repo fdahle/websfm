@@ -91,6 +91,26 @@ describe('projectFootprint (degenerate cases)', () => {
     expect(projectFootprint(tilted, sensor, 0).error).toBe('diverges')
   })
 
+  it('rejects a near-180° FOV (tiny focal) nadir camera instead of spanning the earth', () => {
+    // A garbage focal (~2 px for a 1000 px-wide frame) gives a near-180° field of
+    // view: the corner rays graze the ground and, unclamped, land tens of
+    // thousands of km away. The grazing guard rejects it rather than drawing a
+    // footprint that wraps the globe. (Regression: earth-spanning footprints.)
+    const wideFov = { ...sensor, focal: 2 }
+    const nadir = { x: 0, y: 0, z: 1000, omega: 0, phi: 0, kappa: 0 }
+    expect(projectFootprint(nadir, wideFov, 0).error).toBe('diverges')
+  })
+
+  it('keeps a normal near-nadir footprint bounded to a sane extent', () => {
+    // Sanity companion to the guard: a real nadir camera at 1000 m produces a
+    // footprint a few hundred metres across, never continent-scale.
+    const nadir = { x: 0, y: 0, z: 1000, omega: 0, phi: 0, kappa: 0 }
+    const fp = projectFootprint(nadir, sensor, 0)
+    expect(fp.error).toBeUndefined()
+    const xs = fp.rings[0].map((p) => p[0])
+    expect(Math.max(...xs) - Math.min(...xs)).toBeLessThan(2000)
+  })
+
   it('shifts the footprint off-nadir under a modest tilt', () => {
     // A 20° omega tilt swings the view off nadir along Y; the centroid leaves the
     // origin (sign follows the omega/phi/kappa convention — here −Y).

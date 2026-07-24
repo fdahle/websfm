@@ -43,7 +43,7 @@ const canImport = computed(() => built.value.length > 0)
 
 function doImport() {
   if (!canImport.value) return
-  emit('import', { footprints: built.value, sourceCrs: sourceCrs.value })
+  emit('import', { footprints: built.value, sourceCrs: sourceCrs.value, name: props.fileName })
 }
 </script>
 

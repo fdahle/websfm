@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest'
-import { parseMeshBuffer, transferVertexColors, generateMesh } from './mesh.js'
+import {
+  parseMeshBuffer,
+  transferVertexColors,
+  generateMesh,
+  meshInputCell,
+  subsampleForMesh,
+  recommendMeshDepth,
+} from './mesh.js'
 
 // Encode a mesh into the wasm wire format (mirror of crates/mesh encode_mesh) so the
 // parser can be round-tripped without the actual wasm.
@@ -105,5 +112,71 @@ describe('generateMesh', () => {
     expect(m.nVerts).toBe(0)
     expect(m.count).toBe(0)
     expect(m.col).toBeNull()
+  })
+
+  it('subsamples the Poisson input when the cloud is denser than a leaf cell', () => {
+    // 4 near-coincident points inside one tiny region + normals; a coarse input cell
+    // collapses them, so the solver sees fewer points than the full cloud.
+    const pos = Float32Array.from([0, 0, 0, 0.01, 0, 0, 0, 0.01, 0, 0.01, 0.01, 0, 10, 0, 0])
+    const nrm = Float32Array.from([0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1])
+    const d = { count: 5, pos, nrm, col: null }
+    let sawPoints = -1
+    // depth 1 over extent 10 ⇒ leaf 5, input cell 5 (> mergeCell 0.001) ⇒ the four
+    // clustered points collapse to one, plus the far point ⇒ 2 input points.
+    const poissonFn = (p) => { sawPoints = p.length / 3; return new Uint8Array(8) }
+    generateMesh(d, poissonFn, { depth: 1, mergeCell: 0.001, colorize: false }, () => {})
+    expect(sawPoints).toBe(2)
+  })
+})
+
+describe('meshInputCell', () => {
+  it('ties the input cell to the octree leaf width (extent / 2^depth)', () => {
+    const pos = Float32Array.from([0, 0, 0, 8, 0, 0]) // extent 8
+    expect(meshInputCell(pos, 3, 1)).toBeCloseTo(1) // 8 / 2^3
+    expect(meshInputCell(pos, 3, 2)).toBeCloseTo(2) // ×2 leaf cells per point
+  })
+
+  it('returns 0 for a degenerate cloud or non-positive depth', () => {
+    expect(meshInputCell(new Float32Array(0), 8)).toBe(0)
+    expect(meshInputCell(Float32Array.from([1, 1, 1, 1, 1, 1]), 8)).toBe(0) // no extent
+    expect(meshInputCell(Float32Array.from([0, 0, 0, 1, 0, 0]), 0)).toBe(0)
+  })
+})
+
+describe('subsampleForMesh', () => {
+  it('averages points + renormalises normals within a cell', () => {
+    // Two points in one cell (cell=1), one in another; opposing-ish normals average.
+    const pos = Float32Array.from([0.2, 0, 0, 0.8, 0, 0, 5, 0, 0])
+    const nrm = Float32Array.from([0, 0, 1, 0, 1, 0, 1, 0, 0])
+    const { pos: outPos, nrm: outNrm } = subsampleForMesh(pos, nrm, 1)
+    expect(outPos.length / 3).toBe(2)
+    // The merged cell's position is the mean of its two points.
+    const merged = [outPos[0], outPos[1], outPos[2]]
+    const other = [outPos[3], outPos[4], outPos[5]]
+    // Order isn't guaranteed; find the merged (x≈0.5) one.
+    const m = Math.abs(merged[0] - 0.5) < 1e-4 ? merged : other
+    expect(m[0]).toBeCloseTo(0.5)
+    // Every emitted normal is unit length.
+    for (let i = 0; i < outNrm.length / 3; i++) {
+      const mag = Math.hypot(outNrm[i * 3], outNrm[i * 3 + 1], outNrm[i * 3 + 2])
+      expect(mag).toBeCloseTo(1)
+    }
+  })
+
+  it('passes the input through unchanged when cell <= 0', () => {
+    const pos = Float32Array.from([0, 0, 0])
+    const nrm = Float32Array.from([0, 0, 1])
+    const r = subsampleForMesh(pos, nrm, 0)
+    expect(r.pos).toBe(pos)
+    expect(r.nrm).toBe(nrm)
+  })
+})
+
+describe('recommendMeshDepth', () => {
+  it('grows ~½·log2(N) and clamps to [6, 12]', () => {
+    expect(recommendMeshDepth(0)).toBe(8)      // fallback
+    expect(recommendMeshDepth(100)).toBe(6)    // clamp low
+    expect(recommendMeshDepth(1_000_000)).toBe(10) // round(0.5·~19.9)
+    expect(recommendMeshDepth(1e12)).toBe(12)  // clamp high
   })
 })

@@ -172,7 +172,7 @@ export const useSensorsStore = defineStore('sensors', () => {
       if (value === 'film' && !s.fiducials) {
         s.fiducials = { marks: [], ppxMm: 0, ppyMm: 0, focalMm: s.focalUnit === 'mm' ? (s.focal ?? 0) : 0 }
       }
-      log(`Sensor ${s.label}: kind set to ${value}`, 'info', 'Sensor')
+      log(`Sensor ${s.label} set to ${value}`, 'info', 'Sensor', { channel: 'activity' })
       save()
       if (isPersisting()) imagesStore.sync()
       return

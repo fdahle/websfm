@@ -69,6 +69,8 @@ export const useModalsStore = defineStore('modals', () => {
   // on a given section; the old per-view flags collapsed into these two.
   const qualityOpen         = ref(false)
   const qualitySection      = ref('overview')
+  // Debug ▸ Project Summary — compact copy-pasteable reconstruction-health digest.
+  const debugSummaryOpen    = ref(false)
 
   return {
     settingsOpen,
@@ -121,5 +123,6 @@ export const useModalsStore = defineStore('modals', () => {
     fiducialCalibrateSensorId,
     qualityOpen,
     qualitySection,
+    debugSummaryOpen,
   }
 })

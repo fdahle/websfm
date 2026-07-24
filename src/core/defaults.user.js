@@ -70,7 +70,9 @@ export const MATCH_DEFAULTS = {
   // a guard against the ~0.06 spurious fits while re-admitting the tail.
   minInlierRatio: 0.15,
   maxIters: 1000,              // F-RANSAC iterations
-  maxNeighbors: 10,            // preselect: k-nearest cameras to consider per image
+  preselectMethod: 'position', // preselect: 'position' (nearest cameras) | 'footprint' (ground overlap)
+  maxNeighbors: 10,            // preselect (position): k-nearest cameras to consider per image
+  minOverlap: 30,              // preselect (footprint): min ground-overlap % (of the smaller footprint) to keep a pair
   sequentialOverlap: 10,       // sequential: match each image to the next N capture-order images
   sequentialLoopClosure: false, // circular sequence: also connect its end back to its start
   lgMaxKeypoints: 2048,        // per-image cap fed to LightGlue (plain path)
@@ -289,7 +291,6 @@ export const FOOTPRINT_DEFAULTS = {
   groundElev: 0,      // fixed ground elevation (when not useAgl)
   agl: 1000,          // above-ground-level height (when useAgl)
   assumeNadir: true,  // treat cameras as looking straight down when angles are missing
-  overwrite: true,    // replace existing footprints
 }
 
 // Automatic fiducial measurement on film scans (core/sfm/fiducialDetect.js,

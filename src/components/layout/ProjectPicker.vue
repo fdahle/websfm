@@ -37,7 +37,10 @@ function openMenu(e, project) {
   }
 }
 function closeMenu() { menu.value = null }
-function runMenu(fn) { closeMenu(); fn() }
+// Run the action BEFORE clearing the menu: every callback reads `menu` lazily
+// (menu.id / menu.project), so closing first would null it out and the action
+// would throw on `null.project` — leaving every item dead.
+function runMenu(fn) { fn(); closeMenu() }
 
 const renamingId = ref(null)
 const renameValue = ref('')

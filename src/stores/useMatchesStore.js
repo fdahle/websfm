@@ -3,7 +3,7 @@ import { defineStore } from 'pinia'
 import * as opfs from '../utils/opfs.js'
 import { matchDescriptors, matchLightGlue, verifyMatches, POOL_SIZE } from '../workers/computeClient.js'
 import { useLog } from '../composables/useLog.js'
-import { preselectPairs } from '../core/features/preselect.js'
+import { preselectPairs, preselectByFootprintOverlap } from '../core/features/preselect.js'
 import { sequentialPairs } from '../core/features/sequentialPairs.js'
 import { inlierSpread } from '../core/features/verify.js'
 import { evaluatePairAcceptance } from '../core/features/pairGate.js'
@@ -13,6 +13,7 @@ import { MATCH_TUNING } from '../core/tuning.js'
 import { registerProjectStore } from './projectStores.js'
 import { useProjectsStore } from './useProjectsStore.js'
 import { usePosesStore } from './usePosesStore.js'
+import { useFootprintsStore } from './useFootprintsStore.js'
 import { useModelsStore } from './useModelsStore.js'
 
 // Original image dimensions (px) in the same space as keypoint x,y — needed by
@@ -115,7 +116,13 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
       // the win when there are no poses for proximity preselection. Only kicks in
       // when both images have meaningfully more keypoints than the subset, so
       // small images just pay the full match. See core/features/subsetGate.js.
+      //
+      // Skipped entirely when preselection actually pruned the set (`_preselected`):
+      // pose/footprint-overlap preselection IS the overlap prefilter, so re-judging
+      // its pose-selected pairs with a cruder subset test only adds false negatives
+      // (it vetoed 52% of preselected pairs on a low-keypoint aerial block).
       const gateEnabled = settings.subsetGate !== false && settings.matcher !== 'lightglue'
+        && !settings._preselected
       if (gateEnabled) {
         const gateSize = settings.subsetGateSize
         const dim = srcA.descDim ?? 128
@@ -300,12 +307,40 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
     onDone?.(pairId(imgA.uuid, imgB.uuid), entry)
   }
 
-  // Camera positions (project CRS) from imported poses, keyed by image uuid — the
-  // signal proximity preselection uses. Only resolved poses (imageId set) count.
-  function positionsByUuid() {
-    const m = new Map()
+  // Camera positions (project CRS) from imported poses, keyed by image **uuid** —
+  // the key every preselect step downstream uses (pairId is uuid-based). Poses link
+  // to images by image.id (the name/size composite), so bridge id→uuid via the image
+  // list; only resolved poses (imageId set, x/y present) count.
+  function positionsByUuid(images) {
+    const posById = new Map()
     for (const p of posesStore.poses) {
-      if (p.imageId && p.x != null && p.y != null) m.set(p.imageId, [p.x, p.y, p.z ?? 0])
+      if (p.imageId && p.x != null && p.y != null) posById.set(p.imageId, [p.x, p.y, p.z ?? 0])
+    }
+    const m = new Map()
+    for (const img of images) {
+      const pos = posById.get(img.id)
+      if (pos) m.set(img.uuid, pos)
+    }
+    return m
+  }
+
+  // Best footprint outer-ring per image, keyed by image **uuid** (same id→uuid
+  // bridge as positionsByUuid). Prefers a computed set (one polygon per image, in
+  // the project frame) over an imported one; first match wins otherwise.
+  function footprintRingsByUuid(images) {
+    const ringById = new Map() // image.id -> { ring, source }
+    for (const set of useFootprintsStore().sets) {
+      for (const fp of set.footprints) {
+        if (!fp.imageId || !fp.rings?.length) continue
+        const existing = ringById.get(fp.imageId)
+        if (!existing || (existing.source !== 'computed' && set.source === 'computed'))
+          ringById.set(fp.imageId, { ring: fp.rings[0], source: set.source })
+      }
+    }
+    const m = new Map()
+    for (const img of images) {
+      const e = ringById.get(img.id)
+      if (e) m.set(img.uuid, e.ring)
     }
     return m
   }
@@ -352,24 +387,48 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
           pairs.push([ready[i], ready[j]])
     }
 
-    // Proximity preselection: prune the exhaustive set to each image's nearest
-    // neighbours by camera position, so ordered strips cost ~O(N·k) not O(N²). A
-    // pair with an unpositioned endpoint can't be judged, so it's kept.
+    // Preselection: prune the exhaustive set to pairs that plausibly overlap, so an
+    // ordered block costs far less than O(N²). Two evidence sources — camera
+    // proximity (imported poses) or ground overlap (image footprints). A pair with
+    // an endpoint the chosen method can't judge is kept (never silently dropped).
+    // Whether preselection actually pruned pairs (a requested preselect can fall
+    // back to exhaustive when too few images carry footprints/positions — in that
+    // case the subset gate must still run, as no overlap prefilter happened).
+    let preselectionApplied = false
     if (strategy === 'preselect') {
-      const pos = positionsByUuid()
-      const positioned = ready.filter(im => pos.has(im.uuid))
-      if (positioned.length < 2) {
-        log('Preselection: fewer than 2 images have camera positions — matching exhaustively instead', 'warn', 'Matching')
+      const method = settings.preselectMethod ?? 'position'
+      if (method === 'footprint') {
+        const rings = footprintRingsByUuid(ready)
+        if (rings.size < 2) {
+          log('Preselection: fewer than 2 images have footprints — matching exhaustively instead', 'warn', 'Matching')
+        } else {
+          const keep = preselectByFootprintOverlap(
+            [...rings].map(([uuid, ring]) => ({ uuid, ring })),
+            { minOverlap: (settings.minOverlap ?? 30) / 100 },
+          )
+          const before = pairs.length
+          pairs = pairs.filter(([a, b]) =>
+            (rings.has(a.uuid) && rings.has(b.uuid)) ? keep.has(pairId(a.uuid, b.uuid)) : true)
+          preselectionApplied = true
+          log(`Preselection: ${pairs.length}/${before} pair(s) kept, ${before - pairs.length} skipped `
+            + `(footprint overlap ≥ ${settings.minOverlap ?? 30}%)`, 'info', 'Matching')
+        }
       } else {
-        const keep = preselectPairs(
-          positioned.map(im => ({ uuid: im.uuid, pos: pos.get(im.uuid) })),
-          { maxNeighbors: settings.maxNeighbors },
-        )
-        const before = pairs.length
-        pairs = pairs.filter(([a, b]) =>
-          (pos.has(a.uuid) && pos.has(b.uuid)) ? keep.has(pairId(a.uuid, b.uuid)) : true)
-        log(`Preselection: ${pairs.length}/${before} pair(s) kept, ${before - pairs.length} skipped `
-          + `(camera proximity, ≤${settings.maxNeighbors} neighbours)`, 'info', 'Matching')
+        const pos = positionsByUuid(ready)
+        if (pos.size < 2) {
+          log('Preselection: fewer than 2 images have camera positions — matching exhaustively instead', 'warn', 'Matching')
+        } else {
+          const keep = preselectPairs(
+            [...pos].map(([uuid, p]) => ({ uuid, pos: p })),
+            { maxNeighbors: settings.maxNeighbors },
+          )
+          const before = pairs.length
+          pairs = pairs.filter(([a, b]) =>
+            (pos.has(a.uuid) && pos.has(b.uuid)) ? keep.has(pairId(a.uuid, b.uuid)) : true)
+          preselectionApplied = true
+          log(`Preselection: ${pairs.length}/${before} pair(s) kept, ${before - pairs.length} skipped `
+            + `(camera proximity, ≤${settings.maxNeighbors} neighbours)`, 'info', 'Matching')
+        }
       }
     }
 
@@ -377,6 +436,13 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
       log('Match: no image pairs to process (need at least 2 images with keypoints)', 'warn', 'Matching')
       return
     }
+
+    // Preselection already filtered by overlap, so the subset gate would only
+    // add false negatives — bypass it for every pair this run.
+    if (preselectionApplied && settings.subsetGate !== false && settings.matcher !== 'lightglue') {
+      log('Subset gate disabled: preselection is the overlap prefilter', 'info', 'Matching')
+    }
+    settings = { ...settings, _preselected: preselectionApplied }
 
     // LightGlue is pinned to worker 0 and its ORT session is not reentrant (two
     // concurrent session.run() on one wasm session deadlock — the old 7-way freeze).
@@ -481,7 +547,7 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
         F: entry.F, matches: entry.matches, disabled: entry.disabled, weak: entry.weak,
       }).catch(() => {})
     }
-    log(`Pair ${disabled ? 'excluded from' : 'restored to'} reconstruction`, 'info', 'Matching')
+    log(`Pair ${disabled ? 'excluded from' : 'restored to'} reconstruction`, 'info', 'Matching', { channel: 'activity' })
   }
 
   // Project-store contract.

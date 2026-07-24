@@ -271,7 +271,8 @@ function makeGcpFeature(g) {
 
 function makeFootprintFeature(fp) {
   const f = new Feature({ geometry: new Polygon(fp.rings) })
-  f.set('footprintName', fp.name)
+  // Hover label: the image the polygon belongs to, else the layer name.
+  f.set('footprintName', fp.imageName ?? fp.setName ?? fp.name)
   if (fp.imageId) f.set('imgId', fp.imageId)
   return f
 }
@@ -788,7 +789,20 @@ function zoomToImage(imgId) {
   map.getView().animate({ center: coord, zoom: 17, duration: 300 })
 }
 
-defineExpose({ zoomToImage, fitView: fitToMarkers })
+// Fit the view to one shapefile set's polygons (its combined extent). `polygons`
+// is the set's flat polygon list ([{ rings }]); ignores any without geometry.
+function zoomToFootprints(polygons) {
+  if (!map || !polygons?.length) return
+  let extent = createEmpty()
+  for (const p of polygons) {
+    if (p.rings?.length) extend(extent, new Polygon(p.rings).getExtent())
+  }
+  if (!extentIsEmpty(extent)) {
+    map.getView().fit(extent, { padding: [48, 48, 48, 48], maxZoom: 18, duration: 300 })
+  }
+}
+
+defineExpose({ zoomToImage, fitView: fitToMarkers, zoomToFootprints })
 </script>
 
 <template>

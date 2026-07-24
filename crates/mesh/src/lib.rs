@@ -11,7 +11,7 @@
 // here and in the handover.
 
 use nalgebra::{Point3, Vector3};
-use poisson_reconstruction::PoissonReconstruction;
+use poisson_reconstruction::{PoissonBuilder, PoissonReconstruction};
 use std::collections::HashMap;
 use wasm_bindgen::prelude::*;
 
@@ -61,6 +61,12 @@ pub fn poisson_mesh(
         max_depth,
         RELAXATION_ITERS,
     );
+    finalize_mesh(&poisson, &points, trim_dist)
+}
+
+/// Extract, trim, and encode a mesh from a solved reconstruction. Shared by the
+/// one-shot [`poisson_mesh`] and the staged [`PoissonMesher::finish`].
+fn finalize_mesh(poisson: &PoissonReconstruction, points: &[Point3<f64>], trim_dist: f32) -> Vec<u8> {
     // Extract at the sample-average iso, not 0: screened Poisson's true surface is the
     // average of the implicit function at the input points, so extracting at 0 inflates
     // the surface (an ~8% radius bias on a test sphere). Kazhdan's PoissonRecon does the
@@ -80,7 +86,7 @@ pub fn poisson_mesh(
     // Trim Poisson's extrapolated bulges: drop any triangle all of whose vertices lie
     // farther than `trim_dist` from every input point, then compact the vertex list.
     let (verts, tris) = if trim_dist > 0.0 {
-        trim_far_triangles(&verts, &tris, &points, trim_dist as f64)
+        trim_far_triangles(&verts, &tris, points, trim_dist as f64)
     } else {
         (verts, tris)
     };
@@ -89,6 +95,79 @@ pub fn poisson_mesh(
     }
 
     encode_mesh(&verts, &tris)
+}
+
+/// Staged, JS-driven wrapper around the screened-Poisson solve. Exposes the phases the
+/// worker steps through so it can paint per-layer progress (the whole solve is a single
+/// blocking wasm call otherwise — the "stuck at Poisson solve" symptom) and keep the
+/// largest uninterruptible unit of work down to one multigrid layer:
+///
+/// ```text
+///   let m = PoissonMesher.build(pos, nrm, depth, screening)   // build octree + field
+///   for _ in 0..m.num_layers() { m.solve_step() }             // solve, report progress
+///   let bytes = m.finish(trim_dist)                            // extract + trim + encode
+///   m.free()
+/// ```
+///
+/// The one-shot [`poisson_mesh`] free function is kept for the Rust tests (which run
+/// natively and cannot construct a JS driver).
+#[wasm_bindgen]
+pub struct PoissonMesher {
+    builder: Option<PoissonBuilder>,
+}
+
+#[wasm_bindgen]
+impl PoissonMesher {
+    /// Build the multigrid octree + vector field (no layer solved yet). `pos`/`nrm` are
+    /// flat `3·N` f32 (world-space; `nrm` unit); `max_depth`/`screening` as in
+    /// [`poisson_mesh`]. An empty / degenerate input yields a mesher with zero layers
+    /// whose `finish` returns an empty mesh.
+    pub fn build(pos: &[f32], nrm: &[f32], max_depth: u32, screening: f32) -> PoissonMesher {
+        let n = pos.len() / 3;
+        if n == 0 || nrm.len() < n * 3 || max_depth == 0 {
+            return PoissonMesher { builder: None };
+        }
+        let points: Vec<Point3<f64>> = (0..n)
+            .map(|i| Point3::new(pos[i * 3] as f64, pos[i * 3 + 1] as f64, pos[i * 3 + 2] as f64))
+            .collect();
+        let normals: Vec<Vector3<f64>> = (0..n)
+            .map(|i| Vector3::new(nrm[i * 3] as f64, nrm[i * 3 + 1] as f64, nrm[i * 3 + 2] as f64))
+            .collect();
+        let max_depth = max_depth as usize;
+        let density_depth = max_depth.saturating_sub(DENSITY_DEPTH_BACKOFF).max(1).min(max_depth);
+        let builder = PoissonBuilder::new(
+            &points,
+            &normals,
+            screening as f64,
+            density_depth,
+            max_depth,
+            RELAXATION_ITERS,
+        );
+        PoissonMesher { builder: Some(builder) }
+    }
+
+    /// Number of multigrid layers to solve (`== max_depth + 1`, or 0 for a degenerate
+    /// build). Drives the caller's progress denominator.
+    pub fn num_layers(&self) -> usize {
+        self.builder.as_ref().map_or(0, |b| b.num_layers())
+    }
+
+    /// Solve the next multigrid layer (coarsest first). Returns `true` while more layers
+    /// remain. A no-op (`false`) once every layer is solved or on a degenerate build.
+    pub fn solve_step(&mut self) -> bool {
+        self.builder.as_mut().map_or(false, |b| b.solve_step())
+    }
+
+    /// Solve any remaining layers, then extract, trim (world-unit `trim_dist`; ≤0
+    /// disables), and encode the mesh to the little-endian wire buffer described on
+    /// [`poisson_mesh`]. Consumes the internal builder — call once.
+    pub fn finish(&mut self, trim_dist: f32) -> Vec<u8> {
+        let Some(builder) = self.builder.take() else {
+            return empty_mesh();
+        };
+        let (poisson, points) = builder.finish();
+        finalize_mesh(&poisson, &points, trim_dist)
+    }
 }
 
 fn empty_mesh() -> Vec<u8> {

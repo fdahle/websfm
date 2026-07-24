@@ -14,6 +14,64 @@
 // (the GPU competes for the same RAM Safari polices).
 export const DEFAULT_BUDGET_BYTES = 2 * 1024 * 1024 * 1024
 
+const GiB = 1024 ** 3
+// A device-derived budget is clamped to this window: never trust a tab with more
+// than 6 GB (the OS, the GPU and other tabs all compete for it), never gate below
+// 1 GB (even a small machine can run a modest dense job, and the per-run pre-flight
+// is the real guard).
+const MIN_DEVICE_BUDGET_BYTES = 1 * GiB
+const MAX_DEVICE_BUDGET_BYTES = 6 * GiB
+// Fraction of total device memory a single tab may claim for a dense run.
+const DEVICE_MEMORY_FRACTION = 0.5
+// Fraction of the JS-heap ceiling to use when that is the only signal (weaker: it
+// caps the JS heap, not the typed-array/wasm/GPU allocations a dense run dominates with).
+const HEAP_LIMIT_FRACTION = 0.75
+
+const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n))
+
+/**
+ * Derive a dense-run memory budget from injected hardware readings. PURE: the
+ * caller (main thread) reads `navigator.deviceMemory` (GB) and
+ * `performance.memory.jsHeapSizeLimit` (bytes) — both Chrome-only — and passes the
+ * numbers in; core never touches a global. When nothing is known (Safari/Firefox)
+ * it returns the conservative {@link DEFAULT_BUDGET_BYTES}, so behaviour is
+ * unchanged from before this existed.
+ *
+ * `deviceMemoryGB` is passed straight through for `core/recommend.js` (U2) to pick
+ * a dense quality; it is null unless `navigator.deviceMemory` was the source.
+ *
+ * @param {{ deviceMemoryGB?: number|null, jsHeapLimitBytes?: number|null }} [readings]
+ * @returns {{ budgetBytes: number, deviceMemoryGB: number|null, source: string, note: string }}
+ */
+export function deviceBudget({ deviceMemoryGB = null, jsHeapLimitBytes = null } = {}) {
+  if (Number.isFinite(deviceMemoryGB) && deviceMemoryGB > 0) {
+    const budgetBytes = clamp(deviceMemoryGB * GiB * DEVICE_MEMORY_FRACTION, MIN_DEVICE_BUDGET_BYTES, MAX_DEVICE_BUDGET_BYTES)
+    return {
+      budgetBytes,
+      deviceMemoryGB,
+      source: 'navigator.deviceMemory',
+      // deviceMemory is browser-capped at 8 GB for fingerprinting resistance, so a
+      // high-RAM machine reads 8 and lands at the clamp — that is expected, not a bug.
+      note: `Device budget ${formatBytes(budgetBytes)} — ${DEVICE_MEMORY_FRACTION * 100}% of ${deviceMemoryGB} GB device memory (browser-capped at 8).`,
+    }
+  }
+  if (Number.isFinite(jsHeapLimitBytes) && jsHeapLimitBytes > 0) {
+    const budgetBytes = clamp(jsHeapLimitBytes * HEAP_LIMIT_FRACTION, MIN_DEVICE_BUDGET_BYTES, MAX_DEVICE_BUDGET_BYTES)
+    return {
+      budgetBytes,
+      deviceMemoryGB: null,
+      source: 'performance.memory',
+      note: `Device budget ${formatBytes(budgetBytes)} — ${HEAP_LIMIT_FRACTION * 100}% of the ${formatBytes(jsHeapLimitBytes)} JS-heap limit (no deviceMemory available).`,
+    }
+  }
+  return {
+    budgetBytes: DEFAULT_BUDGET_BYTES,
+    deviceMemoryGB: null,
+    source: 'default',
+    note: `Device budget ${formatBytes(DEFAULT_BUDGET_BYTES)} — no memory API available (Safari/Firefox); using the conservative default.`,
+  }
+}
+
 // Human-readable byte size (GiB/MiB) for logs and UI.
 export function formatBytes(n) {
   if (!(n > 0)) return '0 B'

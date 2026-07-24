@@ -31,7 +31,7 @@ function sensorWidthFromDb(meta) {
 // Physical sensor width (mm) from EXIF focal-plane resolution (how exiftool/COLMAP
 // derive sensor size), else a make/model table. FocalPlaneResolutionUnit: 2=inch,
 // 3=cm, 4=mm. Returns null when nothing usable is available.
-function sensorWidthMm(meta) {
+export function sensorWidthMm(meta) {
   const res = meta?.focalPlaneXRes
   const w = meta?.width
   if (res && w) {

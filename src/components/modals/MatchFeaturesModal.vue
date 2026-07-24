@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import FieldHelp from '../guide/FieldHelp.vue'
 import ModalShell from './ui/ModalShell.vue'
 import SettingsField from './ui/SettingsField.vue'
@@ -15,6 +15,9 @@ import { MATCH_DEFAULTS, MATCH_PRESETS, MATCH_PRESET_META } from '../../core/def
 const props = defineProps({
   // Largest detected keypoint count over all images (for the density auto-hint).
   detectedMaxKeypoints: { type: Number, default: 0 },
+  // How many images can drive each preselect method (gates the method choice).
+  posedImageCount: { type: Number, default: 0 },
+  footprintImageCount: { type: Number, default: 0 },
 })
 
 const emit = defineEmits(['close', 'run'])
@@ -22,12 +25,30 @@ const emit = defineEmits(['close', 'run'])
 // GPU is a machine-level preference now (Settings ▸ Compute), injected on run.
 const { useGpu } = useComputeSettings()
 
+// Preselect needs ≥2 images carrying the relevant evidence to prune anything.
+const hasPoses = computed(() => props.posedImageCount >= 2)
+const hasFootprints = computed(() => props.footprintImageCount >= 2)
+const preselectAvailable = computed(() => hasPoses.value || hasFootprints.value)
+
 const strategy = ref('exhaustive')
-const strategies = [
+const strategies = computed(() => [
   { id: 'exhaustive', label: 'Exhaustive' },
   { id: 'sequential', label: 'Sequential' },
-  { id: 'preselect', label: 'Preselect' },
-]
+  { id: 'preselect', label: 'Preselect', disabled: !preselectAvailable.value },
+])
+const preselectMethods = computed(() => [
+  { id: 'position', label: 'Camera position', disabled: !hasPoses.value },
+  { id: 'footprint', label: 'Footprint overlap', disabled: !hasFootprints.value },
+])
+
+// Keep the chosen preselect method on an *available* one: when the user opens
+// Preselect, snap to whichever evidence they actually have.
+watch(strategy, (s) => {
+  if (s !== 'preselect') return
+  const m = settings.value.preselectMethod
+  if (m === 'position' && !hasPoses.value && hasFootprints.value) settings.value.preselectMethod = 'footprint'
+  else if (m === 'footprint' && !hasFootprints.value && hasPoses.value) settings.value.preselectMethod = 'position'
+})
 
 // Matcher: brute-force NN + Lowe ratio (works on any descriptor) or LightGlue
 // (learned; requires SuperPoint 256-d descriptors — the store guards mismatches).
@@ -91,7 +112,7 @@ function run() {
 
     <SettingsGroup title="Strategy">
       <SettingsField
-        hint="Exhaustive matches all pairs. Sequential uses a capture-order neighbour window and needs no GPS. Preselect uses imported camera positions.">
+        hint="Exhaustive matches all pairs. Sequential uses a capture-order neighbour window and needs no GPS. Preselect prunes pairs by camera position or footprint overlap (needs imported poses or footprints).">
         <template #label>Pairing</template>
         <SegmentedControl v-model="strategy" :options="strategies" />
       </SettingsField>
@@ -110,12 +131,26 @@ function run() {
         </SettingsField>
       </template>
 
-      <SettingsField v-if="strategy === 'preselect'" label-for="maxNeighbors"
-        hint="Match each image to its N nearest by camera position. Needs imported poses.">
-        <template #label><GlossaryTerm id="camera-pose">Neighbours per image</GlossaryTerm>
-          <FieldHelp op="match-features" param="maxNeighbors" :default-value="settings.maxNeighbors" /></template>
-        <input id="maxNeighbors" v-model.number="settings.maxNeighbors" type="number" min="1" max="50" step="1" class="field-input" />
-      </SettingsField>
+      <template v-if="strategy === 'preselect'">
+        <SettingsField
+          hint="Camera position keeps each image's nearest cameras (needs imported poses). Footprint overlap keeps pairs whose footprints share ground (needs footprints) — better when views converge or point different ways.">
+          <template #label>Preselect by</template>
+          <SegmentedControl v-model="settings.preselectMethod" :options="preselectMethods" />
+        </SettingsField>
+
+        <SettingsField v-if="settings.preselectMethod === 'position'" label-for="maxNeighbors"
+          hint="Match each image to its N nearest by camera position. Needs imported poses.">
+          <template #label><GlossaryTerm id="camera-pose">Neighbours per image</GlossaryTerm>
+            <FieldHelp op="match-features" param="maxNeighbors" :default-value="settings.maxNeighbors" /></template>
+          <input id="maxNeighbors" v-model.number="settings.maxNeighbors" type="number" min="1" max="50" step="1" class="field-input" />
+        </SettingsField>
+
+        <SettingsField v-else label-for="minOverlap"
+          hint="Keep a pair when the smaller footprint shares at least this much of its area with the other. Needs image footprints.">
+          <template #label>Minimum overlap %</template>
+          <input id="minOverlap" v-model.number="settings.minOverlap" type="number" min="1" max="100" step="1" class="field-input" />
+        </SettingsField>
+      </template>
     </SettingsGroup>
 
     <SettingsGroup title="Matcher">

@@ -793,16 +793,17 @@ export const useImagesStore = defineStore('images', () => {
     if (!img || img.kpStatus === 'running') return
     // SuperPoint runs a learned model — fetch its weights (with consent) first.
     if (settings.detector === 'superpoint' && !(await useModelsStore().ensureReady(['superpoint']))) {
-      log('Detection cancelled — SuperPoint model was not downloaded.', 'warn', 'SuperPoint')
+      log('Detection cancelled — SuperPoint model was not downloaded.', 'warn', 'Detection')
       return
     }
     // Re-detecting renumbers keypoints, so any existing matches for this image
     // become stale — invalidate them once detection succeeds (below).
     const hadKeypoints = img.kpStatus === 'done'
-    // Log/source label follows the chosen detector (SIFT default, or SuperPoint).
+    // Message-text label for the chosen detector (SIFT default, or SuperPoint);
+    // the console *source* is the pipeline stage 'Detection', not the detector.
     const tag = settings.detector === 'superpoint' ? 'SuperPoint' : 'SIFT'
     img.kpStatus = 'running'
-    log(`${tag} start: ${img.name}`, 'info', tag)
+    log(`${tag} start: ${img.name}`, 'info', 'Detection')
     try {
       // A TIFF's lossless compute PNG may still be encoding (ingest sets the
       // display JPEG first) — wait for it, or reject if its transcode failed,
@@ -813,7 +814,7 @@ export const useImagesStore = defineStore('images', () => {
       const res = await detectKeypoints(
         img.computeUrl ?? img.url,
         { ...settings, mask: img.mask?.dataUrl ?? null },
-        { onLog: (msg) => log(msg, 'info', tag) },
+        { onLog: (msg) => log(msg, 'info', 'Detection') },
       )
       // The worker can't be interrupted mid-image, so a cancel pressed while this
       // one was in flight lands here with a finished result — drop it rather than
@@ -821,7 +822,7 @@ export const useImagesStore = defineStore('images', () => {
       if (shouldCancel?.()) {
         const found = images.value.find((i) => i.id === id)
         if (found) found.kpStatus = hadKeypoints ? 'done' : null
-        log(`${tag} discarded (cancelled): ${img.name}`, 'warn', tag)
+        log(`${tag} discarded (cancelled): ${img.name}`, 'warn', 'Detection')
         return
       }
       const found = images.value.find((i) => i.id === id)
@@ -840,14 +841,14 @@ export const useImagesStore = defineStore('images', () => {
         found.detector = res.detector ?? 'sift'
         found.descDim  = res.descDim ?? 128
         if (hadKeypoints) useMatchesStore().removeMatchesForImage(found.uuid)
-        log(`${tag} done: ${found.name} — ${found.kpCount} keypoints in ${found.kpMs} ms`, 'success', tag)
+        log(`${tag} done: ${found.name} — ${found.kpCount} keypoints in ${found.kpMs} ms`, 'success', 'Detection')
         // Detailed diagnostics (debug level): the working resolution actually
         // used, how many features the cap discarded, mask drops, and the response
         // spread (the signal for tuning maxKeypoints / contrastThreshold).
         const d = res.diag
         if (d) {
           log(`${tag} ${found.name} — detect @ ${d.detectWidth}×${d.detectHeight} `
-            + `(${d.scale.toFixed(3)}× of ${d.natW}×${d.natH})`, 'debug', tag)
+            + `(${d.scale.toFixed(3)}× of ${d.natW}×${d.natH})`, 'debug', 'Detection')
           if (res.detector === 'superpoint') {
             // Learned detector: no near-duplicate suppression / response, so report
             // the cap + mask drops and the keypoint-score spread instead.
@@ -855,14 +856,14 @@ export const useImagesStore = defineStore('images', () => {
               + `${d.capHit ? ' (top-K cap hit)' : ''}`
               + `${d.maskedPreCap > 0 ? `, −${d.maskedPreCap} masked before cap` : ''}`
               + `${d.maskedDropped > 0 ? `, −${d.maskedDropped} in mask → ${d.kept}` : ''}`
-              + `; score p50 ${d.scoreP50.toFixed(3)} / p95 ${d.scoreP95.toFixed(3)}`, 'debug', tag)
+              + `; score p50 ${d.scoreP50.toFixed(3)} / p95 ${d.scoreP95.toFixed(3)}`, 'debug', 'Detection')
           } else {
             log(`${tag} ${found.name} — ${d.rawFound} found → ${d.capped}`
               + `${d.capHit ? ` capped (min response ${d.minResponse.toFixed(3)})` : ' (under cap)'}`
               + `${d.suppressed > 0 ? `, −${d.suppressed} duplicate-position keypoints suppressed` : ''}`
               + `${d.maskedPreCap > 0 ? `, −${d.maskedPreCap} masked before cap` : ''}`
               + `${d.maskedDropped > 0 ? `, −${d.maskedDropped} in mask → ${d.kept}` : ''}`
-              + `; response p50 ${d.respP50.toFixed(3)} / p95 ${d.respP95.toFixed(3)}`, 'debug', tag)
+              + `; response p50 ${d.respP50.toFixed(3)} / p95 ${d.respP95.toFixed(3)}`, 'debug', 'Detection')
           }
         }
         if (isPersisting()) {
@@ -881,10 +882,10 @@ export const useImagesStore = defineStore('images', () => {
       // revert the image to its prior state instead of flagging an error.
       if (shouldCancel?.()) {
         if (found) found.kpStatus = hadKeypoints ? 'done' : null
-        log(`${tag} aborted (cancelled): ${img.name}`, 'warn', tag)
+        log(`${tag} aborted (cancelled): ${img.name}`, 'warn', 'Detection')
         return
       }
-      log(`${tag} error: ${img.name} — ${err?.message ?? err}`, 'error', tag)
+      log(`${tag} error: ${img.name} — ${err?.message ?? err}`, 'error', 'Detection')
       if (found) found.kpStatus = 'error'
     }
   }
@@ -896,27 +897,28 @@ export const useImagesStore = defineStore('images', () => {
     const total = pending.length
     // Echo the settings actually in effect so the console records what was run.
     const { detector = 'sift', maxDim = 1200, contrastThreshold = 0.01, maxKeypoints = 5000 } = settings
+    // Message-text label only; the console source is the stage 'Detection'.
     const batchTag = detector === 'superpoint' ? 'SuperPoint' : 'SIFT'
     // SuperPoint runs a learned model — fetch its weights (with consent) once for
     // the whole batch before dispatching any image.
     if (detector === 'superpoint' && !(await useModelsStore().ensureReady(['superpoint']))) {
-      log('Detection cancelled — SuperPoint model was not downloaded.', 'warn', batchTag)
+      log('Detection cancelled — SuperPoint model was not downloaded.', 'warn', 'Detection')
       return
     }
     log(`${batchTag} batch: ${total} image(s) queued — ≤${maxDim}px`
       + `${detector === 'superpoint' ? '' : `, contrast ${contrastThreshold}`}, ≤${maxKeypoints} kp`,
-      'info', batchTag)
+      'info', 'Detection')
     let done = 0
     for (const img of pending) {
-      if (shouldCancel?.()) { log(`${batchTag} cancelled — ${done}/${total} done`, 'warn', batchTag); return }
+      if (shouldCancel?.()) { log(`${batchTag} cancelled — ${done}/${total} done`, 'warn', 'Detection'); return }
       await detectOne(img.id, settings, onDetected, shouldCancel)
       // Cancelled mid-image: detectOne already discarded the result, so stop here
       // without counting it as done.
-      if (shouldCancel?.()) { log(`${batchTag} cancelled — ${done}/${total} done`, 'warn', batchTag); return }
+      if (shouldCancel?.()) { log(`${batchTag} cancelled — ${done}/${total} done`, 'warn', 'Detection'); return }
       done++
       onProgress?.(done, total, img.name)
     }
-    log(`${batchTag} batch complete`, 'success', batchTag)
+    log(`${batchTag} batch complete`, 'success', 'Detection')
   }
 
   function clearKeypoints(id) {
@@ -926,7 +928,7 @@ export const useImagesStore = defineStore('images', () => {
     img.kpCount   = 0
     img.kpMs      = 0
     img.kpStatus  = null
-    log(`Keypoints cleared: ${img.name}`, 'info', 'SIFT')
+    log(`Keypoints cleared: ${img.name}`, 'info', 'Detection')
     useMatchesStore().removeMatchesForImage(img.uuid)
     if (isPersisting()) {
       const pid = projects.currentProjectId

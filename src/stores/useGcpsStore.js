@@ -161,7 +161,7 @@ export const useGcpsStore = registerProjectStore(defineStore('gcps', () => {
       accuracyImgX: DEFAULT_ACCURACY_IMG, accuracyImgY: DEFAULT_ACCURACY_IMG,
       observations: [], enabled: true,
     })
-    log(`GCP added: ${gcps.value[gcps.value.length - 1].name}`, 'success', 'GCP')
+    log(`Added GCP ${gcps.value[gcps.value.length - 1].name}`, 'success', 'GCP', { channel: 'activity' })
     save()
     return id
   }
@@ -218,14 +218,15 @@ export const useGcpsStore = registerProjectStore(defineStore('gcps', () => {
     const g = gcps.value.find((x) => x.id === id)
     if (!g) return
     g.enabled = !!enabled
-    log(`GCP ${g.name}: ${g.enabled ? 'enabled' : 'disabled'}`, 'info', 'GCP')
+    log(`GCP ${g.name} ${g.enabled ? 'enabled' : 'disabled'}`, 'info', 'GCP', { channel: 'activity' })
     save()
   }
 
   function removeGcp(id) {
     const idx = gcps.value.findIndex((g) => g.id === id)
     if (idx === -1) return
-    gcps.value.splice(idx, 1)
+    const [removed] = gcps.value.splice(idx, 1)
+    log(`Removed GCP ${removed.name}`, 'info', 'GCP', { channel: 'activity' })
     save()
   }
 

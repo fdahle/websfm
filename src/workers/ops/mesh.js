@@ -1,5 +1,32 @@
-import init, { poisson_mesh } from '../../wasm/mesh/mesh.js'
+import init, { PoissonMesher } from '../../wasm/mesh/mesh.js'
 import { generateMesh } from '../../core/products/mesh.js'
+
+// Drive the staged Poisson solve, emitting progress between multigrid layers. Injected
+// into core `generateMesh` as its `poissonFn` (same 5-arg signature the one-shot wasm
+// entry had). Runs synchronously — the worker thread blocks here, but each `emit` posts a
+// message that the MAIN thread paints as it arrives, so the bar advances per layer
+// instead of freezing on one opaque call. Cancel is still a hard `terminateAll` (the
+// worker can't service messages mid-solve); staging just bounds each blocking chunk to
+// one layer. `mesher.free()` releases the wasm-side octree in a finally.
+function stagedPoisson(emit) {
+  return (pos, nrm, depth, screening, trim) => {
+    emit('progress', [0, 1, `Building octree (depth ${depth})…`])
+    const mesher = PoissonMesher.build(pos, nrm, depth >>> 0, screening)
+    try {
+      const n = mesher.num_layers()
+      for (let i = 0; i < n; i++) {
+        mesher.solve_step()
+        emit('progress', [i + 1, n + 1, `Solving multigrid layer ${i + 1}/${n}…`])
+      }
+      emit('progress', [n, n + 1, 'Extracting surface…'])
+      const bytes = mesher.finish(trim)
+      emit('progress', [n + 1, n + 1, 'Surface extracted'])
+      return bytes
+    } finally {
+      mesher.free()
+    }
+  }
+}
 
 // Mesh op (screened Poisson). Owns the mesh wasm module (lazy init, like
 // reconstruction.js gates its own wasm). Pure meshing lives in core/products/mesh.js;
@@ -20,7 +47,7 @@ export function makeMeshOps() {
     }
     emit('progress', [0, 1, 'Poisson solve…'])
     const t0 = performance.now()
-    const mesh = generateMesh(dense, poisson_mesh, settings, (m, l, c) => emit('log', [m, l, c]))
+    const mesh = generateMesh(dense, stagedPoisson(emit), settings, (m, l, c) => emit('log', [m, l, c]))
     emit('log', [`Mesh: built ${mesh.nVerts} vertices / ${mesh.count} triangles `
       + `in ${((performance.now() - t0) / 1000).toFixed(1)}s`, 'success', 'Products'])
     emit('progress', [1, 1, 'Done'])

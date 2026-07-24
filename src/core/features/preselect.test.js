@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { preselectPairs } from './preselect.js'
+import { preselectPairs, footprintOverlap, preselectByFootprintOverlap } from './preselect.js'
 
 describe('preselectPairs', () => {
   // Five cameras evenly spaced along a line (a flight strip).
@@ -86,5 +86,76 @@ describe('preselectPairs', () => {
     const keep = preselectPairs(items, { maxNeighbors: 2 })
     expect(keep.has('a--b')).toBe(true)
     expect(keep.has('a--c')).toBe(true)
+  })
+})
+
+// Unit square [0,1]², shifted by dx along x. Closed ring (repeats first vertex),
+// matching what core/footprint.js emits.
+const squareAt = (dx) => [[dx, 0], [dx + 1, 0], [dx + 1, 1], [dx, 1], [dx, 0]]
+
+describe('footprintOverlap', () => {
+  it('is 1 for identical footprints', () => {
+    expect(footprintOverlap(squareAt(0), squareAt(0))).toBeCloseTo(1, 6)
+  })
+
+  it('measures the shared fraction of two overlapping squares', () => {
+    // Two unit squares offset by 0.25 share a 0.75×1 strip ⇒ 0.75 of each.
+    expect(footprintOverlap(squareAt(0), squareAt(0.25))).toBeCloseTo(0.75, 6)
+  })
+
+  it('is 0 for disjoint footprints', () => {
+    expect(footprintOverlap(squareAt(0), squareAt(2))).toBe(0)
+  })
+
+  it('is 0 for footprints that only touch at an edge', () => {
+    expect(footprintOverlap(squareAt(0), squareAt(1))).toBe(0)
+  })
+
+  it('normalises by the SMALLER footprint (a small one inside a big one scores ~1)', () => {
+    const big = [[0, 0], [10, 0], [10, 10], [0, 10], [0, 0]]
+    const small = [[4, 4], [6, 4], [6, 6], [4, 6], [4, 4]]  // fully inside big
+    expect(footprintOverlap(big, small)).toBeCloseTo(1, 6)
+    expect(footprintOverlap(small, big)).toBeCloseTo(1, 6)   // symmetric
+  })
+
+  it('handles open rings (no repeated closing vertex)', () => {
+    const open = (dx) => [[dx, 0], [dx + 1, 0], [dx + 1, 1], [dx, 1]]
+    expect(footprintOverlap(open(0), open(0.25))).toBeCloseTo(0.75, 6)
+  })
+
+  it('handles a rotated (convex) footprint', () => {
+    // A diamond centred at (0.5,0.5) with area 0.5, fully inside the unit square.
+    const diamond = [[0.5, 0.1], [0.9, 0.5], [0.5, 0.9], [0.1, 0.5], [0.5, 0.1]]
+    expect(footprintOverlap(squareAt(0), diamond)).toBeCloseTo(1, 6) // diamond ⊂ square
+  })
+})
+
+describe('preselectByFootprintOverlap', () => {
+  // A strip of unit squares each overlapping its neighbour by 0.75.
+  const strip = [
+    { uuid: 'a', ring: squareAt(0) },
+    { uuid: 'b', ring: squareAt(0.25) },
+    { uuid: 'c', ring: squareAt(0.5) },
+    { uuid: 'd', ring: squareAt(3) },   // far away — overlaps nothing
+  ]
+
+  it('keeps pairs above the overlap threshold, drops the rest', () => {
+    const keep = preselectByFootprintOverlap(strip, { minOverlap: 0.5 })
+    expect(keep.has('a--b')).toBe(true)   // 0.75
+    expect(keep.has('b--c')).toBe(true)   // 0.75
+    expect(keep.has('a--c')).toBe(true)   // squares 0 and 0.5 share 0.5 ⇒ == threshold
+    expect(keep.has('a--d')).toBe(false)  // disjoint
+    expect(keep.has('c--d')).toBe(false)  // disjoint
+  })
+
+  it('a stricter threshold prunes the weaker overlaps', () => {
+    const keep = preselectByFootprintOverlap(strip, { minOverlap: 0.6 })
+    expect(keep.has('a--b')).toBe(true)   // 0.75 ≥ 0.6
+    expect(keep.has('a--c')).toBe(false)  // 0.5 < 0.6
+  })
+
+  it('returns an empty set for fewer than two footprints', () => {
+    expect(preselectByFootprintOverlap([{ uuid: 'a', ring: squareAt(0) }]).size).toBe(0)
+    expect(preselectByFootprintOverlap([]).size).toBe(0)
   })
 })
