@@ -924,8 +924,21 @@ convergence".
   can audit. The dev console keeps only a **capped display tail** in memory
   (`useLog` `MAX_BUFFER`), but every line is streamed to an **append-only OPFS
   NDJSON** file (`log.ndjson`, owned by `useLogStore`) — that file is the full
-  record (scroll-back prepends older chunks from it; Save TXT exports all of it),
+  record (scroll-back prepends older chunks from it; Save TXT exports it),
   so the buffer cap is a view limit, never data loss.
+  - Every entry carries a **`channel`** (`log(msg, level, source, { channel })`):
+    `'pipeline'` (default — the scientific/process record) vs `'activity'` (a
+    one-line confirmation that the *user* toggled/edited something reversible —
+    exclude a match, enable/add/remove a GCP, set-as-main, rename/remove a cloud).
+    `core/*` `onLog` output is always pipeline; only stores emit `activity`. The
+    console shows them in **Pipeline / Activity / All** tabs, and Save TXT exports
+    **pipeline, non-debug** by default (activity + debug are opt-in checkboxes) — so
+    user-action noise never clogs the exported record. Absent `channel` ⇒ pipeline.
+  - A log message must **not** restate its own `source` — the console renders the
+    source as a coloured badge. `utils/logFormat.js` `stripSourcePrefix` removes a
+    stray leading `"<source>: "` at render + export as a safety net, but write
+    messages without the prefix (a *different* sub-stage label like `"Mesh:"` under
+    source `Products` is fine — it's not a duplicate).
 - **Attribution/licenses have one home: `src/core/help/licenses.js`.** When you add
   any dependency whose license requires its notice to travel with the shipped app —
   a bundled npm package, a crate compiled into a WASM module (including vendored code

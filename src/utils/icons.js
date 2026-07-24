@@ -60,6 +60,12 @@ export const icons = {
     <rect x="3" y="5" width="18" height="14" rx="2" />
     <path d="M7 10l3 2.5L7 15" />
     <path d="M13 15h4" />`,
+  // Project-summary digest: a clipboard with a health-pulse line — a report of
+  // reconstruction health (Debug ▸ Project Summary).
+  summary: `
+    <rect x="5" y="4" width="14" height="17" rx="2" />
+    <rect x="9" y="2.5" width="6" height="3" rx="1" />
+    <path d="M8 13h2l1.5 3 2-6 1.5 3h1" />`,
 
   // ── Import ──────────────────────────────────────────────────────────────────
   image: `

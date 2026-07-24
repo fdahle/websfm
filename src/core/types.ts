@@ -206,6 +206,36 @@ export interface FiducialObservation {
   py: number
 }
 
+// ── Dataset profile (usability track U1) ──────────────────────────────────────
+
+/**
+ * A metadata-only characterization of an image set (no pixel reads), produced by
+ * `core/profile.js` and consumed by `core/recommend.js` (U2) to derive settings.
+ * Every classification records its rationale in {@link DatasetProfile.notes}.
+ */
+export interface DatasetProfile {
+  nImages: number
+  /** Smallest per-image long edge in px (null when no dimensions are known). */
+  minDim: number | null
+  /** Largest per-image long edge in px — the "native max" U2 scales from. */
+  maxDim: number | null
+  /** Median megapixels across images (null when no dimensions are known). */
+  medianMP: number | null
+  kind: 'film' | 'drone' | 'phone' | 'unknown'
+  /** Any image carries EXIF GPS lat/lon. */
+  hasGps: boolean
+  /** Any imported camera poses are present. */
+  hasPoses: boolean
+  /** Any sensor declares a non-zero lens-distortion coefficient. */
+  hasCalibratedDistortion: boolean
+  /** Image names form a capture sequence (trailing-integer, mostly contiguous). */
+  sequentialNames: boolean
+  /** Coarse size bucket for budget decisions: <20 / 20–200 / >200 images. */
+  scale: 'small' | 'medium' | 'large'
+  /** Human-readable rationale for each derived value (auditable, like onLog). */
+  notes: string[]
+}
+
 // ── CRS-tagged coordinates ────────────────────────────────────────────────────
 
 /** A CRS authority code, e.g. 'EPSG:4326' or 'EPSG:3031' (Antarctic Polar). */

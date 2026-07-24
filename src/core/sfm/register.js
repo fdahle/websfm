@@ -237,7 +237,7 @@ export async function registerImages(ctx) {
     // R2: gate is fixed (pnpThresh, set once above); log it against the model p95
     // so a diverging model is still visible without loosening the gate to match it.
     const modelStats = modelReprojStats()
-    log(`Reconstruction: registration pass ${pass} — ${remaining.length} image(s) remaining `
+    log(`registration pass ${pass} — ${remaining.length} image(s) remaining `
       + `(fixed PnP gate ${pnpThresh.toFixed(1)}px, model p95 ${modelStats.p95.toFixed(1)}px)`, 'debug', 'Reconstruction')
 
     for (const img of remaining) {
@@ -251,7 +251,7 @@ export async function registerImages(ctx) {
       if (pts3.length < minMatchesForRegistration) {
         const reason = `too few correspondences (${pts3.length}/${minMatchesForRegistration})`
         deferReasons.set(img.uuid, reason)
-        log(`Reconstruction: defer ${img.name} — ${reason}`, 'debug', 'Reconstruction')
+        log(`defer ${img.name} — ${reason}`, 'debug', 'Reconstruction')
         continue
       }
 
@@ -272,7 +272,7 @@ export async function registerImages(ctx) {
         const reason = `PnP solve failed (${pts3.length} correspondences, gate ${pnpThresh.toFixed(1)}px; `
           + `at looser gates: ${probe.join(', ')})`
         deferReasons.set(img.uuid, reason)
-        log(`Reconstruction: ${reason} for ${img.name}`, 'warn', 'Reconstruction')
+        log(`${reason} for ${img.name}`, 'warn', 'Reconstruction')
         continue
       }
       // R1: honest acceptance. The solver only needs ≥6 inliers to return a pose,
@@ -287,7 +287,7 @@ export async function registerImages(ctx) {
           + `${(100 * inlierCount / pts3.length).toFixed(0)}%, need ≥${minInliersNeeded} `
           + `[max(${minPnpInliers}, ${(100 * minPnpInlierRatio).toFixed(0)}%)], gate ${pnpThresh.toFixed(1)}px)`
         deferReasons.set(img.uuid, reason)
-        log(`Reconstruction: ${reason} for ${img.name}`, 'warn', 'Reconstruction')
+        log(`${reason} for ${img.name}`, 'warn', 'Reconstruction')
         continue
       }
 
@@ -314,7 +314,7 @@ export async function registerImages(ctx) {
           + `[${(100 * recheckRatio).toFixed(0)}%]); ${inlierCount} held at the `
           + `${pnpThresh.toFixed(1)}px gate`
         deferReasons.set(img.uuid, reason)
-        log(`Reconstruction: defer ${img.name} — ${reason}`, 'warn', 'Reconstruction')
+        log(`defer ${img.name} — ${reason}`, 'warn', 'Reconstruction')
         continue
       }
       cameras.set(img.uuid, newCam)
@@ -331,7 +331,7 @@ export async function registerImages(ctx) {
         if (proj) inlierResid.push(Math.hypot(proj.u - pts2[i].x, proj.v - pts2[i].y))
       }
       const rs = numStats(inlierResid)
-      log(`Reconstruction: registered ${img.name} (${inlierCount}/${pts3.length} PnP inliers, `
+      log(`registered ${img.name} (${inlierCount}/${pts3.length} PnP inliers, `
         + `inlier reproj mean ${rs.mean.toFixed(2)}px / median ${rs.median.toFixed(2)}px)`, 'success', 'Reconstruction')
 
       // Extend existing tracks: every inlier correspondence is this image observing
@@ -419,7 +419,7 @@ export async function registerImages(ctx) {
         }
       }
       const pct = triTotal ? (100 * added / triTotal).toFixed(0) : '0'
-      log(`Reconstruction: ${img.name} — extended ${extended} track(s), `
+      log(`${img.name} — extended ${extended} track(s), `
         + `+${added} new points (${added}/${triTotal} survived cheirality + parallax, ${pct}%; `
         + `${lowParallax} dropped for <${filterMinTriAngleDeg}° parallax)`, 'debug', 'Reconstruction')
 
@@ -441,7 +441,7 @@ export async function registerImages(ctx) {
         const mergedTr = mergeTracks(filterMaxReprojPx) // fold split tracks (both-endpoint case)
         rebuildViewIndex() // BA + filter + merge replaced/dropped point objects; refresh first
         const folded = foldOneEndpointMatches(filterMaxReprojPx)
-        log(`Reconstruction: interim BA cleanup — filtered ${f.obsRemoved} obs + ${f.ptsRemoved} points, `
+        log(`interim BA cleanup — filtered ${f.obsRemoved} obs + ${f.ptsRemoved} points, `
           + `merged ${mergedTr} split track(s), folded ${folded} track observation(s); `
           + `${getPoints3d().length} points`, 'debug', 'Reconstruction')
         registeredSinceBA = 0
@@ -451,7 +451,7 @@ export async function registerImages(ctx) {
     // R4: after each sweep, fold every one-endpoint-assigned match between two
     // registered images into its existing track (raises the ≥3-view share).
     const foldedPass = foldOneEndpointMatches(pnpThresh)
-    if (foldedPass) log(`Reconstruction: pass ${pass} folded ${foldedPass} one-endpoint `
+    if (foldedPass) log(`pass ${pass} folded ${foldedPass} one-endpoint `
       + `observation(s) into existing tracks`, 'debug', 'Reconstruction')
 
     // (2)+(3) Stalled-strip rescue (one shot). A full sweep registered nothing, but
@@ -480,7 +480,7 @@ export async function registerImages(ctx) {
         // rather than logging a step that never runs.
         const focalSolve = baIterations > 0 && rescueMode !== 'none' && cameras.size >= 3
           && getPoints3d().length >= 10
-        log(`Reconstruction: registration stalled at ${cameras.size} camera(s) — ${stalledLinked.length} `
+        log(`registration stalled at ${cameras.size} camera(s) — ${stalledLinked.length} `
           + `linked image(s) still unregistered; rescue (${focalSolve ? `intrinsics solve '${rescueMode}' + ` : ''}`
           + `retriangulation, then a relaxed retry${focalSolve ? '' : '; intrinsics not solvable at 2 views'})`,
           'info', 'Reconstruction')
@@ -495,7 +495,7 @@ export async function registerImages(ctx) {
           keypointOf, maxReprojPx: filterMaxReprojPx, triangulate: triangulateDlt,
         })
         rebuildViewIndex()
-        log(`Reconstruction: rescue retriangulation +${added} point(s); retrying with a relaxed `
+        log(`rescue retriangulation +${added} point(s); retrying with a relaxed `
           + `recheck (${pnpThresh.toFixed(1)}px, ${(100 * rescueRefineRatio).toFixed(0)}%)`, 'info', 'Reconstruction')
         relaxed = true
         modelVersion++    // model changed → invalidate the per-pass correspondence cache
@@ -512,7 +512,7 @@ export async function registerImages(ctx) {
   //     (loosen ratio / verification threshold / min-matches).
   const unregistered = imgs.filter((img) => !registeredUuids.has(img.uuid))
   if (unregistered.length) {
-    log(`Reconstruction: ${unregistered.length} image(s) never registered:`, 'warn', 'Reconstruction')
+    log(`${unregistered.length} image(s) never registered:`, 'warn', 'Reconstruction')
     for (const img of unregistered) {
       let regLinks = 0, regInliers = 0, unregLinks = 0, weakRegLinks = 0
       for (const e of corrPairs) {
@@ -523,12 +523,12 @@ export async function registerImages(ctx) {
         if (toReg) { regLinks++; regInliers += e.inlierCount }
         else unregLinks++
       }
-      log(`Reconstruction:   • ${img.name} — ${deferReasons.get(img.uuid) ?? 'no link to the model'} `
+      log(`  • ${img.name} — ${deferReasons.get(img.uuid) ?? 'no link to the model'} `
         + `[verified pairs: ${regLinks} to registered (${regInliers} inliers), ${unregLinks} to unregistered`
         + `${weakRegLinks ? `; ${weakRegLinks} weak bridge(s) to registered` : ''}]`,
         'warn', 'Reconstruction')
     }
   }
 
-  log(`Reconstruction: ${cameras.size}/${imgs.length} cameras registered, ${getPoints3d().length} points`, 'info', 'Reconstruction')
+  log(`${cameras.size}/${imgs.length} cameras registered, ${getPoints3d().length} points`, 'info', 'Reconstruction')
 }

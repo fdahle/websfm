@@ -190,6 +190,12 @@ impl PoissonLayer {
                             let mut laplacian = convolution.laplacian[ii][jj][kk];
 
                             if screening != 0.0 {
+                                // Both splines depend only on the two node centres and
+                                // the cell width — all loop-invariant across the screening
+                                // point loop below. Build them once per (node, other_node)
+                                // pair instead of once per point (the hot inner loop).
+                                let poly1 = TriQuadraticBspline::new(center1, cell_width);
+                                let poly2 = TriQuadraticBspline::new(center2, cell_width);
                                 for si in -1..=1 {
                                     for sj in -1..=1 {
                                         for sk in -1..=1 {
@@ -199,12 +205,6 @@ impl PoissonLayer {
                                                 for pid in pt_ids {
                                                     // Use get to ignore the sentinel.
                                                     if let Some(pt) = points.get(*pid) {
-                                                        let poly1 = TriQuadraticBspline::new(
-                                                            center1, cell_width,
-                                                        );
-                                                        let poly2 = TriQuadraticBspline::new(
-                                                            center2, cell_width,
-                                                        );
                                                         laplacian += screen_factor
                                                             * poly1.eval(*pt)
                                                             * poly2.eval(*pt);

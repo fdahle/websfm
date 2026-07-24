@@ -65,63 +65,21 @@ impl PoissonReconstruction {
         max_depth: usize,
         max_relaxation_iters: usize,
     ) -> Self {
-        assert_eq!(
-            points.len(),
-            normals.len(),
-            "Exactly one normal per point must be provided."
-        );
-        assert!(density_estimation_depth <= max_depth);
-        let mut root_aabb = Aabb::from_points(points);
-        let max_extent = root_aabb.extents().max();
-        let leaf_cell_width = max_extent / (2.0 as Real).powi(max_depth as i32);
-        root_aabb.loosen(leaf_cell_width);
-        let grid_origin = root_aabb.mins;
-
-        let mut layers = vec![];
-        layers.push(PoissonLayer::from_points(
+        // Convenience wrapper over the staged [`PoissonBuilder`]: build the multigrid
+        // octree + vector field, solve every layer, then finalize — all in one go. The
+        // staged builder exists so a single-threaded (wasm, rayon-stripped) caller can
+        // report progress between multigrid levels; this path just runs them straight
+        // through.
+        let (recon, _points) = PoissonBuilder::new(
             points,
-            grid_origin,
-            leaf_cell_width,
-        ));
-
-        for i in 0..max_depth {
-            let layer = PoissonLayer::from_next_layer(points, &layers[i]);
-            layers.push(layer);
-        }
-
-        // Reverse so the coarser layers go first.
-        layers.reverse();
-
-        let vector_field =
-            PoissonVectorField::new(&layers, points, normals, density_estimation_depth);
-
-        for i in 0..layers.len() {
-            let result = PoissonLayer::solve(
-                &layers,
-                i,
-                &vector_field,
-                points,
-                normals,
-                screening,
-                max_relaxation_iters,
-            );
-            layers[i].node_weights = result;
-        }
-
-        let mut total_weight = 0.0;
-        let mut result = Self {
-            layers,
-            isovalue: 0.0,
-        };
-        let mut isovalue = 0.0;
-
-        for (pt, w) in points.iter().zip(vector_field.densities.iter()) {
-            isovalue += result.eval(pt) / *w;
-            total_weight += 1.0 / *w;
-        }
-
-        result.isovalue = isovalue / total_weight;
-        result
+            normals,
+            screening,
+            density_estimation_depth,
+            max_depth,
+            max_relaxation_iters,
+        )
+        .finish();
+        recon
     }
 
     /// The domain where the surface’s implicit function is defined.
@@ -254,6 +212,121 @@ impl PoissonReconstruction {
         }
 
         result
+    }
+}
+
+/// Staged driver for the Screened Poisson solve. [`PoissonReconstruction::from_points_and_normals`]
+/// runs build → per-layer solve → finish in one call; this type exposes those phases
+/// separately so a caller that cannot use threads (the wasm build strips rayon) can
+/// report progress between multigrid levels and keep the largest uninterruptible unit
+/// of work down to a single layer solve.
+pub struct PoissonBuilder {
+    layers: Vec<PoissonLayer>,
+    vector_field: PoissonVectorField,
+    points: Vec<Point3<Real>>,
+    normals: Vec<Vector3<Real>>,
+    screening: Real,
+    max_relaxation_iters: usize,
+    next_layer: usize,
+}
+
+impl PoissonBuilder {
+    /// Build the multigrid octree layers and the Poisson vector field. No layer is
+    /// solved yet; call [`Self::solve_step`] `num_layers()` times, or [`Self::finish`]
+    /// (which solves any remaining layers).
+    pub fn new(
+        points: &[Point3<Real>],
+        normals: &[Vector3<Real>],
+        screening: Real,
+        density_estimation_depth: usize,
+        max_depth: usize,
+        max_relaxation_iters: usize,
+    ) -> Self {
+        assert_eq!(
+            points.len(),
+            normals.len(),
+            "Exactly one normal per point must be provided."
+        );
+        assert!(density_estimation_depth <= max_depth);
+        let mut root_aabb = Aabb::from_points(points);
+        let max_extent = root_aabb.extents().max();
+        let leaf_cell_width = max_extent / (2.0 as Real).powi(max_depth as i32);
+        root_aabb.loosen(leaf_cell_width);
+        let grid_origin = root_aabb.mins;
+
+        let mut layers = vec![];
+        layers.push(PoissonLayer::from_points(points, grid_origin, leaf_cell_width));
+
+        for i in 0..max_depth {
+            let layer = PoissonLayer::from_next_layer(points, &layers[i]);
+            layers.push(layer);
+        }
+
+        // Reverse so the coarser layers go first.
+        layers.reverse();
+
+        let vector_field =
+            PoissonVectorField::new(&layers, points, normals, density_estimation_depth);
+
+        Self {
+            layers,
+            vector_field,
+            points: points.to_vec(),
+            normals: normals.to_vec(),
+            screening,
+            max_relaxation_iters,
+            next_layer: 0,
+        }
+    }
+
+    /// Number of multigrid layers (`== max_depth + 1`).
+    pub fn num_layers(&self) -> usize {
+        self.layers.len()
+    }
+
+    /// Solve the next unsolved multigrid layer (coarsest first). Returns `true` while
+    /// more layers remain to be solved, `false` once the last layer has been solved.
+    pub fn solve_step(&mut self) -> bool {
+        if self.next_layer >= self.layers.len() {
+            return false;
+        }
+        let i = self.next_layer;
+        let result = PoissonLayer::solve(
+            &self.layers,
+            i,
+            &self.vector_field,
+            &self.points,
+            &self.normals,
+            self.screening,
+            self.max_relaxation_iters,
+        );
+        self.layers[i].node_weights = result;
+        self.next_layer += 1;
+        self.next_layer < self.layers.len()
+    }
+
+    /// Solve any remaining layers, compute the density-weighted isovalue, and return the
+    /// reconstruction together with the input points (the caller needs them to pick an
+    /// extraction iso level and to trim far triangles).
+    pub fn finish(mut self) -> (PoissonReconstruction, Vec<Point3<Real>>) {
+        while self.solve_step() {}
+
+        let mut result = PoissonReconstruction {
+            layers: self.layers,
+            isovalue: 0.0,
+        };
+        let mut isovalue = 0.0;
+        let mut total_weight = 0.0;
+        for (pt, w) in self.points.iter().zip(self.vector_field.densities.iter()) {
+            isovalue += result.eval(pt) / *w;
+            total_weight += 1.0 / *w;
+        }
+        result.isovalue = if total_weight != 0.0 {
+            isovalue / total_weight
+        } else {
+            0.0
+        };
+        (result, self.points)
     }
 }
 

@@ -100,8 +100,9 @@
   padding: 4px 14px;
   cursor: pointer;
 }
-.seg-btn:hover { background: var(--hover-bg); }
+.seg-btn:hover:not(:disabled) { background: var(--hover-bg); }
 .seg-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.seg-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
 /* Disclosure toggle */
 .link-btn {

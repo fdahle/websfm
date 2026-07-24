@@ -8,14 +8,16 @@ import PresetCards from './ui/PresetCards.vue'
 import WarnBox from './ui/WarnBox.vue'
 import GlossaryTerm from '../glossary/GlossaryTerm.vue'
 import { MESH_DEFAULTS, MESH_PRESETS, MESH_PRESET_META } from '../../core/defaults.user.js'
+import { recommendMeshDepth } from '../../core/products/mesh.js'
 
 // Build Mesh (screened Poisson over the dense cloud). Defaults are the single source
 // of truth in core/defaults.user.js (core/products/mesh.js keeps matching fallbacks).
 // `hasDenseNormals` gates the run: Poisson needs the dense cloud's oriented normals,
 // which only exist on a dense cloud produced after normals were plumbed.
-defineProps({
+const props = defineProps({
   hasDense: { type: Boolean, default: false },
   hasDenseNormals: { type: Boolean, default: false },
+  denseCount: { type: Number, default: 0 },
 })
 
 const emit = defineEmits(['close', 'run'])
@@ -36,6 +38,11 @@ function selectPreset(id) {
   settings.value = { ...resolvePreset(id) }
   baseId.value = id
 }
+
+// Flag an octree depth that's high for this cloud's point count: too high mostly builds
+// empty octree cells — slow and RAM-hungry with no real detail gain (see mesh.js).
+const recommendedDepth = computed(() => recommendMeshDepth(props.denseCount))
+const depthTooHigh = computed(() => props.denseCount > 0 && settings.value.depth > recommendedDepth.value)
 
 function run() {
   emit('run', { ...settings.value })
@@ -69,6 +76,12 @@ function run() {
           </template>
           <input id="mesh-depth" v-model.number="settings.depth" type="number" min="4" max="12" step="1" class="field-input" />
         </SettingsField>
+
+        <WarnBox v-if="depthTooHigh">
+          Depth {{ settings.depth }} is high for {{ denseCount.toLocaleString() }} points
+          (recommended ≤ {{ recommendedDepth }}). The Poisson solve may be slow and
+          memory-hungry with little extra detail — consider lowering it.
+        </WarnBox>
 
         <SettingsField label="Screening weight" label-for="mesh-screen"
           hint="How tightly the surface fits the points. 0 = smoothest/fastest; higher hugs the data.">

@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, watch, nextTick, onMounted } from 'vue'
-import { useLog } from '../../composables/useLog.js'
+import { useLog, stripSourcePrefix } from '../../composables/useLog.js'
 import { useLogStore } from '../../stores/useLogStore.js'
 import { useProjectsStore } from '../../stores/useProjectsStore.js'
 import { useCommands } from '../../composables/useCommands.js'
@@ -127,6 +127,12 @@ const showSource = ref(true)
 // this only controls whether they're shown here. Off by default.
 const showDetail = ref(false)
 
+// Channel tabs: 'pipeline' = the process/scientific record, 'activity' = user-action
+// confirmations (toggles, add/enable/rename), 'all' = both. Entries persisted before
+// this field existed have no `channel` ⇒ treated as pipeline.
+const activeTab = ref('pipeline')
+function entryChannel(e) { return e.channel === 'activity' ? 'activity' : 'pipeline' }
+
 // Filter panel
 const filterOpen = ref(false)
 const hiddenSources = ref(new Set())
@@ -139,6 +145,7 @@ const allSources = computed(() => {
 })
 
 function passesFilter(e) {
+  if (activeTab.value !== 'all' && entryChannel(e) !== activeTab.value) return false
   if (!showDetail.value && e.level === 'debug') return false
   if (hiddenSources.value.has(e.source)) return false
   return true
@@ -150,6 +157,15 @@ const filteredEntries = computed(() => {
   for (const e of earlier.value) if (passesFilter(e)) out.push(e)
   for (const e of entries.value) if (passesFilter(e)) out.push(e)
   return out
+})
+
+// Per-tab counts for the tab badges (live tail + loaded scroll-back).
+const channelCounts = computed(() => {
+  let pipeline = 0, activity = 0
+  const tally = e => { entryChannel(e) === 'activity' ? activity++ : pipeline++ }
+  for (const e of earlier.value) tally(e)
+  for (const e of entries.value) tally(e)
+  return { pipeline, activity, all: pipeline + activity }
 })
 
 function toggleSource(source) {
@@ -170,7 +186,7 @@ function hideAll() { hiddenSources.value = new Set(allSources.value) }
 const SOURCE_COLORS = {
   'Images':   '#4d9de0',
   'Metadata': '#9b59b6',
-  'SIFT':     '#e67e22',
+  'Detection': '#e67e22',
   'Matching': '#1abc9c',
   'Project':  '#2ecc71',
   'Reconstruction': '#e0518a',
@@ -274,13 +290,27 @@ async function onClear() {
   await logStore.clearConsole()
 }
 
-// Save the *complete* stream to a .txt file — the whole on-disk record, not the
-// capped live window and not filtered (Detail/source toggles are view-only).
+// Export options. The default export is the clean process record: pipeline lines
+// only, no debug noise. Activity confirmations and debug diagnostics are opt-in so
+// they never clog the exported log (the whole point of the Activity channel). These
+// are export-only and independent of the view's tab / Detail toggles.
+const exportMenuOpen = ref(false)
+const exportActivity = ref(false)
+const exportDebug = ref(false)
+
+// Save the stream to a .txt file — the whole on-disk record, not the capped live
+// window. Filtered by the export options above (never by the view's Detail/tab/
+// source toggles). The source-name prefix is stripped so the column isn't doubled.
 // Falls back to what's in memory if the stream can't be read.
 async function saveTxt() {
-  const fmt = e => `${e.time}  ${(e.source ?? '').padEnd(10)}  ${e.level.padEnd(7)}  ${e.message}`
+  const fmt = e => `${e.time}  ${(e.source ?? '').padEnd(10)}  ${e.level.padEnd(7)}  ${stripSourcePrefix(e.source, e.message)}`
   let src = await logStore.readAll()
   if (!src || src.length === 0) src = [...earlier.value, ...entries.value]
+  src = src.filter(e => {
+    if (!exportActivity.value && (e.channel === 'activity')) return false
+    if (!exportDebug.value && e.level === 'debug') return false
+    return true
+  })
   const lines = src.map(fmt)
   const blob = new Blob([lines.join('\n')], { type: 'text/plain' })
   const url = URL.createObjectURL(blob)
@@ -299,7 +329,19 @@ async function saveTxt() {
   <div class="console" :style="{ height: height + 'px' }">
     <div class="resize-handle" @mousedown.prevent="onDragStart" />
     <div class="console-header">
-      <span class="console-title">Console</span>
+      <div class="console-tabs">
+        <button
+          v-for="tab in [
+            { id: 'pipeline', label: 'Pipeline', count: channelCounts.pipeline },
+            { id: 'activity', label: 'Activity', count: channelCounts.activity },
+            { id: 'all', label: 'All', count: channelCounts.all },
+          ]"
+          :key="tab.id"
+          class="console-tab"
+          :class="{ active: activeTab === tab.id }"
+          @click="activeTab = tab.id"
+        >{{ tab.label }}<span class="tab-count">{{ tab.count }}</span></button>
+      </div>
       <div class="header-actions">
         <button
           class="btn-action"
@@ -319,7 +361,26 @@ async function saveTxt() {
           title="Filter by source"
           @click="filterOpen = !filterOpen"
         >Filter</button>
-        <button class="btn-action" title="Save visible entries to TXT" @click="saveTxt">Save TXT</button>
+        <div class="export-wrap">
+          <button class="btn-action" title="Save the log to a TXT file" @click="saveTxt">Save TXT</button>
+          <button
+            class="btn-action export-caret"
+            :class="{ active: exportMenuOpen }"
+            title="Export options"
+            @click="exportMenuOpen = !exportMenuOpen"
+          >▾</button>
+          <div v-if="exportMenuOpen" class="export-menu" @mouseleave="exportMenuOpen = false">
+            <div class="export-menu-title">Include in export</div>
+            <label class="export-opt">
+              <input type="checkbox" v-model="exportActivity" />
+              <span>Activity (user actions)</span>
+            </label>
+            <label class="export-opt">
+              <input type="checkbox" v-model="exportDebug" />
+              <span>Detailed (debug) lines</span>
+            </label>
+          </div>
+        </div>
         <button class="btn-clear" title="Clear" @click="onClear">Clear</button>
       </div>
     </div>
@@ -329,18 +390,22 @@ async function saveTxt() {
           v-for="entry in filteredEntries"
           :key="entry.id"
           class="entry"
-          :class="`level-${entry.level}`"
+          :class="[`level-${entry.level}`, { 'channel-activity': entryChannel(entry) === 'activity' }]"
         >
+          <span v-if="entryChannel(entry) === 'activity'" class="entry-activity-glyph" title="User action">▸</span>
           <span class="entry-time">{{ entry.time }}</span>
           <span
             v-if="showSource"
             class="entry-source"
             :style="entry.source ? sourceStyle(entry.source) : {}"
           >{{ entry.source ?? '—' }}</span>
-          <span class="entry-msg">{{ entry.message }}</span>
+          <span class="entry-msg">{{ stripSourcePrefix(entry.source, entry.message) }}</span>
         </div>
         <div v-if="filteredEntries.length === 0" class="empty">
-          {{ entries.length === 0 && earlier.length === 0 ? 'No output yet.' : 'No entries match the current filter.' }}
+          {{ entries.length === 0 && earlier.length === 0
+            ? 'No output yet.'
+            : activeTab === 'activity' ? 'No activity yet — actions you take appear here.'
+            : 'No entries match the current filter.' }}
         </div>
       </div>
 
@@ -426,12 +491,51 @@ async function saveTxt() {
   flex-shrink: 0;
 }
 
-.console-title {
+.console-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.console-tab {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--console-text-dim);
   font-size: 11px;
   font-weight: 600;
-  color: var(--console-text-label);
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  padding: 3px 8px;
+  font-family: inherit;
+}
+
+.console-tab:hover {
+  color: var(--console-text);
+}
+
+.console-tab.active {
+  color: var(--console-text);
+  border-bottom-color: var(--accent);
+}
+
+.tab-count {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0;
+  color: var(--console-text-dim);
+  background: var(--console-btn-hover);
+  border-radius: 8px;
+  padding: 0 5px;
+  line-height: 1.5;
+}
+
+.console-tab.active .tab-count {
+  color: var(--console-text);
 }
 
 .header-actions {
@@ -460,6 +564,62 @@ async function saveTxt() {
   color: var(--console-text);
   background: var(--console-btn-hover);
   border-color: var(--console-border);
+}
+
+/* Save TXT + its export-options popover */
+.export-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.export-caret {
+  padding: 1px 4px;
+}
+
+.export-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 4px;
+  z-index: 5;
+  background: var(--console-bg);
+  border: 1px solid var(--console-border);
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+  padding: 6px;
+  min-width: 190px;
+}
+
+.export-menu-title {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--console-text-label);
+  padding: 2px 4px 6px;
+}
+
+.export-opt {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 4px;
+  cursor: pointer;
+  border-radius: 3px;
+  font-size: 11px;
+  color: var(--console-text);
+  user-select: none;
+}
+
+.export-opt:hover {
+  background: var(--console-hover);
+}
+
+.export-opt input[type="checkbox"] {
+  margin: 0;
+  cursor: pointer;
+  accent-color: var(--accent);
 }
 
 .btn-clear {
@@ -577,6 +737,20 @@ async function saveTxt() {
 
 .entry-msg {
   color: var(--console-text);
+}
+
+/* Activity lines read as "you did this", not "the algorithm found this":
+   a leading glyph + a slightly recessed message. */
+.entry-activity-glyph {
+  flex-shrink: 0;
+  color: var(--accent);
+  font-size: 10px;
+  opacity: 0.8;
+}
+
+.channel-activity .entry-msg {
+  color: var(--console-text-dim);
+  font-style: italic;
 }
 
 .level-success .entry-msg { color: #4ec94e; }

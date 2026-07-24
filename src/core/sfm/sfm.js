@@ -132,7 +132,7 @@ async function reconstructSingleModel(input, hooks = {}) {
     const now = performance.now()
     stageTimes[label] = now - stageMark
     stageMark = now
-    log(`Reconstruction: stage "${label}" took ${(stageTimes[label]).toFixed(0)}ms`, 'debug', 'Reconstruction')
+    log(`stage "${label}" took ${(stageTimes[label]).toFixed(0)}ms`, 'debug', 'Reconstruction')
   }
 
   // Per-track colour: median (per channel) of the source-image RGB sampled at
@@ -172,10 +172,10 @@ async function reconstructSingleModel(input, hooks = {}) {
   try {
     const imgs = images.filter((img) => img.kpStatus === 'done')
     if (imgs.length < 2) {
-      log('Reconstruction: need at least 2 images with keypoints', 'warn', 'Reconstruction')
+      log('need at least 2 images with keypoints', 'warn', 'Reconstruction')
       return done('idle')
     }
-    log(`Reconstruction: starting with ${imgs.length} images, ${donePairs.length} match pairs`
+    log(`starting with ${imgs.length} images, ${donePairs.length} match pairs`
       + `${weakPairs.length ? ` (+${weakPairs.length} weak PnP bridge${weakPairs.length === 1 ? '' : 's'})` : ''}`,
       'info', 'Reconstruction')
 
@@ -199,7 +199,7 @@ async function reconstructSingleModel(input, hooks = {}) {
       const sizes = [...comps.values()].sort((a, b) => b - a)
       const med = (arr) => (arr.length ? [...arr].sort((a, b) => a - b)[arr.length >> 1] : 0)
       const isolated = [...deg.values()].filter((d) => d === 0).length
-      log(`Reconstruction: match graph — ${sizes.length} component(s), largest ${sizes[0] ?? 0}/${imgs.length} images`
+      log(`match graph — ${sizes.length} component(s), largest ${sizes[0] ?? 0}/${imgs.length} images`
         + `${isolated ? `, ${isolated} isolated` : ''}; median ${med([...deg.values()])} pairs/image, `
         + `median ${med(donePairs.map((e) => e.inlierCount))} inliers/pair`,
         (sizes[0] ?? 0) < imgs.length ? 'warn' : 'info', 'Reconstruction')
@@ -225,16 +225,16 @@ async function reconstructSingleModel(input, hooks = {}) {
         const obs = calibratedFiducialPairs(img, s)
         const fit = cal ? fitFiducialTransform(obs, cal.transform || 'affine') : fitFiducialAffine(obs)
         if (!fit) {
-          log(`Reconstruction: ${img.name} — fiducial fit failed (${obs.length} usable mark(s), `
+          log(`${img.name} — fiducial fit failed (${obs.length} usable mark(s), `
             + `need ≥3); falling back to standard intrinsics`, 'warn', 'Reconstruction')
           continue
         }
         const pitchUm = fit.pitchMm * 1000
-        log(`Reconstruction: ${img.name} — fiducial ${cal?.transform || 'affine'} fit: pitch ${pitchUm.toFixed(2)}µm/px, `
+        log(`${img.name} — fiducial ${cal?.transform || 'affine'} fit: pitch ${pitchUm.toFixed(2)}µm/px, `
           + `${fit.rotDeg == null ? '' : `rot ${fit.rotDeg.toFixed(2)}°, shear ${fit.shear.toFixed(4)}, `}RMS ${fit.rmsUm.toFixed(1)}µm`,
           'info', 'Reconstruction')
         if (fit.rmsUm > 0.5 * pitchUm) {
-          log(`Reconstruction: ${img.name} — fiducial residual ${fit.rmsUm.toFixed(1)}µm exceeds `
+          log(`${img.name} — fiducial residual ${fit.rmsUm.toFixed(1)}µm exceeds `
             + `½ pixel (${(0.5 * pitchUm).toFixed(1)}µm) — check the clicked marks`, 'warn', 'Reconstruction')
         }
         const sid = img.sensorId ?? '__nosensor__'
@@ -247,12 +247,12 @@ async function reconstructSingleModel(input, hooks = {}) {
         const fiducials = entries[0].calibration
         const frame = canonicalFrame(fiducials, pitchMm)
         if (!frame) {
-          log(`Reconstruction: sensor ${sid} — could not build canonical frame (need ≥3 marks); `
+          log(`sensor ${sid} — could not build canonical frame (need ≥3 marks); `
             + `film images fall back to standard intrinsics`, 'warn', 'Reconstruction')
           continue
         }
         const source = `fiducial interior orientation (${fiducials.focalMm}mm ÷ ${(pitchMm * 1000).toFixed(2)}µm/px)`
-        log(`Reconstruction: sensor ${sid} — canonical frame ${frame.width}×${frame.height}px, `
+        log(`sensor ${sid} — canonical frame ${frame.width}×${frame.height}px, `
           + `K fx=${frame.K.fx.toFixed(1)} cx=${frame.K.cx.toFixed(1)} cy=${frame.K.cy.toFixed(1)} `
           + `(median pitch ${(pitchMm * 1000).toFixed(2)}µm/px over ${entries.length} image(s))`,
           'info', 'Reconstruction')
@@ -282,7 +282,7 @@ async function reconstructSingleModel(input, hooks = {}) {
           }
         }
         if (remapped) {
-          log(`Reconstruction: remapped ${remapped} GCP observation(s) on film images `
+          log(`remapped ${remapped} GCP observation(s) on film images `
             + `into the canonical frame`, 'info', 'Reconstruction')
         }
       }
@@ -298,7 +298,7 @@ async function reconstructSingleModel(input, hooks = {}) {
       if (K.source.startsWith('default')) defaultKCount++
       const implied = K.impliedFilmWidthMm != null
         ? ` [implies ${K.impliedFilmWidthMm.toFixed(0)}mm film width]` : ''
-      log(`Reconstruction: K[${img.name}] fx=${K.fx.toFixed(1)} fy=${K.fy.toFixed(1)} `
+      log(`K[${img.name}] fx=${K.fx.toFixed(1)} fy=${K.fy.toFixed(1)} `
         + `cx=${K.cx.toFixed(1)} cy=${K.cy.toFixed(1)} — ${K.source}${implied}`,
         'debug', 'Reconstruction')
       // A real principal point sits within a few % of the image centre. A cx/cy
@@ -312,7 +312,7 @@ async function reconstructSingleModel(input, hooks = {}) {
         const key = img.sensorId ?? img.uuid
         if (!ppWarned.has(key)) {
           ppWarned.add(key)
-          log(`Reconstruction: principal point cx=${K.cx.toFixed(1)} cy=${K.cy.toFixed(1)} is far from `
+          log(`principal point cx=${K.cx.toFixed(1)} cy=${K.cy.toFixed(1)} is far from `
             + `the image centre (${(iw / 2).toFixed(0)}, ${(ih / 2).toFixed(0)}) — the sensor table takes `
             + `ABSOLUTE pixels. If this calibration came from Metashape (which reports centre offsets), `
             + `enter ${(iw / 2).toFixed(1)} + cx and ${(ih / 2).toFixed(1)} + cy instead.`,
@@ -322,7 +322,7 @@ async function reconstructSingleModel(input, hooks = {}) {
       // The pixel-pitch path can silently produce an off-standard film width (a
       // ~9% focal error on the CA…V set). Flag it so the user checks pitch/format.
       if (K.impliedFilmWidthMm != null && K.filmWidthOk === false) {
-        log(`Reconstruction: K[${img.name}] implied film width ${K.impliedFilmWidthMm.toFixed(0)}mm `
+        log(`K[${img.name}] implied film width ${K.impliedFilmWidthMm.toFixed(0)}mm `
           + `is not a standard aerial format (~230/240mm) — check the scan pixel pitch, or use the `
           + `film/sensor-format (mm) field instead of pixel size.`, 'warn', 'Reconstruction')
       }
@@ -350,7 +350,7 @@ async function reconstructSingleModel(input, hooks = {}) {
       undistortedUuids.add(img.uuid)
     }
     if (undistortedImgs > 0) {
-      log(`Reconstruction: undistorted keypoints on ${undistortedImgs}/${imgs.length} image(s) `
+      log(`undistorted keypoints on ${undistortedImgs}/${imgs.length} image(s) `
         + `(lens distortion removed at ingest — pipeline stays pinhole; `
         + `mean shift ${(shiftSum / Math.max(1, shiftN)).toFixed(2)}px, max ${shiftMax.toFixed(2)}px)`,
         'info', 'Reconstruction')
@@ -385,7 +385,7 @@ async function reconstructSingleModel(input, hooks = {}) {
       }
       if (refit > 0) {
         const med = (a) => [...a].sort((x, y) => x - y)[a.length >> 1]
-        log(`Reconstruction: re-fitted F on undistorted keypoints for ${refit} pair(s)`
+        log(`re-fitted F on undistorted keypoints for ${refit} pair(s)`
           + `${skipped ? ` (${skipped} skipped)` : ''} — median epipolar RMS `
           + `${med(before).toFixed(2)}px → ${med(after).toFixed(2)}px (stale distorted-space fit replaced)`,
           'info', 'Reconstruction')
@@ -403,7 +403,7 @@ async function reconstructSingleModel(input, hooks = {}) {
     if (cfg.refineIntrinsics === 'auto') {
       if (anyCalibratedDistortion) {
         cfg.refineIntrinsics = 'none'
-        log(`Reconstruction: refineIntrinsics 'auto' → 'none' `
+        log(`refineIntrinsics 'auto' → 'none' `
           + '(a calibrated distortion model exists — self-cal off to avoid double-correcting)',
           'info', 'Reconstruction')
       } else {
@@ -413,14 +413,14 @@ async function reconstructSingleModel(input, hooks = {}) {
         // post-filter refineMode is computed per pass rather than fixed.
         cfg.refineIntrinsics = SELF_CAL_BASE_TERMS
         cfg.selfCalStaged = true
-        log(`Reconstruction: refineIntrinsics 'auto' → staged (base '${SELF_CAL_BASE_TERMS}', `
+        log(`refineIntrinsics 'auto' → staged (base '${SELF_CAL_BASE_TERMS}', `
           + 'escalating to cx,cy / k2 / k3 in post-filter passes as the model grows)',
           'info', 'Reconstruction')
       }
     }
 
     if (defaultKCount > 0) {
-      log(`Reconstruction: ${defaultKCount}/${imgs.length} image(s) have no focal length — using a default FOV guess. `
+      log(`${defaultKCount}/${imgs.length} image(s) have no focal length — using a default FOV guess. `
         + `Wrong intrinsics distort the geometry and commonly prevent cameras from registering; `
         + `supply a focal length or sensor size for reliable results.`,
         defaultKCount === imgs.length ? 'warn' : 'info', 'Reconstruction')
@@ -464,7 +464,7 @@ async function reconstructSingleModel(input, hooks = {}) {
         },
       )
       if (summary.aborted) {
-        log(`Reconstruction: rotation-cycle filter SKIPPED — median triangle cycle error `
+        log(`rotation-cycle filter SKIPPED — median triangle cycle error `
           + `${summary.medianTriErrDeg.toFixed(1)}° (over ${summary.triangles} triangles) is far beyond the `
           + `${summary.abortErrDeg.toFixed(0)}° sanity ceiling, so the pairwise rotations are globally `
           + `untrustworthy and dropping edges would execute true pairs. Common causes: wrong or `
@@ -480,12 +480,12 @@ async function reconstructSingleModel(input, hooks = {}) {
         const worst = [...drop].sort((a, b) => a.ratio - b.ratio).slice(0, 10)
         const worstStr = worst.map((d) =>
           `${nm(d.idA)}↔${nm(d.idB)} ${d.good}/${d.tri} (${(100 * d.ratio).toFixed(0)}%, ${d.inliers} inl)`).join('; ')
-        log(`Reconstruction: rotation-cycle filter removed ${drop.length}/${donePairs.length} pair(s) `
+        log(`rotation-cycle filter removed ${drop.length}/${donePairs.length} pair(s) `
           + `weighted-consistent in <${(100 * needSupport).toFixed(0)}% of their triangles `
           + `(threshold ${summary.effErrDeg.toFixed(1)}°, median tri-error ${summary.medianTriErrDeg.toFixed(1)}° `
           + `over ${summary.triangles} triangles). Worst: ${worstStr}`, 'warn', 'Reconstruction')
         for (const d of drop) {
-          log(`Reconstruction: rotation-cycle filter dropped ${nm(d.idA)} ↔ ${nm(d.idB)} — `
+          log(`rotation-cycle filter dropped ${nm(d.idA)} ↔ ${nm(d.idB)} — `
             + `cycle-consistent in only ${d.good}/${d.tri} triangles `
             + `(${(100 * d.ratio).toFixed(0)}%, ${d.inliers} inliers) — likely false match`,
             'debug', 'Reconstruction')
@@ -494,11 +494,11 @@ async function reconstructSingleModel(input, hooks = {}) {
         // them once the keypoints are self-cal-corrected.
         droppedPairs = donePairs.filter((e) => rm.has(pk(e.idA, e.idB)))
         donePairs = donePairs.filter((e) => !rm.has(pk(e.idA, e.idB)))
-        log(`Reconstruction: ${donePairs.length} verified pair(s) remain after cycle filter`
+        log(`${donePairs.length} verified pair(s) remain after cycle filter`
           + `${summary.bridgeProtected ? ` (${summary.bridgeProtected} bridge edge(s) protected from dropping)` : ''}`,
           'info', 'Reconstruction')
       } else {
-        log('Reconstruction: rotation-cycle filter — all pairs cycle-consistent '
+        log('rotation-cycle filter — all pairs cycle-consistent '
           + `(threshold ${summary.effErrDeg.toFixed(1)}°, median tri-error ${summary.medianTriErrDeg.toFixed(1)}°)`,
           'debug', 'Reconstruction')
       }
@@ -527,10 +527,10 @@ async function reconstructSingleModel(input, hooks = {}) {
     cameras.set(bestPair.idB, best.cB)
     points3d = best.points
 
-    log(`Reconstruction: initial pair ${imgA.name} ↔ ${imgB.name} `
+    log(`initial pair ${imgA.name} ↔ ${imgB.name} `
       + `(${best.inliers} inliers, ${best.points.length} pts, ${best.angle.toFixed(2)}° parallax)`,
       'success', 'Reconstruction')
-    log(`Reconstruction: init reprojection — ${fmtStats(modelReprojStats())}`, 'debug', 'Reconstruction')
+    log(`init reprojection — ${fmtStats(modelReprojStats())}`, 'debug', 'Reconstruction')
     // Essential-matrix conditioning: σ2/σ1 ≈ 1 for a valid E. A low ratio means
     // F→E used wrong intrinsics, which inflates init reprojection and typically
     // blocks PnP registration of otherwise well-connected images.
@@ -544,7 +544,7 @@ async function reconstructSingleModel(input, hooks = {}) {
         ? ' — well below 1 points to wrong intrinsics (focal / principal point), which '
           + 'inflates init reprojection and typically blocks PnP registration'
         : ''
-      log(`Reconstruction: essential matrix σ = [${s1.toFixed(3)}, ${s2.toFixed(3)}, ${s3.toFixed(3)}] — `
+      log(`essential matrix σ = [${s1.toFixed(3)}, ${s2.toFixed(3)}, ${s3.toFixed(3)}] — `
         + `σ2/σ1 ${ratio.toFixed(2)} (ideal ≈ 1.0)${conditioning}`,
         ratio < 0.7 ? 'warn' : 'debug', 'Reconstruction')
     }
@@ -699,7 +699,7 @@ async function reconstructSingleModel(input, hooks = {}) {
       log, onProgress,
     })
     const preBaStats = modelReprojStats()
-    log(`Reconstruction: pre-BA reprojection — ${fmtStats(preBaStats)}`, 'info', 'Reconstruction')
+    log(`pre-BA reprojection — ${fmtStats(preBaStats)}`, 'info', 'Reconstruction')
     markStage('registration')
 
     // ── Bundle adjustment + track filtering (Phase 2 + 3) ────────────────────
@@ -713,7 +713,7 @@ async function reconstructSingleModel(input, hooks = {}) {
     // pre-filter mess drifted cx/cy 180px on B1), only post-filter passes refine.
     async function runBundleAdjust(label, iters, refineMode = refineIntrinsics) {
       if (!(cameras.size >= 2 && points3d.length >= 10 && iters > 0)) {
-        log(`Reconstruction: ${label} skipped (cameras=${cameras.size}, `
+        log(`${label} skipped (cameras=${cameras.size}, `
           + `points=${points3d.length}, iters=${iters})`, 'debug', 'Reconstruction')
         return
       }
@@ -732,13 +732,13 @@ async function reconstructSingleModel(input, hooks = {}) {
           if (kp) observations.push({ camIdx: ci, ptIdx: pi, x: kp.x, y: kp.y })
         })
       })
-      log(`Reconstruction: ${label} — ${camList.length} cameras, ${points3d.length} points, `
+      log(`${label} — ${camList.length} cameras, ${points3d.length} points, `
         + `${observations.length} observations, ${iters} iters`, 'info', 'Reconstruction')
 
       const result = await bundleAdjust(camList, kList, points3d, observations,
         { maxIters: iters, refineIntrinsics: refineMode, sensorOfCam })
       if (!result) {
-        log(`Reconstruction: ${label} returned no result (skipped)`, 'warn', 'Reconstruction')
+        log(`${label} returned no result (skipped)`, 'warn', 'Reconstruction')
         return
       }
       // A correct bundle adjustment can only lower the cost; reject a worsening
@@ -749,10 +749,10 @@ async function reconstructSingleModel(input, hooks = {}) {
       if (result.costBefore != null && result.costAfter != null && result.costAfter > result.costBefore) {
         const delta = result.costAfter - result.costBefore
         if (delta < 0.01) {
-          log(`Reconstruction: ${label} already converged (RMS ${result.costBefore.toFixed(2)}px unchanged); `
+          log(`${label} already converged (RMS ${result.costBefore.toFixed(2)}px unchanged); `
             + `keeping the pre-BA estimate`, 'debug', 'Reconstruction')
         } else {
-          log(`Reconstruction: ${label} REJECTED — RMS ${result.costBefore.toFixed(2)}px → `
+          log(`${label} REJECTED — RMS ${result.costBefore.toFixed(2)}px → `
             + `${result.costAfter.toFixed(2)}px would worsen the model; keeping the pre-BA estimate`,
             'warn', 'Reconstruction')
         }
@@ -792,11 +792,11 @@ async function reconstructSingleModel(input, hooks = {}) {
             .filter((k) => rk[k])
             .map((k) => `${k} ${rk[k].toFixed(5)}`)
           const kdist = kterms.length ? `, ${kterms.join(', ')}` : ''
-          log(`Reconstruction: ${label} self-calibration — sensor group ${g}: `
+          log(`${label} self-calibration — sensor group ${g}: `
             + `fx ${fx0.toFixed(1)} → ${fx1.toFixed(1)} (${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%)${cxcy}${kdist}${implied}`,
             'info', 'Reconstruction')
         })
-        log(`Reconstruction: ${label} self-calibration is weakly observed on short/single strips `
+        log(`${label} self-calibration is weakly observed on short/single strips `
           + `(needs ≥2° tilt variation for a trustworthy focal); review before updating the sensor table.`,
           'debug', 'Reconstruction')
       }
@@ -881,7 +881,7 @@ async function reconstructSingleModel(input, hooks = {}) {
               const maxNormR = Math.hypot(Math.max(rk.cx, w - rk.cx) / rk.fx, Math.max(rk.cy, h - rk.cy) / rk.fy)
               const guard = radialCurveOk(composed, maxNormR, rk.fx)
               if (!guard.ok) {
-                log(`Reconstruction: ${label} self-cal composed radial fit looks unreliable — ${guard.reason}; `
+                log(`${label} self-cal composed radial fit looks unreliable — ${guard.reason}; `
                   + `dense will use it as-is but review the calibration`, 'warn', 'Reconstruction')
               }
               selfCalDistBySensor.set(sid, {
@@ -890,7 +890,7 @@ async function reconstructSingleModel(input, hooks = {}) {
             }
           }
           if (foldedImgs > 0) {
-            log(`Reconstruction: ${label} folded self-calibrated distortion into ${foldedImgs} image(s)' `
+            log(`${label} folded self-calibrated distortion into ${foldedImgs} image(s)' `
               + `keypoints (mean shift ${(foldedShift / Math.max(1, foldedN)).toFixed(2)}px; model stays pinhole)`,
               'info', 'Reconstruction')
           }
@@ -898,7 +898,7 @@ async function reconstructSingleModel(input, hooks = {}) {
       }
 
       if (result.costBefore != null && result.costAfter != null) {
-        log(`Reconstruction: ${label} RMS ${result.costBefore.toFixed(2)}px → ${result.costAfter.toFixed(2)}px `
+        log(`${label} RMS ${result.costBefore.toFixed(2)}px → ${result.costAfter.toFixed(2)}px `
           + `(−${Math.abs(result.costBefore - result.costAfter).toFixed(2)}px)`, 'success', 'Reconstruction')
       }
       const trace = result.costTrace ?? []
@@ -911,10 +911,10 @@ async function reconstructSingleModel(input, hooks = {}) {
         const verdict = lastDrop > 0.02
           ? `still descending (${(lastDrop * 100).toFixed(1)}% on last iter — raising baIterations may help)`
           : `plateaued (converged in ${trace.length} iter)`
-        log(`Reconstruction: ${label} convergence (RMS px) — ${fmtTrace.join(' → ')}; ${verdict}`,
+        log(`${label} convergence (RMS px) — ${fmtTrace.join(' → ')}; ${verdict}`,
           'debug', 'Reconstruction')
       }
-      log(`Reconstruction: ${label} reprojection — ${fmtStats(modelReprojStats())}`, 'info', 'Reconstruction')
+      log(`${label} reprojection — ${fmtStats(modelReprojStats())}`, 'info', 'Reconstruction')
     }
 
     // GCP-in-BA (F2, deferred half): once the pipeline has settled, pull the
@@ -938,7 +938,7 @@ async function reconstructSingleModel(input, hooks = {}) {
       })
       if (qualifying.length < 3) {
         if (gcps.length) {
-          log(`Reconstruction: GCP anchoring skipped (${qualifying.length}/3 GCPs `
+          log(`GCP anchoring skipped (${qualifying.length}/3 GCPs `
             + `with ≥2 registered views)`, 'debug', 'Reconstruction')
         }
         return
@@ -962,12 +962,12 @@ async function reconstructSingleModel(input, hooks = {}) {
         const pairs = tri.filter((r) => r.tri)
           .map((r) => ({ src: [r.tri.x, r.tri.y, r.tri.z], dst: [r.g.x, r.g.y, r.g.z ?? 0] }))
         if (pairs.length < 3) {
-          log('Reconstruction: GCP anchoring stopped (fewer than 3 GCPs triangulated)', 'warn', 'Reconstruction')
+          log('GCP anchoring stopped (fewer than 3 GCPs triangulated)', 'warn', 'Reconstruction')
           return
         }
         const fit = fitSimilarity(pairs)
         if (!fit) {
-          log('Reconstruction: GCP anchoring stopped (similarity fit failed — degenerate configuration)',
+          log('GCP anchoring stopped (similarity fit failed — degenerate configuration)',
             'warn', 'Reconstruction')
           return
         }
@@ -1013,18 +1013,18 @@ async function reconstructSingleModel(input, hooks = {}) {
         })
         if (!anchors.length) return
 
-        log(`Reconstruction: GCP-anchored bundle adjustment (round ${round + 1}/2) — `
+        log(`GCP-anchored bundle adjustment (round ${round + 1}/2) — `
           + `${anchors.length} GCP(s), seed scale ${fit.scale.toPrecision(4)}, `
           + `seed RMS ${fit.rms.toPrecision(3)}`, 'info', 'Reconstruction')
 
         const result = await bundleAdjust(camList, kList, [...points3d, ...anchorPts], observations,
           { maxIters: baIterations, refineIntrinsics: 'none', sensorOfCam, gcpAnchors: anchors })
         if (!result) {
-          log('Reconstruction: GCP-anchored bundle adjustment returned no result (skipped)', 'warn', 'Reconstruction')
+          log('GCP-anchored bundle adjustment returned no result (skipped)', 'warn', 'Reconstruction')
           return
         }
         if (result.costAfter > result.costBefore + 0.01) {
-          log(`Reconstruction: GCP-anchored bundle adjustment REJECTED — would worsen reprojection RMS `
+          log(`GCP-anchored bundle adjustment REJECTED — would worsen reprojection RMS `
             + `${result.costBefore.toFixed(2)}px → ${result.costAfter.toFixed(2)}px`, 'warn', 'Reconstruction')
           return
         }
@@ -1034,7 +1034,7 @@ async function reconstructSingleModel(input, hooks = {}) {
         // Only the original (non-anchor) points are kept — the synthetic anchor
         // points were scratch space for this BA pass, not real SIFT tracks.
         points3d = points3d.map((pt, i) => ({ ...pt, x: result.points3d[i].x, y: result.points3d[i].y, z: result.points3d[i].z }))
-        log(`Reconstruction: GCP-anchored bundle adjustment RMS ${result.costBefore.toFixed(2)}px → `
+        log(`GCP-anchored bundle adjustment RMS ${result.costBefore.toFixed(2)}px → `
           + `${result.costAfter.toFixed(2)}px, anchor residual (SfM units) → ${result.anchorRmsAfter.toFixed(4)}`,
           'success', 'Reconstruction')
       }
@@ -1045,7 +1045,7 @@ async function reconstructSingleModel(input, hooks = {}) {
     const logOutlierShare = (label) => {
       const resid = modelResiduals()
       const nr = resid.length || 1
-      log(`Reconstruction: ${label} — ${(100 * resid.filter((r) => r > 5).length / nr).toFixed(1)}% obs over 5px, `
+      log(`${label} — ${(100 * resid.filter((r) => r > 5).length / nr).toFixed(1)}% obs over 5px, `
         + `${(100 * resid.filter((r) => r > 20).length / nr).toFixed(1)}% over 20px`, 'info', 'Reconstruction')
     }
 
@@ -1107,7 +1107,7 @@ async function reconstructSingleModel(input, hooks = {}) {
         maxReprojPx: filterMaxReprojPx * 2,
         minTriAngleDeg: filterMinTriAngleDeg,
       })
-      log(`Reconstruction: pre-BA gross cleanup (≤${(filterMaxReprojPx * 2).toFixed(1)}px, `
+      log(`pre-BA gross cleanup (≤${(filterMaxReprojPx * 2).toFixed(1)}px, `
         + `≥${filterMinTriAngleDeg}° parallax) — removed ${preClean.obsRemoved} obs + `
         + `${preClean.ptsRemoved} points; ${points3d.length} points remain`,
       preClean.obsRemoved || preClean.ptsRemoved ? 'info' : 'debug', 'Reconstruction')
@@ -1132,13 +1132,13 @@ async function reconstructSingleModel(input, hooks = {}) {
         const merged = mres.merged
         if (added || merged) {
           const after = trackHist()
-          log(`Reconstruction: retriangulation +${added} point(s), merged ${merged} split track(s); `
+          log(`retriangulation +${added} point(s), merged ${merged} split track(s); `
             + `${points3d.length} points`, 'info', 'Reconstruction')
-          log(`Reconstruction: track lengths (2/3/4+ view) ${before.t2}/${before.t3}/${before.t4} → `
+          log(`track lengths (2/3/4+ view) ${before.t2}/${before.t3}/${before.t4} → `
             + `${after.t2}/${after.t3}/${after.t4}`, 'info', 'Reconstruction')
           await runBundleAdjust('post-retriangulation bundle adjustment', baIterations, 'none')
         } else {
-          log('Reconstruction: retriangulation found no missed structure', 'debug', 'Reconstruction')
+          log('retriangulation found no missed structure', 'debug', 'Reconstruction')
         }
       }
 
@@ -1147,7 +1147,7 @@ async function reconstructSingleModel(input, hooks = {}) {
       for (const [round, maxPx] of [[1, filterMaxReprojPx * 2], [2, filterMaxReprojPx]]) {
         onProgress?.(imgs.length - 1, imgs.length, `Track filter + bundle adjustment (pass ${round})…`)
         const { obsRemoved, ptsRemoved } = filterTracks({ maxReprojPx: maxPx, minTriAngleDeg: filterMinTriAngleDeg })
-        log(`Reconstruction: track filter pass ${round} (≤${maxPx.toFixed(1)}px, ≥${filterMinTriAngleDeg}° parallax) — `
+        log(`track filter pass ${round} (≤${maxPx.toFixed(1)}px, ≥${filterMinTriAngleDeg}° parallax) — `
           + `removed ${obsRemoved} obs + ${ptsRemoved} points; ${points3d.length} points remain`, 'info', 'Reconstruction')
         // Staged self-cal (WS2): under 'auto' the post-filter passes escalate the refined
         // terms (k2 / cx,cy / k3) as the camera + observation counts clear each gate; an
@@ -1158,7 +1158,7 @@ async function reconstructSingleModel(input, hooks = {}) {
           const counts = { nCams: cameras.size, nObs }
           refineMode = stagedSelfCalTerms(counts)
           const deferred = stagedSelfCalDeferred(counts)
-          log(`Reconstruction: post-filter pass ${round} self-cal terms '${refineMode}'`
+          log(`post-filter pass ${round} self-cal terms '${refineMode}'`
             + `${deferred.length ? ` — deferred ${deferred.join('; ')}` : ' — all terms unlocked'}`,
             'info', 'Reconstruction')
         }
@@ -1170,7 +1170,7 @@ async function reconstructSingleModel(input, hooks = {}) {
         // fit noise beats folding it in. register.js's stalled-model rescue normally keeps
         // models off this floor; this protects genuinely tiny projects.
         if (refineMode !== 'none' && cameras.size < 3) {
-          log(`Reconstruction: post-filter pass ${round} self-cal skipped — ${cameras.size} camera(s) `
+          log(`post-filter pass ${round} self-cal skipped — ${cameras.size} camera(s) `
             + `cannot identify intrinsics (a 2-view model hides distortion in its points); `
             + `keeping '${refineMode}' unrefined`, 'info', 'Reconstruction')
           refineMode = 'none'
@@ -1226,7 +1226,7 @@ async function reconstructSingleModel(input, hooks = {}) {
           }
           droppedPairs = droppedPairs.filter((e) => !readmitSet.has(pkId(e.idA, e.idB)))
           const nm = (u) => imageByUuid(u)?.name ?? u
-          log(`Reconstruction: re-admitted ${readmit.length} cycle-filter-dropped pair(s) after self-cal `
+          log(`re-admitted ${readmit.length} cycle-filter-dropped pair(s) after self-cal `
             + `(${readmit.slice(0, 6).map((r) => `${nm(r.idA)}↔${nm(r.idB)}`).join(', ')}${readmit.length > 6 ? ', …' : ''}); `
             + `re-attempting registration`, 'info', 'Reconstruction')
           const before = cameras.size
@@ -1240,23 +1240,23 @@ async function reconstructSingleModel(input, hooks = {}) {
             log, onProgress,
           })
           if (cameras.size > before) {
-            log(`Reconstruction: final sweep registered ${cameras.size - before} more camera(s) `
+            log(`final sweep registered ${cameras.size - before} more camera(s) `
               + `(${cameras.size}/${imgs.length}); re-solving`, 'info', 'Reconstruction')
             await runBundleAdjust('final second-chance bundle adjustment', baIterations,
               cfg.selfCalStaged ? stagedSelfCalTerms({ nCams: cameras.size, nObs: points3d.reduce((s, p) => s + p.views.size, 0) }) : refineIntrinsics)
             filterTracks({ maxReprojPx: filterMaxReprojPx, minTriAngleDeg: filterMinTriAngleDeg })
           } else {
-            log('Reconstruction: final sweep re-admitted pairs but registered no new cameras', 'debug', 'Reconstruction')
+            log('final sweep re-admitted pairs but registered no new cameras', 'debug', 'Reconstruction')
           }
         } else {
-          log(`Reconstruction: re-admission — 0/${droppedPairs.length} dropped pair(s) cleared the `
+          log(`re-admission — 0/${droppedPairs.length} dropped pair(s) cleared the `
             + `consistency vote on the self-calibrated graph`, 'debug', 'Reconstruction')
         }
       }
 
-      log('Reconstruction: bundle adjustment + filtering complete', 'success', 'Reconstruction')
+      log('bundle adjustment + filtering complete', 'success', 'Reconstruction')
     } else {
-      log(`Reconstruction: bundle adjustment skipped (cameras=${cameras.size}, `
+      log(`bundle adjustment skipped (cameras=${cameras.size}, `
         + `points=${points3d.length}, iters=${baIterations})`, 'debug', 'Reconstruction')
     }
     if (gcps.length && cameras.size >= 2 && points3d.length >= 10) {
@@ -1285,11 +1285,11 @@ async function reconstructSingleModel(input, hooks = {}) {
         .map(([uuid, rs]) => ({ uuid, name: imageByUuid(uuid)?.name ?? uuid, s: numStats(rs) }))
         .sort((a, b) => b.s.median - a.s.median)
       const flagged = rows.filter((r) => globalMed > 0 && r.s.median > 2 * globalMed)
-      log(`Reconstruction: per-camera residuals — global median ${globalMed.toFixed(2)}px; `
+      log(`per-camera residuals — global median ${globalMed.toFixed(2)}px; `
         + `${flagged.length}/${rows.length} camera(s) over 2× (${(2 * globalMed).toFixed(2)}px)`,
         flagged.length ? 'warn' : 'info', 'Reconstruction')
       for (const r of flagged) {
-        log(`Reconstruction:   ⚠ ${r.name} — median ${r.s.median.toFixed(2)}px, `
+        log(`  ⚠ ${r.name} — median ${r.s.median.toFixed(2)}px, `
           + `p95 ${r.s.p95.toFixed(2)}px (${r.s.count} obs)`, 'warn', 'Reconstruction')
       }
     }
@@ -1298,8 +1298,8 @@ async function reconstructSingleModel(input, hooks = {}) {
     // a model dominated by 2-view tracks is weakly constrained.
     const { t2: tracks2, t3: tracks3, t4: tracks4 } = trackHist()
     const totalMs = performance.now() - t0
-    log(`Reconstruction: track lengths — ${tracks2} ×2-view, ${tracks3} ×3-view, ${tracks4} ×4+-view`, 'info', 'Reconstruction')
-    log(`Reconstruction: total time ${(totalMs / 1000).toFixed(1)}s `
+    log(`track lengths — ${tracks2} ×2-view, ${tracks3} ×3-view, ${tracks4} ×4+-view`, 'info', 'Reconstruction')
+    log(`total time ${(totalMs / 1000).toFixed(1)}s `
       + `(${Object.entries(stageTimes).map(([k, v]) => `${k} ${(v / 1000).toFixed(1)}s`).join(', ')})`, 'info', 'Reconstruction')
 
     // Q3: persistable run summary so successive runs are honestly comparable
@@ -1326,7 +1326,7 @@ async function reconstructSingleModel(input, hooks = {}) {
         imageNames: c.map((u) => imageByUuid(u)?.name ?? u),
       }))
     if (remainingComponents.length) {
-      log(`Reconstruction: ${remainingComponents.length} reconstructable-looking unregistered component(s) remain `
+      log(`${remainingComponents.length} reconstructable-looking unregistered component(s) remain `
         + `(${remainingComponents.map((c) => c.size).join(', ')} images); largest starts `
         + `${remainingComponents[0].imageNames.slice(0, 4).join(', ')}`
         + `${remainingComponents[0].size > 4 ? ', …' : ''}. Routing viable blocks to secondary-model recovery; `
@@ -1398,7 +1398,7 @@ export async function reconstruct(input, hooks = {}) {
   const initialKey = pairKey(primary.summary?.initPair)
   if (initialKey) excluded.add(initialKey)
   for (let attempt = 0; attempt < maxRetries && primary.cameras.length < cfg.seedRetryMinFraction * nInputImages; attempt++) {
-    log(`Reconstruction: primary registered only ${primary.cameras.length}/${nInputImages}; `
+    log(`primary registered only ${primary.cameras.length}/${nInputImages}; `
       + `retrying with alternate seed (${attempt + 1}/${maxRetries}, ${excluded.size} prior seed(s) excluded)`,
     'warn', 'Reconstruction')
     const candidate = await reconstructSingleModel({
@@ -1413,18 +1413,18 @@ export async function reconstruct(input, hooks = {}) {
     if (candidate.status !== 'done') continue
     if (candidate.cameras.length > primary.cameras.length
       || (candidate.cameras.length === primary.cameras.length && candidate.points.length > primary.points.length)) {
-      log(`Reconstruction: alternate seed improved primary ${primary.cameras.length} → ${candidate.cameras.length} cameras; keeping it`,
+      log(`alternate seed improved primary ${primary.cameras.length} → ${candidate.cameras.length} cameras; keeping it`,
         'success', 'Reconstruction')
       primary = candidate
     } else {
-      log(`Reconstruction: alternate seed reached ${candidate.cameras.length} cameras; keeping ${primary.cameras.length}-camera primary`,
+      log(`alternate seed reached ${candidate.cameras.length} cameras; keeping ${primary.cameras.length}-camera primary`,
         'info', 'Reconstruction')
     }
     const candidateKey = pairKey(candidate.summary?.initPair)
     if (candidateKey) excluded.add(candidateKey)
   }
   if (primary.cameras.length < 0.25 * nInputImages) {
-    log(`Reconstruction: primary remains too small after alternate-seed retries `
+    log(`primary remains too small after alternate-seed retries `
       + `(${primary.cameras.length}/${nInputImages}); secondary recovery suppressed because it cannot `
       + `reliably align against a tiny primary`, 'error', 'Reconstruction')
     primary.secondaryModels = []
@@ -1440,11 +1440,11 @@ export async function reconstruct(input, hooks = {}) {
 
   const secondaryModels = []
   const mergeReports = []
-  log(`Reconstruction: secondary-model recovery — ${jobs.length} viable stranded component(s)`,
+  log(`secondary-model recovery — ${jobs.length} viable stranded component(s)`,
     'info', 'Reconstruction')
   for (let ji = 0; ji < jobs.length; ji++) {
     const job = jobs[ji]
-    log(`Reconstruction: secondary ${ji + 1}/${jobs.length} — ${job.componentIds.length} stranded + `
+    log(`secondary ${ji + 1}/${jobs.length} — ${job.componentIds.length} stranded + `
       + `${job.boundaryIds.length} primary boundary image(s), ${job.pairs.length} pair(s)`,
     'info', 'Reconstruction')
     const secondary = await reconstructSingleModel({
@@ -1460,12 +1460,12 @@ export async function reconstruct(input, hooks = {}) {
         : undefined,
     })
     if (secondary.status !== 'done' || secondary.cameras.length < 2 || !secondary.points.length) {
-      log(`Reconstruction: secondary ${ji + 1} failed to form a usable model`, 'warn', 'Reconstruction')
+      log(`secondary ${ji + 1} failed to form a usable model`, 'warn', 'Reconstruction')
       continue
     }
     const aligned = alignSecondary(primary, secondary, job.componentIds)
     if (!aligned.accepted) {
-      log(`Reconstruction: secondary ${ji + 1} kept separate — ${aligned.reason}`, 'warn', 'Reconstruction')
+      log(`secondary ${ji + 1} kept separate — ${aligned.reason}`, 'warn', 'Reconstruction')
       secondaryModels.push({
         ...secondary,
         name: `Secondary sparse ${ji + 1}`,
@@ -1487,7 +1487,7 @@ export async function reconstruct(input, hooks = {}) {
       scaleSpread: aligned.scaleSpread,
     }
     mergeReports.push(report)
-    log(`Reconstruction: secondary ${ji + 1} merged — +${report.addedCameras} cameras, `
+    log(`secondary ${ji + 1} merged — +${report.addedCameras} cameras, `
       + `+${report.addedPoints} points; ${report.sharedCameras} shared cameras, `
       + `position RMS ${(100 * report.alignmentRmsFrac).toFixed(2)}% of span, `
       + `rotation median ${report.medianRotationDeg.toFixed(2)}°, scale spread `

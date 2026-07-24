@@ -81,6 +81,77 @@ export function transferVertexColors(meshPos, dense, cell, opts = {}) {
   return { col, misses }
 }
 
+// Bounding-box max extent of a flat position buffer (world units). 0 for an empty/flat
+// cloud. Used to size the octree leaf cell and the input downsample.
+function maxExtent(pos) {
+  const n = pos.length / 3
+  if (n === 0) return 0
+  let minx = Infinity, miny = Infinity, minz = Infinity
+  let maxx = -Infinity, maxy = -Infinity, maxz = -Infinity
+  for (let i = 0; i < n; i++) {
+    const x = pos[i * 3], y = pos[i * 3 + 1], z = pos[i * 3 + 2]
+    if (x < minx) minx = x; if (x > maxx) maxx = x
+    if (y < miny) miny = y; if (y > maxy) maxy = y
+    if (z < minz) minz = z; if (z > maxz) maxz = z
+  }
+  return Math.max(maxx - minx, maxy - miny, maxz - minz)
+}
+
+// World-unit voxel cell for the Poisson INPUT downsample at a given octree `depth`. A
+// depth-D octree resolves nothing finer than one leaf cell (extent / 2^D), so we thin the
+// input to ≈ `leafCellsPerPoint` leaf cells per point. Returns 0 (⇒ no downsample) for a
+// degenerate cloud or non-positive depth.
+export function meshInputCell(pos, depth, leafCellsPerPoint = 1) {
+  const extent = maxExtent(pos)
+  if (!(extent > 0) || !(depth > 0)) return 0
+  const leaf = extent / Math.pow(2, depth)
+  return leaf * Math.max(1, leafCellsPerPoint)
+}
+
+// Voxel-subsample the Poisson input: collapse points sharing a `cell`-sized world cell
+// into one averaged position + renormalised averaged normal (matches the fusion merge).
+// Colour is intentionally dropped — mesh vertex colour is transferred from the FULL dense
+// cloud afterwards, so it isn't needed here. Returns { pos:Float32Array, nrm:Float32Array }.
+// `cell <= 0` passes the input arrays through unchanged.
+export function subsampleForMesh(pos, nrm, cell) {
+  if (!(cell > 0)) return { pos, nrm }
+  const inv = 1 / cell
+  const n = pos.length / 3
+  const cells = new Map()
+  for (let i = 0; i < n; i++) {
+    const x = pos[i * 3], y = pos[i * 3 + 1], z = pos[i * 3 + 2]
+    const key = `${Math.floor(x * inv)},${Math.floor(y * inv)},${Math.floor(z * inv)}`
+    let a = cells.get(key)
+    if (!a) { a = { x: 0, y: 0, z: 0, nx: 0, ny: 0, nz: 0, n: 0 }; cells.set(key, a) }
+    a.x += x; a.y += y; a.z += z
+    a.nx += nrm[i * 3]; a.ny += nrm[i * 3 + 1]; a.nz += nrm[i * 3 + 2]
+    a.n++
+  }
+  const m = cells.size
+  const outPos = new Float32Array(m * 3)
+  const outNrm = new Float32Array(m * 3)
+  let j = 0
+  for (const a of cells.values()) {
+    const k = 1 / a.n
+    outPos[j * 3] = a.x * k; outPos[j * 3 + 1] = a.y * k; outPos[j * 3 + 2] = a.z * k
+    const mag = Math.hypot(a.nx, a.ny, a.nz)
+    if (mag > 1e-9) { outNrm[j * 3] = a.nx / mag; outNrm[j * 3 + 1] = a.ny / mag; outNrm[j * 3 + 2] = a.nz / mag }
+    else { outNrm[j * 3 + 2] = 1 }
+    j++
+  }
+  return { pos: outPos, nrm: outNrm }
+}
+
+// A sensible max octree depth for a cloud of `pointCount` points. Surface points fill
+// ≈ (2^depth)² occupied leaf cells (a surface is a 2-manifold), so useful depth ≈
+// ½·log₂(N). Clamped to [6, 12]. The modal warns when the chosen depth exceeds this (a
+// too-high depth mostly builds empty octree cells — slow and RAM-hungry with no detail
+// gain); core only logs the recommendation, never overrides the user's choice.
+export function recommendMeshDepth(pointCount) {
+  if (!(pointCount > 0)) return 8
+  return Math.min(12, Math.max(6, Math.round(0.5 * Math.log2(pointCount))))
+}
+
 // Generate a triangle mesh from a flat dense cloud via screened Poisson. `poissonFn`
 // is the wasm `poisson_mesh(pos, nrm, depth, screening, trimDist)` (injected). `dense`
 // is { count, pos:Float32Array(3N), col?:Uint8Array(3N), nrm:Float32Array(3N) }. The
@@ -94,13 +165,37 @@ export function generateMesh(dense, poissonFn, settings = {}, onLog = () => {}) 
   }
   const cfg = { ...MESH_DEFAULTS, ...MESH_TUNING, ...settings }
   const mergeCell = settings.mergeCell > 0 ? settings.mergeCell : 1
+  const depth = cfg.depth >>> 0
   const trimDist = cfg.trimFactor > 0 ? cfg.trimFactor * mergeCell : 0
 
-  onLog(`Mesh: Poisson over ${dense.count} points — depth ${cfg.depth}, screening ${cfg.screening}, `
+  // Flag a depth that's high for this point count (mostly builds empty octree cells).
+  const recDepth = recommendMeshDepth(dense.count)
+  if (depth > recDepth) {
+    onLog(`Mesh: depth ${depth} is high for ${dense.count.toLocaleString()} points `
+      + `(recommended ≤ ${recDepth}) — the solve may be slow with little detail gain`, 'warn', 'Products')
+  }
+
+  // Downsample the Poisson INPUT to ~one point per octree leaf cell — the solve can't
+  // resolve finer than that, so a denser cloud is wasted work. Only thins when it would
+  // actually reduce the cloud (input denser than a leaf cell). Colour transfer below
+  // still uses the full dense cloud, so this costs no quality.
+  const inCell = meshInputCell(dense.pos, depth, cfg.inputLeafCellsPerPoint)
+  let inPos = dense.pos, inNrm = dense.nrm
+  if (inCell > mergeCell * 1.01) {
+    const sub = subsampleForMesh(dense.pos, dense.nrm, inCell)
+    if (sub.pos.length / 3 < dense.count) {
+      inPos = sub.pos; inNrm = sub.nrm
+      onLog(`Mesh: subsampled input ${dense.count.toLocaleString()} → ${(inPos.length / 3).toLocaleString()} points `
+        + `(≈1 per leaf cell, ${inCell.toExponential(2)}) — colour still from the full cloud`, 'info', 'Products')
+    }
+  }
+  const inCount = inPos.length / 3
+
+  onLog(`Mesh: Poisson over ${inCount.toLocaleString()} points — depth ${depth}, screening ${cfg.screening}, `
     + `trim ${trimDist > 0 ? `${trimDist.toExponential(2)} (${cfg.trimFactor}× cell)` : 'off'}`, 'info', 'Products')
 
   const t0 = (typeof performance !== 'undefined' ? performance.now() : Date.now())
-  const bytes = poissonFn(dense.pos, dense.nrm, cfg.depth >>> 0, cfg.screening, trimDist)
+  const bytes = poissonFn(inPos, inNrm, depth, cfg.screening, trimDist)
   const { nVerts, nTris, pos, idx } = parseMeshBuffer(bytes)
   const solveMs = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - t0
   onLog(`Mesh: solve produced ${nVerts} verts / ${nTris} tris in ${(solveMs / 1000).toFixed(1)}s`,

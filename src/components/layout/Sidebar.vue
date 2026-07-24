@@ -5,7 +5,7 @@ import ImagesSection from './sidebar/ImagesSection.vue'
 import SensorsSection from './sidebar/SensorsSection.vue'
 import MatchesSection from './sidebar/MatchesSection.vue'
 import GcpsSection from './sidebar/GcpsSection.vue'
-import FootprintsSection from './sidebar/FootprintsSection.vue'
+import ShapefilesSection from './sidebar/ShapefilesSection.vue'
 import ReconstructionSection from './sidebar/ReconstructionSection.vue'
 import ProductsSection from './sidebar/ProductsSection.vue'
 import ReferenceSection from './sidebar/ReferenceSection.vue'
@@ -19,7 +19,9 @@ const props = defineProps({
   poses:      { type: Array,  default: () => [] },
   // Image footprint polygons (imported or computed from poses); the section only
   // renders when at least one exists.
-  footprints: { type: Array,  default: () => [] },
+  // Vector polygon layers ("shapefiles"): computed footprint sets + imported
+  // polygon files. [{ id, name, source, onMap, footprints:[...] }]
+  shapefiles: { type: Array,  default: () => [] },
   // Point clouds: [{ id, name, kind, createdAt, cameras: Map, points: [] }]
   clouds:     { type: Array,  default: () => [] },
   selectedCloudId: { type: String, default: null },
@@ -53,7 +55,7 @@ const emit = defineEmits([
   'add-images', 'import-file', 'remove-image', 'convert-image-to-raster', 'remove-gcp', 'select-gcp',
   'jump-to-image', 'remove-gcp-observation', 'open-gcp',
   'remove-sensor', 'merge-sensors', 'open-sensor', 'assign-sensor', 'remove-pose',
-  'remove-footprint',
+  'remove-shapefile', 'rename-shapefile', 'set-shapefile-on-map', 'zoom-to-shapefile',
   'select', 'open', 'show-info', 'delete-keypoints', 'zoom-to-image',
   'select-cloud', 'remove-cloud', 'rename-cloud', 'set-main-cloud', 'reconstruct',
   'open-matches', 'open-product', 'zoom-to-cloud',
@@ -185,13 +187,16 @@ watch(() => props.pendingRasters.length, (count, previous) => {
       @open-gcp="emit('open-gcp', $event)"
     />
 
-    <!-- Footprints are optional: only show the section when some exist. -->
-    <FootprintsSection
-      v-if="footprints.length"
+    <!-- Shapefiles (vector polygon layers) are optional: only show when some exist. -->
+    <ShapefilesSection
+      v-if="shapefiles.length"
       :open="open.footprints"
-      :footprints="footprints"
+      :sets="shapefiles"
       @toggle="toggle('footprints')"
-      @remove-footprint="emit('remove-footprint', $event)"
+      @remove-shapefile="emit('remove-shapefile', $event)"
+      @rename-shapefile="emit('rename-shapefile', $event)"
+      @set-shapefile-on-map="emit('set-shapefile-on-map', $event)"
+      @zoom-to-shapefile="emit('zoom-to-shapefile', $event)"
       @jump-to-image="emit('jump-to-image', $event)"
     />
 

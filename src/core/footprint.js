@@ -37,10 +37,20 @@ export function focalPx(sensor) {
   return sensor.focalUnit == null ? sensor.focal : null
 }
 
+// Minimum depression angle (degrees below horizontal) a corner ray must have to
+// count. A ray grazing the ground plane (near-horizontal) hits it tens of
+// thousands of km away — a footprint "covering the whole earth" — which is the
+// signature of a bad focal (near-180° FOV from a garbage EXIF focal) or an
+// oblique pose that sees past the horizon. At 1° the far corner sits at most
+// ~57× the flying height, so genuine near-nadir aerial always clears it while the
+// earth-spanning garbage is rejected. See projectFootprint's 'diverges' result.
+export const MIN_RAY_DEPRESSION_DEG = 1
+
 // Project one pixel (u,v) through the camera onto plane Z = groundZ.
-// Returns [X, Y] (object space) or null if the ray doesn't descend to the plane
-// (camera at/below the plane, or an oblique ray pointing up — e.g. the horizon).
-export function projectPixelToGround(u, v, { Mt, center, focal, cx, cy, groundZ }) {
+// Returns [X, Y] (object space) or null if the ray doesn't usefully descend to
+// the plane (camera at/below it, a ray pointing up — the horizon — or a ray so
+// near-horizontal it would land absurdly far away; see MIN_RAY_DEPRESSION_DEG).
+export function projectPixelToGround(u, v, { Mt, center, focal, cx, cy, groundZ, minSinDepression = 0 }) {
   // Image-space ray direction: photo x right, photo y up (pixel rows grow down,
   // hence the negation), optical axis at -focal.
   const vx = u - cx
@@ -53,6 +63,12 @@ export function projectPixelToGround(u, v, { Mt, center, focal, cx, cy, groundZ 
   if (dz === 0) return null
   const s = (groundZ - center[2]) / dz
   if (s <= 0) return null   // plane is behind the camera along this ray
+  // Reject a near-horizontal (grazing) ray: its depression below horizontal is
+  // asin(-dz / |d|). Too shallow ⇒ the intersection is implausibly far.
+  if (minSinDepression > 0) {
+    const len = Math.hypot(dx, dy, dz)
+    if (len === 0 || -dz / len < minSinDepression) return null
+  }
   return [center[0] + s * dx, center[1] + s * dy]
 }
 
@@ -84,7 +100,8 @@ export function projectFootprint(pose, sensor, groundZ) {
     [M[0][1], M[1][1], M[2][1]],
     [M[0][2], M[1][2], M[2][2]],
   ]
-  const ctx = { Mt, center: [pose.x, pose.y, pose.z], focal, cx, cy, groundZ }
+  const minSinDepression = Math.sin((MIN_RAY_DEPRESSION_DEG * Math.PI) / 180)
+  const ctx = { Mt, center: [pose.x, pose.y, pose.z], focal, cx, cy, groundZ, minSinDepression }
 
   const corners = [[0, 0], [width, 0], [width, height], [0, height]]
   const ring = []

@@ -142,4 +142,12 @@ export const DENSE_TUNING = {
 export const MESH_TUNING = {
   colorSearchRadius: 1,        // vertex-colour transfer: search ±N voxel cells (3³ nhood)
   grayFallback: [180, 180, 180], // colour for a vertex with no dense point nearby
+  // Poisson input downsample. A depth-D octree can't resolve detail finer than one leaf
+  // cell (extent / 2^D), so feeding it a much denser cloud is wasted work — octree build,
+  // matrix assembly and the CG solve all scale ~linearly with point count. Voxel-subsample
+  // the input to ≈ this many leaf cells per point before the solve (1 ⇒ ~one point per leaf
+  // cell). Colour transfer still uses the FULL dense cloud, so quality is unaffected. The
+  // subsample only kicks in when it would actually thin the cloud (input denser than a leaf
+  // cell); a sparse cloud passes through untouched.
+  inputLeafCellsPerPoint: 1,
 }

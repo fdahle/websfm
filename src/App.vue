@@ -18,6 +18,7 @@ import FiducialDetectModal from './components/modals/FiducialDetectModal.vue'
 import FiducialCalibrateModal from './components/modals/FiducialCalibrateModal.vue'
 import MatchListModal from './components/modals/MatchListModal.vue'
 import QualityReportModal from './components/modals/QualityReportModal.vue'
+import DebugSummaryModal from './components/modals/DebugSummaryModal.vue'
 import ProgressModal from './components/modals/ProgressModal.vue'
 import ModelDownloadModal from './components/modals/ModelDownloadModal.vue'
 import SettingsModal from './components/modals/SettingsModal.vue'
@@ -381,10 +382,14 @@ function removeGcpObservation({ gcpId, imageId }) {
   refreshGcpReport()
 }
 
-// ── Footprints ──────────────────────────────────────────────────────────────────
+// ── Shapefiles (vector polygon layers: computed footprints + imported polygons) ───
 const footprintsStore = useFootprintsStore()
-const { footprints } = storeToRefs(footprintsStore)
-const { addFootprints, computeFootprints, reprojectFootprints, removeFootprint } = footprintsStore
+// `shapefiles` = the managed sets (sidebar rows); `mapFootprints` = the flat list
+// of polygons in the sets currently shown on the map (what ViewerMap draws).
+const { sets: shapefiles, mapPolygons: mapFootprints } = storeToRefs(footprintsStore)
+const { addFootprints, computeFootprints, reprojectFootprints, removeSet, renameSet, setSetOnMap } = footprintsStore
+// Total polygons across all sets — gates the ribbon's footprint layer toggle.
+const footprintCount = computed(() => shapefiles.value.reduce((n, s) => n + s.footprints.length, 0))
 
 // ── Sensors (shared intrinsics) ───────────────────────────────────────────────────
 // Project-scoped, but restored/cleared manually (must precede images — its EXIF
@@ -415,6 +420,25 @@ const posesStore = usePosesStore()
 const { poses } = storeToRefs(posesStore)
 const { addPoses, removePose, reprojectPoses } = posesStore
 
+// Distinct current images that carry each preselect evidence source — the Match
+// modal gates its "Preselect by" methods on these (poses link by image.id, as do
+// footprints; count only links that resolve to a loaded image).
+const posedImageCount = computed(() => {
+  const ids = new Set(images.value.map((i) => i.id))
+  const posed = new Set()
+  for (const p of poses.value)
+    if (p.imageId && p.x != null && p.y != null && ids.has(p.imageId)) posed.add(p.imageId)
+  return posed.size
+})
+const footprintImageCount = computed(() => {
+  const ids = new Set(images.value.map((i) => i.id))
+  const withFp = new Set()
+  for (const s of shapefiles.value)
+    for (const fp of s.footprints)
+      if (fp.imageId && ids.has(fp.imageId)) withFp.add(fp.imageId)
+  return withFp.size
+})
+
 // ── Modals ────────────────────────────────────────────────────────────────────
 const {
   settingsOpen, aboutOpen, systemInfoOpen,
@@ -432,6 +456,7 @@ const {
   infoImageId,
   fiducialDetectOpen, fiducialDetectSensorId, fiducialCalibrateOpen, fiducialCalibrateSensorId,
   qualityOpen, qualitySection,
+  debugSummaryOpen,
 } = storeToRefs(useModalsStore())
 
 const glossaryStore = useGlossaryStore()
@@ -835,9 +860,12 @@ watch(activeTabId, (id) => { if (id === 'viewer') flushScene() })
 const showCameras = ref(true)
 const showGrid = ref(true)
 // ── Map display toggles ────────────────────────────────────────────────────────
-// Footprints default off — they clutter the basemap and are only meaningful once
-// imported/computed; the ribbon toggle turns them on.
-const showFootprints = ref(false)
+// The footprint layer master toggle (ribbon). Defaults on so a freshly computed
+// or imported shapefile set is visible immediately; per-set visibility is the
+// finer control (each set's `onMap` flag, toggled from its sidebar row). The
+// layer only ever holds polygons from sets the user has kept on the map, so this
+// no longer clutters a bare basemap.
+const showFootprints = ref(true)
 const showMapGrid = ref(true)
 
 // ── Console ───────────────────────────────────────────────────────────────────
@@ -1191,11 +1219,21 @@ function zoomToImagePosition(imgId) {
   nextTick(() => mapViewerRef.value?.zoomToImage(imgId))
 }
 
-// Footprints from imported camera poses (opens the map when any were built).
+// Footprints from imported camera poses: build one "footprints" set, then open
+// the map and zoom to it so the result is immediately visible (and any "they
+// landed somewhere unexpected" problem is obvious).
 function onFootprintFromPoses(settings) {
   footprintFromPosesOpen.value = false
-  const { computed: n } = computeFootprints(settings)
-  if (n > 0) activateTab('map')
+  const { computed: n, setId } = computeFootprints(settings)
+  if (n > 0 && setId) zoomToShapefile(setId)
+}
+
+// Switch to the map and fit the view to a shapefile set's extent.
+function zoomToShapefile(id) {
+  const set = shapefiles.value.find((s) => s.id === id)
+  if (!set) return
+  activateTab('map')
+  nextTick(() => mapViewerRef.value?.zoomToFootprints(set.footprints))
 }
 
 // ── Export (camera params + products) ───────────────────────────────────────────
@@ -1219,7 +1257,7 @@ async function handleSwitchProject(id) {
 async function handleDeleteProject(id) {
   // Capture before deleting: deleteProjectById nulls currentProjectId itself.
   const wasCurrent = id === currentProjectId.value
-  const nextId = await deleteProjectById(id)
+  await deleteProjectById(id)
 
   // Deleting the last project leaves nothing to pick — close the picker and go
   // straight to project creation (non-cancellable), never an empty list.
@@ -1235,11 +1273,14 @@ async function handleDeleteProject(id) {
   }
 
   if (wasCurrent) {
+    // Deleting the open project blanks the background and returns to the picker
+    // (now non-dismissible, since currentProjectId is null) rather than silently
+    // switching into some other project the user didn't choose.
     clearAll(resetToViewer)
     clearSensors()
     clearProjectStores()
     viewerRef.value?.clearReconstructionData()
-    if (nextId) await openProject(nextId)
+    projectPickerOpen.value = true
   }
 }
 
@@ -1439,11 +1480,12 @@ function confirmRemoveGcp(id) {
     onConfirm: () => removeGcpAndCloseTab(id),
   })
 }
-function confirmRemoveFootprint(id) {
+function confirmRemoveShapefile(id) {
+  const set = shapefiles.value.find((s) => s.id === id)
   askConfirm({
-    title: 'Remove footprint?',
-    message: `Remove this footprint? This can't be undone.`,
-    onConfirm: () => removeFootprint(id),
+    title: 'Remove shapefile?',
+    message: `Remove “${set?.name ?? 'this layer'}” and its ${set?.footprints.length ?? 0} polygon(s)? This can't be undone.`,
+    onConfirm: () => removeSet(id),
   })
 }
 function confirmClearKeypoints(idOrIds) {
@@ -1577,6 +1619,7 @@ function handleCommand(id) {
     case 'open-settings':        settingsOpen.value = true; break
     case 'open-about':           aboutOpen.value = true; break
     case 'open-system-info':     systemInfoOpen.value = true; break
+    case 'open-debug-summary':   debugSummaryOpen.value = true; break
     case 'open-glossary':        glossaryStore.openHome(); break
     case 'open-guide':           guideStore.openHome(); break
     case 'open-project-picker':  projectPickerOpen.value = !projectPickerOpen.value; break
@@ -1693,7 +1736,7 @@ function onRibbonPick(event) {
       :show-grid="showGrid"
       :show-map-grid="showMapGrid"
       :show-footprints="showFootprints"
-      :footprint-count="footprints.length"
+      :footprint-count="footprintCount"
       @command="handleCommand"
     />
     <input ref="ribbonInput" type="file" accept="image/*" multiple hidden @change="onRibbonPick" />
@@ -1753,6 +1796,8 @@ function onRibbonPick(event) {
       <MatchFeaturesModal
         v-if="matchFeaturesOpen"
         :detected-max-keypoints="detectedMaxKeypoints"
+        :posed-image-count="posedImageCount"
+        :footprint-image-count="footprintImageCount"
         @close="matchFeaturesOpen = false"
         @run="onMatchRun"
       />
@@ -1841,6 +1886,7 @@ function onRibbonPick(event) {
         v-if="meshOpen"
         :has-dense="clouds.some((c) => c.kind === 'dense' && c.count > 0)"
         :has-dense-normals="clouds.some((c) => c.kind === 'dense' && !!c.nrm)"
+        :dense-count="clouds.find((c) => c.kind === 'dense' && c.count > 0)?.count ?? 0"
         @close="meshOpen = false"
         @run="onMeshRun"
       />
@@ -1947,6 +1993,7 @@ function onRibbonPick(event) {
         :poses="poses"
         :sensors="sensors"
         :images="images"
+        :project-crs="currentCrs"
         @close="footprintFromPosesOpen = false"
         @run="onFootprintFromPoses"
       />
@@ -2137,6 +2184,10 @@ function onRibbonPick(event) {
       />
     </Teleport>
 
+    <Teleport to="body">
+      <DebugSummaryModal v-if="debugSummaryOpen" @close="debugSummaryOpen = false" />
+    </Teleport>
+
     <GlossaryModal />
     <GuideModal />
 
@@ -2149,7 +2200,7 @@ function onRibbonPick(event) {
         :selected-gcp-id="selectedGcpId"
         :sensors="sensors"
         :poses="poses"
-        :footprints="footprints"
+        :shapefiles="shapefiles"
         :clouds="clouds"
         :selected-cloud-id="selectedCloudId"
         :main-sparse-id="mainSparseId"
@@ -2193,7 +2244,10 @@ function onRibbonPick(event) {
         @open-sensor="sensorTableOpen = true"
         @assign-sensor="({ imageId, sensorId }) => assignSensor(imageId, sensorId)"
         @remove-pose="removePose"
-        @remove-footprint="confirmRemoveFootprint"
+        @remove-shapefile="confirmRemoveShapefile"
+        @rename-shapefile="({ id, name }) => renameSet(id, name)"
+        @set-shapefile-on-map="({ id, onMap }) => setSetOnMap(id, onMap)"
+        @zoom-to-shapefile="zoomToShapefile"
         @select="selectImage"
         @open="(id) => openImageTab(id)"
         @show-info="infoImageId = $event"
@@ -2228,7 +2282,7 @@ function onRibbonPick(event) {
 
         <div class="content">
           <Viewer3D ref="viewerRef" v-show="activeTabId === 'viewer'" :theme="theme" :images="images" :show-cameras="showCameras" :show-grid="showGrid" :scene-up="viewerSceneUp" @command="handleCommand" />
-          <ViewerMap ref="mapViewerRef" v-show="activeTabId === 'map'" :images="images" :gcps="gcps" :footprints="footprints" :poses="poses" :selected-id="selectedId" :selected-gcp-id="selectedGcpId" :aligned-uuids="alignedUuids" :has-sparse="hasSparse" :crs="currentCrs" :show-footprints="showFootprints" :show-grid="showMapGrid" :rasters="mapRasters" :probe-raster="probeRasterAt" :load-raster="ensureRasterLoaded" @select="selectImage" @command="handleCommand" @select-gcp="selectGcp" @set-gcp-position="setGcpGroundPosition" @add-gcp-at="addGcpAtCoord" @delete-gcp="deleteGcpFromEditor" />
+          <ViewerMap ref="mapViewerRef" v-show="activeTabId === 'map'" :images="images" :gcps="gcps" :footprints="mapFootprints" :poses="poses" :selected-id="selectedId" :selected-gcp-id="selectedGcpId" :aligned-uuids="alignedUuids" :has-sparse="hasSparse" :crs="currentCrs" :show-footprints="showFootprints" :show-grid="showMapGrid" :rasters="mapRasters" :probe-raster="probeRasterAt" :load-raster="ensureRasterLoaded" @select="selectImage" @command="handleCommand" @select-gcp="selectGcp" @set-gcp-position="setGcpGroundPosition" @add-gcp-at="addGcpAtCoord" @delete-gcp="deleteGcpFromEditor" />
           <template v-for="tab in tabs" :key="tab.id">
             <ViewerImage
               v-if="tab.type === 'image' && imageById(tab.imageId)"

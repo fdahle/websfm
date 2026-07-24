@@ -1,4 +1,7 @@
 import { ref } from 'vue'
+// Re-export the pure formatter so existing consumers keep importing it from here;
+// its implementation lives in utils/ (Vue-free) so it can be unit-tested.
+export { stripSourcePrefix } from '../utils/logFormat.js'
 
 // Module-level singleton — any file can import useLog() and share the same entries.
 const entries = ref([])
@@ -18,7 +21,17 @@ const pending = []
 const listeners = new Set()
 
 export function useLog() {
-  function log(message, level = 'info', source = null) {
+  // `opts.channel` separates the two kinds of line that share this stream:
+  //   'pipeline' (default) — the scientific/process record: what a detector,
+  //     matcher, SfM/dense run, or import actually did. This is the audit trail
+  //     the user exports and reads back.
+  //   'activity' — a one-line confirmation that the *user* just did something
+  //     reversible (toggled a match, enabled a GCP, set a cloud as main…). Shown
+  //     live so the action is acknowledged, kept for scroll-back, but off the
+  //     default export so it never clogs the record.
+  // The console renders them in separate tabs; entries persist either way.
+  function log(message, level = 'info', source = null, opts = {}) {
+    const channel = opts.channel === 'activity' ? 'activity' : 'pipeline'
     const now = new Date()
     const hms = now.toLocaleTimeString('en', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
     const ms  = now.getMilliseconds().toString().padStart(3, '0')
@@ -27,7 +40,7 @@ export function useLog() {
     // plain ++_seq collides with persisted-then-restored entries — duplicate Vue
     // :key — which surfaced as doubled console lines after reopening a project.
     // The id is also the anchor scroll-back uses to locate a line in the stream.
-    const entry = { id: `${now.getTime().toString(36)}-${(++_seq).toString(36)}`, time: `${hms}.${ms}`, level, message, source }
+    const entry = { id: `${now.getTime().toString(36)}-${(++_seq).toString(36)}`, time: `${hms}.${ms}`, level, message, source, channel }
     entries.value.push(entry)
     if (entries.value.length > MAX_BUFFER) entries.value.shift()
     pending.push(entry)

@@ -332,10 +332,13 @@ export function useImportRouting({ addGcps, addFootprints, addSensors, addPoses,
     activateTab('map')
   }
 
-  async function onFootprintImport({ footprints: parsed, sourceCrs }) {
+  async function onFootprintImport({ footprints: parsed, sourceCrs, name }) {
     footprintImportOpen.value = false
     footprintImportData.value = null
-    await addFootprints(parsed, sourceCrs)
+    // Name the imported set after the file (strip extension) so the sidebar row
+    // is recognisable; the store falls back to a generic label if absent.
+    const setName = name ? name.replace(/\.[^.]+$/, '') : undefined
+    await addFootprints(parsed, sourceCrs, setName)
     activateTab('map')
   }
 

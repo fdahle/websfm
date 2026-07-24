@@ -25,6 +25,10 @@ const props = defineProps({
 const emit = defineEmits(['command'])
 
 const container = ref(null)
+// Set when WebGL is unavailable (headless/sandboxed/GPU-disabled). We degrade to an
+// overlay instead of throwing out of the mounted hook, which would crash app mount and
+// take the whole UI down with the 3D view.
+const glError = ref('')
 let renderer, scene, camera, controls, animationId, resizeObserver, grid
 
 // ── Frustum sizing helpers ────────────────────────────────────────────────────
@@ -171,6 +175,22 @@ function init() {
   const el = container.value
   const w = el.clientWidth, h = el.clientHeight
 
+  // Create the WebGL renderer FIRST: if the context can't be created (sandboxed /
+  // GPU-disabled / headless), the constructor throws — catch it and bail before any
+  // scene/camera/controls exist, so every `if (!scene)` guard below and in the watchers
+  // keeps the component inert rather than half-initialised.
+  try {
+    renderer = new THREE.WebGLRenderer({ antialias: true })
+  } catch (e) {
+    glError.value = 'The 3D view is unavailable: this browser or environment could not '
+      + 'create a WebGL context. The rest of the app is unaffected.'
+    console.warn('[Viewer3D] WebGL unavailable — 3D view disabled:', e)
+    return
+  }
+  renderer.setPixelRatio(window.devicePixelRatio)
+  renderer.setSize(w, h)
+  el.appendChild(renderer.domElement)
+
   scene = new THREE.Scene()
   scene.background = new THREE.Color(BG[props.theme] ?? BG.dark)
 
@@ -179,11 +199,6 @@ function init() {
   camera.up.set(0, 0, 1)
   camera.position.set(3, -3, 2.5)
   camera.lookAt(0, 0, 0)
-
-  renderer = new THREE.WebGLRenderer({ antialias: true })
-  renderer.setPixelRatio(window.devicePixelRatio)
-  renderer.setSize(w, h)
-  el.appendChild(renderer.domElement)
 
   grid = makeGrid(props.theme)
   updateGrid() // orient the (empty) grid to the default up before any cloud loads
@@ -641,6 +656,11 @@ onBeforeUnmount(() => {
   >
     <ViewerContextMenu :menu="ctxMenu" :items="ctxItems" @select="onCtxSelect" />
 
+    <!-- WebGL unavailable: degrade gracefully instead of crashing app mount. -->
+    <div v-if="glError" class="gl-error">
+      <div class="gl-error-box">{{ glError }}</div>
+    </div>
+
     <!-- Viewer-local view options popover (ephemeral display tweaks) -->
     <div class="view-options">
       <button
@@ -672,6 +692,26 @@ onBeforeUnmount(() => {
   height: 100%;
   position: relative;
   overflow: hidden;
+}
+
+.gl-error {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  pointer-events: none;
+}
+.gl-error-box {
+  max-width: 360px;
+  padding: 14px 16px;
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text-dim);
+  font-size: 12.5px;
+  line-height: 1.5;
+  text-align: center;
 }
 
 .overlay {

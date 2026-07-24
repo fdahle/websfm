@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { estimatedIntrinsics } from '../../core/sfm/cameraEstimated.js'
-import { resolveK } from '../../core/sfm/reconstruction.js'
+import { resolveK, sensorWidthMm } from '../../core/sfm/reconstruction.js'
 import { DISTORTION_MODELS, coeffsForModel } from '../../core/sfm/distortion.js'
 import { parseRows, sniffDelimiter } from '../../core/io/gcp.js'
 
@@ -203,6 +203,16 @@ const initFxShown = (s) => (!isFilm(s) && s.focalUnit === 'px' ? null : initFx(s
 // Whether pixel size / format apply to a sensor at all — they only convert an mm
 // focal, so on a px-focal (or EXIF-only) digital sensor they're inert.
 const usesMmScale = (s) => focalInMm(s)
+
+// EXIF-derivable physical sensor width (mm) for a sensor's assigned image, from
+// FocalPlaneXResolution (or the make/model table). Used only as a placeholder in
+// the empty `format` cell so the value resolveK actually uses is visible — the
+// user hasn't entered a format, but SfM/footprints still have a real scale.
+function exifSensorWidth(s) {
+  const img = props.images.find((i) => i.sensorId === s.id)
+  const mm = sensorWidthMm(img?.meta ?? null)
+  return mm ? round(mm) : null
+}
 
 // ── Per-cell content for the read-only Estimated / Δ modes (column-driven) ───────
 // Returns { text, unit? } so the two mode blocks can iterate NUM_COLS like the
@@ -414,8 +424,24 @@ const totalCols = computed(() => 4 + NUM_COLS.length + 2)
               <!-- Pixel size / format only convert an mm focal. On a px-focal (or EXIF)
                    sensor they don't apply, so show '—' rather than a dimmed stale value
                    that reads as "still used". -->
+              <!-- format (mm): when the user hasn't entered one, show the EXIF-derived
+                   sensor width (FocalPlaneXResolution) as a placeholder, so the scale
+                   resolveK is actually using is visible. Typing overrides it. -->
               <input
-                v-else-if="(c.key === 'pixelSize' || c.key === 'sensorWidthMm') && usesMmScale(s)"
+                v-else-if="c.key === 'sensorWidthMm' && usesMmScale(s)"
+                class="cell-input"
+                :class="{ 'exif-placeholder': s.sensorWidthMm == null && exifSensorWidth(s) != null }"
+                type="number"
+                step="any"
+                :value="s.sensorWidthMm ?? ''"
+                :placeholder="exifSensorWidth(s) != null ? `${exifSensorWidth(s)} (EXIF)` : ''"
+                :title="s.sensorWidthMm == null && exifSensorWidth(s) != null
+                  ? `Auto-derived from EXIF (FocalPlaneXResolution): ${exifSensorWidth(s)} mm. Type a value to override.`
+                  : 'Physical sensor / film width (mm) — converts an mm focal to pixels'"
+                @change="onEdit(s.id, c.key, $event)"
+              />
+              <input
+                v-else-if="c.key === 'pixelSize' && usesMmScale(s)"
                 class="cell-input"
                 type="number"
                 step="any"
@@ -584,6 +610,10 @@ tbody td.dim { color: var(--text-dim); }
 .label-input { width: 130px; }
 .cell-input:focus { border-color: var(--accent); }
 .cell-input:disabled { opacity: 0.4; cursor: not-allowed; }
+/* An empty format cell backed by an EXIF-derived width: dashed border + a muted,
+   italic placeholder mark it as auto-filled (used-but-not-user-entered). */
+.cell-input.exif-placeholder { border-style: dashed; }
+.cell-input.exif-placeholder::placeholder { color: var(--text-dim); font-style: italic; opacity: 1; }
 
 /* Focal cell: numeric input + compact px/mm unit selector. */
 .focal-cell { display: inline-flex; gap: 4px; align-items: center; }

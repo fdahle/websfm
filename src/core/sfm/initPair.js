@@ -93,11 +93,11 @@ export async function selectInitPair(
     .sort((a, b) => b.inlierCount - a.inlierCount)
     .slice(0, initCandidates)
 
-  log(`Reconstruction: ${candidates.length} init candidate(s) of ${donePairs.length} done pairs `
+  log(`${candidates.length} init candidate(s) of ${donePairs.length} done pairs `
     + `(≥${minInitInliers} inliers, need ≥${minInitAngleDeg}° parallax)`, 'info', 'Reconstruction')
 
   if (candidates.length === 0) {
-    log('Reconstruction: no valid matched pair found — check inlier counts and metadata', 'warn', 'Reconstruction')
+    log('no valid matched pair found — check inlier counts and metadata', 'warn', 'Reconstruction')
     return { status: 'idle' }
   }
 
@@ -246,7 +246,7 @@ export async function selectInitPair(
     const nameA = imageByUuid(entry.idA)?.name ?? entry.idA
     const nameB = imageByUuid(entry.idB)?.name ?? entry.idB
     if (!init.ok) {
-      log(`Reconstruction: candidate ${nameA} ↔ ${nameB} rejected — ${init.reason}`, 'debug', 'Reconstruction')
+      log(`candidate ${nameA} ↔ ${nameB} rejected — ${init.reason}`, 'debug', 'Reconstruction')
       continue
     }
     // Cheirality survival = how many triangulated points are in front of both
@@ -254,7 +254,7 @@ export async function selectInitPair(
     const kept = init.cheiralKept, tri = init.triCount
     const pct = tri ? (100 * kept / tri).toFixed(0) : '0'
     if (kept < 10) {
-      log(`Reconstruction: candidate ${nameA} ↔ ${nameB} rejected — only ${kept}/${tri} pts `
+      log(`candidate ${nameA} ↔ ${nameB} rejected — only ${kept}/${tri} pts `
         + `survived cheirality (${pct}%), need ≥10`, 'debug', 'Reconstruction')
       continue
     }
@@ -266,7 +266,7 @@ export async function selectInitPair(
     const candRatio = init.esv.s1 > 0 ? init.esv.s2 / init.esv.s1 : 0
     // Log the score AND its factors: a seed decision that can only be re-derived by
     // hand from raw candidate numbers is what made the B4 post-mortem manual.
-    log(`Reconstruction: candidate ${nameA} ↔ ${nameB} — ${init.inliers} inliers, `
+    log(`candidate ${nameA} ↔ ${nameB} — ${init.inliers} inliers, `
       + `${kept}/${tri} pts kept after cheirality (${pct}%), median parallax ${init.angle.toFixed(2)}°, `
       + `init reproj median ${init.reproj.median.toFixed(2)}px, E σ2/σ1 ${candRatio.toFixed(2)}, `
       + `graph degree ${pairDegree(entry)} (median ${medianDegree}) `
@@ -287,7 +287,7 @@ export async function selectInitPair(
     // is worth a second look, and neither is visible from the winner's numbers alone.
     const rest = adequate.filter((v) => v !== best)
     const second = rest.length ? rest.reduce((a, b) => (b.score > a.score ? b : a)) : null
-    log(`Reconstruction: selected seed ${best.nameA} ↔ ${best.nameB} of ${adequate.length} `
+    log(`selected seed ${best.nameA} ↔ ${best.nameB} of ${adequate.length} `
       + `pair(s) over ${minInitAngleDeg}° parallax (score ${best.score.toFixed(1)}: `
       + `${best.cheiralKept} pts, ${best.angle.toFixed(2)}° parallax, `
       + `init reproj median ${best.reproj.median.toFixed(2)}px, `
@@ -315,12 +315,12 @@ export async function selectInitPair(
   }))
 
   if (!best) {
-    log('Reconstruction: pose recovery failed for all candidate pairs '
+    log('pose recovery failed for all candidate pairs '
       + '(toggle "Detail" in the console to see per-candidate reasons)', 'error', 'Reconstruction')
     return { status: 'error' }
   }
   if (best.angle < minInitAngleDeg) {
-    log(`Reconstruction: best initial parallax is only ${best.angle.toFixed(2)}° `
+    log(`best initial parallax is only ${best.angle.toFixed(2)}° `
       + `(< ${minInitAngleDeg}°) — the sparse cloud may look flat/linear`, 'warn', 'Reconstruction')
   }
 

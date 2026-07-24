@@ -203,6 +203,91 @@ fiducials; self-calibration (A2) + fiducials (F4) are the code-side support.
 
 ## Done log (most recent first)
 
+- **2026-07-24 · U5 · Pre-flight checks.** Pure `core/preflight.js` `preflight(state)`
+  → `[{ level, code, msg, fix }]` + `hasBlockers()`, ordered blocks-first. Blocks: <2
+  images / no keypoints / no verified matches / all pairs disabled (distinct message from
+  "none"). Warns: sensor missing focal (labels listed), film sensor without calibrated
+  fiducials, dense projection over budget (`formatBytes`), GPU requested but no adapter.
+  Every check carries an actionable `fix`; a `block` disables Run. 12 tests
+  (`preflight.test.js`). Owed: store assembles the snapshot + gates Run on `hasBlockers`.
+
+- **2026-07-24 · U6 follow-up · dense depth-coverage verdict.** `verdict.js` gained a
+  `depth-coverage` finding off `EVAL_THRESHOLDS.depthCoveragePct` (absent on sparse-only
+  runs, so it stays silent then), so a thin dense run also gets an actionable verdict.
+  Test added; verdict now 12 tests.
+
+- **2026-07-24 · G2 follow-up · `preselection` glossary entry.** Added
+  `src/glossary/algorithms/preselection.md` (position / footprint / capture-order pair
+  pruning + the subset-gate fallback) — the term `recommend.js`'s match-strategy pick
+  leans on. Cross-links to baseline / camera-pose / keypoint / match-graph. `glossary.test.js`
+  green (27).
+
+- **2026-07-24 · C1 (pure half) · Hardware-aware memory budget.** `core/dense/memBudget.js`
+  gains `deviceBudget({ deviceMemoryGB, jsHeapLimitBytes })` → `{ budgetBytes,
+  deviceMemoryGB, source, note }`, deriving from **injected** readings so core stays pure
+  (the main thread reads the two Chrome-only globals and passes numbers in): 50% of
+  `navigator.deviceMemory` clamped to [1, 6] GB; else 75% of the JS-heap limit; else the
+  existing `DEFAULT_BUDGET_BYTES` (Safari/Firefox, unchanged behaviour). `deviceMemoryGB`
+  passes through for `recommendSettings`' (U2) dense pick and is null unless deviceMemory
+  was the source. 6 tests in `memBudget.test.js`. Owed: main-thread wiring (seed the store's
+  dense gate + log `note` + feed U2 + U5 warn).
+
+- **2026-07-24 · U6 · Post-run verdict.** Pure `core/sfm/verdict.js` `buildVerdict(snapshot)`
+  → `{ level:green|yellow|red, headline, findings[] }`, each finding `{ level, code, title,
+  fix }` with an actionable next-step. Rules: degenerate run (red, short-circuits), low
+  registration (via `EVAL_THRESHOLDS.registeredPct`, lists ≤5 unregistered names), p95 ≥
+  {3,5}× median ⇒ distortion fingerprint, high absolute median (suppressed if distortion
+  already fired), ≥3-view < 20% ⇒ weak geometry, split match graph, large focal Δ. Reuses
+  the single `EVAL_THRESHOLDS` table (health.js) + `classify` — the only verdict-local
+  number is the residual-tail *ratio* (a shape no single threshold sees). 11 tests incl.
+  the B1 fingerprints (282px-tail distortion, 9.5% ≥3-view). The cheap 20% of F8; the rule
+  engine is pure so F8 / U4's Run-All summary can reuse it. Owed: browser panel wiring.
+
+- **2026-07-24 · G2 · Glossary entries for load-bearing terms.** Added
+  `src/glossary/algorithms/matching-density.md` (Fast vs Full / tiled LightGlue) and
+  `cycle-consistency.md` (the rotation-cycle match filter, incl. why it re-admits edges
+  after the first self-cal fold); **self-calibration** already shipped. Both cross-link to
+  existing entries and auto-link by title/alias. `glossary.test.js` green (26). Figures
+  still marked `<!-- TODO(image) -->`.
+
+- **2026-07-24 · U2 · Recommended settings (derived from the U1 profile).** New pure
+  `src/core/recommend.js` `recommendSettings(profile, budget)` → `{ detect, match, sfm,
+  depthmap, fuse }`, each stage a map of knob→`{ value, reason }` — only the knobs it can
+  derive from metadata (unlisted knobs keep their `defaults.user.js` value), so U3 can diff
+  against defaults and banner just the deviations. Derives: `detect.maxDim` =
+  clamp(round(0.5·nativeLongEdge), 1200, 3200), `detect.maxKeypoints` inverse to set size
+  (SIFT units — SuperPoint keeps its own ~2048 cap), `detect.tiling`/`tileSize` on for
+  >6000 px scans; `match.strategy` from poses/GPS (→ preselect) / large+sequential-names
+  (→ sequential) / else exhaustive; `sfm.refineIntrinsics` stays `auto` with a
+  calibration-aware reason; `depthmap.quality` from an optional `budget.deviceMemoryGB`
+  (C1) + set size. 13 tests (`recommend.test.js`) incl. pinned **B0** (aerial film →
+  3200 px tiled detect / sequential match / low dense) and **B1** (building → 2184 px
+  detect / exhaustive). **Design refinement over the TODO sketch:** sequential *matching*
+  only fires on a **large** set — contiguous filenames alone don't prove a strip. `npm
+  test` (new files) + `typecheck` green. Next: C1 (device budget), then U3 (banner, browser).
+
+- **2026-07-24 · U1 · Dataset profiler (usability track foundation).** New pure
+  `src/core/profile.js` `profileDataset({images, sensors, poses, gcps})` classifies an
+  image set from metadata only (no pixel reads) → `{ nImages, minDim, maxDim, medianMP,
+  kind:film|drone|phone|unknown, hasGps, hasPoses, hasCalibratedDistortion,
+  sequentialNames, scale, notes[] }`, every decision carrying a `notes[]` rationale.
+  `DatasetProfile` type in `core/types.ts`; 11 unit tests (`profile.test.js`) pin the
+  film / declared-film-sensor-wins / drone-make / phone-make / no-EXIF-tentative-film /
+  single-EXIF-not-film / sequential-vs-gappy / calibrated-distortion / mixed-resolution /
+  scale-bucket / empty cases. `npm test` (new file) + `npm run typecheck` green. No
+  importers yet — this is the input `core/recommend.js` (U2) will turn into settings.
+
+- **2026-07-24 · Debug ▸ Project Summary — copy-pasteable reconstruction-health digest.**
+  Large runs produce logs too long to skim for "did this succeed?", so a new ribbon entry
+  (**Other ▸ Debug ▸ Project Summary**, `summary` icon) opens a small read-only modal with
+  a Markdown⇄JSON toggle + Copy button: status roll-up, per-section classified health rows,
+  top offenders (worst-RMS + unregistered-with-reason), and sparse/dense run figures.
+  It is a *second view* of `useQualityReport().computeHealth`, not new compute — so it can
+  never drift from the Quality Report hub. Pure formatter `core/eval/summaryDigest.js`
+  (`buildProjectDigest` + `digestToMarkdown`/`digestToJson`, tested); `computeDigest` in
+  `composables/useQualityReport.js`; `components/modals/DebugSummaryModal.vue`;
+  `debugSummaryOpen` in `useModalsStore`; wired in `App.vue`/`Ribbon.vue`.
+
 - **2026-07-22 · Init selection now scores real one-step growth** — the first browser
   acceptance run exposed two remaining blind spots in the seed heuristic: the good South
   Building seed ranked ninth while only eight candidates were probed, and graph-degree

@@ -12,7 +12,7 @@ pub type Real = f64;
 extern crate nalgebra as na;
 extern crate parry3d_f64 as parry;
 
-pub use self::poisson::PoissonReconstruction;
+pub use self::poisson::{PoissonBuilder, PoissonReconstruction};
 
 mod conjugate_gradient;
 mod hgrid;

@@ -386,23 +386,26 @@ images; no one-click run-all; no post-run verdict. Metashape model: autos are
 good, experts keep every knob. All derived values get an `onLog` line and stay
 overridable. **Order: U1 → U2 (+C1) → U4 → U5 → U3 → U6.** U1/U2/U5/U6 are pure
 + unit-testable (no browser); U3/U4 need a browser-manual pass — say so.
-- **U1 — Dataset profiler.** New pure `src/core/profile.js`:
-  `profileDataset({images, sensors, poses, gcps}) → { nImages, minDim, maxDim,
-  medianMP, kind:'film'|'drone'|'phone'|'unknown', hasGps, hasPoses,
-  hasCalibratedDistortion, sequentialNames, scale }` from metadata only (no pixel
-  reads); every decision gets a `notes[]` rationale. Type in `types.ts`. Unit-test
-  film/drone/no-metadata/sequential-name cases.
-- **U2 — Recommended settings.** New pure `src/core/recommend.js`:
-  `recommendSettings(profile, budget) → { detect, match, sfm, depthmap, fuse }`,
-  same shapes as `defaults.user.js` but derived (e.g. `maxDim =
-  clamp(round(0.5·nativeMax), 1200, 3200)` for film/large; `maxKeypoints` scaled
-  by count; strategy from poses/GPS/sequential). Returns `{value, reason}` pairs.
-  Pin expected outputs for the B0/B1 profiles.
-- **C1 — Hardware-aware memory budget.** `core/memBudget.js` gains
-  `deviceBudget()` reading `navigator.deviceMemory` / `performance.memory` (main
-  thread — pass the number *into* core; core stays pure). Seeds the dense gate,
-  feeds U2's dense quality pick, warns in U5. Unit-test the derivation with
-  injected values; log detected budget + source.
+- ~~**U1 — Dataset profiler.**~~ **done 2026-07-24** — `src/core/profile.js`
+  `profileDataset(...)` + `DatasetProfile` type in `types.ts`, 11 unit tests
+  (film/declared-film/drone/phone/no-metadata/sequential/mixed-res/scale cases).
+  Now unblocks U2.
+- ~~**U2 — Recommended settings.**~~ **done 2026-07-24** — `src/core/recommend.js`
+  `recommendSettings(profile, budget) → { detect, match, sfm, depthmap, fuse }`, each
+  stage a map of knob→`{value, reason}` (derived knobs only; unlisted keep defaults).
+  13 unit tests incl. pinned B0 (aerial film) + B1 (building) profiles. **Refinement
+  vs the spec sketch:** sequential *matching* is only recommended on a **large** set —
+  contiguous filenames alone don't prove a strip (cameras number every shoot
+  sequentially), so a medium set stays exhaustive. Next: **C1** (real device budget for
+  the dense pick) then **U3** (banner wiring, browser).
+- **C1 — Hardware-aware memory budget.** *(pure half done 2026-07-24)* —
+  `core/dense/memBudget.js` `deviceBudget({deviceMemoryGB, jsHeapLimitBytes})` derives
+  `{ budgetBytes, deviceMemoryGB, source, note }` from **injected** readings (core stays
+  pure): 50% of `navigator.deviceMemory` clamped [1,6] GB, else 75% of the JS-heap limit,
+  else the conservative `DEFAULT_BUDGET_BYTES`. `deviceMemoryGB` passes through for U2's
+  dense pick. 6 unit tests. **Owed (main thread):** a thin caller that reads the two
+  Chrome-only globals, passes them in, seeds the store's dense gate with `budgetBytes`,
+  logs `note`, and feeds `deviceMemoryGB` to `recommendSettings`; U5 warns from it.
 - **U3 — "Recommended for this dataset" prefill** in each stage modal: banner
   showing derived values that differ from static defaults, one-click apply,
   hover shows `reason`. Prefill only, never a hidden override.
@@ -410,15 +413,20 @@ overridable. **Order: U1 → U2 (+C1) → U4 → U5 → U3 → U6.** U1/U2/U5/U6
   one Low/Med/High selector → U2, U5 checklist) + `runAll(stages, settings)` in
   `composables/usePipeline.js` chaining the existing `runDetect/…` with the
   `aborted` flag; also the `run all` console command (CC ▸ C2 — same `runAll`).
-- **U5 — Pre-flight checks.** Pure `core/preflight.js` → `[{level, msg, fix}]`:
-  no focal ⇒ warn; film without fiducials ⇒ warn; dense memory projection
-  (`projectDensifyPeakBytes`) + GPU adapter check; <2 images / no keypoints /
-  all pairs disabled ⇒ block. `block` disables Run.
-- **U6 — Post-run verdict.** Pure `core/sfm/verdict.js`: run summary → traffic
-  light + next-steps (registered <80% ⇒ list unregistered + overlap/minMatches;
-  p95 reproj >3× median ⇒ suspect distortion; ≥3-view share <20% ⇒ weakly
-  constrained). Encode the B0/B1 fingerprints as thresholds; this is the cheap
-  20% of F8 — keep the rule engine pure so F8 reuses it.
+- ~~**U5 — Pre-flight checks.**~~ **done 2026-07-24** — pure `core/preflight.js`
+  `preflight(state) → [{level, code, msg, fix}]` + `hasBlockers()`. Blocks: <2 images /
+  no keypoints / no matches / all pairs disabled. Warns: missing focal, film-without-
+  fiducials, dense projection over budget (`formatBytes`), GPU-requested-but-absent.
+  Blocks-first ordering; every check carries `fix`. 12 tests. **Owed (browser):** assemble
+  the state snapshot in the store + disable Run when `hasBlockers`.
+- ~~**U6 — Post-run verdict.**~~ **done 2026-07-24** — pure `core/sfm/verdict.js`
+  `buildVerdict(snapshot) → { level, headline, findings[] }`. Rules: degenerate (red,
+  short-circuits), registration<warn/bad, p95≥{3,5}× median ⇒ distortion, high median,
+  ≥3-view<20% ⇒ weak-geometry, split graph, focal Δ, **dense depth-coverage** (added
+  2026-07-24). Reuses the single `EVAL_THRESHOLDS` table (health.js) — only the
+  residual-tail *ratio* is verdict-local. Each finding carries an actionable `fix`. 12
+  tests incl. the B1 fingerprints (282px-tail distortion, 9.5% ≥3-view). **Owed
+  (browser/store):** wire into a post-run panel + U4 Run-All summary.
 - **§A6 — Adaptive bridge-pair gate** *(gated on the B1 re-run under R)*: B1
   showed `minInlierRatio 0.25` rejecting genuine loop-closing bridges (27 inliers
   @ 0.23). Evaluate lowering `MATCH_TUNING.overrideInliers` (30) to ~25 **or** an
@@ -570,12 +578,14 @@ regions) as a worker op reading downscaled rasters. Pure `core/maskAuto.js` +
 step-by-step spec (module API, tests, UI, defaults) in the linked PLAN file.
 Parked out of scope there: SAM2-propagation auto-masking (see F12).
 
-### G2 — Glossary entries for the newly load-bearing terms (folded from PLAN P6.3)
-Add `src/glossary/algorithms/` entries for **"matching density"** (Fast/Full — the
-LightGlue tiled vs capped path), **"self-calibration"** (`refineIntrinsics: 'auto'`,
-now on by default), and **"cycle consistency"** (the rotation-cycle match filter) —
-the pipeline now leans on all three and they auto-link wherever their title/aliases
-appear (see CLAUDE.md "Adding a term"). Small; pure content.
+### ~~G2 — Glossary entries for the newly load-bearing terms~~ **done 2026-07-24**
+Added `src/glossary/algorithms/matching-density.md` (Fast/Full — the LightGlue tiled
+vs capped path) and `cycle-consistency.md` (the rotation-cycle match filter);
+**self-calibration** already existed (`core-sfm/self-calibration.md`). Also added
+`preselection.md` (position/footprint/capture-order pair pruning, the term
+`recommend.js`'s strategy pick leans on). All auto-link via title/aliases and cross-link
+to existing entries; `glossary.test.js` green (id↔filename, help: ids resolve, no `>` in
+TODO(image) comments). Figures still owed (the `<!-- TODO(image) -->` markers).
 
 ### A5 — Per-depth-map geometric consistency filter (dense)
 Fusion is currently the only cross-view test and runs too late to stop freckle.
@@ -626,6 +636,12 @@ browser check (Safari + Chrome).
   copied from another machine; both migration directions verify and leave the
   disk folder in place. Measure export/import throughput on the 128-image set and
   record it as a baseline.
+- **Debug ▸ Project Summary** (shipped 2026-07-24, browser-only paths unproven):
+  the ribbon button appears under Other ▸ Debug, opens the modal, the Markdown⇄JSON
+  toggle switches the body, and Copy writes to the clipboard with the toast. Optional
+  follow-up if wanted: also emit the digest to `log.ndjson` (debug channel) so it lands
+  in the saved record, and consider adding a run-config section once `summary` persists
+  the settings a run used.
 (The tiling/SuperPoint/LightGlue/TIFF browser runs are under W0/SP5.)
 
 ### P3 — OPFS quantize + spill of depth maps
@@ -840,6 +856,15 @@ JS proves slow on large grids; optional manual "Flip Z" for object scenes.
   builds up live (the `emit` channel exists).
 - **Surface worker errors in the UI** — currently a per-request reject logs; the
   `onerror` fail-all path isn't user-visible.
+- **Match-graph edge rendering at scale** (`components/viewers/MatchGraph.vue`).
+  The force-layout freeze is fixed (grid-accelerated repulsion + settle animated
+  across RAF frames instead of synchronously — 2026-07-24), but with a huge match
+  count the *edge* paths remain O(edges) ≈ O(n²) every frame and can drag the frame
+  rate: `draw()` strokes every edge each frame and `edgeAt()` scans them all on every
+  mousemove. Also `pairSetKey()` sorts+joins all pair IDs into one big string on each
+  deep `matchSummaries` change. Levers when it bites: edge culling / thinning at low
+  zoom, and a cheaper topology signature. Not a hard freeze — revisit only if the
+  reduced frame rate is actually reported.
 
 **Sparse / SfM**
 - **Up-front feature-track builder (union-find), gated on measured need.**

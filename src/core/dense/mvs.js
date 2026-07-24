@@ -246,7 +246,7 @@ export async function depthMapForImage(ref, sources, points, settings = {}, comp
   // levels get more iterations (cheap, and they carry the global propagation).
   if (levels.length > 1) {
     const plan = levels.map((L, li) => `${L.w}×${L.h}×${iterations + (levels.length - 1 - li)}it`).join(' → ')
-    hooks.onLog?.(`Dense: coarse-to-fine ${levels.length} levels (${sources.length} src) — ${plan}`, 'debug', 'Dense')
+    hooks.onLog?.(`coarse-to-fine ${levels.length} levels (${sources.length} src) — ${plan}`, 'debug', 'Dense')
   }
   const baseSeed = (ref.width * 73856093) ^ (ref.height * 19349663)
   // Per-level progress weights (this image is 0..1): a level's cost ≈ its pixels ×

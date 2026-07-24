@@ -43,6 +43,8 @@ let edges = []   // { a, b, pairId, inlierCount, disabled, w }
 let nodeByUuid = new Map()
 let topoKey = ''  // signature of the pair set; a change forces a full re-layout
 let raf = null
+let settleFrames = 0   // remaining settle ticks to run inside the RAF loop (>0 ⇒ animating)
+let settleTick = 0     // ticks done in the current animated settle (for the early-exit gate)
 let dragNode = null
 let dragMoved = false
 let panning = false
@@ -180,10 +182,20 @@ function sync() {
 
 // Full (re)layout: build the graph, settle it to rest, then fit it to the viewport.
 // Used on first mount, topology change, mode switch, and "Reset layout".
+// Small graphs settle synchronously (instant, static on open); large graphs settle
+// across animation frames (see the RAF loop) so the main thread never blocks — the
+// graph visibly unfolds instead of freezing the whole page.
 function applyLayout() {
   build()
-  relax()
-  fitView()
+  if (nodes.length > GRID_THRESHOLD) {
+    settleFrames = 200   // budget of ticks; the loop early-exits once it reaches rest
+    settleTick = 0
+    fitView()            // frame the seeded scatter; re-framed each settle frame
+  } else {
+    settleFrames = 0
+    relax()
+    fitView()
+  }
 }
 
 // ── Force simulation ────────────────────────────────────────────────────────────
@@ -194,23 +206,78 @@ const CENTER  = 0.002     // pull toward centre
 const DAMP    = 0.86      // velocity damping
 const MAX_TICKS = 480
 
-// One integration step; returns total kinetic energy so relax() can detect rest.
-function step() {
-  const n = nodes.length
+// Above this node count the exact O(n²) repulsion loop gets expensive enough to stall
+// the main thread (a few hundred images × up to 200 settle ticks × heavy property
+// access is already hundreds of millions of ops), so switch to a uniform-grid
+// approximation AND settle over animation frames instead of synchronously (see
+// applyLayout). Below it, keep the exact synchronous path — instant and identical for
+// the common small-graph case. Kept low deliberately: for graphs this small every node
+// is within the cutoff anyway, so the grid result matches the exact loop.
+const GRID_THRESHOLD = 150
+// Repulsion is REPULSE/d², negligible past a few rest-lengths; only pairs within this
+// radius contribute meaningfully, so the grid can ignore everything farther. The
+// centre pull (CENTER) still holds disconnected components together globally.
+const REPULSE_CUTOFF = REST * 4   // 400px; f≈0.04 at the cutoff vs the spring's scale
+
+// Exact all-pairs repulsion (O(n²)) — accurate, used for small graphs.
+function repelExact(n) {
   for (let i = 0; i < n; i++) {
     const a = nodes[i]
     for (let j = i + 1; j < n; j++) {
-      const b = nodes[j]
-      let dx = a.x - b.x, dy = a.y - b.y
-      let d2 = dx * dx + dy * dy
-      if (d2 < 0.01) { dx = Math.random() - 0.5; dy = Math.random() - 0.5; d2 = 0.25 }
-      const f = REPULSE / d2
-      const d = Math.sqrt(d2)
-      const fx = (dx / d) * f, fy = (dy / d) * f
-      a.vx += fx; a.vy += fy
-      b.vx -= fx; b.vy -= fy
+      applyRepulsion(a, nodes[j])
     }
   }
+}
+
+// Grid-accelerated repulsion (~O(n·k)): bucket nodes into cells of the cutoff size,
+// then only test each node against its own and the 8 neighbouring cells.
+function repelGrid(n) {
+  const cell = REPULSE_CUTOFF
+  const cutoff2 = REPULSE_CUTOFF * REPULSE_CUTOFF
+  const buckets = new Map()   // packed "gx,gy" key → array of node indices
+  for (let i = 0; i < n; i++) {
+    const p = nodes[i]
+    const key = Math.floor(p.x / cell) + ',' + Math.floor(p.y / cell)
+    let arr = buckets.get(key)
+    if (!arr) { arr = []; buckets.set(key, arr) }
+    arr.push(i)
+  }
+  for (let i = 0; i < n; i++) {
+    const a = nodes[i]
+    const gx = Math.floor(a.x / cell), gy = Math.floor(a.y / cell)
+    for (let ox = -1; ox <= 1; ox++) {
+      for (let oy = -1; oy <= 1; oy++) {
+        const arr = buckets.get((gx + ox) + ',' + (gy + oy))
+        if (!arr) continue
+        for (const j of arr) {
+          if (j <= i) continue   // each unordered pair once (matches exact loop)
+          const b = nodes[j]
+          const dx = a.x - b.x, dy = a.y - b.y
+          if (dx * dx + dy * dy > cutoff2) continue
+          applyRepulsion(a, b)
+        }
+      }
+    }
+  }
+}
+
+// Symmetric repulsion between two nodes (shared by both paths).
+function applyRepulsion(a, b) {
+  let dx = a.x - b.x, dy = a.y - b.y
+  let d2 = dx * dx + dy * dy
+  if (d2 < 0.01) { dx = Math.random() - 0.5; dy = Math.random() - 0.5; d2 = 0.25 }
+  const f = REPULSE / d2
+  const d = Math.sqrt(d2)
+  const fx = (dx / d) * f, fy = (dy / d) * f
+  a.vx += fx; a.vy += fy
+  b.vx -= fx; b.vy -= fy
+}
+
+// One integration step; returns total kinetic energy so relax() can detect rest.
+function step() {
+  const n = nodes.length
+  if (n > GRID_THRESHOLD) repelGrid(n)
+  else repelExact(n)
   for (const e of edges) {
     const a = nodes[e.a], b = nodes[e.b]
     const dx = b.x - a.x, dy = b.y - a.y
@@ -236,10 +303,10 @@ function step() {
 
 // Settle the layout to rest synchronously, so the graph appears static on open
 // instead of animating into place. Early-exits once kinetic energy is negligible;
-// caps iterations (and drops the cap for large graphs, where step() is O(n²)).
+// keeps a lower cap for large graphs (step() is grid-accelerated but still linear).
 function relax() {
   if (!nodes.length) return
-  const cap = nodes.length > 200 ? 200 : MAX_TICKS
+  const cap = nodes.length > GRID_THRESHOLD ? 200 : MAX_TICKS
   for (let i = 0; i < cap; i++) {
     const ke = step()
     if (i > 30 && ke < 0.05 * nodes.length) break
@@ -285,8 +352,23 @@ function zoomButton(factor) { zoomAt(W / 2, H / 2, factor) }
 
 // ── Rendering ───────────────────────────────────────────────────────────────────
 function loop() {
+  if (settleFrames > 0) advanceSettle()
   draw()
   raf = requestAnimationFrame(loop)
+}
+
+// Advance an animated (large-graph) settle by a few ticks per frame, re-framing as the
+// layout expands, and stop once it reaches rest or exhausts its tick budget. Runs a
+// small batch per frame so each frame stays short and the UI keeps responding.
+function advanceSettle() {
+  const TICKS_PER_FRAME = 6
+  for (let k = 0; k < TICKS_PER_FRAME && settleFrames > 0; k++) {
+    const ke = step()
+    settleTick++
+    settleFrames--
+    if (settleTick > 30 && ke < 0.05 * nodes.length) { settleFrames = 0; break }
+  }
+  fitView()
 }
 
 function draw() {

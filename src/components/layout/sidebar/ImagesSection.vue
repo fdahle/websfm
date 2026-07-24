@@ -20,6 +20,12 @@ const emit = defineEmits([
   'delete-keypoints', 'remove-image', 'convert-to-raster',
 ])
 
+// Images added instantly, but metadata (EXIF + dimensions) extracts async per
+// file — for a 444-image drop that's a visible lag. Surface the progress so the
+// (disabled) pipeline buttons aren't the only signal something is still running.
+const metaPending = computed(() => props.images.filter((i) => i.loading).length)
+const metaDone = computed(() => props.images.length - metaPending.value)
+
 // Per-image expand state
 const expanded = ref({})
 function toggleExpand(id) {
@@ -163,6 +169,16 @@ function ctxRemove() {
       <span class="section-name">Images</span>
       <span v-if="images.length" class="badge">{{ images.length }}</span>
     </button>
+    <div
+      v-if="open && metaPending"
+      class="meta-progress"
+      :title="`Reading image metadata — ${metaDone} of ${images.length} done`"
+    >
+      <div class="meta-progress-track">
+        <div class="meta-progress-fill" :style="{ width: (metaDone / images.length * 100) + '%' }"></div>
+      </div>
+      <span class="meta-progress-label">Reading metadata… {{ metaDone }}/{{ images.length }}</span>
+    </div>
     <ul v-if="open" class="item-list">
       <template v-for="img in images" :key="img.id">
         <li
@@ -180,6 +196,7 @@ function ctxRemove() {
             :title="expanded[img.id] ? 'Collapse' : 'Expand'"
           ></button>
           <span v-if="img.previewPending" class="status-dot loading"></span>
+          <span v-else-if="img.loading" class="status-dot loading" title="Reading metadata…"></span>
           <span v-else-if="img.kpStatus === 'running'" class="status-dot running"></span>
           <span v-else-if="img.kpStatus === 'error'" class="status-dot error"></span>
           <span class="item-name">{{ img.name }}</span>

@@ -303,6 +303,14 @@ const tabs = [
           { id: 'open-about',       label: 'About',       icon: 'info' },
         ],
       },
+      {
+        // A compact, classified reconstruction-health digest — copy-pasteable so a
+        // run's outcome can be shared without the full (thousands-of-lines) log.
+        label: 'Debug',
+        commands: [
+          { id: 'open-debug-summary', label: 'Project\nSummary', icon: 'summary', needsProject: true },
+        ],
+      },
     ],
   },
 ]

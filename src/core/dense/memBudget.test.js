@@ -1,7 +1,52 @@
 import { describe, it, expect } from 'vitest'
 import {
   createMemLedger, projectDensePeakBytes, projectDensifyPeakBytes, formatBytes, DEFAULT_BUDGET_BYTES,
+  deviceBudget,
 } from './memBudget.js'
+
+const GiB = 1024 ** 3
+
+describe('deviceBudget', () => {
+  it('derives from navigator.deviceMemory (50%, passed through for U2)', () => {
+    const b = deviceBudget({ deviceMemoryGB: 8 })
+    expect(b.budgetBytes).toBe(4 * GiB) // 50% of 8
+    expect(b.deviceMemoryGB).toBe(8)
+    expect(b.source).toBe('navigator.deviceMemory')
+  })
+
+  it('clamps the device-derived budget into [1, 6] GB', () => {
+    expect(deviceBudget({ deviceMemoryGB: 2 }).budgetBytes).toBe(1 * GiB)  // 50%·2 = 1, at floor
+    expect(deviceBudget({ deviceMemoryGB: 1 }).budgetBytes).toBe(1 * GiB)  // below floor → clamped
+    expect(deviceBudget({ deviceMemoryGB: 32 }).budgetBytes).toBe(6 * GiB) // above ceiling → clamped
+  })
+
+  it('falls back to the JS-heap limit when deviceMemory is absent (deviceMemoryGB stays null)', () => {
+    const b = deviceBudget({ jsHeapLimitBytes: 4 * GiB })
+    expect(b.budgetBytes).toBe(3 * GiB) // 75% of 4
+    expect(b.deviceMemoryGB).toBeNull() // so U2 falls back to size-based
+    expect(b.source).toBe('performance.memory')
+  })
+
+  it('prefers deviceMemory over the heap limit when both are present', () => {
+    expect(deviceBudget({ deviceMemoryGB: 8, jsHeapLimitBytes: 2 * GiB }).source).toBe('navigator.deviceMemory')
+  })
+
+  it('returns the conservative default when nothing is known (Safari/Firefox)', () => {
+    for (const readings of [undefined, {}, { deviceMemoryGB: 0 }, { deviceMemoryGB: null, jsHeapLimitBytes: NaN }]) {
+      const b = deviceBudget(readings)
+      expect(b.budgetBytes).toBe(DEFAULT_BUDGET_BYTES)
+      expect(b.source).toBe('default')
+      expect(b.deviceMemoryGB).toBeNull()
+    }
+  })
+
+  it('always carries a human-readable note', () => {
+    for (const r of [{ deviceMemoryGB: 8 }, { jsHeapLimitBytes: 3 * GiB }, {}]) {
+      expect(typeof deviceBudget(r).note).toBe('string')
+      expect(deviceBudget(r).note.length).toBeGreaterThan(0)
+    }
+  })
+})
 
 describe('createMemLedger', () => {
   it('tracks, releases, and reports live + peak usage', () => {
