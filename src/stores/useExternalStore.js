@@ -56,6 +56,8 @@ export const useExternalStore = registerProjectStore(defineStore('external', () 
 
   // In-flight hydrations, so two concurrent samplers don't both read the sidecar.
   const loading = new Map()
+  const activeImports = new Set()
+  const pendingWorkCount = ref(0)
 
   // id → the ORIGINAL imported File, held in memory for this session.
   //
@@ -124,7 +126,18 @@ export const useExternalStore = registerProjectStore(defineStore('external', () 
   // Decode + classify off-thread, then commit. `forceKind` comes from the import
   // modal when the sniff was low-confidence. Returns the new RasterMeta, or null.
   async function importRaster(file, { forceKind = null } = {}) {
+    const task = importRasterNow(file, { forceKind })
+    activeImports.add(task)
+    pendingWorkCount.value++
+    try { return await task } finally {
+      activeImports.delete(task)
+      pendingWorkCount.value--
+    }
+  }
+
+  async function importRasterNow(file, { forceKind = null } = {}) {
     if (!file) return null
+    const projectId = projects.currentProjectId
     const id = makeId()
     pendingRasters.value.push({ id, name: file.name })
     const removePending = () => {
@@ -177,6 +190,16 @@ export const useExternalStore = registerProjectStore(defineStore('external', () 
       log(`Reference raster ${record.name}: no CRS in the GeoTIFF — assuming the project CRS`, 'warn', 'Import')
     }
 
+    // Parsing and CRS resolution may take seconds. A lifecycle change clears
+    // this store; never let the old operation repopulate or persist into the
+    // newly active project.
+    if (projects.currentProjectId !== projectId) {
+      removePending()
+      log(`Reference raster: ${file.name} finished after the project changed — import discarded`,
+        'warn', 'Import')
+      return null
+    }
+
     // Replace the disabled loading row with the complete record. Both carry the
     // same id, so the transition is stable from the user's perspective.
     removePending()
@@ -187,11 +210,11 @@ export const useExternalStore = registerProjectStore(defineStore('external', () 
     originals.set(record.id, file)
 
     if (isPersisting()) {
-      await opfs.saveExternalPlane(projects.currentProjectId, record.id, plane.buffer)
+      await opfs.saveExternalPlane(projectId, record.id, plane.buffer)
         .catch((err) => log(`Reference raster save failed — ${err?.message ?? err}`, 'error', 'Import'))
       // Keep the original file: it's the source of truth a kind flip re-decodes
       // from, and (A-7) what "cache locally" would materialise.
-      await opfs.saveExternalSource(projects.currentProjectId, record.id, file)
+      await opfs.saveExternalSource(projectId, record.id, file)
         .catch((err) => log(`Reference raster source save failed — ${err?.message ?? err}`, 'warn', 'Import'))
       await save()
     }
@@ -203,6 +226,10 @@ export const useExternalStore = registerProjectStore(defineStore('external', () 
         + 'are not directly comparable. Check each dataset\'s vertical datum.', 'warn', 'Import')
     }
     return record
+  }
+
+  async function flushPendingWork() {
+    while (activeImports.size) await Promise.allSettled([...activeImports])
   }
 
   // Rebuild a RasterSource from a meta + its plane. DEM planes are Float32 with
@@ -656,7 +683,7 @@ export const useExternalStore = registerProjectStore(defineStore('external', () 
   }
 
   return {
-    rasters, pendingRasters, sources,
+    rasters, pendingRasters, pendingWorkCount, sources,
     demRasters, orthoRasters, hasReferenceDem, defaultDem, mixedVerticalDatums,
     mapRasters,
     rasterById,
@@ -664,6 +691,6 @@ export const useExternalStore = registerProjectStore(defineStore('external', () 
     toRasterCoords, toProjectCoords,
     setRasterKind, setRasterStyle, setVerticalInfo, setRasterOnMap, setRasterOpacity,
     renameRaster, removeRaster,
-    save, restore, clear,
+    save, restore, clear, flushPendingWork,
   }
 }))

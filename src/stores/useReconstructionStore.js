@@ -11,19 +11,16 @@ import {
 } from '../workers/computeClient.js'
 import { useLog } from '../composables/useLog.js'
 import * as opfs from '../utils/opfs.js'
-import { fitSimilarity, applySimilarity } from '../core/products/georef.js'
 import { aerialUpRotation, rotateReconstruction } from '../core/products/projection.js'
-import { cameraCenter } from '../core/sfm/geometry.js'
-import { triangulateAllGcps } from '../core/sfm/gcpTriangulation.js'
-import { gcpGuidesForImage, gcpEstimateForImage } from '../core/sfm/gcpGuides.js'
 import { qualityToMaxDim } from '../core/dense/mvs.js'
 import { projectDensifyPeakBytes, formatBytes, DEFAULT_BUDGET_BYTES } from '../core/dense/memBudget.js'
-import {
-  serializeDepthMap, deserializeDepthMap, depthPlanesMissing,
-  buildDepthIndex, isDepthIndexStale, depthMapBytes,
-} from '../core/dense/depthMapCodec.js'
+import { depthMapBytes } from '../core/dense/depthMapCodec.js'
 import { distortionOf } from '../core/sfm/distortion.js'
 import { parseColmapModel, parseColmapModelBin, readColmapModel, makeNameResolver, colmapToSparse } from '../core/io/colmapModel.js'
+import { serializeCloud, deserializeCloud, legacyDeserializeCloud } from './reconstruction/cloudSerde.js'
+import { createDepthMapCache } from './reconstruction/depthMapCache.js'
+import { createGeoreferencing } from './reconstruction/georeferencing.js'
+import { isGeographic } from '../core/crs.js'
 import { registerProjectStore } from './projectStores.js'
 import { useImagesStore } from './useImagesStore.js'
 import { useMatchesStore } from './useMatchesStore.js'
@@ -71,10 +68,15 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
   // into `depthMapsMeta`, and `ensureDepthMapsLoaded()` hydrates the planes on
   // first use — eagerly pulling hundreds of MB into memory on every project open
   // would undo the fusion memory budget for opens that never densify.
-  const depthMaps = shallowRef(new Map())
-  // Restored index entries for planes still on disk but not yet hydrated. Empty
-  // once loaded (the maps themselves are then the source of truth).
-  const depthMapsMeta = shallowRef([])
+  const {
+    depthMaps, depthMapsMeta, depthMapCount,
+    persistDepthMaps, ensureDepthMapsLoaded, loadDepthIndexIntoMeta, clearDepthMaps,
+  } = createDepthMapCache({
+    isPersisting: () => isPersisting(),
+    currentProjectId: () => projects.currentProjectId,
+    mainSparseCloud: () => mainSparseCloud.value,
+    log,
+  })
 
   // Georeference: a fitted SfM→CRS similarity (scale + rotation + translation),
   // or null in the local frame. { sim:{scale,R,t}, crs, rms, count, method }.
@@ -86,8 +88,12 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
   //   summary:      { date, nCameras, nPoints, pct3plusViewTracks, preBaP95px,
   //                   postBaMedianPx, perPairInitReproj }
   //   denseSummary: { costMedian, keptPct, cullBreakdown }
+  //   depthSummary: dense Stage A — { backend, settings, medianMsPerImage, coverage,
+  //                 geomFilter* } (workers/ops/dense.js). Persisted for the same reason
+  //                 the other two are: a dense baseline outlives the session that ran it.
   const summary = ref(null)
   const denseSummary = ref(null)
+  const depthSummary = ref(null)
 
   // The last few sparse-run summaries (newest last), so the Quality Report can answer
   // "did that tweak help?" across runs (WS5). Summaries only — cheap JSON, no cloud
@@ -184,108 +190,6 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
   // Persist only when a project is open and OPFS is usable (see useProjectsStore).
   const isPersisting = () => projects.isPersisting
 
-  // Pack one cloud into the on-disk shape: small metadata (cameras stay JSON —
-  // ~hundreds at most) plus binary buffers for the heavy per-point data. Colour is
-  // whole-cloud (the colouring pass runs over every point), so a single hasColor
-  // flag governs the col buffer. View-tracks use a CSR layout: vcount[i] tracks for
-  // point i, flattened into vcam/vkp; camera uuids are dictionary-encoded via
-  // viewUuids (seeded from the cloud's cameras, extended for any stray uuid).
-  // Dense clouds are already flat ({ count, pos:Float32, col:Uint8 }) with no
-  // view-tracks, so serialization is near-passthrough. pos is widened to Float64 on
-  // disk to match the sparse sidecar format (so the reader stays dtype-uniform and
-  // dense clouds persisted before the flat rework still load through this branch).
-  function serializeDenseCloud(c) {
-    const N = c.count || 0
-    const pos = new Float64Array(N * 3)
-    pos.set(c.pos.subarray(0, N * 3))
-    const col = c.col ? c.col.slice(0, N * 3) : null
-    // World-space normals stay Float32 on disk (unit scale — no precision gain from
-    // widening). Absent on normal-less/legacy runs; the reader leaves nrm undefined.
-    const nrm = c.nrm ? c.nrm.slice(0, N * 3) : null
-    return {
-      id: c.id, name: c.name, kind: 'dense', createdAt: c.createdAt,
-      imported: !!c.imported, derived: !!c.derived, secondary: !!c.secondary,
-      cameras: [], pointCount: N, hasColor: !!col, hasNormals: !!nrm, viewUuids: [],
-      buffers: { pos: pos.buffer, col: col ? col.buffer : null, nrm: nrm ? nrm.buffer : null,
-        vcount: null, vcam: null, vkp: null, vx: null, vy: null },
-    }
-  }
-
-  // Mesh cloud on-disk shape: pos (Float64, per-vertex, uniform sidecar dtype) + col
-  // (Uint8, per-vertex) + idx (Uint32, 3·triangles). nVerts + count(=tris) in metadata.
-  function serializeMeshCloud(c) {
-    const nVerts = c.nVerts || 0
-    const pos = new Float64Array(nVerts * 3)
-    pos.set(c.pos.subarray(0, nVerts * 3))
-    const col = c.col ? c.col.slice(0, nVerts * 3) : null
-    const idx = c.idx ? Uint32Array.from(c.idx) : new Uint32Array(0)
-    return {
-      id: c.id, name: c.name, kind: 'mesh', createdAt: c.createdAt,
-      imported: !!c.imported, secondary: !!c.secondary,
-      cameras: [], pointCount: nVerts, nVerts, triCount: c.count || 0,
-      hasColor: !!col, viewUuids: [],
-      buffers: { pos: pos.buffer, col: col ? col.buffer : null, idx: idx.buffer,
-        vcount: null, vcam: null, vkp: null, vx: null, vy: null },
-    }
-  }
-
-  function serializeCloud(c) {
-    if (c.kind === 'dense') return serializeDenseCloud(c)
-    if (c.kind === 'mesh') return serializeMeshCloud(c)
-    const pts = c.points
-    const N = pts.length
-    const pos = new Float64Array(N * 3)
-    const hasColor = pts.some((p) => p.color)
-    const col = hasColor ? new Uint8Array(N * 3) : null
-
-    const camIndex = new Map()
-    const viewUuids = []
-    for (const uuid of c.cameras.keys()) { camIndex.set(uuid, viewUuids.length); viewUuids.push(uuid) }
-
-    const vcount = new Uint32Array(N)
-    let totalViews = 0
-    for (const p of pts) totalViews += p.views ? p.views.size : 0
-    const vcam = new Uint32Array(totalViews)
-    const vkp = new Uint32Array(totalViews)
-    // Per-view BA-frame pixel (COLMAP export). Only allocated when some point carries
-    // it (sparse clouds from a real reconstruct); NaN marks a view without a pixel.
-    const hasViewPx = pts.some((p) => p.viewsPx && p.viewsPx.size)
-    const vx = hasViewPx ? new Float32Array(totalViews).fill(NaN) : null
-    const vy = hasViewPx ? new Float32Array(totalViews).fill(NaN) : null
-
-    let vi = 0
-    for (let i = 0; i < N; i++) {
-      const p = pts[i]
-      pos[i * 3] = p.x; pos[i * 3 + 1] = p.y; pos[i * 3 + 2] = p.z
-      if (col && p.color) { col[i * 3] = p.color[0]; col[i * 3 + 1] = p.color[1]; col[i * 3 + 2] = p.color[2] }
-      if (p.views && p.views.size) {
-        vcount[i] = p.views.size
-        for (const [uuid, kp] of p.views) {
-          let ci = camIndex.get(uuid)
-          if (ci === undefined) { ci = viewUuids.length; camIndex.set(uuid, ci); viewUuids.push(uuid) }
-          vcam[vi] = ci; vkp[vi] = kp
-          if (vx) { const px = p.viewsPx?.get(uuid); if (px) { vx[vi] = px[0]; vy[vi] = px[1] } }
-          vi++
-        }
-      }
-    }
-    return {
-      id: c.id, name: c.name, kind: c.kind, createdAt: c.createdAt,
-      imported: !!c.imported, secondary: !!c.secondary,
-      cameras: [...c.cameras.entries()].map(([uuid, cam]) => ({ uuid, ...cam })),
-      pointCount: N, hasColor, viewUuids,
-      buffers: {
-        pos: pos.buffer,
-        col: col ? col.buffer : null,
-        vcount: vcount.buffer,
-        vcam: vcam.buffer,
-        vkp: vkp.buffer,
-        vx: vx ? vx.buffer : null,
-        vy: vy ? vy.buffer : null,
-      },
-    }
-  }
-
   // Serialise every cloud to the on-disk shape (metadata + binary buffers).
   function serialize() {
     return {
@@ -299,6 +203,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
       // Run-quality summaries (Q3) — tiny, kept for cross-run comparison.
       summary: summary.value,
       denseSummary: denseSummary.value,
+      depthSummary: depthSummary.value,
       summaryHistory: summaryHistory.value,
     }
   }
@@ -306,103 +211,6 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
   async function persist() {
     if (!isPersisting()) return
     await opfs.saveReconstruction(projects.currentProjectId, serialize()).catch(() => {})
-  }
-
-  // How many depth maps this project has, hydrated or merely on disk. The ribbon /
-  // command guards for Densify + Ortho read this, so it must count the restored-but-
-  // not-yet-loaded ones too — otherwise reopening a project leaves both stages gated
-  // off despite the planes sitting in OPFS.
-  const depthMapCount = computed(() => depthMaps.value.size || depthMapsMeta.value.length)
-
-  // Write the depth planes + index. Stamped with the sparse cloud's identity so a
-  // later reconstruction re-run can be detected as invalidating (see the codec).
-  async function persistDepthMaps(maps, settings) {
-    if (!isPersisting() || !maps.length) return
-    const index = buildDepthIndex(maps, { sparseCloud: mainSparseCloud.value, settings })
-    const entries = maps.map((m) => ({ uuid: m.uuid, buffers: serializeDepthMap(m).buffers }))
-    try {
-      await opfs.saveDepthPlanes(projects.currentProjectId, index, entries)
-      log(`Dense: ${maps.length} depth map(s) saved (${formatBytes(depthMapBytes(index.maps))}) `
-        + `— reopening this project will not need a Stage A re-run`, 'info', 'Dense')
-    } catch (err) {
-      // Non-fatal: the maps are live in memory, this run still works.
-      log(`Dense: could not save depth maps — ${err?.message ?? err}. They will be lost on reload.`,
-        'warn', 'Dense')
-    }
-  }
-
-  // Hydrate the planes for a restored project on first use. Returns true when
-  // `depthMaps` holds usable maps. Cheap no-op once loaded (or when Stage A ran
-  // this session).
-  async function ensureDepthMapsLoaded() {
-    if (depthMaps.value.size) return true
-    const metas = depthMapsMeta.value
-    if (!metas.length) return false
-    const t0 = performance.now()
-    log(`Dense: loading ${metas.length} saved depth map(s) (${formatBytes(depthMapBytes(metas))})…`,
-      'info', 'Dense')
-    try {
-      const loaded = await opfs.loadDepthPlanes(projects.currentProjectId, metas)
-      const byUuid = new Map(loaded.map((e) => [e.uuid, e.buffers]))
-      const maps = new Map()
-      const gone = []      // image removed since — its planes went with it
-      const corrupt = []   // present but truncated / wrong size
-      for (const meta of metas) {
-        const buffers = byUuid.get(meta.uuid)
-        if (depthPlanesMissing(buffers)) { gone.push(meta.uuid); continue }
-        const m = deserializeDepthMap(meta, buffers)
-        if (m) maps.set(m.uuid, m)
-        else corrupt.push(meta.uuid)
-      }
-      if (corrupt.length) {
-        // Fusing a truncated plane yields a silently wrong cloud — refuse the set.
-        log(`Dense: ${corrupt.length} saved depth map(s) are corrupt — discarding the saved set; `
-          + `recompute depth maps before densifying`, 'error', 'Dense')
-        depthMapsMeta.value = []
-        await opfs.deleteDepthPlanes(projects.currentProjectId).catch(() => {})
-        return false
-      }
-      if (gone.length) {
-        // Fusion is happy with fewer maps, and a removed image *should* stop
-        // contributing — drop those entries and re-stamp the index.
-        log(`Dense: ${gone.length} saved depth map(s) dropped — their images are no longer in `
-          + `this project`, 'info', 'Dense')
-        await opfs.saveDepthIndex(projects.currentProjectId,
-          buildDepthIndex([...maps.values()], { sparseCloud: mainSparseCloud.value })).catch(() => {})
-      }
-      depthMaps.value = maps
-      depthMapsMeta.value = []
-      if (!maps.size) return false
-      log(`Dense: ${maps.size} depth map(s) restored in ${((performance.now() - t0) / 1000).toFixed(1)}s`,
-        'success', 'Dense')
-      return true
-    } catch (err) {
-      log(`Dense: could not load saved depth maps — ${err?.message ?? err}. Recompute them.`,
-        'error', 'Dense')
-      depthMapsMeta.value = []
-      return false
-    }
-  }
-
-  // Point `depthMapsMeta` at the saved index, unless it is stale against the current
-  // main sparse cloud — depth is in that cloud's frame, so a reconstruction re-run
-  // invalidates it. Returns true when usable saved maps are now advertised.
-  // `projectId` is explicit for the restore path (which is handed one), defaulting
-  // to the open project for the in-session callers.
-  async function loadDepthIndexIntoMeta(projectId = projects.currentProjectId) {
-    if (!isPersisting()) return false
-    const index = await opfs.loadDepthIndex(projectId).catch(() => null)
-    if (!index?.maps?.length) { depthMapsMeta.value = []; return false }
-    if (isDepthIndexStale(index, mainSparseCloud.value)) {
-      log(`Dense: discarding ${index.maps.length} saved depth map(s) — they belong to an older `
-        + `sparse reconstruction and no longer match the current model; recompute them`,
-        'warn', 'Dense')
-      depthMapsMeta.value = []
-      await opfs.deleteDepthPlanes(projectId).catch(() => {})
-      return false
-    }
-    depthMapsMeta.value = index.maps
-    return true
   }
 
   // Insert a sparse model. Two intents via `opts`:
@@ -695,13 +503,14 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
         views: [...p.views.entries()].map(([u, kp]) => [u, kp]),
       }))
 
-      const { maps } = await workerComputeDepthMaps(
+      const { maps, summary: aSummary } = await workerComputeDepthMaps(
         { images: inputImages, points, settings },
-        { onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl) => onProgress?.(d, t, lbl) },
+        { onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f) },
       )
 
       depthMaps.value = new Map(maps.map((m) => [m.uuid, m]))
       depthMapsMeta.value = []   // the fresh maps supersede any restored index
+      depthSummary.value = aSummary ?? null
       for (const m of maps) {
         const im = imgByUuid.get(m.uuid)
         if (im && m.displayDataUrl) imagesStore.updateDepth(im.id, m.displayDataUrl)
@@ -751,8 +560,14 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     // secondary contributor). The heavy per-map displayDataUrl PNG is display-only,
     // so strip it from the wire payload entirely. The worker returns the buffers so
     // we re-attach them below; until then the store's copies are detached.
+    // Resolve uuid → filename for the fusion progress/log labels. Deliberately derived
+    // here rather than persisted in the depth-map index: the image list is the authority
+    // on names (a rename must not leave a stale copy in the sidecar), and a restored
+    // project has the list but no name on the map. Falls back to a uuid fragment in
+    // core/dense/mvs.js when the image is gone.
+    const nameByUuid = new Map(images.value.map((im) => [im.uuid, im.name]))
     const mapsInput = maps.map((m) => ({
-      uuid: m.uuid, width: m.width, height: m.height, K: m.K, R: m.R, t: m.t,
+      uuid: m.uuid, name: m.name ?? nameByUuid.get(m.uuid), width: m.width, height: m.height, K: m.K, R: m.R, t: m.t,
       depth: m.depth, cost: m.cost, rgb: m.rgb, normals: m.normals || null,
     }))
     const transfer = []
@@ -763,7 +578,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     try {
       const { points: flat, nrm, summary: dSummary, mapBuffers } = await workerDensify(
         { maps: mapsInput, settings },
-        { onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl) => onProgress?.(d, t, lbl), transfer },
+        { onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f), transfer },
       )
       // Re-attach the round-tripped buffers so ortho / a second densify still work.
       if (mapBuffers) {
@@ -804,8 +619,10 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
   }
 
   // Mesh — screened Poisson over the main dense cloud (needs its oriented normals).
-  // Consumes the dense cloud's pos/col/nrm; the worker round-trips them home so the
-  // dense cloud stays usable. Upserts a single kind:'mesh' cloud.
+  // Sends disposable copies of the dense buffers to the worker. Keeping the
+  // authoritative arrays here costs one temporary copy, but makes cancellation
+  // genuinely non-destructive: terminating a worker cannot strand detached
+  // source buffers. Upserts a single kind:'mesh' cloud.
   async function generateMesh(settings = {}, onProgress) {
     const dense = clouds.value.find((c) => c.kind === 'dense')
     if (!dense?.count) { log('Mesh: build a dense point cloud first', 'warn', 'Products'); return }
@@ -815,23 +632,20 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     }
     // Pass the dense merge cell (GSD) so the worker sizes the trim radius + colour grid.
     const mergeCell = denseSummary.value?.mergeCell ?? 0
-    // Transfer (not clone) the dense buffers; the worker returns them for re-attach.
+    const posCopy = dense.pos.slice()
+    const colCopy = dense.col?.slice() || null
+    const nrmCopy = dense.nrm.slice()
     const input = {
-      dense: { count: dense.count, pos: dense.pos, col: dense.col || null, nrm: dense.nrm },
+      dense: { count: dense.count, pos: posCopy, col: colCopy, nrm: nrmCopy },
       settings: { ...settings, mergeCell },
     }
-    const transfer = [dense.pos.buffer]
-    if (dense.col) transfer.push(dense.col.buffer)
-    transfer.push(dense.nrm.buffer)
+    const transfer = [posCopy.buffer]
+    if (colCopy) transfer.push(colCopy.buffer)
+    transfer.push(nrmCopy.buffer)
     reconStatus.value = 'running'
     try {
-      const { mesh, denseHome } = await workerMeshify(input,
-        { onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl) => onProgress?.(d, t, lbl), transfer })
-      // Re-attach the round-tripped dense buffers (mesh generation is non-destructive).
-      if (denseHome) {
-        const d = clouds.value.find((c) => c.kind === 'dense')
-        if (d) { d.pos = markRaw(denseHome.pos); if (denseHome.col) d.col = markRaw(denseHome.col); if (denseHome.nrm) d.nrm = markRaw(denseHome.nrm) }
-      }
+      const { mesh } = await workerMeshify(input,
+        { onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f), transfer })
       if (!mesh || !mesh.nVerts) {
         log('Mesh: Poisson produced no surface — try a lower depth or check the cloud/normals', 'warn', 'Products')
         reconStatus.value = 'done'
@@ -878,9 +692,8 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
   // (one for crop/filter, two or more for merge); `settings` is already in the
   // core/products/cloudEdit.js shape (the modals do the UI→core mapping in run()).
   //
-  // The source buffers are transferred to the worker and round-tripped home, so the
-  // op is non-destructive but the sources are briefly detached — the op is written
-  // to never throw for exactly that reason (see workers/ops/cloud.js).
+  // Disposable copies are transferred to the worker. The source buffers remain
+  // attached throughout, including when Cancel hard-terminates the worker.
   async function editClouds({ mode, sourceIds = [], settings = {}, name } = {}, onProgress) {
     const sources = sourceIds
       .map((id) => clouds.value.find((c) => c.id === id))
@@ -895,26 +708,20 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     }
     const transfer = []
     const payload = sources.map((c) => {
-      transfer.push(c.pos.buffer)
-      if (c.col) transfer.push(c.col.buffer)
-      if (c.nrm) transfer.push(c.nrm.buffer)
-      return { id: c.id, count: c.count, pos: c.pos, col: c.col || null, nrm: c.nrm || null }
+      const pos = c.pos.slice()
+      const col = c.col?.slice() || null
+      const nrm = c.nrm?.slice() || null
+      transfer.push(pos.buffer)
+      if (col) transfer.push(col.buffer)
+      if (nrm) transfer.push(nrm.buffer)
+      return { id: c.id, count: c.count, pos, col, nrm }
     })
     reconStatus.value = 'running'
     try {
-      const { cloud: edited, error, home } = await workerEditCloud(
+      const { cloud: edited, error } = await workerEditCloud(
         { mode, clouds: payload, settings },
-        { onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl) => onProgress?.(d, t, lbl), transfer },
+        { onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f), transfer },
       )
-      // Re-attach the round-tripped source buffers FIRST — before any early return —
-      // or a failed/empty edit leaves every source cloud holding a detached buffer.
-      for (const h of home || []) {
-        const c = clouds.value.find((x) => x.id === h.id)
-        if (!c) continue
-        c.pos = markRaw(h.pos)
-        if (h.col) c.col = markRaw(h.col)
-        if (h.nrm) c.nrm = markRaw(h.nrm)
-      }
       if (error) throw new Error(error)
       if (!edited?.count) {
         log('Cloud edit: the result is empty — nothing was added', 'warn', 'Products')
@@ -939,178 +746,17 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
 
   // ── Georeferencing + products (DEM / orthophoto) ─────────────────────────────
 
-  // 3D-3D correspondences for the SfM→CRS fit: registered sparse camera centres
-  // ↔ imported camera poses (both keyed to images; poses are in the project CRS).
-  function georefPairs() {
-    const cams = sparseCameras.value
-    if (!cams.size) return []
-    const imgById = new Map(images.value.map((im) => [im.id, im]))
-    const pairs = []
-    for (const p of posesStore.poses) {
-      if (p.enabled === false || p.imageId == null || p.x == null || p.y == null) continue
-      const im = imgById.get(p.imageId)
-      if (!im) continue
-      const cam = cams.get(im.uuid)
-      if (!cam) continue
-      pairs.push({ src: cameraCenter(cam), dst: [p.x, p.y, p.z ?? 0] })
-    }
-    return pairs
-  }
-
-  // Maps needed to resolve a GCP observation's imageId → its registered camera:
-  // imageId → image (for .uuid), and the sparse cloud's cameras (uuid-keyed).
-  function imagesById() {
-    return new Map(images.value.map((im) => [im.id, im]))
-  }
-
-  // Fit-eligible GCPs: enabled, with ≥2 observations that resolve to a
-  // *registered* camera — cheap sync check, no triangulation, used to gate
-  // `canGeoreferenceGcps` and to decide whether it's worth triangulating at all.
-  function qualifyingGcps() {
-    const cams = sparseCameras.value
-    if (!cams.size) return []
-    const imgById = imagesById()
-    return gcpsStore.gcps.filter((g) => {
-      if (g.enabled === false) return false
-      const nRegistered = (g.observations || []).filter((o) => {
-        const uuid = imgById.get(o.imageId)?.uuid
-        return uuid != null && cams.has(uuid)
-      }).length
-      return nRegistered >= 2
-    })
-  }
-
-  // True when a GCP-based fit is *plausible* (≥3 GCPs each with ≥2 registered
-  // observations) — cheap, does not triangulate.
-  const canGeoreferenceGcps = computed(() => qualifyingGcps().length >= 3)
-
-  // 3D-3D correspondences for the SfM→CRS fit from GCPs: triangulate each
-  // qualifying GCP in the current SfM frame, pair with its surveyed position.
-  async function gcpGeorefPairs() {
-    const qualifying = qualifyingGcps()
-    if (!qualifying.length) return []
-    const results = await triangulateAllGcps(qualifying, sparseCameras.value, imagesById())
-    return results
-      .filter(({ tri }) => tri != null)
-      .map(({ gcp, tri }) => ({ src: [tri.x, tri.y, tri.z], dst: [gcp.x, gcp.y, gcp.z ?? 0] }))
-  }
-
-  // True when a georeference can be fit (≥3 correspondences from GCPs or poses),
-  // so the product modals can offer a real-CRS output alongside the local frame.
-  const canGeoreference = computed(() => canGeoreferenceGcps.value || georefPairs().length >= 3)
-
-  // Fit (or refit) the SfM→CRS similarity, targeting the current project CRS.
-  // GCPs are the accuracy-defining source and win when ≥3 triangulate; imported
-  // camera poses are the fallback. Returns the georef record or null.
-  async function georeference() {
-    const gcpPairs = await gcpGeorefPairs()
-    const usingGcps = gcpPairs.length >= 3
-    const pairs = usingGcps ? gcpPairs : georefPairs()
-    if (pairs.length < 3) {
-      log('Georeference: need ≥3 GCPs or camera poses matching registered images', 'warn', 'Products')
-      return null
-    }
-    const fit = fitSimilarity(pairs)
-    if (!fit) {
-      log('Georeference: fit failed (degenerate configuration)', 'warn', 'Products')
-      return null
-    }
-    georef.value = {
-      sim: { scale: fit.scale, R: fit.R, t: fit.t },
-      crs: projects.currentCrs, rms: fit.rms, count: fit.count, method: usingGcps ? 'gcps' : 'poses',
-    }
-    log(`Georeference: ${fit.count} ${usingGcps ? 'GCPs' : 'poses'} → ${projects.currentCrs}, `
-      + `scale ${fit.scale.toPrecision(4)}, RMS ${fit.rms.toPrecision(3)}`, 'success', 'Products')
-    healthDirty.value++   // GCP prune / refit → the hub overview must recompute
-    persist()
-    return georef.value
-  }
-
-  // Per-image pose residuals against the current georeference (Evaluate ▸ Pose
-  // Residuals): apply the fitted similarity to each registered camera centre and
-  // diff against the imported pose. Mirrors gcpAccuracyReport's shape and its
-  // no-robust stance — dropping a camera from the diff would hide the drift this
-  // report exists to surface. Returns [{ uuid, name, dx, dy, dz, dTotal }].
-  function poseResidualReport() {
-    const sim = georef.value?.sim
-    const cams = sparseCameras.value
-    if (!sim || !cams.size) return []
-    const imgById = new Map(images.value.map((im) => [im.id, im]))
-    const out = []
-    for (const p of posesStore.poses) {
-      if (p.enabled === false || p.imageId == null || p.x == null || p.y == null) continue
-      const im = imgById.get(p.imageId)
-      const cam = im && cams.get(im.uuid)
-      if (!cam) continue
-      const fit = applySimilarity(sim, cameraCenter(cam))
-      const dx = fit[0] - p.x, dy = fit[1] - p.y, dz = fit[2] - (p.z ?? 0)
-      out.push({ uuid: im.uuid, name: im.name, dx, dy, dz, dTotal: Math.hypot(dx, dy, dz) })
-    }
-    return out
-  }
-
-  // Per-GCP accuracy report against the current georeference: triangulate every
-  // enabled GCP, apply the fitted similarity, and diff against its surveyed CRS
-  // position — plus the per-observation reprojection residual already computed
-  // by triangulateGcp. Pure read against already-fitted state; cheap to recompute
-  // on demand (e.g. every time the GCP table is shown or a mark is placed).
-  // Returns [{ gcpId, name, viewCount, dx, dy, dz, dTotal, observations }] —
-  // entries for untriangulable GCPs still appear with residuals `null`.
-  async function gcpAccuracyReport() {
-    const sim = georef.value?.sim
-    const enabled = gcpsStore.gcps.filter((g) => g.enabled !== false)
-    if (!enabled.length) return []
-    const results = await triangulateAllGcps(enabled, sparseCameras.value, imagesById())
-    return results.map(({ gcp, tri }) => {
-      if (!tri) {
-        return { gcpId: gcp.id, name: gcp.name, viewCount: 0,
-          dx: null, dy: null, dz: null, dTotal: null, observations: [] }
-      }
-      let dx = null, dy = null, dz = null, dTotal = null
-      if (sim && gcp.x != null && gcp.y != null) {
-        const p = applySimilarity(sim, [tri.x, tri.y, tri.z])
-        dx = p[0] - gcp.x; dy = p[1] - gcp.y; dz = p[2] - (gcp.z ?? 0)
-        dTotal = Math.hypot(dx, dy, dz)
-      }
-      return {
-        gcpId: gcp.id, name: gcp.name, viewCount: tri.viewCount,
-        dx, dy, dz, dTotal, observations: tri.perViewReprojPx,
-      }
-    })
-  }
-
-  // Guided marking: for every enabled GCP not yet marked on `imageId`, where the
-  // current cloud's poses say it must lie in that image — a predicted pixel
-  // (≥2 other observations) or an epipolar line (exactly 1). Empty when the
-  // image isn't registered. Cheap read against already-fitted state, recomputed
-  // on demand like gcpAccuracyReport.
-  //
-  // Deliberately silent. This runs on every tab switch, selection change and
-  // re-render, so logging here reports the app's own recomputation rather than
-  // anything the user did — it buried the console in lines that repeated whatever
-  // was already on screen. The one moment worth a line is when a mark is *placed*;
-  // App.vue's `logGcpMark` does that, comparing the click against this guide.
-  async function gcpGuides(imageId) {
-    if (imageId == null || !gcpsStore.gcps.length) return []
-    return gcpGuidesForImage(gcpsStore.gcps, imageId, sparseCameras.value, imagesById())
-  }
-
-  // Where the model thinks `gcpId` is, projected into `imageId`, from *all* its
-  // marks including that image's own. NOT a guide (see gcpEstimateForImage) — it's
-  // for bracketing a mark to measure how far the new mark moved the estimate.
-  async function gcpEstimate(gcpId, imageId) {
-    const gcp = gcpsStore.gcps.find((g) => g.id === gcpId)
-    if (!gcp || imageId == null) return null
-    const byId = imagesById()
-    const targetCam = sparseCameras.value.get(byId.get(imageId)?.uuid)
-    if (!targetCam) return null
-    const camerasByImageId = new Map()
-    for (const o of gcp.observations || []) {
-      const cam = sparseCameras.value.get(byId.get(o.imageId)?.uuid)
-      if (cam) camerasByImageId.set(o.imageId, cam)
-    }
-    return gcpEstimateForImage(gcp.observations, targetCam, camerasByImageId)
-  }
+  const {
+    georefPairs, imagesById, qualifyingGcps, canGeoreferenceGcps, gcpGeorefPairs,
+    canGeoreference, georeference, poseResidualReport, gcpAccuracyReport,
+    gcpGuides, gcpEstimate,
+  } = createGeoreferencing({
+    sparseCameras, images, georef, healthDirty,
+    poses: () => posesStore.poses,
+    gcps: () => gcpsStore.gcps,
+    currentCrs: () => projects.currentCrs,
+    persist, log,
+  })
 
   // Build a DEM from the densest available cloud, in the requested frame
   // (settings.crs: 'local' | 'project'). A new DEM invalidates the old ortho.
@@ -1143,7 +789,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
       }))
       const grid = await workerGenerateDem(
         { points, cameras, frame: frameSpec, settings },
-        { onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl) => onProgress?.(d, t, lbl) },
+        { onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f) },
       )
       dem.value = grid
       ortho.value = null // a new DEM invalidates the old ortho
@@ -1192,7 +838,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
       }))
       const res = await workerGenerateOrtho(
         { dem: demPayload, maps: mapsPayload, settings },
-        { onLog: (m, l, c) => log(m, l, c), onProgress: (dn, t, lbl) => onProgress?.(dn, t, lbl) },
+        { onLog: (m, l, c) => log(m, l, c), onProgress: (dn, t, lbl, f) => onProgress?.(dn, t, lbl, f) },
       )
       ortho.value = res
       if (isPersisting()) opfs.saveProduct(projects.currentProjectId, 'ortho', res).catch(() => {})
@@ -1226,6 +872,11 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
             uuid: img.uuid,
             name: img.name,
             kpStatus: img.kpStatus,
+            // Resolution the keypoints were MEASURED at (keypoint coords themselves
+            // are native px). core/scaleContext.js resolves the reprojection gates
+            // against it — a gate below the measurement quantum rejects good data.
+            // Absent on pre-scale projects ⇒ treated as 1 ⇒ no correction.
+            detectScale: img.detectScale ?? null,
             // Sensor id lets BA share one focal across images on the same sensor
             // (self-calibration); null → the image is its own intrinsics group.
             sensorId: img.sensorId ?? null,
@@ -1295,10 +946,15 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
         // Feeds the optional GCP-anchored bundle-adjust pass in core/sfm/sfm.js.
         gcps: (() => {
           const imgById = imagesById()
+          // Anchored BA is a Euclidean 3D constraint. Do not mix longitude/
+          // latitude degrees with metre elevations, and never invent z=0 for a
+          // 2D control point. Post-hoc products enforce the same boundary.
+          if (isGeographic(projects.currentCrs)) return []
           return gcpsStore.gcps
-            .filter((g) => g.enabled !== false && g.x != null && g.y != null)
+            .filter((g) => g.enabled !== false
+              && Number.isFinite(g.x) && Number.isFinite(g.y) && Number.isFinite(g.z))
             .map((g) => ({
-              x: g.x, y: g.y, z: g.z ?? 0,
+              x: g.x, y: g.y, z: g.z,
               accuracyX: g.accuracyX, accuracyY: g.accuracyY, accuracyZ: g.accuracyZ,
               observations: (g.observations || [])
                 .map((o) => ({ uuid: imgById.get(o.imageId)?.uuid, px: o.px, py: o.py }))
@@ -1310,7 +966,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
 
       const result = await workerReconstruct(input, {
         onLog: (message, level, category) => log(message, level, category),
-        onProgress: (done, total, label) => onProgress?.(done, total, label),
+        onProgress: (done, total, label, fraction) => onProgress?.(done, total, label, fraction),
       })
 
       // Apply the model. Point view-tracks come back as [[uuid, kpIdx, x, y], …];
@@ -1395,13 +1051,13 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     selectedCloudId.value = null
     mainSparseId.value = null
     reconStatus.value = 'idle'
-    depthMaps.value = new Map()
-    depthMapsMeta.value = []
+    clearDepthMaps()
     dem.value = null
     ortho.value = null
     georef.value = null
     summary.value = null
     denseSummary.value = null
+    depthSummary.value = null
     summaryHistory.value = []
     if (purge && isPersisting()) {
       opfs.deleteReconstruction(projects.currentProjectId).catch(() => {})
@@ -1413,121 +1069,6 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
   // Rebuild one cloud from version-2 metadata + binary buffers (inverse of
   // serializeCloud). markRaw: point clouds are large and only ever replaced
   // wholesale, never mutated per-point — deep reactivity freezes render/restore.
-  function deserializeCloud(c) {
-    const N = c.pointCount ?? 0
-    const b = c.buffers || {}
-    // Dense clouds restore into the flat { count, pos:Float32, col:Uint8 } shape.
-    // On-disk pos is Float64 (uniform sidecar format); narrow it to Float32 in memory.
-    if (c.kind === 'dense') {
-      const posF = b.pos ? Float32Array.from(new Float64Array(b.pos)) : new Float32Array(0)
-      const col = c.hasColor && b.col ? new Uint8Array(b.col) : null
-      // Normals stay Float32 on disk; undefined when the run produced none (no heal).
-      const nrm = c.hasNormals && b.nrm ? new Float32Array(b.nrm) : null
-      return {
-        id: c.id ?? makeCloudId(), name: c.name ?? 'Dense cloud', kind: 'dense',
-        createdAt: c.createdAt ?? Date.now(), cameras: markRaw(new Map()),
-        ...(c.imported ? { imported: true } : {}),
-        // Absent on projects saved before cloud editing existed ⇒ not derived.
-        ...(c.derived ? { derived: true } : {}),
-        count: N, pos: markRaw(posF), col: markRaw(col),
-        ...(nrm ? { nrm: markRaw(nrm) } : {}),
-      }
-    }
-    if (c.kind === 'mesh') {
-      const nVerts = c.nVerts ?? N
-      const posF = b.pos ? Float32Array.from(new Float64Array(b.pos)) : new Float32Array(0)
-      const col = c.hasColor && b.col ? new Uint8Array(b.col) : null
-      const idx = b.idx ? new Uint32Array(b.idx) : new Uint32Array(0)
-      return {
-        id: c.id ?? makeCloudId(), name: c.name ?? 'Mesh', kind: 'mesh',
-        createdAt: c.createdAt ?? Date.now(), cameras: markRaw(new Map()),
-        ...(c.imported ? { imported: true } : {}),
-        count: c.triCount ?? (idx.length / 3), nVerts,
-        pos: markRaw(posF), idx: markRaw(idx), col: markRaw(col),
-      }
-    }
-    const pos = b.pos ? new Float64Array(b.pos) : new Float64Array(0)
-    const col = c.hasColor && b.col ? new Uint8Array(b.col) : null
-    const vcount = b.vcount ? new Uint32Array(b.vcount) : null
-    const vcam = b.vcam ? new Uint32Array(b.vcam) : null
-    const vkp = b.vkp ? new Uint32Array(b.vkp) : null
-    const vx = b.vx ? new Float32Array(b.vx) : null
-    const vy = b.vy ? new Float32Array(b.vy) : null
-    const viewUuids = c.viewUuids || []
-
-    const cameras = new Map()
-    for (const cam of c.cameras || []) { const { uuid, R, t, K } = cam; cameras.set(uuid, { R, t, K }) }
-
-    const points = new Array(N)
-    let vi = 0
-    for (let i = 0; i < N; i++) {
-      const views = new Map()
-      let viewsPx
-      if (vcount && vcam && vkp) {
-        const k = vcount[i]
-        for (let j = 0; j < k; j++) {
-          const uuid = viewUuids[vcam[vi]]
-          views.set(uuid, vkp[vi])
-          if (vx && vy && Number.isFinite(vx[vi])) {
-            (viewsPx ??= new Map()).set(uuid, [vx[vi], vy[vi]])
-          }
-          vi++
-        }
-      }
-      points[i] = {
-        x: pos[i * 3], y: pos[i * 3 + 1], z: pos[i * 3 + 2],
-        color: col ? [col[i * 3], col[i * 3 + 1], col[i * 3 + 2]] : undefined,
-        views,
-        viewsPx,
-      }
-    }
-    return {
-      id: c.id ?? makeCloudId(),
-      name: c.name ?? 'Sparse cloud',
-      kind: c.kind ?? 'sparse',
-      createdAt: c.createdAt ?? Date.now(),
-      ...(c.imported ? { imported: true } : {}),
-      ...(c.secondary ? { secondary: true } : {}),
-      cameras: markRaw(cameras),
-      points: markRaw(points),
-    }
-  }
-
-  // Legacy inline shape (points embedded in JSON) — kept so a pre-binary project
-  // still opens. New projects always write version 2.
-  function legacyDeserializeCloud(c) {
-    // Legacy dense clouds embedded points as objects; fold them into the flat shape.
-    if (c.kind === 'dense') {
-      const src = c.points || []
-      const n = src.length
-      const pos = new Float32Array(n * 3)
-      const col = new Uint8Array(n * 3)
-      for (let i = 0; i < n; i++) {
-        const p = src[i]
-        pos[i*3] = p.x; pos[i*3+1] = p.y; pos[i*3+2] = p.z
-        const cc = p.color || [200, 200, 200]
-        col[i*3] = cc[0]; col[i*3+1] = cc[1]; col[i*3+2] = cc[2]
-      }
-      return {
-        id: c.id ?? makeCloudId(), name: c.name ?? 'Dense cloud', kind: 'dense',
-        createdAt: c.createdAt ?? Date.now(), cameras: markRaw(new Map()),
-        count: n, pos: markRaw(pos), col: markRaw(col),
-      }
-    }
-    const map = new Map()
-    for (const cam of c.cameras || []) { const { uuid, R, t, K } = cam; map.set(uuid, { R, t, K }) }
-    return {
-      id: c.id ?? makeCloudId(),
-      name: c.name ?? 'Sparse cloud',
-      kind: c.kind ?? 'sparse',
-      createdAt: c.createdAt ?? Date.now(),
-      cameras: markRaw(map),
-      points: markRaw((c.points || []).map(({ x, y, z, color, views }) => ({
-        x, y, z, color, views: new Map(views || []),
-      }))),
-    }
-  }
-
   async function restore({ projectId }) {
     // Reset first so switching to a project without a saved model doesn't leave
     // the previous project's clouds in memory (loadReconstruction returns null for
@@ -1550,13 +1091,14 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
         ? [{ name: 'Sparse cloud', kind: 'sparse', ...data }]
         : []
 
-    clouds.value = raw.map((c) => (c.buffers ? deserializeCloud(c) : legacyDeserializeCloud(c)))
+    clouds.value = raw.map((c) => (c.buffers ? deserializeCloud(c, makeCloudId) : legacyDeserializeCloud(c, makeCloudId)))
     selectedCloudId.value = clouds.value[0]?.id ?? null
     mainSparseId.value = data.mainSparseId ?? null
     ensureMainSparse() // legacy docs (no mainSparseId) → first sparse cloud
     georef.value = data.georef ?? null
     summary.value = data.summary ?? null
     denseSummary.value = data.denseSummary ?? null
+    depthSummary.value = data.depthSummary ?? null
     summaryHistory.value = Array.isArray(data.summaryHistory) ? data.summaryHistory : []
 
     // Restore persisted raster products (DEM / ortho), if any.
@@ -1601,6 +1143,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     georef,
     summary,
     denseSummary,
+    depthSummary,
     summaryHistory,
     healthDirty,
     dem,

@@ -181,11 +181,26 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
   parses an imported PLY/LAS/XYZ file off-thread (a 500 MB LAS on the UI thread is the
   trap it avoids), buffers in `transfer`. Handlers call
   `core/*` and keep their `transfer` lists next to them.
-- **`App.vue`** is layout + store wiring + the Ribbon command dispatch; self-contained
+- **`App.vue`** is layout + store wiring + the Ribbon command dispatch. `handleCommand`
+  keeps its trivial dispatches as **data** — `MODAL_COMMANDS` (command id → the modal
+  ref it opens), `EVAL_SECTIONS` (Quality-hub deep links), a `view-preset-*` prefix
+  rule — and reserves `switch` cases for commands with a guard, a toggle or a side
+  effect, so the tables never hide behaviour. A new pipeline modal is one line in
+  `MODAL_COMMANDS`. **Verifying an App.vue refactor needs more than a green build**:
+  `<script setup>` compiles a template identifier it can't resolve to `_ctx.foo`,
+  which builds fine and is `undefined` at runtime. Compile the SFC before and after
+  (`@vue/compiler-sfc` `compileScript` + `compileTemplate` with the script's
+  `bindings`) and diff the `_ctx.*` sets — it must stay empty. Self-contained
   concerns are extracted to **`composables/*`** (`useTabDrag`, `useSidebarResize`,
   `useImportRouting` = dropped/picked-file funnel, `useExports` = camera-params/product
-  export, `useModalEscape` = Escape-closes-top-modal, `useImageViewSettings` = the image
-  view's overlay/edit toggles, plus `usePipeline`/`useTabs`/etc.). Those image-view
+  export, `useProjectLifecycle` = open/create/switch/delete + folder-backed storage +
+  `.websfm` save/load + the blocking load overlay (and `resetInMemoryProject`, the one
+  spelling of "drop all in-memory project state"), `useConfirmations` = both
+  confirm-before-destroy dialogs, `useModalEscape` = Escape-closes-top-modal,
+  `useImageViewSettings` = the image view's overlay/edit toggles, plus
+  `usePipeline`/`useTabs`/etc.). **The convention for these**: read the stores
+  directly, inject only what genuinely lives in App.vue (tab management, the
+  Three.js scene ref) — not a 15-argument dependency bag. Those image-view
   toggles (keypoints/mask/depth/GCPs/fiducials + mask-edit/gcp-edit) are **global, not
   per-tab**: one localStorage-persisted ref every image tab renders from, so switching
   images never changes them and a tab stays a bare image reference. The single per-image
@@ -212,7 +227,14 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
   from `ModalShell` (overlay/header/close/footer; preserves esc + click-backdrop close, so
   `useModalEscape` is unchanged), `SettingsField`/`SettingsGroup`/`AdvancedDisclosure`/
   `SegmentedControl`/`WarnBox`/`PresetCards`, all consuming a shared `modal.css` via
-  `<style scoped src>`. The **Evaluate** tab is one **Quality Report hub**
+  `<style scoped src>`. The three tabular **file-import previewers**
+  (`Camera`/`Gcp`/`FootprintImportModal`) are a **separate** family — wider own
+  chrome, a header/rows table with per-column role assignment — sharing
+  `ui/import-modal.css` the same way; don't try to fold them into `modal.css`.
+  Rules a component never renders are inert (scoped CSS), so put anything genuinely
+  shared in the shared file and let each modal declare only the selectors whose
+  *values* differ (`.modal` width, the `.controls` grid). **A shared value plus a
+  per-modal "undo" rule is worse than not sharing at all.** The **Evaluate** tab is one **Quality Report hub**
   (`QualityReportModal.vue` — wide own-chrome modal, left section nav + an Overview
   landing page; section bodies are `components/modals/eval/Eval*Section.vue`, NOT
   `ModalShell` wrappers, so each imports `../ui/modal.css` itself). A greyed nav entry
@@ -305,7 +327,17 @@ self-contained, file-based project format.
   reconstruction reads the store (`useReconstructionStore` pair marshalling) and
   don't count as `verified` in `matchStats`. Toggled from `MatchListModal` (list
   row / preview / graph-edge double-click; `MatchGraph.vue` is the graph view).
-- `useReconstructionStore` — clouds (sparse + dense), depth-map cache (`shallowRef`,
+- `useReconstructionStore` — the store file itself keeps cloud state, the pipeline
+  runners (reconstruct / depth / densify / mesh / DEM / ortho / editClouds) and
+  persist/restore; three concerns live beside it in **`stores/reconstruction/`** —
+  `cloudSerde.js` (cloud ↔ on-disk shape, incl. the CSR view-track layout and the
+  legacy readers; round-trip tested), `depthMapCache.js` (the lazy depth-map cache
+  + its persistence), `georeferencing.js` (the SfM→CRS fit + accuracy reports).
+  They are composed *in place* of the code they replaced, so every consumer still
+  sits below them — moving a factory call up will TDZ. Its public surface is
+  unchanged by the split and 17 files depend on it: **treat the setup `return`
+  block as the API** and diff it against HEAD after touching this store.
+  Clouds (sparse + dense), depth-map cache (`shallowRef`,
   persisted + lazily loaded — see the depth-map persistence note under Pipelines ▸ 4),
   georef fit, run summaries; runs reconstruct / computeDepthMaps /
   densify / generateDem / generateOrtho. Multiple `kind:'sparse'` clouds can coexist
@@ -463,7 +495,15 @@ self-contained, file-based project format.
    (`core/sfm/selfCalSchedule.js`) — base `f,k1` during registration, escalating to
    `k2`/`cx,cy`/`k3` in the post-filter passes as cam+obs counts clear each gate; `'none'`
    when a calibrated Brown model already removed distortion at ingest (don't double-correct).
-   An explicit comma string bypasses staging. **Pinhole-fold invariant**: radial coeffs must
+   An explicit comma string bypasses staging. **Camera count never decides whether a radial
+   term is refined** — only multi-view track redundancy does (`distortionIdentifiable`): a
+   2-view track absorbs any k1 into its own depth and fits perfectly, so a model can sit far
+   past any camera threshold and still constrain nothing. BA then *lowers its cost* while the
+   focal runs away (B4's P1180211 seed: fx 2389 → 4796), which `runBundleAdjust`'s cost-only
+   divergence guard cannot catch, and the fold bakes it into the keypoints. There are **two**
+   BA call sites and the guard must be at both — `sfm.js`'s post-filter passes and
+   `register.js`'s interim/rescue solves (`distortionCalMinCams` is a cheap pre-filter there,
+   not the decision). **Pinhole-fold invariant**: radial coeffs must
    never be left on the model (nothing downstream applies them). After each self-cal pass
    `runBundleAdjust` **folds the full `{k1,k2,k3}` bag** out of the keypoints (`undistortPixel`
    is the exact inverse of BA's forward model), resets the model coeffs to 0 (cx/cy stay on
@@ -497,10 +537,21 @@ self-contained, file-based project format.
      conformal/affine/projective fits. Reconstruction is the join point via
      `calibratedFiducialPairs`; detections without calibration never alter SfM.
      Legacy `fiducialObs`/`sensor.fiducials` migrate on restore and their original
-     detector remains compatibility code. **A ZNCC template must be odd-sized** — `znccAt` derives
+     detector remains compatibility code. `fiducialDetection.js` (anonymous slots)
+     and `fiducialBootstrap.js` (calibrated layout) are two **policies** over one
+     set of primitives in `core/sfm/fiducialPrimitives.js` — analytic prototype,
+     film-frame estimate, best ZNCC peak. They were forked copies once and drifted
+     into two live bugs; add shared math there, not in either policy.
+     **A ZNCC template must be odd-sized** — `znccAt` derives
      `half = (size−1)/2`, and an even size makes every pixel read a fractional
      index, i.e. `undefined` → NaN → a score of 0 that looks like an honest
      "no match" (`downscalePatch` forces odd; 65px ÷ 8 → 8 was the live bug).
+     **A peak's ambiguity margin is measured against a spatially DISTINCT
+     runner-up**: adjacent prototype sizes/variants all lock onto the same mark and
+     score alike, so without the distance guard an unambiguous mark reports margin
+     ≈ 0 and is rejected as `'two-peaks'`. Tests that neutralise the gate
+     (`minPeakMargin: -1`) cannot see this — keep at least one case at the shipped
+     default.
 4. **Dense MVS** (`core/dense/mvs.js` + `crates/reconstruction/src/mvs.rs`): Stage A build
    per-image PatchMatch depth maps → optional `filterDepthMap` (median/speckle cleanup)
    → `filterDepthMapsGeometric` (cross-view consistency) → Stage B `fuseDepthMaps`
@@ -837,6 +888,69 @@ convergence".
   rejected if the transcode failed — detection/dense error loudly rather than
   fall back to the lossy JPEG). Non-TIFF/native-decode/restored images are ready
   immediately.
+- **NEVER spread a typed array into a variadic call** — `Math.max(...plane)`,
+  `Math.min(...)`, `arr.push(...big)`. V8 throws `RangeError: Maximum call stack
+  size exceeded` past ~124k arguments, and every pixel plane in this app is far
+  bigger (a fiducial gray is `maxDim` 1536 ⇒ ~2.4M). It reads as the obvious
+  spelling and unit tests never catch it, because fixtures are tiny — it shipped
+  broken in `estimateFilmBounds` and killed the whole fiducial-bootstrap op. Write
+  the loop. (Spreading a small derived array — per-image stats, a handful of
+  scales — is fine; the rule is about per-pixel data.)
+- **Image name → image id has ONE home: `core/io/nameMatch.js`.** GCP observations,
+  camera poses, footprint polygons and COLMAP import all associate a foreign tool's
+  filename with a loaded image, and they must agree. `makeNameResolver(entries,
+  {key})` indexes four tiers (exact → basename → lowercase basename → lowercase
+  stem) and only falls to a looser tier when every stricter one missed — a linear
+  "exact OR stem" scan decides per *candidate* instead, so an earlier stem hit beats
+  a later exact hit. Build it once per image-list change (a `computed` in each
+  store), never per lookup.
+- **A canvas overlay redraw is rAF-coalesced, never called per event.**
+  `ViewerImage.vue`'s `drawOverlay()` schedules; `renderOverlay()` draws and is
+  private. 18 prop watchers feed it and one user action commonly trips several, so
+  a direct call means several full repaints per tick (and one per mousemove during
+  a drag). Same reason as App.vue's `queueGcpGuidesRefresh`. Per-point `fillStyle`
+  is the other trap: a style change flushes the 2D context, so colour-coded
+  keypoints batch into one `Path2D` per hue bucket and cull off-screen points.
+  The two side canvases it blits come from composables — `useDepthOverlay`
+  (depth map) and `useSmartSelect` (the SAM2 cyan candidate) — as `shallowRef`s;
+  reading `.value` in `renderOverlay` tracks nothing, since the draw runs from
+  rAF rather than a reactive effect. **Mask *editing* deliberately stays in the
+  component**: paint/undo/rect/invert is a three-way coupling between pointer
+  input, the mask canvas and the renderer, so a `useMaskEditor` would need ~28
+  exports and ~8 deps — indirection without decoupling. `useSmartSelect` works
+  precisely because it has a narrow seam: it hands back
+  `buildCommitCanvas(w, h)` and never touches the mask canvas or undo stack.
+- **Progress is a monotonic 0..1 `fraction`, never a work counter.** `usePipeline`
+  owns the whole display contract: it ingests every `onProgress(done, total, label,
+  fraction?)` into a plain object and flushes to refs on a rAF at ≤10 Hz (worker
+  events arrive far faster than anyone reads them — `matchAll` emits once per *pair*),
+  clamps the fraction monotonically, and lands on 100% exactly once via
+  `closeProgress()`. `ProgressModal` caps in-flight progress at **99%** — a bar that
+  shows 100% while work continues is what teaches users the bar lies. So: **`done`/
+  `total` are the numeric readout only**; a stage whose counter maxes out before the
+  work does must supply an explicit `fraction`. Two shapes recur and both need one:
+  a **post-loop phase** (dense Stage A's cross-view filter needs every map, so the
+  per-image loop is rescaled to 0–0.85 in `workers/ops/dense.js`) and a **nested
+  sub-run** (SfM seed retries / secondary models re-run the whole pipeline —
+  `core/sfm/progressPlan.js` `scopeProgress` remaps each child's honest 0..1 into a
+  slice of the parent's range). SfM's own bar is a weighted phase walk there, NOT the
+  registered-camera count: registration is ~45% of the run, and counting cameras put
+  the bar at 100% with BA, retriangulation and track filtering still to come. A stage
+  with no countable work at all (DEM, cloud edit) opens `{ indeterminate: true }` and
+  resolves automatically if a real `total > 1` ever arrives.
+- **Elapsed and remaining are formatted differently on purpose** (`utils/timeFormat.js`):
+  elapsed is *measured*, so `formatClock` shows M:SS (the ticking seconds double as the
+  liveness signal on a long run); remaining is *estimated*, so `formatRemaining` rounds
+  coarser the further out it looks (<1 min → "less than a minute", <10 min → nearest
+  minute, <1 h → nearest 5, ≥1 h → nearest 10). Second-level precision on an EMA
+  estimate is a false claim, and a bucketed value stops the number twitching on every
+  250 ms tick. Both guard the "60 minutes" boundary — pinned by tests.
+- **A progress label must name the image, never its uuid.** Depth maps carry
+  `name: img.name` from `workers/ops/dense.js`, but it is NOT in the depth-map
+  sidecar/index — the densify marshalling in `useReconstructionStore` re-derives
+  uuid→name from the image list each run (the list is the authority; a rename must not
+  leave a stale copy on disk). `core/dense/mvs.js` keeps `m.name ?? m.uuid?.slice(0,8)`
+  as the fallback for a map whose image was removed.
 - **Descriptor width is per-detector, never a constant**: 128 (SIFT) vs 256
   (SuperPoint), carried as `descDim` on the feature bundle / OPFS blob and passed
   as `dim` into `crates/matching`. A wrong dim mis-slices the flat buffer into
@@ -874,6 +988,39 @@ convergence".
   Note: modals holding UI-unit values transform them in their own `run()` (e.g. a `%`
   ÷100, `0`⇒`Infinity`), so those defaults must live in the modal-facing constant, not a
   store-side merge that would double-apply the transform.
+- **A threshold is only a constant if its unit is.** Two classes of default in this
+  app are *not* scale-free, and hardcoding them meant one number with different
+  meanings on different inputs:
+  - **Pixel thresholds.** Detection runs at `maxDim` (scale `s = min(1, maxDim/nativeMax)`),
+    but `workers/ops/detect.js` maps keypoints back to **native** px, so every
+    downstream gate is denominated in native px while the measurement quantum is
+    `1/s` native px. A 10137px scan at `maxDim` 2400 is quantized to ~4.2px against
+    a 2.0px F-RANSAC gate — *tighter than the noise floor*. `core/scaleContext.js`
+    owns the fix: gates are configured in **detection px** and resolved to native px
+    per run (`buildScaleContext`/`pairScaleContext`/`resolveScaledPx`). Matching
+    resolves **per pair** (coarser image wins — it sets the epipolar noise floor);
+    SfM resolves **once per run** in `reconstruct()` and injects `detectScaleFactor`
+    into `settings`, so seed retries and secondary models cannot re-derive a
+    different factor from their subset and become incomparable at merge time. The
+    scale rides on the image as `detectScale` (persisted; **absent ⇒ 1 ⇒ no
+    correction**, never healed from meta × the current modal value).
+  - **Counts drawn from a sample.** `core/features/subsetGate.js` compares
+    `subsetGateThreshold` against putatives from an `s`-keypoint sample, whose
+    expected yield is `(s/Na)(s/Nb)·M` — so a *fixed* `s` makes the gate ~1/N more
+    severe as keypoint budgets rise (at the Detailed preset a fixed 200 vetoes
+    nearly every pair and silently severs the graph). `resolveSubsetGateSize` holds
+    `s/√(Na·Nb)` constant instead; the user's `subsetGateSize` is the **floor**, and
+    the cost ceiling outranks it. Scaling the *threshold* down is not the
+    alternative — a threshold of 1 on an expectation of 0.6 is a coin flip.
+  Derivation rules: derive from **measurements**, never from decisions (`refineIntrinsics:
+  'auto'` reads a fact and is correctly auto; `blend: 'best'` is intent and must not be);
+  log every derived value **with its inputs**, or the run is not reproducible; and keep
+  presets **static deltas** — resolve data-dependence *after* the preset, or the test
+  matrix becomes presets × input characteristics and nothing is pinnable.
+  `core/features/detectResolution.js` is the same idea applied to `maxDim` itself
+  (fraction of native, clamped into a per-preset band) — opt-in via `maxDimMode`,
+  and its band **floor is that preset's absolute value**, which is what makes
+  "auto can only add resolution, never remove it" true and testable.
 - `useImagesStore.sync()` rewrites the whole `project.json` and is fired from many
   concurrent callbacks; it **coalesces** writes (≤1 in flight, one trailing re-run) so
   concurrent callers don't race the file. Persistence is gated by `projects.isPersisting`
@@ -920,6 +1067,22 @@ convergence".
   σ0 — do not re-blur it (see METHODS.md §2; re-blurring flattens DoG contrast and
   silently eats coarse-scale keypoints). Kernel radius is 3σ, so blur cost is dominated
   by the *absolute* sigmas: keep the increments, not the full σ_i, in the inner loop.
+- **A stage's run record travels with its result, not only in the log.** A measured
+  number without the settings that produced it is not a baseline, so each stage
+  persists what it was *asked* to do next to what it achieved: `summary.config` /
+  `gates` / `initPair` (+`attempts`) / `selfCal` / `intrinsics` / `cycleFilter` /
+  `timings` from `core/sfm/sfm.js`, `image.detectSettings` per image (persisted;
+  **absent ⇒ null ⇒ "unknown"**, never back-filled from the current modal — the same
+  rule as `detectScale`), `depthSummary` from `workers/ops/dense.js` (persisted in
+  `reconstruction.json` beside `denseSummary`). The one exception is
+  `useMatchesStore.matchRun`, which is **session-scoped**: match *pairs* persist per
+  file and there is no run-level file, so a reopened project has no run to describe.
+  `core/eval/summaryDigest.js` renders all of it (Debug ▸ Project Summary, which also
+  streams the markdown into `log.ndjson` at debug level) — it is a *view*, so it must
+  never compute a figure a producer could have recorded. Two rules keep it honest: an
+  unknown setting renders as **absent**, never as its default (a digest must not claim
+  settings the run didn't use), and a heterogeneous batch says so (`detect.mixed`)
+  rather than presenting one image's values as the run's.
 - Keep the heavy logging style — every derived/auto value gets a log line the user
   can audit. The dev console keeps only a **capped display tail** in memory
   (`useLog` `MAX_BUFFER`), but every line is streamed to an **append-only OPFS
@@ -956,6 +1119,22 @@ convergence".
 Per change: `npm test` + `npm run typecheck`. WASM changes: rebuild + rerun.
 Browser-runtime work (WGSL, OPFS, modals) needs a manual browser run this
 environment may not support — say so explicitly rather than claiming verification.
+
+Test globs are `src/core/**`, `src/utils/**`, `src/stores/**` (`vitest.config.js`).
+A test file outside those **silently never runs** — check the glob before concluding
+"the tests pass" for new code under `composables/` or `workers/`. The environment is
+node with no Vue plugin, so those globs cover plain `.js` only: no `.vue` SFCs, no
+DOM, no live Pinia. Importing Vue's reactivity (`markRaw`, `ref`) is fine.
+
+**A green build is not verification for `<script setup>` or CSS refactors.** Two
+failure modes build cleanly and break at runtime, so check them directly:
+- an unresolved template identifier compiles to `_ctx.foo` → compile the SFC before
+  and after (`@vue/compiler-sfc` `compileScript` + `compileTemplate` with the
+  script's `bindings`) and diff the `_ctx.*` sets;
+- a moved CSS rule changes the cascade → build both versions, then diff the emitted
+  per-scope rules (merging duplicate selectors in document order, since a base rule
+  and an override are two records for the same selector).
+For a store, diff the setup `return` block against HEAD — that is its API.
 
 ## Where things live
 - Models / on-disk shapes: docstrings at the top of each `opfs.js` section.

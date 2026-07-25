@@ -79,16 +79,36 @@ describe('fitSimilarity', () => {
     expect(fitSimilarity(pairs)).toBeNull()
   })
 
-  it('fits collinear points without mirroring (residual stays small)', () => {
-    // A straight line still admits a valid similarity; just underdetermined about
-    // the axis. The fit should not blow up or reflect.
+  it('rejects collinear points because rotation about the line is underdetermined', () => {
     const s = 2, R = rotZ(0.5), t = [1, 2, 3]
     const src = [[0, 0, 0], [1, 0, 0], [2, 0, 0], [3, 0, 0]]
     const pairs = src.map((p) => ({ src: p, dst: applySimilarity({ scale: s, R, t }, p) }))
     const fit = fitSimilarity(pairs)
-    expect(fit).not.toBeNull()
-    expect(fit.scale).toBeGreaterThan(0)
-    expect(fit.rms).toBeLessThan(1e-6)
+    expect(fit).toBeNull()
+  })
+
+  it('rejects missing and non-finite coordinates', () => {
+    expect(fitSimilarity([
+      { src: [0, 0, 0], dst: [0, 0, 0] },
+      { src: [1, 0, 0], dst: [1, 0, 0] },
+      { src: [0, 1, 0], dst: [0, 1, undefined] },
+    ])).toBeNull()
+    expect(fitSimilarity([
+      { src: [0, 0, 0], dst: [0, 0, 0] },
+      { src: [1, 0, 0], dst: [1, 0, 0] },
+      { src: [0, 1, 0], dst: [0, 1, Number.NaN] },
+    ])).toBeNull()
+  })
+
+  it('uses correspondence weights to reduce a low-confidence outlier influence', () => {
+    const src = [[0, 0, 0], [2, 0, 0], [0, 2, 0], [0, 0, 2], [2, 2, 2]]
+    const clean = src.map((p) => ({ src: p, dst: [...p] }))
+    const noisy = clean.map((p, i) => i === 4
+      ? { ...p, dst: [12, -8, 7], weight: 1e-6 }
+      : { ...p, weight: 1 })
+    const fit = fitSimilarity(noisy)
+    close(fit.scale, 1, 1e-3)
+    close(fit.t[0], 0, 1e-3); close(fit.t[1], 0, 1e-3); close(fit.t[2], 0, 1e-3)
   })
 })
 

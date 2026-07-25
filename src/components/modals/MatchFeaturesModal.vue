@@ -240,8 +240,9 @@ function run() {
         </SettingsField>
 
         <template v-if="settings.geometricVerification">
-          <SettingsField label-for="ransacThresh" unit="px"
-            hint="Sampson distance threshold for inlier classification.">
+          <SettingsField label-for="ransacThresh" unit="detection px"
+            hint="Sampson distance threshold for inlier classification. Measured at the
+                  detection resolution, so it scales automatically on downscaled images.">
             <template #label><GlossaryTerm id="epipolar-geometry">RANSAC threshold</GlossaryTerm>
               <FieldHelp op="match-features" param="ransacThreshPx" :default-value="settings.ransacThreshPx" /></template>
             <input id="ransacThresh" v-model.number="settings.ransacThreshPx" type="number" min="0.5" max="8.0" step="0.5" class="field-input" />

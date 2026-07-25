@@ -4,6 +4,7 @@ import { useLog } from '../composables/useLog.js'
 import { ensureProjection, transform } from '../core/crs.js'
 import * as opfs from '../utils/opfs.js'
 import { registerProjectStore } from './projectStores.js'
+import { makeNameResolver } from '../core/io/nameMatch.js'
 import { useImagesStore } from './useImagesStore.js'
 import { useProjectsStore } from './useProjectsStore.js'
 
@@ -34,25 +35,18 @@ export const usePosesStore = registerProjectStore(defineStore('poses', () => {
     }).catch((err) => log(`Pose save failed — ${err?.message ?? err}`, 'error', 'Pose'))
   }
 
-  // Resolve an image name to an id (case-insensitive, extension-tolerant) —
-  // same matching as GCP observations / footprints.
-  function resolveImageId(imageName) {
-    if (!imageName) return null
-    const lc = imageName.toLowerCase()
-    const base = lc.replace(/\.[^.]+$/, '')
-    const hit = images.value.find((img) => {
-      const n = img.name.toLowerCase()
-      return n === lc || n.replace(/\.[^.]+$/, '') === base
-    })
-    return hit?.id ?? null
-  }
+  // Name → image-id matching is shared with GCP observations / footprints /
+  // COLMAP import (core/io/nameMatch.js). Indexed once per image-list change, so
+  // a full reconcile is O(poses + images) rather than a scan per pose.
+  const resolveImageId = computed(() => makeNameResolver(images.value))
 
   // Re-resolve every pose's imageId against the current image list (retroactive
   // association for poses imported before their images, or images added later).
   function resolveImageMatches() {
     let changed = false
+    const resolve = resolveImageId.value
     for (const p of poses.value) {
-      const id = resolveImageId(p.imageName)
+      const id = resolve(p.imageName)
       if (id !== p.imageId) { p.imageId = id; changed = true }
     }
     if (changed) save()
@@ -80,7 +74,7 @@ export const usePosesStore = registerProjectStore(defineStore('poses', () => {
     let matched = 0
     for (const raw of rawPoses) {
       const [x, y, z] = transform([raw.x, raw.y, raw.z ?? 0], sourceCrs, projCrs)
-      const imageId = resolveImageId(raw.imageName)
+      const imageId = resolveImageId.value(raw.imageName)
       if (imageId) matched++
       const existing = poses.value.find((p) => p.imageName === raw.imageName)
       const next = {

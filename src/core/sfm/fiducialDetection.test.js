@@ -23,6 +23,17 @@ describe('anonymous fiducial detection', () => {
     const out = detectFiducialSpots(scan('right-angle', 'corners+sides'), { family: 'right-angle', positions: 'corners+sides', minPeakMargin: -1 })
     expect(out.accepted).toHaveLength(8)
   })
+  // Regression: the two cases above disable the ambiguity gate (minPeakMargin:
+  // -1), which is how a broken margin went unnoticed — it was measured against a
+  // near-duplicate of the peak itself, so clean marks scored ~0 and were filed as
+  // 'two-peaks'. A clean synthetic scan must pass at the SHIPPED default.
+  it('accepts unambiguous marks at the default peak-margin gate', () => {
+    const out = detectFiducialSpots(scan(), { family: 'generic', positions: 'corners' })
+    expect(out.accepted.map((d) => d.slot).sort()).toEqual(slotsForPositions('corners').sort())
+    expect(out.drafts).toEqual([])
+    for (const d of out.accepted) expect(d.peakMargin).toBeGreaterThan(0)
+  })
+
   it('never invents frame fiducials on a flat image', () => {
     const gray = { data: new Float32Array(100 * 80).fill(100), width: 100, height: 80 }
     const out = detectFiducialSpots(gray, { family: 'frame' })

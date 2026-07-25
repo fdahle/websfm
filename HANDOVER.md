@@ -203,6 +203,253 @@ fiducials; self-calibration (A2) + fiducials (F4) are the code-side support.
 
 ## Done log (most recent first)
 
+- **2026-07-25 · Model-download consent was unreachable behind the progress modal.** First
+  SuperPoint (or LightGlue) run: the stage opens `ProgressModal` (overlay `z-index: 300`)
+  and only *then* does the store raise the weight-download prompt from inside the run —
+  `ModalShell`'s overlay is `z-index: 200`, so the consent dialog rendered underneath a bar
+  stuck at 0% and could never be clicked. Fixed at both levels: `composables/usePipeline.js`
+  now resolves consent **before** `openProgress` (`ensureModels`, a no-op once the weights
+  are cached; the LightGlue pre-warm is gated on the same SuperPoint/256-d precondition
+  `useMatchesStore` enforces, so a run that cannot start still errors before asking for a
+  download), and `ModelDownloadModal.vue` stacks its overlay at 400 so the paths that never
+  open a progress modal (per-image detect, Smart Select) stay clickable. The store-side
+  `ensureReady` guards are unchanged — this was prompt *ordering*, not the gate.
+
+- **2026-07-25 · Run record: the digest becomes a baseline entry.** The owed verification
+  runs are all "dataset × settings → numbers", but `summary` carried only the five outcome
+  figures — no settings, no seed, no fx trajectory, no resolved gates, no timings — so a
+  pasted digest could not be attributed to a run, and a missed target needed the full log
+  to diagnose. Producers now record what they were asked to do beside what they achieved:
+  · `core/sfm/sfm.js` → `summary.config` (requested knobs, captured **before** the `auto`
+  resolutions and the detect-px→native-px scaling mutate `cfg`), `gates` (factor + median
+  detection scale + resolved PnP/filter px, recorded even at factor 1 — "no correction
+  applied" is the measurement a full-resolution set owes), `initPair` (+ score, degree,
+  PnP-ready views, candidates scored, runner-up), `attempts` (seed retries, which attempt
+  was kept, per-attempt cams/points — B4's guard turned 19 cameras into 122 and the run's
+  own metrics never flagged the bad one), `selfCal` (requested → resolved, staged, per-pass
+  mode + reduction reason), `intrinsics` (fx nominal → final + Δ% per sensor),
+  `cycleFilter`, `timings`.
+  · `image.detectSettings` (persisted, absent ⇒ null) — `detector` + `detectScale` alone
+  cannot tell a Balanced run from a Detailed one.
+  · `useMatchesStore.matchRun` (session-scoped) — gate accounting + the user knobs; the
+  "542 of 1280 pairs gated" class of bug is invisible in any per-pair record.
+  · `workers/ops/dense.js` → `depthSummary` (persisted): backend **as requested vs as
+  ended** + GPU fallback count, Stage A settings, median s/image, median coverage + cost,
+  and the cross-view filter's wall clock *and* bite (median/min kept %, marginal maps) —
+  the two numbers TODO ▸ DF asks for.
+  · `core/eval/summaryDigest.js` renders Verdict (U6's `buildVerdict`, finally wired) →
+  Run config → Health → Offenders → Run details → Diagnostics; `DebugSummaryModal` also
+  streams the markdown into `log.ndjson` at debug level. Unknown settings render as
+  *absent* rather than as their default. 11 new tests pin the sections against a B4-shaped
+  fixture. `npm test` (1137) + typecheck + build green; the digest itself is browser-only
+  and unverified there.
+
+- **2026-07-25 · Self-cal identifiability guard reaches the in-registration BA.** The
+  2026-07-24 `distortionIdentifiable` fix (radial terms are identifiable only from
+  multi-view track redundancy, never from camera count) was applied at one of the **two**
+  BA call sites: `sfm.js`'s post-filter passes. `register.js`'s interim + rescue solves
+  still gated on the `distortionCalMinCams: 6` camera-count proxy that the same module's
+  comment disowns, so a ≥6-camera model built almost entirely of 2-view tracks refined
+  `f,k1` against nothing that constrained it. BA lowers its own cost while doing this, so
+  the cost-only divergence guard in `runBundleAdjust` passes it, and the fold then bakes
+  the bad calibration into the keypoints. Symptom in the SB log (seed retries 3–4): fx
+  2389 → 5459, k1 −0.897, one interim BA at 995px RMS — the same runaway B4 already
+  records for the P1180211 seed (fx 2389 → 4796, +101%). Now `register.js` computes the
+  ≥3-view track share and runs the same predicate: unidentifiable outright ⇒ `'none'`,
+  identifiable focal but 2-view-dominated ⇒ radial terms dropped, focal still solved;
+  `distortionCalMinCams` demoted to a cheap pre-filter. Reduction logged once per distinct
+  reason. Not the cause of any registration count — a diverged retry was already discarded
+  by `structuredClone` per attempt, so the damage was contained to the attempt.
+  Lives in `core/sfm/register.js` (`identifiableRefine`); pinned by `register.test.js`
+  (WS-C1, 4 cases — the 2-view-dominated one fails without the guard).
+
+- **2026-07-25 · Sequential pairing bypasses the subset gate.** The gate's per-run
+  bypass ("the pair set was already chosen for overlap, so the gate can only add false
+  negatives") was wired only to the `preselect` strategy — `preselectionApplied` was set
+  inside that branch alone. **Sequential pairing is the same kind of prefilter**: it has
+  already decided which pairs plausibly overlap, using capture order. Worse, a sequential
+  chain has no redundancy, so a false veto severs the graph outright rather than costing
+  one edge. Measured on the 128-image building set: **542 of 1280 sequential pairs gated**,
+  match graph split into 2 components (largest 85/128), 101 images left with zero
+  correspondences to the registered set, primary stuck at 65/128 after four seed retries.
+  The flag is now `overlapPrefiltered` and covers both strategies. Root cause is a
+  threshold calibrated against strongly-overlapping pairs: at the 4% sampling fraction,
+  a weak chain link with ~300 true matches expects well under one subset putative against
+  a threshold of 8. Found by reading the browser log for the DR verification run.
+
+- **2026-07-25 · Data-relative thresholds: pixel gates and sampled counts.** Three
+  defaults were absolute constants whose *meaning* varied with the input.
+  · **Pixel gates** (`core/scaleContext.js`, new, 20 tests). Detection runs at
+  `maxDim` but keypoints come back in native px, so `ransacThreshPx` 2.0 and
+  `reprjThreshold` 4.0 were native-px gates applied to data measured at `1/s` native
+  px. On the CA…V film scan (10137px at `maxDim` 2400, `s` ≈ 0.237) the RANSAC gate
+  sat *below* the ~4.2px measurement quantum — RANSAC discriminating below its own
+  noise floor — while the identical constant is loose on a full-resolution set. Gates
+  are now configured in **detection px**: matching resolves per pair (coarser image
+  wins), SfM resolves once in `reconstruct()` and injects `detectScaleFactor` so
+  retries/secondary models share one factor. `detectScale` persists on the image;
+  **absent ⇒ 1 ⇒ bit-identical behaviour**, so old projects and full-resolution sets
+  do not move. Reported at info level with the median scale behind the factor; a
+  half-downscaled set (median 1, no correction) still warns, which an early
+  "factor === 1 ⇒ nothing to say" return had swallowed — caught by a test.
+  · **Sampled counts** (`core/features/subsetGate.js` `resolveSubsetGateSize`, 11
+  tests). The gate compared a fixed threshold (8) against putatives from a fixed
+  200-keypoint sample, but expected yield is `(s/Na)(s/Nb)·M` — ~16 at 1000 kp/img,
+  ~3 at 5000, ~0.6 at 25000. The SIFT **Detailed** preset would therefore have vetoed
+  nearly every pair and severed the match graph, with the damage surfacing stages
+  later as a tiny reconstruction. Sample size now holds `s/√(Na·Nb)` constant (0.04,
+  reproducing 200 at the 5000-kp calibration point); `subsetGateSize` becomes a floor,
+  the O(s²) ceiling outranks it. Plausibly a second cause of the 2026-07-24 CA…V
+  gating (7/10 pairs) alongside the low pair count.
+  · **Detection resolution** (`core/features/detectResolution.js`, 15 tests). `maxDim`
+  as a fraction of each image's own native size, clamped into a per-preset band.
+  **Opt-in** (`maxDimMode`, default `absolute`) so the owed SB/B1 acceptance runs are
+  not invalidated. Each band's floor *is* that preset's absolute value, which makes
+  "auto never resolves lower than absolute" true at every image size — a test pins it
+  against `defaults.user.js`. An earlier draft with a lower floor silently detected a
+  2000px image at 1600px; the monotonicity test caught it.
+  · **Owed: a browser run.** All three change matching/SfM behaviour on downscaled
+  sets and none of it is exercised by the node test environment. Re-run CA…V (the
+  motivating set) and SB medium with `maxDimMode: absolute` first, so the pixel-gate
+  change is measured in isolation from the resolution change.
+
+- **2026-07-24 · Progress bar: phase-weighted, monotonic, throttled.** Four reported
+  problems, four distinct causes.
+  · **Sparse "finished" several times** — the bar was the *registered-camera count*,
+  which maxes out at the end of registration (~half the run), and every alternate-seed
+  retry / secondary model re-ran the whole single-model pipeline, driving that counter
+  0→100% again. Replaced by `core/sfm/progressPlan.js`: a weighted phase walk
+  (cycleFilter→initPair→register .45→bundle→retriangulate→trackFilter→gcpBundle→
+  finalize) plus `scopeProgress`, which remaps each nested sub-run's honest 0..1 into a
+  slice of the parent's range (primary 0–0.75, recovery 0.75–0.97). 14 tests; the
+  sfm.test.js progress assertion now pins monotonicity + "not full at end of
+  registration" instead of the old `[3,3,'Done']` literal.
+  · **Numbers churned** — `matchAll` emits once per *pair* (thousands of synchronous
+  reactive writes). `usePipeline` now ingests into a plain object and flushes to refs
+  on a rAF at ≤10 Hz; labels still flush on change.
+  · **Premature 100%** — the modal caps in-flight progress at 99% and only fills on
+  the `complete` flag, which `closeProgress` sets for 350 ms as it closes. Bar value is
+  a monotonic `fraction`, no longer `current/total`.
+  · **uuids in the dense progress text** — fusion's label was `m.uuid.slice(0,8)`; the
+  `name` was dropped by the store's densify marshalling (and absent from the depth-map
+  index). Store now resolves uuid→name from the image list (derived, not persisted).
+  Also: indeterminate mode for the count-less product ops (DEM / cloud edit),
+  a sub-item bar from the fractional part of `current` (dense Stage A / fusion),
+  "longer than expected" instead of a stuck 0:00 ETA, cancel freezes the fill, and
+  Stage A's per-image loop was rescaled to 0–0.85 so the cross-view filter that runs
+  *after* it isn't hidden behind a full bar.
+
+- **2026-07-24 · useReconstructionStore split (3 modules under `stores/reconstruction/`).**
+  1630 → 1155 lines, **public API byte-identical** (41 exports, none added or
+  removed — verified by diffing the setup `return` against HEAD), so none of the 17
+  consumers changed.
+  · `cloudSerde.js` — cloud ↔ on-disk shape (3 kinds, the CSR view-track layout, two
+  legacy shapes). Had **zero** test coverage; now has 16 round-trip tests that
+  passed first run, i.e. the extraction was behaviour-preserving.
+  · `depthMapCache.js` — the lazy depth-map cache + persistence. Returns its two
+  `shallowRef`s rather than hiding them: the pipeline runners assign to them
+  directly and a setter would buy nothing.
+  · `georeferencing.js` — the SfM→CRS similarity fit and the read-only accuracy
+  reports, with the two METHODS.md rules (GCPs beat poses; the reports are
+  deliberately non-robust) restated at the top so they can't be optimized away.
+  Placement is load-bearing: the factory calls sit exactly where the moved blocks
+  were, so every consumer is still below them and nothing hits a TDZ.
+  **Also fixed: `vitest.config.js` only globbed `src/core/**` and `src/utils/**`**,
+  so a test written anywhere under `stores/` or `composables/` silently never ran —
+  which is why the store layer had no tests at all. `src/stores/**` is now included
+  (still node env, no Vue plugin: plain `.js` only, no SFCs, no DOM, no live Pinia).
+  What deliberately stayed: the pipeline runners (reconstruct / depth / densify /
+  mesh / DEM / ortho / editClouds, ~590 lines) are the store's actual job and are
+  cohesive — splitting them would just move the store somewhere else.
+
+- **2026-07-24 · ViewerImage split: `useDepthOverlay` + `useSmartSelect`.** 1750 →
+  1589 lines. The depth overlay (its own canvas, the colorize-on-import
+  normalization, export/clear, the external-change watcher) and SAM2 Smart Select
+  (model consent, per-image encode, click points, decode loop, cyan preview) were
+  both clean seams. Smart Select's commit is expressed as
+  `buildCommitCanvas(w, h)` → "the accepted segment as an OffscreenCanvas ready to
+  blit", so the composable never touches the mask canvas, undo stack or store, and
+  `commitSmart` keeps its snapshot/blit/export ordering. Both canvases became
+  `shallowRef`s so the renderer can read them without a getter (the draw path is
+  rAF-driven, not a reactive effect, so nothing tracks them).
+  **`useMaskEditor` was considered and rejected**: painting is a three-way coupling
+  between pointer input, the mask canvas and the renderer, so the composable would
+  have needed ~28 exports and ~8 deps — moving lines without reducing coupling.
+  Left in place deliberately; don't "finish the job" without a better seam.
+
+- **2026-07-24 · App.vue split: `useConfirmations` + `useProjectLifecycle`.**
+  2623 → 2253 lines. `composables/useConfirmations.js` owns both confirm dialogs
+  (`pendingImageDelete` for images, the generic `pendingConfirm` for everything
+  else) and the six `confirmRemove*`; `composables/useProjectLifecycle.js` owns
+  open/create/switch/delete, folder-backed storage, `.websfm` save+load, and the
+  blocking load overlay they all share. Both read stores directly and take only
+  the App-level callbacks (tab closing, blanking the Three.js scene) as deps —
+  the `useImportRouting` convention. Two things fell out on the way: the
+  `clearAll`/`clearSensors`/`clearProjectStores`/`clearViewerScene` quartet was
+  written out **7 times** and is now `resetInMemoryProject({ purge })`, and
+  `openProject`/`pickDirectory` turned out to have no caller outside the moved
+  block, so they are private to the composable rather than re-exported.
+  **Verified with the SFC compiler**, not just a green build: `<script setup>`
+  compiles an unresolved template identifier to `_ctx.foo` and fails *silently* at
+  runtime, so both App.vue versions were compiled and their `_ctx.*` sets diffed —
+  0 before, 0 after. Also checked every `clear()` treats `{purge:false}` as `{}`.
+
+- **2026-07-24 · Import-modal chrome deduped.** `CameraImportModal` and
+  `GcpImportModal` carried **byte-identical** 151-line stylesheets;
+  `FootprintImportModal` a near-copy. Extracted to
+  `components/modals/ui/import-modal.css` (`<style scoped src>`), with the four
+  genuinely divergent selectors (`.modal` width, `.controls` grid, `.ctrl-crs`
+  grid-column, `.preview th`/`td`) declared per modal — a shared value plus a
+  per-modal "undo" would be worse than no sharing. ~230 lines removed; repo-wide
+  jscpd 1120 → 867 duplicated lines. **Verified by building both versions and
+  diffing the emitted per-scope CSS**: camera/GCP effective rules are identical,
+  footprint gains only rules for classes its template never renders. Note these
+  three are the *import previewer* family, not the `ModalShell` + `modal.css`
+  settings family — different chrome on purpose.
+
+- **2026-07-24 · Ribbon command dispatch: trivial cases → data.** `handleCommand`
+  in App.vue lost 29 switch cases to three tables: `MODAL_COMMANDS` (22 commands
+  whose whole effect is opening a modal), `EVAL_SECTIONS` (Quality-hub deep links),
+  and a `view-preset-*` prefix rule. Every remaining case carries a guard, a toggle
+  or a side effect, so the table never hides behaviour. Coverage cross-checked
+  against every dispatch id in `Ribbon.vue` + `core/help/commands.js` — no
+  regression. (The store's flag declarations stay explicit: generating them would
+  cost grep-ability and `tsc` inference for no real gain.)
+
+- **2026-07-24 · Fiducial primitives dedup + two live bugs.** `fiducialDetection.js`
+  was a copy-paste fork of `fiducialBootstrap.js` and had drifted, producing two
+  shipping bugs. (1) **`estimateFilmBounds` crashed on every real scan**: its dynamic
+  range was `Math.max(...gray.data)`, which throws `RangeError` past ~124k arguments —
+  scans are downscaled to `maxDim` 1536 (~2.4M samples), and the call sits outside the
+  op's `try`, so `bootstrapFiducials` rejected wholesale. (2) **peak margin measured
+  against a near-duplicate of the peak itself** (the fork dropped the "runner-up must be
+  spatially distinct" guard), so unambiguous marks scored margin ≈ 0 and were filed as
+  `'two-peaks'`. Both existing tests disabled the margin gate (`minPeakMargin: -1`),
+  which is why it hid. Shared math now lives in `core/sfm/fiducialPrimitives.js`
+  (`makeFiducialPrototype` / `estimateFrameBounds` / `bestPrototypeHit`, parameterised
+  by `strokeFrac` + `polarity`); the two modules are policy layers over it. Also fixed:
+  a prototype wider than the image produced an inverted `clamp(v, lo, hi)` range and an
+  out-of-bounds search box instead of being skipped. 9 new tests pin all three at the
+  shipped defaults (`fiducialPrimitives.test.js`, + one in `fiducialDetection.test.js`).
+
+- **2026-07-24 · One home for image-name matching.** `core/io/nameMatch.js`
+  (`makeNameResolver`, `basename`, `stem`). GCP observations, poses, footprints and
+  COLMAP import each carried their own copy, each commented "same matching as" the
+  others; only COLMAP's handled path components, and the three store copies decided
+  per-candidate rather than per-tier (an earlier stem hit beat a later exact hit). Now
+  one tiered indexed resolver — exact → basename → lowercase basename → lowercase stem
+  — behind a `computed` in each store, so a reconcile pass is O(N+M) instead of O(N·M).
+  13 tests (`nameMatch.test.js`).
+
+- **2026-07-24 · ViewerImage overlay: coalesced + batched.** `drawOverlay` is now an
+  rAF scheduler over `renderOverlay`; 18 prop watchers plus pan/zoom/paint funnelled
+  into it synchronously, and one user action trips several at once (a drag fired a full
+  repaint per mousemove). Keypoint drawing: response min/max hoisted into a `computed`
+  keyed on the keypoint array instead of a full pass per frame, off-screen points
+  culled, and the per-point `fillStyle` + `arc` replaced by one `Path2D` per hue bucket
+  (24) — N context-state flushes became ≤24. Not verifiable in this environment
+  (browser runtime); tests/typecheck/build pass.
+
 - **2026-07-24 · U5 · Pre-flight checks.** Pure `core/preflight.js` `preflight(state)`
   → `[{ level, code, msg, fix }]` + `hasBlockers()`, ordered blocks-first. Blocks: <2
   images / no keypoints / no verified matches / all pairs disabled (distinct message from

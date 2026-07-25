@@ -4,15 +4,14 @@ import { maskFromSource, invertMaskPixels, anyExcluded } from '../../core/mask.j
 import { depthColor } from '../../core/products/colormap.js'
 import { fitFiducialAffine, mmToScan } from '../../core/sfm/fiducials.js'
 import { clipLineToRect } from '../../core/sfm/gcpGuides.js'
-import { segmentEncode, segmentDecode, segmentForget } from '../../workers/computeClient.js'
-import { logitsToBinaryMask } from '../../core/segment/sam2.js'
+import { segmentForget } from '../../workers/computeClient.js'
 import { copyToClipboard } from '../../composables/useToasts.js'
-import { useModelsStore } from '../../stores/useModelsStore.js'
+import { useDepthOverlay } from '../../composables/useDepthOverlay.js'
+import { useSmartSelect } from '../../composables/useSmartSelect.js'
 import MaskToolbar from './MaskToolbar.vue'
 import GcpToolbar from './GcpToolbar.vue'
 
 // Smart Select (SAM2) fetches its learned weights on demand via this store.
-const modelsStore = useModelsStore()
 
 const props = defineProps({
   image:         { type: Object,  required: true },
@@ -120,7 +119,6 @@ const container      = ref(null)
 const imgEl          = ref(null)
 const overlayCanvas  = ref(null)
 const maskFileInput  = ref(null)
-const depthFileInput = ref(null)
 
 // Pan/zoom
 const scale    = ref(1)
@@ -147,13 +145,10 @@ const maskOpacity = ref(0.45)   // red-overlay alpha while editing/viewing
 // is activated; each click decodes a *fresh* candidate segment (clicks are
 // independent — a plain click resets to one positive point at that spot), which
 // is previewed (cyan) until the user commits it into the red mask or discards it.
-const smartStatus     = ref('')      // toolbar status line
-const smartHasPreview = ref(false)   // a candidate segment is currently shown
-let smartEnc = null                  // { width, height } of the encoded raster (aspect-preserved ≤ maxDim)
-let smartPoints = []                 // [{ x, y, positive }] in encoded-raster px
-let smartResult = null               // { logits:Float32Array, mw, mh } last decode (raw low-res)
-let smartPreviewCanvas = null        // OffscreenCanvas cyan candidate overlay
-let smartBusy = false, smartDirty = false // coalesce overlapping decodes
+const {
+  smartStatus, smartHasPreview, smartPreviewCanvas,
+  ensureEncoded, smartClick, buildCommitCanvas, discardSmart, resetSmart,
+} = useSmartSelect({ image: () => props.image, imgEl, drawOverlay })
 let smartDown = null                 // { x, y, alt } pending click-vs-drag while Smart tool active
 let smartMoved = false               // pointer moved past the click threshold → it's a pan, not a click
 let gcpDown = null                   // { x, y } pending click-vs-drag while GCP-edit mode active
@@ -169,8 +164,12 @@ let maskDirty = false // uncommitted mask edits pending a flush to the store on 
 let rectDrag = null // { x0, y0, x1, y1, erase } image-px corners of an in-flight rectangle
 
 let maskOffscreen  = null  // OffscreenCanvas at native image resolution
-let depthOffscreen = null  // OffscreenCanvas holding colorized depth at native resolution
-const hasDepth = ref(!!props.image.depth)
+// Depth-map overlay (its own canvas + import/export/clear). `depthCanvas` is what
+// renderOverlay blits; the rest is the ribbon's depth buttons.
+const {
+  depthFileInput, depthCanvas, hasDepth,
+  initDepthCanvas, triggerDepthImport, onDepthFileChange, clearDepth,
+} = useDepthOverlay({ imgEl, image: () => props.image, drawOverlay, emit })
 let mousePos      = null  // { x, y } screen coords for brush cursor
 let isDrawing     = false
 let strokeHit     = false // did the in-flight brush/erase stroke touch the image?
@@ -230,6 +229,35 @@ const DEPTH_STOPS = [0, 0.25, 0.5, 0.75, 1].map((t) => {
   return [t, `rgb(${r},${g},${b})`]
 })
 
+// Keypoint response range, for the cold→hot colour ramp. Recomputed only when the
+// keypoint array itself is replaced (re-detect / image switch), not on every draw —
+// it is a full pass over up to tens of thousands of points.
+const keypointRange = computed(() => {
+  const kps = props.image.keypoints
+  if (!kps?.length) return null
+  let minR = Infinity, maxR = -Infinity
+  for (const kp of kps) {
+    if (kp.response < minR) minR = kp.response
+    if (kp.response > maxR) maxR = kp.response
+  }
+  return { minR, range: maxR - minR || 1 }
+})
+
+// Every overlay input (18 prop watchers, plus pan/zoom/paint) funnels through
+// here, and one user action commonly trips several at once — a mask-edit toggle
+// moves `maskEdit`, `showMask` and `tool` together, and a drag fires per
+// mousemove. Coalesce to at most one repaint per animation frame; `renderOverlay`
+// below is the actual draw and is never called directly. Same pattern as
+// App.vue's queueGcpGuidesRefresh.
+let overlayFrame = 0
+function drawOverlay() {
+  if (overlayFrame) return
+  overlayFrame = requestAnimationFrame(() => {
+    overlayFrame = 0
+    renderOverlay()
+  })
+}
+
 // Draw a labelled colour-ramp legend stacked up from the bottom-left corner.
 // `slot` (0-based) offsets successive legends vertically so they don't overlap.
 function drawLegend(ctx, h, slot, stops, leftLabel, rightLabel, title) {
@@ -285,7 +313,8 @@ function drawGuideLabel(ctx, x, y, text, color) {
   ctx.restore()
 }
 
-function drawOverlay() {
+// The actual repaint. Call `drawOverlay()` instead — it coalesces to one frame.
+function renderOverlay() {
   const c   = overlayCanvas.value
   const img = imgEl.value
   if (!c || !img || !img.naturalWidth || !container.value) return
@@ -315,10 +344,10 @@ function drawOverlay() {
   let legendSlot = 0
 
   // Depth — colorized semi-transparent overlay at image position
-  if (depthOffscreen && hasDepth.value && props.showDepth) {
+  if (depthCanvas.value && hasDepth.value && props.showDepth) {
     ctx.save()
     ctx.globalAlpha = 0.6
-    ctx.drawImage(depthOffscreen, tx.value, ty.value, dispW, dispH)
+    ctx.drawImage(depthCanvas.value, tx.value, ty.value, dispW, dispH)
     ctx.restore()
     drawLegend(ctx, h, legendSlot++, DEPTH_STOPS, 'near', 'far', 'depth')
   }
@@ -333,32 +362,41 @@ function drawOverlay() {
   }
 
   // Smart Select candidate — cyan preview overlay (uncommitted) while the tool is active.
-  if (props.maskEdit && tool.value === 'smart' && smartPreviewCanvas) {
+  if (props.maskEdit && tool.value === 'smart' && smartPreviewCanvas.value) {
     ctx.save()
     ctx.imageSmoothingEnabled = true // smooth the low-res preview edges
     ctx.globalAlpha = 0.55
-    ctx.drawImage(smartPreviewCanvas, tx.value, ty.value, dispW, dispH)
+    ctx.drawImage(smartPreviewCanvas.value, tx.value, ty.value, dispW, dispH)
     ctx.restore()
   }
 
   // Keypoints — colour-coded dots (cold=blue → hot=red by SIFT response)
-  if (props.showKeypoints && props.image.keypoints?.length) {
+  if (props.showKeypoints && keypointRange.value) {
     const kps = props.image.keypoints
-    let minR = Infinity, maxR = -Infinity
-    for (const kp of kps) {
-      if (kp.response < minR) minR = kp.response
-      if (kp.response > maxR) maxR = kp.response
-    }
-    const range = maxR - minR || 1
+    const { minR, range } = keypointRange.value
+    // Batched into one Path2D per hue bucket. A `fillStyle` change flushes the 2D
+    // context, so a per-point colour costs one state change per keypoint — with
+    // tens of thousands of them that dominates a drag frame. 24 buckets is finer
+    // than the eye resolves on a 4 px dot.
+    const BUCKETS = 24
+    const paths = new Array(BUCKETS)
+    const R = 2, edge = R + 1
     for (const kp of kps) {
       const x = kp.nx * dispW + tx.value
       const y = kp.ny * dispH + ty.value
+      // Cull off-screen points: zoomed in, that is nearly all of them.
+      if (x < -edge || y < -edge || x > w + edge || y > h + edge) continue
       const t = (kp.response - minR) / range      // 0 = coldest, 1 = hottest
-      const hue = Math.round((1 - t) * 240)       // 240° blue → 0° red
+      const b = clamp(Math.round(t * (BUCKETS - 1)), 0, BUCKETS - 1)
+      const p = paths[b] ?? (paths[b] = new Path2D())
+      p.moveTo(x + R, y)                          // arc start, so no joining line
+      p.arc(x, y, R, 0, Math.PI * 2)
+    }
+    for (let b = 0; b < BUCKETS; b++) {
+      if (!paths[b]) continue
+      const hue = Math.round((1 - b / (BUCKETS - 1)) * 240)   // 240° blue → 0° red
       ctx.fillStyle = `hsl(${hue},100%,55%)`
-      ctx.beginPath()
-      ctx.arc(x, y, 2, 0, Math.PI * 2)
-      ctx.fill()
+      ctx.fill(paths[b])
     }
 
     drawLegend(ctx, h, legendSlot++, KEYPOINT_STOPS, 'low', 'high', 'response')
@@ -817,97 +855,17 @@ function clearMask() {
 }
 
 // ── Smart Select (SAM2) ─────────────────────────────────────────────────────────
-
-// Build an OffscreenCanvas(w,h) painting `rgba` where the binary mask is 1, else
-// transparent. Used for both the cyan preview and the red commit blit.
-function buildMaskCanvas(mask, w, h, rgba) {
-  const c = new OffscreenCanvas(w, h)
-  const cx = c.getContext('2d')
-  const id = cx.createImageData(w, h)
-  const d = id.data
-  for (let i = 0; i < w * h; i++) {
-    if (mask[i]) { d[i * 4] = rgba[0]; d[i * 4 + 1] = rgba[1]; d[i * 4 + 2] = rgba[2]; d[i * 4 + 3] = rgba[3] }
-  }
-  cx.putImageData(id, 0, 0)
-  return c
-}
-
-// Encode the current image once (heavy, ~1s; the model itself loads once for the
-// whole session). Cached per uuid in the worker; smartEnc caches the raster dims.
-async function ensureEncoded() {
-  if (smartEnc || smartStatus.value === 'encoding') return
-  const img = props.image
-  if (!img?.uuid) return
-  // SAM2 runs learned encoder + decoder models — fetch their weights (with
-  // consent) before the first encode. Declining leaves Smart Select idle.
-  smartStatus.value = 'loading model…'
-  if (!(await modelsStore.ensureReady(['sam2_encoder', 'sam2_decoder']))) {
-    smartStatus.value = 'model not downloaded'
-    return
-  }
-  smartStatus.value = 'encoding'
-  try {
-    const r = await segmentEncode(img.uuid, img.computeUrl ?? img.url)
-    smartEnc = { width: r.width, height: r.height }
-    smartStatus.value = 'ready — click an object'
-  } catch (err) {
-    smartStatus.value = 'encode failed'
-    console.error('SAM2 encode failed:', err)
-  }
-}
-
-// Decode the current smartPoints into a candidate segment, coalescing overlapping
-// clicks (one decode in flight; a click mid-decode re-runs afterward).
-async function runSmartDecode() {
-  if (!smartEnc || !smartPoints.length) return
-  if (smartBusy) { smartDirty = true; return }
-  smartBusy = true
-  smartStatus.value = 'segmenting…'
-  try {
-    do {
-      smartDirty = false
-      const pts = smartPoints.map((p) => ({ ...p }))
-      const res = await segmentDecode(props.image.uuid, pts)
-      smartResult = { logits: res.logits, mw: res.mw, mh: res.mh }
-      // Preview at the encoded raster resolution (fast); the smoothed overlay hides
-      // its coarseness. The COMMIT re-upsamples the same logits to native res.
-      const pv = logitsToBinaryMask(res.logits, res.mw, res.mh, smartEnc.width, smartEnc.height)
-      smartPreviewCanvas = buildMaskCanvas(pv, smartEnc.width, smartEnc.height, [80, 200, 255, 255])
-      smartHasPreview.value = true
-      smartStatus.value = `preview · IoU ${res.iou?.toFixed?.(2) ?? '—'} — Enter to add`
-      drawOverlay()
-    } while (smartDirty)
-  } catch (err) {
-    smartStatus.value = 'segment failed'
-    console.error('SAM2 decode failed:', err)
-  } finally {
-    smartBusy = false
-  }
-}
-
-// A click in the image (native px). Plain click = fresh single-point segment
-// (independent). Alt-click refines the current candidate by adding a negative
-// point (carves the region back). Coords map native px → encoded-raster px.
-async function smartClick(px, py, negative) {
-  if (!smartEnc) { await ensureEncoded(); if (!smartEnc) return }
-  const img = imgEl.value
-  const ex = px * smartEnc.width / img.naturalWidth
-  const ey = py * smartEnc.height / img.naturalHeight
-  if (negative && smartPoints.length) smartPoints.push({ x: ex, y: ey, positive: false })
-  else smartPoints = [{ x: ex, y: ey, positive: true }]
-  await runSmartDecode()
-}
+// The SAM2 side (encode / click points / decode / cyan preview) lives in
+// useSmartSelect; committing stays here because it is a mask-canvas edit.
 
 // Commit the previewed segment into the red mask canvas (add), then clear the
 // preview so the next click starts fresh. Undoable like every other mask edit.
 async function commitSmart() {
-  if (!smartResult || !maskOffscreen) return
-  // Upsample the raw 256² logits straight to NATIVE image resolution (bilinear +
-  // threshold) — a much finer boundary than scaling a pre-thresholded low-res
-  // mask up. The red canvas is then blitted 1:1 into the (native-sized) mask.
-  const { logits, mw, mh } = smartResult
-  const nat = logitsToBinaryMask(logits, mw, mh, maskOffscreen.width, maskOffscreen.height)
-  const red = buildMaskCanvas(nat, maskOffscreen.width, maskOffscreen.height, [255, 0, 0, 255])
+  if (!maskOffscreen) return
+  // The segment is upsampled to NATIVE resolution by the composable, so the red
+  // canvas blits 1:1 into the (native-sized) mask.
+  const red = buildCommitCanvas(maskOffscreen.width, maskOffscreen.height)
+  if (!red) return
   snapshotForUndo()
   const ctx = maskOffscreen.getContext('2d')
   ctx.globalCompositeOperation = 'source-over'
@@ -915,25 +873,6 @@ async function commitSmart() {
   hasMask.value = true
   discardSmart()
   await exportMask()
-}
-
-// Drop the current candidate without touching the committed mask.
-function discardSmart() {
-  smartPoints = []
-  smartResult = null
-  smartPreviewCanvas = null
-  smartHasPreview.value = false
-  if (smartStatus.value !== 'encoding') smartStatus.value = smartEnc ? 'ready — click an object' : ''
-  drawOverlay()
-}
-
-// Reset all Smart state (image switch / leaving edit). Frees the worker's cached
-// embedding for the old image.
-function resetSmart(forgetUuid) {
-  discardSmart()
-  smartEnc = null
-  smartStatus.value = ''
-  if (forgetUuid) segmentForget(forgetUuid)
 }
 
 function triggerMaskImport() {
@@ -954,95 +893,6 @@ async function onMaskFileChange(e) {
   } catch (err) {
     console.error('Failed to import mask:', err)
   }
-}
-
-// ── Depth map operations ──────────────────────────────────────────────────────
-
-function initDepthCanvas() {
-  const img = imgEl.value
-  if (!img || !img.naturalWidth) return
-  depthOffscreen = new OffscreenCanvas(img.naturalWidth, img.naturalHeight)
-  if (props.image.depth?.dataUrl) loadDepthFromDataUrl(props.image.depth.dataUrl)
-}
-
-// Already-colorized depth maps are stored as PNG data URLs; just blit them in.
-async function loadDepthFromDataUrl(dataUrl) {
-  if (!depthOffscreen) return
-  try {
-    const blob = await (await fetch(dataUrl)).blob()
-    const bmp  = await createImageBitmap(blob)
-    const ctx  = depthOffscreen.getContext('2d')
-    ctx.clearRect(0, 0, depthOffscreen.width, depthOffscreen.height)
-    ctx.drawImage(bmp, 0, 0, depthOffscreen.width, depthOffscreen.height)
-    hasDepth.value = true
-    drawOverlay()
-  } catch {}
-}
-
-
-function triggerDepthImport() {
-  depthFileInput.value?.click()
-}
-
-// Import a (typically grayscale) depth image, normalize by luminance, and
-// store a colorized version. Fully transparent / zero pixels are treated as "no data".
-async function onDepthFileChange(e) {
-  const file = e.target.files?.[0]
-  e.target.value = ''
-  if (!file || !depthOffscreen) return
-  try {
-    const bmp    = await createImageBitmap(file)
-    const tmp    = new OffscreenCanvas(depthOffscreen.width, depthOffscreen.height)
-    const tmpCtx = tmp.getContext('2d')
-    tmpCtx.drawImage(bmp, 0, 0, tmp.width, tmp.height)
-    const id = tmpCtx.getImageData(0, 0, tmp.width, tmp.height)
-    const d  = id.data
-
-    // Find min/max luminance over valid pixels for contrast normalization.
-    let lo = Infinity, hi = -Infinity
-    for (let i = 0; i < d.length; i += 4) {
-      if (d[i + 3] === 0) continue
-      const lum = d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114
-      if (lum < lo) lo = lum
-      if (lum > hi) hi = lum
-    }
-    const range = hi - lo || 1
-
-    for (let i = 0; i < d.length; i += 4) {
-      if (d[i + 3] === 0) { d[i + 3] = 0; continue }
-      const lum = d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114
-      const t = (lum - lo) / range
-      const [r, g, b] = depthColor(t)
-      d[i] = r; d[i + 1] = g; d[i + 2] = b; d[i + 3] = 255
-    }
-    const ctx = depthOffscreen.getContext('2d')
-    ctx.clearRect(0, 0, depthOffscreen.width, depthOffscreen.height)
-    ctx.putImageData(id, 0, 0)
-    hasDepth.value = true
-    await exportDepth()
-    drawOverlay()
-  } catch (err) {
-    console.error('Failed to import depth map:', err)
-  }
-}
-
-async function exportDepth() {
-  if (!depthOffscreen) return
-  const blob = await depthOffscreen.convertToBlob({ type: 'image/png' })
-  const dataUrl = await new Promise((resolve) => {
-    const fr = new FileReader()
-    fr.onload = () => resolve(fr.result)
-    fr.readAsDataURL(blob)
-  })
-  emit('update-depth', dataUrl)
-}
-
-function clearDepth() {
-  if (!depthOffscreen) return
-  depthOffscreen.getContext('2d').clearRect(0, 0, depthOffscreen.width, depthOffscreen.height)
-  hasDepth.value = false
-  emit('update-depth', null)
-  drawOverlay()
 }
 
 // ── Mouse handlers ────────────────────────────────────────────────────────────
@@ -1341,18 +1191,6 @@ watch(() => props.image.mask, (mask, prev) => {
   }
 })
 
-// Sync depth canvas when parent clears or replaces the depth map externally
-watch(() => props.image.depth, (depth, prev) => {
-  if (depth === prev) return
-  if (depth?.dataUrl && depthOffscreen) {
-    loadDepthFromDataUrl(depth.dataUrl)
-  } else if (!depth && depthOffscreen) {
-    depthOffscreen.getContext('2d').clearRect(0, 0, depthOffscreen.width, depthOffscreen.height)
-    hasDepth.value = false
-    drawOverlay()
-  }
-})
-
 // Mask-edit keyboard shortcuts. Instances are kept alive per tab via v-show, so
 // gate on being the *visible* one (offsetParent is null while display:none) and
 // on edit mode; skip while typing in a field. Escape is handled globally in
@@ -1400,6 +1238,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   flushMask() // persist any pending mask edits if the tab is closed mid-edit
+  if (overlayFrame) cancelAnimationFrame(overlayFrame)
   resizeObserver?.disconnect()
   document.removeEventListener('keydown', onKeydown)
   if (props.image?.uuid) segmentForget(props.image.uuid) // free the SAM2 embedding

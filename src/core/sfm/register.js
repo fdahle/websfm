@@ -21,6 +21,7 @@
 import { solvePnp, triangulateDlt } from "./reconstruction.js"
 import { projectPoint, triangulationAngle, cameraCenter } from "./geometry.js"
 import { toNorm, camToP34flat, retriangulatePairs } from "./tracks.js"
+import { distortionIdentifiable, withoutDistortionTerms } from "./selfCalSchedule.js"
 
 // Depth of world point (x,y,z) along a flat 3×4 projection matrix's principal axis
 // (cheirality: positive ⇒ in front of the camera). Mirrors sfm.js's helper.
@@ -36,6 +37,17 @@ export async function registerImages(ctx) {
     runBundleAdjust, filterTracks, modelReprojStats, imageByUuid, numStats,
     log, onProgress,
   } = ctx
+  // Phase-relative progress (core/sfm/progressPlan.js). The caller binds this to a
+  // phase and a slice of the overall bar; here we only say how far *this* sweep has
+  // got. Registration starts from the 2-camera init pair, so that's the zero point.
+  const reportPhase = ctx.reportPhase
+    ?? ((local, label, counts) => onProgress?.(counts?.done ?? 0, counts?.total ?? 0, label))
+  const registerLocal = () => {
+    const span = Math.max(1, imgs.length - 2)
+    return Math.min(1, Math.max(0, (cameras.size - 2) / span))
+  }
+  const reportRegister = (label) =>
+    reportPhase(registerLocal(), label, { done: cameras.size, total: imgs.length })
   // WS1 — correspondence-pair superset. `corrPairs` = strong donePairs + weak PnP
   // bridges; it drives 2D-3D correspondence collection and connectivity scoring (a weak
   // pair is a legitimate link for resecting a camera). Triangulation and retriangulation
@@ -95,10 +107,42 @@ export async function registerImages(ctx) {
   // the same f,k1 mode once past the threshold, so a stall caused by distortion escapes too.
   const selfCalOn = cfg.refineIntrinsics !== 'none'
   const distortionCalMinCams = cfg.distortionCalMinCams ?? 6
+
+  // Camera count is a cheap PRE-filter, never the decision. What actually separates a
+  // radial coefficient from point depth is multi-view track redundancy — a model can sit
+  // well past `distortionCalMinCams` and still be built almost entirely of 2-view tracks,
+  // each of which absorbs any k1 into its own depth and fits perfectly. BA then lowers its
+  // cost while the focal runs away (observed: fx 2389 → 5459, k1 −0.897 over seed retries,
+  // one interim BA landing at 995px RMS), and because the fold is destructive the bad
+  // calibration is baked into the keypoints. `runBundleAdjust`'s only divergence guard is
+  // cost-based, so it passes such a pass cleanly.
+  //
+  // The post-filter passes already gate on this (sfm.js ▸ distortionIdentifiable); the
+  // in-registration solves did not, which left the identical failure live at this call
+  // site. Same predicate, same reduction: not identifiable at all ⇒ 'none'; identifiable
+  // focal but 2-view-dominated tracks ⇒ drop the radial terms and keep solving f.
+  const identReasonsLogged = new Set()
+  const identifiableRefine = (mode) => {
+    if (mode === 'none') return 'none'
+    const pts = getPoints3d()
+    let multiView = 0
+    for (const pt of pts) if (pt.views.size >= 3) multiView++
+    const ident = distortionIdentifiable({
+      nCams: cameras.size, nTracks: pts.length, nMultiViewTracks: multiView,
+    })
+    if (ident.ok) return mode
+    const next = ident.scope === 'all' ? 'none' : withoutDistortionTerms(mode)
+    if (next !== mode && !identReasonsLogged.has(ident.reason)) {
+      identReasonsLogged.add(ident.reason)
+      log(`in-registration self-cal ${next === 'none' ? 'skipped' : `reduced to '${next}'`} — `
+        + `${ident.reason}`, 'info', 'Reconstruction')
+    }
+    return next
+  }
   const distortionRefine = (n) =>
-    selfCalOn && n >= distortionCalMinCams ? cfg.refineIntrinsics : 'none'
+    selfCalOn && n >= distortionCalMinCams ? identifiableRefine(cfg.refineIntrinsics) : 'none'
   const rescueRefine = (n) =>
-    !selfCalOn ? 'none' : n >= distortionCalMinCams ? cfg.refineIntrinsics : 'f'
+    !selfCalOn ? 'none' : identifiableRefine(n >= distortionCalMinCams ? cfg.refineIntrinsics : 'f')
   const keypointOf = (uuid, kpIdx) => imageByUuid(uuid)?.keypoints?.[kpIdx] ?? null
 
   // Total inliers linking `uuid` to the already-registered set (cheap fallback
@@ -255,7 +299,7 @@ export async function registerImages(ctx) {
         continue
       }
 
-      onProgress?.(cameras.size, imgs.length, `Registering ${img.name} (${pts3.length} correspondences)`)
+      reportRegister(`Registering ${img.name} (${pts3.length} correspondences)`)
       const pnp = await solvePnp(pts3, pts2, K, { ransacThreshPx: pnpThresh, maxIters: 200 })
       if (!pnp) {
         // Diagnostic: the solver returns nothing when it can't gather ≥6 inliers
@@ -434,7 +478,7 @@ export async function registerImages(ctx) {
       registeredSinceBA++
       if (baIterations > 0 && interimBaEvery > 0 && registeredSinceBA >= interimBaEvery
           && cameras.size >= 3 && getPoints3d().length >= 10) {
-        onProgress?.(cameras.size, imgs.length, `Bundle adjustment (${cameras.size} cameras)…`)
+        reportRegister(`Bundle adjustment (${cameras.size} cameras)…`)
         await runBundleAdjust(`interim BA (${cameras.size} cameras)`, interimBaIterations,
           distortionRefine(cameras.size))
         const f = filterTracks({ maxReprojPx: filterMaxReprojPx * 2, minTriAngleDeg: filterMinTriAngleDeg })
@@ -485,11 +529,11 @@ export async function registerImages(ctx) {
           + `retriangulation, then a relaxed retry${focalSolve ? '' : '; intrinsics not solvable at 2 views'})`,
           'info', 'Reconstruction')
         if (focalSolve) {
-          onProgress?.(cameras.size, imgs.length, 'Rescue: focal solve…')
+          reportRegister('Rescue: focal solve…')
           await runBundleAdjust('rescue focal solve', interimBaIterations, rescueMode)
           rebuildViewIndex()
         }
-        onProgress?.(cameras.size, imgs.length, 'Rescue: retriangulating…')
+        reportRegister('Rescue: retriangulating…')
         const { added } = await retriangulatePairs({
           points3d: getPoints3d(), cameras, pairs: donePairs,
           keypointOf, maxReprojPx: filterMaxReprojPx, triangulate: triangulateDlt,

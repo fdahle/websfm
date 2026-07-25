@@ -1,0 +1,166 @@
+/* Shared chrome for the three tabular *import preview* modals — CameraImportModal,
+   GcpImportModal, FootprintImportModal. Consumed via
+   `<style scoped src="./ui/import-modal.css">` (the modal.css / sidebar-sections.css
+   pattern), so rules are scoped per component: a modal that never renders
+   `.role-select` pays nothing for it.
+
+   These three are NOT the `ModalShell` + `modal.css` settings-modal family. They are
+   a file previewer — drop a CSV/GeoJSON, see a header/rows table, assign a role per
+   column, confirm — with their own wider chrome and their own table styling. Camera
+   and GCP import carried byte-identical 151-line copies of all of this; footprint
+   import carried a near-copy.
+
+   Deliberately NOT here, because the three genuinely disagree — each declares its own:
+     .modal              width         (760px camera/GCP, 620px footprint)
+     .controls           grid-template-columns
+     .ctrl-crs           grid-column
+     .preview th / td    header styling and monospace body cells
+   Keep it that way. A shared value plus a per-modal "undo" is worse than no sharing. */
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+}
+
+.modal {
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  max-width: 94vw;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 13px 16px;
+  border-bottom: 1px solid var(--panel-border);
+}
+
+.modal-title { font-size: 14px; font-weight: 600; color: var(--text); }
+
+.modal-close {
+  background: none; border: none; color: var(--text-dim);
+  font-size: 20px; line-height: 1; cursor: pointer; padding: 1px 6px; border-radius: 4px;
+}
+.modal-close:hover { background: var(--hover-bg); color: var(--text); }
+
+.modal-body { padding: 16px; overflow-y: auto; }
+
+.filename {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-bottom: 14px;
+  font-family: monospace;
+}
+
+/* Content-type toggle */
+.kind-label { margin-bottom: 8px; }
+.kind-toggle {
+  display: inline-flex;
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  overflow: hidden;
+  margin-bottom: 16px;
+}
+
+.kind-btn {
+  background: var(--bg);
+  border: none;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 13px;
+  padding: 7px 16px;
+  cursor: pointer;
+}
+.kind-btn + .kind-btn { border-left: 1px solid var(--panel-border); }
+.kind-btn:hover { color: var(--text); }
+.kind-btn.active { background: var(--accent); color: #fff; }
+
+.controls {
+  display: grid;
+  align-items: end;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.ctrl { display: flex; flex-direction: column; gap: 6px; }
+.ctrl-crs { max-width: 360px; }
+
+.ctrl-label, .section-label {
+  font-size: 11px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.06em; color: var(--text-dim);
+}
+.section-label { display: block; margin-bottom: 8px; }
+
+.ctrl-input {
+  background: var(--bg); border: 1px solid var(--panel-border); border-radius: 5px;
+  color: var(--text); font: inherit; font-size: 13px; padding: 7px 10px; outline: none;
+}
+.ctrl-input:focus { border-color: var(--accent); }
+
+.ctrl-check {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 13px; color: var(--text); cursor: pointer; padding-bottom: 7px;
+}
+
+.table-wrap {
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  overflow: auto;
+  max-height: 260px;
+}
+
+.preview {
+  border-collapse: collapse;
+  font-size: 12px;
+  width: 100%;
+}
+
+.preview th, .preview td {
+  border: 1px solid var(--panel-border);
+  padding: 4px 8px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.role-cell { padding: 4px; background: var(--bg); position: sticky; top: 0; z-index: 1; }
+
+.role-select {
+  background: var(--panel); border: 1px solid var(--panel-border); border-radius: 4px;
+  color: var(--text); font: inherit; font-size: 11px; padding: 3px 6px; outline: none; width: 100%;
+}
+.role-select:focus { border-color: var(--accent); }
+
+.header-cell { background: var(--bg); color: var(--text-dim); font-weight: 600; }
+
+.summary { margin-top: 12px; font-size: 12px; }
+.summary .warn { color: #d89a3a; }
+.summary .ok { color: var(--text-dim); }
+
+.modal-footer {
+  display: flex; justify-content: flex-end; gap: 8px;
+  padding: 12px 16px; border-top: 1px solid var(--panel-border);
+}
+
+.btn-secondary {
+  background: none; border: 1px solid var(--panel-border); border-radius: 5px;
+  color: var(--text-dim); font: inherit; font-size: 12px; padding: 6px 14px; cursor: pointer;
+}
+.btn-secondary:hover { background: var(--hover-bg); color: var(--text); }
+
+.btn-primary {
+  background: var(--accent); border: none; border-radius: 5px;
+  color: #fff; font: inherit; font-size: 12px; padding: 6px 16px; cursor: pointer;
+}
+.btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
+.btn-primary:disabled { opacity: 0.45; cursor: default; }

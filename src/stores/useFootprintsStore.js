@@ -3,6 +3,7 @@ import { defineStore, storeToRefs } from 'pinia'
 import { useLog } from '../composables/useLog.js'
 import { ensureProjection, transform, isGeographic, localMetricFrame } from '../core/crs.js'
 import { projectFootprint } from '../core/footprint.js'
+import { makeNameResolver } from '../core/io/nameMatch.js'
 import { resolveK } from '../core/sfm/reconstruction.js'
 import * as opfs from '../utils/opfs.js'
 import { registerProjectStore } from './projectStores.js'
@@ -54,18 +55,10 @@ export const useFootprintsStore = registerProjectStore(defineStore('footprints',
     }).catch((err) => log(`Shapefile save failed — ${err?.message ?? err}`, 'error', 'Footprint'))
   }
 
-  // Resolve an image name to an in-memory image id (case-insensitive, tolerant of
-  // extension differences). Same matching as GCP observations.
-  function resolveImageId(imageName) {
-    if (!imageName) return null
-    const lc = imageName.toLowerCase()
-    const base = lc.replace(/\.[^.]+$/, '')
-    const hit = images.value.find((img) => {
-      const n = img.name.toLowerCase()
-      return n === lc || n.replace(/\.[^.]+$/, '') === base
-    })
-    return hit?.id ?? null
-  }
+  // Name → image-id matching is shared with GCP observations / poses / COLMAP
+  // import (core/io/nameMatch.js). Indexed once per image-list change, so a full
+  // reconcile is O(polygons + images) rather than a scan per polygon.
+  const resolveImageId = computed(() => makeNameResolver(images.value))
 
   function transformRings(rings, from, to) {
     return rings.map((ring) => ring.map((c) => transform([c[0], c[1]], from, to)))
@@ -75,9 +68,10 @@ export const useFootprintsStore = registerProjectStore(defineStore('footprints',
   // list. Lets a polygon imported before its image (or images added later) link up.
   function resolveImageMatches() {
     let changed = false
+    const resolve = resolveImageId.value
     for (const set of sets.value) {
       for (const fp of set.footprints) {
-        const id = resolveImageId(fp.imageName)
+        const id = resolve(fp.imageName)
         if (id !== fp.imageId) { fp.imageId = id; changed = true }
       }
     }
@@ -117,7 +111,7 @@ export const useFootprintsStore = registerProjectStore(defineStore('footprints',
     let matched = 0
     const footprints = rawFootprints.map((raw) => {
       const rings = transformRings(raw.rings, sourceCrs, projCrs)
-      const imageId = resolveImageId(raw.imageName)
+      const imageId = resolveImageId.value(raw.imageName)
       if (imageId) matched++
       return { id: crypto.randomUUID(), imageId, imageName: raw.imageName ?? raw.name ?? null, rings }
     })
@@ -140,7 +134,7 @@ export const useFootprintsStore = registerProjectStore(defineStore('footprints',
   // { focal(px), width, height }. Returns { focal(px), cx, cy, width, height } or
   // null. Exported so the modal can mirror eligibility without duplicating it.
   function resolveIntrinsics(pose, fallback = null) {
-    const imageId = pose.imageId ?? resolveImageId(pose.imageName)
+    const imageId = pose.imageId ?? resolveImageId.value(pose.imageName)
     const img = imageId ? images.value.find((i) => i.id === imageId) : null
     const sensor = (img && sensors.value.find((s) => s.id === img.sensorId))
       ?? (sensors.value.length === 1 ? sensors.value[0] : null)
@@ -222,7 +216,7 @@ export const useFootprintsStore = registerProjectStore(defineStore('footprints',
 
       const intr = resolveIntrinsics(pose, intrinsics)
       if (!intr) { reasons.noSensor++; continue }
-      const imageId = pose.imageId ?? resolveImageId(pose.imageName)
+      const imageId = pose.imageId ?? resolveImageId.value(pose.imageName)
 
       const groundZ = useAgl ? pose.z - agl : groundElev
       // In a geographic CRS, ray-cast in the local metric frame, then map the ring

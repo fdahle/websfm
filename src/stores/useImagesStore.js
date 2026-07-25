@@ -12,6 +12,7 @@ import { gateFiducialDetections, FIDUCIAL_DETECT_TUNING } from '../core/sfm/fidu
 import { FIDUCIAL_DETECT_DEFAULTS } from '../core/defaults.user.js'
 import { migrateLegacyFiducialImage } from '../core/sfm/fiducialModel.js'
 import { buildBorderMask } from '../core/mask.js'
+import { resolveDetectMaxDim } from '../core/features/detectResolution.js'
 import { useLog } from '../composables/useLog.js'
 import * as opfs from '../utils/opfs.js'
 import { useProjectsStore } from './useProjectsStore.js'
@@ -39,6 +40,30 @@ export const useImagesStore = defineStore('images', () => {
   // uuid; absent ⇒ ready now (non-TIFF, native-decode, restored-from-cache, or the
   // PNG already landed). Plain Map (never reactive, never persisted).
   const computeReady = new Map() // uuid -> { promise, resolve, reject }
+  const activeImports = new Set()
+  const pendingWrites = new Set()
+  const pendingWorkCount = ref(0)
+
+  function trackWrite(promise) {
+    pendingWorkCount.value++
+    const tracked = Promise.resolve(promise).finally(() => {
+      pendingWrites.delete(tracked)
+      pendingWorkCount.value--
+    })
+    pendingWrites.add(tracked)
+    return tracked
+  }
+
+  // Lifecycle operations call this before switching, exporting, moving or
+  // deleting a project. Loop because a TIFF import can enqueue derived writes
+  // after its original-image write has already completed.
+  async function flushPendingWork() {
+    while (activeImports.size || pendingWrites.size || writing) {
+      const pending = [...activeImports, ...pendingWrites]
+      if (pending.length) await Promise.allSettled(pending)
+      else await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+  }
 
   function markComputePending(uuid) {
     let resolve, reject
@@ -76,19 +101,25 @@ export const useImagesStore = defineStore('images', () => {
   // captures the latest state). N callers collapse to ≤2 ordered writes.
   let writing = false
   let rerun = false
-  async function sync() {
+  async function sync(expectedProjectId = projects.currentProjectId) {
     if (!isPersisting()) return
+    if (projects.currentProjectId !== expectedProjectId) return
     if (writing) { rerun = true; return }
     writing = true
+    pendingWorkCount.value++
     try {
-      do { rerun = false; await writeProjectNow() } while (rerun)
+      do {
+        rerun = false
+        if (projects.currentProjectId !== expectedProjectId) return
+        await writeProjectNow(expectedProjectId)
+      } while (rerun)
     } finally {
       writing = false
+      pendingWorkCount.value--
     }
   }
 
-  async function writeProjectNow() {
-    const pid = projects.currentProjectId
+  async function writeProjectNow(pid) {
     const proj = projects.projects.find((p) => p.id === pid)
     if (!proj) return
     await opfs.writeProject(pid, {
@@ -101,6 +132,8 @@ export const useImagesStore = defineStore('images', () => {
           id: img.id, uuid: img.uuid, name: img.name,
           kpStatus: img.kpStatus, kpCount: img.kpCount, kpMs: img.kpMs,
           detector: img.detector ?? null, descDim: img.descDim ?? null,
+          detectScale: img.detectScale ?? null,
+          detectSettings: img.detectSettings ?? null,
           hasMask: !!img.mask, hasDepth: !!img.depth,
           sensorId: img.sensorId ?? null,
           // Fiducial observations (F4) are user clicks on the raster — tiny, and
@@ -121,30 +154,46 @@ export const useImagesStore = defineStore('images', () => {
     selectedId.value = id
   }
 
-  function extractMetadataFor(item, file, presetDims) {
-    extractMetadata(file, item.url, presetDims)
+  function extractMetadataFor(item, file, projectId, presetDims) {
+    return extractMetadata(file, item.url, presetDims)
       .then((meta) => {
-        const found = images.value.find((img) => img.id === item.id)
+        const found = projects.currentProjectId === projectId
+          ? images.value.find((img) => img.uuid === item.uuid) : null
         if (found) {
           found.meta = meta
           found.loading = false
           const cam = [meta.make, meta.model].filter(Boolean).join(' ') || 'unknown camera'
           const dim = meta.width && meta.height ? ` ${meta.width}×${meta.height}` : ''
           log(`Metadata: ${file.name} — ${cam}${dim}`, 'success', 'Metadata')
-          if (isPersisting()) sync()
+          if (isPersisting()) sync(projectId)
         }
       })
       .catch((err) => {
-        const found = images.value.find((img) => img.id === item.id)
+        const found = projects.currentProjectId === projectId
+          ? images.value.find((img) => img.uuid === item.uuid) : null
         if (found) found.loading = false
         log(`Metadata failed: ${file.name} — ${err?.message ?? err}`, 'error', 'Metadata')
-        if (isPersisting()) sync()
+        if (isPersisting()) sync(projectId)
       })
   }
 
   async function addImages(files, onProgress) {
+    const task = addImagesNow(files, onProgress)
+    activeImports.add(task)
+    pendingWorkCount.value++
+    try { return await task } finally {
+      activeImports.delete(task)
+      pendingWorkCount.value--
+    }
+  }
+
+  async function addImagesNow(files, onProgress) {
+    const projectId = projects.currentProjectId
+    const persistImport = !!projectId && isPersisting()
     let added = 0
     const tiffItems = []
+    const metadataTasks = []
+    const batchWrites = []
     for (const file of files) {
       const item = createImage(file)
       if (images.value.some((img) => img.id === item.id)) {
@@ -155,9 +204,9 @@ export const useImagesStore = defineStore('images', () => {
       added++
       log(`Added image: ${file.name} (${(file.size / 1024).toFixed(0)} KB)`, 'info', 'Images')
 
-      if (isPersisting()) {
-        opfs.saveImage(projects.currentProjectId, item.uuid, file)
-          .catch((err) => log(`OPFS save failed: ${file.name} — ${err?.message ?? err}`, 'error', 'Images'))
+      if (persistImport) {
+        batchWrites.push(trackWrite(opfs.saveImage(projectId, item.uuid, file)
+          .catch((err) => log(`OPFS save failed: ${file.name} — ${err?.message ?? err}`, 'error', 'Images'))))
       }
 
       // Browsers (bar Safari) can't decode TIFF natively, so createImage's blob
@@ -174,11 +223,11 @@ export const useImagesStore = defineStore('images', () => {
         // EXIF + dimensions don't need the slow full pixel decode — the TIFF
         // header gives real width/height near-instantly (readTiffDimensions),
         // so metadata shows up right away instead of waiting on the transcode.
-        readTiffDimensions(file)
-          .then((dims) => extractMetadataFor(item, file, dims))
-          .catch(() => extractMetadataFor(item, file))
+        metadataTasks.push(readTiffDimensions(file)
+          .then((dims) => extractMetadataFor(item, file, projectId, dims))
+          .catch(() => extractMetadataFor(item, file, projectId)))
       } else {
-        extractMetadataFor(item, file)
+        metadataTasks.push(extractMetadataFor(item, file, projectId))
       }
     }
 
@@ -244,13 +293,12 @@ export const useImagesStore = defineStore('images', () => {
           // Cache the transcode outputs in OPFS so reopening the project skips
           // the (multi-second) re-decode + re-encode — see the TIFF gotcha in
           // CLAUDE.md. Pure function of the immutable original; fire-and-forget.
-          if (isPersisting()) {
-            const pid = projects.currentProjectId
+          if (persistImport) {
             log(`Caching TIFF derived blobs: ${file.name} — display ${(displayBlob.size / 1024).toFixed(0)} KB, compute ${(computeBlob.size / 1024).toFixed(0)} KB`, 'info', 'Images')
-            opfs.saveImageDerived(pid, item.uuid, 'display', displayBlob)
-              .catch((err) => log(`OPFS derived save failed (display): ${file.name} — ${err?.message ?? err}`, 'error', 'Images'))
-            opfs.saveImageDerived(pid, item.uuid, 'compute', computeBlob)
-              .catch((err) => log(`OPFS derived save failed (compute): ${file.name} — ${err?.message ?? err}`, 'error', 'Images'))
+            batchWrites.push(trackWrite(opfs.saveImageDerived(projectId, item.uuid, 'display', displayBlob)
+              .catch((err) => log(`OPFS derived save failed (display): ${file.name} — ${err?.message ?? err}`, 'error', 'Images'))))
+            batchWrites.push(trackWrite(opfs.saveImageDerived(projectId, item.uuid, 'compute', computeBlob)
+              .catch((err) => log(`OPFS derived save failed (compute): ${file.name} — ${err?.message ?? err}`, 'error', 'Images'))))
           }
         } catch (err) {
           const found = images.value.find((img) => img.id === item.id)
@@ -267,8 +315,10 @@ export const useImagesStore = defineStore('images', () => {
       }))
     }
 
+    await Promise.allSettled(metadataTasks)
+    await Promise.allSettled(batchWrites)
     if (added > 1) log(`Added ${added} images`, 'success', 'Images')
-    if (isPersisting()) sync()
+    if (persistImport) await sync(projectId)
   }
 
   function removeImage(id, onRemoved) {
@@ -809,11 +859,22 @@ export const useImagesStore = defineStore('images', () => {
       // display JPEG first) — wait for it, or reject if its transcode failed,
       // rather than detecting on the lossy display blob (computeUrl invariant).
       await whenComputeReady(img)
+      // Working resolution. In 'auto' mode this is a fraction of THIS image's
+      // native size (core/features/detectResolution.js) rather than one absolute
+      // cap for a set that may span 2000–10000 px; 'absolute' (the default) passes
+      // the configured value straight through. Resolved here, per image, because
+      // this is where the native size is known — and logged, because a silently
+      // derived working resolution is not auditable.
+      const nativeMax = Math.max(img.meta?.width || 0, img.meta?.height || 0)
+      const res0 = resolveDetectMaxDim(nativeMax, settings)
+      if (res0.mode === 'auto') {
+        log(`${tag} ${img.name} — detect at ${res0.reason}`, 'debug', 'Detection')
+      }
       // Pass the per-image mask (if any) so keypoints inside masked regions are
       // dropped at detection — this propagates to matching and reconstruction.
       const res = await detectKeypoints(
         img.computeUrl ?? img.url,
-        { ...settings, mask: img.mask?.dataUrl ?? null },
+        { ...settings, maxDim: res0.maxDim, mask: img.mask?.dataUrl ?? null },
         { onLog: (msg) => log(msg, 'info', 'Detection') },
       )
       // The worker can't be interrupted mid-image, so a cancel pressed while this
@@ -840,6 +901,24 @@ export const useImagesStore = defineStore('images', () => {
         // 128-d vs SuperPoint 256-d) rather than assume a constant.
         found.detector = res.detector ?? 'sift'
         found.descDim  = res.descDim ?? 128
+        // Detection scale travels with the image for the same reason descDim does:
+        // keypoints come back in NATIVE pixels (detect.js maps them back), so every
+        // downstream pixel threshold is denominated in native px while the
+        // measurement quantum is 1/scale native px. core/scaleContext.js resolves
+        // the gates against it. Absent ⇒ 1 ⇒ no correction (back-compat).
+        found.detectScale = res.diag?.scale ?? 1
+        // The detection settings this image's keypoints were produced WITH. Persisted
+        // because a measured result without its settings is not a baseline: `detector`
+        // and `detectScale` alone cannot distinguish a Balanced run from a Detailed one
+        // (same scale, 2.5× the keypoint budget). Absent ⇒ null ⇒ "unknown, pre-dates
+        // this field"; deliberately not back-filled from the current modal values.
+        found.detectSettings = {
+          maxDim: settings.maxDim ?? null,
+          maxDimMode: settings.maxDimMode ?? null,
+          maxKeypoints: settings.maxKeypoints ?? null,
+          contrastThreshold: settings.contrastThreshold ?? null,
+          tiling: settings.tiling ?? null,
+        }
         if (hadKeypoints) useMatchesStore().removeMatchesForImage(found.uuid)
         log(`${tag} done: ${found.name} — ${found.kpCount} keypoints in ${found.kpMs} ms`, 'success', 'Detection')
         // Detailed diagnostics (debug level): the working resolution actually
@@ -896,7 +975,10 @@ export const useImagesStore = defineStore('images', () => {
       : images.value.filter((img) => img.kpStatus !== 'done')
     const total = pending.length
     // Echo the settings actually in effect so the console records what was run.
-    const { detector = 'sift', maxDim = 1200, contrastThreshold = 0.01, maxKeypoints = 5000 } = settings
+    const {
+      detector = 'sift', maxDim = 1200, contrastThreshold = 0.01, maxKeypoints = 5000,
+      maxDimMode = 'absolute', preset = 'medium',
+    } = settings
     // Message-text label only; the console source is the stage 'Detection'.
     const batchTag = detector === 'superpoint' ? 'SuperPoint' : 'SIFT'
     // SuperPoint runs a learned model — fetch its weights (with consent) once for
@@ -905,7 +987,13 @@ export const useImagesStore = defineStore('images', () => {
       log('Detection cancelled — SuperPoint model was not downloaded.', 'warn', 'Detection')
       return
     }
-    log(`${batchTag} batch: ${total} image(s) queued — ≤${maxDim}px`
+    // Resolution: one figure in absolute mode; in auto mode it varies per image, so
+    // report the band being applied rather than a number that would only be right
+    // for some of the batch.
+    const resLabel = maxDimMode === 'auto'
+      ? `auto resolution (${preset} band, ≥${maxDim}px)`
+      : `≤${maxDim}px`
+    log(`${batchTag} batch: ${total} image(s) queued — ${resLabel}`
       + `${detector === 'superpoint' ? '' : `, contrast ${contrastThreshold}`}, ≤${maxKeypoints} kp`,
       'info', 'Detection')
     let done = 0
@@ -928,6 +1016,11 @@ export const useImagesStore = defineStore('images', () => {
     img.kpCount   = 0
     img.kpMs      = 0
     img.kpStatus  = null
+    // The scale described keypoints that no longer exist. Inert either way (a
+    // null kpStatus excludes the image from matching and SfM), but a stale value
+    // must not survive into the next detection run at different settings.
+    img.detectScale = null
+    img.detectSettings = null
     log(`Keypoints cleared: ${img.name}`, 'info', 'Detection')
     useMatchesStore().removeMatchesForImage(img.uuid)
     if (isPersisting()) {
@@ -1032,6 +1125,14 @@ export const useImagesStore = defineStore('images', () => {
           // Older projects predate these — default to SIFT/128 (back-compat).
           detector: record.detector ?? 'sift',
           descDim: record.descDim ?? 128,
+          // Absent on projects that predate scale-relative thresholds. Deliberately
+          // NOT healed from meta dimensions × the current modal maxDim: the setting
+          // may have changed since detection, and a wrong factor is worse than none.
+          // Such a project reproduces its old numbers until the images are re-detected.
+          detectScale: record.detectScale ?? null,
+          // Same rule as detectScale: absent on older projects, never reconstructed
+          // from the current modal state.
+          detectSettings: record.detectSettings ?? null,
           mask: null,
           depth: null,
           // Back-compat: older projects predate fiducials ⇒ empty.
@@ -1084,6 +1185,7 @@ export const useImagesStore = defineStore('images', () => {
   return {
     images,
     selectedId,
+    pendingWorkCount,
     sync,
     imageById,
     selectImage,
@@ -1101,6 +1203,7 @@ export const useImagesStore = defineStore('images', () => {
     detectOne,
     detectAll,
     whenComputeReady,
+    flushPendingWork,
     clearKeypoints,
     clearAll,
     restoreImages,

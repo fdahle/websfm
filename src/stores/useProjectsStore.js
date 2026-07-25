@@ -61,10 +61,20 @@ export const useProjectsStore = defineStore('projects', () => {
     const id = crypto.randomUUID()
     const now = new Date().toISOString()
     const entry = { id, name, sceneType, crs, createdAt: now, lastModified: now }
+    // Persist the project before exposing it as current. If storage fails the
+    // caller remains in the old project instead of selecting a half-created one.
+    await opfs.writeProject(id, { ...entry, images: [] })
+    const previousId = currentProjectId.value
     projects.value.push(entry)
     currentProjectId.value = id
-    await opfs.writeProject(id, { ...entry, images: [] })
-    await saveIndex()
+    try {
+      await saveIndex()
+    } catch (err) {
+      projects.value = projects.value.filter((p) => p.id !== id)
+      currentProjectId.value = previousId
+      await opfs.deleteProject(id).catch(() => {})
+      throw err
+    }
     return id
   }
 
@@ -84,11 +94,24 @@ export const useProjectsStore = defineStore('projects', () => {
   // folder project that ALSO means "not connected" — the caller distinguishes
   // the two via `openPlan(id)`, which it must consult first.
   async function switchProject(id) {
-    currentProjectId.value = id
     const p = projects.value.find((p) => p.id === id)
+    if (!p) return null
+    // Read first, commit second. Folder permission and corrupt/missing project
+    // failures must not change lastOpenedId or abandon the active project.
+    const data = await opfs.readProject(id)
+    if (!data) return null
+    const previousId = currentProjectId.value
+    const previousModified = p.lastModified
+    currentProjectId.value = id
     if (p) p.lastModified = new Date().toISOString()
-    await saveIndex()
-    return await opfs.readProject(id)
+    try {
+      await saveIndex()
+    } catch (err) {
+      currentProjectId.value = previousId
+      p.lastModified = previousModified
+      throw err
+    }
+    return data
   }
 
   async function renameProject(id, newName) {
@@ -189,9 +212,9 @@ export const useProjectsStore = defineStore('projects', () => {
     }
     opfs.setProjectRoot(id, dirHandle)
     await saveProjectHandle(id, dirHandle)
+    await opfs.writeProject(id, { ...entry, images: [] })
     projects.value.push(entry)
     currentProjectId.value = id
-    await opfs.writeProject(id, { ...entry, images: [] })
     await saveIndex()
     return { ok: true, id }
   }

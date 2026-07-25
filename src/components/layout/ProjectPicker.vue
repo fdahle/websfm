@@ -140,14 +140,14 @@ onBeforeUnmount(() => {
         </template>
         <template v-else>
           <span class="check">{{ project.id === currentProjectId ? '✓' : '' }}</span>
-          <div class="project-main" @click="emit('switch', project.id)">
+          <button type="button" class="project-main" @click="emit('switch', project.id)">
             <div class="project-name-row">
               <span class="scene-badge">{{ project.sceneType === 'aerial' ? '✈' : '◼' }}</span>
               <span v-if="isFolderProject(project)" class="storage-badge" title="Stored in a folder on disk">🗀</span>
               <span class="project-name">{{ project.name }}</span>
             </div>
             <span class="project-meta">{{ projectMeta(project) }}</span>
-          </div>
+          </button>
           <button class="icon-btn" title="Project actions" @click.stop="openMenu($event, project)">⋯</button>
         </template>
       </li>
@@ -270,6 +270,12 @@ onBeforeUnmount(() => {
 .project-main {
   flex: 1;
   min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
   display: flex;
   flex-direction: column;
   gap: 2px;

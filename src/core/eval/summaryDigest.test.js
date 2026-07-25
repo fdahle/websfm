@@ -82,3 +82,141 @@ describe('digestToJson', () => {
     expect(JSON.parse(digestToJson(d))).toEqual(d)
   })
 })
+
+// ── Baseline record (run config + diagnostics) ─────────────────────────────────
+// These sections exist so a pasted digest is a complete baseline entry: what was run,
+// which seed won, how the gates resolved, what the match gates did. A regression here
+// silently turns a baseline back into an unattributable set of numbers.
+
+const B4 = {
+  ...INPUT,
+  detect: {
+    detector: 'sift', images: 128, maxDim: 2400, maxDimMode: 'absolute',
+    maxKeypoints: 10000, contrastThreshold: 0.01, tiling: 'off',
+    medianKeypoints: 9800, medianDetectScale: 0.78, mixed: false,
+  },
+  matchRun: {
+    strategy: 'exhaustive', matcher: 'bruteforce', nPairs: 8128,
+    accepted: 647, weak: 0, rejected: 15, skipped: 20, gated: 7446,
+    inliers: 145289, meanInlierRatio: 0.85, subsetGateActive: true, resolvedRansacPx: 2.53,
+    settings: { ratioThreshold: 0.75, minInlierRatio: 0.15, crossCheck: true },
+  },
+  summary: {
+    ...INPUT.summary,
+    config: { reprjThresholdDetectPx: 4, baIterations: 30, refineIntrinsics: 'auto' },
+    gates: {
+      detectScaleFactor: 2.53, medianScale: 0.395, clamped: false, mixed: false,
+      reprjThresholdPx: 7.6, filterMaxReprojPx: 10.14,
+    },
+    initPair: {
+      nameA: 'P1180215', nameB: 'P1180321', angleDeg: 2.68, inliers: 812, points: 640,
+      score: 91.4, degree: 21, readyViews: 23, candidatesScored: 24,
+      runnerUp: { pair: 'P1180211 ↔ P1180210', score: 74.2, parallaxDeg: 5.21 },
+    },
+    attempts: {
+      retryCap: 4, retriesRun: 0, winner: 0,
+      seeds: [{ attempt: 0, pair: 'P1180215 ↔ P1180321', cameras: 122, points: 20953, kept: true }],
+    },
+    selfCal: {
+      requested: 'auto', resolved: 'f,k1', staged: true,
+      passes: [{ pass: 1, mode: 'f,k1', reducedReason: null },
+        { pass: 2, mode: 'f', reducedReason: '2-view-dominated tracks' }],
+    },
+    intrinsics: [{ sensorId: 's1', label: 'Canon', fxNominal: 2389.3, fxFinal: 2565.9, deltaPct: 7.39, source: 'exif' }],
+    selfCalDistortion: [{ sensorId: 's1', k1: -0.0251, k2: 0, k3: 0, fitRmsPx: 0.153 }],
+    cycleFilter: {
+      aborted: true, candidates: 647, triangles: 2010, medianTriErrDeg: 42.3,
+      effErrDeg: 30, dropped: 0, readmitted: 0, bridgeProtected: 0, remainingPairs: 647,
+    },
+    timings: { init: 4200, register: 61000, bundle: 18000, totalMs: 96000 },
+  },
+  depthSummary: {
+    nMaps: 122, backend: 'gpu→wasm', gpuFallbacks: 1,
+    settings: { quality: 'medium', maxDim: 768, maxSources: 6, iterations: 3, geomConsistency: true },
+    medianMsPerImage: 40000, totalMs: 4880000, medianCoveragePct: 82.4, medianCostMedian: 0.15,
+    geomFilterMs: 31000, geomFilterMedianKeptPct: 74.2, geomFilterMinKeptPct: 0.4,
+    geomFilterMarginalMaps: 2, projectedPeakBytes: 1943011000, budgetBytes: 12884901888,
+  },
+  verdict: {
+    level: 'yellow',
+    headline: '122 of 128 images registered',
+    findings: [{ level: 'yellow', code: 'depth-coverage', title: 'Depth coverage 49%', fix: 'Add overlap' }],
+  },
+}
+
+describe('buildProjectDigest — baseline record', () => {
+  it('carries run config per stage, and nulls a stage with no record', () => {
+    const d = buildProjectDigest(B4)
+    expect(d.config.detect).toMatchObject({ detector: 'sift', maxDim: 2400, maxDimMode: 'absolute' })
+    expect(d.config.match).toMatchObject({ strategy: 'exhaustive', pairs: 8128, ratioThreshold: 0.75 })
+    expect(d.config.sparse).toMatchObject({ refineIntrinsics: 'auto' })
+    expect(d.config.dense).toMatchObject({ quality: 'medium' })
+    expect(buildProjectDigest(INPUT).config).toEqual({ detect: null, match: null, sparse: null, dense: null })
+  })
+
+  it('carries the seed decision, gates, self-cal and cycle-filter records', () => {
+    const d = buildProjectDigest(B4).diagnostics
+    expect(d.seed).toMatchObject({ nameA: 'P1180215', readyViews: 23 })
+    expect(d.attempts.retriesRun).toBe(0)
+    expect(d.gates.detectScaleFactor).toBeCloseTo(2.53)
+    expect(d.selfCal.passes).toHaveLength(2)
+    expect(d.intrinsics[0]).toMatchObject({ fxNominal: 2389.3, fxFinal: 2565.9 })
+    expect(d.cycleFilter.aborted).toBe(true)
+    expect(d.matchGates).toMatchObject({ gated: 7446, subsetGateActive: true })
+    expect(d.timings.totalMs).toBe(96000)
+  })
+
+  it('diagnostics are null-but-present when the sparse summary predates them', () => {
+    const d = buildProjectDigest(INPUT).diagnostics
+    expect(d.seed).toBeNull()
+    expect(d.gates).toBeNull()
+    expect(d.intrinsics).toEqual([])
+  })
+})
+
+describe('digestToMarkdown — baseline record', () => {
+  const md = digestToMarkdown(buildProjectDigest(B4))
+
+  it('states the config of every stage that has one', () => {
+    expect(md).toContain('## Run config')
+    expect(md).toContain('**Detect**: sift · 128 image(s)')
+    expect(md).toContain('maxDim=2400')
+    expect(md).toContain('**Match**: exhaustive · bruteforce')
+  })
+
+  it('names the seed, its runner-up, and whether a retry was needed', () => {
+    expect(md).toContain('**Seed**: P1180215 ↔ P1180321')
+    expect(md).toContain('runner-up: P1180211 ↔ P1180210')
+    expect(md).toContain('(first seed, no retry)')
+  })
+
+  it('reports the fx trajectory with its delta', () => {
+    expect(md).toContain('2389.3 → 2565.9 (+7.4%)')
+  })
+
+  it('reports the resolved pixel gates and the match gate tally', () => {
+    expect(md).toContain('**Reprojection gates**: ×2.53')
+    expect(md).toContain('7446 subset-gated')
+  })
+
+  it('reports the cycle filter skipping above its ceiling', () => {
+    expect(md).toContain('SKIPPED (above sanity ceiling)')
+    expect(md).toContain('42.3°')
+  })
+
+  it('reports Stage A backend, throughput and cross-view filter cost', () => {
+    expect(md).toContain('122 map(s) on gpu→wasm (1 GPU fallback(s))')
+    expect(md).toContain('median 40.0s/image')
+    expect(md).toContain('Cross-view filter: 31.0s')
+    expect(md).toContain('projected peak 1.8 GB')
+  })
+
+  it('leads with the verdict and its findings', () => {
+    expect(md.indexOf('## Verdict')).toBeLessThan(md.indexOf('## Health'))
+    expect(md).toContain('- [yellow] Depth coverage 49% → Add overlap')
+  })
+
+  it('omits the config block entirely when nothing is known', () => {
+    expect(digestToMarkdown(buildProjectDigest(INPUT))).not.toContain('## Run config')
+  })
+})

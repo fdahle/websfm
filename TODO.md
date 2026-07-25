@@ -37,6 +37,38 @@ still unvalidated on real data (Now ▸ R).
 
 ## Now
 
+### DR — Data-relative defaults: partly verified (shipped 2026-07-25)
+Pixel gates are denominated in **detection** pixels and resolved per run
+(`core/scaleContext.js`); the subset gate's sample size scales with the keypoint
+counts (`resolveSubsetGateSize`); detection `maxDim` can scale with each image
+(`core/features/detectResolution.js`, opt-in). See HANDOVER 2026-07-25.
+
+**Verified in the browser 2026-07-25:**
+- ~~CA…V~~ **passed, strongly.** 10137px native at maxDim 4000 → scale 0.395, factor
+  ×2.53; gates resolved RANSAC 2→5.06px, PnP/BA 3→7.60px, filter 4→10.14px. Result
+  **5/5 cameras, 3720 points, 0.72px median**, then a 4.5M-point dense cloud —
+  against a 45-point, all-2-view baseline. Confounded by masks + the Detailed
+  detection preset in the same run, so the gate change is not isolated, but the
+  direction is unambiguous.
+- ~~SB as the scale control~~ **passed.** 3072px native at maxDim 4000 → scale 1,
+  factor 1, and **no "Reprojection gates" line was emitted at all** — the plumbing
+  correctly does nothing on a full-resolution set. PnP gates stayed 8.0px.
+
+**Still owed — a like-for-like SB run.** The 2026-07-25 SB run reached 65/128, but
+it is not comparable to the 122/128 baseline: it used the Detailed detection preset
+(4000px / 25000 kp / contrast 0.005) instead of medium, and **sequential** matching
+(1280 pairs) instead of exhaustive, after the 8128-pair exhaustive run was cancelled.
+It was graph-limited (2 components, largest 85/128; 101 images with 0 correspondences
+to the registered set), not gate-limited.
+- Re-run SB at **medium detection + exhaustive matching** — the baseline's own
+  settings — to get a real control. Change one variable at a time after that.
+- That run also exposed the sequential/subset-gate bug now fixed (see below); re-run
+  the **sequential** variant too and confirm the 542 gated pairs are gone and the
+  graph is one component.
+- **Then** re-run CA…V with `maxDimMode: auto` and compare against its absolute run.
+- Not done, deliberately: `maxNeighbors` / `sequentialOverlap` are **not** scaled with
+  image count — they encode capture overlap, not set size (see the Backlog note).
+
 ### SB — South Building completeness + dense backend follow-up (2026-07-21)
 The 128-image medium baseline produced an accurate primary model (86 cameras,
 13,942 sparse points, 0.53px median reprojection) and a good 5.96M-point dense
@@ -636,12 +668,16 @@ browser check (Safari + Chrome).
   copied from another machine; both migration directions verify and leave the
   disk folder in place. Measure export/import throughput on the 128-image set and
   record it as a baseline.
-- **Debug ▸ Project Summary** (shipped 2026-07-24, browser-only paths unproven):
-  the ribbon button appears under Other ▸ Debug, opens the modal, the Markdown⇄JSON
-  toggle switches the body, and Copy writes to the clipboard with the toast. Optional
-  follow-up if wanted: also emit the digest to `log.ndjson` (debug channel) so it lands
-  in the saved record, and consider adding a run-config section once `summary` persists
-  the settings a run used.
+- **Debug ▸ Project Summary** (shipped 2026-07-24, extended 2026-07-25 into the
+  **baseline record** — run config + diagnostics + verdict, see HANDOVER; browser-only
+  paths still unproven): the ribbon button appears under Other ▸ Debug, opens the modal,
+  the Markdown⇄JSON toggle switches the body, Copy writes to the clipboard with the
+  toast, and the digest also lands in `log.ndjson` at debug level. **Check on the first
+  baseline run** that the new blocks are populated, not blank: Run config (all four
+  stages), Seed + attempts, Reprojection gates, Match gates, fx trajectory, cycle
+  filter, timings, Stage A backend/throughput/filter. Anything blank means a producer
+  isn't recording — fix that rather than the renderer. `matchRun` is session-scoped by
+  design, so copy the digest **without reopening the project** after a run.
 (The tiling/SuperPoint/LightGlue/TIFF browser runs are under W0/SP5.)
 
 ### P3 — OPFS quantize + spill of depth maps
@@ -824,6 +860,22 @@ JS proves slow on large grids; optional manual "Flip Z" for object scenes.
 ---
 
 ## Backlog
+
+**Data-relative defaults — examined and rejected**
+- **Do NOT scale `maxNeighbors` / `sequentialOverlap` with image count.** Both were
+  candidates in the 2026-07-25 pass and both are wrong to scale: they encode how
+  much the *capture* overlaps (an aerial strip at 60/30% overlaps ~8–12 neighbours
+  whether the block is 20 images or 500), not how large the set is. Scaling them
+  with N would add O(N²) matching cost that buys no new edges. The genuinely
+  set-size-dependent decision in that area — "is preselection/the subset gate worth
+  its false-negative risk at this pair count?" — is already handled by
+  `subsetGateMinPairs` and the `preselectionApplied` veto.
+- **Do NOT scale `minMatches` with the keypoint budget.** It looks budget-relative
+  but is a *geometric* floor (enough correspondences to constrain F/PnP robustly),
+  and raising it on a Detailed run would cut exactly the 15–40-inlier tail that
+  carries mean track length (see `minInlierRatio`'s note in defaults.user.js). The
+  spurious-match growth that comes with a larger budget is the **inlier ratio**
+  gate's job, not the absolute count's.
 
 **Project storage**
 - **ZIP64 writer**, to lift the 4 GB `.websfm` ceiling. fflate reads ZIP64 but

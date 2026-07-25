@@ -85,7 +85,15 @@ export function axisLabels(code) {
 }
 
 export function isGeographic(code) {
-  return !!crsInfo(code).geographic
+  const catalog = catalogByCode.get(code)
+  if (catalog) return !!catalog.geographic
+  // Dynamically fetched/custom definitions are not in the curated picker
+  // catalog. Once registered, inspect proj4 as well so another geographic EPSG
+  // cannot slip through a metric-only computation merely because it is not a preset.
+  const def = proj4.defs(code)
+  if (!def) return false
+  if (typeof def === 'string') return /\+proj=(longlat|latlong)\b/i.test(def)
+  return def.projName === 'longlat' || def.projName === 'latlong'
 }
 
 // ── Registration ──────────────────────────────────────────────────────────────

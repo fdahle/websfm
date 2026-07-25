@@ -11,11 +11,13 @@ import SegmentedControl from './ui/SegmentedControl.vue'
 import { useQualityReport } from '../../composables/useQualityReport.js'
 import { useProjectsStore } from '../../stores/useProjectsStore.js'
 import { copyToClipboard } from '../../composables/useToasts.js'
+import { useLog } from '../../composables/useLog.js'
 
 const emit = defineEmits(['close'])
 
 const report = useQualityReport()
 const projects = useProjectsStore()
+const { log } = useLog()
 
 const format = ref('markdown')
 const formatOptions = [
@@ -36,6 +38,11 @@ onMounted(async () => {
     const out = await report.computeDigest(name)
     markdown.value = out.markdown
     json.value = out.json
+    // Also stream the digest into log.ndjson (debug level, so Save TXT excludes it by
+    // default). A baseline run's digest then lives in the saved record next to the log
+    // lines it summarises, instead of only in whatever the user remembered to copy.
+    // One entry per line, because the log store is line-oriented.
+    for (const line of out.markdown.split('\n')) log(line, 'debug', 'Summary')
   } catch (e) {
     error.value = e?.message || String(e)
   } finally {

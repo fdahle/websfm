@@ -63,12 +63,22 @@ dropping questionable pairs.
 
 ## RANSAC threshold
 <!-- param: ransacThreshPx  default: 2.0 -->
-The Sampson-distance tolerance, in pixels, for calling a match an inlier during
+The Sampson-distance tolerance for calling a match an inlier during
 fundamental-matrix estimation. Think of it as the same idea as
 [reprojection error](help:reprojection-error): tighter means only well-localized
-correspondences pass. Scale it with your imagery — around `1–2 px` for sharp,
-high-resolution frames, looser for soft or heavily downsampled ones. Too tight
-throws away good matches; too loose lets outliers masquerade as inliers.
+correspondences pass. Too tight throws away good matches; too loose lets outliers
+masquerade as inliers.
+
+The unit is **detection pixels** — pixels at the resolution the detector actually
+ran at, which is capped by the detection step's *Max dimension*. You do not need to
+loosen this by hand for large images: keypoints are reported in full-resolution
+coordinates, so websfm multiplies your value by the downscaling factor before use
+and logs the result. A 10000 px scan detected at 2400 px gets a gate about 4×
+wider in image pixels, because that is how coarsely its keypoints were measured in
+the first place. Images detected at full resolution are unaffected.
+
+`1–2 px` suits most imagery. Raise it if matching is rejecting pairs you can see
+overlap; lower it if obviously wrong pairs are being accepted.
 
 ## RANSAC iterations
 <!-- param: maxIters  default: 1000 -->

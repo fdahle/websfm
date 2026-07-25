@@ -7,9 +7,10 @@ import { preselectPairs, preselectByFootprintOverlap } from '../core/features/pr
 import { sequentialPairs } from '../core/features/sequentialPairs.js'
 import { inlierSpread } from '../core/features/verify.js'
 import { evaluatePairAcceptance } from '../core/features/pairGate.js'
-import { pickSpreadIndices, sliceDescriptorRows } from '../core/features/subsetGate.js'
+import { pickSpreadIndices, sliceDescriptorRows, resolveSubsetGateSize } from '../core/features/subsetGate.js'
 import { MATCH_DEFAULTS } from '../core/defaults.user.js'
 import { MATCH_TUNING } from '../core/tuning.js'
+import { pairScaleContext, buildScaleContext, describeScaleContext, resolveScaledPx } from '../core/scaleContext.js'
 import { registerProjectStore } from './projectStores.js'
 import { useProjectsStore } from './useProjectsStore.js'
 import { usePosesStore } from './usePosesStore.js'
@@ -42,6 +43,14 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
   // write races (one writer's snapshot clobbers another's set). See P2 in HANDOVER.
   const matchStore = shallowRef(new Map())
   const touch = () => triggerRef(matchStore)
+
+  // The last completed matchAll run: its settings and its gate accounting (accepted /
+  // weak / rejected / raw-skipped / subset-gated). Kept because the accounting is what
+  // diagnoses a graph problem — "542 of 1280 sequential pairs gated" was the whole
+  // 2026-07-25 bug, and no per-pair record shows it. Session-scoped on purpose: match
+  // *pairs* persist per file, there is no run-level file, and a re-opened project has
+  // no run to describe. Null until a run completes; a cancelled run leaves it alone.
+  const matchRun = shallowRef(null)
 
   // Persist only when a project is open and OPFS is usable (see useProjectsStore).
   const isPersisting = () => projects.isPersisting
@@ -117,14 +126,22 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
       // when both images have meaningfully more keypoints than the subset, so
       // small images just pay the full match. See core/features/subsetGate.js.
       //
-      // Skipped entirely when preselection actually pruned the set (`_preselected`):
-      // pose/footprint-overlap preselection IS the overlap prefilter, so re-judging
-      // its pose-selected pairs with a cruder subset test only adds false negatives
-      // (it vetoed 52% of preselected pairs on a low-keypoint aerial block).
+      // `_skipSubsetGate` is matchAll's per-run veto (see there): preselection already
+      // being the overlap prefilter, or too few pairs for the saving to be worth the
+      // false-negative risk. Set on the settings object rather than checked here
+      // because both reasons are properties of the *run*, not of this pair.
       const gateEnabled = settings.subsetGate !== false && settings.matcher !== 'lightglue'
-        && !settings._preselected
+        && !settings._skipSubsetGate
       if (gateEnabled) {
-        const gateSize = settings.subsetGateSize
+        // Size the sample from THIS pair's actual keypoint counts, not a fixed
+        // figure: the gate's threshold is applied to a sampled count, so holding
+        // the sample size fixed makes the test ~1/N more severe as keypoint counts
+        // rise — at the Detailed detection preset a fixed 200 would veto nearly
+        // every pair. See core/features/subsetGate.js for the arithmetic.
+        const gateSizing = resolveSubsetGateSize(kpsA.length, kpsB.length, {
+          floorSize: settings.subsetGateSize,
+        })
+        const gateSize = gateSizing.size
         const dim = srcA.descDim ?? 128
         if (kpsA.length > gateSize * 1.5 && kpsB.length > gateSize * 1.5) {
           const idxA = pickSpreadIndices(kpsA, gateSize)
@@ -142,7 +159,10 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
             entry.status = 'done'
             entry.gated = true
             log(`Gated: ${imgA.name} ↔ ${imgB.name} — subset gate ${gate.matches.length}/${gateThreshold} `
-              + `putatives on ${idxA.length}×${idxB.length}-kp subsets — skipping full match`, 'debug', 'Matching')
+              + `putatives on ${idxA.length}×${idxB.length}-kp subsets `
+              + `(${(gateSizing.fraction * 100).toFixed(1)}% sample of ${kpsA.length}/${kpsB.length} kp`
+              + `${gateSizing.clamped ? `, at the ${gateSizing.clamped === 'ceil' ? 'cost ceiling' : 'size floor'}` : ''})`
+              + ' — skipping full match', 'debug', 'Matching')
             touch()
             onDone?.(pid, entry)
             return
@@ -210,8 +230,15 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
       }
 
       if (settings.geometricVerification !== false) {
+        // The RANSAC gate is in DETECTION pixels, but kpsA/kpsB are in native
+        // pixels (detect.js maps them back), so resolve it against this pair's
+        // detection scale. Per pair, not per run: two images may have been detected
+        // at different scales, and the coarser one sets the epipolar noise floor.
+        // Both at full resolution ⇒ factor 1 ⇒ the configured value, unchanged.
+        const scaleCtx = pairScaleContext(srcA, srcB)
+        const ransacPx = resolveScaledPx(settings.ransacThreshPx, scaleCtx)
         const result = await verifyMatches(kpsA, kpsB, raw, {
-          ransacThreshPx: settings.ransacThreshPx,
+          ransacThreshPx: ransacPx,
           maxIters: settings.maxIters,
           // Skip H-RANSAC on pairs below the hard acceptance floor: they're rejected
           // regardless of H, so the H/F degeneracy label is never consulted (see
@@ -254,7 +281,9 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
           + `${spread ? `spread ${spread.uniqueA}/${spread.uniqueB} unique, ${spread.extentA.toFixed(0)}/${spread.extentB.toFixed(0)}px` : 'spread n/a'}`
           + `${verdict.spreadDegenerate ? ' (positional collapse — REJECTED)' : ''}`
           + `${verdict.weak ? ' (WEAK — PnP bridge only)' : ''}, `
-          + `RANSAC ${settings.ransacThreshPx}px`, 'debug', 'Matching')
+          + `RANSAC ${ransacPx.toFixed(2)}px`
+          + `${scaleCtx.factor === 1 ? '' : ` (${settings.ransacThreshPx} detect-px ×${scaleCtx.factor.toFixed(2)} `
+            + `for detection scale ${scaleCtx.medianScale.toFixed(3)})`}`, 'debug', 'Matching')
       } else {
         entry.matches = raw.map(m => [m.ia, m.ib])
         entry.inlierCount = raw.length
@@ -394,7 +423,17 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
     // Whether preselection actually pruned pairs (a requested preselect can fall
     // back to exhaustive when too few images carry footprints/positions — in that
     // case the subset gate must still run, as no overlap prefilter happened).
-    let preselectionApplied = false
+    //
+    // Sequential pairing counts as an overlap prefilter for exactly the same reason
+    // camera-proximity preselection does: it has ALREADY decided which pairs
+    // plausibly overlap, using capture order. Running the subset gate on top of it
+    // only removes chain links — and a sequential chain has no redundancy, so a
+    // false veto severs the graph outright. Measured on the 128-image building set
+    // (2026-07-25): 542 of 1280 sequential pairs gated, match graph split into 2
+    // components (largest 85/128), 101 images left with zero correspondences to the
+    // registered set. The gate's threshold is calibrated against strongly-overlapping
+    // pairs; the weak links a chain depends on expect well under one subset putative.
+    let overlapPrefiltered = strategy === 'sequential'
     if (strategy === 'preselect') {
       const method = settings.preselectMethod ?? 'position'
       if (method === 'footprint') {
@@ -409,7 +448,7 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
           const before = pairs.length
           pairs = pairs.filter(([a, b]) =>
             (rings.has(a.uuid) && rings.has(b.uuid)) ? keep.has(pairId(a.uuid, b.uuid)) : true)
-          preselectionApplied = true
+          overlapPrefiltered = true
           log(`Preselection: ${pairs.length}/${before} pair(s) kept, ${before - pairs.length} skipped `
             + `(footprint overlap ≥ ${settings.minOverlap ?? 30}%)`, 'info', 'Matching')
         }
@@ -425,7 +464,7 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
           const before = pairs.length
           pairs = pairs.filter(([a, b]) =>
             (pos.has(a.uuid) && pos.has(b.uuid)) ? keep.has(pairId(a.uuid, b.uuid)) : true)
-          preselectionApplied = true
+          overlapPrefiltered = true
           log(`Preselection: ${pairs.length}/${before} pair(s) kept, ${before - pairs.length} skipped `
             + `(camera proximity, ≤${settings.maxNeighbors} neighbours)`, 'info', 'Matching')
         }
@@ -437,12 +476,28 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
       return
     }
 
-    // Preselection already filtered by overlap, so the subset gate would only
-    // add false negatives — bypass it for every pair this run.
-    if (preselectionApplied && settings.subsetGate !== false && settings.matcher !== 'lightglue') {
-      log('Subset gate disabled: preselection is the overlap prefilter', 'info', 'Matching')
+    // Two per-run reasons to bypass the subset gate, both properties of the run rather
+    // than of any one pair:
+    //  • the pair set was ALREADY chosen for overlap — by preselection (camera
+    //    proximity / footprints) or by capture order (sequential) — so the gate can
+    //    only add false negatives. It vetoed 52% of preselected pairs on a low-keypoint
+    //    aerial block, and 42% of sequential pairs on the 128-image building set;
+    //  • too few pairs for the saving to exist — the gate skips O(Na·Nb) work, which is
+    //    worth a false-negative risk across hundreds of pairs and worth nothing across a
+    //    handful, where a single wrong veto can sever the match graph.
+    const gateApplies = settings.subsetGate !== false && settings.matcher !== 'lightglue'
+    let skipSubsetGate = false
+    if (gateApplies && overlapPrefiltered) {
+      skipSubsetGate = true
+      log(`Subset gate disabled: ${strategy === 'sequential' ? 'capture order is' : 'preselection is'}`
+        + ' the overlap prefilter', 'info', 'Matching')
+    } else if (gateApplies && pairs.length < settings.subsetGateMinPairs) {
+      skipSubsetGate = true
+      log(`Subset gate disabled: only ${pairs.length} pair(s) (< ${settings.subsetGateMinPairs}) `
+        + '— matching them in full is cheap, and a wrong veto could sever the match graph',
+        'info', 'Matching')
     }
-    settings = { ...settings, _preselected: preselectionApplied }
+    settings = { ...settings, _skipSubsetGate: skipSubsetGate }
 
     // LightGlue is pinned to worker 0 and its ORT session is not reentrant (two
     // concurrent session.run() on one wasm session deadlock — the old 7-way freeze).
@@ -461,6 +516,18 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
       + `; matcher ${lightglue ? 'LightGlue (learned)' : 'brute-force'}`
       + `${lightglue ? '' : `, cross-check ${crossCheck ? 'on (mutual NN)' : 'off'}, ratio ${settings.ratioThreshold}`}`,
       'info', 'Matching')
+    // Report the detection-scale correction once per run at info level (the
+    // per-pair resolved value is debug). Built over the images actually taking
+    // part, so it describes this run rather than the project.
+    let resolvedRansacPx = null
+    if (settings.geometricVerification !== false) {
+      const runCtx = buildScaleContext(ready)
+      resolvedRansacPx = resolveScaledPx(settings.ransacThreshPx, runCtx)
+      if (runCtx.factor !== 1 || runCtx.mixed) {
+        log(describeScaleContext(runCtx, `RANSAC gate (${settings.ransacThreshPx} detect-px)`),
+          runCtx.clamped ? 'warn' : 'info', 'Matching')
+      }
+    }
     let done = 0
     // Tally this run's outcomes for the completion summary. Skipped = too few raw
     // matches to bother verifying; rejected = verified but failed the count/ratio
@@ -510,6 +577,39 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
       + `${stats.gated ? `, ${stats.gated} gated (subset pre-test)` : ''}`
       + `; ${stats.inliers} total inliers, mean inlier ratio ${meanRatio.toFixed(2)}`,
       'success', 'Matching')
+
+    matchRun.value = {
+      date: new Date().toISOString(),
+      strategy,
+      matcher: settings.matcher === 'lightglue' ? 'lightglue' : 'bruteforce',
+      nImages: ready.length,
+      nPairs: pairs.length,
+      accepted: stats.matched,
+      weak: stats.weak,
+      rejected: stats.rejected,
+      skipped: stats.skipped,
+      gated: stats.gated,
+      inliers: stats.inliers,
+      meanInlierRatio: meanRatio,
+      subsetGateActive: gateApplies && !skipSubsetGate,
+      resolvedRansacPx,
+      // The user-facing knobs only — the tuning.js internals are not what a baseline
+      // varies, and dumping the merged object would bury the five that matter.
+      settings: {
+        ratioThreshold: settings.ratioThreshold,
+        crossCheck: settings.crossCheck,
+        minMatches: settings.minMatches,
+        minInlierRatio: settings.minInlierRatio,
+        ransacThreshPx: settings.ransacThreshPx,
+        maxIters: settings.maxIters,
+        subsetGate: settings.subsetGate,
+        preselectMethod: strategy === 'preselect' ? settings.preselectMethod : null,
+        maxNeighbors: strategy === 'preselect' ? settings.maxNeighbors : null,
+        sequentialOverlap: strategy === 'sequential' ? settings.sequentialOverlap : null,
+        sequentialLoopClosure: strategy === 'sequential' ? settings.sequentialLoopClosure : null,
+        lgTiled: settings.matcher === 'lightglue' ? settings.lgTiled : null,
+      },
+    }
   }
 
   // Drop every pair involving `uuid`. Re-detecting an image (or clearing its
@@ -576,10 +676,11 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
   function clear({ purge = false } = {}) {
     matchStore.value.clear()
     matchStore.value = new Map()
+    matchRun.value = null
     if (purge && isPersisting()) {
       opfs.clearAllMatches(projects.currentProjectId).catch(() => {})
     }
   }
 
-  return { matchStore, pairId, getMatch, verifiedPairs, matchPair, matchAll, removeMatchesForImage, setPairDisabled, restore, clear }
+  return { matchStore, matchRun, pairId, getMatch, verifiedPairs, matchPair, matchAll, removeMatchesForImage, setPairDisabled, restore, clear }
 }))

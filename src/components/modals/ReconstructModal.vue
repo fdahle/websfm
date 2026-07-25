@@ -77,8 +77,9 @@ function run() {
           />
         </SettingsField>
 
-        <SettingsField label-for="reprj" unit="px"
-          hint="Inlier threshold for camera-pose RANSAC. Lower = stricter.">
+        <SettingsField label-for="reprj" unit="detection px"
+          hint="Inlier threshold for camera-pose RANSAC. Lower = stricter. Measured at
+                the detection resolution, so it scales automatically on downscaled images.">
           <template #label>
             <GlossaryTerm id="reprojection-error">Reprojection threshold</GlossaryTerm>
           </template>

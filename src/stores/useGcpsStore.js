@@ -1,8 +1,9 @@
-import { ref, watch } from 'vue'
+import { ref, watch, computed } from 'vue'
 import { defineStore } from 'pinia'
 import { useLog } from '../composables/useLog.js'
 import { ensureProjection, transform } from '../core/crs.js'
 import { hasGcpElevation } from '../core/io/gcp.js'
+import { makeNameResolver } from '../core/io/nameMatch.js'
 import * as opfs from '../utils/opfs.js'
 import { registerProjectStore } from './projectStores.js'
 import { useImagesStore } from './useImagesStore.js'
@@ -57,18 +58,10 @@ export const useGcpsStore = registerProjectStore(defineStore('gcps', () => {
     }).catch((err) => log(`GCP save failed — ${err?.message ?? err}`, 'error', 'GCP'))
   }
 
-  // Resolve an observation's image name to an in-memory image id (case-insensitive,
-  // tolerant of extension differences).
-  function resolveImageId(imageName) {
-    if (!imageName) return null
-    const lc = imageName.toLowerCase()
-    const base = lc.replace(/\.[^.]+$/, '')
-    const hit = imagesStore.images.find((img) => {
-      const n = img.name.toLowerCase()
-      return n === lc || n.replace(/\.[^.]+$/, '') === base
-    })
-    return hit?.id ?? null
-  }
+  // Name → image-id matching is shared with poses / footprints / COLMAP import
+  // (core/io/nameMatch.js). Indexed once per image-list change, so a full
+  // reconcile is O(observations + images) rather than a scan per observation.
+  const resolveImageId = computed(() => makeNameResolver(imagesStore.images))
 
   // Re-resolve every observation's `imageId` against the current image list.
   // Observations imported/marked before their image was loaded carry a null
@@ -78,9 +71,10 @@ export const useGcpsStore = registerProjectStore(defineStore('gcps', () => {
   // link on "image actually exists". Runs on every image-list change.
   function reconcileObservationImageIds() {
     let changed = false
+    const resolve = resolveImageId.value
     for (const g of gcps.value) {
       for (const o of g.observations || []) {
-        const resolved = resolveImageId(o.imageName)
+        const resolved = resolve(o.imageName)
         if (resolved !== o.imageId) { o.imageId = resolved; changed = true }
       }
     }
@@ -111,7 +105,7 @@ export const useGcpsStore = registerProjectStore(defineStore('gcps', () => {
       const [x, y, z] = transform([raw.x, raw.y, raw.z ?? 0], sourceCrs, projCrs)
       const existing = gcps.value.find((g) => g.name === raw.name)
       const observations = (raw.observations || []).map((o) => ({
-        imageId: resolveImageId(o.imageName),
+        imageId: resolveImageId.value(o.imageName),
         imageName: o.imageName,
         px: o.px,
         py: o.py,
