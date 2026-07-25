@@ -11,7 +11,9 @@ export function downloadBlob(filename, data, mime = 'application/octet-stream') 
   document.body.appendChild(a)
   a.click()
   a.remove()
-  URL.revokeObjectURL(url)
+  // The click only schedules navigation in some engines. Revoking immediately
+  // can invalidate the URL before Safari/Firefox have opened it.
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
 // Convert a data: URL (e.g. an OffscreenCanvas PNG) to a Blob for download.

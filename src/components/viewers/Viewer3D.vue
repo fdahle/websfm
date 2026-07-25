@@ -118,6 +118,40 @@ const frustumGroup = new THREE.Group()
 // the GPU textures they reference).
 let thumbTextures = []
 
+function disposeMaterial(material, textures = new Set(), materials = new Set()) {
+  for (const mat of Array.isArray(material) ? material : [material]) {
+    if (!mat || materials.has(mat)) continue
+    materials.add(mat)
+    for (const value of Object.values(mat)) {
+      if (value?.isTexture && !textures.has(value)) {
+        textures.add(value); value.dispose(); value.__websfmDisposed = true
+      }
+    }
+    mat.dispose()
+  }
+}
+
+function disposeObject(root) {
+  const textures = new Set()
+  const materials = new Set()
+  root?.traverse((obj) => {
+    obj.geometry?.dispose()
+    if (obj.material) disposeMaterial(obj.material, textures, materials)
+  })
+}
+
+function clearFrustums() {
+  disposeObject(frustumGroup)
+  frustumGroup.clear()
+  // Textures referenced by a material were disposed above. Keep this fallback
+  // for a texture whose async load completed after its mesh was removed.
+  for (const tex of thumbTextures) if (!tex.__websfmDisposed) {
+    tex.dispose()
+    tex.__websfmDisposed = true
+  }
+  thumbTextures = []
+}
+
 // Robust bounds of the loaded scene — drive the camera view presets and grid.
 const sceneCenter = new THREE.Vector3(0, 0, 0)
 let sceneRadius = 5
@@ -238,11 +272,9 @@ function setReconstructionData(cameras, points3d) {
   const hadContent = pointCloud !== null || frustumGroup.children.length > 0
 
   // Remove previous
-  if (pointCloud) { scene.remove(pointCloud); pointCloud.geometry.dispose(); pointCloud = null }
-  if (meshObject) { scene.remove(meshObject); meshObject.geometry.dispose(); meshObject.material.dispose(); meshObject = null }
-  frustumGroup.clear()
-  for (const tex of thumbTextures) tex.dispose()
-  thumbTextures = []
+  if (pointCloud) { scene.remove(pointCloud); disposeObject(pointCloud); pointCloud = null }
+  if (meshObject) { scene.remove(meshObject); disposeObject(meshObject); meshObject = null }
+  clearFrustums()
 
   if (pointCount === 0 && !isMesh && cameras.size === 0) {
     sceneCenter.set(0, 0, 0)
@@ -388,9 +420,7 @@ function setReconstructionData(cameras, points3d) {
 // Rebuilds from scratch (disposing old thumbnail textures) so it's safe to call
 // on every cameraScale change.
 function buildFrustums(cams, frustumDepth) {
-  frustumGroup.clear()
-  for (const tex of thumbTextures) tex.dispose()
-  thumbTextures = []
+  clearFrustums()
 
   const frustumMat = new THREE.LineBasicMaterial({ color: 0xff8844 })
   const urlByUuid = new Map(props.images.map((im) => [im.uuid, im.url]))
@@ -556,6 +586,7 @@ watch(() => props.theme, (t) => {
   if (!scene) return
   scene.background = new THREE.Color(BG[t] ?? BG.dark)
   scene.remove(grid)
+  disposeObject(grid)
   grid = makeGrid(t)
   updateGrid()
   scene.add(grid)
@@ -636,10 +667,10 @@ onMounted(init)
 onBeforeUnmount(() => {
   cancelAnimationFrame(animationId)
   resizeObserver?.disconnect()
-  for (const tex of thumbTextures) tex.dispose()
-  thumbTextures = []
-  if (pointCloud) { pointCloud.geometry.dispose(); pointCloud = null }
-  if (meshObject) { meshObject.geometry.dispose(); meshObject.material.dispose(); meshObject = null }
+  clearFrustums()
+  if (pointCloud) { disposeObject(pointCloud); pointCloud = null }
+  if (meshObject) { disposeObject(meshObject); meshObject = null }
+  if (grid) { disposeObject(grid); grid = null }
   controls?.dispose()
   renderer?.dispose()
   renderer?.domElement.remove()

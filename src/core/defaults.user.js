@@ -10,10 +10,22 @@
 // `siftSettings` ref. NOTE: the worker op (workers/ops/detect.js) keeps its own,
 // intentionally-different fallbacks (e.g. tileSize 0 ⇒ auto-derive) — that op is the
 // defensive floor, not this user-facing prefill, so the two are allowed to differ.
+// Resolution/budget note (2026-07-24): these were originally set for hand-held photo
+// sets and were far too conservative for the aerial + scanned-film work this app
+// targets. A 10137×9600 film scan detected at 1200px throws away ~98.6% of the pixels,
+// and the resulting ~6k keypoints are too few to constrain self-calibration (the CA…V
+// run finished with 45 points, all 2-view). Measured cost at 5000px on that set was
+// ~2.6 s/image, so the old ceiling was not buying speed that mattered. For reference,
+// Metashape's defaults are full image resolution with a 40,000 key point limit.
 export const DETECT_SIFT_DEFAULTS = {
-  maxDim: 1200,             // longest side the detector runs at (px)
+  maxDim: 2400,             // longest side the detector runs at (px)
+  // 'absolute' ⇒ maxDim as written, for every image (the historical behaviour).
+  // 'auto' ⇒ a fraction of each image's OWN native size, clamped into a per-preset
+  // band whose floor IS the absolute value above — so auto can only add resolution
+  // to large images, never take it away. See core/features/detectResolution.js.
+  maxDimMode: 'absolute',
   contrastThreshold: 0.01,  // DoG response floor (lower = more, weaker keypoints)
-  maxKeypoints: 5000,       // per-image cap (strongest kept)
+  maxKeypoints: 10000,      // per-image cap (strongest kept)
   tiling: 'off',            // 'off' | 'on' — tiled detection for very large images
   tileSize: 1024,           // tile edge (px) when tiling is on
   overlap: 64,              // tile overlap (px) so seams still get keypoints
@@ -22,7 +34,8 @@ export const DETECT_SIFT_DEFAULTS = {
 // Tie-point detection — SuperPoint (no contrast knob; learned threshold is baked in).
 // Mirrored by DetectFeaturesModal.vue's `superpointSettings` ref.
 export const DETECT_SUPERPOINT_DEFAULTS = {
-  maxDim: 1200,
+  maxDim: 1600,             // raised with SIFT's, but far less: the cap below binds first
+  maxDimMode: 'absolute',   // see DETECT_SIFT_DEFAULTS.maxDimMode
   maxKeypoints: 2048,       // LightGlue attention is O(N²) — 2048 is the usual sweet spot
   tiling: 'off',
   tileSize: 1024,
@@ -32,15 +45,19 @@ export const DETECT_SUPERPOINT_DEFAULTS = {
 // Detection quality presets (deltas over the per-detector defaults; medium ≡ defaults).
 // One shared card set (meta), two delta maps — the modal applies whichever matches the
 // active detector. Only resolution + keypoint budget vary (contrast too for SIFT).
+// Brute-force matching is O(Na·Nb), so the keypoint cap costs quadratically at the
+// NEXT stage — that, not detection time, is what bounds the Detailed preset.
 export const DETECT_SIFT_PRESETS = {
-  low:    { maxDim: 900,  maxKeypoints: 3000, contrastThreshold: 0.02 },
+  low:    { maxDim: 1400, maxKeypoints: 5000,  contrastThreshold: 0.02 },
   medium: {},
-  high:   { maxDim: 1600, maxKeypoints: 8000, contrastThreshold: 0.006 },
+  high:   { maxDim: 4000, maxKeypoints: 25000, contrastThreshold: 0.005 },
 }
+// SuperPoint is capped much lower on purpose: LightGlue's attention is O(N²) in
+// keypoints, so its budget is a hard constraint rather than a speed/quality dial.
 export const DETECT_SUPERPOINT_PRESETS = {
-  low:    { maxDim: 900,  maxKeypoints: 1024 },
+  low:    { maxDim: 1200, maxKeypoints: 1024 },
   medium: {},
-  high:   { maxDim: 1600, maxKeypoints: 4096 },
+  high:   { maxDim: 2400, maxKeypoints: 4096 },
 }
 export const DETECT_PRESET_META = [
   { id: 'low',    label: 'Fast',     blurb: 'Lower resolution, fewer keypoints' },
@@ -63,7 +80,13 @@ export const MATCH_DEFAULTS = {
   crossCheck: true,
   minMatches: 15,              // min surviving matches to keep a pair
   geometricVerification: true, // run F-RANSAC verification
-  ransacThreshPx: 2.0,         // F-RANSAC inlier threshold (px)
+  // F-RANSAC inlier threshold, in **detection pixels** — i.e. at the resolution the
+  // keypoints were measured at, not at native image resolution. useMatchesStore
+  // resolves it per pair via core/scaleContext.js (× the coarser image's 1/scale).
+  // A set detected at full resolution is unaffected; a film scan detected at ¼ gets
+  // a gate 4× wider in native px, which is what keeps it above the measurement
+  // quantum instead of below it. See scaleContext.js for the full argument.
+  ransacThreshPx: 2.0,
   // Reject pairs whose inlier fraction is below this. COLMAP has no ratio gate at all
   // (only min_num_inliers=15) and verifies ~3× more pairs on the building set — that tail
   // of 15–40-inlier pairs is what carries its 3.6 mean track length vs our 2.6. 0.15 keeps
@@ -79,8 +102,17 @@ export const MATCH_DEFAULTS = {
   lgTiled: false,              // coarse-to-fine tiled guided matching (full density)
   lgTileBudget: 2048,          // max keypoints per tile side when tiled (attention budget)
   subsetGate: true,            // cheap coarse pre-test to skip non-overlapping pairs
-  subsetGateSize: 200,         // spatially-uniform keypoints per image in the pre-test
-  subsetGateThreshold: 8,      // min subset putatives required to run the full match
+  // MINIMUM spatially-uniform keypoints per image in the pre-test. The actual
+  // sample is sized per pair from the real keypoint counts
+  // (core/features/subsetGate.js resolveSubsetGateSize) so the sampling *fraction*
+  // — and therefore the meaning of subsetGateThreshold below — stays constant.
+  // A fixed size makes the gate ~1/N more severe as keypoint counts rise; at the
+  // Detailed detection preset a fixed 200 would veto nearly every pair.
+  subsetGateSize: 200,
+  // Min subset putatives required to run the full match. Only meaningful together
+  // with a stable sampling fraction (see subsetGateSize) — this is a count drawn
+  // from a sample, not from the full keypoint sets.
+  subsetGateThreshold: 8,
 }
 // Matching quality presets — tune the geometric-verification strictness (deltas over
 // the defaults; medium ≡ defaults). Strategy/matcher are separate primary choices, not
@@ -100,7 +132,11 @@ export const MATCH_PRESET_META = [
 // Mirrored by ReconstructModal.vue's `settings` ref.
 export const RECONSTRUCT_DEFAULTS = {
   minMatchesForRegistration: 20, // min correspondences to a registered image to try PnP
-  reprjThreshold: 4.0,           // reprojection inlier threshold (px)
+  // Reprojection inlier threshold, in **detection pixels** (see ransacThreshPx).
+  // core/sfm/sfm.js resolves it once per run against the set's median detection
+  // scale and hands the native-px value to the PnP gates, interim BA and the track
+  // filter. RECONSTRUCT_PRESETS below patch it in the same detect-px unit.
+  reprjThreshold: 4.0,
   baIterations: 30,              // bundle-adjustment iterations
   // BA self-calibration: 'auto' | 'none' | 'f' | 'f,cxcy' | 'f,k1'. 'auto' (the
   // default) resolves in core/sfm/sfm.js to 'f,k1' when no sensor carries a

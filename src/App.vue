@@ -50,14 +50,13 @@ import { useTabDrag } from './composables/useTabDrag.js'
 import { useSidebarResize } from './composables/useSidebarResize.js'
 import { useImportRouting } from './composables/useImportRouting.js'
 import { useExports } from './composables/useExports.js'
+import { useConfirmations } from './composables/useConfirmations.js'
+import { useProjectLifecycle } from './composables/useProjectLifecycle.js'
 import { useModalEscape } from './composables/useModalEscape.js'
-import { showToast } from './composables/useToasts.js'
-import { formatBytes } from './core/io/projectArchive.js'
 import { useBeforeUnload } from './composables/useBeforeUnload.js'
 import { useReconstructionStore } from './stores/useReconstructionStore.js'
 import { useExternalStore } from './stores/useExternalStore.js'
 import { useGcpsStore } from './stores/useGcpsStore.js'
-import { restoreProjectStores, clearProjectStores } from './stores/projectStores.js'
 import { useFootprintsStore } from './stores/useFootprintsStore.js'
 import { useSensorsStore } from './stores/useSensorsStore.js'
 import { usePosesStore } from './stores/usePosesStore.js'
@@ -98,21 +97,17 @@ const {
   persistenceAvailable, projects, currentProjectId, currentProjectName, currentSceneType, currentCrs,
 } = storeToRefs(projectsStore)
 const {
-  setPersistenceAvailable, loadIndex, createProject, setProjectCrs, switchProject, renameProject,
-  deleteProjectById, exportProject, importProject,
-  folderSupported, openPlan, reconnectProjectFolder, relinkProjectFolder,
-  createFolderProject, adoptFolderProject, moveProjectToFolder, moveProjectToBrowser,
+  setPersistenceAvailable, loadIndex, setProjectCrs, renameProject, folderSupported,
 } = projectsStore
 
 // ── Images ────────────────────────────────────────────────────────────────────
 const imagesStore = useImagesStore()
-const { images, selectedId } = storeToRefs(imagesStore)
+const { images, selectedId, pendingWorkCount: pendingImageWork } = storeToRefs(imagesStore)
 const {
   imageById, selectImage,
   addImages, removeImage,
-  updateMask, updateDepth, detectAll, clearKeypoints, clearAll,
-  setFiducialObservation, setFiducialDetection, addFiducialObservations, migrateLegacyFiducialDetections,
-  restoreImages,
+  updateMask, updateDepth, detectAll, clearKeypoints,
+  setFiducialObservation, setFiducialDetection, addFiducialObservations,
 } = imagesStore
 
 // Largest detected keypoint count over all images — lets the Match modal warn when
@@ -174,7 +169,10 @@ const { reconstruct, importColmapModel, importCloud, editClouds, computeDepthMap
 // Project-scoped; restore/clear run through the project-store registry. Only the
 // index is in memory — pixel planes hydrate on first use (useExternalStore).
 const externalStore = useExternalStore()
-const { rasters, pendingRasters, sources: rasterSources, hasReferenceDem, mapRasters } = storeToRefs(externalStore)
+const {
+  rasters, pendingRasters, pendingWorkCount: pendingRasterWork,
+  sources: rasterSources, hasReferenceDem, mapRasters,
+} = storeToRefs(externalStore)
 const { importRaster, setRasterKind, setRasterStyle, setVerticalInfo, setRasterOnMap, setRasterOpacity, removeRaster, rasterById, probeRasterAt, ensureRasterLoaded } = externalStore
 
 // Clicking a point cloud in the sidebar shows it in the 3D viewer.
@@ -398,7 +396,8 @@ const sensorsStore = useSensorsStore()
 const { sensors } = storeToRefs(sensorsStore)
 const {
   imageCount: sensorImageCount,
-  addSensors, updateSensor, toggleSensorFixed, setFiducialMarks, setFiducialCalibration, migrateLegacyFiducialCalibrations, assignSensor, mergeSensors, removeSensor, clearSensors, restoreSensors,
+  addSensors, updateSensor, toggleSensorFixed, setFiducialMarks, setFiducialCalibration,
+  assignSensor, mergeSensors, removeSensor,
 } = sensorsStore
 
 // Sensor ids whose intrinsics fall back to the default-FOV guess for at least one
@@ -530,6 +529,7 @@ function openFiducialCalibrate() {
 // ── Pipeline ──────────────────────────────────────────────────────────────────
 const {
   progressOpen, progressTitle, progressCurrent, progressTotal, progressLabel,
+  progressUnit, progressFraction, progressIndeterminate, progressComplete, progressCancelling,
   cancelRun, runDetect, runMatch, runReconstruct, runComputeDepthMaps, runDensify,
   runGenerateDem, runGenerateOrtho, runGenerateMesh, runEditClouds,
 } = usePipeline({ images, detectAll, matchAll, reconstruct, computeDepthMaps, densify, generateDem, generateOrtho, generateMesh, editClouds })
@@ -870,14 +870,22 @@ const showMapGrid = ref(true)
 
 // ── Console ───────────────────────────────────────────────────────────────────
 // True while a project is being restored — drives the interaction-blocking overlay.
-const projectLoading = ref(false)
-// { done, total, label } while restoreImages streams progress, else null — lets
-// the loading overlay show "Loading image 3/5 — name.tif" instead of a static spinner.
-const projectLoadingProgress = ref(null)
-// Headline for the same overlay. Project save/load reuses it (both block the UI
-// for the same reason — the project is mid-flight), so the text is a ref rather
-// than the hardcoded "Loading project…" it started as.
-const projectLoadingLabel = ref('Loading project…')
+// Project lifecycle: open / create / switch / delete, folder-backed storage,
+// `.websfm` save+load, and the blocking load overlay they all share. Tabs and the
+// 3D scene live here, so those two resets are injected.
+const {
+  projectLoading, projectLoadingProgress, projectLoadingLabel,
+  resetInMemoryProject,
+  handleCreateProject, handleCancelNewProject,
+  folderPrompt, folderPromptProject,
+  onFolderConnect, onFolderRepick, openProjectFolder,
+  moveCurrentProjectToFolder, moveCurrentProjectToBrowser,
+  onSaveProject, importProjectFile, onProjectFilePick,
+  handleSwitchProject, handleDeleteProject,
+} = useProjectLifecycle({
+  resetToViewer,
+  clearViewerScene: () => viewerRef.value?.clearReconstructionData(),
+})
 
 const consoleOpen = ref(localStorage.getItem('consoleOpen') === 'true')
 watch(consoleOpen, (v) => localStorage.setItem('consoleOpen', v))
@@ -918,269 +926,6 @@ onMounted(async () => {
     projectPickerOpen.value = true
   }
 })
-
-async function openProject(id) {
-  // A folder-backed project has to be reachable before anything reads it: the
-  // stored directory handle may need a permission grant (which needs a user
-  // gesture) or may be dead. `openPlan` registers the root when it can and
-  // otherwise tells us which prompt to raise — reading project.json first would
-  // just fail in a way indistinguishable from a corrupt project.
-  const plan = await openPlan(id)
-  if (plan.action !== 'open') {
-    folderPrompt.value = { id, action: plan.action, error: '' }
-    return
-  }
-  const projectData = await switchProject(id)
-  if (!projectData) return
-  // Gate interaction while a project restores. Restoring a model still does a
-  // burst of synchronous work (decoding point buffers, rebuilding tracks); the
-  // overlay stops the user acting on a half-loaded project and then hitting the
-  // freeze mid-click.
-  projectLoading.value = true
-  try {
-    if (projectData.crs) await ensureProjection(projectData.crs).catch(() => {})
-    resetToViewer()
-    viewerRef.value?.clearReconstructionData()
-    // Let the overlay actually paint before the synchronous restore work runs.
-    await nextTick()
-    await new Promise((r) => requestAnimationFrame(() => r()))
-    // Restore sensors before images: EXIF auto-grouping reacts to the image list,
-    // so the saved sensors must already be in place or it would mint duplicates
-    // and clobber manual sensor assignments. Both have bespoke restore signatures,
-    // so they stay manual; every other project-scoped store restores through the
-    // registry below (matches, reconstruction, GCPs, footprints, poses).
-    await restoreSensors(id)
-    await restoreImages(projectData.images || [], id, (done, total, label) => {
-      projectLoadingProgress.value = { done, total, label }
-    })
-    migrateLegacyFiducialDetections(sensors.value)
-    migrateLegacyFiducialCalibrations(images.value)
-    projectLoadingProgress.value = null
-    await restoreProjectStores({ projectId: id, projectData })
-    // restore() sets selectedCloud, which the watcher pushes into the viewer.
-  } finally {
-    projectLoading.value = false
-    projectLoadingProgress.value = null
-  }
-}
-
-// ── New project ───────────────────────────────────────────────────────────────
-async function handleCreateProject({ name, sceneType, crs, dirHandle = null }) {
-  newProjectOpen.value = false
-  // Leaving the current project to create a new one: reset in-memory state only.
-  // Purging here would delete the previously-open project's persisted data.
-  clearAll(resetToViewer)
-  clearSensors()
-  clearProjectStores()   // matches, reconstruction, GCPs, footprints, poses
-  viewerRef.value?.clearReconstructionData()
-  if (crs) await ensureProjection(crs).catch(() => {})
-  if (!dirHandle) { await createProject(name, sceneType, crs); return }
-
-  // Folder-backed: the directory must be empty (websfm writes a whole tree into
-  // it and prunes stale sidecars), so a non-empty one asks once.
-  let res = await createFolderProject(name, sceneType, crs, dirHandle)
-  if (!res.ok && res.needsConfirm
-      && confirm(`"${dirHandle.name}" is not empty. Create the project in it anyway?`)) {
-    res = await createFolderProject(name, sceneType, crs, dirHandle, { confirmed: true })
-  }
-  if (res.ok) {
-    log(`Project "${name}" created in folder "${dirHandle.name}"`, 'info', 'Project')
-    return
-  }
-  log(`Could not create project in folder: ${res.error}`, 'error', 'Project')
-  showToast('Could not use that folder', { detail: res.error, kind: 'error', ms: 6000 })
-  newProjectCanCancel.value = !!currentProjectId.value
-  newProjectOpen.value = true
-}
-
-// Cancelling the New Project dialog falls back to the picker when no project is
-// open yet, so the user is never left in an empty, project-less state.
-function handleCancelNewProject() {
-  newProjectOpen.value = false
-  if (!currentProjectId.value && projects.value.length > 0) {
-    projectPickerOpen.value = true
-  }
-}
-
-// ── Folder-backed projects ────────────────────────────────────────────────────
-// { id, action: 'reconnect' | 'repick', error } while a folder project is
-// waiting to be reached, else null. Held here (not in the modals store) because
-// it is a step *inside* opening a project, not a modal the user opens.
-const folderPrompt = ref(null)
-
-const folderPromptProject = computed(() =>
-  folderPrompt.value ? projects.value.find((p) => p.id === folderPrompt.value.id) || null : null)
-
-async function pickDirectory() {
-  try {
-    return await window.showDirectoryPicker({ mode: 'readwrite' })
-  } catch (err) {
-    if (err?.name !== 'AbortError') {
-      log(`Folder picker: ${err?.message ?? err}`, 'error', 'Project')
-    }
-    return null
-  }
-}
-
-// "Connect" in the reconnect dialog — the user gesture requestPermission needs.
-async function onFolderConnect() {
-  const prompt = folderPrompt.value
-  if (!prompt) return
-  const res = await reconnectProjectFolder(prompt.id)
-  if (!res.ok) { folderPrompt.value = { ...prompt, action: 'repick', error: res.error }; return }
-  folderPrompt.value = null
-  await openProject(prompt.id)
-}
-
-// "Choose folder…" — re-point the project at a freshly picked directory.
-async function onFolderRepick() {
-  const prompt = folderPrompt.value
-  if (!prompt) return
-  const dirHandle = await pickDirectory()
-  if (!dirHandle) return
-  const res = await relinkProjectFolder(prompt.id, dirHandle)
-  if (!res.ok) { folderPrompt.value = { ...prompt, error: res.error }; return }
-  folderPrompt.value = null
-  await openProject(prompt.id)
-}
-
-// Adopt a directory that already holds a project.json — the Dropbox/git sharing
-// path. Its internal ids are kept, so the same folder is the same project
-// wherever it is opened.
-async function openProjectFolder() {
-  const dirHandle = await pickDirectory()
-  if (!dirHandle) return
-  const res = await adoptFolderProject(dirHandle)
-  if (!res.ok) {
-    log(`Open project folder: ${res.error}`, 'error', 'Project')
-    showToast('Not a project folder', { detail: res.error, kind: 'error', ms: 6000 })
-    return
-  }
-  projectPickerOpen.value = false
-  clearAll(resetToViewer)
-  clearSensors()
-  clearProjectStores()
-  viewerRef.value?.clearReconstructionData()
-  await openProject(res.id)
-}
-
-// Migration between backends. Both directions are a verified tree copy; only the
-// OPFS source is deleted afterwards — files on the user's disk are never removed
-// by websfm, so "move into browser storage" leaves the folder in place.
-async function moveCurrentProjectToFolder(id = currentProjectId.value) {
-  if (!id) return
-  const dirHandle = await pickDirectory()
-  if (!dirHandle) return
-  projectLoadingLabel.value = 'Moving project to folder…'
-  projectLoading.value = true
-  try {
-    await nextTick()
-    let res = await moveProjectToFolder(id, dirHandle, {
-      onProgress: ({ files, label }) => { projectLoadingProgress.value = { done: files, total: 0, label: `${files} files — ${label}` } },
-    })
-    if (!res.ok && res.needsConfirm
-        && confirm(`"${dirHandle.name}" is not empty. Move the project into it anyway?`)) {
-      res = await moveProjectToFolder(id, dirHandle, { confirmed: true })
-    }
-    if (res.ok) {
-      log(`Project moved to folder "${dirHandle.name}" (${res.files} files)`, 'info', 'Project')
-      showToast('Project moved to folder', { detail: dirHandle.name })
-    } else {
-      log(`Move to folder failed: ${res.error}`, 'error', 'Project')
-      showToast('Could not move project', { detail: res.error, kind: 'error', ms: 6000 })
-    }
-  } finally {
-    projectLoading.value = false
-    projectLoadingProgress.value = null
-    projectLoadingLabel.value = 'Loading project…'
-  }
-}
-
-async function moveCurrentProjectToBrowser(id = currentProjectId.value) {
-  if (!id) return
-  if (!confirm('Copy this project into browser storage? The folder on disk is left in place, '
-    + 'and websfm will stop writing to it.')) return
-  projectLoadingLabel.value = 'Moving project into browser storage…'
-  projectLoading.value = true
-  try {
-    await nextTick()
-    const res = await moveProjectToBrowser(id, {
-      onProgress: ({ files, label }) => { projectLoadingProgress.value = { done: files, total: 0, label: `${files} files — ${label}` } },
-    })
-    if (res.ok) {
-      log(`Project moved into browser storage (${res.files} files)`, 'info', 'Project')
-      showToast('Project moved into browser storage')
-    } else {
-      log(`Move into browser storage failed: ${res.error}`, 'error', 'Project')
-      showToast('Could not move project', { detail: res.error, kind: 'error', ms: 6000 })
-    }
-  } finally {
-    projectLoading.value = false
-    projectLoadingProgress.value = null
-    projectLoadingLabel.value = 'Loading project…'
-  }
-}
-
-// ── Project file (.websfm) ────────────────────────────────────────────────────
-// Save/load of a whole project as one file. Both directions block the UI behind
-// the same overlay as a project open: they rewrite (or create) a project on
-// disk, and a half-unpacked project must not be clickable.
-
-async function onSaveProject({ includeDerived }) {
-  saveProjectOpen.value = false
-  const id = currentProjectId.value
-  if (!id) return
-  try {
-    const res = await exportProject(id, { includeDerived, onLog: (m, l, c) => log(m, l, c) })
-    if (res?.cancelled) return
-    showToast('Project saved', { detail: `${res.fileName} · ${formatBytes(res.archiveBytes)}` })
-  } catch (err) {
-    const detail = String(err?.message ?? err)
-    log(`Save project failed: ${detail}`, 'error', 'Project')
-    showToast('Could not save project', { detail, kind: 'error', ms: 6000 })
-  }
-}
-
-// A `.websfm` file always lands as a NEW project — never merged into the open
-// one. Importing then switching is therefore non-destructive, so it needs no
-// confirmation: the current project is untouched and still in the picker.
-async function importProjectFile(file) {
-  if (!file) return
-  projectLoadingLabel.value = 'Opening project file…'
-  projectLoading.value = true
-  let id = null
-  try {
-    await nextTick()
-    id = await importProject(file, {
-      onLog: (m, l, c) => log(m, l, c),
-      onProgress: ({ done, label }) => {
-        projectLoadingProgress.value = { done, total: 0, label: `${done} files — ${label}` }
-      },
-    })
-  } catch (err) {
-    const detail = String(err?.message ?? err)
-    log(`Open project file failed: ${detail}`, 'error', 'Project')
-    showToast('Could not open project file', { detail, kind: 'error', ms: 6000 })
-  } finally {
-    projectLoading.value = false
-    projectLoadingProgress.value = null
-    projectLoadingLabel.value = 'Loading project…'
-  }
-  if (!id) return
-  projectPickerOpen.value = false
-  clearAll(resetToViewer)
-  clearSensors()
-  clearProjectStores()
-  viewerRef.value?.clearReconstructionData()
-  await openProject(id)
-  showToast('Project opened', { detail: currentProjectName.value || '' })
-}
-
-function onProjectFilePick(event) {
-  const file = event.target.files?.[0]
-  if (file) importProjectFile(file)
-  event.target.value = ''
-}
 
 // ── Coordinate system ─────────────────────────────────────────────────────────
 async function handleSetCrs(crs) {
@@ -1244,46 +989,6 @@ const {
   georef, currentProjectName, currentCrs,
 })
 
-// ── Project picker actions ────────────────────────────────────────────────────
-async function handleSwitchProject(id) {
-  if (id === currentProjectId.value) { projectPickerOpen.value = false; return }
-  projectPickerOpen.value = false
-  clearAll(resetToViewer)
-  clearSensors()
-  clearProjectStores()
-  await openProject(id)
-}
-
-async function handleDeleteProject(id) {
-  // Capture before deleting: deleteProjectById nulls currentProjectId itself.
-  const wasCurrent = id === currentProjectId.value
-  await deleteProjectById(id)
-
-  // Deleting the last project leaves nothing to pick — close the picker and go
-  // straight to project creation (non-cancellable), never an empty list.
-  if (projects.value.length === 0) {
-    projectPickerOpen.value = false
-    clearAll(resetToViewer)
-    clearSensors()
-    clearProjectStores()
-    viewerRef.value?.clearReconstructionData()
-    newProjectCanCancel.value = false
-    newProjectOpen.value = true
-    return
-  }
-
-  if (wasCurrent) {
-    // Deleting the open project blanks the background and returns to the picker
-    // (now non-dismissible, since currentProjectId is null) rather than silently
-    // switching into some other project the user didn't choose.
-    clearAll(resetToViewer)
-    clearSensors()
-    clearProjectStores()
-    viewerRef.value?.clearReconstructionData()
-    projectPickerOpen.value = true
-  }
-}
-
 // ── Pipeline handlers (close modal, then delegate to usePipeline) ─────────────
 function onDetectRun(settings)      { detectFeaturesOpen.value = false;  runDetect(settings)      }
 function onMatchRun(settings)       { matchFeaturesOpen.value  = false;  runMatch(settings)       }
@@ -1308,10 +1013,16 @@ async function onCropCloudRun(req)   { cropCloudOpen.value = false;   await runE
 async function onFilterCloudRun(req) { filterCloudOpen.value = false; await runEditClouds({ ...req, mode: 'filter' }) }
 async function onMergeCloudsRun(req) { mergeCloudsOpen.value = false; await runEditClouds({ ...req, mode: 'merge' }) }
 
-// ── Image deletion (with confirmation) ────────────────────────────────────────
-// Removing images is irreversible (drops keypoints/masks/matches), so route every
-// delete request through a confirm dialog. Holds the pending image ids + names.
-const pendingImageDelete = ref(null)
+// ── Confirm-before-destroy ────────────────────────────────────────────────────
+// Every irreversible action (remove image / sensor / cloud / raster / GCP /
+// shapefile, clear keypoints) routes through one of the two dialogs owned here.
+// Tabs live in App.vue, so the close-the-subject's-tab callbacks are injected.
+const {
+  pendingImageDelete, requestRemoveImages, confirmRemoveImages, deleteMessage,
+  pendingConfirm, askConfirm, runPendingConfirm,
+  confirmRemoveSensor, confirmRemoveCloud, confirmRemoveRaster,
+  confirmRemoveGcp, confirmRemoveShapefile, confirmClearKeypoints,
+} = useConfirmations({ closeTabForImage, closeTabForRaster, removeGcpAndCloseTab })
 
 // Escape-closes-top-most-modal (pulls modal state from the stores; the few local
 // bits are injected). Used by the global keydown handler in the bootstrap below.
@@ -1319,57 +1030,11 @@ const { closeTopModal } = useModalEscape({
   pendingImageDelete, exportKind, onCancelNewProject: handleCancelNewProject,
 })
 
-// Site-wide confirm before the tab is closed / reloaded / navigated away.
-useBeforeUnload()
+// Autosaved idle sessions can close quietly. Prompt only while closing would
+// interrupt compute, project I/O, or an import whose source bytes are not yet safe.
+useBeforeUnload(() => progressOpen.value || projectLoading.value
+  || pendingImageWork.value > 0 || pendingRasterWork.value > 0)
 
-function requestRemoveImages(idOrIds) {
-  const ids = (Array.isArray(idOrIds) ? idOrIds : [idOrIds]).filter(Boolean)
-  if (!ids.length) return
-  const names = ids.map((id) => imageById(id)?.name).filter(Boolean)
-  pendingImageDelete.value = { ids, names }
-}
-
-function confirmRemoveImages() {
-  const ids = pendingImageDelete.value?.ids ?? []
-  for (const id of ids) removeImage(id, closeTabForImage)
-  pendingImageDelete.value = null
-}
-
-const deleteMessage = computed(() => {
-  const p = pendingImageDelete.value
-  if (!p) return ''
-  if (p.ids.length === 1) return `Remove “${p.names[0] ?? 'this image'}”? This also deletes its keypoints, mask, depth map and matches. This can't be undone.`
-  return `Remove ${p.ids.length} images? This also deletes their keypoints, masks, depth maps and matches. This can't be undone.`
-})
-
-// ── Generic confirm-before-delete (sidebar removals) ──────────────────────────
-// Every destructive sidebar action routes through one confirm dialog. Holds
-// { title, message, confirmLabel, onConfirm }; `askConfirm` opens it, the dialog
-// runs onConfirm on accept.
-const pendingConfirm = ref(null)
-function askConfirm(opts) { pendingConfirm.value = opts }
-function runPendingConfirm() {
-  const fn = pendingConfirm.value?.onConfirm
-  pendingConfirm.value = null
-  fn?.()
-}
-
-function confirmRemoveSensor(id) {
-  const s = sensors.value.find((x) => x.id === id)
-  askConfirm({
-    title: 'Remove sensor?',
-    message: `Remove sensor “${s?.label ?? id}”? Images assigned to it will be left without a sensor.`,
-    onConfirm: () => removeSensor(id),
-  })
-}
-function confirmRemoveCloud(id) {
-  const c = clouds.value.find((x) => x.id === id)
-  askConfirm({
-    title: 'Remove cloud?',
-    message: `Remove “${c?.name ?? 'this cloud'}”? This can't be undone.`,
-    onConfirm: () => removeCloud(id),
-  })
-}
 // Open an imported reference raster in its own tab. The tab opens immediately
 // (the preview PNG is in the index, so there's something to look at at once) and
 // the full plane hydrates behind it — a REMA tile is hundreds of MB and must not
@@ -1460,48 +1125,6 @@ async function onRasterStyleApply({ id, style }) {
   await setRasterStyle(id, style)
 }
 
-function confirmRemoveRaster(id) {
-  const r = externalStore.rasterById(id)
-  askConfirm({
-    title: 'Remove reference raster?',
-    message: `Remove “${r?.name ?? 'this raster'}”? The imported file is deleted from the project. This can't be undone.`,
-    onConfirm: async () => {
-      closeTabForRaster(id)
-      await removeRaster(id)
-    },
-  })
-}
-
-function confirmRemoveGcp(id) {
-  const g = gcps.value.find((x) => x.id === id)
-  askConfirm({
-    title: 'Remove GCP?',
-    message: `Remove GCP “${g?.name ?? id}” and all its image observations? This can't be undone.`,
-    onConfirm: () => removeGcpAndCloseTab(id),
-  })
-}
-function confirmRemoveShapefile(id) {
-  const set = shapefiles.value.find((s) => s.id === id)
-  askConfirm({
-    title: 'Remove shapefile?',
-    message: `Remove “${set?.name ?? 'this layer'}” and its ${set?.footprints.length ?? 0} polygon(s)? This can't be undone.`,
-    onConfirm: () => removeSet(id),
-  })
-}
-function confirmClearKeypoints(idOrIds) {
-  const ids = (Array.isArray(idOrIds) ? idOrIds : [idOrIds]).filter(Boolean)
-  if (!ids.length) return
-  const msg = ids.length === 1
-    ? `Delete keypoints for “${imageById(ids[0])?.name ?? 'this image'}”? Its matches are dropped too and it must be re-detected before matching.`
-    : `Delete keypoints for ${ids.length} images? Their matches are dropped too and they must be re-detected before matching.`
-  askConfirm({
-    title: ids.length > 1 ? 'Delete keypoints?' : 'Delete keypoints?',
-    message: msg,
-    confirmLabel: 'Delete',
-    onConfirm: () => ids.forEach((id) => clearKeypoints(id)),
-  })
-}
-
 // ── ImageViewer refs (for imperative mask ops) ────────────────────────────────
 const imageViewerRefs = reactive({})
 
@@ -1547,7 +1170,60 @@ const projectFileInput = ref(null)
 // before opening the hidden camera-file <input>.
 
 // ── Commands ──────────────────────────────────────────────────────────────────
+
+// Commands whose entire effect is "open this modal", as data rather than 22
+// identical switch cases. A new pipeline modal is one line here. Anything with a
+// guard, a toggle, or a side effect (open-gcp-table also refreshes the report;
+// open-project-picker toggles) stays an explicit case below — the table is for the
+// trivial ones only, so it never hides behaviour.
+const MODAL_COMMANDS = {
+  'save-project-file':     saveProjectOpen,
+  'open-image-table':      imageTableOpen,
+  'open-mask-manager':     maskManagerOpen,
+  'auto-mask':             autoMaskOpen,
+  'open-sensor-table':     sensorTableOpen,
+  'open-match-list':       matchListOpen,
+  'detect-features':       detectFeaturesOpen,
+  'match-features':        matchFeaturesOpen,
+  'reconstruct':           reconstructOpen,
+  'compute-depth':         depthMapsOpen,
+  'dense':                 denseOpen,
+  'gen-dem':               demOpen,
+  'gen-ortho':             orthoOpen,
+  'gen-mesh':              meshOpen,
+  'filter-cloud':          filterCloudOpen,
+  'crop-cloud':            cropCloudOpen,
+  'merge-clouds':          mergeCloudsOpen,
+  'footprints-from-poses': footprintFromPosesOpen,
+  'open-settings':         settingsOpen,
+  'open-about':            aboutOpen,
+  'open-system-info':      systemInfoOpen,
+  'open-debug-summary':    debugSummaryOpen,
+}
+
+// Quality Report hub deep-links. The old per-view command ids are kept so muscle
+// memory and existing logs stay valid (PLAN-eval-quality-hub WS0); several map to
+// one section.
+const EVAL_SECTIONS = {
+  'eval-overview':       'overview',
+  'eval-reconstruction': 'sparse',
+  'eval-images':         'sparse',
+  'eval-calibration':    'calibration',
+  'eval-gcps':           'accuracy',
+  'eval-poses':          'accuracy',
+  'eval-dem-gcps':       'accuracy',
+  'eval-match-graph':    'matching',
+  'eval-coverage':       'coverage',
+  'eval-depth-coverage': 'dense',
+}
+
 function handleCommand(id) {
+  const modal = MODAL_COMMANDS[id]
+  if (modal) { modal.value = true; return }
+  if (EVAL_SECTIONS[id]) { openQuality(EVAL_SECTIONS[id]); return }
+  // 3D view presets: 'view-preset-top' → setView('top').
+  if (id.startsWith('view-preset-')) { viewerRef.value?.setView(id.slice('view-preset-'.length)); return }
+
   switch (id) {
     case 'import-images':        ribbonInput.value.click(); break
     case 'import-gcps':          gcpInput.value.click(); break
@@ -1556,7 +1232,6 @@ function handleCommand(id) {
     case 'import-colmap':        colmapInput.value.click(); break
     case 'import-cloud':         cloudInput.value.click(); break
     case 'import-raster':        rasterInput.value.click(); break
-    case 'save-project-file':    saveProjectOpen.value = true; break
     case 'export-cameras':       exportPoses(); break
     case 'export-sensors':       exportSensors(); break
     case 'export-cloud':         exportKind.value = 'cloud'; break
@@ -1567,59 +1242,20 @@ function handleCommand(id) {
     case 'export-ortho':         exportKind.value = 'ortho'; break
     case 'export-keypoints':     exportKeypoints(); break
     case 'export-matches':       exportMatches(); break
-    case 'clear-all':            clearAll(resetToViewer, { purge: true }); clearSensors({ purge: true }); clearProjectStores({ purge: true }); viewerRef.value?.clearReconstructionData(); break
+    case 'clear-all':            resetInMemoryProject({ purge: true }); break
     case 'remove-selected':      if (selectedId.value) requestRemoveImages(selectedId.value); break
     case 'view-viewer':          activateTab('viewer'); break
     case 'view-map':             activateTab('map'); break
-    case 'view-preset-top':      viewerRef.value?.setView('top'); break
-    case 'view-preset-bottom':   viewerRef.value?.setView('bottom'); break
-    case 'view-preset-left':     viewerRef.value?.setView('left'); break
-    case 'view-preset-right':    viewerRef.value?.setView('right'); break
-    case 'view-preset-front':    viewerRef.value?.setView('front'); break
-    case 'view-preset-back':     viewerRef.value?.setView('back'); break
     case 'reset-view':           viewerRef.value?.resetView(); break
     case 'view-toggle-cameras':  showCameras.value = !showCameras.value; break
     case 'view-toggle-grid': showGrid.value = !showGrid.value; break
     case 'map-fit-view':         mapViewerRef.value?.fitView(); break
     case 'map-toggle-grid': showMapGrid.value = !showMapGrid.value; break
     case 'map-toggle-footprints': showFootprints.value = !showFootprints.value; break
-    case 'open-image-table':     imageTableOpen.value = true; break
-    case 'open-mask-manager':    maskManagerOpen.value = true; break
-    case 'auto-mask':            autoMaskOpen.value = true; break
     case 'detect-fiducials':     openFiducialDetect(); break
     case 'calibrate-fiducials':  openFiducialCalibrate(); break
-    case 'open-sensor-table':    sensorTableOpen.value = true; break
     case 'open-gcp-table':       gcpTableOpen.value = true; refreshGcpReport(); break
-    case 'open-match-list':      matchListOpen.value = true; break
-    case 'reconstruct':          reconstructOpen.value = true; break
-    case 'compute-depth':        depthMapsOpen.value = true; break
-    case 'dense':                denseOpen.value = true; break
-    case 'gen-dem':              demOpen.value = true; break
-    case 'gen-ortho':            orthoOpen.value = true; break
-    case 'gen-mesh':             meshOpen.value = true; break
-    case 'filter-cloud':         filterCloudOpen.value = true; break
-    case 'crop-cloud':           cropCloudOpen.value = true; break
-    case 'merge-clouds':         mergeCloudsOpen.value = true; break
     case 'auto-georeference':    georeference(); break
-    // Quality Report hub — old command ids kept as deep-links into hub sections so
-    // muscle memory / logs stay valid (PLAN-eval-quality-hub WS0).
-    case 'eval-overview':        openQuality('overview'); break
-    case 'eval-reconstruction':
-    case 'eval-images':          openQuality('sparse'); break
-    case 'eval-calibration':     openQuality('calibration'); break
-    case 'eval-gcps':
-    case 'eval-poses':
-    case 'eval-dem-gcps':        openQuality('accuracy'); break
-    case 'eval-match-graph':     openQuality('matching'); break
-    case 'eval-coverage':        openQuality('coverage'); break
-    case 'eval-depth-coverage':  openQuality('dense'); break
-    case 'footprints-from-poses': footprintFromPosesOpen.value = true; break
-    case 'detect-features':      detectFeaturesOpen.value = true; break
-    case 'match-features':       matchFeaturesOpen.value = true; break
-    case 'open-settings':        settingsOpen.value = true; break
-    case 'open-about':           aboutOpen.value = true; break
-    case 'open-system-info':     systemInfoOpen.value = true; break
-    case 'open-debug-summary':   debugSummaryOpen.value = true; break
     case 'open-glossary':        glossaryStore.openHome(); break
     case 'open-guide':           guideStore.openHome(); break
     case 'open-project-picker':  projectPickerOpen.value = !projectPickerOpen.value; break
@@ -2019,6 +1655,11 @@ function onRibbonPick(event) {
         :current="progressCurrent"
         :total="progressTotal"
         :label="progressLabel"
+        :unit="progressUnit"
+        :fraction="progressFraction"
+        :indeterminate="progressIndeterminate"
+        :complete="progressComplete"
+        :cancelling="progressCancelling"
         :cancelable="true"
         @cancel="cancelRun"
       />

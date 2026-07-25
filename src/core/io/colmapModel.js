@@ -23,6 +23,8 @@
 //                  track:[[imageId, point2dIdx]] }],
 //   }
 
+import { makeNameResolver as makeIdResolver } from './nameMatch.js'
+
 // ── Rotation ↔ quaternion (Hamilton, world-to-cam) ───────────────────────────
 
 // Row-major R → normalized [qw, qx, qy, qz] with qw ≥ 0 (COLMAP convention).
@@ -556,34 +558,11 @@ export function readColmapModel(model) {
   return { images, points, droppedDistortion: [...droppedDistortion] }
 }
 
-// Build a tiered COLMAP-name → uuid resolver over the loaded images. COLMAP stores
-// whatever path was given at reconstruction time (often a bare filename, sometimes a
-// relative path); websfm images key by `name`. Match progressively looser: exact →
-// basename → case-insensitive basename → basename without extension. First match
-// wins per tier; an unmatched name returns null.
+// COLMAP-name → uuid resolver over the loaded images. The tiered matching rule is
+// shared with the GCP / pose / footprint importers — see `core/io/nameMatch.js`.
 //   loaded: [{ uuid, name }]
 export function makeNameResolver(loaded) {
-  const basename = (n) => String(n).split(/[\\/]/).pop()
-  const stem = (n) => basename(n).replace(/\.[^.]+$/, '')
-  const exact = new Map(), base = new Map(), baseLower = new Map(), stemLower = new Map()
-  for (const { uuid, name } of loaded) {
-    if (name == null) continue
-    if (!exact.has(name)) exact.set(name, uuid)
-    const b = basename(name)
-    if (!base.has(b)) base.set(b, uuid)
-    const bl = b.toLowerCase()
-    if (!baseLower.has(bl)) baseLower.set(bl, uuid)
-    const sl = stem(name).toLowerCase()
-    if (!stemLower.has(sl)) stemLower.set(sl, uuid)
-  }
-  return (name) => {
-    if (name == null) return null
-    return exact.get(name)
-      ?? base.get(basename(name))
-      ?? baseLower.get(basename(name).toLowerCase())
-      ?? stemLower.get(stem(name).toLowerCase())
-      ?? null
-  }
+  return makeIdResolver(loaded, { key: 'uuid' })
 }
 
 // Turn `readColmapModel` output into websfm store shapes (a sparse cloud). Pure —

@@ -27,16 +27,22 @@ import { fitFiducialAffine, canonicalFrame, scanToCanonical } from './fiducials.
 import { calibratedFiducialPairs } from './fiducialModel.js'
 import { fitFiducialTransform } from './fiducialCalibration.js'
 import { rotationCycleFilter, reevaluateDroppedEdges } from './cycleFilter.js'
+import { makeProgressReporter, scopeProgress, RUN_BUDGET, sliceRange } from './progressPlan.js'
 import { toNorm, camToP34flat, reprojErr, retriangulatePairs, mergeSplitTracks } from './tracks.js'
 import { selectInitPair } from './initPair.js'
 import { registerImages } from './register.js'
 import { triangulateGcp } from './gcpTriangulation.js'
-import { stagedSelfCalTerms, stagedSelfCalDeferred, SELF_CAL_BASE_TERMS } from './selfCalSchedule.js'
+import {
+  stagedSelfCalTerms, stagedSelfCalDeferred, SELF_CAL_BASE_TERMS,
+  distortionIdentifiable, withoutDistortionTerms,
+} from './selfCalSchedule.js'
 import { fitComposedRadial, radialCurveOk } from './selfCalCompose.js'
+import { adaptiveReprojThreshold, CLEANUP_THRESHOLD_DEFAULTS } from './cleanupThreshold.js'
 import { fitSimilarity, frameFromSimilarity } from '../products/georef.js'
 import { graphHealth } from '../eval/matchGraph.js'
 import { RECONSTRUCT_DEFAULTS } from '../defaults.user.js'
 import { SFM_TUNING } from '../tuning.js'
+import { buildScaleContext, describeScaleContext, resolveScaledPx } from '../scaleContext.js'
 import { secondaryJobs, alignSecondary, mergeAligned } from './multiModel.js'
 
 // Re-export the extracted pure modules so existing importers (sfm.test.js and any
@@ -75,7 +81,82 @@ async function reconstructSingleModel(input, hooks = {}) {
   // live in defaults.user.js (mirrored by ReconstructModal); internal ones in tuning.js.
   const cfg = { ...RECONSTRUCT_DEFAULTS, ...SFM_TUNING, ...settings }
   const log = hooks.onLog ?? (() => {})
+
+  // ── Run record (baseline bookkeeping) ────────────────────────────────────────
+  // Everything below feeds `summary` so the Debug ▸ Project Summary digest can state
+  // WHAT was run, not just how it scored — a measured number without its settings is
+  // not a baseline. Captured HERE, before the 'auto' resolutions and the detect-px →
+  // native-px gate scaling below mutate `cfg`, so these are the knobs as *requested*.
+  const runConfig = {
+    minMatchesForRegistration: cfg.minMatchesForRegistration,
+    reprjThresholdDetectPx: cfg.reprjThreshold,
+    filterMaxReprojDetectPx: cfg.filterMaxReprojPx,
+    baIterations: cfg.baIterations,
+    refineIntrinsics: cfg.refineIntrinsics,
+    rotationCycleFilter: settings.rotationCycleFilter !== false,
+    secondaryModels: settings.secondaryModels !== false,
+  }
+  // Filled in below as each stage runs; every field stays null when its stage
+  // didn't run, so a missing number is never confused with a zero.
+  let gateRecord = null       // resolved reprojection gates + the detection-scale factor
+  let cycleRecord = null      // rotation-cycle filter verdict + drop/re-admit counts
+  const selfCalRecord = { requested: cfg.refineIntrinsics, resolved: null, staged: false, passes: [] }
+  const intrinsicsRecord = new Map() // sensorId → { fxNominal, fxFinal, cx, cy, source, label }
+
+  // Reprojection gates are configured in DETECTION pixels but applied to keypoints
+  // in NATIVE pixels, so resolve them against this set's detection scale before
+  // anything reads them. Done here, on `cfg`, because both consumers (this
+  // orchestrator's BA/filter passes and register.js's PnP gates) destructure from
+  // it — there is no second place to keep in sync. A set detected at full
+  // resolution has factor 1 and every value resolves to itself.
+  //
+  // A nested run (seed retry / secondary model) receives the already-resolved
+  // factor through `settings` so it cannot re-derive a different one from its
+  // camera subset — the gates must mean the same thing in every sub-run.
+  {
+    // `reconstruct()` resolves the factor once from the FULL image set and injects
+    // it, so a secondary model built from a stranded subset cannot derive a
+    // different one — a gate that means different things in the primary and
+    // secondary frames would make the merge gates incomparable. The fallback
+    // covers direct callers (tests, a dev harness) that skip that entry point.
+    const injected = Number.isFinite(settings.detectScaleFactor)
+    const scaleCtx = injected
+      ? { n: images.length, factor: settings.detectScaleFactor }
+      : buildScaleContext(images)
+    cfg.detectScaleFactor = scaleCtx.factor
+
+    if (scaleCtx.factor !== 1 || scaleCtx.mixed) {
+      // Only the deriving run reports the inputs behind the factor; an inheriting
+      // sub-run has no set of its own to describe and would be fabricating them.
+      if (!injected) log(describeScaleContext(scaleCtx, 'Reprojection gates'),
+        scaleCtx.clamped ? 'warn' : 'info', 'SfM')
+      log(`Gates resolved (detect-px → native px, ×${scaleCtx.factor.toFixed(2)}): `
+        + `PnP/BA ${cfg.reprjThreshold} → ${resolveScaledPx(cfg.reprjThreshold, scaleCtx).toFixed(2)}px, `
+        + `track filter ${cfg.filterMaxReprojPx} → ${resolveScaledPx(cfg.filterMaxReprojPx, scaleCtx).toFixed(2)}px`,
+      'info', 'SfM')
+    }
+    cfg.reprjThreshold    = resolveScaledPx(cfg.reprjThreshold, scaleCtx)
+    cfg.filterMaxReprojPx = resolveScaledPx(cfg.filterMaxReprojPx, scaleCtx)
+    // Recorded even when the factor is 1: "no correction applied" is itself the
+    // measurement the data-relative-gates work needs from a full-resolution set.
+    gateRecord = {
+      detectScaleFactor: scaleCtx.factor,
+      inherited: injected,
+      medianScale: injected ? null : scaleCtx.medianScale,
+      minScale: injected ? null : scaleCtx.minScale,
+      maxScale: injected ? null : scaleCtx.maxScale,
+      clamped: injected ? false : !!scaleCtx.clamped,
+      mixed: injected ? false : !!scaleCtx.mixed,
+      reprjThresholdPx: cfg.reprjThreshold,
+      filterMaxReprojPx: cfg.filterMaxReprojPx,
+    }
+  }
+  // Progress is phase-weighted (core/sfm/progressPlan.js), not a camera count: the
+  // count reaches its maximum at the end of registration, which is roughly halfway
+  // through the run. `hooks.progressRange` lets a nested sub-run (seed retry /
+  // secondary model) report an honest local 0..1 into a slice of the parent's bar.
   const onProgress = hooks.onProgress
+  const report = makeProgressReporter(onProgress, hooks.progressRange ?? {})
 
   const imageByUuid = (uuid) => images.find((img) => img.uuid === uuid) || null
 
@@ -296,6 +377,16 @@ async function reconstructSingleModel(input, hooks = {}) {
       const K = resolveK(img.meta, img.sensor)
       Kmap.set(img.uuid, K)
       if (K.source.startsWith('default')) defaultKCount++
+      // Nominal focal per sensor, before any self-calibration touches it — the
+      // "from" half of the fx trajectory the digest reports (B4: 2389 → 2566 is a
+      // healthy run, 2389 → 4796 is a runaway, and only the pair distinguishes them).
+      const sid = img.sensorId ?? `image:${img.uuid}`
+      if (!intrinsicsRecord.has(sid)) {
+        intrinsicsRecord.set(sid, {
+          sensorId: img.sensorId ?? null, label: img.sensor?.label ?? null,
+          fxNominal: K.fx, source: K.source, fxFinal: null, cx: null, cy: null,
+        })
+      }
       const implied = K.impliedFilmWidthMm != null
         ? ` [implies ${K.impliedFilmWidthMm.toFixed(0)}mm film width]` : ''
       log(`K[${img.name}] fx=${K.fx.toFixed(1)} fy=${K.fy.toFixed(1)} `
@@ -418,6 +509,8 @@ async function reconstructSingleModel(input, hooks = {}) {
           'info', 'Reconstruction')
       }
     }
+    selfCalRecord.resolved = cfg.refineIntrinsics
+    selfCalRecord.staged = !!cfg.selfCalStaged
 
     if (defaultKCount > 0) {
       log(`${defaultKCount}/${imgs.length} image(s) have no focal length — using a default FOV guess. `
@@ -431,6 +524,7 @@ async function reconstructSingleModel(input, hooks = {}) {
     // structure) that no count/ratio gate can catch: their relative rotation is
     // inconsistent with the rest of the match graph. See rotationCycleFilter.
     if (settings.rotationCycleFilter !== false && donePairs.length >= 3) {
+      report('cycleFilter', 0.5, 'Checking rotation-cycle consistency…', { done: 0, total: imgs.length })
       // Relative rotation R (idA→idB) per pair, via essential decomposition. The
       // pose args only disambiguate the cheirality branch, so post-undistort vs
       // raw keypoints barely shift R — F/K drive it. Skip pairs without an F.
@@ -463,6 +557,20 @@ async function reconstructSingleModel(input, hooks = {}) {
           protectBridges: true,
         },
       )
+      // The filter's verdict is a standing open question (it has never engaged on a
+      // baseline, and for opposite reasons at each end — see TODO ▸ RS), so record the
+      // numbers that decide its fate rather than only logging them.
+      cycleRecord = {
+        aborted: !!summary.aborted,
+        candidates: donePairs.length,
+        triangles: summary.triangles ?? null,
+        medianTriErrDeg: summary.medianTriErrDeg ?? null,
+        effErrDeg: summary.effErrDeg ?? null,
+        abortErrDeg: summary.abortErrDeg ?? null,
+        dropped: summary.aborted ? 0 : drop.length,
+        bridgeProtected: summary.bridgeProtected ?? 0,
+        readmitted: 0,
+      }
       if (summary.aborted) {
         log(`rotation-cycle filter SKIPPED — median triangle cycle error `
           + `${summary.medianTriErrDeg.toFixed(1)}° (over ${summary.triangles} triangles) is far beyond the `
@@ -513,7 +621,8 @@ async function reconstructSingleModel(input, hooks = {}) {
       {
         onLog: log,
         onProgress: onProgress
-          ? (k, m) => onProgress(0, imgs.length, `Scoring init pairs ${k + 1}/${m}…`)
+          ? (k, m) => report('initPair', m > 0 ? (k + 1) / m : 0,
+            `Scoring initial pairs ${k + 1}/${m}…`, { done: k + 1, total: m })
           : undefined,
       },
     )
@@ -549,7 +658,7 @@ async function reconstructSingleModel(input, hooks = {}) {
         ratio < 0.7 ? 'warn' : 'debug', 'Reconstruction')
     }
     markStage('init')
-    onProgress?.(1, imgs.length, `Initial pair: ${imgA.name} ↔ ${imgB.name}`)
+    report('initPair', 1, `Initial pair: ${imgA.name} ↔ ${imgB.name}`, { done: 2, total: imgs.length })
 
     // ── Track index ──────────────────────────────────────────────────────────
     // Reverse map keypoint → 3D point, per image: viewIndex[uuid].get(kpIdx) → pt.
@@ -697,6 +806,7 @@ async function reconstructSingleModel(input, hooks = {}) {
       addView, rebuildViewIndex, foldOneEndpointMatches, mergeTracks,
       runBundleAdjust, filterTracks, modelReprojStats, imageByUuid, numStats,
       log, onProgress,
+      reportPhase: (local, label, counts) => report('register', local, label, counts),
     })
     const preBaStats = modelReprojStats()
     log(`pre-BA reprojection — ${fmtStats(preBaStats)}`, 'info', 'Reconstruction')
@@ -932,7 +1042,8 @@ async function reconstructSingleModel(input, hooks = {}) {
     // "good enough to help the poses converge", not final.
     async function runGcpAnchoredBundleAdjust() {
       const qualifying = gcps.filter((g) => {
-        if (g.enabled === false) return false
+        if (g.enabled === false || !Number.isFinite(g.x)
+            || !Number.isFinite(g.y) || !Number.isFinite(g.z)) return false
         const nReg = (g.observations || []).filter((o) => cameras.has(o.uuid)).length
         return nReg >= 2
       })
@@ -960,7 +1071,15 @@ async function reconstructSingleModel(input, hooks = {}) {
       for (let round = 0; round < 2; round++) {
         const tri = await triangulateQualifying()
         const pairs = tri.filter((r) => r.tri)
-          .map((r) => ({ src: [r.tri.x, r.tri.y, r.tri.z], dst: [r.g.x, r.g.y, r.g.z ?? 0] }))
+          .map((r) => {
+            const sigmas = [r.g.accuracyX, r.g.accuracyY, r.g.accuracyZ]
+              .map((v) => Number.isFinite(v) && v > 0 ? v : 1)
+            const variance = sigmas.reduce((sum, sigma) => sum + sigma * sigma, 0) / 3
+            return {
+              src: [r.tri.x, r.tri.y, r.tri.z], dst: [r.g.x, r.g.y, r.g.z],
+              weight: 1 / Math.max(1e-12, variance),
+            }
+          })
         if (pairs.length < 3) {
           log('GCP anchoring stopped (fewer than 3 GCPs triangulated)', 'warn', 'Reconstruction')
           return
@@ -1000,8 +1119,9 @@ async function reconstructSingleModel(input, hooks = {}) {
           if (!t) return
           const pi = points3d.length + anchorPts.length
           anchorPts.push({ x: t.x, y: t.y, z: t.z })
-          const target = frame.toSfm([g.x, g.y, g.z ?? 0])
-          const accuracy = ((g.accuracyX ?? 1) + (g.accuracyY ?? 1) + (g.accuracyZ ?? 1)) / 3
+          const target = frame.toSfm([g.x, g.y, g.z])
+          const accuracy = Math.sqrt(((g.accuracyX ?? 1) ** 2
+            + (g.accuracyY ?? 1) ** 2 + (g.accuracyZ ?? 1) ** 2) / 3)
           // Accuracy is a std-dev in CRS units; the anchor residual is measured in
           // the SfM frame, `fit.scale` apart from CRS — weight = 1/sigma_sfm².
           const weight = (fit.scale * fit.scale) / Math.max(1e-6, accuracy * accuracy)
@@ -1095,7 +1215,17 @@ async function reconstructSingleModel(input, hooks = {}) {
     const keypointOf = (uuid, kpIdx) => imageByUuid(uuid)?.keypoints?.[kpIdx] ?? null
 
     if (cameras.size >= 2 && points3d.length >= 10 && baIterations > 0) {
-      onProgress?.(imgs.length - 1, imgs.length, 'Bundle adjustment…')
+      report('bundle', 1, 'Bundle adjustment…', { done: cameras.size, total: imgs.length })
+
+      // With no focal length anywhere, resolveK fell back to `fx = max(w,h)` — a
+      // guess that can be ~50% off on a scanned aerial frame, shifting EVERY
+      // residual above the cleanup gate below. Solve focal only first (cx/cy and
+      // the radial terms stay fixed; the R6 concern is principal-point drift, not
+      // f) so the gate judges tracks rather than the intrinsics guess. Gated on
+      // `defaultKCount` so a project with real calibration is untouched.
+      if (defaultKCount > 0) {
+        await runBundleAdjust('focal pre-solve (default-FOV intrinsics)', baIterations, 'f')
+      }
 
       // Registration can leave a tiny tail of catastrophic observations (the South
       // Building baseline had a 180px maximum). Running global BA on that known
@@ -1103,11 +1233,25 @@ async function reconstructSingleModel(input, hooks = {}) {
       // rejections before the existing filter finally cleaned it. Strip only gross
       // residuals here using the same generous first-pass gate used below; the tighter
       // pass and all parallax checks remain unchanged.
+      //
+      // The gate is floored at a residual quantile so this pass can never remove
+      // more than a tenth of the observations: an absolute threshold applied to a
+      // model whose intrinsics are still wrong deletes the model, not its tail
+      // (cleanupThreshold.js). No-op whenever the model is healthy.
+      const preThr = adaptiveReprojThreshold(modelResiduals(), filterMaxReprojPx * 2,
+        { maxRemovedFrac: CLEANUP_THRESHOLD_DEFAULTS.preBaMaxRemovedFrac })
+      if (preThr.adaptive) {
+        log(`pre-BA gross cleanup relaxed ${preThr.absolutePx.toFixed(1)}px → `
+          + `${preThr.px.toFixed(1)}px — the absolute gate would have removed over `
+          + `${(100 * CLEANUP_THRESHOLD_DEFAULTS.preBaMaxRemovedFrac).toFixed(0)}% of observations. `
+          + `The residual distribution is shifted as a whole, which points at the intrinsics `
+          + `(focal length / principal point), not at bad tracks.`, 'warn', 'Reconstruction')
+      }
       const preClean = filterTracks({
-        maxReprojPx: filterMaxReprojPx * 2,
+        maxReprojPx: preThr.px,
         minTriAngleDeg: filterMinTriAngleDeg,
       })
-      log(`pre-BA gross cleanup (≤${(filterMaxReprojPx * 2).toFixed(1)}px, `
+      log(`pre-BA gross cleanup (≤${preThr.px.toFixed(1)}px, `
         + `≥${filterMinTriAngleDeg}° parallax) — removed ${preClean.obsRemoved} obs + `
         + `${preClean.ptsRemoved} points; ${points3d.length} points remain`,
       preClean.obsRemoved || preClean.ptsRemoved ? 'info' : 'debug', 'Reconstruction')
@@ -1121,7 +1265,7 @@ async function reconstructSingleModel(input, hooks = {}) {
       // A3: retriangulate missed matches + merge split tracks under the improved
       // poses, then one more BA so the new/merged structure settles jointly.
       {
-        onProgress?.(imgs.length - 1, imgs.length, 'Retriangulating + merging tracks…')
+        report('retriangulate', 1, 'Retriangulating + merging tracks…', { done: cameras.size, total: imgs.length })
         const before = trackHist()
         const { added } = await retriangulatePairs({
           points3d, cameras, pairs: donePairs, keypointOf,
@@ -1145,14 +1289,26 @@ async function reconstructSingleModel(input, hooks = {}) {
       // Filter → re-BA, twice: a generous pass to strip gross junk, then a tighter
       // pass once the model has settled. Each re-solve runs on the cleaned set.
       for (const [round, maxPx] of [[1, filterMaxReprojPx * 2], [2, filterMaxReprojPx]]) {
-        onProgress?.(imgs.length - 1, imgs.length, `Track filter + bundle adjustment (pass ${round})…`)
-        const { obsRemoved, ptsRemoved } = filterTracks({ maxReprojPx: maxPx, minTriAngleDeg: filterMinTriAngleDeg })
-        log(`track filter pass ${round} (≤${maxPx.toFixed(1)}px, ≥${filterMinTriAngleDeg}° parallax) — `
+        report('trackFilter', round / 2,
+          `Track filter + bundle adjustment (pass ${round})…`, { done: cameras.size, total: imgs.length })
+        // Same quantile floor as the pre-BA pass, but a deliberately loose bound: these
+        // passes ARE the real filter and a hard block can legitimately lose a lot, so it
+        // guards only against annihilating the model (cleanupThreshold.js).
+        const thr = adaptiveReprojThreshold(modelResiduals(), maxPx,
+          { maxRemovedFrac: CLEANUP_THRESHOLD_DEFAULTS.filterMaxRemovedFrac })
+        if (thr.adaptive) {
+          log(`track filter pass ${round} relaxed ${maxPx.toFixed(1)}px → ${thr.px.toFixed(1)}px — `
+            + `the absolute gate would have removed over half the observations; check the intrinsics`,
+            'warn', 'Reconstruction')
+        }
+        const { obsRemoved, ptsRemoved } = filterTracks({ maxReprojPx: thr.px, minTriAngleDeg: filterMinTriAngleDeg })
+        log(`track filter pass ${round} (≤${thr.px.toFixed(1)}px, ≥${filterMinTriAngleDeg}° parallax) — `
           + `removed ${obsRemoved} obs + ${ptsRemoved} points; ${points3d.length} points remain`, 'info', 'Reconstruction')
         // Staged self-cal (WS2): under 'auto' the post-filter passes escalate the refined
         // terms (k2 / cx,cy / k3) as the camera + observation counts clear each gate; an
         // explicit user refine string is used verbatim (selfCalStaged is false).
         let refineMode = refineIntrinsics
+        let reducedReason = null
         if (cfg.selfCalStaged) {
           const nObs = points3d.reduce((s, p) => s + p.views.size, 0)
           const counts = { nCams: cameras.size, nObs }
@@ -1162,19 +1318,30 @@ async function reconstructSingleModel(input, hooks = {}) {
             + `${deferred.length ? ` — deferred ${deferred.join('; ')}` : ' — all terms unlocked'}`,
             'info', 'Reconstruction')
         }
-        // WS-C1: k1 is not identifiable from a 2-camera model — the seed pair can absorb
-        // any radial coefficient into its point positions, so BA "converges" on whatever
-        // the noise prefers. Observed on the 5-image TMA baselines, whose 2-camera models
-        // flipped k1 between passes (+0.032 → −0.010) and tripped the composed-fit runaway
-        // warning every time. A fold is destructive (it moves keypoints), so refusing to
-        // fit noise beats folding it in. register.js's stalled-model rescue normally keeps
-        // models off this floor; this protects genuinely tiny projects.
-        if (refineMode !== 'none' && cameras.size < 3) {
-          log(`post-filter pass ${round} self-cal skipped — ${cameras.size} camera(s) `
-            + `cannot identify intrinsics (a 2-view model hides distortion in its points); `
-            + `keeping '${refineMode}' unrefined`, 'info', 'Reconstruction')
-          refineMode = 'none'
+        // WS-C1: radial distortion is identifiable only from multi-view track redundancy,
+        // NOT from camera count — see selfCalSchedule.js ▸ distortionIdentifiable. Too few
+        // cameras ⇒ refine nothing; enough cameras but 2-view-dominated tracks ⇒ drop the
+        // radial terms and keep solving focal (still observable from camera geometry).
+        if (refineMode !== 'none') {
+          const hist = trackHist()
+          const ident = distortionIdentifiable({
+            nCams: cameras.size,
+            nTracks: points3d.length,
+            nMultiViewTracks: hist.t3 + hist.t4,
+          })
+          if (!ident.ok) {
+            const next = ident.scope === 'all' ? 'none' : withoutDistortionTerms(refineMode)
+            if (next !== refineMode) {
+              log(`post-filter pass ${round} self-cal ${next === 'none' ? 'skipped' : `reduced to '${next}'`} — `
+                + `${ident.reason}`, 'info', 'Reconstruction')
+            }
+            refineMode = next
+            reducedReason = ident.reason
+          }
         }
+        // One row per post-filter pass: what was actually refined, and why it was cut
+        // back if it was. The escalation schedule is invisible in the final numbers.
+        selfCalRecord.passes.push({ pass: round, mode: refineMode, reducedReason })
         await runBundleAdjust(`post-filter bundle adjustment ${round}`, baIterations, refineMode)
       }
       logOutlierShare('post-filter residuals')
@@ -1225,6 +1392,7 @@ async function reconstructSingleModel(input, hooks = {}) {
             donePairs.push(c.entry)
           }
           droppedPairs = droppedPairs.filter((e) => !readmitSet.has(pkId(e.idA, e.idB)))
+          if (cycleRecord) cycleRecord.readmitted = readmit.length
           const nm = (u) => imageByUuid(u)?.name ?? u
           log(`re-admitted ${readmit.length} cycle-filter-dropped pair(s) after self-cal `
             + `(${readmit.slice(0, 6).map((r) => `${nm(r.idA)}↔${nm(r.idB)}`).join(', ')}${readmit.length > 6 ? ', …' : ''}); `
@@ -1238,6 +1406,10 @@ async function reconstructSingleModel(input, hooks = {}) {
             addView, rebuildViewIndex, foldOneEndpointMatches, mergeTracks,
             runBundleAdjust, filterTracks, modelReprojStats, imageByUuid, numStats,
             log, onProgress,
+            // This second-chance sweep runs AFTER the track-filter passes, so it
+            // reports there rather than rewinding to the register phase — the bar is
+            // monotonic and would simply stall for the duration otherwise.
+            reportPhase: (local, label, counts) => report('trackFilter', 1, label, counts),
           })
           if (cameras.size > before) {
             log(`final sweep registered ${cameras.size - before} more camera(s) `
@@ -1260,7 +1432,7 @@ async function reconstructSingleModel(input, hooks = {}) {
         + `points=${points3d.length}, iters=${baIterations})`, 'debug', 'Reconstruction')
     }
     if (gcps.length && cameras.size >= 2 && points3d.length >= 10) {
-      onProgress?.(imgs.length - 1, imgs.length, 'GCP-anchored bundle adjustment…')
+      report('gcpBundle', 1, 'GCP-anchored bundle adjustment…', { done: cameras.size, total: imgs.length })
       await runGcpAnchoredBundleAdjust()
     }
     markStage('bundleAdjust')
@@ -1332,6 +1504,19 @@ async function reconstructSingleModel(input, hooks = {}) {
         + `${remainingComponents[0].size > 4 ? ', …' : ''}. Routing viable blocks to secondary-model recovery; `
         + `looser global PnP gates are not used.`, 'warn', 'Reconstruction')
     }
+    // Final focal per sensor, from the registered cameras' K (BA writes refined
+    // intrinsics back onto it) and falling back to Kmap for an unregistered sensor.
+    for (const img of imgs) {
+      const sid = img.sensorId ?? `image:${img.uuid}`
+      const rec = intrinsicsRecord.get(sid)
+      if (!rec || rec.fxFinal != null) continue
+      const K = cameras.get(img.uuid)?.K ?? Kmap.get(img.uuid)
+      if (!K) continue
+      rec.fxFinal = K.fx
+      rec.cx = K.cx
+      rec.cy = K.cy
+      rec.registered = cameras.has(img.uuid)
+    }
     const summary = {
       date: new Date().toISOString(),
       nCameras: cameras.size,
@@ -1339,7 +1524,40 @@ async function reconstructSingleModel(input, hooks = {}) {
       pct3plusViewTracks,
       preBaP95px: preBaStats.p95,
       postBaMedianPx: finalStats.median,
-      initPair: { idA: bestPair.idA, idB: bestPair.idB, nameA: imgA.name, nameB: imgB.name },
+      initPair: {
+        idA: bestPair.idA, idB: bestPair.idB, nameA: imgA.name, nameB: imgB.name,
+        // The seed record IS the SB acceptance test (TODO ▸ SB): which pair won, on
+        // what evidence, and how close the runner-up was.
+        angleDeg: best.angle, inliers: best.inliers, points: best.points.length,
+        score: best.score ?? null,
+        // Graph degree + PnP-ready third views come from the candidate table (the
+        // scorer computes them there); they are the two signals the 2026-07-22
+        // heuristic changes turn on, so a run is not reviewable without them.
+        ...(() => {
+          const rows = perPairInitReproj || []
+          const sel = rows.find((p) => p.selected)
+          const others = rows.filter((p) => !p.selected && p.score != null)
+          const up = others.length ? others.reduce((a, b) => (b.score > a.score ? b : a)) : null
+          return {
+            degree: sel?.degree ?? null,
+            readyViews: sel?.growthViews ?? null,
+            candidatesScored: rows.length,
+            runnerUp: up ? { pair: up.pair, score: up.score, parallaxDeg: up.parallaxDeg } : null,
+          }
+        })(),
+      },
+      // Run record (baseline bookkeeping) — see the runConfig comment at the top.
+      config: runConfig,
+      gates: gateRecord,
+      cycleFilter: cycleRecord ? { ...cycleRecord, remainingPairs: donePairs.length } : null,
+      selfCal: selfCalRecord,
+      intrinsics: [...intrinsicsRecord.values()].map((r) => ({
+        ...r,
+        deltaPct: r.fxNominal && r.fxFinal != null ? (100 * (r.fxFinal - r.fxNominal) / r.fxNominal) : null,
+      })),
+      // Per-stage wall clock. Already measured for the debug log; persisted because
+      // "is Stage X negligible?" is a question several TODO items ask of real runs.
+      timings: { ...stageTimes, totalMs: performance.now() - t0 },
       unregisteredComponents: remainingComponents,
       perPairInitReproj,
       // WS2: composed self-calibrated radial distortion per sensor {k1,k2,k3} (folded
@@ -1356,7 +1574,7 @@ async function reconstructSingleModel(input, hooks = {}) {
       fiducialTransforms: [...fiducialTransforms].map(([uuid, t]) => ({ uuid, A: t.A, transform: t.transform, frame: t.frame })),
     }
 
-    onProgress?.(imgs.length, imgs.length, 'Done')
+    report('finalize', 1, 'Finalising model…', { done: cameras.size, total: imgs.length })
     // A run that finishes with no points (or a single camera) is a failed
     // reconstruction, not a success — log it red so it doesn't read as green.
     const degenerate = points3d.length === 0 || cameras.size < 2
@@ -1379,10 +1597,43 @@ async function reconstructSingleModel(input, hooks = {}) {
 // cameras independently agree in position, orientation and leave-one-out scale;
 // otherwise the valid model is returned separately for the store to preserve.
 export async function reconstruct(input, hooks = {}) {
+  // Resolve the detection-scale factor ONCE, from the full image set, and pin it
+  // into `settings`. Every sub-run below spreads `input.settings`, so the primary,
+  // each seed retry and each secondary model all apply identical reprojection
+  // gates — a secondary built from a stranded subset must not re-derive its own
+  // factor, or its residuals would not be comparable with the primary's at merge
+  // time. See core/scaleContext.js for why the gates need scaling at all.
+  const runScale = buildScaleContext(input.images || [])
+  input = { ...input, settings: { ...(input.settings || {}), detectScaleFactor: runScale.factor } }
+  if (runScale.factor !== 1 || runScale.mixed) {
+    // The one place the factor's *inputs* are reported; sub-runs only echo the
+    // resolved gates. Emitted here rather than in the primary sub-run so it
+    // appears once per reconstruction, not once per retry.
+    (hooks.onLog ?? (() => {}))(describeScaleContext(runScale, 'Reprojection gates'),
+      runScale.clamped ? 'warn' : 'info', 'SfM')
+  }
+
   const cfg = { ...SFM_TUNING, ...(input.settings || {}) }
   const clone = (value) => structuredClone(value)
-  let primary = await reconstructSingleModel(clone(input), hooks)
-  if (primary.status !== 'done' || cfg.secondaryModels === false) return primary
+  // Which attempt produced the model we return. The alternate-seed guard turned a
+  // 19-camera primary into 122 on B4, and the run's own metrics did NOT flag the bad
+  // one — so "was a retry needed?" is part of the result, not an aside in the log.
+  const attempts = { retryCap: Math.max(0, cfg.seedRetryMax ?? 0), retriesRun: 0, winner: 0, seeds: [] }
+  const withRunRecord = (model) => {
+    if (model?.summary) {
+      model.summary.attempts = { ...attempts, seeds: [...attempts.seeds] }
+    }
+    return model
+  }
+  // Each sub-run reports an honest local 0..1; the orchestration maps those into
+  // consecutive slices of one overall bar. Without this, seed retries and secondary
+  // models each drove the bar 0→100% again — the "finishes several times" bug.
+  const [primaryStart, primaryEnd] = RUN_BUDGET.primary
+  let primary = await reconstructSingleModel(clone(input), {
+    ...hooks,
+    progressRange: { start: primaryStart, end: primaryEnd },
+  })
+  if (primary.status !== 'done' || cfg.secondaryModels === false) return withRunRecord(primary)
 
   // Seed choice is noisy on difficult wide-angle sets because each pair's F/RANSAC
   // estimate can move its recovered parallax enough to reorder otherwise plausible
@@ -1395,8 +1646,24 @@ export async function reconstruct(input, hooks = {}) {
   const pairKey = (p) => p ? (p.idA < p.idB ? `${p.idA}--${p.idB}` : `${p.idB}--${p.idA}`) : null
   const nInputImages = (input.images || []).filter((im) => im.kpStatus === 'done').length
   const maxRetries = Math.max(0, cfg.seedRetryMax ?? 0)
+  // Recovery budget: seed retries take the first half, secondary models the second.
+  // Both counts are discovered mid-run, so each is subdivided against its own cap.
+  const [recStart, recEnd] = RUN_BUDGET.recovery
+  const recMid = recStart + (recEnd - recStart) / 2
+  const retryRange = (attempt) => {
+    const [start, end] = sliceRange([recStart, recMid], Math.max(1, maxRetries), attempt)
+    return { start, end }
+  }
   const initialKey = pairKey(primary.summary?.initPair)
   if (initialKey) excluded.add(initialKey)
+  attempts.seeds.push({
+    attempt: 0,
+    pair: primary.summary?.initPair
+      ? `${primary.summary.initPair.nameA} ↔ ${primary.summary.initPair.nameB}` : null,
+    cameras: primary.cameras.length,
+    points: primary.points.length,
+    kept: true,
+  })
   for (let attempt = 0; attempt < maxRetries && primary.cameras.length < cfg.seedRetryMinFraction * nInputImages; attempt++) {
     log(`primary registered only ${primary.cameras.length}/${nInputImages}; `
       + `retrying with alternate seed (${attempt + 1}/${maxRetries}, ${excluded.size} prior seed(s) excluded)`,
@@ -1406,11 +1673,34 @@ export async function reconstruct(input, hooks = {}) {
       settings: { ...(input.settings || {}), secondaryModels: false, excludedInitPairs: [...excluded] },
     }, {
       onLog: (message, level, category) => log(`Seed retry ${attempt + 1}: ${message}`, level, category),
-      onProgress: hooks.onProgress
-        ? (done, total, label) => hooks.onProgress(done, total, `Seed retry ${attempt + 1}: ${label}`)
-        : undefined,
+      // Retries share the first half of the recovery budget, subdivided by the retry
+      // cap (the actual count isn't known in advance — the loop exits early on a good
+      // primary, which simply means the bar jumps ahead to the secondary phase).
+      progressRange: retryRange(attempt),
+      onProgress: scopeProgress(hooks.onProgress, {
+        ...retryRange(attempt),
+        decorate: (label) => `Seed retry ${attempt + 1}: ${label}`,
+      }),
     })
-    if (candidate.status !== 'done') continue
+    attempts.retriesRun = attempt + 1
+    if (candidate.status !== 'done') {
+      attempts.seeds.push({ attempt: attempt + 1, pair: null, cameras: 0, points: 0, kept: false })
+      continue
+    }
+    const improved = candidate.cameras.length > primary.cameras.length
+      || (candidate.cameras.length === primary.cameras.length && candidate.points.length > primary.points.length)
+    attempts.seeds.push({
+      attempt: attempt + 1,
+      pair: candidate.summary?.initPair
+        ? `${candidate.summary.initPair.nameA} ↔ ${candidate.summary.initPair.nameB}` : null,
+      cameras: candidate.cameras.length,
+      points: candidate.points.length,
+      kept: improved,
+    })
+    if (improved) {
+      attempts.winner = attempt + 1
+      for (const s of attempts.seeds) if (s.attempt !== attempts.winner) s.kept = false
+    }
     if (candidate.cameras.length > primary.cameras.length
       || (candidate.cameras.length === primary.cameras.length && candidate.points.length > primary.points.length)) {
       log(`alternate seed improved primary ${primary.cameras.length} → ${candidate.cameras.length} cameras; keeping it`,
@@ -1429,14 +1719,20 @@ export async function reconstruct(input, hooks = {}) {
       + `reliably align against a tiny primary`, 'error', 'Reconstruction')
     primary.secondaryModels = []
     primary.summary = { ...(primary.summary || {}), secondaryMerges: [] }
-    return primary
+    return withRunRecord(primary)
   }
 
   const jobs = secondaryJobs(input, primary, {
     minImages: cfg.secondaryMinImages,
     maxBoundary: cfg.secondaryBoundaryImages,
   })
-  if (!jobs.length) return primary
+  if (!jobs.length) return withRunRecord(primary)
+  // Declared after `jobs` on purpose — it closes over it, and a const read from an
+  // arrow hoisted above its declaration is a TDZ waiting to happen.
+  const secondaryRange = (ji) => {
+    const [start, end] = sliceRange([recMid, recEnd], Math.max(1, jobs.length), ji)
+    return { start, end }
+  }
 
   const secondaryModels = []
   const mergeReports = []
@@ -1455,9 +1751,11 @@ export async function reconstruct(input, hooks = {}) {
       settings: { ...(input.settings || {}), secondaryModels: false },
     }, {
       onLog: (message, level, category) => log(`Secondary ${ji + 1}: ${message}`, level, category),
-      onProgress: hooks.onProgress
-        ? (done, total, label) => hooks.onProgress(done, total, `Secondary ${ji + 1}: ${label}`)
-        : undefined,
+      progressRange: secondaryRange(ji),
+      onProgress: scopeProgress(hooks.onProgress, {
+        ...secondaryRange(ji),
+        decorate: (label) => `Secondary ${ji + 1}: ${label}`,
+      }),
     })
     if (secondary.status !== 'done' || secondary.cameras.length < 2 || !secondary.points.length) {
       log(`secondary ${ji + 1} failed to form a usable model`, 'warn', 'Reconstruction')
@@ -1495,5 +1793,5 @@ export async function reconstruct(input, hooks = {}) {
   }
   primary.secondaryModels = secondaryModels
   primary.summary = { ...(primary.summary || {}), secondaryMerges: mergeReports }
-  return primary
+  return withRunRecord(primary)
 }

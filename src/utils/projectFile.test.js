@@ -23,6 +23,7 @@ vi.mock('./opfs.js', () => ({
   async writeProjectFile(_projectId, relPath, data) {
     store.set(relPath, new Blob([data]))
   },
+  async getQuota() { return { quota: 10 * 1024 * 1024 * 1024, usage: 0 } },
 }))
 
 const { exportProjectArchive, importProjectArchive, peekArchiveManifest } = await import('./projectFile.js')
@@ -167,5 +168,15 @@ describe('importProjectArchive', () => {
     })
     expect(store.has('../escape.txt')).toBe(false)
     expect(warnings.some(([level, m]) => level === 'warn' && /unsafe paths/.test(m))).toBe(true)
+  })
+
+  it('rejects archives whose expanded content exceeds the import budget', async () => {
+    seedProject()
+    const { sink, blob } = memorySink()
+    await exportProjectArchive({ projectId: 'src', manifest: MANIFEST, fileName: 'p.websfm', openSink: sink })
+    store.clear()
+    await expect(importProjectArchive({
+      file: blob(), projectId: 'dst', limits: { maxTotalBytes: 16 },
+    })).rejects.toThrow(/import limit/)
   })
 })

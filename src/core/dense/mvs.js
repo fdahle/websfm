@@ -868,7 +868,7 @@ export function fuseDepthMaps(maps, opts = {}, onLog = () => {}, hooks = {}) {
         const t = now()
         if (t - lastEmit >= DENSE_TUNING.fuseProgressMs) {
           lastEmit = t
-          onProgress(mi + v / h, maps.length, m.uuid?.slice(0, 8) ?? '')
+          onProgress(mi + v / h, maps.length, m.name ?? m.uuid?.slice(0, 8) ?? '')
         }
       }
       for (let u = 0; u < w; u += step) {
@@ -960,7 +960,7 @@ export function fuseDepthMaps(maps, opts = {}, onLog = () => {}, hooks = {}) {
         kept++; mapKept++
       }
     }
-    onLog(`Fusion: ${m.uuid?.slice(0, 8) ?? '?'} — ${mapKept}/${mapConsidered} px kept `
+    onLog(`Fusion: ${m.name ?? m.uuid?.slice(0, 8) ?? '?'} — ${mapKept}/${mapConsidered} px kept `
       + `(${(100 * mapKept / Math.max(1, mapConsidered)).toFixed(1)}%)`, 'debug', 'Dense')
   }
 

@@ -63,8 +63,12 @@ const detectors = [
 ]
 
 const settings = computed(() => {
-  if (detector.value === 'sift') return { ...siftSettings.value }
-  if (detector.value === 'superpoint') return { ...superpointSettings.value }
+  // `preset` rides along so the store can pick the auto-resolution band (its floor
+  // is that preset's absolute maxDim). `baseId`, not `activePreset`: an edited
+  // preset still belongs to the band the user last chose, and 'custom' has none.
+  const base = { preset: baseId.value }
+  if (detector.value === 'sift') return { ...base, ...siftSettings.value }
+  if (detector.value === 'superpoint') return { ...base, ...superpointSettings.value }
   return {}
 })
 
@@ -76,16 +80,31 @@ const presetMap = computed(() => (isSp.value ? DETECT_SUPERPOINT_PRESETS : DETEC
 const presetBase = computed(() => (isSp.value ? DETECT_SUPERPOINT_DEFAULTS : DETECT_SIFT_DEFAULTS))
 const resolvePreset = (id) => ({ ...presetBase.value, ...presetMap.value[id] })
 const baseId = ref('medium')
+// `maxDimMode` is a mode, not a quality delta — it is orthogonal to the preset and
+// identical across all three, so switching it must not flip the card to Custom.
+const PRESET_MATCH_IGNORE = new Set(['maxDimMode'])
 const activePreset = computed(() => {
   const s = activeRef.value.value
   for (const { id } of DETECT_PRESET_META) {
     const r = resolvePreset(id)
-    if (Object.keys(r).every((k) => s[k] === r[k])) return id
+    if (Object.keys(r).every((k) => PRESET_MATCH_IGNORE.has(k) || s[k] === r[k])) return id
   }
   return 'custom'
 })
+// Writable proxy onto whichever detector's settings are active. `activeRef` is a
+// computed *holding a ref*, which templates do not unwrap through — reading
+// `activeRef.value.maxDimMode` in the template would compile fine and be undefined
+// at runtime. Going through an explicit computed keeps that entirely in script.
+const maxDimMode = computed({
+  get: () => activeRef.value.value.maxDimMode ?? 'absolute',
+  set: (v) => { activeRef.value.value = { ...activeRef.value.value, maxDimMode: v } },
+})
+
 function selectPreset(id) {
-  activeRef.value.value = { ...resolvePreset(id) }
+  // Preserve the orthogonal mode across a preset change — picking "Detailed"
+  // should not silently switch the resolution rule back to absolute.
+  const { maxDimMode } = activeRef.value.value
+  activeRef.value.value = { ...resolvePreset(id), maxDimMode }
   baseId.value = id
 }
 
@@ -161,12 +180,28 @@ function attemptRun() {
 
     <AdvancedDisclosure label="Advanced settings">
       <SettingsGroup title="Detection">
-        <SettingsField v-if="!isSp" label="Detection resolution" label-for="maxDim" unit="px"
-          hint="Longest side the detector runs at (keypoints map back to native pixels).">
+        <SettingsField label="Resolution rule" label-for="maxDimMode"
+          :hint="maxDimMode === 'auto'
+            ? 'Each image is detected at a fraction of its own size, never below the fixed value. Best for mixed or very large images such as film scans.'
+            : 'Every image is detected at the same fixed resolution, whatever its native size.'">
+          <select id="maxDimMode" v-model="maxDimMode" class="field-input field-select">
+            <option value="absolute">Fixed for all images</option>
+            <option value="auto">Scale with image size</option>
+          </select>
+        </SettingsField>
+
+        <SettingsField v-if="!isSp" :label="siftSettings.maxDimMode === 'auto' ? 'Minimum resolution' : 'Detection resolution'"
+          label-for="maxDim" unit="px"
+          :hint="siftSettings.maxDimMode === 'auto'
+            ? 'Floor for the scaled resolution — larger images get proportionally more, up to a per-preset ceiling.'
+            : 'Longest side the detector runs at (keypoints map back to native pixels).'">
           <input id="maxDim" v-model.number="siftSettings.maxDim" type="number" min="100" max="10000" step="100" class="field-input" />
         </SettingsField>
-        <SettingsField v-else label="Detection resolution" label-for="sp-maxDim" unit="px"
-          hint="Longest side before detection. Raising it only helps with tiling on.">
+        <SettingsField v-else :label="superpointSettings.maxDimMode === 'auto' ? 'Minimum resolution' : 'Detection resolution'"
+          label-for="sp-maxDim" unit="px"
+          :hint="superpointSettings.maxDimMode === 'auto'
+            ? 'Floor for the scaled resolution. SuperPoint ceilings stay well below the untiled-input limit.'
+            : 'Longest side before detection. Raising it only helps with tiling on.'">
           <input id="sp-maxDim" v-model.number="superpointSettings.maxDim" type="number" min="100" max="10000" step="100" class="field-input" />
         </SettingsField>
 

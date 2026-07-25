@@ -10,6 +10,7 @@ import { useLog } from './useLog.js'
 import { distortionOf } from '../core/sfm/distortion.js'
 import { downloadBlob, dataUrlToBlob } from '../utils/download.js'
 import { zipStore } from '../utils/zip.js'
+import { showToast } from './useToasts.js'
 
 // Camera-params + product export funnel, lifted out of App.vue. Owns `exportKind`
 // (which export dialog is open); the Ribbon command dispatch sets it and the
@@ -39,7 +40,7 @@ export function useExports({
     a.href = url
     a.download = filename
     a.click()
-    URL.revokeObjectURL(url)
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
   }
 
   function exportKeypoints() {
@@ -89,15 +90,21 @@ export function useExports({
     return { crs, code, geographic }
   }
 
-  function onExportRun(settings) {
+  async function onExportRun(settings) {
     const kind = exportKind.value
     exportKind.value = null
-    if (kind === 'cloud') doExportCloud(settings)
-    else if (kind === 'mesh') doExportMesh(settings)
-    else if (kind === 'model') doExportModel(settings)
-    else if (kind === 'colmap') doExportColmap(settings)
-    else if (kind === 'dem') doExportDem(settings)
-    else if (kind === 'ortho') doExportOrtho(settings)
+    try {
+      if (kind === 'cloud') await doExportCloud(settings)
+      else if (kind === 'mesh') await doExportMesh(settings)
+      else if (kind === 'model') await doExportModel(settings)
+      else if (kind === 'colmap') await doExportColmap(settings)
+      else if (kind === 'dem') await doExportDem(settings)
+      else if (kind === 'ortho') await doExportOrtho(settings)
+    } catch (err) {
+      const detail = String(err?.message ?? err)
+      log(`Export failed: ${detail}`, 'error', 'Export')
+      showToast('Export failed', { detail, kind: 'error', ms: 6000 })
+    }
   }
 
   // The main sparse cloud (what downstream stages consume — MC), or the selected
@@ -209,6 +216,7 @@ export function useExports({
     const cloud = sparseCloud()
     if (!cloud) return
     const imgByUuid = new Map(images.value.map((im) => [im.uuid, im]))
+    const sensorById = new Map(sensors.value.map((sensor) => [sensor.id, sensor]))
 
     const exportImages = [...cloud.cameras.entries()]
       .map(([uuid, cam]) => {
@@ -227,12 +235,12 @@ export function useExports({
     if (!anyViewsPx) {
       const risky = exportImages.some(({ uuid }) => {
         const im = imgByUuid.get(uuid)
-        return im?.sensor?.kind === 'film' || !!distortionOf(im?.sensor)
+        const sensor = sensorById.get(im?.sensorId)
+        return sensor?.kind === 'film' || !!distortionOf(sensor)
       })
       if (risky) {
-        console.warn('[COLMAP export] No BA-frame pixels (viewsPx) available and this project '
-          + 'uses lens distortion or film scans — 2D observations may not match the exported '
-          + 'cameras. Re-run reconstruction to regenerate the model with coherent observations.')
+        throw new Error('This legacy model has no BA-frame observations, but its sensors use '
+          + 'lens distortion or film coordinates. Re-run reconstruction before COLMAP export.')
       }
     }
 

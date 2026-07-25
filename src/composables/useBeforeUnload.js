@@ -5,8 +5,9 @@ import { onMounted, onBeforeUnmount } from 'vue'
 // generic confirm — all we can do is opt in by calling preventDefault + setting
 // returnValue. Browsers only actually show it once the user has interacted with
 // the page (sticky activation), so a pristine fresh load won't nag.
-export function useBeforeUnload() {
+export function useBeforeUnload(shouldWarn = () => true) {
   function onBeforeUnload(e) {
+    if (!shouldWarn()) return
     e.preventDefault()
     // Legacy field some browsers still require to trigger the prompt.
     e.returnValue = ''

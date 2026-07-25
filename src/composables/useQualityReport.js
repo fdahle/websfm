@@ -20,6 +20,7 @@ import { estimatedIntrinsics } from '../core/sfm/cameraEstimated.js'
 import { resolveK } from '../core/sfm/reconstruction.js'
 import { buildReportHtml } from '../core/products/report.js'
 import { buildProjectDigest, digestToMarkdown, digestToJson } from '../core/eval/summaryDigest.js'
+import { buildVerdict } from '../core/sfm/verdict.js'
 
 export function useQualityReport() {
   const recon = useReconstructionStore()
@@ -178,6 +179,35 @@ export function useQualityReport() {
     })
   }
 
+  // Detection config for the digest's run-config block. The settings ride on each
+  // image (`detectSettings`, recorded at detect time), so reduce them to one row plus
+  // a `mixed` flag: a batch CAN be heterogeneous (a re-detect of one image at other
+  // settings), and presenting the first image's values as the run's would be a claim
+  // the data doesn't support. Null when no image carries a record (older projects).
+  const detectConfig = computed(() => {
+    const withKp = imagesStore.images.filter((im) => im.kpStatus === 'done')
+    if (!withKp.length) return null
+    const recorded = withKp.filter((im) => im.detectSettings)
+    const med = (vals) => {
+      const s = vals.filter((v) => v != null).sort((a, b) => a - b)
+      return s.length ? s[Math.min(s.length - 1, Math.round(0.5 * (s.length - 1)))] : null
+    }
+    const first = recorded[0]?.detectSettings ?? null
+    const keys = ['maxDim', 'maxDimMode', 'maxKeypoints', 'contrastThreshold', 'tiling']
+    const mixed = !!first && recorded.some((im) => keys.some((k) => im.detectSettings[k] !== first[k]))
+    return {
+      detector: withKp[0].detector ?? 'sift',
+      images: withKp.length,
+      ...(first
+        ? { maxDim: first.maxDim, maxDimMode: first.maxDimMode, maxKeypoints: first.maxKeypoints,
+          contrastThreshold: first.contrastThreshold, tiling: first.tiling }
+        : {}),
+      medianKeypoints: med(withKp.map((im) => im.kpCount ?? null)),
+      medianDetectScale: med(withKp.map((im) => im.detectScale ?? null)),
+      mixed,
+    }
+  })
+
   // The compact copy-pasteable digest (PLAN-debug-summary): the same classified health
   // rows as the hub, plus top offenders + run figures, in ONE structured object the two
   // renderers turn into markdown or JSON. Async for the GCP report (via computeHealth).
@@ -204,12 +234,36 @@ export function useQualityReport() {
       }))
       .slice(0, 20)
 
+    // U6's rule engine over the same snapshot — so the digest states what to DO, not
+    // only what happened. Skipped before a sparse run exists (nothing to judge).
+    const verdict = recon.summary
+      ? buildVerdict({
+        imageCount: snapshot.imageCount,
+        registeredCount: snapshot.registeredCount,
+        nPoints: points.value.length,
+        reprojMedianPx: snapshot.reproj?.median ?? null,
+        reprojP95px: snapshot.reproj?.p95 ?? null,
+        track3ViewPct: recon.summary.pct3plusViewTracks ?? null,
+        graphComponents: snapshot.graph?.components ?? null,
+        focalDeltaPct: focalDeltas.value.length
+          ? focalDeltas.value.reduce((a, b) => (Math.abs(b) > Math.abs(a) ? b : a)) : null,
+        depthCoveragePct: snapshot.depth?.coveragePct ?? null,
+        unregistered,
+      })
+      : null
+
     const digest = buildProjectDigest({
       projectName, date: new Date().toISOString(), crsUnit: crsUnit.value,
       rows, snapshot,
       offenders: { residuals, unregistered },
       summary: recon.summary ?? null,
       denseSummary: recon.denseSummary ?? null,
+      // The Stage A record describes a depth-map set; suppress it once that set is
+      // gone (a stale-stamp discard clears the maps but not the summary).
+      depthSummary: recon.depthMapCount ? (recon.depthSummary ?? null) : null,
+      detect: detectConfig.value,
+      matchRun: matchesStore.matchRun ?? null,
+      verdict,
     })
     return { digest, markdown: digestToMarkdown(digest), json: digestToJson(digest) }
   }
@@ -218,6 +272,6 @@ export function useQualityReport() {
     cameras, points, imageIds, nameByUuid, crsUnit,
     reproj, histogram, graph, selfCal, sensorRows, focalDeltas, depth,
     perImageResiduals, unregisteredReason,
-    computeHealth, buildExportReport, computeDigest,
+    detectConfig, computeHealth, buildExportReport, computeDigest,
   }
 }

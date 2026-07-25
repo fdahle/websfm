@@ -8,7 +8,9 @@ export function makeSfmOps() {
   async function reconstruct([input], { emit }) {
     const result = await sfmReconstruct(input, {
       onLog: (message, level, category) => emit('log', [message, level, category]),
-      onProgress: (done, total, label) => emit('progress', [done, total, label]),
+      // `fraction` is the phase-weighted 0..1 bar value (core/sfm/progressPlan.js);
+      // done/total ride along as the numeric readout only.
+      onProgress: (done, total, label, fraction) => emit('progress', [done, total, label, fraction]),
     })
     return { result }
   }

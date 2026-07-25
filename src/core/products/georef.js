@@ -19,30 +19,42 @@ const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
 const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 
 // Fit similarity dst ≈ s·R·src + t from ≥3 non-degenerate correspondences.
-//   pairs: [{ src:[x,y,z] (SfM), dst:[x,y,z] (CRS) }]
+//   pairs: [{ src:[x,y,z] (SfM), dst:[x,y,z] (CRS), weight?:number }]
 // Returns { scale, R (row-major 3×3), t:[x,y,z], rms, count } or null if it can't
 // be determined (too few points, or a degenerate/collinear configuration).
 export function fitSimilarity(pairs) {
   const n = pairs.length
   if (n < 3) return null
 
+  // A 3D similarity needs finite 3D coordinates and at least three
+  // non-collinear points in both frames. A straight flight strip can have lots
+  // of correspondences and a tiny residual while rotation about the strip is
+  // still unconstrained, so point count / total variance alone is not enough.
+  if (pairs.some(({ src, dst }) => !finiteVec3(src) || !finiteVec3(dst))) return null
+  if (!hasNonCollinearGeometry(pairs.map((p) => p.src))
+      || !hasNonCollinearGeometry(pairs.map((p) => p.dst))) return null
+  const weights = pairs.map((p) => Number.isFinite(p.weight) && p.weight > 0 ? p.weight : 1)
+  const weightSum = weights.reduce((sum, w) => sum + w, 0)
+
   // Centroids.
   const cs = [0, 0, 0], cd = [0, 0, 0]
-  for (const { src, dst } of pairs) {
-    cs[0] += src[0]; cs[1] += src[1]; cs[2] += src[2]
-    cd[0] += dst[0]; cd[1] += dst[1]; cd[2] += dst[2]
+  for (let k = 0; k < n; k++) {
+    const { src, dst } = pairs[k], w = weights[k]
+    cs[0] += w * src[0]; cs[1] += w * src[1]; cs[2] += w * src[2]
+    cd[0] += w * dst[0]; cd[1] += w * dst[1]; cd[2] += w * dst[2]
   }
-  for (let i = 0; i < 3; i++) { cs[i] /= n; cd[i] /= n }
+  for (let i = 0; i < 3; i++) { cs[i] /= weightSum; cd[i] /= weightSum }
 
   // Cross-covariance M[i][j] = Σ src'_i · dst'_j (Horn's S) and Σ|src'|².
   const M = [[0, 0, 0], [0, 0, 0], [0, 0, 0]]
   let srcVar = 0
   const a = [], b = []
-  for (const { src, dst } of pairs) {
+  for (let k = 0; k < n; k++) {
+    const { src, dst } = pairs[k], w = weights[k]
     const s = sub(src, cs), d = sub(dst, cd)
     a.push(s); b.push(d)
-    for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) M[i][j] += s[i] * d[j]
-    srcVar += dot(s, s)
+    for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) M[i][j] += w * s[i] * d[j]
+    srcVar += w * dot(s, s)
   }
   if (srcVar < 1e-20) return null
 
@@ -68,7 +80,7 @@ export function fitSimilarity(pairs) {
       R[1][0] * a[k][0] + R[1][1] * a[k][1] + R[1][2] * a[k][2],
       R[2][0] * a[k][0] + R[2][1] * a[k][1] + R[2][2] * a[k][2],
     ]
-    num += dot(b[k], Ra)
+    num += weights[k] * dot(b[k], Ra)
   }
   const scale = num / srcVar
   if (!(scale > 0) || !isFinite(scale)) return null
@@ -83,11 +95,35 @@ export function fitSimilarity(pairs) {
 
   // Residual RMS in CRS units.
   let sse = 0
-  for (const { src, dst } of pairs) {
+  for (let k = 0; k < n; k++) {
+    const { src, dst } = pairs[k]
     const p = applySimilarity({ scale, R, t }, src)
-    sse += (p[0] - dst[0]) ** 2 + (p[1] - dst[1]) ** 2 + (p[2] - dst[2]) ** 2
+    sse += weights[k] * ((p[0] - dst[0]) ** 2 + (p[1] - dst[1]) ** 2 + (p[2] - dst[2]) ** 2)
   }
-  return { scale, R, t, rms: Math.sqrt(sse / n), count: n }
+  return { scale, R, t, rms: Math.sqrt(sse / weightSum), count: n }
+}
+
+const finiteVec3 = (v) => Array.isArray(v) && v.length >= 3
+  && Number.isFinite(v[0]) && Number.isFinite(v[1]) && Number.isFinite(v[2])
+
+// Translation-invariant collinearity test. Compare the largest squared cross
+// product with the squared cloud energy, making the threshold scale-independent.
+function hasNonCollinearGeometry(points) {
+  const c = [0, 0, 0]
+  for (const p of points) { c[0] += p[0]; c[1] += p[1]; c[2] += p[2] }
+  c[0] /= points.length; c[1] /= points.length; c[2] /= points.length
+  const centred = points.map((p) => sub(p, c))
+  const energy = centred.reduce((sum, p) => sum + dot(p, p), 0)
+  if (!(energy > 1e-20)) return false
+  let maxCross2 = 0
+  for (let i = 0; i < centred.length; i++) for (let j = i + 1; j < centred.length; j++) {
+    const a = centred[i], b = centred[j]
+    const cx = a[1] * b[2] - a[2] * b[1]
+    const cy = a[2] * b[0] - a[0] * b[2]
+    const cz = a[0] * b[1] - a[1] * b[0]
+    maxCross2 = Math.max(maxCross2, cx * cx + cy * cy + cz * cz)
+  }
+  return maxCross2 > energy * energy * 1e-12
 }
 
 // Apply dst = s·R·src + t.

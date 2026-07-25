@@ -69,6 +69,12 @@ function onClose() { if (!downloading.value) models.decline() }
 
 <style scoped src="./ui/modal.css"></style>
 <style scoped>
+/* Above ProgressModal's overlay (z-index 300, its own scoped style). A stage that
+   raises this prompt mid-run — a per-image detect, Smart Select — must stay
+   clickable rather than sit under the progress backdrop. Declared after the
+   modal.css import so it wins on source order at equal specificity. */
+.overlay { z-index: 400; }
+
 .mdl-intro { margin: 0 0 14px; line-height: 1.5; }
 .mdl-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
 .mdl-item { display: flex; flex-direction: column; gap: 6px; }

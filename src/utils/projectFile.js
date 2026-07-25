@@ -15,6 +15,7 @@ import {
   MANIFEST_NAME, shouldArchivePath, archiveCompression, archiveSizeVerdict,
   isSafeArchiveEntry, validateManifest, formatBytes, summarizeSections,
   ARCHIVE_DERIVED_DIRS,
+  ZIP32_MAX_BYTES,
 } from '../core/io/projectArchive.js'
 
 // ── Save target ───────────────────────────────────────────────────────────────
@@ -180,16 +181,46 @@ export async function exportProjectArchive({
 
 // ── Import ────────────────────────────────────────────────────────────────────
 
-function makeUnzip(onEntry) {
+const DEFAULT_IMPORT_LIMITS = Object.freeze({
+  maxEntries: 100_000,
+  maxEntryBytes: 1024 * 1024 * 1024, // one expanded entry is buffered at a time
+  maxTotalBytes: ZIP32_MAX_BYTES,
+  maxCompressionRatio: 1000,
+  maxManifestBytes: 1024 * 1024,
+})
+
+function makeUnzip(onEntry, limits = {}) {
+  const cfg = { ...DEFAULT_IMPORT_LIMITS, ...limits }
   const unzip = new Unzip()
+  let entryCount = 0
+  let totalBytes = 0
   unzip.register(UnzipInflate)
   unzip.register(UnzipPassThrough)
   unzip.onfile = (f) => {
+    entryCount++
+    if (entryCount > cfg.maxEntries) throw new Error(`project file has too many entries (limit ${cfg.maxEntries})`)
+    const entryLimit = f.name === MANIFEST_NAME ? cfg.maxManifestBytes : cfg.maxEntryBytes
+    if (Number.isFinite(f.originalSize) && f.originalSize > entryLimit) {
+      throw new Error(`archive entry "${f.name}" expands to ${formatBytes(f.originalSize)} `
+        + `(limit ${formatBytes(entryLimit)})`)
+    }
+    if (Number.isFinite(f.originalSize) && Number.isFinite(f.size) && f.size > 0
+        && f.originalSize / f.size > cfg.maxCompressionRatio) {
+      throw new Error(`archive entry "${f.name}" has an unsafe compression ratio`)
+    }
     const chunks = []
     let bytes = 0
     f.ondata = (err, chunk, final) => {
       if (err) throw err
-      if (chunk?.length) { chunks.push(chunk.slice()); bytes += chunk.length }
+      if (chunk?.length) {
+        bytes += chunk.length
+        totalBytes += chunk.length
+        if (bytes > entryLimit) throw new Error(`archive entry "${f.name}" exceeds ${formatBytes(entryLimit)}`)
+        if (totalBytes > cfg.maxTotalBytes) {
+          throw new Error(`project file expands beyond the ${formatBytes(cfg.maxTotalBytes)} import limit`)
+        }
+        chunks.push(chunk.slice())
+      }
       if (final) onEntry({ name: f.name, chunks, bytes })
     }
     f.start()
@@ -240,7 +271,9 @@ function concat(chunks) {
  * Returns { manifest, entryCount, bytes }. Throws with a user-facing message on
  * a bad manifest — the caller is responsible for deleting the half-written dir.
  */
-export async function importProjectArchive({ file, projectId, onProgress = null, onLog = null }) {
+export async function importProjectArchive({
+  file, projectId, onProgress = null, onLog = null, limits = {},
+}) {
   const log = (m, level = 'info') => onLog?.(m, level, 'Project')
 
   let manifest = null
@@ -249,7 +282,22 @@ export async function importProjectArchive({ file, projectId, onProgress = null,
   let skipped = 0
   const pending = []
 
-  const unzip = makeUnzip((entry) => pending.push(entry))
+  // Keep decompression within both the ZIP32 format ceiling and the browser's
+  // currently available storage. A folder project remains the escape hatch for
+  // exceptionally large individual source files.
+  let available = Infinity
+  try {
+    const estimate = await opfs.getQuota?.()
+    if (Number.isFinite(estimate?.quota)) {
+      available = Math.max(0, estimate.quota - (estimate.usage || 0))
+    }
+  } catch {}
+  const maxTotalBytes = Math.min(
+    limits.maxTotalBytes ?? DEFAULT_IMPORT_LIMITS.maxTotalBytes,
+    Number.isFinite(available) ? Math.floor(available * 0.9) : Infinity,
+  )
+  if (maxTotalBytes <= 0) throw new Error('browser storage has no space available for this project')
+  const unzip = makeUnzip((entry) => pending.push(entry), { ...limits, maxTotalBytes })
 
   async function drain() {
     while (pending.length) {

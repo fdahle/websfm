@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url'
 import { beforeAll, describe, it, expect } from 'vitest'
 
 import initRecon from '../../wasm/reconstruction/reconstruction.js'
+import { RUN_BUDGET } from './progressPlan.js'
 import { reconstruct, retriangulatePairs, mergeSplitTracks, rotationCycleFilter } from './sfm.js'
 import { distortPixel } from './distortion.js'
 import { canonicalFrame } from './fiducials.js'
@@ -106,7 +107,7 @@ describe('reconstruct (incremental SfM, synthetic 3-view scene)', () => {
       { images, pairs, settings: { baIterations: 0 } },
       {
         onLog: (m, level, cat) => logs.push([level, cat, m]),
-        onProgress: (d, total, label) => progress.push([d, total, label]),
+        onProgress: (d, total, label, fraction) => progress.push([d, total, label, fraction]),
       },
     )
 
@@ -114,7 +115,19 @@ describe('reconstruct (incremental SfM, synthetic 3-view scene)', () => {
     expect(out.cameras).toHaveLength(3)
     expect(new Set(out.cameras.map((c) => c.uuid))).toEqual(new Set(uuids))
     expect(out.points.length).toBeGreaterThan(30)
-    expect(progress.at(-1)).toEqual([3, 3, 'Done'])
+    // Progress is phase-weighted, not a camera count (core/sfm/progressPlan.js): the
+    // run ends on the finalize phase with every camera counted. The bar value must be
+    // monotonic and must NOT be full at the end of registration — that premature 100%
+    // is exactly what the phase plan replaced.
+    expect(progress.at(-1).slice(0, 2)).toEqual([3, 3])
+    const fractions = progress.map((p) => p[3]).filter((f) => f != null)
+    expect(fractions.length).toBeGreaterThan(0)
+    for (let i = 1; i < fractions.length; i++) {
+      expect(fractions[i]).toBeGreaterThanOrEqual(fractions[i - 1])
+    }
+    expect(fractions.at(-1)).toBeCloseTo(RUN_BUDGET.primary[1], 10)
+    const lastRegister = progress.filter((p) => /Registering /.test(p[2] ?? '')).at(-1)
+    if (lastRegister) expect(lastRegister[3]).toBeLessThan(0.5)
 
     // Reprojection check: project each reconstructed point into every camera that
     // sees it and compare to the stored keypoint. Noise-free input + a faithful

@@ -1,4 +1,5 @@
 import { beforeAll, describe, it, expect } from 'vitest'
+import proj4 from 'proj4'
 import { ensureProjection, transform, isGeographic, axisLabels, localMetricFrame } from './crs.js'
 
 // Catalog CRS resolve from their built-in proj4 def — no network or OPFS needed.
@@ -86,6 +87,11 @@ describe('catalog metadata', () => {
   it('classifies geographic vs projected', () => {
     expect(isGeographic('EPSG:4326')).toBe(true)
     expect(isGeographic('EPSG:3031')).toBe(false)
+  })
+
+  it('classifies registered geographic CRSs outside the curated catalog', () => {
+    proj4.defs('EPSG:999001', '+proj=longlat +datum=WGS84 +no_defs')
+    expect(isGeographic('EPSG:999001')).toBe(true)
   })
 
   it('labels axes per CRS', () => {

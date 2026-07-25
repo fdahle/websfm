@@ -178,7 +178,7 @@ export function useImportRouting({ addGcps, addFootprints, addSensors, addPoses,
   // Dropped/picked image batch: fork the reference rasters out, ingest the rest.
   async function addImagesRouted(files) {
     const photos = await forkGeoreferencedRasters(files)
-    if (photos.length && addImages) addImages(photos)
+    if (photos.length && addImages) await addImages(photos)
   }
 
   // Decode + classify off-thread, then either commit straight away (the sniff

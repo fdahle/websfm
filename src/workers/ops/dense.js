@@ -231,6 +231,13 @@ export function makeDenseOps({ rasterize }) {
       }
     }
     if (!backend) emit('log', ['Depth maps: backend = WASM (CPU)', 'info', 'Dense'])
+    // Stage A run record. `backend` above can flip to WASM mid-run on a GPU error, so
+    // the record tracks what was *requested*, what it started on, and how many images
+    // fell back — "all 86 maps remained on GPU" is a target in TODO ▸ SB and is
+    // unanswerable from a summary that only reports the final value.
+    const startedOnGpu = !!backend
+    let gpuFallbacks = 0
+    const perImage = [] // { ms, coveragePct, costMedian }
 
     const cameras = new Map(images.map((im) => [im.uuid, { R: im.R, t: im.t, K: im.K }]))
 
@@ -300,9 +307,15 @@ export function makeDenseOps({ rasterize }) {
 
     const maps = []
     const transfer = []
+    // Stage A is a per-image loop FOLLOWED by the cross-view filter, which needs every
+    // map before it can start. The loop therefore owns only the first slice of the bar
+    // — reporting it as the whole thing left the filter (minutes on a big set) running
+    // behind a bar already sitting at 100%. done/total stay honest for the readout.
+    const LOOP_SHARE = 0.85
+    const loopFraction = (v) => (images.length > 0 ? LOOP_SHARE * (v / images.length) : 0)
     for (let i = 0; i < images.length; i++) {
       const img = images[i]
-      emit('progress', [i, images.length, img.name])
+      emit('progress', [i, images.length, img.name, loopFraction(i)])
 
       const srcUuids = srcUuidsByImg[i]
       if (srcUuids.length === 0) {
@@ -353,7 +366,7 @@ export function makeDenseOps({ rasterize }) {
         onLog: (m, l, c) => emit('log', [`${img.name}: ${m}`, l, c]),
         // Fractional within-image progress (0..1 across pyramid levels), folded into
         // the per-image emit so the bar glides through a minute-long WASM image.
-        onProgress: (f) => emit('progress', [i + f, images.length, img.name]),
+        onProgress: (f) => emit('progress', [i + f, images.length, img.name, loopFraction(i + f)]),
         validate: backend && i === 0,
       }
       let dm
@@ -366,6 +379,7 @@ export function makeDenseOps({ rasterize }) {
           emit('log', [`Depth maps: GPU error on ${img.name} (${err?.message ?? err}) — falling back to WASM`,
             'warn', 'Dense'])
           backend = undefined
+          gpuFallbacks++
           // Keep streaming the coarse-to-fine plan log on the retry (validate no
           // longer applies once we've dropped off the GPU path).
           dm = await depthMapForImage(ref, sources, points, { window, iterations, bestK: imgBestK, coarseLong }, backend, { onLog: hooks.onLog, onProgress: hooks.onProgress })
@@ -425,6 +439,11 @@ export function makeDenseOps({ rasterize }) {
         if (dm.depth[k] > 0) { valid++; costs.push(dm.cost[k]) }
       }
       const cs = stat(costs)
+      perImage.push({
+        ms: imgMs,
+        coveragePct: 100 * valid / dm.depth.length,
+        costMedian: cs.median,
+      })
       const seedPct = (100 * dm.seeded / dm.depth.length).toFixed(1)
       emit('log', [`Depth maps: ${img.name} — ${srcUuids.length} sources (best-${imgBestK}), ${dm.width}×${dm.height}, `
         + `depth ${dm.depthMin.toFixed(2)}–${dm.depthMax.toFixed(2)} (${dm.seeded} seeds, ${seedPct}%), `
@@ -455,12 +474,16 @@ export function makeDenseOps({ rasterize }) {
     // zeroes rejected pixels in `maps`, so what we persist and hand to the ortho is the
     // filtered plane. The display PNGs above were rendered pre-filter and are only a
     // preview, so they intentionally still show the raw plane.
+    let geomFilterMs = null
     if (geomConsistency && maps.length) {
-      emit('progress', [0, maps.length, 'Filtering depth maps…'])
+      emit('progress', [0, maps.length, 'Filtering depth maps…', LOOP_SHARE])
       const tFilt = performance.now()
       filterDepthMapsGeometric(maps, { maxGeomCost, minConsistent, minNcc },
         (m, l, c) => emit('log', [m, l, c]),
-        { onProgress: (d, t, lbl) => emit('progress', [d, t, lbl]) })
+        {
+          onProgress: (d, t, lbl) => emit('progress', [d, t,
+            `Cross-view filter: ${lbl}`, LOOP_SHARE + (1 - LOOP_SHARE) * (t > 0 ? d / t : 0)]),
+        })
       const marginal = maps.filter((m) => (m.filterStats?.considered ?? 0) > 0 && m.filterStats.keptPct < 1)
       if (marginal.length) {
         const names = marginal.slice(0, 12)
@@ -470,12 +493,50 @@ export function makeDenseOps({ rasterize }) {
           + 'They remain cached for diagnostics/orthophoto use but will contribute little to fusion.',
         'warn', 'Dense'])
       }
-      emit('log', [`Depth filter: cross-view consistency in ${((performance.now() - tFilt) / 1000).toFixed(1)}s`,
+      geomFilterMs = performance.now() - tFilt
+      emit('log', [`Depth filter: cross-view consistency in ${(geomFilterMs / 1000).toFixed(1)}s`,
         'info', 'Dense'])
     }
 
-    emit('progress', [images.length, images.length, 'Done'])
-    return { result: { maps }, transfer }
+    emit('progress', [images.length, images.length, 'Depth maps complete', 1])
+    // Stage A summary — settings + throughput + the cross-view filter's cost and bite.
+    // Persisted by the store (reconstruction.json) so a dense baseline survives a reload.
+    const med = (vals) => {
+      if (!vals.length) return null
+      const s = [...vals].sort((a, b) => a - b)
+      return s[Math.min(s.length - 1, Math.round(0.5 * (s.length - 1)))]
+    }
+    const filterKept = maps.map((m) => m.filterStats?.keptPct).filter((v) => v != null)
+    const summary = {
+      date: new Date().toISOString(),
+      nMaps: maps.length,
+      nImages: images.length,
+      backend: startedOnGpu ? (gpuFallbacks ? 'gpu→wasm' : 'gpu') : 'wasm',
+      gpuRequested: !!settings.useGpu,
+      gpuFallbacks,
+      settings: {
+        quality: settings.quality ?? null, maxDim, maxSources, window, iterations,
+        bestK: autoBestKMode ? 'auto' : bestK,
+        speckleFilter: !!speckleFilter,
+        geomConsistency: !!geomConsistency,
+        maxGeomCost: geomConsistency ? maxGeomCost : null,
+        minConsistent: geomConsistency ? minConsistent : null,
+        minNcc: geomConsistency ? minNcc : null,
+      },
+      medianMsPerImage: med(perImage.map((p) => p.ms)),
+      totalMs: performance.now() - t0,
+      medianCoveragePct: med(perImage.map((p) => p.coveragePct)),
+      medianCostMedian: med(perImage.map((p) => p.costMedian)),
+      geomFilterMs,
+      // Post-filter survival: the DF item needs both the cost of the pass and how
+      // much it actually removed, per map rather than as one blended figure.
+      geomFilterMedianKeptPct: med(filterKept),
+      geomFilterMinKeptPct: filterKept.length ? Math.min(...filterKept) : null,
+      geomFilterMarginalMaps: filterKept.filter((v) => v < 1).length,
+      projectedPeakBytes: proj.total,
+      budgetBytes: budget,
+    }
+    return { result: { maps, summary }, transfer }
   }
 
   // Stage B — Build Point Cloud (dense). Fuses the depth maps from Stage A into a

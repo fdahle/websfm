@@ -29,7 +29,13 @@ export const DETECT_TUNING = {
 // rotation-cycle-filter thresholds → core/sfm/cycleFilter.js.
 export const SFM_TUNING = {
   // ── Interleaved bundle-adjustment / track filtering ──
-  filterMaxReprojPx: 4.0,    // observation pruning threshold (px)
+  // Observation pruning threshold, in **detection pixels** — sfm.js resolves it to
+  // native px against the run's detection scale (core/scaleContext.js, which owns
+  // the maxFactor/minFactor knobs) before any pass reads it. Bounded separately by
+  // core/sfm/cleanupThreshold.js, which caps how much a pass may remove when the
+  // residual distribution is shifted by wrong intrinsics — different root cause,
+  // and the two compose (the quantile bound applies to the resolved threshold).
+  filterMaxReprojPx: 4.0,
   filterMinTriAngleDeg: 1.5, // drop points whose rays are too parallel
   interimBaEvery: 5,         // run a global BA after this many newly-registered cameras
   interimBaIterations: 12,   // fewer iters for the interim solves than the final BA
@@ -108,6 +114,18 @@ export const MATCH_TUNING = {
   lgGuideRelThresh: 0.001,   // guide-H RANSAC threshold as a fraction of image diagonal (≥3 px)
   lgGuideMinInlierRatio: 0.15, // min H-inlier fraction (scene too 3D / no overlap ⇒ fall back)
   lgTileMinKps: 32,          // skip a tile with fewer keypoints than this on either side
+  // ── Subset gate applicability ──
+  // The gate trades a small false-negative rate for skipping O(Na·Nb) matches, which is
+  // only a good trade when there are many pairs to skip. Below this count the full
+  // exhaustive match costs seconds, so the trade is all risk and no saving — and the
+  // risk is severing the graph (the 2026-07-24 CA…V run: 7/10 pairs gated, including
+  // the consecutive 33↔34, splitting 5 images into 2 components and registering 3).
+  // The gate's *sample size* is not here: it is derived per pair from the real
+  // keypoint counts by core/features/subsetGate.js resolveSubsetGateSize (which
+  // owns the fraction/floor/ceiling), because a fixed sample makes the gate ~1/N
+  // more severe as keypoint counts rise. The CA…V gating above is consistent with
+  // that failure mode as well as with the low pair count.
+  subsetGateMinPairs: 50,
 }
 
 // Dense MVS knobs read in core/dense/mvs.js but NOT exposed in DepthMapsModal /
