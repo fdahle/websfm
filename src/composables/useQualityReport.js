@@ -21,6 +21,7 @@ import { resolveK } from '../core/sfm/reconstruction.js'
 import { buildReportHtml } from '../core/products/report.js'
 import { buildProjectDigest, digestToMarkdown, digestToJson } from '../core/eval/summaryDigest.js'
 import { buildVerdict } from '../core/sfm/verdict.js'
+import { buildRunFingerprints } from '../core/eval/runFingerprint.js'
 
 export function useQualityReport() {
   const recon = useReconstructionStore()
@@ -248,6 +249,8 @@ export function useQualityReport() {
         focalDeltaPct: focalDeltas.value.length
           ? focalDeltas.value.reduce((a, b) => (Math.abs(b) > Math.abs(a) ? b : a)) : null,
         depthCoveragePct: snapshot.depth?.coveragePct ?? null,
+        selfCalResolved: recon.summary?.selfCal?.resolved ?? null,
+        separateSecondaryModels: recon.summary?.secondaryRecovery?.separate?.length ?? 0,
         unregistered,
       })
       : null
@@ -263,6 +266,7 @@ export function useQualityReport() {
       depthSummary: recon.depthMapCount ? (recon.depthSummary ?? null) : null,
       detect: detectConfig.value,
       matchRun: matchesStore.matchRun ?? null,
+      fingerprints: buildRunFingerprints(imagesStore.images, matchesStore.matchStore.values()),
       verdict,
     })
     return { digest, markdown: digestToMarkdown(digest), json: digestToJson(digest) }

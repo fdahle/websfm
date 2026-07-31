@@ -1066,6 +1066,16 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     }
   }
 
+  // Project Settings cleanup: retain reconstruction/clouds while dropping the
+  // recomputable depth-map and raster-product caches from memory and storage.
+  async function clearDerived() {
+    clearDepthMaps()
+    dem.value = null
+    ortho.value = null
+    if (isPersisting()) await opfs.deleteProjectDerived(projects.currentProjectId)
+    log('Cleared cached image transcodes, depth maps, and raster products.', 'success', 'Project')
+  }
+
   // Rebuild one cloud from version-2 metadata + binary buffers (inverse of
   // serializeCloud). markRaw: point clouds are large and only ever replaced
   // wholesale, never mutated per-point — deep reactivity freezes render/restore.
@@ -1166,6 +1176,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     densify,
     restore,
     clear,
+    clearDerived,
     selectCloud,
     removeCloud,
     renameCloud,

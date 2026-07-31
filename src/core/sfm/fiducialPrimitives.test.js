@@ -31,6 +31,39 @@ describe('estimateFrameBounds', () => {
   })
 })
 
+describe('makeFiducialPrototype', () => {
+  const darkPixels = (p) => {
+    const h = (p.size - 1) / 2, out = []
+    for (let y = 0; y < p.size; y++) for (let x = 0; x < p.size; x++) {
+      if (p.data[y * p.size + x] === 0) out.push({ dx: x - h, dy: y - h })
+    }
+    return out
+  }
+
+  // Regression: the variant test and its geometry test used to share one condition
+  // (`variant === 0 && insideDot`), so every pixel outside a variant's own shape fell
+  // through to the ring branch — the "dot" and "crosshair" templates were each drawn
+  // inside a filled ring, making all three swept variants near-identical blobs and
+  // costing the generic family its discriminative power.
+  it('draws each generic variant as its own shape, with no ring bleeding in', () => {
+    const S = 25
+    const dot = darkPixels(makeFiducialPrototype('generic', S, 0, { strokeFrac: 0.1 }))
+    const maxR = Math.max(...dot.map((p) => Math.hypot(p.dx, p.dy)))
+    expect(maxR).toBeLessThanOrEqual(S * 0.18) // the dot's own radius, not the ring's
+
+    const stroke = Math.round(S * 0.1)
+    const cross = darkPixels(makeFiducialPrototype('generic', S, 1, { strokeFrac: 0.1 }))
+    expect(cross.every((p) => Math.abs(p.dx) <= stroke || Math.abs(p.dy) <= stroke)).toBe(true)
+
+    // The ring variant keeps its hole — the one shape whose centre band is light.
+    const ring = makeFiducialPrototype('generic', S, 2, { strokeFrac: 0.1 })
+    const at = (dx, dy) => ring.data[(dy + (S - 1) / 2) * ring.size + dx + (S - 1) / 2]
+    expect(at(0, 0)).toBe(0)                    // centre dot
+    expect(at(0, stroke + 1)).toBe(1)           // gap between centre and ring
+    expect(at(0, Math.round(S * 0.29))).toBe(0) // the ring itself
+  })
+})
+
 describe('bestPrototypeHit', () => {
   // Paint one unambiguous crosshair on a clean field.
   function scanWithMark(family = 'generic', variant = 1, size = 13) {

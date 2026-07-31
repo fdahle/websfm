@@ -10,6 +10,7 @@ import { defineStore } from 'pinia'
 // a store, that computed can move in and read useImagesStore() directly.
 export const useModalsStore = defineStore('modals', () => {
   const settingsOpen        = ref(false)
+  const projectSettingsOpen = ref(false)
   const aboutOpen           = ref(false)
   const systemInfoOpen      = ref(false)
   const projectPickerOpen   = ref(false)
@@ -74,6 +75,7 @@ export const useModalsStore = defineStore('modals', () => {
 
   return {
     settingsOpen,
+    projectSettingsOpen,
     aboutOpen,
     systemInfoOpen,
     projectPickerOpen,

@@ -46,9 +46,17 @@ export function makeFiducialPrototype(family, size, variant = 0, { strokeFrac = 
   for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
     const dx = x - h, dy = y - h
     if (family === 'generic') {
-      if (variant % 3 === 0 && dx * dx + dy * dy <= (S * 0.18) ** 2) dark(x, y) // dot
-      else if (variant % 3 === 1 && (Math.abs(dx) <= r || Math.abs(dy) <= r)) dark(x, y) // crosshair
-      else { // ring + centre
+      // Pick the variant FIRST, then test its own geometry. Folding the two into one
+      // condition (`variant === 0 && insideDot`) made every pixel *outside* a variant's
+      // shape fall through to the ring branch, so the dot and crosshair templates were
+      // each drawn inside a filled ring — three variations of a blob rather than the
+      // three distinct shapes this family exists to sweep.
+      const v = variant % 3
+      if (v === 0) { // dot
+        if (dx * dx + dy * dy <= (S * 0.18) ** 2) dark(x, y)
+      } else if (v === 1) { // crosshair
+        if (Math.abs(dx) <= r || Math.abs(dy) <= r) dark(x, y)
+      } else { // ring + centre
         const d = Math.hypot(dx, dy), rr = S * 0.29
         if (Math.abs(d - rr) <= r || d <= r) dark(x, y)
       }

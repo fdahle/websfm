@@ -26,9 +26,13 @@ export const EVAL_THRESHOLDS = {
   // A split match graph (>1 component) cannot register as one block — anything above
   // a single component is a warning regardless of size.
   graphComponents:  { warn: 2,    bad: 999,  dir: 'low' },
-  // Composed self-cal distortion fit RMS: the linear-LSQ refit should reproduce BA's
-  // forward model to well under a tenth-pixel; >0.05px means the fold is lossy.
-  selfCalFitRmsPx:  { warn: 0.05, bad: 0.2,  dir: 'low' },
+  // Dense-warp approximation RMS: sparse applies a sequence of exact self-cal folds,
+  // while dense currently receives one composed radial bag. This measures that
+  // representation loss, not whether BA calibrated the lens correctly. The R1–R4
+  // baselines all landed at 0.16–0.20px (including the healthy 128-camera result), so
+  // the former 0.05/0.20 bounds produced a warning on every real run. Keep sub-quarter-
+  // pixel approximation error healthy; ≥0.5px is materially large for dense warping.
+  selfCalFitRmsPx:  { warn: 0.25, bad: 0.5,  dir: 'low' },
   // GCP georeference residual (CRS units, usually m). Aerial survey grade is
   // sub-metre; several metres means a bad fit or mismarked GCPs.
   gcpRmse:          { warn: 1.0,  bad: 3.0,  dir: 'low' },
@@ -142,12 +146,12 @@ export function projectHealth(snapshot = {}) {
       hint: nComp == null ? undefined
         : (nComp > 1 ? `split — ${isolated} isolated` : 'connected') })
 
-  // Self-cal fit RMS (worst sensor)
+  // Dense-warp approximation RMS (worst sensor).
   let fitRms = null
   if (s.selfCal?.length) {
     fitRms = Math.max(...s.selfCal.map((d) => d.fitRmsPx ?? 0))
   }
-  push('selfcal', 'calibration', 'Self-cal fit RMS', fitRms, 'px',
+  push('selfcal', 'calibration', 'Self-cal warp fit RMS', fitRms, 'px',
     EVAL_THRESHOLDS.selfCalFitRmsPx, { missingHint: 'self-cal was off / no summary' })
 
   // Focal delta (worst sensor, absolute %)

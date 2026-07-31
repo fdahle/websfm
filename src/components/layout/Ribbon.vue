@@ -284,6 +284,7 @@ const tabs = [
         // verb-shaped action — and it is a *copy*, never "the save".
         label: 'Project',
         commands: [
+          { id: 'open-project-settings', label: 'Project\nSettings', icon: 'settings', needsProject: true },
           { id: 'save-project-file', label: 'Save a\nCopy…', icon: 'save', needsProject: true },
         ],
       },

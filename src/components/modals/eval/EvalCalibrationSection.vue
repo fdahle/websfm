@@ -92,7 +92,7 @@ const drAtEdge = (curve) => (curve.length ? curve[curve.length - 1].dr : null)
           <div class="cal-item"><div class="cal-k">k2</div><div class="cal-v">{{ s.dist.k2?.toFixed(4) ?? '—' }}</div></div>
           <div class="cal-item"><div class="cal-k">k3</div><div class="cal-v">{{ s.dist.k3?.toFixed(4) ?? '—' }}</div></div>
           <div class="cal-item">
-            <div class="cal-k">Fit RMS <span class="unit">(warn > {{ FIT_RMS_WARN }})</span></div>
+            <div class="cal-k">Dense warp fit RMS <span class="unit">(warn > {{ FIT_RMS_WARN }})</span></div>
             <div class="cal-v" :class="{ warn: s.dist.fitRmsPx > FIT_RMS_WARN }">
               {{ s.dist.fitRmsPx?.toFixed(3) ?? '—' }} <span class="unit">px</span>
             </div>

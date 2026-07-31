@@ -14,6 +14,7 @@
 // Prerequisite checks, mirroring Ribbon.vue's disabledReason() messages so the
 // two gates never disagree. Each: does `state` satisfy it, and why not.
 const NEED_CHECKS = {
+  project:   { ok: (s) => !!s.projectReady, reason: 'Open a project first' },
   images:    { ok: (s) => s.imageCount   > 0, reason: 'Import images first' },
   imagesReady: { ok: (s) => !s.imagesLoading, reason: 'Images still loading…' },
   keypoints: { ok: (s) => s.kpImageCount > 0, reason: 'Detect keypoints first' },
@@ -74,6 +75,7 @@ export const COMMANDS = [
   { name: 'export matches',   dispatch: 'export-matches',   needs: ['matches'],   group: 'Export', help: 'Export matches' },
 
   // --- App ---
+  { name: 'project settings', aliases: ['project properties'], dispatch: 'open-project-settings', needs: ['project'], group: 'App', help: 'Open settings for the current project' },
   { name: 'settings', aliases: [],                  dispatch: 'open-settings', group: 'App', help: 'Open settings' },
   { name: 'glossary', aliases: [],                  dispatch: 'open-glossary', group: 'App', help: 'Open the glossary' },
   { name: 'about',    aliases: [],                  dispatch: 'open-about',    group: 'App', help: 'Open the about dialog' },

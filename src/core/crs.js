@@ -75,9 +75,11 @@ export const CRS_CATALOG = [
 ]
 
 const catalogByCode = new Map(CRS_CATALOG.map((c) => [c.code, c]))
+const dynamicInfoByCode = new Map()
 
 export function crsInfo(code) {
-  return catalogByCode.get(code) || { code, name: code, geographic: false, axes: ['X', 'Y', 'Z'], basemap: 'osm' }
+  return catalogByCode.get(code) || dynamicInfoByCode.get(code)
+    || { code, name: code, geographic: false, axes: ['X', 'Y', 'Z'], basemap: 'osm' }
 }
 
 export function axisLabels(code) {
@@ -190,8 +192,23 @@ function applyDef(code, def, opts) {
 
 // Make sure `code` is usable by proj4 and OpenLayers. Resolves the definition
 // from the catalog, a generated UTM def, the OPFS cache, or epsg.io.
-export async function ensureProjection(code) {
+export async function ensureProjection(code, supplied = null) {
   if (registered.has(code)) return true
+
+  // Search results from the embedded EPSG index carry their definition and
+  // area of use, avoiding a second lookup and making CRS selection work offline.
+  if (supplied?.def) {
+    dynamicInfoByCode.set(code, {
+      code,
+      name: supplied.name || code,
+      geographic: !!supplied.geographic,
+      axes: supplied.geographic ? ['Lon', 'Lat', 'Alt'] : ['Easting', 'Northing', 'Up'],
+      basemap: 'osm',
+      worldExtent: supplied.worldExtent,
+    })
+    applyDef(code, supplied.def, { worldExtent: supplied.worldExtent })
+    return true
+  }
 
   const cat = catalogByCode.get(code)
   if (cat?.def) { applyDef(code, cat.def, { extent: cat.extent, worldExtent: cat.worldExtent }); return true }

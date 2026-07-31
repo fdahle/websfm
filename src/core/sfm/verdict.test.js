@@ -33,7 +33,7 @@ describe('buildVerdict', () => {
     const reg = v.findings.find((f) => f.code === 'registration')
     expect(reg.title).toMatch(/17\/50/)
     expect(reg.title).toMatch(/e\.jpg, …/) // capped at 5 + ellipsis
-    expect(reg.fix).toMatch(/minMatches/)
+    expect(reg.fix).toMatch(/diagnostics first/i)
   })
 
   it('detects the distortion fingerprint (p95 ≫ median) — B1 shape', () => {
@@ -49,6 +49,14 @@ describe('buildVerdict', () => {
   it('yellow distortion tail at 3–5×', () => {
     const v = buildVerdict({ ...healthy(), reprojMedianPx: 1.0, reprojP95px: 3.5 })
     expect(v.findings.find((f) => f.code === 'distortion').level).toBe('yellow')
+  })
+
+  it('does not tell a completed self-cal run to enable self-calibration', () => {
+    const v = buildVerdict({ ...healthy(), reprojMedianPx: 0.3, reprojP95px: 1.8, selfCalResolved: 'f,k1' })
+    const tail = v.findings.find((f) => f.code === 'reprojection-tail')
+    expect(tail).toBeTruthy()
+    expect(tail.fix).toMatch(/already ran/i)
+    expect(tail.fix).not.toMatch(/enable self-calibration/i)
   })
 
   it('a high median with no tail reports reprojection, not distortion', () => {

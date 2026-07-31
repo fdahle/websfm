@@ -48,6 +48,14 @@ export const SFM_TUNING = {
   // the interim BA stays pose/points-only and the fold (which mutates keypoints) is held
   // back. Only active when refineIntrinsics self-calibrates (no calibrated model at ingest).
   distortionCalMinCams: 6,
+  // Transactional self-cal guard. These are deliberately broad plausibility bounds,
+  // not calibration priors: normal EXIF recovery remains free, while the observed
+  // thin-block runaways (focal +48…88%, k1 ≈ -0.5) are rejected before their
+  // distortion is destructively folded into every image's keypoints.
+  selfCalMaxFocalStepFrac: 0.25,
+  selfCalMaxFocalNominalFrac: 0.35,
+  selfCalMaxPrincipalOffsetFrac: 0.10,
+  selfCalMaxCornerShiftFrac: 0.25,
   // ── PnP registration gate ──
   pnpGateScale: 2,           // fixed inlier gate = reprjThreshold × min(pnpGateScale, 2)
   minPnpInliers: 15,         // absolute PnP-inlier floor to accept a pose

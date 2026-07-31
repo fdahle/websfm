@@ -12,11 +12,21 @@ const GRID_Z_VALUES = ['min', 'avg', 'max']
 const stored = localStorage.getItem(GRID_Z_KEY) ?? localStorage.getItem(LEGACY_GRID_Z_KEY)
 const gridZ = ref(GRID_Z_VALUES.includes(stored) ? stored : 'avg') // default middle
 
+const BACKGROUND_KEY = 'viewer3dBackground'
+const BACKGROUND_VALUES = ['theme', 'dark', 'light', 'black']
+const storedBackground = localStorage.getItem(BACKGROUND_KEY)
+const background = ref(BACKGROUND_VALUES.includes(storedBackground) ? storedBackground : 'theme')
+
 export function useViewerSettings() {
   function setGridZ(v) {
     if (!GRID_Z_VALUES.includes(v)) return
     gridZ.value = v
     localStorage.setItem(GRID_Z_KEY, v)
   }
-  return { gridZ, setGridZ }
+  function setBackground(v) {
+    if (!BACKGROUND_VALUES.includes(v)) return
+    background.value = v
+    localStorage.setItem(BACKGROUND_KEY, v)
+  }
+  return { gridZ, setGridZ, background, setBackground }
 }

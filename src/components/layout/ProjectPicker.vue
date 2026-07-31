@@ -15,7 +15,7 @@ const props = defineProps({
 
 const emit = defineEmits([
   'switch', 'rename', 'delete', 'new', 'open-file', 'open-folder', 'close',
-  'save-copy', 'move-to-folder', 'move-to-browser',
+  'settings', 'save-copy', 'move-to-folder', 'move-to-browser',
 ])
 
 // Per-project actions live in one row menu rather than a row of icon buttons:
@@ -180,6 +180,12 @@ onBeforeUnmount(() => {
          in a transformed ancestor — which would re-root `position: fixed`. -->
     <Teleport to="body">
     <div v-if="menu" class="row-menu" :style="{ left: menu.x + 'px', top: menu.y + 'px' }">
+      <button
+        class="menu-item"
+        :disabled="menu.id !== currentProjectId"
+        :title="menu.id !== currentProjectId ? 'Open this project first' : 'Edit this project’s properties and storage'"
+        @click="runMenu(() => emit('settings', menu.id))"
+      >Project settings…</button>
       <button class="menu-item" @click="runMenu(() => startRename(menu.project))">Rename…</button>
       <button
         class="menu-item"

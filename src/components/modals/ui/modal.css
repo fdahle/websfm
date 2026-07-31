@@ -84,6 +84,7 @@
 .field-input:focus { outline: none; border-color: var(--accent); }
 .field-select { width: auto; min-width: 180px; cursor: pointer; }
 .field-unit { font-size: 12px; color: var(--text-dim); }
+.field-input.range { width: 100%; padding: 0; accent-color: var(--accent); }
 
 .checkbox-row { display: flex; align-items: center; gap: 8px; cursor: pointer; }
 .checkbox { width: 14px; height: 14px; cursor: pointer; accent-color: var(--accent); }
@@ -103,6 +104,44 @@
 .seg-btn:hover:not(:disabled) { background: var(--hover-bg); }
 .seg-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
 .seg-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Choice cards (ChoiceCards.vue) — a SegmentedControl with room for an example
+   picture + a one-line blurb. Same card look as PresetCards, but these pick the
+   value of one setting rather than a whole preset, so there is no "modified" state. */
+.choice-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 8px;
+}
+.choice-card {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  text-align: left;
+  background: var(--bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 7px;
+  padding: 8px 9px;
+  cursor: pointer;
+  color: var(--text);
+  font: inherit;
+}
+.choice-card:hover:not(:disabled) { border-color: var(--text-dim); }
+.choice-card.active {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+  color: var(--accent);
+}
+.choice-card:disabled { opacity: 0.4; cursor: not-allowed; }
+.choice-card-visual {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 0 4px;
+}
+.choice-card-label { font-size: 12px; font-weight: 600; }
+.choice-card-blurb { font-size: 11px; color: var(--text-dim); line-height: 1.35; }
 
 /* Disclosure toggle */
 .link-btn {
