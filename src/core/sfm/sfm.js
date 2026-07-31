@@ -37,6 +37,7 @@ import {
   distortionIdentifiable, withoutDistortionTerms,
 } from './selfCalSchedule.js'
 import { fitComposedRadial, radialCurveOk } from './selfCalCompose.js'
+import { validateSelfCalUpdate } from './selfCalGuard.js'
 import { adaptiveReprojThreshold, CLEANUP_THRESHOLD_DEFAULTS } from './cleanupThreshold.js'
 import { fitSimilarity, frameFromSimilarity } from '../products/georef.js'
 import { graphHealth } from '../eval/matchGraph.js'
@@ -95,12 +96,16 @@ async function reconstructSingleModel(input, hooks = {}) {
     refineIntrinsics: cfg.refineIntrinsics,
     rotationCycleFilter: settings.rotationCycleFilter !== false,
     secondaryModels: settings.secondaryModels !== false,
+    selfCalMaxFocalStepFrac: cfg.selfCalMaxFocalStepFrac,
+    selfCalMaxFocalNominalFrac: cfg.selfCalMaxFocalNominalFrac,
+    selfCalMaxPrincipalOffsetFrac: cfg.selfCalMaxPrincipalOffsetFrac,
+    selfCalMaxCornerShiftFrac: cfg.selfCalMaxCornerShiftFrac,
   }
   // Filled in below as each stage runs; every field stays null when its stage
   // didn't run, so a missing number is never confused with a zero.
   let gateRecord = null       // resolved reprojection gates + the detection-scale factor
   let cycleRecord = null      // rotation-cycle filter verdict + drop/re-admit counts
-  const selfCalRecord = { requested: cfg.refineIntrinsics, resolved: null, staged: false, passes: [] }
+  const selfCalRecord = { requested: cfg.refineIntrinsics, resolved: null, staged: false, passes: [], adjustments: [] }
   const intrinsicsRecord = new Map() // sensorId → { fxNominal, fxFinal, cx, cy, source, label }
 
   // Reprojection gates are configured in DETECTION pixels but applied to keypoints
@@ -635,6 +640,10 @@ async function reconstructSingleModel(input, hooks = {}) {
     cameras.set(bestPair.idA, best.cA)
     cameras.set(bestPair.idB, best.cB)
     points3d = best.points
+    // `points3d` initially aliases best.points and registration appends to it until
+    // the first BA replaces the array. Snapshot now; otherwise diagnostics.seed.points
+    // accidentally reports the model size at first BA rather than the seed size.
+    const seedPointCount = best.points.length
 
     log(`initial pair ${imgA.name} ↔ ${imgB.name} `
       + `(${best.inliers} inliers, ${best.points.length} pts, ${best.angle.toFixed(2)}° parallax)`,
@@ -867,6 +876,51 @@ async function reconstructSingleModel(input, hooks = {}) {
             'warn', 'Reconstruction')
         }
         return
+      }
+
+      // Self-calibration is destructive only after this point: accepted radial terms
+      // are folded into every image's keypoints. Validate the detached BA result first,
+      // and reject the whole update transaction if any shared sensor is implausible.
+      // Reprojection cost alone cannot catch focal/distortion overfit on thin blocks.
+      if (refineMode !== 'none' && result.intrinsics) {
+        const checkedGroups = new Set()
+        const proposals = []
+        let rejected = null
+        for (let ci = 0; ci < uuidList.length; ci++) {
+          const group = sensorOfCam[ci]
+          const groupKey = group >= 0 ? `sensor:${group}` : `camera:${ci}`
+          if (checkedGroups.has(groupKey)) continue
+          checkedGroups.add(groupKey)
+          const uuid = uuidList[ci]
+          const img = imageByUuid(uuid)
+          const sid = img?.sensorId ?? `image:${uuid}`
+          const nominalFx = intrinsicsRecord.get(sid)?.fxNominal ?? kList[ci]?.fx
+          const width = img?.meta?.width ?? img?.width ?? 0
+          const height = img?.meta?.height ?? img?.height ?? 0
+          const proposed = result.intrinsics[ci]
+          const verdict = validateSelfCalUpdate({
+            before: kList[ci], proposed, nominalFx, width, height,
+          }, {
+            maxFocalStepFrac: cfg.selfCalMaxFocalStepFrac,
+            maxFocalNominalFrac: cfg.selfCalMaxFocalNominalFrac,
+            maxPrincipalOffsetFrac: cfg.selfCalMaxPrincipalOffsetFrac,
+            maxCornerShiftFrac: cfg.selfCalMaxCornerShiftFrac,
+          })
+          proposals.push({
+            sensorId: img?.sensorId ?? null,
+            fxBefore: kList[ci]?.fx ?? null,
+            fxProposed: proposed?.fx ?? null,
+            k1: proposed?.k1 ?? 0, k2: proposed?.k2 ?? 0, k3: proposed?.k3 ?? 0,
+            accepted: verdict.ok, rejectionCode: verdict.code, rejectionReason: verdict.reason,
+          })
+          if (!verdict.ok && !rejected) rejected = verdict
+        }
+        selfCalRecord.adjustments.push({ label, mode: refineMode, accepted: !rejected, sensors: proposals })
+        if (rejected) {
+          log(`${label} self-calibration REJECTED before commit — ${rejected.reason}; `
+            + 'keeping cameras, points, intrinsics, and keypoints unchanged', 'warn', 'Reconstruction')
+          return
+        }
       }
       uuidList.forEach((uuid, ci) => {
         const old = cameras.get(uuid)
@@ -1506,7 +1560,14 @@ async function reconstructSingleModel(input, hooks = {}) {
     }
     // Final focal per sensor, from the registered cameras' K (BA writes refined
     // intrinsics back onto it) and falling back to Kmap for an unregistered sensor.
-    for (const img of imgs) {
+    // Prefer an actually registered camera for each sensor. The previous image-order
+    // loop could see an unregistered first image, mark the shared sensor false, and
+    // then suppress every later registered image because fxFinal was already filled.
+    const finalIntrinsicsImages = [
+      ...imgs.filter((img) => cameras.has(img.uuid)),
+      ...imgs.filter((img) => !cameras.has(img.uuid)),
+    ]
+    for (const img of finalIntrinsicsImages) {
       const sid = img.sensorId ?? `image:${img.uuid}`
       const rec = intrinsicsRecord.get(sid)
       if (!rec || rec.fxFinal != null) continue
@@ -1528,7 +1589,7 @@ async function reconstructSingleModel(input, hooks = {}) {
         idA: bestPair.idA, idB: bestPair.idB, nameA: imgA.name, nameB: imgB.name,
         // The seed record IS the SB acceptance test (TODO ▸ SB): which pair won, on
         // what evidence, and how close the runner-up was.
-        angleDeg: best.angle, inliers: best.inliers, points: best.points.length,
+        angleDeg: best.angle, inliers: best.inliers, points: seedPointCount,
         score: best.score ?? null,
         // Graph degree + PnP-ready third views come from the candidate table (the
         // scorer computes them there); they are the two signals the 2026-07-22
@@ -1726,7 +1787,10 @@ export async function reconstruct(input, hooks = {}) {
     minImages: cfg.secondaryMinImages,
     maxBoundary: cfg.secondaryBoundaryImages,
   })
-  if (!jobs.length) return withRunRecord(primary)
+  if (!jobs.length) {
+    primary.summary = { ...(primary.summary || {}), secondaryRecovery: { jobs: 0, merged: [], separate: [] } }
+    return withRunRecord(primary)
+  }
   // Declared after `jobs` on purpose — it closes over it, and a const read from an
   // arrow hoisted above its declaration is a TDZ waiting to happen.
   const secondaryRange = (ji) => {
@@ -1792,6 +1856,21 @@ export async function reconstruct(input, hooks = {}) {
       + `${(100 * report.scaleSpread).toFixed(2)}%`, 'success', 'Reconstruction')
   }
   primary.secondaryModels = secondaryModels
-  primary.summary = { ...(primary.summary || {}), secondaryMerges: mergeReports }
+  primary.summary = {
+    ...(primary.summary || {}),
+    secondaryMerges: mergeReports,
+    secondaryRecovery: {
+      jobs: jobs.length,
+      merged: mergeReports,
+      separate: secondaryModels.map((m) => ({
+        name: m.name,
+        componentImages: m.componentImageUuids?.length ?? 0,
+        cameras: m.cameras?.length ?? 0,
+        points: m.points?.length ?? 0,
+        sharedCameras: m.alignment?.sharedCameras ?? 0,
+        reason: m.alignment?.reason ?? 'alignment rejected',
+      })),
+    },
+  }
   return withRunRecord(primary)
 }

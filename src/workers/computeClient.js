@@ -10,7 +10,13 @@
 
 // One worker per core (minus one for the UI thread), capped so we don't spawn a
 // pile of workers that each load their own wasm copy on first use.
-export const POOL_SIZE = Math.max(1, Math.min(8, (navigator.hardwareConcurrency || 4) - 1))
+export const MAX_POOL_SIZE = Math.max(1, Math.min(8, (navigator.hardwareConcurrency || 4) - 1))
+const storedPoolSize = typeof localStorage === 'undefined'
+  ? 0
+  : Number(localStorage.getItem('websfm.compute.workerCount'))
+export let POOL_SIZE = storedPoolSize > 0
+  ? Math.max(1, Math.min(MAX_POOL_SIZE, Math.round(storedPoolSize)))
+  : MAX_POOL_SIZE
 
 let workers = null
 let rr = 0
@@ -64,6 +70,24 @@ export function terminateAll(reason = 'cancelled') {
   workers = null
   if (oldWorkers) for (const w of oldWorkers) w.terminate()
   for (const [id, entry] of pending) { pending.delete(id); entry.reject(new Error(reason)) }
+}
+
+// Reconfigure only while idle: killing a pool with active jobs would turn a
+// harmless preference change into a cancelled reconstruction. Returns false
+// when a run is active; the persisted choice still takes effect after reload.
+export function configureWorkerPoolSize(value) {
+  const requested = Number(value)
+  const next = requested > 0
+    ? Math.max(1, Math.min(MAX_POOL_SIZE, Math.round(requested)))
+    : MAX_POOL_SIZE
+  if (next === POOL_SIZE) return true
+  if (pending.size) return false
+  const oldWorkers = workers
+  workers = null
+  if (oldWorkers) for (const worker of oldWorkers) worker.terminate()
+  rr = 0
+  POOL_SIZE = next
+  return true
 }
 
 function call(op, args, { transfer = [], onEvent, worker: pinned } = {}) {

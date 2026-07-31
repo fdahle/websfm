@@ -45,6 +45,8 @@ const px = (v) => (v == null ? '—' : `${v.toFixed(1)} px`)
  * @property {number} [graphComponents] match-graph component count (optional)
  * @property {number} [focalDeltaPct]  worst |Δ focal| vs nominal, % (optional)
  * @property {number} [depthCoveragePct] mean per-map valid-depth coverage, % (dense; optional)
+ * @property {string} [selfCalResolved] actual sparse self-cal mode ('none', 'f,k1', …)
+ * @property {number} [separateSecondaryModels] usable secondary models that could not be aligned
  * @property {Array<{name?: string, reason?: string}>} [unregistered] names to list in the fix
  */
 
@@ -87,9 +89,13 @@ export function buildVerdict(snapshot = {}) {
       const missing = total - reg
       const names = (s.unregistered || []).map((u) => u.name).filter(Boolean).slice(0, 5)
       const listed = names.length ? ` (e.g. ${names.join(', ')}${missing > names.length ? ', …' : ''})` : ''
+      const secondary = s.separateSecondaryModels > 0
+        ? ` ${s.separateSecondaryModels} additional usable model(s) were reconstructed but could not be aligned to the primary.` : ''
       add(level, 'registration',
-        `Only ${reg}/${total} images registered (${pct(regPct)})${listed}.`,
-        'Add overlapping images or loop closures between the disconnected parts, lower minMatches, or enable Preselect if you imported poses/GPS.')
+        `Only ${reg}/${total} images registered in the primary (${pct(regPct)})${listed}.${secondary}`,
+        s.graphComponents > 1
+          ? 'The verified match graph is split. Add bridging images, use exhaustive/pose preselection, or run targeted cross-component matching; lowering reconstruction gates cannot reconnect a split graph.'
+          : 'Inspect the unregistered-image and self-calibration diagnostics first. Add overlap where correspondences are absent; only lower matching floors when the match graph itself is demonstrably too sparse.')
     }
   }
 
@@ -100,16 +106,22 @@ export function buildVerdict(snapshot = {}) {
     const ratio = p95 / med
     const level = ratio >= REPROJ_TAIL_BAD ? 'red' : ratio >= REPROJ_TAIL_WARN ? 'yellow' : null
     if (level) {
-      add(level, 'distortion',
+      const selfCalKnown = s.selfCalResolved != null
+      const selfCalActive = selfCalKnown && s.selfCalResolved !== 'none'
+      const code = selfCalActive ? 'reprojection-tail' : 'distortion'
+      const fix = selfCalActive
+        ? 'Self-calibration already ran, so this ratio alone does not prove uncorrected distortion. Inspect the worst residual images and the spatial/radial residual plot; remove localized bad tracks or images, and only change the lens model if the residuals grow coherently toward the corners.'
+        : 'This can indicate uncorrected lens distortion, but the ratio alone is not proof. Inspect residuals versus image radius; if they grow toward the corners, enable self-calibration or set a calibrated distortion model.'
+      add(level, code,
         `Reprojection tail is ${ratio.toFixed(1)}× the median (median ${px(med)}, p95 ${px(p95)}).`,
-        'The corners project worse than the centre — a sign of uncorrected lens distortion. Turn on self-calibration (Reconstruct ▸ auto / f,k1), or set a calibrated distortion model on the sensor, and re-run.')
+        fix)
     }
   }
 
   // 4. Absolute reprojection median (a bad solve even without a tail).
   {
     const level = toneToLevel(classify(med, EVAL_THRESHOLDS.reprojMedianPx))
-    if (level && !findings.some((f) => f.code === 'distortion')) {
+    if (level && !findings.some((f) => f.code === 'distortion' || f.code === 'reprojection-tail')) {
       add(level, 'reprojection',
         `Reprojection median is ${px(med)}.`,
         'Tighten the reprojection gate and add BA iterations (Reconstruct ▸ High), and remove any high-residual images.')

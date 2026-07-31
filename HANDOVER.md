@@ -203,6 +203,37 @@ fiducials; self-calibration (A2) + fiducials (F4) are the code-side support.
 
 ## Done log (most recent first)
 
+- **2026-07-31 · Batch consensus for fiducial detection** (`core/sfm/fiducialConsensus.js`,
+  wired in `useImagesStore.detectFiducialsForSensor`, reason `batch-outlier` in the review
+  queue). Motivated by a measured TMA failure: on a synthetic Trimetrogon scan with the
+  data strip (clock faces + annotation blocks in the left border), the left mid-side mark
+  is captured by a text block and **silently accepted 60 px off** with a healthy ZNCC score
+  (0.52) — no per-image gate can see it. Cross-image disagreement can: the mark sits at the
+  same frame-relative place in every scan of a flight, the annotations do not. Measured on
+  an 8-image synthetic batch with per-image annotation text: 3 of 8 left marks captured
+  (67–78 px off), **3/3 caught, 0 false positives**, tolerance 10 px against a batch spread
+  of 0.02% of frame width. Known limit, by construction: if a majority of the batch is
+  captured by the *same* wrong feature, the median follows it.
+  Also measured on the same synthetic (Generic + Sides + polarity Auto, tolerance 0.5):
+  4/4 marks at ≤1 px under grain, 0.35× contrast, and ±40 px mark displacement.
+
+- **2026-07-30 · Detect Fiducials modal redesigned; the generic prototype family was
+  three blobs, not three shapes.** The modal now follows the shared framework (hero
+  choice → grouped fields → `AdvancedDisclosure`, `SegmentedControl` for positions and
+  polarity, `StatTiles` + `DataTable` for results instead of hand-rolled tables).
+  Detection type is a new shared `ui/ChoiceCards.vue` — a `SegmentedControl` with room
+  for an example picture — each card carrying a small SVG of the mark
+  (`components/modals/fiducial/FiducialFamilyGlyph.vue`). Drawing those pictures is what
+  surfaced the bug: `makeFiducialPrototype`'s generic branch folded the variant test and
+  the geometry test into one condition, so every pixel outside a variant's own shape fell
+  through to the `else` and got the **ring** drawn on it. Measured before the fix: the
+  "dot" variant (radius 4.5 in a 25 px patch) had dark pixels out to radius **10.2** — a
+  solid disc; the "crosshair" was a cross inside that disc. All three swept templates were
+  therefore near-identical, costing the family the discrimination it exists for. Fixed by
+  branching on the variant first (`core/sfm/fiducialPrimitives.js`), pinned by a regression
+  test. **This changes detection results on real scans** — the generic sweep is genuinely
+  three shapes now, so re-check a film set whose marks were tuned against the old blob.
+
 - **2026-07-25 · Model-download consent was unreachable behind the progress modal.** First
   SuperPoint (or LightGlue) run: the stage opens `ProgressModal` (overlay `z-index: 300`)
   and only *then* does the store raise the weight-download prompt from inside the run —

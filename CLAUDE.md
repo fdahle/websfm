@@ -542,6 +542,17 @@ self-contained, file-based project format.
      set of primitives in `core/sfm/fiducialPrimitives.js` — analytic prototype,
      film-frame estimate, best ZNCC peak. They were forked copies once and drifted
      into two live bugs; add shared math there, not in either policy.
+     **A wrong-but-confident mark is caught across images, never within one**
+     (`core/sfm/fiducialConsensus.js`, run by `detectFiducialsForSensor` once the
+     whole batch is in): a slot sits at the same frame-relative place in every scan
+     of a flight, so anything else near it (a data-strip annotation block) gives
+     itself away only by disagreeing with the batch — its own ZNCC score looks
+     healthy. Demotes to the review queue, never deletes. Same two rules as the
+     dense cross-view filter: every slot's consensus is computed **before** anything
+     is demoted (else image i is judged against i−1's already-thinned set, making the
+     result order-dependent), and the batch uses **one** normalisation basis —
+     frame-relative when every row has a usable film frame, else raster-relative for
+     all, since comparing the two is meaningless.
      **A ZNCC template must be odd-sized** — `znccAt` derives
      `half = (size−1)/2`, and an even size makes every pixel read a fractional
      index, i.e. `undefined` → NaN → a score of 0 that looks like an honest

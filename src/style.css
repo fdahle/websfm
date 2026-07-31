@@ -1,4 +1,6 @@
 :root {
+  --ui-scale: 1;
+  --ui-scale-inverse: 1;
   --bg: #1e1e1e;
   --panel: #252526;
   --panel-border: #333;
@@ -54,6 +56,26 @@ body {
   background: var(--bg);
   color: var(--text);
   overflow: hidden;
+}
+
+/* Explicit accessibility override. The default continues to follow the user's
+   operating-system preference; Settings can force the reduced-motion variant. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+html[data-reduce-motion] *,
+html[data-reduce-motion] *::before,
+html[data-reduce-motion] *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  scroll-behavior: auto !important;
+  transition-duration: 0.001ms !important;
 }
 
 /* Drag handle injected by the v-col-resize directive onto resizable <th>s. */

@@ -11,6 +11,7 @@ import { fitFiducialAffine, mmToScan } from '../core/sfm/fiducials.js'
 import { gateFiducialDetections, FIDUCIAL_DETECT_TUNING } from '../core/sfm/fiducialDetect.js'
 import { FIDUCIAL_DETECT_DEFAULTS } from '../core/defaults.user.js'
 import { migrateLegacyFiducialImage } from '../core/sfm/fiducialModel.js'
+import { fiducialBatchConsensus } from '../core/sfm/fiducialConsensus.js'
 import { buildBorderMask } from '../core/mask.js'
 import { resolveDetectMaxDim } from '../core/features/detectResolution.js'
 import { useLog } from '../composables/useLog.js'
@@ -636,6 +637,38 @@ export const useImagesStore = defineStore('images', () => {
         }
       } catch (err) { log(`${img.name}: anonymous template retry failed — ${err.message}`, 'warn', 'Fiducial') }
     }
+    // Cross-image agreement, once the whole batch (including the template retry)
+    // is in. A mark that disagrees with the rest of the flight is demoted to the
+    // review queue — the case a per-image score cannot catch is a wrong-but-confident
+    // hit on something else near the slot (a data-strip annotation block).
+    const consensus = fiducialBatchConsensus(buffered.map((r) => ({
+      id: r.id, name: r.name, accepted: r.out.accepted || [],
+      frame: r.out.frame, natW: r.out.natW, natH: r.out.natH,
+    })))
+    for (const s of consensus.perSlot) {
+      if (!s.checked) { log(`Batch consensus: ${s.slot} skipped — only ${s.n} image(s)`, 'debug', 'Fiducial'); continue }
+      log(`Batch consensus (${consensus.basis}-relative): ${s.slot} over ${s.n} image(s), `
+        + `spread ${(s.spreadFrac * 100).toFixed(2)}% of frame width, tolerance ${(s.tolFrac * 100).toFixed(2)}%`,
+        'debug', 'Fiducial')
+    }
+    if (consensus.outliers.length) {
+      const dropBySlot = new Map()
+      for (const o of consensus.outliers) {
+        if (!dropBySlot.has(o.imageId)) dropBySlot.set(o.imageId, new Set())
+        dropBySlot.get(o.imageId).add(o.slot)
+        log(`${o.imageName ?? o.imageId}: ${o.slot} disagrees with the batch — `
+          + `${o.distPx.toFixed(1)} px from the batch position (tolerance ${o.tolPx.toFixed(1)} px); sent to review`,
+          'warn', 'Fiducial')
+      }
+      for (const row of buffered) {
+        const drop = dropBySlot.get(row.id)
+        if (!drop) continue
+        row.out.drafts = [...(row.out.drafts || []),
+          ...(row.out.accepted || []).filter((d) => drop.has(d.slot)).map((d) => ({ ...d, reason: 'batch-outlier' }))]
+        row.out.accepted = (row.out.accepted || []).filter((d) => !drop.has(d.slot))
+      }
+    }
+
     let applied = 0, masksGenerated = 0
     for (const row of buffered) {
       const img = imageById(row.id)

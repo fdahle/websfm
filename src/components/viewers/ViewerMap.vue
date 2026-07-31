@@ -29,6 +29,9 @@ import { useContextMenu } from '../../composables/useContextMenu.js'
 import { copyToClipboard } from '../../composables/useToasts.js'
 import ViewerContextMenu from './ViewerContextMenu.vue'
 import GcpToolbar from './GcpToolbar.vue'
+import { useMapSettings } from '../../composables/useMapSettings.js'
+
+const { basemap } = useMapSettings()
 
 const props = defineProps({
   images:     { type: Array,  default: () => [] },
@@ -617,14 +620,18 @@ async function build() {
     }),
     controls: [new Attribution({ collapsible: true })],
   })
+  const builtMap = map
 
-  // Add the basemap below the grid (index 0).
-  if (info.basemap === 'osm') {
+  // Add the selected basemap below the grid (index 0). "Automatic" preserves
+  // the CRS-aware polar layers; an explicit street layer uses OSM everywhere.
+  if (basemap.value === 'streets' || (basemap.value === 'auto' && info.basemap === 'osm')) {
     map.getLayers().insertAt(0, makeOsmLayer())
-  } else if (info.basemap === 'gibs') {
+  } else if (basemap.value === 'auto' && info.basemap === 'gibs') {
     addGibsLayer(info)
-      .then((layer) => { if (map) map.getLayers().insertAt(0, layer) })
-      .catch(() => { basemapNote.value = 'Polar basemap unavailable — showing grid only.' })
+      .then((layer) => { if (map === builtMap) builtMap.getLayers().insertAt(0, layer) })
+      .catch(() => {
+        if (map === builtMap) basemapNote.value = 'Polar basemap unavailable — showing grid only.'
+      })
   }
 
   syncRasterLayers()
@@ -749,6 +756,13 @@ watch(() => props.rasters, syncRasterLayers, { deep: true })
 
 // Rebuild the whole map when the project CRS changes
 watch(() => props.crs, async () => {
+  destroy()
+  await build()
+  map?.updateSize()
+})
+
+// A basemap preference change is immediately visible in an already-open map.
+watch(basemap, async () => {
   destroy()
   await build()
   map?.updateSize()

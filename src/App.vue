@@ -22,6 +22,7 @@ import DebugSummaryModal from './components/modals/DebugSummaryModal.vue'
 import ProgressModal from './components/modals/ProgressModal.vue'
 import ModelDownloadModal from './components/modals/ModelDownloadModal.vue'
 import SettingsModal from './components/modals/SettingsModal.vue'
+import ProjectSettingsModal from './components/modals/ProjectSettingsModal.vue'
 import AboutModal from './components/modals/AboutModal.vue'
 import SystemInfoModal from './components/modals/SystemInfoModal.vue'
 import NewProjectModal from './components/modals/NewProjectModal.vue'
@@ -94,7 +95,7 @@ const { theme, applyTheme, setTheme } = useTheme()
 // ── Projects ──────────────────────────────────────────────────────────────────
 const projectsStore = useProjectsStore()
 const {
-  persistenceAvailable, projects, currentProjectId, currentProjectName, currentSceneType, currentCrs,
+  persistenceAvailable, projects, currentProjectId, currentProject, currentProjectName, currentSceneType, currentCrs,
 } = storeToRefs(projectsStore)
 const {
   setPersistenceAvailable, loadIndex, setProjectCrs, renameProject, folderSupported,
@@ -163,7 +164,13 @@ const { sidebarWidth, startSidebarResize } = useSidebarResize()
 // Project-scoped store; restore/clear run through the project-store registry.
 const reconstructionStore = useReconstructionStore()
 const { cameras, sparseCameras, points3d, reconStatus, clouds, selectedCloudId, selectedCloud, mainSparseId, mainSparseCloud, depthMapCount, dem, ortho, georef, canGeoreference, denseSummary } = storeToRefs(reconstructionStore)
-const { reconstruct, importColmapModel, importCloud, editClouds, computeDepthMaps, densify, generateDem, generateOrtho, generateMesh, georeference, gcpAccuracyReport, gcpGuides, gcpEstimate, selectCloud, removeCloud, renameCloud, setMainSparse } = reconstructionStore
+const { reconstruct, importColmapModel, importCloud, editClouds, computeDepthMaps, densify, generateDem, generateOrtho, generateMesh, georeference, gcpAccuracyReport, gcpGuides, gcpEstimate, selectCloud, removeCloud, renameCloud, setMainSparse, clearDerived: clearReconstructionDerived } = reconstructionStore
+
+async function clearCurrentProjectDerived() {
+  await clearReconstructionDerived()
+  // Product tabs would otherwise remain open with a now-null backing raster.
+  for (const tab of [...tabs.value]) if (tab.type === 'product') closeTab(tab.id)
+}
 
 // ── External reference data (imported DEMs / orthophotos) ─────────────────────
 // Project-scoped; restore/clear run through the project-store registry. Only the
@@ -440,7 +447,7 @@ const footprintImageCount = computed(() => {
 
 // ── Modals ────────────────────────────────────────────────────────────────────
 const {
-  settingsOpen, aboutOpen, systemInfoOpen,
+  settingsOpen, projectSettingsOpen, aboutOpen, systemInfoOpen,
   projectPickerOpen, newProjectOpen, newProjectCanCancel, saveProjectOpen,
   detectFeaturesOpen, matchFeaturesOpen,
   imageTableOpen, maskManagerOpen, autoMaskOpen, sensorTableOpen, gcpTableOpen, matchListOpen, reconstructOpen,
@@ -566,6 +573,7 @@ const imagesLoading = computed(() => images.value.some(img => img.loading || img
 // Guard state for the DevConsole command line — same prerequisite flags the
 // ribbon uses to enable/disable buttons (see core/help/commands.js guardReason).
 const commandState = computed(() => ({
+  projectReady:  !!currentProjectId.value,
   imageCount:    images.value.length,
   imagesLoading: imagesLoading.value,
   kpImageCount:  kpImageCount.value,
@@ -1196,6 +1204,7 @@ const MODAL_COMMANDS = {
   'merge-clouds':          mergeCloudsOpen,
   'footprints-from-poses': footprintFromPosesOpen,
   'open-settings':         settingsOpen,
+  'open-project-settings': projectSettingsOpen,
   'open-about':            aboutOpen,
   'open-system-info':      systemInfoOpen,
   'open-debug-summary':    debugSummaryOpen,
@@ -1416,6 +1425,7 @@ function onRibbonPick(event) {
       @save-copy="() => { projectPickerOpen = false; saveProjectOpen = true }"
       @move-to-folder="(id) => { projectPickerOpen = false; moveCurrentProjectToFolder(id) }"
       @move-to-browser="(id) => { projectPickerOpen = false; moveCurrentProjectToBrowser(id) }"
+      @settings="() => { projectPickerOpen = false; projectSettingsOpen = true }"
       @close="projectPickerOpen = false"
     />
 
@@ -1669,10 +1679,15 @@ function onRibbonPick(event) {
       <SettingsModal
         v-if="settingsOpen"
         :theme="theme"
-        :crs="currentProjectId ? currentCrs : null"
-        :scene-type="currentSceneType"
         @close="settingsOpen = false"
         @set-theme="setTheme"
+      />
+      <ProjectSettingsModal
+        v-if="projectSettingsOpen && currentProject"
+        :project="currentProject"
+        :clear-derived="clearCurrentProjectDerived"
+        @close="projectSettingsOpen = false"
+        @rename="(name) => renameProject(currentProjectId, name)"
         @set-crs="handleSetCrs"
       />
     </Teleport>
@@ -2121,8 +2136,9 @@ function onRibbonPick(event) {
 .app {
   display: flex;
   flex-direction: column;
-  height: 100%;
-  width: 100%;
+  height: calc(100% * var(--ui-scale-inverse));
+  width: calc(100% * var(--ui-scale-inverse));
+  zoom: var(--ui-scale);
 }
 
 .layout {

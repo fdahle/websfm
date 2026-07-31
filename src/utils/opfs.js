@@ -179,6 +179,16 @@ export async function* walkProjectFiles(projectId, { skip = null } = {}) {
   yield* walkDir(dir, '', skip)
 }
 
+// Remove only artifacts that are safe to regenerate. Source images,
+// keypoints/matches, masks, sparse/dense clouds, GCPs, and imports are retained.
+// This is also the exact set omitted by "exclude cached/derived data" archives.
+export async function deleteProjectDerived(projectId) {
+  const dir = await getProjectDir(projectId)
+  for (const name of ['images-derived', 'depthmaps', 'products']) {
+    await dir.removeEntry(name, { recursive: true }).catch(() => {})
+  }
+}
+
 // Write one file at `relPath` inside the project dir, creating intermediate
 // directories. `data` is anything createWritable() accepts (Blob / ArrayBuffer /
 // TypedArray / string). Rejects traversal outside the project dir — `relPath`

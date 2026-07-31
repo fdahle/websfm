@@ -1,42 +1,85 @@
 <script setup>
-import { ref } from 'vue'
-import CrsPicker from '../controls/CrsPicker.vue'
+import { computed, onMounted, ref } from 'vue'
 import { useGlossarySettings } from '../../composables/useGlossarySettings.js'
 import { useComputeSettings } from '../../composables/useComputeSettings.js'
 import { useViewerSettings } from '../../composables/useViewerSettings.js'
 import { useUiSettings } from '../../composables/useUiSettings.js'
 import { useBrowserWarning } from '../../composables/useBrowserWarning.js'
+import { useMapSettings } from '../../composables/useMapSettings.js'
+import { formatBytes } from '../../core/io/projectArchive.js'
+import { MODEL_CACHE_NAME } from '../../core/models/registry.js'
+import * as opfs from '../../utils/opfs.js'
+
+defineProps({ theme: String })
+const emit = defineEmits(['close', 'set-theme'])
 
 const { isChromium, warningEnabled, setEnabled: setBrowserWarningEnabled } = useBrowserWarning()
 const { glossaryTermsEnabled, setGlossaryTermsEnabled } = useGlossarySettings()
-const { memBudgetGb, setMemBudgetGb, useGpu, setUseGpu } = useComputeSettings()
-const { advancedSettingsExpanded, setAdvancedSettingsExpanded } = useUiSettings()
-const { gridZ, setGridZ } = useViewerSettings()
-
-defineProps({
-  theme: String,
-  crs: { type: String, default: null },
-  sceneType: { type: String, default: null },
-})
-const emit = defineEmits(['close', 'set-theme', 'set-crs'])
+const { memBudgetGb, setMemBudgetGb, useGpu, setUseGpu, workerCount, setWorkerCount, MAX_POOL_SIZE } = useComputeSettings()
+const { advancedSettingsExpanded, setAdvancedSettingsExpanded, uiScale, setUiScale, motion, setMotion } = useUiSettings()
+const { gridZ, setGridZ, background, setBackground } = useViewerSettings()
+const { basemap, setBasemap } = useMapSettings()
 
 const tabs = [
-  { id: 'project', label: 'Project' },
-  { id: 'display', label: 'Display' },
+  { id: 'general', label: 'General' },
+  { id: 'visualization', label: 'Map & 3D' },
   { id: 'compute', label: 'Compute' },
   { id: 'storage', label: 'Storage' },
-  { id: 'debug', label: 'Debug' },
 ]
-const activeTab = ref('project')
+const activeTab = ref('general')
 
-// --- Mockup-only state (not wired to anything yet) ---
-const gcpAccuracyH = ref('0.05')
-const gcpAccuracyV = ref('0.10')
-const units = ref('metric')
-const baseLayer = ref('satellite')
-const markerSize = ref(6)
-const showDevConsole = ref(false)
-const verboseLogging = ref(false)
+const storageUsage = ref(null)
+const storageQuota = ref(null)
+const storageDurable = ref(null)
+const storageBusy = ref(false)
+const storageMessage = ref('')
+const usagePercent = computed(() => storageQuota.value > 0
+  ? Math.min(100, (storageUsage.value / storageQuota.value) * 100)
+  : 0)
+
+async function refreshStorage() {
+  storageMessage.value = ''
+  try {
+    const estimate = await opfs.getQuota()
+    storageUsage.value = estimate.usage ?? 0
+    storageQuota.value = estimate.quota ?? 0
+    storageDurable.value = navigator.storage?.persisted
+      ? await navigator.storage.persisted()
+      : null
+  } catch (err) {
+    storageMessage.value = `Storage information is unavailable: ${err?.message ?? err}`
+  }
+}
+
+async function requestDurableStorage() {
+  storageBusy.value = true
+  try {
+    storageDurable.value = await opfs.requestDurable()
+    storageMessage.value = storageDurable.value
+      ? 'Persistent storage enabled.'
+      : 'The browser did not grant persistent storage. Projects still save normally, but may be evicted if space is critically low.'
+  } catch (err) {
+    storageMessage.value = `Could not request persistent storage: ${err?.message ?? err}`
+  } finally {
+    storageBusy.value = false
+  }
+}
+
+async function clearModelCache() {
+  if (!window.confirm('Remove downloaded AI models? They will be downloaded again when needed. Projects are not affected.')) return
+  storageBusy.value = true
+  try {
+    const removed = typeof caches !== 'undefined' && await caches.delete(MODEL_CACHE_NAME)
+    await refreshStorage()
+    storageMessage.value = removed ? 'Downloaded AI models removed.' : 'No downloaded AI models were stored.'
+  } catch (err) {
+    storageMessage.value = `Could not clear downloaded models: ${err?.message ?? err}`
+  } finally {
+    storageBusy.value = false
+  }
+}
+
+onMounted(refreshStorage)
 </script>
 
 <template>
@@ -56,53 +99,15 @@ const verboseLogging = ref(false)
           :class="{ active: activeTab === tab.id }"
           :aria-selected="activeTab === tab.id"
           @click="activeTab = tab.id"
-        >
-          {{ tab.label }}
-        </button>
+        >{{ tab.label }}</button>
       </div>
 
       <div class="modal-body">
-        <!-- Project -->
-        <template v-if="activeTab === 'project'">
-          <div v-if="crs && sceneType !== 'object'" class="setting-row setting-row-stacked">
-            <div class="setting-info">
-              <span class="setting-label">Coordinate system</span>
-              <span class="setting-desc">Working CRS for this project's map, GCPs and cameras. Changing it re-projects existing data.</span>
-            </div>
-            <CrsPicker :model-value="crs" @update:model-value="emit('set-crs', $event)" />
-          </div>
-          <div v-else-if="sceneType === 'object'" class="setting-row setting-row-stacked">
-            <div class="setting-info">
-              <span class="setting-label">Coordinate system</span>
-              <span class="setting-desc">Object-capture projects have no coordinate system — scale is set manually.</span>
-            </div>
-            <CrsPicker :model-value="crs || 'EPSG:4326'" disabled />
-          </div>
-          <div v-else class="empty-note">Open a project to edit its coordinate system.</div>
-
-          <div class="setting-row setting-row-stacked">
-            <div class="setting-info">
-              <span class="setting-label">Default GCP accuracy <span class="badge">Coming soon</span></span>
-              <span class="setting-desc">Assumed measurement accuracy for newly imported ground control points.</span>
-            </div>
-            <div class="field-grid">
-              <label class="field">
-                <span>Horizontal (m)</span>
-                <input v-model="gcpAccuracyH" type="number" step="0.01" min="0" disabled>
-              </label>
-              <label class="field">
-                <span>Vertical (m)</span>
-                <input v-model="gcpAccuracyV" type="number" step="0.01" min="0" disabled>
-              </label>
-            </div>
-          </div>
-        </template>
-
-        <!-- Display -->
-        <template v-else-if="activeTab === 'display'">
+        <template v-if="activeTab === 'general'">
           <div class="setting-row">
             <div class="setting-info">
               <span class="setting-label">Theme</span>
+              <span class="setting-desc">Appearance used throughout the application.</span>
             </div>
             <div class="seg-toggle">
               <button :class="{ active: theme === 'dark' }" @click="emit('set-theme', 'dark')">Dark</button>
@@ -112,30 +117,34 @@ const verboseLogging = ref(false)
 
           <div class="setting-row">
             <div class="setting-info">
-              <span class="setting-label">Glossary terms</span>
-              <span class="setting-desc">Highlight explained keywords in the UI; hover one for a definition and “Read more”.</span>
+              <span class="setting-label">Interface size</span>
+              <span class="setting-desc">Scale the main workspace controls and panels.</span>
             </div>
-            <label class="switch">
-              <input
-                type="checkbox"
-                :checked="glossaryTermsEnabled"
-                @change="setGlossaryTermsEnabled($event.target.checked)"
-              >
-              <span class="slider"></span>
-            </label>
+            <div class="seg-toggle compact">
+              <button :class="{ active: uiScale === 0.9 }" @click="setUiScale(0.9)">90%</button>
+              <button :class="{ active: uiScale === 1 }" @click="setUiScale(1)">100%</button>
+              <button :class="{ active: uiScale === 1.1 }" @click="setUiScale(1.1)">110%</button>
+            </div>
           </div>
 
-          <div v-if="!isChromium" class="setting-row">
+          <div class="setting-row">
             <div class="setting-info">
-              <span class="setting-label">Warn on unsupported browser</span>
-              <span class="setting-desc">Show a reminder that websfm works best in a Chromium-based browser (Chrome, Edge); some features like GPU depth maps may be unavailable here.</span>
+              <span class="setting-label">Motion</span>
+              <span class="setting-desc">Follow the operating system or minimize interface animation.</span>
+            </div>
+            <select class="select" :value="motion" @change="setMotion($event.target.value)">
+              <option value="system">Follow system</option>
+              <option value="reduce">Reduce motion</option>
+            </select>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-info">
+              <span class="setting-label">Glossary terms</span>
+              <span class="setting-desc">Highlight explained keywords; hover for a definition and a link to the full entry.</span>
             </div>
             <label class="switch">
-              <input
-                type="checkbox"
-                :checked="warningEnabled"
-                @change="setBrowserWarningEnabled($event.target.checked)"
-              >
+              <input type="checkbox" :checked="glossaryTermsEnabled" @change="setGlossaryTermsEnabled($event.target.checked)">
               <span class="slider"></span>
             </label>
           </div>
@@ -143,145 +152,134 @@ const verboseLogging = ref(false)
           <div class="setting-row">
             <div class="setting-info">
               <span class="setting-label">Expand advanced settings</span>
-              <span class="setting-desc">Open pipeline modals with all knobs showing instead of tucked behind the “Advanced settings” disclosure.</span>
+              <span class="setting-desc">Open processing dialogs with their advanced controls visible.</span>
             </div>
             <label class="switch">
-              <input
-                type="checkbox"
-                :checked="advancedSettingsExpanded"
-                @change="setAdvancedSettingsExpanded($event.target.checked)"
-              >
+              <input type="checkbox" :checked="advancedSettingsExpanded" @change="setAdvancedSettingsExpanded($event.target.checked)">
               <span class="slider"></span>
             </label>
           </div>
 
+          <div v-if="!isChromium" class="setting-row">
+            <div class="setting-info">
+              <span class="setting-label">Warn on unsupported browser</span>
+              <span class="setting-desc">Remind me when browser limitations can affect compute or file access.</span>
+            </div>
+            <label class="switch">
+              <input type="checkbox" :checked="warningEnabled" @change="setBrowserWarningEnabled($event.target.checked)">
+              <span class="slider"></span>
+            </label>
+          </div>
+        </template>
+
+        <template v-else-if="activeTab === 'visualization'">
           <div class="setting-row">
             <div class="setting-info">
-              <span class="setting-label">Grid height</span>
-              <span class="setting-desc">Where the 3D-view ground grid sits along the vertical axis of the point cloud.</span>
+              <span class="setting-label">Map base layer</span>
+              <span class="setting-desc">Automatic uses OpenStreetMap normally and the matching NASA layer for polar coordinate systems.</span>
             </div>
-            <div class="seg-toggle">
+            <select class="select" :value="basemap" @change="setBasemap($event.target.value)">
+              <option value="auto">Automatic</option>
+              <option value="streets">Street map</option>
+              <option value="none">None (grid only)</option>
+            </select>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-info">
+              <span class="setting-label">3D background</span>
+              <span class="setting-desc">Choose a neutral canvas independently of the application theme.</span>
+            </div>
+            <select class="select" :value="background" @change="setBackground($event.target.value)">
+              <option value="theme">Follow theme</option>
+              <option value="dark">Dark grey</option>
+              <option value="light">Light grey</option>
+              <option value="black">Black</option>
+            </select>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-info">
+              <span class="setting-label">3D ground-grid height</span>
+              <span class="setting-desc">Place the reference grid at the bottom, centre, or top of the loaded point cloud.</span>
+            </div>
+            <div class="seg-toggle compact">
               <button :class="{ active: gridZ === 'min' }" @click="setGridZ('min')">Bottom</button>
               <button :class="{ active: gridZ === 'avg' }" @click="setGridZ('avg')">Middle</button>
               <button :class="{ active: gridZ === 'max' }" @click="setGridZ('max')">Top</button>
             </div>
           </div>
 
-          <div class="setting-row">
-            <div class="setting-info">
-              <span class="setting-label">Units <span class="badge">Coming soon</span></span>
-            </div>
-            <div class="seg-toggle disabled">
-              <button :class="{ active: units === 'metric' }" @click="units = 'metric'">Metric</button>
-              <button :class="{ active: units === 'imperial' }" @click="units = 'imperial'">Imperial</button>
-            </div>
-          </div>
-
-          <div class="setting-row">
-            <div class="setting-info">
-              <span class="setting-label">Map base layer <span class="badge">Coming soon</span></span>
-            </div>
-            <select v-model="baseLayer" class="select" disabled>
-              <option value="satellite">Satellite</option>
-              <option value="streets">Streets</option>
-              <option value="terrain">Terrain</option>
-            </select>
-          </div>
-
-          <div class="setting-row">
-            <div class="setting-info">
-              <span class="setting-label">Keypoint marker size <span class="badge">Coming soon</span></span>
-            </div>
-            <input v-model.number="markerSize" type="range" min="2" max="14" disabled>
-          </div>
         </template>
 
-        <!-- Compute -->
         <template v-else-if="activeTab === 'compute'">
           <div class="setting-row">
             <div class="setting-info">
-              <span class="setting-label">Memory budget</span>
-              <span class="setting-desc">Dense depth-map runs refuse to start if projected peak memory exceeds this. Set it to how much RAM this browser can safely use — prevents the tab being killed on large projects.</span>
+              <span class="setting-label">Memory safety limit</span>
+              <span class="setting-desc">Dense runs stop before starting when estimated peak memory exceeds this amount.</span>
             </div>
             <div class="num-input">
-              <input
-                type="number" min="0.25" step="0.5"
-                :value="memBudgetGb"
-                @change="setMemBudgetGb($event.target.value)"
-              >
+              <input type="number" min="0.25" step="0.5" :value="memBudgetGb" @change="setMemBudgetGb($event.target.value)">
               <span class="num-unit">GB</span>
             </div>
           </div>
 
           <div class="setting-row">
             <div class="setting-info">
-              <span class="setting-label">Use GPU (experimental)</span>
-              <span class="setting-desc">Run LightGlue matching and dense depth maps on WebGPU (Chrome/Edge). Much faster; falls back to CPU automatically when the GPU can't run a model.</span>
+              <span class="setting-label">Compute workers</span>
+              <span class="setting-desc">Limit parallel CPU tasks to reduce memory pressure. Automatic uses up to {{ MAX_POOL_SIZE }} workers on this device.</span>
+            </div>
+            <select class="select" :value="workerCount" @change="setWorkerCount($event.target.value)">
+              <option value="0">Automatic ({{ MAX_POOL_SIZE }})</option>
+              <option v-for="n in MAX_POOL_SIZE" :key="n" :value="n">{{ n }}</option>
+            </select>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-info">
+              <span class="setting-label">Use GPU <span class="badge">Experimental</span></span>
+              <span class="setting-desc">Use WebGPU for supported matching and dense operations; unsupported operations fall back to CPU.</span>
             </div>
             <label class="switch">
-              <input
-                type="checkbox"
-                :checked="useGpu"
-                @change="setUseGpu($event.target.checked)"
-              >
+              <input type="checkbox" :checked="useGpu" @change="setUseGpu($event.target.checked)">
               <span class="slider"></span>
             </label>
           </div>
+
         </template>
 
-        <!-- Storage -->
         <template v-else-if="activeTab === 'storage'">
           <div class="setting-row setting-row-stacked">
             <div class="setting-info">
-              <span class="setting-label">Storage used <span class="badge">Coming soon</span></span>
-              <span class="setting-desc">Local data stored in your browser (OPFS).</span>
+              <span class="setting-label">Browser storage</span>
+              <span class="setting-desc">Includes browser-backed projects, derived files, downloaded AI models, and other data stored for this site.</span>
             </div>
-            <div class="usage-bar"><div class="usage-fill" style="width: 38%"></div></div>
-            <span class="setting-desc">≈ 380 MB of 1 GB</span>
+            <div v-if="storageUsage != null && storageQuota" class="usage-bar" role="progressbar" :aria-valuenow="usagePercent" aria-valuemin="0" aria-valuemax="100">
+              <div class="usage-fill" :style="{ width: usagePercent + '%' }"></div>
+            </div>
+            <span v-if="storageUsage != null && storageQuota" class="setting-desc">{{ formatBytes(storageUsage) }} used of {{ formatBytes(storageQuota) }} available to this site</span>
+            <span v-else class="setting-desc">Storage usage is unavailable in this browser.</span>
           </div>
 
           <div class="setting-row">
             <div class="setting-info">
-              <span class="setting-label">Clear cached data <span class="badge">Coming soon</span></span>
-              <span class="setting-desc">Remove derived files (thumbnails, features). Projects are kept.</span>
+              <span class="setting-label">Storage protection</span>
+              <span class="setting-desc">Persistent storage makes the browser less likely to evict local projects when disk space is low.</span>
             </div>
-            <button class="btn" disabled>Clear cache</button>
+            <span v-if="storageDurable" class="status-ok">Protected</span>
+            <button v-else-if="storageDurable === false" class="btn" :disabled="storageBusy" @click="requestDurableStorage">Request</button>
+            <span v-else class="readout">Unavailable</span>
           </div>
 
           <div class="setting-row">
             <div class="setting-info">
-              <span class="setting-label">Export / import project <span class="badge">Coming soon</span></span>
+              <span class="setting-label">Downloaded AI models</span>
+              <span class="setting-desc">Remove reusable SuperPoint, LightGlue, and Smart Select weights. They download again only when needed.</span>
             </div>
-            <div class="btn-group">
-              <button class="btn" disabled>Export</button>
-              <button class="btn" disabled>Import</button>
-            </div>
-          </div>
-        </template>
-
-        <!-- Debug -->
-        <template v-else-if="activeTab === 'debug'">
-          <div class="empty-note">Diagnostics and developer tools. Nothing here yet.</div>
-
-          <div class="setting-row">
-            <div class="setting-info">
-              <span class="setting-label">Show dev console <span class="badge">Coming soon</span></span>
-            </div>
-            <label class="switch">
-              <input v-model="showDevConsole" type="checkbox" disabled>
-              <span class="slider"></span>
-            </label>
+            <button class="btn" :disabled="storageBusy" @click="clearModelCache">Clear models</button>
           </div>
 
-          <div class="setting-row">
-            <div class="setting-info">
-              <span class="setting-label">Verbose logging <span class="badge">Coming soon</span></span>
-            </div>
-            <label class="switch">
-              <input v-model="verboseLogging" type="checkbox" disabled>
-              <span class="slider"></span>
-            </label>
-          </div>
+          <div v-if="storageMessage" class="status-message" aria-live="polite">{{ storageMessage }}</div>
         </template>
       </div>
     </div>
@@ -289,309 +287,50 @@ const verboseLogging = ref(false)
 </template>
 
 <style scoped>
-.modal-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.55);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 200;
-}
-
-.modal {
-  background: var(--panel);
-  border: 1px solid var(--panel-border);
-  border-radius: 8px;
-  width: 480px;
-  max-width: 90vw;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
-}
-
-.modal-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 13px 16px;
-  border-bottom: 1px solid var(--panel-border);
-}
-
-.modal-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text);
-}
-
-.modal-close {
-  background: none;
-  border: none;
-  color: var(--text-dim);
-  font-size: 20px;
-  line-height: 1;
-  cursor: pointer;
-  padding: 1px 6px;
-  border-radius: 4px;
-}
-
-.modal-close:hover {
-  background: var(--hover-bg);
-  color: var(--text);
-}
-
-.tab-bar {
-  display: flex;
-  gap: 2px;
-  padding: 0 12px;
-  border-bottom: 1px solid var(--panel-border);
-}
-
-.tab {
-  background: none;
-  border: none;
-  border-bottom: 2px solid transparent;
-  color: var(--text-dim);
-  font: inherit;
-  font-size: 13px;
-  padding: 10px 12px;
-  margin-bottom: -1px;
-  cursor: pointer;
-}
-
-.tab:hover:not(.active) {
-  color: var(--text);
-}
-
-.tab.active {
-  color: var(--text);
-  border-bottom-color: var(--accent);
-}
-
-.modal-body {
-  padding: 8px 0;
-  min-height: 220px;
-}
-
-.setting-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 10px 16px;
-}
-
-.setting-row + .setting-row {
-  border-top: 1px solid var(--panel-border);
-}
-
-.setting-row-stacked {
-  flex-direction: column;
-  align-items: stretch;
-  gap: 10px;
-}
-
-.setting-info {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.setting-label {
-  font-size: 13px;
-  color: var(--text);
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.setting-desc {
-  font-size: 11px;
-  color: var(--text-dim);
-  line-height: 1.4;
-}
-
-.empty-note {
-  padding: 16px;
-  font-size: 12px;
-  color: var(--text-dim);
-  line-height: 1.5;
-}
-
-.badge {
-  font-size: 9px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--text-dim);
-  border: 1px solid var(--panel-border);
-  border-radius: 4px;
-  padding: 1px 5px;
-}
-
-/* Segmented toggle (theme/units) */
-.seg-toggle {
-  display: flex;
-  border: 1px solid var(--panel-border);
-  border-radius: 6px;
-  overflow: hidden;
-  flex-shrink: 0;
-}
-
-.seg-toggle.disabled {
-  opacity: 0.5;
-  pointer-events: none;
-}
-
-.seg-toggle button {
-  background: none;
-  border: none;
-  color: var(--text-dim);
-  font-size: 12px;
-  padding: 4px 16px;
-  cursor: pointer;
-  font: inherit;
-}
-
-.seg-toggle button:hover:not(.active) {
-  background: var(--hover-bg);
-  color: var(--text);
-}
-
-.seg-toggle button.active {
-  background: var(--accent);
-  color: #fff;
-}
-
-/* Generic inputs (mockups) */
-.field-grid {
-  display: flex;
-  gap: 10px;
-}
-
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  flex: 1;
-  font-size: 11px;
-  color: var(--text-dim);
-}
-
-.field input,
-.text-input,
-.select {
-  background: var(--input-bg, var(--panel));
-  border: 1px solid var(--panel-border);
-  border-radius: 6px;
-  color: var(--text);
-  font: inherit;
-  font-size: 12px;
-  padding: 5px 8px;
-}
-
-.text-input {
-  width: 100%;
-}
-
-input:disabled,
-.select:disabled,
-.btn:disabled,
-input[type="range"]:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.btn {
-  background: none;
-  border: 1px solid var(--panel-border);
-  border-radius: 6px;
-  color: var(--text);
-  font: inherit;
-  font-size: 12px;
-  padding: 5px 14px;
-  cursor: pointer;
-  flex-shrink: 0;
-}
-
-.btn-group {
-  display: flex;
-  gap: 8px;
-}
-
-.num-input {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
-}
-
-.num-input input {
-  width: 80px;
-  background: var(--input-bg, var(--panel));
-  border: 1px solid var(--panel-border);
-  border-radius: 6px;
-  color: var(--text);
-  font: inherit;
-  font-size: 12px;
-  padding: 5px 8px;
-}
-
-.num-unit {
-  font-size: 12px;
-  color: var(--text-dim);
-}
-
-.usage-bar {
-  height: 8px;
-  border-radius: 4px;
-  background: var(--hover-bg);
-  overflow: hidden;
-}
-
-.usage-fill {
-  height: 100%;
-  background: var(--accent);
-}
-
-/* Switch (debug toggles) */
-.switch {
-  position: relative;
-  display: inline-block;
-  width: 36px;
-  height: 20px;
-  flex-shrink: 0;
-}
-
-.switch input {
-  opacity: 0;
-  width: 0;
-  height: 0;
-}
-
-.slider {
-  position: absolute;
-  inset: 0;
-  background: var(--panel-border);
-  border-radius: 20px;
-  transition: background 0.15s;
-}
-
-.slider::before {
-  content: '';
-  position: absolute;
-  height: 14px;
-  width: 14px;
-  left: 3px;
-  top: 3px;
-  background: #fff;
-  border-radius: 50%;
-  transition: transform 0.15s;
-}
-
-.switch input:checked + .slider {
-  background: var(--accent);
-}
-
-.switch input:checked + .slider::before {
-  transform: translateX(16px);
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: flex; align-items: center; justify-content: center; z-index: 200; }
+.modal { background: var(--panel); border: 1px solid var(--panel-border); border-radius: 8px; width: 540px; max-width: 92vw; max-height: 86vh; overflow: auto; box-shadow: 0 8px 32px rgba(0,0,0,.4); }
+.modal-header { display: flex; align-items: center; justify-content: space-between; padding: 13px 16px; border-bottom: 1px solid var(--panel-border); }
+.modal-title { font-size: 14px; font-weight: 600; color: var(--text); }
+.modal-close { background: none; border: 0; color: var(--text-dim); font-size: 20px; line-height: 1; cursor: pointer; padding: 1px 6px; border-radius: 4px; }
+.modal-close:hover { background: var(--hover-bg); color: var(--text); }
+.tab-bar { display: flex; gap: 2px; padding: 0 12px; border-bottom: 1px solid var(--panel-border); }
+.tab { background: none; border: 0; border-bottom: 2px solid transparent; color: var(--text-dim); font: inherit; font-size: 13px; padding: 10px 12px; margin-bottom: -1px; cursor: pointer; }
+.tab:hover:not(.active) { color: var(--text); }
+.tab.active { color: var(--text); border-bottom-color: var(--accent); }
+.modal-body { padding: 8px 0; min-height: 240px; }
+.setting-row { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 12px 16px; }
+.setting-row + .setting-row { border-top: 1px solid var(--panel-border); }
+.setting-row-stacked { flex-direction: column; align-items: stretch; gap: 10px; }
+.setting-info { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.setting-label { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text); }
+.setting-desc, .status-message { font-size: 11px; color: var(--text-dim); line-height: 1.45; }
+.status-message { padding: 11px 16px; }
+.status-message { color: var(--text); border-top: 1px solid var(--panel-border); }
+.badge { font-size: 9px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-dim); border: 1px solid var(--panel-border); border-radius: 4px; padding: 1px 5px; }
+.seg-toggle { display: flex; border: 1px solid var(--panel-border); border-radius: 6px; overflow: hidden; flex-shrink: 0; }
+.seg-toggle button { background: none; border: 0; color: var(--text-dim); font: inherit; font-size: 12px; padding: 5px 16px; cursor: pointer; }
+.seg-toggle.compact button { padding-inline: 9px; }
+.seg-toggle button:hover:not(.active) { background: var(--hover-bg); color: var(--text); }
+.seg-toggle button.active { background: var(--accent); color: #fff; }
+.select, .num-input input { background: var(--input-bg, var(--panel)); border: 1px solid var(--panel-border); border-radius: 6px; color: var(--text); font: inherit; font-size: 12px; padding: 5px 8px; }
+.select { max-width: 165px; }
+.num-input { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.num-input input { width: 76px; }
+.num-unit, .readout { font-size: 12px; color: var(--text-dim); }
+.btn { background: none; border: 1px solid var(--panel-border); border-radius: 6px; color: var(--text); font: inherit; font-size: 12px; padding: 5px 12px; cursor: pointer; flex-shrink: 0; }
+.btn:hover:not(:disabled) { background: var(--hover-bg); }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.usage-bar { height: 8px; border-radius: 4px; background: var(--hover-bg); overflow: hidden; }
+.usage-fill { height: 100%; background: var(--accent); min-width: 2px; }
+.status-ok { color: #3fae6a; font-size: 12px; font-weight: 600; }
+.switch { position: relative; display: inline-block; width: 36px; height: 20px; flex-shrink: 0; }
+.switch input { opacity: 0; width: 0; height: 0; }
+.slider { position: absolute; inset: 0; background: var(--panel-border); border-radius: 20px; transition: background .15s; }
+.slider::before { content: ''; position: absolute; width: 14px; height: 14px; left: 3px; top: 3px; background: #fff; border-radius: 50%; transition: transform .15s; }
+.switch input:checked + .slider { background: var(--accent); }
+.switch input:checked + .slider::before { transform: translateX(16px); }
+@media (max-width: 560px) {
+  .setting-row:not(.setting-row-stacked) { align-items: flex-start; flex-direction: column; }
+  .tab { padding-inline: 8px; }
 }
 </style>

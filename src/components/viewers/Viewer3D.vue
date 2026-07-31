@@ -8,7 +8,7 @@ import { copyToClipboard } from '../../composables/useToasts.js'
 import { estimateUpFromCameras } from '../../core/sfm/geometry.js'
 import ViewerContextMenu from './ViewerContextMenu.vue'
 
-const { gridZ } = useViewerSettings()
+const { gridZ, background } = useViewerSettings()
 
 const props = defineProps({
   theme: { type: String, default: 'dark' },
@@ -173,7 +173,11 @@ const pointSize = ref(3)     // point-cloud dot size (px, no size attenuation)
 let lastCams = []
 let lastBaseDepth = 0.15
 
-const BG = { dark: 0x1a1a1a, light: 0xf0f0f0 }
+const BG = { dark: 0x1a1a1a, light: 0xf0f0f0, black: 0x000000 }
+function backgroundColor() {
+  const key = background.value === 'theme' ? props.theme : background.value
+  return BG[key] ?? BG.dark
+}
 const GRID = {
   dark:  [0x444444, 0x2a2a2a],
   light: [0xb8b8b8, 0xd8d8d8],
@@ -226,7 +230,7 @@ function init() {
   el.appendChild(renderer.domElement)
 
   scene = new THREE.Scene()
-  scene.background = new THREE.Color(BG[props.theme] ?? BG.dark)
+  scene.background = new THREE.Color(backgroundColor())
 
   camera = new THREE.PerspectiveCamera(60, w / h, 0.1, 10000)
   // Z-up scene (elevation along +Z, matching the SfM/geospatial convention).
@@ -584,12 +588,16 @@ function animate() {
 
 watch(() => props.theme, (t) => {
   if (!scene) return
-  scene.background = new THREE.Color(BG[t] ?? BG.dark)
+  scene.background = new THREE.Color(backgroundColor())
   scene.remove(grid)
   disposeObject(grid)
   grid = makeGrid(t)
   updateGrid()
   scene.add(grid)
+})
+
+watch(background, () => {
+  if (scene) scene.background = new THREE.Color(backgroundColor())
 })
 
 watch(() => props.showCameras, (v) => { if (frustumGroup) frustumGroup.visible = v })

@@ -54,7 +54,15 @@ export function buildProjectDigest(input = {}) {
     if (r.status in status) status[r.status]++
   }
   // A single word for the whole project: the worst present tone wins.
-  status.overall = status.bad ? 'bad' : status.warn ? 'warn' : status.ok ? 'ok' : 'unknown'
+  status.healthOverall = status.bad ? 'bad' : status.warn ? 'warn' : status.ok ? 'ok' : 'unknown'
+  // The action-oriented verdict includes shape/cross-field checks that are not health
+  // rows (for example a severe reprojection tail). The exported top-level status must
+  // never be greener than that verdict, otherwise one JSON object contradicts itself.
+  const verdictTone = verdict?.level === 'red' ? 'bad' : verdict?.level === 'yellow' ? 'warn'
+    : verdict?.level === 'green' ? 'ok' : 'unknown'
+  const toneRank = { unknown: 0, ok: 1, warn: 2, bad: 3 }
+  status.overall = toneRank[verdictTone] > toneRank[status.healthOverall]
+    ? verdictTone : status.healthOverall
 
   // Group the health rows by section, preserving first-seen order.
   const sectionOrder = []
@@ -131,6 +139,8 @@ export function buildProjectDigest(input = {}) {
       selfCalDistortion: summary?.selfCalDistortion
         ? summary.selfCalDistortion.map((r) => ({ ...r })) : [],
       cycleFilter: summary?.cycleFilter ? { ...summary.cycleFilter } : null,
+      secondaryRecovery: summary?.secondaryRecovery ? { ...summary.secondaryRecovery } : null,
+      fingerprints: input.fingerprints ? { ...input.fingerprints } : null,
       // Match gate accounting: the tally, not the settings (those are in config.match).
       matchGates: matchRun
         ? {
@@ -250,7 +260,10 @@ function configLines(config) {
 function diagnosticsLines(d) {
   const out = []
   if (!d) return out
-  const { seed, attempts, gates, selfCal, intrinsics, selfCalDistortion, cycleFilter, matchGates, timings } = d
+  const {
+    seed, attempts, gates, selfCal, intrinsics, selfCalDistortion, cycleFilter,
+    matchGates, timings, secondaryRecovery, fingerprints,
+  } = d
 
   if (seed) {
     const ru = seed.runnerUp
@@ -293,6 +306,12 @@ function diagnosticsLines(d) {
     for (const p of selfCal.passes || []) {
       out.push(`  pass ${p.pass}: '${p.mode}'${p.reducedReason ? ` — reduced: ${p.reducedReason}` : ''}`)
     }
+    for (const a of selfCal.adjustments || []) {
+      const rejected = (a.sensors || []).filter((s) => !s.accepted)
+      if (rejected.length) {
+        out.push(`  ⚠ ${a.label}: rejected before commit — ${rejected.map((s) => s.rejectionReason).join('; ')}`)
+      }
+    }
   }
   for (const r of intrinsics || []) {
     // The fx trajectory is the single most diagnostic number on an EXIF-only or film
@@ -313,6 +332,16 @@ function diagnosticsLines(d) {
       + `; dropped ${cycleFilter.dropped}, re-admitted ${cycleFilter.readmitted}`
       + `, ${cycleFilter.bridgeProtected} bridge(s) protected`
       + `, ${fmtNum(cycleFilter.remainingPairs)} pairs remain`)
+  }
+  if (secondaryRecovery) {
+    out.push(`- **Secondary recovery**: ${secondaryRecovery.jobs ?? 0} job(s), `
+      + `${secondaryRecovery.merged?.length ?? 0} merged, ${secondaryRecovery.separate?.length ?? 0} kept separate`)
+    for (const m of secondaryRecovery.separate || []) {
+      out.push(`  ${m.name}: ${m.cameras} cams / ${m.points} pts, ${m.sharedCameras} shared — ${m.reason}`)
+    }
+  }
+  if (fingerprints) {
+    out.push(`- **Run fingerprints**: features ${fingerprints.features ?? '—'} · matches ${fingerprints.matches ?? '—'}`)
   }
   if (timings) {
     const parts = Object.entries(timings)

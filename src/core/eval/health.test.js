@@ -67,6 +67,13 @@ describe('projectHealth', () => {
     expect(byId.graph.status).toBe('ok')
   })
 
+  it('treats sub-quarter-pixel composed warp error as healthy', () => {
+    const row = projectHealth({ selfCal: [{ sensorId: 's1', fitRmsPx: 0.2 }] })
+      .find((r) => r.id === 'selfcal')
+    expect(row.label).toBe('Self-cal warp fit RMS')
+    expect(row.status).toBe('ok')
+  })
+
   it('flags a split graph and a low registration rate', () => {
     const rows = projectHealth({
       imageCount: 10, registeredCount: 6,

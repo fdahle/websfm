@@ -34,6 +34,12 @@ describe('buildProjectDigest', () => {
     expect(d.status.overall).toBe('bad')
   })
 
+  it('top-level status cannot be greener than the verdict', () => {
+    const d = buildProjectDigest({ ...INPUT, verdict: { level: 'red', headline: 'tail', findings: [] } })
+    expect(d.status.healthOverall).toBe('warn')
+    expect(d.status.overall).toBe('bad')
+  })
+
   it('groups health rows by section in first-seen order', () => {
     const d = buildProjectDigest(INPUT)
     expect(d.health.map((g) => g.section)).toEqual(['sparse', 'matching', 'accuracy'])
@@ -128,6 +134,10 @@ const B4 = {
       aborted: true, candidates: 647, triangles: 2010, medianTriErrDeg: 42.3,
       effErrDeg: 30, dropped: 0, readmitted: 0, bridgeProtected: 0, remainingPairs: 647,
     },
+    secondaryRecovery: {
+      jobs: 1, merged: [],
+      separate: [{ name: 'Secondary sparse 1', cameras: 20, points: 6382, sharedCameras: 12, reason: 'position RMS 14.4%' }],
+    },
     timings: { init: 4200, register: 61000, bundle: 18000, totalMs: 96000 },
   },
   depthSummary: {
@@ -142,6 +152,7 @@ const B4 = {
     headline: '122 of 128 images registered',
     findings: [{ level: 'yellow', code: 'depth-coverage', title: 'Depth coverage 49%', fix: 'Add overlap' }],
   },
+  fingerprints: { algorithm: 'fnv1a32', features: 'fnv1a32:12345678', matches: 'fnv1a32:abcdef01' },
 }
 
 describe('buildProjectDigest — baseline record', () => {
@@ -162,6 +173,8 @@ describe('buildProjectDigest — baseline record', () => {
     expect(d.selfCal.passes).toHaveLength(2)
     expect(d.intrinsics[0]).toMatchObject({ fxNominal: 2389.3, fxFinal: 2565.9 })
     expect(d.cycleFilter.aborted).toBe(true)
+    expect(d.secondaryRecovery.separate[0].cameras).toBe(20)
+    expect(d.fingerprints.matches).toBe('fnv1a32:abcdef01')
     expect(d.matchGates).toMatchObject({ gated: 7446, subsetGateActive: true })
     expect(d.timings.totalMs).toBe(96000)
   })
@@ -202,6 +215,12 @@ describe('digestToMarkdown — baseline record', () => {
   it('reports the cycle filter skipping above its ceiling', () => {
     expect(md).toContain('SKIPPED (above sanity ceiling)')
     expect(md).toContain('42.3°')
+  })
+
+  it('reports separate secondary models and reproducibility fingerprints', () => {
+    expect(md).toContain('1 kept separate')
+    expect(md).toContain('Secondary sparse 1: 20 cams / 6382 pts')
+    expect(md).toContain('features fnv1a32:12345678')
   })
 
   it('reports Stage A backend, throughput and cross-view filter cost', () => {
