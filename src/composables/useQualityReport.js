@@ -164,13 +164,13 @@ export function useQualityReport() {
     // Accuracy (GCP)
     if (gcpReport?.length) {
       sections.push({
-        title: 'GCP accuracy',
+        title: 'Control and checkpoint accuracy',
         columns: [
-          { key: 'name', label: 'GCP' }, { key: 'views', label: 'Views', align: 'right' },
+          { key: 'name', label: 'Point' }, { key: 'role', label: 'Role' }, { key: 'views', label: 'Views', align: 'right' },
           { key: 'dTotal', label: 'Δ total', align: 'right' },
         ],
-        rows: gcpReport.map((g) => ({ name: g.name, views: g.viewCount, dTotal: f2(g.dTotal, 3) })),
-        note: `Residual against the ${recon.georef?.method === 'gcps' ? 'GCP' : 'pose'} georeference (${crsUnit.value}).`,
+        rows: gcpReport.map((g) => ({ name: g.name, role: g.role === 'check' ? 'Check' : 'Control', views: g.viewCount, dTotal: f2(g.dTotal, 3) })),
+        note: `Checkpoints are excluded from fitting and provide independent accuracy; control residuals are fit residuals (${crsUnit.value}).`,
       })
     }
 

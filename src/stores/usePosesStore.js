@@ -1,12 +1,13 @@
 import { ref, watch, computed } from 'vue'
 import { defineStore, storeToRefs } from 'pinia'
 import { useLog } from '../composables/useLog.js'
-import { ensureProjection, transform } from '../core/crs.js'
+import { ensureProjection, metresPerCrsUnit, metresToCrsUnits, transform } from '../core/crs.js'
 import * as opfs from '../utils/opfs.js'
 import { registerProjectStore } from './projectStores.js'
 import { makeNameResolver } from '../core/io/nameMatch.js'
 import { useImagesStore } from './useImagesStore.js'
 import { useProjectsStore } from './useProjectsStore.js'
+import { exifPoseFromMetadata, projectExifPose } from '../core/io/exifPose.js'
 
 // Camera poses (exterior orientation / extrinsics): one per image, used as
 // georeferencing priors for bundle adjustment. Positions are stored in the
@@ -21,8 +22,45 @@ export const usePosesStore = registerProjectStore(defineStore('poses', () => {
   const { images } = storeToRefs(useImagesStore())
   const { currentCrs } = storeToRefs(projects)
 
-  // [{ imageId, imageName, x, y, z, omega, phi, kappa, accXYZ, accAngle, source, enabled }]
+  // [{ imageId, imageName, x, y, z, omega, phi, kappa,
+  //    accuracyX, accuracyY, accuracyZ, accXYZ, accAngle, source, enabled }]
   const poses = ref([])
+
+  function normalizePose(p) {
+    const scalar = Number.isFinite(p.accXYZ) && p.accXYZ > 0 ? p.accXYZ : DEFAULT_ACC_XYZ
+    if (!(Number.isFinite(p.accuracyX) && p.accuracyX > 0)) p.accuracyX = scalar
+    if (!(Number.isFinite(p.accuracyY) && p.accuracyY > 0)) p.accuracyY = scalar
+    if (!(Number.isFinite(p.accuracyZ) && p.accuracyZ > 0)) p.accuracyZ = scalar
+    p.accXYZ = scalar // retained for project/back-end compatibility
+    p.source = p.source === 'exif' ? 'exif' : 'imported'
+    if (p.enabled == null) p.enabled = true
+    return p
+  }
+
+  function reprojectPose(p, fromCrs, toCrs) {
+    const [x, y, z] = transform([p.x, p.y, p.z ?? 0], fromCrs, toCrs)
+    if (p.source !== 'exif') return normalizePose({ ...p, x, y, z: p.z != null ? z : null })
+
+    // EXIF Z/accuracy are physical metres, not horizontal-CRS units. Retain
+    // canonical metre sidecars so repeated CRS changes never accumulate scale
+    // error; derive them once for projects persisted before these fields existed.
+    const fromFactor = metresPerCrsUnit(fromCrs) ?? 1
+    const altitudeMeters = Number.isFinite(p.altitudeMeters)
+      ? p.altitudeMeters : (Number.isFinite(p.z) ? p.z * fromFactor : null)
+    const accuracyMetersX = Number.isFinite(p.accuracyMetersX)
+      ? p.accuracyMetersX : p.accuracyX * fromFactor
+    const accuracyMetersY = Number.isFinite(p.accuracyMetersY)
+      ? p.accuracyMetersY : p.accuracyY * fromFactor
+    const accuracyMetersZ = Number.isFinite(p.accuracyMetersZ)
+      ? p.accuracyMetersZ : p.accuracyZ * fromFactor
+    const accuracyX = metresToCrsUnits(accuracyMetersX, toCrs)
+    const accuracyY = metresToCrsUnits(accuracyMetersY, toCrs)
+    const accuracyZ = metresToCrsUnits(accuracyMetersZ, toCrs)
+    return normalizePose({ ...p, x, y,
+      z: altitudeMeters == null ? null : metresToCrsUnits(altitudeMeters, toCrs),
+      altitudeMeters, accuracyMetersX, accuracyMetersY, accuracyMetersZ,
+      accuracyX, accuracyY, accuracyZ, accXYZ: accuracyX })
+  }
 
   // Persist only when a project is open and OPFS is usable (see useProjectsStore).
   const isPersisting = () => projects.isPersisting
@@ -85,17 +123,99 @@ export const usePosesStore = registerProjectStore(defineStore('poses', () => {
         phi:   raw.phi ?? null,
         kappa: raw.kappa ?? null,
         accXYZ:   raw.accXYZ ?? DEFAULT_ACC_XYZ,
+        accuracyX: raw.accuracyX ?? raw.accXYZ ?? DEFAULT_ACC_XYZ,
+        accuracyY: raw.accuracyY ?? raw.accXYZ ?? DEFAULT_ACC_XYZ,
+        accuracyZ: raw.accuracyZ ?? raw.accXYZ ?? DEFAULT_ACC_XYZ,
         accAngle: raw.accAngle ?? DEFAULT_ACC_ANGLE,
         source: 'imported',
         enabled: true,
       }
       if (existing) Object.assign(existing, next)
-      else { poses.value.push(next); added++ }
+      else { poses.value.push(normalizePose(next)); added++ }
     }
     log(`Poses imported: ${added}${matched ? `, ${matched} matched to images` : ''} (from ${sourceCrs})`, 'success', 'Pose')
     await save()
     return added
   }
+
+  // Materialise image EXIF GPS in the existing pose store. Imported pose files
+  // always win; EXIF records are derived idempotently and retain user toggles/
+  // accuracy edits across metadata refreshes.
+  let exifSyncGeneration = 0
+  async function syncExifPoses() {
+    const generation = ++exifSyncGeneration
+    const projectId = projects.currentProjectId
+    const projectCrs = currentCrs.value
+    try {
+      await ensureProjection('EPSG:4326')
+      await ensureProjection(projectCrs)
+    } catch (err) {
+      log(`EXIF GPS unavailable — could not resolve CRS (${err?.message ?? err})`, 'warn', 'Pose')
+      return 0
+    }
+    if (generation !== exifSyncGeneration || projectId !== projects.currentProjectId) return 0
+
+    const liveIds = new Set(images.value.map((im) => im.id))
+    let changed = false, added = 0
+    // Drop derived records only when their image is genuinely gone. During restore,
+    // metadata may arrive after images, so a temporarily missing meta object is kept.
+    const kept = poses.value.filter((p) => p.source !== 'exif' || liveIds.has(p.imageId))
+    if (kept.length !== poses.value.length) { poses.value = kept; changed = true }
+
+    for (const im of images.value) {
+      const raw = exifPoseFromMetadata(im.meta)
+      if (!raw) continue
+      const projected = projectExifPose(raw, projectCrs)
+      if (!projected) continue
+      const existing = poses.value.find((p) => p.imageId === im.id || p.imageName === im.name)
+      if (existing && existing.source !== 'exif') continue
+      if (existing) {
+        Object.assign(existing, {
+          imageId: im.id, imageName: im.name, x: projected.x, y: projected.y, z: projected.z,
+          altitudeMeters: projected.altitudeMeters,
+          accuracyMetersX: projected.accuracyMetersX,
+          accuracyMetersY: projected.accuracyMetersY,
+          accuracyMetersZ: projected.accuracyMetersZ,
+          direction: raw.direction, directionRef: raw.directionRef,
+          verticalDatum: existing.verticalDatum ?? raw.verticalDatum,
+        })
+        // No pose-accuracy editor exists today, but preserve a future/manual
+        // override explicitly marked as user-owned instead of overwriting it.
+        if (existing.accuracySource !== 'user') Object.assign(existing, {
+          accuracyX: projected.accuracyX, accuracyY: projected.accuracyY,
+          accuracyZ: projected.accuracyZ, accXYZ: projected.accuracyX,
+          accuracySource: raw.accuracySource,
+        })
+      } else {
+        poses.value.push(normalizePose({
+          imageId: im.id, imageName: im.name,
+          x: projected.x, y: projected.y, z: projected.z,
+          omega: null, phi: null, kappa: null,
+          accuracyX: projected.accuracyX, accuracyY: projected.accuracyY,
+          accuracyZ: projected.accuracyZ, accXYZ: projected.accuracyX,
+          altitudeMeters: projected.altitudeMeters,
+          accuracyMetersX: projected.accuracyMetersX,
+          accuracyMetersY: projected.accuracyMetersY,
+          accuracyMetersZ: projected.accuracyMetersZ,
+          accAngle: DEFAULT_ACC_ANGLE,
+          accuracySource: raw.accuracySource, verticalDatum: raw.verticalDatum,
+          direction: raw.direction, directionRef: raw.directionRef,
+          source: 'exif', enabled: true,
+        }))
+        added++
+      }
+      changed = true
+    }
+    if (changed) await save()
+    if (added) log(`EXIF GPS: ${added} camera position(s) added in ${projectCrs}`, 'success', 'Pose')
+    return added
+  }
+
+  const exifSig = computed(() => images.value.map((im) => {
+    const m = im.meta || {}
+    return `${im.id}:${im.name}:${m.gpsLat ?? ''}:${m.gpsLon ?? ''}:${m.gpsAlt ?? ''}:${m.gpsAltRef ?? ''}:${m.gpsHorizontalAccuracy ?? ''}:${m.gpsDirection ?? ''}:${m.gpsDirectionRef ?? ''}`
+  }).join('|'))
+  watch(exifSig, () => { syncExifPoses() }, { immediate: true })
 
   function removePose(imageName) {
     const idx = poses.value.findIndex((p) => p.imageName === imageName)
@@ -119,15 +239,13 @@ export const usePosesStore = registerProjectStore(defineStore('poses', () => {
     if (data.crs && projectCrs && data.crs !== projectCrs) {
       await ensureProjection(data.crs).catch(() => {})
       await ensureProjection(projectCrs).catch(() => {})
-      poses.value = data.poses.map((p) => {
-        const [x, y, z] = transform([p.x, p.y, p.z ?? 0], data.crs, projectCrs)
-        return { ...p, x, y, z: p.z != null ? z : null }
-      })
+      poses.value = data.poses.map((p) => reprojectPose(p, data.crs, projectCrs))
       await opfs.savePoses(projectId, { crs: projectCrs, poses: poses.value }).catch(() => {})
     } else {
-      poses.value = data.poses
+      poses.value = data.poses.map(normalizePose)
     }
     resolveImageMatches()
+    await syncExifPoses()
     log(`Poses restored: ${poses.value.length}`, 'success', 'Pose')
   }
 
@@ -136,10 +254,7 @@ export const usePosesStore = registerProjectStore(defineStore('poses', () => {
     if (!poses.value.length || fromCrs === toCrs) { await save(); return }
     await ensureProjection(fromCrs).catch(() => {})
     await ensureProjection(toCrs).catch(() => {})
-    poses.value = poses.value.map((p) => {
-      const [x, y, z] = transform([p.x, p.y, p.z ?? 0], fromCrs, toCrs)
-      return { ...p, x, y, z: p.z != null ? z : null }
-    })
+    poses.value = poses.value.map((p) => reprojectPose(p, fromCrs, toCrs))
     await save()
     log(`Poses re-projected to ${toCrs}`, 'info', 'Pose')
   }
@@ -147,6 +262,7 @@ export const usePosesStore = registerProjectStore(defineStore('poses', () => {
   return {
     poses,
     addPoses,
+    syncExifPoses,
     removePose,
     reprojectPoses,
     restore,

@@ -3,15 +3,40 @@
 // the exhaustive O(N²). Pure — the store supplies positions (from imported poses)
 // and turns the returned key set back into image pairs.
 
+import { isGeographic, localMetricFrame, transform } from '../crs.js'
+
 // Sorted "uuidA--uuidB" key, matching useMatchesStore.pairId so the store can test
 // membership directly.
 function pairKey(a, b) {
   return a < b ? `${a}--${b}` : `${b}--${a}`
 }
 
-function dist3(a, b) {
-  const dx = a[0] - b[0], dy = a[1] - b[1], dz = (a[2] ?? 0) - (b[2] ?? 0)
-  return Math.hypot(dx, dy, dz)
+function dist2(a, b) {
+  return Math.hypot(a[0] - b[0], a[1] - b[1])
+}
+
+// Camera proximity is horizontal overlap evidence: altitude neither establishes
+// nor rules out shared ground. For a geographic working CRS, first project all
+// positions into one local azimuthal-equidistant metre frame so degrees are never
+// compared with metres. Returns fresh [{ uuid, pos:[x,y] }] plain data.
+export function positionsForProximity(items, crs) {
+  const valid = items.filter((item) => Number.isFinite(item.pos?.[0]) && Number.isFinite(item.pos?.[1]))
+  if (!isGeographic(crs) || valid.length === 0)
+    return valid.map((item) => ({ uuid: item.uuid, pos: [item.pos[0], item.pos[1]] }))
+
+  const wgs = valid.map((item) => ({
+    uuid: item.uuid,
+    pos: transform([item.pos[0], item.pos[1]], crs, 'EPSG:4326'),
+  }))
+  const lonRad = wgs.map((item) => item.pos[0] * Math.PI / 180)
+  const lon = Math.atan2(
+    lonRad.reduce((sum, v) => sum + Math.sin(v), 0),
+    lonRad.reduce((sum, v) => sum + Math.cos(v), 0),
+  ) * 180 / Math.PI
+  const lat = wgs.reduce((sum, item) => sum + item.pos[1], 0) / wgs.length
+  const metric = localMetricFrame(lon, lat)
+  return wgs.map((item) => ({ uuid: item.uuid,
+    pos: transform(item.pos, 'EPSG:4326', metric) }))
 }
 
 // items: [{ uuid, pos: [x, y, z] }]. Returns a Set of pair keys to match.
@@ -23,7 +48,7 @@ export function preselectPairs(items, { maxNeighbors = 10, maxDistance = Infinit
     const near = []
     for (let j = 0; j < items.length; j++) {
       if (i === j) continue
-      const d = dist3(items[i].pos, items[j].pos)
+      const d = dist2(items[i].pos, items[j].pos)
       if (d <= maxDistance) near.push([d, items[j].uuid])
     }
     near.sort((a, b) => a[0] - b[0])

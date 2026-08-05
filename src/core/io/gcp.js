@@ -61,14 +61,15 @@ const PATTERNS = {
   image: /^(image|img|photo|file|filename|picture)$/i,
   px:    /^(px|pixelx|pixel_x|imx|u|col|column)$/i,
   py:    /^(py|pixely|pixel_y|imy|v|row|line)$/i,
+  role:  /^(role|type|usage|pointtype|point_type)$/i,
 }
 
-const ROLES = ['name', 'x', 'y', 'z', 'image', 'px', 'py']
+const ROLES = ['name', 'x', 'y', 'z', 'image', 'px', 'py', 'role']
 
 // Returns { name, x, y, z, image, px, py } mapping each role to a column index
 // (or null). Uses header text when present, otherwise positional defaults.
 export function guessMapping(headerCells, columnCount, hasHeader, { positional = true } = {}) {
-  const mapping = { name: null, x: null, y: null, z: null, image: null, px: null, py: null }
+  const mapping = { name: null, x: null, y: null, z: null, image: null, px: null, py: null, role: null }
 
   if (hasHeader) {
     headerCells.forEach((cell, i) => {
@@ -100,6 +101,13 @@ export const ROLE_LABELS = {
   image: 'Image name',
   px:    'Pixel X',
   py:    'Pixel Y',
+  role:  'Control / check',
+}
+
+export function normalizeGcpRole(value) {
+  const s = String(value ?? '').trim().toLowerCase().replace(/[\s_-]+/g, '')
+  if (['check', 'checkpoint', 'checkpt', 'validation'].includes(s)) return 'check'
+  return 'control'
 }
 
 // ── Build GCP objects ─────────────────────────────────────────────────────────
@@ -124,16 +132,20 @@ export function buildGcps(dataRows, mapping) {
 
     let g = byName.get(name)
     if (!g) {
-      g = { name, x: null, y: null, z: null, observations: [] }
+      g = { name, role: 'control', x: null, y: null, z: null, observations: [] }
       byName.set(name, g)
     }
 
     const x = mapping.x != null ? num(row[mapping.x]) : null
     const y = mapping.y != null ? num(row[mapping.y]) : null
     const z = mapping.z != null ? num(row[mapping.z]) : null
+    const role = mapping.role != null ? normalizeGcpRole(row[mapping.role]) : 'control'
     if (g.x == null && x != null) g.x = x
     if (g.y == null && y != null) g.y = y
     if (g.z == null && z != null) g.z = z
+    // A repeated point may have one role value per observation row. Check wins so
+    // a mixed/partially-filled file can never accidentally use a checkpoint as control.
+    if (role === 'check') g.role = 'check'
 
     if (mapping.image != null && mapping.px != null && mapping.py != null) {
       const imageName = row[mapping.image]?.trim()

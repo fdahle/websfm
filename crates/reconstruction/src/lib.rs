@@ -156,13 +156,13 @@ mod tests {
             pt_flat.push((x[2] + d * 0.5) as f32);
         }
 
-        let out = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &obs, &[], &[], 60, &[], 0);
+        let out = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &obs, &[], &[], &[], 60, &[], 0);
         let base = n_cam * 12 + n_pts * 3 + n_cam * 7;
         // cameras + points + intrinsics (7 each: fx,fy,cx,cy,k1,k2,k3) + [cost_before, cost_after] + trace.
-        assert!(out.len() >= base + 3, "unexpected BA output length");
+        assert!(out.len() >= base + 4, "unexpected BA output length");
         let cost_before = out[base];
         let cost_after = out[base + 1];
-        let trace = &out[base + 3..];
+        let trace = &out[base + 4..];
         assert!(!trace.is_empty(), "no convergence trace emitted");
         assert!(*trace.last().unwrap() <= cost_after + 1e-3, "trace tail should match final RMS");
         assert!(cost_before > 1.0, "test setup too easy: before {cost_before}px");
@@ -226,11 +226,11 @@ mod tests {
             pt_flat.push((x[2] + d * 0.5) as f32);
         }
 
-        let out = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &obs, &[], &[], 80, &[], 0);
+        let out = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &obs, &[], &[], &[], 80, &[], 0);
         let base = n_cam * 12 + n_pts * 3 + n_cam * 7;
         let cost_before = out[base];
         let cost_after = out[base + 1];
-        let trace = &out[base + 3..];
+        let trace = &out[base + 4..];
         assert!(!trace.is_empty(), "no convergence trace emitted");
         // The accepted-step RMS trace is monotonically non-increasing (LM never
         // commits a worsening step — the property Q2's guard relies on).
@@ -289,7 +289,7 @@ mod tests {
         let mut pt_flat: Vec<f32> = Vec::new();
         for x in &gt_pts { for &v in x { pt_flat.push(v as f32); } }
 
-        let out = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &obs, &[], &[], 100, &sensor_of_cam, 1);
+        let out = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &obs, &[], &[], &[], 100, &sensor_of_cam, 1);
         let intr_base = n_cam * 12 + n_pts * 3;
         let cost_after = out[intr_base + n_cam * 7 + 1];
         // Refined focal is returned per camera; sharing ⇒ all equal, ≈ f_true.
@@ -356,8 +356,8 @@ mod tests {
         let anchor_flat: Vec<f32> = vec![0.0, anchor_target[0] as f32, anchor_target[1] as f32, anchor_target[2] as f32];
         let anchor_weight: Vec<f32> = vec![1e4]; // heavily outweighs the ~4-observation reprojection pull
 
-        let out_no_anchor = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &obs, &[], &[], 60, &[], 0);
-        let out_anchor = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &obs, &anchor_flat, &anchor_weight, 60, &[], 0);
+        let out_no_anchor = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &obs, &[], &[], &[], 60, &[], 0);
+        let out_anchor = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &obs, &anchor_flat, &anchor_weight, &[], 60, &[], 0);
 
         let pts_base = n_cam * 12;
         let dist = |out: &Vec<f32>| -> f64 {
@@ -376,6 +376,64 @@ mod tests {
         assert!(anchor_rms_after < 0.05, "anchor_rms_after too high: {anchor_rms_after}");
         let anchor_rms_no_anchor = out_no_anchor[base + 2];
         assert_eq!(anchor_rms_no_anchor, 0.0, "anchor_rms_after must be 0 with no anchors");
+    }
+
+    // Camera-centre priors resolve the otherwise free global translation gauge.
+    // Translate every camera centre and point together: reprojections remain
+    // exactly unchanged, so ordinary BA has no reason to undo it. Position priors
+    // should pull the whole reconstruction back without spoiling reprojection.
+    #[test]
+    fn bundle_adjust_camera_priors_constrain_centres() {
+        let (fx, fy, cx, cy) = (800.0_f64, 800.0_f64, 320.0_f64, 240.0_f64);
+        let gt_cams: Vec<(M3, V3)> = vec![
+            (so3_exp(&[0.0, 0.0, 0.0]),       [0.0, 0.0, 6.0]),
+            (so3_exp(&[0.05, -0.1, 0.02]),    [0.5, 0.1, 6.2]),
+            (so3_exp(&[-0.08, 0.06, -0.03]),  [-0.4, 0.2, 5.8]),
+            (so3_exp(&[0.03, 0.12, 0.05]),    [0.2, -0.3, 6.1]),
+        ];
+        let mut gt_pts: Vec<V3> = Vec::new();
+        for ix in -2..=2 { for iy in -2..=2 {
+            gt_pts.push([ix as f64 * 0.5, iy as f64 * 0.5, 0.2 * ((ix * iy) as f64).cos()]);
+        }}
+        let n_cam = gt_cams.len(); let n_pts = gt_pts.len();
+
+        let mut obs = Vec::new();
+        for (ci, (r, t)) in gt_cams.iter().enumerate() {
+            for (pi, x) in gt_pts.iter().enumerate() {
+                let (u, v) = project_px(r, t, fx, fy, cx, cy, x);
+                obs.extend_from_slice(&[ci as f32, pi as f32, u as f32, v as f32]);
+            }
+        }
+        let mut k_flat = Vec::new();
+        for _ in 0..n_cam { k_flat.extend_from_slice(&[fx as f32, fy as f32, cx as f32, cy as f32]); }
+
+        let shift = [1.5, -0.8, 0.6];
+        let mut cam_flat = Vec::new();
+        let mut prior_flat = Vec::new();
+        for (ci, (r, t)) in gt_cams.iter().enumerate() {
+            let rs = mat3_vec(r, &shift);
+            let shifted_t = [t[0] - rs[0], t[1] - rs[1], t[2] - rs[2]];
+            for row in r { for &v in row { cam_flat.push(v as f32); } }
+            for &v in &shifted_t { cam_flat.push(v as f32); }
+            let centre = mat3_vec(&mat3_transpose(r), &[-t[0], -t[1], -t[2]]);
+            prior_flat.extend_from_slice(&[
+                ci as f32, centre[0] as f32, centre[1] as f32, centre[2] as f32,
+                1e4, 1e4, 1e4,
+            ]);
+        }
+        let mut pt_flat = Vec::new();
+        for p in &gt_pts { pt_flat.extend_from_slice(&[
+            (p[0] + shift[0]) as f32, (p[1] + shift[1]) as f32, (p[2] + shift[2]) as f32,
+        ]); }
+
+        let out = bundle_adjust(
+            &cam_flat, &k_flat, &pt_flat, &obs, &[], &[], &prior_flat, 80, &[], 0,
+        );
+        let base = n_cam * 12 + n_pts * 3 + n_cam * 7;
+        assert!(out[base + 3] < 1e-3,
+            "camera-centre priors did not resolve translation: RMS {}", out[base + 3]);
+        assert!(out[base + 1] < 1e-3,
+            "camera priors spoiled reprojection: {}px", out[base + 1]);
     }
 
     // Dense MVS (Poisson prep): compute_depth_map must export per-pixel converged
@@ -524,7 +582,7 @@ mod tests {
         for x in &gt_pts { for &v in x { pt_flat.push(v as f32); } }
 
         // refine_mask 5 = f | k1 (bits 1 and 4).
-        let out = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &obs, &[], &[], 100, &sensor_of_cam, 5);
+        let out = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &obs, &[], &[], &[], 100, &sensor_of_cam, 5);
         let intr_base = n_cam * 12 + n_pts * 3;
         let cost_before = out[intr_base + n_cam * 7];
         let cost_after = out[intr_base + n_cam * 7 + 1];
@@ -584,7 +642,7 @@ mod tests {
         let mut pt_flat: Vec<f32> = Vec::new();
         for x in &gt_pts { for &v in x { pt_flat.push(v as f32); } }
 
-        let out = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &obs, &[], &[], 120, &sensor_of_cam, 13);
+        let out = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &obs, &[], &[], &[], 120, &sensor_of_cam, 13);
         let intr_base = n_cam * 12 + n_pts * 3;
         let cost_after = out[intr_base + n_cam * 7 + 1];
         for c in 0..n_cam {

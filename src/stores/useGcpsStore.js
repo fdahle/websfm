@@ -2,7 +2,7 @@ import { ref, watch, computed } from 'vue'
 import { defineStore } from 'pinia'
 import { useLog } from '../composables/useLog.js'
 import { ensureProjection, transform } from '../core/crs.js'
-import { hasGcpElevation } from '../core/io/gcp.js'
+import { hasGcpElevation, normalizeGcpRole } from '../core/io/gcp.js'
 import { makeNameResolver } from '../core/io/nameMatch.js'
 import * as opfs from '../utils/opfs.js'
 import { registerProjectStore } from './projectStores.js'
@@ -26,15 +26,18 @@ export const useGcpsStore = registerProjectStore(defineStore('gcps', () => {
   const imagesStore = useImagesStore()
   const projects = useProjectsStore()
 
-  // [{ id, name, x, y, z, accuracyX, accuracyY, accuracyZ, accuracyImgX, accuracyImgY,
+  // [{ id, name, role:'control'|'check', x, y, z, accuracyX, accuracyY,
+  //    accuracyZ, accuracyImgX, accuracyImgY,
   //    observations: [{ imageId, imageName, px, py }], enabled }]
-  // `enabled` = ignored entirely (excluded from georeference/BA + accuracy report).
+  // `role` and `enabled` are orthogonal: an enabled checkpoint is measured but
+  // never enters georeferencing or BA; disabled points enter neither solve nor report.
   const gcps = ref([])
 
   // Backfill accuracy fields on GCPs loaded from older saved projects.
   // (Pre-split `accuracyAbs`/`accuracyXY` seed the per-axis ground values; the
-  // former single `accuracyRel` seeds both image axes; `role` is dropped.)
+  // former single `accuracyRel` seeds both image axes). Legacy points are controls.
   function normalize(g) {
+    g.role = normalizeGcpRole(g.role)
     if (g.accuracyX    == null) g.accuracyX    = g.accuracyXY ?? g.accuracyAbs ?? DEFAULT_ACCURACY_X
     if (g.accuracyY    == null) g.accuracyY    = g.accuracyXY ?? g.accuracyAbs ?? DEFAULT_ACCURACY_Y
     if (g.accuracyZ    == null) g.accuracyZ    = g.accuracyAbs ?? DEFAULT_ACCURACY_Z
@@ -43,7 +46,6 @@ export const useGcpsStore = registerProjectStore(defineStore('gcps', () => {
     delete g.accuracyAbs
     delete g.accuracyXY
     delete g.accuracyRel
-    delete g.role
     return g
   }
 
@@ -114,6 +116,7 @@ export const useGcpsStore = registerProjectStore(defineStore('gcps', () => {
         // Merge: update position + append observations we don't already have
         // (re-importing the same file must not duplicate observations).
         existing.x = x; existing.y = y; existing.z = raw.z != null ? z : existing.z
+        existing.role = normalizeGcpRole(raw.role ?? existing.role)
         for (const o of observations) {
           const dup = existing.observations.some(
             (e) => e.imageName === o.imageName && e.px === o.px && e.py === o.py,
@@ -124,6 +127,7 @@ export const useGcpsStore = registerProjectStore(defineStore('gcps', () => {
         gcps.value.push({
           id: crypto.randomUUID(),
           name: raw.name,
+          role: normalizeGcpRole(raw.role),
           x, y, z: raw.z != null ? z : null,
           accuracyX:    DEFAULT_ACCURACY_X,
           accuracyY:    DEFAULT_ACCURACY_Y,
@@ -150,7 +154,7 @@ export const useGcpsStore = registerProjectStore(defineStore('gcps', () => {
     const n = gcps.value.length + 1
     const id = crypto.randomUUID()
     gcps.value.push({
-      id, name: `GCP ${n}`, x: 0, y: 0, z: null,
+      id, name: `GCP ${n}`, role: 'control', x: 0, y: 0, z: null,
       accuracyX: DEFAULT_ACCURACY_X, accuracyY: DEFAULT_ACCURACY_Y, accuracyZ: DEFAULT_ACCURACY_Z,
       accuracyImgX: DEFAULT_ACCURACY_IMG, accuracyImgY: DEFAULT_ACCURACY_IMG,
       observations: [], enabled: true,
@@ -165,6 +169,17 @@ export const useGcpsStore = registerProjectStore(defineStore('gcps', () => {
     const trimmed = (name ?? '').trim()
     if (!g || !trimmed) return
     g.name = trimmed
+    save()
+  }
+
+  function setGcpRole(id, role) {
+    const g = gcps.value.find((x) => x.id === id)
+    if (!g) return
+    const next = normalizeGcpRole(role)
+    if (g.role === next) return
+    g.role = next
+    log(`${g.name} is now a ${next === 'check' ? 'checkpoint' : 'control point'}`,
+      'info', 'GCP', { channel: 'activity' })
     save()
   }
 
@@ -392,6 +407,7 @@ export const useGcpsStore = registerProjectStore(defineStore('gcps', () => {
     addGcps,
     addGcp,
     setGcpName,
+    setGcpRole,
     setGcpPosition,
     setGcpAccuracy,
     setObservation,

@@ -8,6 +8,8 @@ import SegmentedControl from './ui/SegmentedControl.vue'
 import PresetCards from './ui/PresetCards.vue'
 import WarnBox from './ui/WarnBox.vue'
 import GlossaryTerm from '../glossary/GlossaryTerm.vue'
+import { useDatasetRecommendations } from '../../composables/useDatasetRecommendations.js'
+import { useRecommendedPreset } from '../../composables/useRecommendedPreset.js'
 import {
   DETECT_SIFT_DEFAULTS, DETECT_SUPERPOINT_DEFAULTS,
   DETECT_SIFT_PRESETS, DETECT_SUPERPOINT_PRESETS, DETECT_PRESET_META,
@@ -21,6 +23,7 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['close', 'run'])
+const { recommendations } = useDatasetRecommendations()
 
 const overwrite = ref(false)
 const modeOptions = [
@@ -66,7 +69,10 @@ const settings = computed(() => {
   // `preset` rides along so the store can pick the auto-resolution band (its floor
   // is that preset's absolute maxDim). `baseId`, not `activePreset`: an edited
   // preset still belongs to the band the user last chose, and 'custom' has none.
-  const base = { preset: baseId.value }
+  // The dataset-derived card is not one of `detectResolution.js`'s bands (which
+  // are compute ceilings per *quality* preset), so it reports the balanced band
+  // rather than silently falling through to it inside core.
+  const base = { preset: baseId.value === 'recommended' ? 'medium' : baseId.value }
   if (detector.value === 'sift') return { ...base, ...siftSettings.value }
   if (detector.value === 'superpoint') return { ...base, ...superpointSettings.value }
   return {}
@@ -78,19 +84,10 @@ const isSp = computed(() => detector.value === 'superpoint')
 const activeRef = computed(() => (isSp.value ? superpointSettings : siftSettings))
 const presetMap = computed(() => (isSp.value ? DETECT_SUPERPOINT_PRESETS : DETECT_SIFT_PRESETS))
 const presetBase = computed(() => (isSp.value ? DETECT_SUPERPOINT_DEFAULTS : DETECT_SIFT_DEFAULTS))
-const resolvePreset = (id) => ({ ...presetBase.value, ...presetMap.value[id] })
 const baseId = ref('medium')
 // `maxDimMode` is a mode, not a quality delta — it is orthogonal to the preset and
 // identical across all three, so switching it must not flip the card to Custom.
 const PRESET_MATCH_IGNORE = new Set(['maxDimMode'])
-const activePreset = computed(() => {
-  const s = activeRef.value.value
-  for (const { id } of DETECT_PRESET_META) {
-    const r = resolvePreset(id)
-    if (Object.keys(r).every((k) => PRESET_MATCH_IGNORE.has(k) || s[k] === r[k])) return id
-  }
-  return 'custom'
-})
 // Writable proxy onto whichever detector's settings are active. `activeRef` is a
 // computed *holding a ref*, which templates do not unwrap through — reading
 // `activeRef.value.maxDimMode` in the template would compile fine and be undefined
@@ -100,12 +97,52 @@ const maxDimMode = computed({
   set: (v) => { activeRef.value.value = { ...activeRef.value.value, maxDimMode: v } },
 })
 
+const detectRecommendations = computed(() => {
+  const out = { ...recommendations.value.detect }
+  // U2's keypoint budget is explicitly in SIFT units; applying it to
+  // SuperPoint would violate LightGlue's much tighter attention budget.
+  if (isSp.value) delete out.maxKeypoints
+  return out
+})
+const DETECT_RECOMMENDATION_LABELS = {
+  maxDim: 'Detection resolution',
+  maxKeypoints: 'Max keypoints',
+  tiling: 'Tiling',
+  tileSize: 'Tile size',
+}
+// The derived knobs are the same ones the quality presets tune, so the
+// recommendation is offered as one more card rather than a banner above them.
+const {
+  RECOMMENDED_PRESET_ID, patch: recommendedPatch, withRecommended, logApplied,
+} = useRecommendedPreset({
+  stage: 'detection',
+  recommendations: detectRecommendations,
+  defaults: presetBase,
+  labels: DETECT_RECOMMENDATION_LABELS,
+})
+const presetCards = computed(() => withRecommended(DETECT_PRESET_META))
+
+const resolvePreset = (id) => (id === RECOMMENDED_PRESET_ID
+  ? { ...presetBase.value, ...recommendedPatch.value }
+  : { ...presetBase.value, ...presetMap.value[id] })
+// Recommended is checked first (it is the more specific claim) — it only exists
+// when it differs from the defaults, but it can coincide with another preset.
+const activePreset = computed(() => {
+  const s = activeRef.value.value
+  for (const { id } of presetCards.value) {
+    const r = resolvePreset(id)
+    if (Object.keys(r).every((k) => PRESET_MATCH_IGNORE.has(k) || s[k] === r[k])) return id
+  }
+  return 'custom'
+})
+
 function selectPreset(id) {
   // Preserve the orthogonal mode across a preset change — picking "Detailed"
   // should not silently switch the resolution rule back to absolute.
   const { maxDimMode } = activeRef.value.value
   activeRef.value.value = { ...resolvePreset(id), maxDimMode }
   baseId.value = id
+  if (id === RECOMMENDED_PRESET_ID) logApplied()
 }
 
 // SuperPoint is fully convolutional, so a single untiled pass on a very large network
@@ -174,7 +211,7 @@ function attemptRun() {
     <PresetCards
       :model-value="activePreset"
       :base-id="baseId"
-      :presets="DETECT_PRESET_META"
+      :presets="presetCards"
       @select="selectPreset"
     />
 

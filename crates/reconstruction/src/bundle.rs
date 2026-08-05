@@ -124,6 +124,10 @@ fn build_groups(ids: &[i32], n_cam: usize) -> (Vec<usize>, usize) {
 /// touches that point's own 3×3 block (gradient + diagonal Hessian) — no camera
 /// Jacobian, no new coupling — so it folds into the existing per-point Schur
 /// elimination for free. Empty anchor arrays reduce to today's behaviour exactly.
+/// Camera-position support: `camera_prior_flat` optionally pulls camera centres
+/// `C = -R^T t` toward known positions in this same SfM frame. Each row carries
+/// independent inverse-variance weights for X/Y/Z. Its analytic pose Jacobian is
+/// `[-R^T | -R^T[t]_x]` for this solver's `[dt,domega]` update convention.
 ///
 /// # Inputs
 /// - `cameras_flat`: n_cam × 12 floats `[R(9)|t(3), …]`
@@ -133,6 +137,8 @@ fn build_groups(ids: &[i32], n_cam: usize) -> (Vec<usize>, usize) {
 /// - `anchor_flat`: n_anchor × 4 floats `[pt_i, target_x, target_y, target_z, …]`
 /// - `anchor_weight`: n_anchor floats, one `1/sigma²` weight per anchor (aligned
 ///   with `anchor_flat`'s rows; missing entries default to weight 1)
+/// - `camera_prior_flat`: n_prior × 7 floats
+///   `[cam_i, target_x, target_y, target_z, weight_x, weight_y, weight_z, …]`
 /// - `max_iters`: outer LM iterations
 /// - `sensor_of_cam`: n_cam ints — per-camera sensor id (shared → shared focal);
 ///   `< 0` (or a short/empty list) ⇒ that camera is its own group
@@ -143,12 +149,14 @@ fn build_groups(ids: &[i32], n_cam: usize) -> (Vec<usize>, usize) {
 ///
 /// # Output
 /// `[cameras_flat(n_cam×12), pts_flat(n_pts×3), intrinsics_flat(n_cam×7),
-///   cost_before, cost_after, anchor_rms_after, cost_trace…]` — the returned
+///   cost_before, cost_after, anchor_rms_after, camera_prior_rms_after,
+///   cost_trace…]` — the returned
 /// intrinsics are the **refined** effective K per camera as `[fx,fy,cx,cy,k1,k2,k3]`
 /// (radial coeffs 0 for the bits not set in `refine_mask`, identical to the input K
 /// when `refine_mask == 0`); cost_before/cost_after are RMS reprojection error in
 /// pixels (anchors do not affect them); anchor_rms_after is the RMS anchor
-/// residual in the caller's world units (0 when there are no anchors).
+/// residual in the caller's world units, and camera_prior_rms_after is the RMS
+/// camera-centre residual (both 0 when their respective prior list is empty).
 #[wasm_bindgen]
 pub fn bundle_adjust(
     cameras_flat: &[f32],
@@ -157,6 +165,7 @@ pub fn bundle_adjust(
     obs_flat: &[f32],
     anchor_flat: &[f32],
     anchor_weight: &[f32],
+    camera_prior_flat: &[f32],
     max_iters: u32,
     sensor_of_cam: &[i32],
     refine_mask: u32,
@@ -196,6 +205,22 @@ pub fn bundle_adjust(
         (sse / anchors.len() as f64).sqrt()
     };
 
+    // Camera-centre priors: (camera index, target centre, per-axis weight).
+    // Reject non-finite/non-positive weights so a malformed metadata row cannot
+    // poison the whole normal equation with NaNs or negative curvature.
+    let n_camera_prior = camera_prior_flat.len() / 7;
+    let camera_priors: Vec<(usize, V3, V3)> = (0..n_camera_prior).filter_map(|i| {
+        let b = i * 7;
+        let ci = camera_prior_flat[b] as usize;
+        let target = [camera_prior_flat[b+1] as f64, camera_prior_flat[b+2] as f64,
+                      camera_prior_flat[b+3] as f64];
+        let weight = [camera_prior_flat[b+4] as f64, camera_prior_flat[b+5] as f64,
+                      camera_prior_flat[b+6] as f64];
+        if ci >= n_cam || target.iter().any(|v| !v.is_finite())
+            || weight.iter().any(|v| !v.is_finite() || *v <= 0.0) { return None; }
+        Some((ci, target, weight))
+    }).collect();
+
     // Unpack cameras / base intrinsics / points / observations.
     let mut cams: Vec<(M3, V3)> = (0..n_cam).map(|c| {
         let b = c * 12;
@@ -222,6 +247,27 @@ pub fn bundle_adjust(
     // Per-point observation lists — the structure the Schur reduction iterates.
     let mut pt_obs: Vec<Vec<(usize, f64, f64)>> = vec![vec![]; n_pts];
     for &(ci, pi, ox, oy) in &obs { pt_obs[pi].push((ci, ox, oy)); }
+
+    let camera_center = |cam: &(M3, V3)| -> V3 {
+        let (r, t) = cam;
+        [-(r[0][0]*t[0] + r[1][0]*t[1] + r[2][0]*t[2]),
+         -(r[0][1]*t[0] + r[1][1]*t[1] + r[2][1]*t[2]),
+         -(r[0][2]*t[0] + r[1][2]*t[1] + r[2][2]*t[2])]
+    };
+    let camera_prior_sse = |cams: &Vec<(M3, V3)>| -> f64 {
+        camera_priors.iter().map(|&(ci, target, weight)| {
+            let c = camera_center(&cams[ci]);
+            (0..3).map(|k| weight[k] * (c[k] - target[k]).powi(2)).sum::<f64>()
+        }).sum()
+    };
+    let camera_prior_rms = |cams: &Vec<(M3, V3)>| -> f64 {
+        if camera_priors.is_empty() { return 0.0; }
+        let sse: f64 = camera_priors.iter().map(|&(ci, target, _)| {
+            let c = camera_center(&cams[ci]);
+            (0..3).map(|k| (c[k] - target[k]).powi(2)).sum::<f64>()
+        }).sum();
+        (sse / camera_priors.len() as f64).sqrt()
+    };
 
     // ── Intrinsic self-calibration setup ─────────────────────────────────────────
     // `refine_mask` is a bitmask (1=f, 2=cxcy, 4=k1, 8=k2, 16=k3). The per-group param
@@ -285,7 +331,7 @@ pub fn bundle_adjust(
             let e = e2.sqrt();
             sum += if e <= dh { e2 } else { 2.0 * dh * e - dh * dh };
         }
-        sum + anchor_sse(pts)
+        sum + anchor_sse(pts) + camera_prior_sse(cams)
     };
 
     // Adaptive Huber threshold: a multiple of the residual median, so it tracks the
@@ -329,6 +375,32 @@ pub fn bundle_adjust(
             gpv[pi][1] += w * (pts[pi][1] - target[1]);
             gpv[pi][2] += w * (pts[pi][2] - target[2]);
             cmat[pi][0][0] += w; cmat[pi][1][1] += w; cmat[pi][2][2] += w;
+        }
+
+        // Camera-centre priors contribute directly to the reduced camera blocks.
+        // For C=-R^Tt and update (t+=dt, R=Exp(dw)R), J=[-R^T|-R^T[t]_x].
+        for &(ci, target, weight) in &camera_priors {
+            let (r, t) = &cams[ci];
+            let centre = camera_center(&cams[ci]);
+            let st = skew(t);
+            let mut j = [[0.0f64; 6]; 3];
+            for row in 0..3 {
+                for col in 0..3 {
+                    j[row][col] = -r[col][row];
+                    j[row][3 + col] = -(r[0][row]*st[0][col]
+                        + r[1][row]*st[1][col] + r[2][row]*st[2][col]);
+                }
+            }
+            let residual = [centre[0] - target[0], centre[1] - target[1], centre[2] - target[2]];
+            let off = 6 * ci;
+            for a in 0..6 {
+                for axis in 0..3 { gr[off+a] += weight[axis] * j[axis][a] * residual[axis]; }
+                for b in 0..6 {
+                    for axis in 0..3 {
+                        smat[(off+a)*n + off+b] += weight[axis] * j[axis][a] * j[axis][b];
+                    }
+                }
+            }
         }
 
         for pi in 0..n_pts {
@@ -531,11 +603,12 @@ pub fn bundle_adjust(
 
     let cost_after = rms(&cams, &pts, &gpar);
     let anchor_rms_after = anchor_rms(&pts);
+    let camera_prior_rms_after = camera_prior_rms(&cams);
 
     // Pack output: cameras (12 each), points (3 each), refined effective intrinsics
     // (7 each: fx,fy,cx,cy,k1,k2,k3 — radial coeffs 0 for the bits not in refine_mask),
-    // [cost_before, cost_after, anchor_rms_after], then the RMS convergence trace.
-    let mut out = Vec::with_capacity(n_cam * 12 + n_pts * 3 + n_cam * 7 + 3 + trace.len());
+    // [cost_before, cost_after, anchor_rms_after, camera_prior_rms_after], then trace.
+    let mut out = Vec::with_capacity(n_cam * 12 + n_pts * 3 + n_cam * 7 + 4 + trace.len());
     for (r, t) in &cams {
         for row in r { for &v in row { out.push(v as f32); } }
         for &v in t { out.push(v as f32); }
@@ -551,6 +624,7 @@ pub fn bundle_adjust(
     out.push(cost_before as f32);
     out.push(cost_after as f32);
     out.push(anchor_rms_after as f32);
+    out.push(camera_prior_rms_after as f32);
     for &c in &trace { out.push(c as f32); }
     out
 }

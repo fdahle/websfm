@@ -62,7 +62,7 @@ export function createGeoreferencing({
     return new Map(images.value.map((im) => [im.id, im]))
   }
 
-  // Fit-eligible GCPs: enabled, with ≥2 observations that resolve to a
+  // Fit-eligible control points: enabled controls with ≥2 observations that resolve to a
   // *registered* camera — cheap sync check, no triangulation, used to gate
   // `canGeoreferenceGcps` and to decide whether it's worth triangulating at all.
   function qualifyingGcps() {
@@ -70,7 +70,7 @@ export function createGeoreferencing({
     if (!cams.size) return []
     const imgById = imagesById()
     return gcps().filter((g) => {
-      if (g.enabled === false || !finite3d(g)) return false
+      if (g.enabled === false || g.role === 'check' || !finite3d(g)) return false
       const nRegistered = (g.observations || []).filter((o) => {
         const uuid = imgById.get(o.imageId)?.uuid
         return uuid != null && cams.has(uuid)
@@ -106,7 +106,15 @@ export function createGeoreferencing({
   // GCPs are the accuracy-defining source and win when ≥3 triangulate; imported
   // camera poses are the fallback. Returns the georef record or null.
   async function georeference() {
+    const clearFit = () => {
+      if (georef.value) {
+        georef.value = null
+        healthDirty.value++
+        persist()
+      }
+    }
     if (isGeographic(currentCrs())) {
+      clearFit()
       log(`Georeference: ${currentCrs()} uses angular coordinates; choose a projected metric CRS`,
         'warn', 'Products')
       return null
@@ -115,11 +123,13 @@ export function createGeoreferencing({
     const usingGcps = gcpPairs.length >= 3
     const pairs = usingGcps ? gcpPairs : georefPairs()
     if (pairs.length < 3) {
+      clearFit()
       log('Georeference: need ≥3 GCPs or camera poses matching registered images', 'warn', 'Products')
       return null
     }
     const fit = fitSimilarity(pairs)
     if (!fit) {
+      clearFit()
       log('Georeference: fit failed (degenerate configuration)', 'warn', 'Products')
       return null
     }
@@ -152,13 +162,19 @@ export function createGeoreferencing({
       if (!cam) continue
       const fit = applySimilarity(sim, cameraCenter(cam))
       const dx = fit[0] - p.x, dy = fit[1] - p.y, dz = fit[2] - p.z
-      out.push({ uuid: im.uuid, name: im.name, dx, dy, dz, dTotal: Math.hypot(dx, dy, dz) })
+      out.push({ uuid: im.uuid, name: im.name, source: p.source ?? 'imported',
+        accuracyX: p.accuracyX ?? p.accXYZ, accuracyY: p.accuracyY ?? p.accXYZ,
+        accuracyZ: p.accuracyZ ?? p.accXYZ, verticalDatum: p.verticalDatum ?? null,
+        dx, dy, dz, dTotal: Math.hypot(dx, dy, dz) })
     }
     return out
   }
 
-  // Per-GCP accuracy report against the current georeference: triangulate every
-  // enabled GCP, apply the fitted similarity, and diff against its surveyed CRS
+  // Per-point accuracy report against the current georeference: triangulate every
+  // enabled control/check point, apply the control/pose-fitted similarity, and diff
+  // against its surveyed CRS position. Checkpoints are deliberately present here
+  // despite being absent from qualifyingGcps()/gcpGeorefPairs(): that is what makes
+  // their residual independent of the adjustment.
   // position — plus the per-observation reprojection residual already computed
   // by triangulateGcp. Pure read against already-fitted state; cheap to recompute
   // on demand (e.g. every time the GCP table is shown or a mark is placed).
@@ -171,7 +187,7 @@ export function createGeoreferencing({
     const results = await triangulateAllGcps(enabled, sparseCameras.value, imagesById())
     return results.map(({ gcp, tri }) => {
       if (!tri) {
-        return { gcpId: gcp.id, name: gcp.name, viewCount: 0,
+        return { gcpId: gcp.id, name: gcp.name, role: gcp.role ?? 'control', viewCount: 0,
           dx: null, dy: null, dz: null, dTotal: null, observations: [] }
       }
       let dx = null, dy = null, dz = null, dTotal = null
@@ -181,7 +197,7 @@ export function createGeoreferencing({
         dTotal = Math.hypot(dx, dy, dz)
       }
       return {
-        gcpId: gcp.id, name: gcp.name, viewCount: tri.viewCount,
+        gcpId: gcp.id, name: gcp.name, role: gcp.role ?? 'control', viewCount: tri.viewCount,
         dx, dy, dz, dTotal, observations: tri.perViewReprojPx,
       }
     })

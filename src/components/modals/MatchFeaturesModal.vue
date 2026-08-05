@@ -10,7 +10,10 @@ import PresetCards from './ui/PresetCards.vue'
 import WarnBox from './ui/WarnBox.vue'
 import GlossaryTerm from '../glossary/GlossaryTerm.vue'
 import { useComputeSettings } from '../../composables/useComputeSettings.js'
+import { useDatasetRecommendations } from '../../composables/useDatasetRecommendations.js'
+import { useLog } from '../../composables/useLog.js'
 import { MATCH_DEFAULTS, MATCH_PRESETS, MATCH_PRESET_META } from '../../core/defaults.user.js'
+import { initialMatchStrategy } from '../../core/recommend.js'
 
 const props = defineProps({
   // Largest detected keypoint count over all images (for the density auto-hint).
@@ -24,13 +27,16 @@ const emit = defineEmits(['close', 'run'])
 
 // GPU is a machine-level preference now (Settings ▸ Compute), injected on run.
 const { useGpu } = useComputeSettings()
+const { recommendations } = useDatasetRecommendations()
+const { log } = useLog()
 
 // Preselect needs ≥2 images carrying the relevant evidence to prune anything.
 const hasPoses = computed(() => props.posedImageCount >= 2)
 const hasFootprints = computed(() => props.footprintImageCount >= 2)
 const preselectAvailable = computed(() => hasPoses.value || hasFootprints.value)
 
-const strategy = ref('exhaustive')
+const strategy = ref(initialMatchStrategy(props.posedImageCount))
+const strategyTouched = ref(false)
 const strategies = computed(() => [
   { id: 'exhaustive', label: 'Exhaustive' },
   { id: 'sequential', label: 'Sequential' },
@@ -49,6 +55,21 @@ watch(strategy, (s) => {
   if (m === 'position' && !hasPoses.value && hasFootprints.value) settings.value.preselectMethod = 'footprint'
   else if (m === 'footprint' && !hasFootprints.value && hasPoses.value) settings.value.preselectMethod = 'position'
 })
+
+// Metadata/CRS synchronization is asynchronous. If positions become ready while
+// this modal is open, select proximity automatically only while the field is still
+// pristine; never override an explicit user choice.
+watch(hasPoses, (ready) => {
+  if (ready && !strategyTouched.value && strategy.value === 'exhaustive') {
+    strategy.value = 'preselect'
+    settings.value = { ...settings.value, preselectMethod: 'position' }
+  }
+})
+
+function selectStrategy(value) {
+  strategyTouched.value = true
+  strategy.value = value
+}
 
 // Matcher: brute-force NN + Lowe ratio (works on any descriptor) or LightGlue
 // (learned; requires SuperPoint 256-d descriptors — the store guards mismatches).
@@ -75,6 +96,36 @@ const activePreset = computed(() => {
 function selectPreset(id) {
   settings.value = { ...resolvePreset(id) }
   baseId.value = id
+}
+
+// The derived knob here is the pairing STRATEGY, which is not what the quality
+// presets tune — so the recommendation is surfaced on the strategy field itself
+// rather than as a card that would silently reach past its own dimension.
+const matchRecommendations = computed(() => {
+  const out = { ...recommendations.value.match }
+  // A project can contain an unmatched imported pose. The modal's matched-image
+  // count is the authority on whether position preselection can actually run.
+  if (out.strategy?.value === 'preselect' && !preselectAvailable.value) {
+    delete out.strategy
+    delete out.preselectMethod
+  }
+  return out
+})
+const strategyRec = computed(() => matchRecommendations.value.strategy ?? null)
+const strategyRecLabel = computed(
+  () => strategies.value.find((s) => s.id === strategyRec.value?.value)?.label ?? strategyRec.value?.value,
+)
+const strategyRecApplied = computed(() => strategy.value === strategyRec.value?.value)
+function applyStrategyRecommendation() {
+  const rec = strategyRec.value
+  if (!rec) return
+  strategy.value = rec.value
+  log(`Recommended matching: Pairing strategy = ${rec.value} — ${rec.reason}`, 'info', 'Recommend')
+  const method = matchRecommendations.value.preselectMethod
+  if (method) {
+    settings.value = { ...settings.value, preselectMethod: method.value }
+    log(`Recommended matching: Preselect by = ${method.value} — ${method.reason}`, 'info', 'Recommend')
+  }
 }
 
 // P6: one "matching density" mental model instead of three overlapping caps. Fast =
@@ -112,9 +163,18 @@ function run() {
 
     <SettingsGroup title="Strategy">
       <SettingsField
-        hint="Exhaustive matches all pairs. Sequential uses a capture-order neighbour window and needs no GPS. Preselect prunes pairs by camera position or footprint overlap (needs imported poses or footprints).">
+        hint="Exhaustive matches all pairs. Sequential uses a capture-order neighbour window and needs no GPS. Preselect prunes pairs by camera position or footprint overlap (EXIF GPS, imported poses, or footprints).">
         <template #label>Pairing</template>
-        <SegmentedControl v-model="strategy" :options="strategies" />
+        <SegmentedControl :model-value="strategy" :options="strategies" @update:model-value="selectStrategy" />
+        <div v-if="strategyRec" class="rec-inline">
+          <button
+            v-if="!strategyRecApplied"
+            type="button" class="link-btn"
+            @click="applyStrategyRecommendation"
+          >Use recommended: {{ strategyRecLabel }}</button>
+          <span v-else class="rec-inline-ok">✓ Recommended for this dataset</span>
+          <span class="rec-inline-reason">{{ strategyRec.reason }}</span>
+        </div>
       </SettingsField>
 
       <template v-if="strategy === 'sequential'">
@@ -133,13 +193,13 @@ function run() {
 
       <template v-if="strategy === 'preselect'">
         <SettingsField
-          hint="Camera position keeps each image's nearest cameras (needs imported poses). Footprint overlap keeps pairs whose footprints share ground (needs footprints) — better when views converge or point different ways.">
+          hint="Camera position keeps each image's nearest cameras (EXIF GPS or imported poses). Footprint overlap keeps pairs whose footprints share ground (needs footprints) — better when views converge or point different ways.">
           <template #label>Preselect by</template>
           <SegmentedControl v-model="settings.preselectMethod" :options="preselectMethods" />
         </SettingsField>
 
         <SettingsField v-if="settings.preselectMethod === 'position'" label-for="maxNeighbors"
-          hint="Match each image to its N nearest by camera position. Needs imported poses.">
+          hint="Match each image to its N nearest by camera position. Needs EXIF GPS or imported poses.">
           <template #label><GlossaryTerm id="camera-pose">Neighbours per image</GlossaryTerm>
             <FieldHelp op="match-features" param="maxNeighbors" :default-value="settings.maxNeighbors" /></template>
           <input id="maxNeighbors" v-model.number="settings.maxNeighbors" type="number" min="1" max="50" step="1" class="field-input" />
@@ -272,3 +332,11 @@ function run() {
 </template>
 
 <style scoped src="./ui/modal.css"></style>
+<style scoped>
+/* Dataset recommendation for the pairing strategy — a quiet line under the
+   control it concerns, not a block above the modal. */
+.rec-inline { margin-top: 6px; display: flex; flex-direction: column; gap: 2px; }
+.rec-inline .link-btn { font-size: 11px; }
+.rec-inline-ok { font-size: 11px; font-weight: 600; color: var(--accent); }
+.rec-inline-reason { font-size: 11px; line-height: 1.4; color: var(--text-dim); }
+</style>

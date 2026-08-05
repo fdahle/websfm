@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { preselectPairs, footprintOverlap, preselectByFootprintOverlap } from './preselect.js'
+import { preselectPairs, positionsForProximity, footprintOverlap, preselectByFootprintOverlap } from './preselect.js'
 
 describe('preselectPairs', () => {
   // Five cameras evenly spaced along a line (a flight strip).
@@ -64,12 +64,11 @@ describe('preselectPairs', () => {
     expect(preselectPairs([]).size).toBe(0)
   })
 
-  it('treats a missing z as 0 in the distance', () => {
-    // 2D positions (no z) must not throw and should rank by planar distance.
+  it('uses planar distance and ignores altitude', () => {
     const items = [
-      { uuid: 'a', pos: [0, 0] },
-      { uuid: 'b', pos: [1, 0] },
-      { uuid: 'c', pos: [5, 0] },
+      { uuid: 'a', pos: [0, 0, 10000] },
+      { uuid: 'b', pos: [1, 0, -10000] },
+      { uuid: 'c', pos: [5, 0, 10000] },
     ]
     const keep = preselectPairs(items, { maxNeighbors: 1 })
     expect(keep.has('a--b')).toBe(true)
@@ -86,6 +85,23 @@ describe('preselectPairs', () => {
     const keep = preselectPairs(items, { maxNeighbors: 2 })
     expect(keep.has('a--b')).toBe(true)
     expect(keep.has('a--c')).toBe(true)
+  })
+})
+
+describe('positionsForProximity', () => {
+  it('drops altitude in a projected CRS', () => {
+    expect(positionsForProximity([{ uuid: 'a', pos: [3, 4, 99] }], 'EPSG:3857'))
+      .toEqual([{ uuid: 'a', pos: [3, 4] }])
+  })
+
+  it('turns geographic positions into locally metric XY, including across the dateline', () => {
+    const out = positionsForProximity([
+      { uuid: 'west', pos: [179.999, 10, 0] },
+      { uuid: 'east', pos: [-179.999, 10, 5000] },
+    ], 'EPSG:4326')
+    expect(out).toHaveLength(2)
+    expect(Math.hypot(out[0].pos[0] - out[1].pos[0], out[0].pos[1] - out[1].pos[1]))
+      .toBeLessThan(250)
   })
 })
 

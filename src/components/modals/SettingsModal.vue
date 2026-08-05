@@ -15,7 +15,10 @@ const emit = defineEmits(['close', 'set-theme'])
 
 const { isChromium, warningEnabled, setEnabled: setBrowserWarningEnabled } = useBrowserWarning()
 const { glossaryTermsEnabled, setGlossaryTermsEnabled } = useGlossarySettings()
-const { memBudgetGb, setMemBudgetGb, useGpu, setUseGpu, workerCount, setWorkerCount, MAX_POOL_SIZE } = useComputeSettings()
+const {
+  memBudgetGb, memBudgetAuto, setMemBudgetGb, resetMemBudgetAuto, deviceBudgetInfo,
+  useGpu, setUseGpu, workerCount, setWorkerCount, MAX_POOL_SIZE,
+} = useComputeSettings()
 const { advancedSettingsExpanded, setAdvancedSettingsExpanded, uiScale, setUiScale, motion, setMotion } = useUiSettings()
 const { gridZ, setGridZ, background, setBackground } = useViewerSettings()
 const { basemap, setBasemap } = useMapSettings()
@@ -216,11 +219,17 @@ onMounted(refreshStorage)
           <div class="setting-row">
             <div class="setting-info">
               <span class="setting-label">Memory safety limit</span>
-              <span class="setting-desc">Dense runs stop before starting when estimated peak memory exceeds this amount.</span>
+              <span class="setting-desc">
+                Dense runs stop before starting when estimated peak memory exceeds this amount.
+                {{ memBudgetAuto ? `Automatically derived from ${deviceBudgetInfo.source}.` : 'Manually overridden.' }}
+              </span>
             </div>
-            <div class="num-input">
-              <input type="number" min="0.25" step="0.5" :value="memBudgetGb" @change="setMemBudgetGb($event.target.value)">
-              <span class="num-unit">GB</span>
+            <div class="setting-actions">
+              <div class="num-input">
+                <input type="number" min="0.25" step="0.5" :value="memBudgetGb" @change="setMemBudgetGb($event.target.value)">
+                <span class="num-unit">GB</span>
+              </div>
+              <button v-if="!memBudgetAuto" class="btn" title="Use the detected device budget" @click="resetMemBudgetAuto">Auto</button>
             </div>
           </div>
 

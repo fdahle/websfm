@@ -37,6 +37,7 @@ async function refreshGcps() {
     const r = byId.get(g.id)
     return {
       id: g.id, name: g.name, enabled: g.enabled !== false,
+      role: g.role ?? 'control',
       viewCount: r ? r.viewCount : (g.observations?.length ?? 0),
       dx: r?.dx ?? null, dy: r?.dy ?? null, dz: r?.dz ?? null, dTotal: r?.dTotal ?? null,
       observations: r?.observations ?? [],
@@ -57,9 +58,12 @@ const rmse = (rows, sel) => {
   return Math.sqrt(used.reduce((a, r) => a + sel(r) ** 2, 0) / used.length)
 }
 const gcpStats = computed(() => {
-  const used = gcpRows.value.filter((r) => r.enabled && r.dTotal != null)
+  const controls = gcpRows.value.filter((r) => r.enabled && r.role !== 'check' && r.dTotal != null)
+  const checks = gcpRows.value.filter((r) => r.enabled && r.role === 'check' && r.dTotal != null)
+  const used = checks.length ? checks : controls
   return {
     n: used.length, total: gcpsStore.gcps.length,
+    controls: controls.length, checks: checks.length, basis: checks.length ? 'check' : 'control',
     rmseX: rmse(used, (r) => r.dx), rmseY: rmse(used, (r) => r.dy),
     rmseZ: rmse(used, (r) => r.dz), rmseTotal: rmse(used, (r) => r.dTotal),
   }
@@ -67,11 +71,11 @@ const gcpStats = computed(() => {
 const gcpTiles = computed(() => {
   const s = gcpStats.value
   const t = [
-    { label: 'RMSE total', value: fmtM(s.rmseTotal), unit: crsUnit.value, tone: tone(s.rmseTotal, T.gcpRmse), hint: `warn > ${T.gcpRmse.warn} ${crsUnit.value}` },
+    { label: s.basis === 'check' ? 'Checkpoint RMSE' : 'Control fit RMSE', value: fmtM(s.rmseTotal), unit: crsUnit.value, tone: tone(s.rmseTotal, T.gcpRmse), hint: s.basis === 'check' ? 'Independent accuracy' : 'No valid checkpoints — not independent' },
     { label: 'RMSE X', value: fmtM(s.rmseX), unit: crsUnit.value },
     { label: 'RMSE Y', value: fmtM(s.rmseY), unit: crsUnit.value },
     { label: 'RMSE Z', value: fmtM(s.rmseZ), unit: crsUnit.value },
-    { label: 'GCPs used', value: `${s.n} / ${s.total}` },
+    { label: 'Controls / checks', value: `${s.controls} / ${s.checks}`, hint: `${s.total} point(s) total` },
   ]
   if (method.value) t.push({ label: 'Georef source', value: method.value === 'gcps' ? 'GCPs' : 'poses',
     tone: method.value === 'gcps' ? undefined : 'warn', hint: method.value === 'poses' ? 'pose fit — <3 GCPs' : undefined })
@@ -79,6 +83,7 @@ const gcpTiles = computed(() => {
 })
 const gcpColumns = [
   { key: 'enabled', label: 'On', sortable: false }, { key: 'name', label: 'Name' },
+  { key: 'role', label: 'Role', format: (v) => v === 'check' ? 'Check' : 'Control' },
   { key: 'viewCount', label: 'Views', align: 'right' },
   { key: 'dx', label: 'ΔX', align: 'right', format: fmtM }, { key: 'dy', label: 'ΔY', align: 'right', format: fmtM },
   { key: 'dz', label: 'ΔZ', align: 'right', format: fmtM }, { key: 'dTotal', label: 'Δ total', align: 'right', format: fmtM },
@@ -102,7 +107,8 @@ const poseTiles = computed(() => [
   { label: 'Poses compared', value: poseStats.value.n },
 ])
 const poseColumns = [
-  { key: 'name', label: 'Image' }, { key: 'dx', label: 'ΔX', align: 'right', format: fmtM },
+  { key: 'name', label: 'Image' }, { key: 'source', label: 'Source', format: (v) => v === 'exif' ? 'EXIF GPS' : 'Imported' },
+  { key: 'dx', label: 'ΔX', align: 'right', format: fmtM },
   { key: 'dy', label: 'ΔY', align: 'right', format: fmtM }, { key: 'dz', label: 'ΔZ', align: 'right', format: fmtM },
   { key: 'dTotal', label: 'Δ total', align: 'right', format: fmtM },
 ]
@@ -159,7 +165,7 @@ const demColumns = [
           <div v-else class="obs-empty">No triangulable observations.</div>
         </template>
       </DataTable>
-      <p class="eval-note">Click a row for per-image reprojection error. Disable a GCP to drop it from the georeference and refit.</p>
+      <p class="eval-note">Checkpoint RMSE is independent: checkpoints are measured here but never enter georeferencing or bundle adjustment. Without checkpoints, the displayed control residual is only a fit residual.</p>
     </template>
   </template>
 

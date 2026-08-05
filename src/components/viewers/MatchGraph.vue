@@ -8,7 +8,7 @@ import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 // Node coordinates live in a fixed "world" space; a pan/zoom view transform maps
 // world → screen so the graph can be panned (drag empty space) and zoomed (wheel /
 // buttons). The layout is pre-warmed to rest *before* the first paint so it opens
-// settled rather than visibly drifting. When imported camera positions are available
+// settled rather than visibly drifting. When camera positions are available
 // they can drive a geographic layout (nodes placed where the photos were taken).
 //
 // Nodes are draggable; clicking an edge selects the pair (drives the preview),
@@ -32,7 +32,7 @@ const canvasEl  = ref(null)
 const wrapEl    = ref(null)
 const hoverText = ref(null)  // { text, x, y }
 
-// Layout mode: 'force' (spring layout) or 'geo' (imported camera positions). Only
+// Layout mode: 'force' (spring layout) or 'geo' (imported or EXIF-derived positions). Only
 // meaningful when positions exist; defaults to geo when they do.
 const layoutMode  = ref('force')
 const hasPositions = computed(() => Object.keys(props.nodePositions || {}).length > 0)
@@ -582,7 +582,7 @@ watch(hasPositions, (has) => {
 
     <!-- Toolbar: layout mode, reset, zoom -->
     <div class="graph-toolbar">
-      <div v-if="hasPositions" class="mode-toggle" title="Force = spring layout · Geographic = imported camera positions">
+      <div v-if="hasPositions" class="mode-toggle" title="Force = spring layout · Geographic = camera positions">
         <button class="mode-btn" :class="{ active: layoutMode === 'force' }" @click="setMode('force')">Force</button>
         <button class="mode-btn" :class="{ active: layoutMode === 'geo' }" @click="setMode('geo')">Geographic</button>
       </div>

@@ -36,7 +36,8 @@ describe('resolveCommand', () => {
 
   it('is case-insensitive and resolves aliases', () => {
     expect(resolveCommand('RECONSTRUCT').cmd?.dispatch).toBe('reconstruct')
-    expect(resolveCommand('georef').cmd?.dispatch).toBe('auto-georeference')
+    expect(resolveCommand('georef').cmd?.dispatch).toBe('georeference')
+    expect(resolveCommand('find gcps').cmd?.dispatch).toBe('find-gcps')
   })
 
   it('prefers the 2-token name over the bare first token', () => {

@@ -266,8 +266,11 @@ export async function solvePnp(pts3d, pts2d, K, opts = {}) {
 //                       (already in this same SfM frame) with residual
 //                       weight·‖pt−target‖² on top of their normal reprojection
 //                       observations. Omit/empty for plain SfM-only BA.
+//   cameraPriors      — [{ camIdx, target:[x,y,z], weights:[wx,wy,wz] }]
+//                       camera-centre constraints in this same SfM frame. The
+//                       weights are per-axis inverse variances.
 // Returns { cameras, points3d, intrinsics, costBefore, costAfter, costTrace,
-//   anchorRmsAfter } — `intrinsics` is the refined effective K per camera
+//   anchorRmsAfter, cameraPriorRmsAfter } — `intrinsics` is the refined effective K per camera
 // `{ fx, fy, cx, cy, k1, k2, k3 }` (radial coeffs 0 for terms not refined); anchorRmsAfter
 // is the RMS anchor residual in world units (0 when there are no anchors).
 const REFINE_BIT = { f: 1, cxcy: 2, k1: 4, k2: 8, k3: 16 }
@@ -281,7 +284,10 @@ export function refineModeMask(spec) {
 }
 export async function bundleAdjust(cameras, intrinsics, points3d, observations, opts = {}) {
   await ensureWasm()
-  const { maxIters = 30, refineIntrinsics = 'none', sensorOfCam = null, gcpAnchors = [] } = opts
+  const {
+    maxIters = 30, refineIntrinsics = 'none', sensorOfCam = null,
+    gcpAnchors = [], cameraPriors = [],
+  } = opts
   const refineMode = refineModeMask(refineIntrinsics)
   const nCam = cameras.length
   const nPts = points3d.length
@@ -314,6 +320,13 @@ export async function bundleAdjust(cameras, intrinsics, points3d, observations, 
     anchorWFlat[i] = weight
   })
 
+  const cameraPriorFlat = new Float32Array(cameraPriors.length * 7)
+  cameraPriors.forEach(({ camIdx, target, weights }, i) => {
+    cameraPriorFlat.set([
+      camIdx, target[0], target[1], target[2], weights[0], weights[1], weights[2],
+    ], i * 7)
+  })
+
   // sensor_of_cam: aligned to `cameras`; -1 (own group) where unknown. Empty/all-−1
   // is fine — the solver only uses it when refineMode > 0.
   const sensorFlat = new Int32Array(nCam)
@@ -322,17 +335,21 @@ export async function bundleAdjust(cameras, intrinsics, points3d, observations, 
     sensorFlat[c] = Number.isInteger(id) ? id : -1
   }
 
-  const raw = bundle_adjust(camFlat, kFlat, ptsFlat, obsFlat, anchorFlat, anchorWFlat, maxIters, sensorFlat, refineMode)
+  const raw = bundle_adjust(
+    camFlat, kFlat, ptsFlat, obsFlat, anchorFlat, anchorWFlat, cameraPriorFlat,
+    maxIters, sensorFlat, refineMode,
+  )
   // Layout: cameras(nCam×12), points(nPts×3), intrinsics(nCam×7 = fx,fy,cx,cy,k1,k2,k3),
-  // costBefore, costAfter, anchorRmsAfter, then a variable-length per-iteration
+  // costBefore, costAfter, anchorRmsAfter, cameraPriorRmsAfter, then a variable-length per-iteration
   // RMS convergence trace.
   const intrBase = nCam * 12 + nPts * 3
   const base = intrBase + nCam * 7
-  if (!raw || raw.length < base + 3) return null
+  if (!raw || raw.length < base + 4) return null
   const costBefore = raw[base]
   const costAfter  = raw[base + 1]
   const anchorRmsAfter = raw[base + 2]
-  const costTrace  = raw.length > base + 3 ? Array.from(raw.slice(base + 3)) : []
+  const cameraPriorRmsAfter = raw[base + 3]
+  const costTrace  = raw.length > base + 4 ? Array.from(raw.slice(base + 4)) : []
 
   const outCameras = cameras.map((_, c) => {
     const b = c * 12
@@ -352,7 +369,10 @@ export async function bundleAdjust(cameras, intrinsics, points3d, observations, 
     return { fx: raw[b], fy: raw[b+1], cx: raw[b+2], cy: raw[b+3], k1: raw[b+4], k2: raw[b+5], k3: raw[b+6] }
   })
 
-  return { cameras: outCameras, points3d: outPoints, intrinsics: outIntrinsics, costBefore, costAfter, costTrace, anchorRmsAfter }
+  return {
+    cameras: outCameras, points3d: outPoints, intrinsics: outIntrinsics,
+    costBefore, costAfter, costTrace, anchorRmsAfter, cameraPriorRmsAfter,
+  }
 }
 
 // PatchMatch multi-view-stereo depth map for one reference image (dense recon).

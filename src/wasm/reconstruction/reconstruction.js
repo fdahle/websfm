@@ -26,6 +26,10 @@
  * touches that point's own 3×3 block (gradient + diagonal Hessian) — no camera
  * Jacobian, no new coupling — so it folds into the existing per-point Schur
  * elimination for free. Empty anchor arrays reduce to today's behaviour exactly.
+ * Camera-position support: `camera_prior_flat` optionally pulls camera centres
+ * `C = -R^T t` toward known positions in this same SfM frame. Each row carries
+ * independent inverse-variance weights for X/Y/Z. Its analytic pose Jacobian is
+ * `[-R^T | -R^T[t]_x]` for this solver's `[dt,domega]` update convention.
  *
  * # Inputs
  * - `cameras_flat`: n_cam × 12 floats `[R(9)|t(3), …]`
@@ -35,6 +39,8 @@
  * - `anchor_flat`: n_anchor × 4 floats `[pt_i, target_x, target_y, target_z, …]`
  * - `anchor_weight`: n_anchor floats, one `1/sigma²` weight per anchor (aligned
  *   with `anchor_flat`'s rows; missing entries default to weight 1)
+ * - `camera_prior_flat`: n_prior × 7 floats
+ *   `[cam_i, target_x, target_y, target_z, weight_x, weight_y, weight_z, …]`
  * - `max_iters`: outer LM iterations
  * - `sensor_of_cam`: n_cam ints — per-camera sensor id (shared → shared focal);
  *   `< 0` (or a short/empty list) ⇒ that camera is its own group
@@ -45,24 +51,27 @@
  *
  * # Output
  * `[cameras_flat(n_cam×12), pts_flat(n_pts×3), intrinsics_flat(n_cam×7),
- *   cost_before, cost_after, anchor_rms_after, cost_trace…]` — the returned
+ *   cost_before, cost_after, anchor_rms_after, camera_prior_rms_after,
+ *   cost_trace…]` — the returned
  * intrinsics are the **refined** effective K per camera as `[fx,fy,cx,cy,k1,k2,k3]`
  * (radial coeffs 0 for the bits not set in `refine_mask`, identical to the input K
  * when `refine_mask == 0`); cost_before/cost_after are RMS reprojection error in
  * pixels (anchors do not affect them); anchor_rms_after is the RMS anchor
- * residual in the caller's world units (0 when there are no anchors).
+ * residual in the caller's world units, and camera_prior_rms_after is the RMS
+ * camera-centre residual (both 0 when their respective prior list is empty).
  * @param {Float32Array} cameras_flat
  * @param {Float32Array} intrinsics_flat
  * @param {Float32Array} pts_flat
  * @param {Float32Array} obs_flat
  * @param {Float32Array} anchor_flat
  * @param {Float32Array} anchor_weight
+ * @param {Float32Array} camera_prior_flat
  * @param {number} max_iters
  * @param {Int32Array} sensor_of_cam
  * @param {number} refine_mask
  * @returns {Float32Array}
  */
-export function bundle_adjust(cameras_flat, intrinsics_flat, pts_flat, obs_flat, anchor_flat, anchor_weight, max_iters, sensor_of_cam, refine_mask) {
+export function bundle_adjust(cameras_flat, intrinsics_flat, pts_flat, obs_flat, anchor_flat, anchor_weight, camera_prior_flat, max_iters, sensor_of_cam, refine_mask) {
     const ptr0 = passArrayF32ToWasm0(cameras_flat, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
     const ptr1 = passArrayF32ToWasm0(intrinsics_flat, wasm.__wbindgen_malloc);
@@ -75,12 +84,14 @@ export function bundle_adjust(cameras_flat, intrinsics_flat, pts_flat, obs_flat,
     const len4 = WASM_VECTOR_LEN;
     const ptr5 = passArrayF32ToWasm0(anchor_weight, wasm.__wbindgen_malloc);
     const len5 = WASM_VECTOR_LEN;
-    const ptr6 = passArray32ToWasm0(sensor_of_cam, wasm.__wbindgen_malloc);
+    const ptr6 = passArrayF32ToWasm0(camera_prior_flat, wasm.__wbindgen_malloc);
     const len6 = WASM_VECTOR_LEN;
-    const ret = wasm.bundle_adjust(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4, ptr5, len5, max_iters, ptr6, len6, refine_mask);
-    var v8 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
+    const ptr7 = passArray32ToWasm0(sensor_of_cam, wasm.__wbindgen_malloc);
+    const len7 = WASM_VECTOR_LEN;
+    const ret = wasm.bundle_adjust(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4, ptr5, len5, ptr6, len6, max_iters, ptr7, len7, refine_mask);
+    var v9 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
     wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
-    return v8;
+    return v9;
 }
 
 /**

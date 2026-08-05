@@ -43,6 +43,11 @@ export async function extractMetadata(file, url, presetDims = null) {
     gpsLat: e.latitude ?? null,
     gpsLon: e.longitude ?? null,
     gpsAlt: e.GPSAltitude ?? null,
+    gpsAltRef: e.GPSAltitudeRef ?? null,
+    gpsHorizontalAccuracy: e.GPSHPositioningError ?? e.HorizontalPositioningError ?? null,
+    gpsDop: e.GPSDOP ?? null,
+    gpsDirection: e.GPSImgDirection ?? null,
+    gpsDirectionRef: e.GPSImgDirectionRef ?? null,
     fileSize: file.size,
     raw: e,
   }

@@ -21,6 +21,13 @@
 const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n))
 const rec = (value, reason) => ({ value, reason })
 
+// Matching can safely select proximity by default only when at least two loaded
+// images have usable camera positions. Kept pure so the modal's automatic initial
+// state and its availability gate share a directly testable rule.
+export function initialMatchStrategy(positionCount) {
+  return Number(positionCount) >= 2 ? 'preselect' : 'exhaustive'
+}
+
 // ── detect ──────────────────────────────────────────────────────────────────
 function recommendDetect(p) {
   const out = {}
@@ -42,7 +49,7 @@ function recommendDetect(p) {
   // nothing — maxDim already clamped to 3200, so an 11 000 px scan would lose
   // detail without tiling.
   if (p.maxDim != null && p.maxDim > 6000) {
-    out.tiling = rec('on', `Native long edge ${p.maxDim} px > 6000 — tiled detection preserves fine keypoints a single downscaled pass would miss.`)
+    out.tiling = rec('auto', `Native long edge ${p.maxDim} px > 6000 — automatic tiled detection preserves fine keypoints a single downscaled pass would miss.`)
     out.tileSize = rec(1536, 'Larger tiles than the 1024 default for a high-resolution scan.')
   }
 
@@ -55,10 +62,8 @@ function recommendMatch(p) {
 
   // Strategy (a top-level match-stage choice the modal emits: exhaustive |
   // sequential | preselect). Priors → prune pairs before the O(N²) match.
-  if (p.hasPoses || p.hasGps) {
-    out.strategy = rec('preselect', p.hasPoses
-      ? 'Imported poses present — preselect by camera proximity instead of matching all pairs.'
-      : 'EXIF GPS present — preselect by camera proximity (position) instead of matching all pairs.')
+  if (p.hasPoses) {
+    out.strategy = rec('preselect', 'Camera positions present — preselect by proximity instead of matching all pairs.')
     out.preselectMethod = rec('position', 'Nearest-camera preselection from the available positions.')
   } else if (p.sequentialNames && p.scale === 'large') {
     // Contiguous filenames alone don't prove a strip — cameras number files

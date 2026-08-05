@@ -99,8 +99,8 @@ export function profileDataset({ images = [], sensors = [], poses = [], gcps = [
 
   const hasGps = images.some((i) => isFiniteNum(i.meta?.gpsLat) && isFiniteNum(i.meta?.gpsLon))
   const hasPoses = (poses?.length ?? 0) > 0
-  if (hasPoses) notes.push(`${poses.length} imported pose(s) present — proximity preselection + georef seeds available.`)
-  else if (hasGps) notes.push('EXIF GPS present but no imported poses — GPS can seed proximity preselection (F10).')
+  if (hasPoses) notes.push(`${poses.length} camera position(s) present — proximity preselection + georef seeds available.`)
+  else if (hasGps) notes.push('EXIF GPS present — synchronizing project-CRS camera positions for proximity preselection.')
 
   const hasCalibratedDistortion = (sensors ?? []).some(sensorHasDistortion)
   if (hasCalibratedDistortion) notes.push('A sensor declares non-zero lens distortion — self-cal can start from it rather than from scratch.')

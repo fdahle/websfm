@@ -64,6 +64,10 @@ function reprojFor(gcpId, imageId) {
             :title="gcpExpanded[gcp.id] ? 'Collapse' : 'Expand'"
           ></button>
           <span class="item-name">{{ gcp.name }}</span>
+          <span class="role-badge" :class="gcp.role === 'check' ? 'check' : 'control'"
+            :title="gcp.role === 'check' ? 'Checkpoint — excluded from adjustment' : 'Control point — constrains georeferencing'">
+            {{ gcp.role === 'check' ? 'CHK' : 'CTL' }}
+          </span>
           <span
             class="obs-badge"
             :class="{ low: (gcp.observations?.length || 0) < 2 }"
@@ -134,6 +138,14 @@ function reprojFor(gcpId, imageId) {
 .list-item.selected { background: rgba(80, 200, 255, 0.1); }
 
 .obs-badge.low { color: #e0a030; }
+
+.role-badge {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  color: #3fae6a;
+}
+.role-badge.check { color: #38a9c7; }
 
 .obs-header {
   margin: 6px 0 2px;

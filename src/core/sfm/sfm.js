@@ -76,7 +76,7 @@ function fmtStats(s) {
 }
 
 async function reconstructSingleModel(input, hooks = {}) {
-  const { images, pairs, settings = {}, gcps = [] } = input
+  const { images, pairs, settings = {}, gcps = [], cameraPriors = [] } = input
   // Resolve knobs from the single-source-of-truth constants, letting caller-supplied
   // `settings` (from the modal / a dev experiment override) win. User-facing defaults
   // live in defaults.user.js (mirrored by ReconstructModal); internal ones in tuning.js.
@@ -100,6 +100,7 @@ async function reconstructSingleModel(input, hooks = {}) {
     selfCalMaxFocalNominalFrac: cfg.selfCalMaxFocalNominalFrac,
     selfCalMaxPrincipalOffsetFrac: cfg.selfCalMaxPrincipalOffsetFrac,
     selfCalMaxCornerShiftFrac: cfg.selfCalMaxCornerShiftFrac,
+    cameraPositionPriors: cameraPriors.length,
   }
   // Filled in below as each stage runs; every field stays null when its stage
   // didn't run, so a missing number is never confused with a zero.
@@ -1081,6 +1082,86 @@ async function reconstructSingleModel(input, hooks = {}) {
       log(`${label} reprojection — ${fmtStats(modelReprojStats())}`, 'info', 'Reconstruction')
     }
 
+    // Convert project-CRS camera positions into targets in the current arbitrary
+    // SfM frame. The best-fit similarity removes the unobservable global gauge;
+    // the remaining residuals describe block deformation, which BA can correct.
+    function buildCameraPriorConstraints(uuidList, reference = null) {
+      const camIdxOf = new Map(uuidList.map((uuid, i) => [uuid, i]))
+      const usable = cameraPriors.filter((p) => camIdxOf.has(p.uuid)
+        && Number.isFinite(p.x) && Number.isFinite(p.y) && Number.isFinite(p.z))
+      if (usable.length < (reference ? 1 : cfg.cameraPriorBaMinCameras)) return null
+      const pairs = usable.map((p) => {
+        const sigma = [p.accuracyX, p.accuracyY, p.accuracyZ]
+          .map((v) => Number.isFinite(v) && v > 0 ? v : 5)
+        return {
+          src: cameraCenter(cameras.get(p.uuid)), dst: [p.x, p.y, p.z],
+          weight: 3 / sigma.reduce((sum, v) => sum + v * v, 0),
+        }
+      })
+      const fit = reference?.fit ?? fitSimilarity(pairs)
+      if (!fit) return null
+      const frame = reference?.frame ?? frameFromSimilarity(fit, 'camera-prior')
+      const priors = usable.map((p) => {
+        const sigma = [p.accuracyX, p.accuracyY, p.accuracyZ]
+          .map((v) => Number.isFinite(v) && v > 0 ? v : 5)
+        return {
+          camIdx: camIdxOf.get(p.uuid), target: frame.toSfm([p.x, p.y, p.z]),
+          // sigma_sfm = sigma_project / scale, hence inverse variance scales by s².
+          weights: sigma.map((v) => fit.scale * fit.scale / (v * v)),
+        }
+      })
+      return { fit, priors }
+    }
+
+    const cameraPriorReprojectionAccepts = (result) => {
+      const allowance = Math.max(cfg.cameraPriorMaxReprojIncreasePx,
+        result.costBefore * cfg.cameraPriorMaxReprojIncreaseFrac)
+      return result.costAfter <= result.costBefore + allowance
+    }
+
+    async function runCameraPriorBundleAdjust() {
+      if (!(cameraPriors.length >= cfg.cameraPriorBaMinCameras
+          && cameras.size >= cfg.cameraPriorBaMinCameras
+          && points3d.length >= 10 && baIterations > 0)) return
+      for (let round = 0; round < cfg.cameraPriorBaRounds; round++) {
+        const uuidList = [...cameras.keys()]
+        const constrained = buildCameraPriorConstraints(uuidList)
+        if (!constrained) {
+          log(`camera-prior bundle adjustment skipped — fewer than ${cfg.cameraPriorBaMinCameras} `
+            + 'registered, non-collinear 3D camera positions', 'debug', 'Reconstruction')
+          return
+        }
+        const camList = uuidList.map((u) => cameras.get(u))
+        const camIdxOf = new Map(uuidList.map((u, i) => [u, i]))
+        const observations = []
+        points3d.forEach((pt, pi) => pt.views.forEach((kpIdx, uuid) => {
+          const ci = camIdxOf.get(uuid), kp = imageByUuid(uuid)?.keypoints?.[kpIdx]
+          if (ci != null && kp) observations.push({ camIdx: ci, ptIdx: pi, x: kp.x, y: kp.y })
+        }))
+        log(`camera-prior bundle adjustment (round ${round + 1}/${cfg.cameraPriorBaRounds}) — `
+          + `${constrained.priors.length} camera(s), seed RMS ${constrained.fit.rms.toPrecision(3)} project units`,
+        'info', 'Reconstruction')
+        const result = await bundleAdjust(camList, camList.map((c) => c.K), points3d, observations, {
+          maxIters: baIterations, refineIntrinsics: 'none',
+          sensorOfCam: uuidList.map((u) => sensorIntByUuid.get(u) ?? -1),
+          cameraPriors: constrained.priors,
+        })
+        if (!result) return
+        if (!cameraPriorReprojectionAccepts(result)) {
+          log(`camera-prior bundle adjustment REJECTED — reprojection RMS `
+            + `${result.costBefore.toFixed(2)}px → ${result.costAfter.toFixed(2)}px exceeds the safety bound`,
+          'warn', 'Reconstruction')
+          return
+        }
+        uuidList.forEach((uuid, ci) => cameras.set(uuid, { ...cameras.get(uuid), ...result.cameras[ci] }))
+        points3d = result.points3d.map((pt, i) => ({ ...pt, views: points3d[i].views }))
+        log(`camera-prior bundle adjustment RMS ${result.costBefore.toFixed(2)}px → `
+          + `${result.costAfter.toFixed(2)}px; centre residual → `
+          + `${(result.cameraPriorRmsAfter * constrained.fit.scale).toPrecision(3)} project units`,
+        'success', 'Reconstruction')
+      }
+    }
+
     // GCP-in-BA (F2, deferred half): once the pipeline has settled, pull the
     // triangulated position of each GCP toward its surveyed position via
     // bundle.rs's anchor residual — GCPs constrain the reconstruction directly
@@ -1096,6 +1177,7 @@ async function reconstructSingleModel(input, hooks = {}) {
     // "good enough to help the poses converge", not final.
     async function runGcpAnchoredBundleAdjust() {
       const qualifying = gcps.filter((g) => {
+        if (g.role === 'check') return false
         if (g.enabled === false || !Number.isFinite(g.x)
             || !Number.isFinite(g.y) || !Number.isFinite(g.z)) return false
         const nReg = (g.observations || []).filter((o) => cameras.has(o.uuid)).length
@@ -1151,6 +1233,9 @@ async function reconstructSingleModel(input, hooks = {}) {
         const kList = camList.map((c) => c.K)
         const sensorOfCam = uuidList.map((u) => sensorIntByUuid.get(u) ?? -1)
         const camIdxOf = new Map(uuidList.map((u, i) => [u, i]))
+        // GCPs define the one project↔SfM similarity for all survey constraints
+        // in this joint pass, keeping point and camera targets in the same gauge.
+        const constrainedCameras = buildCameraPriorConstraints(uuidList, { fit, frame })
 
         const observations = []
         points3d.forEach((pt, pi) => {
@@ -1192,12 +1277,14 @@ async function reconstructSingleModel(input, hooks = {}) {
           + `seed RMS ${fit.rms.toPrecision(3)}`, 'info', 'Reconstruction')
 
         const result = await bundleAdjust(camList, kList, [...points3d, ...anchorPts], observations,
-          { maxIters: baIterations, refineIntrinsics: 'none', sensorOfCam, gcpAnchors: anchors })
+          { maxIters: baIterations, refineIntrinsics: 'none', sensorOfCam, gcpAnchors: anchors,
+            cameraPriors: constrainedCameras?.priors ?? [] })
         if (!result) {
           log('GCP-anchored bundle adjustment returned no result (skipped)', 'warn', 'Reconstruction')
           return
         }
-        if (result.costAfter > result.costBefore + 0.01) {
+        if (result.costAfter > result.costBefore + 0.01
+            && !(constrainedCameras && cameraPriorReprojectionAccepts(result))) {
           log(`GCP-anchored bundle adjustment REJECTED — would worsen reprojection RMS `
             + `${result.costBefore.toFixed(2)}px → ${result.costAfter.toFixed(2)}px`, 'warn', 'Reconstruction')
           return
@@ -1209,7 +1296,9 @@ async function reconstructSingleModel(input, hooks = {}) {
         // points were scratch space for this BA pass, not real SIFT tracks.
         points3d = points3d.map((pt, i) => ({ ...pt, x: result.points3d[i].x, y: result.points3d[i].y, z: result.points3d[i].z }))
         log(`GCP-anchored bundle adjustment RMS ${result.costBefore.toFixed(2)}px → `
-          + `${result.costAfter.toFixed(2)}px, anchor residual (SfM units) → ${result.anchorRmsAfter.toFixed(4)}`,
+          + `${result.costAfter.toFixed(2)}px, anchor residual (SfM units) → ${result.anchorRmsAfter.toFixed(4)}`
+          + (constrainedCameras ? `, camera-centre residual → `
+            + `${(result.cameraPriorRmsAfter * fit.scale).toPrecision(3)} project units` : ''),
           'success', 'Reconstruction')
       }
     }
@@ -1484,6 +1573,10 @@ async function reconstructSingleModel(input, hooks = {}) {
     } else {
       log(`bundle adjustment skipped (cameras=${cameras.size}, `
         + `points=${points3d.length}, iters=${baIterations})`, 'debug', 'Reconstruction')
+    }
+    if (cameraPriors.length && cameras.size >= 2 && points3d.length >= 10) {
+      report('gcpBundle', 1, 'Camera-position constrained bundle adjustment…', { done: cameras.size, total: imgs.length })
+      await runCameraPriorBundleAdjust()
     }
     if (gcps.length && cameras.size >= 2 && points3d.length >= 10) {
       report('gcpBundle', 1, 'GCP-anchored bundle adjustment…', { done: cameras.size, total: imgs.length })
