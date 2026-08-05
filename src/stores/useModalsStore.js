@@ -26,6 +26,8 @@ export const useModalsStore = defineStore('modals', () => {
   const gcpTableOpen        = ref(false)
   const matchListOpen       = ref(false)
   const reconstructOpen     = ref(false)
+  const findGcpsOpen        = ref(false)
+  const georeferenceOpen    = ref(false)
   const depthMapsOpen       = ref(false)
   const denseOpen           = ref(false)
   const demOpen             = ref(false)
@@ -91,6 +93,8 @@ export const useModalsStore = defineStore('modals', () => {
     gcpTableOpen,
     matchListOpen,
     reconstructOpen,
+    findGcpsOpen,
+    georeferenceOpen,
     depthMapsOpen,
     denseOpen,
     demOpen,

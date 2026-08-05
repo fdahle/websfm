@@ -98,6 +98,29 @@ export function isGeographic(code) {
   return def.projName === 'longlat' || def.projName === 'latlong'
 }
 
+// Linear scale of a projected CRS. Returns metres represented by one CRS unit,
+// or null for geographic/unknown definitions. proj4 only exposes `to_meter` for
+// non-metre units; `units=m` is the implicit factor 1 case.
+export function metresPerCrsUnit(code) {
+  if (isGeographic(code)) return null
+  let projection
+  try { projection = new proj4.Proj(code) } catch { return null }
+  if (Number.isFinite(projection.to_meter) && projection.to_meter > 0) return projection.to_meter
+  if (projection.units === 'm' || projection.units === 'meter' || projection.units === 'metre') return 1
+  // proj4's default linear unit for a projected definition is metres, but the
+  // constructed Proj object leaves `units` undefined when `+units=m` was omitted.
+  if (projection.units == null) return 1
+  return null
+}
+
+// Convert a physical distance in metres into the horizontal working CRS's
+// linear units. Geographic CRSs have no single linear scale, so keep metres;
+// callers using geographic coordinates must not mix the result into XY math.
+export function metresToCrsUnits(value, code) {
+  const factor = metresPerCrsUnit(code)
+  return Number.isFinite(value) && factor ? value / factor : value
+}
+
 // ── Registration ──────────────────────────────────────────────────────────────
 
 // Track what proj4 already knows so we don't re-register or re-fetch.

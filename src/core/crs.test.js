@@ -1,6 +1,7 @@
 import { beforeAll, describe, it, expect } from 'vitest'
 import proj4 from 'proj4'
-import { ensureProjection, transform, isGeographic, axisLabels, localMetricFrame } from './crs.js'
+import { ensureProjection, transform, isGeographic, axisLabels, localMetricFrame,
+  metresPerCrsUnit, metresToCrsUnits } from './crs.js'
 
 // Catalog CRS resolve from their built-in proj4 def — no network or OPFS needed.
 // EPSG:3031 is the Antarctic Polar Stereographic case the project relies on.
@@ -29,6 +30,24 @@ describe('transform', () => {
     const back = transform(utm, 'EPSG:32632', 'EPSG:4326')
     expect(back[0]).toBeCloseTo(lonlat[0], 6)
     expect(back[1]).toBeCloseTo(lonlat[1], 6)
+  })
+})
+
+describe('projected CRS linear units', () => {
+  it('reports metre CRSs and leaves metre distances unchanged', () => {
+    expect(metresPerCrsUnit('EPSG:32632')).toBe(1)
+    expect(metresToCrsUnits(10, 'EPSG:32632')).toBe(10)
+  })
+
+  it('converts metres into non-metre projected units', () => {
+    proj4.defs('TEST:USFT', '+proj=tmerc +lat_0=0 +lon_0=0 +k=1 +x_0=0 +y_0=0 +datum=WGS84 +units=us-ft +no_defs')
+    expect(metresPerCrsUnit('TEST:USFT')).toBeCloseTo(0.3048006096, 10)
+    expect(metresToCrsUnits(1, 'TEST:USFT')).toBeCloseTo(3.2808333333, 8)
+  })
+
+  it('does not invent a linear scale for longitude/latitude', () => {
+    expect(metresPerCrsUnit('EPSG:4326')).toBeNull()
+    expect(metresToCrsUnits(10, 'EPSG:4326')).toBe(10)
   })
 })
 

@@ -91,7 +91,7 @@ function rmse(rows, sel) {
 //   graph:    { components:[[id,…],…], isolated:[id] } | null,
 //   selfCal:  [{ sensorId, fitRmsPx }] | null,          // summary.selfCalDistortion
 //   focalDeltas: [number|null] | null,                  // per-sensor Δ focal %
-//   gcpReport:  [{ dTotal }] | null,                    // gcpAccuracyReport rows (enabled)
+//   gcpReport:  [{ dTotal, role }] | null,              // enabled controls + checkpoints
 //   poseReport: [{ dTotal }] | null,
 //   demCheck:   [{ dz }] | null,
 //   depth:    { coveragePct, mapCount } | null,         // mean per-map valid %
@@ -163,10 +163,16 @@ export function projectHealth(snapshot = {}) {
   push('focal', 'calibration', 'Focal Δ vs nominal', focalPct, '%',
     EVAL_THRESHOLDS.focalDeltaPct, { missingHint: 'no registered sensors' })
 
-  // GCP RMSE
-  const gcpRmse = s.gcpReport ? rmse(s.gcpReport, (r) => r.dTotal) : null
-  push('gcp', 'accuracy', 'GCP RMSE', gcpRmse, unit,
-    EVAL_THRESHOLDS.gcpRmse, { missingHint: 'need ≥3 triangulated GCPs' })
+  // Prefer genuinely independent checkpoints. Fall back to control fit residuals,
+  // but label that weaker quantity honestly instead of blending the two populations.
+  const checks = s.gcpReport?.filter((r) => r.role === 'check' && r.dTotal != null) ?? []
+  const controls = s.gcpReport?.filter((r) => r.role !== 'check' && r.dTotal != null) ?? []
+  const gcpRmse = rmse(checks.length ? checks : controls, (r) => r.dTotal)
+  push('gcp', 'accuracy', checks.length ? 'Checkpoint RMSE' : 'Control fit RMSE', gcpRmse, unit,
+    EVAL_THRESHOLDS.gcpRmse, {
+      missingHint: 'need triangulated GCPs or checkpoints',
+      hint: checks.length ? 'independent accuracy' : (controls.length ? 'no valid checkpoints — not independent' : undefined),
+    })
 
   // Pose RMSE
   const poseRmse = s.poseReport ? rmse(s.poseReport, (r) => r.dTotal) : null

@@ -261,6 +261,28 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
   value directly (no Custom). `ReconstructModal` is the reference template. **GPU is not a
   per-modal knob**: the experimental WebGPU opt-in lives in Settings ▸ Compute
   (`useComputeSettings.useGpu`); MatchFeatures + DepthMaps inject it at `run()`.
+  The same composable owns the machine-level dense memory gate: automatic values come
+  from pure `deviceBudget` fed with optional browser readings, while a saved manual value
+  remains an explicit override; dense modals consume its resolved `memBudgetBytes`.
+  Dataset-derived modal prefills use one path: `useDatasetRecommendations` profiles the
+  live stores (U1) and calls the C1-backed recommender (U2), which hands each stage a
+  `{ knob: { value, reason } }` slice. **A recommendation is never its own banner** — a
+  block above `PresetCards` competes with the hero for the same decision and restates
+  fields the form already shows, with the reason (its only new information) truncated.
+  It is surfaced *on the control it concerns*, three shapes, chosen by what was derived
+  (`core/recommendUi.js` is the pure side, `composables/useRecommendedPreset.js` the glue):
+  when the derived knobs are the ones the quality presets tune it becomes **one more
+  preset card** (`recommendedPresetCard` → detection; checked first in the parent's
+  `activePreset` loop since it is the more specific claim); when a card already exists per
+  recommended value it **badges that card** (`badgePreset` + `PresetCards`' `note` →
+  depth-map quality — a second card would offer the same setting twice); when the knob is
+  orthogonal to the presets it is an **inline link under that field** (matching's pairing
+  strategy). Selecting/applying is the only mutation and logs value + reason; nothing
+  changes on open. Eligibility stays against the STATIC defaults, never the live modal
+  values — a card whose contents depended on what the user already typed would change
+  meaning under them. A stage with nothing derived (dense fusion, and SfM's
+  `refineIntrinsics`, which only restates `auto`) gets **no** affordance; SfM's reason
+  instead extends the self-cal field's hint, since it explains but can't offer an action.
 
 ## Project storage: `.websfm` files + folder-backed projects
 Both features fall out of one fact — the per-project OPFS directory
@@ -432,8 +454,9 @@ self-contained, file-based project format.
    never read. Keep that param ≤ `minMatches`, or a still-accepted pair (incl. the
    low-ratio absolute-inlier override) gets mislabelled non-degenerate. Two cheap
    prefilters cut the exhaustive O(N²) cost: **preselection**
-   (`core/features/preselect.js`, k-nearest by imported camera position) prunes pairs
-   before matching *when poses exist*; the **subset gate**
+   (`core/features/preselect.js`, horizontal k-nearest by imported or EXIF-derived
+   camera position; geographic coordinates first enter one local metric frame) prunes
+   pairs before matching *when poses exist*; the **subset gate**
    (`core/features/subsetGate.js`, brute-force only) handles the no-poses case —
    before the full match, match a small spatially-uniform keypoint subset
    (`pickSpreadIndices` grid-buckets so a repetitive façade doesn't collapse the

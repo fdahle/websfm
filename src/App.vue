@@ -64,6 +64,8 @@ import { usePosesStore } from './stores/usePosesStore.js'
 import './stores/useLogStore.js'   // registers the console as a project-scoped store
 import { useLog } from './composables/useLog.js'
 import ReconstructModal from './components/modals/ReconstructModal.vue'
+import FindGcpsModal from './components/modals/FindGcpsModal.vue'
+import GeoreferenceModal from './components/modals/GeoreferenceModal.vue'
 import ExportModal from './components/modals/ExportModal.vue'
 import DepthMapsModal from './components/modals/DepthMapsModal.vue'
 import DenseModal from './components/modals/DenseModal.vue'
@@ -163,7 +165,7 @@ const { sidebarWidth, startSidebarResize } = useSidebarResize()
 // ── Reconstruction ────────────────────────────────────────────────────────────
 // Project-scoped store; restore/clear run through the project-store registry.
 const reconstructionStore = useReconstructionStore()
-const { cameras, sparseCameras, points3d, reconStatus, clouds, selectedCloudId, selectedCloud, mainSparseId, mainSparseCloud, depthMapCount, dem, ortho, georef, canGeoreference, denseSummary } = storeToRefs(reconstructionStore)
+const { cameras, sparseCameras, points3d, reconStatus, clouds, selectedCloudId, selectedCloud, mainSparseId, mainSparseCloud, depthMapCount, dem, ortho, georef, canGeoreference, canGeoreferenceGcps, denseSummary } = storeToRefs(reconstructionStore)
 const { reconstruct, importColmapModel, importCloud, editClouds, computeDepthMaps, densify, generateDem, generateOrtho, generateMesh, georeference, gcpAccuracyReport, gcpGuides, gcpEstimate, selectCloud, removeCloud, renameCloud, setMainSparse, clearDerived: clearReconstructionDerived } = reconstructionStore
 
 async function clearCurrentProjectDerived() {
@@ -178,7 +180,7 @@ async function clearCurrentProjectDerived() {
 const externalStore = useExternalStore()
 const {
   rasters, pendingRasters, pendingWorkCount: pendingRasterWork,
-  sources: rasterSources, hasReferenceDem, mapRasters,
+  sources: rasterSources, hasReferenceDem, orthoRasters: referenceOrthos, mapRasters,
 } = storeToRefs(externalStore)
 const { importRaster, setRasterKind, setRasterStyle, setVerticalInfo, setRasterOnMap, setRasterOpacity, removeRaster, rasterById, probeRasterAt, ensureRasterLoaded } = externalStore
 
@@ -200,7 +202,7 @@ function zoomToCloud(id) {
 const { log } = useLog()
 const gcpsStore = useGcpsStore()
 const { gcps } = storeToRefs(gcpsStore)
-const { addGcps, addGcp, setGcpName, setGcpPosition, setGcpAccuracy, setObservation, removeObservation, removeGcp, reprojectGcps } = gcpsStore
+const { addGcps, addGcp, setGcpName, setGcpRole, setGcpPosition, setGcpAccuracy, setObservation, removeObservation, removeGcp, reprojectGcps } = gcpsStore
 
 // GCP elevations from an imported reference DEM (the stated goal of the
 // external-reference-data work). The sampler is *injected* rather than imported
@@ -226,6 +228,14 @@ async function checkGcpZAgainstReferenceDem() {
 const gcpReport = ref([])
 async function refreshGcpReport() {
   gcpReport.value = await gcpAccuracyReport()
+}
+
+async function changeGcpRole({ id, role }) {
+  setGcpRole(id, role)
+  // A role change alters the control set. Refit immediately so a checkpoint can
+  // never be displayed against a stale transform that still used it as control.
+  if (reconstructionStore.sparseCameras.size) await georeference()
+  await refreshGcpReport()
 }
 
 // `selectedGcpId` highlights a GCP's marker in the image view + its row in the
@@ -433,7 +443,7 @@ const posedImageCount = computed(() => {
   const ids = new Set(images.value.map((i) => i.id))
   const posed = new Set()
   for (const p of poses.value)
-    if (p.imageId && p.x != null && p.y != null && ids.has(p.imageId)) posed.add(p.imageId)
+    if (p.enabled !== false && p.imageId && Number.isFinite(p.x) && Number.isFinite(p.y) && ids.has(p.imageId)) posed.add(p.imageId)
   return posed.size
 })
 const footprintImageCount = computed(() => {
@@ -451,6 +461,7 @@ const {
   projectPickerOpen, newProjectOpen, newProjectCanCancel, saveProjectOpen,
   detectFeaturesOpen, matchFeaturesOpen,
   imageTableOpen, maskManagerOpen, autoMaskOpen, sensorTableOpen, gcpTableOpen, matchListOpen, reconstructOpen,
+  findGcpsOpen, georeferenceOpen,
   depthMapsOpen, denseOpen, demOpen, orthoOpen, meshOpen,
   cropCloudOpen, filterCloudOpen, mergeCloudsOpen,
   gcpImportOpen, gcpImportText, gcpImportName, gcpImportGeojson, gcpImportCrs,
@@ -654,7 +665,7 @@ const matchNodePositions = computed(() => {
   const out = {}
   const poseByImageId = new Map()
   for (const p of poses.value) {
-    if (p.imageId == null || p.x == null || p.y == null) continue
+    if (p.enabled === false || p.imageId == null || p.x == null || p.y == null) continue
     poseByImageId.set(p.imageId, p)
   }
   for (const img of images.value) {
@@ -1000,7 +1011,40 @@ const {
 // ── Pipeline handlers (close modal, then delegate to usePipeline) ─────────────
 function onDetectRun(settings)      { detectFeaturesOpen.value = false;  runDetect(settings)      }
 function onMatchRun(settings)       { matchFeaturesOpen.value  = false;  runMatch(settings)       }
-function onReconstructRun(settings) { reconstructOpen.value    = false;  runReconstruct(settings) }
+// A Georeference request may hand off to the normal reconstruction dialog so the
+// user retains control over its settings. Only after a successful sparse run do we
+// fit the final SfM→project-CRS similarity.
+const georeferenceAfterReconstruct = ref(false)
+function closeReconstructModal() {
+  reconstructOpen.value = false
+  georeferenceAfterReconstruct.value = false
+}
+async function onReconstructRun(settings) {
+  const finishGeoreference = georeferenceAfterReconstruct.value
+  reconstructOpen.value = false
+  georeferenceAfterReconstruct.value = false
+  await runReconstruct(settings)
+  if (finishGeoreference && reconStatus.value === 'done') {
+    await georeference()
+    await refreshGcpReport()
+  }
+  if (reconStatus.value === 'done') {
+    // The store retired products tied to the previous camera solution; do not leave
+    // tabs open with a null backing raster.
+    for (const tab of [...tabs.value]) if (tab.type === 'product') closeTab(tab.id)
+  }
+}
+
+async function onGeoreferenceRun({ mode }) {
+  georeferenceOpen.value = false
+  if (mode === 'adjust') {
+    georeferenceAfterReconstruct.value = true
+    reconstructOpen.value = true
+    return
+  }
+  await georeference()
+  await refreshGcpReport()
+}
 
 // Open an image from the Mask Manager and drop straight into mask-edit mode.
 function editMask(id) {
@@ -1194,6 +1238,8 @@ const MODAL_COMMANDS = {
   'detect-features':       detectFeaturesOpen,
   'match-features':        matchFeaturesOpen,
   'reconstruct':           reconstructOpen,
+  'find-gcps':             findGcpsOpen,
+  'georeference':          georeferenceOpen,
   'compute-depth':         depthMapsOpen,
   'dense':                 denseOpen,
   'gen-dem':               demOpen,
@@ -1264,7 +1310,8 @@ function handleCommand(id) {
     case 'detect-fiducials':     openFiducialDetect(); break
     case 'calibrate-fiducials':  openFiducialCalibrate(); break
     case 'open-gcp-table':       gcpTableOpen.value = true; refreshGcpReport(); break
-    case 'auto-georeference':    georeference(); break
+    // Legacy command id retained for saved console history / older integrations.
+    case 'auto-georeference':    georeferenceOpen.value = true; break
     case 'open-glossary':        glossaryStore.openHome(); break
     case 'open-guide':           guideStore.openHome(); break
     case 'open-project-picker':  projectPickerOpen.value = !projectPickerOpen.value; break
@@ -1452,8 +1499,32 @@ function onRibbonPick(event) {
     <Teleport to="body">
       <ReconstructModal
         v-if="reconstructOpen"
-        @close="reconstructOpen = false"
+        :ground-control-adjustment="georeferenceAfterReconstruct"
+        @close="closeReconstructModal"
         @run="onReconstructRun"
+      />
+    </Teleport>
+
+    <Teleport to="body">
+      <FindGcpsModal
+        v-if="findGcpsOpen"
+        :has-relative-ortho="!!ortho"
+        :reference-orthos="referenceOrthos"
+        @close="findGcpsOpen = false"
+      />
+    </Teleport>
+
+    <Teleport to="body">
+      <GeoreferenceModal
+        v-if="georeferenceOpen"
+        :can-adjust-with-gcps="canGeoreferenceGcps && canGeoreference"
+        :can-transform="canGeoreference"
+        :has-matches="matchSummaries.length > 0"
+        :gcp-count="gcps.length"
+        :pose-count="poses.length"
+        :project-crs="currentCrs"
+        @close="georeferenceOpen = false"
+        @run="onGeoreferenceRun"
       />
     </Teleport>
 
@@ -1774,6 +1845,7 @@ function onRibbonPick(event) {
         @remove="removeGcpAndCloseTab"
         @update-accuracy="({ id, kind, value }) => setGcpAccuracy(id, kind, value)"
         @update-name="({ id, name }) => setGcpName(id, name)"
+        @update-role="changeGcpRole"
         @update-position="({ id, axis, value }) => setGcpPosition(id, axis, value)"
         @refresh-report="refreshGcpReport"
         @select="selectGcp"

@@ -5,6 +5,7 @@ import {
   guessMapping,
   buildGcps,
   hasGcpElevation,
+  normalizeGcpRole,
 } from './gcp.js'
 
 describe('hasGcpElevation', () => {
@@ -12,6 +13,15 @@ describe('hasGcpElevation', () => {
     expect(hasGcpElevation({ z: 0 })).toBe(true)
     expect(hasGcpElevation({ z: null })).toBe(false)
     expect(hasGcpElevation({})).toBe(false)
+  })
+})
+
+describe('normalizeGcpRole', () => {
+  it('recognises checkpoint aliases and defaults everything else to control', () => {
+    expect(normalizeGcpRole('Check Point')).toBe('check')
+    expect(normalizeGcpRole('validation')).toBe('check')
+    expect(normalizeGcpRole('GCP')).toBe('control')
+    expect(normalizeGcpRole(null)).toBe('control')
   })
 })
 
@@ -119,8 +129,8 @@ describe('buildGcps', () => {
     )
     expect(skipped).toBe(0)
     expect(gcps).toEqual([
-      { name: 'A', x: 10.5, y: 20.5, z: 5, observations: [] },
-      { name: 'B', x: 1, y: 2, z: 3, observations: [] },
+      { name: 'A', role: 'control', x: 10.5, y: 20.5, z: 5, observations: [] },
+      { name: 'B', role: 'control', x: 1, y: 2, z: 3, observations: [] },
     ])
   })
 
@@ -168,6 +178,16 @@ describe('buildGcps', () => {
     )
     expect(gcps).toHaveLength(1)
     expect(gcps[0]).toMatchObject({ x: 1, y: 2, z: 3 })
+  })
+
+  it('imports a role column and lets checkpoint win across repeated rows', () => {
+    const withRole = { ...mapping, role: 4 }
+    const { gcps } = buildGcps([
+      ['A', '1', '2', '3', 'control'],
+      ['A', '', '', '', 'check point'],
+      ['B', '4', '5', '6', 'gcp'],
+    ], withRole)
+    expect(gcps.map((g) => [g.name, g.role])).toEqual([['A', 'check'], ['B', 'control']])
   })
 
   it('drops an observation with a non-numeric pixel coordinate', () => {

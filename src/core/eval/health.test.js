@@ -99,4 +99,15 @@ describe('projectHealth', () => {
     expect(byId.pose.status).toBe('warn') // 3.53 ≥ 2
     expect(byId.dem.value).toBeCloseTo(0.5, 6)
   })
+
+  it('uses checkpoint RMSE instead of blending control fit residuals', () => {
+    const row = projectHealth({ gcpReport: [
+      { role: 'control', dTotal: 0.01 },
+      { role: 'check', dTotal: 2 },
+      { role: 'check', dTotal: 4 },
+    ] }).find((r) => r.id === 'gcp')
+    expect(row.label).toBe('Checkpoint RMSE')
+    expect(row.value).toBeCloseTo(Math.sqrt(10), 6)
+    expect(row.hint).toBe('independent accuracy')
+  })
 })

@@ -59,7 +59,7 @@ images ─► [1] detect ─► keypoints + descriptors
               ├ incremental resection (P3P + MSAC PnP, track extension)
               ├ interleaved + final bundle adjustment (LM + Schur + Huber)
               ├ retriangulation + split-track merge + 2-pass track filter
-              └ optional GCP-anchored BA
+              └ optional camera-position + GCP-constrained BA
               ▼
        [4] dense MVS (PatchMatch depth maps → geometric fusion)
               ▼
@@ -163,7 +163,7 @@ the graph. Positionally-degenerate pairs stay hard-rejected, never weak.
 (`setPairDisabled`); disabled pairs are filtered wherever SfM reads matches.
 
 **Prefilters** (cut the O(N²) pair cost):
-- **Preselection** (`preselect.js`) — when imported camera positions exist, only
+- **Preselection** (`preselect.js`) — when imported or EXIF-derived camera positions exist, only
   match each image's k-nearest neighbours by camera position.
 - **Subset gate** (`subsetGate.js`, brute-force, no-poses case) — pre-match a
   small **spatially-uniform** keypoint subset (`pickSpreadIndices` grid-buckets so
@@ -647,18 +647,41 @@ quaternion method: build the 4×4 `N` from the cross-covariance, take its top
 eigenvector). Closed-form, no SVD dependency — matches the crate's dependency-free
 spirit.
 
-Correspondences are either **camera centres ↔ imported camera poses** (pose-based
+Correspondences are either **camera centres ↔ camera positions** (pose-based
 fit) or **triangulated GCPs ↔ surveyed GCP coordinates**. When ≥3 GCPs triangulate
 into the current SfM frame (§6.5, `gcpTriangulation.js`), the **GCP fit is
 preferred** over the pose-based one. `gcpAccuracyReport()` reports per-GCP CRS
 residual + per-observation reprojection px.
+
+Camera positions may be explicitly imported or derived from EXIF GPS. EXIF
+longitude/latitude is transformed from WGS84 into the project CRS at ingest;
+positions without altitude remain useful for map display and matching preselection
+but cannot enter the 3D similarity fit. EXIF altitude is retained with an unknown
+vertical datum and conservative default accuracy when the file supplies no accuracy.
+Proximity matching uses horizontal distance only; a geographic project is mapped into
+one local azimuthal-equidistant metre frame before neighbours are ranked. EXIF altitude
+and accuracy remain canonically denominated in metres and are converted when a projected
+working CRS uses another linear unit.
+Imported pose files take precedence over EXIF-derived positions.
 
 The fit and the report consume the **non-robust** triangulation (§6.5): every mark
 the user placed reaches them, outliers included. This is deliberate — silently
 dropping a GCP observation from the fit would hide exactly the disagreement the
 accuracy report exists to surface.
 
-### 6.2 GCPs inside bundle adjustment (anchored BA)
+### 6.2 Camera positions and GCPs inside bundle adjustment
+
+Enabled 3D camera positions also constrain BA directly. At the end of sparse SfM,
+the current camera centres are Horn-fit to the registered project-CRS positions;
+the inverse fit maps each surveyed/EXIF position into the current SfM frame. The
+Rust solver adds the residual `C − target`, where `C = −Rᵀt`, with the analytic
+pose Jacobian `[-Rᵀ | −Rᵀ[t]×]`. X/Y/Z are weighted independently by their
+inverse variances after converting accuracy into SfM units. Two fixed-intrinsics
+rounds let the fit settle, while a bounded reprojection-increase guard rejects a
+noisy-position solution that would materially damage the image measurements.
+When GCP anchors are also present, their similarity defines the common SfM target
+frame for both point and camera priors. Geographic project CRSs and positions
+without altitude remain post-hoc only.
 
 GCPs also constrain BA **directly**, not just post-hoc. `bundle_adjust` accepts an
 **anchor residual** `Σ w·‖pt − target‖²` on specific 3D points, weighted by
@@ -678,9 +701,11 @@ convergence".
 ### 6.3 A GCP's shape
 
 Surveyed ground coords `x/y/z` with per-axis accuracy, pixel `observations`
-`[{imageId, px, py}]` with per-axis image accuracy, and an `enabled` flag. There
-is **no control/check split** — every enabled GCP is used. A GCP with <2 marks is
-unusable (flagged).
+`[{imageId, px, py}]` with per-axis image accuracy, an `enabled` flag, and a
+`role` (`control` or `check`). Enabled controls enter the similarity fit and
+anchored BA. Enabled checkpoints are triangulated and reported against that fit
+but never constrain it, so their CRS RMSE is independent accuracy. Disabled
+points enter neither solve nor report. A point with <2 marks is unusable (flagged).
 
 ### 6.4 Guided marking (`core/sfm/gcpGuides.js`)
 
@@ -960,7 +985,7 @@ products directly. This is a first-class concern, not a post-export reprojection
 | Self-cal | shared focal scale / cx,cy / k1 | full intrinsic groups | intentionally modest |
 | Distortion | Brown, removed at ingest | Brown, in BA | we stay pinhole downstream |
 | Dense | PatchMatch MVS (CPU + WebGPU) | PatchMatch MVS | GPU path is WGSL |
-| Georef | Horn 7-param + GCP-anchored BA | model_aligner / GCP | |
+| Georef | Horn 7-param + camera/GCP-constrained BA | model_aligner / GCP | |
 
 Genuinely distinctive: **runs in the browser, client-side, no server**; **polar/
 non-WGS84 CRS first-class**; **historical scanned-film intrinsics** (pixel-pitch /

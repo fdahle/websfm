@@ -14,7 +14,7 @@ const props = defineProps({
 
 const emit = defineEmits([
   'remove', 'update-accuracy', 'update-name', 'update-position', 'select', 'add',
-  'fill-z', 'check-z',
+  'update-role', 'fill-z', 'check-z',
 ])
 
 // Compact coordinate formatting (projected metres vs. degrees in a geographic CRS).
@@ -77,6 +77,7 @@ function onPositionInput(gcp, axis, e) {
       <thead>
         <tr>
           <th>Name</th>
+          <th title="Controls constrain the solution; checkpoints only measure independent accuracy">Role</th>
           <th>X</th>
           <th>Y</th>
           <th>Z</th>
@@ -111,6 +112,13 @@ function onPositionInput(gcp, axis, e) {
               :value="gcp.name"
               @change="onNameInput(gcp, $event)"
             />
+          </td>
+          <td>
+            <select class="role-input" :value="gcp.role || 'control'"
+              @change="emit('update-role', { id: gcp.id, role: $event.target.value })" @click.stop>
+              <option value="control">Control</option>
+              <option value="check">Check</option>
+            </select>
           </td>
           <td class="num">
             <input
@@ -307,6 +315,16 @@ tbody tr:hover {
   font: inherit;
   font-size: 12px;
   font-weight: 500;
+}
+
+.role-input {
+  padding: 3px 6px;
+  background: var(--bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
 }
 
 .coord-input {

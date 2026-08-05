@@ -175,7 +175,7 @@ function styleFor(feature) {
 }
 
 // GCP markers: green diamond, visually distinct from the blue image-GPS circles.
-const gcpStyle = new Style({
+const controlStyle = new Style({
   image: new RegularShape({
     points: 4,
     radius: 7,
@@ -185,12 +185,33 @@ const gcpStyle = new Style({
   }),
 })
 
+const checkStyle = new Style({
+  image: new RegularShape({
+    points: 4, radius: 7, angle: Math.PI / 4,
+    fill: new Fill({ color: '#38a9c7' }),
+    stroke: new Stroke({ color: '#fff', width: 1.5 }),
+  }),
+})
+
+function gcpStyleFor(feature) {
+  return feature.get('gcpRole') === 'check' ? checkStyle : controlStyle
+}
+
 // Camera-position markers: purple triangle, distinct from GPS circles and GCP diamonds.
 const poseStyle = new Style({
   image: new RegularShape({
     points: 3,
     radius: 7,
     fill:   new Fill({ color: '#b06ad9' }),
+    stroke: new Stroke({ color: '#fff', width: 1.5 }),
+  }),
+})
+
+const exifPoseStyle = new Style({
+  image: new RegularShape({
+    points: 3,
+    radius: 7,
+    fill: new Fill({ color: '#297fb8' }),
     stroke: new Stroke({ color: '#fff', width: 1.5 }),
   }),
 })
@@ -205,7 +226,8 @@ const poseSelectedStyle = new Style({
 })
 
 function poseStyleFor(feature) {
-  return feature.get('imgId') === props.selectedId ? poseSelectedStyle : poseStyle
+  if (feature.get('imgId') === props.selectedId) return poseSelectedStyle
+  return feature.get('poseSource') === 'exif' ? exifPoseStyle : poseStyle
 }
 
 // Footprint polygons: translucent fill + stroke; brighter when the linked image is selected.
@@ -228,7 +250,8 @@ function footprintStyleFor(feature) {
 // ── GPS extraction ────────────────────────────────────────────────────────────
 
 const gpsImages = computed(() =>
-  props.images.filter((img) => img.meta?.gpsLat != null && img.meta?.gpsLon != null)
+  props.images.filter((img) => img.meta?.gpsLat != null && img.meta?.gpsLon != null
+    && !props.poses.some((p) => p.imageId === img.id && p.enabled !== false))
 )
 
 // GCPs are stored in the project CRS already (= the map view CRS), so they need
@@ -269,6 +292,7 @@ function makeGcpFeature(g) {
   const f = new Feature({ geometry: new Point([g.x, g.y]) })
   f.set('gcpName', g.name)
   f.set('gcpId', g.id)
+  f.set('gcpRole', g.role ?? 'control')
   return f
 }
 
@@ -284,6 +308,7 @@ function makePoseFeature(p) {
   const f = new Feature({ geometry: new Point([p.x, p.y]) })
   f.set('poseName', p.imageName)
   if (p.imageId) f.set('imgId', p.imageId)
+  f.set('poseSource', p.source ?? 'imported')
   return f
 }
 
@@ -588,7 +613,7 @@ async function build() {
   footprintSource = new VectorSource({ features: mapFootprints.value.map(makeFootprintFeature) })
   footprintLayer = new VectorLayer({ source: footprintSource, style: footprintStyleFor, visible: props.showFootprints })
   poseSource = new VectorSource({ features: mapPoses.value.map(makePoseFeature) })
-  gcpLayer = new VectorLayer({ source: gcpSource, style: gcpStyle })
+  gcpLayer = new VectorLayer({ source: gcpSource, style: gcpStyleFor })
 
   const grid = makeGridLayer(info, projection)
   gridLayer = grid

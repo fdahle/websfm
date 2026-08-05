@@ -3,7 +3,7 @@ import { defineStore } from 'pinia'
 import * as opfs from '../utils/opfs.js'
 import { matchDescriptors, matchLightGlue, verifyMatches, POOL_SIZE } from '../workers/computeClient.js'
 import { useLog } from '../composables/useLog.js'
-import { preselectPairs, preselectByFootprintOverlap } from '../core/features/preselect.js'
+import { preselectPairs, positionsForProximity, preselectByFootprintOverlap } from '../core/features/preselect.js'
 import { sequentialPairs } from '../core/features/sequentialPairs.js'
 import { inlierSpread } from '../core/features/verify.js'
 import { evaluatePairAcceptance } from '../core/features/pairGate.js'
@@ -341,16 +341,18 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
   // to images by image.id (the name/size composite), so bridge id→uuid via the image
   // list; only resolved poses (imageId set, x/y present) count.
   function positionsByUuid(images) {
-    const posById = new Map()
+    const poseById = new Map()
     for (const p of posesStore.poses) {
-      if (p.imageId && p.x != null && p.y != null) posById.set(p.imageId, [p.x, p.y, p.z ?? 0])
+      if (p.enabled !== false && p.imageId && Number.isFinite(p.x) && Number.isFinite(p.y))
+        poseById.set(p.imageId, p)
     }
-    const m = new Map()
+    const linked = []
     for (const img of images) {
-      const pos = posById.get(img.id)
-      if (pos) m.set(img.uuid, pos)
+      const pose = poseById.get(img.id)
+      if (pose) linked.push({ uuid: img.uuid, pos: [pose.x, pose.y] })
     }
-    return m
+    return new Map(positionsForProximity(linked, projects.currentCrs)
+      .map((item) => [item.uuid, item.pos]))
   }
 
   // Best footprint outer-ring per image, keyed by image **uuid** (same id→uuid

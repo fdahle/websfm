@@ -45,7 +45,8 @@ export const COMMANDS = [
   { name: 'ortho',    aliases: [],                  dispatch: 'gen-ortho',       needs: ['dem', 'depthMaps'], group: 'Pipeline', help: 'Open the orthophoto dialog' },
 
   // --- Tools ---
-  { name: 'georeference', aliases: ['georef'],      dispatch: 'auto-georeference',  needs: ['sparse', 'poses'], group: 'Tools', help: 'Auto-georeference from imported poses' },
+  { name: 'find gcps', aliases: ['auto-gcps'],       dispatch: 'find-gcps',          needs: ['sparse'], group: 'Tools', help: 'Open automatic reference-ortho matching (mockup)' },
+  { name: 'georeference', aliases: ['georef'],       dispatch: 'georeference',       needs: ['sparse'], group: 'Tools', help: 'Adjust with GCPs or transform the current model to the project CRS' },
   { name: 'automask',     aliases: ['auto-mask'],   dispatch: 'auto-mask',          needs: ['images', 'imagesReady'], group: 'Tools', help: 'Open the auto-mask dialog' },
   { name: 'footprints',   aliases: [],              dispatch: 'footprints-from-poses', needs: ['poses', 'sensors'], group: 'Tools', help: 'Build footprints from poses' },
   { name: 'fiducials',    aliases: ['detect-fiducials'], dispatch: 'detect-fiducials', needs: ['filmSensor'], group: 'Tools', help: 'Auto-detect fiducial marks on film scans' },

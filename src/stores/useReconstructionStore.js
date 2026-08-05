@@ -28,6 +28,7 @@ import { useProjectsStore } from './useProjectsStore.js'
 import { useSensorsStore } from './useSensorsStore.js'
 import { usePosesStore } from './usePosesStore.js'
 import { useGcpsStore } from './useGcpsStore.js'
+import { buildCameraPriors } from '../core/sfm/cameraPriors.js'
 
 // Project-scoped store: the sparse model (camera poses + 3D points) from
 // incremental SfM. Reads the image list and match graph from their stores;
@@ -247,6 +248,42 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     else clouds.value.push(cloud)
     if (select) selectedCloudId.value = cloud.id
     if (asMain || !mainSparseCloud.value) mainSparseId.value = cloud.id
+  }
+
+  // A sparse rebuild changes the coordinate frame and camera solution consumed by
+  // every computed downstream stage. Retire those artifacts together so an old
+  // local ortho/depth set can never masquerade as belonging to the adjusted model.
+  // Imported and user-derived clouds are independent records and remain available;
+  // only the pipeline's replaceable dense/mesh slots are removed.
+  async function invalidateSparseDependents() {
+    const removedIds = new Set(clouds.value
+      .filter((c) => (c.kind === 'dense' || c.kind === 'mesh') && !c.imported && !c.derived)
+      .map((c) => c.id))
+    const depthPreviewImages = images.value.filter((im) => !!im.depth)
+    const hadDerived = depthMapCount.value > 0 || depthPreviewImages.length > 0 || !!dem.value || !!ortho.value
+      || !!georef.value || removedIds.size > 0
+
+    clouds.value = clouds.value.filter((c) => !removedIds.has(c.id))
+    if (removedIds.has(selectedCloudId.value)) selectedCloudId.value = mainSparseId.value
+    clearDepthMaps()
+    dem.value = null
+    ortho.value = null
+    georef.value = null
+    denseSummary.value = null
+    depthSummary.value = null
+    for (const im of depthPreviewImages) im.depth = null
+
+    if (isPersisting()) {
+      await Promise.all([
+        opfs.deleteDepthPlanes(projects.currentProjectId).catch(() => {}),
+        opfs.deleteProducts(projects.currentProjectId).catch(() => {}),
+        ...depthPreviewImages.map((im) => opfs.deleteDepth(projects.currentProjectId, im.uuid).catch(() => {})),
+      ])
+    }
+    if (hadDerived) {
+      log('Sparse model changed — depth maps, computed dense/mesh, DEM, orthophoto and '
+        + 'georeference were retired; rebuild them from the adjusted model.', 'info', 'Reconstruction')
+    }
   }
 
   // Import a COLMAP sparse model (text OR binary) as a NEW sparse cloud (never
@@ -952,14 +989,21 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
           if (isGeographic(projects.currentCrs)) return []
           return gcpsStore.gcps
             .filter((g) => g.enabled !== false
+              && g.role !== 'check'
               && Number.isFinite(g.x) && Number.isFinite(g.y) && Number.isFinite(g.z))
             .map((g) => ({
+              role: 'control',
               x: g.x, y: g.y, z: g.z,
               accuracyX: g.accuracyX, accuracyY: g.accuracyY, accuracyZ: g.accuracyZ,
               observations: (g.observations || [])
                 .map((o) => ({ uuid: imgById.get(o.imageId)?.uuid, px: o.px, py: o.py }))
                 .filter((o) => o.uuid != null),
             }))
+        })(),
+        // Surveyed/imported and EXIF-derived camera positions. BA needs metric
+        // Euclidean coordinates, so geographic project CRSs stay post-hoc only.
+        cameraPriors: (() => {
+          return buildCameraPriors(posesStore.poses, images.value, projects.currentCrs)
         })(),
         settings,
       }
@@ -1025,6 +1069,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
             name: model.name || `Secondary sparse ${si + 1}`,
           })
         }
+        await invalidateSparseDependents()
         // Retire the outgoing summary into the run history before overwriting it, so
         // "vs previous run" compares against what was on screen a moment ago (WS5).
         if (summary.value) {

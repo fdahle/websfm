@@ -1,5 +1,5 @@
 <script setup>
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import ModalShell from './ui/ModalShell.vue'
 import SettingsField from './ui/SettingsField.vue'
 import SettingsGroup from './ui/SettingsGroup.vue'
@@ -7,12 +7,15 @@ import AdvancedDisclosure from './ui/AdvancedDisclosure.vue'
 import PresetCards from './ui/PresetCards.vue'
 import GlossaryTerm from '../glossary/GlossaryTerm.vue'
 import { useComputeSettings } from '../../composables/useComputeSettings.js'
+import { useDatasetRecommendations } from '../../composables/useDatasetRecommendations.js'
 import { DEPTHMAP_DEFAULTS, DEPTHMAP_QUALITY_META } from '../../core/defaults.user.js'
+import { badgePreset } from '../../core/recommendUi.js'
 
 const emit = defineEmits(['close', 'run'])
 
 // Memory budget + GPU are machine-level (Settings ▸ Compute); read here, apply on run.
-const { memBudgetGb, useGpu } = useComputeSettings()
+const { memBudgetBytes, useGpu } = useComputeSettings()
+const { recommendations } = useDatasetRecommendations()
 
 // Stage A — Build Depth Maps (PatchMatch MVS). Quality is the primary control
 // (Metashape-style relative preset → the store resolves it to a working maxDim
@@ -22,13 +25,27 @@ const { memBudgetGb, useGpu } = useComputeSettings()
 // transforms filterRelTol (%) and drops null overrides before dispatch.
 const settings = ref({ ...DEPTHMAP_DEFAULTS })
 
+// Quality is a first-class field whose values ARE the cards, so the dataset
+// recommendation marks the card it points at instead of adding a second one that
+// would offer the same setting twice. Marking is inert — the user still picks.
+const qualityRec = computed(() => recommendations.value.depthmap?.quality ?? null)
+const qualityCards = computed(
+  () => badgePreset(DEPTHMAP_QUALITY_META, qualityRec.value?.value, { title: qualityRec.value?.reason }),
+)
+const qualityNote = computed(() => {
+  const rec = qualityRec.value
+  if (!rec) return ''
+  const label = DEPTHMAP_QUALITY_META.find((p) => p.id === rec.value)?.label ?? rec.value
+  return `Recommended: ${label} — ${rec.reason}`
+})
+
 function run() {
   const { filterRelTol, maxDim, bestK, ...rest } = settings.value
   const out = {
     ...rest,
     filterRelTol: filterRelTol / 100,
     useGpu: useGpu.value,
-    memBudgetBytes: Math.max(0.25, memBudgetGb.value || 2) * 1024 * 1024 * 1024,
+    memBudgetBytes: memBudgetBytes.value,
   }
   // Only forward the numeric overrides when actually set — otherwise let the
   // store/worker derive them (maxDim from quality, bestK per image).
@@ -43,7 +60,8 @@ function run() {
     <PresetCards
       :model-value="settings.quality"
       :base-id="settings.quality"
-      :presets="DEPTHMAP_QUALITY_META"
+      :presets="qualityCards"
+      :note="qualityNote"
       @select="(id) => (settings.quality = id)"
     />
 

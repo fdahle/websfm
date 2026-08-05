@@ -22,7 +22,7 @@ export const SFM_PHASES = [
   { key: 'bundle',         weight: 0.15, label: 'Bundle adjustment' },
   { key: 'retriangulate',  weight: 0.08, label: 'Retriangulating' },
   { key: 'trackFilter',    weight: 0.12, label: 'Filtering tracks' },
-  { key: 'gcpBundle',      weight: 0.05, label: 'GCP-anchored bundle adjustment' },
+  { key: 'gcpBundle',      weight: 0.05, label: 'Position-constrained bundle adjustment' },
   { key: 'finalize',       weight: 0.05, label: 'Finalising' },
 ]
 

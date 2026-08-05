@@ -39,6 +39,15 @@ export const SFM_TUNING = {
   filterMinTriAngleDeg: 1.5, // drop points whose rays are too parallel
   interimBaEvery: 5,         // run a global BA after this many newly-registered cameras
   interimBaIterations: 12,   // fewer iters for the interim solves than the final BA
+  // Camera-centre priors (imported poses / EXIF GPS) enter one final fixed-K BA.
+  // Targets are mapped into the current arbitrary SfM frame by a similarity fit;
+  // two rounds let that mapping settle after the first constrained deformation.
+  cameraPriorBaRounds: 2,
+  cameraPriorBaMinCameras: 3,
+  // A position-constrained solution may trade a little image residual for better
+  // geometry. Bound that trade so noisy GPS cannot visibly damage tie-point fit.
+  cameraPriorMaxReprojIncreasePx: 0.25,
+  cameraPriorMaxReprojIncreaseFrac: 0.10,
   // ── In-registration distortion self-calibration (D3) ──
   // Once the model has this many cameras, the interim BA refines a shared focal + radial
   // k1 and folds the distortion out of the keypoints (+ Kmap) mid-registration, instead

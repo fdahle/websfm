@@ -400,6 +400,28 @@ describe('bundleAdjust', () => {
     expect(withAnchor.anchorRmsAfter).toBeLessThan(0.05)
   })
 
+  it('marshals camera-centre priors into bundle adjustment', async () => {
+    const { poses, intrinsics, points3d, observations } = exactScene(17, 50)
+    const shift = [1.2, -0.7, 0.4]
+    const cameras = poses.map(({ R, t }) => {
+      const rs = R.map((row) => row[0] * shift[0] + row[1] * shift[1] + row[2] * shift[2])
+      return { R, t: [t[0] - rs[0], t[1] - rs[1], t[2] - rs[2]] }
+    })
+    const shiftedPoints = points3d.map((p) => ({
+      x: p.x + shift[0], y: p.y + shift[1], z: p.z + shift[2],
+    }))
+    const result = await bundleAdjust(cameras, intrinsics, shiftedPoints, observations, {
+      maxIters: 60,
+      cameraPriors: [
+        { camIdx: 0, target: [0, 0, 0], weights: [1e4, 1e4, 1e4] },
+        { camIdx: 1, target: [2, 0, 0], weights: [1e4, 1e4, 1e4] },
+      ],
+    })
+    expect(result).not.toBeNull()
+    expect(result.cameraPriorRmsAfter).toBeLessThan(1e-3)
+    expect(result.costAfter).toBeLessThan(1e-3)
+  })
+
   // A2 self-calibration through the JS↔WASM boundary: a scene rendered with a focal
   // 10% higher than the seed K, refined with one shared focal. Validates the new
   // marshalling (sensorOfCam + refineIntrinsics in, refined intrinsics out).

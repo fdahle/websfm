@@ -1,10 +1,10 @@
 import { defineConfig } from 'vitest/config'
 
 // Tests live alongside the pure compute layer in src/core/ (plus a few pure
-// dependency-free helpers in src/utils/, e.g. zip.js). No Vue plugin and a plain
-// node environment: these import no Vue/Pinia, and the wasm modules run on Node's
-// WebAssembly (loaded from bytes in the test setup). Keep test files under these
-// globs free of Vue/Pinia/DOM imports.
+// dependency-free helpers in src/utils/ and main-thread composables whose browser
+// globals can be injected). No Vue plugin and a plain node environment: these
+// import no SFCs, and the wasm modules run on Node's WebAssembly (loaded from bytes
+// in the test setup). Keep test files under these globs free of direct DOM use.
 //
 // `src/stores/**` is included for store-layer modules that are plain functions —
 // e.g. `stores/reconstruction/cloudSerde.js`, which is pure data transformation
@@ -20,6 +20,7 @@ export default defineConfig({
       'src/core/**/*.test.{js,ts}',
       'src/utils/**/*.test.{js,ts}',
       'src/stores/**/*.test.{js,ts}',
+      'src/composables/**/*.test.{js,ts}',
     ],
   },
 })

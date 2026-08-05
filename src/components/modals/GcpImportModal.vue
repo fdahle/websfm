@@ -59,6 +59,7 @@ const roleOptions = computed(() => {
     { id: 'image',  label: 'Image name' },
     { id: 'px',     label: 'Pixel X' },
     { id: 'py',     label: 'Pixel Y' },
+    { id: 'role',   label: 'Control / check' },
   ]
 })
 
@@ -73,7 +74,7 @@ function setRole(colIdx, role) {
 }
 
 const mapping = computed(() => {
-  const m = { name: null, x: null, y: null, z: null, image: null, px: null, py: null }
+  const m = { name: null, x: null, y: null, z: null, image: null, px: null, py: null, role: null }
   columnRoles.value.forEach((role, i) => { if (role !== 'ignore' && m[role] == null) m[role] = i })
   return m
 })

@@ -11,12 +11,15 @@ import { DENSE_FUSE_DEFAULTS } from '../../core/defaults.user.js'
 const emit = defineEmits(['close', 'run'])
 
 // Memory budget for the fusion pre-flight is machine-level (Settings ▸ Compute).
-const { memBudgetGb } = useComputeSettings()
+const { memBudgetBytes } = useComputeSettings()
 
 // Stage B — Build Dense Cloud (fuse depth maps). `depthTolPct` is exposed as a
 // percentage; converted to the fraction core/dense/mvs.js fuseDepthMaps expects. In
 // Auto mode minViews + maxCost are derived by fusion from the data.
 // Defaults live in core/defaults.user.js; run() transforms depthTolPct (%) below.
+// No dataset recommendation here by design: fusion already derives minViews/maxCost
+// from the data in `auto` mode, and the geometric gates are dataset-independent
+// (core/recommend.js `recommendFuse`). An empty banner is worse than none.
 const settings = ref({ ...DENSE_FUSE_DEFAULTS })
 
 function run() {
@@ -29,7 +32,7 @@ function run() {
     minTriAngleDeg,
     maxIncidenceDeg,
     removeIsolated,
-    memBudgetBytes: Math.max(0.25, memBudgetGb.value || 2) * 1024 * 1024 * 1024,
+    memBudgetBytes: memBudgetBytes.value,
   })
 }
 </script>

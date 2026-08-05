@@ -91,7 +91,7 @@ typical overlap; increase it only for hard pairs with many outliers.
 <!-- param: maxNeighbors  default: 10 -->
 Used by the **Preselect** strategy: instead of matching every pair (an $O(N^2)$
 explosion on large blocks), match each image only to its N nearest neighbours by
-imported camera position. Lower N is faster but risks missing real overlap on
+EXIF-derived or imported camera position. Lower N is faster but risks missing real overlap on
 cross-strip or looping flight lines; raise it when the flight geometry is dense or
 irregular. Needs imported poses — images without one fall back to exhaustive
 matching.

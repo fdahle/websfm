@@ -28,8 +28,8 @@ georeferencing (post-hoc similarity fit *and* GCP-anchored BA) with a per-GCP
 accuracy report. The real gaps to "general tool" (tracked in Later ▸
 features): any mesh output (F3), interop with the ecosystem — COLMAP
 model import/export (F7), LAS point clouds (F1 polish) — processing report
-(F8), point-cloud editing/gradual selection (F9), EXIF-GPS pair preselection
-(F10), scale bars (F11), fisheye (F6). The biggest
+(F8), point-cloud editing/gradual selection (F9), scale bars (F11), fisheye
+(F6). The biggest
 *credibility* gap is not a feature: it's that the R-track robustness work is
 still unvalidated on real data (Now ▸ R).
 
@@ -371,6 +371,26 @@ confirmation owed since 2026-07-07).
 Import georeferenced rasters you did **not** produce, and use them as ground
 truth. The immediate driver: map-placed GCPs have no elevation source.
 
+#### Automatic GCP finding from orthophotos — UI mockup shipped, matcher owed
+
+The Tools ▸ Georeferencing ▸ **Find GCPs** dialog now defines the intended inputs:
+the project's relative/local orthophoto and an imported georeferenced reference
+orthophoto. Its run action is deliberately disabled until the matching pipeline is
+implemented. Build a coarse-to-fine, rotation/scale-tolerant image registration that:
+
+- detects and matches stable features between the relative and reference orthos;
+- robustly estimates the 2D mapping and rejects spatially clustered/ambiguous matches;
+- converts accepted reference pixels to project-CRS X/Y, obtains Z from a declared
+  reference DEM (never silently invents Z=0), and traces relative-ortho pixels back to
+  observations in original registered images;
+- creates **candidate** GCPs for user review rather than silently accepting them as
+  control, with residual, confidence and coverage diagnostics;
+- hands reviewed points to the existing **Georeference** workflow (GCP-anchored sparse
+  adjustment followed by the final SfM→CRS similarity fit).
+
+This depends on raw/readable reference-ortho pixels from RR above; the currently baked
+RGBA source has no window reader suitable for feature matching.
+
 **Workstream B + phases A-1…A-3 shipped 2026-07-18** (see HANDOVER) — sidebar
 provenance split, `rasterKind.js`/`rasterSample.js`/`rasterSource.js`, the
 `parseRaster` op, `useExternalStore`, the georeferenced-TIFF routing fork, the
@@ -430,17 +450,25 @@ overridable. **Order: U1 → U2 (+C1) → U4 → U5 → U3 → U6.** U1/U2/U5/U6
   contiguous filenames alone don't prove a strip (cameras number every shoot
   sequentially), so a medium set stays exhaustive. Next: **C1** (real device budget for
   the dense pick) then **U3** (banner wiring, browser).
-- **C1 — Hardware-aware memory budget.** *(pure half done 2026-07-24)* —
+- ~~**C1 — Hardware-aware memory budget.**~~ **done 2026-07-31** —
   `core/dense/memBudget.js` `deviceBudget({deviceMemoryGB, jsHeapLimitBytes})` derives
   `{ budgetBytes, deviceMemoryGB, source, note }` from **injected** readings (core stays
   pure): 50% of `navigator.deviceMemory` clamped [1,6] GB, else 75% of the JS-heap limit,
   else the conservative `DEFAULT_BUDGET_BYTES`. `deviceMemoryGB` passes through for U2's
-  dense pick. 6 unit tests. **Owed (main thread):** a thin caller that reads the two
-  Chrome-only globals, passes them in, seeds the store's dense gate with `budgetBytes`,
-  logs `note`, and feeds `deviceMemoryGB` to `recommendSettings`; U5 warns from it.
-- **U3 — "Recommended for this dataset" prefill** in each stage modal: banner
-  showing derived values that differ from static defaults, one-click apply,
-  hover shows `reason`. Prefill only, never a hidden override.
+  dense pick. The main-thread half now lives in `useComputeSettings`: it reads the optional
+  browser globals, logs the derivation, seeds both dense-stage pre-flight gates, preserves
+  saved manual overrides with an Auto reset, and exposes `recommendForDataset(profile)`.
+  6 core unit tests; browser smoke-check the displayed automatic source/value and Auto reset.
+- ~~**U3 — "Recommended for this dataset" prefill.**~~ **done 2026-07-31** —
+  reactive `useDatasetRecommendations` wires U1→U2→C1 into the pipeline stages, surfaced
+  **on the control each recommendation concerns** (recommended preset card / badged card /
+  inline field link — see CLAUDE.md), not in a banner. Only derived values differing from
+  static defaults appear; reasons stay readable and selecting is normally the only mutation.
+  Applying logs every value + rationale. Integration also corrected two stale U2 outputs:
+  large-image tiling is `auto` (not the removed `on` mode), and raw EXIF GPS only
+  offers position preselection after it becomes usable project-CRS poses. F10 later
+  made that pairing choice automatic when at least two positions are available.
+  Automated tests/typecheck/build green; browser visual/apply smoke-check remains owed.
 - **U4 — One-click "Run All".** New `RunPipelineModal.vue` (stage checkboxes,
   one Low/Med/High selector → U2, U5 checklist) + `runAll(stages, settings)` in
   `composables/usePipeline.js` chaining the existing `runDetect/…` with the
@@ -774,14 +802,6 @@ HANDOVER). What remains is the two halves that need *interaction* or touch the
   view-tracks dense/ortho/COLMAP-export read, so deleting one has to invalidate
   the depth-map staleness stamp and re-run BA — which is exactly why
   `cloudEdit.js` refuses sparse clouds.
-
-### F10 — EXIF-GPS pose priors + preselection **[new 2026-07-07; absorbs "P2 remnants"]**
-`core/io/metadata.js` already parses `gpsLat/gpsLon/gpsAlt` — nothing consumes
-them. Convert to the project CRS at ingest and (a) feed `preselectPairs` when
-no poses are imported (drone sets get proximity preselection for free), (b)
-offer them as imported-pose seeds for georef (F2's similarity fit works off
-them), (c) show on the map like imported poses (visually distinguished).
-Pure plumbing; every piece exists.
 
 ### F11 — Scale bars / distance constraints **[new 2026-07-07]**
 For close-range/object work without GCPs: user marks two image points across

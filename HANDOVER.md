@@ -203,6 +203,48 @@ fiducials; self-calibration (A2) + fiducials (F4) are the code-side support.
 
 ## Done log (most recent first)
 
+- **2026-08-05 · F10 shipped · EXIF-GPS camera priors and automatic proximity matching.**
+  `usePosesStore` materializes EXIF longitude/latitude/altitude as enabled project-CRS
+  poses, preserves canonical metre altitude/accuracy across CRS changes, and lets an
+  explicitly imported pose win. Two or more linked positions now select proximity
+  matching by default; geographic coordinates are transformed to a shared local metric
+  frame and altitude is excluded from neighbour ranking. EXIF-derived poses render as
+  distinct map triangles, feed post-hoc pose georeferencing, and—with altitude in a
+  projected CRS—enter fixed-intrinsics BA as independently X/Y/Z-weighted camera-centre
+  residuals behind a reprojection-damage guard. Missing EXIF accuracy uses conservative
+  10 m horizontal / 20 m vertical defaults; non-metre projected CRSs receive converted
+  Z and σ values. Imported poses, XY-only fixes, disabled records, and geographic-CRS BA
+  boundaries are integration-tested. Yaw/pitch/roll and richer vendor per-axis GNSS
+  accuracy remain follow-ups, not part of F10.
+
+- **2026-07-31 · U3 · Recommended settings are now an explicit modal action.**
+  `useDatasetRecommendations` reactively profiles the current image/sensor/pose/GCP
+  stores and threads C1's real device-memory signal into U2. Each recommendation is
+  surfaced **on the control it concerns** rather than in a banner above the modal (the
+  first cut's `ui/RecommendationBanner` competed with `PresetCards` for the same decision,
+  restated the form below it, and clipped its own rationale): detection gains a
+  "Recommended ★" **preset card**, depth-map quality **badges** the card it points at plus
+  a note line, and matching's pairing strategy gets an inline "Use recommended" link under
+  the field. Dense fusion and SfM derive nothing to apply, so they get no affordance —
+  SfM's rationale extends the self-calibration hint instead. Only values differing from
+  static defaults appear, each rationale stays readable, and selecting is the only
+  mutation (logged with value + reason). `core/recommendUi.js` pins the diff/card policy;
+  `composables/useRecommendedPreset.js` is the shared glue.
+  Integration fixed two previously-unrunnable U2 suggestions: large scans now
+  select the live `tiling:'auto'` mode, and raw EXIF GPS does not offer position
+  preselection until it becomes project-CRS camera positions. Browser visual/apply
+  smoke-check remains owed; F10 subsequently made the usable-position choice automatic.
+
+- **2026-07-31 · C1 completed · Hardware-aware dense safety limit.**
+  `useComputeSettings` now reads the optional main-thread memory signals and passes them to
+  the pure `deviceBudget`; its resolved byte value is the single input used by both Build
+  Depth Maps and Build Dense Cloud. It logs the derivation, keeps existing saved limits as
+  explicit manual overrides, and Settings ▸ Compute can reset them to Auto. The actual
+  `deviceMemoryGB` (never the user's override) is threaded into U2 through
+  `recommendForDataset(profile)`. The two main-thread wiring regressions plus all 1,165
+  tests, typecheck and the production build pass; browser smoke-check of the reported
+  source/value remains owed.
+
 - **2026-07-31 · Batch consensus for fiducial detection** (`core/sfm/fiducialConsensus.js`,
   wired in `useImagesStore.detectFiducialsForSensor`, reason `batch-outlier` in the review
   queue). Motivated by a measured TMA failure: on a synthetic Trimetrogon scan with the

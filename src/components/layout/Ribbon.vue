@@ -174,12 +174,22 @@ const tabs = [
         // Settings modal (App.vue `handleSetCrs`), not a tool that transforms data.
         label: 'Georeferencing',
         commands: [
-          { id: 'auto-georeference', label: 'Auto\nGeoref',        icon: 'target', needsSparse: true, needsPoses: true, aerialOnly: true },
-          // Placeholder: fit the reconstruction to an imported reference DEM *surface*
-          // (ICP over the Horn 7-param similarity), rather than to point correspondences
-          // the way georef.js does today. The one control path that needs neither GCPs
-          // nor pose priors — the historical-film case.
-          { id: 'align-reference',   label: 'Align to\nReference', icon: 'layers', disabled: true },
+          // Mockup: automatic relative-ortho ↔ reference-ortho matching is tracked in
+          // TODO.md. Keep the dialog reachable so the intended inputs/workflow are clear.
+          { id: 'find-gcps',      label: 'Find\nGCPs',      icon: 'map-pin', needsSparse: true, aerialOnly: true },
+          // One entry point for both GCP-constrained adjustment + final similarity fit
+          // and the cheap transform-only path. The modal explains/validates each mode.
+          { id: 'georeference',   label: 'Geo-\nreference', icon: 'target',  needsSparse: true, aerialOnly: true },
+        ],
+      },
+      {
+        // Operations that refine an already-georeferenced result against external
+        // evidence belong after georeferencing, not beside the controls that establish it.
+        label: 'Post-processing',
+        commands: [
+          // Placeholder: local surface registration against an imported reference DEM.
+          // A practical ICP implementation needs an existing approximate georeference.
+          { id: 'fit-reference', label: 'Fit to\nReference', icon: 'layers', disabled: true },
         ],
       },
       {

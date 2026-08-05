@@ -6,13 +6,21 @@ import SettingsField from './ui/SettingsField.vue'
 import SettingsGroup from './ui/SettingsGroup.vue'
 import AdvancedDisclosure from './ui/AdvancedDisclosure.vue'
 import PresetCards from './ui/PresetCards.vue'
+import { useDatasetRecommendations } from '../../composables/useDatasetRecommendations.js'
 import {
   RECONSTRUCT_DEFAULTS,
   RECONSTRUCT_PRESETS,
   RECONSTRUCT_PRESET_META,
 } from '../../core/defaults.user.js'
 
+const props = defineProps({
+  // Set when Georeference hands off here for its GCP-constrained adjustment path.
+  // The reconstruction settings remain identical; only the framing and final action differ.
+  groundControlAdjustment: { type: Boolean, default: false },
+})
+
 const emit = defineEmits(['close', 'run'])
+const { recommendations } = useDatasetRecommendations()
 
 // Prefill from the single source of truth (core/sfm/sfm.js falls back to the same
 // values). Clone so edits don't mutate the shared constant.
@@ -46,7 +54,16 @@ const SELF_CAL_HINTS = {
   'f,k1': 'Solve focal length and the first radial distortion coefficient.',
   'f,cxcy,k1,k2,k3': 'Solve focal, principal point and all three radial coefficients (needs many well-spread views).',
 }
-const selfCalHint = computed(() => SELF_CAL_HINTS[settings.value.refineIntrinsics] ?? '')
+// U2 derives nothing to override here — `auto` already resolves per project inside
+// core/sfm/sfm.js — but it does know WHICH branch this project will take. That is
+// worth saying, so it extends the hint of the field it describes instead of
+// occupying a banner that could never offer an action.
+const selfCalHint = computed(() => {
+  const base = SELF_CAL_HINTS[settings.value.refineIntrinsics] ?? ''
+  const reason = recommendations.value.sfm?.refineIntrinsics?.reason
+  if (settings.value.refineIntrinsics !== 'auto' || !reason) return base
+  return `${base} This project: ${reason}`
+})
 
 function run() {
   emit('run', { ...settings.value })
@@ -54,7 +71,11 @@ function run() {
 </script>
 
 <template>
-  <ModalShell title="Sparse Reconstruction" @close="emit('close')">
+  <ModalShell :title="props.groundControlAdjustment ? 'Adjust with Ground Control' : 'Sparse Reconstruction'" @close="emit('close')">
+    <p v-if="props.groundControlAdjustment" class="adjust-intro">
+      Rebuild the sparse model with the eligible GCPs included in bundle adjustment.
+      When it succeeds, the model will automatically be fitted to the project CRS.
+    </p>
     <PresetCards
       :model-value="activePreset"
       :base-id="baseId"
@@ -127,7 +148,9 @@ function run() {
 
     <template #footer>
       <button class="btn" @click="emit('close')">Cancel</button>
-      <button class="btn btn-primary" @click="run">Run Reconstruction</button>
+      <button class="btn btn-primary" @click="run">
+        {{ props.groundControlAdjustment ? 'Adjust & Georeference' : 'Run Reconstruction' }}
+      </button>
     </template>
   </ModalShell>
 </template>
@@ -136,3 +159,6 @@ function run() {
      which are passed as slot content (compiled in this component's scope, so scoped CSS
      applies here — not inside SettingsField). .btn lives in the global stylesheet. -->
 <style scoped src="./ui/modal.css"></style>
+<style scoped>
+.adjust-intro { margin: 0; font-size: 13px; line-height: 1.5; color: var(--text); }
+</style>

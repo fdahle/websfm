@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { recommendSettings } from './recommend.js'
+import { initialMatchStrategy, recommendSettings } from './recommend.js'
 import { profileDataset } from './profile.js'
 
 // A minimal profile builder — recommend.js only reads these fields.
@@ -11,6 +11,12 @@ const profile = (over = {}) => ({
 })
 
 describe('recommendSettings', () => {
+  it('starts matching on proximity only with at least two usable positions', () => {
+    expect(initialMatchStrategy(0)).toBe('exhaustive')
+    expect(initialMatchStrategy(1)).toBe('exhaustive')
+    expect(initialMatchStrategy(2)).toBe('preselect')
+  })
+
   it('returns all five stages even for a null profile', () => {
     const r = recommendSettings(null)
     expect(Object.keys(r)).toEqual(['detect', 'match', 'sfm', 'depthmap', 'fuse'])
@@ -34,14 +40,16 @@ describe('recommendSettings', () => {
   it('detect enables tiling only for very large scans', () => {
     expect(recommendSettings(profile({ maxDim: 4000 })).detect.tiling).toBeUndefined()
     const big = recommendSettings(profile({ maxDim: 11000 })).detect
-    expect(big.tiling.value).toBe('on')
+    expect(big.tiling.value).toBe('auto')
     expect(big.tileSize.value).toBe(1536)
   })
 
-  it('match strategy: poses/GPS → preselect, sequential → sequential, else exhaustive', () => {
+  it('match strategy: poses → preselect, sequential → sequential, else exhaustive', () => {
     expect(recommendSettings(profile({ hasPoses: true })).match.strategy.value).toBe('preselect')
     expect(recommendSettings(profile({ hasPoses: true })).match.preselectMethod.value).toBe('position')
-    expect(recommendSettings(profile({ hasGps: true })).match.strategy.value).toBe('preselect')
+    // Raw metadata alone is not enough: the reactive pose sync must first turn it
+    // into matched project-CRS positions, at which point hasPoses becomes true.
+    expect(recommendSettings(profile({ hasGps: true })).match.strategy.value).toBe('exhaustive')
     // Sequential naming only downgrades to sequential matching on a LARGE set —
     // on a medium set contiguous filenames don't justify skipping exhaustive.
     expect(recommendSettings(profile({ sequentialNames: true, scale: 'large' })).match.strategy.value).toBe('sequential')
@@ -98,7 +106,7 @@ describe('recommendSettings', () => {
     expect(p.scale).toBe('large')
     const r = recommendSettings(p)
     expect(r.detect.maxDim.value).toBe(3200)
-    expect(r.detect.tiling.value).toBe('on')
+    expect(r.detect.tiling.value).toBe('auto')
     expect(r.match.strategy.value).toBe('sequential')
     expect(r.depthmap.quality.value).toBe('low') // large set
   })
