@@ -40,6 +40,10 @@ async function refreshGcps() {
       role: g.role ?? 'control',
       viewCount: r ? r.viewCount : (g.observations?.length ?? 0),
       dx: r?.dx ?? null, dy: r?.dy ?? null, dz: r?.dz ?? null, dTotal: r?.dTotal ?? null,
+      normalized: r?.normalized ?? null, normalizedAxes: r?.normalizedAxes ?? null,
+      looDx: r?.looDx ?? null, looDy: r?.looDy ?? null, looDz: r?.looDz ?? null,
+      looTotal: r?.looTotal ?? null, looNormalized: r?.looNormalized ?? null,
+      looNormalizedAxes: r?.looNormalizedAxes ?? null,
       observations: r?.observations ?? [],
     }
   })
@@ -60,22 +64,32 @@ const rmse = (rows, sel) => {
 const gcpStats = computed(() => {
   const controls = gcpRows.value.filter((r) => r.enabled && r.role !== 'check' && r.dTotal != null)
   const checks = gcpRows.value.filter((r) => r.enabled && r.role === 'check' && r.dTotal != null)
-  const used = checks.length ? checks : controls
+  const loo = controls.filter((r) => r.looTotal != null).map((r) => ({ ...r,
+    dx: r.looDx, dy: r.looDy, dz: r.looDz, dTotal: r.looTotal,
+    normalized: r.looNormalized, normalizedAxes: r.looNormalizedAxes }))
+  const used = checks.length ? checks : (loo.length >= 4 ? loo : controls)
+  const basis = checks.length ? 'check' : (loo.length >= 4 ? 'loo' : 'control')
+  const normalized = used.map((r) => r.normalized).filter(Number.isFinite)
+  const maxAxes = used.map((r) => Math.max(...(r.normalizedAxes || []).map(Math.abs))).filter(Number.isFinite)
   return {
     n: used.length, total: gcpsStore.gcps.length,
-    controls: controls.length, checks: checks.length, basis: checks.length ? 'check' : 'control',
+    controls: controls.length, checks: checks.length, basis,
     rmseX: rmse(used, (r) => r.dx), rmseY: rmse(used, (r) => r.dy),
     rmseZ: rmse(used, (r) => r.dz), rmseTotal: rmse(used, (r) => r.dTotal),
+    normalizedRms: normalized.length ? Math.sqrt(normalized.reduce((s,v) => s + v*v, 0) / (3*normalized.length)) : null,
+    over2: maxAxes.filter((v) => v > 2).length, over3: maxAxes.filter((v) => v > 3).length,
   }
 })
 const gcpTiles = computed(() => {
   const s = gcpStats.value
   const t = [
-    { label: s.basis === 'check' ? 'Checkpoint RMSE' : 'Control fit RMSE', value: fmtM(s.rmseTotal), unit: crsUnit.value, tone: tone(s.rmseTotal, T.gcpRmse), hint: s.basis === 'check' ? 'Independent accuracy' : 'No valid checkpoints — not independent' },
+    { label: s.basis === 'check' ? 'Checkpoint RMSE' : (s.basis === 'loo' ? 'Leave-one-out RMSE' : 'Control fit RMSE'), value: fmtM(s.rmseTotal), unit: crsUnit.value, tone: tone(s.rmseTotal, T.gcpRmse), hint: s.basis === 'check' ? 'Independent accuracy' : (s.basis === 'loo' ? 'Each control predicted by a fit that excludes it' : 'No valid checkpoints — not independent') },
     { label: 'RMSE X', value: fmtM(s.rmseX), unit: crsUnit.value },
     { label: 'RMSE Y', value: fmtM(s.rmseY), unit: crsUnit.value },
     { label: 'RMSE Z', value: fmtM(s.rmseZ), unit: crsUnit.value },
     { label: 'Controls / checks', value: `${s.controls} / ${s.checks}`, hint: `${s.total} point(s) total` },
+    { label: 'Normalized RMS', value: s.normalizedRms == null ? '—' : s.normalizedRms.toFixed(2), unit: 'σ', hint: '≈1 means residuals match declared uncertainty' },
+    { label: 'Any axis >2σ / >3σ', value: `${s.over2} / ${s.over3}`, tone: s.over3 ? 'bad' : (s.over2 ? 'warn' : undefined) },
   ]
   if (method.value) t.push({ label: 'Georef source', value: method.value === 'gcps' ? 'GCPs' : 'poses',
     tone: method.value === 'gcps' ? undefined : 'warn', hint: method.value === 'poses' ? 'pose fit — <3 GCPs' : undefined })
@@ -87,6 +101,7 @@ const gcpColumns = [
   { key: 'viewCount', label: 'Views', align: 'right' },
   { key: 'dx', label: 'ΔX', align: 'right', format: fmtM }, { key: 'dy', label: 'ΔY', align: 'right', format: fmtM },
   { key: 'dz', label: 'ΔZ', align: 'right', format: fmtM }, { key: 'dTotal', label: 'Δ total', align: 'right', format: fmtM },
+  { key: 'normalized', label: 'Normalized', align: 'right', format: (v) => v == null ? '—' : `${v.toFixed(2)}σ` },
 ]
 
 // ── Pose residuals (WS2.5: XY vs Z split) ──
@@ -165,7 +180,7 @@ const demColumns = [
           <div v-else class="obs-empty">No triangulable observations.</div>
         </template>
       </DataTable>
-      <p class="eval-note">Checkpoint RMSE is independent: checkpoints are measured here but never enter georeferencing or bundle adjustment. Without checkpoints, the displayed control residual is only a fit residual.</p>
+      <p class="eval-note">Checkpoint RMSE is independent: checkpoints never enter the adjustment. Without checkpoints, four or more controls use leave-one-out prediction; with fewer controls, the displayed control residual is only a fit residual. Normalized values compare residuals with declared covariance.</p>
     </template>
   </template>
 

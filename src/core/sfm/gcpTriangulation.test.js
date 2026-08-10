@@ -156,6 +156,16 @@ describe('triangulateGcp — N-view refinement', () => {
     expect(errFrom(nView)).toBeLessThan(errFrom(pairOnly))
   })
 
+  it('lets a low-uncertainty mark outweigh a noisy low-confidence mark', async () => {
+    const observations = noisySeedMark()
+    observations[0].accuracyX = 20; observations[0].accuracyY = 20
+    for (const o of observations.slice(1)) { o.accuracyX = 0.5; o.accuracyY = 0.5 }
+    const weighted = await triangulateGcp(observations, cams)
+    const equal = await triangulateGcp(observations.map((o) => ({ ...o, accuracyX: 1, accuracyY: 1 })), cams)
+    expect(errFrom(weighted)).toBeLessThan(errFrom(equal))
+    expect(weighted.perViewReprojPx[0].normalized).toBeLessThan(weighted.perViewReprojPx[0].reprojPx)
+  })
+
   it('reports every view in perViewReprojPx and rejects none by default', async () => {
     const oa = project(camA, X), ob = project(camB, X), oc = project(camC, X)
     const observations = [

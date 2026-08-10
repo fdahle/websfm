@@ -472,7 +472,10 @@ export function buildColmapModel({ images, points }) {
   const points2D = new Map() // uuid → [[x,y,point3dId]]
   images.forEach((im, i) => {
     idOfUuid.set(im.uuid, i + 1)
-    points2D.set(im.uuid, [])
+    // Supplying the full feature array preserves keypoint indices across a
+    // database + sparse-workspace round trip. Sparse-only callers omit it and
+    // retain the compact observed-points behaviour.
+    points2D.set(im.uuid, (im.keypoints ?? []).map((kp) => [kp.x, kp.y, -1]))
   })
 
   const points3D = points.map((p, i) => {
@@ -482,8 +485,10 @@ export function buildColmapModel({ images, points }) {
       const imageId = idOfUuid.get(v.uuid)
       if (imageId === undefined) continue // observation in an image we're not exporting
       const arr = points2D.get(v.uuid)
-      const point2dIdx = arr.length
-      arr.push([v.x, v.y, point3dId])
+      const requested = Number(v.featureIdx)
+      const point2dIdx = Number.isInteger(requested) && requested >= 0 && requested < arr.length ? requested : arr.length
+      if (point2dIdx === arr.length) arr.push([v.x, v.y, point3dId])
+      else arr[point2dIdx] = [v.x, v.y, point3dId]
       track.push([imageId, point2dIdx])
     }
     return {

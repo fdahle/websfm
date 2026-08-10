@@ -63,6 +63,38 @@ fn project_full(r: &M3, t: &V3, fx: f64, fy: f64, cx: f64, cy: f64, k1: f64, k2:
     (fx * a * d + cx, fy * b * d + cy)
 }
 
+// Principal rotation vector Log(R), with magnitude in [0, π]. Camera orientation
+// priors use Log(R_current R_targetᵀ), so the residual is continuous around the
+// target and avoids Euler-angle wraparound inside the optimiser.
+pub(crate) fn so3_log(r: &M3) -> V3 {
+    let cos_theta = ((r[0][0] + r[1][1] + r[2][2] - 1.0) * 0.5).clamp(-1.0, 1.0);
+    let theta = cos_theta.acos();
+    let vee = [r[2][1] - r[1][2], r[0][2] - r[2][0], r[1][0] - r[0][1]];
+    if theta < 1e-8 { return [0.5*vee[0], 0.5*vee[1], 0.5*vee[2]]; }
+    let sin_theta = theta.sin();
+    if sin_theta.abs() > 1e-7 {
+        let scale = theta / (2.0 * sin_theta);
+        return [scale*vee[0], scale*vee[1], scale*vee[2]];
+    }
+    let mut axis = [
+        ((r[0][0] + 1.0) * 0.5).max(0.0).sqrt(),
+        ((r[1][1] + 1.0) * 0.5).max(0.0).sqrt(),
+        ((r[2][2] + 1.0) * 0.5).max(0.0).sqrt(),
+    ];
+    if axis[0] >= axis[1] && axis[0] >= axis[2] && axis[0] > 1e-8 {
+        axis[1] = (r[0][1] + r[1][0]) / (4.0 * axis[0]);
+        axis[2] = (r[0][2] + r[2][0]) / (4.0 * axis[0]);
+    } else if axis[1] >= axis[2] && axis[1] > 1e-8 {
+        axis[0] = (r[0][1] + r[1][0]) / (4.0 * axis[1]);
+        axis[2] = (r[1][2] + r[2][1]) / (4.0 * axis[1]);
+    } else if axis[2] > 1e-8 {
+        axis[0] = (r[0][2] + r[2][0]) / (4.0 * axis[2]);
+        axis[1] = (r[1][2] + r[2][1]) / (4.0 * axis[2]);
+    }
+    let norm = (axis[0]*axis[0] + axis[1]*axis[1] + axis[2]*axis[2]).sqrt().max(1e-12);
+    [theta*axis[0]/norm, theta*axis[1]/norm, theta*axis[2]/norm]
+}
+
 // ── Reduced-variable coupling blocks (Schur assembly) ─────────────────────────
 
 // One point's merged Jvarᵀ·Jp coupling block, keyed by its reduced-variable offset
@@ -120,14 +152,15 @@ fn build_groups(ids: &[i32], n_cam: usize) -> (Vec<usize>, usize) {
 ///
 /// GCP support: `anchor_flat`/`anchor_weight` optionally pull specific 3D points
 /// toward a known target position (e.g. a GCP triangulated in this same SfM
-/// frame) with an extra quadratic residual `w·‖pt − target‖²`. This only ever
+/// frame) with an extra quadratic residual `Σ_axis w_axis·(pt − target)²`. This only ever
 /// touches that point's own 3×3 block (gradient + diagonal Hessian) — no camera
 /// Jacobian, no new coupling — so it folds into the existing per-point Schur
 /// elimination for free. Empty anchor arrays reduce to today's behaviour exactly.
-/// Camera-position support: `camera_prior_flat` optionally pulls camera centres
-/// `C = -R^T t` toward known positions in this same SfM frame. Each row carries
-/// independent inverse-variance weights for X/Y/Z. Its analytic pose Jacobian is
-/// `[-R^T | -R^T[t]_x]` for this solver's `[dt,domega]` update convention.
+/// Camera-pose support: `camera_prior_flat` optionally pulls camera centres
+/// `C = -R^T t` and rotations toward known poses in this same SfM frame. Position
+/// rows carry independent inverse-variance weights for X/Y/Z. Orientation uses
+/// the tangent residual `Log(R R_target^T)` and a full 3×3 precision matrix,
+/// allowing the caller to transform per-OPK uncertainties into solver axes.
 ///
 /// # Inputs
 /// - `cameras_flat`: n_cam × 12 floats `[R(9)|t(3), …]`
@@ -135,10 +168,13 @@ fn build_groups(ids: &[i32], n_cam: usize) -> (Vec<usize>, usize) {
 /// - `pts_flat`: n_pts × 3 floats `[x,y,z, …]`
 /// - `obs_flat`: n_obs × 4 floats `[cam_i, pt_i, pixel_x, pixel_y, …]`
 /// - `anchor_flat`: n_anchor × 4 floats `[pt_i, target_x, target_y, target_z, …]`
-/// - `anchor_weight`: n_anchor floats, one `1/sigma²` weight per anchor (aligned
-///   with `anchor_flat`'s rows; missing entries default to weight 1)
-/// - `camera_prior_flat`: n_prior × 7 floats
-///   `[cam_i, target_x, target_y, target_z, weight_x, weight_y, weight_z, …]`
+/// - `observation_weight`: n_obs × 2 inverse-variance pixel weights (X/Y);
+///   feature observations use 1, GCP marks use their declared pixel variances
+/// - `anchor_weight`: n_anchor × 9 floats, row-major 3×3 precision matrices
+/// - `camera_prior_flat`: n_prior × 25 floats
+///   `[cam_i, target_x, target_y, target_z, weight_x, weight_y, weight_z,
+///     target_R(9), orientation_precision(9), …]`. An all-zero orientation
+///   precision matrix makes the row position-only.
 /// - `max_iters`: outer LM iterations
 /// - `sensor_of_cam`: n_cam ints — per-camera sensor id (shared → shared focal);
 ///   `< 0` (or a short/empty list) ⇒ that camera is its own group
@@ -163,6 +199,7 @@ pub fn bundle_adjust(
     intrinsics_flat: &[f32],
     pts_flat: &[f32],
     obs_flat: &[f32],
+    observation_weight: &[f32],
     anchor_flat: &[f32],
     anchor_weight: &[f32],
     camera_prior_flat: &[f32],
@@ -175,23 +212,28 @@ pub fn bundle_adjust(
     let n_obs = obs_flat.len() / 4;
     if n_cam == 0 || n_pts == 0 || n_obs == 0 { return vec![]; }
 
-    // Anchors: (point_idx, target position, weight). Points outside range are
+    // Anchors: (point_idx, target position, per-axis weights). Points outside range are
     // dropped rather than panicking on a malformed caller payload.
     let n_anchor = anchor_flat.len() / 4;
-    let anchors: Vec<(usize, V3, f64)> = (0..n_anchor).map(|i| {
+    let anchors: Vec<(usize, V3, M3)> = (0..n_anchor).filter_map(|i| {
         let b = i * 4;
         let pi = anchor_flat[b] as usize;
         let target: V3 = [anchor_flat[b+1] as f64, anchor_flat[b+2] as f64, anchor_flat[b+3] as f64];
-        let w = anchor_weight.get(i).copied().unwrap_or(1.0) as f64;
-        (pi, target, w)
-    }).filter(|&(pi, _, _)| pi < n_pts).collect();
+        let wb = i * 9;
+        let precision: M3 = [0,1,2].map(|r| [0,1,2].map(|c| {
+            anchor_weight.get(wb + 3*r + c).copied().unwrap_or(if r == c { 1.0 } else { 0.0 }) as f64
+        }));
+        if pi >= n_pts || precision.iter().flatten().any(|v| !v.is_finite()) { return None; }
+        Some((pi, target, precision))
+    }).collect();
     let mut anchored = vec![false; n_pts];
     for &(pi, _, _) in &anchors { anchored[pi] = true; }
     let anchor_sse = |pts: &Vec<V3>| -> f64 {
         let mut sum = 0.0f64;
-        for &(pi, target, w) in &anchors {
-            let dx = pts[pi][0] - target[0]; let dy = pts[pi][1] - target[1]; let dz = pts[pi][2] - target[2];
-            sum += w * (dx*dx + dy*dy + dz*dz);
+        for &(pi, target, precision) in &anchors {
+            let d = [pts[pi][0]-target[0], pts[pi][1]-target[1], pts[pi][2]-target[2]];
+            let pd = mat3_vec(&precision, &d);
+            sum += d[0]*pd[0] + d[1]*pd[1] + d[2]*pd[2];
         }
         sum
     };
@@ -205,12 +247,11 @@ pub fn bundle_adjust(
         (sse / anchors.len() as f64).sqrt()
     };
 
-    // Camera-centre priors: (camera index, target centre, per-axis weight).
-    // Reject non-finite/non-positive weights so a malformed metadata row cannot
-    // poison the whole normal equation with NaNs or negative curvature.
-    let n_camera_prior = camera_prior_flat.len() / 7;
-    let camera_priors: Vec<(usize, V3, V3)> = (0..n_camera_prior).filter_map(|i| {
-        let b = i * 7;
+    // Camera-pose priors: camera index, target centre, position weights, and an
+    // optional (target rotation, full orientation precision) pair.
+    let n_camera_prior = camera_prior_flat.len() / 25;
+    let camera_priors: Vec<(usize, V3, V3, Option<(M3, M3)>)> = (0..n_camera_prior).filter_map(|i| {
+        let b = i * 25;
         let ci = camera_prior_flat[b] as usize;
         let target = [camera_prior_flat[b+1] as f64, camera_prior_flat[b+2] as f64,
                       camera_prior_flat[b+3] as f64];
@@ -218,7 +259,21 @@ pub fn bundle_adjust(
                       camera_prior_flat[b+6] as f64];
         if ci >= n_cam || target.iter().any(|v| !v.is_finite())
             || weight.iter().any(|v| !v.is_finite() || *v <= 0.0) { return None; }
-        Some((ci, target, weight))
+        let target_r: M3 = [0,1,2].map(|row| [0,1,2].map(|col|
+            camera_prior_flat[b + 7 + 3*row + col] as f64));
+        let mut precision: M3 = [0,1,2].map(|row| [0,1,2].map(|col|
+            camera_prior_flat[b + 16 + 3*row + col] as f64));
+        for row in 0..3 { for col in (row+1)..3 {
+            let v = 0.5 * (precision[row][col] + precision[col][row]);
+            precision[row][col] = v; precision[col][row] = v;
+        }}
+        let det2 = precision[0][0]*precision[1][1] - precision[0][1]*precision[1][0];
+        let orientation = if target_r.iter().flatten().all(|v| v.is_finite())
+            && precision.iter().flatten().all(|v| v.is_finite())
+            && precision[0][0] > 0.0 && det2 > 0.0 && det3(&precision) > 0.0 {
+            Some((target_r, precision))
+        } else { None };
+        Some((ci, target, weight, orientation))
     }).collect();
 
     // Unpack cameras / base intrinsics / points / observations.
@@ -239,14 +294,18 @@ pub fn bundle_adjust(
     let mut pts: Vec<V3> = (0..n_pts).map(|i| {
         [pts_flat[i*3] as f64, pts_flat[i*3+1] as f64, pts_flat[i*3+2] as f64]
     }).collect();
-    let obs: Vec<(usize, usize, f64, f64)> = (0..n_obs).map(|i| {
+    let obs: Vec<(usize, usize, f64, f64, f64, f64)> = (0..n_obs).map(|i| {
         let b = i * 4;
-        (obs_flat[b] as usize, obs_flat[b+1] as usize, obs_flat[b+2] as f64, obs_flat[b+3] as f64)
-    }).filter(|&(ci, pi, _, _)| ci < n_cam && pi < n_pts).collect();
+        let wb = i * 2;
+        let wx = observation_weight.get(wb).copied().unwrap_or(1.0) as f64;
+        let wy = observation_weight.get(wb+1).copied().unwrap_or(1.0) as f64;
+        (obs_flat[b] as usize, obs_flat[b+1] as usize, obs_flat[b+2] as f64, obs_flat[b+3] as f64,
+         if wx.is_finite() && wx > 0.0 { wx } else { 1.0 }, if wy.is_finite() && wy > 0.0 { wy } else { 1.0 })
+    }).filter(|&(ci, pi, _, _, _, _)| ci < n_cam && pi < n_pts).collect();
 
     // Per-point observation lists — the structure the Schur reduction iterates.
-    let mut pt_obs: Vec<Vec<(usize, f64, f64)>> = vec![vec![]; n_pts];
-    for &(ci, pi, ox, oy) in &obs { pt_obs[pi].push((ci, ox, oy)); }
+    let mut pt_obs: Vec<Vec<(usize, f64, f64, f64, f64)>> = vec![vec![]; n_pts];
+    for &(ci, pi, ox, oy, wx, wy) in &obs { pt_obs[pi].push((ci, ox, oy, wx, wy)); }
 
     let camera_center = |cam: &(M3, V3)| -> V3 {
         let (r, t) = cam;
@@ -254,15 +313,24 @@ pub fn bundle_adjust(
          -(r[0][1]*t[0] + r[1][1]*t[1] + r[2][1]*t[2]),
          -(r[0][2]*t[0] + r[1][2]*t[1] + r[2][2]*t[2])]
     };
+    let orientation_residual = |r: &M3, target_r: &M3| -> V3 {
+        so3_log(&mat3_mul(r, &mat3_transpose(target_r)))
+    };
     let camera_prior_sse = |cams: &Vec<(M3, V3)>| -> f64 {
-        camera_priors.iter().map(|&(ci, target, weight)| {
+        camera_priors.iter().map(|&(ci, target, weight, orientation)| {
             let c = camera_center(&cams[ci]);
-            (0..3).map(|k| weight[k] * (c[k] - target[k]).powi(2)).sum::<f64>()
+            let position = (0..3).map(|k| weight[k] * (c[k] - target[k]).powi(2)).sum::<f64>();
+            let rotation = orientation.map(|(target_r, precision)| {
+                let e = orientation_residual(&cams[ci].0, &target_r);
+                let pe = mat3_vec(&precision, &e);
+                dot3(&e, &pe)
+            }).unwrap_or(0.0);
+            position + rotation
         }).sum()
     };
     let camera_prior_rms = |cams: &Vec<(M3, V3)>| -> f64 {
         if camera_priors.is_empty() { return 0.0; }
-        let sse: f64 = camera_priors.iter().map(|&(ci, target, _)| {
+        let sse: f64 = camera_priors.iter().map(|&(ci, target, _, _)| {
             let c = camera_center(&cams[ci]);
             (0..3).map(|k| (c[k] - target[k]).powi(2)).sum::<f64>()
         }).sum();
@@ -308,7 +376,7 @@ pub fn bundle_adjust(
     // Plain RMS reprojection error over all observations (reported to the caller).
     let rms = |cams: &Vec<(M3, V3)>, pts: &Vec<V3>, gpar: &Vec<[f64; 6]>| -> f64 {
         let mut sse = 0.0f64; let mut cnt = 0usize;
-        for &(ci, pi, ox, oy) in &obs {
+        for &(ci, pi, ox, oy, _, _) in &obs {
             let (r, t) = &cams[ci];
             let (fx, fy, cx, cy, k1, k2, k3) = eff(ci, gpar);
             let (px, py) = project_full(r, t, fx, fy, cx, cy, k1, k2, k3, &pts[pi]);
@@ -322,14 +390,14 @@ pub fn bundle_adjust(
     // quadratic) GCP anchor term — same total objective the LM step below descends.
     let robust_cost = |cams: &Vec<(M3, V3)>, pts: &Vec<V3>, gpar: &Vec<[f64; 6]>, dh: f64| -> f64 {
         let mut sum = 0.0f64;
-        for &(ci, pi, ox, oy) in &obs {
+        for &(ci, pi, ox, oy, wx, wy) in &obs {
             let (r, t) = &cams[ci];
             let (fx, fy, cx, cy, k1, k2, k3) = eff(ci, gpar);
             let (px, py) = project_full(r, t, fx, fy, cx, cy, k1, k2, k3, &pts[pi]);
             if px.is_nan() { sum += dh * dh; continue; }
-            let e2 = (px - ox).powi(2) + (py - oy).powi(2);
-            let e = e2.sqrt();
-            sum += if e <= dh { e2 } else { 2.0 * dh * e - dh * dh };
+            let dx=px-ox; let dy=py-oy; let e=(dx*dx+dy*dy).sqrt();
+            let robust = if e <= dh { 1.0 } else { dh/e };
+            sum += robust * (wx*dx*dx + wy*dy*dy);
         }
         sum + anchor_sse(pts) + camera_prior_sse(cams)
     };
@@ -338,7 +406,7 @@ pub fn bundle_adjust(
     // noise floor as the model tightens. Recomputed once per outer iteration.
     let huber_threshold = |cams: &Vec<(M3, V3)>, pts: &Vec<V3>, gpar: &Vec<[f64; 6]>| -> f64 {
         let mut es: Vec<f64> = Vec::with_capacity(obs.len());
-        for &(ci, pi, ox, oy) in &obs {
+        for &(ci, pi, ox, oy, _, _) in &obs {
             let (r, t) = &cams[ci];
             let (fx, fy, cx, cy, k1, k2, k3) = eff(ci, gpar);
             let (px, py) = project_full(r, t, fx, fy, cx, cy, k1, k2, k3, &pts[pi]);
@@ -368,18 +436,20 @@ pub fn bundle_adjust(
         let mut gpv = vec![[0f64; 3]; n_pts];
         let mut emap: Vec<Vec<EBlock>> = (0..n_pts).map(|_| Vec::new()).collect();
 
-        // GCP anchors: gradient/Hessian of w·‖pt−target‖² touches only that
+        // GCP anchors: gradient/Hessian of Σ_axis w_axis·(pt−target)² touches only that
         // point's own 3×3 block — no camera coupling, so it's just added here.
-        for &(pi, target, w) in &anchors {
-            gpv[pi][0] += w * (pts[pi][0] - target[0]);
-            gpv[pi][1] += w * (pts[pi][1] - target[1]);
-            gpv[pi][2] += w * (pts[pi][2] - target[2]);
-            cmat[pi][0][0] += w; cmat[pi][1][1] += w; cmat[pi][2][2] += w;
+        for &(pi, target, precision) in &anchors {
+            let d = [pts[pi][0]-target[0], pts[pi][1]-target[1], pts[pi][2]-target[2]];
+            let pd = mat3_vec(&precision, &d);
+            for a in 0..3 {
+                gpv[pi][a] += pd[a];
+                for b in 0..3 { cmat[pi][a][b] += precision[a][b]; }
+            }
         }
 
         // Camera-centre priors contribute directly to the reduced camera blocks.
         // For C=-R^Tt and update (t+=dt, R=Exp(dw)R), J=[-R^T|-R^T[t]_x].
-        for &(ci, target, weight) in &camera_priors {
+        for &(ci, target, weight, orientation) in &camera_priors {
             let (r, t) = &cams[ci];
             let centre = camera_center(&cams[ci]);
             let st = skew(t);
@@ -401,10 +471,40 @@ pub fn bundle_adjust(
                     }
                 }
             }
+
+            // Orientation residual e=Log(R R_targetᵀ). A small central finite-
+            // difference Jacobian is used for the three rotation variables. It
+            // is exact for the actual left-multiplicative update convention and
+            // avoids a fragile closed-form inverse-Jacobian near large rotations.
+            if let Some((target_r, precision)) = orientation {
+                let e = orientation_residual(r, &target_r);
+                let eps = 1e-6;
+                let mut j = [[0.0f64; 3]; 3];
+                for col in 0..3 {
+                    let mut dw_plus = [0.0; 3]; dw_plus[col] = eps;
+                    let mut dw_minus = [0.0; 3]; dw_minus[col] = -eps;
+                    let rp = mat3_mul(&so3_exp(&dw_plus), r);
+                    let rm = mat3_mul(&so3_exp(&dw_minus), r);
+                    let ep = orientation_residual(&rp, &target_r);
+                    let em = orientation_residual(&rm, &target_r);
+                    for row in 0..3 { j[row][col] = (ep[row] - em[row]) / (2.0*eps); }
+                }
+                let pe = mat3_vec(&precision, &e);
+                for a in 0..3 {
+                    let ia = off + 3 + a;
+                    for row in 0..3 { gr[ia] += j[row][a] * pe[row]; }
+                    for b in 0..3 {
+                        let ib = off + 3 + b;
+                        for row in 0..3 { for col in 0..3 {
+                            smat[ia*n + ib] += j[row][a] * precision[row][col] * j[col][b];
+                        }}
+                    }
+                }
+            }
         }
 
         for pi in 0..n_pts {
-            for &(ci, ox, oy) in &pt_obs[pi] {
+            for &(ci, ox, oy, obs_wx, obs_wy) in &pt_obs[pi] {
                 let (r, t) = &cams[ci];
                 let (fx, fy, cx, cy, k1, k2, k3) = eff(ci, &gpar);
                 let pc = mat3_vec(r, &pts[pi]); // R·X
@@ -457,37 +557,38 @@ pub fn bundle_adjust(
                 // Huber IRLS weight.
                 let e = (ru*ru + rv*rv).sqrt();
                 let w = if e <= dh { 1.0 } else { dh / e };
+                let wu = w * obs_wx; let wv = w * obs_wy;
 
                 let coff = 6 * ci;
                 for a in 0..6 {
-                    gr[coff + a] += w * (ju[a]*ru + jv[a]*rv);
-                    for b in 0..6 { smat[(coff+a)*n + coff+b] += w * (ju[a]*ju[b] + jv[a]*jv[b]); }
+                    gr[coff + a] += wu*ju[a]*ru + wv*jv[a]*rv;
+                    for b in 0..6 { smat[(coff+a)*n + coff+b] += wu*ju[a]*ju[b] + wv*jv[a]*jv[b]; }
                 }
                 if refine {
                     let goff = group_off + grp[ci] * kdim;
                     for a in 0..kdim {
-                        gr[goff + a] += w * (jku[a]*ru + jkv[a]*rv);
-                        for b in 0..kdim { smat[(goff+a)*n + goff+b] += w * (jku[a]*jku[b] + jkv[a]*jkv[b]); }
+                        gr[goff + a] += wu*jku[a]*ru + wv*jkv[a]*rv;
+                        for b in 0..kdim { smat[(goff+a)*n + goff+b] += wu*jku[a]*jku[b] + wv*jkv[a]*jkv[b]; }
                         // Cross term camera(coff) ↔ group(goff), both triangles.
                         for b in 0..6 {
-                            let v = w * (jku[a]*ju[b] + jkv[a]*jv[b]);
+                            let v = wu*jku[a]*ju[b] + wv*jkv[a]*jv[b];
                             smat[(goff+a)*n + coff+b] += v;
                             smat[(coff+b)*n + goff+a] += v;
                         }
                     }
                 }
                 for a in 0..3 {
-                    gpv[pi][a] += w * (jpu[a]*ru + jpv[a]*rv);
-                    for b in 0..3 { cmat[pi][a][b] += w * (jpu[a]*jpu[b] + jpv[a]*jpv[b]); }
+                    gpv[pi][a] += wu*jpu[a]*ru + wv*jpv[a]*rv;
+                    for b in 0..3 { cmat[pi][a][b] += wu*jpu[a]*jpu[b] + wv*jpv[a]*jpv[b]; }
                 }
                 // Coupling blocks E (Jvarᵀ·Jp) for this point: camera then group.
                 let mut cblk = [[0f64; 3]; 6];
-                for a in 0..6 { for b in 0..3 { cblk[a][b] = w * (ju[a]*jpu[b] + jv[a]*jpv[b]); } }
+                for a in 0..6 { for b in 0..3 { cblk[a][b] = wu*ju[a]*jpu[b] + wv*jv[a]*jpv[b]; } }
                 add_eblock(&mut emap[pi], coff, 6, &cblk);
                 if refine {
                     let goff = group_off + grp[ci] * kdim;
                     let mut kblk = [[0f64; 3]; 6];
-                    for a in 0..kdim { for b in 0..3 { kblk[a][b] = w * (jku[a]*jpu[b] + jkv[a]*jpv[b]); } }
+                    for a in 0..kdim { for b in 0..3 { kblk[a][b] = wu*jku[a]*jpu[b] + wv*jkv[a]*jpv[b]; } }
                     add_eblock(&mut emap[pi], goff, kdim, &kblk);
                 }
             }

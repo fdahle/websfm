@@ -2,7 +2,7 @@
 # Add new crates under crates/<name>/ and list them here.
 [workspace]
 resolver = "2"
-members = ["sift", "matching", "reconstruction", "mesh", "imagecodec"]
+members = ["sift", "matching", "reconstruction", "mesh", "imagecodec", "lazcodec"]
 
 # Profiles must live in the workspace root manifest (Cargo ignores them in
 # member crates). These apply to every crate in the workspace.

@@ -1,0 +1,17 @@
+{
+  "name": "lazcodec",
+  "type": "module",
+  "description": "LASzip (LAZ) compression/decompression compiled to WebAssembly",
+  "version": "0.1.0",
+  "license": "MIT OR Apache-2.0",
+  "files": [
+    "lazcodec_bg.wasm",
+    "lazcodec.js",
+    "lazcodec.d.ts"
+  ],
+  "main": "lazcodec.js",
+  "types": "lazcodec.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}

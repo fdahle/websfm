@@ -3,18 +3,19 @@
 // georeferencing fit + accuracy report) and, optionally, anchored into bundle
 // adjustment. Pure, no Vue/Pinia/OPFS/DOM.
 //
-// A GCP's observations are `{ imageId, px, py }` pixel marks on one or more
+// A GCP's observations are `{ imageId, px, py, accuracyX, accuracyY }` pixel marks on one or more
 // *registered* images (images with a camera pose in the current sparse
 // cloud). Two-view DLT triangulation (reusing the same WASM path as SfM point
 // triangulation) on the widest-baseline pair seeds the 3D position, which is
 // then refined against *every* observation by Gauss-Newton on the summed
 // reprojection error (`refineGcpPoint` below — pure JS: a handful of points,
-// not millions, so this needs no new WASM routine).
+// not millions, so this needs no new WASM routine). Pixel axes are weighted by
+// their declared inverse variances.
 //
 // The refinement is what makes a 3rd..Nth mark worth placing: the DLT pair
 // alone ignores them, so marking a GCP in eight images used to predict exactly
-// what the best two predicted. Marks are the user's own evidence, so they get
-// equal weight — with one exception, `opts.robust` (see ROBUST_* below), which
+// what the best two predicted. Marks retain their declared measurement weights,
+// with one exception: `opts.robust` (see ROBUST_* below), which
 // drops marks that disagree wildly with the consensus. That is opt-in because
 // it changes *which* evidence reaches the caller: the guide path wants it (a
 // misclick shouldn't poison the aiming prediction for every other image), while
@@ -118,10 +119,14 @@ function reprojCost(views, x, y, z, huberPx = null) {
     const p = projectPoint(v.cam, x, y, z)
     if (!p) { valid.push(false); continue }
     valid.push(true)
-    const sq = (p.u - v.px) ** 2 + (p.v - v.py) ** 2
-    if (huberPx == null) { s += sq; continue }
-    const r = Math.sqrt(sq)
-    s += r <= huberPx ? 0.5 * sq : huberPx * (r - 0.5 * huberPx)
+    const ru = p.u - v.px, rv = p.v - v.py
+    const wx = 1 / ((Number.isFinite(v.accuracyX) && v.accuracyX > 0 ? v.accuracyX : 1) ** 2)
+    const wy = 1 / ((Number.isFinite(v.accuracyY) && v.accuracyY > 0 ? v.accuracyY : 1) ** 2)
+    const weightedSq = wx * ru * ru + wy * rv * rv
+    if (huberPx == null) { s += weightedSq; continue }
+    const r = Math.hypot(ru, rv)
+    const robustWeight = r <= huberPx ? 1 : huberPx / r
+    s += robustWeight * weightedSq
   }
   return { cost: s, valid }
 }
@@ -169,11 +174,13 @@ export function refineGcpPoint(views, seed, opts = {}) {
       const rv = K.fy * (yc / zc) + K.cy - v.py
       // IRLS: beyond δ the weight decays as δ/|r|, so the view's pull on the
       // normal equations saturates instead of growing with its error.
-      let w = 1
+      let robustWeight = 1
       if (huberPx != null) {
         const rn = Math.hypot(ru, rv)
-        if (rn > huberPx) w = huberPx / rn
+        if (rn > huberPx) robustWeight = huberPx / rn
       }
+      const wx = robustWeight / ((Number.isFinite(v.accuracyX) && v.accuracyX > 0 ? v.accuracyX : 1) ** 2)
+      const wy = robustWeight / ((Number.isFinite(v.accuracyY) && v.accuracyY > 0 ? v.accuracyY : 1) ** 2)
       const ju = [
         (K.fx / zc) * (R[0][0] - (xc / zc) * R[2][0]),
         (K.fx / zc) * (R[0][1] - (xc / zc) * R[2][1]),
@@ -185,8 +192,8 @@ export function refineGcpPoint(views, seed, opts = {}) {
         (K.fy / zc) * (R[1][2] - (yc / zc) * R[2][2]),
       ]
       for (let i = 0; i < 3; i++) {
-        g[i] += w * (ju[i] * ru + jv[i] * rv)
-        for (let j = 0; j < 3; j++) H[i][j] += w * (ju[i] * ju[j] + jv[i] * jv[j])
+        g[i] += wx * ju[i] * ru + wy * jv[i] * rv
+        for (let j = 0; j < 3; j++) H[i][j] += wx * ju[i] * ju[j] + wy * jv[i] * jv[j]
       }
     }
     if (used < 2) break
@@ -213,7 +220,11 @@ export function refineGcpPoint(views, seed, opts = {}) {
 function perViewResiduals(views, x, y, z) {
   return views.map((v) => {
     const proj = projectPoint(v.cam, x, y, z)
-    return { imageId: v.imageId, reprojPx: proj ? Math.hypot(proj.u - v.px, proj.v - v.py) : null }
+    if (!proj) return { imageId: v.imageId, reprojPx: null, normalized: null }
+    const dx = proj.u - v.px, dy = proj.v - v.py
+    const sx = Number.isFinite(v.accuracyX) && v.accuracyX > 0 ? v.accuracyX : 1
+    const sy = Number.isFinite(v.accuracyY) && v.accuracyY > 0 ? v.accuracyY : 1
+    return { imageId: v.imageId, dx, dy, reprojPx: Math.hypot(dx, dy), normalized: Math.hypot(dx/sx, dy/sy) }
   })
 }
 

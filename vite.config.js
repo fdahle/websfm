@@ -27,7 +27,7 @@ export default defineConfig({
   // Keep esbuild's dep pre-bundler away from onnxruntime-web: bundling it rewrites
   // ORT's internal wasm-glue references and breaks the wasm↔JS binding at runtime
   // ("ke.$b is not a function"). Excluding it serves ORT's own ESM untouched.
-  optimizeDeps: { exclude: ['onnxruntime-web'] },
+  optimizeDeps: { exclude: ['onnxruntime-web', '@sqlite.org/sqlite-wasm'] },
   // Cross-origin isolation → SharedArrayBuffer → multi-threaded ORT wasm (core/ort.js
   // auto-picks threads when `crossOriginIsolated`; ~3× on LightGlue/SuperPoint CPU).
   // COEP `credentialless` (NOT `require-corp`) is deliberate: it still permits

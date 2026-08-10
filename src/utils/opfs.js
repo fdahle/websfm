@@ -718,7 +718,8 @@ export async function deleteExternalAll(projectId) {
 }
 
 // ── Ground Control Points ───────────────────────────────────────────────────────
-// JSON: { crs, gcps: [{ id, name, x, y, z, observations: [...], enabled }] }
+// JSON: { crs, importDefaults, gcps: [{ coordinates, covariance metadata,
+// observations with pixel sigmas, role, enabled }] }
 
 export async function saveGcps(projectId, data) {
   const dir = await getProjectDir(projectId, true)
@@ -868,8 +869,10 @@ export async function deleteSensors(projectId) {
 
 // ── Camera poses (exterior orientation / extrinsics) ────────────────────────────
 // JSON: { crs, poses: [{ imageId, imageName, x, y, z, omega, phi, kappa,
-//                        accXYZ, accAngle, source, enabled }] }
-// Positions live in the project CRS; angles (deg) pass through unchanged.
+//                        accuracyX/Y/Z, accXYZ, accuracyOmega/Phi/Kappa,
+//                        accAngle, source, enabled }] }
+// Positions live in the project CRS; angles (deg) pass through CRS changes
+// unchanged and are consumed as camera-orientation priors during BA.
 
 export async function savePoses(projectId, data) {
   const dir = await getProjectDir(projectId, true)

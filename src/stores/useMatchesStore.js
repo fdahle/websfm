@@ -634,6 +634,41 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
     return removed
   }
 
+  // Bulk import pairs whose feature indices already refer to the current image
+  // keypoint arrays. External image ordering is normalized to the store's sorted
+  // uuid ordering here; when it flips, each [ia,ib] pair flips with it.
+  async function importMatches(entries, { replace = false } = {}) {
+    const writes = []
+    let imported = 0, skipped = 0
+    for (const src of entries || []) {
+      if (!src.uuidA || !src.uuidB || src.uuidA === src.uuidB) { skipped++; continue }
+      const [idA, idB] = [src.uuidA, src.uuidB].sort()
+      const pid = pairId(idA, idB)
+      if (!replace && matchStore.value.has(pid)) { skipped++; continue }
+      const flip = idA !== src.uuidA
+      const matches = (src.matches || []).map(([a, b]) => flip ? [b, a] : [a, b])
+      const entry = {
+        idA, idB, rawCount: src.rawCount ?? matches.length,
+        inlierCount: src.verified === false ? 0 : (src.inlierCount ?? matches.length),
+        F: flip && src.F ? transpose3(src.F) : (src.F ?? null),
+        matches, status: 'done', disabled: false, weak: src.verified === false,
+        source: src.source ?? 'external',
+      }
+      matchStore.value.set(pid, entry)
+      imported++
+      if (isPersisting()) writes.push(opfs.saveMatches(projects.currentProjectId, pid, entry))
+    }
+    touch()
+    if (writes.length) await Promise.all(writes)
+    log(`Matches imported: ${imported} pair(s)${skipped ? `, ${skipped} skipped` : ''}`,
+      imported ? 'success' : 'warn', 'Import')
+    return { imported, skipped }
+  }
+
+  function transpose3(m) {
+    return [[m[0][0], m[1][0], m[2][0]], [m[0][1], m[1][1], m[2][1]], [m[0][2], m[1][2], m[2][2]]]
+  }
+
   // Toggle a verified pair's exclusion from reconstruction. A reversible user
   // override for obviously-wrong matches that clear every automatic gate; disabled
   // pairs stay stored (and re-enablable) but are filtered out at reconstruct time.
@@ -684,5 +719,5 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
     }
   }
 
-  return { matchStore, matchRun, pairId, getMatch, verifiedPairs, matchPair, matchAll, removeMatchesForImage, setPairDisabled, restore, clear }
+  return { matchStore, matchRun, pairId, getMatch, verifiedPairs, matchPair, matchAll, importMatches, removeMatchesForImage, setPairDisabled, restore, clear }
 }))

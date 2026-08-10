@@ -59,7 +59,7 @@ images ─► [1] detect ─► keypoints + descriptors
               ├ incremental resection (P3P + MSAC PnP, track extension)
               ├ interleaved + final bundle adjustment (LM + Schur + Huber)
               ├ retriangulation + split-track merge + 2-pass track filter
-              └ optional camera-position + GCP-constrained BA
+              └ optional camera-pose + GCP-constrained BA
               ▼
        [4] dense MVS (PatchMatch depth maps → geometric fusion)
               ▼
@@ -652,6 +652,9 @@ fit) or **triangulated GCPs ↔ surveyed GCP coordinates**. When ≥3 GCPs trian
 into the current SfM frame (§6.5, `gcpTriangulation.js`), the **GCP fit is
 preferred** over the pose-based one. `gcpAccuracyReport()` reports per-GCP CRS
 residual + per-observation reprojection px.
+Horn's scalar-weight solution is a stable initializer. When GCPs carry
+anisotropic covariance, all seven similarity parameters are then refined against
+the full Mahalanobis objective.
 
 Camera positions may be explicitly imported or derived from EXIF GPS. EXIF
 longitude/latitude is transformed from WGS84 into the project CRS at ingest;
@@ -662,6 +665,14 @@ Proximity matching uses horizontal distance only; a geographic project is mapped
 one local azimuthal-equidistant metre frame before neighbours are ranked. EXIF altitude
 and accuracy remain canonically denominated in metres and are converted when a projected
 working CRS uses another linear unit.
+Drone XMP is read alongside standard EXIF. Complete camera gimbal yaw/pitch/roll
+is converted from the common drone convention (yaw clockwise from true north,
+pitch −90° at nadir) into photogrammetric omega/phi/kappa; airframe-only attitude
+is not substituted for camera attitude. True-north attitude and east/north RTK
+standard deviations are rotated into the project grid, including meridian
+convergence, and canonical ENU values are retained so a CRS change can repeat the
+conversion without accumulating error. Vendor per-axis RTK fields (including DJI
+`RtkStdLon`/`RtkStdLat`/`RtkStdHgt`) override the conservative defaults.
 Imported pose files take precedence over EXIF-derived positions.
 
 The fit and the report consume the **non-robust** triangulation (§6.5): every mark
@@ -683,9 +694,20 @@ When GCP anchors are also present, their similarity defines the common SfM targe
 frame for both point and camera priors. Geographic project CRSs and positions
 without altitude remain post-hoc only.
 
+When an imported or EXIF/XMP-derived camera pose also carries a complete
+omega/phi/kappa orientation, its rotation constrains the same BA passes. The
+photogrammetric image frame
+(x right, y up, optical axis −z) is converted to the solver camera frame (x right,
+y down, optical axis +z), then composed with the SfM→project similarity rotation.
+The solver minimizes the wrapped rotation-vector residual
+`Log(R R_targetᵀ)`. Per-axis omega/phi/kappa 1σ accuracies are transformed into a
+full tangent-space precision matrix, so anisotropic angular uncertainty is retained;
+incomplete orientations remain position-only priors.
+
 GCPs also constrain BA **directly**, not just post-hoc. `bundle_adjust` accepts an
-**anchor residual** `Σ w·‖pt − target‖²` on specific 3D points, weighted by
-`w = 1/σ²` (from per-axis GCP survey accuracy, scaled into the SfM frame). Each
+**anchor residual** `δᵀPδ` on specific 3D points, using the full GCP precision
+matrix `P`. The CRS covariance (including XY/XZ/YZ correlations) is rotated and
+scaled into the SfM frame before solving. Each
 anchored GCP is injected as an extra 3D point (with its own real reprojection
 observations) whose position is pulled toward the GCP's CRS position transformed
 into the SfM frame via the current similarity fit. The anchor only touches that
@@ -700,12 +722,20 @@ convergence".
 
 ### 6.3 A GCP's shape
 
-Surveyed ground coords `x/y/z` with per-axis accuracy, pixel `observations`
-`[{imageId, px, py}]` with per-axis image accuracy, an `enabled` flag, and a
+Surveyed ground coords `x/y/z` with per-axis 1σ accuracy, optional XY/XZ/YZ
+correlations, accuracy provenance and vertical datum; pixel `observations`
+`[{imageId, px, py, accuracyX, accuracyY}]` with per-observation 1σ pixel
+accuracy; an `enabled` flag; and a
 `role` (`control` or `check`). Enabled controls enter the similarity fit and
 anchored BA. Enabled checkpoints are triangulated and reported against that fit
 but never constrain it, so their CRS RMSE is independent accuracy. Disabled
 points enter neither solve nor report. A point with <2 marks is unusable (flagged).
+Delimited-file import accepts per-row X/Y/Z or horizontal accuracy, correlations,
+and per-observation pixel accuracy. Import-wide presets/fallbacks support 1σ, 2σ,
+95%-per-axis, HRMS/VRMS and CEP95, in metres, source-CRS units or project-CRS
+units. Unknown uncertainty excludes a point from control but retains it for
+marking/reporting. Defaults are remembered per project. CRS changes propagate
+the full covariance with a local transform Jacobian and rescale Z between units.
 
 ### 6.4 Guided marking (`core/sfm/gcpGuides.js`)
 

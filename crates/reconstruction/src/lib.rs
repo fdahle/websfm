@@ -156,7 +156,7 @@ mod tests {
             pt_flat.push((x[2] + d * 0.5) as f32);
         }
 
-        let out = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &obs, &[], &[], &[], 60, &[], 0);
+        let out = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &obs, &[], &[], &[], &[], 60, &[], 0);
         let base = n_cam * 12 + n_pts * 3 + n_cam * 7;
         // cameras + points + intrinsics (7 each: fx,fy,cx,cy,k1,k2,k3) + [cost_before, cost_after] + trace.
         assert!(out.len() >= base + 4, "unexpected BA output length");
@@ -226,7 +226,7 @@ mod tests {
             pt_flat.push((x[2] + d * 0.5) as f32);
         }
 
-        let out = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &obs, &[], &[], &[], 80, &[], 0);
+        let out = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &obs, &[], &[], &[], &[], 80, &[], 0);
         let base = n_cam * 12 + n_pts * 3 + n_cam * 7;
         let cost_before = out[base];
         let cost_after = out[base + 1];
@@ -289,7 +289,7 @@ mod tests {
         let mut pt_flat: Vec<f32> = Vec::new();
         for x in &gt_pts { for &v in x { pt_flat.push(v as f32); } }
 
-        let out = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &obs, &[], &[], &[], 100, &sensor_of_cam, 1);
+        let out = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &obs, &[], &[], &[], &[], 100, &sensor_of_cam, 1);
         let intr_base = n_cam * 12 + n_pts * 3;
         let cost_after = out[intr_base + n_cam * 7 + 1];
         // Refined focal is returned per camera; sharing ⇒ all equal, ≈ f_true.
@@ -354,10 +354,10 @@ mod tests {
         for x in &render_pts { for &v in x { pt_flat.push(v as f32); } }
 
         let anchor_flat: Vec<f32> = vec![0.0, anchor_target[0] as f32, anchor_target[1] as f32, anchor_target[2] as f32];
-        let anchor_weight: Vec<f32> = vec![1e4]; // heavily outweighs the ~4-observation reprojection pull
+        let anchor_weight: Vec<f32> = vec![1e4, 0.0, 0.0, 0.0, 1e4, 0.0, 0.0, 0.0, 1e4];
 
-        let out_no_anchor = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &obs, &[], &[], &[], 60, &[], 0);
-        let out_anchor = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &obs, &anchor_flat, &anchor_weight, &[], 60, &[], 0);
+        let out_no_anchor = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &obs, &[], &[], &[], &[], 60, &[], 0);
+        let out_anchor = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &obs, &[], &anchor_flat, &anchor_weight, &[], 60, &[], 0);
 
         let pts_base = n_cam * 12;
         let dist = |out: &Vec<f32>| -> f64 {
@@ -419,6 +419,8 @@ mod tests {
             prior_flat.extend_from_slice(&[
                 ci as f32, centre[0] as f32, centre[1] as f32, centre[2] as f32,
                 1e4, 1e4, 1e4,
+                1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0,
+                0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
             ]);
         }
         let mut pt_flat = Vec::new();
@@ -427,13 +429,79 @@ mod tests {
         ]); }
 
         let out = bundle_adjust(
-            &cam_flat, &k_flat, &pt_flat, &obs, &[], &[], &prior_flat, 80, &[], 0,
+            &cam_flat, &k_flat, &pt_flat, &obs, &[], &[], &[], &prior_flat, 80, &[], 0,
         );
         let base = n_cam * 12 + n_pts * 3 + n_cam * 7;
         assert!(out[base + 3] < 1e-3,
             "camera-centre priors did not resolve translation: RMS {}", out[base + 3]);
         assert!(out[base + 1] < 1e-3,
             "camera priors spoiled reprojection: {}px", out[base + 1]);
+    }
+
+    // Orientation priors resolve the free global rotation gauge while preserving
+    // exact reprojection: rotate the entire scene coordinate frame, then ask BA
+    // to recover the original camera rotations.
+    #[test]
+    fn bundle_adjust_camera_orientation_priors_constrain_rotations() {
+        let (fx, fy, cx, cy) = (800.0_f64, 800.0_f64, 320.0_f64, 240.0_f64);
+        let gt_cams: Vec<(M3, V3)> = vec![
+            (so3_exp(&[0.0, 0.0, 0.0]), [0.0, 0.0, 6.0]),
+            (so3_exp(&[0.04, -0.08, 0.02]), [0.5, 0.1, 6.1]),
+            (so3_exp(&[-0.06, 0.05, -0.03]), [-0.4, 0.2, 5.9]),
+        ];
+        let gt_pts: Vec<V3> = (-2..=2).flat_map(|ix| (-2..=2).map(move |iy|
+            [ix as f64 * 0.45, iy as f64 * 0.45, 0.15 * ((ix * iy) as f64).cos()]
+        )).collect();
+        let n_cam = gt_cams.len(); let n_pts = gt_pts.len();
+        let mut obs = Vec::new();
+        for (ci, (r, t)) in gt_cams.iter().enumerate() {
+            for (pi, x) in gt_pts.iter().enumerate() {
+                let (u, v) = project_px(r, t, fx, fy, cx, cy, x);
+                obs.extend_from_slice(&[ci as f32, pi as f32, u as f32, v as f32]);
+            }
+        }
+        let q = so3_exp(&[0.14, -0.10, 0.08]);
+        let qt = mat3_transpose(&q);
+        let mut cam_flat = Vec::new(); let mut prior_flat = Vec::new();
+        let mut k_flat = Vec::new();
+        for (ci, (target_r, t)) in gt_cams.iter().enumerate() {
+            let initial_r = mat3_mul(target_r, &qt);
+            for row in &initial_r { for &v in row { cam_flat.push(v as f32); } }
+            for &v in t { cam_flat.push(v as f32); }
+            k_flat.extend_from_slice(&[fx as f32, fy as f32, cx as f32, cy as f32]);
+            let centre = mat3_vec(&mat3_transpose(&initial_r), &[-t[0], -t[1], -t[2]]);
+            prior_flat.extend_from_slice(&[
+                ci as f32, centre[0] as f32, centre[1] as f32, centre[2] as f32,
+                1e-9, 1e-9, 1e-9,
+            ]);
+            for row in target_r { for &v in row { prior_flat.push(v as f32); } }
+            prior_flat.extend_from_slice(&[
+                1e5, 0.0, 0.0, 0.0, 1e5, 0.0, 0.0, 0.0, 1e5,
+            ]);
+        }
+        let mut pt_flat = Vec::new();
+        for p in &gt_pts {
+            let rotated = mat3_vec(&q, p);
+            pt_flat.extend_from_slice(&[rotated[0] as f32, rotated[1] as f32, rotated[2] as f32]);
+        }
+        let out = bundle_adjust(
+            &cam_flat, &k_flat, &pt_flat, &obs, &[], &[], &[], &prior_flat, 80, &[], 0,
+        );
+        let mut angular_sse = 0.0;
+        for (ci, (target_r, _)) in gt_cams.iter().enumerate() {
+            let b = ci * 12;
+            let fitted: M3 = [
+                [out[b] as f64, out[b+1] as f64, out[b+2] as f64],
+                [out[b+3] as f64, out[b+4] as f64, out[b+5] as f64],
+                [out[b+6] as f64, out[b+7] as f64, out[b+8] as f64],
+            ];
+            let e = super::bundle::so3_log(&mat3_mul(&fitted, &mat3_transpose(target_r)));
+            angular_sse += dot3(&e, &e);
+        }
+        let angular_rms = (angular_sse / n_cam as f64).sqrt();
+        let base = n_cam * 12 + n_pts * 3 + n_cam * 7;
+        assert!(angular_rms < 1e-3, "orientation priors left {angular_rms} rad RMS");
+        assert!(out[base + 1] < 1e-3, "orientation priors spoiled reprojection: {}px", out[base + 1]);
     }
 
     // Dense MVS (Poisson prep): compute_depth_map must export per-pixel converged
@@ -582,7 +650,7 @@ mod tests {
         for x in &gt_pts { for &v in x { pt_flat.push(v as f32); } }
 
         // refine_mask 5 = f | k1 (bits 1 and 4).
-        let out = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &obs, &[], &[], &[], 100, &sensor_of_cam, 5);
+        let out = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &obs, &[], &[], &[], &[], 100, &sensor_of_cam, 5);
         let intr_base = n_cam * 12 + n_pts * 3;
         let cost_before = out[intr_base + n_cam * 7];
         let cost_after = out[intr_base + n_cam * 7 + 1];
@@ -642,7 +710,7 @@ mod tests {
         let mut pt_flat: Vec<f32> = Vec::new();
         for x in &gt_pts { for &v in x { pt_flat.push(v as f32); } }
 
-        let out = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &obs, &[], &[], &[], 120, &sensor_of_cam, 13);
+        let out = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &obs, &[], &[], &[], &[], 120, &sensor_of_cam, 13);
         let intr_base = n_cam * 12 + n_pts * 3;
         let cost_after = out[intr_base + n_cam * 7 + 1];
         for c in 0..n_cam {

@@ -59,7 +59,8 @@ const tabs = [
           { id: 'open-image-table',  label: 'Images',  icon: 'table',   needsImages: true },
           { id: 'open-mask-manager', label: 'Masks',   icon: 'mask',    needsImages: true },
           { id: 'open-sensor-table', label: 'Sensors', icon: 'camera',  needsSensors: true },
-          { id: 'open-gcp-table',    label: 'GCPs',    icon: 'map-pin', aerialOnly: true, needsImages: true },
+          { id: 'open-pose-table',   label: 'Camera\nPoses', icon: 'camera-pose', needsPoses: true },
+          { id: 'open-gcp-table',    label: 'GCPs',    icon: 'map-pin', aerialOnly: true },
           { id: 'open-match-list',   label: 'Matches', icon: 'list',    needsMatches: true },
         ],
       },
@@ -87,7 +88,9 @@ const tabs = [
       {
         label: 'Ground Control',
         commands: [
-          { id: 'import-gcps', label: 'GCP\nFile', icon: 'map-pin', aerialOnly: true, needsImages: true },
+          // GCP coordinates and filename-keyed observations are project data. They
+          // can be imported before images and reconcile automatically as images arrive.
+          { id: 'import-gcps', label: 'GCP\nFile', icon: 'map-pin', aerialOnly: true },
         ],
       },
       {
@@ -103,9 +106,9 @@ const tabs = [
         ],
       },
       {
-        label: 'Reconstruction',
+        label: 'Interoperability',
         commands: [
-          { id: 'import-colmap', label: 'COLMAP\nModel', icon: 'cube', needsImages: true },
+          { id: 'import-colmap', label: 'SfM\nProject…', icon: 'cube' },
         ],
       },
     ],
@@ -248,13 +251,14 @@ const tabs = [
     id: 'export',
     label: 'Export',
     groups: [
-      // Group names are deliberately the SAME vocabulary as the Import tab
-      // (Cameras / Reconstruction / Products), so a round trip reads symmetrically.
+      // Keep the same data-oriented vocabulary and pipeline order as Import,
+      // Reconstruct, and Evaluate. Interchange models are reconstruction data;
+      // point clouds and meshes are geometry; DEM/ortho are mapping products.
       {
         label: 'Cameras',
         commands: [
           { id: 'export-cameras', label: 'Camera\nPoses', icon: 'camera-pose', needsPoses: true },
-          { id: 'export-sensors', label: 'Sensors',       icon: 'camera',      needsSensors: true },
+          { id: 'export-sensors', label: 'Calibration',   icon: 'calibration', needsSensors: true },
         ],
       },
       {
@@ -267,9 +271,14 @@ const tabs = [
       {
         label: 'Reconstruction',
         commands: [
-          { id: 'export-cloud',  label: 'Point\nCloud',  icon: 'point-cloud', needsCloud: true },
-          { id: 'export-model',  label: 'Model\nJSON',   icon: 'cube',        needsCloud: true },
-          { id: 'export-colmap', label: 'COLMAP\nModel', icon: 'cube',        needsCloud: true },
+          { id: 'export-model',  label: 'Model\nJSON',   icon: 'cube', needsSparse: true },
+        ],
+      },
+      {
+        label: 'Geometry',
+        commands: [
+          { id: 'export-cloud', label: 'Point\nCloud', icon: 'point-cloud', needsCloud: true },
+          { id: 'export-mesh',  label: 'Mesh',         icon: 'cube',        needsMesh: true },
         ],
       },
       {
@@ -277,7 +286,14 @@ const tabs = [
         commands: [
           { id: 'export-dem',   label: 'DEM',   icon: 'dem',   needsDem: true, aerialOnly: true },
           { id: 'export-ortho', label: 'Ortho', icon: 'ortho', needsOrtho: true, aerialOnly: true },
-          { id: 'export-mesh',  label: 'Mesh',  icon: 'cube',  needsMesh: true },
+        ],
+      },
+      {
+        label: 'Interoperability',
+        commands: [
+          { id: 'export-colmap', label: 'SfM\nProject…', icon: 'cube', needsSparse: true },
+          { id: 'export-undistorted', label: 'Undistorted\nImages…', icon: 'image', needsSparse: true },
+          { id: 'export-tiles3d', label: '3D Tiles…', icon: 'layers', needsCloud: true },
         ],
       },
     ],

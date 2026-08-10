@@ -26,11 +26,16 @@ describe('guessMapping', () => {
 
   it('maps accuracy columns', () => {
     const m = guessMapping(
-      ['image', 'x', 'y', 'z', 'omega', 'phi', 'kappa', 'accuracy', 'angacc'],
-      9,
+      ['image', 'x', 'y', 'z', 'omega', 'phi', 'kappa', 'accuracy', 'angacc',
+        'sigma_x', 'accuracy_y', 'acc_z', 'sigma_omega', 'pitch_accuracy', 'acc_kappa'],
+      15,
       true,
     )
-    expect(m).toMatchObject({ accXYZ: 7, accAngle: 8 })
+    expect(m).toMatchObject({
+      accXYZ: 7, accAngle: 8,
+      accuracyX: 9, accuracyY: 10, accuracyZ: 11,
+      accuracyOmega: 12, accuracyPhi: 13, accuracyKappa: 14,
+    })
   })
 
   it('falls back to positional columns without a header', () => {
@@ -52,7 +57,8 @@ describe('guessMapping', () => {
 describe('buildPoses', () => {
   const mapping = {
     image: 0, x: 1, y: 2, z: 3, omega: 4, phi: 5, kappa: 6,
-    accXYZ: null, accAngle: null,
+    accuracyX: null, accuracyY: null, accuracyZ: null, accXYZ: null,
+    accuracyOmega: null, accuracyPhi: null, accuracyKappa: null, accAngle: null,
   }
 
   it('builds numeric poses from valid rows', () => {
@@ -105,11 +111,20 @@ describe('buildPoses', () => {
   })
 
   it('passes accuracy columns through when mapped', () => {
-    const withAcc = { ...mapping, accXYZ: 7, accAngle: 8 }
+    const withAcc = {
+      ...mapping, accXYZ: 7, accAngle: 8,
+      accuracyX: 9, accuracyY: 10, accuracyZ: 11,
+      accuracyOmega: 12, accuracyPhi: 13, accuracyKappa: 14,
+    }
     const { poses } = buildPoses(
-      [['img', '1', '2', '3', '0', '0', '0', '0.05', '0.5']],
+      [['img', '1', '2', '3', '0', '0', '0', '0.05', '0.5',
+        '0.01', '0.02', '0.03', '0.1', '0.2', '0.3']],
       withAcc,
     )
-    expect(poses[0]).toMatchObject({ accXYZ: 0.05, accAngle: 0.5 })
+    expect(poses[0]).toMatchObject({
+      accXYZ: 0.05, accAngle: 0.5,
+      accuracyX: 0.01, accuracyY: 0.02, accuracyZ: 0.03,
+      accuracyOmega: 0.1, accuracyPhi: 0.2, accuracyKappa: 0.3,
+    })
   })
 })

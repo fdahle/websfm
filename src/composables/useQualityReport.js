@@ -167,10 +167,13 @@ export function useQualityReport() {
         title: 'Control and checkpoint accuracy',
         columns: [
           { key: 'name', label: 'Point' }, { key: 'role', label: 'Role' }, { key: 'views', label: 'Views', align: 'right' },
-          { key: 'dTotal', label: 'Δ total', align: 'right' },
+          { key: 'dTotal', label: 'Δ total', align: 'right' }, { key: 'normalized', label: 'Normalized', align: 'right' },
+          { key: 'loo', label: 'LOO Δ', align: 'right' },
         ],
-        rows: gcpReport.map((g) => ({ name: g.name, role: g.role === 'check' ? 'Check' : 'Control', views: g.viewCount, dTotal: f2(g.dTotal, 3) })),
-        note: `Checkpoints are excluded from fitting and provide independent accuracy; control residuals are fit residuals (${crsUnit.value}).`,
+        rows: gcpReport.map((g) => ({ name: g.name, role: g.role === 'check' ? 'Check' : 'Control', views: g.viewCount,
+          dTotal: f2(g.dTotal, 3), normalized: g.normalized == null ? '—' : `${g.normalized.toFixed(2)}σ`,
+          loo: f2(g.looTotal, 3) })),
+        note: `Checkpoints are independent; leave-one-out (LOO) predicts each control from the others. Normalized residuals use declared covariance (${crsUnit.value}).`,
       })
     }
 

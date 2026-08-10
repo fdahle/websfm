@@ -6,6 +6,7 @@
 
 import { parsePly } from './ply.js'
 import { parseLas } from './las.js'
+import { parseLaz } from './laz.js'
 import { parseXyzText } from './cloudText.js'
 import { prepareCloudForExport } from '../products/exporters.js'
 
@@ -16,12 +17,16 @@ export function sniffCloudFormat(bytes, name = '') {
   const head = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)
   if (head.length >= 4) {
     const magic = String.fromCharCode(head[0], head[1], head[2], head[3])
-    if (magic === 'LASF') return 'las'
+    // A .laz carries the same LASF signature; the LASzip high bit on the point
+    // format (byte 104) is what separates them. Extension is not evidence — LAZ
+    // is regularly shipped named .las.
+    if (magic === 'LASF') return (head.length > 104 && (head[104] & 0x80)) ? 'laz' : 'las'
     if (magic.startsWith('ply') && (head[3] === 0x0a || head[3] === 0x0d)) return 'ply'
   }
   const ext = String(name).split('.').pop()?.toLowerCase()
   if (ext === 'ply') return 'ply'
-  if (ext === 'las' || ext === 'laz') return 'las' // parseLas rejects LAZ with a clear error
+  if (ext === 'laz') return 'laz'
+  if (ext === 'las') return 'las'
   if (ext === 'xyz' || ext === 'pts' || ext === 'txt') return 'text'
   return null
 }
@@ -44,10 +49,13 @@ export function looksLikeXyzText(text, minRows = 2) {
 
 // Dispatch a cloud/mesh file to its parser. Returns the parser's flat shape
 // (cloud { count, pos, col?, nrm? } or mesh { nVerts, count, pos, idx, col? }).
-export function parseCloudFile(buffer, name = '', { onLog } = {}) {
+// `lazDecompress` is the injected LASzip codec (crates/lazcodec via the worker);
+// without it a LAZ file errors rather than being read as garbage.
+export function parseCloudFile(buffer, name = '', { onLog, lazDecompress = null } = {}) {
   const fmt = sniffCloudFormat(buffer, name)
   if (!fmt) throw new Error(`Unrecognized point-cloud format: ${name || '(unnamed file)'}`)
   if (fmt === 'ply') return parsePly(buffer, { onLog })
+  if (fmt === 'laz') return parseLaz(buffer, { decompress: lazDecompress, onLog })
   if (fmt === 'las') return parseLas(buffer, { onLog })
   const text = new TextDecoder().decode(buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer))
   return parseXyzText(text, { onLog })

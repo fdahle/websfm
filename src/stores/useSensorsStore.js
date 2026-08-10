@@ -149,6 +149,39 @@ export const useSensorsStore = defineStore('sensors', () => {
     return added
   }
 
+  // Import externally-id'd camera groups and bind matched images in one pass.
+  // Returns the external-id map so an interop coordinator can report conflicts.
+  async function importCameraGroups(rawSensors, imageBindings = []) {
+    const idByExternal = new Map()
+    for (const raw of rawSensors || []) {
+      const sensor = {
+        id: crypto.randomUUID(), label: raw.label,
+        width: raw.width ?? null, height: raw.height ?? null,
+        focal: raw.focal ?? raw.fx ?? null, focalUnit: 'px',
+        cx: raw.cx ?? null, cy: raw.cy ?? null,
+        k1: raw.k1 ?? null, k2: raw.k2 ?? null, k3: raw.k3 ?? null,
+        p1: raw.p1 ?? null, p2: raw.p2 ?? null,
+        distortionModel: raw.distortionModel ?? inferDistortionModel(raw),
+        pixelSize: null, signature: null, source: raw.source ?? 'imported',
+        // Keep anisotropic focal information for lossless re-export even though
+        // the current sensor editor/solver uses the scalar focal field.
+        externalFx: raw.fx ?? raw.focal ?? null,
+        externalFy: raw.fy ?? raw.focal ?? null,
+      }
+      sensors.value.push(sensor)
+      idByExternal.set(raw.externalId, sensor.id)
+    }
+    for (const binding of imageBindings || []) {
+      const img = images.value.find((i) => i.uuid === binding.uuid)
+      const sensorId = idByExternal.get(binding.cameraId)
+      if (img && sensorId) img.sensorId = sensorId
+    }
+    await save()
+    if (isPersisting()) await imagesStore.sync()
+    log(`Camera calibration imported: ${idByExternal.size} group(s)`, idByExternal.size ? 'success' : 'warn', 'Import')
+    return idByExternal
+  }
+
   // Editable intrinsic fields and their parsing. Blank input clears the field
   // to null; `label` is free text, everything else is numeric.
   const NUMERIC_FIELDS = new Set(['width', 'height', 'focal', 'cx', 'cy', 'k1', 'k2', 'k3', 'p1', 'p2', 'pixelSize', 'sensorWidthMm'])
@@ -313,6 +346,7 @@ export const useSensorsStore = defineStore('sensors', () => {
     imageCount,
     ensureExifSensors,
     addSensors,
+    importCameraGroups,
     updateSensor,
     toggleSensorFixed,
     setFiducialMarks,

@@ -1,0 +1,19 @@
+[package]
+name = "lazcodec"
+version = "0.1.0"
+edition = "2021"
+description = "LASzip (LAZ) compression/decompression compiled to WebAssembly"
+license = "MIT OR Apache-2.0"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+# Isolated like `crates/mesh` and `crates/imagecodec`: this crate is allowed a
+# dependency (`laz`, the pure-Rust LASzip port) that must NOT leak into
+# `crates/reconstruction`. There is no credible pure-JS LAZ *writer*, and LAZ is
+# what surveying/GIS consumers (CloudCompare, QGIS, ArcGIS) expect instead of a
+# 5–10× larger LAS. Threadless by construction — `laz`'s default features pull no
+# rayon (see the `default-features = false` note below).
+[dependencies]
+wasm-bindgen = "0.2"
+laz = { version = "0.12", default-features = false }

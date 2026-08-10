@@ -20,6 +20,7 @@ export const useModalsStore = defineStore('modals', () => {
   const detectFeaturesOpen  = ref(false)
   const matchFeaturesOpen   = ref(false)
   const imageTableOpen      = ref(false)
+  const poseTableOpen       = ref(false)
   const maskManagerOpen     = ref(false)
   const autoMaskOpen        = ref(false)
   const sensorTableOpen     = ref(false)
@@ -49,6 +50,11 @@ export const useModalsStore = defineStore('modals', () => {
   const cameraImportText    = ref('')
   const cameraImportName    = ref('')
   const cameraImportMode    = ref('pose') // sniffed default: 'sensor' | 'pose'
+  // Did the USER state what this file is (a Ribbon ▸ Import command, or the
+  // "what is this file?" chooser), or did we sniff it (drag-and-drop)? The two
+  // tabular import modals ask their "Import as" question prominently only in
+  // the sniffed case; a declared kind gets a one-line correction link instead.
+  const importKindDeclared  = ref(false)
   const importKindOpen      = ref(false)  // "what is this dropped file?" chooser
   const importKindFile      = ref(null)   // the File awaiting a kind choice, or null
   const importCloudOpen     = ref(false)  // point-cloud / mesh import settings
@@ -87,6 +93,7 @@ export const useModalsStore = defineStore('modals', () => {
     detectFeaturesOpen,
     matchFeaturesOpen,
     imageTableOpen,
+    poseTableOpen,
     maskManagerOpen,
     autoMaskOpen,
     sensorTableOpen,
@@ -115,6 +122,7 @@ export const useModalsStore = defineStore('modals', () => {
     cameraImportText,
     cameraImportName,
     cameraImportMode,
+    importKindDeclared,
     importKindOpen,
     importKindFile,
     importCloudOpen,

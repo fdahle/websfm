@@ -38,12 +38,36 @@ export function distortComposed(u, v, Kw, dist, selfCal) {
 //   selfCal  — composed self-calibration bag from summary.selfCalDistortion (or null)
 //   fiducial — { A, frame } from summary.fiducialTransforms for this image (or null)
 export function makeCanonicalToScan({ K, dist = null, selfCal = null, fiducial = null } = {}) {
+  return makeSampleMap({ K, dist, selfCal, fiducial })
+}
+
+// The same chain, but between two *scaled* grids — the form a resampler needs.
+// `outScale` is the resolution of the (u,v) grid relative to K's own frame,
+// `srcScale` the resolution of the source raster relative to the scan frame; both
+// default to 1, which recovers makeCanonicalToScan exactly.
+//
+// Scaling the grid rather than K is safe and is why only one primitive is needed:
+// distortPixel normalizes by K, so distortComposed(u, v, scaleK(K, s)) is
+// identically s·distortComposed(u/s, v/s, K) — the normalized coordinates are the
+// same number either way.
+//
+// Returns **null** when the whole chain is the identity (no bags, no fiducial, both
+// scales 1); callers treat null as "no work to do", which is the common
+// EXIF-only digital case.
+export function makeSampleMap({
+  K, dist = null, selfCal = null, fiducial = null, outScale = 1, srcScale = 1,
+} = {}) {
   const needsDist = !!K && (hasDistortion(dist) || hasDistortion(selfCal))
-  if (!needsDist && !fiducial) return null
+  const needsScale = outScale !== 1 || srcScale !== 1
+  if (!needsDist && !fiducial && !needsScale) return null
   return (u, v) => {
-    let x = u, y = v
+    // Into K's own (full-resolution canonical) frame.
+    let x = outScale === 1 ? u : u / outScale
+    let y = outScale === 1 ? v : v / outScale
     if (needsDist) { const d = distortComposed(x, y, K, dist, selfCal); x = d.x; y = d.y }
     if (fiducial) { const s = canonicalToScan(x, y, fiducial.transform ?? fiducial.A, fiducial.frame); x = s.x; y = s.y }
+    // Into the source raster's grid.
+    if (srcScale !== 1) { x *= srcScale; y *= srcScale }
     return { x, y }
   }
 }

@@ -93,6 +93,11 @@ describe('guessMapping', () => {
     expect(m).toMatchObject({ name: 0, x: 1, y: 2, z: 3 })
   })
 
+  it('recognises common per-axis accuracy headers', () => {
+    const m = guessMapping(['name', 'x', 'y', 'z', 'sigma_x', 'accY', 'accuracyZ'], 7, true)
+    expect(m).toMatchObject({ accuracyX: 4, accuracyY: 5, accuracyZ: 6 })
+  })
+
   it('maps image observation columns only from the header', () => {
     const m = guessMapping(['id', 'x', 'y', 'z', 'image', 'col', 'row'], 7, true)
     expect(m).toMatchObject({ image: 4, px: 5, py: 6 })
@@ -129,8 +134,12 @@ describe('buildGcps', () => {
     )
     expect(skipped).toBe(0)
     expect(gcps).toEqual([
-      { name: 'A', role: 'control', x: 10.5, y: 20.5, z: 5, observations: [] },
-      { name: 'B', role: 'control', x: 1, y: 2, z: 3, observations: [] },
+      { name: 'A', role: 'control', x: 10.5, y: 20.5, z: 5,
+        accuracyX: null, accuracyY: null, accuracyZ: null,
+        correlationXY: null, correlationXZ: null, correlationYZ: null, observations: [] },
+      { name: 'B', role: 'control', x: 1, y: 2, z: 3,
+        accuracyX: null, accuracyY: null, accuracyZ: null,
+        correlationXY: null, correlationXZ: null, correlationYZ: null, observations: [] },
     ])
   })
 
@@ -166,8 +175,8 @@ describe('buildGcps', () => {
     expect(gcps).toHaveLength(1)
     expect(gcps[0]).toMatchObject({ name: 'A', x: 1, y: 2, z: 3 })
     expect(gcps[0].observations).toEqual([
-      { imageName: 'img1.jpg', px: 100, py: 200 },
-      { imageName: 'img2.jpg', px: 110, py: 210 },
+      { imageName: 'img1.jpg', px: 100, py: 200, accuracyX: null, accuracyY: null },
+      { imageName: 'img2.jpg', px: 110, py: 210, accuracyX: null, accuracyY: null },
     ])
   })
 
@@ -188,6 +197,16 @@ describe('buildGcps', () => {
       ['B', '4', '5', '6', 'gcp'],
     ], withRole)
     expect(gcps.map((g) => [g.name, g.role])).toEqual([['A', 'check'], ['B', 'control']])
+  })
+
+  it('maps positive per-axis accuracy and ignores invalid values', () => {
+    const withAccuracy = { ...mapping, accuracyX: 4, accuracyY: 5, accuracyZ: 6 }
+    const { gcps } = buildGcps([
+      ['A', '1', '2', '3', '0.02', '0.03', '0.05'],
+      ['B', '4', '5', '6', '0', '-1', 'nope'],
+    ], withAccuracy)
+    expect(gcps[0]).toMatchObject({ accuracyX: 0.02, accuracyY: 0.03, accuracyZ: 0.05 })
+    expect(gcps[1]).toMatchObject({ accuracyX: null, accuracyY: null, accuracyZ: null })
   })
 
   it('drops an observation with a non-numeric pixel coordinate', () => {

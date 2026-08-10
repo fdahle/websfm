@@ -203,6 +203,48 @@ fiducials; self-calibration (A2) + fiducials (F4) are the code-side support.
 
 ## Done log (most recent first)
 
+- **2026-08-07 · Product-side interoperability: undistorted images, COG, LAZ, 3D Tiles.**
+  Four independent formats from `docs/planning/plan-interop-formats.md`, in that
+  order.
+  **Undistorted images** (ribbon: Export ▸ Interoperability ▸ Undistorted Images…)
+  write a COLMAP `image_undistorter`-shaped workspace — `images/` + `sparse/*.bin`
+  with PINHOLE cameras — for OpenMVS/MVE/MVS-Texturing. No new geometry was
+  written: the composed map already used by dense MVS was generalized to
+  `core/sfm/displayFrame.js` `makeSampleMap` (scaled output/source grids) and the
+  resampling extracted to the new pure `core/products/undistort.js`; **dense now
+  imports both**, so there is one composition, not two. Crop mode reproduces
+  `blank_pixels=0` via `validSampleRect`.
+  **Cloud-Optimized GeoTIFF** for DEM + ortho. `writeCog` was split into
+  `planCog`/`assembleCog` so per-tile DEFLATE can go through the injected async
+  callback (`writeCogDeflate`); a GDAL ghost area makes readers report LAYOUT=COG.
+  **LAZ** export + import via the new `crates/lazcodec` (the `laz` crate, Apache-2.0,
+  recorded in `core/help/licenses.js`); `core/io/las.js` was split into shareable
+  header/record halves and `core/io/laz.js` holds the container rules with the
+  codec injected. LAZ *import* falls out — `parseLas`'s hard rejection is gone and
+  the sniff reads the LASzip high bit, not the extension.
+  **3D Tiles 1.1** (`core/products/tiles3d.js`): single-tile `tileset.json` + a
+  points `.glb`. The ECEF placement is measured from probe points one project-CRS
+  unit east/north rather than assuming grid axes are ENU — the shortcut that fails
+  near the poles.
+  1,285 tests (+39), typecheck, SFC `_ctx` diff and production build pass; four
+  Rust tests in `lazcodec` incl. a 200k-point multi-chunk round trip.
+  **Owed: browser + external-application verification** — nothing here has been
+  opened in COLMAP, OpenMVS, gdalinfo, CloudCompare, QGIS or Cesium from this
+  environment. See the plan doc's per-item checklist.
+
+- **2026-08-06 · F7 expanded into the SfM interoperability hub.** Import and Export
+  now end with an **Interoperability** group and one **SfM Project…** action. The
+  staged import modal accepts complete COLMAP folders/ZIPs, `database.db`, sparse
+  text/binary models, optional images, transforms.json, OpenMVG JSON, VisualSFM NVM,
+  and OpenSfM reconstruction JSON. An official SQLite/WASM worker inspects and reads
+  COLMAP cameras, keypoints, compatible descriptors, raw/verified pairs and F/E/H;
+  selected data commits through bulk store APIs. Export adds `database.db`, a complete
+  database+sparse+optional-images workspace, transforms.json, OpenMVG, and NVM while
+  retaining sparse text/binary ZIPs. ZIP image payloads remain compressed during
+  inspection. Pure convention/blob adapters are unit-tested; full suite 1,227 tests,
+  typecheck, SFC compilation, and production build pass. Still owed: real COLMAP GUI
+  round-trip and large-workspace browser memory/cancellation verification.
+
 - **2026-08-05 · F10 shipped · EXIF-GPS camera priors and automatic proximity matching.**
   `usePosesStore` materializes EXIF longitude/latitude/altitude as enabled project-CRS
   poses, preserves canonical metre altitude/accuracy across CRS changes, and lets an
@@ -214,8 +256,13 @@ fiducials; self-calibration (A2) + fiducials (F4) are the code-side support.
   residuals behind a reprojection-damage guard. Missing EXIF accuracy uses conservative
   10 m horizontal / 20 m vertical defaults; non-metre projected CRSs receive converted
   Z and σ values. Imported poses, XY-only fixes, disabled records, and geographic-CRS BA
-  boundaries are integration-tested. Yaw/pitch/roll and richer vendor per-axis GNSS
-  accuracy remain follow-ups, not part of F10.
+  boundaries are integration-tested. **2026-08-05 follow-up:** XMP extraction now
+  consumes complete DJI-compatible camera-gimbal yaw/pitch/roll (never airframe-only
+  attitude), converts drone −90°-nadir angles to OPK, and rotates true-north attitude
+  into project grid north. Vendor per-axis GNSS/RTK sigmas, including DJI
+  `RtkStdLon`/`RtkStdLat`/`RtkStdHgt`, are preserved in ENU, rotated into project X/Y,
+  and passed to the existing weighted position priors. Canonical ENU values make CRS
+  changes lossless; missing angular accuracy uses a conservative 5° default.
 
 - **2026-07-31 · U3 · Recommended settings are now an explicit modal action.**
   `useDatasetRecommendations` reactively profiles the current image/sensor/pose/GCP

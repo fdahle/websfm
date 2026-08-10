@@ -277,5 +277,11 @@ export function usePipeline({ images, detectAll, matchAll, reconstruct, computeD
     runGenerateOrtho,
     runGenerateMesh,
     runEditClouds,
+    // The progress contract itself, for a long-running job that is not a pipeline
+    // stage — undistorted-image export is minutes of work and must not run behind
+    // a frozen UI with no bar. Exposed rather than reimplemented so there stays
+    // exactly one place that clamps the fraction monotonically and lands on 100%
+    // once (see ProgressModal's 99% cap).
+    progress: { open: openProgress, report, close: closeProgress, aborted },
   }
 }

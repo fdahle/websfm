@@ -298,3 +298,25 @@ export function restyleRasterPreview(buffer, name, style, { onLog } = {}) {
     onEvent: onLog ? (ev, a) => { if (ev === 'log') onLog(...a) } : undefined,
   })
 }
+
+// Undistorted-image export — resample one image into the pinhole frame the sparse
+// model lives in, off the main thread. One image per call so peak memory is one
+// image, not the batch (a 100 MP scan is ~400 MB as RGBA). Resolves to
+// { bytes, width, height, K, rect, mime }; `bytes` is transferred back.
+export function undistortImage(args, { onLog } = {}) {
+  return call('undistortImage', [args], {
+    onEvent: onLog ? (ev, a) => { if (ev === 'log') onLog(...a) } : undefined,
+  })
+}
+
+// LAZ export — LASzip compression off the main thread (a 30 M-point cloud is
+// ~780 MB of point records). The cloud buffers are transferred in and round-
+// tripped home under `home`, so the caller's cloud is never left detached.
+export function exportLazCloud(cloud, { crsCode = null, geographic = false, onLog } = {}) {
+  const transfer = [cloud.pos.buffer]
+  if (cloud.col) transfer.push(cloud.col.buffer)
+  return call('exportLaz', [{ cloud, crsCode, geographic }], {
+    transfer,
+    onEvent: onLog ? (ev, a) => { if (ev === 'log') onLog(...a) } : undefined,
+  })
+}

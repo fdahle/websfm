@@ -77,6 +77,7 @@ export const THIRD_PARTY = [
       { name: 'marked-katex-extension', version: '5.1.10',  license: 'MIT',          url: 'https://github.com/UziTech/marked-katex-extension' },
       { name: 'exifr',                  version: '7.1.3',   license: 'MIT',          url: 'https://github.com/MikeKovarik/exifr' },
       { name: 'fflate',                 version: '0.8.3',   license: 'MIT',          url: 'https://github.com/101arrowz/fflate' },
+      { name: 'SQLite Wasm',            version: '3.53.0',  license: 'Apache-2.0',   url: 'https://github.com/sqlite/sqlite-wasm' },
     ],
   },
   {
@@ -88,6 +89,12 @@ export const THIRD_PARTY = [
       { name: 'poisson_reconstruction',  version: '0.4.0',   license: 'MIT OR Apache-2.0', url: 'https://github.com/dimforge/poisson_reconstruction',
         notice: 'Vendored under crates/mesh/vendor/ (rayon stripped for threadless WASM, ' +
           'with a marching-cubes iso patch).' },
+      { name: 'laz',                     version: '0.12.2',  license: 'Apache-2.0',        url: 'https://github.com/laz-rs/laz-rs',
+        notice: 'Rust port of LASzip, compiled into crates/lazcodec for LAZ point-cloud ' +
+          'compression. Licensed under the Apache License, Version 2.0; a copy is at ' +
+          'https://www.apache.org/licenses/LICENSE-2.0' },
+      { name: 'byteorder',               version: '1.5.0',   license: 'Unlicense OR MIT',  url: 'https://github.com/BurntSushi/byteorder' },
+      { name: 'num-traits',              version: '0.2.19',  license: 'MIT OR Apache-2.0', url: 'https://github.com/rust-num/num-traits' },
     ],
   },
   {

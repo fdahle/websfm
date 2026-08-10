@@ -22,6 +22,8 @@ import { makeCloudOps } from './ops/cloud.js'
 import { makeTiffOps } from './ops/tiff.js'
 import { makeSegmentOps } from './ops/segment.js'
 import { makeIoOps } from './ops/io.js'
+import { makeUndistortOps } from './ops/undistort.js'
+import { makeLazCodec, makeLazOps } from './ops/laz.js'
 
 // Decode an image URL (blob: URLs work in a worker) and draw it into an
 // OffscreenCanvas, downscaled so the longest side is ≤ maxDim. Returns RGBA
@@ -44,6 +46,9 @@ async function rasterize(url, maxDim) {
 
 // Merge every domain's op registry. rasterize is the only worker-local helper the
 // ops need; the rest of each domain's helpers live in its own module.
+// One LAZ codec instance, shared by the import parser and the export op.
+const lazCodec = makeLazCodec()
+
 const ops = {
   ...makeDetectOps({ rasterize }),
   ...makeMatchOps(),
@@ -54,7 +59,9 @@ const ops = {
   ...makeCloudOps(),
   ...makeTiffOps(),
   ...makeSegmentOps({ rasterize }),
-  ...makeIoOps(),
+  ...makeIoOps({ lazCodec }),
+  ...makeLazOps(lazCodec),
+  ...makeUndistortOps({ rasterize }),
 }
 
 self.onmessage = async (e) => {

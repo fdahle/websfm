@@ -744,35 +744,12 @@ densify→mesh, rendering, restore, or open the exports). *Optional follow-ups (
 required):* orthophoto-textured 2.5D DEM mesh for aerial (cheaper, drapes the true
 ortho); meshoptimizer decimation (Phase 6, parked); a UV-textured export.
 
-### F7 — COLMAP model import/export (ecosystem interop) **[new 2026-07-07]**
-Read/write COLMAP's sparse-model format (`cameras.txt/images.txt/points3D.txt`
-+ the `.bin` variants — well documented, stable). Pure core
-(`core/io/colmapModel.js` — R↔quaternion, text serialize/parse, websfm↔ColmapModel
-adapters) + a dependency-free `utils/zip.js` **shipped & unit-tested** (2026-07-10).
-**Export shipped**: Ribbon *Export ▸ Interop ▸ COLMAP Model* → zipped `.txt`
-model (PINHOLE per image, local SfM frame). The 2D observations are exported in
-the **BA (pinhole) frame** — the sparse run bakes each view's undistorted /
-fiducial-canonical / self-cal-folded pixel into the cloud (`viewsPx`, persisted as
-`recon.*.vx/vy.bin`), so distortion / film-scan / self-cal projects export
-observations coherent with the exported K/R/t (B2 fix, 2026-07-10). Remaining:
-- **Import (text)** — ✅ shipped 2026-07-10 (see HANDOVER): `colmapToSparse` +
-  `makeNameResolver` (colmapModel.js), `unzipStore` (zip.js), `isColmapFile`
-  sniffing, `useReconstructionStore.importColmapModel`, Ribbon *Import ▸ Interop ▸
-  COLMAP Model* + multi-file/zip picker (`useImportRouting.openColmapImport`). Adds a
-  new sparse cloud via MC (never replaces). **Browser run still owed** — see below.
-- **`.bin` variants** — ✅ shipped (PLAN-import-export Phase 3): LE-binary
-  `serializeColmapModelBin`/`parseColmapModelBin` share the ColmapModel struct;
-  export modal `bin` format (zipped `.bin`), import routes `.bin` keys through the
-  binary parser. Txt↔bin equivalence unit-tested.
-- **Browser manual run (owed verification)** — (a) export a real sparse model, open
-  the zip in COLMAP / another importer; confirm cameras + points land with low
-  reprojection error. Specifically exercise a **film-scan** and a **self-cal** (`f,k1`)
-  project now that observations export in the BA frame (B2) — the round-trip the unit
-  tests can't cover. (b) **Import** the same zip back (or a COLMAP model from
-  elsewhere) into a project with the matching images loaded: confirm the new
-  "Imported (COLMAP)" sparse cloud appears alongside the computed one, name-matching
-  hits the loaded images, and it can be set main → dense/DEM run off it. Best
-  end-to-end check: export→import round-trip lands cameras in ~the same frame.
+### F7 — SfM interoperability hub — **SHIPPED 2026-08-06**
+Complete COLMAP database/workspace import-export plus transforms.json, OpenMVG,
+VisualSFM NVM, and OpenSfM import is recorded in HANDOVER. **Owed verification:**
+open a real exported database/workspace in COLMAP, run mapper, re-import it, and
+exercise a large compressed folder/ZIP in Chromium, Firefox, and Safari. Include a
+film-scan and self-calibrated project to verify BA-frame observations end to end.
 
 ### F8 — Processing report **[shipped 2026-07-17 via Quality Report hub WS6]**
 Self-contained HTML report (print-to-PDF; no new deps) shipped as `core/products/
@@ -867,11 +844,38 @@ cloud export with georef/voxel-downsample options; PLY/LAS/XYZ cloud & mesh
 **import** (off-thread parse → `importCloud`); COLMAP `.bin` (F7); OBJ/STL mesh
 export; nerfstudio/3DGS `transforms.json` export; GeoTIFF DEFLATE, hillshade
 PNG, JPEG ortho, real WKT `.prj` (WGS84 geographic + UTM zones, else proj4
-fallback). **Still parked**: Bundler/NVM import (Phase 5b, optional — skipped as
-time-boxed), LAZ (Phase 7 stretch — needs a WASM codec crate), GeoTIFF tiling
-for very large rasters, undistorted-image export (COLMAP `image_undistorter`
-parity). **Owed: in-browser verification** — headless can't open the exports;
-see the per-phase manual-check list in HANDOVER.
+fallback). **LAZ, GeoTIFF tiling (COG), undistorted-image export and single-tile
+Cesium 3D Tiles shipped 2026-08-07** — see HANDOVER and
+`docs/planning/plan-interop-formats.md`. **Still parked**: Bundler/NVM import
+(Phase 5b, optional — skipped as time-boxed). **Owed: in-browser + external-
+application verification** — headless can't open the exports; see the per-phase
+manual-check list in HANDOVER and the per-item checklist in the interop-formats
+plan.
+
+### Remaining interoperability (from `docs/planning/plan-interop-formats.md`)
+Deliberately not started, with the reasons, so they aren't re-litigated:
+- **Mesh texturing** — reframed as a *pipeline* feature, not an export format.
+  `meshToObj` already writes per-vertex colour; adding OBJ+MTL is an afternoon,
+  but there is **no texture to reference**: no UV atlas, no bake. The real work is
+  (1) a UV atlas (xatlas as an isolated WASM crate, same precedent as
+  `crates/mesh`), (2) visibility-based view selection + seam blending, reusing the
+  depth maps as the z-buffer exactly as `core/products/ortho.js` does. Textured
+  OBJ+MTL, textured glTF and a textured 3D Tiles payload all fall out afterwards.
+  File under Products when picked up, not Interoperability.
+- **3D Tiles LOD** — the shipped exporter writes one tile, which covers "put my
+  model on a globe". A quadtree with per-tile decimation needs a mesh simplifier
+  websfm does not have. Gate on someone actually streaming a websfm product into
+  Cesium and hitting the limit.
+- **E57** — declined for now. The container is XML over paged binary sections with
+  a CRC-32 per 1024-byte page and bitpacked `CompressedVector` fields: weeks of
+  work with no browser-targetable library, and **LAZ now reaches the same
+  software** (CloudCompare, QGIS, ArcGIS, Cyclone, Faro). Its distinctive value —
+  multi-scan poses and embedded panoramas — is a terrestrial-laser-scanning
+  concern, not an aerial one. Revisit only on a request naming the receiving
+  application, and **read** support first.
+- **Compress imported reference rasters.** Now free: the `planCog`/`assembleCog`
+  split means `useExternalStore`'s import path can DEFLATE its tiles too, so a
+  large REMA tile stops costing its full uncompressed size in OPFS.
 
 ### Products follow-ups
 Real-world map-viewer overlay for the ortho; ortho GPU/WASM kernel if per-cell
@@ -968,8 +972,9 @@ JS proves slow on large grids; optional manual "Flip Z" for object scenes.
   `RasterSource` accessor boundary (`core/io/rasterSource.js`), which exists so
   a lazy source lands as a second implementation rather than a rewrite of every
   call site. So: introduce the equivalent `CloudSource` boundary first, then a
-  COPC implementation behind it. Note this also means accepting LAZ, which
-  `core/io/las.js` rejects today on purpose. Gate on someone actually hitting
+  COPC implementation behind it. LAZ is no longer a blocker for this —
+  `crates/lazcodec` + `core/io/laz.js` read and write it as of 2026-08-07, so
+  COPC is now only the octree/LOD layer on top. Gate on someone actually hitting
   the wall with a real reference cloud.
 - **Video import** (extract frames at interval/overlap heuristic) — cheap via
   `<video>` + canvas; opens the largest casual-user funnel.

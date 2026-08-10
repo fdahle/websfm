@@ -70,7 +70,7 @@ export function fitSimilarity(pairs) {
   ]
   const q = topEigenvector(N)
   if (!q) return null
-  const R = quatToMatrix(q)
+  let R = quatToMatrix(q)
 
   // Scale s = Σ dst'·(R·src') / Σ|src'|² (least-squares, given R).
   let num = 0
@@ -82,7 +82,7 @@ export function fitSimilarity(pairs) {
     ]
     num += weights[k] * dot(b[k], Ra)
   }
-  const scale = num / srcVar
+  let scale = num / srcVar
   if (!(scale > 0) || !isFinite(scale)) return null
 
   // t = centroid_dst − s·R·centroid_src.
@@ -91,7 +91,15 @@ export function fitSimilarity(pairs) {
     R[1][0] * cs[0] + R[1][1] * cs[1] + R[1][2] * cs[2],
     R[2][0] * cs[0] + R[2][1] * cs[1] + R[2][2] * cs[2],
   ]
-  const t = [cd[0] - scale * Rcs[0], cd[1] - scale * Rcs[1], cd[2] - scale * Rcs[2]]
+  let t = [cd[0] - scale * Rcs[0], cd[1] - scale * Rcs[1], cd[2] - scale * Rcs[2]]
+
+  // Horn supports one scalar weight per correspondence. When callers provide a
+  // full precision matrix, use Horn only as the stable closed-form seed and
+  // refine all seven similarity parameters under the anisotropic objective.
+  if (pairs.some((p) => validM3(p.precision))) {
+    const refined = refineAnisotropicSimilarity(pairs, { scale, R, t })
+    if (refined) ({ scale, R, t } = refined)
+  }
 
   // Residual RMS in CRS units.
   let sse = 0
@@ -102,6 +110,92 @@ export function fitSimilarity(pairs) {
   }
   return { scale, R, t, rms: Math.sqrt(sse / weightSum), count: n }
 }
+
+const validM3 = (m) => Array.isArray(m) && m.length === 3
+  && m.every((row) => Array.isArray(row) && row.length === 3 && row.every(Number.isFinite))
+
+function solveLinear(A, b) {
+  const n = b.length
+  const M = A.map((row, i) => [...row, b[i]])
+  for (let c = 0; c < n; c++) {
+    let piv = c
+    for (let r = c + 1; r < n; r++) if (Math.abs(M[r][c]) > Math.abs(M[piv][c])) piv = r
+    if (!(Math.abs(M[piv][c]) > 1e-20)) return null
+    ;[M[c], M[piv]] = [M[piv], M[c]]
+    for (let r = c + 1; r < n; r++) {
+      const f = M[r][c] / M[c][c]
+      for (let k = c; k <= n; k++) M[r][k] -= f * M[c][k]
+    }
+  }
+  const x = Array(n).fill(0)
+  for (let r = n - 1; r >= 0; r--) {
+    let v = M[r][n]
+    for (let k = r + 1; k < n; k++) v -= M[r][k] * x[k]
+    x[r] = v / M[r][r]
+  }
+  return x.every(Number.isFinite) ? x : null
+}
+
+const mul3 = (A, B) => A.map((row) => B[0].map((_, j) =>
+  row.reduce((sum, value, k) => sum + value * B[k][j], 0)))
+const skew3 = ([x,y,z]) => [[0,-z,y],[z,0,-x],[-y,x,0]]
+const so3 = (w) => {
+  const a = Math.hypot(...w)
+  if (a < 1e-12) {
+    const K = skew3(w)
+    return [[1+K[0][0],K[0][1],K[0][2]],[K[1][0],1+K[1][1],K[1][2]],[K[2][0],K[2][1],1+K[2][2]]]
+  }
+  const u = w.map((v) => v/a), K = skew3(u), c=Math.cos(a), s=Math.sin(a), q=1-c
+  return [
+    [c+u[0]*u[0]*q, u[0]*u[1]*q-u[2]*s, u[0]*u[2]*q+u[1]*s],
+    [u[1]*u[0]*q+u[2]*s, c+u[1]*u[1]*q, u[1]*u[2]*q-u[0]*s],
+    [u[2]*u[0]*q-u[1]*s, u[2]*u[1]*q+u[0]*s, c+u[2]*u[2]*q],
+  ]
+}
+
+function refineAnisotropicSimilarity(pairs, seed) {
+  let state = { scale: seed.scale, R: seed.R.map((r) => r.slice()), t: seed.t.slice() }
+  const precisionOf = (p) => validM3(p.precision) ? p.precision
+    : [[p.weight ?? 1,0,0],[0,p.weight ?? 1,0],[0,0,p.weight ?? 1]]
+  const evaluate = (s) => pairs.reduce((sum, pair) => {
+    const r = sub(applySimilarity(s, pair.src), pair.dst), P = precisionOf(pair)
+    const pr = P.map((row) => dot(row, r))
+    return sum + dot(r, pr)
+  }, 0)
+  let cost = evaluate(state)
+  for (let iter = 0; iter < 15; iter++) {
+    const H = Array.from({length:7}, () => Array(7).fill(0)), g = Array(7).fill(0)
+    for (const pair of pairs) {
+      const v = matVec3(state.R, pair.src), sv = v.map((x) => state.scale*x)
+      const pred = sv.map((x,i) => x + state.t[i]), r = sub(pred, pair.dst), P = precisionOf(pair)
+      const S = skew3(sv)
+      const J = Array.from({length:3}, (_, row) => [
+        -S[row][0], -S[row][1], -S[row][2], sv[row],
+        row === 0 ? 1 : 0, row === 1 ? 1 : 0, row === 2 ? 1 : 0,
+      ])
+      for (let a=0;a<7;a++) for (let axis=0;axis<3;axis++) {
+        const pir = P[axis][0]*r[0]+P[axis][1]*r[1]+P[axis][2]*r[2]
+        g[a] += J[axis][a]*pir
+        for (let b=0;b<7;b++) for (let k=0;k<3;k++) H[a][b] += J[axis][a]*P[axis][k]*J[k][b]
+      }
+    }
+    for (let i=0;i<7;i++) H[i][i] += 1e-10 * Math.max(1, H[i][i])
+    const step = solveLinear(H, g.map((v) => -v))
+    if (!step) break
+    const candidate = {
+      R: mul3(so3(step.slice(0,3)), state.R),
+      scale: state.scale * Math.exp(step[3]),
+      t: state.t.map((v,i) => v + step[4+i]),
+    }
+    const next = evaluate(candidate)
+    if (!(next < cost)) break
+    state = candidate; cost = next
+    if (Math.hypot(...step) < 1e-10) break
+  }
+  return state
+}
+
+const matVec3 = (m, v) => m.map((row) => dot(row, v))
 
 const finiteVec3 = (v) => Array.isArray(v) && v.length >= 3
   && Number.isFinite(v[0]) && Number.isFinite(v[1]) && Number.isFinite(v[2])

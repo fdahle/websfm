@@ -4,6 +4,7 @@ import CrsPicker from '../controls/CrsPicker.vue'
 import { DELIMITER_OPTIONS, sniffDelimiter, parseRows } from '../../core/io/gcp.js'
 import { SENSOR_ROLES, SENSOR_ROLE_LABELS, guessMapping as guessSensors, buildSensors } from '../../core/io/sensor.js'
 import { POSE_ROLES, POSE_ROLE_LABELS, guessMapping as guessPoses, buildPoses } from '../../core/io/pose.js'
+import { roleSelectStyle } from './ui/importRoles.js'
 
 // Imports camera parameters from delimited text in one of two modes:
 //   - 'sensor' : shared intrinsics (one row per sensor) — no CRS
@@ -14,6 +15,13 @@ const props = defineProps({
   fileName:     { type: String, default: 'camera file' },
   projectCrs:   { type: String, default: 'EPSG:4326' },
   detectedMode: { type: String, default: 'pose' },
+  // The user already said what this file is (a Ribbon ▸ Import command, or the
+  // kind chooser) — `detectedMode` is their answer, not a sniff. Then asking
+  // "Import as" up front re-asks a question they just answered, so the choice
+  // shrinks to a one-line correction link. It never disappears: the declaration
+  // can still be wrong (wrong button, wrong file), and the modal is the only
+  // place that mistake is visible.
+  kindDeclared: { type: Boolean, default: false },
 })
 const emit = defineEmits(['close', 'import', 'switch-kind'])
 
@@ -109,12 +117,22 @@ function doImport() {
       <div class="modal-body">
         <div class="filename">{{ fileName }}</div>
 
-        <label class="section-label kind-label">Import as</label>
-        <div class="kind-toggle">
-          <button class="kind-btn" @click="switchKind('gcp')">Ground Control Points</button>
-          <button class="kind-btn" :class="{ active: mode === 'pose' }" @click="mode = 'pose'">Camera Positions</button>
-          <button class="kind-btn" :class="{ active: mode === 'sensor' }" @click="mode = 'sensor'">Camera Intrinsics</button>
-        </div>
+        <template v-if="!kindDeclared">
+          <label class="section-label kind-label">Import as</label>
+          <div class="kind-toggle">
+            <button class="kind-btn" @click="switchKind('gcp')">Ground Control Points</button>
+            <button class="kind-btn" :class="{ active: mode === 'pose' }" @click="mode = 'pose'">Camera Positions</button>
+            <button class="kind-btn" :class="{ active: mode === 'sensor' }" @click="mode = 'sensor'">Camera Intrinsics</button>
+          </div>
+        </template>
+        <p v-else class="kind-note">
+          Importing as <b>{{ mode === 'sensor' ? 'Camera Intrinsics' : 'Camera Positions' }}</b>.
+          Not right? Import as
+          <button class="kind-link" @click="mode = mode === 'sensor' ? 'pose' : 'sensor'">
+            {{ mode === 'sensor' ? 'Camera Positions' : 'Camera Intrinsics' }}
+          </button>
+          or <button class="kind-link" @click="switchKind('gcp')">Ground Control Points</button>.
+        </p>
 
         <div class="controls">
           <div class="ctrl">
@@ -134,6 +152,10 @@ function doImport() {
         </div>
 
         <label class="section-label">Column mapping</label>
+        <p v-if="mode === 'pose'" class="kind-note">
+          Accuracies are 1σ values. Position accuracies constrain reconstruction;
+          orientation accuracies constrain omega, phi and kappa.
+        </p>
         <div class="table-wrap">
           <table class="preview">
             <thead>
@@ -141,6 +163,7 @@ function doImport() {
                 <th v-for="i in columnCount" :key="'r' + i" class="role-cell">
                   <select
                     class="role-select"
+                    :style="roleSelectStyle(columnRoles[i - 1] || 'ignore', roleOptions)"
                     :value="columnRoles[i - 1] || 'ignore'"
                     @change="setRole(i - 1, $event.target.value)"
                   >

@@ -27,9 +27,16 @@ export function downloadCsv(filename, text) {
 // Camera poses (extrinsics) in the project CRS. Each pose already carries its
 // own `imageName`, so no image lookup is needed.
 export function buildPosesCsv(poses, crs) {
-  const header = ['image', 'X', 'Y', 'Z', 'omega', 'phi', 'kappa', 'acc_xyz', 'acc_angle', 'crs']
+  const header = [
+    'image', 'X', 'Y', 'Z', 'omega', 'phi', 'kappa',
+    'accuracy_x', 'accuracy_y', 'accuracy_z',
+    'accuracy_omega', 'accuracy_phi', 'accuracy_kappa', 'crs',
+  ]
   const rows = poses.map((p) => [
-    p.imageName, p.x, p.y, p.z, p.omega, p.phi, p.kappa, p.accXYZ, p.accAngle, crs,
+    p.imageName, p.x, p.y, p.z, p.omega, p.phi, p.kappa,
+    p.accuracyX ?? p.accXYZ, p.accuracyY ?? p.accXYZ, p.accuracyZ ?? p.accXYZ,
+    p.accuracyOmega ?? p.accAngle, p.accuracyPhi ?? p.accAngle,
+    p.accuracyKappa ?? p.accAngle, crs,
   ])
   return toCsv(header, rows)
 }

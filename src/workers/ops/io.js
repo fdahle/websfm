@@ -1,5 +1,5 @@
 import { fromArrayBuffer } from 'geotiff'
-import { parseCloudFile, cloudStats } from '../../core/io/cloudImport.js'
+import { parseCloudFile, cloudStats, sniffCloudFormat } from '../../core/io/cloudImport.js'
 import { classifyRasterKind } from '../../core/io/rasterKind.js'
 import { hillshadeRgba } from '../../core/products/colormap.js'
 import { rasterToDataUrl } from '../rasterPreview.js'
@@ -13,12 +13,20 @@ import {
 // the UI thread is the trap this avoids). Pure parsing/classification lives in
 // core/io/*; this marshals bytes in and flat buffers out (all in `transfer` —
 // no clones of dense-scale data).
-export function makeIoOps() {
+export function makeIoOps({ lazCodec = null } = {}) {
   // args: [{ buffer: ArrayBuffer, name: string }] → { parsed, stats }
   // parsed: cloud { count, pos, col?, nrm? } | mesh { nVerts, count, pos, idx, col? }
   async function parseCloud([{ buffer, name }], { emit }) {
     const t0 = performance.now()
-    const parsed = parseCloudFile(buffer, name, { onLog: (m, l, c) => emit('log', [m, l, c]) })
+    // A LAZ needs the LASzip codec; load it only when the file actually is one
+    // (the sniff reads the header's high bit, not the extension).
+    if (lazCodec && sniffCloudFormat(new Uint8Array(buffer, 0, Math.min(256, buffer.byteLength)), name) === 'laz') {
+      await lazCodec.ensure()
+    }
+    const parsed = parseCloudFile(buffer, name, {
+      onLog: (m, l, c) => emit('log', [m, l, c]),
+      lazDecompress: lazCodec?.decompress ?? null,
+    })
     const stats = cloudStats(parsed)
     emit('log', [`Parsed ${name}: ${stats.points.toLocaleString()} points`
       + `${stats.faces ? `, ${stats.faces.toLocaleString()} faces` : ''}`

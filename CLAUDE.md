@@ -30,9 +30,13 @@ if the *method* changed, update METHODS.md.
   marching-cubes iso patch — it is one of two crates allowed a dependency, kept isolated
   so it doesn't leak into `crates/reconstruction` (which stays wasm-bindgen-only).
   Its Rust tests need release mode (`cargo test -p mesh --release`; debug is ~40× slower).
-  `crates/imagecodec` is the other dep-carrying crate: the `tiff` crate as a native TIFF
-  decoder that replaces the slow pure-JS geotiff.js decode at ingest (see the TIFF gotcha),
-  likewise isolated from `reconstruction`.
+  `crates/imagecodec` and `crates/lazcodec` are the other dep-carrying crates,
+  likewise isolated from `reconstruction`: the `tiff` crate as a native TIFF decoder
+  that replaces the slow pure-JS geotiff.js decode at ingest (see the TIFF gotcha),
+  and the `laz` crate (LASzip) for LAZ read/write, which has no credible pure-JS
+  writer. `lazcodec` does **only** the chunked arithmetic coding — the LAS header,
+  VLR directory and point-record layout stay in JS (`core/io/las.js` +
+  `core/io/laz.js`), so format knowledge lives on one side of the boundary.
 - **Persistence**: OPFS (Origin Private File System) via `src/utils/opfs.js`. Per-project
   directory tree; everything recomputable is recomputed rather than stored — the one
   exception is **dense Stage A depth maps** (minutes/image to rebuild), persisted to
@@ -81,6 +85,25 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
   DEFLATE would need the async callback per tile per level. Overviews box-average
   with nodata skipped; a single-tile level keeps TileOffsets/TileByteCounts inline,
   since count·size ≤ 4 means a reader takes the field as the value, not a pointer),
+  A **COG is written in two calls** — `planCog` (pure, sync: levels, tiles, write
+  order) then `assembleCog` (layout once the real byte counts are known) — because
+  compression is async and per-tile; `writeCogDeflate` is the wired-up form and
+  `writeCog` the uncompressed one-shot. A tiled file's TileByteCounts *are* the
+  compressed sizes, so layout cannot precede compression. It also emits the GDAL
+  ghost area so readers report `LAYOUT=COG`),
+  `undistort.js` — resampling a raster into the pinhole frame (bilinear
+  `resampleRgba`, nearest `resampleMaskLut`, `pinholeFrameSize`, `validSampleRect`
+  = COLMAP `blank_pixels=0`, `cropRgba`/`shiftPrincipalPoint`). The *map* always
+  comes from `core/sfm/displayFrame.js` `makeSampleMap`; **dense MVS and the
+  undistorted-image export share both**, so there is exactly one distortion
+  composition in the app,
+  `tiles3d.js` — Cesium 3D Tiles 1.1, **one tile** (`tileset.json` + a points
+  `.glb`). Two conventions carry it: content is written **Y-up** while the tile
+  frame and its bounding volume are **Z-up** (3D Tiles rotates glTF content on
+  load; matching handedness tips the model on its side), and the ECEF transform is
+  **measured** from probe points one project-CRS unit east/north rather than
+  assuming grid axes are ENU — that shortcut is fine mid-latitude and badly wrong
+  near the poles, where convergence approaches the longitude difference itself,
   `wkt.js` — minimal OGC WKT1
   for `.prj` (WGS84 geographic + UTM zones formulaic, else null → caller writes the
   raw proj4/EPSG string), `colormap.js`, `report.js` — `buildReportHtml` assembles one
@@ -121,7 +144,14 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
   matching, dropping unmatched images/observations), `las.js` — LAS 1.2 writer
   (point format 2) + reader (formats 0–3/6–8, **stride is header-authoritative** —
   read `headerSize`/`offsetToPointData`/`pointDataRecordLength`, never assume from
-  the format id; LAZ rejected), `cloudText.js` — XYZ writer/reader, `ply.js` —
+  the format id). It is split so LAZ reuses it: `writeLasHeader`/`encodeLasPoints`
+  on the way out, `readLasHeader`/`decodeLasPoints` on the way in. `laz.js` — the
+  LAZ container (LASzip VLR 22204, the point-format high bit) with the **codec
+  injected**, the same way `geotiff.js` takes its `deflate`, so it stays testable
+  with no wasm; the codec is `crates/lazcodec` via `workers/ops/laz.js`. A .laz and
+  a .las of one cloud differ in exactly two places — the high bit and the extra
+  VLR — and quantize identically. **The sniff reads the high bit, not the
+  extension**: LAZ is regularly shipped named `.las`, `cloudText.js` — XYZ writer/reader, `ply.js` —
   ascii + binary-LE reader (points + faces; unknown props skipped by computed
   stride; big-endian rejected), `cloudImport.js` — magic-byte format sniff +
   parser dispatch + the import transform (unit-scale / Y-up→Z-up proper rotation /
@@ -746,10 +776,12 @@ Per-project working CRS (proj4). GCPs, footprints, and camera poses store positi
 the project CRS and are reprojected on CRS change (`handleSetCrs` in App.vue). See memory
 `gcp-crs-architecture` and `works-in-antarctica`.
 
-A GCP has surveyed ground coords (`x/y/z` + per-axis `accuracyX/Y/Z`), pixel
-`observations` (`[{ imageId, imageName, px, py }]`, with per-axis image accuracy
-`accuracyImgX/Y`), and an `enabled` flag; there is no control/check role (every
-enabled GCP is used). GCPs are created three ways: CSV import (`GcpImportModal`),
+A GCP has surveyed ground coords (`x/y/z` + per-axis `accuracyX/Y/Z`), optional
+XY/XZ/YZ correlations, accuracy provenance and vertical datum. Pixel observations
+store `{ imageId, imageName, px, py, accuracyX, accuracyY }`; `accuracyImgX/Y`
+are defaults for new marks. Enabled controls constrain the solve, checkpoints are
+reported independently, and unknown/invalid covariance never constrains. GCPs are
+created three ways: CSV import (`GcpImportModal`),
 the GCP table's "+ Add GCP" (`x/y = 0`, **`z = null`** until measured or filled;
 zero is a valid sea-level elevation, never a missing-value sentinel), edited inline —
 `useGcpsStore.addGcp`), or **right-click in the image view**. That right-click
@@ -831,7 +863,7 @@ whenever ≥3 GCPs triangulate), and `gcpAccuracyReport()` reports per-GCP CRS
 residual + per-observation reprojection px. GCPs also constrain **bundle
 adjustment** directly, not just this post-hoc fit: `bundle_adjust`
 (`crates/reconstruction/src/bundle.rs`) takes an `anchor_flat`/`anchor_weight`
-pair injecting a `Σ w·‖pt−target‖²` residual on specific 3D points (their own
+pair injecting a full-covariance `δᵀPδ` residual on specific 3D points (their own
 point-index space, appended after the normal SIFT points, each with normal
 reprojection observations of its own) — the anchor only touches that point's own
 3×3 Schur block, no camera-side Jacobian, so it's free to add and a no-op with
@@ -843,6 +875,11 @@ against a poor seed fit. The *final* georeference used for DEM/ortho is still a
 fresh post-hoc fit against whatever cameras this leaves in the sparse cloud, not
 this pass's scratch state — anchoring only needs to be "good enough to help
 convergence".
+GCP pixel marks are inverse-variance weighted in N-view triangulation and BA.
+Horn seeds a seven-parameter generalized least-squares refinement under each
+GCP's full precision matrix. Accuracy reporting includes Mahalanobis residuals
+and leave-one-control-out predictions when no checkpoints exist; CRS changes
+propagate covariance rather than retaining stale numeric sigmas.
 
 ## Conventions, invariants & gotchas
 - `markRaw`/`shallowRef` for big typed arrays (keypoints, descriptors, depth planes):
