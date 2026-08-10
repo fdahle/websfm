@@ -96,7 +96,9 @@ import { estimateUpFromCameras } from './core/sfm/geometry.js'
 import { useSfmInterop } from './composables/useSfmInterop.js'
 
 // ── Theme ─────────────────────────────────────────────────────────────────────
-const { theme, applyTheme, setTheme } = useTheme()
+// `theme` is the resolved 'dark'|'light'; `themePreference` is what the user
+// chose ('system' follows the OS and re-resolves when it flips).
+const { theme, themePreference, setTheme, cycleTheme } = useTheme()
 
 // ── Projects ──────────────────────────────────────────────────────────────────
 const projectsStore = useProjectsStore()
@@ -916,7 +918,6 @@ watch(consoleOpen, (v) => localStorage.setItem('consoleOpen', v))
 
 // ── Bootstrap ─────────────────────────────────────────────────────────────────
 onMounted(async () => {
-  applyTheme(theme.value)
   window.addEventListener('keydown', (e) => {
     if (e.key === '`' && (e.ctrlKey || e.metaKey)) {
       e.preventDefault()
@@ -1334,6 +1335,7 @@ function handleCommand(id) {
     case 'open-guide':           guideStore.openHome(); break
     case 'open-project-picker':  projectPickerOpen.value = !projectPickerOpen.value; break
     case 'toggle-console':       consoleOpen.value = !consoleOpen.value; break
+    case 'toggle-theme':         cycleTheme(); break
     case 'raster-fit':           activeProductViewer()?.fit(); break
     case 'raster-zoom-in':       activeProductViewer()?.zoomBy(1.4); break
     case 'raster-zoom-out':      activeProductViewer()?.zoomBy(1 / 1.4); break
@@ -1447,6 +1449,8 @@ function onRibbonPick(event) {
       :show-map-grid="showMapGrid"
       :show-footprints="showFootprints"
       :footprint-count="footprintCount"
+      :theme-preference="themePreference"
+      :theme="theme"
       @command="handleCommand"
     />
     <input ref="ribbonInput" type="file" accept="image/*" multiple hidden @change="onRibbonPick" />
@@ -1789,7 +1793,8 @@ function onRibbonPick(event) {
     <Teleport to="body">
       <SettingsModal
         v-if="settingsOpen"
-        :theme="theme"
+        :theme="themePreference"
+        :resolved-theme="theme"
         @close="settingsOpen = false"
         @set-theme="setTheme"
       />

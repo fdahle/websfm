@@ -50,7 +50,9 @@ function orientationInProject(raw, grid) {
 }
 
 export function exifPoseFromMetadata(meta = {}) {
-  if (!finite(meta.gpsLat) || !finite(meta.gpsLon)) return null
+  // An image carries `meta: null` from createImage until extraction resolves,
+  // and a default parameter only fills in for `undefined` — so guard explicitly.
+  if (!meta || !finite(meta.gpsLat) || !finite(meta.gpsLon)) return null
   const lat = Number(meta.gpsLat), lon = Number(meta.gpsLon)
   if (lat < -90 || lat > 90 || lon < -180 || lon > 180) return null
 

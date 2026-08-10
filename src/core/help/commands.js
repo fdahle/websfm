@@ -78,6 +78,7 @@ export const COMMANDS = [
   // --- App ---
   { name: 'project settings', aliases: ['project properties'], dispatch: 'open-project-settings', needs: ['project'], group: 'App', help: 'Open settings for the current project' },
   { name: 'settings', aliases: [],                  dispatch: 'open-settings', group: 'App', help: 'Open settings' },
+  { name: 'theme',    aliases: ['dark mode', 'light mode'], dispatch: 'toggle-theme', group: 'App', help: 'Cycle appearance: system / light / dark' },
   { name: 'glossary', aliases: [],                  dispatch: 'open-glossary', group: 'App', help: 'Open the glossary' },
   { name: 'about',    aliases: [],                  dispatch: 'open-about',    group: 'App', help: 'Open the about dialog' },
   { name: 'system info', aliases: ['diagnostics'],  dispatch: 'open-system-info', group: 'App', help: 'Open system / hardware diagnostics' },
