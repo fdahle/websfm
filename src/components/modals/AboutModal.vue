@@ -8,8 +8,10 @@ import { ref } from 'vue'
 import ModalShell from './ui/ModalShell.vue'
 import Icon from '../Icon.vue'
 import { ACKNOWLEDGMENTS, THIRD_PARTY } from '../../core/help/licenses.js'
+import { version as appVersion } from '../../../package.json'
 
 const emit = defineEmits(['close'])
+const licenseUrl = `${import.meta.env.BASE_URL}LICENSE`
 
 const tab = ref('about')
 const tabs = [
@@ -26,7 +28,7 @@ const tabs = [
       <div class="hero-mark"><Icon name="cube" /></div>
       <div class="hero-text">
         <div class="hero-name">websfm</div>
-        <div class="hero-tag">Browser-based Structure&nbsp;from&nbsp;Motion</div>
+        <div class="hero-tag">Browser-based Structure&nbsp;from&nbsp;Motion · v{{ appVersion }}</div>
       </div>
     </div>
 
@@ -51,7 +53,7 @@ const tabs = [
         <a class="chip" href="https://github.com/fdahle/websfm" target="_blank" rel="noopener">
           <Icon name="link" /> GitHub
         </a>
-        <a class="chip" href="https://github.com/fdahle/websfm/blob/main/LICENSE" target="_blank" rel="noopener">
+        <a class="chip" :href="licenseUrl" target="_blank" rel="noopener">
           <Icon name="file" /> MIT License
         </a>
       </div>

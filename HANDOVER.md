@@ -203,6 +203,14 @@ fiducials; self-calibration (A2) + fiducials (F4) are the code-side support.
 
 ## Done log (most recent first)
 
+- **2026-08-10 · First-beta release packaging.** Versioned the app as
+  `0.1.0-beta.1`, added and bundled the MIT license, exposed the version in About,
+  added favicon/social metadata, made root versus subpath deployment explicit via
+  `VITE_BASE_PATH`, documented the HTTPS/MIME/CORS/cache requirements, and patched
+  the PostCSS/nanoid advisories. `check:release` guards the required static/runtime
+  assets. Root and `/websfm/` production builds, 1,285 JS tests, typecheck,
+  optimized Rust workspace tests, and npm audit pass.
+
 - **2026-08-07 · Product-side interoperability: undistorted images, COG, LAZ, 3D Tiles.**
   Four independent formats from `docs/planning/plan-interop-formats.md`, in that
   order.

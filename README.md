@@ -78,16 +78,32 @@ npm run typecheck  # tsc --noEmit
 ## Building & self-hosting
 
 ```bash
-npm run build      # → dist/
+npm ci
+npm run build:release  # build dist/ and verify all release assets
 npm run preview    # serve the production build locally
 ```
 
-`dist/` is a static site and can be hosted on any static file server. Two things
-to configure on the host:
+`dist/` is a static site and can be hosted on any static file server. Deploy it
+over **HTTPS**: the browser storage APIs used for projects require a secure context
+(plain HTTP is only suitable for local development on `localhost`).
+
+The default build is for the domain root, such as `https://websfm.example/`. If the
+app will live below a path, include that path at build time, with both slashes:
+
+```bash
+VITE_BASE_PATH=/websfm/ npm run build:release
+# deploy dist/ at https://example.com/websfm/
+```
+
+Configure the production host as follows:
 
 - **Model files.** Serve the four `.onnx` weights (see below) at `<site>/models/`,
   or point the app elsewhere at build time with
   `VITE_MODEL_BASE_URL=https://your-cdn/models/ npm run build`.
+
+  A separate model host must allow browser requests from the app origin, for
+  example with `Access-Control-Allow-Origin: https://websfm.example`. Serve ONNX
+  files as `application/octet-stream`.
 
 - **Cross-origin isolation (optional, for speed).** For multi-threaded ONNX
   (~3× faster matching) the host must send these two response headers:
@@ -99,6 +115,30 @@ to configure on the host:
 
   These are already set for `npm run dev` / `npm run preview`. Without them the
   app still works, single-threaded (the same graceful path as Safari).
+
+- **Static file types.** Serve `.wasm` as `application/wasm` and `.mjs` as
+  `text/javascript`. An incorrect WASM type disables streaming compilation and an
+  incorrect MJS type prevents ONNX Runtime from loading.
+
+- **Caching and compression.** The files below `assets/` have content hashes and
+  can use `Cache-Control: public, max-age=31536000, immutable`. Keep `index.html`
+  on `no-cache` so a release can point browsers at its new hashes. Enable Brotli or
+  gzip for HTML, JavaScript and CSS; do not recompress `.wasm` or `.onnx` unless the
+  server is configured to do so efficiently.
+
+Before sharing a release, verify the real production URL rather than only the Vite
+preview server:
+
+```bash
+curl -I https://websfm.example/
+curl -I https://websfm.example/assets/NAME.wasm
+curl -I https://websfm.example/ort/ort-wasm-simd-threaded.wasm
+curl -I https://websfm.example/models/superpoint.onnx
+```
+
+Then perform one cold browser smoke test: create a project, import photographs, run
+SIFT detection/matching/reconstruction, refresh and reopen the project, download a
+learned model, and export/re-import a `.websfm` project.
 
 ### Model files
 
