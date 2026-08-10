@@ -111,7 +111,9 @@ describe('guessNameKey', () => {
 describe('geoJsonToGcps', () => {
   it('converts Point features into GCPs with numeric coordinates', () => {
     const gcps = geoJsonToGcps([pointFeature([10, 20, 30], { name: 'P1' })], 'name')
-    expect(gcps).toEqual([{ name: 'P1', x: 10, y: 20, z: 30, observations: [] }])
+    expect(gcps).toEqual([{ name: 'P1', x: 10, y: 20, z: 30,
+      accuracyX: null, accuracyY: null, accuracyZ: null,
+      correlationXY: null, correlationXZ: null, correlationYZ: null, observations: [] }])
   })
 
   it('expands a MultiPoint into one GCP per coordinate', () => {

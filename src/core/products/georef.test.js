@@ -110,6 +110,20 @@ describe('fitSimilarity', () => {
     close(fit.scale, 1, 1e-3)
     close(fit.t[0], 0, 1e-3); close(fit.t[1], 0, 1e-3); close(fit.t[2], 0, 1e-3)
   })
+
+  it('refines the Horn seed under full anisotropic precision', () => {
+    const src = [[0,0,0],[2,0,0],[0,2,0],[0,0,2],[2,2,2],[-1,1,1]]
+    const pairs = src.map((p, i) => ({
+      src: p,
+      dst: i === 4 ? [p[0], p[1], p[2] + 20] : [...p],
+      precision: i === 4 ? [[1,0,0],[0,1,0],[0,0,1e-8]] : [[1,0,0],[0,1,0],[0,0,1]],
+    }))
+    const fit = fitSimilarity(pairs)
+    expect(fit.scale).toBeCloseTo(1, 3)
+    expect(fit.t[0]).toBeCloseTo(0, 3)
+    expect(fit.t[1]).toBeCloseTo(0, 3)
+    expect(fit.t[2]).toBeCloseTo(0, 2)
+  })
 })
 
 describe('frameFromSimilarity', () => {

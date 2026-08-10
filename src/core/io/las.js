@@ -14,6 +14,8 @@ import { geoKeysForEpsg } from '../products/geotiff.js'
 
 const HEADER_SIZE_12 = 227
 const VLR_HEADER_SIZE = 54
+// Point format 2: xyz i32×3 + intensity u16 + 4 flag bytes + src u16 + RGB u16×3.
+export const LAS_RECORD_F2 = 26
 
 // Fixed-width ASCII field (zero-padded), for the sys-id / software / VLR strings.
 function asciiField(dst, offset, text, width) {
@@ -68,49 +70,26 @@ export function cloudToLas(points, { crsCode = null, geographic = false, onLog }
     dir.forEach((v, i) => bv.setUint16(i * 2, v, true))
     vlr = body
   }
-  const vlrBytes = vlr ? VLR_HEADER_SIZE + vlr.length : 0
-  const offsetToPoints = HEADER_SIZE_12 + vlrBytes
+  const vlrs = vlr
+    ? [{ userId: 'LASF_Projection', recordId: 34735, description: 'GeoKeyDirectory', data: vlr }]
+    : []
 
-  const RECORD = 26 // point format 2: xyz i32×3 + intensity u16 + 4 flag bytes + src u16 + RGB u16×3
-  const out = new Uint8Array(offsetToPoints + n * RECORD)
+  // Point records, in the exact on-disk layout. Split out from the header so the
+  // LAZ writer (core/io/laz.js) hands this same buffer to the compressor — one
+  // definition of a point record, not two.
+  const pointBytes = encodeLasPoints({ n, getX, getY, getZ, getC, scale, offset })
+  const header = writeLasHeader({ n, vlrs, scale, offset, bbox: { minX, minY, minZ, maxX, maxY, maxZ } })
+  const out = new Uint8Array(header.length + pointBytes.length)
+  out.set(header, 0)
+  out.set(pointBytes, header.length)
+  return out
+}
+
+// Quantized point records for LAS point format 2. Returns n·26 bytes.
+export function encodeLasPoints({ n, getX, getY, getZ, getC, scale, offset }) {
+  const out = new Uint8Array(n * LAS_RECORD_F2)
   const dv = new DataView(out.buffer)
-
-  // ── Public header block (LAS 1.2, 227 bytes) ──
-  asciiField(out, 0, 'LASF', 4)
-  // 4 fileSourceId u16 = 0, 6 globalEncoding u16 = 0, 8–23 GUID = 0 (already zeroed)
-  out[24] = 1; out[25] = 2 // version 1.2
-  asciiField(out, 26, 'websfm', 32) // system identifier
-  asciiField(out, 58, 'websfm', 32) // generating software
-  const now = new Date()
-  const dayOfYear = Math.floor((now - new Date(now.getFullYear(), 0, 0)) / 86400000)
-  dv.setUint16(90, dayOfYear, true)
-  dv.setUint16(92, now.getFullYear(), true)
-  dv.setUint16(94, HEADER_SIZE_12, true)     // header size
-  dv.setUint32(96, offsetToPoints, true)     // offset to point data
-  dv.setUint32(100, vlr ? 1 : 0, true)       // number of VLRs
-  out[104] = 2                               // point data format 2
-  dv.setUint16(105, RECORD, true)            // point data record length
-  dv.setUint32(107, n, true)                 // legacy number of point records
-  dv.setUint32(111, n, true)                 // points by return[0] (all first-return)
-  dv.setFloat64(131, scale[0], true); dv.setFloat64(139, scale[1], true); dv.setFloat64(147, scale[2], true)
-  dv.setFloat64(155, offset[0], true); dv.setFloat64(163, offset[1], true); dv.setFloat64(171, offset[2], true)
-  dv.setFloat64(179, maxX, true); dv.setFloat64(187, minX, true)
-  dv.setFloat64(195, maxY, true); dv.setFloat64(203, minY, true)
-  dv.setFloat64(211, maxZ, true); dv.setFloat64(219, minZ, true)
-
-  // ── VLR (GeoKeyDirectory) ──
-  if (vlr) {
-    const p = HEADER_SIZE_12
-    // reserved u16 = 0
-    asciiField(out, p + 2, 'LASF_Projection', 16)
-    dv.setUint16(p + 18, 34735, true)          // record id: GeoKeyDirectory
-    dv.setUint16(p + 20, vlr.length, true)     // record length after header
-    asciiField(out, p + 22, 'GeoKeyDirectory', 32)
-    out.set(vlr, p + VLR_HEADER_SIZE)
-  }
-
-  // ── Point records ──
-  let p = offsetToPoints
+  let p = 0
   for (let i = 0; i < n; i++) {
     dv.setInt32(p, Math.round((getX(i) - offset[0]) / scale[0]), true)
     dv.setInt32(p + 4, Math.round((getY(i) - offset[1]) / scale[1]), true)
@@ -122,7 +101,52 @@ export function cloudToLas(points, { crsCode = null, geographic = false, onLog }
     dv.setUint16(p + 20, byte(c[0]) * 257, true) // 8-bit → 16-bit per spec
     dv.setUint16(p + 22, byte(c[1]) * 257, true)
     dv.setUint16(p + 24, byte(c[2]) * 257, true)
-    p += RECORD
+    p += LAS_RECORD_F2
+  }
+  return out
+}
+
+// LAS 1.2 public header block + a VLR list. `compressed` sets the LASzip high bit
+// on the point format — the ONLY header difference between a .las and a .laz, since
+// the record length field keeps describing the *uncompressed* record either way.
+export function writeLasHeader({ n, vlrs = [], scale, offset, bbox, compressed = false }) {
+  const { minX, minY, minZ, maxX, maxY, maxZ } = bbox
+  const vlrBytes = vlrs.reduce((sum, v) => sum + VLR_HEADER_SIZE + v.data.length, 0)
+  const offsetToPoints = HEADER_SIZE_12 + vlrBytes
+  const out = new Uint8Array(offsetToPoints)
+  const dv = new DataView(out.buffer)
+
+  asciiField(out, 0, 'LASF', 4)
+  // 4 fileSourceId u16 = 0, 6 globalEncoding u16 = 0, 8–23 GUID = 0 (already zeroed)
+  out[24] = 1; out[25] = 2 // version 1.2
+  asciiField(out, 26, 'websfm', 32) // system identifier
+  asciiField(out, 58, 'websfm', 32) // generating software
+  const now = new Date()
+  const dayOfYear = Math.floor((now - new Date(now.getFullYear(), 0, 0)) / 86400000)
+  dv.setUint16(90, dayOfYear, true)
+  dv.setUint16(92, now.getFullYear(), true)
+  dv.setUint16(94, HEADER_SIZE_12, true)     // header size
+  dv.setUint32(96, offsetToPoints, true)     // offset to point data
+  dv.setUint32(100, vlrs.length, true)       // number of VLRs
+  out[104] = compressed ? (2 | 0x80) : 2     // point data format 2 (high bit = LASzip)
+  dv.setUint16(105, LAS_RECORD_F2, true)     // point data record length (uncompressed)
+  dv.setUint32(107, n, true)                 // legacy number of point records
+  dv.setUint32(111, n, true)                 // points by return[0] (all first-return)
+  dv.setFloat64(131, scale[0], true); dv.setFloat64(139, scale[1], true); dv.setFloat64(147, scale[2], true)
+  dv.setFloat64(155, offset[0], true); dv.setFloat64(163, offset[1], true); dv.setFloat64(171, offset[2], true)
+  dv.setFloat64(179, maxX, true); dv.setFloat64(187, minX, true)
+  dv.setFloat64(195, maxY, true); dv.setFloat64(203, minY, true)
+  dv.setFloat64(211, maxZ, true); dv.setFloat64(219, minZ, true)
+
+  let p = HEADER_SIZE_12
+  for (const v of vlrs) {
+    // reserved u16 = 0
+    asciiField(out, p + 2, v.userId, 16)
+    dv.setUint16(p + 18, v.recordId, true)
+    dv.setUint16(p + 20, v.data.length, true)  // record length after header
+    asciiField(out, p + 22, v.description ?? '', 32)
+    out.set(v.data, p + VLR_HEADER_SIZE)
+    p += VLR_HEADER_SIZE + v.data.length
   }
   return out
 }
@@ -143,6 +167,29 @@ const SUPPORTED_FORMATS = new Set([0, 1, 2, 3, 6, 7, 8])
 // per-point objects (dense-scale invariant).
 export function parseLas(buffer, { onLog } = {}) {
   const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer)
+  const h = readLasHeader(bytes)
+  if (h.isLaz) {
+    throw new Error('This file is LAZ (compressed LAS) — open it through the LAZ reader '
+      + '(core/io/laz.js), which needs the lazcodec WASM module')
+  }
+  let count = h.count
+  // The record count must fit the buffer; trust the smaller of header vs bytes.
+  const avail = Math.floor((bytes.length - h.offsetToPoints) / h.recordLength)
+  if (avail < count) {
+    onLog?.(`LAS: header claims ${count} points but the file holds ${avail} — reading ${avail}`, 'warn', 'Import')
+    count = Math.max(0, avail)
+  }
+  const cloud = decodeLasPoints(
+    bytes.subarray(h.offsetToPoints), count, h.recordLength, h.format, h.scale, h.offset)
+  onLog?.(`LAS: read ${count.toLocaleString()} points (v${h.versionMajor}.${h.versionMinor}, `
+    + `format ${h.format}${cloud.col ? ', RGB' : ''})`, 'info', 'Import')
+  return cloud
+}
+
+// Public header block + VLR directory. Shared with the LAZ reader, which needs the
+// same fields plus the LASzip VLR payload. Every stride here is read from the
+// header, never assumed from the format id (the interop rule at the top).
+export function readLasHeader(bytes) {
   const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
   if (bytes.length < HEADER_SIZE_12 || String.fromCharCode(bytes[0], bytes[1], bytes[2], bytes[3]) !== 'LASF') {
     throw new Error('Not a LAS file (missing LASF signature)')
@@ -161,40 +208,41 @@ export function parseLas(buffer, { onLog } = {}) {
     count = Number(big)
   }
 
-  // LAZ rejection: laszip sets the high bit of the point format, and writes a
-  // "laszip encoded" VLR (record id 22204). Name the format in the error.
+  // laszip sets the high bit of the point format AND writes a "laszip encoded"
+  // VLR (record id 22204); either one is enough to call the file compressed.
   let isLaz = (formatRaw & 0x80) !== 0
+  const vlrs = []
   let vp = headerSize
   for (let i = 0; i < nVlrs && vp + VLR_HEADER_SIZE <= offsetToPoints; i++) {
     const recordId = dv.getUint16(vp + 18, true)
     const len = dv.getUint16(vp + 20, true)
+    const userId = String.fromCharCode(...bytes.subarray(vp + 2, vp + 18)).replace(/\0+$/, '')
     if (recordId === 22204) isLaz = true
+    vlrs.push({ userId, recordId, data: bytes.subarray(vp + VLR_HEADER_SIZE, vp + VLR_HEADER_SIZE + len) })
     vp += VLR_HEADER_SIZE + len
-  }
-  if (isLaz) {
-    throw new Error('This file is LAZ (compressed LAS) — decompress it to .las first (e.g. with laszip or CloudCompare)')
   }
 
   const format = formatRaw & 0x3f
   if (!SUPPORTED_FORMATS.has(format)) {
     throw new Error(`Unsupported LAS point data format ${format} (supported: 0–3, 6–8)`)
   }
+  return {
+    versionMajor, versionMinor, headerSize, offsetToPoints, formatRaw, format, recordLength,
+    count, isLaz, vlrs,
+    scale: [dv.getFloat64(131, true), dv.getFloat64(139, true), dv.getFloat64(147, true)],
+    offset: [dv.getFloat64(155, true), dv.getFloat64(163, true), dv.getFloat64(171, true)],
+  }
+}
+
+// Decode raw point records (already uncompressed) → the flat cloud shape. Reads
+// xyz (+ RGB when the format carries it) and skips the rest via `recordLength`.
+export function decodeLasPoints(pointBytes, count, recordLength, format, scale, offset) {
+  const dv = new DataView(pointBytes.buffer, pointBytes.byteOffset, pointBytes.byteLength)
   const rgbOff = RGB_OFFSET[format]
   const hasRgb = rgbOff != null && recordLength >= rgbOff + 6
-
-  const scale = [dv.getFloat64(131, true), dv.getFloat64(139, true), dv.getFloat64(147, true)]
-  const offset = [dv.getFloat64(155, true), dv.getFloat64(163, true), dv.getFloat64(171, true)]
-
-  // The record count must fit the buffer; trust the smaller of header vs bytes.
-  const avail = Math.floor((bytes.length - offsetToPoints) / recordLength)
-  if (avail < count) {
-    onLog?.(`LAS: header claims ${count} points but the file holds ${avail} — reading ${avail}`, 'warn', 'Import')
-    count = Math.max(0, avail)
-  }
-
   const pos = new Float64Array(count * 3)
   const col = hasRgb ? new Uint8Array(count * 3) : null
-  let p = offsetToPoints
+  let p = 0
   for (let i = 0; i < count; i++) {
     pos[i * 3] = dv.getInt32(p, true) * scale[0] + offset[0]
     pos[i * 3 + 1] = dv.getInt32(p + 4, true) * scale[1] + offset[1]
@@ -206,7 +254,5 @@ export function parseLas(buffer, { onLog } = {}) {
     }
     p += recordLength
   }
-  onLog?.(`LAS: read ${count.toLocaleString()} points (v${versionMajor}.${versionMinor}, format ${format}`
-    + `${hasRgb ? ', RGB' : ''})`, 'info', 'Import')
   return { count, pos, ...(col ? { col } : {}) }
 }

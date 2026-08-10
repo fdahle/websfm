@@ -97,6 +97,12 @@ function num(v) {
   return Number.isFinite(n) ? n : null
 }
 
+function propertyCI(props, aliases) {
+  const entries = Object.entries(props || {})
+  const found = entries.find(([key]) => aliases.includes(key.toLowerCase().replace(/[\s_-]+/g, '')))
+  return found?.[1]
+}
+
 // Convert Point/MultiPoint features into raw GCPs (file's own coordinates).
 // Shape matches what useGcpsStore.addGcps consumes: { name, x, y, z, observations }.
 export function geoJsonToGcps(features, nameKey) {
@@ -113,6 +119,12 @@ export function geoJsonToGcps(features, nameKey) {
       gcps.push({
         name: nameFrom(f.properties, nameKey, `GCP ${i}`),
         x, y, z: num(c?.[2]),
+        accuracyX: num(propertyCI(f.properties, ['accuracyx','accx','sigmax','stdx'])),
+        accuracyY: num(propertyCI(f.properties, ['accuracyy','accy','sigmay','stdy'])),
+        accuracyZ: num(propertyCI(f.properties, ['accuracyz','accz','sigmaz','stdz'])),
+        correlationXY: num(propertyCI(f.properties, ['correlationxy','corrxy','rhoxy'])),
+        correlationXZ: num(propertyCI(f.properties, ['correlationxz','corrxz','rhoxz'])),
+        correlationYZ: num(propertyCI(f.properties, ['correlationyz','corryz','rhoyz'])),
         observations: [],
       })
     }

@@ -12,7 +12,8 @@ import { exifPoseFromMetadata, projectExifPose } from '../core/io/exifPose.js'
 // Camera poses (exterior orientation / extrinsics): one per image, used as
 // georeferencing priors for bundle adjustment. Positions are stored in the
 // project working CRS — exactly like GCPs/footprints — and re-projected when the
-// CRS changes. Orientation angles (omega/phi/kappa, degrees) pass through.
+// CRS changes. Imported orientation angles pass through unchanged; EXIF/XMP
+// true-north attitudes are rotated into grid north and constrain pose-prior BA.
 const DEFAULT_ACC_XYZ   = 5.0   // position prior accuracy, project-CRS units (m)
 const DEFAULT_ACC_ANGLE = 2.0   // orientation prior accuracy, degrees
 
@@ -23,7 +24,8 @@ export const usePosesStore = registerProjectStore(defineStore('poses', () => {
   const { currentCrs } = storeToRefs(projects)
 
   // [{ imageId, imageName, x, y, z, omega, phi, kappa,
-  //    accuracyX, accuracyY, accuracyZ, accXYZ, accAngle, source, enabled }]
+  //    accuracyX, accuracyY, accuracyZ, accXYZ,
+  //    accuracyOmega, accuracyPhi, accuracyKappa, accAngle, source, enabled }]
   const poses = ref([])
 
   function normalizePose(p) {
@@ -32,6 +34,11 @@ export const usePosesStore = registerProjectStore(defineStore('poses', () => {
     if (!(Number.isFinite(p.accuracyY) && p.accuracyY > 0)) p.accuracyY = scalar
     if (!(Number.isFinite(p.accuracyZ) && p.accuracyZ > 0)) p.accuracyZ = scalar
     p.accXYZ = scalar // retained for project/back-end compatibility
+    const angleScalar = Number.isFinite(p.accAngle) && p.accAngle > 0 ? p.accAngle : DEFAULT_ACC_ANGLE
+    if (!(Number.isFinite(p.accuracyOmega) && p.accuracyOmega > 0)) p.accuracyOmega = angleScalar
+    if (!(Number.isFinite(p.accuracyPhi) && p.accuracyPhi > 0)) p.accuracyPhi = angleScalar
+    if (!(Number.isFinite(p.accuracyKappa) && p.accuracyKappa > 0)) p.accuracyKappa = angleScalar
+    p.accAngle = angleScalar // retained as the isotropic fallback/legacy field
     p.source = p.source === 'exif' ? 'exif' : 'imported'
     if (p.enabled == null) p.enabled = true
     return p
@@ -40,6 +47,24 @@ export const usePosesStore = registerProjectStore(defineStore('poses', () => {
   function reprojectPose(p, fromCrs, toCrs) {
     const [x, y, z] = transform([p.x, p.y, p.z ?? 0], fromCrs, toCrs)
     if (p.source !== 'exif') return normalizePose({ ...p, x, y, z: p.z != null ? z : null })
+
+    // New EXIF records retain their original WGS84 position, ENU attitude and
+    // ENU uncertainties. Rebuild from those canonical values so changing CRS
+    // also updates meridian convergence and rotates anisotropic GNSS accuracy.
+    if (Number.isFinite(p.lon) && Number.isFinite(p.lat)
+        && Number.isFinite(p.accuracyMetersEast) && Number.isFinite(p.accuracyMetersNorth)) {
+      const projected = projectExifPose({
+        lon: p.lon, lat: p.lat, altitude: p.altitudeMeters,
+        accuracyX: p.accuracyMetersEast, accuracyY: p.accuracyMetersNorth,
+        accuracyZ: p.accuracyMetersUp ?? p.accuracyMetersZ,
+        omega: p.omegaEnu, phi: p.phiEnu, kappa: p.kappaEnu,
+        accuracyOmega: p.accuracyOmega, accuracyPhi: p.accuracyPhi,
+        accuracyKappa: p.accuracyKappa, accuracySource: p.accuracySource,
+        orientationSource: p.orientationSource, verticalDatum: p.verticalDatum,
+        direction: p.direction, directionRef: p.directionRef,
+      }, toCrs)
+      return normalizePose({ ...p, ...projected })
+    }
 
     // EXIF Z/accuracy are physical metres, not horizontal-CRS units. Retain
     // canonical metre sidecars so repeated CRS changes never accumulate scale
@@ -127,6 +152,9 @@ export const usePosesStore = registerProjectStore(defineStore('poses', () => {
         accuracyY: raw.accuracyY ?? raw.accXYZ ?? DEFAULT_ACC_XYZ,
         accuracyZ: raw.accuracyZ ?? raw.accXYZ ?? DEFAULT_ACC_XYZ,
         accAngle: raw.accAngle ?? DEFAULT_ACC_ANGLE,
+        accuracyOmega: raw.accuracyOmega ?? raw.accAngle ?? DEFAULT_ACC_ANGLE,
+        accuracyPhi:   raw.accuracyPhi   ?? raw.accAngle ?? DEFAULT_ACC_ANGLE,
+        accuracyKappa: raw.accuracyKappa ?? raw.accAngle ?? DEFAULT_ACC_ANGLE,
         source: 'imported',
         enabled: true,
       }
@@ -176,8 +204,15 @@ export const usePosesStore = registerProjectStore(defineStore('poses', () => {
           accuracyMetersX: projected.accuracyMetersX,
           accuracyMetersY: projected.accuracyMetersY,
           accuracyMetersZ: projected.accuracyMetersZ,
+          accuracyMetersEast: projected.accuracyMetersEast,
+          accuracyMetersNorth: projected.accuracyMetersNorth,
+          accuracyMetersUp: projected.accuracyMetersUp,
+          lon: projected.lon, lat: projected.lat,
+          omegaEnu: projected.omegaEnu, phiEnu: projected.phiEnu, kappaEnu: projected.kappaEnu,
           direction: raw.direction, directionRef: raw.directionRef,
           verticalDatum: existing.verticalDatum ?? raw.verticalDatum,
+          omega: projected.omega, phi: projected.phi, kappa: projected.kappa,
+          orientationSource: raw.orientationSource,
         })
         // No pose-accuracy editor exists today, but preserve a future/manual
         // override explicitly marked as user-owned instead of overwriting it.
@@ -186,19 +221,33 @@ export const usePosesStore = registerProjectStore(defineStore('poses', () => {
           accuracyZ: projected.accuracyZ, accXYZ: projected.accuracyX,
           accuracySource: raw.accuracySource,
         })
+        if (existing.orientationAccuracySource !== 'user') Object.assign(existing, {
+          accuracyOmega: raw.accuracyOmega, accuracyPhi: raw.accuracyPhi,
+          accuracyKappa: raw.accuracyKappa,
+          orientationAccuracySource: raw.orientationSource ? 'exif' : null,
+        })
       } else {
         poses.value.push(normalizePose({
           imageId: im.id, imageName: im.name,
           x: projected.x, y: projected.y, z: projected.z,
-          omega: null, phi: null, kappa: null,
+          omega: projected.omega, phi: projected.phi, kappa: projected.kappa,
           accuracyX: projected.accuracyX, accuracyY: projected.accuracyY,
           accuracyZ: projected.accuracyZ, accXYZ: projected.accuracyX,
           altitudeMeters: projected.altitudeMeters,
           accuracyMetersX: projected.accuracyMetersX,
           accuracyMetersY: projected.accuracyMetersY,
           accuracyMetersZ: projected.accuracyMetersZ,
-          accAngle: DEFAULT_ACC_ANGLE,
+          accuracyMetersEast: projected.accuracyMetersEast,
+          accuracyMetersNorth: projected.accuracyMetersNorth,
+          accuracyMetersUp: projected.accuracyMetersUp,
+          lon: projected.lon, lat: projected.lat,
+          omegaEnu: projected.omegaEnu, phiEnu: projected.phiEnu, kappaEnu: projected.kappaEnu,
+          accuracyOmega: raw.accuracyOmega, accuracyPhi: raw.accuracyPhi,
+          accuracyKappa: raw.accuracyKappa,
+          accAngle: raw.accuracyOmega ?? DEFAULT_ACC_ANGLE,
           accuracySource: raw.accuracySource, verticalDatum: raw.verticalDatum,
+          orientationSource: raw.orientationSource,
+          orientationAccuracySource: raw.orientationSource ? 'exif' : null,
           direction: raw.direction, directionRef: raw.directionRef,
           source: 'exif', enabled: true,
         }))
@@ -213,7 +262,7 @@ export const usePosesStore = registerProjectStore(defineStore('poses', () => {
 
   const exifSig = computed(() => images.value.map((im) => {
     const m = im.meta || {}
-    return `${im.id}:${im.name}:${m.gpsLat ?? ''}:${m.gpsLon ?? ''}:${m.gpsAlt ?? ''}:${m.gpsAltRef ?? ''}:${m.gpsHorizontalAccuracy ?? ''}:${m.gpsDirection ?? ''}:${m.gpsDirectionRef ?? ''}`
+    return `${im.id}:${im.name}:${m.gpsLat ?? ''}:${m.gpsLon ?? ''}:${m.gpsAlt ?? ''}:${m.gpsAltRef ?? ''}:${m.gpsHorizontalAccuracy ?? ''}:${m.gpsAccuracyX ?? ''}:${m.gpsAccuracyY ?? ''}:${m.gpsAccuracyZ ?? ''}:${m.gpsDirection ?? ''}:${m.gpsDirectionRef ?? ''}:${m.cameraOmega ?? ''}:${m.cameraPhi ?? ''}:${m.cameraKappa ?? ''}:${m.cameraAccuracyOmega ?? ''}:${m.cameraAccuracyPhi ?? ''}:${m.cameraAccuracyKappa ?? ''}`
   }).join('|'))
   watch(exifSig, () => { syncExifPoses() }, { immediate: true })
 

@@ -3,9 +3,11 @@ import {
   filterDepthMapsGeometric, autoBestK,
 } from '../../core/dense/mvs.js'
 import { buildMaskLookup } from '../../core/mask.js'
-import { distortPixel, hasDistortion } from '../../core/sfm/distortion.js'
-import { distortComposed } from '../../core/sfm/displayFrame.js'
-import { canonicalToScan } from '../../core/sfm/fiducials.js'
+import { hasDistortion } from '../../core/sfm/distortion.js'
+import { makeSampleMap } from '../../core/sfm/displayFrame.js'
+import {
+  resampleRgba, resampleMaskLut, pinholeFrameSize,
+} from '../../core/products/undistort.js'
 import { depthColor } from '../../core/products/colormap.js'
 import { isGpuAvailable, ensureDevice } from '../gpu/device.js'
 import { computeDepthMapGPU } from '../gpu/depthMapGpu.js'
@@ -18,104 +20,60 @@ import {
 // depth-map colourising) live here next to the two dense handlers. The GPU backend
 // swap + first-image GPU↔CPU A/B validation live inside computeDepthMaps.
 export function makeDenseOps({ rasterize }) {
-  // Bilinear-sample an RGBA buffer at (x,y); clamps to the edge. Writes into `out`
-  // at offset `oi` (4 bytes). Used by the raster undistortion below.
-  function sampleRgbaBilinear(data, w, h, x, y, out, oi) {
-    const x0 = Math.max(0, Math.min(w - 1, Math.floor(x)))
-    const y0 = Math.max(0, Math.min(h - 1, Math.floor(y)))
-    const x1 = Math.min(w - 1, x0 + 1), y1 = Math.min(h - 1, y0 + 1)
-    const fx = x - x0, fy = y - y0
-    const i00 = (y0 * w + x0) * 4, i10 = (y0 * w + x1) * 4
-    const i01 = (y1 * w + x0) * 4, i11 = (y1 * w + x1) * 4
-    for (let c = 0; c < 4; c++) {
-      const top = data[i00 + c] * (1 - fx) + data[i10 + c] * fx
-      const bot = data[i01 + c] * (1 - fx) + data[i11 + c] * fx
-      out[oi + c] = top * (1 - fy) + bot * fy
-    }
-  }
+  // ── Raster → pinhole frame ──────────────────────────────────────────────────
+  // Every raster dense reads must live in the same pinhole frame as the sparse
+  // cloud: distortion folded out, and for a film scan the scan→canonical affine
+  // applied too. The *map* comes from core/sfm/displayFrame.js `makeSampleMap`
+  // (one composition, shared with the image view's residual overlay and the
+  // undistorted-image export) and the *resampling* from core/products/undistort.js.
+  // Dense supplies the two scale factors because it works at reduced resolution.
 
   // Any distortion to remove (calibrated OR self-calibrated)?
   function hasAnyDistortion(dist, selfCal) {
     return hasDistortion(dist) || hasDistortion(selfCal)
   }
 
-  // Composed forward distortion map (WS2): an ideal pinhole pixel → the pixel the raw
-  // raster recorded. Self-cal was removed AFTER the calibrated bag at ingest
-  // (kp_raw = distort_cal(distort_self(kp_ideal))), so `selfCal` applies first, then
-  // `dist`, about the same working K. The common EXIF-only case has dist = null and
-  // only a self-cal bag; a fully-calibrated sensor has selfCal = null. Either bag empty
-  // ⇒ that stage is a no-op. Shared with the image view's residual overlay, which has
-  // to undo the same folds to draw a computed pixel on the raw image.
-
-  // Remove lens distortion from a working-resolution raster: for each output (ideal
-  // pinhole) pixel, sample the source at the distorted pixel the lens recorded there
-  // (closed-form forward map + bilinear). Kfull is the native-resolution K; the map
-  // runs in working-res K = scaleK(Kfull, scale). Returns a new raster; a no-op when
-  // both bags are empty. This is what keeps depth maps / fusion / DEM / ortho pinhole.
+  // Remove lens distortion from a working-resolution raster. Kfull is the
+  // native-resolution K; output and source share the working grid, so both scales
+  // are `r.scale`. A no-op when both bags are empty — that early return is what
+  // keeps the common EXIF-only case free (a pure scale change is still a real map).
   function undistortRaster(r, Kfull, dist, selfCal) {
     if (!hasAnyDistortion(dist, selfCal)) return r
-    const { data, width: w, height: h, scale } = r
-    const Kw = scaleK(Kfull, scale)
-    const out = new Uint8ClampedArray(data.length)
-    for (let v = 0; v < h; v++) {
-      for (let u = 0; u < w; u++) {
-        const { x: ud, y: vd } = distortComposed(u, v, Kw, dist, selfCal)
-        sampleRgbaBilinear(data, w, h, ud, vd, out, (v * w + u) * 4)
-      }
-    }
-    return { ...r, data: out }
+    const map = makeSampleMap({ K: Kfull, dist, selfCal, outScale: r.scale, srcScale: r.scale })
+    return { ...r, data: resampleRgba(r, map, r.width, r.height) }
   }
 
-  // Undistort a boolean mask LUT with the same forward map (nearest sample) so a
-  // distorted-space film-frame mask lines up with the now-undistorted raster.
+  // The same map, nearest sample, so a distorted-space mask lines up with the
+  // now-undistorted raster.
   function undistortMaskLut(lut, w, h, Kfull, dist, scale, selfCal) {
     if (!hasAnyDistortion(dist, selfCal)) return lut
-    const Kw = scaleK(Kfull, scale)
-    const out = new Uint8Array(lut.length)
-    for (let v = 0; v < h; v++) {
-      for (let u = 0; u < w; u++) {
-        const { x: ud, y: vd } = distortComposed(u, v, Kw, dist, selfCal)
-        const su = Math.max(0, Math.min(w - 1, Math.round(ud)))
-        const sv = Math.max(0, Math.min(h - 1, Math.round(vd)))
-        out[v * w + u] = lut[sv * w + su]
-      }
-    }
-    return out
+    const map = makeSampleMap({ K: Kfull, dist, selfCal, outScale: scale, srcScale: scale })
+    return resampleMaskLut(lut, w, h, map, w, h)
   }
 
   // ── Film scan → canonical warp (F4) ─────────────────────────────────────────
   // A film image's sparse cameras use the canonical K, so its dense reference
   // raster must live in the canonical pixel frame too. We warp the scan raster
   // into that frame with the SAME transform chain the sparse ingest applied, only
-  // inverted (output canonical px → sample the scan): canonical px →(distort, in
-  // canonical, which equals distort in mm)→ distorted canonical →(canonicalToScan)
-  // → scan full-res → ×scanScale → scan working px. The canonical working grid is
-  // sized so its long side ≈ maxDim (matching non-film rasters). Returns a raster
-  // carrying the info the mask warp needs (scanDims, fid, canonK, dist).
-  function canonWorkingToScan(u, v, cScale, canonK, dist, fid, scanScale, selfCal) {
-    const cx = u / cScale, cy = v / cScale                       // full-res canonical px
-    const d = distortComposed(cx, cy, canonK, dist, selfCal)     // remove self-cal + calibrated
-    const s = canonicalToScan(d.x, d.y, fid.transform ?? fid.A, fid.frame) // scan full-res px
-    return { x: s.x * scanScale, y: s.y * scanScale }            // scan working px
+  // inverted (output canonical px → sample the scan). The canonical working grid
+  // is sized so its long side ≈ maxDim (matching non-film rasters). Returns a
+  // raster carrying what the mask warp needs (scanDims, fid, canonK, dist).
+  function filmSampleMap(canonK, dist, fid, cScale, scanScale, selfCal) {
+    return makeSampleMap({
+      K: canonK, dist, selfCal, fiducial: fid, outScale: cScale, srcScale: scanScale,
+    })
   }
 
   function warpFilmRaster(r, canonK, dist, fid, maxDim, selfCal) {
-    const { data, width: sw, height: sh, scale: scanScale } = r
+    const { width: sw, height: sh, scale: scanScale } = r
     const { frame } = fid
     const cScale = maxDim / Math.max(frame.width, frame.height)
-    const ow = Math.max(1, Math.round(frame.width * cScale))
-    const oh = Math.max(1, Math.round(frame.height * cScale))
-    const out = new Uint8ClampedArray(ow * oh * 4)
+    const { width: ow, height: oh } = pinholeFrameSize({ fiducial: fid, scale: cScale })
     const useDist = hasDistortion(dist) ? dist : null
     const useSelf = hasDistortion(selfCal) ? selfCal : null
-    for (let v = 0; v < oh; v++) {
-      for (let u = 0; u < ow; u++) {
-        const s = canonWorkingToScan(u, v, cScale, canonK, useDist, fid, scanScale, useSelf)
-        sampleRgbaBilinear(data, sw, sh, s.x, s.y, out, (v * ow + u) * 4)
-      }
-    }
+    const map = filmSampleMap(canonK, useDist, fid, cScale, scanScale, useSelf)
     return {
-      data: out, width: ow, height: oh, scale: cScale,
+      data: resampleRgba(r, map, ow, oh), width: ow, height: oh, scale: cScale,
       fid, canonK, dist: useDist, selfCal: useSelf, scanDims: { w: sw, h: sh, scale: scanScale },
     }
   }
@@ -125,16 +83,8 @@ export function makeDenseOps({ rasterize }) {
   async function filmMaskLut(maskDataUrl, r) {
     const sd = r.scanDims
     const scanLut = await buildMaskLookup(maskDataUrl, sd.w, sd.h)
-    const out = new Uint8Array(r.width * r.height)
-    for (let v = 0; v < r.height; v++) {
-      for (let u = 0; u < r.width; u++) {
-        const s = canonWorkingToScan(u, v, r.scale, r.canonK, r.dist, r.fid, sd.scale, r.selfCal)
-        const su = Math.max(0, Math.min(sd.w - 1, Math.round(s.x)))
-        const sv = Math.max(0, Math.min(sd.h - 1, Math.round(s.y)))
-        out[v * r.width + u] = scanLut[sv * sd.w + su]
-      }
-    }
-    return out
+    const map = filmSampleMap(r.canonK, r.dist, r.fid, r.scale, sd.scale, r.selfCal)
+    return resampleMaskLut(scanLut, sd.w, sd.h, map, r.width, r.height)
   }
 
   // Extract a tightly-packed RGB buffer (drop alpha) from RGBA pixels.

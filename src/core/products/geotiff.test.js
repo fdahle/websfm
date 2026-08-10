@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import { fromArrayBuffer } from 'geotiff'
-import { writeGeoTiff, writeCog, geoKeysForEpsg } from './geotiff.js'
+import {
+  writeGeoTiff, writeCog, writeCogDeflate, planCog, assembleCog, geoKeysForEpsg,
+} from './geotiff.js'
 
 // Minimal baseline-TIFF reader (little-endian) — enough to verify the writer.
 function parseTiff(bytes) {
@@ -349,5 +351,107 @@ describe('geoKeysForEpsg', () => {
 
   it('falls back to a user-defined model when no code is given', () => {
     expect(geoKeysForEpsg(null, false)).toEqual([[1024, 0, 1, 32767], [1025, 0, 1, 1]])
+  })
+})
+
+// ── COG: compression + layout ────────────────────────────────────────────────
+
+// The same zlib-stream callback the app injects (CompressionStream is DOM/worker
+// -only, which is why the writer takes it rather than importing one).
+async function deflateBytes(bytes) {
+  const cs = new CompressionStream('deflate')
+  const w = cs.writable.getWriter()
+  w.write(bytes); w.close()
+  return new Uint8Array(await new Response(cs.readable).arrayBuffer())
+}
+
+describe('writeCogDeflate', () => {
+  it('round-trips pixel-for-pixel through per-tile DEFLATE', async () => {
+    const w = 40, h = 24
+    const data = ramp(w, h, 1)
+    const bytes = await writeCogDeflate(
+      { ...cogBase, width: w, height: h, data, tileSize: 16 }, deflateBytes)
+    const tiff = await fromArrayBuffer(toBuf(bytes))
+    const img = await tiff.getImage(0)
+    expect(await tag(img, 'Compression')).toBe(8)   // Adobe DEFLATE
+    const [band] = await img.readRasters()
+    expect(Array.from(band)).toEqual(Array.from(data))
+  })
+
+  it('keeps overviews readable and compressed too', async () => {
+    const bytes = await writeCogDeflate(
+      { ...cogBase, width: 40, height: 24, data: ramp(40, 24, 1), tileSize: 16 }, deflateBytes)
+    const tiff = await fromArrayBuffer(toBuf(bytes))
+    expect(await tiff.getImageCount()).toBe(3)
+    const ov = await tiff.getImage(1)
+    expect(await tag(ov, 'Compression')).toBe(8)
+    const [band] = await ov.readRasters()
+    expect(band.length).toBe(20 * 12)
+  })
+
+  it('is smaller than the uncompressed form on compressible data', async () => {
+    // A constant plane is the clearest case: uncompressed pays full tile bytes.
+    const w = 128, h = 128
+    const flat = new Float32Array(w * h).fill(42)
+    const spec = { ...cogBase, width: w, height: h, data: flat, tileSize: 16 }
+    const plain = writeCog(spec)
+    const packed = await writeCogDeflate(spec, deflateBytes)
+    expect(packed.length).toBeLessThan(plain.length / 4)
+  })
+
+  it('falls back to the uncompressed writer when no deflate is supplied', async () => {
+    const spec = { ...cogBase, width: 40, height: 24, data: ramp(40, 24, 1), tileSize: 16 }
+    const bytes = await writeCogDeflate(spec, null)
+    const img = await (await fromArrayBuffer(toBuf(bytes))).getImage(0)
+    expect(await tag(img, 'Compression')).toBe(1)
+  })
+})
+
+describe('planCog / assembleCog', () => {
+  it('hands back tiles in write order — overviews first, full resolution last', () => {
+    const { plan, tiles } = planCog(
+      { ...cogBase, width: 40, height: 24, data: ramp(40, 24, 1), tileSize: 16 })
+    expect(plan.levels).toEqual([
+      { width: 40, height: 24 }, { width: 20, height: 12 }, { width: 10, height: 6 },
+    ])
+    // Level 2 (a single tile) comes first; level 0's six tiles come last.
+    expect(plan.order[0].li).toBe(2)
+    expect(plan.order[plan.order.length - 1].li).toBe(0)
+    expect(tiles.length).toBe(plan.order.length)
+    expect(tiles.length).toBe(plan.tileCounts.reduce((a, b) => a + b, 0))
+  })
+
+  it('records each tile\'s real byte count, so variable-size tiles stay readable', async () => {
+    const spec = { ...cogBase, width: 40, height: 24, data: ramp(40, 24, 1), tileSize: 16 }
+    const { plan, tiles } = planCog(spec)
+    const packed = []
+    for (const t of tiles) packed.push(await deflateBytes(t))
+    // Compression makes the tiles different sizes — the failure this guards is a
+    // writer that assumes one fixed tile length for TileByteCounts.
+    expect(new Set(packed.map((p) => p.length)).size).toBeGreaterThan(1)
+    const bytes = assembleCog(plan, packed, { compression: 8 })
+    const [band] = await (await fromArrayBuffer(toBuf(bytes))).getImage(0).then((i) => i.readRasters())
+    expect(Array.from(band)).toEqual(Array.from(spec.data))
+  })
+
+  it('rejects a tile array that does not match the plan', () => {
+    const { plan, tiles } = planCog(
+      { ...cogBase, width: 40, height: 24, data: ramp(40, 24, 1), tileSize: 16 })
+    expect(() => assembleCog(plan, tiles.slice(1))).toThrow(/expected/)
+  })
+
+  it('writes the GDAL ghost area so readers recognise the COG layout', () => {
+    const bytes = writeCog(
+      { ...cogBase, width: 40, height: 24, data: ramp(40, 24, 1), tileSize: 16 })
+    const ghost = new TextDecoder().decode(bytes.subarray(8, 160))
+    expect(ghost).toContain('GDAL_STRUCTURAL_METADATA_SIZE=')
+    expect(ghost).toContain('LAYOUT=IFDS_BEFORE_DATA')
+    // The declared size must match the block that follows the first line, or a
+    // reader parses into the first IFD.
+    const head = ghost.slice(0, ghost.indexOf('\n') + 1)
+    const declared = Number(/SIZE=(\d+)/.exec(head)[1])
+    const body = new TextDecoder().decode(bytes.subarray(8 + head.length, 8 + head.length + declared))
+    expect(body.endsWith('\n')).toBe(true)
+    expect(body).toContain('KNOWN_INCOMPATIBLE_EDITION=NO')
   })
 })

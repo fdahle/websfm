@@ -32,6 +32,7 @@ import { toNorm, camToP34flat, reprojErr, retriangulatePairs, mergeSplitTracks }
 import { selectInitPair } from './initPair.js'
 import { registerImages } from './register.js'
 import { triangulateGcp } from './gcpTriangulation.js'
+import { precisionFromGcp, precisionInSfmFrame } from '../gcpAccuracy.js'
 import {
   stagedSelfCalTerms, stagedSelfCalDeferred, SELF_CAL_BASE_TERMS,
   distortionIdentifiable, withoutDistortionTerms,
@@ -40,6 +41,7 @@ import { fitComposedRadial, radialCurveOk } from './selfCalCompose.js'
 import { validateSelfCalUpdate } from './selfCalGuard.js'
 import { adaptiveReprojThreshold, CLEANUP_THRESHOLD_DEFAULTS } from './cleanupThreshold.js'
 import { fitSimilarity, frameFromSimilarity } from '../products/georef.js'
+import { orientationPriorInSfm } from './cameraPriors.js'
 import { graphHealth } from '../eval/matchGraph.js'
 import { RECONSTRUCT_DEFAULTS } from '../defaults.user.js'
 import { SFM_TUNING } from '../tuning.js'
@@ -101,6 +103,8 @@ async function reconstructSingleModel(input, hooks = {}) {
     selfCalMaxPrincipalOffsetFrac: cfg.selfCalMaxPrincipalOffsetFrac,
     selfCalMaxCornerShiftFrac: cfg.selfCalMaxCornerShiftFrac,
     cameraPositionPriors: cameraPriors.length,
+    cameraOrientationPriors: cameraPriors.filter((p) =>
+      [p.omega, p.phi, p.kappa].every(Number.isFinite)).length,
   }
   // Filled in below as each stage runs; every field stays null when its stage
   // didn't run, so a missing number is never confused with a zero.
@@ -1082,9 +1086,9 @@ async function reconstructSingleModel(input, hooks = {}) {
       log(`${label} reprojection — ${fmtStats(modelReprojStats())}`, 'info', 'Reconstruction')
     }
 
-    // Convert project-CRS camera positions into targets in the current arbitrary
-    // SfM frame. The best-fit similarity removes the unobservable global gauge;
-    // the remaining residuals describe block deformation, which BA can correct.
+    // Convert project-CRS camera poses into targets in the current arbitrary SfM
+    // frame. The best-fit position similarity removes the global gauge; imported
+    // orientations are then composed through its rotation into the same frame.
     function buildCameraPriorConstraints(uuidList, reference = null) {
       const camIdxOf = new Map(uuidList.map((uuid, i) => [uuid, i]))
       const usable = cameraPriors.filter((p) => camIdxOf.has(p.uuid)
@@ -1108,6 +1112,7 @@ async function reconstructSingleModel(input, hooks = {}) {
           camIdx: camIdxOf.get(p.uuid), target: frame.toSfm([p.x, p.y, p.z]),
           // sigma_sfm = sigma_project / scale, hence inverse variance scales by s².
           weights: sigma.map((v) => fit.scale * fit.scale / (v * v)),
+          ...(orientationPriorInSfm(p, fit.R) ?? {}),
         }
       })
       return { fit, priors }
@@ -1166,7 +1171,7 @@ async function reconstructSingleModel(input, hooks = {}) {
     // triangulated position of each GCP toward its surveyed position via
     // bundle.rs's anchor residual — GCPs constrain the reconstruction directly
     // rather than only fitting a post-hoc similarity. `gcps[].observations` are
-    // pre-resolved to `{ uuid, px, py }` (the store maps imageId → uuid before
+    // pre-resolved to `{ uuid, px, py, accuracyX, accuracyY }` (the store maps imageId → uuid before
     // crossing into the worker).
     //
     // Runs (triangulate → fit → anchored BA) twice — hard-coded, not a user
@@ -1179,7 +1184,7 @@ async function reconstructSingleModel(input, hooks = {}) {
       const qualifying = gcps.filter((g) => {
         if (g.role === 'check') return false
         if (g.enabled === false || !Number.isFinite(g.x)
-            || !Number.isFinite(g.y) || !Number.isFinite(g.z)) return false
+            || !Number.isFinite(g.y) || !Number.isFinite(g.z) || !precisionFromGcp(g)) return false
         const nReg = (g.observations || []).filter((o) => cameras.has(o.uuid)).length
         return nReg >= 2
       })
@@ -1196,7 +1201,8 @@ async function reconstructSingleModel(input, hooks = {}) {
         for (const g of qualifying) {
           const obsWithCam = (g.observations || []).filter((o) => cameras.has(o.uuid))
           const tri = await triangulateGcp(
-            obsWithCam.map((o) => ({ imageId: o.uuid, px: o.px, py: o.py })),
+            obsWithCam.map((o) => ({ imageId: o.uuid, px: o.px, py: o.py,
+              accuracyX: o.accuracyX, accuracyY: o.accuracyY })),
             cameras,
           )
           out.push({ g, tri, obsWithCam })
@@ -1208,12 +1214,10 @@ async function reconstructSingleModel(input, hooks = {}) {
         const tri = await triangulateQualifying()
         const pairs = tri.filter((r) => r.tri)
           .map((r) => {
-            const sigmas = [r.g.accuracyX, r.g.accuracyY, r.g.accuracyZ]
-              .map((v) => Number.isFinite(v) && v > 0 ? v : 1)
-            const variance = sigmas.reduce((sum, sigma) => sum + sigma * sigma, 0) / 3
             return {
               src: [r.tri.x, r.tri.y, r.tri.z], dst: [r.g.x, r.g.y, r.g.z],
-              weight: 1 / Math.max(1e-12, variance),
+              weight: 3 / (r.g.accuracyX ** 2 + r.g.accuracyY ** 2 + r.g.accuracyZ ** 2),
+              precision: precisionFromGcp(r.g),
             }
           })
         if (pairs.length < 3) {
@@ -1259,15 +1263,13 @@ async function reconstructSingleModel(input, hooks = {}) {
           const pi = points3d.length + anchorPts.length
           anchorPts.push({ x: t.x, y: t.y, z: t.z })
           const target = frame.toSfm([g.x, g.y, g.z])
-          const accuracy = Math.sqrt(((g.accuracyX ?? 1) ** 2
-            + (g.accuracyY ?? 1) ** 2 + (g.accuracyZ ?? 1) ** 2) / 3)
-          // Accuracy is a std-dev in CRS units; the anchor residual is measured in
-          // the SfM frame, `fit.scale` apart from CRS — weight = 1/sigma_sfm².
-          const weight = (fit.scale * fit.scale) / Math.max(1e-6, accuracy * accuracy)
-          anchors.push({ ptIdx: pi, target, weight })
+          const precision = precisionInSfmFrame(g, fit)
+          if (!precision) return
+          anchors.push({ ptIdx: pi, target, precision })
           for (const o of obsWithCam) {
             const ci = camIdxOf.get(o.uuid)
-            if (ci != null) observations.push({ camIdx: ci, ptIdx: pi, x: o.px, y: o.py })
+            if (ci != null) observations.push({ camIdx: ci, ptIdx: pi, x: o.px, y: o.py,
+              weightX: 1 / ((o.accuracyX ?? 1) ** 2), weightY: 1 / ((o.accuracyY ?? 1) ** 2) })
           }
         })
         if (!anchors.length) return

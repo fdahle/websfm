@@ -23,14 +23,15 @@
  *
  * GCP support: `anchor_flat`/`anchor_weight` optionally pull specific 3D points
  * toward a known target position (e.g. a GCP triangulated in this same SfM
- * frame) with an extra quadratic residual `w·‖pt − target‖²`. This only ever
+ * frame) with an extra quadratic residual `Σ_axis w_axis·(pt − target)²`. This only ever
  * touches that point's own 3×3 block (gradient + diagonal Hessian) — no camera
  * Jacobian, no new coupling — so it folds into the existing per-point Schur
  * elimination for free. Empty anchor arrays reduce to today's behaviour exactly.
- * Camera-position support: `camera_prior_flat` optionally pulls camera centres
- * `C = -R^T t` toward known positions in this same SfM frame. Each row carries
- * independent inverse-variance weights for X/Y/Z. Its analytic pose Jacobian is
- * `[-R^T | -R^T[t]_x]` for this solver's `[dt,domega]` update convention.
+ * Camera-pose support: `camera_prior_flat` optionally pulls camera centres
+ * `C = -R^T t` and rotations toward known poses in this same SfM frame. Position
+ * rows carry independent inverse-variance weights for X/Y/Z. Orientation uses
+ * the tangent residual `Log(R R_target^T)` and a full 3×3 precision matrix,
+ * allowing the caller to transform per-OPK uncertainties into solver axes.
  *
  * # Inputs
  * - `cameras_flat`: n_cam × 12 floats `[R(9)|t(3), …]`
@@ -38,10 +39,13 @@
  * - `pts_flat`: n_pts × 3 floats `[x,y,z, …]`
  * - `obs_flat`: n_obs × 4 floats `[cam_i, pt_i, pixel_x, pixel_y, …]`
  * - `anchor_flat`: n_anchor × 4 floats `[pt_i, target_x, target_y, target_z, …]`
- * - `anchor_weight`: n_anchor floats, one `1/sigma²` weight per anchor (aligned
- *   with `anchor_flat`'s rows; missing entries default to weight 1)
- * - `camera_prior_flat`: n_prior × 7 floats
- *   `[cam_i, target_x, target_y, target_z, weight_x, weight_y, weight_z, …]`
+ * - `observation_weight`: n_obs × 2 inverse-variance pixel weights (X/Y);
+ *   feature observations use 1, GCP marks use their declared pixel variances
+ * - `anchor_weight`: n_anchor × 9 floats, row-major 3×3 precision matrices
+ * - `camera_prior_flat`: n_prior × 25 floats
+ *   `[cam_i, target_x, target_y, target_z, weight_x, weight_y, weight_z,
+ *     target_R(9), orientation_precision(9), …]`. An all-zero orientation
+ *   precision matrix makes the row position-only.
  * - `max_iters`: outer LM iterations
  * - `sensor_of_cam`: n_cam ints — per-camera sensor id (shared → shared focal);
  *   `< 0` (or a short/empty list) ⇒ that camera is its own group
@@ -61,7 +65,7 @@
  * residual in the caller's world units, and camera_prior_rms_after is the RMS
  * camera-centre residual (both 0 when their respective prior list is empty).
  */
-export function bundle_adjust(cameras_flat: Float32Array, intrinsics_flat: Float32Array, pts_flat: Float32Array, obs_flat: Float32Array, anchor_flat: Float32Array, anchor_weight: Float32Array, camera_prior_flat: Float32Array, max_iters: number, sensor_of_cam: Int32Array, refine_mask: number): Float32Array;
+export function bundle_adjust(cameras_flat: Float32Array, intrinsics_flat: Float32Array, pts_flat: Float32Array, obs_flat: Float32Array, observation_weight: Float32Array, anchor_flat: Float32Array, anchor_weight: Float32Array, camera_prior_flat: Float32Array, max_iters: number, sensor_of_cam: Int32Array, refine_mask: number): Float32Array;
 
 export function compute_depth_map(ref_gray: Uint8Array, ref_w: number, ref_h: number, ref_k: Float32Array, src_gray: Uint8Array, src_dims: Uint32Array, src_k: Float32Array, src_rel: Float32Array, src_mask: Uint8Array, seed_depth: Float32Array, depth_min: number, depth_max: number, window: number, iterations: number, best_k: number, seed: number): Float32Array;
 
@@ -121,7 +125,7 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
-    readonly bundle_adjust: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number) => [number, number];
+    readonly bundle_adjust: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number, s: number, t: number) => [number, number];
     readonly compute_depth_map: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number, s: number, t: number, u: number, v: number, w: number, x: number) => [number, number];
     readonly recover_pose: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number];
     readonly solve_pnp: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number];

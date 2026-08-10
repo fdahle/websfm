@@ -11,6 +11,7 @@ import ImageInfoModal from './components/modals/ImageInfoModal.vue'
 import DetectFeaturesModal from './components/modals/DetectFeaturesModal.vue'
 import MatchFeaturesModal from './components/modals/MatchFeaturesModal.vue'
 import ImageTableModal from './components/modals/ImageTableModal.vue'
+import CameraPoseTableModal from './components/modals/CameraPoseTableModal.vue'
 import MaskManagerModal from './components/modals/MaskManagerModal.vue'
 import AutoMaskModal from './components/modals/AutoMaskModal.vue'
 import SensorTableModal from './components/modals/SensorTableModal.vue'
@@ -85,11 +86,14 @@ import CameraImportModal from './components/modals/CameraImportModal.vue'
 import ImportKindModal from './components/modals/ImportKindModal.vue'
 import ImportCloudModal from './components/modals/ImportCloudModal.vue'
 import ImportRasterModal from './components/modals/ImportRasterModal.vue'
+import InteropImportModal from './components/modals/InteropImportModal.vue'
+import InteropSourceModal from './components/modals/InteropSourceModal.vue'
 import RasterStyleModal from './components/modals/RasterStyleModal.vue'
 import * as opfs from './utils/opfs.js'
 import { ensureProjection } from './core/crs.js'
 import { resolveK } from './core/sfm/reconstruction.js'
 import { estimateUpFromCameras } from './core/sfm/geometry.js'
+import { useSfmInterop } from './composables/useSfmInterop.js'
 
 // ── Theme ─────────────────────────────────────────────────────────────────────
 const { theme, applyTheme, setTheme } = useTheme()
@@ -165,8 +169,8 @@ const { sidebarWidth, startSidebarResize } = useSidebarResize()
 // ── Reconstruction ────────────────────────────────────────────────────────────
 // Project-scoped store; restore/clear run through the project-store registry.
 const reconstructionStore = useReconstructionStore()
-const { cameras, sparseCameras, points3d, reconStatus, clouds, selectedCloudId, selectedCloud, mainSparseId, mainSparseCloud, depthMapCount, dem, ortho, georef, canGeoreference, canGeoreferenceGcps, denseSummary } = storeToRefs(reconstructionStore)
-const { reconstruct, importColmapModel, importCloud, editClouds, computeDepthMaps, densify, generateDem, generateOrtho, generateMesh, georeference, gcpAccuracyReport, gcpGuides, gcpEstimate, selectCloud, removeCloud, renameCloud, setMainSparse, clearDerived: clearReconstructionDerived } = reconstructionStore
+const { cameras, sparseCameras, points3d, reconStatus, clouds, selectedCloudId, selectedCloud, mainSparseId, mainSparseCloud, depthMapCount, dem, ortho, georef, canGeoreference, canGeoreferenceGcps, denseSummary, summary: reconSummary } = storeToRefs(reconstructionStore)
+const { reconstruct, importColmapModel, importInteropModel, importCloud, editClouds, computeDepthMaps, densify, generateDem, generateOrtho, generateMesh, georeference, gcpAccuracyReport, gcpGuides, gcpEstimate, selectCloud, removeCloud, renameCloud, setMainSparse, clearDerived: clearReconstructionDerived } = reconstructionStore
 
 async function clearCurrentProjectDerived() {
   await clearReconstructionDerived()
@@ -201,8 +205,9 @@ function zoomToCloud(id) {
 // ── Ground Control Points ───────────────────────────────────────────────────────
 const { log } = useLog()
 const gcpsStore = useGcpsStore()
-const { gcps } = storeToRefs(gcpsStore)
-const { addGcps, addGcp, setGcpName, setGcpRole, setGcpPosition, setGcpAccuracy, setObservation, removeObservation, removeGcp, reprojectGcps } = gcpsStore
+const { gcps, importDefaults: gcpImportDefaults } = storeToRefs(gcpsStore)
+const { addGcps, addGcp, setGcpName, setGcpRole, setGcpPosition, setGcpAccuracy, setObservation,
+  setGcpVerticalDatum, setObservationAccuracy, removeObservation, removeGcp, reprojectGcps } = gcpsStore
 
 // GCP elevations from an imported reference DEM (the stated goal of the
 // external-reference-data work). The sampler is *injected* rather than imported
@@ -460,14 +465,14 @@ const {
   settingsOpen, projectSettingsOpen, aboutOpen, systemInfoOpen,
   projectPickerOpen, newProjectOpen, newProjectCanCancel, saveProjectOpen,
   detectFeaturesOpen, matchFeaturesOpen,
-  imageTableOpen, maskManagerOpen, autoMaskOpen, sensorTableOpen, gcpTableOpen, matchListOpen, reconstructOpen,
+  imageTableOpen, poseTableOpen, maskManagerOpen, autoMaskOpen, sensorTableOpen, gcpTableOpen, matchListOpen, reconstructOpen,
   findGcpsOpen, georeferenceOpen,
   depthMapsOpen, denseOpen, demOpen, orthoOpen, meshOpen,
   cropCloudOpen, filterCloudOpen, mergeCloudsOpen,
   gcpImportOpen, gcpImportText, gcpImportName, gcpImportGeojson, gcpImportCrs,
   footprintImportOpen, footprintImportData, footprintFromPosesOpen,
   cameraImportOpen, cameraImportText, cameraImportName, cameraImportMode,
-  importKindOpen, importKindFile,
+  importKindDeclared, importKindOpen, importKindFile,
   importCloudOpen, importCloudData,
   importRasterOpen, importRasterData, rasterStyleId,
   infoImageId,
@@ -549,7 +554,7 @@ const {
   progressOpen, progressTitle, progressCurrent, progressTotal, progressLabel,
   progressUnit, progressFraction, progressIndeterminate, progressComplete, progressCancelling,
   cancelRun, runDetect, runMatch, runReconstruct, runComputeDepthMaps, runDensify,
-  runGenerateDem, runGenerateOrtho, runGenerateMesh, runEditClouds,
+  runGenerateDem, runGenerateOrtho, runGenerateMesh, runEditClouds, progress: exportProgress,
 } = usePipeline({ images, detectAll, matchAll, reconstruct, computeDepthMaps, densify, generateDem, generateOrtho, generateMesh, editClouds })
 
 // Dense pipeline gating for the Ribbon.
@@ -960,6 +965,10 @@ async function handleSetCrs(crs) {
 // ── Import (dropped / picked files) ──────────────────────────────────────────────
 // The whole import funnel lives in useImportRouting; it drives the import modals
 // (state in useModalsStore) and commits through these store actions.
+const { importSession: sfmImportSession, openImport: openSfmImport, closeImport: closeSfmImport, commitImport: commitSfmImport } = useSfmInterop({
+  addImages, importColmapModel, importInteropModel, activateTab,
+})
+
 const {
   cameraPickMode,
   openImportFile, openDroppedImport, routeImport,
@@ -971,10 +980,14 @@ const {
 } = useImportRouting({
   addGcps, addFootprints, addSensors, addPoses, addFiducialObs: addFiducialObservations,
   importColmap: importColmapModel, importCloud,
+  openSfmProject: openSfmImport,
   // A dropped `.tif` arrives as `image/tiff` and would otherwise be ingested as
   // a source photo, so the image path is routed through the georeference fork.
   importRaster, addImages, importProjectFile,
   activateTab,
+  showGcps: () => { gcpTableOpen.value = true },
+  showSensors: () => { sensorTableOpen.value = true },
+  showPoses: () => { poseTableOpen.value = true },
 })
 
 // Switch to the map and centre it on an image's position (pose or EXIF GPS).
@@ -1005,7 +1018,7 @@ const {
   exportKind, exportPoses, exportSensors, exportKeypoints, exportMatches, onExportRun,
 } = useExports({
   poses, sensors, images, matchStore, clouds, selectedCloud, mainSparseCloud, dem, ortho,
-  georef, currentProjectName, currentCrs,
+  georef, currentProjectName, currentCrs, summary: reconSummary, progress: exportProgress,
 })
 
 // ── Pipeline handlers (close modal, then delegate to usePipeline) ─────────────
@@ -1215,6 +1228,8 @@ const ribbonInput = ref(null)
 const gcpInput = ref(null)
 const cameraInput = ref(null)
 const colmapInput = ref(null)
+const sfmFolderInput = ref(null)
+const sfmSourceOpen = ref(false)
 const cloudInput = ref(null)
 const rasterInput = ref(null)
 const projectFileInput = ref(null)
@@ -1231,6 +1246,7 @@ const projectFileInput = ref(null)
 const MODAL_COMMANDS = {
   'save-project-file':     saveProjectOpen,
   'open-image-table':      imageTableOpen,
+  'open-pose-table':       poseTableOpen,
   'open-mask-manager':     maskManagerOpen,
   'auto-mask':             autoMaskOpen,
   'open-sensor-table':     sensorTableOpen,
@@ -1284,7 +1300,7 @@ function handleCommand(id) {
     case 'import-gcps':          gcpInput.value.click(); break
     case 'import-camera-list':   cameraPickMode.value = 'pose';   cameraInput.value.click(); break
     case 'import-calib':         cameraPickMode.value = 'sensor'; cameraInput.value.click(); break
-    case 'import-colmap':        colmapInput.value.click(); break
+    case 'import-colmap':        sfmSourceOpen.value = true; break
     case 'import-cloud':         cloudInput.value.click(); break
     case 'import-raster':        rasterInput.value.click(); break
     case 'export-cameras':       exportPoses(); break
@@ -1293,6 +1309,8 @@ function handleCommand(id) {
     case 'export-mesh':          exportKind.value = 'mesh'; break
     case 'export-model':         exportKind.value = 'model'; break
     case 'export-colmap':        exportKind.value = 'colmap'; break
+    case 'export-undistorted':   exportKind.value = 'undistorted'; break
+    case 'export-tiles3d':       exportKind.value = 'tiles3d'; break
     case 'export-dem':           exportKind.value = 'dem'; break
     case 'export-ortho':         exportKind.value = 'ortho'; break
     case 'export-keypoints':     exportKeypoints(); break
@@ -1434,7 +1452,8 @@ function onRibbonPick(event) {
     <input ref="ribbonInput" type="file" accept="image/*" multiple hidden @change="onRibbonPick" />
     <input ref="gcpInput" type="file" accept=".csv,.txt,.tsv,.gcp,.pts,.geojson,.json,application/geo+json,text/*" hidden @change="onGcpPick" />
     <input ref="cameraInput" type="file" accept=".csv,.txt,.tsv,.cam,text/*" hidden @change="onCameraPick" />
-    <input ref="colmapInput" type="file" accept=".txt,.bin,.zip" multiple hidden @change="onColmapPick" />
+    <input ref="colmapInput" type="file" accept=".db,.sqlite,.txt,.bin,.zip,.json,.nvm" multiple hidden @change="(e) => { sfmSourceOpen = false; onColmapPick(e) }" />
+    <input ref="sfmFolderInput" type="file" webkitdirectory multiple hidden @change="(e) => { sfmSourceOpen = false; onColmapPick(e) }" />
     <input ref="cloudInput" type="file" accept=".ply,.las,.laz,.xyz,.pts" hidden @change="onCloudPick" />
     <input ref="rasterInput" type="file" accept=".tif,.tiff" hidden @change="onRasterPick" />
     <input ref="projectFileInput" type="file" accept=".websfm,.zip" hidden @change="onProjectFilePick" />
@@ -1525,6 +1544,24 @@ function onRibbonPick(event) {
         :project-crs="currentCrs"
         @close="georeferenceOpen = false"
         @run="onGeoreferenceRun"
+      />
+    </Teleport>
+
+    <Teleport to="body">
+      <InteropSourceModal
+        v-if="sfmSourceOpen"
+        @close="sfmSourceOpen = false"
+        @files="colmapInput.click()"
+        @folder="sfmFolderInput.click()"
+      />
+    </Teleport>
+
+    <Teleport to="body">
+      <InteropImportModal
+        v-if="sfmImportSession"
+        :session="sfmImportSession"
+        @close="closeSfmImport"
+        @run="commitSfmImport"
       />
     </Teleport>
 
@@ -1646,6 +1683,8 @@ function onRibbonPick(event) {
         :project-crs="currentCrs"
         :geojson-gcps="gcpImportGeojson"
         :detected-crs="gcpImportCrs"
+        :accuracy-defaults="gcpImportDefaults"
+        :kind-declared="importKindDeclared"
         @close="gcpImportOpen = false; gcpImportGeojson = null; gcpImportText = ''; gcpImportCrs = null"
         @import="onGcpImport"
         @switch-kind="onImportSwitchKind"
@@ -1723,6 +1762,7 @@ function onRibbonPick(event) {
         :file-name="cameraImportName"
         :project-crs="currentCrs"
         :detected-mode="cameraImportMode"
+        :kind-declared="importKindDeclared"
         @close="cameraImportOpen = false"
         @import="onCameraImport"
         @switch-kind="onImportSwitchKind"
@@ -1782,6 +1822,13 @@ function onRibbonPick(event) {
         @open="(id) => { openImageTab(id); imageTableOpen = false }"
         @assign-sensor="({ imageId, sensorId }) => assignSensor(imageId, sensorId)"
         @open-sensor-table="imageTableOpen = false; sensorTableOpen = true"
+      />
+
+      <CameraPoseTableModal
+        v-if="poseTableOpen"
+        :poses="poses"
+        :crs="currentCrs"
+        @close="poseTableOpen = false"
       />
 
       <MaskManagerModal
@@ -1846,6 +1893,7 @@ function onRibbonPick(event) {
         @update-accuracy="({ id, kind, value }) => setGcpAccuracy(id, kind, value)"
         @update-name="({ id, name }) => setGcpName(id, name)"
         @update-role="changeGcpRole"
+        @update-vertical-datum="({ id, verticalDatum }) => setGcpVerticalDatum(id, verticalDatum)"
         @update-position="({ id, axis, value }) => setGcpPosition(id, axis, value)"
         @refresh-report="refreshGcpReport"
         @select="selectGcp"
@@ -1966,6 +2014,7 @@ function onRibbonPick(event) {
         @select-gcp="selectGcp"
         @jump-to-image="jumpToImage"
         @remove-gcp-observation="removeGcpObservation"
+        @update-gcp-observation-accuracy="({ gcpId, imageId, axis, value }) => setObservationAccuracy(gcpId, imageId, axis, value)"
         @open-gcp="openGcpView"
         @remove-sensor="confirmRemoveSensor"
         @merge-sensors="({ target, source }) => mergeSensors(target, source)"

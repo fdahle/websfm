@@ -389,7 +389,7 @@ describe('bundleAdjust', () => {
 
     const noAnchor = await bundleAdjust(cameras, intrinsics, nudged, observations, { maxIters: 40 })
     const withAnchor = await bundleAdjust(cameras, intrinsics, nudged, observations, {
-      maxIters: 40, gcpAnchors: [{ ptIdx: 0, target, weight: 1e4 }],
+      maxIters: 40, gcpAnchors: [{ ptIdx: 0, target, weights: [1e4, 1e4, 1e4] }],
     })
     expect(noAnchor).not.toBeNull()
     expect(withAnchor).not.toBeNull()
@@ -398,6 +398,36 @@ describe('bundleAdjust', () => {
     const dist = (p) => Math.hypot(p.x - target[0], p.y - target[1], p.z - target[2])
     expect(dist(withAnchor.points3d[0])).toBeLessThan(dist(noAnchor.points3d[0]) * 0.1)
     expect(withAnchor.anchorRmsAfter).toBeLessThan(0.05)
+  })
+
+  it('applies GCP anchor weights independently per axis', async () => {
+    const { cameras, intrinsics, points3d, observations } = exactScene(9, 40)
+    const p = points3d[0]
+    const target = [p.x + 0.5, p.y - 0.4, p.z + 0.6]
+    const result = await bundleAdjust(cameras, intrinsics, points3d, observations, {
+      maxIters: 40,
+      gcpAnchors: [{ ptIdx: 0, target, weights: [1e5, 1e5, 1e-6] }],
+    })
+    expect(result).not.toBeNull()
+    const fitted = result.points3d[0]
+    expect(Math.abs(fitted.x - target[0])).toBeLessThan(0.1)
+    expect(Math.abs(fitted.y - target[1])).toBeLessThan(0.1)
+    // The deliberately weak Z prior must not inherit the strong horizontal weight.
+    expect(Math.abs(fitted.z - target[2])).toBeGreaterThan(0.2)
+  })
+
+  it('applies per-axis observation weights in bundle adjustment', async () => {
+    const { cameras, intrinsics, points3d, observations } = exactScene(13, 40)
+    const target = { ...points3d[0] }
+    const corrupted = observations.map((o) => o.ptIdx === 0 && o.camIdx === 0
+      ? { ...o, x: o.x + 5, y: o.y - 4 } : { ...o })
+    const equal = await bundleAdjust(cameras, intrinsics, points3d, corrupted, { maxIters: 40 })
+    const weighted = await bundleAdjust(cameras, intrinsics, points3d,
+      corrupted.map((o) => o.ptIdx === 0 && o.camIdx === 0
+        ? { ...o, weightX: 1e-6, weightY: 1e-6 }
+        : (o.ptIdx === 0 ? { ...o, weightX: 100, weightY: 100 } : o)), { maxIters: 40 })
+    const error = (p) => Math.hypot(p.x-target.x, p.y-target.y, p.z-target.z)
+    expect(error(weighted.points3d[0])).toBeLessThan(error(equal.points3d[0]))
   })
 
   it('marshals camera-centre priors into bundle adjustment', async () => {
@@ -419,6 +449,29 @@ describe('bundleAdjust', () => {
     })
     expect(result).not.toBeNull()
     expect(result.cameraPriorRmsAfter).toBeLessThan(1e-3)
+    expect(result.costAfter).toBeLessThan(1e-3)
+  })
+
+  it('marshals camera-orientation priors into bundle adjustment', async () => {
+    const { cameras, intrinsics, points3d, observations } = exactScene(19, 50)
+    const targetR = rotY(0.12)
+    const result = await bundleAdjust(cameras, intrinsics, points3d, observations, {
+      maxIters: 80,
+      cameraPriors: [{
+        camIdx: 0, target: [0, 0, 0], weights: [1e-9, 1e-9, 1e-9],
+        targetR,
+        orientationPrecision: [[1e6, 0, 0], [0, 1e6, 0], [0, 0, 1e6]],
+      }],
+    })
+    expect(result).not.toBeNull()
+    const relative = matMul3(result.cameras[0].R, [
+      [targetR[0][0], targetR[1][0], targetR[2][0]],
+      [targetR[0][1], targetR[1][1], targetR[2][1]],
+      [targetR[0][2], targetR[1][2], targetR[2][2]],
+    ])
+    const angularError = Math.acos(Math.max(-1, Math.min(1,
+      (relative[0][0] + relative[1][1] + relative[2][2] - 1) / 2)))
+    expect(angularError).toBeLessThan(1e-3)
     expect(result.costAfter).toBeLessThan(1e-3)
   })
 

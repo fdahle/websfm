@@ -1,7 +1,8 @@
 import { ref, watch, computed } from 'vue'
 import { defineStore } from 'pinia'
 import { useLog } from '../composables/useLog.js'
-import { ensureProjection, transform } from '../core/crs.js'
+import { ensureProjection, isGeographic, localMetricFrame, metresToCrsUnits, transform } from '../core/crs.js'
+import { confidenceToSigma, precisionFromGcp, reprojectGcpWithAccuracy } from '../core/gcpAccuracy.js'
 import { hasGcpElevation, normalizeGcpRole } from '../core/io/gcp.js'
 import { makeNameResolver } from '../core/io/nameMatch.js'
 import * as opfs from '../utils/opfs.js'
@@ -9,12 +10,8 @@ import { registerProjectStore } from './projectStores.js'
 import { useImagesStore } from './useImagesStore.js'
 import { useProjectsStore } from './useProjectsStore.js'
 
-// Default measurement accuracies for a new GCP.
-//   x / y / z    — per-axis accuracy of the ground coordinates, in project-CRS units (e.g. metres)
-//   imgX / imgY  — accuracy of the image observations (marker projections), in pixels
-const DEFAULT_ACCURACY_X   = 1.0
-const DEFAULT_ACCURACY_Y   = 1.0
-const DEFAULT_ACCURACY_Z   = 1.0
+// Default accuracy of image observations (marker projections), in pixels.
+// Ground-coordinate accuracy has no implicit default: it must be declared.
 const DEFAULT_ACCURACY_IMG = 1.0
 
 // Project-scoped store: ground control points, stored in the project's working CRS.
@@ -27,25 +24,41 @@ export const useGcpsStore = registerProjectStore(defineStore('gcps', () => {
   const projects = useProjectsStore()
 
   // [{ id, name, role:'control'|'check', x, y, z, accuracyX, accuracyY,
-  //    accuracyZ, accuracyImgX, accuracyImgY,
-  //    observations: [{ imageId, imageName, px, py }], enabled }]
+  //    accuracyZ, correlations, provenance/datum, accuracyImgX, accuracyImgY,
+  //    observations: [{ imageId, imageName, px, py, accuracyX, accuracyY }], enabled }]
   // `role` and `enabled` are orthogonal: an enabled checkpoint is measured but
   // never enters georeferencing or BA; disabled points enter neither solve nor report.
   const gcps = ref([])
+  const importDefaults = ref({ accuracies: { x: null, y: null, z: null },
+    imageAccuracies: { x: 1, y: 1 }, settings: { preset: 'unknown', convention: '1sigma', unit: 'metres', verticalDatum: 'unknown' } })
 
-  // Backfill accuracy fields on GCPs loaded from older saved projects.
-  // (Pre-split `accuracyAbs`/`accuracyXY` seed the per-axis ground values; the
-  // former single `accuracyRel` seeds both image axes). Legacy points are controls.
+  // Canonicalize current-schema values loaded from persistence. Missing or
+  // invalid ground uncertainty stays unknown and therefore cannot constrain a
+  // solve; no compatibility defaults are inferred from retired fields.
   function normalize(g) {
+    const positive = (value) => Number.isFinite(Number(value)) && Number(value) > 0
+      ? Number(value) : null
+    const correlation = (value) => Number.isFinite(Number(value))
+      ? Math.max(-0.999, Math.min(0.999, Number(value))) : 0
+
     g.role = normalizeGcpRole(g.role)
-    if (g.accuracyX    == null) g.accuracyX    = g.accuracyXY ?? g.accuracyAbs ?? DEFAULT_ACCURACY_X
-    if (g.accuracyY    == null) g.accuracyY    = g.accuracyXY ?? g.accuracyAbs ?? DEFAULT_ACCURACY_Y
-    if (g.accuracyZ    == null) g.accuracyZ    = g.accuracyAbs ?? DEFAULT_ACCURACY_Z
-    if (g.accuracyImgX == null) g.accuracyImgX = g.accuracyRel ?? DEFAULT_ACCURACY_IMG
-    if (g.accuracyImgY == null) g.accuracyImgY = g.accuracyRel ?? DEFAULT_ACCURACY_IMG
-    delete g.accuracyAbs
-    delete g.accuracyXY
-    delete g.accuracyRel
+    g.accuracyX = positive(g.accuracyX)
+    g.accuracyY = positive(g.accuracyY)
+    g.accuracyZ = positive(g.accuracyZ)
+    g.accuracyImgX = positive(g.accuracyImgX) ?? DEFAULT_ACCURACY_IMG
+    g.accuracyImgY = positive(g.accuracyImgY) ?? DEFAULT_ACCURACY_IMG
+    g.accuracyConvention ??= '1sigma'
+    g.verticalDatum ??= 'unknown'
+    g.correlationXY = correlation(g.correlationXY)
+    g.correlationXZ = correlation(g.correlationXZ)
+    g.correlationYZ = correlation(g.correlationYZ)
+    g.accuracyStatus = precisionFromGcp(g)
+      ? (g.accuracyStatus && g.accuracyStatus !== 'unknown' ? g.accuracyStatus : 'declared')
+      : 'unknown'
+    for (const o of g.observations || []) {
+      o.accuracyX = positive(o.accuracyX) ?? g.accuracyImgX
+      o.accuracyY = positive(o.accuracyY) ?? g.accuracyImgY
+    }
     return g
   }
 
@@ -57,6 +70,7 @@ export const useGcpsStore = registerProjectStore(defineStore('gcps', () => {
     await opfs.saveGcps(projects.currentProjectId, {
       crs: projects.currentCrs,
       gcps: gcps.value,
+      importDefaults: importDefaults.value,
     }).catch((err) => log(`GCP save failed — ${err?.message ?? err}`, 'error', 'GCP'))
   }
 
@@ -90,8 +104,12 @@ export const useGcpsStore = registerProjectStore(defineStore('gcps', () => {
   )
 
   // Add parsed GCPs (given in `sourceCrs`), transforming positions into the project CRS.
-  async function addGcps(rawGcps, sourceCrs) {
+  async function addGcps(rawGcps, sourceCrs, defaultAccuracies = {}, accuracySettings = {}, defaultImageAccuracies = {}) {
     const projCrs = projects.currentCrs
+    const imageDefaults = {
+      x: Number.isFinite(Number(defaultImageAccuracies.x)) && Number(defaultImageAccuracies.x) > 0 ? Number(defaultImageAccuracies.x) : 1,
+      y: Number.isFinite(Number(defaultImageAccuracies.y)) && Number(defaultImageAccuracies.y) > 0 ? Number(defaultImageAccuracies.y) : 1,
+    }
     // If either CRS can't be resolved, transform() below would throw mid-loop —
     // bail with a clear log instead of rejecting silently into the caller.
     try {
@@ -101,22 +119,84 @@ export const useGcpsStore = registerProjectStore(defineStore('gcps', () => {
       log(`GCP import failed — could not resolve CRS (${err?.message ?? err})`, 'error', 'GCP')
       return 0
     }
+    importDefaults.value = {
+      accuracies: { x: defaultAccuracies.x ?? null, y: defaultAccuracies.y ?? null, z: defaultAccuracies.z ?? null },
+      imageAccuracies: imageDefaults,
+      settings: { preset: accuracySettings.preset ?? 'custom', convention: accuracySettings.convention ?? '1sigma',
+        unit: accuracySettings.unit ?? 'project', verticalDatum: accuracySettings.verticalDatum ?? 'unknown' },
+    }
 
-    let added = 0
+    let added = 0, unconstrained = 0
+    const convention = accuracySettings.convention ?? '1sigma'
+    const unit = accuracySettings.unit ?? 'project'
+    const importedAccuracy = (value, fallback = null, axis = 'x') => {
+      const sigma = confidenceToSigma(value, convention, axis)
+      return sigma ?? fallback
+    }
+    const defaults = {
+      x: importedAccuracy(defaultAccuracies.x, null, 'x'),
+      y: importedAccuracy(defaultAccuracies.y, null, 'y'),
+      z: importedAccuracy(defaultAccuracies.z, null, 'z'),
+    }
+    const toProjectAccuracy = (raw, values) => {
+      const base = {
+        x: raw.x, y: raw.y, z: raw.z,
+        accuracyX: values.x, accuracyY: values.y, accuracyZ: values.z,
+        correlationXY: raw.correlationXY ?? 0,
+        correlationXZ: raw.correlationXZ ?? 0,
+        correlationYZ: raw.correlationYZ ?? 0,
+      }
+      if (![values.x, values.y, values.z].every((v) => Number.isFinite(v) && v > 0)) return base
+      if (unit === 'source') return reprojectGcpWithAccuracy(base, sourceCrs, projCrs)
+      if (unit === 'metres') {
+        if (isGeographic(projCrs)) {
+          const [lon, lat] = transform([raw.x, raw.y], sourceCrs, projCrs)
+          return reprojectGcpWithAccuracy({ ...base, x: 0, y: 0 }, localMetricFrame(lon, lat), projCrs)
+        }
+        return { ...base,
+          accuracyX: metresToCrsUnits(values.x, projCrs),
+          accuracyY: metresToCrsUnits(values.y, projCrs),
+          accuracyZ: metresToCrsUnits(values.z, projCrs) }
+      }
+      return base
+    }
     for (const raw of rawGcps) {
       const [x, y, z] = transform([raw.x, raw.y, raw.z ?? 0], sourceCrs, projCrs)
+      const values = {
+        x: importedAccuracy(raw.accuracyX, defaults.x, 'x'),
+        y: importedAccuracy(raw.accuracyY, defaults.y, 'y'),
+        z: importedAccuracy(raw.accuracyZ, defaults.z, 'z'),
+      }
+      const accuracy = toProjectAccuracy(raw, values)
+      const hasAccuracy = precisionFromGcp(accuracy) != null
+      if (!hasAccuracy) unconstrained++
+      const hasExplicitAccuracy = [raw.accuracyX, raw.accuracyY, raw.accuracyZ].some((v) => v != null)
       const existing = gcps.value.find((g) => g.name === raw.name)
       const observations = (raw.observations || []).map((o) => ({
         imageId: resolveImageId.value(o.imageName),
         imageName: o.imageName,
         px: o.px,
         py: o.py,
+        accuracyX: Number.isFinite(o.accuracyX) && o.accuracyX > 0 ? o.accuracyX : imageDefaults.x,
+        accuracyY: Number.isFinite(o.accuracyY) && o.accuracyY > 0 ? o.accuracyY : imageDefaults.y,
       }))
       if (existing) {
         // Merge: update position + append observations we don't already have
         // (re-importing the same file must not duplicate observations).
         existing.x = x; existing.y = y; existing.z = raw.z != null ? z : existing.z
         existing.role = normalizeGcpRole(raw.role ?? existing.role)
+        // Only explicit per-row values replace existing accuracies. Import-wide
+        // fallbacks are for new points and must not erase later manual edits.
+        if (raw.accuracyX != null) existing.accuracyX = accuracy.accuracyX
+        if (raw.accuracyY != null) existing.accuracyY = accuracy.accuracyY
+        if (raw.accuracyZ != null) existing.accuracyZ = accuracy.accuracyZ
+        if ([raw.accuracyX, raw.accuracyY, raw.accuracyZ].some((v) => v != null)) {
+          existing.correlationXY = accuracy.correlationXY ?? 0
+          existing.correlationXZ = accuracy.correlationXZ ?? 0
+          existing.correlationYZ = accuracy.correlationYZ ?? 0
+          existing.accuracyStatus = hasAccuracy ? 'declared' : 'unknown'
+        }
+        if (accuracySettings.verticalDatum) existing.verticalDatum = accuracySettings.verticalDatum
         for (const o of observations) {
           const dup = existing.observations.some(
             (e) => e.imageName === o.imageName && e.px === o.px && e.py === o.py,
@@ -129,11 +209,16 @@ export const useGcpsStore = registerProjectStore(defineStore('gcps', () => {
           name: raw.name,
           role: normalizeGcpRole(raw.role),
           x, y, z: raw.z != null ? z : null,
-          accuracyX:    DEFAULT_ACCURACY_X,
-          accuracyY:    DEFAULT_ACCURACY_Y,
-          accuracyZ:    DEFAULT_ACCURACY_Z,
-          accuracyImgX: DEFAULT_ACCURACY_IMG,
-          accuracyImgY: DEFAULT_ACCURACY_IMG,
+          accuracyX: accuracy.accuracyX, accuracyY: accuracy.accuracyY, accuracyZ: accuracy.accuracyZ,
+          correlationXY: accuracy.correlationXY ?? 0,
+          correlationXZ: accuracy.correlationXZ ?? 0,
+          correlationYZ: accuracy.correlationYZ ?? 0,
+          accuracyStatus: hasAccuracy ? (hasExplicitAccuracy || accuracySettings.preset === 'custom'
+            ? 'declared' : `preset:${accuracySettings.preset ?? 'custom'}`) : 'unknown',
+          accuracyConvention: '1sigma',
+          verticalDatum: accuracySettings.verticalDatum ?? 'unknown',
+          accuracyImgX: imageDefaults.x,
+          accuracyImgY: imageDefaults.y,
           observations,
           enabled: true,
         })
@@ -142,6 +227,8 @@ export const useGcpsStore = registerProjectStore(defineStore('gcps', () => {
     }
     const obsCount = rawGcps.reduce((n, g) => n + (g.observations?.length || 0), 0)
     log(`GCPs imported: ${added} point(s)${obsCount ? `, ${obsCount} observation(s)` : ''} (from ${sourceCrs})`, 'success', 'GCP')
+    if (unconstrained) log(`${unconstrained} imported GCP(s) have unknown or invalid covariance and will not constrain the solution`,
+      'warn', 'GCP')
     await save()
     return added
   }
@@ -155,7 +242,9 @@ export const useGcpsStore = registerProjectStore(defineStore('gcps', () => {
     const id = crypto.randomUUID()
     gcps.value.push({
       id, name: `GCP ${n}`, role: 'control', x: 0, y: 0, z: null,
-      accuracyX: DEFAULT_ACCURACY_X, accuracyY: DEFAULT_ACCURACY_Y, accuracyZ: DEFAULT_ACCURACY_Z,
+      accuracyX: null, accuracyY: null, accuracyZ: null,
+      correlationXY: 0, correlationXZ: 0, correlationYZ: 0,
+      accuracyStatus: 'unknown', accuracyConvention: '1sigma', verticalDatum: 'unknown',
       accuracyImgX: DEFAULT_ACCURACY_IMG, accuracyImgY: DEFAULT_ACCURACY_IMG,
       observations: [], enabled: true,
     })
@@ -183,6 +272,13 @@ export const useGcpsStore = registerProjectStore(defineStore('gcps', () => {
     save()
   }
 
+  function setGcpVerticalDatum(id, verticalDatum) {
+    const g = gcps.value.find((x) => x.id === id)
+    if (!g || !['unknown', 'ellipsoidal', 'orthometric', 'local'].includes(verticalDatum)) return
+    g.verticalDatum = verticalDatum
+    save()
+  }
+
   // Update one ground-position axis ('x' | 'y' | 'z') of a GCP, in project-CRS
   // units. Empty/invalid input is ignored (keeps the previous value) rather
   // than silently persisting a NaN.
@@ -201,21 +297,29 @@ export const useGcpsStore = registerProjectStore(defineStore('gcps', () => {
   }
 
   // Update one accuracy field of a GCP: ground 'x'|'y'|'z' (CRS units) or image
-  // 'imgx'|'imgy' (pixels). Empty/invalid input falls back to that field's
-  // default so we never persist a NaN.
+  // 'imgx'|'imgy' (pixels). Empty clears the declaration; invalid numeric input
+  // is ignored so we never persist NaN.
   const ACCURACY_FIELDS = {
-    x:    { prop: 'accuracyX',    def: DEFAULT_ACCURACY_X   },
-    y:    { prop: 'accuracyY',    def: DEFAULT_ACCURACY_Y   },
-    z:    { prop: 'accuracyZ',    def: DEFAULT_ACCURACY_Z   },
-    imgx: { prop: 'accuracyImgX', def: DEFAULT_ACCURACY_IMG },
-    imgy: { prop: 'accuracyImgY', def: DEFAULT_ACCURACY_IMG },
+    x:    { prop: 'accuracyX' },
+    y:    { prop: 'accuracyY' },
+    z:    { prop: 'accuracyZ' },
+    imgx: { prop: 'accuracyImgX' },
+    imgy: { prop: 'accuracyImgY' },
   }
   function setGcpAccuracy(id, kind, value) {
     const field = ACCURACY_FIELDS[kind]
     const g = gcps.value.find((x) => x.id === id)
     if (!field || !g) return
-    const num = Number(value)
-    g[field.prop] = Number.isFinite(num) && num > 0 ? num : field.def
+    if (String(value ?? '').trim() === '') g[field.prop] = null
+    else {
+      const num = Number(value)
+      if (!(Number.isFinite(num) && num > 0)) return
+      g[field.prop] = num
+    }
+    if (kind === 'x' || kind === 'y' || kind === 'z') {
+      g.accuracyStatus = [g.accuracyX, g.accuracyY, g.accuracyZ].every((v) => Number.isFinite(v) && v > 0)
+        ? 'declared' : 'unknown'
+    }
     save()
   }
 
@@ -279,6 +383,9 @@ export const useGcpsStore = registerProjectStore(defineStore('gcps', () => {
       const before = g.z
       g.z = hit.z
       g.accuracyZ = hit.accuracy
+      g.verticalDatum = hit.datum ?? 'unknown'
+      g.accuracyStatus = [g.accuracyX, g.accuracyY, g.accuracyZ].every((v) => Number.isFinite(v) && v > 0)
+        ? 'declared' : 'unknown'
       filled++
       log(`GCP ${g.name}: Z ${before == null ? '—' : fmtNum(before)} → ${fmtNum(hit.z)} `
         + `from "${hit.rasterName}" (σ ${hit.accuracy}, ${hit.datum})`, 'info', 'GCP')
@@ -311,12 +418,18 @@ export const useGcpsStore = registerProjectStore(defineStore('gcps', () => {
         gcpId: g.id, name: g.name, x: g.x, y: g.y,
         gcpZ, demZ,
         dz: (demZ != null && gcpZ != null) ? demZ - gcpZ : null,
+        gcpDatum: g.verticalDatum ?? 'unknown',
         datum: hit?.datum ?? null,
         rasterName: hit?.rasterName ?? null,
       })
       log(`GCP ${g.name}: reference DEM ${demZ == null ? 'no data' : fmtNum(demZ)}`
         + `, GCP ${gcpZ == null ? '—' : fmtNum(gcpZ)}`
         + `${rows.at(-1).dz != null ? `, Δ ${fmtNum(rows.at(-1).dz)}` : ''}`, 'info', 'GCP')
+      if (hit?.datum && hit.datum !== 'unknown' && g.verticalDatum && g.verticalDatum !== 'unknown'
+          && hit.datum !== g.verticalDatum) {
+        log(`GCP ${g.name}: height datum ${g.verticalDatum} differs from reference DEM datum ${hit.datum}`,
+          'warn', 'GCP')
+      }
     }
     const withDz = rows.filter((r) => r.dz != null)
     if (withDz.length) {
@@ -346,7 +459,17 @@ export const useGcpsStore = registerProjectStore(defineStore('gcps', () => {
     if (!g) return
     const existing = g.observations.find((o) => o.imageId === imageId)
     if (existing) { existing.px = px; existing.py = py; existing.imageName = imageName }
-    else g.observations.push({ imageId, imageName, px, py })
+    else g.observations.push({ imageId, imageName, px, py, accuracyX: g.accuracyImgX, accuracyY: g.accuracyImgY })
+    save()
+  }
+
+  function setObservationAccuracy(gcpId, imageId, axis, value) {
+    const g = gcps.value.find((x) => x.id === gcpId)
+    const o = g?.observations?.find((obs) => obs.imageId === imageId)
+    if (!o || (axis !== 'x' && axis !== 'y')) return
+    const num = Number(value)
+    if (!(Number.isFinite(num) && num > 0)) return
+    o[axis === 'x' ? 'accuracyX' : 'accuracyY'] = num
     save()
   }
 
@@ -364,6 +487,8 @@ export const useGcpsStore = registerProjectStore(defineStore('gcps', () => {
   // reads it back and currentProjectId still points at the project being left.
   function clear({ purge = false } = {}) {
     gcps.value = []
+    importDefaults.value = { accuracies: { x: null, y: null, z: null },
+      imageAccuracies: { x: 1, y: 1 }, settings: { preset: 'unknown', convention: '1sigma', unit: 'metres', verticalDatum: 'unknown' } }
     if (purge && isPersisting()) opfs.deleteGcps(projects.currentProjectId).catch(() => {})
   }
 
@@ -373,14 +498,14 @@ export const useGcpsStore = registerProjectStore(defineStore('gcps', () => {
     const projectCrs = projectData?.crs
     gcps.value = []
     const data = await opfs.loadGcps(projectId)
+    if (data?.importDefaults) importDefaults.value = data.importDefaults
     if (!data?.gcps?.length) return
     // Stored CRS may differ from the current project CRS (e.g. CRS changed elsewhere).
     if (data.crs && projectCrs && data.crs !== projectCrs) {
       await ensureProjection(data.crs).catch(() => {})
       await ensureProjection(projectCrs).catch(() => {})
       gcps.value = data.gcps.map((g) => {
-        const [x, y, z] = transform([g.x, g.y, g.z ?? 0], data.crs, projectCrs)
-        return normalize({ ...g, x, y, z: g.z != null ? z : null })
+        return normalize(reprojectGcpWithAccuracy(normalize({ ...g }), data.crs, projectCrs))
       })
       await opfs.saveGcps(projectId, { crs: projectCrs, gcps: gcps.value }).catch(() => {})
     } else {
@@ -395,8 +520,7 @@ export const useGcpsStore = registerProjectStore(defineStore('gcps', () => {
     await ensureProjection(fromCrs).catch(() => {})
     await ensureProjection(toCrs).catch(() => {})
     gcps.value = gcps.value.map((g) => {
-      const [x, y, z] = transform([g.x, g.y, g.z ?? 0], fromCrs, toCrs)
-      return { ...g, x, y, z: g.z != null ? z : null }
+      return reprojectGcpWithAccuracy(g, fromCrs, toCrs)
     })
     await save()
     log(`GCPs re-projected to ${toCrs}`, 'info', 'GCP')
@@ -404,13 +528,16 @@ export const useGcpsStore = registerProjectStore(defineStore('gcps', () => {
 
   return {
     gcps,
+    importDefaults,
     addGcps,
     addGcp,
     setGcpName,
     setGcpRole,
+    setGcpVerticalDatum,
     setGcpPosition,
     setGcpAccuracy,
     setObservation,
+    setObservationAccuracy,
     removeObservation,
     removeGcp,
     fillZFromReferenceDem,

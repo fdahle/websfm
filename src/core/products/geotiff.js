@@ -207,20 +207,51 @@ function cutTiles(level, spp, tileSize, nodata) {
   return { tiles, across, down }
 }
 
-export function writeCog(spec) {
+// ── COG: plan → (compress) → assemble ────────────────────────────────────────
+//
+// Layout and bytes are split into two calls because compression is *async* here:
+// DEFLATE comes from the browser's CompressionStream, which is DOM/worker-only
+// and so is injected rather than imported (the same reason writeGeoTiff takes a
+// `deflate` callback). A tiled image has thousands of tiles across all levels, so
+// awaiting inside the writer would serialize thousands of round-trips; instead
+// `planCog` hands back the raw tiles, the caller compresses them however it likes
+// (batched, in parallel, or not at all), and `assembleCog` lays out the file once
+// the real byte counts are known — which they must be, since a compressed tile's
+// size is exactly what TileByteCounts records.
+//
+// `writeCog(spec)` remains the uncompressed one-shot form.
+
+// GDAL's "ghost area": a comment block immediately after the TIFF header that
+// lets a reader recognise the COG layout without scanning the whole file (it is
+// what makes gdalinfo report LAYOUT=COG). We advertise only what we actually do —
+// no BLOCK_LEADER/BLOCK_TRAILER, since we write bare tile data with no per-block
+// size prefix. The declared size counts the bytes after the first line.
+function ghostArea() {
+  const body = 'LAYOUT=IFDS_BEFORE_DATA\n'
+    + 'BLOCK_ORDER=ROW_MAJOR\n'
+    + 'KNOWN_INCOMPATIBLE_EDITION=NO\n'
+  const head = `GDAL_STRUCTURAL_METADATA_SIZE=${String(body.length).padStart(6, '0')} bytes\n`
+  return new TextEncoder().encode(head + body)
+}
+
+// Cut a raster into COG levels and tiles. Returns the raw (uncompressed) tiles in
+// **write order** — lowest-resolution overview first, full resolution last, which
+// is what puts the overviews in the first bytes of the file — plus the plan
+// assembleCog needs.
+export function planCog(spec) {
   const { width, height, samples, photometric, extraSamples, data,
           pixelScale, tiepoint, geoKeys, gdalNoData,
           tileSize = 256, maxOverviews = Infinity } = spec
   const spp = samples.length
   const { bits, format } = samples[0]
   if (!samples.every((s) => s.bits === bits && s.format === format))
-    throw new Error('writeCog: every sample must share bits and format')
+    throw new Error('planCog: every sample must share bits and format')
   if (tileSize % 16 || tileSize <= 0)
-    throw new Error('writeCog: tileSize must be a positive multiple of 16')
+    throw new Error('planCog: tileSize must be a positive multiple of 16')
   if (!ArrayBuffer.isView(data) || data instanceof DataView)
-    throw new Error('writeCog: data must be a TypedArray of the sample type')
+    throw new Error('planCog: data must be a TypedArray of the sample type')
   if (data.length !== width * height * spp)
-    throw new Error(`writeCog: data length ${data.length} != ${width}*${height}*${spp}`)
+    throw new Error(`planCog: data length ${data.length} != ${width}*${height}*${spp}`)
 
   const nodataNum = gdalNoData == null ? null : Number(gdalNoData)
   const nodata = nodataNum == null || Number.isNaN(nodataNum) ? null : nodataNum
@@ -236,8 +267,36 @@ export function writeCog(spec) {
   }
 
   const cut = levels.map((l) => cutTiles(l, spp, tileSize, nodata))
-  const tileBytes = tileSize * tileSize * spp * (bits / 8)
+  // Flat write order + the index back to (level, tile) so assembleCog can put each
+  // compressed buffer's byte count on the right IFD entry.
+  const order = []
+  const tiles = []
+  for (let li = levels.length - 1; li >= 0; li--) {
+    cut[li].tiles.forEach((t, ti) => { order.push({ li, ti }); tiles.push(t) })
+  }
+  const plan = {
+    levels: levels.map((l) => ({ width: l.width, height: l.height })),
+    tileCounts: cut.map((c) => c.tiles.length),
+    order, spp, samples, photometric, extraSamples,
+    pixelScale, tiepoint, geoKeys, gdalNoData, tileSize,
+  }
+  return { plan, tiles }
+}
+
+// Lay out and emit the file. `tileBuffers` must be the array planCog returned,
+// in the same order, either untouched or with each entry replaced by its
+// compressed form. `compression` is the TIFF tag value (1 = none, 8 = Adobe
+// DEFLATE) and must match what the caller actually did to the tiles.
+export function assembleCog(plan, tileBuffers, { compression = 1 } = {}) {
+  const { levels, tileCounts, order, spp, samples, photometric, extraSamples,
+          pixelScale, tiepoint, geoKeys, gdalNoData, tileSize } = plan
+  if (tileBuffers.length !== order.length)
+    throw new Error(`assembleCog: expected ${order.length} tiles, got ${tileBuffers.length}`)
   const even = (n) => (n % 2 ? n + 1 : n)
+
+  // Per-level tile byte counts, from what the caller actually produced.
+  const byteCounts = levels.map((_, li) => new Array(tileCounts[li]).fill(0))
+  order.forEach(({ li, ti }, i) => { byteCounts[li][ti] = tileBuffers[i].length })
 
   // --- Build each level's IFD entries (tag order ascending). --------------
   const ifds = levels.map((level, li) => {
@@ -251,13 +310,19 @@ export function writeCog(spec) {
     const shortField = (tag, vals) =>
       vals.length === 1 ? inline(tag, TYPE.SHORT, vals[0])
         : extern(tag, TYPE.SHORT, vals.length, shortArrayBytes(vals))
+    const longArray = (values) => {
+      const b = new Uint8Array(values.length * 4)
+      const bdv = new DataView(b.buffer)
+      values.forEach((v, i) => bdv.setUint32(i * 4, v, true))
+      return b
+    }
 
-    const nTiles = cut[li].tiles.length
+    const nTiles = tileCounts[li]
     inline(254, TYPE.LONG, li === 0 ? 0 : 1)          // NewSubfileType (1 = reduced resolution)
     inline(256, TYPE.LONG, level.width)
     inline(257, TYPE.LONG, level.height)
     shortField(258, samples.map((s) => s.bits))
-    inline(259, TYPE.SHORT, 1)                        // Compression: none
+    inline(259, TYPE.SHORT, compression)
     inline(262, TYPE.SHORT, photometric)
     inline(277, TYPE.SHORT, spp)
     inline(284, TYPE.SHORT, 1)                        // PlanarConfiguration: chunky
@@ -270,13 +335,8 @@ export function writeCog(spec) {
     if (nTiles === 1) offsetsEntry.inline = 0
     else { offsetsEntry.externIndex = externals.length; externals.push(new Uint8Array(nTiles * 4)) }
     entries.push(offsetsEntry)
-    if (nTiles === 1) inline(325, TYPE.LONG, tileBytes)
-    else {
-      const counts = new Uint8Array(nTiles * 4)
-      const cdv = new DataView(counts.buffer)
-      for (let i = 0; i < nTiles; i++) cdv.setUint32(i * 4, tileBytes, true)
-      extern(325, TYPE.LONG, nTiles, counts)
-    }
+    if (nTiles === 1) inline(325, TYPE.LONG, byteCounts[li][0])
+    else extern(325, TYPE.LONG, nTiles, longArray(byteCounts[li]))
     if (extraSamples && extraSamples.length) shortField(338, extraSamples)
     shortField(339, samples.map((s) => s.format))
     if (li === 0) {
@@ -295,8 +355,9 @@ export function writeCog(spec) {
     return { entries, externals, offsetsEntry }
   })
 
-  // --- Layout: header, all IFDs + their externals, then tile data. --------
-  let cur = 8
+  // --- Layout: header, ghost area, all IFDs + externals, then tile data. --
+  const ghost = ghostArea()
+  let cur = 8 + ghost.length
   for (const ifd of ifds) {
     cur = even(cur)
     ifd.offset = cur
@@ -304,13 +365,13 @@ export function writeCog(spec) {
     ifd.externOffsets = []
     for (const b of ifd.externals) { cur = even(cur); ifd.externOffsets.push(cur); cur += b.length }
   }
-  // Tile data order: lowest-resolution overview first, full resolution last.
-  const dataOrder = levels.map((_, i) => i).reverse()
-  const tileOffsets = levels.map(() => [])
-  for (const li of dataOrder) {
+  // Tile data in write order (overviews first), each 2-byte aligned.
+  const tileOffsets = levels.map((_, li) => new Array(tileCounts[li]).fill(0))
+  order.forEach(({ li, ti }, i) => {
     cur = even(cur)
-    for (let t = 0; t < cut[li].tiles.length; t++) { tileOffsets[li].push(cur); cur += tileBytes }
-  }
+    tileOffsets[li][ti] = cur
+    cur += tileBuffers[i].length
+  })
   const total = cur
 
   const out = new Uint8Array(total)
@@ -319,6 +380,7 @@ export function writeCog(spec) {
   out[0] = 0x49; out[1] = 0x49
   dv.setUint16(2, 42, true)
   dv.setUint32(4, ifds[0].offset, true)
+  out.set(ghost, 8)
 
   ifds.forEach((ifd, li) => {
     // Backfill the tile offsets now that they are known.
@@ -345,10 +407,24 @@ export function writeCog(spec) {
     ifd.externals.forEach((b, i) => out.set(b, ifd.externOffsets[i]))
   })
 
-  for (const li of dataOrder) {
-    cut[li].tiles.forEach((t, i) => out.set(t, tileOffsets[li][i]))
-  }
+  order.forEach(({ li, ti }, i) => out.set(tileBuffers[i], tileOffsets[li][ti]))
   return out
+}
+
+export function writeCog(spec) {
+  const { plan, tiles } = planCog(spec)
+  return assembleCog(plan, tiles)
+}
+
+// The compressed form: same plan, DEFLATE every tile through the injected async
+// callback. `deflate` is the same zlib-stream callback writeGeoTiff takes, so a
+// caller wires one function for both writers.
+export async function writeCogDeflate(spec, deflate) {
+  const { plan, tiles } = planCog(spec)
+  if (!deflate) return assembleCog(plan, tiles)
+  const packed = []
+  for (const t of tiles) packed.push(await deflate(t))
+  return assembleCog(plan, packed, { compression: 8 })
 }
 
 // GeoKeyDirectory entries for an EPSG code (or a bare geotransform when unknown).

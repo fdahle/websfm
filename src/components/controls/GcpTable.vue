@@ -14,7 +14,7 @@ const props = defineProps({
 
 const emit = defineEmits([
   'remove', 'update-accuracy', 'update-name', 'update-position', 'select', 'add',
-  'update-role', 'fill-z', 'check-z',
+  'update-role', 'update-vertical-datum', 'fill-z', 'check-z',
 ])
 
 // Compact coordinate formatting (projected metres vs. degrees in a geographic CRS).
@@ -78,6 +78,7 @@ function onPositionInput(gcp, axis, e) {
         <tr>
           <th>Name</th>
           <th title="Controls constrain the solution; checkpoints only measure independent accuracy">Role</th>
+          <th title="Accuracy provenance and vertical height datum">Uncertainty</th>
           <th>X</th>
           <th>Y</th>
           <th>Z</th>
@@ -90,8 +91,8 @@ function onPositionInput(gcp, axis, e) {
           <th :title="crs ? `Z-axis ground accuracy in ${crs} units` : 'Z-axis ground accuracy in CRS units'">
             Z accuracy
           </th>
-          <th title="Horizontal image-observation (marker) accuracy in pixels">Image X acc (px)</th>
-          <th title="Vertical image-observation (marker) accuracy in pixels">Image Y acc (px)</th>
+          <th title="Default X accuracy for newly marked image observations">Default image X σ (px)</th>
+          <th title="Default Y accuracy for newly marked image observations">Default image Y σ (px)</th>
           <th title="Number of images this GCP is marked in — needs ≥2 to be used">Observations</th>
           <th title="Fitted-vs-surveyed position residual, in CRS units">Residual (CRS)</th>
           <th title="Mean reprojection error across this GCP's marked observations">Reproj (px)</th>
@@ -118,6 +119,15 @@ function onPositionInput(gcp, axis, e) {
               @change="emit('update-role', { id: gcp.id, role: $event.target.value })" @click.stop>
               <option value="control">Control</option>
               <option value="check">Check</option>
+            </select>
+          </td>
+          <td class="uncertainty-cell" :class="{ unknown: !gcp.accuracyStatus || gcp.accuracyStatus === 'unknown' }"
+            :title="`Ground accuracy: ${gcp.accuracyStatus || 'unknown'}; height datum: ${gcp.verticalDatum || 'unknown'}`">
+            {{ !gcp.accuracyStatus || gcp.accuracyStatus === 'unknown' ? '⚠ unknown' : gcp.accuracyStatus.replace('preset:', '') }}
+            <select class="datum-select" :value="gcp.verticalDatum || 'unknown'" @click.stop
+              @change="emit('update-vertical-datum', { id: gcp.id, verticalDatum: $event.target.value })">
+              <option value="unknown">datum?</option><option value="ellipsoidal">ellipsoid</option>
+              <option value="orthometric">geoid</option><option value="local">local</option>
             </select>
           </td>
           <td class="num">
@@ -204,7 +214,9 @@ function onPositionInput(gcp, axis, e) {
             </span>
           </td>
           <td class="num">
-            <span v-if="reportFor(gcp)?.dTotal != null">{{ fmtCoord(reportFor(gcp).dTotal) }}</span>
+            <span v-if="reportFor(gcp)?.dTotal != null" :title="reportFor(gcp).normalized == null ? '' : `Mahalanobis residual ${reportFor(gcp).normalized.toFixed(2)}σ`">
+              {{ fmtCoord(reportFor(gcp).dTotal) }}<small v-if="reportFor(gcp).normalized != null" class="sigma-tag"> · {{ reportFor(gcp).normalized.toFixed(1) }}σ</small>
+            </span>
             <span v-else class="na">—</span>
           </td>
           <td class="num">
@@ -352,6 +364,7 @@ tbody tr:hover {
 .na {
   color: var(--text-dim);
 }
+.sigma-tag { color: var(--text-dim); font-size: 10px; }
 
 .acc-cell {
   width: 120px;
@@ -377,6 +390,11 @@ tbody tr:hover {
 .obs-low {
   color: #e0a030;
 }
+
+.uncertainty-cell { max-width: 90px; font-size: 10px; color: var(--text-dim); }
+.uncertainty-cell.unknown { color: #e0a030; }
+.uncertainty-cell small { display: block; font-size: 9px; opacity: .75; }
+.datum-select { display: block; max-width: 78px; margin-top: 2px; font-size: 9px; color: var(--text); background: var(--bg); border: 1px solid var(--panel-border); }
 
 .action-cell {
   width: 32px;

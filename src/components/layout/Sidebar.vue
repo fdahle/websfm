@@ -53,7 +53,7 @@ const props = defineProps({
 
 const emit = defineEmits([
   'add-images', 'import-file', 'remove-image', 'convert-image-to-raster', 'remove-gcp', 'select-gcp',
-  'jump-to-image', 'remove-gcp-observation', 'open-gcp',
+  'jump-to-image', 'remove-gcp-observation', 'update-gcp-observation-accuracy', 'open-gcp',
   'remove-sensor', 'merge-sensors', 'open-sensor', 'assign-sensor', 'remove-pose',
   'remove-shapefile', 'rename-shapefile', 'set-shapefile-on-map', 'zoom-to-shapefile',
   'select', 'open', 'show-info', 'delete-keypoints', 'zoom-to-image',
@@ -184,6 +184,7 @@ watch(() => props.pendingRasters.length, (count, previous) => {
       @select="emit('select-gcp', $event)"
       @jump-to-image="emit('jump-to-image', $event)"
       @remove-observation="emit('remove-gcp-observation', $event)"
+      @update-observation-accuracy="emit('update-gcp-observation-accuracy', $event)"
       @open-gcp="emit('open-gcp', $event)"
     />
 

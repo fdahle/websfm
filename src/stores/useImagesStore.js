@@ -1042,6 +1042,39 @@ export const useImagesStore = defineStore('images', () => {
     log(`${batchTag} batch complete`, 'success', 'Detection')
   }
 
+  // Attach an external feature index to existing images in one batch. The caller
+  // has already resolved external names to uuids and coordinated replacement of
+  // dependent matches. Keeping this as a store action preserves markRaw + OPFS
+  // invariants and avoids a modal mutating reactive records directly.
+  async function importFeatures(entries, { invalidateMatches = true } = {}) {
+    const pid = projects.currentProjectId
+    let imported = 0
+    const writes = []
+    for (const entry of entries || []) {
+      const img = images.value.find((i) => i.uuid === entry.uuid)
+      if (!img || !Array.isArray(entry.keypoints)) continue
+      if (invalidateMatches) useMatchesStore().removeMatchesForImage(img.uuid)
+      img.keypoints = markRaw(entry.keypoints)
+      img.descriptors = entry.descriptors ? markRaw(entry.descriptors) : null
+      img.kpStatus = 'done'
+      img.kpCount = entry.keypoints.length
+      img.kpMs = 0
+      img.detector = entry.detector ?? 'sift'
+      img.descDim = entry.descDim ?? 128
+      img.detectScale = 1
+      img.detectSettings = { source: entry.source ?? 'external' }
+      imported++
+      if (isPersisting()) {
+        writes.push(opfs.saveKeypoints(pid, img.uuid, img.keypoints))
+        if (img.descriptors) writes.push(opfs.saveDescriptors(pid, img.uuid, img.descriptors))
+      }
+    }
+    if (writes.length) await Promise.all(writes)
+    if (imported && isPersisting()) await sync(pid)
+    log(`Features imported: ${imported} image(s)`, imported ? 'success' : 'warn', 'Import')
+    return imported
+  }
+
   function clearKeypoints(id) {
     const img = imageById(id)
     if (!img) return
@@ -1235,6 +1268,7 @@ export const useImagesStore = defineStore('images', () => {
     detectFiducialsForSensor,
     detectOne,
     detectAll,
+    importFeatures,
     whenComputeReady,
     flushPendingWork,
     clearKeypoints,

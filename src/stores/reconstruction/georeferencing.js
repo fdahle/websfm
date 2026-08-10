@@ -4,6 +4,7 @@ import { cameraCenter } from '../../core/sfm/geometry.js'
 import { triangulateAllGcps } from '../../core/sfm/gcpTriangulation.js'
 import { gcpGuidesForImage, gcpEstimateForImage } from '../../core/sfm/gcpGuides.js'
 import { isGeographic } from '../../core/crs.js'
+import { normalizedGroundResidual, precisionFromGcp } from '../../core/gcpAccuracy.js'
 
 const finite3d = (p) => Number.isFinite(p?.x) && Number.isFinite(p?.y) && Number.isFinite(p?.z)
 const inverseVariance3d = (p) => {
@@ -70,7 +71,7 @@ export function createGeoreferencing({
     if (!cams.size) return []
     const imgById = imagesById()
     return gcps().filter((g) => {
-      if (g.enabled === false || g.role === 'check' || !finite3d(g)) return false
+      if (g.enabled === false || g.role === 'check' || !finite3d(g) || !precisionFromGcp(g)) return false
       const nRegistered = (g.observations || []).filter((o) => {
         const uuid = imgById.get(o.imageId)?.uuid
         return uuid != null && cams.has(uuid)
@@ -94,6 +95,7 @@ export function createGeoreferencing({
       .map(({ gcp, tri }) => ({
         src: [tri.x, tri.y, tri.z], dst: [gcp.x, gcp.y, gcp.z],
         weight: inverseVariance3d(gcp),
+        precision: precisionFromGcp(gcp),
       }))
   }
 
@@ -121,11 +123,28 @@ export function createGeoreferencing({
     }
     const gcpPairs = await gcpGeorefPairs()
     const usingGcps = gcpPairs.length >= 3
+    if (usingGcps) {
+      const datums = new Set(qualifyingGcps().map((g) => g.verticalDatum ?? 'unknown'))
+      if (datums.size > 1 || datums.has('unknown')) {
+        log(`Georeference: GCP height datum is ${[...datums].join(' / ')} — verify ellipsoidal and orthometric heights are not mixed`,
+          'warn', 'Products')
+      }
+    }
     const pairs = usingGcps ? gcpPairs : georefPairs()
     if (pairs.length < 3) {
       clearFit()
       log('Georeference: need ≥3 GCPs or camera poses matching registered images', 'warn', 'Products')
       return null
+    }
+    if (usingGcps) {
+      const xs = pairs.map((p) => p.dst[0]), ys = pairs.map((p) => p.dst[1]), zs = pairs.map((p) => p.dst[2])
+      const horizontalSpan = Math.hypot(Math.max(...xs)-Math.min(...xs), Math.max(...ys)-Math.min(...ys))
+      const verticalSpan = Math.max(...zs)-Math.min(...zs)
+      const verticalSigma = Math.max(...qualifyingGcps().map((g) => g.accuracyZ ?? 0))
+      if (horizontalSpan > 0 && verticalSpan < 3 * verticalSigma) {
+        log(`Georeference: GCP vertical range (${verticalSpan.toPrecision(3)}) is small relative to vertical uncertainty; scale/tilt may be weakly constrained`,
+          'warn', 'Products')
+      }
     }
     const fit = fitSimilarity(pairs)
     if (!fit) {
@@ -185,22 +204,51 @@ export function createGeoreferencing({
     const enabled = gcps().filter((g) => g.enabled !== false)
     if (!enabled.length) return []
     const results = await triangulateAllGcps(enabled, sparseCameras.value, imagesById())
-    return results.map(({ gcp, tri }) => {
+    const rows = results.map(({ gcp, tri }) => {
       if (!tri) {
         return { gcpId: gcp.id, name: gcp.name, role: gcp.role ?? 'control', viewCount: 0,
           dx: null, dy: null, dz: null, dTotal: null, observations: [] }
       }
       let dx = null, dy = null, dz = null, dTotal = null
+      let normalized = null, normalizedAxes = null, chi2 = null
       if (sim && finite3d(gcp)) {
         const p = applySimilarity(sim, [tri.x, tri.y, tri.z])
         dx = p[0] - gcp.x; dy = p[1] - gcp.y; dz = p[2] - gcp.z
         dTotal = Math.hypot(dx, dy, dz)
+        const nr = normalizedGroundResidual(gcp, [dx, dy, dz])
+        normalized = nr?.normalized ?? null
+        normalizedAxes = nr?.axes ?? null
+        chi2 = nr?.chi2 ?? null
       }
       return {
         gcpId: gcp.id, name: gcp.name, role: gcp.role ?? 'control', viewCount: tri.viewCount,
-        dx, dy, dz, dTotal, observations: tri.perViewReprojPx,
+        dx, dy, dz, dTotal, normalized, normalizedAxes, chi2,
+        observations: tri.perViewReprojPx,
       }
     })
+    // When no checkpoints exist, leave-one-control-out prediction is the next
+    // best validation: fit without one control and predict that withheld point.
+    const controls = results.filter(({ gcp, tri }) => tri && gcp.role !== 'check'
+      && finite3d(gcp) && precisionFromGcp(gcp))
+    if (controls.length >= 4) {
+      for (const withheld of controls) {
+        const fit = fitSimilarity(controls.filter((r) => r !== withheld).map(({ gcp, tri }) => ({
+          src: [tri.x, tri.y, tri.z], dst: [gcp.x, gcp.y, gcp.z],
+          weight: inverseVariance3d(gcp), precision: precisionFromGcp(gcp),
+        })))
+        if (!fit) continue
+        const predicted = applySimilarity(fit, [withheld.tri.x, withheld.tri.y, withheld.tri.z])
+        const residual = predicted.map((v, i) => v - [withheld.gcp.x, withheld.gcp.y, withheld.gcp.z][i])
+        const nr = normalizedGroundResidual(withheld.gcp, residual)
+        const row = rows.find((r) => r.gcpId === withheld.gcp.id)
+        if (row) {
+          row.looDx = residual[0]; row.looDy = residual[1]; row.looDz = residual[2]
+          row.looTotal = Math.hypot(...residual); row.looNormalized = nr?.normalized ?? null
+          row.looNormalizedAxes = nr?.axes ?? null
+        }
+      }
+    }
+    return rows
   }
 
   // Guided marking: for every enabled GCP not yet marked on `imageId`, where the

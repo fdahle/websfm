@@ -10,7 +10,8 @@ const props = defineProps({
   report:        { type: Array,   default: () => [] },
   selectedGcpId: { type: String,  default: null },
 })
-const emit = defineEmits(['toggle', 'remove-gcp', 'select', 'jump-to-image', 'remove-observation', 'open-gcp'])
+const emit = defineEmits(['toggle', 'remove-gcp', 'select', 'jump-to-image', 'remove-observation',
+  'update-observation-accuracy', 'open-gcp'])
 
 const gcpExpanded = ref({})
 function toggleGcpExpand(id) {
@@ -110,6 +111,14 @@ function reprojFor(gcpId, imageId) {
               <span v-if="reprojFor(gcp.id, obs.imageId) != null" class="obs-reproj" title="Reprojection error (px)">
                 {{ reprojFor(gcp.id, obs.imageId).toFixed(1) }}px
               </span>
+              <label class="obs-sigma" title="Per-observation X/Y marking accuracy (1σ pixels)">
+                σ
+                <input type="number" min="0" step="any" :value="obs.accuracyX ?? gcp.accuracyImgX"
+                  @click.stop @change="emit('update-observation-accuracy', { gcpId: gcp.id, imageId: obs.imageId, axis: 'x', value: $event.target.value })" />
+                /
+                <input type="number" min="0" step="any" :value="obs.accuracyY ?? gcp.accuracyImgY"
+                  @click.stop @change="emit('update-observation-accuracy', { gcpId: gcp.id, imageId: obs.imageId, axis: 'y', value: $event.target.value })" />
+              </label>
               <button class="obs-remove" title="Remove this observation" @click.stop="emit('remove-observation', { gcpId: gcp.id, imageId: obs.imageId })">×</button>
             </li>
           </ul>
@@ -188,6 +197,8 @@ function reprojFor(gcpId, imageId) {
   cursor: default;
 }
 .obs-reproj { font-size: 10px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.obs-sigma { display: flex; align-items: center; gap: 2px; font-size: 9px; color: var(--text-dim); }
+.obs-sigma input { width: 36px; padding: 1px 2px; font-size: 9px; color: var(--text); background: var(--bg); border: 1px solid var(--panel-border); border-radius: 3px; }
 .obs-remove {
   background: none;
   border: none;

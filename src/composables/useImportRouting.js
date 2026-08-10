@@ -21,12 +21,12 @@ import { useLog } from './useLog.js'
 //   activateTab(id) — switch the active tab (to 'map' after a spatial import)
 // `cameraPickMode` is returned so the Ribbon command dispatch (still in App.vue)
 // can hint the file-picker mode before opening the hidden <input>.
-export function useImportRouting({ addGcps, addFootprints, addSensors, addPoses, addFiducialObs, importColmap, importCloud, importRaster, importProjectFile, addImages, activateTab }) {
+export function useImportRouting({ addGcps, addFootprints, addSensors, addPoses, addFiducialObs, importColmap, openSfmProject, importCloud, importRaster, importProjectFile, addImages, activateTab, showGcps, showSensors, showPoses }) {
   const {
     gcpImportOpen, gcpImportText, gcpImportName, gcpImportGeojson, gcpImportCrs,
     footprintImportOpen, footprintImportData,
     cameraImportOpen, cameraImportText, cameraImportName, cameraImportMode,
-    importKindOpen, importKindFile,
+    importKindDeclared, importKindOpen, importKindFile,
     importCloudOpen, importCloudData,
     importRasterOpen, importRasterData,
   } = storeToRefs(useModalsStore())
@@ -38,8 +38,11 @@ export function useImportRouting({ addGcps, addFootprints, addSensors, addPoses,
   // ── Import (GCPs / footprints) ──────────────────────────────────────────────────
   // A delimited text file is always GCPs. A GeoJSON file is routed by geometry:
   // point features → GCP import, polygon features → footprint import.
-  async function openImportFile(file) {
+  // `declared` = the user already said this is a GCP file (a Ribbon command or
+  // the kind chooser), so the modal shows a correction link instead of asking.
+  async function openImportFile(file, { declared = false } = {}) {
     if (!file) return
+    importKindDeclared.value = declared
     let text
     try {
       text = await file.text()
@@ -126,9 +129,9 @@ export function useImportRouting({ addGcps, addFootprints, addSensors, addPoses,
     }
   }
 
-  function routeImport(file, kind) {
-    if (kind === 'pose' || kind === 'sensor') openCameraImport(file, kind)
-    else if (kind === 'gcp' || kind === 'footprint') openImportFile(file)
+  function routeImport(file, kind, { declared = false } = {}) {
+    if (kind === 'pose' || kind === 'sensor') openCameraImport(file, kind, { declared })
+    else if (kind === 'gcp' || kind === 'footprint') openImportFile(file, { declared })
     else if (kind === 'fiducialObs') openFiducialObsImport(file)
     else if (kind === 'colmap') openColmapImport([file])
     else if (kind === 'cloud') openCloudImport(file)
@@ -265,6 +268,7 @@ export function useImportRouting({ addGcps, addFootprints, addSensors, addPoses,
   }
   async function openColmapImport(fileList) {
     const files = [...(fileList || [])]
+    if (openSfmProject) { await openSfmProject(files); return }
     if (!files.length || !importColmap) return
     const model = {}
     try {
@@ -304,13 +308,14 @@ export function useImportRouting({ addGcps, addFootprints, addSensors, addPoses,
     const file = importKindFile.value
     importKindOpen.value = false
     importKindFile.value = null
-    if (file) routeImport(file, kind)
+    if (file) routeImport(file, kind, { declared: true })
   }
 
   // User re-classified the file from inside an open import modal ("Import as …").
   function onImportSwitchKind({ kind, rawText, fileName }) {
     gcpImportOpen.value = false
     cameraImportOpen.value = false
+    importKindDeclared.value = true   // the correction itself is a declaration
     if (kind === 'gcp') {
       gcpImportGeojson.value = null
       gcpImportCrs.value = null
@@ -325,11 +330,12 @@ export function useImportRouting({ addGcps, addFootprints, addSensors, addPoses,
     }
   }
 
-  async function onGcpImport({ gcps: parsed, sourceCrs }) {
+  async function onGcpImport({ gcps: parsed, sourceCrs, defaultAccuracies, accuracySettings, defaultImageAccuracies }) {
     gcpImportOpen.value = false
     gcpImportGeojson.value = null
-    await addGcps(parsed, sourceCrs)
+    await addGcps(parsed, sourceCrs, defaultAccuracies, accuracySettings, defaultImageAccuracies)
     activateTab('map')
+    showGcps?.()
   }
 
   async function onFootprintImport({ footprints: parsed, sourceCrs, name }) {
@@ -344,15 +350,16 @@ export function useImportRouting({ addGcps, addFootprints, addSensors, addPoses,
 
   function onGcpPick(event) {
     const file = event.target.files?.[0]
-    if (file) openImportFile(file)
+    if (file) openImportFile(file, { declared: true })   // Ribbon ▸ Import ▸ GCP File
     event.target.value = ''
   }
 
   // ── Import (camera intrinsics / extrinsics) ──────────────────────────────────────
   // A delimited camera file opens the import modal in the sniffed mode (sensor vs
   // pose); `forceMode` lets the Ribbon's two commands hint a default.
-  async function openCameraImport(file, forceMode = null) {
+  async function openCameraImport(file, forceMode = null, { declared = false } = {}) {
     if (!file) return
+    importKindDeclared.value = declared
     let text
     try {
       text = await file.text()
@@ -370,15 +377,19 @@ export function useImportRouting({ addGcps, addFootprints, addSensors, addPoses,
     cameraImportOpen.value = false
     if (payload.mode === 'sensor') {
       await addSensors(payload.sensors)
+      showSensors?.()
     } else {
       await addPoses(payload.poses, payload.sourceCrs)
       activateTab('map')
+      showPoses?.()
     }
   }
 
   function onCameraPick(event) {
     const file = event.target.files?.[0]
-    if (file) openCameraImport(file, cameraPickMode.value)
+    // The Ribbon's two camera commands set `cameraPickMode` before opening the
+    // picker — that IS the declaration; a mode-less pick is still a sniff.
+    if (file) openCameraImport(file, cameraPickMode.value, { declared: !!cameraPickMode.value })
     event.target.value = ''
   }
 

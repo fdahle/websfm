@@ -2,7 +2,7 @@
 // formats (bytes or text). No DOM/Blob here — the UI layer wraps the return value
 // in a Blob and triggers the download (see utils/download.js).
 
-import { writeGeoTiff, geoKeysForEpsg } from './geotiff.js'
+import { writeGeoTiff, writeCogDeflate, geoKeysForEpsg } from './geotiff.js'
 import { applySimilarity } from './georef.js'
 import { createVoxelAccumulator } from '../dense/mvs.js'
 
@@ -432,6 +432,29 @@ export async function demToGeoTiff(dem, { crs = {}, nodata = -9999, deflate = nu
   })
 }
 
+// ── DEM → Cloud-Optimized GeoTIFF ────────────────────────────────────────────
+// Same pixels, internally tiled with halving overviews, so a viewer can pull a
+// preview (or one window) with a couple of range requests instead of the whole
+// file. writeCogDeflate takes the SAME injected `deflate` callback as above —
+// it just calls it once per tile per level rather than once for the image.
+export async function demToCog(dem, { crs = {}, nodata = -9999, deflate = null, tileSize = 512 } = {}) {
+  const { width, height, gsd, originX, originY, data } = dem
+  const buf = new Float32Array(width * height)
+  for (let i = 0; i < buf.length; i++) buf[i] = Number.isFinite(data[i]) ? data[i] : nodata
+  return writeCogDeflate({
+    width, height,
+    samples: [{ bits: 32, format: 3 }],
+    photometric: 1, extraSamples: null,
+    // A COG writer needs the TypedArray, not packed bytes: it has to interpret
+    // pixels to tile them and to box-average the overviews.
+    data: buf, tileSize,
+    pixelScale: [gsd, gsd, 0],
+    tiepoint: [0, 0, 0, originX, originY, 0],
+    geoKeys: geoKeysForEpsg(crs.code, crs.geographic),
+    gdalNoData: nodata,
+  }, deflate)
+}
+
 // ── Ortho → GeoTIFF (RGBA) ───────────────────────────────────────────────────
 // ortho: { width, height, rgba:Uint8Array (w·h·4) }. geo carries the DEM's
 // geotransform (ortho shares the DEM grid). crs + deflate as in demToGeoTiff.
@@ -450,6 +473,25 @@ export async function orthoToGeoTiff(ortho, geo, { crs = {}, deflate = null } = 
     tiepoint: [0, 0, 0, originX, originY, 0],
     geoKeys: geoKeysForEpsg(crs.code, crs.geographic),
   })
+}
+
+// ── Ortho → Cloud-Optimized GeoTIFF ──────────────────────────────────────────
+// Overviews box-average the RGBA; alpha averages with it, so a half-covered
+// overview cell is half-transparent rather than snapping to opaque.
+export async function orthoToCog(ortho, geo, { crs = {}, deflate = null, tileSize = 512 } = {}) {
+  const { width, height, rgba } = ortho
+  const { gsd, originX, originY } = geo
+  const data = rgba instanceof Uint8Array
+    ? rgba : new Uint8Array(rgba.buffer, rgba.byteOffset, rgba.byteLength)
+  return writeCogDeflate({
+    width, height,
+    samples: [0, 1, 2, 3].map(() => ({ bits: 8, format: 1 })),
+    photometric: 2, extraSamples: [2], // unassociated alpha
+    data, tileSize,
+    pixelScale: [gsd, gsd, 0],
+    tiepoint: [0, 0, 0, originX, originY, 0],
+    geoKeys: geoKeysForEpsg(crs.code, crs.geographic),
+  }, deflate)
 }
 
 // ── Raster world file (.wld / .pgw) for a georeferenced image ─────────────────

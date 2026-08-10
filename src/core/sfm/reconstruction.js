@@ -261,14 +261,16 @@ export async function solvePnp(pts3d, pts2d, K, opts = {}) {
 //                       (1=f, 2=cxcy, 4=k1, 8=k2, 16=k3) by refineModeMask.
 //   sensorOfCam       — per-camera integer sensor id (cameras sharing an id share
 //                       one focal); required for refinement, ignored for 'none'.
-//   gcpAnchors        — [{ ptIdx, target:[x,y,z], weight }] — GCP-anchored 3D
+//   gcpAnchors        — [{ ptIdx, target:[x,y,z], precision:3×3 }] — GCP-anchored 3D
 //                       points (see core/sfm/sfm.js), pulled toward `target`
-//                       (already in this same SfM frame) with residual
-//                       weight·‖pt−target‖² on top of their normal reprojection
+//                       (already in this same SfM frame) with independently
+//                       covariance-weighted residuals on top of normal reprojection
 //                       observations. Omit/empty for plain SfM-only BA.
-//   cameraPriors      — [{ camIdx, target:[x,y,z], weights:[wx,wy,wz] }]
+//   cameraPriors      — [{ camIdx, target:[x,y,z], weights:[wx,wy,wz],
+//                          targetR?:3×3, orientationPrecision?:3×3 }]
 //                       camera-centre constraints in this same SfM frame. The
-//                       weights are per-axis inverse variances.
+//                       position weights and orientation precision are inverse
+//                       variances (orientation is expressed in radians).
 // Returns { cameras, points3d, intrinsics, costBefore, costAfter, costTrace,
 //   anchorRmsAfter, cameraPriorRmsAfter } — `intrinsics` is the refined effective K per camera
 // `{ fx, fy, cx, cy, k1, k2, k3 }` (radial coeffs 0 for terms not refined); anchorRmsAfter
@@ -309,22 +311,32 @@ export async function bundleAdjust(cameras, intrinsics, points3d, observations, 
   points3d.forEach(({ x, y, z }, i) => { ptsFlat.set([x, y, z], i * 3) })
 
   const obsFlat = new Float32Array(nObs * 4)
-  observations.forEach(({ camIdx, ptIdx, x, y }, i) => {
+  const obsWFlat = new Float32Array(nObs * 2)
+  observations.forEach(({ camIdx, ptIdx, x, y, weightX = 1, weightY = 1 }, i) => {
     obsFlat.set([camIdx, ptIdx, x, y], i * 4)
+    obsWFlat.set([weightX, weightY].map((v) => Number.isFinite(v) && v > 0 ? v : 1), i * 2)
   })
 
   const anchorFlat  = new Float32Array(gcpAnchors.length * 4)
-  const anchorWFlat = new Float32Array(gcpAnchors.length)
-  gcpAnchors.forEach(({ ptIdx, target, weight }, i) => {
+  const anchorWFlat = new Float32Array(gcpAnchors.length * 9)
+  gcpAnchors.forEach(({ ptIdx, target, precision, weights, weight }, i) => {
     anchorFlat.set([ptIdx, target[0], target[1], target[2]], i * 4)
-    anchorWFlat[i] = weight
+    const axisWeights = weights ?? [weight, weight, weight]
+    const matrix = precision ?? [[axisWeights[0],0,0],[0,axisWeights[1],0],[0,0,axisWeights[2]]]
+    anchorWFlat.set(matrix.flat().map((value, j) => Number.isFinite(value)
+      ? value : (j % 4 === 0 ? 1 : 0)), i * 9)
   })
 
-  const cameraPriorFlat = new Float32Array(cameraPriors.length * 7)
-  cameraPriors.forEach(({ camIdx, target, weights }, i) => {
+  // Row layout is shared with bundle.rs. A zero orientation-precision matrix
+  // means position-only (EXIF or an imported row without complete OPK angles).
+  const cameraPriorFlat = new Float32Array(cameraPriors.length * 25)
+  cameraPriors.forEach(({ camIdx, target, weights, targetR, orientationPrecision }, i) => {
+    const R = targetR?.flat() ?? [1,0,0,0,1,0,0,0,1]
+    const P = orientationPrecision?.flat() ?? Array(9).fill(0)
     cameraPriorFlat.set([
       camIdx, target[0], target[1], target[2], weights[0], weights[1], weights[2],
-    ], i * 7)
+      ...R, ...P,
+    ], i * 25)
   })
 
   // sensor_of_cam: aligned to `cameras`; -1 (own group) where unknown. Empty/all-−1
@@ -336,7 +348,7 @@ export async function bundleAdjust(cameras, intrinsics, points3d, observations, 
   }
 
   const raw = bundle_adjust(
-    camFlat, kFlat, ptsFlat, obsFlat, anchorFlat, anchorWFlat, cameraPriorFlat,
+    camFlat, kFlat, ptsFlat, obsFlat, obsWFlat, anchorFlat, anchorWFlat, cameraPriorFlat,
     maxIters, sensorFlat, refineMode,
   )
   // Layout: cameras(nCam×12), points(nPts×3), intrinsics(nCam×7 = fx,fy,cx,cy,k1,k2,k3),

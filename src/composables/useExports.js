@@ -1,11 +1,20 @@
 import { ref } from 'vue'
 import { buildPosesCsv, buildSensorsCsv, downloadCsv } from '../utils/exportCsv.js'
-import { cloudToPly, meshToPly, meshToGlb, meshToObj, meshToStl, reconstructionToJson, demToAsciiGrid, demToGeoTiff, orthoToGeoTiff, rasterWorldFile, prepareCloudForExport } from '../core/products/exporters.js'
+import { cloudToPly, meshToPly, meshToGlb, meshToObj, meshToStl, reconstructionToJson, demToAsciiGrid, demToGeoTiff, demToCog, orthoToGeoTiff, orthoToCog, rasterWorldFile, prepareCloudForExport } from '../core/products/exporters.js'
 import { cloudToLas } from '../core/io/las.js'
 import { cloudToXyz } from '../core/io/cloudText.js'
 import { buildColmapModel, serializeColmapModel, serializeColmapModelBin } from '../core/io/colmapModel.js'
+import { imageIdsToPairId } from '../core/io/colmapDatabase.js'
+import { exportColmapDatabase } from '../workers/colmapDbClient.js'
+import { undistortImage, exportLazCloud } from '../workers/computeClient.js'
 import { buildTransformsJson } from '../core/io/transforms.js'
+import { buildNvm, buildOpenMvg } from '../core/io/sfmInterop.js'
 import { epsgToWkt } from '../core/products/wkt.js'
+import {
+  ecefTransformFromProbes, boundingBox, buildTileset, cloudToGlbPoints,
+  localBounds, cloudCentroid,
+} from '../core/products/tiles3d.js'
+import { transformAsync, ensureProjection } from '../core/crs.js'
 import { useLog } from './useLog.js'
 import { distortionOf } from '../core/sfm/distortion.js'
 import { downloadBlob, dataUrlToBlob } from '../utils/download.js'
@@ -17,10 +26,12 @@ import { showToast } from './useToasts.js'
 // template's ExportModal binds to it. The reactive state it reads is injected as
 // refs so the composable stays free of store wiring. Injected deps (all refs):
 //   poses, sensors, images, matchStore, clouds, selectedCloud, mainSparseCloud,
-//   dem, ortho, georef, currentProjectName, currentCrs
+//   dem, ortho, georef, currentProjectName, currentCrs, summary
+// plus `progress` — usePipeline's progress handle, for the one export (undistorted
+// images) that is minutes of work rather than a serialization.
 export function useExports({
   poses, sensors, images, matchStore, clouds, selectedCloud, mainSparseCloud, dem, ortho,
-  georef, currentProjectName, currentCrs,
+  georef, currentProjectName, currentCrs, summary, progress,
 }) {
   const { log } = useLog()
   function exportPoses() {
@@ -75,7 +86,8 @@ export function useExports({
 
   const projectBase = () => currentProjectName.value || 'project'
 
-  // Which export dialog is open ('cloud' | 'model' | 'colmap' | 'dem' | 'ortho'), or null.
+  // Which export dialog is open ('cloud' | 'model' | 'colmap' | 'undistorted' | 'dem' |
+  // 'ortho'), or null.
   const exportKind = ref(null)
 
   // Parse the current DEM's CRS into an EPSG code + geographic flag for GeoTIFF /
@@ -98,6 +110,8 @@ export function useExports({
       else if (kind === 'mesh') await doExportMesh(settings)
       else if (kind === 'model') await doExportModel(settings)
       else if (kind === 'colmap') await doExportColmap(settings)
+      else if (kind === 'undistorted') await doExportUndistorted(settings)
+      else if (kind === 'tiles3d') await doExportTiles3d(settings)
       else if (kind === 'dem') await doExportDem(settings)
       else if (kind === 'ortho') await doExportOrtho(settings)
     } catch (err) {
@@ -118,7 +132,31 @@ export function useExports({
   // optional georeference transform (the stored Horn fit → project CRS) and an
   // optional voxel downsample (cell in target-frame units, applied after georef).
   const cloudHasPoints = (c) => c && (c.kind === 'dense' ? c.count > 0 : c.points?.length > 0)
-  function doExportCloud({ format, includeColor, applyGeoref, downsampleCell }) {
+  // Normalize either cloud shape to flat typed arrays for the worker. This
+  // COPIES rather than handing over the store's own buffers: the worker call
+  // transfers, and a detached store cloud would be a far worse outcome than one
+  // extra buffer during an export the user asked for.
+  function toFlatCloud(src) {
+    if (src && src.pos) {
+      const count = src.count ?? src.pos.length / 3
+      return {
+        count,
+        pos: new Float64Array(src.pos.subarray(0, count * 3)),
+        col: src.col ? new Uint8Array(src.col.subarray(0, count * 3)) : null,
+      }
+    }
+    const n = src.length
+    const pos = new Float64Array(n * 3)
+    const col = new Uint8Array(n * 3)
+    for (let i = 0; i < n; i++) {
+      pos[i * 3] = src[i].x; pos[i * 3 + 1] = src[i].y; pos[i * 3 + 2] = src[i].z
+      const c = src[i].color || [200, 200, 200]
+      col[i * 3] = c[0]; col[i * 3 + 1] = c[1]; col[i * 3 + 2] = c[2]
+    }
+    return { count: n, pos, col }
+  }
+
+  async function doExportCloud({ format, includeColor, applyGeoref, downsampleCell }) {
     const cloud = cloudHasPoints(selectedCloud.value)
       ? selectedCloud.value
       : clouds.value.find(cloudHasPoints)
@@ -136,13 +174,18 @@ export function useExports({
     })
     if (g) log(`Cloud export: georeferenced to ${g.crs}`, 'info', 'Export')
     const base = `${projectBase()}-${cloud.kind}`
-    if (format === 'las') {
+    if (format === 'las' || format === 'laz') {
       const m = g ? /EPSG:(\d+)/i.exec(g.crs) : null
-      const las = cloudToLas(src, {
-        crsCode: m ? Number(m[1]) : null,
-        geographic: m ? Number(m[1]) === 4326 : false,
-        onLog: log,
-      })
+      const crsCode = m ? Number(m[1]) : null
+      const geographic = m ? Number(m[1]) === 4326 : false
+      if (format === 'laz') {
+        // LASzip runs in the worker (crates/lazcodec) — the arithmetic coder on a
+        // multi-million-point cloud would freeze the UI thread.
+        const { bytes } = await exportLazCloud(toFlatCloud(src), { crsCode, geographic, onLog: log })
+        downloadBlob(`${base}.laz`, bytes, 'application/octet-stream')
+        return
+      }
+      const las = cloudToLas(src, { crsCode, geographic, onLog: log })
       downloadBlob(`${base}.las`, las, 'application/octet-stream')
     } else if (format === 'xyz') {
       downloadBlob(`${base}.xyz`, cloudToXyz(src, { color: includeColor }), 'text/plain;charset=utf-8')
@@ -212,9 +255,10 @@ export function useExports({
   // about, since a distorted/film/self-cal project would export inconsistently).
   // Only cameras with a matching loaded image + resolved K are exported (COLMAP
   // needs width/height/name). Output is in the local SfM frame.
-  function doExportColmap({ format } = {}) {
+  async function doExportColmap({ format, includeImages = false } = {}) {
     const cloud = sparseCloud()
     if (!cloud) return
+    if (format === 'transforms') { doExportModel({ format: 'transforms' }); return }
     const imgByUuid = new Map(images.value.map((im) => [im.uuid, im]))
     const sensorById = new Map(sensors.value.map((sensor) => [sensor.id, sensor]))
 
@@ -222,7 +266,7 @@ export function useExports({
       .map(([uuid, cam]) => {
         const im = imgByUuid.get(uuid)
         if (!im || !cam.K || !im.meta?.width || !im.meta?.height) return null
-        return { uuid, name: im.name, width: im.meta.width, height: im.meta.height, K: cam.K, R: cam.R, t: cam.t }
+        return { uuid, name: im.name, width: im.meta.width, height: im.meta.height, K: cam.K, R: cam.R, t: cam.t, keypoints: im.keypoints ?? [], file: im.file ?? null }
       })
       .filter(Boolean)
     if (!exportImages.length) return
@@ -252,15 +296,69 @@ export function useExports({
             .map(([uuid, kpIdx]) => {
               if (!exported.has(uuid)) return null
               const px = p.viewsPx?.get(uuid)
-              if (px) return { uuid, x: px[0], y: px[1] }
+              if (px) return { uuid, x: px[0], y: px[1], featureIdx: kpIdx }
               const kp = imgByUuid.get(uuid)?.keypoints?.[kpIdx]
-              return kp ? { uuid, x: kp.x, y: kp.y } : null
+              return kp ? { uuid, x: kp.x, y: kp.y, featureIdx: kpIdx } : null
             })
             .filter(Boolean)
         : [],
     }))
 
     const model = buildColmapModel({ images: exportImages, points })
+    // Adapters share the deterministic COLMAP-like model so image, feature and
+    // track ids remain stable across every export representation.
+    model.images.forEach((im, i) => { im.R = exportImages[i].R; im.K = exportImages[i].K; im.width = exportImages[i].width; im.height = exportImages[i].height })
+    if (format === 'nvm') {
+      downloadBlob(`${projectBase()}.nvm`, buildNvm(model), 'text/plain;charset=utf-8')
+      log(`NVM export: ${model.images.length} cameras, ${model.points3D.length} points`, 'success', 'Export')
+      return
+    }
+    if (format === 'openmvg') {
+      saveJson(buildOpenMvg(model), `${projectBase()}-sfm_data.json`)
+      log(`OpenMVG export: ${model.images.length} cameras, ${model.points3D.length} points`, 'success', 'Export')
+      return
+    }
+    if (format === 'database' || format === 'workspace') {
+      const imageIdByUuid = new Map(model.images.map((im, i) => [exportImages[i].uuid, im.imageId]))
+      const features = exportImages.map((im, i) => {
+        const source = imgByUuid.get(im.uuid)
+        let descriptors = null
+        if (source?.descriptors?.length === im.keypoints.length * 128 && /sift/i.test(source.detector ?? '')) {
+          descriptors = new Uint8Array(source.descriptors.length)
+          for (let k = 0; k < descriptors.length; k++) descriptors[k] = Math.max(0, Math.min(255, Math.round(source.descriptors[k] * 512)))
+        }
+        return { imageId: model.images[i].imageId, keypoints: im.keypoints, descriptors }
+      })
+      const pairs = []
+      for (const [, pair] of matchStore.value) {
+        const imageIdA = imageIdByUuid.get(pair.idA), imageIdB = imageIdByUuid.get(pair.idB)
+        if (!imageIdA || !imageIdB || pair.status !== 'done' || !pair.matches?.length) continue
+        const flip = imageIdA > imageIdB
+        pairs.push({
+          pairId: imageIdsToPairId(imageIdA, imageIdB),
+          matches: flip ? pair.matches.map(([a, b]) => [b, a]) : pair.matches,
+          F: flip && pair.F ? [[pair.F[0][0], pair.F[1][0], pair.F[2][0]], [pair.F[0][1], pair.F[1][1], pair.F[2][1]], [pair.F[0][2], pair.F[1][2], pair.F[2][2]]] : (pair.F ?? null),
+          E: pair.E ?? null, H: pair.H ?? null,
+        })
+      }
+      const database = await exportColmapDatabase({ cameras: model.cameras, images: model.images, features, pairs })
+      if (format === 'database') {
+        downloadBlob(`${projectBase()}-database.db`, database, 'application/vnd.sqlite3')
+        log(`COLMAP database export: ${model.images.length} images, ${pairs.length} match pairs`, 'success', 'Export')
+        return
+      }
+      const modelFiles = serializeColmapModelBin(model)
+      const entries = [
+        { name: 'database.db', data: database },
+        ...Object.entries(modelFiles).map(([name, data]) => ({ name: `sparse/0/${name}`, data })),
+      ]
+      if (includeImages) {
+        for (const im of exportImages) if (im.file) entries.push({ name: `images/${im.name}`, data: new Uint8Array(await im.file.arrayBuffer()) })
+      }
+      downloadBlob(`${projectBase()}-colmap-workspace.zip`, zipStore(entries), 'application/zip')
+      log(`COLMAP workspace export: database + sparse model${includeImages ? ' + images' : ''}`, 'success', 'Export')
+      return
+    }
     // Binary (.bin) or text (.txt) — both share the ColmapModel struct; only the
     // encoding differs. Binary files are already Uint8Array; text is UTF-8 encoded.
     const files = format === 'bin' ? serializeColmapModelBin(model) : serializeColmapModel(model)
@@ -305,6 +403,16 @@ export function useExports({
   async function doExportDem({ format, nodata, compression }) {
     if (!dem.value) return
     const info = crsInfo(dem.value)
+    if (format === 'cog') {
+      // COG defaults to DEFLATE: an uncompressed tiled file is strictly larger
+      // than the baseline one for no benefit, and the whole point of the format
+      // is cheap partial reads.
+      const deflate = compression === 'none' ? null : deflateBytes
+      const tif = await demToCog(dem.value, { crs: info, nodata, deflate })
+      downloadBlob(`${projectBase()}-dem-cog.tif`, tif, 'image/tiff')
+      log(`DEM export: Cloud-Optimized GeoTIFF${deflate ? ' (DEFLATE)' : ''}`, 'success', 'Export')
+      return
+    }
     if (format === 'geotiff') {
       const deflate = compression === 'deflate' ? deflateBytes : null
       const tif = await demToGeoTiff(dem.value, { crs: info, nodata, deflate })
@@ -330,6 +438,13 @@ export function useExports({
   async function doExportOrtho({ format, compression, jpegQuality }) {
     if (!ortho.value || !dem.value) return
     const info = crsInfo(dem.value)
+    if (format === 'cog') {
+      const deflate = compression === 'none' ? null : deflateBytes
+      const tif = await orthoToCog(ortho.value, dem.value, { crs: info, deflate })
+      downloadBlob(`${projectBase()}-ortho-cog.tif`, tif, 'image/tiff')
+      log(`Ortho export: Cloud-Optimized GeoTIFF${deflate ? ' (DEFLATE)' : ''}`, 'success', 'Export')
+      return
+    }
     if (format === 'geotiff') {
       const deflate = compression === 'deflate' ? deflateBytes : null
       const tif = await orthoToGeoTiff(ortho.value, dem.value, { crs: info, deflate })
@@ -349,6 +464,198 @@ export function useExports({
     downloadBlob(`${projectBase()}-ortho.wld`, rasterWorldFile(dem.value), 'text/plain;charset=utf-8')
     if (info.crs) downloadBlob(`${projectBase()}-ortho.prj`, prjText(info), 'text/plain;charset=utf-8')
     log(`Ortho export: ${jpeg ? 'JPEG' : 'PNG'} + world file`, 'success', 'Export')
+  }
+
+  // ── Undistorted images (COLMAP `image_undistorter` parity) ──────────────────
+  //
+  // Writes a workspace an external dense/mesh pipeline can consume directly —
+  // OpenMVS, MVE and MVS-Texturing all want pinhole images plus a PINHOLE camera
+  // model, with no distortion to apply. websfm's sparse model is *already*
+  // pinhole (distortion is folded out of the keypoints at ingest), so only the
+  // pixels have to move; the camera model needs no edit at all.
+  //
+  // The resampling map is the same one dense MVS uses (core/sfm/displayFrame.js
+  // `makeSampleMap`), which is what makes the exported images agree with the
+  // exported cameras for a self-calibrated lens *and* a film scan.
+  //
+  // Layout mirrors COLMAP's undistorter so downstream tools need no arguments:
+  //   images/<name>.<ext>
+  //   sparse/{cameras,images,points3D}.bin
+  async function doExportUndistorted({
+    mode = 'crop', format = 'jpeg', quality = 0.92, maxDim = 0,
+  } = {}) {
+    const cloud = sparseCloud()
+    if (!cloud || !cloud.cameras?.size) return
+    const imgByUuid = new Map(images.value.map((im) => [im.uuid, im]))
+    const sensorById = new Map(sensors.value.map((s) => [s.id, s]))
+    const sum = summary?.value ?? null
+    const selfCalBySensor = new Map(
+      (sum?.selfCalDistortion ?? []).map((d) => [d.sensorId, { k1: d.k1, k2: d.k2, k3: d.k3 }]))
+    const fidByUuid = new Map(
+      (sum?.fiducialTransforms ?? []).map((t) => [t.uuid, { A: t.A, transform: t.transform ?? null, frame: t.frame }]))
+
+    // The observations must be in the BA (pinhole) frame — that is the only frame
+    // the undistorted pixels are in. Raw store keypoints are in scan/distorted
+    // space, so a legacy model without viewsPx would write marks that don't sit on
+    // the images it ships beside them.
+    const anyViewsPx = cloud.points.some((p) => p.viewsPx && p.viewsPx.size)
+    if (!anyViewsPx && cloud.points.length) {
+      throw new Error('This model has no BA-frame observations (viewsPx). Re-run reconstruction '
+        + 'before exporting undistorted images.')
+    }
+
+    const ext = format === 'png' ? 'png' : 'jpg'
+    const targets = [...cloud.cameras.entries()].filter(([uuid, cam]) => {
+      const im = imgByUuid.get(uuid)
+      return im && cam?.K && (im.computeUrl || im.url)
+    })
+    if (!targets.length) return
+
+    const entries = []
+    const outImages = []
+    let bytesTotal = 0
+    progress?.open?.(`Exporting ${targets.length} undistorted images`, targets.length, null,
+      { unit: 'images' })
+    try {
+      for (let i = 0; i < targets.length; i++) {
+        if (progress?.aborted?.value) break
+        const [uuid, cam] = targets[i]
+        const im = imgByUuid.get(uuid)
+        const sensor = im.sensorId ? sensorById.get(im.sensorId) : null
+        const sc = im.sensorId ? selfCalBySensor.get(im.sensorId) : null
+        const fid = fidByUuid.get(uuid) ?? null
+        if (sensor?.kind === 'film' && !fid) {
+          log(`Undistort: ${im.name} skipped — no interior-orientation transform from the `
+            + 'last sparse run (re-run reconstruction).', 'warn', 'Export')
+          progress?.report?.(i + 1, targets.length, im.name)
+          continue
+        }
+        const res = await undistortImage({
+          url: im.computeUrl ?? im.url,
+          K: { fx: cam.K.fx, fy: cam.K.fy, cx: cam.K.cx, cy: cam.K.cy },
+          dist: sensor ? distortionOf(sensor) : null,
+          selfCal: sc && (sc.k1 || sc.k2 || sc.k3)
+            ? { k1: sc.k1 || 0, k2: sc.k2 || 0, k3: sc.k3 || 0 } : null,
+          fid, mode, maxDim, format, quality,
+        }, { onLog: (m, l, c) => log(m, l, c ?? 'Export') })
+
+        const name = `${im.name.replace(/\.[^.]+$/, '')}.${ext}`
+        const data = new Uint8Array(res.bytes)
+        bytesTotal += data.length
+        // Plain ZIP has a hard 4 GB ceiling (no ZIP64 writer — the same limit
+        // .websfm export pre-flights). Stop with an actionable message rather
+        // than emitting a file that unzips corrupt.
+        if (bytesTotal > 4 * 1024 ** 3) {
+          throw new Error('Undistorted images exceed the 4 GB ZIP limit. Lower the output '
+            + 'resolution or the JPEG quality, or export in batches.')
+        }
+        entries.push({ name: `images/${name}`, data })
+        outImages.push({
+          uuid, name, width: res.width, height: res.height, K: res.K,
+          R: cam.R, t: cam.t, outScale: res.outScale, rect: res.rect,
+        })
+        progress?.report?.(i + 1, targets.length, im.name)
+      }
+      if (!outImages.length) {
+        log('Undistort: nothing exported', 'warn', 'Export')
+        return
+      }
+
+      // Move each observation onto its image's output grid: the model's marks are
+      // in K's full-resolution pinhole frame, the images are scaled by `outScale`
+      // and then cropped, so the same affine applies to both.
+      const gridByUuid = new Map(outImages.map((o) => [o.uuid, o]))
+      const kept = new Set(outImages.map((o) => o.uuid))
+      const points = cloud.points.map((p) => ({
+        xyz: [p.x, p.y, p.z],
+        color: p.color,
+        views: p.views
+          ? [...p.views.entries()].map(([u, kpIdx]) => {
+            if (!kept.has(u)) return null
+            const px = p.viewsPx?.get(u)
+            if (!px) return null
+            const g = gridByUuid.get(u)
+            const x = px[0] * g.outScale - g.rect.x
+            const y = px[1] * g.outScale - g.rect.y
+            // A mark that the crop cut away is no longer observable in the
+            // exported image; dropping it keeps the model self-consistent.
+            if (x < 0 || y < 0 || x > g.width - 1 || y > g.height - 1) return null
+            return { uuid: u, x, y }
+          }).filter(Boolean)
+          : [],
+      }))
+
+      // No `keypoints` — the store's are in scan space, and the compact
+      // observed-points form is what a sparse-only consumer wants anyway.
+      const model = buildColmapModel({ images: outImages, points })
+      const files = serializeColmapModelBin(model)
+      for (const [n, data] of Object.entries(files)) entries.push({ name: `sparse/${n}`, data })
+
+      downloadBlob(`${projectBase()}-undistorted.zip`, zipStore(entries), 'application/zip')
+      const cropped = outImages.filter((o) => o.rect.x || o.rect.y).length
+      log(`Undistorted export: ${outImages.length} images (${ext.toUpperCase()}, ${mode}`
+        + `${cropped ? `, ${cropped} cropped` : ''}) + PINHOLE sparse model, `
+        + `${(bytesTotal / 1024 ** 2).toFixed(0)} MB`, 'success', 'Export')
+    } finally {
+      await progress?.close?.()
+    }
+  }
+
+  // ── Cesium 3D Tiles (single tile) ───────────────────────────────────────────
+  //
+  // tileset.json + one .glb. The only real content is the placement: the tile
+  // transform maps local metres to ECEF, and it is *measured* from probe points
+  // rather than assuming the project's grid axes are east/north. That assumption
+  // is the usual shortcut and it fails precisely here — near the poles a
+  // projected CRS's convergence approaches the longitude difference itself.
+  //
+  // LOD tiling is deliberately not attempted (see docs/planning/plan-interop-formats.md).
+  async function doExportTiles3d({ includeColor = true } = {}) {
+    const cloud = cloudHasPoints(selectedCloud.value)
+      ? selectedCloud.value
+      : clouds.value.find(cloudHasPoints)
+    if (!cloud) return
+
+    const g = georef?.value ?? null
+    const raw = cloud.kind === 'dense'
+      ? { count: cloud.count, pos: cloud.pos, col: cloud.col }
+      : cloud.points
+    // Georeference first: a tileset is only placeable in the project CRS.
+    const src = toFlatCloud(prepareCloudForExport(raw, { sim: g?.sim ?? null, cell: 0, onLog: log }))
+
+    const origin = cloudCentroid(src)
+    let transform = null
+    const crs = g?.crs ?? null
+    if (crs && crs !== 'local') {
+      await ensureProjection(crs)
+      // One project-CRS unit east and north of the origin. Both round-trip through
+      // proj4, so the resulting basis carries the local rotation AND scale factor.
+      const geo = async ([x, y, z]) => {
+        const [lon, lat] = await transformAsync([x, y], crs, 'EPSG:4326')
+        return { lon, lat, h: z }
+      }
+      transform = ecefTransformFromProbes({
+        origin: await geo(origin),
+        east: await geo([origin[0] + 1, origin[1], origin[2]]),
+        north: await geo([origin[0], origin[1] + 1, origin[2]]),
+      })
+    } else {
+      log('3D Tiles: no georeference — the tileset has no place on the globe. '
+        + 'Georeference the model first for a viewer to position it.', 'warn', 'Export')
+    }
+
+    const glb = cloudToGlbPoints(src, { origin, color: includeColor })
+    const { min, max } = localBounds(src, origin)
+    const tileset = buildTileset({
+      transform, box: boundingBox(min, max), contentUri: 'content.glb',
+    })
+    const entries = [
+      { name: 'tileset.json', data: new TextEncoder().encode(JSON.stringify(tileset, null, 2)) },
+      { name: 'content.glb', data: glb },
+    ]
+    downloadBlob(`${projectBase()}-3dtiles.zip`, zipStore(entries), 'application/zip')
+    log(`3D Tiles export: ${src.count.toLocaleString()} points, `
+      + `${transform ? `placed in ${crs}` : 'local frame (unplaced)'}`, 'success', 'Export')
   }
 
   return { exportKind, exportPoses, exportSensors, exportKeypoints, exportMatches, onExportRun }

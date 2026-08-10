@@ -21,6 +21,7 @@ import { serializeCloud, deserializeCloud, legacyDeserializeCloud } from './reco
 import { createDepthMapCache } from './reconstruction/depthMapCache.js'
 import { createGeoreferencing } from './reconstruction/georeferencing.js'
 import { isGeographic } from '../core/crs.js'
+import { precisionFromGcp } from '../core/gcpAccuracy.js'
 import { registerProjectStore } from './projectStores.js'
 import { useImagesStore } from './useImagesStore.js'
 import { useMatchesStore } from './useMatchesStore.js'
@@ -337,6 +338,25 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     })
     log(`COLMAP import: added sparse cloud (${cameras.size} cameras, ${points.length} points)`
       + `${mainSparseId.value === selectedCloudId.value ? ' — set as main' : ''}`, 'success', 'Reconstruction')
+    persist()
+    return true
+  }
+
+  function importInteropModel(model) {
+    const resolve = makeNameResolver(images.value.map((im) => ({ uuid: im.uuid, name: im.name })))
+    const loadedByUuid = new Map(images.value.map((im) => [im.uuid, im]))
+    const normalizedImages = (model.images ?? []).map((im) => {
+      const uuid = resolve(im.name), loaded = loadedByUuid.get(uuid)
+      const width = im.width ?? loaded?.meta?.width ?? null, height = im.height ?? loaded?.meta?.height ?? null
+      return { ...im, width, height, K: { fx: im.K?.fx, fy: im.K?.fy ?? im.K?.fx, cx: im.K?.cx ?? (width ? width / 2 : 0), cy: im.K?.cy ?? (height ? height / 2 : 0) } }
+    })
+    const { cameras, points, matched, unmatched } = colmapToSparse({ images: normalizedImages, points: model.points ?? [] }, resolve)
+    if (cameras.size < 2) {
+      log(`${model.format} import: fewer than 2 cameras match loaded images`, 'warn', 'Reconstruction')
+      return false
+    }
+    upsertSparseCloud(cameras, points, { replaceId: null, asMain: !mainSparseCloud.value, name: `Imported (${model.format})`, imported: true })
+    log(`${model.format} import: ${matched.length} cameras, ${points.length} points${unmatched.length ? `, ${unmatched.length} unmatched` : ''}`, 'success', 'Reconstruction')
     persist()
     return true
   }
@@ -990,13 +1010,17 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
           return gcpsStore.gcps
             .filter((g) => g.enabled !== false
               && g.role !== 'check'
-              && Number.isFinite(g.x) && Number.isFinite(g.y) && Number.isFinite(g.z))
+              && Number.isFinite(g.x) && Number.isFinite(g.y) && Number.isFinite(g.z)
+              && precisionFromGcp(g) != null)
             .map((g) => ({
               role: 'control',
               x: g.x, y: g.y, z: g.z,
               accuracyX: g.accuracyX, accuracyY: g.accuracyY, accuracyZ: g.accuracyZ,
+              correlationXY: g.correlationXY, correlationXZ: g.correlationXZ, correlationYZ: g.correlationYZ,
               observations: (g.observations || [])
-                .map((o) => ({ uuid: imgById.get(o.imageId)?.uuid, px: o.px, py: o.py }))
+                .map((o) => ({ uuid: imgById.get(o.imageId)?.uuid, px: o.px, py: o.py,
+                  accuracyX: o.accuracyX ?? g.accuracyImgX,
+                  accuracyY: o.accuracyY ?? g.accuracyImgY }))
                 .filter((o) => o.uuid != null),
             }))
         })(),
@@ -1214,7 +1238,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     generateOrtho,
     generateMesh,
     reconstruct,
-    importColmapModel,
+    importColmapModel, importInteropModel,
     importCloud,
     editClouds,
     computeDepthMaps,
