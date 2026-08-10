@@ -21,6 +21,13 @@ describe('exifPoseFromMetadata', () => {
     expect(exifPoseFromMetadata({ gpsLat: null, gpsLon: 2 })).toBeNull()
   })
 
+  // A freshly added image carries meta: null until extraction resolves, and the
+  // EXIF-pose sync runs over the live image list on every push.
+  it('tolerates a missing metadata object', () => {
+    expect(exifPoseFromMetadata(null)).toBeNull()
+    expect(exifPoseFromMetadata(undefined)).toBeNull()
+  })
+
   it('uses declared horizontal positioning error', () => {
     expect(exifPoseFromMetadata({ gpsLat: 1, gpsLon: 2, gpsHorizontalAccuracy: 0.7 }))
       .toMatchObject({ accuracyX: 0.7, accuracyY: 0.7, accuracySource: 'exif' })

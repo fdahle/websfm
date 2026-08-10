@@ -10,7 +10,9 @@ import { formatBytes } from '../../core/io/projectArchive.js'
 import { MODEL_CACHE_NAME } from '../../core/models/registry.js'
 import * as opfs from '../../utils/opfs.js'
 
-defineProps({ theme: String })
+// `theme` is the stored preference ('system' | 'light' | 'dark'); `resolvedTheme`
+// is what 'system' currently evaluates to, shown so the choice isn't opaque.
+const props = defineProps({ theme: String, resolvedTheme: String })
 const emit = defineEmits(['close', 'set-theme'])
 
 const { isChromium, warningEnabled, setEnabled: setBrowserWarningEnabled } = useBrowserWarning()
@@ -22,6 +24,10 @@ const {
 const { advancedSettingsExpanded, setAdvancedSettingsExpanded, uiScale, setUiScale, motion, setMotion } = useUiSettings()
 const { gridZ, setGridZ, background, setBackground } = useViewerSettings()
 const { basemap, setBasemap } = useMapSettings()
+
+const themeDesc = computed(() => (props.theme === 'system'
+  ? `Following your operating system — currently ${props.resolvedTheme === 'light' ? 'light' : 'dark'}.`
+  : 'Appearance used throughout the application.'))
 
 const tabs = [
   { id: 'general', label: 'General' },
@@ -110,11 +116,12 @@ onMounted(refreshStorage)
           <div class="setting-row">
             <div class="setting-info">
               <span class="setting-label">Theme</span>
-              <span class="setting-desc">Appearance used throughout the application.</span>
+              <span class="setting-desc">{{ themeDesc }}</span>
             </div>
-            <div class="seg-toggle">
-              <button :class="{ active: theme === 'dark' }" @click="emit('set-theme', 'dark')">Dark</button>
+            <div class="seg-toggle compact">
+              <button :class="{ active: theme === 'system' }" @click="emit('set-theme', 'system')">System</button>
               <button :class="{ active: theme === 'light' }" @click="emit('set-theme', 'light')">Light</button>
+              <button :class="{ active: theme === 'dark' }" @click="emit('set-theme', 'dark')">Dark</button>
             </div>
           </div>
 

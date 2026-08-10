@@ -44,6 +44,11 @@ const props = defineProps({
   showGrid: { type: Boolean, default: true },
   showMapGrid: { type: Boolean, default: true },
   showFootprints: { type: Boolean, default: true },
+  // Appearance: the stored preference ('system' | 'light' | 'dark') and the
+  // value it currently resolves to. Both are needed — the button's label states
+  // the preference, its tooltip states what "system" resolved to.
+  themePreference: { type: String, default: 'system' },
+  theme: { type: String, default: 'dark' },
 })
 
 const emit = defineEmits(['command'])
@@ -325,6 +330,9 @@ const tabs = [
         commands: [
           { id: 'open-glossary', label: 'Glossary', icon: 'book' },
           { id: 'open-guide',    label: 'Guide',    icon: 'book' },
+          // Cycles System → Light → Dark; its label and icon report the current
+          // choice, so `themed` is resolved in cmdLabel/cmdIcon.
+          { id: 'toggle-theme',     label: 'Theme',       icon: 'theme-system', themed: true },
           { id: 'open-settings',    label: 'Settings',    icon: 'settings' },
           { id: 'open-system-info', label: 'System info', icon: 'cpu' },
           { id: 'open-about',       label: 'About',       icon: 'info' },
@@ -638,8 +646,37 @@ function disabledReason(cmd) {
   return ''
 }
 
+// The theme button reports the current preference rather than a fixed verb —
+// "System" also has to show which way it currently resolved, or the button is
+// the one control that can't tell you what the app is doing.
+const THEME_BUTTON = {
+  system: { label: 'Theme\nSystem', icon: 'theme-system' },
+  light:  { label: 'Theme\nLight',  icon: 'sun' },
+  dark:   { label: 'Theme\nDark',   icon: 'moon' },
+}
+
 function cmdLabel(cmd) {
+  if (cmd.themed) return (THEME_BUTTON[props.themePreference] ?? THEME_BUTTON.system).label
   return cmd.labelFn ? cmd.labelFn(props.imageViewState) : cmd.label
+}
+
+function cmdIcon(cmd) {
+  if (cmd.themed) {
+    return props.themePreference === 'system'
+      ? THEME_BUTTON.system.icon
+      : (THEME_BUTTON[props.themePreference] ?? THEME_BUTTON.system).icon
+  }
+  return cmd.icon
+}
+
+function cmdTitle(cmd) {
+  if (cmd.themed) {
+    const pref = props.themePreference === 'system'
+      ? `System (${props.theme === 'light' ? 'light' : 'dark'})`
+      : (props.themePreference === 'light' ? 'Light' : 'Dark')
+    return `Appearance: ${pref} — click to cycle`
+  }
+  return ''
 }
 
 function run(cmd) {
@@ -712,7 +749,7 @@ function run(cmd) {
                   :title="isDisabled(cmd) ? disabledReason(cmd) : cmdLabel(cmd)"
                   @click="run(cmd)"
                 >
-                  <Icon :name="cmd.icon" class="cmd-icon-sm" />
+                  <Icon :name="cmdIcon(cmd)" class="cmd-icon-sm" />
                   <span class="cmd-label-sm">{{ cmdLabel(cmd) }}</span>
                 </button>
               </div>
@@ -722,10 +759,10 @@ function run(cmd) {
                 class="cmd"
                 :class="{ active: isActive(item), danger: item.danger, disabled: isDisabled(item) }"
                 :aria-disabled="isDisabled(item)"
-                :title="isDisabled(item) ? disabledReason(item) : ''"
+                :title="isDisabled(item) ? disabledReason(item) : cmdTitle(item)"
                 @click="run(item)"
               >
-                <Icon :name="item.icon" class="cmd-icon" />
+                <Icon :name="cmdIcon(item)" class="cmd-icon" />
                 <span class="cmd-label">{{ cmdLabel(item) }}</span>
               </button>
             </template>

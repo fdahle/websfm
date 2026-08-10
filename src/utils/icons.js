@@ -195,6 +195,16 @@ export const icons = {
     <circle cx="12" cy="12" r="8.5" />
     <path d="M12 11v5" />
     <circle cx="12" cy="7.8" r="0.6" fill="currentColor" stroke="none" />`,
+  // Theme trio — the ribbon button swaps between them to report the current
+  // choice, so they must read as one family at 24px.
+  sun: `
+    <circle cx="12" cy="12" r="4.2" />
+    <path d="M12 2.6v2.4M12 19v2.4M2.6 12h2.4M19 12h2.4M5.4 5.4l1.7 1.7M16.9 16.9l1.7 1.7M18.6 5.4l-1.7 1.7M7.1 16.9l-1.7 1.7" />`,
+  moon: `<path d="M20 14.2A8.4 8.4 0 1 1 9.8 4a6.9 6.9 0 0 0 10.2 10.2Z" />`,
+  // "System": one disc, half of it filled — light and dark decided elsewhere.
+  'theme-system': `
+    <circle cx="12" cy="12" r="8.5" />
+    <path d="M12 3.5a8.5 8.5 0 0 1 0 17Z" fill="currentColor" stroke="none" />`,
   // System info: a processor chip with pins — reads as "hardware / diagnostics".
   cpu: `
     <rect x="7" y="7" width="10" height="10" rx="1.5" />

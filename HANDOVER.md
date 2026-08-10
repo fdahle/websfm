@@ -203,6 +203,22 @@ fiducials; self-calibration (A2) + fiducials (F4) are the code-side support.
 
 ## Done log (most recent first)
 
+- **2026-08-10 · System theme detection + quick theme button.** `composables/useTheme.js`
+  now stores a *preference* (`system` | `light` | `dark`) and exposes the resolved
+  `theme`; `system` reads `prefers-color-scheme` and re-resolves live when the OS
+  flips. `data-theme` is written explicitly for dark too (ViewerMap's
+  `[data-theme="dark"]` OpenLayers rules never matched before), and
+  `documentElement.style.colorScheme` follows so native controls/scrollbars match.
+  UI: Settings ▸ General is a three-way toggle that names what "system" resolved to,
+  plus a cycling `Other ▸ App ▸ Theme` ribbon button (label/icon report the current
+  choice) and a `theme` console command. No stored preference now means "follow the
+  OS" instead of the old hardcoded dark.
+
+- **2026-08-10 · Fix: image import aborted on `meta: null`.** `exifPoseFromMetadata`
+  used a default parameter, which does not fill in for `null` — and `createImage`
+  sets `meta: null` until EXIF extraction resolves, so `usePosesStore`'s immediate
+  `exifSig` watcher threw on the first pushed image and killed the ingest.
+
 - **2026-08-10 · First-beta release packaging.** Versioned the app as
   `0.1.0-beta.1`, added and bundled the MIT license, exposed the version in About,
   added favicon/social metadata, made root versus subpath deployment explicit via
