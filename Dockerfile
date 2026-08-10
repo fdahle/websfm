@@ -7,7 +7,7 @@ RUN npm ci
 
 COPY . .
 
-RUN npm run build:release
+RUN npm run build
 
 FROM nginx:alpine
 
