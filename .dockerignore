@@ -1,0 +1,39 @@
+# Build context hygiene. The image runs `npm ci` for a linux/musl node_modules,
+# so the host tree must never be copied over it — a Windows/macOS install ships
+# platform-specific binaries (@esbuild/*, @rollup/rollup-*-msvc) that cannot run
+# in the Alpine build stage.
+node_modules
+**/node_modules
+
+# Produced inside the image by `npm run build`.
+dist
+dist-ssr
+
+# Rust build output (src/wasm/** is committed; the crates are not compiled here).
+target
+crates/target
+
+# Test images / datasets — hundreds of MB, never needed to build the app.
+data
+
+.git
+.gitignore
+Dockerfile
+.dockerignore
+
+# Docs are not inputs to the build, with one exception: LICENSE is copied into
+# dist by vite-plugin-static-copy and checked by scripts/check-release.mjs.
+CLAUDE.md
+METHODS.md
+TODO.md
+HANDOVER.md
+docs
+
+.vscode
+.claude
+.DS_Store
+*.local
+
+# NOTE: public/models/*.onnx is gitignored but deliberately NOT ignored here.
+# The weights are served from <site>/models/ unless VITE_MODEL_BASE_URL points
+# elsewhere, so they must reach the build context to be bundled into the image.

@@ -29,9 +29,31 @@ import { makeLazCodec, makeLazOps } from './ops/laz.js'
 // OffscreenCanvas, downscaled so the longest side is ≤ maxDim. Returns RGBA
 // pixels, the working dimensions, the scale back to the original, and the
 // original (natural) dimensions.
+// A bare "Failed to fetch" names neither the URL nor the stage it died in, and
+// the three plausible causes — a revoked/foreign blob: URL, a blocked request,
+// an undecodable payload — are indistinguishable in that message. Keep the URL
+// (blob:/http: are short; a data: URL is truncated) attached to every failure.
+function describeUrl(url) {
+  if (typeof url !== 'string') return String(url)
+  return url.length > 120 ? `${url.slice(0, 120)}… (${url.length} chars)` : url
+}
+
 async function rasterize(url, maxDim) {
-  const blob = await (await fetch(url)).blob()
-  const bmp = await createImageBitmap(blob)
+  let resp
+  try {
+    resp = await fetch(url)
+  } catch (err) {
+    throw new Error(`rasterize: fetch failed for ${describeUrl(url)} — ${err?.message ?? err}`)
+  }
+  if (!resp.ok) throw new Error(`rasterize: HTTP ${resp.status} for ${describeUrl(url)}`)
+  const blob = await resp.blob()
+  let bmp
+  try {
+    bmp = await createImageBitmap(blob)
+  } catch (err) {
+    throw new Error(`rasterize: decode failed for ${describeUrl(url)} `
+      + `(${blob.type || 'no content-type'}, ${blob.size} B) — ${err?.message ?? err}`)
+  }
   const natW = bmp.width, natH = bmp.height
   const scale = Math.min(1, maxDim / Math.max(natW, natH))
   const width = Math.round(natW * scale)
