@@ -217,15 +217,24 @@ export const DEM_DEFAULTS = {
   crs: 'local',     // 'local' | 'project'
   gsd: 0,           // ground sample distance; 0 = auto (√(area/n))
   aggregate: 'max', // 'max' (DSM top surface) | 'mean' | 'median'
+  fillMethod: 'idw', // 'none' | 'nearest' | 'idw'
   fillRadius: 2,    // IDW hole-fill radius (cells); 0 = none
 }
 
 // Orthophoto (core/products/ortho.js). Mirrored by OrthoModal.vue.
 // UI units: depthTolRel is a %, ÷100 on run; maxCost 0 ⇒ Infinity (no gate).
 export const ORTHO_DEFAULTS = {
+  // Which surface supplies the height per ground cell (core/products/surface.js).
+  // 'dem' reuses the built DEM (and its frame); 'mesh' rasterises the mesh cloud
+  // (watertight ⇒ no holes); 'plane' fits a plane through the cloud (flat scenes).
+  surface: 'dem',
+  crs: 'local',     // frame for a mesh/plane surface; 'dem' reuses the DEM's frame
+  gsd: 0,           // ortho cell size; 0 = the surface's own (auto) resolution
   blend: 'best',    // 'best' (sharpest) | 'average' (smoother seams)
   depthTolRel: 2,   // occlusion tolerance, % of depth
   maxCost: 0,       // 0 = no cost gate; else drop matches above this cost
+  fillMethod: 'idw', // colour interpolation: 'none' | 'nearest' | 'idw'
+  fillRadius: 2,    // fill unsampled pixels inside the chosen surface (cells)
 }
 
 // Product export (core/products/exporters.js + geotiff.js). Mirrored by ExportModal.vue.
@@ -264,6 +273,7 @@ export const IMPORT_CLOUD_DEFAULTS = {
 export const MESH_DEFAULTS = {
   depth: 8,          // octree max depth (detail vs cost/RAM)
   screening: 4,      // Poisson point-fitting weight; 0 disables screening
+  fillHoles: true,   // keep the untrimmed, watertight Poisson surface
   trimFactor: 6,     // trim radius = trimFactor × dense mergeCell; 0 = no trim
   colorize: true,    // transfer dense-cloud colour onto the mesh vertices
 }

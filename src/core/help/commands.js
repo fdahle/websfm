@@ -23,6 +23,8 @@ const NEED_CHECKS = {
   depthMaps: { ok: (s) => s.depthMapCount > 0, reason: 'Compute depth maps first' },
   cloud:     { ok: (s) => s.cloudReady,       reason: 'Build a point cloud first' },
   dem:       { ok: (s) => s.demReady,         reason: 'Build a DEM first' },
+  // An ortho reprojects onto a SURFACE — a DEM or a mesh, not a DEM specifically.
+  surface:   { ok: (s) => s.demReady || s.meshReady, reason: 'Build a DEM or a mesh first' },
   ortho:     { ok: (s) => s.orthoReady,       reason: 'Build an orthophoto first' },
   products:  { ok: (s) => s.productReady,     reason: 'Build a DEM or orthophoto first' },
   poses:     { ok: (s) => s.poseCount   > 0,  reason: 'Import camera poses first' },
@@ -42,7 +44,7 @@ export const COMMANDS = [
   { name: 'depth',    aliases: ['depthmaps'],       dispatch: 'compute-depth',   needs: ['sparse'],    group: 'Pipeline', help: 'Open the depth-map dialog' },
   { name: 'dense',    aliases: [],                  dispatch: 'dense',           needs: ['depthMaps'], group: 'Pipeline', help: 'Open the dense reconstruction dialog' },
   { name: 'dem',      aliases: [],                  dispatch: 'gen-dem',         needs: ['cloud'],     group: 'Pipeline', help: 'Open the DEM generation dialog' },
-  { name: 'ortho',    aliases: [],                  dispatch: 'gen-ortho',       needs: ['dem', 'depthMaps'], group: 'Pipeline', help: 'Open the orthophoto dialog' },
+  { name: 'ortho',    aliases: [],                  dispatch: 'gen-ortho',       needs: ['surface', 'depthMaps'], group: 'Pipeline', help: 'Open the orthophoto dialog' },
 
   // --- Tools ---
   { name: 'find gcps', aliases: ['auto-gcps'],       dispatch: 'find-gcps',          needs: ['sparse'], group: 'Tools', help: 'Open automatic reference-ortho matching (mockup)' },

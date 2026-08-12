@@ -21,7 +21,7 @@ const {
   memBudgetGb, memBudgetAuto, setMemBudgetGb, resetMemBudgetAuto, deviceBudgetInfo,
   useGpu, setUseGpu, workerCount, setWorkerCount, MAX_POOL_SIZE,
 } = useComputeSettings()
-const { advancedSettingsExpanded, setAdvancedSettingsExpanded, uiScale, setUiScale, motion, setMotion } = useUiSettings()
+const { advancedSettingsExpanded, setAdvancedSettingsExpanded, motion, setMotion } = useUiSettings()
 const { gridZ, setGridZ, background, setBackground } = useViewerSettings()
 const { basemap, setBasemap } = useMapSettings()
 
@@ -60,13 +60,17 @@ async function refreshStorage() {
   }
 }
 
+// Chromium decides this silently from site engagement (installed as an app,
+// bookmarked, notifications allowed, repeat visits) and shows no prompt at all;
+// only Firefox asks. So a denial is not an error and the message has to say what
+// would actually change the verdict, rather than implying a dialog was dismissed.
 async function requestDurableStorage() {
   storageBusy.value = true
   try {
     storageDurable.value = await opfs.requestDurable()
     storageMessage.value = storageDurable.value
       ? 'Persistent storage enabled.'
-      : 'The browser did not grant persistent storage. Projects still save normally, but may be evicted if space is critically low.'
+      : 'The browser declined for now — most browsers grant this automatically once the site is used regularly, bookmarked, or installed as an app, without asking. Projects still save normally, but may be evicted if disk space runs critically low. You can try again later.'
   } catch (err) {
     storageMessage.value = `Could not request persistent storage: ${err?.message ?? err}`
   } finally {
@@ -122,18 +126,6 @@ onMounted(refreshStorage)
               <button :class="{ active: theme === 'system' }" @click="emit('set-theme', 'system')">System</button>
               <button :class="{ active: theme === 'light' }" @click="emit('set-theme', 'light')">Light</button>
               <button :class="{ active: theme === 'dark' }" @click="emit('set-theme', 'dark')">Dark</button>
-            </div>
-          </div>
-
-          <div class="setting-row">
-            <div class="setting-info">
-              <span class="setting-label">Interface size</span>
-              <span class="setting-desc">Scale the main workspace controls and panels.</span>
-            </div>
-            <div class="seg-toggle compact">
-              <button :class="{ active: uiScale === 0.9 }" @click="setUiScale(0.9)">90%</button>
-              <button :class="{ active: uiScale === 1 }" @click="setUiScale(1)">100%</button>
-              <button :class="{ active: uiScale === 1.1 }" @click="setUiScale(1.1)">110%</button>
             </div>
           </div>
 
@@ -236,7 +228,12 @@ onMounted(refreshStorage)
                 <input type="number" min="0.25" step="0.5" :value="memBudgetGb" @change="setMemBudgetGb($event.target.value)">
                 <span class="num-unit">GB</span>
               </div>
-              <button v-if="!memBudgetAuto" class="btn" title="Use the detected device budget" @click="resetMemBudgetAuto">Auto</button>
+              <button
+                class="btn btn-compact"
+                :disabled="memBudgetAuto"
+                :title="memBudgetAuto ? 'Already using the detected device budget' : 'Use the detected device budget'"
+                @click="resetMemBudgetAuto"
+              >Auto</button>
             </div>
           </div>
 
@@ -280,10 +277,10 @@ onMounted(refreshStorage)
           <div class="setting-row">
             <div class="setting-info">
               <span class="setting-label">Storage protection</span>
-              <span class="setting-desc">Persistent storage makes the browser less likely to evict local projects when disk space is low.</span>
+              <span class="setting-desc">Persistent storage makes the browser less likely to evict local projects when disk space is low. The browser decides this itself — usually without asking — based on how often the site is used.</span>
             </div>
             <span v-if="storageDurable" class="status-ok">Protected</span>
-            <button v-else-if="storageDurable === false" class="btn" :disabled="storageBusy" @click="requestDurableStorage">Request</button>
+            <button v-else-if="storageDurable === false" class="btn" :disabled="storageBusy" @click="requestDurableStorage">{{ storageBusy ? 'Requesting…' : 'Request' }}</button>
             <span v-else class="readout">Unavailable</span>
           </div>
 
@@ -330,12 +327,16 @@ onMounted(refreshStorage)
 .seg-toggle button.active { background: var(--accent); color: #fff; }
 .select, .num-input input { background: var(--input-bg, var(--panel)); border: 1px solid var(--panel-border); border-radius: 6px; color: var(--text); font: inherit; font-size: 12px; padding: 5px 8px; }
 .select { max-width: 165px; }
+/* The memory-limit row pairs a number input with its "Auto" reset; without this
+   the two stack against the row's stretch alignment instead of sitting on one line. */
+.setting-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 .num-input { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 .num-input input { width: 76px; }
 .num-unit, .readout { font-size: 12px; color: var(--text-dim); }
 .btn { background: none; border: 1px solid var(--panel-border); border-radius: 6px; color: var(--text); font: inherit; font-size: 12px; padding: 5px 12px; cursor: pointer; flex-shrink: 0; }
 .btn:hover:not(:disabled) { background: var(--hover-bg); }
 .btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn-compact { padding: 5px 10px; }
 .usage-bar { height: 8px; border-radius: 4px; background: var(--hover-bg); overflow: hidden; }
 .usage-fill { height: 100%; background: var(--accent); min-width: 2px; }
 .status-ok { color: #3fae6a; font-size: 12px; font-weight: 600; }

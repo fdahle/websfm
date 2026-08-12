@@ -238,10 +238,10 @@
 .expand-btn:hover { color: var(--text); }
 .expand-btn.open::before { transform: rotate(90deg); }
 
-/* Image detail panel — white card with dotted left connector */
+/* Image detail panel — raised card with dotted left connector */
 .img-details {
-  background: #fff;
-  border-left: 1.5px dotted #bbb;
+  background: var(--detail-bg);
+  border-left: 1.5px dotted var(--detail-border);
   margin: 0 8px 4px 19px;
   border-radius: 0 4px 4px 0;
   padding: 4px 8px 4px 10px;
@@ -255,15 +255,15 @@
   line-height: 1.8;
 }
 
-.detail-label { color: #777; }
+.detail-label { color: var(--text-dim); }
 
 .detail-value {
-  color: #222;
+  color: var(--text);
   font-variant-numeric: tabular-nums;
 }
 
-.detail-dim   { color: #aaa; }
-.detail-error { color: #c33; }
+.detail-dim   { color: var(--text-dim); opacity: 0.75; }
+.detail-error { color: var(--danger); }
 
 /* GCP observation count pill */
 .obs-badge {
@@ -282,9 +282,9 @@
   margin: 6px 0 2px;
   padding: 3px 8px;
   background: none;
-  border: 1px solid #ddd;
+  border: 1px solid var(--panel-border);
   border-radius: 4px;
-  color: #c33;
+  color: var(--danger);
   font: inherit;
   font-size: 11px;
   cursor: pointer;
@@ -292,21 +292,22 @@
 
 .gcp-remove:hover {
   background: rgba(220, 80, 80, 0.1);
-  border-color: #c33;
+  border-color: var(--danger);
 }
 
 .role-toggle {
   padding: 2px 6px;
   background: none;
-  border: 1px solid #ddd;
+  border: 1px solid var(--panel-border);
   border-radius: 4px;
+  color: var(--text);
   font: inherit;
   font-size: 11px;
   cursor: pointer;
 }
 
 .role-toggle:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--hover-bg);
 }
 
 .role-toggle.marking {

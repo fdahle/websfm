@@ -25,19 +25,56 @@ export function parseMeshBuffer(bytes) {
   return { nVerts, nTris, pos, idx }
 }
 
-// Build a voxel hash of a flat dense cloud at `cell`: numeric packed key → index of a
-// representative point in that cell (last writer wins; colour is averaged upstream by
-// fusion, so any occupant is fine). Same floor(coord/cell) anchoring as the fusion
-// accumulator. Keys are plain JS strings (correctness over speed; the cloud is one-time).
-function buildColorGrid(pos, cell) {
+// Cell-grid geometry of a flat position buffer at `cell`, for numeric key packing —
+// `{ bx, by, bz, nx, ny, nz, packed }`: the base cell index per axis and the per-axis
+// cell counts the `(dix·ny+diy)·nz+diz` packing multiplies by. One cell of padding each
+// side means a coordinate just past the measured bound still packs to a unique in-range
+// key. `packed` is false when the cell count product would exceed float64's exact
+// integer range (an enormous extent against a tiny cell) — the callers then fall back
+// to string keys, since a silently-colliding key is worse than a slow one.
+function packingFor(pos, cell) {
   const inv = 1 / cell
-  const grid = new Map()
   const n = pos.length / 3
+  if (!(n > 0)) return { bx: 0, by: 0, bz: 0, nx: 1, ny: 1, nz: 1, packed: true }
+  let ix0 = Infinity, iy0 = Infinity, iz0 = Infinity
+  let ix1 = -Infinity, iy1 = -Infinity, iz1 = -Infinity
   for (let i = 0; i < n; i++) {
     const kx = Math.floor(pos[i * 3] * inv)
     const ky = Math.floor(pos[i * 3 + 1] * inv)
     const kz = Math.floor(pos[i * 3 + 2] * inv)
-    grid.set(`${kx},${ky},${kz}`, i)
+    if (kx < ix0) ix0 = kx; if (kx > ix1) ix1 = kx
+    if (ky < iy0) iy0 = ky; if (ky > iy1) iy1 = ky
+    if (kz < iz0) iz0 = kz; if (kz > iz1) iz1 = kz
+  }
+  const nx = (ix1 - ix0) + 3, ny = (iy1 - iy0) + 3, nz = (iz1 - iz0) + 3
+  return {
+    bx: ix0 - 1, by: iy0 - 1, bz: iz0 - 1,
+    nx, ny, nz,
+    packed: Number.isFinite(nx * ny * nz) && nx * ny * nz <= Number.MAX_SAFE_INTEGER,
+  }
+}
+
+// Cell key for `pack`: the packed number, or the legacy string when packing would not
+// stay float64-exact. `dix/diy/diz` are offsets already rebased by `bx/by/bz`.
+function cellKey(pack, dix, diy, diz) {
+  return pack.packed ? (dix * pack.ny + diy) * pack.nz + diz : `${dix},${diy},${diz}`
+}
+
+// Build a voxel hash of a flat dense cloud at `cell`: numeric packed key → index of a
+// representative point in that cell (last writer wins; colour is averaged upstream by
+// fusion, so any occupant is fine). Same floor(coord/cell) anchoring as the fusion
+// accumulator, and the same numeric `(dix·ny+diy)·nz+diz` key packing — a dense cloud
+// is millions of points, and a template-string key allocates a string per point.
+function buildColorGrid(pos, cell, pack) {
+  const inv = 1 / cell
+  const { bx, by, bz } = pack
+  const grid = new Map()
+  const n = pos.length / 3
+  for (let i = 0; i < n; i++) {
+    const dix = Math.floor(pos[i * 3] * inv) - bx
+    const diy = Math.floor(pos[i * 3 + 1] * inv) - by
+    const diz = Math.floor(pos[i * 3 + 2] * inv) - bz
+    grid.set(cellKey(pack, dix, diy, diz), i)
   }
   return grid
 }
@@ -56,7 +93,9 @@ export function transferVertexColors(meshPos, dense, cell, opts = {}) {
     for (let i = 0; i < nVerts; i++) { col[i*3] = grayFallback[0]; col[i*3+1] = grayFallback[1]; col[i*3+2] = grayFallback[2] }
     return { col, misses: nVerts }
   }
-  const grid = buildColorGrid(dpos, cell)
+  const pack = packingFor(dpos, cell)
+  const { bx, by, bz, nx, ny, nz } = pack
+  const grid = buildColorGrid(dpos, cell, pack)
   const inv = 1 / cell
   let misses = 0
   for (let v = 0; v < nVerts; v++) {
@@ -64,9 +103,18 @@ export function transferVertexColors(meshPos, dense, cell, opts = {}) {
     const cx = Math.floor(vx * inv), cy = Math.floor(vy * inv), cz = Math.floor(vz * inv)
     let bestI = -1, bestD2 = Infinity
     for (let dz = -searchRadius; dz <= searchRadius; dz++) {
+      const diz = cz + dz - bz
+      if (diz < 0 || diz >= nz) continue
       for (let dy = -searchRadius; dy <= searchRadius; dy++) {
+        const diy = cy + dy - by
+        if (diy < 0 || diy >= ny) continue
         for (let dx = -searchRadius; dx <= searchRadius; dx++) {
-          const idx = grid.get(`${cx+dx},${cy+dy},${cz+dz}`)
+          // Poisson extrapolates past the cloud, so a mesh vertex can sit outside the
+          // packed range. Skip rather than let the key alias onto an unrelated cell —
+          // out of range genuinely means "no dense point here".
+          const dix = cx + dx - bx
+          if (dix < 0 || dix >= nx) continue
+          const idx = grid.get(cellKey(pack, dix, diy, diz))
           if (idx === undefined) continue
           const ex = dpos[idx*3] - vx, ey = dpos[idx*3+1] - vy, ez = dpos[idx*3+2] - vz
           const d2 = ex*ex + ey*ey + ez*ez
@@ -117,10 +165,18 @@ export function subsampleForMesh(pos, nrm, cell) {
   if (!(cell > 0)) return { pos, nrm }
   const inv = 1 / cell
   const n = pos.length / 3
+  // Numeric packed cell keys, as in the fusion accumulator — this runs over the whole
+  // dense cloud (millions of points), where a template-string key allocates a string
+  // per point.
+  const pack = packingFor(pos, cell)
+  const { bx, by, bz } = pack
   const cells = new Map()
   for (let i = 0; i < n; i++) {
     const x = pos[i * 3], y = pos[i * 3 + 1], z = pos[i * 3 + 2]
-    const key = `${Math.floor(x * inv)},${Math.floor(y * inv)},${Math.floor(z * inv)}`
+    const dix = Math.floor(x * inv) - bx
+    const diy = Math.floor(y * inv) - by
+    const diz = Math.floor(z * inv) - bz
+    const key = cellKey(pack, dix, diy, diz)
     let a = cells.get(key)
     if (!a) { a = { x: 0, y: 0, z: 0, nx: 0, ny: 0, nz: 0, n: 0 }; cells.set(key, a) }
     a.x += x; a.y += y; a.z += z
@@ -166,7 +222,10 @@ export function generateMesh(dense, poissonFn, settings = {}, onLog = () => {}) 
   const cfg = { ...MESH_DEFAULTS, ...MESH_TUNING, ...settings }
   const mergeCell = settings.mergeCell > 0 ? settings.mergeCell : 1
   const depth = cfg.depth >>> 0
-  const trimDist = cfg.trimFactor > 0 ? cfg.trimFactor * mergeCell : 0
+  // Screened Poisson is closed before trimming. Keeping it untrimmed is the
+  // reliable hole-fill mode; distance trimming is useful for removing unsupported
+  // extrapolation, but can reopen boundaries and gaps.
+  const trimDist = cfg.fillHoles ? 0 : (cfg.trimFactor > 0 ? cfg.trimFactor * mergeCell : 0)
 
   // Flag a depth that's high for this point count (mostly builds empty octree cells).
   const recDepth = recommendMeshDepth(dense.count)

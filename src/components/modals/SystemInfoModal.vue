@@ -35,13 +35,29 @@ onMounted(async () => {
 
   const gl = gl2 || canvas.getContext('webgl')
   if (gl) {
+    // The extension constant is UNMASKED_RENDERER_WEBGL — the WEBGL_-prefixed
+    // spelling is the *extension* name, not a member, so reading it yields
+    // undefined and getParameter(undefined) returns null (a blank field, no error).
+    // Chrome also hides the extension behind privacy settings, hence the RENDERER
+    // fallback (generic, but never empty).
     const ext = gl.getExtension('WEBGL_debug_renderer_info')
-    gpu.value = ext ? gl.getParameter(ext.WEBGL_UNMASKED_RENDERER_WEBGL) : 'Unknown'
+    const renderer = (ext && gl.getParameter(ext.UNMASKED_RENDERER_WEBGL))
+      || gl.getParameter(gl.RENDERER)
+    gpu.value = renderer || 'Unknown'
   } else {
     gpu.value = 'No WebGL'
   }
 
   webgpu.value = !!navigator.gpu
+  // WebGPU reports the real adapter on engines that mask it in WebGL.
+  if (navigator.gpu) {
+    try {
+      const adapter = await navigator.gpu.requestAdapter()
+      const info = adapter && (adapter.info || (adapter.requestAdapterInfo && await adapter.requestAdapterInfo()))
+      const desc = [info?.description, info?.device, info?.vendor].find(s => s)
+      if (desc && (!gpu.value || gpu.value === 'Unknown')) gpu.value = desc
+    } catch { /* adapter info is best-effort */ }
+  }
 
   // Minimal WASM module with a SIMD opcode (v128.const) to detect SIMD support.
   const simdBytes = new Uint8Array([

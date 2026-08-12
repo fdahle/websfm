@@ -1,7 +1,8 @@
 <script setup>
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import ModalShell from './ui/ModalShell.vue'
 import SettingsField from './ui/SettingsField.vue'
+import WarnBox from './ui/WarnBox.vue'
 import GlossaryTerm from '../glossary/GlossaryTerm.vue'
 import { DEM_DEFAULTS } from '../../core/defaults.user.js'
 
@@ -9,9 +10,23 @@ import { DEM_DEFAULTS } from '../../core/defaults.user.js'
 // grid in the chosen frame. Defaults are the single source of truth in
 // core/defaults.user.js (core/products/dem.js keeps matching defensive fallbacks).
 // `canGeoreference` / `projectCrs` come from the reconstruction store.
-defineProps({
+// `source` is the store's `demSource` getter — the cloud generateDem() will
+// actually rasterise. Shown read-only: the pick is the store's, this only makes
+// it visible. A sparse source is a legitimate (if coarse) run, so it warns and
+// never gates the button.
+const props = defineProps({
   canGeoreference: { type: Boolean, default: false },
   projectCrs: { type: String, default: null },
+  source: { type: Object, default: null },
+})
+
+const isSparseSource = computed(() => props.source?.kind === 'sparse')
+
+const sourceLabel = computed(() => {
+  const s = props.source
+  if (!s) return 'No point cloud yet'
+  const kind = s.kind === 'dense' ? 'Dense cloud' : 'Sparse cloud'
+  return `${kind}${s.name ? ` · ${s.name}` : ''} · ${s.count.toLocaleString()} points`
 })
 
 const emit = defineEmits(['close', 'run'])
@@ -27,6 +42,19 @@ function run() {
 
 <template>
   <ModalShell title="Build DEM" @close="emit('close')">
+    <!-- Read-only: which cloud the run will rasterise. The pick lives in the
+         store's demSource getter; showing it here is what makes a sparse-source
+         DEM a visible choice instead of a silent fallback. -->
+    <div class="source-row">
+      <span class="field-label">Source</span>
+      <span class="field-hint source-value">{{ sourceLabel }}</span>
+    </div>
+
+    <WarnBox v-if="isSparseSource">
+      Building from the <b>sparse</b> cloud — cells are interpolated from tie points,
+      so the surface is approximate. Run <b>Depth maps → Densify</b> for a true DSM.
+    </WarnBox>
+
     <SettingsField label-for="dem-crs"
       hint="Local uses a camera-estimated up-vector (up-to-scale); the project CRS fits a similarity to imported poses for real-world heights & GSD.">
       <template #label>
@@ -59,9 +87,22 @@ function run() {
       </select>
     </SettingsField>
 
-    <SettingsField label="Hole fill radius" label-for="dem-fill" unit="px"
-      hint="Inverse-distance fill of empty cells within this radius. 0 = leave gaps.">
-      <input id="dem-fill" v-model.number="settings.fillRadius" type="number" min="0" max="16" step="1" class="field-input" />
+    <SettingsField label="Gap interpolation" label-for="dem-fill-method"
+      hint="IDW blends nearby heights smoothly; nearest neighbour preserves steps. Disable to keep nodata gaps.">
+      <select id="dem-fill-method" v-model="settings.fillMethod" class="field-input field-select">
+        <option value="idw">Inverse distance (smooth)</option>
+        <option value="nearest">Nearest neighbour</option>
+        <option value="none">None (keep gaps)</option>
+      </select>
+    </SettingsField>
+
+    <!-- The radius never expands the raster extent; it only fills cells with a
+         measured neighbour inside this search distance. -->
+    <SettingsField v-if="settings.fillMethod !== 'none'" label="Interpolation radius" label-for="dem-fill" unit="px"
+      :hint="isSparseSource
+        ? 'Fill empty cells with measured neighbours inside this radius. On a sparse source, a large radius invents surface between distant tie points.'
+        : 'Fill empty cells only when an original measured cell lies within this radius.'">
+      <input id="dem-fill" v-model.number="settings.fillRadius" type="number" min="1" max="32" step="1" class="field-input" />
     </SettingsField>
 
     <template #footer>
@@ -75,4 +116,7 @@ function run() {
 <style scoped>
 /* DEM/aggregation selects read better full-width. */
 .field-select { width: 100%; }
+/* Source is a read-only statement, not a field: label and value on one line. */
+.source-row { display: flex; align-items: baseline; gap: 8px; }
+.source-value { color: var(--text); }
 </style>

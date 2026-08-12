@@ -73,6 +73,52 @@ export function sampleOrtho(P, maps, opts = {}) {
   return best ? best.rgb : null
 }
 
+// Fill small transparent holes that lie INSIDE the selected surface. Reads only
+// original sampled pixels, so interpolation cannot propagate across a large gap
+// one radius at a time or grow beyond the DEM/mesh footprint.
+export function fillOrthoGaps(rgba, surfaceMask, width, height, radius, method = 'idw') {
+  const r = Math.max(0, Math.floor(radius))
+  if (!r || method === 'none') return 0
+  const sampled = new Uint8Array(width * height)
+  for (let i = 0; i < sampled.length; i++) sampled[i] = rgba[i * 4 + 3] > 0 ? 1 : 0
+
+  let filled = 0
+  const r2 = r * r
+  for (let row = 0; row < height; row++) {
+    for (let col = 0; col < width; col++) {
+      const i = row * width + col
+      if (!surfaceMask[i] || sampled[i]) continue
+      let nearest = -1, nearestD2 = Infinity, wsum = 0, rs = 0, gs = 0, bs = 0
+      for (let dr = -r; dr <= r; dr++) {
+        const rr = row + dr
+        if (rr < 0 || rr >= height) continue
+        for (let dc = -r; dc <= r; dc++) {
+          const cc = col + dc
+          if (cc < 0 || cc >= width) continue
+          const d2 = dr * dr + dc * dc
+          if (!d2 || d2 > r2) continue
+          const ni = rr * width + cc
+          if (!sampled[ni]) continue
+          if (d2 < nearestD2) { nearestD2 = d2; nearest = ni }
+          const w = 1 / d2, o = ni * 4
+          wsum += w; rs += w * rgba[o]; gs += w * rgba[o + 1]; bs += w * rgba[o + 2]
+        }
+      }
+      if (nearest < 0) continue
+      const o = i * 4
+      if (method === 'nearest') {
+        const no = nearest * 4
+        rgba[o] = rgba[no]; rgba[o + 1] = rgba[no + 1]; rgba[o + 2] = rgba[no + 2]
+      } else {
+        rgba[o] = Math.round(rs / wsum); rgba[o + 1] = Math.round(gs / wsum); rgba[o + 2] = Math.round(bs / wsum)
+      }
+      rgba[o + 3] = 255
+      filled++
+    }
+  }
+  return filled
+}
+
 // Orthorectify a whole DEM grid into an RGBA raster aligned to it. `toSfm` maps a
 // frame coord [x,y,z] back to SfM world (frame.toSfm); `cellCenter(grid,col,row)`
 // gives the ground XY. Cells with no height (mask 0) or no visible view become
@@ -99,6 +145,9 @@ export function orthorectify(grid, maps, toSfm, opts = {}, onProgress = () => {}
     }
     if (row % 32 === 0) onProgress(row, height)
   }
+  const sampled = covered
+  const filled = fillOrthoGaps(rgba, mask, width, height, opts.fillRadius ?? 2, opts.fillMethod ?? 'idw')
+  covered += filled
   onProgress(height, height)
-  return { width, height, rgba, covered }
+  return { width, height, rgba, covered, sampled, filled }
 }
