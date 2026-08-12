@@ -88,7 +88,13 @@ function run() {
           <input id="mesh-screen" v-model.number="settings.screening" type="number" min="0" max="16" step="0.5" class="field-input" />
         </SettingsField>
 
-        <SettingsField label="Trim factor" label-for="mesh-trim" unit="× cell"
+        <SettingsField
+          hint="Keeps Poisson's closed surface so gaps in the cloud do not become mesh holes. This may retain extrapolated geometry near the boundary.">
+          <template #label>Fill gaps (watertight mesh)</template>
+          <label class="checkbox-row"><input v-model="settings.fillHoles" type="checkbox" class="checkbox" /> Enabled</label>
+        </SettingsField>
+
+        <SettingsField v-if="!settings.fillHoles" label="Trim factor" label-for="mesh-trim" unit="× cell"
           hint="Cull triangles farther than this many dense-cloud cells from any point. 0 = keep watertight.">
           <input id="mesh-trim" v-model.number="settings.trimFactor" type="number" min="0" max="32" step="1" class="field-input" />
         </SettingsField>

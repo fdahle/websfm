@@ -116,7 +116,7 @@ describe('help', () => {
   it('gives per-command detail including requirements', () => {
     const lines = helpFor('ortho')
     expect(lines[0]).toContain('ortho')
-    expect(lines.join('\n')).toContain('requires: dem, depthMaps')
+    expect(lines.join('\n')).toContain('requires: surface, depthMaps')
     expect(helpFor('nope')).toBeNull()
   })
 })

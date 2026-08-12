@@ -117,6 +117,40 @@ Per-image transcode (decode → JPEG display + lossless PNG compute), Chrome, wo
 Decode ~34× faster; total ingest ~7.4×. Compute-PNG blob sizes unchanged (≈103–108 MB),
 i.e. identical decoded pixels. Next tall pole is the canvas PNG encode (~4 s).
 
+### B-mesh — screened-Poisson meshing (2026-08-11)
+Native `cargo test -p mesh --release`, Apple silicon. The "before" is HEAD c8b9943.
+
+**End-to-end, identical output** (`reconstructs_sphere_near_unit_radius`, depth 5,
+2000 pts — the crate's own test, so the geometry is pinned, not just the clock):
+**69.80 s → 9.47 s (7.4×)**, and byte-for-byte the same mesh: 18440 verts / 36604 tris,
+mean radius 1.080, RMS 0.190 both sides. The shipped wasm reproduces those exact
+numbers under Node/V8 via both entry points (`poisson_mesh` and the staged
+`PoissonMesher` the worker drives).
+
+**Phase breakdown** (`cargo test -p mesh --release --test bench_phases -- --ignored`,
+synthetic terrain, one point per leaf cell — the shape `generateMesh` feeds the solver):
+
+| phase | depth 7, 16k pts (before) | (after) | depth 8, 65k pts (after) |
+| --- | --- | --- | --- |
+| build (octree + vector field) | 0.46 s | 0.62 s | 2.28 s |
+| solve, coarsest layer | **462.99 s** | **0.80 s** | 3.05 s |
+| solve, all layers | — | 52.33 s | 227.00 s |
+| marching cubes | 194.51 s | **1.40 s** | 6.27 s |
+| **total** | — | **54.47 s** | **236.12 s** |
+
+The before column's coarsest layer was **462.39 s of it inside `build_rhs`**, with
+matrix assembly and CG both at 0.00 s. Depth 8 costs 8× that per layer, so the old code
+needed roughly an hour for the *first* of nine layers — which is the "hangs forever"
+report this came from. Two numbers say where it went: the extraction flood visited
+**17.4M cells for a 129k-node octree** (134× the data), and `cells_intersecting_aabb`
+probes `3·2^depth + 3` cells per axis (771³ ≈ 4.6e8 per node at depth 8).
+
+Ceilings that remain: the finest-layer solve is now the tall pole (123 s of the 227 s
+at depth 8) and is genuine work — sparse assembly + CG over the largest layer. It is
+also the part that would gain most from threads; the app is already cross-origin
+isolated for ORT, so `SharedArrayBuffer` is available and the rayon strip is a build
+flag, not a hard limit.
+
 ### B-detect — SIFT detection throughput (2026-07-17)
 The "before" is the pre-`2026-07-17` pyramid (blur-from-base + no SIMD). Two measurements,
 because the isolated and end-to-end numbers differ and both are worth keeping:
@@ -202,6 +236,54 @@ fiducials; self-calibration (A2) + fiducials (F4) are the code-side support.
 ---
 
 ## Done log (most recent first)
+
+- **2026-08-11 · Screened-Poisson meshing made usable (7.4× end to end, identical
+  output).** Meshing was effectively unusable at the default depth 8 — see the B-mesh
+  baseline. Five patches to the vendored solver, all exact restructurings rather than
+  approximations, plus two on our side:
+  (1) `PoissonVectorField::build_rhs` **scatters from the non-zero splatted normals**
+  instead of every node probing an AABB range in every other layer's grid.
+  `HGrid::cells_intersecting_aabb` walks the whole integer range and only *filters* to
+  occupied cells, so its cost was the box volume — `O(nodes · 8^depth)`. This was 98% of
+  the runtime. Exact because `grad_grad` is zero off-support, so both forms enumerate a
+  superset of the same pairs. Whichever of range-walk / node-scan is cheaper is chosen
+  per source (`PoissonLayer::range_is_cheaper_than_scan`).
+  (2) `PoissonLayer::solve` gathers the screening points **once per node** and uses the
+  B-spline's separability — 15 one-dimensional evaluations per point cover the whole ±2
+  stencil — instead of re-gathering and evaluating two tri-quadratics per (neighbour,
+  point). Same for the coarser-layer subtraction.
+  (3) Marching cubes **memoizes cube corners** (each is shared by up to 8 cells; ~6×
+  reuse measured). Upstream had left this as a `PERF:` note.
+  (4) `PoissonBuilder::finish` returns the **sample-average iso** it can accumulate in
+  the pass it already makes over every point; `finalize_mesh` was making a second one.
+  (5) `reconstruct_mesh_buffers_iso_within` lets the caller **bound the isosurface walk
+  to the region trimming would keep**, so extraction stops chasing extrapolated sheets
+  it was generating only to discard: 5.78M verts → 32.7k, 194.51 s → 1.40 s at depth 7.
+  Pinned by `bounded_extraction_matches_unbounded_after_trimming`, which compares the
+  trimmed mesh *geometrically* (the walk order changes, so the vertex numbering does).
+  Note the naive "stay inside the octree AABB" bound is **wrong** and that test catches
+  it — the coarse multigrid layers have support far wider than the finest layer's extent.
+  (6) `core/products/mesh.js` uses the fusion accumulator's **numeric packed cell keys**
+  in `subsampleForMesh` / `buildColorGrid` rather than a template string per point (the
+  colour grid spans the whole dense cloud). Packing needs a per-axis bounds check, since
+  Poisson extrapolates past the cloud and an out-of-range offset otherwise aliases onto
+  a valid neighbouring key — tested.
+  (7) `workers/ops/mesh.js` emits each progress label **before** the work it names. The
+  label used to be posted after `solve_step` returned, so "Building octree (depth 8)…"
+  stayed on screen through the entire first layer solve — the build is ~0.5 s, and the
+  label was pointing at the wrong phase for the whole run.
+
+- **2026-08-11 · Orthophoto surface choice (DEM / mesh / plane) + its own GSD.** The
+  ortho no longer requires a DEM: `core/products/surface.js` (new, pure) builds the
+  same height grid from the **mesh** (z-buffer rasterisation of the Poisson triangles
+  — watertight, so no surface holes, the fix for a patchy ortho) or from a robust
+  least-squares **plane** through the cloud, and `resampleSurface` decouples the
+  ortho's GSD from the surface's. `OrthoModal` gained a Surface select (rendering the
+  store's new `orthoSurfaces` getter, the list `generateOrtho` consumes), a coordinate
+  frame for mesh/plane surfaces, and a GSD field; the ribbon/console gate moved from
+  `needsDem` to `needsSurface` (DEM **or** mesh). The ortho result now carries its own
+  `gsd/originX/originY/frame/crs`, and the exporters read it from there instead of the
+  DEM (older orthos fall back). Rebuilding a DEM only invalidates a DEM-surface ortho.
 
 - **2026-08-10 · System theme detection + quick theme button.** `composables/useTheme.js`
   now stores a *preference* (`system` | `light` | `dark`) and exposes the resolved

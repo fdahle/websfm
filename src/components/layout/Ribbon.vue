@@ -44,11 +44,6 @@ const props = defineProps({
   showGrid: { type: Boolean, default: true },
   showMapGrid: { type: Boolean, default: true },
   showFootprints: { type: Boolean, default: true },
-  // Appearance: the stored preference ('system' | 'light' | 'dark') and the
-  // value it currently resolves to. Both are needed — the button's label states
-  // the preference, its tooltip states what "system" resolved to.
-  themePreference: { type: String, default: 'system' },
-  theme: { type: String, default: 'dark' },
 })
 
 const emit = defineEmits(['command'])
@@ -65,7 +60,9 @@ const tabs = [
           { id: 'open-mask-manager', label: 'Masks',   icon: 'mask',    needsImages: true },
           { id: 'open-sensor-table', label: 'Sensors', icon: 'camera',  needsSensors: true },
           { id: 'open-pose-table',   label: 'Camera\nPoses', icon: 'camera-pose', needsPoses: true },
-          { id: 'open-gcp-table',    label: 'GCPs',    icon: 'map-pin', aerialOnly: true },
+          // The table edits existing GCPs; a GCP is born elsewhere (import, or a
+          // right-click on the map / an image), so an empty project has nothing to show.
+          { id: 'open-gcp-table',    label: 'GCPs',    icon: 'map-pin', aerialOnly: true, needsGcps: true },
           { id: 'open-match-list',   label: 'Matches', icon: 'list',    needsMatches: true },
         ],
       },
@@ -149,7 +146,7 @@ const tabs = [
         label: 'Products',
         commands: [
           { id: 'gen-dem',       label: 'DEM',     icon: 'dem',   needsCloud: true, aerialOnly: true },
-          { id: 'gen-ortho',     label: 'Ortho',   icon: 'ortho', needsDem: true, needsDepthMaps: true, aerialOnly: true },
+          { id: 'gen-ortho',     label: 'Ortho',   icon: 'ortho', needsSurface: true, needsDepthMaps: true, aerialOnly: true },
           { id: 'gen-mesh',      label: 'Mesh',    icon: 'cube',  needsDense: true },
         ],
       },
@@ -330,9 +327,8 @@ const tabs = [
         commands: [
           { id: 'open-glossary', label: 'Glossary', icon: 'book' },
           { id: 'open-guide',    label: 'Guide',    icon: 'book' },
-          // Cycles System → Light → Dark; its label and icon report the current
-          // choice, so `themed` is resolved in cmdLabel/cmdIcon.
-          { id: 'toggle-theme',     label: 'Theme',       icon: 'theme-system', themed: true },
+          // Appearance lives in Settings ▸ Display (and the command palette's
+          // `theme`) — deliberately not duplicated as a ribbon button.
           { id: 'open-settings',    label: 'Settings',    icon: 'settings' },
           { id: 'open-system-info', label: 'System info', icon: 'cpu' },
           { id: 'open-about',       label: 'About',       icon: 'info' },
@@ -505,7 +501,7 @@ const rasterTab = computed(() => {
             label: isOrtho ? 'Orthophoto' : 'DEM',
             commands: [
               isOrtho
-                ? { id: 'gen-ortho', label: 'Rebuild', icon: 'ortho', needsDem: true, needsDepthMaps: true }
+                ? { id: 'gen-ortho', label: 'Rebuild', icon: 'ortho', needsSurface: true, needsDepthMaps: true }
                 : { id: 'gen-dem',   label: 'Rebuild', icon: 'dem',   needsCloud: true },
               { id: isOrtho ? 'export-ortho' : 'export-dem', label: 'Export',  icon: 'download' },
             ],
@@ -598,6 +594,8 @@ function isDisabled(cmd) {
   if (cmd.needsTwoClouds && props.editableCloudCount < 2) return true
   if (cmd.needsMesh      && !props.meshReady)         return true
   if (cmd.needsDem       && !props.demReady)          return true
+  // An ortho reprojects onto a surface — a DEM or a mesh either way.
+  if (cmd.needsSurface   && !props.demReady && !props.meshReady) return true
   if (cmd.needsOrtho     && !props.orthoReady)        return true
   if (cmd.needsProducts  && !props.productReady)      return true
   if (cmd.needsKeypoints && props.kpImageCount === 0) return true
@@ -630,10 +628,12 @@ function disabledReason(cmd) {
     return 'Merging needs at least two dense clouds'
   if (cmd.needsMesh      && !props.meshReady)         return 'Build a mesh first'
   if (cmd.needsDem       && !props.demReady)          return 'Build a DEM first'
+  if (cmd.needsSurface   && !props.demReady && !props.meshReady) return 'Build a DEM or a mesh first'
   if (cmd.needsOrtho     && !props.orthoReady)        return 'Build an orthophoto first'
   if (cmd.needsProducts  && !props.productReady)      return 'Build a DEM or orthophoto first'
   if (cmd.needsKeypoints && props.kpImageCount === 0) return 'Detect keypoints first'
-  if (cmd.needsGcps     && props.gcpCount === 0)   return 'Import GCPs first'
+  if (cmd.needsGcps     && props.gcpCount === 0)
+    return 'No GCPs yet — import a GCP file, or right-click the map or an image to add one'
   if (cmd.needsPoses    && props.poseCount === 0)  return 'Import camera poses first'
   if (cmd.needsSensors  && props.sensorCount === 0) return 'No sensors available'
   if (cmd.needsFilmSensor && props.filmSensorCount === 0) return 'Set at least one sensor to Film first'
@@ -646,36 +646,15 @@ function disabledReason(cmd) {
   return ''
 }
 
-// The theme button reports the current preference rather than a fixed verb —
-// "System" also has to show which way it currently resolved, or the button is
-// the one control that can't tell you what the app is doing.
-const THEME_BUTTON = {
-  system: { label: 'Theme\nSystem', icon: 'theme-system' },
-  light:  { label: 'Theme\nLight',  icon: 'sun' },
-  dark:   { label: 'Theme\nDark',   icon: 'moon' },
-}
-
 function cmdLabel(cmd) {
-  if (cmd.themed) return (THEME_BUTTON[props.themePreference] ?? THEME_BUTTON.system).label
   return cmd.labelFn ? cmd.labelFn(props.imageViewState) : cmd.label
 }
 
 function cmdIcon(cmd) {
-  if (cmd.themed) {
-    return props.themePreference === 'system'
-      ? THEME_BUTTON.system.icon
-      : (THEME_BUTTON[props.themePreference] ?? THEME_BUTTON.system).icon
-  }
   return cmd.icon
 }
 
-function cmdTitle(cmd) {
-  if (cmd.themed) {
-    const pref = props.themePreference === 'system'
-      ? `System (${props.theme === 'light' ? 'light' : 'dark'})`
-      : (props.themePreference === 'light' ? 'Light' : 'Dark')
-    return `Appearance: ${pref} — click to cycle`
-  }
+function cmdTitle() {
   return ''
 }
 

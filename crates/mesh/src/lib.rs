@@ -53,30 +53,50 @@ pub fn poisson_mesh(
     let max_depth = max_depth as usize;
     let density_depth = max_depth.saturating_sub(DENSITY_DEPTH_BACKOFF).max(1).min(max_depth);
 
-    let poisson = PoissonReconstruction::from_points_and_normals(
+    let (poisson, points, sample_iso) = PoissonBuilder::new(
         &points,
         &normals,
         screening as f64,
         density_depth,
         max_depth,
         RELAXATION_ITERS,
-    );
-    finalize_mesh(&poisson, &points, trim_dist)
+    )
+    .finish();
+    finalize_mesh(&poisson, &points, sample_iso, trim_dist)
 }
 
 /// Extract, trim, and encode a mesh from a solved reconstruction. Shared by the
 /// one-shot [`poisson_mesh`] and the staged [`PoissonMesher::finish`].
-fn finalize_mesh(poisson: &PoissonReconstruction, points: &[Point3<f64>], trim_dist: f32) -> Vec<u8> {
-    // Extract at the sample-average iso, not 0: screened Poisson's true surface is the
+fn finalize_mesh(
+    poisson: &PoissonReconstruction,
+    points: &[Point3<f64>],
+    iso: f64,
+    trim_dist: f32,
+) -> Vec<u8> {
+    // `iso` is the sample-average iso, not 0: screened Poisson's true surface is the
     // average of the implicit function at the input points, so extracting at 0 inflates
     // the surface (an ~8% radius bias on a test sphere). Kazhdan's PoissonRecon does the
-    // same. Guard against a degenerate (empty) average.
-    let iso = if points.is_empty() {
-        0.0
-    } else {
-        points.iter().map(|p| poisson.eval(p)).sum::<f64>() / points.len() as f64
+    // same. It comes from `PoissonBuilder::finish`, which accumulates it in the pass it
+    // already makes over every point — computing it here meant a second full pass.
+    //
+    // When trimming is on, tell extraction the same thing the trim pass will enforce, so
+    // it stops chasing extrapolated sheets off into empty space instead of generating
+    // millions of triangles for us to throw away. The extraction bound is deliberately
+    // looser than the trim radius: a cell's triangles lie inside its AABB, so a cell
+    // whose centre is within `trim_dist + half the cell diagonal` of a sample can still
+    // hold a vertex that survives trimming. Same final mesh, a fraction of the work.
+    let trim_dist = trim_dist as f64;
+    let trimming = trim_dist > 0.0;
+    let trim_near = trimming.then(|| PointProximity::new(points, trim_dist));
+    let buffers = match &trim_near {
+        Some(_) => {
+            let leaf = poisson.leaf_cell_width();
+            let reach = trim_dist + leaf * 3.0_f64.sqrt() / 2.0;
+            let reach_near = PointProximity::new(points, reach);
+            poisson.reconstruct_mesh_buffers_iso_within(iso, &|c| reach_near.near(c.x, c.y, c.z))
+        }
+        None => poisson.reconstruct_mesh_buffers_iso(iso),
     };
-    let buffers = poisson.reconstruct_mesh_buffers_iso(iso);
     let verts: Vec<[f64; 3]> = buffers.vertices().iter().map(|p| [p.x, p.y, p.z]).collect();
     let tris: Vec<u32> = buffers.indices().to_vec();
     if verts.is_empty() || tris.len() < 3 {
@@ -85,10 +105,9 @@ fn finalize_mesh(poisson: &PoissonReconstruction, points: &[Point3<f64>], trim_d
 
     // Trim Poisson's extrapolated bulges: drop any triangle all of whose vertices lie
     // farther than `trim_dist` from every input point, then compact the vertex list.
-    let (verts, tris) = if trim_dist > 0.0 {
-        trim_far_triangles(&verts, &tris, points, trim_dist as f64)
-    } else {
-        (verts, tris)
+    let (verts, tris) = match &trim_near {
+        Some(near) => trim_far_triangles(&verts, &tris, near),
+        None => (verts, tris),
     };
     if verts.is_empty() || tris.len() < 3 {
         return empty_mesh();
@@ -165,8 +184,8 @@ impl PoissonMesher {
         let Some(builder) = self.builder.take() else {
             return empty_mesh();
         };
-        let (poisson, points) = builder.finish();
-        finalize_mesh(&poisson, &points, trim_dist)
+        let (poisson, points, sample_iso) = builder.finish();
+        finalize_mesh(&poisson, &points, sample_iso, trim_dist)
     }
 }
 
@@ -192,35 +211,43 @@ fn encode_mesh(verts: &[[f64; 3]], tris: &[u32]) -> Vec<u8> {
     out
 }
 
-// Voxel-hash proximity grid over the input points (cell = trim_dist), then keep a
-// triangle if ANY of its vertices is within trim_dist of ANY input point. Same
-// packed-cell idea as the JS fusion accumulator. Returns the compacted (verts,idx).
-fn trim_far_triangles(
-    verts: &[[f64; 3]],
-    tris: &[u32],
-    points: &[Point3<f64>],
-    trim_dist: f64,
-) -> (Vec<[f64; 3]>, Vec<u32>) {
-    let inv = 1.0 / trim_dist;
-    let cell = |x: f64, y: f64, z: f64| -> (i64, i64, i64) {
-        ((x * inv).floor() as i64, (y * inv).floor() as i64, (z * inv).floor() as i64)
-    };
-    let mut grid: HashMap<(i64, i64, i64), Vec<usize>> = HashMap::new();
-    for (i, p) in points.iter().enumerate() {
-        grid.entry(cell(p.x, p.y, p.z)).or_default().push(i);
+/// Voxel-hash proximity index over the input points: "is this position within `radius`
+/// of any sample?". Cells are `radius`-sized so the answer is a scan of 27 cells. Same
+/// packed-cell idea as the JS fusion accumulator.
+struct PointProximity<'a> {
+    grid: HashMap<(i64, i64, i64), Vec<usize>>,
+    points: &'a [Point3<f64>],
+    inv: f64,
+    radius2: f64,
+}
+
+impl<'a> PointProximity<'a> {
+    fn new(points: &'a [Point3<f64>], radius: f64) -> Self {
+        let inv = 1.0 / radius;
+        let mut grid: HashMap<(i64, i64, i64), Vec<usize>> = HashMap::new();
+        for (i, p) in points.iter().enumerate() {
+            let key = (
+                (p.x * inv).floor() as i64,
+                (p.y * inv).floor() as i64,
+                (p.z * inv).floor() as i64,
+            );
+            grid.entry(key).or_default().push(i);
+        }
+        Self { grid, points, inv, radius2: radius * radius }
     }
-    let d2 = trim_dist * trim_dist;
-    // Is vertex v within trim_dist of any input point? Scan its cell + 26 neighbours.
-    let near = |v: &[f64; 3]| -> bool {
-        let (cx, cy, cz) = cell(v[0], v[1], v[2]);
+
+    fn near(&self, x: f64, y: f64, z: f64) -> bool {
+        let cx = (x * self.inv).floor() as i64;
+        let cy = (y * self.inv).floor() as i64;
+        let cz = (z * self.inv).floor() as i64;
         for dx in -1..=1 {
             for dy in -1..=1 {
                 for dz in -1..=1 {
-                    if let Some(ids) = grid.get(&(cx + dx, cy + dy, cz + dz)) {
+                    if let Some(ids) = self.grid.get(&(cx + dx, cy + dy, cz + dz)) {
                         for &i in ids {
-                            let p = &points[i];
-                            let (ex, ey, ez) = (p.x - v[0], p.y - v[1], p.z - v[2]);
-                            if ex * ex + ey * ey + ez * ez <= d2 {
+                            let p = &self.points[i];
+                            let (ex, ey, ez) = (p.x - x, p.y - y, p.z - z);
+                            if ex * ex + ey * ey + ez * ez <= self.radius2 {
                                 return true;
                             }
                         }
@@ -229,10 +256,18 @@ fn trim_far_triangles(
             }
         }
         false
-    };
+    }
+}
 
+// Keep a triangle if ANY of its vertices is within trim_dist of ANY input point.
+// Returns the compacted (verts, idx).
+fn trim_far_triangles(
+    verts: &[[f64; 3]],
+    tris: &[u32],
+    near: &PointProximity,
+) -> (Vec<[f64; 3]>, Vec<u32>) {
     // Per-vertex nearness, cached (each vertex is shared by several triangles).
-    let vert_near: Vec<bool> = verts.iter().map(near).collect();
+    let vert_near: Vec<bool> = verts.iter().map(|v| near.near(v[0], v[1], v[2])).collect();
 
     let mut remap = vec![u32::MAX; verts.len()];
     let mut out_verts: Vec<[f64; 3]> = Vec::new();
@@ -257,6 +292,40 @@ fn trim_far_triangles(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // A mesh as a sorted list of triangles, each a sorted triple of vertex positions —
+    // identity that survives a renumbering of the vertex buffer. Bit patterns are used
+    // as the sort key (positions are copied verbatim, never recomputed).
+    fn canonical_triangles(pos: &[[f32; 3]], idx: &[u32]) -> Vec<[[u32; 3]; 3]> {
+        let bits = |v: [f32; 3]| [v[0].to_bits(), v[1].to_bits(), v[2].to_bits()];
+        let mut tris: Vec<[[u32; 3]; 3]> = idx
+            .chunks_exact(3)
+            .map(|t| {
+                let mut v = [
+                    bits(pos[t[0] as usize]),
+                    bits(pos[t[1] as usize]),
+                    bits(pos[t[2] as usize]),
+                ];
+                v.sort();
+                v
+            })
+            .collect();
+        tris.sort();
+        tris
+    }
+
+    // Flat f32 triples -> the nalgebra pair the solver takes (as `poisson_mesh` does).
+    fn to_nalgebra(pos: &[f32], nrm: &[f32]) -> (Vec<Point3<f64>>, Vec<Vector3<f64>>) {
+        let n = pos.len() / 3;
+        (
+            (0..n)
+                .map(|i| Point3::new(pos[i * 3] as f64, pos[i * 3 + 1] as f64, pos[i * 3 + 2] as f64))
+                .collect(),
+            (0..n)
+                .map(|i| Vector3::new(nrm[i * 3] as f64, nrm[i * 3 + 1] as f64, nrm[i * 3 + 2] as f64))
+                .collect(),
+        )
+    }
 
     // Decode the byte buffer back into (nVerts, nTris, positions, indices).
     fn decode(bytes: &[u8]) -> (u32, u32, Vec<[f32; 3]>, Vec<u32>) {
@@ -323,6 +392,59 @@ mod tests {
         // run here. A gross error (wrong normals, broken solve) blows well past these.
         assert!((mean_r - 1.0).abs() < 0.15, "sphere radius grossly wrong: mean {mean_r:.3}");
         assert!(rms < 0.25, "vertices not near unit sphere: RMS {rms:.3}");
+    }
+
+    // Bounding the isosurface walk to the region trimming would keep must not change
+    // the trimmed mesh — it may only skip work. This pins the equivalence claim behind
+    // `reconstruct_mesh_buffers_iso_within`: extract bounded then trim (what
+    // `finalize_mesh` does) against extract everywhere then trim (what it used to do).
+    // A too-tight bound shows up here as a smaller mesh; the naive "stay inside the
+    // octree AABB" bound fails it, because the coarse multigrid layers have support far
+    // wider than the finest layer's extent.
+    #[test]
+    fn bounded_extraction_matches_unbounded_after_trimming() {
+        // A hemisphere-ish cap: an open surface, so Poisson extrapolates hard past the
+        // rim and there is genuinely far-from-data isosurface for the bound to skip.
+        let mut pos: Vec<f32> = Vec::new();
+        let mut nrm: Vec<f32> = Vec::new();
+        let n = 3000usize;
+        let ga = std::f64::consts::PI * (3.0 - 5.0_f64.sqrt());
+        for i in 0..n {
+            let y = 1.0 - (i as f64 / (n - 1) as f64); // upper half only
+            let r = (1.0 - y * y).max(0.0).sqrt();
+            let theta = ga * i as f64;
+            let (x, z) = (theta.cos() * r, theta.sin() * r);
+            pos.extend_from_slice(&[x as f32, y as f32, z as f32]);
+            nrm.extend_from_slice(&[x as f32, y as f32, z as f32]);
+        }
+
+        let (points, normals) = to_nalgebra(&pos, &nrm);
+        let (poisson, points, iso) = PoissonBuilder::new(&points, &normals, 4.0, 3, 5, 10).finish();
+        let trim = 0.15f32;
+
+        // What finalize_mesh produces: bounded extraction, then trim.
+        let bounded = finalize_mesh(&poisson, &points, iso, trim);
+
+        // Reference: extract over the whole domain, then trim.
+        let buffers = poisson.reconstruct_mesh_buffers_iso(iso);
+        let verts: Vec<[f64; 3]> = buffers.vertices().iter().map(|p| [p.x, p.y, p.z]).collect();
+        let tris: Vec<u32> = buffers.indices().to_vec();
+        let near = PointProximity::new(&points, trim as f64);
+        let (rverts, rtris) = trim_far_triangles(&verts, &tris, &near);
+        let reference = encode_mesh(&rverts, &rtris);
+
+        let (bv, bt, bpos, bidx) = decode(&bounded);
+        let (rv, rt, rpos, ridx) = decode(&reference);
+        eprintln!("bounded: {bv} verts / {bt} tris; unbounded+trim: {rv} verts / {rt} tris");
+        assert!(bt > 100, "degenerate test fixture: only {bt} triangles survived");
+        // Compare the geometry, not the buffer: skipping cells changes the order the
+        // flood visits them in, so the same triangles come out under a different vertex
+        // numbering. Canonicalize to a sorted list of sorted vertex triples.
+        assert_eq!(
+            canonical_triangles(&bpos, &bidx),
+            canonical_triangles(&rpos, &ridx),
+            "bounding the walk changed the trimmed mesh"
+        );
     }
 
     // Trimming keeps the mesh over a well-sampled plane and never emits a triangle

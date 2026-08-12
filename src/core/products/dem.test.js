@@ -63,6 +63,18 @@ describe('rasterizeDem', () => {
     expect(filled.filled).toBeGreaterThan(0)
   })
 
+  it('supports nearest-neighbour interpolation and an explicit off switch', () => {
+    const pts = [
+      { x: 0, y: 0, z: 2 }, { x: 4, y: 0, z: 10 },
+      { x: 0, y: 4, z: 2 }, { x: 4, y: 4, z: 10 },
+    ]
+    const nearest = rasterizeDem(pts, { gsd: 1, fillMethod: 'nearest', fillRadius: 2 })
+    const off = rasterizeDem(pts, { gsd: 1, fillMethod: 'none', fillRadius: 20 })
+    expect(nearest.filled).toBeGreaterThan(0)
+    expect([...nearest.data].filter(Number.isFinite).every((z) => z === 2 || z === 10)).toBe(true)
+    expect(off.filled).toBe(0)
+  })
+
   it('caps the grid size via maxGrid by growing gsd', () => {
     const pts = [{ x: 0, y: 0, z: 0 }, { x: 1000, y: 1000, z: 1 }]
     const dem = rasterizeDem(pts, { gsd: 0.1, maxGrid: 64, fillRadius: 0 })

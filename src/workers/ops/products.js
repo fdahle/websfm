@@ -4,6 +4,7 @@ import { buildLocalFrame, makeFrame } from '../../core/products/projection.js'
 import { frameFromSimilarity } from '../../core/products/georef.js'
 import { rasterizeDem } from '../../core/products/dem.js'
 import { orthorectify } from '../../core/products/ortho.js'
+import { meshSurface, planeSurface, resampleSurface } from '../../core/products/surface.js'
 
 // Product ops (DEM + orthophoto). The frame rebuild/descriptor + raster→dataURL
 // canvas helpers live here next to the two handlers; pure compute is in
@@ -79,26 +80,110 @@ export function makeProductsOps() {
     return { result, transfer: [grid.data.buffer, grid.mask.buffer] }
   }
 
-  // Build an orthophoto by reprojecting each DEM cell into the cached depth maps
-  // (their depth planes double as occlusion z-buffers; their RGB planes supply the
-  // colour). Pure compute lives in core/products/ortho.js.
+  // Build the height grid the ortho walks, from whichever surface the user chose.
+  // Ortho needs a height per ground cell — the DEM is only one way to get one, and
+  // it is the holey one (see core/products/surface.js). `surface` is one of:
+  //   { kind:'dem',   grid }                       — the built DEM, frame included
+  //   { kind:'mesh',  frame, pos, idx }            — SfM-world verts + indices
+  //   { kind:'plane', frame, pos, count }          — SfM-world points (flat xyz)
+  // Mesh/plane arrive in SfM world coords and are projected into the frame here,
+  // exactly as generateDem does, so all three grids share one convention. Their
+  // frame spec may be a bare { kind:'local' } REQUEST rather than a resolved
+  // descriptor, so they also carry `cameras` + `framePoints` — buildLocalFrame
+  // derives the up-vector and origin from the scene and cannot run without them.
+  function buildSurfaceGrid(surface, emit) {
+    const kind = surface?.kind
+    if (kind === 'dem') {
+      return { grid: surface.grid, frame: rebuildFrame(surface.grid.frame), label: 'DEM' }
+    }
+    // Only an unresolved spec needs the scene; a descriptor resolves on its own.
+    const needsScene = !(surface.frame?.kind === 'similarity' || surface.frame?.origin)
+    const fp = surface.framePoints
+    const framePts = new Array(needsScene ? surface.framePointCount ?? 0 : 0)
+    for (let i = 0; i < framePts.length; i++) {
+      framePts[i] = { x: fp[i * 3], y: fp[i * 3 + 1], z: fp[i * 3 + 2] }
+    }
+    const camMap = new Map(needsScene
+      ? (surface.cameras ?? []).map((c) => [c.uuid, { R: c.R, t: c.t, K: c.K }])
+      : [])
+    const frame = rebuildFrame(surface.frame, camMap, framePts)
+    if (kind === 'mesh') {
+      emit('progress', [0, 1, 'Rasterising mesh surface…'])
+      const n = Math.floor(surface.pos.length / 3)
+      const framed = new Float32Array(surface.pos.length)
+      for (let i = 0; i < n; i++) {
+        const [x, y, z] = frame.fromSfm([surface.pos[i * 3], surface.pos[i * 3 + 1], surface.pos[i * 3 + 2]])
+        framed[i * 3] = x; framed[i * 3 + 1] = y; framed[i * 3 + 2] = z
+      }
+      const grid = meshSurface({ pos: framed, idx: surface.idx }, surface.settings ?? {},
+        (done, total) => emit('progress', [done, total, 'Rasterising mesh surface…']))
+      if (!grid) throw new Error('Ortho: the mesh has no triangles to rasterise')
+      emit('log', [`Ortho: mesh surface ${grid.width}×${grid.height} @ `
+        + `${grid.gsd.toPrecision(3)} ${frame.unit === 'm' ? 'm' : 'units'}/px from `
+        + `${grid.triangles.toLocaleString()} triangles, ${grid.count} cells with height`,
+      'info', 'Products'])
+      return { grid: { ...grid, frame: frameDescriptor(frame, surface.frame) }, frame, label: 'mesh' }
+    }
+    if (kind === 'plane') {
+      emit('progress', [0, 1, 'Fitting plane surface…'])
+      const framed = new Array(surface.count)
+      for (let i = 0; i < surface.count; i++) {
+        const [x, y, z] = frame.fromSfm([surface.pos[i * 3], surface.pos[i * 3 + 1], surface.pos[i * 3 + 2]])
+        framed[i] = { x, y, z }
+      }
+      const grid = planeSurface(framed, surface.settings ?? {})
+      if (!grid) throw new Error('Ortho: could not fit a plane (need ≥3 spread points)')
+      const p = grid.plane
+      emit('log', [`Ortho: plane surface ${grid.width}×${grid.height} @ `
+        + `${grid.gsd.toPrecision(3)} ${frame.unit === 'm' ? 'm' : 'units'}/px — `
+        + `slope ${(Math.hypot(p.a, p.b) * 100).toFixed(1)}%, residual RMS `
+        + `${p.rms.toPrecision(3)} over ${p.n.toLocaleString()} points`
+        + (p.dropped ? ` (${p.dropped.toLocaleString()} outliers dropped)` : ''),
+      'info', 'Products'])
+      return { grid: { ...grid, frame: frameDescriptor(frame, surface.frame) }, frame, label: 'plane' }
+    }
+    throw new Error(`Ortho: unknown surface "${kind}"`)
+  }
+
+  // Build an orthophoto by reprojecting each surface cell into the cached depth
+  // maps (their depth planes double as occlusion z-buffers; their RGB planes
+  // supply the colour). Pure compute lives in core/products/{ortho,surface}.js.
   async function generateOrtho([input], { emit }) {
-    const { dem, maps, settings = {} } = input
-    emit('progress', [0, dem.height, 'Orthorectifying…'])
-    const frame = rebuildFrame(dem.frame)
+    const { surface, maps, settings = {} } = input
+    const built = buildSurfaceGrid(surface, emit)
+    const { frame, label } = built
+    // The ortho's own GSD is independent of the surface's: a coarse surface is
+    // plenty for reprojection while the ortho wants image resolution.
+    const grid = settings.gsd > 0 ? resampleSurface(built.grid, settings.gsd) : built.grid
+    if (grid !== built.grid) {
+      emit('log', [`Ortho: resampled the ${label} surface to ${grid.width}×${grid.height} @ `
+        + `${grid.gsd.toPrecision(3)} ${frame.unit === 'm' ? 'm' : 'units'}/px`, 'info', 'Products'])
+    }
+
+    emit('progress', [0, grid.height, 'Orthorectifying…'])
     const t0 = performance.now()
-    const { width, height, rgba, covered } = orthorectify(dem, maps, frame.toSfm, settings,
+    const { width, height, rgba, covered, sampled, filled } = orthorectify(grid, maps, frame.toSfm, settings,
       (done, total) => emit('progress', [done, total, 'Orthorectifying…']))
 
     const previewDataUrl = await rasterToDataUrl(new ImageData(rgba, width, height), width, height)
-    emit('log', [`Ortho: ${width}×${height}, ${covered}/${width * height} cells coloured `
-      + `(${(100 * covered / (width * height)).toFixed(0)}%) from ${maps.length} view(s) `
+    const cells = width * height
+    emit('log', [`Ortho: ${width}×${height}, ${covered}/${cells} cells coloured `
+      + `(${(100 * covered / cells).toFixed(0)}%) from ${maps.length} view(s) over the `
+      + `${label} surface (${grid.count}/${cells} cells had a height) `
+      + `— ${sampled} sampled + ${filled} interpolated `
       + `in ${((performance.now() - t0) / 1000).toFixed(1)}s`, 'success', 'Products'])
     emit('progress', [height, height, 'Done'])
 
     const rgbaBuf = new Uint8Array(rgba.buffer)
     return {
-      result: { width, height, rgba: rgbaBuf, covered, previewDataUrl },
+      // The geotransform travels WITH the ortho: its grid no longer has to be the
+      // DEM's, so the exporters/viewer must read it here, not off the DEM.
+      result: {
+        width, height, rgba: rgbaBuf, covered, sampled, filled, previewDataUrl,
+        gsd: grid.gsd, originX: grid.originX, originY: grid.originY,
+        surface: label, surfaceCells: grid.count,
+        frame: grid.frame, crs: frame.crs, unit: frame.unit,
+      },
       transfer: [rgbaBuf.buffer],
     }
   }

@@ -144,6 +144,63 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
 
   const sparseCameras = computed(() => mainSparseCloud.value?.cameras ?? new Map())
 
+  // The cloud a DEM run would rasterise: the densest one available. Exposed as a
+  // getter (rather than re-derived in DemModal) so the modal's "Source:" line and
+  // generateDem() below can never disagree about what is about to be built —
+  // generateDem consumes this, it does not repeat the pick.
+  // A sparse source is allowed on purpose (it's the only DEM available for an
+  // imported COLMAP model, and the fastest orientation/scale sanity check before
+  // committing to dense) — the modal warns, it does not gate.
+  const demSource = computed(() => {
+    const dense = clouds.value.find((c) => c.kind === 'dense')
+    if (dense?.count) return { cloud: dense, kind: 'dense', count: dense.count, name: dense.name ?? null }
+    const sparse = mainSparseCloud.value
+    const n = sparse?.points?.length ?? 0
+    if (!n) return null
+    return { cloud: sparse, kind: 'sparse', count: n, name: sparse.name ?? null }
+  })
+
+  // The mesh a mesh-surface ortho would rasterise (the first non-empty one).
+  const meshCloud = computed(() => clouds.value.find((c) => c.kind === 'mesh' && c.count > 0) ?? null)
+
+  // Which surfaces an ortho run could use for its height-per-cell. Same contract
+  // as demSource: the modal RENDERS this list and generateOrtho() CONSUMES it, so
+  // the two can't disagree about what is available or what is about to be built.
+  // An ortho is not a DEM product — it just needs a surface (Metashape's Build
+  // Orthomosaic ▸ Surface: DEM / Mesh / planar), and the DEM is the holey one.
+  const orthoSurfaces = computed(() => {
+    const src = demSource.value
+    return [
+      {
+        id: 'dem',
+        label: 'DEM',
+        available: !!dem.value,
+        detail: dem.value ? `${dem.value.width}×${dem.value.height} · ${dem.value.crs === 'local' || !dem.value.crs ? 'local frame' : dem.value.crs}` : null,
+        hint: dem.value
+          ? 'Reuses the built DEM and its frame. Cells the DEM has no height for stay transparent.'
+          : 'Build a DEM first.',
+      },
+      {
+        id: 'mesh',
+        label: 'Mesh',
+        available: !!meshCloud.value,
+        detail: meshCloud.value ? `${meshCloud.value.count.toLocaleString()} triangles` : null,
+        hint: meshCloud.value
+          ? 'Rasterises the mesh from above. Watertight, so there are no surface holes — the fix for a patchy ortho.'
+          : 'Build a mesh first (Products ▸ Mesh).',
+      },
+      {
+        id: 'plane',
+        label: 'Plane',
+        available: !!src,
+        detail: src ? `fitted to the ${src.kind} cloud` : null,
+        hint: src
+          ? 'Least-squares plane through the cloud. Fully dense, but only correct where the ground really is flat.'
+          : 'Build a point cloud first.',
+      },
+    ]
+  })
+
   // Re-establish the "one sparse cloud is always main" invariant after any change
   // to the cloud list (delete, restore). If the current main is gone but sparse
   // clouds remain, promote the first; if none remain, clear it.
@@ -818,14 +875,20 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
   // Build a DEM from the densest available cloud, in the requested frame
   // (settings.crs: 'local' | 'project'). A new DEM invalidates the old ortho.
   async function generateDem(settings = {}, onProgress) {
-    const dense = clouds.value.find((c) => c.kind === 'dense')
     const sparse = mainSparseCloud.value
-    const src = dense?.count ? dense : sparse
-    const srcCount = src ? (src.kind === 'dense' ? src.count : src.points.length) : 0
-    if (!src || !srcCount) {
+    // Single source of truth for "which cloud" — the same getter the modal shows.
+    const source = demSource.value
+    if (!source) {
       log('DEM: build a point cloud first', 'warn', 'Products')
       return
     }
+    const src = source.cloud
+    log(`DEM: source is the ${source.kind} cloud`
+      + `${source.name ? ` "${source.name}"` : ''} (${source.count.toLocaleString()} points)`
+      + (source.kind === 'sparse'
+        ? ' — cells are interpolated from tie points; densify for a true surface'
+        : ''),
+      source.kind === 'sparse' ? 'warn' : 'info', 'Products')
     // Resolve the target frame. 'project' needs a georeference (fit on demand,
     // refit if the CRS changed since); fall back to local if it can't be built.
     let frameSpec = { kind: 'local' }
@@ -849,10 +912,14 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
         { onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f) },
       )
       dem.value = grid
-      ortho.value = null // a new DEM invalidates the old ortho
+      // A new DEM invalidates an ortho BUILT ON IT — but not one built over the
+      // mesh/plane surface, which this run didn't touch. (An ortho with no
+      // recorded surface predates the choice, so it was a DEM ortho.)
+      const orthoWasDem = ortho.value && (ortho.value.surface ?? 'DEM') === 'DEM'
+      if (orthoWasDem) ortho.value = null
       if (isPersisting()) {
         opfs.saveProduct(projects.currentProjectId, 'dem', grid).catch(() => {})
-        opfs.deleteProduct(projects.currentProjectId, 'ortho').catch(() => {})
+        if (orthoWasDem) opfs.deleteProduct(projects.currentProjectId, 'ortho').catch(() => {})
       }
       reconStatus.value = 'done'
     } catch (err) {
@@ -861,10 +928,94 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     }
   }
 
-  // Orthorectify the current DEM using the cached depth maps (occlusion via their
-  // depth planes, colour from their RGB planes). Needs a DEM + depth maps.
+  // Build the surface payload for an ortho run: the height source the worker will
+  // turn into a grid. `settings.surface` is one of orthoSurfaces' ids. Returns null
+  // (after logging why) when the chosen surface isn't available.
+  //
+  // A mesh/plane surface needs a frame of its own — a DEM carries the one it was
+  // built in, but there may be no DEM at all now. It's resolved exactly as
+  // generateDem does, so the two products stay co-registered.
+  async function orthoSurfacePayload(settings) {
+    const id = settings.surface ?? 'dem'
+    const opt = orthoSurfaces.value.find((s) => s.id === id)
+    if (!opt) { log(`Ortho: unknown surface "${id}"`, 'warn', 'Products'); return null }
+    if (!opt.available) { log(`Ortho: ${opt.hint}`, 'warn', 'Products'); return null }
+
+    if (id === 'dem') {
+      const d = dem.value
+      log('Ortho: surface is the DEM — cells the DEM has no height for stay transparent',
+        'info', 'Products')
+      return {
+        kind: 'dem',
+        grid: {
+          width: d.width, height: d.height, gsd: d.gsd, originX: d.originX, originY: d.originY,
+          data: d.data, mask: d.mask, frame: d.frame,
+        },
+      }
+    }
+
+    // Resolve the target frame for a mesh/plane surface ('project' needs a
+    // georeference; fall back to local when it can't be built).
+    let frameSpec = null
+    if (settings.crs && settings.crs !== 'local') {
+      const g = georef.value?.crs === projects.currentCrs ? georef.value : await georeference()
+      if (g) frameSpec = { kind: 'similarity', ...g.sim, crs: g.crs }
+      else log('Ortho: no georeference available — using the local frame', 'warn', 'Products')
+    }
+    // Local frame: reuse the DEM's when it was built locally, so a mesh ortho lands
+    // on the same grid origin as the DEM instead of a near-identical one of its own.
+    // A bare { kind:'local' } spec is only a REQUEST — buildLocalFrame derives the
+    // up-vector from the scene, so cameras + points must travel with it.
+    if (!frameSpec) {
+      frameSpec = dem.value?.frame?.kind === 'local' ? dem.value.frame : { kind: 'local' }
+    }
+    const surfSettings = { gsd: settings.surfaceGsd > 0 ? settings.surfaceGsd : 0 }
+
+    // Point sample from the densest cloud: the plane's fit input, and the local
+    // frame's origin/PCA fallback. Subsampled — a plane needs spread, not every
+    // point, and 25 M boxed {x,y,z} in the worker is the OOM we avoid everywhere.
+    const src = demSource.value
+    const cloud = src?.cloud
+    const total = src?.count ?? 0
+    const MAX_FIT = 200_000
+    const stride = Math.max(1, Math.ceil(total / MAX_FIT))
+    const n = total ? Math.ceil(total / stride) : 0
+    const pos = new Float64Array(n * 3)
+    for (let i = 0, k = 0; i < total; i += stride, k++) {
+      if (cloud.kind === 'dense') {
+        pos[k * 3] = cloud.pos[i * 3]; pos[k * 3 + 1] = cloud.pos[i * 3 + 1]; pos[k * 3 + 2] = cloud.pos[i * 3 + 2]
+      } else {
+        const p = cloud.points[i]
+        pos[k * 3] = p.x; pos[k * 3 + 1] = p.y; pos[k * 3 + 2] = p.z
+      }
+    }
+    const cameras = [...sparseCameras.value.entries()].map(([uuid, cam]) => ({
+      uuid, R: cam.R.map((r) => [...r]), t: [...cam.t], K: { ...cam.K },
+    }))
+
+    if (id === 'mesh') {
+      const m = meshCloud.value
+      log(`Ortho: surface is the mesh "${m.name ?? 'mesh'}" `
+        + `(${m.count.toLocaleString()} triangles)`, 'info', 'Products')
+      return {
+        kind: 'mesh', frame: frameSpec, cameras, framePoints: pos, framePointCount: n,
+        pos: m.pos, idx: m.idx, settings: surfSettings,
+      }
+    }
+
+    log(`Ortho: surface is a plane fitted to the ${src.kind} cloud `
+      + `(${n.toLocaleString()} of ${total.toLocaleString()} points)`, 'info', 'Products')
+    // The plane's fit points double as the local frame's — one sample, one array.
+    return {
+      kind: 'plane', frame: frameSpec, cameras, framePoints: pos, framePointCount: n,
+      pos, count: n, settings: surfSettings,
+    }
+  }
+
+  // Orthorectify a surface using the cached depth maps (occlusion via their depth
+  // planes, colour from their RGB planes). Needs depth maps and a surface — which
+  // is a DEM only when the user picks one (see orthoSurfaces).
   async function generateOrtho(settings = {}, onProgress) {
-    if (!dem.value) { log('Ortho: build a DEM first', 'warn', 'Products'); return }
     // Hydrate a restored project's saved planes (no-op if they're already in memory).
     await ensureDepthMapsLoaded()
     let maps = [...depthMaps.value.values()]
@@ -882,19 +1033,16 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
         return
       }
     }
+    const surface = await orthoSurfacePayload(settings)
+    if (!surface) return
     reconStatus.value = 'running'
     try {
-      const d = dem.value
-      const demPayload = {
-        width: d.width, height: d.height, gsd: d.gsd, originX: d.originX, originY: d.originY,
-        data: d.data, mask: d.mask, frame: d.frame,
-      }
       const mapsPayload = maps.map((m) => ({
         uuid: m.uuid, width: m.width, height: m.height, K: m.K, R: m.R, t: m.t,
         depth: m.depth, cost: m.cost, rgb: m.rgb,
       }))
       const res = await workerGenerateOrtho(
-        { dem: demPayload, maps: mapsPayload, settings },
+        { surface, maps: mapsPayload, settings },
         { onLog: (m, l, c) => log(m, l, c), onProgress: (dn, t, lbl, f) => onProgress?.(dn, t, lbl, f) },
       )
       ortho.value = res
@@ -1226,7 +1374,9 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     summaryHistory,
     healthDirty,
     dem,
+    demSource,
     ortho,
+    orthoSurfaces,
     canGeoreference,
     canGeoreferenceGcps,
     georeference,

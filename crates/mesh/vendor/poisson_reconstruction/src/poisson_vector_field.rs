@@ -37,6 +37,12 @@ fn trilinear_coefficients(bcoords: Vector3<Real>) -> [Real; 8] {
 pub struct PoissonVectorField {
     pub(crate) densities: Vec<Real>,
     layers_normals: Vec<Vec<Vector3<Real>>>,
+    /// Per layer, the node ids that actually received a normal splat. Every other node
+    /// contributes nothing to the right-hand side, and there are at most 8 of these per
+    /// input sample across all layers (one trilinear splat = 8 corners) — which is what
+    /// lets [`Self::build_rhs`] iterate sources instead of probing for them. (Vendored
+    /// patch — see crate header.)
+    nonzero_normals: Vec<Vec<usize>>,
 }
 
 impl PoissonVectorField {
@@ -115,12 +121,46 @@ impl PoissonVectorField {
             layers_normals.push(grid_normals);
         }
 
+        let nonzero_normals = layers_normals
+            .iter()
+            .map(|normals| {
+                normals
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, n)| **n != Vector3::zeros())
+                    .map(|(id, _)| id)
+                    .collect()
+            })
+            .collect();
+
         Self {
             densities,
             layers_normals,
+            nonzero_normals,
         }
     }
 
+    /// Accumulate the vector field's divergence against every node of `curr_layer`.
+    ///
+    /// **Vendored patch — scatter, not gather.** The original walked, for every node of
+    /// `curr_layer` and every other layer, the cells of an AABB in that layer's grid.
+    /// [`HGrid::cells_intersecting_aabb`] iterates every *integer cell in the coordinate
+    /// range* and only filters to occupied cells afterwards, so its cost is the box
+    /// VOLUME, not the occupancy. With a coarse `curr_layer` against the finest layer
+    /// that box spans `3·2^max_depth + 3` cells per axis — 771³ ≈ 4.6e8 hash probes per
+    /// node at depth 8, and 8× that per extra depth level. It dominated everything else
+    /// by orders of magnitude and is why a depth-8 mesh took hours.
+    ///
+    /// The non-zero entries of `layers_normals` are the only sources that can contribute,
+    /// and there are at most 8 per input sample, so we iterate *those* and scatter into
+    /// the nodes they reach. Whichever enumeration of the target nodes is cheaper wins:
+    /// the grid range when it is small (the usual case — a fine source into a coarse
+    /// layer touches ~4³ cells), else a linear scan of the layer's own node list.
+    ///
+    /// This is an exact restructuring, not an approximation: [`TriQuadraticBspline::
+    /// grad_grad`] returns zero as soon as the two supports are disjoint along any axis,
+    /// so both formulations enumerate a superset of the same non-zero node pairs. Only
+    /// the floating-point summation order changes.
     pub fn build_rhs(
         &self,
         layers: &[PoissonLayer],
@@ -128,43 +168,49 @@ impl PoissonVectorField {
         rhs: &mut DVector<Real>,
     ) {
         let curr_layer = &layers[curr_layer_id];
+        let curr_width = curr_layer.cell_width();
 
-        rhs.as_mut_slice()
-            .iter_mut()
-            .enumerate()
-            .for_each(|(rhs_id, rhs)| {
-                let curr_node = curr_layer.ordered_nodes[rhs_id];
-                let curr_node_center = curr_layer.grid.cell_center(&curr_node);
+        for (other_layer_id, other_layer) in layers.iter().enumerate() {
+            let other_width = other_layer.cell_width();
+            let reach = Vector3::repeat(curr_width * 1.5 + other_width * 1.5);
 
-                for (other_layer_id, other_layer) in layers.iter().enumerate() {
-                    let aabb = Aabb::from_half_extents(
-                        curr_node_center,
-                        Vector3::repeat(
-                            curr_layer.cell_width() * 1.5 + other_layer.cell_width() * 1.5,
-                        ),
-                    );
+            for &other_node_id in &self.nonzero_normals[other_layer_id] {
+                let normal = self.layers_normals[other_layer_id][other_node_id];
+                let other_node = other_layer.ordered_nodes[other_node_id];
+                let other_node_center = other_layer.grid.cell_center(&other_node);
+                let poly1 = TriQuadraticBspline::new(other_node_center, other_width);
+                let aabb = Aabb::from_half_extents(other_node_center, reach);
 
-                    for (other_node, _) in other_layer
-                        .grid
-                        .cells_intersecting_aabb(&aabb.mins, &aabb.maxs)
+                let mut accumulate = |curr_node_center: Point3<Real>, rhs_id: usize| {
+                    let poly2 = TriQuadraticBspline::new(curr_node_center, curr_width);
+                    let coeff = poly1.grad_grad(poly2, false, true);
+                    rhs[rhs_id] += normal.dot(&coeff);
+                };
+
+                if curr_layer.range_is_cheaper_than_scan(&aabb.mins, &aabb.maxs) {
+                    for (curr_node, _) in
+                        curr_layer.grid.cells_intersecting_aabb(&aabb.mins, &aabb.maxs)
                     {
-                        let other_node_id = other_layer.grid_node_idx[&other_node];
-                        let normal = self.layers_normals[other_layer_id][other_node_id];
-
-                        if normal != Vector3::zeros() {
-                            let other_node_center = other_layer.grid.cell_center(&other_node);
-                            let poly1 = TriQuadraticBspline::new(
-                                other_node_center,
-                                other_layer.cell_width(),
-                            );
-                            let poly2 =
-                                TriQuadraticBspline::new(curr_node_center, curr_layer.cell_width());
-                            let coeff = poly1.grad_grad(poly2, false, true);
-                            *rhs += normal.dot(&coeff);
+                        // A grid cell is not necessarily a node (points live in the same
+                        // grid), so look up rather than index.
+                        if let Some(&rhs_id) = curr_layer.grid_node_idx.get(&curr_node) {
+                            accumulate(curr_layer.grid.cell_center(&curr_node), rhs_id);
+                        }
+                    }
+                } else {
+                    // The source is much coarser than this layer, so its reach spans a
+                    // huge cell range. Walking the node list is then the cheaper way to
+                    // find the same overlaps.
+                    for (rhs_id, curr_node) in curr_layer.ordered_nodes.iter().enumerate() {
+                        let curr_node_center = curr_layer.grid.cell_center(curr_node);
+                        let d = curr_node_center - other_node_center;
+                        if d.x.abs() < reach.x && d.y.abs() < reach.y && d.z.abs() < reach.z {
+                            accumulate(curr_node_center, rhs_id);
                         }
                     }
                 }
-            });
+            }
+        }
     }
 
     pub fn area_approximation(&self) -> Real {

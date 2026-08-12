@@ -434,20 +434,25 @@ export function useExports({
   }
 
   // Ortho → GeoTIFF (optional DEFLATE), or PNG/JPEG + world file (.wld) + .prj.
-  // Shares the DEM's geotransform.
+  // The geotransform comes from the ORTHO, not the DEM: an ortho can now be built
+  // over a mesh/plane surface and at its own GSD, so the two grids need not match.
+  // Orthos written before that (persisted without gsd/originX) fall back to the DEM,
+  // which is exactly the grid they were built on.
   async function doExportOrtho({ format, compression, jpegQuality }) {
-    if (!ortho.value || !dem.value) return
-    const info = crsInfo(dem.value)
+    if (!ortho.value) return
+    const geo = ortho.value.gsd != null ? ortho.value : dem.value
+    if (!geo) return
+    const info = crsInfo(geo)
     if (format === 'cog') {
       const deflate = compression === 'none' ? null : deflateBytes
-      const tif = await orthoToCog(ortho.value, dem.value, { crs: info, deflate })
+      const tif = await orthoToCog(ortho.value, geo, { crs: info, deflate })
       downloadBlob(`${projectBase()}-ortho-cog.tif`, tif, 'image/tiff')
       log(`Ortho export: Cloud-Optimized GeoTIFF${deflate ? ' (DEFLATE)' : ''}`, 'success', 'Export')
       return
     }
     if (format === 'geotiff') {
       const deflate = compression === 'deflate' ? deflateBytes : null
-      const tif = await orthoToGeoTiff(ortho.value, dem.value, { crs: info, deflate })
+      const tif = await orthoToGeoTiff(ortho.value, geo, { crs: info, deflate })
       downloadBlob(`${projectBase()}-ortho.tif`, tif, 'image/tiff')
       log(`Ortho export: GeoTIFF${deflate ? ' (DEFLATE)' : ''}`, 'success', 'Export')
       return
@@ -461,7 +466,7 @@ export function useExports({
     downloadBlob(`${projectBase()}-ortho.${ext}`, blob)
     // World file extension mirrors the image (.wld works for both; .jgw/.pgw are the
     // strict siblings — .wld is universally accepted, so keep it simple).
-    downloadBlob(`${projectBase()}-ortho.wld`, rasterWorldFile(dem.value), 'text/plain;charset=utf-8')
+    downloadBlob(`${projectBase()}-ortho.wld`, rasterWorldFile(geo), 'text/plain;charset=utf-8')
     if (info.crs) downloadBlob(`${projectBase()}-ortho.prj`, prjText(info), 'text/plain;charset=utf-8')
     log(`Ortho export: ${jpeg ? 'JPEG' : 'PNG'} + world file`, 'success', 'Export')
   }

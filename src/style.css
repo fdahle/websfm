@@ -1,6 +1,4 @@
 :root {
-  --ui-scale: 1;
-  --ui-scale-inverse: 1;
   --bg: #1e1e1e;
   --panel: #252526;
   --panel-border: #333;
@@ -9,6 +7,10 @@
   --accent: #0e639c;
   --accent-hover: #1177bb;
   --hover-bg: rgba(255, 255, 255, 0.07);
+  /* Expanded detail card in the sidebar — a surface raised off --panel. */
+  --detail-bg: rgba(255, 255, 255, 0.05);
+  --detail-border: #444;
+  --danger: #e06767;
 
   --console-bg: #1a1a1a;
   --console-border: #333;
@@ -28,6 +30,9 @@
   --accent: #0e639c;
   --accent-hover: #1177bb;
   --hover-bg: rgba(0, 0, 0, 0.06);
+  --detail-bg: #ffffff;
+  --detail-border: #bbb;
+  --danger: #c33;
 
   --console-bg: #f5f5f5;
   --console-border: #d0d0d0;

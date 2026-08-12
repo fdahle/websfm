@@ -14,9 +14,13 @@ function stagedPoisson(emit) {
     const mesher = PoissonMesher.build(pos, nrm, depth >>> 0, screening)
     try {
       const n = mesher.num_layers()
+      // Emit each label BEFORE the work it names, not after. A label posted after
+      // `solve_step` returns describes work already finished, so the *previous* label
+      // stays on screen for the whole solve — which is why a slow run looked like it
+      // was stuck in "Building octree" when the octree build is a fraction of a second.
       for (let i = 0; i < n; i++) {
+        emit('progress', [i, n + 1, `Solving multigrid layer ${i + 1}/${n}…`])
         mesher.solve_step()
-        emit('progress', [i + 1, n + 1, `Solving multigrid layer ${i + 1}/${n}…`])
       }
       emit('progress', [n, n + 1, 'Extracting surface…'])
       const bytes = mesher.finish(trim)

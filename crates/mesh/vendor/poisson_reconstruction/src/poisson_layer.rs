@@ -25,6 +25,25 @@ impl PoissonLayer {
     pub fn cell_width(&self) -> Real {
         self.grid.cell_width()
     }
+
+    /// Would enumerating this layer's cells over the `[mins, maxs]` lattice range cost
+    /// less than a linear scan of its node list? `HGrid::cells_intersecting_aabb` walks
+    /// every integer cell in the range (one hash probe each) regardless of how few are
+    /// occupied, so a box far larger than the cell width is better answered by scanning.
+    /// (Vendored patch — see the note on `PoissonVectorField::build_rhs`.)
+    pub(crate) fn range_is_cheaper_than_scan(
+        &self,
+        mins: &Point3<Real>,
+        maxs: &Point3<Real>,
+    ) -> bool {
+        let start = self.grid.key(mins);
+        let end = self.grid.key(maxs);
+        let mut volume: u128 = 1;
+        for dim in 0..3 {
+            volume *= (end[dim] - start[dim] + 1).max(0) as u128;
+        }
+        volume <= self.ordered_nodes.len() as u128
+    }
 }
 
 impl PoissonLayer {
@@ -173,14 +192,74 @@ impl PoissonLayer {
             (2.0 as Real).powi(curr_layer as i32) * screening * vector_field.area_approximation()
                 / (points.len() as Real);
 
+        // Screening scratch (vendored patch): the points near the node currently being
+        // assembled, each carrying the separable B-spline factors of the whole ±2
+        // stencil. The original re-scanned the 27 neighbouring cells and rebuilt both
+        // splines inside the stencil loop — paying the point gather 125× per node and
+        // two full tri-quadratic evaluations per (neighbour, point). A tri-quadratic
+        // B-spline is a product of three one-dimensional ones, so 15 evaluations per
+        // point cover every stencil neighbour at once: the factor for offset (i,j,k) is
+        // bx[i+2]·by[j+2]·bz[k+2]. Same arithmetic, ~20× fewer spline evaluations and
+        // one gather per node instead of 125.
+        struct ScreenPoint {
+            at_node: Real, // the assembled node's own basis at this point
+            bx: [Real; 5], // per-axis basis of the stencil offsets -2..=2
+            by: [Real; 5],
+            bz: [Real; 5],
+        }
+        let mut screen_stencil: Vec<ScreenPoint> = Vec::new();
+
         for (nid, node) in my_layer.ordered_nodes.iter().enumerate() {
-            let center1 = my_layer.grid.cell_center(node);
+            if screening != 0.0 {
+                // Stencil-neighbour centres per axis. Read from the grid rather than
+                // formed as center1 + offset·width so they stay bit-identical to the
+                // centres the original built inside the stencil loop.
+                let mut cx = [0.0; 5];
+                let mut cy = [0.0; 5];
+                let mut cz = [0.0; 5];
+                for t in 0..5 {
+                    let d = t as i64 - 2;
+                    cx[t] = my_layer.grid.cell_center(&(node + vector![d, 0, 0])).x;
+                    cy[t] = my_layer.grid.cell_center(&(node + vector![0, d, 0])).y;
+                    cz[t] = my_layer.grid.cell_center(&(node + vector![0, 0, d])).z;
+                }
+
+                screen_stencil.clear();
+                for si in -1..=1 {
+                    for sj in -1..=1 {
+                        for sk in -1..=1 {
+                            let adj = node + vector![si, sj, sk];
+                            let Some(pt_ids) = my_layer.grid.cell(&adj) else {
+                                continue;
+                            };
+                            for pid in pt_ids {
+                                // Use get to ignore the sentinel.
+                                let Some(pt) = points.get(*pid) else {
+                                    continue;
+                                };
+                                let mut bx = [0.0; 5];
+                                let mut by = [0.0; 5];
+                                let mut bz = [0.0; 5];
+                                for t in 0..5 {
+                                    bx[t] = polynomial::eval_bspline(pt.x, cx[t], cell_width);
+                                    by[t] = polynomial::eval_bspline(pt.y, cy[t], cell_width);
+                                    bz[t] = polynomial::eval_bspline(pt.z, cz[t], cell_width);
+                                }
+                                let at_node = bx[2] * by[2] * bz[2];
+                                // Zero here zeroes every product this point appears in.
+                                if at_node != 0.0 {
+                                    screen_stencil.push(ScreenPoint { at_node, bx, by, bz });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
 
             for i in -2..=2 {
                 for j in -2..=2 {
                     for k in -2..=2 {
                         let other_node = node + vector![i, j, k];
-                        let center2 = my_layer.grid.cell_center(&other_node);
 
                         if let Some(other_nid) = my_layer.grid_node_idx.get(&other_node) {
                             let ii = (i + 2) as usize;
@@ -189,31 +268,9 @@ impl PoissonLayer {
 
                             let mut laplacian = convolution.laplacian[ii][jj][kk];
 
-                            if screening != 0.0 {
-                                // Both splines depend only on the two node centres and
-                                // the cell width — all loop-invariant across the screening
-                                // point loop below. Build them once per (node, other_node)
-                                // pair instead of once per point (the hot inner loop).
-                                let poly1 = TriQuadraticBspline::new(center1, cell_width);
-                                let poly2 = TriQuadraticBspline::new(center2, cell_width);
-                                for si in -1..=1 {
-                                    for sj in -1..=1 {
-                                        for sk in -1..=1 {
-                                            let adj = node + vector![si, sj, sk];
-
-                                            if let Some(pt_ids) = my_layer.grid.cell(&adj) {
-                                                for pid in pt_ids {
-                                                    // Use get to ignore the sentinel.
-                                                    if let Some(pt) = points.get(*pid) {
-                                                        laplacian += screen_factor
-                                                            * poly1.eval(*pt)
-                                                            * poly2.eval(*pt);
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
+                            for p in &screen_stencil {
+                                laplacian +=
+                                    screen_factor * p.at_node * (p.bx[ii] * p.by[jj] * p.bz[kk]);
                             }
 
                             grad_matrix.push(nid, *other_nid, laplacian);
@@ -228,59 +285,69 @@ impl PoissonLayer {
         vector_field.build_rhs(layers, curr_layer, &mut rhs);
 
         // Subtract the results from the coarser layers.
-        rhs.as_mut_slice()
-            .iter_mut()
-            .enumerate()
-            .for_each(|(rhs_id, rhs)| {
-                let node_key = my_layer.ordered_nodes[rhs_id];
-                let node_center = my_layer.grid.cell_center(&node_key);
-                let poly1 = TriQuadraticBspline::new(node_center, my_layer.cell_width());
+        //
+        // Screening scratch (vendored patch): which points sit near this node, and this
+        // node's own basis at each of them, do not depend on *which* coarser node is
+        // being subtracted — but the original re-gathered the 27 cells and re-evaluated
+        // `poly1` inside that loop. Gather once per node instead.
+        let mut screen_coarse: Vec<(Point3<Real>, Real)> = Vec::new();
 
-                for coarser_layer in &layers[0..curr_layer] {
-                    let aabb = Aabb::from_half_extents(
-                        node_center,
-                        Vector3::repeat(
-                            my_layer.cell_width() * 1.5 + coarser_layer.cell_width() * 1.5,
-                        ),
-                    );
+        for rhs_id in 0..my_layer.ordered_nodes.len() {
+            let node_key = my_layer.ordered_nodes[rhs_id];
+            let node_center = my_layer.grid.cell_center(&node_key);
+            let poly1 = TriQuadraticBspline::new(node_center, my_layer.cell_width());
 
-                    for (coarser_node_key, _) in coarser_layer
-                        .grid
-                        .cells_intersecting_aabb(&aabb.mins, &aabb.maxs)
-                    {
-                        let coarser_node_center = coarser_layer.grid.cell_center(&coarser_node_key);
-                        let poly2 = TriQuadraticBspline::new(
-                            coarser_node_center,
-                            coarser_layer.cell_width(),
-                        );
-                        let mut coeff = poly1.grad_grad(poly2, true, true).sum();
-                        let coarser_rhs_id = coarser_layer.grid_node_idx[&coarser_node_key];
-
-                        if screening != 0.0 {
-                            for si in -1..=1 {
-                                for sj in -1..=1 {
-                                    for sk in -1..=1 {
-                                        let adj = node_key + vector![si, sj, sk];
-
-                                        if let Some(pt_ids) = my_layer.grid.cell(&adj) {
-                                            for pid in pt_ids {
-                                                // Use get to ignore the sentinel.
-                                                if let Some(pt) = points.get(*pid) {
-                                                    coeff += screen_factor
-                                                        * poly1.eval(*pt)
-                                                        * poly2.eval(*pt);
-                                                }
-                                            }
-                                        }
-                                    }
+            if screening != 0.0 && curr_layer > 0 {
+                screen_coarse.clear();
+                for si in -1..=1 {
+                    for sj in -1..=1 {
+                        for sk in -1..=1 {
+                            let adj = node_key + vector![si, sj, sk];
+                            let Some(pt_ids) = my_layer.grid.cell(&adj) else {
+                                continue;
+                            };
+                            for pid in pt_ids {
+                                // Use get to ignore the sentinel.
+                                let Some(pt) = points.get(*pid) else {
+                                    continue;
+                                };
+                                let at_node = poly1.eval(*pt);
+                                // Zero here zeroes every product this point appears in.
+                                if at_node != 0.0 {
+                                    screen_coarse.push((*pt, at_node));
                                 }
                             }
                         }
-
-                        *rhs -= coarser_layer.node_weights[coarser_rhs_id] * coeff;
                     }
                 }
-            });
+            }
+
+            for coarser_layer in &layers[0..curr_layer] {
+                let aabb = Aabb::from_half_extents(
+                    node_center,
+                    Vector3::repeat(
+                        my_layer.cell_width() * 1.5 + coarser_layer.cell_width() * 1.5,
+                    ),
+                );
+
+                for (coarser_node_key, _) in coarser_layer
+                    .grid
+                    .cells_intersecting_aabb(&aabb.mins, &aabb.maxs)
+                {
+                    let coarser_node_center = coarser_layer.grid.cell_center(&coarser_node_key);
+                    let poly2 =
+                        TriQuadraticBspline::new(coarser_node_center, coarser_layer.cell_width());
+                    let mut coeff = poly1.grad_grad(poly2, true, true).sum();
+                    let coarser_rhs_id = coarser_layer.grid_node_idx[&coarser_node_key];
+
+                    for (pt, at_node) in &screen_coarse {
+                        coeff += screen_factor * *at_node * poly2.eval(*pt);
+                    }
+
+                    rhs[rhs_id] -= coarser_layer.node_weights[coarser_rhs_id] * coeff;
+                }
+            }
+        }
 
         // Solve the sparse system.
         let lhs = CscMatrix::from(&grad_matrix);

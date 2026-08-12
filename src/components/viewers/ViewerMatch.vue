@@ -31,6 +31,13 @@ const usedStats = computed(() => {
 // Hide the unused (red) matches — dots + lines — in the preview. Preview-local.
 const hideUnused = ref(false)
 
+// The overlay canvas spans BOTH panels, so panning one image far enough pushes
+// its dots across the splitter and they render on top of the other photo. Off
+// (the default) each panel's dots are clipped to its own panel; on restores the
+// old spill-over behaviour. Lines are never clipped — crossing the splitter is
+// what they're for. Preview-local, like `hideUnused`.
+const spillPoints = ref(false)
+
 // Colour palette, mirroring Metashape's aligned/not-aligned convention.
 const C_USED = '#00e676'     // green — became a tie-point
 const C_UNUSED = '#ff5252'   // red — verified inlier, not in the model
@@ -190,28 +197,33 @@ function drawOverlay() {
   } else drawLines(true)
   ctx.restore()
 
-  // Dots — coloured by the same aligned/unused status on both panels.
+  // Dots — coloured by the same aligned/unused status on both panels. Drawn one
+  // panel at a time so each pass can clip to its own panel rect (see spillPoints).
   const DOT = 4
-  for (const [ia, ib] of pairs) {
-    if (used && hideUnused.value && !used.has(`${ia}:${ib}`)) continue
-    const c = colorOf(ia, ib)
-    const a = kpsA[ia]
-    if (a) {
-      const pa = lPos(a)
-      ctx.fillStyle = c
+  const drawDots = (side) => {
+    const rect = side === 'L' ? lcRect : rcRect
+    const kps  = side === 'L' ? kpsA   : kpsB
+    const pos  = side === 'L' ? lPos   : rPos
+    ctx.save()
+    if (!spillPoints.value) {
       ctx.beginPath()
-      ctx.arc(pa.x, pa.y, DOT, 0, Math.PI * 2)
+      ctx.rect(rect.left - panelsRect.left, rect.top - panelsRect.top, rect.width, rect.height)
+      ctx.clip()
+    }
+    for (const [ia, ib] of pairs) {
+      if (used && hideUnused.value && !used.has(`${ia}:${ib}`)) continue
+      const kp = kps[side === 'L' ? ia : ib]
+      if (!kp) continue
+      const p = pos(kp)
+      ctx.fillStyle = colorOf(ia, ib)
+      ctx.beginPath()
+      ctx.arc(p.x, p.y, DOT, 0, Math.PI * 2)
       ctx.fill()
     }
-    const b = kpsB[ib]
-    if (b) {
-      const pb = rPos(b)
-      ctx.fillStyle = c
-      ctx.beginPath()
-      ctx.arc(pb.x, pb.y, DOT, 0, Math.PI * 2)
-      ctx.fill()
-    }
+    ctx.restore()
   }
+  drawDots('L')
+  drawDots('R')
 }
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
@@ -239,6 +251,7 @@ onBeforeUnmount(() => resizeObserver?.disconnect())
 watch(() => props.matches,          () => drawOverlay(), { deep: false })
 watch(() => props.usedKeys,         () => drawOverlay())
 watch(hideUnused,                   () => drawOverlay())
+watch(spillPoints,                  () => drawOverlay())
 watch(() => props.imageA.keypoints, () => drawOverlay())
 watch(() => props.imageB.keypoints, () => drawOverlay())
 
@@ -317,6 +330,10 @@ function onImgLoad(side) {
         >{{ hideUnused ? 'Show unused' : 'Hide unused' }}</button>
       </span>
       <span v-else class="match-count">{{ matches.length }} tie points</span>
+      <label class="spill-toggle" title="Draw a panned image's points even where they overlap the other photo">
+        <input v-model="spillPoints" type="checkbox" />
+        Points beyond panel
+      </label>
       <span class="panel-label">{{ imageB.name }}</span>
     </div>
   </div>
@@ -423,6 +440,16 @@ function onImgLoad(side) {
 }
 .legend-toggle:hover { background: var(--hover-bg); color: var(--text); }
 .legend-toggle.on { border-color: var(--accent); color: var(--accent); }
+
+.spill-toggle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.spill-toggle input { margin: 0; cursor: pointer; }
+.spill-toggle:hover { color: var(--text); }
 
 .panel-label {
   max-width: 40%;

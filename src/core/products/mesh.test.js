@@ -71,6 +71,24 @@ describe('transferVertexColors', () => {
     expect(Array.from(col.slice(3, 6))).toEqual([0, 0, 255])
   })
 
+  it('does not alias an out-of-bounds vertex onto another cell', () => {
+    // Cell keys are packed as (dix·ny+diy)·nz+diz, so an out-of-range offset on one
+    // axis lands on a *valid* key of the next. Poisson extrapolates past the cloud, so
+    // mesh vertices outside it are routine — without a per-axis bounds check this
+    // vertex would silently take the blue point's colour instead of missing.
+    // Cloud spans cells x=0..1, y=z=0 ⇒ bx=by=bz=-1, nx=4, ny=nz=3.
+    const dense = {
+      pos: Float32Array.from([0.5, 0.5, 0.5, 1.5, 0.5, 0.5]),
+      col: Uint8Array.from([255, 0, 0, 0, 0, 255]),
+    }
+    // (dix=1, diy=4, diz=1) packs to (1·3+4)·3+1 = 22, the same key as the blue point
+    // at (dix=2, diy=1, diz=1). It is 3 cells away in y, so the honest answer is a miss.
+    const meshPos = Float32Array.from([0.5, 3.5, 0.5])
+    const { col, misses } = transferVertexColors(meshPos, dense, 1.0, { searchRadius: 1, grayFallback: [7, 8, 9] })
+    expect(misses).toBe(1)
+    expect(Array.from(col)).toEqual([7, 8, 9])
+  })
+
   it('falls back to gray and counts a vertex with no dense point in range', () => {
     const dense = { pos: Float32Array.from([0, 0, 0]), col: Uint8Array.from([10, 20, 30]) }
     // Vertex far away (many cells off) with searchRadius 1 ⇒ miss.
@@ -112,6 +130,18 @@ describe('generateMesh', () => {
     expect(m.nVerts).toBe(0)
     expect(m.count).toBe(0)
     expect(m.col).toBeNull()
+  })
+
+  it('keeps the Poisson surface untrimmed when gap filling is enabled', () => {
+    let trim = -1
+    const poissonFn = (_pos, _nrm, _depth, _screening, trimDist) => {
+      trim = trimDist
+      return new Uint8Array(8)
+    }
+    generateMesh(dense, poissonFn, { mergeCell: 0.5, trimFactor: 6, fillHoles: true }, () => {})
+    expect(trim).toBe(0)
+    generateMesh(dense, poissonFn, { mergeCell: 0.5, trimFactor: 6, fillHoles: false }, () => {})
+    expect(trim).toBe(3)
   })
 
   it('subsamples the Poisson input when the cloud is denser than a leaf cell', () => {

@@ -32,12 +32,13 @@ export function suggestGsd(points) {
 //   opts:
 //     gsd        — cell size in frame units; auto (suggestGsd) when omitted
 //     aggregate  — 'max'(default DSM) | 'min' | 'mean' | 'median'
-//     fillRadius — cells; IDW hole-fill search radius (0 = no fill)
+//     fillMethod — 'none' | 'nearest' | 'idw' (default)
+//     fillRadius — cells; hole-fill search radius (0 = no fill)
 //     maxGrid    — hard cap on the longer grid side; gsd is grown to respect it
 // Returns { width, height, gsd, originX, originY, data:Float32Array (NaN=nodata),
 //           mask:Uint8Array (1=has data, incl. filled), zMin, zMax, count, filled }.
 export function rasterizeDem(points, opts = {}) {
-  const { aggregate = 'max', fillRadius = 2, maxGrid = 4096 } = opts
+  const { aggregate = 'max', fillMethod = 'idw', fillRadius = 2, maxGrid = 4096 } = opts
   if (points.length < 1) return null
 
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
@@ -101,7 +102,9 @@ export function rasterizeDem(points, opts = {}) {
   for (let i = 0; i < cells; i++) if (!Number.isNaN(data[i])) { measured[i] = 1; count++ }
 
   let filled = 0
-  if (fillRadius > 0) filled = idwFill(data, measured, width, height, fillRadius)
+  if (fillMethod !== 'none' && fillRadius > 0) {
+    filled = fillNodata(data, measured, width, height, fillRadius, fillMethod)
+  }
 
   const mask = new Uint8Array(cells)
   let zMin = Infinity, zMax = -Infinity
@@ -120,29 +123,35 @@ export function rasterizeDem(points, opts = {}) {
 // Fill nodata cells by inverse-distance weighting over measured cells within
 // `radius` (in cells). Writes into `data` but reads only `measured`, so filled
 // cells never seed further fills. Returns the number of cells filled.
-function idwFill(data, measured, width, height, radius) {
+export function fillNodata(data, measured, width, height, radius, method = 'idw') {
   let filled = 0
-  const r2 = radius * radius
+  const r = Math.max(0, Math.floor(radius))
+  const r2 = r * r
   for (let row = 0; row < height; row++) {
     for (let col = 0; col < width; col++) {
       const idx = row * width + col
       if (measured[idx]) continue
       let wsum = 0, vsum = 0
-      for (let dr = -radius; dr <= radius; dr++) {
+      let nearest = -1, nearestD2 = Infinity
+      for (let dr = -r; dr <= r; dr++) {
         const rr = row + dr
         if (rr < 0 || rr >= height) continue
-        for (let dc = -radius; dc <= radius; dc++) {
+        for (let dc = -r; dc <= r; dc++) {
           const cc = col + dc
           if (cc < 0 || cc >= width) continue
           const d2 = dr * dr + dc * dc
           if (d2 === 0 || d2 > r2) continue
           const nIdx = rr * width + cc
           if (!measured[nIdx]) continue
+          if (d2 < nearestD2) { nearestD2 = d2; nearest = nIdx }
           const w = 1 / d2
           wsum += w; vsum += w * data[nIdx]
         }
       }
-      if (wsum > 0) { data[idx] = vsum / wsum; filled++ }
+      if (nearest >= 0) {
+        data[idx] = method === 'nearest' ? data[nearest] : vsum / wsum
+        filled++
+      }
     }
   }
   return filled

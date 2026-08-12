@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { sampleOrtho, orthorectify } from './ortho.js'
+import { fillOrthoGaps, sampleOrtho, orthorectify } from './ortho.js'
 import { rasterizeDem } from './dem.js'
 import { makeFrame } from './projection.js'
 
@@ -72,5 +72,31 @@ describe('orthorectify', () => {
     const dem = rasterizeDem(pts, { gsd: 0.5, fillRadius: 0 })
     const ortho = orthorectify(dem, [m], identity.toSfm, {})
     expect(ortho.covered).toBe(0)
+  })
+})
+
+describe('fillOrthoGaps', () => {
+  it('fills interior transparent pixels but not cells outside the surface', () => {
+    const width = 3, height = 1
+    const rgba = new Uint8ClampedArray([
+      20, 40, 60, 255,
+      0, 0, 0, 0,
+      0, 0, 0, 0,
+    ])
+    const surface = new Uint8Array([1, 1, 0])
+    const filled = fillOrthoGaps(rgba, surface, width, height, 2, 'nearest')
+    expect(filled).toBe(1)
+    expect(Array.from(rgba.slice(4, 8))).toEqual([20, 40, 60, 255])
+    expect(rgba[11]).toBe(0)
+  })
+
+  it('does not let newly filled pixels propagate across a large gap', () => {
+    const width = 5
+    const rgba = new Uint8ClampedArray(width * 4)
+    rgba.set([100, 120, 140, 255], 0)
+    const filled = fillOrthoGaps(rgba, new Uint8Array(width).fill(1), width, 1, 1, 'nearest')
+    expect(filled).toBe(1)
+    expect(rgba[7]).toBe(255)
+    expect(rgba[11]).toBe(0)
   })
 })

@@ -29,6 +29,21 @@ if the *method* changed, update METHODS.md.
   `crates/mesh/vendor/` (rayon's worker threads panic on threadless wasm) with a
   marching-cubes iso patch — it is one of two crates allowed a dependency, kept isolated
   so it doesn't leak into `crates/reconstruction` (which stays wasm-bindgen-only).
+  The vendored copy also carries **performance patches** (2026-08-11, see HANDOVER
+  ▸ B-mesh): every one is an exact restructuring — same mesh out, only summation order
+  and vertex numbering move — and each is marked `(Vendored patch)` at its site. The
+  evergreen lesson behind them: **`HGrid::cells_intersecting_aabb` costs the box
+  volume, not the occupancy.** It walks every integer cell in the range and only then
+  filters to occupied ones, so an AABB query whose box is much larger than the cell
+  width is a trap — it reads like a spatial index lookup and behaves like a dense scan.
+  That one call made depth-8 meshing take hours. Where a query box can be large
+  relative to the grid, either scatter from the sources instead or scan the node list
+  (`PoissonLayer::range_is_cheaper_than_scan` picks per call). Second lesson, in the
+  same file: **the Poisson solution is defined over all space** — the coarse multigrid
+  layers' basis functions have support far wider than the finest layer's extent — so
+  the isosurface walk runs a long way past the samples, and "bound it to the octree
+  AABB" is *wrong* (it clips real surface). Bound it by proximity to the input points
+  instead, which is exactly what the trim pass already enforces.
   Its Rust tests need release mode (`cargo test -p mesh --release`; debug is ~40× slower).
   `crates/imagecodec` and `crates/lazcodec` are the other dep-carrying crates,
   likewise isolated from `reconstruction`: the `tiff` crate as a native TIFF decoder
@@ -72,7 +87,9 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
   `core/dense/` (`mvs.js` dense MVS orchestrator, `planeCost.js`, `memBudget.js`,
   `depthMapCodec.js` — pure depth-map↔sidecar (de)serialization + index stamping/
   staleness for the persisted Stage A output),
-  `core/products/` (`dem.js`, `ortho.js`, `mesh.js` screened-Poisson mesh orchestrator
+  `core/products/` (`dem.js`, `ortho.js`, `surface.js` — the height grid the ortho
+  reprojects onto, from a mesh / fitted plane / resampled DEM (see Pipelines ▸ 5),
+  `mesh.js` screened-Poisson mesh orchestrator
   — byte-buffer parse + nearest-voxel vertex-colour transfer, wasm solver injected,
   `projection.js`, `georef.js`, `exporters.js` — cloud/mesh/DEM/ortho writers incl.
   `prepareCloudForExport` (georef-then-voxel-downsample, streams the dense
@@ -700,7 +717,24 @@ self-contained, file-based project format.
 5. **Products**: local vertical frame (`core/products/projection.js`, aerial Z-up auto-orient) →
    DEM (`core/products/dem.js`, binned heights + IDW fill, hillshaded preview) → orthophoto
    (`core/products/ortho.js`, true reprojection reusing the cached depth maps as z-buffer +
-   colour). Optional georeferencing via `core/products/georef.js` (Horn 7-param similarity,
+   colour). **The ortho reprojects onto a SURFACE, and the DEM is only one of them**
+   (Metashape's Build Orthomosaic ▸ Surface): `orthorectify` walks a
+   `{width,height,gsd,originX,originY,data,mask}` grid, so `core/products/surface.js`
+   builds that same grid from the **mesh** (`meshSurface`, a from-above z-buffer
+   rasterisation of the Poisson triangles — watertight ⇒ a dense mask, which is the
+   cure for a patchy ortho, since every DEM hole is a transparent ortho cell) or from a
+   robust least-squares **plane** (`fitPlane`/`planeSurface`, flat scenes), plus
+   `resampleSurface` so the ortho's GSD is independent of the surface's (a coarse
+   surface reprojects fine; the ortho wants image detail). The store's `orthoSurfaces`
+   getter is the single source of what's available — the modal renders it and
+   `generateOrtho` consumes it, exactly like `demSource`/DemModal. Two consequences:
+   an ortho **carries its own geotransform** (`gsd`/`originX`/`originY`/`frame`/`crs`;
+   the exporters must read it there, not off the DEM — older persisted orthos have
+   none and fall back), and rebuilding a DEM only invalidates an ortho whose
+   `surface` was the DEM. A mesh/plane surface's `{kind:'local'}` frame spec is a
+   *request*, not a descriptor, so the payload must also carry cameras + a point
+   sample — `buildLocalFrame` derives the up-vector from the scene.
+   Optional georeferencing via `core/products/georef.js` (Horn 7-param similarity,
    SfM centres ↔ imported poses). Exports in `core/products/exporters.js` +
    `core/products/geotiff.js` (PLY, model JSON, DEM GeoTIFF/.asc, ortho GeoTIFF/PNG+.wld)
    through `ExportModal.vue`. Products persist to OPFS (`products/…`).

@@ -171,7 +171,7 @@ const { sidebarWidth, startSidebarResize } = useSidebarResize()
 // ── Reconstruction ────────────────────────────────────────────────────────────
 // Project-scoped store; restore/clear run through the project-store registry.
 const reconstructionStore = useReconstructionStore()
-const { cameras, sparseCameras, points3d, reconStatus, clouds, selectedCloudId, selectedCloud, mainSparseId, mainSparseCloud, depthMapCount, dem, ortho, georef, canGeoreference, canGeoreferenceGcps, denseSummary, summary: reconSummary } = storeToRefs(reconstructionStore)
+const { cameras, sparseCameras, points3d, reconStatus, clouds, selectedCloudId, selectedCloud, mainSparseId, mainSparseCloud, depthMapCount, dem, demSource, ortho, orthoSurfaces, georef, canGeoreference, canGeoreferenceGcps, denseSummary, summary: reconSummary } = storeToRefs(reconstructionStore)
 const { reconstruct, importColmapModel, importInteropModel, importCloud, editClouds, computeDepthMaps, densify, generateDem, generateOrtho, generateMesh, georeference, gcpAccuracyReport, gcpGuides, gcpEstimate, selectCloud, removeCloud, renameCloud, setMainSparse, clearDerived: clearReconstructionDerived } = reconstructionStore
 
 async function clearCurrentProjectDerived() {
@@ -604,6 +604,7 @@ const commandState = computed(() => ({
   depthMapCount: depthMapCount.value,
   cloudReady:    cloudReady.value,
   demReady:      demReady.value,
+  meshReady:     meshReady.value,
   orthoReady:    orthoReady.value,
   productReady:  productReady.value,
 }))
@@ -1449,8 +1450,6 @@ function onRibbonPick(event) {
       :show-map-grid="showMapGrid"
       :show-footprints="showFootprints"
       :footprint-count="footprintCount"
-      :theme-preference="themePreference"
-      :theme="theme"
       @command="handleCommand"
     />
     <input ref="ribbonInput" type="file" accept="image/*" multiple hidden @change="onRibbonPick" />
@@ -1600,6 +1599,7 @@ function onRibbonPick(event) {
         v-if="demOpen"
         :can-georeference="canGeoreference"
         :project-crs="currentCrs"
+        :source="demSource"
         @close="demOpen = false"
         @run="onDemRun"
       />
@@ -1632,8 +1632,9 @@ function onRibbonPick(event) {
     <Teleport to="body">
       <OrthoModal
         v-if="orthoOpen"
-        :dem-crs="dem?.crs === 'local' || !dem?.crs ? 'local frame' : dem.crs"
-        :dem-size="dem ? `${dem.width}×${dem.height}` : null"
+        :surfaces="orthoSurfaces"
+        :can-georeference="canGeoreference"
+        :project-crs="currentCrs"
         @close="orthoOpen = false"
         @run="onOrthoRun"
       />
@@ -2262,9 +2263,8 @@ function onRibbonPick(event) {
 .app {
   display: flex;
   flex-direction: column;
-  height: calc(100% * var(--ui-scale-inverse));
-  width: calc(100% * var(--ui-scale-inverse));
-  zoom: var(--ui-scale);
+  height: 100%;
+  width: 100%;
 }
 
 .layout {

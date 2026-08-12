@@ -70,7 +70,7 @@ impl PoissonReconstruction {
         // staged builder exists so a single-threaded (wasm, rayon-stripped) caller can
         // report progress between multigrid levels; this path just runs them straight
         // through.
-        let (recon, _points) = PoissonBuilder::new(
+        let (recon, _points, _sample_iso) = PoissonBuilder::new(
             points,
             normals,
             screening,
@@ -149,19 +149,62 @@ impl PoissonReconstruction {
     /// extracting at 0 systematically offsets (inflates/deflates) the surface, so the
     /// caller passes that sample-average iso here. (Vendored patch — see crate header.)
     pub fn reconstruct_mesh_buffers_iso(&self, iso: Real) -> MeshBuffers {
+        self.reconstruct_mesh_buffers_iso_within(iso, &|_| true)
+    }
+
+    /// The width of one leaf (finest-layer) cell. Callers sizing a bound for
+    /// [`Self::reconstruct_mesh_buffers_iso_within`] need it. (Vendored patch.)
+    pub fn leaf_cell_width(&self) -> Real {
+        self.layers.last().map_or(0.0, |l| l.cell_width())
+    }
+
+    /// Like [`Self::reconstruct_mesh_buffers_iso`], but stops the isosurface walk from
+    /// entering cells whose centre fails `in_bounds`. (Vendored patch.)
+    ///
+    /// After seeding from the octree leaves, extraction floods outward through every
+    /// neighbouring cell that shows a sign change. The Poisson solution is defined over
+    /// all space — the coarse layers' basis functions have support far wider than the
+    /// data — so that walk chases extrapolated sheets a long way past the samples: on a
+    /// 129k-node depth-7 octree it visited 17.4M cells, 134× the data, and made
+    /// extraction the slowest phase of the pipeline. A caller that is going to discard
+    /// far-from-data triangles anyway can say so here and skip generating them.
+    ///
+    /// The predicate must be *conservative*: it takes a cell centre and must accept any
+    /// cell that could contain a triangle the caller intends to keep. A cell's triangles
+    /// lie within its AABB, so a keep-radius `r` around the samples means passing
+    /// `r + half the cell diagonal` here.
+    pub fn reconstruct_mesh_buffers_iso_within(
+        &self,
+        iso: Real,
+        in_bounds: &dyn Fn(&Point3<Real>) -> bool,
+    ) -> MeshBuffers {
         let mut result = MeshBuffers::default();
         let mut visited = HashMap::new();
+        // Corner cache (vendored patch): every cube corner is shared by up to 8
+        // neighbouring cells, and one `eval` sums a tri-quadratic over ~27 nodes of
+        // *every* layer — the single most expensive thing in extraction. Corners sit
+        // exactly on the leaf lattice (cell centre ± half a width), so rounding
+        // `(corner − origin) / width` recovers an exact integer key to memoize on.
+        // Upstream left this as a `PERF:` note.
+        let mut corners: HashMap<Point3<i64>, Real> = HashMap::new();
 
         if let Some(last_layer) = self.layers.last() {
+            let grid_origin = *last_layer.grid.origin();
+            let leaf_width = last_layer.grid.cell_width();
             // Check all the existing leaves.
-            let mut eval_cell = |key: Point3<i64>, visited: &mut HashMap<Point3<i64>, bool>| {
+            let mut eval_cell = |key: Point3<i64>,
+                                 visited: &mut HashMap<Point3<i64>, bool>,
+                                 corners: &mut HashMap<Point3<i64>, Real>| {
                 let cell_center = last_layer.grid.cell_center(&key);
                 let cell_width = Vector3::repeat(last_layer.grid.cell_width() / 2.0);
                 let aabb = Aabb::from_half_extents(cell_center, cell_width);
                 let mut vertex_values = [0.0; 8];
 
                 for (pt, val) in aabb.vertices().iter().zip(vertex_values.iter_mut()) {
-                    *val = self.eval(pt);
+                    let corner_key = Point3::from(
+                        (pt - grid_origin).map(|e| (e / leaf_width).round() as i64),
+                    );
+                    *val = *corners.entry(corner_key).or_insert_with(|| self.eval(pt));
                 }
 
                 let len_before = result.indices().len();
@@ -179,7 +222,7 @@ impl PoissonReconstruction {
 
             for cell in last_layer.cells_qbvh.raw_proxies() {
                 // let aabb = last_layer.cells_qbvh.node_aabb(cell.node).unwrap();
-                eval_cell(cell.data.cell, &mut visited);
+                eval_cell(cell.data.cell, &mut visited, &mut corners);
             }
 
             // Checking only the leaves isn’t enough, isosurfaces might escape leaves through levels
@@ -200,7 +243,14 @@ impl PoissonReconstruction {
                             let new_cell = cell + Vector3::new(i, j, k);
 
                             if !visited.contains_key(&new_cell) {
-                                let has_sign_change = eval_cell(new_cell, &mut visited);
+                                // Don't chase the isosurface into regions the caller is
+                                // going to discard anyway (vendored patch — see
+                                // `reconstruct_mesh_buffers_iso_within`).
+                                if !in_bounds(&last_layer.grid.cell_center(&new_cell)) {
+                                    continue;
+                                }
+                                let has_sign_change =
+                                    eval_cell(new_cell, &mut visited, &mut corners);
                                 if has_sign_change {
                                     stack.push(new_cell);
                                 }
@@ -306,9 +356,17 @@ impl PoissonBuilder {
     }
 
     /// Solve any remaining layers, compute the density-weighted isovalue, and return the
-    /// reconstruction together with the input points (the caller needs them to pick an
-    /// extraction iso level and to trim far triangles).
-    pub fn finish(mut self) -> (PoissonReconstruction, Vec<Point3<Real>>) {
+    /// reconstruction together with the input points (the caller needs them to trim far
+    /// triangles) and the **sample-average iso level** to extract at.
+    ///
+    /// That last value is the vendored patch: the caller wants the plain (unweighted)
+    /// average of the implicit function over the input samples, and used to obtain it
+    /// with a second full `eval` pass over every point — the same ~27-nodes-per-layer
+    /// evaluation this loop is already doing. It is accumulated here instead, in the
+    /// pass that has to happen anyway. Returned already expressed relative to
+    /// `isovalue`, so it can go straight to [`PoissonReconstruction::
+    /// reconstruct_mesh_buffers_iso`].
+    pub fn finish(mut self) -> (PoissonReconstruction, Vec<Point3<Real>>, Real) {
         while self.solve_step() {}
 
         let mut result = PoissonReconstruction {
@@ -317,16 +375,25 @@ impl PoissonBuilder {
         };
         let mut isovalue = 0.0;
         let mut total_weight = 0.0;
+        let mut unweighted = 0.0;
         for (pt, w) in self.points.iter().zip(self.vector_field.densities.iter()) {
-            isovalue += result.eval(pt) / *w;
+            // `isovalue` is still 0 here, so this is the raw implicit function.
+            let value = result.eval(pt);
+            isovalue += value / *w;
             total_weight += 1.0 / *w;
+            unweighted += value;
         }
         result.isovalue = if total_weight != 0.0 {
             isovalue / total_weight
         } else {
             0.0
         };
-        (result, self.points)
+        let sample_iso = if self.points.is_empty() {
+            0.0
+        } else {
+            unweighted / self.points.len() as Real - result.isovalue
+        };
+        (result, self.points, sample_iso)
     }
 }
 

@@ -39,7 +39,10 @@ function trimExt(name) {
 const selectedPairId = ref(null)
 
 // ── Filtering + sorting ───────────────────────────────────────────────────────
-const filterA = ref('')
+// Filter by *participating* image, not by column: which of a pair's two images
+// lands in A vs B is arbitrary (pairId is the uuid-sorted join), so an A-only
+// filter silently hides roughly half the pairs the chosen image appears in.
+const filterImage = ref('')
 const sortKey = ref('nameA')   // 'nameA' | 'nameB' | 'inlierCount' | 'rawCount'
 const sortDir = ref('asc')     // 'asc' | 'desc'
 
@@ -52,16 +55,20 @@ function sortBy(key) {
   }
 }
 
-// Distinct Image A names present in the pairs, for the filter dropdown.
-const imageAOptions = computed(() => {
-  const names = [...new Set(props.matchSummaries.map((m) => trimExt(m.nameA)))]
-  return names.sort((a, b) => a.localeCompare(b))
+// Distinct image names appearing on *either* side of a pair, for the dropdown.
+const imageOptions = computed(() => {
+  const names = new Set()
+  for (const m of props.matchSummaries) {
+    names.add(trimExt(m.nameA))
+    names.add(trimExt(m.nameB))
+  }
+  return [...names].sort((a, b) => a.localeCompare(b))
 })
 
 const displayedSummaries = computed(() => {
-  const q = filterA.value
+  const q = filterImage.value
   let rows = props.matchSummaries
-  if (q) rows = rows.filter((m) => trimExt(m.nameA) === q)
+  if (q) rows = rows.filter((m) => trimExt(m.nameA) === q || trimExt(m.nameB) === q)
 
   const key = sortKey.value
   const dir = sortDir.value === 'asc' ? 1 : -1
@@ -99,7 +106,7 @@ function selectMatch(pairId) {
 
 // Draggable width of the left list panel (px). Clamped so it can't swallow the
 // preview or shrink below the table's usable width.
-const listWidth = ref(320)
+const listWidth = ref(360)
 let resizing = null
 function startResize(e) {
   resizing = { startX: e.clientX, startW: listWidth.value }
@@ -158,11 +165,11 @@ const selectedUsedKeys = computed(() =>
           <div v-if="!matchSummaries.length" class="empty">No matches yet — run Match Features first.</div>
           <template v-else>
             <div class="filter-bar">
-              <select v-model="filterA" class="filter-input">
+              <select v-model="filterImage" class="filter-input" title="Show only pairs containing this image (either side)">
                 <option value="">All images</option>
-                <option v-for="name in imageAOptions" :key="name" :value="name">{{ name }}</option>
+                <option v-for="name in imageOptions" :key="name" :value="name">{{ name }}</option>
               </select>
-              <button v-if="filterA" class="filter-clear" title="Clear filter" @click="filterA = ''">×</button>
+              <button v-if="filterImage" class="filter-clear" title="Clear filter" @click="filterImage = ''">×</button>
             </div>
             <div class="table-scroll">
             <table v-col-resize class="match-table">
@@ -176,7 +183,7 @@ const selectedUsedKeys = computed(() =>
               </thead>
               <tbody>
                 <tr v-if="!displayedSummaries.length">
-                  <td :colspan="hasSparse ? 4 : 3" class="empty-row">No pairs match “{{ filterA }}”.</td>
+                  <td :colspan="hasSparse ? 4 : 3" class="empty-row">No pairs match “{{ filterImage }}”.</td>
                 </tr>
                 <tr
                   v-for="m in displayedSummaries"
@@ -247,8 +254,11 @@ const selectedUsedKeys = computed(() =>
   background: var(--panel);
   border: 1px solid var(--panel-border);
   border-radius: 8px;
-  width: min(95vw, 1100px);
-  height: 75vh;
+  /* Roomy on purpose: the right panel holds two photos side by side, so the
+     preview is the constraint — at 1100×75vh each half was barely wider than a
+     thumbnail once the list took its 320px. */
+  width: min(96vw, 1440px);
+  height: min(88vh, 1000px);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
   display: flex;
   flex-direction: column;
