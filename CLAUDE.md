@@ -935,6 +935,19 @@ propagate covariance rather than retaining stale numeric sigmas.
   `createWritable` outside opfs.js is the `.websfm` archive sink in
   `utils/projectFile.js` — a just-picked handle, written once, streamed, with no
   second writer.
+- **A `blob:` URL is a handle to a FILE, not a copy of the bytes.** `img.url` is
+  `createObjectURL` over a `File`: the user's original on disk for an in-session
+  image (`utils/image.js`), the OPFS copy (`getFile()`) for a restored one. The
+  browser re-validates that file on every read, so the URL can die mid-session —
+  the original is moved/renamed/re-synced, best-effort OPFS is evicted — and the
+  symptom is `net::ERR_FILE_NOT_FOUND`, not an exception. Nothing in the pipeline
+  notices on its own (matching reads descriptors, not pixels), so **every `<img>`
+  bound to `img.url` must carry `@error="imagesStore.reportImageLoadError(img.id)"`**
+  — the store re-creates the URL from the OPFS copy (one shared attempt per image
+  per session, validated by a 1-byte read so a heal can't hand back a second dead
+  URL) and only then sets `previewFailed` + `previewFailReason: 'source-lost'`.
+  Related: OPFS is *best-effort* storage unless asked otherwise, so
+  `opfs.ensureDurableStorage()` is requested once on project create/open.
 - **`image.url` must always be a browser-native raster** (JPEG/PNG/…): the
   viewer `<img>`, the metadata dimension probe (`new Image()`), and the worker's
   `rasterize` (`createImageBitmap`) all decode it through the browser. TIFF is

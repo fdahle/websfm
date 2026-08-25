@@ -1,10 +1,15 @@
 <script setup>
 import { computed, onMounted, onBeforeUnmount } from 'vue'
 import { FIELD_DEFS } from '../../core/io/metadata.js'
+import { useImagesStore } from '../../stores/useImagesStore.js'
 
 const props = defineProps({
   image: { type: Object, required: true },
 })
+
+// See ViewerImage: the <img>'s @error routes here so a dead blob: URL is healed
+// from OPFS, or the image is flagged, instead of silently rendering blank.
+const imagesStore = useImagesStore()
 
 const emit = defineEmits(['close'])
 
@@ -42,8 +47,18 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 
       <div class="modal-body">
         <div class="preview">
-          <img v-if="!image.previewPending && !image.previewFailed" :src="image.url" :alt="image.name" class="preview-img" />
-          <div v-else-if="image.previewFailed" class="preview-img preview-pending">Preview unavailable — decode failed</div>
+          <img
+            v-if="!image.previewPending && !image.previewFailed"
+            :src="image.url"
+            :alt="image.name"
+            class="preview-img"
+            @error="imagesStore.reportImageLoadError(image.id)"
+          />
+          <div v-else-if="image.previewFailed" class="preview-img preview-pending">
+            {{ image.previewFailReason === 'source-lost'
+              ? 'Image file no longer available — re-add the file'
+              : 'Preview unavailable — decode failed' }}
+          </div>
           <div v-else class="preview-img preview-pending">Decoding image…</div>
         </div>
 

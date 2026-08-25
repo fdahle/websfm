@@ -62,10 +62,19 @@ function isUnaligned(img) {
   return props.hasSparse && !props.alignedUuids.has(img.uuid)
 }
 
+// Why an image can't be shown. 'source-lost' is the mid-session case: the file
+// behind its blob: URL went away and project storage had no usable copy, so it
+// will also fail detection / dense / ortho — worth saying, not just "failed".
+function failReason(img) {
+  return img.previewFailReason === 'source-lost'
+    ? 'image file no longer available — re-add the file'
+    : 'failed to load (could not decode image)'
+}
+
 // Tooltip for the image row, reflecting its load state.
 function rowTitle(img) {
   if (img.previewPending) return `${img.name} — decoding…`
-  if (img.previewFailed) return `${img.name} — failed to load (could not decode image)`
+  if (img.previewFailed) return `${img.name} — ${failReason(img)}`
   if (isUnaligned(img)) return `${img.name} — not aligned (no camera in the sparse model)`
   return img.name
 }
@@ -201,7 +210,7 @@ function ctxRemove() {
           <span v-else-if="img.kpStatus === 'error'" class="status-dot error"></span>
           <span class="item-name">{{ img.name }}</span>
           <span v-if="img.previewPending" class="load-tag" title="Decoding image…">decoding…</span>
-          <span v-else-if="img.previewFailed" class="unaligned-tag failed-tag" title="Failed to load — image could not be decoded">⚠</span>
+          <span v-else-if="img.previewFailed" class="unaligned-tag failed-tag" :title="failReason(img)">⚠</span>
           <span v-else-if="isUnaligned(img)" class="unaligned-tag" title="Not aligned — no camera in the sparse model">⚠</span>
         </li>
         <li v-if="expanded[img.id]" class="img-details" @contextmenu.stop>

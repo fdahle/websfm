@@ -1,6 +1,11 @@
 <script setup>
 import { formatFileSize } from '../../core/io/metadata.js'
 import { useTableSort } from '../../composables/useTableSort.js'
+import { useImagesStore } from '../../stores/useImagesStore.js'
+
+// See ViewerImage: the thumbnail's @error routes here so a dead blob: URL is
+// healed from OPFS, or the image is flagged, instead of rendering blank.
+const imagesStore = useImagesStore()
 
 const props = defineProps({
   images: {
@@ -62,8 +67,20 @@ const { toggleSort, sortArrow, sorted: sortedImages } = useTableSort(() => props
           @dblclick="$emit('open', img.id)"
         >
           <td class="thumb-cell">
-            <img v-if="!img.previewPending && !img.previewFailed" :src="img.url" :alt="img.name" class="thumb" />
-            <div v-else-if="img.previewFailed" class="thumb thumb-error" title="Preview unavailable — decode failed">!</div>
+            <img
+              v-if="!img.previewPending && !img.previewFailed"
+              :src="img.url"
+              :alt="img.name"
+              class="thumb"
+              @error="imagesStore.reportImageLoadError(img.id)"
+            />
+            <div
+              v-else-if="img.previewFailed"
+              class="thumb thumb-error"
+              :title="img.previewFailReason === 'source-lost'
+                ? 'Image file no longer available — re-add the file'
+                : 'Preview unavailable — decode failed'"
+            >!</div>
             <div v-else class="thumb thumb-pending" title="Decoding image…" />
           </td>
           <td class="name-cell" :title="img.name">{{ img.name }}</td>
