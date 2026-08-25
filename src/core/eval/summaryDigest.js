@@ -39,6 +39,7 @@ export function buildProjectDigest(input = {}) {
     date = new Date().toISOString(),
     crsUnit = 'm',
     rows = [],
+    snapshot = null,
     offenders = {},
     summary = null,
     denseSummary = null,
@@ -115,6 +116,7 @@ export function buildProjectDigest(input = {}) {
           tiling: detect.tiling ?? null,
           medianKeypoints: detect.medianKeypoints ?? null,
           medianDetectScale: detect.medianDetectScale ?? null,
+          kpCapHitPct: detect.kpCapHitPct ?? null,
           mixed: !!detect.mixed,
         }
         : null,
@@ -133,7 +135,14 @@ export function buildProjectDigest(input = {}) {
     diagnostics: {
       seed: summary?.initPair ? { ...summary.initPair } : null,
       attempts: summary?.attempts ? { ...summary.attempts } : null,
-      gates: summary?.gates ? { ...summary.gates } : null,
+      // The resolved gates, plus the residual distribution they were applied to. A gate
+      // in isolation says nothing — 9.12 px is tight on one dataset and inert on
+      // another; only "gate vs observed p95" says whether the track filter had anything
+      // to bite on. Both figures are *reported* (sfm.js resolved the gate, reconStats
+      // measured the p95); the digest only puts them on one line.
+      gates: summary?.gates
+        ? { ...summary.gates, observedP95px: snapshot?.reproj?.p95 ?? null }
+        : null,
       selfCal: summary?.selfCal ? { ...summary.selfCal } : null,
       intrinsics: summary?.intrinsics ? summary.intrinsics.map((r) => ({ ...r })) : [],
       selfCalDistortion: summary?.selfCalDistortion
@@ -150,6 +159,8 @@ export function buildProjectDigest(input = {}) {
           rejected: matchRun.rejected ?? null,
           skipped: matchRun.skipped ?? null,
           gated: matchRun.gated ?? null,
+          degenerate: matchRun.degenerate ?? null,
+          degenerateOf: matchRun.degenerateOf ?? null,
           subsetGateActive: !!matchRun.subsetGateActive,
           meanInlierRatio: matchRun.meanInlierRatio ?? null,
           inliers: matchRun.inliers ?? null,
@@ -237,13 +248,26 @@ function kv(obj) {
     .join(' · ')
 }
 
+// Share of images at the keypoint cap above which the digest flags it. Not an
+// EVAL_THRESHOLDS entry: this is a run-shape note in a config echo, not a health tile.
+// Matched to verdict.js KP_CAP_WARN_PCT so the two never disagree on screen.
+const KP_CAP_NOTE_PCT = 90
+
+// Track-filter gate ÷ observed p95 above which the gate is called inactive. Mirrors
+// verdict.js GATE_HEADROOM_WARN for the same reason as KP_CAP_NOTE_PCT.
+const GATE_HEADROOM_NOTE = 2
+
 function configLines(config) {
   const out = []
   const { detect, match, sparse, dense } = config || {}
   if (detect) {
-    const { detector, images, mixed, ...rest } = detect
+    const { detector, images, mixed, kpCapHitPct, ...rest } = detect
     out.push(`- **Detect**: ${detector ?? '?'}${images != null ? ` · ${images} image(s)` : ''}`
       + `${kv(rest) ? ` · ${kv(rest)}` : ''}`
+      // Pulled out of `kv` because a bare `kpCapHitPct=100` reads as one more knob when
+      // it is a finding: at 100% the cap, not contrastThreshold, chose the keypoints.
+      + `${kpCapHitPct != null ? ` · ${fmtNum(kpCapHitPct, 0)}% of images at the keypoint cap`
+        + `${kpCapHitPct >= KP_CAP_NOTE_PCT ? ' ⚠' : ''}` : ''}`
       // A per-image record means the batch can be heterogeneous; say so rather than
       // presenting one image's settings as the run's.
       + `${mixed ? ' · ⚠ settings differ between images' : ''}`)
@@ -288,17 +312,35 @@ function diagnosticsLines(d) {
     }
   }
   if (gates) {
+    // Headroom = the track-filter gate over the observed p95. Above ~2× the gate sits
+    // past essentially every residual, so the filter removed nothing and a reprojection
+    // tail survives by construction rather than because the geometry is bad.
+    const obs = gates.observedP95px
+    const filt = gates.filterMaxReprojPx
+    const headroom = obs != null && obs > 0 && filt != null ? filt / obs : null
     out.push(`- **Reprojection gates**: ×${fmtNum(gates.detectScaleFactor)} `
       + `(median detection scale ${gates.medianScale != null ? fmtNum(gates.medianScale, 3) : 'inherited'})`
       + ` → PnP/BA ${fmtNum(gates.reprjThresholdPx)}px, track filter ${fmtNum(gates.filterMaxReprojPx)}px`
       + `${gates.clamped ? ' · ⚠ clamped' : ''}${gates.mixed ? ' · ⚠ mixed scales' : ''}`)
+    if (headroom != null) {
+      out.push(`  vs observed p95 ${fmtNum(obs)}px → ${fmtNum(headroom, 1)}× headroom`
+        + `${headroom >= GATE_HEADROOM_NOTE ? ' ⚠ the track filter is effectively inactive' : ''}`)
+    }
   }
   if (matchGates) {
+    const { degenerate: dg, degenerateOf: dgOf } = matchGates
     out.push(`- **Match gates**: ${matchGates.pairs} pairs → ${matchGates.accepted} accepted, `
       + `${matchGates.weak} weak, ${matchGates.rejected} rejected, ${matchGates.skipped} skipped, `
       + `${matchGates.gated} subset-gated (gate ${matchGates.subsetGateActive ? 'on' : 'off'})`
       + `; mean inlier ratio ${fmtNum(matchGates.meanInlierRatio)}`
       + `${matchGates.resolvedRansacPx != null ? `, RANSAC ${fmtNum(matchGates.resolvedRansacPx)}px` : ''}`)
+    // H/F degeneracy share over the accepted pairs — the evidence that separates "the
+    // rotations are wrong because the intrinsics are wrong" from "F is not determined
+    // on near-planar geometry". Printed whenever a run recorded it, including 0.
+    if (dg != null && dgOf) {
+      out.push(`  H/F-degenerate (planar / pure rotation): ${dg}/${dgOf} accepted `
+        + `(${fmtNum((100 * dg) / dgOf, 0)}%)`)
+    }
   }
   if (selfCal) {
     out.push(`- **Self-cal**: requested '${selfCal.requested}' → '${selfCal.resolved}'`
