@@ -534,7 +534,7 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
     // Tally this run's outcomes for the completion summary. Skipped = too few raw
     // matches to bother verifying; rejected = verified but failed the count/ratio
     // gate; matched = kept (with ≥1 inlier).
-    const stats = { matched: 0, weak: 0, rejected: 0, skipped: 0, gated: 0, inliers: 0, ratios: [] }
+    const stats = { matched: 0, weak: 0, rejected: 0, skipped: 0, gated: 0, inliers: 0, ratios: [], degenerate: 0 }
     const tally = (_pid, entry) => {
       if (entry.status !== 'done') return
       // Order matters: outcome flags are mutually exclusive but explicit (weak/gated/
@@ -545,6 +545,15 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
       else if (entry.inlierCount > 0) {
         stats.matched++; stats.inliers += entry.inlierCount
         if (entry.rawCount) stats.ratios.push(entry.inlierCount / entry.rawCount)
+        // H/F degeneracy is a per-pair label (planar scene / pure rotation) that no
+        // count or ratio gate acts on, so it only ever reached the debug log — yet the
+        // run-level SHARE is a first-order diagnostic: it is what decides whether an
+        // aborted rotation-cycle filter means "bad intrinsics" or "F is not determined
+        // on this geometry" (see the filter's sanity-abort). Counted over ACCEPTED
+        // pairs only, because that is the exact population where H ran: `hSkipBelow`
+        // = minMatches skips H below the accept floor, so any other denominator would
+        // dilute the share with pairs that were never evaluated.
+        if (entry.degenerate) stats.degenerate++
       } else stats.rejected++
     }
 
@@ -577,7 +586,9 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
       + `${stats.weak ? `, ${stats.weak} weak (PnP bridges)` : ''}`
       + `, ${stats.rejected} rejected, ${stats.skipped} skipped`
       + `${stats.gated ? `, ${stats.gated} gated (subset pre-test)` : ''}`
-      + `; ${stats.inliers} total inliers, mean inlier ratio ${meanRatio.toFixed(2)}`,
+      + `; ${stats.inliers} total inliers, mean inlier ratio ${meanRatio.toFixed(2)}`
+      + `${stats.matched ? `, ${stats.degenerate}/${stats.matched} accepted pair(s) H/F-degenerate `
+        + `(${(100 * stats.degenerate / stats.matched).toFixed(0)}% planar / pure-rotation)` : ''}`,
       'success', 'Matching')
 
     matchRun.value = {
@@ -593,6 +604,10 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
       gated: stats.gated,
       inliers: stats.inliers,
       meanInlierRatio: meanRatio,
+      // Degenerate count + its denominator travel together: a bare count is unreadable
+      // without knowing how many pairs H was actually evaluated on (accepted pairs).
+      degenerate: stats.degenerate,
+      degenerateOf: stats.matched,
       subsetGateActive: gateApplies && !skipSubsetGate,
       resolvedRansacPx,
       // The user-facing knobs only — the tuning.js internals are not what a baseline
