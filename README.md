@@ -182,16 +182,19 @@ the Rust change so fresh clones keep working without a toolchain.
 ## Tech stack
 
 - **UI:** Vue 3 (`<script setup>`), Pinia, OpenLayers (map), Three.js (3D).
-- **Compute:** five Rust crates (`sift`, `matching`, `reconstruction`, `mesh`,
-  `imagecodec`) compiled to WASM and run off the main thread.
+- **Compute:** six Rust crates (`sift`, `matching`, `reconstruction`, `mesh`,
+  `imagecodec`, `lazcodec`) compiled to WASM and run off the main thread.
 - **Learned models:** ONNX Runtime Web (WebGPU + WASM backends).
 - **Storage:** OPFS; projects are self-contained on-disk directories, also
   exportable as `.websfm` archives.
 - **Build/test:** Vite, Vitest.
 
 Architecture notes for contributors live in [`CLAUDE.md`](CLAUDE.md) (code layout)
-and [`METHODS.md`](METHODS.md) (the photogrammetry/SfM methods). Planning docs are
-under [`docs/planning/`](docs/planning/).
+and [`METHODS.md`](METHODS.md) (the photogrammetry/SfM methods). Open work is in
+[`TODO.md`](TODO.md), the record of what shipped and what it measured is in
+[`HANDOVER.md`](HANDOVER.md), and [`VERIFICATION.csv`](VERIFICATION.csv) tracks
+which manual/real-data checks have actually been run. Planning docs are under
+[`docs/planning/`](docs/planning/).
 
 ## Development & AI assistance
 
