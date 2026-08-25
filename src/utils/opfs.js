@@ -145,6 +145,32 @@ export async function requestDurable() {
   return navigator.storage.persist()
 }
 
+// OPFS defaults to *best-effort* storage: the browser is free to evict the whole
+// origin under disk pressure, taking a project's images, matches and depth maps
+// with it — and a blob: URL held across a long run then fails with
+// ERR_FILE_NOT_FOUND rather than reporting anything. Requesting persistence
+// promotes the bucket so nothing is evicted without the user asking.
+//
+// Called on project create/open (opening a project is the point at which the user
+// has committed to storing data), and memoized: the answer cannot change without
+// a user action, Chromium decides it silently from engagement heuristics, and
+// Firefox *prompts* — re-asking every project switch would re-prompt.
+let durableRequest = null
+export function ensureDurableStorage() {
+  durableRequest ??= (async () => {
+    if (typeof navigator === 'undefined' || !navigator.storage?.persist) return { supported: false, durable: false }
+    try {
+      // persisted() first: a granted bucket must not be re-requested (Firefox
+      // treats persist() as a permission request and would prompt again).
+      if (await navigator.storage.persisted()) return { supported: true, durable: true, alreadyGranted: true }
+      return { supported: true, durable: await navigator.storage.persist() }
+    } catch (err) {
+      return { supported: true, durable: false, error: err?.message ?? String(err) }
+    }
+  })()
+  return durableRequest
+}
+
 export async function getQuota() {
   return navigator.storage.estimate()
 }
