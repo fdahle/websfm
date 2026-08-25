@@ -10,6 +10,10 @@
 import proj4 from 'proj4'
 import { register } from 'ol/proj/proj4'
 import { get as getOlProjection } from 'ol/proj'
+// crs.js is one of the documented cross-cutting stragglers, not a pure core
+// module (it already carries OpenLayers registration and an epsg.io fetch), so
+// it reaches the storage layer directly rather than duplicating file I/O.
+import { readAppJson, writeAppJson } from '../utils/opfs.js'
 
 // ── Catalog ─────────────────────────────────────────────────────────────────
 // Curated entries shown in the CRS picker. Any other EPSG code can still be used
@@ -127,28 +131,21 @@ export function metresToCrsUnits(value, code) {
 const registered = new Set(['EPSG:4326', 'EPSG:3857'])
 
 // Cache for definitions fetched from epsg.io, persisted in OPFS across reloads.
+// Definitions fetched from epsg.io, cached in OPFS so a code resolves offline
+// on the next run. Persistence goes through utils/opfs.js rather than a local
+// createWritable: two unknown codes resolving at once (a project CRS and an
+// imported raster's, say) both write this one file, and overlapping writables
+// collide on Chromium's swap file — an error this `catch {}` would swallow,
+// losing the cache entry with no trace. See opfs.js ▸ Serialized writes.
+const DEF_CACHE_FILE = 'crs-defs.json'
 let defCache = null
 async function loadDefCache() {
   if (defCache) return defCache
-  try {
-    const root = await navigator.storage.getDirectory()
-    const dir = await root.getDirectoryHandle('websfm', { create: true })
-    const fh = await dir.getFileHandle('crs-defs.json')
-    defCache = JSON.parse(await (await fh.getFile()).text())
-  } catch {
-    defCache = {}
-  }
+  defCache = (await readAppJson(DEF_CACHE_FILE).catch(() => null)) || {}
   return defCache
 }
 async function saveDefCache() {
-  try {
-    const root = await navigator.storage.getDirectory()
-    const dir = await root.getDirectoryHandle('websfm', { create: true })
-    const fh = await dir.getFileHandle('crs-defs.json', { create: true })
-    const w = await fh.createWritable()
-    await w.write(JSON.stringify(defCache || {}))
-    await w.close()
-  } catch {}
+  await writeAppJson(DEF_CACHE_FILE, defCache || {}).catch(() => {})
 }
 
 // Generate a UTM proj4 def from an EPSG code (326xx = north, 327xx = south).

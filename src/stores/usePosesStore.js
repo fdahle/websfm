@@ -90,12 +90,33 @@ export const usePosesStore = registerProjectStore(defineStore('poses', () => {
   // Persist only when a project is open and OPFS is usable (see useProjectsStore).
   const isPersisting = () => projects.isPersisting
 
+  // `save()` fires from several places that overlap during a restore or a bulk
+  // image add — the EXIF watcher (once per image as metadata lands),
+  // `resolveImageMatches`, and `restore` itself — each rewriting the whole
+  // poses.json. Coalesced exactly like `useSensorsStore.save` /
+  // `useImagesStore.sync`: at most one in flight, a request arriving mid-write
+  // schedules a single trailing re-run that captures the latest state.
+  // (opfs.js serializes same-file writes regardless; this is about not queueing
+  // N redundant rewrites of one small file.)
+  let writing = false
+  let rerun = false
   async function save() {
     if (!isPersisting()) return
-    await opfs.savePoses(projects.currentProjectId, {
-      crs: currentCrs.value,
-      poses: poses.value,
-    }).catch((err) => log(`Pose save failed — ${err?.message ?? err}`, 'error', 'Pose'))
+    if (writing) { rerun = true; return }
+    writing = true
+    try {
+      do {
+        rerun = false
+        await opfs.savePoses(projects.currentProjectId, {
+          crs: currentCrs.value,
+          poses: poses.value,
+        })
+      } while (rerun)
+    } catch (err) {
+      log(`Pose save failed — ${err?.message ?? err}`, 'error', 'Pose')
+    } finally {
+      writing = false
+    }
   }
 
   // Name → image-id matching is shared with GCP observations / footprints /
