@@ -123,7 +123,7 @@ function edit(img)         { emit('edit', img.id) }
 
           <div class="rows">
             <div v-for="img in group.images" :key="img.id" class="row">
-              <img class="thumb" :src="img.url" :alt="img.name" />
+              <img class="thumb" :src="img.url" :alt="img.name" @error="imagesStore.reportImageLoadError(img.id)" />
               <span class="name" :title="img.name">{{ img.name }}</span>
               <span class="badge" :class="{ on: !!img.mask }">{{ img.mask ? 'Masked' : 'None' }}</span>
               <div class="row-actions">

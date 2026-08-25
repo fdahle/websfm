@@ -15,6 +15,11 @@ export function createImage(file) {
     // forever in this case, so the UI must keep showing a placeholder (an
     // error one, not "decoding…") instead of falling back to a broken <img>.
     previewFailed: false,
+    // Why `previewFailed` is set: 'decode' (the bytes are here but unreadable —
+    // a failed TIFF transcode) or 'source-lost' (the blob URL's backing file
+    // went away mid-session and OPFS had no usable copy; see
+    // useImagesStore.reportImageLoadError). null while the image is fine.
+    previewFailReason: null,
     file,
     meta: null,
     sensorId: null, // id of the Sensor (shared intrinsics) this image belongs to

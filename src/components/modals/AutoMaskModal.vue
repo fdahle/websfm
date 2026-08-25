@@ -122,7 +122,13 @@ async function applyToAll() {
 
         <div v-for="g in groups" :key="g.key" class="group">
           <div class="preview" :title="g.label">
-            <img v-if="g.images[0]" class="thumb" :src="g.images[0].url" :alt="g.label" />
+            <img
+              v-if="g.images[0]"
+              class="thumb"
+              :src="g.images[0].url"
+              :alt="g.label"
+              @error="imagesStore.reportImageLoadError(g.images[0].id)"
+            />
             <div v-if="g.w" class="border-overlay" :style="{ inset: previewInset(g) }"></div>
           </div>
           <div class="group-info">

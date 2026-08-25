@@ -303,7 +303,12 @@ export const useImagesStore = defineStore('images', () => {
           }
         } catch (err) {
           const found = images.value.find((img) => img.id === item.id)
-          if (found) { found.loading = false; found.previewPending = false; found.previewFailed = true }
+          if (found) {
+            found.loading = false
+            found.previewPending = false
+            found.previewFailed = true
+            found.previewFailReason = 'decode'
+          }
           // Reject readiness so compute consumers error loudly rather than
           // silently fall back to the lossy display JPEG for a TIFF (that would
           // leak JPEG artifacts into keypoints/depth — the computeUrl invariant).
@@ -344,6 +349,108 @@ export const useImagesStore = defineStore('images', () => {
       }
       onRemoved?.(id)
     }
+  }
+
+  // ── Image source liveness ─────────────────────────────────────────────────
+  // `img.url` is a blob: URL, which is a handle to a FILE — not a copy of the
+  // bytes. An in-session image's handle points at the user's original file on
+  // disk (utils/image.js), a restored one's at the OPFS copy (opfs.getFile());
+  // both are re-validated by the browser on every read. So either can die
+  // mid-session — the original is moved/renamed/re-synced/cleaned up, best-effort
+  // OPFS is evicted — and the browser then fails the <img> with
+  // ERR_FILE_NOT_FOUND. Nothing else notices: matching reads descriptors rather
+  // than pixels, so a long run can finish against images the viewer can no longer
+  // show, and the first symptom is a blank tab.
+  //
+  // Every <img> bound to `img.url` reports its failure here. The OPFS copy is
+  // written at ingest and is the authority, so the first response is to re-create
+  // the URL from it; only when that fails too is the image flagged lost. One heal
+  // attempt per image per session — the fresh URL re-renders the <img>, and a
+  // second failure must land on the flag instead of looping.
+  //
+  // The PROMISE is cached, not just the fact of an attempt: several views can
+  // render one image at once (viewer + metadata table + mask manager), so their
+  // error events arrive together, and a second caller that skipped the in-flight
+  // heal would flag the image as lost while the first is busy repairing it.
+  const urlHeal = new Map() // uuid → Promise<boolean>
+
+  function healImageUrl(img) {
+    let attempt = urlHeal.get(img.uuid)
+    if (!attempt) {
+      attempt = refreshImageUrl(img)
+        .then((healed) => {
+          if (healed) {
+            log(`Image source recovered from project storage: ${img.name} — the file it was `
+              + 'loaded from is no longer readable (moved, renamed, or deleted)', 'warn', 'Images')
+          }
+          return healed
+        })
+        .catch((err) => {
+          log(`Image recovery failed: ${img.name} — ${err?.message ?? err}`, 'error', 'Images')
+          return false
+        })
+      urlHeal.set(img.uuid, attempt)
+    }
+    return attempt
+  }
+
+  // Re-create `url` (and `computeUrl`) from the OPFS copy. Returns false when
+  // there is nothing to heal from, leaving the image untouched.
+  async function refreshImageUrl(img) {
+    const projectId = projects.currentProjectId
+    if (!projectId || !isPersisting()) return false
+
+    // Reading one byte forces the browser to validate the file behind the blob,
+    // so a heal can't hand back a second dead URL that fails on first paint.
+    const readable = async (blob) => {
+      if (!blob) return false
+      try { await blob.slice(0, 1).arrayBuffer(); return true } catch { return false }
+    }
+
+    let displayBlob = null, computeBlob = null
+    if (isTiff(img.name) && nativeTiffDecodeResult() !== true) {
+      // A non-native engine can't decode the raw TIFF, so only the transcode
+      // cache is usable here. Re-transcoding is what reopening the project does;
+      // it isn't worth running from an <img> error handler.
+      ;[displayBlob, computeBlob] = await Promise.all([
+        opfs.loadImageDerivedBlob(projectId, img.uuid, 'display'),
+        opfs.loadImageDerivedBlob(projectId, img.uuid, 'compute'),
+      ])
+      if (!(await readable(displayBlob)) || !(await readable(computeBlob))) return false
+    } else {
+      displayBlob = await opfs.loadImageBlob(projectId, img.uuid).catch(() => null)
+      if (!(await readable(displayBlob))) return false
+      computeBlob = displayBlob
+    }
+
+    const hadSeparateCompute = img.computeUrl && img.computeUrl !== img.url
+    URL.revokeObjectURL(img.url)
+    if (hadSeparateCompute) URL.revokeObjectURL(img.computeUrl)
+    img.url = URL.createObjectURL(displayBlob)
+    img.computeUrl = computeBlob === displayBlob ? img.url : URL.createObjectURL(computeBlob)
+    return true
+  }
+
+  // Called by every <img> that renders `img.url` (viewer, metadata table, image
+  // info, mask manager, auto-mask) from its @error handler.
+  async function reportImageLoadError(id) {
+    const img = imageById(id)
+    // previewPending is the TIFF transcode's own placeholder window: the raw blob
+    // is expected to fail there and the transcode is already on its way.
+    if (!img || img.previewFailed || img.previewPending) return false
+
+    if (await healImageUrl(img)) return true
+
+    // Re-resolve: the image may have been removed, or already flagged by a
+    // sibling view, while the heal attempt ran.
+    const still = imageById(id)
+    if (!still || still.previewFailed) return false
+    still.previewFailed = true
+    still.previewFailReason = 'source-lost'
+    log(`Image unavailable: ${still.name} — the browser can no longer read its pixels, and there `
+      + 'is no usable copy in project storage. Re-add the file to restore it; detection, dense '
+      + 'MVS and orthophoto generation will fail for this image until you do.', 'error', 'Images')
+    return false
   }
 
   // `persist` false updates only the in-memory mask (so undo/redo, the viewer
@@ -1109,6 +1216,7 @@ export const useImagesStore = defineStore('images', () => {
     }
     images.value = []
     selectedId.value = null
+    urlHeal.clear()
     if (n > 0) log(`Session cleared (${n} image${n !== 1 ? 's' : ''} removed)`, 'warn', 'Images')
     if (purge && isPersisting()) sync()
     onCleared?.()
@@ -1125,6 +1233,9 @@ export const useImagesStore = defineStore('images', () => {
     }
     images.value = []
     selectedId.value = null
+    // Fresh URLs from fresh handles — a previous session's heal attempts say
+    // nothing about whether these can be re-read.
+    urlHeal.clear()
 
     const total = records.length
     let done = 0
@@ -1184,6 +1295,12 @@ export const useImagesStore = defineStore('images', () => {
           meta: record.meta,
           sensorId: record.sensorId ?? null,
           loading: false,
+          // Both blobs above are resolved before this object exists, so a
+          // restored image never starts pending — but the fields must be present
+          // for reportImageLoadError to flag one whose source dies later.
+          previewPending: false,
+          previewFailed: false,
+          previewFailReason: null,
           keypoints: [],
           kpStatus: record.kpStatus,
           kpCount: record.kpCount || 0,
@@ -1257,6 +1374,7 @@ export const useImagesStore = defineStore('images', () => {
     selectImage,
     addImages,
     removeImage,
+    reportImageLoadError,
     updateMask,
     updateDepth,
     setFiducialObservation,

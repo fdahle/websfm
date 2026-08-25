@@ -5,6 +5,7 @@ import { depthColor } from '../../core/products/colormap.js'
 import { fitFiducialAffine, mmToScan } from '../../core/sfm/fiducials.js'
 import { clipLineToRect } from '../../core/sfm/gcpGuides.js'
 import { segmentForget } from '../../workers/computeClient.js'
+import { useImagesStore } from '../../stores/useImagesStore.js'
 import { copyToClipboard } from '../../composables/useToasts.js'
 import { useDepthOverlay } from '../../composables/useDepthOverlay.js'
 import { useSmartSelect } from '../../composables/useSmartSelect.js'
@@ -45,6 +46,10 @@ const props = defineProps({
 // mark-fiducial: assign this pixel to a fiducial mark { fidId, px, py }.
 // exit-mask-edit: user closed the mask toolbar (×) — parent owns the maskEdit flag.
 const emit = defineEmits(['update-mask', 'update-depth', 'mark-gcp', 'add-gcp', 'select-gcp', 'delete-gcp', 'mark-fiducial', 'exit-mask-edit', 'exit-gcp-edit'])
+
+// Only for the <img>'s @error: a blob: URL can outlive the file behind it, and
+// the store heals it from OPFS or flags the image (see reportImageLoadError).
+const imagesStore = useImagesStore()
 
 // Ids of GCPs already marked on this image, shown with a dot in the GCP-edit
 // toolbar's target list.
@@ -1278,9 +1283,16 @@ defineExpose({ fit, zoomIn, zoomOut, triggerMaskImport, clearMask, triggerDepthI
         :style="{ transform: `translate(${tx}px, ${ty}px) scale(${scale})` }"
         draggable="false"
         @load="onImgLoad"
+        @error="imagesStore.reportImageLoadError(image.id)"
       />
-      <div v-else-if="image.previewFailed" class="image-pending image-error" title="Preview unavailable — decode failed">
-        Preview unavailable
+      <div
+        v-else-if="image.previewFailed"
+        class="image-pending image-error"
+        :title="image.previewFailReason === 'source-lost'
+          ? 'The file this image was loaded from is no longer readable, and project storage has no usable copy. Re-add the file.'
+          : 'Preview unavailable — decode failed'"
+      >
+        {{ image.previewFailReason === 'source-lost' ? 'Image file no longer available' : 'Preview unavailable' }}
       </div>
       <div v-else class="image-pending" title="Decoding image…">
         <span class="spinner" />
