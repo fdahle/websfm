@@ -1217,6 +1217,21 @@ propagate covariance rather than retaining stale numeric sigmas.
   unknown setting renders as **absent**, never as its default (a digest must not claim
   settings the run didn't use), and a heterogeneous batch says so (`detect.mixed`)
   rather than presenting one image's values as the run's.
+  **The digest is the run's record; `core/sfm/verdict.js` is its alarm — they have
+  different bars and the difference is load-bearing.** The digest prints an observation
+  unconditionally, including when the news is good (a 0% degenerate share, a tight gate);
+  the verdict fires only when something is actionable. That is why verdict's
+  contributing-cause rules (`gate-headroom`, `keypoint-cap`, `cycle-filter-skipped`) are
+  gated on another finding having already fired: each describes a run *shape*, not a
+  defect — a run can saturate the keypoint cap, skip the rotation-cycle filter and leave
+  the track filter inert while still being an excellent reconstruction, and turning that
+  green run yellow is a false alarm. Put a new observation in the digest first; promote it
+  to a verdict rule only once it is shown to *explain* a failure. Related: a threshold
+  duplicated across the two (`KP_CAP_NOTE_PCT`/`KP_CAP_WARN_PCT`,
+  `GATE_HEADROOM_NOTE`/`GATE_HEADROOM_WARN`) must move together, since the digest's ⚠ and
+  the verdict's finding appear on the same screen. These live in their own modules rather
+  than `EVAL_THRESHOLDS` because they are shape/cross-field tests (a ratio between two
+  figures, a share of a population), not the single-value tiles that table colours.
 - Keep the heavy logging style — every derived/auto value gets a log line the user
   can audit. The dev console keeps only a **capped display tail** in memory
   (`useLog` `MAX_BUFFER`), but every line is streamed to an **append-only OPFS

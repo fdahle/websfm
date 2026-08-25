@@ -239,3 +239,81 @@ describe('digestToMarkdown — baseline record', () => {
     expect(digestToMarkdown(buildProjectDigest(INPUT))).not.toContain('## Run config')
   })
 })
+
+// ── Run-shape observations (2026-08-18) ────────────────────────────────────────
+// Three figures that decided a real diagnosis but were previously either unrecorded
+// or split across sections the reader had to join by hand. The digest is the run's
+// *record*, so unlike the verdict's contributing-cause rules these print
+// unconditionally — including when the news is good (0 degenerate, tight gate).
+// Modelled on the DJI run: 5472px sensor detected at 2400 (×2.28), cap saturated,
+// planar nadir geometry, and a track filter well above the observed residuals.
+const DJI = {
+  ...B4,
+  snapshot: { reproj: { median: 0.86, p95: 4.0, n: 800000 } },
+  detect: {
+    detector: 'sift', images: 127, maxDim: 2400, maxDimMode: 'absolute',
+    maxKeypoints: 10000, contrastThreshold: 0.01, tiling: 'off',
+    medianKeypoints: 10000, medianDetectScale: 0.4386, kpCapHitPct: 100, mixed: false,
+  },
+  matchRun: {
+    ...B4.matchRun, nPairs: 779, accepted: 779, rejected: 0, skipped: 0, gated: 0,
+    subsetGateActive: false, meanInlierRatio: 0.98, degenerate: 623, degenerateOf: 779,
+  },
+  summary: {
+    ...B4.summary,
+    gates: {
+      detectScaleFactor: 2.28, medianScale: 0.4386, clamped: false, mixed: false,
+      reprjThresholdPx: 9.12, filterMaxReprojPx: 9.12,
+    },
+  },
+}
+
+describe('digestToMarkdown — run-shape observations', () => {
+  const md = digestToMarkdown(buildProjectDigest(DJI))
+
+  it('flags a saturated keypoint cap in the detect config', () => {
+    expect(md).toContain('100% of images at the keypoint cap ⚠')
+  })
+
+  it('does not flag a cap that most images stayed under', () => {
+    const ok = digestToMarkdown(buildProjectDigest({
+      ...DJI, detect: { ...DJI.detect, kpCapHitPct: 12 },
+    }))
+    expect(ok).toContain('12% of images at the keypoint cap')
+    expect(ok).not.toContain('keypoint cap ⚠')
+  })
+
+  it('puts the resolved gate next to the residuals it was applied to', () => {
+    // fmtNum prints integers bare, module-wide — 4.0 renders as "4px", not "4.00px".
+    expect(md).toContain('vs observed p95 4px → 2.3× headroom ⚠ the track filter is effectively inactive')
+  })
+
+  it('reports headroom without the warning when the gate actually bites', () => {
+    const tight = digestToMarkdown(buildProjectDigest({
+      ...DJI,
+      summary: { ...DJI.summary, gates: { ...DJI.summary.gates, filterMaxReprojPx: 4.4 } },
+    }))
+    expect(tight).toContain('1.1× headroom')
+    expect(tight).not.toContain('effectively inactive')
+  })
+
+  it('reports the H/F-degenerate share of accepted pairs', () => {
+    expect(md).toContain('H/F-degenerate (planar / pure rotation): 623/779 accepted (80%)')
+  })
+
+  it('reports a zero degenerate share rather than omitting it', () => {
+    const clean = digestToMarkdown(buildProjectDigest({
+      ...DJI, matchRun: { ...DJI.matchRun, degenerate: 0 },
+    }))
+    expect(clean).toContain('0/779 accepted (0%)')
+  })
+
+  // Older runs recorded none of these three. Absent must stay absent — a digest that
+  // printed "0%" for an unmeasured share would be claiming a measurement.
+  it('omits every new line when the run predates the measurements', () => {
+    const old = digestToMarkdown(buildProjectDigest(B4))
+    expect(old).not.toContain('keypoint cap')
+    expect(old).not.toContain('headroom')
+    expect(old).not.toContain('H/F-degenerate')
+  })
+})

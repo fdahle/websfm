@@ -7,8 +7,17 @@
 //
 // Pure rule engine: plain snapshot in, plain verdict out (no Vue/Pinia/DOM), so F8
 // and a future "Run All" summary can both reuse it. It colours off the SAME single
-// `EVAL_THRESHOLDS` table the hub uses (health.js) — the only verdict-specific number
-// is the residual-tail ratio below, which is a *shape* test no single threshold sees.
+// `EVAL_THRESHOLDS` table the hub uses (health.js); the handful of constants below are
+// verdict-only because each is a *shape* or *cross-field* test that no single-value
+// health threshold can see (a ratio between two figures, or a share of a population).
+//
+// The last three rules are **contributing-cause** rules: they explain a finding that
+// already fired rather than raising one of their own, and are deliberately silent
+// otherwise. A run can saturate the keypoint cap, skip the rotation-cycle filter and
+// leave the track filter inert while still being a perfectly good reconstruction —
+// turning that green run yellow would be a false alarm. The unconditional record of
+// all three lives in the digest (core/eval/summaryDigest.js), which is the run's
+// *record*; the verdict is its *alarm*, and the two have different bars.
 
 import { EVAL_THRESHOLDS, classify } from '../eval/health.js'
 
@@ -24,6 +33,29 @@ const REPROJ_TAIL_BAD = 5
 // geometrically thin block), but a run is only "weakly constrained enough to act on"
 // once it drops under ~20% — B1's 9.5% was the pathological end.
 const TRACK3_ACT_PCT = 20
+
+// Track-filter gate ÷ observed reprojection p95. The gate is denominated in DETECTION
+// pixels and resolved to native by the detection scale (core/scaleContext.js), so a low
+// maxDim silently multiplies it: a 5472px sensor detected at 2400 gives ×2.28, putting a
+// 4 detect-px filter at 9.12 native px against a 4.0 px p95. Past ~2× the gate sits above
+// essentially every residual and the filter removes nothing, so a reprojection tail
+// survives by construction rather than because the geometry is bad. Mirrored as
+// GATE_HEADROOM_NOTE in summaryDigest.js.
+const GATE_HEADROOM_WARN = 2
+
+// Share of images at the keypoint cap above which the cap — not contrastThreshold — is
+// what selected the keypoints. It selects by DoG response, which biases toward
+// high-contrast texture and away from spatial uniformity, so a saturated cap is a
+// plausible contributing cause of an uneven per-image residual spread. Mirrored as
+// KP_CAP_NOTE_PCT in summaryDigest.js.
+const KP_CAP_WARN_PCT = 90
+
+// Share of accepted pairs flagged H/F-degenerate above which the match graph's geometry
+// is substantially planar / rotation-dominated. F is not uniquely determined on planar
+// correspondences, so the essential decomposition the rotation-cycle filter depends on
+// returns an arbitrary member of a family — which is the competing explanation for a
+// filter abort, against "the intrinsics were wrong".
+const DEGENERATE_PAIR_WARN_PCT = 50
 
 const worst = (a, b) => (a === 'red' || b === 'red' ? 'red' : a === 'yellow' || b === 'yellow' ? 'yellow' : 'green')
 
@@ -48,6 +80,14 @@ const px = (v) => (v == null ? '—' : `${v.toFixed(1)} px`)
  * @property {string} [selfCalResolved] actual sparse self-cal mode ('none', 'f,k1', …)
  * @property {number} [separateSecondaryModels] usable secondary models that could not be aligned
  * @property {Array<{name?: string, reason?: string}>} [unregistered] names to list in the fix
+ * @property {number} [filterMaxReprojPx] resolved track-filter gate, native px (summary.gates)
+ * @property {number} [detectScaleFactor] native-px ÷ detection-px factor (summary.gates)
+ * @property {number} [maxDim] detection long-edge cap, px (detectConfig)
+ * @property {number} [kpCapHitPct] share of images that hit the keypoint cap, %
+ * @property {number} [maxKeypoints] the keypoint cap itself (for the fix text)
+ * @property {boolean} [cycleFilterAborted] the rotation-cycle filter skipped itself
+ * @property {number} [cycleMedianTriErrDeg] its measured median triangle cycle error
+ * @property {number} [degeneratePairPct] share of accepted pairs flagged H/F-degenerate, %
  */
 
 /**
@@ -160,6 +200,62 @@ export function buildVerdict(snapshot = {}) {
     add(depthLevel, 'depth-coverage',
       `Depth maps kept only ${pct(s.depthCoveragePct)} of pixels on average.`,
       'Increase the source-view count and check the intrinsics are right (a wrong focal wrecks depth); raising depth-map quality also helps on weak texture.')
+  }
+
+  // ── Contributing causes ────────────────────────────────────────────────────
+  // Each of the following explains a finding that already fired. See the header: they
+  // are silent on an otherwise-clean run, because none of them is a defect on its own.
+  const fired = (...codes) => findings.some((f) => codes.includes(f.code))
+  const residualFinding = () => fired('reprojection-tail', 'distortion', 'reprojection')
+  const structuralFinding = () => fired(
+    'reprojection-tail', 'distortion', 'reprojection', 'registration', 'weak-geometry')
+
+  // 9. Inert track filter. Ordered directly after the residual rules because when both
+  //    fire this is the actionable one: the tail was never filtered, so "the residuals
+  //    are bad" and "nothing removed the bad residuals" are the same observation.
+  if (p95 != null && p95 > 0 && s.filterMaxReprojPx != null && residualFinding()) {
+    const headroom = s.filterMaxReprojPx / p95
+    if (headroom >= GATE_HEADROOM_WARN) {
+      const scale = s.detectScaleFactor
+      const scaleNote = scale != null && scale > 1.2
+        ? ` The gate is set in detection pixels and scaled ×${scale.toFixed(2)} to native, `
+          + `because detection ran at maxDim ${s.maxDim ?? '?'} on a larger sensor — `
+          + 'raising maxDim shrinks the factor and tightens every gate with it.'
+        : ''
+      add('yellow', 'gate-headroom',
+        `The track filter gate (${px(s.filterMaxReprojPx)}) sits ${headroom.toFixed(1)}× above the `
+          + `observed p95 (${px(p95)}), so it removed essentially nothing.`,
+        `The residual tail above survived the filter by construction, not because the geometry is sound.${scaleNote}`
+          + ' Raise detection resolution or lower filterMaxReprojDetectPx, then re-run and compare the tail.')
+    }
+  }
+
+  // 10. Saturated keypoint cap.
+  if (s.kpCapHitPct != null && s.kpCapHitPct >= KP_CAP_WARN_PCT && structuralFinding()) {
+    add('yellow', 'keypoint-cap',
+      `${pct(s.kpCapHitPct)} of images hit the ${s.maxKeypoints ?? 'keypoint'} keypoint cap.`,
+      'The cap, not contrastThreshold, is selecting the keypoints, and it selects by response — '
+        + 'biasing toward high-contrast texture and away from even spatial coverage. Raise maxKeypoints, '
+        + 'or raise contrastThreshold so the threshold does the selecting.')
+  }
+
+  // 11. Rotation-cycle filter skipped. Reported with the degeneracy share because that
+  //     share is what distinguishes its two possible causes, and they have opposite fixes.
+  if (s.cycleFilterAborted && structuralFinding()) {
+    const dg = s.degeneratePairPct
+    const planar = dg != null && dg >= DEGENERATE_PAIR_WARN_PCT
+    add('yellow', 'cycle-filter-skipped',
+      `The rotation-cycle filter skipped itself — median triangle cycle error `
+        + `${s.cycleMedianTriErrDeg != null ? `${s.cycleMedianTriErrDeg.toFixed(0)}°` : 'above its ceiling'}`
+        + `, so false pairs were not screened before SfM.`,
+      planar
+        ? `${pct(dg)} of accepted pairs are H/F-degenerate (planar scene or rotation-dominated motion), `
+          + 'where the fundamental matrix is not uniquely determined and the filter\'s pairwise rotations '
+          + 'are meaningless. This is expected on nadir aerial blocks and is not fixable by calibration; '
+          + 'rely on the PnP gates downstream.'
+        : 'With few degenerate pairs the likelier cause is wrong intrinsics (focal or lens distortion) '
+          + 'feeding the essential decomposition. Check the fx trajectory and the composed radial terms; '
+          + 'a correct sensor definition lets the filter run.')
   }
 
   return finalize(findings)

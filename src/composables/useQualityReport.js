@@ -199,6 +199,15 @@ export function useQualityReport() {
     const first = recorded[0]?.detectSettings ?? null
     const keys = ['maxDim', 'maxDimMode', 'maxKeypoints', 'contrastThreshold', 'tiling']
     const mixed = !!first && recorded.some((im) => keys.some((k) => im.detectSettings[k] !== first[k]))
+    // Share of images that hit the keypoint cap. When this is high the cap — not
+    // `contrastThreshold` — is what selected the keypoints, and it selects by response,
+    // which biases toward high-contrast texture and away from spatial uniformity. The
+    // digest prints medianKeypoints and maxKeypoints side by side, but "they are equal"
+    // is the observation that matters and nobody reads two numbers for it. Only
+    // computable per-image (each image's own recorded cap), so a mixed batch is still
+    // counted correctly.
+    const capped = recorded.filter((im) =>
+      im.detectSettings.maxKeypoints > 0 && (im.kpCount ?? 0) >= im.detectSettings.maxKeypoints)
     return {
       detector: withKp[0].detector ?? 'sift',
       images: withKp.length,
@@ -208,6 +217,8 @@ export function useQualityReport() {
         : {}),
       medianKeypoints: med(withKp.map((im) => im.kpCount ?? null)),
       medianDetectScale: med(withKp.map((im) => im.detectScale ?? null)),
+      // null (not 0) when no image carries a detect record — "unknown", never "none".
+      kpCapHitPct: recorded.length ? (100 * capped.length) / recorded.length : null,
       mixed,
     }
   })
@@ -255,6 +266,19 @@ export function useQualityReport() {
         selfCalResolved: recon.summary?.selfCal?.resolved ?? null,
         separateSecondaryModels: recon.summary?.secondaryRecovery?.separate?.length ?? 0,
         unregistered,
+        // Contributing-cause inputs (see verdict.js): the resolved gates and the
+        // detection/matching shape behind them. All optional — an older run that
+        // recorded none of these simply skips those rules.
+        filterMaxReprojPx: recon.summary?.gates?.filterMaxReprojPx ?? null,
+        detectScaleFactor: recon.summary?.gates?.detectScaleFactor ?? null,
+        maxDim: detectConfig.value?.maxDim ?? null,
+        maxKeypoints: detectConfig.value?.maxKeypoints ?? null,
+        kpCapHitPct: detectConfig.value?.kpCapHitPct ?? null,
+        cycleFilterAborted: !!recon.summary?.cycleFilter?.aborted,
+        cycleMedianTriErrDeg: recon.summary?.cycleFilter?.medianTriErrDeg ?? null,
+        degeneratePairPct: matchesStore.matchRun?.degenerateOf
+          ? (100 * matchesStore.matchRun.degenerate) / matchesStore.matchRun.degenerateOf
+          : null,
       })
       : null
 
