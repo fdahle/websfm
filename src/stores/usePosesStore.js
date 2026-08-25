@@ -5,6 +5,7 @@ import { ensureProjection, metresPerCrsUnit, metresToCrsUnits, transform } from 
 import * as opfs from '../utils/opfs.js'
 import { registerProjectStore } from './projectStores.js'
 import { makeNameResolver } from '../core/io/nameMatch.js'
+import { pluralize } from '../core/textFormat.js'
 import { useImagesStore } from './useImagesStore.js'
 import { useProjectsStore } from './useProjectsStore.js'
 import { exifPoseFromMetadata, projectExifPose } from '../core/io/exifPose.js'
@@ -277,7 +278,7 @@ export const usePosesStore = registerProjectStore(defineStore('poses', () => {
       changed = true
     }
     if (changed) await save()
-    if (added) log(`EXIF GPS: ${added} camera position(s) added in ${projectCrs}`, 'success', 'Pose')
+    if (added) log(`EXIF GPS: ${pluralize(added, 'camera position')} added in ${projectCrs}`, 'success', 'Pose')
     return added
   }
 
