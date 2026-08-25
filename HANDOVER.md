@@ -1,14 +1,28 @@
 # HANDOVER — the record: baselines + done log
 
-Roles: `CLAUDE.md` = architecture/conventions, `TODO.md` = the plan (all open
-work), this file = the **record** — measured baselines that future runs are
-compared against, and a reverse-chronological done log. When an item ships,
-move it from TODO.md to one done-log line here (date · what · where it lives).
+Roles: `CLAUDE.md` = architecture/conventions, `METHODS.md` = the science,
+`TODO.md` = the plan (all open work), `VERIFICATION.csv` = the manual-check
+register, and this file = the **record** — measured baselines that future runs are
+compared against, and a reverse-chronological done log. When an item ships, move it
+from TODO.md to one done-log line here (date · what · where it lives). When a
+`VERIFICATION.csv` row produces a *number* (throughput, camera counts, cull
+percentages, storage per image), that number belongs in §Baselines below — the CSV
+records that the check was done, this file records what it measured.
 Git history holds the detail.
 
 ---
 
 ## Baselines (before/after yardsticks)
+
+| id | what | date | still the current yardstick for |
+| --- | --- | --- | --- |
+| **B4** | South Building, 128 images, two front ends | 2026-07-22 | init-pair selection, self-cal on a known focal (fx ≈ 2566), dense throughput |
+| **B3** | the 2-camera registration stall, 4 runs | 2026-07-16 | the registration/rescue work (RS); superseded for B1 only when SFM-03/04 are re-run |
+| **B1** | Metashape building set, 50 images | 2026-07-04 | the R-track acceptance targets (pre-BA p95, ≥3-view share, bridge pairs) |
+| **B0** | CA213732V… aerial film strip, 5 images | 2026-07-03 | intrinsics-limited film behaviour, dense cost medians, fusion kept-% |
+| **B0-ingest** | TIFF ingest per image | 2026-07-16 | ingest cost; next lever is the canvas PNG encode |
+| **B-detect** | SIFT detection throughput | 2026-07-17 | the detection pyramid + the wasted-descriptor finding (P10) |
+| **B-mesh** | screened-Poisson meshing | 2026-08-11 | meshing cost per depth; the finest-layer solve is the remaining pole |
 
 ### B4 — South Building, 128 images (2026-07-22, two runs) — supersedes the 86-camera SB number
 Two front ends on the same set: **SIFT/brute-force** (17:27–17:38 console log, dense
@@ -236,6 +250,107 @@ fiducials; self-calibration (A2) + fiducials (F4) are the code-side support.
 ---
 
 ## Done log (most recent first)
+
+*Entries often name a `PLAN-*.md` / `plan-*.md` file. Those are deleted when their
+feature ships (the documented rule), so older links point at files that now exist
+only in git history — that is expected, not rot. Live plans are in `docs/planning/`.*
+
+- **2026-08-19 · Up-front mobile-device notice.** websfm is a desktop app (WASM compute,
+  OPFS projects, ribbon+sidebar+canvas layout) with no mobile story, so a phone/tablet
+  user now gets a blocking acknowledgement before anything else:
+  `components/layout/MobileWarning.vue` over `composables/useMobileWarning.js`, the same
+  shared-ref + one-localStorage-key shape as `useBrowserWarning` (so the modal's confirm
+  and the Settings ▸ Display toggle can't drift). Detection is of the **device, not the
+  window** — `userAgentData.mobile`, then UA tokens, then the iPadOS `Macintosh` +
+  `maxTouchPoints` case, then coarse-pointer/no-hover media queries — because a narrow
+  desktop window must not raise a blocking dialog. Deliberately *not* `ModalShell`:
+  that shell closes on Escape and on a backdrop click, and this gate must be dismissed
+  only by its explicit button (z-index 9500, above the BrowserWarning toast). Manual
+  check owed: VERIFICATION.csv `UI-16`.
+
+- **2026-08-18 · Digest reports three run-shape figures; verdict gains contributing-cause
+  rules.** A 127-image DJI nadir run came back yellow on a 4.7× reprojection tail whose
+  cause could not be read off the digest: the three figures that explained it were either
+  unrecorded or split across sections. Added, all *reported* (no new measurement): the
+  **H/F-degenerate share of accepted pairs** (`useMatchesStore` tallied it per pair but
+  only ever logged it at debug — counted over accepted pairs, the exact population where
+  `hSkipBelow` let H run); the **keypoint-cap hit share** (`useQualityReport.detectConfig`
+  — at 100% the cap, not `contrastThreshold`, selected the keypoints, by response, which
+  biases against spatial uniformity); and the **track-filter gate beside the observed
+  p95** it was applied to, since a 9.12 px gate over a 4.0 px p95 removed nothing and the
+  two numbers previously sat in different sections. `core/sfm/verdict.js` turns each into
+  a rule (`gate-headroom` / `keypoint-cap` / `cycle-filter-skipped`), all three
+  **contributing-cause**: they explain a finding that already fired and are silent
+  otherwise, because a run can do all three and still be a good reconstruction. The
+  cycle-filter rule reads the degeneracy share to pick between the abort's two causes,
+  which have opposite fixes. Evidence value: this run closes the "move it after the
+  distortion fold" option in TODO ▸ RS — see that entry.
+  Where: `stores/useMatchesStore.js`, `composables/useQualityReport.js`,
+  `core/eval/summaryDigest.js`, `core/sfm/verdict.js` (+ tests for the last two).
+
+- **2026-08-18 · OPFS writes serialize per file ("Failed to create swap file").**
+  A folder-backed project reported `Pose save failed — Failed to execute
+  'createWritable' on 'FileSystemHandle': Failed to create swap file` right after
+  an EXIF-GPS sync. `createWritable()` stages into a sibling `<name>.crswap` and
+  renames on close, so two writables on one file collide on that name — the same
+  race `useSensorsStore` had already patched locally for sensors.json, hit here
+  because `usePosesStore.restore` fires an un-awaited `save()` from
+  `resolveImageMatches` and then awaits another from `syncExifPoses`, while the
+  EXIF watcher fires a third. Folder storage loses the race reliably where OPFS
+  won it by luck: real-disk latency widens the window. Fixed at the layer that
+  owns the invariant — every write in `utils/opfs.js` now goes through
+  `writeFileIn`, a per-path queue (append offsets are read inside the lock, so
+  concurrent `appendLog` calls can no longer overwrite each other), which covers
+  every project file rather than the two stores that had been patched. Poses
+  additionally got the coalescing sensors/images already have. `src/utils/opfs.test.js`
+  is new: a fake FSA backend that throws the real swap-file error reproduces the
+  failure with the queue bypassed and passes with it. `core/crs.js`'s
+  fetched-proj4-def cache had its own hand-rolled `createWritable` with the same
+  race (two unknown codes resolving at once) behind a bare `catch {}` that hid it;
+  it now goes through `opfs.readAppJson`/`writeAppJson`. The only remaining
+  `createWritable` outside opfs.js is the archive sink in `utils/projectFile.js`,
+  which has no second writer. Also `core/textFormat.js` (new): `pluralize`/
+  `nounFor`, in core so core call sites can use it — "1 camera position(s)" was
+  the reported symptom, ~120 sibling strings are TODO ▸ LG.
+- **2026-08-18 · Image sources that die mid-session are detected, healed, and
+  reported.** A deployed run produced `GET blob:… net::ERR_FILE_NOT_FOUND` for some
+  images once matching finished. Cause: a blob URL is a handle to a *file*, not a
+  copy of the bytes — an in-session image's `url` points at the user's original file
+  on disk (`utils/image.js`) and a restored one's at the OPFS copy
+  (`opfs.loadImageBlob` → `getFile()`), and both are re-validated on every read.
+  Matching never touches pixels, so it neither caused nor noticed the loss; it just
+  supplied the long window. Nothing detected it either — there was not one `@error`
+  handler in the app, and `previewFailed` had a single writer (the TIFF transcode
+  catch). Now: all five `<img>`s bound to `img.url` route `@error` to
+  `useImagesStore.reportImageLoadError`, which re-creates the URL from the OPFS copy
+  (one shared attempt per image per session, validated by a 1-byte read so a heal
+  can't return a second dead URL) and only flags `previewFailed` +
+  `previewFailReason: 'source-lost'` when there is nothing to heal from — sidebar ⚠,
+  viewer/table/info text, and a log line naming what will now fail. Separately,
+  `opfs.ensureDurableStorage()` is requested once on project create/open
+  (`useProjectsStore`), so OPFS is no longer best-effort/evictable, with the verdict
+  logged. Verification rows STO-0x.
+- **2026-08-17 · Documentation consolidation + `VERIFICATION.csv`.** The four docs had
+  accumulated the failure mode they were meant to prevent: TODO.md was 1042 lines of
+  which most of §Now was *shipped* work carrying browser-verification checklists, the
+  same checks were restated in the plan files, and seven cross-referenced plan files
+  no longer existed. Split by role instead: **`VERIFICATION.csv`** (new, repo root) is
+  now the single register of every check this environment cannot run — 105 rows across
+  release / sparse / dense / products / interop / storage / UI / fiducials / reference
+  data / GCP / detection, each with dataset, browser, pass criteria, source doc and
+  empty status/result/date columns. TODO.md keeps only open *work* (1042 → 556 lines):
+  each shipped-but-unverified item collapsed to its conditional follow-ups (the ones
+  that need a measurement before a knob moves) plus a pointer to its rows. Deleted as
+  shipped: W0/W1 (committed since 2026-07-07), Q ▸ P0.2 (self-cal reached k2/k3 in
+  WS2), A5 (shipped as Stage A′), EX ▸ A-4, MC Phase 0, G2, DR, and the F3/F7/F8/F12
+  entries. Docs rule updated in CLAUDE.md (the register + the plan-file lifecycle);
+  HANDOVER gained a baselines index and this note; METHODS gained §8.1 (the ortho
+  reprojects onto a *surface* — DEM / mesh / plane — which was a method change never
+  written up) and lost two stale claims (self-cal row in the comparison table, the
+  glossary path). Crate count corrected to six (lazcodec) in CLAUDE.md + README.
+  `docs/feature-matching-backends.md` moved to `docs/planning/` with a status header;
+  every live plan file now opens with status / open-work pointer / owed rows.
+  No code changed.
 
 - **2026-08-11 · Screened-Poisson meshing made usable (7.4× end to end, identical
   output).** Meshing was effectively unusable at the default depth 8 — see the B-mesh

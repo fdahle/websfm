@@ -957,6 +957,25 @@ must stay < 5e-3).
 4. **Georeference** (optional, §6) — when present, products carry CRS coordinates
    and true scale; otherwise they live in the local frame.
 
+### 8.1 The ortho reprojects onto a *surface*, and the DEM is only one of them
+
+`orthorectify` walks a height grid (`{width, height, gsd, originX, originY, data,
+mask}`); which surface fills that grid is a user choice (Metashape's *Build
+Orthomosaic ▸ Surface*), built by `core/products/surface.js`:
+
+- **DEM** — the binned/IDW-filled height grid above. Every DEM hole is a transparent
+  ortho cell, which is what makes a sparse-coverage ortho look patchy.
+- **Mesh** (`meshSurface`) — a from-above z-buffer rasterisation of the Poisson
+  triangles. Watertight ⇒ a dense mask, so it is the cure for that patchiness.
+- **Plane** (`fitPlane`/`planeSurface`) — a robust least-squares plane through the
+  cloud, for genuinely flat scenes.
+
+`resampleSurface` decouples the ortho's GSD from the surface's: a coarse surface
+reprojects fine, while the ortho wants image detail. Consequences worth stating:
+an ortho therefore **carries its own geotransform** (`gsd`/`originX`/`originY`/
+`frame`/`crs`) rather than borrowing the DEM's, and rebuilding a DEM only
+invalidates an ortho whose surface *was* that DEM.
+
 Exports: PLY, model JSON, DEM GeoTIFF/.asc, ortho GeoTIFF/PNG+.wld, mesh PLY/GLB
 (`exporters.js`, `geotiff.js`).
 
@@ -1012,7 +1031,7 @@ products directly. This is a first-class concern, not a post-export reprojection
 | SfM type | incremental | incremental | same family |
 | Resection | **P3P Lambda-Twist** + MSAC + GN | P3P + RANSAC | |
 | BA | LM + Schur + adaptive Huber (from scratch) | LM + Schur (Ceres) | no external solver |
-| Self-cal | shared focal scale / cx,cy / k1 | full intrinsic groups | intentionally modest |
+| Self-cal | shared f / cx,cy / k1,k2,k3, staged by model size, folded into the keypoints | full intrinsic groups | bitmask-selected; on by default (`auto`) |
 | Distortion | Brown, removed at ingest | Brown, in BA | we stay pinhole downstream |
 | Dense | PatchMatch MVS (CPU + WebGPU) | PatchMatch MVS | GPU path is WGSL |
 | Georef | Horn 7-param + camera/GCP-constrained BA | model_aligner / GCP | |
@@ -1063,11 +1082,11 @@ exist to tell the user *where* a reconstruction is weak.
 - Matching verification: `src/core/features/verify.js`
 - Georef: `src/core/products/georef.js`; GCP triangulation: `gcpTriangulation.js`
 - Dense: `src/core/dense/mvs.js`, `crates/reconstruction/src/mvs.rs`, `workers/gpu/`
-- Products: `src/core/products/{projection,dem,ortho}.js`
+- Products: `src/core/products/{projection,dem,ortho,surface}.js`
 - Mesh (screened Poisson): `src/core/products/mesh.js`, `crates/mesh/` (vendored
   `poisson_reconstruction` under `crates/mesh/vendor/`)
 - Tunable knobs & their rationale: `src/core/defaults.user.js`, `src/core/tuning.js`
 
 *In-app glossary*: many of these terms also have cross-linked explanations under
-`src/help/**` surfaced in the UI — that content is user-facing; this file is the
-developer/colleague-facing method reference.
+`src/glossary/**` (loader/renderer in `src/core/help/`), surfaced in the UI — that
+content is user-facing; this file is the developer/colleague-facing method reference.
