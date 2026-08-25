@@ -17,18 +17,67 @@ async function readJson(dir, filename) {
   }
 }
 
+// ── Serialized writes ─────────────────────────────────────────────────────────
+// `createWritable()` does not write in place: Chromium stages the bytes in a
+// sibling `<name>.crswap` file and renames it over the target on close(). Two
+// writables open on the SAME file therefore collide on that one swap name, and
+// the loser throws **"Failed to create swap file"** — reported from a
+// folder-backed project on 2026-08-18, where the slower real-disk I/O widens the
+// overlap window that OPFS usually wins by luck.
+//
+// Stores coalesce their own writes for their own reasons (useImagesStore.sync,
+// useSensorsStore.save: fewer redundant rewrites), but the invariant is a
+// property of this layer, not of any one store — a store cannot know that
+// another one is mid-write, and every project JSON has call sites that can
+// overlap. So EVERY write in this module goes through writeFileIn, which queues
+// per file: writes to one path run in order, different paths still run in
+// parallel.
+//
+// The key is `<containing dir name>/<filename>` — handles are re-created per
+// call, so they cannot be compared, and this is stable for both OPFS and picked
+// folders. Two projects with the same directory name would over-serialize, which
+// costs nothing (only one project is open at a time) and is never wrong.
+const fileLocks = new Map() // key → promise resolving when the queued write settles
+
+async function withFileLock(key, fn) {
+  const prev = fileLocks.get(key)
+  // Run regardless of how the predecessor settled: a queue must not cancel the
+  // writes behind a failed one.
+  const run = prev ? prev.then(() => fn(), () => fn()) : fn()
+  const tail = run.then(() => {}, () => {})
+  fileLocks.set(key, tail)
+  try {
+    return await run
+  } finally {
+    // Only the tail clears the entry, so a write that queued behind us keeps the
+    // chain alive (and the map doesn't grow without bound).
+    if (fileLocks.get(key) === tail) fileLocks.delete(key)
+  }
+}
+
+/**
+ * Write one file, serialized against every other write to the same path.
+ * `data` null ⇒ create/truncate only. `append` seeks to the current end INSIDE
+ * the lock — reading the size outside it is the same race one level up (two
+ * appends would compute the same offset and one would overwrite the other).
+ */
+async function writeFileIn(dir, filename, data, { append = false } = {}) {
+  return withFileLock(`${dir.name}/${filename}`, async () => {
+    const fh = await dir.getFileHandle(filename, { create: true })
+    const size = append ? (await fh.getFile()).size : 0
+    const writable = await fh.createWritable(append ? { keepExistingData: true } : undefined)
+    if (append) await writable.seek(size)
+    if (data != null) await writable.write(data)
+    await writable.close()
+  })
+}
+
 async function writeJson(dir, filename, data) {
-  const fh = await dir.getFileHandle(filename, { create: true })
-  const writable = await fh.createWritable()
-  await writable.write(JSON.stringify(data))
-  await writable.close()
+  await writeFileIn(dir, filename, JSON.stringify(data))
 }
 
 async function writeBin(dir, filename, buffer) {
-  const fh = await dir.getFileHandle(filename, { create: true })
-  const writable = await fh.createWritable()
-  await writable.write(buffer)
-  await writable.close()
+  await writeFileIn(dir, filename, buffer)
 }
 
 async function readBin(dir, filename) {
@@ -110,6 +159,23 @@ export async function readIndex() {
 export async function writeIndex(data) {
   const root = await getRoot()
   await writeJson(root, 'index.json', data)
+}
+
+// ── App-level (non-project) JSON ──────────────────────────────────────────────
+// Files in the `websfm/` root that belong to the installation rather than to a
+// project — today just `core/crs.js`'s fetched-proj4-definition cache. Exposed so
+// that cache goes through the same per-path write queue as everything else
+// instead of hand-rolling its own createWritable (which raced itself whenever two
+// unknown CRS codes resolved at once, and swallowed the swap-file error).
+
+export async function readAppJson(filename) {
+  const root = await getRoot()
+  return readJson(root, filename)
+}
+
+export async function writeAppJson(filename, data) {
+  const root = await getRoot()
+  await writeJson(root, filename, data)
 }
 
 // ── Project ───────────────────────────────────────────────────────────────────
@@ -209,10 +275,7 @@ export async function writeFileAt(dirHandle, relPath, data) {
   }
   let dir = dirHandle
   for (const part of parts.slice(0, -1)) dir = await dir.getDirectoryHandle(part, { create: true })
-  const fh = await dir.getFileHandle(parts[parts.length - 1], { create: true })
-  const writable = await fh.createWritable()
-  await writable.write(data)
-  await writable.close()
+  await writeFileIn(dir, parts[parts.length - 1], data)
 }
 
 export async function readJsonAt(dirHandle, filename) {
@@ -260,10 +323,7 @@ export async function measureTree(dirHandle) {
 
 export async function saveImage(projectId, uuid, file) {
   const dir = await getSubDir(projectId, 'images')
-  const fh = await dir.getFileHandle(uuid, { create: true })
-  const writable = await fh.createWritable()
-  await writable.write(file)
-  await writable.close()
+  await writeFileIn(dir, uuid, file)
 }
 
 export async function loadImageBlob(projectId, uuid) {
@@ -292,10 +352,7 @@ async function derivedName(uuid, kind) {
 
 export async function saveImageDerived(projectId, uuid, kind, blob) {
   const dir = await getSubDir(projectId, 'images-derived')
-  const fh = await dir.getFileHandle(await derivedName(uuid, kind), { create: true })
-  const writable = await fh.createWritable()
-  await writable.write(blob)
-  await writable.close()
+  await writeFileIn(dir, await derivedName(uuid, kind), blob)
 }
 
 export async function loadImageDerivedBlob(projectId, uuid, kind) {
@@ -326,10 +383,7 @@ export async function saveKeypoints(projectId, uuid, keypoints) {
     buf[o + 3] = kp.ny; buf[o + 4] = kp.scale; buf[o + 5] = kp.response
   })
   const dir = await getSubDir(projectId, 'keypoints')
-  const fh = await dir.getFileHandle(uuid + '.bin', { create: true })
-  const writable = await fh.createWritable()
-  await writable.write(buf.buffer)
-  await writable.close()
+  await writeFileIn(dir, uuid + '.bin', buf.buffer)
 }
 
 export async function loadKeypoints(projectId, uuid) {
@@ -369,10 +423,7 @@ export async function saveColors(projectId, uuid, keypoints) {
     if (c) { buf[i * 3] = c[0]; buf[i * 3 + 1] = c[1]; buf[i * 3 + 2] = c[2] }
   })
   const dir = await getSubDir(projectId, 'keypoint_colors')
-  const fh = await dir.getFileHandle(uuid + '.bin', { create: true })
-  const writable = await fh.createWritable()
-  await writable.write(buf.buffer)
-  await writable.close()
+  await writeFileIn(dir, uuid + '.bin', buf.buffer)
 }
 
 export async function loadColors(projectId, uuid) {
@@ -396,10 +447,7 @@ export async function loadColors(projectId, uuid) {
 
 export async function saveDescriptors(projectId, uuid, descriptors) {
   const dir = await getSubDir(projectId, 'descriptors')
-  const fh = await dir.getFileHandle(uuid + '.bin', { create: true })
-  const writable = await fh.createWritable()
-  await writable.write(descriptors.buffer)
-  await writable.close()
+  await writeFileIn(dir, uuid + '.bin', descriptors.buffer)
 }
 
 export async function loadDescriptors(projectId, uuid) {
@@ -477,10 +525,7 @@ export async function saveMask(projectId, uuid, dataUrl) {
   const res = await fetch(dataUrl)
   const blob = await res.blob()
   const dir = await getSubDir(projectId, 'masks')
-  const fh = await dir.getFileHandle(uuid + '.png', { create: true })
-  const writable = await fh.createWritable()
-  await writable.write(blob)
-  await writable.close()
+  await writeFileIn(dir, uuid + '.png', blob)
 }
 
 export async function loadMaskDataUrl(projectId, uuid) {
@@ -513,10 +558,7 @@ export async function saveDepth(projectId, uuid, dataUrl) {
   const res = await fetch(dataUrl)
   const blob = await res.blob()
   const dir = await getSubDir(projectId, 'depthmaps')
-  const fh = await dir.getFileHandle(uuid + '.png', { create: true })
-  const writable = await fh.createWritable()
-  await writable.write(blob)
-  await writable.close()
+  await writeFileIn(dir, uuid + '.png', blob)
 }
 
 export async function loadDepthDataUrl(projectId, uuid) {
@@ -680,10 +722,7 @@ export async function deleteExternalPlane(projectId, id) {
 // The original imported file, kept so a kind flip can re-decode.
 export async function saveExternalSource(projectId, id, blob) {
   const dir = await getSubDir(projectId, 'external')
-  const fh = await dir.getFileHandle(`${id}.src`, { create: true })
-  const writable = await fh.createWritable()
-  await writable.write(blob)
-  await writable.close()
+  await writeFileIn(dir, `${id}.src`, blob)
 }
 
 export async function loadExternalSource(projectId, id) {
@@ -781,12 +820,7 @@ export async function deleteFootprints(projectId) {
 export async function appendLog(projectId, entries) {
   if (!entries || entries.length === 0) return
   const dir = await getProjectDir(projectId, true)
-  const fh = await dir.getFileHandle('log.ndjson', { create: true })
-  const size = (await fh.getFile()).size
-  const writable = await fh.createWritable({ keepExistingData: true })
-  await writable.seek(size)
-  await writable.write(entries.map(e => JSON.stringify(e)).join('\n') + '\n')
-  await writable.close()
+  await writeFileIn(dir, 'log.ndjson', entries.map(e => JSON.stringify(e)).join('\n') + '\n', { append: true })
 }
 
 export async function readLog(projectId) {
@@ -808,9 +842,7 @@ export async function readLog(projectId) {
 export async function truncateLog(projectId) {
   try {
     const dir = await getProjectDir(projectId, true)
-    const fh = await dir.getFileHandle('log.ndjson', { create: true })
-    const writable = await fh.createWritable() // no keepExistingData ⇒ truncates
-    await writable.close()
+    await writeFileIn(dir, 'log.ndjson', null) // no keepExistingData ⇒ truncates
   } catch {}
 }
 

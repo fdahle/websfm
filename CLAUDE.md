@@ -919,6 +919,22 @@ propagate covariance rather than retaining stale numeric sigmas.
 - `markRaw`/`shallowRef` for big typed arrays (keypoints, descriptors, depth planes):
   reactivity is wasteful AND a Vue Proxy can't be `postMessage`d to the worker.
 - Worker results transfer ArrayBuffers (see each op's `transfer`).
+- **`createWritable()` does not write in place — it stages a `<name>.crswap`
+  sibling and renames it on `close()`.** Two writables open on the *same* file
+  therefore collide on that one swap name and the loser throws **"Failed to create
+  swap file"**. `utils/opfs.js` owns the fix: every write in that module goes
+  through `writeFileIn`, which queues per path (same file ⇒ ordered, different
+  files ⇒ still parallel) and reads an append offset *inside* the lock. Do not add
+  a raw `createWritable` call beside it. Store-level coalescing
+  (`useImagesStore.sync`, `useSensorsStore.save`, `usePosesStore.save`) stays, but
+  it is about not queueing N redundant rewrites — it cannot make one store's write
+  safe against another's. Folder-backed projects lose this race far more often than
+  OPFS ones: real-disk latency widens the window. `core/crs.js`'s fetched-def cache
+  reaches the same queue through `readAppJson`/`writeAppJson` (files in the
+  `websfm/` root that belong to the installation, not a project). The **only**
+  `createWritable` outside opfs.js is the `.websfm` archive sink in
+  `utils/projectFile.js` — a just-picked handle, written once, streamed, with no
+  second writer.
 - **`image.url` must always be a browser-native raster** (JPEG/PNG/…): the
   viewer `<img>`, the metadata dimension probe (`new Image()`), and the worker's
   `rasterize` (`createImageBitmap`) all decode it through the browser. TIFF is

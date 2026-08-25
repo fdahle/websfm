@@ -37,6 +37,9 @@ async function openArchiveSink(suggestedName) {
       handle = null                                  // picker unavailable/blocked: buffer instead
     }
     if (handle) {
+      // The one createWritable outside opfs.js, deliberately: this is a file the
+      // user just picked, written once, streamed, and never touched by anything
+      // else — none of the conditions opfs.js's per-path write queue exists for.
       const writable = await handle.createWritable()
       return {
         streaming: true,
