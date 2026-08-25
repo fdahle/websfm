@@ -34,6 +34,7 @@ import GuideModal from './components/guide/GuideModal.vue'
 import ProjectPicker from './components/layout/ProjectPicker.vue'
 import DevConsole from './components/layout/DevConsole.vue'
 import BrowserWarning from './components/layout/BrowserWarning.vue'
+import MobileWarning from './components/layout/MobileWarning.vue'
 import ToastStack from './components/layout/ToastStack.vue'
 import { useImagesStore } from './stores/useImagesStore.js'
 import { useMatchesStore } from './stores/useMatchesStore.js'
@@ -1415,6 +1416,7 @@ function onRibbonPick(event) {
 
 <template>
   <div class="app">
+    <MobileWarning />
     <BrowserWarning />
     <ToastStack />
     <Ribbon

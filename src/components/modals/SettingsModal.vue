@@ -5,6 +5,7 @@ import { useComputeSettings } from '../../composables/useComputeSettings.js'
 import { useViewerSettings } from '../../composables/useViewerSettings.js'
 import { useUiSettings } from '../../composables/useUiSettings.js'
 import { useBrowserWarning } from '../../composables/useBrowserWarning.js'
+import { useMobileWarning } from '../../composables/useMobileWarning.js'
 import { useMapSettings } from '../../composables/useMapSettings.js'
 import { formatBytes } from '../../core/io/projectArchive.js'
 import { MODEL_CACHE_NAME } from '../../core/models/registry.js'
@@ -16,6 +17,11 @@ const props = defineProps({ theme: String, resolvedTheme: String })
 const emit = defineEmits(['close', 'set-theme'])
 
 const { isChromium, warningEnabled, setEnabled: setBrowserWarningEnabled } = useBrowserWarning()
+const {
+  isMobile,
+  warningEnabled: mobileWarningEnabled,
+  setEnabled: setMobileWarningEnabled,
+} = useMobileWarning()
 const { glossaryTermsEnabled, setGlossaryTermsEnabled } = useGlossarySettings()
 const {
   memBudgetGb, memBudgetAuto, setMemBudgetGb, resetMemBudgetAuto, deviceBudgetInfo,
@@ -169,6 +175,17 @@ onMounted(refreshStorage)
             </div>
             <label class="switch">
               <input type="checkbox" :checked="warningEnabled" @change="setBrowserWarningEnabled($event.target.checked)">
+              <span class="slider"></span>
+            </label>
+          </div>
+
+          <div v-if="isMobile" class="setting-row">
+            <div class="setting-info">
+              <span class="setting-label">Warn on mobile devices</span>
+              <span class="setting-desc">Show the notice that websfm is a desktop application and mobile layout is unsupported.</span>
+            </div>
+            <label class="switch">
+              <input type="checkbox" :checked="mobileWarningEnabled" @change="setMobileWarningEnabled($event.target.checked)">
               <span class="slider"></span>
             </label>
           </div>
