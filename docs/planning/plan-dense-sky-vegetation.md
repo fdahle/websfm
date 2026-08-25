@@ -1,8 +1,11 @@
 # Plan — kill sky/vegetation freckles at the depth map, not at fusion
 
-> **STATUS 2026-07-17 — Stage A′ shipped; Stages 1+2 turned out to be one small pure-JS
-> change, not a kernel workstream. See "What actually shipped" at the bottom before
-> reading the rest. Open work now tracked in TODO ▸ DF.**
+> **Status (2026-08-17): Stage A′ shipped 2026-07-17, unmeasured on real data.**
+> Stages 1+2 turned out to be one small pure-JS change, not a kernel workstream —
+> see "What actually shipped" at the bottom before reading the rest.
+> Open work: TODO ▸ Now ▸ DF (retune the defaults *from* the measurements).
+> Owed manual checks: `VERIFICATION.csv` ▸ `DEN-02`…`DEN-04`, `DEN-13`.
+> Delete this file once DF closes.
 
 ## Problem
 

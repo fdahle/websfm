@@ -4,7 +4,7 @@ Browser-based Structure-from-Motion / photogrammetry app. Vue 3 + Pinia front en
 heavy CV math in Rust→WASM, everything runs client-side (no server). Targets polar /
 non-WGS84 projects (Antarctica), so CRS handling is first-class.
 
-## The four docs (keep the roles strict)
+## The docs (keep the roles strict)
 - **CLAUDE.md** (this file) — evergreen *code* architecture, layering, invariants,
   "where things live". No status, no tasks; if a sentence can go stale, it belongs
   elsewhere.
@@ -16,18 +16,27 @@ non-WGS84 projects (Antarctica), so CRS handling is first-class.
   work lives there, nowhere else.
 - **HANDOVER.md** — the record: measured baselines (before/after yardsticks) and a
   reverse-chronological done log.
+- **VERIFICATION.csv** — the manual-check register: one row per check this
+  environment cannot run (browser runtime, real datasets, external applications),
+  with its pass criteria and columns for status/result/date. It exists because
+  "shipped" and "verified" diverged badly once the code outran the browser runs;
+  checklists must live there, not scattered through TODO.md and the plan files.
+- **`docs/planning/plan-*.md`** — executable specs for features not yet shipped (the
+  step-by-step *how*; TODO.md stays the source of truth for *whether/when*). Delete a
+  plan file once its feature has shipped **and** its verification rows are signed off.
 When an item ships: delete it from TODO.md, add one done-log line to HANDOVER.md
-(date · what · where it lives), fold any *evergreen* code lesson into this file, and
-if the *method* changed, update METHODS.md.
+(date · what · where it lives), add any owed manual checks as VERIFICATION.csv rows,
+fold any *evergreen* code lesson into this file, and if the *method* changed, update
+METHODS.md. A measured number from a verification run goes to HANDOVER §Baselines.
 
 ## Stack
 - **UI**: Vue 3 (`<script setup>`), Pinia stores, OpenLayers (map), Three.js (3D).
-- **Compute**: five Rust crates compiled to WASM
-  (`crates/{sift,matching,reconstruction,mesh,imagecodec}`),
+- **Compute**: six Rust crates compiled to WASM
+  (`crates/{sift,matching,reconstruction,mesh,imagecodec,lazcodec}`),
   run **off the main thread** in a worker. `crates/mesh` is screened-Poisson meshing;
   it vendors a **rayon-stripped** copy of Dimforge's `poisson_reconstruction` under
   `crates/mesh/vendor/` (rayon's worker threads panic on threadless wasm) with a
-  marching-cubes iso patch — it is one of two crates allowed a dependency, kept isolated
+  marching-cubes iso patch — it is one of the three crates allowed a dependency, kept isolated
   so it doesn't leak into `crates/reconstruction` (which stays wasm-bindgen-only).
   The vendored copy also carries **performance patches** (2026-08-11, see HANDOVER
   ▸ B-mesh): every one is an exact restructuring — same mesh out, only summation order

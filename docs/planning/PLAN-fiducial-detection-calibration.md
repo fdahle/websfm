@@ -1,8 +1,11 @@
 # PLAN — separate fiducial detection from fiducial calibration
 
-Status: implemented 2026-07-20; representative real-scan browser acceptance is
-still owed. This file is retained as the implementation/acceptance record. The
-anonymous detection model, separate calibration task, persistence migration and
+> **Status (2026-08-17): implemented 2026-07-20; real-scan acceptance still owed.**
+> Owed manual checks: `VERIFICATION.csv` ▸ `FID-01`…`FID-07`.
+> Delete this file once those rows are signed off.
+
+This file is retained as the implementation/acceptance record. The anonymous
+detection model, separate calibration task, persistence migration and
 reconstruction adapter are shipped and covered by automated tests.
 
 ## Goal

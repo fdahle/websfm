@@ -1,7 +1,9 @@
 # Plan: SfM interoperability hub and full COLMAP workspace exchange
 
-**Implemented 2026-08-06.** Remaining acceptance work is the real-application and
-large-browser verification matrix at the end of this document.
+> **Status (2026-08-17): implemented 2026-08-06.** Remaining acceptance work is the
+> real-application and large-browser verification matrix at the end of this document,
+> tracked as `VERIFICATION.csv` ▸ `IOP-01`…`IOP-08`.
+> Delete this file once those rows are signed off.
 
 ## Outcome
 

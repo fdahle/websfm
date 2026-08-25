@@ -1,9 +1,10 @@
 # Plan: remaining professional interoperability formats
 
-**Items 1–4 implemented 2026-08-07.** Items 5 (mesh texturing) and 6 (E57) stand
-as written — see TODO ▸ "Remaining interoperability". What is still owed for the
-shipped four is the external-application verification listed under each item;
-none of it can run in a headless environment.
+> **Status (2026-08-17): items 1–4 implemented 2026-08-07.** Items 5 (mesh
+> texturing) and 6 (E57) stand as written — see TODO ▸ Later ▸ "Remaining
+> interoperability". Owed external-application checks for the shipped four:
+> `VERIFICATION.csv` ▸ `PRD-04`, `PRD-06`, `PRD-07`, `PRD-09`.
+> Delete items 1–4 from this file once those rows are signed off.
 
 Follow-on to `plan-sfm-interoperability.md` (COLMAP workspace exchange, shipped
 2026-08-06). That plan closed the **SfM-project** axis. This one closes the

@@ -1,5 +1,12 @@
 # Feature Matching Backends — Implementation Plan
 
+> **Status (2026-08-17): SP0–SP2 shipped** — the ONNX runtime, the SuperPoint detect
+> path and the LightGlue match op are in (weights are downloaded on demand with
+> consent, not bundled; see `core/models/registry.js`). Retained as **reference** for
+> the backend abstraction and the ONNX Runtime Web notes. Remaining slices: TODO ▸
+> Next ▸ SP (SP3 concurrency, SP4 custom model upload, SP5 tests) and TODO ▸ Later ▸
+> F5. Owed manual checks: `VERIFICATION.csv` ▸ `DET-02`, `DET-04`, `DET-06`.
+
 ## Goal
 
 Offer multiple detector/matcher backends selectable by the user, rather than committing to one pipeline. The current SIFT approach stays as the default (offline-capable, zero download, fast). Neural backends are opt-in.

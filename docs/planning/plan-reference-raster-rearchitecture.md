@@ -1,7 +1,13 @@
 # Plan — reference rasters: raw storage, COG, draw-time styling
 
-> **Supersedes §A of `plan-external-reference-data.md`** (storage + display).
-> That file's §B taxonomy shipped and is unaffected.
+> **Status (2026-08-17): Phase 1 (the COG writer) shipped 2026-07-20; Phase 0 spikes
+> are the next action and are a go/no-go for phases 3–5.** Open work: TODO ▸ Now ▸ RR.
+> Owed manual checks: `VERIFICATION.csv` ▸ `RAS-05` (spike 0a, EPSG:3031 under
+> WebGLTileLayer) and `RAS-06` (spike 0d, real timings); the *current* raster path's
+> browser verification is `RAS-01`…`RAS-04`.
+>
+> **Supersedes §A of the former `plan-external-reference-data.md`** (storage +
+> display); that plan's §B taxonomy shipped and its file has been deleted.
 >
 > **No back-compat.** Hard development phase: nothing imported under the old
 > design must survive. The index schema, the sidecar layout and the store API all

@@ -1,5 +1,9 @@
 # Plan: Evaluate tab → Quality Report hub (restructure + content fixes + additions)
 
+> **Status (2026-08-17): WS0–WS6 all shipped 2026-07-17** (see HANDOVER done log).
+> Owed manual checks: `VERIFICATION.csv` ▸ `UI-05`, `UI-06`, `UI-07`, `PRD-11`.
+> Delete this file once those rows are signed off.
+
 Executor plan. Read CLAUDE.md first (layering rules, "pure core", the Evaluate-tab
 rule *derive from the cloud, don't extend the summary*, verification policy).
 Everything UI-side needs a manual browser run this environment may not support —

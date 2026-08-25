@@ -1,5 +1,12 @@
 # Plan: fix the 2-camera registration stall (building baselines)
 
+> **Status (2026-08-17): WS-A + WS-C shipped 2026-07-16; unproven on real data.**
+> The synthetic scene cannot reproduce the stall (a noise-free co-visible rig absorbs
+> even k1 = −0.35), so `register.test.js` pins the *guard*, not the recovery.
+> Open work (all conditional on the runs): TODO ▸ Now ▸ SFM.
+> Owed manual checks: `VERIFICATION.csv` ▸ `SFM-03`…`SFM-06`.
+> Delete this file once those rows are signed off and the WS-B decision is made.
+
 Executor plan. Read CLAUDE.md first (layering rules, "pure core", verification policy).
 Everything here is inside `src/core/sfm/` + `src/core/tuning.js`, so `npm test` +
 `npm run typecheck` cover it; the full-pipeline confirmation needs a manual browser
