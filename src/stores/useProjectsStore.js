@@ -10,6 +10,7 @@ import {
   adoptFolderVerdict, newFolderVerdict, copyVerified,
 } from '../core/io/folderProject.js'
 import { saveProjectHandle, loadProjectHandle, deleteProjectHandle } from '../utils/handleStore.js'
+import { useLog } from '../composables/useLog.js'
 
 // The project index: which projects exist, which one is open, and its metadata
 // (name, scene type, working CRS). Foundational store — most other stores read
@@ -17,6 +18,8 @@ import { saveProjectHandle, loadProjectHandle, deleteProjectHandle } from '../ut
 // whether and where to persist. It is the project *index*, not project content,
 // so it is not itself a registry-driven project-scoped store.
 export const useProjectsStore = defineStore('projects', () => {
+  const { log } = useLog()
+
   // Persistence is always on; this only tracks whether OPFS is usable in this
   // environment. When false, the app runs transiently without a project.
   const persistenceAvailable = ref(true)
@@ -37,6 +40,29 @@ export const useProjectsStore = defineStore('projects', () => {
 
   function setPersistenceAvailable(available) {
     persistenceAvailable.value = available
+  }
+
+  // Browser storage is best-effort until asked otherwise, and an eviction takes a
+  // whole project — images, matches, depth maps — with it, which surfaces as blob:
+  // URLs failing mid-session rather than as any kind of error. Ask once, at the
+  // point the user commits to a project (create/open); opfs.ensureDurableStorage
+  // memoizes the request, so this only logs the first verdict.
+  let durableLogged = false
+  function requestDurableOnce() {
+    opfs.ensureDurableStorage().then((r) => {
+      if (durableLogged) return
+      durableLogged = true
+      if (!r.supported) {
+        log('Storage durability unsupported in this browser — project data is best-effort and the browser '
+          + 'may evict it under disk pressure', 'warn', 'Project')
+      } else if (r.durable) {
+        log(`Storage durability ${r.alreadyGranted ? 'already granted' : 'granted'} — project data will not be evicted`,
+          'info', 'Project')
+      } else {
+        log('Storage durability denied — the browser may evict project data under disk pressure. Keep a '
+          + '.websfm copy, or use a folder-backed project, for anything you cannot recompute', 'warn', 'Project')
+      }
+    }).catch(() => {})
   }
 
   // ── Index I/O ───────────────────────────────────────────────────────────────
@@ -75,6 +101,7 @@ export const useProjectsStore = defineStore('projects', () => {
       await opfs.deleteProject(id).catch(() => {})
       throw err
     }
+    requestDurableOnce()
     return id
   }
 
@@ -111,6 +138,7 @@ export const useProjectsStore = defineStore('projects', () => {
       p.lastModified = previousModified
       throw err
     }
+    requestDurableOnce()
     return data
   }
 
