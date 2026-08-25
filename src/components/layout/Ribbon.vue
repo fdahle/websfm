@@ -557,6 +557,11 @@ function isHidden(cmd) {
 }
 
 function isActive(cmd) {
+  // A disabled toggle never renders as "on": its state refers to data that isn't
+  // there yet (an empty project's Footprints toggle defaults to showFootprints
+  // true, so it drew as an active-but-greyed button that shows nothing), and the
+  // user can't click it to find out otherwise.
+  if (isDisabled(cmd)) return false
   if (cmd.view != null && cmd.view === props.activeView) return true
   if (cmd.activeKey === 'consoleOpen')   return props.consoleOpen
   if (cmd.activeKey === 'showCameras')   return props.showCameras
