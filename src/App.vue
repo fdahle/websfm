@@ -69,6 +69,7 @@ import { useLog } from './composables/useLog.js'
 import ReconstructModal from './components/modals/ReconstructModal.vue'
 import FindGcpsModal from './components/modals/FindGcpsModal.vue'
 import GeoreferenceModal from './components/modals/GeoreferenceModal.vue'
+import ScaleBarsModal from './components/modals/ScaleBarsModal.vue'
 import ExportModal from './components/modals/ExportModal.vue'
 import DepthMapsModal from './components/modals/DepthMapsModal.vue'
 import DenseModal from './components/modals/DenseModal.vue'
@@ -173,8 +174,8 @@ const { sidebarWidth, startSidebarResize } = useSidebarResize()
 // ── Reconstruction ────────────────────────────────────────────────────────────
 // Project-scoped store; restore/clear run through the project-store registry.
 const reconstructionStore = useReconstructionStore()
-const { cameras, sparseCameras, points3d, reconStatus, clouds, selectedCloudId, selectedCloud, mainSparseId, mainSparseCloud, depthMapCount, dem, demSource, ortho, orthoSurfaces, georef, canGeoreference, canGeoreferenceGcps, denseSummary, summary: reconSummary } = storeToRefs(reconstructionStore)
-const { reconstruct, importColmapModel, importInteropModel, importCloud, editClouds, computeDepthMaps, densify, generateDem, generateOrtho, generateMesh, georeference, gcpAccuracyReport, gcpGuides, gcpEstimate, selectCloud, removeCloud, renameCloud, setMainSparse, clearDerived: clearReconstructionDerived } = reconstructionStore
+const { cameras, sparseCameras, points3d, reconStatus, clouds, selectedCloudId, selectedCloud, mainSparseId, mainSparseCloud, depthMaps, depthMapCount, dem, demSource, ortho, orthoSurfaces, georef, canGeoreference, canGeoreferenceGcps, denseSummary, summary: reconSummary } = storeToRefs(reconstructionStore)
+const { reconstruct, importColmapModel, importInteropModel, importCloud, editClouds, computeDepthMaps, densify, generateDem, generateOrtho, generateMesh, georeference, effectiveFrameSpec, gcpAccuracyReport, gcpGuides, gcpEstimate, selectCloud, removeCloud, renameCloud, setMainSparse, clearDerived: clearReconstructionDerived } = reconstructionStore
 
 async function clearCurrentProjectDerived() {
   await clearReconstructionDerived()
@@ -210,7 +211,7 @@ function zoomToCloud(id) {
 const { log } = useLog()
 const gcpsStore = useGcpsStore()
 const { gcps, importDefaults: gcpImportDefaults } = storeToRefs(gcpsStore)
-const { addGcps, addGcp, setGcpName, setGcpRole, setGcpPosition, setGcpAccuracy, setObservation,
+const { addGcps, addGcp, addPoint, setGcpName, setGcpRole, setGcpPosition, setGcpAccuracy, setObservation,
   setGcpVerticalDatum, setObservationAccuracy, removeObservation, removeGcp, reprojectGcps } = gcpsStore
 
 // GCP elevations from an imported reference DEM (the stated goal of the
@@ -250,6 +251,10 @@ async function changeGcpRole({ id, role }) {
 // `selectedGcpId` highlights a GCP's marker in the image view + its row in the
 // table; set by clicking a GCP row (highlight only — marking is via right-click).
 const selectedGcpId = ref(null)
+// Marker currently being created by the guided scale setup. Once it has two
+// photo observations, return to the setup modal so the user can continue with
+// point 2 or enter the measured distance without hunting through the ribbon.
+const scaleSetupMarkerId = ref(null)
 function selectGcp(id) { selectedGcpId.value = id }
 
 // Turn on the GCP overlay so a freshly-placed mark is visible.
@@ -338,14 +343,24 @@ function assignGcpObservation(imageId, imageName, { gcpId, px, py }) {
   ensureGcpsVisible()
   refreshGcpReport()
   logGcpMark(gcpId, imageId, imageName, px, py, guide)
+  const point = gcps.value.find((g) => g.id === gcpId)
+  if (scaleSetupMarkerId.value === gcpId && (point?.observations?.length ?? 0) >= 2) {
+    scaleSetupMarkerId.value = null
+    patchImageView({ gcpEdit: false })
+    scaleBarsOpen.value = true
+  }
 }
-function addGcpAtObservation(imageId, imageName, { px, py }) {
-  const id = addGcp()
+// Create a new reference point already marked at this pixel. `role` is
+// 'control' (surveyed ground control) or 'marker' (a scale-bar endpoint with no
+// surveyed position) — always chosen up front, never by creating a control point
+// and re-roling it (see useGcpsStore.addPoint).
+function addGcpAtObservation(imageId, imageName, { px, py, role = 'control' }) {
+  const id = addPoint({ role })
   setObservation(id, imageId, imageName, px, py)
   selectedGcpId.value = id
   ensureGcpsVisible()
   refreshGcpReport()
-  logGcpMark(id, imageId, imageName, px, py, null)  // new GCP — never has a guide
+  logGcpMark(id, imageId, imageName, px, py, null)  // new point — never has a guide
 }
 
 // ── GCP ground-position editing from the 2D map ─────────────────────────────────
@@ -366,6 +381,21 @@ function addGcpAtCoord({ x, y }) {
   selectedGcpId.value = id
   refreshGcpReport()
 }
+// Select a just-created point and put the image view into marking mode, so the
+// user's next click marks it. Used by the Scale Bars modal's "＋ New marker": the
+// marker exists but is useless until it is marked in ≥2 images.
+function startMarkingPoint(gcpId) {
+  scaleSetupMarkerId.value = gcpId
+  selectedGcpId.value = gcpId
+  ensureGcpsVisible()
+  patchImageView({ gcpEdit: true })
+  refreshGcpReport()
+}
+function exitGcpEdit() {
+  scaleSetupMarkerId.value = null
+  patchImageView({ gcpEdit: false })
+}
+
 // Sidebar observation-list actions.
 function jumpToImage({ imageId }) { if (imageId != null) openImageTab(imageId) }
 
@@ -470,7 +500,7 @@ const {
   projectPickerOpen, newProjectOpen, newProjectCanCancel, saveProjectOpen,
   detectFeaturesOpen, matchFeaturesOpen,
   imageTableOpen, poseTableOpen, maskManagerOpen, autoMaskOpen, sensorTableOpen, gcpTableOpen, matchListOpen, reconstructOpen,
-  findGcpsOpen, georeferenceOpen,
+  findGcpsOpen, georeferenceOpen, scaleBarsOpen,
   depthMapsOpen, denseOpen, demOpen, orthoOpen, meshOpen,
   cropCloudOpen, filterCloudOpen, mergeCloudsOpen,
   gcpImportOpen, gcpImportText, gcpImportName, gcpImportGeojson, gcpImportCrs,
@@ -931,7 +961,7 @@ onMounted(async () => {
         // Nothing modal to dismiss — Escape exits mask/GCP-edit mode on the active tab.
         const tab = activeTab.value
         if (tab?.type === 'image' && imageViewPrefs.value.maskEdit) patchImageView({ maskEdit: false })
-        else if (tab?.type === 'image' && imageViewPrefs.value.gcpEdit) patchImageView({ gcpEdit: false })
+        else if (tab?.type === 'image' && imageViewPrefs.value.gcpEdit) exitGcpEdit()
       }
     }
   })
@@ -1023,7 +1053,13 @@ const {
 } = useExports({
   poses, sensors, images, matchStore, clouds, selectedCloud, mainSparseCloud, dem, ortho,
   georef, currentProjectName, currentCrs, summary: reconSummary, progress: exportProgress,
+  effectiveFrameSpec,
 })
+
+// Is the fitted scale still describing the current model + measurements? Read at
+// render time (not cached) because it depends on the marks, which the user edits
+// while the app is open. `scaleFitStatus` is the single owner of that rule.
+const scaleFitValid = computed(() => reconstructionStore.scaleFitStatus().valid)
 
 // ── Pipeline handlers (close modal, then delegate to usePipeline) ─────────────
 function onDetectRun(settings)      { detectFeaturesOpen.value = false;  runDetect(settings)      }
@@ -1261,6 +1297,7 @@ const MODAL_COMMANDS = {
   'reconstruct':           reconstructOpen,
   'find-gcps':             findGcpsOpen,
   'georeference':          georeferenceOpen,
+  'scale-bars':            scaleBarsOpen,
   'compute-depth':         depthMapsOpen,
   'dense':                 denseOpen,
   'gen-dem':               demOpen,
@@ -1559,6 +1596,17 @@ function onRibbonPick(event) {
     </Teleport>
 
     <Teleport to="body">
+      <!-- Scale bars read/write their stores directly (like the Quality hub), so
+           this is one MODAL_COMMANDS line plus this block. The one thing it needs
+           App.vue for is handing a freshly created marker to the image view. -->
+      <ScaleBarsModal
+        v-if="scaleBarsOpen"
+        @close="scaleBarsOpen = false"
+        @mark-point="(id) => { scaleBarsOpen = false; startMarkingPoint(id) }"
+      />
+    </Teleport>
+
+    <Teleport to="body">
       <InteropSourceModal
         v-if="sfmSourceOpen"
         @close="sfmSourceOpen = false"
@@ -1581,6 +1629,7 @@ function onRibbonPick(event) {
         v-if="exportKind"
         :kind="exportKind"
         :has-georef="!!georef"
+        :has-scale="scaleFitValid || georef?.crs === currentCrs"
         @close="exportKind = null"
         @run="onExportRun"
       />
@@ -1606,6 +1655,7 @@ function onRibbonPick(event) {
       <DemModal
         v-if="demOpen"
         :can-georeference="canGeoreference"
+        :has-scale="scaleFitValid || georef?.crs === currentCrs"
         :project-crs="currentCrs"
         :source="demSource"
         @close="demOpen = false"
@@ -1642,6 +1692,8 @@ function onRibbonPick(event) {
         v-if="orthoOpen"
         :surfaces="orthoSurfaces"
         :can-georeference="canGeoreference"
+        :has-scale="scaleFitValid || georef?.crs === currentCrs"
+        :dem-unit="dem?.unit ?? null"
         :project-crs="currentCrs"
         @close="orthoOpen = false"
         @run="onOrthoRun"
@@ -1900,6 +1952,7 @@ function onRibbonPick(event) {
         :report="gcpReport"
         :selected-gcp-id="selectedGcpId"
         :has-reference-dem="hasReferenceDem"
+        :scene-type="currentSceneType"
         @fill-z="fillGcpZFromReferenceDem"
         @check-z="checkGcpZAgainstReferenceDem"
         @close="gcpTableOpen = false"
@@ -1911,7 +1964,7 @@ function onRibbonPick(event) {
         @update-position="({ id, axis, value }) => setGcpPosition(id, axis, value)"
         @refresh-report="refreshGcpReport"
         @select="selectGcp"
-        @add="addGcp"
+        @add="(role) => addPoint({ role })"
       />
     </Teleport>
 
@@ -2092,8 +2145,9 @@ function onRibbonPick(event) {
               :selected-gcp-id="selectedGcpId"
               :mask-edit="imageViewPrefs.maskEdit"
               :gcp-edit="imageViewPrefs.gcpEdit"
+              :scene-type="currentSceneType"
               @exit-mask-edit="patchImageView({ maskEdit: false })"
-              @exit-gcp-edit="patchImageView({ gcpEdit: false })"
+              @exit-gcp-edit="exitGcpEdit"
               @update-mask="(dataUrl, persist) => updateMask(tab.imageId, dataUrl, persist)"
               @update-depth="(dataUrl) => updateDepth(tab.imageId, dataUrl)"
               :is-film="sensorForImage(tab.imageId)?.kind === 'film'"
@@ -2120,6 +2174,7 @@ function onRibbonPick(event) {
               :ref="(el) => { if (el) productViewerRefs[tab.id] = el; else delete productViewerRefs[tab.id] }"
               :kind="tab.productKind"
               :product="tab.productKind === 'ortho' ? ortho : dem"
+              :frame-status="reconstructionStore.productFrameStatus(tab.productKind === 'ortho' ? ortho : dem)"
             />
             <!-- Same viewer, imported raster instead of a computed product. -->
             <ProductViewer

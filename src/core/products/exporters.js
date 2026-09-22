@@ -75,6 +75,23 @@ export function prepareCloudForExport(points, { sim = null, cell = 0, onLog } = 
   return { count: m, pos, ...(col ? { col } : {}) }
 }
 
+// Apply the same optional target-frame similarity to an indexed mesh while
+// preserving topology and colours. Unlike a cloud export there is no voxel
+// stage: changing vertex count would invalidate the face indices. A fresh
+// Float64 position plane keeps CRS-sized translations precise for text/binary
+// writers; writers that require Float32 (GLB) quantize only at their format
+// boundary.
+export function prepareMeshForExport(mesh, { sim = null } = {}) {
+  if (!sim) return mesh
+  const n = mesh?.nVerts ?? Math.floor((mesh?.pos?.length ?? 0) / 3)
+  const pos = new Float64Array(n * 3)
+  for (let i = 0; i < n; i++) {
+    const p = applySimilarity(sim, [mesh.pos[i * 3], mesh.pos[i * 3 + 1], mesh.pos[i * 3 + 2]])
+    pos[i * 3] = p[0]; pos[i * 3 + 1] = p[1]; pos[i * 3 + 2] = p[2]
+  }
+  return { ...mesh, nVerts: n, pos }
+}
+
 // ── Point cloud → PLY ────────────────────────────────────────────────────────
 // points is either a sparse cloud's [{ x, y, z, color?: [r,g,b] (0–255),
 // normal?: [nx,ny,nz] }] or a dense cloud's flat descriptor { count,

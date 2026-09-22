@@ -166,7 +166,7 @@ export function projectHealth(snapshot = {}) {
   // Prefer genuinely independent checkpoints. Fall back to control fit residuals,
   // but label that weaker quantity honestly instead of blending the two populations.
   const checks = s.gcpReport?.filter((r) => r.role === 'check' && r.dTotal != null) ?? []
-  const controls = s.gcpReport?.filter((r) => r.role !== 'check' && r.dTotal != null) ?? []
+  const controls = s.gcpReport?.filter((r) => (r.role ?? 'control') === 'control' && r.dTotal != null) ?? []
   const gcpRmse = rmse(checks.length ? checks : controls, (r) => r.dTotal)
   push('gcp', 'accuracy', checks.length ? 'Checkpoint RMSE' : 'Control fit RMSE', gcpRmse, unit,
     EVAL_THRESHOLDS.gcpRmse, {

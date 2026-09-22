@@ -6,6 +6,7 @@ import {
   buildGcps,
   hasGcpElevation,
   normalizeGcpRole,
+  isGroundControl,
 } from './gcp.js'
 
 describe('hasGcpElevation', () => {
@@ -22,6 +23,12 @@ describe('normalizeGcpRole', () => {
     expect(normalizeGcpRole('validation')).toBe('check')
     expect(normalizeGcpRole('GCP')).toBe('control')
     expect(normalizeGcpRole(null)).toBe('control')
+    // A marker MUST round-trip: collapsing it to 'control' would reload a
+    // scale-bar endpoint from disk as ground control at whatever coordinates
+    // the table happens to hold (D4).
+    expect(normalizeGcpRole('marker')).toBe('marker')
+    expect(normalizeGcpRole('Scale Bar')).toBe('marker')
+    expect(normalizeGcpRole('scale_marker')).toBe('marker')
   })
 })
 
@@ -199,6 +206,29 @@ describe('buildGcps', () => {
     expect(gcps.map((g) => [g.name, g.role])).toEqual([['A', 'check'], ['B', 'control']])
   })
 
+  it('imports marker observations without surveyed coordinates', () => {
+    const withMarker = {
+      name: 0, role: 1, x: 2, y: 3, z: 4, image: 5, px: 6, py: 7,
+    }
+    const { gcps, skipped } = buildGcps([
+      ['scale-a', 'marker', '', '', '', 'img.jpg', '100.5', '200.5'],
+    ], withMarker)
+    expect(skipped).toBe(0)
+    expect(gcps).toHaveLength(1)
+    expect(gcps[0]).toMatchObject({ name: 'scale-a', role: 'marker', x: null, y: null, z: null })
+    expect(gcps[0].observations).toEqual([
+      { imageName: 'img.jpg', px: 100.5, py: 200.5, accuracyX: null, accuracyY: null },
+    ])
+  })
+
+  it('rejects marker rows that have neither coordinates nor an observation', () => {
+    const { gcps, skipped } = buildGcps([
+      ['scale-a', 'marker', '', '', '', '', '', ''],
+    ], { name: 0, role: 1, x: 2, y: 3, z: 4, image: 5, px: 6, py: 7 })
+    expect(gcps).toEqual([])
+    expect(skipped).toBe(1)
+  })
+
   it('maps positive per-axis accuracy and ignores invalid values', () => {
     const withAccuracy = { ...mapping, accuracyX: 4, accuracyY: 5, accuracyZ: 6 }
     const { gcps } = buildGcps([
@@ -216,5 +246,41 @@ describe('buildGcps', () => {
       withObs,
     )
     expect(gcps[0].observations).toHaveLength(0)
+  })
+})
+
+describe('isGroundControl', () => {
+  const surveyed = {
+    role: 'control', enabled: true, x: 1, y: 2, z: 3,
+    accuracyX: 0.01, accuracyY: 0.01, accuracyZ: 0.02,
+  }
+  const precision = (g) => (g.accuracyX > 0 && g.accuracyY > 0 && g.accuracyZ > 0 ? {} : null)
+
+  it('accepts an enabled control point with coordinates and a precision', () => {
+    expect(isGroundControl(surveyed, { precision })).toBe(true)
+  })
+
+  it('rejects a MARKER even with deliberately finite coordinates and accuracy', () => {
+    // The whole point of D4: a marker that somehow acquires a full surveyed
+    // record — migrated, imported, or edited by accident — still must not
+    // constrain georeferencing, anchored BA or the leave-one-out report.
+    expect(isGroundControl({ ...surveyed, role: 'marker' }, { precision })).toBe(false)
+  })
+
+  it('rejects checkpoints, disabled points, and missing coordinates', () => {
+    expect(isGroundControl({ ...surveyed, role: 'check' }, { precision })).toBe(false)
+    expect(isGroundControl({ ...surveyed, enabled: false }, { precision })).toBe(false)
+    expect(isGroundControl({ ...surveyed, z: null }, { precision })).toBe(false)
+    expect(isGroundControl({ ...surveyed, x: NaN }, { precision })).toBe(false)
+    expect(isGroundControl(null, { precision })).toBe(false)
+  })
+
+  it('rejects a point whose covariance the caller cannot resolve', () => {
+    expect(isGroundControl({ ...surveyed, accuracyZ: null }, { precision })).toBe(false)
+  })
+
+  it('treats an absent role as control (back-compat with older projects)', () => {
+    const { role, ...noRole } = surveyed
+    expect(isGroundControl(noRole, { precision })).toBe(true)
   })
 })

@@ -258,3 +258,37 @@ export function makeFrame({ origin, east, north, up, crs = 'local', unit = 'mode
   const toSfm = (c) => add(origin, add(add(scale(east, c[0]), scale(north, c[1])), scale(up, c[2])))
   return { fromSfm, toSfm, origin, east, north, up, crs, unit, source }
 }
+
+// Wrap a local frame in a metric scale. Scale is a property of the FRAME, never
+// of the coordinates: rescaling the cloud would invalidate the depth-map
+// staleness stamp and contradict every recorded summary number (see
+// core/products/scale.js).
+//
+// The basis stays orthonormal and the scalar rides alongside:
+//     fromSfm(p) = scale · base.fromSfm(p)
+//     toSfm(c)   = base.toSfm(c / scale)
+// Scaling `east`/`north`/`up` instead would break makeFrame's assumption that
+// the basis is orthonormal — it uses those vectors in BOTH directions, so a
+// scaled basis makes fromSfm and toSfm stop being inverses (they would apply the
+// factor twice one way and once the other). Keep the serialised basis
+// unit-length and the factor separate; projection.test.js pins the round-trip.
+//
+// The result reports `unit:'m'` with `crs:'local'` — metric with no CRS, which
+// is exactly what an object-capture project scaled by a scale bar is. Export
+// paths must not attach a CRS merely because the coordinates are metric.
+export function frameFromScaledLocal(base, scale) {
+  if (!base || !Number.isFinite(scale) || !(scale > 0)) return null
+  const fromSfm = (p) => {
+    const c = base.fromSfm(p)
+    return [c[0] * scale, c[1] * scale, c[2] * scale]
+  }
+  const toSfm = (c) => base.toSfm([c[0] / scale, c[1] / scale, c[2] / scale])
+  return {
+    ...base,
+    fromSfm,
+    toSfm,
+    unit: 'm',
+    source: base.source ? `${base.source}+scalebars` : 'scalebars',
+    scale,
+  }
+}

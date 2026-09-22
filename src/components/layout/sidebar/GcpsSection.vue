@@ -6,10 +6,33 @@ const props = defineProps({
   open:          { type: Boolean, default: true },
   gcps:          { type: Array,   default: () => [] },
   // Per-GCP accuracy report (useReconstructionStore.gcpAccuracyReport()):
-  // [{ gcpId, dTotal, observations: [{ imageId, reprojPx }] }] — empty until refreshed.
+  // [{ gcpId, dTotal, sfm: { x, y, z }, observations: [{ imageId, reprojPx }] }] —
+  // empty until refreshed.
   report:        { type: Array,   default: () => [] },
   selectedGcpId: { type: String,  default: null },
 })
+
+// Role → badge. A **marker** is a scale-bar endpoint: image marks, no surveyed
+// position. It is listed alongside control/check because it is marked with the
+// same machinery — but it is never a ground constraint (core/io/gcp.js
+// `isGroundControl`), and the badge is what says so at a glance.
+const ROLE_BADGES = {
+  control: { cls: 'control', text: 'CTL', title: 'Control point — constrains georeferencing' },
+  check:   { cls: 'check',   text: 'CHK', title: 'Checkpoint — excluded from adjustment' },
+  marker:  { cls: 'marker',  text: 'MRK', title: 'Marker — a scale-bar endpoint with no surveyed position; never constrains the solve' },
+}
+const roleBadge = (gcp) => ROLE_BADGES[gcp.role] ?? ROLE_BADGES.control
+const isMarker = (gcp) => gcp.role === 'marker'
+
+// Where the model puts a point in the SfM frame, from the accuracy report. For a
+// MARKER this — with the per-view reprojection errors below — is the only quality
+// signal there is: there is no surveyed coordinate to diff against.
+function sfmPosFor(gcpId) {
+  return props.report.find((r) => r.gcpId === gcpId)?.sfm ?? null
+}
+function fmtSfm(v) {
+  return v == null || Number.isNaN(v) ? '—' : v.toPrecision(6)
+}
 const emit = defineEmits(['toggle', 'remove-gcp', 'select', 'jump-to-image', 'remove-observation',
   'update-observation-accuracy', 'open-gcp'])
 
@@ -45,7 +68,7 @@ function reprojFor(gcpId, imageId) {
   <div class="section">
     <button class="section-hd" @click="emit('toggle')">
       <span class="chevron">{{ open ? '▾' : '▸' }}</span>
-      <span class="section-name">Ground Control Points</span>
+      <span class="section-name">Control &amp; Markers</span>
       <span v-if="gcps.length" class="badge">{{ gcps.length }}</span>
     </button>
     <ul v-if="open" class="item-list">
@@ -65,9 +88,8 @@ function reprojFor(gcpId, imageId) {
             :title="gcpExpanded[gcp.id] ? 'Collapse' : 'Expand'"
           ></button>
           <span class="item-name">{{ gcp.name }}</span>
-          <span class="role-badge" :class="gcp.role === 'check' ? 'check' : 'control'"
-            :title="gcp.role === 'check' ? 'Checkpoint — excluded from adjustment' : 'Control point — constrains georeferencing'">
-            {{ gcp.role === 'check' ? 'CHK' : 'CTL' }}
+          <span class="role-badge" :class="roleBadge(gcp).cls" :title="roleBadge(gcp).title">
+            {{ roleBadge(gcp).text }}
           </span>
           <span
             class="obs-badge"
@@ -78,21 +100,42 @@ function reprojFor(gcpId, imageId) {
           </span>
         </li>
         <li v-if="gcpExpanded[gcp.id]" class="img-details">
-          <div class="detail-row">
-            <span class="detail-label">X</span>
-            <span class="detail-value">{{ fmtCoord(gcp.x) }}</span>
-          </div>
-          <div class="detail-row">
-            <span class="detail-label">Y</span>
-            <span class="detail-value">{{ fmtCoord(gcp.y) }}</span>
-          </div>
-          <div class="detail-row">
-            <span class="detail-label">Z</span>
-            <span class="detail-value">
-              <template v-if="gcp.z != null">{{ fmtCoord(gcp.z) }}</template>
-              <span v-else class="detail-dim">—</span>
-            </span>
-          </div>
+          <!-- A marker has no surveyed coordinates by definition; show where the
+               model puts it instead, in SfM units. -->
+          <template v-if="isMarker(gcp)">
+            <div class="detail-row">
+              <span class="detail-label">Model X</span>
+              <span class="detail-value">{{ fmtSfm(sfmPosFor(gcp.id)?.x) }}</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">Model Y</span>
+              <span class="detail-value">{{ fmtSfm(sfmPosFor(gcp.id)?.y) }}</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">Model Z</span>
+              <span class="detail-value">{{ fmtSfm(sfmPosFor(gcp.id)?.z) }}</span>
+            </div>
+            <div v-if="!sfmPosFor(gcp.id)" class="detail-row">
+              <span class="detail-value detail-dim">Not triangulated — needs ≥2 marks in registered images</span>
+            </div>
+          </template>
+          <template v-else>
+            <div class="detail-row">
+              <span class="detail-label">X</span>
+              <span class="detail-value">{{ fmtCoord(gcp.x) }}</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">Y</span>
+              <span class="detail-value">{{ fmtCoord(gcp.y) }}</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">Z</span>
+              <span class="detail-value">
+                <template v-if="gcp.z != null">{{ fmtCoord(gcp.z) }}</template>
+                <span v-else class="detail-dim">—</span>
+              </span>
+            </div>
+          </template>
 
           <div class="obs-header">Marked images ({{ gcp.observations?.length || 0 }})</div>
           <ul v-if="gcp.observations?.length" class="obs-list">
@@ -122,10 +165,10 @@ function reprojFor(gcpId, imageId) {
               <button class="obs-remove" title="Remove this observation" @click.stop="emit('remove-observation', { gcpId: gcp.id, imageId: obs.imageId })">×</button>
             </li>
           </ul>
-          <div v-else class="obs-empty">Right-click a position in an image tab to mark this GCP.</div>
+          <div v-else class="obs-empty">Right-click a position in an image tab to mark this point.</div>
         </li>
       </template>
-      <li v-if="!gcps.length" class="empty">No GCPs — right-click in an image tab to add one, or import a control-point file</li>
+      <li v-if="!gcps.length" class="empty">No points — right-click in an image tab to add one, or import a control-point file</li>
     </ul>
 
     <!-- GCP context menu -->
@@ -136,7 +179,7 @@ function reprojFor(gcpId, imageId) {
         :style="{ left: gcpCtx.x + 'px', top: gcpCtx.y + 'px' }"
         @click.stop
       >
-        <button class="ctx-item danger" @click="ctxRemoveGcp">Remove GCP</button>
+        <button class="ctx-item danger" @click="ctxRemoveGcp">Remove point</button>
       </div>
     </Teleport>
   </div>
@@ -155,6 +198,7 @@ function reprojFor(gcpId, imageId) {
   color: #3fae6a;
 }
 .role-badge.check { color: #38a9c7; }
+.role-badge.marker { color: #b98ae0; }
 
 .obs-header {
   margin: 6px 0 2px;

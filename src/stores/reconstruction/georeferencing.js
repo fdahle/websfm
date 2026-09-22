@@ -1,10 +1,15 @@
-import { computed } from 'vue'
+import { computed, watch } from 'vue'
 import { fitSimilarity, applySimilarity } from '../../core/products/georef.js'
 import { cameraCenter } from '../../core/sfm/geometry.js'
 import { triangulateAllGcps } from '../../core/sfm/gcpTriangulation.js'
 import { gcpGuidesForImage, gcpEstimateForImage } from '../../core/sfm/gcpGuides.js'
 import { isGeographic } from '../../core/crs.js'
 import { normalizedGroundResidual, precisionFromGcp } from '../../core/gcpAccuracy.js'
+import { isGroundControl } from '../../core/io/gcp.js'
+
+// One spelling of "may this point constrain the solve" (core/io/gcp.js), shared
+// with the anchored-BA gate. Never re-derive it from finite coordinates alone.
+const groundControl = (g) => isGroundControl(g, { precision: precisionFromGcp })
 
 const finite3d = (p) => Number.isFinite(p?.x) && Number.isFinite(p?.y) && Number.isFinite(p?.z)
 const inverseVariance3d = (p) => {
@@ -37,7 +42,20 @@ const inverseVariance3d = (p) => {
 //   persist(), log() — store side effects
 export function createGeoreferencing({
   sparseCameras, images, georef, healthDirty, poses, gcps, currentCrs, persist, log,
+  modelStamp = () => null,
 }) {
+
+  const evidenceKey = computed(() => {
+    // Camera buffers are markRaw; healthDirty signals in-place model edits.
+    void healthDirty.value
+    return JSON.stringify({ crs: currentCrs(), model: modelStamp(),
+      cameras: [...sparseCameras.value], images: images.value.map(im => [im.id, im.uuid]),
+      gcps: gcps(), poses: poses() })
+  })
+  const validGeoref = computed(() => georef.value?.evidenceKey === evidenceKey.value ? georef.value : null)
+  watch([evidenceKey, () => georef.value], () => {
+    if (georef.value && !validGeoref.value) georef.value = null
+  }, { flush: 'sync' })
 
   // 3D-3D correspondences for the SfM→CRS fit: registered sparse camera centres
   // ↔ imported camera poses (both keyed to images; poses are in the project CRS).
@@ -71,7 +89,7 @@ export function createGeoreferencing({
     if (!cams.size) return []
     const imgById = imagesById()
     return gcps().filter((g) => {
-      if (g.enabled === false || g.role === 'check' || !finite3d(g) || !precisionFromGcp(g)) return false
+      if (!groundControl(g)) return false
       const nRegistered = (g.observations || []).filter((o) => {
         const uuid = imgById.get(o.imageId)?.uuid
         return uuid != null && cams.has(uuid)
@@ -121,7 +139,9 @@ export function createGeoreferencing({
         'warn', 'Products')
       return null
     }
+    const evidenceAtStart = evidenceKey.value
     const gcpPairs = await gcpGeorefPairs()
+    if (evidenceKey.value !== evidenceAtStart) return null
     const usingGcps = gcpPairs.length >= 3
     if (usingGcps) {
       const datums = new Set(qualifyingGcps().map((g) => g.verticalDatum ?? 'unknown'))
@@ -153,6 +173,7 @@ export function createGeoreferencing({
       return null
     }
     georef.value = {
+      evidenceKey: evidenceAtStart,
       sim: { scale: fit.scale, R: fit.R, t: fit.t },
       crs: currentCrs(), rms: fit.rms, count: fit.count, method: usingGcps ? 'gcps' : 'poses',
     }
@@ -169,7 +190,7 @@ export function createGeoreferencing({
   // no-robust stance — dropping a camera from the diff would hide the drift this
   // report exists to surface. Returns [{ uuid, name, dx, dy, dz, dTotal }].
   function poseResidualReport() {
-    const sim = georef.value?.sim
+    const sim = validGeoref.value?.sim
     const cams = sparseCameras.value
     if (!sim || !cams.size) return []
     const imgById = new Map(images.value.map((im) => [im.id, im]))
@@ -200,14 +221,14 @@ export function createGeoreferencing({
   // Returns [{ gcpId, name, viewCount, dx, dy, dz, dTotal, observations }] —
   // entries for untriangulable GCPs still appear with residuals `null`.
   async function gcpAccuracyReport() {
-    const sim = georef.value?.sim
+    const sim = validGeoref.value?.sim
     const enabled = gcps().filter((g) => g.enabled !== false)
     if (!enabled.length) return []
     const results = await triangulateAllGcps(enabled, sparseCameras.value, imagesById())
     const rows = results.map(({ gcp, tri }) => {
       if (!tri) {
         return { gcpId: gcp.id, name: gcp.name, role: gcp.role ?? 'control', viewCount: 0,
-          dx: null, dy: null, dz: null, dTotal: null, observations: [] }
+          sfm: null, dx: null, dy: null, dz: null, dTotal: null, observations: [] }
       }
       let dx = null, dy = null, dz = null, dTotal = null
       let normalized = null, normalizedAxes = null, chi2 = null
@@ -222,14 +243,19 @@ export function createGeoreferencing({
       }
       return {
         gcpId: gcp.id, name: gcp.name, role: gcp.role ?? 'control', viewCount: tri.viewCount,
+        // Where the model puts the point, in SfM-frame units. For a control/check
+        // point this is intermediate; for a MARKER it is the whole answer — a
+        // marker has no surveyed coordinate to diff against, so its triangulated
+        // position and the per-view reprojection errors are the only quality
+        // signals it has. It is also what the scale-bar fit measures across.
+        sfm: { x: tri.x, y: tri.y, z: tri.z },
         dx, dy, dz, dTotal, normalized, normalizedAxes, chi2,
         observations: tri.perViewReprojPx,
       }
     })
     // When no checkpoints exist, leave-one-control-out prediction is the next
     // best validation: fit without one control and predict that withheld point.
-    const controls = results.filter(({ gcp, tri }) => tri && gcp.role !== 'check'
-      && finite3d(gcp) && precisionFromGcp(gcp))
+    const controls = results.filter(({ gcp, tri }) => tri && groundControl(gcp))
     if (controls.length >= 4) {
       for (const withheld of controls) {
         const fit = fitSimilarity(controls.filter((r) => r !== withheld).map(({ gcp, tri }) => ({
@@ -284,7 +310,7 @@ export function createGeoreferencing({
     return gcpEstimateForImage(gcp.observations, targetCam, camerasByImageId)
   }
 
-  return {
+  return { validGeoref, evidenceKey,
     georefPairs, imagesById, qualifyingGcps, canGeoreferenceGcps, gcpGeorefPairs,
     canGeoreference, georeference, poseResidualReport, gcpAccuracyReport,
     gcpGuides, gcpEstimate,

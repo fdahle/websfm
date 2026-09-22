@@ -6,7 +6,12 @@
 // Chrome. We fix it once, at ingest/restore, by transcoding the TIFF to a PNG
 // blob and using that as `image.url` — every downstream consumer then works
 // unchanged in every browser.
-import { fromBlob } from 'geotiff'
+let geotiffModule
+async function openTiff(blob) {
+  geotiffModule ??= import('geotiff')
+  const { fromBlob } = await geotiffModule
+  return fromBlob(blob)
+}
 
 // True for anything that looks like a TIFF, from a File/Blob (type + name) or a
 // bare filename string (used on restore, where the OPFS Blob carries no name).
@@ -159,7 +164,7 @@ function geoKeysDeclareCrs(geoKeys) {
 
 export async function probeTiffGeoTags(blob) {
   try {
-    const tiff = await fromBlob(blob)
+    const tiff = await openTiff(blob)
     const image = await tiff.getImage()
     const fd = image.getFileDirectory()
     const tiepoint = await readTiffTag(fd, 'ModelTiepoint')
@@ -203,7 +208,7 @@ export async function probeTiffGeoTags(blob) {
 // pixel decode (readRGB, below) — lets callers show real dimensions near-
 // instantly while the slow decode+encode still runs in the background.
 export async function readTiffDimensions(blob) {
-  const tiff = await fromBlob(blob)
+  const tiff = await openTiff(blob)
   const image = await tiff.getImage()
   return { width: image.getWidth(), height: image.getHeight() }
 }
@@ -255,7 +260,7 @@ export async function tiffToDisplayBlob(blob, { jpegQuality = 0.92, onThumbnail,
   }
 
   if (!rgba) {
-    const tiff = await fromBlob(blob)
+    const tiff = await openTiff(blob)
     const image = await tiff.getImage()
     width = image.getWidth()
     height = image.getHeight()

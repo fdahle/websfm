@@ -1,4 +1,7 @@
 <script setup>
+import { linearCrsUnit } from '../../../core/crs.js'
+import { useProjectsStore } from '../../../stores/useProjectsStore.js'
+
 import { ref, computed, onMounted } from 'vue'
 import StatTiles from '../ui/StatTiles.vue'
 import DataTable from '../ui/DataTable.vue'
@@ -18,12 +21,19 @@ const imagesStore = useImagesStore()
 const { log } = useLog()
 
 const tab = ref('gcps')
-const TABS = [{ id: 'gcps', label: 'GCP Accuracy' }, { id: 'poses', label: 'Pose Residuals' }, { id: 'dem', label: 'DEM vs GCPs' }]
+const TABS = [
+  { id: 'gcps', label: 'GCP Accuracy' },
+  { id: 'poses', label: 'Pose Residuals' },
+  { id: 'scale', label: 'Scale Bars' },
+  { id: 'dem', label: 'DEM vs GCPs' },
+]
 
-const crsUnit = computed(() => recon.dem?.unit || 'm')
+const projects = useProjectsStore()
+const crsUnit = computed(() => linearCrsUnit(projects.currentCrs))
 const method = computed(() => recon.georef?.method ?? null)
 const fmtM = (v) => (v == null ? '—' : v.toFixed(3))
 const tone = (v, thr) => (v == null ? undefined : (v >= thr.bad ? 'bad' : (v >= thr.warn ? 'warn' : 'ok')))
+const ROLE_LABEL = { control: 'Control', check: 'Check', marker: 'Marker' }
 
 // ── GCP accuracy (async; per-row toggle refits + re-runs) ──
 const imageName = (id) => imagesStore.images.find((im) => im.id === id)?.name ?? id
@@ -49,7 +59,7 @@ async function refreshGcps() {
   })
   gcpLoading.value = false
 }
-onMounted(refreshGcps)
+onMounted(() => { refreshGcps(); refreshScale() })
 async function onToggle(row) {
   gcpsStore.setGcpEnabled(row.id, !row.enabled)
   await recon.georeference()
@@ -62,7 +72,7 @@ const rmse = (rows, sel) => {
   return Math.sqrt(used.reduce((a, r) => a + sel(r) ** 2, 0) / used.length)
 }
 const gcpStats = computed(() => {
-  const controls = gcpRows.value.filter((r) => r.enabled && r.role !== 'check' && r.dTotal != null)
+  const controls = gcpRows.value.filter((r) => r.enabled && (r.role ?? 'control') === 'control' && r.dTotal != null)
   const checks = gcpRows.value.filter((r) => r.enabled && r.role === 'check' && r.dTotal != null)
   const loo = controls.filter((r) => r.looTotal != null).map((r) => ({ ...r,
     dx: r.looDx, dy: r.looDy, dz: r.looDz, dTotal: r.looTotal,
@@ -97,7 +107,7 @@ const gcpTiles = computed(() => {
 })
 const gcpColumns = [
   { key: 'enabled', label: 'On', sortable: false }, { key: 'name', label: 'Name' },
-  { key: 'role', label: 'Role', format: (v) => v === 'check' ? 'Check' : 'Control' },
+  { key: 'role', label: 'Role', format: (v) => ROLE_LABEL[v] ?? 'Control' },
   { key: 'viewCount', label: 'Views', align: 'right' },
   { key: 'dx', label: 'ΔX', align: 'right', format: fmtM }, { key: 'dy', label: 'ΔY', align: 'right', format: fmtM },
   { key: 'dz', label: 'ΔZ', align: 'right', format: fmtM }, { key: 'dTotal', label: 'Δ total', align: 'right', format: fmtM },
@@ -128,8 +138,71 @@ const poseColumns = [
   { key: 'dTotal', label: 'Δ total', align: 'right', format: fmtM },
 ]
 
+// ── Scale bars (D6) ──
+// Every bar reports a residual, whether or not it defined the scale: with a
+// georeference present the bars are independent CHECKS against the CRS fit. That
+// is the same rule that keeps the GCP report non-robust — a disagreeing bar is
+// exactly the disagreement the report exists to surface.
+const scaleRows = ref([])
+const scaleResolved = ref({ unit: 'model', scale: 1, source: null })
+const scaleLoading = ref(true)
+async function refreshScale() {
+  scaleLoading.value = true
+  scaleResolved.value = await recon.effectiveFrameSpec()
+  const rows = await recon.scaleBarReport(
+    scaleResolved.value.unit !== 'model' ? scaleResolved.value.scale : null)
+  scaleRows.value = rows.map((r) => ({ ...r, absResidual: r.residualM == null ? null : Math.abs(r.residualM) }))
+  scaleLoading.value = false
+}
+const scaleStats = computed(() => {
+  const used = scaleRows.value.filter((r) => r.enabled && r.residualM != null)
+  const weightedSquaredError = used.reduce((sum, r) => {
+    const weight = r.accuracyM > 0 ? 1 / (r.accuracyM * r.accuracyM) : 1
+    return sum + weight * r.residualM * r.residualM
+  }, 0)
+  const weightSum = used.reduce((sum, r) =>
+    sum + (r.accuracyM > 0 ? 1 / (r.accuracyM * r.accuracyM) : 1), 0)
+  return {
+    n: used.length,
+    total: scaleRows.value.length,
+    rms: weightSum ? Math.sqrt(weightedSquaredError / weightSum) : null,
+    worst: used.length ? Math.max(...used.map((r) => Math.abs(r.residualM))) : null,
+    unmeasured: scaleRows.value.filter((r) => r.enabled && r.modelDistance == null).length,
+  }
+})
+const scaleTiles = computed(() => {
+  const s = scaleStats.value
+  const src = scaleResolved.value.source
+  return [
+    { label: 'Scale source', value: src === 'georef' ? 'Georeference' : (src === 'scalebars' ? 'Scale bars' : 'None'),
+      tone: src ? undefined : 'warn',
+      hint: src === 'georef' ? 'bars are independent checks'
+        : (src ? null : 'lengths are up to scale — model units') },
+    { label: 'Metres per model unit', value: scaleResolved.value.unit !== 'model' ? scaleResolved.value.scale.toPrecision(6) : '—' },
+    { label: 'Weighted residual RMS', value: s.rms == null ? '—' : s.rms.toPrecision(3), unit: 'm' },
+    { label: 'Worst residual', value: s.worst == null ? '—' : s.worst.toPrecision(3), unit: 'm' },
+    { label: 'Bars reported', value: `${s.n} / ${s.total}` },
+    { label: 'Not measurable', value: s.unmeasured, tone: s.unmeasured ? 'warn' : undefined,
+      hint: s.unmeasured ? 'endpoint missing or not registered' : null },
+  ]
+})
+const scaleColumns = [
+  { key: 'name', label: 'Bar' },
+  { key: 'enabled', label: 'In fit', format: (v) => (v ? 'yes' : 'no') },
+  { key: 'knownDistanceM', label: 'Known', align: 'right', format: (v) => (v == null ? '—' : `${v.toPrecision(6)} m`) },
+  { key: 'accuracyM', label: '± 1σ', align: 'right', format: (v) => (v == null ? 'equal weight' : `${v.toPrecision(3)} m`) },
+  { key: 'modelDistance', label: 'Model', align: 'right', format: (v) => (v == null ? '—' : v.toPrecision(6)) },
+  { key: 'measuredM', label: 'Measured', align: 'right', format: (v) => (v == null ? '—' : `${v.toPrecision(6)} m`) },
+  { key: 'residualM', label: 'Residual', align: 'right',
+    format: (v, r) => (v == null ? (r.reason ?? '—') : `${v >= 0 ? '+' : '−'}${Math.abs(v).toPrecision(3)} m`) },
+  { key: 'normalizedResidual', label: 'Normalized', align: 'right', format: (v) => (v == null ? '—' : `${v.toFixed(2)}σ`) },
+]
+
 // ── DEM vs GCPs ──
-const demGcps = computed(() => gcpsStore.gcps.filter((g) => g.enabled !== false && g.x != null && g.y != null))
+const demGcps = computed(() => gcpsStore.gcps.filter((g) =>
+  g.enabled !== false
+  && (g.role === 'control' || g.role === 'check')
+  && Number.isFinite(g.x) && Number.isFinite(g.y) && Number.isFinite(g.z)))
 const demRows = computed(() =>
   sampleDemAtGcps(recon.dem, demGcps.value).map((r) => ({ id: r.gcpId, ...r, absDz: r.dz == null ? null : Math.abs(r.dz) })))
 const demStats = computed(() => {
@@ -192,6 +265,21 @@ const demColumns = [
       <DataTable :columns="poseColumns" :rows="poseRows" sort-key="dTotal" sort-dir="desc"
         empty-text="No imported poses match registered images." />
       <p class="eval-note">Registered camera centre (through the georeference) vs the imported pose, worst-first.</p>
+    </template>
+  </template>
+
+  <!-- Scale bars -->
+  <template v-else-if="tab === 'scale'">
+    <div v-if="scaleLoading" class="eval-loading">Measuring bars…</div>
+    <template v-else>
+      <StatTiles :tiles="scaleTiles" />
+      <DataTable :columns="scaleColumns" :rows="scaleRows" sort-key="absResidual" sort-dir="desc"
+        empty-text="No scale bars — add them from Tools ▸ Georeferencing ▸ Scale Bars." />
+      <p class="eval-note">
+        Every bar is reported, whether or not it defined the scale — a georeferenced project's
+        bars are independent checks against the CRS fit, and a bar excluded from the fit still
+        shows its residual. Bars with no declared 1σ are equally weighted, not surveyed.
+      </p>
     </template>
   </template>
 

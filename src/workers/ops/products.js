@@ -1,6 +1,7 @@
+import { pointView } from '../../core/products/pointView.ts'
 import { hillshadeRgba } from '../../core/products/colormap.js'
 import { rasterToDataUrl } from '../rasterPreview.js'
-import { buildLocalFrame, makeFrame } from '../../core/products/projection.js'
+import { buildLocalFrame, makeFrame, frameFromScaledLocal } from '../../core/products/projection.js'
 import { frameFromSimilarity } from '../../core/products/georef.js'
 import { rasterizeDem } from '../../core/products/dem.js'
 import { orthorectify } from '../../core/products/ortho.js'
@@ -15,7 +16,15 @@ export function makeProductsOps() {
   // resolves it). 'local' is derived from the scene; 'similarity' from a fit.
   function rebuildFrame(spec, cameras, points) {
     if (spec?.kind === 'similarity') {
-      return frameFromSimilarity({ scale: spec.scale, R: spec.R, t: spec.t }, spec.crs)
+      return frameFromSimilarity({ scale: spec.scale, R: spec.R, t: spec.t }, spec.crs, spec)
+    }
+    // 'scaled-local' = the local frame with a scale-bar factor (metric, no CRS).
+    // The base descriptor's basis is unit-length; NEVER hand makeFrame scaled
+    // vectors (see frameFromScaledLocal). The base half may itself be an
+    // unresolved request, so recurse rather than duplicating the fallback.
+    if (spec?.kind === 'scaled-local') {
+      const base = rebuildFrame({ ...spec, kind: 'local' }, cameras, points)
+      return frameFromScaledLocal(base, spec.scale) ?? base
     }
     if (spec && spec.origin && spec.east) {
       // A fully-resolved local descriptor (re-used by the ortho pass).
@@ -27,9 +36,14 @@ export function makeProductsOps() {
   // A serialisable snapshot of a frame (basis + metadata) so the DEM result can
   // carry the exact frame its grid was built in, for the ortho pass to reuse.
   function frameDescriptor(frame, spec) {
-    if (spec?.kind === 'similarity') return { kind: 'similarity', scale: spec.scale, R: spec.R, t: spec.t, crs: spec.crs }
+    if (spec?.kind === 'similarity') return { ...spec }
     return {
-      kind: 'local', origin: frame.origin, east: frame.east, north: frame.north, up: frame.up,
+      // frame.origin/east/north/up are the UNSCALED basis for a scaled-local
+      // frame too (frameFromScaledLocal keeps the basis orthonormal and carries
+      // the factor separately), so one descriptor shape covers both.
+      kind: spec?.kind === 'scaled-local' ? 'scaled-local' : 'local',
+      ...(spec?.kind === 'scaled-local' ? { scale: frame.scale ?? spec.scale } : {}),
+      origin: frame.origin, east: frame.east, north: frame.north, up: frame.up,
       crs: frame.crs, unit: frame.unit, source: frame.source,
     }
   }
@@ -49,21 +63,24 @@ export function makeProductsOps() {
     const { points, cameras = [], frame: frameSpec, settings = {} } = input
     const camMap = new Map(cameras.map((c) => [c.uuid, { R: c.R, t: c.t, K: c.K }]))
     emit('progress', [0, 1, 'Projecting points…'])
-    const frame = rebuildFrame(frameSpec, camMap, points)
+    const view = pointView(points)
+    const frame = rebuildFrame(frameSpec, camMap, view)
 
     // Project every point into the frame (z = height).
-    const framed = new Array(points.length)
-    for (let i = 0; i < points.length; i++) {
-      const [x, y, z] = frame.fromSfm(points[i])
-      framed[i] = { x, y, z }
+    const pos = points.pos ?? new Float64Array(view.length * 3)
+    let i = 0
+    for (const p of view) {
+      const projected = frame.fromSfm(p)
+      pos[i++] = projected[0]; pos[i++] = projected[1]; pos[i++] = projected[2]
     }
+    const framed = pointView({ pos, count: view.length })
 
     emit('progress', [0, 1, 'Rasterising grid…'])
     const grid = rasterizeDem(framed, settings)
     if (!grid) throw new Error('DEM: could not rasterise (need a denser cloud or a smaller GSD)')
 
     const previewDataUrl = await demToDataUrl(grid)
-    const unitLabel = frame.unit === 'm' ? 'm' : 'model units'
+    const unitLabel = frame.unit === 'model' ? 'model units' : frame.unit
     emit('log', [`DEM: ${grid.width}×${grid.height} @ ${grid.gsd.toPrecision(3)} ${unitLabel}/px, `
       + `z ${grid.zMin.toPrecision(4)}–${grid.zMax.toPrecision(4)}, `
       + `${grid.count} measured + ${grid.filled} filled cells (${frame.crs})`, 'success', 'Products'])
@@ -119,7 +136,7 @@ export function makeProductsOps() {
         (done, total) => emit('progress', [done, total, 'Rasterising mesh surface…']))
       if (!grid) throw new Error('Ortho: the mesh has no triangles to rasterise')
       emit('log', [`Ortho: mesh surface ${grid.width}×${grid.height} @ `
-        + `${grid.gsd.toPrecision(3)} ${frame.unit === 'm' ? 'm' : 'units'}/px from `
+        + `${grid.gsd.toPrecision(3)} ${frame.unit === 'model' ? 'model units' : frame.unit}/px from `
         + `${grid.triangles.toLocaleString()} triangles, ${grid.count} cells with height`,
       'info', 'Products'])
       return { grid: { ...grid, frame: frameDescriptor(frame, surface.frame) }, frame, label: 'mesh' }
@@ -135,7 +152,7 @@ export function makeProductsOps() {
       if (!grid) throw new Error('Ortho: could not fit a plane (need ≥3 spread points)')
       const p = grid.plane
       emit('log', [`Ortho: plane surface ${grid.width}×${grid.height} @ `
-        + `${grid.gsd.toPrecision(3)} ${frame.unit === 'm' ? 'm' : 'units'}/px — `
+        + `${grid.gsd.toPrecision(3)} ${frame.unit === 'model' ? 'model units' : frame.unit}/px — `
         + `slope ${(Math.hypot(p.a, p.b) * 100).toFixed(1)}%, residual RMS `
         + `${p.rms.toPrecision(3)} over ${p.n.toLocaleString()} points`
         + (p.dropped ? ` (${p.dropped.toLocaleString()} outliers dropped)` : ''),
@@ -157,7 +174,7 @@ export function makeProductsOps() {
     const grid = settings.gsd > 0 ? resampleSurface(built.grid, settings.gsd) : built.grid
     if (grid !== built.grid) {
       emit('log', [`Ortho: resampled the ${label} surface to ${grid.width}×${grid.height} @ `
-        + `${grid.gsd.toPrecision(3)} ${frame.unit === 'm' ? 'm' : 'units'}/px`, 'info', 'Products'])
+        + `${grid.gsd.toPrecision(3)} ${frame.unit === 'model' ? 'model units' : frame.unit}/px`, 'info', 'Products'])
     }
 
     emit('progress', [0, grid.height, 'Orthorectifying…'])

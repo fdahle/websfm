@@ -7,6 +7,7 @@ defineProps({
   report:        { type: Array,  default: () => [] },
   selectedGcpId: { type: String, default: null },
   hasReferenceDem: { type: Boolean, default: false },
+  sceneType:       { type: String,  default: null },
 })
 
 const emit = defineEmits([
@@ -17,9 +18,9 @@ const emit = defineEmits([
 
 <template>
   <div class="overlay" @click.self="emit('close')">
-    <div class="modal" role="dialog" aria-modal="true" aria-label="Ground Control Points Table">
+    <div class="modal" role="dialog" aria-modal="true" aria-label="Control and Markers Table">
       <div class="modal-header">
-        <span class="modal-title">Ground Control Points</span>
+        <span class="modal-title">Control &amp; Markers</span>
         <div class="modal-actions">
           <button class="modal-refresh" title="Refresh accuracy report" @click="emit('refresh-report')">⟳</button>
           <button class="modal-close" title="Close" @click="emit('close')">×</button>
@@ -32,6 +33,7 @@ const emit = defineEmits([
           :report="report"
           :selected-gcp-id="selectedGcpId"
           :has-reference-dem="hasReferenceDem"
+          :scene-type="sceneType"
           @fill-z="emit('fill-z')"
           @check-z="emit('check-z')"
           @remove="emit('remove', $event)"
@@ -41,7 +43,7 @@ const emit = defineEmits([
           @update-role="emit('update-role', $event)"
           @update-vertical-datum="emit('update-vertical-datum', $event)"
           @select="emit('select', $event)"
-          @add="emit('add')"
+          @add="emit('add', $event)"
         />
       </div>
     </div>

@@ -10,12 +10,22 @@ const props = defineProps({
   // Reads the INDEX, never a loaded plane — the planes hydrate lazily, so a
   // freshly reopened project has rasters but no sources in memory.
   hasReferenceDem: { type: Boolean, default: false },
+  // Project scene type ('aerial' | 'object' | null) — orders the two create
+  // buttons; an object project is almost always adding markers.
+  sceneType: { type: String, default: null },
 })
 
 const emit = defineEmits([
   'remove', 'update-accuracy', 'update-name', 'update-position', 'select', 'add',
   'update-role', 'update-vertical-datum', 'fill-z', 'check-z',
 ])
+
+// A MARKER is a scale-bar endpoint: image marks and no surveyed position. Its
+// coordinate and ground-accuracy cells are not "blank", they do not exist — so
+// the row collapses them rather than showing editable zeros that would read as
+// surveyed values (and, per core/io/gcp.js `isGroundControl`, still could not
+// constrain anything if filled in).
+const isMarker = (gcp) => gcp.role === 'marker'
 
 // Compact coordinate formatting (projected metres vs. degrees in a geographic CRS).
 function fmtCoord(v) {
@@ -56,7 +66,17 @@ function onPositionInput(gcp, axis, e) {
 <template>
   <div class="table-wrap">
     <div class="toolbar">
-      <button class="add-gcp" @click="emit('add')">+ Add GCP</button>
+      <!-- Two explicit actions rather than one "+ Add" plus a role edit: a point
+           created as control and re-roled afterwards keeps the coordinates it was
+           born with. Scene type orders them; both are always available. -->
+      <template v-if="sceneType === 'object'">
+        <button class="add-gcp" title="A scale-bar endpoint: image marks, no surveyed position" @click="emit('add', 'marker')">+ Add marker</button>
+        <button class="add-gcp" title="A surveyed point that constrains georeferencing" @click="emit('add', 'control')">+ Add control</button>
+      </template>
+      <template v-else>
+        <button class="add-gcp" title="A surveyed point that constrains georeferencing" @click="emit('add', 'control')">+ Add control</button>
+        <button class="add-gcp" title="A scale-bar endpoint: image marks, no surveyed position" @click="emit('add', 'marker')">+ Add marker</button>
+      </template>
       <!-- Only offered once a reference DEM is imported; a greyed-out button
            with no explanation is worse than no button. -->
       <template v-if="hasReferenceDem">
@@ -119,9 +139,14 @@ function onPositionInput(gcp, axis, e) {
               @change="emit('update-role', { id: gcp.id, role: $event.target.value })" @click.stop>
               <option value="control">Control</option>
               <option value="check">Check</option>
+              <option value="marker">Marker</option>
             </select>
           </td>
-          <td class="uncertainty-cell" :class="{ unknown: !gcp.accuracyStatus || gcp.accuracyStatus === 'unknown' }"
+          <td v-if="isMarker(gcp)" class="marker-note" colspan="7"
+            title="A marker has no surveyed position — it exists to give a scale bar a reproducible endpoint">
+            no surveyed position
+          </td>
+          <td v-if="!isMarker(gcp)" class="uncertainty-cell" :class="{ unknown: !gcp.accuracyStatus || gcp.accuracyStatus === 'unknown' }"
             :title="`Ground accuracy: ${gcp.accuracyStatus || 'unknown'}; height datum: ${gcp.verticalDatum || 'unknown'}`">
             {{ !gcp.accuracyStatus || gcp.accuracyStatus === 'unknown' ? '⚠ unknown' : gcp.accuracyStatus.replace('preset:', '') }}
             <select class="datum-select" :value="gcp.verticalDatum || 'unknown'" @click.stop
@@ -130,7 +155,7 @@ function onPositionInput(gcp, axis, e) {
               <option value="orthometric">geoid</option><option value="local">local</option>
             </select>
           </td>
-          <td class="num">
+          <td v-if="!isMarker(gcp)" class="num">
             <input
               class="coord-input"
               type="number"
@@ -139,7 +164,7 @@ function onPositionInput(gcp, axis, e) {
               @change="onPositionInput(gcp, 'x', $event)"
             />
           </td>
-          <td class="num">
+          <td v-if="!isMarker(gcp)" class="num">
             <input
               class="coord-input"
               type="number"
@@ -148,7 +173,7 @@ function onPositionInput(gcp, axis, e) {
               @change="onPositionInput(gcp, 'y', $event)"
             />
           </td>
-          <td class="num">
+          <td v-if="!isMarker(gcp)" class="num">
             <input
               class="coord-input"
               type="number"
@@ -157,7 +182,7 @@ function onPositionInput(gcp, axis, e) {
               @change="onPositionInput(gcp, 'z', $event)"
             />
           </td>
-          <td class="acc-cell">
+          <td v-if="!isMarker(gcp)" class="acc-cell">
             <input
               class="acc-input"
               type="number"
@@ -167,7 +192,7 @@ function onPositionInput(gcp, axis, e) {
               @change="onAccuracyInput(gcp, 'x', $event)"
             />
           </td>
-          <td class="acc-cell">
+          <td v-if="!isMarker(gcp)" class="acc-cell">
             <input
               class="acc-input"
               type="number"
@@ -177,7 +202,7 @@ function onPositionInput(gcp, axis, e) {
               @change="onAccuracyInput(gcp, 'y', $event)"
             />
           </td>
-          <td class="acc-cell">
+          <td v-if="!isMarker(gcp)" class="acc-cell">
             <input
               class="acc-input"
               type="number"
@@ -224,7 +249,7 @@ function onPositionInput(gcp, axis, e) {
             <span v-else class="na">—</span>
           </td>
           <td class="action-cell">
-            <button class="row-remove" title="Remove GCP" @click.stop="emit('remove', gcp.id)">×</button>
+            <button class="row-remove" title="Remove point" @click.stop="emit('remove', gcp.id)">×</button>
           </td>
         </tr>
       </tbody>
@@ -398,6 +423,13 @@ tbody tr:hover {
 
 .action-cell {
   width: 32px;
+  text-align: center;
+}
+
+.marker-note {
+  color: var(--text-dim);
+  font-style: italic;
+  font-size: 11px;
   text-align: center;
 }
 

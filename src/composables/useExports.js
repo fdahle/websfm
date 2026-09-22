@@ -1,6 +1,7 @@
 import { ref } from 'vue'
+import { metresPerCrsUnit } from '../core/crs.js'
 import { buildPosesCsv, buildSensorsCsv, downloadCsv } from '../utils/exportCsv.js'
-import { cloudToPly, meshToPly, meshToGlb, meshToObj, meshToStl, reconstructionToJson, demToAsciiGrid, demToGeoTiff, demToCog, orthoToGeoTiff, orthoToCog, rasterWorldFile, prepareCloudForExport } from '../core/products/exporters.js'
+import { cloudToPly, meshToPly, meshToGlb, meshToObj, meshToStl, reconstructionToJson, demToAsciiGrid, demToGeoTiff, demToCog, orthoToGeoTiff, orthoToCog, rasterWorldFile, prepareCloudForExport, prepareMeshForExport } from '../core/products/exporters.js'
 import { cloudToLas } from '../core/io/las.js'
 import { cloudToXyz } from '../core/io/cloudText.js'
 import { buildColmapModel, serializeColmapModel, serializeColmapModelBin } from '../core/io/colmapModel.js'
@@ -27,13 +28,41 @@ import { showToast } from './useToasts.js'
 // refs so the composable stays free of store wiring. Injected deps (all refs):
 //   poses, sensors, images, matchStore, clouds, selectedCloud, mainSparseCloud,
 //   dem, ortho, georef, currentProjectName, currentCrs, summary
+// plus `effectiveFrameSpec` — THE unit resolver (useReconstructionStore). Export
+// must not decide independently what a coordinate means.
 // plus `progress` — usePipeline's progress handle, for the one export (undistorted
 // images) that is minutes of work rather than a serialization.
 export function useExports({
   poses, sensors, images, matchStore, clouds, selectedCloud, mainSparseCloud, dem, ortho,
-  georef, currentProjectName, currentCrs, summary, progress,
+  georef, currentProjectName, currentCrs, summary, progress, effectiveFrameSpec,
 }) {
   const { log } = useLog()
+
+  // The similarity a cloud/mesh export should apply, from THE resolver:
+  //   georeference  → the full CRS similarity (scale + rotation + translation)
+  //   scale bars    → a pure scale, no rotation, no origin shift
+  //   neither       → null (raw SfM coordinates, up to scale)
+  //
+  // The scale case is deliberately scale-ONLY rather than the whole scaled local
+  // frame. The orientation half of that frame is a *product* convention — DEM and
+  // ortho need a vertical axis, so buildLocalFrame guesses one (camera viewing
+  // dirs, else cloud PCA). For an object scan that guess is a PCA axis, and
+  // silently re-orienting an exported cloud by it would change more than the unit
+  // the user asked for. Metres in the model's own frame is the honest answer, and
+  // it is the answer with NO CRS attached (see D9 / WS0.4).
+  async function exportSimilarity() {
+    const resolved = await effectiveFrameSpec?.()
+    if (resolved?.source === 'georef') {
+      return { sim: { scale: resolved.frameSpec.scale, R: resolved.frameSpec.R, t: resolved.frameSpec.t }, unit: resolved.unit, crs: resolved.crs, source: 'georef' }
+    }
+    if (resolved?.source === 'scalebars') {
+      return {
+        sim: { scale: resolved.scale, R: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], t: [0, 0, 0] },
+        unit: 'm', crs: null, source: 'scalebars',
+      }
+    }
+    return { sim: null, unit: 'model', crs: null, source: null }
+  }
   function exportPoses() {
     if (!poses.value.length) return
     downloadCsv(`${currentProjectName.value || 'project'}-poses.csv`, buildPosesCsv(poses.value, currentCrs.value))
@@ -166,16 +195,22 @@ export function useExports({
     const raw = cloud.kind === 'dense'
       ? { count: cloud.count, pos: cloud.pos, col: cloud.col, nrm: cloud.nrm }
       : cloud.points
-    const g = applyGeoref ? georef?.value : null
+    const frame = applyGeoref ? await exportSimilarity() : { sim: null, unit: 'model', crs: null, source: null }
     const src = prepareCloudForExport(raw, {
-      sim: g?.sim ?? null,
+      sim: frame.sim,
       cell: downsampleCell > 0 ? downsampleCell : 0,
       onLog: log,
     })
-    if (g) log(`Cloud export: georeferenced to ${g.crs}`, 'info', 'Export')
+    if (frame.source === 'georef') log(`Cloud export: georeferenced to ${frame.crs}`, 'info', 'Export')
+    else if (frame.source === 'scalebars') {
+      log(`Cloud export: scaled to metres (×${frame.sim.scale.toPrecision(6)}) `
+        + 'from the scale bars — metric coordinates, no CRS', 'info', 'Export')
+    }
     const base = `${projectBase()}-${cloud.kind}`
     if (format === 'las' || format === 'laz') {
-      const m = g ? /EPSG:(\d+)/i.exec(g.crs) : null
+      // NEVER attach a CRS merely because the coordinates are metric: only a real
+      // georeference names one.
+      const m = frame.source === 'georef' && frame.crs ? /EPSG:(\d+)/i.exec(frame.crs) : null
       const crsCode = m ? Number(m[1]) : null
       const geographic = m ? Number(m[1]) === 4326 : false
       if (format === 'laz') {
@@ -198,12 +233,19 @@ export function useExports({
 
   // Mesh (screened Poisson) → PLY (faces) or GLB. Uses the selected mesh cloud, else
   // the first mesh cloud.
-  function doExportMesh({ format, includeColor }) {
+  async function doExportMesh({ format, includeColor, applyGeoref }) {
     const cloud = selectedCloud.value?.kind === 'mesh'
       ? selectedCloud.value
       : clouds.value.find((c) => c.kind === 'mesh' && c.count > 0)
     if (!cloud) return
-    const mesh = { nVerts: cloud.nVerts, count: cloud.count, pos: cloud.pos, idx: cloud.idx, col: cloud.col }
+    const raw = { nVerts: cloud.nVerts, count: cloud.count, pos: cloud.pos, idx: cloud.idx, col: cloud.col }
+    const frame = applyGeoref ? await exportSimilarity() : { sim: null, unit: 'model', crs: null, source: null }
+    const mesh = prepareMeshForExport(raw, { sim: frame.sim })
+    if (frame.source === 'georef') log(`Mesh export: georeferenced to ${frame.crs}`, 'info', 'Export')
+    else if (frame.source === 'scalebars') {
+      log(`Mesh export: scaled to metres (×${frame.sim.scale.toPrecision(6)}) `
+        + 'from the scale bars — metric coordinates, no CRS', 'info', 'Export')
+    }
     if (format === 'glb') {
       downloadBlob(`${projectBase()}-mesh.glb`, meshToGlb(mesh, { color: includeColor }), 'model/gltf-binary')
     } else if (format === 'obj') {
@@ -621,7 +663,8 @@ export function useExports({
       : clouds.value.find(cloudHasPoints)
     if (!cloud) return
 
-    const g = georef?.value ?? null
+    const resolved = await effectiveFrameSpec?.()
+    const g = resolved?.source === 'georef' ? { sim: resolved.frameSpec, crs: resolved.crs } : null
     const raw = cloud.kind === 'dense'
       ? { count: cloud.count, pos: cloud.pos, col: cloud.col }
       : cloud.points
@@ -637,7 +680,7 @@ export function useExports({
       // proj4, so the resulting basis carries the local rotation AND scale factor.
       const geo = async ([x, y, z]) => {
         const [lon, lat] = await transformAsync([x, y], crs, 'EPSG:4326')
-        return { lon, lat, h: z }
+        return { lon, lat, h: z * (metresPerCrsUnit(crs) ?? 1) }
       }
       transform = ecefTransformFromProbes({
         origin: await geo(origin),

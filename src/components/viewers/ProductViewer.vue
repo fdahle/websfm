@@ -18,6 +18,12 @@ const props = defineProps({
   // For an imported raster: the hydrated RasterSource, so the cursor can read
   // real values. Absent ⇒ the preview still renders, values read as "—".
   source: { type: Object, default: null },
+  // Frame staleness for a COMPUTED product (useReconstructionStore
+  // `productFrameStatus`): { stale, reason }. A refit does not corrupt the raster —
+  // its coordinates are still exactly what the recorded frame says — but its metres
+  // are no longer this project's metres, so it must not be mistaken for a current
+  // product. Absent/false ⇒ no banner.
+  frameStatus: { type: Object, default: null },
 })
 
 // One descriptor for both shapes. A computed product's grid is north-up with a
@@ -195,7 +201,7 @@ function demValueAt(idx, world) {
   return has ? p.data[idx] : null
 }
 
-const unitLabel = () => (props.product?.unit === 'm' ? 'm' : 'units')
+const unitLabel = () => (props.product?.unit && props.product.unit !== 'model' ? props.product.unit : 'model units')
 const fmt = (v, d = 3) => (v == null ? '—' : (Math.abs(v) >= 1000 ? v.toFixed(2) : Number(v.toPrecision(d))))
 
 watch(() => props.product, () => { hover.value = null; requestAnimationFrame(fit) })
@@ -230,6 +236,10 @@ defineExpose({ fit, zoomBy })
 
 <template>
   <div class="product-viewer">
+    <div v-if="frameStatus?.stale" class="frame-banner">
+      Outdated frame — {{ frameStatus.reason }} since this {{ kind === 'ortho' ? 'orthophoto' : 'DEM' }}
+      was built. It still shows the coordinates it was built in; rebuild it to use the current frame.
+    </div>
     <div
       ref="container"
       class="viewport"
@@ -333,6 +343,15 @@ defineExpose({ fit, zoomBy })
 </template>
 
 <style scoped>
+.frame-banner {
+  flex-shrink: 0;
+  padding: 6px 10px;
+  font-size: 11px;
+  color: #e0a030;
+  background: rgba(224, 160, 48, 0.1);
+  border-bottom: 1px solid rgba(224, 160, 48, 0.35);
+}
+
 .product-viewer {
   position: absolute;
   inset: 0;

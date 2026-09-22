@@ -1,4 +1,5 @@
 <script setup>
+import { linearCrsUnit } from '../../core/crs.js'
 import { computed, ref } from 'vue'
 import ModalShell from './ui/ModalShell.vue'
 import SettingsField from './ui/SettingsField.vue'
@@ -16,11 +17,13 @@ import { DEM_DEFAULTS } from '../../core/defaults.user.js'
 // never gates the button.
 const props = defineProps({
   canGeoreference: { type: Boolean, default: false },
+  hasScale: { type: Boolean, default: false },
   projectCrs: { type: String, default: null },
   source: { type: Object, default: null },
 })
 
 const isSparseSource = computed(() => props.source?.kind === 'sparse')
+const localUnit = computed(() => props.hasScale ? 'm/px' : 'model units/px')
 
 const sourceLabel = computed(() => {
   const s = props.source
@@ -56,12 +59,14 @@ function run() {
     </WarnBox>
 
     <SettingsField label-for="dem-crs"
-      hint="Local uses a camera-estimated up-vector (up-to-scale); the project CRS fits a similarity to imported poses for real-world heights & GSD.">
+      :hint="hasScale
+        ? 'Local uses a camera-estimated orientation and the current highest-ranked scale evidence, so coordinates are metric but have no CRS.'
+        : 'Local uses a camera-estimated up-vector (up-to-scale); the project CRS fits a similarity to imported poses for real-world heights & GSD.'">
       <template #label>
         <GlossaryTerm id="coordinate-reference-system">Coordinate frame</GlossaryTerm>
       </template>
       <select id="dem-crs" v-model="settings.crs" class="field-input field-select">
-        <option value="local">Local (model units)</option>
+        <option value="local">{{ hasScale ? 'Local (metres, no CRS)' : 'Local (model units)' }}</option>
         <option value="project" :disabled="!canGeoreference">
           {{ projectCrs || 'Project CRS' }}{{ canGeoreference ? '' : ' — needs camera poses' }}
         </option>
@@ -69,7 +74,7 @@ function run() {
     </SettingsField>
 
     <SettingsField label-for="dem-gsd"
-      :unit="settings.crs === 'project' ? 'm/px' : 'units/px'"
+      :unit="settings.crs === 'project' ? `${linearCrsUnit(projectCrs)}/px` : localUnit"
       hint="Cell size. 0 = auto (≈ one point per cell). Smaller = finer & slower.">
       <template #label>
         <GlossaryTerm id="ground-sample-distance">Ground sample distance</GlossaryTerm>

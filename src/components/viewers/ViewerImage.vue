@@ -39,10 +39,33 @@ const props = defineProps({
   // pixels — [{ px, py, du, dv, mag }] (du,dv = observation − projection).
   showResiduals: { type: Boolean, default: false },
   residuals:     { type: Array,   default: () => [] },
+  // Project scene type ('aerial' | 'object' | null). It only orders the two
+  // create actions in the right-click chooser — an object project has no
+  // georeference, so a marker is what it is almost always marking.
+  sceneType:     { type: String,  default: null },
 })
 
+// Which point kind this scene type creates by default. Never a gate: both kinds
+// stay one click away in every project.
+const defaultPointRole = computed(() => (props.sceneType === 'object' ? 'marker' : 'control'))
+
+// Which kind the NEXT click-to-create makes, while nothing is selected. Local to
+// the viewport (it is a pointer mode, not project state) and re-seeded from the
+// scene type whenever that changes.
+const pendingNewRole = ref(defaultPointRole.value)
+watch(defaultPointRole, (r) => { pendingNewRole.value = r })
+// The toolbar's "＋ New control" / "＋ New marker" both mean "deselect, and create
+// THIS kind next" — so they set the mode and clear the target in one action.
+function onSelectNewRole(role) {
+  pendingNewRole.value = role === 'marker' ? 'marker' : 'control'
+  emit('select-gcp', null)
+}
+
 // mark-gcp: assign this pixel to an existing GCP { gcpId, px, py }.
-// add-gcp:  create a new GCP marked at this pixel { px, py }.
+// add-gcp:  create a new reference point marked at this pixel { px, py, role }.
+//           `role` is 'control' (surveyed ground control) or 'marker' (a scale-bar
+//           endpoint with no surveyed position) — the chooser asks explicitly
+//           rather than always creating a GCP.
 // mark-fiducial: assign this pixel to a fiducial mark { fidId, px, py }.
 // exit-mask-edit: user closed the mask toolbar (×) — parent owns the maskEdit flag.
 const emit = defineEmits(['update-mask', 'update-depth', 'mark-gcp', 'add-gcp', 'select-gcp', 'delete-gcp', 'mark-fiducial', 'exit-mask-edit', 'exit-gcp-edit'])
@@ -918,7 +941,7 @@ function toImagePixel(sx, sy) {
 }
 
 // ── Right-click context menu ──────────────────────────────────────────────────
-// Two-stage: a general 'main' menu whose "Add GCP here…" entry switches the same
+// Two-stage: a general 'main' menu whose "Add point here…" entry switches the same
 // popup to 'gcp' mode (new-vs-existing chooser at the same anchor).
 // { x, y (viewport, for positioning), px, py (image pixel), mode } or null.
 const menu = ref(null)
@@ -941,10 +964,10 @@ function onContextMenu(e) {
 function closeMenu() { menu.value = null }
 function menuBack()  { if (menu.value) menu.value = { ...menu.value, mode: 'main' } }
 
-// "Add GCP here…" → switch the popup to the new-vs-existing chooser.
+// "Add point here…" → switch the popup to the new-vs-existing chooser.
 function menuAddGcp() { if (menu.value) menu.value = { ...menu.value, mode: 'gcp' } }
-function menuNewGcp() {
-  if (menu.value) emit('add-gcp', { px: menu.value.px, py: menu.value.py })
+function menuNewGcp(role) {
+  if (menu.value) emit('add-gcp', { px: menu.value.px, py: menu.value.py, role })
   closeMenu()
 }
 function menuAssign(gcpId) {
@@ -1077,7 +1100,9 @@ async function onMouseUp() {
         // A selected GCP → mark this image's observation of it; otherwise create a
         // new GCP here (parent owns both, same handlers as the right-click menu).
         if (props.selectedGcpId != null) emit('mark-gcp', { gcpId: props.selectedGcpId, px: pix.px, py: pix.py })
-        else emit('add-gcp', { px: pix.px, py: pix.py })
+        // Click-to-create with nothing selected defaults to whatever this scene
+        // type is usually marking: control for aerial, markers for object capture.
+        else emit('add-gcp', { px: pix.px, py: pix.py, role: pendingNewRole.value })
       }
     }
     return
@@ -1327,8 +1352,10 @@ defineExpose({ fit, zoomIn, zoomOut, triggerMaskImport, clearMask, triggerDepthI
         v-if="gcpEdit"
         :all-gcps="allGcps"
         :selected-id="selectedGcpId"
+        :new-role="pendingNewRole"
         :marked-ids="markedGcpIds"
         @select="(id) => emit('select-gcp', id)"
+        @select-new="onSelectNewRole"
         @delete="(id) => emit('delete-gcp', id)"
         @close="emit('exit-gcp-edit')"
       />
@@ -1336,7 +1363,7 @@ defineExpose({ fit, zoomIn, zoomOut, triggerMaskImport, clearMask, triggerDepthI
       <!-- Right-click context menu (general → GCP chooser sub-mode). -->
       <div v-if="menu" class="ctx-menu" :style="{ left: menu.x + 'px', top: menu.y + 'px' }" @mousedown.stop @contextmenu.prevent>
         <template v-if="menu.mode === 'main'">
-          <button class="ctx-item add" @click="menuAddGcp">Add GCP here…</button>
+          <button class="ctx-item add" @click="menuAddGcp">Add control/marker here…</button>
           <button v-if="isFilm" class="ctx-item add" @click="menuAddFiducial">Mark fiducial…</button>
           <div class="ctx-sep"></div>
           <button class="ctx-item" @click="menuCopyCoords">Copy pixel (X,&nbsp;Y)</button>
@@ -1360,8 +1387,19 @@ defineExpose({ fit, zoomIn, zoomOut, triggerMaskImport, clearMask, triggerDepthI
           <button class="ctx-item back" @click="menuBack">‹ Back</button>
         </template>
         <template v-else>
-          <div class="ctx-hd">Add ground control point</div>
-          <button class="ctx-item add" @click="menuNewGcp">＋ New GCP here</button>
+          <div class="ctx-hd">Add reference point</div>
+          <!-- Two explicit actions, never one action plus a role edit afterwards:
+               a control point born with coordinates and re-roled to marker is
+               exactly the migration hazard core/io/gcp.js guards against. The
+               scene type only decides the ORDER, so both stay one click away. -->
+          <template v-if="defaultPointRole === 'marker'">
+            <button class="ctx-item add" @click="menuNewGcp('marker')">＋ New marker here</button>
+            <button class="ctx-item add" @click="menuNewGcp('control')">＋ New control point here</button>
+          </template>
+          <template v-else>
+            <button class="ctx-item add" @click="menuNewGcp('control')">＋ New control point here</button>
+            <button class="ctx-item add" @click="menuNewGcp('marker')">＋ New marker here</button>
+          </template>
           <template v-if="allGcps.length">
             <div class="ctx-sub">Assign to existing</div>
             <button
