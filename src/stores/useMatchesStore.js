@@ -51,6 +51,7 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
   // *pairs* persist per file, there is no run-level file, and a re-opened project has
   // no run to describe. Null until a run completes; a cancelled run leaves it alone.
   const matchRun = shallowRef(null)
+  let restoreGeneration = 0
 
   // Persist only when a project is open and OPFS is usable (see useProjectsStore).
   const isPersisting = () => projects.isPersisting
@@ -68,6 +69,13 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
     // Weak pairs (PnP bridges) don't count as verified geometry — they carry inliers but
     // failed the accept gate, so they're excluded here and from matchStats (reported apart).
     for (const v of matchStore.value.values()) if (v.status === 'done' && v.inlierCount > 0 && !v.weak) n++
+    return n
+  })
+  const usableMatchCount = computed(() => {
+    let n = 0
+    for (const entry of matchStore.value.values()) {
+      if (entry.status === 'done' && !entry.disabled && entry.inlierCount > 0) n++
+    }
     return n
   })
 
@@ -90,8 +98,11 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
     // Trigger reactivity
     touch()
 
+    const projectId = projects.currentProjectId
+    const persist = isPersisting()
     try {
-      const projectId = projects.currentProjectId
+      // Supersede the old result before any early exit (gated, failed or cancelled).
+      if (persist) await opfs.deleteMatches(projectId, pid)
       // Image whose uuid sorts first → idA; its descriptors go to descA
       const srcA = idA === imgA.uuid ? imgA : imgB
       const srcB = idA === imgA.uuid ? imgB : imgA
@@ -115,6 +126,15 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
         log(`Match failed: descriptors missing for ${names} — re-run feature detection`, 'error', 'Matching')
         touch()
         return
+      }
+
+      const dimA = srcA.descDim ?? 128
+      const dimB = srcB.descDim ?? 128
+      if (dimA !== dimB || (srcA.detector ?? 'sift') !== (srcB.detector ?? 'sift')
+          || !Number.isSafeInteger(dimA) || dimA <= 0
+          || descA.length !== kpsA.length * dimA || descB.length !== kpsB.length * dimB
+          || (settings.matcher === 'lightglue' && (srcA.detector ?? 'sift') !== 'superpoint')) {
+        throw new Error('Incompatible descriptors — detect both images with the same detector before matching')
       }
 
       // Subset gate (brute-force only): a cheap coarse pre-test that rejects
@@ -294,8 +314,8 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
       // Persist any pair carrying inlier matches — accepted AND weak (a weak bridge must
       // survive a reload or the graph re-severs on restore). The old `>= minMatches` gate
       // dropped weak pairs whenever minMatches was raised above their inlier count.
-      if (isPersisting() && entry.matches.length > 0) {
-        opfs.saveMatches(projectId, pid, {
+      if (persist && entry.matches.length > 0) {
+        await opfs.saveMatches(projectId, pid, {
           idA, idB,
           rawCount: entry.rawCount,
           inlierCount: entry.inlierCount,
@@ -303,7 +323,7 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
           matches: entry.matches,
           disabled: entry.disabled,
           weak: entry.weak,
-        }).catch(() => {})
+        })
       }
 
       const label = `${imgA.name} ↔ ${imgB.name}`
@@ -377,10 +397,11 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
   }
 
   async function matchAll(images, settings = {}, onProgress, shouldCancel) {
+    restoreGeneration++
     // Same merge as matchPair so this function's own settings reads (and its
     // matchPair calls) all draw from the single source of truth.
     settings = { ...MATCH_DEFAULTS, ...MATCH_TUNING, ...settings }
-    const ready = images.filter(img => img.kpStatus === 'done')
+    const ready = images.filter((img) => img.kpStatus === 'done' && (img.keypoints?.length ?? 0) > 0)
     const strategy = settings.strategy ?? 'exhaustive'
 
     // LightGlue's weights are trained on SuperPoint's 256-d descriptors — refuse
@@ -634,6 +655,7 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
   // the old indices is now wrong — invalidate them rather than let stale indices
   // corrupt a later match/reconstruct run.
   function removeMatchesForImage(uuid) {
+    restoreGeneration++
     let removed = 0
     for (const [pid, e] of matchStore.value) {
       if (e.idA === uuid || e.idB === uuid) {
@@ -653,6 +675,7 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
   // keypoint arrays. External image ordering is normalized to the store's sorted
   // uuid ordering here; when it flips, each [ia,ib] pair flips with it.
   async function importMatches(entries, { replace = false } = {}) {
+    restoreGeneration++
     const writes = []
     let imported = 0, skipped = 0
     for (const src of entries || []) {
@@ -704,7 +727,14 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
 
   // Project-store contract.
   async function restore({ projectId }) {
+    const generation = ++restoreGeneration
+    matchStore.value = new Map()
+    // Pair JSON is potentially the largest collection of small files in a
+    // project, but reconstruction cannot run correctly against a partially loaded
+    // graph. Await it as part of project open; descriptor planes remain lazy and
+    // are still read only when a new matching run needs them.
     const all = await opfs.loadAllMatches(projectId)
+    if (generation !== restoreGeneration || projectId !== projects.currentProjectId) return
     const newMap = new Map()
     for (const { pairId, idA, idB, rawCount, inlierCount, F, matches, disabled, weak } of all) {
       newMap.set(pairId, {
@@ -726,13 +756,21 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
   // clear (project switch/close) must leave them, since restore reads them back and
   // currentProjectId still points at the project being left.
   function clear({ purge = false } = {}) {
+    const removed = matchStore.value.size
+    restoreGeneration++
     matchStore.value.clear()
     matchStore.value = new Map()
     matchRun.value = null
     if (purge && isPersisting()) {
       opfs.clearAllMatches(projects.currentProjectId).catch(() => {})
     }
+    if (purge && removed) {
+      log(`Removed ${removed} match pair${removed === 1 ? '' : 's'}`, 'info', 'Matching', { channel: 'activity' })
+    }
   }
 
-  return { matchStore, matchRun, pairId, getMatch, verifiedPairs, matchPair, matchAll, importMatches, removeMatchesForImage, setPairDisabled, restore, clear }
+  return {
+    matchStore, matchRun, pairId, getMatch, verifiedPairs, usableMatchCount,
+    matchPair, matchAll, importMatches, removeMatchesForImage, setPairDisabled, restore, clear,
+  }
 }))

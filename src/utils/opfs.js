@@ -1,4 +1,7 @@
+import { trackPersistence, persistenceLock, ignoreMissing } from './persistence.js'
+import { writeBinaryDocument, readBinaryDocument } from './binaryDocument.js'
 import { DEPTH_BIN_KEYS } from '../core/dense/depthMapCodec.js'
+import { mapConcurrent } from './concurrency.js'
 
 const FLOATS_PER_KP = 6 // x, y, nx, ny, scale, response
 
@@ -66,9 +69,14 @@ async function writeFileIn(dir, filename, data, { append = false } = {}) {
     const fh = await dir.getFileHandle(filename, { create: true })
     const size = append ? (await fh.getFile()).size : 0
     const writable = await fh.createWritable(append ? { keepExistingData: true } : undefined)
-    if (append) await writable.seek(size)
-    if (data != null) await writable.write(data)
-    await writable.close()
+    try {
+      if (append) await writable.seek(size)
+      if (data != null) await writable.write(data)
+      await writable.close()
+    } catch (error) {
+      await writable.abort?.().catch(() => {})
+      throw error
+    }
   })
 }
 
@@ -182,6 +190,8 @@ export async function readIndex() {
   return readJson(root, 'index.json')
 }
 
+// The project store tracks the complete locked read/merge/write transaction.
+// Retrying a bare index snapshot would overwrite edits from another tab.
 export async function writeIndex(data) {
   const root = await getRoot()
   await writeJson(root, 'index.json', data)
@@ -200,8 +210,10 @@ export async function readAppJson(filename) {
 }
 
 export async function writeAppJson(filename, data) {
-  const root = await getRoot()
-  await writeJson(root, filename, data)
+  return trackPersistence('writeAppJson:' + String(filename), async () => {
+    const root = await getRoot()
+    await writeJson(root, filename, data)
+  })
 }
 
 // ── Project ───────────────────────────────────────────────────────────────────
@@ -216,8 +228,10 @@ export async function readProject(projectId) {
 }
 
 export async function writeProject(projectId, data) {
-  const dir = await getProjectDir(projectId, true)
-  await writeJson(dir, 'project.json', data)
+  return trackPersistence('writeProject:' + String(projectId), async () => {
+    const dir = await getProjectDir(projectId, true)
+    await writeJson(dir, 'project.json', data)
+  })
 }
 
 // Remove the project's OPFS tree. A folder-backed project has none — its files
@@ -225,19 +239,23 @@ export async function writeProject(projectId, data) {
 // the project instead and says so). This is why the check is here rather than at
 // the call site: every path into deletion has to obey it.
 export async function deleteProject(projectId) {
-  if (projectRoots.has(projectId)) return
-  const root = await getRoot()
-  const projects = await root.getDirectoryHandle('projects', { create: true })
-  await projects.removeEntry(projectId, { recursive: true }).catch(() => {})
+  return trackPersistence('deleteProject:' + String(projectId), async () => {
+    if (projectRoots.has(projectId)) return
+    const root = await getRoot()
+    const projects = await root.getDirectoryHandle('projects', { create: true })
+    await projects.removeEntry(projectId, { recursive: true }).catch(ignoreMissing)
+  })
 }
 
 // Delete the OPFS tree regardless of any registered folder root — used by the
 // OPFS→folder migration once the copy has been verified, where the source is
 // known to be the OPFS tree even though the root is by then re-registered.
 export async function deleteOpfsProjectTree(projectId) {
-  const root = await getRoot()
-  const projects = await root.getDirectoryHandle('projects', { create: true })
-  await projects.removeEntry(projectId, { recursive: true }).catch(() => {})
+  return trackPersistence('deleteOpfsProjectTree:' + String(projectId), async () => {
+    const root = await getRoot()
+    const projects = await root.getDirectoryHandle('projects', { create: true })
+    await projects.removeEntry(projectId, { recursive: true }).catch(ignoreMissing)
+  })
 }
 
 // ── Whole-project file walk / write ───────────────────────────────────────────
@@ -275,10 +293,12 @@ export async function* walkProjectFiles(projectId, { skip = null } = {}) {
 // keypoints/matches, masks, sparse/dense clouds, GCPs, and imports are retained.
 // This is also the exact set omitted by "exclude cached/derived data" archives.
 export async function deleteProjectDerived(projectId) {
-  const dir = await getProjectDir(projectId)
-  for (const name of ['images-derived', 'depthmaps', 'products']) {
-    await dir.removeEntry(name, { recursive: true }).catch(() => {})
-  }
+  return trackPersistence('deleteProjectDerived:' + String(projectId), async () => {
+    const dir = await getProjectDir(projectId)
+    for (const name of ['images-derived', 'depthmaps', 'products']) {
+      await dir.removeEntry(name, { recursive: true }).catch(ignoreMissing)
+    }
+  })
 }
 
 // Write one file at `relPath` inside the project dir, creating intermediate
@@ -286,8 +306,10 @@ export async function deleteProjectDerived(projectId) {
 // TypedArray / string). Rejects traversal outside the project dir — `relPath`
 // can come from a zip entry name, which is attacker-controlled data.
 export async function writeProjectFile(projectId, relPath, data) {
-  const dir = await getProjectDir(projectId, true)
-  await writeFileAt(dir, relPath, data)
+  return trackPersistence('writeProjectFile:' + String(projectId) + ':' + String(relPath), async () => {
+    const dir = await getProjectDir(projectId, true)
+    await writeFileAt(dir, relPath, data)
+  })
 }
 
 // ── Directory-handle utilities (folder-backed projects / migration) ───────────
@@ -295,13 +317,15 @@ export async function writeProjectFile(projectId, relPath, data) {
 // migration has to hold BOTH roots at once — the registry can only name one.
 
 export async function writeFileAt(dirHandle, relPath, data) {
-  const parts = String(relPath).split('/').filter((p) => p !== '' && p !== '.')
-  if (!parts.length || parts.some((p) => p === '..')) {
-    throw new Error(`writeFileAt: unsafe path "${relPath}"`)
-  }
-  let dir = dirHandle
-  for (const part of parts.slice(0, -1)) dir = await dir.getDirectoryHandle(part, { create: true })
-  await writeFileIn(dir, parts[parts.length - 1], data)
+  return trackPersistence('writeFileAt:' + String(relPath), async () => {
+    const parts = String(relPath).split('/').filter((p) => p !== '' && p !== '.')
+    if (!parts.length || parts.some((p) => p === '..')) {
+      throw new Error(`writeFileAt: unsafe path "${relPath}"`)
+    }
+    let dir = dirHandle
+    for (const part of parts.slice(0, -1)) dir = await dir.getDirectoryHandle(part, { create: true })
+    await writeFileIn(dir, parts[parts.length - 1], data)
+  })
 }
 
 export async function readJsonAt(dirHandle, filename) {
@@ -326,15 +350,17 @@ export async function getOpfsProjectDir(projectId, create = false) {
 // { files, bytes }. Verified by the caller (byte totals) before it deletes the
 // source — a half-copied project must never be the only copy.
 export async function copyTree(from, to, { onProgress = null } = {}) {
-  let files = 0
-  let bytes = 0
-  for await (const { relPath, file } of walkDir(from, '', null)) {
-    await writeFileAt(to, relPath, file)
-    files++
-    bytes += file.size
-    onProgress?.({ files, bytes, label: relPath })
-  }
-  return { files, bytes }
+  return trackPersistence('copyTree:' + String(from), async () => {
+    let files = 0
+    let bytes = 0
+    for await (const { relPath, file } of walkDir(from, '', null)) {
+      await writeFileAt(to, relPath, file)
+      files++
+      bytes += file.size
+      onProgress?.({ files, bytes, label: relPath })
+    }
+    return { files, bytes }
+  })
 }
 
 // Total file count + byte size of a tree, for verifying a copy.
@@ -348,8 +374,10 @@ export async function measureTree(dirHandle) {
 // ── Images ────────────────────────────────────────────────────────────────────
 
 export async function saveImage(projectId, uuid, file) {
-  const dir = await getSubDir(projectId, 'images')
-  await writeFileIn(dir, uuid, file)
+  return trackPersistence('saveImage:' + String(projectId) + ':' + String(uuid), async () => {
+    const dir = await getSubDir(projectId, 'images')
+    await writeFileIn(dir, uuid, file)
+  })
 }
 
 export async function loadImageBlob(projectId, uuid) {
@@ -359,10 +387,12 @@ export async function loadImageBlob(projectId, uuid) {
 }
 
 export async function deleteImage(projectId, uuid) {
-  try {
-    const dir = await getSubDir(projectId, 'images')
-    await dir.removeEntry(uuid)
-  } catch {}
+  return trackPersistence('deleteImage:' + String(projectId) + ':' + String(uuid), async () => {
+    try {
+      const dir = await getSubDir(projectId, 'images')
+      await dir.removeEntry(uuid)
+    } catch (error) { ignoreMissing(error) }
+  })
 }
 
 // ── Derived (transcoded) image blobs ──────────────────────────────────────────
@@ -377,8 +407,10 @@ async function derivedName(uuid, kind) {
 }
 
 export async function saveImageDerived(projectId, uuid, kind, blob) {
-  const dir = await getSubDir(projectId, 'images-derived')
-  await writeFileIn(dir, await derivedName(uuid, kind), blob)
+  return trackPersistence('saveImageDerived:' + String(projectId) + ':' + String(uuid) + ':' + String(kind), async () => {
+    const dir = await getSubDir(projectId, 'images-derived')
+    await writeFileIn(dir, await derivedName(uuid, kind), blob)
+  })
 }
 
 export async function loadImageDerivedBlob(projectId, uuid, kind) {
@@ -392,24 +424,28 @@ export async function loadImageDerivedBlob(projectId, uuid, kind) {
 }
 
 export async function deleteImageDerived(projectId, uuid) {
-  try {
-    const dir = await getSubDir(projectId, 'images-derived')
-    await dir.removeEntry(await derivedName(uuid, 'display')).catch(() => {})
-    await dir.removeEntry(await derivedName(uuid, 'compute')).catch(() => {})
-  } catch {}
+  return trackPersistence('deleteImageDerived:' + String(projectId) + ':' + String(uuid), async () => {
+    try {
+      const dir = await getSubDir(projectId, 'images-derived')
+      await dir.removeEntry(await derivedName(uuid, 'display')).catch(ignoreMissing)
+      await dir.removeEntry(await derivedName(uuid, 'compute')).catch(ignoreMissing)
+    } catch (error) { ignoreMissing(error) }
+  })
 }
 
 // ── Keypoints ─────────────────────────────────────────────────────────────────
 
 export async function saveKeypoints(projectId, uuid, keypoints) {
-  const buf = new Float32Array(keypoints.length * FLOATS_PER_KP)
-  keypoints.forEach((kp, i) => {
-    const o = i * FLOATS_PER_KP
-    buf[o] = kp.x; buf[o + 1] = kp.y; buf[o + 2] = kp.nx
-    buf[o + 3] = kp.ny; buf[o + 4] = kp.scale; buf[o + 5] = kp.response
+  return trackPersistence('saveKeypoints:' + String(projectId) + ':' + String(uuid), async () => {
+    const buf = new Float32Array(keypoints.length * FLOATS_PER_KP)
+    keypoints.forEach((kp, i) => {
+      const o = i * FLOATS_PER_KP
+      buf[o] = kp.x; buf[o + 1] = kp.y; buf[o + 2] = kp.nx
+      buf[o + 3] = kp.ny; buf[o + 4] = kp.scale; buf[o + 5] = kp.response
+    })
+    const dir = await getSubDir(projectId, 'keypoints')
+    await writeFileIn(dir, uuid + '.bin', buf.buffer)
   })
-  const dir = await getSubDir(projectId, 'keypoints')
-  await writeFileIn(dir, uuid + '.bin', buf.buffer)
 }
 
 export async function loadKeypoints(projectId, uuid) {
@@ -431,10 +467,12 @@ export async function loadKeypoints(projectId, uuid) {
 }
 
 export async function deleteKeypoints(projectId, uuid) {
-  try {
-    const dir = await getSubDir(projectId, 'keypoints')
-    await dir.removeEntry(uuid + '.bin')
-  } catch {}
+  return trackPersistence('deleteKeypoints:' + String(projectId) + ':' + String(uuid), async () => {
+    try {
+      const dir = await getSubDir(projectId, 'keypoints')
+      await dir.removeEntry(uuid + '.bin')
+    } catch (error) { ignoreMissing(error) }
+  })
 }
 
 // ── Keypoint colours ────────────────────────────────────────────────────────
@@ -443,13 +481,15 @@ export async function deleteKeypoints(projectId, uuid) {
 // Parallel array to keypoints; used to colour the sparse cloud.
 
 export async function saveColors(projectId, uuid, keypoints) {
-  const buf = new Uint8Array(keypoints.length * 3)
-  keypoints.forEach((kp, i) => {
-    const c = kp.color
-    if (c) { buf[i * 3] = c[0]; buf[i * 3 + 1] = c[1]; buf[i * 3 + 2] = c[2] }
+  return trackPersistence('saveColors:' + String(projectId) + ':' + String(uuid), async () => {
+    const buf = new Uint8Array(keypoints.length * 3)
+    keypoints.forEach((kp, i) => {
+      const c = kp.color
+      if (c) { buf[i * 3] = c[0]; buf[i * 3 + 1] = c[1]; buf[i * 3 + 2] = c[2] }
+    })
+    const dir = await getSubDir(projectId, 'keypoint_colors')
+    await writeFileIn(dir, uuid + '.bin', buf.buffer)
   })
-  const dir = await getSubDir(projectId, 'keypoint_colors')
-  await writeFileIn(dir, uuid + '.bin', buf.buffer)
 }
 
 export async function loadColors(projectId, uuid) {
@@ -472,8 +512,10 @@ export async function loadColors(projectId, uuid) {
 // Not loaded into the image object — fetched on-demand when matching.
 
 export async function saveDescriptors(projectId, uuid, descriptors) {
-  const dir = await getSubDir(projectId, 'descriptors')
-  await writeFileIn(dir, uuid + '.bin', descriptors.buffer)
+  return trackPersistence('saveDescriptors:' + String(projectId) + ':' + String(uuid), async () => {
+    const dir = await getSubDir(projectId, 'descriptors')
+    await writeFileIn(dir, uuid + '.bin', descriptors.buffer)
+  })
 }
 
 export async function loadDescriptors(projectId, uuid) {
@@ -488,10 +530,12 @@ export async function loadDescriptors(projectId, uuid) {
 }
 
 export async function deleteDescriptors(projectId, uuid) {
-  try {
-    const dir = await getSubDir(projectId, 'descriptors')
-    await dir.removeEntry(uuid + '.bin')
-  } catch {}
+  return trackPersistence('deleteDescriptors:' + String(projectId) + ':' + String(uuid), async () => {
+    try {
+      const dir = await getSubDir(projectId, 'descriptors')
+      await dir.removeEntry(uuid + '.bin')
+    } catch (error) { ignoreMissing(error) }
+  })
 }
 
 // ── Matches ───────────────────────────────────────────────────────────────────
@@ -500,8 +544,10 @@ export async function deleteDescriptors(projectId, uuid) {
 // pairId = sorted([uuidA, uuidB]).join('--')
 
 export async function saveMatches(projectId, pairId, data) {
-  const dir = await getSubDir(projectId, 'matches')
-  await writeJson(dir, pairId + '.json', data)
+  return trackPersistence('saveMatches:' + String(projectId) + ':' + String(pairId), async () => {
+    const dir = await getSubDir(projectId, 'matches')
+    await writeJson(dir, pairId + '.json', data)
+  })
 }
 
 export async function loadMatches(projectId, pairId) {
@@ -514,44 +560,53 @@ export async function loadMatches(projectId, pairId) {
 }
 
 export async function deleteMatches(projectId, pairId) {
-  try {
-    const dir = await getSubDir(projectId, 'matches')
-    await dir.removeEntry(pairId + '.json')
-  } catch {}
+  return trackPersistence('deleteMatches:' + String(projectId) + ':' + String(pairId), async () => {
+    try {
+      const dir = await getSubDir(projectId, 'matches')
+      await dir.removeEntry(pairId + '.json')
+    } catch (error) { ignoreMissing(error) }
+  })
 }
 
 export async function loadAllMatches(projectId) {
   try {
     const dir = await getSubDir(projectId, 'matches')
-    const results = []
+    const files = []
     for await (const [name, handle] of dir) {
       if (handle.kind !== 'file' || !name.endsWith('.json')) continue
+      files.push({ name, handle })
+    }
+    const loaded = await mapConcurrent(files, 12, async ({ name, handle }) => {
       try {
         const file = await handle.getFile()
         const data = JSON.parse(await file.text())
-        results.push({ pairId: name.replace(/\.json$/, ''), ...data })
-      } catch {}
-    }
-    return results
+        return { pairId: name.replace(/\.json$/, ''), ...data }
+      } catch { return null }
+    })
+    return loaded.filter(Boolean)
   } catch {
     return []
   }
 }
 
 export async function clearAllMatches(projectId) {
-  try {
-    const dir = await getProjectDir(projectId)
-    await dir.removeEntry('matches', { recursive: true })
-  } catch {}
+  return trackPersistence('clearAllMatches:' + String(projectId), async () => {
+    try {
+      const dir = await getProjectDir(projectId)
+      await dir.removeEntry('matches', { recursive: true })
+    } catch (error) { ignoreMissing(error) }
+  })
 }
 
 // ── Masks ─────────────────────────────────────────────────────────────────────
 
 export async function saveMask(projectId, uuid, dataUrl) {
-  const res = await fetch(dataUrl)
-  const blob = await res.blob()
-  const dir = await getSubDir(projectId, 'masks')
-  await writeFileIn(dir, uuid + '.png', blob)
+  return trackPersistence('saveMask:' + String(projectId) + ':' + String(uuid), async () => {
+    const res = await fetch(dataUrl)
+    const blob = await res.blob()
+    const dir = await getSubDir(projectId, 'masks')
+    await writeFileIn(dir, uuid + '.png', blob)
+  })
 }
 
 export async function loadMaskDataUrl(projectId, uuid) {
@@ -570,10 +625,12 @@ export async function loadMaskDataUrl(projectId, uuid) {
 }
 
 export async function deleteMask(projectId, uuid) {
-  try {
-    const dir = await getSubDir(projectId, 'masks')
-    await dir.removeEntry(uuid + '.png')
-  } catch {}
+  return trackPersistence('deleteMask:' + String(projectId) + ':' + String(uuid), async () => {
+    try {
+      const dir = await getSubDir(projectId, 'masks')
+      await dir.removeEntry(uuid + '.png')
+    } catch (error) { ignoreMissing(error) }
+  })
 }
 
 // ── Depth maps (display previews) ─────────────────────────────────────────────
@@ -581,10 +638,12 @@ export async function deleteMask(projectId, uuid) {
 // it are a separate concern — see "Depth-map planes" below.
 
 export async function saveDepth(projectId, uuid, dataUrl) {
-  const res = await fetch(dataUrl)
-  const blob = await res.blob()
-  const dir = await getSubDir(projectId, 'depthmaps')
-  await writeFileIn(dir, uuid + '.png', blob)
+  return trackPersistence('saveDepth:' + String(projectId) + ':' + String(uuid), async () => {
+    const res = await fetch(dataUrl)
+    const blob = await res.blob()
+    const dir = await getSubDir(projectId, 'depthmaps')
+    await writeFileIn(dir, uuid + '.png', blob)
+  })
 }
 
 export async function loadDepthDataUrl(projectId, uuid) {
@@ -603,15 +662,17 @@ export async function loadDepthDataUrl(projectId, uuid) {
 }
 
 export async function deleteDepth(projectId, uuid) {
-  try {
-    const dir = await getSubDir(projectId, 'depthmaps')
-    await dir.removeEntry(uuid + '.png').catch(() => {})
-    // The float planes belong to the same image — drop them together, or an
-    // image removal would leave orphaned (and much larger) sidecars behind.
-    for (const key of DEPTH_BIN_KEYS) {
-      await dir.removeEntry(`${uuid}.${key}.bin`).catch(() => {})
-    }
-  } catch {}
+  return trackPersistence('deleteDepth:' + String(projectId) + ':' + String(uuid), async () => {
+    try {
+      const dir = await getSubDir(projectId, 'depthmaps')
+      await dir.removeEntry(uuid + '.png').catch(ignoreMissing)
+      // The float planes belong to the same image — drop them together, or an
+      // image removal would leave orphaned (and much larger) sidecars behind.
+      for (const key of DEPTH_BIN_KEYS) {
+        await dir.removeEntry(`${uuid}.${key}.bin`).catch(ignoreMissing)
+      }
+    } catch (error) { ignoreMissing(error) }
+  })
 }
 
 // ── Depth-map planes ──────────────────────────────────────────────────────────
@@ -631,32 +692,36 @@ async function removeStaleDepthBins(dir, keepUuids) {
     const m = name.match(/^(.+)\.(?:depth|cost|nrm|rgb)\.bin$/)
     if (m && !keepUuids.has(m[1])) stale.push(name)
   }
-  for (const name of stale) await dir.removeEntry(name).catch(() => {})
+  for (const name of stale) await dir.removeEntry(name).catch(ignoreMissing)
 }
 
 // `entries`: [{ uuid, buffers: { depth, cost, nrm, rgb } }] — buffers as
 // ArrayBuffers (writing does not detach them, so the caller's cache stays live).
 export async function saveDepthPlanes(projectId, index, entries) {
-  const dir = await getSubDir(projectId, 'depthmaps')
-  const keep = new Set()
-  for (const { uuid, buffers } of entries) {
-    keep.add(uuid)
-    for (const key of DEPTH_BIN_KEYS) {
-      const buf = buffers?.[key]
-      const name = `${uuid}.${key}.bin`
-      if (buf && buf.byteLength) await writeBin(dir, name, buf)
-      else await dir.removeEntry(name).catch(() => {})   // e.g. nrm absent
+  return trackPersistence('saveDepthPlanes:' + String(projectId), async () => {
+    const dir = await getSubDir(projectId, 'depthmaps')
+    const keep = new Set()
+    for (const { uuid, buffers } of entries) {
+      keep.add(uuid)
+      for (const key of DEPTH_BIN_KEYS) {
+        const buf = buffers?.[key]
+        const name = `${uuid}.${key}.bin`
+        if (buf && buf.byteLength) await writeBin(dir, name, buf)
+        else await dir.removeEntry(name).catch(ignoreMissing)   // e.g. nrm absent
+      }
     }
-  }
-  await writeJson(dir, 'index.json', index)
-  await removeStaleDepthBins(dir, keep)   // drop planes of images no longer mapped
+    await writeJson(dir, 'index.json', index)
+    await removeStaleDepthBins(dir, keep)   // drop planes of images no longer mapped
+  })
 }
 
 // Rewrite the index alone, leaving the planes untouched (e.g. after dropping the
 // entries of images that were removed).
 export async function saveDepthIndex(projectId, index) {
-  const dir = await getSubDir(projectId, 'depthmaps')
-  await writeJson(dir, 'index.json', index)
+  return trackPersistence('saveDepthIndex:' + String(projectId), async () => {
+    const dir = await getSubDir(projectId, 'depthmaps')
+    await writeJson(dir, 'index.json', index)
+  })
 }
 
 export async function loadDepthIndex(projectId) {
@@ -685,11 +750,13 @@ export async function loadDepthPlanes(projectId, metas) {
 }
 
 export async function deleteDepthPlanes(projectId) {
-  try {
-    const dir = await getSubDir(projectId, 'depthmaps')
-    await dir.removeEntry('index.json').catch(() => {})
-    await removeStaleDepthBins(dir, new Set())
-  } catch {}
+  return trackPersistence('deleteDepthPlanes:' + String(projectId), async () => {
+    try {
+      const dir = await getSubDir(projectId, 'depthmaps')
+      await dir.removeEntry('index.json').catch(ignoreMissing)
+      await removeStaleDepthBins(dir, new Set())
+    } catch (error) { ignoreMissing(error) }
+  })
 }
 
 // ── External reference rasters ────────────────────────────────────────────────
@@ -708,8 +775,10 @@ export async function deleteDepthPlanes(projectId) {
 //   whose original stays in OPFS behind the derived display/compute blobs.
 
 export async function saveExternalIndex(projectId, index) {
-  const dir = await getSubDir(projectId, 'external')
-  await writeJson(dir, 'index.json', index)
+  return trackPersistence('saveExternalIndex:' + String(projectId), async () => {
+    const dir = await getSubDir(projectId, 'external')
+    await writeJson(dir, 'index.json', index)
+  })
 }
 
 export async function loadExternalIndex(projectId) {
@@ -724,8 +793,10 @@ export async function loadExternalIndex(projectId) {
 // Write one raster's plane. Does not detach `buffer` (matching saveDepthPlanes),
 // so the caller's in-memory source stays usable straight after the import.
 export async function saveExternalPlane(projectId, id, buffer) {
-  const dir = await getSubDir(projectId, 'external')
-  await writeBin(dir, `${id}.bin`, buffer)
+  return trackPersistence('saveExternalPlane:' + String(projectId) + ':' + String(id), async () => {
+    const dir = await getSubDir(projectId, 'external')
+    await writeBin(dir, `${id}.bin`, buffer)
+  })
 }
 
 export async function loadExternalPlane(projectId, id) {
@@ -738,17 +809,21 @@ export async function loadExternalPlane(projectId, id) {
 }
 
 export async function deleteExternalPlane(projectId, id) {
-  try {
-    const dir = await getSubDir(projectId, 'external')
-    await dir.removeEntry(`${id}.bin`).catch(() => {})
-    await dir.removeEntry(`${id}.src`).catch(() => {})
-  } catch {}
+  return trackPersistence('deleteExternalPlane:' + String(projectId) + ':' + String(id), async () => {
+    try {
+      const dir = await getSubDir(projectId, 'external')
+      await dir.removeEntry(`${id}.bin`).catch(ignoreMissing)
+      await dir.removeEntry(`${id}.src`).catch(ignoreMissing)
+    } catch (error) { ignoreMissing(error) }
+  })
 }
 
 // The original imported file, kept so a kind flip can re-decode.
 export async function saveExternalSource(projectId, id, blob) {
-  const dir = await getSubDir(projectId, 'external')
-  await writeFileIn(dir, `${id}.src`, blob)
+  return trackPersistence('saveExternalSource:' + String(projectId) + ':' + String(id), async () => {
+    const dir = await getSubDir(projectId, 'external')
+    await writeFileIn(dir, `${id}.src`, blob)
+  })
 }
 
 export async function loadExternalSource(projectId, id) {
@@ -763,23 +838,27 @@ export async function loadExternalSource(projectId, id) {
 
 // Drop every raster sidecar (plane + original) not in `keepIds`.
 export async function pruneExternalPlanes(projectId, keepIds) {
-  try {
-    const dir = await getSubDir(projectId, 'external')
-    const stale = []
-    for await (const name of dir.keys()) {
-      const m = name.match(/^(.+)\.(?:bin|src)$/)
-      if (m && !keepIds.has(m[1])) stale.push(name)
-    }
-    for (const name of stale) await dir.removeEntry(name).catch(() => {})
-  } catch {}
+  return trackPersistence('pruneExternalPlanes:' + String(projectId), async () => {
+    try {
+      const dir = await getSubDir(projectId, 'external')
+      const stale = []
+      for await (const name of dir.keys()) {
+        const m = name.match(/^(.+)\.(?:bin|src)$/)
+        if (m && !keepIds.has(m[1])) stale.push(name)
+      }
+      for (const name of stale) await dir.removeEntry(name).catch(ignoreMissing)
+    } catch (error) { ignoreMissing(error) }
+  })
 }
 
 export async function deleteExternalAll(projectId) {
-  try {
-    const dir = await getSubDir(projectId, 'external')
-    await dir.removeEntry('index.json').catch(() => {})
-    await pruneExternalPlanes(projectId, new Set())
-  } catch {}
+  return trackPersistence('deleteExternalAll:' + String(projectId), async () => {
+    try {
+      const dir = await getSubDir(projectId, 'external')
+      await dir.removeEntry('index.json').catch(ignoreMissing)
+      await pruneExternalPlanes(projectId, new Set())
+    } catch (error) { ignoreMissing(error) }
+  })
 }
 
 // ── Ground Control Points ───────────────────────────────────────────────────────
@@ -787,8 +866,10 @@ export async function deleteExternalAll(projectId) {
 // observations with pixel sigmas, role, enabled }] }
 
 export async function saveGcps(projectId, data) {
-  const dir = await getProjectDir(projectId, true)
-  await writeJson(dir, 'gcps.json', data)
+  return trackPersistence('saveGcps:' + String(projectId), async () => {
+    const dir = await getProjectDir(projectId, true)
+    await writeJson(dir, 'gcps.json', data)
+  })
 }
 
 export async function loadGcps(projectId) {
@@ -801,10 +882,12 @@ export async function loadGcps(projectId) {
 }
 
 export async function deleteGcps(projectId) {
-  try {
-    const dir = await getProjectDir(projectId)
-    await dir.removeEntry('gcps.json')
-  } catch {}
+  return trackPersistence('deleteGcps:' + String(projectId), async () => {
+    try {
+      const dir = await getProjectDir(projectId)
+      await dir.removeEntry('gcps.json')
+    } catch (error) { ignoreMissing(error) }
+  })
 }
 
 // ── Shapefiles (footprint / polygon vector layers) ────────────────────────────────
@@ -814,8 +897,10 @@ export async function deleteGcps(projectId) {
 // into one set on restore (see useFootprintsStore.normalizeStored).
 
 export async function saveFootprints(projectId, data) {
-  const dir = await getProjectDir(projectId, true)
-  await writeJson(dir, 'footprints.json', data)
+  return trackPersistence('saveFootprints:' + String(projectId), async () => {
+    const dir = await getProjectDir(projectId, true)
+    await writeJson(dir, 'footprints.json', data)
+  })
 }
 
 export async function loadFootprints(projectId) {
@@ -828,10 +913,12 @@ export async function loadFootprints(projectId) {
 }
 
 export async function deleteFootprints(projectId) {
-  try {
-    const dir = await getProjectDir(projectId)
-    await dir.removeEntry('footprints.json')
-  } catch {}
+  return trackPersistence('deleteFootprints:' + String(projectId), async () => {
+    try {
+      const dir = await getProjectDir(projectId)
+      await dir.removeEntry('footprints.json')
+    } catch (error) { ignoreMissing(error) }
+  })
 }
 
 // ── Dev console log ──────────────────────────────────────────────────────────────
@@ -844,9 +931,11 @@ export async function deleteFootprints(projectId) {
 // (Legacy `log.json` was a single rewritten array; migrated on first restore.)
 
 export async function appendLog(projectId, entries) {
-  if (!entries || entries.length === 0) return
-  const dir = await getProjectDir(projectId, true)
-  await writeFileIn(dir, 'log.ndjson', entries.map(e => JSON.stringify(e)).join('\n') + '\n', { append: true })
+  return trackPersistence('appendLog:' + String(projectId), async () => {
+    if (!entries || entries.length === 0) return
+    const dir = await getProjectDir(projectId, true)
+    await writeFileIn(dir, 'log.ndjson', entries.map(e => JSON.stringify(e)).join('\n') + '\n', { append: true })
+  })
 }
 
 export async function readLog(projectId) {
@@ -857,7 +946,7 @@ export async function readLog(projectId) {
     const out = []
     for (const line of text.split('\n')) {
       if (!line) continue
-      try { out.push(JSON.parse(line)) } catch {}
+      try { out.push(JSON.parse(line)) } catch (error) { ignoreMissing(error) }
     }
     return out
   } catch {
@@ -865,20 +954,51 @@ export async function readLog(projectId) {
   }
 }
 
-export async function truncateLog(projectId) {
+// Read only the live console window from the end of the append-only stream.
+// Export/scroll-back still use readLog(), which deliberately returns everything.
+export async function readLogTail(projectId, limit) {
   try {
-    const dir = await getProjectDir(projectId, true)
-    await writeFileIn(dir, 'log.ndjson', null) // no keepExistingData ⇒ truncates
-  } catch {}
+    const dir = await getProjectDir(projectId)
+    const fh = await dir.getFileHandle('log.ndjson')
+    const file = await fh.getFile()
+    if (!file.size || limit <= 0) return []
+    let bytes = Math.min(file.size, Math.max(64 * 1024, limit * 256))
+    while (true) {
+      const start = file.size - bytes
+      const text = await file.slice(start).text()
+      const lines = text.split('\n')
+      if (start > 0) lines.shift()
+      const out = []
+      for (const line of lines) {
+        if (!line) continue
+        try { out.push(JSON.parse(line)) } catch (error) { ignoreMissing(error) }
+      }
+      if (out.length >= limit || start === 0) return out.slice(-limit)
+      bytes = Math.min(file.size, bytes * 2)
+    }
+  } catch {
+    return null
+  }
+}
+
+export async function truncateLog(projectId) {
+  return trackPersistence('truncateLog:' + String(projectId), async () => {
+    try {
+      const dir = await getProjectDir(projectId, true)
+      await writeFileIn(dir, 'log.ndjson', null) // no keepExistingData ⇒ truncates
+    } catch (error) { ignoreMissing(error) }
+  })
 }
 
 export async function deleteLog(projectId) {
-  for (const name of ['log.ndjson', 'log.json' /* legacy */]) {
-    try {
-      const dir = await getProjectDir(projectId)
-      await dir.removeEntry(name)
-    } catch {}
-  }
+  return trackPersistence('deleteLog:' + String(projectId), async () => {
+    for (const name of ['log.ndjson', 'log.json' /* legacy */]) {
+      try {
+        const dir = await getProjectDir(projectId)
+        await dir.removeEntry(name)
+      } catch (error) { ignoreMissing(error) }
+    }
+  })
 }
 
 // One-time migration off the legacy whole-array `log.json`. Returns its entries
@@ -893,10 +1013,12 @@ export async function loadLegacyLog(projectId) {
 }
 
 export async function deleteLegacyLog(projectId) {
-  try {
-    const dir = await getProjectDir(projectId)
-    await dir.removeEntry('log.json')
-  } catch {}
+  return trackPersistence('deleteLegacyLog:' + String(projectId), async () => {
+    try {
+      const dir = await getProjectDir(projectId)
+      await dir.removeEntry('log.json')
+    } catch (error) { ignoreMissing(error) }
+  })
 }
 
 // ── Sensors (shared camera intrinsics) ──────────────────────────────────────────
@@ -905,8 +1027,10 @@ export async function deleteLegacyLog(projectId) {
 // Intrinsics are CRS-free, so (unlike GCPs/footprints/poses) no `crs` field.
 
 export async function saveSensors(projectId, data) {
-  const dir = await getProjectDir(projectId, true)
-  await writeJson(dir, 'sensors.json', data)
+  return trackPersistence('saveSensors:' + String(projectId), async () => {
+    const dir = await getProjectDir(projectId, true)
+    await writeJson(dir, 'sensors.json', data)
+  })
 }
 
 export async function loadSensors(projectId) {
@@ -919,10 +1043,12 @@ export async function loadSensors(projectId) {
 }
 
 export async function deleteSensors(projectId) {
-  try {
-    const dir = await getProjectDir(projectId)
-    await dir.removeEntry('sensors.json')
-  } catch {}
+  return trackPersistence('deleteSensors:' + String(projectId), async () => {
+    try {
+      const dir = await getProjectDir(projectId)
+      await dir.removeEntry('sensors.json')
+    } catch (error) { ignoreMissing(error) }
+  })
 }
 
 // ── Camera poses (exterior orientation / extrinsics) ────────────────────────────
@@ -933,8 +1059,10 @@ export async function deleteSensors(projectId) {
 // unchanged and are consumed as camera-orientation priors during BA.
 
 export async function savePoses(projectId, data) {
-  const dir = await getProjectDir(projectId, true)
-  await writeJson(dir, 'poses.json', data)
+  return trackPersistence('savePoses:' + String(projectId), async () => {
+    const dir = await getProjectDir(projectId, true)
+    await writeJson(dir, 'poses.json', data)
+  })
 }
 
 export async function loadPoses(projectId) {
@@ -947,21 +1075,24 @@ export async function loadPoses(projectId) {
 }
 
 export async function deletePoses(projectId) {
-  try {
-    const dir = await getProjectDir(projectId)
-    await dir.removeEntry('poses.json')
-  } catch {}
+  return trackPersistence('deletePoses:' + String(projectId), async () => {
+    try {
+      const dir = await getProjectDir(projectId)
+      await dir.removeEntry('poses.json')
+    } catch (error) { ignoreMissing(error) }
+  })
 }
 
 // ── Reconstruction ────────────────────────────────────────────────────────────
-// Metadata → reconstruction.json (version 2):
-//   { version: 2, clouds: [{ id, name, kind, createdAt, pointCount, hasColor,
+// Metadata → reconstruction.json (version 3):
+//   { version: 3, binaryFiles: { key: { name, bytes } }, clouds: [{ id, name, kind, createdAt, pointCount, hasColor,
 //       cameras: [{ uuid, R, t, K }], viewUuids: [uuid, …] }],
 //     georef, summary, denseSummary }
 // The heavy per-point data lives in binary sidecars, one set per cloud, named
-// `recon.{cloudId}.{key}.bin`:
+// `reconstruction.json.{generation}.{cloudId}.{key}.bin` (legacy: recon.{cloudId}.{key}.bin):
 //   pos    Float64  3·N   x,y,z (world-frame precision)
 //   col    Uint8    3·N   r,g,b (present only when hasColor)
+//   colorMask Uint8 N     1 when a sparse point has colour; absent on legacy saves
 //   nrm    Float32  3·N   world-space unit normals (dense-only; Poisson mesh input;
 //                         absent on old projects / normal-less runs — do NOT heal)
 //   idx    Uint32   3·T   triangle vertex indices (mesh clouds only)
@@ -970,67 +1101,81 @@ export async function deletePoses(projectId) {
 //   vkp    Uint32   ΣV    keypoint index, per view
 // This replaces a multi-MB JSON.parse (which froze the main thread on open) with
 // a transferable typed-array read. The store passes each cloud's typed arrays as
-// `buffers: { pos, col, nrm, idx, vcount, vcam, vkp, vx, vy }` (ArrayBuffers); load
+// `buffers: { pos, col, colorMask, nrm, idx, vcount, vcam, vkp, vx, vy }` (ArrayBuffers); load
 // returns them the same way for the store to rebuild the point objects. vx/vy carry
 // per-view BA-frame pixels (COLMAP export) and are absent on dense/legacy clouds.
-const RECON_BIN_KEYS = ['pos', 'col', 'nrm', 'idx', 'vcount', 'vcam', 'vkp', 'vx', 'vy']
+const RECON_BIN_KEYS = ['pos', 'col', 'colorMask', 'nrm', 'idx', 'vcount', 'vcam', 'vkp', 'vx', 'vy']
 
 async function removeStaleReconBins(dir, keepIds) {
   const stale = []
   for await (const name of dir.keys()) {
-    const m = name.match(/^recon\.(.+)\.(?:pos|col|nrm|idx|vcount|vcam|vkp|vx|vy)\.bin$/)
+    const m = name.match(/^recon\.(.+)\.(?:pos|col|colorMask|nrm|idx|vcount|vcam|vkp|vx|vy)\.bin$/)
     if (m && !keepIds.has(m[1])) stale.push(name)
   }
-  for (const name of stale) await dir.removeEntry(name).catch(() => {})
+  for (const name of stale) await dir.removeEntry(name).catch(ignoreMissing)
 }
 
 export async function saveReconstruction(projectId, data) {
-  const dir = await getProjectDir(projectId, true)
-  const { clouds = [], ...rest } = data
-  const meta = { version: 2, ...rest, clouds: [] }
-  const keepIds = new Set()
-  for (const c of clouds) {
-    keepIds.add(c.id)
-    const { buffers, ...cmeta } = c
-    meta.clouds.push(cmeta)
-    for (const key of RECON_BIN_KEYS) {
-      const buf = buffers?.[key]
-      const name = `recon.${c.id}.${key}.bin`
-      if (buf && buf.byteLength) await writeBin(dir, name, buf)
-      else await dir.removeEntry(name).catch(() => {})   // e.g. col absent, or empty view set
-    }
-  }
-  await writeJson(dir, 'reconstruction.json', meta)
-  await removeStaleReconBins(dir, keepIds)               // drop sidecars of removed clouds
+  return trackPersistence('saveReconstruction:' + String(projectId), async () => {
+    return persistenceLock(`reconstruction:${projectId}`, async () => {
+      const dir = await getProjectDir(projectId, true)
+      const { clouds = [], ...rest } = data
+      const meta = { ...rest, version: 3, clouds: [] }
+      const buffers = {}
+      for (const c of clouds) {
+        const { buffers: cloudBuffers, ...cmeta } = c
+        meta.clouds.push(cmeta)
+        for (const key of RECON_BIN_KEYS) {
+          if (cloudBuffers?.[key]) buffers[`${c.id}.${key}`] = cloudBuffers[key]
+        }
+      }
+      await writeBinaryDocument(dir, 'reconstruction.json', meta, buffers, { writeJson, writeBin })
+    })
+  })
 }
 
 export async function loadReconstruction(projectId) {
+  return persistenceLock(`reconstruction:${projectId}`, async () => {
   try {
     const dir = await getProjectDir(projectId)
     const meta = await readJson(dir, 'reconstruction.json')
     if (!meta) return null
     // Legacy inline shape (points embedded in JSON) — hand back untouched; the
-    // store still understands it. New projects always write version 2.
-    if (meta.version !== 2) return meta
-    for (const c of meta.clouds || []) {
+    // store still understands it. New saves write version 3 with immutable generation buffers.
+    if (meta.version !== 2 && meta.version !== 3) return meta
+    const saved = meta.binaryFiles ? await readBinaryDocument(dir, meta, readBin) : null
+    await mapConcurrent(meta.clouds || [], 3, async (c) => {
       const buffers = {}
-      for (const key of RECON_BIN_KEYS) {
-        buffers[key] = await readBin(dir, `recon.${c.id}.${key}.bin`).catch(() => null)
+      const loaded = await mapConcurrent(RECON_BIN_KEYS, 6, async (key) => saved
+        ? saved[`${c.id}.${key}`] ?? null
+        : readBin(dir, `recon.${c.id}.${key}.bin`).catch(() => null))
+      RECON_BIN_KEYS.forEach((key, index) => { buffers[key] = loaded[index] })
+      const n = c.pointCount ?? 0
+      if (!Number.isSafeInteger(n) || n < 0 || (buffers.pos?.byteLength ?? 0) !== n * 24
+          || (c.hasColor && buffers.col?.byteLength !== n * 3)
+          || (c.hasNormals && buffers.nrm?.byteLength !== n * 12)
+          || (c.kind === 'mesh' && buffers.idx?.byteLength !== (c.triCount ?? 0) * 12)) {
+        throw new Error('Incomplete saved reconstruction')
       }
       c.buffers = buffers
-    }
+    })
+    delete meta.binaryFiles
     return meta
   } catch {
     return null
   }
+  })
 }
 
 export async function deleteReconstruction(projectId) {
-  try {
+  return trackPersistence('deleteReconstruction:' + String(projectId), () => persistenceLock(`reconstruction:${projectId}`, async () => {
     const dir = await getProjectDir(projectId)
-    await dir.removeEntry('reconstruction.json').catch(() => {})
+    await dir.removeEntry('reconstruction.json').catch(ignoreMissing)
     await removeStaleReconBins(dir, new Set())
-  } catch {}
+    if (dir.keys) for await (const name of dir.keys()) {
+      if (name.startsWith('reconstruction.json.') && name.endsWith('.bin')) await dir.removeEntry(name).catch(ignoreMissing)
+    }
+  }))
 }
 
 // ── Products (DEM / orthophoto rasters) ──────────────────────────────────────
@@ -1040,46 +1185,65 @@ export async function deleteReconstruction(projectId) {
 // reload. DEM: Float32 heights (`data`) + Uint8 validity (`mask`). Ortho: Uint8
 // RGBA (`rgba`).
 
-export async function saveProduct(projectId, kind, product) {
-  try {
-    const dir = await getSubDir(projectId, 'products')
-    const { data, mask, rgba, ...meta } = product
-    await writeJson(dir, `${kind}.json`, meta)
-    if (data) await writeBin(dir, `${kind}_data.bin`, data.buffer)
-    if (mask) await writeBin(dir, `${kind}_mask.bin`, mask.buffer)
-    if (rgba) await writeBin(dir, `${kind}_rgba.bin`, rgba.buffer)
-  } catch {}
-}
-
-export async function loadProduct(projectId, kind) {
-  try {
-    const dir = await getSubDir(projectId, 'products')
-    const meta = await readJson(dir, `${kind}.json`)
-    if (!meta) return null
-    if (kind === 'dem') {
-      const data = new Float32Array(await readBin(dir, 'dem_data.bin'))
-      const mask = new Uint8Array(await readBin(dir, 'dem_mask.bin'))
-      return { ...meta, data, mask }
-    }
-    const rgba = new Uint8Array(await readBin(dir, `${kind}_rgba.bin`))
-    return { ...meta, rgba }
-  } catch {
-    return null
+function validateProduct(kind, product) {
+  const n = product.width * product.height
+  if (!Number.isSafeInteger(product.width) || product.width <= 0
+      || !Number.isSafeInteger(product.height) || product.height <= 0 || !Number.isSafeInteger(n)
+      || (kind === 'dem' ? !(product.data instanceof Float32Array) || product.data.length !== n
+        || !(product.mask instanceof Uint8Array) || product.mask.length !== n
+        : !(product.rgba instanceof Uint8Array || product.rgba instanceof Uint8ClampedArray) || product.rgba.length !== n * 4)) {
+    throw new Error('Incomplete or invalid raster product')
   }
 }
 
+export async function saveProduct(projectId, kind, product) {
+  return trackPersistence('saveProduct:' + String(projectId) + ':' + String(kind), async () => {
+    validateProduct(kind, product)
+    return persistenceLock(`product:${projectId}:${kind}`, async () => {
+      const dir = await getSubDir(projectId, 'products')
+      const { data, mask, rgba, ...meta } = product
+      // Pass views, not their underlying buffer: subarrays may have a nonzero offset.
+      await writeBinaryDocument(dir, `${kind}.json`, meta, { data, mask, rgba }, { writeJson, writeBin })
+    })
+  })
+}
+
+export async function loadProduct(projectId, kind) {
+  return persistenceLock(`product:${projectId}:${kind}`, async () => {
+    try {
+      const dir = await getSubDir(projectId, 'products')
+      const meta = await readJson(dir, `${kind}.json`)
+      if (!meta) return null
+      const buffers = meta.binaryFiles ? await readBinaryDocument(dir, meta, readBin) : null
+      delete meta.binaryFiles
+      const product = kind === 'dem' ? { ...meta,
+        data: new Float32Array(buffers ? buffers.data : await readBin(dir, 'dem_data.bin')),
+        mask: new Uint8Array(buffers ? buffers.mask : await readBin(dir, 'dem_mask.bin')),
+      } : { ...meta, rgba: new Uint8Array(buffers ? buffers.rgba : await readBin(dir, `${kind}_rgba.bin`)) }
+      validateProduct(kind, product)
+      return product
+    } catch { return null }
+  })
+}
+
 export async function deleteProduct(projectId, kind) {
-  try {
+  return trackPersistence('deleteProduct:' + String(projectId) + ':' + String(kind), () => persistenceLock(`product:${projectId}:${kind}`, async () => {
     const dir = await getSubDir(projectId, 'products')
-    for (const suffix of ['.json', '_data.bin', '_mask.bin', '_rgba.bin']) {
-      await dir.removeEntry(`${kind}${suffix}`).catch(() => {})
+    await dir.removeEntry(`${kind}.json`).catch(ignoreMissing)
+    for (const suffix of ['_data.bin', '_mask.bin', '_rgba.bin']) {
+      await dir.removeEntry(`${kind}${suffix}`).catch(ignoreMissing)
     }
-  } catch {}
+    if (dir.keys) for await (const name of dir.keys()) {
+      if (name.startsWith(`${kind}.json.`) && name.endsWith('.bin')) await dir.removeEntry(name).catch(ignoreMissing)
+    }
+  }))
 }
 
 export async function deleteProducts(projectId) {
-  try {
-    const dir = await getProjectDir(projectId)
-    await dir.removeEntry('products', { recursive: true })
-  } catch {}
+  return trackPersistence('deleteProducts:' + String(projectId), async () => {
+    try {
+      const dir = await getProjectDir(projectId)
+      await dir.removeEntry('products', { recursive: true })
+    } catch (error) { ignoreMissing(error) }
+  })
 }

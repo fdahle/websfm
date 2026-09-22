@@ -57,6 +57,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
   // at one of them (see `ensureMainSparse`). Persisted in reconstruction.json.
   const mainSparseId = ref(null)
   const reconStatus = ref('idle') // last run: 'idle' | 'running' | 'done' | 'error'
+  let restoreGeneration = 0
 
   // Per-image depth maps from the dense Stage A (Build Depth Maps), keyed by image
   // uuid. Each: { uuid, width, height, K, R, t, depth, cost, rgb, normals }.
@@ -268,8 +269,13 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
   }
 
   async function persist() {
-    if (!isPersisting()) return
-    await opfs.saveReconstruction(projects.currentProjectId, serialize()).catch(() => {})
+    if (!isPersisting()) return false
+    try {
+      await opfs.saveReconstruction(projects.currentProjectId, serialize())
+      return true
+    } catch {
+      return false
+    }
   }
 
   // Insert a sparse model. Two intents via `opts`:
@@ -1061,6 +1067,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
   // persists it. (The model now lands all at once at the end rather than building
   // up live in the viewer — a fair trade for never freezing the UI.)
   async function reconstruct(settings = {}, onProgress) {
+    restoreGeneration++
     reconStatus.value = 'running'
 
     try {
@@ -1264,6 +1271,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
   // Reset the in-memory clouds. Pass { purge: true } to also delete the persisted
   // reconstruction.json — do NOT purge on project switch, since restore reads it.
   function clear({ purge = false } = {}) {
+    restoreGeneration++
     clouds.value = []
     selectedCloudId.value = null
     mainSparseId.value = null
@@ -1301,12 +1309,15 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     // the previous project's clouds in memory (loadReconstruction returns null for
     // an empty project and would otherwise no-op).
     clear()
+    const generation = restoreGeneration
+    const isCurrentRestore = () => generation === restoreGeneration && projectId === projects.currentProjectId
     const data = await opfs.loadReconstruction(projectId)
+    if (!isCurrentRestore()) return
     if (!data) {
       // No sparse model, so any saved depth planes are orphans (they only exist in a
       // sparse cloud's frame). Let the staleness check collect them rather than leak
       // hundreds of MB of OPFS forever.
-      await loadDepthIndexIntoMeta(projectId)
+      await loadDepthIndexIntoMeta(projectId, isCurrentRestore)
       return
     }
 
@@ -1333,6 +1344,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
       opfs.loadProduct(projectId, 'dem'),
       opfs.loadProduct(projectId, 'ortho'),
     ])
+    if (!isCurrentRestore()) return
     dem.value = savedDem
     ortho.value = savedOrtho
     if (savedDem || savedOrtho) {
@@ -1347,7 +1359,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     // Advertise saved depth maps without loading their planes — densify / ortho
     // hydrate them on demand. Runs after ensureMainSparse() so the staleness check
     // compares against the cloud the pipeline will actually consume.
-    if (await loadDepthIndexIntoMeta(projectId)) {
+    if (await loadDepthIndexIntoMeta(projectId, isCurrentRestore) && isCurrentRestore()) {
       log(`Dense: ${depthMapsMeta.value.length} saved depth map(s) available `
         + `(${formatBytes(depthMapBytes(depthMapsMeta.value))}, loaded on demand)`, 'success', 'Dense')
     }

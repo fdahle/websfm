@@ -84,7 +84,7 @@ export const useLogStore = registerProjectStore(defineStore('log', () => {
   // appends are incremental, so no de-duplication is needed here.
   async function restore({ projectId }) {
     cancelTimer()
-    let saved = await opfs.readLog(projectId)
+    let saved = await opfs.readLogTail(projectId, MAX_BUFFER)
     if (saved === null) {
       // Migrate the legacy whole-array log.json into the stream, once.
       const legacy = await opfs.loadLegacyLog(projectId)
@@ -95,8 +95,7 @@ export const useLogStore = registerProjectStore(defineStore('log', () => {
       await opfs.deleteLegacyLog(projectId)
     }
     if (!Array.isArray(saved) || saved.length === 0) return
-    const tail = saved.slice(-MAX_BUFFER)
-    entries.value = [...tail, ...entries.value]
+    entries.value = [...saved, ...entries.value]
     if (entries.value.length > MAX_BUFFER) entries.value = entries.value.slice(-MAX_BUFFER)
   }
 

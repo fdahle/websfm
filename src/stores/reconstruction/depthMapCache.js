@@ -119,9 +119,13 @@ export function createDepthMapCache({ isPersisting, currentProjectId, mainSparse
   // invalidates it. Returns true when usable saved maps are now advertised.
   // `projectId` is explicit for the restore path (which is handed one), defaulting
   // to the open project for the in-session callers.
-  async function loadDepthIndexIntoMeta(projectId = currentProjectId()) {
+  async function loadDepthIndexIntoMeta(projectId = currentProjectId(), shouldApply = () => true) {
     if (!isPersisting()) return false
     const index = await opfs.loadDepthIndex(projectId).catch(() => null)
+    // Restore callers may have switched projects while the OPFS read was pending.
+    // In that case this result belongs to the old project and must not touch the
+    // shared refs (or delete data based on the new project's sparse model).
+    if (!shouldApply()) return false
     if (!index?.maps?.length) { depthMapsMeta.value = []; return false }
     if (isDepthIndexStale(index, mainSparseCloud())) {
       log(`Dense: discarding ${index.maps.length} saved depth map(s) — they belong to an older `

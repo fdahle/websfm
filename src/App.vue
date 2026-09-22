@@ -1,3 +1,4 @@
+import { pendingPersistence, persistenceFailures, retryPersistence } from './utils/persistence.js'
 <script setup>
 import { ref, computed, reactive, watch, onMounted, nextTick } from 'vue'
 import { storeToRefs } from 'pinia'
@@ -1101,7 +1102,8 @@ const { closeTopModal } = useModalEscape({
 // Autosaved idle sessions can close quietly. Prompt only while closing would
 // interrupt compute, project I/O, or an import whose source bytes are not yet safe.
 useBeforeUnload(() => progressOpen.value || projectLoading.value
-  || pendingImageWork.value > 0 || pendingRasterWork.value > 0)
+  || pendingImageWork.value > 0 || pendingRasterWork.value > 0
+  || pendingPersistence.value > 0 || persistenceFailures.value.length > 0)
 
 // Open an imported reference raster in its own tab. The tab opens immediately
 // (the preview PNG is in the index, so there's something to look at at once) and
@@ -1416,6 +1418,10 @@ function onRibbonPick(event) {
 
 <template>
   <div class="app">
+    <div v-if="persistenceFailures.length" role="alert" class="persistence-error">
+      Unsaved changes: {{ persistenceFailures[0].error?.message || 'Storage write failed' }}
+      <button :disabled="pendingPersistence > 0" @click="retryPersistence().catch(() => {})">Retry saving</button>
+    </div>
     <MobileWarning />
     <BrowserWarning />
     <ToastStack />
@@ -2405,4 +2411,10 @@ function onRibbonPick(event) {
   margin: 4px 0;
 }
 
+</style>
+
+<style scoped>
+.persistence-error { position: fixed; bottom: 12px; left: 12px; right: 12px; z-index: 500;
+  background: #70271f; color: white; padding: 12px; border-radius: 6px; }
+.persistence-error button { margin-left: 12px; }
 </style>

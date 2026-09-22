@@ -15,7 +15,11 @@ function makeFile(name) {
     open: 0,
     async getFile() {
       const { data } = this
-      return { size: data.length, text: async () => data }
+      return {
+        size: data.length,
+        text: async () => data,
+        slice: (start = 0) => ({ text: async () => data.slice(start) }),
+      }
     },
     async createWritable(opts) {
       if (this.open > 0) {
@@ -127,4 +131,14 @@ describe('write serialization', () => {
     const lines = projectDir('p4').files.get('log.ndjson').data.trim().split('\n')
     expect(lines.map((l) => JSON.parse(l).m).sort()).toEqual(['a', 'b'])
   })
+
+  it('reads only the requested tail of a large log', async () => {
+    const entries = Array.from({ length: 3000 }, (_, i) => ({ i, m: 'x'.repeat(40) }))
+    await opfs.appendLog('p5', entries)
+    const tail = await opfs.readLogTail('p5', 25)
+    expect(tail).toHaveLength(25)
+    expect(tail[0].i).toBe(2975)
+    expect(tail[24].i).toBe(2999)
+  })
+
 })

@@ -1,3 +1,4 @@
+import { coalescedSave } from '../utils/coalescedSave.js'
 import { ref, watch, computed } from 'vue'
 import { defineStore, storeToRefs } from 'pinia'
 import { useLog } from '../composables/useLog.js'
@@ -99,25 +100,11 @@ export const usePosesStore = registerProjectStore(defineStore('poses', () => {
   // schedules a single trailing re-run that captures the latest state.
   // (opfs.js serializes same-file writes regardless; this is about not queueing
   // N redundant rewrites of one small file.)
-  let writing = false
-  let rerun = false
-  async function save() {
-    if (!isPersisting()) return
-    if (writing) { rerun = true; return }
-    writing = true
-    try {
-      do {
-        rerun = false
-        await opfs.savePoses(projects.currentProjectId, {
-          crs: currentCrs.value,
-          poses: poses.value,
-        })
-      } while (rerun)
-    } catch (err) {
-      log(`Pose save failed — ${err?.message ?? err}`, 'error', 'Pose')
-    } finally {
-      writing = false
-    }
+  const saveQueued = coalescedSave('poses', opfs.savePoses)
+  function save() {
+    if (!isPersisting()) return Promise.resolve()
+    return saveQueued(projects.currentProjectId, { crs: currentCrs.value, poses: poses.value })
+      .catch(err => log(`Poses save failed — ${err?.message ?? err}`, 'error', 'Poses'))
   }
 
   // Name → image-id matching is shared with GCP observations / footprints /
@@ -192,6 +179,12 @@ export const usePosesStore = registerProjectStore(defineStore('poses', () => {
   // always win; EXIF records are derived idempotently and retain user toggles/
   // accuracy edits across metadata refreshes.
   let exifSyncGeneration = 0
+  function assignIfChanged(target, values) {
+    const changed = Object.entries(values).some(([key, value]) => !Object.is(target[key], value))
+    if (changed) Object.assign(target, values)
+    return changed
+  }
+
   async function syncExifPoses() {
     const generation = ++exifSyncGeneration
     const projectId = projects.currentProjectId
@@ -220,7 +213,7 @@ export const usePosesStore = registerProjectStore(defineStore('poses', () => {
       const existing = poses.value.find((p) => p.imageId === im.id || p.imageName === im.name)
       if (existing && existing.source !== 'exif') continue
       if (existing) {
-        Object.assign(existing, {
+        changed = assignIfChanged(existing, {
           imageId: im.id, imageName: im.name, x: projected.x, y: projected.y, z: projected.z,
           altitudeMeters: projected.altitudeMeters,
           accuracyMetersX: projected.accuracyMetersX,
@@ -235,19 +228,23 @@ export const usePosesStore = registerProjectStore(defineStore('poses', () => {
           verticalDatum: existing.verticalDatum ?? raw.verticalDatum,
           omega: projected.omega, phi: projected.phi, kappa: projected.kappa,
           orientationSource: raw.orientationSource,
-        })
+        }) || changed
         // No pose-accuracy editor exists today, but preserve a future/manual
         // override explicitly marked as user-owned instead of overwriting it.
-        if (existing.accuracySource !== 'user') Object.assign(existing, {
-          accuracyX: projected.accuracyX, accuracyY: projected.accuracyY,
-          accuracyZ: projected.accuracyZ, accXYZ: projected.accuracyX,
-          accuracySource: raw.accuracySource,
-        })
-        if (existing.orientationAccuracySource !== 'user') Object.assign(existing, {
-          accuracyOmega: raw.accuracyOmega, accuracyPhi: raw.accuracyPhi,
-          accuracyKappa: raw.accuracyKappa,
-          orientationAccuracySource: raw.orientationSource ? 'exif' : null,
-        })
+        if (existing.accuracySource !== 'user') {
+          changed = assignIfChanged(existing, {
+            accuracyX: projected.accuracyX, accuracyY: projected.accuracyY,
+            accuracyZ: projected.accuracyZ, accXYZ: projected.accuracyX,
+            accuracySource: raw.accuracySource,
+          }) || changed
+        }
+        if (existing.orientationAccuracySource !== 'user') {
+          changed = assignIfChanged(existing, {
+            accuracyOmega: raw.accuracyOmega, accuracyPhi: raw.accuracyPhi,
+            accuracyKappa: raw.accuracyKappa,
+            orientationAccuracySource: raw.orientationSource ? 'exif' : null,
+          }) || changed
+        }
       } else {
         poses.value.push(normalizePose({
           imageId: im.id, imageName: im.name,
@@ -274,8 +271,8 @@ export const usePosesStore = registerProjectStore(defineStore('poses', () => {
           source: 'exif', enabled: true,
         }))
         added++
+        changed = true
       }
-      changed = true
     }
     if (changed) await save()
     if (added) log(`EXIF GPS: ${pluralize(added, 'camera position')} added in ${projectCrs}`, 'success', 'Pose')
