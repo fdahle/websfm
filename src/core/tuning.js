@@ -37,6 +37,12 @@ export const SFM_TUNING = {
   // and the two compose (the quantile bound applies to the resolved threshold).
   filterMaxReprojPx: 4.0,
   filterMinTriAngleDeg: 1.5, // drop points whose rays are too parallel
+  // Final sparse-cloud corroboration gate. Keep 2-view tracks while incremental SfM
+  // needs them, then omit them from the delivered model once a sufficiently large
+  // multi-view core proves that doing so will not erase a two-camera/tiny dataset.
+  finalMinTrackViews: 3,
+  finalTrackPruneMinCount: 50,
+  finalTrackPruneMinShare: 0.2,
   interimBaEvery: 5,         // run a global BA after this many newly-registered cameras
   interimBaIterations: 12,   // fewer iters for the interim solves than the final BA
   // Camera-centre priors (imported poses / EXIF GPS) enter one final fixed-K BA.

@@ -98,6 +98,23 @@ describe('resolveK (intrinsics resolution)', () => {
     expect(K.source).toMatch(/format/)
   })
 
+  it('converts 35mm-equivalent focal by diagonal FOV for portrait 4:3 images', () => {
+    const portrait = { width: 3072, height: 4080, focalLength35: 49 }
+    const landscape = { width: 4080, height: 3072, focalLength35: 49 }
+    const expected = (49 / Math.hypot(36, 24)) * Math.hypot(3072, 4080)
+
+    const portraitK = resolveK(portrait)
+    const landscapeK = resolveK(landscape)
+    expect(portraitK.fx).toBeCloseTo(expected, 6)
+    expect(portraitK.fx).toBeCloseTo(5783.9801, 3)
+    expect(landscapeK.fx).toBeCloseTo(portraitK.fx, 6)
+  })
+
+  it('preserves the horizontal conversion for landscape 3:2 images', () => {
+    const K = resolveK({ width: 6000, height: 4000, focalLength35: 50 })
+    expect(K.fx).toBeCloseTo((50 / 36) * 6000, 6)
+  })
+
   it('falls back to a default FOV with no calibration', () => {
     const K = resolveK(meta, null)
     expect(K.fx).toBe(10137) // max(w, h)

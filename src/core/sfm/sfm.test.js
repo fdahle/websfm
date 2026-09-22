@@ -4,7 +4,11 @@ import { beforeAll, describe, it, expect } from 'vitest'
 
 import initRecon from '../../wasm/reconstruction/reconstruction.js'
 import { RUN_BUDGET } from './progressPlan.js'
-import { reconstruct, retriangulatePairs, mergeSplitTracks, rotationCycleFilter } from './sfm.js'
+import {
+  reconstruct, retriangulatePairs, mergeSplitTracks, rotationCycleFilter,
+  pruneFinalTwoViewTracks,
+} from './sfm.js'
+import { resolveK } from './reconstruction.js'
 import { distortPixel } from './distortion.js'
 import { canonicalFrame } from './fiducials.js'
 
@@ -38,9 +42,9 @@ function mulberry32(seed) {
   }
 }
 
-// One sensor for all images → one known K (matches core estimateK from this meta).
+// One sensor for all images → one known K (matches core resolveK from this meta).
 const META = { width: 1000, height: 800, focalLength35: 35 }
-const FX = (META.focalLength35 / 36) * META.width // estimateK: fx = (f35/36)·w
+const FX = resolveK(META).fx
 const K = [[FX, 0, META.width / 2], [0, FX, META.height / 2], [0, 0, 1]]
 const KINV = [[1 / FX, 0, -(META.width / 2) / FX], [0, 1 / FX, -(META.height / 2) / FX], [0, 0, 1]]
 const Kobj = { fx: FX, fy: FX, cx: META.width / 2, cy: META.height / 2 }
@@ -583,6 +587,18 @@ describe('retriangulatePairs / mergeSplitTracks (A3)', () => {
     expect(points3d).toHaveLength(0)
   })
 
+  it('rejects a low-parallax point even when it reprojects perfectly', async () => {
+    const points3d = []
+    const triangulate = async () => [{ x: W[0], y: W[1], z: W[2], srcIdx: 0 }]
+    const { added, lowParallax } = await retriangulatePairs({
+      points3d, cameras, pairs: [{ idA: 'c0', idB: 'c1', matches: [[0, 0]] }],
+      keypointOf, maxReprojPx: 2, minTriAngleDeg: 20, triangulate,
+    })
+    expect(added).toBe(0)
+    expect(lowParallax).toBe(1)
+    expect(points3d).toHaveLength(0)
+  })
+
   it('merges two points that are the same feature split across a match', () => {
     const p1 = { ...ptAt(W), views: new Map([['c0', 0], ['c1', 0]]) }
     const p2 = { ...ptAt(W), views: new Map([['c2', 0]]) }
@@ -607,6 +623,30 @@ describe('retriangulatePairs / mergeSplitTracks (A3)', () => {
     })
     expect(res.merged).toBe(0)
     expect(res.points3d).toHaveLength(2)
+  })
+})
+
+describe('pruneFinalTwoViewTracks', () => {
+  const track = (views) => ({ x: 0, y: 0, z: 1, views: new Map(views.map((u, i) => [u, i])) })
+
+  it('removes uncorroborated 2-view points when a healthy multi-view core exists', () => {
+    const strong = Array.from({ length: 80 }, () => track(['a', 'b', 'c']))
+    const fragile = Array.from({ length: 20 }, () => track(['a', 'b']))
+    const res = pruneFinalTwoViewTracks([...strong, ...fragile])
+    expect(res.applied).toBe(true)
+    expect(res.removed).toBe(20)
+    expect(res.points3d).toHaveLength(80)
+    expect(res.points3d.every((pt) => pt.views.size >= 3)).toBe(true)
+  })
+
+  it('keeps 2-view points when pruning would erase a weak or tiny model', () => {
+    const strong = Array.from({ length: 10 }, () => track(['a', 'b', 'c']))
+    const fragile = Array.from({ length: 90 }, () => track(['a', 'b']))
+    const input = [...strong, ...fragile]
+    const res = pruneFinalTwoViewTracks(input)
+    expect(res.applied).toBe(false)
+    expect(res.removed).toBe(0)
+    expect(res.points3d).toBe(input)
   })
 })
 

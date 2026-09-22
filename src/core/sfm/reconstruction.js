@@ -111,9 +111,14 @@ export function resolveK(meta, sensor = null) {
     }
   }
 
-  // 4. EXIF 35mm-equivalent focal length.
+  // 4. EXIF 35mm-equivalent focal length. The equivalence is defined by angle of
+  // view / crop factor, so convert through the image diagonal and the 35mm
+  // full-frame diagonal (36x24mm). Using `w / 36` is only valid for an unrotated
+  // 3:2 image: it underestimates focal length badly for portrait and non-3:2
+  // outputs (for example a portrait 4:3 phone image).
   if (meta?.focalLength35) {
-    const fx = (meta.focalLength35 / 36) * w
+    const fullFrameDiagonalMm = Math.hypot(36, 24)
+    const fx = (meta.focalLength35 / fullFrameDiagonalMm) * Math.hypot(w, h)
     return { fx, fy: fx, cx, cy, source: 'EXIF 35mm-equivalent focal' }
   }
 

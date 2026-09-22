@@ -69,7 +69,7 @@ export async function selectInitPair(
     const points = []
     for (const { x, y, z, srcIdx } of tri) {
       if (projDepth(PA, x, y, z) > 0 && projDepth(PB, x, y, z) > 0) {
-        const [ia, ib] = matches[srcIdx]
+        const [ia, ib] = matches.at ? matches.at(srcIdx) : matches[srcIdx]
         points.push({ x, y, z, views: new Map([[entry.idA, ia], [entry.idB, ib]]) })
       }
     }
