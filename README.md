@@ -69,9 +69,38 @@ learned backends locally, drop the four `.onnx` files into `public/models/` — 
 ### Tests & type-checking
 
 ```bash
-npm test           # vitest
-npm run typecheck  # tsc --noEmit
+npm test                # unit and store regression tests
+npm run typecheck       # TypeScript, Vue bindings, JavaScript correctness lint
+npm run test:wasm       # real LAZ WASM round-trip across compressor chunks
+npm run check:wasm      # Rust source / committed WASM freshness
+npx playwright install chromium
+npm run test:browser    # browser storage, keyboard, import/export and multi-tab tests
 ```
+
+Type checking is incremental: executable TypeScript currently includes packed-point
+views and project-index merging, alongside the shared data types and migrated
+confirmation/modal-shell components. Every Vue template is checked for undeclared
+bindings; JavaScript implementations are checked for undefined variables and
+unreachable code. This does not yet provide full static typing of every store.
+GitHub Actions runs these checks, native Rust tests, a production build and Chromium
+regressions. To use an installed Chrome locally, set `PLAYWRIGHT_CHANNEL=chrome`.
+After Rust changes, run `npm run build:wasm`; its final step updates the build stamp.
+
+Persistence uses immutable buffer generations with a final metadata commit for
+reconstructions and raster products. Existing projects remain readable; new
+reconstruction saves use version 3 and require this application version or newer.
+Failed saves remain visible and block project switching/export until retried.
+Tabs coordinate index edits and, where Web Locks are available, allow one editing
+session per project. These locks do not coordinate separate browsers or devices
+writing a shared folder.
+
+SfM ZIP extraction runs in a worker with limits of 1 GiB compressed, 512 MiB
+selected output, 256 MiB per entry, 20,000 entries and a 200:1 expansion ratio.
+LAS/LAZ imports have a 1 GiB estimated working-memory budget; the WASM decompressor
+also caps raw records at 512 MiB. DEM staging and raster allocations each have a
+512 MiB budget. Split or subsample larger inputs. CSV exports prefix potentially
+executable **text** with an apostrophe; numerical coordinates remain numbers.
+That protective apostrophe is part of the exported value when reimported.
 
 ---
 
@@ -122,7 +151,11 @@ Configure the production host as follows:
 
 - **Caching and compression.** The files below `assets/` have content hashes and
   can use `Cache-Control: public, max-age=31536000, immutable`. Keep `index.html`
-  on `no-cache` so a release can point browsers at its new hashes. Enable Brotli or
+  on `no-cache` so a release can point browsers at its new hashes. ORT runtime files
+  live under `ort/<installed-onnxruntime-version>/`; revalidate unversioned `.mjs`,
+  `.wasm` and `.onnx` files. When replacing model weights under the same name, also
+  bump `MODEL_CACHE_NAME` in `src/core/models/registry.js` to invalidate Cache Storage.
+  Enable Brotli or
   gzip for HTML, JavaScript and CSS; do not recompress `.wasm` or `.onnx` unless the
   server is configured to do so efficiently.
 
@@ -132,7 +165,7 @@ preview server:
 ```bash
 curl -I https://websfm.example/
 curl -I https://websfm.example/assets/NAME.wasm
-curl -I https://websfm.example/ort/ort-wasm-simd-threaded.wasm
+curl -I https://websfm.example/ort/1.27.0/ort-wasm-simd-threaded.wasm
 curl -I https://websfm.example/models/superpoint.onnx
 ```
 
