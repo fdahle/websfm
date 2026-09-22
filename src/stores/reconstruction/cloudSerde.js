@@ -1,4 +1,5 @@
 import { markRaw } from 'vue'
+import { makePackedPoints } from '../../core/sfm/resultCodec.js'
 
 // Cloud ↔ on-disk shape. Lifted out of useReconstructionStore so the format has one
 // home and can be round-tripped in tests (it handles three cloud kinds, a CSR
@@ -33,6 +34,7 @@ export function serializeDenseCloud(c) {
   const nrm = c.nrm ? c.nrm.slice(0, N * 3) : null
   return {
     id: c.id, name: c.name, kind: 'dense', createdAt: c.createdAt,
+    posType: c.pos instanceof Float64Array ? 'f64' : 'f32',
     imported: !!c.imported, derived: !!c.derived, secondary: !!c.secondary,
     cameras: [], pointCount: N, hasColor: !!col, hasNormals: !!nrm, viewUuids: [],
     buffers: { pos: pos.buffer, col: col ? col.buffer : null, nrm: nrm ? nrm.buffer : null,
@@ -50,6 +52,7 @@ export function serializeMeshCloud(c) {
   const idx = c.idx ? Uint32Array.from(c.idx) : new Uint32Array(0)
   return {
     id: c.id, name: c.name, kind: 'mesh', createdAt: c.createdAt,
+    posType: c.pos instanceof Float64Array ? 'f64' : 'f32',
     imported: !!c.imported, secondary: !!c.secondary,
     cameras: [], pointCount: nVerts, nVerts, triCount: c.count || 0,
     hasColor: !!col, viewUuids: [],
@@ -66,13 +69,44 @@ export function serializeCloud(c) {
   const pos = new Float64Array(N * 3)
   const hasColor = pts.some((p) => p.color)
   const col = hasColor ? new Uint8Array(N * 3) : null
+  const colorMask = hasColor ? new Uint8Array(N) : null
 
   const camIndex = new Map()
   const viewUuids = []
   for (const uuid of c.cameras.keys()) { camIndex.set(uuid, viewUuids.length); viewUuids.push(uuid) }
 
-  const vcount = new Uint32Array(N)
+  const packedTracks = pts.packedTracks ?? null
+  if (packedTracks) {
+    // Reconstructed/restored clouds already own the exact CSR representation the
+    // disk format expects. Reuse it rather than iterating millions of observations
+    // and allocating a second set of buffers immediately after reconstruction.
+    for (let i = 0; i < N; i++) {
+      const p = pts[i]
+      pos[i * 3] = p.x; pos[i * 3 + 1] = p.y; pos[i * 3 + 2] = p.z
+      if (col && p.color) {
+        col[i * 3] = p.color[0]; col[i * 3 + 1] = p.color[1]; col[i * 3 + 2] = p.color[2]
+        colorMask[i] = 1
+      }
+    }
+    return {
+      id: c.id, name: c.name, kind: c.kind, createdAt: c.createdAt,
+      imported: !!c.imported, secondary: !!c.secondary,
+      cameras: [...c.cameras.entries()].map(([uuid, cam]) => ({ uuid, ...cam })),
+      pointCount: N, hasColor, viewUuids: packedTracks.viewUuids,
+      buffers: {
+        pos: pos.buffer,
+        col: col ? col.buffer : null,
+        colorMask: colorMask ? colorMask.buffer : null,
+        vcount: packedTracks.vcount.buffer,
+        vcam: packedTracks.vcam.buffer,
+        vkp: packedTracks.vkp.buffer,
+        vx: packedTracks.vx?.buffer ?? null,
+        vy: packedTracks.vy?.buffer ?? null,
+      },
+    }
+  }
   let totalViews = 0
+  const vcount = new Uint32Array(N)
   for (const p of pts) totalViews += p.views ? p.views.size : 0
   const vcam = new Uint32Array(totalViews)
   const vkp = new Uint32Array(totalViews)
@@ -86,7 +120,10 @@ export function serializeCloud(c) {
   for (let i = 0; i < N; i++) {
     const p = pts[i]
     pos[i * 3] = p.x; pos[i * 3 + 1] = p.y; pos[i * 3 + 2] = p.z
-    if (col && p.color) { col[i * 3] = p.color[0]; col[i * 3 + 1] = p.color[1]; col[i * 3 + 2] = p.color[2] }
+    if (col && p.color) {
+      col[i * 3] = p.color[0]; col[i * 3 + 1] = p.color[1]; col[i * 3 + 2] = p.color[2]
+      colorMask[i] = 1
+    }
     if (p.views && p.views.size) {
       vcount[i] = p.views.size
       for (const [uuid, kp] of p.views) {
@@ -106,6 +143,7 @@ export function serializeCloud(c) {
     buffers: {
       pos: pos.buffer,
       col: col ? col.buffer : null,
+      colorMask: colorMask ? colorMask.buffer : null,
       vcount: vcount.buffer,
       vcam: vcam.buffer,
       vkp: vkp.buffer,
@@ -118,10 +156,11 @@ export function serializeCloud(c) {
 export function deserializeCloud(c, makeCloudId) {
   const N = c.pointCount ?? 0
   const b = c.buffers || {}
-  // Dense clouds restore into the flat { count, pos:Float32, col:Uint8 } shape.
-  // On-disk pos is Float64 (uniform sidecar format); narrow it to Float32 in memory.
+  // Dense clouds restore into the flat shape with their original position precision.
+  // Retain Float64 precision in memory, including imported projected coordinates.
   if (c.kind === 'dense') {
-    const posF = b.pos ? Float32Array.from(new Float64Array(b.pos)) : new Float32Array(0)
+    const storedPos = b.pos ? new Float64Array(b.pos) : new Float64Array(0)
+    const posF = c.posType === 'f32' && !c.imported ? Float32Array.from(storedPos) : storedPos
     const col = c.hasColor && b.col ? new Uint8Array(b.col) : null
     // Normals stay Float32 on disk; undefined when the run produced none (no heal).
     const nrm = c.hasNormals && b.nrm ? new Float32Array(b.nrm) : null
@@ -131,13 +170,14 @@ export function deserializeCloud(c, makeCloudId) {
       ...(c.imported ? { imported: true } : {}),
       // Absent on projects saved before cloud editing existed ⇒ not derived.
       ...(c.derived ? { derived: true } : {}),
-      count: N, pos: markRaw(posF), col: markRaw(col),
+      count: N, pos: markRaw(posF), col: col ? markRaw(col) : null,
       ...(nrm ? { nrm: markRaw(nrm) } : {}),
     }
   }
   if (c.kind === 'mesh') {
     const nVerts = c.nVerts ?? N
-    const posF = b.pos ? Float32Array.from(new Float64Array(b.pos)) : new Float32Array(0)
+    const storedPos = b.pos ? new Float64Array(b.pos) : new Float64Array(0)
+    const posF = c.posType === 'f32' && !c.imported ? Float32Array.from(storedPos) : storedPos
     const col = c.hasColor && b.col ? new Uint8Array(b.col) : null
     const idx = b.idx ? new Uint32Array(b.idx) : new Uint32Array(0)
     return {
@@ -145,11 +185,12 @@ export function deserializeCloud(c, makeCloudId) {
       createdAt: c.createdAt ?? Date.now(), cameras: markRaw(new Map()),
       ...(c.imported ? { imported: true } : {}),
       count: c.triCount ?? (idx.length / 3), nVerts,
-      pos: markRaw(posF), idx: markRaw(idx), col: markRaw(col),
+      pos: markRaw(posF), idx: markRaw(idx), col: col ? markRaw(col) : null,
     }
   }
   const pos = b.pos ? new Float64Array(b.pos) : new Float64Array(0)
   const col = c.hasColor && b.col ? new Uint8Array(b.col) : null
+  const colorMask = b.colorMask ? new Uint8Array(b.colorMask) : null
   const vcount = b.vcount ? new Uint32Array(b.vcount) : null
   const vcam = b.vcam ? new Uint32Array(b.vcam) : null
   const vkp = b.vkp ? new Uint32Array(b.vkp) : null
@@ -160,29 +201,15 @@ export function deserializeCloud(c, makeCloudId) {
   const cameras = new Map()
   for (const cam of c.cameras || []) { const { uuid, R, t, K } = cam; cameras.set(uuid, { R, t, K }) }
 
-  const points = new Array(N)
-  let vi = 0
-  for (let i = 0; i < N; i++) {
-    const views = new Map()
-    let viewsPx
-    if (vcount && vcam && vkp) {
-      const k = vcount[i]
-      for (let j = 0; j < k; j++) {
-        const uuid = viewUuids[vcam[vi]]
-        views.set(uuid, vkp[vi])
-        if (vx && vy && Number.isFinite(vx[vi])) {
-          (viewsPx ??= new Map()).set(uuid, [vx[vi], vy[vi]])
-        }
-        vi++
-      }
-    }
-    points[i] = {
-      x: pos[i * 3], y: pos[i * 3 + 1], z: pos[i * 3 + 2],
-      color: col ? [col[i * 3], col[i * 3 + 1], col[i * 3 + 2]] : undefined,
-      views,
-      viewsPx,
-    }
-  }
+  const points = vcount && vcam && vkp
+    ? makePackedPoints({ pos, col, colorMask, viewUuids, vcount, vcam, vkp, vx, vy,
+        missingColorIsUndefined: true })
+    : new Array(N).fill(null).map((_, i) => ({
+        x: pos[i * 3], y: pos[i * 3 + 1], z: pos[i * 3 + 2],
+        color: col && (!colorMask || colorMask[i])
+          ? [col[i * 3], col[i * 3 + 1], col[i * 3 + 2]] : undefined,
+        views: new Map(),
+      }))
   return {
     id: c.id ?? makeCloudId(),
     name: c.name ?? 'Sparse cloud',
@@ -196,13 +223,13 @@ export function deserializeCloud(c, makeCloudId) {
 }
 
 // Legacy inline shape (points embedded in JSON) — kept so a pre-binary project
-// still opens. New projects always write version 2.
+// still opens. New projects write binary generation documents.
 export function legacyDeserializeCloud(c, makeCloudId) {
   // Legacy dense clouds embedded points as objects; fold them into the flat shape.
   if (c.kind === 'dense') {
     const src = c.points || []
     const n = src.length
-    const pos = new Float32Array(n * 3)
+    const pos = new Float64Array(n * 3)
     const col = new Uint8Array(n * 3)
     for (let i = 0; i < n; i++) {
       const p = src[i]
@@ -213,7 +240,7 @@ export function legacyDeserializeCloud(c, makeCloudId) {
     return {
       id: c.id ?? makeCloudId(), name: c.name ?? 'Dense cloud', kind: 'dense',
       createdAt: c.createdAt ?? Date.now(), cameras: markRaw(new Map()),
-      count: n, pos: markRaw(pos), col: markRaw(col),
+      count: n, pos: markRaw(pos), col: col ? markRaw(col) : null,
     }
   }
   const map = new Map()
@@ -229,4 +256,3 @@ export function legacyDeserializeCloud(c, makeCloudId) {
     }))),
   }
 }
-

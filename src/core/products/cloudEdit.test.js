@@ -262,3 +262,15 @@ describe('grid sizing helpers', () => {
     expect(estimateSpacing({ minX: 1, minY: 1, minZ: 1, maxX: 1, maxY: 1, maxZ: 1 }, 10)).toBe(0)
   })
 })
+
+it('keeps survey precision when filtering, merging and downsampling imported clouds', () => {
+  const cloud = { count: 2, pos: new Float64Array([7000000.01, 500000.01, 1, 7000000.02, 500000.02, 2]) }
+  const filtered = filterRange(cloud, { axis: 'z', min: 0, max: 3 })
+  expect(filtered.pos).toEqual(cloud.pos)
+  const merged = mergeClouds([cloud, cloud])
+  expect(merged.pos).toBeInstanceOf(Float64Array)
+  expect(merged.pos[0]).toBe(7000000.01)
+  const reduced = voxelDownsample(cloud, { cell: 0.001 })
+  expect(reduced.pos).toBeInstanceOf(Float64Array)
+  expect([...reduced.pos].filter((_, i) => i % 3 === 0).sort()).toEqual([7000000.01, 7000000.02])
+})

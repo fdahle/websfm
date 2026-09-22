@@ -1,4 +1,4 @@
-import init, { compress_points, decompress_points } from '../../wasm/lazcodec/lazcodec.js'
+import init, { compress_points, decompress_points, LazEncoder } from '../../wasm/lazcodec/lazcodec.js'
 import { cloudToLaz } from '../../core/io/laz.js'
 
 // LAZ codec ownership (lazy wasm init, like workers/ops/mesh.js gates the mesh
@@ -26,7 +26,19 @@ export function makeLazCodec() {
   const decompress = (vlrData, compressed, count, size) =>
     decompress_points(vlrData, compressed, count, size)
 
-  return { ensure, compress, decompress }
+  const createCompressor = (format, size) => {
+    const encoder = new LazEncoder(format, size)
+    return {
+      push: bytes => encoder.push(bytes),
+      finish: () => {
+        const packed = encoder.finish()
+        const vlr = packed.vlr
+        return { vlr, data: packed.data() }
+      },
+      free: () => encoder.free(),
+    }
+  }
+  return { ensure, compress, decompress, createCompressor }
 }
 
 export function makeLazOps(codec) {
@@ -38,7 +50,7 @@ export function makeLazOps(codec) {
     await codec.ensure()
     const log = (m, l = 'info') => emit('log', [m, l, 'Export'])
     const bytes = cloudToLaz(cloud, {
-      crsCode, geographic, compress: codec.compress, onLog: (m, l) => log(m, l),
+      crsCode, geographic, compress: codec.compress, createCompressor: codec.createCompressor, onLog: (m, l) => log(m, l),
     })
     const transfer = [bytes.buffer, cloud.pos.buffer]
     if (cloud.col) transfer.push(cloud.col.buffer)

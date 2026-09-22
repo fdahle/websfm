@@ -76,6 +76,58 @@ impl CompressedPoints {
     }
 }
 
+/// Incremental encoder: owns one continuous LASzip stream across JS chunks.
+#[wasm_bindgen]
+pub struct LazEncoder {
+    compressor: Option<LasZipCompressor<'static, Cursor<Vec<u8>>>>,
+    vlr: Vec<u8>,
+    point_size: u16,
+}
+
+#[wasm_bindgen]
+impl LazEncoder {
+    #[wasm_bindgen(constructor)]
+    pub fn new(point_format: u8, point_size: u16) -> Result<LazEncoder, JsError> {
+        Self::create(point_format, point_size).map_err(|e| JsError::new(&e))
+    }
+
+    pub fn push(&mut self, points: &[u8]) -> Result<(), JsError> {
+        self.push_impl(points).map_err(|e| JsError::new(&e))
+    }
+
+    pub fn finish(&mut self) -> Result<CompressedPoints, JsError> {
+        self.finish_impl().map_err(|e| JsError::new(&e))
+    }
+}
+
+impl LazEncoder {
+    fn create(point_format: u8, point_size: u16) -> Result<Self, String> {
+        let vlr = vlr_for_format(point_format)?;
+        if point_size == 0 || u64::from(point_size) != vlr.items_size() {
+            return Err("lazcodec: point size does not match format".into());
+        }
+        let mut bytes = Vec::new();
+        vlr.write_to(&mut bytes).map_err(|e| e.to_string())?;
+        let compressor = LasZipCompressor::new(Cursor::new(Vec::new()), vlr)
+            .map_err(|e| e.to_string())?;
+        Ok(Self { compressor: Some(compressor), vlr: bytes, point_size })
+    }
+
+    fn push_impl(&mut self, points: &[u8]) -> Result<(), String> {
+        if points.len() > 8 * 1024 * 1024 || points.len() % self.point_size as usize != 0 {
+            return Err("lazcodec: invalid or oversized record chunk".into());
+        }
+        self.compressor.as_mut().ok_or("lazcodec: encoder already finished")?
+            .compress_many(points).map_err(|e| e.to_string())
+    }
+
+    fn finish_impl(&mut self) -> Result<CompressedPoints, String> {
+        let mut compressor = self.compressor.take().ok_or("lazcodec: encoder already finished")?;
+        compressor.done().map_err(|e| e.to_string())?;
+        Ok(CompressedPoints { data: compressor.into_inner().into_inner(), vlr: std::mem::take(&mut self.vlr) })
+    }
+}
+
 /// Compress raw LAS point records.
 ///
 /// `points` is `num_points × point_size` interleaved bytes, exactly the on-disk
@@ -164,7 +216,12 @@ fn decompress_points_impl(
             "lazcodec: point_size {point_size} does not match the file's LASzip VLR ({expected})"
         ));
     }
-    let mut out = vec![0u8; num_points as usize * point_size as usize];
+    let size = (num_points as usize).checked_mul(point_size as usize)
+        .filter(|&n| point_size > 0 && n <= 512 * 1024 * 1024)
+        .ok_or_else(|| "lazcodec: decoded records exceed the 512 MiB limit".to_string())?;
+    let mut out = Vec::new();
+    out.try_reserve_exact(size).map_err(|_| "lazcodec: insufficient memory".to_string())?;
+    out.resize(size, 0u8);
     let mut decompressor = LasZipDecompressor::new(Cursor::new(compressed), vlr)
         .map_err(|e| format!("lazcodec: decompressor: {e}"))?;
     decompressor
@@ -199,6 +256,24 @@ mod tests {
         }
         assert_eq!(v.len(), n * 26);
         v
+    }
+
+    #[test]
+    fn incremental_encoder_round_trips_across_chunks() {
+        let points = make_points(120_003);
+        let mut encoder = LazEncoder::create(2, 26).unwrap();
+        for chunk in points.chunks(26 * 50_000) { encoder.push_impl(chunk).unwrap(); }
+        let packed = encoder.finish_impl().unwrap();
+        let decoded = decompress_points_impl(&packed.vlr, &packed.data, 120_003, 26).unwrap();
+        assert_eq!(decoded, points);
+        assert!(encoder.finish_impl().is_err());
+    }
+
+    #[test]
+    fn rejects_oversized_decompression_before_allocating() {
+        let packed = compress_points_impl(&make_points(1), 2, 26).unwrap();
+        let error = decompress_points_impl(&packed.vlr, &packed.data, u32::MAX, 26).unwrap_err();
+        assert!(error.contains("limit"));
     }
 
     // The invariant the whole crate exists for. It also covers the chunk-table

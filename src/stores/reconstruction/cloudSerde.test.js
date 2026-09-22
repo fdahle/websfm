@@ -90,10 +90,31 @@ describe('sparse cloud round trip', () => {
     expect(deserializeCloud(ser, makeCloudId).points[0].color).toBeUndefined()
   })
 
+  it('preserves missing colour separately from true black', () => {
+    const c = sparseCloud()
+    delete c.points[1].color
+    const once = roundTrip(c)
+    expect(once.points.map((p) => p.color)).toEqual([[10, 20, 30], undefined, [0, 0, 0]])
+    // The second save takes the packed-track fast path used by restored projects.
+    const twice = roundTrip(once)
+    expect(twice.points.map((p) => p.color)).toEqual([[10, 20, 30], undefined, [0, 0, 0]])
+  })
+
   it('handles an empty cloud', () => {
     const out = roundTrip({ id: 'e', name: 'E', kind: 'sparse', createdAt: 1, cameras: new Map(), points: [] })
     expect(out.points).toEqual([])
     expect(out.cameras.size).toBe(0)
+  })
+
+  it('reuses restored CSR tracks while serializing updated point positions', () => {
+    const restored = roundTrip(sparseCloud())
+    expect(restored.points.packedTracks).toBeTruthy()
+    restored.points[0].x = 99
+    const ser = serializeCloud(restored)
+    expect(new Float64Array(ser.buffers.pos)[0]).toBe(99)
+    expect(ser.buffers.vcam).toBe(restored.points.packedTracks.vcam.buffer)
+    expect([...deserializeCloud(ser, makeCloudId).points[0].views.entries()])
+      .toEqual([['ua', 7], ['ub', 9]])
   })
 })
 
@@ -183,4 +204,15 @@ describe('legacy (pre-binary) documents', () => {
     const out = legacyDeserializeCloud({ kind: 'sparse', points: [] }, makeCloudId)
     expect(out.id).toMatch(/^minted-/)
   })
+})
+
+it('preserves imported survey coordinates through dense and mesh persistence', () => {
+  for (const kind of ['dense', 'mesh']) {
+    const pos = new Float64Array([7000000.01, 500000.01, 100, 7000000.02, 500000.02, 101])
+    const cloud = { id: 'survey', kind, imported: true, count: 2, nVerts: 2, pos, col: null, idx: new Uint32Array() }
+    const out = roundTrip(cloud)
+    expect(out.pos).toBeInstanceOf(Float64Array)
+    expect(out.pos).toEqual(pos)
+    expect(out.pos[0]).not.toBe(out.pos[3])
+  }
 })

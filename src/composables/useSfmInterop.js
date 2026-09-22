@@ -1,5 +1,5 @@
 import { ref } from 'vue'
-import { unzipSync } from 'fflate'
+import { readSfmZip } from '../workers/archive/zipClient.js'
 import { useImagesStore } from '../stores/useImagesStore.js'
 import { useMatchesStore } from '../stores/useMatchesStore.js'
 import { useSensorsStore } from '../stores/useSensorsStore.js'
@@ -53,29 +53,19 @@ export function useSfmInterop({ addImages, importColmapModel, importInteropModel
   const sensorsStore = useSensorsStore()
   const { log } = useLog()
   const importSession = ref(null)
+  let importController = null
 
-  async function entriesFrom(files) {
+  async function entriesFrom(files, signal) {
     const entries = []
     const lazyImages = []
     for (const file of files) {
       const path = cleanPath(file.webkitRelativePath || file.name)
       if (/\.zip$/i.test(file.name)) {
-        const archiveBytes = new Uint8Array(await file.arrayBuffer())
-        // fflate's filter sees the central-directory metadata before inflating.
-        // Keep image payloads compressed until the user explicitly selects them.
-        const archive = unzipSync(archiveBytes, { filter: (entry) => {
-          const entryPath = cleanPath(entry.name)
-          if (IMAGE_EXT.test(entryPath) && /(?:^|\/)images?\//i.test(entryPath)) {
-            if (safeArchivePath(entryPath)) lazyImages.push({ path: entryPath, archiveBytes })
-            return false
-          }
-          const base = baseName(entryPath).toLowerCase()
-          return DB_EXT.test(entryPath) || MODEL_FILES.has(base)
-        } })
-        for (const [entryPath, data] of Object.entries(archive)) {
-          if (!safeArchivePath(entryPath) || entryPath.endsWith('/')) continue
-          entries.push({ path: cleanPath(entryPath), data, sourceName: file.name })
+        const { entries: archive, names } = await readSfmZip(file, { signal })
+        for (const path of names) {
+          if (IMAGE_EXT.test(path) && /(?:^|\/)images?\//i.test(path)) lazyImages.push({ path, archiveFile: file })
         }
+        for (const entry of archive) entries.push({ ...entry, sourceName: file.name })
       } else {
         entries.push({ path, file, sourceName: file.name })
         if (IMAGE_EXT.test(path) && /(?:^|\/)images?\//i.test(path)) lazyImages.push({ path, file })
@@ -84,16 +74,16 @@ export function useSfmInterop({ addImages, importColmapModel, importInteropModel
     return { entries, lazyImages }
   }
 
-  function materializeImages(items) {
+  async function materializeImages(items, signal) {
     const files = items.filter((x) => x.file).map((x) => x.file)
     const byArchive = new Map()
-    for (const item of items.filter((x) => x.archiveBytes)) {
-      if (!byArchive.has(item.archiveBytes)) byArchive.set(item.archiveBytes, new Set())
-      byArchive.get(item.archiveBytes).add(item.path)
+    for (const item of items.filter((x) => x.archiveFile)) {
+      if (!byArchive.has(item.archiveFile)) byArchive.set(item.archiveFile, new Set())
+      byArchive.get(item.archiveFile).add(item.path)
     }
-    for (const [archiveBytes, wanted] of byArchive) {
-      const archive = unzipSync(archiveBytes, { filter: (entry) => wanted.has(cleanPath(entry.name)) })
-      for (const [path, data] of Object.entries(archive)) files.push(new File([data], baseName(path), { type: '' }))
+    for (const [archiveFile, wanted] of byArchive) {
+      const { entries } = await readSfmZip(archiveFile, { wanted: [...wanted], signal })
+      for (const { path, data } of entries) files.push(new File([data], baseName(path), { type: '' }))
     }
     return files
   }
@@ -101,11 +91,16 @@ export function useSfmInterop({ addImages, importColmapModel, importInteropModel
   async function openImport(fileList) {
     const files = [...(fileList || [])]
     if (!files.length) return
+    importController?.abort()
+    importController = new AbortController()
+    const signal = importController.signal
     disposeColmapDatabase()
     importSession.value = { status: 'inspecting', sourceName: files.length === 1 ? files[0].name : `${files.length} selected files` }
     try {
       if (files.length === 1 && /\.(?:json|nvm)$/i.test(files[0].name)) {
-        const model = parseSfmText(await files[0].text(), files[0].name)
+        const text = await files[0].text()
+        signal.throwIfAborted()
+        const model = parseSfmText(text, files[0].name)
         const resolve = makeNameResolver(imagesStore.images, { key: 'uuid' })
         const matchedImages = model.images.filter((im) => resolve(im.name)).length
         importSession.value = {
@@ -118,7 +113,8 @@ export function useSfmInterop({ addImages, importColmapModel, importInteropModel
         }
         return
       }
-      const { entries, lazyImages } = await entriesFrom(files)
+      const { entries, lazyImages } = await entriesFrom(files, signal)
+      signal.throwIfAborted()
       const dbEntry = entries.find((e) => DB_EXT.test(e.path)) ?? null
       const modelGroups = new Map()
       const bundledImages = lazyImages
@@ -139,6 +135,7 @@ export function useSfmInterop({ addImages, importColmapModel, importInteropModel
       if (dbEntry) {
         const dbFile = dbEntry.file ?? new File([dbEntry.data], baseName(dbEntry.path), { type: 'application/vnd.sqlite3' })
         database = await inspectColmapDatabase(dbFile)
+        signal.throwIfAborted()
       }
       const models = [...modelGroups].map(([name, model]) => ({ ...modelSummary(model, name), files: model }))
       if (!database && !models.some((m) => m.complete)) throw new Error('No COLMAP database or complete sparse model was found')
@@ -161,6 +158,7 @@ export function useSfmInterop({ addImages, importColmapModel, importInteropModel
         warnings, error: null,
       }
     } catch (err) {
+      if (signal.aborted) return
       disposeColmapDatabase()
       importSession.value = { ...importSession.value, status: 'error', error: err?.message ?? String(err) }
       log(`SfM project inspection failed: ${err?.message ?? err}`, 'error', 'Import')
@@ -168,6 +166,7 @@ export function useSfmInterop({ addImages, importColmapModel, importInteropModel
   }
 
   function closeImport() {
+    importController?.abort()
     disposeColmapDatabase()
     importSession.value = null
   }
@@ -175,6 +174,7 @@ export function useSfmInterop({ addImages, importColmapModel, importInteropModel
   async function commitImport(options) {
     const session = importSession.value
     if (!session || session.status !== 'ready') return
+    const signal = importController?.signal
     session.status = 'importing'
     session.error = null
     try {
@@ -187,7 +187,7 @@ export function useSfmInterop({ addImages, importColmapModel, importInteropModel
         matchSource: options.matchSource,
       }) : { cameras: [], images: [], features: [], pairs: [] }
 
-      if (options.images && session.bundledImages.length) await addImages(materializeImages(session.bundledImages))
+      if (options.images && session.bundledImages.length) await addImages(await materializeImages(session.bundledImages, signal))
       const resolve = makeNameResolver(imagesStore.images, { key: 'uuid' })
       const dbImages = session.database?.images ?? []
       const uuidByExternal = new Map(dbImages.map((im) => [im.externalId, resolve(im.name)]).filter(([, uuid]) => uuid))

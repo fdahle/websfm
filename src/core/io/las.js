@@ -157,7 +157,17 @@ const byte = (v) => Math.max(0, Math.min(255, Math.round(v ?? 0)))
 // an entry carry no RGB. (0/1/6: no RGB; 2: after xyz+intensity+flags; 3/5: after
 // the f64 GPS time; 7/8: LAS 1.4 layout with a wider flag block + GPS time.)
 const RGB_OFFSET = { 2: 20, 3: 28, 5: 28, 7: 30, 8: 30, 10: 30 }
-const SUPPORTED_FORMATS = new Set([0, 1, 2, 3, 6, 7, 8])
+const RECORD_MIN = { 0: 20, 1: 28, 2: 26, 3: 34, 6: 30, 7: 36, 8: 38 }
+const SUPPORTED_FORMATS = new Set(Object.keys(RECORD_MIN).map(Number))
+export const LAS_IMPORT_BUDGET = 1024 ** 3
+
+export function validateLasAllocation(count, recordLength, extraBytes = 0) {
+  if (!Number.isSafeInteger(count) || count < 0 || count > 0xffffffff
+      || !Number.isSafeInteger(recordLength) || recordLength <= 0
+      || count * (recordLength * 2 + 27) + extraBytes > LAS_IMPORT_BUDGET) {
+    throw new Error('LAS/LAZ import exceeds the 1 GiB working-memory limit; split or subsample the cloud first')
+  }
+}
 
 // ── Reader: LAS bytes → flat cloud ───────────────────────────────────────────
 // Supports LAS 1.x headers (1.2 and 1.4 layouts), point formats 0–3 and 6–8;
@@ -197,11 +207,20 @@ export function readLasHeader(bytes) {
   const versionMajor = bytes[24], versionMinor = bytes[25]
   const headerSize = dv.getUint16(94, true)
   const offsetToPoints = dv.getUint32(96, true)
+  if (versionMajor !== 1 || versionMinor > 4) throw new Error('Unsupported LAS version')
+  const minimumHeader = versionMinor >= 4 ? 375 : versionMinor === 3 ? 235 : HEADER_SIZE_12
+  if (headerSize < minimumHeader || headerSize > bytes.length
+      || offsetToPoints < headerSize || offsetToPoints > bytes.length) {
+    throw new Error('Invalid LAS header size or point-data offset')
+  }
   const nVlrs = dv.getUint32(100, true)
+  if (nVlrs > Math.floor((offsetToPoints - headerSize) / VLR_HEADER_SIZE)) {
+    throw new Error('Invalid LAS VLR count')
+  }
   const formatRaw = bytes[104]
   const recordLength = dv.getUint16(105, true)
   let count = dv.getUint32(107, true)
-  // LAS 1.4: the legacy u32 count may be 0 with the real u64 count at offset 375.
+  // LAS 1.4: the legacy u32 count may be 0 with the real u64 count at offset 247.
   if (count === 0 && versionMinor >= 4 && headerSize >= 375) {
     const big = dv.getBigUint64(247, true)
     if (big > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error('LAS point count exceeds safe integer range')
@@ -213,11 +232,13 @@ export function readLasHeader(bytes) {
   let isLaz = (formatRaw & 0x80) !== 0
   const vlrs = []
   let vp = headerSize
-  for (let i = 0; i < nVlrs && vp + VLR_HEADER_SIZE <= offsetToPoints; i++) {
+  for (let i = 0; i < nVlrs; i++) {
+    if (vp + VLR_HEADER_SIZE > offsetToPoints) throw new Error('Truncated LAS VLR header')
     const recordId = dv.getUint16(vp + 18, true)
     const len = dv.getUint16(vp + 20, true)
+    if (vp + VLR_HEADER_SIZE + len > offsetToPoints) throw new Error('Truncated LAS VLR payload')
     const userId = String.fromCharCode(...bytes.subarray(vp + 2, vp + 18)).replace(/\0+$/, '')
-    if (recordId === 22204) isLaz = true
+    if (recordId === 22204 && userId === 'laszip encoded') isLaz = true
     vlrs.push({ userId, recordId, data: bytes.subarray(vp + VLR_HEADER_SIZE, vp + VLR_HEADER_SIZE + len) })
     vp += VLR_HEADER_SIZE + len
   }
@@ -225,6 +246,12 @@ export function readLasHeader(bytes) {
   const format = formatRaw & 0x3f
   if (!SUPPORTED_FORMATS.has(format)) {
     throw new Error(`Unsupported LAS point data format ${format} (supported: 0–3, 6–8)`)
+  }
+  if (recordLength < RECORD_MIN[format]) throw new Error('Invalid LAS point record length')
+  const scale = [dv.getFloat64(131, true), dv.getFloat64(139, true), dv.getFloat64(147, true)]
+  const offset = [dv.getFloat64(155, true), dv.getFloat64(163, true), dv.getFloat64(171, true)]
+  if (scale.some(v => !Number.isFinite(v) || v <= 0) || offset.some(v => !Number.isFinite(v))) {
+    throw new Error('Invalid LAS coordinate scale or offset')
   }
   return {
     versionMajor, versionMinor, headerSize, offsetToPoints, formatRaw, format, recordLength,
@@ -237,6 +264,9 @@ export function readLasHeader(bytes) {
 // Decode raw point records (already uncompressed) → the flat cloud shape. Reads
 // xyz (+ RGB when the format carries it) and skips the rest via `recordLength`.
 export function decodeLasPoints(pointBytes, count, recordLength, format, scale, offset) {
+  validateLasAllocation(count, recordLength)
+  if (!SUPPORTED_FORMATS.has(format) || recordLength < RECORD_MIN[format]
+      || count * recordLength > pointBytes.byteLength) throw new Error('Truncated or invalid LAS point records')
   const dv = new DataView(pointBytes.buffer, pointBytes.byteOffset, pointBytes.byteLength)
   const rgbOff = RGB_OFFSET[format]
   const hasRgb = rgbOff != null && recordLength >= rgbOff + 6

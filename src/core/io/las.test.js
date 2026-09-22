@@ -150,3 +150,23 @@ describe('parseLas (reader)', () => {
     expect(Math.abs(out.pos[0] - PTS[0].x)).toBeLessThan(sdv.getFloat64(131, true))
   })
 })
+
+describe('untrusted LAS headers', () => {
+  it.each([
+    [105, 0, 16, 'record length'],
+    [105, 12, 16, 'record length'],
+    [94, 10, 16, 'header'],
+    [96, 999999, 32, 'offset'],
+    [100, 999999, 32, 'VLR count'],
+  ])('rejects malformed field at %i', (offset, value, bits, message) => {
+    const bytes = cloudToLas(PTS)
+    const view = new DataView(bytes.buffer)
+    view[`setUint${bits}`](offset, value, true)
+    expect(() => parseLas(bytes)).toThrow(message)
+  })
+  it('rejects a VLR payload extending into the point records', () => {
+    const bytes = cloudToLas(PTS, { crsCode: 3031 })
+    new DataView(bytes.buffer).setUint16(227 + 20, 65535, true)
+    expect(() => parseLas(bytes)).toThrow('VLR payload')
+  })
+})

@@ -1,4 +1,5 @@
 <script setup>
+import { relativePositions } from '../../core/products/pointView.ts'
 import { onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
@@ -321,7 +322,7 @@ function setReconstructionData(cameras, points3d) {
         colors = null
       }
     } else {
-      positions = new Float32Array(pointCount * 3)
+      positions = new Float64Array(pointCount * 3)
       // Per-point RGB sampled from the source images (median over each track). Fall
       // back to the flat blue when a point has no colour (e.g. a restored model from
       // before colouring, or keypoints detected without colour).
@@ -340,7 +341,8 @@ function setReconstructionData(cameras, points3d) {
     }
 
     const geo = new THREE.BufferGeometry()
-    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3))
+    const { origin, relative } = relativePositions(positions)
+    geo.setAttribute('position', new THREE.BufferAttribute(relative, 3))
     if (colors) geo.setAttribute('color', new THREE.BufferAttribute(colors, 3))
     geo.computeBoundingSphere() // for Three's frustum culling (framing uses robustBounds)
 
@@ -350,6 +352,7 @@ function setReconstructionData(cameras, points3d) {
         : { size: pointSize.value, sizeAttenuation: false, color: 0x44aaff },
     )
     pointCloud = new THREE.Points(geo, mat)
+    pointCloud.position.set(...origin)
     scene.add(pointCloud)
 
     // Fit camera + grid to robust bounds (median centre, 95th-pct radius) so stray
@@ -372,7 +375,8 @@ function setReconstructionData(cameras, points3d) {
   // scene's Directional + Ambient lights shade both faces (DoubleSide).
   if (isMesh && points3d.nVerts > 0) {
     const geo = new THREE.BufferGeometry()
-    geo.setAttribute('position', new THREE.BufferAttribute(points3d.pos, 3))
+    const { origin, relative } = relativePositions(points3d.pos)
+    geo.setAttribute('position', new THREE.BufferAttribute(relative, 3))
     if (points3d.col) {
       const colors = new Float32Array(points3d.nVerts * 3)
       for (let i = 0; i < colors.length; i++) colors[i] = points3d.col[i] / 255
@@ -388,6 +392,7 @@ function setReconstructionData(cameras, points3d) {
       side: THREE.DoubleSide, flatShading: false, roughness: 0.95, metalness: 0.0,
     })
     meshObject = new THREE.Mesh(geo, mat)
+    meshObject.position.set(...origin)
     scene.add(meshObject)
 
     const b = robustBounds(points3d.pos, points3d.nVerts, sceneUp)

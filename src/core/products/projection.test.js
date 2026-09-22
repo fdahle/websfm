@@ -141,6 +141,14 @@ describe('aerial Z-up orientation', () => {
     expect([out.points[0].x, out.points[0].y, out.points[0].z]).toEqual([-2, 1, 3])
   })
 
+  it('can rotate an owned result without allocating a second point array', () => {
+    const cams = new Map([['a', { R: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], t: [0, 0, 0], K: {} }]])
+    const pts = [{ x: 1, y: 2, z: 3 }]
+    const out = rotateReconstruction(cams, pts, [[0, -1, 0], [1, 0, 0], [0, 0, 1]], { inPlace: true })
+    expect(out.points).toBe(pts)
+    expect(pts[0]).toEqual({ x: -2, y: 1, z: 3 })
+  })
+
   it('returns null for a convergent rig (no coherent up)', () => {
     const cams = new Map([
       ['a', { R: [[1, 0, 0], [0, -1, 0], [0, 0, -1]], t: [0, 0, 0] }], // looks −Z
