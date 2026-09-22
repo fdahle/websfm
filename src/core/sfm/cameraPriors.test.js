@@ -18,15 +18,40 @@ describe('buildCameraPriors', () => {
     }])
   })
 
-  it('keeps XY-only, disabled, unmatched, and geographic positions out of BA', () => {
+  it('keeps XY-only, disabled, and unmatched positions out of BA', () => {
     const poses = [
       { imageId: 'image-1', x: 1, y: 2, z: null, enabled: true },
       { imageId: 'image-2', x: 1, y: 2, z: 3, enabled: false },
       { imageId: 'missing', x: 1, y: 2, z: 3, enabled: true },
     ]
     expect(buildCameraPriors(poses, images, 'EPSG:3857')).toEqual([])
-    expect(buildCameraPriors([{ imageId: 'image-1', x: 1, y: 2, z: 3 }], images, 'EPSG:4326'))
-      .toEqual([])
+  })
+
+  it('converts EPSG:4326 poses into a survey-centred metric frame', () => {
+    const priors = buildCameraPriors([
+      { imageId: 'image-1', x: 4, y: 52, z: 100, accuracyX: 5, accuracyY: 6, accuracyZ: 10 },
+      { imageId: 'image-2', x: 4.001, y: 52.001, z: 103, accuracyX: 5, accuracyY: 6, accuracyZ: 10 },
+    ], images, 'EPSG:4326')
+
+    expect(priors).toHaveLength(2)
+    expect(priors[0].metricFrame).toBe('local-geographic')
+    expect(priors[1].x - priors[0].x).toBeCloseTo(68.68, 1)
+    expect(priors[1].y - priors[0].y).toBeCloseTo(111.27, 1)
+    expect(priors.map((prior) => prior.z)).toEqual([100, 103])
+    expect(priors[0]).toMatchObject({ accuracyX: 5, accuracyY: 6, accuracyZ: 10 })
+  })
+
+  it('uses canonical metre altitude and accuracies for geographic EXIF poses', () => {
+    const [prior] = buildCameraPriors([{
+      imageId: 'image-1', x: 4, y: 52, z: 999,
+      altitudeMeters: 120, accuracyX: 99, accuracyY: 99, accuracyZ: 99,
+      accuracyMetersX: 0.03, accuracyMetersY: 0.04, accuracyMetersZ: 0.08,
+      source: 'exif',
+    }], images, 'EPSG:4326')
+    expect(prior).toMatchObject({
+      z: 120, accuracyX: 0.03, accuracyY: 0.04, accuracyZ: 0.08,
+      metricFrame: 'local-geographic',
+    })
   })
 })
 

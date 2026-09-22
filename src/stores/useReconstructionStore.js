@@ -8,12 +8,13 @@ import {
   generateOrtho as workerGenerateOrtho,
   meshify as workerMeshify,
   editCloud as workerEditCloud,
+  terminateAll,
 } from '../workers/computeClient.js'
 import { useLog } from '../composables/useLog.js'
 import * as opfs from '../utils/opfs.js'
 import { aerialUpRotation, rotateReconstruction } from '../core/products/projection.js'
 import { qualityToMaxDim } from '../core/dense/mvs.js'
-import { projectDensifyPeakBytes, formatBytes, DEFAULT_BUDGET_BYTES } from '../core/dense/memBudget.js'
+import { projectDensifyPeakBytes, formatBytes, DEFAULT_BUDGET_BYTES, deviceBudget } from '../core/dense/memBudget.js'
 import { depthMapBytes } from '../core/dense/depthMapCodec.js'
 import { distortionOf } from '../core/sfm/distortion.js'
 import { parseColmapModel, parseColmapModelBin, readColmapModel, makeNameResolver, colmapToSparse } from '../core/io/colmapModel.js'
@@ -30,6 +31,11 @@ import { useSensorsStore } from './useSensorsStore.js'
 import { usePosesStore } from './usePosesStore.js'
 import { useGcpsStore } from './useGcpsStore.js'
 import { buildCameraPriors } from '../core/sfm/cameraPriors.js'
+import { unpackReconstructionResult } from '../core/sfm/resultCodec.js'
+import { packMatchPairs } from '../core/sfm/matchCodec.js'
+import {
+  projectSparsePeakBreakdownBytes, sparseMemoryDecision, SPARSE_HEAP_FRACTION,
+} from '../core/sfm/memBudget.js'
 
 // Project-scoped store: the sparse model (camera poses + 3D points) from
 // incremental SfM. Reads the image list and match graph from their stores;
@@ -312,6 +318,44 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     else clouds.value.push(cloud)
     if (select) selectedCloudId.value = cloud.id
     if (asMain || !mainSparseCloud.value) mainSparseId.value = cloud.id
+  }
+
+  // A sparse rerun replaces the current main model. Keeping that model's hundreds of
+  // thousands of Map-backed tracks resident while constructing the worker input can
+  // make the memory preflight reject a run that fits comfortably from a clean state.
+  // Replace it with a lightweight placeholder only when headroom is insufficient.
+  // Nothing is persisted here: if the new solve fails, reloading restores the previous
+  // saved reconstruction. Imported/derived comparison clouds remain untouched.
+  function releaseReplaceableModelForRerun() {
+    const main = mainSparseCloud.value
+    const replaceId = main?.id ?? null
+    const pointCount = main?.points?.length ?? 0
+    const cameraCount = main?.cameras?.size ?? 0
+    let dependentClouds = 0
+
+    clouds.value = clouds.value.flatMap((cloud) => {
+      if (cloud.kind === 'sparse' && cloud.secondary) return []
+      if ((cloud.kind === 'dense' || cloud.kind === 'mesh') && !cloud.imported && !cloud.derived) {
+        dependentClouds++
+        return []
+      }
+      if (cloud.id !== replaceId || cloud.kind !== 'sparse') return [cloud]
+      return [{ ...cloud, cameras: markRaw(new Map()), points: markRaw([]), count: 0 }]
+    })
+    clearDepthMaps()
+    dem.value = null
+    ortho.value = null
+    georef.value = null
+    summary.value = null
+    denseSummary.value = null
+    depthSummary.value = null
+    healthDirty.value++
+    for (const img of images.value) if (img.depth) img.depth = null
+    if (selectedCloudId.value && !clouds.value.some((c) => c.id === selectedCloudId.value))
+      selectedCloudId.value = replaceId
+
+    return { released: pointCount > 0 || cameraCount > 0 || dependentClouds > 0,
+      pointCount, cameraCount, dependentClouds }
   }
 
   // A sparse rebuild changes the coordinate frame and camera solution consumed by
@@ -1069,10 +1113,104 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
   async function reconstruct(settings = {}, onProgress) {
     restoreGeneration++
     reconStatus.value = 'running'
+    let stopMemoryWatchdog = () => {}
 
     try {
-      const imgs = images.value.filter((img) => img.kpStatus === 'done')
+      // Descriptors are required for matching, never for SfM. In a persistent
+      // project they are already in OPFS and can be loaded on demand if matching
+      // is run again. Keeping 127 × 25k × 128 float SIFT descriptors resident can
+      // consume ~1.5 GiB and is enough to kill the renderer during reconstruction.
+      let descriptorBytesReleased = 0
+      let descriptorImagesReleased = 0
+      if (isPersisting()) {
+        for (const img of images.value) {
+          const bytes = img.descriptors?.byteLength ?? 0
+          if (!bytes) continue
+          descriptorBytesReleased += bytes
+          descriptorImagesReleased++
+          img.descriptors = null
+        }
+      }
+      if (descriptorBytesReleased) {
+        log(`Released ${formatBytes(descriptorBytesReleased)} of persisted descriptors from `
+          + `${descriptorImagesReleased} image(s) before reconstruction`, 'info', 'Compute')
+        // Yield once so the engine can reclaim detached descriptor backing stores
+        // before the live-heap reading below. Never assume it did: the decision
+        // uses the observed value without subtracting bytes optimistically.
+        await new Promise((resolve) => setTimeout(resolve, 0))
+      }
+      const imgs = images.value.filter((img) => img.kpStatus === 'done' && (img.keypoints?.length ?? 0) > 0)
       const sensorById = new Map(sensors.value.map((s) => [s.id, s]))
+      const reconstructionTransfers = []
+      const reconstructionPairs = [...matchStore.value.values()]
+        .filter((e) => e.status === 'done' && !e.disabled)
+
+      // Renderer OOM cannot be caught after the fact. Refuse before constructing
+      // the large plain worker input when its projected peak exceeds safe headroom.
+      const keypointCount = imgs.reduce((sum, img) => sum + (img.keypoints?.length ?? 0), 0)
+      const matchCount = reconstructionPairs.reduce((sum, pair) => sum + (pair.matches?.length ?? 0), 0)
+      const peak = projectSparsePeakBreakdownBytes({ keypointCount, matchCount })
+      const heap = globalThis.performance?.memory
+      const hardwareBudget = deviceBudget({
+        deviceMemoryGB: Number(globalThis.navigator?.deviceMemory) || null,
+        jsHeapLimitBytes: Number(heap?.jsHeapSizeLimit) || null,
+      }).budgetBytes
+      const decideMemory = () => ({
+        renderer: sparseMemoryDecision({
+          estimateBytes: peak.rendererBytes,
+          usedHeapBytes: Number(globalThis.performance?.memory?.usedJSHeapSize),
+          heapLimitBytes: Number(globalThis.performance?.memory?.jsHeapSizeLimit),
+          fallbackBudgetBytes: hardwareBudget,
+        }),
+        // A Web Worker is a separate V8 isolate with its own heap ceiling. Comparing
+        // renderer-used + worker-projected bytes to one isolate's limit rejected safe
+        // runs (the 127-image DJI set: 1.40 + 2.35 > 3.52 GB) even though neither heap
+        // approached its own ceiling.
+        worker: sparseMemoryDecision({
+          estimateBytes: peak.workerBytes,
+          usedHeapBytes: 0,
+          heapLimitBytes: Number(globalThis.performance?.memory?.jsHeapSizeLimit),
+          fallbackBudgetBytes: hardwareBudget,
+        }),
+      })
+      let decisions = decideMemory()
+
+      // A reload restores the saved sparse model, so "reload and retry" alone does
+      // not create renderer headroom. If the only thing preventing a rerun is the
+      // replaceable current result, unload it in memory (the saved copy stays on disk),
+      // discard idle worker heaps, yield for collection, and measure again.
+      if (!decisions.renderer.safe) {
+        const released = releaseReplaceableModelForRerun()
+        if (released.released) {
+          terminateAll('preparing a clean sparse-reconstruction rerun')
+          log(`Released the loaded reconstruction before rerun (${released.cameraCount} cameras, `
+            + `${released.pointCount.toLocaleString()} points`
+            + `${released.dependentClouds ? `, ${released.dependentClouds} computed dependent cloud(s)` : ''}). `
+            + 'The saved model remains recoverable by reloading until the replacement succeeds.',
+          'info', 'Compute')
+          await new Promise((resolve) => setTimeout(resolve, 50))
+          decisions = decideMemory()
+        }
+      }
+      const decisionSafe = decisions.renderer.safe && decisions.worker.safe
+      log(`Sparse memory preflight — ${keypointCount.toLocaleString()} keypoints, `
+        + `${matchCount.toLocaleString()} matches; renderer `
+        + `${decisions.renderer.usedBytes != null ? `${formatBytes(decisions.renderer.usedBytes)} current + ` : ''}`
+        + `${formatBytes(peak.rendererBytes)} input`
+        + `${decisions.renderer.limitBytes ? ` ≤ ${formatBytes(decisions.renderer.limitBytes)} ceiling` : ''}; `
+        + `worker projected peak ${formatBytes(peak.workerBytes)}`
+        + `${decisions.worker.limitBytes ? ` ≤ ${formatBytes(decisions.worker.limitBytes)} ceiling` : ''} `
+        + `(combined device peak estimate ${formatBytes(peak.totalBytes)})`,
+      decisionSafe ? 'info' : 'error', 'Compute')
+      if (!decisionSafe) {
+        reconStatus.value = 'error'
+        const where = !decisions.renderer.safe && !decisions.worker.safe
+          ? 'renderer and worker heaps' : (!decisions.renderer.safe ? 'renderer heap' : 'worker heap')
+        log(`Sparse reconstruction stopped before start because the projected ${where} would exceed `
+          + 'its safety ceiling. Close other memory-heavy tabs or reduce the image/keypoint/match set.',
+        'error', 'Reconstruction')
+        return
+      }
 
       const input = {
         images: imgs.map((img) => {
@@ -1137,17 +1275,20 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
               : null,
           }
         }),
-        pairs: [...matchStore.value.values()]
-          // Skip pairs the user has excluded (obviously-wrong matches) as well as
-          // any still in flight/errored.
-          .filter((e) => e.status === 'done' && !e.disabled)
+        pairs: reconstructionPairs
           .map((e) => ({
             idA: e.idA, idB: e.idB,
             // F (3×3) and matches come from reactive store entries; rebuild them
             // as plain arrays or the Vue proxy can't be structured-cloned to the
             // worker ("[object Array] could not be cloned").
             F: e.F ? e.F.map((row) => [...row]) : null,
-            matches: e.matches.map((m) => [m[0], m[1]]),
+            // Millions of tuple arrays are catastrophic to clone. This fresh
+            // packed buffer is disposable and transferred into the worker below.
+            matches: (() => {
+              const packed = packMatchPairs(e.matches)
+              reconstructionTransfers.push(packed.buffer)
+              return packed
+            })(),
             // WS1: weak pairs (valid F below the accept gate) ride through with the flag.
             // sfm.js keeps them out of the cycle filter / init / triangulation and feeds
             // them only to PnP correspondence collection (register.js).
@@ -1179,34 +1320,56 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
                 .filter((o) => o.uuid != null),
             }))
         })(),
-        // Surveyed/imported and EXIF-derived camera positions. BA needs metric
-        // Euclidean coordinates, so geographic project CRSs stay post-hoc only.
+        // Surveyed/imported and EXIF-derived camera positions. buildCameraPriors
+        // keeps projected coordinates as-is and gives geographic projects an
+        // internal survey-centred metric frame; the project/output CRS is unchanged.
         cameraPriors: (() => {
-          return buildCameraPriors(posesStore.poses, images.value, projects.currentCrs)
+          const priors = buildCameraPriors(posesStore.poses, images.value, projects.currentCrs)
+          if (isGeographic(projects.currentCrs) && priors.length) {
+            log(`Camera priors: ${priors.length} geographic position(s) converted to a `
+              + 'survey-centred metric frame for bundle adjustment', 'info', 'Pose')
+          }
+          return priors
         })(),
         settings,
       }
 
-      const result = await workerReconstruct(input, {
+      // Chrome exposes live heap usage. Poll while the main thread is idle and the
+      // worker solves; terminate early because a renderer OOM itself is uncatchable.
+      if (Number.isFinite(heap?.usedJSHeapSize) && Number.isFinite(heap?.jsHeapSizeLimit)) {
+        const stopAt = heap.jsHeapSizeLimit * SPARSE_HEAP_FRACTION
+        let stopped = false
+        const timer = setInterval(() => {
+          if (stopped || !(performance.memory?.usedJSHeapSize >= stopAt)) return
+          stopped = true
+          clearInterval(timer)
+          const used = performance.memory.usedJSHeapSize
+          log(`Sparse reconstruction stopped at ${formatBytes(used)} heap usage `
+            + `(safety ceiling ${formatBytes(stopAt)})`, 'error', 'Compute')
+          terminateAll('reconstruction stopped before browser memory exhaustion')
+        }, 500)
+        stopMemoryWatchdog = () => { stopped = true; clearInterval(timer) }
+      }
+
+      let packedResult = await workerReconstruct(input, {
         onLog: (message, level, category) => log(message, level, category),
         onProgress: (done, total, label, fraction) => onProgress?.(done, total, label, fraction),
+        transfer: reconstructionTransfers,
       })
+      stopMemoryWatchdog()
+      stopMemoryWatchdog = () => {}
+      const result = unpackReconstructionResult(packedResult)
+      // The expanded Maps are now authoritative. Drop the transferred CSR buffers
+      // before orientation + persistence allocate their own compact arrays.
+      packedResult = null
+      log(`Compact result received: ${result.points.length.toLocaleString()} points`,
+        'info', 'Reconstruction')
 
-      // Apply the model. Point view-tracks come back as [[uuid, kpIdx, x, y], …];
-      // rebuild `views` (uuid→kpIdx) plus a parallel `viewsPx` (uuid→[x,y]) carrying
-      // the BA-frame keypoint pixels (undistorted / canonical / self-cal-folded) —
-      // the only pixels coherent with the exported K/R/t (COLMAP export reads them).
+      // Apply the compact worker result. The transport codec has already expanded
+      // its CSR buffers directly into the Map-based point shape used by the app.
       if (result.status === 'done') {
-        let camMap = new Map()
-        for (const { uuid, R, t, K } of result.cameras) camMap.set(uuid, { R, t, K })
-        let pts = result.points.map(({ x, y, z, views, color }) => {
-          const v = new Map(), vpx = new Map()
-          for (const entry of views) {
-            v.set(entry[0], entry[1])
-            if (entry.length >= 4) vpx.set(entry[0], [entry[2], entry[3]])
-          }
-          return { x, y, z, views: v, viewsPx: vpx.size ? vpx : undefined, color }
-        })
+        let camMap = result.cameras
+        let pts = result.points
 
         // Aerial auto-orient: SfM leaves the model in an arbitrary frame (it can
         // come out upside-down). For aerial surveys the cameras look down, so we
@@ -1214,7 +1377,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
         if (projects.currentSceneType === 'aerial') {
           const R = aerialUpRotation(camMap)
           if (R) {
-            const oriented = rotateReconstruction(camMap, pts, R)
+            const oriented = rotateReconstruction(camMap, pts, R, { inPlace: true })
             camMap = oriented.cameras
             pts = oriented.points
             log('Oriented model Z-up (aerial: cameras above ground)', 'info', 'Reconstruction')
@@ -1226,19 +1389,12 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
         // sparse cloud rather than discarding it or forcing it into the primary frame.
         clouds.value = clouds.value.filter((c) => !(c.kind === 'sparse' && c.secondary))
         for (const [si, model] of (result.secondaryModels || []).entries()) {
-          let secondaryCameras = new Map(model.cameras.map(({ uuid, R, t, K }) => [uuid, { R, t, K }]))
-          let secondaryPoints = model.points.map(({ x, y, z, views, color }) => {
-            const v = new Map(), vpx = new Map()
-            for (const entry of views) {
-              v.set(entry[0], entry[1])
-              if (entry.length >= 4) vpx.set(entry[0], [entry[2], entry[3]])
-            }
-            return { x, y, z, views: v, viewsPx: vpx.size ? vpx : undefined, color }
-          })
+          let secondaryCameras = model.cameras
+          let secondaryPoints = model.points
           if (projects.currentSceneType === 'aerial') {
             const R = aerialUpRotation(secondaryCameras)
             if (R) ({ cameras: secondaryCameras, points: secondaryPoints } =
-              rotateReconstruction(secondaryCameras, secondaryPoints, R))
+              rotateReconstruction(secondaryCameras, secondaryPoints, R, { inPlace: true }))
           }
           upsertSparseCloud(secondaryCameras, secondaryPoints, {
             replaceId: null,
@@ -1257,13 +1413,19 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
         summary.value = result.summary ?? null
         healthDirty.value++
         reconStatus.value = 'done'
-        await persist()
+        const saved = await persist()
+        log(saved
+          ? 'Reconstruction saved to project storage'
+          : 'Reconstruction is available in memory but could not be saved to project storage',
+        saved ? 'success' : 'warn', 'Project')
       } else {
         reconStatus.value = result.status === 'error' ? 'error' : 'idle'
       }
     } catch (err) {
       log(`Reconstruction error: ${err?.message ?? err}`, 'error', 'Reconstruction')
       reconStatus.value = 'error'
+    } finally {
+      stopMemoryWatchdog()
     }
   }
 

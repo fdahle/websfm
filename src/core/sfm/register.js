@@ -536,7 +536,8 @@ export async function registerImages(ctx) {
         reportRegister('Rescue: retriangulating…')
         const { added } = await retriangulatePairs({
           points3d: getPoints3d(), cameras, pairs: donePairs,
-          keypointOf, maxReprojPx: filterMaxReprojPx, triangulate: triangulateDlt,
+          keypointOf, maxReprojPx: filterMaxReprojPx,
+          minTriAngleDeg: filterMinTriAngleDeg, triangulate: triangulateDlt,
         })
         rebuildViewIndex()
         log(`rescue retriangulation +${added} point(s); retrying with a relaxed `

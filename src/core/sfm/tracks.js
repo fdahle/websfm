@@ -1,5 +1,5 @@
 import { makeP34flat } from './reconstruction.js'
-import { projectWithDepth } from './geometry.js'
+import { cameraCenter, projectWithDepth, triangulationAngle } from './geometry.js'
 
 // ── Retriangulation + track merging (A3, pure) ───────────────────────────────
 // Standard COLMAP-style post-BA structure recovery, factored out of `reconstruct`
@@ -45,15 +45,18 @@ function buildViewIndex(points3d) {
 // Retriangulate matches whose *both* keypoints are still unassigned, using the
 // current (post-BA) poses. Adds a point when it's in front of both cameras and
 // reprojects ≤ gate in both. `triangulate(nA, nB, PA, PB)` is injected (WASM DLT
-// in production). Mutates + returns `points3d`; returns { added }.
-export async function retriangulatePairs({ points3d, cameras, pairs, keypointOf, maxReprojPx, triangulate }) {
+// in production). Mutates `points3d`; returns { added, lowParallax }.
+export async function retriangulatePairs({
+  points3d, cameras, pairs, keypointOf, maxReprojPx, triangulate,
+  minTriAngleDeg = 0,
+}) {
   const index = buildViewIndex(points3d)
   const addIndexed = (pt, uuid, kp) => {
     pt.views.set(uuid, kp)
     let m = index.get(uuid); if (!m) { m = new Map(); index.set(uuid, m) }
     m.set(kp, pt)
   }
-  let added = 0
+  let added = 0, lowParallax = 0
   for (const e of pairs) {
     const camA = cameras.get(e.idA), camB = cameras.get(e.idB)
     if (!camA || !camB) continue // both endpoints must be registered
@@ -63,6 +66,8 @@ export async function retriangulatePairs({ points3d, cameras, pairs, keypointOf,
 
     const KA = camA.K, KB = camB.K
     const PA = camToP34flat(camA), PB = camToP34flat(camB)
+    const CA = minTriAngleDeg > 0 ? cameraCenter(camA) : null
+    const CB = minTriAngleDeg > 0 ? cameraCenter(camB) : null
     const nA = [], nB = [], keep = []
     for (const [ia, ib] of fresh) {
       const kA = keypointOf(e.idA, ia), kB = keypointOf(e.idB, ib)
@@ -79,6 +84,14 @@ export async function retriangulatePairs({ points3d, cameras, pairs, keypointOf,
       const kA = keypointOf(e.idA, ia), kB = keypointOf(e.idB, ib)
       if (reprojErr(camA, x, y, z, kA) > maxReprojPx) continue
       if (reprojErr(camB, x, y, z, kB) > maxReprojPx) continue
+      // Reprojection alone cannot constrain depth when the viewing rays are almost
+      // parallel: a wrong correspondence displaced along its epipolar line can fit
+      // both images yet triangulate arbitrarily far away. Apply the same geometric
+      // floor as the track filter before allocating these bulk-recovered points.
+      if (minTriAngleDeg > 0 && triangulationAngle(CA, CB, { x, y, z }) < minTriAngleDeg) {
+        lowParallax++
+        continue
+      }
       const pt = { x, y, z, views: new Map() }
       addIndexed(pt, e.idA, ia)
       addIndexed(pt, e.idB, ib)
@@ -86,7 +99,36 @@ export async function retriangulatePairs({ points3d, cameras, pairs, keypointOf,
       added++
     }
   }
-  return { added }
+  return { added, lowParallax }
+}
+
+// Final-output quality gate. Two-view points remain available throughout camera
+// registration and BA because they are necessary to bootstrap an incremental model.
+// Once the solve is complete, however, they are also the only tracks for which an
+// epipolar-consistent wrong match has no independent observation to contradict it.
+//
+// Apply the gate only when the model already has a healthy core of multi-view tracks;
+// this preserves legitimate two-camera reconstructions and tiny/weak datasets instead
+// of turning them into an empty result. Pure so the policy can be regression-tested.
+export function pruneFinalTwoViewTracks(points3d, {
+  minViews = 3,
+  minSupportedTracks = 50,
+  minSupportedShare = 0.2,
+} = {}) {
+  const total = points3d.length
+  const supported = points3d.filter((pt) => (pt.views?.size ?? 0) >= minViews)
+  const supportedShare = total ? supported.length / total : 0
+  const applied = minViews > 2
+    && supported.length >= minSupportedTracks
+    && supportedShare >= minSupportedShare
+  return {
+    points3d: applied ? supported : points3d,
+    applied,
+    removed: applied ? total - supported.length : 0,
+    supported: supported.length,
+    supportedShare,
+    total,
+  }
 }
 
 // Merge tracks split across two points: a match whose endpoints belong to two

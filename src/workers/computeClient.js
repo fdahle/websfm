@@ -234,7 +234,8 @@ function streamingOp(op) {
 }
 
 // Incremental SfM (see core/sfm/sfm.js). `onLog`/`onProgress` fire during the run;
-// resolves to { status, cameras, points } when the model is complete.
+// resolves to a compact transferable result; the reconstruction store expands it
+// with resultCodec after ownership of the buffers reaches the main thread.
 export const reconstruct = streamingOp('reconstruct')
 
 // Dense Stage A — Build Depth Maps (PatchMatch MVS, see core/dense/mvs.js). Resolves to

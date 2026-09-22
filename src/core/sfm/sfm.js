@@ -28,7 +28,10 @@ import { calibratedFiducialPairs } from './fiducialModel.js'
 import { fitFiducialTransform } from './fiducialCalibration.js'
 import { rotationCycleFilter, reevaluateDroppedEdges } from './cycleFilter.js'
 import { makeProgressReporter, scopeProgress, RUN_BUDGET, sliceRange } from './progressPlan.js'
-import { toNorm, camToP34flat, reprojErr, retriangulatePairs, mergeSplitTracks } from './tracks.js'
+import {
+  toNorm, camToP34flat, reprojErr, retriangulatePairs, mergeSplitTracks,
+  pruneFinalTwoViewTracks,
+} from './tracks.js'
 import { selectInitPair } from './initPair.js'
 import { registerImages } from './register.js'
 import { triangulateGcp } from './gcpTriangulation.js'
@@ -47,10 +50,12 @@ import { RECONSTRUCT_DEFAULTS } from '../defaults.user.js'
 import { SFM_TUNING } from '../tuning.js'
 import { buildScaleContext, describeScaleContext, resolveScaledPx } from '../scaleContext.js'
 import { secondaryJobs, alignSecondary, mergeAligned } from './multiModel.js'
+import { compactPointRecords } from './resultCodec.js'
+import { wrapPackedMatches } from './matchCodec.js'
 
 // Re-export the extracted pure modules so existing importers (sfm.test.js and any
 // others that reached for these through sfm.js) keep working unchanged.
-export { rotationCycleFilter, retriangulatePairs, mergeSplitTracks }
+export { rotationCycleFilter, retriangulatePairs, mergeSplitTracks, pruneFinalTwoViewTracks }
 
 // ── Geometry helpers ────────────────────────────────────────────────────────────
 // Depth of world point (x,y,z) along a flat 3×4 projection matrix's principal
@@ -243,20 +248,21 @@ async function reconstructSingleModel(input, hooks = {}) {
   const done = (status, summary = null) => ({
     status,
     cameras: [...cameras.entries()].map(([uuid, cam]) => ({ uuid, ...cam })),
-    // Each view is [uuid, kpIdx, x, y] where (x,y) is the keypoint in the BA frame —
-    // i.e. after undistortion / fiducial scan→canonical / self-cal k1 fold, which are
-    // applied to the worker's keypoint copy in place. The store keypoints stay in raw
-    // scan/distorted space (viewer/GCP need it), so a downstream consumer that needs
-    // pixels coherent with the exported K/R/t (COLMAP export) must use these, not the
-    // store keypoints. `new Map(view)` still yields uuid→kpIdx (extra tuple elements
-    // are ignored), so the in-memory `views` shape is unchanged.
-    points: points3d.map(({ x, y, z, views }) => ({
-      x, y, z, color: pointColor(views),
-      views: [...views.entries()].map(([uuid, kpIdx]) => {
+    // Fold the solver's Map tracks directly into shared CSR buffers. Creating an
+    // intermediate [uuid,kp,x,y] array for each observation made finalisation's
+    // peak proportional to millions of JS objects and could kill the worker after
+    // it had already logged success. The slices remain iterable/Map-compatible for
+    // secondary-model alignment and callers of this pure module.
+    points: compactPointRecords(points3d, {
+      colorOf: ({ views }) => pointColor(views),
+      pixelOf: (uuid, kpIdx) => {
         const kp = imageByUuid(uuid)?.keypoints?.[kpIdx]
-        return kp ? [uuid, kpIdx, kp.x, kp.y] : [uuid, kpIdx]
-      }),
-    })),
+        return kp ? [kp.x, kp.y] : null
+      },
+      // `done()` is terminal for this solver instance. Releasing each mutable
+      // Map-backed point as it is packed keeps finalisation below the solve peak.
+      consume: true,
+    }),
     summary,
   })
 
@@ -717,6 +723,9 @@ async function reconstructSingleModel(input, hooks = {}) {
       baIterations,
       filterMaxReprojPx,
       filterMinTriAngleDeg,
+      finalMinTrackViews,
+      finalTrackPruneMinCount,
+      finalTrackPruneMinShare,
       refineIntrinsics,
       interimBaEvery,
       interimBaIterations,
@@ -1412,20 +1421,25 @@ async function reconstructSingleModel(input, hooks = {}) {
       {
         report('retriangulate', 1, 'Retriangulating + merging tracks…', { done: cameras.size, total: imgs.length })
         const before = trackHist()
-        const { added } = await retriangulatePairs({
+        const { added, lowParallax } = await retriangulatePairs({
           points3d, cameras, pairs: donePairs, keypointOf,
-          maxReprojPx: filterMaxReprojPx, triangulate: triangulateDlt,
+          maxReprojPx: filterMaxReprojPx, minTriAngleDeg: filterMinTriAngleDeg,
+          triangulate: triangulateDlt,
         })
         const mres = mergeSplitTracks({ points3d, cameras, pairs: donePairs, keypointOf, maxReprojPx: filterMaxReprojPx })
         points3d = mres.points3d
         const merged = mres.merged
         if (added || merged) {
           const after = trackHist()
-          log(`retriangulation +${added} point(s), merged ${merged} split track(s); `
+          log(`retriangulation +${added} point(s), merged ${merged} split track(s)`
+            + `${lowParallax ? `, rejected ${lowParallax} low-parallax candidate(s)` : ''}; `
             + `${points3d.length} points`, 'info', 'Reconstruction')
           log(`track lengths (2/3/4+ view) ${before.t2}/${before.t3}/${before.t4} → `
             + `${after.t2}/${after.t3}/${after.t4}`, 'info', 'Reconstruction')
           await runBundleAdjust('post-retriangulation bundle adjustment', baIterations, 'none')
+        } else if (lowParallax) {
+          log(`retriangulation found no stable missed structure — rejected ${lowParallax} `
+            + `candidate point(s) below ${filterMinTriAngleDeg}° parallax`, 'info', 'Reconstruction')
         } else {
           log('retriangulation found no missed structure', 'debug', 'Reconstruction')
         }
@@ -1586,6 +1600,28 @@ async function reconstructSingleModel(input, hooks = {}) {
     }
     markStage('bundleAdjust')
 
+    // The incremental solver needs 2-view points to bootstrap and register cameras,
+    // but final products do not need to expose them when a strong multi-view core is
+    // available. This removes the one class of point for which a wrong match along an
+    // epipolar line can retain low reprojection error with no independent witness.
+    const finalTrackPrune = pruneFinalTwoViewTracks(points3d, {
+      minViews: finalMinTrackViews,
+      minSupportedTracks: finalTrackPruneMinCount,
+      minSupportedShare: finalTrackPruneMinShare,
+    })
+    if (finalTrackPrune.applied) {
+      points3d = finalTrackPrune.points3d
+      rebuildViewIndex()
+      log(`final track-quality cleanup — removed ${finalTrackPrune.removed} uncorroborated `
+        + `2-view point(s); ${finalTrackPrune.supported} point(s) with ≥${finalMinTrackViews} views remain`,
+      finalTrackPrune.removed ? 'info' : 'debug', 'Reconstruction')
+    } else if (finalTrackPrune.total > 0 && finalMinTrackViews > 2) {
+      log(`final track-quality cleanup kept 2-view points — only ${finalTrackPrune.supported}/`
+        + `${finalTrackPrune.total} (${(100 * finalTrackPrune.supportedShare).toFixed(1)}%) have `
+        + `≥${finalMinTrackViews} views, below the safe automatic-pruning floor`,
+      'warn', 'Reconstruction')
+    }
+
     // Per-camera median-residual table (flags cameras > 2× the global median). The
     // global stats hide a handful of badly-placed cameras that each still triangulate
     // hundreds of points at their own bad quality (the pass-2 cameras on B1); this
@@ -1714,6 +1750,13 @@ async function reconstructSingleModel(input, hooks = {}) {
       // Per-stage wall clock. Already measured for the debug log; persisted because
       // "is Stage X negligible?" is a question several TODO items ask of real runs.
       timings: { ...stageTimes, totalMs: performance.now() - t0 },
+      finalTrackCleanup: {
+        applied: finalTrackPrune.applied,
+        removedTwoView: finalTrackPrune.removed,
+        supportedBefore: finalTrackPrune.supported,
+        totalBefore: finalTrackPrune.total,
+        minViews: finalMinTrackViews,
+      },
       unregisteredComponents: remainingComponents,
       perPairInitReproj,
       // WS2: composed self-calibrated radial distortion per sensor {k1,k2,k3} (folded
@@ -1740,7 +1783,10 @@ async function reconstructSingleModel(input, hooks = {}) {
     log(`Reconstruction summary: ${summary.nCameras} cameras, ${summary.nPoints} points, `
       + `${pct3plusViewTracks.toFixed(1)}% ≥3-view tracks, pre-BA p95 ${preBaStats.p95.toFixed(1)}px, `
       + `post-BA median ${finalStats.median.toFixed(2)}px`, 'success', 'Reconstruction')
-    return done('done', summary)
+    const output = done('done', summary)
+    log(`compact model ready: ${summary.nCameras} cameras, ${summary.nPoints} points`,
+      'info', 'Reconstruction')
+    return output
   } catch (err) {
     log(`Reconstruction error: ${err?.message ?? err}`, 'error', 'Reconstruction')
     return done('error')
@@ -1770,7 +1816,11 @@ export async function reconstruct(input, hooks = {}) {
   }
 
   const cfg = { ...SFM_TUNING, ...(input.settings || {}) }
-  const clone = (value) => structuredClone(value)
+  const clone = (value) => {
+    const copy = structuredClone(value)
+    wrapPackedMatches(copy.pairs)
+    return copy
+  }
   // Which attempt produced the model we return. The alternate-seed guard turned a
   // 19-camera primary into 122 on B4, and the run's own metrics did NOT flag the bad
   // one — so "was a retry needed?" is part of the result, not an aside in the log.

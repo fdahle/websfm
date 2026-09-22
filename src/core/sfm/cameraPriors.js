@@ -1,4 +1,4 @@
-import { isGeographic } from '../crs.js'
+import { isGeographic, localMetricFrame, transform } from '../crs.js'
 import { opkMatrix } from '../footprint.js'
 
 const mulM3 = (A, B) => A.map((row) => B[0].map((_, col) =>
@@ -43,24 +43,59 @@ export function orientationPriorInSfm(pose, fitRotation) {
 }
 
 // Marshal enabled, fully-3D camera poses into worker-safe BA priors. XY-only
-// EXIF fixes remain useful to the map/matcher but cannot constrain a Euclidean 3D
-// solve; geographic project coordinates likewise stay post-hoc only. Imported
-// OPK angles and their accuracies are retained so the SfM orchestrator can turn
-// them into orientation constraints after fitting the SfM↔project frame.
+// fixes remain useful to the map/matcher but cannot constrain a Euclidean 3D
+// solve. A geographic working CRS is converted into one survey-centred local
+// metric frame: bundle adjustment must never mix angular XY with metre Z, but it
+// also must not silently discard every GPS constraint merely because the project
+// is displayed/exported in longitude and latitude.
+//
+// Imported OPK angles and their accuracies are retained so the SfM orchestrator
+// can turn them into orientation constraints after fitting the SfM↔prior frame.
 export function buildCameraPriors(poses, images, crs) {
-  if (isGeographic(crs)) return []
   const uuidByImageId = new Map(images.map((image) => [image.id, image.uuid]))
-  return poses
+  const usable = poses
     .filter((pose) => pose.enabled !== false
       && Number.isFinite(pose.x) && Number.isFinite(pose.y) && Number.isFinite(pose.z))
-    .map((pose) => ({
-      uuid: uuidByImageId.get(pose.imageId),
-      x: pose.x, y: pose.y, z: pose.z,
-      accuracyX: pose.accuracyX, accuracyY: pose.accuracyY, accuracyZ: pose.accuracyZ,
+    .map((pose) => ({ pose, uuid: uuidByImageId.get(pose.imageId) }))
+    .filter(({ uuid }) => uuid != null)
+
+  let metricPositions = null
+  if (isGeographic(crs) && usable.length) {
+    const wgs84 = usable.map(({ pose }) => transform([pose.x, pose.y], crs, 'EPSG:4326'))
+    if (!wgs84.every(([lon, lat]) => Number.isFinite(lon) && Number.isFinite(lat))) return []
+
+    // Circular longitude mean keeps a survey straddling ±180° centred at the
+    // antimeridian instead of placing its local frame on the opposite side of Earth.
+    const lonRad = wgs84.map(([lon]) => lon * Math.PI / 180)
+    const lon0 = Math.atan2(
+      lonRad.reduce((sum, lon) => sum + Math.sin(lon), 0),
+      lonRad.reduce((sum, lon) => sum + Math.cos(lon), 0),
+    ) * 180 / Math.PI
+    const lat0 = wgs84.reduce((sum, [, lat]) => sum + lat, 0) / wgs84.length
+    const metric = localMetricFrame(lon0, lat0)
+    metricPositions = wgs84.map((position) => transform(position, 'EPSG:4326', metric))
+  }
+
+  return usable.map(({ pose, uuid }, i) => {
+    const [x, y] = metricPositions?.[i] ?? [pose.x, pose.y]
+    const geographic = metricPositions != null
+    return {
+      uuid,
+      x, y, z: geographic && Number.isFinite(pose.altitudeMeters) ? pose.altitudeMeters : pose.z,
+      // EXIF poses retain canonical metre uncertainties. Prefer those in the
+      // local metric frame; imported geographic-pose accuracies are documented
+      // as physical metres and therefore pass through unchanged.
+      accuracyX: geographic && Number.isFinite(pose.accuracyMetersX)
+        ? pose.accuracyMetersX : pose.accuracyX,
+      accuracyY: geographic && Number.isFinite(pose.accuracyMetersY)
+        ? pose.accuracyMetersY : pose.accuracyY,
+      accuracyZ: geographic && Number.isFinite(pose.accuracyMetersZ)
+        ? pose.accuracyMetersZ : pose.accuracyZ,
       omega: pose.omega, phi: pose.phi, kappa: pose.kappa,
       accuracyOmega: pose.accuracyOmega, accuracyPhi: pose.accuracyPhi,
       accuracyKappa: pose.accuracyKappa,
       source: pose.source,
-    }))
-    .filter((pose) => pose.uuid != null)
+      ...(geographic ? { metricFrame: 'local-geographic' } : {}),
+    }
+  })
 }
