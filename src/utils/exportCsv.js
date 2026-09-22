@@ -4,8 +4,12 @@
 
 function cell(v) {
   if (v == null || v === '') return ''
-  const s = String(v)
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+  // Only text fields are escaped: negative numeric coordinates remain numbers.
+  // The apostrophe is intentional spreadsheet-safe text, including on reimport.
+  const text = String(v)
+  const s = typeof v === 'string' && /^[\s\u0000-\u001f]*[=+@-]|^[\t\r\n]/.test(text)
+    ? `'${text}` : text
+  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
 }
 
 function toCsv(header, rows) {

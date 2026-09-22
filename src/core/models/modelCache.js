@@ -28,7 +28,12 @@ export async function readCachedModel(url) {
 
 /** True iff `url`'s bytes are already in Cache Storage. */
 export async function isModelCached(url) {
-  return (await readCachedModel(url)) != null
+  try {
+    if (typeof caches === 'undefined') return false
+    return !!(await (await caches.open(MODEL_CACHE_NAME)).match(url))
+  } catch {
+    return false
+  }
 }
 
 /**

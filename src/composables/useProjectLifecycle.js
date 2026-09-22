@@ -1,3 +1,4 @@
+import { flushPersistence } from '../utils/persistence.js'
 import { computed, nextTick, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { ensureProjection } from '../core/crs.js'
@@ -50,6 +51,8 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene }) {
 
   async function flushProjectWork() {
     await Promise.all([flushPendingWork(), externalStore.flushPendingWork()])
+    await nextTick() // run store watchers that schedule autosaves
+    await flushPersistence()
   }
 
   // ── Blocking load overlay ───────────────────────────────────────────────────
@@ -94,6 +97,7 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene }) {
 
   // ── Open ────────────────────────────────────────────────────────────────────
   async function openProject(id) {
+    const loadStarted = performance.now()
     await flushProjectWork()
     // A folder-backed project has to be reachable before anything reads it: the
     // stored directory handle may need a permission grant (which needs a user
@@ -130,7 +134,16 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene }) {
       return false
     }
     await withLoadingOverlay('Loading project…', async () => {
-      if (projectData.crs) await ensureProjection(projectData.crs).catch(() => {})
+      const timings = []
+      const timed = async (phase, fn) => {
+        const started = performance.now()
+        const result = await fn()
+        timings.push({ phase, ms: performance.now() - started })
+        return result
+      }
+      if (projectData.crs) {
+        await timed('projection', () => ensureProjection(projectData.crs).catch(() => {}))
+      }
       // The destination is reachable and readable; only now is it safe to tear
       // down the project being left.
       resetInMemoryProject()
@@ -142,14 +155,23 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene }) {
       // and clobber manual sensor assignments. Both have bespoke restore signatures,
       // so they stay manual; every other project-scoped store restores through the
       // registry below (matches, reconstruction, GCPs, footprints, poses).
-      await restoreSensors(id)
-      await restoreImages(projectData.images || [], id, (done, total, label) => {
-        projectLoadingProgress.value = { done, total, label }
-      })
+      await timed('sensors', () => restoreSensors(id))
+      await timed('images', () => restoreImages(projectData.images || [], id, (done, total, label) => {
+        if (projectLoading.value && currentProjectId.value === id) {
+          projectLoadingProgress.value = { done, total, label }
+        }
+      }))
       migrateLegacyFiducialDetections(sensors.value)
       migrateLegacyFiducialCalibrations(images.value)
       projectLoadingProgress.value = null
-      await restoreProjectStores({ projectId: id, projectData })
+      const storeTimings = await timed('project stores', () =>
+        restoreProjectStores({ projectId: id, projectData }))
+      const detail = [...timings, ...storeTimings.map(({ store, ms }) => ({ phase: store, ms }))]
+        .sort((a, b) => b.ms - a.ms)
+        .map(({ phase, ms }) => `${phase} ${Math.round(ms)} ms`)
+        .join(' · ')
+      log(`Project load timing: ${Math.round(performance.now() - loadStarted)} ms total — ${detail}`,
+        'info', 'Project')
       // restore() sets selectedCloud, which the watcher pushes into the viewer.
     })
     return true
@@ -158,47 +180,49 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene }) {
   // ── New project ─────────────────────────────────────────────────────────────
   async function handleCreateProject({ name, sceneType, crs, dirHandle = null }) {
     newProjectOpen.value = false
-    await flushProjectWork()
-    if (crs) await ensureProjection(crs).catch(() => {})
-    if (!dirHandle) {
-      try {
-        await createProject(name, sceneType, crs)
-        resetInMemoryProject()
-      } catch (err) {
-        const detail = String(err?.message ?? err)
-        log(`Could not create project: ${detail}`, 'error', 'Project')
-        showToast('Could not create project', { detail, kind: 'error', ms: 6000 })
-        newProjectCanCancel.value = !!currentProjectId.value
-        newProjectOpen.value = true
+    return withLoadingOverlay('Creating project…', async () => {
+      await flushProjectWork()
+      if (crs) await ensureProjection(crs).catch(() => {})
+      if (!dirHandle) {
+        try {
+          await createProject(name, sceneType, crs)
+          resetInMemoryProject()
+        } catch (err) {
+          const detail = String(err?.message ?? err)
+          log(`Could not create project: ${detail}`, 'error', 'Project')
+          showToast('Could not create project', { detail, kind: 'error', ms: 6000 })
+          newProjectCanCancel.value = !!currentProjectId.value
+          newProjectOpen.value = true
+        }
+        return
       }
-      return
-    }
 
-    // Folder-backed: the directory must be empty (websfm writes a whole tree into
-    // it and prunes stale sidecars), so a non-empty one asks once.
-    let res
-    try {
-      res = await createFolderProject(name, sceneType, crs, dirHandle)
-    } catch (err) {
-      res = { ok: false, error: String(err?.message ?? err) }
-    }
-    if (!res.ok && res.needsConfirm
-        && confirm(`"${dirHandle.name}" is not empty. Create the project in it anyway?`)) {
+      // Folder-backed: the directory must be empty (websfm writes a whole tree into
+      // it and prunes stale sidecars), so a non-empty one asks once.
+      let res
       try {
-        res = await createFolderProject(name, sceneType, crs, dirHandle, { confirmed: true })
+        res = await createFolderProject(name, sceneType, crs, dirHandle)
       } catch (err) {
         res = { ok: false, error: String(err?.message ?? err) }
       }
-    }
-    if (res.ok) {
-      resetInMemoryProject()
-      log(`Project "${name}" created in folder "${dirHandle.name}"`, 'info', 'Project')
-      return
-    }
-    log(`Could not create project in folder: ${res.error}`, 'error', 'Project')
-    showToast('Could not use that folder', { detail: res.error, kind: 'error', ms: 6000 })
-    newProjectCanCancel.value = !!currentProjectId.value
-    newProjectOpen.value = true
+      if (!res.ok && res.needsConfirm
+          && confirm(`"${dirHandle.name}" is not empty. Create the project in it anyway?`)) {
+        try {
+          res = await createFolderProject(name, sceneType, crs, dirHandle, { confirmed: true })
+        } catch (err) {
+          res = { ok: false, error: String(err?.message ?? err) }
+        }
+      }
+      if (res.ok) {
+        resetInMemoryProject()
+        log(`Project "${name}" created in folder "${dirHandle.name}"`, 'info', 'Project')
+        return
+      }
+      log(`Could not create project in folder: ${res.error}`, 'error', 'Project')
+      showToast('Could not use that folder', { detail: res.error, kind: 'error', ms: 6000 })
+      newProjectCanCancel.value = !!currentProjectId.value
+      newProjectOpen.value = true
+    })
   }
 
   // Cancelling the New Project dialog falls back to the picker when no project is

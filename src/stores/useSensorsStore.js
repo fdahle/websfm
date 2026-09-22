@@ -1,3 +1,4 @@
+import { coalescedSave } from '../utils/coalescedSave.js'
 import { ref, watch, computed } from 'vue'
 import { defineStore, storeToRefs } from 'pinia'
 import { useLog } from '../composables/useLog.js'
@@ -35,21 +36,11 @@ export const useSensorsStore = defineStore('sensors', () => {
   // file"), so writes are coalesced exactly like `useImagesStore.sync()`: at most
   // one in flight, a request arriving mid-write schedules a single trailing re-run
   // that captures the latest state.
-  let writing = false
-  let rerun = false
-  async function save() {
-    if (!isPersisting()) return
-    if (writing) { rerun = true; return }
-    writing = true
-    try {
-      do {
-        rerun = false
-        await opfs.saveSensors(projects.currentProjectId, { sensors: sensors.value })
-          .catch((err) => log(`Sensor save failed — ${err?.message ?? err}`, 'error', 'Sensor'))
-      } while (rerun)
-    } finally {
-      writing = false
-    }
+  const saveQueued = coalescedSave('sensors', opfs.saveSensors)
+  function save() {
+    if (!isPersisting()) return Promise.resolve()
+    return saveQueued(projects.currentProjectId, { sensors: sensors.value })
+      .catch(err => log(`Sensors save failed — ${err?.message ?? err}`, 'error', 'Sensors'))
   }
 
   // How many images currently reference a sensor.

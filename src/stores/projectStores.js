@@ -33,12 +33,18 @@ export function registerProjectStore(useStore) {
   return useStore
 }
 
-// Restore every registered store for a project, in registration order.
+const now = () => globalThis.performance?.now?.() ?? Date.now()
+
+// Restore every registered store concurrently. Sensors and images are handled
+// before this registry; the registered stores are independent once those exist.
 export async function restoreProjectStores(ctx) {
-  for (const useStore of registry) {
+  return Promise.all(registry.map(async (useStore) => {
     const store = useStore()
-    if (typeof store.restore === 'function') await store.restore(ctx)
-  }
+    if (typeof store.restore !== 'function') return null
+    const started = now()
+    await store.restore(ctx)
+    return { store: store.$id || 'unknown', ms: now() - started }
+  })).then((items) => items.filter(Boolean))
 }
 
 // Clear every registered store. `opts` is forwarded to each store's clear()

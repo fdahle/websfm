@@ -666,12 +666,11 @@ export const useExternalStore = registerProjectStore(defineStore('external', () 
     rasters.value = data.rasters.map((r) => ({ ...r, onMap: !!r.onMap, opacity: r.opacity ?? 1 }))
     // Re-resolve each raster's CRS so the first sample doesn't have to await a
     // projection fetch mid-interaction.
-    for (const r of rasters.value) {
-      if (!r.crs) continue
-      await resolveRasterCrs(r)
-    }
+    await Promise.all(rasters.value.map((r) => r.crs ? resolveRasterCrs(r) : null))
     // Drop sidecars belonging to rasters no longer in the index.
-    await opfs.pruneExternalPlanes(projectId, new Set(rasters.value.map((r) => r.id))).catch(() => {})
+    // Stale-cache cleanup is maintenance, not state required to use the project.
+    // Keep it off the blocking open path.
+    opfs.pruneExternalPlanes(projectId, new Set(rasters.value.map((r) => r.id))).catch(() => {})
 
     log(`Reference rasters restored: ${rasters.value.length} `
       + `(${demRasters.value.length} DEM, ${orthoRasters.value.length} ortho) — pixel data loads on demand`,

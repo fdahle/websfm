@@ -1,4 +1,4 @@
-import { ref, markRaw } from 'vue'
+import { ref, markRaw, computed } from 'vue'
 import { defineStore } from 'pinia'
 import { createImage } from '../utils/image.js'
 import { isTiff, canDecodeTiffNatively, nativeTiffDecodeResult, readTiffDimensions } from '../utils/tiff.js'
@@ -19,6 +19,7 @@ import * as opfs from '../utils/opfs.js'
 import { useProjectsStore } from './useProjectsStore.js'
 import { useMatchesStore } from './useMatchesStore.js'
 import { useModelsStore } from './useModelsStore.js'
+import { mapConcurrent } from '../utils/concurrency.js'
 
 // The image set: source images, their metadata, keypoints, masks, depth maps, and
 // sensor assignments. Project-scoped and persisted, but its restore/clear have
@@ -30,6 +31,10 @@ export const useImagesStore = defineStore('images', () => {
 
   const images = ref([])
   const selectedId = ref(null)
+  // A status flag alone is insufficient after restore: a missing/corrupt keypoint
+  // sidecar used to leave an empty array advertised as ready to matching.
+  const keypointReadyImages = computed(() => images.value.filter((img) =>
+    img.kpStatus === 'done' && (img.keypoints?.length ?? 0) > 0))
 
   // Persist only when a project is open and OPFS is usable (see useProjectsStore).
   const isPersisting = () => projects.isPersisting
@@ -42,6 +47,7 @@ export const useImagesStore = defineStore('images', () => {
   // PNG already landed). Plain Map (never reactive, never persisted).
   const computeReady = new Map() // uuid -> { promise, resolve, reject }
   const activeImports = new Set()
+  let restoreGeneration = 0
   const pendingWrites = new Set()
   const pendingWorkCount = ref(0)
 
@@ -1209,6 +1215,7 @@ export const useImagesStore = defineStore('images', () => {
   // since that would clobber the project being left with an empty image list, and
   // restore reads project.json back. Only the explicit "clear-all" command purges.
   function clearAll(onCleared, { purge = false } = {}) {
+    restoreGeneration++
     const n = images.value.length
     for (const img of images.value) {
       URL.revokeObjectURL(img.url)
@@ -1222,10 +1229,11 @@ export const useImagesStore = defineStore('images', () => {
     onCleared?.()
   }
 
-  // Restore images from OPFS project records (used on session load / project
-  // switch). Runs every record's OPFS reads + TIFF transcode in parallel
-  // (Promise.all) instead of one at a time — order is preserved since
-  // Promise.all resolves in input order regardless of completion order.
+  // Restore the cheap project.json records immediately, then hydrate pixels,
+  // features and overlays with bounded concurrency. The returned promise does not
+  // resolve until hydration finishes: project open uses that contract to keep its
+  // loading overlay up, so command guards and viewers never observe a nominally
+  // open project whose required image state is still empty.
   async function restoreImages(records, projectId, onProgress) {
     for (const img of images.value) {
       URL.revokeObjectURL(img.url)
@@ -1237,9 +1245,48 @@ export const useImagesStore = defineStore('images', () => {
     // nothing about whether these can be re-read.
     urlHeal.clear()
 
+    const generation = ++restoreGeneration
+    const restored = records.map((record) => ({
+      id: record.id,
+      uuid: record.uuid,
+      name: record.name,
+      url: null,
+      computeUrl: null,
+      file: null,
+      meta: record.meta,
+      sensorId: record.sensorId ?? null,
+      loading: true,
+      previewPending: true,
+      previewFailed: false,
+      previewFailReason: null,
+      keypoints: [],
+      kpStatus: record.kpStatus,
+      kpCount: record.kpCount || 0,
+      kpMs: record.kpMs || 0,
+      detector: record.detector ?? 'sift',
+      descDim: record.descDim ?? 128,
+      detectScale: record.detectScale ?? null,
+      detectSettings: record.detectSettings ?? null,
+      mask: null,
+      depth: null,
+      fiducialObs: Array.isArray(record.fiducialObs) ? record.fiducialObs.map((o) => ({ ...o })) : [],
+      fiducialDetections: Array.isArray(record.fiducialDetections) ? record.fiducialDetections.map((d) => ({ ...d })) : [],
+    }))
+    images.value = restored
+
     const total = records.length
+    if (total === 0) {
+      log('Project loaded: 0 images', 'success', 'Project')
+      return
+    }
     let done = 0
-    const restored = await Promise.all(records.map(async (record) => {
+    await mapConcurrent(records, 12, async (record, index) => {
+      // `images` is a deep ref: assigning `restored` above makes its entries
+      // reactive proxies, but the entries retained in the local `restored` array
+      // remain raw. Mutating a raw entry updates its target without notifying Vue,
+      // leaving computed guards such as `imagesLoading` cached at true forever.
+      // Always mutate the proxy owned by the store.
+      const img = images.value[index]
       try {
         // Load the original lazily — a TIFF cache hit needs neither the
         // original nor a (re-)decode, so we skip the OPFS read entirely there.
@@ -1285,43 +1332,15 @@ export const useImagesStore = defineStore('images', () => {
           url = URL.createObjectURL(await loadOriginal())
           computeUrl = url
         }
-        const img = {
-          id: record.id,
-          uuid: record.uuid,
-          name: record.name,
-          url,
-          computeUrl,
-          file: null,
-          meta: record.meta,
-          sensorId: record.sensorId ?? null,
-          loading: false,
-          // Both blobs above are resolved before this object exists, so a
-          // restored image never starts pending — but the fields must be present
-          // for reportImageLoadError to flag one whose source dies later.
-          previewPending: false,
-          previewFailed: false,
-          previewFailReason: null,
-          keypoints: [],
-          kpStatus: record.kpStatus,
-          kpCount: record.kpCount || 0,
-          kpMs: record.kpMs || 0,
-          // Older projects predate these — default to SIFT/128 (back-compat).
-          detector: record.detector ?? 'sift',
-          descDim: record.descDim ?? 128,
-          // Absent on projects that predate scale-relative thresholds. Deliberately
-          // NOT healed from meta dimensions × the current modal maxDim: the setting
-          // may have changed since detection, and a wrong factor is worse than none.
-          // Such a project reproduces its old numbers until the images are re-detected.
-          detectScale: record.detectScale ?? null,
-          // Same rule as detectScale: absent on older projects, never reconstructed
-          // from the current modal state.
-          detectSettings: record.detectSettings ?? null,
-          mask: null,
-          depth: null,
-          // Back-compat: older projects predate fiducials ⇒ empty.
-          fiducialObs: Array.isArray(record.fiducialObs) ? record.fiducialObs.map((o) => ({ ...o })) : [],
-          fiducialDetections: Array.isArray(record.fiducialDetections) ? record.fiducialDetections.map((d) => ({ ...d })) : [],
+        if (generation !== restoreGeneration || projectId !== projects.currentProjectId
+            || !images.value.includes(img)) {
+          URL.revokeObjectURL(url)
+          if (computeUrl && computeUrl !== url) URL.revokeObjectURL(computeUrl)
+          return
         }
+        img.url = url
+        img.computeUrl = computeUrl
+        img.previewPending = false
         if (record.kpStatus === 'done') {
           const kps = await opfs.loadKeypoints(projectId, record.uuid)
           if (kps) {
@@ -1330,6 +1349,11 @@ export const useImagesStore = defineStore('images', () => {
             const colors = await opfs.loadColors(projectId, record.uuid)
             if (colors) kps.forEach((kp, i) => { if (colors[i]) kp.color = colors[i] })
             img.keypoints = markRaw(kps)
+            img.kpCount = kps.length
+          } else {
+            img.kpStatus = 'error'
+            img.kpCount = 0
+            log(`Keypoints missing for ${record.name} — re-run feature detection`, 'warn', 'Project')
           }
         }
         if (record.hasMask) {
@@ -1340,17 +1364,30 @@ export const useImagesStore = defineStore('images', () => {
           const depthDataUrl = await opfs.loadDepthDataUrl(projectId, record.uuid)
           if (depthDataUrl) img.depth = { dataUrl: depthDataUrl }
         }
-        return img
       } catch (err) {
-        log(`Restore failed: ${record.name} — ${err?.message ?? err}`, 'error', 'Project')
-        return null
+        if (generation === restoreGeneration) {
+          log(`Restore failed: ${record.name} — ${err?.message ?? err}`, 'error', 'Project')
+          img.previewPending = false
+          img.previewFailed = true
+          img.previewFailReason = err?.message ?? String(err)
+          // A source image that cannot be restored is not a usable matching input,
+          // even if project.json says its old keypoint job completed.
+          img.keypoints = markRaw([])
+          img.kpStatus = 'error'
+          img.kpCount = 0
+        }
       } finally {
+        if (generation === restoreGeneration) img.loading = false
         done++
-        onProgress?.(done, total, record.name)
+        if (generation === restoreGeneration && projectId === projects.currentProjectId) {
+          onProgress?.(done, total, record.name)
+        }
       }
-    }))
-    images.value = restored.filter(Boolean)
-    log(`Project loaded: ${images.value.length} image${images.value.length !== 1 ? 's' : ''}`, 'success', 'Project')
+    })
+    if (generation === restoreGeneration && projectId === projects.currentProjectId) {
+      log(`Project assets ready: ${images.value.length} image${images.value.length !== 1 ? 's' : ''}`,
+        'success', 'Project')
+    }
   }
 
   function migrateLegacyFiducialDetections(sensors) {
@@ -1368,6 +1405,7 @@ export const useImagesStore = defineStore('images', () => {
   return {
     images,
     selectedId,
+    keypointReadyImages,
     pendingWorkCount,
     sync,
     imageById,

@@ -1,3 +1,6 @@
+import { acquireProjectLease } from '../utils/projectLease.js'
+import { persistenceLock, trackPersistence, flushPersistence, discardPersistenceFailure } from '../utils/persistence.js'
+import { mergeProjectIndex } from '../utils/projectIndex.ts'
 import { ref, computed } from 'vue'
 import { defineStore } from 'pinia'
 import * as opfs from '../utils/opfs.js'
@@ -24,6 +27,8 @@ export const useProjectsStore = defineStore('projects', () => {
   // environment. When false, the app runs transiently without a project.
   const persistenceAvailable = ref(true)
   const projects = ref([])        // [{ id, name, sceneType, createdAt, lastModified }]
+  let leasedId = null
+  let releaseLease = null
   const currentProjectId = ref(null)
 
   const currentProject = computed(() =>
@@ -67,18 +72,28 @@ export const useProjectsStore = defineStore('projects', () => {
 
   // ── Index I/O ───────────────────────────────────────────────────────────────
 
+  let indexBaseline = []
+  const snapshotOf = value => JSON.parse(JSON.stringify(value))
+
   async function loadIndex() {
     const index = await opfs.readIndex()
     if (index?.projects) projects.value = index.projects
+    indexBaseline = snapshotOf(projects.value)
     return index?.lastOpenedId || null
   }
 
-  async function saveIndex() {
-    await opfs.writeIndex({
-      version: 1,
-      lastOpenedId: currentProjectId.value,
-      projects: projects.value,
-    })
+  function saveIndex() {
+    const snapshot = snapshotOf(projects.value)
+    const baseline = snapshotOf(indexBaseline)
+    const lastOpenedId = currentProjectId.value
+    return trackPersistence('project-index', () => persistenceLock('project-index', async () => {
+      const latest = await opfs.readIndex()
+      const merged = mergeProjectIndex(latest?.projects ?? [], baseline, snapshot)
+      await opfs.writeIndex({ version: 1, lastOpenedId, projects: merged })
+      // Preserve edits made locally while the disk operation was in flight.
+      projects.value = mergeProjectIndex(merged, snapshot, snapshotOf(projects.value))
+      indexBaseline = snapshotOf(merged)
+    }))
   }
 
   // ── CRUD ────────────────────────────────────────────────────────────────────
@@ -89,7 +104,9 @@ export const useProjectsStore = defineStore('projects', () => {
     const entry = { id, name, sceneType, crs, createdAt: now, lastModified: now }
     // Persist the project before exposing it as current. If storage fails the
     // caller remains in the old project instead of selecting a half-created one.
-    await opfs.writeProject(id, { ...entry, images: [] })
+    const newLease = await acquireProjectLease(id)
+    try { await opfs.writeProject(id, { ...entry, images: [] }) }
+    catch (error) { newLease(); discardPersistenceFailure(`writeProject:${id}`); throw error }
     const previousId = currentProjectId.value
     projects.value.push(entry)
     currentProjectId.value = id
@@ -98,9 +115,14 @@ export const useProjectsStore = defineStore('projects', () => {
     } catch (err) {
       projects.value = projects.value.filter((p) => p.id !== id)
       currentProjectId.value = previousId
+      discardPersistenceFailure('project-index')
       await opfs.deleteProject(id).catch(() => {})
+      newLease()
       throw err
     }
+    releaseLease?.()
+    releaseLease = newLease
+    leasedId = id
     requestDurableOnce()
     return id
   }
@@ -125,8 +147,10 @@ export const useProjectsStore = defineStore('projects', () => {
     if (!p) return null
     // Read first, commit second. Folder permission and corrupt/missing project
     // failures must not change lastOpenedId or abandon the active project.
-    const data = await opfs.readProject(id)
-    if (!data) return null
+    const newLease = leasedId === id ? null : await acquireProjectLease(id)
+    let data
+    try { data = await opfs.readProject(id) } catch (error) { newLease?.(); throw error }
+    if (!data) { newLease?.(); return null }
     const previousId = currentProjectId.value
     const previousModified = p.lastModified
     currentProjectId.value = id
@@ -135,9 +159,12 @@ export const useProjectsStore = defineStore('projects', () => {
       await saveIndex()
     } catch (err) {
       currentProjectId.value = previousId
+      discardPersistenceFailure('project-index')
       p.lastModified = previousModified
+      newLease?.()
       throw err
     }
+    if (newLease) { releaseLease?.(); releaseLease = newLease; leasedId = id }
     requestDurableOnce()
     return data
   }
@@ -156,13 +183,17 @@ export const useProjectsStore = defineStore('projects', () => {
   // user's own disk and removing them is not ours to do (opfs.deleteProject
   // enforces that; the picker's confirm text says so).
   async function deleteProjectById(id) {
-    projects.value = projects.value.filter((p) => p.id !== id)
-    await opfs.deleteProject(id)
-    opfs.clearProjectRoot(id)
-    await deleteProjectHandle(id)
-    if (currentProjectId.value === id) currentProjectId.value = null
-    await saveIndex()
-    return projects.value[0]?.id || null
+    const temporaryLease = leasedId === id ? null : await acquireProjectLease(id)
+    try {
+      projects.value = projects.value.filter((p) => p.id !== id)
+      await opfs.deleteProject(id)
+      opfs.clearProjectRoot(id)
+      await deleteProjectHandle(id)
+      if (currentProjectId.value === id) currentProjectId.value = null
+      await saveIndex()
+      if (leasedId === id) { releaseLease?.(); releaseLease = null; leasedId = null }
+      return projects.value[0]?.id || null
+    } finally { temporaryLease?.() }
   }
 
   // ── Folder-backed projects ──────────────────────────────────────────────────
@@ -349,6 +380,7 @@ export const useProjectsStore = defineStore('projects', () => {
   // → { cancelled } | { fileName, archiveBytes, … }. Throws with a user-facing
   // message (too large, no data, write failed) for the caller to surface.
   async function exportProject(id, { includeDerived = true, onProgress = null, onLog = null } = {}) {
+    await flushPersistence()
     const project = projects.value.find((p) => p.id === id)
     if (!project) throw new Error('project not found')
     return exportProjectArchive({
