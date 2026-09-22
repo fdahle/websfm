@@ -141,4 +141,17 @@ describe('write serialization', () => {
     expect(tail[24].i).toBe(2999)
   })
 
+  it('round-trips and deletes project workflows', async () => {
+    const data = {
+      workflows: [{ id: 'w1', name: 'Survey recipe', blocks: [] }],
+      activeId: 'w1',
+      runs: [],
+    }
+
+    await opfs.saveWorkflows('p6', data)
+    expect(await opfs.loadWorkflows('p6')).toEqual(data)
+
+    await opfs.deleteWorkflows('p6')
+    expect(await opfs.loadWorkflows('p6')).toBeNull()
+  })
 })

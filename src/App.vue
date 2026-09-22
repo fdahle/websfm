@@ -1,6 +1,6 @@
-import { pendingPersistence, persistenceFailures, retryPersistence } from './utils/persistence.js'
 <script setup>
-import { ref, computed, reactive, watch, onMounted, nextTick } from 'vue'
+import { pendingPersistence, persistenceFailures, retryPersistence } from './utils/persistence.js'
+import { ref, computed, reactive, watch, onMounted, nextTick, defineAsyncComponent } from 'vue'
 import { storeToRefs } from 'pinia'
 import Ribbon from './components/layout/Ribbon.vue'
 import Sidebar from './components/layout/Sidebar.vue'
@@ -50,6 +50,8 @@ import { useModalsStore } from './stores/useModalsStore.js'
 import { useGlossaryStore } from './stores/useGlossaryStore.js'
 import { useGuideStore } from './stores/useGuideStore.js'
 import { usePipeline } from './composables/usePipeline.js'
+import { useWorkflowRunner } from './composables/useWorkflowRunner.js'
+import { useComputeSettings } from './composables/useComputeSettings.js'
 import { useTabDrag } from './composables/useTabDrag.js'
 import { useSidebarResize } from './composables/useSidebarResize.js'
 import { useImportRouting } from './composables/useImportRouting.js'
@@ -64,6 +66,8 @@ import { useGcpsStore } from './stores/useGcpsStore.js'
 import { useFootprintsStore } from './stores/useFootprintsStore.js'
 import { useSensorsStore } from './stores/useSensorsStore.js'
 import { usePosesStore } from './stores/usePosesStore.js'
+import { useWorkflowsStore } from './stores/useWorkflowsStore.js'
+import { createWorkflow, resolveWorkflowSettings, WORKFLOW_BLOCK_BY_ID } from './core/workflow.js'
 import './stores/useLogStore.js'   // registers the console as a project-scoped store
 import { useLog } from './composables/useLog.js'
 import ReconstructModal from './components/modals/ReconstructModal.vue'
@@ -98,6 +102,7 @@ import { resolveK } from './core/sfm/reconstruction.js'
 import { estimateUpFromCameras } from './core/sfm/geometry.js'
 import { useSfmInterop } from './composables/useSfmInterop.js'
 
+const WorkflowBuilderModal = defineAsyncComponent(() => import('./components/modals/WorkflowBuilderModal.vue'))
 // ── Theme ─────────────────────────────────────────────────────────────────────
 // `theme` is the resolved 'dark'|'light'; `themePreference` is what the user
 // chose ('system' follows the OS and re-resolves when it flips).
@@ -114,7 +119,7 @@ const {
 
 // ── Images ────────────────────────────────────────────────────────────────────
 const imagesStore = useImagesStore()
-const { images, selectedId, pendingWorkCount: pendingImageWork } = storeToRefs(imagesStore)
+const { images, selectedId, keypointReadyImages, pendingWorkCount: pendingImageWork } = storeToRefs(imagesStore)
 const {
   imageById, selectImage,
   addImages, removeImage,
@@ -130,8 +135,18 @@ const detectedMaxKeypoints = computed(() =>
 // ── Matches ───────────────────────────────────────────────────────────────────
 // Project-scoped store; restore/clear run through the project-store registry.
 const matchesStore = useMatchesStore()
-const { matchStore } = storeToRefs(matchesStore)
+const { matchStore, matchRun, usableMatchCount } = storeToRefs(matchesStore)
 const { matchAll, setPairDisabled } = matchesStore
+
+// Project recipes + immutable run snapshots. Global templates remain in browser
+// preferences; applying one always copies it into this project.
+const workflowsStore = useWorkflowsStore()
+const { workflows, activeId: activeWorkflowId, templates: workflowTemplates, runs: workflowRuns } = storeToRefs(workflowsStore)
+const {
+  addWorkflow, updateWorkflow, removeWorkflow, duplicateWorkflow, setActive: setActiveWorkflow,
+  saveTemplate: saveWorkflowTemplate, applyTemplate: applyWorkflowTemplate,
+  removeTemplate: removeWorkflowTemplate, recordRun: recordWorkflowRun,
+} = workflowsStore
 
 // ── Tabs ──────────────────────────────────────────────────────────────────────
 const showMap = computed(() => currentSceneType.value !== 'object')
@@ -497,7 +512,7 @@ const footprintImageCount = computed(() => {
 // ── Modals ────────────────────────────────────────────────────────────────────
 const {
   settingsOpen, projectSettingsOpen, aboutOpen, systemInfoOpen,
-  projectPickerOpen, newProjectOpen, newProjectCanCancel, saveProjectOpen,
+  projectPickerOpen, newProjectOpen, newProjectCanCancel, saveProjectOpen, workflowBuilderOpen,
   detectFeaturesOpen, matchFeaturesOpen,
   imageTableOpen, poseTableOpen, maskManagerOpen, autoMaskOpen, sensorTableOpen, gcpTableOpen, matchListOpen, reconstructOpen,
   findGcpsOpen, georeferenceOpen, scaleBarsOpen,
@@ -590,6 +605,7 @@ const {
   cancelRun, runDetect, runMatch, runReconstruct, runComputeDepthMaps, runDensify,
   runGenerateDem, runGenerateOrtho, runGenerateMesh, runEditClouds, progress: exportProgress,
 } = usePipeline({ images, detectAll, matchAll, reconstruct, computeDepthMaps, densify, generateDem, generateOrtho, generateMesh, editClouds })
+const { useGpu: workflowUseGpu, memBudgetBytes: workflowMemBudgetBytes } = useComputeSettings()
 
 // Dense pipeline gating for the Ribbon.
 const sparseReady = computed(() => clouds.value.some((c) => c.kind === 'sparse' && c.cameras.size >= 2))
@@ -613,7 +629,7 @@ const productReady = computed(() => !!dem.value || !!ortho.value)
 // ── Derived state ──────────────────────────────────────────────────────────────
 const selected = computed(() => images.value.find((img) => img.id === selectedId.value) || null)
 
-const kpImageCount = computed(() => images.value.filter(img => img.kpStatus === 'done').length)
+const kpImageCount = computed(() => keypointReadyImages.value.length)
 
 // True while any image is still decoding or transcoding (TIFF PNG encode /
 // preview pending). Pixel-reading compute ops (Detect, Auto-mask) gate on this so
@@ -627,7 +643,7 @@ const commandState = computed(() => ({
   imageCount:    images.value.length,
   imagesLoading: imagesLoading.value,
   kpImageCount:  kpImageCount.value,
-  matchCount:    matchSummaries.value.length,
+  matchCount:    usableMatchCount.value,
   gcpCount:      gcps.value.length,
   poseCount:     poses.value.length,
   sensorCount:   sensors.value.length,
@@ -640,6 +656,96 @@ const commandState = computed(() => ({
   orthoReady:    orthoReady.value,
   productReady:  productReady.value,
 }))
+
+// Workflow preflight/execution state uses semantic output names rather than UI
+// counter names. The runner re-reads this computed before every block, so outputs
+// produced by the previous stage become immediately reusable.
+const workflowState = computed(() => ({
+  sceneType: currentSceneType.value,
+  images: images.value.length > 0,
+  keypoints: kpImageCount.value >= 2,
+  matches: usableMatchCount.value > 0,
+  sparse: sparseReady.value,
+  depthMaps: depthMapCount.value > 0,
+  cloud: cloudReady.value,
+  dense: denseReady.value,
+  dem: demReady.value,
+  mesh: meshReady.value,
+  surface: demReady.value || meshReady.value,
+  ortho: orthoReady.value,
+}))
+
+async function runAutomatedWorkflowBlock(type, rawSettings) {
+  const settings = resolveWorkflowSettings(type, rawSettings, {
+    useGpu: workflowUseGpu.value,
+    memBudgetBytes: workflowMemBudgetBytes.value,
+  })
+  const targets = type === 'detect-features'
+    ? (settings.overwrite ? [...images.value] : images.value.filter((img) => img.kpStatus !== 'done'))
+    : []
+  const before = type === 'detect-features'
+    ? new Map(targets.map((img) => [img.uuid, img.keypoints]))
+    : workflowOutputToken(type)
+
+  let result
+  if (type === 'detect-features') result = await runDetect(settings)
+  else if (type === 'match-features') result = await runMatch(settings)
+  else if (type === 'reconstruct') result = await runReconstruct(settings)
+  else if (type === 'compute-depth') result = await runComputeDepthMaps(settings)
+  else if (type === 'dense') result = await runDensify(settings)
+  else if (type === 'gen-dem') result = await runGenerateDem(settings)
+  else if (type === 'gen-ortho') result = await runGenerateOrtho(settings)
+  else if (type === 'gen-mesh') result = await runGenerateMesh(settings)
+  else throw new Error(`Workflow block is not automated: ${type}`)
+
+  if (result?.ok === false || result?.unchanged) return result
+  const changed = type === 'detect-features'
+    ? targets.every((img) => img.kpStatus === 'done' && img.keypoints !== before.get(img.uuid))
+    : workflowOutputToken(type) !== before
+  return changed
+    ? { ok: true, cancelled: false }
+    : { ok: false, cancelled: false, reason: `${WORKFLOW_BLOCK_BY_ID.get(type)?.label ?? type} did not replace its output` }
+}
+
+function workflowOutputToken(type) {
+  if (type === 'match-features') return matchRun.value
+  if (type === 'reconstruct') return mainSparseCloud.value
+  if (type === 'compute-depth') return depthMaps.value
+  if (type === 'dense') return clouds.value.find((c) => c.kind === 'dense' && !c.imported && !c.derived) ?? null
+  if (type === 'gen-dem') return dem.value
+  if (type === 'gen-ortho') return ortho.value
+  if (type === 'gen-mesh') return clouds.value.find((c) => c.kind === 'mesh' && !c.imported && !c.derived) ?? null
+  return null
+}
+
+const workflowRunner = useWorkflowRunner({
+  state: workflowState,
+  runAutomated: runAutomatedWorkflowBlock,
+  cancelAutomated: cancelRun,
+  openInteractive: handleCommand,
+  recordRun: recordWorkflowRun,
+  onLog: log,
+})
+const {
+  running: workflowRunning, pause: workflowPause, statuses: workflowStatuses,
+  currentBlockId: workflowCurrentBlockId,
+} = workflowRunner
+
+function addNewWorkflow() {
+  addWorkflow(createWorkflow('Untitled workflow'))
+}
+function onWorkflowUpdate({ id, patch }) {
+  updateWorkflow(id, patch)
+}
+function closeWorkflowBuilder() {
+  if (!workflowRunning.value) {
+    workflowRunner.respond('dismiss')
+    workflowBuilderOpen.value = false
+  }
+}
+function onWorkflowRun({ workflow, fromIndex, onlyIds }) {
+  workflowRunner.start(workflow, { fromIndex, onlyIds: onlyIds ? new Set(onlyIds) : null })
+}
 
 const hasSparse = computed(() => clouds.value.some((c) => c.kind === 'sparse'))
 
@@ -1133,6 +1239,7 @@ const {
 // bits are injected). Used by the global keydown handler in the bootstrap below.
 const { closeTopModal } = useModalEscape({
   pendingImageDelete, exportKind, onCancelNewProject: handleCancelNewProject,
+  workflowRunning, onCloseWorkflow: closeWorkflowBuilder,
 })
 
 // Autosaved idle sessions can close quietly. Prompt only while closing would
@@ -1286,6 +1393,7 @@ const projectFileInput = ref(null)
 // trivial ones only, so it never hides behaviour.
 const MODAL_COMMANDS = {
   'save-project-file':     saveProjectOpen,
+  'workflow-builder':      workflowBuilderOpen,
   'open-image-table':      imageTableOpen,
   'open-pose-table':       poseTableOpen,
   'open-mask-manager':     maskManagerOpen,
@@ -1542,6 +1650,35 @@ function onRibbonPick(event) {
       @settings="() => { projectPickerOpen = false; projectSettingsOpen = true }"
       @close="projectPickerOpen = false"
     />
+
+    <!-- Kept before the command modals in DOM order: an interactive workflow block
+         opens its existing modal above the builder, then returns here to continue. -->
+    <Teleport to="body">
+      <WorkflowBuilderModal
+        v-if="workflowBuilderOpen"
+        :workflows="workflows"
+        :active-id="activeWorkflowId"
+        :templates="workflowTemplates"
+        :runs="workflowRuns"
+        :state="workflowState"
+        :running="workflowRunning"
+        :pause="workflowPause"
+        :statuses="workflowStatuses"
+        :current-block-id="workflowCurrentBlockId"
+        @close="closeWorkflowBuilder"
+        @set-active="setActiveWorkflow"
+        @add-workflow="addNewWorkflow"
+        @update-workflow="onWorkflowUpdate"
+        @duplicate-workflow="duplicateWorkflow"
+        @remove-workflow="removeWorkflow"
+        @save-template="saveWorkflowTemplate"
+        @apply-template="applyWorkflowTemplate"
+        @remove-template="removeWorkflowTemplate"
+        @run="onWorkflowRun"
+        @respond="workflowRunner.respond"
+        @stop="workflowRunner.stop"
+      />
+    </Teleport>
 
     <Teleport to="body">
       <DetectFeaturesModal

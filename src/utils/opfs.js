@@ -956,6 +956,34 @@ export async function deleteScaleBars(projectId) {
   })
 }
 
+// ── Workflow builder ──────────────────────────────────────────────────────────
+// JSON: { workflows: Workflow[], activeId, runs: immutable execution snapshots[] }
+
+export async function saveWorkflows(projectId, data) {
+  return trackPersistence('saveWorkflows:' + String(projectId), async () => {
+    const dir = await getProjectDir(projectId, true)
+    await writeJson(dir, 'workflows.json', data)
+  })
+}
+
+export async function loadWorkflows(projectId) {
+  try {
+    const dir = await getProjectDir(projectId)
+    return readJson(dir, 'workflows.json')
+  } catch {
+    return null
+  }
+}
+
+export async function deleteWorkflows(projectId) {
+  return trackPersistence('deleteWorkflows:' + String(projectId), async () => {
+    try {
+      const dir = await getProjectDir(projectId)
+      await dir.removeEntry('workflows.json')
+    } catch (error) { ignoreMissing(error) }
+  })
+}
+
 // ── Dev console log ──────────────────────────────────────────────────────────────
 // Append-only NDJSON stream (`log.ndjson`): one { id, time, level, message,
 // source } object per line. The console keeps only a bounded live *tail* in

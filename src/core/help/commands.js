@@ -38,6 +38,7 @@ const NEED_CHECKS = {
 // are resolved before single-word ones so `export` + subcommand works.
 export const COMMANDS = [
   // --- Pipeline ---
+  { name: 'workflow', aliases: ['workflow-builder', 'recipe'], dispatch: 'workflow-builder', needs: ['project'], group: 'Pipeline', help: 'Open the visual workflow builder' },
   { name: 'detect',   aliases: ['detect-features'], dispatch: 'detect-features', needs: ['images', 'imagesReady'], group: 'Pipeline', help: 'Open the feature-detection dialog' },
   { name: 'match',    aliases: ['match-features'],  dispatch: 'match-features',  needs: ['keypoints'], group: 'Pipeline', help: 'Open the feature-matching dialog' },
   { name: 'sparse',   aliases: ['reconstruct'],     dispatch: 'reconstruct',     needs: ['matches'],   group: 'Pipeline', help: 'Open the sparse reconstruction dialog' },

@@ -153,19 +153,30 @@ export function usePipeline({ images, detectAll, matchAll, reconstruct, computeD
 
   // Invoked by the progress modal's Cancel button.
   function cancelRun() {
+    if (!progressOpen.value) return
     aborted.value = true
     progressCancelling.value = true
     progressLabel.value = 'Cancelling…'
     cancelImpl?.()
   }
 
+  const refused = (reason, cancelled = false) => ({ ok: false, cancelled, reason })
+
+  async function finishRun(ok = true, reason = '') {
+    const cancelled = aborted.value
+    await closeProgress()
+    return cancelled ? refused('Cancelled', true) : { ok, cancelled: false, ...(reason ? { reason } : {}) }
+  }
+
   async function runDetect(settings) {
     const pending = settings.overwrite
       ? images.value
       : images.value.filter((img) => img.kpStatus !== 'done')
-    if (pending.length === 0) return
+    if (pending.length === 0) return { ok: true, unchanged: true }
     // Model consent BEFORE openProgress — see ensureModels.
-    if (settings.detector === 'superpoint' && !(await ensureModels(['superpoint']))) return
+    if (settings.detector === 'superpoint' && !(await ensureModels(['superpoint']))) {
+      return refused('SuperPoint model download was cancelled', true)
+    }
     // Detection polls `aborted` between images, but ONE image can be a long
     // worker call (SuperPoint on CPU WASM, or a tiled native-res run), so Cancel
     // also hard-terminates the pool — the in-flight detect rejects, detectOne
@@ -174,12 +185,13 @@ export function usePipeline({ images, detectAll, matchAll, reconstruct, computeD
     // No per-image overlay callback: the keypoint overlay is a global toggle gated on
     // the image's own kpStatus, so it lights up reactively as each detection lands.
     await detectAll(settings, null, report, shouldCancel)
-    await closeProgress()
+    const ok = pending.every((img) => img.kpStatus === 'done' && (img.keypoints?.length ?? 0) > 0)
+    return finishRun(ok, ok ? '' : 'Feature detection failed for one or more images')
   }
 
   async function runMatch(settings) {
-    const ready = images.value.filter((img) => img.kpStatus === 'done')
-    if (ready.length < 2) return
+    const ready = images.value.filter((img) => img.kpStatus === 'done' && (img.keypoints?.length ?? 0) > 0)
+    if (ready.length < 2) return refused('Matching requires at least two images with keypoints')
     // Model consent BEFORE openProgress — see ensureModels. Gated on the same
     // descriptor precondition useMatchesStore checks (LightGlue needs SuperPoint
     // 256-d features): when it fails, matchAll must reach its own error first, so
@@ -187,7 +199,7 @@ export function usePipeline({ images, detectAll, matchAll, reconstruct, computeD
     // store remains the authority — this is only about prompt ordering.
     if (settings.matcher === 'lightglue'
       && ready.every((im) => im.detector === 'superpoint' && (im.descDim ?? 128) === 256)
-      && !(await ensureModels(['lightglue']))) return
+      && !(await ensureModels(['lightglue']))) return refused('LightGlue model download was cancelled', true)
     // Matching polls `aborted` between pairs, but ONE pair can be a long,
     // uninterruptible worker call (LightGlue on CPU WASM, or a hung run), so
     // Cancel also hard-terminates the pool — the in-flight matchPair's worker
@@ -196,17 +208,17 @@ export function usePipeline({ images, detectAll, matchAll, reconstruct, computeD
     // session (~model reload next run); acceptable for an explicit user cancel.
     openProgress('Matching Features', 0, () => terminateAll('matching cancelled'), { unit: 'pairs' })
     await matchAll(images.value, settings, report, shouldCancel)
-    await closeProgress()
+    return finishRun()
   }
 
   async function runReconstruct(settings) {
-    const ready = images.value.filter((img) => img.kpStatus === 'done')
-    if (ready.length < 2) return
+    const ready = images.value.filter((img) => img.kpStatus === 'done' && (img.keypoints?.length ?? 0) > 0)
+    if (ready.length < 2) return refused('Sparse reconstruction requires at least two images with keypoints')
     // Reconstruct is a single worker call — cancel by terminating the worker
     // (the store catches the resulting rejection and resets its status).
     openProgress('Sparse Reconstruction', ready.length, () => terminateAll('reconstruction cancelled'))
     await reconstruct(settings, report)
-    await closeProgress()
+    return finishRun()
   }
 
   // Dense Stage A — Build Depth Maps (PatchMatch MVS). Single worker call; cancel
@@ -214,14 +226,14 @@ export function usePipeline({ images, detectAll, matchAll, reconstruct, computeD
   async function runComputeDepthMaps(settings) {
     openProgress('Building Depth Maps', images.value.length, () => terminateAll('depth maps cancelled'), { unit: 'images' })
     await computeDepthMaps(settings, report)
-    await closeProgress()
+    return finishRun()
   }
 
   // Dense Stage B — fuse the depth maps into the dense cloud.
   async function runDensify(settings) {
     openProgress('Building Dense Cloud', 1, () => terminateAll('densify cancelled'), { indeterminate: true, unit: 'maps' })
     await densify(settings, report)
-    await closeProgress()
+    return finishRun()
   }
 
   // Products — DEM (rasterise a height grid). Single worker call; cancel by
@@ -229,14 +241,14 @@ export function usePipeline({ images, detectAll, matchAll, reconstruct, computeD
   async function runGenerateDem(settings) {
     openProgress('Building DEM', 1, () => terminateAll('DEM cancelled'), { indeterminate: true })
     await generateDem(settings, report)
-    await closeProgress()
+    return finishRun()
   }
 
   // Products — orthophoto (reproject the DEM through the cached depth maps).
   async function runGenerateOrtho(settings) {
     openProgress('Building Orthophoto', 1, () => terminateAll('orthophoto cancelled'), { indeterminate: true })
     await generateOrtho(settings, report)
-    await closeProgress()
+    return finishRun()
   }
 
   // Products — mesh (screened Poisson over the dense cloud). Single worker call;
@@ -244,7 +256,7 @@ export function usePipeline({ images, detectAll, matchAll, reconstruct, computeD
   async function runGenerateMesh(settings) {
     openProgress('Building Mesh', 1, () => terminateAll('mesh cancelled'), { indeterminate: true })
     await generateMesh(settings, report)
-    await closeProgress()
+    return finishRun()
   }
 
   // Tools — cloud editing (crop / filter / merge). Single worker call, same
@@ -253,7 +265,7 @@ export function usePipeline({ images, detectAll, matchAll, reconstruct, computeD
     const titles = { crop: 'Cropping Cloud', filter: 'Filtering Cloud', merge: 'Merging Clouds' }
     openProgress(titles[request.mode] ?? 'Editing Cloud', 1, () => terminateAll('cloud edit cancelled'), { indeterminate: true })
     await editClouds(request, report)
-    await closeProgress()
+    return finishRun()
   }
 
   return {
