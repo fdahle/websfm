@@ -47,6 +47,7 @@ export function buildProjectDigest(input = {}) {
     detect = null,
     matchRun = null,
     verdict = null,
+    scaleFit = null,
   } = input
 
   // Status roll-up across the classified health rows.
@@ -197,6 +198,19 @@ export function buildProjectDigest(input = {}) {
         geomFilterMarginalMaps: depthSummary.geomFilterMarginalMaps ?? null,
         projectedPeakBytes: depthSummary.projectedPeakBytes ?? null,
         budgetBytes: depthSummary.budgetBytes ?? null,
+      } : null,
+      // The fitted scale, as a RECORDED fact of the run — the digest prints it
+      // unconditionally, including when the news is good (a tight RMS). Absent
+      // when nothing has been fitted, never invented as 1.
+      scale: scaleFit ? {
+        scale: scaleFit.scale ?? null,
+        rms: scaleFit.rms ?? null,
+        count: scaleFit.count ?? null,
+        method: scaleFit.method ?? null,
+        createdAt: scaleFit.createdAt ?? null,
+        worstResidualM: Array.isArray(scaleFit.constraints) && scaleFit.constraints.length
+          ? Math.max(...scaleFit.constraints.map((c) => Math.abs(c.residualM ?? 0)))
+          : null,
       } : null,
     },
   }
@@ -455,8 +469,8 @@ export function digestToMarkdown(digest) {
   }
 
   // Run details.
-  const { sparse, dense, depth } = digest.run
-  if (sparse || dense || depth) {
+  const { sparse, dense, depth, scale } = digest.run
+  if (sparse || dense || depth || scale) {
     L.push('## Run details')
     if (sparse) {
       L.push(`Sparse: cameras ${fmtNum(sparse.cameras)}, points ${fmtNum(sparse.points)}, `
@@ -492,6 +506,11 @@ export function digestToMarkdown(digest) {
         + `kept ${fmtNum(dense.keptPct)}%`
         + `${dense.mergeCell != null ? `, merge cell ${fmtNum(dense.mergeCell, 4)}` : ''}`
         + `, culls {${cull}}`)
+    }
+    if (scale) {
+      L.push(`Scale: ${fmtNum(scale.scale, 6)} m per model unit from ${fmtNum(scale.count)} `
+        + `${scale.method ?? 'constraint'} bar(s), RMS ${fmtNum(scale.rms, 4)} m`
+        + (scale.worstResidualM != null ? `, worst residual ${fmtNum(scale.worstResidualM, 4)} m` : ''))
     }
     L.push('')
   }

@@ -921,6 +921,41 @@ export async function deleteFootprints(projectId) {
   })
 }
 
+// ── Scale bars (known-distance constraints) ──────────────────────────────────────
+// JSON: { bars: [{ id, name, a:{kind,id}, b:{kind,id}, knownDistanceM, accuracyM,
+//                  displayUnit, enabled }] }
+// This is *evidence* — what the user measured — and is deliberately separate from
+// the derived fit, which lives in reconstruction.json as `scaleFit`. A scale is a
+// cached result of (model × bars × marks); keeping the two apart is what lets the
+// fit go stale without the measurements going with it.
+// No `crs` field: a bar's distance is metres, which is CRS-independent — and a
+// scale-bar project characteristically has no CRS at all.
+
+export async function saveScaleBars(projectId, data) {
+  return trackPersistence('saveScaleBars:' + String(projectId), async () => {
+    const dir = await getProjectDir(projectId, true)
+    await writeJson(dir, 'scalebars.json', data)
+  })
+}
+
+export async function loadScaleBars(projectId) {
+  try {
+    const dir = await getProjectDir(projectId)
+    return readJson(dir, 'scalebars.json')
+  } catch {
+    return null
+  }
+}
+
+export async function deleteScaleBars(projectId) {
+  return trackPersistence('deleteScaleBars:' + String(projectId), async () => {
+    try {
+      const dir = await getProjectDir(projectId)
+      await dir.removeEntry('scalebars.json')
+    } catch (error) { ignoreMissing(error) }
+  })
+}
+
 // ── Dev console log ──────────────────────────────────────────────────────────────
 // Append-only NDJSON stream (`log.ndjson`): one { id, time, level, message,
 // source } object per line. The console keeps only a bounded live *tail* in

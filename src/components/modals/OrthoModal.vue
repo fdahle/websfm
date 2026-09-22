@@ -1,4 +1,5 @@
 <script setup>
+import { linearCrsUnit } from '../../core/crs.js'
 import { computed, ref, watch } from 'vue'
 import ModalShell from './ui/ModalShell.vue'
 import SettingsField from './ui/SettingsField.vue'
@@ -17,6 +18,8 @@ import { ORTHO_DEFAULTS } from '../../core/defaults.user.js'
 const props = defineProps({
   surfaces: { type: Array, default: () => [] },
   canGeoreference: { type: Boolean, default: false },
+  hasScale: { type: Boolean, default: false },
+  demUnit: { type: String, default: null },
   projectCrs: { type: String, default: null },
 })
 
@@ -33,6 +36,11 @@ const chosen = computed(() => props.surfaces.find((s) => s.id === settings.value
 // A DEM surface carries the frame it was built in; only mesh/plane pick one here.
 const framePicked = computed(() => settings.value.surface !== 'dem')
 const canRun = computed(() => !!chosen.value?.available)
+const outputUnit = computed(() => {
+  if (!framePicked.value) return props.demUnit && props.demUnit !== 'model' ? `${props.demUnit}/px` : 'model units/px'
+  return settings.value.crs === 'project' ? `${linearCrsUnit(props.projectCrs)}/px`
+    : props.hasScale ? 'm/px' : 'model units/px'
+})
 
 // The project frame can't be chosen without a georeference — don't leave a stale
 // selection that would silently fall back to local at run time.
@@ -79,12 +87,14 @@ function run() {
     <!-- A DEM already fixes the frame; mesh/plane surfaces are built here, so
          they need the same choice Build DEM offers. -->
     <SettingsField v-if="framePicked" label-for="ortho-crs"
-      hint="Local uses a camera-estimated up-vector (up-to-scale); the project CRS fits a similarity to imported poses for real-world coordinates & GSD.">
+      :hint="hasScale
+        ? 'Local uses a camera-estimated orientation and the current highest-ranked scale evidence, so coordinates are metric but have no CRS.'
+        : 'Local uses a camera-estimated up-vector (up-to-scale); the project CRS fits a similarity to imported poses for real-world coordinates & GSD.'">
       <template #label>
         <GlossaryTerm id="coordinate-reference-system">Coordinate frame</GlossaryTerm>
       </template>
       <select id="ortho-crs" v-model="settings.crs" class="field-input field-select">
-        <option value="local">Local (model units)</option>
+        <option value="local">{{ hasScale ? 'Local (metres, no CRS)' : 'Local (model units)' }}</option>
         <option value="project" :disabled="!canGeoreference">
           {{ projectCrs || 'Project CRS' }}{{ canGeoreference ? '' : ' — needs camera poses' }}
         </option>
@@ -92,7 +102,7 @@ function run() {
     </SettingsField>
 
     <SettingsField label-for="ortho-gsd"
-      :unit="settings.crs === 'project' && framePicked ? 'm/px' : 'units/px'"
+      :unit="outputUnit"
       hint="Ortho cell size. 0 = the surface's own resolution. The ortho can be finer than the surface — a coarse surface is enough to reproject onto.">
       <template #label>
         <GlossaryTerm id="ground-sample-distance">Ground sample distance</GlossaryTerm>

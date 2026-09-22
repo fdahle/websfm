@@ -29,6 +29,7 @@ export const useModalsStore = defineStore('modals', () => {
   const reconstructOpen     = ref(false)
   const findGcpsOpen        = ref(false)
   const georeferenceOpen    = ref(false)
+  const scaleBarsOpen       = ref(false)  // known-distance constraints (F11)
   const depthMapsOpen       = ref(false)
   const denseOpen           = ref(false)
   const demOpen             = ref(false)
@@ -102,6 +103,7 @@ export const useModalsStore = defineStore('modals', () => {
     reconstructOpen,
     findGcpsOpen,
     georeferenceOpen,
+    scaleBarsOpen,
     depthMapsOpen,
     denseOpen,
     demOpen,

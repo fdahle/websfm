@@ -1,3 +1,5 @@
+import { linearCrsUnit } from '../core/crs.js'
+import { useProjectsStore } from '../stores/useProjectsStore.js'
 // Shared assembly for the Quality Report hub (PLAN-eval-quality-hub). Marshals the
 // reactive stores into the PLAIN snapshot the pure `core/eval/*` fns consume, so the
 // Overview health rows and the exported HTML report are built from ONE source and
@@ -23,6 +25,10 @@ import { buildProjectDigest, digestToMarkdown, digestToJson } from '../core/eval
 import { buildVerdict } from '../core/sfm/verdict.js'
 import { buildRunFingerprints } from '../core/eval/runFingerprint.js'
 
+// Role → report label. 'marker' is a scale-bar endpoint (no surveyed position),
+// so a binary control/check ternary would silently mislabel it as ground control.
+const ROLE_LABEL = { control: 'Control', check: 'Check', marker: 'Marker' }
+
 export function useQualityReport() {
   const recon = useReconstructionStore()
   const imagesStore = useImagesStore()
@@ -34,7 +40,8 @@ export function useQualityReport() {
   const points = computed(() => recon.mainSparseCloud?.points ?? [])
   const imageIds = computed(() => imagesStore.images.map((im) => im.uuid))
   const nameByUuid = computed(() => new Map(imagesStore.images.map((im) => [im.uuid, im.name])))
-  const crsUnit = computed(() => recon.dem?.unit || 'm')
+  const projects = useProjectsStore()
+  const crsUnit = computed(() => linearCrsUnit(projects.currentCrs))
 
   const reproj = computed(() => reprojectionStats(cameras.value, points.value))
   const histogram = computed(() => trackLengthHistogram(points.value))
@@ -170,10 +177,50 @@ export function useQualityReport() {
           { key: 'dTotal', label: 'Δ total', align: 'right' }, { key: 'normalized', label: 'Normalized', align: 'right' },
           { key: 'loo', label: 'LOO Δ', align: 'right' },
         ],
-        rows: gcpReport.map((g) => ({ name: g.name, role: g.role === 'check' ? 'Check' : 'Control', views: g.viewCount,
+        rows: gcpReport.map((g) => ({ name: g.name, role: ROLE_LABEL[g.role] ?? 'Control', views: g.viewCount,
           dTotal: f2(g.dTotal, 3), normalized: g.normalized == null ? '—' : `${g.normalized.toFixed(2)}σ`,
           loo: f2(g.looTotal, 3) })),
         note: `Checkpoints are independent; leave-one-out (LOO) predicts each control from the others. Normalized residuals use declared covariance (${crsUnit.value}).`,
+      })
+    }
+
+    // Scale bars (D6). Present whenever bars exist — including in a georeferenced
+    // project, where they are independent checks against the CRS fit, and
+    // including bars excluded from the fit or not measurable, each with its reason.
+    // A bar that vanishes from the report takes the user's measurement with it.
+    const resolvedFrame = await recon.effectiveFrameSpec()
+    const barRows = await recon.scaleBarReport(
+      resolvedFrame.unit !== 'model' ? resolvedFrame.scale : null)
+    if (barRows.length) {
+      const src = resolvedFrame.source
+      sections.push({
+        title: 'Scale constraints',
+        tiles: [
+          { label: 'Scale source', value: src === 'georef' ? 'Georeference' : (src === 'scalebars' ? 'Scale bars' : 'None') },
+          { label: 'Metres per model unit', value: resolvedFrame.unit !== 'model' ? resolvedFrame.scale.toPrecision(6) : '—' },
+          { label: 'Bars', value: String(barRows.length) },
+        ],
+        columns: [
+          { key: 'name', label: 'Bar' }, { key: 'used', label: 'In fit' },
+          { key: 'known', label: 'Known', align: 'right' },
+          { key: 'sigma', label: '± 1σ', align: 'right' },
+          { key: 'measured', label: 'Measured', align: 'right' },
+          { key: 'residual', label: 'Residual', align: 'right' },
+          { key: 'normalized', label: 'Normalized', align: 'right' },
+        ],
+        rows: barRows.map((b) => ({
+          name: b.name,
+          used: b.enabled ? 'yes' : 'no',
+          known: b.knownDistanceM == null ? '—' : `${b.knownDistanceM.toPrecision(6)} m`,
+          sigma: b.accuracyM == null ? 'equal weight' : `${b.accuracyM.toPrecision(3)} m`,
+          measured: b.measuredM == null ? '—' : `${b.measuredM.toPrecision(6)} m`,
+          residual: b.residualM == null ? (b.reason ?? '—')
+            : `${b.residualM >= 0 ? '+' : '−'}${Math.abs(b.residualM).toPrecision(3)} m`,
+          normalized: b.normalizedResidual == null ? '—' : `${b.normalizedResidual.toFixed(2)}σ`,
+        })),
+        note: src === 'georef'
+          ? 'The georeference defines the scale; these bars are independent checks against it.'
+          : 'Residuals are measured minus entered. Bars with no declared 1σ are equally weighted, not surveyed.',
       })
     }
 
@@ -294,6 +341,10 @@ export function useQualityReport() {
       detect: detectConfig.value,
       matchRun: matchesStore.matchRun ?? null,
       fingerprints: buildRunFingerprints(imagesStore.images, matchesStore.matchStore.values()),
+      // Recorded as-is. A fit whose evidence has moved is still what this project
+      // last computed, and the digest is the record; the *resolver* is what refuses
+      // to hand stale metres to a product.
+      scaleFit: recon.scaleFit ?? null,
       verdict,
     })
     return { digest, markdown: digestToMarkdown(digest), json: digestToJson(digest) }

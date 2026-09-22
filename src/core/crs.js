@@ -117,6 +117,15 @@ export function metresPerCrsUnit(code) {
   return null
 }
 
+// Native coordinate labels for product settings and georeferenced output.
+export function linearCrsUnit(code) {
+  const factor = metresPerCrsUnit(code)
+  if (factor === 1) return 'm'
+  if (factor && Math.abs(factor - 0.3048) < 1e-12) return 'ft'
+  if (factor && Math.abs(factor - 1200 / 3937) < 1e-12) return 'US-ft'
+  return 'CRS units'
+}
+
 // Convert a physical distance in metres into the horizontal working CRS's
 // linear units. Geographic CRSs have no single linear scale, so keep metres;
 // callers using geographic coordinates must not mix the result into XY math.

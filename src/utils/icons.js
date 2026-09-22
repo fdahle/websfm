@@ -91,6 +91,11 @@ export const icons = {
     <circle cx="12" cy="12" r="8" />
     <circle cx="12" cy="12" r="3.5" />
     <path d="M12 2v3M12 19v3M2 12h3M19 12h3" />`,
+  // Scale bar: a ruler laid between two marked endpoints — the graduations are
+  // what distinguishes it from the plain 'link'/measure glyphs.
+  ruler: `
+    <rect x="2.5" y="8.5" width="19" height="7" rx="1" />
+    <path d="M6.5 8.5v3M10 8.5v4.5M13.5 8.5v3M17 8.5v4.5" />`,
   'map-pin': `
     <path d="M12 21s7-6.3 7-11a7 7 0 1 0-14 0c0 4.7 7 11 7 11z" />
     <circle cx="12" cy="10" r="2.5" />`,

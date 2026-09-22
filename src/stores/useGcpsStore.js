@@ -18,16 +18,25 @@ const DEFAULT_ACCURACY_IMG = 1.0
 //
 // Reads the image list (to resolve observation image names → ids) from the images
 // store and the project CRS / persistence flags from the projects store.
+// User-facing noun per role. One table so the log line, the sidebar badge title
+// and the table select cannot drift apart.
+const ROLE_NOUNS = { control: 'control point', check: 'checkpoint', marker: 'marker' }
+
 export const useGcpsStore = registerProjectStore(defineStore('gcps', () => {
   const { log } = useLog()
   const imagesStore = useImagesStore()
   const projects = useProjectsStore()
 
-  // [{ id, name, role:'control'|'check', x, y, z, accuracyX, accuracyY,
+  // [{ id, name, role:'control'|'check'|'marker', x, y, z, accuracyX, accuracyY,
   //    accuracyZ, correlations, provenance/datum, accuracyImgX, accuracyImgY,
   //    observations: [{ imageId, imageName, px, py, accuracyX, accuracyY }], enabled }]
   // `role` and `enabled` are orthogonal: an enabled checkpoint is measured but
   // never enters georeferencing or BA; disabled points enter neither solve nor report.
+  // A **marker** is a point with image observations and NO surveyed coordinates —
+  // a scale-bar endpoint (see core/products/scale.js). Null coordinates are useful
+  // representation but NOT the safety boundary: every constraint gate tests
+  // `role === 'control'` explicitly, so a marker that somehow acquires finite
+  // coordinates still cannot become ground control.
   const gcps = ref([])
   const importDefaults = ref({ accuracies: { x: null, y: null, z: null },
     imageAccuracies: { x: 1, y: 1 }, settings: { preset: 'unknown', convention: '1sigma', unit: 'metres', verticalDatum: 'unknown' } })
@@ -233,25 +242,41 @@ export const useGcpsStore = registerProjectStore(defineStore('gcps', () => {
     return added
   }
 
-  // Manually create a blank GCP (no import needed) — horizontal position defaults
-  // to the origin while elevation is explicitly missing until entered or filled
-  // from a reference DEM. Observations are marked
-  // interactively via setObservation. Returns the new GCP's id.
-  function addGcp() {
+  // Manually create a blank reference point (no import needed). Observations are
+  // marked interactively via setObservation. Returns the new point's id.
+  //
+  // A **control/check** point seeds x/y at the CRS origin — the historical
+  // behaviour, since a surveyed point is about to have its coordinates typed in —
+  // while elevation stays explicitly missing (zero is a valid sea-level Z, never
+  // a missing-value sentinel).
+  // A **marker** seeds all THREE coordinates null, for the same reason: it has no
+  // surveyed position at all, and `x:0, y:0` would be a finite coordinate, i.e. a
+  // control point sitting at the CRS origin.
+  //
+  // Never create a control point and mutate its role afterwards — that is exactly
+  // how a marker ends up carrying coordinates.
+  function addPoint({ role = 'control', name = null } = {}) {
+    const kind = normalizeGcpRole(role)
+    const marker = kind === 'marker'
     const n = gcps.value.length + 1
     const id = crypto.randomUUID()
     gcps.value.push({
-      id, name: `GCP ${n}`, role: 'control', x: 0, y: 0, z: null,
+      id, name: name?.trim() || (marker ? `Marker ${n}` : `GCP ${n}`), role: kind,
+      x: marker ? null : 0, y: marker ? null : 0, z: null,
       accuracyX: null, accuracyY: null, accuracyZ: null,
       correlationXY: 0, correlationXZ: 0, correlationYZ: 0,
       accuracyStatus: 'unknown', accuracyConvention: '1sigma', verticalDatum: 'unknown',
       accuracyImgX: DEFAULT_ACCURACY_IMG, accuracyImgY: DEFAULT_ACCURACY_IMG,
       observations: [], enabled: true,
     })
-    log(`Added GCP ${gcps.value[gcps.value.length - 1].name}`, 'success', 'GCP', { channel: 'activity' })
+    log(`Added ${marker ? 'marker' : 'GCP'} ${gcps.value[gcps.value.length - 1].name}`,
+      'success', 'GCP', { channel: 'activity' })
     save()
     return id
   }
+
+  // Back-compat alias for the many call sites that mean "add a control point".
+  const addGcp = () => addPoint({ role: 'control' })
 
   function setGcpName(id, name) {
     const g = gcps.value.find((x) => x.id === id)
@@ -266,9 +291,16 @@ export const useGcpsStore = registerProjectStore(defineStore('gcps', () => {
     if (!g) return
     const next = normalizeGcpRole(role)
     if (g.role === next) return
+    const wasMarker = g.role === 'marker'
     g.role = next
-    log(`${g.name} is now a ${next === 'check' ? 'checkpoint' : 'control point'}`,
-      'info', 'GCP', { channel: 'activity' })
+    // Promoting a marker to control/check gives it a *position* it never had, so
+    // seed the horizontal coordinates the way addPoint would rather than leaving
+    // nulls that read as "surveyed but blank".
+    if (wasMarker && next !== 'marker') {
+      if (g.x == null) g.x = 0
+      if (g.y == null) g.y = 0
+    }
+    log(`${g.name} is now a ${ROLE_NOUNS[next]}`, 'info', 'GCP', { channel: 'activity' })
     save()
   }
 
@@ -530,6 +562,7 @@ export const useGcpsStore = registerProjectStore(defineStore('gcps', () => {
     gcps,
     importDefaults,
     addGcps,
+    addPoint,
     addGcp,
     setGcpName,
     setGcpRole,

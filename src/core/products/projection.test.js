@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   estimateUpFromViewingDirs, estimateUpFromCloud, buildLocalFrame, makeFrame,
-  aerialUpRotation, rotateReconstruction,
+  aerialUpRotation, rotateReconstruction, frameFromScaledLocal,
 } from './projection.js'
 
 // A nadir camera at height `h` looking straight down: for a world-down viewing
@@ -165,5 +165,53 @@ describe('makeFrame', () => {
     })
     expect(frame.fromSfm([12, 23, 35])).toEqual([2, 3, 5])
     expect(frame.toSfm([2, 3, 5])).toEqual([12, 23, 35])
+  })
+})
+
+describe('frameFromScaledLocal', () => {
+  // A deliberately non-axis-aligned basis: an accidental double-scaling hides
+  // behind an identity basis, which is exactly the regression this test exists for.
+  const base = makeFrame({
+    origin: [3, -2, 7],
+    east:  [0.6, 0.8, 0],
+    north: [-0.8, 0.6, 0],
+    up:    [0, 0, 1],
+    crs: 'local', unit: 'model', source: 'cameras',
+  })
+
+  it('fromSfm and toSfm stay exact inverses', () => {
+    const f = frameFromScaledLocal(base, 4.25)
+    for (const p of [[0, 0, 0], [3, -2, 7], [11.5, 4.25, -3.75], [-100, 250, 0.5]]) {
+      const round = f.toSfm(f.fromSfm(p))
+      expect(round[0]).toBeCloseTo(p[0], 9)
+      expect(round[1]).toBeCloseTo(p[1], 9)
+      expect(round[2]).toBeCloseTo(p[2], 9)
+    }
+  })
+
+  it('scales a known distance exactly once', () => {
+    const s = 4.25
+    const f = frameFromScaledLocal(base, s)
+    const a = [3, -2, 7], b = [3 + 0.6, -2 + 0.8, 7]   // 1 model unit along east
+    const fa = f.fromSfm(a), fb = f.fromSfm(b)
+    const d = Math.hypot(fb[0] - fa[0], fb[1] - fa[1], fb[2] - fa[2])
+    expect(d).toBeCloseTo(s, 9)          // not s² — that is the double-scale bug
+  })
+
+  it('keeps the serialised basis unit-length and reports metres with no CRS', () => {
+    const f = frameFromScaledLocal(base, 4.25)
+    expect(Math.hypot(...f.east)).toBeCloseTo(1, 12)
+    expect(Math.hypot(...f.north)).toBeCloseTo(1, 12)
+    expect(Math.hypot(...f.up)).toBeCloseTo(1, 12)
+    expect(f.scale).toBe(4.25)
+    expect(f.unit).toBe('m')
+    expect(f.crs).toBe('local')          // metric with NO CRS
+  })
+
+  it('refuses a non-positive or non-finite scale', () => {
+    expect(frameFromScaledLocal(base, 0)).toBeNull()
+    expect(frameFromScaledLocal(base, -1)).toBeNull()
+    expect(frameFromScaledLocal(base, NaN)).toBeNull()
+    expect(frameFromScaledLocal(null, 2)).toBeNull()
   })
 })

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { cloudToPly, meshToPly, meshToGlb, meshToObj, meshToStl, reconstructionToJson, demToAsciiGrid, rasterWorldFile, prepareCloudForExport } from './exporters.js'
+import { cloudToPly, meshToPly, meshToGlb, meshToObj, meshToStl, reconstructionToJson, demToAsciiGrid, rasterWorldFile, prepareCloudForExport, prepareMeshForExport } from './exporters.js'
 
 describe('meshToPly', () => {
   // A single triangle with per-vertex colour.
@@ -228,6 +228,26 @@ describe('prepareCloudForExport', () => {
     // All 4 average to x ≈ 500000.015 — a Float32 pipeline would lose this.
     expect(Math.abs(out.pos[0] - 500000.015)).toBeLessThan(1e-4)
     expect(out.col[0]).toBe(100)
+  })
+})
+
+describe('prepareMeshForExport', () => {
+  it('transforms vertices without changing topology or colours', () => {
+    const mesh = {
+      nVerts: 2, count: 0,
+      pos: Float32Array.from([1, 2, 3, 4, 5, 6]),
+      idx: new Uint32Array(), col: Uint8Array.from([1, 2, 3, 4, 5, 6]),
+    }
+    const sim = { scale: 2, R: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], t: [10, 20, 30] }
+    const out = prepareMeshForExport(mesh, { sim })
+    expect([...out.pos]).toEqual([12, 24, 36, 18, 30, 42])
+    expect(out.idx).toBe(mesh.idx)
+    expect(out.col).toBe(mesh.col)
+  })
+
+  it('returns the original mesh when no transform is requested', () => {
+    const mesh = { nVerts: 0, pos: new Float32Array(), idx: new Uint32Array() }
+    expect(prepareMeshForExport(mesh)).toBe(mesh)
   })
 })
 

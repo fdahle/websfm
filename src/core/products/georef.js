@@ -231,7 +231,7 @@ export function applySimilarity({ scale, R, t }, p) {
 
 // Wrap a fitted similarity as a frame (fromSfm = apply, toSfm = inverse), so
 // DEM/ortho consume it exactly like a local frame. `crs` tags the target.
-export function frameFromSimilarity(sim, crs) {
+export function frameFromSimilarity(sim, crs, { unit = 'm', metresPerUnit = 1 } = {}) {
   const { scale, R, t } = sim
   const fromSfm = (p) => applySimilarity(sim, Array.isArray(p) ? p : [p.x, p.y, p.z])
   // Inverse: src = Rᵀ·(dst − t)/s.
@@ -243,7 +243,7 @@ export function frameFromSimilarity(sim, crs) {
       R[0][2] * d[0] + R[1][2] * d[1] + R[2][2] * d[2],
     ]
   }
-  return { ...makeFrame({ origin: [0, 0, 0], east: [1, 0, 0], north: [0, 1, 0], up: [0, 0, 1], crs, unit: 'm', source: 'georef' }), fromSfm, toSfm, scale, R, t }
+  return { ...makeFrame({ origin: [0, 0, 0], east: [1, 0, 0], north: [0, 1, 0], up: [0, 0, 1], crs, unit, source: 'georef' }), fromSfm, toSfm, scale, R, t, metresPerUnit }
 }
 
 // ── linear-algebra helpers (dependency-free) ─────────────────────────────────

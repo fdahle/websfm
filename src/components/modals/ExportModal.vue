@@ -11,7 +11,16 @@ const props = defineProps({
   kind: { type: String, required: true },
   // A georef fit exists → the cloud export can transform into the project CRS.
   hasGeoref: { type: Boolean, default: false },
+  // A valid scale-bar fit exists (and no georeference) → the cloud export can be
+  // written in METRES with no CRS. One checkbox covers both, because both answer
+  // the same question: "put real units on this file?"
+  hasScale: { type: Boolean, default: false },
 })
+
+const hasFrame = computed(() => props.hasGeoref || props.hasScale)
+const frameLabel = computed(() => (props.hasGeoref
+  ? 'Georeference (transform into the project CRS)'
+  : 'Apply scale (write metres — no CRS is attached)'))
 const emit = defineEmits(['close', 'run'])
 
 const CONFIG = {
@@ -135,9 +144,9 @@ function run() {
     <!-- Point cloud -->
     <template v-if="kind === 'cloud'">
       <label class="checkbox-row"><input type="checkbox" v-model="settings.includeColor" class="checkbox" /> Include vertex colours</label>
-      <label v-if="hasGeoref" class="checkbox-row"><input type="checkbox" v-model="settings.applyGeoref" class="checkbox" /> Georeference (transform into the project CRS)</label>
+      <label v-if="hasFrame" class="checkbox-row"><input type="checkbox" v-model="settings.applyGeoref" class="checkbox" /> {{ frameLabel }}</label>
       <SettingsField label="Voxel downsample cell" label-for="dscell"
-        :hint="`World units${hasGeoref ? ' (project CRS when georeferenced)' : ''}; 0 = keep every point.`">
+        :hint="`World units${hasGeoref ? ' (project CRS when georeferenced)' : (hasScale ? ' (metres when scaled)' : '')}; 0 = keep every point.`">
         <input id="dscell" v-model.number="settings.downsampleCell" type="number" min="0" step="any" class="field-input" />
       </SettingsField>
     </template>
@@ -147,6 +156,9 @@ function run() {
       <label class="checkbox-row" :class="{ disabled: settings.format === 'stl' }">
         <input type="checkbox" v-model="settings.includeColor" :disabled="settings.format === 'stl'" class="checkbox" />
         Include vertex colours{{ settings.format === 'stl' ? ' (STL has no colour)' : '' }}
+      </label>
+      <label v-if="hasFrame" class="checkbox-row">
+        <input type="checkbox" v-model="settings.applyGeoref" class="checkbox" /> {{ frameLabel }}
       </label>
     </template>
 

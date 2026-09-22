@@ -1,3 +1,4 @@
+import { createFrameResolver } from './reconstruction/frames.js'
 import { ref, shallowRef, computed, markRaw } from 'vue'
 import { defineStore, storeToRefs } from 'pinia'
 import {
@@ -21,8 +22,10 @@ import { parseColmapModel, parseColmapModelBin, readColmapModel, makeNameResolve
 import { serializeCloud, deserializeCloud, legacyDeserializeCloud } from './reconstruction/cloudSerde.js'
 import { createDepthMapCache } from './reconstruction/depthMapCache.js'
 import { createGeoreferencing } from './reconstruction/georeferencing.js'
+import { createScaling } from './reconstruction/scaling.js'
 import { isGeographic } from '../core/crs.js'
 import { precisionFromGcp } from '../core/gcpAccuracy.js'
+import { isGroundControl } from '../core/io/gcp.js'
 import { registerProjectStore } from './projectStores.js'
 import { useImagesStore } from './useImagesStore.js'
 import { useMatchesStore } from './useMatchesStore.js'
@@ -30,6 +33,7 @@ import { useProjectsStore } from './useProjectsStore.js'
 import { useSensorsStore } from './useSensorsStore.js'
 import { usePosesStore } from './usePosesStore.js'
 import { useGcpsStore } from './useGcpsStore.js'
+import { useScaleBarsStore } from './useScaleBarsStore.js'
 import { buildCameraPriors } from '../core/sfm/cameraPriors.js'
 import { unpackReconstructionResult } from '../core/sfm/resultCodec.js'
 import { packMatchPairs } from '../core/sfm/matchCodec.js'
@@ -49,6 +53,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
   const { sensors } = storeToRefs(useSensorsStore())
   const posesStore = usePosesStore()
   const gcpsStore = useGcpsStore()
+  const scaleBarsStore = useScaleBarsStore()
 
   // Point clouds produced for this project. Each is an independent layer the user
   // can select in the sidebar and view in the 3D viewer (sparse now; dense later).
@@ -91,6 +96,19 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
   // or null in the local frame. { sim:{scale,R,t}, crs, rms, count, method }.
   // Small + useful across sessions, so it persists in reconstruction.json.
   const georef = ref(null)
+
+  // Scale fit: the SfM→metres scalar fitted from known distances (scale bars),
+  // or null. { scale, rms, count, method:'scalebars', sourceStamp, evidenceDigest,
+  // createdAt, constraints:[…] }. It is a CACHE of a derivation, which is why it
+  // carries a stamp + digest and is refused when either moves — see
+  // reconstruction/scaling.js and D11. The bar *records* themselves are evidence
+  // and live in useScaleBarsStore / scalebars.json, not here.
+  //
+  // Scale NEVER rewrites coordinates. It is applied as a property of the
+  // projection frame (`frameFromScaledLocal`), because rescaling the cloud would
+  // invalidate the depth-map staleness stamp and contradict every recorded
+  // summary number.
+  const scaleFit = ref(null)
 
   // Quality summaries from the last sparse / dense run (Q3). Small, persisted in
   // reconstruction.json so successive runs can be compared across sessions.
@@ -266,6 +284,8 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
       // Small + reusable across sessions; the DEM/ortho rasters themselves are
       // recomputable and stay out of the persisted doc.
       georef: georef.value,
+      // Derived, not evidence — the bars live in scalebars.json (see D11).
+      scaleFit: scaleFit.value,
       // Run-quality summaries (Q3) — tiny, kept for cross-run comparison.
       summary: summary.value,
       denseSummary: denseSummary.value,
@@ -346,6 +366,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     dem.value = null
     ortho.value = null
     georef.value = null
+    scaleFit.value = null
     summary.value = null
     denseSummary.value = null
     depthSummary.value = null
@@ -377,6 +398,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     dem.value = null
     ortho.value = null
     georef.value = null
+    scaleFit.value = null
     denseSummary.value = null
     depthSummary.value = null
     for (const im of depthPreviewImages) im.depth = null
@@ -912,14 +934,29 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
 
   const {
     georefPairs, imagesById, qualifyingGcps, canGeoreferenceGcps, gcpGeorefPairs,
-    canGeoreference, georeference, poseResidualReport, gcpAccuracyReport,
+    canGeoreference, georeference, validGeoref, poseResidualReport, gcpAccuracyReport,
     gcpGuides, gcpEstimate,
   } = createGeoreferencing({
     sparseCameras, images, georef, healthDirty,
+    modelStamp: () => mainSparseCloud.value ? [mainSparseCloud.value.id, mainSparseCloud.value.createdAt] : null,
     poses: () => posesStore.poses,
     gcps: () => gcpsStore.gcps,
     currentCrs: () => projects.currentCrs,
     persist, log,
+  })
+
+  const {
+    canFitScale, fitScaleBars, scaleBarReport, scaleFitStatus,
+  } = createScaling({
+    sparseCameras, images, mainSparseCloud, scaleFit, healthDirty,
+    bars: () => scaleBarsStore.bars,
+    gcps: () => gcpsStore.gcps,
+    persist, log,
+  })
+
+  const { effectiveFrameSpec, currentFrameSignature, productFrameStatus, frameStampOf } = createFrameResolver({
+    mainSparseCloud, validGeoref, currentCrs: () => projects.currentCrs, georeference,
+    scaleFit, scaleFitStatus, log,
   })
 
   // Build a DEM from the densest available cloud, in the requested frame
@@ -939,36 +976,43 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
         ? ' — cells are interpolated from tie points; densify for a true surface'
         : ''),
       source.kind === 'sparse' ? 'warn' : 'info', 'Products')
-    // Resolve the target frame. 'project' needs a georeference (fit on demand,
-    // refit if the CRS changed since); fall back to local if it can't be built.
-    let frameSpec = { kind: 'local' }
-    if (settings.crs && settings.crs !== 'local') {
-      const g = georef.value?.crs === projects.currentCrs ? georef.value : await georeference()
-      if (g) frameSpec = { kind: 'similarity', ...g.sim, crs: g.crs }
-      else log('DEM: no georeference available — using the local frame', 'warn', 'Products')
+    // Resolve the target frame through THE resolver — never independently. A
+    // 'project' request fits/refits the georeference on demand; otherwise a valid
+    // scale-bar fit still makes the local frame metric (with no CRS).
+    const resolved = await effectiveFrameSpec({ crs: settings.crs })
+    const frameSpec = resolved.frameSpec
+    if (settings.crs && settings.crs !== 'local' && resolved.source !== 'georef') {
+      log('DEM: no georeference available — using the local frame'
+        + (resolved.unit === 'm' ? ', scaled to metres by the scale bars' : ''), 'warn', 'Products')
     }
     reconStatus.value = 'running'
     try {
       // Plain copies: cloud state is reactive (Vue proxies can't be cloned). Dense
       // clouds are flat typed arrays — read xyz straight out (colour isn't needed).
-      const points = src.kind === 'dense'
-        ? Array.from({ length: src.count }, (_, i) => ({ x: src.pos[i*3], y: src.pos[i*3+1], z: src.pos[i*3+2] }))
-        : src.points.map((p) => ({ x: p.x, y: p.y, z: p.z }))
+      const count = src.kind === 'dense' ? src.count : src.points.length
+      if (count * 48 > 512 * 1024 ** 2) throw new Error('DEM point staging exceeds 512 MiB; subsample the cloud first')
+      const pos = new Float64Array(count * 3)
+      if (src.kind === 'dense') pos.set(src.pos.subarray(0, count * 3))
+      else for (let i = 0; i < count; i++) {
+        const p = src.points[i]
+        pos[i*3] = p.x; pos[i*3+1] = p.y; pos[i*3+2] = p.z
+      }
+      const points = { pos, count }
       const cameras = [...(sparse?.cameras ?? new Map()).entries()].map(([uuid, cam]) => ({
         uuid, R: cam.R.map((r) => [...r]), t: [...cam.t], K: { ...cam.K },
       }))
       const grid = await workerGenerateDem(
         { points, cameras, frame: frameSpec, settings },
-        { onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f) },
+        { transfer: [pos.buffer], onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f) },
       )
-      dem.value = grid
+      dem.value = { ...grid, frameStamp: frameStampOf(resolved) }
       // A new DEM invalidates an ortho BUILT ON IT — but not one built over the
       // mesh/plane surface, which this run didn't touch. (An ortho with no
       // recorded surface predates the choice, so it was a DEM ortho.)
       const orthoWasDem = ortho.value && (ortho.value.surface ?? 'DEM') === 'DEM'
       if (orthoWasDem) ortho.value = null
       if (isPersisting()) {
-        opfs.saveProduct(projects.currentProjectId, 'dem', grid).catch(() => {})
+        opfs.saveProduct(projects.currentProjectId, 'dem', dem.value).catch(() => {})
         if (orthoWasDem) opfs.deleteProduct(projects.currentProjectId, 'ortho').catch(() => {})
       }
       reconStatus.value = 'done'
@@ -985,7 +1029,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
   // A mesh/plane surface needs a frame of its own — a DEM carries the one it was
   // built in, but there may be no DEM at all now. It's resolved exactly as
   // generateDem does, so the two products stay co-registered.
-  async function orthoSurfacePayload(settings) {
+  async function orthoSurfacePayload(settings, resolved) {
     const id = settings.surface ?? 'dem'
     const opt = orthoSurfaces.value.find((s) => s.id === id)
     if (!opt) { log(`Ortho: unknown surface "${id}"`, 'warn', 'Products'); return null }
@@ -1004,20 +1048,22 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
       }
     }
 
-    // Resolve the target frame for a mesh/plane surface ('project' needs a
-    // georeference; fall back to local when it can't be built).
-    let frameSpec = null
-    if (settings.crs && settings.crs !== 'local') {
-      const g = georef.value?.crs === projects.currentCrs ? georef.value : await georeference()
-      if (g) frameSpec = { kind: 'similarity', ...g.sim, crs: g.crs }
-      else log('Ortho: no georeference available — using the local frame', 'warn', 'Products')
+    let frameSpec = resolved.source === 'georef' ? resolved.frameSpec : null
+    if (settings.crs && settings.crs !== 'local' && !frameSpec) {
+      log('Ortho: no georeference available — using the local frame', 'warn', 'Products')
     }
     // Local frame: reuse the DEM's when it was built locally, so a mesh ortho lands
     // on the same grid origin as the DEM instead of a near-identical one of its own.
-    // A bare { kind:'local' } spec is only a REQUEST — buildLocalFrame derives the
-    // up-vector from the scene, so cameras + points must travel with it.
+    // A bare { kind:'local' } / { kind:'scaled-local' } spec is only a REQUEST —
+    // buildLocalFrame derives the up-vector from the scene, so cameras + points must
+    // travel with it. A reused DEM descriptor is only valid at the SAME scale: a
+    // refit since then means its metres are not these metres.
     if (!frameSpec) {
-      frameSpec = dem.value?.frame?.kind === 'local' ? dem.value.frame : { kind: 'local' }
+      const reusable = dem.value?.frame
+      const sameKind = reusable?.kind === resolved.frameSpec.kind
+      const sameScale = resolved.frameSpec.kind !== 'scaled-local'
+        || Math.abs((reusable?.scale ?? 0) - resolved.frameSpec.scale) < 1e-12
+      frameSpec = sameKind && sameScale ? reusable : resolved.frameSpec
     }
     const surfSettings = { gsd: settings.surfaceGsd > 0 ? settings.surfaceGsd : 0 }
 
@@ -1083,7 +1129,8 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
         return
       }
     }
-    const surface = await orthoSurfacePayload(settings)
+    const resolved = await effectiveFrameSpec({ crs: settings.crs })
+    const surface = await orthoSurfacePayload(settings, resolved)
     if (!surface) return
     reconStatus.value = 'running'
     try {
@@ -1095,8 +1142,16 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
         { surface, maps: mapsPayload, settings },
         { onLog: (m, l, c) => log(m, l, c), onProgress: (dn, t, lbl, f) => onProgress?.(dn, t, lbl, f) },
       )
-      ortho.value = res
-      if (isPersisting()) opfs.saveProduct(projects.currentProjectId, 'ortho', res).catch(() => {})
+      // An ortho built ON the DEM inherits the DEM's recorded frame — its cells are
+      // that grid's cells, so claiming today's frame would be a claim about a raster
+      // this run never re-projected.
+      ortho.value = {
+        ...res,
+        frameStamp: (settings.surface ?? 'dem') === 'dem'
+          ? (dem.value?.frameStamp ?? frameStampOf(resolved))
+          : frameStampOf(resolved),
+      }
+      if (isPersisting()) opfs.saveProduct(projects.currentProjectId, 'ortho', ortho.value).catch(() => {})
       reconStatus.value = 'done'
     } catch (err) {
       log(`Ortho error: ${err?.message ?? err}`, 'error', 'Products')
@@ -1304,10 +1359,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
           // 2D control point. Post-hoc products enforce the same boundary.
           if (isGeographic(projects.currentCrs)) return []
           return gcpsStore.gcps
-            .filter((g) => g.enabled !== false
-              && g.role !== 'check'
-              && Number.isFinite(g.x) && Number.isFinite(g.y) && Number.isFinite(g.z)
-              && precisionFromGcp(g) != null)
+            .filter((g) => isGroundControl(g, { precision: precisionFromGcp }))
             .map((g) => ({
               role: 'control',
               x: g.x, y: g.y, z: g.z,
@@ -1442,6 +1494,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     dem.value = null
     ortho.value = null
     georef.value = null
+    scaleFit.value = null
     summary.value = null
     denseSummary.value = null
     depthSummary.value = null
@@ -1496,6 +1549,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     mainSparseId.value = data.mainSparseId ?? null
     ensureMainSparse() // legacy docs (no mainSparseId) → first sparse cloud
     georef.value = data.georef ?? null
+    scaleFit.value = data.scaleFit ?? null    // absent in older projects ⇒ no scale
     summary.value = data.summary ?? null
     denseSummary.value = data.denseSummary ?? null
     depthSummary.value = data.depthSummary ?? null
@@ -1542,6 +1596,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     depthMapsMeta,
     depthMapCount,
     georef,
+    scaleFit,
     summary,
     denseSummary,
     depthSummary,
@@ -1554,6 +1609,16 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     canGeoreference,
     canGeoreferenceGcps,
     georeference,
+    // Scale constraints (F11). `effectiveFrameSpec` is THE resolver — product
+    // builders, readouts, reports and exports must all ask it rather than
+    // choosing a scale independently.
+    effectiveFrameSpec,
+    canFitScale,
+    fitScaleBars,
+    scaleBarReport,
+    scaleFitStatus,
+    currentFrameSignature,
+    productFrameStatus,
     gcpAccuracyReport,
     poseResidualReport,
     gcpGuides,

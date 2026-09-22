@@ -23,6 +23,27 @@ export function hasGcpElevation(gcp) {
   return gcp?.z != null
 }
 
+// THE ground-control gate. Every place that lets a point constrain the solve —
+// the georeference fit, its leave-one-control-out prediction, the GCP-anchored
+// bundle adjust and the worker marshalling that feeds it — must ask this, and
+// must not re-derive the rule from "has finite coordinates" or "is not a check".
+//
+// Why that matters (D4): a marker is a scale-bar endpoint with image marks and no
+// surveyed position. Null coordinates are useful *representation*, not a safety
+// boundary — a migrated, imported or accidentally edited marker with finite
+// numbers on it would otherwise silently become ground control. The role is the
+// boundary; the coordinates are only a necessary extra.
+//
+// `precision` is the caller's covariance check (core/gcpAccuracy.js
+// `precisionFromGcp`); it lives there because it needs the accuracy model, so it
+// is injected rather than imported (this module stays a leaf).
+export function isGroundControl(gcp, { precision = () => true } = {}) {
+  if (!gcp || gcp.enabled === false) return false
+  if (normalizeGcpRole(gcp.role) !== 'control') return false
+  if (!Number.isFinite(gcp.x) || !Number.isFinite(gcp.y) || !Number.isFinite(gcp.z)) return false
+  return precision(gcp) != null && precision(gcp) !== false
+}
+
 // Strip comment (#) and blank lines.
 function contentLines(text) {
   return text.split(/\r?\n/).map((l) => l.trimEnd()).filter((l) => l.trim() && !l.trimStart().startsWith('#'))
@@ -117,7 +138,7 @@ export const ROLE_LABELS = {
   image: 'Image name',
   px:    'Pixel X',
   py:    'Pixel Y',
-  role:  'Control / check',
+  role:  'Control / check / marker',
   accuracyX: 'X accuracy',
   accuracyY: 'Y accuracy',
   accuracyZ: 'Z accuracy',
@@ -129,9 +150,21 @@ export const ROLE_LABELS = {
   correlationYZ: 'YZ correlation',
 }
 
+// Three roles, and the difference between them is a *constraint* boundary, not a
+// label — see D4 in docs/planning/plan-scale-and-measurement.md:
+//   control — surveyed coordinates that constrain georeferencing / anchored BA
+//   check   — surveyed coordinates deliberately withheld from the fit
+//   marker  — image observations and NO surveyed coordinates: a scale-bar
+//             endpoint. It must never reach a ground constraint, and that is
+//             enforced by `role === 'control'` at every gate, never by "its
+//             coordinates happen to be null".
+// So this must ROUND-TRIP 'marker': collapsing an unknown value to 'control'
+// would reload a marker from disk as a control point at whatever coordinates the
+// table happens to hold.
 export function normalizeGcpRole(value) {
   const s = String(value ?? '').trim().toLowerCase().replace(/[\s_-]+/g, '')
   if (['check', 'checkpoint', 'checkpt', 'validation'].includes(s)) return 'check'
+  if (['marker', 'scalemarker', 'scalebar'].includes(s)) return 'marker'
   return 'control'
 }
 
@@ -197,7 +230,10 @@ export function buildGcps(dataRows, mapping) {
     if (g.correlationYZ == null && correlationYZ != null) g.correlationYZ = correlationYZ
     // A repeated point may have one role value per observation row. Check wins so
     // a mixed/partially-filled file can never accidentally use a checkpoint as control.
-    if (role === 'check') g.role = 'check'
+    // A non-control role wins so one 'check'/'marker' row is not diluted by the
+    // plain rows around it; 'check' outranks 'marker' because it makes the
+    // stronger claim (surveyed coordinates deliberately held back from the fit).
+    if (role !== 'control' && (g.role === 'control' || role === 'check')) g.role = role
 
     if (mapping.image != null && mapping.px != null && mapping.py != null) {
       const imageName = row[mapping.image]?.trim()
@@ -213,9 +249,19 @@ export function buildGcps(dataRows, mapping) {
     }
   }
 
-  // Keep only GCPs with a valid absolute X/Y position.
+  // Controls/checks require surveyed X/Y. Markers deliberately do not: their image
+  // observations are scale-bar endpoints, and forcing coordinates here made the
+  // advertised `marker` CSV role impossible to import.
   const gcps = []
   for (const g of byName.values()) {
+    if (g.role === 'marker') {
+      if (!g.observations.length) { skipped++; continue }
+      g.x = null; g.y = null; g.z = null
+      g.accuracyX = null; g.accuracyY = null; g.accuracyZ = null
+      g.correlationXY = null; g.correlationXZ = null; g.correlationYZ = null
+      gcps.push(g)
+      continue
+    }
     if (g.x == null || g.y == null) { skipped++; continue }
     gcps.push(g)
   }

@@ -60,9 +60,12 @@ const tabs = [
           { id: 'open-mask-manager', label: 'Masks',   icon: 'mask',    needsImages: true },
           { id: 'open-sensor-table', label: 'Sensors', icon: 'camera',  needsSensors: true },
           { id: 'open-pose-table',   label: 'Camera\nPoses', icon: 'camera-pose', needsPoses: true },
-          // The table edits existing GCPs; a GCP is born elsewhere (import, or a
+          // The table edits existing points; one is born elsewhere (import, or a
           // right-click on the map / an image), so an empty project has nothing to show.
-          { id: 'open-gcp-table',    label: 'GCPs',    icon: 'map-pin', aerialOnly: true, needsGcps: true },
+          // Deliberately NOT aerialOnly: it also holds markers (scale-bar endpoints),
+          // which are an object-capture feature. Importing surveyed *ground control*
+          // stays aerial-only — that command is in the Import tab, not this one.
+          { id: 'open-gcp-table',    label: 'Control &\nMarkers', icon: 'map-pin', needsGcps: true },
           { id: 'open-match-list',   label: 'Matches', icon: 'list',    needsMatches: true },
         ],
       },
@@ -185,6 +188,11 @@ const tabs = [
           // One entry point for both GCP-constrained adjustment + final similarity fit
           // and the cheap transform-only path. The modal explains/validates each mode.
           { id: 'georeference',   label: 'Geo-\nreference', icon: 'target',  needsSparse: true, aerialOnly: true },
+          // Same job as Georeference — fixing the datum — for a project that has no
+          // CRS at all. Deliberately NOT aerialOnly: scale bars are the object-capture
+          // way to get metres, and an object project is exactly where there is no
+          // georeference to supply one.
+          { id: 'scale-bars',     label: 'Scale\nBars',     icon: 'ruler',   needsSparse: true },
         ],
       },
       {

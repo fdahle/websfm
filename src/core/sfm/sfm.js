@@ -36,6 +36,7 @@ import { selectInitPair } from './initPair.js'
 import { registerImages } from './register.js'
 import { triangulateGcp } from './gcpTriangulation.js'
 import { precisionFromGcp, precisionInSfmFrame } from '../gcpAccuracy.js'
+import { isGroundControl } from '../io/gcp.js'
 import {
   stagedSelfCalTerms, stagedSelfCalDeferred, SELF_CAL_BASE_TERMS,
   distortionIdentifiable, withoutDistortionTerms,
@@ -1191,9 +1192,11 @@ async function reconstructSingleModel(input, hooks = {}) {
     // "good enough to help the poses converge", not final.
     async function runGcpAnchoredBundleAdjust() {
       const qualifying = gcps.filter((g) => {
-        if (g.role === 'check') return false
-        if (g.enabled === false || !Number.isFinite(g.x)
-            || !Number.isFinite(g.y) || !Number.isFinite(g.z) || !precisionFromGcp(g)) return false
+        // One spelling of the ground-control rule (core/io/gcp.js): role
+        // 'control' explicitly, so a marker — a scale-bar endpoint with image
+        // marks and no surveyed position — can never anchor a point, whatever
+        // coordinates happen to be on it.
+        if (!isGroundControl(g, { precision: precisionFromGcp })) return false
         const nReg = (g.observations || []).filter((o) => cameras.has(o.uuid)).length
         return nReg >= 2
       })
