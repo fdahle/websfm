@@ -57,8 +57,8 @@ const emit = defineEmits([
   'remove-sensor', 'merge-sensors', 'open-sensor', 'assign-sensor', 'remove-pose',
   'remove-shapefile', 'rename-shapefile', 'set-shapefile-on-map', 'zoom-to-shapefile',
   'select', 'open', 'show-info', 'delete-keypoints', 'zoom-to-image',
-  'select-cloud', 'remove-cloud', 'rename-cloud', 'set-main-cloud', 'reconstruct',
-  'open-matches', 'open-product', 'zoom-to-cloud',
+  'select-cloud', 'remove-cloud', 'rename-cloud', 'set-main-cloud',
+  'open-matches', 'remove-matches', 'open-product', 'zoom-to-cloud',
   'open-raster', 'remove-raster', 'set-raster-kind', 'style-raster',
   'set-raster-on-map', 'set-raster-opacity', 'convert-raster-to-image',
 ])
@@ -172,6 +172,7 @@ watch(() => props.pendingRasters.length, (count, previous) => {
       :match-stats="matchStats"
       @toggle="toggle('matches')"
       @open-matches="emit('open-matches')"
+      @remove-matches="emit('remove-matches')"
     />
 
     <GcpsSection
@@ -212,7 +213,6 @@ watch(() => props.pendingRasters.length, (count, previous) => {
       @remove-cloud="emit('remove-cloud', $event)"
       @rename-cloud="emit('rename-cloud', $event)"
       @set-main-cloud="emit('set-main-cloud', $event)"
-      @reconstruct="emit('reconstruct')"
       @zoom-to-cloud="emit('zoom-to-cloud', $event)"
     />
 

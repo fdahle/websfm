@@ -12,7 +12,7 @@ defineProps({
   mainSparseId:    { type: String, default: null },
   reconStatus:     { type: String, default: 'idle' }, // 'idle'|'running'|'done'|'error'
 })
-const emit = defineEmits(['toggle', 'select-cloud', 'remove-cloud', 'rename-cloud', 'set-main-cloud', 'reconstruct', 'zoom-to-cloud'])
+const emit = defineEmits(['toggle', 'select-cloud', 'remove-cloud', 'rename-cloud', 'set-main-cloud', 'zoom-to-cloud'])
 </script>
 
 <template>
@@ -33,7 +33,6 @@ const emit = defineEmits(['toggle', 'select-cloud', 'remove-cloud', 'rename-clou
         @remove-cloud="emit('remove-cloud', $event)"
         @rename-cloud="emit('rename-cloud', $event)"
         @set-main-cloud="emit('set-main-cloud', $event)"
-        @reconstruct="emit('reconstruct')"
         @zoom-to-cloud="emit('zoom-to-cloud', $event)"
       />
       <li v-if="reconStatus === 'running' && !clouds.length" class="empty">Reconstructing…</li>

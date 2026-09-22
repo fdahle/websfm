@@ -4,6 +4,7 @@
 // CRS picker, and parsing several thousand records during application startup
 // would be wasteful. Only horizontal CRSs are offered because WebSfM's working
 // CRS is an x/y system; vertical-only and geocentric CRSs cannot be used safely.
+import registryUrl from 'epsg-index/all.json?url'
 
 const HORIZONTAL_KINDS = new Set(['CRS-PROJCRS', 'CRS-GEOGCRS', 'CRS-GEOG3DCRS'])
 
@@ -29,7 +30,13 @@ export function normaliseCrsRecord(record) {
 
 export async function loadCrsRegistry() {
   if (!registryPromise) {
-    registryPromise = import('epsg-index/all.json').then(({ default: index }) =>
+    // Keep the catalog as a static JSON asset. Bundling it as an object-literal
+    // JavaScript chunk inflated it and triggered the large-chunk warning even though
+    // it was already lazy. The hashed local URL remains offline-capable.
+    registryPromise = fetch(registryUrl).then((response) => {
+      if (!response.ok) throw new Error(`Could not load the CRS catalog (${response.status})`)
+      return response.json()
+    }).then((index) =>
       Object.values(index)
         .filter((record) => HORIZONTAL_KINDS.has(record.kind) && (record.proj4 || record.wkt))
         .map(normaliseCrsRecord),
@@ -68,4 +75,3 @@ export function searchCrsRecords(records, query, limit = 12) {
     .slice(0, limit)
     .map(({ record }) => record)
 }
-

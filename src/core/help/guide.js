@@ -59,7 +59,16 @@ export function parseGuideDoc(raw, sourcePath = '<string>') {
     order.push(key)
   }
 
-  return { id: meta.id, title: meta.title || meta.id, summary: meta.summary || '', intro, params, order }
+  return {
+    id: meta.id,
+    title: meta.title || meta.id,
+    summary: meta.summary || '',
+    category: meta.category || 'More',
+    sortOrder: Number.isFinite(Number(meta.order)) ? Number(meta.order) : 999,
+    intro,
+    params,
+    order,
+  }
 }
 
 // ── Doc loading + lookup ────────────────────────────────────────────────────────
@@ -91,7 +100,9 @@ export function getParam(opId, key) {
 }
 
 export function getAllGuideDocs() {
-  return [...loadDocs().values()].sort((a, b) => a.title.localeCompare(b.title))
+  return [...loadDocs().values()].sort((a, b) =>
+    a.sortOrder - b.sortOrder || a.title.localeCompare(b.title),
+  )
 }
 
 // Render a guide markdown fragment (intro or a param body) to auto-linked HTML.

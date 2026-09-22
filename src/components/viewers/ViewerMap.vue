@@ -1,4 +1,5 @@
 <script setup>
+import 'ol/ol.css'
 import { onMounted, onBeforeUnmount, ref, computed, watch } from 'vue'
 // Aliased: a bare `Map` import shadows the global Map constructor, and this file
 // keeps id→layer lookups in real JS Maps.

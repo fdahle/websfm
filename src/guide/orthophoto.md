@@ -1,0 +1,44 @@
+---
+id: orthophoto
+title: Build an Orthophoto
+summary: Reprojects source imagery onto a DEM, mesh, or fitted plane to remove perspective.
+category: Products and export
+order: 90
+---
+An [orthophoto](help:orthophoto) uses the chosen surface for geometry and cached depth
+maps for visibility. It therefore needs both depth maps and a DEM or mesh (a fitted
+plane is available for genuinely flat scenes).
+
+## Surface
+<!-- param: surface default: DEM -->
+Use a **DEM** for terrain and overhead mapping, a **mesh** for complex or vertical 3D
+shape, and a **plane** only when the scene is truly flat. Surface errors become image
+displacement, double edges, or holes in the orthophoto.
+
+## Coordinate frame and resolution
+When a DEM is selected, the orthophoto inherits its frame. For mesh or plane, choose
+Local or Project CRS. Auto resolution follows the surface; a smaller pixel size than
+the imagery and surface support does not add real detail.
+
+## Blending
+<!-- param: blend default: Best -->
+**Best** chooses the sharpest suitable observation and usually preserves detail.
+**Average** can soften seams and noise but may blur moving objects or small alignment
+errors. Depth visibility prevents images from painting through foreground surfaces.
+
+## Occlusion and cost gates
+Depth tolerance controls how closely an image observation must agree with the surface.
+Too tight creates holes; too loose can paint hidden surfaces. The optional matching-cost
+gate can reject weak depth evidence but is normally best left disabled initially.
+
+## Fill gaps
+Colour interpolation fills unsampled pixels inside the selected surface. Keep the
+radius small: interpolation is cosmetic and cannot recover imagery hidden from every
+camera. Large holes usually indicate missing coverage, a bad surface, or over-strict
+visibility checks.
+
+## Export
+GeoTIFF keeps pixels and georeferencing in one file. PNG and JPEG exports are paired
+with a world file and `.prj`; keep those sidecars beside the image when moving it into
+GIS. Inspect seams, leaning objects, ghosting, holes, and boundary behaviour at full
+resolution before using the result.

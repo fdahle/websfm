@@ -13,7 +13,7 @@ const props = defineProps({
   selectedCloudId: { type: String, default: null },
   mainSparseId:    { type: String, default: null }, // sparse cloud downstream stages consume
 })
-const emit = defineEmits(['select-cloud', 'remove-cloud', 'rename-cloud', 'set-main-cloud', 'reconstruct', 'zoom-to-cloud'])
+const emit = defineEmits(['select-cloud', 'remove-cloud', 'rename-cloud', 'set-main-cloud', 'zoom-to-cloud'])
 
 const cloudExpanded = ref({})
 function toggleCloudExpand(id) {
@@ -78,12 +78,11 @@ const { menu: cloudCtx, open: openCloudCtx, close: closeMenu } = useContextMenu(
 function onCloudRightClick(e, cloud) {
   // "Set as main" adds a row for sparse clouds that aren't already main.
   const extra = cloud.kind === 'sparse' && cloud.id !== props.mainSparseId ? 28 : 0
-  openCloudCtx(e, { cloud }, { w: 180, h: 156 + extra })
+  openCloudCtx(e, { cloud }, { w: 180, h: 128 + extra })
 }
 function ctxSetMain()      { emit('set-main-cloud', cloudCtx.value.cloud.id); closeMenu() }
 function ctxZoomCloud()    { emit('zoom-to-cloud', cloudCtx.value.cloud.id); closeMenu() }
 function ctxRenameCloud()  { startRename(cloudCtx.value.cloud); closeMenu() }
-function ctxRebuildCloud() { emit('reconstruct'); closeMenu() }
 function ctxRemoveCloud()  { emit('remove-cloud', cloudCtx.value.cloud.id); closeMenu() }
 </script>
 
@@ -183,7 +182,6 @@ function ctxRemoveCloud()  { emit('remove-cloud', cloudCtx.value.cloud.id); clos
         @click="ctxSetMain"
       >Set as main</button>
       <button class="ctx-item" @click="ctxRenameCloud">Rename</button>
-      <button v-if="cloudCtx.cloud.kind === 'sparse'" class="ctx-item" @click="ctxRebuildCloud">Rebuild sparse cloud</button>
       <div class="ctx-sep"></div>
       <button class="ctx-item danger" @click="ctxRemoveCloud">Remove</button>
     </div>

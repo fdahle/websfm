@@ -5,6 +5,8 @@
   id: kebab-case-id     # required, matches the filename; the Guide tab/home key
   title: Display Title  # required, tab + index heading
   summary: One or two sentences shown on the Guide home index. Keep it short.
+  category: Pipeline    # home-screen group
+  order: 30             # lower appears first
   ---
   Intro prose about the operation (everything before the first `## ` heading).
 
@@ -23,6 +25,8 @@
 id: match-features
 title: Match Features
 summary: Finds corresponding keypoints between image pairs and verifies each pair geometrically before it reaches reconstruction.
+category: Reconstruction pipeline
+order: 30
 ---
 Matching takes the [keypoint](help:keypoint)s that Detect found and, for every
 image pair, works out which keypoints describe the same physical point. Each
@@ -53,12 +57,12 @@ only if your overlap is genuinely marginal and you would rather have a weak link
 than none.
 
 ## Min inlier ratio
-<!-- param: minInlierRatio  default: 0.25 -->
+<!-- param: minInlierRatio  default: 0.15 -->
 Once RANSAC fits a fundamental matrix, this rejects the whole pair when the fraction
 of raw matches that survive as inliers falls below the threshold. It is the main
 defence against a *spurious* epipolar fit: on repetitive structure RANSAC can find a
 fundamental matrix that explains a minority of matches while most are wrong. A
-healthy pair usually retains well above `0.25`; raise it to be more aggressive about
+healthy pair usually retains well above `0.15`; raise it to be more aggressive about
 dropping questionable pairs.
 
 ## RANSAC threshold
