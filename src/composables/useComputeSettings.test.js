@@ -1,3 +1,4 @@
+import { nextTick } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const GiB = 1024 ** 3
@@ -26,6 +27,7 @@ describe('useComputeSettings hardware budget wiring', () => {
     expect(settings.memBudgetGb.value).toBe(4)
     expect(settings.memBudgetBytes.value).toBe(4 * GiB)
     expect(settings.deviceBudgetInfo.source).toBe('navigator.deviceMemory')
+    expect(settings.useGpu.value).toBe(false)
 
     const recs = settings.recommendForDataset({ nImages: 5, scale: 'small' })
     expect(recs.depthmap.quality.value).toBe('high')
@@ -49,5 +51,25 @@ describe('useComputeSettings hardware budget wiring', () => {
     expect(settings.memBudgetAuto.value).toBe(true)
     expect(settings.memBudgetGb.value).toBe(4)
     expect(storage.getItem('websfm.dense.memBudgetGb')).toBeNull()
+  })
+
+  it('enables GPU by default when WebGPU is exposed', async () => {
+    vi.stubGlobal('navigator', { hardwareConcurrency: 8, deviceMemory: 8, gpu: {} })
+    const { useComputeSettings } = await import('./useComputeSettings.js')
+
+    expect(useComputeSettings().useGpu.value).toBe(true)
+  })
+
+  it('preserves an explicit GPU opt-out', async () => {
+    const storage = memoryStorage({ 'websfm.compute.useGpu': 'false' })
+    vi.stubGlobal('localStorage', storage)
+    vi.stubGlobal('navigator', { hardwareConcurrency: 8, deviceMemory: 8, gpu: {} })
+    const { useComputeSettings } = await import('./useComputeSettings.js')
+    const settings = useComputeSettings()
+
+    expect(settings.useGpu.value).toBe(false)
+    settings.setUseGpu(true)
+    await nextTick()
+    expect(storage.getItem('websfm.compute.useGpu')).toBe('true')
   })
 })

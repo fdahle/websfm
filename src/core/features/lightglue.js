@@ -54,7 +54,8 @@ function serialized(fn) {
 // LightGlue's transformer used to be hard-pinned to CPU: the old fabio-sim export
 // (opset-lower, ~9.7k nodes dominated by dynamic-shape bookkeeping) thrashed on
 // ORT's WebGPU EP. On ORT 1.27's much-improved JSEP it can run on the GPU, so the
-// GPU path is now *attemptable* (opt-in via `useGpu`) with a self-healing CPU
+// GPU path is now *attemptable* (controlled by `useGpu`, auto-on when available)
+// with a self-healing CPU
 // fallback: if the one-time warm-up hangs past this budget or throws, we drop the
 // GPU session, pin WASM, and re-run on CPU. Nothing downstream changes — same
 // graph, same outputs, still gated by verifyMatches (F-RANSAC).

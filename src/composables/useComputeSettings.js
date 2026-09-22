@@ -40,12 +40,18 @@ const recommendationBudget = Object.freeze({
 
 let budgetLogged = false
 
-// useGpu: opt into the experimental WebGPU backends (LightGlue matching + PatchMatch
-// depth maps). A property of *this browser/GPU*, not of a project or run — so it lives
-// here rather than duplicated as a per-modal checkbox. Both consumers fall back to CPU
-// automatically when the adapter can't run the model, so leaving it on is safe.
+// useGpu: prefer the experimental WebGPU backends (LightGlue matching + PatchMatch
+// depth maps) automatically on capable browsers. A property of *this browser/GPU*,
+// not of a project or run — so it lives here rather than duplicated as a per-modal
+// checkbox. Both consumers fall back to CPU automatically when adapter acquisition or
+// an operation fails, and an explicit user opt-out remains persisted.
 const GPU_KEY = 'websfm.compute.useGpu'
-const useGpu = ref(localStorage.getItem(GPU_KEY) === 'true') // default off (experimental)
+const storedGpu = localStorage.getItem(GPU_KEY)
+// Prefer WebGPU on first use when the browser exposes it. The worker still performs
+// the authoritative adapter/device probe and safely falls back to WASM, while a
+// stored true/false remains an explicit user choice on later visits.
+const gpuApiAvailable = typeof navigator !== 'undefined' && !!navigator.gpu
+const useGpu = ref(storedGpu == null ? gpuApiAvailable : storedGpu === 'true')
 
 watch(useGpu, (v) => localStorage.setItem(GPU_KEY, String(!!v)))
 
