@@ -1,7 +1,8 @@
 # workers/gpu — WebGPU depth-map backend
 
-Opt-in ("Use GPU (experimental)") PatchMatch depth-map kernel. ~0.1 s/img vs
-minutes on the WASM CPU path. Worker-only: everything here touches
+Automatically preferred when WebGPU is exposed, with a persisted user opt-out.
+PatchMatch runs at ~0.1 s/img here versus minutes on the WASM CPU path. Worker-only:
+everything here touches
 `navigator.gpu`, so **never import from `core/*`** (which stays pure/DOM-free).
 
 - `device.js` — lazy device singleton (`ensureDevice()`), mirrors the wasm

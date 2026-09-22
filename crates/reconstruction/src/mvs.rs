@@ -57,6 +57,31 @@ pub(crate) struct SrcView<'a> {
 // (adaptive best-K over *valid* sources). Test with `>= INVALID_THRESH`.
 pub(crate) const INVALID: f64 = 1e9;
 const INVALID_THRESH: f64 = 1e8;
+// The worker and WebGPU kernel share this source-view ceiling. Keeping the robust
+// best-K candidates in a stack array avoids a heap allocation + full sort for every
+// PatchMatch hypothesis (many times per pixel on the CPU/WASM backend).
+const MAX_SOURCES: usize = 16;
+
+#[inline]
+fn mean_best_costs(costs: impl Iterator<Item = f64>, best_k: usize) -> f64 {
+    let target = best_k.max(1).min(MAX_SOURCES);
+    let mut lowest = [f64::INFINITY; MAX_SOURCES];
+    let mut kept = 0usize;
+    for c in costs {
+        if c >= INVALID_THRESH { continue; }
+        if kept == target && c >= lowest[target - 1] { continue; }
+        let end = kept.min(target - 1);
+        let mut pos = end;
+        while pos > 0 && c < lowest[pos - 1] {
+            if pos < target { lowest[pos] = lowest[pos - 1]; }
+            pos -= 1;
+        }
+        if pos < target { lowest[pos] = c; }
+        if kept < target { kept += 1; }
+    }
+    if kept == 0 { return 2.0; }
+    lowest[..kept].iter().sum::<f64>() / kept as f64
+}
 
 // ZNCC of the reference patch around (u, v) against the source patch obtained by
 // mapping each reference sample through the plane (depth at (u,v), unit normal n)
@@ -152,16 +177,11 @@ pub(crate) fn agg_cost(
     u: usize, v: usize, depth: f64, n: &V3, radius: i32,
 ) -> f64 {
     if depth <= 0.0 { return 2.0; }
-    // Collect only *valid* per-source costs; exclude no-measurement sources
-    // (INVALID sentinel) rather than averaging their max cost in.
-    let mut costs: Vec<f64> = srcs.iter()
-        .map(|s| plane_cost(refimg, rw, rh, rfx, rfy, rcx, rcy, s, u, v, depth, n, radius))
-        .filter(|c| *c < INVALID_THRESH)
-        .collect();
-    if costs.is_empty() { return 2.0; } // no source measured this pixel
-    costs.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    let k = best_k.min(costs.len()).max(1);
-    costs[..k].iter().sum::<f64>() / k as f64
+    // Retain only the lowest requested K costs as we visit the sources. K is at
+    // most MAX_SOURCES by the public worker contract; unlike collect()+sort(), this
+    // performs no allocation in the innermost PatchMatch scoring loop.
+    mean_best_costs(srcs.iter().map(|src|
+        plane_cost(refimg, rw, rh, rfx, rfy, rcx, rcy, src, u, v, depth, n, radius)), best_k)
 }
 
 #[wasm_bindgen]
@@ -337,3 +357,15 @@ pub fn compute_depth_map(
     out
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mean_best_costs_keeps_only_lowest_valid_k_without_allocation() {
+        let costs = [0.8, INVALID, 0.2, 0.5, 0.1, 0.9];
+        assert!((mean_best_costs(costs.into_iter(), 3) - (0.1 + 0.2 + 0.5) / 3.0).abs() < 1e-12);
+        assert!((mean_best_costs([0.4, INVALID].into_iter(), 3) - 0.4).abs() < 1e-12);
+        assert_eq!(mean_best_costs([INVALID].into_iter(), 3), 2.0);
+    }
+}

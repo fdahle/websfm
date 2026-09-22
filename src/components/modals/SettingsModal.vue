@@ -267,8 +267,8 @@ onMounted(refreshStorage)
 
           <div class="setting-row">
             <div class="setting-info">
-              <span class="setting-label">Use GPU <span class="badge">Experimental</span></span>
-              <span class="setting-desc">Use WebGPU for supported matching and dense operations; unsupported operations fall back to CPU.</span>
+              <span class="setting-label">Use GPU <span class="badge">Recommended</span></span>
+              <span class="setting-desc">Automatically enabled when this browser offers WebGPU. Supported matching and dense operations use it; unavailable operations fall back to CPU.</span>
             </div>
             <label class="switch">
               <input type="checkbox" :checked="useGpu" @change="setUseGpu($event.target.checked)">
