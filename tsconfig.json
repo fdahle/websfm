@@ -1,18 +1,16 @@
 {
-  // Scoped to src/core/ only — the pure compute layer. Per the migration plan,
-  // TypeScript lands on core first (no Vue/Pinia here). JS core modules opt in
-  // incrementally by being renamed to .ts; until then only .ts files are checked.
   "compilerOptions": {
     "target": "ES2022",
-    "lib": ["ES2022", "DOM"],
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "strict": true,
     "noEmit": true,
     "skipLibCheck": true,
+    "allowImportingTsExtensions": true,
     "isolatedModules": true,
     "verbatimModuleSyntax": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["src/core/**/*.ts"]
+  "include": ["src/**/*.ts"]
 }

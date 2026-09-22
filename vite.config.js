@@ -1,3 +1,4 @@
+import { ortVersion } from './scripts/ort-version.mjs'
 import { defineConfig, loadEnv } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { viteStaticCopy } from 'vite-plugin-static-copy'
@@ -23,7 +24,7 @@ export default defineConfig(({ mode }) => {
         targets: [
           {
             src: 'node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded*.{wasm,mjs}',
-            dest: 'ort',
+            dest: `ort/${ortVersion}`,
             // Flatten: emit files at /ort/<name>, not /ort/node_modules/onnxruntime-web/dist/<name>.
             rename: { stripBase: true },
           },
@@ -38,6 +39,11 @@ export default defineConfig(({ mode }) => {
     // worker is already instantiated as `{ type: 'module' }` (computeClient.js), so
     // emit ES-module worker chunks.
     worker: { format: 'es' },
+    // This is an offline-capable compute application rather than a document-sized
+    // site. Keep an explicit entry-chunk budget just above the measured shell after
+    // the map, 3D viewer, help/report dialogs, TIFF decoder and CRS catalog have been
+    // split out. Future growth past this baseline should warn again.
+    build: { chunkSizeWarningLimit: 1750 },
     // Keep esbuild's dep pre-bundler away from onnxruntime-web: bundling it rewrites
     // ORT's internal wasm-glue references and breaks the wasm↔JS binding at runtime
     // ("ke.$b is not a function"). Excluding it serves ORT's own ESM untouched.

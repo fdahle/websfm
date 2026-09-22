@@ -11,8 +11,12 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
-    "build:wasm": "wasm-pack build crates/sift --target web --out-dir ../../src/wasm/detection && wasm-pack build crates/matching --target web --out-dir ../../src/wasm/matching && wasm-pack build crates/reconstruction --target web --out-dir ../../src/wasm/reconstruction && wasm-pack build crates/mesh --target web --out-dir ../../src/wasm/mesh && wasm-pack build crates/imagecodec --target web --out-dir ../../src/wasm/imagecodec && wasm-pack build crates/lazcodec --target web --out-dir ../../src/wasm/lazcodec && rm -f src/wasm/*/.gitignore"
+    "typecheck": "tsc --noEmit -p tsconfig.json && vue-tsc --noEmit -p tsconfig.vue.json && node scripts/check-vue-bindings.mjs && npm run lint",
+    "build:wasm": "wasm-pack build crates/sift --target web --out-dir ../../src/wasm/detection && wasm-pack build crates/matching --target web --out-dir ../../src/wasm/matching && wasm-pack build crates/reconstruction --target web --out-dir ../../src/wasm/reconstruction && wasm-pack build crates/mesh --target web --out-dir ../../src/wasm/mesh && wasm-pack build crates/imagecodec --target web --out-dir ../../src/wasm/imagecodec && wasm-pack build crates/lazcodec --target web --out-dir ../../src/wasm/lazcodec && rm -f src/wasm/*/.gitignore && node scripts/wasm-stamp.mjs --write",
+    "test:browser": "playwright test",
+    "test:wasm": "node scripts/check-laz-wasm.mjs",
+    "check:wasm": "node scripts/wasm-stamp.mjs",
+    "lint": "eslint src scripts tests *.config.js"
   },
   "dependencies": {
     "@sqlite.org/sqlite-wasm": "^3.53.0-build1",
@@ -31,10 +35,14 @@
     "vue": "^3.5.13"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@vitejs/plugin-vue": "^5.2.1",
+    "eslint": "^10.10.0",
+    "globals": "^17.12.0",
     "typescript": "^5.9.3",
     "vite": "^6.0.7",
     "vite-plugin-static-copy": "^4.1.1",
-    "vitest": "^4.1.9"
+    "vitest": "^4.1.11",
+    "vue-tsc": "^3.3.11"
   }
 }
