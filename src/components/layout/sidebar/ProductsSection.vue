@@ -38,7 +38,7 @@ function toggleProductExpand(kind) {
 const openLabel = (kind) =>
   (props.openTabIds.has(`product:${kind}`) ? 'Switch to tab' : 'Open in tab')
 
-const productUnit = (p) => (p?.unit === 'm' ? 'm' : 'units')
+const productUnit = (p) => (p?.unit && p.unit !== 'model' ? p.unit : 'model units')
 const productCrs = (p) => (p?.crs === 'local' || !p?.crs ? 'Local' : p.crs)
 </script>
 

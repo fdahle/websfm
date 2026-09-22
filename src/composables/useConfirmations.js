@@ -4,6 +4,7 @@ import { useExternalStore } from '../stores/useExternalStore.js'
 import { useFootprintsStore } from '../stores/useFootprintsStore.js'
 import { useGcpsStore } from '../stores/useGcpsStore.js'
 import { useImagesStore } from '../stores/useImagesStore.js'
+import { useMatchesStore } from '../stores/useMatchesStore.js'
 import { useReconstructionStore } from '../stores/useReconstructionStore.js'
 import { useSensorsStore } from '../stores/useSensorsStore.js'
 
@@ -25,6 +26,8 @@ export function useConfirmations({ closeTabForImage, closeTabForRaster, removeGc
   const { imageById, removeImage, clearKeypoints } = imagesStore
   const { sensors } = storeToRefs(useSensorsStore())
   const { removeSensor } = useSensorsStore()
+  const matchesStore = useMatchesStore()
+  const { matchStore } = storeToRefs(matchesStore)
   const { clouds } = storeToRefs(useReconstructionStore())
   const { removeCloud } = useReconstructionStore()
   const externalStore = useExternalStore()
@@ -126,10 +129,21 @@ export function useConfirmations({ closeTabForImage, closeTabForRaster, removeGc
     })
   }
 
+  function confirmRemoveMatches() {
+    const count = matchStore.value.size
+    if (!count) return
+    askConfirm({
+      title: 'Remove matches?',
+      message: `Remove all ${count.toLocaleString()} match pair${count === 1 ? '' : 's'}? Existing sparse clouds are kept, but reconstruction cannot be rerun until the images are matched again. This can't be undone.`,
+      confirmLabel: 'Remove',
+      onConfirm: () => matchesStore.clear({ purge: true }),
+    })
+  }
+
   return {
     pendingImageDelete, requestRemoveImages, confirmRemoveImages, deleteMessage,
     pendingConfirm, askConfirm, runPendingConfirm,
     confirmRemoveSensor, confirmRemoveCloud, confirmRemoveRaster,
-    confirmRemoveGcp, confirmRemoveShapefile, confirmClearKeypoints,
+    confirmRemoveGcp, confirmRemoveShapefile, confirmClearKeypoints, confirmRemoveMatches,
   }
 }

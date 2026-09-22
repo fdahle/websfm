@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest'
-import { normaliseCrsRecord, searchCrsRecords } from './crsRegistry.js'
+import { describe, expect, it, vi } from 'vitest'
+import { loadCrsRegistry, normaliseCrsRecord, searchCrsRecords } from './crsRegistry.js'
 import { axisLabels, crsInfo, ensureProjection } from './crs.js'
 
 const records = [
@@ -42,5 +42,22 @@ describe('normaliseCrsRecord', () => {
     await ensureProjection(record.code, record)
     expect(crsInfo(record.code).name).toBe('Test geographic CRS')
     expect(axisLabels(record.code)).toEqual(['Lon', 'Lat', 'Alt'])
+  })
+})
+
+describe('loadCrsRegistry', () => {
+  it('fetches and filters the emitted catalog asset on demand', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        1: { code: '1', name: 'Projected', kind: 'CRS-PROJCRS', proj4: '+proj=utm' },
+        2: { code: '2', name: 'Vertical', kind: 'CRS-VERTCRS', wkt: 'VERT_CS[]' },
+      }),
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+    const loaded = await loadCrsRegistry()
+    expect(fetchMock).toHaveBeenCalledOnce()
+    expect(loaded.map((record) => record.code)).toEqual(['EPSG:1'])
+    vi.unstubAllGlobals()
   })
 })

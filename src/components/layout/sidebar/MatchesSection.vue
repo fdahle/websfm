@@ -1,16 +1,33 @@
 <script setup>
 import { ref } from 'vue'
+import { useContextMenu } from '../../../composables/useContextMenu.js'
 
-defineProps({
+const props = defineProps({
   open: { type: Boolean, default: true },
   // Pairwise-match summary: { total, verified, running, error, used?, disabled? }
   matchStats: { type: Object, default: () => ({ total: 0, verified: 0, running: 0, error: 0 }) },
 })
-const emit = defineEmits(['toggle', 'open-matches'])
+const emit = defineEmits(['toggle', 'open-matches', 'remove-matches'])
 
 // Matches summary is a single expandable row (no per-pair list — pairs are O(N²)
 // and live in the dedicated modal). This just toggles the inline stats card.
 const matchesExpanded = ref(false)
+
+// Match summary context menu (right-click). The pair list itself lives in the
+// dedicated modal; destructive removal is routed to App's shared confirmation.
+const { menu: matchesCtx, open: openMatchesCtx, close: closeMenu } = useContextMenu()
+function onMatchesRightClick(e) {
+  openMatchesCtx(e, {}, { w: 180, h: 88 })
+}
+function ctxOpenMatches() {
+  emit('open-matches')
+  closeMenu()
+}
+function ctxRemoveMatches() {
+  if (props.matchStats.running) return
+  emit('remove-matches')
+  closeMenu()
+}
 </script>
 
 <template>
@@ -28,6 +45,7 @@ const matchesExpanded = ref(false)
           title="Double-click to open the match list"
           @click="matchesExpanded = !matchesExpanded"
           @dblclick="emit('open-matches')"
+          @contextmenu="onMatchesRightClick"
         >
           <button
             class="expand-btn"
@@ -64,6 +82,26 @@ const matchesExpanded = ref(false)
       <li v-else-if="matchStats.running" class="empty">Matching…</li>
       <li v-else class="empty">No matches — run matching</li>
     </ul>
+
+    <!-- Match context menu -->
+    <Teleport to="body">
+      <div
+        v-if="matchesCtx"
+        class="ctx-menu"
+        :style="{ left: matchesCtx.x + 'px', top: matchesCtx.y + 'px' }"
+        @click.stop
+      >
+        <button class="ctx-item" @click="ctxOpenMatches">Open match list</button>
+        <div class="ctx-sep"></div>
+        <button
+          class="ctx-item danger"
+          :class="{ 'ctx-disabled': matchStats.running }"
+          :disabled="!!matchStats.running"
+          :title="matchStats.running ? 'Cancel matching before removing matches' : ''"
+          @click="ctxRemoveMatches"
+        >Remove matches</button>
+      </div>
+    </Teleport>
   </div>
 </template>
 

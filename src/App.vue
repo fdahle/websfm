@@ -4,8 +4,6 @@ import { ref, computed, reactive, watch, onMounted, nextTick, defineAsyncCompone
 import { storeToRefs } from 'pinia'
 import Ribbon from './components/layout/Ribbon.vue'
 import Sidebar from './components/layout/Sidebar.vue'
-import Viewer3D from './components/viewers/Viewer3D.vue'
-import ViewerMap from './components/viewers/ViewerMap.vue'
 import ViewerImage from './components/viewers/ViewerImage.vue'
 import ViewerGcp from './components/viewers/ViewerGcp.vue'
 import ImageInfoModal from './components/modals/ImageInfoModal.vue'
@@ -19,24 +17,20 @@ import SensorTableModal from './components/modals/SensorTableModal.vue'
 import FiducialDetectModal from './components/modals/FiducialDetectModal.vue'
 import FiducialCalibrateModal from './components/modals/FiducialCalibrateModal.vue'
 import MatchListModal from './components/modals/MatchListModal.vue'
-import QualityReportModal from './components/modals/QualityReportModal.vue'
-import DebugSummaryModal from './components/modals/DebugSummaryModal.vue'
 import ProgressModal from './components/modals/ProgressModal.vue'
 import ModelDownloadModal from './components/modals/ModelDownloadModal.vue'
 import SettingsModal from './components/modals/SettingsModal.vue'
 import ProjectSettingsModal from './components/modals/ProjectSettingsModal.vue'
 import AboutModal from './components/modals/AboutModal.vue'
-import SystemInfoModal from './components/modals/SystemInfoModal.vue'
 import NewProjectModal from './components/modals/NewProjectModal.vue'
 import SaveProjectModal from './components/modals/SaveProjectModal.vue'
 import FolderReconnectModal from './components/modals/FolderReconnectModal.vue'
-import GlossaryModal from './components/glossary/GlossaryModal.vue'
-import GuideModal from './components/guide/GuideModal.vue'
 import ProjectPicker from './components/layout/ProjectPicker.vue'
 import DevConsole from './components/layout/DevConsole.vue'
 import BrowserWarning from './components/layout/BrowserWarning.vue'
 import MobileWarning from './components/layout/MobileWarning.vue'
 import ToastStack from './components/layout/ToastStack.vue'
+
 import { useImagesStore } from './stores/useImagesStore.js'
 import { useMatchesStore } from './stores/useMatchesStore.js'
 import { useTabs } from './composables/useTabs.js'
@@ -102,7 +96,18 @@ import { resolveK } from './core/sfm/reconstruction.js'
 import { estimateUpFromCameras } from './core/sfm/geometry.js'
 import { useSfmInterop } from './composables/useSfmInterop.js'
 
+// These dialogs pull in large reports, Markdown/KaTeX, or diagnostic code and are
+// not needed for the initial workspace. Load them on first open instead of putting
+// every optional tool in the entry chunk.
+const QualityReportModal = defineAsyncComponent(() => import('./components/modals/QualityReportModal.vue'))
+const DebugSummaryModal = defineAsyncComponent(() => import('./components/modals/DebugSummaryModal.vue'))
 const WorkflowBuilderModal = defineAsyncComponent(() => import('./components/modals/WorkflowBuilderModal.vue'))
+const SystemInfoModal = defineAsyncComponent(() => import('./components/modals/SystemInfoModal.vue'))
+const GlossaryModal = defineAsyncComponent(() => import('./components/glossary/GlossaryModal.vue'))
+const GuideModal = defineAsyncComponent(() => import('./components/guide/GuideModal.vue'))
+const ViewerMap = defineAsyncComponent(() => import('./components/viewers/ViewerMap.vue'))
+const Viewer3D = defineAsyncComponent(() => import('./components/viewers/Viewer3D.vue'))
+
 // ── Theme ─────────────────────────────────────────────────────────────────────
 // `theme` is the resolved 'dark'|'light'; `themePreference` is what the user
 // chose ('system' follows the OS and re-resolves when it flips).
@@ -162,6 +167,10 @@ const {
   closeAllTabs, closeOtherTabs, closeTabsToLeft, closeTabsToRight,
   resetToViewer,
 } = useTabs(imageById, showMap)
+// The map is a large OpenLayers subtree. Mount it on first use, then retain it so
+// pan/zoom/layer state survives subsequent tab switches.
+const mapMounted = ref(activeTabId.value === 'map')
+watch(activeTabId, (id) => { if (id === 'map') mapMounted.value = true })
 
 // Image-view overlay + edit toggles: one global, persisted preference shared by every
 // image tab (switching images never changes them), not per-tab state.
@@ -1232,7 +1241,7 @@ const {
   pendingImageDelete, requestRemoveImages, confirmRemoveImages, deleteMessage,
   pendingConfirm, askConfirm, runPendingConfirm,
   confirmRemoveSensor, confirmRemoveCloud, confirmRemoveRaster,
-  confirmRemoveGcp, confirmRemoveShapefile, confirmClearKeypoints,
+  confirmRemoveGcp, confirmRemoveShapefile, confirmClearKeypoints, confirmRemoveMatches,
 } = useConfirmations({ closeTabForImage, closeTabForRaster, removeGcpAndCloseTab })
 
 // Escape-closes-top-most-modal (pulls modal state from the stores; the few local
@@ -2168,8 +2177,8 @@ function onRibbonPick(event) {
       <DebugSummaryModal v-if="debugSummaryOpen" @close="debugSummaryOpen = false" />
     </Teleport>
 
-    <GlossaryModal />
-    <GuideModal />
+    <GlossaryModal v-if="glossaryStore.isOpen" />
+    <GuideModal v-if="guideStore.isOpen" />
 
     <div class="layout">
       <Sidebar
@@ -2205,11 +2214,11 @@ function onRibbonPick(event) {
         @set-raster-on-map="({ id, onMap }) => setRasterOnMap(id, onMap)"
         @set-raster-opacity="({ id, opacity }) => setRasterOpacity(id, opacity)"
         @open-matches="matchListOpen = true"
+        @remove-matches="confirmRemoveMatches"
         @select-cloud="showCloud"
         @remove-cloud="confirmRemoveCloud"
         @rename-cloud="({ id, name }) => renameCloud(id, name)"
         @set-main-cloud="setMainSparse"
-        @reconstruct="reconstructOpen = true"
         @add-images="addImagesRouted"
         @import-file="openDroppedImport"
         @remove-image="requestRemoveImages"
@@ -2263,7 +2272,7 @@ function onRibbonPick(event) {
 
         <div class="content">
           <Viewer3D ref="viewerRef" v-show="activeTabId === 'viewer'" :theme="theme" :images="images" :show-cameras="showCameras" :show-grid="showGrid" :scene-up="viewerSceneUp" @command="handleCommand" />
-          <ViewerMap ref="mapViewerRef" v-show="activeTabId === 'map'" :images="images" :gcps="gcps" :footprints="mapFootprints" :poses="poses" :selected-id="selectedId" :selected-gcp-id="selectedGcpId" :aligned-uuids="alignedUuids" :has-sparse="hasSparse" :crs="currentCrs" :show-footprints="showFootprints" :show-grid="showMapGrid" :rasters="mapRasters" :probe-raster="probeRasterAt" :load-raster="ensureRasterLoaded" @select="selectImage" @command="handleCommand" @select-gcp="selectGcp" @set-gcp-position="setGcpGroundPosition" @add-gcp-at="addGcpAtCoord" @delete-gcp="deleteGcpFromEditor" />
+          <ViewerMap v-if="mapMounted" ref="mapViewerRef" v-show="activeTabId === 'map'" :images="images" :gcps="gcps" :footprints="mapFootprints" :poses="poses" :selected-id="selectedId" :selected-gcp-id="selectedGcpId" :aligned-uuids="alignedUuids" :has-sparse="hasSparse" :crs="currentCrs" :show-footprints="showFootprints" :show-grid="showMapGrid" :rasters="mapRasters" :probe-raster="probeRasterAt" :load-raster="ensureRasterLoaded" @select="selectImage" @command="handleCommand" @select-gcp="selectGcp" @set-gcp-position="setGcpGroundPosition" @add-gcp-at="addGcpAtCoord" @delete-gcp="deleteGcpFromEditor" />
           <template v-for="tab in tabs" :key="tab.id">
             <ViewerImage
               v-if="tab.type === 'image' && imageById(tab.imageId)"

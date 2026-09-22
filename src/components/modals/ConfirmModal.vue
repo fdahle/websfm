@@ -1,6 +1,6 @@
-<script setup>
+<script setup lang="ts">
 // Generic confirmation dialog for destructive/irreversible actions. Driven by the
-// caller: pass a title/message, listen for confirm/cancel. Enter confirms, Esc
+// caller: pass a title/message, listen for confirm/cancel. Enter activates the focused button, Esc
 // cancels. `danger` styles the confirm button red.
 defineProps({
   title: { type: String, default: 'Are you sure?' },
@@ -13,7 +13,7 @@ const emit = defineEmits(['confirm', 'cancel'])
 </script>
 
 <template>
-  <div class="overlay" @click.self="emit('cancel')" @keydown.esc="emit('cancel')" @keydown.enter="emit('confirm')">
+  <div class="overlay" @click.self="emit('cancel')" @keydown.esc.stop="emit('cancel')">
     <div class="modal" role="dialog" aria-modal="true" :aria-label="title">
       <div class="modal-header">
         <span class="modal-title">{{ title }}</span>
@@ -23,8 +23,8 @@ const emit = defineEmits(['confirm', 'cancel'])
         <p class="message">{{ message }}</p>
       </div>
       <div class="modal-footer">
-        <button class="btn" @click="emit('cancel')">{{ cancelLabel }}</button>
-        <button ref="confirmBtn" class="btn" :class="danger ? 'btn-danger' : 'btn-primary'" autofocus @click="emit('confirm')">
+        <button class="btn" autofocus @click="emit('cancel')">{{ cancelLabel }}</button>
+        <button ref="confirmBtn" class="btn" :class="danger ? 'btn-danger' : 'btn-primary'" @click="emit('confirm')">
           {{ confirmLabel }}
         </button>
       </div>

@@ -1,10 +1,12 @@
+import { installModalFocus } from './utils/modalFocus.js'
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import App from './App.vue'
 import './style.css'
-import 'ol/ol.css'
-import 'katex/dist/katex.min.css'
 import { colResize } from './utils/resizableColumns.js'
+
+const disposeModalFocus = installModalFocus()
+if (import.meta.hot) import.meta.hot.dispose(disposeModalFocus)
 
 createApp(App)
   .use(createPinia())

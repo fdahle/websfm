@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseGuideDoc } from './guide.js'
+import { parseGuideDoc, getAllGuideDocs, getGuideDoc } from './guide.js'
 
 describe('parseGuideDoc', () => {
   const raw = [
@@ -7,6 +7,8 @@ describe('parseGuideDoc', () => {
     'id: match-features',
     'title: Match Features',
     'summary: Finds correspondences between image pairs.',
+    'category: Reconstruction pipeline',
+    'order: 30',
     '---',
     'Intro prose about matching.',
     '',
@@ -24,6 +26,8 @@ describe('parseGuideDoc', () => {
     expect(doc.id).toBe('match-features')
     expect(doc.title).toBe('Match Features')
     expect(doc.summary).toBe('Finds correspondences between image pairs.')
+    expect(doc.category).toBe('Reconstruction pipeline')
+    expect(doc.sortOrder).toBe(30)
     expect(doc.intro).toBe('Intro prose about matching.')
   })
 
@@ -52,11 +56,32 @@ describe('parseGuideDoc', () => {
     const doc = parseGuideDoc('---\nid: foo\n---\nbody')
     expect(doc.title).toBe('foo')
     expect(doc.summary).toBe('')
+    expect(doc.category).toBe('More')
+    expect(doc.sortOrder).toBe(999)
     expect(doc.order).toEqual([])
   })
 
   it('throws when frontmatter or id is missing', () => {
     expect(() => parseGuideDoc('no frontmatter here')).toThrow(/frontmatter/)
     expect(() => parseGuideDoc('---\ntitle: X\n---\nbody')).toThrow(/id/)
+  })
+})
+
+describe('bundled guide', () => {
+  it('loads the main user journey and resolves its guide cross-links', () => {
+    const docs = getAllGuideDocs()
+    const ids = new Set(docs.map(d => d.id))
+    for (const id of [
+      'getting-started', 'projects-storage', 'detect-features', 'match-features',
+      'sparse-reconstruction', 'depth-maps', 'dense-cloud', 'georeferencing',
+      'dem', 'orthophoto', 'mesh', 'quality-report',
+    ]) expect(ids.has(id), `missing guide article: ${id}`).toBe(true)
+
+    for (const doc of docs) {
+      const markdown = [doc.intro, ...doc.params.values()].map(v => v?.body ?? v).join('\n')
+      for (const match of markdown.matchAll(/\]\(guide:([^)]+)\)/g)) {
+        expect(getGuideDoc(match[1]), `${doc.id} links to missing guide:${match[1]}`).not.toBeNull()
+      }
+    }
   })
 })
