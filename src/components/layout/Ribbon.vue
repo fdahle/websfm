@@ -123,10 +123,16 @@ const tabs = [
     label: 'Reconstruct',
     groups: [
       {
+        label: 'Workflow',
+        commands: [
+          { id: 'workflow-builder', label: 'Workflow\nBuilder', icon: 'list', needsProject: true },
+        ],
+      },
+      {
         label: 'Features',
         commands: [
           { id: 'detect-features', label: 'Detect\nFeatures', icon: 'sparkles', needsImages: true, needsImagesReady: true },
-          { id: 'match-features', label: 'Match\nFeatures', icon: 'link', needsKeypoints: true },
+          { id: 'match-features', label: 'Match\nFeatures', icon: 'link', needsKeypoints: true, needsImagesReady: true },
         ],
       },
       // The groups are pipeline *stages*, in order: features → sparse → dense →
@@ -135,13 +141,13 @@ const tabs = [
       {
         label: 'Sparse',
         commands: [
-          { id: 'reconstruct',   label: 'Sparse\nModel', icon: 'sparse-model', needsMatches: true },
+          { id: 'reconstruct',   label: 'Sparse\nModel', icon: 'sparse-model', needsMatches: true, needsImagesReady: true },
         ],
       },
       {
         label: 'Dense',
         commands: [
-          { id: 'compute-depth', label: 'Depth\nMaps',   icon: 'depth',       needsSparse: true },
+          { id: 'compute-depth', label: 'Depth\nMaps',   icon: 'depth',       needsSparse: true, needsImagesReady: true },
           { id: 'dense',         label: 'Dense\nModel',  icon: 'point-cloud', needsDepthMaps: true },
         ],
       },
@@ -149,7 +155,7 @@ const tabs = [
         label: 'Products',
         commands: [
           { id: 'gen-dem',       label: 'DEM',     icon: 'dem',   needsCloud: true, aerialOnly: true },
-          { id: 'gen-ortho',     label: 'Ortho',   icon: 'ortho', needsSurface: true, needsDepthMaps: true, aerialOnly: true },
+          { id: 'gen-ortho',     label: 'Ortho',   icon: 'ortho', needsSurface: true, needsDepthMaps: true, needsImagesReady: true, aerialOnly: true },
           { id: 'gen-mesh',      label: 'Mesh',    icon: 'cube',  needsDense: true },
         ],
       },
@@ -167,7 +173,7 @@ const tabs = [
         label: 'Images',
         commands: [
           { id: 'auto-mask',        label: 'Auto\nMask',      icon: 'mask',   needsImages: true, needsImagesReady: true },
-          { id: 'detect-fiducials', label: 'Detect\nFiducials', icon: 'target', needsFilmSensor: true },
+          { id: 'detect-fiducials', label: 'Detect\nFiducials', icon: 'target', needsFilmSensor: true, needsImagesReady: true },
           { id: 'calibrate-fiducials', label: 'Calibrate\nFiducials', icon: 'calibration', needsFilmSensor: true },
         ],
       },
@@ -274,7 +280,7 @@ const tabs = [
       {
         label: 'Features',
         commands: [
-          { id: 'export-keypoints', label: 'Key\npoints', icon: 'keypoints', needsKeypoints: true },
+          { id: 'export-keypoints', label: 'Key\npoints', icon: 'keypoints', needsKeypoints: true, needsImagesReady: true },
           { id: 'export-matches',   label: 'Matches',     icon: 'link',      needsMatches: true },
         ],
       },

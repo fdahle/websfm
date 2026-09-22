@@ -17,6 +17,7 @@ export const useModalsStore = defineStore('modals', () => {
   const newProjectOpen      = ref(false)
   const newProjectCanCancel = ref(true)
   const saveProjectOpen     = ref(false)  // "Save project as…" (.websfm) options
+  const workflowBuilderOpen = ref(false)
   const detectFeaturesOpen  = ref(false)
   const matchFeaturesOpen   = ref(false)
   const imageTableOpen      = ref(false)
@@ -91,6 +92,7 @@ export const useModalsStore = defineStore('modals', () => {
     newProjectOpen,
     newProjectCanCancel,
     saveProjectOpen,
+    workflowBuilderOpen,
     detectFeaturesOpen,
     matchFeaturesOpen,
     imageTableOpen,
