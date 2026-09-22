@@ -15,7 +15,7 @@
 // on the way in.
 
 import {
-  LAS_RECORD_F2, encodeLasPoints, writeLasHeader, readLasHeader, decodeLasPoints,
+  validateLasAllocation, LAS_RECORD_F2, encodeLasPoints, writeLasHeader, readLasHeader, decodeLasPoints,
 } from './las.js'
 import { geoKeysForEpsg } from '../products/geotiff.js'
 
@@ -32,14 +32,15 @@ export const LAZ_CHUNK_POINTS = 50_000
 //
 // `compress` is the injected codec: (pointBytes, pointFormat, pointSize) →
 // { vlr: Uint8Array, data: Uint8Array }. It is called ONCE with the full record
-// stream — LASzip's own chunking lives inside it, and splitting the stream across
+// stream for small legacy callers. Production uses createCompressor, keeping one
+// encoder across bounded pushes. Splitting the stream across
 // several compressor instances would produce several independent LAZ blocks, not
 // one file. The chunking this module does is only in how the records are *built*.
 //
 // Returns a Uint8Array. Throws if no compressor was supplied — silently writing
 // an uncompressed .las under a .laz name would be worse.
-export function cloudToLaz(points, { crsCode = null, geographic = false, compress, onLog } = {}) {
-  if (typeof compress !== 'function') {
+export function cloudToLaz(points, { crsCode = null, geographic = false, compress, createCompressor, onLog } = {}) {
+  if (typeof compress !== 'function' && typeof createCompressor !== 'function') {
     throw new Error('cloudToLaz: no LAZ compressor supplied (the lazcodec WASM module failed to load)')
   }
   const flat = points && points.pos ? points : null
@@ -53,20 +54,26 @@ export function cloudToLaz(points, { crsCode = null, geographic = false, compres
 
   const { scale, offset, bbox } = quantization(n, getX, getY, getZ)
 
-  // Build the record stream in chunks (see the memory note above).
-  const pointBytes = new Uint8Array(n * LAS_RECORD_F2)
-  for (let start = 0; start < n; start += LAZ_CHUNK_POINTS) {
-    const len = Math.min(LAZ_CHUNK_POINTS, n - start)
-    const chunk = encodeLasPoints({
-      n: len,
-      getX: (i) => getX(start + i), getY: (i) => getY(start + i), getZ: (i) => getZ(start + i),
-      getC: (i) => getC(start + i),
-      scale, offset,
-    })
-    pointBytes.set(chunk, start * LAS_RECORD_F2)
+  // The browser codec keeps one encoder alive across bounded chunks. The
+  // whole-buffer adapter remains for small callers with an injected legacy codec.
+  if (!createCompressor && n * LAS_RECORD_F2 > 64 * 1024 ** 2) {
+    throw new Error('Large LAZ exports require an incremental compressor')
   }
+  const encoder = createCompressor?.(2, LAS_RECORD_F2)
+  let packed
+  try {
+    const pointBytes = encoder ? null : new Uint8Array(n * LAS_RECORD_F2)
+    for (let start = 0; start < n; start += LAZ_CHUNK_POINTS) {
+      const len = Math.min(LAZ_CHUNK_POINTS, n - start)
+      const chunk = encodeLasPoints({ n: len,
+        getX: i => getX(start + i), getY: i => getY(start + i), getZ: i => getZ(start + i),
+        getC: i => getC(start + i), scale, offset })
+      if (encoder) encoder.push(chunk)
+      else pointBytes.set(chunk, start * LAS_RECORD_F2)
+    }
+    packed = encoder ? encoder.finish() : compress(pointBytes, 2, LAS_RECORD_F2)
+  } finally { encoder?.free?.() }
 
-  const packed = compress(pointBytes, 2, LAS_RECORD_F2)
   const vlrs = []
   if (crsCode) vlrs.push({ userId: 'LASF_Projection', recordId: 34735, description: 'GeoKeyDirectory', data: geoKeyBytes(crsCode, geographic) })
   // The LASzip VLR must be present for any reader to know how the points were
@@ -80,7 +87,7 @@ export function cloudToLaz(points, { crsCode = null, geographic = false, compres
   const out = new Uint8Array(header.length + packed.data.length)
   out.set(header, 0)
   out.set(packed.data, header.length)
-  const ratio = pointBytes.length ? (pointBytes.length / packed.data.length) : 1
+  const ratio = n ? (n * LAS_RECORD_F2 / packed.data.length) : 1
   onLog?.(`LAZ export: ${n.toLocaleString()} points, ${(out.length / 1024 ** 2).toFixed(1)} MB `
     + `(${ratio.toFixed(1)}× smaller than LAS)`
     + (crsCode ? `, EPSG:${crsCode} GeoKey VLR` : ', no CRS VLR (local frame)'), 'info', 'Export')
@@ -98,10 +105,11 @@ export function parseLaz(buffer, { decompress, onLog } = {}) {
   if (!h.isLaz) {
     throw new Error('This file is uncompressed LAS, not LAZ — read it with parseLas')
   }
-  const lazVlr = h.vlrs.find((v) => v.recordId === LASZIP_VLR_RECORD_ID)
+  const lazVlr = h.vlrs.find((v) => v.recordId === LASZIP_VLR_RECORD_ID && v.userId === LASZIP_VLR_USER_ID)
   if (!lazVlr) {
     throw new Error('LAZ file has no "laszip encoded" VLR (record 22204) — cannot know how the points were coded')
   }
+  validateLasAllocation(h.count, h.recordLength, bytes.byteLength)
   const records = decompress(lazVlr.data, bytes.subarray(h.offsetToPoints), h.count, h.recordLength)
   const cloud = decodeLasPoints(records, h.count, h.recordLength, h.format, h.scale, h.offset)
   onLog?.(`LAZ: read ${h.count.toLocaleString()} points (v${h.versionMajor}.${h.versionMinor}, `

@@ -53,7 +53,7 @@ export function cloudBounds(cloud) {
 export function selectPoints(cloud, keep, kept) {
   const n = cloudCount(cloud)
   const src = cloud.pos, sc = cloud.col || null, sn = cloud.nrm || null
-  const pos = new Float32Array(kept * 3)
+  const pos = new (cloud.pos.constructor)(kept * 3)
   const col = sc ? new Uint8Array(kept * 3) : null
   const nrm = sn ? new Float32Array(kept * 3) : null
   let o = 0
@@ -380,7 +380,7 @@ export function voxelDownsample(cloud, { cell = 0 } = {}, onLog) {
   }
   const flat = acc.finalizeFlat()
   const m = flat.length / 6
-  const outPos = new Float32Array(m * 3)
+  const outPos = new (cloud.pos.constructor)(m * 3)
   const outCol = sc ? new Uint8Array(m * 3) : null
   for (let i = 0; i < m; i++) {
     const s = i * 6, d = i * 3
@@ -438,7 +438,8 @@ export function mergeClouds(clouds, { cell = 0 } = {}, onLog) {
   if (!allNrm && list.some((c) => c.nrm))
     onLog?.('Merge: normals dropped (not every input cloud has them)', 'info', 'Products')
 
-  const pos = new Float32Array(total * 3)
+  const PositionArray = list.some(c => c.pos instanceof Float64Array) ? Float64Array : Float32Array
+  const pos = new PositionArray(total * 3)
   const col = anyCol ? new Uint8Array(total * 3) : null
   const nrm = allNrm ? new Float32Array(total * 3) : null
   let o = 0

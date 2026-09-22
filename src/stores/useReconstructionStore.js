@@ -481,8 +481,8 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
   // worker op, transformed by applyImportTransform). Always ADDS a new cloud —
   // never replaces computed ones — flagged `imported: true` so upsertDense/Mesh
   // skip it on a re-fuse/re-mesh. Coordinates land verbatim in the current frame
-  // (no CRS reprojection). pos is narrowed to Float32 in memory (the DenseCloud/
-  // MeshCloud convention — the viewer feeds it straight to Three.js). Returns true
+  // (no CRS reprojection). Authoritative positions retain Float64 precision;
+  // the renderer builds origin-relative Float32 buffers. Returns true
   // on success.
   function importCloud(parsed, fileName = 'file') {
     const isMesh = !!parsed.idx
@@ -491,7 +491,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
       log(`Cloud import: ${fileName} contained no points`, 'warn', 'Reconstruction')
       return false
     }
-    const pos = parsed.pos instanceof Float32Array ? parsed.pos : Float32Array.from(parsed.pos)
+    const pos = parsed.pos instanceof Float64Array ? parsed.pos : Float64Array.from(parsed.pos)
     const cloud = {
       id: makeCloudId(),
       name: `Imported (${fileName})`,

@@ -60,6 +60,9 @@ export function rasterizeDem(points, opts = {}) {
   const originY = maxY // top-left origin: row 0 is the max-Y edge
 
   const cells = width * height
+  if (!Number.isSafeInteger(cells) || cells * 24 + (aggregate === 'median' ? points.length * 40 : 0) > 512 * 1024 ** 2) {
+    throw new Error('DEM raster exceeds the 512 MiB working-memory limit; increase GSD or reduce the grid size')
+  }
   const data = new Float32Array(cells).fill(NaN)
 
   const colOf = (x) => Math.min(width - 1, Math.max(0, Math.floor((x - originX) / gsd)))

@@ -48,6 +48,57 @@ export class CompressedPoints {
 if (Symbol.dispose) CompressedPoints.prototype[Symbol.dispose] = CompressedPoints.prototype.free;
 
 /**
+ * Incremental encoder: owns one continuous LASzip stream across JS chunks.
+ */
+export class LazEncoder {
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        LazEncoderFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_lazencoder_free(ptr, 0);
+    }
+    /**
+     * @returns {CompressedPoints}
+     */
+    finish() {
+        const ret = wasm.lazencoder_finish(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return CompressedPoints.__wrap(ret[0]);
+    }
+    /**
+     * @param {number} point_format
+     * @param {number} point_size
+     */
+    constructor(point_format, point_size) {
+        const ret = wasm.lazencoder_new(point_format, point_size);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        this.__wbg_ptr = ret[0];
+        LazEncoderFinalization.register(this, this.__wbg_ptr, this);
+        return this;
+    }
+    /**
+     * @param {Uint8Array} points
+     */
+    push(points) {
+        const ptr0 = passArray8ToWasm0(points, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.lazencoder_push(this.__wbg_ptr, ptr0, len0);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+}
+if (Symbol.dispose) LazEncoder.prototype[Symbol.dispose] = LazEncoder.prototype.free;
+
+/**
  * Compress raw LAS point records.
  *
  * `points` is `num_points × point_size` interleaved bytes, exactly the on-disk
@@ -123,6 +174,9 @@ function __wbg_get_imports() {
 const CompressedPointsFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_compressedpoints_free(ptr, 1));
+const LazEncoderFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_lazencoder_free(ptr, 1));
 
 function getArrayU8FromWasm0(ptr, len) {
     ptr = ptr >>> 0;

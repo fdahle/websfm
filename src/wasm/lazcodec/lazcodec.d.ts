@@ -22,6 +22,17 @@ export class CompressedPoints {
 }
 
 /**
+ * Incremental encoder: owns one continuous LASzip stream across JS chunks.
+ */
+export class LazEncoder {
+    free(): void;
+    [Symbol.dispose](): void;
+    finish(): CompressedPoints;
+    constructor(point_format: number, point_size: number);
+    push(points: Uint8Array): void;
+}
+
+/**
  * Compress raw LAS point records.
  *
  * `points` is `num_points × point_size` interleaved bytes, exactly the on-disk
@@ -45,10 +56,14 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly __wbg_compressedpoints_free: (a: number, b: number) => void;
+    readonly __wbg_lazencoder_free: (a: number, b: number) => void;
     readonly compress_points: (a: number, b: number, c: number, d: number) => [number, number, number];
     readonly compressedpoints_data: (a: number) => [number, number];
     readonly compressedpoints_vlr: (a: number) => [number, number];
     readonly decompress_points: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
+    readonly lazencoder_finish: (a: number) => [number, number, number];
+    readonly lazencoder_new: (a: number, b: number) => [number, number, number];
+    readonly lazencoder_push: (a: number, b: number, c: number) => [number, number];
     readonly __wbindgen_externrefs: WebAssembly.Table;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __externref_table_dealloc: (a: number) => void;

@@ -71,7 +71,7 @@ export interface Point3 {
 export interface DenseCloud {
   count: number
   /** xyz per point, length 3·count. */
-  pos: Float32Array
+  pos: Float32Array | Float64Array
   /** rgb (0–255) per point, length 3·count; null when uncoloured. */
   col: Uint8Array | null
   /**
@@ -93,7 +93,7 @@ export interface MeshCloud {
   /** vertex count. */
   nVerts: number
   /** xyz per vertex, length 3·nVerts. */
-  pos: Float32Array
+  pos: Float32Array | Float64Array
   /** triangle vertex indices, length 3·count. */
   idx: Uint32Array
   /** rgb (0–255) per vertex, length 3·nVerts; null when uncoloured. */
