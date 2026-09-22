@@ -8,11 +8,12 @@ run, with its pass criteria and a column for the result).
 When an item ships: delete it here, add one done-log line to HANDOVER.md, and add
 its owed manual checks as rows in `VERIFICATION.csv` — **not** as a checklist here.
 
-A handful of **not-yet-started features keep a detailed executable spec** in a
+A handful of **open features keep a detailed executable spec** in a
 `docs/planning/plan-<feature>.md` file (linked from the relevant item below). The
 TODO line is the source of truth for *whether/when*; the plan file holds the
-step-by-step *how*. Delete the plan file when the feature ships **and** its
-verification rows are signed off.
+step-by-step *how*. `docs/planning/README.md` is the index. Delete the plan file
+when its implementation work closes; any remaining browser or external-tool checks
+belong only in `VERIFICATION.csv`.
 
 **Goal (updated 2026-07-07):** a general browser-based SfM/photogrammetry tool
 in the COLMAP/Metashape class — full pipeline (detect → match → sparse → dense →
@@ -22,22 +23,21 @@ first-class. Ordering below is by expected impact on the two benchmark workflows
 (CA213732V… aerial strip, South Building B4 / Metashape building B1) *and* on
 closing the generality gap. Baselines to beat are in `HANDOVER.md` §Baselines.
 
-**Where we stand (audit refreshed 2026-08-17, after `0.1.0-beta.1`).** The feature
+**Where we stand (audit refreshed 2026-09-01, after `0.1.0-beta.1`).** The feature
 gaps named in the 2026-07-07 audit have closed: mesh output (F3), COLMAP/OpenMVG/
 NVM/OpenSfM interop (F7), LAS+LAZ+COG+3D Tiles+undistorted images (F1), processing
 report (F8), dense point-cloud editing (F9 numeric half), project save/load and
 folder-backed projects, learned front ends (SuperPoint/LightGlue/SAM2) with
-on-demand weights, and the usability track's pure half (profiler → recommendations
-→ device budget → per-control prefills, pre-flight, post-run verdict). What is
+on-demand weights, and the usability track (profiler → recommendations → device
+budget → per-control prefills → visual Workflow Builder). What is
 *not* closed, in order:
 
 1. **Verification.** Most of what shipped since 2026-07-10 has never been run in a
    browser on real data. That is the credibility gap now, not any missing feature.
-   It is tracked row-by-row in `VERIFICATION.csv` (105 checks; 37 at P1).
-2. **The "it just works" path** — U4 below is the last piece of the usability track
-   and the only one a user sees.
-3. Remaining feature gaps, all genuinely narrow: sparse gradual selection (F9),
-   scale bars (F11), fisheye (F6), mesh texturing, reference-DEM-constrained BA (F13).
+   It is tracked row-by-row in `VERIFICATION.csv` (123 checks; 48 at P1).
+2. Remaining feature gaps, all genuinely narrow: sparse gradual selection (F9),
+   measurement tools (F11 — its scale half shipped 2026-08-25), fisheye (F6), mesh texturing,
+   reference-DEM-constrained BA (F13).
 
 ---
 
@@ -54,28 +54,13 @@ these gate code decisions elsewhere in this file:
 | `SFM-03`/`SFM-04` building 50, both front ends | decides RS ▸ WS-B and the A6 bridge-pair gate below |
 | `DEN-02`/`DEN-03` sky- and vegetation-heavy dense | decides the DF retune, and whether the in-optimiser pass is worth it |
 | `RAS-05` EPSG:3031 under WebGLTileLayer | go/no-go for the whole RR re-architecture |
-| `DEN-05` SB dense on WebGPU | decides P1 (GPU as the dense default) |
+| `DEN-05`/`DEN-06` dense on WebGPU | validates the automatic GPU default shipped 2026-08-25 and its WASM fallback |
 | `REL-02` cold smoke on the deployed build | it is a public beta |
 
 Rules that keep the register honest: record the *measured* number, not "ok"; one
 variable at a time (the 2026-07-25 SB run changed detection preset *and* pairing
 and is therefore not comparable to anything); and a blank Debug ▸ Project Summary
 block means a **producer** is not recording — fix the producer, not the renderer.
-
-### U4 — one-click "Run All" (the last usability piece)
-Everything it consumes has shipped: `core/profile.js` (U1), `core/recommend.js`
-(U2), `core/dense/memBudget.js` + `useComputeSettings` (C1), the per-control
-prefills (U3), `core/preflight.js` (U5) and `core/sfm/verdict.js` (U6).
-Two of those are **pure code with no consumer** — `preflight.js` is imported
-nowhere, and `verdict.js` only reaches the Quality Report / debug digest.
-- New `RunPipelineModal.vue`: stage checkboxes, one Low/Med/High selector feeding
-  U2, the U5 checklist inline, Run disabled while `hasBlockers()`.
-- `runAll(stages, settings)` in `composables/usePipeline.js`, chaining the existing
-  `runDetect`/`runMatch`/… under the `aborted` flag; same entry point backs the
-  `run all` console command (CC ▸ C2).
-- Finish on the U6 verdict (headline + findings, each with its `fix`).
-- Assemble the preflight state snapshot in the store — that is U5's owed half.
-- Manual pass → `VERIFICATION.csv` ▸ `UI-15`.
 
 ### RR — reference rasters: raw storage + COG + draw-time styling
 Re-architecture, **not** a fix: the imported-raster path stores a *baked* plane, so
@@ -98,6 +83,8 @@ migration** — re-import is expected. Full spec:
 
 ### SFM — decisions parked behind the acceptance runs
 Each is one knob with a named piece of evidence; none should be tuned a priori.
+The 2-camera-stall implementation detail is in
+`docs/planning/plan-registration-stall.md`; this section owns its gates and priority.
 - **Init-pair E-conditioning.** The candidate σ2/σ1 term is already computed and
   logged. Wire it into the score **only if** `SFM-01` shows a barely-passing ~2.5°
   seed winning badly, with that run as its evidence.
@@ -140,8 +127,8 @@ Each is one knob with a named piece of evidence; none should be tuned a priori.
 
 ### DF — dense cross-view filter: retune from data
 Stage A′ (`filterDepthMapsGeometric`) shipped and is unit-tested but **unmeasured on
-real data**; it subsumes what was previously tracked as A5. Plan doc:
-`docs/planning/plan-dense-sky-vegetation.md` (delete once this closes).
+real data**; it subsumes what was previously tracked as A5. The former dense
+sky/vegetation plan is retired: this section contains all remaining decisions.
 - **Retune the defaults** once `DEN-02`…`DEN-04` are in. `maxGeomCost 1.0` /
   `minConsistent 2` / `minNcc 0.1` are COLMAP's numbers, adopted untested at our
   working resolutions. Watch for over-culling on legitimately weak-texture surfaces
@@ -226,13 +213,13 @@ converged config in practice — a plural match graph is a large store rework fo
 workflow most users don't run). Metashape-style chunks stay parked.
 
 ### SP — SuperPoint + LightGlue: remaining slices
-**SP3 — concurrency & memory.** A LightGlue session is ~45 MB **per worker** plus
-WebGPU buffers. Route NN ops through a single dedicated inference worker (or cap
-NN-path concurrency to 1–2); the learned backends are GPU-bound, so per-image
-parallelism helps less than for CPU SIFT. Measure memory + wall-clock into HANDOVER
-§Baselines. **⚠ Conflicts with the P5 matching-speed item below** (which proposes
-2–3 parallel LightGlue workers): measure single-session GPU utilisation, pick one
-stance, update both.
+**SP3 — measure concurrency & memory.** The safety half has shipped: LightGlue is
+pinned to worker 0, `session.run()` is serialized in `core/features/lightglue.js`,
+and the store dispatches LightGlue pairs at concurrency 1. A session is ~45 MB plus
+WebGPU buffers. Measure single-session GPU utilisation, peak memory and wall-clock
+into HANDOVER §Baselines before deciding whether parallel sessions would actually
+help. **⚠ This decides the parallel-LightGlue proposal in the matching-speed item
+below**; do not add 2–3 sessions until the measurement justifies their memory cost.
 
 **SP4 — custom model upload** (Settings ▸ Advanced). User-supplied
 `superpoint.onnx` / `lightglue.onnx` via a new `opfs.js` **Models** section
@@ -294,9 +281,6 @@ Cancel+rerun.
   that). ~2× Stage A, touches all three kernels under the lockstep invariant, and
   needs `memBudget.js` to learn a Stage A peak (it models only fusion). **Only worth
   it if `DEN-02`/`DEN-03` show holes, not freckles.**
-- **P1 — make GPU the dense default.** Flip to on-when-adapter-exists ("Use GPU
-  (recommended)"), keep per-image WASM fallback + first-image A/B validation, keep
-  the opt-out. Gated on `DEN-05`/`DEN-06` passing in both Chrome and Safari.
 - **P3 — OPFS quantize + spill of depth maps.** Persistence shipped; this is the
   memory/size half. **Quantize** the planes (depth → Uint16 + per-map min/max, cost →
   Uint8, normals → 3×Int8 — normals are >half the bytes and Poisson won't notice
@@ -361,7 +345,7 @@ heal — they close the window rather than react to it.
   read-back per image at import — measure it on a film-scan batch (B0-ingest) before
   making it unconditional; doing it lazily (first heal) is the fallback if it hurts.
   Not applicable to a non-persisting session, which has no copy by definition.
-- **IS-2 — liveness in the pre-flight (needs U4/U5 wiring).** A dead source is only
+- **IS-2 — liveness in the Workflow Builder pre-flight.** A dead source is only
   discovered today when something renders or reads pixels, i.e. possibly an hour into
   a run. `core/preflight.js` is the right home: probe each image (one-byte read of the
   blob, the same test `refreshImageUrl` uses) and emit a `warn` naming the images that
@@ -389,11 +373,24 @@ merge, `core/products/cloudEdit.js`). What remains needs *interaction* or touche
   with a caller-supplied mask, so this is a selection-UI task plus one core entry
   point. Still needs the "new derived cloud vs persisted delete mask" decision.
 
-### F11 — scale bars / distance constraints
-For close-range/object work without GCPs: mark two image points across ≥2 views
-(reuse the GCP marking UI), enter a known distance, scale the model and report the
-residual. Metashape staple; small now that the triangulate-marked-points helper
-exists (`core/sfm/gcpTriangulation.js`).
+### F11 — measurement tools (scale shipped 2026-08-25)
+**Scale constraints shipped** (slice 1, WS0–WS2: markers, scale bars, the
+`effectiveFrameSpec` resolver, residual reporting, staleness) — see HANDOVER
+2026-08-25 and `VERIFICATION.csv` ▸ `MEAS-01`…`MEAS-04`, `MEAS-10`…`MEAS-13`,
+none of which has been run in a browser yet. What remains is the ruler.
+- **Measurement tools** (Pix4D rayCloud): ruler/polyline, area (true vs
+  planimetric), elevation profile, volume cut/fill against a surface. Pure
+  geometry in a new `core/products/measure.js`; the one new *interaction*
+  primitive is 3D picking, which `Viewer3D.vue` has none of today. The 2D half
+  (ruler/area/profile on the ortho/DEM in `ProductViewer`) is cheaper than the 3D
+  half and higher-value for aerial work — the pixel↔world conversion is already
+  there. **Ship the pure core with its consumer, not before** — `preflight.js`
+  above is the standing example of why.
+- Every readout goes through `effectiveFrameSpec` and prints its unit: `24.13 m`
+  or `24.13 model units`, never a bare number. That resolver, the `scaled-local`
+  frame and the marker role are already in place, so this is now viewer work.
+Plan: `docs/planning/plan-scale-and-measurement.md` ▸ WS3–WS7 (WS0–WS2 done;
+delete the file once the measurement slices ship; unsigned checks stay in the register).
 
 ### F13 — reference-DEM-constrained bundle adjustment
 Anchor sparse points to an imported reference DEM surface as a weak "the ground is
@@ -421,14 +418,28 @@ with no per-image keypoint stage). The SfM core is already neutral (pairs as
 `{F, matches:[[ia,ib]], inlierCount}`) and descriptor width is carried, not assumed.
 Keep verification + the pairs graph as the neutral meeting point. MAGSAC++ is an
 orthogonal upgrade benefiting every backend — file under `crates/matching`.
-Background reading: `docs/planning/plan-feature-matching-backends.md` (the original
-2026-07 backend plan, kept as reference).
+The original backend plan is retired: SP0–SP2 and the backend-neutral boundary
+shipped; SP3–SP5 above are the remaining concrete work.
 
 ### CC — command console, remaining tiers
-**C2**: `run detect match sparse` chaining (same `runAll` as U4), `stats [matches]`,
+**C2**: `run workflow <name>` / `run detect match sparse` through the shipped
+workflow runner, `stats [matches]`,
 `set sfm.minPnpInlierRatio 0.5` (echo old→new). **C3**: `pair disable|enable <A> <B>`,
 `select <imageName>`, `Cmd/Ctrl-K` open-and-focus, per-command usage. Consider
 auto-deriving the T1 command list from the ribbon table so it can't drift.
+
+### WF — Workflow Builder follow-ups
+The empty-by-default visual builder, project workflows, global templates, execution snapshots,
+interactive pauses, preflight, reuse/warning policies and generated recipe text
+shipped 2026-09-01. Input and export intentionally remain direct user actions rather
+than workflow blocks. Remaining power-user layers, deliberately after browser use:
+- **Quality-gate blocks + branching** over recorded report metrics (registered share,
+  reprojection error, dense coverage). A failed gate may pause/stop or choose a branch.
+- **Editable recipe text** once the v1 JSON schema survives real projects; parse into
+  the same block graph and require lossless visual ↔ text round-tripping.
+- **Parameter sweeps / multi-project batch runs** only after one-project resume,
+  interactive-block and storage-pressure behaviour is proven.
+Acceptance for the shipped builder is `VERIFICATION.csv` ▸ `UI-15`.
 
 ### Remaining interoperability
 Deliberately not started, with the reasons, so they aren't re-litigated:

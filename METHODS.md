@@ -463,7 +463,16 @@ poses, **merge split tracks** (`mergeSplitTracks` — the same physical point th
 got triangulated twice), and a **2-pass track filter** removing observations /
 points on two criteria: reprojection error above `filterMaxReprojPx`, and
 triangulation angle below `filterMinTriAngleDeg` (ill-conditioned near-zero-
-parallax points). BA is re-run after filtering.
+parallax points). The parallax floor is also applied before bulk retriangulation so
+near-parallel candidates are never allocated merely because they reproject well.
+BA is re-run after filtering.
+
+Two-view points remain available while the incremental solve needs them. At final
+output, however, they are omitted automatically when the model already contains a
+healthy core of at least three-view tracks. This specifically removes false matches
+that slide along an epipolar line: they can have low two-image reprojection error but
+have no independent observation confirming their depth. Tiny and genuinely two-camera
+models retain their two-view structure rather than being emptied by this policy.
 
 ---
 
@@ -691,8 +700,11 @@ inverse variances after converting accuracy into SfM units. Two fixed-intrinsics
 rounds let the fit settle, while a bounded reprojection-increase guard rejects a
 noisy-position solution that would materially damage the image measurements.
 When GCP anchors are also present, their similarity defines the common SfM target
-frame for both point and camera priors. Geographic project CRSs and positions
-without altitude remain post-hoc only.
+frame for both point and camera priors. For a geographic project CRS, enabled 3D
+camera positions are first transformed into one survey-centred WGS84
+azimuthal-equidistant frame, with horizontal coordinates, altitude, and uncertainty
+all expressed in metres; this internal frame affects only adjustment, not the
+project's display/export CRS. Positions without altitude remain post-hoc only.
 
 When an imported or EXIF/XMP-derived camera pose also carries a complete
 omega/phi/kappa orientation, its rotation constrains the same BA passes. The
@@ -858,6 +870,64 @@ Logging the guides themselves was tried and removed: guides recompute on every t
 switch, selection and re-render, so those lines reported the app re-rendering rather
 than the user working.
 
+### 6.6 Scale constraints — the gauge, and why the fit is post-hoc
+
+**Method**: weighted linear least squares for a single scalar
+(`core/products/scale.js` `fitScale`), applied as a property of the projection
+*frame* (`core/products/projection.js` `frameFromScaledLocal`).
+
+A similarity transform — 3 translation, 3 rotation, 1 scale — leaves every
+reprojection residual unchanged. Those seven quantities are therefore the
+**gauge freedom** of the reprojection cost (photogrammetry: the *datum defect* of
+a free network), and no amount of imagery determines them. §6.1's georeference
+removes all seven at once from external evidence. A **scale bar** — a measured
+real-world distance between two points the reconstruction can also locate —
+removes exactly one of them, and is what a close-range/object project with no
+GCPs and no CRS has instead.
+
+The fit is one line:
+
+    s = Σ wᵢ·dᵢ_model·dᵢ_known / Σ wᵢ·dᵢ_model²      residualᵢ = s·dᵢ_model − dᵢ_known
+
+with `wᵢ = 1/σᵢ²` from each bar's declared 1σ (missing σ ⇒ weight 1, reported as
+"equal weight", never as a surveyed uncertainty). Endpoints are either a
+**marker** — a point with image observations and no surveyed coordinates,
+triangulated by §6.5's N-view routine — or a **camera centre**, which costs
+nothing because it is already part of the solution.
+
+**Why post-hoc is not an approximation.** Because bundle adjustment is blind to
+the gauge, applying a scale afterwards yields *exactly the same model* that
+constraining the scale inside the adjustment would have yielded. For a single bar
+the two are identical. They diverge only when ≥2 bars **disagree**: a distance
+residual inside the optimiser would then deform the geometry to split the
+difference between them, while the post-hoc fit leaves the shape alone and
+reports the disagreement. That is the more honest answer while the disagreement
+is small, and a signal to re-measure when it is not. The in-optimiser variant is
+also expensive here — a distance residual couples two point blocks, which breaks
+the block-diagonal point structure the Schur complement in `bundle.rs` eliminates
+against — so it stays deferred until a dataset shows a bar residual worth the
+cost. Note `anchor_flat` (§6.2) is *not* a shortcut: it anchors absolute
+positions, which a scale bar does not know.
+
+**Scale never rewrites coordinates.** It rides on the frame:
+`fromSfm(p) = s·base.fromSfm(p)`, `toSfm(c) = base.toSfm(c/s)`, with the basis
+left orthonormal (scaling `east/north/up` instead would make the two maps stop
+being inverses, since `makeFrame` uses them in both directions). Rescaling the
+cloud would invalidate the depth-map staleness stamp, contradict every recorded
+`summary.*` number and have to be redone on each refit.
+
+**Rank, and what a bar means when it did not define the scale.** One resolver
+decides the unit — `CRS georeference > scale constraints > none`. A georeference
+already carries a scale, so when both exist the georeference wins and the bars
+become independent **checks**. Either way *every* bar reports its residual,
+including bars excluded from the fit and bars that cannot currently be measured
+(with the reason): a disagreeing bar is exactly the disagreement the report
+exists to surface, the same stance as §6.1's non-robust accuracy report.
+
+A scale-bar project is **metric with no CRS**, a combination that did not exist
+before. Exports write metric values and no CRS identifier; nothing attaches the
+project CRS merely because coordinates are in metres.
+
 ---
 
 ## 7. Dense multi-view stereo
@@ -916,10 +986,11 @@ support planes, in `core/dense/mvs.js` + `crates/reconstruction/src/mvs.rs`.
   Because the kernel keeps `n_z < 0` (facing the camera), aerial coverage yields
   consistently **outward-oriented** normals — exactly what screened Poisson needs.
 
-**Two backends**, same math: **WASM/CPU** (default) and an opt-in **WebGPU**
-kernel (`workers/gpu/patchmatch.wgsl`, ~0.1 s/img vs minutes on CPU), with
-per-image fallback to CPU and a first-image A/B validation (`GPU validate: … RMS …`,
-must stay < 5e-3).
+**Two backends**, same math: **WebGPU** is preferred automatically when the browser
+exposes it, with **WASM/CPU** as the unsupported/error fallback and an explicit user
+opt-out. The GPU kernel (`workers/gpu/patchmatch.wgsl`, ~0.1 s/img vs minutes on
+CPU) retains per-image fallback and a first-image A/B validation
+(`GPU validate: … RMS …`, must stay < 5e-3).
 
 **Method caveats a colleague will probe:**
 - The plane-induced homography is `H = R + t·nᵀ/d` for plane `n·X = d` with

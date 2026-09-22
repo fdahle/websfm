@@ -1,11 +1,12 @@
 # PLAN — more Auto-Mask strategies (executable spec)
 
-> **Status (2026-08-17): not started.** Open work: TODO ▸ Next ▸ M3/M4.
+> **Status (audited 2026-09-01): not started.** Open work: TODO ▸ Next ▸ M4.
 > Owed manual checks: none yet — add rows to `VERIFICATION.csv` when it ships.
 
 Self-contained implementation spec; execute the steps in order. Read CLAUDE.md
 first (layering rules, worker conventions, the docs roles). Delete this file when
-the feature ships (done-log line into HANDOVER.md).
+the implementation ships (done-log line into HANDOVER.md; manual checks move to
+VERIFICATION.csv).
 
 ## Goal
 

@@ -1,6 +1,6 @@
 # Plan — reference rasters: raw storage, COG, draw-time styling
 
-> **Status (2026-08-17): Phase 1 (the COG writer) shipped 2026-07-20; Phase 0 spikes
+> **Status (audited 2026-09-01): Phase 1 (the COG writer) shipped 2026-07-20; Phase 0 spikes
 > are the next action and are a go/no-go for phases 3–5.** Open work: TODO ▸ Now ▸ RR.
 > Owed manual checks: `VERIFICATION.csv` ▸ `RAS-05` (spike 0a, EPSG:3031 under
 > WebGLTileLayer) and `RAS-06` (spike 0d, real timings); the *current* raster path's

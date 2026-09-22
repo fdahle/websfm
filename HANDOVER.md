@@ -255,6 +255,106 @@ fiducials; self-calibration (A2) + fiducials (F4) are the code-side support.
 feature ships (the documented rule), so older links point at files that now exist
 only in git history — that is expected, not rot. Live plans are in `docs/planning/`.*
 
+- **2026-09-11 · Senior-review fixes and regression coverage.** Confirmation keyboard
+  handling and shared modal focus; immutable reconstruction/product generations;
+  pending-save barriers and retry feedback; cross-tab index merging and project
+  leases; georeference evidence invalidation and native CRS units; Float64 import,
+  editing and persistence with relative render buffers; bounded worker ZIP imports,
+  validated LAS/LAZ allocation and incremental LAZ compression; typed DEM staging;
+  versioned ORT runtime paths; cache-presence and spreadsheet-safe CSV fixes.
+  Extracted frame resolution and persistence helpers, added incremental TypeScript,
+  Vue binding checks, JavaScript correctness lint and GitHub Actions. Local checks:
+  1,470 unit/store tests, 8 Chrome integration tests, 40 native Rust tests (5 ignored),
+  static checks, production build and real LAZ WASM round-trip passed. Rebuilt all
+  six WASM packages and recorded source/artifact hashes. npm reports zero known
+  vulnerabilities after dependency updates. Compatibility and import budgets are
+  documented in README; large real-data/GPU and deployed-server checks remain in
+  VERIFICATION.csv.
+
+- **2026-09-01 · Geographic camera priors now constrain sparse BA automatically.**
+  `core/sfm/cameraPriors.js` converts enabled 3D positions from a geographic project
+  CRS into one survey-centred azimuthal-equidistant metre frame, including an
+  antimeridian-safe centre and canonical EXIF altitude/uncertainty. Projected-CRS
+  behaviour is unchanged, and the project CRS remains the display/export CRS.
+  Focused unit coverage pins metric baselines and EXIF metre sidecars; a real-browser
+  folded-block rerun remains in `VERIFICATION.csv`.
+
+- **2026-09-01 · Visual Workflow Builder replaces one-click U4.** Reconstruct ▸
+  Workflow now opens a full-screen ordered block builder rather than hiding the
+  pipeline behind “Run All”. One pure, versioned registry (`core/workflow.js`) owns
+  workflow-suitable processing commands from preparation through reconstruction,
+  products and evaluation; input and export remain explicit user actions outside
+  recipes. Automatic blocks call the existing `usePipeline` runners,
+  while commands requiring a file picker or human judgement open their existing
+  modal and pause until the user confirms completion. Per-workflow defaults and
+  per-block overrides choose `Reuse valid` / `Ask` / `Always rerun` and
+  `Pause` / `Continue` / `Stop` on warnings. Dependency preflight, drag reorder,
+  disable/duplicate, Run / Run selected / Run from selected, live status, execution
+  preview, an empty-by-default canvas, Guided/Standard/Expert disclosure and
+  generated recipe text are in
+  `WorkflowBuilderModal.vue`; no second reconstruction implementation exists.
+  `useWorkflowsStore` persists project-owned copies + the latest 30 immutable run
+  snapshots in `workflows.json`; global templates live in localStorage and are
+  copied—not linked—into a project. `useWorkflowRunner` owns sequential execution,
+  pauses and snapshots. The console command `workflow` opens the same builder.
+  A 2026-09-01 UI follow-up aligned the builder with shared modal controls and
+  migrated only untouched auto-generated v1 starters to the empty canvas.
+  Automated: 1,395 JS tests (new schema/store/runner coverage), typecheck and
+  production build pass. Browser acceptance remains `VERIFICATION.csv` ▸ `UI-15`;
+  quality-gate branching and editable text are explicit TODO ▸ WF follow-ups.
+- **2026-09-01 · Planning/TODO consolidation.** Audited every file in
+  `docs/planning/` against the current stores, workers, UI and verification register;
+  added `docs/planning/README.md` as the live-plan index. Retired six specs whose
+  implementation is complete or whose remaining idea is already owned elsewhere:
+  fiducial detection/calibration, dense sky/vegetation cleanup, the Evaluate/Quality
+  hub, the original learned feature-backend foundation, professional interop formats
+  and the SfM interop hub.
+  Their historical detail remains in git; their open acceptance checks remain in
+  `VERIFICATION.csv`, and mesh texturing / SP3–SP5 remain in `TODO.md`. Refreshed the
+  four live plan headers, narrowed SP3 to its still-unmeasured concurrency decision,
+  aligned the plan lifecycle rule in `CLAUDE.md`/`TODO.md`, corrected the register
+  summary to **123 checks / 47 P1**,
+  and changed the stale `DEN-05` wording from deciding GPU-default work to validating
+  the automatic default that shipped 2026-08-25. No code changed.
+- **2026-08-25 · WebGPU is now the automatic compute default + CPU PatchMatch hot-loop
+  cleanup.** `useComputeSettings` enables GPU on first use when `navigator.gpu` is
+  exposed, while preserving a stored explicit opt-out; adapter acquisition and every
+  per-image failure still fall back to WASM, and first-image GPU↔CPU validation remains.
+  The WASM kernel's innermost `agg_cost` no longer allocates and fully sorts a `Vec`
+  for every hypothesis: it keeps only the requested best-K costs in a fixed 16-entry
+  stack array. The rebuilt reconstruction WASM is 135,556 → 130,014 bytes. Automated:
+  1,378 JS tests, 12 optimized Rust tests, typecheck, production build, release check.
+  Browser acceptance remains `VERIFICATION.csv` ▸ `DEN-05`/`DEN-06`.
+- **2026-08-25 · Scale constraints (F11 slice 1 — WS0–WS2).** An object-capture
+  project (no GCPs, no CRS) can now be given a metric unit from a measured
+  distance. Pure fit in `core/products/scale.js` (weighted LSQ `fitScale`, mm/cm/m
+  conversion, `scaleEvidenceDigest`); the factor is applied as a property of the
+  *frame* — `frameFromScaledLocal` in `core/products/projection.js`, descriptor kind
+  `scaled-local` in `workers/ops/products.js` — never by rescaling the cloud, which
+  would invalidate the depth-map staleness stamp and every recorded `summary.*`
+  number. `useReconstructionStore.effectiveFrameSpec` is THE unit resolver
+  (`georeference > scale bars > none`) and DEM/ortho/cloud/mesh export now all ask it
+  instead of choosing independently. Evidence (`useScaleBarsStore` /
+  `scalebars.json`) is split from the derived fit (`reconstruction.json.scaleFit`),
+  which carries a cloud stamp + evidence digest and is refused when either moves
+  (`stores/reconstruction/scaling.js` `scaleFitStatus`); a DEM/ortho records the
+  frame it was built in and shows an "outdated frame" banner after a refit. New
+  **`marker`** role = image marks with no surveyed position; the ground-control gate
+  is now one explicit `core/io/gcp.js` `isGroundControl` (`role === 'control'`, never
+  "has finite coordinates") shared by the georef fit, its LOO prediction, anchored BA
+  and the worker marshalling, so a marker can never become a constraint. UI: Tools ▸
+  Georeferencing ▸ **Scale Bars** (`ScaleBarsModal`), the GCP table/toolbar/right-click
+  renamed **Control & Markers** with two explicit create actions, a Scale Bars tab in
+  Quality Report ▸ Accuracy + a section in the exported HTML report + `scaleFit` in the
+  Debug digest. Glossary: `scale-bar`, `gauge-freedom`. Method: METHODS.md §6.6
+  (why post-hoc is exact, not an approximation). 38 new tests
+  (`scale.test.js`, `scaling.test.js`, `projection.test.js`, `gcp.test.js`);
+  `npm test` 1373 pass, `npm run typecheck` clean, `npm run build` clean, App.vue +
+  every touched SFC re-checked for `_ctx.*` leaks (still empty). **Not browser-run** —
+  `VERIFICATION.csv` rows `MEAS-01`…`MEAS-04`, `MEAS-10`…`MEAS-13`.
+  Remaining F11 slices (measurement tools, WS3–WS6) still specified in
+  `docs/planning/plan-scale-and-measurement.md`.
+
 - **2026-08-19 · Up-front mobile-device notice.** websfm is a desktop app (WASM compute,
   OPFS projects, ribbon+sidebar+canvas layout) with no mobile story, so a phone/tablet
   user now gets a blocking acknowledgement before anything else:

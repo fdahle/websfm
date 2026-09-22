@@ -21,9 +21,15 @@ non-WGS84 projects (Antarctica), so CRS handling is first-class.
   with its pass criteria and columns for status/result/date. It exists because
   "shipped" and "verified" diverged badly once the code outran the browser runs;
   checklists must live there, not scattered through TODO.md and the plan files.
-- **`docs/planning/plan-*.md`** — executable specs for features not yet shipped (the
-  step-by-step *how*; TODO.md stays the source of truth for *whether/when*). Delete a
-  plan file once its feature has shipped **and** its verification rows are signed off.
+- **`src/guide/*.md`** — the in-app, user-facing guide: task-oriented instructions
+  and parameter advice for the functionality people use. **A user-visible function
+  change is incomplete until its guide article is updated in the same change** (or
+  a new article is added). This includes changed workflows, prerequisites, defaults,
+  labels, supported formats, side effects, and output behaviour.
+- **`docs/planning/`** — executable specs for open implementation work (the
+  step-by-step *how*; TODO.md stays the source of truth for *whether/when*), indexed
+  by `docs/planning/README.md`. Delete a plan once its implementation closes; any
+  unsigned browser/external checks remain solely in `VERIFICATION.csv`.
 When an item ships: delete it from TODO.md, add one done-log line to HANDOVER.md
 (date · what · where it lives), add any owed manual checks as VERIFICATION.csv rows,
 fold any *evergreen* code lesson into this file, and if the *method* changed, update
@@ -100,7 +106,9 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
   reprojects onto, from a mesh / fitted plane / resampled DEM (see Pipelines ▸ 5),
   `mesh.js` screened-Poisson mesh orchestrator
   — byte-buffer parse + nearest-voxel vertex-colour transfer, wasm solver injected,
-  `projection.js`, `georef.js`, `exporters.js` — cloud/mesh/DEM/ortho writers incl.
+  `projection.js`, `georef.js`, `scale.js` — the known-distance ("scale bar") fit:
+  weighted-LSQ `fitScale` + `frameFromScaledLocal` (in projection.js) + the
+  evidence digest, `exporters.js` — cloud/mesh/DEM/ortho writers incl.
   `prepareCloudForExport` (georef-then-voxel-downsample, streams the dense
   accumulator — no per-point objects) + `meshToObj`/`meshToStl`, `geotiff.js`
   (sync writers; DEFLATE via an injected `deflate` callback since `CompressionStream`
@@ -407,10 +415,11 @@ self-contained, file-based project format.
   row / preview / graph-edge double-click; `MatchGraph.vue` is the graph view).
 - `useReconstructionStore` — the store file itself keeps cloud state, the pipeline
   runners (reconstruct / depth / densify / mesh / DEM / ortho / editClouds) and
-  persist/restore; three concerns live beside it in **`stores/reconstruction/`** —
+  persist/restore; four concerns live beside it in **`stores/reconstruction/`** —
   `cloudSerde.js` (cloud ↔ on-disk shape, incl. the CSR view-track layout and the
   legacy readers; round-trip tested), `depthMapCache.js` (the lazy depth-map cache
-  + its persistence), `georeferencing.js` (the SfM→CRS fit + accuracy reports).
+  + its persistence), `georeferencing.js` (the SfM→CRS fit + accuracy reports),
+  `scaling.js` (the scale-bar fit + per-bar residual report + staleness).
   They are composed *in place* of the code they replaced, so every consumer still
   sits below them — moving a factory call up will TDZ. Its public surface is
   unchanged by the split and 17 files depend on it: **treat the setup `return`
@@ -430,17 +439,21 @@ self-contained, file-based project format.
   (absent ⇒ first sparse, back-compat). **Cloud shape differs by kind**: a
   `kind:'sparse'` cloud is an array of `{x,y,z,color,views,viewsPx}` point objects
   (it carries per-point tracks); a `kind:'dense'` cloud is **flat** —
-  `{ count, pos:Float32Array(3N), col:Uint8Array(3N), nrm?:Float32Array(3N) }`
+  `{ count, pos:Float32Array|Float64Array(3N), col:Uint8Array(3N), nrm?:Float32Array(3N) }`
   (`DenseCloud` in `types.ts`), no per-point objects (millions of fused points as
   objects was the OOM's main-thread tail); a `kind:'mesh'` cloud is a flat indexed
-  triangle mesh — `{ count /* triangles */, nVerts, pos:Float32Array(3·nVerts),
+  triangle mesh — `{ count /* triangles */, nVerts, pos:Float32Array|Float64Array(3·nVerts),
   idx:Uint32Array(3·count), col:Uint8Array(3·nVerts) }` (`MeshCloud`). Every dense
-  consumer branches on kind (`Viewer3D` hands `pos` straight to Three.js as
-  `THREE.Points`, or builds an indexed `THREE.Mesh` for `'mesh'`;
+  consumer branches on kind (`Viewer3D` constructs relative Float32 render buffers
+  for `THREE.Points` or an indexed `THREE.Mesh`; authoritative imported/global
+  coordinates remain Float64 through editing and persistence;
   `cloudToPly`/DEM marshalling/persist accept dense+sparse, `meshToPly`/`meshToGlb`
   handle mesh; sidebar count = points, or triangles for a mesh; DEM/ortho/densify
   input pickers select `kind:'dense'` so mesh clouds are never a source). On-disk
-  dense/mesh `pos` is widened to Float64 to share the sparse sidecar format; dense
+  dense/mesh `pos` is widened to Float64 to share the sparse sidecar format;
+  `posType` retains computed Float32 storage without narrowing Float64 imports.
+  Reconstruction version 3 commits immutable sidecar generations through metadata
+  (`binaryFiles`), while legacy inline/version-2 documents remain readable. Dense
   `nrm` (Float32 3N world-space normals, the Poisson mesh input — reused PatchMatch
   plane normals) and mesh `idx` are extra per-cloud sidecar bins (`nrm`/`idx` keys),
   **absent on old projects ⇒ undefined, do NOT heal** (legacy object-shape dense
@@ -484,6 +497,18 @@ self-contained, file-based project format.
   (`openPlan` / `reconnectProjectFolder` / `createFolderProject` /
   `adoptFolderProject` / `moveProjectTo{Folder,Browser}`). See
   "Project storage" above.
+- **`useScaleBarsStore`** — scale-bar *evidence* (`scalebars.json`): items
+  `{ id, name, a, b, knownDistanceM, accuracyM, displayUnit, enabled }` with each
+  endpoint `{ kind:'marker'|'camera', id }`. Metres are canonical; `displayUnit`
+  (mm/cm/m) only records what the user typed, and `updateBar` is the single
+  conversion boundary. The derived fit is NOT here — see Scale & units.
+- **`useWorkflowsStore`** — project-owned visual recipes + the latest 30 immutable
+  run snapshots (`workflows.json`). Global templates are machine-level preferences
+  in localStorage; applying one makes an independent project copy, so editing a
+  template never mutates an old project. `core/workflow.js` is the versioned pure
+  schema/registry/preflight/text boundary; `useWorkflowRunner` executes automatic
+  blocks through `usePipeline` and pauses interactive blocks over the existing
+  ribbon command—never duplicate a command modal or a stage runner in the builder.
 - `useSensorsStore`, `useGcpsStore`, `useFootprintsStore`,
   `usePosesStore`, `useModalsStore`.
 
@@ -744,7 +769,8 @@ self-contained, file-based project format.
    *request*, not a descriptor, so the payload must also carry cameras + a point
    sample — `buildLocalFrame` derives the up-vector from the scene.
    Optional georeferencing via `core/products/georef.js` (Horn 7-param similarity,
-   SfM centres ↔ imported poses). Exports in `core/products/exporters.js` +
+   SfM centres ↔ imported poses), or, for a project with no CRS, a **scale
+   constraint** (see Scale & units below). Exports in `core/products/exporters.js` +
    `core/products/geotiff.js` (PLY, model JSON, DEM GeoTIFF/.asc, ortho GeoTIFF/PNG+.wld)
    through `ExportModal.vue`. Products persist to OPFS (`products/…`).
 6. **Cloud editing** (`core/products/cloudEdit.js` + `workers/ops/cloud.js`, Tools ▸
@@ -814,24 +840,76 @@ block there, pushing the rest above the frontmatter (i.e. "missing frontmatter")
 `glossary.test.js` pins both, plus id↔filename, a non-empty title/summary/body, and
 that every explicit `help:` id resolves.
 
+## Scale & units
+An SfM model is up to scale. Four invariants carry the fix (METHODS.md §6.6):
+- **Scale lives in the FRAME, never in the coordinates.** `frameFromScaledLocal`
+  (`core/products/projection.js`) wraps a local frame with a scalar —
+  `fromSfm(p) = s·base.fromSfm(p)`, `toSfm(c) = base.toSfm(c/s)` — and the basis
+  stays **orthonormal**; scaling `east/north/up` makes `fromSfm`/`toSfm` stop
+  being inverses, since `makeFrame` uses them in both directions. Rescaling the
+  cloud instead would invalidate the depth-map staleness stamp and contradict
+  every recorded `summary.*` number. The frame descriptor kind is
+  `scaled-local` (worker: `workers/ops/products.js` `rebuildFrame`).
+- **One resolver, `useReconstructionStore.effectiveFrameSpec`.** Evidence rank is
+  `CRS georeference > scale constraints > none`; it returns
+  `{ frameSpec, unit, scale, source, crs, stamp }` and every product builder,
+  readout, report and export asks it. A scalar-only getter would not do —
+  horizontal distance and Δz also need the resolved orientation. Two parallel
+  unit systems is the failure mode this exists to prevent.
+- **A fit is a CACHE, so it is stamped.** `reconstruction.json.scaleFit` carries
+  `sourceStamp {id, createdAt}` of the main sparse cloud plus an
+  `evidenceDigest` over the enabled bars and the marks of the markers they
+  reference (`scaleEvidenceDigest`); `stores/reconstruction/scaling.js`
+  `scaleFitStatus` refuses it when either moves, and `productFrameStatus` flags a
+  DEM/ortho built in a frame the project has since left. Stale metres are worse
+  than honest model units.
+- **Never print a bare number, and never fabricate a metre.** With no scale a
+  length reads `… model units`; a scale-bar project is **metric with NO CRS**, a
+  combination that did not exist before — export paths write metric values and no
+  CRS identifier (`crsInfo` returns null for `crs:'local'`, `geoKeysForEpsg(null)`
+  writes user-defined). Never attach the project CRS just because the numbers are
+  metres.
+Evidence vs derived state is split the same way GCPs are: the bar *records* live
+in `useScaleBarsStore` / `scalebars.json`, the fit in `reconstruction.json`.
+Bars **always** report a residual — including bars a georeference outranks (they
+become checks), bars the user unchecked, and bars that cannot be measured (with
+the reason). Nothing is dropped from the report, only from the fit.
+
 ## CRS / GCP / poses
 Per-project working CRS (proj4). GCPs, footprints, and camera poses store positions in
 the project CRS and are reprojected on CRS change (`handleSetCrs` in App.vue). See memory
 `gcp-crs-architecture` and `works-in-antarctica`.
+
+There are **three roles**, and the difference is a *constraint* boundary, not a
+label: `control` (constrains georeferencing + anchored BA), `check` (surveyed,
+deliberately withheld) and `marker` (image observations, **no** surveyed
+position — a scale-bar endpoint). `core/io/gcp.js` **`isGroundControl`** is the
+one gate every constraint site asks (georef fit, its LOO prediction, anchored BA,
+the worker marshalling); it tests `role === 'control'` **explicitly**. Null
+coordinates on a marker are useful representation, **not** the safety boundary —
+a migrated/imported/edited marker with finite numbers must still not constrain
+anything. `normalizeGcpRole` therefore round-trips `'marker'`, and
+`useGcpsStore.addPoint({ role })` seeds a marker's x/y/z all null. **Never create
+a control point and re-role it** — it keeps the coordinates it was born with,
+which is why every create affordance is two explicit actions.
 
 A GCP has surveyed ground coords (`x/y/z` + per-axis `accuracyX/Y/Z`), optional
 XY/XZ/YZ correlations, accuracy provenance and vertical datum. Pixel observations
 store `{ imageId, imageName, px, py, accuracyX, accuracyY }`; `accuracyImgX/Y`
 are defaults for new marks. Enabled controls constrain the solve, checkpoints are
 reported independently, and unknown/invalid covariance never constrains. GCPs are
-created three ways: CSV import (`GcpImportModal`),
-the GCP table's "+ Add GCP" (`x/y = 0`, **`z = null`** until measured or filled;
-zero is a valid sea-level elevation, never a missing-value sentinel), edited inline —
-`useGcpsStore.addGcp`), or **right-click in the image view**. That right-click
-opens `ViewerImage.vue`'s general context menu (copy pixel/colour, zoom, fit)
-whose "Add GCP here…" entry switches the same popup to a new-vs-existing chooser
-("New GCP here" → `add-gcp`; an existing name → `mark-gcp`), both landing in
-`setObservation`. The image view also shows a magnifier **loupe** (when the GCP
+created three ways: CSV import (`GcpImportModal`, surveyed ground control only —
+that command stays aerial-only), the **Control & Markers** table's "+ Add control" /
+"+ Add marker" (a control seeds `x/y = 0` with **`z = null`** until measured or
+filled — zero is a valid sea-level elevation, never a missing-value sentinel; a
+marker seeds all three null), edited inline — `useGcpsStore.addPoint({ role })`),
+or **right-click in the image view**. That right-click opens `ViewerImage.vue`'s
+general context menu (copy pixel/colour, zoom, fit) whose "Add control/marker
+here…" entry switches the same popup to a new-vs-existing chooser ("New control
+point here" / "New marker here" → `add-gcp` with the role; an existing name →
+`mark-gcp`), both landing in `setObservation`. `sceneType` only **orders** the two
+create actions (object ⇒ marker first); both are always one click away, because
+the alternative — create then re-role — is the coordinate hazard above. The image view also shows a magnifier **loupe** (when the GCP
 overlay is on) and each marker's **live reprojection error** from the accuracy
 report; the sidebar's GCP detail lists per-image observations (jump-to-image +
 remove), flags GCPs with <2 marks (unusable), and right-clicking a GCP row
@@ -1081,6 +1159,14 @@ propagate covariance rather than retaining stale numeric sigmas.
   the bar at 100% with BA, retriangulation and track filtering still to come. A stage
   with no countable work at all (DEM, cloud edit) opens `{ indeterminate: true }` and
   resolves automatically if a real `total > 1` ever arrives.
+- **A workflow is orchestration, not another pipeline.** `core/workflow.js`
+  block ids are the existing ribbon/console dispatch ids. Automatic reconstruction
+  blocks resolve the same defaults/preset deltas/unit conversions as their modal and
+  call `usePipeline`; interactive blocks open that command and wait. Output reuse asks
+  the live stores after every block—their existing invalidation/staleness rules define
+  “valid”, never a second workflow-owned cache flag. The visual builder and generated
+  recipe text are views over the same versioned JSON; when editable text lands it must
+  round-trip losslessly into that schema rather than become a second source of truth.
 - **Elapsed and remaining are formatted differently on purpose** (`utils/timeFormat.js`):
   elapsed is *measured*, so `formatClock` shows M:SS (the ticking seconds double as the
   liveness signal on a long run); remaining is *estimated*, so `formatRemaining` rounds
