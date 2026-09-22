@@ -28,3 +28,7 @@ public/models/*.onnx
 # Note: src/wasm/** (the generated WASM bindings) is intentionally NOT ignored,
 # so the app runs on a fresh clone without needing the Rust toolchain.
 
+
+# Browser test artifacts
+playwright-report/
+test-results/

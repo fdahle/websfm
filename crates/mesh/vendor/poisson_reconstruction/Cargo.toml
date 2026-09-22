@@ -2,7 +2,8 @@
 # MIT OR Apache-2.0. Patched for wasm32-unknown-unknown: rayon removed and its two
 # `par_iter_mut()` call sites replaced with sequential `iter_mut()` (wasm without
 # the atomics/threads feature cannot spawn rayon's worker threads — it panics at
-# runtime). No other changes. Upstream:
+# runtime). The unused upstream serde cfg is also removed because this private
+# wasm-only copy exposes no serde feature or dependency. Upstream:
 # https://github.com/ForesightMiningSoftwareCorporation/PoissonReconstruction
 [package]
 name = "poisson_reconstruction"

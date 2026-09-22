@@ -23,7 +23,8 @@
 // PREFIX so ORT fetches its own wasm by the exact filename its glue expects. This
 // avoids the `?url` route, which handed the bundle a build it couldn't bind to
 // ("ke.$b is not a function" — a wasm/glue version mismatch). Keep public/ort/ in
-// sync with the onnxruntime-web version.
+// sync with the onnxruntime-web version. Versioned paths also bypass older
+// deployments that cached the unversioned loaders with a one-year lifetime.
 
 let ortPromise = null
 
@@ -38,7 +39,7 @@ export function getOrt(onLog) {
       // the CPU EP), not an error. Keep genuine errors.
       ort.env.logLevel = 'error'
       const base = (import.meta.env && import.meta.env.BASE_URL) || '/'
-      ort.env.wasm.wasmPaths = `${base}ort/`
+      ort.env.wasm.wasmPaths = `${base}ort/${ort.env.versions.web}/`
       if (!globalThis.crossOriginIsolated) ort.env.wasm.numThreads = 1
       return ort
     })()
@@ -80,7 +81,7 @@ export function resolveBackend() {
 export async function createSession(model, opts = {}, onLog, backendOverride) {
   const ort = await getOrt(onLog)
   // `backendOverride` lets a caller pin a backend regardless of the machine —
-  // e.g. LightGlue drives this to try 'webgpu' (opt-in) or 'wasm', managing its
+  // e.g. LightGlue drives this to try 'webgpu' (when useGpu is enabled) or 'wasm', managing its
   // own GPU→CPU fallback in core/features/lightglue.js rather than trusting ORT's EP order.
   const backend = backendOverride || await resolveBackend()
   onLog?.(`ORT: compiling wasm + creating session (${backend})…`)

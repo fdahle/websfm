@@ -1,3 +1,4 @@
+import { ortVersion } from './ort-version.mjs'
 import { access, readFile, stat } from 'node:fs/promises'
 
 const dist = new URL('../dist/', import.meta.url)
@@ -27,8 +28,8 @@ await Promise.all([
   requireFile('index.html'),
   requireFile('LICENSE', 500),
   requireFile('favicon.svg', 100),
-  requireFile('ort/ort-wasm-simd-threaded.mjs', 1_000),
-  requireFile('ort/ort-wasm-simd-threaded.wasm', 1_000_000),
+  requireFile(`ort/${ortVersion}/ort-wasm-simd-threaded.mjs`, 1_000),
+  requireFile(`ort/${ortVersion}/ort-wasm-simd-threaded.wasm`, 1_000_000),
 ])
 
 if (!externalModels) {
