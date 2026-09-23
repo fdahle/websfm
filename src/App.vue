@@ -128,7 +128,7 @@ const imagesStore = useImagesStore()
 const { images, selectedId, keypointReadyImages, pendingWorkCount: pendingImageWork } = storeToRefs(imagesStore)
 const {
   imageById, selectImage,
-  addImages, removeImage,
+  addImages, removeImage, renameImage,
   updateMask, updateDepth, detectAll, clearKeypoints,
   setFiducialObservation, setFiducialDetection, addFiducialObservations,
 } = imagesStore
@@ -200,7 +200,7 @@ const { sidebarWidth, startSidebarResize } = useSidebarResize()
 // Project-scoped store; restore/clear run through the project-store registry.
 const reconstructionStore = useReconstructionStore()
 const { cameras, sparseCameras, reconStatus, clouds, selectedCloudId, selectedCloud, mainSparseId, mainSparseCloud, depthMaps, depthMapCount, dem, demSource, ortho, orthoSurfaces, georef, canGeoreference, canGeoreferenceGcps, denseSummary, summary: reconSummary } = storeToRefs(reconstructionStore)
-const { reconstruct, importColmapModel, importInteropModel, importCloud, editClouds, computeDepthMaps, densify, generateDem, generateOrtho, generateMesh, georeference, effectiveFrameSpec, gcpAccuracyReport, gcpGuides, gcpEstimate, selectCloud, setCloudStyle, setCloudVisible, removeCloud, renameCloud, setMainSparse, clearDerived: clearReconstructionDerived } = reconstructionStore
+const { reconstruct, importColmapModel, importInteropModel, importCloud, editClouds, computeDepthMaps, densify, generateDem, generateOrtho, generateMesh, georeference, effectiveFrameSpec, gcpAccuracyReport, gcpGuides, gcpEstimate, selectCloud, setCloudStyle, setCloudVisible, removeCloud, renameCloud, removeProduct, renameProduct, setMainSparse, clearDerived: clearReconstructionDerived } = reconstructionStore
 
 async function clearCurrentProjectDerived() {
   await clearReconstructionDerived()
@@ -216,7 +216,43 @@ const {
   rasters, pendingRasters, pendingWorkCount: pendingRasterWork,
   sources: rasterSources, hasReferenceDem, orthoRasters: referenceOrthos, mapRasters,
 } = storeToRefs(externalStore)
-const { importRaster, setRasterKind, setRasterStyle, setVerticalInfo, setRasterOnMap, setRasterOpacity, removeRaster, rasterById, probeRasterAt, ensureRasterLoaded } = externalStore
+const { importRaster, setRasterKind, setRasterStyle, setVerticalInfo, setRasterOnMap, setRasterOpacity, renameRaster, removeRaster, rasterById, probeRasterAt, ensureRasterLoaded } = externalStore
+
+function updateTabTitle(tabId, title) {
+  const tab = tabs.value.find((candidate) => candidate.id === tabId)
+  if (tab) tab.title = title
+}
+
+function renameImageFromSidebar({ id, name }) {
+  if (!renameImage(id, name)) return
+  updateTabTitle(`img:${id}`, imageById(id).name)
+  // Match tabs cache their pair label, so refresh any that mention this image.
+  for (const tab of tabs.value) {
+    if (tab.type !== 'match' || (tab.imageIdA !== id && tab.imageIdB !== id)) continue
+    const nameA = imageById(tab.imageIdA)?.name ?? tab.imageIdA
+    const nameB = imageById(tab.imageIdB)?.name ?? tab.imageIdB
+    tab.title = `${nameA.replace(/\.[^.]+$/, '')} ↔ ${nameB.replace(/\.[^.]+$/, '')}`
+  }
+}
+
+function computedProductName(kind) {
+  const product = kind === 'ortho' ? ortho.value : dem.value
+  return product?.name || (kind === 'ortho' ? 'Orthophoto' : 'DEM')
+}
+
+function openComputedProductTab(kind) {
+  openProductTab(kind, computedProductName(kind))
+}
+
+function renameProductFromSidebar({ kind, name }) {
+  if (renameProduct(kind, name)) updateTabTitle(`product:${kind}`, computedProductName(kind))
+}
+
+async function renameRasterFromSidebar({ id, name }) {
+  const trimmed = name?.trim()
+  if (!trimmed || !(await renameRaster(id, trimmed))) return
+  updateTabTitle(`raster:${id}`, trimmed)
+}
 
 const symbologyCloudId = ref(null)
 const symbologyCloud = computed(() => clouds.value.find(c => c.id === symbologyCloudId.value) ?? null)
@@ -1237,6 +1273,18 @@ const {
   confirmRemoveGcp, confirmRemoveShapefile, confirmClearKeypoints, confirmRemoveMatches,
 } = useConfirmations({ closeTabForImage, closeTabForRaster, removeGcpAndCloseTab })
 
+function confirmRemoveProduct(kind) {
+  const name = computedProductName(kind)
+  askConfirm({
+    title: `Remove ${kind === 'ortho' ? 'orthophoto' : 'DEM'}?`,
+    message: `Remove “${name}”? The product can be rebuilt, but this can't be undone.`,
+    onConfirm: async () => {
+      closeTab(`product:${kind}`)
+      await removeProduct(kind)
+    },
+  })
+}
+
 // Escape-closes-top-most-modal (pulls modal state from the stores; the few local
 // bits are injected). Used by the global keydown handler in the bootstrap below.
 const { closeTopModal } = useModalEscape({
@@ -1313,7 +1361,7 @@ async function convertImageToRaster(imageId) {
       if (!file) {
         try {
           const blob = await opfs.loadImageBlob(projects.currentProjectId, img.uuid)
-          if (blob) file = new File([blob], img.name, { type: 'image/tiff' })
+          if (blob) file = new File([blob], img.sourceName ?? img.name, { type: 'image/tiff' })
         } catch { /* fall through to the warning below */ }
       }
       if (!file) {
@@ -2202,10 +2250,13 @@ function onRibbonPick(event) {
         :rasters="rasters"
         :pending-rasters="pendingRasters"
         :open-tab-ids="openTabIds"
-        @open-product="openProductTab"
+        @open-product="openComputedProductTab"
+        @remove-product="confirmRemoveProduct"
+        @rename-product="renameProductFromSidebar"
         @open-raster="openRasterTab"
         @convert-raster-to-image="(id) => onRasterImportAsImage({ id })"
         @remove-raster="confirmRemoveRaster"
+        @rename-raster="renameRasterFromSidebar"
         @set-raster-kind="({ id, kind }) => setRasterKind(id, kind)"
         @style-raster="(id) => (rasterStyleId = id)"
         @set-raster-on-map="({ id, onMap }) => setRasterOnMap(id, onMap)"
@@ -2221,6 +2272,7 @@ function onRibbonPick(event) {
         @add-images="addImagesRouted"
         @import-file="openDroppedImport"
         @remove-image="requestRemoveImages"
+        @rename-image="renameImageFromSidebar"
         @convert-image-to-raster="convertImageToRaster"
         @remove-gcp="confirmRemoveGcp"
         @select-gcp="selectGcp"

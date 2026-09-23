@@ -285,6 +285,39 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     persist()
   }
 
+  function productForKind(kind) {
+    if (kind === 'dem') return dem.value
+    if (kind === 'ortho') return ortho.value
+    return null
+  }
+
+  // Computed raster products have stable kind-based identities (one DEM and one
+  // orthophoto), so their user-facing names can change independently of every
+  // consumer. Replacing the shallow-ref object also updates sidebar/viewer users.
+  function renameProduct(kind, name) {
+    const product = productForKind(kind)
+    const trimmed = name?.trim()
+    if (!product || !trimmed || trimmed === product.name) return false
+    const previous = product.name || (kind === 'ortho' ? 'Orthophoto' : 'DEM')
+    const renamed = { ...product, name: trimmed }
+    if (kind === 'dem') dem.value = renamed
+    else ortho.value = renamed
+    log(`Renamed product "${previous}" → "${trimmed}"`, 'info', 'Products', { channel: 'activity' })
+    if (isPersisting()) opfs.saveProduct(projects.currentProjectId, kind, renamed).catch(() => {})
+    return true
+  }
+
+  async function removeProduct(kind) {
+    const product = productForKind(kind)
+    if (!product) return false
+    const name = product.name || (kind === 'ortho' ? 'Orthophoto' : 'DEM')
+    if (kind === 'dem') dem.value = null
+    else ortho.value = null
+    if (isPersisting()) await opfs.deleteProduct(projects.currentProjectId, kind).catch(() => {})
+    log(`Removed product "${name}"`, 'info', 'Products', { channel: 'activity' })
+    return true
+  }
+
   // Persist only when a project is open and OPFS is usable (see useProjectsStore).
   const isPersisting = () => projects.isPersisting
 
@@ -1026,7 +1059,11 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
         { points, cameras, frame: frameSpec, settings },
         { transfer: [pos.buffer], onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f) },
       )
-      dem.value = { ...grid, frameStamp: frameStampOf(resolved) }
+      dem.value = {
+        ...grid,
+        name: dem.value?.name || 'DEM',
+        frameStamp: frameStampOf(resolved),
+      }
       // A new DEM invalidates an ortho BUILT ON IT — but not one built over the
       // mesh/plane surface, which this run didn't touch. (An ortho with no
       // recorded surface predates the choice, so it was a DEM ortho.)
@@ -1168,6 +1205,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
       // this run never re-projected.
       ortho.value = {
         ...res,
+        name: ortho.value?.name || 'Orthophoto',
         frameStamp: (settings.surface ?? 'dem') === 'dem'
           ? (dem.value?.frameStamp ?? frameStampOf(resolved))
           : frameStampOf(resolved),
@@ -1660,5 +1698,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     setCloudStyle, setCloudVisible,
     removeCloud,
     renameCloud,
+    removeProduct,
+    renameProduct,
   }
 }))

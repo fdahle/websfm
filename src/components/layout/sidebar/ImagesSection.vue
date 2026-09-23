@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
 import { useContextMenu } from '../../../composables/useContextMenu.js'
 import { isTiff } from '../../../utils/tiff.js'
 
@@ -17,7 +17,7 @@ const props = defineProps({
 })
 const emit = defineEmits([
   'toggle', 'select', 'open', 'show-info', 'zoom-to-image',
-  'delete-keypoints', 'remove-image', 'convert-to-raster',
+  'delete-keypoints', 'remove-image', 'rename-image', 'convert-to-raster',
 ])
 
 // Images added instantly, but metadata (EXIF + dimensions) extracts async per
@@ -131,7 +131,26 @@ const ctxHasPosition = computed(() => {
 // is that the ingest-time sniff already said "no" and the user disagrees; the
 // import itself is what decides, and it fails loudly if there is no
 // geotransform.
-const ctxIsTiff = computed(() => !ctxIsMulti.value && isTiff(ctxMenu.value?.img?.name))
+const ctxIsTiff = computed(() => !ctxIsMulti.value
+  && isTiff(ctxMenu.value?.img?.sourceName ?? ctxMenu.value?.img?.name))
+
+// Inline rename. Multi-selection deliberately cannot be renamed as one action;
+// the context menu leaves Rename disabled until it targets a single image.
+const editingImageId = ref(null)
+const editingName = ref('')
+const renameInput = ref(null)
+function setRenameInput(el) { if (el) renameInput.value = el }
+function startRename(img) {
+  editingImageId.value = img.id
+  editingName.value = img.name
+  nextTick(() => { renameInput.value?.focus(); renameInput.value?.select() })
+}
+function commitRename() {
+  if (editingImageId.value == null) return
+  emit('rename-image', { id: editingImageId.value, name: editingName.value })
+  editingImageId.value = null
+}
+function cancelRename() { editingImageId.value = null }
 
 function onRightClick(e, img) {
   // Right-clicking outside the current selection collapses to that single image
@@ -141,7 +160,7 @@ function onRightClick(e, img) {
     suppressWatch = true
     emit('select', img.id)
   }
-  openImageCtx(e, { img }, { w: 200, h: 180 })
+  openImageCtx(e, { img }, { w: 200, h: 208 })
 }
 
 // The action is the same either way (openImageTab focuses an existing tab), but
@@ -152,6 +171,7 @@ const ctxOpenLabel = computed(() =>
 function ctxOpen()     { emit('open', ctxMenu.value.img.id); closeMenu() }
 function ctxInfo()     { emit('show-info', ctxMenu.value.img.id); closeMenu() }
 function ctxZoom()     { emit('zoom-to-image', ctxMenu.value.img.id); closeMenu() }
+function ctxRename()   { startRename(ctxMenu.value.img); closeMenu() }
 function ctxDeleteKp() {
   // Emit the whole target set at once so the parent confirms a batch with a single
   // prompt (matches the remove-image path).
@@ -208,7 +228,18 @@ function ctxRemove() {
           <span v-else-if="img.loading" class="status-dot loading" title="Reading metadata…"></span>
           <span v-else-if="img.kpStatus === 'running'" class="status-dot running"></span>
           <span v-else-if="img.kpStatus === 'error'" class="status-dot error"></span>
-          <span class="item-name">{{ img.name }}</span>
+          <input
+            v-if="editingImageId === img.id"
+            :ref="setRenameInput"
+            v-model="editingName"
+            class="rename-input"
+            @click.stop
+            @dblclick.stop
+            @keydown.enter.prevent="commitRename"
+            @keydown.esc.prevent="cancelRename"
+            @blur="commitRename"
+          />
+          <span v-else class="item-name">{{ img.name }}</span>
           <span v-if="img.previewPending" class="load-tag" title="Decoding image…">decoding…</span>
           <span v-else-if="img.previewFailed" class="unaligned-tag failed-tag" :title="failReason(img)">⚠</span>
           <span v-else-if="isUnaligned(img)" class="unaligned-tag" title="Not aligned — no camera in the sparse model">⚠</span>
@@ -271,6 +302,7 @@ function ctxRemove() {
         <button class="ctx-item" :class="{ 'ctx-disabled': ctxIsMulti || !ctxHasPosition }" :disabled="ctxIsMulti || !ctxHasPosition" @click="ctxZoom">Zoom to position on map</button>
         <div class="ctx-sep"></div>
         <button class="ctx-item" :class="{ 'ctx-disabled': ctxIsMulti }" :disabled="ctxIsMulti" @click="ctxInfo">Show information</button>
+        <button class="ctx-item" :class="{ 'ctx-disabled': ctxIsMulti }" :disabled="ctxIsMulti" @click="ctxRename">Rename</button>
         <template v-if="ctxIsTiff">
           <div class="ctx-sep"></div>
           <button
@@ -281,7 +313,7 @@ function ctxRemove() {
         </template>
         <div class="ctx-sep"></div>
         <button v-if="ctxHasKp" class="ctx-item danger" @click="ctxDeleteKp">Delete keypoints</button>
-        <button class="ctx-item danger" @click="ctxRemove">Remove image</button>
+        <button class="ctx-item danger" @click="ctxRemove">{{ ctxIsMulti ? 'Remove images' : 'Remove image' }}</button>
       </div>
     </Teleport>
   </div>

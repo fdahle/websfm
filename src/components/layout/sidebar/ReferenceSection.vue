@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, nextTick } from 'vue'
 import CloudRows from './CloudRows.vue'
 import { useContextMenu } from '../../../composables/useContextMenu.js'
 
@@ -43,9 +43,25 @@ const datumWarn = (r) => r.kind === 'dem' && (!r.verticalDatum || r.verticalDatu
 // the toggle is hidden rather than offered and silently doing nothing.
 const canMap = (r) => !!r.previewDataUrl && !!r.crs && !r.crsUnresolved
 
+const editingRasterId = ref(null)
+const editingName = ref('')
+const renameInput = ref(null)
+function setRenameInput(el) { if (el) renameInput.value = el }
+function startRename(raster) {
+  editingRasterId.value = raster.id
+  editingName.value = raster.name
+  nextTick(() => { renameInput.value?.focus(); renameInput.value?.select() })
+}
+function commitRename() {
+  if (editingRasterId.value == null) return
+  emit('rename-raster', { id: editingRasterId.value, name: editingName.value })
+  editingRasterId.value = null
+}
+function cancelRename() { editingRasterId.value = null }
+
 const { menu: ctx, open: openCtx, close: closeCtx } = useContextMenu()
 function onRasterRightClick(e, raster) {
-  openCtx(e, { raster }, { w: 200, h: canMap(raster) ? 220 : 192 })
+  openCtx(e, { raster }, { w: 200, h: canMap(raster) ? 248 : 220 })
 }
 
 // Tab id per useTabs.openRasterTab — the emit focuses an existing tab either way,
@@ -65,6 +81,7 @@ function ctxFlipKind() {
   closeCtx()
 }
 function ctxStyle()    { emit('style-raster', ctx.value.raster.id); closeCtx() }
+function ctxRename()   { startRename(ctx.value.raster); closeCtx() }
 // The mirror of ImagesSection's "Convert to reference data": the ingest geokey
 // sniff called this a raster, but it's really a source photo.
 function ctxToImage()  { emit('convert-to-image', ctx.value.raster.id); closeCtx() }
@@ -117,7 +134,18 @@ function ctxRemove()   { emit('remove-raster', ctx.value.raster.id); closeCtx() 
             @click.stop="toggleRasterExpand(r.id)"
             :title="rasterExpanded[r.id] ? 'Collapse' : 'Expand'"
           ></button>
-          <span class="item-name">{{ r.name }}</span>
+          <input
+            v-if="editingRasterId === r.id"
+            :ref="setRenameInput"
+            v-model="editingName"
+            class="rename-input"
+            @click.stop
+            @dblclick.stop
+            @keydown.enter.prevent="commitRename"
+            @keydown.esc.prevent="cancelRename"
+            @blur="commitRename"
+          />
+          <span v-else class="item-name">{{ r.name }}</span>
           <!-- On-map indicator: the toggle lives in the right-click menu, so
                without this the state is invisible until you open the menu again. -->
           <span
@@ -222,6 +250,7 @@ function ctxRemove()   { emit('remove-raster', ctx.value.raster.id); closeCtx() 
           title="This is really a source photo — re-import it as an image"
           @click="ctxToImage"
         >Convert to source image</button>
+        <button class="ctx-item" @click="ctxRename">Rename</button>
 
         <div class="ctx-sep"></div>
         <button class="ctx-item danger" @click="ctxRemove">Remove</button>
