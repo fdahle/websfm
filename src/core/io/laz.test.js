@@ -8,21 +8,33 @@ import { cloudToLas, parseLas, readLasHeader } from './las.js'
 // with the LAS writer), which is this module's whole job. The arithmetic coding
 // itself is pinned by the crate's own round-trip test, which runs 200k points
 // through several chunks.
-function fakeCodec() {
+function fakeCodec({ compressor = 2, footer = false } = {}) {
   return {
     compress(pointBytes, format, size) {
-      const vlr = new Uint8Array([format, size & 0xff, size >> 8])
+      const vlr = new Uint8Array([compressor, 0, format, size & 0xff, size >> 8])
       // "Compress" by prefixing a marker, so a writer that forgot to route the
       // bytes through the codec at all cannot pass.
-      const data = new Uint8Array(pointBytes.length + 4)
-      data.set([0x4c, 0x41, 0x5a, 0x21], 0)   // 'LAZ!'
-      data.set(pointBytes, 4)
+      const start = compressor === 1 ? 0 : 8
+      const table = start + 4 + pointBytes.length
+      const data = new Uint8Array(table + (start ? 8 : 0) + (footer ? 8 : 0))
+      data.set([0x4c, 0x41, 0x5a, 0x21], start)   // 'LAZ!'
+      data.set(pointBytes, start + 4)
+      if (start) {
+        const view = new DataView(data.buffer)
+        view.setBigInt64(0, footer ? -1n : BigInt(table), true)
+        if (footer) view.setBigInt64(data.length - 8, BigInt(table), true)
+      }
       return { vlr, data }
     },
     decompress(vlrData, compressed, count, size) {
-      expect(vlrData[0]).toBe(2)                        // the format we wrote
-      expect(String.fromCharCode(...compressed.subarray(0, 4))).toBe('LAZ!')
-      return compressed.subarray(4, 4 + count * size)
+      expect(vlrData[2]).toBe(2)                        // the format we wrote
+      const start = compressor === 1 ? 0 : 8
+      if (start) {
+        const view = new DataView(compressed.buffer, compressed.byteOffset, compressed.byteLength)
+        expect(view.getBigInt64(footer ? compressed.length - 8 : 0, true)).toBe(BigInt(start + 4 + count * size))
+      }
+      expect(String.fromCharCode(...compressed.subarray(start, start + 4))).toBe('LAZ!')
+      return compressed.subarray(start + 4, start + 4 + count * size)
     },
   }
 }
@@ -96,6 +108,44 @@ describe('cloudToLaz', () => {
 })
 
 describe('parseLaz', () => {
+  it.each([2, 3])('relocates compressor %i file offsets without changing the input', (compressor) => {
+    const codec = fakeCodec({ compressor })
+    const bytes = cloudToLaz(cloud, { compress: codec.compress, crsCode: 3031 })
+    const h = readLasHeader(bytes)
+    const view = new DataView(bytes.buffer)
+    expect(view.getBigInt64(h.offsetToPoints, true)).toBe(BigInt(bytes.length - 8))
+    // Also exercise Uint8Array inputs with a nonzero byteOffset.
+    const padded = new Uint8Array(bytes.length + 17)
+    padded.set(bytes, 17)
+    const input = padded.subarray(17)
+    expect(parseLaz(input, { decompress: codec.decompress }).count).toBe(cloud.count)
+    expect(input).toEqual(bytes)
+  })
+
+  it('relocates the EOF pointer from a non-seekable writer', () => {
+    const codec = fakeCodec({ footer: true })
+    const bytes = cloudToLaz(cloud, { compress: codec.compress })
+    const view = new DataView(bytes.buffer)
+    expect(view.getBigInt64(readLasHeader(bytes).offsetToPoints, true)).toBe(-1n)
+    expect(view.getBigInt64(bytes.length - 8, true)).toBe(BigInt(bytes.length - 16))
+    expect(parseLaz(bytes, { decompress: codec.decompress }).count).toBe(cloud.count)
+  })
+
+  it('leaves unchunked pointwise data untouched', () => {
+    const codec = fakeCodec({ compressor: 1 })
+    const bytes = cloudToLaz(cloud, { compress: codec.compress })
+    expect(parseLaz(bytes, { decompress: codec.decompress }).count).toBe(cloud.count)
+  })
+
+  it('rejects an out-of-file chunk table before calling the decoder', () => {
+    const codec = fakeCodec()
+    const bytes = cloudToLaz(cloud, { compress: codec.compress })
+    new DataView(bytes.buffer).setBigInt64(readLasHeader(bytes).offsetToPoints, BigInt(bytes.length), true)
+    let called = false
+    expect(() => parseLaz(bytes, { decompress: () => { called = true } })).toThrow(/chunk-table offset/)
+    expect(called).toBe(false)
+  })
+
   it('round-trips a cloud through the container', () => {
     const codec = fakeCodec()
     const bytes = cloudToLaz(cloud, { compress: codec.compress })
