@@ -4,8 +4,8 @@
 // (red/green/blue or diffuse_red/…, uchar), normals (nx/ny/nz, float/double),
 // and — when an `element face` exists — triangle indices from a
 // `property list <uchar|uint8|…> <int|uint|…> vertex_indices|vertex_index`.
-// Unknown vertex properties are skipped by their computed byte stride (binary)
-// or column position (ascii). Polygons with >3 vertices are fanned into triangles.
+// Other scalar vertex properties are retained as named point attributes.
+// Polygons with >3 vertices are fanned into triangles.
 //
 // Returns a cloud { count, pos: Float64Array(3N), col?: Uint8Array(3N),
 // nrm?: Float32Array(3N) } or, with faces, a mesh { nVerts, count /* tris */,
@@ -81,6 +81,7 @@ export function parsePly(buffer, { onLog } = {}) {
 
   // Column/byte layout of the vertex element.
   const layout = { x: null, y: null, z: null, col: [null, null, null], nrm: [null, null, null] }
+  const scalarFields = []
   let stride = 0
   vertexEl.props.forEach((p, i) => {
     if (p.type === 'list') throw new Error(`PLY: list property "${p.name}" on the vertex element is not supported`)
@@ -92,6 +93,7 @@ export function parsePly(buffer, { onLog } = {}) {
     else if (p.name === 'nx') layout.nrm[0] = slot
     else if (p.name === 'ny') layout.nrm[1] = slot
     else if (p.name === 'nz') layout.nrm[2] = slot
+    else scalarFields.push({ name: p.name, ...slot })
     stride += SCALAR_BYTES[p.type] ?? (() => { throw new Error(`PLY: unknown property type "${p.type}"`) })()
   })
   if (!layout.x || !layout.y || !layout.z) throw new Error('PLY: vertex element lacks x/y/z')
@@ -102,6 +104,7 @@ export function parsePly(buffer, { onLog } = {}) {
   const pos = new Float64Array(n * 3)
   const col = hasCol ? new Uint8Array(n * 3) : null
   const nrm = hasNrm ? new Float32Array(n * 3) : null
+  const attributes = Object.fromEntries(scalarFields.map(field => [field.name, new Float64Array(n)]))
   const tris = [] // flat triangle indices (fanned)
 
   // Color scale: uchar is the norm; float 0–1 colors appear in the wild.
@@ -120,6 +123,7 @@ export function parsePly(buffer, { onLog } = {}) {
           pos[i * 3] = Number(t[layout.x.index])
           pos[i * 3 + 1] = Number(t[layout.y.index])
           pos[i * 3 + 2] = Number(t[layout.z.index])
+          for (const field of scalarFields) attributes[field.name][i] = Number(t[field.index])
           if (col) for (let c = 0; c < 3; c++) col[i * 3 + c] = colByte(Number(t[layout.col[c].index]), layout.col[c].type)
           if (nrm) for (let c = 0; c < 3; c++) nrm[i * 3 + c] = Number(t[layout.nrm[c].index])
         }
@@ -145,6 +149,7 @@ export function parsePly(buffer, { onLog } = {}) {
           pos[i * 3 + 2] = readScalar(dv, p + layout.z.offset, layout.z.type)
           if (col) for (let c = 0; c < 3; c++) col[i * 3 + c] = colByte(readScalar(dv, p + layout.col[c].offset, layout.col[c].type), layout.col[c].type)
           if (nrm) for (let c = 0; c < 3; c++) nrm[i * 3 + c] = readScalar(dv, p + layout.nrm[c].offset, layout.nrm[c].type)
+          for (const field of scalarFields) attributes[field.name][i] = readScalar(dv, p + field.offset, field.type)
           p += stride
         }
       } else {
@@ -173,8 +178,8 @@ export function parsePly(buffer, { onLog } = {}) {
   if (faceEl && tris.length) {
     onLog?.(`PLY: read mesh — ${n.toLocaleString()} vertices, ${(tris.length / 3).toLocaleString()} triangles`
       + `${col ? ', color' : ''}`, 'info', 'Import')
-    return { nVerts: n, count: tris.length / 3, pos, idx: Uint32Array.from(tris), ...(col ? { col } : {}) }
+    return { attributes, nVerts: n, count: tris.length / 3, pos, idx: Uint32Array.from(tris), ...(col ? { col } : {}) }
   }
   onLog?.(`PLY: read ${n.toLocaleString()} points (${format}${col ? ', color' : ''}${nrm ? ', normals' : ''})`, 'info', 'Import')
-  return { count: n, pos, ...(col ? { col } : {}), ...(nrm ? { nrm } : {}) }
+  return { attributes, count: n, pos, ...(col ? { col } : {}), ...(nrm ? { nrm } : {}) }
 }

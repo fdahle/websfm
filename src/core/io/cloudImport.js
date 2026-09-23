@@ -9,6 +9,7 @@ import { parseLas } from './las.js'
 import { parseLaz } from './laz.js'
 import { parseXyzText } from './cloudText.js'
 import { prepareCloudForExport } from '../products/exporters.js'
+import { voxelDownsample } from '../products/cloudEdit.js'
 
 // Cheap binary-magic sniff over the first bytes (no text decode — a 500 MB LAS
 // must not be decoded as a string). Falls back to the extension for text-ish
@@ -112,7 +113,9 @@ export function applyImportTransform(parsed, { unitScale = 1, swapYZ = false, su
     onLog?.(`Import transform: ×${s}${swapYZ ? ', Y-up → Z-up' : ''}`, 'info', 'Import')
   }
   if (subsampleCell > 0 && !parsed.idx) {
-    out = prepareCloudForExport(out, { cell: subsampleCell, onLog })
+    out = Object.keys(out.attributes || {}).length
+      ? voxelDownsample(out, { cell: subsampleCell }, onLog)
+      : prepareCloudForExport(out, { cell: subsampleCell, onLog })
   }
   return out
 }

@@ -16,6 +16,9 @@ const BACKGROUND_KEY = 'viewer3dBackground'
 const BACKGROUND_VALUES = ['theme', 'dark', 'light', 'black']
 const storedBackground = localStorage.getItem(BACKGROUND_KEY)
 const background = ref(BACKGROUND_VALUES.includes(storedBackground) ? storedBackground : 'theme')
+const NEAR_KEY = 'viewer3dNearClip'
+const storedNear = Number(localStorage.getItem(NEAR_KEY))
+const nearClip = ref(Number.isFinite(storedNear) && storedNear >= 0 && storedNear <= 1000 ? storedNear : 0)
 
 export function useViewerSettings() {
   function setGridZ(v) {
@@ -28,5 +31,11 @@ export function useViewerSettings() {
     background.value = v
     localStorage.setItem(BACKGROUND_KEY, v)
   }
-  return { gridZ, setGridZ, background, setBackground }
+  function setNearClip(value) {
+    const number = Number(value)
+    if (!Number.isFinite(number) || number < 0 || number > 1000) return
+    nearClip.value = number === 0 ? 0 : Math.max(0.000001, number)
+    localStorage.setItem(NEAR_KEY, String(nearClip.value))
+  }
+  return { gridZ, setGridZ, background, setBackground, nearClip, setNearClip }
 }

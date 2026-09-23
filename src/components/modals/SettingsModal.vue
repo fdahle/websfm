@@ -28,7 +28,7 @@ const {
   useGpu, setUseGpu, workerCount, setWorkerCount, MAX_POOL_SIZE,
 } = useComputeSettings()
 const { advancedSettingsExpanded, setAdvancedSettingsExpanded, motion, setMotion } = useUiSettings()
-const { gridZ, setGridZ, background, setBackground } = useViewerSettings()
+const { gridZ, setGridZ, background, setBackground, nearClip, setNearClip } = useViewerSettings()
 const { basemap, setBasemap } = useMapSettings()
 
 const themeDesc = computed(() => (props.theme === 'system'
@@ -229,6 +229,13 @@ onMounted(refreshStorage)
             </div>
           </div>
 
+          <div class="setting-row">
+            <div class="setting-info">
+              <label class="setting-label" for="viewer-near-clip">3D near clipping distance</label>
+              <span class="setting-desc">0 adjusts automatically as you zoom. A smaller manual distance keeps nearby points visible. Values use scene units.</span>
+            </div>
+            <div class="num-input"><input id="viewer-near-clip" type="number" min="0" max="1000" step="0.001" :value="nearClip" @change="setNearClip($event.target.value)" /></div>
+          </div>
         </template>
 
         <template v-else-if="activeTab === 'compute'">

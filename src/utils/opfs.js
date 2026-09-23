@@ -1167,12 +1167,12 @@ export async function deletePoses(projectId) {
 // `buffers: { pos, col, colorMask, nrm, idx, vcount, vcam, vkp, vx, vy }` (ArrayBuffers); load
 // returns them the same way for the store to rebuild the point objects. vx/vy carry
 // per-view BA-frame pixels (COLMAP export) and are absent on dense/legacy clouds.
-const RECON_BIN_KEYS = ['pos', 'col', 'colorMask', 'nrm', 'idx', 'vcount', 'vcam', 'vkp', 'vx', 'vy']
+const RECON_BIN_KEYS = ['pos', 'col', 'colorMask', 'nrm', 'idx', 'vcount', 'vcam', 'vkp', 'vx', 'vy', 'attributes']
 
 async function removeStaleReconBins(dir, keepIds) {
   const stale = []
   for await (const name of dir.keys()) {
-    const m = name.match(/^recon\.(.+)\.(?:pos|col|colorMask|nrm|idx|vcount|vcam|vkp|vx|vy)\.bin$/)
+    const m = name.match(/^recon\.(.+)\.(?:pos|col|colorMask|nrm|idx|vcount|vcam|vkp|vx|vy|attributes)\.bin$/)
     if (m && !keepIds.has(m[1])) stale.push(name)
   }
   for (const name of stale) await dir.removeEntry(name).catch(ignoreMissing)

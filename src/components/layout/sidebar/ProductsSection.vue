@@ -14,7 +14,10 @@ const props = defineProps({
   ortho: { type: Object, default: null },
   openTabIds: { type: Object, default: () => new Set() },
 })
-const emit = defineEmits(['toggle', 'open-product', 'select-cloud', 'remove-cloud', 'rename-cloud', 'zoom-to-cloud'])
+const emit = defineEmits([
+  'toggle', 'open-product', 'remove-product', 'rename-product',
+  'cloud-symbology', 'cloud-visibility', 'select-cloud', 'remove-cloud', 'rename-cloud', 'zoom-to-cloud',
+])
 
 // One row per built raster; opening (double-click) shows it in a tab like an image.
 const productRows = computed(() => {
@@ -54,6 +57,8 @@ const productCrs = (p) => (p?.crs === 'local' || !p?.crs ? 'Local' : p.crs)
         :clouds="clouds"
         :selected-cloud-id="selectedCloudId"
         @select-cloud="emit('select-cloud', $event)"
+        @cloud-symbology="emit('cloud-symbology', $event)"
+        @cloud-visibility="emit('cloud-visibility', $event)"
         @remove-cloud="emit('remove-cloud', $event)"
         @rename-cloud="emit('rename-cloud', $event)"
         @zoom-to-cloud="emit('zoom-to-cloud', $event)"

@@ -56,6 +56,8 @@ export function selectPoints(cloud, keep, kept) {
   const pos = new (cloud.pos.constructor)(kept * 3)
   const col = sc ? new Uint8Array(kept * 3) : null
   const nrm = sn ? new Float32Array(kept * 3) : null
+  const fields = Object.entries(cloud.attributes || {})
+  const attributes = Object.fromEntries(fields.map(([name, values]) => [name, new values.constructor(kept)]))
   let o = 0
   for (let i = 0; i < n; i++) {
     if (!keep[i]) continue
@@ -63,9 +65,10 @@ export function selectPoints(cloud, keep, kept) {
     pos[d] = src[s]; pos[d + 1] = src[s + 1]; pos[d + 2] = src[s + 2]
     if (col) { col[d] = sc[s]; col[d + 1] = sc[s + 1]; col[d + 2] = sc[s + 2] }
     if (nrm) { nrm[d] = sn[s]; nrm[d + 1] = sn[s + 1]; nrm[d + 2] = sn[s + 2] }
+    for (const [name, values] of fields) attributes[name][o] = values[i]
     o++
   }
-  return { count: kept, pos, ...(col ? { col } : {}), ...(nrm ? { nrm } : {}) }
+  return { count: kept, pos, ...(col ? { col } : {}), ...(nrm ? { nrm } : {}), ...(fields.length ? { attributes } : {}) }
 }
 
 // Largest packed cell key we allow: keys are float64 integers, so the per-axis cell
@@ -363,6 +366,18 @@ export function voxelDownsample(cloud, { cell = 0 } = {}, onLog) {
   if (!n || !(cell > 0)) return cloud
   const b = cloudBounds(cloud)
   const c = clampGridCell(b, cell)
+  // Keep an actual observation per cell when scalar fields are present. Averaging
+  // class ids, return flags or timestamps would invent invalid observations.
+  if (Object.keys(cloud.attributes || {}).length) {
+    const seen = new Set()
+    const keep = new Uint8Array(n)
+    for (let i = 0; i < n; i++) {
+      const key = [0, 1, 2].map(axis => Math.floor(cloud.pos[i * 3 + axis] / c)).join(',')
+      if (!seen.has(key)) { seen.add(key); keep[i] = 1 }
+    }
+    onLog?.(`Subsample: retained ${seen.size.toLocaleString()} representative points with their attributes`, 'info', 'Products')
+    return selectPoints(cloud, keep, seen.size)
+  }
   const shift = [Math.floor(b.minX / c) * c, Math.floor(b.minY / c) * c, Math.floor(b.minZ / c) * c]
   const acc = createVoxelAccumulator(c, {
     minX: b.minX - shift[0], minY: b.minY - shift[1], minZ: b.minZ - shift[2],
@@ -442,6 +457,15 @@ export function mergeClouds(clouds, { cell = 0 } = {}, onLog) {
   const pos = new PositionArray(total * 3)
   const col = anyCol ? new Uint8Array(total * 3) : null
   const nrm = allNrm ? new Float32Array(total * 3) : null
+  const names = [...new Set(list.flatMap(c => Object.keys(c.attributes || {})))]
+  const shared = names.filter(name => list.every(c => c.attributes?.[name]))
+  // Promote mixed numeric types to Float64; only keep fields every input has.
+  const attributes = Object.fromEntries(shared.map(name => {
+    const FirstType = list[0].attributes[name].constructor
+    const Type = list.every(c => c.attributes[name].constructor === FirstType) ? FirstType : Float64Array
+    return [name, new Type(total)]
+  }))
+  if (shared.length !== names.length) onLog?.('Merge: retained only scalar fields shared by every input cloud', 'info', 'Products')
   let o = 0
   for (const c of list) {
     const n = cloudCount(c)
@@ -451,9 +475,10 @@ export function mergeClouds(clouds, { cell = 0 } = {}, onLog) {
       else col.fill(200, o * 3, (o + n) * 3)
     }
     if (nrm) nrm.set(c.nrm.subarray(0, n * 3), o * 3)
+    for (const name of shared) attributes[name].set(c.attributes[name].subarray(0, n), o)
     o += n
   }
   onLog?.(`Merge: ${list.length} clouds → ${total.toLocaleString()} points`, 'info', 'Products')
-  const merged = { count: total, pos, ...(col ? { col } : {}), ...(nrm ? { nrm } : {}) }
+  const merged = { count: total, pos, ...(col ? { col } : {}), ...(nrm ? { nrm } : {}), ...(shared.length ? { attributes } : {}) }
   return cell > 0 ? voxelDownsample(merged, { cell }, onLog) : merged
 }

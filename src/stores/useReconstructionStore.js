@@ -248,6 +248,20 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     selectedCloudId.value = id
   }
 
+  function setCloudStyle(id, style) {
+    const cloud = clouds.value.find(c => c.id === id)
+    if (!cloud) return
+    cloud.style = JSON.parse(JSON.stringify(style))
+    persist()
+  }
+
+  function setCloudVisible(id, visible) {
+    const cloud = clouds.value.find(c => c.id === id)
+    if (!cloud) return
+    cloud.visible = !!visible
+    persist()
+  }
+
   function removeCloud(id) {
     const removed = clouds.value.find((c) => c.id === id)
     clouds.value = clouds.value.filter((c) => c.id !== id)
@@ -566,6 +580,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
       imported: true,
       cameras: markRaw(new Map()),
       pos: markRaw(pos),
+      ...(parsed.attributes ? { attributes: markRaw(parsed.attributes) } : {}),
       ...(parsed.col ? { col: markRaw(parsed.col) } : { col: null }),
       ...(isMesh
         ? { nVerts: n, count: parsed.count, idx: markRaw(parsed.idx) }
@@ -866,6 +881,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
       cameras: markRaw(new Map()),
       count: flat.count,
       pos: markRaw(flat.pos),
+      ...(flat.attributes ? { attributes: markRaw(flat.attributes) } : {}),
       col: markRaw(flat.col || null),
       ...(flat.nrm ? { nrm: markRaw(flat.nrm) } : {}),
     }
@@ -900,7 +916,12 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
       transfer.push(pos.buffer)
       if (col) transfer.push(col.buffer)
       if (nrm) transfer.push(nrm.buffer)
-      return { id: c.id, count: c.count, pos, col, nrm }
+      const attributes = Object.fromEntries(Object.entries(c.attributes || {}).map(([key, values]) => {
+        const copy = values.slice()
+        transfer.push(copy.buffer)
+        return [key, copy]
+      }))
+      return { id: c.id, count: c.count, pos, col, nrm, attributes }
     })
     reconStatus.value = 'running'
     try {
@@ -1636,6 +1657,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     clear,
     clearDerived,
     selectCloud,
+    setCloudStyle, setCloudVisible,
     removeCloud,
     renameCloud,
   }

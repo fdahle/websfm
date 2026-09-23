@@ -42,6 +42,7 @@ const props = defineProps({
   sceneType: { type: String, default: null },
   showCameras: { type: Boolean, default: true },
   showGrid: { type: Boolean, default: true },
+  showLegend: { type: Boolean, default: false },
   showMapGrid: { type: Boolean, default: true },
   showFootprints: { type: Boolean, default: true },
 })
@@ -390,6 +391,7 @@ const sceneGroup = {
   commands: [
     { id: 'view-toggle-cameras',   label: 'Cameras',   icon: 'camera', activeKey: 'showCameras' },
     { id: 'view-toggle-grid', label: 'Grid', icon: 'grid',   activeKey: 'showGrid' },
+    { id: 'view-toggle-legend', label: 'Legend', icon: 'layers', activeKey: 'showLegend' },
   ],
 }
 
@@ -580,6 +582,7 @@ function isActive(cmd) {
   if (cmd.activeKey === 'consoleOpen')   return props.consoleOpen
   if (cmd.activeKey === 'showCameras')   return props.showCameras
   if (cmd.activeKey === 'showGrid') return props.showGrid
+  if (cmd.activeKey === 'showLegend') return props.showLegend
   if (cmd.activeKey === 'showMapGrid') return props.showMapGrid
   if (cmd.activeKey === 'showFootprints') return props.showFootprints
   if (cmd.activeKey === 'rasterOnMap')    return !!props.activeRaster?.onMap

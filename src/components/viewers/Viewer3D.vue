@@ -5,11 +5,15 @@ import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { useViewerSettings } from '../../composables/useViewerSettings.js'
 import { estimateUpFromCameras } from '../../core/sfm/geometry.js'
+import CloudLegend from './CloudLegend.vue'
+import { buildCloudStyle, scalarRange, sharedElevationRange, resolveCloudStyle } from '../../core/products/cloudStyle.js'
+import { viewerClipping } from '../../core/products/viewerClipping.js'
 
-const { gridZ, background } = useViewerSettings()
+const { gridZ, background, nearClip } = useViewerSettings()
 
 const props = defineProps({
   theme: { type: String, default: 'dark' },
+  showLegend: { type: Boolean, default: false },
   // Source images ({ uuid, url, … }) — used to texture camera-frustum thumbnails.
   images: { type: Array, default: () => [] },
   showCameras: { type: Boolean, default: true },
@@ -107,9 +111,25 @@ function robustBounds(positions, count, up) {
   }
 }
 
-// Reconstruction scene objects (replaced on each setReconstructionData call)
-let pointCloud = null
-let meshObject = null // THREE.Mesh for kind:'mesh' clouds
+// Independent cloud layers and shared camera frustums
+const cloudLayers = new Map()
+const legendLayers = ref([])
+const linearChannel = Float32Array.from({ length: 256 }, (_, i) =>
+  new THREE.Color().setRGB(i / 255, 0, 0, THREE.SRGBColorSpace).r)
+let lastCameraMaps = []
+let knownCloudIds = new Set()
+// Imported point buffers are immutable; replacing a buffer invalidates its range.
+const elevationRanges = new WeakMap()
+function cachedElevationRange(cloud) {
+  const data = cloud.pos || cloud.points
+  const count = cloud.nVerts ?? cloud.count ?? cloud.points?.length ?? 0
+  let cached = elevationRanges.get(data)
+  if (!cached || cached.count !== count) {
+    cached = { count, range: scalarRange(cloud, 'elevation') }
+    elevationRanges.set(data, cached)
+  }
+  return cached.range
+}
 const frustumGroup = new THREE.Group()
 // Thumbnail textures live as long as their frustum; tracked so we can dispose
 // them when the scene is rebuilt (frustumGroup.clear() drops the meshes but not
@@ -184,6 +204,8 @@ const GRID = {
 function makeGrid(t) {
   const [mc, gc] = GRID[t] ?? GRID.dark
   const g = new THREE.GridHelper(10, 10, mc, gc)
+  // Reference lines should not write competing depths into a coplanar cloud.
+  g.material.depthWrite = false
   // GridHelper lies in the XZ plane (normal +Y). updateGrid orients it so its normal
   // matches the estimated scene up (world +Z by default).
   g.visible = props.showGrid
@@ -216,7 +238,9 @@ function init() {
   // scene/camera/controls exist, so every `if (!scene)` guard below and in the watchers
   // keeps the component inert rather than half-initialised.
   try {
-    renderer = new THREE.WebGLRenderer({ antialias: true })
+    // Survey extents and close-up inspection span many orders of magnitude.
+    // Log depth avoids the poor far-surface precision of a tiny near plane.
+    renderer = new THREE.WebGLRenderer({ antialias: true, logarithmicDepthBuffer: true })
   } catch (e) {
     glError.value = 'The 3D view is unavailable: this browser or environment could not '
       + 'create a WebGL context. The rest of the app is unaffected.'
@@ -257,169 +281,157 @@ function init() {
 
 // ── Reconstruction visualisation ─────────────────────────────────────────────
 
-// cameras: Map<uuid, { R, t, K }>   points3d: [{ x, y, z }]
-// `points3d` is either a sparse cloud's array of { x, y, z, color? } objects, or a
-// dense cloud's flat descriptor { count, pos:Float32Array(3N), col?:Uint8Array(3N) }.
-// The flat path hands its position buffer straight to Three.js (no per-point object
-// walk — the win for million-point dense clouds).
-function setReconstructionData(cameras, points3d) {
-  if (!scene) return
-  const isMesh = points3d?.kind === 'mesh'
-  const flat = !isMesh && points3d && points3d.pos ? points3d : null
-  const pointCount = isMesh ? 0 : (flat ? flat.count : (points3d?.length ?? 0))
+function createCloudLayer(cloud) {
+  const isMesh = cloud.kind === 'mesh'
+  const count = isMesh ? cloud.nVerts : (cloud.count ?? cloud.points?.length ?? 0)
+  if (!count) return null
+  let positions = cloud.pos
+  if (!positions) {
+    positions = new Float64Array(count * 3)
+    for (let i = 0; i < count; i++) {
+      const p = cloud.points[i]
+      positions[i * 3] = p.x; positions[i * 3 + 1] = p.y; positions[i * 3 + 2] = p.z
+    }
+  }
+  const geometry = new THREE.BufferGeometry()
+  const { origin, relative } = relativePositions(positions)
+  geometry.setAttribute('position', new THREE.BufferAttribute(relative, 3))
+  if (isMesh) {
+    geometry.setIndex(new THREE.BufferAttribute(cloud.idx, 1))
+    geometry.computeVertexNormals()
+  }
+  geometry.computeBoundingSphere()
+  const material = isMesh
+    ? new THREE.MeshStandardMaterial({ side: THREE.DoubleSide, roughness: 0.95, metalness: 0 })
+    : new THREE.PointsMaterial({ size: pointSize.value, sizeAttenuation: false })
+  const object = isMesh ? new THREE.Mesh(geometry, material) : new THREE.Points(geometry, material)
+  object.position.set(...origin)
+  object.userData.cloudId = cloud.id
+  scene.add(object)
+  return { object, positions, count, source: cloud, bounds: robustBounds(positions, count, sceneUp) }
+}
 
-  // Was a model already loaded? If so we keep the current camera framing when the
-  // data is swapped (e.g. sparse ↔ dense of the same scene) rather than snapping
-  // back to the default view on every selection.
-  const hadContent = pointCloud !== null || frustumGroup.children.length > 0
+function styleLayer(layer, cloud, elevationRange) {
+  const visual = buildCloudStyle(cloud, undefined, { elevationRange })
+  const { geometry, material } = layer.object
+  // Release replaced colour/index GPU buffers before uploading a new style.
+  // The geometry's CPU position array remains available for the next upload.
+  if (layer.legend) geometry.dispose()
+  if (visual.colors) {
+    // Three.js shades vertex colours in linear space; source RGB, ramp colours
+    // and legend swatches are sRGB. Convert so the displayed legend matches.
+    const colors = new Float32Array(visual.colors.length)
+    for (let i = 0; i < colors.length; i++) colors[i] = linearChannel[visual.colors[i]]
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3))
+  } else geometry.deleteAttribute('color')
+  if (cloud.kind !== 'mesh') geometry.setIndex(visual.indices ? new THREE.BufferAttribute(visual.indices, 1) : null)
+  material.vertexColors = !!visual.colors
+  material.color.set(visual.colors ? 0xffffff : visual.style.colour)
+  material.opacity = visual.style.opacity
+  material.transparent = visual.style.opacity < 1
+  material.depthWrite = visual.style.opacity === 1
+  material.needsUpdate = true
+  layer.style = cloud.style
+  layer.legend = visual.legend
+  layer.elevationRangeKey = elevationRange ? `${elevationRange.min}:${elevationRange.max}` : ''
+}
 
-  // Remove previous
-  if (pointCloud) { scene.remove(pointCloud); disposeObject(pointCloud); pointCloud = null }
-  if (meshObject) { scene.remove(meshObject); disposeObject(meshObject); meshObject = null }
-  clearFrustums()
-
-  if (pointCount === 0 && !isMesh && cameras.size === 0) {
-    sceneCenter.set(0, 0, 0)
-    sceneRadius = 5
+function updateLayerBounds() {
+  if (!cloudLayers.size) {
+    sceneCenter.set(0, 0, 0); sceneRadius = 5
     sceneAlongMin = 0; sceneAlongMax = 0
-    sceneUp.set(0, 0, 1)
-    updateGrid()
     return
   }
-
-  // ── Camera centres + estimated scene up ──────────────────────────────────────
-  // Centres (C = -Rᵀt) size the frustums (see cameraFrustumDepth). The up vector
-  // orients the initial view + grid so the model reads level without georef
-  // (see estimateUpFromCameras). Prefer the reconstruction-level up passed as a prop
-  // (a dense/mesh cloud carries no cameras of its own), else derive from these
-  // cameras, else world +Z.
-  const cams = []
-  for (const [uuid, cam] of cameras) {
-    const { R, t } = cam
-    cams.push({
-      uuid, R,
-      centre: new THREE.Vector3(
-        -(R[0][0]*t[0] + R[1][0]*t[1] + R[2][0]*t[2]),
-        -(R[0][1]*t[0] + R[1][1]*t[1] + R[2][1]*t[2]),
-        -(R[0][2]*t[0] + R[1][2]*t[1] + R[2][2]*t[2]),
-      ),
-    })
+  const box = new THREE.Box3()
+  let low = Infinity, high = -Infinity
+  for (const { bounds: b } of cloudLayers.values()) {
+    box.expandByPoint(b.center.clone().addScalar(-b.radius))
+    box.expandByPoint(b.center.clone().addScalar(b.radius))
+    const height = b.center.dot(sceneUp)
+    low = Math.min(low, height + b.alongMin)
+    high = Math.max(high, height + b.alongMax)
   }
-  const up = (props.sceneUp && props.sceneUp.length === 3) ? props.sceneUp : estimateUpFromCameras(cams)
-  if (up) sceneUp.set(up[0], up[1], up[2]).normalize()
+  box.getCenter(sceneCenter)
+  sceneRadius = Math.max(0.001, box.getSize(new THREE.Vector3()).length() / 2)
+  sceneAlongMin = low - sceneCenter.dot(sceneUp)
+  sceneAlongMax = high - sceneCenter.dot(sceneUp)
+}
+
+// Reconcile by cloud id, retaining GPU geometry when only selection, names,
+// symbology or another layer changes. Each origin is placed in the same world
+// frame, so projected survey coordinates stay aligned across multiple files.
+function setCloudLayers(clouds) {
+  if (!scene) return
+  const hadContent = cloudLayers.size > 0 || frustumGroup.children.length > 0
+  const addedCloud = clouds.some(c => c.visible !== false && !knownCloudIds.has(c.id))
+  knownCloudIds = new Set(clouds.map(c => c.id))
+  const visible = clouds.filter(c => c.visible !== false)
+  const elevationRange = sharedElevationRange(clouds, cachedElevationRange)
+  const ids = new Set(visible.map(c => c.id))
+  for (const [id, layer] of cloudLayers) {
+    if (!ids.has(id)) { scene.remove(layer.object); disposeObject(layer.object); cloudLayers.delete(id) }
+  }
+  const cameraMaps = visible.map(c => c.cameras).filter(Boolean)
+  const camerasChanged = cameraMaps.length !== lastCameraMaps.length || cameraMaps.some((m, i) => m !== lastCameraMaps[i])
+  const cameras = new Map()
+  for (const map of cameraMaps) for (const [id, cam] of map) cameras.set(id, cam)
+  const up = props.sceneUp || estimateUpFromCameras(cameras)
+  if (up) sceneUp.set(...up).normalize()
   else sceneUp.set(0, 0, 1)
-
-  // ── Point cloud ────────────────────────────────────────────────────────────
-  if (pointCount > 0) {
-    let positions, colors
-    if (flat) {
-      // Dense: reuse the position buffer directly; normalise colours to 0..1.
-      positions = flat.pos
-      if (flat.col) {
-        colors = new Float32Array(pointCount * 3)
-        for (let i = 0; i < colors.length; i++) colors[i] = flat.col[i] / 255
-      } else {
-        colors = null
-      }
-    } else {
-      positions = new Float64Array(pointCount * 3)
-      // Per-point RGB sampled from the source images (median over each track). Fall
-      // back to the flat blue when a point has no colour (e.g. a restored model from
-      // before colouring, or keypoints detected without colour).
-      const hasColor = points3d.some((p) => p.color)
-      colors = hasColor ? new Float32Array(pointCount * 3) : null
-      for (let i = 0; i < pointCount; i++) {
-        positions[i*3]   = points3d[i].x
-        positions[i*3+1] = points3d[i].y
-        positions[i*3+2] = points3d[i].z
-        if (colors) {
-          const c = points3d[i].color
-          if (c) { colors[i*3] = c[0]/255; colors[i*3+1] = c[1]/255; colors[i*3+2] = c[2]/255 }
-          else   { colors[i*3] = 0.27; colors[i*3+1] = 0.67; colors[i*3+2] = 1.0 } // 0x44aaff
-        }
-      }
+  for (const cloud of visible) {
+    let layer = cloudLayers.get(cloud.id)
+    if (layer && (layer.source.pos !== cloud.pos || layer.source.points !== cloud.points || layer.source.idx !== cloud.idx
+        || layer.source.count !== cloud.count || layer.source.kind !== cloud.kind)) {
+      scene.remove(layer.object); disposeObject(layer.object); cloudLayers.delete(cloud.id); layer = null
     }
-
-    const geo = new THREE.BufferGeometry()
-    const { origin, relative } = relativePositions(positions)
-    geo.setAttribute('position', new THREE.BufferAttribute(relative, 3))
-    if (colors) geo.setAttribute('color', new THREE.BufferAttribute(colors, 3))
-    geo.computeBoundingSphere() // for Three's frustum culling (framing uses robustBounds)
-
-    const mat = new THREE.PointsMaterial(
-      colors
-        ? { size: pointSize.value, sizeAttenuation: false, vertexColors: true }
-        : { size: pointSize.value, sizeAttenuation: false, color: 0x44aaff },
-    )
-    pointCloud = new THREE.Points(geo, mat)
-    pointCloud.position.set(...origin)
-    scene.add(pointCloud)
-
-    // Fit camera + grid to robust bounds (median centre, 95th-pct radius) so stray
-    // far points don't inflate the framing or the grid span.
-    const b = robustBounds(positions, pointCount, sceneUp)
-    sceneCenter.copy(b.center)
-    sceneRadius = b.radius
-    sceneAlongMin = b.alongMin; sceneAlongMax = b.alongMax
-    camera.near = sceneRadius * 0.001
-    camera.far  = sceneRadius * 100
-    camera.updateProjectionMatrix()
-    // Only auto-frame the very first model; swapping between clouds of an
-    // already-loaded scene leaves the user's viewpoint untouched.
-    if (!hadContent) resetView()
-  }
-
-  // ── Mesh ─────────────────────────────────────────────────────────────────────
-  // Indexed triangle mesh (screened Poisson). Vertex colours when present; normals
-  // are recomputed on the GPU-side geometry (cheaper than shipping them) so the
-  // scene's Directional + Ambient lights shade both faces (DoubleSide).
-  if (isMesh && points3d.nVerts > 0) {
-    const geo = new THREE.BufferGeometry()
-    const { origin, relative } = relativePositions(points3d.pos)
-    geo.setAttribute('position', new THREE.BufferAttribute(relative, 3))
-    if (points3d.col) {
-      const colors = new Float32Array(points3d.nVerts * 3)
-      for (let i = 0; i < colors.length; i++) colors[i] = points3d.col[i] / 255
-      geo.setAttribute('color', new THREE.BufferAttribute(colors, 3))
+    if (!layer) {
+      layer = createCloudLayer(cloud)
+      if (!layer) continue
+      cloudLayers.set(cloud.id, layer)
     }
-    geo.setIndex(new THREE.BufferAttribute(points3d.idx, 1))
-    geo.computeVertexNormals()
-    geo.computeBoundingSphere() // for Three's frustum culling (framing uses robustBounds)
-
-    const mat = new THREE.MeshStandardMaterial({
-      vertexColors: !!points3d.col,
-      color: points3d.col ? 0xffffff : 0xb0b0b0,
-      side: THREE.DoubleSide, flatShading: false, roughness: 0.95, metalness: 0.0,
-    })
-    meshObject = new THREE.Mesh(geo, mat)
-    meshObject.position.set(...origin)
-    scene.add(meshObject)
-
-    const b = robustBounds(points3d.pos, points3d.nVerts, sceneUp)
-    sceneCenter.copy(b.center)
-    sceneRadius = b.radius
-    sceneAlongMin = b.alongMin; sceneAlongMax = b.alongMax
-    camera.near = sceneRadius * 0.001
-    camera.far = sceneRadius * 100
-    camera.updateProjectionMatrix()
-    if (!hadContent) resetView()
+    const style = resolveCloudStyle(cloud)
+    const sharedRange = style.field === 'elevation' && style.range === 'auto' ? elevationRange : null
+    const rangeKey = sharedRange ? `${sharedRange.min}:${sharedRange.max}` : ''
+    if (!layer.legend || layer.style !== cloud.style || layer.source.col !== cloud.col || layer.source.attributes !== cloud.attributes
+        || layer.elevationRangeKey !== rangeKey) styleLayer(layer, cloud, sharedRange)
+    layer.source = cloud
   }
+  legendLayers.value = [...cloudLayers].map(([id, layer]) => ({ id, name: layer.source.name, legend: layer.legend }))
+  updateLayerBounds()
+  updateGrid()
+  if (camerasChanged) {
+    lastCameraMaps = cameraMaps
+    lastCams = [...cameras].map(([uuid, { R, t }]) => ({ uuid, R, centre: new THREE.Vector3(
+      -(R[0][0]*t[0] + R[1][0]*t[1] + R[2][0]*t[2]),
+      -(R[0][1]*t[0] + R[1][1]*t[1] + R[2][1]*t[2]),
+      -(R[0][2]*t[0] + R[1][2]*t[1] + R[2][2]*t[2]),
+    ) }))
+    lastBaseDepth = cameraFrustumDepth(lastCams.map(c => c.centre), [])
+    buildFrustums(lastCams, lastBaseDepth * cameraScale.value)
+  }
+  // Fit newly added layers together, including distant survey tiles. Selection,
+  // symbology and visibility toggles preserve the user's camera position.
+  if ((!hadContent || addedCloud) && cloudLayers.size) resetView()
+  updateClipping()
+}
 
-  // ── Camera frustums ────────────────────────────────────────────────────────
-  // `cams` (centres for cameraFrustumDepth) was computed above alongside the up est.
-  // Cache inputs so the "Camera size" slider can rebuild frustums without
-  // recomputing the cloud (see the cameraScale watcher).
-  lastCams = cams
-  lastBaseDepth = cameraFrustumDepth(cams.map((c) => c.centre), points3d)
-  buildFrustums(lastCams, lastBaseDepth * cameraScale.value)
+function zoomToCloud(id) {
+  const layer = cloudLayers.get(id)
+  if (!layer) return
+  const center = sceneCenter.clone(), radius = sceneRadius
+  sceneCenter.copy(layer.bounds.center); sceneRadius = layer.bounds.radius
+  resetView()
+  sceneCenter.copy(center); sceneRadius = radius
+  updateClipping()
+}
 
-  // Only (re)fit the grid to the scene on a fresh load. Swapping sparse ↔ dense
-  // (or mesh) of the same scene keeps the user's viewpoint (see `hadContent`), so the
-  // grid must stay put too — sparse and dense have different bounding-sphere radii
-  // (dense extent / stray sparse points), and refitting here made the grid visibly
-  // jump size on every swap. sceneCenter/Radius above still track the current cloud so
-  // an explicit Reset View / gridZ change reframes it.
-  if (!hadContent) updateGrid()
+function updateClipping() {
+  if (!camera || !controls) return
+  const { near, far } = viewerClipping(sceneRadius, camera.position.distanceTo(controls.target), nearClip.value)
+  if (Math.abs(camera.near - near) > near * 0.01 || Math.abs(camera.far - far) > far * 0.01) {
+    camera.near = near; camera.far = far
+    camera.updateProjectionMatrix()
+  }
 }
 
 // (Re)build the camera-frustum lines + image-thumbnail quads at the given depth.
@@ -483,7 +495,7 @@ function buildFrustums(cams, frustumDepth) {
 }
 
 function clearReconstructionData() {
-  setReconstructionData(new Map(), [])
+  setCloudLayers([])
 }
 
 // ── Camera view presets ──────────────────────────────────────────────────────
@@ -571,7 +583,7 @@ function resetView() {
   controls.update()
 }
 
-defineExpose({ setReconstructionData, clearReconstructionData, setView, resetView })
+defineExpose({ setCloudLayers, clearReconstructionData, setView, resetView, zoomToCloud })
 
 function onResize() {
   const el = container.value
@@ -585,6 +597,7 @@ function onResize() {
 function animate() {
   animationId = requestAnimationFrame(animate)
   controls.update()
+  updateClipping()
   renderer.render(scene, camera)
 }
 
@@ -609,12 +622,17 @@ watch(gridZ, () => updateGrid())
 // (e.g. a dense cloud selected before the sparse cameras are pushed). Re-orient the
 // grid to it without yanking the user's current viewpoint.
 watch(() => props.sceneUp, (u) => {
-  if (u && u.length === 3) { sceneUp.set(u[0], u[1], u[2]).normalize(); updateGrid() }
+  if (u && u.length === 3) {
+    sceneUp.set(u[0], u[1], u[2]).normalize()
+    for (const layer of cloudLayers.values()) layer.bounds = robustBounds(layer.positions, layer.count, sceneUp)
+    updateLayerBounds(); updateGrid()
+  }
 })
 
 // View-options sliders — cheap live updates, no cloud recompute.
 watch(cameraScale, () => { if (lastCams.length) buildFrustums(lastCams, lastBaseDepth * cameraScale.value) })
-watch(pointSize, (v) => { if (pointCloud) pointCloud.material.size = v })
+watch(pointSize, (v) => { for (const { object } of cloudLayers.values()) if (object.isPoints) object.material.size = v })
+watch(nearClip, updateClipping)
 
 // No right-click context menu here on purpose: OrbitControls uses the right mouse
 // button to pan, so any menu competes with the primary navigation gesture. Coordinate
@@ -626,8 +644,8 @@ onBeforeUnmount(() => {
   cancelAnimationFrame(animationId)
   resizeObserver?.disconnect()
   clearFrustums()
-  if (pointCloud) { disposeObject(pointCloud); pointCloud = null }
-  if (meshObject) { disposeObject(meshObject); meshObject = null }
+  for (const { object } of cloudLayers.values()) disposeObject(object)
+  cloudLayers.clear()
   if (grid) { disposeObject(grid); grid = null }
   controls?.dispose()
   renderer?.dispose()
@@ -644,12 +662,8 @@ onBeforeUnmount(() => {
 
     <!-- Viewer-local view options popover (ephemeral display tweaks) -->
     <div class="view-options">
-      <button
-        class="vo-btn"
-        :class="{ active: showOptions }"
-        title="View options"
-        @click="showOptions = !showOptions"
-      >⚙</button>
+      <button class="vo-btn" :class="{ active: showOptions }" title="View options"
+        aria-label="View options" :aria-expanded="showOptions" @click="showOptions = !showOptions">⚙</button>
       <div v-if="showOptions" class="vo-panel">
         <div class="vo-title">View options</div>
         <label class="vo-row">
@@ -664,6 +678,7 @@ onBeforeUnmount(() => {
         </label>
       </div>
     </div>
+    <CloudLegend v-if="showLegend" :layers="legendLayers" />
   </div>
 </template>
 
@@ -708,10 +723,10 @@ onBeforeUnmount(() => {
 .view-options {
   position: absolute;
   top: 10px;
-  right: 10px;
+  left: 10px;
   display: flex;
   flex-direction: column;
-  align-items: flex-end;
+  align-items: flex-start;
   gap: 6px;
 }
 
@@ -733,6 +748,7 @@ onBeforeUnmount(() => {
 .vo-btn.active {
   background: var(--hover-bg);
 }
+
 
 .vo-panel {
   min-width: 210px;

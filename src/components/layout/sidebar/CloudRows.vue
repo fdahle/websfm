@@ -13,7 +13,7 @@ const props = defineProps({
   selectedCloudId: { type: String, default: null },
   mainSparseId:    { type: String, default: null }, // sparse cloud downstream stages consume
 })
-const emit = defineEmits(['select-cloud', 'remove-cloud', 'rename-cloud', 'set-main-cloud', 'zoom-to-cloud'])
+const emit = defineEmits(['cloud-symbology', 'cloud-visibility', 'select-cloud', 'remove-cloud', 'rename-cloud', 'set-main-cloud', 'zoom-to-cloud'])
 
 const cloudExpanded = ref({})
 function toggleCloudExpand(id) {
@@ -78,7 +78,7 @@ const { menu: cloudCtx, open: openCloudCtx, close: closeMenu } = useContextMenu(
 function onCloudRightClick(e, cloud) {
   // "Set as main" adds a row for sparse clouds that aren't already main.
   const extra = cloud.kind === 'sparse' && cloud.id !== props.mainSparseId ? 28 : 0
-  openCloudCtx(e, { cloud }, { w: 180, h: 128 + extra })
+  openCloudCtx(e, { cloud }, { w: 190, h: 160 + extra })
 }
 function ctxSetMain()      { emit('set-main-cloud', cloudCtx.value.cloud.id); closeMenu() }
 function ctxZoomCloud()    { emit('zoom-to-cloud', cloudCtx.value.cloud.id); closeMenu() }
@@ -101,6 +101,9 @@ function ctxRemoveCloud()  { emit('remove-cloud', cloudCtx.value.cloud.id); clos
         @click.stop="toggleCloudExpand(cloud.id)"
         :title="cloudExpanded[cloud.id] ? 'Collapse' : 'Expand'"
       ></button>
+      <input class="cloud-visibility" type="checkbox" :checked="cloud.visible !== false"
+        :aria-label="`Show ${cloud.name} in 3D`" title="Visible in 3D"
+        @click.stop @change="emit('cloud-visibility', { id: cloud.id, visible: $event.target.checked })" />
       <input
         v-if="editingCloudId === cloud.id"
         :ref="setRenameInput"
@@ -175,6 +178,7 @@ function ctxRemoveCloud()  { emit('remove-cloud', cloudCtx.value.cloud.id); clos
       <!-- Groups: go there → change it → destructive. Same order as the image and
            reference-raster menus. -->
       <button class="ctx-item" @click="ctxZoomCloud">Zoom to</button>
+      <button class="ctx-item" @click="emit('cloud-symbology', cloudCtx.cloud.id); closeMenu()">Symbology…</button>
       <div class="ctx-sep"></div>
       <button
         v-if="cloudCtx.cloud.kind === 'sparse' && cloudCtx.cloud.id !== mainSparseId"
@@ -190,6 +194,7 @@ function ctxRemoveCloud()  { emit('remove-cloud', cloudCtx.value.cloud.id); clos
 
 <style scoped src="./sidebar-sections.css"></style>
 <style scoped>
+.cloud-visibility { flex-shrink: 0; margin: 0 6px 0 0; accent-color: var(--accent); }
 /* Marks the sparse cloud downstream stages consume (MC). */
 .main-badge {
   flex-shrink: 0;

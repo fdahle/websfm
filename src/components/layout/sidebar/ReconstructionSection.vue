@@ -12,7 +12,7 @@ defineProps({
   mainSparseId:    { type: String, default: null },
   reconStatus:     { type: String, default: 'idle' }, // 'idle'|'running'|'done'|'error'
 })
-const emit = defineEmits(['toggle', 'select-cloud', 'remove-cloud', 'rename-cloud', 'set-main-cloud', 'zoom-to-cloud'])
+const emit = defineEmits(['toggle', 'cloud-symbology', 'cloud-visibility', 'select-cloud', 'remove-cloud', 'rename-cloud', 'set-main-cloud', 'zoom-to-cloud'])
 </script>
 
 <template>
@@ -30,6 +30,8 @@ const emit = defineEmits(['toggle', 'select-cloud', 'remove-cloud', 'rename-clou
         :selected-cloud-id="selectedCloudId"
         :main-sparse-id="mainSparseId"
         @select-cloud="emit('select-cloud', $event)"
+        @cloud-symbology="emit('cloud-symbology', $event)"
+        @cloud-visibility="emit('cloud-visibility', $event)"
         @remove-cloud="emit('remove-cloud', $event)"
         @rename-cloud="emit('rename-cloud', $event)"
         @set-main-cloud="emit('set-main-cloud', $event)"
