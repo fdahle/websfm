@@ -164,7 +164,7 @@ export const LAS_IMPORT_BUDGET = 1024 ** 3
 export function validateLasAllocation(count, recordLength, extraBytes = 0) {
   if (!Number.isSafeInteger(count) || count < 0 || count > 0xffffffff
       || !Number.isSafeInteger(recordLength) || recordLength <= 0
-      || count * (recordLength * 2 + 27) + extraBytes > LAS_IMPORT_BUDGET) {
+      || count * (recordLength * 2 + 64) + extraBytes > LAS_IMPORT_BUDGET) {
     throw new Error('LAS/LAZ import exceeds the 1 GiB working-memory limit; split or subsample the cloud first')
   }
 }
@@ -262,7 +262,8 @@ export function readLasHeader(bytes) {
 }
 
 // Decode raw point records (already uncompressed) → the flat cloud shape. Reads
-// xyz (+ RGB when the format carries it) and skips the rest via `recordLength`.
+// Coordinates, RGB and standard scalar LAS attributes. Extra record bytes are
+// skipped via recordLength; classification flags stay separate from class ids.
 export function decodeLasPoints(pointBytes, count, recordLength, format, scale, offset) {
   validateLasAllocation(count, recordLength)
   if (!SUPPORTED_FORMATS.has(format) || recordLength < RECORD_MIN[format]
@@ -272,11 +273,47 @@ export function decodeLasPoints(pointBytes, count, recordLength, format, scale, 
   const hasRgb = rgbOff != null && recordLength >= rgbOff + 6
   const pos = new Float64Array(count * 3)
   const col = hasRgb ? new Uint8Array(count * 3) : null
+  const modern = format >= 6
+  const attributes = {
+    intensity: new Uint16Array(count), classification: new Uint8Array(count),
+    returnNumber: new Uint8Array(count), numberOfReturns: new Uint8Array(count),
+    scanAngle: new Float32Array(count), pointSourceId: new Uint16Array(count),
+    userData: new Uint8Array(count), synthetic: new Uint8Array(count),
+    keyPoint: new Uint8Array(count), withheld: new Uint8Array(count),
+    scanDirection: new Uint8Array(count), edgeOfFlightLine: new Uint8Array(count),
+  }
+  if (modern || format === 1 || format === 3) attributes.gpsTime = new Float64Array(count)
+  if (modern) {
+    attributes.overlap = new Uint8Array(count)
+    attributes.scannerChannel = new Uint8Array(count)
+  }
+  if (format === 8) attributes.nir = new Uint16Array(count)
   let p = 0
   for (let i = 0; i < count; i++) {
     pos[i * 3] = dv.getInt32(p, true) * scale[0] + offset[0]
     pos[i * 3 + 1] = dv.getInt32(p + 4, true) * scale[1] + offset[1]
     pos[i * 3 + 2] = dv.getInt32(p + 8, true) * scale[2] + offset[2]
+    attributes.intensity[i] = dv.getUint16(p + 12, true)
+    const returns = dv.getUint8(p + 14)
+    const flags = dv.getUint8(p + 15)
+    attributes.returnNumber[i] = returns & (modern ? 15 : 7)
+    attributes.numberOfReturns[i] = (returns >> (modern ? 4 : 3)) & (modern ? 15 : 7)
+    attributes.classification[i] = modern ? dv.getUint8(p + 16) : flags & 31
+    const classFlags = modern ? flags : flags >> 5
+    attributes.synthetic[i] = classFlags & 1
+    attributes.keyPoint[i] = (classFlags >> 1) & 1
+    attributes.withheld[i] = (classFlags >> 2) & 1
+    attributes.scanDirection[i] = ((modern ? flags : returns) >> 6) & 1
+    attributes.edgeOfFlightLine[i] = ((modern ? flags : returns) >> 7) & 1
+    attributes.scanAngle[i] = modern ? dv.getInt16(p + 18, true) * 0.006 : dv.getInt8(p + 16)
+    attributes.userData[i] = dv.getUint8(p + 17)
+    attributes.pointSourceId[i] = dv.getUint16(p + (modern ? 20 : 18), true)
+    if (attributes.gpsTime) attributes.gpsTime[i] = dv.getFloat64(p + (modern ? 22 : 20), true)
+    if (modern) {
+      attributes.overlap[i] = (flags >> 3) & 1
+      attributes.scannerChannel[i] = (flags >> 4) & 3
+    }
+    if (attributes.nir) attributes.nir[i] = dv.getUint16(p + 36, true)
     if (col) {
       col[i * 3] = dv.getUint16(p + rgbOff, true) >> 8
       col[i * 3 + 1] = dv.getUint16(p + rgbOff + 2, true) >> 8
@@ -284,5 +321,5 @@ export function decodeLasPoints(pointBytes, count, recordLength, format, scale, 
     }
     p += recordLength
   }
-  return { count, pos, ...(col ? { col } : {}) }
+  return { count, pos, ...(col ? { col } : {}), attributes }
 }

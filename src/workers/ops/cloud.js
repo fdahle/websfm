@@ -1,3 +1,4 @@
+import { attributeBuffers } from '../../core/io/cloudAttributes.js'
 import { cropCloud, filterCloud, mergeClouds, cloudCount } from '../../core/products/cloudEdit.js'
 
 // Cloud-editing ops (crop / filter / merge). Pure math lives in
@@ -26,6 +27,7 @@ export function makeCloudOps() {
     if (out.pos?.buffer) transfer.push(out.pos.buffer)
     if (out.col?.buffer) transfer.push(out.col.buffer)
     if (out.nrm?.buffer) transfer.push(out.nrm.buffer)
+    transfer.push(...attributeBuffers(out))
   }
 
   // input: { mode: 'crop'|'filter'|'merge', clouds: [{ id, count, pos, col, nrm }],

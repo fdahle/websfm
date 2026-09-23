@@ -38,7 +38,7 @@ const byte = (v) => Math.max(0, Math.min(255, Math.round(v ?? 0)))
 // skipped and counted. Returns { count, pos: Float64Array, col?, skipped }.
 export function parseXyzText(text, { onLog } = {}) {
   const rows = parseRows(text, sniffDelimiter(text))
-  const xs = [], cols = []
+  const xs = [], cols = [], intensities = []
   let skipped = 0
   let colMax = 0
   for (const row of rows) {
@@ -48,6 +48,8 @@ export function parseXyzText(text, { onLog } = {}) {
       continue
     }
     xs.push(nums[0], nums[1], nums[2])
+    if (row.length === 4 || row.length === 7) intensities.push(nums[3])
+    else intensities.push(NaN)
     if (row.length >= 6) {
       const [r, g, b] = nums.slice(row.length - 3)
       if ([r, g, b].every(Number.isFinite)) {
@@ -71,5 +73,6 @@ export function parseXyzText(text, { onLog } = {}) {
   onLog?.(`XYZ: read ${count.toLocaleString()} points`
     + `${col ? ` with color (${colMax <= 1.0001 ? '0–1' : '0–255'} range)` : ''}`
     + `${skipped ? `, skipped ${skipped} non-numeric row(s)` : ''}`, 'info', 'Import')
-  return { count, pos, ...(col ? { col } : {}), skipped }
+  return { count, pos, ...(col ? { col } : {}), skipped,
+    ...(intensities.some(Number.isFinite) ? { attributes: { intensity: Float64Array.from(intensities) } } : {}) }
 }

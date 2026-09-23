@@ -1,3 +1,4 @@
+import { attributeBuffers } from '../../core/io/cloudAttributes.js'
 import { fromArrayBuffer } from 'geotiff'
 import { parseCloudFile, cloudStats, sniffCloudFormat } from '../../core/io/cloudImport.js'
 import { classifyRasterKind } from '../../core/io/rasterKind.js'
@@ -31,7 +32,7 @@ export function makeIoOps({ lazCodec = null } = {}) {
     emit('log', [`Parsed ${name}: ${stats.points.toLocaleString()} points`
       + `${stats.faces ? `, ${stats.faces.toLocaleString()} faces` : ''}`
       + ` in ${((performance.now() - t0) / 1000).toFixed(1)}s`, 'info', 'Import'])
-    const transfer = [parsed.pos.buffer]
+    const transfer = [parsed.pos.buffer, ...attributeBuffers(parsed)]
     if (parsed.col) transfer.push(parsed.col.buffer)
     if (parsed.nrm) transfer.push(parsed.nrm.buffer)
     if (parsed.idx) transfer.push(parsed.idx.buffer)

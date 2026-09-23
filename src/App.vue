@@ -89,6 +89,7 @@ import ImportCloudModal from './components/modals/ImportCloudModal.vue'
 import ImportRasterModal from './components/modals/ImportRasterModal.vue'
 import InteropImportModal from './components/modals/InteropImportModal.vue'
 import InteropSourceModal from './components/modals/InteropSourceModal.vue'
+import CloudSymbologyModal from './components/modals/CloudSymbologyModal.vue'
 import RasterStyleModal from './components/modals/RasterStyleModal.vue'
 import * as opfs from './utils/opfs.js'
 import { ensureProjection } from './core/crs.js'
@@ -198,8 +199,8 @@ const { sidebarWidth, startSidebarResize } = useSidebarResize()
 // ── Reconstruction ────────────────────────────────────────────────────────────
 // Project-scoped store; restore/clear run through the project-store registry.
 const reconstructionStore = useReconstructionStore()
-const { cameras, sparseCameras, points3d, reconStatus, clouds, selectedCloudId, selectedCloud, mainSparseId, mainSparseCloud, depthMaps, depthMapCount, dem, demSource, ortho, orthoSurfaces, georef, canGeoreference, canGeoreferenceGcps, denseSummary, summary: reconSummary } = storeToRefs(reconstructionStore)
-const { reconstruct, importColmapModel, importInteropModel, importCloud, editClouds, computeDepthMaps, densify, generateDem, generateOrtho, generateMesh, georeference, effectiveFrameSpec, gcpAccuracyReport, gcpGuides, gcpEstimate, selectCloud, removeCloud, renameCloud, setMainSparse, clearDerived: clearReconstructionDerived } = reconstructionStore
+const { cameras, sparseCameras, reconStatus, clouds, selectedCloudId, selectedCloud, mainSparseId, mainSparseCloud, depthMaps, depthMapCount, dem, demSource, ortho, orthoSurfaces, georef, canGeoreference, canGeoreferenceGcps, denseSummary, summary: reconSummary } = storeToRefs(reconstructionStore)
+const { reconstruct, importColmapModel, importInteropModel, importCloud, editClouds, computeDepthMaps, densify, generateDem, generateOrtho, generateMesh, georeference, effectiveFrameSpec, gcpAccuracyReport, gcpGuides, gcpEstimate, selectCloud, setCloudStyle, setCloudVisible, removeCloud, renameCloud, setMainSparse, clearDerived: clearReconstructionDerived } = reconstructionStore
 
 async function clearCurrentProjectDerived() {
   await clearReconstructionDerived()
@@ -217,7 +218,15 @@ const {
 } = storeToRefs(externalStore)
 const { importRaster, setRasterKind, setRasterStyle, setVerticalInfo, setRasterOnMap, setRasterOpacity, removeRaster, rasterById, probeRasterAt, ensureRasterLoaded } = externalStore
 
-// Clicking a point cloud in the sidebar shows it in the 3D viewer.
+const symbologyCloudId = ref(null)
+const symbologyCloud = computed(() => clouds.value.find(c => c.id === symbologyCloudId.value) ?? null)
+function openCloudSymbology(id) {
+  selectCloud(id)
+  activateTab('viewer')
+  symbologyCloudId.value = id
+}
+
+// Selection chooses the active layer without hiding the others.
 function showCloud(id) {
   selectCloud(id)
   activateTab('viewer')
@@ -228,7 +237,8 @@ function showCloud(id) {
 function zoomToCloud(id) {
   selectCloud(id)
   activateTab('viewer')
-  nextTick(() => viewerRef.value?.resetView())
+  setCloudVisible(id, true)
+  nextTick(() => viewerRef.value?.zoomToCloud(id))
 }
 
 // ── Ground Control Points ───────────────────────────────────────────────────────
@@ -996,43 +1006,26 @@ const mapViewerRef = ref(null)
 // the sparse cameras, so it's stable across sparse↔dense↔mesh selections.
 const viewerSceneUp = computed(() => estimateUpFromCameras(sparseCameras.value))
 
-// Push the selected point cloud into the 3D viewer. Reference changes on select,
-// rebuild (a fresh object replaces the sparse cloud), and restore.
-//
-// Building the Three.js scene (point buffers + per-camera frustum geometry/textures)
-// is heavy main-thread work, so we only do it while the 3D tab is actually shown.
-// Selecting/restoring a cloud while working in an image/map tab just stashes it as
-// `pendingScene`; it's flushed when the viewer tab becomes active. This keeps that
-// cost off the critical path (e.g. project restore lands on a different tab, or the
-// user selects clouds from the sidebar while in 2D).
-let pendingScene = null // { cameras, data } — the scene owed to the (possibly hidden) viewer
+// Queue layer changes while the 3D tab is hidden. Each cloud has its own GPU
+// object; selection no longer replaces the other visible layers.
+const sceneClouds = computed(() => clouds.value.map(c => ({ ...c })))
+let scenePending = true
 function flushScene() {
-  if (!pendingScene) return
-  const { cameras, data } = pendingScene
-  pendingScene = null
-  if (data == null) viewerRef.value?.clearReconstructionData()
-  else viewerRef.value?.setReconstructionData(cameras, data)
+  if (!scenePending || !viewerRef.value) return
+  scenePending = false
+  viewerRef.value.setCloudLayers(sceneClouds.value)
 }
-watch(selectedCloud, (c) => {
-  // Dense clouds are flat typed arrays; sparse clouds are point-object arrays; mesh
-  // clouds are indexed triangle buffers. The viewer accepts all three (it hands the
-  // dense/mesh position buffers straight to Three.js).
-  let data = null
-  const cameras = c?.cameras ?? new Map()
-  if (c) {
-    if (c.kind === 'dense') data = { count: c.count, pos: c.pos, col: c.col }
-    else if (c.kind === 'mesh') data = { kind: 'mesh', nVerts: c.nVerts, count: c.count, pos: c.pos, idx: c.idx, col: c.col }
-    else data = c.points
-  }
-  pendingScene = { cameras, data }
+watch(sceneClouds, () => {
+  scenePending = true
   if (activeTabId.value === 'viewer') flushScene()
 })
-// Build any scene owed to the viewer the moment its tab is shown.
+watch(viewerRef, () => { scenePending = true; if (activeTabId.value === 'viewer') flushScene() })
 watch(activeTabId, (id) => { if (id === 'viewer') flushScene() })
 
 // ── 3D scene display toggles ───────────────────────────────────────────────────
 const showCameras = ref(true)
 const showGrid = ref(true)
+const showLegend = ref(false)
 // ── Map display toggles ────────────────────────────────────────────────────────
 // The footprint layer master toggle (ribbon). Defaults on so a freshly computed
 // or imported shapefile set is visible immediately; per-set visibility is the
@@ -1481,6 +1474,7 @@ function handleCommand(id) {
     case 'reset-view':           viewerRef.value?.resetView(); break
     case 'view-toggle-cameras':  showCameras.value = !showCameras.value; break
     case 'view-toggle-grid': showGrid.value = !showGrid.value; break
+    case 'view-toggle-legend': showLegend.value = !showLegend.value; break
     case 'map-fit-view':         mapViewerRef.value?.fitView(); break
     case 'map-toggle-grid': showMapGrid.value = !showMapGrid.value; break
     case 'map-toggle-footprints': showFootprints.value = !showFootprints.value; break
@@ -1609,6 +1603,7 @@ function onRibbonPick(event) {
       :scene-type="currentSceneType"
       :show-cameras="showCameras"
       :show-grid="showGrid"
+      :show-legend="showLegend"
       :show-map-grid="showMapGrid"
       :show-footprints="showFootprints"
       :footprint-count="footprintCount"
@@ -1932,6 +1927,8 @@ function onRibbonPick(event) {
     </Teleport>
 
     <Teleport to="body">
+      <CloudSymbologyModal v-if="symbologyCloud" :key="symbologyCloud.id" :cloud="symbologyCloud" :clouds="clouds"
+        @close="symbologyCloudId = null" @apply="({ id, style }) => setCloudStyle(id, style)" />
       <RasterStyleModal
         v-if="rasterBeingStyled"
         :raster="rasterBeingStyled"
@@ -2216,6 +2213,8 @@ function onRibbonPick(event) {
         @open-matches="matchListOpen = true"
         @remove-matches="confirmRemoveMatches"
         @select-cloud="showCloud"
+        @cloud-symbology="openCloudSymbology"
+        @cloud-visibility="({ id, visible }) => setCloudVisible(id, visible)"
         @remove-cloud="confirmRemoveCloud"
         @rename-cloud="({ id, name }) => renameCloud(id, name)"
         @set-main-cloud="setMainSparse"
@@ -2271,7 +2270,7 @@ function onRibbonPick(event) {
         </div>
 
         <div class="content">
-          <Viewer3D ref="viewerRef" v-show="activeTabId === 'viewer'" :theme="theme" :images="images" :show-cameras="showCameras" :show-grid="showGrid" :scene-up="viewerSceneUp" @command="handleCommand" />
+          <Viewer3D ref="viewerRef" v-show="activeTabId === 'viewer'" :theme="theme" :images="images" :show-cameras="showCameras" :show-grid="showGrid" :show-legend="showLegend" :scene-up="viewerSceneUp" @command="handleCommand" />
           <ViewerMap v-if="mapMounted" ref="mapViewerRef" v-show="activeTabId === 'map'" :images="images" :gcps="gcps" :footprints="mapFootprints" :poses="poses" :selected-id="selectedId" :selected-gcp-id="selectedGcpId" :aligned-uuids="alignedUuids" :has-sparse="hasSparse" :crs="currentCrs" :show-footprints="showFootprints" :show-grid="showMapGrid" :rasters="mapRasters" :probe-raster="probeRasterAt" :load-raster="ensureRasterLoaded" @select="selectImage" @command="handleCommand" @select-gcp="selectGcp" @set-gcp-position="setGcpGroundPosition" @add-gcp-at="addGcpAtCoord" @delete-gcp="deleteGcpFromEditor" />
           <template v-for="tab in tabs" :key="tab.id">
             <ViewerImage

@@ -19,8 +19,8 @@ const props = defineProps({
   openTabIds: { type: Object, default: () => new Set() },
 })
 const emit = defineEmits([
-  'toggle', 'select-cloud', 'remove-cloud', 'rename-cloud', 'zoom-to-cloud',
-  'open-raster', 'remove-raster', 'set-raster-kind', 'style-raster',
+  'toggle', 'cloud-symbology', 'cloud-visibility', 'select-cloud', 'remove-cloud', 'rename-cloud', 'zoom-to-cloud',
+  'open-raster', 'remove-raster', 'rename-raster', 'set-raster-kind', 'style-raster',
   'set-raster-on-map', 'set-raster-opacity', 'convert-to-image',
 ])
 
@@ -85,6 +85,8 @@ function ctxRemove()   { emit('remove-raster', ctx.value.raster.id); closeCtx() 
         :clouds="clouds"
         :selected-cloud-id="selectedCloudId"
         @select-cloud="emit('select-cloud', $event)"
+        @cloud-symbology="emit('cloud-symbology', $event)"
+        @cloud-visibility="emit('cloud-visibility', $event)"
         @remove-cloud="emit('remove-cloud', $event)"
         @rename-cloud="emit('rename-cloud', $event)"
         @zoom-to-cloud="emit('zoom-to-cloud', $event)"

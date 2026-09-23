@@ -1,4 +1,5 @@
 import { markRaw } from 'vue'
+import { packAttributes, unpackAttributes } from '../../core/io/cloudAttributes.js'
 import { makePackedPoints } from '../../core/sfm/resultCodec.js'
 
 // Cloud ↔ on-disk shape. Lifted out of useReconstructionStore so the format has one
@@ -61,7 +62,7 @@ export function serializeMeshCloud(c) {
   }
 }
 
-export function serializeCloud(c) {
+function serializeCloudData(c) {
   if (c.kind === 'dense') return serializeDenseCloud(c)
   if (c.kind === 'mesh') return serializeMeshCloud(c)
   const pts = c.points
@@ -153,7 +154,7 @@ export function serializeCloud(c) {
   }
 }
 
-export function deserializeCloud(c, makeCloudId) {
+function deserializeCloudData(c, makeCloudId) {
   const N = c.pointCount ?? 0
   const b = c.buffers || {}
   // Dense clouds restore into the flat shape with their original position precision.
@@ -255,4 +256,19 @@ export function legacyDeserializeCloud(c, makeCloudId) {
       x, y, z, color, views: new Map(views || []),
     }))),
   }
+}
+
+// Keep view styling and scalar fields alongside every cloud kind.
+export function serializeCloud(c) {
+  const data = serializeCloudData(c)
+  const { fields, buffer } = packAttributes(c.attributes, c.kind === 'mesh' ? c.nVerts : (c.count ?? c.points?.length ?? 0))
+  return { ...data, visible: c.visible !== false, style: c.style ? JSON.parse(JSON.stringify(c.style)) : null,
+    attributeFields: fields, buffers: { ...data.buffers, attributes: buffer } }
+}
+
+export function deserializeCloud(c, makeCloudId) {
+  const cloud = deserializeCloudData(c, makeCloudId)
+  const attributes = unpackAttributes(c.attributeFields, c.buffers?.attributes, c.pointCount ?? 0)
+  return { ...cloud, visible: c.visible !== false, style: c.style ?? null,
+    ...(Object.keys(attributes).length ? { attributes: markRaw(attributes) } : {}) }
 }

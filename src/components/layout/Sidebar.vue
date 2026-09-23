@@ -52,14 +52,14 @@ const props = defineProps({
 })
 
 const emit = defineEmits([
-  'add-images', 'import-file', 'remove-image', 'convert-image-to-raster', 'remove-gcp', 'select-gcp',
+  'add-images', 'import-file', 'remove-image', 'rename-image', 'convert-image-to-raster', 'remove-gcp', 'select-gcp',
   'jump-to-image', 'remove-gcp-observation', 'update-gcp-observation-accuracy', 'open-gcp',
   'remove-sensor', 'merge-sensors', 'open-sensor', 'assign-sensor', 'remove-pose',
   'remove-shapefile', 'rename-shapefile', 'set-shapefile-on-map', 'zoom-to-shapefile',
   'select', 'open', 'show-info', 'delete-keypoints', 'zoom-to-image',
-  'select-cloud', 'remove-cloud', 'rename-cloud', 'set-main-cloud',
-  'open-matches', 'remove-matches', 'open-product', 'zoom-to-cloud',
-  'open-raster', 'remove-raster', 'set-raster-kind', 'style-raster',
+  'cloud-symbology', 'cloud-visibility', 'select-cloud', 'remove-cloud', 'rename-cloud', 'set-main-cloud',
+  'open-matches', 'remove-matches', 'open-product', 'remove-product', 'rename-product', 'zoom-to-cloud',
+  'open-raster', 'remove-raster', 'rename-raster', 'set-raster-kind', 'style-raster',
   'set-raster-on-map', 'set-raster-opacity', 'convert-raster-to-image',
 ])
 
@@ -210,6 +210,8 @@ watch(() => props.pendingRasters.length, (count, previous) => {
       :recon-status="reconStatus"
       @toggle="toggle('reconstruction')"
       @select-cloud="emit('select-cloud', $event)"
+      @cloud-symbology="emit('cloud-symbology', $event)"
+      @cloud-visibility="emit('cloud-visibility', $event)"
       @remove-cloud="emit('remove-cloud', $event)"
       @rename-cloud="emit('rename-cloud', $event)"
       @set-main-cloud="emit('set-main-cloud', $event)"
@@ -226,6 +228,8 @@ watch(() => props.pendingRasters.length, (count, previous) => {
       @toggle="toggle('products')"
       @open-product="emit('open-product', $event)"
       @select-cloud="emit('select-cloud', $event)"
+      @cloud-symbology="emit('cloud-symbology', $event)"
+      @cloud-visibility="emit('cloud-visibility', $event)"
       @remove-cloud="emit('remove-cloud', $event)"
       @rename-cloud="emit('rename-cloud', $event)"
       @zoom-to-cloud="emit('zoom-to-cloud', $event)"
@@ -243,6 +247,8 @@ watch(() => props.pendingRasters.length, (count, previous) => {
       :open-tab-ids="openTabIds"
       @toggle="toggle('reference')"
       @select-cloud="emit('select-cloud', $event)"
+      @cloud-symbology="emit('cloud-symbology', $event)"
+      @cloud-visibility="emit('cloud-visibility', $event)"
       @remove-cloud="emit('remove-cloud', $event)"
       @rename-cloud="emit('rename-cloud', $event)"
       @zoom-to-cloud="emit('zoom-to-cloud', $event)"
