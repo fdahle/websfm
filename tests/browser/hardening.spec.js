@@ -145,7 +145,12 @@ test('the full application creates and reopens a project without runtime errors'
   await page.getByPlaceholder('My Project').fill('Browser smoke project')
   await page.getByRole('button', { name: 'Create project', exact: true }).click()
   await expect(page.getByRole('dialog', { name: 'New Project', exact: true })).toHaveCount(0)
-  await expect(page.getByRole('button', { name: /Browser smoke project/ })).toBeVisible()
+  const projectButton = page.getByRole('button', { name: 'Browser smoke project ▾', exact: true })
+  await expect(projectButton).toBeVisible()
+  await projectButton.click()
+  await expect(page.locator('.project-picker')).toBeVisible()
+  await projectButton.click()
+  await expect(page.locator('.project-picker')).toHaveCount(0)
   await page.evaluate(async () => (await import('/src/utils/persistence.js')).flushPersistence())
   await page.reload()
   // The project picker is expected on startup; the created project must survive.

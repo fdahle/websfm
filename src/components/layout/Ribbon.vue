@@ -693,6 +693,7 @@ function run(cmd) {
         v-if="persistenceEnabled"
         class="project-btn"
         :title="currentProjectName || 'Project'"
+        @mousedown.stop
         @click="emit('command', 'open-project-picker')"
       >
         {{ currentProjectName || '—' }}
