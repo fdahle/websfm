@@ -137,6 +137,7 @@ export const useImagesStore = defineStore('images', () => {
         const { raw: _raw, ...metaToSave } = img.meta ?? {}
         return {
           id: img.id, uuid: img.uuid, name: img.name,
+          sourceName: img.sourceName ?? img.name,
           kpStatus: img.kpStatus, kpCount: img.kpCount, kpMs: img.kpMs,
           detector: img.detector ?? null, descDim: img.descDim ?? null,
           detectScale: img.detectScale ?? null,
@@ -203,6 +204,10 @@ export const useImagesStore = defineStore('images', () => {
     const batchWrites = []
     for (const file of files) {
       const item = createImage(file)
+      // Keep the immutable source filename separate from the user-editable label.
+      // TIFF decoding must not depend on whether a user keeps the .tif extension
+      // in the label they choose later.
+      item.sourceName = file.name
       if (images.value.some((img) => img.id === item.id)) {
         log(`Skip duplicate: ${file.name}`, 'warn', 'Images')
         continue
@@ -357,6 +362,20 @@ export const useImagesStore = defineStore('images', () => {
     }
   }
 
+  // Rename is label-only. The stable id/uuid continue to key tabs, matches,
+  // observations and persisted binary assets, so changing the display name does
+  // not break any links to the image.
+  function renameImage(id, name) {
+    const img = imageById(id)
+    const trimmed = name?.trim()
+    if (!img || !trimmed || trimmed === img.name) return false
+    const previous = img.name
+    img.name = trimmed
+    log(`Renamed image "${previous}" → "${trimmed}"`, 'info', 'Images', { channel: 'activity' })
+    if (isPersisting()) sync()
+    return true
+  }
+
   // ── Image source liveness ─────────────────────────────────────────────────
   // `img.url` is a blob: URL, which is a handle to a FILE — not a copy of the
   // bytes. An in-session image's handle points at the user's original file on
@@ -414,7 +433,7 @@ export const useImagesStore = defineStore('images', () => {
     }
 
     let displayBlob = null, computeBlob = null
-    if (isTiff(img.name) && nativeTiffDecodeResult() !== true) {
+    if (isTiff(img.sourceName ?? img.name) && nativeTiffDecodeResult() !== true) {
       // A non-native engine can't decode the raw TIFF, so only the transcode
       // cache is usable here. Re-transcoding is what reopening the project does;
       // it isn't worth running from an <img> error handler.
@@ -1250,6 +1269,7 @@ export const useImagesStore = defineStore('images', () => {
       id: record.id,
       uuid: record.uuid,
       name: record.name,
+      sourceName: record.sourceName ?? record.name,
       url: null,
       computeUrl: null,
       file: null,
@@ -1295,7 +1315,7 @@ export const useImagesStore = defineStore('images', () => {
         // OPFS keeps the original file, so TIFFs need the same transcode as on
         // ingest (the Blob has no name, so classify by the record's name).
         let url, computeUrl
-        if (isTiff(record.name)) {
+        if (isTiff(record.sourceName ?? record.name)) {
           // Native-decode probe is session-cached; only feed it the original on
           // the first TIFF, when the result isn't known yet.
           const known = nativeTiffDecodeResult()
@@ -1412,6 +1432,7 @@ export const useImagesStore = defineStore('images', () => {
     selectImage,
     addImages,
     removeImage,
+    renameImage,
     reportImageLoadError,
     updateMask,
     updateDepth,

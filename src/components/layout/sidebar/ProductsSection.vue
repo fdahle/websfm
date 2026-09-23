@@ -1,6 +1,7 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, ref, nextTick } from 'vue'
 import CloudRows from './CloudRows.vue'
+import { useContextMenu } from '../../../composables/useContextMenu.js'
 
 // Deliverables the app produced: computed dense/mesh clouds plus the DEM/ortho
 // rasters. Split from Reference Data by *provenance*, not data type — everything
@@ -22,8 +23,8 @@ const emit = defineEmits([
 // One row per built raster; opening (double-click) shows it in a tab like an image.
 const productRows = computed(() => {
   const rows = []
-  if (props.dem) rows.push({ kind: 'dem', name: 'DEM', product: props.dem })
-  if (props.ortho) rows.push({ kind: 'ortho', name: 'Orthophoto', product: props.ortho })
+  if (props.dem) rows.push({ kind: 'dem', name: props.dem.name || 'DEM', product: props.dem })
+  if (props.ortho) rows.push({ kind: 'ortho', name: props.ortho.name || 'Orthophoto', product: props.ortho })
   return rows
 })
 
@@ -43,6 +44,37 @@ const openLabel = (kind) =>
 
 const productUnit = (p) => (p?.unit && p.unit !== 'model' ? p.unit : 'model units')
 const productCrs = (p) => (p?.crs === 'local' || !p?.crs ? 'Local' : p.crs)
+
+const editingKind = ref(null)
+const editingName = ref('')
+const renameInput = ref(null)
+function setRenameInput(el) { if (el) renameInput.value = el }
+function startRename(row) {
+  editingKind.value = row.kind
+  editingName.value = row.name
+  nextTick(() => { renameInput.value?.focus(); renameInput.value?.select() })
+}
+function commitRename() {
+  if (editingKind.value == null) return
+  emit('rename-product', { kind: editingKind.value, name: editingName.value })
+  editingKind.value = null
+}
+function cancelRename() { editingKind.value = null }
+
+const { menu: productCtx, open: openProductCtx, close: closeProductCtx } = useContextMenu()
+function onProductRightClick(e, row) { openProductCtx(e, { row }, { w: 190, h: 132 }) }
+const ctxOpenLabel = computed(() => productCtx.value
+  ? openLabel(productCtx.value.row.kind)
+  : 'Open in tab')
+function ctxOpen() {
+  emit('open-product', productCtx.value.row.kind)
+  closeProductCtx()
+}
+function ctxRename() { startRename(productCtx.value.row); closeProductCtx() }
+function ctxRemove() {
+  emit('remove-product', productCtx.value.row.kind)
+  closeProductCtx()
+}
 </script>
 
 <template>
@@ -68,6 +100,7 @@ const productCrs = (p) => (p?.crs === 'local' || !p?.crs ? 'Local' : p.crs)
           class="list-item"
           :title="`${row.name} — double-click to open`"
           @dblclick="emit('open-product', row.kind)"
+          @contextmenu="onProductRightClick($event, row)"
         >
           <button
             class="expand-btn"
@@ -75,12 +108,23 @@ const productCrs = (p) => (p?.crs === 'local' || !p?.crs ? 'Local' : p.crs)
             @click.stop="toggleProductExpand(row.kind)"
             :title="productExpanded[row.kind] ? 'Collapse' : 'Expand'"
           ></button>
-          <span class="item-name">{{ row.name }}</span>
+          <input
+            v-if="editingKind === row.kind"
+            :ref="setRenameInput"
+            v-model="editingName"
+            class="rename-input"
+            @click.stop
+            @dblclick.stop
+            @keydown.enter.prevent="commitRename"
+            @keydown.esc.prevent="cancelRename"
+            @blur="commitRename"
+          />
+          <span v-else class="item-name">{{ row.name }}</span>
           <span class="obs-badge" :title="`${row.product.width}×${row.product.height} px`">
             {{ row.product.width }}×{{ row.product.height }}
           </span>
         </li>
-        <li v-if="productExpanded[row.kind]" class="img-details">
+        <li v-if="productExpanded[row.kind]" class="img-details" @contextmenu.stop>
           <div class="detail-row">
             <span class="detail-label">Frame</span>
             <span class="detail-value">{{ productCrs(dem || row.product) }}</span>
@@ -108,6 +152,21 @@ const productCrs = (p) => (p?.crs === 'local' || !p?.crs ? 'Local' : p.crs)
       </template>
       <li v-if="isEmpty" class="empty">No products — densify, or build a DEM or orthophoto</li>
     </ul>
+
+    <Teleport to="body">
+      <div
+        v-if="productCtx"
+        class="ctx-menu"
+        :style="{ left: productCtx.x + 'px', top: productCtx.y + 'px' }"
+        @click.stop
+      >
+        <button class="ctx-item" @click="ctxOpen">{{ ctxOpenLabel }}</button>
+        <div class="ctx-sep"></div>
+        <button class="ctx-item" @click="ctxRename">Rename</button>
+        <div class="ctx-sep"></div>
+        <button class="ctx-item danger" @click="ctxRemove">Remove</button>
+      </div>
+    </Teleport>
   </div>
 </template>
 

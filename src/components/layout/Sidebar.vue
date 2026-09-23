@@ -153,6 +153,7 @@ watch(() => props.pendingRasters.length, (count, previous) => {
       @zoom-to-image="emit('zoom-to-image', $event)"
       @delete-keypoints="emit('delete-keypoints', $event)"
       @remove-image="emit('remove-image', $event)"
+      @rename-image="emit('rename-image', $event)"
       @convert-to-raster="emit('convert-image-to-raster', $event)"
     />
 
@@ -227,6 +228,8 @@ watch(() => props.pendingRasters.length, (count, previous) => {
       :open-tab-ids="openTabIds"
       @toggle="toggle('products')"
       @open-product="emit('open-product', $event)"
+      @remove-product="emit('remove-product', $event)"
+      @rename-product="emit('rename-product', $event)"
       @select-cloud="emit('select-cloud', $event)"
       @cloud-symbology="emit('cloud-symbology', $event)"
       @cloud-visibility="emit('cloud-visibility', $event)"
@@ -254,6 +257,7 @@ watch(() => props.pendingRasters.length, (count, previous) => {
       @zoom-to-cloud="emit('zoom-to-cloud', $event)"
       @open-raster="emit('open-raster', $event)"
       @remove-raster="emit('remove-raster', $event)"
+      @rename-raster="emit('rename-raster', $event)"
       @set-raster-kind="emit('set-raster-kind', $event)"
       @style-raster="emit('style-raster', $event)"
       @set-raster-on-map="emit('set-raster-on-map', $event)"
