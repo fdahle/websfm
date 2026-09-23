@@ -87,6 +87,9 @@ export function cloudToLaz(points, { crsCode = null, geographic = false, compres
   const out = new Uint8Array(header.length + packed.data.length)
   out.set(header, 0)
   out.set(packed.data, header.length)
+  // The codec writes a standalone point block; LASzip files store absolute
+  // chunk-table offsets, so account for the header and VLRs when embedding it.
+  relocateChunkTable(out.subarray(header.length), packed.vlr, header.length)
   const ratio = n ? (n * LAS_RECORD_F2 / packed.data.length) : 1
   onLog?.(`LAZ export: ${n.toLocaleString()} points, ${(out.length / 1024 ** 2).toFixed(1)} MB `
     + `(${ratio.toFixed(1)}× smaller than LAS)`
@@ -109,12 +112,40 @@ export function parseLaz(buffer, { decompress, onLog } = {}) {
   if (!lazVlr) {
     throw new Error('LAZ file has no "laszip encoded" VLR (record 22204) — cannot know how the points were coded')
   }
-  validateLasAllocation(h.count, h.recordLength, bytes.byteLength)
-  const records = decompress(lazVlr.data, bytes.subarray(h.offsetToPoints), h.count, h.recordLength)
+  // Keep the caller's file unchanged. The codec seeks within the point block,
+  // whereas the file's chunk-table pointer is relative to the whole LAS file.
+  // Include both this copy and the codec's input copy in the memory budget.
+  validateLasAllocation(h.count, h.recordLength, bytes.byteLength + 2 * (bytes.byteLength - h.offsetToPoints))
+  const compressed = new Uint8Array(bytes.subarray(h.offsetToPoints))
+  relocateChunkTable(compressed, lazVlr.data, -h.offsetToPoints)
+  const records = decompress(lazVlr.data, compressed, h.count, h.recordLength)
   const cloud = decodeLasPoints(records, h.count, h.recordLength, h.format, h.scale, h.offset)
   onLog?.(`LAZ: read ${h.count.toLocaleString()} points (v${h.versionMajor}.${h.versionMinor}, `
     + `format ${h.format}${cloud.col ? ', RGB' : ''})`, 'info', 'Import')
   return cloud
+}
+
+// LASzip compressor types 2 (pointwise chunked) and 3 (layered/COPC) have
+// an i64 chunk-table pointer. Type 1 is an unchunked stream without a pointer.
+function relocateChunkTable(data, vlr, delta) {
+  if (vlr.byteLength < 2) throw new Error('Truncated LASzip VLR')
+  const compressor = new DataView(vlr.buffer, vlr.byteOffset, vlr.byteLength).getUint16(0, true)
+  if (compressor !== 2 && compressor !== 3) return
+  if (data.byteLength < 8) throw new Error('Truncated LAZ chunk-table pointer')
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
+  let pointerOffset = 0
+  let pointer = view.getBigInt64(0, true)
+  // Non-seekable writers put the actual pointer at EOF and leave -1 here.
+  if (pointer === -1n) {
+    pointerOffset = data.byteLength - 8
+    pointer = view.getBigInt64(pointerOffset, true)
+  }
+  if (pointer <= 0n) return // No chunk table; let the codec handle sequential decoding.
+  const relative = pointer + BigInt(Math.min(delta, 0))
+  if (relative < 8n || relative + 8n > BigInt(data.byteLength)) {
+    throw new Error('Invalid LAZ chunk-table offset (file may be truncated)')
+  }
+  view.setBigInt64(pointerOffset, pointer + BigInt(delta), true)
 }
 
 // Per-axis quantization, identical to the LAS writer's — a .laz and .las of the
