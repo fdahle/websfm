@@ -58,6 +58,11 @@ test('two tabs preserve independent projects and refuse simultaneous editing', a
     try { await window.projects.switchProject(id); return 'opened' } catch (error) { return error.message }
   }, a)).toContain('already open in another tab')
   await page.close()
+  // Closing a tab returns before Chromium has necessarily released its Web Lock.
+  await expect.poll(() => other.evaluate(async id => {
+    const { held } = await navigator.locks.query()
+    return held.some(lock => lock.name === `websfm:project-session:${id}`)
+  }, a)).toBe(false)
   await other.evaluate(id => window.projects.switchProject(id), a)
 })
 
