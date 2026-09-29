@@ -156,10 +156,11 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
   8-bit takes the styled path; an 8-bit 1–3 band ortho keeps the old `readRGB`
   fast path untouched. An index renders on its own fixed −1…1 scale and is
   never stretched (a stretch would move the zero crossing that gives NDVI its
-  meaning). A restyle is a **re-decode from the retained original**
-  (`useExternalStore.setRasterStyle`, mirroring `setRasterKind`) — the stored
-  plane is baked 8-bit RGBA, and keeping raw uint16 bands would cost ~300 MB
-  per scene,
+  meaning). Restyling uses a **32 MiB worker LRU of preview bands and percentile
+  samples** (`useExternalStore.setRasterStyle`); a cache miss reads the retained
+  original Blob. Styled full-resolution planes remain lazy derived data.
+  `readRasterWindow` reads bounded raw-band windows directly from the original
+  with explicit pixel offsets/scales, independent of display styling,
   `rasterSample.js` — **THE** raster sampler (bilinear + nodata/mask/NaN, plus
   `worldToPixel`/`pixelToWorld`/`rasterBounds`) over a
   `{ width, height, data, geoTransform }` descriptor — `core/eval/demCheck.js`
@@ -1359,6 +1360,23 @@ propagate covariance rather than retaining stale numeric sigmas.
   from and unaffected by bundled third-party licenses; never relabel a third party's
   license as ours.
 
+## Interactive raster and sparse tools
+
+- `RasterMeasurements.vue` consumes `core/products/measure.js` in the active
+  ProductViewer. `useMeasurementsStore` persists named snapshots to
+  `measurements.json`; source identity, generation and frame stamps flag stale
+  results. Vertices use the recorded raster frame. Profiles retain nodata gaps.
+- `FindGcpsModal.vue` consumes bounded reference reads, worker SIFT/homography
+  matching and `core/sfm/referenceGcps.js`. Accepted candidates retain measured
+  sparse observations; raw photo coordinates undo recorded calibration. Unknown
+  elevation/covariance must remain unknown until user review.
+- Sparse gradual selection uses packed disposable worker input, fixed-intrinsics
+  BA and one successful store commit. Keep self-calibration and film transforms
+  when retiring obsolete run statistics; invalidate all computed dependents.
+- SIFT batch concurrency is bounded by pool size, four jobs and an explicit
+  decode/pyramid memory estimate. Learned detection stays serial. Batch logs
+  measure wall time; the estimate is not an observed browser peak.
+
 ## Verification
 Per change: `npm test` + `npm run typecheck`. WASM changes: rebuild + rerun.
 Browser-runtime work (WGSL, OPFS, modals) needs a manual browser run this
@@ -1386,3 +1404,12 @@ For a store, diff the setup `return` block against HEAD — that is its API.
   `core/sfm/register.js` (PnP-gate + interim-BA knobs).
 - Type hints: `src/core/types.ts` (+ `npm run typecheck`).
 - The plan: `TODO.md`. Baselines + done log: `HANDOVER.md`.
+
+- Saved dense maps travel to workers as File handles. `depthMapInput()` validates
+  sidecar sizes; streamed fusion keeps a reference and comparison map, streamed
+  ortho keeps one map. Never reintroduce whole-set hydration to compute products.
+- Imported ortho display uses Blob range reads and WebGL tiles. COG compression
+  assembles Blob parts, not a second full-resolution typed array. Raw originals
+  remain authoritative; shader ranges and gamma never alter their sample values.
+- Matching RPC timing separates sender serialization from worker execution;
+  round-trip remainder includes scheduling and transport, not just copying.

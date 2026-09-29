@@ -930,6 +930,29 @@ project CRS merely because coordinates are in metres.
 
 ---
 
+### Reference-orthophoto control candidates
+
+Reference matching detects SIFT on the project orthophoto preview and a bounded
+raw reference-band image, then applies a mutual ratio match and homography RANSAC.
+At least eight inliers and a 25% inlier fraction are required. Sparse points within
+two working pixels of an accepted feature provide measured photo tracks; the
+reference position is estimated from the matched reference feature plus the
+homography's local displacement to that sparse point. Candidates are spatially
+separated and require at least two stored photo observations. Canonical pixels
+are mapped back through the recorded self-calibration, lens and film transforms.
+
+This is a candidate generator under a locally planar assumption, not independent
+survey control. User review, elevation and declared covariance are required before
+its output can constrain adjustment. Temporal change and relief remain limitations.
+
+### User-driven sparse cleanup
+
+Gradual selection uses per-point reprojection RMS, registered track length, or
+maximum camera-ray angle. After deletion a fixed-intrinsics bundle adjustment
+refines the surviving graph. A disconnected graph, under-supported camera or
+missing canonical observation rejects the operation before commit. Calibration
+transforms survive; derived geometry and georeferencing are invalidated.
+
 ## 7. Dense multi-view stereo
 
 **Method**: **PatchMatch stereo** (Bleyer et al. 2011 lineage) with slanted
@@ -1142,6 +1165,28 @@ exist to tell the user *where* a reconstruction is weak.
   its **max view count** — how many images see that patch of ground (2 = the triangulation
   minimum, ≥3 comfortable). It's the photogrammetric "where is my overlap thin" map,
   read straight off the already-Z-up-oriented sparse points, not a new solve.
+
+### Streaming products and saved measurements (2026-09-27)
+
+Saved depth-map fusion executes the same cost percentile, auto merge-cell,
+bounding-box, consistency, parallax, incidence and voxel rules as resident fusion.
+Its pair-major consistency pass preserves source order and early-accept gates,
+storing agreement counts and maximum angles for one reference image. File handles
+load one reference and one comparison map at a time. Synthetic tests require exact
+point, normal and summary equality for both paths. Streamed orthorectification
+keeps the same best-view tie order or weighted average, rounding only after all
+views; gap filling runs after all source maps have contributed.
+
+Saved 2D measurements retain world vertices, units, sampled profiles and their
+source/frame stamp. They are evidence snapshots; rebuilding a raster never
+silently recomputes them. Reference candidate review can declare covariance axes,
+height, vertical datum and checkpoint role before import. DEM-derived heights
+carry the DEM's declared accuracy; no accuracy is inferred from a good image match.
+
+Reference COG conversion preserves full-resolution sample values. Nearest-sample
+overviews support display only; raw matching reads the original raster. Shader
+styles implement the same band ranges, gamma and normalized-difference formula
+as CPU previews (the index colour ramp is sampled into 33 interpolation stops).
 
 ## 12. Where to read the code (pointers, not content)
 

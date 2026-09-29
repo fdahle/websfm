@@ -62,24 +62,13 @@ variable at a time (the 2026-07-25 SB run changed detection preset *and* pairing
 and is therefore not comparable to anything); and a blank Debug ▸ Project Summary
 block means a **producer** is not recording — fix the producer, not the renderer.
 
-### RR — reference rasters: raw storage + COG + draw-time styling
-Re-architecture, **not** a fix: the imported-raster path stores a *baked* plane, so
-styling is a ~10 s re-decode of the original, the ortho bake has no reader
-(`readWindow` has no consumers; `sampleAt` is null for orthos), and raw values —
-needed for automatic GCP finding against satellite imagery — are unrecoverable.
-Target: originals + COG as the source of truth, style as pure view state applied at
-draw time on the GPU (`ol/source/GeoTIFF` + `ol/layer/WebGLTile`, both already in
-OL 10.9), fast-first import with background conversion. **No back-compat / no
-migration** — re-import is expected. Full spec:
-`docs/planning/plan-reference-raster-rearchitecture.md`.
-- **Phase 0 spikes first** (`VERIFICATION.csv` ▸ `RAS-05`, `RAS-06`). 0a is the
-  assumption phases 3–5 rest on; 0d replaces every timing estimate in the plan with
-  a measurement. Do not start Phase 1 before they answer.
-- Deletes the 2026-07-20 restyle work (`styleStamp`/`planeStyleStamp`/
-  `redecodePlane`/`restyleRasterPreview` + the `previewUrl` layer-rebuild fix) —
-  correct for the architecture they patched, dead weight in this one.
-- Phase 1 (the COG writer) already shipped ahead of the spikes deliberately: it
-  survives either branch.
+### RR — remaining reference-raster work
+Local COG display, GPU styling, bounded raw windows and reviewed GCP candidates
+are implemented. Remaining work: fully windowed DEM analysis (sampling still uses
+a flat elevation plane), conversion of sources above the decoding budget, remote
+COG sources, and rectangular-pixel tiled raster tabs. Real large-tile timings and
+visual comparisons remain `RAS-06`; the synthetic EPSG:3031 GPU path is verified.
+See `docs/planning/plan-reference-raster-rearchitecture.md`.
 
 ### SFM — decisions parked behind the acceptance runs
 Each is one knob with a named piece of evidence; none should be tuned a priori.
@@ -232,14 +221,9 @@ guard) with a mocked `InferenceSession`. Real-inference browser runs are
 `VERIFICATION.csv` ▸ `DET-02`, `DET-04`, `DET-06`.
 
 ### Matching & detection throughput
-Order: **P5 → P9 → P10**; measure before starting and after each item, and record in
+Stage timings now separate loading, serialization, matching and verification.
+Use a real dataset to justify **P9 → P10**; measure before/after and record in
 HANDOVER §Baselines (`DET-07` is the before-number).
-
-**P5 — parallelize `detectAll`.** `useImagesStore.detectAll` awaits one `detectOne`
-at a time despite the pool. Reuse `matchAll`'s shared-cursor drain loop; keep
-cooperative cancellation + per-image progress. ~POOL_SIZE× on detection, trivial.
-Caveat: respect SP3's NN-concurrency cap — parallel SuperPoint sessions multiply GPU
-memory.
 
 **P9 — fused match+verify op + worker-side descriptor cache.** One `matchPairFull`
 op (match + verify in one call; gate logic stays in the store). Workers cache
@@ -356,18 +340,10 @@ heal — they close the window rather than react to it.
 
 ## Later — features
 
-### F9 — the two remaining halves of point-cloud editing
+### F9 — remaining interactive point-cloud editing
 The numeric **dense** half shipped 2026-07-22 (Tools ▸ Point Cloud: filter / crop /
-merge, `core/products/cloudEdit.js`). What remains needs *interaction* or touches the
-*sparse* model, which that work deliberately excluded:
-- **Gradual selection** (the higher-value, cheaper half): filter **sparse** points by
-  reprojection error / track length / triangulation angle with a live-count slider,
-  then delete + re-run BA. The stats all exist in the track filter
-  (`core/sfm/sfm.js`); this exposes them as a user-driven post-pass, UI as a modal
-  like MatchList. It is genuinely a different operation from the shipped dense
-  filters and must stay separate: a sparse point carries the view-tracks that
-  dense/ortho/COLMAP-export read, so deleting one must invalidate the depth-map
-  staleness stamp and re-run BA — exactly why `cloudEdit.js` refuses sparse clouds.
+merge, `core/products/cloudEdit.js`). Sparse gradual selection shipped 2026-09-27 (Filter Cloud → Sparse gradual selection).
+What remains needs interactive 3D selection:
 - **Interactive**: box/lasso select in Viewer3D → delete selected (three.js
   raycast/frustum). Cheaper than it was — the delete is `cropCloud`/`selectPoints`
   with a caller-supplied mask, so this is a selection-UI task plus one core entry
@@ -376,15 +352,14 @@ merge, `core/products/cloudEdit.js`). What remains needs *interaction* or touche
 ### F11 — measurement tools (scale shipped 2026-08-25)
 **Scale constraints shipped** (slice 1, WS0–WS2: markers, scale bars, the
 `effectiveFrameSpec` resolver, residual reporting, staleness) — see HANDOVER
-2026-08-25 and `VERIFICATION.csv` ▸ `MEAS-01`…`MEAS-04`, `MEAS-10`…`MEAS-13`,
-none of which has been run in a browser yet. What remains is the ruler.
-- **Measurement tools** (Pix4D rayCloud): ruler/polyline, area (true vs
-  planimetric), elevation profile, volume cut/fill against a surface. Pure
-  geometry in a new `core/products/measure.js`; the one new *interaction*
-  primitive is 3D picking, which `Viewer3D.vue` has none of today. The 2D half
-  (ruler/area/profile on the ortho/DEM in `ProductViewer`) is cheaper than the 3D
-  half and higher-value for aerial work — the pixel↔world conversion is already
-  there. **Ship the pure core with its consumer, not before** — `preflight.js`
+2026-08-25 and `VERIFICATION.csv` ▸ `MEAS-01`…`MEAS-04`, `MEAS-10`…`MEAS-13`.
+The 2026-09-27 slice added saved 2D ruler/polyline, planimetric area and DEM
+profiles with CSV export and source/frame staleness; synthetic Chromium coverage is in `workflow-tools.spec.js`.
+What remains is 3D picking/rulers, true surface area and volume.
+- **Remaining measurement tools** (Pix4D rayCloud): 3D ruler/polyline, true surface
+  area and volume cut/fill. Extend the shipped
+  `core/products/measure.js`; the one new *interaction*
+  primitive is 3D picking, which `Viewer3D.vue` has none of today. The saved 2D half is shipped. **Ship additional pure core with its consumer, not before** — `preflight.js`
   above is the standing example of why.
 - Every readout goes through `effectiveFrameSpec` and prints its unit: `24.13 m`
   or `24.13 model units`, never a bare number. That resolver, the `scaled-local`

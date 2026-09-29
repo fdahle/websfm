@@ -24,6 +24,36 @@ Git history holds the detail.
 | **B-detect** | SIFT detection throughput | 2026-07-17 | the detection pyramid + the wasted-descriptor finding (P10) |
 | **B-mesh** | screened-Poisson meshing | 2026-08-11 | meshing cost per depth; the finest-layer solve is the remaining pole |
 
+### B-workflow-followups — synthetic Chrome checks (2026-09-27)
+
+Three cold-worker pairs, 800 SIFT descriptors per image, three synthetic cameras:
+matching wall **966 ms**; summed pair stages **1.30 ms descriptor loading**, **1.25 ms
+postMessage serialization**, **760 ms matching**, **592 ms verification**. Worker
+stage times include backend startup; parallel sums exceed wall time. These are
+instrumentation checks, not the 50-image real matching baseline. No worker cache
+or fused matching/verification optimization was enabled from these numbers.
+
+A 1024² six-band uint16 EPSG:3031 synthetic raster produced its preview in **767 ms**
+and a three-level COG. Chrome rendered it through WebGL, changed RGB bands/gamma
+and an index style, and preserved raw values. This is not a large real tile timing.
+
+Streamed fusion and both orthophoto blend modes exactly match resident outputs in
+synthetic tests. Chrome also fused OPFS depth maps with **zero resident store maps**.
+For 50 maps at 1024² with normals, input planes alone are about **1150 MiB**; two
+maps plus agreement/angle scratch planes are about **58 MiB**. This is arithmetic
+for the new residency bound, not a measured browser heap peak; accumulator/output,
+codec buffers and GC remain additional memory.
+
+### B-detect-batch — Chromium synthetic scheduling baseline (2026-09-27)
+
+Eight deterministic 1200×1200 PNGs, SIFT, contrast 0.01, cap 5000, four warmed
+workers, no persistence, Chrome 154 on this Mac: **serial 3672 ms → bounded batch
+943 ms (3.89×)**. Every keypoint record and descriptor element matched exactly.
+A repeat measured 3744 ms → 970 ms (3.86×).
+Reproduce with the throughput case in `tests/browser/workflow-tools.spec.js`.
+This measures scheduling on synthetic images, not the Building 50 matching run,
+large-film-scan peak memory, cold model startup or disk throughput.
+
 ### B4 — South Building, 128 images (2026-07-22, two runs) — supersedes the 86-camera SB number
 Two front ends on the same set: **SIFT/brute-force** (17:27–17:38 console log, dense
 on CPU) and **SuperPoint/LightGlue** (`south_gpu` quality report, 19:45). This is the
@@ -250,6 +280,30 @@ fiducials; self-calibration (A2) + fiducials (F4) are the code-side support.
 ---
 
 ## Done log (most recent first)
+
+- 2026-09-28 · Fixed the blank Workflow Builder on new projects; initialize on open, provide an actionable empty canvas, keep the settings inspector accessible in compact windows, and add keyboard reorder controls. Added the workflow guide and Chrome coverage for editing, templates, OPFS reopen, and interactive execution (`App.vue`, `WorkflowBuilderModal.vue`, `workflow-builder.spec.js`).
+
+- **2026-09-27 · Five workflow follow-ups.** GCP close-ups, optional source-photo
+  crops, DEM height/accuracy filling and checkpoint roles in Find GCPs; named
+  persisted 2D measurements and stale-source stamps; matching RPC stage timings;
+  File-handle depth-map streaming for fusion and ortho with eviction after save;
+  fast ortho previews, serialized COG preparation, Blob-part assembly and WebGL
+  raster tabs/map layers with GPU styles. Guides describe the workflows and
+  remaining limits. Real historical accuracy and large-dataset memory/timings
+  remain in VERIFICATION.csv. Validation: 1508 tests in the full unit run plus
+  four shader-expression cases; 19 Chrome integration tests, with grayscale and
+  application startup rechecked after the final viewer split; typecheck/lint and
+  production build pass. Main bundle: 1744.32 kB, below the 1750 kB warning.
+
+- **2026-09-27 · Throughput, reference candidates and editing.** Added bounded SIFT
+  batches with memory-aware concurrency estimates and wall-clock logs; raw
+  GeoTIFF window reads and a bounded restyle-band cache; reviewed reference-ortho
+  SIFT/H-RANSAC GCP candidates tied to measured sparse tracks; temporary 2D
+  ruler/area/DEM profiles with CSV; and sparse gradual selection with worker BA,
+  track/calibration preservation and dependent-product invalidation. Five
+  synthetic Chromium workflows pass, including actual SIFT, GeoTIFF and BA WASM.
+  Real historical matching and large-image peak memory remain manual checks.
+
 
 *Entries often name a `PLAN-*.md` / `plan-*.md` file. Those are deleted when their
 feature ships (the documented rule), so older links point at files that now exist
