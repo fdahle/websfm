@@ -42,3 +42,18 @@ GeoTIFF keeps pixels and georeferencing in one file. PNG and JPEG exports are pa
 with a world file and `.prj`; keep those sidecars beside the image when moving it into
 GIS. Inspect seams, leaning objects, ghosting, holes, and boundary behaviour at full
 resolution before using the result.
+
+## Imported reference rasters
+Reference imagery first appears as a preview, then gains tiled full-resolution
+display in its tab and on the map. Pan and zoom request visible tiles. RGB band
+mapping, grayscale, normalized-difference indices and gamma are drawn on the GPU;
+manual ranges and changes that reuse existing ranges update without decoding the
+image again. A new percentile range may need a small sample read.
+
+The original file is retained for raw-value access. A tiled copy with overviews is
+prepared in the background and saved with the project; conversion jobs run one at
+a time. Files beyond the conversion memory budget use their original GeoTIFF.
+Unsupported display layouts use the preview. Display styles never change raw
+values used for matching. Imported DEMs retain a separate elevation plane for
+sampling and profiles. Raster tabs use tiled display for square-pixel rasters;
+the map also supports rectangular pixels.

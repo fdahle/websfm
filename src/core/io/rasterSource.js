@@ -7,7 +7,7 @@
 //   {
 //     meta,                          // RasterMeta (see useExternalStore)
 //     sampleAt(x, y),                // native-CRS world coords → value | null
-//     readWindow(rect, level),       // { col, row, width, height } → { data, width, height }
+//     readWindow(rect, level),       // await → { data, width, height, … }
 //     previewDataUrl(),              // small pre-rendered preview, or null
 //   }
 //
@@ -22,7 +22,9 @@ import { sampleRaster, worldToPixel, pixelToWorld, rasterBounds } from './raster
 // meta: RasterMeta — { width, height, bands, dtype, nodata, geoTransform, … }
 // data: the single-band plane (Float32Array for a DEM; for an ortho this is the
 //       band-0 plane and `rgba` carries the display pixels).
-export function createFlatRasterSource(meta, data, { rgba = null, previewDataUrl = null } = {}) {
+// Original-backed ortho reads are asynchronous and also return raw `channels`,
+// pixel offsets and per-axis scales (bounded output may be downsampled).
+export function createFlatRasterSource(meta, data, { rgba = null, previewDataUrl = null, readRawWindow = null } = {}) {
   // The descriptor the shared sampler wants. Built once — sampleAt is called per
   // GCP and, in the viewer, per cursor move.
   const desc = {
@@ -46,6 +48,8 @@ export function createFlatRasterSource(meta, data, { rgba = null, previewDataUrl
     // Pixel-space read. `level` is accepted and ignored — a flat source has only
     // full resolution; a COG source will use it to pick an overview.
     readWindow({ col = 0, row = 0, width = meta.width, height = meta.height } = {}, _level = 0) {
+      if (readRawWindow) return readRawWindow({ col, row, width, height }, _level)
+      if (!data) throw new Error('Raw raster pixels are unavailable; re-import the original raster')
       const c0 = Math.max(0, Math.floor(col))
       const r0 = Math.max(0, Math.floor(row))
       const w = Math.min(meta.width - c0, Math.ceil(width))

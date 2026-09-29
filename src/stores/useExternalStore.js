@@ -4,8 +4,8 @@ import { useLog } from '../composables/useLog.js'
 import { ensureProjection, transform } from '../core/crs.js'
 import { createFlatRasterSource } from '../core/io/rasterSource.js'
 import { rasterBounds } from '../core/io/rasterSample.js'
-import { describeStyle, styleStamp } from '../core/io/rasterStyle.js'
-import { parseRasterFile, restyleRasterPreview } from '../workers/computeClient.js'
+import { describeStyle, styleStamp, resolveRasterStyle, bandsUsedBy } from '../core/io/rasterStyle.js'
+import { parseRasterFile, restyleRasterPreview, prepareRasterCog, readRasterWindow as workerReadRasterWindow } from '../workers/computeClient.js'
 import * as opfs from '../utils/opfs.js'
 import { registerProjectStore } from './projectStores.js'
 import { useProjectsStore } from './useProjectsStore.js'
@@ -71,13 +71,50 @@ export const useExternalStore = registerProjectStore(defineStore('external', () 
   // Cheap: a dropped/picked File is a disk-backed handle, not the bytes.
   // Deliberately NOT on the record — the record is serialised to index.json.
   const originals = new Map()
+  const styleRequests = new Map(), displayFiles = new Map(), displayLoading = new Map()
+  let conversionQueue = Promise.resolve()
+  async function displayFile(id) {
+    if (displayFiles.has(id)) return displayFiles.get(id)
+    if (displayLoading.has(id)) return displayLoading.get(id)
+    const projectId = projects.currentProjectId, meta = rasterById(id)
+    if (!meta) return null
+    const task = (async () => {
+      let file = isPersisting() ? await opfs.loadExternalCog(projectId, id) : null
+      if (!file) {
+        const original = await originalFile(id)
+        if (!original) return null
+        const run = conversionQueue.catch(() => {}).then(async () => {
+          if (projectId !== projects.currentProjectId || rasterById(id) !== meta) return null
+          try {
+            const result = await prepareRasterCog(original, JSON.parse(JSON.stringify(meta)))
+            if (!result.reused && isPersisting() && projects.currentProjectId === projectId && rasterById(id) === meta)
+              await opfs.saveExternalCog(projectId, id, result.file)
+            log(`Raster ${meta.name}: tiled display ${result.reused ? 'reused' : 'prepared'} in ${result.ms.toFixed(0)} ms`, 'info', 'Import')
+            return result.file
+          } catch (err) {
+            log(`Raster ${meta.name}: ${err.message}; displaying the original GeoTIFF`, 'info', 'Import')
+            return original
+          }
+        })
+        conversionQueue = run; file = await run
+      }
+      if (file && projects.currentProjectId === projectId && rasterById(id) === meta) {
+        displayFiles.set(id, file); return file
+      }
+      return null
+    })()
+    displayLoading.set(id, task)
+    try { return await task } finally { if (displayLoading.get(id) === task) displayLoading.delete(id) }
+  }
 
   // The original file, wherever it lives: memory first, then OPFS. Null when the
   // project was reopened and never persisted the source.
   async function originalFile(id) {
     const held = originals.get(id)
     if (held) return held
-    const file = await opfs.loadExternalSource(projects.currentProjectId, id)
+    const projectId = projects.currentProjectId
+    const file = await opfs.loadExternalSource(projectId, id)
+    if (projectId !== projects.currentProjectId) return null
     if (file) originals.set(id, file)
     return file
   }
@@ -147,9 +184,8 @@ export const useExternalStore = registerProjectStore(defineStore('external', () 
 
     let meta, plane
     try {
-      const buffer = await file.arrayBuffer()
-      ;({ meta, plane } = await parseRasterFile(buffer, file.name, {
-        forceKind,
+      ;({ meta, plane } = await parseRasterFile(file, file.name, {
+        forceKind, previewOnly: true,
         onLog: (m, l, c) => log(m, l, c),
       }))
     } catch (err) {
@@ -208,9 +244,13 @@ export const useExternalStore = registerProjectStore(defineStore('external', () 
     // Before the persistence check, not inside it: a non-persisting project needs
     // this to be the retained copy, and that is exactly when nothing else has one.
     originals.set(record.id, file)
+    // Preview is already visible; serialize optional conversion jobs in the background.
+    const prepared = displayFile(record.id)
+    activeImports.add(prepared)
+    prepared.catch(err => log(`Raster tiled display unavailable: ${err.message}`, 'warn', 'Import')).finally(() => activeImports.delete(prepared))
 
     if (isPersisting()) {
-      await opfs.saveExternalPlane(projectId, record.id, plane.buffer)
+      if (plane) await opfs.saveExternalPlane(projectId, record.id, plane.buffer)
         .catch((err) => log(`Reference raster save failed — ${err?.message ?? err}`, 'error', 'Import'))
       // Keep the original file: it's the source of truth a kind flip re-decodes
       // from, and (A-7) what "cache locally" would materialise.
@@ -239,10 +279,19 @@ export const useExternalStore = registerProjectStore(defineStore('external', () 
       const data = plane instanceof Float32Array ? plane : new Float32Array(plane)
       return createFlatRasterSource(meta, data, { previewDataUrl: meta.previewDataUrl })
     }
-    const rgba = plane instanceof Uint8Array ? plane : new Uint8Array(plane)
+    const rgba = plane == null ? null : plane instanceof Uint8Array ? plane : new Uint8Array(plane)
     // An ortho has no scalar value plane — sampleAt returns null and callers use
     // the geometry helpers (worldToPixel) plus `rgba()` for colour.
-    return createFlatRasterSource(meta, null, { rgba, previewDataUrl: meta.previewDataUrl })
+    return createFlatRasterSource(meta, null, { rgba, previewDataUrl: meta.previewDataUrl,
+      readRawWindow: (rect) => readRasterWindow(meta.id, { rect }),
+    })
+  }
+
+  async function readRasterWindow(id, options = {}) {
+    const projectId = projects.currentProjectId
+    const file = await originalFile(id)
+    if (!file || projectId !== projects.currentProjectId) throw new Error('The original reference raster is unavailable')
+    return workerReadRasterWindow(file, options)
   }
 
   function setSource(id, source) {
@@ -512,6 +561,9 @@ export const useExternalStore = registerProjectStore(defineStore('external', () 
   async function setRasterStyle(id, style) {
     const meta = rasterById(id)
     if (!meta) return false
+    const projectId = projects.currentProjectId
+    const request = Symbol()
+    styleRequests.set(id, request)
 
     const file = await originalFile(id)
     if (!file) {
@@ -522,17 +574,30 @@ export const useExternalStore = registerProjectStore(defineStore('external', () 
 
     let resolved, previewDataUrl
     try {
-      const buffer = await file.arrayBuffer()
-      ;({ style: resolved, previewDataUrl } = await restyleRasterPreview(buffer, meta.name, style, {
-        onLog: (m, l, c) => log(m, l, c),
-      }))
+      const requested = resolveRasterStyle(style, meta)
+      const used = bandsUsedBy(requested), previous = meta.style
+      const sameRanges = previous && ['mode', 'stretch', 'loPct', 'hiPct'].every(k => previous[k] === requested[k])
+        && JSON.stringify(bandsUsedBy(previous)) === JSON.stringify(used)
+      const manual = requested.stretch === 'manual' && used.every((_, i) =>
+        requested.manual?.[i]?.length === 2 && requested.manual[i].every(Number.isFinite) && requested.manual[i][1] > requested.manual[i][0])
+      if (meta.gpuReady && (requested.mode === 'index' || manual || sameRanges)) {
+        resolved = { ...requested, ranges: requested.mode === 'index' ? [] : manual ? requested.manual : previous.ranges }
+      } else {
+        ;({ style: resolved, previewDataUrl } = await restyleRasterPreview(file, meta.name, style, {
+          rangesOnly: !!meta.gpuReady,
+          cacheKey: `${projectId}:${id}:${meta.importedAt}:${file.size}:${file.lastModified}`,
+          onLog: (m, l, c) => log(m, l, c),
+        }))
+      }
     } catch (err) {
       log(`Reference raster "${meta.name}": re-style failed — ${err?.message ?? err}`, 'error', 'Import')
       return false
     }
 
+    if (projectId !== projects.currentProjectId || rasterById(id) !== meta || styleRequests.get(id) !== request) return false
+    styleRequests.delete(id)
     meta.style = resolved
-    meta.previewDataUrl = previewDataUrl
+    if (previewDataUrl) meta.previewDataUrl = previewDataUrl
 
     // Drop the hydrated plane: it was composed with the old style, and serving it
     // to a sampler now would return colours that no longer match what is drawn.
@@ -544,7 +609,7 @@ export const useExternalStore = registerProjectStore(defineStore('external', () 
 
     if (isPersisting()) await save()
     log(`Reference raster "${meta.name}": restyled — ${describeStyle(meta.style)}`
-      + ' (full-resolution pixels re-decode on next use)', 'success', 'Import')
+      + (meta.gpuReady ? ' (GPU display updated)' : ' (preview updated)'), 'success', 'Import')
     return true
   }
 
@@ -615,7 +680,7 @@ export const useExternalStore = registerProjectStore(defineStore('external', () 
     const next = new Map(sources.value)
     next.delete(id)
     sources.value = next
-    originals.delete(id)
+    originals.delete(id); displayFiles.delete(id); displayLoading.delete(id)
     if (isPersisting()) {
       await opfs.deleteExternalPlane(projects.currentProjectId, id).catch(() => {})
       await save()
@@ -646,6 +711,7 @@ export const useExternalStore = registerProjectStore(defineStore('external', () 
     sources.value = new Map()
     loading.clear()
     originals.clear()
+    styleRequests.clear(); displayFiles.clear(); displayLoading.clear()
     if (purge && isPersisting()) opfs.deleteExternalAll(projects.currentProjectId).catch(() => {})
   }
 
@@ -657,13 +723,14 @@ export const useExternalStore = registerProjectStore(defineStore('external', () 
     pendingRasters.value = []
     sources.value = new Map()
     originals.clear()
+    styleRequests.clear(); displayFiles.clear(); displayLoading.clear()
     const data = await opfs.loadExternalIndex(projectId)
     if (!data || !Array.isArray(data.rasters) || !data.rasters.length) return
 
     // `onMap`/`opacity` are absent on rasters imported before A-4 — default to
     // hidden at full opacity rather than healing the file (nothing is lost, and a
     // project that never used the map layer shouldn't gain rewritten records).
-    rasters.value = data.rasters.map((r) => ({ ...r, onMap: !!r.onMap, opacity: r.opacity ?? 1 }))
+    rasters.value = data.rasters.map((r) => ({ ...r, gpuReady: false, onMap: !!r.onMap, opacity: r.opacity ?? 1 }))
     // Re-resolve each raster's CRS so the first sample doesn't have to await a
     // projection fetch mid-interaction.
     await Promise.all(rasters.value.map((r) => r.crs ? resolveRasterCrs(r) : null))
@@ -686,9 +753,9 @@ export const useExternalStore = registerProjectStore(defineStore('external', () 
     demRasters, orthoRasters, hasReferenceDem, defaultDem, mixedVerticalDatums,
     mapRasters,
     rasterById,
-    importRaster, originalFile, ensureRasterLoaded, sampleReferenceDem, probeRasterAt,
+    importRaster, originalFile, displayFile, ensureRasterLoaded, sampleReferenceDem, probeRasterAt,
     toRasterCoords, toProjectCoords,
-    setRasterKind, setRasterStyle, setVerticalInfo, setRasterOnMap, setRasterOpacity,
+    setRasterKind, setRasterStyle, setVerticalInfo, setRasterOnMap, setRasterOpacity, readRasterWindow,
     renameRaster, removeRaster,
     save, restore, clear, flushPendingWork,
   }

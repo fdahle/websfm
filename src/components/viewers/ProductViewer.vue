@@ -1,7 +1,11 @@
 <script setup>
-import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import { defineAsyncComponent, ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { pixelToWorld } from '../../core/io/rasterSample.js'
 import { copyToClipboard } from '../../composables/useToasts.js'
+const GpuRasterCanvas = defineAsyncComponent(() => import('./raster/GpuRasterCanvas.vue'))
+const gpuReady = ref(false)
+const gpuCapable = computed(() => props.product?.id && props.product?.crs && !props.product.crsUnresolved
+  && Math.abs(props.product.geoTransform?.scaleX + props.product.geoTransform?.scaleY) < 1e-9)
 
 // Tab viewer for ANY georeferenced raster — a computed DEM/orthophoto product,
 // or an imported reference raster. Shows the baked preview PNG (hillshaded
@@ -259,6 +263,7 @@ defineExpose({ fit, zoomBy })
            centring offset was computed for the full width/height. -->
       <img
         v-if="product?.previewDataUrl"
+        v-show="!gpuReady"
         :src="product.previewDataUrl"
         class="raster"
         :style="{
@@ -273,6 +278,7 @@ defineExpose({ fit, zoomBy })
         {{ source === null && product?.geoTransform ? 're-import it.' : 'rebuild it.' }}
       </div>
 
+      <GpuRasterCanvas v-if="gpuCapable" :product="product" :scale="scale" :tx="tx" :ty="ty" @ready="gpuReady = $event" />
       <div
         v-if="menu"
         class="ctx-menu"

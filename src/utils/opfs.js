@@ -834,6 +834,7 @@ export async function deleteExternalPlane(projectId, id) {
       const dir = await getSubDir(projectId, 'external')
       await dir.removeEntry(`${id}.bin`).catch(ignoreMissing)
       await dir.removeEntry(`${id}.src`).catch(ignoreMissing)
+      await dir.removeEntry(`${id}.cog`).catch(ignoreMissing)
     } catch (error) { ignoreMissing(error) }
   })
 }
@@ -844,6 +845,16 @@ export async function saveExternalSource(projectId, id, blob) {
     const dir = await getSubDir(projectId, 'external')
     await writeFileIn(dir, `${id}.src`, blob)
   })
+}
+
+export async function saveExternalCog(projectId, id, blob) {
+  return trackPersistence('saveExternalCog:' + String(projectId) + ':' + id, async () => {
+    await writeFileIn(await getSubDir(projectId, 'external'), `${id}.cog`, blob)
+  })
+}
+export async function loadExternalCog(projectId, id) {
+  try { return await (await (await getSubDir(projectId, 'external')).getFileHandle(`${id}.cog`)).getFile() }
+  catch { return null }
 }
 
 export async function loadExternalSource(projectId, id) {
@@ -863,7 +874,7 @@ export async function pruneExternalPlanes(projectId, keepIds) {
       const dir = await getSubDir(projectId, 'external')
       const stale = []
       for await (const name of dir.keys()) {
-        const m = name.match(/^(.+)\.(?:bin|src)$/)
+        const m = name.match(/^(.+)\.(?:bin|src|cog)$/)
         if (m && !keepIds.has(m[1])) stale.push(name)
       }
       for (const name of stale) await dir.removeEntry(name).catch(ignoreMissing)

@@ -78,7 +78,7 @@ import CropCloudModal from './components/modals/CropCloudModal.vue'
 import MergeCloudsModal from './components/modals/MergeCloudsModal.vue'
 import OrthoModal from './components/modals/OrthoModal.vue'
 import ConfirmModal from './components/modals/ConfirmModal.vue'
-import ProductViewer from './components/viewers/ProductViewer.vue'
+const ProductViewer = defineAsyncComponent(() => import('./components/viewers/ProductViewer.vue'))
 import GcpImportModal from './components/modals/GcpImportModal.vue'
 import GcpTableModal from './components/modals/GcpTableModal.vue'
 import FootprintImportModal from './components/modals/FootprintImportModal.vue'

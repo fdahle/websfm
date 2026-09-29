@@ -455,3 +455,13 @@ describe('planCog / assembleCog', () => {
     expect(body).toContain('KNOWN_INCOMPATIBLE_EDITION=NO')
   })
 })
+
+it('assembles COG Blob parts with the same offsets and bytes as contiguous output', async () => {
+  const { plan, tiles } = planCog({ width: 259, height: 17,
+    samples: [{ bits: 16, format: 1 }], photometric: 1,
+    data: Uint16Array.from({ length: 259 * 17 }, (_, i) => i),
+    pixelScale: [2, 2, 0], tiepoint: [0, 0, 0, 1000, 2000, 0], geoKeys: geoKeysForEpsg(3031, false) })
+  const expected = assembleCog(plan, tiles)
+  const parts = assembleCog(plan, tiles.map(t => ({ length: t.length, part: new Blob([t]) })), { parts: true })
+  expect(new Uint8Array(await new Blob(parts).arrayBuffer())).toEqual(expected)
+})
