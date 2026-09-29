@@ -96,8 +96,9 @@ self.onmessage = async (e) => {
   // Intermediate events for streaming ops, tagged with the request id.
   const emit = (ev, evArgs) => self.postMessage({ id, ev, args: evArgs })
   try {
+    const started = performance.now()
     const { result, transfer } = await handler(args, { emit })
-    self.postMessage({ id, ok: true, result }, transfer ?? [])
+    self.postMessage({ id, ok: true, result, workerMs: performance.now() - started }, transfer ?? [])
   } catch (err) {
     self.postMessage({ id, ok: false, error: err?.message ?? String(err) })
   }
