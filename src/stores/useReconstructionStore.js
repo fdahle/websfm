@@ -79,12 +79,11 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
   // recomputable artifact expensive enough to earn disk (minutes/image), without
   // which reopening a project forced a full Stage A re-run before densify/ortho.
   // Persistence is LAZY on the way back in: `restore` reads only the tiny index
-  // into `depthMapsMeta`, and `ensureDepthMapsLoaded()` hydrates the planes on
-  // first use — eagerly pulling hundreds of MB into memory on every project open
-  // would undo the fusion memory budget for opens that never densify.
+  // into `depthMapsMeta`; `depthMapInput()` opens file handles, and workers
+  // stream their planes during fusion and ortho. Saved planes are evicted.
   const {
     depthMaps, depthMapsMeta, depthMapCount,
-    persistDepthMaps, ensureDepthMapsLoaded, loadDepthIndexIntoMeta, clearDepthMaps,
+    persistDepthMaps, depthMapInput, loadDepthIndexIntoMeta, clearDepthMaps,
   } = createDepthMapCache({
     isPersisting: () => isPersisting(),
     currentProjectId: () => projects.currentProjectId,
@@ -762,9 +761,12 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
 
   // Dense Stage B — fuse the Stage A depth maps into a coloured dense cloud.
   async function densify(settings = {}, onProgress) {
-    // Hydrate a restored project's saved planes (no-op if Stage A ran this session).
-    await ensureDepthMapsLoaded()
-    const maps = [...depthMaps.value.values()]
+    const projectId = projects.currentProjectId, sparse = mainSparseCloud.value
+    const stillCurrent = () => projectId === projects.currentProjectId && sparse === mainSparseCloud.value
+    let input
+    try { input = await depthMapInput() }
+    catch (err) { log(`Dense: ${err.message}`, 'error', 'Dense'); return }
+    const { maps, streamed } = input
     if (!maps.length) {
       log('Dense: compute depth maps before building the dense cloud', 'warn', 'Dense')
       return
@@ -776,6 +778,12 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     // them). Same budget knob as Stage A.
     const budget = settings.memBudgetBytes > 0 ? settings.memBudgetBytes : DEFAULT_BUDGET_BYTES
     const proj = projectDensifyPeakBytes({ maps })
+    if (streamed) {
+      const sizes = maps.map(m => m.width * m.height * (m.hasNormals ? 23 : 11)).sort((a, b) => b - a)
+      const bounded = (sizes[0] || 0) + (sizes[1] || 0) + Math.max(...maps.map(m => m.width * m.height)) * 12
+      proj.total += bounded - proj.input; proj.input = bounded
+      log('Dense: reading saved maps on demand (one reference + one comparison); releasing planes after use', 'info', 'Dense')
+    }
     log(`Dense fuse: projected peak memory ≈ ${formatBytes(proj.total)} `
       + `(input ${formatBytes(proj.input)} + accumulator ${formatBytes(proj.accumulator)} + `
       + `output ${formatBytes(proj.output)}; ${proj.validPx.toLocaleString()} valid px → `
@@ -800,20 +808,21 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     // project has the list but no name on the map. Falls back to a uuid fragment in
     // core/dense/mvs.js when the image is gone.
     const nameByUuid = new Map(images.value.map((im) => [im.uuid, im.name]))
-    const mapsInput = maps.map((m) => ({
+    const mapsInput = streamed ? maps.map(m => ({ ...m, name: nameByUuid.get(m.uuid) })) : maps.map((m) => ({
       uuid: m.uuid, name: m.name ?? nameByUuid.get(m.uuid), width: m.width, height: m.height, K: m.K, R: m.R, t: m.t,
       depth: m.depth, cost: m.cost, rgb: m.rgb, normals: m.normals || null,
     }))
     const transfer = []
-    for (const m of mapsInput) {
+    for (const m of streamed ? [] : mapsInput) {
       transfer.push(m.depth.buffer, m.cost.buffer, m.rgb.buffer)
       if (m.normals) transfer.push(m.normals.buffer)
     }
     try {
       const { points: flat, nrm, summary: dSummary, mapBuffers } = await workerDensify(
-        { maps: mapsInput, settings },
+        { maps: mapsInput, streamed, settings },
         { onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f), transfer },
       )
+      if (!stillCurrent()) return
       // Re-attach the round-tripped buffers so ortho / a second densify still work.
       if (mapBuffers) {
         for (const mb of mapBuffers) {
@@ -838,6 +847,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
       reconStatus.value = 'done'
       await persist()
     } catch (err) {
+      if (!stillCurrent()) return
       // The buffers were transferred out; if the worker failed before returning them
       // they're detached (dead). Drop the in-memory cache so ortho / re-densify don't
       // read empty buffers. The planes are on disk now, so point the store back at the
@@ -1170,36 +1180,27 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
   // planes, colour from their RGB planes). Needs depth maps and a surface — which
   // is a DEM only when the user picks one (see orthoSurfaces).
   async function generateOrtho(settings = {}, onProgress) {
-    // Hydrate a restored project's saved planes (no-op if they're already in memory).
-    await ensureDepthMapsLoaded()
-    let maps = [...depthMaps.value.values()]
+    const projectId = projects.currentProjectId, sparse = mainSparseCloud.value
+    const stillCurrent = () => projectId === projects.currentProjectId && sparse === mainSparseCloud.value
+    let input
+    try { input = await depthMapInput() }
+    catch (err) { log(`Ortho: ${err.message}`, 'error', 'Products'); return }
+    const { maps, streamed } = input
     if (!maps.length) { log('Ortho: compute depth maps first', 'warn', 'Products'); return }
-    // A failed densify transfers (and loses) the depth buffers; a detached typed
-    // array reports byteLength 0. Reload them from disk if they were saved, and only
-    // refuse when nothing usable is left — never reproject empty planes.
-    if (maps.some((m) => m.depth.byteLength === 0 || m.rgb.byteLength === 0)) {
-      depthMaps.value = new Map()
-      const recovered = await loadDepthIndexIntoMeta() && await ensureDepthMapsLoaded()
-      maps = [...depthMaps.value.values()]
-      if (!recovered || !maps.length) {
-        log('Ortho: depth maps were released by a prior densify — recompute them first',
-          'warn', 'Products')
-        return
-      }
-    }
     const resolved = await effectiveFrameSpec({ crs: settings.crs })
     const surface = await orthoSurfacePayload(settings, resolved)
     if (!surface) return
     reconStatus.value = 'running'
     try {
-      const mapsPayload = maps.map((m) => ({
+      const mapsPayload = streamed ? maps : maps.map((m) => ({
         uuid: m.uuid, width: m.width, height: m.height, K: m.K, R: m.R, t: m.t,
         depth: m.depth, cost: m.cost, rgb: m.rgb,
       }))
       const res = await workerGenerateOrtho(
-        { surface, maps: mapsPayload, settings },
+        { surface, maps: mapsPayload, streamed, settings },
         { onLog: (m, l, c) => log(m, l, c), onProgress: (dn, t, lbl, f) => onProgress?.(dn, t, lbl, f) },
       )
+      if (!stillCurrent()) return
       // An ortho built ON the DEM inherits the DEM's recorded frame — its cells are
       // that grid's cells, so claiming today's frame would be a claim about a raster
       // this run never re-projected.
@@ -1213,6 +1214,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
       if (isPersisting()) opfs.saveProduct(projects.currentProjectId, 'ortho', ortho.value).catch(() => {})
       reconStatus.value = 'done'
     } catch (err) {
+      if (!stillCurrent()) return
       log(`Ortho error: ${err?.message ?? err}`, 'error', 'Products')
       reconStatus.value = 'error'
     }

@@ -749,6 +749,26 @@ export async function loadDepthPlanes(projectId, metas) {
   return out
 }
 
+// Read handles, not planes. Validate every required sidecar before computation.
+export async function loadDepthFiles(projectId, metas) {
+  const dir = await getSubDir(projectId, 'depthmaps'), out = []
+  for (const meta of metas) {
+    const files = {}
+    for (const key of DEPTH_BIN_KEYS) {
+      try { files[key] = await (await dir.getFileHandle(`${meta.uuid}.${key}.bin`)).getFile() }
+      catch (error) { ignoreMissing(error); files[key] = null }
+    }
+    if (['depth', 'cost', 'rgb'].every(k => !files[k]?.size)) continue
+    const n = meta.width * meta.height
+    for (const [key, size] of Object.entries({ depth: n * 4, cost: n * 4, rgb: n * 3, nrm: n * 12 })) {
+      if (key === 'nrm' && !files.nrm?.size) continue
+      if (files[key]?.size !== size) throw new Error(`Corrupt depth map ${meta.uuid} (${key}); recompute depth maps`)
+    }
+    out.push({ ...meta, files })
+  }
+  return out
+}
+
 export async function deleteDepthPlanes(projectId) {
   return trackPersistence('deleteDepthPlanes:' + String(projectId), async () => {
     try {
