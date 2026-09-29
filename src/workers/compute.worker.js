@@ -22,6 +22,7 @@ import { makeCloudOps } from './ops/cloud.js'
 import { makeTiffOps } from './ops/tiff.js'
 import { makeSegmentOps } from './ops/segment.js'
 import { makeIoOps } from './ops/io.js'
+import { makeReferenceGcpOps } from './ops/referenceGcps.js'
 import { makeUndistortOps } from './ops/undistort.js'
 import { makeLazCodec, makeLazOps } from './ops/laz.js'
 
@@ -82,6 +83,7 @@ const ops = {
   ...makeTiffOps(),
   ...makeSegmentOps({ rasterize }),
   ...makeIoOps({ lazCodec }),
+  ...makeReferenceGcpOps({ rasterize }),
   ...makeLazOps(lazCodec),
   ...makeUndistortOps({ rasterize }),
 }
