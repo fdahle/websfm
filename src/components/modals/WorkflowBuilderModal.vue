@@ -49,7 +49,7 @@ watch(workflow, (next) => {
 }, { immediate: true })
 
 function patchWorkflow(patch) {
-  if (!workflow.value) return
+  if (!workflow.value || props.running) return
   emit('update-workflow', { id: workflow.value.id, patch })
 }
 function patchBlock(id, patch) {
@@ -77,6 +77,7 @@ function duplicateBlock(id) {
   if (index < 0) return
   const source = workflow.value.blocks[index]
   const copy = createWorkflowBlock(source.type)
+  copy.enabled = source.enabled
   copy.settings = JSON.parse(JSON.stringify(source.settings))
   copy.reusePolicy = source.reusePolicy
   copy.warningPolicy = source.warningPolicy
@@ -93,6 +94,11 @@ function moveBlock(fromId, toId) {
   const [item] = blocks.splice(from, 1)
   blocks.splice(to, 0, item)
   patchWorkflow({ blocks })
+}
+function moveBy(id, offset) {
+  const index = workflow.value.blocks.findIndex((block) => block.id === id)
+  const target = workflow.value.blocks[index + offset]
+  if (target) moveBlock(id, target.id)
 }
 function onDrop(id) {
   moveBlock(draggedId.value, id)
@@ -171,7 +177,8 @@ async function copyRecipe() {
       <div v-else class="builder-grid">
         <aside class="palette">
           <h3>Blocks</h3>
-          <input v-model="paletteSearch" class="field-input palette-search" type="search" placeholder="Find a command…" />
+          <input v-model="paletteSearch" class="field-input palette-search" type="search" aria-label="Find a command" placeholder="Find a command…" />
+          <p v-if="!visiblePalette.length" class="field-hint">No commands match “{{ paletteSearch }}”.</p>
           <template v-for="category in WORKFLOW_CATEGORIES" :key="category">
             <section v-if="visiblePalette.some((b) => b.category === category)">
               <h4>{{ category }}</h4>
@@ -185,8 +192,8 @@ async function copyRecipe() {
           <section v-if="templates.length" class="templates">
             <h4>My templates</h4>
             <div v-for="item in templates" :key="item.id" class="template-row">
-              <button type="button" class="btn template-name" @click="emit('apply-template', item.id)">{{ item.name }}</button>
-              <button type="button" class="btn icon-button" title="Remove template" @click="emit('remove-template', item.id)">×</button>
+              <button type="button" class="btn template-name" :disabled="running" @click="emit('apply-template', item.id)">{{ item.name }}</button>
+              <button type="button" class="btn icon-button" :disabled="running" title="Remove template" @click="emit('remove-template', item.id)">×</button>
             </div>
           </section>
           <section v-if="runs.length" class="runs">
@@ -214,10 +221,18 @@ async function copyRecipe() {
             </label>
           </div>
 
-          <div v-if="!workflow.blocks.length" class="empty-lane">Add commands from the palette to build a workflow.</div>
+          <div v-if="!workflow.blocks.length" class="empty-lane">
+            <h3>Build your workflow</h3>
+            <p>Add commands from the Blocks panel. They run in order from top to bottom.</p>
+            <p>For a sparse model, start with Detect Features, Match Features, then Sparse Model.</p>
+            <button type="button" class="btn btn-primary" :disabled="running" @click="addBlock('detect-features')">Add Detect Features</button>
+            <p class="field-hint">Import your images before running. You can configure the workflow now.</p>
+          </div>
           <article v-for="(block, index) in workflow.blocks" :key="block.id"
             class="workflow-block" :class="[{ selected: block.id === activeBlockId, disabled: !block.enabled }, statuses[block.id]?.status]"
-            :draggable="!running" @dragstart="draggedId = block.id" @dragover.prevent @drop="onDrop(block.id)"
+            :draggable="!running" @dragstart="draggedId = block.id" @dragend="draggedId = null" @dragover.prevent @drop="onDrop(block.id)"
+            tabindex="0" :aria-label="`Step ${index + 1}: ${WORKFLOW_BLOCK_BY_ID.get(block.type)?.label}`"
+            @keydown.enter.self="activeBlockId = block.id" @keydown.space.self.prevent="activeBlockId = block.id"
             @click="activeBlockId = block.id">
             <span class="drag" title="Drag to reorder">⠿</span>
             <span class="step">{{ index + 1 }}</span>
@@ -227,6 +242,10 @@ async function copyRecipe() {
             </div>
             <span v-if="!WORKFLOW_BLOCK_BY_ID.get(block.type)?.automated" class="badge">Interactive</span>
             <span class="status">{{ statuses[block.id]?.status || plannedStatus(block) }}</span>
+            <div class="reorder-actions">
+              <button type="button" class="btn icon-button" :disabled="running || index === 0" title="Move up" @click.stop="moveBy(block.id, -1)">↑</button>
+              <button type="button" class="btn icon-button" :disabled="running || index === workflow.blocks.length - 1" title="Move down" @click.stop="moveBy(block.id, 1)">↓</button>
+            </div>
             <button type="button" class="btn block-action" :disabled="running" :title="block.enabled ? 'Disable' : 'Enable'" @click.stop="patchBlock(block.id, { enabled: !block.enabled })">
               {{ block.enabled ? 'On' : 'Off' }}
             </button>
@@ -300,6 +319,11 @@ async function copyRecipe() {
         </template>
       </div>
     </div>
+    <div v-else class="empty-lane">
+      <h3>Create your first workflow</h3>
+      <p>Combine reconstruction commands, choose their settings, and run them in order.</p>
+      <button type="button" class="btn btn-primary" :disabled="running" @click="emit('add-workflow')">Create workflow</button>
+    </div>
 
     <template #footer>
       <span v-if="errors.length" class="footer-error">{{ errors.length }} dependency problem{{ errors.length === 1 ? '' : 's' }}</span>
@@ -319,8 +343,9 @@ async function copyRecipe() {
 <style scoped src="./ui/modal.css"></style>
 <style scoped>
 :deep(.modal) { width: min(1380px, 94vw); height: min(860px, 92vh); }
-:deep(.modal-body) { padding: 0; overflow: hidden; }
-.builder { height: 100%; min-height: 0; display: flex; flex-direction: column; }
+:deep(.modal-body) { padding: 0; overflow: hidden; flex: 1; }
+:deep(.modal-footer) { flex-wrap: wrap; }
+.builder { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .builder-toolbar { display: flex; gap: 8px; align-items: flex-end; padding: 10px 12px; border-bottom: 1px solid var(--panel-border); }
 .workflow-identity, .workflow-switcher, .detail-select { display: flex; flex-direction: column; gap: 4px; }
 .workflow-name { width: 210px; font-weight: 600; }
@@ -331,7 +356,7 @@ async function copyRecipe() {
 .btn-compact { padding: 4px 9px; }
 .view-switcher { flex-wrap: nowrap; }
 .view-switcher .seg-btn { white-space: nowrap; }
-.builder-grid { min-height: 0; flex: 1; display: grid; grid-template-columns: 230px minmax(440px, 1fr) 300px; }
+.builder-grid { min-height: 0; flex: 1; display: grid; grid-template-columns: 210px minmax(0, 1fr) 260px; }
 .palette, .inspector { overflow: auto; padding: 14px; background: var(--panel); }
 .palette { border-right: 1px solid var(--panel-border); }
 .inspector { border-left: 1px solid var(--panel-border); }
@@ -349,7 +374,8 @@ h4 { margin: 16px 0 6px; color: var(--text-dim); font-size: 10px; text-transform
 .run-row small.completed { color: #36a269; }
 .run-row small.failed { color: #d35353; }
 .workflow-lane { overflow: auto; padding: 14px 18px 40px; background: var(--bg); }
-.policy-row { display: flex; gap: 18px; padding: 10px 12px; margin-bottom: 12px; background: var(--panel); border: 1px solid var(--panel-border); border-radius: 7px; }
+.policy-row { display: flex; flex-wrap: wrap; gap: 12px; padding: 10px 12px; margin-bottom: 12px; background: var(--panel); border: 1px solid var(--panel-border); border-radius: 7px; }
+.policy-row .field-select { min-width: 0; }
 .policy-row label { display: flex; align-items: center; gap: 8px; }
 .workflow-block { display: flex; align-items: center; gap: 9px; margin: 7px 0; padding: 10px; border: 1px solid var(--panel-border); border-radius: 7px; background: var(--panel); cursor: pointer; }
 .workflow-block:hover { border-color: var(--text-dim); }
@@ -364,6 +390,8 @@ h4 { margin: 16px 0 6px; color: var(--text-dim); font-size: 10px; text-transform
 .block-copy small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-dim); }
 .badge, .status { font-size: 11px; padding: 2px 6px; border-radius: 10px; background: var(--hover-bg); }
 .block-action { padding: 4px 7px; }
+.reorder-actions { display: flex; flex-direction: column; gap: 2px; }
+.reorder-actions .btn { padding: 0 4px; }
 .inspector .field { margin: 12px 0; }
 .inspector .field-input { width: 100%; box-sizing: border-box; }
 .inspector input[type="checkbox"] { justify-self: start; width: 14px; }
@@ -380,12 +408,23 @@ h4 { margin: 16px 0 6px; color: var(--text-dim); font-size: 10px; text-transform
 .recipe-pane textarea { width: 100%; box-sizing: border-box; flex: 1; resize: none; font-family: ui-monospace, monospace; }
 .copy-button { align-self: flex-end; }
 .empty-lane { padding: 48px 24px; text-align: center; color: var(--text-dim); background: var(--panel); border: 1px dashed var(--panel-border); border-radius: 7px; }
+.empty-lane h3 { color: var(--text); font-size: 17px; }
+.empty-lane p { line-height: 1.5; }
 .danger-quiet, .danger { color: #d35353; }
 .footer-error { align-self: center; }
 @media (max-width: 1120px) {
   .builder-toolbar { flex-wrap: wrap; }
   .toolbar-spacer { display: none; }
-  .builder-grid { grid-template-columns: 200px 1fr; }
-  .inspector { display: none; }
+  .builder-grid { grid-template-columns: 190px minmax(0, 1fr); grid-template-rows: minmax(180px, 1fr) auto; }
+  .palette { grid-row: 1 / 3; }
+  .inspector { grid-column: 2; max-height: 220px; border-left: 0; border-top: 1px solid var(--panel-border); }
+}
+@media (max-width: 680px) {
+  .builder-grid { display: flex; flex-direction: column; overflow: auto; }
+  .palette, .workflow-lane, .inspector { overflow: visible; max-height: none; }
+  .palette { border-right: 0; border-bottom: 1px solid var(--panel-border); }
+  .workflow-block { flex-wrap: wrap; }
+  .block-copy { min-width: 120px; }
+  .workflow-name { width: 170px; }
 }
 </style>

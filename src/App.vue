@@ -789,6 +789,11 @@ const {
 function addNewWorkflow() {
   addWorkflow(createWorkflow('Untitled workflow'))
 }
+// New projects clear the project stores without going through restore(). Opening
+// the builder must initialize its canvas as well as opening the dialog.
+watch(workflowBuilderOpen, (open) => {
+  if (open) workflowsStore.ensureWorkflow()
+})
 function onWorkflowUpdate({ id, patch }) {
   updateWorkflow(id, patch)
 }
