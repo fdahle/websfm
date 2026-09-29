@@ -1,10 +1,11 @@
+import { readDepthFiles } from '../../core/dense/depthFileReader.js'
 import { pointView } from '../../core/products/pointView.ts'
 import { hillshadeRgba } from '../../core/products/colormap.js'
 import { rasterToDataUrl } from '../rasterPreview.js'
 import { buildLocalFrame, makeFrame, frameFromScaledLocal } from '../../core/products/projection.js'
 import { frameFromSimilarity } from '../../core/products/georef.js'
 import { rasterizeDem } from '../../core/products/dem.js'
-import { orthorectify } from '../../core/products/ortho.js'
+import { orthorectify, orthorectifyStreamed } from '../../core/products/ortho.js'
 import { meshSurface, planeSurface, resampleSurface } from '../../core/products/surface.js'
 
 // Product ops (DEM + orthophoto). The frame rebuild/descriptor + raster→dataURL
@@ -166,7 +167,7 @@ export function makeProductsOps() {
   // maps (their depth planes double as occlusion z-buffers; their RGB planes
   // supply the colour). Pure compute lives in core/products/{ortho,surface}.js.
   async function generateOrtho([input], { emit }) {
-    const { surface, maps, settings = {} } = input
+    const { surface, maps, streamed = false, settings = {} } = input
     const built = buildSurfaceGrid(surface, emit)
     const { frame, label } = built
     // The ortho's own GSD is independent of the surface's: a coarse surface is
@@ -179,7 +180,10 @@ export function makeProductsOps() {
 
     emit('progress', [0, grid.height, 'Orthorectifying…'])
     const t0 = performance.now()
-    const { width, height, rgba, covered, sampled, filled } = orthorectify(grid, maps, frame.toSfm, settings,
+    const rectify = streamed
+      ? (g, ms, toSfm, options, progress) => orthorectifyStreamed(g, ms, i => readDepthFiles(ms[i]), toSfm, options, progress)
+      : orthorectify
+    const { width, height, rgba, covered, sampled, filled } = await rectify(grid, maps, frame.toSfm, settings,
       (done, total) => emit('progress', [done, total, 'Orthorectifying…']))
 
     const previewDataUrl = await rasterToDataUrl(new ImageData(rgba, width, height), width, height)

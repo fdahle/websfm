@@ -159,7 +159,8 @@ export function projectDensifyPeakBytes({ maps, mergeOverlap = 2, residency = 1 
     inputBytes += (m.depth?.byteLength || 0) + (m.cost?.byteLength || 0)
       + (m.rgb?.byteLength || 0) + (m.normals?.byteLength || 0)
     const d = m.depth
-    if (d) for (let i = 0; i < d.length; i++) if (d[i] > 0) validPx++
+    if (d) { for (let i = 0; i < d.length; i++) if (d[i] > 0) validPx++ }
+    else validPx += m.validPx ?? m.width * m.height
   }
   const input = inputBytes * residency
   const cells = Math.ceil(validPx / Math.max(1, mergeOverlap))

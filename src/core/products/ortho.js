@@ -151,3 +151,45 @@ export function orthorectify(grid, maps, toSfm, opts = {}, onProgress = () => {}
   onProgress(height, height)
   return { width, height, rgba, covered, sampled, filled }
 }
+
+// Map-major counterpart: identical selection/weights, one decoded map resident.
+export async function orthorectifyStreamed(grid, metas, loadMap, toSfm, opts = {}, onProgress = () => {}) {
+  const { width, height, gsd, originX, originY, data, mask } = grid
+  const n = width * height, rgba = new Uint8ClampedArray(n * 4)
+  const average = opts.blend === 'average', scores = new Float64Array(n).fill(Infinity)
+  const sums = average ? new Float64Array(n * 4) : null
+  const { depthTolRel = 0.02, maxCost = Infinity } = opts
+  for (let mi = 0; mi < metas.length; mi++) {
+    const m = await loadMap(mi)
+    for (let row = 0; row < height; row++) for (let col = 0; col < width; col++) {
+      const idx = row * width + col
+      if (!mask[idx]) continue
+      const P = toSfm([originX + (col + 0.5) * gsd, originY - (row + 0.5) * gsd, data[idx]])
+      const p = projectInto(m, P)
+      if (!p) continue
+      const u = Math.round(p.u), v = Math.round(p.v)
+      if (u < 0 || v < 0 || u >= m.width || v >= m.height) continue
+      const i = v * m.width + u, stored = m.depth[i], cost = m.cost ? m.cost[i] : 0
+      if (!(stored > 0) || Math.abs(stored - p.depth) > depthTolRel * p.depth || cost > maxCost) continue
+      const score = cost + 1e-6 * p.depth, o = idx * 4, c = i * 3
+      if (average) {
+        const w = 1 / (cost + 1e-3)
+        sums[o] += w * m.rgb[c]; sums[o + 1] += w * m.rgb[c + 1]; sums[o + 2] += w * m.rgb[c + 2]; sums[o + 3] += w
+      } else if (score < scores[idx]) {
+        scores[idx] = score
+        rgba[o] = m.rgb[c]; rgba[o + 1] = m.rgb[c + 1]; rgba[o + 2] = m.rgb[c + 2]; rgba[o + 3] = 255
+      }
+    }
+    onProgress(mi + 1, metas.length)
+  }
+  let sampled = 0
+  for (let i = 0; i < n; i++) {
+    const o = i * 4
+    if (average && sums[o + 3] > 0) {
+      rgba[o] = Math.round(sums[o] / sums[o + 3]); rgba[o + 1] = Math.round(sums[o + 1] / sums[o + 3]); rgba[o + 2] = Math.round(sums[o + 2] / sums[o + 3]); rgba[o + 3] = 255
+    }
+    if (rgba[o + 3]) sampled++
+  }
+  const filled = fillOrthoGaps(rgba, mask, width, height, opts.fillRadius ?? 2, opts.fillMethod ?? 'idw')
+  return { width, height, rgba, covered: sampled + filled, sampled, filled }
+}

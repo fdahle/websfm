@@ -1,5 +1,6 @@
+import { readDepthFiles } from '../../core/dense/depthFileReader.js'
 import {
-  selectSourceViews, scaleK, rgbaToGray, depthMapForImage, fuseDepthMaps, filterDepthMap,
+  selectSourceViews, scaleK, rgbaToGray, depthMapForImage, fuseDepthMaps, fuseDepthMapsStreamed, filterDepthMap,
   filterDepthMapsGeometric, autoBestK,
 } from '../../core/dense/mvs.js'
 import { buildMaskLookup } from '../../core/mask.js'
@@ -492,13 +493,16 @@ export function makeDenseOps({ rasterize }) {
   // Stage B — Build Point Cloud (dense). Fuses the depth maps from Stage A into a
   // single coloured point cloud (pure compute in core/dense/mvs.js).
   async function densify([input], { emit }) {
-    const { maps, settings = {} } = input
+    const { maps, streamed = false, settings = {} } = input
     const total = Math.max(1, maps.length)
     emit('progress', [0, total, 'Fusing depth maps…'])
     const tFuse = performance.now()
     // fuseDepthMaps streams kept pixels straight into the voxel merge and returns the
     // packed flat buffer [x,y,z,r,g,b] per point — no per-point object list (the OOM).
-    const flat = fuseDepthMaps(maps, settings,
+    const fuse = streamed
+      ? (ms, options, log, hooks) => fuseDepthMapsStreamed(ms, i => readDepthFiles(ms[i]), options, log, hooks)
+      : fuseDepthMaps
+    const flat = await fuse(maps, settings,
       (m, l, c) => emit('log', [m, l, c]),
       { onProgress: (d, t, lbl) => emit('progress', [d, t, lbl]) })
     const nPoints = flat.length / 6
@@ -510,10 +514,10 @@ export function makeDenseOps({ rasterize }) {
     // The store transfers each map's depth/cost/rgb/normals buffers in (no clone), so
     // return them so they round-trip home and the store can re-attach them to its
     // depthMaps cache (ortho reuses them). dims/K/R/t never left the main thread.
-    const mapBuffers = maps.map((m) => ({ uuid: m.uuid, depth: m.depth, cost: m.cost, rgb: m.rgb, normals: m.normals || null }))
+    const mapBuffers = (streamed ? [] : maps).map((m) => ({ uuid: m.uuid, depth: m.depth, cost: m.cost, rgb: m.rgb, normals: m.normals || null }))
     const transfer = [flat.buffer]
     if (flat.nrm) transfer.push(flat.nrm.buffer)
-    for (const m of maps) {
+    for (const m of streamed ? [] : maps) {
       transfer.push(m.depth.buffer, m.cost.buffer, m.rgb.buffer)
       if (m.normals) transfer.push(m.normals.buffer)
     }

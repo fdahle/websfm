@@ -520,12 +520,13 @@ export function autoBestK(nSources) {
 // feeds the run summary (replaces the old second full pool + sort in medianOf).
 // Returns { maxCost, n, raw, median } (raw = unclamped p70, so callers can flag a
 // weak signal).
-export function autoFusionMaxCost(maps, {
+function* fusionCostSteps(maps, {
   percentile = 0.7, lo = 0.3, hi = 0.45, maxSamples = DENSE_TUNING.fuseCostMaxSamples,
 } = {}) {
   // One cheap scan for the true valid count → a stride that caps the sample budget.
   let totalValid = 0
-  for (const m of maps) {
+  for (let mi = 0; mi < maps.length; mi++) {
+    const m = yield mi
     const { depth } = m
     for (let i = 0; i < depth.length; i++) if (depth[i] > 0) totalValid++
   }
@@ -533,7 +534,8 @@ export function autoFusionMaxCost(maps, {
   const stride = Math.max(1, Math.floor(totalValid / maxSamples))
   const samples = new Float32Array(Math.ceil(totalValid / stride) + 1)
   let s = 0, vi = 0
-  for (const m of maps) {
+  for (let mi = 0; mi < maps.length; mi++) {
+    const m = yield mi
     const { depth, cost } = m
     for (let i = 0; i < depth.length; i++) {
       if (depth[i] > 0) {
@@ -547,6 +549,15 @@ export function autoFusionMaxCost(maps, {
   const at = (q) => arr[Math.min(s - 1, Math.max(0, Math.round(q * (s - 1))))]
   const q = at(percentile)
   return { maxCost: Math.min(hi, Math.max(lo, q)), n: totalValid, raw: q, median: at(0.5) }
+}
+
+function runWithMaps(iterator, maps) {
+  let step = iterator.next()
+  while (!step.done) step = iterator.next(maps[step.value])
+  return step.value
+}
+export function autoFusionMaxCost(maps, options = {}) {
+  return runWithMaps(fusionCostSteps(maps, options), maps)
 }
 
 // ── Stage B: fusion ──────────────────────────────────────────────────────────
@@ -600,9 +611,10 @@ export function mergePointsSpatial(points, cellSize) {
 // Auto voxel size for the spatial merge: the median ground-sample-distance across
 // maps (median valid depth / fx = the world-space span of one pixel). One cell ≈ one
 // pixel footprint, so cross-view overlap dedupes without discarding real resolution.
-function autoMergeCell(maps) {
+function* mergeCellSteps(maps) {
   const gsds = []
-  for (const m of maps) {
+  for (let mi = 0; mi < maps.length; mi++) {
+    const m = yield mi
     const { depth } = m
     const ds = []
     for (let i = 0; i < depth.length; i++) if (depth[i] > 0) ds.push(depth[i])
@@ -760,7 +772,57 @@ function clampCellForBounds(bounds, cell) {
   return c
 }
 
+// Both runners execute the same fusion/voxel code. The async runner retains one
+// reference map and one comparison map. Pair-major consistency preserves view
+// order and the original early acceptance gates, using two scratch planes.
 export function fuseDepthMaps(maps, opts = {}, onLog = () => {}, hooks = {}) {
+  return runWithMaps(fusionSteps(maps, opts, onLog, hooks), maps)
+}
+export async function fuseDepthMapsStreamed(metas, loadMap, opts = {}, onLog = () => {}, hooks = {}) {
+  const iterator = fusionSteps(metas, opts, onLog, { ...hooks, streaming: true })
+  let next = iterator.next()
+  while (!next.done) {
+    const request = next.value
+    if (typeof request === 'number') next = iterator.next(await loadMap(request))
+    else {
+      const { m, mi, minViews, minTriAngleDeg, maxCost, depthTolRel, consistencyPx, step } = request
+      const agree = new Uint32Array(m.width * m.height), angle = new Float64Array(agree.length)
+      const C = cameraCenter(m), rad = Math.max(0, Math.round(consistencyPx))
+      for (let ci = 0; ci < metas.length; ci++) {
+        if (ci === mi) continue
+        const other = await loadMap(ci), otherC = cameraCenter(other)
+        for (let v = 0; v < m.height; v += step) for (let u = 0; u < m.width; u += step) {
+          const idx = v * m.width + u, d = m.depth[idx]
+          if (!(d > 0) || m.cost[idx] > maxCost
+            || (agree[idx] >= minViews && (minTriAngleDeg <= 0 || angle[idx] >= minTriAngleDeg))) continue
+          const P = unprojectPixel(m, u, v, d), p = project(other, P.x, P.y, P.z)
+          if (!p) continue
+          const cu = Math.round(p.u), cv = Math.round(p.v), tol = depthTolRel * p.depth
+          let hit = false
+          for (let dv = -rad; dv <= rad && !hit; dv++) {
+            const y = cv + dv
+            if (y < 0 || y >= other.height) continue
+            for (let du = -rad; du <= rad; du++) {
+              const x = cu + du
+              if (x < 0 || x >= other.width) continue
+              const od = other.depth[y * other.width + x]
+              if (od > 0 && Math.abs(od - p.depth) <= tol) { hit = true; break }
+            }
+          }
+          if (hit) {
+            agree[idx]++
+            if (minTriAngleDeg > 0) angle[idx] = Math.max(angle[idx], triangulationAngle(C, otherC, P))
+          }
+        }
+        hooks.onProgress?.(mi + (ci + 1) / metas.length, metas.length, 'Checking depth consistency…')
+      }
+      next = iterator.next({ agree, angle })
+    }
+  }
+  return next.value
+}
+
+function* fusionSteps(maps, opts = {}, onLog = () => {}, hooks = {}) {
   // depthTolRel/step are user-facing (DENSE_FUSE_DEFAULTS); consistencyPx is internal (tuning.js).
   const { consistencyPx = DENSE_TUNING.consistencyPx, depthTolRel = 0.01, step = 1 } = opts
   // WS4 geometric filters (0 disables each; fall back to DENSE_FUSE_DEFAULTS values).
@@ -774,7 +836,7 @@ export function fuseDepthMaps(maps, opts = {}, onLog = () => {}, hooks = {}) {
 
   // Cost histogram (sampled, one sort) — drives both the auto gate and the summary
   // median, so it's computed once regardless of whether maxCost is overridden.
-  const costStats = autoFusionMaxCost(maps)
+  const costStats = yield* fusionCostSteps(maps)
 
   // Derived defaults (Step 3): when the user hasn't overridden them, adapt to the
   // data. minViews = min(2, nMaps−1) so a 2-image project can still fuse (needs 1
@@ -807,7 +869,8 @@ export function fuseDepthMaps(maps, opts = {}, onLog = () => {}, hooks = {}) {
   // map) — enough to size the voxel-key packing without a full unprojection pass.
   const bounds = { minX: Infinity, minY: Infinity, minZ: Infinity, maxX: -Infinity, maxY: -Infinity, maxZ: -Infinity }
   const bboxStride = DENSE_TUNING.fuseBboxStride
-  for (const m of maps) {
+  for (let mi = 0; mi < maps.length; mi++) {
+    const m = yield mi
     const { width: w, height: h, depth } = m
     for (let v = 0; v < h; v += bboxStride) {
       for (let u = 0; u < w; u += bboxStride) {
@@ -828,9 +891,9 @@ export function fuseDepthMaps(maps, opts = {}, onLog = () => {}, hooks = {}) {
   // "disabled" — streamed as a tiny cell so the flat output ≈ raw count but never a
   // per-point object list (a true no-merge would resurrect the OOM). autoMergeCell
   // and the cost histogram only read `maps`, so both resolve before the loop.
-  let mergeCell = opts.mergeCell != null ? opts.mergeCell : autoMergeCell(maps)
+  let mergeCell = opts.mergeCell != null ? opts.mergeCell : yield* mergeCellSteps(maps)
   if (!(mergeCell > 0)) {
-    const auto = autoMergeCell(maps)
+    const auto = yield* mergeCellSteps(maps)
     mergeCell = (auto > 0 ? auto : 1) * 1e-3
     onLog(`Fusion: merge disabled — streaming near-unmerged at cell ${mergeCell.toExponential(2)} `
       + `(flat output, no raw point objects)`, 'warn', 'Dense')
@@ -856,7 +919,8 @@ export function fuseDepthMaps(maps, opts = {}, onLog = () => {}, hooks = {}) {
   let noNormalMaps = 0
 
   for (let mi = 0; mi < maps.length; mi++) {
-    const m = maps[mi]
+    const m = yield mi
+    const checks = hooks.streaming ? yield { mi, m, minViews, minTriAngleDeg, maxCost, depthTolRel, consistencyPx, step } : null
     const { width: w, height: h, depth, cost, rgb, normals } = m
     if (!normals) noNormalMaps++
     // Camera centre C = −Rᵀt, for the view-direction normal fallback (stale caches).
@@ -886,8 +950,8 @@ export function fuseDepthMaps(maps, opts = {}, onLog = () => {}, hooks = {}) {
         // points (and `consistencyPx` was previously inert: added to a world-unit
         // depth tolerance scaled by 1e-3, i.e. ≈0).
         const rad = Math.max(0, Math.round(consistencyPx))
-        let agree = 0, maxAngle = 0
-        for (let ci = 0; ci < cams.length; ci++) {
+        let agree = checks ? checks.agree[idx] : 0, maxAngle = checks ? checks.angle[idx] : 0
+        for (let ci = 0; ci < cams.length && !checks; ci++) {
           const c = cams[ci]
           if (c.m === m) continue
           const p = project(c, P.x, P.y, P.z)

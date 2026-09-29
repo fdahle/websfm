@@ -33,3 +33,13 @@ real thin structure you care about.
 Use the 3D viewer to inspect floating clusters, edge shells, holes, and over-smoothed
 areas. Cloud filtering can remove statistical outliers or isolated components, but
 systematic defects are better fixed in the depth maps, masks, or source imagery.
+
+
+## Saved depth maps and memory
+After depth maps are saved, their pixel arrays are released. Building a dense
+cloud reads one reference map and one comparison map at a time; orthophoto
+generation reads one map at a time. The same consistency and blending rules apply.
+This reduces resident input memory, though the merged point cloud and its output
+still need memory. Unsaved maps remain in memory if project storage is unavailable.
+The memory estimate shown before fusion includes the streamed inputs and scratch
+arrays. Streaming may trade repeated disk reads for a lower memory peak.
