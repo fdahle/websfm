@@ -987,6 +987,22 @@ export async function deleteScaleBars(projectId) {
   })
 }
 
+export async function saveMeasurements(projectId, data) {
+  return trackPersistence('saveMeasurements:' + String(projectId), async () => {
+    await writeJson(await getProjectDir(projectId, true), 'measurements.json', data)
+  })
+}
+export async function loadMeasurements(projectId) {
+  try { return await readJson(await getProjectDir(projectId), 'measurements.json') }
+  catch { return null }
+}
+export async function deleteMeasurements(projectId) {
+  return trackPersistence('deleteMeasurements:' + String(projectId), async () => {
+    try { await (await getProjectDir(projectId)).removeEntry('measurements.json') }
+    catch (error) { ignoreMissing(error) }
+  })
+}
+
 // ── Workflow builder ──────────────────────────────────────────────────────────
 // JSON: { workflows: Workflow[], activeId, runs: immutable execution snapshots[] }
 

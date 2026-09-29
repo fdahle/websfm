@@ -35,3 +35,21 @@ surface across real gaps, especially from a sparse cloud.
 ## Inspect before export
 Look for spikes, pits, edge extrapolation, bridges across gaps, and a plausible height
 range. Export GeoTIFF when the product has a CRS; preserve nodata for downstream GIS.
+
+## Measure a raster
+Open the DEM tab and choose **Measure → Ruler / polyline**, **Planimetric area**,
+or **Elevation profile**. Click vertices, then Finish; Undo point and Clear edit
+the current drawing. Hold Shift while dragging to pan. A new click after Finish
+starts a new measurement. Enter a name and choose **Save measurement** to keep
+it with the project. The **Saved** selector reopens measurements; Rename and Delete
+manage them. Saved profiles retain their sampled elevations and nodata gaps.
+Rebuilding the raster or changing its coordinate frame marks older measurements
+**stale**. Their saved results remain readable; draw a new measurement on the
+current source to replace them.
+
+Distance and area use the raster's recorded horizontal frame and display its
+units, including model units when scale is unknown. Area is the horizontal
+footprint, not terrain surface area. Measurements are unavailable for geographic
+coordinates or a stale computed frame. Profiles require a loaded DEM, preserve
+nodata gaps, and can be downloaded with **Export profile CSV**. The profile uses
+approximately one-cell spacing, coarsened for very long paths.

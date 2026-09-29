@@ -2,6 +2,7 @@
 import { defineAsyncComponent, ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { pixelToWorld } from '../../core/io/rasterSample.js'
 import { copyToClipboard } from '../../composables/useToasts.js'
+import RasterMeasurements from './RasterMeasurements.vue'
 const GpuRasterCanvas = defineAsyncComponent(() => import('./raster/GpuRasterCanvas.vue'))
 const gpuReady = ref(false)
 const gpuCapable = computed(() => props.product?.id && props.product?.crs && !props.product.crsUnresolved
@@ -51,6 +52,7 @@ const gsdOf = computed(() => {
 })
 
 const container = ref(null)
+const measurements = ref(null)
 
 // Pan/zoom (mirrors ViewerImage): the preview PNG is width×height (= grid), so
 // natural pixel dims come straight from the product.
@@ -146,6 +148,8 @@ function menuFit() { fit(); closeMenu() }
 function onMouseDown(e) {
   if (menu.value && e.button === 0) { closeMenu(); return }
   if (e.button !== 0) return
+  const rect = container.value.getBoundingClientRect()
+  if (!e.shiftKey && measurements.value?.pick(e.clientX - rect.left, e.clientY - rect.top)) return
   dragging.value = true
   startX = e.clientX; startY = e.clientY
   startTx = tx.value; startTy = ty.value
@@ -253,7 +257,7 @@ defineExpose({ fit, zoomBy })
       @mousemove="onMouseMove"
       @mouseup="onMouseUp"
       @mouseleave="onMouseLeave"
-      @dblclick="fit"
+      @dblclick="!measurements?.active && fit()"
       @contextmenu="onContextMenu"
     >
       <!-- The preview PNG is downsampled (≤1024 px) for a large imported raster, so
@@ -300,6 +304,8 @@ defineExpose({ fit, zoomBy })
         <span>{{ Math.round(scale * 100) }}%</span>
         <button title="Fit to view" @click.stop="fit">Fit</button>
       </div>
+      <RasterMeasurements ref="measurements" :product="product" :source="source" :descriptor="desc"
+        :frame-status="frameStatus" :kind="kind" :scale="scale" :tx="tx" :ty="ty" />
     </div>
 
     <!-- Layout mirrors the image view: live cursor readout on the left, static

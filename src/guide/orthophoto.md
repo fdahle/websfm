@@ -43,6 +43,16 @@ with a world file and `.prj`; keep those sidecars beside the image when moving i
 GIS. Inspect seams, leaning objects, ghosting, holes, and boundary behaviour at full
 resolution before using the result.
 
+## Measure an orthophoto
+Use the tab's **Measure** selector for a ruler/polyline or planimetric polygon
+area. Click vertices, then Finish. Shift-drag pans; Undo point and Clear edit the
+drawing. Results use the orthophoto's recorded units. Enter a name and **Save
+measurement** to keep it with the project. Reopen it with the **Saved** selector;
+source or frame changes mark its saved result stale.
+Open the DEM tab for an elevation profile. An orthophoto alone supplies no height
+surface, and a geographic or outdated frame cannot produce these linear measurements.
+
+
 ## Imported reference rasters
 Reference imagery first appears as a preview, then gains tiled full-resolution
 display in its tab and on the map. Pan and zoom request visible tiles. RGB band
