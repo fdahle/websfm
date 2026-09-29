@@ -49,3 +49,10 @@ overlap prevents features at tile edges from being clipped.
 **Append** skips images that already have completed detection. **Overwrite** replaces
 all keypoints and invalidates results that depend on them. Use Overwrite after changing
 detector, or when you need a clean comparison of detection settings.
+
+## Batch throughput
+SIFT batches use up to four workers, bounded by your configured worker count and
+a conservative estimate of image decode and pyramid memory. Large scans or images
+with unknown dimensions run one at a time. SuperPoint stays serial to share its
+model session. The console reports concurrency and batch wall time; Cancel stops
+new work and discards unfinished results.
