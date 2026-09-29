@@ -14,6 +14,7 @@ import {
 } from '../core/io/folderProject.js'
 import { saveProjectHandle, loadProjectHandle, deleteProjectHandle } from '../utils/handleStore.js'
 import { useLog } from '../composables/useLog.js'
+import { version as appVersion } from '../../package.json'
 
 // The project index: which projects exist, which one is open, and its metadata
 // (name, scene type, working CRS). Foundational store — most other stores read
@@ -101,7 +102,7 @@ export const useProjectsStore = defineStore('projects', () => {
   async function createProject(name, sceneType, crs = 'EPSG:4326') {
     const id = crypto.randomUUID()
     const now = new Date().toISOString()
-    const entry = { id, name, sceneType, crs, createdAt: now, lastModified: now }
+    const entry = { id, name, sceneType, crs, createdAt: now, lastModified: now, createdWithVersion: appVersion }
     // Persist the project before exposing it as current. If storage fails the
     // caller remains in the old project instead of selecting a half-created one.
     const newLease = await acquireProjectLease(id)
@@ -267,6 +268,7 @@ export const useProjectsStore = defineStore('projects', () => {
     const now = new Date().toISOString()
     const entry = {
       id, name, sceneType, crs, createdAt: now, lastModified: now,
+      createdWithVersion: appVersion,
       storage: STORAGE_FOLDER, folderName: dirHandle.name,
     }
     opfs.setProjectRoot(id, dirHandle)
@@ -302,6 +304,7 @@ export const useProjectsStore = defineStore('projects', () => {
       crs: data.crs ?? null,
       createdAt: data.createdAt || now,
       lastModified: now,
+      createdWithVersion: data.createdWithVersion || null,
       storage: STORAGE_FOLDER,
       folderName: dirHandle.name,
     }
@@ -385,7 +388,7 @@ export const useProjectsStore = defineStore('projects', () => {
     if (!project) throw new Error('project not found')
     return exportProjectArchive({
       projectId: id,
-      manifest: buildManifest({ project, includeDerived }),
+      manifest: buildManifest({ project, appVersion, includeDerived }),
       fileName: archiveFileName(project.name),
       includeDerived,
       onProgress,
@@ -431,6 +434,7 @@ export const useProjectsStore = defineStore('projects', () => {
       crs: data.crs ?? manifest.project?.crs ?? null,
       createdAt: data.createdAt || manifest.project?.createdAt || now,
       lastModified: now,
+      createdWithVersion: data.createdWithVersion || null,
     }
     await opfs.writeProject(id, { ...data, ...entry })
     projects.value.push(entry)
