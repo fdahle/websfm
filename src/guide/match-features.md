@@ -109,3 +109,11 @@ $O(N \cdot w)$ for a window of $w$ images. Ten is a good starting point for a sm
 Enable **Close capture loop** when the sequence makes a complete circuit so the
 last frames also match the first frames. This assumes the image list follows
 capture order (normally filename/EXIF order).
+
+
+## Read the timing report
+After matching, the log reports wall time and summed pair times for descriptor
+loading, descriptor serialization, matching, and geometric verification. Worker
+times include backend initialization when cold. Queue/transport time is reported
+as the remaining round-trip time. Concurrent stage totals can exceed wall time;
+use comparable image sets, worker counts and settings when judging a change.

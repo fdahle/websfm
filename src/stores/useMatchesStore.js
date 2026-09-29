@@ -94,6 +94,12 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
       : [imgB.keypoints, imgA.keypoints]
 
     const entry = { idA, idB, rawCount: 0, inlierCount: 0, F: null, matches: [], status: 'running', disabled: false, weak: false }
+    entry.timing = { descriptorLoadMs: 0, descriptorBytes: 0, postMessageMs: 0, matchingMs: 0, verificationMs: 0, roundTripMs: 0 }
+    const timing = stage => ({ onTiming: t => {
+      entry.timing.postMessageMs += t.postMessageMs
+      entry.timing[stage] += t.workerMs
+      entry.timing.roundTripMs += t.roundTripMs
+    } })
     matchStore.value.set(pid, entry)
     // Trigger reactivity
     touch()
@@ -117,9 +123,12 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
         descCache?.set(id, p)
         return p
       }
+      const loadStarted = performance.now()
       const descA = await loadDesc(idA, srcA)
       const descB = await loadDesc(idB, srcB)
 
+      entry.timing.descriptorLoadMs = performance.now() - loadStarted
+      entry.timing.descriptorBytes = (descA?.byteLength ?? 0) + (descB?.byteLength ?? 0)
       if (!descA || !descB) {
         entry.status = 'error'
         const names = `${imgA.name} / ${imgB.name}`
@@ -172,7 +181,7 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
             ratioThreshold: settings.ratioThreshold,
             crossCheck: settings.crossCheck,
             dim,
-          })
+          }, timing('matchingMs'))
           const gateThreshold = settings.subsetGateThreshold
           if (gate.matches.length < gateThreshold) {
             entry.rawCount = 0
@@ -217,7 +226,7 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
           guideMinInlierRatio: settings.lgGuideMinInlierRatio,
           guideRelThresh: settings.lgGuideRelThresh,
           tileMinKps: settings.lgTileMinKps,
-        }, { onLog: (msg, level = 'info') => log(msg, level, 'Matching') })
+        }, { ...timing('matchingMs'), onLog: (msg, level = 'info') => log(msg, level, 'Matching') })
         raw = res.matches
       } else {
         const res = await matchDescriptors(descA, descB, {
@@ -227,7 +236,7 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
           // The crate slices the flat buffer by `dim`; a wrong dim yields phantom
           // rows and out-of-range match indices → the `reading 'x'` crash in verify.
           dim: srcA.descDim ?? 128,
-        })
+        }, timing('matchingMs'))
         raw = res.matches
       }
       entry.rawCount = raw.length
@@ -264,7 +273,7 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
           // regardless of H, so the H/F degeneracy label is never consulted (see
           // verify_matches_hf). minMatches is the one un-overridable accept gate.
           hSkipBelow: minMatches,
-        })
+        }, timing('verificationMs'))
         // Classify via the pure gate (core/features/pairGate.js): accept / weak / reject.
         // `spread` is computed here (needs the store's keypoints); everything else is a
         // plain-data decision the gate owns so it can be unit-tested in isolation.
@@ -596,7 +605,20 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
         onProgress?.(done, pairs.length)
       }
     }
+    const runStarted = performance.now()
     await Promise.all(Array.from({ length: concurrency }, drain))
+    const timings = { wallMs: performance.now() - runStarted, descriptorLoadMs: 0, descriptorBytes: 0,
+      postMessageMs: 0, matchingMs: 0, verificationMs: 0, roundTripMs: 0 }
+    for (const [a, b] of pairs) {
+      const t = matchStore.value.get(pairId(a.uuid, b.uuid))?.timing
+      if (t) for (const key of Object.keys(t)) timings[key] += t[key]
+    }
+    log(`Matching timing: wall ${(timings.wallMs / 1000).toFixed(2)}s; summed pair stages: `
+      + `descriptor loads ${(timings.descriptorLoadMs / 1000).toFixed(2)}s, `
+      + `postMessage serialization ${(timings.postMessageMs / 1000).toFixed(2)}s, `
+      + `matching ${(timings.matchingMs / 1000).toFixed(2)}s, verification ${(timings.verificationMs / 1000).toFixed(2)}s; `
+      + `queue/transport remainder ${(Math.max(0, timings.roundTripMs - timings.matchingMs - timings.verificationMs - timings.postMessageMs) / 1000).toFixed(2)}s. `
+      + `Concurrent stage sums can exceed wall time.`, 'info', 'Matching')
     if (cancelled || shouldCancel?.()) {
       log(`Matching cancelled — ${done}/${pairs.length} done`, 'warn', 'Matching')
       return
@@ -613,6 +635,7 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
       'success', 'Matching')
 
     matchRun.value = {
+      timings,
       date: new Date().toISOString(),
       strategy,
       matcher: settings.matcher === 'lightglue' ? 'lightglue' : 'bruteforce',

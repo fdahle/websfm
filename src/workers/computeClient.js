@@ -30,6 +30,8 @@ function handleMessage(e) {
   // Intermediate streaming event (e.g. reconstruct log/progress) — not terminal.
   if (ev) { entry.onEvent?.(ev, args); return }
   pending.delete(id)
+  entry.onTiming?.({ postMessageMs: entry.postMessageMs,
+    workerMs: e.data.workerMs ?? 0, roundTripMs: performance.now() - entry.started })
   if (ok) entry.resolve(result)
   else entry.reject(new Error(error))
 }
@@ -90,16 +92,18 @@ export function configureWorkerPoolSize(value) {
   return true
 }
 
-function call(op, args, { transfer = [], onEvent, worker: pinned } = {}) {
+function call(op, args, { transfer = [], onEvent, onTiming, worker: pinned } = {}) {
   const pool = getPool()
   // `pinned` forces a specific worker (learned backends load a heavy per-worker
   // runtime once — see detectKeypoints); otherwise round-robin across the pool.
   const worker = pinned != null ? pool[pinned % pool.length] : pool[rr++ % pool.length]
   const id = nextId++
   return new Promise((resolve, reject) => {
-    pending.set(id, { resolve, reject, onEvent, worker })
+    const entry = { resolve, reject, onEvent, onTiming, worker, started: performance.now(), postMessageMs: 0 }
+    pending.set(id, entry)
     try {
       worker.postMessage({ id, op, args }, transfer)
+      entry.postMessageMs = performance.now() - entry.started
     } catch (err) {
       pending.delete(id)
       reject(err)
@@ -155,24 +159,25 @@ export function detectFiducialSpots(url, options = {}, { onLog } = {}) {
   })
 }
 
-export function matchDescriptors(descA, descB, options = {}) {
+export function matchDescriptors(descA, descB, options = {}, { onTiming } = {}) {
   // No transfer: structured-clone copies the descriptors so the caller's
   // in-memory buffers (reused across pairs) are not detached.
-  return call('match', [descA, descB, options])
+  return call('match', [descA, descB, options], { onTiming })
 }
 
 // LightGlue joint match. Pinned to worker 0 for the same reason SuperPoint is —
 // one heavy ORT session, loaded once — so concurrent pairs serialize on it rather
 // than each booting their own runtime. Streams first-run init log lines.
-export function matchLightGlue(args, { onLog } = {}) {
+export function matchLightGlue(args, { onLog, onTiming } = {}) {
   return call('matchLightGlue', [args], {
+    onTiming,
     worker: 0,
     onEvent: onLog ? (ev, a) => { if (ev === 'log') onLog(...a) } : undefined,
   })
 }
 
-export function verifyMatches(kpsA, kpsB, matches, options = {}) {
-  return call('verify', [kpsA, kpsB, matches, options])
+export function verifyMatches(kpsA, kpsB, matches, options = {}, { onTiming } = {}) {
+  return call('verify', [kpsA, kpsB, matches, options], { onTiming })
 }
 
 // SAM2 smart-mask selection (F12). All three ops pin worker 0 so the heavy ORT
