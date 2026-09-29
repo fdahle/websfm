@@ -1,8 +1,8 @@
 # Plan: scale constraints + measurement tools
 
 > **Status (audited 2026-09-01): slice 1 shipped 2026-08-25 — WS0, WS1, WS2 and their share of WS7
-> are done; WS3–WS6 (the measurement tools) are not started.** See HANDOVER
-> 2026-08-25 for what landed and where. Nothing below has been run in a browser:
+> are done. The 2026-09-27 2D slice adds named saved rulers, polygons and DEM profiles with source/frame stamps; 3D picking, surface area and volume remain.** See HANDOVER
+> 2026-08-25 and 2026-09-27 for what landed. Synthetic 2D measurement, persistence and stale-source workflows pass in Chrome; real GIS comparisons remain:
 > `VERIFICATION.csv` ▸ `MEAS-01`…`MEAS-04`, `MEAS-10`…`MEAS-13` are the owed
 > checks. Deviations from this plan, both deliberate:
 >   • **WS0.4 cloud/mesh export** applies the fitted scale ONLY (no rotation, no
@@ -14,7 +14,7 @@
 >     with no CRS, is what ships.
 >   • **D8's product stamps** landed as `frameStamp` on the DEM/ortho only (plus
 >     `productFrameStatus` + the ProductViewer banner). The measurement-record
->     stamps are WS4's, and land with the store that holds them.
+>     stamps now live with `useMeasurementsStore` for saved 2D results.
 >
 > TODO ▸ `F11` is the source of truth for *whether/when*; this file is the *how*.
 > Delete it when WS3–WS7 ship; any unsigned checks remain in `VERIFICATION.csv`.
@@ -334,7 +334,7 @@ digest fact. Tests: `scaling.test.js`.
    so the HTML report carries bar residuals. Add `scaleFit` to
    `core/eval/summaryDigest.js` as a recorded run fact.
 
-### WS3 — measurement core (pure, no UI)
+### WS3 — measurement core (2D length/area/profile shipped; remaining geometry below)
 `core/products/measure.js`:
 - `segmentLengths(points)` / `polylineLength` → per-segment + total, plus Δz and
   horizontal (map) distance per segment. Callers first transform SfM vertices
@@ -383,7 +383,11 @@ nodata handling, a polygon with a hole-free concave shape.
    Inspect ▸ Measurements` opens the list.
 6. Every result renders through the D2 resolver: `24.13 m` vs `24.13 model units`.
 
-### WS5 — 2D measurement on products + profile
+### WS5 — 2D measurement on products + profile (temporary tools shipped 2026-09-27)
+Temporary ruler/polyline, planimetric area, DEM profile with nodata gaps and CSV
+are implemented and browser-tested. Persisted measurement records and cross-raster
+height sampling remain open. Original design:
+
 Cheaper than WS4 and higher-value for aerial work: `ProductViewer` already
 converts pixel↔world and samples the value under the cursor, and already has a
 context menu to hang tools on.

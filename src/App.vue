@@ -1,4 +1,5 @@
 <script setup>
+import './stores/useMeasurementsStore.js'
 import { pendingPersistence, persistenceFailures, retryPersistence } from './utils/persistence.js'
 import { ref, computed, reactive, watch, onMounted, nextTick, defineAsyncComponent } from 'vue'
 import { storeToRefs } from 'pinia'

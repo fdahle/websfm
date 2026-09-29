@@ -1101,7 +1101,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
         { transfer: [pos.buffer], onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f) },
       )
       dem.value = {
-        ...grid,
+        ...grid, createdAt: Date.now(),
         name: dem.value?.name || 'DEM',
         frameStamp: frameStampOf(resolved),
       }
@@ -1236,7 +1236,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
       // that grid's cells, so claiming today's frame would be a claim about a raster
       // this run never re-projected.
       ortho.value = {
-        ...res,
+        ...res, createdAt: Date.now(),
         name: ortho.value?.name || 'Orthophoto',
         frameStamp: (settings.surface ?? 'dem') === 'dem'
           ? (dem.value?.frameStamp ?? frameStampOf(resolved))
