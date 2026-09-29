@@ -14,6 +14,7 @@ import { migrateLegacyFiducialImage } from '../core/sfm/fiducialModel.js'
 import { fiducialBatchConsensus } from '../core/sfm/fiducialConsensus.js'
 import { buildBorderMask } from '../core/mask.js'
 import { resolveDetectMaxDim } from '../core/features/detectResolution.js'
+import { detectionConcurrency } from '../core/features/detectConcurrency.js'
 import { useLog } from '../composables/useLog.js'
 import * as opfs from '../utils/opfs.js'
 import { useProjectsStore } from './useProjectsStore.js'
@@ -1135,9 +1136,9 @@ export const useImagesStore = defineStore('images', () => {
   }
 
   async function detectAll(settings = {}, onDetected, onProgress, shouldCancel) {
-    const pending = settings.overwrite
+    const pending = (settings.overwrite
       ? images.value
-      : images.value.filter((img) => img.kpStatus !== 'done')
+      : images.value.filter((img) => img.kpStatus !== 'done')).filter((img) => img.kpStatus !== 'running')
     const total = pending.length
     // Echo the settings actually in effect so the console records what was run.
     const {
@@ -1158,20 +1159,29 @@ export const useImagesStore = defineStore('images', () => {
     const resLabel = maxDimMode === 'auto'
       ? `auto resolution (${preset} band, ≥${maxDim}px)`
       : `≤${maxDim}px`
-    log(`${batchTag} batch: ${total} image(s) queued — ${resLabel}`
+    const concurrency = detectionConcurrency(pending, settings, POOL_SIZE, navigator.deviceMemory)
+    const started = performance.now()
+    log(`${batchTag} batch: ${total} image(s) queued — ${resLabel}, ${concurrency} concurrent`
       + `${detector === 'superpoint' ? '' : `, contrast ${contrastThreshold}`}, ≤${maxKeypoints} kp`,
       'info', 'Detection')
     let done = 0
-    for (const img of pending) {
-      if (shouldCancel?.()) { log(`${batchTag} cancelled — ${done}/${total} done`, 'warn', 'Detection'); return }
-      await detectOne(img.id, settings, onDetected, shouldCancel)
-      // Cancelled mid-image: detectOne already discarded the result, so stop here
-      // without counting it as done.
-      if (shouldCancel?.()) { log(`${batchTag} cancelled — ${done}/${total} done`, 'warn', 'Detection'); return }
-      done++
-      onProgress?.(done, total, img.name)
+    let cursor = 0
+    let cancelled = false
+    const stop = () => cancelled || (cancelled = !!shouldCancel?.())
+    const drain = async () => {
+      while (!stop()) {
+        const img = pending[cursor++]
+        if (!img) return
+        await detectOne(img.id, settings, onDetected, stop)
+        if (stop()) return
+        done++
+        onProgress?.(done, total, img.name)
+      }
     }
-    log(`${batchTag} batch complete`, 'success', 'Detection')
+    await Promise.all(Array.from({ length: concurrency }, drain))
+    const seconds = (performance.now() - started) / 1000
+    log(`${batchTag} ${stop() ? 'cancelled' : 'batch complete'} — ${done}/${total} processed in ${seconds.toFixed(2)} s`
+      + ` (${concurrency} concurrent)`, stop() ? 'warn' : 'success', 'Detection')
   }
 
   // Attach an external feature index to existing images in one batch. The caller
