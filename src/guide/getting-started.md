@@ -38,6 +38,9 @@ should resemble the scene without detached clusters.
 Open the [Quality Report](guide:quality-report) before spending time on dense output.
 Fix missing images, weak links, or poor calibration at the sparse stage.
 
+To save and repeat a sequence of commands, use the
+[Workflow Builder](guide:workflow-builder) in the Reconstruct tab.
+
 ## 4 · Add scale or coordinates
 Camera positions or ground control can place an aerial reconstruction in the project
 CRS. For an object, add a scale bar between two points whose real distance is known.
