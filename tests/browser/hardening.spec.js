@@ -154,6 +154,13 @@ test('the full application creates and reopens a project without runtime errors'
   await expect(projectButton).toBeVisible()
   await projectButton.click()
   await expect(page.locator('.project-picker')).toBeVisible()
+  const version = (await page.locator('.app-version').textContent()).match(/v(.+)$/)[1]
+  await expect(page.locator('.project-version')).toHaveText(`Created with websfm v${version}`)
+  expect(await page.evaluate(async () => {
+    const opfs = await import('/src/utils/opfs.js')
+    const entry = (await opfs.readIndex()).projects.find(p => p.name === 'Browser smoke project')
+    return { index: entry.createdWithVersion, project: (await opfs.readProject(entry.id)).createdWithVersion }
+  })).toEqual({ index: version, project: version })
   await projectButton.click()
   await expect(page.locator('.project-picker')).toHaveCount(0)
   await page.evaluate(async () => (await import('/src/utils/persistence.js')).flushPersistence())

@@ -1,6 +1,7 @@
 <script setup>
 import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { isFolderProject, folderLabel } from '../../core/io/folderProject.js'
+import { version as appVersion } from '../../../package.json'
 import Icon from '../Icon.vue'
 
 const props = defineProps({
@@ -147,6 +148,9 @@ onBeforeUnmount(() => {
               <span class="project-name">{{ project.name }}</span>
             </div>
             <span class="project-meta">{{ projectMeta(project) }}</span>
+            <span class="project-version" :class="{ 'different-version': project.createdWithVersion && project.createdWithVersion !== appVersion }">
+              {{ project.createdWithVersion ? `Created with websfm v${project.createdWithVersion}` : 'Creation version unknown' }}
+            </span>
           </button>
           <button class="icon-btn" title="Project actions" @click.stop="openMenu($event, project)">⋯</button>
         </template>
@@ -154,6 +158,7 @@ onBeforeUnmount(() => {
     </ul>
 
     <div class="picker-footer">
+      <div class="app-version">Current websfm v{{ appVersion }}</div>
       <button class="primary-btn" @click="emit('new')">+ New project</button>
 
       <!-- File vs folder is the one thing users cannot infer from the labels, so
@@ -325,6 +330,25 @@ onBeforeUnmount(() => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.project-version, .app-version {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.project-version {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.project-version.different-version {
+  color: var(--accent);
+}
+
+.app-version {
+  margin-bottom: 8px;
 }
 
 .icon-btn {

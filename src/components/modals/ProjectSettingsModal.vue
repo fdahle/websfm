@@ -4,6 +4,7 @@ import CrsPicker from '../controls/CrsPicker.vue'
 import { formatBytes, ARCHIVE_DERIVED_DIRS } from '../../core/io/projectArchive.js'
 import { folderLabel, isFolderProject } from '../../core/io/folderProject.js'
 import * as opfs from '../../utils/opfs.js'
+import { version as appVersion } from '../../../package.json'
 
 const props = defineProps({
   project: { type: Object, required: true },
@@ -97,6 +98,14 @@ onMounted(measure)
           <div class="readout-row">
             <span>Location</span>
             <strong>{{ isFolderProject(project) ? folderLabel(project) : 'Browser storage' }}</strong>
+          </div>
+          <div class="readout-row">
+            <span>Created with</span>
+            <strong>{{ project.createdWithVersion ? `websfm v${project.createdWithVersion}` : 'Unknown' }}</strong>
+          </div>
+          <div class="readout-row">
+            <span>Current app</span>
+            <strong>websfm v{{ appVersion }}</strong>
           </div>
         </section>
 
