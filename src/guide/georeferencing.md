@@ -46,3 +46,30 @@ metric units but no real-world origin or CRS.
 Inspect GCP and camera residuals in the Quality Report. A low fitting residual is not
 proof of external accuracy when all control lies in one corner or one plane. Look for
 spatial patterns and compare withheld checkpoints where possible.
+
+## Find candidate GCPs from a reference orthophoto
+Build an orthophoto, import a georeferenced reference raster, then open **Tools →
+Find GCPs**. Choose a reference band and select **Find candidates**. The matcher
+uses SIFT and a robust planar alignment of the project preview and a bounded raw
+reference-band read. Repeated gamma/stretch changes reuse cached preview bands;
+the first read of a new band can still require a source decode.
+
+The numbered overlays and table show candidate locations. Choose **Review** for
+side-by-side project/reference close-ups and available source-photo marks. Check
+only candidates that identify the same stable feature. Each candidate uses an
+existing sparse track measured in at least two source photos; its reference
+coordinate is a local estimate near a verified match, not a surveyed point.
+
+In the same dialog, enter elevation and coordinate accuracies (positive 1σ values
+in project units), or select a reference DEM and **Fill selected heights**. DEM
+filling copies its declared vertical accuracy and datum; nodata, out-of-bounds
+locations, and DEMs without declared accuracy leave the candidate unchanged.
+Choose **Checkpoint** to reserve a point for checking rather than fitting.
+**Add reviewed candidates** imports only checked rows. Unknown elevation and
+accuracy stay unknown; incomplete controls cannot constrain adjustment. Photo
+marks can still be refined later in Control & Markers.
+
+A heavily changed historical scene, repetitive texture, very different scales, or
+relief that violates the planar model can defeat this matcher. A failed alignment
+creates no control; use manual marks or a more suitable reference in that case.
+Closing the search dialog discards pending search results.

@@ -66,7 +66,7 @@ import { createWorkflow, resolveWorkflowSettings, WORKFLOW_BLOCK_BY_ID } from '.
 import './stores/useLogStore.js'   // registers the console as a project-scoped store
 import { useLog } from './composables/useLog.js'
 import ReconstructModal from './components/modals/ReconstructModal.vue'
-import FindGcpsModal from './components/modals/FindGcpsModal.vue'
+const FindGcpsModal = defineAsyncComponent(() => import('./components/modals/FindGcpsModal.vue'))
 import GeoreferenceModal from './components/modals/GeoreferenceModal.vue'
 import ScaleBarsModal from './components/modals/ScaleBarsModal.vue'
 import ExportModal from './components/modals/ExportModal.vue'

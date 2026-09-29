@@ -183,6 +183,7 @@ export function verifyMatches(kpsA, kpsB, matches, options = {}, { onTiming } = 
 export const sparseMetrics = (packed) => call('sparseMetrics', [packed])
 export const refineSparse = (packed, settings) => call('refineSparse', [packed, settings])
 export const readRasterWindow = (file, options = {}) => call('readRasterWindow', [{ file, ...options }])
+export const findReferenceMatches = (url, reference) => call('findReferenceMatches', [url, reference])
 
 // SAM2 smart-mask selection (F12). All three ops pin worker 0 so the heavy ORT
 // encoder/decoder sessions load once AND the per-uuid embedding cache (held in

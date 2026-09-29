@@ -48,7 +48,7 @@ export const COMMANDS = [
   { name: 'ortho',    aliases: [],                  dispatch: 'gen-ortho',       needs: ['surface', 'depthMaps'], group: 'Pipeline', help: 'Open the orthophoto dialog' },
 
   // --- Tools ---
-  { name: 'find gcps', aliases: ['auto-gcps'],       dispatch: 'find-gcps',          needs: ['sparse'], group: 'Tools', help: 'Open automatic reference-ortho matching (mockup)' },
+  { name: 'find gcps', aliases: ['auto-gcps'],       dispatch: 'find-gcps',          needs: ['sparse'], group: 'Tools', help: 'Find and review reference-ortho control candidates' },
   { name: 'georeference', aliases: ['georef'],       dispatch: 'georeference',       needs: ['sparse'], group: 'Tools', help: 'Adjust with GCPs or transform the current model to the project CRS' },
   { name: 'automask',     aliases: ['auto-mask'],   dispatch: 'auto-mask',          needs: ['images', 'imagesReady'], group: 'Tools', help: 'Open the auto-mask dialog' },
   { name: 'footprints',   aliases: [],              dispatch: 'footprints-from-poses', needs: ['poses', 'sensors'], group: 'Tools', help: 'Build footprints from poses' },

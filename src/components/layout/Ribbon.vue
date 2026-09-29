@@ -189,8 +189,6 @@ const tabs = [
         // Settings modal (App.vue `handleSetCrs`), not a tool that transforms data.
         label: 'Georeferencing',
         commands: [
-          // Mockup: automatic relative-ortho ↔ reference-ortho matching is tracked in
-          // TODO.md. Keep the dialog reachable so the intended inputs/workflow are clear.
           { id: 'find-gcps',      label: 'Find\nGCPs',      icon: 'map-pin', needsSparse: true, aerialOnly: true },
           // One entry point for both GCP-constrained adjustment + final similarity fit
           // and the cheap transform-only path. The modal explains/validates each mode.

@@ -114,6 +114,7 @@ export const useGcpsStore = registerProjectStore(defineStore('gcps', () => {
 
   // Add parsed GCPs (given in `sourceCrs`), transforming positions into the project CRS.
   async function addGcps(rawGcps, sourceCrs, defaultAccuracies = {}, accuracySettings = {}, defaultImageAccuracies = {}) {
+    const projectId = projects.currentProjectId
     const projCrs = projects.currentCrs
     const imageDefaults = {
       x: Number.isFinite(Number(defaultImageAccuracies.x)) && Number(defaultImageAccuracies.x) > 0 ? Number(defaultImageAccuracies.x) : 1,
@@ -128,6 +129,7 @@ export const useGcpsStore = registerProjectStore(defineStore('gcps', () => {
       log(`GCP import failed — could not resolve CRS (${err?.message ?? err})`, 'error', 'GCP')
       return 0
     }
+    if (projects.currentProjectId !== projectId) return 0
     importDefaults.value = {
       accuracies: { x: defaultAccuracies.x ?? null, y: defaultAccuracies.y ?? null, z: defaultAccuracies.z ?? null },
       imageAccuracies: imageDefaults,
