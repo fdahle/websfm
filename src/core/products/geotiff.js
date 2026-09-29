@@ -287,7 +287,7 @@ export function planCog(spec) {
 // in the same order, either untouched or with each entry replaced by its
 // compressed form. `compression` is the TIFF tag value (1 = none, 8 = Adobe
 // DEFLATE) and must match what the caller actually did to the tiles.
-export function assembleCog(plan, tileBuffers, { compression = 1 } = {}) {
+export function assembleCog(plan, tileBuffers, { compression = 1, parts = false } = {}) {
   const { levels, tileCounts, order, spp, samples, photometric, extraSamples,
           pixelScale, tiepoint, geoKeys, gdalNoData, tileSize } = plan
   if (tileBuffers.length !== order.length)
@@ -365,6 +365,7 @@ export function assembleCog(plan, tileBuffers, { compression = 1 } = {}) {
     ifd.externOffsets = []
     for (const b of ifd.externals) { cur = even(cur); ifd.externOffsets.push(cur); cur += b.length }
   }
+  const headerLength = cur
   // Tile data in write order (overviews first), each 2-byte aligned.
   const tileOffsets = levels.map((_, li) => new Array(tileCounts[li]).fill(0))
   order.forEach(({ li, ti }, i) => {
@@ -374,7 +375,8 @@ export function assembleCog(plan, tileBuffers, { compression = 1 } = {}) {
   })
   const total = cur
 
-  const out = new Uint8Array(total)
+  if (total > 0xffffffff) throw new Error('COG exceeds the classic TIFF 4 GiB limit')
+  const out = new Uint8Array(parts ? headerLength : total)
   const dv = new DataView(out.buffer)
 
   out[0] = 0x49; out[1] = 0x49
@@ -407,6 +409,17 @@ export function assembleCog(plan, tileBuffers, { compression = 1 } = {}) {
     ifd.externals.forEach((b, i) => out.set(b, ifd.externOffsets[i]))
   })
 
+  if (parts) {
+    const result = [out]
+    let position = headerLength
+    order.forEach(({ li, ti }, i) => {
+      const offset = tileOffsets[li][ti]
+      if (offset > position) result.push(new Uint8Array(offset - position))
+      result.push(tileBuffers[i].part ?? tileBuffers[i])
+      position = offset + tileBuffers[i].length
+    })
+    return result
+  }
   order.forEach(({ li, ti }, i) => out.set(tileBuffers[i], tileOffsets[li][ti]))
   return out
 }

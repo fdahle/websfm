@@ -180,6 +180,8 @@ export function verifyMatches(kpsA, kpsB, matches, options = {}, { onTiming } = 
   return call('verify', [kpsA, kpsB, matches, options], { onTiming })
 }
 
+export const readRasterWindow = (file, options = {}) => call('readRasterWindow', [{ file, ...options }])
+
 // SAM2 smart-mask selection (F12). All three ops pin worker 0 so the heavy ORT
 // encoder/decoder sessions load once AND the per-uuid embedding cache (held in
 // workers/ops/segment.js module scope) is on the worker every call reaches.
@@ -287,9 +289,9 @@ export function parseCloudFile(buffer, name, { onLog } = {}) {
 // main thread — a 200 MB REMA tile decoded on the UI thread is the same trap
 // parseCloudFile exists to avoid. `forceKind` ('dem'|'ortho') skips the sniff.
 // Resolves to { meta, plane }; `plane` is transferred both ways (no clone).
-export function parseRasterFile(buffer, name, { forceKind = null, style = null, onLog } = {}) {
-  return call('parseRaster', [{ buffer, name, forceKind, style }], {
-    transfer: [buffer],
+export function parseRasterFile(buffer, name, { forceKind = null, style = null, previewOnly = false, onLog } = {}) {
+  return call('parseRaster', [{ ...(buffer instanceof Blob ? { file: buffer } : { buffer }), name, forceKind, style, previewOnly }], {
+    transfer: buffer instanceof Blob ? [] : [buffer],
     onEvent: onLog ? (ev, a) => { if (ev === 'log') onLog(...a) } : undefined,
   })
 }
@@ -298,9 +300,11 @@ export function parseRasterFile(buffer, name, { forceKind = null, style = null, 
 // full-resolution plane, no OPFS write. Milliseconds where parseRasterFile is
 // seconds, which is what lets a restyle repaint immediately; the full plane is
 // re-decoded lazily on the next sample. Resolves to { style, previewDataUrl }.
-export function restyleRasterPreview(buffer, name, style, { onLog } = {}) {
-  return call('restyleRasterPreview', [{ buffer, name, style }], {
-    transfer: [buffer],
+export function restyleRasterPreview(source, name, style, { onLog, cacheKey, rangesOnly = false } = {}) {
+  const isFile = source instanceof Blob
+  return call('restyleRasterPreview', [{ ...(isFile ? { file: source } : { buffer: source }), name, style, cacheKey, rangesOnly }], {
+    worker: POOL_SIZE - 1,
+    transfer: isFile ? [] : [source],
     onEvent: onLog ? (ev, a) => { if (ev === 'log') onLog(...a) } : undefined,
   })
 }
@@ -326,3 +330,5 @@ export function exportLazCloud(cloud, { crsCode = null, geographic = false, onLo
     onEvent: onLog ? (ev, a) => { if (ev === 'log') onLog(...a) } : undefined,
   })
 }
+
+export const prepareRasterCog = (file, meta) => call('prepareRasterCog', [{ file, meta }], { worker: 1 })

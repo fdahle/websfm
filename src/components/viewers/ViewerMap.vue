@@ -1,5 +1,7 @@
 <script setup>
 import 'ol/ol.css'
+import { useExternalStore } from '../../stores/useExternalStore.js'
+import { createGpuRasterLayer, gpuRasterStyle, disposeRasterLayer } from './raster/gpuRaster.js'
 import { onMounted, onBeforeUnmount, ref, computed, watch } from 'vue'
 // Aliased: a bare `Map` import shadows the global Map constructor, and this file
 // keeps id→layer lookups in real JS Maps.
@@ -394,7 +396,19 @@ async function addGibsLayer(info) {
 let rasterGroup = null
 const rasterLayers = new Map() // id → ImageLayer
 
-function makeRasterLayer(r) {
+const external = useExternalStore()
+let rasterSync = 0
+async function makeRasterLayer(r) {
+  if ([1, 2].includes(r.photometric ?? 1)) {
+    try {
+      const file = await external.displayFile(r.id)
+      if (file) {
+        const layer = await createGpuRasterLayer(r, file)
+        layer.once('postrender', () => { r.gpuReady = true })
+        return layer
+      }
+    } catch (err) { console.warn('Tiled raster display failed; using preview', err) }
+  }
   const bounds = rasterBounds({ width: r.width, height: r.height, geoTransform: r.geoTransform })
   if (!bounds) return null
   const projection = getOlProjection(r.crs)
@@ -422,32 +436,36 @@ function makeRasterLayer(r) {
 // reloading it on every input event.
 async function syncRasterLayers() {
   if (!map || !rasterGroup) return
-  const want = props.rasters ?? []
+  const generation = ++rasterSync
+  const want = [...(props.rasters ?? [])]
   for (const r of want) {
     if (r.crs) await ensureProjection(r.crs).catch(() => {})
   }
 
+  if (generation !== rasterSync || !map) return
   const seen = new Set()
   for (const r of want) {
     seen.add(r.id)
     const existing = rasterLayers.get(r.id)
     if (existing) {
       existing.setOpacity(r.opacity ?? 1)
+      if (existing.get('gpuRaster')) { existing.setStyle(gpuRasterStyle(r)); continue }
       // Opacity is a live property; the image itself is not. A restyle (or a
       // kind flip) replaces previewDataUrl in place on the same record, so an
       // unchanged url is the ONLY case that may keep its source — otherwise the
       // layer would keep painting the pre-restyle PNG until the view is torn
       // down, which is exactly the "reload the view to see it" bug.
       if (existing.get('previewUrl') === r.previewDataUrl) continue
-      existing.getSource()?.dispose?.()
+      disposeRasterLayer(existing)
       rasterLayers.delete(r.id)
     }
-    const layer = makeRasterLayer(r)
+    const layer = await makeRasterLayer(r)
+    if (generation !== rasterSync || !map) { disposeRasterLayer(layer); return }
     if (layer) rasterLayers.set(r.id, layer)
   }
   for (const [id, layer] of [...rasterLayers]) {
     if (seen.has(id)) continue
-    layer.getSource()?.dispose?.()
+    disposeRasterLayer(layer)
     rasterLayers.delete(id)
   }
 
@@ -736,7 +754,8 @@ function destroy() {
   poseSource = null
   // The Static sources hold a decoded image each; drop them with the map rather
   // than leaving them attached to a detached group across a CRS rebuild.
-  for (const layer of rasterLayers.values()) layer.getSource()?.dispose?.()
+  rasterSync++
+  for (const layer of rasterLayers.values()) disposeRasterLayer(layer)
   rasterLayers.clear()
   rasterGroup = null
   hover.value = null
