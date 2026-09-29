@@ -1,5 +1,7 @@
 import { reconstruct as sfmReconstruct } from '../../core/sfm/sfm.js'
-import { packReconstructionResult } from '../../core/sfm/resultCodec.js'
+import { packReconstructionResult, packSparseCloud, unpackReconstructionResult } from '../../core/sfm/resultCodec.js'
+import { sparsePointMetrics, refineSparseSelection } from '../../core/sfm/gradualSelection.js'
+import { bundleAdjust } from '../../core/sfm/reconstruction.js'
 import { wrapPackedMatches } from '../../core/sfm/matchCodec.js'
 
 // Sparse incremental-SfM op.
@@ -35,5 +37,16 @@ export function makeSfmOps() {
     return packed
   }
 
-  return { reconstruct }
+  async function sparseMetrics([packed]) {
+    const model = unpackReconstructionResult(packed)
+    return { result: sparsePointMetrics(model.cameras, model.points) }
+  }
+  async function refineSparse([packed, settings]) {
+    const model = unpackReconstructionResult(packed)
+    const refined = await refineSparseSelection(model.cameras, model.points, settings, bundleAdjust)
+    const packedResult = packSparseCloud(refined)
+    Object.assign(packedResult.result, { removed: refined.removed, costBefore: refined.costBefore, costAfter: refined.costAfter })
+    return packedResult
+  }
+  return { reconstruct, sparseMetrics, refineSparse }
 }

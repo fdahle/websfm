@@ -46,3 +46,17 @@ Camera positions should follow the capture path, most useful images should regis
 and the cloud should have coherent shape. In the Quality Report, check reprojection
 error, track lengths, calibration drift, coverage, and disconnected components before
 continuing to depth maps.
+
+## Sparse gradual selection
+Open **Tools → Point Cloud → Filter Cloud → Sparse gradual selection**. Choose
+reprojection RMS error (select above the threshold), track length (select below),
+or maximum triangulation angle (select below). The slider previews selected and
+remaining counts before **Delete selected + refine**.
+
+Refinement preserves surviving tracks and fixes camera calibration while bundle
+adjustment updates camera poses and points. It refuses a disconnected camera
+network, fewer than six surviving observations in any camera, or missing stored
+photo measurements. Cancel or solver failure preserves the original model. A
+successful edit replaces the main sparse model and invalidates depth maps, computed
+dense/mesh output, DEM, orthophoto, scale and georeference; rebuild/refit those next.
+Save a project copy first if you want to retain the previous solution.

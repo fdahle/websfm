@@ -254,6 +254,15 @@ export function packReconstructionResult(result) {
   return { result: packed, transfer }
 }
 
+// Store models use a Map; the transport uses camera records. Clone only the
+// small calibration records; point buffers are copied by the transport caller.
+export function packSparseCloud(cloud) {
+  return packReconstructionResult({
+    status: 'done', points: cloud.points,
+    cameras: [...cloud.cameras].map(([uuid, c]) => ({ uuid, R: c.R.map(row => [...row]), t: [...c.t], K: { ...c.K } })),
+  })
+}
+
 function unpackModel(model) {
   if (!model || model.packedVersion !== PACKED_VERSION) return model
   const count = model.pointCount ?? 0
