@@ -218,7 +218,7 @@ const tabs = [
           // These edit **dense** clouds (computed or imported) and always produce a
           // new cloud — the source is never modified. A sparse cloud is deliberately
           // not editable: its points carry the view-tracks dense/ortho/COLMAP read.
-          { id: 'filter-cloud',    label: 'Filter\nCloud',  icon: 'point-cloud', needsDense: true },
+          { id: 'filter-cloud',    label: 'Filter\nCloud',  icon: 'point-cloud', needsCloud: true },
           { id: 'crop-cloud',      label: 'Crop\nCloud',    icon: 'rect',        needsDense: true },
           { id: 'merge-clouds',    label: 'Merge\nClouds',  icon: 'link',        needsTwoClouds: true },
         ],

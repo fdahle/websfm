@@ -9,6 +9,7 @@ import {
   generateOrtho as workerGenerateOrtho,
   meshify as workerMeshify,
   editCloud as workerEditCloud,
+  refineSparse as workerRefineSparse,
   terminateAll,
 } from '../workers/computeClient.js'
 import { useLog } from '../composables/useLog.js'
@@ -35,7 +36,7 @@ import { usePosesStore } from './usePosesStore.js'
 import { useGcpsStore } from './useGcpsStore.js'
 import { useScaleBarsStore } from './useScaleBarsStore.js'
 import { buildCameraPriors } from '../core/sfm/cameraPriors.js'
-import { unpackReconstructionResult } from '../core/sfm/resultCodec.js'
+import { packSparseCloud, unpackReconstructionResult } from '../core/sfm/resultCodec.js'
 import { packMatchPairs } from '../core/sfm/matchCodec.js'
 import {
   projectSparsePeakBreakdownBytes, sparseMemoryDecision, SPARSE_HEAP_FRACTION,
@@ -940,6 +941,36 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
   // Disposable copies are transferred to the worker. The source buffers remain
   // attached throughout, including when Cancel hard-terminates the worker.
   async function editClouds({ mode, sourceIds = [], settings = {}, name } = {}, onProgress) {
+    if (mode === 'sparse') {
+      const original = mainSparseCloud.value
+      if (!original || original.id !== sourceIds[0] || original.createdAt !== settings.createdAt) return null
+      const projectId = projects.currentProjectId
+      reconStatus.value = 'running'
+      try {
+        // Do not transfer: compact tracks may share the live model's buffers.
+        const packed = packSparseCloud(original).result
+        const result = unpackReconstructionResult(await workerRefineSparse(packed, { metric: settings.metric, threshold: settings.threshold }))
+        if (projects.currentProjectId !== projectId || mainSparseCloud.value !== original) return null
+        upsertSparseCloud(result.cameras, result.points, { replaceId: original.id, asMain: true, name: original.name })
+        await invalidateSparseDependents()
+        // Calibration defines the canonical observation frame and must survive
+        // a fixed-intrinsics refinement. Old run statistics must not masquerade
+        // as statistics of the edited cloud.
+        summary.value = {
+          selfCalDistortion: summary.value?.selfCalDistortion ?? [],
+          fiducialTransforms: summary.value?.fiducialTransforms ?? [],
+        }
+        healthDirty.value++
+        reconStatus.value = 'done'
+        await persist()
+        log(`Gradual selection: removed ${result.removed} points; bundle adjustment ${result.costBefore.toFixed(3)} → ${result.costAfter.toFixed(3)} px`, 'success', 'Reconstruction')
+        return mainSparseCloud.value
+      } catch (err) {
+        log(`Gradual selection stopped: ${err?.message ?? err}`, 'error', 'Reconstruction')
+        reconStatus.value = 'error'
+        return null
+      }
+    }
     const sources = sourceIds
       .map((id) => clouds.value.find((c) => c.id === id))
       .filter((c) => c && c.kind === 'dense' && c.count > 0)

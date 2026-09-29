@@ -7,6 +7,7 @@ import AdvancedDisclosure from './ui/AdvancedDisclosure.vue'
 import PresetCards from './ui/PresetCards.vue'
 import WarnBox from './ui/WarnBox.vue'
 import GlossaryTerm from '../glossary/GlossaryTerm.vue'
+import GradualSelectionModal from './GradualSelectionModal.vue'
 import {
   FILTER_CLOUD_DEFAULTS, FILTER_CLOUD_PRESETS, FILTER_CLOUD_PRESET_META,
 } from '../../core/defaults.user.js'
@@ -15,6 +16,7 @@ import {
 // NEW cloud. Defaults are the single source of truth in core/defaults.user.js;
 // core/products/cloudEdit.js keeps matching fallbacks.
 const props = defineProps({
+  sparseCloud: { type: Object, default: null },
   clouds: { type: Array, default: () => [] },
   // The dense run's merge cell (≈ one ground-sample-distance), used as the sensible
   // auto voxel size. 0 when unknown (an imported cloud, or a legacy run).
@@ -22,6 +24,7 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['close', 'run'])
+const gradual = ref(false)
 
 const settings = ref({ ...FILTER_CLOUD_DEFAULTS })
 const sourceId = ref(props.clouds[0]?.id ?? null)
@@ -86,11 +89,11 @@ function run() {
 </script>
 
 <template>
-  <ModalShell title="Filter Cloud" @close="emit('close')">
+  <GradualSelectionModal v-if="gradual && sparseCloud" :cloud="sparseCloud" @close="gradual = false" @run="emit('run', $event)" />
+  <ModalShell v-else title="Filter Cloud" @close="emit('close')">
+    <button v-if="sparseCloud" class="btn" @click="gradual = true">Sparse gradual selection…</button>
     <WarnBox v-if="!clouds.length">
-      No editable point cloud. Run <strong>Densify</strong> or import a cloud first — filtering
-      applies to dense clouds; a sparse cloud carries the view-tracks the later stages read
-      and is left intact on purpose.
+      No dense cloud is available. Use sparse gradual selection above, or run <strong>Densify</strong> for dense filtering.
     </WarnBox>
 
     <template v-else>

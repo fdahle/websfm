@@ -1264,7 +1264,13 @@ async function onMeshRun(settings)  { meshOpen.value = false;  await runGenerate
 // Cloud editing. Each modal emits a ready-made request ({ sourceIds, settings, name });
 // the mode is fixed by which modal sent it. Always adds a new cloud — non-destructive.
 async function onCropCloudRun(req)   { cropCloudOpen.value = false;   await runEditClouds({ ...req, mode: 'crop' }) }
-async function onFilterCloudRun(req) { filterCloudOpen.value = false; await runEditClouds({ ...req, mode: 'filter' }) }
+async function onFilterCloudRun(req) {
+  filterCloudOpen.value = false
+  await runEditClouds({ ...req, mode: req.mode === 'sparse' ? 'sparse' : 'filter' })
+  if (req.mode === 'sparse' && reconStatus.value === 'done') {
+    for (const tab of [...tabs.value]) if (tab.type === 'product') closeTab(tab.id)
+  }
+}
 async function onMergeCloudsRun(req) { mergeCloudsOpen.value = false; await runEditClouds({ ...req, mode: 'merge' }) }
 
 // ── Confirm-before-destroy ────────────────────────────────────────────────────
@@ -1908,6 +1914,7 @@ function onRibbonPick(event) {
     <Teleport to="body">
       <FilterCloudModal
         v-if="filterCloudOpen"
+        :sparse-cloud="reconstructionStore.mainSparseCloud"
         :clouds="editableClouds"
         :merge-cell="denseSummary?.mergeCell ?? 0"
         @close="filterCloudOpen = false"
