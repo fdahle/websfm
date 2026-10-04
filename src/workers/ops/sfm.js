@@ -41,11 +41,14 @@ export function makeSfmOps() {
     const model = unpackReconstructionResult(packed)
     return { result: sparsePointMetrics(model.cameras, model.points) }
   }
-  async function refineSparse([packed, settings]) {
+  // constraints: { gcps, cameraPriors } — the survey evidence the model was solved
+  // under (store surveyConstraintInput), so the refinement is held to it too.
+  async function refineSparse([packed, settings, constraints = {}]) {
     const model = unpackReconstructionResult(packed)
-    const refined = await refineSparseSelection(model.cameras, model.points, settings, bundleAdjust)
+    const refined = await refineSparseSelection(model.cameras, model.points, settings, bundleAdjust, constraints)
     const packedResult = packSparseCloud(refined)
-    Object.assign(packedResult.result, { removed: refined.removed, costBefore: refined.costBefore, costAfter: refined.costAfter })
+    Object.assign(packedResult.result, { removed: refined.removed, costBefore: refined.costBefore,
+      costAfter: refined.costAfter, constraints: refined.constraints })
     return packedResult
   }
   return { reconstruct, sparseMetrics, refineSparse }

@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { fuseDepthMaps, fuseDepthMapsStreamed } from './mvs.js'
 import { orthorectify, orthorectifyStreamed } from '../products/ortho.js'
 import { serializeDepthMap } from './depthMapCodec.js'
-import { readDepthFiles } from './depthFileReader.js'
+import { readDepthFiles, readDepthOnly } from './depthFileReader.js'
 
 function maps() {
   return Array.from({ length: 4 }, (_, j) => {
@@ -27,6 +27,27 @@ describe('bounded map loading', () => {
     expect(actual.length).toBeGreaterThan(0)
     expect([...actual]).toEqual([...expected]); expect([...actual.nrm]).toEqual([...expected.nrm])
     expect(actual.summary).toEqual(expected.summary)
+  })
+  it('depth-only comparison loads give the identical cloud and a monotonic bar', async () => {
+    const ms = maps(), entries = files(ms), expected = fuseDepthMaps(ms, {})
+    const progress = []
+    const actual = await fuseDepthMapsStreamed(entries, i => readDepthFiles(entries[i]), {}, () => {},
+      { loadDepth: i => readDepthOnly(entries[i]), onProgress: d => progress.push(d) })
+    expect([...actual]).toEqual([...expected])
+    expect(actual.summary).toEqual(expected.summary)
+    for (let i = 1; i < progress.length; i++) expect(progress[i]).toBeGreaterThanOrEqual(progress[i - 1])
+  })
+  it('fused normals face the cameras even when a map stored the opposite sign', () => {
+    // Cameras sit at z = 10 looking down on the z = 0 plane. Camera-frame +z normals
+    // are world −z: pointing away from every camera, i.e. inward for Poisson.
+    const ms = maps().map((m) => ({ ...m, normals: Float32Array.from({ length: 32 * 32 * 3 }, (_, i) => (i % 3 === 2 ? 1 : 0)) }))
+    const out = fuseDepthMaps(ms, {})
+    expect(out.length).toBeGreaterThan(0)
+    for (let i = 2; i < out.nrm.length; i += 3) expect(out.nrm[i]).toBeGreaterThan(0.99)
+  })
+  it('a depth-only load rejects a truncated plane', async () => {
+    const entry = files(maps())[0]; entry.files.depth = new Blob([new Uint8Array(8)])
+    await expect(readDepthOnly(entry)).rejects.toThrow('Corrupt depth map')
   })
   it.each(['best', 'average'])('orthorectification agrees including gap filling: %s', async blend => {
     const ms = maps(), entries = files(ms)

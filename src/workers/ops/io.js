@@ -2,6 +2,7 @@ import { assembleCog, geoKeysForEpsg } from '../../core/products/geotiff.js'
 import { attributeBuffers } from '../../core/io/cloudAttributes.js'
 import { GeoTIFF, fromArrayBuffer, fromBlob } from 'geotiff'
 import { rasterWindow } from '../../core/io/rasterWindow.js'
+import { edgeOriginFromTags } from '../../core/io/rasterSample.js'
 import { parseCloudFile, cloudStats, sniffCloudFormat } from '../../core/io/cloudImport.js'
 import { classifyRasterKind } from '../../core/io/rasterKind.js'
 import { hillshadeRgba } from '../../core/products/colormap.js'
@@ -380,8 +381,10 @@ async function readGeoTransform(image, fd) {
     throw new Error('rotated, sheared or perspective GeoTIFF transforms are not supported')
   }
   try {
-    const [originX, originY] = image.getOrigin()
     const [scaleX, scaleY] = image.getResolution()
+    const tiepoint = matrix?.length ? null : await readTiffTag(fd, 'ModelTiepoint')
+    const [originX, originY] = edgeOriginFromTags({ tiepoint, origin: image.getOrigin(), scaleX, scaleY,
+      rasterType: image.getGeoKeys?.()?.GTRasterTypeGeoKey ?? 1 })
     if (![originX, originY, scaleX, scaleY].every(Number.isFinite) || !scaleX || !scaleY) return null
     return { originX, originY, scaleX, scaleY }
   } catch {

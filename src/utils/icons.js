@@ -96,6 +96,19 @@ export const icons = {
   ruler: `
     <rect x="2.5" y="8.5" width="19" height="7" rx="1" />
     <path d="M6.5 8.5v3M10 8.5v4.5M13.5 8.5v3M17 8.5v4.5" />`,
+  // Measure group (DEM / orthophoto tab): planimetric area, elevation profile,
+  // cut/fill volume.
+  area: `
+    <path d="M4 7l7-3.5 9 4.5-2.5 11L6 19z" stroke-dasharray="2.2 1.8" />
+    <circle cx="4" cy="7" r="1.3" /><circle cx="11" cy="3.5" r="1.3" /><circle cx="20" cy="8" r="1.3" />
+    <circle cx="17.5" cy="19" r="1.3" /><circle cx="6" cy="19" r="1.3" />`,
+  profile: `
+    <path d="M3 20.5h18M3 20.5V3.5" />
+    <path d="M5 16l4-6 3 3 4-7 4 5" />`,
+  volume: `
+    <path d="M2.5 19.5h19" />
+    <path d="M4 19.5c2-5 4.5-9 8-9s6 4 8 9" />
+    <path d="M7 15.5h10" stroke-dasharray="1.6 1.6" />`,
   'map-pin': `
     <path d="M12 21s7-6.3 7-11a7 7 0 1 0-14 0c0 4.7 7 11 7 11z" />
     <circle cx="12" cy="10" r="2.5" />`,

@@ -1,4 +1,4 @@
-import { ref, shallowRef, computed } from 'vue'
+import { ref, shallowRef, computed, toRaw } from 'vue'
 import { defineStore, storeToRefs } from 'pinia'
 import { useLog } from '../composables/useLog.js'
 import { ensureProjection, transform } from '../core/crs.js'
@@ -319,6 +319,18 @@ export const useExternalStore = registerProjectStore(defineStore('external', () 
     const meta = rasterById(id)
     if (!meta) return null
 
+    // An ortho imported since tiled display landed has NO plane by design: the
+    // retained original is authoritative and drawn as GPU tiles, and raw windows
+    // are read from it on demand. Its source is plane-less — never "missing data",
+    // and a restyle must not trigger a full-resolution RGBA decode to rebuild a
+    // plane it never had.
+    const planeless = meta.kind === 'ortho' && !(await opfs.hasExternalPlane(projects.currentProjectId, id))
+    if (planeless) {
+      const source = buildSource(meta, null)
+      setSource(id, source)
+      return source
+    }
+
     const wanted = styleStamp(meta.style)
     if ((meta.planeStyleStamp ?? wanted) !== wanted) {
       const p = redecodePlane(meta).finally(() => loading.delete(id))
@@ -610,7 +622,23 @@ export const useExternalStore = registerProjectStore(defineStore('external', () 
     if (isPersisting()) await save()
     log(`Reference raster "${meta.name}": restyled — ${describeStyle(meta.style)}`
       + (meta.gpuReady ? ' (GPU display updated)' : ' (preview updated)'), 'success', 'Import')
+    // The GPU path restyles the tiles without composing a preview, but the preview
+    // is still what the sidebar, the fallback <img>, a non-tiled map layer and the
+    // next reopen draw. Repaint it off the critical path; a newer restyle wins.
+    if (!previewDataUrl) refreshPreviewAfterRestyle(id, meta, resolved, file, projectId)
     return true
+  }
+
+  function refreshPreviewAfterRestyle(id, meta, style, file, projectId) {
+    restyleRasterPreview(file, meta.name, style, {
+      cacheKey: `${projectId}:${id}:${meta.importedAt}:${file.size}:${file.lastModified}`,
+    }).then(async ({ previewDataUrl }) => {
+      if (!previewDataUrl || projectId !== projects.currentProjectId
+        || rasterById(id) !== meta || toRaw(meta.style) !== style) return
+      meta.previewDataUrl = previewDataUrl
+      if (isPersisting()) await save()
+    }).catch((err) => log(`Reference raster "${meta.name}": preview refresh failed — `
+      + `${err?.message ?? err}`, 'warn', 'Import'))
   }
 
   // Declared vertical datum + accuracy (§A6). Both are user-supplied because

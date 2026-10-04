@@ -2,41 +2,67 @@ import { test, expect } from '@playwright/test'
 const harness = '/tests/browser/workflow-tools.html'
 test.beforeEach(async ({ page }) => { page.on('pageerror', error => console.error('PAGE ERROR', error.message)) })
 
-test('ruler, area and profile measure in the recorded product frame', async ({ page }) => {
+test('ruler, area, profile and volume measure in the recorded product frame', async ({ page }) => {
   await page.goto(harness)
   await page.evaluate(() => {
     const canvas = document.createElement('canvas'); canvas.width = canvas.height = 100
     const ctx = canvas.getContext('2d'); ctx.fillStyle = '#888'; ctx.fillRect(0,0,100,100)
     window.workflowTools.recon.dem = { width:100,height:100,originX:0,originY:100,gsd:1,unit:'m',crs:'local',data:new Float32Array(10000).fill(42),previewDataUrl:canvas.toDataURL() }
   })
-  const select = page.getByRole('combobox', { name:'Measurement tool' })
-  await select.selectOption('length')
+  const tool = (t) => page.getByRole('button', { name:`measure-${t}`, exact:true }).click()
+  const result = page.getByRole('region', { name:'Measurement result' })
+  const headline = result.locator('.mp-value')
   const viewport = page.locator('.viewport'), box = await viewport.boundingBox()
-  await viewport.click({ position:{ x:box.width/2-20,y:box.height/2 } })
-  await viewport.click({ position:{ x:box.width/2+20,y:box.height/2 } })
-  await expect(page.getByText('Horizontal distance: 40.00 m', { exact:true })).toBeVisible()
-  await page.getByRole('textbox', { name:'Measurement name' }).fill('Courtyard')
-  await page.getByRole('button', { name:'Save measurement', exact:true }).click()
-  await select.selectOption('area')
-  for (const [x,y] of [[-20,-20],[20,-20],[20,20],[-20,20]]) await viewport.click({ position:{ x:box.width/2+x,y:box.height/2+y } })
-  await expect(page.getByText('Planimetric area: 1600.00 m²')).toBeVisible()
-  await select.selectOption('profile')
-  for (const x of [-20,20]) await viewport.click({ position:{ x:box.width/2+x,y:box.height/2 } })
-  await expect(page.getByText('Elevation: 42.00–42.00 m', { exact:false })).toBeVisible()
+  const at = (x, y) => viewport.click({ position:{ x:box.width/2+x,y:box.height/2+y } })
+  await tool('length')
+  await expect(page.getByRole('toolbar', { name:'Ruler measurement' })).toBeVisible()
+  await at(-20, 0); await at(20, 0)
+  await expect(headline).toHaveText('40.00 m')
+  await result.getByRole('textbox', { name:'Measurement name' }).fill('Courtyard')
+  await result.getByRole('button', { name:'Save measurement', exact:true }).click()
+  await tool('area')
+  for (const [x,y] of [[-20,-20],[20,-20],[20,20],[-20,20]]) await at(x, y)
+  await expect(headline).toHaveText('1,600.00 m²')
+  await expect(result.getByText('160.00 m', { exact:true })).toBeVisible() // perimeter
+  await tool('profile')
+  for (const x of [-20,20]) await at(x, 0)
+  await expect(result.getByText('42.00 – 42.00 m', { exact:true })).toBeVisible()
   const downloadPromise = page.waitForEvent('download')
-  await page.getByRole('button', { name:'Export profile CSV' }).click()
+  await result.getByRole('button', { name:'Export profile CSV' }).click()
   expect((await downloadPromise).suggestedFilename()).toBe('elevation-profile.csv')
+  // Volume over the flat 42 m DEM: zero against the vertex plane, 2 m × covered
+  // cells against a custom 40 m base, with full coverage reported.
+  await tool('volume')
+  for (const [x,y] of [[-20,-20],[20,-20],[20,20],[-20,20]]) await at(x, y)
+  await expect(headline).toHaveText('0 m³')
+  await expect(result.getByText(/^100\.0% of 1,?600 cells$/)).toBeVisible()
+  await page.getByRole('combobox', { name:'Volume base surface' }).selectOption('custom')
+  await page.getByRole('spinbutton', { name:'Base height' }).fill('40')
+  await expect(headline).toHaveText('3,200 m³')
+  await result.getByRole('textbox', { name:'Measurement name' }).fill('Stockpile')
+  await result.getByRole('button', { name:'Save measurement', exact:true }).click()
+  // Esc clears the drawing, a second Esc leaves the tool.
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('toolbar', { name:'Volume measurement' })).toBeVisible()
+  await at(0, 0)
+  await page.keyboard.press('Escape'); await page.keyboard.press('Escape')
+  await expect(page.getByRole('toolbar', { name:'Volume measurement' })).toHaveCount(0)
   await page.evaluate(async () => {
     const { projects, measurements } = window.workflowTools
     projects.currentProjectId = 'measurement-browser'; projects.persistenceAvailable = true
     await measurements.save(); measurements.clear(); await measurements.restore({ projectId: projects.currentProjectId })
   })
-  await page.getByRole('combobox', { name:'Saved measurement' }).selectOption({ label:'Courtyard' })
-  await expect(page.getByText('Horizontal distance: 40.00 m', { exact:true })).toBeVisible()
+  await tool('saved')
+  const list = page.getByRole('complementary', { name:'Saved measurements' })
+  await list.getByRole('button', { name:/Stockpile/ }).click()
+  await expect(headline).toHaveText('3,200 m³')
+  await list.getByRole('button', { name:/Courtyard/ }).click()
+  await expect(headline).toHaveText('40.00 m')
   await page.evaluate(() => { window.workflowTools.recon.dem = { ...window.workflowTools.recon.dem, createdAt: 2 } })
-  await page.getByRole('combobox', { name:'Saved measurement' }).selectOption({ label:'Courtyard (stale)' })
-  await expect(page.getByText('Stale: source raster or coordinate frame changed.', { exact:false })).toBeVisible()
-  await expect(page.getByText('Horizontal distance: 40.00 m', { exact:true })).toBeVisible()
+  // A rebuild resets the tool but leaves the saved list open, now flagging staleness.
+  await list.getByRole('button', { name:/Courtyard.*stale/ }).click()
+  await expect(result.getByText('Source raster or coordinate frame changed.', { exact:false })).toBeVisible()
+  await expect(headline).toHaveText('40.00 m')
 })
 
 test('raw uint16 GeoTIFF windows survive styling and cached restyles avoid band decoding', async ({ page }) => {

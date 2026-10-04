@@ -66,6 +66,21 @@ describe('distortion (Brown–Conrady)', () => {
     expect(maxErr).toBeLessThan(0.05)
   })
 
+  it('inverts strong barrel distortion exactly out to the corner (the fold depends on it)', () => {
+    // 4000×3000, f=3000: the fixed-point scheme was 0.46 px off here at k1=−0.18
+    // and 3.4 px at −0.20, errors the self-cal fold baked into every keypoint.
+    const K = { fx: 3000, fy: 3000, cx: 2000, cy: 1500 }
+    for (const d of [{ k1: -0.18 }, { k1: -0.2, k2: 0.02 }, { k1: -0.12, k2: -0.01, p1: 0.002, p2: -0.001 }]) {
+      let maxErr = 0
+      for (const [u, v] of [[0, 0], [4000, 3000], [0, 3000], [4000, 0], [1000, 2500]]) {
+        const dp = distortPixel(u, v, K, d)
+        const up = undistortPixel(dp.x, dp.y, K, d)
+        maxErr = Math.max(maxErr, Math.hypot(up.x - u, up.y - v))
+      }
+      expect(maxErr).toBeLessThan(1e-6)
+    }
+  })
+
   it('normalized inverse recovers the forward input', () => {
     const [xd, yd] = distortNormalized(0.4, -0.3, D)
     const [x, y] = undistortNormalized(xd, yd, D)

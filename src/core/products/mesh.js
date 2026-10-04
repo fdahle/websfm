@@ -225,7 +225,6 @@ export function generateMesh(dense, poissonFn, settings = {}, onLog = () => {}) 
   // Screened Poisson is closed before trimming. Keeping it untrimmed is the
   // reliable hole-fill mode; distance trimming is useful for removing unsupported
   // extrapolation, but can reopen boundaries and gaps.
-  const trimDist = cfg.fillHoles ? 0 : (cfg.trimFactor > 0 ? cfg.trimFactor * mergeCell : 0)
 
   // Flag a depth that's high for this point count (mostly builds empty octree cells).
   const recDepth = recommendMeshDepth(dense.count)
@@ -249,6 +248,12 @@ export function generateMesh(dense, poissonFn, settings = {}, onLog = () => {}) 
     }
   }
   const inCount = inPos.length / 3
+  // The trim proximity set IS the Poisson input, so the radius must scale with that
+  // input's spacing: after subsampling to one point per leaf (≫ the dense GSD on a
+  // large scene) a GSD-sized radius trims most marching-cubes vertices and shreds
+  // the surface — the breakdown began at ~2,200 GSD of extent at depth 8.
+  const sampleCell = inPos === dense.pos ? mergeCell : Math.max(mergeCell, inCell)
+  const trimDist = cfg.fillHoles ? 0 : (cfg.trimFactor > 0 ? cfg.trimFactor * sampleCell : 0)
 
   onLog(`Mesh: Poisson over ${inCount.toLocaleString()} points — depth ${depth}, screening ${cfg.screening}, `
     + `trim ${trimDist > 0 ? `${trimDist.toExponential(2)} (${cfg.trimFactor}× cell)` : 'off'}`, 'info', 'Products')

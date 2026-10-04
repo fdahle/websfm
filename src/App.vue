@@ -37,8 +37,7 @@ import { useMatchesStore } from './stores/useMatchesStore.js'
 import { useTabs } from './composables/useTabs.js'
 import { useImageViewSettings } from './composables/useImageViewSettings.js'
 import { imageResidualVectors } from './core/eval/imageStats.js'
-import { makeCanonicalToScan } from './core/sfm/displayFrame.js'
-import { distortionOf } from './core/sfm/distortion.js'
+import { makeCanonicalToScan, makeFrameModelResolver } from './core/sfm/displayFrame.js'
 import { useProjectsStore } from './stores/useProjectsStore.js'
 import { useTheme } from './composables/useTheme.js'
 import { useModalsStore } from './stores/useModalsStore.js'
@@ -96,6 +95,7 @@ import * as opfs from './utils/opfs.js'
 import { ensureProjection } from './core/crs.js'
 import { resolveK } from './core/sfm/reconstruction.js'
 import { estimateUpFromCameras } from './core/sfm/geometry.js'
+import { CORNER_SLOTS, SIDE_SLOTS } from './core/sfm/fiducialModel.js'
 import { useSfmInterop } from './composables/useSfmInterop.js'
 
 // These dialogs pull in large reports, Markdown/KaTeX, or diagnostic code and are
@@ -616,10 +616,16 @@ function fiducialDisplayForImage(imageId) {
     const byId = new Map(cal.marks.map((m) => [m.id, m]))
     return {
       marks: cal.marks,
+      transform: cal.transform || 'affine',
       obs: detections.flatMap((d) => { const fidId = cal.slotMap?.[d.slot]; return byId.has(fidId) ? [{ fidId, px: d.px, py: d.py, slot: d.slot }] : [] }),
     }
   }
-  return { marks: detections.map((d) => ({ id: d.slot })), obs: detections.map((d) => ({ fidId: d.slot, px: d.px, py: d.py, slot: d.slot })) }
+  // Before calibration a mark IS its slot. Offer every slot, not only the ones
+  // detected here — otherwise a slot the detector missed (or an image where it
+  // found nothing) could never be placed by hand.
+  const slots = [...CORNER_SLOTS, ...SIDE_SLOTS]
+  for (const d of detections) if (!slots.includes(d.slot)) slots.push(d.slot)
+  return { marks: slots.map((id) => ({ id })), transform: 'affine', obs: detections.map((d) => ({ fidId: d.slot, px: d.px, py: d.py, slot: d.slot })) }
 }
 
 function markDisplayedFiducial(imageId, { fidId, px, py }) {
@@ -821,7 +827,10 @@ const alignedUuids = computed(() => new Set(sparseCameras.value.keys()))
 // of that image pair. Recomputed only when the sparse cloud changes.
 const usedMatchesByPair = computed(() => {
   const byPair = new Map()   // pairId → Set("kpA:kpB")
-  const sparse = clouds.value.find((c) => c.kind === 'sparse')
+  // The MAIN model — the one reconstruction consumed. "First sparse cloud" was a
+  // COLMAP import's tracks whenever one sat ahead of the computed model, and it
+  // re-walked every track whenever any cloud (dense, mesh…) changed.
+  const sparse = mainSparseCloud.value
   if (!sparse) return byPair
   for (const pt of sparse.points) {
     if (!pt.views || pt.views.size < 2) continue
@@ -843,10 +852,11 @@ const usedMatchesByPair = computed(() => {
 
 const matchSummaries = computed(() => {
   const result = []
+  const byUuid = new Map(images.value.map((img) => [img.uuid, img]))
   for (const [pid, entry] of matchStore.value) {
     if (entry.status !== 'done' || entry.inlierCount === 0) continue
-    const imgA = images.value.find((img) => img.uuid === entry.idA)
-    const imgB = images.value.find((img) => img.uuid === entry.idB)
+    const imgA = byUuid.get(entry.idA)
+    const imgB = byUuid.get(entry.idB)
     if (!imgA || !imgB) continue
     result.push({
       pairId:      pid,
@@ -928,7 +938,7 @@ const activeImageViewState = computed(() => {
     hasMask:       !!img.mask,
     hasDepth:      !!img.depth,
     gcpCount:      activeImageGcps.value.length,
-    fidCount:      (img.fiducialObs?.length ?? 0),
+    fidCount:      (img.fiducialDetections?.length || img.fiducialObs?.length || 0),
   }
 })
 
@@ -955,14 +965,9 @@ const activeImageResiduals = computed(() => {
 // scan→canonical affine. Returns null when the image needs neither — the common
 // EXIF-only digital case, where the overlay is already in the right frame.
 function canonicalToScanFor(img, cam) {
-  const summary = reconstructionStore.summary
-  const sensor = img.sensorId ? sensors.value.find((s) => s.id === img.sensorId) : null
-  return makeCanonicalToScan({
-    K: cam.K,
-    dist: sensor ? distortionOf(sensor) : null,
-    selfCal: (summary?.selfCalDistortion ?? []).find((d) => d.sensorId === img.sensorId) ?? null,
-    fiducial: (summary?.fiducialTransforms ?? []).find((t) => t.uuid === img.uuid) ?? null,
-  })
+  const resolve = makeFrameModelResolver({ summary: reconstructionStore.summary, sensors: sensors.value })
+  const { dist, selfCal, fiducial } = resolve(img)
+  return makeCanonicalToScan({ K: cam.K, dist, selfCal, fiducial })
 }
 
 const activeImageGcps = computed(() => {
@@ -1267,12 +1272,21 @@ async function onMeshRun(settings)  { meshOpen.value = false;  await runGenerate
 async function onCropCloudRun(req)   { cropCloudOpen.value = false;   await runEditClouds({ ...req, mode: 'crop' }) }
 async function onFilterCloudRun(req) {
   filterCloudOpen.value = false
-  await runEditClouds({ ...req, mode: req.mode === 'sparse' ? 'sparse' : 'filter' })
-  if (req.mode === 'sparse' && reconStatus.value === 'done') {
+  const result = await runEditClouds({ ...req, mode: req.mode === 'sparse' ? 'sparse' : 'filter' })
+  if (req.mode === 'sparse' && result.ok) {
     for (const tab of [...tabs.value]) if (tab.type === 'product') closeTab(tab.id)
   }
 }
 async function onMergeCloudsRun(req) { mergeCloudsOpen.value = false; await runEditClouds({ ...req, mode: 'merge' }) }
+// 3D-viewer rectangle/lasso selection: one masked edit per selected cloud. The
+// store refines a derived cloud in place and forks a derived copy of anything else.
+async function onEditSelection({ edits, keepSelected }) {
+  for (const { cloudId, mask } of edits) {
+    // Cancel terminates the worker for this cloud; it must also stop the rest.
+    const result = await runEditClouds({ mode: 'mask', sourceIds: [cloudId], settings: { mask, keepSelected } })
+    if (result?.cancelled) break
+  }
+}
 
 // ── Confirm-before-destroy ────────────────────────────────────────────────────
 // Every irreversible action (remove image / sensor / cloud / raster / GCP /
@@ -1413,8 +1427,11 @@ const productViewerRefs = reactive({})
 // own; an imported one carries its record so the tab can label + restyle it.
 const activeRasterTab = computed(() => {
   const tab = activeTab.value
+  // `measure` is the viewer's measurement-tool state (RasterMeasurements), read
+  // through the tab's ProductViewer ref so the Ribbon's Measure group can show it.
+  const measure = tab ? productViewerRefs[tab.id]?.measureState ?? null : null
   if (tab?.type === 'product') {
-    return { tabId: tab.id, kind: tab.productKind, imported: false, name: tab.title }
+    return { tabId: tab.id, kind: tab.productKind, imported: false, name: tab.title, measure }
   }
   if (tab?.type === 'raster') {
     const r = rasterById(tab.rasterId)
@@ -1425,6 +1442,7 @@ const activeRasterTab = computed(() => {
       imported: true,
       name: r?.name ?? 'Raster',
       onMap: !!r?.onMap,
+      measure,
     }
   }
   return null
@@ -1506,6 +1524,9 @@ function handleCommand(id) {
   if (EVAL_SECTIONS[id]) { openQuality(EVAL_SECTIONS[id]); return }
   // 3D view presets: 'view-preset-top' → setView('top').
   if (id.startsWith('view-preset-')) { viewerRef.value?.setView(id.slice('view-preset-'.length)); return }
+  // Raster Measure group: 'measure-length' → the active viewer's ruler, etc.
+  if (id === 'measure-saved') { activeProductViewer()?.toggleSavedMeasurements(); return }
+  if (id.startsWith('measure-')) { activeProductViewer()?.setMeasureTool(id.slice('measure-'.length)); return }
 
   switch (id) {
     case 'import-images':        ribbonInput.value.click(); break
@@ -2335,7 +2356,7 @@ function onRibbonPick(event) {
         </div>
 
         <div class="content">
-          <Viewer3D ref="viewerRef" v-show="activeTabId === 'viewer'" :theme="theme" :images="images" :show-cameras="showCameras" :show-grid="showGrid" :show-legend="showLegend" :scene-up="viewerSceneUp" @command="handleCommand" />
+          <Viewer3D ref="viewerRef" v-show="activeTabId === 'viewer'" :theme="theme" :images="images" :show-cameras="showCameras" :show-grid="showGrid" :show-legend="showLegend" :scene-up="viewerSceneUp" @command="handleCommand" @edit-selection="onEditSelection" />
           <ViewerMap v-if="mapMounted" ref="mapViewerRef" v-show="activeTabId === 'map'" :images="images" :gcps="gcps" :footprints="mapFootprints" :poses="poses" :selected-id="selectedId" :selected-gcp-id="selectedGcpId" :aligned-uuids="alignedUuids" :has-sparse="hasSparse" :crs="currentCrs" :show-footprints="showFootprints" :show-grid="showMapGrid" :rasters="mapRasters" :probe-raster="probeRasterAt" :load-raster="ensureRasterLoaded" @select="selectImage" @command="handleCommand" @select-gcp="selectGcp" @set-gcp-position="setGcpGroundPosition" @add-gcp-at="addGcpAtCoord" @delete-gcp="deleteGcpFromEditor" />
           <template v-for="tab in tabs" :key="tab.id">
             <ViewerImage
@@ -2364,6 +2385,7 @@ function onRibbonPick(event) {
               :show-fiducials="imageViewPrefs.showFiducials"
               :fiducial-marks="fiducialDisplayForImage(tab.imageId).marks"
               :fiducial-obs="fiducialDisplayForImage(tab.imageId).obs"
+              :fiducial-transform="fiducialDisplayForImage(tab.imageId).transform"
               @mark-gcp="(pt) => assignGcpObservation(tab.imageId, imageById(tab.imageId)?.name, pt)"
               @add-gcp="(pt) => addGcpAtObservation(tab.imageId, imageById(tab.imageId)?.name, pt)"
               @select-gcp="selectGcp"

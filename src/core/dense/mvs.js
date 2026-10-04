@@ -775,6 +775,9 @@ function clampCellForBounds(bounds, cell) {
 // Both runners execute the same fusion/voxel code. The async runner retains one
 // reference map and one comparison map. Pair-major consistency preserves view
 // order and the original early acceptance gates, using two scratch planes.
+// `hooks.loadDepth(i)` (optional) loads a comparison view's depth plane + camera
+// only; the check reads nothing else, and it runs N² times. Falls back to loadMap.
+const STREAMED_CHECK_SHARE = 0.9
 export function fuseDepthMaps(maps, opts = {}, onLog = () => {}, hooks = {}) {
   return runWithMaps(fusionSteps(maps, opts, onLog, hooks), maps)
 }
@@ -788,9 +791,10 @@ export async function fuseDepthMapsStreamed(metas, loadMap, opts = {}, onLog = (
       const { m, mi, minViews, minTriAngleDeg, maxCost, depthTolRel, consistencyPx, step } = request
       const agree = new Uint32Array(m.width * m.height), angle = new Float64Array(agree.length)
       const C = cameraCenter(m), rad = Math.max(0, Math.round(consistencyPx))
+      const loadComparison = hooks.loadDepth ?? loadMap
       for (let ci = 0; ci < metas.length; ci++) {
         if (ci === mi) continue
-        const other = await loadMap(ci), otherC = cameraCenter(other)
+        const other = await loadComparison(ci), otherC = cameraCenter(other)
         for (let v = 0; v < m.height; v += step) for (let u = 0; u < m.width; u += step) {
           const idx = v * m.width + u, d = m.depth[idx]
           if (!(d > 0) || m.cost[idx] > maxCost
@@ -814,7 +818,9 @@ export async function fuseDepthMapsStreamed(metas, loadMap, opts = {}, onLog = (
             if (minTriAngleDeg > 0) angle[idx] = Math.max(angle[idx], triangulationAngle(C, otherC, P))
           }
         }
-        hooks.onProgress?.(mi + (ci + 1) / metas.length, metas.length, 'Checking depth consistency…')
+        // The N comparisons dominate a streamed map's time: they take the first
+        // 90% of its progress slot, the single fusion pass the rest (see fusionSteps).
+        hooks.onProgress?.(mi + STREAMED_CHECK_SHARE * (ci + 1) / metas.length, metas.length, 'Checking depth consistency…')
       }
       next = iterator.next({ agree, angle })
     }
@@ -932,7 +938,8 @@ function* fusionSteps(maps, opts = {}, onLog = () => {}, hooks = {}) {
         const t = now()
         if (t - lastEmit >= DENSE_TUNING.fuseProgressMs) {
           lastEmit = t
-          onProgress(mi + v / h, maps.length, m.name ?? m.uuid?.slice(0, 8) ?? '')
+          const base = hooks.streaming ? STREAMED_CHECK_SHARE : 0
+          onProgress(mi + base + (1 - base) * v / h, maps.length, m.name ?? m.uuid?.slice(0, 8) ?? '')
         }
       }
       for (let u = 0; u < w; u += step) {
@@ -1001,6 +1008,12 @@ function* fusionSteps(maps, opts = {}, onLog = () => {}, hooks = {}) {
         }
         const nm = Math.hypot(nwx, nwy, nwz)
         if (nm > 1e-9) { nwx /= nm; nwy /= nm; nwz /= nm } else { nwx = 0; nwy = 0; nwz = 1 }
+        // Orient toward the camera that saw it. The kernels only keep n_z < 0 in the
+        // camera frame, which is not the same as facing the ray for an off-axis
+        // oblique surface — such a plane is only representable as −n, and its
+        // homography is identical. Poisson needs outward (camera-facing) normals, and
+        // averaging opposite normals in one voxel would cancel them.
+        if (nwx * (C.x - P.x) + nwy * (C.y - P.y) + nwz * (C.z - P.z) < 0) { nwx = -nwx; nwy = -nwy; nwz = -nwz }
 
         // WS4 grazing-angle reject: the incidence angle between the surface normal and
         // the viewing ray (C − P). A grazing (edge-on) surface — thin vegetation shells,

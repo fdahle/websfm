@@ -34,6 +34,28 @@ Use the 3D viewer to inspect floating clusters, edge shells, holes, and over-smo
 areas. Cloud filtering can remove statistical outliers or isolated components, but
 systematic defects are better fixed in the depth maps, masks, or source imagery.
 
+To remove points by hand, pick the **rectangle** or **lasso** tool under the ⚙ button
+in the 3D viewer and drag around the points. Shift-drag adds to the selection,
+Alt-drag removes from it, and a plain click clears it. Selected points turn pink.
+Then choose **Delete** (or press Delete) or **Keep only**. Esc while dragging
+abandons that shape; otherwise Esc clears the selection, and a second Esc leaves the
+tool. Cancelling an edit that spans several clouds stops after the current cloud.
+The first edit keeps your current view. Orbit, pan and zoom keep working on the other mouse
+buttons and the wheel while a tool is active.
+
+- Selection goes **through** the cloud: points hidden behind a surface inside the
+  shape are selected too, and stay highlighted so you can see them. Rotate the view
+  first if you only want the front layer.
+- Only **dense** clouds are selectable. Points you cannot see are never selected:
+  points hidden by the cloud's style (for example, a hidden class), and points cut
+  away by the near-clip setting. Changing the style clears an existing selection.
+  **Keep only** still removes every point outside the selection, hidden ones
+  included.
+- Editing is non-destructive. The first edit of a computed or imported cloud adds an
+  "(edited)" copy and hides the original in the sidebar. Further edits refine that
+  copy in place, so repeated cleanup doesn't stack full copies in memory. To start
+  over, delete the copy and show the original again.
+
 
 ## Saved depth maps and memory
 After depth maps are saved, their pixel arrays are released. Building a dense

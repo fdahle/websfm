@@ -53,7 +53,7 @@ export function useExports({
   async function exportSimilarity() {
     const resolved = await effectiveFrameSpec?.()
     if (resolved?.source === 'georef') {
-      return { sim: { scale: resolved.frameSpec.scale, R: resolved.frameSpec.R, t: resolved.frameSpec.t }, unit: resolved.unit, crs: resolved.crs, source: 'georef' }
+      return { sim: { scale: resolved.frameSpec.scale, R: resolved.frameSpec.R, t: resolved.frameSpec.t, local: resolved.frameSpec.local ?? null }, unit: resolved.unit, crs: resolved.crs, source: 'georef' }
     }
     if (resolved?.source === 'scalebars') {
       return {
@@ -686,6 +686,7 @@ export function useExports({
         origin: await geo(origin),
         east: await geo([origin[0] + 1, origin[1], origin[2]]),
         north: await geo([origin[0], origin[1] + 1, origin[2]]),
+        verticalMetresPerUnit: metresPerCrsUnit(crs) ?? 1,
       })
     } else {
       log('3D Tiles: no georeference — the tileset has no place on the globe. '

@@ -24,8 +24,8 @@ export function makeReferenceGcpOps({ rasterize }) {
     const data = new Uint8ClampedArray(width * height * 4)
     for (let i = 0; i < band.length; i++) {
       if (!Number.isFinite(band[i]) || band[i] === nodata) continue
-      const v = stretchTo255(band[i], range)
-      data.set([v, v, v, 255], i * 4)
+      const v = stretchTo255(band[i], range), o = i * 4
+      data[o] = v; data[o + 1] = v; data[o + 2] = v; data[o + 3] = 255
     }
     const a = await features(local), b = await features({ data, width, height })
     const { matches } = await matchDescriptors(a.descriptors, b.descriptors, { ratioThreshold: 0.7, crossCheck: true })

@@ -14,6 +14,7 @@
 // coordinates. Both live in the project CRS already (see usePosesStore / useGcpsStore).
 
 import { makeFrame } from './projection.js'
+import { gridToLocal, localToGrid, precisionToLocal } from './localFrame.js'
 
 const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
 const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
@@ -220,22 +221,41 @@ function hasNonCollinearGeometry(points) {
   return maxCross2 > energy * energy * 1e-12
 }
 
-// Apply dst = s·R·src + t.
-export function applySimilarity({ scale, R, t }, p) {
-  return [
+// Apply dst = s·R·src + t. A georeference fitted in a local metric frame carries
+// it as `sim.local` (localFrame.js); the similarity then maps SfM → local and the
+// frame takes local → project grid, so callers always receive grid coordinates.
+export function applySimilarity({ scale, R, t, local = null }, p) {
+  const q = [
     scale * (R[0][0] * p[0] + R[0][1] * p[1] + R[0][2] * p[2]) + t[0],
     scale * (R[1][0] * p[0] + R[1][1] * p[1] + R[1][2] * p[2]) + t[1],
     scale * (R[2][0] * p[0] + R[2][1] * p[1] + R[2][2] * p[2]) + t[2],
   ]
+  return local ? localToGrid(q, local) : q
+}
+
+/**
+ * Fit the SfM → project-CRS georeference. With `local` (a projected CRS — see
+ * localFrame.js) the similarity is fitted in that Cartesian frame: targets and
+ * their precision matrices are moved into it, and the result carries `local` so
+ * applySimilarity / frameFromSimilarity return grid coordinates. Without it this
+ * is exactly fitSimilarity (local/scaled frames, legacy records). `rms` is in
+ * ground units of the local frame.
+ */
+export function fitGeoreference(pairs, local = null) {
+  if (!local) return fitSimilarity(pairs)
+  const fit = fitSimilarity(pairs.map((p) => ({ ...p, dst: gridToLocal(p.dst, local),
+    ...(p.precision ? { precision: precisionToLocal(p.precision, local) } : {}) })))
+  return fit ? { ...fit, local } : null
 }
 
 // Wrap a fitted similarity as a frame (fromSfm = apply, toSfm = inverse), so
 // DEM/ortho consume it exactly like a local frame. `crs` tags the target.
 export function frameFromSimilarity(sim, crs, { unit = 'm', metresPerUnit = 1 } = {}) {
-  const { scale, R, t } = sim
+  const { scale, R, t, local = null } = sim
   const fromSfm = (p) => applySimilarity(sim, Array.isArray(p) ? p : [p.x, p.y, p.z])
-  // Inverse: src = Rᵀ·(dst − t)/s.
-  const toSfm = (c) => {
+  // Inverse: src = Rᵀ·(dst − t)/s, with dst first taken from grid into the local frame.
+  const toSfm = (g) => {
+    const c = local ? gridToLocal(g, local) : g
     const d = [(c[0] - t[0]) / scale, (c[1] - t[1]) / scale, (c[2] - t[2]) / scale]
     return [
       R[0][0] * d[0] + R[1][0] * d[1] + R[2][0] * d[2],
@@ -243,7 +263,7 @@ export function frameFromSimilarity(sim, crs, { unit = 'm', metresPerUnit = 1 } 
       R[0][2] * d[0] + R[1][2] * d[1] + R[2][2] * d[2],
     ]
   }
-  return { ...makeFrame({ origin: [0, 0, 0], east: [1, 0, 0], north: [0, 1, 0], up: [0, 0, 1], crs, unit, source: 'georef' }), fromSfm, toSfm, scale, R, t, metresPerUnit }
+  return { ...makeFrame({ origin: [0, 0, 0], east: [1, 0, 0], north: [0, 1, 0], up: [0, 0, 1], crs, unit, source: 'georef' }), fromSfm, toSfm, scale, R, t, local, metresPerUnit }
 }
 
 // ── linear-algebra helpers (dependency-free) ─────────────────────────────────

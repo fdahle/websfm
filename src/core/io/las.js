@@ -288,7 +288,7 @@ export function decodeLasPoints(pointBytes, count, recordLength, format, scale, 
     attributes.scannerChannel = new Uint8Array(count)
   }
   if (format === 8) attributes.nir = new Uint16Array(count)
-  let p = 0
+  let p = 0, rgbMax = 0
   for (let i = 0; i < count; i++) {
     pos[i * 3] = dv.getInt32(p, true) * scale[0] + offset[0]
     pos[i * 3 + 1] = dv.getInt32(p + 4, true) * scale[1] + offset[1]
@@ -315,11 +315,21 @@ export function decodeLasPoints(pointBytes, count, recordLength, format, scale, 
     }
     if (attributes.nir) attributes.nir[i] = dv.getUint16(p + 36, true)
     if (col) {
-      col[i * 3] = dv.getUint16(p + rgbOff, true) >> 8
-      col[i * 3 + 1] = dv.getUint16(p + rgbOff + 2, true) >> 8
-      col[i * 3 + 2] = dv.getUint16(p + rgbOff + 4, true) >> 8
+      const r = dv.getUint16(p + rgbOff, true), g = dv.getUint16(p + rgbOff + 2, true), b = dv.getUint16(p + rgbOff + 4, true)
+      if (r > rgbMax) rgbMax = r; if (g > rgbMax) rgbMax = g; if (b > rgbMax) rgbMax = b
+      col[i * 3] = r >> 8; col[i * 3 + 1] = g >> 8; col[i * 3 + 2] = b >> 8
     }
     p += recordLength
+  }
+  // The spec says 16-bit colour, but many writers store 0–255 in those fields;
+  // the >> 8 above would turn such a cloud black. A file whose colours never
+  // exceed 255 is 8-bit: re-read them unshifted (only the colour words).
+  if (col && rgbMax > 0 && rgbMax <= 255) {
+    for (let i = 0, q = rgbOff; i < count; i++, q += recordLength) {
+      col[i * 3] = dv.getUint16(q, true)
+      col[i * 3 + 1] = dv.getUint16(q + 2, true)
+      col[i * 3 + 2] = dv.getUint16(q + 4, true)
+    }
   }
   return { count, pos, ...(col ? { col } : {}), attributes }
 }

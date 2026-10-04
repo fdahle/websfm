@@ -144,12 +144,6 @@ export function detectFiducials(url, templates, predictions, options = {}, { onL
   })
 }
 
-export function bootstrapFiducials(url, marks, options = {}, { onLog } = {}) {
-  return call('bootstrapFiducials', [url, marks, options], {
-    onEvent: onLog ? (ev, a) => { if (ev === 'log') onLog(...a) } : undefined,
-  })
-}
-
 export function detectFiducialSpots(url, options = {}, { onLog } = {}) {
   // Modal settings are commonly a Vue reactive Proxy. Proxies are not supported
   // by the browser's structured-clone algorithm, so materialize the small,
@@ -181,7 +175,7 @@ export function verifyMatches(kpsA, kpsB, matches, options = {}, { onTiming } = 
 }
 
 export const sparseMetrics = (packed) => call('sparseMetrics', [packed])
-export const refineSparse = (packed, settings) => call('refineSparse', [packed, settings])
+export const refineSparse = (packed, settings, constraints = {}) => call('refineSparse', [packed, settings, constraints])
 export const readRasterWindow = (file, options = {}) => call('readRasterWindow', [{ file, ...options }])
 export const findReferenceMatches = (url, reference) => call('findReferenceMatches', [url, reference])
 

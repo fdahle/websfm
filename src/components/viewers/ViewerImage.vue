@@ -3,6 +3,7 @@ import { ref, watch, computed, onMounted, onBeforeUnmount } from 'vue'
 import { maskFromSource, invertMaskPixels, anyExcluded } from '../../core/mask.js'
 import { depthColor } from '../../core/products/colormap.js'
 import { fitFiducialAffine, mmToScan } from '../../core/sfm/fiducials.js'
+import { fitFiducialTransform, applyFiducialTransform } from '../../core/sfm/fiducialCalibration.js'
 import { clipLineToRect } from '../../core/sfm/gcpGuides.js'
 import { segmentForget } from '../../workers/computeClient.js'
 import { useImagesStore } from '../../stores/useImagesStore.js'
@@ -35,6 +36,9 @@ const props = defineProps({
   showFiducials: { type: Boolean, default: false }, // overlay toggle for fiducial marks
   fiducialMarks: { type: Array,   default: () => [] }, // [{ id, xMm, yMm }]
   fiducialObs:   { type: Array,   default: () => [] }, // [{ fidId, px, py }]
+  // The calibration's scan→mm model: reconstruction fits exactly this one, so the
+  // live residuals must too (an affine readout misreports a conformal/projective fit).
+  fiducialTransform: { type: String, default: 'affine' },
   // Reprojection residual overlay (WS3): per-observation vectors in native image
   // pixels — [{ px, py, du, dv, mag }] (du,dv = observation − projection).
   showResiduals: { type: Boolean, default: false },
@@ -92,7 +96,8 @@ const fidFit = computed(() => {
       return m ? { fidId: o.fidId, px: o.px, py: o.py, xMm: m.xMm, yMm: m.yMm } : null
     })
     .filter(Boolean)
-  return { obs, fit: obs.length >= 3 ? fitFiducialAffine(obs) : null }
+  const model = props.fiducialTransform || 'affine'
+  return { obs, fit: model === 'affine' ? (obs.length >= 3 ? fitFiducialAffine(obs) : null) : fitFiducialTransform(obs, model) }
 })
 // fidId → residual µm (aligned with fidFit.obs order).
 const fidResidual = computed(() => {
@@ -137,7 +142,7 @@ const fidGhosts = computed(() => {
   const out = []
   for (const m of props.fiducialMarks) {
     if (placed.has(m.id) || !Number.isFinite(m.xMm) || !Number.isFinite(m.yMm)) continue
-    const p = mmToScan(m.xMm, m.yMm, fit.A)
+    const p = fit.A ? mmToScan(m.xMm, m.yMm, fit.A) : applyFiducialTransform({ x: m.xMm, y: m.yMm }, { forward: fit.inverse })
     if (p && Number.isFinite(p.x) && Number.isFinite(p.y)) out.push({ id: m.id, px: p.x, py: p.y })
   }
   return out

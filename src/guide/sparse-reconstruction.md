@@ -54,7 +54,9 @@ or maximum triangulation angle (select below). The slider previews selected and
 remaining counts before **Delete selected + refine**.
 
 Refinement preserves surviving tracks and fixes camera calibration while bundle
-adjustment updates camera poses and points. It refuses a disconnected camera
+adjustment updates camera poses and points. It is held to the same enabled ground
+control and camera positions as the original solve, so it cannot undo a GCP
+correction; the log states how many GCP anchors and camera positions constrained it. It refuses a disconnected camera
 network, fewer than six surviving observations in any camera, or missing stored
 photo measurements. Cancel or solver failure preserves the original model. A
 successful edit replaces the main sparse model and invalidates depth maps, computed

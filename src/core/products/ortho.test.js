@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { fillOrthoGaps, sampleOrtho, orthorectify } from './ortho.js'
+import { fillOrthoGaps, sampleOrtho, orthorectify, affineToSfm } from './ortho.js'
+import { frameFromSimilarity } from './georef.js'
 import { rasterizeDem } from './dem.js'
 import { makeFrame } from './projection.js'
 
@@ -98,5 +99,26 @@ describe('fillOrthoGaps', () => {
     expect(filled).toBe(1)
     expect(rgba[7]).toBe(255)
     expect(rgba[11]).toBe(0)
+  })
+})
+
+describe('affineToSfm', () => {
+  it('linearises a georeference similarity at survey coordinates to sub-nanometre', () => {
+    const c = Math.cos(0.3), s = Math.sin(0.3)
+    const frame = frameFromSimilarity({ scale: 2.5, R: [[c, -s, 0], [s, c, 0], [0, 0, 1]], t: [5e5, 7e6, 120] }, 'EPSG:3031')
+    const lo = [4.99e5, 6.999e6, 50], hi = [5.01e5, 7.001e6, 400]
+    const aff = affineToSfm(frame.toSfm, lo, hi)
+    expect(aff).not.toBeNull()
+    for (const q of [[5.004e5, 7.0003e6, 77], [4.995e5, 6.9995e6, 390]]) {
+      const d = q.map((v, i) => v - aff.c0[i])
+      const want = frame.toSfm(q)
+      for (let r = 0; r < 3; r++) {
+        expect(aff.P0[r] + aff.A[r * 3] * d[0] + aff.A[r * 3 + 1] * d[1] + aff.A[r * 3 + 2] * d[2]).toBeCloseTo(want[r], 9)
+      }
+    }
+  })
+
+  it('refuses a non-affine transform so the caller falls back to direct calls', () => {
+    expect(affineToSfm(([x, y, z]) => [x * x, y, z], [0, 0, 0], [10, 10, 10])).toBeNull()
   })
 })

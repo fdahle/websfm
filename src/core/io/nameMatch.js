@@ -60,3 +60,32 @@ export function makeNameResolver(entries, { key = 'id' } = {}) {
       ?? null
   }
 }
+
+/**
+ * Re-link one name-associated record (`{ imageId, imageName }` — a GCP
+ * observation, a pose, a footprint) after the image list changed. Returns true
+ * when the record was modified.
+ *
+ * A link whose image still exists is kept and its stored name follows the image:
+ * a rename is label-only, and re-resolving by the OLD name would silently detach
+ * the record (a GCP's marks would drop out of georeferencing and the anchored BA,
+ * and the null would persist across reloads). Only a record with no live link —
+ * imported before its image, or whose image was removed — falls back to name
+ * resolution.
+ *
+ * @param {{ imageId: any, imageName: string|null }} rec mutated in place
+ * @param {Map<any, { name: string }>} imageById live images by id
+ * @param {(name: string|null|undefined) => any|null} resolve from makeNameResolver
+ */
+export function relinkImageRecord(rec, imageById, resolve) {
+  const img = rec.imageId != null ? imageById.get(rec.imageId) : null
+  if (img) {
+    if (rec.imageName === img.name) return false
+    rec.imageName = img.name
+    return true
+  }
+  const id = resolve(rec.imageName)
+  if (id === rec.imageId) return false
+  rec.imageId = id
+  return true
+}

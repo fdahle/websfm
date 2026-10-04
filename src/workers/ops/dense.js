@@ -1,4 +1,4 @@
-import { readDepthFiles } from '../../core/dense/depthFileReader.js'
+import { readDepthFiles, readDepthOnly } from '../../core/dense/depthFileReader.js'
 import {
   selectSourceViews, scaleK, rgbaToGray, depthMapForImage, fuseDepthMaps, fuseDepthMapsStreamed, filterDepthMap,
   filterDepthMapsGeometric, autoBestK,
@@ -500,7 +500,8 @@ export function makeDenseOps({ rasterize }) {
     // fuseDepthMaps streams kept pixels straight into the voxel merge and returns the
     // packed flat buffer [x,y,z,r,g,b] per point — no per-point object list (the OOM).
     const fuse = streamed
-      ? (ms, options, log, hooks) => fuseDepthMapsStreamed(ms, i => readDepthFiles(ms[i]), options, log, hooks)
+      ? (ms, options, log, hooks) => fuseDepthMapsStreamed(ms, i => readDepthFiles(ms[i]), options, log,
+        { ...hooks, loadDepth: i => readDepthOnly(ms[i]) })
       : fuseDepthMaps
     const flat = await fuse(maps, settings,
       (m, l, c) => emit('log', [m, l, c]),

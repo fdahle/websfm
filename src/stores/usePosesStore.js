@@ -5,7 +5,7 @@ import { useLog } from '../composables/useLog.js'
 import { ensureProjection, metresPerCrsUnit, metresToCrsUnits, transform } from '../core/crs.js'
 import * as opfs from '../utils/opfs.js'
 import { registerProjectStore } from './projectStores.js'
-import { makeNameResolver } from '../core/io/nameMatch.js'
+import { makeNameResolver, relinkImageRecord } from '../core/io/nameMatch.js'
 import { pluralize } from '../core/textFormat.js'
 import { useImagesStore } from './useImagesStore.js'
 import { useProjectsStore } from './useProjectsStore.js'
@@ -117,9 +117,9 @@ export const usePosesStore = registerProjectStore(defineStore('poses', () => {
   function resolveImageMatches() {
     let changed = false
     const resolve = resolveImageId.value
+    const byId = new Map(images.value.map((img) => [img.id, img]))
     for (const p of poses.value) {
-      const id = resolve(p.imageName)
-      if (id !== p.imageId) { p.imageId = id; changed = true }
+      if (relinkImageRecord(p, byId, resolve)) changed = true
     }
     if (changed) save()
   }

@@ -502,6 +502,19 @@ const rasterTab = computed(() => {
           { id: 'raster-zoom-out', label: 'Zoom\nOut', icon: 'zoom-out' },
         ],
       },
+      {
+        // Tools draw in the raster view; the drawing bar + result card live in
+        // RasterMeasurements. Height tools need DEM samples, so an orthophoto
+        // hides them rather than greying them (not applicable, not "not yet").
+        label: 'Measure',
+        commands: [
+          { id: 'measure-length',  label: 'Ruler',   icon: 'ruler',   measureTool: 'length' },
+          { id: 'measure-area',    label: 'Area',    icon: 'area',    measureTool: 'area' },
+          { id: 'measure-profile', label: 'Profile', icon: 'profile', measureTool: 'profile', demOnly: true },
+          { id: 'measure-volume',  label: 'Volume',  icon: 'volume',  measureTool: 'volume',  demOnly: true },
+          { id: 'measure-saved',   label: 'Saved',   icon: 'list',    activeKey: 'measureSaved', needsSavedMeasurements: true },
+        ],
+      },
       r?.imported
         ? {
             label: 'Reference',
@@ -567,6 +580,7 @@ function isHidden(cmd) {
   // a broken build rather than as "not applicable here".
   // Film-only overlays (fiducial marks) show only for a scanned-film image tab.
   if (cmd.filmOnly && !props.imageViewState?.isFilm) return true
+  if (cmd.demOnly && props.activeRaster?.kind !== 'dem') return true
   return false
 }
 
@@ -584,6 +598,8 @@ function isActive(cmd) {
   if (cmd.activeKey === 'showMapGrid') return props.showMapGrid
   if (cmd.activeKey === 'showFootprints') return props.showFootprints
   if (cmd.activeKey === 'rasterOnMap')    return !!props.activeRaster?.onMap
+  if (cmd.measureTool) return props.activeRaster?.measure?.tool === cmd.measureTool
+  if (cmd.activeKey === 'measureSaved')   return !!props.activeRaster?.measure?.showSaved
   const s = props.imageViewState
   if (!s || !cmd.activeKey) return false
   switch (cmd.activeKey) {
@@ -599,41 +615,20 @@ function isActive(cmd) {
   return false
 }
 
+// One list: a command is disabled exactly when it has a reason to be. Two parallel
+// copies of these checks drifted once (a greyed Footprints toggle with an empty
+// tooltip), so the boolean is derived rather than restated.
 function isDisabled(cmd) {
-  if (cmd.disabled) return true
-  if (cmd.aerialOnly && props.sceneType === 'object') return true
-  if (cmd.needsSelection && !props.hasSelection) return true
-  if (cmd.needsImages   && props.imageCount === 0) return true
-  if (cmd.needsImagesReady && props.imagesLoading) return true
-  if (cmd.needsMatches   && props.matchCount === 0)   return true
-  if (cmd.needsSparse    && !props.sparseReady)       return true
-  if (cmd.needsDepthMaps && props.depthMapCount === 0) return true
-  if (cmd.needsProject   && !props.currentProjectName) return true
-  if (cmd.needsCloud     && !props.cloudReady)        return true
-  if (cmd.needsDense     && !props.denseReady)        return true
-  if (cmd.needsTwoClouds && props.editableCloudCount < 2) return true
-  if (cmd.needsMesh      && !props.meshReady)         return true
-  if (cmd.needsDem       && !props.demReady)          return true
-  // An ortho reprojects onto a surface — a DEM or a mesh either way.
-  if (cmd.needsSurface   && !props.demReady && !props.meshReady) return true
-  if (cmd.needsOrtho     && !props.orthoReady)        return true
-  if (cmd.needsProducts  && !props.productReady)      return true
-  if (cmd.needsKeypoints && props.kpImageCount === 0) return true
-  if (cmd.needsGcps     && props.gcpCount === 0)   return true
-  if (cmd.needsPoses    && props.poseCount === 0)  return true
-  if (cmd.needsFootprints && props.footprintCount === 0) return true
-  if (cmd.needsSensors  && props.sensorCount === 0) return true
-  if (cmd.needsFilmSensor && props.filmSensorCount === 0) return true
-  const s = props.imageViewState
-  if (cmd.disableKey === 'kpNotDone' && s?.kpStatus !== 'done') return true
-  if (cmd.disableKey === 'noMask'    && !s?.hasMask)            return true
-  if (cmd.disableKey === 'noDepth'   && !s?.hasDepth)           return true
-  if (cmd.disableKey === 'noGcps'    && !s?.gcpCount)           return true
-  return false
+  return disabledReason(cmd) !== ''
 }
 
 function disabledReason(cmd) {
   if (cmd.disabled) return 'Coming soon'
+  const m = props.activeRaster?.measure
+  if (cmd.measureTool && !m?.available)
+    return 'Measuring needs a current frame with linear coordinates (not geographic, not an outdated frame)'
+  if (cmd.measureTool && cmd.demOnly && !m?.heights) return 'Needs the DEM elevation values, which are not loaded yet'
+  if (cmd.needsSavedMeasurements && !m?.savedCount) return 'No saved measurements on this raster yet'
   if (cmd.aerialOnly && props.sceneType === 'object')
     return 'Only for aerial projects — an object capture has no coordinate system'
   if (cmd.needsImages   && props.imageCount === 0) return 'Import images first'
@@ -655,6 +650,7 @@ function disabledReason(cmd) {
   if (cmd.needsGcps     && props.gcpCount === 0)
     return 'No GCPs yet — import a GCP file, or right-click the map or an image to add one'
   if (cmd.needsPoses    && props.poseCount === 0)  return 'Import camera poses first'
+  if (cmd.needsFootprints && props.footprintCount === 0) return 'Import or generate footprints first'
   if (cmd.needsSensors  && props.sensorCount === 0) return 'No sensors available'
   if (cmd.needsFilmSensor && props.filmSensorCount === 0) return 'Set at least one sensor to Film first'
   if (cmd.needsSelection && !props.hasSelection)   return 'Select an image first'

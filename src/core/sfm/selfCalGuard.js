@@ -18,6 +18,23 @@ function radialScale(k, r2) {
   return 1 + (k.k1 || 0) * r2 + (k.k2 || 0) * r2 * r2 + (k.k3 || 0) * r2 * r2 * r2
 }
 
+// The fold maps OBSERVED (distorted) keypoints to ideal ones, so the forward curve
+// f(r) = r·s(r²) must rise monotonically until it reaches the observed corner
+// radius — otherwise no inverse exists there and the fold moves corner keypoints to
+// garbage. Evaluating s at the corner as if it were an IDEAL radius (the check
+// below) misses this: it accepted k1 down to ≈ −0.7 at a 4000×3000 / f=3000
+// corner, where an inverse stops existing near k1 ≈ −0.21.
+function invertibleTo(k, rObs) {
+  const k1 = k.k1 || 0, k2 = k.k2 || 0, k3 = k.k3 || 0
+  const steps = 512, rMax = 4 * rObs
+  for (let i = 1; i <= steps; i++) {
+    const r = (i / steps) * rMax, r2 = r * r
+    if (!(1 + r2 * (3 * k1 + r2 * (5 * k2 + r2 * 7 * k3)) > 0)) return false // f'(r) ≤ 0: the curve folds
+    if (r * radialScale(k, r2) >= rObs) return true
+  }
+  return false
+}
+
 /**
  * Validate one proposed shared-intrinsics update.
  * Returns a stable plain diagnostic suitable for the run summary.
@@ -57,7 +74,9 @@ export function validateSelfCalUpdate({ before, proposed, nominalFx, width, heig
       const ny = (y - proposed.cy) / proposed.fy
       const r2 = nx * nx + ny * ny
       const scale = radialScale(proposed, r2)
-      if (!finite(scale) || scale <= 0) return fail('radial curve folds or becomes non-finite before the image corner', 'radial-fold')
+      if (!finite(scale) || scale <= 0 || !invertibleTo(proposed, Math.sqrt(r2))) {
+        return fail('radial curve folds or becomes non-finite before the image corner', 'radial-fold')
+      }
       maxShift = Math.max(maxShift, Math.hypot(nx * (scale - 1) * proposed.fx, ny * (scale - 1) * proposed.fy))
     }
     const shiftFrac = maxShift / Math.hypot(width, height)

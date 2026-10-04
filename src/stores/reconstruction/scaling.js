@@ -2,6 +2,7 @@ import { computed } from 'vue'
 import { fitScale, weightFromAccuracy, scaleEvidenceDigest } from '../../core/products/scale.js'
 import { cameraCenter } from '../../core/sfm/geometry.js'
 import { triangulateGcp } from '../../core/sfm/gcpTriangulation.js'
+import { gcpsInPinholeFrame } from '../../core/sfm/displayFrame.js'
 
 // Scale constraints — the SfM→metres scalar fitted from known distances, and the
 // read-only residual report built on it. Split out of useReconstructionStore for
@@ -29,6 +30,7 @@ import { triangulateGcp } from '../../core/sfm/gcpTriangulation.js'
 //   persist(), log() — store side effects
 export function createScaling({
   sparseCameras, images, mainSparseCloud, scaleFit, healthDirty, bars, gcps, persist, log,
+  frameModel = () => null, // see georeferencing.js: marks → the cameras' pinhole frame
 }) {
   const imagesById = () => new Map(images.value.map((im) => [im.id, im]))
 
@@ -85,7 +87,8 @@ export function createScaling({
     // NOT robust, deliberately: this is the measurement itself, and a mark that
     // disagrees is the disagreement the residual exists to report. (Guided
     // marking is the opposite case and does want robust — see gcpGuides.js.)
-    const tri = await triangulateGcp(g.observations, camerasByImageId)
+    const [inFrame] = gcpsInPinholeFrame([g], { imagesById: byId, sparseCameras: cams, frameModel: frameModel() })
+    const tri = await triangulateGcp(inFrame.observations, camerasByImageId)
     if (!tri) return { pos: null, reason: `${g.name} did not triangulate` }
     return { pos: [tri.x, tri.y, tri.z], reason: null, viewCount: tri.viewCount }
   }

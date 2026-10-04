@@ -216,3 +216,16 @@ it('preserves imported survey coordinates through dense and mesh persistence', (
     expect(out.pos[0]).not.toBe(out.pos[3])
   }
 })
+
+describe('damaged attribute sidecar', () => {
+  it('drops the attributes, keeps the cloud, and reports why', () => {
+    const cloud = { id: 'd', name: 'd', kind: 'dense', count: 2, pos: new Float32Array(6), col: new Uint8Array(6),
+      attributes: { intensity: new Uint16Array([1, 2]) } }
+    const ser = serializeCloud(cloud)
+    ser.buffers.attributes = new ArrayBuffer(1) // truncated
+    const back = deserializeCloud(ser, makeCloudId)
+    expect(back.count).toBe(2)
+    expect(back.attributes).toBeUndefined()
+    expect(back.attributeError).toMatch(/intensity/)
+  })
+})

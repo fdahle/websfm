@@ -11,14 +11,19 @@ import { useMeasurementsStore } from '/src/stores/useMeasurementsStore.js'
 import { useGcpsStore } from '/src/stores/useGcpsStore.js'
 const recon = useReconstructionStore(), external = useExternalStore(), projects = useProjectsStore(), images = useImagesStore(), gcps = useGcpsStore()
 projects.persistenceAvailable = false
-const open = ref(''), result = ref(null), raster = ref(null)
+const open = ref(''), result = ref(null), raster = ref(null), viewer = ref(null)
 const measurements = useMeasurementsStore()
 window.workflowTools = { recon, external, images, gcps, projects, measurements, showRaster: id => { raster.value = external.rasterById(id) } }
 async function edit(request) { open.value = ''; result.value = await recon.editClouds(request) }
 </script>
 <template>
   <button @click="open = 'gcps'">Find GCPs</button><button @click="open = 'filter'">Filter cloud</button>
-  <div style="position:relative;width:800px;height:600px"><ProductViewer v-if="raster" :kind="raster.kind" :product="raster" :source="external.sources.get(raster.id)" /><ProductViewer v-else-if="recon.dem" kind="dem" :product="recon.dem" :frame-status="recon.productFrameStatus(recon.dem)" /></div>
+  <!-- Stand-in for the Ribbon's Measure group (App dispatches the same calls). -->
+  <span role="toolbar" aria-label="Measure">
+    <button v-for="t in ['length', 'area', 'profile', 'volume']" :key="t" :aria-pressed="viewer?.measureState?.tool === t" @click="viewer?.setMeasureTool(t)">measure-{{ t }}</button>
+    <button :aria-pressed="!!viewer?.measureState?.showSaved" @click="viewer?.toggleSavedMeasurements()">measure-saved</button>
+  </span>
+  <div style="position:relative;width:800px;height:600px"><ProductViewer v-if="raster" ref="viewer" :kind="raster.kind" :product="raster" :source="external.sources.get(raster.id)" /><ProductViewer v-else-if="recon.dem" ref="viewer" kind="dem" :product="recon.dem" :frame-status="recon.productFrameStatus(recon.dem)" /></div>
   <FindGcpsModal v-if="open === 'gcps'" :has-relative-ortho="!!recon.ortho" :reference-orthos="external.orthoRasters" @close="open = ''" />
   <FilterCloudModal v-if="open === 'filter'" :sparse-cloud="recon.mainSparseCloud" @close="open = ''" @run="edit" />
   <output id="edited">{{ result?.points?.length ?? '' }}</output>

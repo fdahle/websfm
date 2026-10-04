@@ -59,21 +59,22 @@ const norm = (v) => Math.hypot(v[0], v[1], v[2])
 // distances land as ground distances.
 //
 // Returns the 16-element **column-major** matrix 3D Tiles wants.
-export function ecefTransformFromProbes({ origin, east, north }) {
+export function ecefTransformFromProbes({ origin, east, north, verticalMetresPerUnit = 1 }) {
   const o = geodeticToEcef(origin.lon, origin.lat, origin.h ?? 0)
   const ex = sub(geodeticToEcef(east.lon, east.lat, east.h ?? origin.h ?? 0), o)
   const ey = sub(geodeticToEcef(north.lon, north.lat, north.h ?? origin.h ?? 0), o)
   if (norm(ex) === 0 || norm(ey) === 0) {
     throw new Error('ecefTransformFromProbes: degenerate probes (the two offsets projected onto the same point)')
   }
-  // Up is the true ellipsoid normal, not ex×ey: the grid axes are very slightly
-  // non-orthogonal, and taking their cross product would fold that error into the
-  // vertical, tilting the model. Its length matches the horizontal scale so the
-  // frame stays uniform.
-  const scale = (norm(ex) + norm(ey)) / 2
+  // Up: the direction of ex×ey, but the LENGTH of a vertical unit, not of a grid
+  // unit. Heights are not subject to the projection's scale factor k — ex/ey carry
+  // 1/k (a grid unit is 1/k ground metres; 1.026 m at 85°S in EPSG:3031), and
+  // reusing that length exaggerated every height by the same factor (13 m at 500 m
+  // of relief). A vertical unit is `verticalMetresPerUnit` metres (1 for a metric CRS).
   const up = cross(ex, ey)
   const upLen = norm(up)
-  const ez = [up[0] / upLen * scale, up[1] / upLen * scale, up[2] / upLen * scale]
+  const v = verticalMetresPerUnit
+  const ez = [up[0] / upLen * v, up[1] / upLen * v, up[2] / upLen * v]
   return [
     ex[0], ex[1], ex[2], 0,
     ey[0], ey[1], ey[2], 0,

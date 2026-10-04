@@ -13,7 +13,12 @@ it.each(['pose', 'control', 'model', 'camera'])('invalidates a fitted georeferen
     images: ref(['a','b','c'].map(id => ({ id, uuid: id }))), georef, healthDirty: ref(0),
     poses: () => poses.value, gcps: () => controls.value, currentCrs: () => 'EPSG:3031',
     modelStamp: () => model.value, persist: vi.fn(), log: vi.fn() }))
-  expect((await api.georeference()).sim.scale).toBeCloseTo(2)
+  // Grid scale 2 at the pole of EPSG:3031, where the point scale factor is
+  // k ≈ 0.97277: fitted in the local metric frame the similarity's scale is the
+  // GROUND scale 2/k, and the frame travels with it.
+  const fitted = await api.georeference()
+  expect(fitted.sim.local.k).toBeCloseTo(0.97277, 4)
+  expect(fitted.sim.scale).toBeCloseTo(2 / fitted.sim.local.k, 6)
   expect(api.validGeoref.value).not.toBeNull()
   if (field === 'pose') poses.value[1].x = 10
   if (field === 'control') controls.value.push({ id: 'control', x: 1, y: 2, z: 3 })

@@ -24,7 +24,7 @@ import { serializeCloud, deserializeCloud, legacyDeserializeCloud } from './reco
 import { createDepthMapCache } from './reconstruction/depthMapCache.js'
 import { createGeoreferencing } from './reconstruction/georeferencing.js'
 import { createScaling } from './reconstruction/scaling.js'
-import { isGeographic } from '../core/crs.js'
+import { isGeographic, ensureProjection } from '../core/crs.js'
 import { precisionFromGcp } from '../core/gcpAccuracy.js'
 import { isGroundControl } from '../core/io/gcp.js'
 import { registerProjectStore } from './projectStores.js'
@@ -35,7 +35,8 @@ import { useSensorsStore } from './useSensorsStore.js'
 import { usePosesStore } from './usePosesStore.js'
 import { useGcpsStore } from './useGcpsStore.js'
 import { useScaleBarsStore } from './useScaleBarsStore.js'
-import { buildCameraPriors } from '../core/sfm/cameraPriors.js'
+import { buildCameraPriors, surveyFrameFor, gcpToSurveyFrame } from '../core/sfm/cameraPriors.js'
+import { makeFrameModelResolver, gcpsInPinholeFrame } from '../core/sfm/displayFrame.js'
 import { packSparseCloud, unpackReconstructionResult } from '../core/sfm/resultCodec.js'
 import { packMatchPairs } from '../core/sfm/matchCodec.js'
 import {
@@ -934,8 +935,31 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     return cloud
   }
 
-  // Crop / filter / merge dense clouds in the worker. `sourceIds` are cloud ids
-  // (one for crop/filter, two or more for merge); `settings` is already in the
+  // Swap a derived cloud's buffers for an edited result, keeping its identity
+  // (id/name/flags/style). A new object, like upsertSparseCloud, so the viewer
+  // and the sidebar see the change by reference.
+  function replaceDerivedCloud(snapshot, flat) {
+    // Re-read by id: the edit awaited the worker, and a rename/restyle made
+    // meanwhile must survive while a removal must not resurrect the cloud.
+    const idx = clouds.value.findIndex((c) => c.id === snapshot.id)
+    if (idx < 0) return null
+    const { attributes: _a, nrm: _n, ...rest } = clouds.value[idx]
+    const cloud = {
+      ...rest,
+      createdAt: Date.now(),
+      count: flat.count,
+      pos: markRaw(flat.pos),
+      ...(flat.attributes ? { attributes: markRaw(flat.attributes) } : {}),
+      col: markRaw(flat.col || null),
+      ...(flat.nrm ? { nrm: markRaw(flat.nrm) } : {}),
+    }
+    clouds.value.splice(idx, 1, cloud)
+    selectedCloudId.value = cloud.id
+    return cloud
+  }
+
+  // Crop / filter / merge / mask dense clouds in the worker. `sourceIds` are cloud ids
+  // (one for crop/filter/mask, two or more for merge); `settings` is already in the
   // core/products/cloudEdit.js shape (the modals do the UI→core mapping in run()).
   //
   // Disposable copies are transferred to the worker. The source buffers remain
@@ -945,13 +969,31 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
       const original = mainSparseCloud.value
       if (!original || original.id !== sourceIds[0] || original.createdAt !== settings.createdAt) return null
       const projectId = projects.currentProjectId
+      const statusBefore = reconStatus.value
       reconStatus.value = 'running'
       try {
         // Do not transfer: compact tracks may share the live model's buffers.
         const packed = packSparseCloud(original).result
-        const result = unpackReconstructionResult(await workerRefineSparse(packed, { metric: settings.metric, threshold: settings.threshold }))
-        if (projects.currentProjectId !== projectId || mainSparseCloud.value !== original) return null
-        upsertSparseCloud(result.cameras, result.points, { replaceId: original.id, asMain: true, name: original.name })
+        const survey = await surveyConstraintInput({ marks: 'pinhole' })
+        if (projects.currentProjectId !== projectId || mainSparseCloud.value !== original) {
+          if (reconStatus.value === 'running') reconStatus.value = statusBefore
+          return null
+        }
+        const result = unpackReconstructionResult(await workerRefineSparse(packed,
+          { metric: settings.metric, threshold: settings.threshold },
+          { gcps: survey.gcps, cameraPriors: survey.cameraPriors }))
+        if (projects.currentProjectId !== projectId || mainSparseCloud.value !== original) {
+          // Superseded (project switch / set-as-main mid-run): nothing changed here.
+          if (reconStatus.value === 'running') reconStatus.value = statusBefore
+          return null
+        }
+        // An edit of the model, not a recompute: provenance and the user's
+        // display choices carry over (a reconstruct deliberately clears `imported`).
+        upsertSparseCloud(result.cameras, result.points, { replaceId: original.id, asMain: true,
+          name: original.name, imported: !!original.imported, secondary: !!original.secondary })
+        const edited = mainSparseCloud.value
+        if (edited && original.style !== undefined) edited.style = original.style
+        if (edited && original.visible !== undefined) edited.visible = original.visible
         await invalidateSparseDependents()
         // Calibration defines the canonical observation frame and must survive
         // a fixed-intrinsics refinement. Old run statistics must not masquerade
@@ -962,8 +1004,15 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
         }
         healthDirty.value++
         reconStatus.value = 'done'
-        await persist()
-        log(`Gradual selection: removed ${result.removed} points; bundle adjustment ${result.costBefore.toFixed(3)} → ${result.costAfter.toFixed(3)} px`, 'success', 'Reconstruction')
+        if (!(await persist())) {
+          log('Gradual selection: the edited model could not be saved — it will be lost on reload', 'warn', 'Reconstruction')
+        }
+        const held = result.constraints ?? {}
+        log(`Gradual selection: removed ${result.removed} points; bundle adjustment ${result.costBefore.toFixed(3)} → ${result.costAfter.toFixed(3)} px`
+          + (held.gcpAnchors || held.cameraPriors
+            ? ` (held to ${held.gcpAnchors || 0} GCP anchor(s), ${held.cameraPriors || 0} camera prior(s))` : ' (no survey constraints)'),
+          'success', 'Reconstruction')
+        if (held.gcpError) log(`Gradual selection: GCP anchoring skipped — ${held.gcpError}`, 'warn', 'Reconstruction')
         return mainSparseCloud.value
       } catch (err) {
         log(`Gradual selection stopped: ${err?.message ?? err}`, 'error', 'Reconstruction')
@@ -997,6 +1046,15 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
       }))
       return { id: c.id, count: c.count, pos, col, nrm, attributes }
     })
+    if (mode === 'mask') {
+      // The viewer's selection is stamped with the buffer it was drawn from; a
+      // replaced cloud (re-fuse, another edit) must not receive a stale mask.
+      if (!(settings.mask instanceof Uint8Array) || settings.mask.length !== sources[0].count) {
+        log('Selection edit: the selection no longer matches the cloud — select again', 'warn', 'Products')
+        return null
+      }
+      transfer.push(settings.mask.buffer)
+    }
     reconStatus.value = 'running'
     try {
       const { cloud: edited, error } = await workerEditCloud(
@@ -1009,12 +1067,31 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
         reconStatus.value = 'done'
         return null
       }
-      const cloud = addDerivedCloud(edited, {
-        name: name || `${sources[0].name} (${mode})`,
-        imported: sources.every((c) => c.imported),
-      })
-      log(`Cloud edit: added "${cloud.name}" — ${cloud.count.toLocaleString()} points`,
-        'success', 'Products')
+      let cloud
+      if (mode === 'mask' && sources[0].derived) {
+        // A derived cloud is already the user's own working copy, so selection
+        // edits refine it in place — repeated cleanup must not stack one full copy
+        // per stroke in memory and OPFS. Computed and imported clouds stay
+        // untouched: their first selection edit forks a derived copy (below).
+        cloud = replaceDerivedCloud(sources[0], edited)
+        if (!cloud) {
+          log('Selection edit: the cloud was removed while the edit ran', 'warn', 'Products')
+          reconStatus.value = 'done'
+          return null
+        }
+        log(`Selection edit: "${cloud.name}" now has ${cloud.count.toLocaleString()} points`,
+          'success', 'Products')
+      } else {
+        cloud = addDerivedCloud(edited, {
+          name: name || `${sources[0].name} (${mode === 'mask' ? 'edited' : mode})`,
+          imported: sources.every((c) => c.imported),
+        })
+        // Show the edit in place of its source; the source stays one visibility
+        // toggle away for comparison or to start over.
+        if (mode === 'mask') sources[0].visible = false
+        log(`Cloud edit: added "${cloud.name}" — ${cloud.count.toLocaleString()} points`,
+          'success', 'Products')
+      }
       reconStatus.value = 'done'
       await persist()
       return cloud
@@ -1027,6 +1104,11 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
 
   // ── Georeferencing + products (DEM / orthophoto) ─────────────────────────────
 
+  // Each image's frame model (calibrated bag, composed self-cal bag, film
+  // transform) from the run record — the one join displayFrame.js owns. GCP and
+  // marker triangulation map raw marks through it into the cameras' frame.
+  const frameModelFor = computed(() => makeFrameModelResolver({ summary: summary.value, sensors: sensors.value }))
+
   const {
     georefPairs, imagesById, qualifyingGcps, canGeoreferenceGcps, gcpGeorefPairs,
     canGeoreference, georeference, validGeoref, poseResidualReport, gcpAccuracyReport,
@@ -1038,6 +1120,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     gcps: () => gcpsStore.gcps,
     currentCrs: () => projects.currentCrs,
     persist, log,
+    frameModel: () => frameModelFor.value,
   })
 
   const {
@@ -1047,6 +1130,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     bars: () => scaleBarsStore.bars,
     gcps: () => gcpsStore.gcps,
     persist, log,
+    frameModel: () => frameModelFor.value,
   })
 
   const { effectiveFrameSpec, currentFrameSignature, productFrameStatus, frameStampOf } = createFrameResolver({
@@ -1251,6 +1335,55 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     }
   }
 
+  // The external 3D evidence a bundle adjustment is held to — enabled ground
+  // control and camera priors — as worker-ready plain data, in ONE Cartesian survey
+  // frame for a projected CRS (cameraPriors.js surveyFrameFor: scale factor divided
+  // out, curvature restored). Reconstruct and gradual selection share it, so a
+  // refinement is constrained exactly like the solve it refines.
+  //   marks: 'raw'     — GCP marks as clicked (sfm.js maps them alongside keypoints)
+  //          'pinhole' — marks mapped into the cameras' frame (for an existing model)
+  async function surveyConstraintInput({ marks = 'raw' } = {}) {
+    const crs = projects.currentCrs
+    if (crs && crs !== 'local') await ensureProjection(crs).catch(() => {})
+    const control = gcpsStore.gcps.filter((g) => isGroundControl(g, { precision: precisionFromGcp }))
+    const surveyFrame = surveyFrameFor([
+      ...control.map((g) => [g.x, g.y, g.z]),
+      ...posesStore.poses.filter((p) => p.enabled !== false).map((p) => [p.x, p.y, p.z]),
+    ], crs)
+    if (surveyFrame) {
+      log(`Survey constraints: fitted in a local metric frame (grid scale factor k=${surveyFrame.k.toFixed(6)}, `
+        + 'curvature restored) — the project CRS is unchanged for display and export', 'info', 'Reconstruction')
+    }
+    const imgById = imagesById()
+    // Anchored BA is a Euclidean 3D constraint. Do not mix longitude/latitude
+    // degrees with metre elevations, and never invent z=0 for a 2D control point.
+    // Post-hoc products enforce the same boundary.
+    const inFrame = marks === 'pinhole'
+      ? gcpsInPinholeFrame(control, { imagesById: imgById, sparseCameras: sparseCameras.value, frameModel: frameModelFor.value })
+      : control
+    const gcps = isGeographic(crs) ? [] : inFrame
+      .map((g) => gcpToSurveyFrame(g, surveyFrame))
+      .map((g) => ({
+        role: 'control',
+        x: g.x, y: g.y, z: g.z,
+        accuracyX: g.accuracyX, accuracyY: g.accuracyY, accuracyZ: g.accuracyZ,
+        correlationXY: g.correlationXY, correlationXZ: g.correlationXZ, correlationYZ: g.correlationYZ,
+        observations: (g.observations || [])
+          .map((o) => ({ uuid: imgById.get(o.imageId)?.uuid, px: o.px, py: o.py,
+            accuracyX: o.accuracyX ?? g.accuracyImgX,
+            accuracyY: o.accuracyY ?? g.accuracyImgY }))
+          .filter((o) => o.uuid != null),
+      }))
+    // Surveyed/imported and EXIF-derived camera positions; a geographic project's
+    // priors get their own survey-centred metric frame (buildCameraPriors).
+    const cameraPriors = buildCameraPriors(posesStore.poses, images.value, crs, { surveyFrame })
+    if (isGeographic(crs) && cameraPriors.length) {
+      log(`Camera priors: ${cameraPriors.length} geographic position(s) converted to a `
+        + 'survey-centred metric frame for bundle adjustment', 'info', 'Pose')
+    }
+    return { gcps, cameraPriors, surveyFrame }
+  }
+
   // Run incremental SfM in the compute worker (off the main thread). The heavy
   // orchestration lives in core/sfm/sfm.js; this gathers the plain inputs it needs
   // (keypoints + match graph + settings), streams its log/progress back through
@@ -1359,6 +1492,8 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
         return
       }
 
+      const survey = await surveyConstraintInput({ marks: 'raw' })
+
       const input = {
         images: imgs.map((img) => {
           // Forward everything resolveK() may need: the EXIF fields that let it
@@ -1441,40 +1576,9 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
             // them only to PnP correspondence collection (register.js).
             inlierCount: e.inlierCount, weak: e.weak ?? false, status: 'done',
           })),
-        // GCPs, pre-resolved to plain data + imageId → uuid (the worker only knows
-        // images by uuid): [{ x, y, z, accuracy*, observations: [{ uuid, px, py }] }].
-        // Feeds the optional GCP-anchored bundle-adjust pass in core/sfm/sfm.js.
-        gcps: (() => {
-          const imgById = imagesById()
-          // Anchored BA is a Euclidean 3D constraint. Do not mix longitude/
-          // latitude degrees with metre elevations, and never invent z=0 for a
-          // 2D control point. Post-hoc products enforce the same boundary.
-          if (isGeographic(projects.currentCrs)) return []
-          return gcpsStore.gcps
-            .filter((g) => isGroundControl(g, { precision: precisionFromGcp }))
-            .map((g) => ({
-              role: 'control',
-              x: g.x, y: g.y, z: g.z,
-              accuracyX: g.accuracyX, accuracyY: g.accuracyY, accuracyZ: g.accuracyZ,
-              correlationXY: g.correlationXY, correlationXZ: g.correlationXZ, correlationYZ: g.correlationYZ,
-              observations: (g.observations || [])
-                .map((o) => ({ uuid: imgById.get(o.imageId)?.uuid, px: o.px, py: o.py,
-                  accuracyX: o.accuracyX ?? g.accuracyImgX,
-                  accuracyY: o.accuracyY ?? g.accuracyImgY }))
-                .filter((o) => o.uuid != null),
-            }))
-        })(),
-        // Surveyed/imported and EXIF-derived camera positions. buildCameraPriors
-        // keeps projected coordinates as-is and gives geographic projects an
-        // internal survey-centred metric frame; the project/output CRS is unchanged.
-        cameraPriors: (() => {
-          const priors = buildCameraPriors(posesStore.poses, images.value, projects.currentCrs)
-          if (isGeographic(projects.currentCrs) && priors.length) {
-            log(`Camera priors: ${priors.length} geographic position(s) converted to a `
-              + 'survey-centred metric frame for bundle adjustment', 'info', 'Pose')
-          }
-          return priors
-        })(),
+        // GCP anchors + camera priors in one survey frame (surveyConstraintInput).
+        gcps: survey.gcps,
+        cameraPriors: survey.cameraPriors,
         settings,
       }
 
@@ -1618,13 +1722,20 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     clear()
     const generation = restoreGeneration
     const isCurrentRestore = () => generation === restoreGeneration && projectId === projects.currentProjectId
+    // The model, the raster products and the depth index are independent files:
+    // read them concurrently so project open waits for the slowest, not the sum.
+    const productsRead = Promise.all([
+      opfs.loadProduct(projectId, 'dem'),
+      opfs.loadProduct(projectId, 'ortho'),
+    ])
+    const depthIndexRead = opfs.loadDepthIndex(projectId).catch(() => null)
     const data = await opfs.loadReconstruction(projectId)
     if (!isCurrentRestore()) return
     if (!data) {
       // No sparse model, so any saved depth planes are orphans (they only exist in a
       // sparse cloud's frame). Let the staleness check collect them rather than leak
       // hundreds of MB of OPFS forever.
-      await loadDepthIndexIntoMeta(projectId, isCurrentRestore)
+      await loadDepthIndexIntoMeta(projectId, isCurrentRestore, depthIndexRead)
       return
     }
 
@@ -1637,6 +1748,12 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
         : []
 
     clouds.value = raw.map((c) => (c.buffers ? deserializeCloud(c, makeCloudId) : legacyDeserializeCloud(c, makeCloudId)))
+    for (const c of clouds.value) {
+      if (!c.attributeError) continue
+      log(`Cloud "${c.name}": point attributes could not be restored (${c.attributeError}) — `
+        + 'the points are intact; re-import the file to recover intensity/classification', 'warn', 'Reconstruction')
+      delete c.attributeError
+    }
     selectedCloudId.value = clouds.value[0]?.id ?? null
     mainSparseId.value = data.mainSparseId ?? null
     ensureMainSparse() // legacy docs (no mainSparseId) → first sparse cloud
@@ -1648,10 +1765,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     summaryHistory.value = Array.isArray(data.summaryHistory) ? data.summaryHistory : []
 
     // Restore persisted raster products (DEM / ortho), if any.
-    const [savedDem, savedOrtho] = await Promise.all([
-      opfs.loadProduct(projectId, 'dem'),
-      opfs.loadProduct(projectId, 'ortho'),
-    ])
+    const [savedDem, savedOrtho] = await productsRead
     if (!isCurrentRestore()) return
     dem.value = savedDem
     ortho.value = savedOrtho
@@ -1667,7 +1781,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     // Advertise saved depth maps without loading their planes — densify / ortho
     // hydrate them on demand. Runs after ensureMainSparse() so the staleness check
     // compares against the cloud the pipeline will actually consume.
-    if (await loadDepthIndexIntoMeta(projectId, isCurrentRestore) && isCurrentRestore()) {
+    if (await loadDepthIndexIntoMeta(projectId, isCurrentRestore, depthIndexRead) && isCurrentRestore()) {
       log(`Dense: ${depthMapsMeta.value.length} saved depth map(s) available `
         + `(${formatBytes(depthMapBytes(depthMapsMeta.value))}, loaded on demand)`, 'success', 'Dense')
     }

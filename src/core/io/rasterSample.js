@@ -94,3 +94,24 @@ export function rasterBounds(desc) {
   if (!a || !b) return null
   return [Math.min(a.x, b.x), Math.min(a.y, b.y), Math.max(a.x, b.x), Math.max(a.y, b.y)]
 }
+
+/**
+ * The pixel-EDGE origin this module's conventions use, from GeoTIFF tags.
+ * geotiff.js `getOrigin()` returns the tiepoint's model coordinates verbatim,
+ * which is only the top-left edge when the tiepoint sits at raster (0,0) and the
+ * file is PixelIsArea. Two other legal encodings shift every sample:
+ *   - a tiepoint at raster (I, J) ≠ (0, 0) — move back by I·sx, J·sy;
+ *   - GTRasterTypeGeoKey = 2 (PixelIsPoint) — the model coordinate names the
+ *     CENTRE of pixel (I, J), so the edge is half a cell further back
+ *     (GDAL's default reading; 15 m on a 30 m DEM if ignored).
+ * `scaleY` is the signed north-up step (negative), as getResolution() returns it.
+ */
+export function edgeOriginFromTags({ tiepoint = null, origin, scaleX, scaleY, rasterType = 1 }) {
+  let [x, y] = origin
+  if (tiepoint?.length >= 6) {
+    x = tiepoint[3] - tiepoint[0] * scaleX
+    y = tiepoint[4] - tiepoint[1] * scaleY
+  }
+  if (rasterType === 2) { x -= 0.5 * scaleX; y -= 0.5 * scaleY }
+  return [x, y]
+}
