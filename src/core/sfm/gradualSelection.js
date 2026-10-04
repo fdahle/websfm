@@ -1,4 +1,6 @@
 import { cameraCenter, projectWithDepth, triangulationAngle } from './geometry.js'
+import { buildCameraPriorConstraints, qualifyingGcps, buildGcpAnchors } from './surveyConstraints.js'
+import { SFM_TUNING } from '../tuning.js'
 
 export function sparsePointMetrics(cameras, points) {
   const centers = new Map([...cameras].map(([id, camera]) => [id, cameraCenter(camera)]))
@@ -31,7 +33,12 @@ export function selectedSparseIndices(metrics, { metric, threshold }) {
 
 // Work on a disposable worker copy. Keep calibration fixed: viewsPx already
 // contains the canonical observations from the completed reconstruction.
-export async function refineSparseSelection(cameras, points, settings, bundleAdjust) {
+//
+// `constraints` = { gcps, cameraPriors } in the survey frame (GCP marks in the
+// pinhole frame, keyed by uuid) — the same evidence the solve was held to. Without
+// them a re-solve can only lower the reprojection cost, so the ≤-cost gate always
+// passed while it quietly undid a GCP doming correction.
+export async function refineSparseSelection(cameras, points, settings, bundleAdjust, constraints = {}) {
   const removed = new Set(selectedSparseIndices(sparsePointMetrics(cameras, points), settings))
   if (!removed.size) throw new Error('No points selected')
   const kept = points.filter((_, i) => !removed.has(i))
@@ -57,16 +64,42 @@ export async function refineSparseSelection(cameras, points, settings, bundleAdj
     for (let i = 1; i < ids.length; i++) parent[root(ids[i])] = root(ids[0])
   }
   if (new Set(parent.map((_, i) => root(i))).size > 1) throw new Error('Selection would disconnect the camera network')
-  const result = await bundleAdjust(entries.map(([, c]) => c), entries.map(([, c]) => c.K), kept, observations,
-    { maxIters: 30, refineIntrinsics: 'none' })
-  if (!result || !Number.isFinite(result.costAfter) || result.costAfter > result.costBefore * 1.001
-      || result.points3d.length !== kept.length || result.cameras.length !== entries.length
+  const uuidList = entries.map(([id]) => id)
+  const { gcps = [], cameraPriors = [] } = constraints
+  let anchorSetup = null, anchorError = null
+  const qualifying = qualifyingGcps(gcps, cameras)
+  if (qualifying.length >= 3) {
+    const setup = await buildGcpAnchors({ cameras, qualifying, camIdxOf: cameraIndices, firstPointIndex: kept.length })
+    if (setup.error) anchorError = setup.error
+    else anchorSetup = setup
+  }
+  const priorSet = buildCameraPriorConstraints({ cameras, cameraPriors, uuidList,
+    minCameras: SFM_TUNING.cameraPriorBaMinCameras,
+    reference: anchorSetup ? { fit: anchorSetup.fit, frame: anchorSetup.frame } : null })
+  const constrained = !!(anchorSetup || priorSet)
+  const result = await bundleAdjust(entries.map(([, c]) => c), entries.map(([, c]) => c.K),
+    anchorSetup ? [...kept, ...anchorSetup.anchorPts] : kept,
+    anchorSetup ? [...observations, ...anchorSetup.observations] : observations,
+    { maxIters: 30, refineIntrinsics: 'none',
+      ...(anchorSetup ? { gcpAnchors: anchorSetup.anchors } : {}),
+      ...(priorSet ? { cameraPriors: priorSet.priors } : {}) })
+  // An unconstrained re-solve must not raise the residual. A constrained one may,
+  // within the allowance the main solve grants survey constraints (sfm.js).
+  const allowance = constrained
+    ? Math.max(SFM_TUNING.cameraPriorMaxReprojIncreasePx, (result?.costBefore ?? 0) * SFM_TUNING.cameraPriorMaxReprojIncreaseFrac)
+    : (result?.costBefore ?? 0) * 0.001
+  if (!result || !Number.isFinite(result.costAfter) || result.costAfter > result.costBefore + allowance
+      || result.points3d.length !== kept.length + (anchorSetup?.anchorPts.length ?? 0)
+      || result.cameras.length !== entries.length
       || result.points3d.some(p => ![p.x, p.y, p.z].every(Number.isFinite))
       || result.cameras.some(c => ![...c.R.flat(), ...c.t].every(Number.isFinite)))
     throw new Error('Refinement failed or increased the residual; the original model is unchanged')
   return {
     status: 'done', removed: removed.size, costBefore: result.costBefore, costAfter: result.costAfter,
+    constraints: { gcpAnchors: anchorSetup?.anchors.length ?? 0, cameraPriors: priorSet?.priors.length ?? 0,
+      ...(anchorError ? { gcpError: anchorError } : {}) },
     cameras: new Map(entries.map(([id, c], i) => [id, { ...c, ...result.cameras[i] }])),
+    // Only the real points: anchor points were scratch space for this solve.
     points: kept.map((p, i) => ({ ...p, ...result.points3d[i] })),
   }
 }

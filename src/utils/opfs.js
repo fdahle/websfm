@@ -1,6 +1,6 @@
 import { trackPersistence, persistenceLock, ignoreMissing } from './persistence.js'
 import { writeBinaryDocument, readBinaryDocument } from './binaryDocument.js'
-import { DEPTH_BIN_KEYS } from '../core/dense/depthMapCodec.js'
+import { DEPTH_BIN_KEYS, planeBytes } from '../core/dense/depthMapCodec.js'
 import { mapConcurrent } from './concurrency.js'
 
 const FLOATS_PER_KP = 6 // x, y, nx, ny, scale, response
@@ -116,10 +116,6 @@ export function setProjectRoot(projectId, dirHandle) {
 
 export function clearProjectRoot(projectId) {
   projectRoots.delete(projectId)
-}
-
-export function hasProjectRoot(projectId) {
-  return projectRoots.has(projectId)
 }
 
 async function getProjectDir(projectId, create = false) {
@@ -550,15 +546,6 @@ export async function saveMatches(projectId, pairId, data) {
   })
 }
 
-export async function loadMatches(projectId, pairId) {
-  try {
-    const dir = await getSubDir(projectId, 'matches')
-    return readJson(dir, pairId + '.json')
-  } catch {
-    return null
-  }
-}
-
 export async function deleteMatches(projectId, pairId) {
   return trackPersistence('deleteMatches:' + String(projectId) + ':' + String(pairId), async () => {
     try {
@@ -717,12 +704,6 @@ export async function saveDepthPlanes(projectId, index, entries) {
 
 // Rewrite the index alone, leaving the planes untouched (e.g. after dropping the
 // entries of images that were removed).
-export async function saveDepthIndex(projectId, index) {
-  return trackPersistence('saveDepthIndex:' + String(projectId), async () => {
-    const dir = await getSubDir(projectId, 'depthmaps')
-    await writeJson(dir, 'index.json', index)
-  })
-}
 
 export async function loadDepthIndex(projectId) {
   try {
@@ -731,22 +712,6 @@ export async function loadDepthIndex(projectId) {
   } catch {
     return null
   }
-}
-
-// Read the planes for the given metadata entries. A map whose sidecars are
-// missing comes back with null buffers; the caller (codec) rejects it rather
-// than fusing a partial set.
-export async function loadDepthPlanes(projectId, metas) {
-  const dir = await getSubDir(projectId, 'depthmaps')
-  const out = []
-  for (const meta of metas) {
-    const buffers = {}
-    for (const key of DEPTH_BIN_KEYS) {
-      buffers[key] = await readBin(dir, `${meta.uuid}.${key}.bin`).catch(() => null)
-    }
-    out.push({ uuid: meta.uuid, buffers })
-  }
-  return out
 }
 
 // Read handles, not planes. Validate every required sidecar before computation.
@@ -759,8 +724,7 @@ export async function loadDepthFiles(projectId, metas) {
       catch (error) { ignoreMissing(error); files[key] = null }
     }
     if (['depth', 'cost', 'rgb'].every(k => !files[k]?.size)) continue
-    const n = meta.width * meta.height
-    for (const [key, size] of Object.entries({ depth: n * 4, cost: n * 4, rgb: n * 3, nrm: n * 12 })) {
+    for (const [key, size] of Object.entries(planeBytes(meta.width, meta.height))) {
       if (key === 'nrm' && !files.nrm?.size) continue
       if (files[key]?.size !== size) throw new Error(`Corrupt depth map ${meta.uuid} (${key}); recompute depth maps`)
     }
@@ -825,6 +789,17 @@ export async function loadExternalPlane(projectId, id) {
     return await readBin(dir, `${id}.bin`)
   } catch {
     return null
+  }
+}
+
+// Existence only — an ortho imported for tiled display has no plane by design,
+// and reading hundreds of MB just to learn that one exists would undo lazy loading.
+export async function hasExternalPlane(projectId, id) {
+  try {
+    await (await getSubDir(projectId, 'external')).getFileHandle(`${id}.bin`)
+    return true
+  } catch {
+    return false
   }
 }
 

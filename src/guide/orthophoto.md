@@ -44,13 +44,16 @@ GIS. Inspect seams, leaning objects, ghosting, holes, and boundary behaviour at 
 resolution before using the result.
 
 ## Measure an orthophoto
-Use the tab's **Measure** selector for a ruler/polyline or planimetric polygon
-area. Click vertices, then Finish. Shift-drag pans; Undo point and Clear edit the
-drawing. Results use the orthophoto's recorded units. Enter a name and **Save
-measurement** to keep it with the project. Reopen it with the **Saved** selector;
-source or frame changes mark its saved result stale.
-Open the DEM tab for an elevation profile. An orthophoto alone supplies no height
-surface, and a geographic or outdated frame cannot produce these linear measurements.
+With the orthophoto tab in front, use **Ruler** or **Area** in the ribbon's
+**Measure** group. Click vertices, press Enter to finish, Backspace to remove the
+last point, and Esc to clear (a second Esc leaves the tool). Shift-drag pans.
+Results use the orthophoto's recorded units; in a projected CRS they are ground
+lengths and areas, with the projection scale factor k divided out and shown. Type a name and choose **Save
+measurement** to keep it with the project. **Saved** in the ribbon lists saved
+measurements to reopen, rename or delete. Source or frame changes mark a saved
+result stale.
+Profile and Volume need elevations, so use them on a DEM tab. A geographic or
+outdated frame cannot produce these linear measurements.
 
 
 ## Imported reference rasters

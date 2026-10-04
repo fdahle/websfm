@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { buildCameraPriors, orientationPriorInSfm } from './cameraPriors.js'
+import { buildCameraPriors, orientationPriorInSfm, surveyFrameFor, gcpToSurveyFrame } from './cameraPriors.js'
+import { ensureProjection } from '../crs.js'
 
 const images = [{ id: 'image-1', uuid: 'uuid-1' }, { id: 'image-2', uuid: 'uuid-2' }]
 
@@ -37,8 +38,29 @@ describe('buildCameraPriors', () => {
     expect(priors[0].metricFrame).toBe('local-geographic')
     expect(priors[1].x - priors[0].x).toBeCloseTo(68.68, 1)
     expect(priors[1].y - priors[0].y).toBeCloseTo(111.27, 1)
-    expect(priors.map((prior) => prior.z)).toEqual([100, 103])
+    // Heights carry the curvature drop d²/(2R) about the frame centre (~0.3 mm here).
+    priors.forEach((prior, i) => expect(prior.z).toBeCloseTo([100, 103][i], 2))
     expect(priors[0]).toMatchObject({ accuracyX: 5, accuracyY: 6, accuracyZ: 10 })
+  })
+
+  it('moves projected poses and GCPs into one shared survey frame (σ_h / k)', async () => {
+    await ensureProjection('EPSG:3031')
+    const pts = [[1e5, -1e6, 200], [1.03e5, -1.002e6, 260]]
+    const frame = surveyFrameFor(pts, 'EPSG:3031')
+    expect(frame.k).toBeGreaterThan(0.97)
+    expect(frame.k).toBeLessThan(1)
+    const priors = buildCameraPriors(pts.map(([x, y, z], i) => ({
+      imageId: `image-${i + 1}`, x, y, z, accuracyX: 0.1, accuracyY: 0.1, accuracyZ: 0.2 })),
+    images, 'EPSG:3031', { surveyFrame: frame })
+    expect(priors[0].metricFrame).toBe('local-projected')
+    expect(priors[0].accuracyX).toBeCloseTo(0.1 / frame.k, 9)
+    expect(priors[0].accuracyZ).toBe(0.2)
+    const g = gcpToSurveyFrame({ x: pts[0][0], y: pts[0][1], z: pts[0][2], accuracyX: 0.1, accuracyY: 0.1, accuracyZ: 0.2 }, frame)
+    expect([g.x, g.y, g.z]).toEqual([priors[0].x, priors[0].y, priors[0].z])
+    // Ground baseline = grid baseline / k (to first order).
+    const ground = Math.hypot(priors[1].x - priors[0].x, priors[1].y - priors[0].y)
+    expect(ground).toBeCloseTo(Math.hypot(3e3, 2e3) / frame.k, 0)
+    expect(surveyFrameFor(pts, 'EPSG:4326')).toBeNull()
   })
 
   it('uses canonical metre altitude and accuracies for geographic EXIF poses', () => {

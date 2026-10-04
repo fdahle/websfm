@@ -17,7 +17,7 @@ export function makeProductsOps() {
   // resolves it). 'local' is derived from the scene; 'similarity' from a fit.
   function rebuildFrame(spec, cameras, points) {
     if (spec?.kind === 'similarity') {
-      return frameFromSimilarity({ scale: spec.scale, R: spec.R, t: spec.t }, spec.crs, spec)
+      return frameFromSimilarity({ scale: spec.scale, R: spec.R, t: spec.t, local: spec.local ?? null }, spec.crs, spec)
     }
     // 'scaled-local' = the local frame with a scale-bar factor (metric, no CRS).
     // The base descriptor's basis is unit-length; NEVER hand makeFrame scaled
@@ -128,7 +128,9 @@ export function makeProductsOps() {
     if (kind === 'mesh') {
       emit('progress', [0, 1, 'Rasterising mesh surface…'])
       const n = Math.floor(surface.pos.length / 3)
-      const framed = new Float32Array(surface.pos.length)
+      // Float64: these are absolute frame/CRS coordinates — at polar-stereographic
+      // magnitudes (~2.5e6 m) Float32 steps are 0.25 m and the surface snaps.
+      const framed = new Float64Array(surface.pos.length)
       for (let i = 0; i < n; i++) {
         const [x, y, z] = frame.fromSfm([surface.pos[i * 3], surface.pos[i * 3 + 1], surface.pos[i * 3 + 2]])
         framed[i * 3] = x; framed[i * 3 + 1] = y; framed[i * 3 + 2] = z

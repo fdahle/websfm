@@ -2,6 +2,7 @@ import { makeFrame, frameFromScaledLocal } from '../products/projection.js'
 import { frameFromSimilarity } from '../products/georef.js'
 import { applyHomography } from '../features/guidedTiles.js'
 import { pixelToWorld } from '../io/rasterSample.js'
+import { windowToNative } from '../io/rasterWindow.js'
 
 // Candidate controls use existing measured image tracks. The reference position
 // is estimated locally from a verified ortho feature, not a surveyed coordinate.
@@ -55,9 +56,7 @@ export function referenceGcpCandidates({ points, images, ortho, reference, match
     const referencePixel = [match.b[0] + mapped[0] - base[0], match.b[1] + mapped[1] - base[1]]
     if (!referencePixel.every(Number.isFinite) || referencePixel[0] < 0 || referencePixel[1] < 0
         || referencePixel[0] >= referenceLayout.width || referencePixel[1] >= referenceLayout.height) continue
-    const world = pixelToWorld(reference,
-      referenceLayout.col + (referencePixel[0] + 0.5) * referenceLayout.scaleX,
-      referenceLayout.row + (referencePixel[1] + 0.5) * referenceLayout.scaleY)
+    const world = pixelToWorld(reference, ...windowToNative(referenceLayout, referencePixel[0], referencePixel[1]))
     used.add(nearest.index)
     candidates.push({ pointIndex: nearest.index, x: world.x, y: world.y, z: null, observations,
       local: [nearest.u, nearest.v], reference: referencePixel, offsetPx: Math.sqrt(best) })

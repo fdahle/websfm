@@ -177,9 +177,12 @@ export function fundamentalToEssential(F, Ka, Kb) {
 
 // Recover camera B pose from essential matrix E via cheirality check.
 // ptsA/ptsB: array of { x, y } pixel coords (image A and B respectively).
-// Ka: intrinsics of camera A (for cheirality back-projection).
+// Ka / Kb: intrinsics of cameras A and B (Kb defaults to Ka). Each image's points
+// are normalised with ITS OWN K here and the kernel gets an identity K: the kernel
+// takes a single K, and back-projecting B's pixels with A's intrinsics mis-votes
+// the cheirality test on mixed-sensor or zoom pairs.
 // Returns { R: [[…]×3], t: [tx,ty,tz] } in normalised coords, or null.
-export async function recoverPose(ptsA, ptsB, E, Ka) {
+export async function recoverPose(ptsA, ptsB, E, Ka, Kb = Ka) {
   await ensureWasm()
   const n = Math.min(ptsA.length, ptsB.length)
   if (n < 5) return null
@@ -187,11 +190,11 @@ export async function recoverPose(ptsA, ptsB, E, Ka) {
   const flatA = new Float32Array(n * 2)
   const flatB = new Float32Array(n * 2)
   for (let i = 0; i < n; i++) {
-    flatA[i*2] = ptsA[i].x; flatA[i*2+1] = ptsA[i].y
-    flatB[i*2] = ptsB[i].x; flatB[i*2+1] = ptsB[i].y
+    flatA[i*2] = (ptsA[i].x - Ka.cx) / Ka.fx; flatA[i*2+1] = (ptsA[i].y - Ka.cy) / Ka.fy
+    flatB[i*2] = (ptsB[i].x - Kb.cx) / Kb.fx; flatB[i*2+1] = (ptsB[i].y - Kb.cy) / Kb.fy
   }
 
-  const raw = recover_pose(flatA, flatB, E, Ka.fx, Ka.fy, Ka.cx, Ka.cy)
+  const raw = recover_pose(flatA, flatB, E, 1, 1, 0, 0)
   if (!raw || raw.length < 12) return null
 
   return {

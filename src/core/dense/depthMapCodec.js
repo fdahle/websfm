@@ -80,7 +80,7 @@ export function serializeDepthMap(m) {
 }
 
 // Expected byte length of each plane at these dimensions.
-function planeBytes(width, height) {
+export function planeBytes(width, height) {
   const px = width * height
   return { depth: px * 4, cost: px * 4, nrm: px * 3 * 4, rgb: px * 3 }
 }

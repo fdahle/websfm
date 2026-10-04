@@ -30,6 +30,9 @@ const props = defineProps({
   // product. Absent/false ⇒ no banner.
   frameStatus: { type: Object, default: null },
 })
+// The canvas only reports readiness from its own load(); when it unmounts (the CRS
+// became unresolved) nothing would un-hide the preview, leaving a blank viewer.
+watch(() => !!gpuCapable.value, (capable) => { if (!capable) gpuReady.value = false })
 
 // One descriptor for both shapes. A computed product's grid is north-up with a
 // square cell, i.e. scaleX = gsd, scaleY = -gsd.
@@ -239,7 +242,12 @@ function zoomBy(factor) {
   const c = container.value
   if (c) applyZoom(factor, c.clientWidth / 2, c.clientHeight / 2)
 }
-defineExpose({ fit, zoomBy })
+// Measure group handles: the tool lives in RasterMeasurements; the Ribbon reads
+// `measureState` (via App's activeRasterTab) to render which tool is on.
+const measureState = computed(() => measurements.value?.state ?? null)
+function setMeasureTool(tool) { measurements.value?.setTool(tool) }
+function toggleSavedMeasurements() { measurements.value?.toggleSaved() }
+defineExpose({ fit, zoomBy, measureState, setMeasureTool, toggleSavedMeasurements })
 </script>
 
 <template>
@@ -251,7 +259,7 @@ defineExpose({ fit, zoomBy })
     <div
       ref="container"
       class="viewport"
-      :class="{ grabbing: dragging, checker: kind === 'ortho' }"
+      :class="{ grabbing: dragging, checker: kind === 'ortho', measuring: measurements?.active }"
       @wheel="onWheel"
       @mousedown="onMouseDown"
       @mousemove="onMouseMove"
@@ -379,6 +387,7 @@ defineExpose({ fit, zoomBy })
   cursor: grab;
 }
 .viewport.grabbing { cursor: grabbing; }
+.viewport.measuring:not(.grabbing) { cursor: crosshair; }
 .viewport.checker {
   background-image:
     linear-gradient(45deg, rgba(128,128,128,0.10) 25%, transparent 25%),

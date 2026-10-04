@@ -66,6 +66,16 @@ describe('cloudToLas (LAS 1.2 writer)', () => {
     expect(scaleX).toBeLessThan(1e-3)
   })
 
+  it('reads 8-bit colours stored in the 16-bit fields instead of turning them black', () => {
+    const las = cloudToLas(PTS, { crsCode: 4326, geographic: true })
+    const dv = new DataView(las.buffer)
+    const first = dv.getUint32(96, true), stride = dv.getUint16(105, true)
+    // Rewrite every record's RGB as plain 0–255 values, as many writers do.
+    PTS.forEach((p, i) => p.color.forEach((c, k) => dv.setUint16(first + i * stride + 20 + k * 2, c, true)))
+    const out = parseLas(las)
+    for (let i = 0; i < 3; i++) expect([out.col[i * 3], out.col[i * 3 + 1], out.col[i * 3 + 2]]).toEqual(PTS[i].color)
+  })
+
   it('accepts the flat dense shape', () => {
     const flat = {
       count: 2,

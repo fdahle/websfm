@@ -54,7 +54,7 @@ export async function selectInitPair(
     const matches = entry.matches // [[ia, ib], ...]
     const pa = matches.map(([ia]) => iA.keypoints[ia])
     const pb = matches.map(([, ib]) => iB.keypoints[ib])
-    const pose = await recoverPose(pa, pb, E, KA)
+    const pose = await recoverPose(pa, pb, E, KA, KB)
     if (!pose) return { ok: false, reason: 'pose recovery (essential decomposition) failed' }
 
     const cA = { R: I3, t: [0, 0, 0], K: KA }

@@ -4,7 +4,7 @@ import { useLog } from '../composables/useLog.js'
 import { ensureProjection, isGeographic, localMetricFrame, metresToCrsUnits, transform } from '../core/crs.js'
 import { confidenceToSigma, precisionFromGcp, reprojectGcpWithAccuracy } from '../core/gcpAccuracy.js'
 import { hasGcpElevation, normalizeGcpRole } from '../core/io/gcp.js'
-import { makeNameResolver } from '../core/io/nameMatch.js'
+import { makeNameResolver, relinkImageRecord } from '../core/io/nameMatch.js'
 import * as opfs from '../utils/opfs.js'
 import { registerProjectStore } from './projectStores.js'
 import { useImagesStore } from './useImagesStore.js'
@@ -97,10 +97,10 @@ export const useGcpsStore = registerProjectStore(defineStore('gcps', () => {
   function reconcileObservationImageIds() {
     let changed = false
     const resolve = resolveImageId.value
+    const byId = new Map(imagesStore.images.map((img) => [img.id, img]))
     for (const g of gcps.value) {
       for (const o of g.observations || []) {
-        const resolved = resolve(o.imageName)
-        if (resolved !== o.imageId) { o.imageId = resolved; changed = true }
+        if (relinkImageRecord(o, byId, resolve)) changed = true
       }
     }
     if (changed) save()
@@ -130,7 +130,10 @@ export const useGcpsStore = registerProjectStore(defineStore('gcps', () => {
       return 0
     }
     if (projects.currentProjectId !== projectId) return 0
-    importDefaults.value = {
+    // The CSV import dialog reopens on what was used last. Programmatic callers
+    // (reviewed reference-ortho candidates) pass rememberDefaults: false so their
+    // null accuracies don't overwrite the user's remembered survey settings.
+    if (accuracySettings.rememberDefaults !== false) importDefaults.value = {
       accuracies: { x: defaultAccuracies.x ?? null, y: defaultAccuracies.y ?? null, z: defaultAccuracies.z ?? null },
       imageAccuracies: imageDefaults,
       settings: { preset: accuracySettings.preset ?? 'custom', convention: accuracySettings.convention ?? '1sigma',
@@ -207,7 +210,8 @@ export const useGcpsStore = registerProjectStore(defineStore('gcps', () => {
           existing.correlationYZ = accuracy.correlationYZ ?? 0
           existing.accuracyStatus = hasAccuracy ? 'declared' : 'unknown'
         }
-        if (accuracySettings.verticalDatum) existing.verticalDatum = accuracySettings.verticalDatum
+        const datum = raw.verticalDatum ?? accuracySettings.verticalDatum
+        if (datum) existing.verticalDatum = datum
         for (const o of observations) {
           const dup = existing.observations.some(
             (e) => e.imageName === o.imageName && e.px === o.px && e.py === o.py,
@@ -227,7 +231,7 @@ export const useGcpsStore = registerProjectStore(defineStore('gcps', () => {
           accuracyStatus: hasAccuracy ? (hasExplicitAccuracy || accuracySettings.preset === 'custom'
             ? 'declared' : `preset:${accuracySettings.preset ?? 'custom'}`) : 'unknown',
           accuracyConvention: '1sigma',
-          verticalDatum: accuracySettings.verticalDatum ?? 'unknown',
+          verticalDatum: raw.verticalDatum ?? accuracySettings.verticalDatum ?? 'unknown',
           accuracyImgX: imageDefaults.x,
           accuracyImgY: imageDefaults.y,
           observations,

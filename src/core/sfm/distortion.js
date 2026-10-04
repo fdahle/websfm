@@ -61,20 +61,48 @@ export function distortNormalized(x, y, d = {}) {
   return [xd, yd]
 }
 
-// Inverse: distorted normalised (xd,yd) → ideal normalised [x,y] by fixed-point
-// iteration (the standard OpenCV scheme). Converges in a handful of steps for
-// lens-grade coefficients; strong fisheye is out of scope for this model.
-export function undistortNormalized(xd, yd, d = {}, iters = 8) {
+// Inverse: distorted normalised (xd,yd) → ideal normalised [x,y].
+//
+// Newton on the exact forward model, with backtracking, to a tolerance — not a
+// fixed count of fixed-point steps. The self-cal fold relies on this being the
+// exact inverse of BA's forward model, and the fixed-point scheme (OpenCV's
+// default 5–10 steps) stops short on strong barrel distortion: at the corner of a
+// 4000×3000 / f=3000 frame it was off by 0.46 px at k1=−0.18 and 3.4 px at −0.20,
+// errors the fold then baked into every keypoint. Newton converges quadratically
+// wherever the forward map is invertible; where it is not (past the radius at
+// which r·(1+k1r²+…) turns back) no inverse exists and the best point is returned.
+// `iters` caps the Newton steps (the common case converges in 2–4).
+export function undistortNormalized(xd, yd, d = {}, iters = 20) {
   const { k1 = 0, k2 = 0, k3 = 0, p1 = 0, p2 = 0 } = d || {}
+  const residual = (x, y) => {
+    const [fx, fy] = distortNormalized(x, y, d)
+    return [fx - xd, fy - yd]
+  }
   let x = xd, y = yd
-  for (let i = 0; i < iters; i++) {
+  let [ex, ey] = residual(x, y)
+  let err = ex * ex + ey * ey
+  for (let i = 0; i < iters && err > 1e-26; i++) {
     const r2 = x * x + y * y
     const radial = 1 + r2 * (k1 + r2 * (k2 + r2 * k3))
-    const xy = x * y
-    const dxT = 2 * p1 * xy + p2 * (r2 + 2 * x * x)
-    const dyT = p1 * (r2 + 2 * y * y) + 2 * p2 * xy
-    x = (xd - dxT) / radial
-    y = (yd - dyT) / radial
+    const g = k1 + r2 * (2 * k2 + 3 * k3 * r2) // d radial / d r²
+    const a = radial + 2 * x * x * g + 2 * p1 * y + 6 * p2 * x
+    const b = 2 * x * y * g + 2 * p1 * x + 2 * p2 * y
+    const c = b
+    const e = radial + 2 * y * y * g + 6 * p1 * y + 2 * p2 * x
+    const det = a * e - b * c
+    if (!(Math.abs(det) > 1e-15)) break
+    const sx = (e * ex - b * ey) / det
+    const sy = (a * ey - c * ex) / det
+    // Backtrack: never accept a step that increases the residual (keeps Newton
+    // from jumping across a fold of a strongly distorting model).
+    let t = 1, improved = false
+    for (let h = 0; h < 8; h++, t *= 0.5) {
+      const nx = x - t * sx, ny = y - t * sy
+      const [rx, ry] = residual(nx, ny)
+      const nerr = rx * rx + ry * ry
+      if (nerr < err) { x = nx; y = ny; ex = rx; ey = ry; err = nerr; improved = true; break }
+    }
+    if (!improved) break
   }
   return [x, y]
 }

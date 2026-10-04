@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { basename, makeNameResolver, stem } from './nameMatch.js'
+import { basename, makeNameResolver, stem, relinkImageRecord } from './nameMatch.js'
 
 describe('basename / stem', () => {
   it('handles both separators and missing extensions', () => {
@@ -70,5 +70,27 @@ describe('makeNameResolver', () => {
 
   it('tolerates a missing entry list', () => {
     expect(makeNameResolver(undefined)('x.jpg')).toBe(null)
+  })
+})
+
+describe('relinkImageRecord', () => {
+  const images = [{ id: 'a', name: 'north-01' }, { id: 'b', name: 'DSC_0013.JPG' }]
+  const byId = new Map(images.map((i) => [i.id, i]))
+  const resolve = makeNameResolver(images)
+
+  it('keeps a live link across a rename and adopts the new name', () => {
+    const rec = { imageId: 'a', imageName: 'DSC_0012.JPG' }
+    expect(relinkImageRecord(rec, byId, resolve)).toBe(true)
+    expect(rec).toEqual({ imageId: 'a', imageName: 'north-01' })
+    expect(relinkImageRecord(rec, byId, resolve)).toBe(false)
+  })
+
+  it('resolves by name when the record has no live link', () => {
+    const late = { imageId: null, imageName: 'dsc_0013.jpg' }
+    expect(relinkImageRecord(late, byId, resolve)).toBe(true)
+    expect(late.imageId).toBe('b')
+    const removed = { imageId: 'gone', imageName: 'nothing.jpg' }
+    expect(relinkImageRecord(removed, byId, resolve)).toBe(true)
+    expect(removed.imageId).toBeNull()
   })
 })

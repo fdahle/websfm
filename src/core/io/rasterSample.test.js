@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { sampleRaster, worldToPixel, pixelToWorld, rasterBounds } from './rasterSample.js'
+import { sampleRaster, worldToPixel, pixelToWorld, rasterBounds, edgeOriginFromTags } from './rasterSample.js'
 
 // A 4×3 north-up raster at origin (100, 200), 10-unit cells. Row 0 is the
 // NORTHERN edge, so scaleY is negative — the GeoTIFF convention.
@@ -105,5 +105,22 @@ describe('sampleRaster', () => {
 
   it('returns null for a missing descriptor', () => {
     expect(sampleRaster(null, 0, 0)).toBeNull()
+  })
+})
+
+describe('edgeOriginFromTags', () => {
+  const sx = 30, sy = -30
+  it('passes a PixelIsArea tiepoint at (0,0) through unchanged', () => {
+    expect(edgeOriginFromTags({ tiepoint: [0, 0, 0, 1000, 2000, 0], origin: [1000, 2000], scaleX: sx, scaleY: sy })).toEqual([1000, 2000])
+  })
+  it('moves a PixelIsPoint origin from the pixel centre to its top-left edge', () => {
+    expect(edgeOriginFromTags({ tiepoint: [0, 0, 0, 1015, 1985, 0], origin: [1015, 1985], scaleX: sx, scaleY: sy, rasterType: 2 }))
+      .toEqual([1000, 2000])
+  })
+  it('backs a tiepoint at raster (I, J) up to raster (0, 0)', () => {
+    expect(edgeOriginFromTags({ tiepoint: [10, 4, 0, 1300, 1880, 0], origin: [1300, 1880], scaleX: sx, scaleY: sy })).toEqual([1000, 2000])
+  })
+  it('shifts a ModelTransformation origin for PixelIsPoint too', () => {
+    expect(edgeOriginFromTags({ origin: [1015, 1985], scaleX: sx, scaleY: sy, rasterType: 2 })).toEqual([1000, 2000])
   })
 })

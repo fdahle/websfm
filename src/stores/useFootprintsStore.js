@@ -3,7 +3,7 @@ import { defineStore, storeToRefs } from 'pinia'
 import { useLog } from '../composables/useLog.js'
 import { ensureProjection, transform, isGeographic, localMetricFrame } from '../core/crs.js'
 import { projectFootprint } from '../core/footprint.js'
-import { makeNameResolver } from '../core/io/nameMatch.js'
+import { makeNameResolver, relinkImageRecord } from '../core/io/nameMatch.js'
 import { resolveK } from '../core/sfm/reconstruction.js'
 import * as opfs from '../utils/opfs.js'
 import { registerProjectStore } from './projectStores.js'
@@ -69,10 +69,10 @@ export const useFootprintsStore = registerProjectStore(defineStore('footprints',
   function resolveImageMatches() {
     let changed = false
     const resolve = resolveImageId.value
+    const byId = new Map(images.value.map((img) => [img.id, img]))
     for (const set of sets.value) {
       for (const fp of set.footprints) {
-        const id = resolve(fp.imageName)
-        if (id !== fp.imageId) { fp.imageId = id; changed = true }
+        if (relinkImageRecord(fp, byId, resolve)) changed = true
       }
     }
     if (changed) save()

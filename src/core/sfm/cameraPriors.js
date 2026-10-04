@@ -1,4 +1,5 @@
-import { isGeographic, localMetricFrame, transform } from '../crs.js'
+import { isGeographic, localMetricFrame, transform, metresPerCrsUnit } from '../crs.js'
+import { buildMetricFrame, gridToLocal } from '../products/localFrame.js'
 import { opkMatrix } from '../footprint.js'
 
 const mulM3 = (A, B) => A.map((row) => B[0].map((_, col) =>
@@ -51,7 +52,33 @@ export function orientationPriorInSfm(pose, fitRotation) {
 //
 // Imported OPK angles and their accuracies are retained so the SfM orchestrator
 // can turn them into orientation constraints after fitting the SfM↔prior frame.
-export function buildCameraPriors(poses, images, crs) {
+// The one Cartesian survey frame bundle adjustment sees for a PROJECTED CRS
+// (core/products/localFrame.js): grid scale factor divided out, curvature and the
+// height lift restored, about the centroid of `points` ([x,y,z] in the CRS). GCP
+// anchors and camera priors must share it — the joint pass maps both through one
+// fit. Null for a geographic/local CRS (geographic priors get their own AEQD-based
+// frame in buildCameraPriors; geographic GCPs never anchor).
+export function surveyFrameFor(points, crs) {
+  if (!crs || crs === 'local' || isGeographic(crs)) return null
+  const usable = points.filter((p) => Number.isFinite(p[0]) && Number.isFinite(p[1]))
+  if (!usable.length) return null
+  const e0 = usable.reduce((s, p) => s + p[0], 0) / usable.length
+  const n0 = usable.reduce((s, p) => s + p[1], 0) / usable.length
+  return buildMetricFrame((xy) => transform(xy, crs, 'EPSG:4326'), e0, n0,
+    { metresPerUnit: metresPerCrsUnit(crs) ?? 1 })
+}
+
+// A GCP (or any {x,y,z, accuracyX/Y/Z, correlation*}) moved into that frame.
+// J = diag(1/k, 1/k, 1): horizontal σ scale by 1/k, correlations are invariant.
+export function gcpToSurveyFrame(g, frame) {
+  if (!frame) return g
+  const [x, y, z] = gridToLocal([g.x, g.y, g.z ?? 0], frame)
+  return { ...g, x, y, z: g.z == null ? g.z : z,
+    accuracyX: Number.isFinite(g.accuracyX) ? g.accuracyX / frame.k : g.accuracyX,
+    accuracyY: Number.isFinite(g.accuracyY) ? g.accuracyY / frame.k : g.accuracyY }
+}
+
+export function buildCameraPriors(poses, images, crs, { surveyFrame = null } = {}) {
   const uuidByImageId = new Map(images.map((image) => [image.id, image.uuid]))
   const usable = poses
     .filter((pose) => pose.enabled !== false
@@ -59,7 +86,7 @@ export function buildCameraPriors(poses, images, crs) {
     .map((pose) => ({ pose, uuid: uuidByImageId.get(pose.imageId) }))
     .filter(({ uuid }) => uuid != null)
 
-  let metricPositions = null
+  let metricPositions = null, geographicFrame = null
   if (isGeographic(crs) && usable.length) {
     const wgs84 = usable.map(({ pose }) => transform([pose.x, pose.y], crs, 'EPSG:4326'))
     if (!wgs84.every(([lon, lat]) => Number.isFinite(lon) && Number.isFinite(lat))) return []
@@ -74,28 +101,36 @@ export function buildCameraPriors(poses, images, crs) {
     const lat0 = wgs84.reduce((sum, [, lat]) => sum + lat, 0) / wgs84.length
     const metric = localMetricFrame(lon0, lat0)
     metricPositions = wgs84.map((position) => transform(position, 'EPSG:4326', metric))
+    // AEQD has k ≈ 1 about its centre but is still a map: restore curvature and the
+    // height lift the same way a projected CRS does (localFrame.js).
+    geographicFrame = buildMetricFrame((xy) => transform(xy, metric, 'EPSG:4326'), 0, 0)
   }
 
   return usable.map(({ pose, uuid }, i) => {
-    const [x, y] = metricPositions?.[i] ?? [pose.x, pose.y]
+    const [gx, gy] = metricPositions?.[i] ?? [pose.x, pose.y]
     const geographic = metricPositions != null
+    const gz = geographic && Number.isFinite(pose.altitudeMeters) ? pose.altitudeMeters : pose.z
+    const frame = geographic ? geographicFrame : surveyFrame
+    const [x, y, z] = frame ? gridToLocal([gx, gy, gz], frame) : [gx, gy, gz]
+    const hScale = frame && !geographic ? 1 / frame.k : 1
+    const scaled = (v) => (Number.isFinite(v) ? v * hScale : v)
     return {
       uuid,
-      x, y, z: geographic && Number.isFinite(pose.altitudeMeters) ? pose.altitudeMeters : pose.z,
+      x, y, z,
       // EXIF poses retain canonical metre uncertainties. Prefer those in the
       // local metric frame; imported geographic-pose accuracies are documented
       // as physical metres and therefore pass through unchanged.
       accuracyX: geographic && Number.isFinite(pose.accuracyMetersX)
-        ? pose.accuracyMetersX : pose.accuracyX,
+        ? pose.accuracyMetersX : scaled(pose.accuracyX),
       accuracyY: geographic && Number.isFinite(pose.accuracyMetersY)
-        ? pose.accuracyMetersY : pose.accuracyY,
+        ? pose.accuracyMetersY : scaled(pose.accuracyY),
       accuracyZ: geographic && Number.isFinite(pose.accuracyMetersZ)
         ? pose.accuracyMetersZ : pose.accuracyZ,
       omega: pose.omega, phi: pose.phi, kappa: pose.kappa,
       accuracyOmega: pose.accuracyOmega, accuracyPhi: pose.accuracyPhi,
       accuracyKappa: pose.accuracyKappa,
       source: pose.source,
-      ...(geographic ? { metricFrame: 'local-geographic' } : {}),
+      ...(geographic ? { metricFrame: 'local-geographic' } : frame ? { metricFrame: 'local-projected' } : {}),
     }
   })
 }

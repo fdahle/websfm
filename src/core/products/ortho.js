@@ -152,19 +152,66 @@ export function orthorectify(grid, maps, toSfm, opts = {}, onProgress = () => {}
   return { width, height, rgba, covered, sampled, filled }
 }
 
+/**
+ * Every product frame's `toSfm` is affine (local / scaled-local / a georeference
+ * similarity), so the map-major loop — which revisits every cell once PER MAP —
+ * need not call it, and allocate an array, N_maps × N_cells times. Probe it about
+ * the grid's own centre (so survey-sized coordinates don't cost precision) and
+ * check the linearisation against the corners of the grid's 3D box. Returns
+ * `{ c0, P0, A }` (A row-major 3×3: P = P0 + A·(c − c0)) or null if `toSfm` is not
+ * affine to within 1e-9 of the box size, in which case the caller calls it directly.
+ */
+export function affineToSfm(toSfm, lo, hi) {
+  const c0 = [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2]
+  const P0 = toSfm(c0)
+  const A = new Float64Array(9)
+  for (let k = 0; k < 3; k++) {
+    const c = c0.slice(); c[k] += 1
+    const Pk = toSfm(c)
+    for (let r = 0; r < 3; r++) A[r * 3 + k] = Pk[r] - P0[r]
+  }
+  let size = 0, worst = 0
+  for (let corner = 0; corner < 8; corner++) {
+    const c = [corner & 1 ? hi[0] : lo[0], corner & 2 ? hi[1] : lo[1], corner & 4 ? hi[2] : lo[2]]
+    const P = toSfm(c), d = [c[0] - c0[0], c[1] - c0[1], c[2] - c0[2]]
+    for (let r = 0; r < 3; r++) {
+      const lin = P0[r] + A[r * 3] * d[0] + A[r * 3 + 1] * d[1] + A[r * 3 + 2] * d[2]
+      worst = Math.max(worst, Math.abs(lin - P[r]))
+      size = Math.max(size, Math.abs(P[r] - P0[r]))
+    }
+  }
+  return worst <= 1e-9 * Math.max(1, size) ? { c0, P0, A } : null
+}
+
 // Map-major counterpart: identical selection/weights, one decoded map resident.
 export async function orthorectifyStreamed(grid, metas, loadMap, toSfm, opts = {}, onProgress = () => {}) {
   const { width, height, gsd, originX, originY, data, mask } = grid
   const n = width * height, rgba = new Uint8ClampedArray(n * 4)
-  const average = opts.blend === 'average', scores = new Float64Array(n).fill(Infinity)
+  const average = opts.blend === 'average'
+  // Per-cell state is a real cost at MAX_GRID (16.8 M cells): allocate only what
+  // the chosen blend reads — 8 B/cell for 'best', 32 B/cell for 'average'.
+  const scores = average ? null : new Float64Array(n).fill(Infinity)
   const sums = average ? new Float64Array(n * 4) : null
   const { depthTolRel = 0.02, maxCost = Infinity } = opts
+  let zLo = Infinity, zHi = -Infinity
+  for (let i = 0; i < n; i++) if (mask[i]) { const z = data[i]; if (z < zLo) zLo = z; if (z > zHi) zHi = z }
+  const affine = zLo <= zHi ? affineToSfm(toSfm,
+    [originX, originY - height * gsd, zLo], [originX + width * gsd, originY, zHi]) : null
+  const P = [0, 0, 0]
   for (let mi = 0; mi < metas.length; mi++) {
     const m = await loadMap(mi)
     for (let row = 0; row < height; row++) for (let col = 0; col < width; col++) {
       const idx = row * width + col
       if (!mask[idx]) continue
-      const P = toSfm([originX + (col + 0.5) * gsd, originY - (row + 0.5) * gsd, data[idx]])
+      const x = originX + (col + 0.5) * gsd, y = originY - (row + 0.5) * gsd, z = data[idx]
+      if (affine) {
+        const { c0, P0, A } = affine, dx = x - c0[0], dy = y - c0[1], dz = z - c0[2]
+        P[0] = P0[0] + A[0] * dx + A[1] * dy + A[2] * dz
+        P[1] = P0[1] + A[3] * dx + A[4] * dy + A[5] * dz
+        P[2] = P0[2] + A[6] * dx + A[7] * dy + A[8] * dz
+      } else {
+        const q = toSfm([x, y, z]); P[0] = q[0]; P[1] = q[1]; P[2] = q[2]
+      }
       const p = projectInto(m, P)
       if (!p) continue
       const u = Math.round(p.u), v = Math.round(p.v)

@@ -16,7 +16,11 @@ interpreted consistently. For accurate distance and elevation work, a projected
 CRS suited to the site remains the best output coordinate system. Sparse
 reconstruction does not require one, however: camera positions in a geographic CRS
 are automatically converted to a survey-centred metric frame for adjustment while
-the selected project CRS remains unchanged.
+the selected project CRS remains unchanged. The same holds in a projected CRS: map
+grid coordinates are scaled by the projection's scale factor and ignore Earth
+curvature, so the fit, GCP anchoring and camera positions are all solved in a local
+metric frame around the site and converted back to the CRS. The log reports the
+scale factor k it divided out; near the poles this removes metres of error.
 
 ## Camera positions
 Imported or EXIF positions can fit the reconstruction when at least three registered
@@ -46,6 +50,12 @@ metric units but no real-world origin or CRS.
 Inspect GCP and camera residuals in the Quality Report. A low fitting residual is not
 proof of external accuracy when all control lies in one corner or one plane. Look for
 spatial patterns and compare withheld checkpoints where possible.
+
+## Reference raster alignment
+Imported GeoTIFFs are placed the way GDAL reads them, including point-registered
+(PixelIsPoint) files and tiepoints that are not at the first pixel. A raster imported
+before 3 October 2026 keeps the position it was imported with. If a point-registered
+DEM looks shifted by half a cell, remove it and import it again.
 
 ## Find candidate GCPs from a reference orthophoto
 Build an orthophoto, import a georeferenced reference raster, then open **Tools →

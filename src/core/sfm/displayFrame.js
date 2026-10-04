@@ -17,8 +17,8 @@
 // The two distortion bags compose in that order because the self-cal fold happened
 // *after* ingest removed the calibrated one, so undoing them runs newest-first.
 
-import { distortPixel, hasDistortion } from './distortion.js'
-import { canonicalToScan } from './fiducials.js'
+import { distortPixel, undistortPixel, hasDistortion, distortionOf } from './distortion.js'
+import { canonicalToScan, scanToCanonical } from './fiducials.js'
 
 // Apply both distortion bags: ideal pinhole pixel → the pixel the lens recorded.
 // `Kw` must be the K the coefficients were fitted against (working-res if the
@@ -70,4 +70,91 @@ export function makeSampleMap({
     if (srcScale !== 1) { x *= srcScale; y *= srcScale }
     return { x, y }
   }
+}
+
+// The reverse chain: a raw scan pixel (a GCP mark, anything the user clicked) →
+// the pinhole/canonical pixel the reconstructed cameras project into. Exactly the
+// steps ingest and the self-cal fold apply to keypoints, in order: scan→canonical
+// (film), remove the calibrated bag, remove the composed self-cal bag. Triangulating
+// raw marks against pinhole cameras instead is off by the whole lens distortion —
+// and on a film scan by the entire scan→canonical affine. Null ⇒ identity.
+export function makeScanToPinhole({ K, dist = null, selfCal = null, fiducial = null } = {}) {
+  const undoDist = !!K && hasDistortion(dist), undoSelf = !!K && hasDistortion(selfCal)
+  if (!undoDist && !undoSelf && !fiducial) return null
+  return (px, py) => {
+    let x = px, y = py
+    if (fiducial) { const c = scanToCanonical(x, y, fiducial.transform ?? fiducial.A, fiducial.frame); x = c.x; y = c.y }
+    if (undoDist) { const p = undistortPixel(x, y, K, dist); x = p.x; y = p.y }
+    if (undoSelf) { const p = undistortPixel(x, y, K, selfCal); x = p.x; y = p.y }
+    return { x, y }
+  }
+}
+
+// ONE join from the persisted run record to each image's frame model — the
+// calibrated bag of its sensor, the composed self-cal bag, the film transform.
+// Dense, exports, the GCP tools and the image overlays all need it, and copies
+// of this join had drifted (one normalised an all-zero self-cal bag, others
+// passed it raw). Returns image → { dist, selfCal, fiducial, filmMissing }.
+//   summary  — the sparse run summary ({ selfCalDistortion, fiducialTransforms })
+//   sensors  — the sensor list (plain or reactive)
+export function makeFrameModelResolver({ summary = null, sensors = [] } = {}) {
+  const sensorById = new Map((sensors || []).map((s) => [s.id, s]))
+  const selfCalBySensor = new Map((summary?.selfCalDistortion ?? []).map((d) => [d.sensorId, d]))
+  const fidByUuid = new Map((summary?.fiducialTransforms ?? []).map((t) =>
+    [t.uuid, { A: t.A ?? null, transform: t.transform ?? null, frame: t.frame }]))
+  return (image) => {
+    const sensor = image?.sensorId != null ? sensorById.get(image.sensorId) : null
+    const sc = image?.sensorId != null ? selfCalBySensor.get(image.sensorId) : null
+    const selfCal = sc && (sc.k1 || sc.k2 || sc.k3) ? { k1: sc.k1 || 0, k2: sc.k2 || 0, k3: sc.k3 || 0 } : null
+    const fiducial = image?.uuid != null ? fidByUuid.get(image.uuid) ?? null : null
+    return { dist: sensor ? distortionOf(sensor) : null, selfCal, fiducial,
+      filmMissing: sensor?.kind === 'film' && !fiducial }
+  }
+}
+
+// GCP / marker observations → the cameras' pinhole frame, for triangulation.
+// `gcps` keep their identity fields; only observations whose image is registered
+// and needs a correction are copied with mapped px/py (store state is never
+// mutated — the marks themselves stay in scan pixels, where they were clicked).
+//   imagesById    Map<imageId, image>       sparseCameras  Map<uuid, { K }>
+//   frameModel    image → { dist, selfCal, fiducial } (makeFrameModelResolver)
+export function gcpsInPinholeFrame(gcps, { imagesById, sparseCameras, frameModel }) {
+  if (!frameModel) return gcps
+  const maps = new Map()
+  const mapperFor = (imageId) => {
+    if (maps.has(imageId)) return maps.get(imageId)
+    const im = imagesById.get(imageId), cam = im ? sparseCameras.get(im.uuid) : null
+    const m = cam?.K ? makeScanToPinhole({ K: cam.K, ...frameModel(im) }) : null
+    maps.set(imageId, m)
+    return m
+  }
+  return (gcps || []).map((g) => {
+    let changed = false
+    const observations = (g.observations || []).map((o) => {
+      const m = o.px != null && o.py != null ? mapperFor(o.imageId) : null
+      if (!m) return o
+      changed = true
+      const p = m(o.px, o.py)
+      return { ...o, px: p.x, py: p.y }
+    })
+    return changed ? { ...g, observations } : g
+  })
+}
+
+// A guide computed in the pinhole frame → the scan pixels the viewer draws on.
+// A point maps exactly. An epipolar line is a line only in the pinhole frame: it
+// is re-fitted through two of its points either side of the principal point, mapped
+// to the scan (exact for a film affine, a chord of the true curve under lens
+// distortion — the same approximation the guide already documents).
+export function guideToScan(guide, toScan, K) {
+  if (!guide || !toScan) return guide
+  if (guide.kind === 'point') { const p = toScan(guide.u, guide.v); return { ...guide, u: p.x, v: p.y } }
+  if (guide.kind !== 'line' || !guide.line || !K) return guide
+  const [a, b, c] = guide.line
+  const off = a * K.cx + b * K.cy + c
+  const fx = K.cx - off * a, fy = K.cy - off * b, D = Math.max(K.cx, K.cy, 1)
+  const p = toScan(fx - D * b, fy + D * a), q = toScan(fx + D * b, fy - D * a)
+  const la = q.y - p.y, lb = p.x - q.x, n = Math.hypot(la, lb)
+  if (!(n > 1e-12)) return null
+  return { ...guide, line: [la / n, lb / n, -(la * p.x + lb * p.y) / n] }
 }

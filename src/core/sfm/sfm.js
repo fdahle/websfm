@@ -20,7 +20,7 @@ import {
   resolveK, fundamentalToEssential,
   recoverPose, triangulateDlt, solvePnp, bundleAdjust,
 } from './reconstruction.js'
-import { projectPoint, medianTriangulationAngle, triangulationAngle, cameraCenter } from './geometry.js'
+import { projectPoint, medianTriangulationAngle, triangulationAngle } from './geometry.js'
 import { undistortPixel, distortionOf } from './distortion.js'
 import { fitFundamental, sampsonRmsPx } from './fundamental.js'
 import { fitFiducialAffine, canonicalFrame, scanToCanonical } from './fiducials.js'
@@ -34,9 +34,6 @@ import {
 } from './tracks.js'
 import { selectInitPair } from './initPair.js'
 import { registerImages } from './register.js'
-import { triangulateGcp } from './gcpTriangulation.js'
-import { precisionFromGcp, precisionInSfmFrame } from '../gcpAccuracy.js'
-import { isGroundControl } from '../io/gcp.js'
 import {
   stagedSelfCalTerms, stagedSelfCalDeferred, SELF_CAL_BASE_TERMS,
   distortionIdentifiable, withoutDistortionTerms,
@@ -44,8 +41,7 @@ import {
 import { fitComposedRadial, radialCurveOk } from './selfCalCompose.js'
 import { validateSelfCalUpdate } from './selfCalGuard.js'
 import { adaptiveReprojThreshold, CLEANUP_THRESHOLD_DEFAULTS } from './cleanupThreshold.js'
-import { fitSimilarity, frameFromSimilarity } from '../products/georef.js'
-import { orientationPriorInSfm } from './cameraPriors.js'
+import { buildCameraPriorConstraints as buildSurveyPriorConstraints, qualifyingGcps, buildGcpAnchors } from './surveyConstraints.js'
 import { graphHealth } from '../eval/matchGraph.js'
 import { RECONSTRUCT_DEFAULTS } from '../defaults.user.js'
 import { SFM_TUNING } from '../tuning.js'
@@ -343,7 +339,20 @@ async function reconstructSingleModel(input, hooks = {}) {
         const pitches = entries.map((e) => e.fit.pitchMm).sort((a, b) => a - b)
         const pitchMm = pitches[Math.floor(pitches.length / 2)] // median: one frame doesn't chase a single scan
         const fiducials = entries[0].calibration
-        const frame = canonicalFrame(fiducials, pitchMm)
+        // Orientation of scan→mm: a y-up certificate against y-down scan rows is a
+        // reflection (det < 0). The canonical frame must undo it or the whole model
+        // comes out mirrored (see canonicalFrame). Majority vote over the batch.
+        const reflected = entries.filter(({ fit }) => {
+          const h = fit.forward ?? null, A = fit.A ?? null
+          const det = h ? h[0] * h[4] - h[1] * h[3] : A ? A[0] * A[4] - A[1] * A[3] : NaN
+          return det < 0
+        }).length
+        const yUp = reflected * 2 > entries.length
+        if (yUp) {
+          log(`sensor ${sid} — fiducial coordinates are y-up against y-down scan rows; `
+            + 'the canonical frame flips y so the camera stays proper (not mirrored)', 'info', 'Reconstruction')
+        }
+        const frame = canonicalFrame(fiducials, pitchMm, { yUp })
         if (!frame) {
           log(`sensor ${sid} — could not build canonical frame (need ≥3 marks); `
             + `film images fall back to standard intrinsics`, 'warn', 'Reconstruction')
@@ -439,6 +448,21 @@ async function reconstructSingleModel(input, hooks = {}) {
     // Remove Brown–Conrady lens distortion once, up front, so every downstream
     // step (init, PnP, triangulation, BA) is pure pinhole. Keypoint indices are
     // preserved (matches reference them), only positions move.
+    // GCP marks meet the same cameras as the keypoints, so they must live in the
+    // same frame: whatever moves an image's keypoints (calibrated undistortion
+    // here, the self-cal fold later) moves that image's marks too. Otherwise the
+    // anchored BA pulls the model toward raw-lens marks at σ≈1 px.
+    const gcpObsByUuid = new Map()
+    for (const g of gcps) {
+      for (const o of g.observations || []) {
+        if (o.uuid == null || !Number.isFinite(o.px) || !Number.isFinite(o.py)) continue
+        if (!gcpObsByUuid.has(o.uuid)) gcpObsByUuid.set(o.uuid, [])
+        gcpObsByUuid.get(o.uuid).push(o)
+      }
+    }
+    const moveGcpObs = (uuid, map) => {
+      for (const o of gcpObsByUuid.get(uuid) || []) { const u = map(o.px, o.py); o.px = u.x; o.py = u.y }
+    }
     let undistortedImgs = 0
     let anyCalibratedDistortion = false
     const undistortedUuids = new Set()
@@ -454,6 +478,7 @@ async function reconstructSingleModel(input, hooks = {}) {
         shiftSum += d; if (d > shiftMax) shiftMax = d; shiftN++
         return { ...kp, x: u.x, y: u.y }
       })
+      moveGcpObs(img.uuid, (x, y) => undistortPixel(x, y, K, dist))
       undistortedImgs++
       undistortedUuids.add(img.uuid)
     }
@@ -553,7 +578,7 @@ async function reconstructSingleModel(input, hooks = {}) {
         const pose = await recoverPose(
           e.matches.map(([ia]) => iA.keypoints[ia]),
           e.matches.map(([, ib]) => iB.keypoints[ib]),
-          E, Kmap.get(e.idA),
+          E, Kmap.get(e.idA), Kmap.get(e.idB),
         )
         return pose ? pose.R : null
       }
@@ -809,6 +834,7 @@ async function reconstructSingleModel(input, hooks = {}) {
     // *before* registerImages: the interim BA self-calibrates f,k1 mid-registration
     // (D3), so runBundleAdjust's fold reads these during the registration call.
     const pristineKpByUuid = new Map()      // uuid → keypoints snapshot (pre-fold)
+    const foldedTermsBySensor = new Map()   // sensorInt → { k2, k3 } ever folded into its keypoints
     const selfCalDistBySensor = new Map()   // sensorId → { k1, k2, k3, fitRmsPx }
 
     // ── Incremental registration ───────────────────────────────────────────
@@ -1007,7 +1033,11 @@ async function reconstructSingleModel(input, hooks = {}) {
           if (rk && (rk.k1 || rk.k2 || rk.k3)) groupCal.set(g, rk)
         })
         if (groupCal.size) {
-          const active = { k2: refineMode.includes('k2'), k3: refineMode.includes('k3') }
+          // Terms already baked into the keypoints by an EARLIER pass stay in the
+          // composed bag even when this pass refines fewer (the staged schedule and
+          // the identifiability guard can drop k2/k3 later): fitting only the current
+          // pass's terms would silently erase them from what dense reproduces.
+          const passTerms = { k2: refineMode.includes('k2'), k3: refineMode.includes('k3') }
           // Group the images so the composed fit can pool all keypoints of a sensor.
           const groupImgs = new Map() // sensorInt → [img,…]
           for (const img of imgs) {
@@ -1035,6 +1065,7 @@ async function reconstructSingleModel(input, hooks = {}) {
                 foldedShift += Math.hypot(u.x - kp.x, u.y - kp.y); foldedN++
                 return { ...kp, x: u.x, y: u.y }
               })
+              moveGcpObs(img.uuid, (x, y) => undistortPixel(x, y, rk, bag))
               const k = Kmap.get(img.uuid)
               if (k) Kmap.set(img.uuid,
                 { ...k, fx: rk.fx, fy: rk.fy, cx: rk.cx, cy: rk.cy, k1: 0, k2: 0, k3: 0, p1: 0, p2: 0 })
@@ -1050,6 +1081,9 @@ async function reconstructSingleModel(input, hooks = {}) {
                 if (!p) continue
                 for (let i = 0; i < img.keypoints.length; i++) { pris.push(p[i]); fold.push(img.keypoints[i]) }
               }
+              const ever = foldedTermsBySensor.get(g) ?? { k2: false, k3: false }
+              const active = { k2: ever.k2 || (passTerms.k2 && !!rk.k2), k3: ever.k3 || (passTerms.k3 && !!rk.k3) }
+              foldedTermsBySensor.set(g, active)
               const composed = fitComposedRadial(pris, fold, rk, active)
               // Guard: sample the composed radial map to the image corner; a non-monotonic
               // curve or a runaway corner shift means the higher-order fit overfit. Warn
@@ -1099,34 +1133,10 @@ async function reconstructSingleModel(input, hooks = {}) {
     // Convert project-CRS camera poses into targets in the current arbitrary SfM
     // frame. The best-fit position similarity removes the global gauge; imported
     // orientations are then composed through its rotation into the same frame.
-    function buildCameraPriorConstraints(uuidList, reference = null) {
-      const camIdxOf = new Map(uuidList.map((uuid, i) => [uuid, i]))
-      const usable = cameraPriors.filter((p) => camIdxOf.has(p.uuid)
-        && Number.isFinite(p.x) && Number.isFinite(p.y) && Number.isFinite(p.z))
-      if (usable.length < (reference ? 1 : cfg.cameraPriorBaMinCameras)) return null
-      const pairs = usable.map((p) => {
-        const sigma = [p.accuracyX, p.accuracyY, p.accuracyZ]
-          .map((v) => Number.isFinite(v) && v > 0 ? v : 5)
-        return {
-          src: cameraCenter(cameras.get(p.uuid)), dst: [p.x, p.y, p.z],
-          weight: 3 / sigma.reduce((sum, v) => sum + v * v, 0),
-        }
-      })
-      const fit = reference?.fit ?? fitSimilarity(pairs)
-      if (!fit) return null
-      const frame = reference?.frame ?? frameFromSimilarity(fit, 'camera-prior')
-      const priors = usable.map((p) => {
-        const sigma = [p.accuracyX, p.accuracyY, p.accuracyZ]
-          .map((v) => Number.isFinite(v) && v > 0 ? v : 5)
-        return {
-          camIdx: camIdxOf.get(p.uuid), target: frame.toSfm([p.x, p.y, p.z]),
-          // sigma_sfm = sigma_project / scale, hence inverse variance scales by s².
-          weights: sigma.map((v) => fit.scale * fit.scale / (v * v)),
-          ...(orientationPriorInSfm(p, fit.R) ?? {}),
-        }
-      })
-      return { fit, priors }
-    }
+    // Constraint construction lives in surveyConstraints.js (shared with gradual
+    // selection, so a refinement can never drop what this solve was held to).
+    const buildCameraPriorConstraints = (uuidList, reference = null) => buildSurveyPriorConstraints({
+      cameras, cameraPriors, uuidList, minCameras: cfg.cameraPriorBaMinCameras, reference })
 
     const cameraPriorReprojectionAccepts = (result) => {
       const allowance = Math.max(cfg.cameraPriorMaxReprojIncreasePx,
@@ -1191,15 +1201,7 @@ async function reconstructSingleModel(input, hooks = {}) {
     // cameras this leaves in the sparse cloud, so this step only needs to be
     // "good enough to help the poses converge", not final.
     async function runGcpAnchoredBundleAdjust() {
-      const qualifying = gcps.filter((g) => {
-        // One spelling of the ground-control rule (core/io/gcp.js): role
-        // 'control' explicitly, so a marker — a scale-bar endpoint with image
-        // marks and no surveyed position — can never anchor a point, whatever
-        // coordinates happen to be on it.
-        if (!isGroundControl(g, { precision: precisionFromGcp })) return false
-        const nReg = (g.observations || []).filter((o) => cameras.has(o.uuid)).length
-        return nReg >= 2
-      })
+      const qualifying = qualifyingGcps(gcps, cameras)
       if (qualifying.length < 3) {
         if (gcps.length) {
           log(`GCP anchoring skipped (${qualifying.length}/3 GCPs `
@@ -1208,47 +1210,18 @@ async function reconstructSingleModel(input, hooks = {}) {
         return
       }
 
-      async function triangulateQualifying() {
-        const out = []
-        for (const g of qualifying) {
-          const obsWithCam = (g.observations || []).filter((o) => cameras.has(o.uuid))
-          const tri = await triangulateGcp(
-            obsWithCam.map((o) => ({ imageId: o.uuid, px: o.px, py: o.py,
-              accuracyX: o.accuracyX, accuracyY: o.accuracyY })),
-            cameras,
-          )
-          out.push({ g, tri, obsWithCam })
-        }
-        return out
-      }
-
       for (let round = 0; round < 2; round++) {
-        const tri = await triangulateQualifying()
-        const pairs = tri.filter((r) => r.tri)
-          .map((r) => {
-            return {
-              src: [r.tri.x, r.tri.y, r.tri.z], dst: [r.g.x, r.g.y, r.g.z],
-              weight: 3 / (r.g.accuracyX ** 2 + r.g.accuracyY ** 2 + r.g.accuracyZ ** 2),
-              precision: precisionFromGcp(r.g),
-            }
-          })
-        if (pairs.length < 3) {
-          log('GCP anchoring stopped (fewer than 3 GCPs triangulated)', 'warn', 'Reconstruction')
-          return
-        }
-        const fit = fitSimilarity(pairs)
-        if (!fit) {
-          log('GCP anchoring stopped (similarity fit failed — degenerate configuration)',
-            'warn', 'Reconstruction')
-          return
-        }
-        const frame = frameFromSimilarity(fit, 'gcp')
-
         const uuidList = [...cameras.keys()]
         const camList = uuidList.map((u) => cameras.get(u))
         const kList = camList.map((c) => c.K)
         const sensorOfCam = uuidList.map((u) => sensorIntByUuid.get(u) ?? -1)
         const camIdxOf = new Map(uuidList.map((u, i) => [u, i]))
+        const setup = await buildGcpAnchors({ cameras, qualifying, camIdxOf, firstPointIndex: points3d.length })
+        if (setup.error) {
+          log(`GCP anchoring stopped (${setup.error})`, 'warn', 'Reconstruction')
+          return
+        }
+        const { fit, frame, anchorPts, anchors } = setup
         // GCPs define the one project↔SfM similarity for all survey constraints
         // in this joint pass, keeping point and camera targets in the same gauge.
         const constrainedCameras = buildCameraPriorConstraints(uuidList, { fit, frame })
@@ -1263,28 +1236,7 @@ async function reconstructSingleModel(input, hooks = {}) {
             if (kp) observations.push({ camIdx: ci, ptIdx: pi, x: kp.x, y: kp.y })
           })
         })
-
-        // Anchor points are injected as extra 3D points (their own index space,
-        // appended after the normal SIFT points) with normal reprojection
-        // observations of their own PLUS the one anchor residual pulling them
-        // toward the GCP-implied SfM-frame position.
-        const anchorPts = []
-        const anchors = []
-        tri.forEach(({ g, tri: t, obsWithCam }) => {
-          if (!t) return
-          const pi = points3d.length + anchorPts.length
-          anchorPts.push({ x: t.x, y: t.y, z: t.z })
-          const target = frame.toSfm([g.x, g.y, g.z])
-          const precision = precisionInSfmFrame(g, fit)
-          if (!precision) return
-          anchors.push({ ptIdx: pi, target, precision })
-          for (const o of obsWithCam) {
-            const ci = camIdxOf.get(o.uuid)
-            if (ci != null) observations.push({ camIdx: ci, ptIdx: pi, x: o.px, y: o.py,
-              weightX: 1 / ((o.accuracyX ?? 1) ** 2), weightY: 1 / ((o.accuracyY ?? 1) ** 2) })
-          }
-        })
-        if (!anchors.length) return
+        observations.push(...setup.observations)
 
         log(`GCP-anchored bundle adjustment (round ${round + 1}/2) — `
           + `${anchors.length} GCP(s), seed scale ${fit.scale.toPrecision(4)}, `
@@ -1528,7 +1480,7 @@ async function reconstructSingleModel(input, hooks = {}) {
           const fit = fitFundamental(ptsA, ptsB)
           if (!fit) return null
           const Emat = fundamentalToEssential(fit.F, Kmap.get(e.idA), Kmap.get(e.idB))
-          const pose = await recoverPose(ptsA, ptsB, Emat, Kmap.get(e.idA))
+          const pose = await recoverPose(ptsA, ptsB, Emat, Kmap.get(e.idA), Kmap.get(e.idB))
           return pose ? { R: pose.R, F: fit.F } : null
         }
         const activeEdges = []

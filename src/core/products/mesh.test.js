@@ -7,6 +7,7 @@ import {
   subsampleForMesh,
   recommendMeshDepth,
 } from './mesh.js'
+import { MESH_TUNING } from '../tuning.js'
 
 // Encode a mesh into the wasm wire format (mirror of crates/mesh encode_mesh) so the
 // parser can be round-tripped without the actual wasm.
@@ -156,6 +157,18 @@ describe('generateMesh', () => {
     const poissonFn = (p) => { sawPoints = p.length / 3; return new Uint8Array(8) }
     generateMesh(d, poissonFn, { depth: 1, mergeCell: 0.001, colorize: false }, () => {})
     expect(sawPoints).toBe(2)
+  })
+
+  it('scales the trim radius with the subsampled input spacing, not the dense GSD', () => {
+    // Same clustered cloud: input cell 5 ≫ mergeCell 0.001. Trimming at 6×0.001
+    // against samples 5 apart would delete nearly every vertex of the surface.
+    const pos = Float32Array.from([0, 0, 0, 0.01, 0, 0, 0, 0.01, 0, 0.01, 0.01, 0, 10, 0, 0])
+    const nrm = Float32Array.from([0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1])
+    let trim = -1
+    const poissonFn = (_p, _n, _d, _s, t) => { trim = t; return new Uint8Array(8) }
+    generateMesh({ count: 5, pos, nrm, col: null }, poissonFn,
+      { depth: 1, mergeCell: 0.001, trimFactor: 6, fillHoles: false, colorize: false }, () => {})
+    expect(trim).toBeCloseTo(6 * meshInputCell(pos, 1, MESH_TUNING.inputLeafCellsPerPoint), 9)
   })
 })
 

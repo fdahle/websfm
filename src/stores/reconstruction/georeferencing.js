@@ -1,9 +1,11 @@
 import { computed, watch } from 'vue'
-import { fitSimilarity, applySimilarity } from '../../core/products/georef.js'
+import { fitGeoreference, applySimilarity } from '../../core/products/georef.js'
+import { buildMetricFrame } from '../../core/products/localFrame.js'
 import { cameraCenter } from '../../core/sfm/geometry.js'
 import { triangulateAllGcps } from '../../core/sfm/gcpTriangulation.js'
 import { gcpGuidesForImage, gcpEstimateForImage } from '../../core/sfm/gcpGuides.js'
-import { isGeographic } from '../../core/crs.js'
+import { gcpsInPinholeFrame, guideToScan, makeCanonicalToScan } from '../../core/sfm/displayFrame.js'
+import { isGeographic, ensureProjection, transform, metresPerCrsUnit } from '../../core/crs.js'
 import { normalizedGroundResidual, precisionFromGcp } from '../../core/gcpAccuracy.js'
 import { isGroundControl } from '../../core/io/gcp.js'
 
@@ -43,7 +45,36 @@ const inverseVariance3d = (p) => {
 export function createGeoreferencing({
   sparseCameras, images, georef, healthDirty, poses, gcps, currentCrs, persist, log,
   modelStamp = () => null,
+  // image → { dist, selfCal, fiducial } from the run record (displayFrame.js). Marks
+  // are clicked on the raw scan; the cameras project into the pinhole/canonical
+  // frame, so every triangulation here maps them first. Null ⇒ identity.
+  frameModel = () => null,
 }) {
+  const inPinhole = (list) => gcpsInPinholeFrame(list, {
+    imagesById: imagesById(), sparseCameras: sparseCameras.value, frameModel: frameModel() })
+  // The Cartesian frame the similarity is fitted in (core/products/localFrame.js):
+  // the project grid with its point scale factor divided out and Earth curvature
+  // restored about the targets' centroid. Null for no CRS / a geographic CRS, where
+  // the fit stays exactly as before.
+  async function metricFrameFor(dsts) {
+    const crs = currentCrs()
+    if (!crs || crs === 'local' || !dsts.length) return null
+    try {
+      await ensureProjection(crs)
+      if (isGeographic(crs)) return null
+    } catch { return null }
+    let e0 = 0, n0 = 0
+    for (const d of dsts) { e0 += d[0]; n0 += d[1] }
+    e0 /= dsts.length; n0 /= dsts.length
+    return buildMetricFrame((xy) => transform(xy, crs, 'EPSG:4326'), e0, n0,
+      { metresPerUnit: metresPerCrsUnit(crs) ?? 1 })
+  }
+
+  const toScanFor = (imageId) => {
+    const resolve = frameModel(), im = imagesById().get(imageId)
+    const cam = im ? sparseCameras.value.get(im.uuid) : null
+    return resolve && cam ? { toScan: makeCanonicalToScan({ K: cam.K, ...resolve(im) }), K: cam.K } : null
+  }
 
   const evidenceKey = computed(() => {
     // Camera buffers are markRaw; healthDirty signals in-place model edits.
@@ -107,7 +138,7 @@ export function createGeoreferencing({
   async function gcpGeorefPairs() {
     const qualifying = qualifyingGcps()
     if (!qualifying.length) return []
-    const results = await triangulateAllGcps(qualifying, sparseCameras.value, imagesById())
+    const results = await triangulateAllGcps(inPinhole(qualifying), sparseCameras.value, imagesById())
     return results
       .filter(({ tri }) => tri != null)
       .map(({ gcp, tri }) => ({
@@ -166,7 +197,9 @@ export function createGeoreferencing({
           'warn', 'Products')
       }
     }
-    const fit = fitSimilarity(pairs)
+    const local = await metricFrameFor(pairs.map((p) => p.dst))
+    if (evidenceKey.value !== evidenceAtStart) return null
+    const fit = fitGeoreference(pairs, local)
     if (!fit) {
       clearFit()
       log('Georeference: fit failed (degenerate configuration)', 'warn', 'Products')
@@ -174,11 +207,13 @@ export function createGeoreferencing({
     }
     georef.value = {
       evidenceKey: evidenceAtStart,
-      sim: { scale: fit.scale, R: fit.R, t: fit.t },
+      sim: { scale: fit.scale, R: fit.R, t: fit.t, ...(local ? { local } : {}) },
       crs: currentCrs(), rms: fit.rms, count: fit.count, method: usingGcps ? 'gcps' : 'poses',
     }
     log(`Georeference: ${fit.count} ${usingGcps ? 'GCPs' : 'poses'} → ${currentCrs()}, `
-      + `scale ${fit.scale.toPrecision(4)}, RMS ${fit.rms.toPrecision(3)}`, 'success', 'Products')
+      + `scale ${fit.scale.toPrecision(4)}, RMS ${fit.rms.toPrecision(3)}`
+      + (local ? ` (fitted in a local metric frame: grid scale factor k=${local.k.toFixed(6)}, `
+        + `curvature restored; ground units)` : ''), 'success', 'Products')
     healthDirty.value++   // GCP prune / refit → the hub overview must recompute
     persist()
     return georef.value
@@ -224,7 +259,7 @@ export function createGeoreferencing({
     const sim = validGeoref.value?.sim
     const enabled = gcps().filter((g) => g.enabled !== false)
     if (!enabled.length) return []
-    const results = await triangulateAllGcps(enabled, sparseCameras.value, imagesById())
+    const results = await triangulateAllGcps(inPinhole(enabled), sparseCameras.value, imagesById())
     const rows = results.map(({ gcp, tri }) => {
       if (!tri) {
         return { gcpId: gcp.id, name: gcp.name, role: gcp.role ?? 'control', viewCount: 0,
@@ -257,11 +292,12 @@ export function createGeoreferencing({
     // best validation: fit without one control and predict that withheld point.
     const controls = results.filter(({ gcp, tri }) => tri && groundControl(gcp))
     if (controls.length >= 4) {
+      const local = sim?.local ?? await metricFrameFor(controls.map(({ gcp }) => [gcp.x, gcp.y, gcp.z]))
       for (const withheld of controls) {
-        const fit = fitSimilarity(controls.filter((r) => r !== withheld).map(({ gcp, tri }) => ({
+        const fit = fitGeoreference(controls.filter((r) => r !== withheld).map(({ gcp, tri }) => ({
           src: [tri.x, tri.y, tri.z], dst: [gcp.x, gcp.y, gcp.z],
           weight: inverseVariance3d(gcp), precision: precisionFromGcp(gcp),
-        })))
+        })), local)
         if (!fit) continue
         const predicted = applySimilarity(fit, [withheld.tri.x, withheld.tri.y, withheld.tri.z])
         const residual = predicted.map((v, i) => v - [withheld.gcp.x, withheld.gcp.y, withheld.gcp.z][i])
@@ -290,7 +326,9 @@ export function createGeoreferencing({
   // App.vue's `logGcpMark` does that, comparing the click against this guide.
   async function gcpGuides(imageId) {
     if (imageId == null || !gcps().length) return []
-    return gcpGuidesForImage(gcps(), imageId, sparseCameras.value, imagesById())
+    const guides = await gcpGuidesForImage(inPinhole(gcps()), imageId, sparseCameras.value, imagesById())
+    const frame = toScanFor(imageId)
+    return frame?.toScan ? guides.map((g) => guideToScan(g, frame.toScan, frame.K)).filter(Boolean) : guides
   }
 
   // Where the model thinks `gcpId` is, projected into `imageId`, from *all* its
@@ -307,7 +345,12 @@ export function createGeoreferencing({
       const cam = sparseCameras.value.get(byId.get(o.imageId)?.uuid)
       if (cam) camerasByImageId.set(o.imageId, cam)
     }
-    return gcpEstimateForImage(gcp.observations, targetCam, camerasByImageId)
+    const [mapped] = inPinhole([gcp])
+    const est = await gcpEstimateForImage(mapped.observations, targetCam, camerasByImageId)
+    const frame = est && toScanFor(imageId)
+    if (!frame?.toScan) return est
+    const p = frame.toScan(est.u, est.v)
+    return { ...est, u: p.x, v: p.y }
   }
 
   return { validGeoref, evidenceKey,

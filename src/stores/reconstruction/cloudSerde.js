@@ -266,9 +266,19 @@ export function serializeCloud(c) {
     attributeFields: fields, buffers: { ...data.buffers, attributes: buffer } }
 }
 
+// Attributes (intensity, classification, …) are optional extras: a damaged
+// attribute sidecar drops that cloud's attributes, never the cloud — and never,
+// by throwing inside the restore map, every other cloud in the project. The
+// reason rides along as `attributeError` (not persisted) for the restore log.
 export function deserializeCloud(c, makeCloudId) {
   const cloud = deserializeCloudData(c, makeCloudId)
-  const attributes = unpackAttributes(c.attributeFields, c.buffers?.attributes, c.pointCount ?? 0)
+  let attributes = {}, attributeError = null
+  try {
+    attributes = unpackAttributes(c.attributeFields, c.buffers?.attributes, c.pointCount ?? 0)
+  } catch (err) {
+    attributeError = err?.message ?? String(err)
+  }
   return { ...cloud, visible: c.visible !== false, style: c.style ?? null,
-    ...(Object.keys(attributes).length ? { attributes: markRaw(attributes) } : {}) }
+    ...(Object.keys(attributes).length ? { attributes: markRaw(attributes) } : {}),
+    ...(attributeError ? { attributeError } : {}) }
 }

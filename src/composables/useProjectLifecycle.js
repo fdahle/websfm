@@ -156,16 +156,21 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene }) {
       // so they stay manual; every other project-scoped store restores through the
       // registry below (matches, reconstruction, GCPs, footprints, poses).
       await timed('sensors', () => restoreSensors(id))
-      await timed('images', () => restoreImages(projectData.images || [], id, (done, total, label) => {
+      // restoreImages publishes the image list (ids + names) synchronously before
+      // its first await; only previews and keypoints load after that. The registry
+      // stores need the list, never the pixels, so both phases run concurrently.
+      const imagesDone = timed('images', () => restoreImages(projectData.images || [], id, (done, total, label) => {
         if (projectLoading.value && currentProjectId.value === id) {
           projectLoadingProgress.value = { done, total, label }
         }
-      }))
-      migrateLegacyFiducialDetections(sensors.value)
-      migrateLegacyFiducialCalibrations(images.value)
-      projectLoadingProgress.value = null
-      const storeTimings = await timed('project stores', () =>
+      })).then(() => {
+        migrateLegacyFiducialDetections(sensors.value)
+        migrateLegacyFiducialCalibrations(images.value)
+        projectLoadingProgress.value = null
+      })
+      const storesDone = timed('project stores', () =>
         restoreProjectStores({ projectId: id, projectData }))
+      const [, storeTimings] = await Promise.all([imagesDone, storesDone])
       const detail = [...timings, ...storeTimings.map(({ store, ms }) => ({ phase: store, ms }))]
         .sort((a, b) => b.ms - a.ms)
         .map(({ phase, ms }) => `${phase} ${Math.round(ms)} ms`)

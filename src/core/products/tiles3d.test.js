@@ -75,14 +75,18 @@ describe('ecefTransformFromProbes', () => {
     expect(cos).toBeCloseTo(1, 6)
   })
 
-  it('carries the projection scale factor into the basis length', () => {
-    // Probes 1.0004 m apart (a UTM point scale factor): the frame must scale with
-    // them, or grid distances render as the wrong ground distance.
+  it('carries the projection scale factor into the horizontal axes only', () => {
+    // Probes 1.0004 m apart (a UTM point scale factor): the horizontal frame must
+    // scale with them, or grid distances render as the wrong ground distance. Heights
+    // are not scaled by k, so up stays one metre per unit (it used to inherit the
+    // grid scale: +2.6 % exaggeration near the pole in EPSG:3031).
     const wide = { lon: 1.0004 / M_PER_DEG, lat: 0, h: 0 }
     const wideN = { lon: 0, lat: 1.0004 / 110574.389, h: 0 }
     const m = ecefTransformFromProbes({ origin, east: wide, north: wideN })
     expect(norm(col(m, 0))).toBeCloseTo(1.0004, 4)
-    expect(norm(col(m, 2))).toBeCloseTo(1.0004, 4)
+    expect(norm(col(m, 2))).toBeCloseTo(1, 9)
+    const ft = ecefTransformFromProbes({ origin, east: wide, north: wideN, verticalMetresPerUnit: 0.3048 })
+    expect(norm(col(ft, 2))).toBeCloseTo(0.3048, 9)
   })
 
   it('rejects degenerate probes rather than emitting a collapsed frame', () => {

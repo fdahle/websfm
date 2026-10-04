@@ -10,9 +10,8 @@ import { useGcpsStore } from '../../stores/useGcpsStore.js'
 import { useProjectsStore } from '../../stores/useProjectsStore.js'
 import { findReferenceMatches } from '../../workers/computeClient.js'
 import { referenceGcpCandidates } from '../../core/sfm/referenceGcps.js'
-import { makeCanonicalToScan } from '../../core/sfm/displayFrame.js'
+import { makeCanonicalToScan, makeFrameModelResolver } from '../../core/sfm/displayFrame.js'
 import { ensureProjection, transform } from '../../core/crs.js'
-import { distortionOf } from '../../core/sfm/distortion.js'
 
 const props = defineProps({ hasRelativeOrtho: Boolean, referenceOrthos: { type: Array, default: () => [] } })
 const emit = defineEmits(['close'])
@@ -37,7 +36,8 @@ const invalid = computed(() => reviewed.value.some(c =>
     c[k] != null && c[k] !== '' && !(Number.isFinite(c[k]) && c[k] > 0))))
 let generation = 0
 function reset() { generation++; candidates.value = []; preview.value = null; error.value = ''; message.value = ''; busy.value = false }
-watch([selectedReferenceId, band, () => recon.ortho, () => recon.mainSparseCloud, () => projects.currentProjectId], reset)
+// Candidates hold project-CRS coordinates from find time, so a CRS change invalidates them.
+watch([selectedReferenceId, band, () => recon.ortho, () => recon.mainSparseCloud, () => projects.currentProjectId, () => projects.currentCrs], reset)
 onBeforeUnmount(() => { generation++ })
 async function find() {
   const token = ++generation, ortho = recon.ortho, cloud = recon.mainSparseCloud, refRaster = reference.value
@@ -47,15 +47,13 @@ async function find() {
     if (token !== generation) return
     const result = await findReferenceMatches(ortho.previewDataUrl, raw)
     if (token !== generation) return
+    const frameModel = makeFrameModelResolver({ summary: recon.summary, sensors: sensors.sensors })
     const sourceImages = images.images.flatMap(image => {
       const camera = cloud.cameras.get(image.uuid)
       if (!camera) return []
-      const sensor = sensors.sensors.find(s => s.id === image.sensorId)
-      const fiducial = recon.summary?.fiducialTransforms?.find(f => f.uuid === image.uuid)
-      if (sensor?.kind === 'film' && !fiducial) return []
-      const selfCal = recon.summary?.selfCalDistortion?.find(s => s.sensorId === image.sensorId)
-      return [{ uuid: image.uuid, name: image.name, toScan: makeCanonicalToScan({ K: camera.K,
-        dist: sensor ? distortionOf(sensor) : null, selfCal, fiducial }) }]
+      const { dist, selfCal, fiducial, filmMissing } = frameModel(image)
+      if (filmMissing) return []
+      return [{ uuid: image.uuid, name: image.name, toScan: makeCanonicalToScan({ K: camera.K, dist, selfCal, fiducial }) }]
     })
     await Promise.all([ensureProjection(refRaster.crs), ensureProjection(projects.currentCrs)])
     if (token !== generation) return
@@ -92,12 +90,10 @@ async function add() {
   const prefix = `Auto-${reference.value.id}-${recon.mainSparseCloud.createdAt}`
   busy.value = true; error.value = ''
   try {
-    let count = 0
-    for (const c of selected) {
-      if (token !== generation) return
-      count += await gcps.addGcps([{ ...c, name: `${prefix}-${c.pointIndex}`,
-        z: c.z === '' ? null : c.z }], crs, {}, { verticalDatum: c.verticalDatum })
-    }
+    // One call: one log line and one save for the batch, each row carrying its
+    // own datum, and the CSV dialog's remembered settings left alone.
+    const count = await gcps.addGcps(selected.map(c => ({ ...c, name: `${prefix}-${c.pointIndex}`,
+      z: c.z === '' ? null : c.z })), crs, {}, { rememberDefaults: false })
     if (token !== generation) return
     message.value = `Added ${count} reviewed points. Checkpoints are excluded from fitting; incomplete control points still need elevation and accuracy before use.`
     candidates.value = []; preview.value = null
