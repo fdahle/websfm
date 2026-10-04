@@ -347,23 +347,6 @@ export const FOOTPRINT_DEFAULTS = {
   assumeNadir: true,  // treat cameras as looking straight down when angles are missing
 }
 
-// Automatic fiducial measurement on film scans (core/sfm/fiducialDetect.js,
-// driven by useImagesStore.autoDetectFiducials). Mirrored by
-// FiducialDetectModal.vue. The algorithm's own knobs (template size, coarse
-// scale, refine window) are NOT here — they are co-located with the algorithm as
-// FIDUCIAL_DETECT_TUNING, per the self-contained-module exception.
-export const FIDUCIAL_DETECT_DEFAULTS = {
-  mode: 'automatic',     // generated family prototypes; no marked reference scan
-  family: 'generic',     // generic | right-angle | cut-45 | frame
-  rotationK: 0,          // clockwise quarter-turns relative to certificate layout
-  bootstrapMinScore: 0.28,
-  searchRadiusPct: 4,   // search window half-size, % of max(image w, h)
-  minScore: 0.7,        // absolute ZNCC floor
-  maxRmsUm: 30,         // affine-fit RMS gate (µm) — matches manual-marking quality
-  overwrite: false,     // replace existing (manual) observations
-  tryRotations: true,   // probe for a 90° scan rotation before searching
-}
-
 // Anonymous structural detection. Calibration has a separate modal/defaults.
 export const FIDUCIAL_SPOT_DEFAULTS = {
   family: 'generic',

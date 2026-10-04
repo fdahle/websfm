@@ -6,11 +6,8 @@ import {
   FIDUCIAL_DETECT_TUNING, grayFromRgba, detectFiducialsInImage,
 } from '../../core/sfm/fiducialDetect.js'
 import {
-  FIDUCIAL_BOOTSTRAP_TUNING, bootstrapFiducialsFromGray, refineFiducialShape,
-} from '../../core/sfm/fiducialBootstrap.js'
-import {
   FIDUCIAL_DETECTION_TUNING, detectFiducialSpots as detectFiducialSpotsCore,
-  refineDetectionSpot,
+  refineDetectionSpot, nativeRefinePlan,
 } from '../../core/sfm/fiducialDetection.js'
 
 // Detection ops (SIFT / SuperPoint). `rasterize` (OffscreenCanvas pixel decode)
@@ -346,54 +343,37 @@ export function makeDetectOps({ rasterize }) {
     }
   }
 
-  // No hand-marked reference: generated family prototypes locate the calibrated
-  // layout on a thumbnail, then each centre is refined in a native-resolution crop.
-  async function bootstrapFiducials([url, marks, options = {}], { emit } = {}) {
-    const cfg = { ...FIDUCIAL_BOOTSTRAP_TUNING, ...options }
-    const t0 = performance.now()
-    const coarseRgba = await rasterize(url, cfg.maxDim)
-    const coarse = { ...grayFromRgba(coarseRgba.data, coarseRgba.width, coarseRgba.height),
-      scale: coarseRgba.scale, natW: coarseRgba.natW, natH: coarseRgba.natH }
-    const initial = bootstrapFiducialsFromGray(coarse, marks, cfg)
-    const bmp = await decodeBitmap(url)
-    try {
-      const detections = []
-      for (const d of initial.detections) {
-        if (cfg.family === 'frame') {
-          detections.push({ ...d, px: d.px / coarse.scale, py: d.py / coarse.scale })
-          continue
-        }
-        const px0 = d.px / coarse.scale, py0 = d.py / coarse.scale
-        const half = Math.max(24, Math.round((d.scale / coarse.scale) * 2.5))
-        const win = cropGray(bmp, px0 - half, py0 - half, 2 * half + 1, 2 * half + 1)
-        const scale0 = Math.max(7, Math.round(d.scale / coarse.scale)) | 1
-        const hit = refineFiducialShape(win, px0 - win.originX, py0 - win.originY,
-          Math.max(4, half * 0.45), { ...cfg, prototypeSizes: [scale0 - 4, scale0, scale0 + 4].map((s) => Math.max(5, s | 1)) })
-        detections.push(hit ? { ...d, px: win.originX + hit.x, py: win.originY + hit.y,
-          score: hit.score, peakMargin: hit.margin } : { ...d, px: px0, py: py0 })
-      }
-      emit?.('log', [`Fiducial: autonomous ${cfg.family ?? 'generic'} bootstrap found ${detections.length} mark(s) on ${bmp.width}×${bmp.height}`])
-      return { result: { ...initial, detections, natW: bmp.width, natH: bmp.height, ms: performance.now() - t0 } }
-    } finally { bmp.close() }
+  // The coarse thumbnail rasterize() would make, drawn from an already-decoded
+  // bitmap — same scale and rounding — so one detection decodes the scan once.
+  // (A 97 MP PNG decode dominates this op; rasterize + decodeBitmap paid it twice.)
+  function downscaleBitmap(bmp, maxDim) {
+    const natW = bmp.width, natH = bmp.height
+    const scale = Math.min(1, maxDim / Math.max(natW, natH))
+    const width = Math.round(natW * scale), height = Math.round(natH * scale)
+    const ctx = new OffscreenCanvas(width, height).getContext('2d', { willReadFrequently: true })
+    ctx.drawImage(bmp, 0, 0, width, height)
+    return { data: ctx.getImageData(0, 0, width, height).data, width, height, scale, natW, natH }
   }
 
   async function detectFiducialSpots([url, options = {}], { emit } = {}) {
     const cfg = { ...FIDUCIAL_DETECTION_TUNING, ...options }
-    const t0 = performance.now(), rgba = await rasterize(url, cfg.maxDim)
-    const gray = { ...grayFromRgba(rgba.data, rgba.width, rgba.height), scale: rgba.scale, natW: rgba.natW, natH: rgba.natH }
-    const coarse = detectFiducialSpotsCore(gray, cfg)
+    const t0 = performance.now()
     const bmp = await decodeBitmap(url)
     try {
+      const rgba = downscaleBitmap(bmp, cfg.maxDim)
+      const gray = { ...grayFromRgba(rgba.data, rgba.width, rgba.height), scale: rgba.scale, natW: rgba.natW, natH: rgba.natH }
+      const coarse = detectFiducialSpotsCore(gray, cfg)
       const refine = (d) => {
-        if (d.family === 'frame') return { ...d, px: d.px / gray.scale, py: d.py / gray.scale }
-        const px0 = d.px / gray.scale, py0 = d.py / gray.scale
-        const nativeScale = Math.max(7, Math.round((d.scale || 13) / gray.scale)) | 1
-        const half = Math.max(24, Math.round(nativeScale * 2.5))
+        const plan = nativeRefinePlan(d, gray.scale, cfg)
+        if (!plan) return { ...d, px: d.px / gray.scale, py: d.py / gray.scale }
+        const { px0, py0, half } = plan
         const win = cropGray(bmp, px0 - half, py0 - half, 2 * half + 1, 2 * half + 1)
-        const sizes = [nativeScale - 4, nativeScale, nativeScale + 4].map((s) => Math.max(5, s | 1))
-        const hit = refineDetectionSpot(win, px0 - win.originX, py0 - win.originY, Math.max(4, half * 0.45), { ...cfg, prototypeSizes: sizes })
-        return hit ? { ...d, px: win.originX + hit.x, py: win.originY + hit.y,
-          score: hit.score, peakMargin: hit.margin } : { ...d, px: px0, py: py0 }
+        const hit = refineDetectionSpot(win, px0 - win.originX, py0 - win.originY, plan.radius,
+          { ...cfg, prototypeSizes: plan.sizes, variants: plan.variants, polarity: plan.polarity ?? cfg.polarity })
+        // Keep the coarse peakMargin: it was measured over the whole slot search,
+        // while the refine window is too small to hold a distinct runner-up.
+        return hit ? { ...d, px: win.originX + hit.x, py: win.originY + hit.y, score: hit.score }
+          : { ...d, px: px0, py: py0 }
       }
       const accepted = coarse.accepted.map(refine), drafts = coarse.drafts.map(refine)
       const frame = coarse.frame ? {
@@ -406,5 +386,5 @@ export function makeDetectOps({ rasterize }) {
     } finally { bmp.close() }
   }
 
-  return { detect, prepareFiducialTemplates, detectFiducials, bootstrapFiducials, detectFiducialSpots }
+  return { detect, prepareFiducialTemplates, detectFiducials, detectFiducialSpots }
 }

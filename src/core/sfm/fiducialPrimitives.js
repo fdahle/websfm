@@ -1,14 +1,11 @@
 // Shared low-level primitives for template-free fiducial search.
 //
-// `fiducialBootstrap.js` (calibrated marks → detections, for SfM) and
-// `fiducialDetection.js` (anonymous slots → detections, for the review queue)
-// are two policies over the SAME three primitives: generate an analytic
-// prototype, measure the film rectangle, find the best ZNCC peak near a guess.
-// Those three used to be copy-pasted into both modules and had already drifted
-// apart in ways that produced two live bugs (a `Math.max(...typedArray)` stack
+// Three primitives: generate an analytic prototype, measure the film rectangle,
+// find the best ZNCC peak near a guess. `fiducialDetection.js` (anonymous slots →
+// detections) is the policy over them. They once lived as copy-pasted forks in two
+// policy modules and drifted into two live bugs (a `Math.max(...typedArray)` stack
 // overflow on any real-sized scan, and a peak margin measured against a
-// near-duplicate of the peak itself). One copy, parameterised where the two
-// policies genuinely differ.
+// near-duplicate of the peak itself) — keep shared math here, never in a policy.
 //
 // Pure and worker-safe. Grayscale images are `{ data: Float32Array, width,
 // height }`, row-major, values 0..255; patches are square `{ data, size }`.
@@ -135,9 +132,10 @@ export function estimateFrameBounds(gray, maxFrac = 0.2) {
  * a perfectly unambiguous mark and the caller rejects it as ambiguous.
  *
  * `cfg.polarity`: `'dark'` | `'light'` | anything else ⇒ try both.
+ * `cfg.variants`: optional subset of the family's variant indices.
  *
  * @returns {null | { x:number, y:number, score:number, size:number,
- *                    variant:number, tpl:object, margin:number }}
+ *                    variant:number, polarity:'dark'|'light', tpl:object, margin:number }}
  */
 export function bestPrototypeHit(gray, cx, cy, radius, family, cfg = {}) {
   const sizes = cfg.prototypeSizes ?? [9, 13, 17, 25]
@@ -157,15 +155,20 @@ export function bestPrototypeHit(gray, cx, cy, radius, family, cfg = {}) {
     const x1 = clamp(Math.round(cx + radius), xLo, xHi)
     const y1 = clamp(Math.round(cy + radius), yLo, yHi)
     if (x1 < x0 || y1 < y0) continue
-    for (let v = 0; v < variantsFor(family); v++) {
+    // cfg.variants restricts the sweep to known orientations (the native refine
+    // reuses the coarse winner's — re-sweeping all of them costs ~6× for nothing).
+    const variants = cfg.variants?.length ? cfg.variants
+      : Array.from({ length: variantsFor(family) }, (_, v) => v)
+    for (const v of variants) {
       const base = makeFiducialPrototype(family, size, v, protoOpts)
-      const templates = cfg.polarity === 'dark' ? [base]
-        : cfg.polarity === 'light' ? [invertPatch(base)]
-          : [base, invertPatch(base)]
-      for (const tpl of templates) {
+      const templates = cfg.polarity === 'dark' ? [[base, 'dark']]
+        : cfg.polarity === 'light' ? [[invertPatch(base), 'light']]
+          : [[base, 'dark'], [invertPatch(base), 'light']]
+      for (const [tpl, polarity] of templates) {
         const hit = matchZNCC(gray, tpl, x0, y0, x1, y1)
-        hits.push({ ...hit, tpl, size, variant: v })
-        if (!best || hit.score > best.score) best = { ...hit, tpl, size, variant: v }
+        const rec = { ...hit, tpl, size, variant: v, polarity }
+        hits.push(rec)
+        if (!best || hit.score > best.score) best = rec
       }
     }
   }

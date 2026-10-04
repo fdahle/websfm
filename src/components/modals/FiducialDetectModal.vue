@@ -70,6 +70,7 @@ const REASON_LABELS = {
   'two-peaks': 'Two similar candidates',
   'frame-uncertain': 'Film frame uncertain',
   'batch-outlier': 'Disagrees with the batch',
+  'shape-inconsistent': 'Breaks the layout symmetry',
 }
 
 const summary = computed(() => results.value ? {
@@ -135,7 +136,13 @@ async function run() {
   finally { running.value = false }
 }
 
+// A missing-slot draft's position is only where the slot was expected — nothing
+// was measured there, so accepting it would hand calibration and SfM a guess
+// dressed as a mark. Place it by hand instead (image view ▸ right-click).
+const canAccept = (draft) => draft.reason !== 'missing-slot'
+
 function acceptDraft(draft) {
+  if (!canAccept(draft)) return
   imagesStore.setFiducialDetection(draft.imageId, { ...draft, reviewed: true, source: `${draft.source || 'shape'}-review` })
   drafts.value = drafts.value.filter((d) => d !== draft)
 }
@@ -224,7 +231,12 @@ function rejectDraft(draft) { drafts.value = drafts.value.filter((d) => d !== dr
           </template>
           <template #cell-actions="{ row }">
             <span class="fid-actions">
-              <button class="btn btn-sm" @click.stop="acceptDraft(row.draft)">Accept</button>
+              <button
+                class="btn btn-sm"
+                :disabled="!canAccept(row.draft)"
+                :title="canAccept(row.draft) ? '' : 'Nothing was measured here — open the image and place this mark by hand (right-click ▸ Mark fiducial)'"
+                @click.stop="acceptDraft(row.draft)"
+              >Accept</button>
               <button class="btn btn-sm" @click.stop="rejectDraft(row.draft)">Reject</button>
             </span>
           </template>

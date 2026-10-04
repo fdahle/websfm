@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { fiducialBatchConsensus } from './fiducialConsensus.js'
+import { fiducialBatchConsensus, fiducialShapeCheck } from './fiducialConsensus.js'
 
 // One scan: marks at the four mid-sides of a 10000×10000 film frame inset in an
 // 11000×11000 scan. `shift` moves the whole scan on the platen (the frame moves
@@ -76,5 +76,49 @@ describe('fiducialBatchConsensus', () => {
     const out = fiducialBatchConsensus(rows)
     expect(out.basis).toBe('raster')
     expect(out.outliers).toEqual([])
+  })
+})
+
+describe('fiducialShapeCheck', () => {
+  // 8 marks on a sheared, scaled, rotated rectangle — an affine scan. Midpoints of
+  // opposite pairs still coincide, so nothing may be flagged.
+  const affine = ([u, v]) => [5000 + 4100 * u + 300 * v, 5200 - 150 * u + 3950 * v]
+  const unit = { 'corner-tl': [-1, -1], 'corner-tr': [1, -1], 'corner-br': [1, 1], 'corner-bl': [-1, 1],
+    'side-top': [0, -1.05], 'side-bottom': [0, 1.05], 'side-left': [-1.05, 0], 'side-right': [1.05, 0] }
+  const marks = (slots, bump = {}) => slots.map((slot) => {
+    const [px, py] = affine(unit[slot]), [dx, dy] = bump[slot] ?? [0, 0]
+    return { slot, px: px + dx, py: py + dy }
+  })
+  const ALL = Object.keys(unit), CORNERS = ALL.slice(0, 4)
+
+  it('accepts any affine image of a centrally symmetric layout', () => {
+    const r = fiducialShapeCheck(marks(ALL, { 'corner-tl': [1.5, -2] }))
+    expect(r.checked).toBe(true)
+    expect(r.outliers).toEqual([])
+  })
+  it('names the offending pair once ≥3 pair centres vote', () => {
+    // A data-strip hit 60 px off the real corner: centre moves 30 px; tol ≈ 0.002·extent ≈ 23 px.
+    const r = fiducialShapeCheck(marks(ALL, { 'corner-tr': [60, 0] }))
+    expect(r.outliers.map((o) => o.slot).sort()).toEqual(['corner-bl', 'corner-tr'])
+  })
+  it('sends both pairs to review when only two disagree', () => {
+    const r = fiducialShapeCheck(marks(CORNERS, { 'corner-tr': [60, 0] }))
+    expect(r.outliers.map((o) => o.slot).sort()).toEqual([...CORNERS].sort())
+  })
+  it('has no opinion with fewer than two opposite pairs', () => {
+    expect(fiducialShapeCheck(marks(['corner-tl', 'corner-br', 'side-top'])).checked).toBe(false)
+  })
+})
+
+describe('consensus frame confidence', () => {
+  it('falls back to the raster basis when any frame is below the detector floor', () => {
+    const rows = Array.from({ length: 5 }, (_, i) => ({
+      id: `i${i}`, natW: 1000, natH: 1000,
+      frame: { left: 50, right: 950, top: 50, bottom: 950, confidence: i === 2 ? 0.01 : 0.5 },
+      accepted: [{ slot: 'corner-tl', px: 60, py: 60 }],
+    }))
+    expect(fiducialBatchConsensus(rows).basis).toBe('raster')
+    rows[2].frame.confidence = 0.5
+    expect(fiducialBatchConsensus(rows).basis).toBe('frame')
   })
 })

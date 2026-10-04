@@ -1,9 +1,8 @@
-// Automatic fiducial-mark measurement on film scans (F4 follow-up).
+// Fiducial template matching on film scans (F4 follow-up).
 //
-// Marking 4–8 fiducials by hand on every scanned frame is the most tedious part
-// of the film path. Within one scan batch the film frame lands in nearly the same
-// scan position every time, so a template cut from ONE reference image plus a
-// small search window finds the same mark on every other image of that sensor.
+// Within one scan batch the film frame lands in nearly the same scan position
+// every time, so a template cut from one scan plus a small search window finds
+// the same mark on every other image of that sensor.
 // That is the HSfM / MicMac-Kugelhupf approach: ZNCC template matching, coarse to
 // fine, with a sub-pixel quadratic peak fit.
 //
@@ -22,16 +21,13 @@
 // the same "side effects via injected hooks" shape as `onLog`/`onProgress`
 // elsewhere in core. The math stays here; the pixels stay in the worker.
 //
-// Gating deliberately does NOT happen in the detector: it needs population stats
-// across every image of the sensor plus the sensor's calibrated mm layout, so it
-// lives in `gateFiducialDetections` below and is driven by the store.
-
-import { fitFiducialAffine } from './fiducials.js'
+// Today's caller is Detect Fiducials' template retry (useImagesStore
+// detectFiducialsForSensor): donor crops from the batch's best anonymous marks are
+// matched around batch-median positions on scans that came back incomplete.
 
 /**
  * Internal algorithm tuning (the self-contained-module exception in CLAUDE.md —
- * these are not user knobs; the user-facing ones live in `defaults.user.js` as
- * `FIDUCIAL_DETECT_DEFAULTS`). Exported so tests can read them rather than
+ * these are not user knobs). Exported so tests can read them rather than
  * duplicating the numbers.
  */
 export const FIDUCIAL_DETECT_TUNING = {
@@ -384,130 +380,4 @@ export function detectFiducialsInImage({ coarse, templates, predictions, cfg = {
     results.push({ fidId: pred.fidId, px, py, score, coarseScore, rotationK })
   }
   return results
-}
-
-// ── QC gates ───────────────────────────────────────────────────────────────
-
-function median(values) {
-  if (!values.length) return NaN
-  const s = [...values].sort((a, b) => a - b)
-  const m = s.length >> 1
-  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2
-}
-
-/**
- * The three QC gates, in order. Pure so the decision logic is testable without a
- * store, a worker, or a browser.
- *
- *   1. absolute — a detection scoring below `minScore` is rejected outright.
- *   2. population — per fidId, take the median score across everything that
- *      survived gate 1 and reject detections more than `POPULATION_BAND` below
- *      it. This is the gate that catches *confident-wrong* matches: a mark that
- *      locks onto the wrong feature can still clear 0.7 in absolute terms, but
- *      it will not match how that same mark scores on every other scan of the
- *      batch. Needs the whole population, which is why detections are buffered
- *      and applied in a second pass.
- *   3. geometric — join the survivors with the sensor's calibrated mm layout and
- *      fit the interior-orientation affine. If `rmsUm` exceeds the gate, drop
- *      the single worst-residual mark and refit ONCE (one bad mark is the common
- *      failure; two means the image is genuinely wrong). Still over ⇒ the image
- *      fails and nothing is written for it — a bad interior orientation is worse
- *      than none, because it silently poisons every downstream pose.
- *
- * @param {{ uuid: string, name?: string, detections: { fidId: string, px: number,
- *          py: number, score: number, rotationK?: number }[] }[]} resultsPerImage
- * @param {{ id: string, xMm: number, yMm: number }[]} marks Sensor's calibrated marks.
- * @param {{ minScore: number, maxRmsUm: number }} cfg
- * @returns {{ uuid: string, name?: string, status: 'ok'|'partial'|'failed',
- *   accepted: { fidId, px, py, score }[], rejected: { fidId, reason, score }[],
- *   rmsUm: number|null, rotationK: number }[]}
- */
-export function gateFiducialDetections(resultsPerImage, marks, cfg = {}) {
-  const { minScore = 0.7, maxRmsUm = 30 } = cfg
-  const POPULATION_BAND = 0.2
-  const markById = new Map((marks || []).map((m) => [m.id, m]))
-
-  // Gate 1 — absolute score floor.
-  const staged = resultsPerImage.map((img) => {
-    const accepted = [], rejected = []
-    for (const d of img.detections || []) {
-      if (!markById.has(d.fidId)) { rejected.push({ fidId: d.fidId, reason: 'unknown mark', score: d.score }); continue }
-      if (!(d.score >= minScore)) { rejected.push({ fidId: d.fidId, reason: `score ${d.score.toFixed(3)} < ${minScore}`, score: d.score }); continue }
-      accepted.push(d)
-    }
-    return { uuid: img.uuid, name: img.name, accepted, rejected, rotationK: img.detections?.[0]?.rotationK ?? 0 }
-  })
-
-  // Gate 2 — per-mark population median band.
-  const scoresByFid = new Map()
-  for (const img of staged) {
-    for (const d of img.accepted) {
-      if (!scoresByFid.has(d.fidId)) scoresByFid.set(d.fidId, [])
-      scoresByFid.get(d.fidId).push(d.score)
-    }
-  }
-  const medianByFid = new Map([...scoresByFid].map(([fidId, s]) => [fidId, median(s)]))
-  for (const img of staged) {
-    const keep = []
-    for (const d of img.accepted) {
-      const med = medianByFid.get(d.fidId)
-      if (Number.isFinite(med) && d.score < med - POPULATION_BAND) {
-        img.rejected.push({ fidId: d.fidId, reason: `score ${d.score.toFixed(3)} below batch median ${med.toFixed(3)}`, score: d.score })
-      } else keep.push(d)
-    }
-    img.accepted = keep
-  }
-
-  // Gate 3 — affine RMS, with a single worst-mark drop-and-refit.
-  return staged.map((img) => {
-    const fitOn = (dets) => fitFiducialAffine(dets.map((d) => {
-      const m = markById.get(d.fidId)
-      return { px: d.px, py: d.py, xMm: m.xMm, yMm: m.yMm }
-    }))
-
-    let accepted = img.accepted
-    let fit = accepted.length >= 3 ? fitOn(accepted) : null
-
-    // Drop-and-refit, but ONLY with ≥5 marks. An affine has 6 DOF, so any 3
-    // points fit one exactly: with 4 marks, dropping the true outlier and
-    // dropping a good mark BOTH leave a 3-point exact fit with rms 0, so the
-    // outlier is mathematically unlocalizable — a "repair" there would be a coin
-    // flip that writes a wrong interior orientation. 4-mark images that miss the
-    // gate therefore fail outright and go back to the user. (Same lesson as the
-    // GCP robust fit, METHODS.md §6.5: never let a fit that the outlier has
-    // already dragged decide which point is the outlier.)
-    if (fit && fit.rmsUm > maxRmsUm && accepted.length >= 5) {
-      // Leave-one-out rather than largest-residual: with redundancy this low the
-      // outlier still inflates every other mark's residual (masking), and the
-      // largest residual is often an innocent mark. Refitting without each
-      // candidate in turn measures the thing we actually care about.
-      let bestDrop = -1, bestFit = null
-      for (let i = 0; i < accepted.length; i++) {
-        const trial = fitOn(accepted.filter((_, j) => j !== i))
-        if (trial && (!bestFit || trial.rmsUm < bestFit.rmsUm)) { bestFit = trial; bestDrop = i }
-      }
-      if (bestFit && bestFit.rmsUm <= maxRmsUm) {
-        const dropped = accepted[bestDrop]
-        img.rejected.push({
-          fidId: dropped.fidId,
-          reason: `affine outlier (batch rms ${fit.rmsUm.toFixed(1)} µm → ${bestFit.rmsUm.toFixed(1)} µm without it)`,
-          score: dropped.score,
-        })
-        accepted = accepted.filter((_, j) => j !== bestDrop)
-        fit = bestFit
-      }
-    }
-
-    // < 3 surviving marks cannot constrain the affine at all, so there is no
-    // interior orientation to write — that is a failure, not a partial success.
-    const status = !fit || fit.rmsUm > maxRmsUm ? 'failed'
-      : img.rejected.length ? 'partial' : 'ok'
-    return {
-      uuid: img.uuid, name: img.name, status,
-      accepted: status === 'failed' ? [] : accepted,
-      rejected: img.rejected,
-      rmsUm: fit ? fit.rmsUm : null,
-      rotationK: img.rotationK,
-    }
-  })
 }

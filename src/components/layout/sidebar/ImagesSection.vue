@@ -53,8 +53,10 @@ function filmSensor(img) {
   return s?.kind === 'film' ? s : null
 }
 // Marks placed on this image (F4). <3 ⇒ interior orientation incomplete.
+// Detection and hand-marking write fiducialDetections; fiducialObs is the
+// pre-split field, read only for an image that has not migrated yet.
 function fiducialCount(img) {
-  return img.fiducialObs?.length ?? 0
+  return img.fiducialDetections?.length || img.fiducialObs?.length || 0
 }
 // True once a sparse model exists but this image wasn't registered into it — the
 // reconstruction couldn't place its camera. Meaningless before reconstruction runs.
