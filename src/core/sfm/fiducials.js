@@ -140,7 +140,15 @@ export function fitFiducialAffine(obs) {
  *   `originX/Y` are the mm coords of pixel (0,0); the mm→px map is
  *   `x = (mmX − originX)/pitchMm`, `y = (mmY − originY)/pitchMm`.
  */
-export function canonicalFrame(fiducials, pitchMm) {
+//   `yUp`: the calibration's mm frame is y-up (the photogrammetric convention for
+//   fiducial certificates) while scan rows run down, so scan→mm is a REFLECTION.
+//   Mapping mm-y straight to pixel-y would then make the canonical image a mirror of
+//   the scan — a left-handed camera, a mirrored reconstruction, and a georeference
+//   no proper similarity can fit. With yUp the frame flips y (`ySign: -1`, `originY`
+//   = the mm y of pixel row 0, the TOP), keeping the canonical camera proper.
+//   Frames without `ySign` (saved before this) keep the old mapping, so an existing
+//   sparse cloud stays consistent with its own recorded transforms.
+export function canonicalFrame(fiducials, pitchMm, { yUp = false } = {}) {
   const marks = fiducials?.marks || []
   if (!Number.isFinite(pitchMm) || pitchMm <= 0 || !Number.isFinite(fiducials?.focalMm)
     || fiducials.focalMm <= 0 || marks.length < 3) return null
@@ -156,7 +164,7 @@ export function canonicalFrame(fiducials, pitchMm) {
   const extent = Math.max(maxX - minX, maxY - minY)
   const marginMm = Math.max(0.02 * extent, pitchMm) // small breathing room so edge marks aren't at px 0
   const originX = minX - marginMm
-  const originY = minY - marginMm
+  const originY = yUp ? maxY + marginMm : minY - marginMm
   const width = Math.max(1, Math.round((maxX - minX + 2 * marginMm) / pitchMm))
   const height = Math.max(1, Math.round((maxY - minY + 2 * marginMm) / pitchMm))
   const f = fiducials.focalMm / pitchMm
@@ -164,9 +172,9 @@ export function canonicalFrame(fiducials, pitchMm) {
     fx: f,
     fy: f,
     cx: ((fiducials.ppxMm ?? 0) - originX) / pitchMm,
-    cy: ((fiducials.ppyMm ?? 0) - originY) / pitchMm,
+    cy: (yUp ? originY - (fiducials.ppyMm ?? 0) : (fiducials.ppyMm ?? 0) - originY) / pitchMm,
   }
-  return { width, height, originX, originY, pitchMm, K }
+  return { width, height, originX, originY, pitchMm, K, ...(yUp ? { ySign: -1 } : {}) }
 }
 
 /**
@@ -181,7 +189,7 @@ export function scanToCanonical(px, py, A, frame) {
   const mmX = mm.x, mmY = mm.y
   return {
     x: (mmX - frame.originX) / frame.pitchMm,
-    y: (mmY - frame.originY) / frame.pitchMm,
+    y: (frame.ySign === -1 ? frame.originY - mmY : mmY - frame.originY) / frame.pitchMm,
   }
 }
 
@@ -206,7 +214,7 @@ export function mmToScan(xMm, yMm, A) {
  */
 export function canonicalToScan(x, y, A, frame) {
   const mmX = x * frame.pitchMm + frame.originX
-  const mmY = y * frame.pitchMm + frame.originY
+  const mmY = frame.ySign === -1 ? frame.originY - y * frame.pitchMm : y * frame.pitchMm + frame.originY
   if (!Array.isArray(A)) return invertFiducialTransform({ x: mmX, y: mmY }, A)
   const [a, b, c, d, e, f] = A
   const det = a * e - b * d

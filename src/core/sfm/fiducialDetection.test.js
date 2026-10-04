@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { detectFiducialSpots, makeDetectionPrototype } from './fiducialDetection.js'
+import { detectFiducialSpots, makeDetectionPrototype, nativeRefinePlan, refineDetectionSpot } from './fiducialDetection.js'
 import { slotUnitPoint, slotsForPositions } from './fiducialModel.js'
 
 function scan(family = 'generic', positions = 'corners') {
@@ -39,5 +39,70 @@ describe('anonymous fiducial detection', () => {
     const out = detectFiducialSpots(gray, { family: 'frame' })
     expect(out.accepted).toEqual([])
     expect(out.drafts.every((d) => d.reason === 'frame-uncertain')).toBe(true)
+  })
+})
+
+// The worker's coarse → native path (workers/ops/detect.js), replayed in node: a
+// 4× native scan, a box-downsampled thumbnail, then the planned native window.
+describe('native refine plan', () => {
+  const F = 4, size = 53, family = 'generic', variant = 1
+  function nativeScan() {
+    const width = 964, height = 804, data = new Float32Array(width * height).fill(15)
+    const b = { l: 32, r: 928, t: 28, b: 772 }
+    for (let y = b.t; y <= b.b; y++) for (let x = b.l; x <= b.r; x++) data[y * width + x] = 225
+    const centres = {}
+    for (const slot of slotsForPositions('corners')) {
+      const u = slotUnitPoint(slot), cx = Math.round(b.l + u.x * (b.r - b.l)), cy = Math.round(b.t + u.y * (b.b - b.t))
+      const p = makeDetectionPrototype(family, size, variant), h = (size - 1) / 2
+      for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) data[(cy - h + y) * width + cx - h + x] = p.data[y * size + x] ? 225 : 20
+      centres[slot] = { x: cx, y: cy }
+    }
+    return { gray: { data, width, height }, centres }
+  }
+  const downsample = (g) => {
+    const w = g.width / F, h = g.height / F, data = new Float32Array(w * h)
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      let s = 0
+      for (let j = 0; j < F; j++) for (let i = 0; i < F; i++) s += g.data[(y * F + j) * g.width + x * F + i]
+      data[y * w + x] = s / (F * F)
+    }
+    return { data, width: w, height: h }
+  }
+  // cropGray: the requested rect clamped into the image; origin = true position.
+  const crop = (g, x0, y0, w, h) => {
+    const ox = Math.max(0, Math.round(x0)), oy = Math.max(0, Math.round(y0))
+    const cw = Math.min(g.width - ox, Math.round(w)), ch = Math.min(g.height - oy, Math.round(h))
+    const data = new Float32Array(cw * ch)
+    for (let y = 0; y < ch; y++) for (let x = 0; x < cw; x++) data[y * cw + x] = g.data[(oy + y) * g.width + ox + x]
+    return { data, width: cw, height: ch, originX: ox, originY: oy }
+  }
+
+  it('lands on the native centre with the coarse winner\'s variant and polarity only', () => {
+    const { gray, centres } = nativeScan()
+    const coarse = detectFiducialSpots(downsample(gray), { family, positions: 'corners' })
+    expect(coarse.accepted).toHaveLength(4)
+    for (const [i, d] of coarse.accepted.entries()) {
+      const plan = nativeRefinePlan(d, 1 / F)
+      expect(plan.variants).toEqual([d.variant])
+      expect(plan.polarity).toBe(d.polarity)
+      expect(plan.radius).toBe(12) // 3 coarse px
+      const win = crop(gray, plan.px0 - plan.half, plan.py0 - plan.half, 2 * plan.half + 1, 2 * plan.half + 1)
+      const hit = refineDetectionSpot(win, plan.px0 - win.originX, plan.py0 - win.originY, plan.radius,
+        { family, prototypeSizes: plan.sizes, variants: plan.variants, polarity: plan.polarity })
+      const c = centres[d.slot]
+      expect(Math.hypot(win.originX + hit.x - c.x, win.originY + hit.y - c.y)).toBeLessThan(1)
+      // Same answer as the old full sweep over a ±0.45·half window, every variant
+      // (one mark only: that sweep is the ~70× cost this plan removes).
+      if (i > 0) continue
+      const oldHalf = Math.max(24, Math.round(plan.sizes[1] * 2.5))
+      const oldWin = crop(gray, plan.px0 - oldHalf, plan.py0 - oldHalf, 2 * oldHalf + 1, 2 * oldHalf + 1)
+      const old = refineDetectionSpot(oldWin, plan.px0 - oldWin.originX, plan.py0 - oldWin.originY,
+        Math.max(4, oldHalf * 0.45), { family, prototypeSizes: plan.sizes })
+      expect(Math.hypot(win.originX + hit.x - (oldWin.originX + old.x), win.originY + hit.y - (oldWin.originY + old.y))).toBeLessThan(0.5)
+    }
+  }, 30000)
+  it('does not refine a frame point or a missing-slot guess', () => {
+    expect(nativeRefinePlan({ family: 'frame', px: 1, py: 1 }, 0.25)).toBe(null)
+    expect(nativeRefinePlan({ family, reason: 'missing-slot', px: 1, py: 1 }, 0.25)).toBe(null)
   })
 })

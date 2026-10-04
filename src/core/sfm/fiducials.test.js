@@ -141,3 +141,47 @@ describe('scanToCanonical / canonicalToScan round-trip', () => {
     expect(y).toBeCloseTo(frame.K.cy, 6)
   })
 })
+
+describe('y-up fiducial certificates (scan rows run down)', () => {
+  // A certificate in the photogrammetric convention: +y towards the top of the
+  // frame, i.e. towards SMALLER scan rows. scan→mm is then a reflection.
+  const pitchMm = 0.0227
+  const obs = MARKS.map((m) => ({ px: 1000 + m.xMm / pitchMm, py: 1200 - m.yMm / pitchMm, xMm: m.xMm, yMm: m.yMm }))
+  const fit = fitFiducialAffine(obs)
+  const frame = canonicalFrame(FIDUCIALS, fit.pitchMm, { yUp: true })
+
+  it('the fit is a reflection, and the y-up frame undoes it (canonical image not mirrored)', () => {
+    expect(fit.A[0] * fit.A[4] - fit.A[1] * fit.A[3]).toBeLessThan(0)
+    // Two scan points, one above the other: their canonical order must match.
+    const top = scanToCanonical(1000, 300, fit.A, frame), bottom = scanToCanonical(1000, 2000, fit.A, frame)
+    expect(top.y).toBeLessThan(bottom.y)
+    const left = scanToCanonical(300, 1200, fit.A, frame), right = scanToCanonical(2000, 1200, fit.A, frame)
+    expect(left.x).toBeLessThan(right.x)
+  })
+
+  it('round-trips exactly and puts the principal point on K', () => {
+    for (const [px, py] of [[500, 700], [1500, 300], [42.5, 1999.9]]) {
+      const c = scanToCanonical(px, py, fit.A, frame), back = canonicalToScan(c.x, c.y, fit.A, frame)
+      expect(back.x).toBeCloseTo(px, 6)
+      expect(back.y).toBeCloseTo(py, 6)
+    }
+    const ppScan = { px: 1000 + FIDUCIALS.ppxMm / pitchMm, py: 1200 - FIDUCIALS.ppyMm / pitchMm }
+    const pp = scanToCanonical(ppScan.px, ppScan.py, fit.A, frame)
+    expect(pp.x).toBeCloseTo(frame.K.cx, 4)
+    expect(pp.y).toBeCloseTo(frame.K.cy, 4)
+    // Every mark lands inside the canonical raster.
+    for (const o of obs) {
+      const c = scanToCanonical(o.px, o.py, fit.A, frame)
+      expect(c.y).toBeGreaterThanOrEqual(0)
+      expect(c.y).toBeLessThanOrEqual(frame.height)
+    }
+  })
+
+  it('a frame saved before ySign existed keeps the old mapping', () => {
+    const legacy = canonicalFrame(FIDUCIALS, fit.pitchMm)
+    expect(legacy.ySign).toBeUndefined()
+    const c = scanToCanonical(500, 700, fit.A, legacy)
+    const mm = { y: fit.A[3] * 500 + fit.A[4] * 700 + fit.A[5] }
+    expect(c.y).toBeCloseTo((mm.y - legacy.originY) / legacy.pitchMm, 9)
+  })
+})

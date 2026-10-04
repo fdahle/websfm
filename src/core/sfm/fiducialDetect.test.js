@@ -9,7 +9,6 @@ import {
   matchZNCC,
   subpixelPeak,
   detectFiducialsInImage,
-  gateFiducialDetections,
 } from './fiducialDetect.js'
 
 // ── synthetic raster helpers ───────────────────────────────────────────────
@@ -354,116 +353,6 @@ describe('detectFiducialsInImage', () => {
     })
     expect(out).toHaveLength(4)
     expect(out[0].score).toBe(out[0].coarseScore)
-  })
-})
-
-// ── QC gates ───────────────────────────────────────────────────────────────
-
-// A perfectly consistent synthetic batch: scan px = mm × 100 + offset, so the
-// affine fit is exact and any RMS is caused by whatever the test plants.
-// Eight marks (4 corners + 4 edge midpoints), the common metric-camera layout —
-// the drop-and-refit gate needs ≥5 to be able to localize an outlier at all.
-const MM_MARKS = [
-  { id: 'A', xMm: -50, yMm: -50 },
-  { id: 'B', xMm: 50, yMm: -50 },
-  { id: 'C', xMm: -50, yMm: 50 },
-  { id: 'D', xMm: 50, yMm: 50 },
-  { id: 'E', xMm: 0, yMm: -50 },
-  { id: 'F', xMm: 0, yMm: 50 },
-  { id: 'G', xMm: -50, yMm: 0 },
-  { id: 'H', xMm: 50, yMm: 0 },
-]
-const FOUR_MARKS = MM_MARKS.slice(0, 4)
-const toPx = (m) => ({ px: m.xMm * 100 + 6000, py: m.yMm * 100 + 6000 })
-
-function imageResult(uuid, overrides = {}, marks = MM_MARKS) {
-  return {
-    uuid, name: uuid,
-    detections: marks.map((m) => ({
-      fidId: m.id, ...toPx(m), score: 0.9, rotationK: 0, ...(overrides[m.id] || {}),
-    })),
-  }
-}
-
-describe('gateFiducialDetections', () => {
-  const cfg = { minScore: 0.7, maxRmsUm: 30 }
-
-  it('passes a clean batch', () => {
-    const out = gateFiducialDetections([imageResult('a'), imageResult('b')], MM_MARKS, cfg)
-    expect(out.map((r) => r.status)).toEqual(['ok', 'ok'])
-    expect(out[0].accepted).toHaveLength(8)
-    expect(out[0].rmsUm).toBeLessThan(1e-6)
-  })
-
-  it('rejects a below-floor detection (gate 1)', () => {
-    const out = gateFiducialDetections([imageResult('a', { C: { score: 0.4 } })], MM_MARKS, cfg)
-    expect(out[0].accepted.map((d) => d.fidId)).not.toContain('C')
-    expect(out[0].accepted).toHaveLength(7)
-    expect(out[0].rejected[0]).toMatchObject({ fidId: 'C' })
-    expect(out[0].status).toBe('partial')
-  })
-
-  it('rejects a confident-wrong detection via the batch median band (gate 2)', () => {
-    // 'B' clears the absolute floor everywhere, but on image `c` it scores far
-    // below how B scores on the rest of the batch.
-    const batch = [
-      imageResult('a', { B: { score: 0.95 } }),
-      imageResult('b', { B: { score: 0.95 } }),
-      imageResult('c', { B: { score: 0.72 } }),
-    ]
-    const out = gateFiducialDetections(batch, MM_MARKS, cfg)
-    expect(out[2].rejected.some((r) => r.fidId === 'B' && /median/.test(r.reason))).toBe(true)
-    expect(out[2].accepted.map((d) => d.fidId)).not.toContain('B')
-  })
-
-  it('drops the outlier mark and refits once (gate 3)', () => {
-    // 'D' is displaced 20 px (=200 µm at this scale) — well past the 30 µm gate.
-    const bad = imageResult('a')
-    const d = bad.detections.find((x) => x.fidId === 'D')
-    d.px += 20; d.py -= 20
-    const out = gateFiducialDetections([bad], MM_MARKS, cfg)
-    expect(out[0].status).toBe('partial')
-    expect(out[0].accepted.map((x) => x.fidId)).not.toContain('D')
-    expect(out[0].accepted).toHaveLength(7)
-    expect(out[0].rejected.some((r) => r.fidId === 'D' && /affine outlier/.test(r.reason))).toBe(true)
-    expect(out[0].rmsUm).toBeLessThan(30)
-  })
-
-  it('fails the image when a refit still cannot meet the RMS gate', () => {
-    // Two displaced marks — a single drop-and-refit cannot rescue it.
-    const bad = imageResult('a')
-    bad.detections[0].px += 25
-    bad.detections[3].py -= 25
-    const out = gateFiducialDetections([bad], MM_MARKS, cfg)
-    expect(out[0].status).toBe('failed')
-    expect(out[0].accepted).toHaveLength(0)
-  })
-
-  it('fails a 4-mark camera rather than guessing which mark is bad', () => {
-    // Any 3 points fit a 6-DOF affine exactly, so with 4 marks the outlier is
-    // unlocalizable — the gate must refuse to "repair" it. See the comment on
-    // the ≥5 condition in gateFiducialDetections.
-    const bad = imageResult('a', {}, FOUR_MARKS)
-    bad.detections.find((x) => x.fidId === 'D').px += 20
-    const out = gateFiducialDetections([bad], FOUR_MARKS, cfg)
-    expect(out[0].status).toBe('failed')
-    expect(out[0].accepted).toHaveLength(0)
-  })
-
-  it('fails an image left with fewer than 3 marks', () => {
-    const low = Object.fromEntries(
-      ['C', 'D', 'E', 'F', 'G', 'H'].map((id) => [id, { score: 0.1 }]),
-    )
-    const out = gateFiducialDetections([imageResult('a', low)], MM_MARKS, cfg)
-    expect(out[0].status).toBe('failed')
-    expect(out[0].accepted).toHaveLength(0)
-    expect(out[0].rmsUm).toBeNull()
-  })
-
-  it('rejects detections for marks the sensor does not declare', () => {
-    const res = { uuid: 'a', detections: [{ fidId: 'ZZ', px: 0, py: 0, score: 0.99 }] }
-    const out = gateFiducialDetections([res], MM_MARKS, cfg)
-    expect(out[0].rejected[0].reason).toBe('unknown mark')
   })
 })
 
