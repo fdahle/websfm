@@ -134,7 +134,12 @@ pub(crate) fn p3p_lambda_twist(world: &[V3; 3], bearings: &[V3; 3]) -> Vec<(M3, 
                 };
                 if denom <= 1e-12 { continue; }
                 let scale = (a12 / denom).sqrt();
-                let lam = [scale * dir[0], scale * dir[1], scale * dir[2]];
+                let mut lam = [scale * dir[0], scale * dir[1], scale * dir[2]];
+                // The metric constraint is homogeneous in λ, and `dir` is built from
+                // (ar, 1) — its sign is arbitrary. A root whose λ comes out all-negative
+                // is the same solution pointing the other way, not an invalid one;
+                // discarding it dropped roughly half of all true poses.
+                if lam[0] < 0.0 && lam[1] < 0.0 && lam[2] < 0.0 { lam = [-lam[0], -lam[1], -lam[2]]; }
                 if lam[0] <= 0.0 || lam[1] <= 0.0 || lam[2] <= 0.0 { continue; } // depths must be positive
 
                 // Camera-frame points cᵢ = λᵢ·bᵢ, then rigid Procrustes world → camera.

@@ -57,6 +57,92 @@ mod tests {
         assert!(best < 1e-6, "P3P did not recover the true pose (best err {best})");
     }
 
+    // Deterministic LCG in [0,1) so a failure reproduces.
+    struct Lcg(u64);
+    impl Lcg {
+        fn f(&mut self) -> f64 {
+            self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            (self.0 >> 11) as f64 / (1u64 << 53) as f64
+        }
+        fn sym(&mut self, a: f64) -> f64 { (self.f() * 2.0 - 1.0) * a }
+    }
+    fn is_rotation(r: &M3) -> bool {
+        let rtr = mat3_mul(&mat3_transpose(r), r);
+        let mut off = 0.0;
+        for i in 0..3 { for j in 0..3 { off += (rtr[i][j] - if i == j { 1.0 } else { 0.0 }).abs(); } }
+        off < 1e-8 && (det3(r) - 1.0).abs() < 1e-8
+    }
+
+    // Single-pose tests passed by luck: a randomized sweep is what exposed the
+    // absolute svd3 rank threshold (rank-2 inputs → a non-rotation R) and P3P
+    // discarding every root whose direction came out with a negative sign.
+    #[test]
+    fn p3p_recovers_random_minimal_sets() {
+        let mut rng = Lcg(7);
+        let (mut ok, mut n) = (0, 0);
+        for _ in 0..2000 {
+            let r_true = so3_exp(&[rng.sym(1.5), rng.sym(1.5), rng.sym(1.5)]);
+            let t_true = [rng.sym(1.0), rng.sym(1.0), 4.0 + rng.f() * 4.0];
+            let world = [[rng.sym(2.0), rng.sym(2.0), rng.sym(2.0)],
+                         [rng.sym(2.0), rng.sym(2.0), rng.sym(2.0)],
+                         [rng.sym(2.0), rng.sym(2.0), rng.sym(2.0)]];
+            let e1 = [world[1][0] - world[0][0], world[1][1] - world[0][1], world[1][2] - world[0][2]];
+            let e2 = [world[2][0] - world[0][0], world[2][1] - world[0][1], world[2][2] - world[0][2]];
+            if norm3(&cross3(&e1, &e2)) < 0.5 { continue; } // near-collinear: genuinely ill-posed
+            let mut bearings = [[0.0; 3]; 3];
+            let mut behind = false;
+            for i in 0..3 {
+                let p = mat3_vec(&r_true, &world[i]);
+                let c = [p[0] + t_true[0], p[1] + t_true[1], p[2] + t_true[2]];
+                if c[2] < 0.5 { behind = true; }
+                bearings[i] = normalize3(&c);
+            }
+            if behind { continue; }
+            n += 1;
+            let best = p3p_lambda_twist(&world, &bearings).iter()
+                .map(|(r, t)| mat_diff(r, &r_true) + vec_diff(t, &t_true))
+                .fold(f64::INFINITY, f64::min);
+            if best < 1e-5 { ok += 1; }
+        }
+        assert!(ok as f64 >= 0.995 * n as f64, "P3P recovered {ok}/{n} random poses");
+    }
+
+    #[test]
+    fn procrustes_recovers_random_rigid_triples() {
+        let mut rng = Lcg(11);
+        let mut ok = 0;
+        for _ in 0..2000 {
+            let r_true = so3_exp(&[rng.sym(2.0), rng.sym(2.0), rng.sym(2.0)]);
+            let t_true = [rng.sym(5.0), rng.sym(5.0), rng.sym(5.0)];
+            let scale = [0.1, 1.0, 50.0][(rng.f() * 3.0) as usize % 3];
+            let world: [V3; 3] = [0, 1, 2].map(|_| [rng.sym(scale), rng.sym(scale), rng.sym(scale)]);
+            let cam: [V3; 3] = world.map(|w| { let p = mat3_vec(&r_true, &w); [p[0] + t_true[0], p[1] + t_true[1], p[2] + t_true[2]] });
+            if let Some((r, _)) = procrustes3(&world, &cam) {
+                if is_rotation(&r) && mat_diff(&r, &r_true) < 1e-6 { ok += 1; }
+            }
+        }
+        assert!(ok >= 1990, "procrustes3 recovered {ok}/2000 rigid triples");
+    }
+
+    #[test]
+    fn decompose_essential_yields_proper_rotations_at_realistic_norms() {
+        // ‖E‖ ≈ 3–4 is what E = KᵀFK produces for f = 1000–8000 px — the range the
+        // absolute threshold failed in.
+        let mut rng = Lcg(23);
+        for _ in 0..500 {
+            let r_true = so3_exp(&[rng.sym(0.5), rng.sym(0.5), rng.sym(0.5)]);
+            let t = normalize3(&[rng.sym(1.0), rng.sym(1.0), rng.sym(1.0)]);
+            let k = 2.0 + rng.f() * 2.0;
+            let tx = skew(&t);
+            let e0 = mat3_mul(&tx, &r_true);
+            let e: M3 = e0.map(|row| row.map(|v| v * k));
+            let cands = decompose_essential(&e);
+            for (r, _) in cands.iter() { assert!(is_rotation(r), "non-rotation candidate {:?}", r); }
+            let best = cands.iter().map(|(r, _)| mat_diff(r, &r_true)).fold(f64::INFINITY, f64::min);
+            assert!(best < 1e-6, "true rotation not among the candidates (err {best})");
+        }
+    }
+
     #[test]
     fn solve_pnp_recovers_pose_and_rejects_outliers() {
         let (fx, fy, cx, cy) = (800.0_f64, 800.0_f64, 320.0_f64, 240.0_f64);

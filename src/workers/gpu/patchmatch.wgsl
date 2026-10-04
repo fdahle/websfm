@@ -12,16 +12,20 @@
 // valid (w,h); the sample coordinate is clamped to [0,w-1]×[0,h-1] so we never
 // bilinear-sample into the zero padding (which would diverge from the CPU
 // reference). Texels (0..1) are scaled ×255 to match the reference's textureless
-// `denom` cutoff; ZNCC is otherwise scale-invariant.
+// VAR_FLOOR cutoff; ZNCC is otherwise scale-invariant.
 
 const PI : f32 = 3.14159265359;
 const HALF_PI : f32 = 1.57079632679;
 const MAX_SRC : u32 = 16u;
 // Sentinel: a source that provides no measurement (warp OOB / masked / <4 px /
-// textureless). aggCost excludes these instead of averaging a max cost 2.0 in
+// textureless REFERENCE patch). aggCost excludes these instead of averaging a max cost 2.0 in
 // (Step 1 — adaptive best-K over *valid* sources). Test with >= INVALID_THRESH.
 const INVALID : f32 = 1e9;
 const INVALID_THRESH : f32 = 1e8;
+// Per-patch intensity-variance floor (0..255 scale). Flat REFERENCE patch ⇒
+// INVALID (unmeasurable); textured ref onto a flat SOURCE patch ⇒ max cost 2.0
+// (bad hypothesis, never dropped from best-K). Identical in mvs.rs / planeCost.js.
+const VAR_FLOOR : f32 = 1e-6;
 
 struct Params {
   refW : u32, refH : u32, radius : i32, hasSeed : u32,
@@ -83,6 +87,10 @@ fn planeCost(si : u32, u : u32, v : u32, depth : f32, n : vec3<f32>) -> f32 {
   let mw = f32(params.maxW); let mh = f32(params.maxH);
   let sw = f32(s.w); let sh = f32(s.h);
   var sumR = 0.0; var sumS = 0.0; var sumRR = 0.0; var sumSS = 0.0; var sumRS = 0.0; var cnt = 0.0;
+  // Sums are over values SHIFTED by the first contributing sample. ZNCC is
+  // shift-invariant, but raw f32 sums (Σx² up to 255²·121 ≈ 7.9e6) minus n·mean²
+  // cancel catastrophically on bright low-contrast patches. Same in mvs.rs/planeCost.js.
+  var kR = 0.0; var kS = 0.0;
 
   for (var y = -params.radius; y <= params.radius; y = y + 1) {
     for (var x = -params.radius; x <= params.radius; x = x + 1) {
@@ -107,9 +115,12 @@ fn planeCost(si : u32, u : u32, v : u32, depth : f32, n : vec3<f32>) -> f32 {
       // Clamp to the valid region so bilinear never reaches the layer's zero pad.
       let cu = clamp(su, 0.0, sw - 1.0);
       let cv = clamp(sv, 0.0, sh - 1.0);
-      let rval = textureLoad(refTex, vec2<i32>(xi, yi), 0).r * 255.0;
-      let sval = textureSampleLevel(srcTexArr, samp,
-                   vec2<f32>((cu + 0.5) / mw, (cv + 0.5) / mh), layer, 0.0).r * 255.0;
+      let r0 = textureLoad(refTex, vec2<i32>(xi, yi), 0).r * 255.0;
+      let s0 = textureSampleLevel(srcTexArr, samp,
+                 vec2<f32>((cu + 0.5) / mw, (cv + 0.5) / mh), layer, 0.0).r * 255.0;
+      if (cnt == 0.0) { kR = r0; kS = s0; }
+      let rval = r0 - kR;
+      let sval = s0 - kS;
       sumR += rval; sumS += sval;
       sumRR += rval * rval; sumSS += sval * sval; sumRS += rval * sval;
       cnt += 1.0;
@@ -119,8 +130,9 @@ fn planeCost(si : u32, u : u32, v : u32, depth : f32, n : vec3<f32>) -> f32 {
   let mr = sumR / cnt; let ms = sumS / cnt;
   let vr = sumRR / cnt - mr * mr; let vs = sumSS / cnt - ms * ms;
   let cov = sumRS / cnt - mr * ms;
+  if (vr < VAR_FLOOR) { return INVALID; } // textureless REFERENCE patch → no measurement
+  if (vs < VAR_FLOOR) { return 2.0; }     // textured ref onto flat source → bad hypothesis
   let denom = sqrt(vr * vs);
-  if (denom < 1e-6) { return INVALID; } // textureless patch → no measurement
   return 1.0 - clamp(cov / denom, -1.0, 1.0);
 }
 

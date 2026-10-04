@@ -172,17 +172,33 @@ pub(crate) fn svd3(a: &M3) -> (M3, [f64; 3], M3) {
         for i in 0..3 { v[i][new_j] = v_cols[i][old_j]; }
     }
 
-    // U: left singular vectors U_j = (1/s_j) * A * v_j for non-degenerate s_j.
+    // U: left singular vectors U_j ∝ A * v_j for non-degenerate s_j.
     // A near-zero singular value gives no usable A·v_j direction; defer those.
+    //
+    // "Near-zero" must be RELATIVE. Singular values come from eig(AᵀA), so a rank-2
+    // input (every essential matrix; every 3-point Procrustes cross-covariance)
+    // reports s₃ ≈ √ε·s₁ ≈ 1.5e-8·s₁, not 0. An absolute 1e-9 cut let that through
+    // whenever s₁ ≳ 0.07, and A·v₃/s₃ is then noise over noise — U lost its third
+    // column and R = U·Vᵀ was not a rotation (P3P recovered 24% of random poses,
+    // Procrustes 65%, essential decomposition handed out non-rotations).
+    // The kept columns are Gram–Schmidt'ed so U is orthonormal to working precision.
+    let tol = 1e-6 * s[0];
     let mut u = [[0f64; 3]; 3];
     let mut degenerate = [false; 3];
     for j in 0..3 {
-        if s[j] < 1e-9 {
+        if !(s[j] > tol) || s[j] < 1e-300 {
             degenerate[j] = true;
         } else {
             let vj = [v[0][j], v[1][j], v[2][j]];
-            let avj = mat3_vec(a, &vj);
-            for i in 0..3 { u[i][j] = avj[i] / s[j]; }
+            let mut col = mat3_vec(a, &vj);
+            for k in 0..j {
+                if degenerate[k] { continue; }
+                let uk = [u[0][k], u[1][k], u[2][k]];
+                let d = dot3(&col, &uk);
+                for i in 0..3 { col[i] -= d * uk[i]; }
+            }
+            let col = normalize3(&col);
+            for i in 0..3 { u[i][j] = col[i]; }
         }
     }
     // Complete any degenerate column as the cross product of the other two, so U

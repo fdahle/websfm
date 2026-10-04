@@ -53,10 +53,17 @@ pub(crate) struct SrcView<'a> {
 }
 
 // Sentinel: a source that provides no measurement (warp OOB / masked / <4 px /
-// textureless). `agg_cost` excludes these instead of averaging a max cost 2.0 in
+// textureless REFERENCE patch). `agg_cost` excludes these instead of averaging a max cost 2.0 in
 // (adaptive best-K over *valid* sources). Test with `>= INVALID_THRESH`.
 pub(crate) const INVALID: f64 = 1e9;
 const INVALID_THRESH: f64 = 1e8;
+// Per-patch intensity-variance floor (0..255 scale, σ < 1e-3 grey levels). A flat
+// REFERENCE patch is unmeasurable ⇒ INVALID; a textured reference warped onto a
+// flat SOURCE patch (saturated snow, sky, shadow) is evidence against the
+// hypothesis ⇒ max cost 2.0 — as INVALID it would drop out of best-K and let a
+// wrong depth win on the one remaining source's chance correlation.
+// Identical in planeCost.js and patchmatch.wgsl (VAR_FLOOR).
+const VAR_FLOOR: f64 = 1e-6;
 // The worker and WebGPU kernel share this source-view ceiling. Keeping the robust
 // best-K candidates in a stack array avoids a heap allocation + full sort for every
 // PatchMatch hypothesis (many times per pixel on the CPU/WASM backend).
@@ -87,9 +94,9 @@ fn mean_best_costs(costs: impl Iterator<Item = f64>, best_k: usize) -> f64 {
 // mapping each reference sample through the plane (depth at (u,v), unit normal n)
 // induced homography. `radius` is the half-window; step keeps it cheap. Returns a
 // matching *cost* in [0, 2]: 0 = perfect correlation, 2 = anti-correlated. A
-// degenerate plane (bad hypothesis) scores the max cost 2.0; when the source
-// provides no measurement (warp OOB / masked / <4 px / textureless) it returns
-// the INVALID sentinel so `agg_cost` can exclude it rather than average it in.
+// degenerate plane or a flat source patch (bad hypothesis) scores the max cost
+// 2.0; when the source provides no measurement (warp OOB / masked / <4 px /
+// textureless reference patch) it returns the INVALID sentinel so `agg_cost` can exclude it rather than average it in.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn plane_cost(
     refimg: &[u8], rw: usize, rh: usize,
@@ -113,10 +120,14 @@ pub(crate) fn plane_cost(
     // For a reference pixel (x,y): ray = K_r⁻¹[x,y,1]; warped = K_s (R·ray + t·(n·ray)/d).
     // ZNCC needs only running sums, so the full window contributes regardless of
     // size (a previous fixed 32-sample buffer silently truncated window≥3 to a
-    // top-biased patch).
+    // top-biased patch). Values are SHIFTED by the first contributing sample
+    // (ZNCC is shift-invariant) so the sums stay small — mandatory in the f32 GPU
+    // kernel (raw Σx² minus n·mean² cancels on bright low-contrast patches), kept
+    // here so the three kernels are the same math.
     let mut sum_r = 0.0; let mut sum_s = 0.0;
     let mut sum_rr = 0.0; let mut sum_ss = 0.0; let mut sum_rs = 0.0;
     let mut cnt = 0.0;
+    let mut k_r = 0.0; let mut k_s = 0.0;
     let mut y = -radius;
     while y <= radius {
         let mut x = -radius;
@@ -146,8 +157,11 @@ pub(crate) fn plane_cost(
                 let mi = sv_ as usize * src.w + su as usize;
                 if mi < src.mask.len() && src.mask[mi] != 0 { return INVALID; }
             }
-            let rval = refimg[yi as usize * rw + xi as usize] as f64;
-            let sval = sample_gray(src.gray, src.w, src.h, su, sv_);
+            let r0 = refimg[yi as usize * rw + xi as usize] as f64;
+            let s0 = sample_gray(src.gray, src.w, src.h, su, sv_);
+            if cnt == 0.0 { k_r = r0; k_s = s0; }
+            let rval = r0 - k_r;
+            let sval = s0 - k_s;
             sum_r += rval; sum_s += sval;
             sum_rr += rval*rval; sum_ss += sval*sval; sum_rs += rval*sval;
             cnt += 1.0;
@@ -161,8 +175,9 @@ pub(crate) fn plane_cost(
     let var_r = sum_rr / cnt - mean_r*mean_r;
     let var_s = sum_ss / cnt - mean_s*mean_s;
     let cov = sum_rs / cnt - mean_r*mean_s;
+    if var_r < VAR_FLOOR { return INVALID; } // textureless REFERENCE patch — no measurement
+    if var_s < VAR_FLOOR { return 2.0; }     // textured ref onto flat source — bad hypothesis
     let denom = (var_r * var_s).sqrt();
-    if denom < 1e-6 { return INVALID; } // textureless patch — no measurement
     let ncc = (cov / denom).clamp(-1.0, 1.0);
     1.0 - ncc // cost in [0, 2]
 }
@@ -367,5 +382,67 @@ mod tests {
         assert!((mean_best_costs(costs.into_iter(), 3) - (0.1 + 0.2 + 0.5) / 3.0).abs() < 1e-12);
         assert!((mean_best_costs([0.4, INVALID].into_iter(), 3) - 0.4).abs() < 1e-12);
         assert_eq!(mean_best_costs([INVALID].into_iter(), 3), 2.0);
+    }
+
+    // Mirrors planeCost.test.js: identity pose, frontal plane ⇒ every reference
+    // pixel warps onto itself, so the source patch is exactly the given image.
+    fn cost_against(refimg: &[u8], srcimg: &[u8]) -> f64 {
+        let (w, h) = (16usize, 16usize);
+        let src = SrcView {
+            gray: srcimg, mask: &[], w, h,
+            fx: 20.0, fy: 20.0, cx: 8.0, cy: 8.0,
+            r: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+            t: [0.0, 0.0, 0.0],
+        };
+        plane_cost(refimg, w, h, 20.0, 20.0, 8.0, 8.0, &src, 8, 8, 5.0, &[0.0, 0.0, -1.0], 2)
+    }
+
+    fn ramp() -> Vec<u8> {
+        (0..256).map(|i| (((i % 16) * 7 + (i / 16) * 13) % 256) as u8).collect()
+    }
+
+    #[test]
+    fn flat_source_is_max_cost_not_invalid() {
+        let textured = ramp();
+        let flat = vec![255u8; 256]; // saturated snow
+        assert_eq!(cost_against(&textured, &flat), 2.0);
+    }
+
+    #[test]
+    fn flat_reference_is_invalid() {
+        let textured = ramp();
+        let flat = vec![255u8; 256];
+        assert_eq!(cost_against(&flat, &textured), INVALID);
+        assert_eq!(cost_against(&flat, &flat), INVALID);
+    }
+
+    #[test]
+    fn wrong_hypothesis_on_flat_sources_loses_best_k() {
+        // Wrong depth: two sources land on flat areas (now 2.0), one chance 0.25.
+        // True depth: three honest-but-noisy matches. Previously the flat sources
+        // were INVALID and the wrong hypothesis scored 0.25 < 0.35.
+        let wrong = mean_best_costs([2.0, 2.0, 0.25].into_iter(), 3);
+        let truth = mean_best_costs([0.30, 0.35, 0.40].into_iter(), 3);
+        assert!(truth < wrong);
+        let wrong_old = mean_best_costs([INVALID, INVALID, 0.25].into_iter(), 3);
+        assert!(wrong_old < truth); // documents the old failure
+    }
+
+    #[test]
+    fn shifted_sums_match_unshifted_textured_cost() {
+        // Bright, low-contrast patch: shifted and naive f64 formulations agree.
+        let refimg: Vec<u8> = (0..256).map(|i| 238 + ((i * 7 + i / 16) % 4) as u8).collect();
+        let srcimg: Vec<u8> = (0..256).map(|i| 238 + ((i * 5 + i / 16) % 4) as u8).collect();
+        let c = cost_against(&refimg, &srcimg);
+        // Naive reference over the same 5×5 window.
+        let (mut sr, mut ss, mut srr, mut sss, mut srs) = (0.0f64, 0.0, 0.0, 0.0, 0.0);
+        for y in 6..=10 { for x in 6..=10 {
+            let a = refimg[y * 16 + x] as f64; let b = srcimg[y * 16 + x] as f64;
+            sr += a; ss += b; srr += a * a; sss += b * b; srs += a * b;
+        } }
+        let n = 25.0;
+        let (mr, ms) = (sr / n, ss / n);
+        let naive = 1.0 - ((srs / n - mr * ms) / ((srr / n - mr * mr) * (sss / n - ms * ms)).sqrt()).clamp(-1.0, 1.0);
+        assert!((c - naive).abs() < 1e-9, "{c} vs {naive}");
     }
 }

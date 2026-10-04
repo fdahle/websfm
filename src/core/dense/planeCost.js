@@ -5,20 +5,36 @@
 // nearest reference sample, bilinear source sample, ZNCC over a (2r+1)² window,
 // cost = 1 − ncc in [0, 2]. Intensities are 0..255 (matches both the Rust path and
 // the GPU kernel, which scales its 0..1 texels back to 0..255 so the textureless
-// `denom` cutoff lines up).
+// VAR_FLOOR cutoff lines up).
 //
 // "No measurement" vs "bad hypothesis" (Step 1 — adaptive best-K over valid
 // sources): a source that cannot see the reference patch — the warp leaves the
-// source image, lands on a masked texel, covers <4 pixels, or is textureless —
-// yields NO measurement and returns the INVALID sentinel (1e9; test with ≥1e8).
+// source image, lands on a masked texel, or covers <4 pixels — or whose REFERENCE
+// patch is textureless (that pixel is unmeasurable against any source) — yields
+// NO measurement and returns the INVALID sentinel (1e9; test with ≥1e8).
 // Aggregation (aggregateValidCosts) EXCLUDES sentinels rather than averaging a
 // max-cost 2.0 in, so a source whose footprint doesn't cover the pixel can't
 // floor the aggregated cost. A degenerate *plane* (|n·P|<1e-9) is a bad
 // hypothesis, not a missing measurement, so it still scores the real max cost 2.0.
+// So does a textured reference warped onto a FLAT source patch (saturated snow,
+// sky, shadow): that is evidence against the hypothesis, not an absent
+// measurement. Treating it as INVALID let a wrong depth that lands on flat areas
+// in all but one source win on that one source's chance correlation.
+//
+// ZNCC is accumulated over values SHIFTED by the first contributing sample
+// (x − x₀, y − y₀). Mathematically identical (ZNCC is shift-invariant), but it
+// keeps the raw sums small: the GPU kernel runs in f32, where Σx² ≈ 255²·121 then
+// minus n·mean² cancels catastrophically on a bright low-contrast patch. The three
+// kernels share the formulation so they stay the same math.
 
 // Sentinel returned by planeCostRef when a source provides no measurement.
 // Aggregation treats any value ≥ 1e8 as "exclude from best-K".
 export const INVALID = 1e9
+
+// Per-patch intensity-variance floor (0..255 scale, i.e. σ < 1e-3 grey levels).
+// Below it a patch is "flat": reference ⇒ INVALID, source ⇒ max cost 2.0.
+// Identical in mvs.rs (VAR_FLOOR) and patchmatch.wgsl (VAR_FLOOR).
+export const VAR_FLOOR = 1e-6
 
 // Bilinear grayscale sample at (x, y); edge-clamped. Mirrors mvs.rs sample_gray.
 function sampleGrayBilinear(img, w, h, x, y) {
@@ -52,6 +68,7 @@ export function planeCostRef(ref, src, u, v, depth, n, radius) {
 
   const R = src.R, t = src.t
   let sumR = 0, sumS = 0, sumRR = 0, sumSS = 0, sumRS = 0, cnt = 0
+  let kR = 0, kS = 0 // shift = first contributing sample (keeps sums small)
   for (let y = -radius; y <= radius; y++) {
     for (let x = -radius; x <= radius; x++) {
       const xi = u + x, yi = v + y
@@ -72,8 +89,10 @@ export function planeCostRef(ref, src, u, v, depth, n, radius) {
       const sv = src.fy * (xs[1] / xs[2]) + src.cy
       if (su < 0 || sv < 0 || su >= src.w || sv >= src.h) return INVALID // warp left source → no measurement
       if (src.mask && src.mask[(sv | 0) * src.w + (su | 0)]) return INVALID // masked texel → no measurement
-      const rval = ref.gray[yi * ref.w + xi]
-      const sval = sampleGrayBilinear(src.gray, src.w, src.h, su, sv)
+      const r0 = ref.gray[yi * ref.w + xi]
+      const s0 = sampleGrayBilinear(src.gray, src.w, src.h, su, sv)
+      if (cnt === 0) { kR = r0; kS = s0 }
+      const rval = r0 - kR, sval = s0 - kS
       sumR += rval; sumS += sval
       sumRR += rval * rval; sumSS += sval * sval; sumRS += rval * sval
       cnt++
@@ -83,8 +102,9 @@ export function planeCostRef(ref, src, u, v, depth, n, radius) {
   const mr = sumR / cnt, ms = sumS / cnt
   const vr = sumRR / cnt - mr * mr, vs = sumSS / cnt - ms * ms
   const cov = sumRS / cnt - mr * ms
+  if (vr < VAR_FLOOR) return INVALID // textureless REFERENCE patch → no measurement
+  if (vs < VAR_FLOOR) return 2.0      // textured ref onto flat source → bad hypothesis
   const denom = Math.sqrt(vr * vs)
-  if (denom < 1e-6) return INVALID // textureless patch → no measurement
   const ncc = Math.max(-1, Math.min(1, cov / denom))
   return 1 - ncc
 }
