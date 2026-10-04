@@ -1,7 +1,7 @@
 import { attributeBuffers } from '../../core/io/cloudAttributes.js'
-import { cropCloud, filterCloud, mergeClouds, cloudCount } from '../../core/products/cloudEdit.js'
+import { cropCloud, filterCloud, mergeClouds, maskCloud, cloudCount } from '../../core/products/cloudEdit.js'
 
-// Cloud-editing ops (crop / filter / merge). Pure math lives in
+// Cloud-editing ops (crop / filter / merge / mask). Pure math lives in
 // core/products/cloudEdit.js; this file only marshals buffers. No injected worker
 // helpers (nothing here rasterises or touches wasm).
 //
@@ -30,7 +30,7 @@ export function makeCloudOps() {
     transfer.push(...attributeBuffers(out))
   }
 
-  // input: { mode: 'crop'|'filter'|'merge', clouds: [{ id, count, pos, col, nrm }],
+  // input: { mode: 'crop'|'filter'|'merge'|'mask', clouds: [{ id, count, pos, col, nrm }],
   //          settings }. Resolves to { cloud, error, home }.
   //
   // This op NEVER throws. The source buffers are already detached on the caller's
@@ -46,11 +46,13 @@ export function makeCloudOps() {
     try {
       if (!clouds.length) throw new Error('no source cloud')
       const t0 = performance.now()
-      emit('progress', [0, 1, mode === 'merge' ? 'Merging…' : `${mode === 'crop' ? 'Cropping' : 'Filtering'}…`])
+      const verb = { merge: 'Merging', crop: 'Cropping', mask: 'Applying selection' }[mode] ?? 'Filtering'
+      emit('progress', [0, 1, `${verb}…`])
 
       if (mode === 'crop') out = cropCloud(clouds[0], settings, log)
       else if (mode === 'filter') out = filterCloud(clouds[0], settings, log)
       else if (mode === 'merge') out = mergeClouds(clouds, settings, log)
+      else if (mode === 'mask') out = maskCloud(clouds[0], settings, log)
       else throw new Error(`unknown mode "${mode}"`)
 
       const before = clouds.reduce((s, c) => s + cloudCount(c), 0)

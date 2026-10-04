@@ -8,6 +8,7 @@ import { estimateUpFromCameras } from '../../core/sfm/geometry.js'
 import CloudLegend from './CloudLegend.vue'
 import { buildCloudStyle, scalarRange, sharedElevationRange, resolveCloudStyle } from '../../core/products/cloudStyle.js'
 import { viewerClipping } from '../../core/products/viewerClipping.js'
+import { screenSelectMask, maskIndices } from '../../core/products/screenSelect.js'
 
 const { gridZ, background, nearClip } = useViewerSettings()
 
@@ -24,7 +25,9 @@ const props = defineProps({
   sceneUp: { type: Array, default: null },
 })
 // Emits ribbon command ids so App's handleCommand routes them (toggles live in App).
-const emit = defineEmits(['command'])
+// `edit-selection` carries { edits: [{ cloudId, mask }], keepSelected } for App to
+// apply through the store's non-destructive cloud-edit path.
+const emit = defineEmits(['command', 'edit-selection'])
 
 const container = ref(null)
 // Set when WebGL is unavailable (headless/sandboxed/GPU-disabled). We degrade to an
@@ -118,6 +121,10 @@ const linearChannel = Float32Array.from({ length: 256 }, (_, i) =>
   new THREE.Color().setRGB(i / 255, 0, 0, THREE.SRGBColorSpace).r)
 let lastCameraMaps = []
 let knownCloudIds = new Set()
+// Set when a selection edit is committed: the cloud it adds (a derived fork of a
+// computed/imported source) replaces the one the user was zoomed into, so it must
+// not re-frame the scene the way a newly imported cloud does.
+let keepViewForEdit = false
 // Imported point buffers are immutable; replacing a buffer invalidates its range.
 const elevationRanges = new WeakMap()
 function cachedElevationRange(cloud) {
@@ -411,8 +418,10 @@ function setCloudLayers(clouds) {
   }
   // Fit newly added layers together, including distant survey tiles. Selection,
   // symbology and visibility toggles preserve the user's camera position.
-  if ((!hadContent || addedCloud) && cloudLayers.size) resetView()
+  if ((!hadContent || (addedCloud && !keepViewForEdit)) && cloudLayers.size) resetView()
+  if (addedCloud) keepViewForEdit = false
   updateClipping()
+  pruneSelections()
 }
 
 function zoomToCloud(id) {
@@ -496,6 +505,194 @@ function buildFrustums(cams, frustumDepth) {
 
 function clearReconstructionData() {
   setCloudLayers([])
+}
+
+// ── Point selection (rectangle / lasso) ──────────────────────────────────────
+// Left-drag draws a shape while a tool is active; orbit/pan/zoom keep working on
+// the other buttons and the wheel. Only dense clouds are selectable — a sparse
+// cloud's points carry view-tracks (see core/products/cloudEdit.js), and a mesh's
+// vertices are not points. The mask is computed over the exact Float32 buffer and
+// matrix being drawn (core/products/screenSelect.js), so the highlight IS the
+// selection. Selection is not reactive state: per-layer masks live here, keyed by
+// cloud id and stamped with the source buffer, and are dropped whenever that
+// layer's geometry is rebuilt.
+const selectTool = ref(null)       // null | 'rect' | 'lasso'
+const selectionCount = ref(0)
+const selectionClouds = ref(0)
+const drawShape = ref(null)        // { kind, points:[x,y,…] } in container px, for the SVG
+const selections = new Map()       // cloudId → { mask, selected, pos, overlay }
+let drawing = null                 // { op, startX, startY, pts }
+
+function selectableLayers() {
+  return [...cloudLayers].filter(([, l]) => l.source.kind === 'dense' && l.object.isPoints && l.object.visible)
+}
+
+function disposeSelectionOverlay(entry) {
+  if (!entry?.overlay) return
+  scene?.remove(entry.overlay)
+  disposeObject(entry.overlay)
+  entry.overlay = null
+}
+
+function refreshSelectionSummary() {
+  let total = 0, clouds = 0
+  for (const e of selections.values()) if (e.selected) { total += e.selected; clouds++ }
+  selectionCount.value = total
+  selectionClouds.value = clouds
+}
+
+// Highlight: a compact copy of only the selected positions, drawn on top without
+// depth testing, so points selected *behind* a surface show too — they will be
+// deleted along with the visible ones, and the user should see that. Not a shared
+// position attribute: disposing a geometry frees its attributes' GL buffers, which
+// would force a re-upload of the whole cloud.
+function buildSelectionOverlay(layer, entry) {
+  disposeSelectionOverlay(entry)
+  if (!entry.selected) return
+  const src = layer.object.geometry.getAttribute('position').array
+  const idx = maskIndices(entry.mask, entry.selected)
+  const pos = new Float32Array(idx.length * 3)
+  for (let k = 0; k < idx.length; k++) {
+    const i = idx[k] * 3
+    pos[k * 3] = src[i]; pos[k * 3 + 1] = src[i + 1]; pos[k * 3 + 2] = src[i + 2]
+  }
+  const geometry = new THREE.BufferGeometry()
+  geometry.setAttribute('position', new THREE.BufferAttribute(pos, 3))
+  const material = new THREE.PointsMaterial({
+    color: 0xff3d71, size: pointSize.value + 1, sizeAttenuation: false,
+    depthTest: false, depthWrite: false, transparent: true, opacity: 0.9,
+  })
+  const overlay = new THREE.Points(geometry, material)
+  overlay.position.copy(layer.object.position)
+  overlay.renderOrder = 10
+  scene.add(overlay)
+  entry.overlay = overlay
+}
+
+function clearSelection() {
+  for (const e of selections.values()) disposeSelectionOverlay(e)
+  selections.clear()
+  refreshSelectionSummary()
+}
+
+// Drop selections whose layer was removed or rebuilt (new buffer ⇒ stale mask).
+function pruneSelections() {
+  for (const [id, e] of selections) {
+    const layer = cloudLayers.get(id)
+    // A restyle that hides classes swaps the index buffer: a point selected while
+    // drawn may now be hidden, and must not be deleted unseen.
+    if (!layer || layer.source.pos !== e.pos || !layer.object.visible
+        || (layer.object.geometry.index ?? null) !== e.index) {
+      disposeSelectionOverlay(e)
+      selections.delete(id)
+    }
+  }
+  refreshSelectionSummary()
+}
+
+function toggleSelectTool(kind) {
+  selectTool.value = selectTool.value === kind ? null : kind
+}
+
+function pointerPx(e) {
+  const r = container.value.getBoundingClientRect()
+  return [e.clientX - r.left, e.clientY - r.top]
+}
+
+// Capture-phase on the container: runs before OrbitControls' own pointerdown on
+// the canvas, so a left-drag with a tool active never starts an orbit.
+function onSelectPointerDown(e) {
+  if (!selectTool.value || e.button !== 0 || !renderer || e.target !== renderer.domElement) return
+  if (drawing) return // a second pointer must not hijack the stroke in progress
+  e.stopPropagation()
+  e.preventDefault()
+  const [x, y] = pointerPx(e)
+  drawing = {
+    op: e.shiftKey ? 'add' : (e.altKey || e.ctrlKey || e.metaKey) ? 'subtract' : 'replace',
+    startX: x, startY: y, pts: [x, y],
+  }
+  container.value.setPointerCapture?.(e.pointerId)
+  drawShape.value = { kind: selectTool.value, points: [x, y, x, y] }
+}
+
+function onSelectPointerMove(e) {
+  if (!drawing) return
+  const [x, y] = pointerPx(e)
+  if (selectTool.value === 'rect') {
+    drawShape.value = { kind: 'rect', points: [drawing.startX, drawing.startY, x, y] }
+  } else {
+    const n = drawing.pts.length
+    if (Math.hypot(x - drawing.pts[n - 2], y - drawing.pts[n - 1]) >= 3) drawing.pts.push(x, y)
+    drawShape.value = { kind: 'lasso', points: drawing.pts.slice() }
+  }
+}
+
+function onSelectPointerUp(e) {
+  if (!drawing) return
+  const shapePx = drawShape.value
+  const op = drawing.op
+  drawing = null
+  drawShape.value = null
+  container.value.releasePointerCapture?.(e.pointerId)
+  if (!shapePx || !camera) return
+  const w = container.value.clientWidth, h = container.value.clientHeight
+  const ndc = shapePx.points.map((v, i) => (i % 2 === 0 ? (v / w) * 2 - 1 : 1 - (v / h) * 2))
+  const shape = shapePx.kind === 'rect'
+    ? { kind: 'rect', x0: ndc[0], y0: ndc[1], x1: ndc[2], y1: ndc[3] }
+    : { kind: 'lasso', points: ndc }
+  applySelectionShape(shape, op)
+}
+
+function applySelectionShape(shape, op) {
+  camera.updateMatrixWorld()
+  const viewProj = new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse)
+  const layers = selectableLayers()
+  const ids = new Set(layers.map(([id]) => id))
+  if (op === 'replace') {
+    for (const [id, e] of selections) if (!ids.has(id)) { disposeSelectionOverlay(e); selections.delete(id) }
+  }
+  for (const [id, layer] of layers) {
+    layer.object.updateMatrixWorld()
+    const matrix = viewProj.clone().multiply(layer.object.matrixWorld).elements
+    const geometry = layer.object.geometry
+    const prev = selections.get(id)
+    const base = prev && prev.pos === layer.source.pos ? prev.mask : null
+    const { mask, selected } = screenSelectMask(geometry.getAttribute('position').array, layer.count, {
+      matrix, shape, indices: geometry.index?.array ?? null, base, op,
+    })
+    const entry = prev ?? { overlay: null }
+    Object.assign(entry, { mask, selected, pos: layer.source.pos, index: geometry.index ?? null })
+    if (selected) { selections.set(id, entry); buildSelectionOverlay(layer, entry) }
+    else { disposeSelectionOverlay(entry); selections.delete(id) }
+  }
+  refreshSelectionSummary()
+}
+
+// Hand the masks to App (and on to the store). The masks are transferred to the
+// worker there, so the local selection is cleared immediately.
+function commitSelection(keepSelected) {
+  const edits = [...selections].filter(([, e]) => e.selected).map(([cloudId, e]) => ({ cloudId, mask: e.mask }))
+  if (!edits.length) return
+  clearSelection()
+  keepViewForEdit = true
+  emit('edit-selection', { edits, keepSelected })
+}
+
+function onSelectKey(e) {
+  if (!container.value?.offsetParent) return // tab hidden (v-show)
+  const t = e.target
+  if (t && (t.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName))) return
+  if (e.key === 'Escape' && drawing) {
+    // Abort the stroke in progress; the pointerup that follows finds nothing.
+    drawing = null
+    drawShape.value = null
+  } else if (e.key === 'Escape' && (selectionCount.value || selectTool.value)) {
+    if (selectionCount.value) clearSelection()
+    else selectTool.value = null
+  } else if ((e.key === 'Delete' || e.key === 'Backspace') && selectionCount.value) {
+    e.preventDefault()
+    commitSelection(false)
+  }
 }
 
 // ── Camera view presets ──────────────────────────────────────────────────────
@@ -631,17 +828,25 @@ watch(() => props.sceneUp, (u) => {
 
 // View-options sliders — cheap live updates, no cloud recompute.
 watch(cameraScale, () => { if (lastCams.length) buildFrustums(lastCams, lastBaseDepth * cameraScale.value) })
-watch(pointSize, (v) => { for (const { object } of cloudLayers.values()) if (object.isPoints) object.material.size = v })
+watch(pointSize, (v) => {
+  for (const { object } of cloudLayers.values()) if (object.isPoints) object.material.size = v
+  for (const e of selections.values()) if (e.overlay) e.overlay.material.size = v + 1
+})
 watch(nearClip, updateClipping)
 
 // No right-click context menu here on purpose: OrbitControls uses the right mouse
 // button to pan, so any menu competes with the primary navigation gesture. Coordinate
 // readout stays in the 2D views (image / map).
 
-onMounted(init)
+onMounted(() => {
+  init()
+  window.addEventListener('keydown', onSelectKey)
+})
 
 onBeforeUnmount(() => {
   cancelAnimationFrame(animationId)
+  window.removeEventListener('keydown', onSelectKey)
+  clearSelection()
   resizeObserver?.disconnect()
   clearFrustums()
   for (const { object } of cloudLayers.values()) disposeObject(object)
@@ -654,7 +859,9 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div ref="container" class="viewer" @contextmenu.prevent>
+  <div ref="container" class="viewer" :class="{ selecting: !!selectTool }" @contextmenu.prevent
+    @pointerdown.capture="onSelectPointerDown" @pointermove="onSelectPointerMove"
+    @pointerup="onSelectPointerUp" @pointercancel="onSelectPointerUp">
     <!-- WebGL unavailable: degrade gracefully instead of crashing app mount. -->
     <div v-if="glError" class="gl-error">
       <div class="gl-error-box">{{ glError }}</div>
@@ -664,6 +871,16 @@ onBeforeUnmount(() => {
     <div class="view-options">
       <button class="vo-btn" :class="{ active: showOptions }" title="View options"
         aria-label="View options" :aria-expanded="showOptions" @click="showOptions = !showOptions">⚙</button>
+      <button class="vo-btn" :class="{ active: selectTool === 'rect' }"
+        title="Rectangle select (dense clouds) — drag; Shift adds, Alt subtracts"
+        aria-label="Rectangle select" :aria-pressed="selectTool === 'rect'" @click="toggleSelectTool('rect')">
+        <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><rect x="2.5" y="3.5" width="11" height="9" fill="none" stroke="currentColor" stroke-dasharray="2 1.5"/></svg>
+      </button>
+      <button class="vo-btn" :class="{ active: selectTool === 'lasso' }"
+        title="Lasso select (dense clouds) — drag; Shift adds, Alt subtracts"
+        aria-label="Lasso select" :aria-pressed="selectTool === 'lasso'" @click="toggleSelectTool('lasso')">
+        <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M3 9c-1.5-3 1-6.5 5.5-6.5S14 5 13 8s-5 4-7.5 3.5S3 12 4.5 14" fill="none" stroke="currentColor" stroke-dasharray="2 1.5"/></svg>
+      </button>
       <div v-if="showOptions" class="vo-panel">
         <div class="vo-title">View options</div>
         <label class="vo-row">
@@ -679,6 +896,27 @@ onBeforeUnmount(() => {
       </div>
     </div>
     <CloudLegend v-if="showLegend" :layers="legendLayers" />
+
+    <svg v-if="drawShape" class="select-shape" aria-hidden="true">
+      <rect v-if="drawShape.kind === 'rect'"
+        :x="Math.min(drawShape.points[0], drawShape.points[2])" :y="Math.min(drawShape.points[1], drawShape.points[3])"
+        :width="Math.abs(drawShape.points[2] - drawShape.points[0])" :height="Math.abs(drawShape.points[3] - drawShape.points[1])" />
+      <polygon v-else :points="drawShape.points.join(' ')" />
+    </svg>
+
+    <div v-if="selectTool || selectionCount" class="select-bar" role="toolbar" aria-label="Point selection">
+      <template v-if="selectionCount">
+        <span class="sb-count">
+          {{ selectionCount.toLocaleString() }} point{{ selectionCount === 1 ? '' : 's' }} selected<template v-if="selectionClouds > 1"> in {{ selectionClouds }} clouds</template>
+        </span>
+        <button class="btn" title="Delete the selected points (Delete)" @click="commitSelection(false)">Delete</button>
+        <button class="btn" title="Keep only the selected points" @click="commitSelection(true)">Keep only</button>
+        <button class="btn" title="Clear the selection (Esc)" @click="clearSelection">Clear</button>
+      </template>
+      <span v-else class="sb-hint">
+        {{ selectableLayers().length ? 'Drag to select dense-cloud points · Shift adds · Alt subtracts · Esc exits' : 'Show a dense cloud to select its points' }}
+      </span>
+    </div>
   </div>
 </template>
 
@@ -749,6 +987,50 @@ onBeforeUnmount(() => {
   background: var(--hover-bg);
 }
 
+
+.viewer.selecting :deep(canvas) {
+  cursor: crosshair;
+}
+
+.select-shape {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.select-shape rect,
+.select-shape polygon {
+  fill: rgba(255, 61, 113, 0.12);
+  stroke: #ff3d71;
+  stroke-width: 1.5;
+  stroke-dasharray: 5 3;
+}
+
+.select-bar {
+  position: absolute;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100% - 32px);
+  padding: 6px 10px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  font-size: 12px;
+  color: var(--text);
+}
+.sb-count {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.sb-hint {
+  color: var(--text-dim);
+}
 
 .vo-panel {
   min-width: 210px;

@@ -41,7 +41,11 @@ describe('cloud symbology and attributes', () => {
     expect(out.style).toEqual(c.style)
     expect([...out.pos]).toEqual([...c.pos])
     const broken = { ...packed, buffers: { ...packed.buffers, attributes: new ArrayBuffer(1) } }
-    expect(() => deserializeCloud(broken, () => 'new')).toThrow(/attribute/)
+    // A damaged attribute sidecar drops the attributes, not the cloud (nor the restore).
+    const degraded = deserializeCloud(broken, () => 'new')
+    expect(degraded.attributes).toBeUndefined()
+    expect(degraded.attributeError).toMatch(/attribute/)
+    expect([...degraded.pos]).toEqual([...c.pos])
   })
   it('retains corresponding attributes through crop, merge and representative subsampling', () => {
     const c = cloud()
