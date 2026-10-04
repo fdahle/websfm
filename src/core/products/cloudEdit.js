@@ -185,6 +185,32 @@ export function cropCloud(cloud, { min = [], max = [], invert = false } = {}, on
   return selectPoints(cloud, keep, kept)
 }
 
+// ── Mask (interactive selection) ─────────────────────────────────────────────
+
+/**
+ * Apply a per-point selection mask from the 3D viewer's rectangle/lasso tool.
+ * `keepSelected: false` deletes the selected points, `true` keeps only them.
+ * The mask must cover the cloud exactly — a mask computed against a different
+ * cloud (the source was replaced mid-edit) would delete the wrong points, so a
+ * length mismatch throws rather than guessing.
+ *
+ * opts: { mask: Uint8Array(N), keepSelected = false }
+ */
+export function maskCloud(cloud, { mask, keepSelected = false } = {}, onLog) {
+  const n = cloudCount(cloud)
+  if (!mask || mask.length !== n) {
+    throw new Error(`selection covers ${mask?.length ?? 0} points but the cloud has ${n}`)
+  }
+  const keep = new Uint8Array(n)
+  let kept = 0
+  for (let i = 0; i < n; i++) {
+    if ((mask[i] !== 0) === keepSelected) { keep[i] = 1; kept++ }
+  }
+  onLog?.(`Selection: ${keepSelected ? 'kept' : 'deleted'} ${(keepSelected ? kept : n - kept).toLocaleString()}`
+    + ` selected of ${n.toLocaleString()} points`, 'info', 'Products')
+  return selectPoints(cloud, keep, kept)
+}
+
 // ── Filters ──────────────────────────────────────────────────────────────────
 
 /**

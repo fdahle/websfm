@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   cloudBounds, cloudCount, cropCloud, filterRange, removeIsolated,
   statisticalOutlierFilter, voxelDownsample, filterCloud, mergeClouds,
-  estimateSpacing, clampGridCell,
+  estimateSpacing, clampGridCell, maskCloud,
 } from './cloudEdit.js'
 
 // Build a flat cloud from [[x,y,z], …] plus optional colours/normals.
@@ -273,4 +273,23 @@ it('keeps survey precision when filtering, merging and downsampling imported clo
   const reduced = voxelDownsample(cloud, { cell: 0.001 })
   expect(reduced.pos).toBeInstanceOf(Float64Array)
   expect([...reduced.pos].filter((_, i) => i % 3 === 0).sort()).toEqual([7000000.01, 7000000.02])
+})
+
+describe('maskCloud', () => {
+  const src = makeCloud([[0, 0, 0], [1, 0, 0], [2, 0, 0]], { col: [[1, 1, 1], [2, 2, 2], [3, 3, 3]] })
+  const mask = new Uint8Array([0, 1, 0])
+
+  it('deletes the selected points, carrying colour', () => {
+    const out = maskCloud(src, { mask })
+    expect(xyzOf(out)).toEqual([[0, 0, 0], [2, 0, 0]])
+    expect(Array.from(out.col)).toEqual([1, 1, 1, 3, 3, 3])
+  })
+
+  it('keeps only the selected points', () => {
+    expect(xyzOf(maskCloud(src, { mask, keepSelected: true }))).toEqual([[1, 0, 0]])
+  })
+
+  it('refuses a mask computed against a different cloud', () => {
+    expect(() => maskCloud(src, { mask: new Uint8Array(2) })).toThrow(/covers 2 points/)
+  })
 })
