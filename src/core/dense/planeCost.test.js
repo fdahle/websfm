@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { planeCostRef, aggregateValidCosts, INVALID } from './planeCost.js'
+import { planeCostRef, aggregateValidCosts, INVALID, VAR_FLOOR } from './planeCost.js'
 
 // A textured w×h gray image (diagonal ramp) so ZNCC has variance to work with.
 function ramp(w, h) {
@@ -223,5 +223,111 @@ describe('aggregateValidCosts (best-K over valid sources)', () => {
 
   it('takes the k smallest of the valid costs when nValid > bestK', () => {
     expect(aggregateValidCosts([0.9, 0.1, 0.5, 0.3], 2)).toBeCloseTo(0.2, 12) // (0.1+0.3)/2
+  })
+})
+
+// A textured reference warped onto a FLAT source patch (saturated snow, sky,
+// shadow) is evidence AGAINST the hypothesis, not a missing measurement. As
+// INVALID it dropped out of best-K and let a wrong depth win on a single source's
+// chance correlation. Only a flat REFERENCE patch is genuinely unmeasurable.
+describe('flat patches: reference ⇒ INVALID, source ⇒ max cost', () => {
+  const gray = ramp(W, H)
+  const flat = new Uint8Array(W * H).fill(255) // saturated
+  const n = [0, 0, -1]
+
+  it('textured ref vs flat (255) source scores the max cost 2.0, not INVALID', () => {
+    const c = planeCostRef(refOf(gray), srcOf(flat), 8, 8, 5, n, 2)
+    expect(c).toBe(2.0)
+  })
+
+  it('flat ref returns INVALID whatever the source', () => {
+    expect(planeCostRef(refOf(flat), srcOf(gray), 8, 8, 5, n, 2)).toBe(INVALID)
+    expect(planeCostRef(refOf(flat), srcOf(flat), 8, 8, 5, n, 2)).toBe(INVALID)
+  })
+
+  it('a wrong hypothesis landing on flat sources no longer wins best-K', () => {
+    // Wrong depth: two of three sources see flat areas, the third a chance 0.25.
+    const flatCost = planeCostRef(refOf(gray), srcOf(flat), 8, 8, 5, n, 2)
+    const wrong = aggregateValidCosts([flatCost, flatCost, 0.25], 3)
+    // True depth: three honest-but-noisy matches.
+    const truth = aggregateValidCosts([0.30, 0.35, 0.40], 3)
+    expect(truth).toBeCloseTo(0.35, 12)
+    expect(wrong).toBeGreaterThan(truth) // (2+2+0.25)/3 ≈ 1.42
+    // The old behaviour (flat source ⇒ INVALID) let the wrong hypothesis win.
+    expect(aggregateValidCosts([INVALID, INVALID, 0.25], 3)).toBeLessThan(truth)
+  })
+})
+
+// The GPU kernel computes ZNCC in f32. From raw sums (Σx² ≈ 240²·121 ≈ 7e6) the
+// variance is a difference of two ~5.8e4 numbers whose true value is ~1 — f32's
+// ~7 significant digits leave ~1e-2 relative error. Shifting by the first sample
+// keeps every sum O(1)…O(100). Emulate both in f32 (Math.fround on every op) and
+// compare against the f64 cost.
+describe('ZNCC f32 precision (shifted accumulation, GPU emulation)', () => {
+  const f = Math.fround
+  function cost32(rv, sv, shifted) {
+    let sR = 0, sS = 0, sRR = 0, sSS = 0, sRS = 0, cnt = 0
+    let kR = 0, kS = 0
+    for (let i = 0; i < rv.length; i++) {
+      const r0 = f(rv[i]), s0 = f(sv[i])
+      if (shifted && cnt === 0) { kR = r0; kS = s0 }
+      const r = f(r0 - kR), s = f(s0 - kS)
+      sR = f(sR + r); sS = f(sS + s)
+      sRR = f(sRR + f(r * r)); sSS = f(sSS + f(s * s)); sRS = f(sRS + f(r * s))
+      cnt = f(cnt + 1)
+    }
+    const mr = f(sR / cnt), ms = f(sS / cnt)
+    const vr = f(f(sRR / cnt) - f(mr * mr)), vs = f(f(sSS / cnt) - f(ms * ms))
+    const cov = f(f(sRS / cnt) - f(mr * ms))
+    if (vr < VAR_FLOOR) return INVALID
+    if (vs < VAR_FLOOR) return 2.0
+    const denom = f(Math.sqrt(f(vr * vs)))
+    return f(1 - Math.max(-1, Math.min(1, f(cov / denom))))
+  }
+  function cost64(rv, sv) {
+    const nn = rv.length
+    const mr = rv.reduce((a, b) => a + b, 0) / nn, ms = sv.reduce((a, b) => a + b, 0) / nn
+    let vr = 0, vs = 0, cov = 0
+    for (let i = 0; i < nn; i++) {
+      const a = rv[i] - mr, b = sv[i] - ms
+      vr += a * a; vs += b * b; cov += a * b
+    }
+    return 1 - Math.max(-1, Math.min(1, cov / Math.sqrt(vr * vs)))
+  }
+  // Deterministic grey 240±1.5 patches (11×11, the kernel's max window), the
+  // source a noisy, partly correlated copy — bilinear samples are fractional.
+  let seed = 12345
+  const rnd = () => ((seed = (seed * 1103515245 + 12345) >>> 0) / 4294967296)
+  const patches = []
+  for (let p = 0; p < 200; p++) {
+    const rv = [], sv = []
+    for (let i = 0; i < 121; i++) {
+      const r = 240 + 3 * (rnd() - 0.5)
+      rv.push(r)
+      sv.push(Math.min(255, Math.max(0, 240 + 0.6 * (r - 240) + 1.2 * (rnd() - 0.5))))
+    }
+    patches.push([rv, sv])
+  }
+
+  it('shifted f32 sums agree with the f64 cost to < 1e-4', () => {
+    let maxErr = 0
+    for (const [rv, sv] of patches) maxErr = Math.max(maxErr, Math.abs(cost32(rv, sv, true) - cost64(rv, sv)))
+    expect(maxErr).toBeLessThan(1e-4)
+  })
+
+  it('unshifted f32 sums do NOT (the bug this formulation fixes)', () => {
+    const errs = patches.map(([rv, sv]) => Math.abs(cost32(rv, sv, false) - cost64(rv, sv))).sort((a, b) => a - b)
+    expect(errs[errs.length - 1]).toBeGreaterThan(1e-3)
+    expect(errs[errs.length >> 1]).toBeGreaterThan(1e-4) // median, not one outlier
+  })
+
+  it('planeCostRef (shifted f64) matches the textbook two-pass ZNCC', () => {
+    // Identity pose ⇒ the source patch is the source image itself.
+    const refG = new Uint8Array(W * H), srcG = new Uint8Array(W * H)
+    for (let i = 0; i < W * H; i++) { refG[i] = 238 + ((i * 7 + (i >> 4)) % 4); srcG[i] = 238 + ((i * 5 + (i >> 4)) % 4) }
+    const c = planeCostRef(refOf(refG), srcOf(srcG), 8, 8, 5, [0, 0, -1], 2)
+    const rv = [], sv = []
+    for (let y = 6; y <= 10; y++) for (let x = 6; x <= 10; x++) { rv.push(refG[y * W + x]); sv.push(srcG[y * W + x]) }
+    expect(Math.abs(c - cost64(rv, sv))).toBeLessThan(1e-9)
   })
 })

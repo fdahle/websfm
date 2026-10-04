@@ -396,8 +396,12 @@ pub fn bundle_adjust(
             let (px, py) = project_full(r, t, fx, fy, cx, cy, k1, k2, k3, &pts[pi]);
             if px.is_nan() { sum += dh * dh; continue; }
             let dx=px-ox; let dy=py-oy; let e=(dx*dx+dy*dy).sqrt();
-            let robust = if e <= dh { 1.0 } else { dh/e };
-            sum += robust * (wx*dx*dx + wy*dy*dy);
+            // The Huber loss the IRLS weight r = δ/e actually descends: ρ = q·(2r − r²)
+            // (= 2δe − δ² for unit weights), continuous with q at e = δ. Evaluating
+            // r·q (= δe) instead halved the outlier slope relative to the step model
+            // and the anchor/prior terms, so step acceptance judged a different cost.
+            let q = wx*dx*dx + wy*dy*dy;
+            sum += if e <= dh { q } else { let r = dh/e; q * (2.0*r - r*r) };
         }
         sum + anchor_sse(pts) + camera_prior_sse(cams)
     };
