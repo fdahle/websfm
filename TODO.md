@@ -26,7 +26,8 @@ closing the generality gap. Baselines to beat are in `HANDOVER.md` §Baselines.
 **Where we stand (audit refreshed 2026-09-01, after `0.1.0-beta.1`).** The feature
 gaps named in the 2026-07-07 audit have closed: mesh output (F3), COLMAP/OpenMVG/
 NVM/OpenSfM interop (F7), LAS+LAZ+COG+3D Tiles+undistorted images (F1), processing
-report (F8), dense point-cloud editing (F9 numeric half), project save/load and
+report (F8), point-cloud editing (F9: numeric filters, sparse gradual selection,
+3D rectangle/lasso delete), project save/load and
 folder-backed projects, learned front ends (SuperPoint/LightGlue/SAM2) with
 on-demand weights, and the usability track (profiler → recommendations → device
 budget → per-control prefills → visual Workflow Builder). What is
@@ -35,9 +36,9 @@ budget → per-control prefills → visual Workflow Builder). What is
 1. **Verification.** Most of what shipped since 2026-07-10 has never been run in a
    browser on real data. That is the credibility gap now, not any missing feature.
    It is tracked row-by-row in `VERIFICATION.csv` (123 checks; 48 at P1).
-2. Remaining feature gaps, all genuinely narrow: sparse gradual selection (F9),
-   measurement tools (F11 — its scale half shipped 2026-08-25), fisheye (F6), mesh texturing,
-   reference-DEM-constrained BA (F13).
+2. Remaining feature gaps: DEM-of-difference and 3D measurement (F11 — scale, 2D tools
+   and DEM volume shipped), ground classification → DTM (F14), mesh texturing, fisheye
+   (F6), reference-DEM-constrained BA (F13).
 
 ---
 
@@ -144,6 +145,78 @@ Related evidence: `VERIFICATION.csv` ▸ `FID-08` (the TMA set's implied 253 mm)
 ---
 
 ## Next
+
+### RV — 2026-10-03 code + maths review: verified, not yet fixed
+Each item was confirmed against the code (most with a measured number); the fixed
+ones are in HANDOVER. Ordered by expected impact.
+- **Dense half-pixel scaling**: working K uses `cx·s`; area resampling needs
+  `(cx+½)s−½` (same in detection and the pyramid). Cancels only when detection and
+  dense scales match.
+- **Cross-view depth filter has no parallax gate** (COLMAP's
+  `filter_min_triangulation_angle`): low-parallax views "confirm" sky, which then
+  survives in the persisted maps the ortho uses as a z-buffer.
+- **Voxel accumulator clamps out-of-bounds points into border cells** (bounds from a
+  16-px-stride sample, one pad cell): thin tall features collapse. Exact bounds or
+  pad by the depth range.
+- **PatchMatch refinement schedule** decays from the full depth range and restarts
+  per pyramid level; with 3 iterations the finest proposal is still ~12 % of range.
+  Perturb relative to the current depth (COLMAP).
+- **OPK convention**: `opkMatrix` is Rx·Ry·Rz used as object→photo; Pix4D documents
+  it as image→object. Pin with a real Pix4D/Metashape fixture before trusting OPK
+  orientation priors (κ flips on nadir if transposed).
+- **`transforms.json` points at raw (distorted) images** with a pinhole K, and at
+  scan dimensions with a canonical K for film. Export undistorted images with it.
+- **Accuracy statistics**: control residuals normalised by Σ_gcp only (Baarda's
+  Σ − Σ_ŷ reads ~35 % higher with 4 controls); LOO omits prediction covariance;
+  SfM-point uncertainty ignored; pose fits drop anisotropic σ; "RMS" is weighted.
+- **Rust numerics**: Jacobi stops on an absolute 1e-14 (matching + reconstruction);
+  F-RANSAC's final linear refit can replace the best model with one of fewer
+  inliers; no LO step; H/F ratio compares one-sided transfer error to Sampson.
+- **Smaller**: dense applies the calibrated bag with the refined K (explicit refine
+  string + calibrated lens only); a camera without a sensor loses its refined k1
+  unfolded; the composed radial bag is fitted about the final principal point only;
+  `estimateUpFromViewingDirs` tilts a single-heading oblique block's DEM.
+- **Performance**: every 3D selection edit runs `persist()` over every cloud (> 1 GB
+  per stroke with two 25 M-point clouds) — debounce or write only the changed
+  cloud; selection overlay allocates ~16 B/selected point per stroke; LAS import
+  always allocates ~29 B/point of attributes and subsamples attributed clouds with a
+  string key per point; `sparseMetrics` returns one object per point; restore reads
+  DEM/ortho before knowing it needs them.
+- **Find GCPs reads the whole reference raster at 1536 px**: a regional tile against
+  a drone block leaves the project a few dozen working pixels. Needs an approximate
+  footprint (EXIF/priors) to window the read — the ortho itself is relative.
+- **Structure** (god-file audit): unify Ribbon guards with `core/help/commands.js`
+  `NEED_CHECKS` (one `state` prop instead of ~18); extract `core/sfm/ingest.js`
+  (sfm.js 304–508); the survey-constraint builders moved to
+  `core/sfm/surveyConstraints.js` (2026-10-04), but the anchored/prior BA *loops*
+  are still in sfm.js and still lack one shared `buildBaObservations` (which also
+  removes a per-observation `indexOf`); move the
+  sparse-input marshaller out of `reconstruct()` into `stores/reconstruction/`;
+  split fusion out of `mvs.js` with one shared windowed depth-agreement helper.
+
+### FD — fiducial detection: remaining improvements (2026-10-03 gap analysis)
+Shipped 2026-10-04: native refine ~70× cheaper, single decode, memory-bounded
+concurrency, opposite-pair shape gate, donor/consensus/missing-slot/sidebar fixes.
+Open, ranked for 100–1000-scan batches:
+- **Rotation / mirroring per scan (M–L).** Detection is raster-relative, so a scan
+  fed 180° rotated swaps slot identities and gets a wrong principal point; a scan
+  mirrored relative to the batch lands mirrored in the canonical frame. Evidence:
+  data-strip position, asymmetric marks, a learned-template probe (the dead
+  rotation probe in `fiducialDetect.js` `detectFiducialsInImage`). Store `rotationK`/`mirrored` per image.
+- **Batch-mean template + 2-D sub-pixel peak (M).** Align the accepted native crops
+  per slot, average them, re-match every image (not only incomplete ones), and
+  replace the separable parabola with a 2-D quadratic / Lucas–Kanade step. Test:
+  synthetic marks with known sub-pixel offsets, RMS < 0.1 px.
+- **Auto-map slots to the certificate (S).** Best D4 rotation/reflection + similarity
+  from slot geometry to the certificate mm, instead of the hand mapping in
+  `FiducialCalibrateModal`.
+- **Review UX (M).** Persist drafts (`reviewed:false`, excluded from
+  `calibratedFiducialPairs`) so a closed modal doesn't lose the queue; bulk "accept
+  all ≥ x".
+- **Cropped / border-less scans (S).** Low frame confidence makes every hit a draft;
+  fall back to raster-relative acceptance when the batch consensus agrees.
+- **Test gap**: `detectFiducialsForSensor` orchestration (retry, consensus/shape
+  demotion, overwrite, masks) has no test; extract it to a pure function first.
 
 ### EX — external reference data (DEM / ortho)
 Import georeferenced rasters you did **not** produce and use them as ground truth.
@@ -340,24 +413,18 @@ heal — they close the window rather than react to it.
 
 ## Later — features
 
-### F9 — remaining interactive point-cloud editing
-The numeric **dense** half shipped 2026-07-22 (Tools ▸ Point Cloud: filter / crop /
-merge, `core/products/cloudEdit.js`). Sparse gradual selection shipped 2026-09-27 (Filter Cloud → Sparse gradual selection).
-What remains needs interactive 3D selection:
-- **Interactive**: box/lasso select in Viewer3D → delete selected (three.js
-  raycast/frustum). Cheaper than it was — the delete is `cropCloud`/`selectPoints`
-  with a caller-supplied mask, so this is a selection-UI task plus one core entry
-  point. Still needs the "new derived cloud vs persisted delete mask" decision.
-
 ### F11 — measurement tools (scale shipped 2026-08-25)
 **Scale constraints shipped** (slice 1, WS0–WS2: markers, scale bars, the
 `effectiveFrameSpec` resolver, residual reporting, staleness) — see HANDOVER
 2026-08-25 and `VERIFICATION.csv` ▸ `MEAS-01`…`MEAS-04`, `MEAS-10`…`MEAS-13`.
 The 2026-09-27 slice added saved 2D ruler/polyline, planimetric area and DEM
 profiles with CSV export and source/frame staleness; synthetic Chromium coverage is in `workflow-tools.spec.js`.
-What remains is 3D picking/rulers, true surface area and volume.
+Volume cut/fill on a DEM polygon (plane/lowest/custom base, coverage-reported holes)
+shipped 2026-10-03. What remains is 3D picking/rulers, true surface area, and a
+**DEM-of-difference** volume (computed DEM vs an imported reference DEM, sampled
+through `useExternalStore`'s reprojected query — the multi-epoch change product).
 - **Remaining measurement tools** (Pix4D rayCloud): 3D ruler/polyline, true surface
-  area and volume cut/fill. Extend the shipped
+  area, and DEM-of-difference volume. Extend the shipped
   `core/products/measure.js`; the one new *interaction*
   primitive is 3D picking, which `Viewer3D.vue` has none of today. The saved 2D half is shipped. **Ship additional pure core with its consumer, not before** — `preflight.js`
   above is the standing example of why.
@@ -366,6 +433,20 @@ What remains is 3D picking/rulers, true surface area and volume.
   frame and the marker role are already in place, so this is now viewer work.
 Plan: `docs/planning/plan-scale-and-measurement.md` ▸ WS3–WS7 (WS0–WS2 done;
 delete the file once the measurement slices ship; unsigned checks stay in the register).
+
+### F14 — ground classification → DTM
+websfm is a general tool, so "DSM ≈ DTM on bare terrain" is not a reason to skip this:
+vegetated and built-up drone sites need a bare-earth model. Today the DEM bins dense
+heights per cell (`core/products/dem.js`), which yields a DSM. Imported LAS
+classifications are already displayed (`core/products/cloudStyle.js`) but nothing
+produces or consumes them.
+- **Automatic ground filter** writing a `classification` attribute on a derived dense
+  cloud (cloth-simulation or progressive-morphology filter; parameters in metres
+  through `effectiveFrameSpec`, refused in model units).
+- **DEM from selected classes** (DemModal: "all points" vs "ground only"), which is
+  what makes the DTM. LAS/LAZ export must carry the attribute.
+- Manual reclassification can reuse the 3D rectangle/lasso selection (F9) with an
+  "assign class" action next to Delete / Keep only.
 
 ### F13 — reference-DEM-constrained bundle adjustment
 Anchor sparse points to an imported reference DEM surface as a weak "the ground is

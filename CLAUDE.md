@@ -137,7 +137,10 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
   load; matching handedness tips the model on its side), and the ECEF transform is
   **measured** from probe points one project-CRS unit east/north rather than
   assuming grid axes are ENU — that shortcut is fine mid-latitude and badly wrong
-  near the poles, where convergence approaches the longitude difference itself,
+  near the poles, where convergence approaches the longitude difference itself.
+  The probes carry the projection scale factor k into the horizontal axes; the up
+  axis must NOT inherit it (heights are not scaled by k — 2.6 % at 85°S), so it is
+  the unit ellipsoid normal × metres per vertical unit,
   `wkt.js` — minimal OGC WKT1
   for `.prj` (WGS84 geographic + UTM zones formulaic, else null → caller writes the
   raw proj4/EPSG string), `colormap.js`, `report.js` — `buildReportHtml` assembles one
@@ -641,23 +644,29 @@ self-contained, file-based project format.
      estimates a batch layout; `core/sfm/fiducialCalibration.js` validates
      conformal/affine/projective fits. Reconstruction is the join point via
      `calibratedFiducialPairs`; detections without calibration never alter SfM.
-     Legacy `fiducialObs`/`sensor.fiducials` migrate on restore and their original
-     detector remains compatibility code. `fiducialDetection.js` (anonymous slots)
-     and `fiducialBootstrap.js` (calibrated layout) are two **policies** over one
-     set of primitives in `core/sfm/fiducialPrimitives.js` — analytic prototype,
-     film-frame estimate, best ZNCC peak. They were forked copies once and drifted
-     into two live bugs; add shared math there, not in either policy.
-     **A wrong-but-confident mark is caught across images, never within one**
+     Legacy `fiducialObs`/`sensor.fiducials` migrate on restore (the old
+     layout-driven detector was deleted 2026-10-04). `fiducialDetection.js`
+     (anonymous slots) is a **policy** over the primitives in
+     `core/sfm/fiducialPrimitives.js` — analytic prototype, film-frame estimate,
+     best ZNCC peak; `fiducialDetect.js` is the ZNCC template matcher behind the
+     batch retry. Two policies once kept forked copies of those primitives and
+     drifted into two live bugs; add shared math to the primitives, never a policy.
+     **A wrong-but-confident mark is caught by geometry, never by its own score**
      (`core/sfm/fiducialConsensus.js`, run by `detectFiducialsForSensor` once the
-     whole batch is in): a slot sits at the same frame-relative place in every scan
-     of a flight, so anything else near it (a data-strip annotation block) gives
-     itself away only by disagreeing with the batch — its own ZNCC score looks
-     healthy. Demotes to the review queue, never deletes. Same two rules as the
+     whole batch is in) — its ZNCC looks healthy. Two independent checks: across
+     images, a slot sits at the same frame-relative place in every scan of a flight,
+     so a data-strip blob disagrees with the batch (`fiducialBatchConsensus`, ≥4
+     images); within one image, the layout is centrally symmetric and an affine scan
+     keeps midpoints, so opposite marks' midpoints must coincide
+     (`fiducialShapeCheck`). Both demote to the review queue, never delete, and both
+     judge the same unfiltered snapshot; donor templates come only from marks that
+     pass both (a confident wrong donor becomes every retry's template). Same two rules as the
      dense cross-view filter: every slot's consensus is computed **before** anything
      is demoted (else image i is judged against i−1's already-thinned set, making the
      result order-dependent), and the batch uses **one** normalisation basis —
-     frame-relative when every row has a usable film frame, else raster-relative for
-     all, since comparing the two is meaningless.
+     frame-relative when every row has a usable film frame (one the detector itself
+     trusts: `minFrameConfidence`), else raster-relative for all, since comparing the
+     two is meaningless.
      **A ZNCC template must be odd-sized** — `znccAt` derives
      `half = (size−1)/2`, and an even size makes every pixel read a fractional
      index, i.e. `undefined` → NaN → a score of 0 that looks like an honest
@@ -786,7 +795,13 @@ self-contained, file-based project format.
    — every edit ADDS a cloud flagged `derived: true` (persisted; absent ⇒ false),
    which `upsertDenseCloud` skips exactly as it skips `imported`, while `imported`
    is *inherited* from the source so the sidebar's Products-vs-Reference split still
-   holds. (3) **`editCloud` never throws**: the store transfers the source buffers
+   holds. The one exception is the 3D viewer's rectangle/lasso selection
+   (`mode:'mask'`, `core/products/screenSelect.js`): on a cloud that is *already*
+   derived it replaces that cloud in place, because interactive cleanup is many small
+   strokes and a full copy per stroke exhausts memory. Computed/imported clouds are
+   still never touched — their first mask edit forks a derived copy. The mask is
+   computed over the Float32 **render** buffer and the matrix that drew it (never
+   re-derived from the Float64 source), so the highlight is the selection. (3) **`editCloud` never throws**: the store transfers the source buffers
    in, so a rejected call would leave the user's cloud detached — failures return
    `{ cloud: null, error }` with the inputs round-tripped home under `home[]`, and
    the store re-attaches those *before* any early return. `removeIsolated` is the
@@ -958,9 +973,14 @@ target image's own mark, so it's the fitted estimate, not an independent predict
 it exists only because the guide on the marked image retires, making this the one way
 to observe the refinement where the user is looking. A "did not move" reading usually
 means the robust fit **rejected** the new mark, not that refinement is stuck.
-Guides are **advisory, never inputs to the fit**, and share
-`gcpAccuracyReport`'s raw-pixel/pinhole frame (see METHODS.md §6.4) — consistent
-with the reprojection numbers, approximate on a heavily distorted lens.
+Guides are **advisory, never inputs to the fit**. **Marks live in scan pixels,
+cameras in the pinhole/canonical frame**: every GCP/marker triangulation (guides,
+georef fit, accuracy report, scale bars, anchored BA) maps marks through
+`core/sfm/displayFrame.js` `gcpsInPinholeFrame` first, and guides come back through
+`guideToScan`. The per-image chain comes from ONE join, `makeFrameModelResolver`
+(summary + sensors → `{ dist, selfCal, fiducial }`) — copies of that join had
+drifted. Inside `sfm.js`, whatever moves an image's keypoints (ingest
+undistortion, the self-cal fold) must move its GCP marks too (`moveGcpObs`).
 **Never add snap-to-guide.** A guide comes *from* the reconstruction, so snapping a
 mark to it feeds the model's estimate back in as ground truth; GCPs must stay
 independent evidence that can correct the model, and the guide-vs-click gap is the
@@ -997,6 +1017,18 @@ against a poor seed fit. The *final* georeference used for DEM/ortho is still a
 fresh post-hoc fit against whatever cameras this leaves in the sparse cloud, not
 this pass's scratch state — anchoring only needs to be "good enough to help
 convergence".
+**A similarity to a projected CRS is fitted in a local metric frame, never in grid
+units** (`core/products/localFrame.js`): grid E/N carry the point scale factor k and
+no curvature, which left metres of error on error-free polar control. The frame rides
+on the fit as `sim.local`, so every consumer must go through `applySimilarity` /
+`frameFromSimilarity` — applying `s·R·x + t` by hand silently drops it. A fit without
+`sim.local` is the legacy grid fit and still valid. BA uses the same idea: GCP anchors
+and camera priors are converted into ONE survey frame (`cameraPriors.js`
+`surveyFrameFor`) before marshalling, and the constraint builders live in
+`core/sfm/surveyConstraints.js` — any BA that refines a surveyed model (gradual
+selection today) must reuse them, or it can undo the survey correction while its
+reprojection cost drops. Raster measurements likewise divide grid values by k (areas
+and volumes by k², heights never).
 GCP pixel marks are inverse-variance weighted in N-view triangulation and BA.
 Horn seeds a seven-parameter generalized least-squares refinement under each
 GCP's full precision matrix. Accuracy reporting includes Mahalanobis residuals
@@ -1110,6 +1142,13 @@ propagate covariance rather than retaining stale numeric sigmas.
   rejected if the transcode failed — detection/dense error loudly rather than
   fall back to the lossy JPEG). Non-TIFF/native-decode/restored images are ready
   immediately.
+- **Never `watch` an array-returning getter to detect a change** —
+  `watch(() => [a, b], cb)` builds a new array on every evaluation, so it fires
+  whenever any dependency re-triggers, including a parent re-render that merely
+  recreates an object prop. Use the multi-source form `watch([() => a, () => b])`,
+  which compares each source. It bit RasterMeasurements: once the Ribbon displayed
+  the active tool, choosing a tool re-rendered App, recreated `frameStatus`, and
+  the "raster changed" watch reset the tool to Pan immediately.
 - **NEVER spread a typed array into a variadic call** — `Math.max(...plane)`,
   `Math.min(...)`, `arr.push(...big)`. V8 throws `RangeError: Maximum call stack
   size exceeded` past ~124k arguments, and every pixel plane in this app is far
@@ -1125,7 +1164,11 @@ propagate covariance rather than retaining stale numeric sigmas.
   stem) and only falls to a looser tier when every stricter one missed — a linear
   "exact OR stem" scan decides per *candidate* instead, so an earlier stem hit beats
   a later exact hit. Build it once per image-list change (a `computed` in each
-  store), never per lookup.
+  store), never per lookup. **Re-linking after an image-list change is id-first**
+  (`relinkImageRecord`): a record whose `imageId` still exists keeps it and adopts
+  the image's current name; only an unlinked record resolves by name. Re-resolving
+  every record by its stored name silently detached all marks/poses/footprints of a
+  *renamed* image (rename is label-only, the id is the link).
 - **A canvas overlay redraw is rAF-coalesced, never called per event.**
   `ViewerImage.vue`'s `drawOverlay()` schedules; `renderOverlay()` draws and is
   private. 18 prop watchers feed it and one user action commonly trips several, so
@@ -1293,6 +1336,12 @@ propagate covariance rather than retaining stale numeric sigmas.
   Chrome) on the same fixed input as the crate's `#[ignore]`d `parity_digest` test —
   the two digests must match exactly. `cargo check --target wasm32-unknown-unknown`
   at minimum proves the intrinsics still compile.
+- **Geometry solver tolerances are relative, and their tests are randomized.** A
+  3×3 SVD via eig(AᵀA) reports a rank-2 matrix's s₃ as ≈ √ε·s₁, never 0, so an
+  absolute "near zero" cut silently passed noise into U — P3P recovered 24% of random
+  poses and essential decomposition returned non-rotations, while the single-pose
+  unit tests passed by luck. Pin a solver with a few thousand random, well-posed
+  instances at realistic magnitudes (‖E‖ ≈ 3–4 for E = KᵀFK), not one hand-picked case.
 - SIFT's scale-space is built **incrementally** and each octave's base already carries
   σ0 — do not re-blur it (see METHODS.md §2; re-blurring flattens DoG contrast and
   silently eats coarse-scale keypoints). Kernel radius is 3σ, so blur cost is dominated
@@ -1363,7 +1412,10 @@ propagate covariance rather than retaining stale numeric sigmas.
 ## Interactive raster and sparse tools
 
 - `RasterMeasurements.vue` consumes `core/products/measure.js` in the active
-  ProductViewer. `useMeasurementsStore` persists named snapshots to
+  ProductViewer. Tools are chosen from the Ribbon's contextual raster tab
+  (Measure group, `measure-*` commands); the viewer only draws (drawing bar,
+  result card, saved list) and reports its state up through ProductViewer's
+  `measureState` → App's `activeRasterTab.measure`. `useMeasurementsStore` persists named snapshots to
   `measurements.json`; source identity, generation and frame stamps flag stale
   results. Vertices use the recorded raster frame. Profiles retain nodata gaps.
 - `FindGcpsModal.vue` consumes bounded reference reads, worker SIFT/homography

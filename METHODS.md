@@ -298,7 +298,13 @@ New cameras are added one at a time (`solve_pnp` in `crates/reconstruction`):
 - **P3P — Lambda-Twist** (Persson & Nordberg, ECCV 2018) as the minimal solver
   inside RANSAC. Recovers per-point depths along the bearing rays, reconstructs
   the 3 points in the camera frame, aligns to world with a rigid **Procrustes**
-  fit. Chosen over DLT resection because it is far more stable on the **near-planar**
+  fit. The depth direction from each conic root is sign-ambiguous (the metric
+  constraint is homogeneous), so an all-negative λ is negated, not discarded; and
+  the 3×3 SVD behind Procrustes and the essential decomposition treats a singular
+  value as zero **relative** to the largest (rank-2 inputs report s₃ ≈ √ε·s₁, not 0).
+  Both were silent losses until 2026-10-03: P3P recovered 24% of random noise-free
+  minimal sets and the essential decomposition could return non-rotations.
+  Chosen over DLT resection because it is far more stable on the **near-planar**
   geometry of aerial/terrain scenes — this is "the reason aerial cameras register".
 - **MSAC** robust scoring (RANSAC variant with a smooth truncated cost) over the
   P3P hypotheses.
@@ -393,7 +399,8 @@ family as COLMAP's BA; the specifics:
   iterative preconditioned-CG Schur solve at very large camera counts.
 - **Robust cost**: **Huber**, with an **adaptive threshold** = 2.5 × median
   residual (recomputed each outer iteration, floored at 1 px), applied as an IRLS
-  weight `w = min(1, δ/‖r‖)`. Tracks the noise floor as the model tightens so
+  weight `w = min(1, δ/‖r‖)`. Step acceptance evaluates the loss that weight
+  descends, ρ = q·(2w − w²) (= 2δ‖r‖ − δ² for unit weights), not w·q. Tracks the noise floor as the model tightens so
   gross mis-triangulations don't drag the solution.
 - **LM damping**: standard multiplicative λ schedule with up to 8 damping retries
   per iteration; a step is accepted only if it lowers the robust cost, and the
@@ -480,8 +487,13 @@ models retain their two-view structure rather than being emptied by this policy.
 
 **Model**: **Brown–Conrady** — radial `k1,k2,k3` + tangential `p1,p2`.
 Forward: `x_d = x·(1 + k1·r² + k2·r⁴ + k3·r⁶) + [2·p1·xy + p2·(r²+2x²)]` (and the
-symmetric `y_d`), in normalised coords. Inverse by **fixed-point iteration** (the
-standard OpenCV scheme, ~8 iterations; strong fisheye is explicitly out of scope).
+symmetric `y_d`), in normalised coords. Inverse by **Newton's method on the exact
+forward model** with backtracking, to a tolerance (not OpenCV's fixed count of
+fixed-point steps, which was 0.46 px off at a 4000×3000/f=3000 corner for k1=−0.18 and
+3.4 px at −0.20 — errors the self-cal fold baked into every keypoint). Where the
+forward curve r·(1+k1r²+…) turns back before the observed corner radius no inverse
+exists; the self-cal guard rejects such a bag (`radial-fold`) before it is folded.
+Strong fisheye remains out of scope.
 
 **Selectable distortion models** (`DISTORTION_MODELS`, chosen per sensor):
 `pinhole` (none) · `radial` (k1) · `radial2` (k1,k2) · `brown` (k1,k2,k3,p1,p2).
@@ -532,6 +544,14 @@ same per-image transform (recorded in the run summary — it must **not** re-fit
 composes `canonicalToScan` into its raster sample map. GCP observations, which are
 also in scan space, are pushed through the same map at ingest.
 
+**Axis orientation**: certificates conventionally give fiducial coordinates
+**y-up**, while scan rows run down, so scan→mm is a *reflection* (det < 0). Mapping
+mm-y straight to canonical pixel-y would make the canonical image a mirror of the
+scan — a left-handed camera and a mirrored model that no proper similarity can
+georeference. When the sensor's fits are reflections, the canonical frame flips y
+(`ySign: −1`) so the canonical camera stays proper. Frames recorded before this carry
+no `ySign` and keep their original mapping, so an existing model stays consistent.
+
 **Distortion ordering**: the certificate's radial distortion is defined in the
 camera mm frame about the principal point, so the chain is
 `scan px →(affine)→ mm →(lens undistort)→ ideal mm → canonical px`. Since the
@@ -557,7 +577,20 @@ fiducials.
 Across a batch, normalized positions are combined per slot and the strongest safe
 scan supplies real ZNCC donor patches. Incomplete scans are retried around those
 batch-relative positions. This improves appearance matching without introducing a
-metric layout dependency. Confident candidates are persisted as
+metric layout dependency.
+
+The native refine searches only ±3 coarse pixels with the coarse winner's prototype
+variant and polarity (`nativeRefinePlan`): the coarse peak is already sub-pixel, so
+re-sweeping every orientation across a wide window cost ~70× more and could only add a
+wrong-orientation peak. Two independent checks then demote suspect marks to review
+(never delete), both on the same unfiltered set. **Batch consensus** compares each
+slot with the rest of the flight in frame-relative coordinates (raster-relative when
+any frame is missing or below the detector's confidence floor). The **opposite-pair
+shape gate** (`fiducialShapeCheck`) needs no batch: a camera's fiducials are
+centrally symmetric, and an affine scan preserves midpoints, so the midpoints of
+opposite marks must coincide (tolerance 0.2 % of the mark extent). With ≥3 pairs the
+pair off the median centre is named; with 2 disagreeing pairs both go to review.
+Donor templates are drawn only from marks that pass both checks. Confident candidates are persisted as
 `fiducialDetections`; uncertain candidates remain drafts until explicitly accepted
 or rejected. A confident measured frame may also generate a mask for scanner
 background outside the film rectangle.
@@ -571,77 +604,25 @@ Uncalibrated detections remain useful for review but have no effect on sparse or
 dense reconstruction. Legacy observation/layout records are migrated on project
 restore.
 
-#### Legacy calibrated-layout measurement (`core/sfm/fiducialDetect.js`)
+#### Template retry (`core/sfm/fiducialDetect.js`)
 
-The earlier layout-dependent detector remains compatibility code for migrated
-projects and unusual prepared-reference workflows; it is no longer the Detect
-Fiducials UI path.
+Scans the analytic prototypes left incomplete are retried with **real scan patches**:
+a square template is cut around each slot's strongest batch-consistent mark (the
+donor) and matched, **coarse to fine**, around the slot's batch-median position: a
+downscaled pass over the search window, a full-resolution pass around that peak,
+then a sub-pixel separable-parabola fit to the ZNCC peak's 3×3 neighbourhood.
+**ZNCC** rather than plain correlation because scans of one batch differ in exposure
+and development density; zero-mean + energy normalization makes the score invariant
+to exactly that affine intensity change.
 
-Clicking 4–8 marks on every frame of a film block is the most tedious step above.
-The default path therefore starts without a marked reference image. Analytic,
-scale-pyramidal prototypes cover generic dot/ring/crosshair, right-angle and
-45-degree-cut marks; strong row/column transitions provide the separate frame
-mode. The calibration-certificate layout is normalized into the measured film
-rectangle, rotated by the user-declared batch orientation, and each physical mark
-is searched only in its predicted edge/corner region. Detection is followed by a
-native-resolution crop refinement and the same affine geometry gate used by the
-interior orientation. Certificate coordinates are still required: autonomy removes
-scan-pixel clicking, not metric camera calibration.
-
-The strongest geometrically accepted image then becomes an **automatic template
-donor**. Real scan patches are cut around its refined centres and the existing ZNCC
-matcher retries images that the analytic prototypes could not measure. Thus the
-detector learns the batch appearance without requiring the user to prepare a
-reference first. Unresolved images remain untouched and open in the existing image
-fiducial editor, whose three placed marks predict ghost locations for the rest.
-The legacy explicitly marked-reference path remains available for unusual designs.
-
-A square template is cut around each accepted donor (or legacy reference) fiducial and
-matched, **coarse to fine**, in each target: a downscaled pass over a search window
-around the predicted position, then a full-resolution pass around that peak, then a
-sub-pixel refinement fitting a separable parabola to the ZNCC peak's 3×3
-neighbourhood. Predictions come from the target's own interior orientation when it
-already has ≥3 marks (`fitFiducialAffine` + `mmToScan`), otherwise from the
-reference's click positions scaled by the size ratio. **ZNCC** rather than plain
-correlation because scans of one batch differ in exposure and development density;
-zero-mean + energy normalization makes the score invariant to exactly that affine
-intensity change.
-
-An optional probe resolves a **90° scan rotation** (a frame fed through the scanner
-sideways) by scoring all four orientations at their respectively-rotated predicted
-positions and taking the winner only if it beats *every* alternative by a margin.
-This is decidable far less often than it looks: fiducial marks are identical to one
-another, so under the textbook symmetric 4-corner layout every rotation aligns every
-mark with *some* real mark and no template evidence separates the hypotheses. The
-margin rule then keeps k=0 — the correct failure, since a batch is normally scanned
-in one consistent orientation, and a confident wrong k would mis-assign every mark
-id at once.
-
-**QC is the point of the feature** — an automatically mismeasured mark is worse than
-an unmeasured one, because a wrong interior orientation propagates silently into
-every pose. Three gates run in order:
-
-1. **Absolute** — a detection below the ZNCC floor is rejected.
-2. **Population** — per mark, the median score across the whole batch; detections
-   far below their own mark's median are rejected. This is what catches
-   *confident-wrong* matches: a mark that locks onto the wrong feature can still
-   clear an absolute floor, but not the standard its own mark sets on every other
-   scan of the batch. It needs the whole batch, so detections are buffered and
-   applied in a second pass.
-3. **Geometric** — fit the interior-orientation affine to the survivors; over the
-   RMS gate, drop the single worst mark (chosen by leave-one-out refit, not by
-   largest residual, which masking makes unreliable) and refit once. Still over ⇒
-   the image fails and **nothing is written** for it.
-
-Gate 3's repair requires **≥5 marks**. An affine has 6 DOF, so any 3 points fit one
-exactly: with the common 4-mark camera, dropping the true outlier and dropping a
-good mark both leave a 3-point exact fit, and the outlier is mathematically
-unlocalizable. Four-mark images that miss the gate therefore fail outright rather
-than have a coin flip decide their interior orientation — the same lesson as the GCP
-robust fit (§6.5): never let a fit the outlier has already dragged decide which point
-is the outlier.
-
----
+The module also keeps a **90° rotation probe** (score all four orientations, take a
+winner only if it beats every alternative by a margin). The retry disables it, and
+it is decidable far less often than it looks: under a symmetric layout every
+rotation aligns every mark with *some* real mark. Per-scan rotation/mirroring
+detection is open work (TODO ▸ FD). The earlier layout-driven detector (calibrated
+marks searched at their certificate positions, with an affine-RMS gate per image)
+was removed on 2026-10-04: it had no caller, and its per-image geometric check is
+covered, without needing a calibration, by the opposite-pair shape gate above.
 
 ## 6. Ground control points & georeferencing
 
@@ -684,6 +665,23 @@ conversion without accumulating error. Vendor per-axis RTK fields (including DJI
 `RtkStdLon`/`RtkStdLat`/`RtkStdHgt`) override the conservative defaults.
 Imported pose files take precedence over EXIF-derived positions.
 
+**The fit is done in a local metric frame, not in grid coordinates**
+(`core/products/localFrame.js`, `georef.js` `fitGeoreference`). A similarity assumes
+both sides are Cartesian; a projected CRS is not. Grid E/N carry the projection's
+point scale factor k (0.980 at 80°S, 0.973 at the pole in EPSG:3031) while heights do
+not, and the grid ignores Earth curvature, so fitting straight to grid + height leaves
+model error that error-free control cannot remove: 2.1 m RMS on a 6 km block at
+80°S, 6.7 m on 10 km at 85°S, with DEM relief compressed by k. A conformal projection
+is locally a similarity, so the frame divides out k about the targets' centroid,
+corrects k's own variation to second order (for a conformal map that term is fixed by
+∇log k), places a point h above its foot at ζ·(1 + h/R) along the tilted normal, and
+restores the curvature drop |ζ|²/2R. The residual is third order (~10 µm over 10 km
+at 85°S); measured fits drop to 0.07 mm (80°S) and 0.3 mm (85°S) on synthetic
+error-free control (HANDOVER ▸ B-georef-polar). The fitted similarity carries the
+frame (`sim.local`) and every consumer maps through it back to the grid; GCP
+precision scales by 1/k horizontally. A similarity without `sim.local` (older
+projects, no CRS, geographic) is the plain grid fit, unchanged.
+
 The fit and the report consume the **non-robust** triangulation (§6.5): every mark
 the user placed reaches them, outliers included. This is deliberate — silently
 dropping a GCP observation from the fit would hide exactly the disagreement the
@@ -704,7 +702,18 @@ frame for both point and camera priors. For a geographic project CRS, enabled 3D
 camera positions are first transformed into one survey-centred WGS84
 azimuthal-equidistant frame, with horizontal coordinates, altitude, and uncertainty
 all expressed in metres; this internal frame affects only adjustment, not the
-project's display/export CRS. Positions without altitude remain post-hoc only.
+project's display/export CRS. A projected CRS likewise gets one survey frame
+(`cameraPriors.js` `surveyFrameFor`, the §6.1 local metric frame centred on the
+control and camera positions), and GCP anchors and camera priors are both converted
+into it, so the joint pass compares like with like. Positions without altitude
+remain post-hoc only.
+
+The constraint builders live in `core/sfm/surveyConstraints.js` and are shared with
+**sparse gradual selection**: its refinement BA re-runs the same GCP anchors and
+camera priors (marks mapped into the pinhole frame, since the model already lives
+there) and accepts the same bounded reprojection increase as the solve. Without
+them a re-solve can only lower the reprojection cost, so it would pass its own gate
+while quietly undoing a GCP doming correction.
 
 When an imported or EXIF/XMP-derived camera pose also carries a complete
 omega/phi/kappa orientation, its rotation constrains the same BA passes. The
@@ -796,14 +805,16 @@ guide-vs-mark disagreement precisely when the reconstruction is wrong, which is
 when that disagreement is the most valuable signal the user has. The gap between
 the guide and where the user actually clicks **is** the diagnostic.
 
-**Frame caveat**: like `gcpAccuracyReport`, guides are computed in the **raw
-observation pixel frame** against the pinhole model — no calibrated or
-self-cal-composed distortion is re-applied, and film scans are not mapped through
-`canonicalToScan`. This keeps a guide consistent with the reprojection numbers
-shown beside each marker, but on a strongly distorted lens the true epipolar
-"line" is a slight **curve**, so the guide is a first-order approximation. The
-exact form would sample the pinhole line and push each sample through the composed
-distortion into a polyline.
+**Frame**: marks are clicked on the raw scan, while the cameras project into the
+pinhole/canonical frame. Every GCP and marker triangulation — the guides, the
+georeference fit, the accuracy report, the scale-bar fit and the anchored BA — maps
+each mark through its image's chain first (scan→canonical, then remove the
+calibrated and the composed self-cal bags; `displayFrame.js` `makeScanToPinhole`),
+and guides come back through `makeCanonicalToScan` before drawing. Until 2026-10-03
+this was skipped on the store side, which on a film scan meant triangulating raw scan
+pixels against the canonical K. A point guide maps exactly; an epipolar line is a
+line only in the pinhole frame and is drawn as the chord through two mapped points
+(exact for a film affine, a first-order approximation under lens distortion).
 
 ### 6.5 GCP triangulation (N-view, optionally robust)
 
@@ -963,6 +974,19 @@ support planes, in `core/dense/mvs.js` + `crates/reconstruction/src/mvs.rs`.
   is photometric consistency of the **plane-induced homography** warp into source
   views (best-K aggregation over neighbours). Optional `filterDepthMap`
   (median/speckle cleanup).
+
+  Per source the cost is ZNCC (`1 − ncc`, in [0, 2]). Best-K averages only
+  sources that *measured* the pixel: a warp leaving the source, a masked texel or
+  <4 overlapping samples returns a no-measurement sentinel and is excluded. A flat
+  patch is split by side (variance floor 1e-6 on the 0..255 scale, identical in
+  all three kernels): a flat **reference** patch is unmeasurable ⇒ excluded, but a
+  textured reference warped onto a flat **source** patch (saturated snow, sky,
+  shadow) is evidence *against* the hypothesis ⇒ the max cost 2.0. Excluding it
+  instead let a wrong depth that lands on flat areas in all but one source win on
+  that one source's chance correlation. ZNCC sums are accumulated over values
+  shifted by the first contributing sample — identical mathematically, but the
+  f32 GPU kernel otherwise loses the variance of a bright low-contrast patch to
+  cancellation (raw Σx² ≈ 7·10⁶; ~10⁻² cost error at grey 240 ± 1.5).
 - **Stage A′ — cross-view consistency filter** (`filterDepthMapsGeometric`): the
   equivalent of COLMAP's `filter` pass (`filter_min_ncc`, `filter_min_num_consistent`,
   `filter_geom_consistency_max_cost`). Runs once after all depth maps exist and
@@ -1112,6 +1136,9 @@ project CRS** and are reprojected on CRS change. The target domain is Antarctic
 aerial survey, i.e. **polar stereographic** projections where a naive lat-lon
 pipeline degenerates near the pole. Georeferencing (§6) produces CRS-tagged
 products directly. This is a first-class concern, not a post-export reprojection.
+Fits and adjustments are solved in a local metric frame (scale factor divided out,
+curvature restored, §6.1) and mapped back to the grid; raster measurements report
+ground values (grid ÷ k, area and volume ÷ k²; heights unscaled) with k shown.
 
 ---
 
@@ -1143,7 +1170,7 @@ film-format handling with sanity checks); and the WebGPU PatchMatch path.
   iterative Schur solve.
 - **Self-calibration is weakly observed** on flat, single-strip aerial blocks —
   reported but not auto-applied.
-- **Fisheye / strong distortion** is out of scope (fixed-point Brown inverse).
+- **Fisheye** is out of scope (Brown model; Newton inverse, refused past the fold).
 - **Dense quality is intrinsics-limited** — a default-FOV guess visibly distorts
   depth.
 - Fitting the init F in **distorted space** is a first-order approximation
@@ -1182,6 +1209,18 @@ source/frame stamp. They are evidence snapshots; rebuilding a raster never
 silently recomputes them. Reference candidate review can declare covariance axes,
 height, vertical datum and checkpoint role before import. DEM-derived heights
 carry the DEM's declared accuracy; no accuracy is inferred from a good image match.
+
+DEM volume (2026-10-03, `core/products/measure.js` `polygonVolume`) is the 2.5D
+cell-sum used by Pix4D/Metashape stockpile tools and QGIS "Raster surface volume":
+V = Σ (z − base(x,y))·|sx·sy| over cells whose **centre** lies inside the polygon
+(scanline, even-odd), split into cut (> 0) and fill (< 0). The base is a
+least-squares plane through the DEM heights at the vertices (centred coordinates;
+refused when collinear), the lowest vertex height, or a user height. The method
+does not interpolate. Masked, nodata, NaN and off-raster cells are counted and
+reported as a coverage fraction, never filled, so the result says how much of the
+drawn footprint it actually measured. The discretisation error is the cell-edge
+sliver along the boundary, which shrinks with GSD. Units are horizontal² ×
+vertical as recorded, with no conversion.
 
 Reference COG conversion preserves full-resolution sample values. Nearest-sample
 overviews support display only; raw matching reads the original raster. Shader

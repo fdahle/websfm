@@ -23,6 +23,22 @@ Git history holds the detail.
 | **B0-ingest** | TIFF ingest per image | 2026-07-16 | ingest cost; next lever is the canvas PNG encode |
 | **B-detect** | SIFT detection throughput | 2026-07-17 | the detection pyramid + the wasted-descriptor finding (P10) |
 | **B-mesh** | screened-Poisson meshing | 2026-08-11 | meshing cost per depth; the finest-layer solve is the remaining pole |
+| **B-georef-polar** | error-free control, grid fit vs local metric frame | 2026-10-04 | georeferencing in a projected CRS (synthetic; real-data check is REV-06) |
+
+### B-georef-polar — similarity fit on error-free polar control (2026-10-04, synthetic)
+40 control points, true ECEF geometry under an arbitrary SfM similarity, targets in
+EPSG:3031 grid + ellipsoidal height; 3-D RMS of the fitted similarity (m).
+
+| site | extent / relief | k | grid fit (before) | local metric frame (after) |
+| --- | --- | --- | --- | --- |
+| 75°S | 2 km / 100 m | 0.98962 | 0.273 | 9.9e-6 |
+| 80°S | 6 km / 400 m | 0.98021 | 2.084 | 6.6e-5 |
+| 85°S | 10 km / 1000 m | 0.97462 | 6.661 | 2.7e-4 |
+| 65°S | 10 km / 1500 m | 1.02053 | 7.878 | 6.8e-4 |
+
+Pinned (cm bound) by `localFrame.test.js`. Fiducial native refine on a synthetic 4×
+scan (4 corner marks, node): 107 ms planned window vs 7,621 ms for the old
+±0.45·half all-variant sweep, same centres to < 0.5 px — not a browser measurement.
 
 ### B-workflow-followups — synthetic Chrome checks (2026-09-27)
 
@@ -280,6 +296,116 @@ fiducials; self-calibration (A2) + fiducials (F4) are the code-side support.
 ---
 
 ## Done log (most recent first)
+
+- **2026-10-04 · Review follow-ups: polar georeferencing, PatchMatch, survey-held
+  gradual selection, fiducial detection.** *Georeferencing* (`core/products/
+  localFrame.js`, `georef.js` `fitGeoreference`, `sim.local`): the similarity is fitted
+  in a local metric frame — grid with the point scale factor k divided out and
+  curvature restored about the targets' centroid — and composed back to the grid;
+  saved fits without `sim.local` behave as before. GCP anchors and camera priors in
+  BA share one such survey frame (`cameraPriors.js` `surveyFrameFor`/
+  `gcpToSurveyFrame`; σ_h scales by 1/k). Error-free control: 2.1 m → 0.07 mm at 80°S
+  (B-georef-polar). With `sim.local`, `sim.scale` is SfM → *ground* units, so
+  metric-scale readouts and scaled-local exports from a polar georeference shift by
+  k (~2 % at 80°S) — now correct. *Measurements* report ground values (÷k, ÷k² for area and
+  volume) with k on the result card and saved in the record (`groundScale`); records
+  saved earlier stay grid values, unlabelled. *PatchMatch* (`planeCost.js`, `mvs.rs`,
+  `patchmatch.wgsl` in lockstep): a flat SOURCE patch now costs 2.0 instead of being
+  dropped from best-K (a flat REFERENCE patch stays "no measurement"), and ZNCC sums
+  are shifted by the first sample — f32 error on 240 ± 1.5 patches 1.5e-2 → 3.4e-7
+  median. WGSL validated with naga 30 (Tint/browser A/B still owed). *Gradual
+  selection* runs the same GCP anchors + camera priors as the solve
+  (`core/sfm/surveyConstraints.js`, shared with sfm.js; store `surveyConstraintInput`)
+  and accepts the survey reprojection allowance only when constrained. *Fiducials*:
+  native refine searches ±3 coarse px with the coarse winner's variant/polarity
+  (`nativeRefinePlan`, ~70× cheaper) and the scan is decoded once; concurrency is
+  bounded by a full-resolution decode budget (`fiducialDetectionConcurrency`); a new
+  per-image opposite-pair symmetry gate (`fiducialShapeCheck`, affine-invariant)
+  demotes to review alongside batch consensus, which now ignores low-confidence
+  frames; donor templates come only from marks that pass both; template-retry
+  confidence uses the detector's scale; missing-slot drafts can't be accepted; every
+  slot can be hand-placed before calibration; sidebar/viewer mark counts read
+  `fiducialDetections` (every detected film image showed "0 (incomplete)"). New
+  guide article `film-fiducials.md`. Removed the uncalled layout-driven detector
+  (`useImagesStore.autonomousFiducials`/`autoDetectFiducials`, the `bootstrapFiducials`
+  op + client, `core/sfm/fiducialBootstrap.js`, `gateFiducialDetections`,
+  `FIDUCIAL_DETECT_DEFAULTS`); the template matcher in `fiducialDetect.js` stays for
+  the batch retry. VERIFICATION's older "Review hardening" rows renamed
+  `HRD-01`…`HRD-03` (their ids collided with the review's `REV-01`…`REV-03`). Validation: 1,572 unit tests (13 tests of the deleted detector went with it), 19 native Rust
+  tests (reconstruction, release), typecheck/bindings/lint, production build. Owed:
+  `REV-06`…`REV-09`.
+
+- **2026-10-03 · Senior code review + SfM maths review: fixes.** Verified against the
+  code (and mostly reproduced) before fixing; open findings are in TODO ▸ RV.
+  *Geometry kernels* (`crates/reconstruction`, wasm rebuilt + stamped): `svd3` treats a
+  singular value as zero relative to s₁ and Gram–Schmidts U (rank-2 inputs left U
+  without a third column), and P3P negates an all-negative λ instead of discarding it.
+  Before: 478/1977 random noise-free P3P minimal sets recovered, 1305/2000 Procrustes
+  triples, non-rotation essential candidates at ‖E‖≈3–4; after: ≥99.5 %, ≥1990/2000,
+  none (three new randomized tests). BA step acceptance evaluates the Huber loss the
+  IRLS weight descends. `recoverPose` normalises each image with its own K.
+  *Sparse maths*: Newton (tolerance-driven) Brown inverse instead of 8 fixed-point
+  steps; self-cal guard rejects a bag with no inverse at the observed corner; the
+  composed self-cal bag keeps every term ever folded; GCP marks are undistorted and
+  folded with their image's keypoints in `sfm.js`; store-side GCP/marker
+  triangulation (georef fit, accuracy report, scale bars, guides, estimate) maps
+  scan marks into the pinhole/canonical frame (`displayFrame.js`
+  `makeScanToPinhole`/`makeFrameModelResolver`/`gcpsInPinholeFrame`/`guideToScan`);
+  y-up fiducial certificates no longer mirror the canonical film frame (`ySign`).
+  *Products/geo*: 3D Tiles up axis is a vertical metre, not a grid unit (heights were
+  ×1/k); GeoTIFF import honours tiepoint (I,J) and PixelIsPoint
+  (`edgeOriginFromTags`; rasters imported earlier keep their stored origin —
+  re-import to correct); fused normals face the camera; mesh trim radius follows the
+  subsampled Poisson input spacing; mesh ortho surface stays Float64; streamed ortho
+  linearises the affine `toSfm` once instead of per cell × map and allocates only
+  the blend's per-cell state; streamed fusion reads depth-only comparison maps
+  (~6× less N² I/O) and its progress no longer runs backwards; Find GCPs maps the
+  reference window with nearest-sampling centres (was ~31 m off on Sentinel-2).
+  *App bugs*: renaming an image no longer detaches its GCP marks/poses/footprints
+  (`relinkImageRecord`); 3D selection respects near/far clipping, Escape aborts a
+  stroke, a restyle drops a stale selection, Cancel stops a multi-cloud edit, the
+  first edit keeps the camera, an edit racing a removal no longer resurrects a
+  cloud, and the lasso test is banded (exact, no longer O(points × vertices));
+  volume custom base no longer defaults to 0 and measurements apply the reference
+  DEM's vOffset; plane-less orthos reopen without a false "missing data" or a
+  full-resolution decode on restyle, and a GPU-path restyle refreshes the preview;
+  GPU stretch ranges cannot compile NaN; a damaged attribute sidecar drops only that
+  cloud's attributes; LAS files with 8-bit colour in 16-bit fields no longer import
+  black; gradual selection keeps provenance/style, warns on a failed save and never
+  leaves the status spinning; product tabs close only when an edit committed;
+  live fiducial residuals use the calibration's own transform model; match overview
+  counts the main sparse model. *Structure*: Ribbon disable state derives from its
+  reason list (the footprints toggle had an empty tooltip); four dead `opfs.js`
+  exports removed (incl. the forbidden whole-set `loadDepthPlanes`).
+  Validation: 1,561 unit tests, 15 native Rust tests (3 new randomized), typecheck/
+  vue-tsc/bindings/lint, production build, 22 Chrome specs (real WASM). Real-data and
+  external-tool checks owed: `REV-01`…`REV-05`.
+
+- **2026-10-03 · Measurement tools moved to the Ribbon.** DEM/Orthophoto contextual
+  tab gains a Measure group (Ruler, Area, Profile, Volume, Saved); the in-view
+  select-and-buttons toolbar is replaced by a drawing bar, a styled result card
+  (headline value + detail rows, perimeter/relief added) and a saved-measurement
+  list. Enter/Backspace/Esc shortcuts. Fixed a latent watch that reset the tool on
+  any parent re-render. Guides: `dem.md`, `orthophoto.md`. Validation: unit suite,
+  typecheck/lint, 22 Chrome specs (measurement spec rewritten for the new UI),
+  dark/light screenshots in the real app.
+
+- **2026-10-03 · DEM volume measurement (F11).** Measure ▸ Volume (cut / fill) on a DEM
+  polygon against a best-fit vertex plane, lowest vertex or custom height
+  (`core/products/measure.js` `polygonVolume`/`fitBasePlane`, scanline over cell
+  centres). Holes and off-raster area are counted as missing coverage, never
+  interpolated. Saved with the other measurements. Guide: `dem.md` ▸ Measure a volume.
+  Validation: unit tests + the extended `workflow-tools.spec.js` ruler/area/profile/
+  volume Chrome spec. External GIS cross-check owed (`UX-MEAS-02`).
+
+- **2026-10-03 · 3D-viewer rectangle/lasso point selection (F9).** Select dense-cloud
+  points in the 3D view (Shift adds, Alt subtracts), then delete or keep only. Pure
+  `core/products/screenSelect.js` projects the exact Float32 render buffer through the
+  drawn matrix, so the highlight is the selection. `maskCloud` + `mode:'mask'` reuse the
+  cloud-edit worker path. The first edit forks a derived copy and hides the source;
+  edits on a derived cloud replace it in place. Guide: `dense-cloud.md` ▸ Cleaning the
+  cloud. Validation: 1524 unit tests, typecheck/lint, 22 Chrome specs incl. the new
+  `cloud-selection.spec.js`; large-cloud and hidden-class checks owed (`UX-EDIT-02`).
 
 - 2026-09-28 · Fixed the blank Workflow Builder on new projects; initialize on open, provide an actionable empty canvas, keep the settings inspector accessible in compact windows, and add keyboard reorder controls. Added the workflow guide and Chrome coverage for editing, templates, OPFS reopen, and interactive execution (`App.vue`, `WorkflowBuilderModal.vue`, `workflow-builder.spec.js`).
 
