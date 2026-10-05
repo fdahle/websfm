@@ -46,12 +46,17 @@ a second, weaker orientation, because on real data that cost matching time witho
 adding points.
 
 ## Tiling
-Tiling detects overlapping pieces near native resolution and merges duplicates at
-their seams. Use **Auto** for SuperPoint inputs that exceed the single-pass limit, or
-for scans too large to detect in one pass. With SIFT, prefer **Off** whenever memory
-allows: on a 128-image building set, tiled SIFT found far fewer matches than the same
-images detected untiled at the same resolution. Manual tile size is mainly a memory control;
-overlap prevents features at tile edges from being clipped.
+Tiling detects overlapping pieces near native resolution. Each piece keeps only the
+features in its own central region, so every feature is found exactly once and never
+right at a cut. Use **Auto** for SuperPoint inputs that exceed the single-pass limit, or
+for scans too large to detect in one pass. For SIFT, tiling gives the same keypoints
+and matches as an untiled run (99.5 % identical on a building pair) and uses less
+memory, so it is safe to turn on for large images.
+
+**Max tile size** is an upper limit: websfm uses the fewest tiles that fit, shrunk to the
+smallest size that still keeps the requested overlap. **Overlap** sets how far a kept
+feature sits from a cut (half the overlap). The default 64 px is enough for SIFT on
+photos; raise it only if a tiled run matches noticeably worse than an untiled one.
 
 ## Append or overwrite
 **Append** skips images that already have completed detection. **Overwrite** replaces

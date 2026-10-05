@@ -27,8 +27,8 @@ export const DETECT_SIFT_DEFAULTS = {
   contrastThreshold: 0.01,  // DoG response floor (lower = more, weaker keypoints)
   maxKeypoints: 10000,      // per-image cap (strongest kept)
   tiling: 'off',            // 'off' | 'on' — tiled detection for very large images
-  tileSize: 1024,           // tile edge (px) when tiling is on
-  overlap: 64,              // tile overlap (px) so seams still get keypoints
+  tileSize: 1024,           // max tile edge (px) when tiling is on
+  overlap: 64,              // min tile overlap (px); kept keypoints sit ≥ overlap/2 from a cut
 }
 
 // Tie-point detection — SuperPoint (no contrast knob; learned threshold is baked in).
