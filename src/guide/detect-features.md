@@ -47,8 +47,10 @@ adding points.
 
 ## Tiling
 Tiling detects overlapping pieces near native resolution and merges duplicates at
-their seams. Use **Auto** for very large scans, small important detail, or SuperPoint
-inputs that exceed the single-pass limit. Manual tile size is mainly a memory control;
+their seams. Use **Auto** for SuperPoint inputs that exceed the single-pass limit, or
+for scans too large to detect in one pass. With SIFT, prefer **Off** whenever memory
+allows: on a 128-image building set, tiled SIFT found far fewer matches than the same
+images detected untiled at the same resolution. Manual tile size is mainly a memory control;
 overlap prevents features at tile edges from being clipped.
 
 ## Append or overwrite
