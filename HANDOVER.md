@@ -206,6 +206,25 @@ ratio 0.8.
 - **Cost.** The real lever is the per-pair cost: ¼ of MAT-13's matching time for 62 %
   of its points.
 
+**MAT-13 settings on the new build, untiled (MAT-15) and tiled (MAT-14), 2026-10-05:**
+
+| | keypoints | detection | inliers | ≥3-view points | median |
+|---|---|---|---|---|---|
+| MAT-13 (old: response cap, L2-SIFT) | 2,213,951 | 328 s | 2,168,068 | 115,533 | 0.27 px |
+| **MAT-15** (coarse-first, RootSIFT) | 2,213,951 | 332 s | 2,274,195 | **119,454 (+3.4 %)** | 0.28 px |
+| **MAT-14** (= MAT-15 + tiling 1536/64) | 2,213,943 | 362 s | 2,270,904 | **119,127 (−0.3 %)** | 0.28 px |
+| *MAT-12 (old tiling)* | *2,972,173* | *660 s* | *586,284* | *refused* | |
+
+- **RootSIFT.** At 25k only RootSIFT is active, since the cap binds on a handful of
+  images and the keypoint totals are identical. It gives +4.9 % inliers and +3.4 %
+  points, close to the node bench's +4.3 %. COLMAP 80,792 → 148 %.
+- **Tiling.** Tiled equals untiled within noise: per-image keypoint counts differ by
+  0–5, and there are 0–1 seam duplicates per image. Detection costs +9 %, exactly the
+  1.08× tile overlap area, so tiling is a memory tool, not a free one.
+- **Matching time is the keypoint count, not cache evictions.** Summed GPU kernel time
+  for MAT-15/MAT-16 is 3323/1092 s = 3.04×, against a quadratic keypoint ratio of 3.03×,
+  despite MAT-15's 752 evictions and 7.4 GB re-uploaded.
+
 ### B-georef-polar — similarity fit on error-free polar control (2026-10-04, synthetic)
 40 control points, true ECEF geometry under an arbitrary SfM similarity, targets in
 EPSG:3031 grid + ellipsoidal height; 3-D RMS of the fitted similarity (m).

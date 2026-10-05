@@ -335,16 +335,23 @@ stated), each recorded as a VERIFICATION row + HANDOVER baseline.
   and 17 px at 42, 97 and 112 cameras) follow weakly registered images (P1180196 at
   19/32 PnP inliers, P1180198 at 726/1541) or two *rejected* interim BAs (87, 92
   cameras). A rejected BA keeps the pre-BA estimate, so whatever made it worsen is
-  still in the model at the next one. Start by logging per-image residuals for the
+  still in the model at the next one. MAT-14/15 repeat it: the 37-camera interim BA was
+  rejected in both, right after images registered on 40–90 PnP inliers (P1180194/195/196/197).
+  Those all come from the first PnP sweep that also rejects ~10 images at 4–13 inliers.
+  Start by logging per-image residuals for the
   images registered since the last good BA.
 - **Defaults after MAT-13.** Full resolution with a non-binding cap is the best SB result
   so far (115k vs 60k at 2400 px). Decide the Balanced/Detailed SIFT presets
   (`DETECT_SIFT_DEFAULTS` maxDim/maxKeypoints) and the ratio default (0.75 → 0.8, below)
   together, weighing WASM-only users: brute force is O(Na·Nb) and 2.2 M keypoints is ~4×
   the matching work of MAT-10. Check one aerial/film set first.
-- **GPU descriptor cache size.** `MATCH_TUNING.gpuDescCacheMiB` 1024 thrashed at 2.97 M
-  keypoints (4251 evictions, 831 s). Size it from the run's descriptor bytes, capped by
-  the adapter's `maxBufferSize`/device memory, instead of a constant.
+- **GPU descriptor cache size (low value; measured).** `MATCH_TUNING.gpuDescCacheMiB`
+  1024 evicts above ~2 M keypoints, but MAT-15 shows the evictions cost almost nothing.
+  The summed GPU kernel time scales with the quadratic keypoint work alone: MAT-16 1092 s
+  at 1.27 M → MAT-15 3323 s at 2.21 M = 3.04×, against (2.21/1.27)² = 3.03×. Wall time
+  matches (154 s × 3.0 ≈ 460 s), even though MAT-15 re-uploaded 7.4 GB over 752
+  evictions. Sizing the cache from the run would still be tidy, but it is not a speed
+  lever at this scale; matching time is the keypoint count.
 
 **Speed** (no longer the gap; only if a larger set needs it):
 - **Kernel throughput** — Chrome measured 13.5 ms/pair GPU-bound on SB (COLMAP ~12).
