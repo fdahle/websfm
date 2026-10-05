@@ -13,6 +13,7 @@ import { inlierSpread, packMatchedPoints } from '../core/features/verify.js'
 import { evaluatePairAcceptance } from '../core/features/pairGate.js'
 import { pickSpreadIndices, sliceDescriptorRows, resolveSubsetGateSize } from '../core/features/subsetGate.js'
 import { siblingCanonicalMap, canonicalizeMatches } from '../core/features/orientationSiblings.js'
+import { toMatchSpace } from '../core/features/siftDescriptors.js'
 import { MATCH_DEFAULTS } from '../core/defaults.user.js'
 import { MATCH_TUNING } from '../core/tuning.js'
 import { pairScaleContext, buildScaleContext, describeScaleContext, resolveScaledPx } from '../core/scaleContext.js'
@@ -154,9 +155,13 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
         if (descCache?.has(id)) return descCache.get(id)
         // Persistent: OPFS is the copy (detection drops its in-memory one once
         // saved); the in-memory copy only survives a failed save.
-        const p = isPersisting()
+        const p = (isPersisting()
           ? opfs.loadDescriptors(projectId, id).then((d) => d ?? src.descriptors ?? null)
-          : Promise.resolve(src.descriptors ?? null)
+          : Promise.resolve(src.descriptors ?? null))
+          // SIFT matches in RootSIFT; legacy L2 detections convert here, once per run
+          // (core/features/siftDescriptors.js). Never in place: `src.descriptors` is
+          // the image's live copy.
+          .then((d) => toMatchSpace(d, src, src.descDim ?? 128))
         descCache?.set(id, p)
         return p
       }

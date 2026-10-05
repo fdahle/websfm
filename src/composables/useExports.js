@@ -21,6 +21,9 @@ import { distortionOf } from '../core/sfm/distortion.js'
 import { downloadBlob, dataUrlToBlob } from '../utils/download.js'
 import { zipStore } from '../utils/zip.js'
 import { showToast } from './useToasts.js'
+import * as opfs from '../utils/opfs.js'
+import { useProjectsStore } from '../stores/useProjectsStore.js'
+import { siftDescNorm, toMatchSpace } from '../core/features/siftDescriptors.js'
 
 // Camera-params + product export funnel, lifted out of App.vue. Owns `exportKind`
 // (which export dialog is open); the Ribbon command dispatch sets it and the
@@ -37,6 +40,7 @@ export function useExports({
   georef, currentProjectName, currentCrs, summary, progress, effectiveFrameSpec,
 }) {
   const { log } = useLog()
+  const projects = useProjectsStore()
 
   // The similarity a cloud/mesh export should apply, from THE resolver:
   //   georeference  → the full CRS similarity (scale + rotation + translation)
@@ -362,15 +366,28 @@ export function useExports({
     }
     if (format === 'database' || format === 'workspace') {
       const imageIdByUuid = new Map(model.images.map((im, i) => [exportImages[i].uuid, im.imageId]))
-      const features = exportImages.map((im, i) => {
+      // COLMAP stores RootSIFT ×512 as uint8. A saved project keeps descriptors only
+      // in OPFS (detection drops the in-memory copy), so read them from there; legacy
+      // L2 detections convert exactly as matching does.
+      const features = await Promise.all(exportImages.map(async (im, i) => {
         const source = imgByUuid.get(im.uuid)
         let descriptors = null
-        if (source?.descriptors?.length === im.keypoints.length * 128 && /sift/i.test(source.detector ?? '')) {
-          descriptors = new Uint8Array(source.descriptors.length)
-          for (let k = 0; k < descriptors.length; k++) descriptors[k] = Math.max(0, Math.min(255, Math.round(source.descriptors[k] * 512)))
+        if (source && siftDescNorm(source) != null) {
+          const stored = source.descriptors
+            ?? (projects.isPersisting ? await opfs.loadDescriptors(projects.currentProjectId, im.uuid) : null)
+          const root = toMatchSpace(stored, source)
+          if (root?.length === im.keypoints.length * 128) {
+            descriptors = new Uint8Array(root.length)
+            for (let k = 0; k < root.length; k++) descriptors[k] = Math.max(0, Math.min(255, Math.round(root[k] * 512)))
+          }
         }
         return { imageId: model.images[i].imageId, keypoints: im.keypoints, descriptors }
-      })
+      }))
+      const withDesc = features.filter((f) => f.descriptors).length
+      if (withDesc < features.length) {
+        log(`COLMAP database: descriptors for ${withDesc} of ${features.length} image(s) — the rest `
+          + 'are not SIFT or were not found; COLMAP will need to re-extract them', 'warn', 'Export')
+      }
       const pairs = []
       for (const [, pair] of matchStore.value) {
         const imageIdA = imageIdByUuid.get(pair.idA), imageIdB = imageIdByUuid.get(pair.idB)

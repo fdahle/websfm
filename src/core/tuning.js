@@ -30,6 +30,13 @@ export const DETECT_TUNING = {
   // 60,480 vs 60,189 >=3-view points (+0.5 %, MAT-08 vs MAT-10) for ~20 % more
   // descriptors to match. Set 2 to reproduce COLMAP's detector.
   siftMaxOrientations: 1,
+  // Which SIFT keypoints survive maxKeypoints (core/features/keypointCap.js):
+  // 'coarse-first' keeps the largest scales (COLMAP's rule), 'response' the strongest
+  // |DoG| (the pre-2026-10 rule). Measured on an 8-image SB strip (node bench, ≥3-image
+  // tracks): +1.4 % at 2400 px / 10k, where the cap barely binds, and +10 % at native
+  // 3072 px / 10k, where it binds hard. Response-ranked native 10k scored BELOW 2400 px
+  // 10k: fine-scale texture filled the budget. It matters most where the cap binds.
+  siftCapRule: 'coarse-first',
   spMaxUntiledInputPx: 16_000_000, // ≈4000×4000; above this (tiling off) → prompt / clean fail
 }
 
