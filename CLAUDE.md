@@ -1207,7 +1207,11 @@ propagate covariance rather than retaining stale numeric sigmas.
   buffer cost 5.6 ms per line on its own). The rule: append to plain data in place
   and notify in batches — `useLog`'s buffer is a `shallowRef` triggered ≤20 Hz and
   trimmed in chunks; `useMatchesStore.matchPair` throttles `touch()` to ≤10 Hz and
-  `matchAll` flushes once at the end. Never `deep`-watch such a buffer.
+  `matchAll` flushes once at the end. Never `deep`-watch such a buffer. A
+  module-level singleton that Pinia stores capture at setup (the `useLog` buffer)
+  keeps its state in `import.meta.hot.data`: otherwise a dev hot-update of that file
+  hands re-mounted components a fresh instance while the stores keep the old one,
+  and the two silently stop talking (the console went blank, 2026-10-05).
 - **Progress is a monotonic 0..1 `fraction`, never a work counter.** `usePipeline`
   owns the whole display contract: it ingests every `onProgress(done, total, label,
   fraction?)` into a plain object and flushes to refs on a rAF at ≤10 Hz (worker
