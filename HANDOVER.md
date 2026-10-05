@@ -63,6 +63,13 @@ the log buffer cost **5.6 ms per line** once full (20,000 lines: 112.7 s → 1.2
 after the fix, node, no rendering). Gate off raised accepted pairs 61 % but ≥3-view
 points 0.2 % — the point gap is downstream of matching (TODO ▸ MT).
 
+**After the main-thread fixes (MAT-05, same day; ratio 0.8, different image order):**
+matching **109.5 s** wall (COLMAP 99 s) — 13.5 ms/pair, now GPU-bound (summed GPU
+latency 695 s ≈ 6.4 pairs in flight), remainder 15 s (was 1510 s), postMessage 0.6 s
+(was 41 s). Pairs: 1694 accepted / 6282 rejected / 152 skipped (ratio 0.8 turns most
+"skipped" into verified-and-rejected). SfM: 128/128, **54,728** ≥3-view points (+5 %),
+38,990 two-view points dropped in the final cleanup, cycle filter removed 331/1694.
+
 ### B-georef-polar — similarity fit on error-free polar control (2026-10-04, synthetic)
 40 control points, true ECEF geometry under an arbitrary SfM similarity, targets in
 EPSG:3031 grid + ellipsoidal height; 3-D RMS of the fitted similarity (m).
