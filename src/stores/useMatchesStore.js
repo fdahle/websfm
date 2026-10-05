@@ -152,8 +152,10 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
       // sharing an image load its descriptors from OPFS exactly once.
       const loadDesc = (id, src) => {
         if (descCache?.has(id)) return descCache.get(id)
+        // Persistent: OPFS is the copy (detection drops its in-memory one once
+        // saved); the in-memory copy only survives a failed save.
         const p = isPersisting()
-          ? opfs.loadDescriptors(projectId, id)
+          ? opfs.loadDescriptors(projectId, id).then((d) => d ?? src.descriptors ?? null)
           : Promise.resolve(src.descriptors ?? null)
         descCache?.set(id, p)
         return p
