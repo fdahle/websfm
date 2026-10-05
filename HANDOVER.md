@@ -116,7 +116,18 @@ subset gate all moved. Suspects: tiling (one octave fewer per tile, large featur
 the 64 px seams) and the response-ranked cap filling with fine-scale features at full
 resolution (COLMAP, as far as remembered, keeps the coarsest octaves when it truncates). Reconstruction was refused by the renderer
 preflight (3.40 GB used), mostly a stale 1.42 GB descriptor copy (fixed, see done log).
-Untiled full resolution (MAT-13) and tiling alone at 2400 px (MAT-14) separate the two.
+MAT-13 below settles it: tiling.
+
+**Full resolution, untiled (MAT-13) — beats COLMAP:** maxDim 3200 (native 3072), tiling
+off, 25k cap, 1 orientation, gate off, ratio 0.8. 2.21 M keypoints, detection 328 s,
+matching 488 s (GPU descriptor cache still 1 GB: 751 evictions), 1904 accepted pairs,
+2.17 M inliers. SfM 128/128: **115,533 ≥3-view points** (COLMAP 80,792 → 143 %;
+MAT-10 at 2400 px 60,189), median 0.27 px, max 7.2 px, SfM 397 s. The memory preflight
+passed (1.59 GB renderer, no descriptor copy). Versus MAT-12, only tiling changed:
+untiled gave **3.7× the inliers from fewer keypoints** — the tiled SIFT path is broken,
+not the resolution. Caveat: COLMAP's default keypoint budget is 8192, so the comparison
+is ours-best vs COLMAP-default, not like-for-like. End to end ≈ 20 min, slower than
+COLMAP; matching time is now the cost.
 
 ### B-georef-polar — similarity fit on error-free polar control (2026-10-04, synthetic)
 40 control points, true ECEF geometry under an arbitrary SfM similarity, targets in

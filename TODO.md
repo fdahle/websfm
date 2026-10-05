@@ -294,8 +294,9 @@ guard) with a mocked `InferenceSession`. Real-inference browser runs are
 `VERIFICATION.csv` ▸ `DET-02`, `DET-04`, `DET-06`.
 
 ### MT — closing the gap to COLMAP on South Building
-Where we stand (HANDOVER ▸ B-match-gpu, MAT-08/MAT-10): matching 78–96 s (subset gate
-on) vs COLMAP 99 s; ≥3-view points **~60.2–60.5k** vs 80,792; accepted pairs ~1.4k vs 2678.
+Where we stand (HANDOVER ▸ B-match-gpu, MAT-13): **115,533** ≥3-view points vs COLMAP
+80,792 at full resolution untiled (25k cap, ratio 0.8); end to end ~20 min, matching 488 s.
+The point gap is closed; what remains is speed and making this the default path.
 Pairs are not what limits points: gate off raised accepted pairs 61 % for +0.2 %
 points (MAT-05), `minInlierRatio` 0 added 9 pairs (MAT-07), while uncapping the
 keypoints added 9.8 % points on fewer pairs (MAT-08). Run the browser
@@ -327,12 +328,20 @@ stated), each recorded as a VERIFICATION row + HANDOVER baseline.
   ~1.9k px) and five were rejected; the final model is clean (max 8 px). Bad
   observations enter during registration — find which step (PnP extension vs fresh
   triangulation) before they cost tracks.
-- **Detection resolution (MAT-13).** COLMAP extracts untiled at full 3072 px. MAT-12 ran
-  full resolution *tiled* and lost 39 % of inliers, confounded with tiling, a 25k cap and
-  the gate. MAT-13 = untiled at maxDim 3200 (2 GB GPU descriptor cache); MAT-14 = MAT-10
-  with tiling on, isolating tiling. If MAT-13 is still worse than MAT-10, try a
-  scale-first cap (keep coarse octaves when truncating, as COLMAP is believed to — check
-  its source first) instead of the response-ranked one in `crates/sift` and `runTiled`.
+- **Tiled SIFT loses most correspondences (bug).** MAT-12 vs MAT-13 differ only in tiling
+  (1536 px tiles, 64 px overlap): 586k vs 2.17 M inliers from *more* keypoints. Suspects in
+  `workers/ops/detect.js` `runTiled`: keypoints near a tile edge get descriptors from a
+  window clipped by the tile (the 64 px overlap is smaller than a large keypoint's
+  descriptor support) and can out-rank the clean copy from the neighbouring tile; the
+  3 px all-scale NMS; one octave fewer per tile. Fix direction: each tile keeps only
+  keypoints inside its own core (half the overlap), overlap ≥ the largest descriptor
+  radius kept, NMS only across seams. Gate: `MAT-14`. Until then the guide warns SIFT
+  users off tiling.
+- **Defaults after MAT-13.** Full resolution with a non-binding cap is the best SB result
+  so far (115k vs 60k at 2400 px). Decide the Balanced/Detailed SIFT presets
+  (`DETECT_SIFT_DEFAULTS` maxDim/maxKeypoints) and the ratio default (0.75 → 0.8, below)
+  together, weighing WASM-only users: brute force is O(Na·Nb) and 2.2 M keypoints is ~4×
+  the matching work of MAT-10. Check one aerial/film set first.
 - **GPU descriptor cache size.** `MATCH_TUNING.gpuDescCacheMiB` 1024 thrashed at 2.97 M
   keypoints (4251 evictions, 831 s). Size it from the run's descriptor bytes, capped by
   the adapter's `maxBufferSize`/device memory, instead of a constant.
