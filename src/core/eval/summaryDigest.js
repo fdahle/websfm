@@ -125,6 +125,9 @@ export function buildProjectDigest(input = {}) {
         ? {
           strategy: matchRun.strategy ?? null,
           matcher: matchRun.matcher ?? null,
+          // Brute-force backend ('wasm' | 'gpu' | 'gpu→wasm'); absent on runs that
+          // predate it, so it renders as absent rather than a guessed 'wasm'.
+          ...(matchRun.backend?.backend ? { backend: matchRun.backend.backend } : {}),
           pairs: matchRun.nPairs ?? null,
           ...(matchRun.settings || {}),
         }

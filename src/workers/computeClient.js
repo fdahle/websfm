@@ -92,11 +92,19 @@ export function configureWorkerPoolSize(value) {
   return true
 }
 
-function call(op, args, { transfer = [], onEvent, onTiming, worker: pinned } = {}) {
+function call(op, args, { transfer = [], onEvent, onTiming, worker: pinned, avoid } = {}) {
   const pool = getPool()
   // `pinned` forces a specific worker (learned backends load a heavy per-worker
-  // runtime once — see detectKeypoints); otherwise round-robin across the pool.
-  const worker = pinned != null ? pool[pinned % pool.length] : pool[rr++ % pool.length]
+  // runtime once — see detectKeypoints); otherwise round-robin across the pool,
+  // skipping `avoid` (a worker busy with pinned work, e.g. GPU matching) when there
+  // is any other worker to use.
+  let slot
+  if (pinned != null) slot = pinned % pool.length
+  else {
+    slot = rr++ % pool.length
+    if (avoid != null && pool.length > 1 && slot === avoid % pool.length) slot = rr++ % pool.length
+  }
+  const worker = pool[slot]
   const id = nextId++
   return new Promise((resolve, reject) => {
     const entry = { resolve, reject, onEvent, onTiming, worker, started: performance.now(), postMessageMs: 0 }
@@ -153,10 +161,23 @@ export function detectFiducialSpots(url, options = {}, { onLog } = {}) {
   })
 }
 
-export function matchDescriptors(descA, descB, options = {}, { onTiming } = {}) {
+export function matchDescriptors(descA, descB, options = {}, { onTiming, avoidWorker } = {}) {
   // No transfer: structured-clone copies the descriptors so the caller's
   // in-memory buffers (reused across pairs) are not detached.
-  return call('match', [descA, descB, options], { onTiming })
+  return call('match', [descA, descB, options], { onTiming, avoid: avoidWorker })
+}
+
+// WebGPU brute-force matching (workers/gpu/matchGpu.js). All three ops pin ONE
+// worker: WebGPU gives every worker its own device, and the per-run descriptor
+// cache lives in that device's memory — round-robin would hold POOL_SIZE copies of
+// it (~0.5 GB each on a 128-image run). Other work passes `avoidWorker` to keep off
+// this slot while a GPU run is active. No transfer: descriptors are cloned so the
+// caller's per-run cache stays usable for a resend or a WASM fallback.
+export const GPU_MATCH_WORKER = 0
+export const matchGpuBegin = (opts) => call('matchGpuBegin', [opts], { worker: GPU_MATCH_WORKER })
+export const matchGpuEnd = (opts) => call('matchGpuEnd', [opts], { worker: GPU_MATCH_WORKER })
+export function matchDescriptorsGpu(args, { onTiming } = {}) {
+  return call('matchGpu', [args], { worker: GPU_MATCH_WORKER, onTiming })
 }
 
 // LightGlue joint match. Pinned to worker 0 for the same reason SuperPoint is —
@@ -170,8 +191,8 @@ export function matchLightGlue(args, { onLog, onTiming } = {}) {
   })
 }
 
-export function verifyMatches(kpsA, kpsB, matches, options = {}, { onTiming } = {}) {
-  return call('verify', [kpsA, kpsB, matches, options], { onTiming })
+export function verifyMatches(kpsA, kpsB, matches, options = {}, { onTiming, avoidWorker } = {}) {
+  return call('verify', [kpsA, kpsB, matches, options], { onTiming, avoid: avoidWorker })
 }
 
 export const sparseMetrics = (packed) => call('sparseMetrics', [packed])

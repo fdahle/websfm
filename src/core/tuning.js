@@ -106,6 +106,10 @@ export const SFM_TUNING = {
 // MatchFeaturesModal — the user-facing match defaults live in defaults.user.js ▸
 // MATCH_DEFAULTS. `settings` from the caller still overrides.
 export const MATCH_TUNING = {
+  // WebGPU brute-force: byte budget of the per-run GPU descriptor cache (LRU). 1 GiB
+  // holds a whole 128-image SIFT run at ~8.4k kp (≈ 4.3 MB/image); a smaller budget
+  // only costs re-uploads (the worker answers a miss and the store resends).
+  gpuDescCacheMiB: 1024,
   lgMinConf: 0,            // LightGlue min match confidence
   overrideInliers: 30,     // inlier count that overrides a failed ratio/H-F gate
   hfDegenerateRatio: 0.8,  // homography-vs-fundamental ratio flagging a degenerate fit
