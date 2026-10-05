@@ -13,6 +13,7 @@ import { fiducialBatchConsensus, fiducialShapeCheck } from '../core/sfm/fiducial
 import { detectionConfidence } from '../core/sfm/fiducialDetection.js'
 import { buildBorderMask } from '../core/mask.js'
 import { resolveDetectMaxDim } from '../core/features/detectResolution.js'
+import { DETECT_TUNING } from '../core/tuning.js'
 import { detectionConcurrency, fiducialDetectionConcurrency } from '../core/features/detectConcurrency.js'
 import { useLog } from '../composables/useLog.js'
 import * as opfs from '../utils/opfs.js'
@@ -779,11 +780,16 @@ export const useImagesStore = defineStore('images', () => {
       if (res0.mode === 'auto') {
         log(`${tag} ${img.name} — detect at ${res0.reason}`, 'debug', 'Detection')
       }
+      // SIFT keypoints per extremum (dominant + secondary orientations, tuning.js
+      // DETECT_TUNING). Null for SuperPoint, which has no orientation histogram.
+      const maxOrientations = settings.detector === 'superpoint'
+        ? null : (settings.maxOrientations ?? DETECT_TUNING.siftMaxOrientations)
       // Pass the per-image mask (if any) so keypoints inside masked regions are
       // dropped at detection — this propagates to matching and reconstruction.
       const res = await detectKeypoints(
         img.computeUrl ?? img.url,
-        { ...settings, maxDim: res0.maxDim, mask: img.mask?.dataUrl ?? null },
+        { ...settings, maxDim: res0.maxDim, mask: img.mask?.dataUrl ?? null,
+          ...(maxOrientations != null ? { maxOrientations } : {}) },
         { onLog: (msg) => log(msg, 'info', 'Detection') },
       )
       // The worker can't be interrupted mid-image, so a cancel pressed while this
@@ -827,6 +833,8 @@ export const useImagesStore = defineStore('images', () => {
           maxKeypoints: settings.maxKeypoints ?? null,
           contrastThreshold: settings.contrastThreshold ?? null,
           tiling: settings.tiling ?? null,
+          // Absent on images detected before 2026-10 ⇒ unknown (they ran with 1).
+          maxOrientations,
         }
         if (hadKeypoints) useMatchesStore().removeMatchesForImage(found.uuid)
         log(`${tag} done: ${found.name} — ${found.kpCount} keypoints in ${found.kpMs} ms`, 'success', 'Detection')
@@ -905,7 +913,8 @@ export const useImagesStore = defineStore('images', () => {
     const concurrency = detectionConcurrency(pending, settings, POOL_SIZE, navigator.deviceMemory)
     const started = performance.now()
     log(`${batchTag} batch: ${total} image(s) queued — ${resLabel}, ${concurrency} concurrent`
-      + `${detector === 'superpoint' ? '' : `, contrast ${contrastThreshold}`}, ≤${maxKeypoints} kp`,
+      + `${detector === 'superpoint' ? '' : `, contrast ${contrastThreshold}`}, ≤${maxKeypoints} kp`
+      + `${detector === 'superpoint' ? '' : `, ≤${settings.maxOrientations ?? DETECT_TUNING.siftMaxOrientations} orientation(s) per extremum`}`,
       'info', 'Detection')
     let done = 0
     let cursor = 0

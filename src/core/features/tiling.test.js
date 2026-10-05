@@ -74,6 +74,22 @@ describe('nmsByPosition', () => {
   it('handles the empty case', () => {
     expect(nmsByPosition([], 3)).toEqual([])
   })
+
+  it('keeps SIFT orientation siblings but drops them with their extremum', () => {
+    const items = [
+      { x: 10, y: 10, scale: 2, response: 0.9 }, // A
+      { x: 10, y: 10, scale: 2, response: 0.9 }, // A's sibling (second orientation)
+      { x: 11, y: 10, scale: 2.4, response: 0.5 }, // same blob from the next tile → dup
+      { x: 11, y: 10, scale: 2.4, response: 0.5 }, //   … and its sibling goes with it
+      { x: 50, y: 50, scale: 2, response: 0.3 },
+    ]
+    expect(nmsByPosition(items, 3)).toEqual([0, 1, 4])
+  })
+
+  it('never treats scale-less items (SuperPoint) as siblings', () => {
+    const items = [{ x: 5, y: 5, response: 0.9 }, { x: 5, y: 5, response: 0.8 }]
+    expect(nmsByPosition(items, 3)).toEqual([0])
+  })
 })
 
 describe('autoTileSize', () => {

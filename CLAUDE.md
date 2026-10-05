@@ -526,7 +526,16 @@ self-contained, file-based project format.
    adjacent scales/octaves → several index-distinct points within ~2px) are
    suppressed at detection (`suppress_duplicate_positions`, response-desc NMS);
    `detect_sift` output carries **two** trailing sentinels (`raw_found`,
-   `suppressed`), so parse `kept = floor((len-2)/STRIDE)`.
+   `suppressed`), so parse `kept = floor((len-2)/STRIDE)`. An extremum with a
+   second strong orientation peak yields **orientation siblings** — keypoints with
+   bit-identical x, y, scale and their own descriptors (`max_orientations`,
+   `DETECT_TUNING.siftMaxOrientations` = 2). Bit-identical position IS the sibling
+   test everywhere: both duplicate suppressions (crate + tiled `nmsByPosition`) exempt
+   siblings from each other, and `useMatchesStore` folds every putative onto the
+   dominant index right after descriptor matching
+   (`core/features/orientationSiblings.js`) — **nothing downstream of matching may
+   see two indices for one physical point**, or a track splits into two the merge
+   refuses to join.
 2. **Match** (`crates/matching`) → Lowe ratio test + RANSAC fundamental-matrix
    verification (**adaptive termination**: after each new best model the iteration
    cap shrinks to `ln(1−0.99)/ln(1−wˢ)` for inlier ratio `w`, s=8 for F / 4 for H,
@@ -1369,7 +1378,12 @@ propagate covariance rather than retaining stale numeric sigmas.
   native test pins to a naive reference, and verify the *real* build with
   `scripts/simd-parity.mjs`: it runs the built wasm under Node (V8, same engine as
   Chrome) on the same fixed input as the crate's `#[ignore]`d `parity_digest` test —
-  the two digests must match exactly. `cargo check --target wasm32-unknown-unknown`
+  the two digests must match exactly — with one caveat: the SIMD and scalar blur sum
+  in different orders, so keypoint positions differ by ~1e-5 px and `sumX`/`sumY`
+  can differ in the 4th printed decimal purely by rounding. Identical `kept`/`raw`/
+  `sup` with a last-digit gap is that; anything more is a bug — dump the per-keypoint
+  rows from both sides to tell (2026-10-05: same 9 keypoints, same siblings, angles to
+  1e-6). `cargo check --target wasm32-unknown-unknown`
   at minimum proves the intrinsics still compile.
 - **Geometry solver tolerances are relative, and their tests are randomized.** A
   3×3 SVD via eig(AᵀA) reports a rank-2 matrix's s₃ as ≈ √ε·s₁, never 0, so an

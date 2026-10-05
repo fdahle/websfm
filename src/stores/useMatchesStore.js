@@ -12,6 +12,7 @@ import { sequentialPairs } from '../core/features/sequentialPairs.js'
 import { inlierSpread, packMatchedPoints } from '../core/features/verify.js'
 import { evaluatePairAcceptance } from '../core/features/pairGate.js'
 import { pickSpreadIndices, sliceDescriptorRows, resolveSubsetGateSize } from '../core/features/subsetGate.js'
+import { siblingCanonicalMap, canonicalizeMatches } from '../core/features/orientationSiblings.js'
 import { MATCH_DEFAULTS } from '../core/defaults.user.js'
 import { MATCH_TUNING } from '../core/tuning.js'
 import { pairScaleContext, buildScaleContext, describeScaleContext, resolveScaledPx } from '../core/scaleContext.js'
@@ -47,6 +48,15 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
   // write races (one writer's snapshot clobbers another's set). See P2 in HANDOVER.
   const matchStore = shallowRef(new Map())
   const touch = () => triggerRef(matchStore)
+  // SIFT orientation-sibling maps (core/features/orientationSiblings.js), keyed by the
+  // keypoint array itself: re-detection replaces the array, so an entry can never go
+  // stale, and a dropped array takes its map with it.
+  const siblingCanon = new WeakMap()
+  const canonFor = (kps) => {
+    if (!kps) return null
+    if (!siblingCanon.has(kps)) siblingCanon.set(kps, siblingCanonicalMap(kps))
+    return siblingCanon.get(kps)
+  }
   // matchPair's per-pair updates are THROTTLED to ≤10 Hz. Every trigger re-runs each
   // computed that walks the whole Map (App.vue `matchStats`/`matchSummaries`,
   // `usableMatchCount`) and re-renders their components, so 3–4 synchronous triggers
@@ -262,7 +272,14 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
           // rows and out-of-range match indices → the `reading 'x'` crash in verify.
           dim: srcA.descDim ?? 128,
         }, 'full', [idA, idB])
-        raw = res.matches
+        // One index per physical feature from here on: matches made through a
+        // secondary SIFT orientation are re-expressed on the dominant keypoint and
+        // deduplicated, so verification and SfM never see a feature twice (a split
+        // track). No-op for images detected with one orientation.
+        const sib = canonicalizeMatches(res.matches, canonFor(kpsA), canonFor(kpsB))
+        raw = sib.matches
+        entry.siblingMerged = sib.merged
+        entry.siblingAmbiguous = sib.ambiguous
       }
       entry.rawCount = raw.length
 
@@ -590,9 +607,12 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
     // Tally this run's outcomes for the completion summary. Skipped = too few raw
     // matches to bother verifying; rejected = verified but failed the count/ratio
     // gate; matched = kept (with ≥1 inlier).
-    const stats = { matched: 0, weak: 0, rejected: 0, skipped: 0, gated: 0, inliers: 0, ratios: [], degenerate: 0 }
+    const stats = { matched: 0, weak: 0, rejected: 0, skipped: 0, gated: 0, inliers: 0, ratios: [], degenerate: 0,
+      siblingMerged: 0, siblingAmbiguous: 0 }
     const tally = (_pid, entry) => {
       if (entry.status !== 'done') return
+      stats.siblingMerged += entry.siblingMerged ?? 0
+      stats.siblingAmbiguous += entry.siblingAmbiguous ?? 0
       // Order matters: outcome flags are mutually exclusive but explicit (weak/gated/
       // skipped) so a decoupled raw-skip floor never misclassifies a reject as a skip.
       if (entry.gated) stats.gated++
@@ -690,6 +710,11 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
       + `${stats.matched ? `, ${stats.degenerate}/${stats.matched} accepted pair(s) H/F-degenerate `
         + `(${(100 * stats.degenerate / stats.matched).toFixed(0)}% planar / pure-rotation)` : ''}`,
       'success', 'Matching')
+    if (stats.siblingMerged || stats.siblingAmbiguous) {
+      log(`SIFT orientation siblings: ${stats.siblingMerged} duplicate putative(s) merged onto their dominant `
+        + `keypoint, ${stats.siblingAmbiguous} ambiguous putative(s) dropped (one feature matched to two)`,
+        'info', 'Matching')
+    }
 
     matchRun.value = {
       timings,
@@ -712,6 +737,9 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
       // without knowing how many pairs H was actually evaluated on (accepted pairs).
       degenerate: stats.degenerate,
       degenerateOf: stats.matched,
+      // Orientation-sibling canonicalization (core/features/orientationSiblings.js).
+      siblingMerged: stats.siblingMerged,
+      siblingAmbiguous: stats.siblingAmbiguous,
       subsetGateActive: gateApplies && !skipSubsetGate,
       resolvedRansacPx,
       // The user-facing knobs only — the tuning.js internals are not what a baseline

@@ -56,7 +56,7 @@ these gate code decisions elsewhere in this file:
 | `DEN-02`/`DEN-03` sky- and vegetation-heavy dense | decides the DF retune, and whether the in-optimiser pass is worth it |
 | `RAS-05` EPSG:3031 under WebGLTileLayer | go/no-go for the whole RR re-architecture |
 | `DEN-05`/`DEN-06` dense on WebGPU | validates the automatic GPU default shipped 2026-08-25 and its WASM fallback |
-| MT ▸ `minInlierRatio` 0 run on SB | sizes how much of the pair gap (1694 vs COLMAP 2678) is the inlier-ratio gate |
+| `MAT-07` SB with 2 SIFT orientations (re-detect) | measures the 2026-10-05 detector change; then the `minInlierRatio` 0 run in MT |
 | `REL-02` cold smoke on the deployed build | it is a public beta |
 
 Rules that keep the register honest: record the *measured* number, not "ok"; one
@@ -306,13 +306,11 @@ stated), each recorded as a VERIFICATION row + HANDOVER baseline.
 - **Track building is ruled out (MAT-06).** Final-stage completion lifted only 338
   points (+0.6 %); 38,685 two-view points have no verified correspondence into a third
   registered image. The gap is in the correspondences themselves — the items below.
-- **SIFT orientations: one per keypoint.** `crates/sift` `compute_orientation` keeps
-  only the dominant histogram peak; Lowe/VLFeat/COLMAP add a keypoint for every peak
-  ≥ 80 % of the max (COLMAP `max_num_orientations` = 2). A feature whose two peaks are
-  close gets a different orientation in different images and stops matching — exactly
-  the track-shortening failure. Catch: `suppress_duplicate_positions` dedupes by
-  position, so it must keep same-position keypoints with distinct orientations.
-  Detection change ⇒ crate + simd-parity + METHODS §2, and a re-detect.
+- **MAT-07 — measure SIFT multi-orientation** (shipped 2026-10-05, needs a re-detect).
+  Note the cap: most SB images already hit 10,000 keypoints, and siblings count toward
+  it (as in COLMAP), so at 2400 px the second orientation partly *replaces* the weakest
+  extrema. If MAT-07 shows the cap binding, a follow-up run with a higher
+  `maxKeypoints` (or the full-resolution item below) separates the two effects.
 - **Inlier-ratio gate** (one run with `minInlierRatio` 0): COLMAP accepts any pair
   with ≥15 inliers; MAT-05 rejected 6282 pairs after verification. More accepted pairs
   = more correspondences per feature = longer tracks.

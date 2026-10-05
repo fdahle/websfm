@@ -349,6 +349,20 @@ fiducials; self-calibration (A2) + fiducials (F4) are the code-side support.
 
 ## Done log (most recent first)
 
+- **2026-10-05 · SIFT: multiple orientations per keypoint.** `crates/sift`
+  `orientation_peaks`: dominant orientation unchanged, plus every other local histogram
+  maximum ≥ 80 % of it as an extra keypoint ("sibling": same x/y/scale/response, own
+  descriptor), up to `detect_sift`'s new `max_orientations` (`DETECT_TUNING`
+  `siftMaxOrientations` = 2, COLMAP's default). Siblings survive both duplicate
+  suppressions (crate + tiled `nmsByPosition`, exact-position test) and are folded onto
+  the dominant keypoint after matching (`core/features/orientationSiblings.js`, wired in
+  `useMatchesStore.matchPair`; ambiguous folds dropped; totals logged and in
+  `matchRun`), so verification/SfM see one index per feature. Recorded per image as
+  `detectSettings.maxOrientations` and in the digest. `max_orientations = 1` is
+  bit-identical to the old wasm (two synthetic images); 2 adds ~18 % keypoints and
+  8–15 % distinct correct correspondences on rotated/rescaled synthetic pairs (0 % at
+  identity), precision unchanged. Reference-GCP SIFT keeps 1. Needs re-detect: `MAT-07`.
+
 - **2026-10-05 · Final-stage track completion.** \`core/sfm/tracks.js\`
   \`completeTracks\` (COLMAP's CompleteTracks: a verified match with one endpoint on a
   point adds the other endpoint when it reprojects within the track-filter gate) is now

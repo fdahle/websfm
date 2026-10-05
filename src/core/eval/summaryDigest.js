@@ -115,6 +115,8 @@ export function buildProjectDigest(input = {}) {
           maxKeypoints: detect.maxKeypoints ?? null,
           contrastThreshold: detect.contrastThreshold ?? null,
           tiling: detect.tiling ?? null,
+          // SIFT keypoints per extremum; absent on older records ⇒ not rendered.
+          ...(detect.maxOrientations != null ? { maxOrientations: detect.maxOrientations } : {}),
           medianKeypoints: detect.medianKeypoints ?? null,
           medianDetectScale: detect.medianDetectScale ?? null,
           kpCapHitPct: detect.kpCapHitPct ?? null,

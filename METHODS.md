@@ -98,6 +98,27 @@ the symptom was not "no keypoints" but a quiet loss of large-scale structure and
 raises keypoint yield at a given threshold and shifts the mix toward coarse scales,
 so the `DETECT_SIFT_DEFAULTS` presets are calibrated against the corrected pyramid.
 
+**Orientation assignment — one keypoint per strong peak** (Lowe §5; since 2026-10-05).
+The 36-bin, Gaussian-weighted, smoothed gradient-orientation histogram gives the
+dominant orientation (global maximum, parabola-interpolated). Every other local maximum
+reaching **80 %** of it becomes an additional keypoint at the same position, scale and
+response, with its own descriptor computed at that angle — up to
+`DETECT_TUNING.siftMaxOrientations` (2, COLMAP's `max_num_orientations` default) per
+extremum. Why it matters: a feature whose two peaks are nearly equal gets one
+orientation in one image and the other in the next, its descriptors no longer agree, and
+the feature drops out of every match that would have extended its track. On synthetic
+rotated/rescaled pairs the second orientation adds ~18 % keypoints and **8–15 % more
+distinct correct correspondences** (none at zero rotation), with unchanged precision;
+`maxOrientations = 1` reproduces the earlier detector bit for bit. Siblings count toward
+`maxKeypoints`, are exempt from each other in near-duplicate suppression (and are
+suppressed together with their extremum), and are **folded back onto the dominant
+keypoint right after matching** (`core/features/orientationSiblings.js`): every putative
+is re-expressed on the canonical index and deduplicated, and a feature that the two
+orientations matched to two *different* features is dropped as ambiguous. Verification
+and SfM therefore see one index per physical point carrying the evidence of both
+orientations — without the fold, B matching orientation 1 and C matching orientation 2
+would split the point into two tracks the merge step refuses to join.
+
 **Non-standard bits worth mentioning to a colleague:**
 - **Duplicate-keypoint suppression** (`suppress_duplicate_positions`,
   response-weighted descriptor NMS): one strong blob can fire as a DoG extremum
