@@ -56,7 +56,7 @@ these gate code decisions elsewhere in this file:
 | `DEN-02`/`DEN-03` sky- and vegetation-heavy dense | decides the DF retune, and whether the in-optimiser pass is worth it |
 | `RAS-05` EPSG:3031 under WebGLTileLayer | go/no-go for the whole RR re-architecture |
 | `DEN-05`/`DEN-06` dense on WebGPU | validates the automatic GPU default shipped 2026-08-25 and its WASM fallback |
-| `MAT-01`–`MAT-03` GPU brute-force matcher on SB | validates the matcher shipped 2026-10-05 (on by default with WebGPU) and decides MT below |
+| `MAT-05` re-run of the GPU matcher on SB | measures the 2026-10-05 main-thread fixes; MT below lists the experiments that follow |
 | `REL-02` cold smoke on the deployed build | it is a public beta |
 
 Rules that keep the register honest: record the *measured* number, not "ok"; one
@@ -294,20 +294,51 @@ session loads.
 guard) with a mocked `InferenceSession`. Real-inference browser runs are
 `VERIFICATION.csv` ▸ `DET-02`, `DET-04`, `DET-06`.
 
-### MT — after the GPU matcher's browser runs (MAT-01–03)
-- **Subset-gate default.** The gate exists because a WASM pair cost ~2.75 s; at GPU
-  speed it mostly removes recall (2026-10-04 SB: 6967/8128 pairs skipped, 984
-  accepted vs COLMAP 2678). If MAT-03 shows recall recovering with the gate off,
-  make "off" the default when the GPU backend is active and record both runs in
-  HANDOVER §Baselines.
-- **Pool dispatch.** The 2026-10-04 SB run logged a 3735 s queue/transport
-  remainder and 2.65× effective parallelism on 8 workers. Round-robin `call()`
-  assigns a job to a slot regardless of how busy it is; measure whether
-  next-free-worker dispatch fixes it — with the GPU matching, verification is the
-  pool's remaining load.
-- **Kernel efficiency.** ~1.1 TFLOP/s on an RTX (Turing) under Dawn — a fraction of
-  peak. Only worth tuning if MAT-02 shows the GPU, not verification, bounds wall time
-  (larger micro-tiles, f16 descriptors halving the bandwidth).
+### MT — closing the gap to COLMAP on South Building (after MAT-01–03)
+Where we stand (HANDOVER ▸ B-match-gpu): matching 598 s vs COLMAP 99 s; ≥3-view
+points 51,964 vs 80,792. Turning the subset gate off raised accepted pairs 61 % and
+≥3-view points 0.2 %, so **the point gap is downstream of matching**. Run the browser
+experiments one variable at a time on SB (exhaustive, GPU, gate off unless stated),
+each recorded as a VERIFICATION row + HANDOVER baseline.
+
+**Points (the bigger gap):**
+- **Track completion — the main suspect.** The final cleanup dropped 37,279
+  "uncorroborated" 2-view points; retriangulation merged only 143 split tracks.
+  COLMAP links every verified correspondence into one track graph and, after each
+  registration, re-walks it (`CompleteTracks`/`MergeTracks`) to add observations in
+  other registered images whose reprojection agrees. First a diagnostic: for each
+  2-view point, how many of its two keypoints have verified correspondences into a
+  third *registered* image that reproject within the track-filter gate? If that is
+  a large share, implement COLMAP-style completion + merging after the final BA (and
+  ideally after each interim BA) in `core/sfm/`.
+- **Rotation-cycle filter on true pairs.** It removed 273/1589 pairs (17 %),
+  including obvious sequential neighbours (P1180213↔218, 757 inliers, in 0/31
+  triangles; 21 % of accepted pairs were H/F-degenerate — a planar pair's E
+  decomposition can return the wrong rotation). Check the Detail log for how many
+  the post-self-cal re-admission recovers; consider letting dropped pairs still feed
+  track completion (reprojection-gated) while keeping them out of init/registration.
+  COLMAP has no such filter.
+- **Ratio 0.75 vs COLMAP 0.8** (one run): more putatives per pair ⇒ longer tracks.
+- **Inlier-ratio gate** (one run with `minInlierRatio` 0): COLMAP accepts any pair
+  with ≥15 inliers; 1863 pairs were rejected here.
+- **Detection resolution**: COLMAP extracts at full 3072 px with an upsampled first
+  octave; SB ran at ≤2400 px. Separate experiment, after the matching ones.
+
+**Speed:**
+- **Re-run MAT-05** (main-thread fixes of 2026-10-05). Expected GPU-bound at ~30 ms
+  per pair ≈ 4–5 min. Take a DevTools Performance trace if it is not.
+- **Kernel throughput** (~33 ms/pair in Chrome vs 16.5 ms under Dawn/Node for a
+  smaller pair; COLMAP ~12 ms). Options, cheapest first: check whether Chrome
+  compiles via FXC or DXC (`chrome://gpu`) — the 4×4 register arrays are where FXC
+  hurts; manually unroll the micro-tile into vec4 locals; f16 descriptors
+  (`shader-f16`) halve bandwidth; uint8 descriptors with `dot4U8Packed` quarter it and
+  match COLMAP's own uint8 SIFT — but that changes the descriptor semantics for
+  both backends (METHODS change, crate in lockstep).
+- **Pool dispatch.** The 2026-10-04 run showed 2.65× effective parallelism on 8
+  workers under round-robin `call()`; with GPU matching, verification (21 s summed)
+  is the pool's only load, so this matters only if MAT-05 shows idle GPU time.
+- **Subset-gate default**: with the GPU backend the gate saves little and costs
+  pairs; make "off" the default for GPU runs once MAT-05 confirms the wall time.
 
 ### Matching & detection throughput
 Stage timings now separate loading, serialization, matching and verification.

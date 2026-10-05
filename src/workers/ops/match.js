@@ -1,7 +1,7 @@
 import { matchDescriptors } from '../../core/features/bruteforce.js'
 import { compareMatchSets } from '../../core/features/nnSelect.js'
 import { matchLightGlue, matchLightGlueTiled } from '../../core/features/lightglue.js'
-import { verifyMatches } from '../../core/features/verify.js'
+import { verifyMatches, verifyPointPairs } from '../../core/features/verify.js'
 import { beginGpuMatchRun, endGpuMatchRun, matchDescriptorsGpu } from '../gpu/matchGpu.js'
 
 // Matching + geometric-verification ops. No worker-local pixel helpers needed —
@@ -52,5 +52,13 @@ export function makeMatchOps() {
     return { result: res, transfer: [res.inlierMask.buffer] }
   }
 
-  return { match, matchGpuBegin, matchGpu, matchGpuEnd, matchLightGlue: matchLightGluePair, verify }
+  // Packed form used by the match store: only the putatives' coordinates cross
+  // postMessage (transferred), never the two whole keypoint arrays.
+  async function verifyPoints([ptsA, ptsB, options = {}]) {
+    const res = await verifyPointPairs(ptsA, ptsB, options)
+    if (!res) return { result: null }
+    return { result: res, transfer: [res.inlierMask.buffer] }
+  }
+
+  return { verifyPoints, match, matchGpuBegin, matchGpu, matchGpuEnd, matchLightGlue: matchLightGluePair, verify }
 }

@@ -2,14 +2,14 @@ import { shallowRef, triggerRef, computed } from 'vue'
 import { defineStore } from 'pinia'
 import * as opfs from '../utils/opfs.js'
 import {
-  matchDescriptors, matchLightGlue, verifyMatches, POOL_SIZE,
+  matchDescriptors, matchLightGlue, verifyPointPairs, POOL_SIZE,
   matchDescriptorsGpu, matchGpuBegin, matchGpuEnd, GPU_MATCH_WORKER,
 } from '../workers/computeClient.js'
 import { createGpuMatchRun } from './matching/gpuMatchRun.js'
 import { useLog } from '../composables/useLog.js'
 import { preselectPairs, positionsForProximity, preselectByFootprintOverlap } from '../core/features/preselect.js'
 import { sequentialPairs } from '../core/features/sequentialPairs.js'
-import { inlierSpread } from '../core/features/verify.js'
+import { inlierSpread, packMatchedPoints } from '../core/features/verify.js'
 import { evaluatePairAcceptance } from '../core/features/pairGate.js'
 import { pickSpreadIndices, sliceDescriptorRows, resolveSubsetGateSize } from '../core/features/subsetGate.js'
 import { MATCH_DEFAULTS } from '../core/defaults.user.js'
@@ -47,6 +47,18 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
   // write races (one writer's snapshot clobbers another's set). See P2 in HANDOVER.
   const matchStore = shallowRef(new Map())
   const touch = () => triggerRef(matchStore)
+  // matchPair's per-pair updates are THROTTLED to ≤10 Hz. Every trigger re-runs each
+  // computed that walks the whole Map (App.vue `matchStats`/`matchSummaries`,
+  // `usableMatchCount`) and re-renders their components, so 3–4 synchronous triggers
+  // per pair made a run O(pairs²) on the main thread — on the 8128-pair SB run the
+  // per-pair pace slowed from ~33 ms to ~90 ms as the Map filled. Entries are still
+  // mutated in place immediately (getMatch/direct readers see them at once); only the
+  // reactive notification is batched. matchAll flushes with `touch()` when it ends.
+  let touchTimer = null
+  const touchSoon = () => {
+    if (touchTimer != null) return
+    touchTimer = setTimeout(() => { touchTimer = null; touch() }, 100)
+  }
 
   // The last completed matchAll run: its settings and its gate accounting (accepted /
   // weak / rejected / raw-skipped / subset-gated). Kept because the accounting is what
@@ -115,7 +127,7 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
       : matchDescriptors(dA, dB, opts, timing('matchingMs')))
     matchStore.value.set(pid, entry)
     // Trigger reactivity
-    touch()
+    touchSoon()
 
     const projectId = projects.currentProjectId
     const persist = isPersisting()
@@ -146,7 +158,7 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
         entry.status = 'error'
         const names = `${imgA.name} / ${imgB.name}`
         log(`Match failed: descriptors missing for ${names} — re-run feature detection`, 'error', 'Matching')
-        touch()
+        touchSoon()
         return
       }
 
@@ -205,7 +217,7 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
               + `(${(gateSizing.fraction * 100).toFixed(1)}% sample of ${kpsA.length}/${kpsB.length} kp`
               + `${gateSizing.clamped ? `, at the ${gateSizing.clamped === 'ceil' ? 'cost ceiling' : 'size floor'}` : ''})`
               + ' — skipping full match', 'debug', 'Matching')
-            touch()
+            touchSoon()
             onDone?.(pid, entry)
             return
           }
@@ -266,7 +278,7 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
         entry.skipped = true
         const label = `${imgA.name} ↔ ${imgB.name}`
         log(`Skip: ${label} — only ${raw.length} raw matches (need ${rawSkipFloor})`, 'debug', 'Matching')
-        touch()
+        touchSoon()
         onDone?.(pid, entry)
         return
       }
@@ -279,7 +291,8 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
         // Both at full resolution ⇒ factor 1 ⇒ the configured value, unchanged.
         const scaleCtx = pairScaleContext(srcA, srcB)
         const ransacPx = resolveScaledPx(settings.ransacThreshPx, scaleCtx)
-        const result = await verifyMatches(kpsA, kpsB, raw, {
+        const { ptsA, ptsB } = packMatchedPoints(kpsA, kpsB, raw)
+        const result = await verifyPointPairs(ptsA, ptsB, {
           ransacThreshPx: ransacPx,
           maxIters: settings.maxIters,
           // Skip H-RANSAC on pairs below the hard acceptance floor: they're rejected
@@ -374,7 +387,7 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
         + `${cancelled ? '' : ` — ${msg}`}`, cancelled ? 'warn' : 'error', 'Matching')
     }
 
-    touch()
+    touchSoon()
     onDone?.(pairId(imgA.uuid, imgB.uuid), entry)
   }
 
@@ -644,6 +657,9 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
     try {
       await Promise.all(Array.from({ length: concurrency }, drain))
     } finally {
+      // Flush matchPair's throttled reactivity so everything reading the store's
+      // computeds after the run sees the final state.
+      touch()
       // Always release the GPU-side descriptor cache, unless Cancel already
       // terminated the pool (and with it the cache).
       if (gpuRun) backendRecord = await gpuRun.finish({ cancelled: cancelled || !!shouldCancel?.() })

@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url'
 import { beforeAll, describe, it, expect } from 'vitest'
 
 import initMatching from '../../wasm/matching/matching.js'
-import { verifyMatches, inlierSpread } from './verify.js'
+import { verifyMatches, verifyPointPairs, packMatchedPoints, inlierSpread } from './verify.js'
 
 // Load the matching wasm bytes ourselves (Node can't fetch() the .wasm URL the
 // glue defaults to); the module-level singleton then makes the core module's own
@@ -66,6 +66,24 @@ describe('verifyMatches (F + H-vs-F degeneracy)', () => {
       { ransacThreshPx: 2.0, maxIters: 2000, hSkipBelow: base.inlierCount + 1 })
     expect(skipped.hInlierCount).toBe(0)
     expect(skipped.inlierCount).toBe(base.inlierCount)
+  })
+
+  // The store posts packed coordinates (verifyPoints op) instead of the two keypoint
+  // object arrays; it must be the very same verification.
+  it('packed point pairs verify identically to keypoints + match indices', async () => {
+    const { kpsA, kpsB, matches } = scene(false)
+    // Scramble the match order and indices so the packing really has to index.
+    const perm = matches.map((m, i) => ({ ia: (i * 7) % 60, ib: (i * 7) % 60 }))
+    const opts = { ransacThreshPx: 2.0, maxIters: 2000 }
+    const viaKps = await verifyMatches(kpsA, kpsB, perm, opts)
+    const { ptsA, ptsB } = packMatchedPoints(kpsA, kpsB, perm)
+    expect(ptsA).toBeInstanceOf(Float32Array)
+    expect([ptsA[2], ptsA[3]]).toEqual([Math.fround(kpsA[7].x), Math.fround(kpsA[7].y)])
+    const viaPts = await verifyPointPairs(ptsA, ptsB, opts)
+    expect(viaPts.F).toEqual(viaKps.F)
+    expect([...viaPts.inlierMask]).toEqual([...viaKps.inlierMask])
+    expect(viaPts.hInlierCount).toBe(viaKps.hInlierCount)
+    expect(await verifyPointPairs(new Float32Array(14), new Float32Array(14), opts)).toBeNull()
   })
 })
 

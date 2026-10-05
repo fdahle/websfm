@@ -21,16 +21,18 @@ function ensureWasm() {
  * @returns {Promise<{ F: number[][], inlierMask: Float32Array, inlierCount: number, hInlierCount: number } | null>}
  */
 export async function verifyMatches(kpsA, kpsB, matches, options = {}) {
-  // hSkipBelow: skip the homography RANSAC (only the H/F degeneracy label needs it)
-  // for pairs the caller will reject anyway. Pass the caller's own hard acceptance
-  // floor (`minMatches`) so a skipped pair is guaranteed rejected before its label
-  // is read; default 0 ⇒ never skip.
-  const { ransacThreshPx = 2.0, maxIters = 1000, hSkipBelow = 0 } = options
-  await ensureWasm()
+  const { ptsA, ptsB } = packMatchedPoints(kpsA, kpsB, matches)
+  return verifyPointPairs(ptsA, ptsB, options)
+}
 
+/**
+ * The putatives' coordinates as two flat `[x0, y0, x1, y1, …]` Float32Arrays —
+ * row i is `matches[i]`. This is all verification needs, and it is what the store
+ * posts to the worker: cloning two whole keypoint OBJECT arrays per pair (10k
+ * objects each) cost ~5 ms of main-thread serialization per pair.
+ */
+export function packMatchedPoints(kpsA, kpsB, matches) {
   const n = matches.length
-  if (n < 8) return null
-
   const ptsA = new Float32Array(n * 2)
   const ptsB = new Float32Array(n * 2)
   for (let i = 0; i < n; i++) {
@@ -40,6 +42,22 @@ export async function verifyMatches(kpsA, kpsB, matches, options = {}) {
     ptsB[i * 2]     = kpsB[ib].x
     ptsB[i * 2 + 1] = kpsB[ib].y
   }
+  return { ptsA, ptsB }
+}
+
+/**
+ * `verifyMatches` over pre-packed putative coordinates (see `packMatchedPoints`).
+ * Same result shape; `inlierMask[i]` refers to point pair i.
+ */
+export async function verifyPointPairs(ptsA, ptsB, options = {}) {
+  // hSkipBelow: skip the homography RANSAC (only the H/F degeneracy label needs it)
+  // for pairs the caller will reject anyway. Pass the caller's own hard acceptance
+  // floor (`minMatches`) so a skipped pair is guaranteed rejected before its label
+  // is read; default 0 ⇒ never skip.
+  const { ransacThreshPx = 2.0, maxIters = 1000, hSkipBelow = 0 } = options
+  await ensureWasm()
+
+  if (ptsA.length / 2 < 8) return null
 
   // Layout: [F00..F22, hInlierCount, inlier_0, inlier_1, …] (see verify_matches_hf).
   const raw = verify_matches_hf(ptsA, ptsB, ransacThreshPx, maxIters, hSkipBelow)

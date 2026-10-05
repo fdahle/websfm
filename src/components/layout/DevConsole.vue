@@ -94,10 +94,13 @@ function scrollToBottom() {
   })
 }
 
+// `entries` is a shallowRef that useLog notifies once per batch of appended lines
+// (triggerRef) — a shallow watch fires on that. Never make this `deep`: a deep watch
+// walks every field of every buffered line on each notification.
 watch(entries, async () => {
   await nextTick()
   if (stickToBottom.value) scrollToBottom()
-}, { deep: true })
+})
 
 // Drag-to-resize from the top edge.
 const height = ref(200)

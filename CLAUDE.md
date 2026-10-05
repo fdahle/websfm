@@ -1200,6 +1200,14 @@ propagate covariance rather than retaining stale numeric sigmas.
   exports and ~8 deps — indirection without decoupling. `useSmartSelect` works
   precisely because it has a narrow seam: it hands back
   `buildCommitCanvas(w, h)` and never touches the mask canvas or undo stack.
+- **A per-item reactive notification inside a long loop is O(items²).** Every
+  trigger re-runs each consumer that walks the whole collection, so a run that logs
+  or `touch()`es once per pair gets slower as it fills — the 2026-10-05 SB matching
+  run went from ~33 to ~90 ms/pair that way (and a full 5000-line deep-`ref` log
+  buffer cost 5.6 ms per line on its own). The rule: append to plain data in place
+  and notify in batches — `useLog`'s buffer is a `shallowRef` triggered ≤20 Hz and
+  trimmed in chunks; `useMatchesStore.matchPair` throttles `touch()` to ≤10 Hz and
+  `matchAll` flushes once at the end. Never `deep`-watch such a buffer.
 - **Progress is a monotonic 0..1 `fraction`, never a work counter.** `usePipeline`
   owns the whole display contract: it ingests every `onProgress(done, total, label,
   fraction?)` into a plain object and flushes to refs on a rAF at ≤10 Hz (worker

@@ -44,6 +44,25 @@ the `webgpu` npm package — same backend as Chrome on Windows):
 ~1.1 TFLOP/s effective on the GPU — far from peak (TODO ▸ MT). Integer-valued
 descriptors (exact arithmetic) match WASM bit for bit, distances included.
 
+**Real data, browser (2026-10-05, Chrome, same GPU, MAT-01–03):** South Building
+128, SIFT ≤2400 px (4.3k–10k kp), exhaustive, subset gate **off**, ratio 0.75 +
+cross-check. All 8128 pairs on the GPU, validate PASS, 0 fallbacks.
+
+| | WASM + gate (2026-10-04) | GPU, gate off (2026-10-05) | COLMAP |
+| --- | --- | --- | --- |
+| matching wall | 1206 s | 598 s | 99 s |
+| pairs fully matched | 1161 | 8128 | 8128 |
+| accepted pairs | 984 | 1589 (1863 rejected, 4676 skipped) | 2678 |
+| ≥3-view points after SfM | 51,869 | 51,964 | 80,792 |
+| SfM | — | 128/128 cams, fx 2565.3, median 0.31 px, 152 s | 128/128 |
+
+Pace was ~33 ms/pair while the GPU set it (first image's 127 pairs in 4.2 s) and
+~90 ms/pair by the end; 8 drains × 598 s = 4784 s of drain time vs 2050 s inside
+worker calls. The main thread bounded the rest (fixed the same day, re-run owed):
+the log buffer cost **5.6 ms per line** once full (20,000 lines: 112.7 s → 1.25 s
+after the fix, node, no rendering). Gate off raised accepted pairs 61 % but ≥3-view
+points 0.2 % — the point gap is downstream of matching (TODO ▸ MT).
+
 ### B-georef-polar — similarity fit on error-free polar control (2026-10-04, synthetic)
 40 control points, true ECEF geometry under an arbitrary SfM similarity, targets in
 EPSG:3031 grid + ellipsoidal height; 3-D RMS of the fitted similarity (m).
@@ -315,6 +334,16 @@ fiducials; self-calibration (A2) + fiducials (F4) are the code-side support.
 ---
 
 ## Done log (most recent first)
+
+- **2026-10-05 · Main-thread cost of long matching runs.** The first browser GPU run
+  (MAT-02) was main-thread-bound in its second half. `composables/useLog.js`: the
+  console buffer is a `shallowRef` appended in place, notified ≤20 Hz and trimmed in
+  500-line chunks (was a deep `ref` whose `shift()` re-triggered all 5000 indices per
+  line once full); DevConsole's `watch(entries)` is no longer `deep`.
+  `useMatchesStore`: per-pair `touch()` throttled to ≤10 Hz with a flush at the end
+  of `matchAll`; verification posts only the putatives' packed coordinates
+  (`verify.js` `packMatchedPoints` → `verifyPoints` op, transferred) instead of
+  cloning both keypoint object arrays. Re-run of MAT-02 owed.
 
 - **2026-10-05 · WebGPU brute-force matcher + one-matrix cross-check.** *CPU*
   (`crates/matching` `nn2_rows_cols`): cross-check reads B→A column-wise off the same
