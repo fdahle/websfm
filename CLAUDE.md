@@ -529,7 +529,8 @@ self-contained, file-based project format.
    `suppressed`), so parse `kept = floor((len-2)/STRIDE)`. An extremum with a
    second strong orientation peak yields **orientation siblings** — keypoints with
    bit-identical x, y, scale and their own descriptors (`max_orientations`,
-   `DETECT_TUNING.siftMaxOrientations` = 2). Bit-identical position IS the sibling
+   `DETECT_TUNING.siftMaxOrientations`; default 1, so siblings appear only when it is
+   raised). Bit-identical position IS the sibling
    test everywhere: both duplicate suppressions (crate + tiled `nmsByPosition`) exempt
    siblings from each other, and `useMatchesStore` folds every putative onto the
    dominant index right after descriptor matching

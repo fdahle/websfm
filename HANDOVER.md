@@ -101,6 +101,13 @@ of MAT-08's), matching 144 s with the subset gate off, 1642 accepted pairs, **57
 the ratio test ran at the 0.75 default (MAT-08: 0.8), and that change alone was worth
 about +5 % points on MAT-05. Re-match pending (MAT-10).
 
+**Same detections re-matched with MAT-08's settings (MAT-10):** ratio 0.8, gate on:
+1341 accepted pairs, matching 96 s, **60,189** ≥3-view points — −0.5 % vs MAT-08 with 2
+orientations, +4.6 % vs MAT-09 (ratio 0.75). Verdicts: the second orientation is worth
+nothing measurable here, so the default stays at 1; the ratio test at 0.8 is worth ~5 %
+points (now seen twice). Best configuration so far: 1 orientation, keypoint cap that
+does not bind, ratio 0.8 — 60.2k vs COLMAP 80.8k.
+
 ### B-georef-polar — similarity fit on error-free polar control (2026-10-04, synthetic)
 40 control points, true ECEF geometry under an arbitrary SfM similarity, targets in
 EPSG:3031 grid + ellipsoidal height; 3-D RMS of the fitted similarity (m).
@@ -372,6 +379,10 @@ fiducials; self-calibration (A2) + fiducials (F4) are the code-side support.
 ---
 
 ## Done log (most recent first)
+
+- **2026-10-05 · SIFT multi-orientation: default 1.** `DETECT_TUNING.siftMaxOrientations`
+  2 → 1 after MAT-08/MAT-10 (+0.5 % points for ~20 % more descriptors). The code path
+  stays; set 2 to match COLMAP. `core/tuning.js`, METHODS §2, guide ▸ Detect Features.
 
 - **2026-10-05 · GPU matching: Cancel no longer falls back to WASM.** Cancel hard-terminates the pool, so in-flight GPU calls rejected and `gpuMatchRun` answered them on WASM — a fresh pool kept matching after the user stopped. The router now takes `shouldCancel` and rethrows instead of falling back (also for pairs queued behind the validation gate). `stores/matching/gpuMatchRun.js`; browser check `MAT-11`.
 

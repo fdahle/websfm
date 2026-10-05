@@ -103,8 +103,10 @@ The 36-bin, Gaussian-weighted, smoothed gradient-orientation histogram gives the
 dominant orientation (global maximum, parabola-interpolated). Every other local maximum
 reaching **80 %** of it becomes an additional keypoint at the same position, scale and
 response, with its own descriptor computed at that angle — up to
-`DETECT_TUNING.siftMaxOrientations` (2, COLMAP's `max_num_orientations` default) per
-extremum. Why it matters: a feature whose two peaks are nearly equal gets one
+`DETECT_TUNING.siftMaxOrientations` per extremum. The default is **1** (COLMAP's
+`max_num_orientations` is 2): on South Building, with identical matching settings, the
+second orientation changed ≥3-view points by +0.5 % (60,480 vs 60,189) for ~20 % more
+descriptors to match, so it stays available but off. Why it matters: a feature whose two peaks are nearly equal gets one
 orientation in one image and the other in the next, its descriptors no longer agree, and
 the feature drops out of every match that would have extended its track. On synthetic
 rotated/rescaled pairs the second orientation adds ~18 % keypoints and **8–15 % more
