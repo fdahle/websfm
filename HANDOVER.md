@@ -77,6 +77,14 @@ the cycle-dropped pairs. Conclusion: tracks are already as complete as the verif
 correspondences allow — the gap to COLMAP is in correspondences (pairs, detection),
 not in track building.
 
+**With 2 SIFT orientations (MAT-07, re-detected, otherwise as MAT-06):** keypoints
++10 % (capped images stay at 10,000), matching 131.7 s, accepted pairs 1703, verified
+inliers +5.4 % (103,908 sibling duplicates merged, 4,817 ambiguous dropped). ≥3-view
+points **51,200 (−7 %)** — yet the final observation count is unchanged (324k) and
+tracks are longer (6.34 vs 5.89 obs/point). Reading: the second orientation does extend
+tracks, but siblings take cap slots from weaker *distinct* extrema, so capped images
+lose ~15 % of their features. Not yet a fair test of the method.
+
 ### B-georef-polar — similarity fit on error-free polar control (2026-10-04, synthetic)
 40 control points, true ECEF geometry under an arbitrary SfM similarity, targets in
 EPSG:3031 grid + ellipsoidal height; 3-D RMS of the fitted similarity (m).

@@ -56,7 +56,7 @@ these gate code decisions elsewhere in this file:
 | `DEN-02`/`DEN-03` sky- and vegetation-heavy dense | decides the DF retune, and whether the in-optimiser pass is worth it |
 | `RAS-05` EPSG:3031 under WebGLTileLayer | go/no-go for the whole RR re-architecture |
 | `DEN-05`/`DEN-06` dense on WebGPU | validates the automatic GPU default shipped 2026-08-25 and its WASM fallback |
-| `MAT-07` SB with 2 SIFT orientations (re-detect) | measures the 2026-10-05 detector change; then the `minInlierRatio` 0 run in MT |
+| `MAT-08` SB, 2 SIFT orientations at maxKeypoints ≈ 12,000 | decides whether multi-orientation stays the default (MAT-07 was −7 % points at the 10k cap) |
 | `REL-02` cold smoke on the deployed build | it is a public beta |
 
 Rules that keep the register honest: record the *measured* number, not "ok"; one
@@ -306,11 +306,12 @@ stated), each recorded as a VERIFICATION row + HANDOVER baseline.
 - **Track building is ruled out (MAT-06).** Final-stage completion lifted only 338
   points (+0.6 %); 38,685 two-view points have no verified correspondence into a third
   registered image. The gap is in the correspondences themselves — the items below.
-- **MAT-07 — measure SIFT multi-orientation** (shipped 2026-10-05, needs a re-detect).
-  Note the cap: most SB images already hit 10,000 keypoints, and siblings count toward
-  it (as in COLMAP), so at 2400 px the second orientation partly *replaces* the weakest
-  extrema. If MAT-07 shows the cap binding, a follow-up run with a higher
-  `maxKeypoints` (or the full-resolution item below) separates the two effects.
+- **SIFT multi-orientation: decide (MAT-07 → MAT-08).** MAT-07 (2 orientations at the
+  10,000 cap) gave longer tracks but 7 % fewer ≥3-view points: siblings displaced weak
+  distinct extrema in capped images. MAT-08: the same run with `maxKeypoints` ≈ 12,000
+  (distinct extrema held constant). Beats MAT-06 (55,066) ⇒ keep 2 and consider making
+  the cap count extrema rather than keypoints; otherwise set
+  `DETECT_TUNING.siftMaxOrientations` back to 1 (the code path stays, bit-identical at 1).
 - **Inlier-ratio gate** (one run with `minInlierRatio` 0): COLMAP accepts any pair
   with ≥15 inliers; MAT-05 rejected 6282 pairs after verification. More accepted pairs
   = more correspondences per feature = longer tracks.
