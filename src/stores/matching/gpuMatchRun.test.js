@@ -126,6 +126,53 @@ describe('createGpuMatchRun', () => {
     expect((await run.finish()).gpuMatches).toEqual({ full: 1, gate: 2 })
   })
 
+  it('does not fall back to WASM when the GPU call fails because the run was cancelled', async () => {
+    let cancelled = false
+    let finishFirst
+    const { client } = fakeClient({
+      gpu: async (args, n) => {
+        if (n === 1) return { matches: [], count: 0, validation: PASS }
+        await new Promise((resolve) => { finishFirst = resolve })
+        throw new Error('matching cancelled') // terminateAll rejects in-flight calls
+      },
+    })
+    const run = await createGpuMatchRun({ client, log: vi.fn(), cacheBudgetBytes: 2 ** 30, shouldCancel: () => cancelled })
+    await run.match(D, D, opts())
+    const inFlight = run.match(D, D, opts({ idA: 'c', idB: 'd' }))
+    await Promise.resolve()
+    cancelled = true
+    finishFirst()
+    await expect(inFlight).rejects.toThrow(/cancel/)
+    await expect(run.match(D, D, opts({ idA: 'e', idB: 'f' }))).rejects.toThrow(/cancel/)
+    expect(client.cpuMatch).not.toHaveBeenCalled()
+    const rec = await run.finish({ cancelled: true })
+    expect(rec.fallbacks).toBe(0)
+  })
+
+  it('pairs waiting on the validation gate do not start once the run is cancelled', async () => {
+    let cancelled = false
+    let releaseValidator
+    const { client } = fakeClient({
+      gpu: async (args) => {
+        if (args.validate) {
+          await new Promise((resolve) => { releaseValidator = resolve })
+          throw new Error('matching cancelled')
+        }
+        return { matches: [], count: 0 }
+      },
+    })
+    const run = await createGpuMatchRun({ client, log: vi.fn(), cacheBudgetBytes: 2 ** 30, shouldCancel: () => cancelled })
+    const first = run.match(D, D, opts())
+    const waiting = run.match(D, D, opts({ idA: 'c', idB: 'd' }))
+    await Promise.resolve()
+    cancelled = true
+    releaseValidator()
+    await expect(first).rejects.toThrow(/cancel/)
+    await expect(waiting).rejects.toThrow(/cancel/)
+    expect(client.gpuMatch).toHaveBeenCalledTimes(1)
+    expect(client.cpuMatch).not.toHaveBeenCalled()
+  })
+
   it('does not contact the (terminated) worker when the run was cancelled', async () => {
     const { client } = fakeClient()
     const run = await createGpuMatchRun({ client, log: vi.fn(), cacheBudgetBytes: 2 ** 30 })

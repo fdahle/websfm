@@ -373,6 +373,8 @@ fiducials; self-calibration (A2) + fiducials (F4) are the code-side support.
 
 ## Done log (most recent first)
 
+- **2026-10-05 · GPU matching: Cancel no longer falls back to WASM.** Cancel hard-terminates the pool, so in-flight GPU calls rejected and `gpuMatchRun` answered them on WASM — a fresh pool kept matching after the user stopped. The router now takes `shouldCancel` and rethrows instead of falling back (also for pairs queued behind the validation gate). `stores/matching/gpuMatchRun.js`; browser check `MAT-11`.
+
 - **2026-10-05 · SIFT: multiple orientations per keypoint.** `crates/sift`
   `orientation_peaks`: dominant orientation unchanged, plus every other local histogram
   maximum ≥ 80 % of it as an extra keypoint ("sibling": same x/y/scale/response, own
