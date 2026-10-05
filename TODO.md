@@ -56,7 +56,7 @@ these gate code decisions elsewhere in this file:
 | `DEN-02`/`DEN-03` sky- and vegetation-heavy dense | decides the DF retune, and whether the in-optimiser pass is worth it |
 | `RAS-05` EPSG:3031 under WebGLTileLayer | go/no-go for the whole RR re-architecture |
 | `DEN-05`/`DEN-06` dense on WebGPU | validates the automatic GPU default shipped 2026-08-25 and its WASM fallback |
-| `MAT-08` SB, 2 SIFT orientations at maxKeypoints ≈ 12,000 | decides whether multi-orientation stays the default (MAT-07 was −7 % points at the 10k cap) |
+| `MAT-09` SB as MAT-08 at 1 SIFT orientation | decides whether multi-orientation stays the default (MAT-08 +9.8 % points, but the cap moved with it) |
 | `REL-02` cold smoke on the deployed build | it is a public beta |
 
 Rules that keep the register honest: record the *measured* number, not "ok"; one
@@ -295,26 +295,26 @@ guard) with a mocked `InferenceSession`. Real-inference browser runs are
 `VERIFICATION.csv` ▸ `DET-02`, `DET-04`, `DET-06`.
 
 ### MT — closing the gap to COLMAP on South Building
-Where we stand (HANDOVER ▸ B-match-gpu, MAT-05): matching **109.5 s** vs COLMAP 99 s
-(done — GPU-bound at 13.5 ms/pair); ≥3-view points **54,728** vs 80,792; accepted
-pairs 1694 vs 2678. Turning the subset gate off raised accepted pairs 61 % and
-≥3-view points 0.2 %, so the point gap is downstream of matching. Run the browser
-experiments one variable at a time on SB (exhaustive, GPU, gate off, ratio 0.8 unless
+Where we stand (HANDOVER ▸ B-match-gpu, MAT-08): matching **78 s** (subset gate on)
+vs COLMAP 99 s; ≥3-view points **60,480** vs 80,792; accepted pairs 1456 vs 2678.
+Pairs are not what limits points: gate off raised accepted pairs 61 % for +0.2 %
+points (MAT-05), `minInlierRatio` 0 added 9 pairs (MAT-07), while uncapping the
+keypoints added 9.8 % points on fewer pairs (MAT-08). Run the browser
+experiments one variable at a time on SB (exhaustive, GPU, ratio 0.8 unless
 stated), each recorded as a VERIFICATION row + HANDOVER baseline.
 
 **Points:**
 - **Track building is ruled out (MAT-06).** Final-stage completion lifted only 338
   points (+0.6 %); 38,685 two-view points have no verified correspondence into a third
   registered image. The gap is in the correspondences themselves — the items below.
-- **SIFT multi-orientation: decide (MAT-07 → MAT-08).** MAT-07 (2 orientations at the
-  10,000 cap) gave longer tracks but 7 % fewer ≥3-view points: siblings displaced weak
-  distinct extrema in capped images. MAT-08: the same run with `maxKeypoints` ≈ 12,000
-  (distinct extrema held constant). Beats MAT-06 (55,066) ⇒ keep 2 and consider making
-  the cap count extrema rather than keypoints; otherwise set
-  `DETECT_TUNING.siftMaxOrientations` back to 1 (the code path stays, bit-identical at 1).
-- **Inlier-ratio gate** (one run with `minInlierRatio` 0): COLMAP accepts any pair
-  with ≥15 inliers; MAT-05 rejected 6282 pairs after verification. More accepted pairs
-  = more correspondences per feature = longer tracks.
+- **SIFT multi-orientation: decide (MAT-09).** MAT-08 (2 orientations, 20,000 cap,
+  uncapped in practice) beat MAT-06 by 9.8 %, but the cap moved too. MAT-09 = MAT-08
+  at `DETECT_TUNING.siftMaxOrientations` 1. Clearly behind MAT-08 ⇒ keep 2;
+  otherwise default to 1 (fewer descriptors to match; code path stays).
+- **Keypoint cap default.** `maxKeypoints` 10,000 binds on SB at 2400 px (MAT-05..07)
+  and costs ~10 % points. Raising the SIFT default (or making it scale with the
+  detection size) is a cost question for WASM users — brute force is O(Na·Nb). Decide
+  after MAT-09 and the detection-resolution run, which both move the keypoint count.
 - **Rotation-cycle filter on true pairs.** MAT-06: 748 observations from the dropped
   pairs agree with the final geometry within 5.1 px — many dropped pairs are true.
   It removed 331/1694 pairs on MAT-05, incl.

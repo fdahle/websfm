@@ -77,13 +77,23 @@ the cycle-dropped pairs. Conclusion: tracks are already as complete as the verif
 correspondences allow — the gap to COLMAP is in correspondences (pairs, detection),
 not in track building.
 
-**With 2 SIFT orientations (MAT-07, re-detected, otherwise as MAT-06):** keypoints
+**With 2 SIFT orientations (MAT-07, re-detected, `minInlierRatio` 0, otherwise as MAT-06):** keypoints
 +10 % (capped images stay at 10,000), matching 131.7 s, accepted pairs 1703, verified
 inliers +5.4 % (103,908 sibling duplicates merged, 4,817 ambiguous dropped). ≥3-view
 points **51,200 (−7 %)** — yet the final observation count is unchanged (324k) and
 tracks are longer (6.34 vs 5.89 obs/point). Reading: the second orientation does extend
 tracks, but siblings take cap slots from weaker *distinct* extrema, so capped images
-lose ~15 % of their features. Not yet a fair test of the method.
+lose ~15 % of their features. Not yet a fair test of the method. The `minInlierRatio` 0 setting
+moved accepted pairs only 1694 → 1703: the inlier-ratio gate is not the pair gap.
+
+**Uncapped keypoints (MAT-08: Max keypoints 20,000, 2 orientations, subset gate ON,
+`minInlierRatio` 0):** no image reached the cap (max 18,970), 1,449,919 keypoints
+(+35 % vs MAT-06). Detection 106 s, matching **78.3 s** wall (gate on), 1456 accepted /
+5225 gated. SfM 128/128: **60,480** ≥3-view points (+9.8 % vs MAT-06; 75 % of COLMAP's
+80,792), 383k observations (+18 %), median 0.34 px, max 6.3 px, SfM 196 s. More
+points from *fewer* accepted pairs — the 10,000 cap, not the pair count, was holding
+the points back. Cap and orientations moved together, so the orientation share is
+unmeasured (MAT-09).
 
 ### B-georef-polar — similarity fit on error-free polar control (2026-10-04, synthetic)
 40 control points, true ECEF geometry under an arbitrary SfM similarity, targets in
