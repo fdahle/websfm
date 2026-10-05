@@ -91,7 +91,9 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
   top-2 arrays, the JS twin of the crate's rule, shared geometric gate `verify.js` — F-RANSAC + inlierSpread — plus
   `ort.js`, `preselect.js`, `sequentialPairs.js` (capture-order window + optional orbit
   closure), and `tiling.js` — pure tile-grid/core-ownership/seam-NMS/auto-size math
-  behind tiled detection; the per-tile detector loop lives in `workers/ops/detect.js`),
+  behind tiled detection; the per-tile detector loop lives in `workers/ops/detect.js`;
+  `keypointCap.js` — which keypoints survive `maxKeypoints` (coarse-first/response);
+  `siftDescriptors.js` — RootSIFT + the per-image descriptor space),
   `core/sfm/`
   (`sfm.js` incremental SfM orchestrator + primary/secondary driver,
   `multiModel.js` conservative stranded-component reconstruction and shared-camera
@@ -1279,6 +1281,16 @@ propagate covariance rather than retaining stale numeric sigmas.
   (SuperPoint), carried as `descDim` on the feature bundle / OPFS blob and passed
   as `dim` into `crates/matching`. A wrong dim mis-slices the flat buffer into
   phantom rows whose indices overflow the keypoint arrays downstream.
+- **SIFT descriptors have a SPACE, stamped per image** (`descNorm`, persisted;
+  `core/features/siftDescriptors.js`). Detection stores RootSIFT ('root'). An unstamped
+  websfm SIFT image is legacy L2, and an unstamped COLMAP import is RootSIFT, because
+  that is COLMAP's default. Every consumer goes through `toMatchSpace`
+  (`useMatchesStore` loadDesc, the COLMAP database export), which converts legacy L2 into
+  a **new** array. Converting in place would double-convert the live in-memory copy on
+  the next run. Mixed spaces raise no error: the ratio test still runs, just on wrong
+  distances. The cap rule (`core/features/keypointCap.js`) runs in JS after masking
+  and the tile merge; `runSift` calls the crate uncapped, and the kept set is returned
+  in response order, because LightGlue's prefix cap and guided tiles assume best-first.
 - **ORT `InferenceSession`s are NOT reentrant** — two concurrent `session.run()`
   on one wasm session deadlock/corrupt. LightGlue (`core/features/lightglue.js`)
   is pinned to worker 0 with one heavy session, so runs are serialized two ways:

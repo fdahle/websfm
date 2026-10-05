@@ -316,18 +316,10 @@ stated), each recorded as a VERIFICATION row + HANDOVER baseline.
   and costs ~10 % points. Raising the SIFT default (or making it scale with the
   detection size) is a cost question for WASM users — brute force is O(Na·Nb). Decide
   after MAT-09 and the detection-resolution run, which both move the keypoint count.
-- **Coarse-first keypoint cap.** The crate truncates by |DoG| response; COLMAP keeps the
-  coarsest octaves and cuts the finest. At 8192 keypoints, coarse-first gave +35 %
-  multi-view anchors on a node bench (HANDOVER ▸ B-match-gpu, "Why COLMAP's 8192").
-  This is the lever for budget-limited (WASM) users. It changes `detect_sift`'s
-  truncation (the cap must be applied per octave inside the crate), the tiled merge's
-  global top-K, and the seam/sibling ordering. Browser-test SB at 10k, coarse-first vs
-  response.
-- **RootSIFT.** COLMAP's default normalisation is L1-root. On the bench it added +20 %
-  multi-view anchors at 8192 and +16 % at 25k, at no matching cost. Stored descriptors
-  would then mix two incompatible spaces, so it needs a descriptor-kind stamp beside
-  `descDim`, with a mismatch refusing to match (or re-detecting). The JS sqrt(L1) could
-  run in `workers/ops/detect.js` without a crate change.
+  Since 2026-10-05 the cap keeps the coarsest scales first, which changes the
+  trade-off. On the node bench, native resolution with a 10k coarse-first cap matched
+  2400 px with 10k (3,672 vs 3,671 ≥3-image tracks with RootSIFT), so resolution is no
+  longer free points at a fixed budget. MAT-16 gives the browser number.
 - **Rotation-cycle filter on true pairs.** MAT-06: 748 observations from the dropped
   pairs agree with the final geometry within 5.1 px — many dropped pairs are true.
   It removed 331/1694 pairs on MAT-05, incl.

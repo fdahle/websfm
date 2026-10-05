@@ -9,6 +9,11 @@ Detection finds repeatable [keypoint](help:keypoint)s and describes their local 
 appearance. More keypoints can help difficult imagery, but they also make matching
 slower and do not compensate for blur, poor overlap, or repeated texture.
 
+SIFT descriptors are stored as **RootSIFT**, COLMAP's default form, which tells
+similar-looking texture apart better. Projects detected before this change keep
+working: their descriptors are converted when matching loads them, so you do not need
+to detect again.
+
 ## Detector
 **SIFT** is the dependable default and works entirely in WASM. **SuperPoint** is a
 learned detector intended to be paired with LightGlue; its model is downloaded once
@@ -35,9 +40,13 @@ nothing, the contrast threshold may be the limiting gate.
 
 ## Max keypoints
 <!-- param: maxKeypoints default: 10000 (SIFT) · 2048 (SuperPoint) -->
-The per-image cap after ranking by strength. Raise it when useful detail is visibly
-underrepresented. SuperPoint stays lower because LightGlue's attention cost grows
-quickly with the number of keypoints.
+The per-image keypoint limit. When SIFT finds more than this, it keeps the
+**largest-scale** features first and drops the finest ones, the same rule COLMAP uses.
+Large features survive changes of viewpoint better than fine texture, so at a fixed
+limit this gives more points that appear in three or more images (about 10 % more on a
+building set detected at full resolution). Raise the limit when useful detail is visibly
+underrepresented. SuperPoint keeps its highest-scoring points and stays lower, because
+LightGlue's attention cost grows quickly with the number of keypoints.
 
 If many images report exactly the limit in the console, the limit is cutting off
 usable features: raising it added about 10 % reconstructed points on a 128-image

@@ -121,6 +121,32 @@ and SfM therefore see one index per physical point carrying the evidence of both
 orientations — without the fold, B matching orientation 1 and C matching orientation 2
 would split the point into two tracks the merge step refuses to join.
 
+**Descriptor normalisation — RootSIFT** (Arandjelović & Zisserman 2012; COLMAP's
+default `L1_ROOT`; since 2026-10-05). The crate emits classic SIFT (L2-normalise, clamp
+at 0.2, re-normalise). websfm stores and matches each vector as `sqrt(d / ‖d‖₁)`.
+Euclidean distance between RootSIFT vectors is the Hellinger kernel between the
+underlying gradient histograms, which damps the few dominant bins that make plain SIFT
+confuse similar-looking texture. The result is still unit-L2, so the ratio test, the
+WebGPU path and every distance gate are unchanged. RootSIFT is a pure function of the
+stored L2 vector, so pre-switch projects are converted when matching loads them rather
+than re-detected (`core/features/siftDescriptors.js`, stamped as `descNorm` per image).
+Node bench on an 8-image South Building strip: +2.1 % ≥3-image tracks at 2400 px / 10k,
++2.6 % at native / 10k and +4.8 % at native / 25k (HANDOVER ▸ B-match-gpu).
+
+**Which keypoints survive the cap — coarse first** (COLMAP's rule; since 2026-10-05).
+`maxKeypoints` used to keep the strongest |DoG| response. At high resolution that fills
+the budget with fine-scale texture: at native South Building size, 85 % of a
+response-ranked 25k set has σ < 4 px. That texture is the first to stop matching under
+viewpoint change, and on brick or foliage it is repetitive, which the ratio test rejects.
+websfm now keeps the largest scales first, with response as the tie-break inside the
+octave the cap cuts through (`core/features/keypointCap.js`,
+`DETECT_TUNING.siftCapRule`). COLMAP keeps whole octaves, so its 8192 is a soft limit;
+ours stays an exact budget, because brute-force matching is O(Na·Nb). The cap runs after
+masking and after the tile merge, so masked or duplicate keypoints never take slots.
+Measured ≥3-image tracks on the strip: +1.4 % at 2400 px / 10k (the cap barely binds)
+and **+10 %** at native 3072 px / 10k, where response ranking had scored *below* 2400 px.
+With RootSIFT, that native-10k configuration gains +13.5 %.
+
 **Non-standard bits worth mentioning to a colleague:**
 - **Duplicate-keypoint suppression** (`suppress_duplicate_positions`,
   response-weighted descriptor NMS): one strong blob can fire as a DoG extremum

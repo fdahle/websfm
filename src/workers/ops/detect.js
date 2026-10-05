@@ -4,6 +4,8 @@ import {
   planTiles, tileOwns, sliceRaster, nmsByPosition, autoTileSize,
   SIFT_TILE_ALIGN, SUPERPOINT_TILE_ALIGN, SEAM_NMS_RADIUS,
 } from '../../core/features/tiling.js'
+import { capOrder, capBoundary } from '../../core/features/keypointCap.js'
+import { SIFT_DESC_NORM, rootSiftInPlace } from '../../core/features/siftDescriptors.js'
 import { buildMaskLookup } from '../../core/mask.js'
 import {
   FIDUCIAL_DETECT_TUNING, grayFromRgba, detectFiducialsInImage,
@@ -31,32 +33,53 @@ export function makeDetectOps({ rasterize }) {
 
   // SIFT detector → a uniform feature bundle (see detect() for the shared shape):
   // count, per-keypoint accessors, a descriptor-row view, and detector-specific diag.
-  async function runSift(data, width, height, { contrastThreshold, maxKeypoints, maxOrientations }) {
+  // UNCAPPED: the cap is a selection rule (core/features/keypointCap.js) applied by
+  // the caller after masking and, when tiled, after the seam merge. The crate builds
+  // every descriptor before truncating anyway, so this costs only the copy out.
+  async function runSift(data, width, height, { contrastThreshold, maxOrientations }) {
     // wasm init + detect_sift now live in core/features/sift.js; the STRIDE parse
     // into the shared feature bundle (below) stays worker-side.
-    const { flat, ms } = await detectSift(data, width, height, { contrastThreshold, maxKeypoints, maxOrientations })
+    const { flat, ms } = await detectSift(data, width, height, { contrastThreshold, maxKeypoints: 0, maxOrientations })
 
-    // Layout: STRIDE floats per kept keypoint [x,y,scale,response,angle,d0..d127],
-    // then two trailing scalars — rawFound (survivors of near-duplicate suppression,
-    // before the max_keypoints cap) and suppressed. Empty (degenerate input) ⇒ 0.
-    const rawFound = flat.length >= 2 ? flat[flat.length - 2] : 0
+    // Layout: STRIDE floats per keypoint [x,y,scale,response,angle,d0..d127], then two
+    // trailing scalars — rawFound (survivors of near-duplicate suppression) and
+    // suppressed. Empty (degenerate input) ⇒ 0.
     const suppressed = flat.length >= 2 ? flat[flat.length - 1] : 0
     const n = flat.length >= 2 ? Math.floor((flat.length - 2) / STRIDE) : 0
-    // Smallest kept response = last entry (crate returns them response-desc); the
-    // point at which the max_keypoints cap started discarding features.
-    const minResponse = n > 0 ? flat[(n - 1) * STRIDE + 3] : 0
-    const responses = []
-    for (let i = 0; i < n; i++) responses.push(flat[i * STRIDE + 3])
-    responses.sort((a, b) => a - b)
-
     return {
       descLen: DESC_LEN, ms, count: n,
       at: (i) => ({ x: flat[i * STRIDE], y: flat[i * STRIDE + 1], scale: flat[i * STRIDE + 2], response: flat[i * STRIDE + 3] }),
       desc: (i) => flat.subarray(i * STRIDE + 5, i * STRIDE + 5 + DESC_LEN),
+      diag: { rawFound: n, suppressed },
+    }
+  }
+
+  // Mask, then cap, an uncapped SIFT bundle. Masking first means masked regions
+  // never take cap slots (a masked film border can otherwise eat ~20 % of them).
+  function capSift(bundle, { maxKeypoints, capRule, maskLut, width, height }) {
+    const items = []
+    const src = []
+    let maskedPreCap = 0
+    for (let i = 0; i < bundle.count; i++) {
+      const f = bundle.at(i)
+      if (maskLut) {
+        const px = Math.min(width - 1, Math.max(0, Math.round(f.x)))
+        const py = Math.min(height - 1, Math.max(0, Math.round(f.y)))
+        if (maskLut[py * width + px]) { maskedPreCap++; continue }
+      }
+      items.push(f); src.push(i)
+    }
+    const keep = capOrder(items, maxKeypoints, capRule)
+    const { minResponse, minScale } = capBoundary(items, keep)
+    const keptResp = keep.map((k) => items[k].response).sort((a, b) => a - b)
+    return {
+      descLen: bundle.descLen, ms: bundle.ms, count: keep.length,
+      at: (i) => items[keep[i]],
+      desc: (i) => bundle.desc(src[keep[i]]),
       diag: {
-        rawFound, suppressed,
-        capHit: maxKeypoints > 0 && rawFound > maxKeypoints, minResponse,
-        respP50: percentile(responses, 0.5), respP95: percentile(responses, 0.95),
+        ...bundle.diag, maskedPreCap, capRule,
+        capHit: maxKeypoints > 0 && items.length > maxKeypoints, minResponse, minScale,
+        respP50: percentile(keptResp, 0.5), respP95: percentile(keptResp, 0.95),
       },
     }
   }
@@ -121,10 +144,12 @@ export function makeDetectOps({ rasterize }) {
   // caller's mask/colour/back-map loop consumes it unchanged. Each tile keeps only
   // the keypoints in its core (see core/features/tiling.js: ownership, not dedup),
   // a cross-tile NMS removes a blob localised on both sides of a core boundary, and
-  // a global top-K by response keeps the strongest. The per-tile cap cannot drop a
+  // ONE global cap (SIFT: `capRule`; SuperPoint: score) runs over the merge. Each
+  // tile is pre-capped by the same rule only to bound memory, and that cannot drop a
   // keypoint the global cap would keep: one ranked below maxKeypoints others in its
-  // own tile has at least that many distinct stronger keypoints in the image.
-  async function runTiled(raster, detector, tileSize, { contrastThreshold, maxKeypoints, maxOrientations, overlap, maskLut, onLog }) {
+  // own tile has at least that many distinct better-ranked keypoints in the image.
+  // SIFT pre-caps after ownership and masking; SuperPoint's top-K is in the model.
+  async function runTiled(raster, detector, tileSize, { contrastThreshold, maxKeypoints, maxOrientations, capRule, overlap, maskLut, onLog }) {
     const { data, width, height } = raster
     const align = detector === 'superpoint' ? SUPERPOINT_TILE_ALIGN : SIFT_TILE_ALIGN
     const tiles = planTiles(width, height, tileSize, overlap, { align })
@@ -142,9 +167,10 @@ export function makeDetectOps({ rasterize }) {
       const sub = sliceRaster(data, width, height, tile)
       const bundle = detector === 'superpoint'
         ? await runSuperPoint(sub, tile.w, tile.h, { maxKeypoints, onLog })
-        : await runSift(sub, tile.w, tile.h, { contrastThreshold, maxKeypoints, maxOrientations })
+        : await runSift(sub, tile.w, tile.h, { contrastThreshold, maxOrientations })
       descLen = bundle.descLen
       totalMs += bundle.ms
+      const owned = []
       for (let i = 0; i < bundle.count; i++) {
         const f = bundle.at(i)
         const gx = f.x + tile.x, gy = f.y + tile.y
@@ -158,9 +184,16 @@ export function makeDetectOps({ rasterize }) {
           const py = Math.min(height - 1, Math.max(0, Math.round(gy)))
           if (maskLut[py * width + px]) { maskedPreCap++; continue }
         }
-        xs.push(gx); ys.push(gy)
-        scales.push(f.scale); resps.push(f.response); tileIds.push(ti)
-        descChunks.push(bundle.desc(i).slice()) // detach from the tile bundle's buffer
+        owned.push({ i, gx, gy, scale: f.scale, response: f.response })
+      }
+      // Bound memory with the global rule applied per tile: an owned, unmasked keypoint
+      // ranked below maxKeypoints others of its own tile cannot survive the global cap.
+      const pick = detector === 'superpoint' ? owned.map((_, k) => k) : capOrder(owned, maxKeypoints, capRule)
+      for (const k of pick) {
+        const o = owned[k]
+        xs.push(o.gx); ys.push(o.gy)
+        scales.push(o.scale); resps.push(o.response); tileIds.push(ti)
+        descChunks.push(bundle.desc(o.i).slice()) // detach from the tile bundle's buffer
       }
     }
 
@@ -171,18 +204,19 @@ export function makeDetectOps({ rasterize }) {
     const items = xs.map((x, i) => (detector === 'superpoint'
       ? { x, y: ys[i], response: resps[i], tile: tileIds[i] }
       : { x, y: ys[i], scale: scales[i], response: resps[i], tile: tileIds[i] }))
-    let keep = nmsByPosition(items, SEAM_NMS_RADIUS) // strongest-first, seam dupes gone
-    const afterNms = keep.length
-    if (maxKeypoints > 0 && keep.length > maxKeypoints) keep = keep.slice(0, maxKeypoints)
+    const nmsIdx = nmsByPosition(items, SEAM_NMS_RADIUS) // seam dupes gone
+    const afterNms = nmsIdx.length
+    const rule = detector === 'superpoint' ? 'response' : capRule
+    const keep = capOrder(nmsIdx.map((i) => items[i]), maxKeypoints, rule).map((k) => nmsIdx[k])
     onLog?.(`${label}: tiles kept ${rawFound} keypoints in their own cores (${outsideCore} left to a neighbour), `
       + `−${rawFound - afterNms} seam duplicates`)
 
     const keptResp = keep.map((i) => resps[i]).sort((a, b) => a - b)
+    const { minResponse, minScale } = capBoundary(items, keep)
     const diag = {
       tiles: tiles.length, tileSize, overlap, maskedPreCap, outsideCore,
-      rawFound, suppressed: rawFound - afterNms,
-      capHit: maxKeypoints > 0 && afterNms > keep.length,
-      minResponse: keep.length ? resps[keep[keep.length - 1]] : 0,
+      rawFound, suppressed: rawFound - afterNms, capRule: rule,
+      capHit: maxKeypoints > 0 && afterNms > keep.length, minResponse, minScale,
       respP50: percentile(keptResp, 0.5), respP95: percentile(keptResp, 0.95),
       scoreP50: percentile(keptResp, 0.5), scoreP95: percentile(keptResp, 0.95),
     }
@@ -201,7 +235,7 @@ export function makeDetectOps({ rasterize }) {
   async function detect([url, options = {}], { emit } = {}) {
     const {
       detector = 'sift', maxDim = 1200, contrastThreshold = 0.01, maxKeypoints = 5000, mask = null,
-      maxOrientations = 1,
+      maxOrientations = 1, capRule = 'response',
       tiling = 'off', tileSize = 0, overlap = 64,
     } = options
     const raster = await rasterize(url, maxDim)
@@ -220,10 +254,11 @@ export function makeDetectOps({ rasterize }) {
     const tilingActive = tiling !== 'off' && (width > resolvedTile || height > resolvedTile)
 
     const feats = tilingActive
-      ? await runTiled(raster, detector, resolvedTile, { contrastThreshold, maxKeypoints, maxOrientations, overlap, maskLut, onLog })
+      ? await runTiled(raster, detector, resolvedTile, { contrastThreshold, maxKeypoints, maxOrientations, capRule, overlap, maskLut, onLog })
       : detector === 'superpoint'
         ? await runSuperPoint(data, width, height, { maxKeypoints, onLog })
-        : await runSift(data, width, height, { contrastThreshold, maxKeypoints, maxOrientations })
+        : capSift(await runSift(data, width, height, { contrastThreshold, maxOrientations }),
+          { maxKeypoints, capRule, maskLut, width, height })
 
     const keypoints = []
     // Upper bound; the descriptor buffer is trimmed to the kept count below.
@@ -249,6 +284,10 @@ export function makeDetectOps({ rasterize }) {
     }
     // Trim to the kept keypoints (copy so the transferred buffer is exactly sized).
     const descriptors = kept === feats.count ? descBuf : descBuf.slice(0, kept * feats.descLen)
+    // SIFT is stored and matched as RootSIFT (core/features/siftDescriptors.js); the
+    // stamp travels with the image so legacy L2 projects convert on load.
+    const descNorm = detector === 'superpoint' ? null : SIFT_DESC_NORM.ROOT
+    if (descNorm === SIFT_DESC_NORM.ROOT) rootSiftInPlace(descriptors, feats.descLen)
 
     const diag = {
       detectWidth: width, detectHeight: height, natW, natH, scale,
@@ -258,7 +297,7 @@ export function makeDetectOps({ rasterize }) {
 
     return {
       result: {
-        keypoints, descriptors, descDim: feats.descLen, detector,
+        keypoints, descriptors, descDim: feats.descLen, descNorm, detector,
         width: natW, height: natH, detectWidth: width, detectHeight: height, ms: feats.ms, diag,
       },
       transfer: [descriptors.buffer],

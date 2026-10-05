@@ -244,11 +244,11 @@ export function useQualityReport() {
       return s.length ? s[Math.min(s.length - 1, Math.round(0.5 * (s.length - 1)))] : null
     }
     const first = recorded[0]?.detectSettings ?? null
-    const keys = ['maxDim', 'maxDimMode', 'maxKeypoints', 'contrastThreshold', 'tiling', 'maxOrientations']
+    const keys = ['maxDim', 'maxDimMode', 'maxKeypoints', 'contrastThreshold', 'tiling', 'maxOrientations', 'capRule']
     const mixed = !!first && recorded.some((im) => keys.some((k) => im.detectSettings[k] !== first[k]))
     // Share of images that hit the keypoint cap. When this is high the cap — not
-    // `contrastThreshold` — is what selected the keypoints, and it selects by response,
-    // which biases toward high-contrast texture and away from spatial uniformity. The
+    // `contrastThreshold` — is what selected the keypoints, by `capRule` (by response
+    // before 2026-10, which biased toward fine high-contrast texture). The
     // digest prints medianKeypoints and maxKeypoints side by side, but "they are equal"
     // is the observation that matters and nobody reads two numbers for it. Only
     // computable per-image (each image's own recorded cap), so a mixed batch is still
@@ -262,7 +262,8 @@ export function useQualityReport() {
         ? { maxDim: first.maxDim, maxDimMode: first.maxDimMode, maxKeypoints: first.maxKeypoints,
           contrastThreshold: first.contrastThreshold, tiling: first.tiling,
           // Absent on pre-2026-10 detections ⇒ stays undefined ⇒ rendered as unknown.
-          ...(first.maxOrientations != null ? { maxOrientations: first.maxOrientations } : {}) }
+          ...(first.maxOrientations != null ? { maxOrientations: first.maxOrientations } : {}),
+          ...(first.capRule != null ? { capRule: first.capRule } : {}) }
         : {}),
       medianKeypoints: med(withKp.map((im) => im.kpCount ?? null)),
       medianDetectScale: med(withKp.map((im) => im.detectScale ?? null)),

@@ -163,6 +163,34 @@ highest |DoG|, which at full resolution is 85 % σ < 4 px texture) and RootSIFT.
 still adds +16 % at 25k. One anchor and one proxy metric: these are directions, not
 sizes.
 
+**Cap rule × RootSIFT on an 8-image strip (node bench, 2026-10-05):** P1180159–166, all
+28 pairs, ratio 0.8 with cross-check, F-RANSAC at 2 px (2000 iterations), pairs below 15
+inliers dropped. Union-find over F-inliers; the metric counts consistent tracks seen in
+≥3 images. 2400 px uses a bilinear downscale, standing in for the browser's
+`drawImage`.
+
+| detection | cap rule, descriptor | tracks ≥3 | ≥4 | inliers |
+|---|---|---|---|---|
+| 2400 px, 10k (raw 9.3–14.8k) | response, L2 *(before)* | 3,528 | 1,709 | 21,262 |
+| | response, RootSIFT | 3,603 | 1,750 | 21,942 |
+| | coarse-first, L2 | 3,578 | 1,776 | 21,803 |
+| | **coarse-first, RootSIFT** *(now)* | **3,671 (+4.1 %)** | 1,827 | 22,620 |
+| native 3072 px, 10k (raw 16–26k) | response, L2 *(before)* | 3,236 | 1,489 | 18,698 |
+| | response, RootSIFT | 3,319 | 1,520 | 19,595 |
+| | coarse-first, L2 | 3,564 | 1,744 | 21,822 |
+| | **coarse-first, RootSIFT** *(now)* | **3,672 (+13.5 %)** | 1,787 | 22,453 |
+| native 3072 px, 25k (one image over the cap) | response, L2 *(before)* | 7,540 | 3,752 | 45,608 |
+| | response, RootSIFT | 7,900 | 3,889 | 48,209 |
+| | coarse-first, L2 | 7,564 | 3,738 | 45,972 |
+| | **coarse-first, RootSIFT** *(now)* | **7,862 (+4.3 %)** | 3,881 | 48,129 |
+
+Readings:
+- RootSIFT helps everywhere (+2–5 %).
+- The cap rule matters only where the cap binds: +10 % at native / 10k, neutral at
+  25k (−0.5 % with RootSIFT, i.e. noise).
+- Response-ranked native / 10k scored *below* 2400 px / 10k. More resolution under a
+  binding response cap only bought finer texture. Coarse-first removes that inversion.
+
 ### B-georef-polar — similarity fit on error-free polar control (2026-10-04, synthetic)
 40 control points, true ECEF geometry under an arbitrary SfM similarity, targets in
 EPSG:3031 grid + ellipsoidal height; 3-D RMS of the fitted similarity (m).
@@ -434,6 +462,22 @@ fiducials; self-calibration (A2) + fiducials (F4) are the code-side support.
 ---
 
 ## Done log (most recent first)
+
+- **2026-10-05 · SIFT: RootSIFT descriptors and a coarse-first keypoint cap.**
+  - **RootSIFT.** Detection stores `sqrt(d/‖d‖₁)`, stamped `descNorm: 'root'` per
+    image. Legacy L2 projects are converted when matching loads them, so no re-detect
+    is needed.
+  - **Coarse-first cap.** `maxKeypoints` keeps the largest scales first
+    (`DETECT_TUNING.siftCapRule`), applied in JS after masking and the tile merge.
+    Masked keypoints no longer take cap slots on the untiled path either.
+  - **COLMAP database export.** It now reads descriptors from OPFS: since 94fc481 the
+    in-memory copy is dropped, so saved projects had exported none. It also writes
+    true RootSIFT.
+  - **Bench.** On an 8-image SB strip, ≥3-image tracks rose +4.1 % at 2400 px / 10k and
+    +13.5 % at native / 10k.
+  - **Where.** `core/features/siftDescriptors.js`, `core/features/keypointCap.js`,
+    `workers/ops/detect.js`, `stores/useMatchesStore.js`, `composables/useExports.js`;
+    METHODS §2; guide ▸ Detect Features. Browser checks `MAT-15`, `MAT-16`.
 
 - **2026-10-05 · Tiled detection merges by ownership.** Each tile keeps only keypoints
   in its core (cut at each overlap's midpoint), and the NMS runs across seams only. Tiles

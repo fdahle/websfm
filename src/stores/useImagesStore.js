@@ -141,6 +141,7 @@ export const useImagesStore = defineStore('images', () => {
           sourceName: img.sourceName ?? img.name,
           kpStatus: img.kpStatus, kpCount: img.kpCount, kpMs: img.kpMs,
           detector: img.detector ?? null, descDim: img.descDim ?? null,
+          descNorm: img.descNorm ?? null,
           detectScale: img.detectScale ?? null,
           detectSettings: img.detectSettings ?? null,
           hasMask: !!img.mask, hasDepth: !!img.depth,
@@ -784,12 +785,16 @@ export const useImagesStore = defineStore('images', () => {
       // DETECT_TUNING). Null for SuperPoint, which has no orientation histogram.
       const maxOrientations = settings.detector === 'superpoint'
         ? null : (settings.maxOrientations ?? DETECT_TUNING.siftMaxOrientations)
+      // Which keypoints the SIFT cap keeps (keypointCap.js). SuperPoint ranks by score.
+      const capRule = settings.detector === 'superpoint'
+        ? null : (settings.capRule ?? DETECT_TUNING.siftCapRule)
       // Pass the per-image mask (if any) so keypoints inside masked regions are
       // dropped at detection — this propagates to matching and reconstruction.
       const res = await detectKeypoints(
         img.computeUrl ?? img.url,
         { ...settings, maxDim: res0.maxDim, mask: img.mask?.dataUrl ?? null,
-          ...(maxOrientations != null ? { maxOrientations } : {}) },
+          ...(maxOrientations != null ? { maxOrientations } : {}),
+          ...(capRule != null ? { capRule } : {}) },
         { onLog: (msg) => log(msg, 'info', 'Detection') },
       )
       // The worker can't be interrupted mid-image, so a cancel pressed while this
@@ -816,6 +821,10 @@ export const useImagesStore = defineStore('images', () => {
         // 128-d vs SuperPoint 256-d) rather than assume a constant.
         found.detector = res.detector ?? 'sift'
         found.descDim  = res.descDim ?? 128
+        // Which normalisation the stored SIFT descriptors are in (RootSIFT since
+        // 2026-10). Absent ⇒ legacy L2; matching converts on load, so it is never
+        // back-filled (core/features/siftDescriptors.js).
+        found.descNorm = res.descNorm ?? null
         // Detection scale travels with the image for the same reason descDim does:
         // keypoints come back in NATIVE pixels (detect.js maps them back), so every
         // downstream pixel threshold is denominated in native px while the
@@ -835,6 +844,8 @@ export const useImagesStore = defineStore('images', () => {
           tiling: settings.tiling ?? null,
           // Absent on images detected before 2026-10 ⇒ unknown (they ran with 1).
           maxOrientations,
+          // Absent before 2026-10 ⇒ unknown (they ran with 'response').
+          capRule,
         }
         if (hadKeypoints) useMatchesStore().removeMatchesForImage(found.uuid)
         log(`${tag} done: ${found.name} — ${found.kpCount} keypoints in ${found.kpMs} ms`, 'success', 'Detection')
@@ -855,7 +866,9 @@ export const useImagesStore = defineStore('images', () => {
               + `; score p50 ${d.scoreP50.toFixed(3)} / p95 ${d.scoreP95.toFixed(3)}`, 'debug', 'Detection')
           } else {
             log(`${tag} ${found.name} — ${d.rawFound} found → ${d.capped}`
-              + `${d.capHit ? ` capped (min response ${d.minResponse.toFixed(3)})` : ' (under cap)'}`
+              + `${!d.capHit ? ' (under cap)' : d.capRule === 'coarse-first'
+                ? ` capped coarse-first (smallest kept σ ${d.minScale.toFixed(2)} detect px)`
+                : ` capped (min response ${d.minResponse.toFixed(3)})`}`
               + `${d.suppressed > 0 ? `, −${d.suppressed} duplicate-position keypoints suppressed` : ''}`
               + `${d.maskedPreCap > 0 ? `, −${d.maskedPreCap} masked before cap` : ''}`
               + `${d.maskedDropped > 0 ? `, −${d.maskedDropped} in mask → ${d.kept}` : ''}`
@@ -921,7 +934,8 @@ export const useImagesStore = defineStore('images', () => {
     const started = performance.now()
     log(`${batchTag} batch: ${total} image(s) queued — ${resLabel}, ${concurrency} concurrent`
       + `${detector === 'superpoint' ? '' : `, contrast ${contrastThreshold}`}, ≤${maxKeypoints} kp`
-      + `${detector === 'superpoint' ? '' : `, ≤${settings.maxOrientations ?? DETECT_TUNING.siftMaxOrientations} orientation(s) per extremum`}`,
+      + `${detector === 'superpoint' ? '' : `, ≤${settings.maxOrientations ?? DETECT_TUNING.siftMaxOrientations} orientation(s) per extremum`
+        + `, cap rule ${settings.capRule ?? DETECT_TUNING.siftCapRule}, RootSIFT descriptors`}`,
       'info', 'Detection')
     let done = 0
     let cursor = 0
@@ -962,6 +976,7 @@ export const useImagesStore = defineStore('images', () => {
       img.kpMs = 0
       img.detector = entry.detector ?? 'sift'
       img.descDim = entry.descDim ?? 128
+      img.descNorm = entry.descNorm ?? null
       img.detectScale = 1
       img.detectSettings = { source: entry.source ?? 'external' }
       imported++
@@ -988,6 +1003,7 @@ export const useImagesStore = defineStore('images', () => {
     // must not survive into the next detection run at different settings.
     img.detectScale = null
     img.detectSettings = null
+    img.descNorm = null
     log(`Keypoints cleared: ${img.name}`, 'info', 'Detection')
     useMatchesStore().removeMatchesForImage(img.uuid)
     if (isPersisting()) {
@@ -1054,6 +1070,7 @@ export const useImagesStore = defineStore('images', () => {
       kpMs: record.kpMs || 0,
       detector: record.detector ?? 'sift',
       descDim: record.descDim ?? 128,
+      descNorm: record.descNorm ?? null,
       detectScale: record.detectScale ?? null,
       detectSettings: record.detectSettings ?? null,
       mask: null,
