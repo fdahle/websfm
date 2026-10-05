@@ -129,6 +129,40 @@ not the resolution. Caveat: COLMAP's default keypoint budget is 8192, so the com
 is ours-best vs COLMAP-default, not like-for-like. End to end ≈ 20 min, slower than
 COLMAP; matching time is now the cost.
 
+**Tiled SIFT before/after the ownership fix (node bench, one pair, 2026-10-05):** the
+built wasm SIFT and matching run under Node on P1180159/P1180160 at native 3072×2304,
+25k cap, ratio 0.8 with cross-check, F-RANSAC at 2 px. The pre-fix path (1536 px tiles,
+64 px overlap) left **17,070 of 25,000** keypoints with a near-identical twin (≤4 px,
+descriptor L2 < 0.2; untiled: 84). Putatives fell 4,418 → 1,132 and F-inliers
+4,334 → 1,113, the same ratio as MAT-12's 1111 on this pair in the browser. After the
+fix, 1536 px max / 64 px overlap plans 6 tiles of ~1077×1192 px. It reproduces 99.5 % of
+the untiled keypoints (same position, scale and descriptor), with 84 twins, 4,402
+putatives and **4,321 F-inliers** (−0.3 %). Detection takes 3.7 s per image against
+4.2 s untiled. Overlap 256: 99.8 % reproduced, 4,336 inliers. Browser gate: `MAT-14`.
+
+**Why COLMAP's 8192 default does so well (node bench, 2026-10-05):** anchor P1180159 against
+P1180160/162/165/169 at native resolution, ratio 0.8 with cross-check, F-RANSAC (5000
+iterations). The last column counts anchor keypoints that are inliers in ≥2 partners, a
+proxy for ≥3-view tracks. The 165/169 pairs gave ≤20 inliers in every variant (no usable
+overlap).
+
+| 8192 keypoints | inliers (+1 / +3) | ≥2 partners |
+|---|---|---|
+| top response, L2-SIFT, 2 px (our cap rule) | 958 / 105 | 82 |
+| + RootSIFT | 989 / 123 | 99 |
+| coarse-first cap instead (COLMAP) | 1090 / 146 | 111 |
+| coarse-first + RootSIFT | 1103 / 166 | 118 |
+| + 4 px RANSAC | 1133 / 174 | 129 |
+| + peak threshold 0.0067 (= COLMAP's defaults) | 1154 / 174 | 138 |
+| *25k top response, L2 (MAT-13-like)* | *4334 / 558* | *401* |
+| *25k + RootSIFT* | *4439 / 634* | *465* |
+
+At the same budget, COLMAP's choices give +68 % multi-view anchors. The two largest
+effects are *which* 8192 keypoints survive the cap (coarsest scales first, versus our
+highest |DoG|, which at full resolution is 85 % σ < 4 px texture) and RootSIFT. RootSIFT
+still adds +16 % at 25k. One anchor and one proxy metric: these are directions, not
+sizes.
+
 ### B-georef-polar — similarity fit on error-free polar control (2026-10-04, synthetic)
 40 control points, true ECEF geometry under an arbitrary SfM similarity, targets in
 EPSG:3031 grid + ellipsoidal height; 3-D RMS of the fitted similarity (m).
@@ -400,6 +434,15 @@ fiducials; self-calibration (A2) + fiducials (F4) are the code-side support.
 ---
 
 ## Done log (most recent first)
+
+- **2026-10-05 · Tiled detection merges by ownership.** Each tile keeps only keypoints
+  in its core (cut at each overlap's midpoint), and the NMS runs across seams only. Tiles
+  are spread evenly, shrunk to the requested overlap, and aligned to the coarsest octave
+  grid (16 px SIFT, 8 px SuperPoint). The old union-plus-NMS left two-thirds of the
+  keypoints with a twin, and the ratio test then rejected both copies (MAT-12). Tiled
+  SIFT now reproduces the untiled run to 99.5 % (HANDOVER ▸ B-match-gpu).
+  `core/features/tiling.js`, `workers/ops/detect.js`, guide ▸ Detect Features; browser
+  check `MAT-14`.
 
 - **2026-10-05 · Detection no longer keeps descriptors in memory in saved projects.**
   Once `saveDescriptors` resolves the in-memory copy is dropped (matching reads OPFS,

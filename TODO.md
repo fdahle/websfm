@@ -316,6 +316,18 @@ stated), each recorded as a VERIFICATION row + HANDOVER baseline.
   and costs ~10 % points. Raising the SIFT default (or making it scale with the
   detection size) is a cost question for WASM users — brute force is O(Na·Nb). Decide
   after MAT-09 and the detection-resolution run, which both move the keypoint count.
+- **Coarse-first keypoint cap.** The crate truncates by |DoG| response; COLMAP keeps the
+  coarsest octaves and cuts the finest. At 8192 keypoints, coarse-first gave +35 %
+  multi-view anchors on a node bench (HANDOVER ▸ B-match-gpu, "Why COLMAP's 8192").
+  This is the lever for budget-limited (WASM) users. It changes `detect_sift`'s
+  truncation (the cap must be applied per octave inside the crate), the tiled merge's
+  global top-K, and the seam/sibling ordering. Browser-test SB at 10k, coarse-first vs
+  response.
+- **RootSIFT.** COLMAP's default normalisation is L1-root. On the bench it added +20 %
+  multi-view anchors at 8192 and +16 % at 25k, at no matching cost. Stored descriptors
+  would then mix two incompatible spaces, so it needs a descriptor-kind stamp beside
+  `descDim`, with a mismatch refusing to match (or re-detecting). The JS sqrt(L1) could
+  run in `workers/ops/detect.js` without a crate change.
 - **Rotation-cycle filter on true pairs.** MAT-06: 748 observations from the dropped
   pairs agree with the final geometry within 5.1 px — many dropped pairs are true.
   It removed 331/1694 pairs on MAT-05, incl.
@@ -328,15 +340,6 @@ stated), each recorded as a VERIFICATION row + HANDOVER baseline.
   ~1.9k px) and five were rejected; the final model is clean (max 8 px). Bad
   observations enter during registration — find which step (PnP extension vs fresh
   triangulation) before they cost tracks.
-- **Tiled SIFT loses most correspondences (bug).** MAT-12 vs MAT-13 differ only in tiling
-  (1536 px tiles, 64 px overlap): 586k vs 2.17 M inliers from *more* keypoints. Suspects in
-  `workers/ops/detect.js` `runTiled`: keypoints near a tile edge get descriptors from a
-  window clipped by the tile (the 64 px overlap is smaller than a large keypoint's
-  descriptor support) and can out-rank the clean copy from the neighbouring tile; the
-  3 px all-scale NMS; one octave fewer per tile. Fix direction: each tile keeps only
-  keypoints inside its own core (half the overlap), overlap ≥ the largest descriptor
-  radius kept, NMS only across seams. Gate: `MAT-14`. Until then the guide warns SIFT
-  users off tiling.
 - **Defaults after MAT-13.** Full resolution with a non-binding cap is the best SB result
   so far (115k vs 60k at 2400 px). Decide the Balanced/Detailed SIFT presets
   (`DETECT_SIFT_DEFAULTS` maxDim/maxKeypoints) and the ratio default (0.75 → 0.8, below)

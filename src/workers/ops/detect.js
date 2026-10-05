@@ -1,6 +1,9 @@
 import { detectSift } from '../../core/features/sift.js'
 import { detectSuperPoint } from '../../core/features/superpoint.js'
-import { planTiles, sliceRaster, nmsByPosition, autoTileSize } from '../../core/features/tiling.js'
+import {
+  planTiles, tileOwns, sliceRaster, nmsByPosition, autoTileSize,
+  SIFT_TILE_ALIGN, SUPERPOINT_TILE_ALIGN, SEAM_NMS_RADIUS,
+} from '../../core/features/tiling.js'
 import { buildMaskLookup } from '../../core/mask.js'
 import {
   FIDUCIAL_DETECT_TUNING, grayFromRgba, detectFiducialsInImage,
@@ -20,10 +23,6 @@ export function makeDetectOps({ rasterize }) {
   // GPU storage-buffer binding limit, queried once for auto tile sizing (0 once we
   // know there's no adapter; undefined = not yet asked).
   let gpuBindingBytes
-
-  // Detect-space px within which two merged keypoints are the same blob (seam
-  // duplicate). ~3 px matches the crate's near-duplicate suppression radius.
-  const NMS_RADIUS = 3
 
   // Percentile helper over a value array (sorted ascending in place by caller).
   function percentile(sorted, q) {
@@ -119,21 +118,27 @@ export function makeDetectOps({ rasterize }) {
 
   // Run the detector tile-by-tile over an already-rasterised full raster and merge
   // into ONE feature bundle in full detect-space coords — the shared shape, so the
-  // caller's mask/colour/back-map loop consumes it unchanged. Per-tile keypoints are
-  // offset by the tile origin, seam duplicates are NMS'd away, and a global top-K by
-  // response keeps the strongest (LightGlue caps keypoints anyway, so favour the
-  // best overall rather than the union).
+  // caller's mask/colour/back-map loop consumes it unchanged. Each tile keeps only
+  // the keypoints in its core (see core/features/tiling.js: ownership, not dedup),
+  // a cross-tile NMS removes a blob localised on both sides of a core boundary, and
+  // a global top-K by response keeps the strongest. The per-tile cap cannot drop a
+  // keypoint the global cap would keep: one ranked below maxKeypoints others in its
+  // own tile has at least that many distinct stronger keypoints in the image.
   async function runTiled(raster, detector, tileSize, { contrastThreshold, maxKeypoints, maxOrientations, overlap, maskLut, onLog }) {
     const { data, width, height } = raster
-    const tiles = planTiles(width, height, tileSize, overlap)
+    const align = detector === 'superpoint' ? SUPERPOINT_TILE_ALIGN : SIFT_TILE_ALIGN
+    const tiles = planTiles(width, height, tileSize, overlap, { align })
     const label = detector === 'superpoint' ? 'SuperPoint' : 'SIFT'
-    onLog?.(`${label}: tiling ${width}×${height} → ${tiles.length} tile(s) @ ${tileSize}px, overlap ${overlap}px`)
+    const sizes = [...new Set(tiles.map((t) => `${t.w}×${t.h}`))].join(', ')
+    onLog?.(`${label}: tiling ${width}×${height} → ${tiles.length} tile(s) of ${sizes} (max ${tileSize}px, overlap ≥ ${overlap}px)`)
 
-    const xs = [], ys = [], scales = [], resps = [], descChunks = []
+    const xs = [], ys = [], scales = [], resps = [], tileIds = [], descChunks = []
     let descLen = detector === 'superpoint' ? 256 : DESC_LEN
     let totalMs = 0
     let maskedPreCap = 0
-    for (const tile of tiles) {
+    let outsideCore = 0
+    for (let ti = 0; ti < tiles.length; ti++) {
+      const tile = tiles[ti]
       const sub = sliceRaster(data, width, height, tile)
       const bundle = detector === 'superpoint'
         ? await runSuperPoint(sub, tile.w, tile.h, { maxKeypoints, onLog })
@@ -143,6 +148,8 @@ export function makeDetectOps({ rasterize }) {
       for (let i = 0; i < bundle.count; i++) {
         const f = bundle.at(i)
         const gx = f.x + tile.x, gy = f.y + tile.y
+        // A neighbour owns it, and sees it with more context.
+        if (!tileOwns(tile, gx, gy)) { outsideCore++; continue }
         // Drop masked keypoints BEFORE the global top-K, so masked regions don't
         // consume cap slots (a masked border can otherwise eat ~20% of the budget;
         // the caller's post-cap mask check then finds nothing left to drop).
@@ -152,24 +159,27 @@ export function makeDetectOps({ rasterize }) {
           if (maskLut[py * width + px]) { maskedPreCap++; continue }
         }
         xs.push(gx); ys.push(gy)
-        scales.push(f.scale); resps.push(f.response)
+        scales.push(f.scale); resps.push(f.response); tileIds.push(ti)
         descChunks.push(bundle.desc(i).slice()) // detach from the tile bundle's buffer
       }
     }
 
     const rawFound = xs.length
     // SIFT items carry scale so orientation siblings survive the seam dedup
-    // (nmsByPosition); SuperPoint has no siblings.
+    // (nmsByPosition); SuperPoint has no siblings. `tile` limits suppression to
+    // pairs from different tiles.
     const items = xs.map((x, i) => (detector === 'superpoint'
-      ? { x, y: ys[i], response: resps[i] }
-      : { x, y: ys[i], scale: scales[i], response: resps[i] }))
-    let keep = nmsByPosition(items, NMS_RADIUS) // strongest-first, seam dupes gone
+      ? { x, y: ys[i], response: resps[i], tile: tileIds[i] }
+      : { x, y: ys[i], scale: scales[i], response: resps[i], tile: tileIds[i] }))
+    let keep = nmsByPosition(items, SEAM_NMS_RADIUS) // strongest-first, seam dupes gone
     const afterNms = keep.length
     if (maxKeypoints > 0 && keep.length > maxKeypoints) keep = keep.slice(0, maxKeypoints)
+    onLog?.(`${label}: tiles kept ${rawFound} keypoints in their own cores (${outsideCore} left to a neighbour), `
+      + `−${rawFound - afterNms} seam duplicates`)
 
     const keptResp = keep.map((i) => resps[i]).sort((a, b) => a - b)
     const diag = {
-      tiles: tiles.length, tileSize, overlap, maskedPreCap,
+      tiles: tiles.length, tileSize, overlap, maskedPreCap, outsideCore,
       rawFound, suppressed: rawFound - afterNms,
       capHit: maxKeypoints > 0 && afterNms > keep.length,
       minResponse: keep.length ? resps[keep[keep.length - 1]] : 0,

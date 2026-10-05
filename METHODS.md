@@ -130,8 +130,15 @@ would split the point into two tracks the merge step refuses to join.
 - **Descriptor width is per-detector, not a constant**: 128 for SIFT, 256 for the
   optional learned **SuperPoint** detector (ONNX via `onnxruntime-web`). Carried
   as `descDim`; a wrong dim mis-slices the flat descriptor buffer.
-- **Tiled detection** for very large scans: image is split into an overlapping
-  grid, detected per tile, then seams de-duplicated by NMS (`core/features/tiling.js`).
+- **Tiled detection** for very large scans: the image is split into an evenly spaced,
+  overlapping grid whose origins sit on the coarsest octave's sample grid. Each tile
+  keeps only the keypoints in its own *core*, and the cores (cut at each overlap's
+  midpoint) partition the image, so every keypoint comes from exactly one tile and
+  sits ≥ overlap/2 from any cut edge. A 2 px NMS then runs across seams only
+  (`core/features/tiling.js`). Merging by deduplicating the union instead left most
+  keypoints with a near-identical twin, and the ratio test rejects both copies; on
+  South Building that cut correspondences 4×. With ownership, a tiled run reproduces
+  99.5 % of the untiled run's keypoints and its matches.
 - **Colour** is sampled per keypoint at detection and later median-aggregated per
   track for the coloured sparse cloud.
 

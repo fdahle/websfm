@@ -90,7 +90,7 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
   `lightglue.js`, `nnSelect.js` — the brute-force ratio + mutual-NN decision over
   top-2 arrays, the JS twin of the crate's rule, shared geometric gate `verify.js` — F-RANSAC + inlierSpread — plus
   `ort.js`, `preselect.js`, `sequentialPairs.js` (capture-order window + optional orbit
-  closure), and `tiling.js` — pure tile-grid/seam-NMS/auto-size math
+  closure), and `tiling.js` — pure tile-grid/core-ownership/seam-NMS/auto-size math
   behind tiled detection; the per-tile detector loop lives in `workers/ops/detect.js`),
   `core/sfm/`
   (`sfm.js` incremental SfM orchestrator + primary/secondary driver,
@@ -1186,6 +1186,16 @@ propagate covariance rather than retaining stale numeric sigmas.
   broken in `estimateFilmBounds` and killed the whole fiducial-bootstrap op. Write
   the loop. (Spreading a small derived array — per-image stats, a handful of
   scales — is fine; the rule is about per-pixel data.)
+- **Tiled detection merges by OWNERSHIP, never by deduplicating the union.** Each tile
+  keeps only keypoints in its core (`core/features/tiling.js` `tileOwns`; cores cut at
+  overlap midpoints partition the image), so one blob comes from one tile, ≥ overlap/2
+  from any cut. Merging every tile's output and NMS-ing left ~2/3 of SIFT keypoints with a
+  near-identical twin: bit-identical twins pass as orientation siblings, coarse twins sit
+  beyond any small radius. **A duplicate descriptor is worse than a missing one** — the
+  ratio test rejects both copies, because the feature's nearest and second-nearest
+  neighbours are the same blob (MAT-12: 4× fewer correspondences from *more* keypoints).
+  Tile origins sit on the coarsest octave's decimation grid (16 px for SIFT), so away
+  from cuts a tile reproduces the untiled detector exactly.
 - **Image name → image id has ONE home: `core/io/nameMatch.js`.** GCP observations,
   camera poses, footprint polygons and COLMAP import all associate a foreign tool's
   filename with a loaded image, and they must agree. `makeNameResolver(entries,

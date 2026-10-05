@@ -52,7 +52,7 @@ const isChromium = /Chrome\//.test(globalThis.navigator?.userAgent || '')
 // Tiling defaults (Advanced): 'off' | 'auto' | 'manual'. When on, detection runs
 // per overlapping tile at native-ish resolution then merges — more, better-
 // localised keypoints, and it sidesteps the SuperPoint WebGPU OOM. `tileSize` 0
-// means auto-derive; `overlap` dedups seam duplicates.
+// means auto-derive; each tile keeps only keypoints ≥ `overlap`/2 from a cut.
 // Prefill from the single source of truth (see core/defaults.user.js). Cloned so
 // edits don't mutate the shared constants.
 const siftSettings = ref({ ...DETECT_SIFT_DEFAULTS })
@@ -287,20 +287,20 @@ function attemptRun() {
         </SettingsField>
 
         <template v-if="!isSp">
-          <SettingsField v-if="siftSettings.tiling === 'manual'" label="Tile size" label-for="sift-tileSize" unit="px">
+          <SettingsField v-if="siftSettings.tiling === 'manual'" label="Max tile size" label-for="sift-tileSize" unit="px">
             <input id="sift-tileSize" v-model.number="siftSettings.tileSize" type="number" min="256" max="4096" step="64" class="field-input" />
           </SettingsField>
           <SettingsField v-if="siftSettings.tiling !== 'off'" label="Tile overlap" label-for="sift-overlap" unit="px"
-            hint="Seam margin so edge features aren't clipped; duplicates are merged.">
+            hint="Each tile keeps only features at least half this far from a cut.">
             <input id="sift-overlap" v-model.number="siftSettings.overlap" type="number" min="0" max="512" step="16" class="field-input" />
           </SettingsField>
         </template>
         <template v-else>
-          <SettingsField v-if="superpointSettings.tiling === 'manual'" label="Tile size" label-for="sp-tileSize" unit="px">
+          <SettingsField v-if="superpointSettings.tiling === 'manual'" label="Max tile size" label-for="sp-tileSize" unit="px">
             <input id="sp-tileSize" v-model.number="superpointSettings.tileSize" type="number" min="256" max="4096" step="64" class="field-input" />
           </SettingsField>
           <SettingsField v-if="superpointSettings.tiling !== 'off'" label="Tile overlap" label-for="sp-overlap" unit="px"
-            hint="Seam margin so edge features aren't clipped; duplicates are merged.">
+            hint="Each tile keeps only features at least half this far from a cut.">
             <input id="sp-overlap" v-model.number="superpointSettings.overlap" type="number" min="0" max="512" step="16" class="field-input" />
           </SettingsField>
         </template>
