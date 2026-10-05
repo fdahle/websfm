@@ -152,6 +152,9 @@ export function buildProjectDigest(input = {}) {
       selfCalDistortion: summary?.selfCalDistortion
         ? summary.selfCalDistortion.map((r) => ({ ...r })) : [],
       cycleFilter: summary?.cycleFilter ? { ...summary.cycleFilter } : null,
+      // Final-stage track completion passes (absent on runs that predate it).
+      trackCompletion: Array.isArray(summary?.trackCompletion)
+        ? summary.trackCompletion.map((r) => ({ ...r })) : null,
       secondaryRecovery: summary?.secondaryRecovery ? { ...summary.secondaryRecovery } : null,
       fingerprints: input.fingerprints ? { ...input.fingerprints } : null,
       // Match gate accounting: the tally, not the settings (those are in config.match).
@@ -303,7 +306,7 @@ function diagnosticsLines(d) {
   if (!d) return out
   const {
     seed, attempts, gates, selfCal, intrinsics, selfCalDistortion, cycleFilter,
-    matchGates, timings, secondaryRecovery, fingerprints,
+    matchGates, timings, secondaryRecovery, fingerprints, trackCompletion,
   } = d
 
   if (seed) {
@@ -391,6 +394,16 @@ function diagnosticsLines(d) {
       + `; dropped ${cycleFilter.dropped}, re-admitted ${cycleFilter.readmitted}`
       + `, ${cycleFilter.bridgeProtected} bridge(s) protected`
       + `, ${fmtNum(cycleFilter.remainingPairs)} pairs remain`)
+  }
+  if (trackCompletion?.length) {
+    const sum = (k) => trackCompletion.reduce((s, r) => s + (r[k] ?? 0), 0)
+    out.push(`- **Track completion** (final stage): +${fmtNum(sum('added'))} obs via verified pairs`
+      + `, +${fmtNum(sum('addedExtra'))} via cycle-dropped pairs`
+      + `, ${fmtNum(sum('lifted'))} point(s) lifted to ≥3 views over ${trackCompletion.length} pass(es)`)
+    for (const r of trackCompletion) {
+      out.push(`  ${r.stage}: +${r.added}/+${r.addedExtra} in ${r.rounds} round(s), lifted ${r.lifted}`
+        + ` (2-view ${r.before?.t2} → ${r.after?.t2})`)
+    }
   }
   if (secondaryRecovery) {
     out.push(`- **Secondary recovery**: ${secondaryRecovery.jobs ?? 0} job(s), `

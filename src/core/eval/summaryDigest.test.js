@@ -317,3 +317,24 @@ describe('digestToMarkdown — run-shape observations', () => {
     expect(old).not.toContain('H/F-degenerate')
   })
 })
+
+describe('digest — track completion record', () => {
+  const withCompletion = (rows) => ({ ...B4, summary: { ...B4.summary, trackCompletion: rows } })
+
+  it('sums the final-stage passes and lists each one', () => {
+    const rows = [
+      { stage: 'post-BA', added: 1200, addedExtra: 300, rounds: 3, lifted: 900, before: { t2: 39000 }, after: { t2: 38100 } },
+      { stage: 'pre-filter pass 1', added: 40, addedExtra: 0, rounds: 2, lifted: 25, before: { t2: 38100 }, after: { t2: 38075 } },
+    ]
+    const d = buildProjectDigest(withCompletion(rows))
+    expect(d.diagnostics.trackCompletion).toHaveLength(2)
+    const md = digestToMarkdown(d)
+    expect(md).toContain('**Track completion** (final stage): +1240 obs via verified pairs, +300 via cycle-dropped pairs, 925 point(s) lifted to ≥3 views over 2 pass(es)')
+    expect(md).toContain('post-BA: +1200/+300 in 3 round(s), lifted 900 (2-view 39000 → 38100)')
+  })
+
+  it('renders nothing for a run that predates the record', () => {
+    expect(buildProjectDigest(B4).diagnostics.trackCompletion).toBeNull()
+    expect(digestToMarkdown(buildProjectDigest(B4))).not.toContain('Track completion')
+  })
+})

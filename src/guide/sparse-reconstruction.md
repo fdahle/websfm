@@ -47,6 +47,14 @@ and the cloud should have coherent shape. In the Quality Report, check reproject
 error, track lengths, calibration drift, coverage, and disconnected components before
 continuing to depth maps.
 
+Near the end of a run the log reports **track completion**: once the cameras are final,
+every verified match that links an existing point to a keypoint in another image adds
+that observation if it agrees with the point. This turns many two-view points into
+points seen by three or more images; the delivered model keeps only those (two-view
+points are dropped when the model has a strong multi-view core). The line also says how
+many observations came through pairs the match-consistency filter set aside — those
+pairs only lengthen existing points and never create new ones.
+
 ## Sparse gradual selection
 Open **Tools → Point Cloud → Filter Cloud → Sparse gradual selection**. Choose
 reprojection RMS error (select above the threshold), track length (select below),
