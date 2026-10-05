@@ -95,6 +95,12 @@ points from *fewer* accepted pairs — the 10,000 cap, not the pair count, was h
 the points back. Cap and orientations moved together, so the orientation share is
 unmeasured (MAT-09).
 
+**1 orientation, 20,000 cap (MAT-09):** 1,210,571 keypoints (so siblings were 16.5 %
+of MAT-08's), matching 144 s with the subset gate off, 1642 accepted pairs, **57,539**
+≥3-view points (−4.9 % vs MAT-08), 339k observations (−11 %). Not a clean comparison:
+the ratio test ran at the 0.75 default (MAT-08: 0.8), and that change alone was worth
+about +5 % points on MAT-05. Re-match pending (MAT-10).
+
 ### B-georef-polar — similarity fit on error-free polar control (2026-10-04, synthetic)
 40 control points, true ECEF geometry under an arbitrary SfM similarity, targets in
 EPSG:3031 grid + ellipsoidal height; 3-D RMS of the fitted similarity (m).

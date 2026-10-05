@@ -56,7 +56,7 @@ these gate code decisions elsewhere in this file:
 | `DEN-02`/`DEN-03` sky- and vegetation-heavy dense | decides the DF retune, and whether the in-optimiser pass is worth it |
 | `RAS-05` EPSG:3031 under WebGLTileLayer | go/no-go for the whole RR re-architecture |
 | `DEN-05`/`DEN-06` dense on WebGPU | validates the automatic GPU default shipped 2026-08-25 and its WASM fallback |
-| `MAT-09` SB as MAT-08 at 1 SIFT orientation | decides whether multi-orientation stays the default (MAT-08 +9.8 % points, but the cap moved with it) |
+| `MAT-10` SB, 1-orientation detections re-matched with MAT-08 settings | decides whether multi-orientation stays the default (MAT-09 was confounded by the ratio test) |
 | `REL-02` cold smoke on the deployed build | it is a public beta |
 
 Rules that keep the register honest: record the *measured* number, not "ok"; one
@@ -307,10 +307,13 @@ stated), each recorded as a VERIFICATION row + HANDOVER baseline.
 - **Track building is ruled out (MAT-06).** Final-stage completion lifted only 338
   points (+0.6 %); 38,685 two-view points have no verified correspondence into a third
   registered image. The gap is in the correspondences themselves — the items below.
-- **SIFT multi-orientation: decide (MAT-09).** MAT-08 (2 orientations, 20,000 cap,
-  uncapped in practice) beat MAT-06 by 9.8 %, but the cap moved too. MAT-09 = MAT-08
-  at `DETECT_TUNING.siftMaxOrientations` 1. Clearly behind MAT-08 ⇒ keep 2;
-  otherwise default to 1 (fewer descriptors to match; code path stays).
+- **SIFT multi-orientation: decide (MAT-10).** MAT-08 (2 orientations) 60,480 vs
+  MAT-09 (1 orientation) 57,539 points, but MAT-09 also ran ratio 0.75 vs 0.8. MAT-10
+  re-matches the MAT-09 detections with MAT-08's matching settings. MAT-08 clearly
+  ahead ⇒ keep `DETECT_TUNING.siftMaxOrientations` 2; otherwise default to 1.
+- **Ratio-test default.** `MATCH_DEFAULTS.ratioThreshold` 0.75 (COLMAP 0.8). On SB
+  0.8 was worth ~+5 % points (MAT-05) at unchanged median error; consider 0.8 as the
+  default once MAT-10 confirms it on the same detections.
 - **Keypoint cap default.** `maxKeypoints` 10,000 binds on SB at 2400 px (MAT-05..07)
   and costs ~10 % points. Raising the SIFT default (or making it scale with the
   detection size) is a cost question for WASM users — brute force is O(Na·Nb). Decide
