@@ -20,6 +20,9 @@ use wasm_bindgen::prelude::*;
 // larger magnitudes rather than a direct diff-square, it can round differently
 // (and go slightly negative for near-identical rows — clamped to 0); as before,
 // that only perturbs borderline ratio-test ties, which RANSAC then re-filters.
+//
+// Cross-check needs B→A as well; it is read off the SAME dot matrix (column-wise
+// top-2) rather than a second scan, so cross-checking costs one matrix, not two.
 
 const BQ: usize = 4; // queries matched per database-row load (register blocking)
 
@@ -108,75 +111,98 @@ fn dots_tile(qs: &[&[f32]], b: &[f32], dim: usize, out: &mut [f32]) {
     }
 }
 
-// Best/second nearest neighbour of every query against `db`, in s-space
-// (s = ‖b‖² − 2·a·b). Returns per-query (best_idx, best_s, second_s). Queries are
-// register-blocked in tiles of BQ; each tile streams the whole database once.
-fn nn2_all(
-    queries: &[f32],
-    n_q: usize,
-    db: &[f32],
-    n_db: usize,
+// Best/second nearest neighbour per query, in s-space. Updated in visiting order
+// with a strict `<`, so on an exact tie the earliest-visited (lowest) index wins and
+// `s2` keeps the duplicate value — the GPU backend's merge (core/features/nnSelect.js
+// `mergeTop2`) reproduces exactly this rule.
+struct Nn2 {
+    best: Vec<usize>,
+    s1: Vec<f32>,
+    s2: Vec<f32>,
+}
+
+impl Nn2 {
+    fn new(n: usize) -> Self {
+        Self { best: vec![0usize; n], s1: vec![f32::MAX; n], s2: vec![f32::MAX; n] }
+    }
+
+    #[inline]
+    fn offer(&mut self, q: usize, s: f32, idx: usize) {
+        if s < self.s1[q] {
+            self.s2[q] = self.s1[q];
+            self.s1[q] = s;
+            self.best[q] = idx;
+        } else if s < self.s2[q] {
+            self.s2[q] = s;
+        }
+    }
+
+    // Ratio-test survivors: (dist, ok) per query, with the query norm folded back in
+    // to recover true squared distances for the comparison.
+    fn ratio(&self, norms_q: &[f32], ratio_sq: f32) -> (Vec<f32>, Vec<bool>) {
+        let n = self.best.len();
+        let mut ok = vec![false; n];
+        let mut dist = vec![0.0f32; n];
+        for i in 0..n {
+            let d1 = (norms_q[i] + self.s1[i]).max(0.0);
+            let d2 = (norms_q[i] + self.s2[i]).max(0.0);
+            if d1 < ratio_sq * d2 {
+                ok[i] = true;
+                dist[i] = d1.sqrt();
+            }
+        }
+        (dist, ok)
+    }
+}
+
+// Best/second NN of every A row against B (s = ‖b‖² − 2·a·b) and — when `cols` —
+// of every B row against A (s = ‖a‖² − 2·a·b), from ONE pass over the dot matrix
+// A·Bᵀ. A rows are register-blocked in tiles of BQ; each tile streams B once.
+//
+// The column side is bit-identical to running the scan again with the roles swapped
+// (the old two-pass cross-check, kept as `two_pass_reference` in the tests): every
+// dot kernel accumulates per lane in k order and IEEE multiply commutes, so
+// dot(a,b) == dot(b,a) exactly; and for a fixed column the A rows arrive in
+// ascending order, so the strict-`<` tie rule picks the same index.
+fn nn2_rows_cols(
+    a: &[f32],
+    n_a: usize,
+    b: &[f32],
+    n_b: usize,
     dim: usize,
-    norms_db: &[f32],
-) -> (Vec<usize>, Vec<f32>, Vec<f32>) {
-    let mut best_j = vec![0usize; n_q];
-    let mut best_s = vec![f32::MAX; n_q];
-    let mut second_s = vec![f32::MAX; n_q];
+    norms_a: &[f32],
+    norms_b: &[f32],
+    cols: bool,
+) -> (Nn2, Option<Nn2>) {
+    let mut rows = Nn2::new(n_a);
+    let mut colnn = if cols { Some(Nn2::new(n_b)) } else { None };
     let mut dots = [0.0f32; BQ];
     let mut qrefs: Vec<&[f32]> = Vec::with_capacity(BQ);
 
     let mut q0 = 0usize;
-    while q0 < n_q {
-        let bq = BQ.min(n_q - q0);
+    while q0 < n_a {
+        let bq = BQ.min(n_a - q0);
         qrefs.clear();
         for t in 0..bq {
-            qrefs.push(&queries[(q0 + t) * dim..(q0 + t + 1) * dim]);
+            qrefs.push(&a[(q0 + t) * dim..(q0 + t + 1) * dim]);
         }
-        for j in 0..n_db {
-            let brow = &db[j * dim..(j + 1) * dim];
+        for j in 0..n_b {
+            let brow = &b[j * dim..(j + 1) * dim];
             dots_tile(&qrefs, brow, dim, &mut dots[..bq]);
-            let nb = norms_db[j];
+            let nb = norms_b[j];
             for t in 0..bq {
-                let s = nb - 2.0 * dots[t];
-                let qi = q0 + t;
-                if s < best_s[qi] {
-                    second_s[qi] = best_s[qi];
-                    best_s[qi] = s;
-                    best_j[qi] = j;
-                } else if s < second_s[qi] {
-                    second_s[qi] = s;
+                rows.offer(q0 + t, nb - 2.0 * dots[t], j);
+            }
+            if let Some(c) = colnn.as_mut() {
+                for t in 0..bq {
+                    let qi = q0 + t;
+                    c.offer(j, norms_a[qi] - 2.0 * dots[t], qi);
                 }
             }
         }
         q0 += bq;
     }
-    (best_j, best_s, second_s)
-}
-
-// Ratio-test survivors A→B: (best_j, dist, ok) per query, with the query norm
-// folded back in to recover true squared distances for the comparison.
-fn ratio_pass(
-    queries: &[f32],
-    n_q: usize,
-    db: &[f32],
-    n_db: usize,
-    dim: usize,
-    norms_q: &[f32],
-    norms_db: &[f32],
-    ratio_sq: f32,
-) -> (Vec<usize>, Vec<f32>, Vec<bool>) {
-    let (best_j, best_s, second_s) = nn2_all(queries, n_q, db, n_db, dim, norms_db);
-    let mut ok = vec![false; n_q];
-    let mut dist = vec![0.0f32; n_q];
-    for i in 0..n_q {
-        let d1 = (norms_q[i] + best_s[i]).max(0.0);
-        let d2 = (norms_q[i] + second_s[i]).max(0.0);
-        if d1 < ratio_sq * d2 {
-            ok[i] = true;
-            dist[i] = d1.sqrt();
-        }
-    }
-    (best_j, dist, ok)
+    (rows, colnn)
 }
 
 /// Match descriptors using Lowe's ratio test.
@@ -205,11 +231,12 @@ pub fn match_descriptors(
     let norms_a = descriptor_norms(desc_a, n_a, dim);
     let norms_b = descriptor_norms(desc_b, n_b, dim);
 
-    // A → B
-    let (fwd_j, fwd_d, fwd_ok) =
-        ratio_pass(desc_a, n_a, desc_b, n_b, dim, &norms_a, &norms_b, ratio_sq);
+    // A → B rows, plus B → A columns from the same dot matrix when cross-checking.
+    let (rows, cols) = nn2_rows_cols(desc_a, n_a, desc_b, n_b, dim, &norms_a, &norms_b, cross_check);
+    let (fwd_d, fwd_ok) = rows.ratio(&norms_a, ratio_sq);
+    let fwd_j = &rows.best;
 
-    if !cross_check {
+    let Some(cols) = cols else {
         let mut out = Vec::new();
         for i in 0..n_a {
             if fwd_ok[i] {
@@ -219,11 +246,11 @@ pub fn match_descriptors(
             }
         }
         return out;
-    }
+    };
 
-    // B → A (only the argmin is needed for the mutual-consistency filter)
-    let (bwd_i, _bwd_d, bwd_ok) =
-        ratio_pass(desc_b, n_b, desc_a, n_a, dim, &norms_b, &norms_a, ratio_sq);
+    // B → A (only the argmin + ratio verdict are needed for the mutual filter)
+    let (_bwd_d, bwd_ok) = cols.ratio(&norms_b, ratio_sq);
+    let bwd_i = &cols.best;
 
     // Mutual NN filter
     let mut out = Vec::new();
@@ -986,6 +1013,125 @@ mod tests {
                 assert_eq!(got, want, "dim={dim} cross={cross}");
             }
         }
+    }
+
+    // The pre-2026-10 cross-check, verbatim: a full A→B scan, then a second full
+    // B→A scan with the roles swapped. The single-matrix version must reproduce its
+    // output bit for bit (indices, order AND distances).
+    fn two_pass_reference(a: &[f32], b: &[f32], dim: usize, ratio: f32) -> Vec<f32> {
+        fn nn2_all(
+            queries: &[f32], n_q: usize, db: &[f32], n_db: usize, dim: usize, norms_db: &[f32],
+        ) -> (Vec<usize>, Vec<f32>, Vec<f32>) {
+            let mut best_j = vec![0usize; n_q];
+            let mut best_s = vec![f32::MAX; n_q];
+            let mut second_s = vec![f32::MAX; n_q];
+            let mut dots = [0.0f32; BQ];
+            let mut qrefs: Vec<&[f32]> = Vec::with_capacity(BQ);
+            let mut q0 = 0usize;
+            while q0 < n_q {
+                let bq = BQ.min(n_q - q0);
+                qrefs.clear();
+                for t in 0..bq {
+                    qrefs.push(&queries[(q0 + t) * dim..(q0 + t + 1) * dim]);
+                }
+                for j in 0..n_db {
+                    dots_tile(&qrefs, &db[j * dim..(j + 1) * dim], dim, &mut dots[..bq]);
+                    let nb = norms_db[j];
+                    for t in 0..bq {
+                        let s = nb - 2.0 * dots[t];
+                        let qi = q0 + t;
+                        if s < best_s[qi] {
+                            second_s[qi] = best_s[qi];
+                            best_s[qi] = s;
+                            best_j[qi] = j;
+                        } else if s < second_s[qi] {
+                            second_s[qi] = s;
+                        }
+                    }
+                }
+                q0 += bq;
+            }
+            (best_j, best_s, second_s)
+        }
+        fn ratio_pass(
+            queries: &[f32], n_q: usize, db: &[f32], n_db: usize, dim: usize,
+            norms_q: &[f32], norms_db: &[f32], ratio_sq: f32,
+        ) -> (Vec<usize>, Vec<f32>, Vec<bool>) {
+            let (best_j, best_s, second_s) = nn2_all(queries, n_q, db, n_db, dim, norms_db);
+            let mut ok = vec![false; n_q];
+            let mut dist = vec![0.0f32; n_q];
+            for i in 0..n_q {
+                let d1 = (norms_q[i] + best_s[i]).max(0.0);
+                let d2 = (norms_q[i] + second_s[i]).max(0.0);
+                if d1 < ratio_sq * d2 {
+                    ok[i] = true;
+                    dist[i] = d1.sqrt();
+                }
+            }
+            (best_j, dist, ok)
+        }
+        let (n_a, n_b) = (a.len() / dim, b.len() / dim);
+        let ratio_sq = ratio * ratio;
+        let norms_a = descriptor_norms(a, n_a, dim);
+        let norms_b = descriptor_norms(b, n_b, dim);
+        let (fwd_j, fwd_d, fwd_ok) = ratio_pass(a, n_a, b, n_b, dim, &norms_a, &norms_b, ratio_sq);
+        let (bwd_i, _, bwd_ok) = ratio_pass(b, n_b, a, n_a, dim, &norms_b, &norms_a, ratio_sq);
+        let mut out = Vec::new();
+        for i in 0..n_a {
+            if fwd_ok[i] {
+                let j = fwd_j[i];
+                if bwd_ok[j] && bwd_i[j] == i {
+                    out.push(i as f32);
+                    out.push(j as f32);
+                    out.push(fwd_d[i]);
+                }
+            }
+        }
+        out
+    }
+
+    fn bits(v: &[f32]) -> Vec<u32> {
+        v.iter().map(|x| x.to_bits()).collect()
+    }
+
+    // Single-matrix cross-check ≡ old two-pass cross-check, bit for bit. Covers
+    // continuous descriptors (dims incl. a non-multiple-of-4 tail and SuperPoint's
+    // 256, row counts not a multiple of BQ) and coarsely quantised ones, where exact
+    // distance ties are common and the lowest-index tie rule is actually exercised.
+    #[test]
+    fn single_matrix_cross_check_matches_two_pass() {
+        let mut rng = Lcg(0xBADC0DE);
+        for &dim in &[128usize, 256, 130, 8] {
+            for &(n_a, n_b) in &[(37usize, 41usize), (64, 3), (1, 9), (50, 50)] {
+                let a = random_descriptors(&mut rng, n_a, dim);
+                let b = random_descriptors(&mut rng, n_b, dim);
+                for &ratio in &[0.75f32, 0.9, 1.0] {
+                    let got = match_descriptors(&a, &b, dim, ratio, true);
+                    let want = two_pass_reference(&a, &b, dim, ratio);
+                    assert_eq!(bits(&got), bits(&want), "dim={dim} {n_a}x{n_b} ratio={ratio}");
+                }
+            }
+        }
+        // Quantised to {0,1,2}: many duplicate rows ⇒ exact ties in best and second.
+        let mut ties_seen = 0usize;
+        for &dim in &[4usize, 8, 128] {
+            for _ in 0..20 {
+                let quant = |rng: &mut Lcg, n: usize| -> Vec<f32> {
+                    (0..n * dim).map(|_| (rng.f() * 3.0).floor() as f32).collect()
+                };
+                let a = quant(&mut rng, 23);
+                let b = quant(&mut rng, 29);
+                for &ratio in &[0.8f32, 1.0, 1.5] {
+                    let got = match_descriptors(&a, &b, dim, ratio, true);
+                    let want = two_pass_reference(&a, &b, dim, ratio);
+                    assert_eq!(bits(&got), bits(&want), "quantised dim={dim} ratio={ratio}");
+                    // ratio > 1 lets a tied best survive the ratio test, so the tie
+                    // rule decides the match index.
+                    if ratio > 1.0 && !got.is_empty() { ties_seen += 1; }
+                }
+            }
+        }
+        assert!(ties_seen > 0, "quantised cases never produced a surviving match");
     }
 
     // Reported distances are the true L2 (√ of squared) to each matched row.

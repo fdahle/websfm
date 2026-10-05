@@ -71,6 +71,47 @@ describe('matchDescriptors (SIMD wasm)', () => {
     expect(fwdPairs).toEqual(revPairs)
   })
 
+  // The crate reads B→A off the same dot matrix as A→B (column-wise top-2) instead
+  // of a second scan. `cargo test` pins that against the old two-pass code but only
+  // runs the scalar fallback; this runs the shipped simd128 build against a naive
+  // diff-square two-pass reference. Continuous random rows ⇒ no exact ties, so the
+  // index sets must agree exactly.
+  it('single-matrix cross-check equals a naive two-pass mutual-NN reference', async () => {
+    let seed = 0x5eed
+    const rnd = () => ((seed = (seed * 1103515245 + 12345) >>> 0) / 2 ** 32) * 2 - 1
+    const rows = (n, dim) => Float32Array.from({ length: n * dim }, rnd)
+    const naive = (a, b, dim, ratio) => {
+      const nn2 = (q, qi, db) => {
+        let best = -1, d1 = Infinity, d2 = Infinity
+        for (let j = 0; j < db.length / dim; j++) {
+          let d = 0
+          for (let k = 0; k < dim; k++) { const t = q[qi * dim + k] - db[j * dim + k]; d += t * t }
+          if (d < d1) { d2 = d1; d1 = d; best = j } else if (d < d2) d2 = d
+        }
+        return d1 < ratio * ratio * d2 ? best : -1
+      }
+      const out = []
+      for (let i = 0; i < a.length / dim; i++) {
+        const j = nn2(a, i, b)
+        if (j >= 0 && nn2(b, j, a) === i) out.push(`${i}-${j}`)
+      }
+      return out.sort()
+    }
+    for (const [dim, nA, nB] of [[128, 61, 47], [256, 33, 40], [130, 9, 14]]) {
+      // Near-duplicates of A rows planted in B so the mutual set is non-trivial.
+      const A = rows(nA, dim)
+      const B = rows(nB, dim)
+      for (let j = 0; j < Math.min(nA, nB); j += 2) {
+        for (let k = 0; k < dim; k++) B[j * dim + k] = A[((j * 7) % nA) * dim + k] + 0.05 * rnd()
+      }
+      const { matches } = await matchDescriptors(A, B, { ratioThreshold: 0.8, crossCheck: true, dim })
+      const got = matches.map((m) => `${m.ia}-${m.ib}`).sort()
+      const want = naive(A, B, dim, 0.8)
+      expect(want.length).toBeGreaterThan(3)
+      expect(got).toEqual(want)
+    }
+  })
+
   it('reports count consistent with the matches array length', async () => {
     const A = pack([oneHot(0), oneHot(40)])
     const B = pack([oneHot(0, 100), oneHot(40, 100)])
