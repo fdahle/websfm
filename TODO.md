@@ -56,6 +56,7 @@ these gate code decisions elsewhere in this file:
 | `DEN-02`/`DEN-03` sky- and vegetation-heavy dense | decides the DF retune, and whether the in-optimiser pass is worth it |
 | `RAS-05` EPSG:3031 under WebGLTileLayer | go/no-go for the whole RR re-architecture |
 | `DEN-05`/`DEN-06` dense on WebGPU | validates the automatic GPU default shipped 2026-08-25 and its WASM fallback |
+| `MAT-01`–`MAT-03` GPU brute-force matcher on SB | validates the matcher shipped 2026-10-05 (on by default with WebGPU) and decides MT below |
 | `REL-02` cold smoke on the deployed build | it is a public beta |
 
 Rules that keep the register honest: record the *measured* number, not "ok"; one
@@ -293,6 +294,21 @@ session loads.
 guard) with a mocked `InferenceSession`. Real-inference browser runs are
 `VERIFICATION.csv` ▸ `DET-02`, `DET-04`, `DET-06`.
 
+### MT — after the GPU matcher's browser runs (MAT-01–03)
+- **Subset-gate default.** The gate exists because a WASM pair cost ~2.75 s; at GPU
+  speed it mostly removes recall (2026-10-04 SB: 6967/8128 pairs skipped, 984
+  accepted vs COLMAP 2678). If MAT-03 shows recall recovering with the gate off,
+  make "off" the default when the GPU backend is active and record both runs in
+  HANDOVER §Baselines.
+- **Pool dispatch.** The 2026-10-04 SB run logged a 3735 s queue/transport
+  remainder and 2.65× effective parallelism on 8 workers. Round-robin `call()`
+  assigns a job to a slot regardless of how busy it is; measure whether
+  next-free-worker dispatch fixes it — with the GPU matching, verification is the
+  pool's remaining load.
+- **Kernel efficiency.** ~1.1 TFLOP/s on an RTX (Turing) under Dawn — a fraction of
+  peak. Only worth tuning if MAT-02 shows the GPU, not verification, bounds wall time
+  (larger micro-tiles, f16 descriptors halving the bandwidth).
+
 ### Matching & detection throughput
 Stage timings now separate loading, serialization, matching and verification.
 Use a real dataset to justify **P9 → P10**; measure before/after and record in
@@ -304,6 +320,9 @@ descriptors+keypoints keyed by uuid + re-detect revision (LRU ~100 MB); the clie
 posts buffers only on a cache miss and dispatches pairs grouped by shared image. Skip
 pairs already `done` under identical settings unless `overwrite` (resumes interrupted
 runs). Expect 1.3–2× and far less GC; kills the ≈6 GB of clone traffic per run.
+The GPU matcher already does the descriptor half for its own worker (per-run LRU
+keyed by uuid, `{ needs }` on a miss — `workers/gpu/matchGpu.js`); reuse that
+protocol for the WASM pool rather than inventing a second one.
 
 **P10 — don't compute descriptors for keypoints the cap throws away.**
 `sift_keypoints` computes orientation + the 128-d descriptor inline for *every*
@@ -558,10 +577,6 @@ in the exported HTML report (the hub already shows the histogram live).
   on one OPFS project; out of scope until either is addressed.
 
 **Compute & workers**
-- **P4 — GPU matcher (WebGPU).** Descriptor-distance matrix in a compute shader
-  (`src/workers/gpu/`, device singleton exists). The real path to Metashape-class
-  matching throughput (100×+); largest effort. Revisit only after P5–P9 land and are
-  measured; reuse P8's GEMM formulation in WGSL.
 - **GPU dense perf** (measure before/after; only worth it as image counts grow):
   half-grid dispatch for parity sweeps (2× occupancy); overlap CPU rasterize/undistort
   of image i+1 with image i's GPU work; on-GPU pyramid (upload levels once, depth

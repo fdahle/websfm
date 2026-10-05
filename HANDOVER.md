@@ -24,6 +24,25 @@ Git history holds the detail.
 | **B-detect** | SIFT detection throughput | 2026-07-17 | the detection pyramid + the wasted-descriptor finding (P10) |
 | **B-mesh** | screened-Poisson meshing | 2026-08-11 | meshing cost per depth; the finest-layer solve is the remaining pole |
 | **B-georef-polar** | error-free control, grid fit vs local metric frame | 2026-10-04 | georeferencing in a projected CRS (synthetic; real-data check is REV-06) |
+| **B-match-gpu** | brute-force NN, WASM vs WebGPU kernel (synthetic, Dawn) | 2026-10-05 | the GPU matcher's kernel cost; the real-data numbers are MAT-02/MAT-03 |
+
+### B-match-gpu — brute-force NN kernel, WASM vs WebGPU (2026-10-05, synthetic)
+Before (real data, 2026-10-04, South Building 128, ≤2400 px SIFT, ~8.4k kp/img,
+exhaustive, subset gate on, 8 WASM workers): matching **1206 s** wall, ~2.75 s per
+fully matched pair per worker; 6967/8128 pairs gated, 984 accepted (COLMAP GPU
+exhaustive: 99 s, 2678 verified). After (single pair, ms, cross-check on unless
+noted; WASM = Node/V8 simd128 build, GPU = Dawn/D3D12 on an NVIDIA Turing card via
+the `webgpu` npm package — same backend as Chrome on Windows):
+
+| pair | WASM two-pass (before) | WASM one-matrix | WebGPU | agreement |
+| --- | --- | --- | --- | --- |
+| 4000×4000×128, random | 370 | 210 (no cross-check: 190 both) | — | bit-identical (crate test) |
+| 8400×8400×128, SIFT-like, 25 % planted | — | 919 | 16.5 (2 dispatch chunks) | 1888/1888 |
+| 3000×2500×256 | — | 172 | 10.7 | 149/149 |
+| 30 images × 3000 kp, exhaustive (435 pairs) | — | 52.6 s | 7.6 s incl. 369 forced cache resends | 435/435 pairs PASS |
+
+~1.1 TFLOP/s effective on the GPU — far from peak (TODO ▸ MT). Integer-valued
+descriptors (exact arithmetic) match WASM bit for bit, distances included.
 
 ### B-georef-polar — similarity fit on error-free polar control (2026-10-04, synthetic)
 40 control points, true ECEF geometry under an arbitrary SfM similarity, targets in
@@ -296,6 +315,19 @@ fiducials; self-calibration (A2) + fiducials (F4) are the code-side support.
 ---
 
 ## Done log (most recent first)
+
+- **2026-10-05 · WebGPU brute-force matcher + one-matrix cross-check.** *CPU*
+  (`crates/matching` `nn2_rows_cols`): cross-check reads B→A column-wise off the same
+  A·Bᵀ instead of a second scan — bit-identical output (native test vs the old
+  two-pass code incl. exact ties), 1.8× on cross-check. *GPU* (`workers/gpu/
+  matchGpu.js` + `match.wgsl`): tiled kernel returning per-row/per-column top-2 only;
+  ratio + mutual decision in `core/features/nnSelect.js` (the crate's rule in JS,
+  tested against the wasm). Pinned to `GPU_MATCH_WORKER` with a per-run descriptor
+  LRU (`{ needs }` → resend); store router `stores/matching/gpuMatchRun.js` validates
+  the first full and first subset-gate match per run against WASM (fail ⇒ rest of run
+  on WASM), falls back per pair on error, and records `matchRun.backend`. Behind
+  Settings ▸ Compute "Use GPU" (default on with WebGPU). Verified headless on an
+  NVIDIA GPU via Dawn (B-match-gpu); browser runs owed: VERIFICATION `MAT-01`–`MAT-04`.
 
 - **2026-10-04 · Review follow-ups: polar georeferencing, PatchMatch, survey-held
   gradual selection, fiducial detection.** *Georeferencing* (`core/products/

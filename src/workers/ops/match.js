@@ -1,12 +1,36 @@
 import { matchDescriptors } from '../../core/features/bruteforce.js'
+import { compareMatchSets } from '../../core/features/nnSelect.js'
 import { matchLightGlue, matchLightGlueTiled } from '../../core/features/lightglue.js'
 import { verifyMatches } from '../../core/features/verify.js'
+import { beginGpuMatchRun, endGpuMatchRun, matchDescriptorsGpu } from '../gpu/matchGpu.js'
 
 // Matching + geometric-verification ops. No worker-local pixel helpers needed —
 // these operate on already-detected keypoints/descriptors.
 export function makeMatchOps() {
   async function match([descA, descB, options = {}]) {
     return { result: await matchDescriptors(descA, descB, options) }
+  }
+
+  // WebGPU brute-force backend (workers/gpu/matchGpu.js). The client pins all three
+  // ops to one worker — the per-run descriptor cache lives in that worker's device.
+  async function matchGpuBegin([opts = {}]) {
+    return { result: await beginGpuMatchRun(opts) }
+  }
+  async function matchGpuEnd([opts = {}]) {
+    return { result: endGpuMatchRun(opts) }
+  }
+  // `validate` (the run's first pair of each kind): also run the WASM matcher on the
+  // same descriptors and report the agreement. A failed check returns the WASM
+  // result for this pair, so a wrong GPU answer never reaches verification.
+  async function matchGpu([args = {}]) {
+    const res = await matchDescriptorsGpu(args)
+    if (res.needs || !args.validate) return { result: res }
+    const { descA, descB, dim, ratioThreshold, crossCheck } = args
+    const t0 = performance.now()
+    const cpu = await matchDescriptors(descA, descB, { dim, ratioThreshold, crossCheck })
+    const cpuMs = performance.now() - t0
+    const validation = { ...compareMatchSets(cpu.matches, res.matches), gpuMs: res.gpuMs, cpuMs, nA: res.nA, nB: res.nB }
+    return { result: validation.pass ? { ...res, validation } : { ...cpu, validation, backend: 'wasm' } }
   }
 
   // LightGlue joint matcher (ONNX). Unlike `match`, it needs both keypoint sets +
@@ -28,5 +52,5 @@ export function makeMatchOps() {
     return { result: res, transfer: [res.inlierMask.buffer] }
   }
 
-  return { match, matchLightGlue: matchLightGluePair, verify }
+  return { match, matchGpuBegin, matchGpu, matchGpuEnd, matchLightGlue: matchLightGluePair, verify }
 }

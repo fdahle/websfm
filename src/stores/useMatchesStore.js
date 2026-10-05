@@ -1,7 +1,11 @@
 import { shallowRef, triggerRef, computed } from 'vue'
 import { defineStore } from 'pinia'
 import * as opfs from '../utils/opfs.js'
-import { matchDescriptors, matchLightGlue, verifyMatches, POOL_SIZE } from '../workers/computeClient.js'
+import {
+  matchDescriptors, matchLightGlue, verifyMatches, POOL_SIZE,
+  matchDescriptorsGpu, matchGpuBegin, matchGpuEnd, GPU_MATCH_WORKER,
+} from '../workers/computeClient.js'
+import { createGpuMatchRun } from './matching/gpuMatchRun.js'
 import { useLog } from '../composables/useLog.js'
 import { preselectPairs, positionsForProximity, preselectByFootprintOverlap } from '../core/features/preselect.js'
 import { sequentialPairs } from '../core/features/sequentialPairs.js'
@@ -82,7 +86,9 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
   // `descCache` (optional): id → descriptors, shared across a matchAll run so each
   // image's descriptors are loaded from OPFS once instead of once per pair (an
   // image appears in N−1 pairs, so this turns O(N²) loads into O(N)).
-  async function matchPair(imgA, imgB, settings = {}, onDone, descCache = null) {
+  // `gpuRun` (optional): matchAll's WebGPU router (stores/matching/gpuMatchRun.js);
+  // null ⇒ brute-force runs on the WASM pool exactly as before.
+  async function matchPair(imgA, imgB, settings = {}, onDone, descCache = null, gpuRun = null) {
     // Resolve every knob from the single source of truth (defaults.user.js +
     // tuning.js), caller's `settings` winning. Downstream reads `settings.X` directly.
     settings = { ...MATCH_DEFAULTS, ...MATCH_TUNING, ...settings }
@@ -100,6 +106,13 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
       entry.timing[stage] += t.workerMs
       entry.timing.roundTripMs += t.roundTripMs
     } })
+    // Brute-force NN: through the GPU router when this run has one (it validates,
+    // caches descriptors by image id and falls back to WASM per pair), else WASM.
+    // While a GPU run is active, WASM work keeps off the GPU-pinned worker.
+    const avoidWorker = gpuRun ? GPU_MATCH_WORKER : undefined
+    const bruteForce = (dA, dB, opts, kind, ids = [null, null]) => (gpuRun
+      ? gpuRun.match(dA, dB, { ...opts, kind, idA: ids[0], idB: ids[1] }, timing('matchingMs'))
+      : matchDescriptors(dA, dB, opts, timing('matchingMs')))
     matchStore.value.set(pid, entry)
     // Trigger reactivity
     touch()
@@ -177,11 +190,11 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
           const idxB = pickSpreadIndices(kpsB, gateSize)
           const subA = sliceDescriptorRows(descA, idxA, dim)
           const subB = sliceDescriptorRows(descB, idxB, dim)
-          const gate = await matchDescriptors(subA, subB, {
+          const gate = await bruteForce(subA, subB, {
             ratioThreshold: settings.ratioThreshold,
             crossCheck: settings.crossCheck,
             dim,
-          }, timing('matchingMs'))
+          }, 'gate')
           const gateThreshold = settings.subsetGateThreshold
           if (gate.matches.length < gateThreshold) {
             entry.rawCount = 0
@@ -229,14 +242,14 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
         }, { ...timing('matchingMs'), onLog: (msg, level = 'info') => log(msg, level, 'Matching') })
         raw = res.matches
       } else {
-        const res = await matchDescriptors(descA, descB, {
+        const res = await bruteForce(descA, descB, {
           ratioThreshold: settings.ratioThreshold,
           crossCheck: settings.crossCheck,
           // Descriptor width must match the detector: 128 (SIFT) vs 256 (SuperPoint).
           // The crate slices the flat buffer by `dim`; a wrong dim yields phantom
           // rows and out-of-range match indices → the `reading 'x'` crash in verify.
           dim: srcA.descDim ?? 128,
-        }, timing('matchingMs'))
+        }, 'full', [idA, idB])
         raw = res.matches
       }
       entry.rawCount = raw.length
@@ -273,7 +286,7 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
           // regardless of H, so the H/F degeneracy label is never consulted (see
           // verify_matches_hf). minMatches is the one un-overridable accept gate.
           hSkipBelow: minMatches,
-        }, timing('verificationMs'))
+        }, { ...timing('verificationMs'), avoidWorker })
         // Classify via the pure gate (core/features/pairGate.js): accept / weak / reject.
         // `spread` is computed here (needs the store's keypoints); everything else is a
         // plain-data decision the gate owns so it can be unit-tested in isolation.
@@ -587,6 +600,27 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
       } else stats.rejected++
     }
 
+    // WebGPU brute-force (Settings ▸ Compute "Use GPU"): one router per run, which
+    // validates against WASM on the first pair and falls back per pair. LightGlue
+    // has its own GPU path (ORT WebGPU EP) and never comes through here.
+    const gpuRequested = !lightglue && !!settings.useGpu
+    const gpuRun = gpuRequested
+      ? await createGpuMatchRun({
+        client: {
+          begin: matchGpuBegin,
+          end: matchGpuEnd,
+          gpuMatch: matchDescriptorsGpu,
+          cpuMatch: (a, b, o, hooks) => matchDescriptors(a, b, o, { ...hooks, avoidWorker: GPU_MATCH_WORKER }),
+        },
+        log: (msg, level) => log(msg, level, 'Matching'),
+        cacheBudgetBytes: settings.gpuDescCacheMiB * 2 ** 20,
+      })
+      : null
+    if (!lightglue && !gpuRun) {
+      log(`Matching: backend = WASM (CPU)${gpuRequested ? '' : ' — enable "Use GPU" in Settings ▸ Compute for the WebGPU matcher'}`,
+        'info', 'Matching')
+    }
+
     // Load each image's descriptors from OPFS at most once for the whole run.
     const descCache = new Map()
     // Concurrency-limited dispatch: `concurrency` drain loops pull from a shared
@@ -600,13 +634,20 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
         const i = cursor++
         if (i >= pairs.length) return
         const [a, b] = pairs[i]
-        await matchPair(a, b, settings, tally, descCache)
+        await matchPair(a, b, settings, tally, descCache, gpuRun)
         done++
         onProgress?.(done, pairs.length)
       }
     }
     const runStarted = performance.now()
-    await Promise.all(Array.from({ length: concurrency }, drain))
+    let backendRecord = lightglue ? null : { backend: 'wasm', gpuRequested }
+    try {
+      await Promise.all(Array.from({ length: concurrency }, drain))
+    } finally {
+      // Always release the GPU-side descriptor cache, unless Cancel already
+      // terminated the pool (and with it the cache).
+      if (gpuRun) backendRecord = await gpuRun.finish({ cancelled: cancelled || !!shouldCancel?.() })
+    }
     const timings = { wallMs: performance.now() - runStarted, descriptorLoadMs: 0, descriptorBytes: 0,
       postMessageMs: 0, matchingMs: 0, verificationMs: 0, roundTripMs: 0 }
     for (const [a, b] of pairs) {
@@ -639,6 +680,9 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
       date: new Date().toISOString(),
       strategy,
       matcher: settings.matcher === 'lightglue' ? 'lightglue' : 'bruteforce',
+      // Brute-force backend actually used: 'wasm' | 'gpu' | 'gpu→wasm' (+ the GPU
+      // validation verdicts, fallback count and cache counters). null for LightGlue.
+      backend: backendRecord,
       nImages: ready.length,
       nPairs: pairs.length,
       accepted: stats.matched,

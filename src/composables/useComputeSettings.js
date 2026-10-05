@@ -40,8 +40,8 @@ const recommendationBudget = Object.freeze({
 
 let budgetLogged = false
 
-// useGpu: prefer the experimental WebGPU backends (LightGlue matching + PatchMatch
-// depth maps) automatically on capable browsers. A property of *this browser/GPU*,
+// useGpu: prefer the experimental WebGPU backends (brute-force + LightGlue matching,
+// PatchMatch depth maps) automatically on capable browsers. A property of *this browser/GPU*,
 // not of a project or run — so it lives here rather than duplicated as a per-modal
 // checkbox. Both consumers fall back to CPU automatically when adapter acquisition or
 // an operation fails, and an explicit user opt-out remains persisted.

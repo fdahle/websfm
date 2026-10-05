@@ -111,6 +111,23 @@ last frames also match the first frames. This assumes the image list follows
 capture order (normally filename/EXIF order).
 
 
+## GPU acceleration
+With **Use GPU** on (Settings → Compute; on by default when the browser offers
+WebGPU), the brute-force matcher computes descriptor distances on the graphics
+card — typically one to two orders of magnitude faster than the CPU path — and
+gives the same matches. Geometric verification still runs on the CPU workers.
+
+The first pair of every run is matched on both backends and the log prints a
+**GPU validate** line comparing them. If they disagree beyond a few borderline ties,
+the rest of the run switches to the CPU automatically; a GPU error on any single pair
+also falls back to the CPU for that pair. The end-of-run **Matching GPU summary**
+says how many pairs ran where. LightGlue uses its own GPU path and is unaffected.
+
+Because exhaustive matching becomes cheap on the GPU, consider turning the **Subset gate (fast pre-test)**
+off for unordered image sets: the gate saves time by skipping pairs that look
+non-overlapping on a small sample, and occasionally skips a pair that would have
+matched.
+
 ## Read the timing report
 After matching, the log reports wall time and summed pair times for descriptor
 loading, descriptor serialization, matching, and geometric verification. Worker

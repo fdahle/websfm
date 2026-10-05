@@ -87,7 +87,8 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
   data out, side effects via injected `onLog`/`onProgress` hooks. This is what lets the
   same code run inside the worker. Grouped by pipeline stage into subfolders:
   `core/features/` (detectors `sift.js` / `superpoint.js`, matchers `bruteforce.js` /
-  `lightglue.js`, shared geometric gate `verify.js` — F-RANSAC + inlierSpread — plus
+  `lightglue.js`, `nnSelect.js` — the brute-force ratio + mutual-NN decision over
+  top-2 arrays, the JS twin of the crate's rule, shared geometric gate `verify.js` — F-RANSAC + inlierSpread — plus
   `ort.js`, `preselect.js`, `sequentialPairs.js` (capture-order window + optional orbit
   closure), and `tiling.js` — pure tile-grid/seam-NMS/auto-size math
   behind tiled detection; the per-tile detector loop lives in `workers/ops/detect.js`),
@@ -239,7 +240,10 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
 - **`workers/computeClient.js`** is the typed async client (worker pool, request/response
   with streaming `ev` events). Pending calls retain their assigned worker: a
   worker-level crash rejects only that slot's calls and immediately replaces the
-  slot; healthy workers and their in-flight calls continue. **`compute.worker.js`**
+  slot; healthy workers and their in-flight calls continue. A call may pin a slot (`worker:`)
+  — learned backends, SAM2, GPU matching: whatever holds per-worker state — or
+  `avoid` one (WASM work during a GPU matching run keeps off `GPU_MATCH_WORKER`).
+  **`compute.worker.js`**
   keeps the OffscreenCanvas pixel
   decoder (`rasterize`), the message loop, and the merged op registry. The op handlers
   live in **`workers/ops/<domain>.js`** (`detect`/`match`/`sfm`/`dense`/`products`/`mesh`/`io`),
@@ -556,6 +560,17 @@ self-contained, file-based project format.
    (persisted, marshalled) — a **PnP registration bridge only**: `sfm.js` feeds it to
    `register.js` correspondence collection (`corrPairs = strong + weak`) but never lets it
    seed init/cycle-filter/triangulation. `verifiedPairs`/`matchStats` exclude weak.
+   **Brute-force NN has two backends with one decision rule.** WASM (`crates/matching`
+   `match_descriptors`) does it all; WebGPU (`workers/gpu/matchGpu.js` + `match.wgsl`,
+   behind Settings ▸ Compute "Use GPU") returns only per-row/per-column top-2 and
+   `core/features/nnSelect.js` `selectMatches` applies the crate's rule (s-space, f32,
+   lowest-index ties, ratio on squared distances). Both read cross-check's B→A
+   column-wise off the **same** A·Bᵀ — never a second scan. A change to the rule goes
+   to the crate and `nnSelect.js` together; `nnSelect.test.js` pins them bit-exactly on
+   integer descriptors. The store-side router (`stores/matching/gpuMatchRun.js`)
+   validates each run's first pair against WASM, sends each image's descriptors to the
+   pinned GPU worker once (per-run LRU; a miss returns `{ needs }`), and falls back to
+   WASM per pair on any error. RANSAC verification is WASM either way.
 3. **Sparse SfM** (`core/sfm/sfm.js`): a **rotation-cycle consistency filter**
    (`rotationCycleFilter`) first prunes verified-but-false pairs — spurious epipolar
    fits on repetitive structure that clear every count/ratio gate but whose relative
@@ -1308,6 +1323,10 @@ propagate covariance rather than retaining stale numeric sigmas.
   convention comment + a round-trip test: COLMAP's qvec/tvec **is** websfm R,t
   (only R↔quaternion); `transforms.json` needs camera-to-world **OpenGL** (looks
   down −z, +y up) — negate rot columns 1,2 of `c2w_cv=[Rᵀ|C]`.
+- **WGSL: bitcast floats into u32, never indices into f32.** A small integer's bits
+  read as f32 are a denormal, and a driver may flush it to zero on any float
+  load/store — an index packed into a float record silently becomes 0 on some GPUs.
+  `match.wgsl` keeps records as `vec4<u32>` for this reason.
 - The three PatchMatch kernels (`patchmatch.wgsl`, `core/dense/planeCost.js`,
   `crates/reconstruction/src/mvs.rs`) implement the same math; the first-image
   GPU↔CPU A/B check must stay RMS < 5e-3. Change all three (and the `aggRef`
