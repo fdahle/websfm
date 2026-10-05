@@ -331,7 +331,12 @@ stated), each recorded as a VERIFICATION row + HANDOVER baseline.
 - **Interim-BA blow-ups.** MAT-05 interim BAs started from RMS 92 / 719 / 42 px (max
   ~1.9k px) and five were rejected; the final model is clean (max 8 px). Bad
   observations enter during registration — find which step (PnP extension vs fresh
-  triangulation) before they cost tracks.
+  triangulation) before they cost tracks. MAT-16 adds a lead. The blow-ups (RMS 185, 902
+  and 17 px at 42, 97 and 112 cameras) follow weakly registered images (P1180196 at
+  19/32 PnP inliers, P1180198 at 726/1541) or two *rejected* interim BAs (87, 92
+  cameras). A rejected BA keeps the pre-BA estimate, so whatever made it worsen is
+  still in the model at the next one. Start by logging per-image residuals for the
+  images registered since the last good BA.
 - **Defaults after MAT-13.** Full resolution with a non-binding cap is the best SB result
   so far (115k vs 60k at 2400 px). Decide the Balanced/Detailed SIFT presets
   (`DETECT_SIFT_DEFAULTS` maxDim/maxKeypoints) and the ratio default (0.75 → 0.8, below)

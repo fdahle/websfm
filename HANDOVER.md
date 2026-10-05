@@ -191,6 +191,21 @@ Readings:
 - Response-ranked native / 10k scored *below* 2400 px / 10k. More resolution under a
   binding response cap only bought finer texture. Coarse-first removes that inversion.
 
+**Native resolution, 10k cap, coarse-first + RootSIFT (MAT-16, browser, 2026-10-05):**
+maxDim 3200 (native 3072), 10k cap, 1 orientation, tiling off; GPU exhaustive, gate off,
+ratio 0.8.
+- **Work.** 1.27 M keypoints (nearly every image at the cap). Detection 332 s; matching
+  **154 s** (627 MB of descriptors, 0 evictions; MAT-13 488 s). 1812 accepted pairs,
+  1.28 M inliers. SfM 128/128 in 265 s; about 12.5 min end to end (MAT-13 ~20 min).
+- **Result.** **71,710 ≥3-view points**: 89 % of COLMAP's 80,792 at a comparable
+  budget (COLMAP's 8192 is a soft cap), and +19 % over MAT-10 (60,189) from a similar
+  1.21 M keypoints. Median 0.30 px, max 5.46 px, 6.1 observations per point.
+- **Caveat.** Not single-variable against MAT-10: resolution, cap rule, RootSIFT and
+  the subset gate all moved. The bench above says resolution alone does not help under
+  a response cap, so the gain belongs to the cap rule plus RootSIFT.
+- **Cost.** The real lever is the per-pair cost: ¼ of MAT-13's matching time for 62 %
+  of its points.
+
 ### B-georef-polar — similarity fit on error-free polar control (2026-10-04, synthetic)
 40 control points, true ECEF geometry under an arbitrary SfM similarity, targets in
 EPSG:3031 grid + ellipsoidal height; 3-D RMS of the fitted similarity (m).
