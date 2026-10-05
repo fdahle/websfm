@@ -70,6 +70,13 @@ latency 695 s ≈ 6.4 pairs in flight), remainder 15 s (was 1510 s), postMessage
 "skipped" into verified-and-rejected). SfM: 128/128, **54,728** ≥3-view points (+5 %),
 38,990 two-view points dropped in the final cleanup, cycle filter removed 331/1694.
 
+**With final-stage track completion (MAT-06, same data and matches):** +810
+observations, 338 points lifted to ≥3 views → **55,066** ≥3-view points (+0.6 %);
+38,685 two-view points still dropped. 748 of the 781 post-BA additions came through
+the cycle-dropped pairs. Conclusion: tracks are already as complete as the verified
+correspondences allow — the gap to COLMAP is in correspondences (pairs, detection),
+not in track building.
+
 ### B-georef-polar — similarity fit on error-free polar control (2026-10-04, synthetic)
 40 control points, true ECEF geometry under an arbitrary SfM similarity, targets in
 EPSG:3031 grid + ellipsoidal height; 3-D RMS of the fitted similarity (m).

@@ -56,7 +56,7 @@ these gate code decisions elsewhere in this file:
 | `DEN-02`/`DEN-03` sky- and vegetation-heavy dense | decides the DF retune, and whether the in-optimiser pass is worth it |
 | `RAS-05` EPSG:3031 under WebGLTileLayer | go/no-go for the whole RR re-architecture |
 | `DEN-05`/`DEN-06` dense on WebGPU | validates the automatic GPU default shipped 2026-08-25 and its WASM fallback |
-| `MAT-06` SB reconstruction with track completion | measures the 2026-10-05 completion stage; decides the next MT lever |
+| MT ▸ `minInlierRatio` 0 run on SB | sizes how much of the pair gap (1694 vs COLMAP 2678) is the inlier-ratio gate |
 | `REL-02` cold smoke on the deployed build | it is a public beta |
 
 Rules that keep the register honest: record the *measured* number, not "ok"; one
@@ -303,17 +303,22 @@ experiments one variable at a time on SB (exhaustive, GPU, gate off, ratio 0.8 u
 stated), each recorded as a VERIFICATION row + HANDOVER baseline.
 
 **Points:**
-- **MAT-06 — measure track completion** (shipped 2026-10-05: `completeTracks` after
-  the final BA and before each post-filter pass, incl. completion-only use of
-  cycle-dropped pairs). Its log/digest lines say how many observations each source
-  added and how many points it lifted to ≥3 views. On noise-free synthetic data it
-  adds nothing, so its SB effect is unknown until this run. If it is small, the
-  2-view points are genuinely 2-view in the match graph and the levers are the pair
-  set (next two items) and detection, not track building.
+- **Track building is ruled out (MAT-06).** Final-stage completion lifted only 338
+  points (+0.6 %); 38,685 two-view points have no verified correspondence into a third
+  registered image. The gap is in the correspondences themselves — the items below.
+- **SIFT orientations: one per keypoint.** `crates/sift` `compute_orientation` keeps
+  only the dominant histogram peak; Lowe/VLFeat/COLMAP add a keypoint for every peak
+  ≥ 80 % of the max (COLMAP `max_num_orientations` = 2). A feature whose two peaks are
+  close gets a different orientation in different images and stops matching — exactly
+  the track-shortening failure. Catch: `suppress_duplicate_positions` dedupes by
+  position, so it must keep same-position keypoints with distinct orientations.
+  Detection change ⇒ crate + simd-parity + METHODS §2, and a re-detect.
 - **Inlier-ratio gate** (one run with `minInlierRatio` 0): COLMAP accepts any pair
   with ≥15 inliers; MAT-05 rejected 6282 pairs after verification. More accepted pairs
   = more correspondences per feature = longer tracks.
-- **Rotation-cycle filter on true pairs.** It removed 331/1694 pairs on MAT-05, incl.
+- **Rotation-cycle filter on true pairs.** MAT-06: 748 observations from the dropped
+  pairs agree with the final geometry within 5.1 px — many dropped pairs are true.
+  It removed 331/1694 pairs on MAT-05, incl.
   obvious sequential neighbours (P1180213↔218, 757 inliers, 0/31 triangles on MAT-03;
   ~20 % of accepted pairs are H/F-degenerate — a planar pair's E decomposition can
   return the wrong rotation). They now feed completion, but not registration, init or
