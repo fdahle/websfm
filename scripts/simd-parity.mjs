@@ -41,7 +41,7 @@ for (let y = 0; y < h; y++) {
   }
 }
 
-const out = detect_sift(rgba, w, h, 0.02, 1000);
+const out = detect_sift(rgba, w, h, 0.02, 1000, 2);
 const n = out.length - 2;
 const kept = n / STRIDE;
 

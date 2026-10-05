@@ -32,10 +32,10 @@ export function makeDetectOps({ rasterize }) {
 
   // SIFT detector → a uniform feature bundle (see detect() for the shared shape):
   // count, per-keypoint accessors, a descriptor-row view, and detector-specific diag.
-  async function runSift(data, width, height, { contrastThreshold, maxKeypoints }) {
+  async function runSift(data, width, height, { contrastThreshold, maxKeypoints, maxOrientations }) {
     // wasm init + detect_sift now live in core/features/sift.js; the STRIDE parse
     // into the shared feature bundle (below) stays worker-side.
-    const { flat, ms } = await detectSift(data, width, height, { contrastThreshold, maxKeypoints })
+    const { flat, ms } = await detectSift(data, width, height, { contrastThreshold, maxKeypoints, maxOrientations })
 
     // Layout: STRIDE floats per kept keypoint [x,y,scale,response,angle,d0..d127],
     // then two trailing scalars — rawFound (survivors of near-duplicate suppression,
@@ -123,7 +123,7 @@ export function makeDetectOps({ rasterize }) {
   // offset by the tile origin, seam duplicates are NMS'd away, and a global top-K by
   // response keeps the strongest (LightGlue caps keypoints anyway, so favour the
   // best overall rather than the union).
-  async function runTiled(raster, detector, tileSize, { contrastThreshold, maxKeypoints, overlap, maskLut, onLog }) {
+  async function runTiled(raster, detector, tileSize, { contrastThreshold, maxKeypoints, maxOrientations, overlap, maskLut, onLog }) {
     const { data, width, height } = raster
     const tiles = planTiles(width, height, tileSize, overlap)
     const label = detector === 'superpoint' ? 'SuperPoint' : 'SIFT'
@@ -137,7 +137,7 @@ export function makeDetectOps({ rasterize }) {
       const sub = sliceRaster(data, width, height, tile)
       const bundle = detector === 'superpoint'
         ? await runSuperPoint(sub, tile.w, tile.h, { maxKeypoints, onLog })
-        : await runSift(sub, tile.w, tile.h, { contrastThreshold, maxKeypoints })
+        : await runSift(sub, tile.w, tile.h, { contrastThreshold, maxKeypoints, maxOrientations })
       descLen = bundle.descLen
       totalMs += bundle.ms
       for (let i = 0; i < bundle.count; i++) {
@@ -158,7 +158,11 @@ export function makeDetectOps({ rasterize }) {
     }
 
     const rawFound = xs.length
-    const items = xs.map((x, i) => ({ x, y: ys[i], response: resps[i] }))
+    // SIFT items carry scale so orientation siblings survive the seam dedup
+    // (nmsByPosition); SuperPoint has no siblings.
+    const items = xs.map((x, i) => (detector === 'superpoint'
+      ? { x, y: ys[i], response: resps[i] }
+      : { x, y: ys[i], scale: scales[i], response: resps[i] }))
     let keep = nmsByPosition(items, NMS_RADIUS) // strongest-first, seam dupes gone
     const afterNms = keep.length
     if (maxKeypoints > 0 && keep.length > maxKeypoints) keep = keep.slice(0, maxKeypoints)
@@ -187,6 +191,7 @@ export function makeDetectOps({ rasterize }) {
   async function detect([url, options = {}], { emit } = {}) {
     const {
       detector = 'sift', maxDim = 1200, contrastThreshold = 0.01, maxKeypoints = 5000, mask = null,
+      maxOrientations = 1,
       tiling = 'off', tileSize = 0, overlap = 64,
     } = options
     const raster = await rasterize(url, maxDim)
@@ -205,10 +210,10 @@ export function makeDetectOps({ rasterize }) {
     const tilingActive = tiling !== 'off' && (width > resolvedTile || height > resolvedTile)
 
     const feats = tilingActive
-      ? await runTiled(raster, detector, resolvedTile, { contrastThreshold, maxKeypoints, overlap, maskLut, onLog })
+      ? await runTiled(raster, detector, resolvedTile, { contrastThreshold, maxKeypoints, maxOrientations, overlap, maskLut, onLog })
       : detector === 'superpoint'
         ? await runSuperPoint(data, width, height, { maxKeypoints, onLog })
-        : await runSift(data, width, height, { contrastThreshold, maxKeypoints })
+        : await runSift(data, width, height, { contrastThreshold, maxKeypoints, maxOrientations })
 
     const keypoints = []
     // Upper bound; the descriptor buffer is trimmed to the kept count below.

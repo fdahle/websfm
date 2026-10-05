@@ -4,6 +4,13 @@
 /**
  * Detect SIFT keypoints and compute 128-d descriptors.
  *
+ * `max_orientations` (1..=4; 0 is treated as 1): every scale-space extremum yields
+ * its dominant orientation plus up to `max_orientations - 1` further histogram peaks
+ * within ORI_PEAK_RATIO of it, each as a separate keypoint with its own descriptor at
+ * the SAME x, y, scale and response ("siblings"). 1 reproduces the single-orientation
+ * detector exactly. Siblings count toward `max_keypoints` and the counts below, as in
+ * COLMAP (`max_num_orientations`, default 2).
+ *
  * Returns a flat `Float32Array` with `STRIDE` (133) values per keypoint:
  * `[x, y, scale, response, angle, d0..d127, ...]`
  * where `x`/`y` are in input-image pixel coordinates, followed by TWO trailing
@@ -15,13 +22,13 @@
  * returns `[0.0, 0.0]`. Parse as `kept = floor((len - 2) / STRIDE)`,
  * `raw = flat[len-2]`, `suppressed = flat[len-1]`.
  */
-export function detect_sift(rgba: Uint8Array, width: number, height: number, contrast_threshold: number, max_keypoints: number): Float32Array;
+export function detect_sift(rgba: Uint8Array, width: number, height: number, contrast_threshold: number, max_keypoints: number, max_orientations: number): Float32Array;
 
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
-    readonly detect_sift: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
+    readonly detect_sift: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];
     readonly __wbindgen_externrefs: WebAssembly.Table;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_free: (a: number, b: number, c: number) => void;

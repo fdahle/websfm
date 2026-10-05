@@ -244,7 +244,7 @@ export function useQualityReport() {
       return s.length ? s[Math.min(s.length - 1, Math.round(0.5 * (s.length - 1)))] : null
     }
     const first = recorded[0]?.detectSettings ?? null
-    const keys = ['maxDim', 'maxDimMode', 'maxKeypoints', 'contrastThreshold', 'tiling']
+    const keys = ['maxDim', 'maxDimMode', 'maxKeypoints', 'contrastThreshold', 'tiling', 'maxOrientations']
     const mixed = !!first && recorded.some((im) => keys.some((k) => im.detectSettings[k] !== first[k]))
     // Share of images that hit the keypoint cap. When this is high the cap — not
     // `contrastThreshold` — is what selected the keypoints, and it selects by response,
@@ -260,7 +260,9 @@ export function useQualityReport() {
       images: withKp.length,
       ...(first
         ? { maxDim: first.maxDim, maxDimMode: first.maxDimMode, maxKeypoints: first.maxKeypoints,
-          contrastThreshold: first.contrastThreshold, tiling: first.tiling }
+          contrastThreshold: first.contrastThreshold, tiling: first.tiling,
+          // Absent on pre-2026-10 detections ⇒ stays undefined ⇒ rendered as unknown.
+          ...(first.maxOrientations != null ? { maxOrientations: first.maxOrientations } : {}) }
         : {}),
       medianKeypoints: med(withKp.map((im) => im.kpCount ?? null)),
       medianDetectScale: med(withKp.map((im) => im.detectScale ?? null)),

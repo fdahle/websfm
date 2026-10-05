@@ -13,7 +13,20 @@ const STRIDE: usize = 5 + DESC_LEN; // 133
 /// of each other. Keep only the strongest at each visual location.
 const DEDUP_RADIUS_PX: f32 = 2.0;
 
+/// A secondary orientation-histogram peak becomes its own keypoint when it reaches
+/// this fraction of the dominant peak (Lowe 2004 §5; VLFeat and COLMAP use 0.8).
+const ORI_PEAK_RATIO: f32 = 0.8;
+/// Hard ceiling on orientations per extremum (the smoothed histogram rarely has more).
+const MAX_ORIENTATIONS: usize = 4;
+
 /// Detect SIFT keypoints and compute 128-d descriptors.
+///
+/// `max_orientations` (1..=4; 0 is treated as 1): every scale-space extremum yields
+/// its dominant orientation plus up to `max_orientations - 1` further histogram peaks
+/// within ORI_PEAK_RATIO of it, each as a separate keypoint with its own descriptor at
+/// the SAME x, y, scale and response ("siblings"). 1 reproduces the single-orientation
+/// detector exactly. Siblings count toward `max_keypoints` and the counts below, as in
+/// COLMAP (`max_num_orientations`, default 2).
 ///
 /// Returns a flat `Float32Array` with `STRIDE` (133) values per keypoint:
 /// `[x, y, scale, response, angle, d0..d127, ...]`
@@ -32,13 +45,15 @@ pub fn detect_sift(
     height: usize,
     contrast_threshold: f32,
     max_keypoints: usize,
+    max_orientations: usize,
 ) -> Vec<f32> {
     if width == 0 || height == 0 || rgba.len() < width * height * 4 {
         return Vec::new();
     }
 
     let gray = to_gray(rgba, width, height);
-    let kps = sift_keypoints(&gray, width, height, contrast_threshold);
+    let max_orientations = max_orientations.clamp(1, MAX_ORIENTATIONS);
+    let kps = sift_keypoints(&gray, width, height, contrast_threshold, max_orientations);
     let detected = kps.len(); // total extrema, before dedup and before the cap
 
     // Response-desc first so near-duplicate suppression keeps the strongest at each
@@ -70,6 +85,11 @@ pub fn detect_sift(
 /// only when no already-kept (stronger) one lies within `radius` px. A spatial hash
 /// (cell = `radius`) keeps this ~O(n): a candidate only compares against kept points
 /// in its own and adjacent cells. See `DEDUP_RADIUS_PX` for why duplicates arise.
+///
+/// Orientation siblings (same extremum => bit-identical x, y, scale) are NOT
+/// duplicates of each other: a sibling is kept iff no NON-sibling within `radius` was
+/// kept, so the siblings of a suppressed extremum go with it. The stable response
+/// sort keeps the dominant orientation ahead of its siblings (equal response).
 fn suppress_duplicate_positions(kps: Vec<Kp>, radius: f32) -> Vec<Kp> {
     if kps.is_empty() {
         return kps;
@@ -87,6 +107,7 @@ fn suppress_duplicate_positions(kps: Vec<Kp>, radius: f32) -> Vec<Kp> {
             for gy in cy - 1..=cy + 1 {
                 if let Some(idxs) = grid.get(&(gx, gy)) {
                     for &i in idxs {
+                        if is_sibling(&kept[i], &kp) { continue; }
                         let dx = kept[i].x - kp.x;
                         let dy = kept[i].y - kp.y;
                         if dx * dx + dy * dy <= r2 {
@@ -105,6 +126,12 @@ fn suppress_duplicate_positions(kps: Vec<Kp>, radius: f32) -> Vec<Kp> {
         kept.push(kp);
     }
     kept
+}
+
+/// Same extremum, different orientation: x, y and scale are copied verbatim from one
+/// refined extremum, so exact float equality is the identity test.
+fn is_sibling(a: &Kp, b: &Kp) -> bool {
+    a.x == b.x && a.y == b.y && a.scale == b.scale
 }
 
 struct Kp {
@@ -296,8 +323,16 @@ fn downsample(src: &[f32], w: usize, h: usize) -> (Vec<f32>, usize, usize) {
 
 // ── Orientation ───────────────────────────────────────────────────────────────
 
-/// Returns the dominant gradient orientation at (kx, ky) in `gauss`.
-fn compute_orientation(gauss: &[f32], w: usize, h: usize, kx: f32, ky: f32, scale: f32) -> f32 {
+/// Orientations at (kx, ky) in `gauss`: the dominant one first, then up to
+/// `max_n - 1` further peaks (see `orientation_peaks`).
+fn compute_orientations(
+    gauss: &[f32], w: usize, h: usize, kx: f32, ky: f32, scale: f32, max_n: usize,
+) -> Vec<f32> {
+    orientation_peaks(&orientation_histogram(gauss, w, h, kx, ky, scale), max_n)
+}
+
+/// 36-bin, Gaussian-weighted, 6x-smoothed gradient-orientation histogram.
+fn orientation_histogram(gauss: &[f32], w: usize, h: usize, kx: f32, ky: f32, scale: f32) -> [f32; 36] {
     let radius   = (3.0 * scale).round().max(1.0) as i32;
     let sigma_sq = (1.5 * scale) * (1.5 * scale);
     let mut hist = [0.0f32; 36];
@@ -335,16 +370,42 @@ fn compute_orientation(gauss: &[f32], w: usize, h: usize, kx: f32, ky: f32, scal
         }
     }
 
-    // Find dominant peak, then interpolate sub-bin with a parabola.
+    hist
+}
+
+/// Dominant orientation (global maximum, first bin on ties: unchanged from the
+/// single-orientation detector), then the other strict local maxima reaching
+/// ORI_PEAK_RATIO x the dominant value, strongest first, up to `max_n` in total.
+/// Each angle is sub-bin interpolated with a parabola through its neighbours.
+fn orientation_peaks(hist: &[f32; 36], max_n: usize) -> Vec<f32> {
     let (peak_bin, peak_val) = hist.iter().enumerate()
         .fold((0, 0.0f32), |(bi, bv), (i, &v)| if v > bv { (i, v) } else { (bi, bv) });
+    let mut out = vec![peak_angle(hist, peak_bin)];
+    if max_n > 1 {
+        let mut extra: Vec<(usize, f32)> = (0..36)
+            .filter(|&i| {
+                i != peak_bin
+                    && hist[i] > hist[(i + 35) % 36]
+                    && hist[i] > hist[(i + 1) % 36]
+                    && hist[i] >= ORI_PEAK_RATIO * peak_val
+            })
+            .map(|i| (i, hist[i]))
+            .collect();
+        extra.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        out.extend(extra.into_iter().take(max_n - 1).map(|(i, _)| peak_angle(hist, i)));
+    }
+    out
+}
 
-    let l = hist[(peak_bin + 35) % 36];
-    let r = hist[(peak_bin +  1) % 36];
+/// Sub-bin interpolated angle (radians, -pi..pi) of histogram peak `bin`.
+fn peak_angle(hist: &[f32; 36], bin: usize) -> f32 {
+    let peak_val = hist[bin];
+    let l = hist[(bin + 35) % 36];
+    let r = hist[(bin +  1) % 36];
     let denom  = l - 2.0 * peak_val + r;
     let offset = if denom.abs() > 1e-6 { 0.5 * (l - r) / denom } else { 0.0 };
 
-    ((peak_bin as f32 + 0.5 + offset) / 36.0) * 2.0 * std::f32::consts::PI
+    ((bin as f32 + 0.5 + offset) / 36.0) * 2.0 * std::f32::consts::PI
         - std::f32::consts::PI
 }
 
@@ -544,7 +605,9 @@ fn refine_extremum(
     None
 }
 
-fn sift_keypoints(gray: &[f32], width: usize, height: usize, contrast_threshold: f32) -> Vec<Kp> {
+fn sift_keypoints(
+    gray: &[f32], width: usize, height: usize, contrast_threshold: f32, max_orientations: usize,
+) -> Vec<Kp> {
     let scales_per_octave = 3usize;
     let k        = 2f32.powf(1.0 / scales_per_octave as f32);
     let sigma0   = 1.6f32;
@@ -644,17 +707,19 @@ fn sift_keypoints(gray: &[f32], width: usize, height: usize, contrast_threshold:
                     let ky     = ry;
                     let kscale = sigma0 * k.powf(rs);
 
-                    let angle = compute_orientation(&gauss[s], w, h, kx, ky, kscale);
-                    let desc  = compute_descriptor(&gauss[s], w, h, kx, ky, kscale, angle);
-
-                    kps.push(Kp {
-                        x:        kx * scale_factor,
-                        y:        ky * scale_factor,
-                        scale:    kscale * scale_factor,
-                        response: contrast.abs(),
-                        angle,
-                        desc,
-                    });
+                    // One keypoint per orientation; siblings share x/y/scale/response.
+                    let angles = compute_orientations(&gauss[s], w, h, kx, ky, kscale, max_orientations);
+                    for angle in angles {
+                        let desc = compute_descriptor(&gauss[s], w, h, kx, ky, kscale, angle);
+                        kps.push(Kp {
+                            x:        kx * scale_factor,
+                            y:        ky * scale_factor,
+                            scale:    kscale * scale_factor,
+                            response: contrast.abs(),
+                            angle,
+                            desc,
+                        });
+                    }
                 }
             }
         }
@@ -690,7 +755,7 @@ mod tests {
             }
         }
 
-        let out = detect_sift(&rgba, w, h, 0.02, 1000);
+        let out = detect_sift(&rgba, w, h, 0.02, 1000, 2);
         // Two trailing sentinels (raw_found, suppressed) ⇒ (len - 2) is a STRIDE multiple.
         assert_eq!((out.len() - 2) % STRIDE, 0, "output must be groups of {} + 2", STRIDE);
         let kept = (out.len() - 2) / STRIDE;
@@ -700,15 +765,17 @@ mod tests {
         assert!(raw >= kept as f32, "raw-found count must be ≥ kept count");
         assert!(suppressed >= 0.0, "suppressed count must be non-negative");
 
-        // No two kept keypoints may sit within the dedup radius of each other.
-        let kps: Vec<(f32, f32)> = out[..out.len() - 2]
+        // No two kept keypoints may sit within the dedup radius of each other, except
+        // orientation siblings (bit-identical x, y, scale).
+        let kps: Vec<(f32, f32, f32)> = out[..out.len() - 2]
             .chunks(STRIDE)
-            .map(|c| (c[0], c[1]))
+            .map(|c| (c[0], c[1], c[2]))
             .collect();
         for i in 0..kps.len() {
             for j in i + 1..kps.len() {
+                let sib = kps[i] == kps[j];
                 let d = (kps[i].0 - kps[j].0).hypot(kps[i].1 - kps[j].1);
-                assert!(d > DEDUP_RADIUS_PX, "kept keypoints {i},{j} within dedup radius: {d}");
+                assert!(sib || d > DEDUP_RADIUS_PX, "kept keypoints {i},{j} within dedup radius: {d}");
             }
         }
 
@@ -909,7 +976,7 @@ mod tests {
     fn parity_digest() {
         // Not a multiple of 4: exercises the f32x4 tail and the border/interior split.
         let (w, h) = (157usize, 113usize);
-        let out = detect_sift(&parity_image(w, h), w, h, 0.02, 1000);
+        let out = detect_sift(&parity_image(w, h), w, h, 0.02, 1000, 2);
         let kept = (out.len() - 2) / STRIDE;
         let sx: f64 = out[..out.len() - 2].chunks(STRIDE).map(|c| c[0] as f64).sum();
         let sy: f64 = out[..out.len() - 2].chunks(STRIDE).map(|c| c[1] as f64).sum();
@@ -927,10 +994,100 @@ mod tests {
     fn empty_on_flat_image() {
         let (w, h) = (48usize, 48usize);
         let rgba = vec![128u8; w * h * 4];
-        let out = detect_sift(&rgba, w, h, 0.03, 1000);
+        let out = detect_sift(&rgba, w, h, 0.03, 1000, 2);
         // No extrema ⇒ just the two trailing sentinels (raw_found, suppressed), both 0.
         assert_eq!(out.len(), 2, "a flat image yields only the trailing sentinels");
         assert_eq!(out[0], 0.0, "raw-found count should be 0 on a flat image");
         assert_eq!(out[1], 0.0, "suppressed count should be 0 on a flat image");
+    }
+
+    // ── Multiple orientations per extremum (Lowe §5 / COLMAP max_num_orientations) ──
+
+    fn hist_with(peaks: &[(usize, f32)]) -> [f32; 36] {
+        let mut h = [0.1f32; 36];
+        for &(b, v) in peaks { h[b] = v; }
+        h
+    }
+
+    #[test]
+    fn orientation_peaks_picks_dominant_then_strong_secondaries() {
+        // Dominant at bin 5, a secondary at 85 % (bin 20) and a weak one at 70 % (bin 30).
+        let h = hist_with(&[(5, 1.0), (20, 0.85), (30, 0.7)]);
+        let one = orientation_peaks(&h, 1);
+        let two = orientation_peaks(&h, 2);
+        let four = orientation_peaks(&h, 4);
+        assert_eq!(one.len(), 1);
+        assert_eq!(two.len(), 2);
+        assert_eq!(four.len(), 2, "a 70 % peak is below ORI_PEAK_RATIO");
+        assert_eq!(two[0], one[0], "the dominant angle is unchanged by max_n");
+        let bin_of = |a: f32| (((a + std::f32::consts::PI) / (2.0 * std::f32::consts::PI)) * 36.0) as usize;
+        assert_eq!(bin_of(two[0]), 5);
+        assert_eq!(bin_of(two[1]), 20);
+        // Strongest secondaries first, capped at max_n.
+        let h3 = hist_with(&[(2, 1.0), (12, 0.81), (24, 0.95)]);
+        let p = orientation_peaks(&h3, 2);
+        assert_eq!(bin_of(p[1]), 24, "the stronger secondary wins the one extra slot");
+        // A flat histogram has no secondary peaks.
+        assert_eq!(orientation_peaks(&[0.0f32; 36], 4).len(), 1);
+    }
+
+    #[test]
+    fn single_orientation_output_is_a_subset_of_multi() {
+        // max_orientations = 1 is the old detector; with 2, every one of its keypoints
+        // must still be there (cap not binding), identical in every value.
+        let (w, h) = (157usize, 113usize);
+        let img = parity_image(w, h);
+        let one = detect_sift(&img, w, h, 0.02, 0, 1);
+        let two = detect_sift(&img, w, h, 0.02, 0, 2);
+        let rows = |o: &Vec<f32>| -> Vec<Vec<u32>> {
+            o[..o.len() - 2].chunks(STRIDE).map(|c| c.iter().map(|v| v.to_bits()).collect()).collect()
+        };
+        let (r1, r2) = (rows(&one), rows(&two));
+        assert!(r2.len() > r1.len(), "expected some secondary orientations ({} vs {})", r2.len(), r1.len());
+        let set2: std::collections::HashSet<Vec<u32>> = r2.into_iter().collect();
+        for r in &r1 {
+            assert!(set2.contains(r), "a single-orientation keypoint is missing from the multi output");
+        }
+        // 0 is treated as 1.
+        assert_eq!(detect_sift(&img, w, h, 0.02, 0, 0), one);
+    }
+
+    #[test]
+    fn siblings_share_position_and_differ_in_angle() {
+        let (w, h) = (157usize, 113usize);
+        let out = detect_sift(&parity_image(w, h), w, h, 0.02, 0, 2);
+        let rows: Vec<&[f32]> = out[..out.len() - 2].chunks(STRIDE).collect();
+        let mut groups: std::collections::HashMap<(u32, u32, u32), Vec<&[f32]>> = Default::default();
+        for r in &rows { groups.entry((r[0].to_bits(), r[1].to_bits(), r[2].to_bits())).or_default().push(r); }
+        let multi = groups.values().filter(|g| g.len() > 1).count();
+        assert!(multi > 0, "the parity image should produce orientation siblings");
+        for g in groups.values() {
+            assert!(g.len() <= 2, "max_orientations = 2 caps each extremum at two keypoints");
+            if g.len() == 2 {
+                assert_eq!(g[0][3], g[1][3], "siblings share the response");
+                let mut d = (g[0][4] - g[1][4]).abs();
+                if d > std::f32::consts::PI { d = 2.0 * std::f32::consts::PI - d; }
+                // Distinct local maxima of the 36-bin histogram are >= 2 bins apart.
+                assert!(d > 1.5 * (2.0 * std::f32::consts::PI / 36.0), "sibling angles too close: {d}");
+                assert_ne!(&g[0][5..], &g[1][5..], "siblings need their own descriptors");
+            }
+        }
+    }
+
+    #[test]
+    fn duplicate_suppression_keeps_siblings_but_drops_them_with_their_extremum() {
+        let kp = |x: f32, y: f32, scale: f32, response: f32, angle: f32| Kp {
+            x, y, scale, response, angle, desc: [0.0; DESC_LEN],
+        };
+        // Response-desc order, as detect_sift feeds it: A + sibling, then B (+ sibling)
+        // 1 px away from A at another scale (a second extremum of the same blob), then C far away.
+        let list = vec![
+            kp(10.0, 10.0, 2.0, 0.9, 0.1), kp(10.0, 10.0, 2.0, 0.9, 1.5),
+            kp(11.0, 10.0, 3.0, 0.5, 0.2), kp(11.0, 10.0, 3.0, 0.5, 2.0),
+            kp(40.0, 40.0, 2.0, 0.3, 0.0),
+        ];
+        let kept = suppress_duplicate_positions(list, DEDUP_RADIUS_PX);
+        let angles: Vec<f32> = kept.iter().map(|k| k.angle).collect();
+        assert_eq!(angles, vec![0.1, 1.5, 0.0]);
     }
 }

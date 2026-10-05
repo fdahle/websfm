@@ -20,6 +20,13 @@
 // Conservative: a 5000×4735 (23.7 MP) input was the observed failure; ≈4000×4000 leaves
 // margin, and the worker's rethrow is the true backstop if a larger input slips past.
 export const DETECT_TUNING = {
+  // SIFT keypoints per scale-space extremum: the dominant orientation plus secondary
+  // histogram peaks within 80 % of it (Lowe 2004 §5; COLMAP max_num_orientations = 2).
+  // A feature with two near-equal peaks otherwise gets a different orientation in
+  // different images and stops matching — the short-track failure the 2026-10-05 SB
+  // runs pointed at (38.7k two-view points with no third correspondence). Siblings
+  // count toward maxKeypoints, as in COLMAP. 1 = the pre-2026-10 detector exactly.
+  siftMaxOrientations: 2,
   spMaxUntiledInputPx: 16_000_000, // ≈4000×4000; above this (tiling off) → prompt / clean fail
 }
 

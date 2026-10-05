@@ -52,6 +52,33 @@ it('posts only the putatives\' packed coordinates to verification', async () => 
   expect([ptsB[2], ptsB[3]]).toEqual([485, 144])   // b.keypoints[48]
 })
 
+it('folds SIFT orientation siblings onto one keypoint before verification', async () => {
+  vi.spyOn(opfs, 'deleteMatches').mockResolvedValue()
+  vi.spyOn(opfs, 'saveMatches').mockResolvedValue()
+  // 30 features; in both images keypoint 30+i is the second-orientation sibling of i.
+  const kps = (dx) => {
+    const base = Array.from({ length: 30 }, (_, i) => ({ x: i * 10 + dx, y: i * 3, scale: 2, nx: 0, ny: 0 }))
+    return [...base, ...base.map((k) => ({ ...k }))]
+  }
+  const a = { uuid: 'a', name: 'a', keypoints: kps(0), descDim: 128 }
+  const b = { uuid: 'b', name: 'b', keypoints: kps(5), descDim: 128 }
+  vi.spyOn(opfs, 'loadDescriptors').mockResolvedValue(new Float32Array(60 * 128))
+  vi.spyOn(workers, 'matchDescriptors').mockResolvedValue({
+    matches: [
+      ...Array.from({ length: 20 }, (_, i) => ({ ia: i, ib: i, dist: 1 })),
+      ...Array.from({ length: 20 }, (_, i) => ({ ia: 30 + i, ib: 30 + i, dist: 0.5 })), // same features again
+      { ia: 55, ib: 25, dist: 1 }, // feature 25, matched only through its secondary orientation in A
+    ],
+  })
+  const verify = vi.spyOn(workers, 'verifyPointPairs').mockResolvedValue(null)
+  const store = useMatchesStore()
+  await store.matchPair(a, b, { subsetGate: false })
+  const [ptsA] = verify.mock.calls[0]
+  expect(ptsA).toHaveLength(2 * 21) // 20 merged + 1 re-expressed, no duplicates
+  const entry = store.getMatch('a', 'b')
+  expect(entry).toMatchObject({ rawCount: 21, siblingMerged: 20, siblingAmbiguous: 0 })
+})
+
 it.each(['dimensions', 'length', 'detector'])('refuses incompatible descriptor %s before dispatch', async reason => {
   vi.spyOn(opfs, 'deleteMatches').mockResolvedValue()
   vi.spyOn(opfs, 'loadDescriptors').mockResolvedValue(new Float32Array(reason === 'length' ? 127 : 128))

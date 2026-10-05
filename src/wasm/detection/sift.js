@@ -3,6 +3,13 @@
 /**
  * Detect SIFT keypoints and compute 128-d descriptors.
  *
+ * `max_orientations` (1..=4; 0 is treated as 1): every scale-space extremum yields
+ * its dominant orientation plus up to `max_orientations - 1` further histogram peaks
+ * within ORI_PEAK_RATIO of it, each as a separate keypoint with its own descriptor at
+ * the SAME x, y, scale and response ("siblings"). 1 reproduces the single-orientation
+ * detector exactly. Siblings count toward `max_keypoints` and the counts below, as in
+ * COLMAP (`max_num_orientations`, default 2).
+ *
  * Returns a flat `Float32Array` with `STRIDE` (133) values per keypoint:
  * `[x, y, scale, response, angle, d0..d127, ...]`
  * where `x`/`y` are in input-image pixel coordinates, followed by TWO trailing
@@ -18,12 +25,13 @@
  * @param {number} height
  * @param {number} contrast_threshold
  * @param {number} max_keypoints
+ * @param {number} max_orientations
  * @returns {Float32Array}
  */
-export function detect_sift(rgba, width, height, contrast_threshold, max_keypoints) {
+export function detect_sift(rgba, width, height, contrast_threshold, max_keypoints, max_orientations) {
     const ptr0 = passArray8ToWasm0(rgba, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
-    const ret = wasm.detect_sift(ptr0, len0, width, height, contrast_threshold, max_keypoints);
+    const ret = wasm.detect_sift(ptr0, len0, width, height, contrast_threshold, max_keypoints, max_orientations);
     var v2 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
     wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
     return v2;

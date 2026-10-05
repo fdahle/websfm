@@ -67,7 +67,14 @@ export function sliceRaster(data, width, _height, tile) {
  * seam-dedup step. Grid-accelerated (cell = radius) so it stays ~O(n) on the
  * 10–20k points tiling can produce.
  *
- * @param {{x:number,y:number,response:number}[]} items
+ * Orientation siblings — the keypoints SIFT emits for one extremum's secondary
+ * orientations (crates/sift `max_orientations`) — carry bit-identical x, y and scale
+ * and are not duplicates of each other; a sibling survives iff no NON-sibling within
+ * `radius` was kept, exactly like the crate's own suppression. The stable sort keeps
+ * the dominant orientation ahead of its (equal-response) siblings. Items without a
+ * `scale` (SuperPoint) never count as siblings.
+ *
+ * @param {{x:number,y:number,response:number,scale?:number}[]} items
  * @param {number} radius  suppression radius in the same px space as x,y
  * @returns {number[]} kept indices into `items`, strongest-response first
  */
@@ -82,7 +89,7 @@ export function nmsByPosition(items, radius) {
   const grid = new Map() // "cx,cy" → kept indices in that cell
   const kept = []
   for (const i of order) {
-    const { x, y } = items[i]
+    const { x, y, scale } = items[i]
     const cx = Math.floor(x / cell)
     const cy = Math.floor(y / cell)
     let dup = false
@@ -91,6 +98,8 @@ export function nmsByPosition(items, radius) {
         const bucket = grid.get(`${gx},${gy}`)
         if (!bucket) continue
         for (const j of bucket) {
+          const o = items[j]
+          if (scale !== undefined && o.x === x && o.y === y && o.scale === scale) continue // sibling
           const dx = items[j].x - x
           const dy = items[j].y - y
           if (dx * dx + dy * dy < r2) { dup = true; break }

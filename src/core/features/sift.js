@@ -24,12 +24,14 @@ function ensureWasm() {
  * @param {object} options
  * @param {number} [options.contrastThreshold]
  * @param {number} [options.maxKeypoints]
+ * @param {number} [options.maxOrientations] - keypoints per extremum (1 = dominant
+ *   orientation only; 2 = COLMAP's default). See crates/sift `detect_sift`.
  * @returns {Promise<{ flat: Float32Array, ms: number }>}
  */
 export async function detectSift(data, width, height, options = {}) {
-  const { contrastThreshold = 0.01, maxKeypoints = 5000 } = options
+  const { contrastThreshold = 0.01, maxKeypoints = 5000, maxOrientations = 1 } = options
   await ensureWasm()
   const t0 = performance.now()
-  const flat = detect_sift(new Uint8Array(data.buffer), width, height, contrastThreshold, maxKeypoints)
+  const flat = detect_sift(new Uint8Array(data.buffer), width, height, contrastThreshold, maxKeypoints, maxOrientations)
   return { flat, ms: performance.now() - t0 }
 }
