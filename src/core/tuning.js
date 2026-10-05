@@ -26,7 +26,10 @@ export const DETECT_TUNING = {
   // different images and stops matching — the short-track failure the 2026-10-05 SB
   // runs pointed at (38.7k two-view points with no third correspondence). Siblings
   // count toward maxKeypoints, as in COLMAP. 1 = the pre-2026-10 detector exactly.
-  siftMaxOrientations: 2,
+  // Default 1, measured: on South Building with identical matching settings, 2 gave
+  // 60,480 vs 60,189 >=3-view points (+0.5 %, MAT-08 vs MAT-10) for ~20 % more
+  // descriptors to match. Set 2 to reproduce COLMAP's detector.
+  siftMaxOrientations: 1,
   spMaxUntiledInputPx: 16_000_000, // ≈4000×4000; above this (tiling off) → prompt / clean fail
 }
 
