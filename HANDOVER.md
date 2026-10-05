@@ -108,6 +108,14 @@ nothing measurable here, so the default stays at 1; the ratio test at 0.8 is wor
 points (now seen twice). Best configuration so far: 1 orientation, keypoint cap that
 does not bind, ratio 0.8 — 60.2k vs COLMAP 80.8k.
 
+**Full resolution, tiled (MAT-12):** maxDim 5000 with tiling on (6 × 1536 px tiles),
+25k cap: 2.97 M keypoints, detection 660 s, matching **831 s** (the 1 GB GPU descriptor
+cache could not hold 1.52 GB of descriptors: 4251 evictions, 49.6 GB re-uploaded), and
+**39 % fewer inliers** than MAT-10 (586k vs 962k) — tiles lose the coarse octaves and
+the cap fills with fine-scale features. Reconstruction was refused by the renderer
+preflight (3.40 GB used), mostly a stale 1.42 GB descriptor copy (fixed, see done log).
+Untiled full resolution is still unmeasured (MAT-13).
+
 ### B-georef-polar — similarity fit on error-free polar control (2026-10-04, synthetic)
 40 control points, true ECEF geometry under an arbitrary SfM similarity, targets in
 EPSG:3031 grid + ellipsoidal height; 3-D RMS of the fitted similarity (m).
@@ -379,6 +387,12 @@ fiducials; self-calibration (A2) + fiducials (F4) are the code-side support.
 ---
 
 ## Done log (most recent first)
+
+- **2026-10-05 · Detection no longer keeps descriptors in memory in saved projects.**
+  Once `saveDescriptors` resolves the in-memory copy is dropped (matching reads OPFS,
+  falling back to memory only if the file is missing). It had held 1.42 GB until the
+  sparse preflight released it, too late for the heap reading, which then refused the
+  run. `stores/useImagesStore.js`, `stores/useMatchesStore.js`; browser check `MAT-13`.
 
 - **2026-10-05 · SIFT multi-orientation: default 1.** `DETECT_TUNING.siftMaxOrientations`
   2 → 1 after MAT-08/MAT-10 (+0.5 % points for ~20 % more descriptors). The code path

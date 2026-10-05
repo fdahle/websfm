@@ -44,3 +44,27 @@ it('keeps learned detection serial and continues past an individual SIFT failure
   expect(store.images[0].kpStatus).toBe('error')
   expect(store.images.slice(1).every(i => i.kpStatus === 'done')).toBe(true)
 })
+it('drops the in-memory descriptors once a persistent project has saved them, keeps them if the save fails', async () => {
+  const opfs = await import('../utils/opfs.js')
+  const projects = useProjectsStore()
+  projects.persistenceAvailable = true
+  projects.currentProjectId = 'p1'
+  const failFor = 'u1'
+  let settle
+  const saved = new Promise((resolve) => { settle = resolve })
+  let calls = 0
+  vi.spyOn(opfs, 'saveKeypoints').mockResolvedValue()
+  vi.spyOn(opfs, 'saveColors').mockResolvedValue()
+  vi.spyOn(opfs, 'saveDescriptors').mockImplementation(async (pid, uuid) => {
+    if (++calls === 2) settle()
+    if (uuid === failFor) throw new Error('quota')
+  })
+  const store = setup(2)
+  detectKeypoints.mockImplementation(async () => result())
+  await store.detectAll({ maxDim:1200 })
+  await saved
+  await new Promise((r) => setTimeout(r, 0))
+  expect(store.images[0].kpStatus).toBe('done')
+  expect(store.images[0].descriptors).toBeNull()
+  expect(store.images[1].descriptors).toBeInstanceOf(Float32Array)
+})

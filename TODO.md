@@ -327,8 +327,12 @@ stated), each recorded as a VERIFICATION row + HANDOVER baseline.
   ~1.9k px) and five were rejected; the final model is clean (max 8 px). Bad
   observations enter during registration — find which step (PnP extension vs fresh
   triangulation) before they cost tracks.
-- **Detection resolution**: COLMAP extracts at full 3072 px with an upsampled first
-  octave; SB ran at ≤2400 px. Separate experiment, after the matching ones.
+- **Detection resolution (MAT-13).** COLMAP extracts untiled at full 3072 px. MAT-12 ran
+  full resolution *tiled* (1536 px tiles) and lost 39 % of inliers: tiling drops the coarse
+  octaves. MAT-13 repeats it untiled at maxDim 3200 with a 2 GB GPU descriptor cache.
+- **GPU descriptor cache size.** `MATCH_TUNING.gpuDescCacheMiB` 1024 thrashed at 2.97 M
+  keypoints (4251 evictions, 831 s). Size it from the run's descriptor bytes, capped by
+  the adapter's `maxBufferSize`/device memory, instead of a constant.
 
 **Speed** (no longer the gap; only if a larger set needs it):
 - **Kernel throughput** — Chrome measured 13.5 ms/pair GPU-bound on SB (COLMAP ~12).

@@ -866,7 +866,14 @@ export const useImagesStore = defineStore('images', () => {
           const pid = projects.currentProjectId
           opfs.saveKeypoints(pid, found.uuid, found.keypoints).catch(() => {})
           opfs.saveColors(pid, found.uuid, found.keypoints).catch(() => {})
-          opfs.saveDescriptors(pid, found.uuid, res.descriptors).catch(() => {})
+          // A persistent project's matching reads descriptors from OPFS, so the
+          // in-memory copy is dead weight once saved — 1.4 GB at 128 × 25k SIFT
+          // descriptors, enough to fail the sparse memory preflight hours later.
+          // Kept if the save fails: matching falls back to it.
+          const descriptors = res.descriptors
+          opfs.saveDescriptors(pid, found.uuid, descriptors)
+            .then(() => { if (found.descriptors === descriptors) found.descriptors = null })
+            .catch(() => {})
           sync()
         }
         onDetected?.(id)
