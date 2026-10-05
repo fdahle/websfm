@@ -43,6 +43,18 @@ export const SFM_TUNING = {
   finalMinTrackViews: 3,
   finalTrackPruneMinCount: 50,
   finalTrackPruneMinShare: 0.2,
+  // Track completion (tracks.js `completeTracks`, COLMAP's CompleteTracks) after the
+  // final BA and before each post-filter pass: verified matches with one endpoint in a
+  // point add the other endpoint when it reprojects within the track-filter gate.
+  // Rounds repeat until nothing is added (A↔C enables C↔D); 5 is ample — later rounds
+  // add almost nothing. On 2026-10-05 SB the final prune still dropped 38,990 two-view
+  // points (41 %); completion is the step that turns tracks into ≥3-view ones.
+  completeTracksMaxRounds: 5,
+  // Also complete through pairs the rotation-cycle filter dropped (331 on that run,
+  // incl. true sequential neighbours with 700+ inliers). Completion-only: they never
+  // seed or triangulate, and each added observation still has to reproject within the
+  // gate against a point built from trusted pairs. Their additions are logged apart.
+  completeTracksDroppedPairs: true,
   interimBaEvery: 5,         // run a global BA after this many newly-registered cameras
   interimBaIterations: 12,   // fewer iters for the interim solves than the final BA
   // Camera-centre priors (imported poses / EXIF GPS) enter one final fixed-K BA.

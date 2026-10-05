@@ -342,6 +342,19 @@ fiducials; self-calibration (A2) + fiducials (F4) are the code-side support.
 
 ## Done log (most recent first)
 
+- **2026-10-05 · Final-stage track completion.** \`core/sfm/tracks.js\`
+  \`completeTracks\` (COLMAP's CompleteTracks: a verified match with one endpoint on a
+  point adds the other endpoint when it reprojects within the track-filter gate) is now
+  the one home of that rule — registration's \`foldOneEndpointMatches\` is one round of
+  it, behaviour unchanged. New in \`sfm.js\`: it runs to a fixpoint after the final
+  BA's retriangulation/merge and before each post-filter pass (final poses +
+  self-cal-folded keypoints, which registration never judged against), and also draws
+  on the rotation-cycle-dropped pairs for completion only (\`SFM_TUNING\`
+  \`completeTracksMaxRounds\` 5, \`completeTracksDroppedPairs\` true). Recorded as
+  \`summary.trackCompletion\`, rendered in the digest. No-op on a noise-free synthetic
+  strip (identical output on/off, with and without SB-like distortion), so the SB
+  effect is measured by VERIFICATION \`MAT-06\`. METHODS §4.7, guide updated.
+
 - **2026-10-05 · Main-thread cost of long matching runs.** The first browser GPU run
   (MAT-02) was main-thread-bound in its second half. `composables/useLog.js`: the
   console buffer is a `shallowRef` appended in place, notified ≤20 Hz and trimmed in

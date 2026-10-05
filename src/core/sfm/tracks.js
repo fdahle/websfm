@@ -172,3 +172,69 @@ export function mergeSplitTracks({ points3d, cameras, pairs, keypointOf, maxRepr
   for (const p of out) delete p._dead
   return { points3d: out, merged }
 }
+
+// Track completion (COLMAP's `CompleteTracks`): for every verified match between two
+// registered images where EXACTLY ONE endpoint already belongs to a point, add the
+// other endpoint's observation to that point when it reprojects within `maxReprojPx`
+// and the point does not observe that image yet. Both/neither-assigned matches are
+// the other two cases (mergeSplitTracks / retriangulatePairs).
+//
+// Repeats until a round adds nothing or `maxRounds` is reached: an observation added
+// through A↔C can enable C↔D in the next round (within a round the live index already
+// carries some of that forward, in pair order). The incremental solver passes its
+// live keypoint→point `index` + `addView` so its index stays consistent; standalone
+// callers omit both and get a private index.
+//
+// `extraPairs` (e.g. pairs the rotation-cycle filter dropped) feed completion only —
+// they never seed or triangulate structure — and every observation they add must
+// pass the same reprojection gate against a point the trusted pairs built. Counted
+// apart so their effect is visible in the log.
+//
+// Returns { added, addedExtra, rounds, lifted } — `lifted` = points that had ≤2 views
+// before and ≥3 after, i.e. what the final 2-view prune no longer removes.
+export function completeTracks({
+  points3d, cameras, pairs, extraPairs = [], keypointOf, maxReprojPx,
+  maxRounds = 1, index = null, addView = null,
+}) {
+  const idx = index ?? buildViewIndex(points3d)
+  const add = addView ?? ((pt, uuid, kp) => {
+    pt.views.set(uuid, kp)
+    let m = idx.get(uuid); if (!m) { m = new Map(); idx.set(uuid, m) }
+    m.set(kp, pt)
+  })
+  const sizeBefore = new Map() // pt → view count before its first addition
+  const sweep = (list) => {
+    let n = 0
+    for (const e of list) {
+      if (!cameras.has(e.idA) || !cameras.has(e.idB)) continue
+      for (const [ia, ib] of e.matches) {
+        const ptA = idx.get(e.idA)?.get(ia)
+        const ptB = idx.get(e.idB)?.get(ib)
+        if (!!ptA === !!ptB) continue
+        const pt = ptA || ptB
+        const tgtUuid = ptA ? e.idB : e.idA
+        const tgtKp = ptA ? ib : ia
+        if (pt.views.has(tgtUuid)) continue // one keypoint per image per track
+        const kp = keypointOf(tgtUuid, tgtKp)
+        if (!kp) continue
+        if (reprojErr(cameras.get(tgtUuid), pt.x, pt.y, pt.z, kp) > maxReprojPx) continue
+        if (!sizeBefore.has(pt)) sizeBefore.set(pt, pt.views.size)
+        add(pt, tgtUuid, tgtKp)
+        n++
+      }
+    }
+    return n
+  }
+  let added = 0, addedExtra = 0, rounds = 0
+  while (rounds < maxRounds) {
+    rounds++
+    const a = sweep(pairs)
+    const b = extraPairs.length ? sweep(extraPairs) : 0
+    added += a
+    addedExtra += b
+    if (!a && !b) break
+  }
+  let lifted = 0
+  for (const [pt, before] of sizeBefore) if (before <= 2 && pt.views.size >= 3) lifted++
+  return { added, addedExtra, rounds, lifted }
+}

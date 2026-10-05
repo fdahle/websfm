@@ -30,7 +30,7 @@ import { rotationCycleFilter, reevaluateDroppedEdges } from './cycleFilter.js'
 import { makeProgressReporter, scopeProgress, RUN_BUDGET, sliceRange } from './progressPlan.js'
 import {
   toNorm, camToP34flat, reprojErr, retriangulatePairs, mergeSplitTracks,
-  pruneFinalTwoViewTracks,
+  pruneFinalTwoViewTracks, completeTracks,
 } from './tracks.js'
 import { selectInitPair } from './initPair.js'
 import { registerImages } from './register.js'
@@ -52,7 +52,7 @@ import { wrapPackedMatches } from './matchCodec.js'
 
 // Re-export the extracted pure modules so existing importers (sfm.test.js and any
 // others that reached for these through sfm.js) keep working unchanged.
-export { rotationCycleFilter, retriangulatePairs, mergeSplitTracks, pruneFinalTwoViewTracks }
+export { rotationCycleFilter, retriangulatePairs, mergeSplitTracks, pruneFinalTwoViewTracks, completeTracks }
 
 // ── Geometry helpers ────────────────────────────────────────────────────────────
 // Depth of world point (x,y,z) along a flat 3×4 projection matrix's principal
@@ -114,6 +114,8 @@ async function reconstructSingleModel(input, hooks = {}) {
   let cycleRecord = null      // rotation-cycle filter verdict + drop/re-admit counts
   const selfCalRecord = { requested: cfg.refineIntrinsics, resolved: null, staged: false, passes: [], adjustments: [] }
   const intrinsicsRecord = new Map() // sensorId → { fxNominal, fxFinal, cx, cy, source, label }
+  // Final-stage track completion, one row per pass (completeTracksFinal below).
+  const trackCompletionRecord = []
 
   // Reprojection gates are configured in DETECTION pixels but applied to keypoints
   // in NATIVE pixels, so resolve them against this set's detection scale before
@@ -774,36 +776,17 @@ async function reconstructSingleModel(input, hooks = {}) {
     // R4: fold one-endpoint-assigned matches into existing tracks. Only PnP-inlier
     // correspondences extend tracks during registration, and matches touching an
     // existing track are skipped for triangulation — so an observation whose *other*
-    // endpoint already belongs to a point is simply lost, leaving tracks 2-view. For
-    // every verified match between two registered images where exactly one endpoint
-    // is assigned, add the unassigned endpoint's observation to that point when it
-    // reprojects within `gate`. Directly raises the ≥3-view share and BA conditioning.
-    const foldOneEndpointMatches = (gate) => {
-      let folded = 0
-      for (const entry of donePairs) {
-        if (!registeredUuids.has(entry.idA) || !registeredUuids.has(entry.idB)) continue
-        const mapA = viewIndex.get(entry.idA)
-        const mapB = viewIndex.get(entry.idB)
-        for (const [ia, ib] of entry.matches) {
-          const ptA = mapA?.get(ia)
-          const ptB = mapB?.get(ib)
-          // Only the exactly-one-assigned case: both/neither are handled elsewhere
-          // (extension, triangulation, retriangulation, split-track merge).
-          if (!!ptA === !!ptB) continue
-          const pt = ptA || ptB
-          const tgtUuid = ptA ? entry.idB : entry.idA
-          const tgtKp = ptA ? ib : ia
-          if (pt.views.has(tgtUuid)) continue // image already in this track → skip
-          const cam = cameras.get(tgtUuid)
-          const kp = imageByUuid(tgtUuid)?.keypoints?.[tgtKp]
-          if (!cam || !kp) continue
-          if (reprojErr(cam, pt.x, pt.y, pt.z, kp) > gate) continue
-          addView(pt, tgtUuid, tgtKp) // updates viewIndex (mapA/mapB mutate in place)
-          folded++
-        }
-      }
-      return folded
-    }
+    // endpoint already belongs to a point is simply lost, leaving tracks 2-view. One
+    // round of tracks.js `completeTracks` over the live index (`cameras` holds exactly
+    // the registered images): for every verified match between two registered images
+    // where exactly one endpoint is assigned, add the other endpoint when it reprojects
+    // within `gate`. Directly raises the ≥3-view share and BA conditioning. The final
+    // stage runs the same function to a fixpoint (completeTracksFinal below).
+    const foldOneEndpointMatches = (gate) => completeTracks({
+      points3d, cameras, pairs: donePairs,
+      keypointOf: (uuid, k) => imageByUuid(uuid)?.keypoints?.[k] ?? null,
+      maxReprojPx: gate, index: viewIndex, addView,
+    }).added
 
     // Consolidate split tracks: the *both*-endpoints-assigned case foldOneEndpointMatches
     // skips (line above) — a verified match whose two ends already belong to two DIFFERENT
@@ -1323,6 +1306,41 @@ async function reconstructSingleModel(input, hooks = {}) {
     // supplies this run's keypoint lookup + the WASM triangulator.
     const keypointOf = (uuid, kpIdx) => imageByUuid(uuid)?.keypoints?.[kpIdx] ?? null
 
+    // Track completion to a fixpoint (tracks.js `completeTracks`, COLMAP's
+    // CompleteTracks) against the CURRENT poses. Registration's fold judged
+    // observations against rough poses and pre-self-cal keypoints; retriangulation
+    // creates only 2-view points; and pairs the rotation-cycle filter dropped never
+    // fed a track (re-admission only runs while images are unregistered). Runs after
+    // the retriangulation/merge below and before each post-filter pass, so every added
+    // observation is then filtered and bundle-adjusted like any other. Gate = the
+    // tight track-filter threshold, whichever pass it precedes.
+    const completeTracksFinal = (label) => {
+      rebuildViewIndex()
+      const before = trackHist()
+      const extra = cfg.completeTracksDroppedPairs ? droppedPairs : []
+      const res = completeTracks({
+        points3d, cameras, pairs: donePairs, extraPairs: extra, keypointOf,
+        maxReprojPx: filterMaxReprojPx, maxRounds: cfg.completeTracksMaxRounds,
+        index: viewIndex, addView,
+      })
+      const after = trackHist()
+      trackCompletionRecord.push({
+        stage: label, added: res.added, addedExtra: res.addedExtra, extraPairs: extra.length,
+        rounds: res.rounds, lifted: res.lifted, gatePx: filterMaxReprojPx, before, after,
+      })
+      const total = res.added + res.addedExtra
+      if (total) {
+        log(`${label} track completion +${total} observation(s) (${res.added} via verified pairs`
+          + `${extra.length ? `, ${res.addedExtra} via ${extra.length} cycle-filter-dropped pair(s)` : ''}; `
+          + `${res.rounds} round(s), ≤${filterMaxReprojPx.toFixed(1)}px) — ${res.lifted} point(s) lifted to ≥3 views; `
+          + `track lengths (2/3/4+ view) ${before.t2}/${before.t3}/${before.t4} → ${after.t2}/${after.t3}/${after.t4}`,
+        'info', 'Reconstruction')
+      } else {
+        log(`${label} track completion found nothing to add`, 'debug', 'Reconstruction')
+      }
+      return total
+    }
+
     if (cameras.size >= 2 && points3d.length >= 10 && baIterations > 0) {
       report('bundle', 1, 'Bundle adjustment…', { done: cameras.size, total: imgs.length })
 
@@ -1384,7 +1402,8 @@ async function reconstructSingleModel(input, hooks = {}) {
         const mres = mergeSplitTracks({ points3d, cameras, pairs: donePairs, keypointOf, maxReprojPx: filterMaxReprojPx })
         points3d = mres.points3d
         const merged = mres.merged
-        if (added || merged) {
+        const completed = completeTracksFinal('post-BA')
+        if (added || merged || completed) {
           const after = trackHist()
           log(`retriangulation +${added} point(s), merged ${merged} split track(s)`
             + `${lowParallax ? `, rejected ${lowParallax} low-parallax candidate(s)` : ''}; `
@@ -1405,6 +1424,10 @@ async function reconstructSingleModel(input, hooks = {}) {
       for (const [round, maxPx] of [[1, filterMaxReprojPx * 2], [2, filterMaxReprojPx]]) {
         report('trackFilter', round / 2,
           `Track filter + bundle adjustment (pass ${round})…`, { done: cameras.size, total: imgs.length })
+        // Complete first (against the poses + folded keypoints the previous BA left),
+        // so the threshold, filter and BA below treat the added observations like any
+        // other.
+        completeTracksFinal(`pre-filter pass ${round}`)
         // Same quantile floor as the pre-BA pass, but a deliberately loose bound: these
         // passes ARE the real filter and a hard block can legitimately lose a lot, so it
         // guards only against annihilating the model (cleanupThreshold.js).
@@ -1698,6 +1721,7 @@ async function reconstructSingleModel(input, hooks = {}) {
       gates: gateRecord,
       cycleFilter: cycleRecord ? { ...cycleRecord, remainingPairs: donePairs.length } : null,
       selfCal: selfCalRecord,
+      trackCompletion: trackCompletionRecord,
       intrinsics: [...intrinsicsRecord.values()].map((r) => ({
         ...r,
         deltaPct: r.fxNominal && r.fxFinal != null ? (100 * (r.fxFinal - r.fxNominal) / r.fxNominal) : null,

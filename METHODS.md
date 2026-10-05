@@ -381,7 +381,8 @@ camera, its PnP-inlier correspondences **extend existing tracks** (grow to 3+
 views, a much stronger BA constraint) rather than spawning duplicate 2-view
 points; only matches where *neither* endpoint is yet on a track are triangulated
 fresh. A later `foldOneEndpointMatches` pass folds in observations where exactly
-one endpoint was already assigned (raises the ≥3-view share).
+one endpoint was already assigned (raises the ≥3-view share) — one round of the
+track-completion rule of §4.7.
 
 ### 4.5 Bundle adjustment (`crates/reconstruction/src/bundle.rs`)
 
@@ -473,6 +474,24 @@ triangulation angle below `filterMinTriAngleDeg` (ill-conditioned near-zero-
 parallax points). The parallax floor is also applied before bulk retriangulation so
 near-parallel candidates are never allocated merely because they reproject well.
 BA is re-run after filtering.
+
+**Track completion** (`completeTracks`, COLMAP's *CompleteTracks*). A verified match
+whose two keypoints are both on points is a split track (merged above); one whose
+keypoints are both free is new structure (retriangulated above). The third case — one
+keypoint on a point, the other free — adds the free keypoint's observation to that point
+when it reprojects within `filterMaxReprojPx` and the point has no observation in that
+image yet. During registration this runs one round after each sweep and interim BA,
+against the poses of the moment. After registration it runs **to a fixpoint** (an
+observation added through A↔C can enable C↔D) after the retriangulation/merge step and
+again before each track-filter pass — i.e. against the final poses and the
+self-calibrated, folded keypoints, which the registration-time rounds never saw. These
+final rounds also draw on the pairs the rotation-cycle filter dropped, *for completion
+only*: such a pair never seeds or triangulates structure, and each observation it
+contributes must reproject within the gate against a point the trusted pairs built.
+Added observations then go through the same filter and BA as every other observation.
+On a noise-free synthetic strip the final rounds add nothing (registration's rounds
+already completed every track), so their value lies in what registration could not
+judge: pre-self-calibration gate failures and the cycle-dropped pairs.
 
 Two-view points remain available while the incremental solve needs them. At final
 output, however, they are omitted automatically when the model already contains a

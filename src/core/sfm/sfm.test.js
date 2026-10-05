@@ -6,7 +6,7 @@ import initRecon from '../../wasm/reconstruction/reconstruction.js'
 import { RUN_BUDGET } from './progressPlan.js'
 import {
   reconstruct, retriangulatePairs, mergeSplitTracks, rotationCycleFilter,
-  pruneFinalTwoViewTracks,
+  pruneFinalTwoViewTracks, completeTracks,
 } from './sfm.js'
 import { resolveK } from './reconstruction.js'
 import { distortPixel } from './distortion.js'
@@ -623,6 +623,96 @@ describe('retriangulatePairs / mergeSplitTracks (A3)', () => {
     })
     expect(res.merged).toBe(0)
     expect(res.points3d).toHaveLength(2)
+  })
+})
+
+// COLMAP-style track completion (one-endpoint-assigned matches), tested directly.
+describe('completeTracks', () => {
+  // Four cameras around world point W. Keypoint 0 in each image is W's exact
+  // projection; keypoint 1 is a decoy 40 px away (a wrong match).
+  const W = [0, 0, 10]
+  const Rs = [rotY(0), rotY(0.15), rotY(-0.15), rotY(0.3)]
+  const centers = [[0, 0, 0], [2, 0, 0], [-2, 0, 0], [4, 0, 1]]
+  const ts = Rs.map((R, i) => mv(R, centers[i]).map((v) => -v))
+  const uuids = ['c0', 'c1', 'c2', 'c3']
+  const cameras = new Map(uuids.map((u, i) => [u, { R: Rs[i], t: ts[i], K: Kobj }]))
+  const kpOf = new Map(uuids.map((u, i) => {
+    const k = project(Rs[i], ts[i], W)
+    return [u, [k, { x: k.x + 40, y: k.y }]]
+  }))
+  const keypointOf = (uuid, kp) => kpOf.get(uuid)?.[kp] ?? null
+  const twoView = () => ({ ...ptAt(W), views: new Map([['c0', 0], ['c1', 0]]) })
+  const opts = { cameras, keypointOf, maxReprojPx: 2 }
+
+  it('adds the unassigned endpoint of a one-endpoint match and counts the lift', () => {
+    const pt = twoView()
+    const res = completeTracks({ ...opts, points3d: [pt], pairs: [{ idA: 'c0', idB: 'c2', matches: [[0, 0]] }] })
+    expect(res).toMatchObject({ added: 1, addedExtra: 0, lifted: 1 })
+    expect([...pt.views.entries()].sort()).toEqual([['c0', 0], ['c1', 0], ['c2', 0]])
+  })
+
+  it('chains across rounds (A↔C enables C↔D) until nothing more is added', () => {
+    // c2↔c3 comes first, so in round 1 neither endpoint is assigned yet.
+    const pairs = [{ idA: 'c2', idB: 'c3', matches: [[0, 0]] }, { idA: 'c0', idB: 'c2', matches: [[0, 0]] }]
+    const one = twoView()
+    expect(completeTracks({ ...opts, points3d: [one], pairs, maxRounds: 1 }).added).toBe(1)
+    expect(one.views.has('c3')).toBe(false)
+    const many = twoView()
+    const res = completeTracks({ ...opts, points3d: [many], pairs, maxRounds: 5 })
+    expect(res).toMatchObject({ added: 2, rounds: 3, lifted: 1 })
+    expect([...many.views.keys()].sort()).toEqual(['c0', 'c1', 'c2', 'c3'])
+  })
+
+  it('rejects an observation outside the reprojection gate', () => {
+    const pt = twoView()
+    const res = completeTracks({ ...opts, points3d: [pt], pairs: [{ idA: 'c0', idB: 'c2', matches: [[0, 1]] }] })
+    expect(res.added).toBe(0)
+    expect(pt.views.has('c2')).toBe(false)
+  })
+
+  it('never gives a track a second keypoint in the same image, and skips both/neither-assigned matches', () => {
+    const pt = { ...ptAt(W), views: new Map([['c0', 0], ['c2', 0]]) }
+    const other = { ...ptAt(W), views: new Map([['c1', 1]]) }
+    const res = completeTracks({
+      ...opts,
+      points3d: [pt, other],
+      pairs: [
+        { idA: 'c0', idB: 'c2', matches: [[0, 1]] }, // c2 already in the track (kp 0)
+        { idA: 'c0', idB: 'c1', matches: [[0, 1]] }, // both endpoints assigned → merge's job
+        { idA: 'c1', idB: 'c3', matches: [[0, 0]] }, // neither assigned → retriangulation's job
+      ],
+      keypointOf: (uuid, kp) => (uuid === 'c2' && kp === 1 ? kpOf.get('c2')[0] : keypointOf(uuid, kp)),
+    })
+    expect(res.added).toBe(0)
+    expect(pt.views.get('c2')).toBe(0)
+  })
+
+  it('counts additions through extraPairs apart and ignores unregistered images', () => {
+    const pt = twoView()
+    const partial = new Map([...cameras].filter(([u]) => u !== 'c3'))
+    const res = completeTracks({
+      ...opts, cameras: partial, points3d: [pt],
+      pairs: [{ idA: 'c0', idB: 'c3', matches: [[0, 0]] }], // c3 not registered
+      extraPairs: [{ idA: 'c1', idB: 'c2', matches: [[0, 0]] }],
+    })
+    expect(res).toMatchObject({ added: 0, addedExtra: 1 })
+    expect(pt.views.has('c3')).toBe(false)
+    expect(pt.views.get('c2')).toBe(0)
+  })
+
+  it('updates a caller-supplied live index through its addView', () => {
+    const pt = twoView()
+    const index = new Map([['c0', new Map([[0, pt]])], ['c1', new Map([[0, pt]])]])
+    const calls = []
+    const addView = (p, uuid, kp) => {
+      calls.push([uuid, kp]); p.views.set(uuid, kp)
+      if (!index.has(uuid)) index.set(uuid, new Map())
+      index.get(uuid).set(kp, p)
+    }
+    // points3d is deliberately empty: with an index supplied it must not be re-indexed.
+    completeTracks({ ...opts, points3d: [], pairs: [{ idA: 'c1', idB: 'c2', matches: [[0, 0]] }], index, addView })
+    expect(calls).toEqual([['c2', 0]])
+    expect(index.get('c2').get(0)).toBe(pt)
   })
 })
 

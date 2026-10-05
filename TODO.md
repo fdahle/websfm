@@ -56,7 +56,7 @@ these gate code decisions elsewhere in this file:
 | `DEN-02`/`DEN-03` sky- and vegetation-heavy dense | decides the DF retune, and whether the in-optimiser pass is worth it |
 | `RAS-05` EPSG:3031 under WebGLTileLayer | go/no-go for the whole RR re-architecture |
 | `DEN-05`/`DEN-06` dense on WebGPU | validates the automatic GPU default shipped 2026-08-25 and its WASM fallback |
-| `MAT-05` re-run of the GPU matcher on SB | measures the 2026-10-05 main-thread fixes; MT below lists the experiments that follow |
+| `MAT-06` SB reconstruction with track completion | measures the 2026-10-05 completion stage; decides the next MT lever |
 | `REL-02` cold smoke on the deployed build | it is a public beta |
 
 Rules that keep the register honest: record the *measured* number, not "ok"; one
@@ -294,51 +294,45 @@ session loads.
 guard) with a mocked `InferenceSession`. Real-inference browser runs are
 `VERIFICATION.csv` ▸ `DET-02`, `DET-04`, `DET-06`.
 
-### MT — closing the gap to COLMAP on South Building (after MAT-01–03)
-Where we stand (HANDOVER ▸ B-match-gpu): matching 598 s vs COLMAP 99 s; ≥3-view
-points 51,964 vs 80,792. Turning the subset gate off raised accepted pairs 61 % and
-≥3-view points 0.2 %, so **the point gap is downstream of matching**. Run the browser
-experiments one variable at a time on SB (exhaustive, GPU, gate off unless stated),
-each recorded as a VERIFICATION row + HANDOVER baseline.
+### MT — closing the gap to COLMAP on South Building
+Where we stand (HANDOVER ▸ B-match-gpu, MAT-05): matching **109.5 s** vs COLMAP 99 s
+(done — GPU-bound at 13.5 ms/pair); ≥3-view points **54,728** vs 80,792; accepted
+pairs 1694 vs 2678. Turning the subset gate off raised accepted pairs 61 % and
+≥3-view points 0.2 %, so the point gap is downstream of matching. Run the browser
+experiments one variable at a time on SB (exhaustive, GPU, gate off, ratio 0.8 unless
+stated), each recorded as a VERIFICATION row + HANDOVER baseline.
 
-**Points (the bigger gap):**
-- **Track completion — the main suspect.** The final cleanup dropped 37,279
-  "uncorroborated" 2-view points; retriangulation merged only 143 split tracks.
-  COLMAP links every verified correspondence into one track graph and, after each
-  registration, re-walks it (`CompleteTracks`/`MergeTracks`) to add observations in
-  other registered images whose reprojection agrees. First a diagnostic: for each
-  2-view point, how many of its two keypoints have verified correspondences into a
-  third *registered* image that reproject within the track-filter gate? If that is
-  a large share, implement COLMAP-style completion + merging after the final BA (and
-  ideally after each interim BA) in `core/sfm/`.
-- **Rotation-cycle filter on true pairs.** It removed 273/1589 pairs (17 %),
-  including obvious sequential neighbours (P1180213↔218, 757 inliers, in 0/31
-  triangles; 21 % of accepted pairs were H/F-degenerate — a planar pair's E
-  decomposition can return the wrong rotation). Check the Detail log for how many
-  the post-self-cal re-admission recovers; consider letting dropped pairs still feed
-  track completion (reprojection-gated) while keeping them out of init/registration.
-  COLMAP has no such filter.
-- **Ratio 0.75 vs COLMAP 0.8** (one run): more putatives per pair ⇒ longer tracks.
+**Points:**
+- **MAT-06 — measure track completion** (shipped 2026-10-05: `completeTracks` after
+  the final BA and before each post-filter pass, incl. completion-only use of
+  cycle-dropped pairs). Its log/digest lines say how many observations each source
+  added and how many points it lifted to ≥3 views. On noise-free synthetic data it
+  adds nothing, so its SB effect is unknown until this run. If it is small, the
+  2-view points are genuinely 2-view in the match graph and the levers are the pair
+  set (next two items) and detection, not track building.
 - **Inlier-ratio gate** (one run with `minInlierRatio` 0): COLMAP accepts any pair
-  with ≥15 inliers; 1863 pairs were rejected here.
+  with ≥15 inliers; MAT-05 rejected 6282 pairs after verification. More accepted pairs
+  = more correspondences per feature = longer tracks.
+- **Rotation-cycle filter on true pairs.** It removed 331/1694 pairs on MAT-05, incl.
+  obvious sequential neighbours (P1180213↔218, 757 inliers, 0/31 triangles on MAT-03;
+  ~20 % of accepted pairs are H/F-degenerate — a planar pair's E decomposition can
+  return the wrong rotation). They now feed completion, but not registration, init or
+  triangulation, and re-admission runs only while images are unregistered. COLMAP has
+  no such filter; an experiment with the filter off would size its cost.
+- **Interim-BA blow-ups.** MAT-05 interim BAs started from RMS 92 / 719 / 42 px (max
+  ~1.9k px) and five were rejected; the final model is clean (max 8 px). Bad
+  observations enter during registration — find which step (PnP extension vs fresh
+  triangulation) before they cost tracks.
 - **Detection resolution**: COLMAP extracts at full 3072 px with an upsampled first
   octave; SB ran at ≤2400 px. Separate experiment, after the matching ones.
 
-**Speed:**
-- **Re-run MAT-05** (main-thread fixes of 2026-10-05). Expected GPU-bound at ~30 ms
-  per pair ≈ 4–5 min. Take a DevTools Performance trace if it is not.
-- **Kernel throughput** (~33 ms/pair in Chrome vs 16.5 ms under Dawn/Node for a
-  smaller pair; COLMAP ~12 ms). Options, cheapest first: check whether Chrome
-  compiles via FXC or DXC (`chrome://gpu`) — the 4×4 register arrays are where FXC
-  hurts; manually unroll the micro-tile into vec4 locals; f16 descriptors
-  (`shader-f16`) halve bandwidth; uint8 descriptors with `dot4U8Packed` quarter it and
-  match COLMAP's own uint8 SIFT — but that changes the descriptor semantics for
-  both backends (METHODS change, crate in lockstep).
-- **Pool dispatch.** The 2026-10-04 run showed 2.65× effective parallelism on 8
-  workers under round-robin `call()`; with GPU matching, verification (21 s summed)
-  is the pool's only load, so this matters only if MAT-05 shows idle GPU time.
+**Speed** (no longer the gap; only if a larger set needs it):
+- **Kernel throughput** — Chrome measured 13.5 ms/pair GPU-bound on SB (COLMAP ~12).
+  Options: f16 descriptors (`shader-f16`) halve bandwidth; uint8 descriptors with
+  `dot4U8Packed` quarter it but change descriptor semantics for both backends
+  (METHODS change, crate in lockstep).
 - **Subset-gate default**: with the GPU backend the gate saves little and costs
-  pairs; make "off" the default for GPU runs once MAT-05 confirms the wall time.
+  pairs; make "off" the default for GPU runs.
 
 ### Matching & detection throughput
 Stage timings now separate loading, serialization, matching and verification.

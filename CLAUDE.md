@@ -604,7 +604,11 @@ self-contained, file-based project format.
    (`bundle.rs`: Schur complement, analytic Jacobians, adaptive Huber; optional
    shared per-sensor intrinsics refinement via `refineIntrinsics`), retriangulation
    + split-track merging (`retriangulatePairs`/`mergeSplitTracks`), and 2-pass track
-   filtering. Brown–Conrady distortion (`core/sfm/distortion.js`) is removed once at
+   filtering. A verified match has three cases and each has ONE home in
+   `core/sfm/tracks.js`: both endpoints on points → `mergeSplitTracks`; neither →
+   `retriangulatePairs`; exactly one → `completeTracks` (registration's
+   `foldOneEndpointMatches` is one round of it over the live index; the final stage
+   runs it to a fixpoint and lets cycle-dropped pairs *complete* but never seed). Brown–Conrady distortion (`core/sfm/distortion.js`) is removed once at
    ingest so the whole pipeline stays pinhole — `projectPoint`, the track filter,
    reprojection stats and the dense/ortho warp all assume it. A sensor declares which
    coefficients it uses via a **distortion model** (`DISTORTION_MODELS`:
