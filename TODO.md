@@ -328,8 +328,11 @@ stated), each recorded as a VERIFICATION row + HANDOVER baseline.
   observations enter during registration — find which step (PnP extension vs fresh
   triangulation) before they cost tracks.
 - **Detection resolution (MAT-13).** COLMAP extracts untiled at full 3072 px. MAT-12 ran
-  full resolution *tiled* (1536 px tiles) and lost 39 % of inliers: tiling drops the coarse
-  octaves. MAT-13 repeats it untiled at maxDim 3200 with a 2 GB GPU descriptor cache.
+  full resolution *tiled* and lost 39 % of inliers, confounded with tiling, a 25k cap and
+  the gate. MAT-13 = untiled at maxDim 3200 (2 GB GPU descriptor cache); MAT-14 = MAT-10
+  with tiling on, isolating tiling. If MAT-13 is still worse than MAT-10, try a
+  scale-first cap (keep coarse octaves when truncating, as COLMAP is believed to — check
+  its source first) instead of the response-ranked one in `crates/sift` and `runTiled`.
 - **GPU descriptor cache size.** `MATCH_TUNING.gpuDescCacheMiB` 1024 thrashed at 2.97 M
   keypoints (4251 evictions, 831 s). Size it from the run's descriptor bytes, capped by
   the adapter's `maxBufferSize`/device memory, instead of a constant.

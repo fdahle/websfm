@@ -111,10 +111,12 @@ does not bind, ratio 0.8 — 60.2k vs COLMAP 80.8k.
 **Full resolution, tiled (MAT-12):** maxDim 5000 with tiling on (6 × 1536 px tiles),
 25k cap: 2.97 M keypoints, detection 660 s, matching **831 s** (the 1 GB GPU descriptor
 cache could not hold 1.52 GB of descriptors: 4251 evictions, 49.6 GB re-uploaded), and
-**39 % fewer inliers** than MAT-10 (586k vs 962k) — tiles lose the coarse octaves and
-the cap fills with fine-scale features. Reconstruction was refused by the renderer
+**39 % fewer inliers** than MAT-10 (586k vs 962k). Confounded — resolution, tiling, cap and
+subset gate all moved. Suspects: tiling (one octave fewer per tile, large features lost at
+the 64 px seams) and the response-ranked cap filling with fine-scale features at full
+resolution (COLMAP, as far as remembered, keeps the coarsest octaves when it truncates). Reconstruction was refused by the renderer
 preflight (3.40 GB used), mostly a stale 1.42 GB descriptor copy (fixed, see done log).
-Untiled full resolution is still unmeasured (MAT-13).
+Untiled full resolution (MAT-13) and tiling alone at 2400 px (MAT-14) separate the two.
 
 ### B-georef-polar — similarity fit on error-free polar control (2026-10-04, synthetic)
 40 control points, true ECEF geometry under an arbitrary SfM similarity, targets in
