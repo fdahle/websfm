@@ -307,9 +307,24 @@ stated), each recorded as a VERIFICATION row + HANDOVER baseline.
 - **Track building is ruled out (MAT-06).** Final-stage completion lifted only 338
   points (+0.6 %); 38,685 two-view points have no verified correspondence into a third
   registered image. The gap is in the correspondences themselves — the items below.
+- **Ruled out by measurement:** F-RANSAC 4 px (+0.7 %), F-RANSAC 10k iterations (0),
+  peak threshold above or below 0.01 (−1.6…−8 %), a second SIFT orientation (+0.5 %,
+  MAT-10), pair gates (MAT-05/07), track building (MAT-06). See HANDOVER ▸
+  B-match-gpu, "knob sweep".
+- **Projection-guided track extension (unmeasured, likely the largest lever).** Every
+  run discards 46–73k two-view points (MAT-15: 72,895, beside 119k kept). MAT-06 showed
+  these have no *verified* correspondence into a third image, i.e. matching missed
+  them. Once poses exist, project each two-view point into the other registered
+  images and search a few-pixel radius for a keypoint whose descriptor matches either
+  observation. The radius removes the ambiguity that made the global ratio test reject
+  it. COLMAP does not do this (its completion uses existing matches only), so it is
+  headroom beyond COLMAP. Cost: descriptors must reach the SfM worker, about 1.1 GB as
+  f32 at 2.2 M keypoints or 280 MB as COLMAP-style uint8 ×512, or a per-image streaming
+  pass. Size the upper bound first by counting candidates within 3 px.
 - **Ratio-test default.** `MATCH_DEFAULTS.ratioThreshold` 0.75 (COLMAP 0.8). On SB
   0.8 was worth ~+5 % points twice (MAT-05; MAT-09 → MAT-10 on the same detections:
-  57,539 → 60,189) at unchanged median error. Moving the default also moves the
+  57,539 → 60,189) at unchanged median error, and −5.1 % for 0.75 on the strip bench
+  under the new detector (third time). Moving the default also moves the
   Balanced preset onto the Fast preset's value (`low` is 0.80), so the presets need
   re-spacing with it; check one aerial/film set before shipping.
 - **Keypoint cap default.** `maxKeypoints` 10,000 binds on SB at 2400 px (MAT-05..07)
@@ -327,7 +342,16 @@ stated), each recorded as a VERIFICATION row + HANDOVER baseline.
   ~20 % of accepted pairs are H/F-degenerate — a planar pair's E decomposition can
   return the wrong rotation). They now feed completion, but not registration, init or
   triangulation, and re-admission runs only while images are unregistered. COLMAP has
-  no such filter; an experiment with the filter off would size its cost.
+  no such filter; an experiment with the filter off would size its cost. MAT-14/15/16
+  drop 334–410 pairs per run, including pairs with 765, 815 and 1056 inliers at 0
+  consistent triangles, and completion then recovers 620–893 observations through
+  them. Two steps:
+  1. **Diagnose.** Log the H/F-degenerate flag for each dropped pair. If the dropped
+     pairs are mostly planar, the cause is the rotation estimate, not the pairs: take
+     R from the homography decomposition for degenerate pairs, as COLMAP's two-view
+     geometry does for its PLANAR configuration.
+  2. **Measure.** Add `rotationCycleFilter` to `SFM_TUNING` (sfm.js already reads
+     `settings.rotationCycleFilter !== false`) and run SB with it off.
 - **Interim-BA blow-ups.** MAT-05 interim BAs started from RMS 92 / 719 / 42 px (max
   ~1.9k px) and five were rejected; the final model is clean (max 8 px). Bad
   observations enter during registration — find which step (PnP extension vs fresh

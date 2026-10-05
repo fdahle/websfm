@@ -225,6 +225,28 @@ ratio 0.8.
   for MAT-15/MAT-16 is 3323/1092 s = 3.04×, against a quadratic keypoint ratio of 3.03×,
   despite MAT-15's 752 evictions and 7.4 GB re-uploaded.
 
+**Matching/detection knob sweep on the strip (node bench, 2026-10-05):** the same 8-image
+strip and track metric as the cap-rule table above. Native resolution, 10k cap,
+coarse-first + RootSIFT, one knob changed per row.
+
+| variant | tracks ≥3 | vs baseline |
+|---|---|---|
+| baseline: peak 0.01, ratio 0.8, F-RANSAC 2 px / 2000 iterations | 3,672 | — |
+| ratio 0.75 (the current default) | 3,485 | −5.1 % |
+| F-RANSAC 4 px (COLMAP's `max_error`) | 3,698 | +0.7 % |
+| F-RANSAC 10,000 iterations | 3,672 | 0 (adaptive termination stops long before) |
+| peak 0.0067 (COLMAP's threshold) | 3,557 | −3.1 % |
+| peak 0.0067 + 4 px | 3,593 | −2.2 % |
+| peak 0.015 | 3,613 | −1.6 % |
+| peak 0.02 (the Fast preset's value) | 3,364 | −8.4 % |
+| peak 0.03 | 1,231 | raw keypoints fall below the cap |
+
+Readings:
+- Ratio 0.8 is now measured three times (MAT-05, MAT-09 → MAT-10, here) at about +5 %.
+- 0.01 is the peak-threshold optimum. Under the coarse-first cap, a lower threshold
+  admits weak coarse blobs that displace strong fine ones.
+- Neither COLMAP's RANSAC threshold nor its iteration count matters for us.
+
 ### B-georef-polar — similarity fit on error-free polar control (2026-10-04, synthetic)
 40 control points, true ECEF geometry under an arbitrary SfM similarity, targets in
 EPSG:3031 grid + ellipsoidal height; 3-D RMS of the fitted similarity (m).
