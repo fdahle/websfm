@@ -11,14 +11,21 @@ export { stripSourcePrefix } from '../utils/logFormat.js'
 // full, and every consumer re-walks the whole array. Lines are appended in place and
 // consumers are notified at most every NOTIFY_MS (`triggerRef`); everything that
 // replaces the buffer assigns a new array, which notifies on its own.
-const entries = shallowRef([])
+//
+// Dev only: the state lives in `import.meta.hot.data` so it survives a hot update of
+// THIS file. Without that, an edit here gave the re-mounted console a fresh, empty
+// buffer while every already-created Pinia store kept logging into the old module's
+// — the console went silent with no error until a full reload (2026-10-05).
+const shared = import.meta.hot?.data?.logState
+  ?? { entries: shallowRef([]), pending: [], listeners: new Set(), seq: 0 }
+if (import.meta.hot) import.meta.hot.data.logState = shared
+const entries = shared.entries
 const NOTIFY_MS = 50
 let notifyTimer = null
 function notifySoon() {
   if (notifyTimer != null) return
   notifyTimer = setTimeout(() => { notifyTimer = null; triggerRef(entries) }, NOTIFY_MS)
 }
-let _seq = 0
 
 // The live display window is capped: only the most recent MAX_BUFFER lines stay
 // in memory (a full SfM/dense run logs many thousands). Older lines are shifted
@@ -34,8 +41,8 @@ const TRIM_CHUNK = 500
 // Lines logged but not yet persisted. Separate from `entries` precisely because
 // `entries` is capped: a shifted-out line must still reach the file. The store
 // drains this via takePending() on a debounce; `onLog` lets it schedule that.
-const pending = []
-const listeners = new Set()
+const pending = shared.pending
+const listeners = shared.listeners
 
 export function useLog() {
   // `opts.channel` separates the two kinds of line that share this stream:
@@ -53,11 +60,11 @@ export function useLog() {
     const hms = now.toLocaleTimeString('en', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
     const ms  = now.getMilliseconds().toString().padStart(3, '0')
     // Globally-unique id: the wall-clock stamp disambiguates across page reloads
-    // (where _seq resets to 0), _seq disambiguates entries within the same ms. A
-    // plain ++_seq collides with persisted-then-restored entries — duplicate Vue
+    // (where seq resets to 0), seq disambiguates entries within the same ms. A
+    // plain ++seq collides with persisted-then-restored entries — duplicate Vue
     // :key — which surfaced as doubled console lines after reopening a project.
     // The id is also the anchor scroll-back uses to locate a line in the stream.
-    const entry = { id: `${now.getTime().toString(36)}-${(++_seq).toString(36)}`, time: `${hms}.${ms}`, level, message, source, channel }
+    const entry = { id: `${now.getTime().toString(36)}-${(++shared.seq).toString(36)}`, time: `${hms}.${ms}`, level, message, source, channel }
     const buf = entries.value
     buf.push(entry)
     if (buf.length > MAX_BUFFER) buf.splice(0, buf.length - (MAX_BUFFER - TRIM_CHUNK))
