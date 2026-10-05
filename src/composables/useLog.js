@@ -1,10 +1,23 @@
-import { ref } from 'vue'
+import { shallowRef, triggerRef } from 'vue'
 // Re-export the pure formatter so existing consumers keep importing it from here;
 // its implementation lives in utils/ (Vue-free) so it can be unit-tested.
 export { stripSourcePrefix } from '../utils/logFormat.js'
 
 // Module-level singleton — any file can import useLog() and share the same entries.
-const entries = ref([])
+//
+// A shallowRef over a plain array, NOT a deep ref: a pipeline logs one line per
+// matched pair (8128 on a 128-image exhaustive run) and a deep reactive array made
+// each line cost O(buffer) — `shift()` re-triggers every index once the buffer is
+// full, and every consumer re-walks the whole array. Lines are appended in place and
+// consumers are notified at most every NOTIFY_MS (`triggerRef`); everything that
+// replaces the buffer assigns a new array, which notifies on its own.
+const entries = shallowRef([])
+const NOTIFY_MS = 50
+let notifyTimer = null
+function notifySoon() {
+  if (notifyTimer != null) return
+  notifyTimer = setTimeout(() => { notifyTimer = null; triggerRef(entries) }, NOTIFY_MS)
+}
 let _seq = 0
 
 // The live display window is capped: only the most recent MAX_BUFFER lines stay
@@ -13,6 +26,10 @@ let _seq = 0
 // the store to append to the on-disk stream (utils/opfs `appendLog`), which is
 // the full record scroll-back and export read from.
 export const MAX_BUFFER = 5000
+// Overflow is trimmed in chunks, so the O(buffer) array move happens once per
+// TRIM_CHUNK lines rather than on every line; the window holds MAX_BUFFER − TRIM_CHUNK
+// … MAX_BUFFER lines.
+const TRIM_CHUNK = 500
 
 // Lines logged but not yet persisted. Separate from `entries` precisely because
 // `entries` is capped: a shifted-out line must still reach the file. The store
@@ -41,8 +58,10 @@ export function useLog() {
     // :key — which surfaced as doubled console lines after reopening a project.
     // The id is also the anchor scroll-back uses to locate a line in the stream.
     const entry = { id: `${now.getTime().toString(36)}-${(++_seq).toString(36)}`, time: `${hms}.${ms}`, level, message, source, channel }
-    entries.value.push(entry)
-    if (entries.value.length > MAX_BUFFER) entries.value.shift()
+    const buf = entries.value
+    buf.push(entry)
+    if (buf.length > MAX_BUFFER) buf.splice(0, buf.length - (MAX_BUFFER - TRIM_CHUNK))
+    notifySoon()
     pending.push(entry)
     for (const fn of listeners) fn()
   }

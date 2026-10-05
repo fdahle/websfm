@@ -195,6 +195,14 @@ export function verifyMatches(kpsA, kpsB, matches, options = {}, { onTiming, avo
   return call('verify', [kpsA, kpsB, matches, options], { onTiming, avoid: avoidWorker })
 }
 
+// Packed verification (core/features/verify.js `packMatchedPoints`): the two
+// coordinate buffers are TRANSFERRED — they are built per call and never reused.
+export function verifyPointPairs(ptsA, ptsB, options = {}, { onTiming, avoidWorker } = {}) {
+  return call('verifyPoints', [ptsA, ptsB, options], {
+    onTiming, avoid: avoidWorker, transfer: [ptsA.buffer, ptsB.buffer],
+  })
+}
+
 export const sparseMetrics = (packed) => call('sparseMetrics', [packed])
 export const refineSparse = (packed, settings, constraints = {}) => call('refineSparse', [packed, settings, constraints])
 export const readRasterWindow = (file, options = {}) => call('readRasterWindow', [{ file, ...options }])
