@@ -647,6 +647,7 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
         },
         log: (msg, level) => log(msg, level, 'Matching'),
         cacheBudgetBytes: settings.gpuDescCacheMiB * 2 ** 20,
+        shouldCancel: () => !!shouldCancel?.(),
       })
       : null
     if (!lightglue && !gpuRun) {

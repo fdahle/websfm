@@ -10,7 +10,10 @@
 //     the verdict; a failed check moves the REST OF THE RUN to WASM, and the
 //     failing pair itself is answered from the WASM result.
 //   • PER-PAIR FALLBACK. Any GPU error answers that pair on WASM; the first error is
-//     logged, later ones are counted into the end-of-run summary.
+//     logged, later ones are counted into the end-of-run summary. A CANCELLED run is
+//     the exception: Cancel hard-terminates the pool, so every in-flight GPU call
+//     rejects — falling back would spawn a fresh pool and run those pairs on WASM
+//     after the user asked to stop. Once `shouldCancel()` is true, match() throws.
 //   • SEND DESCRIPTORS ONCE. The GPU worker caches each image's descriptors for the
 //     run, so a pair carries only uuids once both images were uploaded; a cache miss
 //     (LRU eviction) comes back as `{ needs }` and the pair is resent with buffers.
@@ -37,7 +40,7 @@ function describeValidation(kind, v) {
  * @returns {Promise<null | { match: Function, finish: Function }>} null when the GPU
  *   is unavailable (already logged) — the caller then matches on WASM as before.
  */
-export async function createGpuMatchRun({ client, log, cacheBudgetBytes, runId = newRunId() }) {
+export async function createGpuMatchRun({ client, log, cacheBudgetBytes, runId = newRunId(), shouldCancel = () => false }) {
   let init
   try {
     init = await client.begin({ runId, cacheBudgetBytes })
@@ -70,8 +73,11 @@ export async function createGpuMatchRun({ client, log, cacheBudgetBytes, runId =
     log(`Matching: ${reason} — the rest of this run matches on WASM (CPU)`, 'error')
   }
 
+  const checkCancel = () => { if (shouldCancel()) throw new Error('matching cancelled') }
+
   async function match(descA, descB, { idA = null, idB = null, dim, ratioThreshold, crossCheck, kind = 'full' }, hooks) {
-    const cpu = () => client.cpuMatch(descA, descB, { dim, ratioThreshold, crossCheck }, hooks)
+    const cpu = () => { checkCancel(); return client.cpuMatch(descA, descB, { dim, ratioThreshold, crossCheck }, hooks) }
+    checkCancel()
     let validator = false
     let release = null
     if (!gates[kind]) {
@@ -79,6 +85,7 @@ export async function createGpuMatchRun({ client, log, cacheBudgetBytes, runId =
       gates[kind] = new Promise((resolve) => { release = resolve })
     } else {
       await gates[kind]
+      checkCancel()
     }
     try {
       if (disabledReason) return await cpu()
@@ -102,6 +109,7 @@ export async function createGpuMatchRun({ client, log, cacheBudgetBytes, runId =
       if (res.backend !== 'wasm') counts[kind]++
       return res
     } catch (err) {
+      checkCancel()
       fallbacks++
       const msg = err?.message ?? String(err)
       if (!firstError) {
