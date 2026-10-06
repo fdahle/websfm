@@ -84,6 +84,7 @@ export async function registerImages(ctx) {
     filterMinTriAngleDeg,
     baIterations,
     interimBaEvery,
+    interimBaGrowth = 0,
     interimBaIterations,
     rescueStalled,
     rescueRefineRatio,
@@ -244,6 +245,7 @@ export async function registerImages(ctx) {
   let progressed = true
   let pass = 0
   let registeredSinceBA = 0 // R3: cameras added since the last interim bundle adjust
+  let camerasAtLastBA = 0   // model size at the last interim BA (interimBaGrowth spacing)
   // P1: correspondences depend only on the model state (registered cameras +
   // viewIndex + points). `modelVersion` bumps whenever a registration mutates that,
   // so a per-pass cache built during scoring can be reused for the PnP attempt as
@@ -399,6 +401,7 @@ export async function registerImages(ctx) {
       let added = 0
       let triTotal = 0    // triangulated before cheirality
       let lowParallax = 0 // rejected for too-parallel rays (P4.4)
+      let badReproj = 0   // rejected: reprojection beyond the track-filter gate
       for (const entry of donePairs) {
         let regUuid = null
         if (entry.idA === img.uuid && registeredUuids.has(entry.idB) && entry.idB !== img.uuid) regUuid = entry.idB
@@ -450,6 +453,14 @@ export async function registerImages(ctx) {
             const [ia, ib] = pairsToTri[srcIdx]
             const newKp = imgIsA ? ia : ib
             const regKp = imgIsA ? ib : ia
+            // Reprojection gate, as COLMAP's triangulator applies. A near-degenerate DLT
+            // solve can pass cheirality and parallax while landing hundreds or thousands
+            // of pixels off its own observations: on South Building every gross pre-solve
+            // residual of the late interim BAs (up to 112,000 px) sat on such a point.
+            const kn = img.keypoints[newKp], kr = regImg.keypoints[regKp]
+            const pn = projectPoint(newCam, x, y, z), pr = projectPoint(regCam, x, y, z)
+            if (!pn || !pr || Math.hypot(pn.u - kn.x, pn.v - kn.y) > filterMaxReprojPx
+              || Math.hypot(pr.u - kr.x, pr.v - kr.y) > filterMaxReprojPx) { badReproj++; continue }
             // A keypoint can recur across this image's pairs; guard against the
             // live index so the same observation never lands in two different
             // points within one pass (the captured maps may be stale after adds).
@@ -465,7 +476,7 @@ export async function registerImages(ctx) {
       const pct = triTotal ? (100 * added / triTotal).toFixed(0) : '0'
       log(`${img.name} — extended ${extended} track(s), `
         + `+${added} new points (${added}/${triTotal} survived cheirality + parallax, ${pct}%; `
-        + `${lowParallax} dropped for <${filterMinTriAngleDeg}° parallax)`, 'debug', 'Reconstruction')
+        + `${lowParallax} dropped for <${filterMinTriAngleDeg}° parallax, ${badReproj} for >${filterMaxReprojPx.toFixed(1)}px reprojection)`, 'debug', 'Reconstruction')
 
       // R3: interleaved bundle adjustment. Registering all cameras in one sweep
       // with zero intermediate BA lets the model drift far from the optimum before
@@ -476,7 +487,11 @@ export async function registerImages(ctx) {
       // near the optimum. Poses/points only here (no self-calibration on the pre-
       // filter mess — that's deferred to the post-filter passes, R6).
       registeredSinceBA++
+      // With `interimBaGrowth` > 1 the solves are also spaced geometrically (COLMAP's
+      // ba_global_images_ratio): each one costs the whole model, so a fixed every-N
+      // spacing makes registration quadratic — 837 of 998 s on the 347-image quarry.
       if (baIterations > 0 && interimBaEvery > 0 && registeredSinceBA >= interimBaEvery
+          && !(interimBaGrowth > 1 && cameras.size < interimBaGrowth * camerasAtLastBA)
           && cameras.size >= 3 && getPoints3d().length >= 10) {
         reportRegister(`Bundle adjustment (${cameras.size} cameras)…`)
         await runBundleAdjust(`interim BA (${cameras.size} cameras)`, interimBaIterations,
@@ -489,6 +504,7 @@ export async function registerImages(ctx) {
           + `merged ${mergedTr} split track(s), folded ${folded} track observation(s); `
           + `${getPoints3d().length} points`, 'debug', 'Reconstruction')
         registeredSinceBA = 0
+        camerasAtLastBA = cameras.size
       }
     }
 

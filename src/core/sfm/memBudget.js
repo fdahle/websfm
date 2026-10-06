@@ -5,15 +5,18 @@
 
 export const SPARSE_HEAP_FRACTION = 0.86
 
-export function projectSparsePeakBreakdownBytes({ keypointCount = 0, matchCount = 0 } = {}) {
+export function projectSparsePeakBreakdownBytes({ keypointCount = 0, matchCount = 0, descriptorBytesPerKeypoint = 0 } = {}) {
   const K = Math.max(0, keypointCount)
   const M = Math.max(0, matchCount)
+  // Guided track extension ships uint8 descriptors (128 B per keypoint): built in the
+  // renderer and transferred, then held in the worker input and its pristine retry clone.
+  const D = K * Math.max(0, descriptorBytesPerKeypoint)
   // Renderer: plain worker-input keypoints plus the disposable packed match buffer.
   // The latter is transferred (not cloned) when the worker starts.
-  const rendererInput = K * 104 + M * 8
+  const rendererInput = K * 104 + M * 8 + D
   // Worker: postMessage's keypoint clone + the pristine retry clone. Packed matches
   // likewise have the transferred input and the solver's pristine retry copy.
-  const workerInputAndClone = K * 104 * 2 + M * 8 * 2
+  const workerInputAndClone = K * 104 * 2 + M * 8 * 2 + D * 2
   // Track observations are bounded by accepted matches and, in practice, by the
   // number of keypoints participating across overlapping cameras.
   const expectedObservations = Math.min(M, Math.ceil(K * 0.85))
@@ -27,7 +30,7 @@ export function projectSparsePeakBreakdownBytes({ keypointCount = 0, matchCount 
     // Historical combined estimate, useful for device-level reporting. Renderer and
     // worker do NOT share a V8 heap ceiling, so this must not be compared to either
     // isolate's jsHeapSizeLimit.
-    totalBytes: Math.ceil((K * 104 * 3 + M * 8 * 2 + solverAndBa) * margin),
+    totalBytes: Math.ceil((K * 104 * 3 + M * 8 * 2 + D * 2 + solverAndBa) * margin),
   }
 }
 

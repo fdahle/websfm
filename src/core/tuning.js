@@ -72,7 +72,29 @@ export const SFM_TUNING = {
   // seed or triangulate, and each added observation still has to reproject within the
   // gate against a point built from trusted pairs. Their additions are logged apart.
   completeTracksDroppedPairs: true,
-  interimBaEvery: 5,         // run a global BA after this many newly-registered cameras
+  // Projection-guided track extension (guidedExtension.js): after the first
+  // self-calibrated post-filter BA, search each point's projection in every registered
+  // camera that misses it for a keypoint with a matching descriptor. Ships the
+  // descriptors to the SfM worker as uint8 RootSIFT (128 B per keypoint; counted by the
+  // sparse memory preflight). Bench (HANDOVER ▸ B-bench): ≥3-view points +5 % SB, +28 %
+  // building, +7 % eagle, +5.9 % quarry, median error and RTK accuracy unchanged.
+  guidedTrackExtension: true,
+  // Search radius = the filter gate capped at this × the model's p90 residual: a coarse
+  // detection scale makes the native-px gate far wider than the model resolves (TMA:
+  // 16.9 px gate, 1 px median). Capped, SB additions sit at 0.39/0.98 px median/p90 vs
+  // the model's 0.31/0.96 (uncapped 0.43/1.42) for −0.6 % points. 0 = gate only.
+  guidedRadiusP90Mult: 3,
+  // Acceptance: best candidate ≤ this quantile of ≥3-view track descriptor distances and
+  // ≤ ratio × the runner-up in the same window (0.95 gave +1 % more on SB, untested
+  // elsewhere; 0.9 ratio and running in both passes changed nothing).
+  guidedQuantile: 0.9,
+  guidedRatio: 0.8,
+  interimBaEvery: 5,        // run a global BA after this many newly-registered cameras
+  // …and only once the model has also grown by this factor since the last one (COLMAP's
+  // ba_global_images_ratio is 1.1). Each solve costs the whole model, so every-5 alone
+  // is quadratic: quarry (347 images) registration 1,005 → 143 s, SB 106 → 45 s, points
+  // and RTK accuracy unchanged (SB −0.4 %). 0 = every interimBaEvery cameras.
+  interimBaGrowth: 1.2,
   interimBaIterations: 12,   // fewer iters for the interim solves than the final BA
   // Camera-centre priors (imported poses / EXIF GPS) enter one final fixed-K BA.
   // Targets are mapped into the current arbitrary SfM frame by a similarity fit;
@@ -83,6 +105,12 @@ export const SFM_TUNING = {
   // geometry. Bound that trade so noisy GPS cannot visibly damage tie-point fit.
   cameraPriorMaxReprojIncreasePx: 0.25,
   cameraPriorMaxReprojIncreaseFrac: 0.10,
+  // Intrinsics the camera-prior BA refines: 'auto' = the last post-filter pass's
+  // self-cal terms, 'none' = fixed K, or a comma list. Fixed K cannot undo a dome caused
+  // by slightly wrong f/k (nadir focal–height correlation): RTK benches quarry camera
+  // residual 0.43 → 0.20 m, GeoScan checkpoints H 6.1 → 4.4 cm, V 16.4 → 10.8 cm.
+  // Loose priors (5 m default, consumer GNSS) carry too little weight to move K.
+  cameraPriorRefineIntrinsics: 'auto',
   // ── In-registration distortion self-calibration (D3) ──
   // Once the model has this many cameras, the interim BA refines a shared focal + radial
   // k1 and folds the distortion out of the keypoints (+ Kmap) mid-registration, instead

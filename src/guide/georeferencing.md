@@ -29,6 +29,16 @@ weak for survey accuracy. Check residuals rather than assuming the metadata is e
 The reconstruction log reports when geographic positions are converted for bundle
 adjustment and later reports the camera-prior residual.
 
+With accurate positions (RTK/PPK, a few centimetres), the camera-position adjustment also
+re-solves focal length and lens distortion. A nadir drone block calibrated from its own
+images alone tends to bend into a shallow dome. Accurate positions are what corrects
+it. Give imported positions their real accuracy, because the 5 m default carries almost
+no weight.
+
+The positions are taken as the camera centres. An RTK antenna usually sits 0.1–0.5 m
+from the lens, and that offset cannot be entered yet, so expect a horizontal camera
+residual of about that size. Checkpoints are the better accuracy test.
+
 ## Ground control points
 A GCP needs known 3D coordinates and image marks. For adjustment, use at least three
 enabled control points, each marked in two registered images; more well-distributed

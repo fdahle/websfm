@@ -55,6 +55,14 @@ points are dropped when the model has a strong multi-view core). The line also s
 many observations came through pairs the match-consistency filter set aside — those
 pairs only lengthen existing points and never create new ones.
 
+It then reports **guided track extension**. Each point is projected into the
+registered images that do not yet see it, and a keypoint with a matching descriptor is
+searched for within a few pixels of the projection. This finds observations that
+matching missed, typically on repetitive façades, and usually adds 5–30 % more
+multi-view points. A following **audit** line compares the added observations' errors
+with the rest of the model. They should be similar; much larger values point to a weak
+model, for example film scans without fiducials.
+
 ## Sparse gradual selection
 Open **Tools → Point Cloud → Filter Cloud → Sparse gradual selection**. Choose
 reprojection RMS error (select above the threshold), track length (select below),

@@ -32,3 +32,6 @@ public/models/*.onnx
 # Browser test artifacts
 playwright-report/
 test-results/
+bench-out/
+# Bench configs name datasets by local path (only meaningful on the machine that has them).
+scripts/bench/configs/
