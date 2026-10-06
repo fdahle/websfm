@@ -25,6 +25,7 @@ Git history holds the detail.
 | **B-mesh** | screened-Poisson meshing | 2026-08-11 | meshing cost per depth; the finest-layer solve is the remaining pole |
 | **B-georef-polar** | error-free control, grid fit vs local metric frame | 2026-10-04 | georeferencing in a projected CRS (synthetic; real-data check is REV-06) |
 | **B-match-gpu** | brute-force NN, WASM vs WebGPU kernel (synthetic, Dawn) | 2026-10-05 | the GPU matcher's kernel cost; the real-data numbers are MAT-02/MAT-03 |
+| **B-bench** | headless bench: SB / building / TMA / eagle / quarry, RTK camera accuracy | 2026-10-05 | SfM point counts, guided extension, camera-position accuracy against RTK |
 
 ### B-match-gpu — brute-force NN kernel, WASM vs WebGPU (2026-10-05, synthetic)
 Before (real data, 2026-10-04, South Building 128, ≤2400 px SIFT, ~8.4k kp/img,
@@ -246,6 +247,133 @@ Readings:
 - 0.01 is the peak-threshold optimum. Under the coarse-first cap, a lower threshold
   admits weak coarse blobs that displace strong fine ones.
 - Neither COLMAP's RANSAC threshold nor its iteration count matters for us.
+
+### B-bench — headless pipeline bench: SfM fixes, guided extension, RTK accuracy (2026-10-05)
+Every number here comes from `scripts/bench/` (headless Chrome, real stores and workers,
+WebGPU matcher, frozen build snapshot, fresh OPFS per run). Defaults are the app's
+defaults unless stated; "ratio 0.8" is `MATCH_DEFAULTS.ratioThreshold` overridden. Within
+one config, `variants` share one detection and one set of matches.
+
+**Run-to-run noise.** Two runs of identical settings on South Building (SB) gave 54,314 and
+54,265 ≥3-view points (0.1 %). Matching is not bit-deterministic: one building-set run
+registered 47/50 cameras where every other run registered 50.
+
+**SfM regression after the BA-acceptance and triangulation-gate fixes:**
+
+| set | before | after |
+|---|---|---|
+| SB native 25k, ratio 0.8 (MAT-15 settings) | 119,454 (MAT-15, browser) | 119,182 / 119,394 |
+| building, 50 images | 4,869 | 4,876 |
+| TMA, 5 scans, no fiducials | 384 | 388 |
+
+- Before the fixes, interim BAs started from RMS 92–902 px. Every gross residual sat on a
+  freshly triangulated two-view point, up to 112,000 px. After them, every interim BA
+  lowers the RMS (SB native: 1.22 → 0.45 px at 7 cameras, …).
+- The robust acceptance rejected 0 solves where the RMS rule rejected 4 per SB run.
+
+**Ratio test, fourth measurement:** SB at app defaults gave 54,314 points at ratio 0.75 and
+57,168 at 0.8 (+5.3 %), at the same median error.
+
+**Rotation-cycle filter audit** (`core/sfm/cycleAudit.js`, SB native 25k):
+
+| | false pairs | true pairs, wrong rotation | true pairs, correct rotation |
+|---|---|---|---|
+| dropped (404) | 46 | 355 (145 planar-flagged) | 3 |
+| kept (1,639) | 78 | 36 | 1,525 |
+
+Median rotation error of the dropped true pairs is 28.6°. At SB defaults (ratio 0.8) the
+split is 12 / 84 / 1, and the filter off changes nothing: 57,167 vs 57,168 points.
+
+**Projection-guided track extension** (`core/sfm/guidedExtension.js`; pass 2; gate =
+`filterMaxReprojPx`; descriptor threshold = 0.9 quantile of ≥3-view track distances; ratio
+0.8). The audit column compares the final residuals of the added observations with the
+rest of the model. All-false additions would sit near 0.7 × gate.
+
+| set | base | guided | gain | added obs: median / p90 | rest: median / p90 | gate |
+|---|---|---|---|---|---|---|
+| SB, 2400 px / 10k, ratio 0.8 | 57,192 | 60,507 | +5.8 % | 0.43 / 1.42 px | 0.31 / 0.96 px | 5.1 px |
+| SB native 25k | 119,394 | 124,680 | +4.4 % | — | — | 4.0 px |
+| building | 4,875 | 6,406 | +31 % | 0.93 / 3.32 px | 0.60 / 2.09 px | 7.3 px |
+| eagle (44, Canon 7D) | 9,812 | 10,703 | +9.1 % | 1.07 / 3.91 px | 0.59 / 1.68 px | — |
+| quarry (347, no priors) | 106,593 | 112,925 | +5.9 % | 1.25 / 4.01 px | 0.92 / 2.56 px | — |
+| TMA | 384 | 442 | +15 % | **5.42 / 13.9 px** | 1.04 / 2.90 px | 16.9 px |
+
+- Cost: SB +16 s SfM, SB native +32 s.
+- Median error is unchanged everywhere: 0.34 px SB, 0.28 → 0.29 px native.
+- The quarry camera-position accuracy is unchanged (0.750 → 0.757 m RMS).
+- Not helping: running it in both passes (60,570), ratio 0.9 (60,558), or capping the search
+  radius at 3 × the model's p90 residual (TMA 431 points, added median still 3.66 px).
+- Quantile 0.95 adds another +1 % on SB (61,152).
+- TMA is the exception, and its whole model is weak (no interior orientation; focal
+  self-cal rejected).
+
+**Quarry (Pix4D example, 347 × 20 MP senseFly S.O.D.A., RTK EXIF ±2.7/4.9 cm):**
+camera-position residual after a 7-parameter fit to the RTK positions
+(`core/eval/positionCheck.js`).
+
+| variant | points | RMS 3D | RMS horizontal | RMS vertical | SfM time |
+|---|---|---|---|---|---|
+| priors (app default: EXIF GNSS as camera priors, fixed-K prior BA) | 106,593 | 0.426 m | 0.167 | 0.392 | 26 min |
+| no priors (pure SfM) | 106,593 | 0.750 m | 0.281 | 0.695 | 22 min |
+| priors, prior BA refines f, cx/cy, k1–k3 (`cameraPriorRefineIntrinsics: 'auto'`) | 106,541 | **0.203 m** | 0.129 | 0.156 | 25 min |
+| no priors, `interimBaGrowth: 1.2` | 106,843 | 0.747 m | 0.280 | 0.693 | **8 min** |
+
+- Pure SfM is off the RTK by about 0.7 m vertically, with the worst cameras clustered: the
+  doming of a nadir block whose focal and distortion are slightly wrong.
+- The fixed-K camera-prior BA stalls at 0.426 m. Its two rounds give 0.730 → 0.426 and then
+  0.426, with the reprojection RMS unchanged at 1.75 px. It cannot correct the intrinsics
+  that cause the dome.
+- Registration takes 998 s, 837 s of which are 69 interim BAs over the whole model (the
+  last ones about 30 s each).
+- Refining the intrinsics inside the prior BA halves the error (vertical −60 %). The focal
+  moves +0.3 %, and the distortion is refolded. The remaining ~0.2 m sits on the same few
+  images in every variant (0194/0195/0344–0346).
+- Geometric interim-BA spacing cuts registration from 1,005 s to 143 s and total SfM from
+  1,341 s to 482 s. Points and accuracy are unchanged.
+
+**Post-change baseline: the shipped defaults** (guided extension on, interim-BA growth
+1.2, prior BA refines intrinsics, ratio 0.75 app default, 2026-10-06):
+
+| set | cameras | ≥3-view points | before | SfM time |
+|---|---|---|---|---|
+| South Building | 128/128 | 57,356 | 54,314 | 123 s |
+| building | 50/50 | 6,369 | 4,876 | 9 s |
+| eagle | **29/44** | 7,803 | — | 12 s |
+| TMA | 5/5 | 423 | 388 | 0.7 s |
+| quarry (RTK priors, preselect 20) | 347/347 | 108,093, camera RMS **0.207 m** | 106,593, 0.426 m | 835 s (was 1,580 s) |
+
+Eagle at ratio 0.75 registers 29/44 cameras with or without the new defaults (7,396
+points without guided extension). At ratio 0.8 it registers 43/44 with 10,476 points:
+76 accepted pairs instead of 66. That is the fifth measurement favouring 0.8, and the
+first where 0.75 costs cameras.
+
+**GeoScan PUTI (Metashape example "aerial images with GCPs", 444 × 24 MP Sony RX1R, RTK
+camera positions ±1–2 cm, 17 GCPs with Metashape image marks).** The bench imports the
+camera file as poses with their standard deviations (preselection uses them;
+`posePriors` decides whether SfM does), triangulates every GCP from its marks through the
+app's own path, and maps it through the camera-position similarity. Checkpoint residuals
+are from 15 GCPs. GCP 19 is excluded: it is off by 1.6 m east and 3.1 m up in every run,
+so its survey or marks disagree. GCP 12 has no marks.
+
+| variant | points | checkpoints horizontal RMS | checkpoints vertical RMS | vertical bias | camera residual vertical |
+|---|---|---|---|---|---|
+| no priors (pure SfM) | 132,680 | 0.785 m | 0.718 m | +0.46 m | 0.555 m |
+| RTK priors, fixed-K prior BA (shipped) | 132,680 | **6.1 cm** | 16.4 cm | +13.0 cm | 4.0 cm |
+| RTK priors, prior BA refines f, cx/cy, k1–k3 | 132,680 | **4.4 cm** | **10.8 cm** | +5.7 cm | 2.9 cm |
+
+- GSD is about 2.9 cm.
+- Metashape's own cameras (GCPs + RTK) match the same file at 2.3 cm RMS (H 2.0 / V 1.2 cm).
+  Its antenna offset (`GNSS_offset.txt`) is given with y up and z backward, i.e.
+  (x, −y, −z) in the OpenCV camera frame. With the offset as written, the residual is
+  36 cm.
+- The camera horizontal residual with priors is a constant 0.35–0.41 m, which equals
+  |lever arm| = 0.41 m. The app has no antenna-offset support, so BA pulls the camera
+  centres onto the antenna positions. The checkpoints barely see it, because the strips
+  alternate direction.
+- Without priors the block domes: the GCP heights scatter from −0.7 to +2.4 m. RTK priors
+  remove almost all of it.
+- Cost: 29–33 min of SfM per variant (registration ≈ 1,000 s at every-5 interim BAs).
+
 
 ### B-georef-polar — similarity fit on error-free polar control (2026-10-04, synthetic)
 40 control points, true ECEF geometry under an arbitrary SfM similarity, targets in
@@ -518,6 +646,31 @@ fiducials; self-calibration (A2) + fiducials (F4) are the code-side support.
 ---
 
 ## Done log (most recent first)
+
+- **2026-10-06 · Headless pipeline bench, SfM accuracy and speed fixes.**
+  Measured in HANDOVER ▸ B-bench.
+  - **Bench.** `scripts/bench/` (runner, configs, reference loader) and
+    `tests/bench/` (page) drive ingest → detect → match → SfM through the real stores
+    and workers in headless Chrome. They report point counts and, with reference data,
+    accuracy:
+    - camera centres against GNSS (`core/eval/positionCheck.js`);
+    - independent GCP checkpoints (Metashape marks).
+  - **BA acceptance judges the robust cost** (`core/sfm/baAcceptance.js`). Plain RMS rose
+    on correct Huber solves and rejected 4 interim BAs per South Building run.
+  - **Fresh triangulations must reproject within the gate** (`core/sfm/register.js`).
+    Points up to 112,000 px off were the whole of the interim-BA "blow-ups".
+  - **Projection-guided track extension**, on by default (`core/sfm/guidedExtension.js`,
+    `SFM_TUNING.guidedTrackExtension`). ≥3-view points +5 % South Building, +28 %
+    building, +7 % eagle, +5.9 % quarry. The sparse memory preflight counts the shipped
+    descriptors.
+  - **Interim BAs spaced geometrically** (`interimBaGrowth` 1.2): quarry registration
+    1,005 → 143 s.
+  - **Camera-prior BA refines the intrinsics** (`cameraPriorRefineIntrinsics: 'auto'`):
+    RTK quarry 0.43 → 0.20 m; GeoScan checkpoints H 6.1 → 4.4 cm, V 16.4 → 10.8 cm.
+  - **Rotation-cycle audit** (`core/sfm/cycleAudit.js`), diagnostic only: the filter
+    mostly drops true pairs. The decision is in TODO ▸ SFM.
+  - **Docs.** METHODS §4.0, §4.4, §4.5, §4.7, §6.2; guide ▸ Sparse Reconstruction and
+    Georeferencing. Browser checks `SFM-18`..`SFM-20`.
 
 - **2026-10-05 · SIFT: RootSIFT descriptors and a coarse-first keypoint cap.**
   - **RootSIFT.** Detection stores `sqrt(d/‖d‖₁)`, stamped `descNorm: 'root'` per

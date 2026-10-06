@@ -228,7 +228,9 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
   and a film scan by the entire scan→canonical affine. `mag` stays the pinhole-frame
   error so the overlay agrees with the tables), `calibration.js` radial curve + focal delta, `matchGraph.js`
   union-find graph health + `bridgeEdges` (articulation edges / "fragile links") +
-  `componentIndex`, `demCheck.js` bilinear DEM-at-GCP sampler, `coverage.js` top-down
+  `componentIndex`, `demCheck.js` bilinear DEM-at-GCP sampler, `positionCheck.js` — camera
+  centres vs independent GNSS (7-parameter fit in a local ENU frame, optional antenna lever
+  arm) + GCP checkpoints through that fit, the bench's accuracy metric, `coverage.js` top-down
   tie-point density grid, `compareRuns.js` run-to-run summary diff, and `health.js`
   — the **single** `EVAL_THRESHOLDS` warn/bad table (every hub tile that colours by
   tone reads it; no scattered magic numbers) + `projectHealth(snapshot)` → the Overview
@@ -1370,7 +1372,10 @@ propagate covariance rather than retaining stale numeric sigmas.
   Interop conversions are the #1 bug source, so each lives in one place with a
   convention comment + a round-trip test: COLMAP's qvec/tvec **is** websfm R,t
   (only R↔quaternion); `transforms.json` needs camera-to-world **OpenGL** (looks
-  down −z, +y up) — negate rot columns 1,2 of `c2w_cv=[Rᵀ|C]`.
+  down −z, +y up) — negate rot columns 1,2 of `c2w_cv=[Rᵀ|C]`. A Metashape GNSS
+  antenna offset is in the same y-up/z-back camera axes, so it is (x, −y, −z) in ours
+  (`scripts/bench/reference.mjs`). As written it left a 36 cm residual; converted, Metashape's
+  own cameras fit the RTK file at 2.3 cm.
 - **WGSL: bitcast floats into u32, never indices into f32.** A small integer's bits
   read as f32 are a denormal, and a driver may flush it to zero on any float
   load/store — an index packed into a float record silently becomes 0 on some GPUs.
@@ -1408,6 +1413,12 @@ propagate covariance rather than retaining stale numeric sigmas.
   rows from both sides to tell (2026-10-05: same 9 keypoints, same siblings, angles to
   1e-6). `cargo check --target wasm32-unknown-unknown`
   at minimum proves the intrinsics still compile.
+- **A BA is judged by the cost it minimised.** The crate descends a Huber cost but
+  reports plain RMS. Plain RMS can rise on a correct robust solve, because the
+  down-weighted outliers drift. Rejecting on it kept freshly registered cameras
+  unrefined and seeded the next blow-up. `runBundleAdjust` therefore re-evaluates one
+  fixed-δ Huber cost (`core/sfm/baAcceptance.js`). A prior-constrained solve trades
+  image residual for geometry on purpose, so it uses the bounded-increase rule instead.
 - **Geometry solver tolerances are relative, and their tests are randomized.** A
   3×3 SVD via eig(AᵀA) reports a rank-2 matrix's s₃ as ≈ √ε·s₁, never 0, so an
   absolute "near zero" cut silently passed noise into U — P3P recovered 24% of random
@@ -1505,6 +1516,19 @@ propagate covariance rather than retaining stale numeric sigmas.
 Per change: `npm test` + `npm run typecheck`. WASM changes: rebuild + rerun.
 Browser-runtime work (WGSL, OPFS, modals) needs a manual browser run this
 environment may not support — say so explicitly rather than claiming verification.
+
+**Pipeline quality is measured with the headless bench** (`scripts/bench/`, README
+there). It runs ingest → detect → match → SfM through the real stores, workers and
+WebGPU matcher in headless Chrome, with a fresh OPFS per run. On the development
+machine headless Chrome exposes the same WebGPU adapter as the desktop browser. A run
+executes a **frozen build snapshot**, because the dev server hot-reloads the page when
+any imported source changes. Pipeline rows in VERIFICATION.csv (South Building, the
+building set, TMA) can be run this way. UI-only checks (modals, viewers, OPFS reopen)
+still need a person. Compare runs one variable at a time: a config's `variants` reuse
+one detection and set of matches for SfM-only changes. Point counts alone can reward a
+wrong change, so give a config `reference` data whenever a set has it: RTK camera
+positions and GCP marks. Then judge accuracy with `posePriors: false` (otherwise the
+solve has already seen the positions). The configs hold machine-specific dataset paths.
 
 Test globs are `src/core/**`, `src/utils/**`, `src/stores/**` (`vitest.config.js`).
 A test file outside those **silently never runs** — check the glob before concluding

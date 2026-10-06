@@ -106,6 +106,14 @@ The 2-camera-stall implementation detail is in
   a high share confirms planar degeneracy, at which point the filter should be **removed**
   rather than relocated, since no calibration fix reaches it. A low share reopens the
   intrinsics hypothesis. One run decides; do not tune the ceiling in the meantime.
+  **Measured 2026-10-05 (`core/sfm/cycleAudit.js`, HANDOVER ▸ B-bench):** on SB native
+  25k it dropped 404 pairs — 46 false, 355 true with a wrong pairwise rotation (median
+  28.6°), 3 true with a correct one — and kept 78 false pairs. Only 145 of the 355 are
+  H/F-degenerate, so planar degeneracy is not the whole story: the rotation estimate
+  itself (E from F with the nominal K) is wrong on true pairs. Turning it off changed
+  nothing (57,167 vs 57,168 points). Two ways out, decide between them: **remove** it
+  (zero measured value, real complexity), or rebuild the pairwise rotations (5-point E
+  under RANSAC with the EXIF K, H decomposition for planar pairs) and re-audit.
 - **A6 — adaptive bridge-pair gate**, gated on `SFM-11`: B1 showed `minInlierRatio
   0.25` rejecting genuine loop-closing bridges (27 inliers @ 0.23). Evaluate
   lowering `MATCH_TUNING.overrideInliers` (30) to ~25 **or** an explicit bridge
@@ -114,6 +122,38 @@ The 2-camera-stall implementation detail is in
 - Verification of the shipped secondary-model recovery + merge is `SFM-08`. Do not
   lower the global 30% PnP gate to force the P1180182 near-miss into the primary
   model.
+
+### ACC — georeferenced accuracy (RTK benches, HANDOVER ▸ B-bench)
+The bench now measures accuracy, not only point counts: camera centres against
+RTK/EXIF positions (quarry, GeoScan) and 15 independent GCP checkpoints (GeoScan).
+- **GNSS antenna lever arm per sensor.** Priors are antenna positions, but BA pulls the
+  camera centres onto them. GeoScan's antenna sits 0.41 m from the lens, which leaves a
+  constant 0.41 m horizontal camera residual and likely part of the +5.7 cm checkpoint
+  height bias. Add an offset (camera frame, metres) to the sensor, apply it in
+  `surveyConstraints.js` (C + Rᵀ·a against the target), and import it from Metashape's
+  convention: y up, z back, i.e. (x, −y, −z) in ours (verified: Metashape's cameras fit
+  the RTK file at 2.3 cm only with that conversion). Then re-run `puti-gcps`.
+- **The remaining GeoScan error** (checkpoints H 4.4 cm, V 10.8 cm, GSD 2.9 cm; Metashape
+  fits the RTK cameras at 1.2 cm vertical). After the lever arm, check whether the prior
+  BA converged: its reprojection RMS does not move across both rounds, and it runs 30
+  iterations each. Quarry's residual (0.20 m) concentrates on 0194/0195/0344–0346 in
+  every variant; look at those images.
+- **Pure-SfM doming** (no priors): about 0.5–0.7 m vertical on both nadir blocks. Only
+  priors or GCPs fix it today. Worth a look at whether the staged self-calibration
+  unlocks k2/k3 on too little evidence for a flat block.
+- **GCP mark pixel convention.** The viewer stores clicks in pixel-edge coordinates (pixel
+  centre = +0.5), while SIFT keypoints use pixel-centre coordinates (centre = 0). That
+  offset is 0.5 px, about 1.5 cm on GeoScan. Measure it with `markOffsetPx: -0.5` in
+  `puti-gcps` before changing anything (Metashape marks share the click convention).
+- **Quarry GCPs.** Nine surveyed targets (CH1903/LV03) exist, but no image marks. Mark them
+  once in the app and export, or auto-place them by projection + target detection; that
+  gives quarry checkpoints too.
+- **Guided extension on weak models.** On TMA (no interior orientation) the additions sit
+  at 3–5 px against a 1 px model, even with the radius cap. Revisit with fiducials
+  calibrated: if they persist, gate the step on model quality.
+- **Matching is not deterministic** (RANSAC). The building set's last three images
+  (IMG_4292–4294) hang on one bridge pair of 25–27 inliers, and the rescue registers
+  them in some runs only (50 vs 47 cameras).
 
 ### DF — dense cross-view filter: retune from data
 Stage A′ (`filterDepthMapsGeometric`) shipped and is unit-tested but **unmeasured on
@@ -296,7 +336,9 @@ guard) with a mocked `InferenceSession`. Real-inference browser runs are
 ### MT — closing the gap to COLMAP on South Building
 Where we stand (HANDOVER ▸ B-match-gpu, MAT-13): **115,533** ≥3-view points vs COLMAP
 80,792 at full resolution untiled (25k cap, ratio 0.8); end to end ~20 min, matching 488 s.
-The point gap is closed; what remains is speed and making this the default path.
+The point gap is closed; what remains is speed and making this the default path. With
+projection-guided track extension (shipped 2026-10-06), the same settings give 124,680
+(154 % of COLMAP; HANDOVER ▸ B-bench).
 Pairs are not what limits points: gate off raised accepted pairs 61 % for +0.2 %
 points (MAT-05), `minInlierRatio` 0 added 9 pairs (MAT-07), while uncapping the
 keypoints added 9.8 % points on fewer pairs (MAT-08). Run the browser
@@ -306,25 +348,20 @@ stated), each recorded as a VERIFICATION row + HANDOVER baseline.
 **Points:**
 - **Track building is ruled out (MAT-06).** Final-stage completion lifted only 338
   points (+0.6 %); 38,685 two-view points have no verified correspondence into a third
-  registered image. The gap is in the correspondences themselves — the items below.
+  registered image. The gap was in the correspondences themselves: projection-guided
+  extension (shipped) recovers +4–6 % of them on SB.
 - **Ruled out by measurement:** F-RANSAC 4 px (+0.7 %), F-RANSAC 10k iterations (0),
   peak threshold above or below 0.01 (−1.6…−8 %), a second SIFT orientation (+0.5 %,
   MAT-10), pair gates (MAT-05/07), track building (MAT-06). See HANDOVER ▸
   B-match-gpu, "knob sweep".
-- **Projection-guided track extension (unmeasured, likely the largest lever).** Every
-  run discards 46–73k two-view points (MAT-15: 72,895, beside 119k kept). MAT-06 showed
-  these have no *verified* correspondence into a third image, i.e. matching missed
-  them. Once poses exist, project each two-view point into the other registered
-  images and search a few-pixel radius for a keypoint whose descriptor matches either
-  observation. The radius removes the ambiguity that made the global ratio test reject
-  it. COLMAP does not do this (its completion uses existing matches only), so it is
-  headroom beyond COLMAP. Cost: descriptors must reach the SfM worker, about 1.1 GB as
-  f32 at 2.2 M keypoints or 280 MB as COLMAP-style uint8 ×512, or a per-image streaming
-  pass. Size the upper bound first by counting candidates within 3 px.
 - **Ratio-test default.** `MATCH_DEFAULTS.ratioThreshold` 0.75 (COLMAP 0.8). On SB
   0.8 was worth ~+5 % points twice (MAT-05; MAT-09 → MAT-10 on the same detections:
   57,539 → 60,189) at unchanged median error, and −5.1 % for 0.75 on the strip bench
-  under the new detector (third time). Moving the default also moves the
+  under the new detector (third time). Fourth, on the headless bench at app defaults:
+  54,314 → 57,168 (+5.3 %, HANDOVER ▸ B-bench). **Fifth, and decisive:** eagle (44 images, Canon 7D) registers
+  only 29/44 cameras at 0.75 but 43/44 at 0.8 (66 vs 76 accepted pairs), independent of the
+  2026-10-06 SfM changes. Recommendation: move the default to 0.8 now and re-space the
+  presets around it. Moving the default also moves the
   Balanced preset onto the Fast preset's value (`low` is 0.80), so the presets need
   re-spacing with it; check one aerial/film set before shipping.
 - **Keypoint cap default.** `maxKeypoints` 10,000 binds on SB at 2400 px (MAT-05..07)
@@ -335,35 +372,6 @@ stated), each recorded as a VERIFICATION row + HANDOVER baseline.
   trade-off. On the node bench, native resolution with a 10k coarse-first cap matched
   2400 px with 10k (3,672 vs 3,671 ≥3-image tracks with RootSIFT), so resolution is no
   longer free points at a fixed budget. MAT-16 gives the browser number.
-- **Rotation-cycle filter on true pairs.** MAT-06: 748 observations from the dropped
-  pairs agree with the final geometry within 5.1 px — many dropped pairs are true.
-  It removed 331/1694 pairs on MAT-05, incl.
-  obvious sequential neighbours (P1180213↔218, 757 inliers, 0/31 triangles on MAT-03;
-  ~20 % of accepted pairs are H/F-degenerate — a planar pair's E decomposition can
-  return the wrong rotation). They now feed completion, but not registration, init or
-  triangulation, and re-admission runs only while images are unregistered. COLMAP has
-  no such filter; an experiment with the filter off would size its cost. MAT-14/15/16
-  drop 334–410 pairs per run, including pairs with 765, 815 and 1056 inliers at 0
-  consistent triangles, and completion then recovers 620–893 observations through
-  them. Two steps:
-  1. **Diagnose.** Log the H/F-degenerate flag for each dropped pair. If the dropped
-     pairs are mostly planar, the cause is the rotation estimate, not the pairs: take
-     R from the homography decomposition for degenerate pairs, as COLMAP's two-view
-     geometry does for its PLANAR configuration.
-  2. **Measure.** Add `rotationCycleFilter` to `SFM_TUNING` (sfm.js already reads
-     `settings.rotationCycleFilter !== false`) and run SB with it off.
-- **Interim-BA blow-ups.** MAT-05 interim BAs started from RMS 92 / 719 / 42 px (max
-  ~1.9k px) and five were rejected; the final model is clean (max 8 px). Bad
-  observations enter during registration — find which step (PnP extension vs fresh
-  triangulation) before they cost tracks. MAT-16 adds a lead. The blow-ups (RMS 185, 902
-  and 17 px at 42, 97 and 112 cameras) follow weakly registered images (P1180196 at
-  19/32 PnP inliers, P1180198 at 726/1541) or two *rejected* interim BAs (87, 92
-  cameras). A rejected BA keeps the pre-BA estimate, so whatever made it worsen is
-  still in the model at the next one. MAT-14/15 repeat it: the 37-camera interim BA was
-  rejected in both, right after images registered on 40–90 PnP inliers (P1180194/195/196/197).
-  Those all come from the first PnP sweep that also rejects ~10 images at 4–13 inliers.
-  Start by logging per-image residuals for the
-  images registered since the last good BA.
 - **Defaults after MAT-13.** Full resolution with a non-binding cap is the best SB result
   so far (115k vs 60k at 2400 px). Decide the Balanced/Detailed SIFT presets
   (`DETECT_SIFT_DEFAULTS` maxDim/maxKeypoints) and the ratio default (0.75 → 0.8, below)

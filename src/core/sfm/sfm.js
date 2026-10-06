@@ -49,6 +49,9 @@ import { buildScaleContext, describeScaleContext, resolveScaledPx } from '../sca
 import { secondaryJobs, alignSecondary, mergeAligned } from './multiModel.js'
 import { compactPointRecords } from './resultCodec.js'
 import { wrapPackedMatches } from './matchCodec.js'
+import { auditPairs } from './cycleAudit.js'
+import { compareRobustCost, projectFull } from './baAcceptance.js'
+import { guidedExtendTracks, auditGuidedAdditions } from './guidedExtension.js'
 
 // Re-export the extracted pure modules so existing importers (sfm.test.js and any
 // others that reached for these through sfm.js) keep working unchanged.
@@ -112,6 +115,8 @@ async function reconstructSingleModel(input, hooks = {}) {
   // didn't run, so a missing number is never confused with a zero.
   let gateRecord = null       // resolved reprojection gates + the detection-scale factor
   let cycleRecord = null      // rotation-cycle filter verdict + drop/re-admit counts
+  let guidedRecord = null     // projection-guided track extension (guidedExtension.js)
+  const guidedAdds = []       // its accepted observations, audited after the final pass
   const selfCalRecord = { requested: cfg.refineIntrinsics, resolved: null, staged: false, passes: [], adjustments: [] }
   const intrinsicsRecord = new Map() // sensorId → { fxNominal, fxFinal, cx, cy, source, label }
   // Final-stage track completion, one row per pass (completeTracksFinal below).
@@ -196,6 +201,9 @@ async function reconstructSingleModel(input, hooks = {}) {
   // WS3: pairs the rotation-cycle filter dropped, stashed for post-self-cal re-admission
   // (they may be TRUE edges the filter mis-judged with pre-fold, uncorrected rotations).
   let droppedPairs = []
+  // The relative rotations the filter judged ('a--b' → R), kept for the post-solve
+  // audit against the finished model (cycleAudit.js).
+  let cycleRotations = null
 
   // Reprojection-error statistics (pixels) over every observation currently in
   // the model: project each 3D point into each camera that sees it and compare
@@ -590,6 +598,7 @@ async function reconstructSingleModel(input, hooks = {}) {
       const relRotByPid = new Map()
       const pkId = (a, b) => (a < b ? `${a}--${b}` : `${b}--${a}`)
       donePairs.forEach((e, i) => relRotByPid.set(pkId(e.idA, e.idB), Rs[i]))
+      cycleRotations = relRotByPid
       const { drop, summary } = rotationCycleFilter(
         donePairs.map((e, i) => ({ idA: e.idA, idB: e.idB, R: Rs[i], inliers: e.inlierCount })),
         {
@@ -854,7 +863,10 @@ async function reconstructSingleModel(input, hooks = {}) {
     // (R3) solves and each post-filter re-solve. `refineMode` overrides `refineIntrinsics`
     // per call: interim/pre-filter solves pass 'none' (self-calibration against the
     // pre-filter mess drifted cx/cy 180px on B1), only post-filter passes refine.
-    async function runBundleAdjust(label, iters, refineMode = refineIntrinsics) {
+    // `cameraPriors` (optional) adds GNSS/pose centre constraints. A prior-constrained
+    // solve is SUPPOSED to trade some image residual for geometry, so it is judged by
+    // the bounded-increase rule (cameraPriorReprojectionAccepts), not "cost must fall".
+    async function runBundleAdjust(label, iters, refineMode = refineIntrinsics, { cameraPriors = null } = {}) {
       if (!(cameras.size >= 2 && points3d.length >= 10 && iters > 0)) {
         log(`${label} skipped (cameras=${cameras.size}, `
           + `points=${points3d.length}, iters=${iters})`, 'debug', 'Reconstruction')
@@ -864,11 +876,12 @@ async function reconstructSingleModel(input, hooks = {}) {
       const camList  = uuidList.map((u) => cameras.get(u))
       const kList    = camList.map((c) => c.K)
       const sensorOfCam = uuidList.map((u) => sensorIntByUuid.get(u) ?? -1)
+      const camIdxOf = new Map(uuidList.map((u, i) => [u, i]))
 
       const observations = []
       points3d.forEach((pt, pi) => {
         pt.views.forEach((kpIdx, uuid) => {
-          const ci = uuidList.indexOf(uuid)
+          const ci = camIdxOf.get(uuid) ?? -1
           const img = imageByUuid(uuid)
           if (ci === -1 || !img) return
           const kp = img.keypoints[kpIdx]
@@ -877,11 +890,43 @@ async function reconstructSingleModel(input, hooks = {}) {
       })
       log(`${label} — ${camList.length} cameras, ${points3d.length} points, `
         + `${observations.length} observations, ${iters} iters`, 'info', 'Reconstruction')
+      // Diagnostic: where do the gross pre-solve residuals sit? Grouped by camera, split
+      // by the observed point's track length (2 = freshly triangulated, ≥3 = extended).
+      {
+        const errs = observations.map((o) => {
+          const q = projectFull(camList[o.camIdx], kList[o.camIdx], points3d[o.ptIdx])
+          return q ? Math.hypot(q.x - o.x, q.y - o.y) : Infinity
+        })
+        const sorted = errs.filter(Number.isFinite).sort((a, b) => a - b)
+        const med = sorted[Math.floor(sorted.length / 2)] ?? 0
+        const gross = Math.max(50, 20 * med)
+        const byCam = new Map()
+        errs.forEach((e, i) => {
+          if (!(e > gross)) return
+          const o = observations[i]
+          const rec = byCam.get(o.camIdx) ?? { n: 0, fresh: 0, max: 0 }
+          rec.n++; if (points3d[o.ptIdx].views.size <= 2) rec.fresh++
+          rec.max = Math.max(rec.max, e)
+          byCam.set(o.camIdx, rec)
+        })
+        if (byCam.size) {
+          const top = [...byCam].sort((a, b) => b[1].n - a[1].n).slice(0, 6)
+            .map(([ci, r]) => `${imageByUuid(uuidList[ci])?.name ?? ci} ${r.n} (${r.fresh} on 2-view pts, max ${r.max.toFixed(0)}px)`)
+          const total = [...byCam.values()].reduce((s, r) => s + r.n, 0)
+          log(`${label} pre-solve gross residuals (>${gross.toFixed(0)}px): ${total} obs on ${byCam.size} camera(s); `
+            + `top: ${top.join('; ')}`, 'debug', 'Reconstruction')
+        }
+      }
 
       const result = await bundleAdjust(camList, kList, points3d, observations,
-        { maxIters: iters, refineIntrinsics: refineMode, sensorOfCam })
+        { maxIters: iters, refineIntrinsics: refineMode, sensorOfCam, ...(cameraPriors ? { cameraPriors } : {}) })
       if (!result) {
         log(`${label} returned no result (skipped)`, 'warn', 'Reconstruction')
+        return
+      }
+      if (cameraPriors && !cameraPriorReprojectionAccepts(result)) {
+        log(`${label} REJECTED — reprojection RMS ${result.costBefore.toFixed(2)}px → `
+          + `${result.costAfter.toFixed(2)}px exceeds the camera-prior safety bound`, 'warn', 'Reconstruction')
         return
       }
       // A correct bundle adjustment can only lower the cost; reject a worsening
@@ -889,17 +934,37 @@ async function reconstructSingleModel(input, hooks = {}) {
       // can tick up by a float epsilon on a no-op re-solve — that's convergence,
       // not divergence, so don't cry wolf (< 0.01px is below any real-world
       // meaning). Only warn + reject when the cost genuinely grows (≥ 0.01px).
-      if (result.costBefore != null && result.costAfter != null && result.costAfter > result.costBefore) {
+      // The guard judges the solve by the cost it minimised. The crate descends a
+      // Huber-robust cost but reports plain RMS, and a correct robust solve can raise
+      // plain RMS by letting down-weighted outliers drift. Rejecting those kept newly
+      // registered cameras unrefined and seeded the later RMS 185–902 px interim
+      // starts (baAcceptance.js). So a plain-RMS rise is only a rejection when the
+      // robust cost rose too.
+      if (!cameraPriors && result.costBefore != null && result.costAfter != null && result.costAfter > result.costBefore) {
         const delta = result.costAfter - result.costBefore
+        const afterKs = refineMode !== 'none' && result.intrinsics
+          ? kList.map((k, ci) => ({ ...k, ...result.intrinsics[ci] })) : kList
+        const robust = compareRobustCost({
+          before: { cams: camList, Ks: kList, points: points3d },
+          after: { cams: result.cameras, Ks: afterKs, points: result.points3d },
+          observations,
+        })
         if (delta < 0.01) {
           log(`${label} already converged (RMS ${result.costBefore.toFixed(2)}px unchanged); `
             + `keeping the pre-BA estimate`, 'debug', 'Reconstruction')
-        } else {
-          log(`${label} REJECTED — RMS ${result.costBefore.toFixed(2)}px → `
-            + `${result.costAfter.toFixed(2)}px would worsen the model; keeping the pre-BA estimate`,
-            'warn', 'Reconstruction')
+          return
         }
-        return
+        if (!robust.improved) {
+          log(`${label} REJECTED — RMS ${result.costBefore.toFixed(2)}px → `
+            + `${result.costAfter.toFixed(2)}px and robust cost ${robust.before.toFixed(2)} → `
+            + `${robust.after.toFixed(2)}px (Huber δ ${robust.delta.toFixed(1)}px) would worsen the model; `
+            + 'keeping the pre-BA estimate', 'warn', 'Reconstruction')
+          return
+        }
+        log(`${label} accepted — plain RMS ${result.costBefore.toFixed(2)}px → ${result.costAfter.toFixed(2)}px rose, `
+          + `but the robust cost it minimises fell ${robust.before.toFixed(2)} → ${robust.after.toFixed(2)}px `
+          + `(Huber δ ${robust.delta.toFixed(1)}px): outliers were down-weighted, not the fit worsened`,
+        'info', 'Reconstruction')
       }
 
       // Self-calibration is destructive only after this point: accepted radial terms
@@ -1095,7 +1160,7 @@ async function reconstructSingleModel(input, hooks = {}) {
 
       if (result.costBefore != null && result.costAfter != null) {
         log(`${label} RMS ${result.costBefore.toFixed(2)}px → ${result.costAfter.toFixed(2)}px `
-          + `(−${Math.abs(result.costBefore - result.costAfter).toFixed(2)}px)`, 'success', 'Reconstruction')
+          + `(${result.costAfter <= result.costBefore ? '−' : '+'}${Math.abs(result.costBefore - result.costAfter).toFixed(2)}px)`, 'success', 'Reconstruction')
       }
       const trace = result.costTrace ?? []
       if (trace.length >= 2) {
@@ -1111,6 +1176,7 @@ async function reconstructSingleModel(input, hooks = {}) {
           'debug', 'Reconstruction')
       }
       log(`${label} reprojection — ${fmtStats(modelReprojStats())}`, 'info', 'Reconstruction')
+      return result
     }
 
     // Convert project-CRS camera poses into targets in the current arbitrary SfM
@@ -1149,6 +1215,22 @@ async function reconstructSingleModel(input, hooks = {}) {
         log(`camera-prior bundle adjustment (round ${round + 1}/${cfg.cameraPriorBaRounds}) — `
           + `${constrained.priors.length} camera(s), seed RMS ${constrained.fit.rms.toPrecision(3)} project units`,
         'info', 'Reconstruction')
+        // Experiment (cameraPriorRefineIntrinsics): let the GNSS-constrained solve re-estimate
+        // focal / principal point / distortion. With fixed K a self-calibration that is
+        // slightly wrong (the nadir focal–height correlation that domes a block) cannot be
+        // corrected by the priors: the quarry stalled at 0.43 m centre residual against
+        // ±3 cm RTK. Routed through runBundleAdjust so the distortion fold, the composed
+        // self-cal record and the self-cal validation all apply exactly as elsewhere.
+        if (cfg.cameraPriorRefineIntrinsics && cfg.cameraPriorRefineIntrinsics !== 'none') {
+          const mode = cfg.cameraPriorRefineIntrinsics === 'auto'
+            ? (selfCalRecord.passes.at(-1)?.mode ?? refineIntrinsics) : cfg.cameraPriorRefineIntrinsics
+          const r = await runBundleAdjust(`camera-prior bundle adjustment (round ${round + 1}, intrinsics '${mode}')`,
+            baIterations, mode, { cameraPriors: constrained.priors })
+          if (!r) return
+          log(`camera-prior bundle adjustment centre residual → `
+            + `${(r.cameraPriorRmsAfter * constrained.fit.scale).toPrecision(3)} project units`, 'success', 'Reconstruction')
+          continue
+        }
         const result = await bundleAdjust(camList, camList.map((c) => c.K), points3d, observations, {
           maxIters: baIterations, refineIntrinsics: 'none',
           sensorOfCam: uuidList.map((u) => sensorIntByUuid.get(u) ?? -1),
@@ -1428,6 +1510,36 @@ async function reconstructSingleModel(input, hooks = {}) {
         // so the threshold, filter and BA below treat the added observations like any
         // other.
         completeTracksFinal(`pre-filter pass ${round}`)
+        // Guided extension runs once, before the tight pass: by then the first
+        // self-calibrated BA has folded the distortion, so projections and keypoints
+        // share the final pinhole frame, and the pass-2 filter + BA below treat the
+        // additions like any other observation (guidedExtension.js).
+        if (round === 2 && cfg.guidedTrackExtension && imgs.some((im) => im.descU8)) {
+          rebuildViewIndex()
+          const before = trackHist()
+          // Search radius: the filter gate, capped at a multiple of the model's own p90
+          // residual (a coarse detection scale makes the native-px gate far wider than
+          // what the model actually resolves — tuning.js guidedRadiusP90Mult).
+          let gatePx = filterMaxReprojPx
+          if (cfg.guidedRadiusP90Mult > 0) {
+            const res = modelResiduals().sort((a, b) => a - b)
+            const p90 = res.length ? res[Math.floor(0.9 * (res.length - 1))] : Infinity
+            gatePx = Math.min(filterMaxReprojPx, cfg.guidedRadiusP90Mult * p90)
+          }
+          const g = guidedExtendTracks({
+            points3d, cameras, imageOf: imageByUuid, viewIndex, addView, gatePx,
+            ratio: cfg.guidedRatio ?? 0.8, quantile: cfg.guidedQuantile ?? 0.9,
+            onAdd: (pt, uuid, kp) => guidedAdds.push({ uuid, kp }),
+            descOf: (uuid, k) => { const d = imageByUuid(uuid)?.descU8; return d && (k + 1) * 128 <= d.length ? { arr: d, off: k * 128 } : null },
+          })
+          const after = trackHist()
+          guidedRecord = [...(guidedRecord ?? []), { pass: round, ...g, gatePx, before, after }]
+          log(`guided track extension (pass ${round}) +${g.added} observation(s) on ${g.pointsExtended} point(s) — `
+            + `${g.lifted} lifted from 2 to ≥3 views (≤${gatePx.toFixed(1)}px, descriptor ≤ `
+            + `${g.tau?.toFixed(3) ?? '–'} measured from ≥3-view tracks, ratio ${cfg.guidedRatio ?? 0.8}; ${g.windows} search window(s), `
+            + `${g.proposals} proposal(s)); track lengths (2/3/4+ view) ${before.t2}/${before.t3}/${before.t4} → `
+            + `${after.t2}/${after.t3}/${after.t4}`, 'info', 'Reconstruction')
+        }
         // Same quantile floor as the pre-BA pass, but a deliberately loose bound: these
         // passes ARE the real filter and a hard block can legitimately lose a lot, so it
         // guards only against annihilating the model (cleanupThreshold.js).
@@ -1482,6 +1594,18 @@ async function reconstructSingleModel(input, hooks = {}) {
         await runBundleAdjust(`post-filter bundle adjustment ${round}`, baIterations, refineMode)
       }
       logOutlierShare('post-filter residuals')
+      if (guidedAdds.length) {
+        const audit = auditGuidedAdditions(guidedAdds, points3d, (pt, uuid, kp) => {
+          const cam = cameras.get(uuid), k = imageByUuid(uuid)?.keypoints?.[kp]
+          const pr = cam?.K && k ? projectPoint(cam, pt.x, pt.y, pt.z) : null
+          return pr ? Math.hypot(pr.u - k.x, pr.v - k.y) : null
+        })
+        guidedRecord.at(-1).audit = audit
+        const f = (v) => (v == null ? '–' : v.toFixed(2))
+        log(`guided track extension audit — ${audit.survived}/${audit.proposed} added observation(s) survived the `
+          + `filter and BA; their residuals median ${f(audit.medianPx)}px, p90 ${f(audit.p90Px)}px vs every other `
+          + `observation's ${f(audit.restMedianPx)}px / ${f(audit.restP90Px)}px`, 'info', 'Reconstruction')
+      }
 
       // ── WS3 final second-chance sweep ────────────────────────────────────────
       // The rotation-cycle filter ran BEFORE self-calibration, so it may have dropped
@@ -1577,6 +1701,26 @@ async function reconstructSingleModel(input, hooks = {}) {
       await runGcpAnchoredBundleAdjust()
     }
     markStage('bundleAdjust')
+
+    // Audit the rotation-cycle filter against the finished model: which dropped pairs
+    // were false, which were true but carried a wrong rotation estimate, and which were
+    // true AND correctly estimated (dropped for other edges' sake). Kept pairs are the
+    // reference bins. Diagnosis only; nothing here changes the model.
+    if (cycleRotations && cycleRecord && !cycleRecord.aborted && cameras.size >= 2) {
+      const audit = (list) => auditPairs({ pairs: list, rotations: cycleRotations, cameras, keypointOf,
+        epipolarPx: filterMaxReprojPx, rotTolDeg: cycleRecord.effErrDeg ?? 5 })
+      const dropped = audit(droppedPairs), kept = audit(donePairs)
+      const fmt = (r) => `${r.bins.false} false / ${r.bins.badRot} true-with-wrong-rotation / `
+        + `${r.bins.goodRot} true-with-correct-rotation (planar-flagged ${r.degenerate.false}/${r.degenerate.badRot}/`
+        + `${r.degenerate.goodRot}; median rotation error ${r.medianRotErrDeg?.toFixed(1) ?? '–'}°)`
+      log(`rotation-cycle audit vs the final model (≤${filterMaxReprojPx.toFixed(1)}px epipolar, `
+        + `≤${(cycleRecord.effErrDeg ?? 5).toFixed(1)}° rotation) — dropped ${droppedPairs.length}: ${fmt(dropped)}; `
+        + `kept ${donePairs.length}: ${fmt(kept)}`, 'info', 'Reconstruction')
+      cycleRecord.audit = {
+        dropped: { bins: dropped.bins, degenerate: dropped.degenerate, medianRotErrDeg: dropped.medianRotErrDeg },
+        kept: { bins: kept.bins, degenerate: kept.degenerate, medianRotErrDeg: kept.medianRotErrDeg },
+      }
+    }
 
     // The incremental solver needs 2-view points to bootstrap and register cameras,
     // but final products do not need to expose them when a strong multi-view core is
@@ -1720,6 +1864,7 @@ async function reconstructSingleModel(input, hooks = {}) {
       config: runConfig,
       gates: gateRecord,
       cycleFilter: cycleRecord ? { ...cycleRecord, remainingPairs: donePairs.length } : null,
+      guidedExtension: guidedRecord,
       selfCal: selfCalRecord,
       trackCompletion: trackCompletionRecord,
       intrinsics: [...intrinsicsRecord.values()].map((r) => ({

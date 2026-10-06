@@ -271,6 +271,26 @@ judged against uncorrected survivors), and consistent ones re-admitted, then one
 more registration sweep runs in case a re-admitted bridge lets a stranded camera
 resect.
 
+**Measured against the final model, it mostly removes true pairs.** After the final
+BA, `core/sfm/cycleAudit.js` re-judges every pair in two ways: whether its inliers
+agree with the model's epipolar geometry (a true pair), and whether its input
+rotation agrees with the model's relative rotation.
+
+On South Building (native resolution, 25k keypoints), the filter dropped 404 pairs:
+
+| Dropped pairs | Count |
+|---|---|
+| False | 46 |
+| True, wrong rotation | 355 |
+| True, correct rotation | 3 |
+
+The 355 true pairs had a median rotation error of 28.6°. Meanwhile, 78 false pairs
+stayed in the graph. The defect is therefore the pairwise **rotation estimate**
+(essential matrix from F and a nominal K), not the cycle test. Only 145 of those 355
+pairs were flagged as H/F-degenerate, so planar degeneracy is not the whole
+explanation either. On South Building the filter changes no point counts in either
+direction: turning it off gave 57,167 points against 57,168.
+
 ### 4.1 Intrinsics resolution (`resolveK`)
 
 `K` is derived per image from EXIF focal length + sensor/film format, or from a
@@ -436,7 +456,12 @@ A **track** = one 3D point observed across ≥2 images. A reverse index
 camera, its PnP-inlier correspondences **extend existing tracks** (grow to 3+
 views, a much stronger BA constraint) rather than spawning duplicate 2-view
 points; only matches where *neither* endpoint is yet on a track are triangulated
-fresh. A later `foldOneEndpointMatches` pass folds in observations where exactly
+fresh. A fresh triangulation must clear the parallax floor **and** reproject within
+`filterMaxReprojPx` in both images, as COLMAP's triangulator requires. A pose that
+passed PnP can still carry a few bad correspondences, and a DLT on a wrong match can
+land far from the rays, at a reprojection error of up to 10⁵ px. Before this gate,
+those points were the whole of the interim-BA "blow-ups" on South Building (start
+RMS up to 900 px), so the next interim solve began from a broken state. A later `foldOneEndpointMatches` pass folds in observations where exactly
 one endpoint was already assigned (raises the ≥3-view share) — one round of the
 track-completion rule of §4.7.
 
@@ -461,8 +486,14 @@ family as COLMAP's BA; the specifics:
   gross mis-triangulations don't drag the solution.
 - **LM damping**: standard multiplicative λ schedule with up to 8 damping retries
   per iteration; a step is accepted only if it lowers the robust cost, and the
-  whole solve is **guarded** at the orchestration level (a result that worsens RMS
-  is rejected, not committed).
+  whole solve is **guarded** at the orchestration level. The guard judges the
+  objective the solver minimised, not plain RMS (`core/sfm/baAcceptance.js`): when
+  RMS rises it re-evaluates one Huber cost before and after, with δ fixed from the
+  pre-solve residuals (2.5 × median, ≥1 px), and rejects only if that cost rose too.
+  Plain RMS is dominated by the few gross outliers that Huber deliberately
+  down-weights, so it can rise while the fit to every inlier improves. Judged on RMS,
+  South Building rejected four good interim solves per run (2026-10-05). A rejected
+  solve keeps its pre-solve estimate, so the next one inherited the same problem.
 - **Cost reported**: RMS reprojection error in pixels, before/after, plus a
   per-iteration convergence trace (used to tell "plateaued" from "still
   descending — raise iterations").
@@ -470,7 +501,12 @@ family as COLMAP's BA; the specifics:
 **Interleaved BA**: a global BA + track-filter runs every `interimBaEvery` new
 cameras (COLMAP-style), so later PnP registers against a tight model and the final
 BA starts near the optimum — instead of one big solve on a drifted model that
-lands in a bad minimum.
+lands in a bad minimum. The solves are also **spaced geometrically**: the next one
+waits until the model has grown by `interimBaGrowth` (1.2) since the last, like
+COLMAP's `ba_global_images_ratio`. Each solve costs the whole model, so a fixed
+every-5 spacing makes registration quadratic in the image count. On the 347-image
+quarry, 69 interim BAs took 837 of 998 s of registration. Geometric spacing cut
+registration to 143 s at the same points and accuracy.
 
 ### 4.6 Self-calibration (optional intrinsics refinement in BA)
 
@@ -548,6 +584,46 @@ Added observations then go through the same filter and BA as every other observa
 On a noise-free synthetic strip the final rounds add nothing (registration's rounds
 already completed every track), so their value lies in what registration could not
 judge: pre-self-calibration gate failures and the cycle-dropped pairs.
+
+**Projection-guided track extension** (`core/sfm/guidedExtension.js`; no COLMAP
+equivalent). Completion can only use matches that exist. On South Building, 46–73k
+two-view points had no verified correspondence into a third registered image, even
+though the third image saw them. The global ratio test had to choose among all of that
+image's keypoints, so a feature with a near-twin elsewhere on a repetitive façade
+failed it. Once poses exist, that ambiguity is gone.
+
+Once, before the tight track-filter pass, every point is projected into each registered
+camera that does not observe it. The method then searches the unused keypoints within
+the search radius and compares descriptors (uint8 RootSIFT, the same space as matching)
+against up to three of the point's observations. A candidate is accepted only when both
+hold:
+- it is closer than the 0.9 quantile of distances between observations of this run's
+  own ≥3-view tracks;
+- it beats the runner-up in the same window by ratio 0.8.
+
+Proposals are resolved greedily, best first, so one keypoint joins one point and a point
+gains one keypoint per image. The following filter and BA then treat the additions like
+any other observation.
+
+The search radius is the filter gate, capped at 3 × the model's p90 residual. On a
+coarse detection scale the native-pixel gate is far wider than what the model resolves
+(16.9 px on TMA against a 1 px median residual).
+
+Measured gains in ≥3-view points:
+
+| set | gain |
+|---|---|
+| South Building | +5 % |
+| South Building, native 25k | +4.4 % |
+| building | +28 % |
+| eagle | +7 % |
+| quarry | +5.9 % |
+
+The audit compares the additions' final residuals with the rest of the model. On South
+Building they come out at 0.39/0.98 px (median/p90) against 0.31/0.96 px, which is
+consistent with true matches; all-false additions would sit near 0.7 × radius. The
+camera accuracy against RTK is unchanged. The exception is a weak model: on the TMA scans
+without interior orientation, the additions sit at 3–5 px against a 1 px model.
 
 Two-view points remain available while the incremental solve needs them. At final
 output, however, they are omitted automatically when the model already contains a
@@ -769,9 +845,30 @@ the current camera centres are Horn-fit to the registered project-CRS positions;
 the inverse fit maps each surveyed/EXIF position into the current SfM frame. The
 Rust solver adds the residual `C − target`, where `C = −Rᵀt`, with the analytic
 pose Jacobian `[-Rᵀ | −Rᵀ[t]×]`. X/Y/Z are weighted independently by their
-inverse variances after converting accuracy into SfM units. Two fixed-intrinsics
-rounds let the fit settle, while a bounded reprojection-increase guard rejects a
-noisy-position solution that would materially damage the image measurements.
+inverse variances after converting accuracy into SfM units. Two rounds let the fit
+settle, while a bounded reprojection-increase guard rejects a noisy-position solution
+that would materially damage the image measurements.
+
+**The prior BA re-estimates the intrinsics.** It refines the same self-calibration
+terms as the last post-filter pass (`cameraPriorRefineIntrinsics: 'auto'`) and folds
+them like any other self-calibrated solve (§4.6). A nadir block measured from its own
+images alone has a focal–flying-height correlation, and its distortion error bends the
+block into a dome. With fixed intrinsics the camera positions cannot remove that,
+because moving the cameras without changing f and k would break the image fit. The
+fixed-K prior BA therefore stalled on two RTK benches:
+- Quarry (347 images): camera-centre residual 0.73 → 0.43 m; with intrinsics refined,
+  0.20 m.
+- GeoScan (444 images, 15 independent checkpoints): horizontal 6.1 → 4.4 cm and
+  vertical 16.4 → 10.8 cm.
+
+With loose positions (consumer GNSS, or the 5 m import default) the prior weight is
+small, and the solve leaves the intrinsics where self-calibration put them.
+
+The priors are antenna positions. The camera centre is a lever arm away from the
+antenna, typically 0.1–0.5 m on survey drones, and there is no per-sensor antenna offset
+yet. RTK priors therefore pull every centre onto its antenna. On GeoScan that leaves a
+constant 0.41 m horizontal camera residual; the checkpoints mostly average it out
+across opposite flight directions.
 When GCP anchors are also present, their similarity defines the common SfM target
 frame for both point and camera priors. For a geographic project CRS, enabled 3D
 camera positions are first transformed into one survey-centred WGS84

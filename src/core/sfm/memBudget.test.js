@@ -10,6 +10,14 @@ describe('sparse reconstruction memory guard', () => {
     expect(large).toBeGreaterThan(small * 8)
   })
 
+  it('counts shipped descriptors only when asked (guided track extension)', () => {
+    const base = projectSparsePeakBreakdownBytes({ keypointCount: 1_000_000, matchCount: 2_000_000 })
+    const guided = projectSparsePeakBreakdownBytes({ keypointCount: 1_000_000, matchCount: 2_000_000,
+      descriptorBytesPerKeypoint: 128 })
+    expect(guided.rendererBytes - base.rendererBytes).toBeCloseTo(128e6 * 1.25, -3)
+    expect(guided.workerBytes - base.workerBytes).toBeCloseTo(2 * 128e6 * 1.25, -3)
+  })
+
   it('budgets renderer and worker isolates independently', () => {
     const peak = projectSparsePeakBreakdownBytes({ keypointCount: 3_175_000, matchCount: 6_743_387 })
     expect(peak.rendererBytes).toBeLessThan(peak.totalBytes)

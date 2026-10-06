@@ -38,6 +38,8 @@ import { useScaleBarsStore } from './useScaleBarsStore.js'
 import { buildCameraPriors, surveyFrameFor, gcpToSurveyFrame } from '../core/sfm/cameraPriors.js'
 import { makeFrameModelResolver, gcpsInPinholeFrame } from '../core/sfm/displayFrame.js'
 import { packSparseCloud, unpackReconstructionResult } from '../core/sfm/resultCodec.js'
+import { toMatchSpace } from '../core/features/siftDescriptors.js'
+import { SFM_TUNING } from '../core/tuning.js'
 import { packMatchPairs } from '../core/sfm/matchCodec.js'
 import {
   projectSparsePeakBreakdownBytes, sparseMemoryDecision, SPARSE_HEAP_FRACTION,
@@ -1429,7 +1431,8 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
       // the large plain worker input when its projected peak exceeds safe headroom.
       const keypointCount = imgs.reduce((sum, img) => sum + (img.keypoints?.length ?? 0), 0)
       const matchCount = reconstructionPairs.reduce((sum, pair) => sum + (pair.matches?.length ?? 0), 0)
-      const peak = projectSparsePeakBreakdownBytes({ keypointCount, matchCount })
+      const peak = projectSparsePeakBreakdownBytes({ keypointCount, matchCount,
+        descriptorBytesPerKeypoint: (settings.guidedTrackExtension ?? SFM_TUNING.guidedTrackExtension) ? 128 : 0 })
       const heap = globalThis.performance?.memory
       const hardwareBudget = deviceBudget({
         deviceMemoryGB: Number(globalThis.navigator?.deviceMemory) || null,
@@ -1575,11 +1578,39 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
             // sfm.js keeps them out of the cycle filter / init / triangulation and feeds
             // them only to PnP correspondence collection (register.js).
             inlierCount: e.inlierCount, weak: e.weak ?? false, status: 'done',
+            // The H/F planar flag from matching; read only by the rotation-cycle audit.
+            degenerate: e.degenerate ?? false,
           })),
         // GCP anchors + camera priors in one survey frame (surveyConstraintInput).
         gcps: survey.gcps,
         cameraPriors: survey.cameraPriors,
         settings,
+      }
+
+      // Guided track extension needs each image's descriptors in the worker, as
+      // COLMAP-style uint8 RootSIFT (×512): 128 B per keypoint instead of 512.
+      if (settings.guidedTrackExtension ?? SFM_TUNING.guidedTrackExtension) {
+        // One image at a time: the float descriptors are 4× the uint8 copy, and loading
+        // them all at once (2.2 M keypoints ≈ 1.1 GB) would be the renderer's peak.
+        let bytes = 0, shipped = 0
+        for (let i = 0; i < imgs.length; i++) {
+          const img = imgs[i]
+          if ((img.detector ?? 'sift') !== 'sift' || (img.descDim ?? 128) !== 128) continue
+          const raw = isPersisting()
+            ? (await opfs.loadDescriptors(projects.currentProjectId, img.uuid)) ?? img.descriptors
+            : img.descriptors
+          const d = toMatchSpace(raw, img, 128)
+          if (!d || d.length !== img.keypoints.length * 128) continue
+          const u8 = new Uint8Array(d.length)
+          for (let k = 0; k < d.length; k++) u8[k] = Math.min(255, Math.round(d[k] * 512))
+          input.images[i].descU8 = u8
+          reconstructionTransfers.push(u8.buffer)
+          bytes += u8.length; shipped++
+        }
+        if (shipped) {
+          log(`guided track extension: sending ${shipped}/${imgs.length} image(s)' descriptors `
+            + `to the worker (${formatBytes(bytes)}, uint8 RootSIFT)`, 'info', 'Reconstruction')
+        }
       }
 
       // Chrome exposes live heap usage. Poll while the main thread is idle and the
