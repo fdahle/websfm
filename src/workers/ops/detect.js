@@ -7,6 +7,7 @@ import {
 import { capOrder, capBoundary } from '../../core/features/keypointCap.js'
 import { SIFT_DESC_NORM, rootSiftInPlace } from '../../core/features/siftDescriptors.js'
 import { buildMaskLookup } from '../../core/mask.js'
+import { fromScaledPx } from '../../core/sfm/geometry.js'
 import {
   FIDUCIAL_DETECT_TUNING, grayFromRgba, detectFiducialsInImage,
 } from '../../core/sfm/fiducialDetect.js'
@@ -240,6 +241,8 @@ export function makeDetectOps({ rasterize }) {
     } = options
     const raster = await rasterize(url, maxDim)
     const { data, width, height, scale, natW, natH } = raster
+    // The resize's actual per-axis factors (the raster size is rounded).
+    const sx = natW ? width / natW : scale, sy = natH ? height / natH : scale
 
     // Masked regions are excluded: keypoints landing on a masked pixel are dropped.
     const maskLut = mask ? await buildMaskLookup(mask, width, height) : null
@@ -274,7 +277,9 @@ export function makeDetectOps({ rasterize }) {
       if (maskLut && maskLut[py * width + px]) continue
       const o = (py * width + px) * 4
       keypoints.push({
-        x: dx / scale, y: dy / scale,
+        // Back to native pixels, centre-aligned (core/sfm/geometry.js fromScaledPx),
+        // per axis with the factor the resize actually used (rounded raster size).
+        x: fromScaledPx(dx, sx), y: fromScaledPx(dy, sy),
         nx: dx / width, ny: dy / height,
         scale: kscale / scale, response,
         color: [data[o], data[o + 1], data[o + 2]],

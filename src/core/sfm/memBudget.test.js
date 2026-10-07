@@ -15,7 +15,8 @@ describe('sparse reconstruction memory guard', () => {
     const guided = projectSparsePeakBreakdownBytes({ keypointCount: 1_000_000, matchCount: 2_000_000,
       descriptorBytesPerKeypoint: 128 })
     expect(guided.rendererBytes - base.rendererBytes).toBeCloseTo(128e6 * 1.25, -3)
-    expect(guided.workerBytes - base.workerBytes).toBeCloseTo(2 * 128e6 * 1.25, -3)
+    // Once in the worker: the working copy shares them (sfm.js cloneSfmInput).
+    expect(guided.workerBytes - base.workerBytes).toBeCloseTo(128e6 * 1.25, -3)
   })
 
   it('budgets renderer and worker isolates independently', () => {

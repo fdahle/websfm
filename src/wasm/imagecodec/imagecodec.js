@@ -24,6 +24,14 @@ export class DecodedTiff {
         wasm.__wbg_decodedtiff_free(ptr, 0);
     }
     /**
+     * Source bit depth (8 or 16), for the ingest log.
+     * @returns {number}
+     */
+    get bitsPerSample() {
+        const ret = wasm.decodedtiff_bitsPerSample(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
      * @returns {number}
      */
     get height() {
@@ -40,6 +48,30 @@ export class DecodedTiff {
         var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
         wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
         return v1;
+    }
+    /**
+     * Source samples per pixel (1 gray … 4 RGBA), for the ingest log.
+     * @returns {number}
+     */
+    get samplesPerPixel() {
+        const ret = wasm.decodedtiff_samplesPerPixel(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * The 16-bit DN mapped to 255 by the percentile stretch; −1 for an 8-bit source.
+     * @returns {number}
+     */
+    get stretchHi() {
+        const ret = wasm.decodedtiff_stretchHi(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * The 16-bit DN mapped to 0 by the percentile stretch; −1 for an 8-bit source.
+     * @returns {number}
+     */
+    get stretchLo() {
+        const ret = wasm.decodedtiff_stretchLo(this.__wbg_ptr);
+        return ret;
     }
     /**
      * @returns {number}

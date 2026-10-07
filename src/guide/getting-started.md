@@ -29,6 +29,13 @@ For an aerial block, roughly **70–80% forward overlap** and **60–70% side ov
 is a useful starting point. Object captures need continuous coverage around the
 subject plus some height variation.
 
+16-bit TIFFs (multispectral and scientific cameras) are converted to 8-bit for viewing
+and feature detection by stretching each image between its darkest and brightest
+0.5 % of pixels, so a sensor that uses only part of its 16-bit range still gives full
+contrast. The log records each image's stretch. For a multi-band camera such as a
+MicaSense, import one band (the panchromatic band where there is one); each band file
+is treated as a separate image. Remove frames taken on the ground before takeoff.
+
 ## 3 · Reconstruct
 Run [Detect Features](guide:detect-features), [Match Features](guide:match-features),
 then [Sparse Reconstruction](guide:sparse-reconstruction). The sparse model is your

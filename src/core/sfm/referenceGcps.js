@@ -3,6 +3,7 @@ import { frameFromSimilarity } from '../products/georef.js'
 import { applyHomography } from '../features/guidedTiles.js'
 import { pixelToWorld } from '../io/rasterSample.js'
 import { windowToNative } from '../io/rasterWindow.js'
+import { centreToMarkPx } from './displayFrame.js'
 
 // Candidate controls use existing measured image tracks. The reference position
 // is estimated locally from a verified ortho feature, not a surveyed coordinate.
@@ -46,7 +47,10 @@ export function referenceGcpCandidates({ points, images, ortho, reference, match
     for (const [uuid, measured] of nearest.point.viewsPx || []) {
       const image = imageByUuid.get(uuid)
       if (!image || !measured?.every(Number.isFinite)) continue
-      const pixel = image.toScan ? image.toScan(...measured) : { x: measured[0], y: measured[1] }
+      // A candidate becomes a mark: back to the click convention (displayFrame.js
+      // makePinholeToMark; without a mapper, just the half-pixel shift).
+      const pixel = image.toScan ? image.toScan(...measured)
+        : { x: centreToMarkPx(measured[0]), y: centreToMarkPx(measured[1]) }
       if (!Number.isFinite(pixel.x) || !Number.isFinite(pixel.y)) continue
       observations.push({ imageName: image.name, px: pixel.x, py: pixel.y })
     }

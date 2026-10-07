@@ -10,7 +10,7 @@ import { useGcpsStore } from '../../stores/useGcpsStore.js'
 import { useProjectsStore } from '../../stores/useProjectsStore.js'
 import { findReferenceMatches } from '../../workers/computeClient.js'
 import { referenceGcpCandidates } from '../../core/sfm/referenceGcps.js'
-import { makeCanonicalToScan, makeFrameModelResolver } from '../../core/sfm/displayFrame.js'
+import { makePinholeToMark, makeFrameModelResolver } from '../../core/sfm/displayFrame.js'
 import { ensureProjection, transform } from '../../core/crs.js'
 
 const props = defineProps({ hasRelativeOrtho: Boolean, referenceOrthos: { type: Array, default: () => [] } })
@@ -53,7 +53,7 @@ async function find() {
       if (!camera) return []
       const { dist, selfCal, fiducial, filmMissing } = frameModel(image)
       if (filmMissing) return []
-      return [{ uuid: image.uuid, name: image.name, toScan: makeCanonicalToScan({ K: camera.K, dist, selfCal, fiducial }) }]
+      return [{ uuid: image.uuid, name: image.name, toScan: makePinholeToMark({ K: camera.K, dist, selfCal, fiducial }) }] // candidates become marks
     })
     await Promise.all([ensureProjection(refRaster.crs), ensureProjection(projects.currentCrs)])
     if (token !== generation) return

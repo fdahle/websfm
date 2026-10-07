@@ -125,7 +125,8 @@ export function normalizeExifMetadata(e = {}, dims = null, fileSize = null) {
     gpsLat: e.latitude ?? metadataNumber(e, ['GPSLatitude']) ?? null,
     gpsLon: e.longitude ?? metadataNumber(e, ['GPSLongitude']) ?? null,
     gpsAlt: e.GPSAltitude ?? metadataNumber(e, ['AbsoluteAltitude']) ?? null,
-    gpsAltRef: e.GPSAltitudeRef ?? null,
+    // exifr hands this byte back as a 1-element Uint8Array view (see below).
+    gpsAltRef: scalarTag(e.GPSAltitudeRef),
     gpsHorizontalAccuracy: horizontalAccuracy,
     gpsAccuracyX: accuracyX,
     gpsAccuracyY: accuracyY,
@@ -143,8 +144,20 @@ export function normalizeExifMetadata(e = {}, dims = null, fileSize = null) {
     cameraAccuracyKappa: metadataNumber(e, ['CameraKappaAccuracy']),
     cameraOrientationSource: explicitOpk ? 'exif-opk' : (opk ? 'xmp-gimbal' : null),
     fileSize,
-    raw: e,
+    // No `raw: e`. For a TIFF, exifr reads the WHOLE file into one buffer and returns
+    // some tags (GPSAltitudeRef, OpcodeList3, …) as small typed-array views into it,
+    // so keeping the parse result kept every imported original alive: ~23 MB per
+    // MicaSense frame, 12.7 GB on a 538-image set, which the sparse memory preflight
+    // then refused. Nothing read `raw`. Keep only plain values here.
   }
+}
+
+// A tag value as a plain scalar: exifr returns some single-value tags as typed-array
+// views into the file buffer, which must not be retained.
+function scalarTag(v) {
+  if (v == null) return null
+  if (ArrayBuffer.isView(v)) return v.length ? Number(v[0]) : null
+  return v
 }
 
 function loadDimensions(url) {

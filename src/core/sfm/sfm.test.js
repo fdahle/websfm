@@ -6,10 +6,11 @@ import initRecon from '../../wasm/reconstruction/reconstruction.js'
 import { RUN_BUDGET } from './progressPlan.js'
 import {
   reconstruct, retriangulatePairs, mergeSplitTracks,
-  pruneFinalTwoViewTracks, completeTracks,
+  pruneFinalTwoViewTracks, completeTracks, cloneSfmInput,
 } from './sfm.js'
 import { resolveK } from './reconstruction.js'
 import { distortPixel } from './distortion.js'
+import { Uint32PairList } from './matchCodec.js'
 import { canonicalFrame } from './fiducials.js'
 
 beforeAll(async () => {
@@ -715,6 +716,35 @@ describe('completeTracks', () => {
     completeTracks({ ...opts, points3d: [], pairs: [{ idA: 'c1', idB: 'c2', matches: [[0, 0]] }], index, addView })
     expect(calls).toEqual([['c2', 0]])
     expect(index.get('c2').get(0)).toBe(pt)
+  })
+})
+
+describe('cloneSfmInput', () => {
+  const input = () => ({
+    images: [{ uuid: 'a', keypoints: [{ x: 1, y: 2 }], descU8: new Uint8Array(128).fill(7) }],
+    pairs: [{ idA: 'a', idB: 'b', matches: new Uint32PairList(Uint32Array.from([0, 0, 1, 1])) }],
+  })
+
+  it('shares the read-only descriptors and copies everything a run mutates', () => {
+    const src = input()
+    const copy = cloneSfmInput(src)
+    expect(copy.images[0].descU8).toBe(src.images[0].descU8) // shared, not cloned
+    expect(copy.images[0].keypoints).not.toBe(src.images[0].keypoints)
+    copy.images[0].keypoints[0].x = 99 // a fold on the working copy…
+    expect(src.images[0].keypoints[0].x).toBe(1) // …leaves the pristine input intact
+    expect(src.images[0].descU8).toBeInstanceOf(Uint8Array) // the original still has it
+    expect(copy.pairs[0].matches).toBeInstanceOf(Uint32PairList)
+  })
+
+  it('re-wraps packed matches when cloning a bare pair list (secondary jobs)', () => {
+    const pairs = cloneSfmInput(input().pairs)
+    expect(pairs[0].matches).toBeInstanceOf(Uint32PairList)
+    expect(pairs[0].matches.length).toBe(2)
+  })
+
+  it('shares descriptors when cloning a bare image list', () => {
+    const src = input().images
+    expect(cloneSfmInput(src)[0].descU8).toBe(src[0].descU8)
   })
 })
 

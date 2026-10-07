@@ -19,6 +19,21 @@ describe('droneYprToOpk', () => {
 })
 
 describe('normalizeExifMetadata', () => {
+  // exifr reads a whole TIFF into one buffer and returns some tags as views into it;
+  // holding any of them kept every imported original alive (12.7 GB on 538 frames).
+  it('keeps no typed-array view into the file buffer', () => {
+    const file = new Uint8Array(1_000_000)
+    file[500] = 1
+    const out = normalizeExifMetadata({
+      latitude: 52, longitude: 4, GPSAltitude: 167,
+      GPSAltitudeRef: file.subarray(500, 501), OpcodeList3: file.subarray(600, 704),
+    }, { width: 4112, height: 3008 }, file.byteLength)
+    expect(out.gpsAltRef).toBe(1)
+    expect(out.raw).toBeUndefined()
+    const views = Object.values(out).filter((v) => ArrayBuffer.isView(v))
+    expect(views).toEqual([])
+  })
+
   it('reads namespaced DJI gimbal and per-axis RTK metadata', () => {
     const out = normalizeExifMetadata({
       latitude: 48, longitude: 9, GPSAltitude: 120,

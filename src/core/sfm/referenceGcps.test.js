@@ -13,7 +13,7 @@ function fixture() {
 it('maps a verified local match to reference coordinates and original photo measurements', () => {
   const result = referenceGcpCandidates(fixture())
   expect(result).toHaveLength(1)
-  expect(result[0]).toMatchObject({ x:1051, y:1929, z:null, offsetPx:0, observations: [{ imageName:'a.jpg', px:111, py:212 }, { imageName:'b.jpg', px:13, py:14 }] })
+  expect(result[0]).toMatchObject({ x:1051, y:1929, z:null, offsetPx:0, observations: [{ imageName:'a.jpg', px:111, py:212 }, { imageName:'b.jpg', px:13.5, py:14.5 }] }) // b: no mapper, so only the mark-convention half pixel
 })
 it('never invents image observations or accepts distant tracks', () => {
   const f = fixture(); f.images.pop()

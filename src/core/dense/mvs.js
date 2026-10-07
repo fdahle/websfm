@@ -16,7 +16,7 @@ import { planeCostRef, aggregateValidCosts } from './planeCost.js'
 import { DENSE_TUNING } from '../tuning.js'
 import { DEPTHMAP_DEFAULTS } from '../defaults.user.js'
 import {
-  cameraCenter, projectWithDepth, triangulationAngle, scaleK, rgbaToGray,
+  cameraCenter, projectWithDepth, triangulationAngle, scaleK, rgbaToGray, toScaledPx,
 } from '../sfm/geometry.js'
 
 // Re-exported for the compute worker, which imports them from this module.
@@ -165,9 +165,11 @@ function downsampleMaskMax2x(mask, w, h) {
 function upsampleDepthNearest(depth, cw, ch, fw, fh) {
   const out = new Float32Array(fw * fh)
   for (let v = 0; v < fh; v++) {
-    const sv = Math.min(ch - 1, (v * ch / fh) | 0)
+    // Centre-aligned nearest (geometry.js toScaledPx): fine pixel centre v + ½ lands at
+    // (v + ½)·ch/fh on the coarse grid. Identical to v/2 for an exact 2× level.
+    const sv = Math.min(ch - 1, ((v + 0.5) * ch / fh) | 0)
     for (let u = 0; u < fw; u++) {
-      const su = Math.min(cw - 1, (u * cw / fw) | 0)
+      const su = Math.min(cw - 1, ((u + 0.5) * cw / fw) | 0)
       out[v * fw + u] = depth[sv * cw + su]
     }
   }
@@ -176,8 +178,9 @@ function upsampleDepthNearest(depth, cw, ch, fw, fh) {
 
 // Scale intrinsics with independent horizontal/vertical factors (floor-halving can
 // make sx ≠ sy by a fraction of a percent; scaleK's single factor would skew fy/cy).
+// The principal point moves by the centre-aligned rule (geometry.js toScaledPx).
 function scaleKxy(K, sx, sy) {
-  return { fx: K.fx * sx, fy: K.fy * sy, cx: K.cx * sx, cy: K.cy * sy }
+  return { fx: K.fx * sx, fy: K.fy * sy, cx: toScaledPx(K.cx, sx), cy: toScaledPx(K.cy, sy) }
 }
 
 // Number of pyramid levels so the coarsest longest side is ≈ `coarseLong` (default

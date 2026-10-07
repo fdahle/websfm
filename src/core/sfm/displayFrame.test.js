@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { makeCanonicalToScan, makeScanToPinhole, makeFrameModelResolver, gcpsInPinholeFrame, guideToScan } from './displayFrame.js'
+import { makeCanonicalToScan, makeScanToPinhole, makePinholeToMark, markToCentrePx, centreToMarkPx, makeFrameModelResolver, gcpsInPinholeFrame, guideToScan } from './displayFrame.js'
 import { fitFiducialAffine, canonicalFrame } from './fiducials.js'
 
 const K = { fx: 3000, fy: 3000, cx: 2000, cy: 1500 }
@@ -14,18 +14,22 @@ const frame = canonicalFrame({ marks: MARKS, focalMm: 153, ppxMm: 0, ppyMm: 0 },
 const fiducial = { A: fit.A, frame }
 
 describe('makeScanToPinhole', () => {
-  it('is the exact inverse of makeCanonicalToScan for every chain', () => {
-    for (const model of [{ dist }, { selfCal }, { dist, selfCal }, { fiducial }, { dist, selfCal, fiducial }]) {
-      const toScan = makeCanonicalToScan({ K, ...model }), toPin = makeScanToPinhole({ K, ...model })
+  it('is the exact inverse of makePinholeToMark for every chain', () => {
+    for (const model of [{}, { dist }, { selfCal }, { dist, selfCal }, { fiducial }, { dist, selfCal, fiducial }]) {
+      const toMark = makePinholeToMark({ K, ...model }), toPin = makeScanToPinhole({ K, ...model })
       for (const [u, v] of [[100, 120], [2000, 1500], [3900, 2900], [1234.5, 77.25]]) {
-        const s = toScan(u, v), back = toPin(s.x, s.y)
+        const s = toMark(u, v), back = toPin(s.x, s.y)
         expect(back.x).toBeCloseTo(u, 6)
         expect(back.y).toBeCloseTo(v, 6)
       }
     }
   })
-  it('is null (identity) when nothing needs correcting', () => {
-    expect(makeScanToPinhole({ K })).toBeNull()
+  it('with nothing to correct is exactly the half-pixel convention shift', () => {
+    // A click on the centre of pixel (10, 20) is stored as (10.5, 20.5); keypoints and
+    // K put that centre at (10, 20).
+    expect(makeScanToPinhole({ K })(10.5, 20.5)).toEqual({ x: 10, y: 20 })
+    expect(makePinholeToMark({ K })(10, 20)).toEqual({ x: 10.5, y: 20.5 })
+    expect(markToCentrePx(centreToMarkPx(7.25))).toBe(7.25)
   })
 })
 
@@ -51,8 +55,7 @@ describe('GCP marks and guides cross the frame boundary', () => {
   const frameModel = (im) => (im.uuid === 'a' ? { dist } : {})
 
   it('maps marks on registered images only and never mutates the input', () => {
-    const toScan = makeCanonicalToScan({ K, dist })
-    const raw = toScan(3500, 2600)
+    const raw = makePinholeToMark({ K, dist })(3500, 2600) // the click a user would make
     const gcps = [{ id: 'g', observations: [{ imageId: 1, px: raw.x, py: raw.y }, { imageId: 2, px: 5, py: 6 }] }]
     const [out] = gcpsInPinholeFrame(gcps, { imagesById, sparseCameras, frameModel })
     expect(out.observations[0].px).toBeCloseTo(3500, 6)

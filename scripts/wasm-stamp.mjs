@@ -1,15 +1,19 @@
 // Source/artifact freshness gate. The build:wasm command writes this only after
 // all six builds succeed; CI rejects changed Rust sources or generated artifacts
 // without a corresponding rebuild. Runtime parity tests validate the codec ABI.
+//
+// The stamp must be identical on every OS, because CI (Linux, LF checkout) checks it:
+// keys always use '/', and text files are hashed with CRLF folded to LF, which is what
+// git stores. On a Windows checkout (core.autocrlf) the raw bytes are CRLF, so hashing
+// them as-is, with path.join's backslash keys, rewrote every entry.
 import { readdir, readFile, writeFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
-import { join } from 'node:path'
 
 async function walk(dir) {
   const paths = []
   for (const entry of await readdir(dir, { withFileTypes: true })) {
     if (['target', '.git', 'node_modules'].includes(entry.name)) continue
-    const path = join(dir, entry.name)
+    const path = `${dir}/${entry.name}`
     if (entry.isDirectory()) paths.push(...await walk(path))
     else paths.push(path)
   }
@@ -20,7 +24,9 @@ sources.push('.cargo/config.toml')
 const artifacts = (await walk('src/wasm')).filter(path => /\.(wasm|js|ts)$/.test(path))
 const stamp = {}
 for (const path of [...sources, ...artifacts].sort()) {
-  stamp[path] = createHash('sha256').update(await readFile(path)).digest('hex')
+  let bytes = await readFile(path)
+  if (!path.endsWith('.wasm')) bytes = Buffer.from(bytes.toString('latin1').replace(/\r\n/g, '\n'), 'latin1')
+  stamp[path] = createHash('sha256').update(bytes).digest('hex')
 }
 const filename = 'src/wasm/build-stamp.json'
 if (process.argv.includes('--write')) {
