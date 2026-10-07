@@ -177,7 +177,17 @@ learned model, and export/re-import a `.websfm` project.
 
 The learned-model weights are downloaded on demand and cached in the browser
 (Cache Storage), so they are **not** part of the repository. The app fetches them
-from `<site>/models/` by default. The files are:
+from `<site>/models/` by default. The redistributable files are published as
+assets of the [`models-v1` release](https://github.com/fdahle/websfm/releases/tag/models-v1);
+on the host, run this before the release build:
+
+```bash
+npm run fetch:models   # downloads into public/models/, verifies SHA-256, removes superpoint.onnx
+npm run build:release
+```
+
+Release assets send no CORS headers, so the app cannot load them from GitHub
+directly; the host must serve its own copy. The files are:
 
 | File | Used by | Size | Source (rename to the file name) |
 | --- | --- | --- | --- |
