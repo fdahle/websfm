@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 import { terminateAll } from '../workers/computeClient.js'
 import { useModelsStore } from '../stores/useModelsStore.js'
+import { learnedDetector, lightGlueModelFor } from '../core/features/learnedDetectors.js'
 
 // images:           Ref<Array>    — current image list, used to count pending work
 // detectAll:        function      — from useImagesStore
@@ -174,11 +175,12 @@ export function usePipeline({ images, detectAll, matchAll, reconstruct, computeD
       : images.value.filter((img) => img.kpStatus !== 'done')
     if (pending.length === 0) return { ok: true, unchanged: true }
     // Model consent BEFORE openProgress — see ensureModels.
-    if (settings.detector === 'superpoint' && !(await ensureModels(['superpoint']))) {
-      return refused('SuperPoint model download was cancelled', true)
+    const learned = learnedDetector(settings.detector)
+    if (learned && !(await ensureModels([learned.modelId]))) {
+      return refused(`${learned.label} model download was cancelled`, true)
     }
     // Detection polls `aborted` between images, but ONE image can be a long
-    // worker call (SuperPoint on CPU WASM, or a tiled native-res run), so Cancel
+    // worker call (a learned detector on CPU WASM, or a tiled native-res run), so Cancel
     // also hard-terminates the pool — the in-flight detect rejects, detectOne
     // reverts that image, and the batch loop exits on the aborted flag.
     openProgress('Detecting Features', pending.length, () => terminateAll('detection cancelled'), { unit: 'images' })
@@ -193,13 +195,12 @@ export function usePipeline({ images, detectAll, matchAll, reconstruct, computeD
     const ready = images.value.filter((img) => img.kpStatus === 'done' && (img.keypoints?.length ?? 0) > 0)
     if (ready.length < 2) return refused('Matching requires at least two images with keypoints')
     // Model consent BEFORE openProgress — see ensureModels. Gated on the same
-    // descriptor precondition useMatchesStore checks (LightGlue needs SuperPoint
-    // 256-d features): when it fails, matchAll must reach its own error first, so
+    // descriptor precondition useMatchesStore checks (LightGlue needs one learned
+    // detector across all images): when it fails, matchAll must reach its own error first, so
     // the user isn't asked to download weights for a run that cannot start. That
     // store remains the authority — this is only about prompt ordering.
-    if (settings.matcher === 'lightglue'
-      && ready.every((im) => im.detector === 'superpoint' && (im.descDim ?? 128) === 256)
-      && !(await ensureModels(['lightglue']))) return refused('LightGlue model download was cancelled', true)
+    const lg = settings.matcher === 'lightglue' ? lightGlueModelFor(ready) : null
+    if (lg?.ok && !(await ensureModels([lg.modelId]))) return refused('LightGlue model download was cancelled', true)
     // Matching polls `aborted` between pairs, but ONE pair can be a long,
     // uninterruptible worker call (LightGlue on CPU WASM, or a hung run), so
     // Cancel also hard-terminates the pool — the in-flight matchPair's worker

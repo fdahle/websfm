@@ -311,7 +311,7 @@ onMounted(refreshStorage)
           <div class="setting-row">
             <div class="setting-info">
               <span class="setting-label">Downloaded AI models</span>
-              <span class="setting-desc">Remove reusable SuperPoint, LightGlue, and Smart Select weights. They download again only when needed.</span>
+              <span class="setting-desc">Remove reusable SuperPoint, DISK, LightGlue, and Smart Select weights. They download again only when needed.</span>
             </div>
             <button class="btn" :disabled="storageBusy" @click="clearModelCache">Clear models</button>
           </div>

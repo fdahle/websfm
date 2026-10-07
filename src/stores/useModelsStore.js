@@ -1,7 +1,7 @@
 import { ref, computed } from 'vue'
 import { defineStore } from 'pinia'
-import { MODELS, MODEL_CACHE_NAME, modelUrl, toMB } from '../core/models/registry.js'
-import { isModelCached } from '../core/models/modelCache.js'
+import { MODELS, MODEL_CACHE_NAME, modelUrl, toMB, isRedistributable } from '../core/models/registry.js'
+import { isModelCached, modelBytesProblem, badModelError } from '../core/models/modelCache.js'
 import { useLog } from '../composables/useLog.js'
 
 // Main-thread owner of the on-demand model download flow.
@@ -35,7 +35,7 @@ export const useModelsStore = defineStore('models', () => {
 
   const totalLoaded = computed(() => {
     let l = 0, t = 0
-    for (const id of request.value?.ids ?? []) {
+    for (const id of (request.value?.ids ?? []).filter((i) => isRedistributable(i))) {
       const p = progress.value[id]
       if (p) { l += p.loaded; t += p.total }
       else t += MODELS[id]?.approxBytes ?? 0
@@ -48,6 +48,11 @@ export const useModelsStore = defineStore('models', () => {
     const url = modelUrl(id)
     const resp = await fetch(url)
     if (!resp.ok) throw new Error(`${MODELS[id].label}: HTTP ${resp.status}`)
+    // A missing file can still answer 200 with the host's index.html. Refuse an
+    // HTML content type before streaming; the bytes are checked again below.
+    const contentType = resp.headers.get('content-type') ?? ''
+    const htmlType = modelBytesProblem({ contentType })
+    if (htmlType) throw badModelError(MODELS[id].label, url, htmlType)
     const total = Number(resp.headers.get('content-length')) || MODELS[id].approxBytes
     progress.value = { ...progress.value, [id]: { loaded: 0, total } }
 
@@ -69,6 +74,12 @@ export const useModelsStore = defineStore('models', () => {
       bytes = await resp.blob()
       progress.value = { ...progress.value, [id]: { loaded: bytes.size, total: bytes.size } }
     }
+
+    const problem = modelBytesProblem({
+      head: new Uint8Array(await bytes.slice(0, 64).arrayBuffer()),
+      size: bytes.size,
+    })
+    if (problem) throw badModelError(MODELS[id].label, url, problem)
 
     const cache = await caches.open(MODEL_CACHE_NAME)
     await cache.put(url, new Response(bytes, {
@@ -103,8 +114,17 @@ export const useModelsStore = defineStore('models', () => {
       if (covered) return pending.promise
     }
 
-    const items = missing.map((id) => ({ id, label: MODELS[id].label, approxBytes: MODELS[id].approxBytes, license: MODELS[id].license }))
-    const totalBytes = items.reduce((s, m) => s + m.approxBytes, 0)
+    // A non-redistributable model (registry.js) is never downloaded from this
+    // site: the user fetches it upstream and hands it over (provideModelFile).
+    const items = missing.map((id) => {
+      const m = MODELS[id]
+      return {
+        id, label: m.label, approxBytes: m.approxBytes, license: m.license, licenseUrl: m.licenseUrl,
+        userSupplied: !isRedistributable(id), sourceUrl: m.sourceUrl, sourceFile: m.sourceFile ?? m.file,
+        ready: false, fileError: '',
+      }
+    })
+    const totalBytes = items.filter((m) => !m.userSupplied).reduce((s, m) => s + m.approxBytes, 0)
     errorMsg.value = ''
     progress.value = {}
     request.value = { ids: missing, items, totalBytes }
@@ -117,7 +137,8 @@ export const useModelsStore = defineStore('models', () => {
       }
       downloading.value = true
       try {
-        for (const id of missing) {
+        // User-supplied items are already cached by provideModelFile.
+        for (const id of missing.filter((i) => isRedistributable(i))) {
           log(`Downloading ${MODELS[id].label} (~${toMB(MODELS[id].approxBytes)} MB)…`, 'info', 'Models')
           await download(id)
         }
@@ -137,11 +158,46 @@ export const useModelsStore = defineStore('models', () => {
     return promise
   }
 
-  function approve() { if (!downloading.value) decision?.(true) }
+  // Every user-supplied item of the open request has been handed over.
+  const suppliedAll = computed(() => (request.value?.items ?? []).every((m) => !m.userSupplied || m.ready))
+
+  function approve() { if (!downloading.value && suppliedAll.value) decision?.(true) }
   function decline() { if (!downloading.value) decision?.(false) }
 
+  /**
+   * Accept a model file the user downloaded themselves (a non-redistributable
+   * model, see registry.js) and cache it under the model's URL — exactly where a
+   * download would have put it, so the worker's loaders need no other path. When
+   * that completes the request and nothing is left to download, the run continues
+   * without a second click. Returns true when the file was accepted.
+   */
+  async function provideModelFile(id, file) {
+    const item = request.value?.items.find((m) => m.id === id)
+    if (item) item.fileError = ''
+    try {
+      const head = new Uint8Array(await file.slice(0, 64).arrayBuffer())
+      const problem = modelBytesProblem({ head, size: file.size })
+        // An ONNX ModelProto opens with field 1 (ir_version) as a varint: 0x08.
+        ?? (head[0] !== 0x08 ? 'it does not start like an ONNX model' : null)
+      if (problem) throw new Error(`"${file.name}" is not an ONNX model (${problem})`)
+      const cache = await caches.open(MODEL_CACHE_NAME)
+      await cache.put(modelUrl(id), new Response(file, {
+        headers: { 'Content-Type': 'application/octet-stream', 'Content-Length': String(file.size) },
+      }))
+      log(`Model provided: ${MODELS[id].label} from "${file.name}" (${toMB(file.size)} MB)`, 'info', 'Models')
+    } catch (err) {
+      const msg = String(err?.message ?? err)
+      if (item) item.fileError = msg
+      log(`Model file rejected: ${msg}`, 'error', 'Models')
+      return false
+    }
+    if (item) item.ready = true
+    if (request.value && request.value.items.every((m) => m.ready)) decision?.(true)
+    return true
+  }
+
   return {
-    request, downloading, progress, errorMsg, totalLoaded,
-    ensureReady, approve, decline, toMB,
+    request, downloading, progress, errorMsg, totalLoaded, suppliedAll,
+    ensureReady, approve, decline, provideModelFile, toMB,
   }
 })

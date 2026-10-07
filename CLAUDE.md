@@ -98,7 +98,12 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
 - **`src/core/**/*.js` is PURE compute**: no Vue/Pinia/OPFS/DOM. Plain data in, plain
   data out, side effects via injected `onLog`/`onProgress` hooks. This is what lets the
   same code run inside the worker. Grouped by pipeline stage into subfolders:
-  `core/features/` (detectors `sift.js` / `superpoint.js`, matchers `bruteforce.js` /
+  `core/features/` (detectors `sift.js` / `learnedDetect.js` — the one ONNX runner
+  for every learned detector — with `learnedDetectors.js` its registry: per detector the
+  weights, descriptor width, input channels (SuperPoint luma, DISK RGB), tile align and
+  the LightGlue trained for it; code asks `isLearnedDetector`/`learnedDetector(id)`,
+  never `=== 'superpoint'`, and `lightGlueModelFor(images)` picks the matcher weights,
+  matchers `bruteforce.js` /
   `lightglue.js`, `nnSelect.js` — the brute-force ratio + mutual-NN decision over
   top-2 arrays, the JS twin of the crate's rule, shared geometric gate `verify.js` — F-RANSAC + inlierSpread — plus
   `ort.js`, `preselect.js`, `sequentialPairs.js` (capture-order window + optional orbit
@@ -224,12 +229,23 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
   on demand with consent**: `stores/useModelsStore.js` `ensureReady([ids])` (main
   thread) opens `ModelDownloadModal.vue` for any uncached id, streams it into
   Cache Storage with progress, and the worker's core backends then read the
-  cached bytes — SuperPoint/LightGlue/SAM2 resolve their URL via `registry.js`
+  cached bytes — the learned detectors/LightGlue/SAM2 resolve their URL via `registry.js`
   and load through `modelCache.js`, no re-download/re-consent. Both sides MUST
   resolve a model to the **identical** URL string or the worker's cache lookup
-  misses. The dispatch gates live in `useImagesStore` detect (SuperPoint),
-  `useMatchesStore.matchAll` (LightGlue), and `ViewerImage.ensureEncoded` (SAM2);
-  a declined download returns `false` and the op aborts cleanly. Dev keeps the
+  misses. The dispatch gates live in `useImagesStore` detect (the learned detector's
+  `modelId`), `useMatchesStore.matchAll` (its LightGlue), and `ViewerImage.ensureEncoded` (SAM2);
+  a declined download returns `false` and the op aborts cleanly. **Every load path
+  rejects a body that is not a model** (`modelBytesProblem`: HTML content type, a
+  leading `<`, or < 64 kB) and evicts such a cached entry: a static host or the Vite
+  dev server answers a missing `/models/x.onnx` with `index.html` and HTTP 200, which
+  ORT reports only as "protobuf parsing failed". **A model's license is part of its
+  record**: `redistributable: false` (SuperPoint — Magic Leap's non-commercial
+  weights) means websfm never serves it. The consent modal instead links the upstream
+  file (a plain link needs no CORS; GitHub release assets send none, so `fetch` cannot
+  get it) and takes it via picker/drop (`useModelsStore.provideModelFile`), caching it
+  under the same URL key, so no loader changes. `scripts/check-release.mjs` requires
+  every redistributable model and fails a build that contains a restricted one (Vite
+  copies `public/models/` wholesale). Dev keeps the
   files at `public/models/` (gitignored) so `loadModelBytes`' plain-fetch
   fallback needs no consent flow); `core/eval/` (pure read-only stats for the **Quality Report** hub
   — `reconStats.js` track-length histogram + reprojection stats, `imageStats.js`
@@ -1146,7 +1162,7 @@ propagate covariance rather than retaining stale numeric sigmas.
   still lives in OPFS but is **only** ever read back to regenerate the display
   blob on restore — nothing compute-side reads it. `canDecodeTiffNatively()`
   skips the transcode entirely on engines that can already decode TIFF (Safari).
-  Detection (SIFT/SuperPoint) and dense MVS both read pixels back out of the
+  Detection (SIFT and the learned detectors) and dense MVS both read pixels back out of the
   image via `rasterize`/`getRaster`, so the transcode produces **two** blobs
   from one decode: `image.url` (JPEG, fast, display-only) and `image.computeUrl`
   (lossless PNG) — every raster-consuming call (`detectKeypoints`, the dense-op
@@ -1311,7 +1327,7 @@ propagate covariance rather than retaining stale numeric sigmas.
   uuid→name from the image list each run (the list is the authority; a rename must not
   leave a stale copy on disk). `core/dense/mvs.js` keeps `m.name ?? m.uuid?.slice(0,8)`
   as the fallback for a map whose image was removed.
-- **Descriptor width is per-detector, never a constant**: 128 (SIFT) vs 256
+- **Descriptor width is per-detector, never a constant**: 128 (SIFT, DISK) vs 256
   (SuperPoint), carried as `descDim` on the feature bundle / OPFS blob and passed
   as `dim` into `crates/matching`. A wrong dim mis-slices the flat buffer into
   phantom rows whose indices overflow the keypoint arrays downstream.
@@ -1346,7 +1362,7 @@ propagate covariance rather than retaining stale numeric sigmas.
   (`{ ...RECONSTRUCT_DEFAULTS, ...SFM_TUNING, ...settings }`) so `settings` still wins.
   Exception: a self-contained pure sub-module (e.g. `core/sfm/initPair.js`) keeps its own defaults co-located with its algorithm —
   `tuning.js` points to it rather than duplicating the value. **All pipeline-stage
-  modals are wired**: detection (`DETECT_SIFT_DEFAULTS`/`DETECT_SUPERPOINT_DEFAULTS`),
+  modals are wired**: detection (`DETECT_DEFAULTS_BY_DETECTOR` / `DETECT_PRESETS_BY_DETECTOR`),
   matching (`MatchFeaturesModal`↔`useMatchesStore`, `MATCH_DEFAULTS`+`MATCH_TUNING`),
   sparse SfM (`ReconstructModal`↔`core/sfm/sfm.js`, `RECONSTRUCT_DEFAULTS`+`SFM_TUNING`),
   dense depth/fuse (`DepthMapsModal`/`DenseModal`, `DEPTHMAP_DEFAULTS`/`DENSE_FUSE_DEFAULTS`

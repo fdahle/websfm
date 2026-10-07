@@ -63,7 +63,7 @@ npm run dev
 ```
 
 The ONNX model files are **not** committed (they are large). To exercise the
-learned backends locally, drop the four `.onnx` files into `public/models/` — see
+learned backends locally, drop the `.onnx` files into `public/models/` — see
 [Model files](#model-files).
 
 ### Tests & type-checking
@@ -126,7 +126,7 @@ VITE_BASE_PATH=/websfm/ npm run build:release
 
 Configure the production host as follows:
 
-- **Model files.** Serve the four `.onnx` weights (see below) at `<site>/models/`,
+- **Model files.** Serve the redistributable `.onnx` weights (see below) at `<site>/models/`,
   or point the app elsewhere at build time with
   `VITE_MODEL_BASE_URL=https://your-cdn/models/ npm run build`.
 
@@ -166,7 +166,7 @@ preview server:
 curl -I https://websfm.example/
 curl -I https://websfm.example/assets/NAME.wasm
 curl -I https://websfm.example/ort/1.27.0/ort-wasm-simd-threaded.wasm
-curl -I https://websfm.example/models/superpoint.onnx
+curl -I https://websfm.example/models/disk.onnx
 ```
 
 Then perform one cold browser smoke test: create a project, import photographs, run
@@ -177,14 +177,25 @@ learned model, and export/re-import a `.websfm` project.
 
 The learned-model weights are downloaded on demand and cached in the browser
 (Cache Storage), so they are **not** part of the repository. The app fetches them
-from `<site>/models/` by default. The four files are:
+from `<site>/models/` by default. The files are:
 
-| File | Used by | Approx. size |
-| --- | --- | --- |
-| `superpoint.onnx` | SuperPoint detector | 5 MB |
-| `lightglue.onnx` | LightGlue matcher | 45 MB |
-| `sam2_encoder.onnx` | Smart Select (SAM2) | 128 MB |
-| `sam2_decoder.onnx` | Smart Select (SAM2) | 21 MB |
+| File | Used by | Size | Source (rename to the file name) |
+| --- | --- | --- | --- |
+| `disk.onnx` | DISK detector | 4 MB | [LightGlue-ONNX v1.0.0](https://github.com/fabio-sim/LightGlue-ONNX/releases/tag/v1.0.0) `disk.onnx` |
+| `lightglue_disk.onnx` | LightGlue for DISK | 46 MB | same release, `disk_lightglue_fused_cpu.onnx` |
+| `lightglue.onnx` | LightGlue for SuperPoint | 46 MB | same release, `superpoint_lightglue_fused_cpu.onnx` |
+| `sam2_encoder.onnx` | Smart Select (SAM2) | 134 MB | [onnx-community/sam2-hiera-tiny](https://huggingface.co/onnx-community/sam2-hiera-tiny) `onnx/vision_encoder.onnx` |
+| `sam2_decoder.onnx` | Smart Select (SAM2) | 21 MB | same repo, `onnx/prompt_encoder_mask_decoder.onnx` |
+
+The two SAM2 files need their internal `value_info` entries removed before ONNX
+Runtime accepts them (see `src/core/segment/README.md`).
+
+**SuperPoint is not distributed.** Its pretrained weights carry Magic Leap's
+academic / non-commercial research license, so do not host `superpoint.onnx`: users
+who qualify download it themselves from the link in the app's download dialog and
+hand the file over once. `npm run check:release` fails if the build contains it, and
+Vite copies everything in `public/models/`, so remove a local copy before a release
+build.
 
 Place them wherever `VITE_MODEL_BASE_URL` (or the default `public/models/`)
 points. The first time a user runs a learned backend, a modal asks to download

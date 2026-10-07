@@ -1,7 +1,7 @@
 // LightGlue matcher wrapper — the learned joint matcher paired with SuperPoint.
 // Replaces brute-force NN + Lowe ratio: it takes BOTH images' keypoints +
 // descriptors and emits correspondences directly. Runs via core/features/ort.js (same
-// lazy/cached session pattern as superpoint.js). Its output still flows through
+// lazy/cached session pattern as learnedDetect.js). Its output still flows through
 // the store's verifyMatches (F-RANSAC) + inlierSpread gates unchanged.
 //
 // Model I/O (fabio-sim LightGlue-ONNX v1.0.0 `superpoint_lightglue_fused_cpu`,
@@ -61,10 +61,14 @@ function serialized(fn) {
 // graph, same outputs, still gated by verifyMatches (F-RANSAC).
 const GPU_WARMUP_TIMEOUT_MS = 30000
 
-function defaultModelUrl() {
-  // Downloaded-on-demand; served from Cache Storage once fetched with consent
-  // (see core/models/). getSession resolves this URL to bytes before createSession.
-  return modelUrl('lightglue')
+// LightGlue weights are trained per detector, so the caller names the model
+// (core/features/learnedDetectors.js matcherModelId: 'lightglue' for SuperPoint,
+// 'lightglue_disk' for DISK). Downloaded on demand and served from Cache Storage
+// (see core/models/); getSession resolves the URL to bytes before createSession.
+// The model id doubles as the session-cache key, so both can be warm at once.
+function resolveModel(args) {
+  const modelId = args.modelId ?? 'lightglue'
+  return { model: args.model ?? modelUrl(modelId), modelKey: args.modelKey ?? modelId }
 }
 
 // Resolve which backend to *try* for this run. WASM if the GPU path was already
@@ -269,8 +273,9 @@ function prefixFeeds(kpsA, descA, wA, hA, kpsB, descB, wB, hB, maxKeypoints) {
 export async function matchLightGlue(args) {
   const {
     kpsA, descA, wA, hA, kpsB, descB, wB, hB, minConf = 0, maxKeypoints = 2048,
-    useGpu = false, model = defaultModelUrl(), modelKey = 'default', onLog,
+    useGpu = false, onLog,
   } = args
+  const { model, modelKey } = resolveModel(args)
   const { spec, capped } = prefixFeeds(kpsA, descA, wA, hA, kpsB, descB, wB, hB, maxKeypoints)
 
   // Serialize: ORT sessions are not reentrant (see `serialized`). Everything from
@@ -343,8 +348,9 @@ export async function matchLightGlueTiled(args) {
     guideMinInlierRatio = 0.15,
     guideRelThresh = 0.001,
     tileMinKps = 32,
-    useGpu = false, model = defaultModelUrl(), modelKey = 'default', onLog,
+    useGpu = false, onLog,
   } = args
+  const { model, modelKey } = resolveModel(args)
   const dim = kpsA.length ? descA.length / kpsA.length : 256
 
   // One mutex acquisition for the WHOLE tiled run (coarse + every tile) — all runs

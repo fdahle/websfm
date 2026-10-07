@@ -14,6 +14,7 @@ import { evaluatePairAcceptance } from '../core/features/pairGate.js'
 import { pickSpreadIndices, sliceDescriptorRows, resolveSubsetGateSize } from '../core/features/subsetGate.js'
 import { siblingCanonicalMap, canonicalizeMatches } from '../core/features/orientationSiblings.js'
 import { toMatchSpace } from '../core/features/siftDescriptors.js'
+import { learnedDetector, lightGlueModelFor } from '../core/features/learnedDetectors.js'
 import { MATCH_DEFAULTS } from '../core/defaults.user.js'
 import { MATCH_TUNING } from '../core/tuning.js'
 import { pairScaleContext, buildScaleContext, describeScaleContext, resolveScaledPx } from '../core/scaleContext.js'
@@ -184,7 +185,7 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
       if (dimA !== dimB || (srcA.detector ?? 'sift') !== (srcB.detector ?? 'sift')
           || !Number.isSafeInteger(dimA) || dimA <= 0
           || descA.length !== kpsA.length * dimA || descB.length !== kpsB.length * dimB
-          || (settings.matcher === 'lightglue' && (srcA.detector ?? 'sift') !== 'superpoint')) {
+          || (settings.matcher === 'lightglue' && !learnedDetector(srcA.detector))) {
         throw new Error('Incompatible descriptors — detect both images with the same detector before matching')
       }
 
@@ -253,6 +254,8 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
         const [wB, hB] = imageDims(srcB)
         const res = await matchLightGlue({
           kpsA, descA, wA, hA, kpsB, descB, wB, hB,
+          // LightGlue weights are trained per detector (SuperPoint ≠ DISK).
+          modelId: learnedDetector(srcA.detector).matcherModelId,
           minConf: settings.lgMinConf,
           maxKeypoints: settings.lgMaxKeypoints,
           useGpu: settings.useGpu,
@@ -463,22 +466,22 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
     const ready = images.filter((img) => img.kpStatus === 'done' && (img.keypoints?.length ?? 0) > 0)
     const strategy = settings.strategy ?? 'exhaustive'
 
-    // LightGlue's weights are trained on SuperPoint's 256-d descriptors — refuse
-    // to run it on SIFT (128-d) features, which would silently produce garbage.
+    // LightGlue's weights are trained per learned detector (SuperPoint 256-d, DISK
+    // 128-d) — refuse SIFT features or a mix, which would silently produce garbage.
     if (settings.matcher === 'lightglue') {
-      const bad = ready.filter((im) => im.detector !== 'superpoint' || (im.descDim ?? 128) !== 256)
-      if (bad.length) {
-        const names = bad.map((im) => `"${im.name}" (${im.detector ?? 'sift'}/${im.descDim ?? 128}-d)`)
+      const lg = lightGlueModelFor(ready)
+      if (!lg.ok) {
+        const names = lg.bad.map((im) => `"${im.name}" (${im.detector ?? 'sift'}/${im.descDim ?? 128}-d)`)
         const shown = names.slice(0, 5).join(', ')
         const more = names.length > 5 ? `, +${names.length - 5} more` : ''
-        log(`LightGlue needs SuperPoint (256-d) descriptors, but ${bad.length} of ${ready.length} `
-          + `image(s) are not: ${shown}${more} — re-detect these with SuperPoint (Overwrite mode), `
+        log(`${lg.reason}, but ${lg.bad.length} of ${ready.length} `
+          + `image(s) are not: ${shown}${more} — re-detect these (Overwrite mode), `
           + 'or switch the matcher to brute-force.', 'error', 'Matching')
         return
       }
-      // Fetch the LightGlue weights (with consent) before dispatching to the worker.
-      if (!(await useModelsStore().ensureReady(['lightglue']))) {
-        log('Matching cancelled — LightGlue model was not downloaded.', 'warn', 'Matching')
+      // Fetch the matching LightGlue weights (with consent) before dispatching.
+      if (!(await useModelsStore().ensureReady([lg.modelId]))) {
+        log('Matching cancelled — the LightGlue model is not available.', 'warn', 'Matching')
         return
       }
     }

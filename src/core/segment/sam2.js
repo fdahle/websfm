@@ -1,6 +1,6 @@
 // Segment-Anything-2 wrapper (F12) — click-to-segment "smart mask selection".
 // Pure worker-side module, same lazy/cached/serialized session pattern as
-// core/features/lightglue.js and superpoint.js (all three go through
+// core/features/lightglue.js and learnedDetect.js (all three go through
 // core/features/ort.js). Plain data in, plain data out; the worker op
 // (workers/ops/segment.js) owns the per-uuid embedding cache and the transfer.
 //
@@ -16,7 +16,7 @@
 //          has_mask_input [1] (0 ⇒ no prior mask), optional orig_im_size [2].
 //     out: masks [1,M,256,256] low-res logits + iou_predictions [1,M].
 //
-// Contract robustness (mirrors superpoint.js's shape-based output classification):
+// Contract robustness (mirrors learnedDetect.js's shape-based output classification):
 // exact tensor NAMES vary between SAM2 exports, so decoder inputs are matched by
 // name *fragment* (coord/label/mask_input/has_mask/orig_im_size) against the
 // session's real inputNames, the encoder→decoder feature handoff is name-keyed

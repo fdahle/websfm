@@ -738,6 +738,24 @@ fiducials; self-calibration (A2) + fiducials (F4) are the code-side support.
 
 ## Done log (most recent first)
 
+- **2026-10-07 · DISK detector; SuperPoint licence corrected and made bring-your-own.**
+  DISK + its own LightGlue (Apache-2.0, fabio-sim LightGlue-ONNX v1.0.0) is a third
+  detector. `core/features/learnedDetectors.js` is the registry (weights, 128/256-d,
+  luma/RGB input, tile align, which LightGlue); `learnedDetect.js` (was `superpoint.js`)
+  runs any of them; matching picks the LightGlue per detector (`lightGlueModelFor`).
+  Node check with real weights: DISK on two shifted 480×380 crops of a synthetic texture,
+  362 LightGlue matches, all 362 within 3 px of the true shift. SuperPoint was labelled
+  MIT, but every public export carries Magic Leap's non-commercial weights: the registry
+  now records the real licence and `redistributable: false`; the download dialog links
+  the upstream file and accepts it via picker/drop (`provideModelFile`), and
+  `check-release.mjs` refuses a build containing it. Browser checks: VERIFICATION
+  DET-08/09/10, REL-03.
+- **2026-10-07 · Model loading rejects an HTML fallback page.** A missing
+  `/models/*.onnx` was served as Vite's `index.html` with HTTP 200, cached as the
+  model, and surfaced as ORT's "protobuf parsing failed". `core/models/modelCache.js`
+  `modelBytesProblem` now checks content type, a leading `<` and a size floor. The
+  check runs on download (`useModelsStore`), the fetch fallback and cache reads, and
+  a bad cached entry is evicted so the consent flow downloads it again.
 - **2026-10-07 · Mesh: converged solve, support cleanup, source picker, 15× faster solve.**
   The eagle "blob field" had three causes. (1) The vendored CG started every multigrid
   layer from `x₀ = b` for 10 iterations and never converged; the residual was cell-sized

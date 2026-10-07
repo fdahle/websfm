@@ -1,5 +1,6 @@
 import { ortVersion } from './ort-version.mjs'
 import { access, readFile, stat } from 'node:fs/promises'
+import { MODELS, isRedistributable } from '../src/core/models/registry.js'
 
 const dist = new URL('../dist/', import.meta.url)
 const base = process.env.VITE_BASE_PATH || '/'
@@ -32,13 +33,21 @@ await Promise.all([
   requireFile(`ort/${ortVersion}/ort-wasm-simd-threaded.wasm`, 1_000_000),
 ])
 
+// Bundled models: every redistributable one must be present (at least half its
+// registered size, so a truncated or HTML-fallback file fails here). A model whose
+// license forbids redistribution (registry.js, SuperPoint) must NOT be in the
+// artifact — Vite copies public/models/ wholesale, so a developer's local copy
+// would otherwise ship silently.
+const shippable = Object.entries(MODELS).filter(([id]) => isRedistributable(id))
+const restricted = Object.entries(MODELS).filter(([id]) => !isRedistributable(id))
 if (!externalModels) {
-  await Promise.all([
-    requireFile('models/superpoint.onnx', 1_000_000),
-    requireFile('models/lightglue.onnx', 10_000_000),
-    requireFile('models/sam2_encoder.onnx', 50_000_000),
-    requireFile('models/sam2_decoder.onnx', 10_000_000),
-  ])
+  await Promise.all(shippable.map(([, m]) => requireFile(`models/${m.file}`, Math.round(m.approxBytes / 2))))
+}
+for (const [, m] of restricted) {
+  try {
+    await access(new URL(`models/${m.file}`, dist))
+    errors.push(`models/${m.file} must not be shipped (${m.license}); delete it from dist/ (and public/models/)`)
+  } catch { /* absent, as required */ }
 }
 
 try {
@@ -53,6 +62,6 @@ if (errors.length) {
   for (const error of errors) console.error(`- ${error}`)
   process.exitCode = 1
 } else {
-  const modelSource = externalModels ? `external models: ${externalModels}` : 'four bundled models'
+  const modelSource = externalModels ? `external models: ${externalModels}` : `${shippable.length} bundled models`
   console.log(`Release artifact OK (${base}, ${modelSource})`)
 }

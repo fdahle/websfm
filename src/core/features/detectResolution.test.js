@@ -3,7 +3,9 @@ import { resolveDetectMaxDim, DETECT_RESOLUTION_BANDS } from './detectResolution
 import {
   DETECT_SIFT_DEFAULTS, DETECT_SIFT_PRESETS,
   DETECT_SUPERPOINT_DEFAULTS, DETECT_SUPERPOINT_PRESETS,
+  DETECT_DISK_DEFAULTS, DETECT_DISK_PRESETS,
 } from '../defaults.user.js'
+import { DETECT_TUNING } from '../tuning.js'
 
 // The absolute maxDim each preset resolves to today (presets are deltas over the
 // defaults; medium is the empty delta).
@@ -113,6 +115,7 @@ describe('auto is never worse than absolute', () => {
   const cases = [
     ['sift', DETECT_SIFT_DEFAULTS, DETECT_SIFT_PRESETS],
     ['superpoint', DETECT_SUPERPOINT_DEFAULTS, DETECT_SUPERPOINT_PRESETS],
+    ['disk', DETECT_DISK_DEFAULTS, DETECT_DISK_PRESETS],
   ]
 
   it('pins each band floor to that preset\'s absolute default', () => {
@@ -138,6 +141,15 @@ describe('auto is never worse than absolute', () => {
           expect(got).toBeGreaterThanOrEqual(Math.min(abs, nativeMax))
         }
       }
+    }
+  })
+})
+
+describe('DISK bands', () => {
+  it('stay inside the untiled single-pass ceiling at every preset (4:3 frame)', () => {
+    for (const preset of ['low', 'medium', 'high']) {
+      const ceil = DETECT_RESOLUTION_BANDS.disk[preset].ceilPx
+      expect(ceil * Math.round(ceil * 0.75)).toBeLessThanOrEqual(DETECT_TUNING.diskMaxUntiledInputPx)
     }
   })
 })

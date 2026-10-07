@@ -99,12 +99,16 @@ export const THIRD_PARTY = [
   },
   {
     // Downloaded on demand with consent (see stores/useModelsStore.js). Licenses
-    // are shown at the download prompt too. VERIFY each weight’s provenance:
-    // some SuperPoint ONNX conversions are research/non-commercial only.
+    // are shown at the download prompt too and must match core/models/registry.js.
+    // SuperPoint is NOT distributed by websfm: its pretrained weights carry Magic
+    // Leap's non-commercial license, so the user supplies the file themselves.
     group: 'Learned models (downloaded on demand)',
     items: [
-      { name: 'SuperPoint', license: 'MIT', url: 'https://github.com/rpautrat/SuperPoint'},
+      { name: 'SuperPoint (user-supplied, not distributed)', license: 'Magic Leap academic / non-commercial research license',
+        url: 'https://github.com/magicleap/SuperPointPretrainedNetwork' },
+      { name: 'DISK',      license: 'Apache-2.0', url: 'https://github.com/cvlab-epfl/disk' },
       { name: 'LightGlue', license: 'Apache-2.0', url: 'https://github.com/cvg/LightGlue' },
+      { name: 'LightGlue-ONNX (ONNX exports)', license: 'Apache-2.0', url: 'https://github.com/fabio-sim/LightGlue-ONNX' },
       { name: 'SAM 2',     license: 'Apache-2.0', url: 'https://github.com/facebookresearch/sam2' },
     ],
   },

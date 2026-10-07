@@ -315,14 +315,16 @@ into HANDOVER §Baselines before deciding whether parallel sessions would actual
 help. **⚠ This decides the parallel-LightGlue proposal in the matching-speed item
 below**; do not add 2–3 sessions until the measurement justifies their memory cost.
 
-**SP4 — custom model upload** (Settings ▸ Advanced). User-supplied
-`superpoint.onnx` / `lightglue.onnx` via a new `opfs.js` **Models** section
-(`models/…`) + a small `useModelSettings`; the core backends prefer the OPFS
-override, else the registry URL. Log which model (custom vs default, size/hash) each
-session loads.
+**SP4 — replace a cached model** (Settings ▸ Compute). Supplying a file now exists
+for the non-redistributable SuperPoint: the consent modal links the upstream file and
+caches a picked/dropped one under the model URL (`useModelsStore.provideModelFile`).
+What remains: a Settings list of cached models with "Replace with file…" (a custom
+export of any model, e.g. a 2048-keypoint SuperPoint), and logging which bytes each
+session loaded (size + a short hash), so a run records custom vs default weights.
 
-**SP5 — tests.** Unit-test the JS marshalling (coord back-map, gate wiring, validity
-guard) with a mocked `InferenceSession`. Real-inference browser runs are
+**SP5 — tests.** Output parsing is pinned (`learnedDetect.test.js`: DISK/SuperPoint
+layouts, cap, width mismatch). Still open: coord back-map, gate wiring and the validity
+guard with a mocked `InferenceSession`. Real-inference browser runs are
 `VERIFICATION.csv` ▸ `DET-02`, `DET-04`, `DET-06`.
 
 ### MT — closing the gap to COLMAP on South Building
@@ -634,9 +636,13 @@ for fisheye params in `bundle.rs`. Gate on a real fisheye dataset — irrelevant
 current workflows.
 
 ### F5 — pluggable detector/matcher backend (design umbrella)
-SuperPoint+LightGlue shipped as the first learned backend; this remains the umbrella
-for later ones (DISK; detector-free RoMa/LoFTR need a `match(imgA,imgB)` op shape
-with no per-image keypoint stage). The SfM core is already neutral (pairs as
+SuperPoint+LightGlue and DISK+LightGlue have shipped (`core/features/learnedDetectors.js`
+registry; one ONNX runner). This remains the umbrella for later ones. **ALIKED**
+(BSD-3-Clause, the strongest LightGlue pairing) needs a standalone per-image ONNX
+export: fabio-sim ships it only as a fused two-image pipeline (v3.0), which does not
+fit the per-image keypoint stage — export cvg/LightGlue's ALIKED extractor + its
+LightGlue ourselves, then it is one registry entry. Detector-free RoMa/LoFTR need a
+`match(imgA,imgB)` op shape with no per-image keypoint stage. The SfM core is already neutral (pairs as
 `{F, matches:[[ia,ib]], inlierCount}`) and descriptor width is carried, not assumed.
 Keep verification + the pairs graph as the neutral meeting point. MAGSAC++ is an
 orthogonal upgrade benefiting every backend — file under `crates/matching`.

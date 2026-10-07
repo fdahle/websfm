@@ -15,10 +15,20 @@ working: their descriptors are converted when matching loads them, so you do not
 to detect again.
 
 ## Detector
-**SIFT** is the dependable default and works entirely in WASM. **SuperPoint** is a
-learned detector intended to be paired with LightGlue; its model is downloaded once
-with your permission and cached locally. Do not mix SIFT and SuperPoint descriptors
-in one run—use **Overwrite** when switching detector.
+**SIFT** is the dependable default and works entirely in WASM. **DISK** and
+**SuperPoint** are learned detectors meant to be paired with LightGlue matching; each
+has its own LightGlue, and websfm picks the right one automatically. Do not mix
+detectors in one project—use **Overwrite** when switching detector.
+
+**DISK** is freely licensed (Apache-2.0). Its model is downloaded once with your
+permission and cached in the browser. It detects at a lower resolution than
+SuperPoint (1024 px by default), because it needs much more memory per pixel.
+
+**SuperPoint**'s pretrained weights are licensed for **non-commercial research only**,
+so websfm does not ship them. The first time you run it, the download dialog shows the
+license and a direct link: download `superpoint.onnx` from its publisher, then choose
+or drop that file in the dialog. It is cached like any other model, and detection
+continues on its own. Use DISK if your work is commercial.
 
 ## Quality preset
 Start with **Balanced**. Choose **Detailed** for high-resolution aerial or film scans
@@ -39,13 +49,13 @@ scans; higher values keep fewer, stronger features. If raising the keypoint cap 
 nothing, the contrast threshold may be the limiting gate.
 
 ## Max keypoints
-<!-- param: maxKeypoints default: 10000 (SIFT) · 2048 (SuperPoint) -->
+<!-- param: maxKeypoints default: 10000 (SIFT) · 2048 (SuperPoint, DISK) -->
 The per-image keypoint limit. When SIFT finds more than this, it keeps the
 **largest-scale** features first and drops the finest ones, the same rule COLMAP uses.
 Large features survive changes of viewpoint better than fine texture, so at a fixed
 limit this gives more points that appear in three or more images (about 10 % more on a
 building set detected at full resolution). Raise the limit when useful detail is visibly
-underrepresented. SuperPoint keeps its highest-scoring points and stays lower, because
+underrepresented. SuperPoint and DISK keep their highest-scoring points and stay lower, because
 LightGlue's attention cost grows quickly with the number of keypoints.
 
 If many images report exactly the limit in the console, the limit is cutting off
@@ -57,7 +67,7 @@ adding points.
 ## Tiling
 Tiling detects overlapping pieces near native resolution. Each piece keeps only the
 features in its own central region, so every feature is found exactly once and never
-right at a cut. Use **Auto** for SuperPoint inputs that exceed the single-pass limit, or
+right at a cut. Use **Auto** for SuperPoint or DISK inputs that exceed the single-pass limit, or
 for scans too large to detect in one pass. For SIFT, tiling gives the same keypoints
 and matches as an untiled run (99.5 % identical on a building pair) and uses less
 memory, so it is safe to turn on for large images.
@@ -75,6 +85,6 @@ detector, or when you need a clean comparison of detection settings.
 ## Batch throughput
 SIFT batches use up to four workers, bounded by your configured worker count and
 a conservative estimate of image decode and pyramid memory. Large scans or images
-with unknown dimensions run one at a time. SuperPoint stays serial to share its
-model session. The console reports concurrency and batch wall time; Cancel stops
+with unknown dimensions run one at a time. SuperPoint and DISK stay serial to share
+their model session. The console reports concurrency and batch wall time; Cancel stops
 new work and discards unfinished results.

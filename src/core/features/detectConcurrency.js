@@ -1,9 +1,10 @@
 // Conservative scheduling estimate, not a measurement of browser peak memory.
 // Allow room for the SIFT pyramid/scratch arrays and full-size image decoding.
 import { resolveDetectMaxDim } from './detectResolution.js'
+import { isLearnedDetector } from './learnedDetectors.js'
 
 export function detectionConcurrency(images, settings, poolSize, deviceMemoryGB = null) {
-  if (settings.detector === 'superpoint' || !images.length) return 1
+  if (isLearnedDetector(settings.detector) || !images.length) return 1
   const budget = Math.min(1024, deviceMemoryGB > 0 ? deviceMemoryGB * 256 : 512) * 1024 ** 2
   let largest = 1
   for (const image of images) {

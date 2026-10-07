@@ -1,6 +1,6 @@
 import init, { detect_sift } from '../../wasm/detection/sift.js'
 
-// SIFT detector wasm wrapper — the classic counterpart of superpoint.js. Pure:
+// SIFT detector wasm wrapper — the classic counterpart of learnedDetect.js. Pure:
 // takes an RGBA raster (pixel decoding is the caller's job — OffscreenCanvas in
 // the worker) and returns the flat detection buffer straight from the crate. The
 // caller parses the STRIDE layout ([x,y,scale,response,angle,d0..d127] per kept
