@@ -15,12 +15,18 @@ const props = defineProps({
   // written in METRES with no CRS. One checkbox covers both, because both answer
   // the same question: "put real units on this file?"
   hasScale: { type: Boolean, default: false },
+  // A user orientation (Tools ▸ Model ▾ ▸ Orient model) exists → the export can be
+  // levelled, re-origined and turned. Combines with scale; a georeference outranks it.
+  hasOrientation: { type: Boolean, default: false },
 })
 
-const hasFrame = computed(() => props.hasGeoref || props.hasScale)
-const frameLabel = computed(() => (props.hasGeoref
-  ? 'Georeference (transform into the project CRS)'
-  : 'Apply scale (write metres — no CRS is attached)'))
+const hasFrame = computed(() => props.hasGeoref || props.hasScale || props.hasOrientation)
+const frameLabel = computed(() => {
+  if (props.hasGeoref) return 'Georeference (transform into the project CRS)'
+  if (props.hasScale && props.hasOrientation) return 'Apply scale and orientation (metres, levelled — no CRS is attached)'
+  if (props.hasScale) return 'Apply scale (write metres — no CRS is attached)'
+  return 'Apply orientation (levelled, with your origin and heading — model units)'
+})
 const emit = defineEmits(['close', 'run'])
 
 const CONFIG = {
@@ -153,7 +159,7 @@ function run() {
 
     <!-- Mesh -->
     <template v-else-if="kind === 'mesh'">
-      <label class="checkbox-row" :class="{ disabled: settings.format === 'stl' }">
+      <label class="checkbox-row">
         <input type="checkbox" v-model="settings.includeColor" :disabled="settings.format === 'stl'" class="checkbox" />
         Include vertex colours{{ settings.format === 'stl' ? ' (STL has no colour)' : '' }}
       </label>
@@ -270,8 +276,6 @@ function run() {
 
 <style scoped src="./ui/modal.css"></style>
 <style scoped>
-.checkbox-row { font-size: 13px; color: var(--text); }
-.checkbox-row.disabled { opacity: 0.5; cursor: not-allowed; }
 .warn-hint { color: var(--warn, #b45309); }
 .field-input.range { width: 100%; padding: 0; }
 code { font-size: 11px; }

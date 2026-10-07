@@ -1418,11 +1418,6 @@ defineExpose({ fit, zoomIn, zoomOut, triggerMaskImport, clearMask, triggerDepthI
           <button class="ctx-item back" @click="menuBack">‹ Back</button>
         </template>
       </div>
-
-      <div class="hud">
-        <span>{{ Math.round(scale * 100) }}%</span>
-        <button title="Fit to view" @click.stop="fit">Fit</button>
-      </div>
     </div>
 
     <div class="status-bar">
@@ -1445,6 +1440,9 @@ defineExpose({ fit, zoomIn, zoomOut, triggerMaskImport, clearMask, triggerDepthI
           <span class="masked" :class="{ on: hoverPx.masked }">Masked&nbsp;{{ hoverPx.masked ? '✓' : '—' }}</span>
         </template>
       </template>
+      <!-- Zoom is status; Fit / Zoom in / out are ribbon commands (Picture ▸ View). -->
+      <span class="spacer"></span>
+      <span class="zoom-level" title="Zoom">{{ Math.round(scale * 100) }}%</span>
     </div>
   </div>
 </template>
@@ -1582,32 +1580,11 @@ defineExpose({ fit, zoomIn, zoomOut, triggerMaskImport, clearMask, triggerDepthI
   pointer-events: none;
 }
 
-.hud {
-  position: absolute;
-  bottom: 12px;
-  right: 12px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 8px;
-  font-size: 12px;
-  color: var(--text);
-  background: var(--panel);
-  border: 1px solid var(--panel-border);
-  border-radius: 6px;
+.spacer { flex: 1; }
+.zoom-level {
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
 }
-
-.hud button {
-  background: none;
-  border: 1px solid var(--panel-border);
-  color: var(--text);
-  border-radius: 4px;
-  padding: 2px 8px;
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.hud button:hover { background: var(--hover-bg); }
 
 .status-bar {
   flex-shrink: 0;

@@ -163,7 +163,7 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene }) {
         if (projectLoading.value && currentProjectId.value === id) {
           projectLoadingProgress.value = { done, total, label }
         }
-      })).then(() => {
+      }, { groups: projectData.imageGroups })).then(() => {
         migrateLegacyFiducialDetections(sensors.value)
         migrateLegacyFiducialCalibrations(images.value)
         projectLoadingProgress.value = null

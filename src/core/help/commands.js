@@ -11,9 +11,11 @@
 // returns the same "do X first" message the ribbon shows for a disabled button,
 // so `dense` typed before depth maps exist explains itself instead of no-op'ing.
 
-// Prerequisite checks, mirroring Ribbon.vue's disabledReason() messages so the
-// two gates never disagree. Each: does `state` satisfy it, and why not.
-const NEED_CHECKS = {
+// Prerequisite checks: the ONE table behind both gates, the ribbon's greyed
+// buttons/menu rows (Ribbon.vue `needs: [...]`) and this command line, so the two
+// can never disagree. Each: does `state` (App.vue `commandState`) satisfy it, and
+// why not. A missing state field reads as unmet.
+export const NEED_CHECKS = {
   project:   { ok: (s) => !!s.projectReady, reason: 'Open a project first' },
   images:    { ok: (s) => s.imageCount   > 0, reason: 'Import images first' },
   imagesReady: { ok: (s) => !s.imagesLoading, reason: 'Images still loading…' },
@@ -22,12 +24,19 @@ const NEED_CHECKS = {
   sparse:    { ok: (s) => s.sparseReady,      reason: 'Build the sparse model first' },
   depthMaps: { ok: (s) => s.depthMapCount > 0, reason: 'Compute depth maps first' },
   cloud:     { ok: (s) => s.cloudReady,       reason: 'Build a point cloud first' },
-  dem:       { ok: (s) => s.demReady,         reason: 'Build a DEM first' },
+  dense:     { ok: (s) => s.denseReady,       reason: 'Build a dense cloud first' },
+  twoClouds: { ok: (s) => s.editableCloudCount >= 2, reason: 'Needs at least two dense clouds' },
+  mesh:      { ok: (s) => s.meshReady,        reason: 'Build a mesh first' },
+  dem:     { ok: (s) => s.demReady,         reason: 'Build a DEM first' },
   // An ortho reprojects onto a SURFACE — a DEM or a mesh, not a DEM specifically.
   surface:   { ok: (s) => s.demReady || s.meshReady, reason: 'Build a DEM or a mesh first' },
   ortho:     { ok: (s) => s.orthoReady,       reason: 'Build an orthophoto first' },
   products:  { ok: (s) => s.productReady,     reason: 'Build a DEM or orthophoto first' },
   poses:     { ok: (s) => s.poseCount   > 0,  reason: 'Import camera poses first' },
+  footprints: { ok: (s) => s.footprintCount > 0, reason: 'Import or generate footprints first' },
+  gcps:      { ok: (s) => s.gcpCount > 0,
+               reason: 'No GCPs yet — import a GCP file, or right-click the map or an image to add one' },
+  selection: { ok: (s) => !!s.hasSelection,   reason: 'Select an image first' },
   sensors:   { ok: (s) => s.sensorCount > 0,  reason: 'No sensors available' },
   filmSensor: { ok: (s) => s.filmSensorCount > 0, reason: 'Set at least one sensor to Film first' },
 }
@@ -54,6 +63,24 @@ export const COMMANDS = [
   { name: 'footprints',   aliases: [],              dispatch: 'footprints-from-poses', needs: ['poses', 'sensors'], group: 'Tools', help: 'Build footprints from poses' },
   { name: 'fiducials',    aliases: ['detect-fiducials'], dispatch: 'detect-fiducials', needs: ['filmSensor'], group: 'Tools', help: 'Auto-detect fiducial marks on film scans' },
   { name: 'calibrate-fiducials', aliases: ['fiducial-calibration'], dispatch: 'calibrate-fiducials', needs: ['filmSensor'], group: 'Tools', help: 'Calibrate detected film fiducials' },
+  { name: 'image quality', aliases: ['blur', 'sharpness'], dispatch: 'image-quality', needs: ['images', 'imagesReady'], group: 'Tools', help: 'Score image sharpness and exposure' },
+  { name: 'optimize',     aliases: ['optimize cameras'], dispatch: 'optimize-cameras', needs: ['sparse'], group: 'Tools', help: 'Re-run bundle adjustment with the focal length free' },
+  { name: 'gradual',      aliases: ['gradual selection'], dispatch: 'gradual-selection', needs: ['sparse'], group: 'Tools', help: 'Remove weak tie points from the sparse model' },
+  { name: 'region',       aliases: [],               dispatch: 'set-region',          needs: ['sparse'], group: 'Tools', help: 'Set the box that bounds depth maps, fusion, mesh and DEM' },
+  { name: 'orient',       aliases: ['orient model', 'level'], dispatch: 'orient-model', needs: ['sparse'], group: 'Tools', help: 'Set up, origin and heading of the local frame' },
+  { name: 'normals',      aliases: ['estimate normals'], dispatch: 'estimate-normals', needs: ['dense'], group: 'Tools', help: 'Estimate per-point normals on a dense cloud' },
+  { name: 'transform',    aliases: [],               dispatch: 'transform-cloud',     needs: ['dense'], group: 'Tools', help: 'Move, rotate, scale or matrix-transform a cloud' },
+  { name: 'align pairs',  aliases: ['align points'], dispatch: 'align-points',        needs: ['dense'], group: 'Tools', help: 'Align a cloud by picking point pairs' },
+  { name: 'icp',          aliases: ['align'],        dispatch: 'align-icp',           needs: ['dense'], group: 'Tools', help: 'Refine an alignment to a reference cloud or mesh' },
+  { name: 'distance',     aliases: ['c2c', 'c2m'],   dispatch: 'cloud-distance',      needs: ['dense'], group: 'Tools', help: 'Per-point distance to another cloud or a mesh' },
+  { name: 'section',      aliases: ['profile'],      dispatch: 'cloud-section',       needs: ['dense'], group: 'Tools', help: 'Cut a vertical slice and export its profile' },
+  { name: 'clean mesh',   aliases: ['clean'],        dispatch: 'clean-mesh',          needs: ['mesh'],  group: 'Tools', help: 'Remove specks and bridges, fill holes' },
+  { name: 'decimate',     aliases: ['simplify'],     dispatch: 'decimate-mesh',       needs: ['mesh'],  group: 'Tools', help: 'Reduce a mesh to a target triangle count' },
+  { name: 'smooth',       aliases: [],               dispatch: 'smooth-mesh',         needs: ['mesh'],  group: 'Tools', help: 'Taubin-smooth a mesh' },
+  { name: 'mesh area',    aliases: ['volume'],       dispatch: 'mesh-measure',        needs: ['mesh'],  group: 'Tools', help: 'Surface area and enclosed volume of a mesh' },
+  { name: 'contours',     aliases: [],               dispatch: 'dem-contours',        needs: ['dem'],   group: 'Tools', help: 'Export contour lines from the DEM' },
+  { name: 'terrain',      aliases: ['slope', 'hillshade', 'aspect'], dispatch: 'dem-derivatives', needs: ['dem'], group: 'Tools', help: 'Export slope, aspect and hillshade rasters' },
+  { name: 'clip',         aliases: [],               dispatch: 'clip-raster',         needs: ['products'], group: 'Tools', help: 'Export the DEM or ortho clipped to a polygon' },
 
   // --- Tables / views ---
   { name: 'images',   aliases: ['image-table'],     dispatch: 'open-image-table',  needs: ['images'],  group: 'View', help: 'Open the image table' },

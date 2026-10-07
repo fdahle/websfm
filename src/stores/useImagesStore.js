@@ -5,7 +5,7 @@ import { isTiff, canDecodeTiffNatively, nativeTiffDecodeResult, readTiffDimensio
 import { extractMetadata } from '../core/io/metadata.js'
 import {
   detectKeypoints, transcodeTiff, prepareFiducialTemplates, detectFiducials,
-  detectFiducialSpots as detectFiducialSpotsWorker, POOL_SIZE,
+  detectFiducialSpots as detectFiducialSpotsWorker, POOL_SIZE, imageQuality as imageQualityWorker,
 } from '../workers/computeClient.js'
 import { FIDUCIAL_DETECT_TUNING } from '../core/sfm/fiducialDetect.js'
 import { migrateLegacyFiducialImage } from '../core/sfm/fiducialModel.js'
@@ -22,6 +22,7 @@ import { useProjectsStore } from './useProjectsStore.js'
 import { useMatchesStore } from './useMatchesStore.js'
 import { useModelsStore } from './useModelsStore.js'
 import { mapConcurrent } from '../utils/concurrency.js'
+import { moveListEntry, nextGroupName, normalizeImageGroups } from '../utils/imageGroups.js'
 
 // The image set: source images, their metadata, keypoints, masks, depth maps, and
 // sensor assignments. Project-scoped and persisted, but its restore/clear have
@@ -33,6 +34,9 @@ export const useImagesStore = defineStore('images', () => {
 
   const images = ref([])
   const selectedId = ref(null)
+  // User-named folders for the sidebar list — display only, never read by the
+  // pipeline (see utils/imageGroups.js). Membership is `img.groupId`.
+  const imageGroups = ref([])
   // A status flag alone is insufficient after restore: a missing/corrupt keypoint
   // sidecar used to leave an empty array advertised as ready to matching.
   const keypointReadyImages = computed(() => images.value.filter((img) =>
@@ -134,6 +138,7 @@ export const useImagesStore = defineStore('images', () => {
     await opfs.writeProject(pid, {
       ...proj,
       lastModified: new Date().toISOString(),
+      imageGroups: imageGroups.value.map((g) => ({ id: g.id, name: g.name, collapsed: !!g.collapsed })),
       images: images.value.map((img) => {
         // eslint-disable-next-line no-unused-vars
         const { raw: _raw, ...metaToSave } = img.meta ?? {}
@@ -145,8 +150,11 @@ export const useImagesStore = defineStore('images', () => {
           descNorm: img.descNorm ?? null,
           detectScale: img.detectScale ?? null,
           detectSettings: img.detectSettings ?? null,
+          // Tools ▸ Images ▾ ▸ Image quality; absent ⇒ never measured.
+          quality: img.quality ?? null,
           hasMask: !!img.mask, hasDepth: !!img.depth,
           sensorId: img.sensorId ?? null,
+          groupId: img.groupId ?? null,
           // Fiducial observations (F4) are user clicks on the raster — tiny, and
           // persisted inline (independent of keypoint indices).
           fiducialObs: img.fiducialObs?.length ? img.fiducialObs.map((o) => ({ ...o })) : [],
@@ -211,6 +219,7 @@ export const useImagesStore = defineStore('images', () => {
       // TIFF decoding must not depend on whether a user keeps the .tif extension
       // in the label they choose later.
       item.sourceName = file.name
+      item.groupId = null
       if (images.value.some((img) => img.id === item.id)) {
         log(`Skip duplicate: ${file.name}`, 'warn', 'Images')
         continue
@@ -383,6 +392,90 @@ export const useImagesStore = defineStore('images', () => {
     img.name = trimmed
     log(`Renamed image "${previous}" → "${trimmed}"`, 'info', 'Images', { channel: 'activity' })
     if (isPersisting()) sync()
+    return true
+  }
+
+  // ── Image groups ──────────────────────────────────────────────────────────
+  // Display-only folders (utils/imageGroups.js). Every mutation is a reversible
+  // user edit, so it logs on the activity channel and re-persists project.json.
+  function persistGroups() { if (isPersisting()) sync() }
+  function groupById(id) { return imageGroups.value.find((g) => g.id === id) || null }
+
+  // Create a group, optionally filling it. `id` may be supplied by the caller
+  // (the sidebar picks it so it can start an inline rename on the new row).
+  function createImageGroup({ id = crypto.randomUUID(), name, imageIds = [] } = {}) {
+    if (groupById(id)) return null
+    const group = { id, name: name?.trim() || nextGroupName(imageGroups.value), collapsed: false }
+    imageGroups.value.push(group)
+    const moved = assignGroup(imageIds, id)
+    log(`Created image group "${group.name}"${moved ? ` with ${moved} image${moved !== 1 ? 's' : ''}` : ''}`,
+      'info', 'Images', { channel: 'activity' })
+    persistGroups()
+    return group
+  }
+
+  function renameImageGroup(id, name) {
+    const group = groupById(id)
+    const trimmed = name?.trim()
+    if (!group || !trimmed || trimmed === group.name) return false
+    const previous = group.name
+    group.name = trimmed
+    log(`Renamed image group "${previous}" → "${trimmed}"`, 'info', 'Images', { channel: 'activity' })
+    persistGroups()
+    return true
+  }
+
+  // Removing a group never removes images: its members become ungrouped.
+  function removeImageGroup(id) {
+    const group = groupById(id)
+    if (!group) return false
+    let freed = 0
+    for (const img of images.value) if (img.groupId === id) { img.groupId = null; freed++ }
+    imageGroups.value = imageGroups.value.filter((g) => g.id !== id)
+    log(`Removed image group "${group.name}"${freed ? ` (${freed} image${freed !== 1 ? 's' : ''} now ungrouped)` : ''}`,
+      'info', 'Images', { channel: 'activity' })
+    persistGroups()
+    return true
+  }
+
+  function assignGroup(imageIds, groupId) {
+    const ids = new Set(imageIds)
+    let moved = 0
+    for (const img of images.value) {
+      if (!ids.has(img.id) || (img.groupId ?? null) === groupId) continue
+      img.groupId = groupId
+      moved++
+    }
+    return moved
+  }
+
+  // Move images into a group, or out of every group with `groupId: null`.
+  function setImagesGroup(imageIds, groupId) {
+    const target = groupId == null ? null : groupById(groupId)
+    if (groupId != null && !target) return 0
+    const moved = assignGroup(imageIds, target?.id ?? null)
+    if (!moved) return 0
+    const what = `${moved} image${moved !== 1 ? 's' : ''}`
+    log(target ? `Moved ${what} to group "${target.name}"` : `Removed ${what} from their group`,
+      'info', 'Images', { channel: 'activity' })
+    persistGroups()
+    return moved
+  }
+
+  // Collapse state is persisted view state (like a raster's onMap): a 342-image
+  // project should reopen the way it was left. Not worth an activity line.
+  function setImageGroupCollapsed(id, collapsed) {
+    const group = groupById(id)
+    if (!group || group.collapsed === !!collapsed) return
+    group.collapsed = !!collapsed
+    persistGroups()
+  }
+
+  function moveImageGroup(id, delta) {
+    const next = moveListEntry(imageGroups.value, id, delta)
+    if (!next) return false
+    imageGroups.value = next
+    persistGroups()
     return true
   }
 
@@ -1036,6 +1129,7 @@ export const useImagesStore = defineStore('images', () => {
       if (img.computeUrl && img.computeUrl !== img.url) URL.revokeObjectURL(img.computeUrl)
     }
     images.value = []
+    imageGroups.value = []
     selectedId.value = null
     urlHeal.clear()
     if (n > 0) log(`Session cleared (${n} image${n !== 1 ? 's' : ''} removed)`, 'warn', 'Images')
@@ -1048,12 +1142,14 @@ export const useImagesStore = defineStore('images', () => {
   // resolve until hydration finishes: project open uses that contract to keep its
   // loading overlay up, so command guards and viewers never observe a nominally
   // open project whose required image state is still empty.
-  async function restoreImages(records, projectId, onProgress) {
+  async function restoreImages(records, projectId, onProgress, { groups } = {}) {
     for (const img of images.value) {
       URL.revokeObjectURL(img.url)
       if (img.computeUrl && img.computeUrl !== img.url) URL.revokeObjectURL(img.computeUrl)
     }
     images.value = []
+    imageGroups.value = normalizeImageGroups(groups)
+    const groupIds = new Set(imageGroups.value.map((g) => g.id))
     selectedId.value = null
     // Fresh URLs from fresh handles — a previous session's heal attempts say
     // nothing about whether these can be re-read.
@@ -1070,6 +1166,7 @@ export const useImagesStore = defineStore('images', () => {
       file: null,
       meta: record.meta,
       sensorId: record.sensorId ?? null,
+      groupId: groupIds.has(record.groupId) ? record.groupId : null,
       loading: true,
       previewPending: true,
       previewFailed: false,
@@ -1083,6 +1180,7 @@ export const useImagesStore = defineStore('images', () => {
       descNorm: record.descNorm ?? null,
       detectScale: record.detectScale ?? null,
       detectSettings: record.detectSettings ?? null,
+      quality: record.quality ?? null,
       mask: null,
       depth: null,
       fiducialObs: Array.isArray(record.fiducialObs) ? record.fiducialObs.map((o) => ({ ...o })) : [],
@@ -1218,9 +1316,42 @@ export const useImagesStore = defineStore('images', () => {
     return count
   }
 
+  // Tools ▸ Images ▾ ▸ Image quality: score each image's sharpness and exposure
+  // (core/features/imageQuality.js, in the worker) and keep the raw numbers on the
+  // image (`quality`, persisted). The batch-relative verdict is derived where it is
+  // shown, never stored: it changes whenever images are added or removed.
+  async function estimateImageQuality(ids = null, { onProgress } = {}) {
+    const wanted = ids ? new Set(ids) : null
+    const targets = images.value.filter((img) => !wanted || wanted.has(img.id))
+    if (!targets.length) return 0
+    log(`Image quality: scoring ${targets.length} image(s)`, 'info', 'Images')
+    let done = 0, failed = 0
+    await mapConcurrent(targets, Math.max(1, Math.min(4, POOL_SIZE)), async (img) => {
+      try {
+        await whenComputeReady(img)
+        const q = await imageQualityWorker(img.computeUrl ?? img.url, { mask: img.mask?.dataUrl ?? null })
+        img.quality = {
+          sharpness: q.sharpness, sharpnessP90: q.sharpnessP90, meanLuma: q.meanLuma,
+          overexposed: q.overexposed, underexposed: q.underexposed,
+          analysisWidth: q.analysisWidth, analysisHeight: q.analysisHeight,
+          masked: !!img.mask, at: new Date().toISOString(),
+        }
+      } catch (err) {
+        failed++
+        log(`${img.name}: image quality failed — ${err?.message ?? err}`, 'error', 'Images')
+      }
+      onProgress?.(++done, targets.length)
+    })
+    log(`Image quality: scored ${targets.length - failed} of ${targets.length} image(s)`, failed ? 'warn' : 'success', 'Images')
+    sync()
+    return targets.length - failed
+  }
+
   return {
     images,
     selectedId,
+    imageGroups,
+    estimateImageQuality,
     keypointReadyImages,
     pendingWorkCount,
     sync,
@@ -1229,6 +1360,12 @@ export const useImagesStore = defineStore('images', () => {
     addImages,
     removeImage,
     renameImage,
+    createImageGroup,
+    renameImageGroup,
+    removeImageGroup,
+    setImagesGroup,
+    setImageGroupCollapsed,
+    moveImageGroup,
     reportImageLoadError,
     updateMask,
     updateDepth,

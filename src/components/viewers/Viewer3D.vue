@@ -6,11 +6,14 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { useViewerSettings } from '../../composables/useViewerSettings.js'
 import { estimateUpFromCameras } from '../../core/sfm/geometry.js'
 import CloudLegend from './CloudLegend.vue'
+import FloatingToolbox from './FloatingToolbox.vue'
 import { buildCloudStyle, scalarRange, sharedElevationRange, resolveCloudStyle } from '../../core/products/cloudStyle.js'
 import { viewerClipping } from '../../core/products/viewerClipping.js'
 import { screenSelectMask, maskIndices } from '../../core/products/screenSelect.js'
+import { pickNearestPoint } from '../../core/products/screenPick.js'
 
-const { gridZ, background, nearClip } = useViewerSettings()
+// pointSize / cameraScale are set from the ribbon's View ▸ Scene steppers.
+const { gridZ, background, nearClip, pointSize, cameraScale } = useViewerSettings()
 
 const props = defineProps({
   theme: { type: String, default: 'dark' },
@@ -23,11 +26,23 @@ const props = defineProps({
   // dense/mesh cloud — which carries no cameras of its own — still frames level (see
   // estimateUpFromCameras). null ⇒ fall back to the viewer's own cameras, else +Z.
   sceneUp: { type: Array, default: null },
+  // The reconstruction region box to draw ({ min, max } in model coordinates) —
+  // the live draft while the Region toolbox is open, else the saved region. null ⇒ none.
+  regionBox: { type: Object, default: null },
+  // Drawn dashed and dim when the saved region no longer matches the model.
+  regionStale: { type: Boolean, default: false },
+  // Point picking for a running tool (point-pair alignment, orient model):
+  // { cloudIds?: string[] } restricts which clouds a click can pick. null ⇒ off.
+  pickMode: { type: Object, default: null },
+  // Points a tool wants shown on top: [{ position: [x,y,z], color: '#rrggbb' }].
+  markers: { type: Array, default: () => [] },
 })
 // Emits ribbon command ids so App's handleCommand routes them (toggles live in App).
 // `edit-selection` carries { edits: [{ cloudId, mask }], keepSelected } for App to
-// apply through the store's non-destructive cloud-edit path.
-const emit = defineEmits(['command', 'edit-selection'])
+// apply through the store's non-destructive cloud-edit path. `select-tool` reports
+// the active selection tool (null | 'rect' | 'lasso') so the ribbon's View ▸ Select
+// toggles can show it — the same up-reporting raster measuring uses.
+const emit = defineEmits(['command', 'edit-selection', 'select-tool', 'pick'])
 
 const container = ref(null)
 // Set when WebGL is unavailable (headless/sandboxed/GPU-disabled). We degrade to an
@@ -138,10 +153,17 @@ function cachedElevationRange(cloud) {
   return cached.range
 }
 const frustumGroup = new THREE.Group()
-// Thumbnail textures live as long as their frustum; tracked so we can dispose
-// them when the scene is rebuilt (frustumGroup.clear() drops the meshes but not
-// the GPU textures they reference).
-let thumbTextures = []
+// Camera glyphs are shared unit geometry placed by a per-camera matrix, so a
+// cameraScale step only rewrites matrices. Thumbnails are small (THUMB_PX²)
+// textures cached by image across rebuilds: re-decoding every full-resolution
+// photo and uploading it to the GPU on each size step or sparse-cloud toggle was
+// the lag. An entry is dropped only when its image is removed or its url changes.
+const THUMB_PX = 256
+const THUMB_DECODES = 4 // concurrent full-size decodes (each is w·h·4 bytes)
+const thumbCache = new Map() // uuid → { url, tex, mat }
+const thumbQueue = []
+let thumbActive = 0
+let frustumLineMat = null, frustumLineGeo = null, frustumPlaneGeo = null
 
 function disposeMaterial(material, textures = new Set(), materials = new Set()) {
   for (const mat of Array.isArray(material) ? material : [material]) {
@@ -149,7 +171,7 @@ function disposeMaterial(material, textures = new Set(), materials = new Set()) 
     materials.add(mat)
     for (const value of Object.values(mat)) {
       if (value?.isTexture && !textures.has(value)) {
-        textures.add(value); value.dispose(); value.__websfmDisposed = true
+        textures.add(value); value.dispose()
       }
     }
     mat.dispose()
@@ -165,16 +187,99 @@ function disposeObject(root) {
   })
 }
 
+// Removes the glyphs only; geometry, materials and thumbnails are shared/cached.
 function clearFrustums() {
-  disposeObject(frustumGroup)
   frustumGroup.clear()
-  // Textures referenced by a material were disposed above. Keep this fallback
-  // for a texture whose async load completed after its mesh was removed.
-  for (const tex of thumbTextures) if (!tex.__websfmDisposed) {
-    tex.dispose()
-    tex.__websfmDisposed = true
+}
+
+function disposeThumb(entry) {
+  entry.disposed = true
+  entry.mat.dispose()
+  entry.tex.image?.close?.()
+  entry.tex.dispose()
+}
+
+function disposeFrustumResources() {
+  clearFrustums()
+  for (const entry of thumbCache.values()) disposeThumb(entry)
+  thumbCache.clear()
+  thumbQueue.length = 0
+  frustumLineMat?.dispose(); frustumLineGeo?.dispose(); frustumPlaneGeo?.dispose()
+  frustumLineMat = frustumLineGeo = frustumPlaneGeo = null
+}
+
+function pumpThumbQueue() {
+  while (thumbActive < THUMB_DECODES && thumbQueue.length) {
+    const entry = thumbQueue.shift()
+    if (entry.disposed) continue
+    thumbActive++
+    // createImageBitmap decodes off the main thread and resizes in one step.
+    // The bitmap is flipped here because WebGL ignores UNPACK_FLIP_Y for it.
+    fetch(entry.url)
+      .then(r => r.blob())
+      .then(blob => createImageBitmap(blob, {
+        resizeWidth: THUMB_PX, resizeHeight: THUMB_PX, resizeQuality: 'medium', imageOrientation: 'flipY',
+      }))
+      .then((bitmap) => {
+        if (entry.disposed) { bitmap.close(); return }
+        entry.tex.image = bitmap
+        entry.tex.needsUpdate = true
+      })
+      .catch(() => {}) // a dead blob: url just leaves the quad untextured
+      .finally(() => { thumbActive--; pumpThumbQueue() })
   }
-  thumbTextures = []
+}
+
+function thumbFor(uuid, url) {
+  let entry = thumbCache.get(uuid)
+  if (entry?.url === url) return entry
+  if (entry) disposeThumb(entry)
+  const tex = new THREE.Texture()
+  tex.colorSpace = THREE.SRGBColorSpace
+  tex.flipY = false
+  entry = { url, tex, mat: new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide }), disposed: false }
+  thumbCache.set(uuid, entry)
+  thumbQueue.push(entry)
+  pumpThumbQueue()
+  return entry
+}
+
+function ensureFrustumGeometry() {
+  if (frustumLineGeo) return
+  frustumLineMat = new THREE.LineBasicMaterial({ color: 0xff8844 })
+  // Unit frustum in camera space (x right, y down, +z forward), depth 1.
+  // corners = [BL-in-image, BR, TR, TL]; 4 centre→corner edges + the far face.
+  const h = 0.5
+  const c = [[-h, -h, 1], [h, -h, 1], [h, h, 1], [-h, h, 1]]
+  const lines = []
+  for (const p of c) lines.push(0, 0, 0, ...p)
+  for (let i = 0; i < 4; i++) lines.push(...c[i], ...c[(i + 1) % 4])
+  frustumLineGeo = new THREE.BufferGeometry()
+  frustumLineGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(lines), 3))
+  frustumLineGeo.computeBoundingSphere()
+  // Thumbnail quad on the far face. The bitmap is pre-flipped (row 0 at v=1),
+  // so the image's top row maps to the y=-h corners.
+  frustumPlaneGeo = new THREE.BufferGeometry()
+  frustumPlaneGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(c.flat()), 3))
+  frustumPlaneGeo.setAttribute('uv', new THREE.BufferAttribute(new Float32Array([0, 1, 1, 1, 1, 0, 0, 0]), 2))
+  frustumPlaneGeo.setIndex([0, 1, 2, 0, 2, 3])
+  frustumPlaneGeo.computeBoundingSphere()
+}
+
+// world = Rᵀ·(s·local) + C — camera-to-world, uniformly scaled by the frustum depth.
+function placeFrustum(obj, depth) {
+  const { R, centre: C } = obj.userData
+  obj.matrix.set(
+    R[0][0] * depth, R[1][0] * depth, R[2][0] * depth, C.x,
+    R[0][1] * depth, R[1][1] * depth, R[2][1] * depth, C.y,
+    R[0][2] * depth, R[1][2] * depth, R[2][2] * depth, C.z,
+    0, 0, 0, 1,
+  )
+  obj.matrixWorldNeedsUpdate = true
+}
+
+function scaleFrustums(depth) {
+  for (const obj of frustumGroup.children) placeFrustum(obj, depth)
 }
 
 // Robust bounds of the loaded scene — drive the camera view presets and grid.
@@ -187,12 +292,6 @@ const sceneUp = new THREE.Vector3(0, 0, 1)
 // the grid's min/avg/max placement (see updateGrid). 0 until a cloud loads.
 let sceneAlongMin = 0, sceneAlongMax = 0
 
-// ── View options (ephemeral, session-scoped display tweaks) ───────────────────
-// Live in a viewer-local popover, deliberately NOT in the ribbon or global
-// Settings: these are transient per-view knobs, not commands or persisted prefs.
-const showOptions = ref(false)
-const cameraScale = ref(1)   // multiplier on the auto frustum size
-const pointSize = ref(3)     // point-cloud dot size (px, no size attenuation)
 // Cached frustum inputs so a cameraScale change can rebuild frustums cheaply
 // without recomputing the whole cloud.
 let lastCams = []
@@ -277,6 +376,8 @@ function init() {
   dir.position.set(5, 10, 7)
   scene.add(dir)
   scene.add(new THREE.AmbientLight(0xffffff, 0.4))
+  updateRegionBox(props.regionBox)
+  updateMarkers(props.markers)
 
   controls = makeControls()
 
@@ -443,63 +544,25 @@ function updateClipping() {
   }
 }
 
-// (Re)build the camera-frustum lines + image-thumbnail quads at the given depth.
-// Rebuilds from scratch (disposing old thumbnail textures) so it's safe to call
-// on every cameraScale change.
+// (Re)build the camera-frustum glyphs at the given depth. Cheap: geometry is
+// shared and thumbnails come from thumbCache, so only per-camera objects are new.
 function buildFrustums(cams, frustumDepth) {
   clearFrustums()
-
-  const frustumMat = new THREE.LineBasicMaterial({ color: 0xff8844 })
+  ensureFrustumGeometry()
   const urlByUuid = new Map(props.images.map((im) => [im.uuid, im.url]))
-  const texLoader = new THREE.TextureLoader()
+  for (const [uuid, entry] of thumbCache) {
+    if (urlByUuid.get(uuid) !== entry.url) { disposeThumb(entry); thumbCache.delete(uuid) }
+  }
 
   for (const { uuid, R, centre } of cams) {
-    const cx = centre.x, cy = centre.y, cz = centre.z
-
-    // Four corners of a unit frustum in camera space, projected to world
-    const hw = 0.5 * frustumDepth  // half-width at depth
-    const corners = [[-hw,-hw,frustumDepth],[hw,-hw,frustumDepth],[hw,hw,frustumDepth],[-hw,hw,frustumDepth]]
-    const worldCorners = corners.map(([lx,ly,lz]) => {
-      return new THREE.Vector3(
-        R[0][0]*lx + R[1][0]*ly + R[2][0]*lz + cx,
-        R[0][1]*lx + R[1][1]*ly + R[2][1]*lz + cy,
-        R[0][2]*lx + R[1][2]*ly + R[2][2]*lz + cz,
-      )
-    })
-
-    // 5 lines: 4 edges from centre to corners + 1 box closing the face
-    const verts = []
-    for (const c of worldCorners) { verts.push(centre.x, centre.y, centre.z, c.x, c.y, c.z) }
-    // Close rectangle
-    for (let i = 0; i < 4; i++) {
-      const a = worldCorners[i], b = worldCorners[(i+1)%4]
-      verts.push(a.x, a.y, a.z, b.x, b.y, b.z)
-    }
-
-    const geo = new THREE.BufferGeometry()
-    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(verts), 3))
-    frustumGroup.add(new THREE.LineSegments(geo, frustumMat))
-
-    // Thumbnail: a small textured quad on the frustum's far face (image plane).
-    // worldCorners is [BL-in-image, BR, TR, TL] in camera x-right / y-down space,
-    // so map UVs with the texture's top row (v=1) to the y=-hw corners.
+    const obj = new THREE.Object3D()
+    obj.matrixAutoUpdate = false
+    obj.userData = { R, centre }
+    obj.add(new THREE.LineSegments(frustumLineGeo, frustumLineMat))
     const url = urlByUuid.get(uuid)
-    if (url) {
-      const [c0, c1, c2, c3] = worldCorners
-      const planeGeo = new THREE.BufferGeometry()
-      planeGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array([
-        c0.x, c0.y, c0.z,  c1.x, c1.y, c1.z,  c2.x, c2.y, c2.z,  c3.x, c3.y, c3.z,
-      ]), 3))
-      planeGeo.setAttribute('uv', new THREE.BufferAttribute(new Float32Array([
-        0, 1,  1, 1,  1, 0,  0, 0,
-      ]), 2))
-      planeGeo.setIndex([0, 1, 2, 0, 2, 3])
-      const tex = texLoader.load(url)
-      tex.colorSpace = THREE.SRGBColorSpace
-      thumbTextures.push(tex)
-      const planeMat = new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide })
-      frustumGroup.add(new THREE.Mesh(planeGeo, planeMat))
-    }
+    if (url) obj.add(new THREE.Mesh(frustumPlaneGeo, thumbFor(uuid, url).mat))
+    placeFrustum(obj, frustumDepth)
+    frustumGroup.add(obj)
   }
 }
 
@@ -590,9 +653,16 @@ function pruneSelections() {
   refreshSelectionSummary()
 }
 
+// Driven by the ribbon (View ▸ Select): choosing the active tool again leaves it.
 function toggleSelectTool(kind) {
   selectTool.value = selectTool.value === kind ? null : kind
 }
+// The toolbox's ×: drop the selection and leave the tool in one step.
+function exitSelection() {
+  clearSelection()
+  selectTool.value = null
+}
+watch(selectTool, (t) => emit('select-tool', t))
 
 function pointerPx(e) {
   const r = container.value.getBoundingClientRect()
@@ -780,7 +850,7 @@ function resetView() {
   controls.update()
 }
 
-defineExpose({ setCloudLayers, clearReconstructionData, setView, resetView, zoomToCloud })
+defineExpose({ setCloudLayers, clearReconstructionData, setView, resetView, zoomToCloud, toggleSelectTool })
 
 function onResize() {
   const el = container.value
@@ -826,8 +896,94 @@ watch(() => props.sceneUp, (u) => {
   }
 })
 
-// View-options sliders — cheap live updates, no cloud recompute.
-watch(cameraScale, () => { if (lastCams.length) buildFrustums(lastCams, lastBaseDepth * cameraScale.value) })
+// ── Region box ────────────────────────────────────────────────────────────────
+// A wireframe of the reconstruction region (Tools ▸ Model ▾ ▸ Region), in the
+// scene's own (model) coordinates. Drawn on top so it reads through the cloud.
+let regionHelper = null
+function updateRegionBox(b) {
+  if (regionHelper) { scene?.remove(regionHelper); disposeObject(regionHelper); regionHelper = null }
+  if (!scene || !b?.min || !b?.max) return
+  const box = new THREE.Box3(new THREE.Vector3(...b.min), new THREE.Vector3(...b.max))
+  if (box.isEmpty()) return
+  regionHelper = new THREE.Box3Helper(box, props.regionStale ? 0x888888 : 0xffb020)
+  regionHelper.material.depthTest = false
+  regionHelper.material.transparent = true
+  regionHelper.material.opacity = props.regionStale ? 0.5 : 0.95
+  regionHelper.renderOrder = 11
+  scene.add(regionHelper)
+}
+watch([() => props.regionBox, () => props.regionStale], ([b]) => updateRegionBox(b), { deep: true })
+
+// ── Point picking (tool-driven) ───────────────────────────────────────────────
+// While `pickMode` is set, a click WITHOUT a drag (a drag still orbits) picks the
+// drawn point nearest the camera within a few pixels (core/products/screenPick.js,
+// on the Float32 render buffer and the matrix that drew it) and emits its EXACT
+// Float64 source coordinates: { cloudId, index, position:[x,y,z] }.
+const PICK_RADIUS_PX = 8
+let pickDown = null
+function onPickPointerDown(e) {
+  if (!props.pickMode || e.button !== 0 || !renderer || e.target !== renderer.domElement) { pickDown = null; return }
+  pickDown = { x: e.clientX, y: e.clientY }
+}
+function onPickPointerUp(e) {
+  const down = pickDown
+  pickDown = null
+  if (!down || !props.pickMode || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 4) return
+  const [px, py] = pointerPx(e)
+  const w = container.value.clientWidth, h = container.value.clientHeight
+  const x = (px / w) * 2 - 1, y = 1 - (py / h) * 2
+  const tolX = (2 * PICK_RADIUS_PX) / w, tolY = (2 * PICK_RADIUS_PX) / h
+  camera.updateMatrixWorld()
+  const viewProj = new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse)
+  const allowed = props.pickMode.cloudIds ? new Set(props.pickMode.cloudIds) : null
+  let best = null
+  for (const [id, layer] of cloudLayers) {
+    if (!layer.object.visible || (allowed && !allowed.has(id))) continue
+    layer.object.updateMatrixWorld()
+    const matrix = viewProj.clone().multiply(layer.object.matrixWorld).elements
+    const geometry = layer.object.geometry
+    // A mesh's index lists triangle corners; any drawn vertex may be picked.
+    const indices = layer.object.isPoints ? (geometry.index?.array ?? null) : null
+    const hit = pickNearestPoint(geometry.getAttribute('position').array, layer.count, { matrix, x, y, tolX, tolY, indices })
+    if (hit && (!best || hit.depth < best.depth)) best = { ...hit, id, layer }
+  }
+  if (!best) return
+  const src = best.layer.positions
+  const i = best.index
+  emit('pick', { cloudId: best.id, index: i, position: [src[i * 3], src[i * 3 + 1], src[i * 3 + 2]] })
+}
+
+// Tool markers, drawn on top of everything. Positions relative to the first marker
+// so a survey-coordinate pick keeps its precision in the Float32 GPU buffer.
+let markerObject = null
+function updateMarkers(markers) {
+  if (markerObject) { scene?.remove(markerObject); disposeObject(markerObject); markerObject = null }
+  if (!scene || !markers?.length) return
+  const o = markers[0].position
+  const pos = new Float32Array(markers.length * 3), col = new Float32Array(markers.length * 3)
+  markers.forEach((m, k) => {
+    pos[k * 3] = m.position[0] - o[0]; pos[k * 3 + 1] = m.position[1] - o[1]; pos[k * 3 + 2] = m.position[2] - o[2]
+    const c = new THREE.Color(m.color || '#ffb020')
+    col[k * 3] = c.r; col[k * 3 + 1] = c.g; col[k * 3 + 2] = c.b
+  })
+  const geometry = new THREE.BufferGeometry()
+  geometry.setAttribute('position', new THREE.BufferAttribute(pos, 3))
+  geometry.setAttribute('color', new THREE.BufferAttribute(col, 3))
+  const material = new THREE.PointsMaterial({ size: 11, sizeAttenuation: false, vertexColors: true, depthTest: false, transparent: true })
+  markerObject = new THREE.Points(geometry, material)
+  markerObject.position.set(o[0], o[1], o[2])
+  markerObject.renderOrder = 12
+  scene.add(markerObject)
+}
+watch(() => props.markers, updateMarkers, { deep: true })
+
+// Ribbon steppers — cheap live updates, no cloud recompute.
+watch(cameraScale, () => scaleFrustums(lastBaseDepth * cameraScale.value))
+// A thumbnail url can arrive or change after the frustums were built (TIFF display
+// transcode, a healed blob: url). A string key compares by value.
+watch(() => props.images.map(im => `${im.uuid}|${im.url ?? ''}`).join('\n'), () => {
+  if (scene && lastCams.length) buildFrustums(lastCams, lastBaseDepth * cameraScale.value)
+})
 watch(pointSize, (v) => {
   for (const { object } of cloudLayers.values()) if (object.isPoints) object.material.size = v
   for (const e of selections.values()) if (e.overlay) e.overlay.material.size = v + 1
@@ -848,7 +1004,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('keydown', onSelectKey)
   clearSelection()
   resizeObserver?.disconnect()
-  clearFrustums()
+  disposeFrustumResources()
   for (const { object } of cloudLayers.values()) disposeObject(object)
   cloudLayers.clear()
   if (grid) { disposeObject(grid); grid = null }
@@ -859,42 +1015,14 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div ref="container" class="viewer" :class="{ selecting: !!selectTool }" @contextmenu.prevent
-    @pointerdown.capture="onSelectPointerDown" @pointermove="onSelectPointerMove"
-    @pointerup="onSelectPointerUp" @pointercancel="onSelectPointerUp">
+  <div ref="container" class="viewer" :class="{ selecting: !!selectTool || !!pickMode }" @contextmenu.prevent
+    @pointerdown.capture="(e) => { onPickPointerDown(e); onSelectPointerDown(e) }" @pointermove="onSelectPointerMove"
+    @pointerup="(e) => { onSelectPointerUp(e); onPickPointerUp(e) }" @pointercancel="onSelectPointerUp">
     <!-- WebGL unavailable: degrade gracefully instead of crashing app mount. -->
     <div v-if="glError" class="gl-error">
       <div class="gl-error-box">{{ glError }}</div>
     </div>
 
-    <!-- Viewer-local view options popover (ephemeral display tweaks) -->
-    <div class="view-options">
-      <button class="vo-btn" :class="{ active: showOptions }" title="View options"
-        aria-label="View options" :aria-expanded="showOptions" @click="showOptions = !showOptions">⚙</button>
-      <button class="vo-btn" :class="{ active: selectTool === 'rect' }"
-        title="Rectangle select (dense clouds) — drag; Shift adds, Alt subtracts"
-        aria-label="Rectangle select" :aria-pressed="selectTool === 'rect'" @click="toggleSelectTool('rect')">
-        <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><rect x="2.5" y="3.5" width="11" height="9" fill="none" stroke="currentColor" stroke-dasharray="2 1.5"/></svg>
-      </button>
-      <button class="vo-btn" :class="{ active: selectTool === 'lasso' }"
-        title="Lasso select (dense clouds) — drag; Shift adds, Alt subtracts"
-        aria-label="Lasso select" :aria-pressed="selectTool === 'lasso'" @click="toggleSelectTool('lasso')">
-        <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M3 9c-1.5-3 1-6.5 5.5-6.5S14 5 13 8s-5 4-7.5 3.5S3 12 4.5 14" fill="none" stroke="currentColor" stroke-dasharray="2 1.5"/></svg>
-      </button>
-      <div v-if="showOptions" class="vo-panel">
-        <div class="vo-title">View options</div>
-        <label class="vo-row">
-          <span>Camera size</span>
-          <input type="range" min="0.2" max="3" step="0.1" v-model.number="cameraScale" />
-          <span class="vo-val">{{ cameraScale.toFixed(1) }}×</span>
-        </label>
-        <label class="vo-row">
-          <span>Point size</span>
-          <input type="range" min="1" max="8" step="1" v-model.number="pointSize" />
-          <span class="vo-val">{{ pointSize }}</span>
-        </label>
-      </div>
-    </div>
     <CloudLegend v-if="showLegend" :layers="legendLayers" />
 
     <svg v-if="drawShape" class="select-shape" aria-hidden="true">
@@ -904,19 +1032,31 @@ onBeforeUnmount(() => {
       <polygon v-else :points="drawShape.points.join(' ')" />
     </svg>
 
-    <div v-if="selectTool || selectionCount" class="select-bar" role="toolbar" aria-label="Point selection">
+    <!-- Toolboxes of tools that live outside this component (Region, point-pair
+         alignment) render over the 3D view here. -->
+    <slot name="toolbox" />
+
+    <!-- The selection tool's toolbox. The ribbon (View ▸ Select) chooses the tool;
+         what you do with the selection lives here. -->
+    <FloatingToolbox v-if="selectTool || selectionCount" id="select-3d" title="Select points" anchor="top-center"
+      :width="260" close-title="Stop selecting (Esc)" @close="exitSelection">
       <template v-if="selectionCount">
-        <span class="sb-count">
-          {{ selectionCount.toLocaleString() }} point{{ selectionCount === 1 ? '' : 's' }} selected<template v-if="selectionClouds > 1"> in {{ selectionClouds }} clouds</template>
-        </span>
-        <button class="btn" title="Delete the selected points (Delete)" @click="commitSelection(false)">Delete</button>
-        <button class="btn" title="Keep only the selected points" @click="commitSelection(true)">Keep only</button>
-        <button class="btn" title="Clear the selection (Esc)" @click="clearSelection">Clear</button>
+        <div class="tb-line">
+          <span class="tb-count">{{ selectionCount.toLocaleString() }}</span>
+          point{{ selectionCount === 1 ? '' : 's' }} selected<template v-if="selectionClouds > 1"> in {{ selectionClouds }} clouds</template>
+        </div>
+        <div class="tb-row">
+          <button class="tb-textbtn danger" title="Delete the selected points (Delete)" @click="commitSelection(false)">Delete</button>
+          <button class="tb-textbtn" title="Keep only the selected points" @click="commitSelection(true)">Keep only</button>
+          <button class="tb-textbtn" title="Clear the selection (Esc)" @click="clearSelection">Clear</button>
+        </div>
       </template>
-      <span v-else class="sb-hint">
-        {{ selectableLayers().length ? 'Drag to select dense-cloud points · Shift adds · Alt subtracts · Esc exits' : 'Show a dense cloud to select its points' }}
-      </span>
-    </div>
+      <div v-else class="tb-hint">
+        {{ selectableLayers().length
+          ? `Drag a ${selectTool === 'lasso' ? 'lasso' : 'rectangle'} over dense-cloud points · Shift adds · Alt subtracts · Esc exits`
+          : 'Show a dense cloud to select its points' }}
+      </div>
+    </FloatingToolbox>
   </div>
 </template>
 
@@ -958,36 +1098,6 @@ onBeforeUnmount(() => {
   user-select: none;
 }
 
-.view-options {
-  position: absolute;
-  top: 10px;
-  left: 10px;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 6px;
-}
-
-.vo-btn {
-  width: 28px;
-  height: 28px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 15px;
-  line-height: 1;
-  color: var(--text);
-  background: var(--panel);
-  border: 1px solid var(--panel-border);
-  border-radius: 6px;
-  cursor: pointer;
-}
-.vo-btn:hover,
-.vo-btn.active {
-  background: var(--hover-bg);
-}
-
-
 .viewer.selecting :deep(canvas) {
   cursor: crosshair;
 }
@@ -1006,64 +1116,6 @@ onBeforeUnmount(() => {
   stroke-width: 1.5;
   stroke-dasharray: 5 3;
 }
-
-.select-bar {
-  position: absolute;
-  left: 50%;
-  bottom: 14px;
-  transform: translateX(-50%);
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  max-width: calc(100% - 32px);
-  padding: 6px 10px;
-  background: var(--panel);
-  border: 1px solid var(--panel-border);
-  border-radius: 8px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
-  font-size: 12px;
-  color: var(--text);
-}
-.sb-count {
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-.sb-hint {
-  color: var(--text-dim);
-}
-
-.vo-panel {
-  min-width: 210px;
-  padding: 10px 12px;
-  background: var(--panel);
-  border: 1px solid var(--panel-border);
-  border-radius: 8px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
-  font-size: 12px;
-  color: var(--text);
-  user-select: none;
-}
-
-.vo-title {
-  font-weight: 600;
-  margin-bottom: 8px;
-  color: var(--text-dim);
-}
-
-.vo-row {
-  display: grid;
-  grid-template-columns: 74px 1fr 34px;
-  align-items: center;
-  gap: 8px;
-  margin-top: 6px;
-}
-.vo-row input[type='range'] {
-  width: 100%;
-  accent-color: var(--accent);
-}
-.vo-val {
-  text-align: right;
-  color: var(--text-dim);
-  font-variant-numeric: tabular-nums;
-}
 </style>
+
+<style scoped src="./toolbox.css"></style>

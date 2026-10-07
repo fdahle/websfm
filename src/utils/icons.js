@@ -281,6 +281,66 @@ export const icons = {
     <circle cx="12" cy="4" r="1.5" />
     <path d="M12 5.5L8 12M12 5.5L16 12" opacity="0.6" />
     <path d="M5 13l7-2 7 2-7 7z" />`,
+  // Freehand selection loop with its tail.
+  lasso: `
+    <path d="M6 15c-2.5-3 0-9 6.5-9S20 9 18.5 12.5 11 16.5 8 15.5" stroke-dasharray="2.5 2" />
+    <path d="M8 15.5c-1 1.5-.5 3 1 4" />`,
+  // Isolines of a hill.
+  contours: `
+    <path d="M3 18c3-1 4-5 9-5s6 4 9 5" />
+    <path d="M6 14c2-1 3-4 6-4s4 3 6 4" opacity="0.7" />
+    <path d="M9 10c1-1 1.5-2.5 3-2.5S14 9 15 10" opacity="0.5" />`,
+  // A thin slab through a block.
+  section: `
+    <path d="M4 8l8-4 8 4-8 4z" opacity="0.5" />
+    <path d="M4 8v8l8 4 8-4V8" opacity="0.5" />
+    <path d="M10 5v11l4 2V7" />`,
+  // Surface with normal arrows.
+  normals: `
+    <path d="M3 17c4-3 14-3 18 0" />
+    <path d="M7 15V9M12 14V7M17 15V9" />
+    <path d="M10.5 8.5L12 7l1.5 1.5" />`,
+  // Dense triangles collapsing to fewer.
+  decimate: `
+    <path d="M3 18L7 6l4 12z" />
+    <path d="M5 12h4" opacity="0.6" />
+    <path d="M13 12h3m0 0l-1.5-1.5M16 12l-1.5 1.5" />
+    <path d="M18 18l2-8 2 8z" />`,
+  // A jagged line beside its smoothed copy.
+  smooth: `
+    <path d="M3 10l2-3 2 4 2-4 2 4" opacity="0.5" />
+    <path d="M3 17c3-4 5 0 8-2s5-3 10-1" />`,
+  // Move/rotate arrows.
+  transform: `
+    <path d="M12 3v18M3 12h18" />
+    <path d="M10 5l2-2 2 2M10 19l2 2 2-2M5 10l-2 2 2 2M19 10l2 2-2 2" />`,
+  // Two clouds snapping together.
+  align: `
+    <circle cx="7" cy="9" r="1" /><circle cx="9" cy="13" r="1" /><circle cx="5" cy="14" r="1" />
+    <circle cx="16" cy="9" r="1" fill="currentColor" /><circle cx="18" cy="13" r="1" fill="currentColor" /><circle cx="14" cy="14" r="1" fill="currentColor" />
+    <path d="M10 6c2-2 4-2 6 0" stroke-dasharray="2 1.5" />`,
+  // A 3D bounding box.
+  region: `
+    <path d="M5 8l7-4 7 4v8l-7 4-7-4z" stroke-dasharray="2.5 1.8" />
+    <path d="M5 8l7 4 7-4M12 12v8" opacity="0.5" />`,
+  // A spirit level.
+  level: `
+    <rect x="3" y="9" width="18" height="6" rx="1.5" />
+    <rect x="10" y="10.5" width="4" height="3" rx="1.5" />
+    <path d="M12 4v3M12 17v3" opacity="0.6" />`,
+  // Eye with a focus ring: image-quality scoring.
+  quality: `
+    <path d="M2.5 12S6 6 12 6s9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6z" />
+    <circle cx="12" cy="12" r="2.5" />`,
+  // Distance arrows between two surfaces.
+  distance: `
+    <path d="M3 7c4-2 14-2 18 0" />
+    <path d="M3 18c4-3 14-1 18 0" opacity="0.6" />
+    <path d="M8 7.5v8.5M16 7.5v9" stroke-dasharray="1.5 1.5" />`,
+  // Scissors-like polygon clip.
+  clip: `
+    <path d="M5 6l12 2 2 10-11 1z" stroke-dasharray="2.5 1.8" />
+    <path d="M8 9h7v7H8z" />`,
 }
 
 export default icons

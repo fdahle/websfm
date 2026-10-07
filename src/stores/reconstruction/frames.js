@@ -1,7 +1,13 @@
 import { computed } from 'vue'
 import { metresPerCrsUnit, linearCrsUnit } from '../../core/crs.js'
 
-export function createFrameResolver({ mainSparseCloud, validGeoref, currentCrs, georeference, scaleFit, scaleFitStatus, log }) {
+export function createFrameResolver({
+  mainSparseCloud, validGeoref, currentCrs, georeference, scaleFit, scaleFitStatus, log,
+  // () => { origin, east, north, up } | null — the user's Orient model basis
+  // (core/products/orientation.js) when one is set and current. It shapes the LOCAL
+  // frame only: a georeference outranks it, exactly as it outranks scale bars.
+  orientationBasis = () => null,
+}) {
   // ── THE unit resolver (D2) ───────────────────────────────────────────────────
   // One place decides what frame a product is built in and what a length in it
   // MEANS. Evidence rank is `CRS georeference > scale constraints > none`, and
@@ -27,6 +33,12 @@ export function createFrameResolver({ mainSparseCloud, validGeoref, currentCrs, 
     return { unit, metresPerUnit }
   }
   const metricScale = g => g.sim.scale * georefUnits(g.crs).metresPerUnit
+  // A local frame spec's explicit basis from the user orientation, or nothing (the
+  // worker then derives the auto frame). makeFrame-ready: { origin, east, north, up }.
+  function orientedBasis() {
+    const b = orientationBasis()
+    return b ? { origin: b.origin, east: b.east, north: b.north, up: b.up, crs: 'local', source: 'orientation' } : {}
+  }
 
   async function effectiveFrameSpec(opts = {}) {
     const stamp = (() => {
@@ -70,7 +82,7 @@ export function createFrameResolver({ mainSparseCloud, validGeoref, currentCrs, 
     const status = scaleFitStatus()
     if (status.valid) {
       return {
-        frameSpec: { kind: 'scaled-local', scale: scaleFit.value.scale },
+        frameSpec: { kind: 'scaled-local', scale: scaleFit.value.scale, ...orientedBasis() },
         unit: 'm', scale: scaleFit.value.scale, source: 'scalebars', crs: 'local', stamp,
       }
     }
@@ -81,7 +93,7 @@ export function createFrameResolver({ mainSparseCloud, validGeoref, currentCrs, 
 
     // 3. Nothing. Up-to-scale model units — and every readout must SAY so rather
     //    than printing a bare number (D9).
-    return { frameSpec: { kind: 'local' }, unit: 'model', scale: 1, source: null, crs: 'local', stamp }
+    return { frameSpec: { kind: 'local', ...orientedBasis() }, unit: 'model', scale: 1, source: null, crs: 'local', stamp }
   }
 
   // A SYNC signature of what currently defines the unit — `{ source, scale, crs }`.
@@ -96,11 +108,11 @@ export function createFrameResolver({ mainSparseCloud, validGeoref, currentCrs, 
         frameKey: JSON.stringify(frameSpec) }
     }
     if (scaleFitStatus().valid) {
-      const frameSpec = { kind: 'scaled-local', scale: scaleFit.value.scale }
+      const frameSpec = { kind: 'scaled-local', scale: scaleFit.value.scale, ...orientedBasis() }
       return { source: 'scalebars', scale: scaleFit.value.scale, crs: 'local',
         frameKey: JSON.stringify(frameSpec) }
     }
-    return { source: null, scale: 1, crs: 'local', frameKey: JSON.stringify({ kind: 'local' }) }
+    return { source: null, scale: 1, crs: 'local', frameKey: JSON.stringify({ kind: 'local', ...orientedBasis() }) }
   })
 
   // Is a persisted product still expressed in the frame the project now uses?

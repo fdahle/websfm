@@ -1,5 +1,5 @@
 <script setup>
-import './stores/useMeasurementsStore.js'
+import { useMeasurementsStore } from './stores/useMeasurementsStore.js'
 import { pendingPersistence, persistenceFailures, retryPersistence } from './utils/persistence.js'
 import { ref, computed, reactive, watch, onMounted, nextTick, defineAsyncComponent } from 'vue'
 import { storeToRefs } from 'pinia'
@@ -36,6 +36,23 @@ import { useImagesStore } from './stores/useImagesStore.js'
 import { useMatchesStore } from './stores/useMatchesStore.js'
 import { useTabs } from './composables/useTabs.js'
 import { useImageViewSettings } from './composables/useImageViewSettings.js'
+import { useViewerSettings } from './composables/useViewerSettings.js'
+import { showToast } from './composables/useToasts.js'
+import { downloadBlob } from './utils/download.js'
+import { terminateAll } from './workers/computeClient.js'
+import ImageQualityModal from './components/modals/ImageQualityModal.vue'
+import TransformCloudModal from './components/modals/TransformCloudModal.vue'
+import AlignIcpModal from './components/modals/AlignIcpModal.vue'
+import CloudDistanceModal from './components/modals/CloudDistanceModal.vue'
+import OptimizeCamerasModal from './components/modals/OptimizeCamerasModal.vue'
+import RegionToolbox from './components/viewers/RegionToolbox.vue'
+import OrientToolbox from './components/viewers/OrientToolbox.vue'
+import AlignPairsToolbox from './components/viewers/AlignPairsToolbox.vue'
+import { normalizeRegion, regionFromPositions } from './core/products/region.js'
+import { normalizeOrientation, upFromPlane } from './core/products/orientation.js'
+import { planeFromThreePoints } from './core/products/screenPick.js'
+import { matrixFromTransform } from './core/products/cloudAlign.js'
+import { sectionCloud, sectionToCsv, sectionToDxf } from './core/products/cloudSection.js'
 import { imageResidualVectors } from './core/eval/imageStats.js'
 import { makeCanonicalToScan, makeFrameModelResolver } from './core/sfm/displayFrame.js'
 import { useProjectsStore } from './stores/useProjectsStore.js'
@@ -74,6 +91,17 @@ import DenseModal from './components/modals/DenseModal.vue'
 import DemModal from './components/modals/DemModal.vue'
 import MeshModal from './components/modals/MeshModal.vue'
 import FilterCloudModal from './components/modals/FilterCloudModal.vue'
+import GradualSelectionModal from './components/modals/GradualSelectionModal.vue'
+import CleanMeshModal from './components/modals/CleanMeshModal.vue'
+import SmoothMeshModal from './components/modals/SmoothMeshModal.vue'
+import DecimateMeshModal from './components/modals/DecimateMeshModal.vue'
+import SampleMeshModal from './components/modals/SampleMeshModal.vue'
+import MeshMeasureModal from './components/modals/MeshMeasureModal.vue'
+import NormalsModal from './components/modals/NormalsModal.vue'
+import SectionModal from './components/modals/SectionModal.vue'
+import ContoursModal from './components/modals/ContoursModal.vue'
+import TerrainModal from './components/modals/TerrainModal.vue'
+import ClipRasterModal from './components/modals/ClipRasterModal.vue'
 import CropCloudModal from './components/modals/CropCloudModal.vue'
 import MergeCloudsModal from './components/modals/MergeCloudsModal.vue'
 import OrthoModal from './components/modals/OrthoModal.vue'
@@ -94,7 +122,7 @@ import RasterStyleModal from './components/modals/RasterStyleModal.vue'
 import * as opfs from './utils/opfs.js'
 import { ensureProjection } from './core/crs.js'
 import { resolveK } from './core/sfm/reconstruction.js'
-import { estimateUpFromCameras } from './core/sfm/geometry.js'
+import { estimateUpFromCameras, cameraCenter } from './core/sfm/geometry.js'
 import { CORNER_SLOTS, SIDE_SLOTS } from './core/sfm/fiducialModel.js'
 import { useSfmInterop } from './composables/useSfmInterop.js'
 
@@ -126,7 +154,7 @@ const {
 
 // ── Images ────────────────────────────────────────────────────────────────────
 const imagesStore = useImagesStore()
-const { images, selectedId, keypointReadyImages, pendingWorkCount: pendingImageWork } = storeToRefs(imagesStore)
+const { images, imageGroups, selectedId, keypointReadyImages, pendingWorkCount: pendingImageWork } = storeToRefs(imagesStore)
 const {
   imageById, selectImage,
   addImages, removeImage, renameImage,
@@ -233,6 +261,19 @@ function renameImageFromSidebar({ id, name }) {
     const nameA = imageById(tab.imageIdA)?.name ?? tab.imageIdA
     const nameB = imageById(tab.imageIdB)?.name ?? tab.imageIdB
     tab.title = `${nameA.replace(/\.[^.]+$/, '')} ↔ ${nameB.replace(/\.[^.]+$/, '')}`
+  }
+}
+
+// Sidebar image-group edits (ImagesSection's 'image-group' event). Display-only:
+// nothing here touches tabs or any pipeline state.
+function onImageGroupAction(a) {
+  switch (a.op) {
+    case 'create':   imagesStore.createImageGroup({ id: a.id, imageIds: a.imageIds }); break
+    case 'rename':   imagesStore.renameImageGroup(a.id, a.name); break
+    case 'remove':   imagesStore.removeImageGroup(a.id); break
+    case 'assign':   imagesStore.setImagesGroup(a.imageIds, a.groupId); break
+    case 'collapse': imagesStore.setImageGroupCollapsed(a.id, a.collapsed); break
+    case 'move':     imagesStore.moveImageGroup(a.id, a.delta); break
   }
 }
 
@@ -573,7 +614,7 @@ const {
   imageTableOpen, poseTableOpen, maskManagerOpen, autoMaskOpen, sensorTableOpen, gcpTableOpen, matchListOpen, reconstructOpen,
   findGcpsOpen, georeferenceOpen, scaleBarsOpen,
   depthMapsOpen, denseOpen, demOpen, orthoOpen, meshOpen,
-  cropCloudOpen, filterCloudOpen, mergeCloudsOpen,
+  cropCloudOpen, filterCloudOpen, mergeCloudsOpen, filterCloudPreset, toolModal,
   gcpImportOpen, gcpImportText, gcpImportName, gcpImportGeojson, gcpImportCrs,
   footprintImportOpen, footprintImportData, footprintFromPosesOpen,
   cameraImportOpen, cameraImportText, cameraImportName, cameraImportMode,
@@ -684,6 +725,11 @@ const meshReady = computed(() => clouds.value.some((c) => c.kind === 'mesh' && c
 // or imported. Sparse clouds are excluded on purpose — their points carry the
 // view-tracks dense/ortho/COLMAP-export read (see core/products/cloudEdit.js).
 const editableClouds = computed(() => clouds.value.filter((c) => c.kind === 'dense' && c.count > 0))
+// What the Mesh ▾ tools act on: every non-empty mesh (computed, imported or edited).
+const meshClouds = computed(() => clouds.value.filter((c) => c.kind === 'mesh' && c.count > 0))
+// A tool dialog starts on the cloud/mesh the user has selected, when it fits.
+const toolInitialId = computed(() => selectedCloudId.value)
+const measurementsStore = useMeasurementsStore()
 const demReady = computed(() => !!dem.value)
 const orthoReady = computed(() => !!ortho.value)
 const productReady = computed(() => !!dem.value || !!ortho.value)
@@ -698,21 +744,25 @@ const kpImageCount = computed(() => keypointReadyImages.value.length)
 // they can't be launched mid-import against not-yet-ready images.
 const imagesLoading = computed(() => images.value.some(img => img.loading || img.previewPending))
 
-// Guard state for the DevConsole command line — same prerequisite flags the
-// ribbon uses to enable/disable buttons (see core/help/commands.js guardReason).
+// Guard state for BOTH the ribbon and the DevConsole command line: the fields the
+// one shared prerequisite table reads (core/help/commands.js NEED_CHECKS).
 const commandState = computed(() => ({
   projectReady:  !!currentProjectId.value,
   imageCount:    images.value.length,
   imagesLoading: imagesLoading.value,
+  hasSelection:  !!selected.value,
   kpImageCount:  kpImageCount.value,
   matchCount:    usableMatchCount.value,
   gcpCount:      gcps.value.length,
   poseCount:     poses.value.length,
+  footprintCount: footprintCount.value,
   sensorCount:   sensors.value.length,
   filmSensorCount: filmSensors.value.length,
   sparseReady:   sparseReady.value,
   depthMapCount: depthMapCount.value,
   cloudReady:    cloudReady.value,
+  denseReady:    denseReady.value,
+  editableCloudCount: editableClouds.value.length,
   demReady:      demReady.value,
   meshReady:     meshReady.value,
   orthoReady:    orthoReady.value,
@@ -1051,7 +1101,10 @@ const mapViewerRef = ref(null)
 // a dense/mesh cloud (which carries no cameras of its own) still frames level, the
 // same way COLMAP/Metashape orient the view (see estimateUpFromCameras). Derived from
 // the sparse cameras, so it's stable across sparse↔dense↔mesh selections.
-const viewerSceneUp = computed(() => estimateUpFromCameras(sparseCameras.value))
+// A user orientation (Orient model) defines up; otherwise it is estimated from the cameras.
+const viewerSceneUp = computed(() => (reconstructionStore.orientationState.active
+  ? normalizeOrientation(reconstructionStore.orientation).up
+  : estimateUpFromCameras(sparseCameras.value)))
 
 // Queue layer changes while the 3D tab is hidden. Each cloud has its own GPU
 // object; selection no longer replaces the other visible layers.
@@ -1081,6 +1134,173 @@ const showLegend = ref(false)
 // no longer clutters a bare basemap.
 const showFootprints = ref(true)
 const showMapGrid = ref(true)
+// Modes entered from the ribbon and left from there or the tool's floating
+// toolbox: the 3D selection tool (reported up by Viewer3D) and map GCP editing.
+const selectTool3d = ref(null)   // null | 'rect' | 'lasso'
+const mapGcpEdit = ref(false)
+// Tools ▸ Model ▾ ▸ Region: the toolbox edits a draft; Apply stores it.
+const regionEdit = ref(false)
+const regionDraft = ref({ min: [0, 0, 0], max: [1, 1, 1] })
+// Fit the draft around the sparse model's points, or the dense cloud the user is
+// working on (selected, else the first computed one), ignoring the farthest 2 %.
+function fitRegionDraft(what) {
+  let positions = null
+  if (what === 'dense') {
+    const dense = editableClouds.value.find((c) => c.id === selectedCloudId.value && !c.imported)
+      ?? editableClouds.value.find((c) => !c.imported)
+    positions = dense ? dense.pos.subarray(0, dense.count * 3) : null
+  } else {
+    const pts = reconstructionStore.mainSparseCloud?.points ?? []
+    positions = new Float64Array(pts.length * 3)
+    pts.forEach((p, i) => { positions[i * 3] = p.x; positions[i * 3 + 1] = p.y; positions[i * 3 + 2] = p.z })
+  }
+  const box = positions ? regionFromPositions(positions) : null
+  if (box) regionDraft.value = box
+}
+function openRegionTool() {
+  activateTab('viewer')
+  const saved = normalizeRegion(reconstructionStore.region)
+  if (saved && reconstructionStore.regionState.active) regionDraft.value = { min: [...saved.min], max: [...saved.max] }
+  else fitRegionDraft('sparse')
+  regionEdit.value = true
+}
+function applyRegion() {
+  if (reconstructionStore.setRegion(regionDraft.value)) regionEdit.value = false
+}
+function removeRegion() {
+  reconstructionStore.clearRegion()
+  regionEdit.value = false
+}
+// ── Tools ▸ Model ▾ ▸ Orient model ─────────────────────────────────────────────
+const orientEdit = ref(false)
+const orientDraft = ref({ up: [0, 0, 1], origin: [0, 0, 0], headingDeg: 0 })
+const orientPicking = ref(null)        // null | 'plane' | 'origin'
+const orientPlanePicks = ref([])       // up to 3 picked positions
+const sparseCentre = () => {
+  const pts = reconstructionStore.mainSparseCloud?.points ?? []
+  if (!pts.length) return [0, 0, 0]
+  let x = 0, y = 0, z = 0
+  for (const p of pts) { x += p.x; y += p.y; z += p.z }
+  return [x / pts.length, y / pts.length, z / pts.length]
+}
+const cameraCentres = () => [...(reconstructionStore.mainSparseCloud?.cameras?.values() ?? [])].map((c) => cameraCenter(c))
+function openOrientTool() {
+  activateTab('viewer')
+  const saved = normalizeOrientation(reconstructionStore.orientation)
+  orientDraft.value = saved && reconstructionStore.orientationState.active
+    ? { up: [...saved.up], origin: [...saved.origin], headingDeg: saved.headingDeg }
+    : { up: [...(estimateUpFromCameras(sparseCameras.value) ?? [0, 0, 1])], origin: sparseCentre(), headingDeg: 0 }
+  orientPicking.value = null
+  orientPlanePicks.value = []
+  orientEdit.value = true
+}
+function orientPick(position) {
+  if (orientPicking.value === 'origin') {
+    orientDraft.value = { ...orientDraft.value, origin: position }
+    orientPicking.value = null
+    return
+  }
+  orientPlanePicks.value = [...orientPlanePicks.value, position]
+  if (orientPlanePicks.value.length < 3) return
+  const [a, b, c] = orientPlanePicks.value
+  const plane = planeFromThreePoints(a, b, c)
+  if (!plane) {
+    log('Orient model: the three points are (nearly) on one line — pick a wider triangle', 'warn', 'Reconstruction')
+  } else {
+    const up = upFromPlane(plane.normal, plane.point, cameraCentres())
+    orientDraft.value = { ...orientDraft.value, up }
+  }
+  orientPicking.value = null
+  orientPlanePicks.value = []
+}
+function applyOrientation() {
+  if (reconstructionStore.setOrientation(orientDraft.value)) orientEdit.value = false
+}
+function removeOrientation() {
+  reconstructionStore.clearOrientation()
+  orientEdit.value = false
+}
+
+// ── Tools ▸ Point Cloud ▾ ▸ Align by point pairs ───────────────────────────────
+// null, or { sourceId, referenceId, pairs: [{ src, dst|null }], allowScale }.
+const alignPairs = ref(null)
+const alignReferences = computed(() => [...editableClouds.value, ...meshClouds.value])
+function openAlignPairs() {
+  activateTab('viewer')
+  const sourceId = editableClouds.value.find((c) => c.id === selectedCloudId.value)?.id ?? editableClouds.value[0]?.id ?? null
+  const referenceId = alignReferences.value.find((c) => c.id !== sourceId)?.id ?? null
+  alignPairs.value = { sourceId, referenceId, pairs: [], allowScale: false }
+}
+function alignPick(position, cloudId) {
+  const a = alignPairs.value
+  const last = a.pairs[a.pairs.length - 1]
+  if (last && !last.dst) {
+    if (cloudId !== a.referenceId) return
+    a.pairs = [...a.pairs.slice(0, -1), { ...last, dst: position }]
+  } else {
+    if (cloudId !== a.sourceId) return
+    a.pairs = [...a.pairs, { src: position, dst: null }]
+  }
+}
+async function applyAlignPairs(transform) {
+  const a = alignPairs.value
+  const source = editableClouds.value.find((c) => c.id === a.sourceId)
+  alignPairs.value = null
+  await runEditClouds({
+    mode: 'transform', sourceIds: [a.sourceId],
+    settings: { matrix: matrixFromTransform(transform) },
+    name: `${source?.name ?? 'Cloud'} (aligned)`,
+  })
+}
+
+// One pick dispatcher for the 3D view: whichever tool is waiting gets the click.
+const viewerPickMode = computed(() => {
+  if (orientEdit.value && orientPicking.value) return {}
+  const a = alignPairs.value
+  if (a) {
+    const last = a.pairs[a.pairs.length - 1]
+    return { cloudIds: [last && !last.dst ? a.referenceId : a.sourceId].filter(Boolean) }
+  }
+  return null
+})
+function onViewerPick({ position, cloudId }) {
+  if (orientEdit.value && orientPicking.value) orientPick(position)
+  else if (alignPairs.value) alignPick(position, cloudId)
+}
+// Markers: point pairs (orange = to move, blue = reference), the ground picks
+// (green) and the chosen origin (white).
+const viewerMarkers = computed(() => {
+  const out = []
+  if (alignPairs.value) {
+    for (const p of alignPairs.value.pairs) {
+      out.push({ position: p.src, color: '#ff8c1a' })
+      if (p.dst) out.push({ position: p.dst, color: '#2f9bff' })
+    }
+  }
+  if (orientEdit.value) {
+    for (const p of orientPlanePicks.value) out.push({ position: p, color: '#3ccf6e' })
+    out.push({ position: orientDraft.value.origin, color: '#ffffff' })
+  }
+  return out
+})
+
+// What the 3D view draws: the draft while editing, else the saved box (dim if stale).
+const viewerRegionBox = computed(() => (regionEdit.value ? regionDraft.value : normalizeRegion(reconstructionStore.region)))
+const viewerRegionStale = computed(() => !regionEdit.value && reconstructionStore.regionState.reason === 'stale')
+const { pointSize, setPointSize, cameraScale, setCameraScale } = useViewerSettings()
+// Everything the ribbon's View tab shows as on / as a stepper value.
+const ribbonViewState = computed(() => ({
+  showCameras: showCameras.value,
+  showGrid: showGrid.value,
+  showLegend: showLegend.value,
+  showMapGrid: showMapGrid.value,
+  showFootprints: showFootprints.value,
+  pointSize: pointSize.value,
+  cameraScale: cameraScale.value,
+  selectRect: selectTool3d.value === 'rect',
+  selectLasso: selectTool3d.value === 'lasso',
+  mapGcpEdit: mapGcpEdit.value,
+}))
 
 // ── Console ───────────────────────────────────────────────────────────────────
 // True while a project is being restored — drives the interaction-blocking overlay.
@@ -1117,6 +1337,10 @@ onMounted(async () => {
         const tab = activeTab.value
         if (tab?.type === 'image' && imageViewPrefs.value.maskEdit) patchImageView({ maskEdit: false })
         else if (tab?.type === 'image' && imageViewPrefs.value.gcpEdit) exitGcpEdit()
+        else if (regionEdit.value) regionEdit.value = false
+        else if (orientEdit.value) { if (orientPicking.value) orientPicking.value = null; else orientEdit.value = false }
+        else if (alignPairs.value) alignPairs.value = null
+        else if (mapGcpEdit.value && tab?.id === 'map') mapGcpEdit.value = false
       }
     }
   })
@@ -1205,6 +1429,7 @@ function zoomToShapefile(id) {
 // ── Export (camera params + products) ───────────────────────────────────────────
 const {
   exportKind, exportPoses, exportSensors, exportKeypoints, exportMatches, onExportRun,
+  exportContours, exportTerrain, exportClipped,
 } = useExports({
   poses, sensors, images, matchStore, clouds, selectedCloud, mainSparseCloud, dem, ortho,
   georef, currentProjectName, currentCrs, summary: reconSummary, progress: exportProgress,
@@ -1272,8 +1497,15 @@ async function onMeshRun(settings)  { meshOpen.value = false;  await runGenerate
 async function onCropCloudRun(req)   { cropCloudOpen.value = false;   await runEditClouds({ ...req, mode: 'crop' }) }
 async function onFilterCloudRun(req) {
   filterCloudOpen.value = false
-  const result = await runEditClouds({ ...req, mode: req.mode === 'sparse' ? 'sparse' : 'filter' })
-  if (req.mode === 'sparse' && result.ok) {
+  filterCloudPreset.value = null
+  await runEditClouds({ ...req, mode: 'filter' })
+}
+// Sparse gradual selection (Tools ▸ Model ▾): retires the model's computed
+// dependents, so their open product tabs close with it.
+async function onGradualSelectionRun(req) {
+  toolModal.value = null
+  const result = await runEditClouds({ ...req, mode: 'sparse' })
+  if (result.ok) {
     for (const tab of [...tabs.value]) if (tab.type === 'product') closeTab(tab.id)
   }
 }
@@ -1518,9 +1750,113 @@ const EVAL_SECTIONS = {
   'eval-depth-coverage': 'dense',
 }
 
-function handleCommand(id) {
+// Tools-tab dialogs that share the one `toolModal` slot (see useModalsStore): the
+// command id IS the slot value, and the template mounts the matching dialog.
+const TOOL_MODALS = new Set([
+  'gradual-selection',
+  // Point Cloud ▾
+  'estimate-normals', 'cloud-section', 'transform-cloud', 'align-icp', 'cloud-distance',
+  // Mesh ▾
+  'clean-mesh', 'smooth-mesh', 'decimate-mesh', 'crop-mesh', 'mesh-to-points', 'mesh-measure',
+  // Products ▾
+  'dem-contours', 'dem-derivatives', 'clip-raster',
+  // Images ▾
+  'image-quality',
+  // Model ▾
+  'optimize-cameras',
+])
+
+async function onOptimizeCamerasRun(req) {
+  toolModal.value = null
+  const result = await runEditClouds({ ...req, mode: 'optimize' })
+  if (result.ok) {
+    for (const tab of [...tabs.value]) if (tab.type === 'product') closeTab(tab.id)
+  }
+}
+
+// Image quality: scoring runs behind the shared progress bar; the dialog stays open
+// underneath and fills in as the scores land.
+async function onImageQualityEstimate(ids) {
+  const total = ids?.length ?? images.value.length
+  exportProgress.open('Scoring Image Quality', total, () => terminateAll('image quality cancelled'), { unit: 'images' })
+  try {
+    await imagesStore.estimateImageQuality(ids, { onProgress: (d, t) => exportProgress.report(d, t, 'Scoring images') })
+  } finally {
+    await exportProgress.close()
+  }
+}
+function onImageQualityGroup(ids) {
+  imagesStore.createImageGroup({ name: 'Low image quality', imageIds: ids })
+}
+function onImageQualityRemove(ids) {
+  toolModal.value = null
+  requestRemoveImages(ids)
+}
+
+// Tools-tab edits that run through the store's cloud-edit path: dialog id → edit
+// mode (core/products/* via workers/ops/cloud.js). Non-destructive, every one.
+const TOOL_EDIT_MODES = {
+  'estimate-normals': 'normals',
+  'transform-cloud': 'transform',
+  'align-icp': 'icp',
+  'cloud-distance': 'distance',
+  'clean-mesh': 'mesh-clean',
+  'smooth-mesh': 'mesh-smooth',
+  'decimate-mesh': 'mesh-decimate',
+  'crop-mesh': 'mesh-crop',
+  'mesh-to-points': 'mesh-sample',
+}
+async function onToolEditRun(req) {
+  const mode = TOOL_EDIT_MODES[toolModal.value]
+  toolModal.value = null
+  if (mode === 'distance') req = { ...req, style: distanceStyle(req.settings.signed) }
+  if (mode) await runEditClouds({ ...req, mode })
+}
+// A distance result opens coloured by distance: a signed one on the diverging ramp
+// with a symmetric range (white = no change), an unsigned one sequential from 0.
+// The range is the 95th-percentile magnitude so a few far points don't wash it out.
+function distanceStyle(signed) {
+  return (stats) => {
+    const m = stats?.p95Abs > 0 ? stats.p95Abs : (Math.max(Math.abs(stats?.min ?? 0), Math.abs(stats?.max ?? 0)) || 1)
+    return signed
+      ? { field: 'attribute:distance', ramp: 'rdbu', range: 'manual', min: -m, max: m }
+      : { field: 'attribute:distance', ramp: 'viridis', range: 'manual', min: 0, max: m }
+  }
+}
+// Section: the slice is added as a cloud, then its 2D profile downloaded. The
+// profile is recomputed from the (small) slice itself, so the worker result stays
+// a plain cloud like every other edit.
+async function onSectionRun({ download, ...req }) {
+  toolModal.value = null
+  const ok = await runEditClouds({ ...req, mode: 'section' })
+  if (!ok || download === 'none') return
+  const slice = reconstructionStore.selectedCloud
+  if (!slice?.count) return
+  const section = sectionCloud(slice, { ...req.settings, thickness: req.settings.thickness * 1.000001 })
+  const base = `${currentProjectName.value || 'project'}-section`
+  if (download === 'dxf') downloadBlob(`${base}.dxf`, sectionToDxf(section), 'application/dxf')
+  else downloadBlob(`${base}.csv`, sectionToCsv(section), 'text/csv;charset=utf-8')
+}
+async function onProductToolRun(fn, settings) {
+  toolModal.value = null
+  try { await fn(settings) } catch (err) {
+    log(`${err?.message ?? err}`, 'error', 'Export')
+    showToast('Export failed', { detail: String(err?.message ?? err), kind: 'error', ms: 6000 })
+  }
+}
+
+// Filter Cloud deep links: the same dialog, starting on one method.
+const FILTER_DEEP_LINKS = { 'cloud-outliers': 'sor', 'cloud-subsample': 'voxel' }
+
+// `value` is set only by a ribbon stepper (the new display value).
+function handleCommand(id, value) {
+  // A deep link's starting method must not leak into a plain "Filter…" (Escape
+  // closes the dialog without passing through its @close handler).
+  if (id === 'filter-cloud') filterCloudPreset.value = null
   const modal = MODAL_COMMANDS[id]
   if (modal) { modal.value = true; return }
+  if (TOOL_MODALS.has(id)) { toolModal.value = id; return }
+  if (FILTER_DEEP_LINKS[id]) { filterCloudPreset.value = FILTER_DEEP_LINKS[id]; filterCloudOpen.value = true; return }
   if (EVAL_SECTIONS[id]) { openQuality(EVAL_SECTIONS[id]); return }
   // 3D view presets: 'view-preset-top' → setView('top').
   if (id.startsWith('view-preset-')) { viewerRef.value?.setView(id.slice('view-preset-'.length)); return }
@@ -1559,6 +1895,23 @@ function handleCommand(id) {
     case 'map-fit-view':         mapViewerRef.value?.fitView(); break
     case 'map-toggle-grid': showMapGrid.value = !showMapGrid.value; break
     case 'map-toggle-footprints': showFootprints.value = !showFootprints.value; break
+    case 'map-gcp-edit':         mapGcpEdit.value = !mapGcpEdit.value; break
+    case 'set-region':           openRegionTool(); break
+    case 'orient-model':         openOrientTool(); break
+    case 'align-points':         openAlignPairs(); break
+    case 'view-point-size':      setPointSize(value); break
+    case 'view-camera-scale':    setCameraScale(value); break
+    case 'view-select-rect':     viewerRef.value?.toggleSelectTool('rect'); break
+    case 'view-select-lasso':    viewerRef.value?.toggleSelectTool('lasso'); break
+    // From the Point Cloud menu: bring the 3D view forward and make sure a tool is
+    // on (never toggle it off, which the ribbon's own Lasso button would).
+    case 'select-points':
+      activateTab('viewer')
+      if (!selectTool3d.value) viewerRef.value?.toggleSelectTool('lasso')
+      break
+    case 'img-fit':              if (activeImageTab.value) imageViewerRefs[activeImageTab.value.id]?.fit(); break
+    case 'img-zoom-in':          if (activeImageTab.value) imageViewerRefs[activeImageTab.value.id]?.zoomIn(); break
+    case 'img-zoom-out':         if (activeImageTab.value) imageViewerRefs[activeImageTab.value.id]?.zoomOut(); break
     case 'detect-fiducials':     openFiducialDetect(); break
     case 'calibrate-fiducials':  openFiducialCalibrate(); break
     case 'open-gcp-table':       gcpTableOpen.value = true; refreshGcpReport(); break
@@ -1656,24 +2009,8 @@ function onRibbonPick(event) {
     <ToastStack />
     <Ribbon
       :active-view="activeView"
-      :has-selection="!!selected"
-      :image-count="images.length"
-      :images-loading="imagesLoading"
-      :match-count="matchSummaries.length"
-      :kp-image-count="kpImageCount"
-      :gcp-count="gcps.length"
-      :pose-count="poses.length"
-      :sensor-count="sensors.length"
-      :film-sensor-count="filmSensors.length"
-      :sparse-ready="sparseReady"
-      :depth-map-count="depthMapCount"
-      :cloud-ready="cloudReady"
-      :dense-ready="denseReady"
-      :editable-cloud-count="editableClouds.length"
-      :mesh-ready="meshReady"
-      :dem-ready="demReady"
-      :ortho-ready="orthoReady"
-      :product-ready="productReady"
+      :state="commandState"
+      :view-state="ribbonViewState"
       :active-image-id="activeImageTab?.id ?? null"
       :active-image-name="activeImageTab?.name ?? null"
       :image-view-state="activeImageViewState"
@@ -1682,12 +2019,6 @@ function onRibbonPick(event) {
       :persistence-enabled="persistenceAvailable"
       :current-project-name="currentProjectName"
       :scene-type="currentSceneType"
-      :show-cameras="showCameras"
-      :show-grid="showGrid"
-      :show-legend="showLegend"
-      :show-map-grid="showMapGrid"
-      :show-footprints="showFootprints"
-      :footprint-count="footprintCount"
       @command="handleCommand"
     />
     <input ref="ribbonInput" type="file" accept="image/*" multiple hidden @change="onRibbonPick" />
@@ -1852,6 +2183,7 @@ function onRibbonPick(event) {
         :kind="exportKind"
         :has-georef="!!georef"
         :has-scale="scaleFitValid || georef?.crs === currentCrs"
+        :has-orientation="reconstructionStore.orientationState.active"
         @close="exportKind = null"
         @run="onExportRun"
       />
@@ -1936,12 +2268,57 @@ function onRibbonPick(event) {
     <Teleport to="body">
       <FilterCloudModal
         v-if="filterCloudOpen"
-        :sparse-cloud="reconstructionStore.mainSparseCloud"
         :clouds="editableClouds"
         :merge-cell="denseSummary?.mergeCell ?? 0"
-        @close="filterCloudOpen = false"
+        :start-method="filterCloudPreset"
+        @close="filterCloudOpen = false; filterCloudPreset = null"
         @run="onFilterCloudRun"
       />
+    </Teleport>
+
+    <Teleport to="body">
+      <GradualSelectionModal
+        v-if="toolModal === 'gradual-selection' && reconstructionStore.mainSparseCloud"
+        :cloud="reconstructionStore.mainSparseCloud"
+        @close="toolModal = null"
+        @run="onGradualSelectionRun"
+      />
+    </Teleport>
+
+    <!-- Tools ▸ Point Cloud ▾ / Mesh ▾ / Products ▾ — one shared slot (toolModal). -->
+    <Teleport to="body">
+      <NormalsModal v-if="toolModal === 'estimate-normals'" :clouds="editableClouds" :initial-id="toolInitialId"
+        :cameras="reconstructionStore.mainSparseCloud?.cameras ?? null" @close="toolModal = null" @run="onToolEditRun" />
+      <TransformCloudModal v-else-if="toolModal === 'transform-cloud'" :clouds="editableClouds" :initial-id="toolInitialId"
+        @close="toolModal = null" @run="onToolEditRun" />
+      <AlignIcpModal v-else-if="toolModal === 'align-icp'" :clouds="editableClouds" :references="[...editableClouds, ...meshClouds]"
+        :initial-id="toolInitialId" @close="toolModal = null" @run="onToolEditRun" />
+      <CloudDistanceModal v-else-if="toolModal === 'cloud-distance'" :clouds="editableClouds" :references="[...editableClouds, ...meshClouds]"
+        :initial-id="toolInitialId" @close="toolModal = null" @run="onToolEditRun" />
+      <SectionModal v-else-if="toolModal === 'cloud-section'" :clouds="editableClouds" :initial-id="toolInitialId"
+        :frame-signature="reconstructionStore.currentFrameSignature" @close="toolModal = null" @run="onSectionRun" />
+      <CleanMeshModal v-else-if="toolModal === 'clean-mesh'" :meshes="meshClouds" :initial-id="toolInitialId"
+        @close="toolModal = null" @run="onToolEditRun" />
+      <SmoothMeshModal v-else-if="toolModal === 'smooth-mesh'" :meshes="meshClouds" :initial-id="toolInitialId"
+        @close="toolModal = null" @run="onToolEditRun" />
+      <DecimateMeshModal v-else-if="toolModal === 'decimate-mesh'" :meshes="meshClouds" :initial-id="toolInitialId"
+        @close="toolModal = null" @run="onToolEditRun" />
+      <CropCloudModal v-else-if="toolModal === 'crop-mesh'" mesh :clouds="meshClouds" :initial-id="toolInitialId"
+        @close="toolModal = null" @run="onToolEditRun" />
+      <SampleMeshModal v-else-if="toolModal === 'mesh-to-points'" :meshes="meshClouds" :initial-id="toolInitialId"
+        @close="toolModal = null" @run="onToolEditRun" />
+      <MeshMeasureModal v-else-if="toolModal === 'mesh-measure'" :meshes="meshClouds" :initial-id="toolInitialId"
+        :frame-signature="reconstructionStore.currentFrameSignature" @close="toolModal = null" />
+      <ContoursModal v-else-if="toolModal === 'dem-contours'" :dem="dem"
+        @close="toolModal = null" @run="(s) => onProductToolRun(exportContours, s)" />
+      <TerrainModal v-else-if="toolModal === 'dem-derivatives'" :dem="dem"
+        @close="toolModal = null" @run="(s) => onProductToolRun(exportTerrain, s)" />
+      <OptimizeCamerasModal v-else-if="toolModal === 'optimize-cameras'" :cloud="reconstructionStore.mainSparseCloud"
+        :gcp-count="gcps.length" @close="toolModal = null" @run="onOptimizeCamerasRun" />
+      <ImageQualityModal v-else-if="toolModal === 'image-quality'" :images="images"
+        @close="toolModal = null" @estimate="onImageQualityEstimate" @group="onImageQualityGroup" @remove="onImageQualityRemove" />
+      <ClipRasterModal v-else-if="toolModal === 'clip-raster'" :dem="dem" :ortho="ortho" :measurements="measurementsStore.records"
+        @close="toolModal = null" @run="(s) => onProductToolRun(exportClipped, s)" />
     </Teleport>
 
     <Teleport to="body">
@@ -2263,6 +2640,7 @@ function onRibbonPick(event) {
       <Sidebar
         :style="{ width: sidebarWidth + 'px' }"
         :images="images"
+        :image-groups="imageGroups"
         :gcps="gcps"
         :gcp-report="gcpReport"
         :selected-gcp-id="selectedGcpId"
@@ -2307,6 +2685,7 @@ function onRibbonPick(event) {
         @import-file="openDroppedImport"
         @remove-image="requestRemoveImages"
         @rename-image="renameImageFromSidebar"
+        @image-group="onImageGroupAction"
         @convert-image-to-raster="convertImageToRaster"
         @remove-gcp="confirmRemoveGcp"
         @select-gcp="selectGcp"
@@ -2356,8 +2735,24 @@ function onRibbonPick(event) {
         </div>
 
         <div class="content">
-          <Viewer3D ref="viewerRef" v-show="activeTabId === 'viewer'" :theme="theme" :images="images" :show-cameras="showCameras" :show-grid="showGrid" :show-legend="showLegend" :scene-up="viewerSceneUp" @command="handleCommand" @edit-selection="onEditSelection" />
-          <ViewerMap v-if="mapMounted" ref="mapViewerRef" v-show="activeTabId === 'map'" :images="images" :gcps="gcps" :footprints="mapFootprints" :poses="poses" :selected-id="selectedId" :selected-gcp-id="selectedGcpId" :aligned-uuids="alignedUuids" :has-sparse="hasSparse" :crs="currentCrs" :show-footprints="showFootprints" :show-grid="showMapGrid" :rasters="mapRasters" :probe-raster="probeRasterAt" :load-raster="ensureRasterLoaded" @select="selectImage" @command="handleCommand" @select-gcp="selectGcp" @set-gcp-position="setGcpGroundPosition" @add-gcp-at="addGcpAtCoord" @delete-gcp="deleteGcpFromEditor" />
+          <Viewer3D ref="viewerRef" v-show="activeTabId === 'viewer'" :theme="theme" :images="images" :show-cameras="showCameras" :show-grid="showGrid" :show-legend="showLegend" :scene-up="viewerSceneUp" @command="handleCommand" @edit-selection="onEditSelection" @select-tool="(t) => { selectTool3d = t }"
+            :region-box="viewerRegionBox" :region-stale="viewerRegionStale"
+            :pick-mode="viewerPickMode" :markers="viewerMarkers" @pick="onViewerPick">
+            <template #toolbox>
+              <RegionToolbox v-if="regionEdit" v-model="regionDraft" :saved-state="reconstructionStore.regionState.active ? 'active' : (reconstructionStore.region ? 'stale' : 'none')"
+                :can-fit-dense="editableClouds.some((c) => !c.imported)" @fit="fitRegionDraft" @apply="applyRegion" @clear="removeRegion" @close="regionEdit = false" />
+              <OrientToolbox v-if="orientEdit" :draft="orientDraft" :picking="orientPicking" :plane-picks="orientPlanePicks.length"
+                :saved-state="reconstructionStore.orientationState.active ? 'active' : (reconstructionStore.orientation ? 'stale' : 'none')"
+                :georeferenced="!!georef" @pick="(t) => { orientPicking = orientPicking === t ? null : t; orientPlanePicks = [] }"
+                @auto-up="orientDraft = { ...orientDraft, up: [...(estimateUpFromCameras(sparseCameras) ?? [0, 0, 1])] }"
+                @centre-origin="orientDraft = { ...orientDraft, origin: sparseCentre() }" @heading="(h) => { if (Number.isFinite(h)) orientDraft = { ...orientDraft, headingDeg: h } }"
+                @apply="applyOrientation" @clear="removeOrientation" @close="orientEdit = false" />
+              <AlignPairsToolbox v-if="alignPairs" v-model:source-id="alignPairs.sourceId" v-model:reference-id="alignPairs.referenceId"
+                v-model:allow-scale="alignPairs.allowScale" :clouds="editableClouds" :references="alignReferences" :pairs="alignPairs.pairs"
+                @undo="alignPairs.pairs = alignPairs.pairs.slice(0, -1)" @clear="alignPairs.pairs = []" @apply="applyAlignPairs" @close="alignPairs = null" />
+            </template>
+          </Viewer3D>
+          <ViewerMap v-if="mapMounted" ref="mapViewerRef" v-show="activeTabId === 'map'" v-model:gcp-edit="mapGcpEdit" :images="images" :gcps="gcps" :footprints="mapFootprints" :poses="poses" :selected-id="selectedId" :selected-gcp-id="selectedGcpId" :aligned-uuids="alignedUuids" :has-sparse="hasSparse" :crs="currentCrs" :show-footprints="showFootprints" :show-grid="showMapGrid" :rasters="mapRasters" :probe-raster="probeRasterAt" :load-raster="ensureRasterLoaded" @select="selectImage" @command="handleCommand" @select-gcp="selectGcp" @set-gcp-position="setGcpGroundPosition" @add-gcp-at="addGcpAtCoord" @delete-gcp="deleteGcpFromEditor" />
           <template v-for="tab in tabs" :key="tab.id">
             <ViewerImage
               v-if="tab.type === 'image' && imageById(tab.imageId)"

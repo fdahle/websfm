@@ -27,7 +27,9 @@ they dominate the image.
 
 For an aerial block, roughly **70–80% forward overlap** and **60–70% side overlap**
 is a useful starting point. Object captures need continuous coverage around the
-subject plus some height variation.
+subject plus some height variation. **Tools → Images ▾ → Image quality** ranks the
+set by sharpness and flags blurred or badly exposed frames before you spend time on
+them (see [Image Quality, Region and Orientation](guide:model-tools)).
 
 16-bit TIFFs (multispectral and scientific cameras) are converted to 8-bit for viewing
 and feature detection by stretching each image between its darkest and brightest
@@ -35,6 +37,15 @@ and feature detection by stretching each image between its darkest and brightest
 contrast. The log records each image's stretch. For a multi-band camera such as a
 MicaSense, import one band (the panchromatic band where there is one); each band file
 is treated as a separate image. Remove frames taken on the ground before takeoff.
+
+**Organising a large set.** Right-click images in the sidebar and choose **New group
+from selection** to put them in a named, collapsible group (for example per flight or
+per strip). Add more images with **Move to group**, or drag rows onto a group header.
+Ctrl-click (⌘-click) and Shift-click select several images. Groups only organise the
+list: they never change detection, matching or reconstruction, and the capture order
+used by sequential matching stays the order the images were imported in. Removing a
+group keeps its images. Images that must share one camera calibration belong in the
+same **sensor**, which is a different thing from a group.
 
 ## 3 · Reconstruct
 Run [Detect Features](guide:detect-features), [Match Features](guide:match-features),
@@ -52,7 +63,8 @@ To save and repeat a sequence of commands, use the
 Camera positions or ground control can place an aerial reconstruction in the project
 CRS. For an object, add a scale bar between two points whose real distance is known.
 Do this before creating final products, because a ground-control adjustment invalidates
-depth maps and downstream products.
+depth maps and downstream products. An object project can also be levelled and given
+an origin with **Tools → Model ▾ → Orient model**.
 
 ## 5 · Make the result
 Build [Depth Maps](guide:depth-maps), fuse them into a [Dense Cloud](guide:dense-cloud),
@@ -62,6 +74,19 @@ then choose the output you need:
 - [DEM](guide:dem) for a gridded elevation surface.
 - [Orthophoto](guide:orthophoto) for scale-correct overhead imagery; it needs depth
   maps plus a DEM or mesh surface.
+
+Clean, align, compare and measure the results with the **Tools** tab's
+[Point Cloud](guide:point-cloud-tools), Mesh and Products menus. A
+**Region** (Tools → Model ▾) keeps depth maps and fusion to the area you care about.
+
+## Where things are
+The ribbon chooses what to do: a dialog, a mode, or a display setting such as point
+and camera size (View → Scene). The **Tools** tab groups its tools by what they act on:
+Images, Model, Point Cloud, Mesh and Products, each a menu. A tool whose prerequisite
+is missing stays in its menu, greyed, with the reason. Interactive tools (selecting
+points, editing masks or ground control, measuring, region, orientation, point-pair
+alignment) open a small floating toolbox over the view. You can drag it by its title,
+and close it with × or Esc.
 
 ## If something goes wrong
 Read the operation log first: it records skipped images, resolved pixel thresholds,

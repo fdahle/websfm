@@ -64,7 +64,7 @@ with the rest of the model. They should be similar; much larger values point to 
 model, for example film scans without fiducials.
 
 ## Sparse gradual selection
-Open **Tools → Point Cloud → Filter Cloud → Sparse gradual selection**. Choose
+Open **Tools → Model ▾ → Gradual selection**. Choose
 reprojection RMS error (select above the threshold), track length (select below),
 or maximum triangulation angle (select below). The slider previews selected and
 remaining counts before **Delete selected + refine**.
@@ -78,3 +78,19 @@ photo measurements. Cancel or solver failure preserves the original model. A
 successful edit replaces the main sparse model and invalidates depth maps, computed
 dense/mesh output, DEM, orthophoto, scale and georeference; rebuild/refit those next.
 Save a project copy first if you want to retain the previous solution.
+
+## Optimize cameras
+**Tools → Model ▾ → Optimize cameras** re-runs bundle adjustment on the finished
+model with the **focal length** free (optionally the **principal point** too),
+shared by every image of a sensor, and every point kept. Use it after adding or
+correcting ground control, or after gradual selection, when the reprojection error
+or the GCP residuals suggest the calibration is slightly off.
+
+It is held to the same ground control and camera positions as the original solve.
+It refuses a change of the focal length larger than 20 %, which is a runaway rather
+than a refinement, and it refuses a solve that raises the residual (unless survey
+constraints explain the increase). Radial distortion stays as the reconstruction
+calibrated it: a different radial term would no longer match the observations the
+dense stage warps by. Re-run the reconstruction with self-calibration to change it.
+Like gradual selection, a successful run replaces the main model in place and clears
+its dense, mesh, DEM, orthophoto, scale and georeference results.

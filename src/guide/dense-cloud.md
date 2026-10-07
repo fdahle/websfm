@@ -34,8 +34,10 @@ Use the 3D viewer to inspect floating clusters, edge shells, holes, and over-smo
 areas. Cloud filtering can remove statistical outliers or isolated components, but
 systematic defects are better fixed in the depth maps, masks, or source imagery.
 
-To remove points by hand, pick the **rectangle** or **lasso** tool under the ⚙ button
-in the 3D viewer and drag around the points. Shift-drag adds to the selection,
+To remove points by hand, pick **Rectangle** or **Lasso** in the ribbon's
+**View → Select** group (or **Tools → Point Cloud ▾ → Select points**), then drag
+around the points in the 3D view. The **Select points** toolbox over the view shows
+the count and the Delete / Keep only / Clear buttons. Shift-drag adds to the selection,
 Alt-drag removes from it, and a plain click clears it. Selected points turn pink.
 Then choose **Delete** (or press Delete) or **Keep only**. Esc while dragging
 abandons that shape; otherwise Esc clears the selection, and a second Esc leaves the

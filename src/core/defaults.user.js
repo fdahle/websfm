@@ -372,6 +372,87 @@ export const MERGE_CLOUDS_DEFAULTS = {
   cell: 0,
 }
 
+// ── Tools ▸ Mesh ▾ (core/products/meshEdit.js, meshDecimate.js) ──────────────
+// Every mesh edit adds a NEW derived mesh; the source is never modified.
+
+// Clean mesh: an ordered chain, each step on the previous output.
+export const CLEAN_MESH_DEFAULTS = {
+  methods: ['components', 'longEdges', 'holes', 'compact'],
+  // Drop pieces smaller than this share of the largest piece (Poisson specks).
+  minFraction: 0.01,
+  minTriangles: 50,
+  // Bridge triangles: any edge longer than this × the median edge.
+  maxEdgeFactor: 6,
+  // Fill boundary loops up to this many edges. A terrain's outer rim is itself a
+  // loop, so "all" (0) closes an open surface — only for objects you want watertight.
+  maxHoleEdges: 64,
+}
+// Taubin λ/μ smoothing: λ > 0 smooths, μ < −λ re-inflates, so the mesh does not
+// shrink the way repeated Laplacian smoothing does.
+export const SMOOTH_MESH_DEFAULTS = {
+  iterations: 10,
+  lambda: 0.5,
+  mu: -0.53,
+  fixBoundary: true,
+}
+export const DECIMATE_MESH_DEFAULTS = {
+  targetMode: 'ratio',      // 'ratio' | 'count'
+  targetRatio: 0.25,
+  targetTriangles: 200_000,
+  preserveBoundary: true,
+}
+export const SAMPLE_MESH_DEFAULTS = {
+  count: 1_000_000,
+}
+
+// ── Tools ▸ Point Cloud ▾ (core/products/cloudNormals.js, cloudAlign.js, …) ──
+
+export const NORMALS_DEFAULTS = {
+  k: 16,
+  // 'auto' ⇒ towards the cameras for a computed cloud, +Z (up) for an imported one.
+  orient: 'auto',           // 'auto' | 'cameras' | 'up' | 'existing'
+}
+export const ICP_DEFAULTS = {
+  maxIterations: 30,
+  // Correspondence rejection radius, in the clouds' units. 0 ⇒ auto (10× the
+  // source's point spacing) — ICP only refines; it needs a rough alignment first.
+  maxDistance: 0,
+  sampleCount: 50_000,
+  pointToPlane: true,
+  estimateScale: false,
+}
+export const DISTANCE_DEFAULTS = {
+  maxDistance: 0,           // 0 ⇒ unlimited
+  signed: true,             // along the reference's normals, when it has them
+}
+export const SECTION_DEFAULTS = {
+  thickness: 0,             // 0 ⇒ auto (about 3× the point spacing)
+  extend: false,
+}
+
+// ── Tools ▸ Products ▾ (core/products/contours.js, terrain.js, rasterClip.js) ─
+
+export const CONTOUR_DEFAULTS = {
+  interval: 0,              // 0 ⇒ auto (≈ 25 levels over the DEM's height range)
+  indexEvery: 5,
+  smooth: 1,
+  minLength: 0,
+  format: 'geojson',        // 'geojson' | 'dxf'
+}
+export const TERRAIN_DEFAULTS = {
+  products: ['slope', 'hillshade'],
+  slopeUnits: 'degrees',    // 'degrees' | 'percent'
+  azimuth: 315,
+  altitude: 45,
+  multidirectional: false,
+}
+
+// ── Tools ▸ Images ▾ (core/features/imageQuality.js) ─────────────────────────
+export const IMAGE_QUALITY_DEFAULTS = {
+  // Sharpness relative to the batch median below which an image is flagged blurry.
+  minRelative: 0.5,
+}
+
 // Footprints from imported poses (core/footprint.js). Mirrored by
 // FootprintFromPosesModal.vue's `settings` ref (the intrinsics override is seeded
 // from sensor data, not a static default).

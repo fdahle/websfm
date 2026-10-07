@@ -308,10 +308,6 @@ defineExpose({ fit, zoomBy, measureState, setMeasureTool, toggleSavedMeasurement
         <button class="ctx-item" @click="menuFit">Fit to view</button>
       </div>
 
-      <div v-if="product" class="hud">
-        <span>{{ Math.round(scale * 100) }}%</span>
-        <button title="Fit to view" @click.stop="fit">Fit</button>
-      </div>
       <RasterMeasurements ref="measurements" :product="product" :source="source" :descriptor="desc"
         :frame-status="frameStatus" :kind="kind" :scale="scale" :tx="tx" :ty="ty" />
     </div>
@@ -357,6 +353,9 @@ defineExpose({ fit, zoomBy, measureState, setMeasureTool, toggleSavedMeasurement
           <span class="sep">|</span>
           <span class="meta">{{ product.crs }}</span>
         </template>
+        <!-- Zoom is status; Fit / Zoom in / out are ribbon commands (raster ▸ View). -->
+        <span class="sep">|</span>
+        <span class="meta zoom-level" title="Zoom">{{ Math.round(scale * 100) }}%</span>
       </template>
     </div>
   </div>
@@ -414,30 +413,6 @@ defineExpose({ fit, zoomBy, measureState, setMeasureTool, toggleSavedMeasurement
   color: var(--text-dim);
   font-size: 13px;
 }
-.hud {
-  position: absolute;
-  bottom: 12px;
-  right: 12px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 8px;
-  font-size: 12px;
-  color: var(--text);
-  background: var(--panel);
-  border: 1px solid var(--panel-border);
-  border-radius: 6px;
-}
-.hud button {
-  background: none;
-  border: 1px solid var(--panel-border);
-  color: var(--text);
-  border-radius: 4px;
-  padding: 2px 8px;
-  font-size: 12px;
-  cursor: pointer;
-}
-.hud button:hover { background: var(--hover-bg); }
 .ctx-menu {
   position: absolute;
   z-index: 20;

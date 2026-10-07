@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Icon from '../Icon.vue'
+import FloatingToolbox from './FloatingToolbox.vue'
 import { useMeasurementsStore } from '../../stores/useMeasurementsStore.js'
 import { measurementSource, measurementStamp, measurementStale } from '../../core/products/measurementRecord.js'
 import { pixelToWorld } from '../../core/io/rasterSample.js'
@@ -251,11 +252,12 @@ defineExpose({ pick, active: computed(() => tool.value !== 'pan'), state, setToo
       <circle v-for="(p, i) in vertices" :key="i" :cx="tx + p.x * scale" :cy="ty + p.y * scale" r="4" class="vertex" />
     </svg>
 
-    <div v-if="tool !== 'pan'" class="measure-bar" role="toolbar" :aria-label="`${TOOLS[tool].label} measurement`"
-      @mousedown.stop @dblclick.stop>
-      <span class="mb-tool"><Icon :name="TOOLS[tool].icon" class="mb-icon" />{{ TOOLS[tool].label }}</span>
+    <!-- The measuring tool's toolbox: the ribbon (raster ▸ Measure) picks the tool. -->
+    <FloatingToolbox v-if="tool !== 'pan'" id="measure" :title="TOOLS[tool].label"
+      :aria-label="`${TOOLS[tool].label} measurement`" anchor="top-center"
+      close-title="Stop measuring (Esc)" @close="choose('pan')">
+      <div class="mb-row">
       <template v-if="tool === 'volume' && !selected">
-        <span class="mb-sep"></span>
         <label class="mb-field">Base
           <select v-model="baseKind" class="mb-input" aria-label="Volume base surface">
             <option value="plane">Best-fit plane</option>
@@ -265,18 +267,16 @@ defineExpose({ pick, active: computed(() => tool.value !== 'pan'), state, setToo
         </label>
         <input v-if="baseKind === 'custom'" v-model.number="baseHeight" type="number" step="any"
           class="mb-input mb-num" aria-label="Base height" :placeholder="verticalUnit" />
+        <span class="mb-sep"></span>
       </template>
-      <span class="mb-sep"></span>
       <span class="mb-hint">{{ hint }}</span>
       <button class="mb-btn" title="Remove the last point (Backspace)" :disabled="!vertices.length || finished" @click="vertices.pop()">
         <Icon name="undo" class="mb-icon" /><span class="sr-only">Undo point</span>
       </button>
       <button class="mb-btn" :disabled="finished || vertices.length < TOOLS[tool].min" title="Finish (Enter)" @click="finish">Finish</button>
       <button class="mb-btn" :disabled="!vertices.length" title="Clear the drawing (Esc)" @click="reset">Clear</button>
-      <button class="mb-btn mb-close" title="Stop measuring (Esc)" aria-label="Stop measuring" @click="choose('pan')">
-        <Icon name="x" class="mb-icon" />
-      </button>
-    </div>
+      </div>
+    </FloatingToolbox>
 
     <div v-if="saved.error" class="measure-alert" role="alert">{{ saved.error }}</div>
 
@@ -341,16 +341,8 @@ defineExpose({ pick, active: computed(() => tool.value !== 'pan'), state, setToo
 .geom-fill { fill: rgba(67, 185, 224, 0.18); }
 .vertex { fill: #fff; stroke: #147c9e; stroke-width: 1.5; }
 
-/* Drawing bar — same chrome as the 3D viewer's selection bar. */
-.measure-bar {
-  position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
-  /* max-content: with left:50% the shrink-to-fit width would be capped at half
-     the view, wrapping a bar that fits comfortably. */
-  display: flex; align-items: center; gap: 6px; width: max-content; max-width: calc(100% - 32px); flex-wrap: wrap;
-  padding: 5px 6px 5px 10px; background: var(--panel); border: 1px solid var(--panel-border);
-  border-radius: 8px; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
-}
-.mb-tool { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
+/* Drawing toolbox body (the chrome is FloatingToolbox). */
+.mb-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .mb-icon { width: 15px; height: 15px; flex: none; }
 .mb-sep { width: 1px; align-self: stretch; background: var(--panel-border); margin: 0 2px; }
 .mb-hint { color: var(--text-dim); white-space: nowrap; }
@@ -372,7 +364,7 @@ defineExpose({ pick, active: computed(() => tool.value !== 'pan'), state, setToo
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 
 .measure-alert {
-  position: absolute; top: 52px; left: 50%; transform: translateX(-50%); padding: 6px 10px;
+  position: absolute; top: 96px; left: 50%; transform: translateX(-50%); padding: 6px 10px;
   border-radius: 6px; background: var(--panel); border: 1px solid var(--danger); color: var(--danger);
 }
 

@@ -1,6 +1,6 @@
 import { reconstruct as sfmReconstruct } from '../../core/sfm/sfm.js'
 import { packReconstructionResult, packSparseCloud, unpackReconstructionResult } from '../../core/sfm/resultCodec.js'
-import { sparsePointMetrics, refineSparseSelection } from '../../core/sfm/gradualSelection.js'
+import { sparsePointMetrics, refineSparseSelection, optimizeCameras } from '../../core/sfm/gradualSelection.js'
 import { bundleAdjust } from '../../core/sfm/reconstruction.js'
 import { wrapPackedMatches } from '../../core/sfm/matchCodec.js'
 
@@ -51,5 +51,15 @@ export function makeSfmOps() {
       costAfter: refined.costAfter, constraints: refined.constraints })
     return packedResult
   }
-  return { reconstruct, sparseMetrics, refineSparse }
+  // Tools ▸ Model ▾ ▸ Optimize cameras: same disposable copy and survey constraints
+  // as refineSparse, with focal (+ principal point) free per sensor.
+  async function optimizeSparse([packed, settings, constraints = {}]) {
+    const model = unpackReconstructionResult(packed)
+    const refined = await optimizeCameras(model.cameras, model.points, settings, bundleAdjust, constraints)
+    const packedResult = packSparseCloud(refined)
+    Object.assign(packedResult.result, { removed: refined.dropped, costBefore: refined.costBefore,
+      costAfter: refined.costAfter, constraints: refined.constraints, focalChange: refined.focalChange })
+    return packedResult
+  }
+  return { reconstruct, sparseMetrics, refineSparse, optimizeSparse }
 }

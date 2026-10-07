@@ -136,6 +136,12 @@ export function detectKeypoints(url, options = {}, { onLog } = {}) {
   })
 }
 
+// Image sharpness/exposure score for one image (Tools ▸ Images ▾ ▸ Image quality).
+// Round-robin across the pool; `mask` is the stored mask dataUrl or null.
+export function imageQuality(url, options = {}) {
+  return call('imageQuality', [url, { ...options }])
+}
+
 // Cut ZNCC templates out of the reference film scan (F4 auto-measurement). Once
 // per run; round-robin is fine (no heavy per-worker runtime to warm up).
 export function prepareFiducialTemplates(url, obs, options = {}, { onLog } = {}) {
@@ -207,6 +213,8 @@ export function verifyPointPairs(ptsA, ptsB, options = {}, { onTiming, avoidWork
 
 export const sparseMetrics = (packed) => call('sparseMetrics', [packed])
 export const refineSparse = (packed, settings, constraints = {}) => call('refineSparse', [packed, settings, constraints])
+// Tools ▸ Model ▾ ▸ Optimize cameras (core/sfm/gradualSelection.js optimizeCameras).
+export const optimizeSparse = (packed, settings, constraints = {}) => call('optimizeSparse', [packed, settings, constraints])
 export const readRasterWindow = (file, options = {}) => call('readRasterWindow', [{ file, ...options }])
 export const findReferenceMatches = (url, reference) => call('findReferenceMatches', [url, reference])
 
@@ -290,6 +298,10 @@ export const generateDem = streamingOp('generateDem')
 // Resolves to { width, height, rgba:Uint8Array, covered, previewDataUrl }.
 // See core/products/ortho.js.
 export const generateOrtho = streamingOp('generateOrtho')
+
+// Tools ▸ Products ▾ — contours / terrain derivatives / polygon clip of a DEM or
+// ortho (see workers/ops/products.js `demTool`). The plane is a copy, transferred in.
+export const demTool = streamingOp('demTool')
 
 // Products — mesh (screened Poisson over the dense cloud, see core/products/mesh.js).
 // Input { dense:{ count, pos, col, nrm }, settings }; resolves to

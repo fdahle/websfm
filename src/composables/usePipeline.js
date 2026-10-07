@@ -263,7 +263,14 @@ export function usePipeline({ images, detectAll, matchAll, reconstruct, computeD
   // Tools — cloud editing (crop / filter / merge / 3D-viewer selection). Single worker call, same
   // cancel-by-terminate contract as the mesh run.
   async function runEditClouds(request) {
-    const titles = { crop: 'Cropping Cloud', filter: 'Filtering Cloud', merge: 'Merging Clouds', mask: 'Editing Selection' }
+    const titles = {
+      crop: 'Cropping Cloud', filter: 'Filtering Cloud', merge: 'Merging Clouds', mask: 'Editing Selection',
+      normals: 'Estimating Normals', transform: 'Transforming Cloud', icp: 'Aligning Clouds',
+      sparse: 'Gradual Selection', optimize: 'Optimizing Cameras',
+      distance: 'Computing Distances', section: 'Cutting Section',
+      'mesh-clean': 'Cleaning Mesh', 'mesh-smooth': 'Smoothing Mesh', 'mesh-decimate': 'Decimating Mesh',
+      'mesh-crop': 'Cropping Mesh', 'mesh-sample': 'Sampling Mesh',
+    }
     openProgress(titles[request.mode] ?? 'Editing Cloud', 1, () => terminateAll('cloud edit cancelled'), { indeterminate: true })
     // ok ⇔ the store committed a result (it returns null for a refusal, an empty
     // result, a superseded run or an error) — callers act on the outcome, not on

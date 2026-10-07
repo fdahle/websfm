@@ -8,7 +8,7 @@ import { cloudToXyz } from '../core/io/cloudText.js'
 import { buildColmapModel, serializeColmapModel, serializeColmapModelBin } from '../core/io/colmapModel.js'
 import { imageIdsToPairId } from '../core/io/colmapDatabase.js'
 import { exportColmapDatabase } from '../workers/colmapDbClient.js'
-import { undistortImage, exportLazCloud } from '../workers/computeClient.js'
+import { undistortImage, exportLazCloud, demTool as workerDemTool } from '../workers/computeClient.js'
 import { buildTransformsJson } from '../core/io/transforms.js'
 import { buildNvm, buildOpenMvg } from '../core/io/sfmInterop.js'
 import { epsgToWkt } from '../core/products/wkt.js'
@@ -16,7 +16,8 @@ import {
   ecefTransformFromProbes, boundingBox, buildTileset, cloudToGlbPoints,
   localBounds, cloudCentroid,
 } from '../core/products/tiles3d.js'
-import { transformAsync, ensureProjection } from '../core/crs.js'
+import { transform, transformAsync, ensureProjection } from '../core/crs.js'
+import { pointScaleFactor } from '../core/products/localFrame.js'
 import { useLog } from './useLog.js'
 import { distortionOf } from '../core/sfm/distortion.js'
 import { downloadBlob, dataUrlToBlob } from '../utils/download.js'
@@ -59,6 +60,17 @@ export function useExports({
     const resolved = await effectiveFrameSpec?.()
     if (resolved?.source === 'georef') {
       return { sim: { scale: resolved.frameSpec.scale, R: resolved.frameSpec.R, t: resolved.frameSpec.t, local: resolved.frameSpec.local ?? null }, unit: resolved.unit, crs: resolved.crs, source: 'georef' }
+    }
+    // A user orientation (Tools ▸ Model ▾ ▸ Orient model) rides on the local frame
+    // spec as an explicit basis: export = s·R·(p − origin), rows of R = east/north/up.
+    const f = resolved?.frameSpec
+    const oriented = f?.east && f?.north && f?.up && f?.origin
+    const s = resolved?.source === 'scalebars' ? resolved.scale : 1
+    if (oriented) {
+      const R = [f.east, f.north, f.up]
+      const t = R.map((row) => -s * (row[0] * f.origin[0] + row[1] * f.origin[1] + row[2] * f.origin[2]))
+      return { sim: { scale: s, R, t }, unit: resolved.source === 'scalebars' ? 'm' : 'model', crs: null,
+        source: resolved.source === 'scalebars' ? 'scalebars' : 'orientation' }
     }
     if (resolved?.source === 'scalebars') {
       return {
@@ -210,6 +222,8 @@ export function useExports({
     else if (frame.source === 'scalebars') {
       log(`Cloud export: scaled to metres (×${frame.sim.scale.toPrecision(6)}) `
         + 'from the scale bars — metric coordinates, no CRS', 'info', 'Export')
+    } else if (frame.source === 'orientation') {
+      log('Cloud export: in the oriented local frame (Orient model) — model units, no CRS', 'info', 'Export')
     }
     const base = `${projectBase()}-${cloud.kind}`
     if (format === 'las' || format === 'laz') {
@@ -250,6 +264,8 @@ export function useExports({
     else if (frame.source === 'scalebars') {
       log(`Mesh export: scaled to metres (×${frame.sim.scale.toPrecision(6)}) `
         + 'from the scale bars — metric coordinates, no CRS', 'info', 'Export')
+    } else if (frame.source === 'orientation') {
+      log('Mesh export: in the oriented local frame (Orient model) — model units, no CRS', 'info', 'Export')
     }
     if (format === 'glb') {
       downloadBlob(`${projectBase()}-mesh.glb`, meshToGlb(mesh, { color: includeColor }), 'model/gltf-binary')
@@ -726,5 +742,97 @@ export function useExports({
       + `${transform ? `placed in ${crs}` : 'local frame (unplaced)'}`, 'success', 'Export')
   }
 
-  return { exportKind, exportPoses, exportSensors, exportKeypoints, exportMatches, onExportRun }
+  // ── Tools ▸ Products ▾ — contours, terrain derivatives, polygon clip ────────
+  // Derived downloads of the existing DEM/ortho; no stored product changes. The
+  // plane goes to the worker as a COPY (transferred), so the product stays intact.
+
+  // Grid E/N in a projected CRS carry the point scale factor k (heights do not):
+  // the true horizontal spacing is gsd / k. 1 for local/model/geographic frames.
+  // Same rule as the raster measurement tools (RasterMeasurements.vue).
+  async function gridScaleFactor(product) {
+    const crs = product?.crs
+    if (!crs || crs === 'local') return 1
+    try {
+      await ensureProjection(crs)
+      const x = product.originX + (product.width * product.gsd) / 2
+      const y = product.originY - (product.height * product.gsd) / 2
+      const k = pointScaleFactor((xy) => transform(xy, crs, 'EPSG:4326'), x, y, { metresPerUnit: metresPerCrsUnit(crs) ?? 1 })
+      return k > 0 ? k : 1
+    } catch { return 1 }
+  }
+
+  const gridCopy = (g) => ({
+    width: g.width, height: g.height, gsd: g.gsd, originX: g.originX, originY: g.originY,
+    data: g.data.slice(), mask: g.mask ? g.mask.slice() : null, crs: g.crs ?? null,
+  })
+  const unitLabelOf = (g) => (g.unit === 'model' ? 'model units' : (g.unit || 'units'))
+
+  async function exportContours({ interval, indexEvery, smooth, minLength, format }) {
+    const grid = dem.value
+    if (!grid) return
+    const copy = gridCopy(grid)
+    const info = crsInfo(grid)
+    const { text, lines, levels } = await workerDemTool(
+      { tool: 'contours', grid: copy, settings: { interval, indexEvery, smooth, minLength }, format, crs: info.crs },
+      { transfer: [copy.data.buffer, ...(copy.mask ? [copy.mask.buffer] : [])], onLog: (m, l, c) => log(m, l, c) },
+    )
+    const dxf = format === 'dxf'
+    downloadBlob(`${projectBase()}-contours.${dxf ? 'dxf' : 'geojson'}`, text,
+      dxf ? 'application/dxf' : 'application/geo+json')
+    if (dxf && info.crs) downloadBlob(`${projectBase()}-contours.prj`, prjText(info), 'text/plain;charset=utf-8')
+    log(`Contours: ${lines.toLocaleString()} lines over ${levels} levels every ${interval} ${unitLabelOf(grid)} → ${dxf ? 'DXF' : 'GeoJSON'}`,
+      'success', 'Export')
+  }
+
+  async function exportTerrain({ products, slopeUnits, azimuth, altitude, multidirectional, compression }) {
+    const grid = dem.value
+    if (!grid || !products?.length) return
+    const k = await gridScaleFactor(grid)
+    if (k !== 1) log(`Terrain: point scale factor k = ${k.toFixed(6)} at the DEM centre — horizontal spacing is gsd/k`, 'info', 'Export')
+    const copy = gridCopy(grid)
+    const { rasters } = await workerDemTool(
+      { tool: 'terrain', grid: copy, settings: { products, units: slopeUnits, azimuth, altitude, multidirectional, k } },
+      { transfer: [copy.data.buffer, ...(copy.mask ? [copy.mask.buffer] : [])], onLog: (m, l, c) => log(m, l, c) },
+    )
+    const info = crsInfo(grid)
+    const deflate = compression === 'none' ? null : deflateBytes
+    for (const name of products) {
+      const r = rasters[name]
+      if (!r) continue
+      // Float32 single band with GDAL nodata, like the DEM itself — hillshade's
+      // 0..255 bytes fit exactly, and one writer keeps the georeferencing identical.
+      const data = name === 'hillshade'
+        ? Float32Array.from(r.data, (v, i) => (r.mask[i] ? v : NaN)) : r.data
+      const tif = await demToGeoTiff({ ...r, data }, { crs: info, nodata: -9999, deflate })
+      downloadBlob(`${projectBase()}-dem-${name}.tif`, tif, 'image/tiff')
+    }
+    log(`Terrain: exported ${products.join(', ')} as GeoTIFF`, 'success', 'Export')
+  }
+
+  async function exportClipped({ kind, polygons, compression }) {
+    const product = kind === 'ortho' ? ortho.value : dem.value
+    if (!product || !polygons?.length) return
+    // An ortho carries its own geotransform; older ones fall back to the DEM's grid.
+    const geo = kind === 'ortho' ? (product.gsd != null ? product : dem.value) : product
+    const input = kind === 'ortho'
+      ? { tool: 'clip', kind, polygons, ortho: { width: product.width, height: product.height, gsd: geo.gsd,
+          originX: geo.originX, originY: geo.originY, data: product.rgba.slice() } }
+      : { tool: 'clip', kind, polygons, grid: gridCopy(product) }
+    const buffers = kind === 'ortho' ? [input.ortho.data.buffer]
+      : [input.grid.data.buffer, ...(input.grid.mask ? [input.grid.mask.buffer] : [])]
+    const { raster } = await workerDemTool(input, { transfer: buffers, onLog: (m, l, c) => log(m, l, c) })
+    if (!raster) { log('Clip: the polygon does not overlap the raster', 'warn', 'Export'); return }
+    const info = crsInfo(geo)
+    const deflate = compression === 'none' ? null : deflateBytes
+    const tif = kind === 'ortho'
+      ? await orthoToGeoTiff({ width: raster.width, height: raster.height, rgba: raster.data }, raster, { crs: info, deflate })
+      : await demToGeoTiff(raster, { crs: info, nodata: -9999, deflate })
+    downloadBlob(`${projectBase()}-${kind}-clipped.tif`, tif, 'image/tiff')
+    log(`Clip: ${kind === 'ortho' ? 'orthophoto' : 'DEM'} clipped to ${polygons.length} polygon(s), ${raster.width}×${raster.height} px`, 'success', 'Export')
+  }
+
+  return {
+    exportKind, exportPoses, exportSensors, exportKeypoints, exportMatches, onExportRun,
+    exportContours, exportTerrain, exportClipped,
+  }
 }

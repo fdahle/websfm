@@ -71,8 +71,11 @@
 .section-sep { height: 1px; background: var(--panel-border); margin: 2px 0; }
 .input-row { display: flex; align-items: center; gap: 6px; }
 
-.field-input {
-  width: 100px;
+/* `.field-select` carries the whole control look on its own, so a select written
+   with only that class (as most tool dialogs do) is styled like one written
+   `field-input field-select`. */
+.field-input,
+.field-select {
   background: var(--bg);
   border: 1px solid var(--panel-border);
   border-radius: 5px;
@@ -81,13 +84,30 @@
   font-size: 13px;
   padding: 4px 8px;
 }
-.field-input:focus { outline: none; border-color: var(--accent); }
+.field-input { width: 100px; }
+.field-input:focus,
+.field-select:focus { outline: none; border-color: var(--accent); }
 .field-select { width: auto; min-width: 180px; cursor: pointer; }
+.field-select:disabled,
+.field-input:disabled { opacity: 0.5; cursor: not-allowed; }
 .field-unit { font-size: 12px; color: var(--text-dim); }
 .field-input.range { width: 100%; padding: 0; accent-color: var(--accent); }
+/* A plain button inside a field (e.g. "Across the middle") keeps its own width
+   instead of stretching across the column. */
+.field > .btn { align-self: flex-start; }
 
-.checkbox-row { display: flex; align-items: center; gap: 8px; cursor: pointer; }
-.checkbox { width: 14px; height: 14px; cursor: pointer; accent-color: var(--accent); }
+/* Checkbox / radio rows. Radios take the same class so they share the accent. */
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+}
+.checkbox-row:has(> input:disabled) { opacity: 0.5; cursor: not-allowed; }
+.checkbox { width: 14px; height: 14px; margin: 0; flex: none; cursor: pointer; accent-color: var(--accent); }
+.checkbox:disabled { cursor: not-allowed; }
 
 /* Segmented control / chips */
 .seg-row { display: flex; gap: 4px; flex-wrap: wrap; }

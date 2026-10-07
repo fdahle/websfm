@@ -42,3 +42,10 @@ WebGPU acceleration is experimental and configured under Settings → Compute. T
 worker estimates memory before running and may reduce concurrency. If the browser
 runs out of memory, lower quality first; this has the clearest effect on both memory
 and time.
+
+## Limit the area
+If a **Region** is set (**Tools → Model ▾ → Region**, see
+[Image Quality, Region and Orientation](guide:model-tools)), each image's depth search
+only covers the sparse points inside it. Images that see little of the region are
+skipped quickly, and the far background is never searched. Fusion then drops anything
+outside the box. A region drawn on an older model is ignored, and the log says so.

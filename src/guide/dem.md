@@ -66,7 +66,7 @@ approximately one-cell spacing, coarsened for very long paths.
 ## Measure a volume
 **Volume (cut / fill)** measures material inside a polygon relative to a base
 surface, for example a stockpile, an excavation or a fill. Draw the polygon around
-the feature's toe, then choose the **Base** in the drawing bar:
+the feature's toe, then choose the **Base** in the measuring toolbox:
 - **Best-fit plane through vertices**: a plane fitted to the DEM heights at your
   vertices. It is exact for three vertices and a least-squares fit for more. Use it
   when the ground around the feature slopes.
@@ -92,3 +92,24 @@ Below 100%, the volume is an underestimate of the area you drew, so fill holes
 before measuring or redraw the polygon around them. The units are the DEM's
 horizontal unit squared times its vertical unit, e.g. m³, or model units³ before
 the project has a scale.
+
+## Contours, slope and clipping
+The **Tools → Products ▾** menu derives files from the DEM and orthophoto. None of
+them changes the stored product.
+
+- **Contours…** traces contour lines at an interval in the DEM's vertical unit
+  (*0* picks a round interval for about 25 levels) and downloads them as **GeoJSON**
+  (GIS) or **DXF** (CAD, with index contours on their own layer). Lines stop at
+  nodata holes rather than cutting across them. Smoothing passes round the corners of
+  the grid crossings; *0* keeps them exact.
+- **Slope, aspect, hillshade…** writes each as a GeoTIFF on the DEM's grid and CRS
+  (Horn's method, as in GDAL). Slope is in degrees or percent, aspect in degrees
+  clockwise from north. In a projected CRS the grid spacing carries the projection's
+  scale factor k, which is corrected at the DEM centre (heights are never scaled). A
+  DEM in degrees of longitude/latitude is refused: its horizontal and vertical units
+  differ.
+- **Clip to polygon…** exports the DEM or orthophoto with everything outside a
+  polygon set to nodata (transparent for the orthophoto), cropped to the polygon. The
+  polygon is a saved **Area** or **Volume** measurement on that product, or a GeoJSON
+  file already in the product's coordinates. A file in another CRS is not reprojected
+  and would clip the wrong place.
