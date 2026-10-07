@@ -46,6 +46,10 @@ const fetchRetry = async (url, tries = 3) => {
   }
 }
 const stem = (n) => n.replace(/.[^.]+$/, '').toLowerCase()
+// The sensor-table fields a run's `sensor` override may set, and each sensor's values
+// before the first override, so a later run without one starts from the EXIF grouping.
+const SENSOR_OVERRIDE_FIELDS = ['focal', 'focalUnit', 'cx', 'cy', 'k1', 'k2', 'k3', 'p1', 'p2', 'distortionModel']
+const sensorBase = {}
 let reference = null // scripts/bench/reference.mjs: { positions, leverArm, gcps }
 
 // Checkpoints: every reference GCP triangulated from its marks through the app's own
@@ -141,11 +145,18 @@ window.bench = {
   // independent accuracy measurement. The default keeps the app's behaviour.
   // leverArm: true sets the reference GNSS antenna offset on every sensor, so the
   // camera priors are treated as antenna positions (sensor.gnssLeverArm); false clears it.
-  async reconstruct({ preset = null, posePriors = true, leverArm = false, exportPoints = false, ...overrides } = {}) {
+  // sensor: { focal, cx, cy, k1, …, distortionModel } is assigned to every sensor for
+  // this run (sensor-table units: focal + focalUnit, absolute pixel-centre cx/cy, OpenCV
+  // p1/p2). A run without it restores the fields to what the EXIF grouping produced.
+  async reconstruct({ preset = null, posePriors = true, leverArm = false, sensor = null, exportPoints = false, ...overrides } = {}) {
     const settings = { ...withPreset(RECONSTRUCT_DEFAULTS, RECONSTRUCT_PRESETS, preset), ...overrides }
     for (const p of poses.poses) p.enabled = posePriors
     const arm = leverArm && reference?.leverArm ? [...reference.leverArm] : null
     for (const s of sensorsStore.sensors) s.gnssLeverArm = arm
+    for (const s of sensorsStore.sensors) {
+      const base = (sensorBase[s.id] ??= Object.fromEntries(SENSOR_OVERRIDE_FIELDS.map((k) => [k, s[k]])))
+      Object.assign(s, base, sensor ?? {})
+    }
     const priors = poses.poses.filter((p) => p.enabled !== false).length
     const t0 = performance.now()
     await recon.reconstruct(settings, report)
@@ -190,7 +201,7 @@ window.bench = {
       cameras: cloud?.cameras?.size ?? 0, images: images.images.length,
       points: points.length, pointsGe3: ge3, observations: obs,
       reprojection: s?.reprojection ?? s?.finalReprojection ?? null,
-      positionCheck, checkpointCheck, checkpointOffsets, posePriors: priors, leverArm: arm,
+      positionCheck, checkpointCheck, checkpointOffsets, posePriors: priors, leverArm: arm, sensor,
       pointsEnu, enuOrigin: pc?.origin ?? null,
       // The posed cameras (pinhole frame), so accuracy can be re-analysed without a rerun.
       model: cloud?.cameras ? Object.fromEntries([...cloud.cameras].map(([u, c]) => [nameOf.get(u) ?? u, { R: c.R, t: c.t, K: c.K }])) : null,

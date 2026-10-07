@@ -9,6 +9,8 @@
 //     "markOffsetPx": 0,                                added to every mark (convention tests)
 //     "markOffsetsPx": [-0.5],                          extra offsets scored on the SAME model
 //     "excludeGcps": ["19"]                             labels kept out of the checkpoint RMS
+//     "gcpOverrides": { "19": [lat, lon, h] }          replaces a file line (a known transcription
+//                                                       or conversion slip); scoring only
 //   }
 //
 // Checkpoints never enter the solve, so `markOffsetsPx` re-scores one reconstruction
@@ -95,6 +97,7 @@ export async function loadReference(ref) {
     const off = Number(ref.markOffsetPx) || 0
     out.gcps = parseTable(await readFile(ref.gcps, 'utf8'))
       .filter((r) => r.length >= 4 && Number.isFinite(+r[1]))
+      .map(([label, lat, lon, h]) => [label, ...(ref.gcpOverrides?.[label] ?? [lat, lon, h])])
       .map(([label, lat, lon, h]) => ({
         label, lat: +lat, lon: +lon, h: +h,
         marks: (marks[label] ?? []).map((m) => ({ image: stem(m.image), px: m.px + off, py: m.py + off })),
