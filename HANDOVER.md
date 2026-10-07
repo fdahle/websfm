@@ -376,6 +376,43 @@ The centre-aligned back-mapping alone is worth 1.8 cm H / 2.7 cm V; the mark con
 (−½, shipped) another 0.9 / 1.0 cm. From the shipped GeoScan baseline (6.1 / 16.4 cm)
 to now: 3.3 / 7.1 cm at a 2.9 cm GSD. A further ~0.35 px remains unexplained (TODO ACC).
 
+**GeoScan datum: do the GCP survey and the RTK file agree? (2026-10-07,
+`scripts/bench/metashape-datum.py`, WSL Python + numpy).** The script reads Metashape's
+adjusted block, which was solved with both reference sets. It re-triangulates each marker
+from Metashape's marks with Metashape's cameras, calibration (Brown f/cx/cy/k1–3/p1/p2)
+and pixel convention, ties the block to one file and compares the markers with the other.
+All values are E / N / U in cm, residual = estimate − reference.
+
+| check | mean | sd |
+|---|---|---|
+| Metashape antenna (offset as (x, −y, −z)) − its own camera reference, 444 cams | +0.2 / +0.0 / −0.1 | 1.3 / 1.4 / 1.7 |
+| same, offset as written (x, y, z) | +0.4 / −2.2 / +8.9 | 2.1 / 35.6 / 3.1 |
+| Metashape markers − marker reference, 13 control | −0.7 / −0.1 / +1.3 | 0.9 / 0.9 / 4.2 |
+| **block tied to the RTK file (7-param) − GCP file, 15 GCPs** | **−1.3 / −1.0 / +0.8** | 0.9 / 0.9 / 4.4 |
+| websfm `puti-arm3` checkpoints, mark offset 0 | −2.9 / +0.8 / +3.9 | 2.1 / 2.0 / 7.1 |
+| websfm `puti-arm3` checkpoints, −½ (shipped) | −2.5 / +0.3 / +4.0 | |
+
+- **The files disagree by about 1.6 cm horizontally** (1.3 W, 1.0 S) and 0.8 cm vertically.
+  That is the datum part of websfm's westward bias. It is about half of it, not the
+  3.6 cm the antenna offset moved the checkpoints.
+- **Two conversions.** The Metashape project holds both sets in another datum. The
+  provided `*_WGS84.txt` files are a constant shift of it (cameras +163.6 / +39.1 /
+  −312.0 cm, sd ≤ 2 cm). The GCPs were converted with a shift that differs from the
+  cameras' by −0.61 / −0.83 / −0.36 cm (sd 0.03 cm over 16 GCPs). Within the project the two sets agree to
+  about 0.7 cm. The conversion adds the rest.
+- **GCP 19 was never converted.** Its file line equals the project value to 1e-8°, so it
+  sits exactly one conversion shift away (websfm measured −165.8 / −36.2 / +308.6 cm).
+  Converted like the other 16, it is 59.83749025, 31.46801745, 66.171 m and lands at
+  +0.6 / −0.4 / −4.7 cm on Metashape's RTK-tied block, an ordinary checkpoint.
+- **websfm minus Metashape, per checkpoint** (offset 0): mean −1.6 / +1.7 / +3.1, sd
+  1.9 / 1.9 / 3.3. Horizontal scatter about the mean is 2.8 cm against Metashape's 1.3 cm.
+  Vertical residuals correlate +0.95 with Metashape's, at websfm ≈ 1.54 × Metashape +
+  2.7 cm. Height, a plane, a dome (r²) and mark radius each explain little (7.1 → ≥ 5.9 cm).
+  Metashape had 13 of the 15 as control, which shrinks their residuals, so this is not a
+  clean target for the vertical.
+- The antenna convention is confirmed independently: as written it leaves a 35.6 cm
+  north scatter on Metashape's own cameras, while (x, −y, −z) fits at 1.3–1.7 cm.
+
 **Monster beach (`zm-pan`, MicaSense Altum-PT pan, 538 airborne frames, standalone
 GPS; YellowScan LiDAR, 158 M points as the reference surface).** Leak-fixed build, no
 16-bit stretch (the before-number):
@@ -407,8 +444,9 @@ camera positions ±1–2 cm, 17 GCPs with Metashape image marks).** The bench im
 camera file as poses with their standard deviations (preselection uses them;
 `posePriors` decides whether SfM does), triangulates every GCP from its marks through the
 app's own path, and maps it through the camera-position similarity. Checkpoint residuals
-are from 15 GCPs. GCP 19 is excluded: it is off by 1.6 m east and 3.1 m up in every run,
-so its survey or marks disagree. GCP 12 has no marks.
+are from 15 GCPs. GCP 19 is excluded: its line in `GCPs_WGS84.txt` was never converted
+out of the Metashape project's datum (see GeoScan datum below), which puts it 1.6 m east
+and 3.1 m up. GCP 12 has no marks.
 
 | variant | points | checkpoints horizontal RMS | checkpoints vertical RMS | vertical bias | camera residual vertical |
 |---|---|---|---|---|---|

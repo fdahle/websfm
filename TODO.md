@@ -97,13 +97,20 @@ self-cal guard fixed for default-FOV focals the same day (HANDOVER done log).
 ### ACC — georeferenced accuracy (RTK benches, HANDOVER ▸ B-bench)
 The bench now measures accuracy, not only point counts: camera centres against
 RTK/EXIF positions (quarry, GeoScan) and 15 independent GCP checkpoints (GeoScan).
-- **GeoScan checkpoints shift ~3.6 cm west with the antenna offset** (shipped 2026-10-06,
-  METHODS ▸ camera priors). The offset is right: cameras fit the RTK file at 2.1 cm and
-  the principal point matches Metashape's to ~1 px, where without it cx was 13 px off.
-  But checkpoint H RMS rises 4.5 → 5.9 cm because every GCP moves the same way (scatter
-  unchanged; height bias 5.4 → 3.4 cm). Test whether the GCP survey and the RTK positions
-  differ by a datum shift: fit a translation between them using Metashape's own adjusted
-  cameras (it used both), and compare with the 3.6 cm.
+- **GeoScan checkpoint bias: the datum explains about half** (measured 2026-10-07,
+  HANDOVER ▸ B-bench ▸ GeoScan datum). Through Metashape's own block, the GCP file and the
+  RTK file disagree by 1.3 cm W / 1.0 cm S / 0.8 cm U. websfm's checkpoints sit at
+  −2.5 / +0.3 / +4.0 cm (shipped −½ mark convention), so about 1.2 cm W, 1.3 cm N and
+  3.2 cm U are websfm's own. Its horizontal scatter about the mean is also twice
+  Metashape's (2.8 vs 1.3 cm). Next: the vertical bias, and whether the remaining mark
+  offset (below) is the same effect. Rescore with GCP 19 corrected (it is a datum slip,
+  not a bad GCP: coordinates in HANDOVER), which adds a 16th checkpoint.
+- **The shared vertical pattern.** Per-checkpoint vertical residuals correlate +0.95 with
+  Metashape's at 1.54× the amplitude. Height, a plane, a dome and mark radius explain
+  little of the pattern. Metashape had 13 of the 15 in its solve, which shrinks their
+  residuals, so part of the 1.54× may be survey or mark error that websfm shows in full.
+  Compare against a Metashape run with every GCP as a checkpoint (RTK only) before
+  treating it as a websfm defect.
 - **The remaining GeoScan error** (checkpoints H 4.4 cm, V 10.8 cm, GSD 2.9 cm; Metashape
   fits the RTK cameras at 1.2 cm vertical). After the lever arm, check whether the prior
   BA converged: its reprojection RMS does not move across both rounds, and it runs 30
