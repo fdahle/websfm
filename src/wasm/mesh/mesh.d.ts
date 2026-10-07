@@ -8,14 +8,12 @@
  * largest uninterruptible unit of work down to one multigrid layer:
  *
  * ```text
- *   let m = PoissonMesher.build(pos, nrm, depth, screening)   // build octree + field
- *   for _ in 0..m.num_layers() { m.solve_step() }             // solve, report progress
- *   let bytes = m.finish(trim_dist)                            // extract + trim + encode
+ *   let m = PoissonMesher.build(pos, nrm, wgt, depth, screening) // octree + field
+ *   for _ in 0..m.num_layers() { m.solve_step() }                 // solve, report progress
+ *   let bytes = m.finish(trim, densityRatio, holeRatio, minShare)  // extract + clean + encode
+ *   let stats = m.stats()                                          // MeshStats::to_vec
  *   m.free()
  * ```
- *
- * The one-shot [`poisson_mesh`] free function is kept for the Rust tests (which run
- * natively and cannot construct a JS driver).
  */
 export class PoissonMesher {
     private constructor();
@@ -23,17 +21,18 @@ export class PoissonMesher {
     [Symbol.dispose](): void;
     /**
      * Build the multigrid octree + vector field (no layer solved yet). `pos`/`nrm` are
-     * flat `3·N` f32 (world-space; `nrm` unit); `max_depth`/`screening` as in
+     * flat `3·N` f32 (world-space; `nrm` unit); `wgt` is one support weight per sample
+     * (raw points it stands for) or empty for all-1; `max_depth`/`screening` as in
      * [`poisson_mesh`]. An empty / degenerate input yields a mesher with zero layers
      * whose `finish` returns an empty mesh.
      */
-    static build(pos: Float32Array, nrm: Float32Array, max_depth: number, screening: number): PoissonMesher;
+    static build(pos: Float32Array, nrm: Float32Array, wgt: Float32Array, max_depth: number, screening: number): PoissonMesher;
     /**
-     * Solve any remaining layers, then extract, trim (world-unit `trim_dist`; ≤0
-     * disables), and encode the mesh to the little-endian wire buffer described on
-     * [`poisson_mesh`]. Consumes the internal builder — call once.
+     * Solve any remaining layers, then extract, clean up (see [`MeshOptions`]; each
+     * argument ≤ 0 disables its stage) and encode the mesh to the little-endian wire
+     * buffer described on [`poisson_mesh`]. Consumes the internal builder — call once.
      */
-    finish(trim_dist: number): Uint8Array;
+    finish(trim_dist: number, density_ratio: number, hole_area_ratio: number, min_component_share: number): Uint8Array;
     /**
      * Number of multigrid layers to solve (`== max_depth + 1`, or 0 for a degenerate
      * build). Drives the caller's progress denominator.
@@ -44,14 +43,18 @@ export class PoissonMesher {
      * remain. A no-op (`false`) once every layer is solved or on a degenerate build.
      */
     solve_step(): boolean;
+    /**
+     * What the last `finish` did, in [`MeshStats::to_vec`] order.
+     */
+    stats(): Float64Array;
 }
 
 /**
- * Screened Poisson mesh from oriented points. `pos`/`nrm` are flat `3·N` f32
- * (world-space; `nrm` unit). `max_depth` is the octree depth (detail vs cost),
- * `screening` the point-fitting weight (0 disables), `trim_dist` the world-unit
- * radius past which a triangle entirely far from the input cloud is culled (≤0
- * disables trimming). Returns ONE byte buffer, little-endian:
+ * Screened Poisson mesh from oriented points, distance trim only. `pos`/`nrm` are flat
+ * `3·N` f32 (world-space; `nrm` unit). `max_depth` is the octree depth (detail vs cost),
+ * `screening` the point-fitting weight (0 disables), `trim_dist` the world-unit radius
+ * past which a triangle entirely far from the input cloud is culled (≤0 disables).
+ * Returns ONE byte buffer, little-endian:
  *   header  [u32 nVerts, u32 nTris]
  *   f32     positions  (3·nVerts)
  *   u32     indices    (3·nTris)
@@ -65,10 +68,11 @@ export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly __wbg_poissonmesher_free: (a: number, b: number) => void;
     readonly poisson_mesh: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];
-    readonly poissonmesher_build: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
-    readonly poissonmesher_finish: (a: number, b: number) => [number, number];
+    readonly poissonmesher_build: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => number;
+    readonly poissonmesher_finish: (a: number, b: number, c: number, d: number, e: number) => [number, number];
     readonly poissonmesher_num_layers: (a: number) => number;
     readonly poissonmesher_solve_step: (a: number) => number;
+    readonly poissonmesher_stats: (a: number) => [number, number];
     readonly __wbindgen_externrefs: WebAssembly.Table;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_free: (a: number, b: number, c: number) => void;

@@ -177,6 +177,12 @@ describe('mesh cloud round trip', () => {
     expect([...out.pos]).toEqual([0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 1, 0])
     expect([...out.col]).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])
   })
+
+  it('round-trips the mesh run record, and leaves it absent on older meshes', () => {
+    const meshSummary = { depth: 8, trim: 'gentle', sourceId: 'd2', stats: { keptTris: 2 } }
+    expect(roundTrip({ ...mesh, meshSummary }).meshSummary).toEqual(meshSummary)
+    expect(roundTrip(mesh).meshSummary).toBeUndefined()
+  })
 })
 
 describe('legacy (pre-binary) documents', () => {

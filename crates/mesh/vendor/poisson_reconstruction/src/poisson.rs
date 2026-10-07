@@ -8,7 +8,7 @@ use na::{vector, Point3, Vector3};
 use parry::bounding_volume::{Aabb, BoundingVolume};
 use parry::partitioning::IndexedData;
 use parry::shape::{TriMesh, TriMeshFlags};
-use std::collections::HashMap;
+use crate::fast_hash::FastMap;
 use std::ops::{AddAssign, Mul};
 
 /// An implicit surface reconstructed with the Screened Poisson reconstruction algorithm.
@@ -80,6 +80,15 @@ impl PoissonReconstruction {
         )
         .finish();
         recon
+    }
+
+    /// Every layer's solved node coefficients, coarsest first. Node order is the octree
+    /// build order, which is deterministic, so two solves of the same input compare
+    /// entry by entry — how a restructured assembly is checked against the one it
+    /// replaced. (Vendored patch, test support.)
+    #[doc(hidden)]
+    pub fn layer_weights(&self) -> Vec<Vec<Real>> {
+        self.layers.iter().map(|l| l.node_weights.as_slice().to_vec()).collect()
     }
 
     /// The domain where the surface’s implicit function is defined.
@@ -179,22 +188,22 @@ impl PoissonReconstruction {
         in_bounds: &dyn Fn(&Point3<Real>) -> bool,
     ) -> MeshBuffers {
         let mut result = MeshBuffers::default();
-        let mut visited = HashMap::new();
+        let mut visited: FastMap<Point3<i64>, bool> = FastMap::default();
         // Corner cache (vendored patch): every cube corner is shared by up to 8
         // neighbouring cells, and one `eval` sums a tri-quadratic over ~27 nodes of
         // *every* layer — the single most expensive thing in extraction. Corners sit
         // exactly on the leaf lattice (cell centre ± half a width), so rounding
         // `(corner − origin) / width` recovers an exact integer key to memoize on.
         // Upstream left this as a `PERF:` note.
-        let mut corners: HashMap<Point3<i64>, Real> = HashMap::new();
+        let mut corners: FastMap<Point3<i64>, Real> = FastMap::default();
 
         if let Some(last_layer) = self.layers.last() {
             let grid_origin = *last_layer.grid.origin();
             let leaf_width = last_layer.grid.cell_width();
             // Check all the existing leaves.
             let mut eval_cell = |key: Point3<i64>,
-                                 visited: &mut HashMap<Point3<i64>, bool>,
-                                 corners: &mut HashMap<Point3<i64>, Real>| {
+                                 visited: &mut FastMap<Point3<i64>, bool>,
+                                 corners: &mut FastMap<Point3<i64>, Real>| {
                 let cell_center = last_layer.grid.cell_center(&key);
                 let cell_width = Vector3::repeat(last_layer.grid.cell_width() / 2.0);
                 let aabb = Aabb::from_half_extents(cell_center, cell_width);
@@ -278,6 +287,12 @@ pub struct PoissonBuilder {
     screening: Real,
     max_relaxation_iters: usize,
     next_layer: usize,
+    // Σ of the solved layers' implicit function at each sample (vendored patch — see
+    // the screening note in `PoissonLayer::solve`).
+    coarse_at_points: Vec<Real>,
+    // Every solved layer's solution in the next layer's basis (vendored patch — see
+    // `PoissonLayer::prolong`).
+    prolonged: FastMap<Point3<i64>, Real>,
 }
 
 impl PoissonBuilder {
@@ -326,6 +341,8 @@ impl PoissonBuilder {
             screening,
             max_relaxation_iters,
             next_layer: 0,
+            coarse_at_points: vec![0.0; points.len()],
+            prolonged: FastMap::default(),
         }
     }
 
@@ -349,9 +366,22 @@ impl PoissonBuilder {
             &self.normals,
             self.screening,
             self.max_relaxation_iters,
+            &self.coarse_at_points,
+            &self.prolonged,
         );
         self.layers[i].node_weights = result;
         self.next_layer += 1;
+        // Only the screening term reads it, and only for a layer still to come.
+        if self.screening != 0.0 && self.next_layer < self.layers.len() {
+            let layer = &self.layers[i];
+            for (acc, pt) in self.coarse_at_points.iter_mut().zip(&self.points) {
+                *acc += layer.eval_triquadratic(pt);
+            }
+        }
+        if self.next_layer < self.layers.len() {
+            self.prolonged =
+                PoissonLayer::prolong(&self.layers[i + 1], &self.layers[i], &self.prolonged);
+        }
         self.next_layer < self.layers.len()
     }
 
@@ -366,7 +396,20 @@ impl PoissonBuilder {
     /// pass that has to happen anyway. Returned already expressed relative to
     /// `isovalue`, so it can go straight to [`PoissonReconstruction::
     /// reconstruct_mesh_buffers_iso`].
-    pub fn finish(mut self) -> (PoissonReconstruction, Vec<Point3<Real>>, Real) {
+    pub fn finish(self) -> (PoissonReconstruction, Vec<Point3<Real>>, Real) {
+        self.finish_weighted(&[])
+    }
+
+    /// [`Self::finish`] with a per-sample **support weight** for the sample-average iso
+    /// (vendored patch). `weights[i]` is how many raw points sample `i` stands for after
+    /// the caller's voxel subsample; empty means every sample weighs 1, which is exactly
+    /// `finish`. Without it a few hundred stray single-point samples count as much as
+    /// the well-supported surface samples and pull the extraction level off the surface.
+    /// Accumulated in the same pass that already evaluates every sample.
+    pub fn finish_weighted(
+        mut self,
+        weights: &[Real],
+    ) -> (PoissonReconstruction, Vec<Point3<Real>>, Real) {
         while self.solve_step() {}
 
         let mut result = PoissonReconstruction {
@@ -375,23 +418,26 @@ impl PoissonBuilder {
         };
         let mut isovalue = 0.0;
         let mut total_weight = 0.0;
-        let mut unweighted = 0.0;
-        for (pt, w) in self.points.iter().zip(self.vector_field.densities.iter()) {
+        let mut support_sum = 0.0;
+        let mut support_total = 0.0;
+        for (i, (pt, w)) in self.points.iter().zip(self.vector_field.densities.iter()).enumerate() {
             // `isovalue` is still 0 here, so this is the raw implicit function.
             let value = result.eval(pt);
             isovalue += value / *w;
             total_weight += 1.0 / *w;
-            unweighted += value;
+            let s = weights.get(i).copied().unwrap_or(1.0);
+            support_sum += value * s;
+            support_total += s;
         }
         result.isovalue = if total_weight != 0.0 {
             isovalue / total_weight
         } else {
             0.0
         };
-        let sample_iso = if self.points.is_empty() {
-            0.0
+        let sample_iso = if support_total > 0.0 {
+            support_sum / support_total - result.isovalue
         } else {
-            unweighted / self.points.len() as Real - result.isovalue
+            0.0
         };
         (result, self.points, sample_iso)
     }
@@ -400,7 +446,7 @@ impl PoissonBuilder {
 pub fn eval_triquadratic<T: Mul<Real, Output = T> + AddAssign + Copy + Default>(
     pt: &Point3<Real>,
     grid: &HGrid<usize>,
-    grid_node_idx: &HashMap<Point3<i64>, usize>,
+    grid_node_idx: &FastMap<Point3<i64>, usize>,
     node_weights: &[T],
 ) -> T {
     let cell_width = grid.cell_width();
@@ -429,7 +475,7 @@ pub fn eval_triquadratic<T: Mul<Real, Output = T> + AddAssign + Copy + Default>(
 pub fn eval_triquadratic_gradient(
     pt: &Point3<Real>,
     grid: &HGrid<usize>,
-    grid_node_idx: &HashMap<Point3<i64>, usize>,
+    grid_node_idx: &FastMap<Point3<i64>, usize>,
     node_weights: &[Real],
 ) -> Vector3<Real> {
     let cell_width = grid.cell_width();

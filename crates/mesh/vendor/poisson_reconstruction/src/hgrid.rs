@@ -2,11 +2,10 @@
 // We should probably move this to Parry.
 #![allow(dead_code)]
 
-use fnv::FnvHasher;
-
 use std::collections::HashMap;
 use std::hash::BuildHasher;
 
+use crate::fast_hash::FastHasher;
 use crate::Real;
 use na::{Point3, Vector3};
 
@@ -19,11 +18,12 @@ impl Default for DeterministicState {
     }
 }
 
+// (Vendored patch) word-at-a-time hashing instead of byte-wise FNV — see fast_hash.rs.
 impl BuildHasher for DeterministicState {
-    type Hasher = FnvHasher;
+    type Hasher = FastHasher;
 
-    fn build_hasher(&self) -> FnvHasher {
-        FnvHasher::with_key(1820)
+    fn build_hasher(&self) -> FastHasher {
+        FastHasher::default()
     }
 }
 

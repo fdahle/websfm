@@ -6,8 +6,13 @@ import {
   meshInputCell,
   subsampleForMesh,
   recommendMeshDepth,
+  resolveMeshDepth,
+  robustBox,
+  estimatePointSpacing,
+  parseMeshStats,
 } from './mesh.js'
 import { MESH_TUNING } from '../tuning.js'
+import { MESH_DEFAULTS } from '../defaults.user.js'
 
 // Encode a mesh into the wasm wire format (mirror of crates/mesh encode_mesh) so the
 // parser can be round-tripped without the actual wasm.
@@ -107,68 +112,193 @@ describe('generateMesh', () => {
     col: Uint8Array.from([255, 0, 0, 0, 255, 0]),
     nrm: Float32Array.from([0, 0, 1, 0, 0, 1]),
   }
+  const empty = () => ({ bytes: new Uint8Array(8), stats: null })
 
   it('throws a clear error when normals are missing', () => {
     const noNrm = { count: 2, pos: dense.pos, col: dense.col }
-    expect(() => generateMesh(noNrm, () => new Uint8Array(8))).toThrow(/normals/i)
+    expect(() => generateMesh(noNrm, empty)).toThrow(/normals/i)
   })
 
   it('parses the injected solver output and colours vertices', () => {
-    const pos = Float32Array.from([0, 0, 0, 1, 0, 0, 0, 1, 0])
+    // The solver works relative to the input's bbox centre (0.5, 0, 0) and answers in
+    // that frame; generateMesh adds the origin back.
+    const pos = Float32Array.from([-0.5, 0, 0, 0.5, 0, 0, -0.5, 1, 0])
     const idx = Uint32Array.from([0, 1, 2])
-    const poissonFn = () => encodeMesh(pos, idx)
+    const poissonFn = () => ({ bytes: encodeMesh(pos, idx), stats: null })
     const m = generateMesh(dense, poissonFn, { mergeCell: 1, colorize: true }, () => {})
     expect(m.nVerts).toBe(3)
     expect(m.count).toBe(1) // triangles
-    expect(m.col).not.toBeNull()
+    expect(Array.from(m.pos.slice(0, 6))).toEqual([0, 0, 0, 1, 0, 0])
     expect(m.col.length).toBe(9)
     // First vertex sits on the red dense point.
     expect(Array.from(m.col.slice(0, 3))).toEqual([255, 0, 0])
   })
 
-  it('returns an empty mesh when the solver yields nothing', () => {
-    const m = generateMesh(dense, () => new Uint8Array(8), { mergeCell: 1 }, () => {})
+  it('returns an empty mesh (with a run summary) when the solver yields nothing', () => {
+    const m = generateMesh(dense, empty, { mergeCell: 1 }, () => {})
     expect(m.nVerts).toBe(0)
     expect(m.count).toBe(0)
     expect(m.col).toBeNull()
+    expect(m.summary.depth).toBeGreaterThan(0)
   })
 
-  it('keeps the Poisson surface untrimmed when gap filling is enabled', () => {
-    let trim = -1
-    const poissonFn = (_pos, _nrm, _depth, _screening, trimDist) => {
-      trim = trimDist
-      return new Uint8Array(8)
+  it('maps the cleanup settings onto the solver options', () => {
+    let seen = null
+    const fn = (input) => { seen = input; return empty() }
+    generateMesh(dense, fn, { mergeCell: 0.5 }, () => {})
+    // Defaults: gentle trim, hole refill, floaters removed, no distance trim.
+    expect(seen.densityRatio).toBe(MESH_TUNING.trimRatio.gentle)
+    expect(seen.holeAreaRatio).toBe(MESH_TUNING.holeAreaRatio)
+    expect(seen.minComponentShare).toBeCloseTo(MESH_DEFAULTS.minPiecePct / 100)
+    expect(seen.trimDist).toBe(0)
+
+    generateMesh(dense, fn, { mergeCell: 0.5, trim: 'strong', fillHoles: false, removeFloaters: false }, () => {})
+    expect(seen.densityRatio).toBe(MESH_TUNING.trimRatio.strong)
+    expect(seen.holeAreaRatio).toBe(0)
+    expect(seen.minComponentShare).toBe(0)
+
+    // Hole refill only means something after a trim.
+    generateMesh(dense, fn, { mergeCell: 0.5, trim: 'off', fillHoles: true }, () => {})
+    expect(seen.densityRatio).toBe(0)
+    expect(seen.holeAreaRatio).toBe(0)
+  })
+
+  it('ignores the retired trimFactor key (a saved workflow recipe still carries 6)', () => {
+    let seen = null
+    generateMesh(dense, (i) => { seen = i; return empty() }, { mergeCell: 0.5, trimFactor: 6, fillHoles: false }, () => {})
+    expect(seen.trimDist).toBe(0)
+  })
+
+  // A clustered cloud with one far point: depth 1 over extent 10 ⇒ leaf 5. The robust
+  // box and stray filter are switched off where the test is about something else.
+  const clustered = () => ({
+    count: 5,
+    pos: Float32Array.from([0, 0, 0, 0.01, 0, 0, 0, 0.01, 0, 0.01, 0.01, 0, 10, 0, 0]),
+    nrm: Float32Array.from([0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]),
+    col: null,
+  })
+  const plain = { robustMargin: Infinity, isolatedCellLeaves: 0, colorize: false }
+
+  it('subsamples to ~one point per leaf and carries each sample\'s point count as support', () => {
+    let seen = null
+    generateMesh(clustered(), (i) => { seen = i; return empty() }, { depth: 1, mergeCell: 0.001, ...plain }, () => {})
+    expect(seen.pos.length / 3).toBe(2) // the four clustered points collapse to one
+    expect([...seen.wgt].sort()).toEqual([1, 4])
+  })
+
+  it('scales the distance trim with the subsampled input spacing, not the dense GSD', () => {
+    // Input cell 5 ≫ mergeCell 0.001: a GSD-sized radius against samples 5 apart would
+    // delete nearly every vertex of the surface.
+    const d = clustered()
+    let seen = null
+    generateMesh(d, (i) => { seen = i; return empty() },
+      { depth: 1, mergeCell: 0.001, distanceTrim: 6, ...plain }, () => {})
+    expect(seen.trimDist).toBeCloseTo(6 * meshInputCell(d.pos, 1, MESH_TUNING.inputLeafCellsPerPoint), 9)
+  })
+
+  it('lowers a depth the input spacing cannot use, and logs why', () => {
+    let seen = null
+    const logs = []
+    // Extent 1, spacing 0.1 ⇒ depth ceil(log2(10)) = 4 is all the spacing supports.
+    const d = { count: 2, pos: Float32Array.from([0, 0, 0, 1, 0, 0]), nrm: Float32Array.from([0, 0, 1, 0, 0, 1]) }
+    generateMesh(d, (i) => { seen = i; return empty() }, { depth: 10, mergeCell: 0.1, ...plain, minDepth: 2 },
+      (m) => logs.push(m))
+    expect(seen.depth).toBe(4)
+    expect(logs.some((l) => /depth 10 → 4/.test(l))).toBe(true)
+  })
+
+  it('leaves far stragglers out of the solve', () => {
+    // 200 points on a unit square plus 2 points 1000 units away.
+    const n = 202
+    const pos = new Float32Array(n * 3)
+    const nrm = new Float32Array(n * 3)
+    for (let i = 0; i < 200; i++) { pos[i * 3] = (i % 20) / 20; pos[i * 3 + 1] = Math.floor(i / 20) / 10; nrm[i * 3 + 2] = 1 }
+    pos[200 * 3] = 1000; pos[201 * 3 + 1] = -1000
+    nrm[200 * 3 + 2] = 1; nrm[201 * 3 + 2] = 1
+    let seen = null
+    generateMesh({ count: n, pos, nrm }, (i) => { seen = i; return empty() },
+      { depth: 4, mergeCell: 0.1, isolatedCellLeaves: 0, colorize: false }, () => {}) // leaf 1/16 < spacing: no subsample
+    expect(seen.pos.length / 3).toBe(200)
+  })
+
+  it('meshes a far-from-origin Float64 cloud in local coordinates and restores them exactly', () => {
+    // Projected coordinates (UTM-like): f32 would round these to ~0.5 m.
+    const E = 512345.123, N = 6123456.789
+    const pos = Float64Array.from([E, N, 10, E + 1, N, 10, E, N + 1, 10, E + 1, N + 1, 10])
+    const nrm = Float32Array.from([0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1])
+    let seen = null
+    const fn = (i) => {
+      seen = i
+      // Echo the first three input samples back as one triangle.
+      return { bytes: encodeMesh(i.pos.slice(0, 9), Uint32Array.from([0, 1, 2])), stats: null }
     }
-    generateMesh(dense, poissonFn, { mergeCell: 0.5, trimFactor: 6, fillHoles: true }, () => {})
-    expect(trim).toBe(0)
-    generateMesh(dense, poissonFn, { mergeCell: 0.5, trimFactor: 6, fillHoles: false }, () => {})
-    expect(trim).toBe(3)
+    const m = generateMesh({ count: 4, pos, nrm }, fn, { depth: 2, mergeCell: 0.25, ...plain }, () => {})
+    for (const v of seen.pos) expect(Math.abs(v)).toBeLessThan(2)
+    expect(m.pos).toBeInstanceOf(Float64Array)
+    const want = [[E, N, 10], [E + 1, N, 10], [E, N + 1, 10], [E + 1, N + 1, 10]]
+    for (let v = 0; v < 3; v++) {
+      const got = [m.pos[v * 3], m.pos[v * 3 + 1], m.pos[v * 3 + 2]]
+      expect(want.some((w) => w.every((c, k) => Math.abs(c - got[k]) < 1e-6))).toBe(true)
+    }
   })
 
-  it('subsamples the Poisson input when the cloud is denser than a leaf cell', () => {
-    // 4 near-coincident points inside one tiny region + normals; a coarse input cell
-    // collapses them, so the solver sees fewer points than the full cloud.
-    const pos = Float32Array.from([0, 0, 0, 0.01, 0, 0, 0, 0.01, 0, 0.01, 0.01, 0, 10, 0, 0])
-    const nrm = Float32Array.from([0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1])
-    const d = { count: 5, pos, nrm, col: null }
-    let sawPoints = -1
-    // depth 1 over extent 10 ⇒ leaf 5, input cell 5 (> mergeCell 0.001) ⇒ the four
-    // clustered points collapse to one, plus the far point ⇒ 2 input points.
-    const poissonFn = (p) => { sawPoints = p.length / 3; return new Uint8Array(8) }
-    generateMesh(d, poissonFn, { depth: 1, mergeCell: 0.001, colorize: false }, () => {})
-    expect(sawPoints).toBe(2)
+  it('estimates the spacing when the cloud has no merge cell, and records it', () => {
+    const n = 400
+    const pos = new Float32Array(n * 3)
+    const nrm = new Float32Array(n * 3)
+    for (let i = 0; i < n; i++) { pos[i * 3] = (i % 20) * 0.3; pos[i * 3 + 1] = Math.floor(i / 20) * 0.3; nrm[i * 3 + 2] = 1 }
+    const m = generateMesh({ count: n, pos, nrm }, empty, { depth: 6, ...plain }, () => {})
+    expect(m.summary.spacingSource).toBe('estimated')
+    expect(m.summary.spacing).toBeCloseTo(0.3, 5)
   })
+})
 
-  it('scales the trim radius with the subsampled input spacing, not the dense GSD', () => {
-    // Same clustered cloud: input cell 5 ≫ mergeCell 0.001. Trimming at 6×0.001
-    // against samples 5 apart would delete nearly every vertex of the surface.
-    const pos = Float32Array.from([0, 0, 0, 0.01, 0, 0, 0, 0.01, 0, 0.01, 0.01, 0, 10, 0, 0])
-    const nrm = Float32Array.from([0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1])
-    let trim = -1
-    const poissonFn = (_p, _n, _d, _s, t) => { trim = t; return new Uint8Array(8) }
-    generateMesh({ count: 5, pos, nrm, col: null }, poissonFn,
-      { depth: 1, mergeCell: 0.001, trimFactor: 6, fillHoles: false, colorize: false }, () => {})
-    expect(trim).toBeCloseTo(6 * meshInputCell(pos, 1, MESH_TUNING.inputLeafCellsPerPoint), 9)
+describe('resolveMeshDepth', () => {
+  it('keeps the requested depth while the spacing supports it', () => {
+    expect(resolveMeshDepth(8, 100, 0.01).depth).toBe(8) // supports 14
+  })
+  it('lowers it to what the spacing supports, never below minDepth', () => {
+    expect(resolveMeshDepth(10, 100, 1)).toEqual({ depth: 7, needed: 7 }) // ceil(log2 100)
+    expect(resolveMeshDepth(10, 4, 1, { minDepth: 5 }).depth).toBe(5)
+    expect(resolveMeshDepth(3, 4, 1, { minDepth: 5 }).depth).toBe(3) // floor is the request when it is below minDepth
+  })
+})
+
+describe('robustBox', () => {
+  it('excludes far stragglers but keeps a margin around the bulk', () => {
+    const pos = new Float64Array(1000 * 3)
+    for (let i = 0; i < 998; i++) { pos[i * 3] = i / 998; pos[i * 3 + 1] = (i % 7) / 7 }
+    pos[998 * 3] = 500; pos[999 * 3 + 2] = -500
+    const b = robustBox(pos)
+    expect(b.max[0]).toBeLessThan(2)
+    expect(b.min[2]).toBeGreaterThan(-2)
+    expect(b.max[0]).toBeGreaterThan(1) // the real extent survives with margin
+  })
+  it('gives a thin axis the margin of the largest one', () => {
+    // Near-planar: z noise of ±0.001 across a 10 × 10 extent.
+    const pos = new Float64Array(500 * 3)
+    for (let i = 0; i < 500; i++) { pos[i * 3] = (i % 25) / 2.5; pos[i * 3 + 1] = Math.floor(i / 25) / 2; pos[i * 3 + 2] = ((i * 37) % 11 - 5) * 2e-4 }
+    const b = robustBox(pos)
+    expect(b.max[2] - b.min[2]).toBeGreaterThan(4)
+  })
+})
+
+describe('estimatePointSpacing', () => {
+  it('returns the median nearest-neighbour distance of a regular grid', () => {
+    const pos = new Float32Array(30 * 30 * 3)
+    for (let i = 0; i < 900; i++) { pos[i * 3] = (i % 30) * 0.02; pos[i * 3 + 1] = Math.floor(i / 30) * 0.02 }
+    expect(estimatePointSpacing(pos)).toBeCloseTo(0.02, 6)
+  })
+  it('returns 0 for fewer than two points', () => {
+    expect(estimatePointSpacing(new Float32Array(3))).toBe(0)
+  })
+})
+
+describe('parseMeshStats', () => {
+  it('names the crate stats vector, and passes null through', () => {
+    const s = parseMeshStats(Float64Array.from([10, 1, 2, 3, 4, 5, 6, 7, 8, 9.5, 0.25]))
+    expect(s).toMatchObject({ extractedTris: 10, holesFilled: 3, components: 5, keptTris: 8, leafWidth: 0.25 })
+    expect(parseMeshStats(null)).toBeNull()
   })
 })
 
@@ -187,18 +317,16 @@ describe('meshInputCell', () => {
 })
 
 describe('subsampleForMesh', () => {
-  it('averages points + renormalises normals within a cell', () => {
+  it('averages points + renormalises normals within a cell, and counts them', () => {
     // Two points in one cell (cell=1), one in another; opposing-ish normals average.
     const pos = Float32Array.from([0.2, 0, 0, 0.8, 0, 0, 5, 0, 0])
     const nrm = Float32Array.from([0, 0, 1, 0, 1, 0, 1, 0, 0])
-    const { pos: outPos, nrm: outNrm } = subsampleForMesh(pos, nrm, 1)
+    const { pos: outPos, nrm: outNrm, wgt } = subsampleForMesh(pos, nrm, 1)
     expect(outPos.length / 3).toBe(2)
-    // The merged cell's position is the mean of its two points.
-    const merged = [outPos[0], outPos[1], outPos[2]]
-    const other = [outPos[3], outPos[4], outPos[5]]
-    // Order isn't guaranteed; find the merged (x≈0.5) one.
-    const m = Math.abs(merged[0] - 0.5) < 1e-4 ? merged : other
-    expect(m[0]).toBeCloseTo(0.5)
+    const mi = Math.abs(outPos[0] - 0.5) < 1e-4 ? 0 : 1
+    expect(outPos[mi * 3]).toBeCloseTo(0.5)
+    expect(wgt[mi]).toBe(2)
+    expect(wgt[1 - mi]).toBe(1)
     // Every emitted normal is unit length.
     for (let i = 0; i < outNrm.length / 3; i++) {
       const mag = Math.hypot(outNrm[i * 3], outNrm[i * 3 + 1], outNrm[i * 3 + 2])
@@ -206,12 +334,13 @@ describe('subsampleForMesh', () => {
     }
   })
 
-  it('passes the input through unchanged when cell <= 0', () => {
-    const pos = Float32Array.from([0, 0, 0])
+  it('keeps every point when cell <= 0, relative to the origin, with unit support', () => {
+    const pos = Float64Array.from([100.5, 200.25, 3])
     const nrm = Float32Array.from([0, 0, 1])
-    const r = subsampleForMesh(pos, nrm, 0)
-    expect(r.pos).toBe(pos)
+    const r = subsampleForMesh(pos, nrm, 0, [100, 200, 0])
+    expect([...r.pos]).toEqual([0.5, 0.25, 3])
     expect(r.nrm).toBe(nrm)
+    expect([...r.wgt]).toEqual([1])
   })
 })
 

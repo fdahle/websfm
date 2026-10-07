@@ -24,17 +24,23 @@ oriented toward the camera that saw them by construction.
 
 <!-- TODO(image): assets/poisson-mesh.svg - oriented input points with normal arrows, the octree subdivision around the surface, the extracted isosurface, and the same mesh after trimming - with the untrimmed version showing the balloon-like closure over an unsampled region. -->
 
-Two details keep the result honest:
+Poisson always produces a *closed* surface that is defined everywhere. It will
+balloon a smooth hull across regions nothing observed, and it wraps every small
+speck of fusion noise in its own shell. Four details keep the result honest:
 
-- **Iso level.** Extracting at the naive zero level inflates the surface by
-  several percent. The iso value is taken at the average of the solution
-  evaluated at the input samples instead.
-- **Trimming.** Poisson always produces a *closed* surface, so it will happily
-  balloon a smooth sheet across a region nothing was ever observed in.
-  Triangles farther than a set multiple of the fusion cell size from any input
-  point are removed, so unobserved areas stay holes.
+- **Iso level.** The surface is extracted at the average of the solution at the
+  input samples (weighted by how many points each sample stands for), not at the
+  naive zero level.
+- **Support trimming.** Each sample carries how many dense points it represents.
+  Surface whose support falls below a fraction of the typical sample's is removed:
+  the extrapolated hull and the shells around specks.
+- **Hole refill.** A small, closed region the trim opened inside otherwise solid
+  surface is a hole the solve rightly bridged, so it is put back.
+- **Floating pieces.** Disconnected pieces that explain only a sliver of the
+  cloud's points are dropped. They are judged by the points they explain, not by
+  their area, because Poisson inflates a tiny speck into a sizeable ball.
 
 The main tunable is **octree depth**: each extra level halves the cell size,
-capturing finer detail at roughly eight times the memory and giving noise more
-freedom to become geometry. Vertex colour is transferred from the nearest dense
-voxel cell, and the result exports as PLY or GLB.
+capturing finer detail at roughly four times the work on a surface. It is lowered
+automatically when the cloud is too sparse to use it. Vertex colour is transferred
+from the nearest dense voxel cell, and the result exports as PLY or GLB.

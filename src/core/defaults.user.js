@@ -271,14 +271,22 @@ export const IMPORT_CLOUD_DEFAULTS = {
 // Mesh (screened Poisson, core/products/mesh.js + crates/mesh). Mirrored by
 // MeshModal.vue. `screening` is the Poisson point-fitting weight (the vendored
 // library's quality lever; the classic PoissonRecon "samples per node" knob is not
-// exposed — see crates/mesh/src/lib.rs). `trimFactor` multiplies the dense cloud's
-// merge cell to set the world-unit trim radius. UI: trimFactor 0 ⇒ no trimming.
+// exposed — see crates/mesh/src/lib.rs). The cleanup after the solve (crates/mesh
+// `MeshOptions`) is what makes the surface usable on a photogrammetric cloud:
+// `trim` drops surface the samples don't support (the extrapolated hull, the shell
+// around a stray speck), `fillHoles` closes small holes that opens, `removeFloaters`
+// drops disconnected pieces explaining < `minPiecePct` % of the main surface's
+// samples. `distanceTrim` is the older proximity trim (× the input sample spacing;
+// 0 = off), kept as an advanced option.
 export const MESH_DEFAULTS = {
-  depth: 8,          // octree max depth (detail vs cost/RAM)
-  screening: 4,      // Poisson point-fitting weight; 0 disables screening
-  fillHoles: true,   // keep the untrimmed, watertight Poisson surface
-  trimFactor: 6,     // trim radius = trimFactor × dense mergeCell; 0 = no trim
-  colorize: true,    // transfer dense-cloud colour onto the mesh vertices
+  depth: 8,              // octree max depth (detail vs cost/RAM); auto-lowered when the cloud can't use it
+  screening: 4,          // Poisson point-fitting weight; 0 disables screening
+  trim: 'gentle',        // 'off' | 'gentle' | 'strong' — support-density trim (MESH_TUNING.trimRatio)
+  fillHoles: true,       // re-add small closed holes the trim opened
+  removeFloaters: true,  // drop disconnected pieces with little sample support
+  minPiecePct: 1,        // … below this % of the best-supported piece's support
+  distanceTrim: 0,       // proximity trim radius in input-sample cells; 0 = off
+  colorize: true,        // transfer dense-cloud colour onto the mesh vertices
 }
 // Mesh quality presets — octree depth is the detail/cost lever (deltas; medium ≡ defaults).
 export const MESH_PRESETS = {

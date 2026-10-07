@@ -77,7 +77,9 @@ export const WORKFLOW_BLOCKS = [
   automated('gen-mesh', 'Build Mesh', 'Products', ['dense'], ['mesh'], { preset: 'medium', ...MESH_DEFAULTS }, [
     { key: 'preset', label: 'Preset', type: 'select', options: ['low', 'medium', 'high', 'custom'] },
     { key: 'depth', label: 'Octree depth', type: 'number', min: 4, max: 12 },
-    { key: 'fillHoles', label: 'Fill holes', type: 'boolean' },
+    { key: 'trim', label: 'Surface trimming', type: 'select', options: ['off', 'gentle', 'strong'] },
+    { key: 'fillHoles', label: 'Fill small holes', type: 'boolean' },
+    { key: 'removeFloaters', label: 'Remove floating pieces', type: 'boolean' },
   ]),
 
   interactive('eval-overview', 'Quality Report', 'Evaluation'),

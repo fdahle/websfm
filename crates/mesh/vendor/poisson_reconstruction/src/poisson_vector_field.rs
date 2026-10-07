@@ -1,5 +1,5 @@
 use crate::poisson_layer::PoissonLayer;
-use crate::polynomial::TriQuadraticBspline;
+use crate::polynomial::OverlapTable;
 use crate::{poisson, Real};
 use itertools::multizip;
 use na::{vector, DVector, Point3, Vector3};
@@ -173,17 +173,18 @@ impl PoissonVectorField {
         for (other_layer_id, other_layer) in layers.iter().enumerate() {
             let other_width = other_layer.cell_width();
             let reach = Vector3::repeat(curr_width * 1.5 + other_width * 1.5);
+            // `poly1.grad_grad(poly2, false, true)` with poly1 = the source node, poly2 =
+            // the target node, by lattice offset (vendored patch — see `OverlapTable`).
+            let table = OverlapTable::new(other_width, curr_width, false, true);
 
             for &other_node_id in &self.nonzero_normals[other_layer_id] {
                 let normal = self.layers_normals[other_layer_id][other_node_id];
                 let other_node = other_layer.ordered_nodes[other_node_id];
                 let other_node_center = other_layer.grid.cell_center(&other_node);
-                let poly1 = TriQuadraticBspline::new(other_node_center, other_width);
                 let aabb = Aabb::from_half_extents(other_node_center, reach);
 
-                let mut accumulate = |curr_node_center: Point3<Real>, rhs_id: usize| {
-                    let poly2 = TriQuadraticBspline::new(curr_node_center, curr_width);
-                    let coeff = poly1.grad_grad(poly2, false, true);
+                let mut accumulate = |curr_node: &Point3<i64>, rhs_id: usize| {
+                    let coeff = table.grad_grad(&other_node, curr_node);
                     rhs[rhs_id] += normal.dot(&coeff);
                 };
 
@@ -194,7 +195,7 @@ impl PoissonVectorField {
                         // A grid cell is not necessarily a node (points live in the same
                         // grid), so look up rather than index.
                         if let Some(&rhs_id) = curr_layer.grid_node_idx.get(&curr_node) {
-                            accumulate(curr_layer.grid.cell_center(&curr_node), rhs_id);
+                            accumulate(&curr_node, rhs_id);
                         }
                     }
                 } else {
@@ -205,7 +206,7 @@ impl PoissonVectorField {
                         let curr_node_center = curr_layer.grid.cell_center(curr_node);
                         let d = curr_node_center - other_node_center;
                         if d.x.abs() < reach.x && d.y.abs() < reach.y && d.z.abs() < reach.z {
-                            accumulate(curr_node_center, rhs_id);
+                            accumulate(curr_node, rhs_id);
                         }
                     }
                 }
