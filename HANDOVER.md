@@ -413,6 +413,34 @@ All values are E / N / U in cm, residual = estimate − reference.
 - The antenna convention is confirmed independently: as written it leaves a 35.6 cm
   north scatter on Metashape's own cameras, while (x, −y, −z) fits at 1.3–1.7 cm.
 
+**GeoScan calibration: websfm self-cal vs Metashape's calibration pinned (2026-10-07,
+`puti-tangential`).** One detection and one set of matches (3,811 / 4,791 pairs, 986 k
+inliers), RTK priors + antenna offset, all variants 444/444 cameras and ~133.7 k ≥3-view
+points, ~34 min SfM each. A variant's `recon.sensor` pins Metashape's adjusted
+calibration (f 5676.93, cx/cy converted to 2993.65 / 1996.63 in websfm's convention,
+k1–k3, p1/p2 swapped to OpenCV order; the forward models agree to 1e-12 px), which
+turns self-calibration off. cm, shipped −½ mark convention, 15 checkpoints:
+
+| variant | camera fit H / V | checkpoints H / V | mean E / N / U | sd E / N / U |
+|---|---|---|---|---|
+| websfm self-cal (default) | **1.6** / **1.3** | **3.4** / 7.0 | −2.5 / +0.4 / +3.9 | 1.7 / 1.5 / 5.8 |
+| Metashape calibration, fixed | 1.7 / 1.5 | 4.8 / **5.6** | −3.0 / +0.7 / −0.8 | 2.9 / 2.3 / 5.5 |
+| same, p1 = p2 = 0 | 2.7 / 1.6 | 5.2 / 5.8 | −3.1 / +0.2 / −0.5 | 3.5 / 2.2 / 5.8 |
+
+- **Vertical bias is focal.** Metashape's calibration (solved with GCPs) removes the
+  +3.9 cm bias. Self-cal from RTK cameras ends at fx 5672.9 (−0.07 %), cx/cy within 2 px.
+  The vertical scatter does not change with the calibration.
+- **Horizontal is better with websfm's own self-cal** than with Metashape's fixed
+  calibration. The westward bias is in every variant (−2.5 to −3.1 cm), so it is not the
+  camera model.
+- **Tangential distortion** is worth 1.0 cm on the camera fit and 0.4 cm on checkpoint H
+  when the rest of the calibration is held fixed. Not enough to build p1/p2 self-cal for
+  this lens.
+- The mark-offset curve has the same slope in all three variants (H at −½ / −¼ / 0 /
+  +¼ / +½ px: 3.1 / 3.2 / 3.4 / 3.8 / 4.2 cm for self-cal).
+- GCP 19 with converted coordinates (`gcpOverrides`, still outside the RMS): −1.3 / +0.7 /
+  −3.2 cm on self-cal, an ordinary checkpoint.
+
 **Monster beach (`zm-pan`, MicaSense Altum-PT pan, 538 airborne frames, standalone
 GPS; YellowScan LiDAR, 158 M points as the reference surface).** Leak-fixed build, no
 16-bit stretch (the before-number):

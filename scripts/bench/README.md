@@ -103,12 +103,19 @@ the quadratic term at the 95 % radius; positive means a bowl).
 - A variant's `recon.leverArm: true` sets `reference.leverArm` on every sensor
   (`gnssLeverArm`), so camera priors are treated as antenna positions. Without it the
   arm is used only to evaluate camera positions.
+- A variant's `recon.sensor: { focal, focalUnit, cx, cy, k1, k2, k3, p1, p2,
+  distortionModel }` pins every sensor's calibration for that run, in sensor-table
+  conventions: absolute pixel-centre `cx`/`cy` (Metashape's are offsets from the centre
+  in pixel-edge coordinates: `W/2 + cx − ½`) and OpenCV `p1`/`p2` (Metashape's are
+  swapped). A calibrated Brown model turns `'auto'` self-calibration off. A variant
+  without it gets the EXIF-grouped sensor back.
 - `stallMinutes` (default 30): abort the run when no log line arrives for this long,
   or at once if the page crashes. A worker that dies of memory otherwise leaves the
   bench waiting forever. Each stage also logs the renderer heap before/after a GC.
 - `reference.markOffsetsPx: [-0.5, 0.5]` re-scores the checkpoints at shifted mark
   conventions on the same model; `reference.excludeGcps` keeps known-bad GCPs out of
-  the RMS (they are still listed).
+  the RMS (they are still listed). `reference.gcpOverrides: { "19": [lat, lon, h] }`
+  replaces one GCP file line (GeoScan's 19 was never converted out of its source datum).
 - `metashape-datum.py` (WSL Python + numpy, not part of a run) checks a reference set
   against Metashape's own adjusted block: the camera-vs-GCP datum, the antenna convention
   and a bench run's checkpoints per GCP. Usage is in its header.

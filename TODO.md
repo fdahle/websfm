@@ -97,20 +97,26 @@ self-cal guard fixed for default-FOV focals the same day (HANDOVER done log).
 ### ACC — georeferenced accuracy (RTK benches, HANDOVER ▸ B-bench)
 The bench now measures accuracy, not only point counts: camera centres against
 RTK/EXIF positions (quarry, GeoScan) and 15 independent GCP checkpoints (GeoScan).
-- **GeoScan checkpoint bias: the datum explains about half** (measured 2026-10-07,
-  HANDOVER ▸ B-bench ▸ GeoScan datum). Through Metashape's own block, the GCP file and the
-  RTK file disagree by 1.3 cm W / 1.0 cm S / 0.8 cm U. websfm's checkpoints sit at
-  −2.5 / +0.3 / +4.0 cm (shipped −½ mark convention), so about 1.2 cm W, 1.3 cm N and
-  3.2 cm U are websfm's own. Its horizontal scatter about the mean is also twice
-  Metashape's (2.8 vs 1.3 cm). Next: the vertical bias, and whether the remaining mark
-  offset (below) is the same effect. Rescore with GCP 19 corrected (it is a datum slip,
-  not a bad GCP: coordinates in HANDOVER), which adds a 16th checkpoint.
-- **The shared vertical pattern.** Per-checkpoint vertical residuals correlate +0.95 with
-  Metashape's at 1.54× the amplitude. Height, a plane, a dome and mark radius explain
-  little of the pattern. Metashape had 13 of the 15 in its solve, which shrinks their
-  residuals, so part of the 1.54× may be survey or mark error that websfm shows in full.
-  Settle it with `VERIFICATION.csv` ▸ `GCP-07` (Metashape, every GCP a checkpoint, RTK
-  only) before treating it as a websfm defect.
+- **GeoScan westward bias: half datum, half unexplained** (measured 2026-10-07, HANDOVER
+  ▸ B-bench ▸ GeoScan datum and ▸ GeoScan calibration). The GCP and RTK files disagree by
+  1.3 cm W / 1.0 cm S / 0.8 cm U (seen through Metashape's block). websfm's checkpoints
+  sit 2.5 cm W. The other ~1.2 cm W stays the same with Metashape's own calibration
+  pinned, so it is not the camera model. It appeared when the antenna offset was turned
+  on. Next suspect: how the lever arm is applied (`surveyConstraints.js`). Compare
+  websfm's and Metashape's per-camera antenna positions for the same images.
+- **GeoScan vertical bias is the focal–height correlation, not a bug in websfm.** With
+  Metashape's calibration fixed (it was solved with GCPs, so its focal knows the ground
+  height) the +3.9 cm U bias falls to −0.8 cm. The scatter stays the same (sd 5.5–5.8 cm)
+  in every variant, and correlates +0.95 per GCP with Metashape's residuals, so the
+  scatter is in the survey or the marks. Self-calibration from RTK cameras alone puts fx
+  at 5672.9 against Metashape's 5676.9. `VERIFICATION.csv` ▸ `GCP-07` (Metashape, RTK
+  only, every GCP a checkpoint) shows whether Metashape lands on the same bias without
+  GCPs. If it does, the bias is just what you get without vertical control.
+- **Tangential self-calibration (p1/p2): parked.** Holding Metashape's calibration and
+  dropping its p1/p2 costs 1.0 cm on the camera fit and 0.4 cm on checkpoint H. But
+  websfm's own radial self-calibration already beats that fixed calibration (checkpoints
+  H 3.4 vs 4.8 cm, camera fit 1.6 vs 1.7 cm). Revisit only on a lens with strong
+  decentring.
 - **The remaining GeoScan error** (checkpoints H 4.4 cm, V 10.8 cm, GSD 2.9 cm; Metashape
   fits the RTK cameras at 1.2 cm vertical). After the lever arm, check whether the prior
   BA converged: its reprojection RMS does not move across both rounds, and it runs 30
@@ -129,7 +135,10 @@ RTK/EXIF positions (quarry, GeoScan) and 15 independent GCP checkpoints (GeoScan
   keypoints (`puti-arm3`) the shift curve is H 5.3 / 4.2 / 3.3 / 3.1 / 3.0 / 3.1 cm and
   V 9.8 / 8.1 / 7.1 / 6.9 / 6.9 / 7.2 cm at +0.5 / 0 / −0.5 / −0.75 / −1.0 / −1.25 px;
   the shipped −½ is the first half of that. **Open: a further ~0.3–0.5 px** (optimum
-  near −0.85). Not the SIFT octaves (decimation, exact) nor the resize (centre-aligned).
+  near −0.85). Not the SIFT octaves (decimation, exact) nor the resize (centre-aligned),
+  and not the camera model: with Metashape's calibration pinned the curve keeps the same
+  slope (`puti-tangential`). A shift mainly moves the mean east, so it may be the
+  westward bias above rather than anything about the marks.
   Candidates: how Metashape places marker centres, or these 15 marks. Test with marks
   made in websfm's own viewer before tuning anything. Also: the viewer draws keypoints
   and residual vectors in keypoint convention on an edge-convention canvas (½ px
