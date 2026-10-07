@@ -11,14 +11,16 @@ import GlossaryTerm from '../glossary/GlossaryTerm.vue'
 import { useDatasetRecommendations } from '../../composables/useDatasetRecommendations.js'
 import { useRecommendedPreset } from '../../composables/useRecommendedPreset.js'
 import {
-  DETECT_SIFT_DEFAULTS, DETECT_SUPERPOINT_DEFAULTS,
-  DETECT_SIFT_PRESETS, DETECT_SUPERPOINT_PRESETS, DETECT_PRESET_META,
+  DETECT_SIFT_DEFAULTS, DETECT_SIFT_PRESETS, DETECT_PRESET_META,
+  DETECT_DEFAULTS_BY_DETECTOR, DETECT_PRESETS_BY_DETECTOR,
 } from '../../core/defaults.user.js'
 import { DETECT_TUNING } from '../../core/tuning.js'
+import { LEARNED_DETECTORS, learnedDetector, detectorLabel } from '../../core/features/learnedDetectors.js'
+import { MODELS, isRedistributable } from '../../core/models/registry.js'
 
 const props = defineProps({
   // Current image list — used to warn when Append mode would leave a mix of
-  // detectors (e.g. some SIFT, some SuperPoint), which breaks LightGlue.
+  // detectors (e.g. some SIFT, some DISK), which breaks LightGlue.
   images: { type: Array, default: () => [] },
 })
 
@@ -34,7 +36,7 @@ const detector = ref('sift')
 
 // Images already detected with a *different* detector than the one selected. In
 // Append mode these are skipped (kpStatus === 'done'), so their old descriptors
-// survive — a silent footgun for LightGlue, which needs all-SuperPoint. Overwrite
+// survive — a silent footgun for LightGlue, which needs one learned detector. Overwrite
 // re-detects everything, so the warning only applies to Append.
 const staleDetectorImages = computed(() =>
   props.images.filter(
@@ -43,7 +45,7 @@ const staleDetectorImages = computed(() =>
 )
 const showMixWarning = computed(() => !overwrite.value && staleDetectorImages.value.length > 0)
 
-// SuperPoint's GPU path (ONNX Runtime's WebGPU EP) is gated to Chromium in
+// A learned detector's GPU path (ONNX Runtime's WebGPU EP) is gated to Chromium in
 // core/features/ort.js (resolveBackend) — on Safari/Firefox it always runs on
 // CPU WASM (and Safari ignores COEP `credentialless`, so single-threaded too).
 // Surface that here, before the user commits to a slow run.
@@ -51,18 +53,23 @@ const isChromium = /Chrome\//.test(globalThis.navigator?.userAgent || '')
 
 // Tiling defaults (Advanced): 'off' | 'auto' | 'manual'. When on, detection runs
 // per overlapping tile at native-ish resolution then merges — more, better-
-// localised keypoints, and it sidesteps the SuperPoint WebGPU OOM. `tileSize` 0
+// localised keypoints, and it sidesteps the learned detectors' WebGPU OOM. `tileSize` 0
 // means auto-derive; each tile keeps only keypoints ≥ `overlap`/2 from a cut.
 // Prefill from the single source of truth (see core/defaults.user.js). Cloned so
 // edits don't mutate the shared constants.
 const siftSettings = ref({ ...DETECT_SIFT_DEFAULTS })
-const superpointSettings = ref({ ...DETECT_SUPERPOINT_DEFAULTS })
+// One settings object per learned detector, so switching detectors keeps each
+// one's edits (and never carries SIFT's keypoint budget into LightGlue's O(N²)).
+const learnedSettings = ref(Object.fromEntries(Object.keys(LEARNED_DETECTORS)
+  .map((id) => [id, { ...DETECT_DEFAULTS_BY_DETECTOR[id] }])))
 
 const detectors = [
-  { id: 'sift',       label: 'SIFT' },
-  { id: 'superpoint', label: 'SuperPoint (learned)' },
-  { id: 'orb',        label: 'ORB (coming soon)',   disabled: true },
-  { id: 'akaze',      label: 'AKAZE (coming soon)',  disabled: true },
+  { id: 'sift', label: 'SIFT' },
+  ...Object.values(LEARNED_DETECTORS).map((d) => ({
+    id: d.id,
+    // A detector whose weights websfm cannot ship says so where it is chosen.
+    label: `${d.label} (learned${isRedistributable(d.modelId) ? '' : ', non-commercial'})`,
+  })),
 ]
 
 const settings = computed(() => {
@@ -73,35 +80,44 @@ const settings = computed(() => {
   // are compute ceilings per *quality* preset), so it reports the balanced band
   // rather than silently falling through to it inside core.
   const base = { preset: baseId.value === 'recommended' ? 'medium' : baseId.value }
-  if (detector.value === 'sift') return { ...base, ...siftSettings.value }
-  if (detector.value === 'superpoint') return { ...base, ...superpointSettings.value }
-  return {}
+  return { ...base, ...activeSettings.value }
 })
 
 // Quality presets apply to whichever detector is active (deltas over that detector's
 // defaults). `activePreset` derives from the active settings so any edit flips to Custom.
-const isSp = computed(() => detector.value === 'superpoint')
-const activeRef = computed(() => (isSp.value ? superpointSettings : siftSettings))
-const presetMap = computed(() => (isSp.value ? DETECT_SUPERPOINT_PRESETS : DETECT_SIFT_PRESETS))
-const presetBase = computed(() => (isSp.value ? DETECT_SUPERPOINT_DEFAULTS : DETECT_SIFT_DEFAULTS))
+const learnedSpec = computed(() => learnedDetector(detector.value))
+const isLearned = computed(() => !!learnedSpec.value)
+const learnedLabel = computed(() => detectorLabel(detector.value))
+// The active detector's settings object, read and replaced as a whole.
+const activeSettings = computed({
+  get: () => (isLearned.value ? learnedSettings.value[detector.value] : siftSettings.value),
+  set: (v) => {
+    if (isLearned.value) learnedSettings.value = { ...learnedSettings.value, [detector.value]: v }
+    else siftSettings.value = v
+  },
+})
+// Reactive object of the active learned detector, for v-model in the template.
+const lp = computed(() => learnedSettings.value[detector.value] ?? {})
+const presetMap = computed(() => DETECT_PRESETS_BY_DETECTOR[detector.value] ?? DETECT_SIFT_PRESETS)
+const presetBase = computed(() => DETECT_DEFAULTS_BY_DETECTOR[detector.value] ?? DETECT_SIFT_DEFAULTS)
+// Licence note for a learned detector whose weights websfm does not distribute.
+const restrictedModel = computed(() => (learnedSpec.value && !isRedistributable(learnedSpec.value.modelId)
+  ? MODELS[learnedSpec.value.modelId] : null))
 const baseId = ref('medium')
 // `maxDimMode` is a mode, not a quality delta — it is orthogonal to the preset and
 // identical across all three, so switching it must not flip the card to Custom.
 const PRESET_MATCH_IGNORE = new Set(['maxDimMode'])
-// Writable proxy onto whichever detector's settings are active. `activeRef` is a
-// computed *holding a ref*, which templates do not unwrap through — reading
-// `activeRef.value.maxDimMode` in the template would compile fine and be undefined
-// at runtime. Going through an explicit computed keeps that entirely in script.
+// Writable proxy onto the active detector's resolution rule, kept in script.
 const maxDimMode = computed({
-  get: () => activeRef.value.value.maxDimMode ?? 'absolute',
-  set: (v) => { activeRef.value.value = { ...activeRef.value.value, maxDimMode: v } },
+  get: () => activeSettings.value.maxDimMode ?? 'absolute',
+  set: (v) => { activeSettings.value = { ...activeSettings.value, maxDimMode: v } },
 })
 
 const detectRecommendations = computed(() => {
   const out = { ...recommendations.value.detect }
-  // U2's keypoint budget is explicitly in SIFT units; applying it to
-  // SuperPoint would violate LightGlue's much tighter attention budget.
-  if (isSp.value) delete out.maxKeypoints
+  // U2's keypoint budget is explicitly in SIFT units; applying it to a learned
+  // detector would violate LightGlue's much tighter attention budget.
+  if (isLearned.value) delete out.maxKeypoints
   return out
 })
 const DETECT_RECOMMENDATION_LABELS = {
@@ -128,7 +144,7 @@ const resolvePreset = (id) => (id === RECOMMENDED_PRESET_ID
 // Recommended is checked first (it is the more specific claim) — it only exists
 // when it differs from the defaults, but it can coincide with another preset.
 const activePreset = computed(() => {
-  const s = activeRef.value.value
+  const s = activeSettings.value
   for (const { id } of presetCards.value) {
     const r = resolvePreset(id)
     if (Object.keys(r).every((k) => PRESET_MATCH_IGNORE.has(k) || s[k] === r[k])) return id
@@ -139,27 +155,30 @@ const activePreset = computed(() => {
 function selectPreset(id) {
   // Preserve the orthogonal mode across a preset change — picking "Detailed"
   // should not silently switch the resolution rule back to absolute.
-  const { maxDimMode } = activeRef.value.value
-  activeRef.value.value = { ...resolvePreset(id), maxDimMode }
+  const { maxDimMode } = activeSettings.value
+  activeSettings.value = { ...resolvePreset(id), maxDimMode }
   baseId.value = id
   if (id === RECOMMENDED_PRESET_ID) logApplied()
 }
 
-// SuperPoint is fully convolutional, so a single untiled pass on a very large network
-// input overflows ONNX Runtime's int32 tensor-size math and OrtRun fails outright (see
-// DETECT_TUNING.spMaxUntiledInputPx + the backstop in core/features/superpoint.js). Flag
+// Learned detectors are fully convolutional, so a single untiled pass on a very large
+// network input overflows ONNX Runtime's int32 tensor-size math and OrtRun fails
+// outright (see DETECT_TUNING.spMaxUntiledInputPx / diskMaxUntiledInputPx + the
+// backstop in core/features/learnedDetect.js). Flag
 // images that would exceed it at the chosen resolution with tiling OFF — the network
 // input is the native size downscaled so its longest side ≤ maxDim — so we can offer to
 // auto-tile before dispatching instead of letting the run fail per image.
+const untiledCeilingPx = computed(() => (detector.value === 'disk'
+  ? DETECT_TUNING.diskMaxUntiledInputPx : DETECT_TUNING.spMaxUntiledInputPx))
 const oversizedSpImages = computed(() => {
-  if (detector.value !== 'superpoint' || superpointSettings.value.tiling !== 'off') return []
-  const maxDim = superpointSettings.value.maxDim || Infinity
+  if (!isLearned.value || lp.value.tiling !== 'off') return []
+  const maxDim = lp.value.maxDim || Infinity
   return props.images.filter((img) => {
     if (!overwrite.value && img.kpStatus === 'done') return false // skipped in Append mode
     const w = img.meta?.width, h = img.meta?.height
     if (!w || !h) return false
     const scale = Math.min(1, maxDim / Math.max(w, h))
-    return Math.round(w * scale) * Math.round(h * scale) > DETECT_TUNING.spMaxUntiledInputPx
+    return Math.round(w * scale) * Math.round(h * scale) > untiledCeilingPx.value
   })
 })
 
@@ -181,7 +200,7 @@ function attemptRun() {
 <template>
   <ModalShell title="Detect Features" @close="emit('close')">
     <SettingsField label-for="detector-sel"
-      hint="SIFT works on any image; SuperPoint (learned) pairs with LightGlue matching.">
+      hint="SIFT works on any image; SuperPoint and DISK (learned) pair with LightGlue matching.">
       <template #label>
         <GlossaryTerm id="sift">Detector</GlossaryTerm>
       </template>
@@ -199,11 +218,19 @@ function attemptRun() {
       {{ staleDetectorImages.length }} image{{ staleDetectorImages.length !== 1 ? 's' : '' }}
       already detected with a different detector will be <strong>skipped</strong> in Append
       mode, leaving a mix of descriptor types. LightGlue matching needs every image to use
-      SuperPoint — switch to <strong>Overwrite</strong> to make them consistent.
+      one learned detector — switch to <strong>Overwrite</strong> to make them consistent.
     </WarnBox>
 
-    <WarnBox v-if="isSp && !isChromium">
-      This browser can't run SuperPoint on the GPU — WebGPU inference is Chromium-only for
+    <WarnBox v-if="restrictedModel">
+      {{ learnedLabel }}'s pretrained weights are licensed for
+      <strong>non-commercial research only</strong>
+      (<a :href="restrictedModel.licenseUrl" target="_blank" rel="noopener">license</a>), so websfm
+      does not ship them — you supply the file once when you first run it. DISK is a
+      freely licensed alternative.
+    </WarnBox>
+
+    <WarnBox v-if="isLearned && !isChromium">
+      This browser can't run {{ learnedLabel }} on the GPU — WebGPU inference is Chromium-only for
       now, so it will run on the <strong>CPU</strong> (much slower). Use
       <strong>Chrome or Edge</strong> for GPU speed.
     </WarnBox>
@@ -227,22 +254,22 @@ function attemptRun() {
           </select>
         </SettingsField>
 
-        <SettingsField v-if="!isSp" :label="siftSettings.maxDimMode === 'auto' ? 'Minimum resolution' : 'Detection resolution'"
+        <SettingsField v-if="!isLearned" :label="siftSettings.maxDimMode === 'auto' ? 'Minimum resolution' : 'Detection resolution'"
           label-for="maxDim" unit="px"
           :hint="siftSettings.maxDimMode === 'auto'
             ? 'Floor for the scaled resolution — larger images get proportionally more, up to a per-preset ceiling.'
             : 'Longest side the detector runs at (keypoints map back to native pixels).'">
           <input id="maxDim" v-model.number="siftSettings.maxDim" type="number" min="100" max="10000" step="100" class="field-input" />
         </SettingsField>
-        <SettingsField v-else :label="superpointSettings.maxDimMode === 'auto' ? 'Minimum resolution' : 'Detection resolution'"
+        <SettingsField v-else :label="lp.maxDimMode === 'auto' ? 'Minimum resolution' : 'Detection resolution'"
           label-for="sp-maxDim" unit="px"
-          :hint="superpointSettings.maxDimMode === 'auto'
-            ? 'Floor for the scaled resolution. SuperPoint ceilings stay well below the untiled-input limit.'
+          :hint="lp.maxDimMode === 'auto'
+            ? `Floor for the scaled resolution. ${learnedLabel} ceilings stay well below the untiled-input limit.`
             : 'Longest side before detection. Raising it only helps with tiling on.'">
-          <input id="sp-maxDim" v-model.number="superpointSettings.maxDim" type="number" min="100" max="10000" step="100" class="field-input" />
+          <input id="sp-maxDim" v-model.number="lp.maxDim" type="number" min="100" max="10000" step="100" class="field-input" />
         </SettingsField>
 
-        <SettingsField v-if="!isSp" label-for="contrast"
+        <SettingsField v-if="!isLearned" label-for="contrast"
           hint="Higher = fewer but more distinctive keypoints.">
           <template #label>
             <GlossaryTerm id="keypoint">Contrast threshold</GlossaryTerm>
@@ -250,7 +277,7 @@ function attemptRun() {
           <input id="contrast" v-model.number="siftSettings.contrastThreshold" type="number" min="0.001" max="0.5" step="0.001" class="field-input" />
         </SettingsField>
 
-        <SettingsField v-if="!isSp" label="Max keypoints" label-for="maxKp">
+        <SettingsField v-if="!isLearned" label="Max keypoints" label-for="maxKp">
           <input id="maxKp" v-model.number="siftSettings.maxKeypoints" type="number" min="100" max="50000" step="100" class="field-input" />
         </SettingsField>
         <SettingsField v-else label-for="sp-maxKp"
@@ -258,18 +285,18 @@ function attemptRun() {
           <template #label>
             Max <GlossaryTerm id="descriptor">keypoints</GlossaryTerm>
           </template>
-          <input id="sp-maxKp" v-model.number="superpointSettings.maxKeypoints" type="number" min="128" max="8192" step="128" class="field-input" />
+          <input id="sp-maxKp" v-model.number="lp.maxKeypoints" type="number" min="128" max="8192" step="128" class="field-input" />
         </SettingsField>
       </SettingsGroup>
 
       <WarnBox v-if="oversizedSpImages.length">
         {{ oversizedSpImages.length }} image{{ oversizedSpImages.length !== 1 ? 's' : '' }}
-        will exceed SuperPoint's single-pass size limit at this resolution and
+        will exceed {{ learnedLabel }}'s single-pass size limit at this resolution and
         <strong>fail</strong>. Turn <strong>Tiling</strong> on below, or lower the resolution.
       </WarnBox>
 
       <SettingsGroup title="Tiling">
-        <SettingsField v-if="!isSp" label="Tiling" label-for="sift-tiling"
+        <SettingsField v-if="!isLearned" label="Tiling" label-for="sift-tiling"
           hint="Detect on overlapping full-resolution tiles, then merge. Off = single downsampled pass.">
           <select id="sift-tiling" v-model="siftSettings.tiling" class="field-input field-select">
             <option value="off">Off</option>
@@ -279,14 +306,14 @@ function attemptRun() {
         </SettingsField>
         <SettingsField v-else label="Tiling" label-for="sp-tiling"
           hint="Overlapping full-res tiles fit GPU memory (avoids the OOM); auto derives the tile size.">
-          <select id="sp-tiling" v-model="superpointSettings.tiling" class="field-input field-select">
+          <select id="sp-tiling" v-model="lp.tiling" class="field-input field-select">
             <option value="off">Off</option>
             <option value="auto">Auto (fit GPU memory)</option>
             <option value="manual">Manual</option>
           </select>
         </SettingsField>
 
-        <template v-if="!isSp">
+        <template v-if="!isLearned">
           <SettingsField v-if="siftSettings.tiling === 'manual'" label="Max tile size" label-for="sift-tileSize" unit="px">
             <input id="sift-tileSize" v-model.number="siftSettings.tileSize" type="number" min="256" max="4096" step="64" class="field-input" />
           </SettingsField>
@@ -296,12 +323,12 @@ function attemptRun() {
           </SettingsField>
         </template>
         <template v-else>
-          <SettingsField v-if="superpointSettings.tiling === 'manual'" label="Max tile size" label-for="sp-tileSize" unit="px">
-            <input id="sp-tileSize" v-model.number="superpointSettings.tileSize" type="number" min="256" max="4096" step="64" class="field-input" />
+          <SettingsField v-if="lp.tiling === 'manual'" label="Max tile size" label-for="sp-tileSize" unit="px">
+            <input id="sp-tileSize" v-model.number="lp.tileSize" type="number" min="256" max="4096" step="64" class="field-input" />
           </SettingsField>
-          <SettingsField v-if="superpointSettings.tiling !== 'off'" label="Tile overlap" label-for="sp-overlap" unit="px"
+          <SettingsField v-if="lp.tiling !== 'off'" label="Tile overlap" label-for="sp-overlap" unit="px"
             hint="Each tile keeps only features at least half this far from a cut.">
-            <input id="sp-overlap" v-model.number="superpointSettings.overlap" type="number" min="0" max="512" step="16" class="field-input" />
+            <input id="sp-overlap" v-model.number="lp.overlap" type="number" min="0" max="512" step="16" class="field-input" />
           </SettingsField>
         </template>
       </SettingsGroup>
@@ -313,7 +340,7 @@ function attemptRun() {
     </template>
   </ModalShell>
 
-  <!-- Oversized-input confirmation: SuperPoint would overflow ORT on these images. -->
+  <!-- Oversized-input confirmation: the learned detector would overflow ORT on these images. -->
   <ModalShell
     v-if="awaitingOversizeChoice"
     title="Large images may fail"
@@ -321,7 +348,7 @@ function attemptRun() {
   >
     <p class="confirm-text">
       {{ oversizedSpImages.length }} image{{ oversizedSpImages.length !== 1 ? 's' : '' }}
-      exceed SuperPoint's single-pass size limit at this resolution and will likely
+      exceed {{ learnedLabel }}'s single-pass size limit at this resolution and will likely
       <strong>fail</strong> (ONNX Runtime overflows its 32-bit tensor limit on very
       large inputs).
     </p>

@@ -35,6 +35,14 @@ sparse reconstruction, so a false match here quietly poisons
 [bundle adjustment](help:bundle-adjustment) downstream — which is why the defaults
 lean strict and every pair is checked with [RANSAC](help:ransac) before it counts.
 
+## Matcher
+**Brute-force** compares descriptors directly and works with every detector.
+**LightGlue** is a learned matcher. It needs every image detected with the same
+learned detector (SuperPoint or DISK), and websfm loads the LightGlue weights trained
+for that detector, downloading them on first use. If some images were detected with
+another detector, matching stops and names them; re-detect those images with
+**Overwrite**.
+
 ## Ratio threshold
 <!-- param: ratioThreshold  default: 0.8 -->
 Lowe's ratio test keeps a match only when the best descriptor match is clearly

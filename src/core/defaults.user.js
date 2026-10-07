@@ -59,6 +59,30 @@ export const DETECT_SUPERPOINT_PRESETS = {
   medium: {},
   high:   { maxDim: 2400, maxKeypoints: 4096 },
 }
+// Tie-point detection — DISK (learned, Apache-2.0; pairs with its own LightGlue).
+// Lower resolution than SuperPoint: DISK's U-Net keeps 128 feature channels at FULL
+// input resolution (SuperPoint downsamples 8× first), so memory per pixel is far
+// higher. 1024 px is the resolution DISK and LightGlue were evaluated at.
+export const DETECT_DISK_DEFAULTS = {
+  maxDim: 1024,
+  maxDimMode: 'absolute',
+  maxKeypoints: 2048,       // same LightGlue O(N²) budget as SuperPoint
+  tiling: 'off',
+  tileSize: 1024,
+  overlap: 64,
+}
+export const DETECT_DISK_PRESETS = {
+  low:    { maxDim: 768, maxKeypoints: 1024 },
+  medium: {},
+  high:   { maxDim: 1600, maxKeypoints: 4096 },
+}
+// Per-detector lookup, so callers never branch on a detector id.
+export const DETECT_DEFAULTS_BY_DETECTOR = {
+  sift: DETECT_SIFT_DEFAULTS, superpoint: DETECT_SUPERPOINT_DEFAULTS, disk: DETECT_DISK_DEFAULTS,
+}
+export const DETECT_PRESETS_BY_DETECTOR = {
+  sift: DETECT_SIFT_PRESETS, superpoint: DETECT_SUPERPOINT_PRESETS, disk: DETECT_DISK_PRESETS,
+}
 export const DETECT_PRESET_META = [
   { id: 'low',    label: 'Fast',     blurb: 'Lower resolution, fewer keypoints' },
   { id: 'medium', label: 'Balanced', blurb: 'Default resolution and cap' },

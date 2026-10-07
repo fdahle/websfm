@@ -14,6 +14,7 @@ import { detectionConfidence } from '../core/sfm/fiducialDetection.js'
 import { buildBorderMask } from '../core/mask.js'
 import { resolveDetectMaxDim } from '../core/features/detectResolution.js'
 import { DETECT_TUNING } from '../core/tuning.js'
+import { learnedDetector, detectorLabel } from '../core/features/learnedDetectors.js'
 import { detectionConcurrency, fiducialDetectionConcurrency } from '../core/features/detectConcurrency.js'
 import { useLog } from '../composables/useLog.js'
 import * as opfs from '../utils/opfs.js'
@@ -759,17 +760,18 @@ export const useImagesStore = defineStore('images', () => {
   async function detectOne(id, settings = {}, onDetected, shouldCancel) {
     const img = images.value.find((i) => i.id === id)
     if (!img || img.kpStatus === 'running') return
-    // SuperPoint runs a learned model — fetch its weights (with consent) first.
-    if (settings.detector === 'superpoint' && !(await useModelsStore().ensureReady(['superpoint']))) {
-      log('Detection cancelled — SuperPoint model was not downloaded.', 'warn', 'Detection')
+    // A learned detector needs its weights — fetch them (with consent) first.
+    const learned = learnedDetector(settings.detector)
+    if (learned && !(await useModelsStore().ensureReady([learned.modelId]))) {
+      log(`Detection cancelled — the ${learned.label} model is not available.`, 'warn', 'Detection')
       return
     }
     // Re-detecting renumbers keypoints, so any existing matches for this image
     // become stale — invalidate them once detection succeeds (below).
     const hadKeypoints = img.kpStatus === 'done'
-    // Message-text label for the chosen detector (SIFT default, or SuperPoint);
+    // Message-text label for the chosen detector (SIFT default, SuperPoint, DISK);
     // the console *source* is the pipeline stage 'Detection', not the detector.
-    const tag = settings.detector === 'superpoint' ? 'SuperPoint' : 'SIFT'
+    const tag = detectorLabel(settings.detector)
     img.kpStatus = 'running'
     log(`${tag} start: ${img.name}`, 'info', 'Detection')
     try {
@@ -789,11 +791,11 @@ export const useImagesStore = defineStore('images', () => {
         log(`${tag} ${img.name} — detect at ${res0.reason}`, 'debug', 'Detection')
       }
       // SIFT keypoints per extremum (dominant + secondary orientations, tuning.js
-      // DETECT_TUNING). Null for SuperPoint, which has no orientation histogram.
-      const maxOrientations = settings.detector === 'superpoint'
+      // DETECT_TUNING). Null for a learned detector: no orientation histogram.
+      const maxOrientations = learned
         ? null : (settings.maxOrientations ?? DETECT_TUNING.siftMaxOrientations)
-      // Which keypoints the SIFT cap keeps (keypointCap.js). SuperPoint ranks by score.
-      const capRule = settings.detector === 'superpoint'
+      // Which keypoints the SIFT cap keeps (keypointCap.js). Learned ones rank by score.
+      const capRule = learned
         ? null : (settings.capRule ?? DETECT_TUNING.siftCapRule)
       // Pass the per-image mask (if any) so keypoints inside masked regions are
       // dropped at detection — this propagates to matching and reconstruction.
@@ -825,7 +827,7 @@ export const useImagesStore = defineStore('images', () => {
         found.kpStatus = 'done'
         // Detector + descriptor width travel with the image so matching can pick
         // the right matcher and read the descriptor stride off the buffer (SIFT
-        // 128-d vs SuperPoint 256-d) rather than assume a constant.
+        // 128-d, SuperPoint 256-d, DISK 128-d) rather than assume a constant.
         found.detector = res.detector ?? 'sift'
         found.descDim  = res.descDim ?? 128
         // Which normalisation the stored SIFT descriptors are in (RootSIFT since
@@ -863,7 +865,7 @@ export const useImagesStore = defineStore('images', () => {
         if (d) {
           log(`${tag} ${found.name} — detect @ ${d.detectWidth}×${d.detectHeight} `
             + `(${d.scale.toFixed(3)}× of ${d.natW}×${d.natH})`, 'debug', 'Detection')
-          if (res.detector === 'superpoint') {
+          if (learnedDetector(res.detector)) {
             // Learned detector: no near-duplicate suppression / response, so report
             // the cap + mask drops and the keypoint-score spread instead.
             log(`${tag} ${found.name} — ${d.capped} keypoints`
@@ -924,11 +926,12 @@ export const useImagesStore = defineStore('images', () => {
       maxDimMode = 'absolute', preset = 'medium',
     } = settings
     // Message-text label only; the console source is the stage 'Detection'.
-    const batchTag = detector === 'superpoint' ? 'SuperPoint' : 'SIFT'
-    // SuperPoint runs a learned model — fetch its weights (with consent) once for
-    // the whole batch before dispatching any image.
-    if (detector === 'superpoint' && !(await useModelsStore().ensureReady(['superpoint']))) {
-      log('Detection cancelled — SuperPoint model was not downloaded.', 'warn', 'Detection')
+    const batchTag = detectorLabel(detector)
+    // A learned detector needs its weights — fetch them (with consent) once for the
+    // whole batch before dispatching any image.
+    const learnedSpec = learnedDetector(detector)
+    if (learnedSpec && !(await useModelsStore().ensureReady([learnedSpec.modelId]))) {
+      log(`Detection cancelled — the ${learnedSpec.label} model is not available.`, 'warn', 'Detection')
       return
     }
     // Resolution: one figure in absolute mode; in auto mode it varies per image, so
@@ -940,8 +943,8 @@ export const useImagesStore = defineStore('images', () => {
     const concurrency = detectionConcurrency(pending, settings, POOL_SIZE, navigator.deviceMemory)
     const started = performance.now()
     log(`${batchTag} batch: ${total} image(s) queued — ${resLabel}, ${concurrency} concurrent`
-      + `${detector === 'superpoint' ? '' : `, contrast ${contrastThreshold}`}, ≤${maxKeypoints} kp`
-      + `${detector === 'superpoint' ? '' : `, ≤${settings.maxOrientations ?? DETECT_TUNING.siftMaxOrientations} orientation(s) per extremum`
+      + `${learnedSpec ? '' : `, contrast ${contrastThreshold}`}, ≤${maxKeypoints} kp`
+      + `${learnedSpec ? '' : `, ≤${settings.maxOrientations ?? DETECT_TUNING.siftMaxOrientations} orientation(s) per extremum`
         + `, cap rule ${settings.capRule ?? DETECT_TUNING.siftCapRule}, RootSIFT descriptors`}`,
       'info', 'Detection')
     let done = 0

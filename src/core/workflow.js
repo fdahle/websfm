@@ -1,9 +1,10 @@
 import {
-  DETECT_SIFT_DEFAULTS, DETECT_SIFT_PRESETS, DETECT_SUPERPOINT_DEFAULTS, DETECT_SUPERPOINT_PRESETS,
+  DETECT_SIFT_DEFAULTS, DETECT_SIFT_PRESETS, DETECT_DEFAULTS_BY_DETECTOR, DETECT_PRESETS_BY_DETECTOR,
   MATCH_DEFAULTS, MATCH_PRESETS, RECONSTRUCT_DEFAULTS, RECONSTRUCT_PRESETS,
   DEPTHMAP_DEFAULTS, DENSE_FUSE_DEFAULTS, DEM_DEFAULTS,
   ORTHO_DEFAULTS, MESH_DEFAULTS, MESH_PRESETS,
 } from './defaults.user.js'
+import { DETECTOR_IDS } from './features/learnedDetectors.js'
 
 export const WORKFLOW_VERSION = 2
 
@@ -26,7 +27,7 @@ export const WORKFLOW_BLOCKS = [
 
   automated('detect-features', 'Detect Features', 'Features', ['images'], ['keypoints'],
     { detector: 'sift', preset: 'medium', overwrite: false, ...DETECT_SIFT_DEFAULTS }, [
-      { key: 'detector', label: 'Detector', type: 'select', options: ['sift', 'superpoint'] },
+      { key: 'detector', label: 'Detector', type: 'select', options: DETECTOR_IDS },
       { key: 'preset', label: 'Preset', type: 'select', options: ['low', 'medium', 'high', 'custom'] },
       { key: 'maxDim', label: 'Maximum dimension', type: 'number', min: 256 },
       { key: 'maxKeypoints', label: 'Maximum keypoints', type: 'number', min: 100 },
@@ -202,9 +203,8 @@ export function workflowRecipeText(workflow) {
 export function resolveWorkflowSettings(type, settings = {}, runtime = {}) {
   const value = { ...settings }
   if (type === 'detect-features') {
-    const isSuperPoint = value.detector === 'superpoint'
-    const base = isSuperPoint ? DETECT_SUPERPOINT_DEFAULTS : DETECT_SIFT_DEFAULTS
-    const presets = isSuperPoint ? DETECT_SUPERPOINT_PRESETS : DETECT_SIFT_PRESETS
+    const base = DETECT_DEFAULTS_BY_DETECTOR[value.detector] ?? DETECT_SIFT_DEFAULTS
+    const presets = DETECT_PRESETS_BY_DETECTOR[value.detector] ?? DETECT_SIFT_PRESETS
     return { ...base, ...value, ...(presets[value.preset] || {}), useGpu: runtime.useGpu }
   }
   if (type === 'match-features') return { ...MATCH_DEFAULTS, ...value, ...(MATCH_PRESETS[value.preset] || {}), useGpu: runtime.useGpu }
@@ -240,14 +240,14 @@ export function resolveWorkflowSettings(type, settings = {}, runtime = {}) {
 
 // Apply one builder edit while keeping detector-specific defaults coherent. A
 // detector switch is a schema switch, not an ordinary custom-field edit: carrying
-// SIFT's 10k keypoint budget into SuperPoint defeats its deliberately low O(N²)
+// SIFT's 10k keypoint budget into a learned detector defeats its deliberately low O(N²)
 // LightGlue ceiling. Keep the selected named preset where possible; a custom set
 // has no meaningful cross-detector equivalent, so reset it to the safe default.
 export function updateWorkflowSetting(settings = {}, key, value) {
-  if (key === 'detector' && (value === 'sift' || value === 'superpoint')) {
+  if (key === 'detector' && DETECT_DEFAULTS_BY_DETECTOR[value]) {
     const preset = ['low', 'medium', 'high'].includes(settings.preset) ? settings.preset : 'medium'
-    const base = value === 'superpoint' ? DETECT_SUPERPOINT_DEFAULTS : DETECT_SIFT_DEFAULTS
-    const presets = value === 'superpoint' ? DETECT_SUPERPOINT_PRESETS : DETECT_SIFT_PRESETS
+    const base = DETECT_DEFAULTS_BY_DETECTOR[value]
+    const presets = DETECT_PRESETS_BY_DETECTOR[value]
     return {
       detector: value,
       preset,

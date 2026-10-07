@@ -10,7 +10,7 @@
 //
 // Pure data module: no Vue/Pinia/OPFS, so it bundles into the worker unchanged.
 
-// Tie-point detection — SuperPoint safety ceiling. Read by core/features/superpoint.js
+// Tie-point detection — SuperPoint safety ceiling. Read by core/features/learnedDetect.js
 // (backstop error on OrtRun) AND DetectFeaturesModal.vue (pre-flight tiling prompt), so
 // the two agree on one number. SuperPoint is fully convolutional: ONNX Runtime builds
 // intermediate tensors at the full network-input size, and past ~this many pixels a
@@ -37,6 +37,11 @@ export const DETECT_TUNING = {
   // 10k: fine-scale texture filled the budget. It matters most where the cap binds.
   siftCapRule: 'coarse-first',
   spMaxUntiledInputPx: 16_000_000, // ≈4000×4000; above this (tiling off) → prompt / clean fail
+  // DISK's U-Net holds 128 float channels at FULL input resolution (SuperPoint
+  // downsamples 8× first), i.e. 512 B per input pixel in one tensor, so ORT's int32
+  // byte math overflows near 2³¹ / 512 ≈ 4.2 MP. Derived, not yet observed; the
+  // worker's overflow rethrow is the backstop either way.
+  diskMaxUntiledInputPx: 4_000_000,
 }
 
 // Sparse SfM knobs read directly in core/sfm/sfm.js (PnP registration + interleaved

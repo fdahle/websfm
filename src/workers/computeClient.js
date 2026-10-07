@@ -8,6 +8,8 @@
 // mutates in place + triggerRefs rather than swapping the whole Map). The big
 // single-call ops (reconstruct/dense/products) still use one worker at a time.
 
+import { isLearnedDetector } from '../core/features/learnedDetectors.js'
+
 // One worker per core (minus one for the UI thread), capped so we don't spawn a
 // pile of workers that each load their own wasm copy on first use.
 export const MAX_POOL_SIZE = Math.max(1, Math.min(8, (navigator.hardwareConcurrency || 4) - 1))
@@ -122,12 +124,12 @@ function call(op, args, { transfer = [], onEvent, onTiming, worker: pinned, avoi
 // ── Drop-in compute API (mirrors core/features/sift.js + core/features/{bruteforce,verify}.js) ─────────
 
 export function detectKeypoints(url, options = {}, { onLog } = {}) {
-  // SuperPoint/ONNX loads a heavy runtime (~26 MB wasm + model + a WebGPU device)
+  // A learned (ONNX) detector loads a heavy runtime (~26 MB wasm + model + a WebGPU device)
   // per worker on first use. Round-robining it across the pool makes the first
   // POOL_SIZE images each initialize independently — in parallel, contending for
   // the GPU — which stalls hard. Pin it to one worker so that happens exactly
   // once; SIFT (tiny wasm) stays round-robin. Streams init/backend log lines.
-  const learned = options.detector === 'superpoint'
+  const learned = isLearnedDetector(options.detector)
   return call('detect', [url, options], {
     worker: learned ? 0 : undefined,
     onEvent: onLog ? (ev, a) => { if (ev === 'log') onLog(...a) } : undefined,

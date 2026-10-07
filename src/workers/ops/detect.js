@@ -1,8 +1,9 @@
 import { detectSift } from '../../core/features/sift.js'
-import { detectSuperPoint } from '../../core/features/superpoint.js'
+import { detectLearned, rgbaToPlanar } from '../../core/features/learnedDetect.js'
+import { learnedDetector, detectorLabel } from '../../core/features/learnedDetectors.js'
 import {
   planTiles, tileOwns, sliceRaster, nmsByPosition, autoTileSize,
-  SIFT_TILE_ALIGN, SUPERPOINT_TILE_ALIGN, SEAM_NMS_RADIUS,
+  SIFT_TILE_ALIGN, SEAM_NMS_RADIUS,
 } from '../../core/features/tiling.js'
 import { capOrder, capBoundary } from '../../core/features/keypointCap.js'
 import { SIFT_DESC_NORM, rootSiftInPlace } from '../../core/features/siftDescriptors.js'
@@ -16,7 +17,7 @@ import {
   refineDetectionSpot, nativeRefinePlan,
 } from '../../core/sfm/fiducialDetection.js'
 
-// Detection ops (SIFT / SuperPoint). `rasterize` (OffscreenCanvas pixel decode)
+// Detection ops (SIFT / learned: SuperPoint, DISK). `rasterize` (OffscreenCanvas pixel decode)
 // stays in the worker and is injected; the STRIDE parse + shared feature-bundle
 // shape live here next to the two detector runners.
 export function makeDetectOps({ rasterize }) {
@@ -85,19 +86,15 @@ export function makeDetectOps({ rasterize }) {
     }
   }
 
-  // SuperPoint detector (ONNX via core/features/superpoint.js) → the same feature bundle.
-  // Descriptors are 256-d here, not 128 — carried through as descLen so persistence
-  // and matching read the width off the buffer rather than a hardcoded const.
-  async function runSuperPoint(data, width, height, { maxKeypoints, onLog }) {
-    // SuperPoint wants single-channel float [0,1]; build it from the RGBA raster
-    // (Rec. 601 luma, matching core/sfm/geometry.js rgbaToGray, then /255).
-    const gray = new Float32Array(width * height)
-    for (let i = 0; i < width * height; i++) {
-      const o = i * 4
-      gray[i] = (data[o] * 0.299 + data[o + 1] * 0.587 + data[o + 2] * 0.114) / 255
-    }
+  // Learned detector (ONNX via core/features/learnedDetect.js) → the same feature
+  // bundle. Descriptor width is the spec's (SuperPoint 256, DISK 128) — carried
+  // through as descLen so persistence and matching read the width off the buffer
+  // rather than a hardcoded const.
+  async function runLearned(spec, data, width, height, { maxKeypoints, onLog }) {
+    // Planar float [0,1]: luma for SuperPoint, RGB for DISK.
+    const pixels = rgbaToPlanar(data, width, height, spec.channels)
     const t0 = performance.now()
-    const { keypoints, descriptors, dim } = await detectSuperPoint(gray, width, height, { maxKeypoints, onLog })
+    const { keypoints, descriptors, dim } = await detectLearned(spec, pixels, width, height, { maxKeypoints, onLog })
     const ms = performance.now() - t0
 
     const n = keypoints.length
@@ -126,7 +123,7 @@ export function makeDetectOps({ rasterize }) {
   }
 
   // Resolve the working tile size for a run: an explicit `manual` size, else auto.
-  // SuperPoint runs on ORT's WebGPU EP, whose real allocation ceiling is well below
+  // Learned detectors run on ORT's WebGPU EP, whose real allocation ceiling is well below
   // the adapter's *reported* binding limit (Apple/unified-memory GPUs advertise
   // multiple GB but OOM'd at 1200px here), so the reported limit only *lowers* the
   // tile on constrained GPUs — the effective cap is a conservative SP_GPU_TILE_MAX
@@ -135,7 +132,7 @@ export function makeDetectOps({ rasterize }) {
   const SP_GPU_TILE_MAX = 1024
   async function resolveTileSize(detector, tiling, tileSize) {
     if (tiling === 'manual' && tileSize > 0) return tileSize
-    if (detector !== 'superpoint') return autoTileSize({ maxBindingBytes: 0 })
+    if (!learnedDetector(detector)) return autoTileSize({ maxBindingBytes: 0 })
     if (gpuBindingBytes === undefined) gpuBindingBytes = await queryGpuBindingBytes()
     return autoTileSize({ maxBindingBytes: gpuBindingBytes, max: SP_GPU_TILE_MAX })
   }
@@ -145,29 +142,30 @@ export function makeDetectOps({ rasterize }) {
   // caller's mask/colour/back-map loop consumes it unchanged. Each tile keeps only
   // the keypoints in its core (see core/features/tiling.js: ownership, not dedup),
   // a cross-tile NMS removes a blob localised on both sides of a core boundary, and
-  // ONE global cap (SIFT: `capRule`; SuperPoint: score) runs over the merge. Each
+  // ONE global cap (SIFT: `capRule`; learned: score) runs over the merge. Each
   // tile is pre-capped by the same rule only to bound memory, and that cannot drop a
   // keypoint the global cap would keep: one ranked below maxKeypoints others in its
   // own tile has at least that many distinct better-ranked keypoints in the image.
-  // SIFT pre-caps after ownership and masking; SuperPoint's top-K is in the model.
+  // SIFT pre-caps after ownership and masking; a learned detector's top-K is applied per tile.
   async function runTiled(raster, detector, tileSize, { contrastThreshold, maxKeypoints, maxOrientations, capRule, overlap, maskLut, onLog }) {
     const { data, width, height } = raster
-    const align = detector === 'superpoint' ? SUPERPOINT_TILE_ALIGN : SIFT_TILE_ALIGN
+    const spec = learnedDetector(detector)
+    const align = spec ? spec.tileAlign : SIFT_TILE_ALIGN
     const tiles = planTiles(width, height, tileSize, overlap, { align })
-    const label = detector === 'superpoint' ? 'SuperPoint' : 'SIFT'
+    const label = detectorLabel(detector)
     const sizes = [...new Set(tiles.map((t) => `${t.w}×${t.h}`))].join(', ')
     onLog?.(`${label}: tiling ${width}×${height} → ${tiles.length} tile(s) of ${sizes} (max ${tileSize}px, overlap ≥ ${overlap}px)`)
 
     const xs = [], ys = [], scales = [], resps = [], tileIds = [], descChunks = []
-    let descLen = detector === 'superpoint' ? 256 : DESC_LEN
+    let descLen = spec ? spec.descDim : DESC_LEN
     let totalMs = 0
     let maskedPreCap = 0
     let outsideCore = 0
     for (let ti = 0; ti < tiles.length; ti++) {
       const tile = tiles[ti]
       const sub = sliceRaster(data, width, height, tile)
-      const bundle = detector === 'superpoint'
-        ? await runSuperPoint(sub, tile.w, tile.h, { maxKeypoints, onLog })
+      const bundle = spec
+        ? await runLearned(spec, sub, tile.w, tile.h, { maxKeypoints, onLog })
         : await runSift(sub, tile.w, tile.h, { contrastThreshold, maxOrientations })
       descLen = bundle.descLen
       totalMs += bundle.ms
@@ -189,7 +187,7 @@ export function makeDetectOps({ rasterize }) {
       }
       // Bound memory with the global rule applied per tile: an owned, unmasked keypoint
       // ranked below maxKeypoints others of its own tile cannot survive the global cap.
-      const pick = detector === 'superpoint' ? owned.map((_, k) => k) : capOrder(owned, maxKeypoints, capRule)
+      const pick = spec ? owned.map((_, k) => k) : capOrder(owned, maxKeypoints, capRule)
       for (const k of pick) {
         const o = owned[k]
         xs.push(o.gx); ys.push(o.gy)
@@ -200,14 +198,14 @@ export function makeDetectOps({ rasterize }) {
 
     const rawFound = xs.length
     // SIFT items carry scale so orientation siblings survive the seam dedup
-    // (nmsByPosition); SuperPoint has no siblings. `tile` limits suppression to
+    // (nmsByPosition); a learned detector has no siblings. `tile` limits suppression to
     // pairs from different tiles.
-    const items = xs.map((x, i) => (detector === 'superpoint'
+    const items = xs.map((x, i) => (spec
       ? { x, y: ys[i], response: resps[i], tile: tileIds[i] }
       : { x, y: ys[i], scale: scales[i], response: resps[i], tile: tileIds[i] }))
     const nmsIdx = nmsByPosition(items, SEAM_NMS_RADIUS) // seam dupes gone
     const afterNms = nmsIdx.length
-    const rule = detector === 'superpoint' ? 'response' : capRule
+    const rule = spec ? 'response' : capRule
     const keep = capOrder(nmsIdx.map((i) => items[i]), maxKeypoints, rule).map((k) => nmsIdx[k])
     onLog?.(`${label}: tiles kept ${rawFound} keypoints in their own cores (${outsideCore} left to a neighbour), `
       + `−${rawFound - afterNms} seam duplicates`)
@@ -231,7 +229,7 @@ export function makeDetectOps({ rasterize }) {
 
   // Detect keypoints + descriptors for one image. Coords map back to original-image
   // pixels; descriptors return as a transferable Float32Array (N×descDim, row-major).
-  // The detector (SIFT or SuperPoint) only produces the raw feature bundle — the
+  // The detector (SIFT or a learned one) only produces the raw feature bundle — the
   // mask filter, colour sampling, back-map to original px, and trim are shared here.
   async function detect([url, options = {}], { emit } = {}) {
     const {
@@ -256,10 +254,11 @@ export function makeDetectOps({ rasterize }) {
     const resolvedTile = tiling !== 'off' ? await resolveTileSize(detector, tiling, tileSize) : 0
     const tilingActive = tiling !== 'off' && (width > resolvedTile || height > resolvedTile)
 
+    const spec = learnedDetector(detector)
     const feats = tilingActive
       ? await runTiled(raster, detector, resolvedTile, { contrastThreshold, maxKeypoints, maxOrientations, capRule, overlap, maskLut, onLog })
-      : detector === 'superpoint'
-        ? await runSuperPoint(data, width, height, { maxKeypoints, onLog })
+      : spec
+        ? await runLearned(spec, data, width, height, { maxKeypoints, onLog })
         : capSift(await runSift(data, width, height, { contrastThreshold, maxOrientations }),
           { maxKeypoints, capRule, maskLut, width, height })
 
@@ -291,7 +290,7 @@ export function makeDetectOps({ rasterize }) {
     const descriptors = kept === feats.count ? descBuf : descBuf.slice(0, kept * feats.descLen)
     // SIFT is stored and matched as RootSIFT (core/features/siftDescriptors.js); the
     // stamp travels with the image so legacy L2 projects convert on load.
-    const descNorm = detector === 'superpoint' ? null : SIFT_DESC_NORM.ROOT
+    const descNorm = spec ? null : SIFT_DESC_NORM.ROOT
     if (descNorm === SIFT_DESC_NORM.ROOT) rootSiftInPlace(descriptors, feats.descLen)
 
     const diag = {

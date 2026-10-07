@@ -3,13 +3,16 @@
 // Opened automatically the first time a learned backend (SuperPoint / LightGlue /
 // SAM2 Smart Select) needs weights that aren't cached yet. The user approves once
 // per machine; the weights land in Cache Storage and this never reappears for them.
+// A model websfm may not redistribute (registry.js, SuperPoint) is handed over
+// instead: a direct upstream link plus a file picker / drop target, cached the same
+// way. Supplying the last missing file continues the run with no second click.
 import { computed } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useModelsStore } from '../../stores/useModelsStore.js'
 import ModalShell from './ui/ModalShell.vue'
 
 const models = useModelsStore()
-const { request, downloading, progress, errorMsg, totalLoaded } = storeToRefs(models)
+const { request, downloading, progress, errorMsg, totalLoaded, suppliedAll } = storeToRefs(models)
 
 const totalMB = computed(() => models.toMB(request.value?.totalBytes ?? 0))
 
@@ -26,6 +29,21 @@ const overallPct = computed(() => {
 // While downloading the modal is not dismissable (closing would leave a half-
 // written cache entry). Backdrop/Escape close maps to decline only pre-download.
 function onClose() { if (!downloading.value) models.decline() }
+
+const anyDownload = computed(() => (request.value?.items ?? []).some((m) => !m.userSupplied))
+const anySupplied = computed(() => (request.value?.items ?? []).some((m) => m.userSupplied))
+
+function onPick(item, ev) {
+  const file = ev.target.files?.[0]
+  ev.target.value = ''
+  if (file) models.provideModelFile(item.id, file)
+}
+// The drop must not reach the window-level import router (it would try to import
+// the .onnx as project data), hence .stop on the handlers below.
+function onDrop(item, ev) {
+  const file = ev.dataTransfer?.files?.[0]
+  if (file) models.provideModelFile(item.id, file)
+}
 </script>
 
 <template>
@@ -37,8 +55,8 @@ function onClose() { if (!downloading.value) models.decline() }
   >
     <p class="mdl-intro">
       This feature runs a learned neural-network model in your browser. The model
-      weights ({{ totalMB }} MB total) are downloaded once and cached locally — no
-      images ever leave your machine. Continue?
+      weights are <template v-if="anyDownload">downloaded ({{ totalMB }} MB) and</template>
+      cached locally, once — no images ever leave your machine.
     </p>
 
     <ul class="mdl-list">
@@ -47,8 +65,36 @@ function onClose() { if (!downloading.value) models.decline() }
           <span class="mdl-label">{{ item.label }}</span>
           <span class="mdl-size">{{ models.toMB(item.approxBytes) }} MB</span>
         </div>
-        <div v-if="item.license" class="mdl-license">License: {{ item.license }}</div>
-        <div v-if="downloading" class="mdl-bar">
+        <div v-if="item.license" class="mdl-license">
+          License:
+          <a v-if="item.licenseUrl" :href="item.licenseUrl" target="_blank" rel="noopener">{{ item.license }}</a>
+          <template v-else>{{ item.license }}</template>
+        </div>
+        <div v-if="item.userSupplied" class="mdl-byo"
+          @dragover.prevent.stop @drop.prevent.stop="onDrop(item, $event)">
+          <p v-if="item.ready" class="mdl-ok">✓ File received</p>
+          <template v-else>
+            <p class="mdl-byo-text">
+              These weights carry a non-commercial license, so websfm does not ship
+              them. If your use qualifies, get the file yourself — once per browser:
+            </p>
+            <ol class="mdl-steps">
+              <li>
+                <a :href="item.sourceUrl" target="_blank" rel="noopener">Download {{ item.sourceFile }}</a>
+                from its publisher.
+              </li>
+              <li>
+                <label class="btn mdl-pick">
+                  Choose the file…
+                  <input type="file" accept=".onnx" hidden @change="onPick(item, $event)" />
+                </label>
+                or drop it here.
+              </li>
+            </ol>
+          </template>
+          <p v-if="item.fileError" class="mdl-error">{{ item.fileError }}</p>
+        </div>
+        <div v-if="downloading && !item.userSupplied" class="mdl-bar">
           <div class="mdl-bar-fill" :style="{ width: pct(item) + '%' }" />
         </div>
       </li>
@@ -59,8 +105,13 @@ function onClose() { if (!downloading.value) models.decline() }
 
     <template #footer>
       <button v-if="!downloading" class="btn" @click="models.decline()">Cancel</button>
-      <button v-if="!downloading" class="btn btn-primary" @click="models.approve()">
+      <button v-if="!downloading && anyDownload" class="btn btn-primary"
+        :disabled="!suppliedAll" :title="suppliedAll ? '' : 'Provide the file above first'"
+        @click="models.approve()">
         Download ({{ totalMB }} MB)
+      </button>
+      <button v-else-if="!downloading && anySupplied" class="btn btn-primary" disabled>
+        Waiting for the file…
       </button>
       <button v-else class="btn" disabled>Downloading…</button>
     </template>
@@ -86,4 +137,9 @@ function onClose() { if (!downloading.value) models.decline() }
 .mdl-bar-fill { height: 100%; background: var(--accent); transition: width 0.15s linear; }
 .mdl-overall { margin: 14px 0 0; font-size: 13px; opacity: 0.8; font-variant-numeric: tabular-nums; }
 .mdl-error { margin: 12px 0 0; color: var(--danger, #e05252); font-size: 13px; }
+.mdl-byo { border: 1px dashed var(--panel-border); border-radius: 6px; padding: 8px 10px; font-size: 12px; }
+.mdl-byo-text { margin: 0 0 6px; line-height: 1.45; }
+.mdl-steps { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; line-height: 1.45; }
+.mdl-pick { font-size: 12px; padding: 2px 8px; cursor: pointer; }
+.mdl-ok { margin: 0; color: var(--success, #3fa76a); }
 </style>
