@@ -738,6 +738,10 @@ fiducials; self-calibration (A2) + fiducials (F4) are the code-side support.
 
 ## Done log (most recent first)
 
+- **2026-10-07 · Model weights on a GitHub release.** The five Apache-2.0 weights are
+  assets of the `models-v1` release; `npm run fetch:models` (`scripts/fetch-models.mjs`)
+  downloads them into `public/models/` with SHA-256 checks and deletes a non-redistributable
+  file (SuperPoint) if present. README ▸ Model files.
 - **2026-10-07 · DISK detector; SuperPoint licence corrected and made bring-your-own.**
   DISK + its own LightGlue (Apache-2.0, fabio-sim LightGlue-ONNX v1.0.0) is a third
   detector. `core/features/learnedDetectors.js` is the registry (weights, 128/256-d,
