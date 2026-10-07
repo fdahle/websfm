@@ -40,6 +40,13 @@ export function rdYlGnColor(t) {
   return lerpRamp([[165, 0, 38], [253, 174, 97], [255, 255, 191], [166, 217, 106], [26, 152, 80]], t)
 }
 
+// Diverging blue→white→red (ColorBrewer RdBu, reversed so red = positive). For a
+// signed difference centred on zero — a cloud-to-cloud distance — where white must
+// mean "no change"; pair it with a symmetric range.
+export function rdBuColor(t) {
+  return lerpRamp([[33, 102, 172], [146, 197, 222], [247, 247, 247], [244, 165, 130], [178, 24, 43]], t)
+}
+
 export function grayColor(t) {
   const v = Math.round(255 * clamp(t, 0, 1))
   return [v, v, v]
@@ -50,6 +57,7 @@ export function grayColor(t) {
 // silently fall back to the default.
 export const RAMPS = {
   rdylgn: rdYlGnColor,
+  rdbu: rdBuColor,
   viridis: viridisColor,
   turbo: depthColor,
   gray: grayColor,

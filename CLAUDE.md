@@ -290,7 +290,10 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
   ref it opens), `EVAL_SECTIONS` (Quality-hub deep links), a `view-preset-*` prefix
   rule — and reserves `switch` cases for commands with a guard, a toggle or a side
   effect, so the tables never hide behaviour. A new pipeline modal is one line in
-  `MODAL_COMMANDS`. **Verifying an App.vue refactor needs more than a green build**:
+  `MODAL_COMMANDS`. The Tools-tab dialogs share ONE slot instead of a flag each
+  (`useModalsStore.toolModal` = the open tool's command id, `TOOL_MODALS` in App,
+  one Escape entry); the ones that run through the store's edit path map dialog id
+  → edit mode in `TOOL_EDIT_MODES`. **Verifying an App.vue refactor needs more than a green build**:
   `<script setup>` compiles a template identifier it can't resolve to `_ctx.foo`,
   which builds fine and is `undefined` at runtime. Compile the SFC before and after
   (`@vue/compiler-sfc` `compileScript` + `compileTemplate` with the script's
@@ -327,6 +330,27 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
   an "imported" chip). Sidebar computes the three lists and the sections stay
   dumb; the shared row rendering/rename/context-menu lives in one `CloudRows.vue`.
   The Ribbon stays as-is — its groups are verbs, not these nouns.
+- **The ribbon CHOOSES; a floating toolbox RUNS.** The ribbon opens a dialog, enters
+  a mode, toggles a display option or sets a display value (stepper). Everything
+  done *inside* a running tool lives in that tool's toolbox over the view, built on
+  `components/viewers/FloatingToolbox.vue` (title, drag, ×; body controls from
+  `toolbox.css`): mask and point editing, 3D selection, raster measuring, Region,
+  Orient model, point-pair alignment. Do not put command buttons on a viewer
+  outside a toolbox; passive status (count, zoom %, legend) is fine. Keyboard
+  shortcuts stay with the owning viewer/App, which order them (Esc clears a
+  selection before it leaves the tool). The ribbon's command TABLES are pure data in
+  `core/help/ribbonTabs.js` (Ribbon.vue only renders them): a menu (`menu: [...]`,
+  PowerPoint's "Shapes ▾") per object family keeps the Tools tab a fixed width
+  however many tools exist. A greyed row prints its reason inline and a menu never
+  hides a row by state. The menu is teleported because `.ribbon-body` scrolls
+  horizontally, which clips an absolute child. **Gating has ONE table**
+  (`core/help/commands.js` `NEED_CHECKS`): commands declare `needs: [...]` and
+  the ribbon and the console both read App's `commandState`, so they cannot
+  disagree. `ribbonTabs.test.js` pins the keys, the icons and console parity.
+  Tool-driven 3D picking is Viewer3D's `pickMode`/`markers` props + `pick` event
+  (`core/products/screenPick.js`: front-most drawn point within a few px, reported
+  as its exact Float64 source position); toolboxes for the 3D view go in its
+  `#toolbox` slot.
 - **Shared modal framework** (`components/modals/ui/`): every pipeline-stage modal builds
   from `ModalShell` (overlay/header/close/footer; preserves esc + click-backdrop close, so
   `useModalEscape` is unchanged), `SettingsField`/`SettingsGroup`/`AdvancedDisclosure`/
@@ -447,6 +471,11 @@ self-contained, file-based project format.
   **sensors restore before images** (EXIF auto-grouping reacts to the image list).
 - `useImagesStore` — source images, keypoints, masks, depth maps, sensor assignments.
   `sync()` writes the whole `project.json`.
+- `useImagesStore.imageGroups` + per-image `groupId` (top-level `imageGroups` in
+  project.json; absent ⇒ none) are **display-only folders** for the sidebar list
+  (`utils/imageGroups.js`). The pipeline never reads them and they never reorder
+  `images` — sequential matching takes that order as capture order. Sensors are the
+  grouping that *does* reach the solve (shared intrinsics); keep the two separate.
 - `useMatchesStore` — pairwise matches; `pairId = sorted([uuidA,uuidB]).join('--')`.
   Entries carry a persisted `disabled` flag (`setPairDisabled`) — a reversible user
   exclusion of an obviously-wrong pair; disabled pairs are filtered out where
@@ -865,6 +894,21 @@ self-contained, file-based project format.
    the store re-attaches those *before* any early return. `removeIsolated` is the
    standalone cousin of the dense accumulator's `filterIsolated` — it scores
    occupancy on a grid but keeps the original points (a cleanup, not a resample).
+   The same op and store path (`editClouds` → `workers/ops/cloud.js` `MODES`) carry
+   every Point Cloud ▾ / Mesh ▾ tool: normals, transform, ICP and distance (the last
+   two take `[source, reference]`, the reference a cloud or a mesh —
+   `REFERENCE_MODES`), section, and the mesh modes (`MESH_EDIT_MODES`). **Mesh edits
+   obey the same three invariants**: a result with `idx` lands through
+   `addDerivedMesh` as a `derived:true` mesh that `upsertMeshCloud` (a re-mesh) never
+   replaces, and the flag is persisted for meshes too (`cloudSerde`). It was dropped
+   on restore once, which would have let a re-mesh overwrite edited work. A tool that
+   opens its result on a colouring passes `style`, or `style(extra)` to see the
+   worker's small result record (the distance spread). **There is one neighbour
+   search: `core/products/knn.js`** (an exact k-d tree). Normals, ICP and distances
+   all use it. The grid in `cloudEdit.js` is for the filters' near-data sweeps only;
+   far queries (another epoch, an unaligned ICP start) are what the tree is for.
+   Lengths a tool shows or takes go through `core/products/cloudUnits.js`: model
+   units for a computed cloud (metres via the frame), file units for an imported one.
 7. **Mesh** (`core/products/mesh.js` + `crates/mesh`): **screened Poisson** over a
    dense cloud with per-point normals (`DenseCloud.nrm`, the PatchMatch plane normals —
    no separate normal estimation). **The source is `meshSource`/`meshSources`** (same
@@ -953,6 +997,17 @@ An SfM model is up to scale. Four invariants carry the fix (METHODS.md §6.6):
   CRS identifier (`crsInfo` returns null for `crs:'local'`, `geoKeysForEpsg(null)`
   writes user-defined). Never attach the project CRS just because the numbers are
   metres.
+- **Orientation and region are model-frame data under the same rules.** A user
+  orientation (Tools ▸ Model ▾ ▸ Orient model, `core/products/orientation.js`) is
+  an explicit `origin/east/north/up` basis the resolver spreads onto the `local` /
+  `scaled-local` frame spec (`frames.js` `orientationBasis` dep): it lives in the
+  frame, never in the coordinates, a georeference outranks it, and its basis is part
+  of `frameKey`. The region (`core/products/region.js`) is a model-frame box that
+  bounds depth seeding, fusion and mesh/DEM input. Both are persisted in
+  `reconstruction.json` with the main sparse cloud's `{id, createdAt}` stamp and are
+  IGNORED when stale. Unlike the scale fit, a rebuild does not delete them: they
+  stay visible as stale so the user can reapply them. Neither ever cuts an imported
+  cloud, which is in its own frame.
 Evidence vs derived state is split the same way GCPs are: the bar *records* live
 in `useScaleBarsStore` / `scalebars.json`, the fit in `reconstruction.json`.
 Bars **always** report a residual — including bars a georeference outranks (they
@@ -1569,6 +1624,11 @@ propagate covariance rather than retaining stale numeric sigmas.
 - Sparse gradual selection uses packed disposable worker input, fixed-intrinsics
   BA and one successful store commit. Keep self-calibration and film transforms
   when retiring obsolete run statistics; invalidate all computed dependents.
+  Optimize cameras is the same path (`refineMainSparse` in the store,
+  `constrainedRefine` in `core/sfm/gradualSelection.js`) with focal/principal point
+  free per sensor. It never frees a radial term, because the pinhole-fold invariant
+  would need the fold + composed-bag bookkeeping, and it refuses a > 20 % focal move
+  as a runaway.
 - SIFT batch concurrency is bounded by pool size, four jobs and an explicit
   decode/pyramid memory estimate. Learned detection stays serial. Batch logs
   measure wall time; the estimate is not an observed browser peak.

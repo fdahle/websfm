@@ -7,6 +7,9 @@ import { frameFromSimilarity } from '../../core/products/georef.js'
 import { rasterizeDem } from '../../core/products/dem.js'
 import { orthorectify, orthorectifyStreamed } from '../../core/products/ortho.js'
 import { meshSurface, planeSurface, resampleSurface } from '../../core/products/surface.js'
+import { traceContours, contoursToGeoJSON, contoursToDxf } from '../../core/products/contours.js'
+import { terrainProducts } from '../../core/products/terrain.js'
+import { clipDem, clipOrtho } from '../../core/products/rasterClip.js'
 
 // Product ops (DEM + orthophoto). The frame rebuild/descriptor + raster→dataURL
 // canvas helpers live here next to the two handlers; pure compute is in
@@ -211,5 +214,36 @@ export function makeProductsOps() {
     }
   }
 
-  return { generateDem, generateOrtho }
+  // Tools ▸ Products ▾ — derived outputs of an existing DEM/ortho, all of which end
+  // as a download (nothing here changes a stored product).
+  //   contours: { grid, settings, format:'geojson'|'dxf', crs } → { text, lines, levels }
+  //   terrain:  { grid, settings } → { rasters: { slope?, aspect?, hillshade? } }
+  //   clip:     { grid | ortho, kind:'dem'|'ortho', polygons } → { raster }
+  // The caller sends a COPY of the plane (transferred), so nothing is round-tripped.
+  async function demTool([input], { emit }) {
+    const log = (m, l, c) => emit('log', [m, l, c])
+    const { tool, settings = {} } = input
+    if (tool === 'contours') {
+      const result = traceContours(input.grid, settings, log)
+      const text = input.format === 'dxf'
+        ? contoursToDxf(result)
+        : JSON.stringify(contoursToGeoJSON(result, { crs: input.crs || undefined }))
+      return { result: { text, lines: result.lines.length, levels: result.levels.length } }
+    }
+    if (tool === 'terrain') {
+      const rasters = terrainProducts(input.grid, { ...settings, onLog: log })
+      const transfer = Object.values(rasters).flatMap((r) => [r.data.buffer, r.mask.buffer])
+      return { result: { rasters }, transfer }
+    }
+    if (tool === 'clip') {
+      const raster = input.kind === 'ortho'
+        ? clipOrtho(input.ortho, input.polygons, { onLog: log })
+        : clipDem(input.grid, input.polygons, { onLog: log })
+      const transfer = raster ? [raster.data.buffer, ...(raster.mask ? [raster.mask.buffer] : [])] : []
+      return { result: { raster }, transfer }
+    }
+    throw new Error(`unknown raster tool "${tool}"`)
+  }
+
+  return { generateDem, generateOrtho, demTool }
 }

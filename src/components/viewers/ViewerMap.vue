@@ -68,9 +68,10 @@ const emit = defineEmits([
   'select', 'command', 'select-gcp', 'set-gcp-position', 'add-gcp-at', 'delete-gcp',
 ])
 
-// GCP edit mode: shows the target-selector toolbar, makes markers draggable, and
-// turns map clicks into position edits. Local to the map tab.
-const editMode = ref(false)
+// GCP edit mode: shows the target-selector toolbox, makes markers draggable, and
+// turns map clicks into position edits. Entered from the ribbon (View ▸ Map ▸ Edit
+// GCPs), left from there or the toolbox's ×, so App owns it (v-model:gcp-edit).
+const editMode = defineModel('gcpEdit', { type: Boolean, default: false })
 const allGcpsBrief = computed(() => props.gcps.map((g) => ({ id: g.id, name: g.name })))
 const positionedGcpIds = computed(() =>
   props.gcps.filter((g) => Number.isFinite(g.x) && Number.isFinite(g.y)).map((g) => g.id)
@@ -870,13 +871,6 @@ defineExpose({ zoomToImage, fitView: fitToMarkers, zoomToFootprints })
       <div ref="mapEl" class="ol-map" />
       <ViewerContextMenu :menu="ctxMenu" :items="ctxItems" @select="onCtxSelect" />
 
-      <button
-        class="gcp-edit-toggle"
-        :class="{ active: editMode }"
-        title="Edit GCP ground positions on the map"
-        @click="editMode = !editMode"
-      >✎ Edit GCPs</button>
-
       <GcpToolbar
         v-if="editMode"
         noun="map"
@@ -946,25 +940,6 @@ defineExpose({ zoomToImage, fitView: fitToMarkers, zoomToFootprints })
   height: 100%;
 }
 
-.gcp-edit-toggle {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  z-index: 3;
-  padding: 5px 10px;
-  background: var(--panel);
-  border: 1px solid var(--panel-border);
-  border-radius: 6px;
-  font-size: 12px;
-  color: var(--text);
-  cursor: pointer;
-}
-.gcp-edit-toggle:hover { background: var(--hover-bg); }
-.gcp-edit-toggle.active {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
-}
 
 /* Cursor readout — same shape as the image view's status bar. */
 .status-bar {

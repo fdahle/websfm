@@ -149,7 +149,7 @@ function solve3(A, b) {
 // Build a right-handed orthonormal basis {east, north, up} with the given `up`
 // as its third (height) axis. East/north are arbitrary in a local frame, so we
 // derive them deterministically from a world axis least parallel to up.
-function basisFromUp(up) {
+export function basisFromUp(up) {
   const u = normalize(up)
   // Reference axis least aligned with up (avoids a degenerate projection).
   const ref = Math.abs(u[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0]

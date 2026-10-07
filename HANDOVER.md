@@ -738,6 +738,51 @@ fiducials; self-calibration (A2) + fiducials (F4) are the code-side support.
 
 ## Done log (most recent first)
 
+- **2026-10-07 · 3D camera glyphs no longer stall on size/visibility changes.** Each
+  camera-size step and each sparse-cloud toggle rebuilt every frustum and re-decoded
+  every photo at full resolution into a fresh GPU texture. Frustums are now shared unit
+  geometry placed by a per-camera matrix (a size step only rewrites matrices), and
+  thumbnails are 256² textures decoded off-thread (`createImageBitmap`, 4 at a time)
+  and cached per image across rebuilds. `components/viewers/Viewer3D.vue`.
+- **2026-10-07 · Ribbon tool menus, floating toolboxes, 19 new tools.** The Tools tab
+  is one dropdown per object family (Images / Model / Point Cloud / Mesh / Products;
+  Georeferencing stays as buttons). The rule now is "the ribbon chooses; a floating
+  toolbox runs".
+  - **Moved out of the views:** the 3D view's ⚙ point/camera size became ribbon
+    steppers (now persisted); rectangle/lasso, the map's Edit GCPs and image fit/zoom
+    became ribbon commands; the "100 % · Fit" HUDs became a status-bar zoom readout.
+  - **Shared toolbox:** mask, point, 3D-selection and measuring toolboxes all sit on
+    `FloatingToolbox.vue`.
+  - **One guard table:** ribbon and console gating share `NEED_CHECKS` (absorbing RV ▸
+    Structure's "unify Ribbon guards"), with tables in `core/help/ribbonTabs.js`.
+  - **New tools:**
+    - Images: image quality.
+    - Model: optimize cameras, region (bounds depth seeding, fusion, mesh and DEM
+      input), orient model (frame basis, like scale); gradual selection moved here.
+    - Point Cloud: estimate normals, transform, align by point pairs (3D picking),
+      ICP, distance to reference (C2C/C2M), section.
+    - Mesh: clean (watertight option), Taubin smooth, QEM decimate, crop, sample to
+      points, area & volume.
+    - Products: contours (GeoJSON/DXF), slope/aspect/hillshade, clip to polygon.
+  - **Fixes found on the way:** a mesh's `derived` flag was not persisted, and
+    `upsertMeshCloud` would have replaced edited meshes.
+  - **Where it lives:** core in `core/products/{knn,cloudNormals,cloudAlign,cloudDistance,
+    meshEdit,meshDecimate,contours,terrain,rasterClip,dxf,cloudSection,region,
+    orientation,cloudUnits,screenPick}.js`, `core/features/imageQuality.js`, and
+    `core/sfm/gradualSelection.js` (`optimizeCameras`).
+  - **Tests:** browser specs `tool-menus`, `model-tools`, `products-tools`,
+    `image-model-tools`. Guides: new `point-cloud-tools`, `model-tools`; updated mesh,
+    dem, dense-cloud, depth-maps, sparse-reconstruction, getting-started. METHODS §8.6.
+  - **Measured (Node):** k-d tree 2M build 1.7 s, 12-NN 3.6 µs/query; normals 1M
+    points 5.4 s; QEM 2M → 200k triangles 7.4–8 s; C2C 1M×1M 2.0 s; C2M 1M × 500k
+    triangles 3.4 s; image quality 6000×4000 ~0.13 s; mesh clean + smooth 200k
+    triangles 0.25 s.
+
+- **2026-10-07 · Image groups in the sidebar.** User-named folders for the image list
+  (right-click ▸ New group / Move to group, drag rows onto a header, collapse, reorder,
+  Ctrl-click multi-select). Display only — the pipeline never reads them and the image
+  order is untouched. `utils/imageGroups.js`, `useImagesStore` (`imageGroups`,
+  `img.groupId` in project.json), `ImagesSection.vue`; guide ▸ Getting Started.
 - **2026-10-07 · Model weights on a GitHub release.** The five Apache-2.0 weights are
   assets of the `models-v1` release; `npm run fetch:models` (`scripts/fetch-models.mjs`)
   downloads them into `public/models/` with SHA-256 checks and deletes a non-redistributable

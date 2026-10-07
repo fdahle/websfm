@@ -181,6 +181,21 @@ Related evidence: `VERIFICATION.csv` ▸ `FID-08` (the TMA set's implied 253 mm)
 
 ## Next
 
+### TL — Tools-tab follow-ups (tools shipped 2026-10-07; checks in VERIFICATION ▸ TOOL-*)
+- **Attributes in cloud exports.** A computed `distance` (and any non-LAS attribute)
+  is saved with the project but not written to PLY/LAS/LAZ; LAS needs extra-bytes
+  VLRs, PLY just a property.
+- **Unwelded imported meshes.** Clean mesh / Area & volume assume shared vertices; an
+  STL-style import (each triangle its own corners) reads as all boundary. Add an
+  epsilon vertex weld as the first Clean step.
+- **ICP to a mesh** matches mesh vertices, not closest surface points: coarse meshes
+  converge to vertex spacing. Use the exact C2M search (`cloudDistance.js`) for
+  correspondences.
+- **Region gizmo.** The box is edited numerically and by fit; drag handles in the 3D
+  view would be faster for objects.
+- **Workflow blocks** for the new tools (the dense-edit pattern in `core/workflow.js`),
+  once someone wants to replay a cleanup chain.
+
 ### RV — 2026-10-03 code + maths review: verified, not yet fixed
 Each item was confirmed against the code (most with a measured number); the fixed
 ones are in HANDOVER. Ordered by expected impact.
@@ -217,8 +232,7 @@ ones are in HANDOVER. Ordered by expected impact.
 - **Find GCPs reads the whole reference raster at 1536 px**: a regional tile against
   a drone block leaves the project a few dozen working pixels. Needs an approximate
   footprint (EXIF/priors) to window the read — the ortho itself is relative.
-- **Structure** (god-file audit): unify Ribbon guards with `core/help/commands.js`
-  `NEED_CHECKS` (one `state` prop instead of ~18); extract `core/sfm/ingest.js`
+- **Structure** (god-file audit): extract `core/sfm/ingest.js`
   (sfm.js 304–508); the survey-constraint builders moved to
   `core/sfm/surveyConstraints.js` (2026-10-04), but the anchored/prior BA *loops*
   are still in sfm.js and still lack one shared `buildBaObservations` (which also

@@ -8,6 +8,7 @@ import {
 import { capOrder, capBoundary } from '../../core/features/keypointCap.js'
 import { SIFT_DESC_NORM, rootSiftInPlace } from '../../core/features/siftDescriptors.js'
 import { buildMaskLookup } from '../../core/mask.js'
+import { analyzeImageQuality, IMAGE_QUALITY_DEFAULTS } from '../../core/features/imageQuality.js'
 import { fromScaledPx } from '../../core/sfm/geometry.js'
 import {
   FIDUCIAL_DETECT_TUNING, grayFromRgba, detectFiducialsInImage,
@@ -444,5 +445,23 @@ export function makeDetectOps({ rasterize }) {
     } finally { bmp.close() }
   }
 
-  return { detect, prepareFiducialTemplates, detectFiducials, detectFiducialSpots }
+  // Tools ▸ Images ▾ ▸ Image quality: sharpness/exposure of one image
+  // (core/features/imageQuality.js). Decoded at twice the analysis size so the
+  // module's own area filter, not the canvas's bilinear shrink, makes the final
+  // fixed-size grid every image is scored on. A mask (1 = masked) excludes sky or
+  // the operator's legs from the score, exactly as it does from detection.
+  async function imageQuality([url, options = {}]) {
+    const analysisMaxDim = options.analysisMaxDim ?? IMAGE_QUALITY_DEFAULTS.analysisMaxDim
+    const raster = await rasterize(url, analysisMaxDim * 2)
+    let usable = null
+    if (options.mask) {
+      const masked = await buildMaskLookup(options.mask, raster.width, raster.height)
+      usable = new Uint8Array(masked.length)
+      for (let i = 0; i < masked.length; i++) usable[i] = masked[i] ? 0 : 1
+    }
+    const q = analyzeImageQuality(raster, { analysisMaxDim, mask: usable })
+    return { result: { ...q, natW: raster.natW, natH: raster.natH } }
+  }
+
+  return { detect, prepareFiducialTemplates, detectFiducials, detectFiducialSpots, imageQuality }
 }

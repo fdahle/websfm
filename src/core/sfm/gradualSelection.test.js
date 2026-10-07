@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { beforeAll, expect, it, vi } from 'vitest'
 import initRecon from '../../wasm/reconstruction/reconstruction.js'
-import { sparsePointMetrics, selectedSparseIndices, refineSparseSelection } from './gradualSelection.js'
+import { sparsePointMetrics, selectedSparseIndices, refineSparseSelection, optimizeCameras } from './gradualSelection.js'
 // GCP anchoring triangulates through the wasm DLT.
 beforeAll(async () => {
   const bytes = await readFile(fileURLToPath(new URL('../../wasm/reconstruction/reconstruction_bg.wasm', import.meta.url)))
@@ -75,4 +75,62 @@ it('holds the refinement to GCP anchors and camera priors (survey frame = 2×SfM
   expect(result.constraints).toMatchObject({ gcpAnchors: 3, cameraPriors: 3 })
   // The same +0.2 px is a regression when nothing constrains the solve.
   await expect(refineSparseSelection(cams, pts, { metric: 'error', threshold: 3 }, solver)).rejects.toThrow('increased')
+})
+
+it('optimizeCameras frees focal per sensor, keeps every point and pins the pinhole invariant', async () => {
+  const input = points()
+  const solver = vi.fn(async (cams, intr, pts) => ({
+    cameras: cams, points3d: pts.map(p => ({ x: p.x, y: p.y, z: p.z })), costBefore: 2, costAfter: 1,
+    intrinsics: intr.map(k => ({ ...k, fx: k.fx * 1.05, fy: k.fy * 1.05, k1: 0.3, k2: 0, k3: 0 })),
+  }))
+  const result = await optimizeCameras(cameras, input, { refine: 'f', sensorOfUuid: { a: 0, b: 0 } }, solver)
+  const opts = solver.mock.calls[0][4]
+  expect(opts.refineIntrinsics).toBe('f')
+  expect(opts.sensorOfCam).toEqual([0, 0])
+  expect(result.points).toHaveLength(8)
+  expect(result.cameras.get('a').K).toEqual({ fx: 105, fy: 105, cx: 0, cy: 0 })
+  // No radial term reaches the model even if the solver returned one.
+  expect(result.cameras.get('a').K.k1).toBeUndefined()
+  expect(input[0].x).toBe(0)
+})
+
+it('optimizeCameras refuses a focal runaway and radial refinement', async () => {
+  const runaway = vi.fn(async (cams, intr, pts) => ({
+    cameras: cams, points3d: pts.map(p => ({ x: p.x, y: p.y, z: p.z })), costBefore: 2, costAfter: 1,
+    intrinsics: intr.map(k => ({ ...k, fx: k.fx * 2, fy: k.fy * 2 })),
+  }))
+  await expect(optimizeCameras(cameras, points(), { refine: 'f' }, runaway)).rejects.toThrow('runaway')
+  await expect(optimizeCameras(cameras, points(), { refine: 'f,k1' }, runaway)).rejects.toThrow('Unsupported')
+})
+
+it('optimizeCameras recovers a 4 % focal error through the real WASM bundle adjustment', async () => {
+  const { bundleAdjust } = await import('./reconstruction.js')
+  const trueK = { fx: 1000, fy: 1000, cx: 0, cy: 0 }
+  const rotY = (a) => [[Math.cos(a), 0, Math.sin(a)], [0, 1, 0], [-Math.sin(a), 0, Math.cos(a)]]
+  // Five cameras on an arc looking at a box of points 10 units away.
+  const cams = new Map(Array.from({ length: 5 }, (_, i) => {
+    const a = (i - 2) * 0.12
+    const R = rotY(-a)
+    const C = [10 * Math.sin(a), 0.3 * i, 10 - 10 * Math.cos(a)]
+    const t = R.map((row) => -(row[0] * C[0] + row[1] * C[1] + row[2] * C[2]))
+    return [`c${i}`, { R, t, K: { ...trueK, fx: 960, fy: 960 } }]
+  }))
+  const proj = (cam, [x, y, z]) => {
+    const p = cam.R.map((row, k) => row[0] * x + row[1] * y + row[2] * z + cam.t[k])
+    return [trueK.fx * p[0] / p[2], trueK.fy * p[1] / p[2]]
+  }
+  let seed = 3
+  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647)
+  const pts = Array.from({ length: 120 }, () => {
+    const w = [rnd() * 6 - 3, rnd() * 4 - 2, 10 + rnd() * 4 - 2]
+    return { x: w[0], y: w[1], z: w[2], views: new Map([...cams.keys()].map((id) => [id, 0])),
+      viewsPx: new Map([...cams].map(([id, c]) => [id, proj(c, w)])) }
+  })
+  const sensorOfUuid = Object.fromEntries([...cams.keys()].map((id) => [id, 0]))
+  const result = await optimizeCameras(cams, pts, { refine: 'f', sensorOfUuid }, bundleAdjust)
+  const fx = result.cameras.get('c0').K.fx
+  expect(Math.abs(fx / 1000 - 1)).toBeLessThan(0.005)
+  expect(result.costAfter).toBeLessThan(result.costBefore)
+  // Shared per sensor: one focal for all five.
+  for (const c of result.cameras.values()) expect(c.K.fx).toBeCloseTo(fx, 6)
 })

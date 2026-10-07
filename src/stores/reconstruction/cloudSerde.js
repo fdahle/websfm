@@ -54,7 +54,7 @@ export function serializeMeshCloud(c) {
   return {
     id: c.id, name: c.name, kind: 'mesh', createdAt: c.createdAt,
     posType: c.pos instanceof Float64Array ? 'f64' : 'f32',
-    imported: !!c.imported, secondary: !!c.secondary,
+    imported: !!c.imported, derived: !!c.derived, secondary: !!c.secondary,
     cameras: [], pointCount: nVerts, nVerts, triCount: c.count || 0,
     hasColor: !!col, viewUuids: [],
     ...(c.meshSummary ? { meshSummary: c.meshSummary } : {}),
@@ -186,6 +186,9 @@ function deserializeCloudData(c, makeCloudId) {
       id: c.id ?? makeCloudId(), name: c.name ?? 'Mesh', kind: 'mesh',
       createdAt: c.createdAt ?? Date.now(), cameras: markRaw(new Map()),
       ...(c.imported ? { imported: true } : {}),
+      // A Mesh ▾ tool output; a re-mesh must never replace it. Absent on meshes
+      // saved before mesh editing existed ⇒ not derived.
+      ...(c.derived ? { derived: true } : {}),
       count: c.triCount ?? (idx.length / 3), nVerts,
       pos: markRaw(posF), idx: markRaw(idx), col: col ? markRaw(col) : null,
       // The mesh run record; absent on meshes saved before it existed ⇒ unknown.

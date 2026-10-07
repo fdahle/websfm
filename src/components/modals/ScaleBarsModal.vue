@@ -475,7 +475,7 @@ td.mid { text-align: center; }
 
 .field-input.name { width: 110px; }
 .field-input.num { width: 84px; text-align: right; }
-.field-select.unit { width: 60px; }
+.field-select.unit { width: 60px; min-width: 0; }
 
 .row-remove {
   background: none; border: none; color: var(--text-dim);

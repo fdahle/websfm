@@ -14,6 +14,7 @@
 import { computeDepthMap } from '../sfm/reconstruction.js'
 import { planeCostRef, aggregateValidCosts } from './planeCost.js'
 import { DENSE_TUNING } from '../tuning.js'
+import { normalizeRegion, regionContains, pointsInRegion } from '../products/region.js'
 import { DEPTHMAP_DEFAULTS } from '../defaults.user.js'
 import {
   cameraCenter, projectWithDepth, triangulationAngle, scaleK, rgbaToGray, toScaledPx,
@@ -208,7 +209,10 @@ export async function depthMapForImage(ref, sources, points, settings = {}, comp
   const refCamScaled = { R: ref.cam.R, t: ref.cam.t, K: ref.K }
   // Depth range is view-space (resolution-invariant): derive it once from the
   // working-res projection (most sparse points visible → tightest percentiles).
-  const { depthMin, depthMax, seeded } = seedDepthFromSparse(refCamScaled, points, ref.width, ref.height)
+  // A region narrows the depth search to the sparse points inside it.
+  const region = normalizeRegion(settings.region)
+  const seedPoints = region ? pointsInRegion(points, region) : points
+  const { depthMin, depthMax, seeded } = seedDepthFromSparse(refCamScaled, seedPoints, ref.width, ref.height)
   if (!(depthMax > depthMin)) return null // no sparse support → can't bound depth
 
   // Relative poses are resolution-independent (R,t only) — shared across levels.
@@ -1075,6 +1079,9 @@ function* fusionSteps(maps, opts = {}, onLog = () => {}, hooks = {}) {
   // Cull accounting (summed across all maps) so the user can see where pixels go.
   let considered = 0, noDepth = 0, highCost = 0, failedConsistency = 0, kept = 0
   let lowParallax = 0, grazing = 0 // WS4 geometric-filter culls
+  // Tools ▸ Model ▾ ▸ Region: a fused point outside the box is never accumulated.
+  const region = normalizeRegion(opts.region)
+  let outsideRegion = 0
   // Precompute each camera centre for the triangulation-angle check (WS4).
   const camCenters = cams.map((c) => cameraCenter(c))
   let lastEmit = 0
@@ -1196,6 +1203,8 @@ function* fusionSteps(maps, opts = {}, onLog = () => {}, hooks = {}) {
           }
         }
 
+        if (region && !regionContains(region, P.x, P.y, P.z)) { outsideRegion++; continue }
+
         // Stream straight into the voxel merge — no raw point ever exists.
         const o = idx * 3
         acc.add(P.x, P.y, P.z, rgb[o], rgb[o+1], rgb[o+2], nwx, nwy, nwz)
@@ -1214,7 +1223,8 @@ function* fusionSteps(maps, opts = {}, onLog = () => {}, hooks = {}) {
     + `${noDepth} no-depth (${pct(noDepth)}%), ${highCost} cost>${maxCost} (${pct(highCost)}%), `
     + `${failedConsistency} <${minViews} views (${pct(failedConsistency)}%)`
     + `${minTriAngleDeg > 0 ? `, ${lowParallax} <${minTriAngleDeg}° parallax (${pct(lowParallax)}%)` : ''}`
-    + `${incidenceOn ? `, ${grazing} >${maxIncidenceDeg}° grazing (${pct(grazing)}%)` : ''}`, 'info', 'Dense')
+    + `${incidenceOn ? `, ${grazing} >${maxIncidenceDeg}° grazing (${pct(grazing)}%)` : ''}`
+    + `${region ? `, ${outsideRegion} outside the region (${pct(outsideRegion)}%)` : ''}`, 'info', 'Dense')
 
   // The voxel merge already collapsed the per-source-pixel "shell" duplicates (a
   // surface seen by k views → k coincident points → one averaged cell). Report it.
@@ -1267,6 +1277,7 @@ function* fusionSteps(maps, opts = {}, onLog = () => {}, hooks = {}) {
       lowViewsPct: 100 * failedConsistency / denom,
       lowParallaxPct: 100 * lowParallax / denom,
       grazingPct: 100 * grazing / denom,
+      ...(region ? { outsideRegionPct: 100 * outsideRegion / denom } : {}),
     },
   }
   flat.count = cells

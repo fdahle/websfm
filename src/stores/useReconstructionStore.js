@@ -9,13 +9,16 @@ import {
   generateOrtho as workerGenerateOrtho,
   meshify as workerMeshify,
   editCloud as workerEditCloud,
-  refineSparse as workerRefineSparse,
+  refineSparse as workerRefineSparse, optimizeSparse as workerOptimizeSparse,
   terminateAll,
 } from '../workers/computeClient.js'
 import { useLog } from '../composables/useLog.js'
 import * as opfs from '../utils/opfs.js'
 import { aerialUpRotation, rotateReconstruction } from '../core/products/projection.js'
 import { qualityToMaxDim } from '../core/dense/mvs.js'
+import { normalizeRegion, regionStatus, regionMask } from '../core/products/region.js'
+import { selectPoints } from '../core/products/cloudEdit.js'
+import { normalizeOrientation, orientationStatus, orientationBasis } from '../core/products/orientation.js'
 import { projectDensifyPeakBytes, formatBytes, DEFAULT_BUDGET_BYTES, deviceBudget } from '../core/dense/memBudget.js'
 import { depthMapBytes } from '../core/dense/depthMapCodec.js'
 import { distortionOf } from '../core/sfm/distortion.js'
@@ -44,6 +47,15 @@ import { packMatchPairs } from '../core/sfm/matchCodec.js'
 import {
   projectSparsePeakBreakdownBytes, sparseMemoryDecision, SPARSE_HEAP_FRACTION,
 } from '../core/sfm/memBudget.js'
+
+// Tools-tab edits (`editClouds` modes, dispatched by workers/ops/cloud.js):
+// Mesh ▾ tools read a mesh (mesh-sample turns it into a dense cloud) …
+const MESH_EDIT_MODES = new Set(['mesh-clean', 'mesh-smooth', 'mesh-decimate', 'mesh-crop', 'mesh-sample'])
+// … these take [source, reference], where the reference may be a cloud or a mesh …
+const REFERENCE_MODES = new Set(['icp', 'distance'])
+// … and these produce a replacement view of their source (an aligned or
+// recoloured copy), so the source is hidden like a selection edit's.
+const REPLACES_SOURCE_VIEW = new Set(['transform', 'icp', 'distance', 'normals', 'mesh-clean', 'mesh-smooth', 'mesh-decimate'])
 
 // Project-scoped store: the sparse model (camera poses + 3D points) from
 // incremental SfM. Reads the image list and match graph from their stores;
@@ -112,6 +124,78 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
   // invalidate the depth-map staleness stamp and contradict every recorded
   // summary number.
   const scaleFit = ref(null)
+
+  // The reconstruction REGION (Tools ▸ Model ▾ ▸ Region, core/products/region.js):
+  // a model-frame box that bounds depth maps, fusion, mesh and DEM input. Stamped
+  // with the main sparse model; a stale region is ignored, never reinterpreted.
+  // Persisted in reconstruction.json; absent ⇒ none. Not cleared by a rebuild —
+  // the stamp makes it stale, so the user can see it and refit it.
+  const region = ref(null)
+  const regionState = computed(() => regionStatus(region.value, mainSparseCloud.value))
+  // The box to apply to a run right now, or null (none / stale / invalid).
+  function activeRegion() {
+    return regionState.value.active ? normalizeRegion(region.value) : null
+  }
+  function setRegion({ min, max }) {
+    const c = mainSparseCloud.value
+    const next = normalizeRegion({ min, max, sourceStamp: c ? { id: c.id, createdAt: c.createdAt ?? null } : null })
+    if (!next || !c) return false
+    region.value = next
+    const f = (v) => v.map((x) => x.toPrecision(5)).join(', ')
+    log(`Region set: [${f(next.min)}] – [${f(next.max)}]`, 'info', 'Reconstruction', { channel: 'activity' })
+    persist()
+    return true
+  }
+  // A copy of a flat cloud ({ count, pos, col?, nrm? }) cut to the active region,
+  // or null when no region applies — the region is model-frame data, so an
+  // imported cloud (its own frame) is never cut. Logs what it removed.
+  function clipToRegion(cloud, label) {
+    const r = activeRegion()
+    if (!r || cloud.imported) return null
+    const { keep, kept } = regionMask(cloud.pos, cloud.count, r)
+    log(`${label}: region keeps ${kept.toLocaleString()} of ${cloud.count.toLocaleString()} points`, 'info', 'Products')
+    return selectPoints(cloud, keep, kept)
+  }
+  // Settings for a dense run with the active region attached (null ⇒ unbounded).
+  function withRegion(settings) {
+    const r = activeRegion()
+    if (r) log('Dense: limited to the region', 'info', 'Dense')
+    else if (regionState.value.reason === 'stale') log('Dense: the region was drawn on an older model and is ignored — refit it to use it', 'warn', 'Dense')
+    return { ...settings, region: r ? { min: r.min, max: r.max } : null }
+  }
+  // The user ORIENTATION of the local frame (Tools ▸ Model ▾ ▸ Orient model,
+  // core/products/orientation.js). Like scale, it lives in the frame, never in the
+  // coordinates; the frame resolver applies it to local/scale-bar products, and a
+  // georeference outranks it. Same stamp rule as the region.
+  const orientation = ref(null)
+  const orientationState = computed(() => orientationStatus(orientation.value, mainSparseCloud.value))
+  function activeOrientationBasis() {
+    return orientationState.value.active ? orientationBasis(orientation.value) : null
+  }
+  function setOrientation({ up, origin, headingDeg = 0 }) {
+    const c = mainSparseCloud.value
+    const next = normalizeOrientation({ up, origin, headingDeg, sourceStamp: c ? { id: c.id, createdAt: c.createdAt ?? null } : null })
+    if (!next || !c) return false
+    orientation.value = next
+    const f = (v) => v.map((x) => x.toPrecision(4)).join(', ')
+    log(`Orientation set: up [${f(next.up)}], origin [${f(next.origin)}], heading ${next.headingDeg}°`
+      + (validGeoref.value ? ' — the georeference outranks it for georeferenced products' : ''),
+    'info', 'Reconstruction', { channel: 'activity' })
+    persist()
+    return true
+  }
+  function clearOrientation() {
+    if (!orientation.value) return
+    orientation.value = null
+    log('Orientation removed — the local frame is levelled from the cameras again', 'info', 'Reconstruction', { channel: 'activity' })
+    persist()
+  }
+  function clearRegion() {
+    if (!region.value) return
+    region.value = null
+    log('Region cleared', 'info', 'Reconstruction', { channel: 'activity' })
+    persist()
+  }
 
   // Quality summaries from the last sparse / dense run (Q3). Small, persisted in
   // reconstruction.json so successive runs can be compared across sessions.
@@ -355,6 +439,8 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
       georef: georef.value,
       // Derived, not evidence — the bars live in scalebars.json (see D11).
       scaleFit: scaleFit.value,
+      region: region.value,
+      orientation: orientation.value,
       // Run-quality summaries (Q3) — tiny, kept for cross-run comparison.
       summary: summary.value,
       denseSummary: denseSummary.value,
@@ -593,8 +679,9 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
   // Insert/replace the single mesh cloud (kind:'mesh'). Flat like the dense cloud:
   // per-vertex pos/col + triangle idx, no per-vertex objects. count = triangles.
   function upsertMeshCloud({ nVerts, count, pos, idx: triIdx, col, summary }, run = {}) {
-    // As with dense: a re-mesh replaces the computed mesh, never an imported one.
-    const i = clouds.value.findIndex((c) => c.kind === 'mesh' && !c.imported)
+    // As with dense: a re-mesh replaces the computed mesh, never an imported one or
+    // a derived (Mesh ▾ tool output) one — those are the user's own work.
+    const i = clouds.value.findIndex((c) => c.kind === 'mesh' && !c.imported && !c.derived)
     const prev = i >= 0 ? clouds.value[i] : null
     const cloud = {
       id: prev?.id ?? makeCloudId(),
@@ -768,7 +855,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
       }))
 
       const { maps, summary: aSummary } = await workerComputeDepthMaps(
-        { images: inputImages, points, settings },
+        { images: inputImages, points, settings: withRegion(settings) },
         { onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f) },
       )
 
@@ -850,7 +937,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     }
     try {
       const { points: flat, nrm, summary: dSummary, mapBuffers } = await workerDensify(
-        { maps: mapsInput, streamed, settings },
+        { maps: mapsInput, streamed, settings: withRegion(settings) },
         { onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f), transfer },
       )
       if (!stillCurrent()) return
@@ -919,11 +1006,16 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     const mergeCell = dense.imported ? 0 : (denseSummary.value?.mergeCell ?? 0)
     log(`Mesh: source "${dense.name ?? 'Dense'}" (${dense.count.toLocaleString()} points`
       + `${dense.derived ? ', edited' : ''}${dense.imported ? ', imported' : ''})`, 'info', 'Products')
-    const posCopy = dense.pos.slice()
-    const colCopy = dense.col?.slice() || null
-    const nrmCopy = dense.nrm.slice()
+    const clipped = clipToRegion(dense, 'Mesh')
+    if (clipped && !clipped.count) {
+      log('Mesh: no point of the source lies inside the region', 'warn', 'Products')
+      return
+    }
+    const posCopy = clipped ? clipped.pos : dense.pos.slice()
+    const colCopy = clipped ? (clipped.col ?? null) : (dense.col?.slice() || null)
+    const nrmCopy = clipped ? clipped.nrm : dense.nrm.slice()
     const input = {
-      dense: { count: dense.count, pos: posCopy, col: colCopy, nrm: nrmCopy },
+      dense: { count: clipped ? clipped.count : dense.count, pos: posCopy, col: colCopy, nrm: nrmCopy },
       settings: { ...meshSettings, mergeCell },
     }
     const transfer = [posCopy.buffer]
@@ -976,6 +1068,28 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     return cloud
   }
 
+  // A Mesh ▾ tool's output: like addDerivedCloud, a NEW mesh flagged `derived`, so
+  // upsertMeshCloud (a re-mesh) never replaces it.
+  function addDerivedMesh(flat, { name, imported = false }) {
+    const cloud = {
+      id: makeCloudId(),
+      name,
+      kind: 'mesh',
+      createdAt: Date.now(),
+      derived: true,
+      ...(imported ? { imported: true } : {}),
+      cameras: markRaw(new Map()),
+      count: flat.count,
+      nVerts: flat.nVerts,
+      pos: markRaw(flat.pos),
+      idx: markRaw(flat.idx),
+      col: markRaw(flat.col || null),
+    }
+    clouds.value.push(cloud)
+    selectedCloudId.value = cloud.id
+    return cloud
+  }
+
   // Swap a derived cloud's buffers for an edited result, keeping its identity
   // (id/name/flags/style). A new object, like upsertSparseCloud, so the viewer
   // and the sidebar see the change by reference.
@@ -1005,71 +1119,116 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
   //
   // Disposable copies are transferred to the worker. The source buffers remain
   // attached throughout, including when Cancel hard-terminates the worker.
-  async function editClouds({ mode, sourceIds = [], settings = {}, name } = {}, onProgress) {
-    if (mode === 'sparse') {
-      const original = mainSparseCloud.value
-      if (!original || original.id !== sourceIds[0] || original.createdAt !== settings.createdAt) return null
-      const projectId = projects.currentProjectId
-      const statusBefore = reconStatus.value
-      reconStatus.value = 'running'
-      try {
-        // Do not transfer: compact tracks may share the live model's buffers.
-        const packed = packSparseCloud(original).result
-        const survey = await surveyConstraintInput({ marks: 'pinhole' })
-        if (projects.currentProjectId !== projectId || mainSparseCloud.value !== original) {
-          if (reconStatus.value === 'running') reconStatus.value = statusBefore
-          return null
-        }
-        const result = unpackReconstructionResult(await workerRefineSparse(packed,
-          { metric: settings.metric, threshold: settings.threshold },
-          { gcps: survey.gcps, cameraPriors: survey.cameraPriors }))
-        if (projects.currentProjectId !== projectId || mainSparseCloud.value !== original) {
-          // Superseded (project switch / set-as-main mid-run): nothing changed here.
-          if (reconStatus.value === 'running') reconStatus.value = statusBefore
-          return null
-        }
-        // An edit of the model, not a recompute: provenance and the user's
-        // display choices carry over (a reconstruct deliberately clears `imported`).
-        upsertSparseCloud(result.cameras, result.points, { replaceId: original.id, asMain: true,
-          name: original.name, imported: !!original.imported, secondary: !!original.secondary })
-        const edited = mainSparseCloud.value
-        if (edited && original.style !== undefined) edited.style = original.style
-        if (edited && original.visible !== undefined) edited.visible = original.visible
-        await invalidateSparseDependents()
-        // Calibration defines the canonical observation frame and must survive
-        // a fixed-intrinsics refinement. Old run statistics must not masquerade
-        // as statistics of the edited cloud.
-        summary.value = {
-          selfCalDistortion: summary.value?.selfCalDistortion ?? [],
-          fiducialTransforms: summary.value?.fiducialTransforms ?? [],
-        }
-        healthDirty.value++
-        reconStatus.value = 'done'
-        if (!(await persist())) {
-          log('Gradual selection: the edited model could not be saved — it will be lost on reload', 'warn', 'Reconstruction')
-        }
-        const held = result.constraints ?? {}
-        log(`Gradual selection: removed ${result.removed} points; bundle adjustment ${result.costBefore.toFixed(3)} → ${result.costAfter.toFixed(3)} px`
-          + (held.gcpAnchors || held.cameraPriors
-            ? ` (held to ${held.gcpAnchors || 0} GCP anchor(s), ${held.cameraPriors || 0} camera prior(s))` : ' (no survey constraints)'),
-          'success', 'Reconstruction')
-        if (held.gcpError) log(`Gradual selection: GCP anchoring skipped — ${held.gcpError}`, 'warn', 'Reconstruction')
-        return mainSparseCloud.value
-      } catch (err) {
-        log(`Gradual selection stopped: ${err?.message ?? err}`, 'error', 'Reconstruction')
-        reconStatus.value = 'error'
+  // Re-solve the MAIN sparse model in the worker and commit the result in place —
+  // gradual selection and Optimize cameras (Tools ▸ Model ▾). Both work on a
+  // disposable packed copy, are held to the same survey evidence (GCP anchors +
+  // camera priors), and on success retire every computed dependent (depth maps,
+  // dense, DEM/ortho…) through invalidateSparseDependents. A project switch or a
+  // set-as-main mid-run supersedes the edit and leaves the model as it was.
+  //   run(packed, { gcps, cameraPriors }) → worker result (packed)
+  //   describe(result) → the log line's middle part
+  async function refineMainSparse({ label, sourceId, createdAt, run, describe }) {
+    const original = mainSparseCloud.value
+    if (!original || original.id !== sourceId || original.createdAt !== createdAt) return null
+    const projectId = projects.currentProjectId
+    const statusBefore = reconStatus.value
+    reconStatus.value = 'running'
+    try {
+      // Do not transfer: compact tracks may share the live model's buffers.
+      const packed = packSparseCloud(original).result
+      const survey = await surveyConstraintInput({ marks: 'pinhole' })
+      if (projects.currentProjectId !== projectId || mainSparseCloud.value !== original) {
+        if (reconStatus.value === 'running') reconStatus.value = statusBefore
         return null
       }
+      const result = unpackReconstructionResult(await run(packed, { gcps: survey.gcps, cameraPriors: survey.cameraPriors }))
+      if (projects.currentProjectId !== projectId || mainSparseCloud.value !== original) {
+        // Superseded (project switch / set-as-main mid-run): nothing changed here.
+        if (reconStatus.value === 'running') reconStatus.value = statusBefore
+        return null
+      }
+      // An edit of the model, not a recompute: provenance and the user's
+      // display choices carry over (a reconstruct deliberately clears `imported`).
+      upsertSparseCloud(result.cameras, result.points, { replaceId: original.id, asMain: true,
+        name: original.name, imported: !!original.imported, secondary: !!original.secondary })
+      const edited = mainSparseCloud.value
+      if (edited && original.style !== undefined) edited.style = original.style
+      if (edited && original.visible !== undefined) edited.visible = original.visible
+      await invalidateSparseDependents()
+      // Calibration defines the canonical observation frame and must survive
+      // a re-solve (neither tool frees a radial term). Old run statistics must not
+      // masquerade as statistics of the edited cloud.
+      summary.value = {
+        selfCalDistortion: summary.value?.selfCalDistortion ?? [],
+        fiducialTransforms: summary.value?.fiducialTransforms ?? [],
+      }
+      healthDirty.value++
+      reconStatus.value = 'done'
+      if (!(await persist())) {
+        log(`${label}: the edited model could not be saved — it will be lost on reload`, 'warn', 'Reconstruction')
+      }
+      const held = result.constraints ?? {}
+      log(`${label}: ${describe(result)}; bundle adjustment ${result.costBefore.toFixed(3)} → ${result.costAfter.toFixed(3)} px`
+        + (held.gcpAnchors || held.cameraPriors
+          ? ` (held to ${held.gcpAnchors || 0} GCP anchor(s), ${held.cameraPriors || 0} camera prior(s))` : ' (no survey constraints)'),
+        'success', 'Reconstruction')
+      if (held.gcpError) log(`${label}: GCP anchoring skipped — ${held.gcpError}`, 'warn', 'Reconstruction')
+      return mainSparseCloud.value
+    } catch (err) {
+      log(`${label} stopped: ${err?.message ?? err}`, 'error', 'Reconstruction')
+      reconStatus.value = 'error'
+      return null
     }
-    const sources = sourceIds
-      .map((id) => clouds.value.find((c) => c.id === id))
-      .filter((c) => c && c.kind === 'dense' && c.count > 0)
-    if (!sources.length) {
-      log('Cloud edit: no dense source cloud selected', 'warn', 'Products')
+  }
+
+  // Images' sensor ids as small integers (BA groups shared intrinsics by them).
+  function sensorIndexByUuid() {
+    const ids = new Map()
+    const out = {}
+    for (const img of imagesStore.images) {
+      if (img.sensorId == null) continue
+      if (!ids.has(img.sensorId)) ids.set(img.sensorId, ids.size)
+      out[img.uuid] = ids.get(img.sensorId)
+    }
+    return out
+  }
+
+  async function editClouds({ mode, sourceIds = [], settings = {}, name, style = null } = {}, onProgress) {
+    // Model edits (Tools ▸ Model ▾): one shared commit path, refineMainSparse.
+    if (mode === 'sparse') {
+      return refineMainSparse({
+        label: 'Gradual selection', sourceId: sourceIds[0], createdAt: settings.createdAt,
+        run: (packed, survey) => workerRefineSparse(packed, { metric: settings.metric, threshold: settings.threshold }, survey),
+        describe: (r) => `removed ${r.removed} points`,
+      })
+    }
+    if (mode === 'optimize') {
+      return refineMainSparse({
+        label: 'Optimize cameras', sourceId: sourceIds[0], createdAt: settings.createdAt,
+        run: (packed, survey) => workerOptimizeSparse(packed, { refine: settings.refine, sensorOfUuid: sensorIndexByUuid() }, survey),
+        describe: (r) => `refined ${settings.refine === 'f,cxcy' ? 'focal length and principal point' : 'focal length'} (largest change ${((r.focalChange ?? 0) * 100).toFixed(2)}%)`
+          + (r.removed ? `, dropped ${r.removed} points with fewer than two observations` : ''),
+      })
+    }
+    // Which kinds each slot accepts. Mesh ▾ tools read a mesh; the reference of an
+    // alignment or a distance may be a dense cloud or a mesh; everything else is
+    // dense-only (a sparse cloud's points carry view-tracks — never edited here).
+    const meshSource = MESH_EDIT_MODES.has(mode)
+    const resolved = sourceIds.map((id) => clouds.value.find((c) => c.id === id) ?? null)
+    const okKind = (c, slot) => c && c.count > 0 && (
+      slot === 0 ? (meshSource ? c.kind === 'mesh' : c.kind === 'dense')
+        : (REFERENCE_MODES.has(mode) ? (c.kind === 'dense' || c.kind === 'mesh') : c.kind === 'dense'))
+    const sources = resolved.filter((c, slot) => okKind(c, slot))
+    if (!sources.length || sources.length !== resolved.length) {
+      log(`Cloud edit: no usable ${meshSource ? 'mesh' : 'dense cloud'} for this tool`, 'warn', 'Products')
       return null
     }
     if (mode === 'merge' && sources.length < 2) {
       log('Cloud edit: merge needs at least two dense clouds', 'warn', 'Products')
+      return null
+    }
+    if (REFERENCE_MODES.has(mode) && (sources.length < 2 || sources[0].id === sources[1].id)) {
+      log('Cloud edit: choose a reference other than the source', 'warn', 'Products')
       return null
     }
     const transfer = []
@@ -1080,12 +1239,17 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
       transfer.push(pos.buffer)
       if (col) transfer.push(col.buffer)
       if (nrm) transfer.push(nrm.buffer)
+      if (c.kind === 'mesh') {
+        const idx = c.idx.slice()
+        transfer.push(idx.buffer)
+        return { id: c.id, kind: 'mesh', count: c.count, nVerts: c.nVerts, pos, col, idx }
+      }
       const attributes = Object.fromEntries(Object.entries(c.attributes || {}).map(([key, values]) => {
         const copy = values.slice()
         transfer.push(copy.buffer)
         return [key, copy]
       }))
-      return { id: c.id, count: c.count, pos, col, nrm, attributes }
+      return { id: c.id, kind: 'dense', count: c.count, pos, col, nrm, attributes }
     })
     if (mode === 'mask') {
       // The viewer's selection is stamped with the buffer it was drawn from; a
@@ -1098,7 +1262,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     }
     reconStatus.value = 'running'
     try {
-      const { cloud: edited, error } = await workerEditCloud(
+      const { cloud: edited, error, extra } = await workerEditCloud(
         { mode, clouds: payload, settings },
         { onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f), transfer },
       )
@@ -1123,15 +1287,22 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
         log(`Selection edit: "${cloud.name}" now has ${cloud.count.toLocaleString()} points`,
           'success', 'Products')
       } else {
-        cloud = addDerivedCloud(edited, {
+        const opts = {
           name: name || `${sources[0].name} (${mode === 'mask' ? 'edited' : mode})`,
-          imported: sources.every((c) => c.imported),
-        })
+          // Provenance follows the SOURCE (slot 0) — a reference only informs the edit.
+          imported: REFERENCE_MODES.has(mode) ? !!sources[0].imported : sources.every((c) => c.imported),
+        }
+        cloud = edited.idx ? addDerivedMesh(edited, opts) : addDerivedCloud(edited, opts)
+        // A tool may start its result on a colouring (distance → a diverging ramp);
+        // a function sees the worker's small result record (e.g. the distance spread).
+        const startStyle = typeof style === 'function' ? style(extra ?? null) : style
+        if (startStyle) cloud.style = startStyle
         // Show the edit in place of its source; the source stays one visibility
         // toggle away for comparison or to start over.
-        if (mode === 'mask') sources[0].visible = false
-        log(`Cloud edit: added "${cloud.name}" — ${cloud.count.toLocaleString()} points`,
-          'success', 'Products')
+        if (mode === 'mask' || REPLACES_SOURCE_VIEW.has(mode)) sources[0].visible = false
+        log(`Cloud edit: added "${cloud.name}" — ${cloud.kind === 'mesh'
+          ? `${cloud.count.toLocaleString()} triangles` : `${cloud.count.toLocaleString()} points`}`,
+        'success', 'Products')
       }
       reconStatus.value = 'done'
       await persist()
@@ -1177,6 +1348,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
   const { effectiveFrameSpec, currentFrameSignature, productFrameStatus, frameStampOf } = createFrameResolver({
     mainSparseCloud, validGeoref, currentCrs: () => projects.currentCrs, georeference,
     scaleFit, scaleFitStatus, log,
+    orientationBasis: activeOrientationBasis,
   })
 
   // Build a DEM from the densest available cloud, in the requested frame
@@ -1217,13 +1389,15 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
         const p = src.points[i]
         pos[i*3] = p.x; pos[i*3+1] = p.y; pos[i*3+2] = p.z
       }
-      const points = { pos, count }
+      const inRegion = src.imported ? null : clipToRegion({ count, pos }, 'DEM')
+      if (inRegion && !inRegion.count) throw new Error('no point of the source lies inside the region')
+      const points = inRegion ? { pos: inRegion.pos, count: inRegion.count } : { pos, count }
       const cameras = [...(sparse?.cameras ?? new Map()).entries()].map(([uuid, cam]) => ({
         uuid, R: cam.R.map((r) => [...r]), t: [...cam.t], K: { ...cam.K },
       }))
       const grid = await workerGenerateDem(
         { points, cameras, frame: frameSpec, settings },
-        { transfer: [pos.buffer], onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f) },
+        { transfer: [points.pos.buffer], onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f) },
       )
       dem.value = {
         ...grid, createdAt: Date.now(),
@@ -1769,6 +1943,8 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     ortho.value = null
     georef.value = null
     scaleFit.value = null
+    region.value = null
+    orientation.value = null
     summary.value = null
     denseSummary.value = null
     depthSummary.value = null
@@ -1837,6 +2013,8 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     ensureMainSparse() // legacy docs (no mainSparseId) → first sparse cloud
     georef.value = data.georef ?? null
     scaleFit.value = data.scaleFit ?? null    // absent in older projects ⇒ no scale
+    region.value = normalizeRegion(data.region) ?? null
+    orientation.value = normalizeOrientation(data.orientation) ?? null
     summary.value = data.summary ?? null
     denseSummary.value = data.denseSummary ?? null
     depthSummary.value = data.depthSummary ?? null
@@ -1916,6 +2094,10 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     importColmapModel, importInteropModel,
     importCloud,
     editClouds,
+    // Tools ▸ Model ▾ ▸ Region (core/products/region.js).
+    region, regionState, setRegion, clearRegion,
+    // Tools ▸ Model ▾ ▸ Orient model (core/products/orientation.js).
+    orientation, orientationState, setOrientation, clearOrientation,
     computeDepthMaps,
     densify,
     restore,

@@ -8,19 +8,28 @@ import { CROP_CLOUD_DEFAULTS } from '../../core/defaults.user.js'
 import { cloudBounds, cloudCount } from '../../core/products/cloudEdit.js'
 
 // Crop Cloud — keep the points inside (or outside) an axis-aligned box. Editing is
-// non-destructive: the run adds a NEW cloud and leaves the source alone.
+// non-destructive: the run adds a NEW cloud and leaves the source alone. With
+// `mesh`, the same box crops a mesh (Tools ▸ Mesh ▾ ▸ Crop): a triangle survives
+// when all three corners are inside (core/products/meshEdit.js `cropMesh`), and the
+// live count counts vertices.
 //
 // `clouds` are the editable clouds (kind:'dense', computed or imported) — sparse
 // clouds are deliberately not croppable, see core/products/cloudEdit.js.
 const props = defineProps({
   clouds: { type: Array, default: () => [] },
+  mesh: { type: Boolean, default: false },
+  initialId: { type: String, default: null },
 })
 
 const emit = defineEmits(['close', 'run'])
 
 const settings = ref({ ...CROP_CLOUD_DEFAULTS })
-const sourceId = ref(props.clouds[0]?.id ?? null)
-const source = computed(() => props.clouds.find((c) => c.id === sourceId.value) ?? null)
+const sourceId = ref(props.clouds.some((c) => c.id === props.initialId) ? props.initialId : props.clouds[0]?.id ?? null)
+const picked = computed(() => props.clouds.find((c) => c.id === sourceId.value) ?? null)
+// The points the box is tested against: a cloud's points, or a mesh's vertices.
+const source = computed(() => (picked.value && props.mesh
+  ? { count: picked.value.nVerts, pos: picked.value.pos } : picked.value))
+const noun = computed(() => (props.mesh ? 'vertices' : 'points'))
 
 const AXES = [
   { key: 'X', min: 'minX', max: 'maxX' },
@@ -85,14 +94,15 @@ function run() {
       max: [num(s.maxX), num(s.maxY), num(s.maxZ)],
       invert: !!s.invert,
     },
-    name: `${source.value?.name ?? 'Cloud'} (cropped)`,
+    name: `${picked.value?.name ?? (props.mesh ? 'Mesh' : 'Cloud')} (cropped)`,
   })
 }
 </script>
 
 <template>
-  <ModalShell title="Crop Cloud" @close="emit('close')">
-    <WarnBox v-if="!clouds.length">
+  <ModalShell :title="mesh ? 'Crop Mesh' : 'Crop Cloud'" @close="emit('close')">
+    <WarnBox v-if="!clouds.length && mesh">No mesh yet. Build one with <strong>Reconstruct ▸ Mesh</strong> or import one.</WarnBox>
+    <WarnBox v-else-if="!clouds.length">
       No editable point cloud. Run <strong>Densify</strong> or import a cloud first — cropping
       applies to dense clouds; a sparse cloud carries the view-tracks the later stages read
       and is left intact on purpose.
@@ -100,11 +110,11 @@ function run() {
 
     <template v-else>
       <SettingsGroup title="Source">
-        <SettingsField label="Cloud" label-for="crop-src"
-          hint="The crop adds a new cloud; this one is left untouched.">
+        <SettingsField :label="mesh ? 'Mesh' : 'Cloud'" label-for="crop-src"
+          :hint="mesh ? 'The crop adds a new mesh; this one is left untouched.' : 'The crop adds a new cloud; this one is left untouched.'">
           <select id="crop-src" v-model="sourceId" class="field-select">
             <option v-for="c in clouds" :key="c.id" :value="c.id">
-              {{ c.name }} — {{ c.count.toLocaleString() }} points
+              {{ c.name }} — {{ c.count.toLocaleString() }} {{ mesh ? 'triangles' : 'points' }}
             </option>
           </select>
         </SettingsField>
@@ -135,10 +145,10 @@ function run() {
 
       <p class="field-hint">
         <template v-if="liveKept !== null">
-          Keeps {{ liveKept.toLocaleString() }} of {{ sourceCount.toLocaleString() }} points.
+          Keeps {{ liveKept.toLocaleString() }} of {{ sourceCount.toLocaleString() }} {{ noun }}.
         </template>
         <template v-else>
-          {{ sourceCount.toLocaleString() }} points — too many to count live; run to see the result.
+          {{ sourceCount.toLocaleString() }} {{ noun }} — too many to count live; run to see the result.
         </template>
       </p>
     </template>

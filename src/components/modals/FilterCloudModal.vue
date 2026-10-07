@@ -7,26 +7,30 @@ import AdvancedDisclosure from './ui/AdvancedDisclosure.vue'
 import PresetCards from './ui/PresetCards.vue'
 import WarnBox from './ui/WarnBox.vue'
 import GlossaryTerm from '../glossary/GlossaryTerm.vue'
-import GradualSelectionModal from './GradualSelectionModal.vue'
 import {
   FILTER_CLOUD_DEFAULTS, FILTER_CLOUD_PRESETS, FILTER_CLOUD_PRESET_META,
 } from '../../core/defaults.user.js'
 
 // Filter Cloud — remove noise from a dense cloud. Non-destructive: the run adds a
 // NEW cloud. Defaults are the single source of truth in core/defaults.user.js;
-// core/products/cloudEdit.js keeps matching fallbacks.
+// core/products/cloudEdit.js keeps matching fallbacks. (Sparse gradual selection
+// is its own tool now — Tools ▸ Model ▾ — since it acts on the model, not a cloud.)
 const props = defineProps({
-  sparseCloud: { type: Object, default: null },
   clouds: { type: Array, default: () => [] },
   // The dense run's merge cell (≈ one ground-sample-distance), used as the sensible
   // auto voxel size. 0 when unknown (an imported cloud, or a legacy run).
   mergeCell: { type: Number, default: 0 },
+  // A deep link (Point Cloud ▾ ▸ Remove outliers / Subsample) starts on ONE
+  // method, with its settings open; null ⇒ the normal preset.
+  startMethod: { type: String, default: null },
 })
 
 const emit = defineEmits(['close', 'run'])
-const gradual = ref(false)
 
-const settings = ref({ ...FILTER_CLOUD_DEFAULTS })
+const settings = ref({
+  ...FILTER_CLOUD_DEFAULTS,
+  methods: props.startMethod ? [props.startMethod] : [...FILTER_CLOUD_DEFAULTS.methods],
+})
 const sourceId = ref(props.clouds[0]?.id ?? null)
 const source = computed(() => props.clouds.find((c) => c.id === sourceId.value) ?? null)
 
@@ -89,11 +93,10 @@ function run() {
 </script>
 
 <template>
-  <GradualSelectionModal v-if="gradual && sparseCloud" :cloud="sparseCloud" @close="gradual = false" @run="emit('run', $event)" />
-  <ModalShell v-else title="Filter Cloud" @close="emit('close')">
-    <button v-if="sparseCloud" class="btn" @click="gradual = true">Sparse gradual selection…</button>
+  <ModalShell :title="startMethod === 'sor' ? 'Remove Outliers' : startMethod === 'voxel' ? 'Subsample Cloud' : 'Filter Cloud'" @close="emit('close')">
     <WarnBox v-if="!clouds.length">
-      No dense cloud is available. Use sparse gradual selection above, or run <strong>Densify</strong> for dense filtering.
+      No dense cloud is available. Run <strong>Dense Model</strong> first, or import one. To clean the sparse
+      model, use <strong>Tools ▸ Model ▸ Gradual selection</strong>.
     </WarnBox>
 
     <template v-else>
@@ -124,7 +127,7 @@ function run() {
         </SettingsField>
       </SettingsGroup>
 
-      <AdvancedDisclosure label="Advanced settings">
+      <AdvancedDisclosure label="Advanced settings" :default-open="!!startMethod">
         <SettingsGroup v-if="has('sor')" title="Statistical outliers">
           <SettingsField label="Neighbours" label-for="filter-sor-k"
             hint="How many nearest neighbours the per-point mean distance averages over.">

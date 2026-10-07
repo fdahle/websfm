@@ -334,7 +334,7 @@ export function makeDenseOps({ rasterize }) {
       }
       let dm
       try {
-        dm = await depthMapForImage(ref, sources, points, { window, iterations, bestK: imgBestK, coarseLong }, backend, hooks)
+        dm = await depthMapForImage(ref, sources, points, { window, iterations, bestK: imgBestK, coarseLong, region: settings.region ?? null }, backend, hooks)
       } catch (err) {
         // A GPU failure mid-run must not abort the whole batch: log it, drop to WASM
         // for this image and every image after, and retry once on the CPU path.
@@ -345,7 +345,7 @@ export function makeDenseOps({ rasterize }) {
           gpuFallbacks++
           // Keep streaming the coarse-to-fine plan log on the retry (validate no
           // longer applies once we've dropped off the GPU path).
-          dm = await depthMapForImage(ref, sources, points, { window, iterations, bestK: imgBestK, coarseLong }, backend, { onLog: hooks.onLog, onProgress: hooks.onProgress })
+          dm = await depthMapForImage(ref, sources, points, { window, iterations, bestK: imgBestK, coarseLong, region: settings.region ?? null }, backend, { onLog: hooks.onLog, onProgress: hooks.onProgress })
         } else {
           throw err
         }

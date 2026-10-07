@@ -1150,6 +1150,18 @@ refines the surviving graph. A disconnected graph, under-supported camera or
 missing canonical observation rejects the operation before commit. Calibration
 transforms survive; derived geometry and georeferencing are invalidated.
 
+**Optimize cameras** (Metashape's *Optimize Cameras*) is the same constrained
+re-solve without the deletion, with the focal length (optionally the principal
+point) free and shared per sensor. Both re-solves are held to the GCP anchors and
+camera priors of the original solve (§6.2), and accepted under the same cost rule:
+an unconstrained solve may not raise the reprojection cost; a constrained one may,
+within the survey allowance. Radial terms are deliberately not freed. The model is
+pinhole by invariant (§4.6): distortion was folded out of the observations and the
+composed bag recorded for dense to reproduce, so a new k₁ would have to be folded
+and recomposed or the dense warp would disagree with the sparse model. A focal change
+over 20 % is refused as a runaway, not a refinement. That is the B4 failure mode, where
+the cost falls while f doubles, and a cost gate cannot see it.
+
 ## 7. Dense multi-view stereo
 
 **Method**: **PatchMatch stereo** (Bleyer et al. 2011 lineage) with slanted
@@ -1361,6 +1373,72 @@ own shell. The cleanup below is part of the method, not a cosmetic option.
   each layer's basis. On a fixed reference solve the coefficients agree with the
   original to 8.5·10⁻¹³ (relative to magnitude 3), and a 65k-point depth-8 solve went
   from 281 s to 18.6 s (native).
+
+### 8.6 Point-cloud, mesh and raster tools (Tools tab)
+
+All of these are post-processing of a finished product. Every edit produces a new
+cloud or mesh; nothing here feeds back into the solve.
+
+- **Neighbour search** (`core/products/knn.js`): one exact static k-d tree (median
+  split on the widest axis, leaves of 12, tree-ordered positions) behind normals,
+  ICP and cloud-to-cloud distance. A uniform grid answers queries near the data;
+  these tools also query far from it (another epoch, an unaligned start), where a
+  grid shell-walk costs the empty volume it crosses.
+- **Normals** (`cloudNormals.js`): PCA of the k = 16 nearest neighbours, normal =
+  eigenvector of the smallest eigenvalue (cyclic Jacobi on the trace-normalised 3×3
+  covariance, built about the neighbourhood centroid in double precision). Each point
+  is oriented independently, toward the nearest camera centre or toward +up. There
+  is no minimum-spanning-tree propagation, so the result is deterministic.
+- **Alignment** (`cloudAlign.js`): point pairs use Horn's closed-form similarity
+  (`georef.js`, §6.1), and the rigid variant keeps Horn's rotation and re-solves the
+  translation. ICP is trimmed (90 %) and point-to-plane (a linearised 6-DoF step,
+  damped Gaussian elimination, Rodrigues update, re-orthonormalised R) when the
+  reference has normals, otherwise point-to-point Horn. It runs in a frame centred on
+  the reference centroid. It is local: it needs an initial overlap within the search
+  radius, and there is no global registration.
+- **Distance** (`cloudDistance.js`): cloud-to-cloud is the nearest-point distance,
+  signed by the reference normal; with k ≥ 3 it is the distance to a local
+  least-squares plane, which removes the point-spacing floor. Cloud-to-mesh is the
+  exact point-to-triangle distance (Ericson). Candidates come from a k-d tree over
+  triangle centroids, searched to d* + r_max, where r_max is the largest
+  centroid-to-vertex radius, in radius tiers. This is exact, because no triangle
+  farther than that can beat the current best.
+- **Mesh cleanup** (`meshEdit.js`): edge topology from counting sorts of half-edges;
+  components by union-find; long-edge bridges against the median edge; boundary
+  loops filled by a centroid fan wound against the loop's own half-edges (so the
+  seam becomes a manifold edge). **Taubin** λ = 0.5, μ = −0.53 (uniform umbrella
+  Laplacian) smooths without the shrinkage of repeated Laplacian smoothing. Volume
+  (⅙ Σ v₀·(v₁×v₂), about the bbox centre) is reported only for a closed,
+  consistently wound mesh.
+- **Decimation** (`meshDecimate.js`): Garland–Heckbert quadric edge collapse,
+  area-weighted plane quadrics plus boundary-constraint quadrics. Collapses are
+  rejected by the link condition, a normal-flip test and a degenerate-triangle test.
+  Position is the better of the 3×3 solve (when well conditioned and near the edge)
+  and the best point on the edge, which keeps flat regions flat and straight borders
+  straight. Ties break on the shortest edge.
+- **Sections** (`cloudSection.js`): points within ±t/2 of the vertical plane through
+  A→B, as (station, height, signed offset).
+- **Contours** (`contours.js`): marching squares on cell centres. A saddle is
+  resolved by the quad-centre mean, a level equal to a sample counts as above, quads
+  touching nodata are skipped (lines end at holes), and segments are joined by exact
+  integer edge ids.
+- **Terrain derivatives** (`terrain.js`): Horn's 3×3 gradient (gdaldem), with the
+  horizontal spacing gsd/k for the projection's point scale factor k (heights never
+  scaled). Aspect is the downhill bearing clockwise from north. Hillshade is
+  Lambertian, with GDAL's byte encoding and multidirectional weighting.
+- **Raster clip** (`rasterClip.js`): an even-odd scanline fill of pixel centres
+  within each polygon (holes subtract), union across polygons.
+- **Image quality** (`core/features/imageQuality.js`): variance of the 3×3
+  Laplacian of luma on a fixed-size, centre-aligned area-downsampled grid (longest
+  side 1024). The score depends on the scene's texture, so it is judged relative to
+  the batch median.
+- **Region** (`region.js`): an axis-aligned box in the model frame. Depth maps seed
+  their depth range only from sparse points inside it, fusion drops fused points
+  outside it, and mesh/DEM inputs are clipped to it.
+- **Orientation** (`orientation.js`): a user basis (up from a three-point ground
+  plane turned to the cameras' side, an origin, a heading about up) for the local
+  product frame. Like the scale factor (§6.6), it lives in the frame, never in the
+  coordinates, and a georeference outranks it.
 
 ## 9. CRS handling (why this app is different)
 

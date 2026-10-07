@@ -25,3 +25,19 @@ it('keeps native foot coordinates while resolving physical scale in metres', asy
   validGeoref.value = null
   expect(resolver.productFrameStatus(product).stale).toBe(true)
 })
+
+it('puts a user orientation on the local frame, and lets a georeference outrank it', async () => {
+  const basis = { origin: [1, 2, 3], east: [1, 0, 0], north: [0, 0, -1], up: [0, 1, 0] }
+  const validGeoref = ref(null)
+  const resolver = createFrameResolver({ mainSparseCloud: ref({ id: 'c', createdAt: 1 }), validGeoref,
+    currentCrs: () => 'EPSG:32632', georeference: vi.fn(), scaleFit: ref(null), scaleFitStatus: () => ({ valid: false }),
+    log: vi.fn(), orientationBasis: () => basis })
+  const local = await resolver.effectiveFrameSpec()
+  expect(local.frameSpec).toMatchObject({ kind: 'local', ...basis })
+  expect(resolver.currentFrameSignature.value.frameKey).toContain('"up":[0,1,0]')
+  validGeoref.value = { crs: 'EPSG:32632', sim: { scale: 1, R: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], t: [0, 0, 0] } }
+  proj4.defs('EPSG:32632', '+proj=utm +zone=32 +datum=WGS84 +units=m +no_defs')
+  const geo = await resolver.effectiveFrameSpec()
+  expect(geo.frameSpec.kind).toBe('similarity')
+  expect(geo.frameSpec.east).toBeUndefined()
+})

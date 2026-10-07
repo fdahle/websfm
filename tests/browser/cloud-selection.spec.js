@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test'
 
-// 3D-viewer rectangle/lasso selection → Delete / Keep only through the cloud-edit
+// 3D-viewer rectangle/lasso selection (tool chosen in the ribbon's View ▸ Select,
+// acted on from the floating toolbox) → Delete / Keep only through the cloud-edit
 // worker path, against the real Viewer3D, store, worker and OPFS persistence.
 test('rectangle and lasso selection edit a dense cloud non-destructively', async ({ page }) => {
   const errors = []
@@ -52,15 +53,15 @@ test('rectangle and lasso selection edit a dense cloud non-destructively', async
   // Columns x = 0..4 → 50 points. Pad well under half the pitch.
   const half = await pixelBox(4)
   const pad = Math.max(2, ((half.x1 - half.x0) / 4) * 0.3)
-  await page.getByRole('button', { name: 'Rectangle select', exact: true }).click()
+  await page.getByRole('button', { name: 'Rectangle', exact: true }).click()
   await drag(half, pad)
-  await expect(page.locator('.select-bar')).toContainText('50 points selected')
+  await expect(page.getByRole('toolbar', { name: 'Select points' })).toContainText('50 points selected')
   // Orbit is untouched by a selection drag (the camera did not move).
   await page.screenshot({ path: test.info().outputPath('selection.png') })
 
   // Alt-drag subtracts column x = 0 (10 points).
   await drag(await pixelBox(0), pad, ['Alt'])
-  await expect(page.locator('.select-bar')).toContainText('40 points selected')
+  await expect(page.getByRole('toolbar', { name: 'Select points' })).toContainText('40 points selected')
 
   await page.getByRole('button', { name: 'Delete', exact: true }).click()
   const clouds = () => page.evaluate(async () => {
@@ -76,7 +77,7 @@ test('rectangle and lasso selection edit a dense cloud non-destructively', async
   const editedId = list[1].id
 
   // Lasso on the edited copy: keep only the row y = 0 (6 survivors: x = 0, 5..9).
-  await page.getByRole('button', { name: 'Lasso select', exact: true }).click()
+  await page.getByRole('button', { name: 'Lasso', exact: true }).click()
   await expect.poll(() => viewer.evaluate(el => el.__vueParentComponent.setupState.cloudLayers.size)).toBe(1)
   await viewer.evaluate(el => el.__vueParentComponent.setupState.setView('top'))
   await page.waitForTimeout(300)
@@ -95,14 +96,14 @@ test('rectangle and lasso selection edit a dense cloud non-destructively', async
   await page.mouse.down()
   for (const p of [row[1], row[2], row[3], row[0]]) await page.mouse.move(...p, { steps: 6 })
   await page.mouse.up()
-  await expect(page.locator('.select-bar')).toContainText('6 points selected')
+  await expect(page.getByRole('toolbar', { name: 'Select points' })).toContainText('6 points selected')
   await page.getByRole('button', { name: 'Keep only', exact: true }).click()
   await expect.poll(async () => (await clouds()).find(c => c.id === editedId)?.count).toBe(6)
   list = await clouds()
   expect(list).toHaveLength(2) // refined in place, no third copy
 
   await page.keyboard.press('Escape')
-  await expect(page.locator('.select-bar')).toHaveCount(0)
+  await expect(page.getByRole('toolbar', { name: 'Select points' })).toHaveCount(0)
 
   await page.evaluate(async () => (await import('/src/utils/persistence.js')).flushPersistence())
   await page.reload()

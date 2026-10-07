@@ -18,6 +18,6 @@ Retired in the 2026-09-01 consolidation (available in git history): fiducial
 detection/calibration, dense sky/vegetation cleanup, Evaluate/Quality hub,
 feature-matching backend foundation, professional interop formats, and SfM
 interoperability. Registration stall followed on 2026-10-06, once the headless bench
-registered the building and TMA sets in full. Their implementation is shipped; remaining acceptance checks,
+registered the building and TMA sets in full, and the ribbon tool menus on 2026-10-07. Their implementation is shipped; remaining acceptance checks,
 data-driven tuning or later feature ideas are already represented in
 `VERIFICATION.csv` and `TODO.md`.

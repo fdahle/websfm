@@ -94,8 +94,7 @@ test('sparse gradual selection refines through real WASM and invalidates derived
     recon.dem = {width:1,height:1,data:new Float32Array([1]),unit:'model'}
     recon.summary = {selfCalDistortion:[{sensorId:'sensor',k1:.01}],fiducialTransforms:[]}
   })
-  await page.getByRole('button', {name:'Filter cloud',exact:true}).click()
-  await page.getByRole('button', {name:'Sparse gradual selection…'}).click()
+  await page.getByRole('button', {name:'Gradual selection',exact:true}).click()
   await expect(page.getByText('1 selected · 29 remaining')).toBeVisible()
   await page.getByRole('button', {name:'Delete selected + refine'}).click()
   await expect(page.locator('#edited')).toHaveText('29')

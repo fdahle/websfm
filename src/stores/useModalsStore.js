@@ -40,7 +40,14 @@ export const useModalsStore = defineStore('modals', () => {
   const cropCloudOpen       = ref(false)
   const filterCloudOpen     = ref(false)
   const mergeCloudsOpen     = ref(false)
-  const gcpImportOpen       = ref(false)
+  // Filter Cloud opened from a deep link (Point Cloud ▾ ▸ Remove outliers /
+  // Subsample) starts on one method; null ⇒ the normal preset.
+  const filterCloudPreset   = ref(null)
+  // The Tools-tab dialogs (Point Cloud ▾ / Mesh ▾ / Model ▾ / Products ▾ / Images ▾)
+  // share ONE slot: the open tool's ribbon command id, or null. Tools are one-at-a-
+  // time dialogs, and a slot per tool would add a flag + an Escape entry per tool.
+  const toolModal           = ref(null)
+  const gcpImportOpen     = ref(false)
   const gcpImportText       = ref('')
   const gcpImportName       = ref('')
   const gcpImportGeojson    = ref(null)   // pre-parsed GCPs from a GeoJSON points file, or null
@@ -114,6 +121,8 @@ export const useModalsStore = defineStore('modals', () => {
     cropCloudOpen,
     filterCloudOpen,
     mergeCloudsOpen,
+    filterCloudPreset,
+    toolModal,
     gcpImportOpen,
     gcpImportText,
     gcpImportName,

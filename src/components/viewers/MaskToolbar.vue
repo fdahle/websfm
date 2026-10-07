@@ -1,11 +1,11 @@
 <script setup>
-import { ref } from 'vue'
 import Icon from '../Icon.vue'
+import FloatingToolbox from './FloatingToolbox.vue'
 
 // Floating mask-editing toolbar shown over the image viewport while the tab is
 // in mask-edit mode. Pure presentation: tool/brush/opacity state lives in the
-// owning ViewerImage, which also implements every action. Draggable by its
-// header; the position is module-scoped so it sticks across images and tabs
+// owning ViewerImage, which also implements every action. The chrome (title,
+// drag, ×) is the shared FloatingToolbox; its position sticks across images and tabs
 // for the session (not persisted).
 const props = defineProps({
   tool:        { type: String,  default: null }, // 'brush' | 'erase' | 'rect' | 'smart' | null (pan)
@@ -37,33 +37,10 @@ const TOOLS = [
 function pickTool(id) {
   emit('set-tool', props.tool === id ? null : id)
 }
-
-// ── Drag by the header ─────────────────────────────────────────────────────────
-const pos = ref({ x: 12, y: 12 })
-let dragStart = null
-
-function onHeaderDown(e) {
-  dragStart = { x: e.clientX - pos.value.x, y: e.clientY - pos.value.y }
-  window.addEventListener('mousemove', onHeaderMove)
-  window.addEventListener('mouseup', onHeaderUp)
-}
-function onHeaderMove(e) {
-  if (!dragStart) return
-  pos.value = { x: Math.max(0, e.clientX - dragStart.x), y: Math.max(0, e.clientY - dragStart.y) }
-}
-function onHeaderUp() {
-  dragStart = null
-  window.removeEventListener('mousemove', onHeaderMove)
-  window.removeEventListener('mouseup', onHeaderUp)
-}
 </script>
 
 <template>
-  <div class="mask-toolbar" :style="{ left: pos.x + 'px', top: pos.y + 'px' }" @mousedown.stop @wheel.stop @dblclick.stop @contextmenu.stop.prevent>
-    <div class="mt-header" @mousedown.prevent="onHeaderDown">
-      <span class="mt-title">Mask</span>
-      <button class="mt-close" title="Exit mask editing (Esc)" @click="emit('close')">×</button>
-    </div>
+  <FloatingToolbox id="mask" title="Mask" :width="168" close-title="Exit mask editing (Esc)" @close="emit('close')">
 
     <div class="mt-row">
       <button
@@ -136,54 +113,10 @@ function onHeaderUp() {
       />
       <span class="mt-val">{{ Math.round(opacity * 100) }}%</span>
     </label>
-  </div>
+  </FloatingToolbox>
 </template>
 
 <style scoped>
-.mask-toolbar {
-  position: absolute;
-  z-index: 15;
-  width: 168px;
-  background: var(--panel);
-  border: 1px solid var(--panel-border);
-  border-radius: 8px;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
-  padding: 0 8px 8px;
-  user-select: none;
-  /* Restore a normal cursor over the toolbar (the viewport underneath is crosshair/none). */
-  cursor: default;
-}
-
-.mt-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin: 0 -8px 6px;
-  padding: 4px 8px 4px 10px;
-  border-bottom: 1px solid var(--panel-border);
-  cursor: grab;
-}
-.mt-header:active { cursor: grabbing; }
-
-.mt-title {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  color: var(--text-dim);
-}
-
-.mt-close {
-  background: none;
-  border: none;
-  color: var(--text-dim);
-  font-size: 15px;
-  line-height: 1;
-  padding: 0 2px;
-  cursor: pointer;
-  border-radius: 4px;
-}
-.mt-close:hover { color: var(--text); background: var(--hover-bg); }
-
 .mt-row {
   display: flex;
   align-items: center;

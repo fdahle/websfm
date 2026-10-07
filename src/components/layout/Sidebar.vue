@@ -12,6 +12,7 @@ import ReferenceSection from './sidebar/ReferenceSection.vue'
 
 const props = defineProps({
   images:     { type: Array,  required: true },
+  imageGroups: { type: Array, default: () => [] },
   gcps:       { type: Array,  default: () => [] },
   gcpReport:  { type: Array,  default: () => [] },
   selectedGcpId: { type: String, default: null },
@@ -52,7 +53,7 @@ const props = defineProps({
 })
 
 const emit = defineEmits([
-  'add-images', 'import-file', 'remove-image', 'rename-image', 'convert-image-to-raster', 'remove-gcp', 'select-gcp',
+  'add-images', 'import-file', 'remove-image', 'rename-image', 'convert-image-to-raster', 'image-group', 'remove-gcp', 'select-gcp',
   'jump-to-image', 'remove-gcp-observation', 'update-gcp-observation-accuracy', 'open-gcp',
   'remove-sensor', 'merge-sensors', 'open-sensor', 'assign-sensor', 'remove-pose',
   'remove-shapefile', 'rename-shapefile', 'set-shapefile-on-map', 'zoom-to-shapefile',
@@ -72,17 +73,22 @@ const sparseClouds    = computed(() => props.clouds.filter((c) => c.kind === 'sp
 const productClouds   = computed(() => props.clouds.filter((c) => c.kind !== 'sparse' && !c.imported))
 const referenceClouds = computed(() => props.clouds.filter((c) => c.kind !== 'sparse' && c.imported))
 
-// Whole-sidebar drag-and-drop (counter avoids false dragleave on children)
+// Whole-sidebar drag-and-drop (counter avoids false dragleave on children).
+// Only a drag carrying files is an import: dragging image rows between groups
+// inside the list must not raise the drop overlay.
 const isDragging = ref(false)
 let dragCounter = 0
+const isFileDrag = (e) => !!e.dataTransfer?.types?.includes('Files')
 
 function onDragEnter(e) {
+  if (!isFileDrag(e)) return
   e.preventDefault()
   dragCounter++
   isDragging.value = true
 }
 
-function onDragLeave() {
+function onDragLeave(e) {
+  if (!isFileDrag(e)) return
   if (--dragCounter === 0) isDragging.value = false
 }
 
@@ -146,6 +152,7 @@ watch(() => props.pendingRasters.length, (count, previous) => {
       :aligned-uuids="alignedUuids"
       :has-sparse="hasSparse"
       :open-tab-ids="openTabIds"
+      :image-groups="imageGroups"
       @toggle="toggle('images')"
       @select="emit('select', $event)"
       @open="emit('open', $event)"
@@ -155,6 +162,7 @@ watch(() => props.pendingRasters.length, (count, previous) => {
       @remove-image="emit('remove-image', $event)"
       @rename-image="emit('rename-image', $event)"
       @convert-to-raster="emit('convert-image-to-raster', $event)"
+      @image-group="emit('image-group', $event)"
     />
 
     <SensorsSection

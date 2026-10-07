@@ -183,6 +183,13 @@ describe('mesh cloud round trip', () => {
     expect(roundTrip({ ...mesh, meshSummary }).meshSummary).toEqual(meshSummary)
     expect(roundTrip(mesh).meshSummary).toBeUndefined()
   })
+
+  // A re-mesh replaces only the computed mesh slot; losing the flag on reload would
+  // let it overwrite the user's edited (Mesh ▾ tool) copy.
+  it('round-trips the derived flag, absent ⇒ not derived', () => {
+    expect(roundTrip({ ...mesh, derived: true }).derived).toBe(true)
+    expect(roundTrip(mesh).derived).toBeUndefined()
+  })
 })
 
 describe('legacy (pre-binary) documents', () => {
