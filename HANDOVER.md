@@ -702,6 +702,18 @@ fiducials; self-calibration (A2) + fiducials (F4) are the code-side support.
 
 ## Done log (most recent first)
 
+- **2026-10-07 · Dense cross-view filter: visible in the log, honest on the bar, ~3× faster.**
+  Per-map filter lines were `debug`, so at the default level the pass was silent from
+  start to summary; now a start line + one `info` line per map (kept %, drops,
+  candidates, seconds) and time-throttled within-map progress. The fixed 85/15 bar
+  split is replaced by `geomFilterLoopShare` (measured loop ms vs
+  `DENSE_TUNING.geomFilterUsPerPx`), and the end-of-filter line reports measured µs/px
+  and the real vs allotted share. The filter itself walks per-block exact-culled
+  candidates nearest-first with an allocation-free inner loop: **bit-identical planes**
+  to the old walk on synthetic 1368×912 nadir sets (15 % sky rows + 3 % flyers),
+  24 maps 26.3 → 9.1 s, 60 maps 132.7 → 36.9 s (Node/V8). `core/dense/mvs.js`,
+  `workers/ops/dense.js`, `core/tuning.js`. Browser run owed: VERIFICATION DEN-15.
+
 - **2026-10-06 (night) · Monster-beach fixes: 16-bit stretch, TIFF memory, pixel
   convention, worker descriptors.** Found by the new `zm-pan` bench (MicaSense pan +
   YellowScan LiDAR); measured in B-bench ▸ Monster.

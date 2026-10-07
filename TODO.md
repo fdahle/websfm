@@ -146,9 +146,11 @@ sky/vegetation plan is retired: this section contains all remaining decisions.
   working resolutions. Watch for over-culling on legitimately weak-texture surfaces
   (snow/ice — the polar case is exactly where a photometric floor is most likely to
   be wrong).
-- If Stage A′ wall clock is not negligible beside PatchMatch, restrict its source
-  loop to each map's own `selectSourceViews` neighbours rather than all maps
-  (it is O(maps²·px) worst case).
+- Stage A′ wall clock: the exact cull + nearest-first walk (2026-10-07) cut it ~3×
+  on synthetic sets, but sky-heavy maps still scale with map count. Check the logged
+  µs/px on a real run (`Depth filter: cross-view consistency in …`) and retune
+  `DENSE_TUNING.geomFilterUsPerPx`; only if it still rivals GPU PatchMatch consider
+  restricting candidates to `selectSourceViews` — that one *does* change verdicts.
 - **Then** consider a Metashape-style mild/moderate/aggressive preset over these
   three knobs — once real numbers say what the useful range is. Do not invent the
   deltas first.

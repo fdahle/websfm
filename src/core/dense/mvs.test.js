@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   filterDepthMap, depthMapForImage, qualityToMaxDim, autoBestK, autoFusionMaxCost,
-  fuseDepthMaps, mergePointsSpatial, createVoxelAccumulator, filterDepthMapsGeometric,
+  fuseDepthMaps, mergePointsSpatial, createVoxelAccumulator, filterDepthMapsGeometric, filterCandidates, geomFilterLoopShare,
 } from './mvs.js'
 
 // Build a w×h Float32Array depth plane from a 2-D array of numbers (0 = hole).
@@ -407,12 +407,70 @@ describe('filterDepthMapsGeometric (cross-view consistency)', () => {
     expect(rev[1].depth[CENTER]).toBe(0)
   })
 
+  it('frustum cull is exact: same planes as walking every map, with fewer candidates', () => {
+    // A 6×3 nadir grid over a sloped ground plane, with seeded noise: flyers (depth
+    // ×0.5–2), holes, and low-NCC pixels. Far-apart cameras share no ground, so the cull
+    // must drop them — and must never drop a map the full walk would have used.
+    let seed = 7
+    const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32)
+    const S = 24, K = { fx: 24, fy: 24, cx: 12, cy: 12 }
+    const R = [[1, 0, 0], [0, -1, 0], [0, 0, -1]] // looking straight down
+    const mk = (cx, cy, cz) => {
+      const t = [-cx, cy, cz] // t = −R·C
+      const depth = new Float32Array(S * S), cost = new Float32Array(S * S).fill(0.2)
+      for (let v = 0; v < S; v++) {
+        for (let u = 0; u < S; u++) {
+          // ray (world) = Rᵀ·((u−cx)/fx, (v−cy)/fy, 1); ground z = 0.05·x
+          const dx = (u - K.cx) / K.fx, dy = -(v - K.cy) / K.fy, dz = -1
+          const s = (0.05 * cx - cz) / (dz - 0.05 * dx)
+          const r = rnd(), k = v * S + u
+          depth[k] = r < 0.05 ? 0 : r < 0.15 ? s * (0.5 + 1.5 * rnd()) : s
+          if (rnd() < 0.05) cost[k] = 0.95
+        }
+      }
+      return { uuid: `${cx},${cy}`, width: S, height: S, K, R, t, depth, cost }
+    }
+    const build = () => {
+      seed = 7
+      const out = []
+      for (let i = 0; i < 6; i++) for (let j = 0; j < 3; j++) out.push(mk(i * 6, j * 6, 10))
+      return out
+    }
+    const a = build(), b = build()
+    const sa = filterDepthMapsGeometric(a, { minConsistent: 2 }, () => {})
+    const sb = filterDepthMapsGeometric(b, { minConsistent: 2, cull: false }, () => {})
+    expect(sa).toEqual(sb)
+    for (let i = 0; i < a.length; i++) expect(a[i].depth).toEqual(b[i].depth)
+    expect(sa.inconsistent).toBeGreaterThan(0) // the flyers were actually judged
+
+    const cand = filterCandidates(build())
+    const total = cand.reduce((n, c) => n + c.length, 0)
+    expect(total).toBeLessThan(18 * 17) // the corner cameras see none of each other
+    expect(total).toBeGreaterThan(0)
+  })
+
   it('is disabled by minConsistent 0 (NCC floor only)', () => {
     const maps = [mkPlane('a', 0), mkPlane('b', -0.1)]
     maps[0].depth[CENTER] = 2 // a flyer that the cross-view check would drop
     const s = filterDepthMapsGeometric(maps, { minConsistent: 0 }, () => {})
     expect(maps[0].depth[CENTER]).toBe(2)
     expect(s.inconsistent).toBe(0)
+  })
+})
+
+describe('geomFilterLoopShare (Stage A progress split)', () => {
+  it('gives the loop nearly all of the bar when PatchMatch is slow (WASM)', () => {
+    // 60 s/image vs 1 MP × 0.4 µs/px = 0.4 s of filter per map
+    const s = geomFilterLoopShare({ loopMs: 600_000, done: 10, total: 100, pxDone: 10e6, usPerPx: 0.4 })
+    expect(s).toBeGreaterThan(0.99 - 1e-9)
+  })
+  it('gives the filter most of the bar when PatchMatch is fast (GPU)', () => {
+    // 0.2 s/image vs 0.4 s/map of filter ⇒ loop owns a third
+    const s = geomFilterLoopShare({ loopMs: 2_000, done: 10, total: 100, pxDone: 10e6, usPerPx: 0.4 })
+    expect(s).toBeCloseTo(1 / 3, 6)
+  })
+  it('has no opinion before the first image is measured', () => {
+    expect(geomFilterLoopShare({ loopMs: 0, done: 0, total: 10, pxDone: 0 })).toBe(null)
   })
 })
 

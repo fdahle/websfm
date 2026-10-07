@@ -219,6 +219,12 @@ export const DENSE_TUNING = {
   minAngleDeg: 3,     // source-view triangulation angle floor (too small = degenerate)
   maxAngleDeg: 60,    // …and ceiling (too wide = poor photo-consistency)
   consistencyPx: 2,   // fusion reprojection agreement threshold (px)
+  // Stage A progress split (workers/ops/dense.js): the cross-view filter's expected
+  // cost per depth-map pixel, weighed against the measured per-image loop time to give
+  // the filter its share of the bar. 0.3–0.5 µs/px measured on synthetic 1.25 MP nadir
+  // sets of 24–60 maps (Node/V8, dev machine, 2026-10-07); it rises slowly with map
+  // count and sky share. The run logs the measured value — retune from those.
+  geomFilterUsPerPx: 0.4,
   // ── Stage B streaming fusion (core/dense/mvs.js fuseDepthMaps) ──
   // Fusion accumulates kept pixels directly into a voxel-merge structure (never a
   // raw per-pixel point list — that was the OOM). The scene bbox that sizes the

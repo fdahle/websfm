@@ -724,7 +724,11 @@ self-contained, file-based project format.
    fused cloud. **Invariant: evidence is read from the unfiltered planes** — rejections
    go to per-map masks applied only after every map is judged; filtering in place would
    make map i+1 judge itself against map i's already-thinned depths, cascading drops in
-   map order (order-dependent, irreproducible). The display PNGs are rendered pre-filter
+   map order (order-dependent, irreproducible). Its candidate views are culled per
+   64 px block (frustum slice vs raster — an *exact* test) and walked nearest-first;
+   neither may change a verdict, and `cull:false` is the reference a test pins it to.
+   Do not speed it up by restricting candidates to `selectSourceViews`: that changes
+   which pixels survive. The display PNGs are rendered pre-filter
    and are deliberately still the raw plane. Stage B also runs three **opt-out geometric outlier filters**
    (`DENSE_FUSE_DEFAULTS`): a **min-triangulation-angle** gate (widest parallax among
    agreeing views must clear `minTriAngleDeg`, kills ~0°-parallax sky), a
@@ -1254,7 +1258,9 @@ propagate covariance rather than retaining stale numeric sigmas.
   `total` are the numeric readout only**; a stage whose counter maxes out before the
   work does must supply an explicit `fraction`. Two shapes recur and both need one:
   a **post-loop phase** (dense Stage A's cross-view filter needs every map, so the
-  per-image loop is rescaled to 0–0.85 in `workers/ops/dense.js`) and a **nested
+  per-image loop owns only a slice of the bar — sized from the *measured* loop time vs
+  the filter's modelled per-pixel cost, `geomFilterLoopShare`, because a fixed split
+  is wrong by an order of magnitude between the WASM and GPU backends) and a **nested
   sub-run** (SfM seed retries / secondary models re-run the whole pipeline —
   `core/sfm/progressPlan.js` `scopeProgress` remaps each child's honest 0..1 into a
   slice of the parent's range). SfM's own bar is a weighted phase walk there, NOT the
