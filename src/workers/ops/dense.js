@@ -1,7 +1,7 @@
 import { readDepthFiles, readDepthOnly } from '../../core/dense/depthFileReader.js'
 import {
   selectSourceViews, scaleK, rgbaToGray, depthMapForImage, fuseDepthMaps, fuseDepthMapsStreamed, filterDepthMap,
-  filterDepthMapsGeometric, autoBestK,
+  filterDepthMapsGeometric, geomFilterLoopShare, autoBestK,
 } from '../../core/dense/mvs.js'
 import { buildMaskLookup } from '../../core/mask.js'
 import { hasDistortion } from '../../core/sfm/distortion.js'
@@ -262,10 +262,22 @@ export function makeDenseOps({ rasterize }) {
     // map before it can start. The loop therefore owns only the first slice of the bar
     // — reporting it as the whole thing left the filter (minutes on a big set) running
     // behind a bar already sitting at 100%. done/total stay honest for the readout.
-    const LOOP_SHARE = 0.85
-    const loopFraction = (v) => (images.length > 0 ? LOOP_SHARE * (v / images.length) : 0)
+    // The slice is re-derived after every image from the measured loop time vs the
+    // filter's modelled cost (geomFilterLoopShare): a fixed 85/15 was ~right for neither
+    // backend. A small backwards step in the fraction is absorbed by usePipeline's
+    // monotonic clamp (the bar holds briefly rather than jumping back).
+    let loopShare = geomConsistency ? 0.85 : 1 // until the first image measures the loop
+    let pxDone = 0
+    const tLoop = performance.now()
+    const updateLoopShare = (done) => {
+      if (!geomConsistency) return
+      const s = geomFilterLoopShare({ loopMs: performance.now() - tLoop, done, total: images.length, pxDone })
+      if (s != null) loopShare = s
+    }
+    const loopFraction = (v) => (images.length > 0 ? loopShare * (v / images.length) : 0)
     for (let i = 0; i < images.length; i++) {
       const img = images[i]
+      if (i > 0) updateLoopShare(i)
       emit('progress', [i, images.length, img.name, loopFraction(i)])
 
       const srcUuids = srcUuidsByImg[i]
@@ -411,6 +423,7 @@ export function makeDenseOps({ rasterize }) {
         // harmless and deliberately NOT cleaned up.
         depth: dm.depth, cost: dm.cost, normals: dm.normals || null, rgb, displayDataUrl,
       })
+      pxDone += dm.width * dm.height
       transfer.push(dm.depth.buffer, dm.cost.buffer, rgb.buffer)
       if (dm.normals) transfer.push(dm.normals.buffer)
       releaseAfter(i) // evict rasters this image was the last consumer of
@@ -427,6 +440,9 @@ export function makeDenseOps({ rasterize }) {
     // preview, so they intentionally still show the raw plane.
     let geomFilterMs = null
     if (geomConsistency && maps.length) {
+      updateLoopShare(images.length)
+      const LOOP_SHARE = loopShare
+      const loopMs = performance.now() - tLoop
       emit('progress', [0, maps.length, 'Filtering depth maps…', LOOP_SHARE])
       const tFilt = performance.now()
       filterDepthMapsGeometric(maps, { maxGeomCost, minConsistent, minNcc },
@@ -445,8 +461,11 @@ export function makeDenseOps({ rasterize }) {
         'warn', 'Dense'])
       }
       geomFilterMs = performance.now() - tFilt
-      emit('log', [`Depth filter: cross-view consistency in ${(geomFilterMs / 1000).toFixed(1)}s`,
-        'info', 'Dense'])
+      // Measured vs modelled, so DENSE_TUNING.geomFilterUsPerPx can be retuned from runs.
+      const usPerPx = pxDone > 0 ? geomFilterMs * 1000 / pxDone : 0
+      emit('log', [`Depth filter: cross-view consistency in ${(geomFilterMs / 1000).toFixed(1)}s `
+        + `(${usPerPx.toFixed(2)} µs/px; ${(100 * geomFilterMs / (geomFilterMs + loopMs)).toFixed(0)}% of Stage A, `
+        + `progress bar gave it ${(100 * (1 - LOOP_SHARE)).toFixed(0)}%)`, 'info', 'Dense'])
     }
 
     emit('progress', [images.length, images.length, 'Depth maps complete', 1])

@@ -365,6 +365,116 @@ export function filterDepthMap(depth, w, h, opts = {}) {
   return { depth: out, removed, smoothed }
 }
 
+// ── Candidate views for the cross-view filter (exact cull + ordering) ────────────
+// Which other maps could vouch for a pixel, and in what order to ask them. Neither
+// changes a verdict, only the work:
+//
+//   • CULL — exact, not a heuristic. Every valid pixel of a region lies in the frustum
+//     slice {u∈[u0,u1], v∈[v0,v1], depth∈[d0,d1]} of its own camera, a convex set whose
+//     8 vertices are those corners unprojected. A perspective projection maps a convex
+//     set lying wholly in front of the camera onto the convex hull of its vertices'
+//     images, so if those images' bounding box misses a candidate's raster, every
+//     pixel's projection misses it too — the walk would `continue` past it anyway. A
+//     slice not wholly in front keeps the candidate (the hull argument fails there); one
+//     wholly behind drops it (camera depth is affine). The 1 px margin absorbs rounding
+//     between this test and the per-pixel one. Done per map, then per block: one stray
+//     far depth (sky) stretches a whole map's slice over every other camera, so a
+//     map-level cull alone cuts little on exactly the scenes this filter is for.
+//   • ORDER — nearest camera centre first. A pixel is kept as soon as `minConsistent`
+//     views agree, and agreeing views are the overlapping, i.e. nearby, ones; in index
+//     order a good pixel of map 150 first walked 149 maps that cannot see it. The count
+//     that decides the verdict does not depend on order.
+const FILTER_BLOCK = 64
+const CULL_MARGIN = 1
+
+function sliceCorners(m, ua, ub, va, vb) {
+  const { width: w, depth } = m
+  let u0 = Infinity, u1 = -Infinity, v0 = Infinity, v1 = -Infinity, d0 = Infinity, d1 = -Infinity
+  for (let v = va; v < vb; v++) {
+    for (let u = ua; u < ub; u++) {
+      const d = depth[v * w + u]
+      if (!(d > 0)) continue
+      if (u < u0) u0 = u
+      if (u > u1) u1 = u
+      if (v < v0) v0 = v
+      if (v > v1) v1 = v
+      if (d < d0) d0 = d
+      if (d > d1) d1 = d
+    }
+  }
+  if (!(d1 > 0)) return null // no valid pixel ⇒ nothing to check
+  const corners = []
+  for (const d of [d0, d1]) for (const u of [u0, u1]) for (const v of [v0, v1]) corners.push(unprojectPixel(m, u, v, d))
+  return corners
+}
+
+function sliceMisses(corners, c) {
+  let minU = Infinity, maxU = -Infinity, minV = Infinity, maxV = -Infinity, behind = 0
+  for (const P of corners) {
+    const p = project(c, P.x, P.y, P.z)
+    if (!p) { behind++; continue }
+    if (p.u < minU) minU = p.u
+    if (p.u > maxU) maxU = p.u
+    if (p.v < minV) minV = p.v
+    if (p.v > maxV) maxV = p.v
+  }
+  if (behind === corners.length) return true
+  return !behind && (maxU < -0.5 - CULL_MARGIN || minU > c.width - 0.5 + CULL_MARGIN
+    || maxV < -0.5 - CULL_MARGIN || minV > c.height - 0.5 + CULL_MARGIN)
+}
+
+// Per map: the surviving candidate indices, nearest first.
+export function filterCandidates(maps) {
+  const centres = maps.map((m) => cameraCenter(m))
+  return maps.map((m, mi) => {
+    const corners = sliceCorners(m, 0, m.width, 0, m.height)
+    if (!corners) return []
+    const C = centres[mi]
+    const dist = (ci) => Math.hypot(centres[ci][0] - C[0], centres[ci][1] - C[1], centres[ci][2] - C[2])
+    const out = []
+    for (let ci = 0; ci < maps.length; ci++) if (ci !== mi && !sliceMisses(corners, maps[ci])) out.push(ci)
+    return out.map((ci) => [dist(ci), ci]).sort((a, b) => a[0] - b[0] || a[1] - b[1]).map((e) => e[1])
+  })
+}
+
+// Per block of map `mi`: the subset of its map-level candidates (order kept) that
+// survive that block's own slice. Row-major blocks of FILTER_BLOCK px.
+function blockCandidates(maps, mi, mapCand) {
+  const m = maps[mi]
+  const bw = Math.ceil(m.width / FILTER_BLOCK), bh = Math.ceil(m.height / FILTER_BLOCK)
+  const out = new Array(bw * bh)
+  for (let by = 0; by < bh; by++) {
+    for (let bx = 0; bx < bw; bx++) {
+      const ua = bx * FILTER_BLOCK, va = by * FILTER_BLOCK
+      const corners = sliceCorners(m, ua, Math.min(m.width, ua + FILTER_BLOCK), va, Math.min(m.height, va + FILTER_BLOCK))
+      out[by * bw + bx] = corners ? Int32Array.from(mapCand.filter((ci) => !sliceMisses(corners, maps[ci]))) : new Int32Array(0)
+    }
+  }
+  return { bw, lists: out }
+}
+
+// Flat per-map camera parameters for the filter's allocation-free inner loop:
+// R (row-major, 9) · t (3) · fx fy cx cy. Read back as the same doubles, so the
+// inlined arithmetic below reproduces unprojectPixel/project bit for bit.
+function camParams(m) {
+  const { R, t, K } = m
+  return Float64Array.of(R[0][0], R[0][1], R[0][2], R[1][0], R[1][1], R[1][2], R[2][0], R[2][1], R[2][2],
+    t[0], t[1], t[2], K.fx, K.fy, K.cx, K.cy)
+}
+
+// Share of Stage A's progress bar owned by the per-image loop (the rest is the
+// cross-view filter that runs after it). Derived from what the loop has measured so
+// far — elapsed ms and working pixels over `done` images, extrapolated to `total` —
+// against the filter's modelled per-pixel cost. A fixed split was wrong in both
+// directions: WASM PatchMatch takes minutes per image (filter ≈ 1 %), the GPU path
+// seconds (filter can be most of the run). Clamped so neither phase vanishes.
+export function geomFilterLoopShare({ loopMs, done, total, pxDone, usPerPx = DENSE_TUNING.geomFilterUsPerPx }) {
+  if (!(done > 0) || !(loopMs > 0)) return null
+  const loopEst = loopMs / done * total
+  const filterEst = pxDone / done * total * usPerPx / 1000
+  return Math.min(0.99, Math.max(0.05, loopEst / (loopEst + filterEst)))
+}
+
 // ── Cross-view geometric consistency (COLMAP's `filter` pass) ────────────────────
 // Stage A is photometric only, and `filterDepthMap` above is a *neighbourhood* test —
 // neither can see that a pixel's depth disagrees with what other views independently
@@ -402,14 +512,18 @@ export function filterDepthMap(depth, w, h, opts = {}) {
 // in place would make map i+1 judge itself against already-thinned evidence, cascading
 // rejections in map order (an order-dependent, irreproducible result).
 //
-// Cost is O(maps² · px) worst case, the same shape as fusion's loop, with an early
-// break once `minConsistent` views agree. Pure: maps are mutated only via the returned
-// planes; no I/O.
+// Cost is O(maps · candidates · px), with an early break once `minConsistent` views
+// agree. Candidates are culled per block and ordered nearest-first (see
+// `filterCandidates` — neither changes a verdict); walking every map in index order was
+// O(maps² · px) and dominated Stage A on large sets. Pure: maps are mutated only via the
+// returned planes; no I/O. `opts.cull: false` walks every map in index order — the
+// reference the cull is tested against.
 export function filterDepthMapsGeometric(maps, opts = {}, onLog = () => {}, hooks = {}) {
   const {
     minNcc = DEPTHMAP_DEFAULTS.minNcc,
     maxGeomCost = DEPTHMAP_DEFAULTS.maxGeomCost,
     minConsistent = DEPTHMAP_DEFAULTS.minConsistent,
+    cull = true,
   } = opts
   const { onProgress } = hooks
 
@@ -417,6 +531,16 @@ export function filterDepthMapsGeometric(maps, opts = {}, onLog = () => {}, hook
   // fails". Apply the NCC floor only.
   const nMaps = maps.length
   const maxCostGate = 1 - minNcc // ZNCC ncc ≥ minNcc  ⇔  cost ≤ 1 − minNcc
+  const checkViews = nMaps >= 2 && minConsistent > 0
+  const candidates = !checkViews ? maps.map(() => [])
+    : cull ? filterCandidates(maps)
+      : maps.map((_, mi) => maps.map((__, ci) => ci).filter((ci) => ci !== mi))
+  if (checkViews) {
+    const nCand = candidates.reduce((s, c) => s + c.length, 0)
+    onLog(`Depth filter: cross-view check over ${nMaps} maps — ${(nCand / nMaps).toFixed(1)} candidate `
+      + `views/map (of ${nMaps - 1})${cull ? ' after the frustum cull' : ''}`, 'info', 'Dense')
+  }
+  const params = maps.map(camParams)
 
   const masks = maps.map((m) => new Uint8Array(m.width * m.height)) // 1 = drop
   let considered = 0, lowNcc = 0, inconsistent = 0, kept = 0
@@ -425,35 +549,70 @@ export function filterDepthMapsGeometric(maps, opts = {}, onLog = () => {}, hook
     const m = maps[mi]
     const { width: w, height: h, depth, cost } = m
     const mask = masks[mi]
-    onProgress?.(mi, nMaps, m.name ?? m.uuid?.slice(0, 8) ?? '')
+    const label = m.name ?? m.uuid?.slice(0, 8) ?? ''
+    const tMap = Date.now()
+    let tTick = tMap
+    onProgress?.(mi, nMaps, label)
+    // Per-block candidate lists (one shared list when not culling).
+    const { bw, lists } = checkViews && cull
+      ? blockCandidates(maps, mi, candidates[mi])
+      : { bw: 1, lists: null }
+    const flatList = lists ? null : Int32Array.from(candidates[mi])
+    // This map's camera, unpacked once (see camParams).
+    const pm = params[mi]
+    const mR00 = pm[0], mR01 = pm[1], mR02 = pm[2], mR10 = pm[3], mR11 = pm[4], mR12 = pm[5]
+    const mR20 = pm[6], mR21 = pm[7], mR22 = pm[8], mt0 = pm[9], mt1 = pm[10], mt2 = pm[11]
+    const mfx = pm[12], mfy = pm[13], mcx = pm[14], mcy = pm[15]
     let mapLowNcc = 0, mapInconsistent = 0
     for (let v = 0; v < h; v++) {
+      // Within-map progress (a map is seconds on a big set): time-throttled so a
+      // 1000-row plane doesn't post 1000 events.
+      if (onProgress && (v & 15) === 0 && v > 0) {
+        const now = Date.now()
+        if (now - tTick >= 100) { tTick = now; onProgress(mi + v / h, nMaps, label) }
+      }
+      const rowBlock = ((v / FILTER_BLOCK) | 0) * bw
       for (let u = 0; u < w; u++) {
         const idx = v * w + u
         const d = depth[idx]
         if (!(d > 0)) continue // already a hole
         considered++
         if (cost[idx] > maxCostGate) { mask[idx] = 1; lowNcc++; mapLowNcc++; continue }
-        if (nMaps < 2 || minConsistent <= 0) { kept++; continue }
+        if (!checkViews) { kept++; continue }
 
-        const P = unprojectPixel(m, u, v, d)
+        // P = unprojectPixel(m, u, v, d), inlined (same arithmetic, no allocation).
+        const ax = (u - mcx) / mfx * d - mt0, ay = (v - mcy) / mfy * d - mt1, az = d - mt2
+        const Px = mR00 * ax + mR10 * ay + mR20 * az
+        const Py = mR01 * ax + mR11 * ay + mR21 * az
+        const Pz = mR02 * ax + mR12 * ay + mR22 * az
+        const cand = flatList ?? lists[rowBlock + ((u / FILTER_BLOCK) | 0)]
         let agree = 0
-        for (let ci = 0; ci < nMaps && agree < minConsistent; ci++) {
-          if (ci === mi) continue
-          const c = maps[ci]
-          const p = project(c, P.x, P.y, P.z)
-          if (!p) continue // behind the source camera
-          const cu = Math.round(p.u), cv = Math.round(p.v)
+        for (let k = 0; k < cand.length && agree < minConsistent; k++) {
+          const ci = cand[k]
+          const c = maps[ci], pc = params[ci]
+          // p = project(c, P)
+          const zc = pc[6] * Px + pc[7] * Py + pc[8] * Pz + pc[11]
+          if (!(zc > 1e-9)) continue // behind the source camera
+          const xc = pc[0] * Px + pc[1] * Py + pc[2] * Pz + pc[9]
+          const yc = pc[3] * Px + pc[4] * Py + pc[5] * Pz + pc[10]
+          const cu = Math.round(pc[12] * (xc / zc) + pc[14]), cv = Math.round(pc[13] * (yc / zc) + pc[15])
           if (cu < 0 || cu >= c.width || cv < 0 || cv >= c.height) continue
           const od = c.depth[cv * c.width + cu]
           if (!(od > 0)) continue // source has no depth here — no evidence either way
           // The source's own surface point at that pixel. If the source is looking at
           // something else entirely (occluder, or noise), the round trip lands far from
           // (u,v) and this view simply doesn't vouch for the pixel.
-          const P2 = unprojectPixel(c, cu, cv, od)
-          const q = project(m, P2.x, P2.y, P2.z)
-          if (!q) continue
-          if (Math.hypot(q.u - u, q.v - v) <= maxGeomCost) agree++
+          // P2 = unprojectPixel(c, cu, cv, od)
+          const bx = (cu - pc[14]) / pc[12] * od - pc[9], by = (cv - pc[15]) / pc[13] * od - pc[10], bz = od - pc[11]
+          const Qx = pc[0] * bx + pc[3] * by + pc[6] * bz
+          const Qy = pc[1] * bx + pc[4] * by + pc[7] * bz
+          const Qz = pc[2] * bx + pc[5] * by + pc[8] * bz
+          // q = project(m, P2)
+          const qz = mR20 * Qx + mR21 * Qy + mR22 * Qz + mt2
+          if (!(qz > 1e-9)) continue
+          const qx = mR00 * Qx + mR01 * Qy + mR02 * Qz + mt0
+          const qy = mR10 * Qx + mR11 * Qy + mR12 * Qz + mt1
+          if (Math.hypot(mfx * (qx / qz) + mcx - u, mfy * (qy / qz) + mcy - v) <= maxGeomCost) agree++
         }
         if (agree < minConsistent) { mask[idx] = 1; inconsistent++; mapInconsistent++; continue }
         kept++
@@ -467,8 +626,11 @@ export function filterDepthMapsGeometric(maps, opts = {}, onLog = () => {}, hook
     m.filterStats.kept = m.filterStats.considered - mapLowNcc - mapInconsistent
     m.filterStats.keptPct = m.filterStats.considered
       ? 100 * m.filterStats.kept / m.filterStats.considered : 0
-    onLog(`Depth filter: ${m.name ?? m.uuid?.slice(0, 8) ?? '?'} — dropped ${mapLowNcc} low-NCC, `
-      + `${mapInconsistent} geometrically inconsistent px`, 'debug', 'Dense')
+    // Info, like Stage A's per-image line: this pass can run for minutes, and at the
+    // default log level it was otherwise silent from start to summary.
+    onLog(`Depth filter: ${label || '?'} (${mi + 1}/${nMaps}) — kept ${m.filterStats.keptPct.toFixed(1)}%; `
+      + `dropped ${mapLowNcc} low-NCC, ${mapInconsistent} inconsistent px; ${candidates[mi].length} candidate views, `
+      + `${((Date.now() - tMap) / 1000).toFixed(1)}s`, 'info', 'Dense')
   }
 
   // Apply now that every map has been judged against the original evidence.
