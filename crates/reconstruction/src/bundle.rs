@@ -50,6 +50,93 @@ pub(crate) fn chol_solve(n: usize, a: &[f64], b: &[f64]) -> Option<Vec<f64>> {
     Some(x)
 }
 
+// Reduced systems at least this large go to `pcg_solve` first. A dense Cholesky is
+// n³/3 flops: ~10¹⁰ at 522 cameras (n ≈ 3,140), about 7 s per LM try in wasm, which
+// made bundle adjustment 2,100 of 2,550 s on the 538-image Monster set. One CG
+// iteration on the same dense matrix is n² flops.
+pub(crate) const PCG_MIN_N: usize = 600;
+
+// Solve the reduced system: preconditioned CG when it is large, dense Cholesky
+// otherwise or whenever CG does not converge (so the worst case is the old cost).
+// `blocks` are the diagonal (offset, size) blocks used as the preconditioner:
+// one 6×6 per camera, one per intrinsics group. None ⇒ not positive-definite.
+pub(crate) fn solve_reduced(n: usize, a: &[f64], b: &[f64], blocks: &[(usize, usize)]) -> Option<Vec<f64>> {
+    if n >= PCG_MIN_N {
+        match pcg_solve(n, a, b, blocks, 1e-10, n.min(2000)) {
+            PcgResult::Converged(x) => return Some(x),
+            PcgResult::NotPositiveDefinite => return None,
+            PcgResult::Stalled => {} // fall back to the exact factorisation
+        }
+    }
+    chol_solve(n, a, b)
+}
+
+pub(crate) enum PcgResult { Converged(Vec<f64>), NotPositiveDefinite, Stalled }
+
+// Conjugate gradients on a dense SPD system, block-Jacobi preconditioned. Converged
+// when ‖r‖ ≤ rel_tol·‖b‖. A non-positive curvature pᵀAp ≤ 0 (or a non-PD diagonal
+// block) means A is not positive-definite — the same signal chol_solve gives, which
+// makes the LM caller raise its damping.
+pub(crate) fn pcg_solve(n: usize, a: &[f64], b: &[f64], blocks: &[(usize, usize)], rel_tol: f64, max_iter: usize) -> PcgResult {
+    // Preconditioner: the inverse of each diagonal block, via its own small Cholesky.
+    let mut inv_blocks: Vec<(usize, usize, Vec<f64>)> = Vec::with_capacity(blocks.len());
+    for &(off, dim) in blocks {
+        let mut blk = vec![0f64; dim * dim];
+        for i in 0..dim { for j in 0..dim { blk[i * dim + j] = a[(off + i) * n + off + j]; } }
+        let mut inv = vec![0f64; dim * dim];
+        for c in 0..dim {
+            let mut e = vec![0f64; dim]; e[c] = 1.0;
+            match chol_solve(dim, &blk, &e) {
+                Some(col) => for r in 0..dim { inv[r * dim + c] = col[r]; },
+                None => return PcgResult::NotPositiveDefinite,
+            }
+        }
+        inv_blocks.push((off, dim, inv));
+    }
+    let apply_m = |r: &[f64], z: &mut [f64]| {
+        z.copy_from_slice(r); // variables outside every block: identity
+        for (off, dim, inv) in &inv_blocks {
+            for i in 0..*dim {
+                let mut s = 0.0;
+                for j in 0..*dim { s += inv[i * dim + j] * r[off + j]; }
+                z[off + i] = s;
+            }
+        }
+    };
+    let matvec = |x: &[f64], y: &mut [f64]| {
+        for i in 0..n {
+            let row = &a[i * n..(i + 1) * n];
+            let mut s = 0.0;
+            for j in 0..n { s += row[j] * x[j]; }
+            y[i] = s;
+        }
+    };
+    let b_norm = b.iter().map(|v| v * v).sum::<f64>().sqrt();
+    let mut x = vec![0f64; n];
+    if b_norm == 0.0 { return PcgResult::Converged(x); }
+    let mut r = b.to_vec();
+    let mut z = vec![0f64; n];
+    apply_m(&r, &mut z);
+    let mut p = z.clone();
+    let mut rz: f64 = r.iter().zip(&z).map(|(u, v)| u * v).sum();
+    let mut ap = vec![0f64; n];
+    for _ in 0..max_iter {
+        matvec(&p, &mut ap);
+        let pap: f64 = p.iter().zip(&ap).map(|(u, v)| u * v).sum();
+        if !(pap > 0.0) { return PcgResult::NotPositiveDefinite; }
+        let alpha = rz / pap;
+        for i in 0..n { x[i] += alpha * p[i]; r[i] -= alpha * ap[i]; }
+        let r_norm = r.iter().map(|v| v * v).sum::<f64>().sqrt();
+        if r_norm <= rel_tol * b_norm { return PcgResult::Converged(x); }
+        apply_m(&r, &mut z);
+        let rz_new: f64 = r.iter().zip(&z).map(|(u, v)| u * v).sum();
+        let beta = rz_new / rz;
+        rz = rz_new;
+        for i in 0..n { p[i] = z[i] + beta * p[i]; }
+    }
+    PcgResult::Stalled
+}
+
 // Pinhole projection with the shared radial polynomial (Brown, no tangential):
 // d = 1 + k1·r² + k2·r⁴ + k3·r⁶, u = fx·a·d + cx, v = fy·b·d + cy, with a,b =
 // normalised camera coords (xc/zc, yc/zc). All coeffs 0 ⇒ plain pinhole.
@@ -358,6 +445,10 @@ pub fn bundle_adjust(
     let refine = kdim > 0 && g_count > 0;
     let group_off = 6 * n_cam;            // intrinsic params follow the camera poses
     let n = group_off + if refine { g_count * kdim } else { 0 };
+    // Diagonal blocks for the reduced solve's preconditioner (solve_reduced).
+    let precond_blocks: Vec<(usize, usize)> = (0..n_cam).map(|c| (6 * c, 6))
+        .chain((0..if refine { g_count } else { 0 }).map(|g| (group_off + g * kdim, kdim)))
+        .collect();
     // Per-group params, one [f64;6] slot each. The focal-scale slot (if present) inits
     // to 1 (multiplies fx/fy); every distortion/principal-point slot inits to 0.
     let mut gpar = vec![[0.0f64; 6]; g_count.max(1)];
@@ -649,7 +740,7 @@ pub fn bundle_adjust(
             }
             if !ok { lambda = (lambda * 4.0).min(1e8); continue; }
 
-            let dsol = match chol_solve(n, &s, &rhs) {
+            let dsol = match solve_reduced(n, &s, &rhs, &precond_blocks) {
                 Some(x) => x,
                 None => { lambda = (lambda * 4.0).min(1e8); continue; }
             };
@@ -732,4 +823,95 @@ pub fn bundle_adjust(
     out.push(camera_prior_rms_after as f32);
     for &c in &trace { out.push(c as f32); }
     out
+}
+
+#[cfg(test)]
+mod reduced_solve_tests {
+    use super::*;
+
+    // Deterministic pseudo-random numbers in [-1, 1).
+    struct Lcg(u64);
+    impl Lcg {
+        fn next(&mut self) -> f64 {
+            self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            ((self.0 >> 11) as f64 / (1u64 << 53) as f64) * 2.0 - 1.0
+        }
+    }
+
+    // A reduced-camera-like system: 6×6 camera blocks coupled through shared points
+    // (each "point" links a few cameras), two intrinsics groups coupled to every
+    // camera, plus LM-style damping on the diagonal. A = JᵀJ + damping, SPD.
+    fn ba_like(n_cam: usize, seed: u64) -> (usize, Vec<f64>, Vec<f64>, Vec<(usize, usize)>) {
+        let kdim = 6;
+        let n = 6 * n_cam + 2 * kdim;
+        let mut rng = Lcg(seed);
+        let mut a = vec![0f64; n * n];
+        let mut add_row = |row: &[(usize, f64)], a: &mut Vec<f64>| {
+            for &(i, vi) in row { for &(j, vj) in row { a[i * n + j] += vi * vj; } }
+        };
+        for p in 0..n_cam * 40 {
+            let c0 = p % n_cam;
+            let cams = [c0, (c0 + 1 + p % 3) % n_cam, (c0 + 5 + p % 7) % n_cam];
+            for _ in 0..2 {
+                let mut row = Vec::new();
+                for &c in &cams { for k in 0..6 { row.push((6 * c + k, rng.next())); } }
+                let g = 6 * n_cam + (p % 2) * kdim;
+                for k in 0..kdim { row.push((g + k, 0.3 * rng.next())); }
+                add_row(&row, &mut a);
+            }
+        }
+        for i in 0..n { a[i * n + i] = a[i * n + i] * 1.001 + 1e-3; }
+        let b: Vec<f64> = (0..n).map(|_| rng.next()).collect();
+        let blocks = (0..n_cam).map(|c| (6 * c, 6))
+            .chain((0..2).map(|g| (6 * n_cam + g * kdim, kdim))).collect();
+        (n, a, b, blocks)
+    }
+
+    #[test]
+    fn pcg_matches_cholesky_on_a_reduced_camera_system() {
+        let (n, a, b, blocks) = ba_like(100, 7);
+        assert!(n >= PCG_MIN_N);
+        let exact = chol_solve(n, &a, &b).unwrap();
+        let x = match pcg_solve(n, &a, &b, &blocks, 1e-10, 2000) {
+            PcgResult::Converged(x) => x,
+            _ => panic!("PCG did not converge"),
+        };
+        let err = x.iter().zip(&exact).map(|(u, v)| (u - v) * (u - v)).sum::<f64>().sqrt();
+        let norm = exact.iter().map(|v| v * v).sum::<f64>().sqrt();
+        assert!(err <= 1e-7 * norm, "relative error {}", err / norm);
+        // And through the dispatcher, which takes the PCG path at this size.
+        let y = solve_reduced(n, &a, &b, &blocks).unwrap();
+        let err2 = y.iter().zip(&exact).map(|(u, v)| (u - v) * (u - v)).sum::<f64>().sqrt();
+        assert!(err2 <= 1e-7 * norm);
+    }
+
+    #[test]
+    fn pcg_reports_an_indefinite_matrix() {
+        let n = 3;
+        let a = vec![1.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0];
+        let blocks = [(0usize, 1usize), (1, 1), (2, 1)];
+        assert!(matches!(pcg_solve(n, &a, &[1.0, 1.0, 1.0], &blocks, 1e-10, 10), PcgResult::NotPositiveDefinite));
+    }
+
+    // cargo test -p reconstruction --release -- --ignored --nocapture reduced_solve_timing
+    #[test]
+    #[ignore]
+    fn reduced_solve_timing() {
+        let (n, a, b, blocks) = ba_like(522, 11);
+        let t = std::time::Instant::now();
+        let exact = chol_solve(n, &a, &b).unwrap();
+        let chol = t.elapsed();
+        let t = std::time::Instant::now();
+        let x = solve_reduced(n, &a, &b, &blocks).unwrap();
+        let pcg = t.elapsed();
+        let err = x.iter().zip(&exact).map(|(u, v)| (u - v).abs()).fold(0.0, f64::max);
+        println!("n = {n}: cholesky {chol:?}, pcg {pcg:?}, max |dx| {err:e}");
+    }
+
+    #[test]
+    fn small_systems_stay_on_cholesky() {
+        let (n, a, b, blocks) = ba_like(10, 3);
+        assert!(n < PCG_MIN_N);
+        assert_eq!(solve_reduced(n, &a, &b, &blocks).unwrap(), chol_solve(n, &a, &b).unwrap());
+    }
 }

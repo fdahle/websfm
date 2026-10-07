@@ -4,7 +4,7 @@ import { buildMetricFrame } from '../../core/products/localFrame.js'
 import { cameraCenter } from '../../core/sfm/geometry.js'
 import { triangulateAllGcps } from '../../core/sfm/gcpTriangulation.js'
 import { gcpGuidesForImage, gcpEstimateForImage } from '../../core/sfm/gcpGuides.js'
-import { gcpsInPinholeFrame, guideToScan, makeCanonicalToScan } from '../../core/sfm/displayFrame.js'
+import { gcpsInPinholeFrame, guideToScan, makePinholeToMark } from '../../core/sfm/displayFrame.js'
 import { isGeographic, ensureProjection, transform, metresPerCrsUnit } from '../../core/crs.js'
 import { normalizedGroundResidual, precisionFromGcp } from '../../core/gcpAccuracy.js'
 import { isGroundControl } from '../../core/io/gcp.js'
@@ -71,9 +71,11 @@ export function createGeoreferencing({
   }
 
   const toScanFor = (imageId) => {
+    // Guides and estimates are drawn where marks are clicked, so they go back to the
+    // mark convention (makePinholeToMark adds the half pixel), even with no bags.
     const resolve = frameModel(), im = imagesById().get(imageId)
     const cam = im ? sparseCameras.value.get(im.uuid) : null
-    return resolve && cam ? { toScan: makeCanonicalToScan({ K: cam.K, ...resolve(im) }), K: cam.K } : null
+    return cam ? { toScan: makePinholeToMark({ K: cam.K, ...(resolve ? resolve(im) : {}) }), K: cam.K } : null
   }
 
   const evidenceKey = computed(() => {

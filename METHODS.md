@@ -472,9 +472,14 @@ family as COLMAP's BA; the specifics:
   **left-perturbed so(3)** rotation update `R ← exp(δω)·R` (minimal 3-parameter
   rotation increment, no gimbal issues). 3D points are 3-DOF.
 - **Schur complement**: the per-point 3×3 blocks are eliminated, leaving a reduced
-  camera(+intrinsic) system solved by **dense Cholesky** (`chol_solve`). Note for
-  scaling questions: the dense reduced solve is the one piece to swap for an
-  iterative preconditioned-CG Schur solve at very large camera counts.
+  camera(+intrinsic) system. Below n = 600 unknowns (100 cameras) it is solved by
+  **dense Cholesky** (`chol_solve`); above, by **conjugate gradients with a
+  block-Jacobi preconditioner** (one 6×6 block per camera, one per intrinsics group;
+  `solve_reduced`) to a relative residual of 10⁻¹⁰, falling back to Cholesky if CG
+  stalls. Cholesky is n³/3 flops: 5.9 s per solve at 522 cameras against 0.14 s for
+  CG with the same answer (2×10⁻¹² apart, native), and BA had taken 2,100 of 2,550 s
+  on a 538-image block. The matrix is still assembled densely (n² memory), so very
+  large blocks will next need a sparse or matrix-free Schur product.
 - **Robust cost**: **Huber**, with an **adaptive threshold** = 2.5 × median
   residual (recomputed each outer iteration, floored at 1 px), applied as an IRLS
   weight `w = min(1, δ/‖r‖)`. Step acceptance evaluates the loss that weight
@@ -1347,8 +1352,8 @@ film-format handling with sanity checks); and the WebGPU PatchMatch path.
 - **Incremental** SfM → sequential, drift can accumulate on long strips (mitigated
   by interleaved BA + loop closures from exhaustive matching, not by a global
   method).
-- **Dense reduced-camera Cholesky** in BA → the scaling ceiling; not yet an
-  iterative Schur solve.
+- **Dense reduced-camera matrix** in BA → the next scaling ceiling: the solve is
+  iterative above 100 cameras, but the n×n matrix is still assembled densely.
 - **Self-calibration is weakly observed** on flat, single-strip aerial blocks —
   reported but not auto-applied.
 - **Fisheye** is out of scope (Brown model; Newton inverse, refused past the fold).

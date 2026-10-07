@@ -15,7 +15,23 @@ export class DecodedTiff {
      * Move the RGBA buffer out to JS (consumes `self`; the handle is freed).
      */
     rgba(): Uint8Array;
+    /**
+     * Source bit depth (8 or 16), for the ingest log.
+     */
+    readonly bitsPerSample: number;
     readonly height: number;
+    /**
+     * Source samples per pixel (1 gray … 4 RGBA), for the ingest log.
+     */
+    readonly samplesPerPixel: number;
+    /**
+     * The 16-bit DN mapped to 255 by the percentile stretch; −1 for an 8-bit source.
+     */
+    readonly stretchHi: number;
+    /**
+     * The 16-bit DN mapped to 0 by the percentile stretch; −1 for an 8-bit source.
+     */
+    readonly stretchLo: number;
     readonly width: number;
 }
 
@@ -33,8 +49,12 @@ export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly __wbg_decodedtiff_free: (a: number, b: number) => void;
     readonly decode_tiff: (a: number, b: number) => [number, number, number];
+    readonly decodedtiff_bitsPerSample: (a: number) => number;
     readonly decodedtiff_height: (a: number) => number;
     readonly decodedtiff_rgba: (a: number) => [number, number];
+    readonly decodedtiff_samplesPerPixel: (a: number) => number;
+    readonly decodedtiff_stretchHi: (a: number) => number;
+    readonly decodedtiff_stretchLo: (a: number) => number;
     readonly decodedtiff_width: (a: number) => number;
     readonly __wbindgen_externrefs: WebAssembly.Table;
     readonly __wbindgen_malloc: (a: number, b: number) => number;

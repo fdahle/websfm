@@ -19,6 +19,7 @@
 
 import { distortPixel, undistortPixel, hasDistortion, distortionOf } from './distortion.js'
 import { canonicalToScan, scanToCanonical } from './fiducials.js'
+import { toScaledPx, fromScaledPx } from './geometry.js'
 
 // Apply both distortion bags: ideal pinhole pixel → the pixel the lens recorded.
 // `Kw` must be the K the coefficients were fitted against (working-res if the
@@ -41,6 +42,17 @@ export function makeCanonicalToScan({ K, dist = null, selfCal = null, fiducial =
   return makeSampleMap({ K, dist, selfCal, fiducial })
 }
 
+// Camera-frame (pinhole) pixel → mark pixel, for anything that produces or draws a
+// mark: GCP guides and estimates, Find-GCPs candidates. makeCanonicalToScan plus the
+// half-pixel convention shift (see markToCentrePx); always a function.
+export function makePinholeToMark({ K, dist = null, selfCal = null, fiducial = null } = {}) {
+  const toScan = makeCanonicalToScan({ K, dist, selfCal, fiducial })
+  return (u, v) => {
+    const p = toScan ? toScan(u, v) : { x: u, y: v }
+    return { x: centreToMarkPx(p.x), y: centreToMarkPx(p.y) }
+  }
+}
+
 // The same chain, but between two *scaled* grids — the form a resampler needs.
 // `outScale` is the resolution of the (u,v) grid relative to K's own frame,
 // `srcScale` the resolution of the source raster relative to the scan frame; both
@@ -48,8 +60,9 @@ export function makeCanonicalToScan({ K, dist = null, selfCal = null, fiducial =
 //
 // Scaling the grid rather than K is safe and is why only one primitive is needed:
 // distortPixel normalizes by K, so distortComposed(u, v, scaleK(K, s)) is
-// identically s·distortComposed(u/s, v/s, K) — the normalized coordinates are the
-// same number either way.
+// identically toScaledPx(distortComposed(fromScaledPx(u, s), …, K), s) — the
+// normalized coordinates are the same number either way, because scaleK moves the
+// principal point by the same centre-aligned rule.
 //
 // Returns **null** when the whole chain is the identity (no bags, no fiducial, both
 // scales 1); callers treat null as "no work to do", which is the common
@@ -61,28 +74,40 @@ export function makeSampleMap({
   const needsScale = outScale !== 1 || srcScale !== 1
   if (!needsDist && !fiducial && !needsScale) return null
   return (u, v) => {
-    // Into K's own (full-resolution canonical) frame.
-    let x = outScale === 1 ? u : u / outScale
-    let y = outScale === 1 ? v : v / outScale
+    // Into K's own (full-resolution canonical) frame — pixel-centre aligned
+    // (geometry.js toScaledPx), the same convention scaleK uses.
+    let x = outScale === 1 ? u : fromScaledPx(u, outScale)
+    let y = outScale === 1 ? v : fromScaledPx(v, outScale)
     if (needsDist) { const d = distortComposed(x, y, K, dist, selfCal); x = d.x; y = d.y }
     if (fiducial) { const s = canonicalToScan(x, y, fiducial.transform ?? fiducial.A, fiducial.frame); x = s.x; y = s.y }
     // Into the source raster's grid.
-    if (srcScale !== 1) { x *= srcScale; y *= srcScale }
+    if (srcScale !== 1) { x = toScaledPx(x, srcScale); y = toScaledPx(y, srcScale) }
     return { x, y }
   }
 }
 
+// ── Marks vs keypoints: two pixel conventions ────────────────────────────────
+// Marks (GCP / marker / scale-bar clicks, imported Metashape marks, Find-GCPs
+// candidates) use the viewer's pixel-EDGE convention: the image's top-left corner is
+// (0, 0), pixel i spans [i, i + 1] and its centre is i + ½ (ViewerImage toImagePixel).
+// Keypoints, K and every camera projection use pixel CENTRES at integers. Convert at
+// the boundary — marks into the camera frame (makeScanToPinhole, sfm.js GCP ingest)
+// and camera-frame positions back into marks (makePinholeToMark) — never in storage.
+// GeoScan checkpoints: H 4.2 → 3.3 cm, V 8.1 → 7.1 cm (2026-10-06).
+export const markToCentrePx = (x) => x - 0.5
+export const centreToMarkPx = (x) => x + 0.5
+
 // The reverse chain: a raw scan pixel (a GCP mark, anything the user clicked) →
 // the pinhole/canonical pixel the reconstructed cameras project into. Exactly the
-// steps ingest and the self-cal fold apply to keypoints, in order: scan→canonical
-// (film), remove the calibrated bag, remove the composed self-cal bag. Triangulating
-// raw marks against pinhole cameras instead is off by the whole lens distortion —
-// and on a film scan by the entire scan→canonical affine. Null ⇒ identity.
+// steps ingest and the self-cal fold apply to keypoints, in order: mark → pixel-
+// centre convention, scan→canonical (film), remove the calibrated bag, remove the
+// composed self-cal bag. Triangulating raw marks against pinhole cameras instead is
+// off by the whole lens distortion — and on a film scan by the entire scan→canonical
+// affine. Never the identity (the half-pixel convention shift always applies).
 export function makeScanToPinhole({ K, dist = null, selfCal = null, fiducial = null } = {}) {
   const undoDist = !!K && hasDistortion(dist), undoSelf = !!K && hasDistortion(selfCal)
-  if (!undoDist && !undoSelf && !fiducial) return null
   return (px, py) => {
-    let x = px, y = py
+    let x = markToCentrePx(px), y = markToCentrePx(py)
     if (fiducial) { const c = scanToCanonical(x, y, fiducial.transform ?? fiducial.A, fiducial.frame); x = c.x; y = c.y }
     if (undoDist) { const p = undistortPixel(x, y, K, dist); x = p.x; y = p.y }
     if (undoSelf) { const p = undistortPixel(x, y, K, selfCal); x = p.x; y = p.y }

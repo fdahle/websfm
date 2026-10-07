@@ -24,8 +24,12 @@ export function makeTiffOps() {
     const decoded = decode_tiff(bytes) // throws on unsupported variants → geotiff fallback
     const width = decoded.width
     const height = decoded.height
-    const rgba = decoded.rgba() // consumes `decoded`
-    return { width, height, rgba }
+    // Source shape + the 16-bit percentile stretch (−1 for an 8-bit source).
+    const bitsPerSample = decoded.bitsPerSample
+    const samplesPerPixel = decoded.samplesPerPixel
+    const stretch = decoded.stretchLo >= 0 ? { lo: decoded.stretchLo, hi: decoded.stretchHi } : null
+    const rgba = decoded.rgba() // consumes `decoded` — read every getter before this
+    return { width, height, rgba, bitsPerSample, samplesPerPixel, stretch }
   }
 
   async function transcodeTiff([blob, jpegQuality], { emit } = {}) {

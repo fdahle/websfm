@@ -6,6 +6,8 @@
 // Chrome. We fix it once, at ingest/restore, by transcoding the TIFF to a PNG
 // blob and using that as `image.url` — every downstream consumer then works
 // unchanged in every browser.
+import { percentileRange, stretch16ToRgba } from '../core/io/tonalStretch.js'
+
 let geotiffModule
 async function openTiff(blob) {
   geotiffModule ??= import('geotiff')
@@ -247,10 +249,13 @@ export async function tiffToDisplayBlob(blob, { jpegQuality = 0.92, onThumbnail,
 
   if (decoder) {
     try {
-      const dec = await decoder(blob)               // { width, height, rgba: Uint8Array(RGBA) }
+      const dec = await decoder(blob)               // { width, height, rgba: Uint8Array(RGBA), bitsPerSample, samplesPerPixel, stretch }
       width = dec.width
       height = dec.height
       rgba = dec.rgba instanceof Uint8ClampedArray ? dec.rgba : new Uint8ClampedArray(dec.rgba.buffer, dec.rgba.byteOffset, dec.rgba.byteLength)
+      if (dec.bitsPerSample) srcInfo.bitsPerSample = dec.bitsPerSample
+      if (dec.samplesPerPixel) srcInfo.samplesPerPixel = dec.samplesPerPixel
+      if (dec.stretch) srcInfo.stretch = dec.stretch
       timings.backend = 'wasm'
       timings.decodeMs = performance.now() - t0
       timings.repackMs = 0
@@ -277,19 +282,36 @@ export async function tiffToDisplayBlob(blob, { jpegQuality = 0.92, onThumbnail,
     srcInfo.bitsPerSample = Array.isArray(bps) ? bps[0] : bps
     srcInfo.compression = fd.Compression             // 1=none, 5=LZW, 8=Deflate, 32773=PackBits, 7=JPEG…
 
-    const rgb = await image.readRGB({ interleave: true })
-    timings.decodeMs = performance.now() - t0
+    // 16-bit gray / RGB(A): stretch between the 0.5 / 99.5 % levels instead of letting
+    // readRGB cut to the high byte — the same mapping as the wasm decoder
+    // (core/io/tonalStretch.js; parity pinned on both sides).
+    const sampleFormat = await readTiffTag(fd, 'SampleFormat')
+    const isUint = sampleFormat == null || (Array.isArray(sampleFormat) ? sampleFormat[0] : sampleFormat) === 1
+    if (srcInfo.bitsPerSample === 16 && isUint && [0, 1, 2].includes(srcInfo.photometric)
+        && [1, 2, 3, 4].includes(srcInfo.samplesPerPixel)) {
+      const samples = await image.readRasters({ interleave: true })
+      timings.decodeMs = performance.now() - t0
+      const tRepack = performance.now()
+      const range = percentileRange(samples, srcInfo.samplesPerPixel)
+      rgba = stretch16ToRgba(samples, width, height, srcInfo.samplesPerPixel, range,
+        { invert: srcInfo.photometric === 0 && srcInfo.samplesPerPixel <= 2 })
+      srcInfo.stretch = range
+      timings.repackMs = performance.now() - tRepack
+    } else {
+      const rgb = await image.readRGB({ interleave: true })
+      timings.decodeMs = performance.now() - t0
 
-    const tRepack = performance.now()
-    const spp = rgb.length / (width * height) // 3 (RGB) or 4 (RGBA)
-    rgba = new Uint8ClampedArray(width * height * 4)
-    for (let px = 0, s = 0; px < width * height; px++, s += spp) {
-      rgba[px * 4]     = rgb[s]
-      rgba[px * 4 + 1] = rgb[s + 1]
-      rgba[px * 4 + 2] = rgb[s + 2]
-      rgba[px * 4 + 3] = spp === 4 ? rgb[s + 3] : 255
+      const tRepack = performance.now()
+      const spp = rgb.length / (width * height) // 3 (RGB) or 4 (RGBA)
+      rgba = new Uint8ClampedArray(width * height * 4)
+      for (let px = 0, s = 0; px < width * height; px++, s += spp) {
+        rgba[px * 4]     = rgb[s]
+        rgba[px * 4 + 1] = rgb[s + 1]
+        rgba[px * 4 + 2] = rgb[s + 2]
+        rgba[px * 4 + 3] = spp === 4 ? rgb[s + 3] : 255
+      }
+      timings.repackMs = performance.now() - tRepack
     }
-    timings.repackMs = performance.now() - tRepack
   }
 
   const canvas = new OffscreenCanvas(width, height)

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  cameraCenter,
+  cameraCenter, toScaledPx, fromScaledPx,
   projectPoint,
   projectWithDepth,
   triangulationAngle,
@@ -107,9 +107,30 @@ describe('medianTriangulationAngle', () => {
 })
 
 describe('scaleK', () => {
-  it('scales every intrinsic component', () => {
+  it('scales the focal and moves the principal point centre-aligned', () => {
+    // cx 320 → (320.5)·0.5 − 0.5 = 159.75: pixel-centre convention, as the resize is.
     expect(scaleK({ fx: 100, fy: 200, cx: 320, cy: 240 }, 0.5))
-      .toEqual({ fx: 50, fy: 100, cx: 160, cy: 120 })
+      .toEqual({ fx: 50, fy: 100, cx: 159.75, cy: 119.75 })
+  })
+
+  it('projects onto the scaled grid exactly where the native projection maps to', () => {
+    const K = { fx: 2400, fy: 2400, cx: 2997.3, cy: 1994.8 }
+    const cam = { R: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], t: [0, 0, 0] }
+    for (const s of [0.4, 0.5, 1 / 3]) {
+      for (const P of [[0.3, -0.2, 5], [-1.1, 0.7, 9]]) {
+        const native = projectPoint({ ...cam, K }, ...P)
+        const scaled = projectPoint({ ...cam, K: scaleK(K, s) }, ...P)
+        expect(scaled.u).toBeCloseTo(toScaledPx(native.u, s), 9)
+        expect(scaled.v).toBeCloseTo(toScaledPx(native.v, s), 9)
+      }
+    }
+  })
+
+  it('toScaledPx and fromScaledPx are inverses, and centre maps to centre', () => {
+    expect(fromScaledPx(toScaledPx(123.4, 0.4), 0.4)).toBeCloseTo(123.4, 12)
+    // A 10-px image scaled to 4 px: native centre 4.5 ↔ scaled centre 1.5.
+    expect(toScaledPx(4.5, 0.4)).toBeCloseTo(1.5, 12)
+    expect(toScaledPx(-0.5, 0.4)).toBeCloseTo(-0.5, 12) // the left edge stays the edge
   })
 })
 

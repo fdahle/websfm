@@ -1,5 +1,6 @@
 import { ref } from 'vue'
 import { metresPerCrsUnit } from '../core/crs.js'
+import { toScaledPx } from '../core/sfm/geometry.js'
 import { buildPosesCsv, buildSensorsCsv, downloadCsv } from '../utils/exportCsv.js'
 import { cloudToPly, meshToPly, meshToGlb, meshToObj, meshToStl, reconstructionToJson, demToAsciiGrid, demToGeoTiff, demToCog, orthoToGeoTiff, orthoToCog, rasterWorldFile, prepareCloudForExport, prepareMeshForExport } from '../core/products/exporters.js'
 import { cloudToLas } from '../core/io/las.js'
@@ -639,8 +640,9 @@ export function useExports({
             const px = p.viewsPx?.get(u)
             if (!px) return null
             const g = gridByUuid.get(u)
-            const x = px[0] * g.outScale - g.rect.x
-            const y = px[1] * g.outScale - g.rect.y
+            // Centre-aligned like the resample and scaleK (geometry.js toScaledPx).
+            const x = toScaledPx(px[0], g.outScale) - g.rect.x
+            const y = toScaledPx(px[1], g.outScale) - g.rect.y
             // A mark that the crop cut away is no longer observable in the
             // exported image; dropping it keeps the model self-consistent.
             if (x < 0 || y < 0 || x > g.width - 1 || y > g.height - 1) return null

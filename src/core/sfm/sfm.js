@@ -82,6 +82,16 @@ function fmtStats(s) {
 
 async function reconstructSingleModel(input, hooks = {}) {
   const { images, pairs, settings = {}, gcps = [], cameraPriors = [] } = input
+  // GCP marks arrive in the viewer's pixel-edge convention; keypoints, K and every
+  // projection use pixel centres (displayFrame.js markToCentrePx). Convert once, before
+  // the film remap and the distortion moves below treat them exactly like keypoints.
+  // `input` is this sub-run's own copy (cloneSfmInput), so this never compounds.
+  for (const g of gcps) {
+    for (const o of g.observations || []) {
+      if (Number.isFinite(o.px)) o.px = markToCentrePx(o.px)
+      if (Number.isFinite(o.py)) o.py = markToCentrePx(o.py)
+    }
+  }
   // Resolve knobs from the single-source-of-truth constants, letting caller-supplied
   // `settings` (from the modal / a dev experiment override) win. User-facing defaults
   // live in defaults.user.js (mirrored by ReconstructModal); internal ones in tuning.js.
@@ -1604,10 +1614,19 @@ async function reconstructSingleModel(input, hooks = {}) {
         imageNames: c.map((u) => imageByUuid(u)?.name ?? u),
       }))
     if (remainingComponents.length) {
-      log(`${remainingComponents.length} reconstructable-looking unregistered component(s) remain `
+      // Say which components the secondary pass will actually take: it skips any
+      // below `secondaryMinImages` (multiModel.js secondaryJobs), so "routing" them
+      // all promised a recovery that never ran (eagle: 6, 4, 4 images vs a floor of 8).
+      const floor = cfg.secondaryMinImages ?? 8
+      const viable = remainingComponents.filter((c) => c.size >= floor).length
+      const routing = cfg.secondaryModels === false ? 'secondary-model recovery is off'
+        : viable === remainingComponents.length ? 'all go to secondary-model recovery'
+          : viable ? `${viable} reach the ${floor}-image floor for secondary-model recovery; the rest stay unregistered`
+            : `none reaches the ${floor}-image floor for secondary-model recovery, so they stay unregistered`
+      log(`${remainingComponents.length} unregistered component(s) remain `
         + `(${remainingComponents.map((c) => c.size).join(', ')} images); largest starts `
         + `${remainingComponents[0].imageNames.slice(0, 4).join(', ')}`
-        + `${remainingComponents[0].size > 4 ? ', …' : ''}. Routing viable blocks to secondary-model recovery; `
+        + `${remainingComponents[0].size > 4 ? ', …' : ''}. ${routing[0].toUpperCase()}${routing.slice(1)}; `
         + `looser global PnP gates are not used.`, 'warn', 'Reconstruction')
     }
     // Final focal per sensor, from the registered cameras' K (BA writes refined
@@ -1715,6 +1734,28 @@ async function reconstructSingleModel(input, hooks = {}) {
   }
 }
 
+// A working copy of the SfM input (or of an image / pair list) for one sub-run. The
+// caller keeps the original as the pristine input for seed retries and secondary
+// models, because a run mutates its keypoints (ingest undistortion, the self-cal
+// fold) and pairs (refitted F). `descU8`, the guided-extension descriptors, is never
+// written, so every copy SHARES it: structuredClone doubled it, 128 B per keypoint —
+// 576 MB on the 4.5 M-keypoint Monster set, enough to fail the worker preflight.
+export function cloneSfmInput(value) {
+  const isList = Array.isArray(value)
+  const list = isList ? value : value?.images
+  const desc = list ? list.map((im) => im?.descU8 ?? null) : null
+  const strip = (im) => (im?.descU8 ? { ...im, descU8: null } : im)
+  const src = isList ? value.map(strip) : list ? { ...value, images: list.map(strip) } : value
+  const copy = structuredClone(src)
+  const out = isList ? copy : copy?.images
+  if (desc && out) out.forEach((im, i) => { if (desc[i] && im) im.descU8 = desc[i] })
+  // structuredClone drops the Uint32PairList prototype; re-wrap — including when the
+  // value IS a pair list (secondary jobs clone `job.pairs` directly), which the old
+  // helper skipped. A no-op for image lists (no `matches`).
+  wrapPackedMatches(isList ? copy : copy?.pairs)
+  return copy
+}
+
 // Public orchestration: build the normal primary model first, then independently
 // reconstruct each sizeable coherent block it stranded. Each secondary gets a halo
 // of registered boundary images. A similarity merge is accepted only when >=3 halo
@@ -1738,11 +1779,7 @@ export async function reconstruct(input, hooks = {}) {
   }
 
   const cfg = { ...SFM_TUNING, ...(input.settings || {}) }
-  const clone = (value) => {
-    const copy = structuredClone(value)
-    wrapPackedMatches(copy.pairs)
-    return copy
-  }
+  const clone = (value) => cloneSfmInput(value)
   // Which attempt produced the model we return. The alternate-seed guard turned a
   // 19-camera primary into 122 on B4, and the run's own metrics did NOT flag the bad
   // one — so "was a retry needed?" is part of the result, not an aside in the log.

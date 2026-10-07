@@ -999,8 +999,14 @@ target image's own mark, so it's the fitted estimate, not an independent predict
 it exists only because the guide on the marked image retires, making this the one way
 to observe the refinement where the user is looking. A "did not move" reading usually
 means the robust fit **rejected** the new mark, not that refinement is stuck.
-Guides are **advisory, never inputs to the fit**. **Marks live in scan pixels,
-cameras in the pinhole/canonical frame**: every GCP/marker triangulation (guides,
+Guides are **advisory, never inputs to the fit**. **Marks are pixel-EDGE, keypoints
+pixel-CENTRE**: a click on the middle of pixel i is stored as i + ½ (the viewer's
+`toImagePixel`), while keypoints, K and projections put it at i. The half pixel is
+applied only at the boundary — `displayFrame.js` `makeScanToPinhole` and sfm.js's
+GCP ingest take marks in (−½), `makePinholeToMark` takes camera-frame positions out
+(+½) for guides, estimates and Find-GCPs candidates. Storage never changes. (Worth
+1 cm on GeoScan checkpoints; keypoint and residual overlays are still drawn ½ px
+up-left.) **Marks live in scan pixels, cameras in the pinhole/canonical frame**: every GCP/marker triangulation (guides,
 georef fit, accuracy report, scale bars, anchored BA) maps marks through
 `core/sfm/displayFrame.js` `gcpsInPinholeFrame` first, and guides come back through
 `guideToScan`. The per-image chain comes from ONE join, `makeFrameModelResolver`
@@ -1104,7 +1110,12 @@ propagate covariance rather than retaining stale numeric sigmas.
   Rust/WASM decoder (`crates/imagecodec`, the `tiff` crate → interleaved 8-bit
   RGBA) into `tiffToDisplayBlob`; on any wasm decode failure (exotic photometric /
   JPEG-in-TIFF / float) it **falls back to the pure-JS geotiff.js path**, so no
-  input regresses. The two canvas encodes (display JPEG + lossless compute PNG)
+  input regresses. **A 16-bit source is stretched, not cut to its high byte**:
+  both paths map its 0.5 / 99.5 % levels onto 0–255 (`core/io/tonalStretch.js`, the
+  crate's `percentile_range`/`stretch_lut`; a parity case is pinned on each side, and
+  the two must change together). The high byte gave MicaSense pan frames half the
+  contrast and 1/14 of the SIFT keypoints. Safari skips the transcode and so the
+  stretch. The two canvas encodes (display JPEG + lossless compute PNG)
   are cheap and stay in JS. The original
   still lives in OPFS but is **only** ever read back to regenerate the display
   blob on restore — nothing compute-side reads it. `canDecodeTiffNatively()`
@@ -1358,6 +1369,17 @@ propagate covariance rather than retaining stale numeric sigmas.
 - Re-detecting or clearing an image's keypoints renumbers indices, so
   `useImagesStore` calls `matchesStore.removeMatchesForImage(uuid)` to drop now-stale
   matches (also on image removal).
+- **Pixel coordinates across resolutions are centre-aligned**: pixel i is centred
+  on i, and every resample (canvas `drawImage`, the dense pyramid's box halving)
+  keeps centres aligned, so a native x sits at `(x + ½)·s − ½` on a grid scaled by
+  s. Go through `core/sfm/geometry.js` `toScaledPx`/`fromScaledPx` and `scaleK`
+  (which moves cx/cy the same way) — never `x·s` or `x/s`. Detection's keypoint
+  back-mapping, `makeSampleMap`, the dense K and the undistorted export all use them.
+  The naive form is 0.75 native px off at s = 0.4, and it went unnoticed because
+  detection and dense made the same error, and SfM alone absorbs a constant shift
+  into the principal point. It shows only against independent pixels: GCP marks, a
+  calibrated principal point. Fiducial detection still maps its coarse fallback with
+  `/scale` (native refinement normally replaces it).
 - Rotation matrices are row-major `[[…],[…],[…]]`; `t` is `[x,y,z]`; camera centre
   `C = -Rᵀt`; projection matrices are flat 12-elem `[R|t]` (no K). websfm is
   OpenCV-convention (world-to-cam R,t; camera looks down **+z**, image **+y down**).

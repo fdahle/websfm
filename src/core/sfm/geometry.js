@@ -208,8 +208,21 @@ function jacobiEigen3(M) {
 }
 
 // Scale intrinsics K to a working resolution (longest side × `scale`).
+// ── Pixel coordinates across resolutions ──────────────────────────────────────
+// Pixel-centre convention: pixel i is centred on coordinate i and covers [i − ½, i + ½]
+// (keypoints, K, every sample map). Every resample in the app is centre-aligned —
+// canvas drawImage, the dense pyramid's box halving — so a native coordinate x lies
+// at (x + ½)·s − ½ on a grid scaled by s, NOT at x·s. The difference is ½ − s/2 px:
+// 0.3 px at s = 0.4, and 0.75 native px going back the other way. It cancelled while
+// detection and dense used the same scale and the same wrong formula; it surfaced as
+// a half-pixel bias against GCP marks (GeoScan checkpoints). Use these two, never x·s.
+export const toScaledPx = (x, s) => (x + 0.5) * s - 0.5
+export const fromScaledPx = (x, s) => (x + 0.5) / s - 0.5
+
+// K for a grid scaled by s (same convention as toScaledPx: the principal point is a
+// pixel coordinate, the focal a length).
 export function scaleK(K, scale) {
-  return { fx: K.fx * scale, fy: K.fy * scale, cx: K.cx * scale, cy: K.cy * scale }
+  return { fx: K.fx * scale, fy: K.fy * scale, cx: toScaledPx(K.cx, scale), cy: toScaledPx(K.cy, scale) }
 }
 
 // RGBA pixel buffer → grayscale Uint8Array (Rec. 601 luma).

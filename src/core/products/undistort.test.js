@@ -4,6 +4,7 @@ import {
   validSampleRect, cropRgba, shiftPrincipalPoint,
 } from './undistort.js'
 import { makeSampleMap } from '../sfm/displayFrame.js'
+import { toScaledPx, fromScaledPx } from '../sfm/geometry.js'
 import { undistortPixel } from '../sfm/distortion.js'
 
 const K = { fx: 800, fy: 800, cx: 320, cy: 240 }
@@ -88,11 +89,13 @@ describe('makeSampleMap scaling', () => {
     const dist = { k1: -0.1, k2: 0, k3: 0, p1: 0, p2: 0 }
     const full = makeSampleMap({ K, dist })
     const half = makeSampleMap({ K, dist, outScale: 0.5, srcScale: 0.5 })
+    // Centre-aligned grids (geometry.js toScaledPx): half-grid pixel u is native
+    // (u + ½)/0.5 − ½, and the result goes back the same way.
     for (const [u, v] of [[10, 10], [100, 60], [300, 200]]) {
-      const a = full(u / 0.5, v / 0.5)
+      const a = full(fromScaledPx(u, 0.5), fromScaledPx(v, 0.5))
       const b = half(u, v)
-      expect(Math.abs(b.x - a.x * 0.5)).toBeLessThan(1e-6)
-      expect(Math.abs(b.y - a.y * 0.5)).toBeLessThan(1e-6)
+      expect(Math.abs(b.x - toScaledPx(a.x, 0.5))).toBeLessThan(1e-6)
+      expect(Math.abs(b.y - toScaledPx(a.y, 0.5))).toBeLessThan(1e-6)
     }
   })
 

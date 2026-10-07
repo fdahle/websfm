@@ -300,9 +300,16 @@ export const useImagesStore = defineStore('images', () => {
             const srcMB = srcInfo?.srcBytes ? (srcInfo.srcBytes / 1048576).toFixed(1) : '?'
             log(
               `TIFF timing (${timings.backend ?? '?'}): ${file.name} — decode ${timings.decodeMs?.toFixed(0)}ms · repack ${timings.repackMs?.toFixed(0)}ms · JPEG ${timings.jpegMs?.toFixed(0)}ms · PNG ${timings.pngMs?.toFixed(0)}ms · total ${timings.totalMs?.toFixed(0)}ms  ` +
-              `[${p}/${srcInfo?.bitsPerSample ?? '?'}-bit/${srcInfo?.samplesPerPixel ?? '?'}spp/${c}, src ${srcMB} MB]`,
+              `[${p ?? '?'}/${srcInfo?.bitsPerSample ?? '?'}-bit/${srcInfo?.samplesPerPixel ?? '?'}spp/${c ?? '?'}, src ${srcMB} MB]`,
               'info', 'Images',
             )
+            // A 16-bit source is stretched between its 0.5 / 99.5 % levels for display
+            // and detection (core/io/tonalStretch.js) — record the mapping it got.
+            if (srcInfo?.stretch) {
+              log(`16-bit TIFF stretched to 8-bit: ${file.name} — DN ${srcInfo.stretch.lo}…${srcInfo.stretch.hi} → 0…255 `
+                + `(0.5 / 99.5 % levels; the high byte alone would span ${srcInfo.stretch.lo >> 8}…${srcInfo.stretch.hi >> 8})`,
+              'info', 'Images')
+            }
           }
           // Cache the transcode outputs in OPFS so reopening the project skips
           // the (multi-second) re-decode + re-encode — see the TIFF gotcha in

@@ -113,9 +113,20 @@ RTK/EXIF positions (quarry, GeoScan) and 15 independent GCP checkpoints (GeoScan
   priors or GCPs fix it today. Worth a look at whether the staged self-calibration
   unlocks k2/k3 on too little evidence for a flat block.
 - **GCP mark pixel convention.** The viewer stores clicks in pixel-edge coordinates (pixel
-  centre = +0.5), while SIFT keypoints use pixel-centre coordinates (centre = 0). That
-  offset is 0.5 px, about 1.5 cm on GeoScan. Measure it with `markOffsetPx: -0.5` in
-  `puti-gcps` before changing anything (Metashape marks share the click convention).
+  centre = +0.5), while keypoints use pixel-centre coordinates (centre = 0). Measured
+  2026-10-06 on GeoScan (with the antenna offset; Metashape marks share the click
+  convention): marks shifted by +0.5 / 0 / −0.5 px give checkpoints H 7.2 / 6.0 / 4.8 cm,
+  V 13.0 / 10.8 / 8.9 cm, still falling past −0.5. Two fixes the same night: the
+  keypoint back-mapping (`x / s`, not centre-aligned: 0.75 px at s = 0.4) and the mark
+  convention (−½ into the camera frame, +½ back; CLAUDE.md ▸ CRS/GCP). On the fixed
+  keypoints (`puti-arm3`) the shift curve is H 5.3 / 4.2 / 3.3 / 3.1 / 3.0 / 3.1 cm and
+  V 9.8 / 8.1 / 7.1 / 6.9 / 6.9 / 7.2 cm at +0.5 / 0 / −0.5 / −0.75 / −1.0 / −1.25 px;
+  the shipped −½ is the first half of that. **Open: a further ~0.3–0.5 px** (optimum
+  near −0.85). Not the SIFT octaves (decimation, exact) nor the resize (centre-aligned).
+  Candidates: how Metashape places marker centres, or these 15 marks. Test with marks
+  made in websfm's own viewer before tuning anything. Also: the viewer draws keypoints
+  and residual vectors in keypoint convention on an edge-convention canvas (½ px
+  up-left; cosmetic).
 - **Quarry GCPs.** Nine surveyed targets (CH1903/LV03) exist, but no image marks. Mark them
   once in the app and export, or auto-place them by projection + target detection; that
   gives quarry checkpoints too.
@@ -160,9 +171,6 @@ Related evidence: `VERIFICATION.csv` ▸ `FID-08` (the TMA set's implied 253 mm)
 ### RV — 2026-10-03 code + maths review: verified, not yet fixed
 Each item was confirmed against the code (most with a measured number); the fixed
 ones are in HANDOVER. Ordered by expected impact.
-- **Dense half-pixel scaling**: working K uses `cx·s`; area resampling needs
-  `(cx+½)s−½` (same in detection and the pyramid). Cancels only when detection and
-  dense scales match.
 - **Cross-view depth filter has no parallax gate** (COLMAP's
   `filter_min_triangulation_angle`): low-parallax views "confirm" sky, which then
   survives in the persisted maps the ortho uses as a z-buffer.
@@ -428,6 +436,87 @@ Cancel+rerun.
   rasters: pure `core/maskAuto.js` + `workers/ops/mask.js` + a strategy-picker rework
   of `AutoMaskModal.vue`. SAM2-propagation auto-masking stays parked (F12).
 
+### MEM — big runs vs the 4 GB per-isolate ceiling (from the Monster stretch run)
+Chrome caps each page's and each worker's JS heap at ~4 GB (`jsHeapSizeLimit`; the
+sparse preflight allows 86 % = 3.52 GB), and wasm32 memory at 4 GB, whatever the
+machine's RAM. A page cannot raise either. On 2026-10-07 the Monster run with the 16-bit
+stretch (4.5 M keypoints, 7.7 M matches, 534/538 cameras, 705 k points) passed the
+preflight at 3.42 / 3.52 GB, then its SfM worker died silently at the guided-extension
+step (HANDOVER ▸ B-bench ▸ Monster). In order:
+1. **Preflight counts guided extension and degrades instead of dying** (hours). Model
+   its peak (descriptors 128 B/keypoint already counted; add its per-image search
+   structures and the per-point candidate lists), and when the projection exceeds the
+   budget, turn guided extension off or thin it, logging why — never let the worker
+   die. Calibrate the model from a measured peak first: launch the bench's Chrome with
+   `--js-flags=--max-old-space-size=8192` (bench only, users cannot) and record the
+   worker's real peak per stage.
+2. **Compact keypoints and tracks in the SfM worker** (days; the real fix). Keypoints
+   are JS objects (~104 B each, `memBudget.js`) held twice (working copy + the
+   pristine retry copy): ~0.9 GB on Monster for data that fits 8 B per keypoint as
+   typed arrays. Sparse points carry a `views: Map` each. Move both to typed arrays
+   (CSR for tracks); expected to roughly halve the worker peak.
+3. **Guided extension in image batches** (moderate): today it ships every image's
+   descriptors (549 MB on Monster) and searches all at once.
+4. **Split very large blocks into overlapping sub-models and merge** (long term), on
+   the existing secondary-model similarity merge; COLMAP's route to thousands of images.
+5. **Memory64 wasm** only lifts the wasm side and Rust/wasm-bindgen support is still
+   experimental — revisit later.
+User workaround today: a lower keypoint cap (Monster would likely fit at 6,000) or fewer
+preselection neighbours.
+
+**PCG reduced solve — tune or disable before committing** (`crates/reconstruction`
+`solve_reduced`, uncommitted on 2026-10-07). On a synthetic BA-shaped system it was 43×
+faster than Cholesky (0.14 vs 5.9 s at n = 3,144, native). On quarry (347 cameras)
+it made BA *slower*: 692 s vs 579 s, total SfM 869 vs 744 s, accuracy unchanged
+(112,985 points, camera RMS 0.217 vs 0.214 m). Likely real reduced systems are far
+worse conditioned (gauge freedom, LM damping), so CG runs to its 2,000-iteration cap at
+the 10⁻¹⁰ tolerance and then pays for the Cholesky fallback too. Next: log iterations
+and fallbacks per solve, then try an inexact-Newton tolerance (~10⁻⁶ relative, as in
+Ceres' iterative Schur) with a small iteration cap, and a better preconditioner
+(Schur-Jacobi or a gauge fix). Until a bench shows a win, raise `PCG_MIN_N` so it is
+off (and adjust its dispatcher test).
+
+### ZM — Monster beach set: MicaSense Altum-PT + YellowScan LiDAR (2026-09-23 flight)
+Local folder `wbsfm/20260923_zm_micasense_afternoon` (bench config `zm-pan`): 556
+captures × 7 bands (5 MS 2064×1544, pan 4112×3008, thermal 320×256, 16-bit), ~120 m
+above ground, standalone GPS; 12 LiDAR strips (LAS 1.4 format 7, 158 M points, RD New +
+NAP) and the 200 Hz trajectory. The first set with an independent 3D surface: the bench
+grids the LiDAR at 0.5 m and scores reconstruction points on flat cells after fitting a
+shift and offset (`scripts/bench/lidar.mjs` → `lidarCheck`: tilt, dome, scatter).
+- **16-bit TIFF → 8-bit takes the high byte** (`crates/imagecodec` `>> 8`). The pan band
+  occupies levels ~24–150 (p1–p99), a bright frame 88–180, so detection sees half the
+  contrast quantised to ~100 grey levels: 1,100–6,900 SIFT keypoints per image at 2400 px,
+  response p50 0.011–0.015 (South Building 0.020). Give the *compute* image a percentile
+  stretch (or a 16-bit gray detect path) for 16-bit sources; keep the display path.
+  Measure keypoints, registered cameras and `lidarCheck` before/after on `zm-pan`.
+- **The app imports 1 of these 12 LiDAR strips.** Two limits stack. The import budget
+  (`core/io/las.js` `validateLasAllocation`: `count × (2 × recordLength + 64)` ≤ 1 GiB)
+  allows ~7.9 M points of format 7, and the strips hold 9–16 M. Behind it, `crates/lazcodec`
+  decodes one file per call and caps that at 512 MiB of records (15.9 M points × 36 B =
+  573 MB). Chunked decoding alone does not fix it: the decoded cloud keeps ~54 B/point
+  (Float64 xyz, colour and 14 attribute arrays), ~0.86 GB for one strip. The fix is a
+  streaming import that subsamples (voxel) or builds a level-of-detail tree per chunk —
+  the `CloudSource` / COPC backlog item, now with a real dataset. First piece: a
+  `LazDecoder` in the crate that owns the compressed bytes and returns N points per call.
+  The bench meanwhile decodes the first 14.9 M points of an oversized strip
+  (`decompressLazRecords` `maxPoints`).
+- **MicaSense factory calibration (optional).** The EXIF focal is right (pan: 16.6 mm ×
+  289.855 px/mm = 4,812 px; the XMP `PerspectiveFocalLength` gives 4,807.5 px), so K
+  resolves without help. The XMP also carries the principal point (mm) and a five-term
+  Brown model per band (pan: k1 −0.157, k2 0.219, k3 0.526, p1, p2). Importing it as a
+  calibrated sensor would replace self-calibration on this camera; compare the two on
+  `zm-pan` with `lidarCheck` before deciding.
+- **Fixed 2026-10-06: every imported TIFF stayed in memory.** exifr reads a whole TIFF
+  into one buffer and returns some tags as views into it; `meta.raw` (unused) and
+  `gpsAltRef` held them, so each original stayed alive (23 MB per pan frame; 12.7 GB on
+  538 frames, which the sparse memory preflight refused). `core/io/metadata.js` now keeps
+  plain values only. A 97 MP film scan pinned ~93 MB the same way.
+- **Ground captures**: the camera records from power-on; 18 of 556 captures are on the
+  ground (~48 m GPS altitude vs 160–168 m flying). The bench drops them with `minGpsAlt`;
+  the app has no equivalent (an altitude outlier flag at import would do).
+- **Later**: the LiDAR trajectory as camera priors (needs the camera↔IMU time offset and
+  lever arm), multispectral bands as a rig, LiDAR-constrained BA (F13).
+
 ### TC-2 / TC-3 — TIFF ingest follow-ups
 - **TC-2 — Rust TIFF *encoder*.** The native decoder shipped (34 s → 1 s; B0-ingest),
   so the remaining ingest cost is the **canvas PNG encode (~4 s, ~75% of ~5.3 s/img)**
@@ -670,10 +759,6 @@ in the exported HTML report (the hub already shows the histogram live).
   layer on top. Gate on someone hitting the wall with a real reference cloud.
 - **Video import** (extract frames at an interval/overlap heuristic) — cheap via
   `<video>` + canvas; opens the largest casual-user funnel.
-- **16-bit / multi-band TIFF for detection**: `utils/tiff.js` transcodes to 8-bit for
-  display+detect; scientific film scans may carry 16-bit dynamic range. Decide whether
-  detect should read a 16-bit gray path before the display transcode. Gate on a real
-  dataset that needs it.
 
 **Dense tuning**
 - Depth-map modal defaults for large film scans: `maxDim` conservative for ~10k-px

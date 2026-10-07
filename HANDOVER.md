@@ -364,6 +364,44 @@ TMA's focal was the default-FOV guess, and every self-cal step had been rejected
 25 % step bound (29.9 % pre-solve). With the guess bounds the pre-solve commits
 (10137 → 6953) and the two post-filter passes finish at 6627.
 
+**GeoScan pixel conventions (2026-10-06/07, RTK priors + antenna offset, GCP 19
+excluded, 15 checkpoints).** Marks shifted by the given amount and re-scored on one model:
+
+| build | +0.5 px | 0 | −0.5 | −0.75 | −1.0 | −1.25 |
+|---|---|---|---|---|---|---|
+| keypoints `x / s` (old) — H / V cm | 7.2 / 13.0 | 6.0 / 10.8 | 4.8 / 8.9 | | | |
+| keypoints centre-aligned — H / V cm | 5.3 / 9.8 | 4.2 / 8.1 | 3.3 / 7.1 | 3.1 / 6.9 | 3.0 / 6.9 | 3.1 / 7.2 |
+
+The centre-aligned back-mapping alone is worth 1.8 cm H / 2.7 cm V; the mark convention
+(−½, shipped) another 0.9 / 1.0 cm. From the shipped GeoScan baseline (6.1 / 16.4 cm)
+to now: 3.3 / 7.1 cm at a 2.9 cm GSD. A further ~0.35 px remains unexplained (TODO ACC).
+
+**Monster beach (`zm-pan`, MicaSense Altum-PT pan, 538 airborne frames, standalone
+GPS; YellowScan LiDAR, 158 M points as the reference surface).** Leak-fixed build, no
+16-bit stretch (the before-number):
+
+| variant | cameras | ≥3-view points | SfM | LiDAR: offset / shift | tilt | dome at 317 m | RMS (flat cells) | ≤10 cm |
+|---|---|---|---|---|---|---|---|---|
+| GPS priors | 522/538 | 299,975 | 2,572 s (BA 2,135 s) | 43.73 m / (−0.8, 0.4) m | 0.25 m/100 m | +0.49 m (bowl) | 17.8 cm | 39 % |
+| no priors | 522/538 | 299,975 | 2,137 s | 43.73 m / (−0.9, 0.4) m | 0.25 m/100 m | +0.49 m | 17.9 cm | 39 % |
+
+- The two variants are the same model: the EXIF positions carry no usable accuracy (5 m
+  default; XMP says 0 m horizontal / 507 m vertical), so the prior BA changes nothing.
+- The 43.7 m offset is the ellipsoid–NAP difference here, as expected; the half-metre
+  bowl is pure-SfM doming, as on the other nadir blocks.
+- Camera GPS residual: a near-constant 3.7 m horizontal per camera (median 3.7, p95
+  5.0), which looks like a time lag along track rather than noise.
+- Before the memory fix this run never reached SfM (renderer 12.7 GB of retained TIFFs),
+  and with the stretch it was refused by the worker preflight (4.09 GB projected; the
+  descriptor clone was 0.72 GB of that).
+- **With the stretch, after the descriptor-sharing fix (2026-10-07 night):** 4,499,603
+  keypoints, 5,396 accepted pairs / 7.7 M inliers (baseline 5,016 / 3.8 M); registration
+  reached 534/538 cameras and 705 k points before cleanup (baseline 522 / 426 k). The
+  preflight passed at 3.42 / 3.52 GB; the SfM worker then died silently after the second
+  post-filter BA, at the guided-extension step, and the bench waited 5 h until killed. No
+  LiDAR numbers for this variant yet. The bench now aborts on a page crash or 30 min
+  without a log line (`stallMinutes`). Plan: TODO ▸ MEM.
+
 **GeoScan PUTI (Metashape example "aerial images with GCPs", 444 × 24 MP Sony RX1R, RTK
 camera positions ±1–2 cm, 17 GCPs with Metashape image marks).** The bench imports the
 camera file as poses with their standard deviations (preselection uses them;
@@ -663,6 +701,32 @@ fiducials; self-calibration (A2) + fiducials (F4) are the code-side support.
 ---
 
 ## Done log (most recent first)
+
+- **2026-10-06 (night) · Monster-beach fixes: 16-bit stretch, TIFF memory, pixel
+  convention, worker descriptors.** Found by the new `zm-pan` bench (MicaSense pan +
+  YellowScan LiDAR); measured in B-bench ▸ Monster.
+  - 16-bit TIFFs are stretched between their 0.5 / 99.5 % levels instead of cut to the
+    high byte (`crates/imagecodec`, `core/io/tonalStretch.js`, parity pinned both
+    sides). Decoder now also reports bit depth / samples / stretch (TODO TC-3's log).
+  - `core/io/metadata.js` no longer keeps the exifr result (`raw`) or a typed-array
+    `gpsAltRef`: both pinned the whole TIFF buffer (renderer 12.7 GB → 0.01 GB after
+    538 pan frames).
+  - Pixel coordinates across resolutions are centre-aligned (`geometry.js`
+    `toScaledPx`/`fromScaledPx`/`scaleK`): detection back-mapping, `makeSampleMap`,
+    the dense pyramid K and depth upsample, the undistorted-workspace export.
+  - `sfm.js` `cloneSfmInput`: the per-run working copy shares the read-only
+    guided-extension descriptors (−576 MB worker heap on 4.5 M keypoints; memBudget
+    updated) and re-wraps packed matches when a bare pair list is cloned (secondary
+    jobs lost the `Uint32PairList` prototype).
+  - `scripts/wasm-stamp.mjs` is OS-independent ('/' keys, LF-normalised hashes).
+  - Log: the stranded-component line names the secondary-model size floor.
+  - GCP marks: pixel-edge (clicks) vs pixel-centre (keypoints) converted at the frame
+    boundary (`displayFrame.js` `makeScanToPinhole`/`makePinholeToMark`, sfm.js ingest,
+    Find GCPs).
+  - Bundle adjustment: reduced camera systems ≥ 600 unknowns are solved by
+    block-Jacobi PCG with Cholesky fallback (`crates/reconstruction` `solve_reduced`;
+    5.9 s → 0.14 s per solve on a synthetic 522-camera system). **Not a win yet on
+    real data:** quarry BA 579 → 692 s at unchanged accuracy (TODO ▸ MEM, PCG item).
 
 - **2026-10-06 · Ratio 0.8, cycle filter removed, default-FOV self-cal bounds, GNSS
   antenna offset, LiDAR bench.** Measured in B-bench (second post-change baseline) and
