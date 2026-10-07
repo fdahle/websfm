@@ -2,11 +2,10 @@
 //
 // Why this exists: pairwise F is fitted during MATCHING, on keypoints in raw
 // (distorted / scan) space. When a calibrated Brown model moves the keypoints at
-// SfM ingest (undistortPixel), every consumer of that stale F — the rotation-cycle
-// filter's relative rotations, the init pair's essential decomposition — keeps
+// SfM ingest (undistortPixel), every consumer of that stale F — the init pair's essential decomposition — keeps
 // operating on distorted-space geometry. For a mild lens that is a rounding error;
 // for a wide-angle (k1 ≈ −0.14 ⇒ tens of px mid-field) it systematically bends the
-// relative rotations until the whole rotation graph looks inconsistent. sfm.js
+// relative rotations. sfm.js
 // therefore re-fits F per pair on the undistorted coordinates before anything
 // reads it. The stored matches are already RANSAC inliers, so no re-RANSAC is
 // needed — a least-squares 8-point with a couple of trim rounds (drop Sampson

@@ -12,6 +12,14 @@ export const SELF_CAL_GUARD_DEFAULTS = {
   maxFocalNominalFrac: 0.35,    // nor end >35% from the ingest/EXIF focal
   maxPrincipalOffsetFrac: 0.10, // principal point must remain within 10% of image size of centre
   maxCornerShiftFrac: 0.25,     // radial displacement at a corner, relative to image diagonal
+  // When the starting focal is resolveK's default-FOV guess (fx = max(w,h): no EXIF focal,
+  // no sensor format), that "nominal" is not evidence. A 153 mm lens on a 230 mm film
+  // frame sits 33% below it, an 88 mm super-wide 62%. The 25% / 35% bounds above rejected
+  // the focal pre-solve that exists for exactly this case (CA213732V strip: a 29.9% step,
+  // fx stuck at the guess; VERIFICATION SFM-12). A guessed focal gets these instead,
+  // i.e. fx may end anywhere in [0.3, 1.7] × the guess.
+  maxGuessFocalStepFrac: 0.6,
+  maxGuessFocalNominalFrac: 0.7,
 }
 
 function radialScale(k, r2) {
@@ -39,8 +47,11 @@ function invertibleTo(k, rObs) {
  * Validate one proposed shared-intrinsics update.
  * Returns a stable plain diagnostic suitable for the run summary.
  */
-export function validateSelfCalUpdate({ before, proposed, nominalFx, width, height }, opts = {}) {
+export function validateSelfCalUpdate({ before, proposed, nominalFx, width, height, focalIsGuess = false }, opts = {}) {
   const c = { ...SELF_CAL_GUARD_DEFAULTS, ...opts }
+  const maxStep = focalIsGuess ? c.maxGuessFocalStepFrac : c.maxFocalStepFrac
+  const maxNominal = focalIsGuess ? c.maxGuessFocalNominalFrac : c.maxFocalNominalFrac
+  const nominalName = focalIsGuess ? 'the default-FOV guess' : 'nominal'
   const fail = (reason, code) => ({ ok: false, code, reason })
   if (!before || !proposed || !finite(proposed.fx) || !finite(proposed.fy)
       || proposed.fx <= 0 || proposed.fy <= 0) {
@@ -48,12 +59,12 @@ export function validateSelfCalUpdate({ before, proposed, nominalFx, width, heig
   }
 
   const stepFrac = before.fx > 0 ? Math.abs(proposed.fx - before.fx) / before.fx : 0
-  if (stepFrac > c.maxFocalStepFrac) {
-    return fail(`focal step ${(100 * stepFrac).toFixed(1)}% exceeds the ${(100 * c.maxFocalStepFrac).toFixed(0)}% safety limit`, 'focal-step')
+  if (stepFrac > maxStep) {
+    return fail(`focal step ${(100 * stepFrac).toFixed(1)}% exceeds the ${(100 * maxStep).toFixed(0)}% safety limit`, 'focal-step')
   }
   const nominalFrac = nominalFx > 0 ? Math.abs(proposed.fx - nominalFx) / nominalFx : 0
-  if (nominalFrac > c.maxFocalNominalFrac) {
-    return fail(`focal is ${(100 * nominalFrac).toFixed(1)}% from nominal, beyond the ${(100 * c.maxFocalNominalFrac).toFixed(0)}% safety limit`, 'focal-nominal')
+  if (nominalFrac > maxNominal) {
+    return fail(`focal is ${(100 * nominalFrac).toFixed(1)}% from ${nominalName}, beyond the ${(100 * maxNominal).toFixed(0)}% safety limit`, 'focal-nominal')
   }
 
   if (width > 0 && height > 0) {

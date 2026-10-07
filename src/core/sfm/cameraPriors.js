@@ -78,7 +78,26 @@ export function gcpToSurveyFrame(g, frame) {
     accuracyY: Number.isFinite(g.accuracyY) ? g.accuracyY / frame.k : g.accuracyY }
 }
 
-export function buildCameraPriors(poses, images, crs, { surveyFrame = null } = {}) {
+/**
+ * A GNSS antenna offset ("lever arm") as stored on a sensor: metres, in the OpenCV
+ * camera frame (x right, y down, z along the view). Metashape's GNSS_offset is given
+ * y-up / z-back, i.e. (x, −y, −z) in these axes. Returns null for absent, non-finite
+ * or all-zero input, so a cleared field is indistinguishable from no field.
+ */
+export function normalizeLeverArm(arm) {
+  if (!Array.isArray(arm) || arm.length !== 3) return null
+  const v = arm.map(Number)
+  if (!v.every(Number.isFinite) || v.every((x) => x === 0)) return null
+  return v
+}
+
+/**
+ * opts.surveyFrame  the projected-CRS survey frame (surveyFrameFor), or null
+ * opts.leverArmFor  imageId → the image's sensor lever arm (any shape normalizeLeverArm
+ *                   accepts); each prior then carries `leverArm`, and the constraint
+ *                   builder targets the antenna instead of the camera centre
+ */
+export function buildCameraPriors(poses, images, crs, { surveyFrame = null, leverArmFor = null } = {}) {
   const uuidByImageId = new Map(images.map((image) => [image.id, image.uuid]))
   const usable = poses
     .filter((pose) => pose.enabled !== false
@@ -114,9 +133,11 @@ export function buildCameraPriors(poses, images, crs, { surveyFrame = null } = {
     const [x, y, z] = frame ? gridToLocal([gx, gy, gz], frame) : [gx, gy, gz]
     const hScale = frame && !geographic ? 1 / frame.k : 1
     const scaled = (v) => (Number.isFinite(v) ? v * hScale : v)
+    const leverArm = leverArmFor ? normalizeLeverArm(leverArmFor(pose.imageId)) : null
     return {
       uuid,
       x, y, z,
+      ...(leverArm ? { leverArm } : {}),
       // EXIF poses retain canonical metre uncertainties. Prefer those in the
       // local metric frame; imported geographic-pose accuracies are documented
       // as physical metres and therefore pass through unchanged.

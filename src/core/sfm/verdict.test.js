@@ -114,14 +114,13 @@ describe('buildVerdict', () => {
   })
 
   // ── Contributing-cause rules ────────────────────────────────────────────────
-  // The defining property of all three: SILENT on a clean run, because none is a
-  // defect on its own. A green run that saturates the cap, skips the cycle filter and
+  // The defining property of both: SILENT on a clean run, because neither is a
+  // defect on its own. A green run that saturates the cap and
   // leaves the track filter inert is still a good reconstruction. The unconditional
   // record is the digest's job; these only explain a finding that already fired.
   const contributing = () => ({
     filterMaxReprojPx: 9.12, detectScaleFactor: 2.28, maxDim: 2400,
     kpCapHitPct: 100, maxKeypoints: 10000,
-    cycleFilterAborted: true, cycleMedianTriErrDeg: 40, degeneratePairPct: 80,
   })
   // The 4.7× tail of the 2026-08-18 DJI run. selfCalResolved is what makes it code as
   // 'reprojection-tail' rather than 'distortion' — self-cal had already run.
@@ -173,35 +172,5 @@ describe('buildVerdict', () => {
       ...healthy(), ...tail(), ...contributing(), kpCapHitPct: 50,
     })
     expect(codes(v2)).not.toContain('keypoint-cap')
-  })
-
-  // The abort has two causes with OPPOSITE fixes, and the degeneracy share is what
-  // separates them — so the finding must say which one it is looking at.
-  it('attributes a cycle-filter abort to planar geometry when pairs are degenerate', () => {
-    const v = buildVerdict({
-      ...healthy(), ...tail(), ...contributing(),
-    })
-    const c = v.findings.find((f) => f.code === 'cycle-filter-skipped')
-    expect(c.title).toMatch(/40°/)
-    expect(c.fix).toMatch(/80% of accepted pairs are H\/F-degenerate/)
-    expect(c.fix).toMatch(/not fixable by calibration/)
-  })
-
-  it('attributes a cycle-filter abort to intrinsics when few pairs are degenerate', () => {
-    const v = buildVerdict({
-      ...healthy(), ...tail(),
-      ...contributing(), degeneratePairPct: 5,
-    })
-    const c = v.findings.find((f) => f.code === 'cycle-filter-skipped')
-    expect(c.fix).toMatch(/wrong intrinsics/)
-    expect(c.fix).not.toMatch(/not fixable by calibration/) // not the planar attribution
-  })
-
-  it('an unrecorded degeneracy share falls back to the intrinsics explanation', () => {
-    const v = buildVerdict({
-      ...healthy(), ...tail(),
-      ...contributing(), degeneratePairPct: null,
-    })
-    expect(v.findings.find((f) => f.code === 'cycle-filter-skipped').fix).toMatch(/wrong intrinsics/)
   })
 })

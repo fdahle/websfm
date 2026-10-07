@@ -1,6 +1,5 @@
-// 3×3 rotation / symmetric-eigen helpers, factored out of sfm.js so both the
-// rotation-cycle match filter (cycleFilter.js) and the orchestrator can share
-// them. Pure, no module state.
+// 3×3 rotation / symmetric-eigen helpers, factored out of sfm.js so its
+// sub-modules (initPair.js) can share them. Pure, no module state.
 
 export const I3 = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
 

@@ -11,12 +11,12 @@
 // verdict-only because each is a *shape* or *cross-field* test that no single-value
 // health threshold can see (a ratio between two figures, or a share of a population).
 //
-// The last three rules are **contributing-cause** rules: they explain a finding that
+// The last two rules are **contributing-cause** rules: they explain a finding that
 // already fired rather than raising one of their own, and are deliberately silent
-// otherwise. A run can saturate the keypoint cap, skip the rotation-cycle filter and
-// leave the track filter inert while still being a perfectly good reconstruction —
+// otherwise. A run can saturate the keypoint cap and leave the track filter inert
+// while still being a perfectly good reconstruction —
 // turning that green run yellow would be a false alarm. The unconditional record of
-// all three lives in the digest (core/eval/summaryDigest.js), which is the run's
+// both lives in the digest (core/eval/summaryDigest.js), which is the run's
 // *record*; the verdict is its *alarm*, and the two have different bars.
 
 import { EVAL_THRESHOLDS, classify } from '../eval/health.js'
@@ -50,13 +50,6 @@ const GATE_HEADROOM_WARN = 2
 // KP_CAP_NOTE_PCT in summaryDigest.js.
 const KP_CAP_WARN_PCT = 90
 
-// Share of accepted pairs flagged H/F-degenerate above which the match graph's geometry
-// is substantially planar / rotation-dominated. F is not uniquely determined on planar
-// correspondences, so the essential decomposition the rotation-cycle filter depends on
-// returns an arbitrary member of a family — which is the competing explanation for a
-// filter abort, against "the intrinsics were wrong".
-const DEGENERATE_PAIR_WARN_PCT = 50
-
 const worst = (a, b) => (a === 'red' || b === 'red' ? 'red' : a === 'yellow' || b === 'yellow' ? 'yellow' : 'green')
 
 // Map a classify() tone ('ok'|'warn'|'bad'|'missing') to a verdict level, or null to
@@ -85,9 +78,6 @@ const px = (v) => (v == null ? '—' : `${v.toFixed(1)} px`)
  * @property {number} [maxDim] detection long-edge cap, px (detectConfig)
  * @property {number} [kpCapHitPct] share of images that hit the keypoint cap, %
  * @property {number} [maxKeypoints] the keypoint cap itself (for the fix text)
- * @property {boolean} [cycleFilterAborted] the rotation-cycle filter skipped itself
- * @property {number} [cycleMedianTriErrDeg] its measured median triangle cycle error
- * @property {number} [degeneratePairPct] share of accepted pairs flagged H/F-degenerate, %
  */
 
 /**
@@ -237,25 +227,6 @@ export function buildVerdict(snapshot = {}) {
       'The cap, not contrastThreshold, is selecting the keypoints, and it selects by response — '
         + 'biasing toward high-contrast texture and away from even spatial coverage. Raise maxKeypoints, '
         + 'or raise contrastThreshold so the threshold does the selecting.')
-  }
-
-  // 11. Rotation-cycle filter skipped. Reported with the degeneracy share because that
-  //     share is what distinguishes its two possible causes, and they have opposite fixes.
-  if (s.cycleFilterAborted && structuralFinding()) {
-    const dg = s.degeneratePairPct
-    const planar = dg != null && dg >= DEGENERATE_PAIR_WARN_PCT
-    add('yellow', 'cycle-filter-skipped',
-      `The rotation-cycle filter skipped itself — median triangle cycle error `
-        + `${s.cycleMedianTriErrDeg != null ? `${s.cycleMedianTriErrDeg.toFixed(0)}°` : 'above its ceiling'}`
-        + `, so false pairs were not screened before SfM.`,
-      planar
-        ? `${pct(dg)} of accepted pairs are H/F-degenerate (planar scene or rotation-dominated motion), `
-          + 'where the fundamental matrix is not uniquely determined and the filter\'s pairwise rotations '
-          + 'are meaningless. This is expected on nadir aerial blocks and is not fixable by calibration; '
-          + 'rely on the PnP gates downstream.'
-        : 'With few degenerate pairs the likelier cause is wrong intrinsics (focal or lens distortion) '
-          + 'feeding the essential decomposition. Check the fx trajectory and the composed radial terms; '
-          + 'a correct sensor definition lets the filter run.')
   }
 
   return finalize(findings)

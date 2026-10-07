@@ -35,7 +35,7 @@ import { useSensorsStore } from './useSensorsStore.js'
 import { usePosesStore } from './usePosesStore.js'
 import { useGcpsStore } from './useGcpsStore.js'
 import { useScaleBarsStore } from './useScaleBarsStore.js'
-import { buildCameraPriors, surveyFrameFor, gcpToSurveyFrame } from '../core/sfm/cameraPriors.js'
+import { buildCameraPriors, surveyFrameFor, gcpToSurveyFrame, normalizeLeverArm } from '../core/sfm/cameraPriors.js'
 import { makeFrameModelResolver, gcpsInPinholeFrame } from '../core/sfm/displayFrame.js'
 import { packSparseCloud, unpackReconstructionResult } from '../core/sfm/resultCodec.js'
 import { toMatchSpace } from '../core/features/siftDescriptors.js'
@@ -1378,10 +1378,20 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
       }))
     // Surveyed/imported and EXIF-derived camera positions; a geographic project's
     // priors get their own survey-centred metric frame (buildCameraPriors).
-    const cameraPriors = buildCameraPriors(posesStore.poses, images.value, crs, { surveyFrame })
+    // A sensor's GNSS antenna offset makes its images' priors antenna positions.
+    const armBySensor = new Map(sensors.value.map((s) => [s.id, normalizeLeverArm(s.gnssLeverArm)]))
+    const leverArmFor = (imageId) => armBySensor.get(imgById.get(imageId)?.sensorId) ?? null
+    const cameraPriors = buildCameraPriors(posesStore.poses, images.value, crs, { surveyFrame, leverArmFor })
     if (isGeographic(crs) && cameraPriors.length) {
       log(`Camera priors: ${cameraPriors.length} geographic position(s) converted to a `
         + 'survey-centred metric frame for bundle adjustment', 'info', 'Pose')
+    }
+    const withArm = cameraPriors.filter((p) => p.leverArm)
+    if (withArm.length) {
+      const arms = [...new Set(withArm.map((p) => p.leverArm.map((v) => v.toFixed(3)).join(', ')))]
+      log(`Camera priors: ${withArm.length}/${cameraPriors.length} are GNSS antenna positions, `
+        + `offset from the camera centre by (${arms.slice(0, 3).join('), (')}) m in camera axes`
+        + `${arms.length > 3 ? ', …' : ''}`, 'info', 'Pose')
     }
     return { gcps, cameraPriors, surveyFrame }
   }
@@ -1575,11 +1585,9 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
               return packed
             })(),
             // WS1: weak pairs (valid F below the accept gate) ride through with the flag.
-            // sfm.js keeps them out of the cycle filter / init / triangulation and feeds
+            // sfm.js keeps them out of init / triangulation and feeds
             // them only to PnP correspondence collection (register.js).
             inlierCount: e.inlierCount, weak: e.weak ?? false, status: 'done',
-            // The H/F planar flag from matching; read only by the rotation-cycle audit.
-            degenerate: e.degenerate ?? false,
           })),
         // GCP anchors + camera priors in one survey frame (surveyConstraintInput).
         gcps: survey.gcps,

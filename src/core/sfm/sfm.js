@@ -17,16 +17,15 @@
 //     points:  [{ x, y, z, views: [[uuid, kpIdx], …] }] }
 
 import {
-  resolveK, fundamentalToEssential,
-  recoverPose, triangulateDlt, solvePnp, bundleAdjust,
+  resolveK, triangulateDlt, solvePnp, bundleAdjust,
 } from './reconstruction.js'
 import { projectPoint, medianTriangulationAngle, triangulationAngle } from './geometry.js'
 import { undistortPixel, distortionOf } from './distortion.js'
+import { markToCentrePx } from './displayFrame.js'
 import { fitFundamental, sampsonRmsPx } from './fundamental.js'
 import { fitFiducialAffine, canonicalFrame, scanToCanonical } from './fiducials.js'
 import { calibratedFiducialPairs } from './fiducialModel.js'
 import { fitFiducialTransform } from './fiducialCalibration.js'
-import { rotationCycleFilter, reevaluateDroppedEdges } from './cycleFilter.js'
 import { makeProgressReporter, scopeProgress, RUN_BUDGET, sliceRange } from './progressPlan.js'
 import {
   toNorm, camToP34flat, reprojErr, retriangulatePairs, mergeSplitTracks,
@@ -49,13 +48,12 @@ import { buildScaleContext, describeScaleContext, resolveScaledPx } from '../sca
 import { secondaryJobs, alignSecondary, mergeAligned } from './multiModel.js'
 import { compactPointRecords } from './resultCodec.js'
 import { wrapPackedMatches } from './matchCodec.js'
-import { auditPairs } from './cycleAudit.js'
 import { compareRobustCost, projectFull } from './baAcceptance.js'
 import { guidedExtendTracks, auditGuidedAdditions } from './guidedExtension.js'
 
 // Re-export the extracted pure modules so existing importers (sfm.test.js and any
 // others that reached for these through sfm.js) keep working unchanged.
-export { rotationCycleFilter, retriangulatePairs, mergeSplitTracks, pruneFinalTwoViewTracks, completeTracks }
+export { retriangulatePairs, mergeSplitTracks, pruneFinalTwoViewTracks, completeTracks }
 
 // ── Geometry helpers ────────────────────────────────────────────────────────────
 // Depth of world point (x,y,z) along a flat 3×4 projection matrix's principal
@@ -101,10 +99,11 @@ async function reconstructSingleModel(input, hooks = {}) {
     filterMaxReprojDetectPx: cfg.filterMaxReprojPx,
     baIterations: cfg.baIterations,
     refineIntrinsics: cfg.refineIntrinsics,
-    rotationCycleFilter: settings.rotationCycleFilter !== false,
     secondaryModels: settings.secondaryModels !== false,
     selfCalMaxFocalStepFrac: cfg.selfCalMaxFocalStepFrac,
     selfCalMaxFocalNominalFrac: cfg.selfCalMaxFocalNominalFrac,
+    selfCalGuessFocalStepFrac: cfg.selfCalGuessFocalStepFrac,
+    selfCalGuessFocalNominalFrac: cfg.selfCalGuessFocalNominalFrac,
     selfCalMaxPrincipalOffsetFrac: cfg.selfCalMaxPrincipalOffsetFrac,
     selfCalMaxCornerShiftFrac: cfg.selfCalMaxCornerShiftFrac,
     cameraPositionPriors: cameraPriors.length,
@@ -114,7 +113,6 @@ async function reconstructSingleModel(input, hooks = {}) {
   // Filled in below as each stage runs; every field stays null when its stage
   // didn't run, so a missing number is never confused with a zero.
   let gateRecord = null       // resolved reprojection gates + the detection-scale factor
-  let cycleRecord = null      // rotation-cycle filter verdict + drop/re-admit counts
   let guidedRecord = null     // projection-guided track extension (guidedExtension.js)
   const guidedAdds = []       // its accepted observations, audited after the final pass
   const selfCalRecord = { requested: cfg.refineIntrinsics, resolved: null, staged: false, passes: [], adjustments: [] }
@@ -184,26 +182,19 @@ async function reconstructSingleModel(input, hooks = {}) {
   let points3d = []          // [{ x, y, z, views: Map<uuid, kpIdx> }]
 
   // Only 'done' pairs participate (the store passes those, but keep the guard
-  // so the algorithm reads identically to the original). Not const: the
-  // rotation-cycle filter (below) prunes cycle-inconsistent pairs before SfM.
+  // so the algorithm reads identically to the original).
   //
   // WS1 — strong vs weak split. A WEAK pair (valid F, enough inliers, but below the
-  // match accept gate) is a registration-only bridge: it must NEVER drive the rotation-
-  // cycle filter, init-pair selection, or fresh triangulation (its geometry isn't trusted
+  // match accept gate) is a registration-only bridge: it must NEVER drive
+  // init-pair selection or fresh triangulation (its geometry isn't trusted
   // enough to seed structure). It only contributes 2D-3D correspondences to PnP. So
   // `donePairs` (everything the strong path reads) excludes weak pairs; `weakPairs` is
   // merged back in solely for register.js's correspondence collection (`corrPairs`).
   // A REJECTED pair also carries status 'done' (with inlierCount 0 / no matches / no F),
   // so both filters must gate on inlierCount — otherwise rejects ride into donePairs and
   // the graph-health union-find fuses the whole set into one phantom component.
-  let donePairs = pairs.filter((e) => e.status === 'done' && !e.weak && e.inlierCount > 0)
+  const donePairs = pairs.filter((e) => e.status === 'done' && !e.weak && e.inlierCount > 0)
   const weakPairs = pairs.filter((e) => e.status === 'done' && e.weak && e.inlierCount > 0)
-  // WS3: pairs the rotation-cycle filter dropped, stashed for post-self-cal re-admission
-  // (they may be TRUE edges the filter mis-judged with pre-fold, uncorrected rotations).
-  let droppedPairs = []
-  // The relative rotations the filter judged ('a--b' → R), kept for the post-solve
-  // audit against the finished model (cycleAudit.js).
-  let cycleRotations = null
 
   // Reprojection-error statistics (pixels) over every observation currently in
   // the model: project each 3D point into each camera that sees it and compare
@@ -501,8 +492,8 @@ async function reconstructSingleModel(input, hooks = {}) {
 
     // ── Re-fit pairwise F on the moved keypoints ─────────────────────────────
     // Each pair's F was fitted during matching, on RAW (distorted / scan-space)
-    // keypoints. Everything that reads e.F — the rotation-cycle filter's relative
-    // rotations, the init pair's essential decomposition — would otherwise keep
+    // keypoints. Everything that reads e.F — the init pair's essential
+    // decomposition — would otherwise keep
     // operating on the stale geometry, which for a wide-angle lens (tens of px of
     // displacement) systematically bends every relative rotation. The stored
     // matches are already RANSAC inliers, so a trimmed least-squares 8-point on
@@ -569,100 +560,6 @@ async function reconstructSingleModel(input, hooks = {}) {
         + `Wrong intrinsics distort the geometry and commonly prevent cameras from registering; `
         + `supply a focal length or sensor size for reliable results.`,
         defaultKCount === imgs.length ? 'warn' : 'info', 'Reconstruction')
-    }
-
-    // ── Rotation-cycle consistency filter ────────────────────────────────────
-    // Drop verified-but-false pairs (spurious epipolar fits on repetitive
-    // structure) that no count/ratio gate can catch: their relative rotation is
-    // inconsistent with the rest of the match graph. See rotationCycleFilter.
-    if (settings.rotationCycleFilter !== false && donePairs.length >= 3) {
-      report('cycleFilter', 0.5, 'Checking rotation-cycle consistency…', { done: 0, total: imgs.length })
-      // Relative rotation R (idA→idB) per pair, via essential decomposition. The
-      // pose args only disambiguate the cheirality branch, so post-undistort vs
-      // raw keypoints barely shift R — F/K drive it. Skip pairs without an F.
-      const relRot = async (e) => {
-        if (!e.F) return null
-        const iA = imageByUuid(e.idA), iB = imageByUuid(e.idB)
-        if (!iA || !iB) return null
-        const E = fundamentalToEssential(e.F, Kmap.get(e.idA), Kmap.get(e.idB))
-        const pose = await recoverPose(
-          e.matches.map(([ia]) => iA.keypoints[ia]),
-          e.matches.map(([, ib]) => iB.keypoints[ib]),
-          E, Kmap.get(e.idA), Kmap.get(e.idB),
-        )
-        return pose ? pose.R : null
-      }
-      const Rs = await Promise.all(donePairs.map(relRot))
-      // Cache each pair's pre-fold rotation so the re-admission pass (WS3) can tell
-      // which survived and recompute only what it needs after the self-cal fold.
-      const relRotByPid = new Map()
-      const pkId = (a, b) => (a < b ? `${a}--${b}` : `${b}--${a}`)
-      donePairs.forEach((e, i) => relRotByPid.set(pkId(e.idA, e.idB), Rs[i]))
-      cycleRotations = relRotByPid
-      const { drop, summary } = rotationCycleFilter(
-        donePairs.map((e, i) => ({ idA: e.idA, idB: e.idB, R: Rs[i], inliers: e.inlierCount })),
-        {
-          cycleErrorDeg: settings.cycleErrorDeg,
-          minTriangles: settings.cycleMinTriangles,
-          minSupport: settings.cycleMinSupport,
-          // WS3: never drop the sole link between two components — severing the graph is
-          // unrecoverable, whereas a bad pose is caught downstream by the PnP gates.
-          protectBridges: true,
-        },
-      )
-      // The filter's verdict is a standing open question (it has never engaged on a
-      // baseline, and for opposite reasons at each end — see TODO ▸ RS), so record the
-      // numbers that decide its fate rather than only logging them.
-      cycleRecord = {
-        aborted: !!summary.aborted,
-        candidates: donePairs.length,
-        triangles: summary.triangles ?? null,
-        medianTriErrDeg: summary.medianTriErrDeg ?? null,
-        effErrDeg: summary.effErrDeg ?? null,
-        abortErrDeg: summary.abortErrDeg ?? null,
-        dropped: summary.aborted ? 0 : drop.length,
-        bridgeProtected: summary.bridgeProtected ?? 0,
-        readmitted: 0,
-      }
-      if (summary.aborted) {
-        log(`rotation-cycle filter SKIPPED — median triangle cycle error `
-          + `${summary.medianTriErrDeg.toFixed(1)}° (over ${summary.triangles} triangles) is far beyond the `
-          + `${summary.abortErrDeg.toFixed(0)}° sanity ceiling, so the pairwise rotations are globally `
-          + `untrustworthy and dropping edges would execute true pairs. Common causes: wrong or `
-          + `uncalibrated intrinsics (focal / lens distortion) or many low-parallax rotation-only pairs. `
-          + `Keeping all ${donePairs.length} pairs.`, 'warn', 'Reconstruction')
-      } else if (drop.length) {
-        const nm = (u) => imageByUuid(u)?.name ?? u
-        const pk = (a, b) => (a < b ? `${a}--${b}` : `${b}--${a}`)
-        const rm = new Set(drop.map((d) => pk(d.idA, d.idB)))
-        const needSupport = settings.cycleMinSupport ?? 0.3
-        // One summary warn + worst 10 (avoid burying the log under hundreds of
-        // lines); the full per-pair list stays available at debug.
-        const worst = [...drop].sort((a, b) => a.ratio - b.ratio).slice(0, 10)
-        const worstStr = worst.map((d) =>
-          `${nm(d.idA)}↔${nm(d.idB)} ${d.good}/${d.tri} (${(100 * d.ratio).toFixed(0)}%, ${d.inliers} inl)`).join('; ')
-        log(`rotation-cycle filter removed ${drop.length}/${donePairs.length} pair(s) `
-          + `weighted-consistent in <${(100 * needSupport).toFixed(0)}% of their triangles `
-          + `(threshold ${summary.effErrDeg.toFixed(1)}°, median tri-error ${summary.medianTriErrDeg.toFixed(1)}° `
-          + `over ${summary.triangles} triangles). Worst: ${worstStr}`, 'warn', 'Reconstruction')
-        for (const d of drop) {
-          log(`rotation-cycle filter dropped ${nm(d.idA)} ↔ ${nm(d.idB)} — `
-            + `cycle-consistent in only ${d.good}/${d.tri} triangles `
-            + `(${(100 * d.ratio).toFixed(0)}%, ${d.inliers} inliers) — likely false match`,
-            'debug', 'Reconstruction')
-        }
-        // Stash the dropped entries so the post-fold re-admission (WS3) can revisit
-        // them once the keypoints are self-cal-corrected.
-        droppedPairs = donePairs.filter((e) => rm.has(pk(e.idA, e.idB)))
-        donePairs = donePairs.filter((e) => !rm.has(pk(e.idA, e.idB)))
-        log(`${donePairs.length} verified pair(s) remain after cycle filter`
-          + `${summary.bridgeProtected ? ` (${summary.bridgeProtected} bridge edge(s) protected from dropping)` : ''}`,
-          'info', 'Reconstruction')
-      } else {
-        log('rotation-cycle filter — all pairs cycle-consistent '
-          + `(threshold ${summary.effErrDeg.toFixed(1)}°, median tri-error ${summary.medianTriErrDeg.toFixed(1)}°)`,
-          'debug', 'Reconstruction')
-      }
     }
 
     // Two-view initialisation + seed selection lives in initPair.js. It probes
@@ -839,7 +736,7 @@ async function reconstructSingleModel(input, hooks = {}) {
     const registeredUuids = new Set([bestPair.idA, bestPair.idB])
     await registerImages({
       imgs, donePairs, Kmap, cfg,
-      // corrPairs = strong (post-cycle-filter) + weak bridges. register.js draws PnP
+      // corrPairs = strong + weak bridges. register.js draws PnP
       // correspondences from this superset but triangulates fresh structure only from
       // donePairs — weak pairs extend registration reach without seeding geometry.
       corrPairs: [...donePairs, ...weakPairs],
@@ -983,15 +880,20 @@ async function reconstructSingleModel(input, hooks = {}) {
           const uuid = uuidList[ci]
           const img = imageByUuid(uuid)
           const sid = img?.sensorId ?? `image:${uuid}`
-          const nominalFx = intrinsicsRecord.get(sid)?.fxNominal ?? kList[ci]?.fx
+          const rec = intrinsicsRecord.get(sid)
+          const nominalFx = rec?.fxNominal ?? kList[ci]?.fx
+          // A default-FOV focal is a guess, not a measurement: wide bounds (selfCalGuard.js).
+          const focalIsGuess = !!rec?.source?.startsWith('default')
           const width = img?.meta?.width ?? img?.width ?? 0
           const height = img?.meta?.height ?? img?.height ?? 0
           const proposed = result.intrinsics[ci]
           const verdict = validateSelfCalUpdate({
-            before: kList[ci], proposed, nominalFx, width, height,
+            before: kList[ci], proposed, nominalFx, width, height, focalIsGuess,
           }, {
             maxFocalStepFrac: cfg.selfCalMaxFocalStepFrac,
             maxFocalNominalFrac: cfg.selfCalMaxFocalNominalFrac,
+            maxGuessFocalStepFrac: cfg.selfCalGuessFocalStepFrac,
+            maxGuessFocalNominalFrac: cfg.selfCalGuessFocalNominalFrac,
             maxPrincipalOffsetFrac: cfg.selfCalMaxPrincipalOffsetFrac,
             maxCornerShiftFrac: cfg.selfCalMaxCornerShiftFrac,
           })
@@ -1391,29 +1293,26 @@ async function reconstructSingleModel(input, hooks = {}) {
     // Track completion to a fixpoint (tracks.js `completeTracks`, COLMAP's
     // CompleteTracks) against the CURRENT poses. Registration's fold judged
     // observations against rough poses and pre-self-cal keypoints; retriangulation
-    // creates only 2-view points; and pairs the rotation-cycle filter dropped never
-    // fed a track (re-admission only runs while images are unregistered). Runs after
+    // creates only 2-view points. Runs after
     // the retriangulation/merge below and before each post-filter pass, so every added
     // observation is then filtered and bundle-adjusted like any other. Gate = the
     // tight track-filter threshold, whichever pass it precedes.
     const completeTracksFinal = (label) => {
       rebuildViewIndex()
       const before = trackHist()
-      const extra = cfg.completeTracksDroppedPairs ? droppedPairs : []
       const res = completeTracks({
-        points3d, cameras, pairs: donePairs, extraPairs: extra, keypointOf,
+        points3d, cameras, pairs: donePairs, keypointOf,
         maxReprojPx: filterMaxReprojPx, maxRounds: cfg.completeTracksMaxRounds,
         index: viewIndex, addView,
       })
       const after = trackHist()
       trackCompletionRecord.push({
-        stage: label, added: res.added, addedExtra: res.addedExtra, extraPairs: extra.length,
+        stage: label, added: res.added,
         rounds: res.rounds, lifted: res.lifted, gatePx: filterMaxReprojPx, before, after,
       })
-      const total = res.added + res.addedExtra
+      const total = res.added
       if (total) {
-        log(`${label} track completion +${total} observation(s) (${res.added} via verified pairs`
-          + `${extra.length ? `, ${res.addedExtra} via ${extra.length} cycle-filter-dropped pair(s)` : ''}; `
+        log(`${label} track completion +${total} observation(s) (`
           + `${res.rounds} round(s), ≤${filterMaxReprojPx.toFixed(1)}px) — ${res.lifted} point(s) lifted to ≥3 views; `
           + `track lengths (2/3/4+ view) ${before.t2}/${before.t3}/${before.t4} → ${after.t2}/${after.t3}/${after.t4}`,
         'info', 'Reconstruction')
@@ -1607,86 +1506,6 @@ async function reconstructSingleModel(input, hooks = {}) {
           + `observation's ${f(audit.restMedianPx)}px / ${f(audit.restP90Px)}px`, 'info', 'Reconstruction')
       }
 
-      // ── WS3 final second-chance sweep ────────────────────────────────────────
-      // The rotation-cycle filter ran BEFORE self-calibration, so it may have dropped
-      // TRUE edges whose rotations only looked inconsistent under the uncorrected
-      // intrinsics. Now that the keypoints + Kmap are folded, re-judge those dropped
-      // edges (re-fit F on the folded keypoints, recompute rotations for candidates AND
-      // survivors, vote against the active graph) and re-admit the consistent ones; then
-      // run one more registration sweep (rescue off) in case a re-admitted bridge lets a
-      // stranded camera resect. Only worth it when images remain unregistered.
-      const stillUnregistered = imgs.filter((im) => !cameras.has(im.uuid))
-      if (droppedPairs.length && stillUnregistered.length && cameras.size >= 2 && points3d.length >= 10) {
-        const pkId = (a, b) => (a < b ? `${a}--${b}` : `${b}--${a}`)
-        // Re-fit F on the folded keypoints, then recover the relative rotation.
-        const relRotFolded = async (e) => {
-          const iA = imageByUuid(e.idA), iB = imageByUuid(e.idB)
-          if (!iA || !iB || (e.matches?.length ?? 0) < 8) return null
-          const ptsA = e.matches.map(([ia]) => iA.keypoints[ia])
-          const ptsB = e.matches.map(([, ib]) => iB.keypoints[ib])
-          const fit = fitFundamental(ptsA, ptsB)
-          if (!fit) return null
-          const Emat = fundamentalToEssential(fit.F, Kmap.get(e.idA), Kmap.get(e.idB))
-          const pose = await recoverPose(ptsA, ptsB, Emat, Kmap.get(e.idA), Kmap.get(e.idB))
-          return pose ? { R: pose.R, F: fit.F } : null
-        }
-        const activeEdges = []
-        for (const e of donePairs) {
-          const r = await relRotFolded(e)
-          if (r) activeEdges.push({ idA: e.idA, idB: e.idB, R: r.R, inliers: e.inlierCount })
-        }
-        const candRot = []
-        for (const e of droppedPairs) {
-          const r = await relRotFolded(e)
-          if (r) candRot.push({ entry: e, R: r.R, F: r.F })
-        }
-        const { readmit } = reevaluateDroppedEdges(
-          activeEdges,
-          candRot.map((c) => ({ idA: c.entry.idA, idB: c.entry.idB, R: c.R, inliers: c.entry.inlierCount })),
-          { cycleErrorDeg: settings.cycleErrorDeg, minTriangles: settings.cycleMinTriangles, minSupport: settings.cycleMinSupport },
-        )
-        if (readmit.length) {
-          const readmitSet = new Set(readmit.map((r) => pkId(r.idA, r.idB)))
-          for (const c of candRot) {
-            if (!readmitSet.has(pkId(c.entry.idA, c.entry.idB))) continue
-            c.entry.F = c.F // adopt the folded-keypoint refit
-            donePairs.push(c.entry)
-          }
-          droppedPairs = droppedPairs.filter((e) => !readmitSet.has(pkId(e.idA, e.idB)))
-          if (cycleRecord) cycleRecord.readmitted = readmit.length
-          const nm = (u) => imageByUuid(u)?.name ?? u
-          log(`re-admitted ${readmit.length} cycle-filter-dropped pair(s) after self-cal `
-            + `(${readmit.slice(0, 6).map((r) => `${nm(r.idA)}↔${nm(r.idB)}`).join(', ')}${readmit.length > 6 ? ', …' : ''}); `
-            + `re-attempting registration`, 'info', 'Reconstruction')
-          const before = cameras.size
-          await registerImages({
-            imgs, donePairs, Kmap, cfg, finalSweep: true,
-            corrPairs: [...donePairs, ...weakPairs],
-            cameras, viewIndex, registeredUuids,
-            getPoints3d: () => points3d,
-            addView, rebuildViewIndex, foldOneEndpointMatches, mergeTracks,
-            runBundleAdjust, filterTracks, modelReprojStats, imageByUuid, numStats,
-            log, onProgress,
-            // This second-chance sweep runs AFTER the track-filter passes, so it
-            // reports there rather than rewinding to the register phase — the bar is
-            // monotonic and would simply stall for the duration otherwise.
-            reportPhase: (local, label, counts) => report('trackFilter', 1, label, counts),
-          })
-          if (cameras.size > before) {
-            log(`final sweep registered ${cameras.size - before} more camera(s) `
-              + `(${cameras.size}/${imgs.length}); re-solving`, 'info', 'Reconstruction')
-            await runBundleAdjust('final second-chance bundle adjustment', baIterations,
-              cfg.selfCalStaged ? stagedSelfCalTerms({ nCams: cameras.size, nObs: points3d.reduce((s, p) => s + p.views.size, 0) }) : refineIntrinsics)
-            filterTracks({ maxReprojPx: filterMaxReprojPx, minTriAngleDeg: filterMinTriAngleDeg })
-          } else {
-            log('final sweep re-admitted pairs but registered no new cameras', 'debug', 'Reconstruction')
-          }
-        } else {
-          log(`re-admission — 0/${droppedPairs.length} dropped pair(s) cleared the `
-            + `consistency vote on the self-calibrated graph`, 'debug', 'Reconstruction')
-        }
-      }
-
       log('bundle adjustment + filtering complete', 'success', 'Reconstruction')
     } else {
       log(`bundle adjustment skipped (cameras=${cameras.size}, `
@@ -1701,26 +1520,6 @@ async function reconstructSingleModel(input, hooks = {}) {
       await runGcpAnchoredBundleAdjust()
     }
     markStage('bundleAdjust')
-
-    // Audit the rotation-cycle filter against the finished model: which dropped pairs
-    // were false, which were true but carried a wrong rotation estimate, and which were
-    // true AND correctly estimated (dropped for other edges' sake). Kept pairs are the
-    // reference bins. Diagnosis only; nothing here changes the model.
-    if (cycleRotations && cycleRecord && !cycleRecord.aborted && cameras.size >= 2) {
-      const audit = (list) => auditPairs({ pairs: list, rotations: cycleRotations, cameras, keypointOf,
-        epipolarPx: filterMaxReprojPx, rotTolDeg: cycleRecord.effErrDeg ?? 5 })
-      const dropped = audit(droppedPairs), kept = audit(donePairs)
-      const fmt = (r) => `${r.bins.false} false / ${r.bins.badRot} true-with-wrong-rotation / `
-        + `${r.bins.goodRot} true-with-correct-rotation (planar-flagged ${r.degenerate.false}/${r.degenerate.badRot}/`
-        + `${r.degenerate.goodRot}; median rotation error ${r.medianRotErrDeg?.toFixed(1) ?? '–'}°)`
-      log(`rotation-cycle audit vs the final model (≤${filterMaxReprojPx.toFixed(1)}px epipolar, `
-        + `≤${(cycleRecord.effErrDeg ?? 5).toFixed(1)}° rotation) — dropped ${droppedPairs.length}: ${fmt(dropped)}; `
-        + `kept ${donePairs.length}: ${fmt(kept)}`, 'info', 'Reconstruction')
-      cycleRecord.audit = {
-        dropped: { bins: dropped.bins, degenerate: dropped.degenerate, medianRotErrDeg: dropped.medianRotErrDeg },
-        kept: { bins: kept.bins, degenerate: kept.degenerate, medianRotErrDeg: kept.medianRotErrDeg },
-      }
-    }
 
     // The incremental solver needs 2-view points to bootstrap and register cameras,
     // but final products do not need to expose them when a strong multi-view core is
@@ -1863,7 +1662,6 @@ async function reconstructSingleModel(input, hooks = {}) {
       // Run record (baseline bookkeeping) — see the runConfig comment at the top.
       config: runConfig,
       gates: gateRecord,
-      cycleFilter: cycleRecord ? { ...cycleRecord, remainingPairs: donePairs.length } : null,
       guidedExtension: guidedRecord,
       selfCal: selfCalRecord,
       trackCompletion: trackCompletionRecord,

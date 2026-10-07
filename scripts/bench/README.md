@@ -80,6 +80,36 @@ change can be judged as more correct rather than merely larger. Run it with
 `posePriors: false`. Otherwise bundle adjustment has already been pulled towards the same
 positions, and the check is no longer independent.
 
+## Accuracy: LiDAR surface (`lidarCheck`)
+
+With `reference.lidar` (`dir`, `crs`, `cell`, `flatRangeM`; see `lidar.mjs`), the strips
+are decoded once and binned into a height grid, cached under `bench-out/cache/`. Each
+reconstruction then exports its ≥3-view points in the `positionCheck` ENU frame, and the
+runner maps them to the LiDAR CRS. Only cells whose LiDAR heights span ≤ `flatRangeM`
+count, because on slopes, edges and vegetation the two sensors legitimately differ.
+
+The camera GPS that defines the frame may be metres off, and ellipsoidal where the
+LiDAR uses a national height datum. The check therefore fits a horizontal shift and a
+vertical offset first, and reports only the shape that remains: `rmsM`, `medianAbsM`,
+`p90AbsM`, `within10cm`, the block tilt (`tiltPer100m`) and the dome (`domeAtEdgeM`,
+the quadratic term at the 95 % radius; positive means a bowl).
+
+## More config keys
+
+- `recursive: true`: walk sub-folders (a MicaSense SET splits captures into 000/001/…).
+  The image name is the basename.
+- `minGpsAlt`: drop images whose EXIF GPS altitude is below this, for example ground
+  captures before takeoff.
+- A variant's `recon.leverArm: true` sets `reference.leverArm` on every sensor
+  (`gnssLeverArm`), so camera priors are treated as antenna positions. Without it the
+  arm is used only to evaluate camera positions.
+- `stallMinutes` (default 30): abort the run when no log line arrives for this long,
+  or at once if the page crashes. A worker that dies of memory otherwise leaves the
+  bench waiting forever. Each stage also logs the renderer heap before/after a GC.
+- `reference.markOffsetsPx: [-0.5, 0.5]` re-scores the checkpoints at shifted mark
+  conventions on the same model; `reference.excludeGcps` keeps known-bad GCPs out of
+  the RMS (they are still listed).
+
 ## Notes
 
 - Images are fed in sorted filename order. The UI uses whatever order the file picker

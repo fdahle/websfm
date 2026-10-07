@@ -100,6 +100,27 @@ export function cloudToLaz(points, { crsCode = null, geographic = false, compres
 // LAZ bytes → the flat cloud shape, via the injected decompressor:
 // (vlrData, compressed, numPoints, pointSize) → Uint8Array of raw records.
 export function parseLaz(buffer, { decompress, onLog } = {}) {
+  const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer)
+  const { header: h, records } = decompressLazRecords(bytes, {
+    decompress,
+    // Include both this module's copy and the codec's input copy in the memory budget.
+    beforeDecompress: (hdr) => validateLasAllocation(hdr.count, hdr.recordLength,
+      bytes.byteLength + 2 * (bytes.byteLength - hdr.offsetToPoints)),
+  })
+  const cloud = decodeLasPoints(records, h.count, h.recordLength, h.format, h.scale, h.offset)
+  onLog?.(`LAZ: read ${h.count.toLocaleString()} points (v${h.versionMajor}.${h.versionMinor}, `
+    + `format ${h.format}${cloud.col ? ', RGB' : ''})`, 'info', 'Import')
+  return cloud
+}
+
+// LAZ bytes → { header, records }: the raw LAS point records, still quantized, without
+// building the flat cloud. parseLaz is this plus decodeLasPoints; a caller that only
+// streams the records (binning a reference cloud into a grid) skips the per-point
+// arrays. `beforeDecompress(header)` may throw to refuse an allocation. `maxPoints`
+// decodes only the first N records (the codec has no streaming decoder and caps one
+// call at 512 MiB of records); the returned header's `count` is then N, and
+// `truncatedFrom` holds the file's own count.
+export function decompressLazRecords(buffer, { decompress, beforeDecompress = null, maxPoints = Infinity } = {}) {
   if (typeof decompress !== 'function') {
     throw new Error('parseLaz: no LAZ decompressor supplied (the lazcodec WASM module failed to load)')
   }
@@ -112,17 +133,14 @@ export function parseLaz(buffer, { decompress, onLog } = {}) {
   if (!lazVlr) {
     throw new Error('LAZ file has no "laszip encoded" VLR (record 22204) — cannot know how the points were coded')
   }
+  const count = Math.min(h.count, Math.max(0, Math.floor(maxPoints)))
+  const header = count < h.count ? { ...h, count, truncatedFrom: h.count } : h
+  beforeDecompress?.(header)
   // Keep the caller's file unchanged. The codec seeks within the point block,
   // whereas the file's chunk-table pointer is relative to the whole LAS file.
-  // Include both this copy and the codec's input copy in the memory budget.
-  validateLasAllocation(h.count, h.recordLength, bytes.byteLength + 2 * (bytes.byteLength - h.offsetToPoints))
   const compressed = new Uint8Array(bytes.subarray(h.offsetToPoints))
   relocateChunkTable(compressed, lazVlr.data, -h.offsetToPoints)
-  const records = decompress(lazVlr.data, compressed, h.count, h.recordLength)
-  const cloud = decodeLasPoints(records, h.count, h.recordLength, h.format, h.scale, h.offset)
-  onLog?.(`LAZ: read ${h.count.toLocaleString()} points (v${h.versionMajor}.${h.versionMinor}, `
-    + `format ${h.format}${cloud.col ? ', RGB' : ''})`, 'info', 'Import')
-  return cloud
+  return { header, records: decompress(lazVlr.data, compressed, count, h.recordLength) }
 }
 
 // LASzip compressor types 2 (pointwise chunked) and 3 (layered/COPC) have

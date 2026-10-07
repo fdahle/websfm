@@ -324,11 +324,6 @@ export function useQualityReport() {
         maxDim: detectConfig.value?.maxDim ?? null,
         maxKeypoints: detectConfig.value?.maxKeypoints ?? null,
         kpCapHitPct: detectConfig.value?.kpCapHitPct ?? null,
-        cycleFilterAborted: !!recon.summary?.cycleFilter?.aborted,
-        cycleMedianTriErrDeg: recon.summary?.cycleFilter?.medianTriErrDeg ?? null,
-        degeneratePairPct: matchesStore.matchRun?.degenerateOf
-          ? (100 * matchesStore.matchRun.degenerate) / matchesStore.matchRun.degenerateOf
-          : null,
       })
       : null
 

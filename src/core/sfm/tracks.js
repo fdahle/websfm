@@ -185,15 +185,10 @@ export function mergeSplitTracks({ points3d, cameras, pairs, keypointOf, maxRepr
 // live keypoint→point `index` + `addView` so its index stays consistent; standalone
 // callers omit both and get a private index.
 //
-// `extraPairs` (e.g. pairs the rotation-cycle filter dropped) feed completion only —
-// they never seed or triangulate structure — and every observation they add must
-// pass the same reprojection gate against a point the trusted pairs built. Counted
-// apart so their effect is visible in the log.
-//
-// Returns { added, addedExtra, rounds, lifted } — `lifted` = points that had ≤2 views
+// Returns { added, rounds, lifted } — `lifted` = points that had ≤2 views
 // before and ≥3 after, i.e. what the final 2-view prune no longer removes.
 export function completeTracks({
-  points3d, cameras, pairs, extraPairs = [], keypointOf, maxReprojPx,
+  points3d, cameras, pairs, keypointOf, maxReprojPx,
   maxRounds = 1, index = null, addView = null,
 }) {
   const idx = index ?? buildViewIndex(points3d)
@@ -225,16 +220,14 @@ export function completeTracks({
     }
     return n
   }
-  let added = 0, addedExtra = 0, rounds = 0
+  let added = 0, rounds = 0
   while (rounds < maxRounds) {
     rounds++
     const a = sweep(pairs)
-    const b = extraPairs.length ? sweep(extraPairs) : 0
     added += a
-    addedExtra += b
-    if (!a && !b) break
+    if (!a) break
   }
   let lifted = 0
   for (const [pt, before] of sizeBefore) if (before <= 2 && pt.views.size >= 3) lifted++
-  return { added, addedExtra, rounds, lifted }
+  return { added, rounds, lifted }
 }

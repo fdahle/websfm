@@ -130,10 +130,6 @@ const B4 = {
     },
     intrinsics: [{ sensorId: 's1', label: 'Canon', fxNominal: 2389.3, fxFinal: 2565.9, deltaPct: 7.39, source: 'exif' }],
     selfCalDistortion: [{ sensorId: 's1', k1: -0.0251, k2: 0, k3: 0, fitRmsPx: 0.153 }],
-    cycleFilter: {
-      aborted: true, candidates: 647, triangles: 2010, medianTriErrDeg: 42.3,
-      effErrDeg: 30, dropped: 0, readmitted: 0, bridgeProtected: 0, remainingPairs: 647,
-    },
     secondaryRecovery: {
       jobs: 1, merged: [],
       separate: [{ name: 'Secondary sparse 1', cameras: 20, points: 6382, sharedCameras: 12, reason: 'position RMS 14.4%' }],
@@ -165,14 +161,13 @@ describe('buildProjectDigest — baseline record', () => {
     expect(buildProjectDigest(INPUT).config).toEqual({ detect: null, match: null, sparse: null, dense: null })
   })
 
-  it('carries the seed decision, gates, self-cal and cycle-filter records', () => {
+  it('carries the seed decision, gates and self-cal records', () => {
     const d = buildProjectDigest(B4).diagnostics
     expect(d.seed).toMatchObject({ nameA: 'P1180215', readyViews: 23 })
     expect(d.attempts.retriesRun).toBe(0)
     expect(d.gates.detectScaleFactor).toBeCloseTo(2.53)
     expect(d.selfCal.passes).toHaveLength(2)
     expect(d.intrinsics[0]).toMatchObject({ fxNominal: 2389.3, fxFinal: 2565.9 })
-    expect(d.cycleFilter.aborted).toBe(true)
     expect(d.secondaryRecovery.separate[0].cameras).toBe(20)
     expect(d.fingerprints.matches).toBe('fnv1a32:abcdef01')
     expect(d.matchGates).toMatchObject({ gated: 7446, subsetGateActive: true })
@@ -210,11 +205,6 @@ describe('digestToMarkdown — baseline record', () => {
   it('reports the resolved pixel gates and the match gate tally', () => {
     expect(md).toContain('**Reprojection gates**: ×2.53')
     expect(md).toContain('7446 subset-gated')
-  })
-
-  it('reports the cycle filter skipping above its ceiling', () => {
-    expect(md).toContain('SKIPPED (above sanity ceiling)')
-    expect(md).toContain('42.3°')
   })
 
   it('reports separate secondary models and reproducibility fingerprints', () => {
@@ -323,14 +313,14 @@ describe('digest — track completion record', () => {
 
   it('sums the final-stage passes and lists each one', () => {
     const rows = [
-      { stage: 'post-BA', added: 1200, addedExtra: 300, rounds: 3, lifted: 900, before: { t2: 39000 }, after: { t2: 38100 } },
-      { stage: 'pre-filter pass 1', added: 40, addedExtra: 0, rounds: 2, lifted: 25, before: { t2: 38100 }, after: { t2: 38075 } },
+      { stage: 'post-BA', added: 1200, rounds: 3, lifted: 900, before: { t2: 39000 }, after: { t2: 38100 } },
+      { stage: 'pre-filter pass 1', added: 40, rounds: 2, lifted: 25, before: { t2: 38100 }, after: { t2: 38075 } },
     ]
     const d = buildProjectDigest(withCompletion(rows))
     expect(d.diagnostics.trackCompletion).toHaveLength(2)
     const md = digestToMarkdown(d)
-    expect(md).toContain('**Track completion** (final stage): +1240 obs via verified pairs, +300 via cycle-dropped pairs, 925 point(s) lifted to ≥3 views over 2 pass(es)')
-    expect(md).toContain('post-BA: +1200/+300 in 3 round(s), lifted 900 (2-view 39000 → 38100)')
+    expect(md).toContain('**Track completion** (final stage): +1240 obs via verified pairs, 925 point(s) lifted to ≥3 views over 2 pass(es)')
+    expect(md).toContain('post-BA: +1200 in 3 round(s), lifted 900 (2-view 39000 → 38100)')
   })
 
   it('renders nothing for a run that predates the record', () => {

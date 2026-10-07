@@ -36,4 +36,34 @@ describe('validateSelfCalUpdate', () => {
     expect(validateSelfCalUpdate(input({ k1: -10 })).code).toBe('radial-fold')
     expect(validateSelfCalUpdate(input({ cx: 2200 })).code).toBe('principal-point')
   })
+
+  // The CA213732V strip: 10137×9600 scans with no focal in the metadata, so resolveK
+  // guesses fx = 10137. The focal pre-solve proposed 7106 (−29.9 %); the true focal is
+  // ~6700. Against an EXIF focal that step is a runaway; against a guess it is the fix.
+  describe('a default-FOV focal guess', () => {
+    const guess = { fx: 10137, fy: 10137, cx: 5068.5, cy: 4800 }
+    const presolve = (fx, focalIsGuess) => validateSelfCalUpdate({
+      before: guess, proposed: { ...guess, fx, fy: fx }, nominalFx: 10137,
+      width: 10137, height: 9600, focalIsGuess,
+    })
+
+    it('rejects the TMA pre-solve step when the focal is treated as measured', () => {
+      expect(presolve(7106, false)).toMatchObject({ ok: false, code: 'focal-step' })
+    })
+
+    it('accepts it, and the true focal, when the focal is only a guess', () => {
+      expect(presolve(7106, true).ok).toBe(true)
+      expect(presolve(6700, true).ok).toBe(true)
+    })
+
+    it('still bounds a guess: fx must stay within [0.3, 1.7] × the guess', () => {
+      expect(presolve(10137 * 0.35, true).code).toBe('focal-step') // a 65 % jump in one pass
+      const drifted = validateSelfCalUpdate({
+        before: { ...guess, fx: 3500, fy: 3500 }, proposed: { ...guess, fx: 2800, fy: 2800 },
+        nominalFx: 10137, width: 10137, height: 9600, focalIsGuess: true,
+      })
+      expect(drifted).toMatchObject({ ok: false, code: 'focal-nominal' })
+      expect(drifted.reason).toMatch(/default-FOV guess/)
+    })
+  })
 })

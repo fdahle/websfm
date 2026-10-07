@@ -29,6 +29,18 @@ function toggleExpand(id) {
   next.has(id) ? next.delete(id) : next.add(id)
   expanded.value = next
 }
+// GNSS antenna offset ("lever arm"): a second detail row, any sensor kind.
+const armOpen = ref(new Set())
+function toggleArm(id) {
+  const next = new Set(armOpen.value)
+  next.has(id) ? next.delete(id) : next.add(id)
+  armOpen.value = next
+}
+const ARM_AXES = [
+  { field: 'gnssLeverArmX', label: 'x right (m)' },
+  { field: 'gnssLeverArmY', label: 'y down (m)' },
+  { field: 'gnssLeverArmZ', label: 'z forward (m)' },
+]
 const fidMarks = (s) => s.fiducials?.marks ?? []
 const fidCount = (s) => fidMarks(s).length
 
@@ -370,6 +382,14 @@ const totalCols = computed(() => 4 + NUM_COLS.length + 2)
                 :title="expanded.has(s.id) ? 'Hide fiducials' : `Edit fiducials (${fidCount(s)} mark${fidCount(s) === 1 ? '' : 's'})`"
                 @click="toggleExpand(s.id)"
               >⛶ {{ fidCount(s) }}</button>
+              <button
+                class="expand-btn"
+                :class="{ open: armOpen.has(s.id) }"
+                :title="s.gnssLeverArm
+                  ? `GNSS antenna offset (${s.gnssLeverArm.join(', ')}) m`
+                  : 'GNSS antenna offset (none: GNSS positions are taken as the camera centre)'"
+                @click="toggleArm(s.id)"
+              >GNSS{{ s.gnssLeverArm ? ' ✓' : '' }}</button>
             </span>
             <span v-else class="dim">{{ isFilm(s) ? 'Film' : 'Digital' }}</span>
           </td>
@@ -550,6 +570,25 @@ const totalCols = computed(() => 4 + NUM_COLS.length + 2)
                 <button class="add-mark" title="Map detected raster slots to a certificate or estimate a batch layout"
                   @click="emit('calibrate-fiducials', s.id)">Calibrate fiducials…</button>
               </div>
+            </div>
+          </td>
+        </tr>
+
+        <!-- GNSS antenna offset: expandable detail row (Initial mode). -->
+        <tr v-if="mode === 'initial' && armOpen.has(s.id)" class="fid-row">
+          <td :colspan="totalCols">
+            <div class="fid-editor">
+              <div class="fid-io">
+                <label v-for="(axis, i) in ARM_AXES" :key="axis.field">{{ axis.label }}
+                  <input class="cell-input" type="number" step="any" :value="s.gnssLeverArm?.[i] ?? ''"
+                    placeholder="0" @change="onEdit(s.id, axis.field, $event)" /></label>
+                <span class="fid-note">metres, from the projection centre to the GNSS antenna</span>
+              </div>
+              <span class="fid-note">
+                Camera axes: x right, y down (in the image), z forward along the view. With an offset,
+                the camera's GNSS position is treated as the antenna's, not the lens's. Metashape's
+                GNSS offset uses y up and z backward: enter its (x, y, z) as (x, −y, −z).
+              </span>
             </div>
           </td>
         </tr>

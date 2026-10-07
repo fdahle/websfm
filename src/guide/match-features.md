@@ -36,11 +36,12 @@ sparse reconstruction, so a false match here quietly poisons
 lean strict and every pair is checked with [RANSAC](help:ransac) before it counts.
 
 ## Ratio threshold
-<!-- param: ratioThreshold  default: 0.75 -->
+<!-- param: ratioThreshold  default: 0.8 -->
 Lowe's ratio test keeps a match only when the best descriptor match is clearly
 closer than the second-best — specifically, when `best / second-best` is below this
 threshold. **Lower is stricter**: fewer matches, but the ones that survive are more
-trustworthy.
+trustworthy. The default, `0.8`, is COLMAP's; geometric verification removes the
+extra false matches it lets through. The Lenient preset uses `0.85` and Strict `0.75`.
 
 Raise it toward `0.9` if you are getting too few matches on low-texture imagery
 (snow, ice, uniform terrain); lower it toward `0.6` on repetitive structure
