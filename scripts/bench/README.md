@@ -109,6 +109,9 @@ the quadratic term at the 95 % radius; positive means a bowl).
 - `reference.markOffsetsPx: [-0.5, 0.5]` re-scores the checkpoints at shifted mark
   conventions on the same model; `reference.excludeGcps` keeps known-bad GCPs out of
   the RMS (they are still listed).
+- `metashape-datum.py` (WSL Python + numpy, not part of a run) checks a reference set
+  against Metashape's own adjusted block: the camera-vs-GCP datum, the antenna convention
+  and a bench run's checkpoints per GCP. Usage is in its header.
 
 ## Notes
 

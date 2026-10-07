@@ -58,8 +58,9 @@ async function metashapeMarks(dir) {
 export async function loadReference(ref) {
   if (!ref) return null
   const out = { positions: null, leverArm: null, gcps: null,
-    // GCP labels whose survey or marks are known bad (GeoScan's 19: 1.6 m E, 3.1 m U in
-    // every run); they are reported but left out of the checkpoint RMS.
+    // GCP labels whose reference is known bad (GeoScan's 19: its file line was never
+    // converted out of the source datum, 1.6 m E / 3.1 m U; HANDOVER ▸ GeoScan datum);
+    // they are reported but left out of the checkpoint RMS.
     excludeGcps: Array.isArray(ref.excludeGcps) ? ref.excludeGcps.map(String) : [],
     markOffsetsPx: Array.isArray(ref.markOffsetsPx) ? ref.markOffsetsPx.map(Number).filter(Number.isFinite) : [] }
   if (ref.cameras) {
