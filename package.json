@@ -8,6 +8,7 @@
     "build": "vite build",
     "build:release": "npm run build && npm run check:release",
     "check:release": "node scripts/check-release.mjs",
+    "fetch:models": "node scripts/fetch-models.mjs",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
