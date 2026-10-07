@@ -5,7 +5,7 @@ use na::Point3;
 use parry::bounding_volume::Aabb;
 use parry::shape::{TriMesh, TriMeshFlags};
 use parry::utils::SortedPair;
-use std::collections::HashMap;
+use crate::fast_hash::FastMap;
 
 type MarchingCubesCellKey = [i32; 3];
 
@@ -14,7 +14,8 @@ type MarchingCubesCellKey = [i32; 3];
 pub struct MeshBuffers {
     vertices: Vec<Point3<f64>>,
     indices: Vec<u32>,
-    edge_to_index: HashMap<SortedPair<MarchingCubesCellKey>, u32>,
+    // (Vendored patch) fast deterministic hasher — see fast_hash.rs.
+    edge_to_index: FastMap<SortedPair<MarchingCubesCellKey>, u32>,
 }
 
 impl MeshBuffers {

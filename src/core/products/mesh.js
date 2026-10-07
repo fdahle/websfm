@@ -6,6 +6,7 @@
 
 import { MESH_DEFAULTS } from '../defaults.user.js'
 import { MESH_TUNING } from '../tuning.js'
+import { removeIsolated } from './cloudEdit.js'
 
 // Parse the wasm byte buffer into typed arrays. Layout (little-endian):
 //   header [u32 nVerts, u32 nTris] + f32 positions (3·nVerts) + u32 indices (3·nTris).
@@ -82,16 +83,17 @@ function buildColorGrid(pos, cell, pack) {
 // Colour each mesh vertex from the nearest occupied dense-cloud cell. For each vertex
 // we scan a (2r+1)³ neighbourhood of cells and pick the nearest dense point by true
 // distance; a vertex with no dense point in range gets the gray fallback (counted).
-// Returns { col:Uint8Array(3·nVerts), misses }.
+// Returns { col:Uint8Array(3·nVerts), misses, missed:Uint8Array(nVerts) } (1 = gray fallback).
 export function transferVertexColors(meshPos, dense, cell, opts = {}) {
   const { searchRadius = MESH_TUNING.colorSearchRadius, grayFallback = MESH_TUNING.grayFallback } = opts
   const nVerts = meshPos.length / 3
   const col = new Uint8Array(nVerts * 3)
+  const missed = new Uint8Array(nVerts)
   const dpos = dense.pos
   const dcol = dense.col
   if (!dpos || !dcol || !(cell > 0)) {
     for (let i = 0; i < nVerts; i++) { col[i*3] = grayFallback[0]; col[i*3+1] = grayFallback[1]; col[i*3+2] = grayFallback[2] }
-    return { col, misses: nVerts }
+    return { col, misses: nVerts, missed: missed.fill(1) }
   }
   const pack = packingFor(dpos, cell)
   const { bx, by, bz, nx, ny, nz } = pack
@@ -124,9 +126,9 @@ export function transferVertexColors(meshPos, dense, cell, opts = {}) {
     }
     const o = v * 3
     if (bestI >= 0) { col[o] = dcol[bestI*3]; col[o+1] = dcol[bestI*3+1]; col[o+2] = dcol[bestI*3+2] }
-    else { col[o] = grayFallback[0]; col[o+1] = grayFallback[1]; col[o+2] = grayFallback[2]; misses++ }
+    else { col[o] = grayFallback[0]; col[o+1] = grayFallback[1]; col[o+2] = grayFallback[2]; misses++; missed[v] = 1 }
   }
-  return { col, misses }
+  return { col, misses, missed }
 }
 
 // Bounding-box max extent of a flat position buffer (world units). 0 for an empty/flat
@@ -157,14 +159,25 @@ export function meshInputCell(pos, depth, leafCellsPerPoint = 1) {
 }
 
 // Voxel-subsample the Poisson input: collapse points sharing a `cell`-sized world cell
-// into one averaged position + renormalised averaged normal (matches the fusion merge).
-// Colour is intentionally dropped — mesh vertex colour is transferred from the FULL dense
-// cloud afterwards, so it isn't needed here. Returns { pos:Float32Array, nrm:Float32Array }.
-// `cell <= 0` passes the input arrays through unchanged.
-export function subsampleForMesh(pos, nrm, cell) {
-  if (!(cell > 0)) return { pos, nrm }
-  const inv = 1 / cell
+// into one averaged position + renormalised averaged normal (matches the fusion merge),
+// and record how many raw points each sample stands for — its **support weight**, which
+// the crate's trim and floater filter read (a 30-point surface voxel and a 1-point stray
+// voxel must not look alike after thinning). Colour is dropped: mesh vertex colour is
+// transferred from the FULL dense cloud afterwards. Positions come out relative to
+// `origin` (Float32 — an imported cloud's absolute projected coordinates would lose
+// decimetres in f32), accumulated in doubles. Returns { pos, nrm, wgt } (Float32Array).
+// `cell <= 0` keeps every point (wgt all 1), still re-expressed relative to `origin`.
+export function subsampleForMesh(pos, nrm, cell, origin = [0, 0, 0]) {
   const n = pos.length / 3
+  const [ox, oy, oz] = origin
+  if (!(cell > 0)) {
+    const rel = new Float32Array(n * 3)
+    for (let i = 0; i < n; i++) {
+      rel[i * 3] = pos[i * 3] - ox; rel[i * 3 + 1] = pos[i * 3 + 1] - oy; rel[i * 3 + 2] = pos[i * 3 + 2] - oz
+    }
+    return { pos: rel, nrm, wgt: new Float32Array(n).fill(1) }
+  }
+  const inv = 1 / cell
   // Numeric packed cell keys, as in the fusion accumulator — this runs over the whole
   // dense cloud (millions of points), where a template-string key allocates a string
   // per point.
@@ -179,13 +192,14 @@ export function subsampleForMesh(pos, nrm, cell) {
     const key = cellKey(pack, dix, diy, diz)
     let a = cells.get(key)
     if (!a) { a = { x: 0, y: 0, z: 0, nx: 0, ny: 0, nz: 0, n: 0 }; cells.set(key, a) }
-    a.x += x; a.y += y; a.z += z
+    a.x += x - ox; a.y += y - oy; a.z += z - oz
     a.nx += nrm[i * 3]; a.ny += nrm[i * 3 + 1]; a.nz += nrm[i * 3 + 2]
     a.n++
   }
   const m = cells.size
   const outPos = new Float32Array(m * 3)
   const outNrm = new Float32Array(m * 3)
+  const wgt = new Float32Array(m)
   let j = 0
   for (const a of cells.values()) {
     const k = 1 / a.n
@@ -193,9 +207,114 @@ export function subsampleForMesh(pos, nrm, cell) {
     const mag = Math.hypot(a.nx, a.ny, a.nz)
     if (mag > 1e-9) { outNrm[j * 3] = a.nx / mag; outNrm[j * 3 + 1] = a.ny / mag; outNrm[j * 3 + 2] = a.nz / mag }
     else { outNrm[j * 3 + 2] = 1 }
+    wgt[j] = a.n
     j++
   }
-  return { pos: outPos, nrm: outNrm }
+  return { pos: outPos, nrm: outNrm, wgt }
+}
+
+// The box the solve spans: the per-axis `[lo, hi]` quantile range of a strided position
+// sample, grown on every side by `margin` × the box's LARGEST side (a thin axis — a near-
+// planar scene's z — must not get a margin of its own thinness, or its legitimate noise
+// would fall outside). Returns { min:[3], max:[3] }.
+export function robustBox(pos, { quantiles = [0.01, 0.99], margin = 0.25, sampleMax = 200000 } = {}) {
+  const n = pos.length / 3
+  const stride = Math.max(1, Math.ceil(n / sampleMax))
+  const m = Math.ceil(n / stride)
+  const lo = [0, 0, 0], hi = [0, 0, 0]
+  const axis = new Float64Array(m)
+  for (let d = 0; d < 3; d++) {
+    let c = 0
+    for (let i = 0; i < n; i += stride) axis[c++] = pos[i * 3 + d]
+    const s = axis.subarray(0, c).sort()
+    lo[d] = s[Math.min(c - 1, Math.floor(quantiles[0] * (c - 1)))]
+    hi[d] = s[Math.min(c - 1, Math.ceil(quantiles[1] * (c - 1)))]
+  }
+  const grow = margin * Math.max(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2])
+  return { min: lo.map((v) => v - grow), max: hi.map((v) => v + grow) }
+}
+
+// Median nearest-neighbour distance over a strided sample of ≤ `sampleMax` points — the
+// input spacing, for a cloud that has no fusion merge cell (an imported cloud). A chained
+// voxel hash at a trial cell; the cell doubles until most samples find a neighbour within
+// their 27-cell neighbourhood. Zero-distance duplicates are skipped. 0 for < 2 points.
+export function estimatePointSpacing(pos, sampleMax = 20000) {
+  const n = pos.length / 3
+  if (n < 2) return 0
+  let minx = Infinity, miny = Infinity, minz = Infinity, maxx = -Infinity, maxy = -Infinity, maxz = -Infinity
+  for (let i = 0; i < n; i++) {
+    const x = pos[i * 3], y = pos[i * 3 + 1], z = pos[i * 3 + 2]
+    if (x < minx) minx = x; if (x > maxx) maxx = x
+    if (y < miny) miny = y; if (y > maxy) maxy = y
+    if (z < minz) minz = z; if (z > maxz) maxz = z
+  }
+  // Surface assumption: N points over the two largest extents' area.
+  const ext = [maxx - minx, maxy - miny, maxz - minz].sort((a, b) => b - a)
+  let cell = Math.sqrt(Math.max(ext[0] * ext[1], ext[0] * ext[0] * 1e-12) / n)
+  if (!(cell > 0)) return 0
+  const stride = Math.max(1, Math.floor(n / sampleMax))
+  for (let attempt = 0; attempt < 8; attempt++, cell *= 2) {
+    const pack = packingFor(pos, cell)
+    const inv = 1 / cell
+    const head = new Map()
+    const next = new Int32Array(n)
+    const keyOf = (i) => cellKey(pack, Math.floor(pos[i * 3] * inv) - pack.bx,
+      Math.floor(pos[i * 3 + 1] * inv) - pack.by, Math.floor(pos[i * 3 + 2] * inv) - pack.bz)
+    for (let i = 0; i < n; i++) {
+      const k = keyOf(i)
+      const h = head.get(k)
+      next[i] = h === undefined ? -1 : h
+      head.set(k, i)
+    }
+    const found = []
+    let sampled = 0
+    for (let i = 0; i < n; i += stride) {
+      sampled++
+      const cx = Math.floor(pos[i * 3] * inv) - pack.bx
+      const cy = Math.floor(pos[i * 3 + 1] * inv) - pack.by
+      const cz = Math.floor(pos[i * 3 + 2] * inv) - pack.bz
+      let best = Infinity
+      for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) {
+        const ix = cx + dx, iy = cy + dy, iz = cz + dz
+        if (ix < 0 || iy < 0 || iz < 0 || ix >= pack.nx || iy >= pack.ny || iz >= pack.nz) continue
+        for (let j = head.get(cellKey(pack, ix, iy, iz)) ?? -1; j >= 0; j = next[j]) {
+          if (j === i) continue
+          const ex = pos[j * 3] - pos[i * 3], ey = pos[j * 3 + 1] - pos[i * 3 + 1], ez = pos[j * 3 + 2] - pos[i * 3 + 2]
+          const d2 = ex * ex + ey * ey + ez * ez
+          if (d2 > 0 && d2 < best) best = d2
+        }
+      }
+      // Only a neighbour within one cell is guaranteed to be the true nearest.
+      if (best <= cell * cell) found.push(Math.sqrt(best))
+    }
+    if (found.length >= 0.8 * sampled) {
+      found.sort((a, b) => a - b)
+      return found[found.length >> 1]
+    }
+  }
+  return cell
+}
+
+// The octree depth actually solved: the requested one, lowered when its leaves would be
+// finer than `minLeafSpacings` input spacings (they resolve nothing and each extra level
+// costs ~4× the solve), never below `minDepth` (or the request, if that is lower).
+// Returns { depth, needed } — `needed` is the depth the spacing supports.
+export function resolveMeshDepth(requested, extent, spacing, { minLeafSpacings = 1, minDepth = 5 } = {}) {
+  const req = requested >>> 0
+  if (!(extent > 0) || !(spacing > 0)) return { depth: req, needed: req }
+  const needed = Math.max(1, Math.ceil(Math.log2(extent / (minLeafSpacings * spacing))))
+  return { depth: Math.max(Math.min(req, needed), Math.min(req, minDepth)), needed }
+}
+
+// The crate's cleanup statistics (`MeshStats::to_vec` order) as named fields; null in,
+// null out.
+export function parseMeshStats(v) {
+  if (!v || v.length < 11) return null
+  return {
+    extractedTris: v[0], distanceRemovedTris: v[1], densityRemovedTris: v[2],
+    holesFilled: v[3], holeTris: v[4], components: v[5], componentsDropped: v[6],
+    componentDroppedTris: v[7], keptTris: v[8], medianSupport: v[9], leafWidth: v[10],
+  }
 }
 
 // A sensible max octree depth for a cloud of `pointCount` points. Surface points fill
@@ -208,74 +327,201 @@ export function recommendMeshDepth(pointCount) {
   return Math.min(12, Math.max(6, Math.round(0.5 * Math.log2(pointCount))))
 }
 
-// Generate a triangle mesh from a flat dense cloud via screened Poisson. `poissonFn`
-// is the wasm `poisson_mesh(pos, nrm, depth, screening, trimDist)` (injected). `dense`
-// is { count, pos:Float32Array(3N), col?:Uint8Array(3N), nrm:Float32Array(3N) }. The
-// merge cell (dense GSD) sizes both the trim radius and the colour-transfer grid.
-// Returns { nVerts, count /* triangles */, pos, idx, col }. Errors loudly if nrm is
-// missing — Poisson needs oriented normals; the user must re-run densify.
+
+const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now())
+const fmt = (v) => (Math.abs(v) >= 1e-2 && Math.abs(v) < 1e4 ? v.toFixed(3) : v.toExponential(2))
+
+// Generate a triangle mesh from a flat dense cloud via screened Poisson. `poissonFn` is
+// the injected solver: `poissonFn({ pos, nrm, wgt, depth, screening, trimDist,
+// densityRatio, holeAreaRatio, minComponentShare }) → { bytes, stats }` (the worker wires
+// the staged wasm `PoissonMesher`; tests pass a stub). `dense` is { count, pos (Float32 or
+// Float64, 3N), col?, nrm (3N) }. `settings.mergeCell` is the fusion merge cell — the
+// cloud's sample spacing — when the cloud has one; otherwise it is estimated.
+//
+// Input conditioning, in order, each step logged with its inputs:
+//   1. spacing (merge cell, or the median nearest-neighbour distance);
+//   2. robust extent — stragglers far outside the object leave the solve, so they can't
+//      coarsen every octree leaf;
+//   3. depth — the requested depth, lowered when its leaves would be finer than the
+//      spacing (a wasted ~4× per level);
+//   4. stray-point pre-filter at two leaves (each lone stray costs ~125 octree nodes);
+//   5. voxel subsample to ~one sample per leaf, carrying each sample's support count,
+//      relative to a local origin (an imported cloud's projected coordinates would lose
+//      decimetres in f32).
+// The solve then trims unsupported surface, refills small holes and drops floating
+// pieces (crates/mesh `MeshOptions`). Returns { nVerts, count /* triangles */, pos, idx,
+// col, summary } — `pos` keeps the source's precision (Float64 in ⇒ Float64 out) and
+// `summary` is the run record persisted with the mesh. Errors loudly if nrm is missing.
 export function generateMesh(dense, poissonFn, settings = {}, onLog = () => {}) {
   if (!dense || !dense.pos || !(dense.count > 0)) throw new Error('generateMesh: empty dense cloud')
   if (!dense.nrm || dense.nrm.length < dense.count * 3) {
     throw new Error('generateMesh: dense cloud has no per-point normals — re-run Densify to compute normals')
   }
   const cfg = { ...MESH_DEFAULTS, ...MESH_TUNING, ...settings }
-  const mergeCell = settings.mergeCell > 0 ? settings.mergeCell : 1
-  const depth = cfg.depth >>> 0
-  // Screened Poisson is closed before trimming. Keeping it untrimmed is the
-  // reliable hole-fill mode; distance trimming is useful for removing unsupported
-  // extrapolation, but can reopen boundaries and gaps.
+  const t0 = now()
+  const n0 = dense.count
 
-  // Flag a depth that's high for this point count (mostly builds empty octree cells).
-  const recDepth = recommendMeshDepth(dense.count)
-  if (depth > recDepth) {
-    onLog(`Mesh: depth ${depth} is high for ${dense.count.toLocaleString()} points `
-      + `(recommended ≤ ${recDepth}) — the solve may be slow with little detail gain`, 'warn', 'Products')
+  // 1. Spacing.
+  let spacing = settings.mergeCell > 0 ? settings.mergeCell : 0
+  let spacingSource = 'merge cell'
+  if (!spacing) {
+    spacing = estimatePointSpacing(dense.pos, cfg.spacingSampleMax)
+    spacingSource = 'estimated'
+    onLog(`Mesh: input spacing ${fmt(spacing)} — median nearest-neighbour distance over ≤ `
+      + `${cfg.spacingSampleMax.toLocaleString()} points (this cloud has no fusion merge cell)`, 'info', 'Products')
+  }
+  if (!(spacing > 0)) {
+    spacing = 1
+    spacingSource = 'fallback'
+    onLog('Mesh: could not estimate the input spacing — using 1 world unit', 'warn', 'Products')
   }
 
-  // Downsample the Poisson INPUT to ~one point per octree leaf cell — the solve can't
-  // resolve finer than that, so a denser cloud is wasted work. Only thins when it would
-  // actually reduce the cloud (input denser than a leaf cell). Colour transfer below
-  // still uses the full dense cloud, so this costs no quality.
-  const inCell = meshInputCell(dense.pos, depth, cfg.inputLeafCellsPerPoint)
-  let inPos = dense.pos, inNrm = dense.nrm
-  if (inCell > mergeCell * 1.01) {
-    const sub = subsampleForMesh(dense.pos, dense.nrm, inCell)
-    if (sub.pos.length / 3 < dense.count) {
-      inPos = sub.pos; inNrm = sub.nrm
-      onLog(`Mesh: subsampled input ${dense.count.toLocaleString()} → ${(inPos.length / 3).toLocaleString()} points `
-        + `(≈1 per leaf cell, ${inCell.toExponential(2)}) — colour still from the full cloud`, 'info', 'Products')
+  // 2. Robust extent.
+  const box = robustBox(dense.pos, {
+    quantiles: cfg.robustQuantiles, margin: cfg.robustMargin, sampleMax: cfg.robustSampleMax,
+  })
+  let src = { count: n0, pos: dense.pos, nrm: dense.nrm }
+  {
+    const keep = new Uint8Array(n0)
+    let kept = 0
+    for (let i = 0; i < n0; i++) {
+      const x = dense.pos[i * 3], y = dense.pos[i * 3 + 1], z = dense.pos[i * 3 + 2]
+      if (x >= box.min[0] && x <= box.max[0] && y >= box.min[1] && y <= box.max[1]
+        && z >= box.min[2] && z <= box.max[2]) { keep[i] = 1; kept++ }
+    }
+    if (kept < n0) {
+      const pos = new (dense.pos.constructor)(kept * 3)
+      const nrm = new Float32Array(kept * 3)
+      for (let i = 0, o = 0; i < n0; i++) {
+        if (!keep[i]) continue
+        for (let d = 0; d < 3; d++) { pos[o * 3 + d] = dense.pos[i * 3 + d]; nrm[o * 3 + d] = dense.nrm[i * 3 + d] }
+        o++
+      }
+      src = { count: kept, pos, nrm }
+      onLog(`Mesh: left ${(n0 - kept).toLocaleString()} far stragglers out of the solve — outside the `
+        + `${cfg.robustQuantiles.map((q) => `${q * 100}`).join('–')} % box grown by ${cfg.robustMargin * 100} %`,
+      'info', 'Products')
     }
   }
-  const inCount = inPos.length / 3
-  // The trim proximity set IS the Poisson input, so the radius must scale with that
-  // input's spacing: after subsampling to one point per leaf (≫ the dense GSD on a
-  // large scene) a GSD-sized radius trims most marching-cubes vertices and shreds
-  // the surface — the breakdown began at ~2,200 GSD of extent at depth 8.
-  const sampleCell = inPos === dense.pos ? mergeCell : Math.max(mergeCell, inCell)
-  const trimDist = cfg.fillHoles ? 0 : (cfg.trimFactor > 0 ? cfg.trimFactor * sampleCell : 0)
+  const extent = maxExtent(src.pos)
 
-  onLog(`Mesh: Poisson over ${inCount.toLocaleString()} points — depth ${depth}, screening ${cfg.screening}, `
-    + `trim ${trimDist > 0 ? `${trimDist.toExponential(2)} (${cfg.trimFactor}× cell)` : 'off'}`, 'info', 'Products')
+  // 3. Depth.
+  const { depth, needed } = resolveMeshDepth(cfg.depth, extent, spacing, cfg)
+  if (depth < (cfg.depth >>> 0)) {
+    onLog(`Mesh: octree depth ${cfg.depth} → ${depth} — leaves at depth ${cfg.depth} would be finer than the `
+      + `input spacing (${fmt(extent)} extent / ${fmt(spacing)} spacing supports depth ${needed})`, 'info', 'Products')
+  }
+  const recDepth = recommendMeshDepth(n0)
+  if (depth > recDepth) {
+    onLog(`Mesh: depth ${depth} is high for ${n0.toLocaleString()} points `
+      + `(recommended ≤ ${recDepth}) — the solve may be slow with little detail gain`, 'warn', 'Products')
+  }
+  const leaf = extent > 0 ? extent / Math.pow(2, depth) : 0
 
-  const t0 = (typeof performance !== 'undefined' ? performance.now() : Date.now())
-  const bytes = poissonFn(inPos, inNrm, depth, cfg.screening, trimDist)
-  const { nVerts, nTris, pos, idx } = parseMeshBuffer(bytes)
-  const solveMs = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - t0
-  onLog(`Mesh: solve produced ${nVerts} verts / ${nTris} tris in ${(solveMs / 1000).toFixed(1)}s`,
-    nVerts > 0 ? 'success' : 'warn', 'Products')
+  // 4. Stray-point pre-filter.
+  if (cfg.isolatedCellLeaves > 0 && leaf > 0 && src.count > 0) {
+    const before = src.count
+    const f = removeIsolated(src, { cell: leaf * cfg.isolatedCellLeaves })
+    if (f.count < before && f.count > 0) {
+      src = { count: f.count, pos: f.pos, nrm: f.nrm }
+      onLog(`Mesh: removed ${(before - f.count).toLocaleString()} isolated points before the solve `
+        + `(cells of ${cfg.isolatedCellLeaves} leaves, ${fmt(leaf * cfg.isolatedCellLeaves)})`, 'info', 'Products')
+    }
+  }
+
+  // 5. Subsample with support weights, relative to a local origin.
+  const origin = [0, 0, 0]
+  {
+    const mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity]
+    for (let i = 0; i < src.count; i++) {
+      for (let d = 0; d < 3; d++) {
+        const v = src.pos[i * 3 + d]
+        if (v < mn[d]) mn[d] = v
+        if (v > mx[d]) mx[d] = v
+      }
+    }
+    for (let d = 0; d < 3; d++) origin[d] = (mn[d] + mx[d]) / 2
+  }
+  const inCell = meshInputCell(src.pos, depth, cfg.inputLeafCellsPerPoint)
+  const thin = inCell > spacing * 1.01
+  const sub = subsampleForMesh(src.pos, src.nrm, thin ? inCell : 0, origin)
+  const inCount = sub.pos.length / 3
+  if (thin && inCount < src.count) {
+    onLog(`Mesh: subsampled input ${src.count.toLocaleString()} → ${inCount.toLocaleString()} points `
+      + `(≈1 per leaf cell, ${fmt(inCell)}; each carries its point count as support) — colour still from the `
+      + 'full cloud', 'info', 'Products')
+  }
+
+  // Cleanup parameters. The distance trim's proximity set IS the subsampled input, so its
+  // radius scales with that input's spacing, not the dense GSD.
+  const sampleCell = thin ? Math.max(spacing, inCell) : spacing
+  const densityRatio = cfg.trimRatio?.[cfg.trim] ?? 0
+  const holeAreaRatio = cfg.fillHoles && densityRatio > 0 ? cfg.holeAreaRatio : 0
+  const minComponentShare = cfg.removeFloaters ? Math.max(0, cfg.minPiecePct) / 100 : 0
+  const trimDist = cfg.distanceTrim > 0 ? cfg.distanceTrim * sampleCell : 0
+  onLog(`Mesh: Poisson over ${inCount.toLocaleString()} points — depth ${depth} (leaf ${fmt(leaf)}), `
+    + `screening ${cfg.screening}; trim ${cfg.trim}${densityRatio ? ` (support < ${densityRatio} × median)` : ''}, `
+    + `fill holes ${holeAreaRatio ? `≤ ${holeAreaRatio * 100} % of the surrounding piece` : 'off'}, `
+    + `floaters ${minComponentShare ? `< ${cfg.minPiecePct} % of the main support` : 'kept'}`
+    + (trimDist ? `, distance trim ${fmt(trimDist)}` : ''), 'info', 'Products')
+
+  const tSolve = now()
+  const out = poissonFn({
+    pos: sub.pos, nrm: sub.nrm, wgt: sub.wgt, depth, screening: cfg.screening,
+    trimDist, densityRatio, holeAreaRatio, minComponentShare,
+  })
+  const { nVerts, nTris, pos: rel, idx } = parseMeshBuffer(out?.bytes ?? out)
+  const stats = parseMeshStats(out?.stats)
+  const solveMs = now() - tSolve
+  onLog(`Mesh: solve produced ${nVerts.toLocaleString()} verts / ${nTris.toLocaleString()} tris in `
+    + `${(solveMs / 1000).toFixed(1)}s`, nVerts > 0 ? 'success' : 'warn', 'Products')
+  if (stats) {
+    onLog(`Mesh: cleanup — extracted ${stats.extractedTris.toLocaleString()} tris; trimmed `
+      + `${stats.densityRemovedTris.toLocaleString()} unsupported`
+      + (stats.distanceRemovedTris ? ` + ${stats.distanceRemovedTris.toLocaleString()} far` : '')
+      + `; refilled ${stats.holesFilled} hole(s) (${stats.holeTris.toLocaleString()} tris); dropped `
+      + `${stats.componentsDropped} of ${stats.components} piece(s) (${stats.componentDroppedTris.toLocaleString()} tris)`,
+    'info', 'Products')
+  }
+
+  const summary = {
+    sourceCount: n0, inputCount: inCount, spacing, spacingSource,
+    requestedDepth: cfg.depth >>> 0, depth, leaf, screening: cfg.screening,
+    trim: cfg.trim, densityRatio, holeAreaRatio, minComponentShare, trimDist,
+    stats, solveMs: Math.round(solveMs), totalMs: 0,
+  }
   if (nVerts === 0 || nTris === 0) {
-    return { nVerts: 0, count: 0, pos: new Float32Array(0), idx: new Uint32Array(0), col: null }
+    summary.totalMs = Math.round(now() - t0)
+    return { nVerts: 0, count: 0, pos: new Float32Array(0), idx: new Uint32Array(0), col: null, summary }
+  }
+
+  // Back to the source frame, at the source's precision.
+  const pos = new (dense.pos instanceof Float64Array ? Float64Array : Float32Array)(nVerts * 3)
+  for (let v = 0; v < nVerts; v++) {
+    pos[v * 3] = rel[v * 3] + origin[0]; pos[v * 3 + 1] = rel[v * 3 + 1] + origin[1]; pos[v * 3 + 2] = rel[v * 3 + 2] + origin[2]
   }
 
   let col = null
   if (cfg.colorize && dense.col) {
-    const { col: vcol, misses } = transferVertexColors(pos, dense, mergeCell, cfg)
-    col = vcol
-    onLog(`Mesh: coloured ${nVerts - misses}/${nVerts} vertices from the dense cloud`
-      + (misses ? ` (${misses} gray fallback — no dense point within ${cfg.colorSearchRadius} cell(s))` : ''),
-      misses ? 'debug' : 'info', 'Products')
+    // Nearest dense point within ±1 merge cell first; a vertex further out (a refilled
+    // hole, a smoothed crease) retries on a leaf-sized grid before falling back to gray.
+    const fine = transferVertexColors(pos, dense, spacing, cfg)
+    col = fine.col
+    let misses = fine.misses
+    if (misses && leaf > spacing) {
+      const coarse = transferVertexColors(pos, dense, leaf, cfg)
+      misses = 0
+      for (let v = 0; v < nVerts; v++) {
+        if (!fine.missed[v]) continue
+        if (coarse.missed[v]) { misses++; continue }
+        col[v * 3] = coarse.col[v * 3]; col[v * 3 + 1] = coarse.col[v * 3 + 1]; col[v * 3 + 2] = coarse.col[v * 3 + 2]
+      }
+    }
+    onLog(`Mesh: coloured ${(nVerts - misses).toLocaleString()}/${nVerts.toLocaleString()} vertices from the dense cloud`
+      + (misses ? ` (${misses.toLocaleString()} gray fallback — no dense point nearby)` : ''),
+    misses ? 'debug' : 'info', 'Products')
   }
 
-  return { nVerts, count: nTris, pos, idx, col }
+  summary.totalMs = Math.round(now() - t0)
+  return { nVerts, count: nTris, pos, idx, col, summary }
 }

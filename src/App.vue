@@ -200,7 +200,7 @@ const { sidebarWidth, startSidebarResize } = useSidebarResize()
 // ── Reconstruction ────────────────────────────────────────────────────────────
 // Project-scoped store; restore/clear run through the project-store registry.
 const reconstructionStore = useReconstructionStore()
-const { cameras, sparseCameras, reconStatus, clouds, selectedCloudId, selectedCloud, mainSparseId, mainSparseCloud, depthMaps, depthMapCount, dem, demSource, ortho, orthoSurfaces, georef, canGeoreference, canGeoreferenceGcps, denseSummary, summary: reconSummary } = storeToRefs(reconstructionStore)
+const { cameras, sparseCameras, reconStatus, clouds, selectedCloudId, selectedCloud, mainSparseId, mainSparseCloud, depthMaps, depthMapCount, dem, demSource, meshSources, meshSource, ortho, orthoSurfaces, georef, canGeoreference, canGeoreferenceGcps, denseSummary, summary: reconSummary } = storeToRefs(reconstructionStore)
 const { reconstruct, importColmapModel, importInteropModel, importCloud, editClouds, computeDepthMaps, densify, generateDem, generateOrtho, generateMesh, georeference, effectiveFrameSpec, gcpAccuracyReport, gcpGuides, gcpEstimate, selectCloud, setCloudStyle, setCloudVisible, removeCloud, renameCloud, removeProduct, renameProduct, setMainSparse, clearDerived: clearReconstructionDerived } = reconstructionStore
 
 async function clearCurrentProjectDerived() {
@@ -1926,8 +1926,8 @@ function onRibbonPick(event) {
       <MeshModal
         v-if="meshOpen"
         :has-dense="clouds.some((c) => c.kind === 'dense' && c.count > 0)"
-        :has-dense-normals="clouds.some((c) => c.kind === 'dense' && !!c.nrm)"
-        :dense-count="clouds.find((c) => c.kind === 'dense' && c.count > 0)?.count ?? 0"
+        :sources="meshSources"
+        :default-source-id="meshSource?.id ?? null"
         @close="meshOpen = false"
         @run="onMeshRun"
       />

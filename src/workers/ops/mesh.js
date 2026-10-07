@@ -1,36 +1,52 @@
 import init, { PoissonMesher } from '../../wasm/mesh/mesh.js'
 import { generateMesh } from '../../core/products/mesh.js'
 
+// Relative cost of the staged phases, for an honest progress fraction. A multigrid
+// layer costs ~3× the one before it (nodes grow with the surface area at each level);
+// the octree build and the extraction + cleanup scale like a share of the finest
+// layer. Measured on the depth-8 bench terrain (crates/mesh/tests/bench_phases.rs,
+// 2026-10-07): coarse layers ~0.6 s, finest 6.8 s, build 1.2 s, extraction 2.4 s.
+const LAYER_GROWTH = 3
+const BUILD_SHARE = 0.15    // × the finest layer's cost
+const EXTRACT_SHARE = 0.4   // × the finest layer's cost
+
 // Drive the staged Poisson solve, emitting progress between multigrid layers. Injected
-// into core `generateMesh` as its `poissonFn` (same 5-arg signature the one-shot wasm
-// entry had). Runs synchronously — the worker thread blocks here, but each `emit` posts a
-// message that the MAIN thread paints as it arrives, so the bar advances per layer
-// instead of freezing on one opaque call. Cancel is still a hard `terminateAll` (the
-// worker can't service messages mid-solve); staging just bounds each blocking chunk to
-// one layer. `mesher.free()` releases the wasm-side octree in a finally.
+// into core `generateMesh` as its `poissonFn`. Runs synchronously — the worker thread
+// blocks here, but each `emit` posts a message that the MAIN thread paints as it
+// arrives, so the bar advances per layer instead of freezing on one opaque call. Cancel
+// is still a hard `terminateAll` (the worker can't service messages mid-solve); staging
+// just bounds each blocking chunk to one layer. `mesher.free()` releases the wasm-side
+// octree in a finally. Returns { bytes, stats } (stats: crates/mesh `MeshStats`).
 function stagedPoisson(emit) {
-  return (pos, nrm, depth, screening, trim) => {
-    emit('progress', [0, 1, `Building octree (depth ${depth})…`])
-    const mesher = PoissonMesher.build(pos, nrm, depth >>> 0, screening)
+  return ({ pos, nrm, wgt, depth, screening, trimDist, densityRatio, holeAreaRatio, minComponentShare }) => {
+    emit('progress', [0, 1, `Building octree (depth ${depth})…`, 0])
+    const mesher = PoissonMesher.build(pos, nrm, wgt ?? new Float32Array(0), depth >>> 0, screening)
     try {
       const n = mesher.num_layers()
+      const finest = Math.pow(LAYER_GROWTH, Math.max(0, n - 1))
+      const layerCost = (i) => Math.pow(LAYER_GROWTH, i)
+      const total = BUILD_SHARE * finest + (finest * LAYER_GROWTH - 1) / (LAYER_GROWTH - 1) + EXTRACT_SHARE * finest
+      let done = BUILD_SHARE * finest
       // Emit each label BEFORE the work it names, not after. A label posted after
       // `solve_step` returns describes work already finished, so the *previous* label
       // stays on screen for the whole solve — which is why a slow run looked like it
       // was stuck in "Building octree" when the octree build is a fraction of a second.
       for (let i = 0; i < n; i++) {
-        emit('progress', [i, n + 1, `Solving multigrid layer ${i + 1}/${n}…`])
+        emit('progress', [i, n + 1, `Solving multigrid layer ${i + 1}/${n}…`, done / total])
         mesher.solve_step()
+        done += layerCost(i)
       }
-      emit('progress', [n, n + 1, 'Extracting surface…'])
-      const bytes = mesher.finish(trim)
-      emit('progress', [n + 1, n + 1, 'Surface extracted'])
-      return bytes
+      emit('progress', [n, n + 1, 'Extracting and cleaning up the surface…', done / total])
+      const bytes = mesher.finish(trimDist, densityRatio, holeAreaRatio, minComponentShare)
+      const stats = mesher.stats()
+      emit('progress', [n + 1, n + 1, 'Surface extracted', 1])
+      return { bytes, stats }
     } finally {
       mesher.free()
     }
   }
 }
+
 
 // Mesh op (screened Poisson). Owns the mesh wasm module (lazy init, like
 // reconstruction.js gates its own wasm). Pure meshing lives in core/products/mesh.js;

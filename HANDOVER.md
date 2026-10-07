@@ -22,7 +22,7 @@ Git history holds the detail.
 | **B0** | CA213732V… aerial film strip, 5 images | 2026-07-03 | intrinsics-limited film behaviour, dense cost medians, fusion kept-% |
 | **B0-ingest** | TIFF ingest per image | 2026-07-16 | ingest cost; next lever is the canvas PNG encode |
 | **B-detect** | SIFT detection throughput | 2026-07-17 | the detection pyramid + the wasted-descriptor finding (P10) |
-| **B-mesh** | screened-Poisson meshing | 2026-08-11 | meshing cost per depth; the finest-layer solve is the remaining pole |
+| **B-mesh-2** | screened-Poisson meshing: converged solve, cleanup, assembly speed | 2026-10-07 | mesh correctness fixtures and solve cost per depth (supersedes B-mesh, whose geometry was the unconverged solve) |
 | **B-georef-polar** | error-free control, grid fit vs local metric frame | 2026-10-04 | georeferencing in a projected CRS (synthetic; real-data check is REV-06) |
 | **B-match-gpu** | brute-force NN, WASM vs WebGPU kernel (synthetic, Dawn) | 2026-10-05 | the GPU matcher's kernel cost; the real-data numbers are MAT-02/MAT-03 |
 | **B-bench** | headless bench: SB / building / TMA / eagle / quarry, RTK camera accuracy | 2026-10-05 | SfM point counts, guided extension, camera-position accuracy against RTK |
@@ -582,6 +582,42 @@ Per-image transcode (decode → JPEG display + lossless PNG compute), Chrome, wo
 Decode ~34× faster; total ingest ~7.4×. Compute-PNG blob sizes unchanged (≈103–108 MB),
 i.e. identical decoded pixels. Next tall pole is the canvas PNG encode (~4 s).
 
+### B-mesh-2 — converged solve, cleanup, assembly restructuring (2026-10-07)
+Native `cargo test -p mesh --release` in WSL Ubuntu on the Windows dev machine (not the
+Apple-silicon machine of B-mesh, so compare times within this section only). The
+geometry of B-mesh below (mean radius 1.080, RMS 0.190) was the **unconverged** solve,
+not a property of Poisson at low depth.
+
+**Correctness** (unit sphere; "off" = area farther than 3 leaves from the sphere):
+
+| fixture | before | after |
+| --- | --- | --- |
+| clean sphere, 8000 pts, depth 6 | 444 components, 47 % off, RMS 0.094 | 1 component, 0 % off, RMS 0.0004 |
+| `reconstructs_sphere_near_unit_radius`, depth 5 | mean 1.080, RMS 0.190 | within 0.01 / 0.01 (asserted) |
+| sphere + 30 coherent specks + 320 strays, depth 6 | 28 components, 47 % off (raw) | 1 component, 0 % off |
+| built wasm under Node/V8: 204k pts, 60 specks, 2000 strays, depth 8 | 47 components, 8.7 % off, RMS 0.237 (no cleanup) | 1 component, 0 % off, RMS 0.0004, 41.4 s |
+
+Cause of the first row: CG from `x₀ = b`, 10 iterations. With `x₀ = 0` the same 10
+iterations converge (`sweep_cg_iterations`); with `x₀ = b`, ~100 are needed.
+
+**Speed**, each step checked against `solver_weights_reference` (123,413 solved
+coefficients; max |Δ| ≤ 8.5·10⁻¹³ against magnitude 3.0):
+
+| step | reference sphere, depth 6 | bench terrain, depth 8, 65k pts (total) |
+| --- | --- | --- |
+| before (converged CG only) | 32.4 s | 280.6 s (solve 268.0 s, finest layer 149.4 s) |
+| screening term via coarse solution at samples + `OverlapTable` for the coarse gradient term | 13.7 s | 99.5 s |
+| `OverlapTable` in `build_rhs` | 7.9 s | 66.1 s |
+| `fast_hash.rs` (octree maps) | 4.3 s | 29.8 s |
+| direct CSC assembly | 3.3 s | — |
+| coarse gradient term by B-spline prolongation | **2.7 s** | **18.6 s** (solve 14.8 s, finest layer 6.8 s, extraction 2.4 s) |
+
+Finest-layer profile before the last three steps (502k nodes, 51M non-zeros): coarse
+subtraction 18.2 s, assembly 5.2 s, rhs 5.1 s, COO→CSC 2.9 s, CG 1.1 s. The COO triplets
+alone were ~1.2 GB at that size, which mattered for the 4 GB wasm heap. Remaining
+ceiling: finest-layer assembly and rhs, both hash-lookup-bound. Threads are the next
+lever (TODO ▸ Compute & workers).
+
 ### B-mesh — screened-Poisson meshing (2026-08-11)
 Native `cargo test -p mesh --release`, Apple silicon. The "before" is HEAD c8b9943.
 
@@ -701,6 +737,23 @@ fiducials; self-calibration (A2) + fiducials (F4) are the code-side support.
 ---
 
 ## Done log (most recent first)
+
+- **2026-10-07 · Mesh: converged solve, support cleanup, source picker, 15× faster solve.**
+  The eagle "blob field" had three causes. (1) The vendored CG started every multigrid
+  layer from `x₀ = b` for 10 iterations and never converged; the residual was cell-sized
+  closed ripples (`conjugate_gradient.rs`, now `x₀ = 0` + 1e-6 tolerance). (2) Build Mesh
+  meshed the *first* dense cloud, so cleaned copies were ignored (`meshSource` /
+  `meshSources` + a modal picker). (3) There was no cleanup. `crates/mesh` `MeshOptions`
+  now adds support-density trimming, hole refill relative to the bordering piece, and
+  floating-piece removal by samples explained, with extraction bounded by the support
+  reach. `core/products/mesh.js` conditions the input: robust extent, spacing estimate
+  for imported clouds, depth capped by spacing, stray pre-filter, support-weighted
+  thinning, local origin for Float64 clouds. The solve assembly was restructured
+  exactly (coarse solution at samples, `OverlapTable`, B-spline prolongation, direct
+  CSC, `fast_hash.rs`), and a 65k-point depth-8 solve went 281 → 18.6 s. The run record
+  persists as `meshSummary`. New UI: Surface trimming / Fill small holes / Remove
+  floating pieces; `trimFactor` was replaced by `distanceTrim` (default off). Numbers:
+  HANDOVER ▸ B-mesh-2. Browser checks: VERIFICATION ▸ MESH-01…03.
 
 - **2026-10-07 · Dense cross-view filter: visible in the log, honest on the bar, ~3× faster.**
   Per-map filter lines were `debug`, so at the default level the pass was silent from

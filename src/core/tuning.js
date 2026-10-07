@@ -244,8 +244,8 @@ export const DENSE_TUNING = {
 }
 
 // Mesh (screened Poisson) internals read in core/products/mesh.js but NOT exposed in
-// MeshModal — the user-facing knobs (depth/screening/trimFactor/colorize) live in
-// defaults.user.js (MESH_DEFAULTS). `settings` from the caller override.
+// MeshModal — the user-facing knobs (depth/screening/trim/fillHoles/removeFloaters/
+// colorize) live in defaults.user.js (MESH_DEFAULTS). `settings` from the caller override.
 export const MESH_TUNING = {
   colorSearchRadius: 1,        // vertex-colour transfer: search ±N voxel cells (3³ nhood)
   grayFallback: [180, 180, 180], // colour for a vertex with no dense point nearby
@@ -255,6 +255,34 @@ export const MESH_TUNING = {
   // the input to ≈ this many leaf cells per point before the solve (1 ⇒ ~one point per leaf
   // cell). Colour transfer still uses the FULL dense cloud, so quality is unaffected. The
   // subsample only kicks in when it would actually thin the cloud (input denser than a leaf
-  // cell); a sparse cloud passes through untouched.
+  // cell); a sparse cloud passes through untouched. Each kept sample carries how many raw
+  // points it stands for — the support weight the trim and the floater filter read.
   inputLeafCellsPerPoint: 1,
+  // Support-density trim: drop surface whose support is below this fraction of the median
+  // sample's (crates/mesh `density_ratio`). 0.1 removes the fixture's speck shells and the
+  // bridged cap of a sphere while keeping an open rim (≈ ½ median); 0.3 also eats thinly
+  // observed surface. A ratio, so it means the same at every scale.
+  trimRatio: { off: 0, gentle: 0.1, strong: 0.3 },
+  // Hole refill: a trimmed region that is closed and no larger than this fraction of the
+  // kept piece around it is a hole the solve bridged and goes back in. Relative to the
+  // bordering piece, never the whole mesh (crates/mesh `refill_holes`).
+  holeAreaRatio: 0.05,
+  // Robust extent. The octree spans the input's bounding box, so a few stragglers far from
+  // the object coarsen every leaf. Points outside the [lo, hi] per-axis quantile box,
+  // grown by `robustMargin` × its size on each side, are left out of the solve. The margin
+  // keeps the object's real extremities (they are inside the 1–99 % box ± 25 %).
+  robustQuantiles: [0.01, 0.99],
+  robustMargin: 0.25,
+  robustSampleMax: 200000,      // positions sampled to estimate the quantiles
+  // Pre-solve floater filter (cloudEdit `removeIsolated` at this many leaf widths): a cell
+  // holding ≤ 2 points with < 2 occupied neighbours is a stray. A converged solve ignores
+  // lone strays geometrically, but each still costs ~125 finest-layer octree nodes.
+  isolatedCellLeaves: 2,
+  // The auto depth cap: never refine leaves below this many input spacings — finer cells
+  // than the samples resolve nothing and multiply the solve's cost by ~4 per level.
+  minLeafSpacings: 1,
+  minDepth: 5,
+  // Spacing estimate for a cloud without a fusion merge cell (an imported cloud): median
+  // nearest-neighbour distance over this many sampled points.
+  spacingSampleMax: 20000,
 }

@@ -104,12 +104,12 @@ fn run(side: usize, depth: usize, screening: f64) {
     let (recon, points, sample_iso) = builder.finish();
     println!("  finish + isovalue: {:.2}s", t.elapsed().as_secs_f64());
 
-    // Extraction bounded exactly as `finalize_mesh` bounds it: the trim radius plus half
-    // a leaf-cell diagonal. Production's default trim is 6× the dense merge cell, and
-    // the input carries ~one point per leaf cell, so ~6 leaf widths is representative.
+    // Extraction bounded exactly as `finalize_mesh` bounds it with the default support
+    // trim: the support field reaches 2√3 support cells (4 leaves each) past a sample,
+    // plus half a leaf-cell diagonal.
     let t = Instant::now();
     let leaf = recon.leaf_cell_width();
-    let reach = Near::new(&points, 6.0 * leaf + leaf * 3.0_f64.sqrt() / 2.0);
+    let reach = Near::new(&points, 2.0 * 3.0_f64.sqrt() * 4.0 * leaf + leaf * 3.0_f64.sqrt() / 2.0);
     let bufs = recon.reconstruct_mesh_buffers_iso_within(sample_iso, &|c| reach.test(c));
     println!(
         "  marching cubes: {:.2}s -> {} verts / {} tris",

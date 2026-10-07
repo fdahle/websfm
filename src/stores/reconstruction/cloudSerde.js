@@ -57,6 +57,7 @@ export function serializeMeshCloud(c) {
     imported: !!c.imported, secondary: !!c.secondary,
     cameras: [], pointCount: nVerts, nVerts, triCount: c.count || 0,
     hasColor: !!col, viewUuids: [],
+    ...(c.meshSummary ? { meshSummary: c.meshSummary } : {}),
     buffers: { pos: pos.buffer, col: col ? col.buffer : null, idx: idx.buffer,
       vcount: null, vcam: null, vkp: null, vx: null, vy: null },
   }
@@ -187,6 +188,8 @@ function deserializeCloudData(c, makeCloudId) {
       ...(c.imported ? { imported: true } : {}),
       count: c.triCount ?? (idx.length / 3), nVerts,
       pos: markRaw(posF), idx: markRaw(idx), col: col ? markRaw(col) : null,
+      // The mesh run record; absent on meshes saved before it existed ⇒ unknown.
+      ...(c.meshSummary ? { meshSummary: c.meshSummary } : {}),
     }
   }
   const pos = b.pos ? new Float64Array(b.pos) : new Float64Array(0)

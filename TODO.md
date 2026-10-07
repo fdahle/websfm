@@ -166,6 +166,17 @@ and an explicit format **outranks** the pitch in `resolveK` since 2026-07-16, so
 warning's advice is now literally actionable — this item is just the UI half.
 Related evidence: `VERIFICATION.csv` ▸ `FID-08` (the TMA set's implied 253 mm).
 
+### MS — mesh: confirm on real data (fix shipped 2026-10-07)
+- **Run `MESH-01` on the eagle** (cleaned cloud, defaults) and `MESH-02` on an aerial
+  set. If pieces survive or real surface is lost, retune `MESH_TUNING.trimRatio` /
+  `holeAreaRatio` and the 1 % floater default from those runs, not from the fixtures.
+  Record time and triangle count as the first real-data mesh baseline.
+- **`demSource` makes the same first-dense pick** Build Mesh used to make, so a DEM
+  ignores an edited cloud too. Decide whether DEM should follow `meshSource`'s rule
+  (selected → newest edit → first) before changing it: DEMs feed ortho staleness.
+- Only if `MESH-01` still shows floaters a cleaned cloud cannot explain: a
+  visibility-aware mesher (TSDF from the persisted depth maps, or Delaunay graph-cut).
+
 ---
 
 ## Next
@@ -720,11 +731,13 @@ in the exported HTML report (the hub already shows the histogram live).
   contract); fewer submits via a dynamic-offset ctrl uniform.
 - **WASM dense perf**: f32 hot loop in `mvs.rs` `plane_cost`/`agg_cost` (the GPU path
   proves f32 sufficient; keep the JS f64 reference as the precision anchor).
-- **Threads for the Poisson solve.** The finest-layer solve is now the mesh tall pole
-  (123 s of 227 s at depth 8) and is genuine sparse-assembly + CG work — the part that
-  would gain most from rayon. The app is already cross-origin isolated for ORT, so
-  `SharedArrayBuffer` is available and the rayon strip is a build flag, not a hard
-  limit. Gate on someone meshing at depth 8+ regularly.
+- **Threads for the Poisson solve.** After the 2026-10-07 restructuring (B-mesh-2) the
+  finest layer is 6.8 s of an 18.6 s depth-8 bench run, split between assembly and the
+  right-hand side, both hash-lookup-bound and per node independent, so they would
+  parallelise cleanly. The app is already cross-origin isolated for ORT, so
+  `SharedArrayBuffer` is available. But wasm threads need nightly Rust with
+  `-Z build-std` (atomics), a new toolchain requirement for the whole build. Gate on
+  real meshes at depth 9–10 being too slow.
 - **Stream partial reconstruction snapshots** from the worker so the 3D viewer builds
   up live (the `emit` channel exists).
 - **Surface worker errors in the UI** — a per-request reject currently only logs; the

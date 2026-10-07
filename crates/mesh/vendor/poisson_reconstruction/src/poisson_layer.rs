@@ -1,22 +1,22 @@
 use crate::conjugate_gradient::solve_conjugate_gradient;
 use crate::hgrid::HGrid;
 use crate::poisson_vector_field::PoissonVectorField;
-use crate::polynomial::TriQuadraticBspline;
+use crate::polynomial::OverlapTable;
 use crate::{
     poisson::{self, CellWithId},
     polynomial, Real,
 };
 use na::{vector, DVector, Point3, Vector3};
-use nalgebra_sparse::{CooMatrix, CscMatrix};
+use nalgebra_sparse::CscMatrix;
 use parry::bounding_volume::Aabb;
 use parry::partitioning::Qbvh;
-use std::collections::HashMap;
+use crate::fast_hash::FastMap;
 
 #[derive(Clone)]
 pub struct PoissonLayer {
     pub grid: HGrid<usize>,
     pub cells_qbvh: Qbvh<CellWithId>,
-    pub grid_node_idx: HashMap<Point3<i64>, usize>,
+    pub grid_node_idx: FastMap<Point3<i64>, usize>,
     pub ordered_nodes: Vec<Point3<i64>>,
     pub node_weights: DVector<Real>,
 }
@@ -53,7 +53,7 @@ impl PoissonLayer {
         cell_width: Real,
     ) -> Self {
         let mut grid = HGrid::new(grid_origin, cell_width);
-        let mut grid_node_idx = HashMap::new();
+        let mut grid_node_idx = FastMap::default();
         let mut ordered_nodes = vec![];
 
         // for pt in points {
@@ -97,7 +97,7 @@ impl PoissonLayer {
     pub fn from_next_layer(points: &[Point3<Real>], layer: &Self) -> Self {
         let cell_width = layer.cell_width() * 2.0;
         let mut grid = HGrid::new(*layer.grid.origin(), cell_width);
-        let mut grid_node_idx = HashMap::new();
+        let mut grid_node_idx = FastMap::default();
         let mut ordered_nodes = vec![];
 
         // Add nodes to the new grid to form a comforming "octree".
@@ -142,7 +142,7 @@ impl PoissonLayer {
 
     fn from_populated_grid(
         grid: HGrid<usize>,
-        grid_node_idx: HashMap<Point3<i64>, usize>,
+        grid_node_idx: FastMap<Point3<i64>, usize>,
         ordered_nodes: Vec<Point3<i64>>,
     ) -> Self {
         let cell_width = grid.cell_width();
@@ -179,6 +179,12 @@ impl PoissonLayer {
         normals: &[Vector3<Real>],
         screening: Real,
         niters: usize,
+        // The coarser layers' solution at each point (Σ over layers < curr_layer of
+        // `eval_triquadratic`), for the screening half of the coarse subtraction.
+        coarse_at_points: &[Real],
+        // The coarser layers' solution in this layer's basis, at every lattice point within
+        // ±2 of a node ([`Self::prolong`]); empty for the coarsest layer.
+        prolonged: &FastMap<Point3<i64>, Real>,
     ) -> DVector<Real> {
         let my_layer = &layers[curr_layer];
         let cell_width = my_layer.cell_width();
@@ -186,8 +192,17 @@ impl PoissonLayer {
         let convolution = polynomial::compute_quadratic_bspline_convolution_coeffs(cell_width);
         let num_nodes = my_layer.ordered_nodes.len();
 
-        // Compute the gradient matrix.
-        let mut grad_matrix = CooMatrix::new(num_nodes, num_nodes);
+        // Compute the gradient matrix, straight into CSC. (Vendored patch.) The matrix is
+        // symmetric — Laplacian stencil plus the screening sum Σ_p B_n(p)·B_m(p), both
+        // symmetric in (n, m) up to the order of the multiplies — so the row assembled for
+        // node `nid` is also its column, in node order. Upstream pushed every entry into a
+        // COO triplet list and converted: at depth 8 that was 51 M triplets (~1.2 GB)
+        // plus a full CSC copy, the solve's peak memory, and ~3 s of sorting.
+        let mut col_offsets: Vec<usize> = Vec::with_capacity(num_nodes + 1);
+        let mut row_indices: Vec<usize> = Vec::new();
+        let mut values: Vec<Real> = Vec::new();
+        col_offsets.push(0);
+        let mut row: Vec<(usize, Real)> = Vec::with_capacity(125);
         let screen_factor =
             (2.0 as Real).powi(curr_layer as i32) * screening * vector_field.area_approximation()
                 / (points.len() as Real);
@@ -209,7 +224,7 @@ impl PoissonLayer {
         }
         let mut screen_stencil: Vec<ScreenPoint> = Vec::new();
 
-        for (nid, node) in my_layer.ordered_nodes.iter().enumerate() {
+        for node in my_layer.ordered_nodes.iter() {
             if screening != 0.0 {
                 // Stencil-neighbour centres per axis. Read from the grid rather than
                 // formed as center1 + offset·width so they stay bit-identical to the
@@ -273,89 +288,161 @@ impl PoissonLayer {
                                     screen_factor * p.at_node * (p.bx[ii] * p.by[jj] * p.bz[kk]);
                             }
 
-                            grad_matrix.push(nid, *other_nid, laplacian);
+                            row.push((*other_nid, laplacian));
                         }
                     }
                 }
             }
+            row.sort_unstable_by_key(|e| e.0);
+            for &(j, v) in &row {
+                row_indices.push(j);
+                values.push(v);
+            }
+            row.clear();
+            col_offsets.push(row_indices.len());
         }
 
         // Build rhs
         let mut rhs = DVector::zeros(my_layer.ordered_nodes.len());
         vector_field.build_rhs(layers, curr_layer, &mut rhs);
 
-        // Subtract the results from the coarser layers.
+        // Subtract the results from the coarser layers: rhs_n −= Σ_m x_m·A_nm over every
+        // coarser node m, where A_nm = ⟨∇B_n, ∇B_m⟩ + screen·Σ_p B_n(p)·B_m(p).
         //
-        // Screening scratch (vendored patch): which points sit near this node, and this
-        // node's own basis at each of them, do not depend on *which* coarser node is
-        // being subtracted — but the original re-gathered the 27 cells and re-evaluated
-        // `poly1` inside that loop. Gather once per node instead.
-        let mut screen_coarse: Vec<(Point3<Real>, Real)> = Vec::new();
+        // (Vendored patch — two exact restructurings of that sum. Measured on a 65k-point
+        // depth-8 terrain, the original spent 149 s of a 268 s solve in this loop.)
+        // 1. The screening half is Σ_p B_n(p) · Σ_m x_m B_m(p), and the inner sum is just
+        //    the coarser layers' solution evaluated at p — the caller accumulates it once
+        //    per point per layer (`coarse_at_points`). The original evaluated every
+        //    coarser basis at every nearby point for every node: nodes × ~64 coarser
+        //    nodes × ~20 points × layers B-spline evaluations.
+        // 2. The gradient half is ⟨∇B_n, ∇F⟩ for the coarser solution F, and a quadratic
+        //    B-spline of width 2w is exactly a [1,3,3,1]/8 (per axis) combination of
+        //    width-w ones. So F, prolonged layer by layer into this layer's basis
+        //    (`prolonged`, see [`Self::prolong`]), turns the sum into the same-width
+        //    5×5×5 stencil over F's coefficients next to n — instead of probing ~64
+        //    nodes in every coarser layer.
+        let my_width = my_layer.cell_width();
+        if curr_layer > 0 {
+            let same = OverlapTable::new(my_width, my_width, true, true);
+            let zero = Point3::new(0i64, 0, 0);
+            let mut stencil = [[[0.0; 5]; 5]; 5];
+            for (i, plane) in stencil.iter_mut().enumerate() {
+                for (j, line) in plane.iter_mut().enumerate() {
+                    for (k, s) in line.iter_mut().enumerate() {
+                        let d = Point3::new(i as i64 - 2, j as i64 - 2, k as i64 - 2);
+                        *s = same.grad_grad_sum(&zero, &d);
+                    }
+                }
+            }
 
-        for rhs_id in 0..my_layer.ordered_nodes.len() {
-            let node_key = my_layer.ordered_nodes[rhs_id];
-            let node_center = my_layer.grid.cell_center(&node_key);
-            let poly1 = TriQuadraticBspline::new(node_center, my_layer.cell_width());
+            for rhs_id in 0..my_layer.ordered_nodes.len() {
+                let node_key = my_layer.ordered_nodes[rhs_id];
+                let node_center = my_layer.grid.cell_center(&node_key);
 
-            if screening != 0.0 && curr_layer > 0 {
-                screen_coarse.clear();
-                for si in -1..=1 {
-                    for sj in -1..=1 {
-                        for sk in -1..=1 {
-                            let adj = node_key + vector![si, sj, sk];
-                            let Some(pt_ids) = my_layer.grid.cell(&adj) else {
-                                continue;
-                            };
-                            for pid in pt_ids {
-                                // Use get to ignore the sentinel.
-                                let Some(pt) = points.get(*pid) else {
+                if screening != 0.0 {
+                    let mut screen = 0.0;
+                    for si in -1..=1 {
+                        for sj in -1..=1 {
+                            for sk in -1..=1 {
+                                let adj = node_key + vector![si, sj, sk];
+                                let Some(pt_ids) = my_layer.grid.cell(&adj) else {
                                     continue;
                                 };
-                                let at_node = poly1.eval(*pt);
-                                // Zero here zeroes every product this point appears in.
-                                if at_node != 0.0 {
-                                    screen_coarse.push((*pt, at_node));
+                                for pid in pt_ids {
+                                    // Use get to ignore the sentinel.
+                                    let Some(pt) = points.get(*pid) else {
+                                        continue;
+                                    };
+                                    let at_node =
+                                        polynomial::eval_bspline(pt.x, node_center.x, my_width)
+                                            * polynomial::eval_bspline(pt.y, node_center.y, my_width)
+                                            * polynomial::eval_bspline(pt.z, node_center.z, my_width);
+                                    screen += at_node * coarse_at_points[*pid];
                                 }
                             }
                         }
                     }
+                    rhs[rhs_id] -= screen_factor * screen;
                 }
-            }
 
-            for coarser_layer in &layers[0..curr_layer] {
-                let aabb = Aabb::from_half_extents(
-                    node_center,
-                    Vector3::repeat(
-                        my_layer.cell_width() * 1.5 + coarser_layer.cell_width() * 1.5,
-                    ),
-                );
-
-                for (coarser_node_key, _) in coarser_layer
-                    .grid
-                    .cells_intersecting_aabb(&aabb.mins, &aabb.maxs)
-                {
-                    let coarser_node_center = coarser_layer.grid.cell_center(&coarser_node_key);
-                    let poly2 =
-                        TriQuadraticBspline::new(coarser_node_center, coarser_layer.cell_width());
-                    let mut coeff = poly1.grad_grad(poly2, true, true).sum();
-                    let coarser_rhs_id = coarser_layer.grid_node_idx[&coarser_node_key];
-
-                    for (pt, at_node) in &screen_coarse {
-                        coeff += screen_factor * *at_node * poly2.eval(*pt);
+                let mut grad = 0.0;
+                for (i, plane) in stencil.iter().enumerate() {
+                    for (j, line) in plane.iter().enumerate() {
+                        for (k, s) in line.iter().enumerate() {
+                            let key = node_key + vector![i as i64 - 2, j as i64 - 2, k as i64 - 2];
+                            if let Some(f) = prolonged.get(&key) {
+                                grad += s * f;
+                            }
+                        }
                     }
-
-                    rhs[rhs_id] -= coarser_layer.node_weights[coarser_rhs_id] * coeff;
                 }
+                rhs[rhs_id] -= grad;
             }
         }
 
         // Solve the sparse system.
-        let lhs = CscMatrix::from(&grad_matrix);
+        let lhs = CscMatrix::try_from_csc_data(num_nodes, num_nodes, col_offsets, row_indices, values)
+            .expect("assembled CSC is well-formed: one sorted, duplicate-free column per node");
         solve_conjugate_gradient(&lhs, &mut rhs, niters);
         // let chol = CscCholesky::factor(&lhs).unwrap();
         // chol.solve_mut(&mut rhs);
 
         rhs
+    }
+
+    /// The solution of every layer up to and including `coarse` (its own solved weights
+    /// plus `coarse_prolonged`, everything coarser already expressed in its basis),
+    /// re-expressed in `fine`'s basis at every lattice point within ±2 of a `fine` node —
+    /// exactly the coefficients [`Self::solve`]'s stencil reads. (Vendored patch.)
+    ///
+    /// Exact by the B-spline refinement relation: a normalised quadratic B-spline of
+    /// width 2w centred on coarse cell K equals Σ_t r_t·B_w at fine cells 2K − 1 + t,
+    /// t = 0..3, with r = [1, 3, 3, 1]/8 per axis. So fine coefficient k gathers from the
+    /// two coarse cells per axis that refine onto it. Those parents lie within ±2 of a
+    /// `coarse` node (each fine node's parent cell is one — see [`Self::from_next_layer`]),
+    /// which is where `coarse_prolonged` is complete, so the induction holds layer to layer.
+    pub(crate) fn prolong(
+        fine: &Self,
+        coarse: &Self,
+        coarse_prolonged: &FastMap<Point3<i64>, Real>,
+    ) -> FastMap<Point3<i64>, Real> {
+        const R: [Real; 4] = [0.125, 0.375, 0.375, 0.125];
+        let q = |k: &Point3<i64>| {
+            coarse_prolonged.get(k).copied().unwrap_or(0.0)
+                + coarse.grid_node_idx.get(k).map_or(0.0, |&id| coarse.node_weights[id])
+        };
+        // Per axis: the two coarse parents of fine index k and their refinement weights.
+        let parents = |k: i64| {
+            let hi = (k + 1).div_euclid(2);
+            let t = (k - 2 * hi + 1) as usize; // 0 or 1; the lower parent has t + 2
+            [(hi, R[t]), (hi - 1, R[t + 2])]
+        };
+        let mut out: FastMap<Point3<i64>, Real> = FastMap::default();
+        out.reserve(fine.ordered_nodes.len() * 2);
+        for node in &fine.ordered_nodes {
+            for i in -2..=2 {
+                for j in -2..=2 {
+                    for k in -2..=2 {
+                        let key = node + vector![i, j, k];
+                        if out.contains_key(&key) {
+                            continue;
+                        }
+                        let (px, py, pz) = (parents(key.x), parents(key.y), parents(key.z));
+                        let mut v = 0.0;
+                        for &(kx, rx) in &px {
+                            for &(ky, ry) in &py {
+                                for &(kz, rz) in &pz {
+                                    v += rx * ry * rz * q(&Point3::new(kx, ky, kz));
+                                }
+                            }
+                        }
+                        out.insert(key, v);
+                    }
+                }
+            }
+        }
+        out
     }
 
     pub fn eval_triquadratic(&self, pt: &Point3<Real>) -> Real {

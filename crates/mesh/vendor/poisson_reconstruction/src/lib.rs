@@ -15,6 +15,7 @@ extern crate parry3d_f64 as parry;
 pub use self::poisson::{PoissonBuilder, PoissonReconstruction};
 
 mod conjugate_gradient;
+mod fast_hash;
 mod hgrid;
 pub mod marching_cubes;
 mod poisson;

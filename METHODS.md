@@ -1288,31 +1288,79 @@ Exports: PLY, model JSON, DEM GeoTIFF/.asc, ortho GeoTIFF/PNG+.wld, mesh PLY/GLB
 **Method**: **screened Poisson surface reconstruction** (Kazhdan & Hoppe 2013),
 `crates/mesh` (WASM) + `core/products/mesh.js`. It solves for an implicit
 indicator function whose gradient matches the oriented point normals (the
-"screening" term additionally pulls the zero level set toward the sample points),
-then extracts the surface with marching cubes.
+"screening" term additionally pulls the level set toward the sample points),
+then extracts the surface with marching cubes. On a photogrammetric cloud the
+solve alone is not a usable mesh, for the same reason PoissonRecon ships a second
+program (`SurfaceTrimmer`): the solution is closed and defined everywhere, so it
+extrapolates a hull past the data and wraps every speck of fusion noise in its
+own shell. The cleanup below is part of the method, not a cosmetic option.
 
 - **Why Poisson, and why it's cheap here**: Poisson needs *oriented* per-point
   normals. Normally that's a separate estimation stage; we reuse the dense
   PatchMatch plane normals (§7), so the only new heavy compute is the multigrid
   solve itself.
-- **Iso-value**: the reconstructed surface is the level set at the **average of
-  the implicit function evaluated at the input samples**, not the naive `0` — the
-  vendored library hard-coded `0`, which inflated the surface ~8% (a patch extracts
-  at the sample-average iso, matching the reference implementation).
-- **Trimming**: Poisson closes over holes with extrapolated "bulges". We cull any
-  triangle whose three vertices are all farther than `trimFactor × mergeCell` from
-  the input cloud (a voxel-hash proximity test), keeping only surface supported by
-  data. `trimFactor 0` keeps the full watertight hull.
+- **The solve must converge.** The multigrid is *cascadic*: each layer solves only
+  for the residual the coarser layers left, by conjugate gradient. The vendored
+  library started each layer's CG from `x₀ = b` (the right-hand side) and ran a
+  fixed 10 iterations, which does not wash that guess out. The leftover residual is
+  closed, cell-sized ripples of the implicit function. On a clean, 8000-sample unit
+  sphere at depth 6 that was 444 surface components with 47 % of the area off the
+  sphere (radius RMS 0.094). From `x₀ = 0`, with a 10⁻⁶ relative-residual stop, the
+  same solve gives one component at RMS 0.0004 in ≤ 10 iterations. This was the main
+  cause of the 2026-10-07 "blob field" eagle mesh.
+- **Input conditioning** (`core/products/mesh.js`): the octree spans the input's
+  bounding box, so stragglers far outside the object (outside the 1–99 % per-axis box
+  grown by 25 % of its largest side) leave the solve. The requested depth is lowered
+  when its leaves would be finer than the sample spacing (the fusion merge cell, or
+  the median nearest-neighbour distance for an imported cloud): those levels resolve
+  nothing. Lone stray points go before the solve (each still costs octree nodes). The
+  cloud is then voxel-thinned to ≈ one sample per leaf, and **each sample keeps how
+  many raw points it stands for** as its *support weight*.
+- **Iso-value**: the surface is the level set at the **support-weighted average of
+  the implicit function at the input samples**, not the naive `0` (the reference
+  implementation also uses a sample average). Weighting by support stops a cloud of
+  one-point strays from pulling the level off the well-supported surface.
+- **Support trimming**: each sample's support weight is splatted onto a lattice four
+  leaves wide (trilinear). A triangle whose mean vertex support is below a fraction of
+  the *median sample's* support is removed (gentle 0.1, strong 0.3). Because the
+  threshold is a ratio, it means the same at every scale. This removes the
+  extrapolated hull and the thin shells around specks. Extraction is bounded to where
+  the support is non-zero, so the hull is never generated at all.
+- **Hole refill**: a trimmed region that is closed (no open edge, so it was not cut by
+  the extraction bound) and no larger than 5 % of the kept piece it borders is a hole
+  the solve legitimately bridged, and it is added back (cf. PoissonRecon's `--aRatio`).
+  It is compared with the *bordering piece*, not the whole mesh. A speck's shell is
+  also closed and attached to kept surface (the speck itself), and next to the whole
+  mesh it looks small. On the floater fixture, comparing with the whole mesh restored
+  9 of 29 blobs.
+- **Floating pieces**: a connected component is dropped when it explains less than
+  1 % of the support of the best-supported component. Support here is the summed
+  weight of the input samples whose nearest kept vertex lies on that component.
+  Measuring by **evidence rather than area** is the point: Poisson inflates a 20-point
+  speck into a ball a few cells across, about 1 % of a sphere's area in the fixture
+  while explaining 0.25 % of its samples.
+- **Distance trim** (optional, off by default): cull any triangle whose three vertices
+  are all farther than `distanceTrim ×` the input sample spacing from the input. It
+  removes extrapolated sheets, but it cannot remove a speck's shell, which by
+  construction lies within any trim radius of its own speck.
 - **Colour**: Poisson vertices are new points, so colour is transferred from the
-  nearest dense-cloud voxel cell (3³ neighbourhood search).
-- **Knobs**: octree `depth` (detail vs cost/RAM), `screening` weight (fit
-  tightness; **not** PoissonRecon's samples-per-node — this library exposes
-  screening instead), `trimFactor`.
+  nearest dense-cloud voxel cell (3³ neighbourhood search), then retried on a
+  leaf-sized grid for vertices farther out (refilled holes, smoothed creases) before
+  falling back to gray.
+- **Knobs**: octree `depth` (detail vs cost/RAM, auto-capped by the spacing),
+  `screening` weight (fit tightness; **not** PoissonRecon's samples-per-node, which
+  this library does not expose), `trim`, `fillHoles`, `removeFloaters` /
+  `minPiecePct`, `distanceTrim`.
 - **Implementation note**: the solver is a **vendored, rayon-stripped** copy of
-  Dimforge's `poisson_reconstruction` — rayon's worker threads panic on
-  threadless wasm, so its two `par_iter_mut()` sites run sequentially.
-
----
+  Dimforge's `poisson_reconstruction` (rayon's worker threads panic on threadless
+  wasm). Its assembly is restructured without changing the system it solves. The
+  coarse-layer screening term uses the coarser solution evaluated once per sample.
+  The gradient terms come from tables keyed by integer lattice offset, and the
+  coarse-layer gradient term uses the exact B-spline refinement
+  (`B_{2w} = Σ [1,3,3,1]/8 · B_w` per axis) to prolong the coarser solution into
+  each layer's basis. On a fixed reference solve the coefficients agree with the
+  original to 8.5·10⁻¹³ (relative to magnitude 3), and a 65k-point depth-8 solve went
+  from 281 s to 18.6 s (native).
 
 ## 9. CRS handling (why this app is different)
 

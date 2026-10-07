@@ -59,6 +59,18 @@ METHODS.md. A measured number from a verification run goes to HANDOVER §Baselin
   the isosurface walk runs a long way past the samples, and "bound it to the octree
   AABB" is *wrong* (it clips real surface). Bound it by proximity to the input points
   instead, which is exactly what the trim pass already enforces.
+  Third lesson, the expensive one: **upstream's CG started every layer from `x₀ = b`
+  and ran a fixed 10 iterations, so the solve never converged.** The residual was
+  cell-sized closed ripples, the "blob field" mesh. It went unnoticed for months
+  because the crate's own sphere test accepted mean radius 1.08 / RMS 0.19 as
+  "smoothed outward at low depth". Converged, it is 1.0001 / 0.0004. Pin a solver's
+  output to a precision it should reach, never to the error it happens to have.
+  Assembly restructurings (the coarse-layer screening sum via the coarser solution at
+  each sample, `OverlapTable` lattice-offset coefficient tables, B-spline prolongation
+  of the coarser solution, direct CSC assembly, `fast_hash.rs`) must reproduce the
+  solved coefficients. `solver_weights_reference` records them with the old code
+  (`WEBSFM_WEIGHTS=write`, `WEBSFM_WEIGHTS_FILE=<path>`; WSL's `/tmp` does not survive
+  between `wsl.exe` calls) and checks the new code (`=check`, ≤ 1e-9 relative).
   Its Rust tests need release mode (`cargo test -p mesh --release`; debug is ~40× slower).
   `crates/imagecodec` and `crates/lazcodec` are the other dep-carrying crates,
   likewise isolated from `reconstruction`: the `tiff` crate as a native TIFF decoder
@@ -837,16 +849,26 @@ self-contained, file-based project format.
    the store re-attaches those *before* any early return. `removeIsolated` is the
    standalone cousin of the dense accumulator's `filterIsolated` — it scores
    occupancy on a grid but keeps the original points (a cleanup, not a resample).
-7. **Mesh** (`core/products/mesh.js` + `crates/mesh`): **screened Poisson** over the
-   main dense cloud, reusing its per-point normals (`DenseCloud.nrm`, the PatchMatch
-   plane normals — no separate normal estimation). The wasm `poisson_mesh` returns one
-   flat byte buffer `[u32 nVerts, u32 nTris, f32 pos, u32 idx]`; the crate extracts at
-   the **sample-average iso** (not 0 — the naive iso inflates the surface ~8%) and
-   **trims** triangles farther than `trimFactor × mergeCell` from any input point.
-   Vertex colour is transferred from the nearest dense voxel cell. Output is a
-   `kind:'mesh'` cloud (`useReconstructionStore.generateMesh`), shown as a lit
-   `THREE.Mesh`, exported PLY (faces) / GLB. Non-destructive: the worker round-trips
-   the dense buffers home.
+7. **Mesh** (`core/products/mesh.js` + `crates/mesh`): **screened Poisson** over a
+   dense cloud with per-point normals (`DenseCloud.nrm`, the PatchMatch plane normals —
+   no separate normal estimation). **The source is `meshSource`/`meshSources`** (same
+   contract as `demSource`: the modal renders it, the run consumes it). It defaults to
+   the selected dense cloud, else the newest `derived` edit, else the first. Never mesh
+   "the first dense cloud": edits are non-destructive copies, and that pick ignored
+   every cleanup. JS conditions the input (spacing from the merge cell, or estimated for
+   an imported cloud; robust-extent box; depth capped by spacing; stray pre-filter;
+   voxel thinning that keeps each sample's **support weight** = raw points per voxel;
+   positions relative to a local origin so Float64 survey coordinates survive the f32
+   solve). The staged wasm `PoissonMesher` returns the flat buffer
+   `[u32 nVerts, u32 nTris, f32 pos, u32 idx]` plus `stats()`, and its `finish` runs the
+   cleanup that makes Poisson usable on photogrammetry (`MeshOptions`). That is support
+   trimming relative to the median sample, hole refill relative to the *bordering*
+   piece, and floating-piece removal by *samples explained*, not area (Poisson inflates
+   a speck into a ball). Extraction is bounded by the support reach, so the hull is
+   never built. Vertex colour is transferred from the nearest dense voxel cell. Output
+   is a `kind:'mesh'` cloud carrying a persisted `meshSummary` run record (absent ⇒
+   unknown), shown as a lit `THREE.Mesh`, exported PLY (faces) / GLB. Non-destructive:
+   the worker round-trips the dense buffers home.
 
 ## In-app glossary (help)
 Cross-linked term explanations. **Content**: `src/glossary/**/*.md` (organised into

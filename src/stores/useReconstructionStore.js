@@ -188,6 +188,25 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     return { cloud: sparse, kind: 'sparse', count: n, name: sparse.name ?? null }
   })
 
+  // The dense clouds Build Mesh can use (any dense cloud with per-point normals —
+  // computed, edited or imported) and the one it uses by default. Same contract as
+  // demSource: MeshModal RENDERS this and generateMesh() CONSUMES it, so the modal's
+  // "Source:" line and the run can't disagree. The default prefers the viewer-selected
+  // dense cloud, then the newest edited (`derived`) one — a cleaned cloud is what the
+  // user made it for — then the first. Picking the first dense cloud unconditionally
+  // (as before) meshed the original fusion output and silently ignored every edit.
+  const meshSources = computed(() => clouds.value
+    .filter((c) => c.kind === 'dense' && c.count > 0 && c.nrm && c.nrm.length >= c.count * 3)
+    .map((c) => ({ id: c.id, name: c.name ?? 'Dense', count: c.count, derived: !!c.derived, imported: !!c.imported })))
+  const meshSource = computed(() => {
+    const list = meshSources.value
+    if (!list.length) return null
+    const selected = list.find((s) => s.id === selectedCloudId.value)
+    if (selected) return selected
+    const derived = list.filter((s) => s.derived)
+    return derived.length ? derived[derived.length - 1] : list[0]
+  })
+
   // The mesh a mesh-surface ortho would rasterise (the first non-empty one).
   const meshCloud = computed(() => clouds.value.find((c) => c.kind === 'mesh' && c.count > 0) ?? null)
 
@@ -573,7 +592,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
 
   // Insert/replace the single mesh cloud (kind:'mesh'). Flat like the dense cloud:
   // per-vertex pos/col + triangle idx, no per-vertex objects. count = triangles.
-  function upsertMeshCloud({ nVerts, count, pos, idx: triIdx, col }) {
+  function upsertMeshCloud({ nVerts, count, pos, idx: triIdx, col, summary }, run = {}) {
     // As with dense: a re-mesh replaces the computed mesh, never an imported one.
     const i = clouds.value.findIndex((c) => c.kind === 'mesh' && !c.imported)
     const prev = i >= 0 ? clouds.value[i] : null
@@ -587,6 +606,14 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
       pos: markRaw(pos),
       idx: markRaw(triIdx),
       col: markRaw(col),
+      // The run record (core/products/mesh.js `summary` + what was asked and of which
+      // cloud). Persisted; absent on older meshes ⇒ unknown.
+      ...(summary ? {
+        meshSummary: {
+          ...summary, sourceId: run.sourceId ?? null, sourceName: run.sourceName ?? null,
+          settings: run.settings ?? null,
+        },
+      } : {}),
     }
     if (i >= 0) clouds.value.splice(i, 1, cloud)
     else clouds.value.push(cloud)
@@ -866,26 +893,38 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     }
   }
 
-  // Mesh — screened Poisson over the main dense cloud (needs its oriented normals).
+  // Mesh — screened Poisson over a dense cloud with oriented normals: `settings.sourceId`
+  // when given (the modal's picker), else `meshSource` — never "the first dense cloud".
   // Sends disposable copies of the dense buffers to the worker. Keeping the
   // authoritative arrays here costs one temporary copy, but makes cancellation
   // genuinely non-destructive: terminating a worker cannot strand detached
   // source buffers. Upserts a single kind:'mesh' cloud.
   async function generateMesh(settings = {}, onProgress) {
-    const dense = clouds.value.find((c) => c.kind === 'dense')
-    if (!dense?.count) { log('Mesh: build a dense point cloud first', 'warn', 'Products'); return }
+    const { sourceId, ...meshSettings } = settings
+    const pick = sourceId != null ? meshSources.value.find((s) => s.id === sourceId) : meshSource.value
+    const dense = pick ? clouds.value.find((c) => c.id === pick.id) : null
+    if (!dense?.count) {
+      log(sourceId != null
+        ? 'Mesh: the chosen dense cloud is gone or has no normals'
+        : 'Mesh: build a dense point cloud (with normals) first', 'warn', 'Products')
+      return
+    }
     if (!dense.nrm || dense.nrm.length < dense.count * 3) {
       log('Mesh: the dense cloud has no per-point normals — re-run Densify to compute them', 'warn', 'Products')
       return
     }
-    // Pass the dense merge cell (GSD) so the worker sizes the trim radius + colour grid.
-    const mergeCell = denseSummary.value?.mergeCell ?? 0
+    // The fusion merge cell is the sample spacing of the clouds fused in this project's
+    // frame — the computed cloud and its edits. An imported cloud (or an edit of one)
+    // has its own spacing, which the worker estimates.
+    const mergeCell = dense.imported ? 0 : (denseSummary.value?.mergeCell ?? 0)
+    log(`Mesh: source "${dense.name ?? 'Dense'}" (${dense.count.toLocaleString()} points`
+      + `${dense.derived ? ', edited' : ''}${dense.imported ? ', imported' : ''})`, 'info', 'Products')
     const posCopy = dense.pos.slice()
     const colCopy = dense.col?.slice() || null
     const nrmCopy = dense.nrm.slice()
     const input = {
       dense: { count: dense.count, pos: posCopy, col: colCopy, nrm: nrmCopy },
-      settings: { ...settings, mergeCell },
+      settings: { ...meshSettings, mergeCell },
     }
     const transfer = [posCopy.buffer]
     if (colCopy) transfer.push(colCopy.buffer)
@@ -899,7 +938,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
         reconStatus.value = 'done'
         return
       }
-      upsertMeshCloud(mesh)
+      upsertMeshCloud(mesh, { sourceId: dense.id, sourceName: dense.name ?? null, settings: meshSettings })
       reconStatus.value = 'done'
       await persist()
     } catch (err) {
@@ -1849,6 +1888,8 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     healthDirty,
     dem,
     demSource,
+    meshSources,
+    meshSource,
     ortho,
     orthoSurfaces,
     canGeoreference,
