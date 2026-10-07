@@ -109,8 +109,8 @@ RTK/EXIF positions (quarry, GeoScan) and 15 independent GCP checkpoints (GeoScan
   Metashape's at 1.54× the amplitude. Height, a plane, a dome and mark radius explain
   little of the pattern. Metashape had 13 of the 15 in its solve, which shrinks their
   residuals, so part of the 1.54× may be survey or mark error that websfm shows in full.
-  Compare against a Metashape run with every GCP as a checkpoint (RTK only) before
-  treating it as a websfm defect.
+  Settle it with `VERIFICATION.csv` ▸ `GCP-07` (Metashape, every GCP a checkpoint, RTK
+  only) before treating it as a websfm defect.
 - **The remaining GeoScan error** (checkpoints H 4.4 cm, V 10.8 cm, GSD 2.9 cm; Metashape
   fits the RTK cameras at 1.2 cm vertical). After the lever arm, check whether the prior
   BA converged: its reprojection RMS does not move across both rounds, and it runs 30
