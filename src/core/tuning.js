@@ -5,8 +5,7 @@
 //
 // The rule (see CLAUDE.md ▸ Conventions): a knob that a modal exposes belongs in
 // `defaults.user.js`, never here. A knob owned by a self-contained pure sub-module
-// (e.g. `core/sfm/cycleFilter.js` cycle thresholds, `core/sfm/initPair.js` seed
-// thresholds) stays co-located with that module's algorithm + rationale — see the
+// (e.g. `core/sfm/initPair.js` seed thresholds) stays co-located with that module's algorithm + rationale — see the
 // pointer notes below rather than duplicating those values here.
 //
 // Pure data module: no Vue/Pinia/OPFS, so it bundles into the worker unchanged.
@@ -42,8 +41,7 @@ export const DETECT_TUNING = {
 
 // Sparse SfM knobs read directly in core/sfm/sfm.js (PnP registration + interleaved
 // bundle-adjustment / track filtering). `settings` from the caller still overrides.
-// NOT here (owned by their modules): init-pair thresholds → core/sfm/initPair.js;
-// rotation-cycle-filter thresholds → core/sfm/cycleFilter.js.
+// NOT here (owned by its module): init-pair thresholds → core/sfm/initPair.js.
 export const SFM_TUNING = {
   // ── Interleaved bundle-adjustment / track filtering ──
   // Observation pruning threshold, in **detection pixels** — sfm.js resolves it to
@@ -67,11 +65,6 @@ export const SFM_TUNING = {
   // add almost nothing. On 2026-10-05 SB the final prune still dropped 38,990 two-view
   // points (41 %); completion is the step that turns tracks into ≥3-view ones.
   completeTracksMaxRounds: 5,
-  // Also complete through pairs the rotation-cycle filter dropped (331 on that run,
-  // incl. true sequential neighbours with 700+ inliers). Completion-only: they never
-  // seed or triangulate, and each added observation still has to reproject within the
-  // gate against a point built from trusted pairs. Their additions are logged apart.
-  completeTracksDroppedPairs: true,
   // Projection-guided track extension (guidedExtension.js): after the first
   // self-calibrated post-filter BA, search each point's projection in every registered
   // camera that misses it for a keypoint with a matching descriptor. Ships the
@@ -128,6 +121,12 @@ export const SFM_TUNING = {
   selfCalMaxFocalNominalFrac: 0.35,
   selfCalMaxPrincipalOffsetFrac: 0.10,
   selfCalMaxCornerShiftFrac: 0.25,
+  // The same two focal bounds when the starting focal is only resolveK's default-FOV
+  // guess (no EXIF focal, no sensor format). That guess is not evidence: a 153 mm lens
+  // on a 230 mm film frame sits 33% below it, and the 25% step bound rejected the focal
+  // pre-solve on the CA213732V strip (29.9%), leaving fx at the guess (SFM-12).
+  selfCalGuessFocalStepFrac: 0.6,
+  selfCalGuessFocalNominalFrac: 0.7,
   // ── PnP registration gate ──
   pnpGateScale: 2,           // fixed inlier gate = reprjThreshold × min(pnpGateScale, 2)
   minPnpInliers: 15,         // absolute PnP-inlier floor to accept a pose

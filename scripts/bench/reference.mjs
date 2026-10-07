@@ -6,8 +6,15 @@
 //     "gcps":      "<tsv: name lat lon h>",             e.g. Metadata/GCPs_WGS84.txt
 //     "leverArm":  "<GNSS_offset.txt>" | [x, y, z],    antenna offset, m (file: Metashape axes; array: OpenCV axes)
 //     "metashape": "<Project.files dir>",               GCP image marks (markers)
-//     "markOffsetPx": 0                                 added to every mark (convention tests)
+//     "markOffsetPx": 0,                                added to every mark (convention tests)
+//     "markOffsetsPx": [-0.5],                          extra offsets scored on the SAME model
+//     "excludeGcps": ["19"]                             labels kept out of the checkpoint RMS
 //   }
+//
+// Checkpoints never enter the solve, so `markOffsetsPx` re-scores one reconstruction
+// at several mark conventions (pixel-edge vs pixel-centre) without re-running SfM.
+// A variant's `recon.leverArm: true` also hands `leverArm` to the solve (every
+// sensor's gnssLeverArm); otherwise it is used only to evaluate camera positions.
 //
 // WGS84 geodetic with ellipsoidal heights throughout; positionCheck.js works in a local
 // ENU frame, so no projection is involved.
@@ -50,7 +57,11 @@ async function metashapeMarks(dir) {
 
 export async function loadReference(ref) {
   if (!ref) return null
-  const out = { positions: null, leverArm: null, gcps: null }
+  const out = { positions: null, leverArm: null, gcps: null,
+    // GCP labels whose survey or marks are known bad (GeoScan's 19: 1.6 m E, 3.1 m U in
+    // every run); they are reported but left out of the checkpoint RMS.
+    excludeGcps: Array.isArray(ref.excludeGcps) ? ref.excludeGcps.map(String) : [],
+    markOffsetsPx: Array.isArray(ref.markOffsetsPx) ? ref.markOffsetsPx.map(Number).filter(Number.isFinite) : [] }
   if (ref.cameras) {
     out.positions = {}
     // Optional per-camera standard deviations in metres: `sigmaColumns` = 0-based column

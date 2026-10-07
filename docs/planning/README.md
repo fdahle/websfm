@@ -12,12 +12,12 @@ Audit: 2026-09-01.
 | --- | --- | --- |
 | [Auto-Mask strategies](PLAN-automask-strategies.md) | Not started | `TODO.md` ▸ M4 |
 | [Reference-raster rearchitecture](plan-reference-raster-rearchitecture.md) | COG writer shipped; spikes and phases 2–6 remain | `TODO.md` ▸ RR |
-| [Registration stall](plan-registration-stall.md) | WS-A/WS-C shipped; evidence-gated WS-B/follow-ups remain | `TODO.md` ▸ SFM |
 | [Scale and measurement](plan-scale-and-measurement.md) | Scale WS0–WS2 shipped; measurement WS3–WS7 remain | `TODO.md` ▸ F11 |
 
 Retired in the 2026-09-01 consolidation (available in git history): fiducial
 detection/calibration, dense sky/vegetation cleanup, Evaluate/Quality hub,
 feature-matching backend foundation, professional interop formats, and SfM
-interoperability. Their implementation is shipped; remaining acceptance checks,
+interoperability. Registration stall followed on 2026-10-06, once the headless bench
+registered the building and TMA sets in full. Their implementation is shipped; remaining acceptance checks,
 data-driven tuning or later feature ideas are already represented in
 `VERIFICATION.csv` and `TODO.md`.

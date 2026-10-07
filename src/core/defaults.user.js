@@ -69,7 +69,10 @@ export const DETECT_PRESET_META = [
 // MatchFeaturesModal.vue's `settings` ref. Internal-only match knobs (not shown to the
 // user) live in tuning.js ▸ MATCH_TUNING.
 export const MATCH_DEFAULTS = {
-  ratioThreshold: 0.75,        // Lowe ratio test
+  // Lowe ratio test. 0.8 = COLMAP's default. Measured five times against 0.75 (HANDOVER
+  // ▸ B-bench, B-match-gpu): +5 % ≥3-view points on South Building at unchanged error,
+  // and eagle registers 43/44 cameras at 0.8 but 29/44 at 0.75.
+  ratioThreshold: 0.8,
   // Mutual-nearest-neighbour cross-check. ON by default (COLMAP parity): without it a
   // brute-force pass is one-directional, so many A keypoints may claim the SAME B
   // keypoint. Those many-to-one putatives (a) inflate the raw count and depress every
@@ -118,9 +121,9 @@ export const MATCH_DEFAULTS = {
 // the defaults; medium ≡ defaults). Strategy/matcher are separate primary choices, not
 // preset-controlled. ratioThreshold is inert on the LightGlue path (no ratio test there).
 export const MATCH_PRESETS = {
-  low:    { ratioThreshold: 0.80, minInlierRatio: 0.10 },
+  low:    { ratioThreshold: 0.85, minInlierRatio: 0.10 },
   medium: {},
-  high:   { ratioThreshold: 0.70, minInlierRatio: 0.25, maxIters: 2000 },
+  high:   { ratioThreshold: 0.75, minInlierRatio: 0.25, maxIters: 2000 },
 }
 export const MATCH_PRESET_META = [
   { id: 'low',    label: 'Lenient',  blurb: 'More matches, looser verification' },

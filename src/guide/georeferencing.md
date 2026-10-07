@@ -35,9 +35,15 @@ images alone tends to bend into a shallow dome. Accurate positions are what corr
 it. Give imported positions their real accuracy, because the 5 m default carries almost
 no weight.
 
-The positions are taken as the camera centres. An RTK antenna usually sits 0.1–0.5 m
-from the lens, and that offset cannot be entered yet, so expect a horizontal camera
-residual of about that size. Checkpoints are the better accuracy test.
+By default the positions are taken as the camera centres. An RTK antenna usually sits
+0.1–0.5 m from the lens. Enter that offset per sensor in the **Sensor table**: the
+**GNSS** button on the sensor's row opens three fields, in metres and camera axes (x
+right, y down in the image, z forward along the view). The positions are then treated
+as antenna positions. Metashape gives its GNSS offset with y up and z backward, so enter
+its (x, y, z) as (x, −y, −z). Without the offset, expect a horizontal camera residual of
+about the offset's length, and a self-calibrated principal point pulled off by the
+offset's size in pixels. On a 444-image RTK block, entering it cut the camera residual
+from 41 cm to 2 cm. Checkpoints are the better accuracy test either way.
 
 ## Ground control points
 A GCP needs known 3D coordinates and image marks. For adjustment, use at least three

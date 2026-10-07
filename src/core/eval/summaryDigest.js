@@ -13,7 +13,7 @@
 // number without its settings is not a baseline. So the digest also states what was
 // run (`config`) and the stage decisions the final numbers hide (`diagnostics`: which
 // seed won and on which attempt, the focal trajectory, the resolved pixel gates, the
-// match gate accounting, the cycle-filter verdict, per-stage wall clock). Everything
+// match gate accounting, per-stage wall clock). Everything
 // here is *reported*, never derived a second way — each field traces to one producer.
 //
 // Input:
@@ -155,7 +155,6 @@ export function buildProjectDigest(input = {}) {
       intrinsics: summary?.intrinsics ? summary.intrinsics.map((r) => ({ ...r })) : [],
       selfCalDistortion: summary?.selfCalDistortion
         ? summary.selfCalDistortion.map((r) => ({ ...r })) : [],
-      cycleFilter: summary?.cycleFilter ? { ...summary.cycleFilter } : null,
       // Final-stage track completion passes (absent on runs that predate it).
       trackCompletion: Array.isArray(summary?.trackCompletion)
         ? summary.trackCompletion.map((r) => ({ ...r })) : null,
@@ -309,7 +308,7 @@ function diagnosticsLines(d) {
   const out = []
   if (!d) return out
   const {
-    seed, attempts, gates, selfCal, intrinsics, selfCalDistortion, cycleFilter,
+    seed, attempts, gates, selfCal, intrinsics, selfCalDistortion,
     matchGates, timings, secondaryRecovery, fingerprints, trackCompletion,
   } = d
 
@@ -358,9 +357,9 @@ function diagnosticsLines(d) {
       + `${matchGates.gated} subset-gated (gate ${matchGates.subsetGateActive ? 'on' : 'off'})`
       + `; mean inlier ratio ${fmtNum(matchGates.meanInlierRatio)}`
       + `${matchGates.resolvedRansacPx != null ? `, RANSAC ${fmtNum(matchGates.resolvedRansacPx)}px` : ''}`)
-    // H/F degeneracy share over the accepted pairs — the evidence that separates "the
-    // rotations are wrong because the intrinsics are wrong" from "F is not determined
-    // on near-planar geometry". Printed whenever a run recorded it, including 0.
+    // H/F degeneracy share over the accepted pairs: how much of the graph is planar or
+    // rotation-dominated, where F is not uniquely determined. Printed whenever a run
+    // recorded it, including 0.
     if (dg != null && dgOf) {
       out.push(`  H/F-degenerate (planar / pure rotation): ${dg}/${dgOf} accepted `
         + `(${fmtNum((100 * dg) / dgOf, 0)}%)`)
@@ -390,22 +389,12 @@ function diagnosticsLines(d) {
     out.push(`  composed radial: k1 ${fmtNum(r.k1, 5)}, k2 ${fmtNum(r.k2, 5)}, k3 ${fmtNum(r.k3, 5)}`
       + ` (fit RMS ${fmtNum(r.fitRmsPx, 3)}px)`)
   }
-  if (cycleFilter) {
-    out.push(`- **Rotation-cycle filter**: ${cycleFilter.aborted ? 'SKIPPED (above sanity ceiling)' : 'ran'}`
-      + ` — median triangle error ${fmtNum(cycleFilter.medianTriErrDeg, 1)}°`
-      + ` over ${fmtNum(cycleFilter.triangles)} triangles`
-      + `, threshold ${fmtNum(cycleFilter.effErrDeg, 1)}°`
-      + `; dropped ${cycleFilter.dropped}, re-admitted ${cycleFilter.readmitted}`
-      + `, ${cycleFilter.bridgeProtected} bridge(s) protected`
-      + `, ${fmtNum(cycleFilter.remainingPairs)} pairs remain`)
-  }
   if (trackCompletion?.length) {
     const sum = (k) => trackCompletion.reduce((s, r) => s + (r[k] ?? 0), 0)
     out.push(`- **Track completion** (final stage): +${fmtNum(sum('added'))} obs via verified pairs`
-      + `, +${fmtNum(sum('addedExtra'))} via cycle-dropped pairs`
       + `, ${fmtNum(sum('lifted'))} point(s) lifted to ≥3 views over ${trackCompletion.length} pass(es)`)
     for (const r of trackCompletion) {
-      out.push(`  ${r.stage}: +${r.added}/+${r.addedExtra} in ${r.rounds} round(s), lifted ${r.lifted}`
+      out.push(`  ${r.stage}: +${r.added} in ${r.rounds} round(s), lifted ${r.lifted}`
         + ` (2-view ${r.before?.t2} → ${r.after?.t2})`)
     }
   }

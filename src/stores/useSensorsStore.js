@@ -7,6 +7,7 @@ import { DISTORTION_MODELS, inferDistortionModel } from '../core/sfm/distortion.
 import * as opfs from '../utils/opfs.js'
 import { useImagesStore } from './useImagesStore.js'
 import { deriveLegacyCalibration } from '../core/sfm/fiducialModel.js'
+import { normalizeLeverArm } from '../core/sfm/cameraPriors.js'
 import { useProjectsStore } from './useProjectsStore.js'
 
 // Sensors are shared camera intrinsics. Each image references one via
@@ -176,6 +177,7 @@ export const useSensorsStore = defineStore('sensors', () => {
   // Editable intrinsic fields and their parsing. Blank input clears the field
   // to null; `label` is free text, everything else is numeric.
   const NUMERIC_FIELDS = new Set(['width', 'height', 'focal', 'cx', 'cy', 'k1', 'k2', 'k3', 'p1', 'p2', 'pixelSize', 'sensorWidthMm'])
+  const LEVER_ARM_FIELDS = new Map([['gnssLeverArmX', 0], ['gnssLeverArmY', 1], ['gnssLeverArmZ', 2]])
 
   // Film-camera fiducial fields (F4): the calibrated interior orientation. Numeric
   // and edited inline like the intrinsics above, but only meaningful when the
@@ -208,6 +210,18 @@ export const useSensorsStore = defineStore('sensors', () => {
       // focalMm is authoritative on the fiducial path — mirror it into focal/focalUnit.
       if (field === 'focalMm') { s.focal = num; s.focalUnit = 'mm' }
       log(`Sensor ${s.label}: ${field} = ${num}`, 'info', 'Sensor')
+      save()
+      return
+    } else if (LEVER_ARM_FIELDS.has(field)) {
+      // GNSS antenna offset, metres, camera axes (x right, y down, z forward). Stored as
+      // one [x, y, z] or null; an all-zero offset is the same as none.
+      const arm = [...(s.gnssLeverArm ?? [0, 0, 0])]
+      const num = value === '' || value == null ? 0 : Number(value)
+      if (!Number.isFinite(num)) return
+      arm[LEVER_ARM_FIELDS.get(field)] = num
+      s.gnssLeverArm = normalizeLeverArm(arm)
+      log(`Sensor ${s.label}: GNSS antenna offset ${s.gnssLeverArm ? `(${s.gnssLeverArm.join(', ')}) m` : 'cleared'}`,
+        'info', 'Sensor', { channel: 'activity' })
       save()
       return
     } else if (field === 'focalUnit') {

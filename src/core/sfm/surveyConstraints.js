@@ -17,6 +17,8 @@ import { fitSimilarity, frameFromSimilarity } from '../products/georef.js'
 import { precisionFromGcp, precisionInSfmFrame } from '../gcpAccuracy.js'
 import { isGroundControl } from '../io/gcp.js'
 
+const centreTarget = (antenna, arm) => (arm ? antenna.map((v, i) => v - arm[i]) : antenna)
+
 const priorSigma = (p) => [p.accuracyX, p.accuracyY, p.accuracyZ].map((v) => (Number.isFinite(v) && v > 0 ? v : 5))
 
 /**
@@ -33,15 +35,47 @@ export function buildCameraPriorConstraints({ cameras, cameraPriors, uuidList, m
   const usable = (cameraPriors || []).filter((p) => camIdxOf.has(p.uuid)
     && Number.isFinite(p.x) && Number.isFinite(p.y) && Number.isFinite(p.z))
   if (usable.length < (reference ? 1 : minCameras)) return null
-  const pairs = usable.map((p) => ({
-    src: cameraCenter(cameras.get(p.uuid)), dst: [p.x, p.y, p.z],
-    weight: 3 / priorSigma(p).reduce((sum, v) => sum + v * v, 0),
-  }))
-  const fit = reference?.fit ?? fitSimilarity(pairs)
+  // A prior with a `leverArm` (metres, camera frame) is the GNSS ANTENNA position,
+  // which sits at C + Rᵀ·a, not at the camera centre C. Holding C to it pulls every
+  // centre onto its antenna (GeoScan: a constant 0.41 m horizontal residual). In the
+  // SfM frame the offset is Rᵀ·a / s, s = the SfM→survey scale of the fit, so the fit
+  // pairs antenna points and the BA target moves back by the same offset. R is the
+  // pose when the constraint is built; the prior BA rebuilds it every round, and a 1°
+  // rotation change moves a 0.4 m arm by 7 mm.
+  const armInSfm = (p, scale) => {
+    if (!p.leverArm || !(scale > 0)) return null
+    const { R } = cameras.get(p.uuid)
+    const a = p.leverArm
+    return [0, 1, 2].map((i) => (R[0][i] * a[0] + R[1][i] * a[1] + R[2][i] * a[2]) / scale)
+  }
+  const pairsAt = (scale) => usable.map((p) => {
+    const C = cameraCenter(cameras.get(p.uuid))
+    const arm = armInSfm(p, scale)
+    return {
+      src: arm ? [C[0] + arm[0], C[1] + arm[1], C[2] + arm[2]] : C, dst: [p.x, p.y, p.z],
+      weight: 3 / priorSigma(p).reduce((sum, v) => sum + v * v, 0),
+    }
+  })
+  let fit = reference?.fit ?? null
+  if (!fit) {
+    // The offset needs the scale and the scale comes from the fit: fit the centres
+    // first, then refit the antenna points at the latest scale. Converges in two or
+    // three refits (each shrinks the scale error by about arm / block size).
+    fit = fitSimilarity(pairsAt(0))
+    if (fit && usable.some((p) => p.leverArm)) {
+      for (let it = 0; it < 4; it++) {
+        const next = fitSimilarity(pairsAt(fit.scale))
+        if (!next) break
+        const converged = Math.abs(next.scale - fit.scale) <= 1e-9 * fit.scale
+        fit = next
+        if (converged) break
+      }
+    }
+  }
   if (!fit) return null
   const frame = reference?.frame ?? frameFromSimilarity(fit, 'camera-prior')
   const priors = usable.map((p) => ({
-    camIdx: camIdxOf.get(p.uuid), target: frame.toSfm([p.x, p.y, p.z]),
+    camIdx: camIdxOf.get(p.uuid), target: centreTarget(frame.toSfm([p.x, p.y, p.z]), armInSfm(p, fit.scale)),
     // sigma_sfm = sigma_project / scale, hence inverse variance scales by s².
     weights: priorSigma(p).map((v) => fit.scale * fit.scale / (v * v)),
     ...(orientationPriorInSfm(p, fit.R) ?? {}),

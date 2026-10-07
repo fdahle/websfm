@@ -56,9 +56,10 @@ const rms = (arr) => (arr.length ? Math.sqrt(arr.reduce((s, v) => s + v * v, 0) 
  *   down, z forward), metres. The positions are the antenna's, so each camera centre
  *   is moved to C + Rᵀ·a/s before the fit; s (SfM units per metre) comes from a first
  *   fit without it, then the fit is repeated.
- * @returns {null | { count, scale, rms3d, rmsH, rmsV, medianH, p95H, maxH, medianV, p95V, maxV, worst, sim, toEnu }}
+ * @returns {null | { count, scale, rms3d, rmsH, rmsV, medianH, p95H, maxH, medianV, p95V, maxV, worst, sim, toEnu, origin }}
  *   metres; `worst` lists the five largest 3D residuals by uuid. `sim` maps SfM →
- *   the local ENU frame `toEnu` (geodetic → ENU via ECEF), for checkpoints.
+ *   the local ENU frame `toEnu` (geodetic → ENU via ECEF), for checkpoints; `origin`
+ *   is that frame's geodetic origin {lat, lon, h}.
  */
 export function cameraPositionCheck(cameras, positions, { leverArm = null } = {}) {
   const ids = [...cameras.keys()].filter((u) => {
@@ -68,7 +69,8 @@ export function cameraPositionCheck(cameras, positions, { leverArm = null } = {}
   if (ids.length < 3) return null
   let lat0 = 0, lon0 = 0, h0 = 0
   for (const u of ids) { const p = positions.get(u); lat0 += p.lat; lon0 += p.lon; h0 += p.alt }
-  const toEnu = makeEnuFrame(lat0 / ids.length, lon0 / ids.length, h0 / ids.length)
+  const origin = { lat: lat0 / ids.length, lon: lon0 / ids.length, h: h0 / ids.length }
+  const toEnu = makeEnuFrame(origin.lat, origin.lon, origin.h)
   const pairs = ids.map((u) => {
     const p = positions.get(u)
     return { uuid: u, src: cameraCenter(cameras.get(u)), dst: toEnu(geodeticToEcef(p.lat, p.lon, p.alt)) }
@@ -97,7 +99,7 @@ export function cameraPositionCheck(cameras, positions, { leverArm = null } = {}
     rms3d: rms(d3), rmsH: rms(h), rmsV: rms(v),
     medianH: quantile(h, 0.5), p95H: quantile(h, 0.95), maxH: quantile(h, 1),
     medianV: quantile(v, 0.5), p95V: quantile(v, 0.95), maxV: quantile(v, 1),
-    worst, sim, toEnu,
+    worst, sim, toEnu, origin,
   }
 }
 

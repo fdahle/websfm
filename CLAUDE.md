@@ -573,7 +573,7 @@ self-contained, file-based project format.
    pair with ≥ `weakMinInliers` inliers but below the accept gate is kept flagged **`weak`**
    (persisted, marshalled) — a **PnP registration bridge only**: `sfm.js` feeds it to
    `register.js` correspondence collection (`corrPairs = strong + weak`) but never lets it
-   seed init/cycle-filter/triangulation. `verifiedPairs`/`matchStats` exclude weak.
+   seed init/triangulation. `verifiedPairs`/`matchStats` exclude weak.
    **Brute-force NN has two backends with one decision rule.** WASM (`crates/matching`
    `match_descriptors`) does it all; WebGPU (`workers/gpu/matchGpu.js` + `match.wgsl`,
    behind Settings ▸ Compute "Use GPU") returns only per-row/per-column top-2 and
@@ -585,21 +585,14 @@ self-contained, file-based project format.
    validates each run's first pair against WASM, sends each image's descriptors to the
    pinned GPU worker once (per-run LRU; a miss returns `{ needs }`), and falls back to
    WASM per pair on any error. RANSAC verification is WASM either way.
-3. **Sparse SfM** (`core/sfm/sfm.js`): a **rotation-cycle consistency filter**
-   (`rotationCycleFilter`) first prunes verified-but-false pairs — spurious epipolar
-   fits on repetitive structure that clear every count/ratio gate but whose relative
-   rotation is inconsistent with the match graph (each triangle's `R_ik⁻¹·R_jk·R_ij`
-   must be ≈ identity; greedily drop the edge that fails most of its triangles). The
-   filter weights each triangle's verdict by its weakest edge's inlier count, adapts
-   the pass/fail angle to the graph's median cycle error, and shields high-inlier
-   edges — all of which auto-disable on a uniform-quality graph (no/equal inlier
-   counts), recovering the plain unweighted filter. Because it runs **before** self-cal,
-   uncorrected distortion can make it drop TRUE edges, so dropped edges are stashed and
-   **re-admitted after the first self-cal fold** (`reevaluateDroppedEdges` + a final
-   second-chance sweep in `sfm.js`: re-fit F on folded keypoints, recompute rotations for
-   candidates AND survivors with the refined Kmap, re-admit the consistent ones, then one
-   more `registerImages` sweep). Then
-   pick init pair (`core/sfm/initPair.js`: score = cheirality-surviving points ×
+3. **Sparse SfM** (`core/sfm/sfm.js`): **no pre-SfM pair filter.** A rotation-cycle
+   consistency filter (drop pairs whose relative rotation fails the graph's triangles)
+   was removed 2026-10-06 after an audit against finished models: the pairwise rotation
+   it judged (E from a matching-time F and the nominal K) is wrong on many *true* pairs,
+   so it dropped 51 true pairs for 0 false on South Building and changed no point count.
+   A false pair is caught downstream instead — the two-gate PnP, the track filter and
+   the robust BA. Do not reintroduce a graph filter on F-derived rotations without
+   re-auditing it against a final model (HANDOVER ▸ B-bench). Pick init pair (`core/sfm/initPair.js`: score = cheirality-surviving points ×
    graph connectivity ÷ a gentle init-reprojection penalty, with **parallax as a
    gate, not a ranking** — flat between a soft band above `minInitAngleDeg` and a
    grazing knee; a ranked parallax term near the floor swings scores 4.7× on
@@ -622,7 +615,7 @@ self-contained, file-based project format.
    `core/sfm/tracks.js`: both endpoints on points → `mergeSplitTracks`; neither →
    `retriangulatePairs`; exactly one → `completeTracks` (registration's
    `foldOneEndpointMatches` is one round of it over the live index; the final stage
-   runs it to a fixpoint and lets cycle-dropped pairs *complete* but never seed). Brown–Conrady distortion (`core/sfm/distortion.js`) is removed once at
+   runs it to a fixpoint). Brown–Conrady distortion (`core/sfm/distortion.js`) is removed once at
    ingest so the whole pipeline stays pinhole — `projectPoint`, the track filter,
    reprojection stats and the dense/ortho warp all assume it. A sensor declares which
    coefficients it uses via a **distortion model** (`DISTORTION_MODELS`:
@@ -1312,8 +1305,7 @@ propagate covariance rather than retaining stale numeric sigmas.
   development) live in `src/core/tuning.js`, grouped by stage, with their rationale
   comment moved next to the value. Core merges them caller-last
   (`{ ...RECONSTRUCT_DEFAULTS, ...SFM_TUNING, ...settings }`) so `settings` still wins.
-  Exception: a self-contained pure sub-module (e.g. `core/sfm/initPair.js`,
-  `core/sfm/cycleFilter.js`) keeps its own defaults co-located with its algorithm —
+  Exception: a self-contained pure sub-module (e.g. `core/sfm/initPair.js`) keeps its own defaults co-located with its algorithm —
   `tuning.js` points to it rather than duplicating the value. **All pipeline-stage
   modals are wired**: detection (`DETECT_SIFT_DEFAULTS`/`DETECT_SUPERPOINT_DEFAULTS`),
   matching (`MatchFeaturesModal`↔`useMatchesStore`, `MATCH_DEFAULTS`+`MATCH_TUNING`),
@@ -1375,7 +1367,10 @@ propagate covariance rather than retaining stale numeric sigmas.
   down −z, +y up) — negate rot columns 1,2 of `c2w_cv=[Rᵀ|C]`. A Metashape GNSS
   antenna offset is in the same y-up/z-back camera axes, so it is (x, −y, −z) in ours
   (`scripts/bench/reference.mjs`). As written it left a 36 cm residual; converted, Metashape's
-  own cameras fit the RTK file at 2.3 cm.
+  own cameras fit the RTK file at 2.3 cm. The app stores it per sensor as
+  `gnssLeverArm` in **our** axes (OpenCV, metres); `cameraPriors.js` attaches it to each
+  prior and `surveyConstraints.js` is the one place it is applied (the antenna sits at
+  `C + Rᵀ·a`, i.e. `Rᵀ·a / s` in the SfM frame).
 - **WGSL: bitcast floats into u32, never indices into f32.** A small integer's bits
   read as f32 are a denormal, and a driver may flush it to zero on any float
   load/store — an index packed into a float record silently becomes 0 on some GPUs.
@@ -1432,7 +1427,7 @@ propagate covariance rather than retaining stale numeric sigmas.
 - **A stage's run record travels with its result, not only in the log.** A measured
   number without the settings that produced it is not a baseline, so each stage
   persists what it was *asked* to do next to what it achieved: `summary.config` /
-  `gates` / `initPair` (+`attempts`) / `selfCal` / `intrinsics` / `cycleFilter` /
+  `gates` / `initPair` (+`attempts`) / `selfCal` / `intrinsics` /
   `timings` from `core/sfm/sfm.js`, `image.detectSettings` per image (persisted;
   **absent ⇒ null ⇒ "unknown"**, never back-filled from the current modal — the same
   rule as `detectScale`), `depthSummary` from `workers/ops/dense.js` (persisted in
@@ -1449,9 +1444,9 @@ propagate covariance rather than retaining stale numeric sigmas.
   different bars and the difference is load-bearing.** The digest prints an observation
   unconditionally, including when the news is good (a 0% degenerate share, a tight gate);
   the verdict fires only when something is actionable. That is why verdict's
-  contributing-cause rules (`gate-headroom`, `keypoint-cap`, `cycle-filter-skipped`) are
+  contributing-cause rules (`gate-headroom`, `keypoint-cap`) are
   gated on another finding having already fired: each describes a run *shape*, not a
-  defect — a run can saturate the keypoint cap, skip the rotation-cycle filter and leave
+  defect — a run can saturate the keypoint cap and leave
   the track filter inert while still being an excellent reconstruction, and turning that
   green run yellow is a false alarm. Put a new observation in the digest first; promote it
   to a verdict rule only once it is shown to *explain* a failure. Related: a threshold

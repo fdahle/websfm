@@ -3,8 +3,8 @@
 // OPFS / worker). Given a geometric-verification result (F-RANSAC inliers + H/F
 // degeneracy count) and the positional-spread summary, classify a pair as:
 //
-//   'accept' — strong geometry. Drives everything: the rotation-cycle filter, init-pair
-//              selection, and fresh triangulation of scene structure.
+//   'accept' — strong geometry. Drives everything: init-pair selection and fresh
+//              triangulation of scene structure.
 //   'weak'   — a valid fundamental matrix with enough inliers to constrain a pose, but
 //              below the ratio / absolute accept gate. COLMAP-style registration
 //              fallback: usable ONLY to feed 2D-3D correspondences into PnP (register.js

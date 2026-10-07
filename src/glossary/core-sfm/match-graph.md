@@ -32,13 +32,12 @@ Three properties matter when reading it:
 
 **Verified does not mean true.** Repetitive structure — a snowfield, a regular
 façade, ocean texture — can produce a pair that passes every count and inlier
-test while relating two images that do not overlap at all. WebSfM catches these
-with a **rotation-cycle consistency** filter: going around any triangle of the
-graph, the composed relative rotations must return to identity, and an edge that
-fails most of its triangles is dropped. Because that check runs before
-self-calibration, uncorrected [lens distortion](help:lens-distortion) can make it
-drop genuine edges too, so dropped edges are kept aside and re-examined once the
-intrinsics have improved.
+test while relating two images that do not overlap at all. Such a pair cannot
+register a camera on its own: registration needs 2D–3D correspondences that agree
+with points the rest of the graph already built, and the track filter and robust
+bundle adjustment reject observations that disagree with the model.
+[Cycle consistency](help:cycle-consistency) is the classic graph-level check, but it
+is only as reliable as the pairwise rotations it composes.
 
 Pairs can also be **disabled by hand** from the match list or the graph view — a
 reversible exclusion for a pair that is visibly wrong. Disabled pairs stop

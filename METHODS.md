@@ -54,7 +54,6 @@ images ─► [1] detect ─► keypoints + descriptors
               │
               ▼
        [3] sparse SfM (incremental)
-              ├ rotation-cycle filter (prune false pairs)
               ├ two-view init (F→E→pose, DLT triangulate, seed pick)
               ├ incremental resection (P3P + MSAC PnP, track extension)
               ├ interleaved + final bundle adjustment (LM + Schur + Huber)
@@ -182,8 +181,13 @@ a closed orbit) when they do not.
 
 **Descriptor matching** (`core/features/bruteforce.js` or the learned
 `lightglue.js`): mutual nearest-neighbour (**cross-check**) + **Lowe ratio test**
-(`d1/d2 < ratio`, default ~0.8). LightGlue is an attention-based learned matcher
-run as an alternative to brute-force.
+(`d1/d2 < ratio`, default 0.8, COLMAP's value). LightGlue is an attention-based
+learned matcher run as an alternative to brute-force. The default was 0.75 until
+2026-10-06; 0.8 won five separate measurements. On South Building it gives ~5% more
+≥3-view points at an unchanged median error. On the eagle set (44 images) 0.75
+registered only 29 cameras against 43 at 0.8: the extra correspondences are what
+connect its weakly overlapping blocks. Geometric verification below removes the extra
+false matches the looser ratio admits.
 
 **Geometric verification** — this is where we are stricter than a textbook
 pipeline. Every candidate pair (both matcher paths) passes through
@@ -210,7 +214,7 @@ the graph: `minMatches` is the accept + H-skip floor, a separate `rawSkipFloor`
 enough inliers (`weakMinInliers`) but below the accept gate is not discarded — it's
 kept flagged `weak`. Weak pairs are **registration bridges only**: they feed 2D-3D
 correspondences to PnP (`register.js`, via `corrPairs = strong + weak`) but never
-seed initialisation, the rotation-cycle filter, or fresh triangulation (their
+seed initialisation or fresh triangulation (their
 geometry isn't trusted enough to build structure). This keeps a low-overlap chain
 link (e.g. a 227-inlier film pair a user's raised `minMatches=500` would sever) in
 the graph. Positionally-degenerate pairs stay hard-rejected, never weak.
@@ -247,49 +251,29 @@ stochastic F/essential estimate from making one locally clean but non-growing se
 foundation for every later model. Secondary recovery is suppressed if all retries leave
 fewer than 25% registered, because a tiny primary is not a trustworthy alignment frame.
 
-### 4.0 Rotation-cycle consistency filter (pre-SfM pruning)
+### 4.0 No pre-SfM pair filter (rotation-cycle filter removed 2026-10-06)
 
-Before any reconstruction, `rotationCycleFilter` (`core/sfm/cycleFilter.js`)
-prunes verified-but-false pairs that clear every count/ratio gate but whose
-**relative rotation is inconsistent with the match graph**. For every triangle of
-pairs, the composed relative rotation `R_ik⁻¹ · R_jk · R_ij` must be ≈ identity;
-greedily drop the edge that fails the most of its triangles. Relative rotations
-come from decomposing each pair's essential matrix. This is the classic loop-
-consistency idea applied as a cheap graph cleaning step.
+Verified pairs go into SfM as they are. A **rotation-cycle consistency filter** used to
+run first: for every triangle of pairs the composed relative rotation
+`R_ik⁻¹ · R_jk · R_ij` must be ≈ identity, and the edge failing most of its triangles is
+dropped. It was removed after an audit of every pair against the finished model. That
+audit asked two things: do the pair's inliers agree with the model's epipolar geometry
+(a true pair), and does its input rotation agree with the model's relative rotation.
 
-Because the filter runs **before self-calibration**, uncorrected lens distortion
-biases the pairwise rotations and it can drop **true** edges. Two guards
-(`core/sfm/cycleFilter.js`): (1) **bridge protection** never drops the sole link
-between two sub-graphs (severing is unrecoverable; a bad pose is caught downstream
-by the PnP gates — though, since a drop candidate always lies on a 3-cycle, this is
-provably a no-op for the current drop gate and is kept only as insurance). (2)
-**Post-self-cal re-admission** (`reevaluateDroppedEdges` + the final second-chance
-sweep in `sfm.js`): once the first fold has corrected the keypoints, dropped edges
-are re-judged — F is re-fit on the folded keypoints, rotations recomputed for
-candidates **and** survivors with the refined Kmap (so corrected candidates aren't
-judged against uncorrected survivors), and consistent ones re-admitted, then one
-more registration sweep runs in case a re-admitted bridge lets a stranded camera
-resect.
+| run | dropped | false | true, wrong rotation | true, right rotation |
+|---|---|---|---|---|
+| South Building, defaults | 53 | 0 | 51 | 2 |
+| South Building, native 25k | 404 | 46 | 355 | 3 |
+| building set (50) | 14 | 9 | 3 | 2 |
 
-**Measured against the final model, it mostly removes true pairs.** After the final
-BA, `core/sfm/cycleAudit.js` re-judges every pair in two ways: whether its inliers
-agree with the model's epipolar geometry (a true pair), and whether its input
-rotation agrees with the model's relative rotation.
-
-On South Building (native resolution, 25k keypoints), the filter dropped 404 pairs:
-
-| Dropped pairs | Count |
-|---|---|
-| False | 46 |
-| True, wrong rotation | 355 |
-| True, correct rotation | 3 |
-
-The 355 true pairs had a median rotation error of 28.6°. Meanwhile, 78 false pairs
-stayed in the graph. The defect is therefore the pairwise **rotation estimate**
-(essential matrix from F and a nominal K), not the cycle test. Only 145 of those 355
-pairs were flagged as H/F-degenerate, so planar degeneracy is not the whole
-explanation either. On South Building the filter changes no point counts in either
-direction: turning it off gave 57,167 points against 57,168.
+The cycle test was not the defect; the pairwise **rotation estimate** was. It comes from
+the matching-time F and a nominal K, and was wrong on many true pairs (median 28.6° on
+the native run). Only 145 of those 355 were H/F-degenerate, so planar geometry explains
+under half. Turning the filter off changed no point count (57,167 vs 57,168). False
+pairs are instead stopped downstream: the two-gate PnP, the track filter and the robust
+BA. A graph filter is worth revisiting only with better pairwise rotations (5-point E
+under RANSAC with the calibrated K, H decomposition for planar pairs), re-audited
+against a final model.
 
 ### 4.1 Intrinsics resolution (`resolveK`)
 
@@ -303,6 +287,18 @@ certificate and is measured, whereas a pitch is typically inferred from the scan
 setting and is the value that goes wrong. If nothing is known, a **default-FOV guess**
 (`fx = image width`) is used and loudly warned: wrong intrinsics both distort the
 geometry and commonly *prevent* cameras from registering.
+
+A focal-only **pre-solve** corrects that guess right after registration. Every
+self-calibration update passes a plausibility guard before it is committed
+(`core/sfm/selfCalGuard.js`): one pass may not move the focal by more than 25%, nor end
+more than 35% from the nominal focal. Those bounds stop the thin-block runaways seen on
+EXIF sets (focal +48…88%). A default-FOV guess is not a measurement, though: a 153 mm
+lens on a 230 mm film frame sits 33% below it. With the EXIF bounds the guard rejected
+the pre-solve on the CA213732V strip (a 29.9% step), and the focal stayed at the guess.
+A guessed focal therefore gets wide bounds instead: 60% per pass, and anywhere within
+[0.3, 1.7] × the guess. On that strip the focal now runs 10137 → 6953 → 6656 → 6627 px
+(expected ~6700), with +11% points (423 → 470) and median reprojection error 1.94 →
+1.48 px.
 
 ### 4.2 Two-view initialisation (`core/sfm/initPair.js`)
 
@@ -576,14 +572,11 @@ image yet. During registration this runs one round after each sweep and interim 
 against the poses of the moment. After registration it runs **to a fixpoint** (an
 observation added through A↔C can enable C↔D) after the retriangulation/merge step and
 again before each track-filter pass — i.e. against the final poses and the
-self-calibrated, folded keypoints, which the registration-time rounds never saw. These
-final rounds also draw on the pairs the rotation-cycle filter dropped, *for completion
-only*: such a pair never seeds or triangulates structure, and each observation it
-contributes must reproject within the gate against a point the trusted pairs built.
+self-calibrated, folded keypoints, which the registration-time rounds never saw.
 Added observations then go through the same filter and BA as every other observation.
 On a noise-free synthetic strip the final rounds add nothing (registration's rounds
 already completed every track), so their value lies in what registration could not
-judge: pre-self-calibration gate failures and the cycle-dropped pairs.
+judge: pre-self-calibration gate failures.
 
 **Projection-guided track extension** (`core/sfm/guidedExtension.js`; no COLMAP
 equivalent). Completion can only use matches that exist. On South Building, 46–73k
@@ -864,11 +857,27 @@ fixed-K prior BA therefore stalled on two RTK benches:
 With loose positions (consumer GNSS, or the 5 m import default) the prior weight is
 small, and the solve leaves the intrinsics where self-calibration put them.
 
-The priors are antenna positions. The camera centre is a lever arm away from the
-antenna, typically 0.1–0.5 m on survey drones, and there is no per-sensor antenna offset
-yet. RTK priors therefore pull every centre onto its antenna. On GeoScan that leaves a
-constant 0.41 m horizontal camera residual; the checkpoints mostly average it out
-across opposite flight directions.
+**GNSS antenna offset (lever arm).** The priors are antenna positions, and the camera
+centre sits a lever arm `a` away (typically 0.1–0.5 m on survey drones, given per
+sensor in camera axes). The antenna is at `C + Rᵀ·a`, so the prior constraint fits the
+similarity to the antenna points and moves each BA target back by `Rᵀ·a / s` in the SfM
+frame (`core/sfm/surveyConstraints.js`; `R` is the pose when the constraint is built,
+rebuilt every round). Without it, RTK priors pull every centre onto its antenna, and
+self-calibration absorbs the offset into the principal point. On GeoScan (arm 0.368 m
+right, 0.181 m down, 2.9 cm pixels) the no-offset solve moved cx by +12.5 px and cy by
++6.4 px, matching the arm's 12.7 px and 6.2 px almost exactly:
+
+| GeoScan, RTK priors | cx, cy (px) | camera vs RTK (3D) | checkpoints H / V | height bias |
+|---|---|---|---|---|
+| no offset | 3007.0, 2000.8 | 0.408 m | 4.5 / 10.8 cm | +5.4 cm |
+| with offset | 2994.8, 1994.7 | 0.021 m | 5.9 / 10.7 cm | +3.4 cm |
+| Metashape (adjusted, with offset) | ≈ 2993.7, 1996.6 | 0.023 m | — | — |
+
+With the offset the calibration agrees with Metashape's to about a pixel, and the cameras
+fit the RTK file as well as Metashape's do. The checkpoints move as a block by about
+3.6 cm west (their scatter is unchanged), so the horizontal RMS rises: a bias between
+the GCP survey and the RTK camera positions, which the wrong principal point used to
+offset by chance, is the leading explanation and not yet confirmed.
 When GCP anchors are also present, their similarity defines the common SfM target
 frame for both point and camera priors. For a geographic project CRS, enabled 3D
 camera positions are first transformed into one survey-centred WGS84
@@ -1402,7 +1411,7 @@ as CPU previews (the index colour ramp is sampled into 33 interpolation stops).
 ## 12. Where to read the code (pointers, not content)
 
 - Sparse orchestration: `src/core/sfm/sfm.js`
-- Init-pair: `src/core/sfm/initPair.js`; cycle filter: `cycleFilter.js`
+- Init-pair: `src/core/sfm/initPair.js`
 - P3P / PnP / triangulation / GN: `crates/reconstruction/src/pose.rs`
 - Bundle adjustment: `crates/reconstruction/src/bundle.rs`
 - Distortion: `src/core/sfm/distortion.js`

@@ -347,6 +347,23 @@ points without guided extension). At ratio 0.8 it registers 43/44 with 10,476 po
 76 accepted pairs instead of 66. That is the fifth measurement favouring 0.8, and the
 first where 0.75 costs cameras.
 
+**Second post-change baseline (2026-10-06 evening):** ratio default 0.8, rotation-cycle
+filter removed, wide self-cal bounds for a default-FOV focal guess. Same configs, app
+defaults, one run each. The three changes moved together, so the gain is not attributed
+per change; the filter alone was measured at no effect (57,167 vs 57,168).
+
+| set | cameras | ≥3-view points | before (table above) | other |
+|---|---|---|---|---|
+| South Building | 128/128 | 59,747 | 57,356 | median 0.34 px, SfM 137 s |
+| building | 50/50 | 7,050 | 6,369 | SfM 12 s |
+| eagle | **43/44** | 10,476 | 7,803 (29/44) | |
+| TMA | 5/5 | 470 | 423 | fx 10137 → 6627 (expected ~6700); median 1.94 → 1.48 px |
+| quarry (RTK priors) | 347/347 | 112,893 | 108,093 | camera RMS 0.214 m (0.207); SfM 762 s (835 s) |
+
+TMA's focal was the default-FOV guess, and every self-cal step had been rejected by the
+25 % step bound (29.9 % pre-solve). With the guess bounds the pre-solve commits
+(10137 → 6953) and the two post-filter passes finish at 6627.
+
 **GeoScan PUTI (Metashape example "aerial images with GCPs", 444 × 24 MP Sony RX1R, RTK
 camera positions ±1–2 cm, 17 GCPs with Metashape image marks).** The bench imports the
 camera file as poses with their standard deviations (preselection uses them;
@@ -647,6 +664,29 @@ fiducials; self-calibration (A2) + fiducials (F4) are the code-side support.
 
 ## Done log (most recent first)
 
+- **2026-10-06 · Ratio 0.8, cycle filter removed, default-FOV self-cal bounds, GNSS
+  antenna offset, LiDAR bench.** Measured in B-bench (second post-change baseline) and
+  METHODS ▸ camera priors.
+  - `MATCH_DEFAULTS.ratioThreshold` 0.75 → 0.8; presets re-spaced to Lenient 0.85 /
+    Strict 0.75 (`core/defaults.user.js`, guide `match-features.md`).
+  - Rotation-cycle filter, its re-admission sweep and audit deleted (`cycleFilter.js`,
+    `cycleAudit.js`, verdict rule `cycle-filter-skipped`, the digest line, the
+    `extraPairs` completion channel). METHODS §4.0 records why.
+  - `selfCalGuard.js` `focalIsGuess`: a default-FOV focal gets 60 % / [0.3, 1.7]×
+    bounds; TMA's pre-solve now commits (fx 10137 → 6627).
+  - `sensor.gnssLeverArm` (Sensor table ▸ GNSS, guide `georeferencing.md`), attached to
+    camera priors by `cameraPriors.js` and applied in `surveyConstraints.js`.
+  - Bench: `recursive`, `minGpsAlt`, `recon.leverArm`, `reference.markOffsetsPx` /
+    `excludeGcps`, and `reference.lidar` → `lidarCheck` (`scripts/bench/lidar.mjs`);
+    `core/io/laz.js` `decompressLazRecords` (with `maxPoints`) split out of `parseLaz`.
+
+- **2026-10-06 · Register pass from the post-change bench logs.** `VERIFICATION.csv`:
+  `SFM-01`, `SFM-03`, `SFM-05`, `SFM-13`, `REV-01` PASS; `SFM-17` PASS on the quarry
+  proxy; `SFM-16` MEASURED (the cycle filter now engages); `SFM-12` FAIL (the self-cal
+  guard rejects TMA's focal pre-solve, TODO ▸ SFM, since fixed); `SFM-09` removed as a duplicate of
+  `SFM-16`; `MAT-02` superseded by `MAT-05`. `docs/planning/plan-registration-stall.md`
+  deleted: its WS-B / second-rescue follow-ups were conditional on stalls that no longer
+  occur.
 - **2026-10-06 · Headless pipeline bench, SfM accuracy and speed fixes.**
   Measured in HANDOVER ▸ B-bench.
   - **Bench.** `scripts/bench/` (runner, configs, reference loader) and

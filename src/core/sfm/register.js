@@ -1,6 +1,6 @@
 // Incremental registration stage of the SfM pipeline (pure compute). Extracted
 // from sfm.js (the incremental-resection sweep + its correspondence helpers) so the
-// orchestrator stays readable, following the initPair.js / cycleFilter.js precedent.
+// orchestrator stays readable, following the initPair.js precedent.
 //
 // Grows the sparse model one camera at a time: order the unregistered images by a
 // next-best-view score, register each by two-gate PnP (loose PnP inlier gate +

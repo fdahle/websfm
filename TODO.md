@@ -35,7 +35,9 @@ budget → per-control prefills → visual Workflow Builder). What is
 
 1. **Verification.** Most of what shipped since 2026-07-10 has never been run in a
    browser on real data. That is the credibility gap now, not any missing feature.
-   It is tracked row-by-row in `VERIFICATION.csv` (123 checks; 48 at P1).
+   It is tracked row-by-row in `VERIFICATION.csv` (162 checks, 139 open; 56 open at
+   P1). The headless bench (`scripts/bench/`) now closes pipeline rows without a
+   person; what is left is mostly UI, OPFS-reopen and external-application checks.
 2. Remaining feature gaps: DEM-of-difference and 3D measurement (F11 — scale, 2D tools
    and DEM volume shipped), ground classification → DTM (F14), mesh texturing, fisheye
    (F6), reference-DEM-constrained BA (F13).
@@ -51,8 +53,8 @@ these gate code decisions elsewhere in this file:
 
 | row | why it gates something |
 | --- | --- |
-| `SFM-01` SB medium/SIFT/exhaustive | the init-pair acceptance test; decides whether the seed heuristic is done |
-| `SFM-03`/`SFM-04` building 50, both front ends | decides RS ▸ WS-B and the A6 bridge-pair gate below |
+| `SFM-18` SB reopened from OPFS | guided track extension with descriptors read from disk, the path the bench never takes |
+| `SFM-04` building 50, SuperPoint + LightGlue | the learned front end on the set SIFT now fully registers |
 | `DEN-02`/`DEN-03` sky- and vegetation-heavy dense | decides the DF retune, and whether the in-optimiser pass is worth it |
 | `RAS-05` EPSG:3031 under WebGLTileLayer | go/no-go for the whole RR re-architecture |
 | `DEN-05`/`DEN-06` dense on WebGPU | validates the automatic GPU default shipped 2026-08-25 and its WASM fallback |
@@ -73,66 +75,35 @@ See `docs/planning/plan-reference-raster-rearchitecture.md`.
 
 ### SFM — decisions parked behind the acceptance runs
 Each is one knob with a named piece of evidence; none should be tuned a priori.
-The 2-camera-stall implementation detail is in
-`docs/planning/plan-registration-stall.md`; this section owns its gates and priority.
-- **Init-pair E-conditioning.** The candidate σ2/σ1 term is already computed and
-  logged. Wire it into the score **only if** `SFM-01` shows a barely-passing ~2.5°
-  seed winning badly, with that run as its evidence.
-- **RS ▸ WS-B — earlier f,k1 self-cal**, *only if* the shipped 2-camera rescue alone
-  does not register the building set (`SFM-03`). Make `distortionRefine`/
-  `rescueRefine` (`core/sfm/register.js`) observation-aware rather than
-  camera-count-only: engage `f,k1` at `cameras.size >= 4 && totalObservations >=
-  ~2000` (new knob beside `distortionCalMinCams` in `tuning.js`, with rationale).
-  Never below 3 cameras — a 2–3-view k1 fit is noise.
-- **A second rescue, only if the logs show it.** `rescued` is one-shot; if the
-  relaxed sweep admits a few cameras and stalls again *before* the distortion fold
-  at 6 cams, allow one more after the first fold ("folded since last rescue", max 2
-  total). Do NOT make rescue unbounded.
-- **Rotation-cycle filter — decide its fate.** It has never engaged on any baseline:
-  B0/B1/B3 sit under the 30° ceiling, B4 skipped at **42.3°** median cycle error, above
-  it. B4 suggested the cause was its position — it runs before self-cal on a focal 7.4%
-  wrong, so its rotations are garbage exactly when it would have most to say.
-  **A third baseline (2026-08-18, 127-image DJI nadir block) kills that explanation**:
-  focal within **0.88%** of nominal, 127/127 registered, 0.86 px median, one component —
-  and it still skipped, at **40.0°** over 1996 triangles. Near-correct intrinsics and an
-  excellent solve produce the same abort as bad intrinsics, so **moving it after the
-  distortion fold will not help**; that option is closed.
-  The remaining hypothesis is geometric, not calibrational: F is not uniquely determined
-  on near-planar correspondences, so the essential decomposition returns an arbitrary
-  member of a family. The run is consistent with it (nadir block over terrain, best seed
-  in the whole graph only 4.03° parallax, 0/779 pairs rejected at a mean inlier ratio of
-  0.98). **The measurement that settles it now exists**: the digest reports the
-  H/F-degenerate share of accepted pairs (2026-08-18). Re-run any baseline and read it —
-  a high share confirms planar degeneracy, at which point the filter should be **removed**
-  rather than relocated, since no calibration fix reaches it. A low share reopens the
-  intrinsics hypothesis. One run decides; do not tune the ceiling in the meantime.
-  **Measured 2026-10-05 (`core/sfm/cycleAudit.js`, HANDOVER ▸ B-bench):** on SB native
-  25k it dropped 404 pairs — 46 false, 355 true with a wrong pairwise rotation (median
-  28.6°), 3 true with a correct one — and kept 78 false pairs. Only 145 of the 355 are
-  H/F-degenerate, so planar degeneracy is not the whole story: the rotation estimate
-  itself (E from F with the nominal K) is wrong on true pairs. Turning it off changed
-  nothing (57,167 vs 57,168 points). Two ways out, decide between them: **remove** it
-  (zero measured value, real complexity), or rebuild the pairwise rotations (5-point E
-  under RANSAC with the EXIF K, H decomposition for planar pairs) and re-audit.
+The registration-stall work closed 2026-10-06: the bench registers SB 128/128, the
+building set 50/50 and TMA 5/5 at defaults with no rescue firing (`SFM-01`/`03`/`05`),
+so earlier f,k1 self-cal (WS-B), a second rescue and init-pair E-conditioning are
+dropped; nothing measured asks for them. The rotation-cycle filter was removed and the
+self-cal guard fixed for default-FOV focals the same day (HANDOVER done log).
 - **A6 — adaptive bridge-pair gate**, gated on `SFM-11`: B1 showed `minInlierRatio
   0.25` rejecting genuine loop-closing bridges (27 inliers @ 0.23). Evaluate
   lowering `MATCH_TUNING.overrideInliers` (30) to ~25 **or** an explicit bridge
   exception (ratio ≥ 0.2 AND inliers ≥ 25 AND passes the spread gate). Decide from
-  logs; one knob, one test.
-- Verification of the shipped secondary-model recovery + merge is `SFM-08`. Do not
-  lower the global 30% PnP gate to force the P1180182 near-miss into the primary
-  model.
+  logs; one knob, one test. The bench already shows the case: the building set's last
+  three images hang on one 25–27 inlier bridge and register in most runs only.
+- **Secondary-model recovery (`SFM-08`).** SB no longer leaves stranded components, and
+  at the new 0.8 ratio default eagle registers 43/44, so the test set is eagle with the
+  ratio set back to 0.75 by hand. Its stranded components (6/4/4 images) are all below
+  `secondaryMinImages` (8), so no job runs; the log claimed otherwise and now names the
+  floor (fixed 2026-10-06). Whether 8 is right for small object sets is open: a 6-image
+  block of a 44-image set is 14 % of the model. Needs a set with a ≥ 8-image stranded
+  block to exercise the merge at all.
 
 ### ACC — georeferenced accuracy (RTK benches, HANDOVER ▸ B-bench)
 The bench now measures accuracy, not only point counts: camera centres against
 RTK/EXIF positions (quarry, GeoScan) and 15 independent GCP checkpoints (GeoScan).
-- **GNSS antenna lever arm per sensor.** Priors are antenna positions, but BA pulls the
-  camera centres onto them. GeoScan's antenna sits 0.41 m from the lens, which leaves a
-  constant 0.41 m horizontal camera residual and likely part of the +5.7 cm checkpoint
-  height bias. Add an offset (camera frame, metres) to the sensor, apply it in
-  `surveyConstraints.js` (C + Rᵀ·a against the target), and import it from Metashape's
-  convention: y up, z back, i.e. (x, −y, −z) in ours (verified: Metashape's cameras fit
-  the RTK file at 2.3 cm only with that conversion). Then re-run `puti-gcps`.
+- **GeoScan checkpoints shift ~3.6 cm west with the antenna offset** (shipped 2026-10-06,
+  METHODS ▸ camera priors). The offset is right: cameras fit the RTK file at 2.1 cm and
+  the principal point matches Metashape's to ~1 px, where without it cx was 13 px off.
+  But checkpoint H RMS rises 4.5 → 5.9 cm because every GCP moves the same way (scatter
+  unchanged; height bias 5.4 → 3.4 cm). Test whether the GCP survey and the RTK positions
+  differ by a datum shift: fit a translation between them using Metashape's own adjusted
+  cameras (it used both), and compare with the 3.6 cm.
 - **The remaining GeoScan error** (checkpoints H 4.4 cm, V 10.8 cm, GSD 2.9 cm; Metashape
   fits the RTK cameras at 1.2 cm vertical). After the lever arm, check whether the prior
   BA converged: its reprojection RMS does not move across both rounds, and it runs 30
@@ -354,16 +325,6 @@ stated), each recorded as a VERIFICATION row + HANDOVER baseline.
   peak threshold above or below 0.01 (−1.6…−8 %), a second SIFT orientation (+0.5 %,
   MAT-10), pair gates (MAT-05/07), track building (MAT-06). See HANDOVER ▸
   B-match-gpu, "knob sweep".
-- **Ratio-test default.** `MATCH_DEFAULTS.ratioThreshold` 0.75 (COLMAP 0.8). On SB
-  0.8 was worth ~+5 % points twice (MAT-05; MAT-09 → MAT-10 on the same detections:
-  57,539 → 60,189) at unchanged median error, and −5.1 % for 0.75 on the strip bench
-  under the new detector (third time). Fourth, on the headless bench at app defaults:
-  54,314 → 57,168 (+5.3 %, HANDOVER ▸ B-bench). **Fifth, and decisive:** eagle (44 images, Canon 7D) registers
-  only 29/44 cameras at 0.75 but 43/44 at 0.8 (66 vs 76 accepted pairs), independent of the
-  2026-10-06 SfM changes. Recommendation: move the default to 0.8 now and re-space the
-  presets around it. Moving the default also moves the
-  Balanced preset onto the Fast preset's value (`low` is 0.80), so the presets need
-  re-spacing with it; check one aerial/film set before shipping.
 - **Keypoint cap default.** `maxKeypoints` 10,000 binds on SB at 2400 px (MAT-05..07)
   and costs ~10 % points. Raising the SIFT default (or making it scale with the
   detection size) is a cost question for WASM users — brute force is O(Na·Nb). Decide
@@ -374,8 +335,8 @@ stated), each recorded as a VERIFICATION row + HANDOVER baseline.
   longer free points at a fixed budget. MAT-16 gives the browser number.
 - **Defaults after MAT-13.** Full resolution with a non-binding cap is the best SB result
   so far (115k vs 60k at 2400 px). Decide the Balanced/Detailed SIFT presets
-  (`DETECT_SIFT_DEFAULTS` maxDim/maxKeypoints) and the ratio default (0.75 → 0.8, below)
-  together, weighing WASM-only users: brute force is O(Na·Nb) and 2.2 M keypoints is ~4×
+  (`DETECT_SIFT_DEFAULTS` maxDim/maxKeypoints; the ratio default moved to 0.8 on
+  2026-10-06), weighing WASM-only users: brute force is O(Na·Nb) and 2.2 M keypoints is ~4×
   the matching work of MAT-10. Check one aerial/film set first.
 - **GPU descriptor cache size (low value; measured).** `MATCH_TUNING.gpuDescCacheMiB`
   1024 evicts above ~2 M keypoints, but MAT-15 shows the evictions cost almost nothing.

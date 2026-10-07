@@ -57,8 +57,32 @@ const outPrefix = resolve(repo, cfg.out ?? join('bench-out', `${name}-${stamp}`)
 await mkdir(dirname(outPrefix), { recursive: true })
 
 // ── dataset ──
-let files = (await readdir(cfg.images)).filter((f) => IMAGE_EXT.has(extname(f).toLowerCase())).sort()
-if (cfg.include) { const re = new RegExp(cfg.include, 'i'); files = files.filter((f) => re.test(f)) }
+// `recursive: true` walks sub-folders (a MicaSense SET splits captures into 000/001/…);
+// paths stay relative with '/' and the image NAME is the basename.
+const listImages = async (dir, prefix = '') => {
+  const out = []
+  for (const e of await readdir(join(dir, prefix), { withFileTypes: true })) {
+    const rel = prefix ? `${prefix}/${e.name}` : e.name
+    if (e.isDirectory() && cfg.recursive) out.push(...await listImages(dir, rel))
+    else if (e.isFile() && IMAGE_EXT.has(extname(e.name).toLowerCase())) out.push(rel)
+  }
+  return out
+}
+const baseName = (f) => f.slice(f.lastIndexOf('/') + 1)
+let files = (await listImages(cfg.images)).sort((a, b) => baseName(a).localeCompare(baseName(b)))
+if (cfg.include) { const re = new RegExp(cfg.include, 'i'); files = files.filter((f) => re.test(baseName(f))) }
+// `minGpsAlt` (metres, EXIF GPS altitude): drop captures taken on the ground before
+// takeoff / after landing, which a camera that records from power-on produces.
+if (cfg.minGpsAlt != null) {
+  const { default: exifr } = await import('exifr')
+  const kept = []
+  for (const f of files) {
+    const g = await exifr.parse(join(cfg.images, f), { gps: true, tiff: true, exif: true, xmp: false }).catch(() => null)
+    if (Number.isFinite(g?.GPSAltitude) && g.GPSAltitude >= Number(cfg.minGpsAlt)) kept.push(f)
+  }
+  console.log(`== minGpsAlt ${cfg.minGpsAlt} m: kept ${kept.length}/${files.length} image(s)`)
+  files = kept
+}
 if (cfg.limit) files = files.slice(0, Number(cfg.limit))
 if (!files.length) throw new Error(`no images in ${cfg.images}`)
 
@@ -125,13 +149,36 @@ const quiet = /^Matched: |^SIFT (start|done): |^Added image: |^Metadata /
 // blobs in memory, which a 2.9 GB dataset (quarry) exhausts — and the user's browser
 // stores them on disk too.
 const profileDir = `${outPrefix}.profile`
-const browser = await chromium.launchPersistentContext(profileDir, { channel: 'chrome', headless: !cfg.headed })
+// Precise heap readings + a callable gc(), so the `== memory` lines below report live
+// bytes rather than quantised numbers that include uncollected garbage.
+const browser = await chromium.launchPersistentContext(profileDir, {
+  channel: 'chrome', headless: !cfg.headed,
+  args: ['--enable-precise-memory-info', '--js-flags=--expose-gc'],
+})
 const result = { name, config: cfg, files: files.length, startedAt: new Date().toISOString(), stages: {} }
 try {
   const page = browser.pages()[0] ?? await browser.newPage()
+  // Stall/crash watchdog. A worker or renderer that dies of memory can leave
+  // page.evaluate pending forever (a 2026-10-07 Monster run sat silent for 5 h after
+  // its SfM worker died). Any page crash, or no log line for `stallMinutes` (default
+  // 30) while a stage runs, aborts the run with an error in the result instead.
+  let lastLogAt = Date.now(), pageCrashed = false
+  page.on('crash', () => { pageCrashed = true; console.error('[page crash] renderer process died') })
+  const stallMs = Number(cfg.stallMinutes ?? 30) * 60_000
+  const watchdog = () => new Promise((_, reject) => {
+    const t = setInterval(() => {
+      if (pageCrashed) { clearInterval(t); reject(new Error('page crashed (renderer process died)')) }
+      else if (Date.now() - lastLogAt > stallMs) {
+        clearInterval(t); reject(new Error(`stalled: no log line for ${cfg.stallMinutes ?? 30} min (worker likely died)`))
+      }
+    }, 10_000)
+    watchdog.timers.push(t)
+  })
+  watchdog.timers = []
   page.on('console', (msg) => {
     const text = msg.text()
     if (text.startsWith('@@LOG ')) {
+      lastLogAt = Date.now()
       const e = JSON.parse(text.slice(6))
       logOut.write(fmt(e) + '\n')
       if (!quiet.test(e.message) && e.level !== 'debug') console.log(fmt(e))
@@ -154,18 +201,59 @@ try {
   if (cfg.reference) console.log('== reference:', JSON.stringify(await page.evaluate((r) => window.bench.setReference(r), await loadReference(cfg.reference))))
   // In batches, so the page never holds the whole dataset as blobs at once.
   let added = 0
-  const list = files.map((f) => ({ url: `${base}/__bench_data/${encodeURIComponent(f)}`, name: f }))
+  const list = files.map((f) => ({ url: `${base}/__bench_data/${encodeURIComponent(f)}`, name: baseName(f) }))
   for (let i = 0; i < list.length; i += 32) added = await page.evaluate((l) => window.bench.addImages(l), list.slice(i, i + 32))
   result.stages.ingest = { images: added, seconds: (Date.now() - t0) / 1000 }
   if (cfg.reference?.importPoses) console.log(`== imported ${await page.evaluate(() => window.bench.importReferencePoses())} reference pose(s)`)
   console.log(`== ingest: ${added} images in ${result.stages.ingest.seconds.toFixed(1)} s`)
+  // Renderer heap after each stage, before and after a forced GC: the sparse memory
+  // preflight reads usedJSHeapSize, so garbage the page has not collected yet can
+  // refuse a run that would fit.
+  const memory = async (label) => {
+    const m = await page.evaluate(async () => {
+      const before = performance.memory?.usedJSHeapSize ?? null
+      if (typeof globalThis.gc === 'function') { globalThis.gc(); await new Promise((r) => setTimeout(r, 200)); globalThis.gc() }
+      return { before, after: performance.memory?.usedJSHeapSize ?? null }
+    })
+    const gb = (v) => (v == null ? '?' : `${(v / 1024 ** 3).toFixed(2)} GB`)
+    console.log(`== memory ${label}: renderer heap ${gb(m.before)} → ${gb(m.after)} after GC`)
+    ;(result.memory ??= {})[label] = m
+  }
+  await memory('after ingest')
 
   const run = { detect: 'detect', match: 'match', recon: 'reconstruct' }
+  // A LiDAR reference (scripts/bench/lidar.mjs) is gridded once, then every
+  // reconstruction's points are scored against it here, in node.
+  const lidarCfg = cfg.reference?.lidar ?? null
+  let lidarGrid = null
   const runStage = async (stage, settings, key = stage) => {
-    const r = await page.evaluate(([f, s]) => window.bench[f](s), [run[stage], settings])
+    const s = stage === 'recon' && lidarCfg ? { ...settings, exportPoints: true } : settings
+    lastLogAt = Date.now()
+    let r
+    try {
+      r = await Promise.race([page.evaluate(([f, x]) => window.bench[f](x), [run[stage], s]), watchdog()])
+    } catch (err) {
+      result.stages[key] = { error: String(err?.message ?? err) }
+      await writeFile(`${outPrefix}.json`, JSON.stringify(result, null, 2))
+      console.error(`== ${key}: ABORTED — ${err?.message ?? err}`)
+      throw err
+    } finally {
+      for (const t of watchdog.timers.splice(0)) clearInterval(t)
+    }
+    if (stage === 'recon' && lidarCfg) {
+      if (r.pointsEnu?.length && r.enuOrigin) {
+        const { loadLidarGrid, lidarCheck } = await import('./lidar.mjs')
+        lidarGrid ??= await loadLidarGrid(lidarCfg, (m) => console.log(`== ${m}`))
+        r.lidarCheck = lidarCheck(r.pointsEnu, r.enuOrigin, lidarGrid, { flatRangeM: lidarCfg.flatRangeM ?? 0.15 })
+      } else {
+        r.lidarCheck = { error: 'no georeferenced points (needs camera GPS for the ENU frame)' }
+      }
+      delete r.pointsEnu
+    }
     result.stages[key] = r
     const { settings: _s, model: _m, ...numbers } = r
     console.log(`== ${key}: ${JSON.stringify(numbers)}`)
+    if (stage !== 'recon') await memory(`after ${key}`)
     await writeFile(`${outPrefix}.json`, JSON.stringify(result, null, 2))
   }
   if (cfg.variants?.length) {

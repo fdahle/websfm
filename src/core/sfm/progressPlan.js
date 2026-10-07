@@ -16,8 +16,7 @@
 // only need to be good enough that the bar does not stall or sprint. Registration
 // dominates; the post-filter passes are what the old bar hid entirely.
 export const SFM_PHASES = [
-  { key: 'cycleFilter',    weight: 0.04, label: 'Filtering match graph' },
-  { key: 'initPair',       weight: 0.06, label: 'Choosing initial pair' },
+  { key: 'initPair',       weight: 0.10, label: 'Choosing initial pair' },
   { key: 'register',       weight: 0.45, label: 'Registering images' },
   { key: 'bundle',         weight: 0.15, label: 'Bundle adjustment' },
   { key: 'retriangulate',  weight: 0.08, label: 'Retriangulating' },

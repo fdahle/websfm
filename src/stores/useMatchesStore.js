@@ -630,9 +630,8 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
         if (entry.rawCount) stats.ratios.push(entry.inlierCount / entry.rawCount)
         // H/F degeneracy is a per-pair label (planar scene / pure rotation) that no
         // count or ratio gate acts on, so it only ever reached the debug log — yet the
-        // run-level SHARE is a first-order diagnostic: it is what decides whether an
-        // aborted rotation-cycle filter means "bad intrinsics" or "F is not determined
-        // on this geometry" (see the filter's sanity-abort). Counted over ACCEPTED
+        // run-level SHARE is a first-order diagnostic: how much of the graph is planar
+        // or rotation-dominated, where F is not determined. Counted over ACCEPTED
         // pairs only, because that is the exact population where H ran: `hSkipBelow`
         // = minMatches skips H below the accept floor, so any other denominator would
         // dilute the share with pairs that were never evaluated.
