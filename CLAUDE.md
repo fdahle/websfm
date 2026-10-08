@@ -1181,6 +1181,30 @@ propagate covariance rather than retaining stale numeric sigmas.
 - `markRaw`/`shallowRef` for big typed arrays (keypoints, descriptors, depth planes):
   reactivity is wasteful AND a Vue Proxy can't be `postMessage`d to the worker.
 - Worker results transfer ArrayBuffers (see each op's `transfer`).
+- **The ~4 GB per-isolate ceiling is the V8 heap, not memory.** It caps JS objects,
+  Maps and number arrays (`jsHeapSizeLimit`, pointer-compression cage) for the page
+  and for each worker separately; ArrayBuffer/typed-array backing stores and wasm
+  memory live outside it (one Chrome worker held 7.2 GB of Float64Arrays on a 108 MB
+  heap). So bulk per-keypoint / per-match / per-observation data belongs in typed
+  arrays, never in an object or Map per item — that is what let the SfM worker's heap
+  drop ~9× (TODO ▸ MEM). `core/sfm/memBudget.js` projects heap and buffers
+  separately for the same reason: heap against `jsHeapSizeLimit`, buffers against the
+  device budget.
+- **SfM worker data model** (`core/sfm/`). Keypoints are one `KeypointSet` per image
+  (`img.kp`, `keypointSet.js`: Float64 xy + optional RGB), **immutable**: every move
+  (film frame, ingest undistortion, each self-cal fold) is `mapPositions` → a NEW set.
+  That is what lets the pristine input, every seed retry / secondary model's working
+  copy (`cloneSfmInput` shares `kp` like `descU8`) and the self-cal pristine snapshot
+  all hold one set without copying it — so never write into `set.xy`. Tracks live in
+  a `TrackStore` (`trackStore.js`): dense point ids, views keyed by image index
+  (`makeImageIds`), positions updated in place by BA, and the keypoint → point index
+  (`pointAt`) maintained incrementally. `refreshTracks` (= `compact()`) runs where the
+  old code rebuilt its `viewIndex`; it **renumbers point ids**, so no id may be held
+  across it (register.js's correspondence cache is invalidated at exactly those
+  points). Order is semantics: points iterate in creation order and views in insertion
+  order, a re-added view goes to the end (Map behaviour) — BA's observation order, and
+  so its float summation, follows both. The `'map'` implementation is the reference the
+  arena is diff-tested against (`trackStore.test.js`).
 - **`createWritable()` does not write in place — it stages a `<name>.crswap`
   sibling and renames it on `close()`.** Two writables open on the *same* file
   therefore collide on that one swap name and the loser throws **"Failed to create
@@ -1669,6 +1693,18 @@ one detection and set of matches for SfM-only changes. Point counts alone can re
 wrong change, so give a config `reference` data whenever a set has it: RTK camera
 positions and GCP marks. Then judge accuracy with `posePriors: false` (otherwise the
 solve has already seen the positions). The configs hold machine-specific dataset paths.
+
+**SfM representation refactors are gated on bit-identical output**
+(`src/core/sfm/sfmGolden.test.js`, off by default). `WEBSFM_SFM_GOLDEN=write` on the old
+code records a digest of four synthetic scenes (self-cal folds, calibrated ingest +
+priors, seed retries + secondary models, film) — the packed result, cameras, summary and
+every log line minus wall-clock — running each twice to prove determinism; `=check` on
+the new code compares. `WEBSFM_SFM_GOLDEN_INPUTS` adds real data: a bench run with
+`dumpSfmInput: true` saves the exact worker payload (`tests/bench/sfmInputDump.js`),
+which node replays. Record the baseline from a worktree of the old commit. The bench's
+`workerHeap.mjs` reports the SfM worker's peak V8 heap and heap + ArrayBuffers per stage
+segment (closed by the solver's `stage …` / `memory mark …` debug lines); bench runs
+are not bit-comparable to each other (matching varies slightly), the node replay is.
 
 Test globs are `src/core/**`, `src/utils/**`, `src/stores/**` (`vitest.config.js`).
 A test file outside those **silently never runs** — check the glob before concluding

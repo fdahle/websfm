@@ -1,5 +1,5 @@
 // Golden-output gate for representation refactors of the SfM core
-// (docs/planning/plan-sfm-compact-memory.md: Phases 0–3 must be bit-identical).
+// (TODO ▸ MEM: changes to how the solver stores data must not change its output).
 //
 // Runs the real `reconstruct()` with the real wasm on synthetic scenes that exercise
 // every stage the refactor touches — EXIF-only self-calibration with distortion folds,

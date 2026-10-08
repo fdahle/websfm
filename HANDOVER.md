@@ -26,6 +26,39 @@ Git history holds the detail.
 | **B-georef-polar** | error-free control, grid fit vs local metric frame | 2026-10-04 | georeferencing in a projected CRS (synthetic; real-data check is REV-06) |
 | **B-match-gpu** | brute-force NN, WASM vs WebGPU kernel (synthetic, Dawn) | 2026-10-05 | the GPU matcher's kernel cost; the real-data numbers are MAT-02/MAT-03 |
 | **B-bench** | headless bench: SB / building / TMA / eagle / quarry, RTK camera accuracy | 2026-10-05 | SfM point counts, guided extension, camera-position accuracy against RTK |
+| **B-mem** | SfM worker memory: V8 heap and heap + ArrayBuffers per stage, before/after the compact-memory work | 2026-10-08 | the sparse memory preflight constants (`core/sfm/memBudget.js`) and any change to the SfM worker's data model |
+
+### B-mem — SfM worker memory, before/after compact keypoints and tracks (2026-10-08)
+Headless bench on the M1 Pro (32 GB), Chrome via Playwright; worker heap sampled over
+CDP every 250 ms (`scripts/bench/workerHeap.mjs`, so short spikes can be missed; the
+heap figure includes uncollected garbage). "Heap" = V8 heap, the ~4 GB per-isolate
+ceiling; "+ buffers" adds ArrayBuffer backing stores and wasm memory, which sit
+outside it (a toy worker held 7.2 GB of Float64Arrays on a 108 MB heap). `main` =
+b22d713; compact = ecf0fde (Phases 0–3).
+
+| set | build | keypoints / matches | worker heap peak | heap + buffers | cameras / points | SfM |
+|---|---|---|---|---|---|---|
+| South Building, 128 | `main` | 1.07 M / 0.92 M | **1.08 GB** (registration) | not recorded | 128 / 59,905 | 141 s |
+| South Building, 128 | Phase 1 only | 1.07 M / 0.92 M | 0.19 GB | not recorded | 128 / 59,816 | 130 s |
+| South Building, 128 | compact | 1.07 M / 0.92 M | **0.12 GB** (filter + BA 2) | 0.35 GB | 128 / 59,825 | 127 s |
+| GeoScan PUTI, 444 | `main` | 1.43 M / 0.99 M | **1.36 GB** (registration) | 1.55 GB | 444 / 133,717 | 2,306 s |
+| GeoScan PUTI, 444 | compact | 1.43 M / 0.99 M | **0.16 GB** (filter + BA 2) | 0.50 GB | 444 / 133,710 | 3,013 s* |
+
+- Point counts differ slightly between bench runs because matching does (1151 vs 1154
+  accepted pairs on SB): bench runs are not bit-comparable. Correctness was gated
+  separately: node replays of each run's captured SfM input (`dumpSfmInput`) give
+  bit-identical cameras, points, tracks, summary and log lines before and after,
+  on South Building and on PUTI, plus four synthetic scenes (`sfmGolden.test.js`).
+- *The compact PUTI run shared the machine with a 55-min node replay and did more BA
+  solves (434 vs 422); its wall time is not a comparison. On an unshared replay of
+  South Building the SfM took 146 s (Map tracks) and 141 s (typed arena).
+- Registration's peak on `main` was the keypoint objects (postMessage clone + the
+  working clone + the self-cal pristine snapshot); after Phase 1 the largest heap
+  segment is transient per-observation number arrays during the final BAs.
+- Preflight model (`SPARSE_MEMORY_MODEL`) fitted on these two sets, generous by design:
+  it projects 0.22 / 0.26 GB of worker heap and 0.30 / 0.44 GB of worker buffers for
+  SB / PUTI. Monster (4.5 M keypoints, 7.7 M matches, the run that died) projects
+  0.78 GB of heap, against 3.42 GB with the old model — measuring it is `SFM-23`.
 
 ### B-match-gpu — brute-force NN kernel, WASM vs WebGPU (2026-10-05, synthetic)
 Before (real data, 2026-10-04, South Building 128, ≤2400 px SIFT, ~8.4k kp/img,
@@ -803,6 +836,19 @@ fiducials; self-calibration (A2) + fiducials (F4) are the code-side support.
 ---
 
 ## Done log (most recent first)
+
+- **2026-10-08 · SfM worker: compact keypoints and tracks (TODO ▸ MEM 1–3).** Keypoints
+  are immutable typed-array sets shared across seed retries / secondary models
+  (`core/sfm/keypointSet.js`); tracks live in a typed-array arena behind a `TrackStore`
+  API (`core/sfm/trackStore.js`, Map reference + 6,000-step differential test); match
+  loops read packed indices; ingest extracted to `core/sfm/ingest.js` and the BA
+  observations built once as typed arrays (`baObservations.js`). Bit-identical output
+  (golden gate `sfmGolden.test.js` on synthetic scenes + South Building + PUTI replays).
+  Worker heap peak 1.08 → 0.12 GB (SB), 1.36 → 0.16 GB (PUTI). The preflight
+  (`core/sfm/memBudget.js`) now projects heap and buffers separately and runs without
+  guided extension, with a yellow verdict, instead of refusing or dying. Bench: worker
+  heap per segment, `maxOldSpaceMb`, `dumpSfmInput`. Numbers: B-mem. Owed: `SFM-23`
+  (Monster), `SFM-24`.
 
 - **2026-10-08 · PatchMatch refinement: depth-relative steps, continued across pyramid
   levels.** The random depth step was a fraction of the global range (useless to near

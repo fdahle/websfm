@@ -240,13 +240,10 @@ ones are in HANDOVER. Ordered by expected impact.
 - **Find GCPs reads the whole reference raster at 1536 px**: a regional tile against
   a drone block leaves the project a few dozen working pixels. Needs an approximate
   footprint (EXIF/priors) to window the read — the ortho itself is relative.
-- **Structure** (god-file audit): extract `core/sfm/ingest.js`
-  (sfm.js 304–508); the survey-constraint builders moved to
-  `core/sfm/surveyConstraints.js` (2026-10-04), but the anchored/prior BA *loops*
-  are still in sfm.js and still lack one shared `buildBaObservations` (which also
-  removes a per-observation `indexOf`); move the
-  sparse-input marshaller out of `reconstruct()` into `stores/reconstruction/`;
-  split fusion out of `mvs.js` with one shared windowed depth-agreement helper.
+- **Structure** (god-file audit; `core/sfm/ingest.js` and one shared
+  `buildBaObservations` shipped with MEM, 2026-10-08): move the sparse-input
+  marshaller out of `reconstruct()` into `stores/reconstruction/`; split fusion out of
+  `mvs.js` with one shared windowed depth-agreement helper.
 
 ### FD — fiducial detection: remaining improvements (2026-10-03 gap analysis)
 Shipped 2026-10-04: native refine ~70× cheaper, single decode, memory-bounded
@@ -474,35 +471,26 @@ Cancel+rerun.
   of `AutoMaskModal.vue`. SAM2-propagation auto-masking stays parked (F12).
 
 ### MEM — big runs vs the 4 GB per-isolate ceiling (from the Monster stretch run)
-**Plan for review:** `docs/planning/plan-sfm-compact-memory.md` (items 1–3 below, plus the
-RV `ingest.js` / `buildBaObservations` structure items, phased with bit-identical output
-as the gate).
-Chrome caps each page's and each worker's JS heap at ~4 GB (`jsHeapSizeLimit`; the
-sparse preflight allows 86 % = 3.52 GB), and wasm32 memory at 4 GB, whatever the
-machine's RAM. A page cannot raise either. On 2026-10-07 the Monster run with the 16-bit
-stretch (4.5 M keypoints, 7.7 M matches, 534/538 cameras, 705 k points) passed the
-preflight at 3.42 / 3.52 GB, then its SfM worker died silently at the guided-extension
-step (HANDOVER ▸ B-bench ▸ Monster). In order:
-1. **Preflight counts guided extension and degrades instead of dying** (hours). Model
-   its peak (descriptors 128 B/keypoint already counted; add its per-image search
-   structures and the per-point candidate lists), and when the projection exceeds the
-   budget, turn guided extension off or thin it, logging why — never let the worker
-   die. Calibrate the model from a measured peak first: launch the bench's Chrome with
-   `--js-flags=--max-old-space-size=8192` (bench only, users cannot) and record the
-   worker's real peak per stage.
-2. **Compact keypoints and tracks in the SfM worker** (days; the real fix). Keypoints
-   are JS objects (~104 B each, `memBudget.js`) held twice (working copy + the
-   pristine retry copy): ~0.9 GB on Monster for data that fits 8 B per keypoint as
-   typed arrays. Sparse points carry a `views: Map` each. Move both to typed arrays
-   (CSR for tracks); expected to roughly halve the worker peak.
-3. **Guided extension in image batches** (moderate): today it ships every image's
-   descriptors (549 MB on Monster) and searches all at once.
-4. **Split very large blocks into overlapping sub-models and merge** (long term), on
+Chrome caps each page's and each worker's **V8 heap** at ~4 GB (`jsHeapSizeLimit`); a
+page cannot raise it. ArrayBuffers and wasm memory live outside that cap. The Monster
+run (4.5 M keypoints, 7.7 M matches) died in its SfM worker at guided extension. The
+compact-memory work (shipped 2026-10-08, HANDOVER ▸ B-mem) moved the worker's
+keypoints, tracks and matches into typed arrays: peak worker heap 1.36 → 0.16 GB on
+GeoScan PUTI, 1.08 → 0.12 GB on South Building, bit-identical output. The preflight
+now projects heap and buffers separately and drops guided extension rather than
+dying. Open:
+1. **Run Monster at defaults on the bench machine** (`SFM-23`): the model projects
+   0.78 GB of worker heap; confirm it completes and record the real per-segment peak.
+2. **Main-thread keypoints** (`useImagesStore`): still one object per keypoint
+   (`nx, ny, scale, response, …`) in the renderer — on Monster roughly 0.5 GB of
+   renderer heap. A store rework, separate from the solver.
+3. **Split very large blocks into overlapping sub-models and merge** (long term), on
    the existing secondary-model similarity merge; COLMAP's route to thousands of images.
-5. **Memory64 wasm** only lifts the wasm side and Rust/wasm-bindgen support is still
+4. **Memory64 wasm** only lifts the wasm side and Rust/wasm-bindgen support is still
    experimental — revisit later.
-User workaround today: a lower keypoint cap (Monster would likely fit at 6,000) or fewer
-preselection neighbours.
+Not needed: guided extension in image batches (plan Phase 5). Its descriptors are
+ArrayBuffers now, outside the heap ceiling; revisit only if the device-memory side of
+the preflight starts refusing runs.
 
 **PCG reduced solve — decide from the bench (`SFM-22`).** PCG is live (shipped in
 `d1355a3`, from n ≥ 600). On a synthetic BA-shaped system it was 43× faster than
