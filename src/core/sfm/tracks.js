@@ -1,5 +1,6 @@
 import { makeP34flat } from './reconstruction.js'
 import { cameraCenter, projectWithDepth, triangulationAngle } from './geometry.js'
+import { hasKp, kpX, kpY } from './keypointSet.js'
 
 // ── Retriangulation + track merging (A3, pure) ───────────────────────────────
 // Standard COLMAP-style post-BA structure recovery, factored out of `reconstruct`
@@ -7,7 +8,7 @@ import { cameraCenter, projectWithDepth, triangulationAngle } from './geometry.j
 //   points3d : [{ x, y, z, views: Map<uuid,kpIdx> }]
 //   cameras  : Map<uuid, { R, t, K }>
 //   pairs    : verified match pairs [{ idA, idB, matches: [[iaKp, ibKp], …] }]
-//   keypointOf(uuid, kpIdx) → { x, y } | null
+//   keypointsOf(uuid) → the image's KeypointSet (keypointSet.js) | null
 //   maxReprojPx : reprojection gate (px)
 //
 // toNorm / camToP34flat / reprojErr live here (rather than in the orchestrator)
@@ -29,6 +30,12 @@ export const reprojErr = (cam, x, y, z, kp) => {
   return p ? Math.hypot(p.u - kp.x, p.v - kp.y) : Infinity
 }
 
+// reprojErr against keypoint k of a KeypointSet.
+export const reprojErrAt = (cam, x, y, z, set, k) => {
+  const p = projectWithDepth(cam, x, y, z)
+  return p ? Math.hypot(p.u - set.xy[2 * k], p.v - set.xy[2 * k + 1]) : Infinity
+}
+
 // uuid → Map<kpIdx, point> reverse index over a track list.
 function buildViewIndex(points3d) {
   const index = new Map()
@@ -47,7 +54,7 @@ function buildViewIndex(points3d) {
 // reprojects ≤ gate in both. `triangulate(nA, nB, PA, PB)` is injected (WASM DLT
 // in production). Mutates `points3d`; returns { added, lowParallax }.
 export async function retriangulatePairs({
-  points3d, cameras, pairs, keypointOf, maxReprojPx, triangulate,
+  points3d, cameras, pairs, keypointsOf, maxReprojPx, triangulate,
   minTriAngleDeg = 0,
 }) {
   const index = buildViewIndex(points3d)
@@ -68,11 +75,11 @@ export async function retriangulatePairs({
     const PA = camToP34flat(camA), PB = camToP34flat(camB)
     const CA = minTriAngleDeg > 0 ? cameraCenter(camA) : null
     const CB = minTriAngleDeg > 0 ? cameraCenter(camB) : null
+    const sA = keypointsOf(e.idA), sB = keypointsOf(e.idB)
     const nA = [], nB = [], keep = []
     for (const [ia, ib] of fresh) {
-      const kA = keypointOf(e.idA, ia), kB = keypointOf(e.idB, ib)
-      if (!kA || !kB) continue
-      nA.push(toNorm(kA.x, kA.y, KA)); nB.push(toNorm(kB.x, kB.y, KB)); keep.push([ia, ib])
+      if (!hasKp(sA, ia) || !hasKp(sB, ib)) continue
+      nA.push(toNorm(kpX(sA, ia), kpY(sA, ia), KA)); nB.push(toNorm(kpX(sB, ib), kpY(sB, ib), KB)); keep.push([ia, ib])
     }
     if (!keep.length) continue
 
@@ -81,9 +88,8 @@ export async function retriangulatePairs({
       const [ia, ib] = keep[srcIdx]
       // A point added earlier in this batch may already own one endpoint.
       if (index.get(e.idA)?.has(ia) || index.get(e.idB)?.has(ib)) continue
-      const kA = keypointOf(e.idA, ia), kB = keypointOf(e.idB, ib)
-      if (reprojErr(camA, x, y, z, kA) > maxReprojPx) continue
-      if (reprojErr(camB, x, y, z, kB) > maxReprojPx) continue
+      if (reprojErrAt(camA, x, y, z, sA, ia) > maxReprojPx) continue
+      if (reprojErrAt(camB, x, y, z, sB, ib) > maxReprojPx) continue
       // Reprojection alone cannot constrain depth when the viewing rays are almost
       // parallel: a wrong correspondence displaced along its epipolar line can fit
       // both images yet triangulate arbitrarily far away. Apply the same geometric
@@ -136,7 +142,7 @@ export function pruneFinalTwoViewTracks(points3d, {
 // Fold the loser into the winner when the union is consistent (no image twice) and
 // every added observation still reprojects ≤ gate against the winner. Returns the
 // surviving array + { merged }.
-export function mergeSplitTracks({ points3d, cameras, pairs, keypointOf, maxReprojPx }) {
+export function mergeSplitTracks({ points3d, cameras, pairs, keypointsOf, maxReprojPx }) {
   const index = buildViewIndex(points3d)
   let merged = 0
   for (const e of pairs) {
@@ -154,8 +160,8 @@ export function mergeSplitTracks({ points3d, cameras, pairs, keypointOf, maxRepr
       // Every added observation must still reproject within the gate against p1.
       let ok = true
       for (const [uuid, kp] of p2.views) {
-        const cam = cameras.get(uuid), kpt = keypointOf(uuid, kp)
-        if (!cam || !kpt || reprojErr(cam, p1.x, p1.y, p1.z, kpt) > maxReprojPx) { ok = false; break }
+        const cam = cameras.get(uuid), set = keypointsOf(uuid)
+        if (!cam || !hasKp(set, kp) || reprojErrAt(cam, p1.x, p1.y, p1.z, set, kp) > maxReprojPx) { ok = false; break }
       }
       if (!ok) continue
       for (const [uuid, kp] of p2.views) {
@@ -188,7 +194,7 @@ export function mergeSplitTracks({ points3d, cameras, pairs, keypointOf, maxRepr
 // Returns { added, rounds, lifted } — `lifted` = points that had ≤2 views
 // before and ≥3 after, i.e. what the final 2-view prune no longer removes.
 export function completeTracks({
-  points3d, cameras, pairs, keypointOf, maxReprojPx,
+  points3d, cameras, pairs, keypointsOf, maxReprojPx,
   maxRounds = 1, index = null, addView = null,
 }) {
   const idx = index ?? buildViewIndex(points3d)
@@ -210,9 +216,9 @@ export function completeTracks({
         const tgtUuid = ptA ? e.idB : e.idA
         const tgtKp = ptA ? ib : ia
         if (pt.views.has(tgtUuid)) continue // one keypoint per image per track
-        const kp = keypointOf(tgtUuid, tgtKp)
-        if (!kp) continue
-        if (reprojErr(cameras.get(tgtUuid), pt.x, pt.y, pt.z, kp) > maxReprojPx) continue
+        const set = keypointsOf(tgtUuid)
+        if (!hasKp(set, tgtKp)) continue
+        if (reprojErrAt(cameras.get(tgtUuid), pt.x, pt.y, pt.z, set, tgtKp) > maxReprojPx) continue
         if (!sizeBefore.has(pt)) sizeBefore.set(pt, pt.views.size)
         add(pt, tgtUuid, tgtKp)
         n++

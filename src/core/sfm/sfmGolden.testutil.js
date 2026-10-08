@@ -1,7 +1,12 @@
 // Golden-output runner for sfmGolden.test.js (see there). Kept free of vitest so a
 // plain node script can drive the same scenes (timing, heap probes).
 
+import { readFileSync } from 'node:fs'
+import process from 'node:process'
+import { basename } from 'node:path'
 import { reconstruct } from './sfm.js'
+import { wrapPackedMatches } from './matchCodec.js'
+import { decodeSfmInput } from '../../../tests/bench/sfmInputDump.js'
 import { packReconstructionResult } from './resultCodec.js'
 import { aerialBlock } from './syntheticScene.testutil.js'
 
@@ -24,6 +29,21 @@ export const GOLDEN_SCENES = {
 }
 
 // Wall-clock lines, and the bench's memory marks (they add no information to compare).
+// Real-data scenes: SfM worker inputs captured by the bench (`dumpSfmInput`), listed in
+// WEBSFM_SFM_GOLDEN_INPUTS (comma-separated paths). Replayed with their own settings,
+// exactly as the worker op would run them.
+export function goldenScenes() {
+  const dumps = (process.env.WEBSFM_SFM_GOLDEN_INPUTS || '').split(',').filter(Boolean)
+  return {
+    ...GOLDEN_SCENES,
+    ...Object.fromEntries(dumps.map((path) => [`dump:${basename(path)}`, () => {
+      const input = decodeSfmInput(readFileSync(path))
+      wrapPackedMatches(input.pairs)
+      return input
+    }])),
+  }
+}
+
 const DROP_LOG = [/took \d+ms/, /total time \d/, / solver — /, /memory mark "/]
 
 function digestTyped(arr) {
@@ -62,10 +82,10 @@ function digestModel(m) {
 }
 
 export async function runGoldenScene(name, { prepare = (scene) => scene } = {}) {
-  const scene = prepare(GOLDEN_SCENES[name]())
+  const scene = prepare(goldenScenes()[name]())
   const logs = []
   const out = await reconstruct(
-    { images: scene.images, pairs: scene.pairs, gcps: scene.gcps, cameraPriors: scene.cameraPriors, settings: {} },
+    { images: scene.images, pairs: scene.pairs, gcps: scene.gcps, cameraPriors: scene.cameraPriors, settings: scene.settings ?? {} },
     { onLog: (m, level, cat) => { if (!DROP_LOG.some((re) => re.test(m))) logs.push(`${level}|${cat}|${m}`) } },
   )
   const { result } = packReconstructionResult(out)

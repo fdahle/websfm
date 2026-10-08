@@ -11,6 +11,8 @@
 // them at full precision; only the wasm hand-off rounds to Float32, as before.
 // Weights are null when every observation has weight 1 (the SIFT tracks).
 
+import { hasKp } from './keypointSet.js'
+
 export function isObservationList(o) {
   return !!o && !Array.isArray(o) && o.cam instanceof Int32Array
 }
@@ -20,9 +22,10 @@ export function isObservationList(o) {
  * within a point, in the order of its views.
  * @param {Array<{views: Map<string, number>}>} points3d
  * @param {(uuid: string) => number | undefined} camIdxOf   undefined / −1 ⇒ skip
- * @param {(uuid: string, kpIdx: number) => {x:number, y:number} | null | undefined} keypointOf
+ * @param {(uuid: string) => {n:number, xy:Float64Array} | null | undefined} keypointsOf
+ *   the image's KeypointSet (keypointSet.js)
  */
-export function buildBaObservations(points3d, camIdxOf, keypointOf) {
+export function buildBaObservations(points3d, camIdxOf, keypointsOf) {
   let cap = 0
   for (const pt of points3d) cap += pt.views.size
   const cam = new Int32Array(cap), pt = new Int32Array(cap)
@@ -32,9 +35,9 @@ export function buildBaObservations(points3d, camIdxOf, keypointOf) {
     for (const [uuid, kpIdx] of points3d[pi].views) {
       const ci = camIdxOf(uuid)
       if (ci == null || ci === -1) continue
-      const kp = keypointOf(uuid, kpIdx)
-      if (!kp) continue
-      cam[n] = ci; pt[n] = pi; x[n] = kp.x; y[n] = kp.y
+      const set = keypointsOf(uuid)
+      if (!hasKp(set, kpIdx)) continue
+      cam[n] = ci; pt[n] = pi; x[n] = set.xy[2 * kpIdx]; y[n] = set.xy[2 * kpIdx + 1]
       n++
     }
   }

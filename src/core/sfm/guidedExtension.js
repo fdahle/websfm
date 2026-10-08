@@ -51,7 +51,7 @@ export function trackDistanceThreshold(points3d, descOf, { quantile = 0.9, maxSa
  * @param {object} o
  * @param {Array} o.points3d                 [{ x, y, z, views: Map<uuid, kpIdx> }]
  * @param {Map} o.cameras                    uuid → { R, t, K }
- * @param {(uuid:string) => {keypoints:{x:number,y:number}[]}|null} o.imageOf
+ * @param {(uuid:string) => {n:number, xy:Float64Array}|null} o.keypointsOf   the image's KeypointSet
  * @param {(uuid:string, kp:number) => {arr:Uint8Array, off:number}|null} o.descOf
  * @param {Map} o.viewIndex                  uuid → Map<kpIdx, point>
  * @param {(pt:object, uuid:string, kp:number) => void} o.addView
@@ -62,7 +62,7 @@ export function trackDistanceThreshold(points3d, descOf, { quantile = 0.9, maxSa
  * @param {number} [o.refObs]                compare against at most this many observations
  * @param {(pt:object, uuid:string, kp:number) => void} [o.onAdd]  called per accepted observation
  */
-export function guidedExtendTracks({ points3d, cameras, imageOf, descOf, viewIndex, addView, gatePx,
+export function guidedExtendTracks({ points3d, cameras, keypointsOf, descOf, viewIndex, addView, gatePx,
   maxDist2 = null, ratio = 0.8, quantile = 0.9, refObs = 3, onAdd = null }) {
   const tau2 = maxDist2 ?? trackDistanceThreshold(points3d, descOf, { quantile })
   const stats = { tau: tau2 == null ? null : Math.sqrt(tau2) / 512, projections: 0, windows: 0, proposals: 0,
@@ -74,17 +74,18 @@ export function guidedExtendTracks({ points3d, cameras, imageOf, descOf, viewInd
   // Per-camera keypoint grid (cell = gate) and keypoint bounds.
   const grids = new Map()
   for (const [uuid] of cameras) {
-    const kps = imageOf(uuid)?.keypoints
-    if (!kps?.length) continue
+    const kps = keypointsOf(uuid)
+    if (!kps?.n) continue
     const cells = new Map()
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
-    for (let i = 0; i < kps.length; i++) {
-      const { x, y } = kps[i]
+    const xy = kps.xy
+    for (let i = 0; i < kps.n; i++) {
+      const x = xy[2 * i], y = xy[2 * i + 1]
       if (x < minX) minX = x; if (y < minY) minY = y; if (x > maxX) maxX = x; if (y > maxY) maxY = y
       const key = Math.floor(x / gatePx) * 1e6 + Math.floor(y / gatePx)
       const c = cells.get(key); if (c) c.push(i); else cells.set(key, [i])
     }
-    grids.set(uuid, { kps, cells, minX, minY, maxX, maxY })
+    grids.set(uuid, { xy, cells, minX, minY, maxX, maxY })
   }
 
   const proposals = []
@@ -107,8 +108,7 @@ export function guidedExtendTracks({ points3d, cameras, imageOf, descOf, viewInd
           const cell = g.cells.get(gx * 1e6 + gy)
           if (!cell) continue
           for (const i of cell) {
-            const k = g.kps[i]
-            if ((k.x - p.u) ** 2 + (k.y - p.v) ** 2 > r2) continue
+            if ((g.xy[2 * i] - p.u) ** 2 + (g.xy[2 * i + 1] - p.v) ** 2 > r2) continue
             if (used?.has(i)) continue
             const cd = descOf(uuid, i)
             if (!cd) continue

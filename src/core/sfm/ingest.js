@@ -15,6 +15,7 @@ import { undistortPixel, distortionOf } from './distortion.js'
 import { fitFundamental, sampsonRmsPx } from './fundamental.js'
 import { fitFiducialAffine, canonicalFrame, scanToCanonical } from './fiducials.js'
 import { calibratedFiducialPairs } from './fiducialModel.js'
+import { mapPositions, kpX, kpY } from './keypointSet.js'
 import { fitFiducialTransform } from './fiducialCalibration.js'
 
 // ── Fiducial interior orientation (F4) ───────────────────────────────────
@@ -86,12 +87,7 @@ export function applyFiducialFrames({ imgs, gcps, log }) {
       for (const { img, fit } of entries) {
         const scanTransform = fit.forward ? fit : fit.A
         img.sensor._fiducialK = { fx: frame.K.fx, fy: frame.K.fy, cx: frame.K.cx, cy: frame.K.cy, source }
-        if (img.keypoints?.length) {
-          img.keypoints = img.keypoints.map((kp) => {
-            const c = scanToCanonical(kp.x, kp.y, scanTransform, frame)
-            return { ...kp, x: c.x, y: c.y }
-          })
-        }
+        if (img.kp?.n) img.kp = mapPositions(img.kp, (x, y) => scanToCanonical(x, y, scanTransform, frame))
         fiducialTransforms.set(img.uuid, { A: fit.A ?? null, transform: fit.forward ? fit : null, frame })
       }
     }
@@ -202,14 +198,14 @@ export function undistortAtIngest({ imgs, Kmap, moveGcpObs, log }) {
   let shiftSum = 0, shiftMax = 0, shiftN = 0
   for (const img of imgs) {
     const dist = distortionOf(img.sensor)
-    if (!dist || !img.keypoints?.length) continue
+    if (!dist || !img.kp?.n) continue
     anyCalibratedDistortion = true
     const K = Kmap.get(img.uuid)
-    img.keypoints = img.keypoints.map((kp) => {
-      const u = undistortPixel(kp.x, kp.y, K, dist)
-      const d = Math.hypot(u.x - kp.x, u.y - kp.y)
+    img.kp = mapPositions(img.kp, (x, y) => {
+      const u = undistortPixel(x, y, K, dist)
+      const d = Math.hypot(u.x - x, u.y - y)
       shiftSum += d; if (d > shiftMax) shiftMax = d; shiftN++
-      return { ...kp, x: u.x, y: u.y }
+      return u
     })
     moveGcpObs(img.uuid, (x, y) => undistortPixel(x, y, K, dist))
     undistortedImgs++
@@ -243,8 +239,8 @@ export function refitMovedPairs({ donePairs, movedUuids, imageByUuid, log }) {
       if (!movedUuids.has(e.idA) && !movedUuids.has(e.idB)) continue
       const iA = imageByUuid(e.idA), iB = imageByUuid(e.idB)
       if (!iA || !iB || (e.matches?.length ?? 0) < 8) { skipped++; continue }
-      const ptsA = e.matches.map(([ia]) => iA.keypoints[ia])
-      const ptsB = e.matches.map(([, ib]) => iB.keypoints[ib])
+      const ptsA = e.matches.map(([ia]) => ({ x: kpX(iA.kp, ia), y: kpY(iA.kp, ia) }))
+      const ptsB = e.matches.map(([, ib]) => ({ x: kpX(iB.kp, ib), y: kpY(iB.kp, ib) }))
       const fit = fitFundamental(ptsA, ptsB)
       if (!fit) { skipped++; continue }
       before.push(sampsonRmsPx(e.F, ptsA, ptsB))

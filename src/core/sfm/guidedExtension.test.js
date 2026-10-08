@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 
 import { guidedExtendTracks, trackDistanceThreshold, auditGuidedAdditions } from './guidedExtension.js'
+import { keypointSetFrom } from './keypointSet.js'
 
 const K = { fx: 1000, fy: 1000, cx: 500, cy: 400 }
 const I = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
@@ -47,7 +48,7 @@ function scene() {
     return [u, arr]
   }))
   const descOf = (u, k) => (flat.has(u) && k < images.get(u).keypoints.length ? { arr: flat.get(u), off: k * 128 } : null)
-  return { images, points3d, viewIndex, addView, descOf, imageOf: (u) => images.get(u), add, flat }
+  return { images, points3d, viewIndex, addView, descOf, keypointsOf: (u) => keypointSetFrom(images.get(u)?.keypoints), add, flat }
 }
 
 describe('trackDistanceThreshold', () => {
@@ -62,7 +63,7 @@ describe('trackDistanceThreshold', () => {
 describe('guidedExtendTracks', () => {
   it('lifts 2-view points by finding their keypoint at the projection', () => {
     const s = scene()
-    const stats = guidedExtendTracks({ points3d: s.points3d, cameras: cams, imageOf: s.imageOf, descOf: s.descOf,
+    const stats = guidedExtendTracks({ points3d: s.points3d, cameras: cams, keypointsOf: s.keypointsOf, descOf: s.descOf,
       viewIndex: s.viewIndex, addView: s.addView, gatePx: 3 })
     expect(stats.lifted).toBe(20)
     expect(s.points3d.slice(20).every((p) => p.views.get('c') === s.points3d.indexOf(p))).toBe(true)
@@ -76,7 +77,7 @@ describe('guidedExtendTracks', () => {
     const twin = s.flat.get('c').slice(25 * 128, 26 * 128)
     const idx = s.add('c', { x: kp.x + 1, y: kp.y }, twin)
     const arr = new Uint8Array((idx + 1) * 128); arr.set(s.flat.get('c')); arr.set(twin, idx * 128); s.flat.set('c', arr)
-    guidedExtendTracks({ points3d: s.points3d, cameras: cams, imageOf: s.imageOf, descOf: s.descOf,
+    guidedExtendTracks({ points3d: s.points3d, cameras: cams, keypointsOf: s.keypointsOf, descOf: s.descOf,
       viewIndex: s.viewIndex, addView: s.addView, gatePx: 3 })
     expect(p.views.has('c')).toBe(false)
     expect(s.points3d[26].views.has('c')).toBe(true)
@@ -86,7 +87,7 @@ describe('guidedExtendTracks', () => {
     const s = scene()
     // Point 30's keypoint in c is claimed by point 0's track (an unrelated point).
     s.viewIndex.get('c').set(30, s.points3d[0])
-    guidedExtendTracks({ points3d: s.points3d, cameras: cams, imageOf: s.imageOf, descOf: s.descOf,
+    guidedExtendTracks({ points3d: s.points3d, cameras: cams, keypointsOf: s.keypointsOf, descOf: s.descOf,
       viewIndex: s.viewIndex, addView: s.addView, gatePx: 3 })
     expect(s.points3d[30].views.has('c')).toBe(false)
   })
@@ -95,7 +96,7 @@ describe('guidedExtendTracks', () => {
     const s = scene()
     const off = 33 * 128
     s.flat.get('c').set(randomDesc(), off) // replace the true descriptor with noise
-    guidedExtendTracks({ points3d: s.points3d, cameras: cams, imageOf: s.imageOf, descOf: s.descOf,
+    guidedExtendTracks({ points3d: s.points3d, cameras: cams, keypointsOf: s.keypointsOf, descOf: s.descOf,
       viewIndex: s.viewIndex, addView: s.addView, gatePx: 3 })
     expect(s.points3d[33].views.has('c')).toBe(false)
   })
@@ -105,7 +106,7 @@ describe('auditGuidedAdditions', () => {
   it('separates surviving additions from the rest of the model', () => {
     const s = scene()
     const adds = []
-    guidedExtendTracks({ points3d: s.points3d, cameras: cams, imageOf: s.imageOf, descOf: s.descOf,
+    guidedExtendTracks({ points3d: s.points3d, cameras: cams, keypointsOf: s.keypointsOf, descOf: s.descOf,
       viewIndex: s.viewIndex, addView: s.addView, gatePx: 3, onAdd: (pt, uuid, kp) => adds.push({ uuid, kp }) })
     expect(adds).toHaveLength(20)
     // Five extended points were filtered away; the rest come back as fresh objects (BA).

@@ -45,6 +45,7 @@ import { packSparseCloud, unpackReconstructionResult } from '../core/sfm/resultC
 import { toMatchSpace } from '../core/features/siftDescriptors.js'
 import { SFM_TUNING } from '../core/tuning.js'
 import { packMatchPairs } from '../core/sfm/matchCodec.js'
+import { keypointSetFrom, keypointSetTransfer } from '../core/sfm/keypointSet.js'
 import {
   projectSparsePeakBreakdownBytes, sparseMemoryDecision, SPARSE_HEAP_FRACTION,
 } from '../core/sfm/memBudget.js'
@@ -1759,7 +1760,13 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
             // Sensor id lets BA share one focal across images on the same sensor
             // (self-calibration); null → the image is its own intrinsics group.
             sensorId: img.sensorId ?? null,
-            keypoints: (img.keypoints || []).map((kp) => ({ x: kp.x, y: kp.y, color: kp.color })),
+            // Typed arrays (core/sfm/keypointSet.js), transferred rather than cloned:
+            // ~20 B per keypoint instead of a 104 B object per keypoint per copy.
+            keypoints: (() => {
+              const set = keypointSetFrom(img.keypoints || [])
+              reconstructionTransfers.push(...keypointSetTransfer(set))
+              return set
+            })(),
             // Fiducial-mark observations (F4) — scan-pixel clicks the sfm ingest
             // uses to fit this image's scan→canonical affine. Spread to plain
             // objects (the Vue proxy can't be structured-cloned).
