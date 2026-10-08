@@ -324,6 +324,7 @@ export function useQualityReport() {
         maxDim: detectConfig.value?.maxDim ?? null,
         maxKeypoints: detectConfig.value?.maxKeypoints ?? null,
         kpCapHitPct: detectConfig.value?.kpCapHitPct ?? null,
+        guidedSkippedForMemory: !!recon.summary?.guidedExtension?.some?.((g) => g.skipped === 'memory'),
       })
       : null
 

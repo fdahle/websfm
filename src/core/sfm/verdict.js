@@ -78,6 +78,7 @@ const px = (v) => (v == null ? '—' : `${v.toFixed(1)} px`)
  * @property {number} [maxDim] detection long-edge cap, px (detectConfig)
  * @property {number} [kpCapHitPct] share of images that hit the keypoint cap, %
  * @property {number} [maxKeypoints] the keypoint cap itself (for the fix text)
+ * @property {boolean} [guidedSkippedForMemory] the preflight turned guided extension off
  */
 
 /**
@@ -190,6 +191,14 @@ export function buildVerdict(snapshot = {}) {
     add(depthLevel, 'depth-coverage',
       `Depth maps kept only ${pct(s.depthCoveragePct)} of pixels on average.`,
       'Increase the source-view count and check the intrinsics are right (a wrong focal wrecks depth); raising depth-map quality also helps on weak texture.')
+  }
+
+  // 9. A stage the memory preflight turned off so the run could finish (memBudget.js).
+  //    Not a defect in the model, but the run is not what was asked for.
+  if (s.guidedSkippedForMemory) {
+    add('yellow', 'memory-degraded',
+      'Guided track extension was skipped: with it the worker was projected past its memory ceiling.',
+      'The model is complete, with fewer ≥3-view tracks. To get it back, lower the keypoint cap (maxKeypoints) or the preselection neighbours, or reconstruct the block in parts.')
   }
 
   // ── Contributing causes ────────────────────────────────────────────────────

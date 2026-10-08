@@ -173,4 +173,10 @@ describe('buildVerdict', () => {
     })
     expect(codes(v2)).not.toContain('keypoint-cap')
   })
+
+  it('warns when the memory preflight skipped guided extension', () => {
+    const v = buildVerdict({ ...healthy(), guidedSkippedForMemory: true })
+    expect(v.level).toBe('yellow')
+    expect(codes(v)).toEqual(['memory-degraded'])
+  })
 })
