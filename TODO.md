@@ -236,9 +236,7 @@ ones are in HANDOVER. Ordered by expected impact.
   string + calibrated lens only); a camera without a sensor loses its refined k1
   unfolded; the composed radial bag is fitted about the final principal point only;
   `estimateUpFromViewingDirs` tilts a single-heading oblique block's DEM.
-- **Performance**: every 3D selection edit runs `persist()` over every cloud (> 1 GB
-  per stroke with two 25 M-point clouds) — debounce or write only the changed
-  cloud; selection overlay allocates ~16 B/selected point per stroke; LAS import
+- **Performance**: selection overlay allocates ~16 B/selected point per stroke; LAS import
   always allocates ~29 B/point of attributes and subsamples attributed clouds with a
   string key per point; `sparseMetrics` returns one object per point; restore reads
   DEM/ortho before knowing it needs them.

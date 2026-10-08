@@ -2,16 +2,23 @@
 // one project sidecar. The whitelist also validates persisted array types.
 const TYPES = { Uint8Array, Int8Array, Uint16Array, Int16Array, Uint32Array, Int32Array, Float32Array, Float64Array }
 
-export function packAttributes(attributes = {}, count) {
+// The field table packAttributes writes, without packing — what a save that reuses an
+// already-written attribute sidecar still has to record in its metadata.
+export function attributeLayout(attributes = {}, count) {
   const fields = []
   let size = 0
-  for (const [name, values] of Object.entries(attributes)) {
+  for (const [name, values] of Object.entries(attributes ?? {})) {
     const type = values.constructor.name
     if (!Object.hasOwn(TYPES, type) || values.length !== count) throw new Error(`Invalid cloud attribute: ${name}`)
     size = Math.ceil(size / 8) * 8
     fields.push({ name, type, offset: size })
     size += values.byteLength
   }
+  return { fields, size }
+}
+
+export function packAttributes(attributes = {}, count) {
+  const { fields, size } = attributeLayout(attributes, count)
   const bytes = new Uint8Array(size)
   for (const field of fields) {
     const values = attributes[field.name]

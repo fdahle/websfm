@@ -804,6 +804,16 @@ fiducials; self-calibration (A2) + fiducials (F4) are the code-side support.
 
 ## Done log (most recent first)
 
+- **2026-10-08 · Reconstruction saves write only the changed clouds.** Each
+  `persist()` re-serialised and rewrote every cloud, so a 3D lasso stroke cost
+  > 1 GB of Float64 widening, copying and writing with two 25 M-point clouds open.
+  Dense/mesh clouds whose typed arrays are the same objects as at the last committed
+  save (or as loaded) now keep their sidecar files: the binary document carries them
+  into the new generation and its GC keeps them. A reused file that has gone (another
+  tab's save) makes the writer refuse before writing and the store resend in full.
+  `utils/binaryDocument.js`, `utils/opfs.js`, `stores/reconstruction/savedCloudFiles.js`,
+  `cloudSerde.js` (metadata-only path). Browser check `PRJ-17`.
+
 - **2026-10-08 · Bundle-adjustment solver: instrumented and configurable.** Every
   `bundle_adjust` call now returns what its reduced solves did (Cholesky vs PCG
   converged / partial / fell back / not PD, CG iterations, size n; bundle.rs

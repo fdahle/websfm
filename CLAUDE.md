@@ -522,7 +522,16 @@ self-contained, file-based project format.
   dense/mesh `pos` is widened to Float64 to share the sparse sidecar format;
   `posType` retains computed Float32 storage without narrowing Float64 imports.
   Reconstruction version 3 commits immutable sidecar generations through metadata
-  (`binaryFiles`), while legacy inline/version-2 documents remain readable. Dense
+  (`binaryFiles`), while legacy inline/version-2 documents remain readable. **A save
+  writes only the clouds that changed**: `stores/reconstruction/savedCloudFiles.js`
+  remembers which committed files hold each dense/mesh cloud, keyed on the *identity*
+  of its typed arrays, and the next save carries those files into the new generation
+  (`{ reuse }`) instead of re-serialising. That rests on one invariant — **never write
+  into a dense/mesh cloud's arrays in place; an edit makes new arrays** (metadata —
+  name, visibility, style — may mutate freely, it is re-serialised every save). Inside
+  the lock the writer re-checks each reused file's size and returns `{ ok:false }`
+  rather than commit a dangling reference (another tab collected it); the store then
+  resends in full. Dense
   `nrm` (Float32 3N world-space normals, the Poisson mesh input — reused PatchMatch
   plane normals) and mesh `idx` are extra per-cloud sidecar bins (`nrm`/`idx` keys),
   **absent on old projects ⇒ undefined, do NOT heal** (legacy object-shape dense

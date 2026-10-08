@@ -24,6 +24,7 @@ import { depthMapBytes } from '../core/dense/depthMapCodec.js'
 import { distortionOf } from '../core/sfm/distortion.js'
 import { parseColmapModel, parseColmapModelBin, readColmapModel, makeNameResolver, colmapToSparse } from '../core/io/colmapModel.js'
 import { serializeCloud, deserializeCloud, legacyDeserializeCloud } from './reconstruction/cloudSerde.js'
+import { createSavedCloudFiles } from './reconstruction/savedCloudFiles.js'
 import { createDepthMapCache } from './reconstruction/depthMapCache.js'
 import { createGeoreferencing } from './reconstruction/georeferencing.js'
 import { createScaling } from './reconstruction/scaling.js'
@@ -428,9 +429,13 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
   const isPersisting = () => projects.isPersisting
 
   // Serialise every cloud to the on-disk shape (metadata + binary buffers).
-  function serialize() {
+  // Committed sidecar files per unchanged dense/mesh cloud (savedCloudFiles.js).
+  const savedCloudFiles = createSavedCloudFiles()
+
+  // `reuse[i]` (optional) — files to point cloud i at instead of re-serialising it.
+  function serialize(reuse = null) {
     return {
-      clouds: clouds.value.map(serializeCloud),
+      clouds: clouds.value.map((c, i) => serializeCloud(c, { reuse: reuse?.[i] ?? null })),
       // Which sparse cloud downstream stages consume (MC). Absent in legacy docs ⇒
       // restore falls back to the first sparse cloud.
       mainSparseId: mainSparseId.value,
@@ -449,11 +454,27 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     }
   }
 
+  // Writes only the clouds whose heavy data changed since the last committed save; the
+  // rest keep their files (savedCloudFiles.js). If a reused file has gone — another tab
+  // saved this project in between — the saver writes nothing and this resends in full.
   async function persist() {
     if (!isPersisting()) return false
+    const projectId = projects.currentProjectId
     try {
-      await opfs.saveReconstruction(projects.currentProjectId, serialize())
-      return true
+      for (const full of [false, true]) {
+        const list = clouds.value
+        const reuse = full ? null : list.map((c) => savedCloudFiles.lookup(c, projectId))
+        const res = await opfs.saveReconstruction(projectId, serialize(reuse))
+        if (res?.ok === false) { savedCloudFiles.clear(); continue }
+        if (res?.files) for (const c of list) savedCloudFiles.remember(c, projectId, res.files[c.id])
+        const reused = reuse?.filter(Boolean).length ?? 0
+        if (reused) {
+          log(`Saved the reconstruction — ${list.length - reused} cloud(s) written, ${reused} unchanged kept`,
+            'debug', 'Reconstruction')
+        }
+        return true
+      }
+      return false
     } catch {
       return false
     }
@@ -2002,6 +2023,10 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
         : []
 
     clouds.value = raw.map((c) => (c.buffers ? deserializeCloud(c, makeCloudId) : legacyDeserializeCloud(c, makeCloudId)))
+    // The arrays just read ARE the committed files' contents, so the first save after
+    // opening need not rewrite them (a v3 document only; legacy shapes carry no list).
+    savedCloudFiles.clear()
+    raw.forEach((c, i) => { if (c.savedFiles) savedCloudFiles.remember(clouds.value[i], projectId, c.savedFiles) })
     for (const c of clouds.value) {
       if (!c.attributeError) continue
       log(`Cloud "${c.name}": point attributes could not be restored (${c.attributeError}) — `
