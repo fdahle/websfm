@@ -63,7 +63,7 @@ describe('depthMapForImage — coarse-to-fine pyramid (Step 2)', () => {
   const makeMock = () => {
     const calls = []
     const fn = async (g, w, h, k, srcs, opts) => {
-      calls.push({ w, h, iters: opts.iterations, seed: opts.seedDepth })
+      calls.push({ w, h, iters: opts.iterations, seed: opts.seedDepth, perturbStart: opts.perturbStart })
       return { depth: new Float32Array(w * h).fill(7), cost: new Float32Array(w * h).fill(0.1), width: w, height: h }
     }
     return { fn, calls }
@@ -74,6 +74,8 @@ describe('depthMapForImage — coarse-to-fine pyramid (Step 2)', () => {
     const out = await depthMapForImage(ref, sources, points, { coarseLong: 10 }, fn)
     // 40 → 20 → 10 ⇒ 3 levels.
     expect(calls.map((c) => c.w)).toEqual([10, 20, 40])
+    // Refinement continues across levels (5 / 4 / 3 sweeps) instead of restarting.
+    expect(calls.map((c) => c.perturbStart)).toEqual([1, 0.125, 0.03125])
     expect(out.width).toBe(W)
     expect(out.height).toBe(H)
   })

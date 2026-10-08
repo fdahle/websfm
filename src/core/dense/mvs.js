@@ -16,6 +16,7 @@ import { planeCostRef, aggregateValidCosts } from './planeCost.js'
 import { DENSE_TUNING } from '../tuning.js'
 import { normalizeRegion, regionContains, pointsInRegion } from '../products/region.js'
 import { DEPTHMAP_DEFAULTS } from '../defaults.user.js'
+import { levelPerturbStarts } from './refineSchedule.js'
 import {
   cameraCenter, projectWithDepth, triangulationAngle, scaleK, rgbaToGray, toScaledPx,
 } from '../sfm/geometry.js'
@@ -263,6 +264,8 @@ export async function depthMapForImage(ref, sources, points, settings = {}, comp
   const totalWeight = levelWeight.reduce((a, b) => a + b, 0) || 1
   let doneWeight = 0
   let dm = null, prevDepth = null, prevW = 0, prevH = 0
+  // Refinement continues across levels rather than restarting (refineSchedule.js).
+  const perturbStarts = levelPerturbStarts(levels.map((_, li) => iterations + (levels.length - 1 - li)))
   for (let li = 0; li < levels.length; li++) {
     const L = levels[li]
     let seedDepth
@@ -275,7 +278,7 @@ export async function depthMapForImage(ref, sources, points, settings = {}, comp
     const levelIters = iterations + (levels.length - 1 - li) // coarsest gets the most
     dm = await computeDepthMapFn(L.gray, L.w, L.h, L.K, L.srcs, {
       depthMin, depthMax, seedDepth, window, iterations: levelIters, bestK,
-      seed: (baseSeed ^ (li * 0x9e3779b1)) >>> 0,
+      seed: (baseSeed ^ (li * 0x9e3779b1)) >>> 0, perturbStart: perturbStarts[li],
     })
     if (!dm) return null
     prevDepth = dm.depth; prevW = L.w; prevH = L.h

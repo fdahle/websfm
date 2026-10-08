@@ -218,9 +218,6 @@ Related evidence: `VERIFICATION.csv` ▸ `FID-08` (the TMA set's implied 253 mm)
 ### RV — 2026-10-03 code + maths review: verified, not yet fixed
 Each item was confirmed against the code (most with a measured number); the fixed
 ones are in HANDOVER. Ordered by expected impact.
-- **PatchMatch refinement schedule** decays from the full depth range and restarts
-  per pyramid level; with 3 iterations the finest proposal is still ~12 % of range.
-  Perturb relative to the current depth (COLMAP).
 - **OPK convention**: `opkMatrix` is Rx·Ry·Rz used as object→photo; Pix4D documents
   it as image→object. Pin with a real Pix4D/Metashape fixture before trusting OPK
   orientation priors (κ flips on nadir if transposed).

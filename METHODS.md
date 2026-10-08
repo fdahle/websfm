@@ -1173,6 +1173,19 @@ support planes, in `core/dense/mvs.js` + `crates/reconstruction/src/mvs.rs`.
   views (best-K aggregation over neighbours). Optional `filterDepthMap`
   (median/speckle cleanup).
 
+  **Refinement schedule** (`core/dense/refineSchedule.js`): each sweep proposes a
+  random normal, a depth-only step and a joint step at scale `s = s₀·0.5^it`; the depth
+  step is `±0.5·s·min(d, d_max − d_min)`. Relative to the pixel's **own** depth `d`, as
+  COLMAP's `PerturbDepth`, because a step sized by the global range is useless to a near
+  pixel on a deep (ground-level, oblique) scene; bounded by the range so a shallow scene
+  keeps its finer steps. A coarse-to-fine pyramid **continues** the decay rather than
+  restarting it: each finer level starts at `s₀ = 2×` the scale the coarser level ended
+  on (headroom for the upsampled seed, whose error is about one coarse pixel). Measured
+  on a synthetic 5:1-depth plane through the real kernel: pixels within 1 % of the
+  true depth 82.5 → 91.9 % (3-level pyramid), 65.8 → 76.2 % (single level); a shallow
+  near-nadir plane is unchanged at a single level and slightly better through the
+  pyramid (`patchmatchSchedule.test.js`).
+
   Per source the cost is ZNCC (`1 − ncc`, in [0, 2]). Best-K averages only
   sources that *measured* the pixel: a warp leaving the source, a masked texel or
   <4 overlapping samples returns a no-measurement sentinel and is excluded. A flat

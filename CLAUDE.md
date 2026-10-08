@@ -1524,7 +1524,13 @@ propagate covariance rather than retaining stale numeric sigmas.
   with the neighbour's **plane** — `cand_d = depth[j]·(n·ray_j)/(n·ray_i)` — never
   the neighbour's raw depth (that only holds fronto-parallel and is the depth-map
   "freckle" bug; a slanted-plane convergence test lives in `planeCost.test.js`). The
-  ZNCC half-window cap is 5 (11×11) in both kernels — keep them equal.
+  ZNCC half-window cap is 5 (11×11) in both kernels — keep them equal. The **random
+  refinement** is in the same two sweeps and follows `core/dense/refineSchedule.js`:
+  the depth step is relative to `min(depth, range)` and its scale continues across
+  pyramid levels (`perturbStart`; mvs.rs derives each sweep's scale itself, the GPU
+  receives it in `Ctrl.scale`). `patchmatchSchedule.test.js` runs the real WASM kernel
+  on synthetic deep and shallow planes and pins the depth accuracy — the A/B check
+  cannot see a schedule change, since it compares costs, not depths.
 - After any `crates/` change: `npm run build:wasm`, commit `src/wasm/*` with the
   source change.
 - **`cargo test` does NOT exercise the SIMD kernels.** `simd128` is enabled for the

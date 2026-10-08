@@ -199,6 +199,10 @@ pub(crate) fn agg_cost(
         plane_cost(refimg, rw, rh, rfx, rfy, rcx, rcy, src, u, v, depth, n, radius)), best_k)
 }
 
+// Depth-proposal half-span as a fraction of the current depth at refinement scale 1
+// (COLMAP: perturbation 1/2^(iter+1) ⇒ ±50 % on the first sweep). Same in patchmatch.wgsl.
+const DEPTH_PERTURB_REL: f64 = 0.5;
+
 #[wasm_bindgen]
 #[allow(clippy::too_many_arguments)]
 pub fn compute_depth_map(
@@ -208,6 +212,7 @@ pub fn compute_depth_map(
     depth_min: f32, depth_max: f32,
     window: u32, iterations: u32, best_k: u32,
     seed: u32,
+    perturb_start: f32,
 ) -> Vec<f32> {
     let rw = ref_w as usize;
     let rh = ref_h as usize;
@@ -286,9 +291,18 @@ pub fn compute_depth_map(
     }
 
     // Red-black checkerboard PatchMatch sweeps.
+    // Refinement scale s = perturb_start · 0.5^it. Depth proposals span
+    // ±DEPTH_PERTURB_REL·s·min(depth, range): the pixel's OWN depth (COLMAP's
+    // PerturbDepth) on a deep scene, where a range-sized step is useless to a near pixel
+    // (it clamps or lands far off) and left near surfaces unrefined; the range on a
+    // shallow one, where ±50 % of depth would be coarser than the search interval itself. perturb_start continues the decay
+    // across pyramid levels (core/dense/refineSchedule.js) instead of restarting each
+    // seeded level at full scale. ≤ 0 / NaN ⇒ 1 (an unseeded, single-level start).
+    // Kept in lockstep with patchmatch.wgsl.
+    let s0 = if perturb_start > 0.0 { perturb_start as f64 } else { 1.0 };
     let iters = iterations.max(1);
     for it in 0..iters {
-        let shrink = 0.5f64.powi(it as i32); // refinement magnitude decays
+        let shrink = s0 * 0.5f64.powi(it as i32); // refinement magnitude decays
         for parity in 0..2u32 {
             for v in 0..rh {
                 for u in 0..rw {
@@ -332,7 +346,7 @@ pub fn compute_depth_map(
                     // the two and converges slowly, so also try the two decoupled
                     // hypotheses COLMAP uses: (a) keep depth, draw a fresh random
                     // normal; (b) keep normal, perturb depth only.
-                    let dspan = (dmax - dmin) * 0.5 * shrink;
+                    let dspan = best_d.min(dmax - dmin) * DEPTH_PERTURB_REL * shrink;
                     // (a) current depth + random new normal.
                     let rand_n = rand_normal(&mut rng);
                     let c = agg_cost(ref_gray, rw, rh, rfx, rfy, rcx, rcy, &srcs, bk, u, v, best_d, &rand_n, radius);

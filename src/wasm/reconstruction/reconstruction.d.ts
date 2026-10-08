@@ -69,7 +69,7 @@
  */
 export function bundle_adjust(cameras_flat: Float32Array, intrinsics_flat: Float32Array, pts_flat: Float32Array, obs_flat: Float32Array, observation_weight: Float32Array, anchor_flat: Float32Array, anchor_weight: Float32Array, camera_prior_flat: Float32Array, max_iters: number, sensor_of_cam: Int32Array, refine_mask: number, solver_flat: Float32Array): Float32Array;
 
-export function compute_depth_map(ref_gray: Uint8Array, ref_w: number, ref_h: number, ref_k: Float32Array, src_gray: Uint8Array, src_dims: Uint32Array, src_k: Float32Array, src_rel: Float32Array, src_mask: Uint8Array, seed_depth: Float32Array, depth_min: number, depth_max: number, window: number, iterations: number, best_k: number, seed: number): Float32Array;
+export function compute_depth_map(ref_gray: Uint8Array, ref_w: number, ref_h: number, ref_k: Float32Array, src_gray: Uint8Array, src_dims: Uint32Array, src_k: Float32Array, src_rel: Float32Array, src_mask: Uint8Array, seed_depth: Float32Array, depth_min: number, depth_max: number, window: number, iterations: number, best_k: number, seed: number, perturb_start: number): Float32Array;
 
 /**
  * Recover camera pose from the essential matrix E using a cheirality check.
@@ -128,7 +128,7 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly bundle_adjust: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number, s: number, t: number, u: number, v: number) => [number, number];
-    readonly compute_depth_map: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number, s: number, t: number, u: number, v: number, w: number, x: number) => [number, number];
+    readonly compute_depth_map: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number, s: number, t: number, u: number, v: number, w: number, x: number, y: number) => [number, number];
     readonly recover_pose: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number];
     readonly solve_pnp: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number];
     readonly triangulate_dlt: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number];

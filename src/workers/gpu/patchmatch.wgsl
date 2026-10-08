@@ -40,7 +40,12 @@ struct Src {
   r0 : vec4<f32>, r1 : vec4<f32>, r2 : vec4<f32>, t : vec4<f32>,
 };
 
-struct Ctrl { mode : u32, parity : u32, iter : u32, _pad : u32 };
+// `scale` is the refinement scale for this sweep, perturbStart·0.5^iter, computed on
+// the CPU (depthMapGpu.js) exactly as mvs.rs computes it.
+struct Ctrl { mode : u32, parity : u32, iter : u32, scale : f32 };
+
+// Depth-proposal half-span as a fraction of the current depth at scale 1 (mvs.rs).
+const DEPTH_PERTURB_REL : f32 = 0.5;
 
 @group(0) @binding(0) var<uniform> params : Params;
 @group(0) @binding(1) var refTex  : texture_2d<f32>;
@@ -219,8 +224,10 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
 
   // 2. Refinement: decoupled (a) random normal, (b) depth-only, then (c) joint.
   var rng = seedRng(i, it + 1u, ctrl.parity + 1u, params.seed);
-  let shrink = pow(0.5, f32(it));
-  let dspan = (params.depthMax - params.depthMin) * 0.5 * shrink;
+  // Relative to this pixel's depth, decaying across iterations AND pyramid levels
+  // (see mvs.rs); kept in lockstep with mvs.rs.
+  let shrink = ctrl.scale;
+  let dspan = min(bestD, params.depthMax - params.depthMin) * DEPTH_PERTURB_REL * shrink;
   // (a) current depth + random new normal.
   let randN = randNormal(&rng);
   let ca = aggCost(u, v, bestD, randN);

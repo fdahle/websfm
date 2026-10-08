@@ -804,6 +804,16 @@ fiducials; self-calibration (A2) + fiducials (F4) are the code-side support.
 
 ## Done log (most recent first)
 
+- **2026-10-08 · PatchMatch refinement: depth-relative steps, continued across pyramid
+  levels.** The random depth step was a fraction of the global range (useless to near
+  pixels on a deep scene) and every pyramid level restarted at full scale. Now the step
+  is `±0.5·s·min(depth, range)` and each finer level starts at twice the scale the
+  coarser one ended on (`core/dense/refineSchedule.js`; `mvs.rs` + `patchmatch.wgsl` in
+  lockstep, the GPU's scale in `Ctrl.scale`). Synthetic, real WASM kernel
+  (`patchmatchSchedule.test.js`): 5:1-depth plane within 1 % 82.5 → 91.9 % (pyramid),
+  65.8 → 76.2 % (single level); shallow plane unchanged / slightly better. WGSL validated
+  with naga only; Chrome run owed (`DEN-06`, `DEN-16`).
+
 - **2026-10-08 · Reconstruction saves write only the changed clouds.** Each
   `persist()` re-serialised and rewrote every cloud, so a 3D lasso stroke cost
   > 1 GB of Float64 widening, copying and writing with two 25 M-point clouds open.

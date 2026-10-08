@@ -423,14 +423,16 @@ export async function bundleAdjust(cameras, intrinsics, points3d, observations, 
 //             present, is a length-w*h 0/1 LUT (1 = excluded frame/fiducial) so the
 //             ZNCC match skips a source's border instead of falsely correlating to it.
 //   opts:     { depthMin, depthMax, seedDepth?: Float32Array(refW*refH),
-//               window=3, iterations=3, bestK=3, seed=1 }  (the dense pipeline passes window 3)
+//               window=3, iterations=3, bestK=3, seed=1, perturbStart=1 }  (the dense pipeline
+//               passes window 3; perturbStart is the refinement scale of the first sweep —
+//               core/dense/refineSchedule.js)
 // Returns { depth: Float32Array, cost: Float32Array, width, height } (cost: lower
 // is more confident; depth in the reconstruction's up-to-scale world units).
 export async function computeDepthMap(refGray, refW, refH, refK, sources, opts = {}) {
   await ensureWasm()
   const {
     depthMin, depthMax, seedDepth = new Float32Array(0),
-    window = 3, iterations = 3, bestK = 3, seed = 1,
+    window = 3, iterations = 3, bestK = 3, seed = 1, perturbStart = 1,
   } = opts
   const n = sources.length
   if (n === 0 || refW * refH === 0) return null
@@ -460,7 +462,7 @@ export async function computeDepthMap(refGray, refW, refH, refK, sources, opts =
     srcGray, srcDims, srcK, srcRel, srcMask,
     seedDepth,
     depthMin, depthMax,
-    window, iterations, bestK, seed >>> 0,
+    window, iterations, bestK, seed >>> 0, perturbStart,
   )
   const npix = refW * refH
   if (!raw || raw.length < npix * 5) return null
