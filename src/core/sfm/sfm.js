@@ -231,6 +231,23 @@ async function reconstructSingleModel(input, hooks = {}) {
 
   const t0 = performance.now()
   const stageTimes = {} // label → ms
+  // What every bundle adjustment's linear solves did (bundle.rs SolveStats), summed for
+  // the run record: the PCG-vs-Cholesky decision (TODO ▸ MEM ▸ PCG) is made from these.
+  const baSolverTotals = { calls: 0, ms: 0, maxN: 0, solves: 0, cholesky: 0, pcgConverged: 0,
+    pcgPartial: 0, pcgFallback: 0, pcgNotPd: 0, pcgIters: 0, pcgItersMax: 0 }
+  const noteBaSolver = (label, result) => {
+    const s = result?.solver
+    if (!s) return
+    const T = baSolverTotals
+    T.calls++; T.ms += result.ms ?? 0; T.maxN = Math.max(T.maxN, s.n)
+    for (const k of ['solves', 'cholesky', 'pcgConverged', 'pcgPartial', 'pcgFallback', 'pcgNotPd', 'pcgIters']) T[k] += s[k]
+    T.pcgItersMax = Math.max(T.pcgItersMax, s.pcgItersMax)
+    const pcg = s.pcgConverged + s.pcgPartial + s.pcgFallback + s.pcgNotPd
+    log(`${label} solver — n ${s.n}, ${s.solves} solve(s): `
+      + (pcg ? `PCG ${s.pcgConverged} converged / ${s.pcgPartial} partial / ${s.pcgFallback} → Cholesky / `
+        + `${s.pcgNotPd} not PD, ${s.pcgIters} CG it (max ${s.pcgItersMax})` : `${s.cholesky} Cholesky`)
+      + `; ${((result.ms ?? 0) / 1000).toFixed(1)}s`, 'debug', 'Reconstruction')
+  }
   let stageMark = t0
   const markStage = (label) => {
     const now = performance.now()
@@ -826,7 +843,9 @@ async function reconstructSingleModel(input, hooks = {}) {
       }
 
       const result = await bundleAdjust(camList, kList, points3d, observations,
-        { maxIters: iters, refineIntrinsics: refineMode, sensorOfCam, ...(cameraPriors ? { cameraPriors } : {}) })
+        { maxIters: iters, refineIntrinsics: refineMode, sensorOfCam, solver: cfg.baSolver,
+          ...(cameraPriors ? { cameraPriors } : {}) })
+      noteBaSolver(label, result)
       if (!result) {
         log(`${label} returned no result (skipped)`, 'warn', 'Reconstruction')
         return
@@ -1146,8 +1165,9 @@ async function reconstructSingleModel(input, hooks = {}) {
         const result = await bundleAdjust(camList, camList.map((c) => c.K), points3d, observations, {
           maxIters: baIterations, refineIntrinsics: 'none',
           sensorOfCam: uuidList.map((u) => sensorIntByUuid.get(u) ?? -1),
-          cameraPriors: constrained.priors,
+          cameraPriors: constrained.priors, solver: cfg.baSolver,
         })
+        noteBaSolver(`camera-prior bundle adjustment (round ${round + 1})`, result)
         if (!result) return
         if (!cameraPriorReprojectionAccepts(result)) {
           log(`camera-prior bundle adjustment REJECTED — reprojection RMS `
@@ -1221,7 +1241,8 @@ async function reconstructSingleModel(input, hooks = {}) {
 
         const result = await bundleAdjust(camList, kList, [...points3d, ...anchorPts], observations,
           { maxIters: baIterations, refineIntrinsics: 'none', sensorOfCam, gcpAnchors: anchors,
-            cameraPriors: constrainedCameras?.priors ?? [] })
+            cameraPriors: constrainedCameras?.priors ?? [], solver: cfg.baSolver })
+        noteBaSolver(`GCP-anchored bundle adjustment (round ${round + 1})`, result)
         if (!result) {
           log('GCP-anchored bundle adjustment returned no result (skipped)', 'warn', 'Reconstruction')
           return
@@ -1589,6 +1610,13 @@ async function reconstructSingleModel(input, hooks = {}) {
     log(`track lengths — ${tracks2} ×2-view, ${tracks3} ×3-view, ${tracks4} ×4+-view`, 'info', 'Reconstruction')
     log(`total time ${(totalMs / 1000).toFixed(1)}s `
       + `(${Object.entries(stageTimes).map(([k, v]) => `${k} ${(v / 1000).toFixed(1)}s`).join(', ')})`, 'info', 'Reconstruction')
+    if (baSolverTotals.calls) {
+      const T = baSolverTotals
+      log(`bundle adjustment solver — ${T.calls} BA call(s), ${(T.ms / 1000).toFixed(1)}s, largest n ${T.maxN}; `
+        + `${T.solves} solves: ${T.cholesky} Cholesky, PCG ${T.pcgConverged} converged / ${T.pcgPartial} partial / `
+        + `${T.pcgFallback} → Cholesky / ${T.pcgNotPd} not PD (${T.pcgIters} CG it, max ${T.pcgItersMax}); `
+        + `policy ${JSON.stringify(cfg.baSolver ?? {})}`, 'info', 'Reconstruction')
+    }
 
     // Q3: persistable run summary so successive runs are honestly comparable
     // ("did it improve" becomes a number, not a feeling). Persisted next to
@@ -1691,6 +1719,7 @@ async function reconstructSingleModel(input, hooks = {}) {
       // Per-stage wall clock. Already measured for the debug log; persisted because
       // "is Stage X negligible?" is a question several TODO items ask of real runs.
       timings: { ...stageTimes, totalMs: performance.now() - t0 },
+      baSolver: { ...baSolverTotals, policy: { ...(cfg.baSolver ?? {}) } },
       finalTrackCleanup: {
         applied: finalTrackPrune.applied,
         removedTwoView: finalTrackPrune.removed,

@@ -65,6 +65,11 @@ project:
 - `dev`: use the Vite dev server instead of a frozen build (faster to start). Any
   source edit then reloads the page mid-run.
 - `build <dir>`: reuse an earlier snapshot. `headed`: show the browser window.
+- `recon.baSolver`: the bundle-adjustment linear-solver policy (`SFM_TUNING.baSolver`),
+  e.g. variants `{ "pcgMinN": 1e9 }` (Cholesky only), `{}` (default PCG) and
+  `{ "pcgRelTol": 1e-6, "pcgMaxIter": 200, "pcgAcceptPartial": true }` (inexact).
+  The result JSON carries `baSolver` (solves, CG iterations, fallbacks, BA seconds)
+  and `timings`.
 - `recon.posePriors: false`: disable every camera pose for that run. That includes the
   EXIF GNSS positions the app imports automatically, which otherwise constrain bundle
   adjustment as camera priors.

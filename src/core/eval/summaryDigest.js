@@ -178,6 +178,7 @@ export function buildProjectDigest(input = {}) {
         }
         : null,
       timings: summary?.timings ? { ...summary.timings } : null,
+      baSolver: summary?.baSolver ? { ...summary.baSolver } : null,
     },
     run: {
       sparse: summary ? {
@@ -309,7 +310,7 @@ function diagnosticsLines(d) {
   if (!d) return out
   const {
     seed, attempts, gates, selfCal, intrinsics, selfCalDistortion,
-    matchGates, timings, secondaryRecovery, fingerprints, trackCompletion,
+    matchGates, timings, secondaryRecovery, fingerprints, trackCompletion, baSolver,
   } = d
 
   if (seed) {
@@ -416,6 +417,14 @@ function diagnosticsLines(d) {
       .map(([k, v]) => `${k} ${(v / 1000).toFixed(1)}s`)
     out.push(`- **Sparse timings**: total ${((timings.totalMs ?? 0) / 1000).toFixed(1)}s`
       + `${parts.length ? ` — ${parts.join(', ')}` : ''}`)
+  }
+  if (baSolver?.calls) {
+    const b = baSolver
+    const policy = Object.entries(b.policy ?? {}).filter(([, v]) => v != null).map(([k, v]) => `${k} ${v}`)
+    out.push(`- **BA solver**: ${b.calls} calls, ${((b.ms ?? 0) / 1000).toFixed(1)}s, largest n ${b.maxN}; `
+      + `${b.solves} solves — ${b.cholesky} Cholesky, PCG ${b.pcgConverged} converged / ${b.pcgPartial} partial / `
+      + `${b.pcgFallback} → Cholesky (${b.pcgIters} CG it, max ${b.pcgItersMax}); `
+      + `policy ${policy.length ? policy.join(', ') : 'default'}`)
   }
   return out
 }

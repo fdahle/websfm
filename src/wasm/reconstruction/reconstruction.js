@@ -52,11 +52,13 @@
  *   1 = focal scale s, 2 = principal point (dcx,dcy), 4 = radial k1, 8 = k2, 16 = k3.
  *   0 ⇒ poses+points only. The per-group param vector is the ordered subset
  *   `[s?, dcx?, dcy?, k1?, k2?, k3?]` (kdim ≤ 6). fy stays locked to fx (single scale).
+ * - `solver_flat`: reduced-system policy `[pcg_min_n, rel_tol, max_iter, accept_partial]`;
+ *   empty / NaN slots ⇒ `SolverOpts::DEFAULT` (see there).
  *
  * # Output
  * `[cameras_flat(n_cam×12), pts_flat(n_pts×3), intrinsics_flat(n_cam×7),
  *   cost_before, cost_after, anchor_rms_after, camera_prior_rms_after,
- *   cost_trace…]` — the returned
+ *   solver stats (BA_STATS_LEN), cost_trace…]` — the returned
  * intrinsics are the **refined** effective K per camera as `[fx,fy,cx,cy,k1,k2,k3]`
  * (radial coeffs 0 for the bits not set in `refine_mask`, identical to the input K
  * when `refine_mask == 0`); cost_before/cost_after are RMS reprojection error in
@@ -74,9 +76,10 @@
  * @param {number} max_iters
  * @param {Int32Array} sensor_of_cam
  * @param {number} refine_mask
+ * @param {Float32Array} solver_flat
  * @returns {Float32Array}
  */
-export function bundle_adjust(cameras_flat, intrinsics_flat, pts_flat, obs_flat, observation_weight, anchor_flat, anchor_weight, camera_prior_flat, max_iters, sensor_of_cam, refine_mask) {
+export function bundle_adjust(cameras_flat, intrinsics_flat, pts_flat, obs_flat, observation_weight, anchor_flat, anchor_weight, camera_prior_flat, max_iters, sensor_of_cam, refine_mask, solver_flat) {
     const ptr0 = passArrayF32ToWasm0(cameras_flat, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
     const ptr1 = passArrayF32ToWasm0(intrinsics_flat, wasm.__wbindgen_malloc);
@@ -95,10 +98,12 @@ export function bundle_adjust(cameras_flat, intrinsics_flat, pts_flat, obs_flat,
     const len7 = WASM_VECTOR_LEN;
     const ptr8 = passArray32ToWasm0(sensor_of_cam, wasm.__wbindgen_malloc);
     const len8 = WASM_VECTOR_LEN;
-    const ret = wasm.bundle_adjust(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4, ptr5, len5, ptr6, len6, ptr7, len7, max_iters, ptr8, len8, refine_mask);
-    var v10 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
+    const ptr9 = passArrayF32ToWasm0(solver_flat, wasm.__wbindgen_malloc);
+    const len9 = WASM_VECTOR_LEN;
+    const ret = wasm.bundle_adjust(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4, ptr5, len5, ptr6, len6, ptr7, len7, max_iters, ptr8, len8, refine_mask, ptr9, len9);
+    var v11 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
     wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
-    return v10;
+    return v11;
 }
 
 /**

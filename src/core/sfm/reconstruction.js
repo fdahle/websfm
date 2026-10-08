@@ -1,5 +1,6 @@
 import init, { recover_pose, triangulate_dlt, solve_pnp, bundle_adjust, compute_depth_map }
   from '../../wasm/reconstruction/reconstruction.js'
+import { SFM_TUNING } from '../tuning.js'
 
 let initPromise = null
 function ensureWasm() {
@@ -280,9 +281,11 @@ export async function solvePnp(pts3d, pts2d, K, opts = {}) {
 //                       position weights and orientation precision are inverse
 //                       variances (orientation is expressed in radians).
 // Returns { cameras, points3d, intrinsics, costBefore, costAfter, costTrace,
-//   anchorRmsAfter, cameraPriorRmsAfter } — `intrinsics` is the refined effective K per camera
+//   anchorRmsAfter, cameraPriorRmsAfter, solver, ms } — `intrinsics` is the refined effective K per camera
 // `{ fx, fy, cx, cy, k1, k2, k3 }` (radial coeffs 0 for terms not refined); anchorRmsAfter
-// is the RMS anchor residual in world units (0 when there are no anchors).
+// is the RMS anchor residual in world units (0 when there are no anchors). `solver` is
+// what the reduced solves did (see BA_SOLVER_KEYS / bundle.rs SolveStats) and `ms` the
+// call's wall clock. `opts.solver` overrides the solver policy (SFM_TUNING.baSolver).
 const REFINE_BIT = { f: 1, cxcy: 2, k1: 4, k2: 8, k3: 16 }
 // Parse a refine-terms string into the crate's bitmask. Unknown / 'none' tokens
 // contribute nothing (so 'none', '', undefined → 0).
@@ -292,11 +295,23 @@ export function refineModeMask(spec) {
   for (const tok of String(spec).split(',')) mask |= REFINE_BIT[tok.trim()] ?? 0
   return mask
 }
+// The fixed solver-stats block bundle.rs writes after the four scalars (BA_STATS_LEN).
+export const BA_SOLVER_KEYS = ['n', 'solves', 'cholesky', 'pcgConverged', 'pcgPartial',
+  'pcgFallback', 'pcgNotPd', 'pcgIters', 'pcgItersMax']
+
+// bundle.rs `solver_flat`; NaN keeps that slot's crate default.
+export function baSolverFlat(solver = {}) {
+  const num = (v) => (v == null || v === '' ? NaN : Number(v))
+  const { pcgMinN, pcgRelTol, pcgMaxIter, pcgAcceptPartial } = solver ?? {}
+  return Float32Array.of(num(pcgMinN), num(pcgRelTol), num(pcgMaxIter),
+    pcgAcceptPartial == null ? NaN : (pcgAcceptPartial ? 1 : 0))
+}
+
 export async function bundleAdjust(cameras, intrinsics, points3d, observations, opts = {}) {
   await ensureWasm()
   const {
     maxIters = 30, refineIntrinsics = 'none', sensorOfCam = null,
-    gcpAnchors = [], cameraPriors = [],
+    gcpAnchors = [], cameraPriors = [], solver = SFM_TUNING.baSolver,
   } = opts
   const refineMode = refineModeMask(refineIntrinsics)
   const nCam = cameras.length
@@ -355,21 +370,25 @@ export async function bundleAdjust(cameras, intrinsics, points3d, observations, 
     sensorFlat[c] = Number.isInteger(id) ? id : -1
   }
 
+  const tCall = performance.now()
   const raw = bundle_adjust(
     camFlat, kFlat, ptsFlat, obsFlat, obsWFlat, anchorFlat, anchorWFlat, cameraPriorFlat,
-    maxIters, sensorFlat, refineMode,
+    maxIters, sensorFlat, refineMode, baSolverFlat(solver),
   )
+  const ms = performance.now() - tCall
   // Layout: cameras(nCam×12), points(nPts×3), intrinsics(nCam×7 = fx,fy,cx,cy,k1,k2,k3),
-  // costBefore, costAfter, anchorRmsAfter, cameraPriorRmsAfter, then a variable-length per-iteration
-  // RMS convergence trace.
+  // costBefore, costAfter, anchorRmsAfter, cameraPriorRmsAfter, the solver stats
+  // (BA_SOLVER_KEYS), then a variable-length per-iteration RMS convergence trace.
   const intrBase = nCam * 12 + nPts * 3
   const base = intrBase + nCam * 7
-  if (!raw || raw.length < base + 4) return null
+  const traceBase = base + 4 + BA_SOLVER_KEYS.length
+  if (!raw || raw.length < traceBase) return null
   const costBefore = raw[base]
   const costAfter  = raw[base + 1]
   const anchorRmsAfter = raw[base + 2]
   const cameraPriorRmsAfter = raw[base + 3]
-  const costTrace  = raw.length > base + 4 ? Array.from(raw.slice(base + 4)) : []
+  const solverStats = Object.fromEntries(BA_SOLVER_KEYS.map((k, i) => [k, raw[base + 4 + i]]))
+  const costTrace  = raw.length > traceBase ? Array.from(raw.slice(traceBase)) : []
 
   const outCameras = cameras.map((_, c) => {
     const b = c * 12
@@ -392,6 +411,7 @@ export async function bundleAdjust(cameras, intrinsics, points3d, observations, 
   return {
     cameras: outCameras, points3d: outPoints, intrinsics: outIntrinsics,
     costBefore, costAfter, costTrace, anchorRmsAfter, cameraPriorRmsAfter,
+    solver: solverStats, ms,
   }
 }
 
