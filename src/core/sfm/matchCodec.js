@@ -6,6 +6,9 @@
 export class Uint32PairList {
   constructor(data) { this.data = data }
   get length() { return this.data.length >>> 1 }
+  // Hot loops read the packed indices directly: no [a, b] array per match.
+  a(i) { return this.data[2 * i] }
+  b(i) { return this.data[2 * i + 1] }
   at(index) {
     const i = index < 0 ? this.length + index : index
     return i >= 0 && i < this.length ? [this.data[i * 2], this.data[i * 2 + 1]] : undefined
@@ -25,6 +28,15 @@ export class Uint32PairList {
     for (const value of this) if (callback.call(thisArg, value, i++, this)) out.push(value)
     return out
   }
+}
+
+// A pair's matches as a Uint32PairList: packed input is wrapped, a plain
+// [[a, b], …] list (tests, older callers) is packed once.
+export function asPairList(matches) {
+  if (matches instanceof Uint32PairList) return matches
+  if (matches instanceof Uint32Array) return new Uint32PairList(matches)
+  if (matches?.data instanceof Uint32Array) return new Uint32PairList(matches.data)
+  return new Uint32PairList(packMatchPairs(matches))
 }
 
 export function packMatchPairs(matches) {

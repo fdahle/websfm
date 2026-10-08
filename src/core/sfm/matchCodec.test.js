@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { Uint32PairList, packMatchPairs, wrapPackedMatches } from './matchCodec.js'
+import { Uint32PairList, packMatchPairs, wrapPackedMatches, asPairList } from './matchCodec.js'
 
 describe('reconstruction match transport', () => {
   it('packs tuples into eight bytes per match and preserves the solver read API', () => {
@@ -18,5 +18,16 @@ describe('reconstruction match transport', () => {
     const rewrapped = wrapPackedMatches(cloned)[0].matches
     expect(rewrapped).toBeInstanceOf(Uint32PairList)
     expect(rewrapped.at(0)).toEqual([1, 2])
+  })
+})
+
+describe('asPairList', () => {
+  it('wraps packed matches and packs plain lists, with indexed a(i) / b(i)', () => {
+    const packed = new Uint32PairList(Uint32Array.from([3, 4, 5, 6]))
+    expect(asPairList(packed)).toBe(packed)
+    const fromArray = asPairList([[1, 2], [7, 8]])
+    expect([fromArray.length, fromArray.a(1), fromArray.b(1)]).toEqual([2, 7, 8])
+    const fromTyped = asPairList(Uint32Array.from([9, 10]))
+    expect([fromTyped.a(0), fromTyped.b(0)]).toEqual([9, 10])
   })
 })
