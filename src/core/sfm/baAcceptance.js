@@ -21,10 +21,15 @@ import { isObservationList } from './baObservations.js'
  * @param {{x:number, y:number, z:number}} p
  */
 export function projectFull(cam, K, p) {
+  return projectFullXYZ(cam, K, p.x, p.y, p.z)
+}
+
+/** projectFull for a point given as coordinates. */
+export function projectFullXYZ(cam, K, x, y, z) {
   const { R, t } = cam
-  const xc = R[0][0] * p.x + R[0][1] * p.y + R[0][2] * p.z + t[0]
-  const yc = R[1][0] * p.x + R[1][1] * p.y + R[1][2] * p.z + t[1]
-  const zc = R[2][0] * p.x + R[2][1] * p.y + R[2][2] * p.z + t[2]
+  const xc = R[0][0] * x + R[0][1] * y + R[0][2] * z + t[0]
+  const yc = R[1][0] * x + R[1][1] * y + R[1][2] * z + t[1]
+  const zc = R[2][0] * x + R[2][1] * y + R[2][2] * z + t[2]
   if (Math.abs(zc) < 1e-9) return null
   const a = xc / zc, b = yc / zc
   const r2 = a * a + b * b, r4 = r2 * r2
@@ -39,8 +44,12 @@ function residuals(state, observations) {
   const out = new Float64Array(n)
   if (isObservationList(observations)) {
     const { cam, pt, x, y } = observations
+    const flat = state.points instanceof Float64Array ? state.points : null
     for (let i = 0; i < n; i++) {
-      const q = projectFull(state.cams[cam[i]], state.Ks[cam[i]], state.points[pt[i]])
+      const j = pt[i]
+      const q = flat
+        ? projectFullXYZ(state.cams[cam[i]], state.Ks[cam[i]], flat[3 * j], flat[3 * j + 1], flat[3 * j + 2])
+        : projectFull(state.cams[cam[i]], state.Ks[cam[i]], state.points[j])
       out[i] = q ? Math.hypot(q.x - x[i], q.y - y[i]) : NaN
     }
     return out
@@ -59,7 +68,7 @@ const huber = (e, d) => (Number.isNaN(e) ? d * d : e <= d ? e * e : 2 * d * e - 
  * Compare a pre- and post-BA state under one Huber cost.
  *
  * @param {object} o
- * @param {{cams:Array, Ks:Array, points:Array}} o.before
+ * @param {{cams:Array, Ks:Array, points:Array|Float64Array}} o.before  points: [{x,y,z}] or flat xyz
  * @param {{cams:Array, Ks:Array, points:Array}} o.after
  * @param {{camIdx:number, ptIdx:number, x:number, y:number}[] | object} o.observations  records or an ObservationList
  * @returns {{ delta:number, before:number, after:number, improved:boolean }}

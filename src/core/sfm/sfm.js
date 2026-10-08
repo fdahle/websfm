@@ -45,11 +45,12 @@ import { RECONSTRUCT_DEFAULTS } from '../defaults.user.js'
 import { SFM_TUNING } from '../tuning.js'
 import { buildScaleContext, describeScaleContext, resolveScaledPx } from '../scaleContext.js'
 import { secondaryJobs, alignSecondary, mergeAligned } from './multiModel.js'
-import { compactPointRecords } from './resultCodec.js'
+import { compactTrackRecords } from './resultCodec.js'
 import { wrapPackedMatches } from './matchCodec.js'
-import { compareRobustCost, projectFull } from './baAcceptance.js'
+import { compareRobustCost, projectFullXYZ } from './baAcceptance.js'
 import { guidedExtendTracks, auditGuidedAdditions } from './guidedExtension.js'
-import { buildBaObservations, appendObservations } from './baObservations.js'
+import { buildBaObservations, appendObservations, trackPositions } from './baObservations.js'
+import { createTrackStore, makeImageIds } from './trackStore.js'
 import { keypointSetFrom, hasKp, kpX, kpY, mapPositions } from './keypointSet.js'
 
 // Re-export the extracted pure modules so existing importers (sfm.test.js and any
@@ -193,13 +194,18 @@ async function reconstructSingleModel(input, hooks = {}) {
   const imageMap = new Map()
   for (const img of images) if (!imageMap.has(img.uuid)) imageMap.set(img.uuid, img)
   const imageByUuid = (uuid) => imageMap.get(uuid) || null
-  // An image's KeypointSet (keypointSet.js), or null. Shared by the BA observation
-  // builders, the track functions and guided extension.
-  const keypointsOf = (uuid) => imageByUuid(uuid)?.kp ?? null
+  // Images by dense index for the track store (trackStore.js): `ids.img(uuid)` /
+  // `ids.uuid(img)`; `images[img]` is the same object `imageByUuid` returns.
+  const ids = makeImageIds(images.map((img) => img.uuid))
+  // An image's KeypointSet (keypointSet.js) by image index, or null. Shared by the BA
+  // observation builders, the track functions and guided extension.
+  const keypointsAt = (img) => images[img]?.kp ?? null
 
   // Local model state (was reactive refs in the store).
   const cameras = new Map()  // uuid → { R, t, K }
-  let points3d = []          // [{ x, y, z, views: Map<uuid, kpIdx> }]
+  // Points and their observations (trackStore.js): dense point ids, views keyed by
+  // image index, and the keypoint → point index the old `viewIndex` Map was.
+  const tracks = createTrackStore(images.map((img) => img.kp?.n ?? 0), { impl: cfg.trackStore })
 
   // Only 'done' pairs participate (the store passes those, but keep the guard
   // so the algorithm reads identically to the original).
@@ -221,18 +227,18 @@ async function reconstructSingleModel(input, hooks = {}) {
   // to the detected keypoint. The single clearest health signal for the model.
   function modelResiduals() {
     const residuals = []
-    for (const pt of points3d) {
-      pt.views.forEach((kpIdx, uuid) => {
-        const cam = cameras.get(uuid)
-        const img = imageByUuid(uuid)
-        if (!cam || !cam.K || !img) return
-        const set = img.kp
+    tracks.forEachPoint((p) => {
+      const x = tracks.x(p), y = tracks.y(p), z = tracks.z(p)
+      tracks.forEachView(p, (img, kpIdx) => {
+        const cam = cameras.get(ids.uuid(img))
+        if (!cam || !cam.K || !images[img]) return
+        const set = images[img].kp
         if (!hasKp(set, kpIdx)) return
-        const proj = projectPoint(cam, pt.x, pt.y, pt.z)
+        const proj = projectPoint(cam, x, y, z)
         if (!proj) return
         residuals.push(Math.hypot(proj.u - kpX(set, kpIdx), proj.v - kpY(set, kpIdx)))
       })
-    }
+    })
     return residuals
   }
   function modelReprojStats() {
@@ -273,10 +279,10 @@ async function reconstructSingleModel(input, hooks = {}) {
   // Per-track colour: median (per channel) of the source-image RGB sampled at
   // each observing keypoint. Median (not mean) is robust to a stray observation
   // landing on a different surface. Returns null when no view carries a colour.
-  const pointColor = (views) => {
+  const pointColor = (p) => {
     const rs = [], gs = [], bs = []
-    views.forEach((kpIdx, uuid) => {
-      const set = imageByUuid(uuid)?.kp
+    tracks.forEachView(p, (img, kpIdx) => {
+      const set = keypointsAt(img)
       if (set?.hasColor?.[kpIdx]) { rs.push(set.rgb[3 * kpIdx]); gs.push(set.rgb[3 * kpIdx + 1]); bs.push(set.rgb[3 * kpIdx + 2]) }
     })
     if (!rs.length) return null
@@ -287,20 +293,18 @@ async function reconstructSingleModel(input, hooks = {}) {
   const done = (status, summary = null) => ({
     status,
     cameras: [...cameras.entries()].map(([uuid, cam]) => ({ uuid, ...cam })),
-    // Fold the solver's Map tracks directly into shared CSR buffers. Creating an
+    // Fold the solver's tracks directly into shared CSR buffers. Creating an
     // intermediate [uuid,kp,x,y] array for each observation made finalisation's
     // peak proportional to millions of JS objects and could kill the worker after
     // it had already logged success. The slices remain iterable/Map-compatible for
     // secondary-model alignment and callers of this pure module.
-    points: compactPointRecords(points3d, {
-      colorOf: ({ views }) => pointColor(views),
-      pixelOf: (uuid, kpIdx) => {
-        const set = imageByUuid(uuid)?.kp
+    points: compactTrackRecords(tracks, {
+      uuidOf: ids.uuid,
+      colorOf: pointColor,
+      pixelOf: (img, kpIdx) => {
+        const set = keypointsAt(img)
         return hasKp(set, kpIdx) ? [kpX(set, kpIdx), kpY(set, kpIdx)] : null
       },
-      // `done()` is terminal for this solver instance. Releasing each mutable
-      // Map-backed point as it is packed keeps finalisation below the solve peak.
-      consume: true,
     }),
     summary,
   })
@@ -409,10 +413,12 @@ async function reconstructSingleModel(input, hooks = {}) {
     const imgB = best.iB
     cameras.set(bestPair.idA, best.cA)
     cameras.set(bestPair.idB, best.cB)
-    points3d = best.points
-    // `points3d` initially aliases best.points and registration appends to it until
-    // the first BA replaces the array. Snapshot now; otherwise diagnostics.seed.points
-    // accidentally reports the model size at first BA rather than the seed size.
+    // The seed's points become the first tracks, in order; this also seeds the
+    // keypoint → point index.
+    for (const pt of best.points) {
+      const p = tracks.addPoint(pt.x, pt.y, pt.z)
+      pt.views.forEach((kpIdx, uuid) => tracks.addView(p, ids.img(uuid), kpIdx))
+    }
     const seedPointCount = best.points.length
 
     log(`initial pair ${imgA.name} ↔ ${imgB.name} `
@@ -440,36 +446,20 @@ async function reconstructSingleModel(input, hooks = {}) {
     report('initPair', 1, `Initial pair: ${imgA.name} ↔ ${imgB.name}`, { done: 2, total: imgs.length })
 
     // ── Track index ──────────────────────────────────────────────────────────
-    // Reverse map keypoint → 3D point, per image: viewIndex[uuid].get(kpIdx) → pt.
-    // This is what makes tracks (rather than a heap of 2-view points) possible:
-    // it lets registration ask "does this keypoint already belong to a point?" in
-    // O(1) and either extend that track or know to triangulate fresh structure.
-    // Every observation must go through addView so the index stays consistent.
-    const viewIndex = new Map() // uuid → Map<kpIdx, pt>
-    const addView = (pt, uuid, kpIdx) => {
-      pt.views.set(uuid, kpIdx)
-      let m = viewIndex.get(uuid)
-      if (!m) { m = new Map(); viewIndex.set(uuid, m) }
-      m.set(kpIdx, pt)
-    }
-    // Seed the index from the committed initial pair.
-    for (const pt of points3d) pt.views.forEach((kpIdx, uuid) => {
-      let m = viewIndex.get(uuid)
-      if (!m) { m = new Map(); viewIndex.set(uuid, m) }
-      m.set(kpIdx, pt)
-    })
-
-    // Rebuild the whole keypoint→point index from the current tracks. Interim
-    // bundle adjustment (R3) replaces every point *object* (BA returns fresh
-    // structs), so the index — which holds references to the old objects — must be
-    // regenerated before registration continues against the tightened model.
-    const rebuildViewIndex = () => {
-      viewIndex.clear()
-      for (const pt of points3d) pt.views.forEach((kpIdx, uuid) => {
-        let m = viewIndex.get(uuid)
-        if (!m) { m = new Map(); viewIndex.set(uuid, m) }
-        m.set(kpIdx, pt)
-      })
+    // The reverse map keypoint → point (`tracks.pointAt`) is what makes tracks
+    // (rather than a heap of 2-view points) possible: registration asks "does this
+    // keypoint already belong to a point?" in O(1) and either extends that track or
+    // knows to triangulate fresh structure. The store keeps it current as views are
+    // added and removed. Where the old code rebuilt its index Map (after bundle
+    // adjustment, filtering, merging), `refreshTracks` compacts the store — renumbering
+    // the points, so no point id may be held across it — and rebuilds the index in
+    // point order (trackStore.js ▸ reindex).
+    const refreshTracks = () => tracks.compact()
+    // A BA's camera index by image index (−1 = not in the solve), from its uuid → index map.
+    const camIdxOfImg = (camIdxOf) => (img) => camIdxOf.get(ids.uuid(img)) ?? -1
+    // Write a solve's refined positions back: solve point r is point ptIds[r].
+    const setTrackPositions = (ptIds, pos) => {
+      for (let r = 0; r < ptIds.length; r++) tracks.setPosition(ptIds[r], pos[3 * r], pos[3 * r + 1], pos[3 * r + 2])
     }
 
     // ── Bundle-adjustment / filtering settings + helpers (hoisted for R3) ────────
@@ -514,9 +504,7 @@ async function reconstructSingleModel(input, hooks = {}) {
     // within `gate`. Directly raises the ≥3-view share and BA conditioning. The final
     // stage runs the same function to a fixpoint (completeTracksFinal below).
     const foldOneEndpointMatches = (gate) => completeTracks({
-      points3d, cameras, pairs: donePairs,
-      keypointsOf,
-      maxReprojPx: gate, index: viewIndex, addView,
+      tracks, ids, cameras, pairs: donePairs, keypointsAt, maxReprojPx: gate,
     }).added
 
     // Consolidate split tracks: the *both*-endpoints-assigned case foldOneEndpointMatches
@@ -526,17 +514,11 @@ async function reconstructSingleModel(input, hooks = {}) {
     // the model grew mostly 2-view during registration (the building run finished at 15%
     // ≥3-view tracks); running it in the interim cleanup as the model builds raises track
     // multiplicity early, which both conditions BA better and gives later PnP longer, more
-    // stable points. Reassigns points3d (the module `let`) like filterTracks; callers
-    // rebuildViewIndex afterwards. Same maxReprojPx gate as the post-BA merge.
-    const mergeTracks = (gate) => {
-      const res = mergeSplitTracks({
-        points3d, cameras, pairs: donePairs,
-        keypointsOf,
-        maxReprojPx: gate,
-      })
-      points3d = res.points3d
-      return res.merged
-    }
+    // stable points. Removes the merged-away points from the store; callers
+    // refreshTracks afterwards. Same maxReprojPx gate as the post-BA merge.
+    const mergeTracks = (gate) => mergeSplitTracks({
+      tracks, ids, cameras, pairs: donePairs, keypointsAt, maxReprojPx: gate,
+    }).merged
 
     // Self-calibrated distortion bookkeeping (WS2). The sparse pipeline folds the
     // distortion out of the keypoints each self-cal pass (exact, in place); dense and
@@ -556,9 +538,8 @@ async function reconstructSingleModel(input, hooks = {}) {
     // Grow the sparse model one camera at a time — next-best-view ordering,
     // two-gate PnP, track extension/triangulation, interleaved BA. Extracted to
     // register.js (see there). registeredUuids is created HERE because the hoisted
-    // foldOneEndpointMatches closure (above) reads it; points3d is a `let` the
-    // injected BA/filter closures reassign, so register.js accesses it through the
-    // live getPoints3d() getter rather than a captured reference.
+    // foldOneEndpointMatches closure (above) reads it; the track store is shared and
+    // mutated in place by register.js and the injected BA/filter closures alike.
     const registeredUuids = new Set([bestPair.idA, bestPair.idB])
     await registerImages({
       imgs, donePairs, Kmap, cfg,
@@ -566,9 +547,8 @@ async function reconstructSingleModel(input, hooks = {}) {
       // correspondences from this superset but triangulates fresh structure only from
       // donePairs — weak pairs extend registration reach without seeding geometry.
       corrPairs: [...donePairs, ...weakPairs],
-      cameras, viewIndex, registeredUuids,
-      getPoints3d: () => points3d,
-      addView, rebuildViewIndex, foldOneEndpointMatches, mergeTracks,
+      cameras, tracks, ids, keypointsAt, registeredUuids,
+      refreshTracks, foldOneEndpointMatches, mergeTracks,
       runBundleAdjust, filterTracks, modelReprojStats, imageByUuid, numStats,
       log, onProgress,
       reportPhase: (local, label, counts) => report('register', local, label, counts),
@@ -590,9 +570,9 @@ async function reconstructSingleModel(input, hooks = {}) {
     // solve is SUPPOSED to trade some image residual for geometry, so it is judged by
     // the bounded-increase rule (cameraPriorReprojectionAccepts), not "cost must fall".
     async function runBundleAdjust(label, iters, refineMode = refineIntrinsics, { cameraPriors = null } = {}) {
-      if (!(cameras.size >= 2 && points3d.length >= 10 && iters > 0)) {
+      if (!(cameras.size >= 2 && tracks.liveCount() >= 10 && iters > 0)) {
         log(`${label} skipped (cameras=${cameras.size}, `
-          + `points=${points3d.length}, iters=${iters})`, 'debug', 'Reconstruction')
+          + `points=${tracks.liveCount()}, iters=${iters})`, 'debug', 'Reconstruction')
         return
       }
       const uuidList = [...cameras.keys()]
@@ -600,9 +580,11 @@ async function reconstructSingleModel(input, hooks = {}) {
       const kList    = camList.map((c) => c.K)
       const sensorOfCam = uuidList.map((u) => sensorIntByUuid.get(u) ?? -1)
       const camIdxOf = new Map(uuidList.map((u, i) => [u, i]))
-
-      const observations = buildBaObservations(points3d, (u) => camIdxOf.get(u), keypointsOf)
-      log(`${label} — ${camList.length} cameras, ${points3d.length} points, `
+      // Point rank in this solve → point id; the solve's point i is ptIds[i].
+      const ptIds = tracks.liveIds()
+      const observations = buildBaObservations(tracks, ptIds, camIdxOfImg(camIdxOf), keypointsAt)
+      const posBefore = trackPositions(tracks, ptIds)
+      log(`${label} — ${camList.length} cameras, ${ptIds.length} points, `
         + `${observations.n} observations, ${iters} iters`, 'info', 'Reconstruction')
       // Diagnostic: where do the gross pre-solve residuals sit? Grouped by camera, split
       // by the observed point's track length (2 = freshly triangulated, ≥3 = extended).
@@ -610,7 +592,8 @@ async function reconstructSingleModel(input, hooks = {}) {
         const { cam: oCam, pt: oPt, x: oX, y: oY } = observations
         const errs = new Array(observations.n)
         for (let i = 0; i < observations.n; i++) {
-          const q = projectFull(camList[oCam[i]], kList[oCam[i]], points3d[oPt[i]])
+          const j = oPt[i]
+          const q = projectFullXYZ(camList[oCam[i]], kList[oCam[i]], posBefore[3 * j], posBefore[3 * j + 1], posBefore[3 * j + 2])
           errs[i] = q ? Math.hypot(q.x - oX[i], q.y - oY[i]) : Infinity
         }
         const sorted = errs.filter(Number.isFinite).sort((a, b) => a - b)
@@ -621,7 +604,7 @@ async function reconstructSingleModel(input, hooks = {}) {
           if (!(e > gross)) return
           const ci = oCam[i]
           const rec = byCam.get(ci) ?? { n: 0, fresh: 0, max: 0 }
-          rec.n++; if (points3d[oPt[i]].views.size <= 2) rec.fresh++
+          rec.n++; if (tracks.viewCount(ptIds[oPt[i]]) <= 2) rec.fresh++
           rec.max = Math.max(rec.max, e)
           byCam.set(ci, rec)
         })
@@ -634,8 +617,8 @@ async function reconstructSingleModel(input, hooks = {}) {
         }
       }
 
-      const result = await bundleAdjust(camList, kList, points3d, observations,
-        { maxIters: iters, refineIntrinsics: refineMode, sensorOfCam, solver: cfg.baSolver,
+      const result = await bundleAdjust(camList, kList, posBefore, observations,
+        { maxIters: iters, refineIntrinsics: refineMode, sensorOfCam, solver: cfg.baSolver, flatPoints: true,
           ...(cameraPriors ? { cameraPriors } : {}) })
       noteBaSolver(label, result)
       if (!result) {
@@ -663,8 +646,8 @@ async function reconstructSingleModel(input, hooks = {}) {
         const afterKs = refineMode !== 'none' && result.intrinsics
           ? kList.map((k, ci) => ({ ...k, ...result.intrinsics[ci] })) : kList
         const robust = compareRobustCost({
-          before: { cams: camList, Ks: kList, points: points3d },
-          after: { cams: result.cameras, Ks: afterKs, points: result.points3d },
+          before: { cams: camList, Ks: kList, points: posBefore },
+          after: { cams: result.cameras, Ks: afterKs, points: result.pos },
           observations,
         })
         if (delta < 0.01) {
@@ -743,7 +726,7 @@ async function reconstructSingleModel(input, hooks = {}) {
           : old.K
         cameras.set(uuid, { ...old, ...result.cameras[ci], K })
       })
-      points3d = result.points3d.map((pt, i) => ({ ...pt, views: points3d[i].views }))
+      setTrackPositions(ptIds, result.pos)
 
       // Self-calibration report: one line per sensor group (before → after focal, the
       // refined principal-point offset + radial coeffs, and the implied film width).
@@ -916,7 +899,7 @@ async function reconstructSingleModel(input, hooks = {}) {
     async function runCameraPriorBundleAdjust() {
       if (!(cameraPriors.length >= cfg.cameraPriorBaMinCameras
           && cameras.size >= cfg.cameraPriorBaMinCameras
-          && points3d.length >= 10 && baIterations > 0)) return
+          && tracks.liveCount() >= 10 && baIterations > 0)) return
       for (let round = 0; round < cfg.cameraPriorBaRounds; round++) {
         const uuidList = [...cameras.keys()]
         const constrained = buildCameraPriorConstraints(uuidList)
@@ -946,9 +929,10 @@ async function reconstructSingleModel(input, hooks = {}) {
             + `${(r.cameraPriorRmsAfter * constrained.fit.scale).toPrecision(3)} project units`, 'success', 'Reconstruction')
           continue
         }
-        const observations = buildBaObservations(points3d, (u) => camIdxOf.get(u), keypointsOf)
-        const result = await bundleAdjust(camList, camList.map((c) => c.K), points3d, observations, {
-          maxIters: baIterations, refineIntrinsics: 'none',
+        const ptIds = tracks.liveIds()
+        const observations = buildBaObservations(tracks, ptIds, camIdxOfImg(camIdxOf), keypointsAt)
+        const result = await bundleAdjust(camList, camList.map((c) => c.K), trackPositions(tracks, ptIds), observations, {
+          maxIters: baIterations, refineIntrinsics: 'none', flatPoints: true,
           sensorOfCam: uuidList.map((u) => sensorIntByUuid.get(u) ?? -1),
           cameraPriors: constrained.priors, solver: cfg.baSolver,
         })
@@ -961,7 +945,7 @@ async function reconstructSingleModel(input, hooks = {}) {
           return
         }
         uuidList.forEach((uuid, ci) => cameras.set(uuid, { ...cameras.get(uuid), ...result.cameras[ci] }))
-        points3d = result.points3d.map((pt, i) => ({ ...pt, views: points3d[i].views }))
+        setTrackPositions(ptIds, result.pos)
         log(`camera-prior bundle adjustment RMS ${result.costBefore.toFixed(2)}px → `
           + `${result.costAfter.toFixed(2)}px; centre residual → `
           + `${(result.cameraPriorRmsAfter * constrained.fit.scale).toPrecision(3)} project units`,
@@ -998,7 +982,8 @@ async function reconstructSingleModel(input, hooks = {}) {
         const kList = camList.map((c) => c.K)
         const sensorOfCam = uuidList.map((u) => sensorIntByUuid.get(u) ?? -1)
         const camIdxOf = new Map(uuidList.map((u, i) => [u, i]))
-        const setup = await buildGcpAnchors({ cameras, qualifying, camIdxOf, firstPointIndex: points3d.length })
+        const ptIds = tracks.liveIds()
+        const setup = await buildGcpAnchors({ cameras, qualifying, camIdxOf, firstPointIndex: ptIds.length })
         if (setup.error) {
           log(`GCP anchoring stopped (${setup.error})`, 'warn', 'Reconstruction')
           return
@@ -1009,14 +994,14 @@ async function reconstructSingleModel(input, hooks = {}) {
         const constrainedCameras = buildCameraPriorConstraints(uuidList, { fit, frame })
 
         const observations = appendObservations(
-          buildBaObservations(points3d, (u) => camIdxOf.get(u), keypointsOf), setup.observations)
+          buildBaObservations(tracks, ptIds, camIdxOfImg(camIdxOf), keypointsAt), setup.observations)
 
         log(`GCP-anchored bundle adjustment (round ${round + 1}/2) — `
           + `${anchors.length} GCP(s), seed scale ${fit.scale.toPrecision(4)}, `
           + `seed RMS ${fit.rms.toPrecision(3)}`, 'info', 'Reconstruction')
 
-        const result = await bundleAdjust(camList, kList, [...points3d, ...anchorPts], observations,
-          { maxIters: baIterations, refineIntrinsics: 'none', sensorOfCam, gcpAnchors: anchors,
+        const result = await bundleAdjust(camList, kList, trackPositions(tracks, ptIds, anchorPts), observations,
+          { maxIters: baIterations, refineIntrinsics: 'none', sensorOfCam, gcpAnchors: anchors, flatPoints: true,
             cameraPriors: constrainedCameras?.priors ?? [], solver: cfg.baSolver })
         noteBaSolver(`GCP-anchored bundle adjustment (round ${round + 1})`, result)
         if (!result) {
@@ -1034,7 +1019,7 @@ async function reconstructSingleModel(input, hooks = {}) {
         })
         // Only the original (non-anchor) points are kept — the synthetic anchor
         // points were scratch space for this BA pass, not real SIFT tracks.
-        points3d = points3d.map((pt, i) => ({ ...pt, x: result.points3d[i].x, y: result.points3d[i].y, z: result.points3d[i].z }))
+        setTrackPositions(ptIds, result.pos)
         log(`GCP-anchored bundle adjustment RMS ${result.costBefore.toFixed(2)}px → `
           + `${result.costAfter.toFixed(2)}px, anchor residual (SfM units) → ${result.anchorRmsAfter.toFixed(4)}`
           + (constrainedCameras ? `, camera-centre residual → `
@@ -1058,37 +1043,37 @@ async function reconstructSingleModel(input, hooks = {}) {
     // viewing rays are too parallel to triangulate stably (< minTriAngleDeg).
     function filterTracks({ maxReprojPx, minTriAngleDeg }) {
       let obsRemoved = 0, ptsRemoved = 0
-      const kept = []
-      for (const pt of points3d) {
-        for (const [uuid, kpIdx] of [...pt.views]) {
-          const cam = cameras.get(uuid)
-          const set = imageByUuid(uuid)?.kp
-          if (!cam || !hasKp(set, kpIdx)) { pt.views.delete(uuid); obsRemoved++; continue }
+      tracks.forEachPoint((p) => {
+        const x = tracks.x(p), y = tracks.y(p), z = tracks.z(p)
+        tracks.forEachView(p, (img, kpIdx) => {
+          const cam = cameras.get(ids.uuid(img))
+          const set = keypointsAt(img)
+          if (!cam || !hasKp(set, kpIdx)) { tracks.removeView(p, img); obsRemoved++; return }
           // Cheirality: point must be in front of the camera.
-          const zc = cam.R[2][0] * pt.x + cam.R[2][1] * pt.y + cam.R[2][2] * pt.z + cam.t[2]
-          const proj = zc > 0 ? projectPoint(cam, pt.x, pt.y, pt.z) : null
+          const zc = cam.R[2][0] * x + cam.R[2][1] * y + cam.R[2][2] * z + cam.t[2]
+          const proj = zc > 0 ? projectPoint(cam, x, y, z) : null
           if (!proj || Math.hypot(proj.u - kpX(set, kpIdx), proj.v - kpY(set, kpIdx)) > maxReprojPx) {
-            pt.views.delete(uuid); obsRemoved++
+            tracks.removeView(p, img); obsRemoved++
           }
-        }
-        if (pt.views.size < 2) { ptsRemoved++; continue }
+        })
+        if (tracks.viewCount(p) < 2) { ptsRemoved++; tracks.removePoint(p); return }
         // Max parallax angle between any two surviving rays.
-        const cs = [...pt.views.keys()].map((u) => cameras.get(u)).filter(Boolean)
+        const cs = []
+        tracks.forEachView(p, (img) => { const c = cameras.get(ids.uuid(img)); if (c) cs.push(c) })
+        const pt = [{ x, y, z }]
         let maxAng = 0
         for (let i = 0; i < cs.length; i++)
           for (let j = i + 1; j < cs.length; j++)
-            maxAng = Math.max(maxAng, medianTriangulationAngle(cs[i], cs[j], [pt]))
-        if (maxAng < minTriAngleDeg) { ptsRemoved++; continue }
-        kept.push(pt)
-      }
-      points3d = kept
+            maxAng = Math.max(maxAng, medianTriangulationAngle(cs[i], cs[j], pt))
+        if (maxAng < minTriAngleDeg) { ptsRemoved++; tracks.removePoint(p) }
+      })
       return { obsRemoved, ptsRemoved }
     }
 
     // Track-length histogram { t2, t3, t4 } (2-view / 3-view / 4+-view counts).
     const trackHist = () => {
       let t2 = 0, t3 = 0, t4 = 0
-      for (const pt of points3d) { const n = pt.views.size; if (n <= 2) t2++; else if (n === 3) t3++; else t4++ }
+      tracks.forEachPoint((p) => { const n = tracks.viewCount(p); if (n <= 2) t2++; else if (n === 3) t3++; else t4++ })
       return { t2, t3, t4 }
     }
 
@@ -1101,12 +1086,11 @@ async function reconstructSingleModel(input, hooks = {}) {
     // observation is then filtered and bundle-adjusted like any other. Gate = the
     // tight track-filter threshold, whichever pass it precedes.
     const completeTracksFinal = (label) => {
-      rebuildViewIndex()
+      refreshTracks()
       const before = trackHist()
       const res = completeTracks({
-        points3d, cameras, pairs: donePairs, keypointsOf,
+        tracks, ids, cameras, pairs: donePairs, keypointsAt,
         maxReprojPx: filterMaxReprojPx, maxRounds: cfg.completeTracksMaxRounds,
-        index: viewIndex, addView,
       })
       const after = trackHist()
       trackCompletionRecord.push({
@@ -1125,7 +1109,7 @@ async function reconstructSingleModel(input, hooks = {}) {
       return total
     }
 
-    if (cameras.size >= 2 && points3d.length >= 10 && baIterations > 0) {
+    if (cameras.size >= 2 && tracks.liveCount() >= 10 && baIterations > 0) {
       report('bundle', 1, 'Bundle adjustment…', { done: cameras.size, total: imgs.length })
 
       // With no focal length anywhere, resolveK fell back to `fx = max(w,h)` — a
@@ -1164,9 +1148,9 @@ async function reconstructSingleModel(input, hooks = {}) {
       })
       log(`pre-BA gross cleanup (≤${preThr.px.toFixed(1)}px, `
         + `≥${filterMinTriAngleDeg}° parallax) — removed ${preClean.obsRemoved} obs + `
-        + `${preClean.ptsRemoved} points; ${points3d.length} points remain`,
+        + `${preClean.ptsRemoved} points; ${tracks.liveCount()} points remain`,
       preClean.obsRemoved || preClean.ptsRemoved ? 'info' : 'debug', 'Reconstruction')
-      rebuildViewIndex()
+      refreshTracks()
 
       // Pre-filter solve stays pinhole ('none'): self-calibration before the tighter
       // cleanup can drift cx/cy badly (R6). Intrinsics are refined only below.
@@ -1179,19 +1163,17 @@ async function reconstructSingleModel(input, hooks = {}) {
         report('retriangulate', 1, 'Retriangulating + merging tracks…', { done: cameras.size, total: imgs.length })
         const before = trackHist()
         const { added, lowParallax } = await retriangulatePairs({
-          points3d, cameras, pairs: donePairs, keypointsOf,
+          tracks, ids, cameras, pairs: donePairs, keypointsAt,
           maxReprojPx: filterMaxReprojPx, minTriAngleDeg: filterMinTriAngleDeg,
           triangulate: triangulateDlt,
         })
-        const mres = mergeSplitTracks({ points3d, cameras, pairs: donePairs, keypointsOf, maxReprojPx: filterMaxReprojPx })
-        points3d = mres.points3d
-        const merged = mres.merged
+        const { merged } = mergeSplitTracks({ tracks, ids, cameras, pairs: donePairs, keypointsAt, maxReprojPx: filterMaxReprojPx })
         const completed = completeTracksFinal('post-BA')
         if (added || merged || completed) {
           const after = trackHist()
           log(`retriangulation +${added} point(s), merged ${merged} split track(s)`
             + `${lowParallax ? `, rejected ${lowParallax} low-parallax candidate(s)` : ''}; `
-            + `${points3d.length} points`, 'info', 'Reconstruction')
+            + `${tracks.liveCount()} points`, 'info', 'Reconstruction')
           log(`track lengths (2/3/4+ view) ${before.t2}/${before.t3}/${before.t4} → `
             + `${after.t2}/${after.t3}/${after.t4}`, 'info', 'Reconstruction')
           await runBundleAdjust('post-retriangulation bundle adjustment', baIterations, 'none')
@@ -1219,7 +1201,7 @@ async function reconstructSingleModel(input, hooks = {}) {
         // share the final pinhole frame, and the pass-2 filter + BA below treat the
         // additions like any other observation (guidedExtension.js).
         if (round === 2 && cfg.guidedTrackExtension && imgs.some((im) => im.descU8)) {
-          rebuildViewIndex()
+          refreshTracks()
           const before = trackHist()
           // Search radius: the filter gate, capped at a multiple of the model's own p90
           // residual (a coarse detection scale makes the native-px gate far wider than
@@ -1231,10 +1213,10 @@ async function reconstructSingleModel(input, hooks = {}) {
             gatePx = Math.min(filterMaxReprojPx, cfg.guidedRadiusP90Mult * p90)
           }
           const g = guidedExtendTracks({
-            points3d, cameras, keypointsOf, viewIndex, addView, gatePx,
+            tracks, ids, cameras, keypointsAt, gatePx,
             ratio: cfg.guidedRatio ?? 0.8, quantile: cfg.guidedQuantile ?? 0.9,
-            onAdd: (pt, uuid, kp) => guidedAdds.push({ uuid, kp }),
-            descOf: (uuid, k) => { const d = imageByUuid(uuid)?.descU8; return d && (k + 1) * 128 <= d.length ? { arr: d, off: k * 128 } : null },
+            onAdd: (p, img, kp) => guidedAdds.push({ uuid: ids.uuid(img), kp }),
+            descOf: (img, k) => { const d = images[img]?.descU8; return d && (k + 1) * 128 <= d.length ? { arr: d, off: k * 128 } : null },
           })
           const after = trackHist()
           guidedRecord = [...(guidedRecord ?? []), { pass: round, ...g, gatePx, before, after }]
@@ -1257,14 +1239,15 @@ async function reconstructSingleModel(input, hooks = {}) {
         }
         const { obsRemoved, ptsRemoved } = filterTracks({ maxReprojPx: thr.px, minTriAngleDeg: filterMinTriAngleDeg })
         log(`track filter pass ${round} (≤${thr.px.toFixed(1)}px, ≥${filterMinTriAngleDeg}° parallax) — `
-          + `removed ${obsRemoved} obs + ${ptsRemoved} points; ${points3d.length} points remain`, 'info', 'Reconstruction')
+          + `removed ${obsRemoved} obs + ${ptsRemoved} points; ${tracks.liveCount()} points remain`, 'info', 'Reconstruction')
         // Staged self-cal (WS2): under 'auto' the post-filter passes escalate the refined
         // terms (k2 / cx,cy / k3) as the camera + observation counts clear each gate; an
         // explicit user refine string is used verbatim (selfCalStaged is false).
         let refineMode = refineIntrinsics
         let reducedReason = null
         if (cfg.selfCalStaged) {
-          const nObs = points3d.reduce((s, p) => s + p.views.size, 0)
+          let nObs = 0
+          tracks.forEachPoint((p) => { nObs += tracks.viewCount(p) })
           const counts = { nCams: cameras.size, nObs }
           refineMode = stagedSelfCalTerms(counts)
           const deferred = stagedSelfCalDeferred(counts)
@@ -1280,7 +1263,7 @@ async function reconstructSingleModel(input, hooks = {}) {
           const hist = trackHist()
           const ident = distortionIdentifiable({
             nCams: cameras.size,
-            nTracks: points3d.length,
+            nTracks: tracks.liveCount(),
             nMultiViewTracks: hist.t3 + hist.t4,
           })
           if (!ident.ok) {
@@ -1301,11 +1284,15 @@ async function reconstructSingleModel(input, hooks = {}) {
       }
       logOutlierShare('post-filter residuals')
       if (guidedAdds.length) {
-        const audit = auditGuidedAdditions(guidedAdds, points3d, (pt, uuid, kp) => {
-          const cam = cameras.get(uuid), set = imageByUuid(uuid)?.kp
-          const pr = cam?.K && hasKp(set, kp) ? projectPoint(cam, pt.x, pt.y, pt.z) : null
-          return pr ? Math.hypot(pr.u - kpX(set, kp), pr.v - kpY(set, kp)) : null
-        })
+        const audit = auditGuidedAdditions(guidedAdds, (visit) => tracks.forEachPoint((p) => {
+          const x = tracks.x(p), y = tracks.y(p), z = tracks.z(p)
+          tracks.forEachView(p, (img, kp) => {
+            const uuid = ids.uuid(img)
+            const cam = cameras.get(uuid), set = keypointsAt(img)
+            const pr = cam?.K && hasKp(set, kp) ? projectPoint(cam, x, y, z) : null
+            visit(uuid, kp, pr ? Math.hypot(pr.u - kpX(set, kp), pr.v - kpY(set, kp)) : null)
+          })
+        }))
         guidedRecord.at(-1).audit = audit
         const f = (v) => (v == null ? '–' : v.toFixed(2))
         log(`guided track extension audit — ${audit.survived}/${audit.proposed} added observation(s) survived the `
@@ -1316,13 +1303,13 @@ async function reconstructSingleModel(input, hooks = {}) {
       log('bundle adjustment + filtering complete', 'success', 'Reconstruction')
     } else {
       log(`bundle adjustment skipped (cameras=${cameras.size}, `
-        + `points=${points3d.length}, iters=${baIterations})`, 'debug', 'Reconstruction')
+        + `points=${tracks.liveCount()}, iters=${baIterations})`, 'debug', 'Reconstruction')
     }
-    if (cameraPriors.length && cameras.size >= 2 && points3d.length >= 10) {
+    if (cameraPriors.length && cameras.size >= 2 && tracks.liveCount() >= 10) {
       report('gcpBundle', 1, 'Camera-position constrained bundle adjustment…', { done: cameras.size, total: imgs.length })
       await runCameraPriorBundleAdjust()
     }
-    if (gcps.length && cameras.size >= 2 && points3d.length >= 10) {
+    if (gcps.length && cameras.size >= 2 && tracks.liveCount() >= 10) {
       report('gcpBundle', 1, 'GCP-anchored bundle adjustment…', { done: cameras.size, total: imgs.length })
       await runGcpAnchoredBundleAdjust()
     }
@@ -1332,14 +1319,13 @@ async function reconstructSingleModel(input, hooks = {}) {
     // but final products do not need to expose them when a strong multi-view core is
     // available. This removes the one class of point for which a wrong match along an
     // epipolar line can retain low reprojection error with no independent witness.
-    const finalTrackPrune = pruneFinalTwoViewTracks(points3d, {
+    const finalTrackPrune = pruneFinalTwoViewTracks(tracks, {
       minViews: finalMinTrackViews,
       minSupportedTracks: finalTrackPruneMinCount,
       minSupportedShare: finalTrackPruneMinShare,
     })
     if (finalTrackPrune.applied) {
-      points3d = finalTrackPrune.points3d
-      rebuildViewIndex()
+      refreshTracks()
       log(`final track-quality cleanup — removed ${finalTrackPrune.removed} uncorroborated `
         + `2-view point(s); ${finalTrackPrune.supported} point(s) with ≥${finalMinTrackViews} views remain`,
       finalTrackPrune.removed ? 'info' : 'debug', 'Reconstruction')
@@ -1356,14 +1342,15 @@ async function reconstructSingleModel(input, hooks = {}) {
     // surfaces them by name so a bad registration is diagnosable at a glance.
     {
       const perCam = new Map() // uuid → residuals[]
-      for (const pt of points3d) pt.views.forEach((kpIdx, uuid) => {
-        const cam = cameras.get(uuid), set = imageByUuid(uuid)?.kp
+      tracks.forEachPoint((p) => tracks.forEachView(p, (img, kpIdx) => {
+        const uuid = ids.uuid(img)
+        const cam = cameras.get(uuid), set = keypointsAt(img)
         if (!cam || !hasKp(set, kpIdx)) return
-        const proj = projectPoint(cam, pt.x, pt.y, pt.z)
+        const proj = projectPoint(cam, tracks.x(p), tracks.y(p), tracks.z(p))
         if (!proj) return
         if (!perCam.has(uuid)) perCam.set(uuid, [])
         perCam.get(uuid).push(Math.hypot(proj.u - kpX(set, kpIdx), proj.v - kpY(set, kpIdx)))
-      })
+      }))
       const globalMed = numStats(modelResiduals()).median || 0
       const rows = [...perCam.entries()]
         .map(([uuid, rs]) => ({ uuid, name: imageByUuid(uuid)?.name ?? uuid, s: numStats(rs) }))
@@ -1397,7 +1384,7 @@ async function reconstructSingleModel(input, hooks = {}) {
     // ("did it improve" becomes a number, not a feeling). Persisted next to
     // georef in reconstruction.json by the store.
     const finalStats = modelReprojStats()
-    const nPoints = points3d.length
+    const nPoints = tracks.liveCount()
     const pct3plusViewTracks = nPoints ? (100 * (tracks3 + tracks4) / nPoints) : 0
     // Diagnose coherent blocks left outside the chosen incremental model. This is
     // materially different from isolated failures: a sizeable remaining component
@@ -1522,8 +1509,8 @@ async function reconstructSingleModel(input, hooks = {}) {
     report('finalize', 1, 'Finalising model…', { done: cameras.size, total: imgs.length })
     // A run that finishes with no points (or a single camera) is a failed
     // reconstruction, not a success — log it red so it doesn't read as green.
-    const degenerate = points3d.length === 0 || cameras.size < 2
-    log(`Reconstruction complete: ${cameras.size} cameras, ${points3d.length} points, `
+    const degenerate = tracks.liveCount() === 0 || cameras.size < 2
+    log(`Reconstruction complete: ${cameras.size} cameras, ${tracks.liveCount()} points, `
       + `final reprojection ${fmtStats(finalStats)}`,
       degenerate ? 'error' : 'success', 'Reconstruction')
     log(`Reconstruction summary: ${summary.nCameras} cameras, ${summary.nPoints} points, `

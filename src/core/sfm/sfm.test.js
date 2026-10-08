@@ -13,6 +13,7 @@ import { distortPixel } from './distortion.js'
 import { Uint32PairList } from './matchCodec.js'
 import { canonicalFrame } from './fiducials.js'
 import { keypointSetFrom, mapPositions } from './keypointSet.js'
+import { tracksFrom, pointsOf } from './trackStore.testutil.js'
 
 beforeAll(async () => {
   const wasmUrl = new URL('../../wasm/reconstruction/reconstruction_bg.wasm', import.meta.url)
@@ -563,70 +564,74 @@ describe('retriangulatePairs / mergeSplitTracks (A3)', () => {
   const ts = Rs.map((R, i) => mv(R, centers[i]).map((v) => -v))
   const uuids = ['c0', 'c1', 'c2']
   const cameras = new Map(uuids.map((u, i) => [u, { R: Rs[i], t: ts[i], K: Kobj }]))
-  const kpOf = new Map(uuids.map((u, i) => [u, keypointSetFrom([project(Rs[i], ts[i], W)])])) // one kp each
-  const keypointsOf = (uuid) => kpOf.get(uuid) ?? null
+  const kpSets = uuids.map((u, i) => keypointSetFrom([project(Rs[i], ts[i], W)])) // one kp each
+  const keypointsAt = (img) => kpSets[img] ?? null
 
   it('retriangulates an unassigned match into a new 2-view point', async () => {
-    const points3d = []
+    const { tracks, ids } = tracksFrom([], uuids)
     const triangulate = async () => [{ x: W[0], y: W[1], z: W[2], srcIdx: 0 }]
     const { added } = await retriangulatePairs({
-      points3d, cameras, pairs: [{ idA: 'c0', idB: 'c1', matches: [[0, 0]] }],
-      keypointsOf, maxReprojPx: 2, triangulate,
+      tracks, ids, cameras, pairs: [{ idA: 'c0', idB: 'c1', matches: [[0, 0]] }],
+      keypointsAt, maxReprojPx: 2, triangulate,
     })
     expect(added).toBe(1)
-    expect(points3d).toHaveLength(1)
-    expect([...points3d[0].views.entries()].sort()).toEqual([['c0', 0], ['c1', 0]])
+    const pts = pointsOf(tracks, ids)
+    expect(pts).toHaveLength(1)
+    expect([...pts[0].views.entries()].sort()).toEqual([['c0', 0], ['c1', 0]])
   })
 
   it('rejects a retriangulated point that reprojects outside the gate', async () => {
-    const points3d = []
+    const { tracks, ids } = tracksFrom([], uuids)
     const triangulate = async () => [{ x: 5, y: 5, z: 10, srcIdx: 0 }] // wrong position
     const { added } = await retriangulatePairs({
-      points3d, cameras, pairs: [{ idA: 'c0', idB: 'c1', matches: [[0, 0]] }],
-      keypointsOf, maxReprojPx: 2, triangulate,
+      tracks, ids, cameras, pairs: [{ idA: 'c0', idB: 'c1', matches: [[0, 0]] }],
+      keypointsAt, maxReprojPx: 2, triangulate,
     })
     expect(added).toBe(0)
-    expect(points3d).toHaveLength(0)
+    expect(tracks.liveCount()).toBe(0)
   })
 
   it('rejects a low-parallax point even when it reprojects perfectly', async () => {
-    const points3d = []
+    const { tracks, ids } = tracksFrom([], uuids)
     const triangulate = async () => [{ x: W[0], y: W[1], z: W[2], srcIdx: 0 }]
     const { added, lowParallax } = await retriangulatePairs({
-      points3d, cameras, pairs: [{ idA: 'c0', idB: 'c1', matches: [[0, 0]] }],
-      keypointsOf, maxReprojPx: 2, minTriAngleDeg: 20, triangulate,
+      tracks, ids, cameras, pairs: [{ idA: 'c0', idB: 'c1', matches: [[0, 0]] }],
+      keypointsAt, maxReprojPx: 2, minTriAngleDeg: 20, triangulate,
     })
     expect(added).toBe(0)
     expect(lowParallax).toBe(1)
-    expect(points3d).toHaveLength(0)
+    expect(tracks.liveCount()).toBe(0)
   })
 
   it('merges two points that are the same feature split across a match', () => {
     const p1 = { ...ptAt(W), views: new Map([['c0', 0], ['c1', 0]]) }
     const p2 = { ...ptAt(W), views: new Map([['c2', 0]]) }
+    const { tracks, ids } = tracksFrom([p1, p2], uuids)
     const res = mergeSplitTracks({
-      points3d: [p1, p2], cameras,
+      tracks, ids, cameras,
       pairs: [{ idA: 'c0', idB: 'c2', matches: [[0, 0]] }], // links p1(c0) ↔ p2(c2)
-      keypointsOf, maxReprojPx: 2,
+      keypointsAt, maxReprojPx: 2,
     })
     expect(res.merged).toBe(1)
-    expect(res.points3d).toHaveLength(1)
-    expect([...res.points3d[0].views.keys()].sort()).toEqual(['c0', 'c1', 'c2'])
+    const pts = pointsOf(tracks, ids)
+    expect(pts).toHaveLength(1)
+    expect([...pts[0].views.keys()].sort()).toEqual(['c0', 'c1', 'c2'])
   })
 
   it('does not merge when the union would put two keypoints in one image', () => {
     const p1 = { ...ptAt(W), views: new Map([['c0', 0], ['c2', 0]]) }
     const p2 = { ...ptAt(W), views: new Map([['c2', 1]]) } // c2 already in p1 at kp 0
+    const { tracks, ids } = tracksFrom([p1, p2], uuids)
     const res = mergeSplitTracks({
-      points3d: [p1, p2], cameras,
+      tracks, ids, cameras,
       pairs: [{ idA: 'c0', idB: 'c2', matches: [[0, 1]] }],
       // c2's keypoint 1 sits at W's projection too.
-      keypointsOf: (uuid) => (uuid === 'c2'
-        ? keypointSetFrom([project(Rs[2], ts[2], W), project(Rs[2], ts[2], W)]) : keypointsOf(uuid)),
+      keypointsAt: (img) => (img === 2
+        ? keypointSetFrom([project(Rs[2], ts[2], W), project(Rs[2], ts[2], W)]) : keypointsAt(img)),
       maxReprojPx: 2,
     })
     expect(res.merged).toBe(0)
-    expect(res.points3d).toHaveLength(2)
+    expect(tracks.liveCount()).toBe(2)
   })
 })
 
@@ -640,87 +645,77 @@ describe('completeTracks', () => {
   const ts = Rs.map((R, i) => mv(R, centers[i]).map((v) => -v))
   const uuids = ['c0', 'c1', 'c2', 'c3']
   const cameras = new Map(uuids.map((u, i) => [u, { R: Rs[i], t: ts[i], K: Kobj }]))
-  const kpOf = new Map(uuids.map((u, i) => {
+  const kpSets = uuids.map((u, i) => {
     const k = project(Rs[i], ts[i], W)
-    return [u, keypointSetFrom([k, { x: k.x + 40, y: k.y }])]
-  }))
-  const keypointsOf = (uuid) => kpOf.get(uuid) ?? null
+    return keypointSetFrom([k, { x: k.x + 40, y: k.y }])
+  })
+  const keypointsAt = (img) => kpSets[img] ?? null
   const twoView = () => ({ ...ptAt(W), views: new Map([['c0', 0], ['c1', 0]]) })
-  const opts = { cameras, keypointsOf, maxReprojPx: 2 }
+  // A store holding `points`, and completeTracks over it; returns the result and the
+  // points read back.
+  const run = (points, { pairs, cameras: cams = cameras, maxRounds, keypointsAt: kpAt = keypointsAt }) => {
+    const { tracks, ids } = tracksFrom(points, uuids)
+    const res = completeTracks({ tracks, ids, cameras: cams, pairs, keypointsAt: kpAt, maxReprojPx: 2, maxRounds })
+    return { res, pts: pointsOf(tracks, ids), tracks, ids }
+  }
 
   it('adds the unassigned endpoint of a one-endpoint match and counts the lift', () => {
-    const pt = twoView()
-    const res = completeTracks({ ...opts, points3d: [pt], pairs: [{ idA: 'c0', idB: 'c2', matches: [[0, 0]] }] })
+    const { res, pts } = run([twoView()], { pairs: [{ idA: 'c0', idB: 'c2', matches: [[0, 0]] }] })
     expect(res).toMatchObject({ added: 1, lifted: 1 })
-    expect([...pt.views.entries()].sort()).toEqual([['c0', 0], ['c1', 0], ['c2', 0]])
+    expect([...pts[0].views.entries()].sort()).toEqual([['c0', 0], ['c1', 0], ['c2', 0]])
   })
 
   it('chains across rounds (A↔C enables C↔D) until nothing more is added', () => {
     // c2↔c3 comes first, so in round 1 neither endpoint is assigned yet.
     const pairs = [{ idA: 'c2', idB: 'c3', matches: [[0, 0]] }, { idA: 'c0', idB: 'c2', matches: [[0, 0]] }]
-    const one = twoView()
-    expect(completeTracks({ ...opts, points3d: [one], pairs, maxRounds: 1 }).added).toBe(1)
-    expect(one.views.has('c3')).toBe(false)
-    const many = twoView()
-    const res = completeTracks({ ...opts, points3d: [many], pairs, maxRounds: 5 })
-    expect(res).toMatchObject({ added: 2, rounds: 3, lifted: 1 })
-    expect([...many.views.keys()].sort()).toEqual(['c0', 'c1', 'c2', 'c3'])
+    const one = run([twoView()], { pairs, maxRounds: 1 })
+    expect(one.res.added).toBe(1)
+    expect(one.pts[0].views.has('c3')).toBe(false)
+    const many = run([twoView()], { pairs, maxRounds: 5 })
+    expect(many.res).toMatchObject({ added: 2, rounds: 3, lifted: 1 })
+    expect([...many.pts[0].views.keys()].sort()).toEqual(['c0', 'c1', 'c2', 'c3'])
   })
 
   it('rejects an observation outside the reprojection gate', () => {
-    const pt = twoView()
-    const res = completeTracks({ ...opts, points3d: [pt], pairs: [{ idA: 'c0', idB: 'c2', matches: [[0, 1]] }] })
+    const { res, pts } = run([twoView()], { pairs: [{ idA: 'c0', idB: 'c2', matches: [[0, 1]] }] })
     expect(res.added).toBe(0)
-    expect(pt.views.has('c2')).toBe(false)
+    expect(pts[0].views.has('c2')).toBe(false)
   })
 
   it('never gives a track a second keypoint in the same image, and skips both/neither-assigned matches', () => {
     const pt = { ...ptAt(W), views: new Map([['c0', 0], ['c2', 0]]) }
     const other = { ...ptAt(W), views: new Map([['c1', 1]]) }
-    const res = completeTracks({
-      ...opts,
-      points3d: [pt, other],
+    const { res, pts } = run([pt, other], {
       pairs: [
         { idA: 'c0', idB: 'c2', matches: [[0, 1]] }, // c2 already in the track (kp 0)
         { idA: 'c0', idB: 'c1', matches: [[0, 1]] }, // both endpoints assigned → merge's job
         { idA: 'c1', idB: 'c3', matches: [[0, 0]] }, // neither assigned → retriangulation's job
       ],
       // c2's keypoint 1 is no decoy here: it sits on W's projection as well.
-      keypointsOf: (uuid) => (uuid === 'c2'
-        ? mapPositions(kpOf.get('c2'), (x, y, k) => (k === 1 ? { x: x - 40, y } : { x, y })) : keypointsOf(uuid)),
+      keypointsAt: (img) => (img === 2
+        ? mapPositions(kpSets[2], (x, y, k) => (k === 1 ? { x: x - 40, y } : { x, y })) : keypointsAt(img)),
     })
     expect(res.added).toBe(0)
-    expect(pt.views.get('c2')).toBe(0)
+    expect(pts[0].views.get('c2')).toBe(0)
   })
 
   it('ignores pairs with an unregistered image', () => {
-    const pt = twoView()
     const partial = new Map([...cameras].filter(([u]) => u !== 'c3'))
-    const res = completeTracks({
-      ...opts, cameras: partial, points3d: [pt],
+    const { res, pts } = run([twoView()], {
+      cameras: partial,
       pairs: [
         { idA: 'c0', idB: 'c3', matches: [[0, 0]] }, // c3 not registered
         { idA: 'c1', idB: 'c2', matches: [[0, 0]] },
       ],
     })
     expect(res).toMatchObject({ added: 1 })
-    expect(pt.views.has('c3')).toBe(false)
-    expect(pt.views.get('c2')).toBe(0)
+    expect(pts[0].views.has('c3')).toBe(false)
+    expect(pts[0].views.get('c2')).toBe(0)
   })
 
-  it('updates a caller-supplied live index through its addView', () => {
-    const pt = twoView()
-    const index = new Map([['c0', new Map([[0, pt]])], ['c1', new Map([[0, pt]])]])
-    const calls = []
-    const addView = (p, uuid, kp) => {
-      calls.push([uuid, kp]); p.views.set(uuid, kp)
-      if (!index.has(uuid)) index.set(uuid, new Map())
-      index.get(uuid).set(kp, p)
-    }
-    // points3d is deliberately empty: with an index supplied it must not be re-indexed.
-    completeTracks({ ...opts, points3d: [], pairs: [{ idA: 'c1', idB: 'c2', matches: [[0, 0]] }], index, addView })
-    expect(calls).toEqual([['c2', 0]])
-    expect(index.get('c2').get(0)).toBe(pt)
+  it('claims the added keypoint in the store\'s live index', () => {
+    const { tracks, ids } = run([twoView()], { pairs: [{ idA: 'c1', idB: 'c2', matches: [[0, 0]] }] })
+    expect(tracks.pointAt(ids.img('c2'), 0)).toBe(0)
   })
 })
 
@@ -760,21 +755,23 @@ describe('pruneFinalTwoViewTracks', () => {
   it('removes uncorroborated 2-view points when a healthy multi-view core exists', () => {
     const strong = Array.from({ length: 80 }, () => track(['a', 'b', 'c']))
     const fragile = Array.from({ length: 20 }, () => track(['a', 'b']))
-    const res = pruneFinalTwoViewTracks([...strong, ...fragile])
+    const { tracks, ids } = tracksFrom([...strong, ...fragile], ['a', 'b', 'c'])
+    const res = pruneFinalTwoViewTracks(tracks)
     expect(res.applied).toBe(true)
     expect(res.removed).toBe(20)
-    expect(res.points3d).toHaveLength(80)
-    expect(res.points3d.every((pt) => pt.views.size >= 3)).toBe(true)
+    const pts = pointsOf(tracks, ids)
+    expect(pts).toHaveLength(80)
+    expect(pts.every((pt) => pt.views.size >= 3)).toBe(true)
   })
 
   it('keeps 2-view points when pruning would erase a weak or tiny model', () => {
     const strong = Array.from({ length: 10 }, () => track(['a', 'b', 'c']))
     const fragile = Array.from({ length: 90 }, () => track(['a', 'b']))
-    const input = [...strong, ...fragile]
-    const res = pruneFinalTwoViewTracks(input)
+    const { tracks } = tracksFrom([...strong, ...fragile], ['a', 'b', 'c'])
+    const res = pruneFinalTwoViewTracks(tracks)
     expect(res.applied).toBe(false)
     expect(res.removed).toBe(0)
-    expect(res.points3d).toBe(input)
+    expect(tracks.liveCount()).toBe(100)
   })
 })
 

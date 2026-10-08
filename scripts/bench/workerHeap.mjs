@@ -3,7 +3,10 @@
 // The renderer's `performance.memory` says nothing about the SfM worker, which is a
 // separate V8 isolate with its own ~4 GB ceiling — the one the Monster run died at.
 // This attaches to every dedicated worker of the page and polls
-// `Runtime.getHeapUsage`, keeping the peak per *segment*. The caller closes a segment
+// `Runtime.getHeapUsage`, keeping the peak per *segment*. Two numbers: the V8 heap
+// (`usedSize` — JS objects, the ~4 GB per-isolate ceiling) and that plus the
+// ArrayBuffer backing stores (`backingStorageSize` — typed arrays live outside the
+// heap, so they do not count against the ceiling but do count as memory). The caller closes a segment
 // by name (`mark`), typically when a stage-boundary log line arrives, so the result
 // reads "peak while registering", "peak during the post-filter passes", and so on.
 //
@@ -29,7 +32,7 @@ export async function startWorkerHeapSampler(page, { intervalMs = 250 } = {}) {
   })
   cdp.on('Target.attachedToTarget', ({ sessionId, targetInfo, waitingForDebugger }) => {
     if (targetInfo.type !== 'worker') return
-    workers.set(sessionId, { url: targetInfo.url, peak: 0 })
+    workers.set(sessionId, { url: targetInfo.url, peak: 0, peakWithBuffers: 0 })
     if (waitingForDebugger) send(sessionId, 'Runtime.runIfWaitingForDebugger')
   })
   cdp.on('Target.detachedFromTarget', ({ sessionId }) => workers.delete(sessionId))
@@ -37,8 +40,8 @@ export async function startWorkerHeapSampler(page, { intervalMs = 250 } = {}) {
   // Playwright's page session without touching its own (flat) attachment.
   await cdp.send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: false, flatten: false })
 
-  let segPeak = 0, segWorker = null
-  const segments = [] // { label, peakBytes, worker }
+  let segPeak = 0, segWorker = null, segPeakBuf = 0
+  const segments = [] // { label, peakBytes, peakWithBuffersBytes, worker }
   let busy = false
   const timer = setInterval(async () => {
     if (busy) return
@@ -47,8 +50,11 @@ export async function startWorkerHeapSampler(page, { intervalMs = 250 } = {}) {
       await Promise.all([...workers].map(async ([sessionId, w]) => {
         const r = await send(sessionId, 'Runtime.getHeapUsage')
         if (!r) return
+        const withBuf = r.usedSize + (r.backingStorageSize ?? 0)
         if (r.usedSize > w.peak) w.peak = r.usedSize
+        if (withBuf > w.peakWithBuffers) w.peakWithBuffers = withBuf
         if (r.usedSize > segPeak) { segPeak = r.usedSize; segWorker = sessionId }
+        if (withBuf > segPeakBuf) segPeakBuf = withBuf
       }))
     } finally { busy = false }
   }, intervalMs)
@@ -56,8 +62,8 @@ export async function startWorkerHeapSampler(page, { intervalMs = 250 } = {}) {
   return {
     // Close the current segment under `label` and start the next one.
     mark(label) {
-      segments.push({ label, peakBytes: segPeak, worker: segWorker })
-      segPeak = 0; segWorker = null
+      segments.push({ label, peakBytes: segPeak, peakWithBuffersBytes: segPeakBuf, worker: segWorker })
+      segPeak = 0; segWorker = null; segPeakBuf = 0
     },
     // Segments since the last take(), plus each live worker's overall peak.
     take() {

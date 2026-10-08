@@ -284,7 +284,9 @@ try {
       const h = heap.take()
       r.workerHeap = h
       const gb = (v) => `${(v / 1024 ** 3).toFixed(2)} GB`
-      for (const seg of h.segments) console.log(`== worker heap ${key} ▸ ${seg.label}: ${gb(seg.peakBytes)}`)
+      for (const seg of h.segments) {
+        console.log(`== worker heap ${key} ▸ ${seg.label}: ${gb(seg.peakBytes)} V8 heap, ${gb(seg.peakWithBuffersBytes)} with ArrayBuffers`)
+      }
     }
     result.stages[key] = r
     const { settings: _s, model: _m, workerHeap: _w, ...numbers } = r

@@ -18,30 +18,44 @@ export function isObservationList(o) {
 }
 
 /**
- * Observations of every point in every camera of `camIdxOf`, in point order and,
- * within a point, in the order of its views.
- * @param {Array<{views: Map<string, number>}>} points3d
- * @param {(uuid: string) => number | undefined} camIdxOf   undefined / −1 ⇒ skip
- * @param {(uuid: string) => {n:number, xy:Float64Array} | null | undefined} keypointsOf
+ * Observations of every live point of `tracks` (trackStore.js) in every camera of
+ * `camIdxOf`, in point order and, within a point, in the order of its views. Point
+ * index in the list = the point's rank among the live points, which is its index in
+ * the matching flat position array (`trackPositions`).
+ * @param {object} tracks
+ * @param {Int32Array} ids                      tracks.liveIds() — rank → point id
+ * @param {(img: number) => number} camIdxOf    −1 ⇒ skip
+ * @param {(img: number) => {n:number, xy:Float64Array} | null | undefined} keypointsAt
  *   the image's KeypointSet (keypointSet.js)
  */
-export function buildBaObservations(points3d, camIdxOf, keypointsOf) {
+export function buildBaObservations(tracks, ids, camIdxOf, keypointsAt) {
   let cap = 0
-  for (const pt of points3d) cap += pt.views.size
+  for (let r = 0; r < ids.length; r++) cap += tracks.viewCount(ids[r])
   const cam = new Int32Array(cap), pt = new Int32Array(cap)
   const x = new Float64Array(cap), y = new Float64Array(cap)
   let n = 0
-  for (let pi = 0; pi < points3d.length; pi++) {
-    for (const [uuid, kpIdx] of points3d[pi].views) {
-      const ci = camIdxOf(uuid)
-      if (ci == null || ci === -1) continue
-      const set = keypointsOf(uuid)
-      if (!hasKp(set, kpIdx)) continue
-      cam[n] = ci; pt[n] = pi; x[n] = set.xy[2 * kpIdx]; y[n] = set.xy[2 * kpIdx + 1]
+  for (let r = 0; r < ids.length; r++) {
+    tracks.forEachView(ids[r], (img, kpIdx) => {
+      const ci = camIdxOf(img)
+      if (ci == null || ci === -1) return
+      const set = keypointsAt(img)
+      if (!hasKp(set, kpIdx)) return
+      cam[n] = ci; pt[n] = r; x[n] = set.xy[2 * kpIdx]; y[n] = set.xy[2 * kpIdx + 1]
       n++
-    }
+    })
   }
   return { n, cam, pt, x, y, wx: null, wy: null }
+}
+
+/** Positions of the points `ids` as one flat Float64Array [x0,y0,z0, x1,…], plus `extra` [{x,y,z}]. */
+export function trackPositions(tracks, ids, extra = []) {
+  const pos = new Float64Array(3 * (ids.length + extra.length))
+  for (let r = 0; r < ids.length; r++) {
+    const p = ids[r]
+    pos[3 * r] = tracks.x(p); pos[3 * r + 1] = tracks.y(p); pos[3 * r + 2] = tracks.z(p)
+  }
+  extra.forEach((q, i) => { const j = 3 * (ids.length + i); pos[j] = q.x; pos[j + 1] = q.y; pos[j + 2] = q.z })
+  return pos
 }
 
 /**

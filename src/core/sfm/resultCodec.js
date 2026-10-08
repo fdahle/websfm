@@ -166,6 +166,58 @@ export function compactPointRecords(points, { colorOf, pixelOf, consume = false 
   })
 }
 
+// The same compact result straight from the solver's TrackStore (trackStore.js): live
+// points in order, each point's views in order — identical buffers to
+// compactPointRecords over the equivalent Map-backed points.
+//   uuidOf(img) → uuid; colorOf(p) → [r,g,b] | null; pixelOf(img, kp) → [x, y] | null
+export function compactTrackRecords(tracks, { uuidOf, colorOf, pixelOf }) {
+  const ids = tracks.liveIds()
+  const count = ids.length
+  const pos = new Float64Array(count * 3)
+  const vcount = new Uint32Array(count)
+  let totalViews = 0
+  for (let i = 0; i < count; i++) {
+    const p = ids[i]
+    pos[i * 3] = tracks.x(p); pos[i * 3 + 1] = tracks.y(p); pos[i * 3 + 2] = tracks.z(p)
+    const n = tracks.viewCount(p)
+    vcount[i] = n
+    totalViews += n
+  }
+  const col = new Uint8Array(count * 3)
+  const colorMask = new Uint8Array(count)
+  let hasColor = false
+  const vcam = new Uint32Array(totalViews)
+  const vkp = new Uint32Array(totalViews)
+  const vx = new Float32Array(totalViews).fill(NaN)
+  const vy = new Float32Array(totalViews).fill(NaN)
+  const viewUuids = []
+  const cameraIndex = new Map()
+  let vi = 0
+  for (let i = 0; i < count; i++) {
+    const p = ids[i]
+    const color = colorOf(p)
+    if (color) {
+      hasColor = true
+      col[i * 3] = color[0]; col[i * 3 + 1] = color[1]; col[i * 3 + 2] = color[2]
+      colorMask[i] = 1
+    }
+    tracks.forEachView(p, (img, kp) => {
+      const uuid = uuidOf(img)
+      let ci = cameraIndex.get(uuid)
+      if (ci === undefined) { ci = viewUuids.length; cameraIndex.set(uuid, ci); viewUuids.push(uuid) }
+      vcam[vi] = ci
+      vkp[vi] = kp
+      const px = pixelOf(img, kp)
+      if (px) { vx[vi] = px[0]; vy[vi] = px[1] }
+      vi++
+    })
+  }
+  return makePackedPoints({
+    pos, col: hasColor ? col : null, colorMask: hasColor ? colorMask : null,
+    viewUuids, vcount, vcam, vkp, vx, vy,
+  })
+}
+
 function packModel(model, transfer) {
   const points = model?.points || []
   const pointCount = points.length
