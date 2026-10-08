@@ -1,4 +1,5 @@
 import { fundamentalToEssential, recoverPose, triangulateDlt } from './reconstruction.js'
+import { hasKp, kpX, kpY } from './keypointSet.js'
 import { I3, essentialSingularValues } from './rotations.js'
 import { toNorm, camToP34flat } from './tracks.js'
 import { projectPoint, medianTriangulationAngle } from './geometry.js'
@@ -33,11 +34,10 @@ export async function selectInitPair(
         const cam = camById.get(uuid)
         const img = imageByUuid(uuid)
         if (!cam || !img) return
-        const kp = img.keypoints?.[kpIdx]
-        if (!kp) return
+        if (!hasKp(img.kp, kpIdx)) return
         const proj = projectPoint(cam, pt.x, pt.y, pt.z)
         if (!proj) return
-        residuals.push(Math.hypot(proj.u - kp.x, proj.v - kp.y))
+        residuals.push(Math.hypot(proj.u - kpX(img.kp, kpIdx), proj.v - kpY(img.kp, kpIdx)))
       })
     }
     return numStats(residuals)
@@ -52,8 +52,8 @@ export async function selectInitPair(
     const E = fundamentalToEssential(entry.F, KA, KB)
     const esv = essentialSingularValues(E)
     const matches = entry.matches // [[ia, ib], ...]
-    const pa = matches.map(([ia]) => iA.keypoints[ia])
-    const pb = matches.map(([, ib]) => iB.keypoints[ib])
+    const pa = matches.map(([ia]) => ({ x: kpX(iA.kp, ia), y: kpY(iA.kp, ia) }))
+    const pb = matches.map(([, ib]) => ({ x: kpX(iB.kp, ib), y: kpY(iB.kp, ib) }))
     const pose = await recoverPose(pa, pb, E, KA, KB)
     if (!pose) return { ok: false, reason: 'pose recovery (essential decomposition) failed' }
 

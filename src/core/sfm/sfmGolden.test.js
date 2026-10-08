@@ -14,6 +14,8 @@
 // `write` also runs every scene twice and fails unless both runs are identical, which
 // is the plan's precondition: the gate is only meaningful on a deterministic solver.
 // WEBSFM_SFM_GOLDEN_FILE overrides the location (default: the OS temp directory).
+// WEBSFM_SFM_GOLDEN_INPUTS adds real-data scenes: bench SfM input dumps (comma-separated
+// paths; scripts/bench `dumpSfmInput`).
 
 import { readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -22,7 +24,7 @@ import { fileURLToPath } from 'node:url'
 import { beforeAll, describe, it, expect } from 'vitest'
 
 import initRecon from '../../wasm/reconstruction/reconstruction.js'
-import { GOLDEN_SCENES, runGoldenScene, firstDiff } from './sfmGolden.testutil.js'
+import { goldenScenes, runGoldenScene, firstDiff } from './sfmGolden.testutil.js'
 
 const MODE = process.env.WEBSFM_SFM_GOLDEN
 const FILE = process.env.WEBSFM_SFM_GOLDEN_FILE || join(tmpdir(), 'websfm-sfm-golden.json')
@@ -35,7 +37,7 @@ describe.skipIf(!MODE)('SfM golden output (bit-identical refactor gate)', () => 
 
   it(`${MODE} ${FILE}`, async () => {
     const got = {}
-    for (const name of Object.keys(GOLDEN_SCENES)) {
+    for (const name of Object.keys(goldenScenes())) {
       got[name] = await runGoldenScene(name)
       if (MODE === 'write') {
         const again = await runGoldenScene(name)
@@ -50,7 +52,7 @@ describe.skipIf(!MODE)('SfM golden output (bit-identical refactor gate)', () => 
     const want = JSON.parse(await readFile(FILE, 'utf8'))
     // Round-trip `got` through JSON so both sides have the same number encoding.
     const norm = JSON.parse(JSON.stringify(got))
-    for (const name of Object.keys(GOLDEN_SCENES)) {
+    for (const name of Object.keys(goldenScenes())) {
       const d = firstDiff(want[name], norm[name], name)
       expect(d, `scene ${name} changed: ${d}`).toBeNull()
     }

@@ -12,6 +12,7 @@ import { resolveK } from './reconstruction.js'
 import { distortPixel } from './distortion.js'
 import { Uint32PairList } from './matchCodec.js'
 import { canonicalFrame } from './fiducials.js'
+import { keypointSetFrom, mapPositions } from './keypointSet.js'
 
 beforeAll(async () => {
   const wasmUrl = new URL('../../wasm/reconstruction/reconstruction_bg.wasm', import.meta.url)
@@ -562,15 +563,15 @@ describe('retriangulatePairs / mergeSplitTracks (A3)', () => {
   const ts = Rs.map((R, i) => mv(R, centers[i]).map((v) => -v))
   const uuids = ['c0', 'c1', 'c2']
   const cameras = new Map(uuids.map((u, i) => [u, { R: Rs[i], t: ts[i], K: Kobj }]))
-  const kpOf = new Map(uuids.map((u, i) => [u, [project(Rs[i], ts[i], W)]])) // one kp each
-  const keypointOf = (uuid, kp) => kpOf.get(uuid)?.[kp] ?? null
+  const kpOf = new Map(uuids.map((u, i) => [u, keypointSetFrom([project(Rs[i], ts[i], W)])])) // one kp each
+  const keypointsOf = (uuid) => kpOf.get(uuid) ?? null
 
   it('retriangulates an unassigned match into a new 2-view point', async () => {
     const points3d = []
     const triangulate = async () => [{ x: W[0], y: W[1], z: W[2], srcIdx: 0 }]
     const { added } = await retriangulatePairs({
       points3d, cameras, pairs: [{ idA: 'c0', idB: 'c1', matches: [[0, 0]] }],
-      keypointOf, maxReprojPx: 2, triangulate,
+      keypointsOf, maxReprojPx: 2, triangulate,
     })
     expect(added).toBe(1)
     expect(points3d).toHaveLength(1)
@@ -582,7 +583,7 @@ describe('retriangulatePairs / mergeSplitTracks (A3)', () => {
     const triangulate = async () => [{ x: 5, y: 5, z: 10, srcIdx: 0 }] // wrong position
     const { added } = await retriangulatePairs({
       points3d, cameras, pairs: [{ idA: 'c0', idB: 'c1', matches: [[0, 0]] }],
-      keypointOf, maxReprojPx: 2, triangulate,
+      keypointsOf, maxReprojPx: 2, triangulate,
     })
     expect(added).toBe(0)
     expect(points3d).toHaveLength(0)
@@ -593,7 +594,7 @@ describe('retriangulatePairs / mergeSplitTracks (A3)', () => {
     const triangulate = async () => [{ x: W[0], y: W[1], z: W[2], srcIdx: 0 }]
     const { added, lowParallax } = await retriangulatePairs({
       points3d, cameras, pairs: [{ idA: 'c0', idB: 'c1', matches: [[0, 0]] }],
-      keypointOf, maxReprojPx: 2, minTriAngleDeg: 20, triangulate,
+      keypointsOf, maxReprojPx: 2, minTriAngleDeg: 20, triangulate,
     })
     expect(added).toBe(0)
     expect(lowParallax).toBe(1)
@@ -606,7 +607,7 @@ describe('retriangulatePairs / mergeSplitTracks (A3)', () => {
     const res = mergeSplitTracks({
       points3d: [p1, p2], cameras,
       pairs: [{ idA: 'c0', idB: 'c2', matches: [[0, 0]] }], // links p1(c0) ↔ p2(c2)
-      keypointOf, maxReprojPx: 2,
+      keypointsOf, maxReprojPx: 2,
     })
     expect(res.merged).toBe(1)
     expect(res.points3d).toHaveLength(1)
@@ -619,7 +620,9 @@ describe('retriangulatePairs / mergeSplitTracks (A3)', () => {
     const res = mergeSplitTracks({
       points3d: [p1, p2], cameras,
       pairs: [{ idA: 'c0', idB: 'c2', matches: [[0, 1]] }],
-      keypointOf: (uuid, kp) => (uuid === 'c2' && kp === 1 ? project(Rs[2], ts[2], W) : keypointOf(uuid, kp)),
+      // c2's keypoint 1 sits at W's projection too.
+      keypointsOf: (uuid) => (uuid === 'c2'
+        ? keypointSetFrom([project(Rs[2], ts[2], W), project(Rs[2], ts[2], W)]) : keypointsOf(uuid)),
       maxReprojPx: 2,
     })
     expect(res.merged).toBe(0)
@@ -639,11 +642,11 @@ describe('completeTracks', () => {
   const cameras = new Map(uuids.map((u, i) => [u, { R: Rs[i], t: ts[i], K: Kobj }]))
   const kpOf = new Map(uuids.map((u, i) => {
     const k = project(Rs[i], ts[i], W)
-    return [u, [k, { x: k.x + 40, y: k.y }]]
+    return [u, keypointSetFrom([k, { x: k.x + 40, y: k.y }])]
   }))
-  const keypointOf = (uuid, kp) => kpOf.get(uuid)?.[kp] ?? null
+  const keypointsOf = (uuid) => kpOf.get(uuid) ?? null
   const twoView = () => ({ ...ptAt(W), views: new Map([['c0', 0], ['c1', 0]]) })
-  const opts = { cameras, keypointOf, maxReprojPx: 2 }
+  const opts = { cameras, keypointsOf, maxReprojPx: 2 }
 
   it('adds the unassigned endpoint of a one-endpoint match and counts the lift', () => {
     const pt = twoView()
@@ -682,7 +685,9 @@ describe('completeTracks', () => {
         { idA: 'c0', idB: 'c1', matches: [[0, 1]] }, // both endpoints assigned → merge's job
         { idA: 'c1', idB: 'c3', matches: [[0, 0]] }, // neither assigned → retriangulation's job
       ],
-      keypointOf: (uuid, kp) => (uuid === 'c2' && kp === 1 ? kpOf.get('c2')[0] : keypointOf(uuid, kp)),
+      // c2's keypoint 1 is no decoy here: it sits on W's projection as well.
+      keypointsOf: (uuid) => (uuid === 'c2'
+        ? mapPositions(kpOf.get('c2'), (x, y, k) => (k === 1 ? { x: x - 40, y } : { x, y })) : keypointsOf(uuid)),
     })
     expect(res.added).toBe(0)
     expect(pt.views.get('c2')).toBe(0)
@@ -721,17 +726,18 @@ describe('completeTracks', () => {
 
 describe('cloneSfmInput', () => {
   const input = () => ({
-    images: [{ uuid: 'a', keypoints: [{ x: 1, y: 2 }], descU8: new Uint8Array(128).fill(7) }],
+    images: [{ uuid: 'a', kp: keypointSetFrom([{ x: 1, y: 2 }]), descU8: new Uint8Array(128).fill(7) }],
     pairs: [{ idA: 'a', idB: 'b', matches: new Uint32PairList(Uint32Array.from([0, 0, 1, 1])) }],
   })
 
-  it('shares the read-only descriptors and copies everything a run mutates', () => {
+  it('shares the immutable descriptors and keypoint sets, copies everything a run mutates', () => {
     const src = input()
     const copy = cloneSfmInput(src)
     expect(copy.images[0].descU8).toBe(src.images[0].descU8) // shared, not cloned
-    expect(copy.images[0].keypoints).not.toBe(src.images[0].keypoints)
-    copy.images[0].keypoints[0].x = 99 // a fold on the working copy…
-    expect(src.images[0].keypoints[0].x).toBe(1) // …leaves the pristine input intact
+    expect(copy.images[0].kp).toBe(src.images[0].kp) // shared too: sets are never written
+    expect(copy.images[0]).not.toBe(src.images[0])
+    copy.images[0].kp = mapPositions(copy.images[0].kp, (x, y) => ({ x: x + 98, y })) // a fold…
+    expect(src.images[0].kp.xy[0]).toBe(1) // …replaces the copy's set; the pristine input is intact
     expect(src.images[0].descU8).toBeInstanceOf(Uint8Array) // the original still has it
     expect(copy.pairs[0].matches).toBeInstanceOf(Uint32PairList)
   })

@@ -7,7 +7,9 @@
 // plain data in and returns plain data out.
 //
 // Input:
-//   images:   [{ uuid, name, keypoints: [{x,y}, …], meta: { width, height, focalLength35 } | null }]
+//   images:   [{ uuid, name, keypoints, meta: { width, height, focalLength35 } | null }]
+//             keypoints: a KeypointSet (keypointSet.js; what the store sends) or
+//             [{x, y, color?}, …] (tests). reconstruct() turns them into `img.kp` sets.
 //   pairs:    [{ idA, idB, F: number[3][3], matches: [[ia,ib], …], inlierCount, status }]
 //             (only 'done' pairs are used; the store passes those)
 //   settings: tuning knobs (see destructuring below)
@@ -34,7 +36,7 @@ import {
   stagedSelfCalTerms, stagedSelfCalDeferred, SELF_CAL_BASE_TERMS,
   distortionIdentifiable, withoutDistortionTerms,
 } from './selfCalSchedule.js'
-import { fitComposedRadial, radialCurveOk } from './selfCalCompose.js'
+import { fitComposedRadialSets, radialCurveOk } from './selfCalCompose.js'
 import { validateSelfCalUpdate } from './selfCalGuard.js'
 import { adaptiveReprojThreshold, CLEANUP_THRESHOLD_DEFAULTS } from './cleanupThreshold.js'
 import { buildCameraPriorConstraints as buildSurveyPriorConstraints, qualifyingGcps, buildGcpAnchors } from './surveyConstraints.js'
@@ -48,6 +50,7 @@ import { wrapPackedMatches } from './matchCodec.js'
 import { compareRobustCost, projectFull } from './baAcceptance.js'
 import { guidedExtendTracks, auditGuidedAdditions } from './guidedExtension.js'
 import { buildBaObservations, appendObservations } from './baObservations.js'
+import { keypointSetFrom, hasKp, kpX, kpY, mapPositions } from './keypointSet.js'
 
 // Re-export the extracted pure modules so existing importers (sfm.test.js and any
 // others that reached for these through sfm.js) keep working unchanged.
@@ -185,14 +188,14 @@ async function reconstructSingleModel(input, hooks = {}) {
 
   // uuid → image, built once: it was a linear `images.find` per call, and it is called
   // per observation (BA, residuals) and per candidate keypoint (guided extension). The
-  // image list never changes within a run; folds replace `img.keypoints` on the same
+  // image list never changes within a run; folds replace `img.kp` on the same
   // object, so the map stays valid. First occurrence wins, as `find` did.
   const imageMap = new Map()
   for (const img of images) if (!imageMap.has(img.uuid)) imageMap.set(img.uuid, img)
   const imageByUuid = (uuid) => imageMap.get(uuid) || null
-  // An image's keypoint by index (null when either is missing). Shared by the BA
-  // observation builders, the track functions and guided extension.
-  const keypointOf = (uuid, kpIdx) => imageByUuid(uuid)?.keypoints?.[kpIdx] ?? null
+  // An image's KeypointSet (keypointSet.js), or null. Shared by the BA observation
+  // builders, the track functions and guided extension.
+  const keypointsOf = (uuid) => imageByUuid(uuid)?.kp ?? null
 
   // Local model state (was reactive refs in the store).
   const cameras = new Map()  // uuid → { R, t, K }
@@ -223,11 +226,11 @@ async function reconstructSingleModel(input, hooks = {}) {
         const cam = cameras.get(uuid)
         const img = imageByUuid(uuid)
         if (!cam || !cam.K || !img) return
-        const kp = img.keypoints?.[kpIdx]
-        if (!kp) return
+        const set = img.kp
+        if (!hasKp(set, kpIdx)) return
         const proj = projectPoint(cam, pt.x, pt.y, pt.z)
         if (!proj) return
-        residuals.push(Math.hypot(proj.u - kp.x, proj.v - kp.y))
+        residuals.push(Math.hypot(proj.u - kpX(set, kpIdx), proj.v - kpY(set, kpIdx)))
       })
     }
     return residuals
@@ -273,8 +276,8 @@ async function reconstructSingleModel(input, hooks = {}) {
   const pointColor = (views) => {
     const rs = [], gs = [], bs = []
     views.forEach((kpIdx, uuid) => {
-      const c = imageByUuid(uuid)?.keypoints?.[kpIdx]?.color
-      if (c) { rs.push(c[0]); gs.push(c[1]); bs.push(c[2]) }
+      const set = imageByUuid(uuid)?.kp
+      if (set?.hasColor?.[kpIdx]) { rs.push(set.rgb[3 * kpIdx]); gs.push(set.rgb[3 * kpIdx + 1]); bs.push(set.rgb[3 * kpIdx + 2]) }
     })
     if (!rs.length) return null
     const med = (a) => { a.sort((x, y) => x - y); return a[a.length >> 1] }
@@ -292,8 +295,8 @@ async function reconstructSingleModel(input, hooks = {}) {
     points: compactPointRecords(points3d, {
       colorOf: ({ views }) => pointColor(views),
       pixelOf: (uuid, kpIdx) => {
-        const kp = imageByUuid(uuid)?.keypoints?.[kpIdx]
-        return kp ? [kp.x, kp.y] : null
+        const set = imageByUuid(uuid)?.kp
+        return hasKp(set, kpIdx) ? [kpX(set, kpIdx), kpY(set, kpIdx)] : null
       },
       // `done()` is terminal for this solver instance. Releasing each mutable
       // Map-backed point as it is packed keeps finalisation below the solve peak.
@@ -512,7 +515,7 @@ async function reconstructSingleModel(input, hooks = {}) {
     // stage runs the same function to a fixpoint (completeTracksFinal below).
     const foldOneEndpointMatches = (gate) => completeTracks({
       points3d, cameras, pairs: donePairs,
-      keypointOf,
+      keypointsOf,
       maxReprojPx: gate, index: viewIndex, addView,
     }).added
 
@@ -528,7 +531,7 @@ async function reconstructSingleModel(input, hooks = {}) {
     const mergeTracks = (gate) => {
       const res = mergeSplitTracks({
         points3d, cameras, pairs: donePairs,
-        keypointOf,
+        keypointsOf,
         maxReprojPx: gate,
       })
       points3d = res.points3d
@@ -538,13 +541,14 @@ async function reconstructSingleModel(input, hooks = {}) {
     // Self-calibrated distortion bookkeeping (WS2). The sparse pipeline folds the
     // distortion out of the keypoints each self-cal pass (exact, in place); dense and
     // the run summary need ONE composed {k1,k2,k3} bag per sensor to reproduce that
-    // fold on the rasters. `pristineKpByUuid` snapshots each eligible image's keypoints
-    // *before the first fold* (post-ingest = pristine), and `selfCalDistBySensor` holds
+    // fold on the rasters. `pristineKpByUuid` keeps each eligible image's keypoint set
+    // from *before the first fold* (post-ingest = pristine) — a reference, free because
+    // sets are immutable (keypointSet.js) — and `selfCalDistBySensor` holds
     // the composed bag fitted from pristine→folded after each pass (selfCalCompose.js) —
     // replacing the old additive-k1 sum, which was wrong beyond first order. Declared
     // *before* registerImages: the interim BA self-calibrates f,k1 mid-registration
     // (D3), so runBundleAdjust's fold reads these during the registration call.
-    const pristineKpByUuid = new Map()      // uuid → keypoints snapshot (pre-fold)
+    const pristineKpByUuid = new Map()      // uuid → KeypointSet before the first fold
     const foldedTermsBySensor = new Map()   // sensorInt → { k2, k3 } ever folded into its keypoints
     const selfCalDistBySensor = new Map()   // sensorId → { k1, k2, k3, fitRmsPx }
 
@@ -597,7 +601,7 @@ async function reconstructSingleModel(input, hooks = {}) {
       const sensorOfCam = uuidList.map((u) => sensorIntByUuid.get(u) ?? -1)
       const camIdxOf = new Map(uuidList.map((u, i) => [u, i]))
 
-      const observations = buildBaObservations(points3d, (u) => camIdxOf.get(u), keypointOf)
+      const observations = buildBaObservations(points3d, (u) => camIdxOf.get(u), keypointsOf)
       log(`${label} — ${camList.length} cameras, ${points3d.length} points, `
         + `${observations.n} observations, ${iters} iters`, 'info', 'Reconstruction')
       // Diagnostic: where do the gross pre-solve residuals sit? Grouped by camera, split
@@ -809,7 +813,7 @@ async function reconstructSingleModel(input, hooks = {}) {
           const groupImgs = new Map() // sensorInt → [img,…]
           for (const img of imgs) {
             const g = sensorIntByUuid.get(img.uuid) ?? -1
-            if (!groupCal.has(g) || !img.keypoints?.length) continue
+            if (!groupCal.has(g) || !img.kp?.n) continue
             if (!groupImgs.has(g)) groupImgs.set(g, [])
             groupImgs.get(g).push(img)
           }
@@ -818,19 +822,17 @@ async function reconstructSingleModel(input, hooks = {}) {
             const rk = groupCal.get(g)
             const bag = { k1: rk.k1 || 0, k2: rk.k2 || 0, k3: rk.k3 || 0 }
             for (const img of gimgs) {
-              // Snapshot the pristine (post-ingest, pre-first-fold) keypoints once, so
-              // the composed fit below always maps pristine → fully-folded.
-              if (!pristineKpByUuid.has(img.uuid)) {
-                pristineKpByUuid.set(img.uuid, img.keypoints.map((kp) => ({ ...kp })))
-              }
+              // Keep the pristine (post-ingest, pre-first-fold) set once, so the
+              // composed fit below always maps pristine → fully-folded.
+              if (!pristineKpByUuid.has(img.uuid)) pristineKpByUuid.set(img.uuid, img.kp)
               // Fold EVERY image on a solved group — not just the registered ones. When
               // this runs during registration, the next candidate to resect must already
               // have undistorted keypoints + a pinhole Kmap or its PnP re-applies the
               // now-removed distortion. Kmap is the source of truth every PnP reads.
-              img.keypoints = img.keypoints.map((kp) => {
-                const u = undistortPixel(kp.x, kp.y, rk, bag)
-                foldedShift += Math.hypot(u.x - kp.x, u.y - kp.y); foldedN++
-                return { ...kp, x: u.x, y: u.y }
+              img.kp = mapPositions(img.kp, (x, y) => {
+                const u = undistortPixel(x, y, rk, bag)
+                foldedShift += Math.hypot(u.x - x, u.y - y); foldedN++
+                return u
               })
               moveGcpObs(img.uuid, (x, y) => undistortPixel(x, y, rk, bag))
               const k = Kmap.get(img.uuid)
@@ -842,16 +844,15 @@ async function reconstructSingleModel(input, hooks = {}) {
             // the summary. Pool all group keypoints for a well-constrained radial fit.
             const sid = gimgs[0].sensorId ?? null
             if (sid != null) {
-              const pris = [], fold = []
+              const setPairs = []
               for (const img of gimgs) {
                 const p = pristineKpByUuid.get(img.uuid)
-                if (!p) continue
-                for (let i = 0; i < img.keypoints.length; i++) { pris.push(p[i]); fold.push(img.keypoints[i]) }
+                if (p) setPairs.push({ pristine: p, folded: img.kp })
               }
               const ever = foldedTermsBySensor.get(g) ?? { k2: false, k3: false }
               const active = { k2: ever.k2 || (passTerms.k2 && !!rk.k2), k3: ever.k3 || (passTerms.k3 && !!rk.k3) }
               foldedTermsBySensor.set(g, active)
-              const composed = fitComposedRadial(pris, fold, rk, active)
+              const composed = fitComposedRadialSets(setPairs, rk, active)
               // Guard: sample the composed radial map to the image corner; a non-monotonic
               // curve or a runaway corner shift means the higher-order fit overfit. Warn
               // (staged gating makes this rare) so a bad calibration is visible in the log.
@@ -945,7 +946,7 @@ async function reconstructSingleModel(input, hooks = {}) {
             + `${(r.cameraPriorRmsAfter * constrained.fit.scale).toPrecision(3)} project units`, 'success', 'Reconstruction')
           continue
         }
-        const observations = buildBaObservations(points3d, (u) => camIdxOf.get(u), keypointOf)
+        const observations = buildBaObservations(points3d, (u) => camIdxOf.get(u), keypointsOf)
         const result = await bundleAdjust(camList, camList.map((c) => c.K), points3d, observations, {
           maxIters: baIterations, refineIntrinsics: 'none',
           sensorOfCam: uuidList.map((u) => sensorIntByUuid.get(u) ?? -1),
@@ -1008,7 +1009,7 @@ async function reconstructSingleModel(input, hooks = {}) {
         const constrainedCameras = buildCameraPriorConstraints(uuidList, { fit, frame })
 
         const observations = appendObservations(
-          buildBaObservations(points3d, (u) => camIdxOf.get(u), keypointOf), setup.observations)
+          buildBaObservations(points3d, (u) => camIdxOf.get(u), keypointsOf), setup.observations)
 
         log(`GCP-anchored bundle adjustment (round ${round + 1}/2) — `
           + `${anchors.length} GCP(s), seed scale ${fit.scale.toPrecision(4)}, `
@@ -1061,12 +1062,12 @@ async function reconstructSingleModel(input, hooks = {}) {
       for (const pt of points3d) {
         for (const [uuid, kpIdx] of [...pt.views]) {
           const cam = cameras.get(uuid)
-          const kp = imageByUuid(uuid)?.keypoints?.[kpIdx]
-          if (!cam || !kp) { pt.views.delete(uuid); obsRemoved++; continue }
+          const set = imageByUuid(uuid)?.kp
+          if (!cam || !hasKp(set, kpIdx)) { pt.views.delete(uuid); obsRemoved++; continue }
           // Cheirality: point must be in front of the camera.
           const zc = cam.R[2][0] * pt.x + cam.R[2][1] * pt.y + cam.R[2][2] * pt.z + cam.t[2]
           const proj = zc > 0 ? projectPoint(cam, pt.x, pt.y, pt.z) : null
-          if (!proj || Math.hypot(proj.u - kp.x, proj.v - kp.y) > maxReprojPx) {
+          if (!proj || Math.hypot(proj.u - kpX(set, kpIdx), proj.v - kpY(set, kpIdx)) > maxReprojPx) {
             pt.views.delete(uuid); obsRemoved++
           }
         }
@@ -1103,7 +1104,7 @@ async function reconstructSingleModel(input, hooks = {}) {
       rebuildViewIndex()
       const before = trackHist()
       const res = completeTracks({
-        points3d, cameras, pairs: donePairs, keypointOf,
+        points3d, cameras, pairs: donePairs, keypointsOf,
         maxReprojPx: filterMaxReprojPx, maxRounds: cfg.completeTracksMaxRounds,
         index: viewIndex, addView,
       })
@@ -1178,11 +1179,11 @@ async function reconstructSingleModel(input, hooks = {}) {
         report('retriangulate', 1, 'Retriangulating + merging tracks…', { done: cameras.size, total: imgs.length })
         const before = trackHist()
         const { added, lowParallax } = await retriangulatePairs({
-          points3d, cameras, pairs: donePairs, keypointOf,
+          points3d, cameras, pairs: donePairs, keypointsOf,
           maxReprojPx: filterMaxReprojPx, minTriAngleDeg: filterMinTriAngleDeg,
           triangulate: triangulateDlt,
         })
-        const mres = mergeSplitTracks({ points3d, cameras, pairs: donePairs, keypointOf, maxReprojPx: filterMaxReprojPx })
+        const mres = mergeSplitTracks({ points3d, cameras, pairs: donePairs, keypointsOf, maxReprojPx: filterMaxReprojPx })
         points3d = mres.points3d
         const merged = mres.merged
         const completed = completeTracksFinal('post-BA')
@@ -1230,7 +1231,7 @@ async function reconstructSingleModel(input, hooks = {}) {
             gatePx = Math.min(filterMaxReprojPx, cfg.guidedRadiusP90Mult * p90)
           }
           const g = guidedExtendTracks({
-            points3d, cameras, imageOf: imageByUuid, viewIndex, addView, gatePx,
+            points3d, cameras, keypointsOf, viewIndex, addView, gatePx,
             ratio: cfg.guidedRatio ?? 0.8, quantile: cfg.guidedQuantile ?? 0.9,
             onAdd: (pt, uuid, kp) => guidedAdds.push({ uuid, kp }),
             descOf: (uuid, k) => { const d = imageByUuid(uuid)?.descU8; return d && (k + 1) * 128 <= d.length ? { arr: d, off: k * 128 } : null },
@@ -1301,9 +1302,9 @@ async function reconstructSingleModel(input, hooks = {}) {
       logOutlierShare('post-filter residuals')
       if (guidedAdds.length) {
         const audit = auditGuidedAdditions(guidedAdds, points3d, (pt, uuid, kp) => {
-          const cam = cameras.get(uuid), k = imageByUuid(uuid)?.keypoints?.[kp]
-          const pr = cam?.K && k ? projectPoint(cam, pt.x, pt.y, pt.z) : null
-          return pr ? Math.hypot(pr.u - k.x, pr.v - k.y) : null
+          const cam = cameras.get(uuid), set = imageByUuid(uuid)?.kp
+          const pr = cam?.K && hasKp(set, kp) ? projectPoint(cam, pt.x, pt.y, pt.z) : null
+          return pr ? Math.hypot(pr.u - kpX(set, kp), pr.v - kpY(set, kp)) : null
         })
         guidedRecord.at(-1).audit = audit
         const f = (v) => (v == null ? '–' : v.toFixed(2))
@@ -1356,13 +1357,12 @@ async function reconstructSingleModel(input, hooks = {}) {
     {
       const perCam = new Map() // uuid → residuals[]
       for (const pt of points3d) pt.views.forEach((kpIdx, uuid) => {
-        const cam = cameras.get(uuid), img = imageByUuid(uuid)
-        const kp = img?.keypoints?.[kpIdx]
-        if (!cam || !kp) return
+        const cam = cameras.get(uuid), set = imageByUuid(uuid)?.kp
+        if (!cam || !hasKp(set, kpIdx)) return
         const proj = projectPoint(cam, pt.x, pt.y, pt.z)
         if (!proj) return
         if (!perCam.has(uuid)) perCam.set(uuid, [])
-        perCam.get(uuid).push(Math.hypot(proj.u - kp.x, proj.v - kp.y))
+        perCam.get(uuid).push(Math.hypot(proj.u - kpX(set, kpIdx), proj.v - kpY(set, kpIdx)))
       })
       const globalMed = numStats(modelResiduals()).median || 0
       const rows = [...perCam.entries()]
@@ -1542,19 +1542,32 @@ async function reconstructSingleModel(input, hooks = {}) {
 
 // A working copy of the SfM input (or of an image / pair list) for one sub-run. The
 // caller keeps the original as the pristine input for seed retries and secondary
-// models, because a run mutates its keypoints (ingest undistortion, the self-cal
-// fold) and pairs (refitted F). `descU8`, the guided-extension descriptors, is never
-// written, so every copy SHARES it: structuredClone doubled it, 128 B per keypoint —
-// 576 MB on the 4.5 M-keypoint Monster set, enough to fail the worker preflight.
+// models, because a run moves its keypoints (ingest undistortion, the self-cal fold)
+// and pairs (refitted F). Two image fields are SHARED, not cloned, because nothing
+// writes into them: `descU8`, the guided-extension descriptors (cloning doubled them,
+// 128 B per keypoint — 576 MB on the 4.5 M-keypoint Monster set), and `kp`, the
+// keypoint set — a move replaces `img.kp` with a new set on the copy and never writes
+// into the shared one (keypointSet.js). Only the small per-image records are copied.
+const SHARED_IMAGE_FIELDS = ['descU8', 'kp']
 export function cloneSfmInput(value) {
   const isList = Array.isArray(value)
   const list = isList ? value : value?.images
-  const desc = list ? list.map((im) => im?.descU8 ?? null) : null
-  const strip = (im) => (im?.descU8 ? { ...im, descU8: null } : im)
+  const shared = list ? list.map((im) => SHARED_IMAGE_FIELDS.map((f) => im?.[f] ?? null)) : null
+  const strip = (im) => {
+    if (!im || !SHARED_IMAGE_FIELDS.some((f) => im[f])) return im
+    const out = { ...im }
+    for (const f of SHARED_IMAGE_FIELDS) if (out[f]) out[f] = null
+    return out
+  }
   const src = isList ? value.map(strip) : list ? { ...value, images: list.map(strip) } : value
   const copy = structuredClone(src)
   const out = isList ? copy : copy?.images
-  if (desc && out) out.forEach((im, i) => { if (desc[i] && im) im.descU8 = desc[i] })
+  if (shared && out) {
+    out.forEach((im, i) => {
+      if (!im) return
+      SHARED_IMAGE_FIELDS.forEach((f, j) => { if (shared[i][j]) im[f] = shared[i][j] })
+    })
+  }
   // structuredClone drops the Uint32PairList prototype; re-wrap — including when the
   // value IS a pair list (secondary jobs clone `job.pairs` directly), which the old
   // helper skipped. A no-op for image lists (no `matches`).
@@ -1568,6 +1581,13 @@ export function cloneSfmInput(value) {
 // cameras independently agree in position, orientation and leave-one-out scale;
 // otherwise the valid model is returned separately for the store to preserve.
 export async function reconstruct(input, hooks = {}) {
+  // Keypoints as immutable typed-array sets (`img.kp`, keypointSet.js) from here on,
+  // shared by every sub-run's working copy. New image records, so the caller's objects
+  // are not touched.
+  input = {
+    ...input,
+    images: (input.images || []).map(({ keypoints, ...img }) => ({ ...img, kp: img.kp ?? keypointSetFrom(keypoints) })),
+  }
   // Resolve the detection-scale factor ONCE, from the full image set, and pin it
   // into `settings`. Every sub-run below spreads `input.settings`, so the primary,
   // each seed retry and each secondary model all apply identical reprojection

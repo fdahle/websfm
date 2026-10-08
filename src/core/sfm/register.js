@@ -22,6 +22,7 @@ import { solvePnp, triangulateDlt } from "./reconstruction.js"
 import { projectPoint, triangulationAngle, cameraCenter } from "./geometry.js"
 import { toNorm, camToP34flat, retriangulatePairs } from "./tracks.js"
 import { distortionIdentifiable, withoutDistortionTerms } from "./selfCalSchedule.js"
+import { hasKp, kpX, kpY } from "./keypointSet.js"
 
 // Depth of world point (x,y,z) along a flat 3×4 projection matrix's principal axis
 // (cheirality: positive ⇒ in front of the camera). Mirrors sfm.js's helper.
@@ -144,7 +145,7 @@ export async function registerImages(ctx) {
     selfCalOn && n >= distortionCalMinCams ? identifiableRefine(cfg.refineIntrinsics) : 'none'
   const rescueRefine = (n) =>
     !selfCalOn ? 'none' : identifiableRefine(n >= distortionCalMinCams ? cfg.refineIntrinsics : 'f')
-  const keypointOf = (uuid, kpIdx) => imageByUuid(uuid)?.keypoints?.[kpIdx] ?? null
+  const keypointsOf = (uuid) => imageByUuid(uuid)?.kp ?? null
 
   // Total inliers linking `uuid` to the already-registered set (cheap fallback
   // heuristic — used only to break ties when the model has no points yet).
@@ -231,9 +232,8 @@ export async function registerImages(ctx) {
     const pts3 = []; const pts2 = []; const newIdx = []
     for (const [pt, idx] of ptToIdx) {
       if (badPts.has(pt) || badIdx.has(idx)) continue
-      const kp = img.keypoints[idx]
-      if (!kp) continue
-      pts3.push(pt); pts2.push({ x: kp.x, y: kp.y }); newIdx.push(idx)
+      if (!hasKp(img.kp, idx)) continue
+      pts3.push(pt); pts2.push({ x: kpX(img.kp, idx), y: kpY(img.kp, idx) }); newIdx.push(idx)
     }
     return { pts3, pts2, newIdx }
   }
@@ -433,12 +433,12 @@ export async function registerImages(ctx) {
 
         // nNew ↔ Pnew (the new image), nReg ↔ Preg (the registered image).
         const nNew = pairsToTri.map(([ia, ib]) => {
-          const kp = img.keypoints[imgIsA ? ia : ib]
-          return toNorm(kp.x, kp.y, K)
+          const k = imgIsA ? ia : ib
+          return toNorm(kpX(img.kp, k), kpY(img.kp, k), K)
         })
         const nReg = pairsToTri.map(([ia, ib]) => {
-          const kp = regImg.keypoints[imgIsA ? ib : ia]
-          return toNorm(kp.x, kp.y, regCam.K)
+          const k = imgIsA ? ib : ia
+          return toNorm(kpX(regImg.kp, k), kpY(regImg.kp, k), regCam.K)
         })
 
         const newTri = await triangulateDlt(nNew, nReg, Pnew, Preg)
@@ -457,10 +457,10 @@ export async function registerImages(ctx) {
             // solve can pass cheirality and parallax while landing hundreds or thousands
             // of pixels off its own observations: on South Building every gross pre-solve
             // residual of the late interim BAs (up to 112,000 px) sat on such a point.
-            const kn = img.keypoints[newKp], kr = regImg.keypoints[regKp]
             const pn = projectPoint(newCam, x, y, z), pr = projectPoint(regCam, x, y, z)
-            if (!pn || !pr || Math.hypot(pn.u - kn.x, pn.v - kn.y) > filterMaxReprojPx
-              || Math.hypot(pr.u - kr.x, pr.v - kr.y) > filterMaxReprojPx) { badReproj++; continue }
+            if (!pn || !pr
+              || Math.hypot(pn.u - kpX(img.kp, newKp), pn.v - kpY(img.kp, newKp)) > filterMaxReprojPx
+              || Math.hypot(pr.u - kpX(regImg.kp, regKp), pr.v - kpY(regImg.kp, regKp)) > filterMaxReprojPx) { badReproj++; continue }
             // A keypoint can recur across this image's pairs; guard against the
             // live index so the same observation never lands in two different
             // points within one pass (the captured maps may be stale after adds).
@@ -552,7 +552,7 @@ export async function registerImages(ctx) {
         reportRegister('Rescue: retriangulating…')
         const { added } = await retriangulatePairs({
           points3d: getPoints3d(), cameras, pairs: donePairs,
-          keypointOf, maxReprojPx: filterMaxReprojPx,
+          keypointsOf, maxReprojPx: filterMaxReprojPx,
           minTriAngleDeg: filterMinTriAngleDeg, triangulate: triangulateDlt,
         })
         rebuildViewIndex()

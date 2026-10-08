@@ -4,6 +4,7 @@ import { beforeAll, describe, it, expect } from 'vitest'
 
 import initRecon from '../../wasm/reconstruction/reconstruction.js'
 import { selectInitPair } from './initPair.js'
+import { keypointSetFrom } from './keypointSet.js'
 
 beforeAll(async () => {
   const wasmUrl = new URL('../../wasm/reconstruction/reconstruction_bg.wasm', import.meta.url)
@@ -75,7 +76,7 @@ function makePair(idA, idB, nPoints, seed, baseline = 0.7) {
   }
   return {
     entry: { idA, idB, F: fundamental(RA, tA, RB, tB), matches, inlierCount: nPoints },
-    images: { [idA]: { name: idA, keypoints: kpA }, [idB]: { name: idB, keypoints: kpB } },
+    images: { [idA]: { name: idA, kp: keypointSetFrom(kpA) }, [idB]: { name: idB, kp: keypointSetFrom(kpB) } },
   }
 }
 

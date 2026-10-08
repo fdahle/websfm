@@ -37,6 +37,34 @@ function solveSmall(A, b) {
 // coeffs to fit — k1 is always on; k2/k3 join only when their bit was refined (a
 // column absent from the fit stays exactly 0). Returns { k1, k2, k3, fitRmsPx, n }.
 export function fitComposedRadial(pristineKps, foldedKps, K, active = {}) {
+  const n = Math.min(pristineKps.length, foldedKps.length)
+  return fitComposed((visit) => {
+    for (let i = 0; i < n; i++) {
+      const p = pristineKps[i], f = foldedKps[i]
+      if (p && f) visit(p.x, p.y, f.x, f.y)
+    }
+  }, K, active)
+}
+
+// The same fit over KeypointSets (keypointSet.js): `pairs` = [{ pristine, folded }],
+// one per image, pooled in order — no per-keypoint objects for a sensor's whole set.
+export function fitComposedRadialSets(pairs, K, active = {}) {
+  return fitComposed((visit) => {
+    for (const { pristine, folded } of pairs) {
+      const n = Math.min(pristine.n, folded.n)
+      const P = pristine.xy, F = folded.xy
+      for (let i = 0; i < n; i++) {
+        // A missing (NaN) keypoint is skipped, as a missing object was.
+        // eslint-disable-next-line no-self-compare
+        if (P[2 * i] === P[2 * i] && F[2 * i] === F[2 * i]) visit(P[2 * i], P[2 * i + 1], F[2 * i], F[2 * i + 1])
+      }
+    }
+  }, K, active)
+}
+
+// `forEachPair(visit)` calls visit(pristineX, pristineY, foldedX, foldedY) per pair, in
+// a fixed order; it is walked twice (normal equations, then the fit RMS).
+function fitComposed(forEachPair, K, active) {
   const { fx, fy, cx, cy } = K
   const cols = ['k1']
   if (active.k2) cols.push('k2')
@@ -47,13 +75,10 @@ export function fitComposedRadial(pristineKps, foldedKps, K, active = {}) {
 
   const AtA = Array.from({ length: m }, () => new Array(m).fill(0))
   const Atb = new Array(m).fill(0)
-  const n = Math.min(pristineKps.length, foldedKps.length)
   let used = 0
-  for (let i = 0; i < n; i++) {
-    const p = pristineKps[i], f = foldedKps[i]
-    if (!p || !f) continue
-    const fxn = (f.x - cx) / fx, fyn = (f.y - cy) / fy       // ideal (folded) normalised
-    const pxn = (p.x - cx) / fx, pyn = (p.y - cy) / fy       // distorted (pristine) normalised
+  forEachPair((px, py, fX, fY) => {
+    const fxn = (fX - cx) / fx, fyn = (fY - cy) / fy       // ideal (folded) normalised
+    const pxn = (px - cx) / fx, pyn = (py - cy) / fy       // distorted (pristine) normalised
     const r2 = fxn * fxn + fyn * fyn
     // Basis value for each column at this point (per axis: coord · r²^pow).
     const basisX = pow.map((k) => fxn * r2 ** k)
@@ -64,7 +89,7 @@ export function fitComposedRadial(pristineKps, foldedKps, K, active = {}) {
       for (let b = 0; b < m; b++) AtA[a][b] += basisX[a] * basisX[b] + basisY[a] * basisY[b]
     }
     used++
-  }
+  })
   if (used < m) return { k1: 0, k2: 0, k3: 0, fitRmsPx: 0, n: used }
   const sol = solveSmall(AtA, Atb) || new Array(m).fill(0)
   const bag = { k1: 0, k2: 0, k3: 0 }
@@ -72,15 +97,13 @@ export function fitComposedRadial(pristineKps, foldedKps, K, active = {}) {
 
   // Fit RMS in pixels: predicted pristine vs actual over the same points.
   let sse = 0, cnt = 0
-  for (let i = 0; i < n; i++) {
-    const p = pristineKps[i], f = foldedKps[i]
-    if (!p || !f) continue
-    const fxn = (f.x - cx) / fx, fyn = (f.y - cy) / fy
+  forEachPair((px, py, fX, fY) => {
+    const fxn = (fX - cx) / fx, fyn = (fY - cy) / fy
     const r2 = fxn * fxn + fyn * fyn
     const d = 1 + bag.k1 * r2 + bag.k2 * r2 * r2 + bag.k3 * r2 * r2 * r2
     const predX = (fxn * d) * fx + cx, predY = (fyn * d) * fy + cy
-    sse += (predX - p.x) ** 2 + (predY - p.y) ** 2; cnt++
-  }
+    sse += (predX - px) ** 2 + (predY - py) ** 2; cnt++
+  })
   const fitRmsPx = cnt ? Math.sqrt(sse / cnt) : 0
   return { ...bag, fitRmsPx, n: used }
 }
