@@ -162,11 +162,12 @@ const browser = await chromium.launchPersistentContext(profileDir, {
   args: ['--enable-precise-memory-info', `--js-flags=${jsFlags.join(' ')}`],
 })
 const result = { name, config: cfg, files: files.length, startedAt: new Date().toISOString(), stages: {} }
+let heap = null // worker heap sampler (workerHeap.mjs), started with the page
 try {
   const page = browser.pages()[0] ?? await browser.newPage()
   // Worker heap per SfM segment: closed by the solver's `stage "…" took` and
   // `memory mark "…"` debug lines (sfm.js), reported with each recon stage.
-  const heap = await startWorkerHeapSampler(page)
+  heap = await startWorkerHeapSampler(page)
   const heapMark = /(?:^|: )(?:stage "([^"]+)" took|memory mark "([^"]+)")|^(Compact result ready)/
   // Stall/crash watchdog. A worker or renderer that dies of memory can leave
   // page.evaluate pending forever (a 2026-10-07 Monster run sat silent for 5 h after
@@ -316,6 +317,8 @@ try {
   await writeFile(`${outPrefix}.json`, JSON.stringify(result, null, 2))
   console.log(`\nlog:     ${outPrefix}.log\nsummary: ${outPrefix}.json`)
 } finally {
+  // The sampler's poll timer would otherwise keep node alive after the browser closes.
+  await heap?.stop()
   await browser.close()
   await rm(profileDir, { recursive: true, force: true }).catch(() => {})
   logOut.end()

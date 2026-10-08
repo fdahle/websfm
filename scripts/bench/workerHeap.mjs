@@ -58,6 +58,7 @@ export async function startWorkerHeapSampler(page, { intervalMs = 250 } = {}) {
       }))
     } finally { busy = false }
   }, intervalMs)
+  timer.unref?.()
 
   return {
     // Close the current segment under `label` and start the next one.

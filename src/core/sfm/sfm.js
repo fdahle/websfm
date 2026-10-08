@@ -1226,6 +1226,14 @@ async function reconstructSingleModel(input, hooks = {}) {
             + `${g.proposals} proposal(s)); track lengths (2/3/4+ view) ${before.t2}/${before.t3}/${before.t4} → `
             + `${after.t2}/${after.t3}/${after.t4}`, 'info', 'Reconstruction')
           memoryMark('guided extension')
+        } else if (round === 2 && cfg.guidedSkippedForMemory) {
+          // The store's memory preflight turned guided extension off so the run fits
+          // (memBudget.js): record it, so the summary and the verdict say what was lost.
+          const m = cfg.guidedSkippedForMemory
+          guidedRecord = [{ pass: round, skipped: 'memory', ...m }]
+          log(`guided track extension skipped — the memory preflight projected the worker past its `
+            + `ceiling with it on${m.reason ? ` (${m.reason})` : ''}; the model is complete without it, `
+            + 'with fewer ≥3-view tracks', 'warn', 'Reconstruction')
         }
         // Same quantile floor as the pre-BA pass, but a deliberately loose bound: these
         // passes ARE the real filter and a hard block can legitimately lose a lot, so it

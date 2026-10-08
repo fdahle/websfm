@@ -20,6 +20,7 @@
 
 import { readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
+import process from 'node:process'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { beforeAll, describe, it, expect } from 'vitest'
@@ -40,7 +41,8 @@ describe.skipIf(!MODE)('SfM golden output (bit-identical refactor gate)', () => 
     const got = {}
     for (const name of Object.keys(goldenScenes())) {
       got[name] = await runGoldenScene(name)
-      if (MODE === 'write') {
+      // WEBSFM_SFM_GOLDEN_ONCE=1 skips the determinism re-run (long real-data scenes).
+      if (MODE === 'write' && !process.env.WEBSFM_SFM_GOLDEN_ONCE) {
         const again = await runGoldenScene(name)
         const d = firstDiff(got[name], again)
         expect(d, `scene ${name} is not deterministic: ${d}`).toBeNull()
@@ -57,5 +59,5 @@ describe.skipIf(!MODE)('SfM golden output (bit-identical refactor gate)', () => 
       const d = firstDiff(want[name], norm[name], name)
       expect(d, `scene ${name} changed: ${d}`).toBeNull()
     }
-  }, 900_000)
+  }, 4 * 3600_000) // real-data scenes (WEBSFM_SFM_GOLDEN_INPUTS) can take tens of minutes
 })

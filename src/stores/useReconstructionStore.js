@@ -47,7 +47,7 @@ import { SFM_TUNING } from '../core/tuning.js'
 import { packMatchPairs } from '../core/sfm/matchCodec.js'
 import { keypointSetFrom, keypointSetTransfer } from '../core/sfm/keypointSet.js'
 import {
-  projectSparsePeakBreakdownBytes, sparseMemoryDecision, SPARSE_HEAP_FRACTION,
+  projectSparsePeakBreakdownBytes, sparseMemoryDecision, planSparseRun, SPARSE_HEAP_FRACTION,
 } from '../core/sfm/memBudget.js'
 
 // Tools-tab edits (`editClouds` modes, dispatched by workers/ops/cloud.js):
@@ -1676,16 +1676,22 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
       // the large plain worker input when its projected peak exceeds safe headroom.
       const keypointCount = imgs.reduce((sum, img) => sum + (img.keypoints?.length ?? 0), 0)
       const matchCount = reconstructionPairs.reduce((sum, pair) => sum + (pair.matches?.length ?? 0), 0)
-      const peak = projectSparsePeakBreakdownBytes({ keypointCount, matchCount,
-        descriptorBytesPerKeypoint: (settings.guidedTrackExtension ?? SFM_TUNING.guidedTrackExtension) ? 128 : 0 })
+      // Guided track extension ships 128 B of descriptors per keypoint and builds
+      // keypoint grids. When it is what pushes a run past a ceiling, the run goes ahead
+      // without it (logged, recorded in the summary, flagged by the verdict) rather than
+      // being refused or dying in the worker.
+      let guided = settings.guidedTrackExtension ?? SFM_TUNING.guidedTrackExtension
+      const project = (withGuided) => projectSparsePeakBreakdownBytes({ keypointCount, matchCount,
+        imageCount: imgs.length, descriptorBytesPerKeypoint: withGuided ? 128 : 0 })
       const heap = globalThis.performance?.memory
       const hardwareBudget = deviceBudget({
         deviceMemoryGB: Number(globalThis.navigator?.deviceMemory) || null,
         jsHeapLimitBytes: Number(heap?.jsHeapSizeLimit) || null,
       }).budgetBytes
-      const decideMemory = () => ({
+      const decideMemory = (peak) => ({
         renderer: sparseMemoryDecision({
-          estimateBytes: peak.rendererBytes,
+          estimateBytes: peak.rendererHeapBytes,
+          bufferBytes: peak.rendererBufferBytes,
           usedHeapBytes: Number(globalThis.performance?.memory?.usedJSHeapSize),
           heapLimitBytes: Number(globalThis.performance?.memory?.jsHeapSizeLimit),
           fallbackBudgetBytes: hardwareBudget,
@@ -1695,19 +1701,22 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
         // runs (the 127-image DJI set: 1.40 + 2.35 > 3.52 GB) even though neither heap
         // approached its own ceiling.
         worker: sparseMemoryDecision({
-          estimateBytes: peak.workerBytes,
+          estimateBytes: peak.workerHeapBytes,
+          // The renderer's input buffers are transferred into the worker, so they are
+          // part of this, not held twice.
+          bufferBytes: peak.workerBufferBytes,
           usedHeapBytes: 0,
           heapLimitBytes: Number(globalThis.performance?.memory?.jsHeapSizeLimit),
           fallbackBudgetBytes: hardwareBudget,
         }),
       })
-      let decisions = decideMemory()
+      let plan = planSparseRun({ guided, project, decide: decideMemory })
 
       // A reload restores the saved sparse model, so "reload and retry" alone does
       // not create renderer headroom. If the only thing preventing a rerun is the
       // replaceable current result, unload it in memory (the saved copy stays on disk),
       // discard idle worker heaps, yield for collection, and measure again.
-      if (!decisions.renderer.safe) {
+      if (!plan.decisions.renderer.safe) {
         const released = releaseReplaceableModelForRerun()
         if (released.released) {
           terminateAll('preparing a clean sparse-reconstruction rerun')
@@ -1717,23 +1726,40 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
             + 'The saved model remains recoverable by reloading until the replacement succeeds.',
           'info', 'Compute')
           await new Promise((resolve) => setTimeout(resolve, 50))
-          decisions = decideMemory()
+          plan = planSparseRun({ guided, project, decide: decideMemory })
         }
       }
-      const decisionSafe = decisions.renderer.safe && decisions.worker.safe
+      const { peak, decisions } = plan
+      let guidedSkippedForMemory = null
+      if (plan.guidedDropped) {
+        guided = false
+        const w = plan.withGuidedPeak
+        const reason = `worker heap ${formatBytes(w.workerHeapBytes)} / buffers `
+          + `${formatBytes(w.workerBufferBytes)} projected with it, `
+          + `${formatBytes(peak.workerHeapBytes)} / ${formatBytes(peak.workerBufferBytes)} without`
+        guidedSkippedForMemory = { reason, withBytes: w.workerBytes, withoutBytes: peak.workerBytes }
+        log(`Sparse memory preflight: guided track extension turned off for this run so it fits — ${reason}. `
+          + 'The model is complete without it; lower the keypoint cap or the preselection neighbours to keep it.',
+        'warn', 'Reconstruction')
+      }
+      const decisionSafe = plan.safe
+      const ceiling = (d) => (d.limitBytes ? ` ≤ ${formatBytes(d.limitBytes)} ceiling` : '')
       log(`Sparse memory preflight — ${keypointCount.toLocaleString()} keypoints, `
-        + `${matchCount.toLocaleString()} matches; renderer `
+        + `${matchCount.toLocaleString()} matches${guided ? ', guided extension on' : ''}; renderer heap `
         + `${decisions.renderer.usedBytes != null ? `${formatBytes(decisions.renderer.usedBytes)} current + ` : ''}`
-        + `${formatBytes(peak.rendererBytes)} input`
-        + `${decisions.renderer.limitBytes ? ` ≤ ${formatBytes(decisions.renderer.limitBytes)} ceiling` : ''}; `
-        + `worker projected peak ${formatBytes(peak.workerBytes)}`
-        + `${decisions.worker.limitBytes ? ` ≤ ${formatBytes(decisions.worker.limitBytes)} ceiling` : ''} `
-        + `(combined device peak estimate ${formatBytes(peak.totalBytes)})`,
+        + `${formatBytes(peak.rendererHeapBytes)}${ceiling(decisions.renderer)}, `
+        + `input buffers ${formatBytes(peak.rendererBufferBytes)}; `
+        + `worker projected heap ${formatBytes(peak.workerHeapBytes)}${ceiling(decisions.worker)}, `
+        + `buffers ${formatBytes(peak.workerBufferBytes)}`
+        + `${decisions.worker.bufferLimitBytes ? ` ≤ ${formatBytes(decisions.worker.bufferLimitBytes)} device budget` : ''}`,
       decisionSafe ? 'info' : 'error', 'Compute')
       if (!decisionSafe) {
         reconStatus.value = 'error'
-        const where = !decisions.renderer.safe && !decisions.worker.safe
-          ? 'renderer and worker heaps' : (!decisions.renderer.safe ? 'renderer heap' : 'worker heap')
+        const parts = []
+        if (!decisions.renderer.heapSafe) parts.push('renderer heap')
+        if (!decisions.worker.heapSafe) parts.push('worker heap')
+        if (!decisions.renderer.buffersSafe || !decisions.worker.buffersSafe) parts.push('device memory')
+        const where = parts.join(' and ') || 'memory'
         log(`Sparse reconstruction stopped before start because the projected ${where} would exceed `
           + 'its safety ceiling. Close other memory-heavy tabs or reduce the image/keypoint/match set.',
         'error', 'Reconstruction')
@@ -1838,7 +1864,10 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
 
       // Guided track extension needs each image's descriptors in the worker, as
       // COLMAP-style uint8 RootSIFT (×512): 128 B per keypoint instead of 512.
-      if (settings.guidedTrackExtension ?? SFM_TUNING.guidedTrackExtension) {
+      if (guidedSkippedForMemory) {
+        input.settings = { ...settings, guidedTrackExtension: false, guidedSkippedForMemory }
+      }
+      if (guided) {
         // One image at a time: the float descriptors are 4× the uint8 copy, and loading
         // them all at once (2.2 M keypoints ≈ 1.1 GB) would be the renderer's peak.
         let bytes = 0, shipped = 0

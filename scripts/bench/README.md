@@ -114,6 +114,18 @@ the quadratic term at the 95 % radius; positive means a bowl).
   in pixel-edge coordinates: `W/2 + cx − ½`) and OpenCV `p1`/`p2` (Metashape's are
   swapped). A calibrated Brown model turns `'auto'` self-calibration off. A variant
   without it gets the EXIF-grouped sensor back.
+- Worker heap: every recon stage prints `== worker heap <stage> ▸ <segment>` with the
+  SfM worker's peak V8 heap (the ~4 GB per-isolate ceiling) and heap + ArrayBuffers
+  (typed arrays and wasm memory, outside that ceiling), per segment of the solve. The
+  segments close on the solver's `stage "…" took` and `memory mark "…"` debug lines;
+  the numbers land in the result JSON as `workerHeap` (`workerHeap.mjs`, Chrome DevTools
+  Protocol, sampled every 250 ms, so a shorter spike can be missed).
+- `maxOldSpaceMb`: raise V8's heap ceiling for the page and its workers
+  (`--max-old-space-size`), so a run that would die at ~4 GB finishes and reports its
+  real peak. Users cannot do this; use it only to measure.
+- `dumpSfmInput: true`: save each recon's exact SfM worker payload as
+  `<out>.<stage>.sfminput` (`tests/bench/sfmInputDump.js`). Node replays it bit for bit
+  as a real-data golden scene (`WEBSFM_SFM_GOLDEN_INPUTS`, `src/core/sfm/sfmGolden.test.js`).
 - `stallMinutes` (default 30): abort the run when no log line arrives for this long,
   or at once if the page crashes. A worker that dies of memory otherwise leaves the
   bench waiting forever. Each stage also logs the renderer heap before/after a GC.
