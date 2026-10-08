@@ -9,6 +9,7 @@
 // A/B the final cost against the CPU reference at the GPU's own (depth, normal).
 
 import { ensureDevice } from './device.js'
+import { refineScale } from '../../core/dense/refineSchedule.js'
 import shaderSrc from './patchmatch.wgsl?raw'
 
 const pipelineCache = new WeakMap()
@@ -54,7 +55,7 @@ export async function computeDepthMapGPU(refGray, refW, refH, refK, sources, opt
 
   const {
     depthMin = 0, depthMax = 0, seedDepth = null,
-    window = 3, iterations = 3, bestK = 3, seed = 1,
+    window = 3, iterations = 3, bestK = 3, seed = 1, perturbStart = 1,
   } = opts
   // Mirror mvs.rs's depth-range guards (dmin ≥ 1e-4, dmax ≥ dmin·1.001) so the GPU
   // and WASM backends init PatchMatch over the same interval — a zero/degenerate
@@ -148,9 +149,12 @@ export async function computeDepthMapGPU(refGray, refW, refH, refK, sources, opt
 
   // ── Control uniform (16 bytes), rewritten before each dispatch ─────────────
   const ctrlBuf = device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
+  // `scale` = the sweep's refinement scale (refineSchedule.js), the value mvs.rs
+  // derives from the same perturbStart and iteration.
   const writeCtrl = (mode, parity, iter) => {
     const b = new ArrayBuffer(16); const d = new DataView(b)
     d.setUint32(0, mode, true); d.setUint32(4, parity, true); d.setUint32(8, iter, true)
+    d.setFloat32(12, refineScale(perturbStart, iter), true)
     device.queue.writeBuffer(ctrlBuf, 0, b)
   }
 

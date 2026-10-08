@@ -23,9 +23,9 @@
   "crates/mesh/vendor/poisson_reconstruction/src/polynomial.rs": "ea27260d58048b7223f4177dc436d73568e2178626bc5d6170662efe7494895b",
   "crates/reconstruction/Cargo.toml": "f36d2aa6c8bbb7207f6feff689eef3af3299385c574603461255205772d4077b",
   "crates/reconstruction/src/bundle.rs": "9d5d031354b0f665373854d3c01de347031ad540e4fd55ef839b7e37b84aaf06",
-  "crates/reconstruction/src/lib.rs": "e753d1d664cb6ce4ab2f854ec5f4a9e170f721c98f18ddfcb68da8c48231c8d7",
+  "crates/reconstruction/src/lib.rs": "6af398aaf6ed1bad95b114f0213f1d295339b97e373c2afef4c504d8683c885f",
   "crates/reconstruction/src/linalg.rs": "4a04848de8824fc3b304c8f5edb0acad5d3c66f331be19c3777a231cf7ce4ccb",
-  "crates/reconstruction/src/mvs.rs": "800c0df94d1d6adbcff25c4b37598c9ce1d016fdcc058eb61ece76bdc3f8c94a",
+  "crates/reconstruction/src/mvs.rs": "b8109e6dffe3c7e4e105d074d8889013856e8d3a72b000b8aac07119364809b2",
   "crates/reconstruction/src/pose.rs": "f2fb88323591c1d4ac00b94b70c7d95fe23e2980cc9cf3324eaad374e8023e5a",
   "crates/sift/Cargo.toml": "41001d1a3003b2b9dc587fac8fc735747c4772623ec693af8da4a5a0b076ad2b",
   "crates/sift/src/lib.rs": "5627ff521992c35f735b7c2d1a8419f2e27ee763b0ca39e8791bf3079c23802a",
@@ -49,8 +49,8 @@
   "src/wasm/mesh/mesh.js": "baef49838b053b09e9612c4214adbd4649e67f424952ba572924006696bbb2e6",
   "src/wasm/mesh/mesh_bg.wasm": "5d3d30cd3e24eef66068bc43310e621179eb86fed7b8632143ddfe57fa6743fb",
   "src/wasm/mesh/mesh_bg.wasm.d.ts": "f475b7b6dde3be7bace2b397a46b2e8d0218c736711cd55f32f0a57096ad94a7",
-  "src/wasm/reconstruction/reconstruction.d.ts": "0078941241e9515c114317bd025a5cfdd22cee8111daf828c2a074b638e194be",
-  "src/wasm/reconstruction/reconstruction.js": "f3b66e75cf44a3e10aa62414bfc5765821e49a5c34c02dfe583aa9c24a450577",
-  "src/wasm/reconstruction/reconstruction_bg.wasm": "60b88e1bd1615f5b3c61215e6c080abc8cfdd7a4bb6fb19d9f84b8118be869d6",
-  "src/wasm/reconstruction/reconstruction_bg.wasm.d.ts": "535178dc68825e4a349c531cdbc60ea0fa07926ce0204a500f1fbe5763abdcf5"
+  "src/wasm/reconstruction/reconstruction.d.ts": "1a3a8fab8db3db6952367b7aaaef8906107c9fc9f87b578e78efa763b27ff911",
+  "src/wasm/reconstruction/reconstruction.js": "1d26bdd9d6462de28e7231c834a046fbb21edc823c574b6176cf474e176147bd",
+  "src/wasm/reconstruction/reconstruction_bg.wasm": "d0ba2bb70faabd1e8818ea6978b6016091d6f54c0619cf4d0e5d1ab9703c6222",
+  "src/wasm/reconstruction/reconstruction_bg.wasm.d.ts": "20d41629bb4bfa2dfbc9b2b72ee46274cb80a2864492270933a9569e9ea3c460"
 }
