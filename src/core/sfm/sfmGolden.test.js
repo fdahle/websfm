@@ -14,6 +14,7 @@
 // `write` also runs every scene twice and fails unless both runs are identical, which
 // is the plan's precondition: the gate is only meaningful on a deterministic solver.
 // WEBSFM_SFM_GOLDEN_FILE overrides the location (default: the OS temp directory).
+// WEBSFM_SFM_TRACKS=map|typed runs the solver on that track store implementation.
 // WEBSFM_SFM_GOLDEN_INPUTS adds real-data scenes: bench SfM input dumps (comma-separated
 // paths; scripts/bench `dumpSfmInput`).
 

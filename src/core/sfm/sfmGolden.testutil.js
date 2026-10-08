@@ -85,7 +85,12 @@ export async function runGoldenScene(name, { prepare = (scene) => scene } = {}) 
   const scene = prepare(goldenScenes()[name]())
   const logs = []
   const out = await reconstruct(
-    { images: scene.images, pairs: scene.pairs, gcps: scene.gcps, cameraPriors: scene.cameraPriors, settings: scene.settings ?? {} },
+    {
+      images: scene.images, pairs: scene.pairs, gcps: scene.gcps, cameraPriors: scene.cameraPriors,
+      // WEBSFM_SFM_TRACKS=map|typed picks the track store (trackStore.js); neither choice
+      // may change the digest.
+      settings: { ...(scene.settings ?? {}), ...(process.env.WEBSFM_SFM_TRACKS ? { trackStore: process.env.WEBSFM_SFM_TRACKS } : {}) },
+    },
     { onLog: (m, level, cat) => { if (!DROP_LOG.some((re) => re.test(m))) logs.push(`${level}|${cat}|${m}`) } },
   )
   const { result } = packReconstructionResult(out)

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 
 import { registerImages } from './register.js'
+import { tracksFrom } from './trackStore.testutil.js'
 
 // WS-A — the stalled-model rescue must fire at the 2-camera seed, not only from 3
 // cameras up. The field failure it exists for (an uncalibrated wide lens: the seed pair
@@ -37,9 +38,9 @@ function makeCtx(overrides = {}) {
     ctx: {
       imgs, donePairs, cameras,
       Kmap: new Map(imgs.map((i) => [i.uuid, K])),
-      viewIndex: new Map(),
+      ...tracksFrom([], imgs.map((i) => i.uuid)),
+      keypointsAt: () => null,
       registeredUuids: new Set(['a', 'b']),
-      getPoints3d: () => [],
       cfg: {
         minMatchesForRegistration: 12, reprjThreshold: 4, pnpGateScale: 2,
         minPnpInliers: 15, minPnpInlierRatio: 0.3, minPnpRefineInlierRatio: 0.3,
@@ -48,8 +49,7 @@ function makeCtx(overrides = {}) {
         rescueStalled: true, rescueRefineRatio: 0.2, refineIntrinsics: 'f,k1',
         ...overrides,
       },
-      addView: () => {},
-      rebuildViewIndex: () => {},
+      refreshTracks: () => {},
       foldOneEndpointMatches: () => 0,
       mergeTracks: () => 0,
       runBundleAdjust: async (label, iters, mode) => { baCalls.push({ label, iters, mode }) },
@@ -133,9 +133,9 @@ function makeRescueCtx({ nCams = 6, viewsPerTrack = 2, nTracks = 40, ...cfgOverr
     ctx: {
       imgs, donePairs, cameras,
       Kmap: new Map(imgs.map((i) => [i.uuid, K])),
-      viewIndex: new Map(),
+      ...tracksFrom(points3d, imgs.map((i) => i.uuid)),
+      keypointsAt: () => null,
       registeredUuids: new Set(names),
-      getPoints3d: () => points3d,
       cfg: {
         minMatchesForRegistration: 12, reprjThreshold: 4, pnpGateScale: 2,
         minPnpInliers: 15, minPnpInlierRatio: 0.3, minPnpRefineInlierRatio: 0.3,
@@ -144,8 +144,7 @@ function makeRescueCtx({ nCams = 6, viewsPerTrack = 2, nTracks = 40, ...cfgOverr
         rescueStalled: true, rescueRefineRatio: 0.2, refineIntrinsics: 'f,k1',
         ...cfgOverrides,
       },
-      addView: () => {},
-      rebuildViewIndex: () => {},
+      refreshTracks: () => {},
       foldOneEndpointMatches: () => 0,
       mergeTracks: () => 0,
       runBundleAdjust: async (label, iters, mode) => { baCalls.push({ label, iters, mode }) },

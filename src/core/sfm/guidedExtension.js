@@ -31,15 +31,24 @@ function dist2(a, ao, b, bo) {
  * The squared-distance acceptance threshold, measured: the `quantile` of distances
  * between two observations of the same point over tracks with ≥3 views (verified,
  * multi-view evidence). Deterministic sampling: every k-th point.
+ * @param {object} tracks   TrackStore (trackStore.js)
+ * @param {(img:number, kp:number) => {arr:Uint8Array, off:number}|null} descOf
  */
-export function trackDistanceThreshold(points3d, descOf, { quantile = 0.9, maxSamples = 20000 } = {}) {
-  const multi = points3d.filter((p) => p.views.size >= 3)
+export function trackDistanceThreshold(tracks, descOf, { quantile = 0.9, maxSamples = 20000 } = {}) {
+  const multi = []
+  tracks.forEachPoint((p) => { if (tracks.viewCount(p) >= 3) multi.push(p) })
   if (!multi.length) return null
   const step = Math.max(1, Math.floor(multi.length / maxSamples))
   const d = []
   for (let i = 0; i < multi.length; i += step) {
-    const obs = [...multi[i].views]
-    const a = descOf(obs[0][0], obs[0][1]), b = descOf(obs[1][0], obs[1][1])
+    // The first two observations of the track.
+    let img0 = -1, kp0 = -1, img1 = -1, kp1 = -1
+    tracks.someView(multi[i], (img, kp) => {
+      if (img0 < 0) { img0 = img; kp0 = kp; return false }
+      img1 = img; kp1 = kp
+      return true
+    })
+    const a = descOf(img0, kp0), b = descOf(img1, kp1)
     if (a && b) d.push(dist2(a.arr, a.off, b.arr, b.off))
   }
   if (!d.length) return null
@@ -49,33 +58,33 @@ export function trackDistanceThreshold(points3d, descOf, { quantile = 0.9, maxSa
 
 /**
  * @param {object} o
- * @param {Array} o.points3d                 [{ x, y, z, views: Map<uuid, kpIdx> }]
+ * @param {object} o.tracks                  TrackStore (trackStore.js); additions go here
+ * @param {object} o.ids                     makeImageIds: uuid ↔ image index
  * @param {Map} o.cameras                    uuid → { R, t, K }
- * @param {(uuid:string) => {n:number, xy:Float64Array}|null} o.keypointsOf   the image's KeypointSet
- * @param {(uuid:string, kp:number) => {arr:Uint8Array, off:number}|null} o.descOf
- * @param {Map} o.viewIndex                  uuid → Map<kpIdx, point>
- * @param {(pt:object, uuid:string, kp:number) => void} o.addView
+ * @param {(img:number) => {n:number, xy:Float64Array}|null} o.keypointsAt   the image's KeypointSet
+ * @param {(img:number, kp:number) => {arr:Uint8Array, off:number}|null} o.descOf
  * @param {number} o.gatePx                  search radius = the reprojection gate
  * @param {number} [o.maxDist2]              squared descriptor threshold (else measured)
  * @param {number} [o.ratio]                 best must beat the runner-up by this ratio
  * @param {number} [o.quantile]              track-distance quantile that sets the threshold
  * @param {number} [o.refObs]                compare against at most this many observations
- * @param {(pt:object, uuid:string, kp:number) => void} [o.onAdd]  called per accepted observation
+ * @param {(p:number, img:number, kp:number) => void} [o.onAdd]  called per accepted observation
  */
-export function guidedExtendTracks({ points3d, cameras, keypointsOf, descOf, viewIndex, addView, gatePx,
+export function guidedExtendTracks({ tracks, ids, cameras, keypointsAt, descOf, gatePx,
   maxDist2 = null, ratio = 0.8, quantile = 0.9, refObs = 3, onAdd = null }) {
-  const tau2 = maxDist2 ?? trackDistanceThreshold(points3d, descOf, { quantile })
+  const tau2 = maxDist2 ?? trackDistanceThreshold(tracks, descOf, { quantile })
   const stats = { tau: tau2 == null ? null : Math.sqrt(tau2) / 512, projections: 0, windows: 0, proposals: 0,
     added: 0, lifted: 0, pointsExtended: 0 }
   if (tau2 == null) return stats
   const r2 = gatePx * gatePx
   const ratio2 = ratio * ratio
 
-  // Per-camera keypoint grid (cell = gate) and keypoint bounds.
-  const grids = new Map()
-  for (const [uuid] of cameras) {
-    const kps = keypointsOf(uuid)
-    if (!kps?.n) continue
+  // Per-camera keypoint grid (cell = gate) and keypoint bounds, in camera order.
+  const camList = [] // { img, cam, grid }
+  for (const [uuid, cam] of cameras) {
+    const img = ids.img(uuid)
+    const kps = keypointsAt(img)
+    if (!kps?.n) { camList.push({ img, cam, grid: null }); continue }
     const cells = new Map()
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
     const xy = kps.xy
@@ -85,32 +94,32 @@ export function guidedExtendTracks({ points3d, cameras, keypointsOf, descOf, vie
       const key = Math.floor(x / gatePx) * 1e6 + Math.floor(y / gatePx)
       const c = cells.get(key); if (c) c.push(i); else cells.set(key, [i])
     }
-    grids.set(uuid, { xy, cells, minX, minY, maxX, maxY })
+    camList.push({ img, cam, grid: { xy, cells, minX, minY, maxX, maxY } })
   }
 
   const proposals = []
-  for (const pt of points3d) {
-    const refs = []
-    for (const [u, k] of pt.views) { const d = descOf(u, k); if (d) refs.push(d); if (refs.length >= refObs) break }
-    if (!refs.length) continue
-    for (const [uuid, cam] of cameras) {
-      if (pt.views.has(uuid)) continue
-      const g = grids.get(uuid)
+  const refs = []
+  tracks.forEachPoint((p) => {
+    refs.length = 0
+    tracks.someView(p, (img, k) => { const d = descOf(img, k); if (d) refs.push(d); return refs.length >= refObs })
+    if (!refs.length) return
+    const px = tracks.x(p), py = tracks.y(p), pz = tracks.z(p)
+    for (const { img, cam, grid: g } of camList) {
+      if (tracks.viewKp(p, img) >= 0) continue
       if (!g) continue
       stats.projections++
-      const p = projectWithDepth(cam, pt.x, pt.y, pt.z)
-      if (!p || p.u < g.minX || p.u > g.maxX || p.v < g.minY || p.v > g.maxY) continue
-      const used = viewIndex.get(uuid)
-      const cx = Math.floor(p.u / gatePx), cy = Math.floor(p.v / gatePx)
+      const pr = projectWithDepth(cam, px, py, pz)
+      if (!pr || pr.u < g.minX || pr.u > g.maxX || pr.v < g.minY || pr.v > g.maxY) continue
+      const cx = Math.floor(pr.u / gatePx), cy = Math.floor(pr.v / gatePx)
       let best = Infinity, second = Infinity, bestKp = -1, any = false
       for (let gx = cx - 1; gx <= cx + 1; gx++) {
         for (let gy = cy - 1; gy <= cy + 1; gy++) {
           const cell = g.cells.get(gx * 1e6 + gy)
           if (!cell) continue
           for (const i of cell) {
-            if ((g.xy[2 * i] - p.u) ** 2 + (g.xy[2 * i + 1] - p.v) ** 2 > r2) continue
-            if (used?.has(i)) continue
-            const cd = descOf(uuid, i)
+            if ((g.xy[2 * i] - pr.u) ** 2 + (g.xy[2 * i + 1] - pr.v) ** 2 > r2) continue
+            if (tracks.pointAt(img, i) >= 0) continue
+            const cd = descOf(img, i)
             if (!cd) continue
             any = true
             let d = Infinity
@@ -122,28 +131,28 @@ export function guidedExtendTracks({ points3d, cameras, keypointsOf, descOf, vie
       if (!any) continue
       stats.windows++
       if (best <= tau2 && (second === Infinity || best <= ratio2 * second)) {
-        proposals.push({ pt, uuid, kp: bestKp, d2: best })
+        proposals.push({ p, img, kp: bestKp, d2: best })
       }
     }
-  }
+  })
   stats.proposals = proposals.length
 
   // Resolve best-first: a keypoint joins one point, a point gains one view per camera.
   proposals.sort((a, b) => a.d2 - b.d2)
-  const claimed = new Map() // uuid → Set<kp>
+  const claimed = new Map() // img → Set<kp>
   const extended = new Set()
   for (const pr of proposals) {
-    if (pr.pt.views.has(pr.uuid)) continue
-    let c = claimed.get(pr.uuid)
-    if (!c) { c = new Set(); claimed.set(pr.uuid, c) }
-    if (c.has(pr.kp) || viewIndex.get(pr.uuid)?.has(pr.kp)) continue
+    if (tracks.viewKp(pr.p, pr.img) >= 0) continue
+    let c = claimed.get(pr.img)
+    if (!c) { c = new Set(); claimed.set(pr.img, c) }
+    if (c.has(pr.kp) || tracks.pointAt(pr.img, pr.kp) >= 0) continue
     c.add(pr.kp)
-    const before = pr.pt.views.size
-    addView(pr.pt, pr.uuid, pr.kp)
-    onAdd?.(pr.pt, pr.uuid, pr.kp)
+    const before = tracks.viewCount(pr.p)
+    tracks.addView(pr.p, pr.img, pr.kp)
+    onAdd?.(pr.p, pr.img, pr.kp)
     stats.added++
     if (before === 2) stats.lifted++
-    extended.add(pr.pt)
+    extended.add(pr.p)
   }
   stats.pointsExtended = extended.size
   return stats
@@ -154,22 +163,19 @@ export function guidedExtendTracks({ points3d, cameras, keypointsOf, descOf, vie
  * survived the filter and BA with every other observation's. False additions would sit
  * anywhere inside the search gate, so their median would be far above the population's;
  * true ones look like the rest of the model. Observations are keyed by (image, keypoint):
- * bundle adjustment rebuilds the point objects, so object identity does not survive it.
+ * a point can be merged or renumbered after the addition, its observation cannot.
  * @param {{uuid:string, kp:number}[]} additions
- * @param {Iterable<{views:Map<string,number>}>} points   the model's current points
- * @param {(pt:object, uuid:string, kp:number) => number|null} residualOf  px
+ * @param {(visit: (uuid:string, kp:number, residualPx:number|null) => void) => void} forEachObservation
+ *   walks the model's current observations, in point then view order
  */
-export function auditGuidedAdditions(additions, points, residualOf) {
+export function auditGuidedAdditions(additions, forEachObservation) {
   const key = (uuid, kp) => `${uuid}|${kp}`
   const added = new Set(additions.map((a) => key(a.uuid, a.kp)))
   const mine = [], rest = []
-  for (const pt of points) {
-    for (const [uuid, kp] of pt.views) {
-      const r = residualOf(pt, uuid, kp)
-      if (r == null) continue
-      ;(added.has(key(uuid, kp)) ? mine : rest).push(r)
-    }
-  }
+  forEachObservation((uuid, kp, r) => {
+    if (r == null) return
+    ;(added.has(key(uuid, kp)) ? mine : rest).push(r)
+  })
   const q = (arr, f) => { if (!arr.length) return null; const a = [...arr].sort((x, y) => x - y); return a[Math.min(a.length - 1, Math.floor(f * a.length))] }
   return {
     proposed: additions.length, survived: mine.length,

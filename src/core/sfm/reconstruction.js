@@ -312,11 +312,15 @@ export async function bundleAdjust(cameras, intrinsics, points3d, observations, 
   await ensureWasm()
   const {
     maxIters = 30, refineIntrinsics = 'none', sensorOfCam = null,
-    gcpAnchors = [], cameraPriors = [], solver = SFM_TUNING.baSolver,
+    gcpAnchors = [], cameraPriors = [], solver = SFM_TUNING.baSolver, flatPoints = false,
   } = opts
   const refineMode = refineModeMask(refineIntrinsics)
   const nCam = cameras.length
-  const nPts = points3d.length
+  // `points3d`: [{x, y, z}] or a flat Float64Array [x0,y0,z0, x1,…]. With
+  // `flatPoints`, the refined points come back as `pos` (Float64Array) instead of
+  // `points3d` objects — no object per point on either side (TODO ▸ MEM).
+  const flatIn = points3d instanceof Float64Array
+  const nPts = flatIn ? points3d.length / 3 : points3d.length
   // `observations` is either an array of {camIdx, ptIdx, x, y, weightX?, weightY?} or an
   // ObservationList (baObservations.js) — the same data as parallel typed arrays.
   const soa = isObservationList(observations)
@@ -334,8 +338,8 @@ export async function bundleAdjust(cameras, intrinsics, points3d, observations, 
     kFlat.set([fx, fy, cx, cy], c * 4)
   })
 
-  const ptsFlat = new Float32Array(nPts * 3)
-  points3d.forEach(({ x, y, z }, i) => { ptsFlat.set([x, y, z], i * 3) })
+  const ptsFlat = flatIn ? Float32Array.from(points3d) : new Float32Array(nPts * 3)
+  if (!flatIn) points3d.forEach(({ x, y, z }, i) => { ptsFlat.set([x, y, z], i * 3) })
 
   const obsFlat = new Float32Array(nObs * 4)
   const obsWFlat = new Float32Array(nObs * 2)
@@ -412,7 +416,8 @@ export async function bundleAdjust(cameras, intrinsics, points3d, observations, 
   })
 
   const ptsBase = nCam * 12
-  const outPoints = points3d.map((_, i) => ({
+  const outPos = flatPoints ? Float64Array.from(raw.subarray(ptsBase, ptsBase + nPts * 3)) : null
+  const outPoints = flatPoints ? null : Array.from({ length: nPts }, (_, i) => ({
     x: raw[ptsBase + i*3], y: raw[ptsBase + i*3+1], z: raw[ptsBase + i*3+2],
   }))
 
@@ -422,7 +427,7 @@ export async function bundleAdjust(cameras, intrinsics, points3d, observations, 
   })
 
   return {
-    cameras: outCameras, points3d: outPoints, intrinsics: outIntrinsics,
+    cameras: outCameras, points3d: outPoints, pos: outPos, intrinsics: outIntrinsics,
     costBefore, costAfter, costTrace, anchorRmsAfter, cameraPriorRmsAfter,
     solver: solverStats, ms,
   }
