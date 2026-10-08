@@ -13,6 +13,7 @@ Audit: 2026-09-01.
 | [Auto-Mask strategies](PLAN-automask-strategies.md) | Not started | `TODO.md` ▸ M4 |
 | [Reference-raster rearchitecture](plan-reference-raster-rearchitecture.md) | COG writer shipped; spikes and phases 2–6 remain | `TODO.md` ▸ RR |
 | [Scale and measurement](plan-scale-and-measurement.md) | Scale WS0–WS2 shipped; measurement WS3–WS7 remain | `TODO.md` ▸ F11 |
+| [SfM compact memory](plan-sfm-compact-memory.md) | Not started — for review | `TODO.md` ▸ MEM |
 
 Retired in the 2026-09-01 consolidation (available in git history): fiducial
 detection/calibration, dense sky/vegetation cleanup, Evaluate/Quality hub,

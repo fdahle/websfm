@@ -474,6 +474,9 @@ Cancel+rerun.
   of `AutoMaskModal.vue`. SAM2-propagation auto-masking stays parked (F12).
 
 ### MEM — big runs vs the 4 GB per-isolate ceiling (from the Monster stretch run)
+**Plan for review:** `docs/planning/plan-sfm-compact-memory.md` (items 1–3 below, plus the
+RV `ingest.js` / `buildBaObservations` structure items, phased with bit-identical output
+as the gate).
 Chrome caps each page's and each worker's JS heap at ~4 GB (`jsHeapSizeLimit`; the
 sparse preflight allows 86 % = 3.52 GB), and wasm32 memory at 4 GB, whatever the
 machine's RAM. A page cannot raise either. On 2026-10-07 the Monster run with the 16-bit
