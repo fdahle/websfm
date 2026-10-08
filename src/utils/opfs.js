@@ -1189,6 +1189,13 @@ export async function deletePoses(projectId) {
 // `buffers: { pos, col, colorMask, nrm, idx, vcount, vcam, vkp, vx, vy }` (ArrayBuffers); load
 // returns them the same way for the store to rebuild the point objects. vx/vy carry
 // per-view BA-frame pixels (COLMAP export) and are absent on dense/legacy clouds.
+//
+// A cloud whose buffers are unchanged since an earlier save passes
+// `reuse: { key: { name, bytes } }` instead (the files that save committed, as returned
+// here or by loadReconstruction's `savedFiles`), so an edit to one 25 M-point cloud
+// does not rewrite every other. Returns `{ ok: true, files: { cloudId: { key: file } } }`,
+// or `{ ok: false, stale: [cloudId] }` — nothing written — when a reused file has gone
+// (another tab's save collected it); the caller then resends those clouds' buffers.
 const RECON_BIN_KEYS = ['pos', 'col', 'colorMask', 'nrm', 'idx', 'vcount', 'vcam', 'vkp', 'vx', 'vy', 'attributes']
 
 async function removeStaleReconBins(dir, keepIds) {
@@ -1208,15 +1215,31 @@ export async function saveReconstruction(projectId, data) {
       const meta = { ...rest, version: 3, clouds: [] }
       const buffers = {}
       for (const c of clouds) {
-        const { buffers: cloudBuffers, ...cmeta } = c
+        const { buffers: cloudBuffers, reuse, ...cmeta } = c
         meta.clouds.push(cmeta)
         for (const key of RECON_BIN_KEYS) {
-          if (cloudBuffers?.[key]) buffers[`${c.id}.${key}`] = cloudBuffers[key]
+          if (reuse?.[key]) buffers[`${c.id}.${key}`] = { reuse: reuse[key] }
+          else if (cloudBuffers?.[key]) buffers[`${c.id}.${key}`] = cloudBuffers[key]
         }
       }
-      await writeBinaryDocument(dir, 'reconstruction.json', meta, buffers, { writeJson, writeBin })
+      const res = await writeBinaryDocument(dir, 'reconstruction.json', meta, buffers, { writeJson, writeBin })
+      if (res.stale) {
+        return { ok: false, stale: [...new Set(res.stale.map((k) => k.slice(0, k.lastIndexOf('.'))))] }
+      }
+      return { ok: true, files: filesByCloud(res.files) }
     })
   })
+}
+
+// `{ "cloudId.key": file }` → `{ cloudId: { key: file } }` (cloud ids may contain dots;
+// buffer keys never do).
+function filesByCloud(files) {
+  const out = {}
+  for (const [k, file] of Object.entries(files)) {
+    const dot = k.lastIndexOf('.')
+    ;(out[k.slice(0, dot)] ??= {})[k.slice(dot + 1)] = file
+  }
+  return out
 }
 
 export async function loadReconstruction(projectId) {
@@ -1229,6 +1252,7 @@ export async function loadReconstruction(projectId) {
     // store still understands it. New saves write version 3 with immutable generation buffers.
     if (meta.version !== 2 && meta.version !== 3) return meta
     const saved = meta.binaryFiles ? await readBinaryDocument(dir, meta, readBin) : null
+    const savedFiles = meta.binaryFiles ? filesByCloud(meta.binaryFiles) : {}
     await mapConcurrent(meta.clouds || [], 3, async (c) => {
       const buffers = {}
       const loaded = await mapConcurrent(RECON_BIN_KEYS, 6, async (key) => saved
@@ -1243,6 +1267,9 @@ export async function loadReconstruction(projectId) {
         throw new Error('Incomplete saved reconstruction')
       }
       c.buffers = buffers
+      // The committed files behind these buffers, so the store's next save can reuse
+      // them for a cloud it has not changed (see saveReconstruction).
+      if (savedFiles[c.id]) c.savedFiles = savedFiles[c.id]
     })
     delete meta.binaryFiles
     return meta

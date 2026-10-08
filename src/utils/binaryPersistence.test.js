@@ -1,4 +1,4 @@
-import { beforeEach, afterEach, it, expect } from 'vitest'
+import { beforeEach, afterEach, describe, it, expect } from 'vitest'
 import * as opfs from './opfs.js'
 import { retryPersistence } from './persistence.js'
 
@@ -22,6 +22,7 @@ function memoryDirectory(control) {
           return {
             write: async value => {
               if (control.fail?.test(name)) throw new Error('disk full')
+              control.written?.push(name)
               staged = new Uint8Array(await new Blob([value]).arrayBuffer())
             },
             close: async () => { files.set(name, staged) },
@@ -79,4 +80,49 @@ it('commits cloud buffers atomically when replacing an existing cloud id', async
   const saved = await opfs.loadReconstruction('binary-test')
   expect(saved.clouds[0].pointCount).toBe(1)
   expect(new Float64Array(saved.clouds[0].buffers.pos)).toEqual(new Float64Array([1, 1, 1]))
+})
+
+describe('cloud buffer reuse', () => {
+  const pos = (n, v) => new Float64Array(n * 3).fill(v).buffer
+  const cloud = (id, n, v) => ({ id, kind: 'dense', pointCount: n, buffers: { pos: pos(n, v) } })
+
+  it('points an unchanged cloud at its committed file instead of rewriting it', async () => {
+    const first = await opfs.saveReconstruction('binary-test', { clouds: [cloud('a', 1, 1), cloud('b', 1, 2)] })
+    expect(first.ok).toBe(true)
+    const aFile = first.files.a.pos
+    control.written = []
+    const second = await opfs.saveReconstruction('binary-test', { clouds: [
+      { id: 'a', kind: 'dense', pointCount: 1, buffers: null, reuse: first.files.a },
+      cloud('b', 2, 3),
+    ] })
+    expect(second.ok).toBe(true)
+    // Only b's new buffer and the metadata were written; a kept its file through GC.
+    expect(control.written.filter((n) => n.endsWith('.bin'))).toEqual([second.files.b.pos.name])
+    expect(second.files.a.pos).toEqual(aFile)
+    expect(dir.files.has(aFile.name)).toBe(true)
+    expect(dir.files.has(first.files.b.pos.name)).toBe(false) // b's old generation collected
+    const saved = await opfs.loadReconstruction('binary-test')
+    expect(new Float64Array(saved.clouds[0].buffers.pos)).toEqual(new Float64Array([1, 1, 1]))
+    expect(new Float64Array(saved.clouds[1].buffers.pos)).toEqual(new Float64Array(6).fill(3))
+    // The load reports the committed files so the next save can reuse them too.
+    expect(saved.clouds[0].savedFiles.pos).toEqual(aFile)
+    control.written = null
+  })
+
+  it('writes nothing and names the cloud when a reused file has gone', async () => {
+    const first = await opfs.saveReconstruction('binary-test', { clouds: [cloud('a', 1, 1)] })
+    dir.files.delete(first.files.a.pos.name) // e.g. another tab's save collected it
+    const before = dir.files.get('reconstruction.json')
+    const res = await opfs.saveReconstruction('binary-test', { clouds: [
+      { id: 'a', kind: 'dense', pointCount: 1, buffers: null, reuse: first.files.a },
+    ] })
+    expect(res).toEqual({ ok: false, stale: ['a'] })
+    expect(dir.files.get('reconstruction.json')).toBe(before)
+    // A size mismatch is stale too.
+    const again = await opfs.saveReconstruction('binary-test', { clouds: [cloud('a', 1, 1)] })
+    const res2 = await opfs.saveReconstruction('binary-test', { clouds: [
+      { id: 'a', kind: 'dense', pointCount: 1, buffers: null, reuse: { pos: { ...again.files.a.pos, bytes: 1 } } },
+    ] })
+    expect(res2.ok).toBe(false)
+  })
 })

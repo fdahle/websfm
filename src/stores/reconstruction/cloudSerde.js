@@ -1,5 +1,5 @@
 import { markRaw } from 'vue'
-import { packAttributes, unpackAttributes } from '../../core/io/cloudAttributes.js'
+import { packAttributes, unpackAttributes, attributeLayout } from '../../core/io/cloudAttributes.js'
 import { makePackedPoints } from '../../core/sfm/resultCodec.js'
 
 // Cloud ↔ on-disk shape. Lifted out of useReconstructionStore so the format has one
@@ -25,8 +25,17 @@ import { makePackedPoints } from '../../core/sfm/resultCodec.js'
 // view-tracks, so serialization is near-passthrough. pos is widened to Float64 on
 // disk to match the sparse sidecar format (so the reader stays dtype-uniform and
 // dense clouds persisted before the flat rework still load through this branch).
-export function serializeDenseCloud(c) {
+// `{ buffers: false }` returns the same metadata with `buffers: null` and allocates
+// nothing — the save path for a cloud whose sidecars are reused (savedCloudFiles.js).
+export function serializeDenseCloud(c, { buffers = true } = {}) {
   const N = c.count || 0
+  const meta = {
+    id: c.id, name: c.name, kind: 'dense', createdAt: c.createdAt,
+    posType: c.pos instanceof Float64Array ? 'f64' : 'f32',
+    imported: !!c.imported, derived: !!c.derived, secondary: !!c.secondary,
+    cameras: [], pointCount: N, hasColor: !!c.col, hasNormals: !!c.nrm, viewUuids: [],
+  }
+  if (!buffers) return { ...meta, buffers: null }
   const pos = new Float64Array(N * 3)
   pos.set(c.pos.subarray(0, N * 3))
   const col = c.col ? c.col.slice(0, N * 3) : null
@@ -34,10 +43,7 @@ export function serializeDenseCloud(c) {
   // widening). Absent on normal-less/legacy runs; the reader leaves nrm undefined.
   const nrm = c.nrm ? c.nrm.slice(0, N * 3) : null
   return {
-    id: c.id, name: c.name, kind: 'dense', createdAt: c.createdAt,
-    posType: c.pos instanceof Float64Array ? 'f64' : 'f32',
-    imported: !!c.imported, derived: !!c.derived, secondary: !!c.secondary,
-    cameras: [], pointCount: N, hasColor: !!col, hasNormals: !!nrm, viewUuids: [],
+    ...meta,
     buffers: { pos: pos.buffer, col: col ? col.buffer : null, nrm: nrm ? nrm.buffer : null,
       vcount: null, vcam: null, vkp: null, vx: null, vy: null },
   }
@@ -45,27 +51,31 @@ export function serializeDenseCloud(c) {
 
 // Mesh cloud on-disk shape: pos (Float64, per-vertex, uniform sidecar dtype) + col
 // (Uint8, per-vertex) + idx (Uint32, 3·triangles). nVerts + count(=tris) in metadata.
-export function serializeMeshCloud(c) {
+export function serializeMeshCloud(c, { buffers = true } = {}) {
   const nVerts = c.nVerts || 0
+  const meta = {
+    id: c.id, name: c.name, kind: 'mesh', createdAt: c.createdAt,
+    posType: c.pos instanceof Float64Array ? 'f64' : 'f32',
+    imported: !!c.imported, derived: !!c.derived, secondary: !!c.secondary,
+    cameras: [], pointCount: nVerts, nVerts, triCount: c.count || 0,
+    hasColor: !!c.col, viewUuids: [],
+    ...(c.meshSummary ? { meshSummary: c.meshSummary } : {}),
+  }
+  if (!buffers) return { ...meta, buffers: null }
   const pos = new Float64Array(nVerts * 3)
   pos.set(c.pos.subarray(0, nVerts * 3))
   const col = c.col ? c.col.slice(0, nVerts * 3) : null
   const idx = c.idx ? Uint32Array.from(c.idx) : new Uint32Array(0)
   return {
-    id: c.id, name: c.name, kind: 'mesh', createdAt: c.createdAt,
-    posType: c.pos instanceof Float64Array ? 'f64' : 'f32',
-    imported: !!c.imported, derived: !!c.derived, secondary: !!c.secondary,
-    cameras: [], pointCount: nVerts, nVerts, triCount: c.count || 0,
-    hasColor: !!col, viewUuids: [],
-    ...(c.meshSummary ? { meshSummary: c.meshSummary } : {}),
+    ...meta,
     buffers: { pos: pos.buffer, col: col ? col.buffer : null, idx: idx.buffer,
       vcount: null, vcam: null, vkp: null, vx: null, vy: null },
   }
 }
 
-function serializeCloudData(c) {
-  if (c.kind === 'dense') return serializeDenseCloud(c)
-  if (c.kind === 'mesh') return serializeMeshCloud(c)
+function serializeCloudData(c, opts) {
+  if (c.kind === 'dense') return serializeDenseCloud(c, opts)
+  if (c.kind === 'mesh') return serializeMeshCloud(c, opts)
   const pts = c.points
   const N = pts.length
   const pos = new Float64Array(N * 3)
@@ -265,11 +275,22 @@ export function legacyDeserializeCloud(c, makeCloudId) {
 }
 
 // Keep view styling and scalar fields alongside every cloud kind.
-export function serializeCloud(c) {
+// `reuse` ({ key: { name, bytes } }, from savedCloudFiles.js) means the cloud's heavy
+// data is unchanged since a save that wrote those files: the metadata is rebuilt (it
+// carries the editable name/visibility/style) but no buffer is allocated or copied,
+// and the saver points this generation at the existing files. Only dense and mesh
+// clouds qualify; a sparse cloud always serialises in full.
+export function serializeCloud(c, { reuse = null } = {}) {
+  const count = c.kind === 'mesh' ? c.nVerts : (c.count ?? c.points?.length ?? 0)
+  const style = c.style ? JSON.parse(JSON.stringify(c.style)) : null
+  if (reuse && (c.kind === 'dense' || c.kind === 'mesh')) {
+    const data = serializeCloudData(c, { buffers: false })
+    const { fields } = attributeLayout(c.attributes, count)
+    return { ...data, visible: c.visible !== false, style, attributeFields: fields, buffers: null, reuse }
+  }
   const data = serializeCloudData(c)
-  const { fields, buffer } = packAttributes(c.attributes, c.kind === 'mesh' ? c.nVerts : (c.count ?? c.points?.length ?? 0))
-  return { ...data, visible: c.visible !== false, style: c.style ? JSON.parse(JSON.stringify(c.style)) : null,
-    attributeFields: fields, buffers: { ...data.buffers, attributes: buffer } }
+  const { fields, buffer } = packAttributes(c.attributes, count)
+  return { ...data, visible: c.visible !== false, style, attributeFields: fields, buffers: { ...data.buffers, attributes: buffer } }
 }
 
 // Attributes (intensity, classification, …) are optional extras: a damaged

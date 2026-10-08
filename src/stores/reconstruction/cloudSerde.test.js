@@ -242,3 +242,35 @@ describe('damaged attribute sidecar', () => {
     expect(back.attributeError).toMatch(/intensity/)
   })
 })
+
+describe('metadata-only serialisation (buffer reuse)', () => {
+  const files = { pos: { name: 'p.bin', bytes: 48 } }
+  const strip = ({ buffers, reuse, ...meta }) => meta
+  const clouds = {
+    dense: {
+      id: 'd1', name: 'Dense', kind: 'dense', createdAt: 2000, count: 2, visible: false,
+      style: { mode: 'height' }, imported: true,
+      pos: Float32Array.from([1, 2, 3, 4, 5, 6]), col: Uint8Array.from([1, 2, 3, 4, 5, 6]),
+      nrm: Float32Array.from([0, 0, 1, 0, 0, 1]), attributes: { intensity: Uint16Array.from([7, 8]) },
+    },
+    mesh: {
+      id: 'm1', name: 'Mesh', kind: 'mesh', createdAt: 3000, count: 1, nVerts: 3, meshSummary: { depth: 8 },
+      pos: Float32Array.from([0, 0, 0, 1, 0, 0, 0, 1, 0]), idx: Uint32Array.from([0, 1, 2]),
+    },
+  }
+
+  it.each(Object.keys(clouds))('writes the same metadata as a full save, and no buffers (%s)', (kind) => {
+    const c = clouds[kind]
+    const full = serializeCloud(c)
+    const lite = serializeCloud(c, { reuse: files })
+    expect(strip(lite)).toEqual(strip(full))
+    expect(lite.buffers).toBeNull()
+    expect(lite.reuse).toBe(files)
+  })
+
+  it('never reuses a sparse cloud: it always serialises in full', () => {
+    const out = serializeCloud(sparseCloud(), { reuse: files })
+    expect(out.reuse).toBeUndefined()
+    expect(out.buffers.pos.byteLength).toBe(3 * 24)
+  })
+})
