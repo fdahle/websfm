@@ -16,6 +16,7 @@ import { fitFundamental, sampsonRmsPx } from './fundamental.js'
 import { fitFiducialAffine, canonicalFrame, scanToCanonical } from './fiducials.js'
 import { calibratedFiducialPairs } from './fiducialModel.js'
 import { mapPositions, kpX, kpY } from './keypointSet.js'
+import { asPairList } from './matchCodec.js'
 import { fitFiducialTransform } from './fiducialCalibration.js'
 
 // ── Fiducial interior orientation (F4) ───────────────────────────────────
@@ -239,8 +240,12 @@ export function refitMovedPairs({ donePairs, movedUuids, imageByUuid, log }) {
       if (!movedUuids.has(e.idA) && !movedUuids.has(e.idB)) continue
       const iA = imageByUuid(e.idA), iB = imageByUuid(e.idB)
       if (!iA || !iB || (e.matches?.length ?? 0) < 8) { skipped++; continue }
-      const ptsA = e.matches.map(([ia]) => ({ x: kpX(iA.kp, ia), y: kpY(iA.kp, ia) }))
-      const ptsB = e.matches.map(([, ib]) => ({ x: kpX(iB.kp, ib), y: kpY(iB.kp, ib) }))
+      const m = asPairList(e.matches)
+      const ptsA = new Array(m.length), ptsB = new Array(m.length)
+      for (let i = 0; i < m.length; i++) {
+        ptsA[i] = { x: kpX(iA.kp, m.a(i)), y: kpY(iA.kp, m.a(i)) }
+        ptsB[i] = { x: kpX(iB.kp, m.b(i)), y: kpY(iB.kp, m.b(i)) }
+      }
       const fit = fitFundamental(ptsA, ptsB)
       if (!fit) { skipped++; continue }
       before.push(sampsonRmsPx(e.F, ptsA, ptsB))

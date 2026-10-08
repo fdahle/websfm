@@ -24,6 +24,7 @@ import { projectPoint, triangulationAngle, cameraCenter } from "./geometry.js"
 import { toNorm, camToP34flat, retriangulatePairs } from "./tracks.js"
 import { distortionIdentifiable, withoutDistortionTerms } from "./selfCalSchedule.js"
 import { hasKp, kpX, kpY } from "./keypointSet.js"
+import { asPairList } from "./matchCodec.js"
 
 // Depth of world point (x,y,z) along a flat 3×4 projection matrix's principal axis
 // (cheirality: positive ⇒ in front of the camera). Mirrors sfm.js's helper.
@@ -215,9 +216,10 @@ export async function registerImages(ctx) {
       else continue
       const regImg = ids.img(regUuid)
       const imgIsA = entry.idA === img.uuid
-      for (const [ia, ib] of entry.matches) {
-        const nIdx = imgIsA ? ia : ib
-        const regIdx = imgIsA ? ib : ia
+      const m = asPairList(entry.matches)
+      for (let i = 0; i < m.length; i++) {
+        const nIdx = imgIsA ? m.a(i) : m.b(i)
+        const regIdx = imgIsA ? m.b(i) : m.a(i)
         const pt = tracks.pointAt(regImg, regIdx)
         if (pt < 0) continue
         const prevIdx = ptToIdx.get(pt)
@@ -423,22 +425,24 @@ export async function registerImages(ctx) {
         // track were handled by the extension step above (when the pose agreed)
         // or are PnP outliers we deliberately don't fold in — re-triangulating
         // them would just create a duplicate point.
-        const pairsToTri = entry.matches.filter(([ia, ib]) => {
-          const newKp = imgIsA ? ia : ib
-          const regKp = imgIsA ? ib : ia
-          if (tracks.pointAt(imgI, newKp) >= 0) return false
-          if (tracks.pointAt(regI, regKp) >= 0) return false
-          return true
-        })
+        const m = asPairList(entry.matches)
+        const newKpOf = (i) => (imgIsA ? m.a(i) : m.b(i))
+        const regKpOf = (i) => (imgIsA ? m.b(i) : m.a(i))
+        const pairsToTri = [] // match indices
+        for (let i = 0; i < m.length; i++) {
+          if (tracks.pointAt(imgI, newKpOf(i)) >= 0) continue
+          if (tracks.pointAt(regI, regKpOf(i)) >= 0) continue
+          pairsToTri.push(i)
+        }
         if (pairsToTri.length === 0) continue
 
         // nNew ↔ Pnew (the new image), nReg ↔ Preg (the registered image).
-        const nNew = pairsToTri.map(([ia, ib]) => {
-          const k = imgIsA ? ia : ib
+        const nNew = pairsToTri.map((i) => {
+          const k = newKpOf(i)
           return toNorm(kpX(img.kp, k), kpY(img.kp, k), K)
         })
-        const nReg = pairsToTri.map(([ia, ib]) => {
-          const k = imgIsA ? ib : ia
+        const nReg = pairsToTri.map((i) => {
+          const k = regKpOf(i)
           return toNorm(kpX(regImg.kp, k), kpY(regImg.kp, k), regCam.K)
         })
 
@@ -451,9 +455,8 @@ export async function registerImages(ctx) {
             // >1000px on the building run). Require a real baseline angle, same
             // floor the track filter later enforces.
             if (triangulationAngle(Cnew, Creg, { x, y, z }) < filterMinTriAngleDeg) { lowParallax++; continue }
-            const [ia, ib] = pairsToTri[srcIdx]
-            const newKp = imgIsA ? ia : ib
-            const regKp = imgIsA ? ib : ia
+            const newKp = newKpOf(pairsToTri[srcIdx])
+            const regKp = regKpOf(pairsToTri[srcIdx])
             // Reprojection gate, as COLMAP's triangulator applies. A near-degenerate DLT
             // solve can pass cheirality and parallax while landing hundreds or thousands
             // of pixels off its own observations: on South Building every gross pre-solve

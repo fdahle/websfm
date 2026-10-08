@@ -1,6 +1,7 @@
 import { makeP34flat } from './reconstruction.js'
 import { cameraCenter, projectWithDepth, triangulationAngle } from './geometry.js'
 import { hasKp, kpX, kpY } from './keypointSet.js'
+import { asPairList } from './matchCodec.js'
 
 // ── Retriangulation + track merging (A3, pure) ───────────────────────────────
 // Standard COLMAP-style post-BA structure recovery, factored out of `reconstruct`
@@ -52,7 +53,9 @@ export async function retriangulatePairs({
     const camA = cameras.get(e.idA), camB = cameras.get(e.idB)
     if (!camA || !camB) continue // both endpoints must be registered
     const iA = ids.img(e.idA), iB = ids.img(e.idB)
-    const fresh = e.matches.filter(([ia, ib]) => tracks.pointAt(iA, ia) < 0 && tracks.pointAt(iB, ib) < 0)
+    const m = asPairList(e.matches)
+    const fresh = [] // match indices whose endpoints are both unassigned
+    for (let i = 0; i < m.length; i++) if (tracks.pointAt(iA, m.a(i)) < 0 && tracks.pointAt(iB, m.b(i)) < 0) fresh.push(i)
     if (!fresh.length) continue
 
     const KA = camA.K, KB = camB.K
@@ -60,16 +63,17 @@ export async function retriangulatePairs({
     const CA = minTriAngleDeg > 0 ? cameraCenter(camA) : null
     const CB = minTriAngleDeg > 0 ? cameraCenter(camB) : null
     const sA = keypointsAt(iA), sB = keypointsAt(iB)
-    const nA = [], nB = [], keep = []
-    for (const [ia, ib] of fresh) {
+    const nA = [], nB = [], keep = [] // keep: match indices, aligned with nA / nB
+    for (const i of fresh) {
+      const ia = m.a(i), ib = m.b(i)
       if (!hasKp(sA, ia) || !hasKp(sB, ib)) continue
-      nA.push(toNorm(kpX(sA, ia), kpY(sA, ia), KA)); nB.push(toNorm(kpX(sB, ib), kpY(sB, ib), KB)); keep.push([ia, ib])
+      nA.push(toNorm(kpX(sA, ia), kpY(sA, ia), KA)); nB.push(toNorm(kpX(sB, ib), kpY(sB, ib), KB)); keep.push(i)
     }
     if (!keep.length) continue
 
     const tri = await triangulate(nA, nB, PA, PB) // [{ x, y, z, srcIdx }]
     for (const { x, y, z, srcIdx } of tri) {
-      const [ia, ib] = keep[srcIdx]
+      const ia = m.a(keep[srcIdx]), ib = m.b(keep[srcIdx])
       // A point added earlier in this batch may already own one endpoint.
       if (tracks.pointAt(iA, ia) >= 0 || tracks.pointAt(iB, ib) >= 0) continue
       if (reprojErrAt(camA, x, y, z, sA, ia) > maxReprojPx) continue
@@ -134,7 +138,9 @@ export function mergeSplitTracks({ tracks, ids, cameras, pairs, keypointsAt, max
   for (const e of pairs) {
     if (!cameras.has(e.idA) || !cameras.has(e.idB)) continue
     const iA = ids.img(e.idA), iB = ids.img(e.idB)
-    for (const [ia, ib] of e.matches) {
+    const m = asPairList(e.matches)
+    for (let i = 0; i < m.length; i++) {
+      const ia = m.a(i), ib = m.b(i)
       // A merged-away point has released its keypoints, so it is never returned here.
       const p1 = tracks.pointAt(iA, ia), p2 = tracks.pointAt(iB, ib)
       if (p1 < 0 || p2 < 0 || p1 === p2) continue
@@ -180,7 +186,9 @@ export function completeTracks({
     for (const e of list) {
       if (!cameras.has(e.idA) || !cameras.has(e.idB)) continue
       const iA = ids.img(e.idA), iB = ids.img(e.idB)
-      for (const [ia, ib] of e.matches) {
+      const m = asPairList(e.matches)
+      for (let i = 0; i < m.length; i++) {
+        const ia = m.a(i), ib = m.b(i)
         const pA = tracks.pointAt(iA, ia)
         const pB = tracks.pointAt(iB, ib)
         if ((pA >= 0) === (pB >= 0)) continue

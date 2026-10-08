@@ -1,5 +1,6 @@
 import { fundamentalToEssential, recoverPose, triangulateDlt } from './reconstruction.js'
 import { hasKp, kpX, kpY } from './keypointSet.js'
+import { asPairList } from './matchCodec.js'
 import { I3, essentialSingularValues } from './rotations.js'
 import { toNorm, camToP34flat } from './tracks.js'
 import { projectPoint, medianTriangulationAngle } from './geometry.js'
@@ -51,9 +52,12 @@ export async function selectInitPair(
     const KB = Kmap.get(entry.idB)
     const E = fundamentalToEssential(entry.F, KA, KB)
     const esv = essentialSingularValues(E)
-    const matches = entry.matches // [[ia, ib], ...]
-    const pa = matches.map(([ia]) => ({ x: kpX(iA.kp, ia), y: kpY(iA.kp, ia) }))
-    const pb = matches.map(([, ib]) => ({ x: kpX(iB.kp, ib), y: kpY(iB.kp, ib) }))
+    const matches = asPairList(entry.matches)
+    const pa = new Array(matches.length), pb = new Array(matches.length)
+    for (let i = 0; i < matches.length; i++) {
+      pa[i] = { x: kpX(iA.kp, matches.a(i)), y: kpY(iA.kp, matches.a(i)) }
+      pb[i] = { x: kpX(iB.kp, matches.b(i)), y: kpY(iB.kp, matches.b(i)) }
+    }
     const pose = await recoverPose(pa, pb, E, KA, KB)
     if (!pose) return { ok: false, reason: 'pose recovery (essential decomposition) failed' }
 
@@ -69,7 +73,7 @@ export async function selectInitPair(
     const points = []
     for (const { x, y, z, srcIdx } of tri) {
       if (projDepth(PA, x, y, z) > 0 && projDepth(PB, x, y, z) > 0) {
-        const [ia, ib] = matches.at ? matches.at(srcIdx) : matches[srcIdx]
+        const ia = matches.a(srcIdx), ib = matches.b(srcIdx)
         points.push({ x, y, z, views: new Map([[entry.idA, ia], [entry.idB, ib]]) })
       }
     }
@@ -132,8 +136,9 @@ export async function selectInitPair(
       let seen = pointsByThirdView.get(thirdUuid)
       if (!seen) { seen = new Set(); pointsByThirdView.set(thirdUuid, seen) }
       const pointByKp = seedPointByView.get(seedUuid)
-      for (const match of edge.matches ?? []) {
-        const pointIdx = pointByKp.get(match[seedSide])
+      const m = asPairList(edge.matches ?? [])
+      for (let i = 0; i < m.length; i++) {
+        const pointIdx = pointByKp.get(seedSide === 0 ? m.a(i) : m.b(i))
         if (pointIdx != null) seen.add(pointIdx)
       }
     }
