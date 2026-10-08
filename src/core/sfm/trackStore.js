@@ -4,7 +4,7 @@
 // image list, a keypoint is its index `kp` in that image. Two implementations share
 // this API: 'map' (one Map per point and per image — the old representation, kept as
 // the reference the arena is tested against) and 'typed' (the arena below). See
-// docs/planning/plan-sfm-compact-memory.md (TODO ▸ MEM) for why.
+// HANDOVER ▸ B-mem (TODO ▸ MEM) for why.
 //
 // Semantics the solver relies on (they are the old `{views: Map}` + `viewIndex`
 // semantics, made explicit):

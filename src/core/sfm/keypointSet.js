@@ -13,7 +13,7 @@
 // snapshot without copying it (sfm.js cloneSfmInput), and why a snapshot is free.
 //
 // Replaces arrays of `{x, y, color}` objects: ~104 B per keypoint per copy as JS
-// objects, 16–20 B here (TODO ▸ MEM, docs/planning/plan-sfm-compact-memory.md).
+// objects, 16–20 B here (TODO ▸ MEM; measured in HANDOVER ▸ B-mem).
 
 export function isKeypointSet(v) {
   return !!v && v.xy instanceof Float64Array
