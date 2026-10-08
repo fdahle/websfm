@@ -23,7 +23,8 @@ export const GOLDEN_SCENES = {
   film: () => aerialBlock({ seed: 45, rows: 3, cols: 4, nPoints: 2000, film: true, prefix: 'fm' }),
 }
 
-const DROP_LOG = [/took \d+ms/, /total time \d/, / solver — /]
+// Wall-clock lines, and the bench's memory marks (they add no information to compare).
+const DROP_LOG = [/took \d+ms/, /total time \d/, / solver — /, /memory mark "/]
 
 function digestTyped(arr) {
   return arr ? Array.from(arr, (v) => (Number.isNaN(v) ? 'NaN' : v)) : null

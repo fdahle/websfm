@@ -1,5 +1,6 @@
 import init, { recover_pose, triangulate_dlt, solve_pnp, bundle_adjust, compute_depth_map }
   from '../../wasm/reconstruction/reconstruction.js'
+import { isObservationList } from './baObservations.js'
 import { SFM_TUNING } from '../tuning.js'
 
 let initPromise = null
@@ -316,7 +317,10 @@ export async function bundleAdjust(cameras, intrinsics, points3d, observations, 
   const refineMode = refineModeMask(refineIntrinsics)
   const nCam = cameras.length
   const nPts = points3d.length
-  const nObs = observations.length
+  // `observations` is either an array of {camIdx, ptIdx, x, y, weightX?, weightY?} or an
+  // ObservationList (baObservations.js) — the same data as parallel typed arrays.
+  const soa = isObservationList(observations)
+  const nObs = soa ? observations.n : observations.length
   if (nCam === 0 || nPts === 0 || nObs === 0) return null
 
   const camFlat = new Float32Array(nCam * 12)
@@ -335,10 +339,19 @@ export async function bundleAdjust(cameras, intrinsics, points3d, observations, 
 
   const obsFlat = new Float32Array(nObs * 4)
   const obsWFlat = new Float32Array(nObs * 2)
-  observations.forEach(({ camIdx, ptIdx, x, y, weightX = 1, weightY = 1 }, i) => {
-    obsFlat.set([camIdx, ptIdx, x, y], i * 4)
-    obsWFlat.set([weightX, weightY].map((v) => Number.isFinite(v) && v > 0 ? v : 1), i * 2)
-  })
+  const weight = (v) => (Number.isFinite(v) && v > 0 ? v : 1)
+  if (soa) {
+    const { cam, pt, x, y, wx, wy } = observations
+    for (let i = 0; i < nObs; i++) {
+      obsFlat[i * 4] = cam[i]; obsFlat[i * 4 + 1] = pt[i]; obsFlat[i * 4 + 2] = x[i]; obsFlat[i * 4 + 3] = y[i]
+      obsWFlat[i * 2] = wx ? weight(wx[i]) : 1; obsWFlat[i * 2 + 1] = wy ? weight(wy[i]) : 1
+    }
+  } else {
+    observations.forEach(({ camIdx, ptIdx, x, y, weightX = 1, weightY = 1 }, i) => {
+      obsFlat.set([camIdx, ptIdx, x, y], i * 4)
+      obsWFlat.set([weightX, weightY].map(weight), i * 2)
+    })
+  }
 
   const anchorFlat  = new Float32Array(gcpAnchors.length * 4)
   const anchorWFlat = new Float32Array(gcpAnchors.length * 9)

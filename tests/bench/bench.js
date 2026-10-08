@@ -22,6 +22,21 @@ import { cameraPositionCheck, gcpCheck } from '/src/core/eval/positionCheck.js'
 import { applySimilarity } from '/src/core/products/georef.js'
 import { makeFrameModelResolver, gcpsInPinholeFrame } from '/src/core/sfm/displayFrame.js'
 import { triangulateGcp } from '/src/core/sfm/gcpTriangulation.js'
+import { encodeSfmInput } from './sfmInputDump.js'
+
+// SfM input capture (config `dumpSfmInput`): the next `reconstruct` op posted to a
+// worker is encoded before it is sent (its match buffers are transferred, so they
+// are only readable here), then handed to the runner as a download. Node replays it
+// through reconstruct() as a real-data golden scene (src/core/sfm/sfmGolden.test.js).
+let sfmCaptureArmed = false, sfmCapture = null
+const postMessage = Worker.prototype.postMessage
+Worker.prototype.postMessage = function (message, ...rest) {
+  if (sfmCaptureArmed && message?.op === 'reconstruct') {
+    sfmCaptureArmed = false
+    sfmCapture = encodeSfmInput(message.args[0])
+  }
+  return postMessage.call(this, message, ...rest)
+}
 
 setActivePinia(createPinia())
 const { onLog, takePending } = useLog()
@@ -148,6 +163,20 @@ window.bench = {
   // sensor: { focal, cx, cy, k1, …, distortionModel } is assigned to every sensor for
   // this run (sensor-table units: focal + focalUnit, absolute pixel-centre cx/cy, OpenCV
   // p1/p2). A run without it restores the fields to what the EXIF grouping produced.
+  armSfmCapture() { sfmCaptureArmed = true; sfmCapture = null },
+  sfmCaptureBytes() { return sfmCapture?.byteLength ?? 0 },
+  // Starts a download of the captured input; the runner saves it. Returns its size.
+  downloadSfmCapture(name) {
+    if (!sfmCapture) return 0
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(new Blob([sfmCapture], { type: 'application/octet-stream' }))
+    a.download = name
+    document.body.appendChild(a); a.click(); a.remove()
+    const n = sfmCapture.byteLength
+    sfmCapture = null
+    return n
+  },
+
   async reconstruct({ preset = null, posePriors = true, leverArm = false, sensor = null, exportPoints = false, ...overrides } = {}) {
     const settings = { ...withPreset(RECONSTRUCT_DEFAULTS, RECONSTRUCT_PRESETS, preset), ...overrides }
     for (const p of poses.poses) p.enabled = posePriors
