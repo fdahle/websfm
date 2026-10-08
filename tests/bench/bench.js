@@ -201,6 +201,9 @@ window.bench = {
       cameras: cloud?.cameras?.size ?? 0, images: images.images.length,
       points: points.length, pointsGe3: ge3, observations: obs,
       reprojection: s?.reprojection ?? s?.finalReprojection ?? null,
+      // BA linear-solver totals + stage wall clock: the PCG-vs-Cholesky comparison
+      // (TODO ▸ MEM ▸ PCG) reads these; set recon.baSolver per variant to compare.
+      baSolver: s?.baSolver ?? null, timings: s?.timings ?? null,
       positionCheck, checkpointCheck, checkpointOffsets, posePriors: priors, leverArm: arm, sensor,
       pointsEnu, enuOrigin: pc?.origin ?? null,
       // The posed cameras (pinhole frame), so accuracy can be re-analysed without a rerun.

@@ -12,6 +12,7 @@ import {
   bundleAdjust,
   resolveK,
   refineModeMask,
+  baSolverFlat,
 } from './reconstruction.js'
 
 // The wasm glue defaults to fetch()ing its .wasm via a URL, which Node can't do.
@@ -388,6 +389,35 @@ describe('bundleAdjust', () => {
     expect(res).not.toBeNull()
     expect(res.costBefore).toBeGreaterThan(10) // the perturbation really hurt
     expect(res.costAfter).toBeLessThan(res.costBefore) // and BA improved it
+  })
+
+  it('reports what its linear solves did, and honours a solver policy', async () => {
+    const { cameras, intrinsics, points3d, observations } = exactScene(23, 60)
+    const perturbed = cameras.map((c, i) => i === 1 ? { R: c.R, t: [c.t[0] + 0.3, c.t[1], c.t[2]] } : c)
+    // n = 12 is far below the PCG threshold: every solve is a Cholesky.
+    const chol = await bundleAdjust(perturbed, intrinsics, points3d, observations, { maxIters: 30 })
+    expect(chol.solver.n).toBe(12)
+    expect(chol.solver.solves).toBeGreaterThan(0)
+    expect(chol.solver.cholesky).toBe(chol.solver.solves)
+    expect(chol.solver.pcgIters).toBe(0)
+    expect(chol.ms).toBeGreaterThanOrEqual(0)
+    // The trace still starts after the stats block (its tail is the final RMS).
+    expect(chol.costTrace.at(-1)).toBeCloseTo(chol.costAfter, 3)
+    // Forcing PCG on the same system reaches the same optimum.
+    const pcg = await bundleAdjust(perturbed, intrinsics, points3d, observations,
+      { maxIters: 30, solver: { pcgMinN: 0 } })
+    expect(pcg.solver.cholesky).toBe(0)
+    expect(pcg.solver.pcgConverged + pcg.solver.pcgFallback + pcg.solver.pcgNotPd).toBe(pcg.solver.solves)
+    expect(pcg.solver.pcgIters).toBeGreaterThan(0)
+    expect(pcg.costAfter).toBeCloseTo(chol.costAfter, 2)
+  })
+
+  it('packs a solver policy with NaN for every unset slot', () => {
+    expect(Array.from(baSolverFlat({})).every(Number.isNaN)).toBe(true)
+    expect(Array.from(baSolverFlat(null)).every(Number.isNaN)).toBe(true)
+    const f = baSolverFlat({ pcgMinN: 1e9, pcgRelTol: 1e-6, pcgMaxIter: 200, pcgAcceptPartial: true })
+    expect(f[0]).toBe(1e9); expect(f[1]).toBeCloseTo(1e-6, 12); expect(f[2]).toBe(200); expect(f[3]).toBe(1)
+    expect(baSolverFlat({ pcgAcceptPartial: false })[3]).toBe(0)
   })
 
   it('returns null when there are no observations', async () => {

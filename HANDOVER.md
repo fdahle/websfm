@@ -804,6 +804,16 @@ fiducials; self-calibration (A2) + fiducials (F4) are the code-side support.
 
 ## Done log (most recent first)
 
+- **2026-10-08 · Bundle-adjustment solver: instrumented and configurable.** Every
+  `bundle_adjust` call now returns what its reduced solves did (Cholesky vs PCG
+  converged / partial / fell back / not PD, CG iterations, size n; bundle.rs
+  `SolveStats`, a fixed `BA_STATS_LEN` block before the trace) and its wall clock.
+  sfm.js logs it per BA (debug), totals it per run (info + `summary.baSolver`, shown in
+  the Project Summary and the bench JSON). The policy (`pcg_min_n`, `rel_tol`,
+  `max_iter`, new `accept_partial`) is `SFM_TUNING.baSolver`, default = the shipped
+  behaviour, so the quarry PCG regression is settled by bench variants (`SFM-22`).
+  `crates/reconstruction/src/bundle.rs`, `core/sfm/reconstruction.js`, `core/sfm/sfm.js`.
+
 - **2026-10-08 · Dense: parallax gate in the cross-view depth filter; exact voxel merge
   outside the sampled bounds.** `filterDepthMapsGeometric` now counts a source view only
   if it sees the point at ≥ `minGeomAngleDeg` (3°, COLMAP's

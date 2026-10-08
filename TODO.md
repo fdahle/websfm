@@ -506,17 +506,19 @@ step (HANDOVER ▸ B-bench ▸ Monster). In order:
 User workaround today: a lower keypoint cap (Monster would likely fit at 6,000) or fewer
 preselection neighbours.
 
-**PCG reduced solve — tune or disable before committing** (`crates/reconstruction`
-`solve_reduced`, uncommitted on 2026-10-07). On a synthetic BA-shaped system it was 43×
-faster than Cholesky (0.14 vs 5.9 s at n = 3,144, native). On quarry (347 cameras)
-it made BA *slower*: 692 s vs 579 s, total SfM 869 vs 744 s, accuracy unchanged
-(112,985 points, camera RMS 0.217 vs 0.214 m). Likely real reduced systems are far
-worse conditioned (gauge freedom, LM damping), so CG runs to its 2,000-iteration cap at
-the 10⁻¹⁰ tolerance and then pays for the Cholesky fallback too. Next: log iterations
-and fallbacks per solve, then try an inexact-Newton tolerance (~10⁻⁶ relative, as in
-Ceres' iterative Schur) with a small iteration cap, and a better preconditioner
-(Schur-Jacobi or a gauge fix). Until a bench shows a win, raise `PCG_MIN_N` so it is
-off (and adjust its dispatcher test).
+**PCG reduced solve — decide from the bench (`SFM-22`).** PCG is live (shipped in
+`d1355a3`, from n ≥ 600). On a synthetic BA-shaped system it was 43× faster than
+Cholesky (0.14 vs 5.9 s at n = 3,144, native). On quarry (347 cameras) it made BA
+*slower*: 692 s vs 579 s, total SfM 869 vs 744 s, accuracy unchanged (112,985 points,
+camera RMS 0.217 vs 0.214 m). Suspected: real reduced systems are far worse conditioned
+(gauge freedom, LM damping), so CG runs to its 2,000-iteration cap at 10⁻¹⁰ and then
+pays for the Cholesky fallback too. Since 2026-10-08 every BA logs what its solves did
+and the run total lands in `summary.baSolver`; the policy is `SFM_TUNING.baSolver`, so
+the bench compares Cholesky-only / default / inexact (`pcgRelTol 1e-6, pcgMaxIter 200,
+pcgAcceptPartial`) as three `recon` variants with no rebuild. Then: keep the winner as
+the default, or switch PCG off (`pcgMinN: 1e9`) if neither PCG variant wins. A better
+preconditioner (Schur-Jacobi or a gauge fix) only if the stats show CG converging
+slowly rather than falling back.
 
 ### ZM — Monster beach set: MicaSense Altum-PT + YellowScan LiDAR (2026-09-23 flight)
 Local folder `wbsfm/20260923_zm_micasense_afternoon` (bench config `zm-pan`): 556
@@ -525,12 +527,6 @@ above ground, standalone GPS; 12 LiDAR strips (LAS 1.4 format 7, 158 M points, R
 NAP) and the 200 Hz trajectory. The first set with an independent 3D surface: the bench
 grids the LiDAR at 0.5 m and scores reconstruction points on flat cells after fitting a
 shift and offset (`scripts/bench/lidar.mjs` → `lidarCheck`: tilt, dome, scatter).
-- **16-bit TIFF → 8-bit takes the high byte** (`crates/imagecodec` `>> 8`). The pan band
-  occupies levels ~24–150 (p1–p99), a bright frame 88–180, so detection sees half the
-  contrast quantised to ~100 grey levels: 1,100–6,900 SIFT keypoints per image at 2400 px,
-  response p50 0.011–0.015 (South Building 0.020). Give the *compute* image a percentile
-  stretch (or a 16-bit gray detect path) for 16-bit sources; keep the display path.
-  Measure keypoints, registered cameras and `lidarCheck` before/after on `zm-pan`.
 - **The app imports 1 of these 12 LiDAR strips.** Two limits stack. The import budget
   (`core/io/las.js` `validateLasAllocation`: `count × (2 × recordLength + 64)` ≤ 1 GiB)
   allows ~7.9 M points of format 7, and the strips hold 9–16 M. Behind it, `crates/lazcodec`

@@ -56,22 +56,92 @@ pub(crate) fn chol_solve(n: usize, a: &[f64], b: &[f64]) -> Option<Vec<f64>> {
 // iteration on the same dense matrix is n² flops.
 pub(crate) const PCG_MIN_N: usize = 600;
 
-// Solve the reduced system: preconditioned CG when it is large, dense Cholesky
-// otherwise or whenever CG does not converge (so the worst case is the old cost).
-// `blocks` are the diagonal (offset, size) blocks used as the preconditioner:
-// one 6×6 per camera, one per intrinsics group. None ⇒ not positive-definite.
-pub(crate) fn solve_reduced(n: usize, a: &[f64], b: &[f64], blocks: &[(usize, usize)]) -> Option<Vec<f64>> {
-    if n >= PCG_MIN_N {
-        match pcg_solve(n, a, b, blocks, 1e-10, n.min(2000)) {
-            PcgResult::Converged(x) => return Some(x),
-            PcgResult::NotPositiveDefinite => return None,
-            PcgResult::Stalled => {} // fall back to the exact factorisation
+// How the reduced system is solved. The caller can override every field through
+// bundle_adjust's `solver_flat` = [pcg_min_n, rel_tol, max_iter, accept_partial]
+// (a missing or NaN slot keeps the default below, so an empty slice is today's
+// behaviour). This exists so a bench can compare policies on real blocks without a
+// rebuild: quarry (347 cameras) ran slower with PCG than without it (692 vs 579 s),
+// most likely because CG hit its iteration cap and then paid for Cholesky as well.
+//   pcg_min_n       reduced size from which PCG is tried (∞ ⇒ always Cholesky)
+//   rel_tol         CG stops at ‖r‖ ≤ rel_tol·‖b‖ (1e-10 is near-exact; an
+//                   inexact-Newton LM, as Ceres' iterative Schur, uses ~1e-6…1e-1)
+//   max_iter        CG iteration cap (capped at n)
+//   accept_partial  at the cap, return the CG iterate instead of falling back to
+//                   Cholesky. Safe for LM: every CG iterate from x₀ = 0 lowers the
+//                   quadratic model, so it is a descent step, and LM still only
+//                   accepts it if the true cost falls (else it raises damping, which
+//                   also makes the next CG solve better conditioned).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct SolverOpts { pub pcg_min_n: usize, pub rel_tol: f64, pub max_iter: usize, pub accept_partial: bool }
+
+impl SolverOpts {
+    pub(crate) const DEFAULT: SolverOpts = SolverOpts { pcg_min_n: PCG_MIN_N, rel_tol: 1e-10, max_iter: 2000, accept_partial: false };
+
+    pub(crate) fn from_flat(f: &[f32]) -> SolverOpts {
+        let d = SolverOpts::DEFAULT;
+        let slot = |i: usize| f.get(i).map(|&v| v as f64).filter(|v| !v.is_nan() && *v >= 0.0);
+        SolverOpts {
+            // `as usize` saturates, so +∞ means "never".
+            pcg_min_n: slot(0).map_or(d.pcg_min_n, |v| v as usize),
+            rel_tol: slot(1).filter(|v| *v > 0.0).map_or(d.rel_tol, |v| v),
+            max_iter: slot(2).filter(|v| *v >= 1.0).map_or(d.max_iter, |v| v as usize),
+            accept_partial: slot(3).map_or(d.accept_partial, |v| v != 0.0),
         }
+    }
+}
+
+// What the reduced solves of one bundle_adjust call did, returned to the caller in a
+// fixed block of the output (see BA_STATS_LEN) so a run can say where its time went.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) struct SolveStats {
+    pub solves: u32,        // reduced solves attempted (one per LM try)
+    pub cholesky: u32,      // solved directly (below pcg_min_n)
+    pub pcg_converged: u32, // PCG reached rel_tol
+    pub pcg_partial: u32,   // PCG hit the cap; its iterate was used (accept_partial)
+    pub pcg_fallback: u32,  // PCG hit the cap; fell back to Cholesky
+    pub pcg_npd: u32,       // PCG found the system not positive-definite
+    pub pcg_iters: u64,     // CG iterations summed over all PCG attempts
+    pub pcg_iters_max: u32, // most CG iterations in one attempt
+}
+
+// Output floats after [cost_before, cost_after, anchor_rms, prior_rms]:
+// [n, solves, cholesky, pcg_converged, pcg_partial, pcg_fallback, pcg_npd,
+//  pcg_iters, pcg_iters_max], then the per-iteration RMS trace.
+pub(crate) const BA_STATS_LEN: usize = 9;
+
+// Solve the reduced system: preconditioned CG when it is large, dense Cholesky
+// otherwise or whenever CG does not converge (unless `accept_partial`), so the worst
+// case is the old cost plus the wasted CG iterations. `blocks` are the diagonal
+// (offset, size) blocks used as the preconditioner: one 6×6 per camera, one per
+// intrinsics group. None ⇒ not positive-definite.
+pub(crate) fn solve_reduced(n: usize, a: &[f64], b: &[f64], blocks: &[(usize, usize)],
+                            opts: &SolverOpts, stats: &mut SolveStats) -> Option<Vec<f64>> {
+    stats.solves += 1;
+    if n >= opts.pcg_min_n {
+        let res = pcg_solve(n, a, b, blocks, opts.rel_tol, n.min(opts.max_iter));
+        let iters = res.iters();
+        stats.pcg_iters += iters as u64;
+        stats.pcg_iters_max = stats.pcg_iters_max.max(iters as u32);
+        match res {
+            PcgResult::Converged(x, _) => { stats.pcg_converged += 1; return Some(x); }
+            PcgResult::NotPositiveDefinite(_) => { stats.pcg_npd += 1; return None; }
+            PcgResult::Stalled(x, _) if opts.accept_partial => { stats.pcg_partial += 1; return Some(x); }
+            PcgResult::Stalled(..) => stats.pcg_fallback += 1, // fall back to the exact factorisation
+        }
+    } else {
+        stats.cholesky += 1;
     }
     chol_solve(n, a, b)
 }
 
-pub(crate) enum PcgResult { Converged(Vec<f64>), NotPositiveDefinite, Stalled }
+// Each variant carries the CG iterations it ran; Stalled also carries the last iterate.
+pub(crate) enum PcgResult { Converged(Vec<f64>, usize), NotPositiveDefinite(usize), Stalled(Vec<f64>, usize) }
+
+impl PcgResult {
+    fn iters(&self) -> usize {
+        match self { PcgResult::Converged(_, k) | PcgResult::NotPositiveDefinite(k) | PcgResult::Stalled(_, k) => *k }
+    }
+}
 
 // Conjugate gradients on a dense SPD system, block-Jacobi preconditioned. Converged
 // when ‖r‖ ≤ rel_tol·‖b‖. A non-positive curvature pᵀAp ≤ 0 (or a non-PD diagonal
@@ -88,7 +158,7 @@ pub(crate) fn pcg_solve(n: usize, a: &[f64], b: &[f64], blocks: &[(usize, usize)
             let mut e = vec![0f64; dim]; e[c] = 1.0;
             match chol_solve(dim, &blk, &e) {
                 Some(col) => for r in 0..dim { inv[r * dim + c] = col[r]; },
-                None => return PcgResult::NotPositiveDefinite,
+                None => return PcgResult::NotPositiveDefinite(0),
             }
         }
         inv_blocks.push((off, dim, inv));
@@ -113,28 +183,28 @@ pub(crate) fn pcg_solve(n: usize, a: &[f64], b: &[f64], blocks: &[(usize, usize)
     };
     let b_norm = b.iter().map(|v| v * v).sum::<f64>().sqrt();
     let mut x = vec![0f64; n];
-    if b_norm == 0.0 { return PcgResult::Converged(x); }
+    if b_norm == 0.0 { return PcgResult::Converged(x, 0); }
     let mut r = b.to_vec();
     let mut z = vec![0f64; n];
     apply_m(&r, &mut z);
     let mut p = z.clone();
     let mut rz: f64 = r.iter().zip(&z).map(|(u, v)| u * v).sum();
     let mut ap = vec![0f64; n];
-    for _ in 0..max_iter {
+    for k in 0..max_iter {
         matvec(&p, &mut ap);
         let pap: f64 = p.iter().zip(&ap).map(|(u, v)| u * v).sum();
-        if !(pap > 0.0) { return PcgResult::NotPositiveDefinite; }
+        if !(pap > 0.0) { return PcgResult::NotPositiveDefinite(k + 1); }
         let alpha = rz / pap;
         for i in 0..n { x[i] += alpha * p[i]; r[i] -= alpha * ap[i]; }
         let r_norm = r.iter().map(|v| v * v).sum::<f64>().sqrt();
-        if r_norm <= rel_tol * b_norm { return PcgResult::Converged(x); }
+        if r_norm <= rel_tol * b_norm { return PcgResult::Converged(x, k + 1); }
         apply_m(&r, &mut z);
         let rz_new: f64 = r.iter().zip(&z).map(|(u, v)| u * v).sum();
         let beta = rz_new / rz;
         rz = rz_new;
         for i in 0..n { p[i] = z[i] + beta * p[i]; }
     }
-    PcgResult::Stalled
+    PcgResult::Stalled(x, max_iter)
 }
 
 // Pinhole projection with the shared radial polynomial (Brown, no tangential):
@@ -269,11 +339,13 @@ fn build_groups(ids: &[i32], n_cam: usize) -> (Vec<usize>, usize) {
 ///   1 = focal scale s, 2 = principal point (dcx,dcy), 4 = radial k1, 8 = k2, 16 = k3.
 ///   0 ⇒ poses+points only. The per-group param vector is the ordered subset
 ///   `[s?, dcx?, dcy?, k1?, k2?, k3?]` (kdim ≤ 6). fy stays locked to fx (single scale).
+/// - `solver_flat`: reduced-system policy `[pcg_min_n, rel_tol, max_iter, accept_partial]`;
+///   empty / NaN slots ⇒ `SolverOpts::DEFAULT` (see there).
 ///
 /// # Output
 /// `[cameras_flat(n_cam×12), pts_flat(n_pts×3), intrinsics_flat(n_cam×7),
 ///   cost_before, cost_after, anchor_rms_after, camera_prior_rms_after,
-///   cost_trace…]` — the returned
+///   solver stats (BA_STATS_LEN), cost_trace…]` — the returned
 /// intrinsics are the **refined** effective K per camera as `[fx,fy,cx,cy,k1,k2,k3]`
 /// (radial coeffs 0 for the bits not set in `refine_mask`, identical to the input K
 /// when `refine_mask == 0`); cost_before/cost_after are RMS reprojection error in
@@ -293,6 +365,7 @@ pub fn bundle_adjust(
     max_iters: u32,
     sensor_of_cam: &[i32],
     refine_mask: u32,
+    solver_flat: &[f32],
 ) -> Vec<f32> {
     let n_cam = cameras_flat.len() / 12;
     let n_pts = pts_flat.len() / 3;
@@ -449,6 +522,8 @@ pub fn bundle_adjust(
     let precond_blocks: Vec<(usize, usize)> = (0..n_cam).map(|c| (6 * c, 6))
         .chain((0..if refine { g_count } else { 0 }).map(|g| (group_off + g * kdim, kdim)))
         .collect();
+    let solver = SolverOpts::from_flat(solver_flat);
+    let mut solve_stats = SolveStats::default();
     // Per-group params, one [f64;6] slot each. The focal-scale slot (if present) inits
     // to 1 (multiplies fx/fy); every distortion/principal-point slot inits to 0.
     let mut gpar = vec![[0.0f64; 6]; g_count.max(1)];
@@ -740,7 +815,7 @@ pub fn bundle_adjust(
             }
             if !ok { lambda = (lambda * 4.0).min(1e8); continue; }
 
-            let dsol = match solve_reduced(n, &s, &rhs, &precond_blocks) {
+            let dsol = match solve_reduced(n, &s, &rhs, &precond_blocks, &solver, &mut solve_stats) {
                 Some(x) => x,
                 None => { lambda = (lambda * 4.0).min(1e8); continue; }
             };
@@ -804,7 +879,7 @@ pub fn bundle_adjust(
     // Pack output: cameras (12 each), points (3 each), refined effective intrinsics
     // (7 each: fx,fy,cx,cy,k1,k2,k3 — radial coeffs 0 for the bits not in refine_mask),
     // [cost_before, cost_after, anchor_rms_after, camera_prior_rms_after], then trace.
-    let mut out = Vec::with_capacity(n_cam * 12 + n_pts * 3 + n_cam * 7 + 4 + trace.len());
+    let mut out = Vec::with_capacity(n_cam * 12 + n_pts * 3 + n_cam * 7 + 4 + BA_STATS_LEN + trace.len());
     for (r, t) in &cams {
         for row in r { for &v in row { out.push(v as f32); } }
         for &v in t { out.push(v as f32); }
@@ -821,6 +896,11 @@ pub fn bundle_adjust(
     out.push(cost_after as f32);
     out.push(anchor_rms_after as f32);
     out.push(camera_prior_rms_after as f32);
+    let st = &solve_stats;
+    for v in [n as f64, st.solves as f64, st.cholesky as f64, st.pcg_converged as f64, st.pcg_partial as f64,
+              st.pcg_fallback as f64, st.pcg_npd as f64, st.pcg_iters as f64, st.pcg_iters_max as f64] {
+        out.push(v as f32);
+    }
     for &c in &trace { out.push(c as f32); }
     out
 }
@@ -873,16 +953,65 @@ mod reduced_solve_tests {
         assert!(n >= PCG_MIN_N);
         let exact = chol_solve(n, &a, &b).unwrap();
         let x = match pcg_solve(n, &a, &b, &blocks, 1e-10, 2000) {
-            PcgResult::Converged(x) => x,
+            PcgResult::Converged(x, _) => x,
             _ => panic!("PCG did not converge"),
         };
         let err = x.iter().zip(&exact).map(|(u, v)| (u - v) * (u - v)).sum::<f64>().sqrt();
         let norm = exact.iter().map(|v| v * v).sum::<f64>().sqrt();
         assert!(err <= 1e-7 * norm, "relative error {}", err / norm);
         // And through the dispatcher, which takes the PCG path at this size.
-        let y = solve_reduced(n, &a, &b, &blocks).unwrap();
+        let mut st = SolveStats::default();
+        let y = solve_reduced(n, &a, &b, &blocks, &SolverOpts::DEFAULT, &mut st).unwrap();
         let err2 = y.iter().zip(&exact).map(|(u, v)| (u - v) * (u - v)).sum::<f64>().sqrt();
         assert!(err2 <= 1e-7 * norm);
+        assert_eq!((st.solves, st.pcg_converged, st.cholesky, st.pcg_fallback), (1, 1, 0, 0));
+        assert!(st.pcg_iters > 0 && st.pcg_iters as u32 == st.pcg_iters_max);
+    }
+
+    #[test]
+    fn solver_opts_parse_with_per_slot_defaults() {
+        assert_eq!(SolverOpts::from_flat(&[]), SolverOpts::DEFAULT);
+        assert_eq!(SolverOpts::from_flat(&[f32::NAN, f32::NAN, f32::NAN, f32::NAN]), SolverOpts::DEFAULT);
+        let o = SolverOpts::from_flat(&[f32::INFINITY, 1e-6, 200.0, 1.0]);
+        assert_eq!(o.pcg_min_n, usize::MAX); // "never PCG"
+        assert!((o.rel_tol - 1e-6).abs() < 1e-12);
+        assert_eq!((o.max_iter, o.accept_partial), (200, true));
+        // Nonsense values keep the default rather than producing a degenerate solver.
+        let bad = SolverOpts::from_flat(&[-1.0, 0.0, 0.0, f32::NAN]);
+        assert_eq!(bad, SolverOpts::DEFAULT);
+    }
+
+    #[test]
+    fn capped_pcg_falls_back_or_returns_its_iterate() {
+        let (n, a, b, blocks) = ba_like(100, 7);
+        let exact = chol_solve(n, &a, &b).unwrap();
+        let rel = |x: &[f64]| {
+            let e = x.iter().zip(&exact).map(|(u, v)| (u - v) * (u - v)).sum::<f64>().sqrt();
+            e / exact.iter().map(|v| v * v).sum::<f64>().sqrt()
+        };
+        // A 3-iteration cap cannot reach 1e-10: the default falls back to Cholesky…
+        let capped = SolverOpts { max_iter: 3, ..SolverOpts::DEFAULT };
+        let mut st = SolveStats::default();
+        let x = solve_reduced(n, &a, &b, &blocks, &capped, &mut st).unwrap();
+        assert_eq!((st.pcg_fallback, st.pcg_partial, st.pcg_iters), (1, 0, 3));
+        assert!(rel(&x) < 1e-9);
+        // …while accept_partial returns the CG iterate: inexact, but a descent step for
+        // the quadratic model ½xᵀAx − bᵀx (lower than at x = 0), which is all LM needs.
+        let mut st = SolveStats::default();
+        let y = solve_reduced(n, &a, &b, &blocks, &SolverOpts { accept_partial: true, ..capped }, &mut st).unwrap();
+        assert_eq!((st.pcg_fallback, st.pcg_partial), (0, 1));
+        assert!(rel(&y) > 1e-6);
+        let model = |x: &[f64]| {
+            let mut q = 0.0;
+            for i in 0..n { let ax: f64 = (0..n).map(|j| a[i * n + j] * x[j]).sum(); q += 0.5 * x[i] * ax - b[i] * x[i]; }
+            q
+        };
+        assert!(model(&y) < 0.0);
+        // pcg_min_n = ∞ keeps everything on Cholesky.
+        let mut st = SolveStats::default();
+        let z = solve_reduced(n, &a, &b, &blocks, &SolverOpts { pcg_min_n: usize::MAX, ..SolverOpts::DEFAULT }, &mut st).unwrap();
+        assert_eq!(z, exact);
+        assert_eq!((st.cholesky, st.pcg_iters), (1, 0));
     }
 
     #[test]
@@ -890,7 +1019,7 @@ mod reduced_solve_tests {
         let n = 3;
         let a = vec![1.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0];
         let blocks = [(0usize, 1usize), (1, 1), (2, 1)];
-        assert!(matches!(pcg_solve(n, &a, &[1.0, 1.0, 1.0], &blocks, 1e-10, 10), PcgResult::NotPositiveDefinite));
+        assert!(matches!(pcg_solve(n, &a, &[1.0, 1.0, 1.0], &blocks, 1e-10, 10), PcgResult::NotPositiveDefinite(_)));
     }
 
     // cargo test -p reconstruction --release -- --ignored --nocapture reduced_solve_timing
@@ -902,7 +1031,7 @@ mod reduced_solve_tests {
         let exact = chol_solve(n, &a, &b).unwrap();
         let chol = t.elapsed();
         let t = std::time::Instant::now();
-        let x = solve_reduced(n, &a, &b, &blocks).unwrap();
+        let x = solve_reduced(n, &a, &b, &blocks, &SolverOpts::DEFAULT, &mut SolveStats::default()).unwrap();
         let pcg = t.elapsed();
         let err = x.iter().zip(&exact).map(|(u, v)| (u - v).abs()).fold(0.0, f64::max);
         println!("n = {n}: cholesky {chol:?}, pcg {pcg:?}, max |dx| {err:e}");
@@ -912,6 +1041,8 @@ mod reduced_solve_tests {
     fn small_systems_stay_on_cholesky() {
         let (n, a, b, blocks) = ba_like(10, 3);
         assert!(n < PCG_MIN_N);
-        assert_eq!(solve_reduced(n, &a, &b, &blocks).unwrap(), chol_solve(n, &a, &b).unwrap());
+        let mut st = SolveStats::default();
+        assert_eq!(solve_reduced(n, &a, &b, &blocks, &SolverOpts::DEFAULT, &mut st).unwrap(), chol_solve(n, &a, &b).unwrap());
+        assert_eq!((st.solves, st.cholesky), (1, 1));
     }
 }

@@ -48,6 +48,14 @@ export const DETECT_TUNING = {
 // bundle-adjustment / track filtering). `settings` from the caller still overrides.
 // NOT here (owned by its module): init-pair thresholds → core/sfm/initPair.js.
 export const SFM_TUNING = {
+  // ── Bundle-adjustment linear solver (bundle.rs SolverOpts) ──
+  // Policy for the reduced camera system of every bundle adjustment. null ⇒ the crate
+  // default: PCG from n ≥ 600 (≈ 100 cameras), rel_tol 1e-10, 2,000 iterations, Cholesky
+  // fallback at the cap. Open question (TODO ▸ MEM ▸ PCG): quarry ran slower with PCG.
+  // Every BA logs what its solves did and the run totals land in summary.baSolver, so a
+  // bench decides by overriding this per run: { pcgMinN: 1e9 } (Cholesky only) or
+  // { pcgRelTol: 1e-6, pcgMaxIter: 200, pcgAcceptPartial: true } (inexact Newton).
+  baSolver: { pcgMinN: null, pcgRelTol: null, pcgMaxIter: null, pcgAcceptPartial: null },
   // ── Interleaved bundle-adjustment / track filtering ──
   // Observation pruning threshold, in **detection pixels** — sfm.js resolves it to
   // native px against the run's detection scale (core/scaleContext.js, which owns
