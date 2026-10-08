@@ -19,11 +19,12 @@
 // variants ([{ label, match?, recon? }]: one detection, then a match + reconstruct per
 // variant, so SfM-only experiments reuse the same keypoints and matches).
 import { chromium } from 'playwright'
+import { startWorkerHeapSampler } from './workerHeap.mjs'
 import { loadReference } from './reference.mjs'
 import { spawn } from 'node:child_process'
 import { readFile, readdir, writeFile, mkdir, rm } from 'node:fs/promises'
 import { createWriteStream, createReadStream } from 'node:fs'
-import { join, dirname, extname, resolve } from 'node:path'
+import { join, dirname, extname, resolve, basename } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const repo = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
@@ -46,7 +47,7 @@ const json = (v) => (typeof v === 'string' ? JSON.parse(v) : v)
 
 const args = parseArgs(process.argv.slice(2))
 const cfg = { ...(args.config ? JSON.parse(await readFile(args.config, 'utf8')) : {}) }
-for (const k of ['name', 'images', 'include', 'limit', 'sceneType', 'stages', 'out', 'port', 'headed', 'dev', 'build']) if (args[k] !== undefined) cfg[k] = args[k]
+for (const k of ['name', 'images', 'include', 'limit', 'sceneType', 'stages', 'out', 'port', 'headed', 'dev', 'build', 'maxOldSpaceMb', 'dumpSfmInput']) if (args[k] !== undefined) cfg[k] = args[k]
 for (const k of ['detect', 'match', 'recon']) cfg[k] = { ...(cfg[k] ?? {}), ...(args[k] ? json(args[k]) : {}) }
 if (!cfg.images) throw new Error('--images <folder> (or "images" in --config) is required')
 const name = cfg.name ?? 'bench'
@@ -151,13 +152,22 @@ const quiet = /^Matched: |^SIFT (start|done): |^Added image: |^Metadata /
 const profileDir = `${outPrefix}.profile`
 // Precise heap readings + a callable gc(), so the `== memory` lines below report live
 // bytes rather than quantised numbers that include uncollected garbage.
+// `maxOldSpaceMb` raises V8's heap ceiling for the page AND its workers (one renderer
+// process). Users cannot do this; it exists so a run that would die at ~4 GB can finish
+// and report its real peak (TODO ▸ MEM). The app's preflight then sees the raised
+// jsHeapSizeLimit too.
+const jsFlags = ['--expose-gc', ...(cfg.maxOldSpaceMb ? [`--max-old-space-size=${Number(cfg.maxOldSpaceMb)}`] : [])]
 const browser = await chromium.launchPersistentContext(profileDir, {
   channel: 'chrome', headless: !cfg.headed,
-  args: ['--enable-precise-memory-info', '--js-flags=--expose-gc'],
+  args: ['--enable-precise-memory-info', `--js-flags=${jsFlags.join(' ')}`],
 })
 const result = { name, config: cfg, files: files.length, startedAt: new Date().toISOString(), stages: {} }
 try {
   const page = browser.pages()[0] ?? await browser.newPage()
+  // Worker heap per SfM segment: closed by the solver's `stage "…" took` and
+  // `memory mark "…"` debug lines (sfm.js), reported with each recon stage.
+  const heap = await startWorkerHeapSampler(page)
+  const heapMark = /(?:^|: )(?:stage "([^"]+)" took|memory mark "([^"]+)")|^(Compact result ready)/
   // Stall/crash watchdog. A worker or renderer that dies of memory can leave
   // page.evaluate pending forever (a 2026-10-07 Monster run sat silent for 5 h after
   // its SfM worker died). Any page crash, or no log line for `stallMinutes` (default
@@ -180,6 +190,12 @@ try {
     if (text.startsWith('@@LOG ')) {
       lastLogAt = Date.now()
       const e = JSON.parse(text.slice(6))
+      const mk = heapMark.exec(e.message)
+      if (mk) {
+        // Keep a sub-run's prefix ("Seed retry 2: ", "Secondary 1: ") in the segment name.
+        const prefix = e.message.slice(0, mk.index + (mk[0].startsWith(': ') ? 2 : 0))
+        heap.mark(`${prefix}${mk[1] ?? mk[2] ?? 'pack result (worker op)'}`)
+      }
       logOut.write(fmt(e) + '\n')
       if (!quiet.test(e.message) && e.level !== 'debug') console.log(fmt(e))
     } else if (msg.type() === 'error') {
@@ -229,11 +245,14 @@ try {
   const runStage = async (stage, settings, key = stage) => {
     const s = stage === 'recon' && lidarCfg ? { ...settings, exportPoints: true } : settings
     lastLogAt = Date.now()
+    heap.mark('(before stage)'); heap.take()
+    if (stage === 'recon' && cfg.dumpSfmInput) await page.evaluate(() => window.bench.armSfmCapture())
     let r
     try {
       r = await Promise.race([page.evaluate(([f, x]) => window.bench[f](x), [run[stage], s]), watchdog()])
     } catch (err) {
-      result.stages[key] = { error: String(err?.message ?? err) }
+      heap.mark('(at abort)')
+      result.stages[key] = { error: String(err?.message ?? err), workerHeap: heap.take() }
       await writeFile(`${outPrefix}.json`, JSON.stringify(result, null, 2))
       console.error(`== ${key}: ABORTED — ${err?.message ?? err}`)
       throw err
@@ -250,8 +269,25 @@ try {
       }
       delete r.pointsEnu
     }
+    if (stage === 'recon' && cfg.dumpSfmInput && await page.evaluate(() => window.bench.sfmCaptureBytes())) {
+      // The exact worker payload, for node replay (tests/bench/sfmInputDump.js).
+      const file = `${outPrefix}.${key.replace(/[^\w.-]+/g, '_')}.sfminput`
+      const [download, bytes] = await Promise.all([
+        page.waitForEvent('download', { timeout: 120_000 }),
+        page.evaluate((n) => window.bench.downloadSfmCapture(n), basename(file)),
+      ])
+      await download.saveAs(file)
+      console.log(`== ${key}: SfM input dump ${(bytes / 1024 ** 2).toFixed(1)} MiB → ${file}`)
+    }
+    if (stage === 'recon') {
+      heap.mark('(tail)')
+      const h = heap.take()
+      r.workerHeap = h
+      const gb = (v) => `${(v / 1024 ** 3).toFixed(2)} GB`
+      for (const seg of h.segments) console.log(`== worker heap ${key} ▸ ${seg.label}: ${gb(seg.peakBytes)}`)
+    }
     result.stages[key] = r
-    const { settings: _s, model: _m, ...numbers } = r
+    const { settings: _s, model: _m, workerHeap: _w, ...numbers } = r
     console.log(`== ${key}: ${JSON.stringify(numbers)}`)
     if (stage !== 'recon') await memory(`after ${key}`)
     await writeFile(`${outPrefix}.json`, JSON.stringify(result, null, 2))

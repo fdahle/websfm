@@ -13,6 +13,8 @@
 // (pinhole + radial k1..k3 on normalised coordinates). A projection behind or on the
 // camera costs δ², as in the crate.
 
+import { isObservationList } from './baObservations.js'
+
 /**
  * @param {{R:number[][], t:number[]}} cam
  * @param {{fx:number, fy:number, cx:number, cy:number, k1?:number, k2?:number, k3?:number}} K
@@ -30,9 +32,20 @@ export function projectFull(cam, K, p) {
   return { x: K.fx * a * d + K.cx, y: K.fy * b * d + K.cy }
 }
 
+const obsCount = (observations) => (isObservationList(observations) ? observations.n : observations.length)
+
 function residuals(state, observations) {
-  const out = new Float64Array(observations.length)
-  for (let i = 0; i < observations.length; i++) {
+  const n = obsCount(observations)
+  const out = new Float64Array(n)
+  if (isObservationList(observations)) {
+    const { cam, pt, x, y } = observations
+    for (let i = 0; i < n; i++) {
+      const q = projectFull(state.cams[cam[i]], state.Ks[cam[i]], state.points[pt[i]])
+      out[i] = q ? Math.hypot(q.x - x[i], q.y - y[i]) : NaN
+    }
+    return out
+  }
+  for (let i = 0; i < n; i++) {
     const o = observations[i]
     const q = projectFull(state.cams[o.camIdx], state.Ks[o.camIdx], state.points[o.ptIdx])
     out[i] = q ? Math.hypot(q.x - o.x, q.y - o.y) : NaN
@@ -48,7 +61,7 @@ const huber = (e, d) => (Number.isNaN(e) ? d * d : e <= d ? e * e : 2 * d * e - 
  * @param {object} o
  * @param {{cams:Array, Ks:Array, points:Array}} o.before
  * @param {{cams:Array, Ks:Array, points:Array}} o.after
- * @param {{camIdx:number, ptIdx:number, x:number, y:number}[]} o.observations
+ * @param {{camIdx:number, ptIdx:number, x:number, y:number}[] | object} o.observations  records or an ObservationList
  * @returns {{ delta:number, before:number, after:number, improved:boolean }}
  *   `before`/`after` are RMS-equivalent (sqrt of mean Huber cost), in px.
  */
@@ -59,8 +72,9 @@ export function compareRobustCost({ before, after, observations }) {
   const med = finite.length ? finite[Math.floor(finite.length / 2)] : 1
   const delta = Math.max(1, 2.5 * med)
   let cb = 0, ca = 0
-  for (let i = 0; i < observations.length; i++) { cb += huber(eb[i], delta); ca += huber(ea[i], delta) }
-  const n = Math.max(1, observations.length)
+  const nObs = obsCount(observations)
+  for (let i = 0; i < nObs; i++) { cb += huber(eb[i], delta); ca += huber(ea[i], delta) }
+  const n = Math.max(1, nObs)
   const b = Math.sqrt(cb / n), a = Math.sqrt(ca / n)
   return { delta, before: b, after: a, improved: a <= b }
 }
