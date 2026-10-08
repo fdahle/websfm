@@ -104,7 +104,7 @@ export const SFM_TUNING = {
   interimBaIterations: 12,   // fewer iters for the interim solves than the final BA
   // Track storage (core/sfm/trackStore.js): 'typed' is the arena the solver runs on;
   // 'map' is the Map-based reference it is tested against. Same output, bit for bit.
-  trackStore: 'map',
+  trackStore: 'typed',
   // Camera-centre priors (imported poses / EXIF GPS) enter one final fixed-K BA.
   // Targets are mapped into the current arbitrary SfM frame by a similarity fit;
   // two rounds let that mapping settle after the first constrained deformation.
