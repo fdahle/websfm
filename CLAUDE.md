@@ -771,7 +771,8 @@ self-contained, file-based project format.
    forward–backward reprojection (unproject → project into a source → unproject **that
    source's own depth at that one pixel** → reproject home; error ≤ `maxGeomCost` px ⇒
    that view is consistent) and needs `minConsistent` such views, plus an absolute
-   `minNcc` floor. Sampling one source pixel is what makes it strict, and is the
+   `minNcc` floor. A view also only votes at ≥ `minGeomAngleDeg` parallax: at ~0° the
+   round trip returns home for any depth, so a near-duplicate view vouches for sky. Sampling one source pixel is what makes it strict, and is the
    difference from `fuseDepthMaps`' own check, which searches a
    (2·`consistencyPx`+1)² window and accepts if *any* pixel there is within tolerance —
    a noisy depth cloud (vegetation) passes that by chance. Fusion's check stays as a
@@ -799,8 +800,11 @@ self-contained, file-based project format.
    ground-pixel footprint). **Invariant — fusion must never materialize a
    per-pixel point-object list** (25–30 M boxed `{x,y,z,color}` ≈ 3 GB was the
    2026-07-12 OOM). Kept pixels stream **directly** into `createVoxelAccumulator`
-   (SoA typed-array sums, numeric packed cell keys sized from a coarse scene bbox
-   — `mergePointsSpatial` is the equivalent-but-batch reference kept for tests) and
+   (SoA typed-array sums, numeric packed cell keys sized from a coarse scene bbox;
+   a point outside that bbox spills into an exact string-keyed overflow map, never a
+   clamp into the border cell, which collapsed thin tall features. Exact bounds are not
+   the fix: one sky flyer would stretch the box and `clampCellForBounds` would coarsen
+   the whole merge — `mergePointsSpatial` is the equivalent-but-batch reference kept for tests) and
    finalize straight to the flat wire buffer `[x,y,z,r,g,b]` per point. This makes
    `step` a **speed lever, not the density knob** — density is controlled by the
    merge cell in world units, and `step` defaults to 1 (full res in, dedupe out).

@@ -35,7 +35,7 @@ budget → per-control prefills → visual Workflow Builder). What is
 
 1. **Verification.** Most of what shipped since 2026-07-10 has never been run in a
    browser on real data. That is the credibility gap now, not any missing feature.
-   It is tracked row-by-row in `VERIFICATION.csv` (162 checks, 139 open; 56 open at
+   It is tracked row-by-row in `VERIFICATION.csv` (189 checks, 166 open; 72 open at
    P1). The headless bench (`scripts/bench/`) now closes pipeline rows without a
    person; what is left is mostly UI, OPFS-reopen and external-application checks.
 2. Remaining feature gaps: DEM-of-difference and 3D measurement (F11 — scale, 2D tools
@@ -158,8 +158,11 @@ Stage A′ (`filterDepthMapsGeometric`) shipped and is unit-tested but **unmeasu
 real data**; it subsumes what was previously tracked as A5. The former dense
 sky/vegetation plan is retired: this section contains all remaining decisions.
 - **Retune the defaults** once `DEN-02`…`DEN-04` are in. `maxGeomCost 1.0` /
-  `minConsistent 2` / `minNcc 0.1` are COLMAP's numbers, adopted untested at our
-  working resolutions. Watch for over-culling on legitimately weak-texture surfaces
+  `minConsistent 2` / `minNcc 0.1` / `minGeomAngleDeg 3` are COLMAP's numbers, adopted
+  untested at our working resolutions. The parallax gate (2026-10-08) is the one most
+  likely to over-cull: short-baseline sets (video sweeps, close-range objects shot from
+  a few steps apart) lose real surface the near-duplicate views alone saw; the log's
+  "consistent only at <3° parallax" bucket is the number to read. Watch for over-culling on legitimately weak-texture surfaces
   (snow/ice — the polar case is exactly where a photometric floor is most likely to
   be wrong).
 - Stage A′ wall clock: the exact cull + nearest-first walk (2026-10-07) cut it ~3×
@@ -215,12 +218,6 @@ Related evidence: `VERIFICATION.csv` ▸ `FID-08` (the TMA set's implied 253 mm)
 ### RV — 2026-10-03 code + maths review: verified, not yet fixed
 Each item was confirmed against the code (most with a measured number); the fixed
 ones are in HANDOVER. Ordered by expected impact.
-- **Cross-view depth filter has no parallax gate** (COLMAP's
-  `filter_min_triangulation_angle`): low-parallax views "confirm" sky, which then
-  survives in the persisted maps the ortho uses as a z-buffer.
-- **Voxel accumulator clamps out-of-bounds points into border cells** (bounds from a
-  16-px-stride sample, one pad cell): thin tall features collapse. Exact bounds or
-  pad by the depth range.
 - **PatchMatch refinement schedule** decays from the full depth range and restarts
   per pyramid level; with 3 iterations the finest proposal is still ~12 % of range.
   Perturb relative to the current depth (COLMAP).

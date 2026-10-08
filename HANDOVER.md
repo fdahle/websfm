@@ -804,6 +804,18 @@ fiducials; self-calibration (A2) + fiducials (F4) are the code-side support.
 
 ## Done log (most recent first)
 
+- **2026-10-08 · Dense: parallax gate in the cross-view depth filter; exact voxel merge
+  outside the sampled bounds.** `filterDepthMapsGeometric` now counts a source view only
+  if it sees the point at ≥ `minGeomAngleDeg` (3°, COLMAP's
+  `filter_min_triangulation_angle`, per view): a near-duplicate view's round trip returns
+  home for any depth, so it vouched for sky, which survived in the persisted maps the
+  ortho uses as a z-buffer. Exposed in Build Depth Maps ▸ Advanced, recorded in
+  `depthSummary.settings`, logged as its own cull bucket. `createVoxelAccumulator` no
+  longer clamps points outside its 16-px-sampled bounds into the border cell (a thin,
+  tall feature collapsed to one cell: 37 → 18 cells on the test spire); they go to an
+  exact overflow map. `core/dense/mvs.js`, `defaults.user.js`, `DepthMapsModal.vue`,
+  `workers/ops/dense.js`. Unmeasured on real data: see `DEN-02`/`DEN-03`/`DEN-07`.
+
 - **2026-10-07 · 3D camera glyphs no longer stall on size/visibility changes.** Each
   camera-size step and each sparse-cloud toggle rebuilt every frustum and re-decoded
   every photo at full resolution into a fresh GPU texture. Frustums are now shared unit

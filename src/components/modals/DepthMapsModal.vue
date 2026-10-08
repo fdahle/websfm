@@ -94,6 +94,11 @@ function run() {
           <input id="minConsistent" v-model.number="settings.minConsistent" type="number" min="1" max="8" step="1" class="field-input" />
         </SettingsField>
 
+        <SettingsField v-if="settings.geomConsistency" label="Minimum parallax" label-for="minGeomAngleDeg" unit="°"
+          hint="A view only counts if it sees the point from at least this angle apart. 0 disables.">
+          <input id="minGeomAngleDeg" v-model.number="settings.minGeomAngleDeg" type="number" min="0" max="20" step="0.5" class="field-input" />
+        </SettingsField>
+
         <SettingsField v-if="settings.geomConsistency" label-for="minNcc"
           hint="Absolute photometric floor per pixel (0–1). Unlike the fusion gate this does not adapt to the data.">
           <template #label>

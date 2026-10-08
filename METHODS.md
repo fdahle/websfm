@@ -1198,8 +1198,15 @@ support planes, in `core/dense/mvs.js` + `crates/reconstruction/src/mvs.rs`.
   only by **disagreement between views**. Per pixel: unproject to `P`, project into a
   source, read **that source's own depth at that single pixel**, unproject it to `P′`,
   reproject `P′` into the reference — the **forward–backward reprojection error** `e`.
-  A view is consistent when `e ≤ maxGeomCost` (px); `minConsistent` such views are
-  required. An absolute `minNcc` floor also applies, distinct from fusion's *adaptive*
+  A view is consistent when `e ≤ maxGeomCost` (px) **and** its triangulation angle at
+  `P` with the reference is ≥ `minGeomAngleDeg` (3°, COLMAP's
+  `filter_min_triangulation_angle`, likewise applied per view); `minConsistent` such
+  views are required. The angle gate exists because at ~0° parallax the round trip is
+  vacuous: a source beside the reference looks down the same ray, so *any* depth there,
+  a sky pixel at an arbitrary distance included, returns to `(u,v)`. Fusion's own
+  parallax gate cannot stand in for it: it cleans only the fused cloud, while this pass
+  also cleans the persisted maps the orthophoto uses as a z-buffer. A pixel that fails
+  only for want of parallax is logged as such, separately from a genuine disagreement. An absolute `minNcc` floor also applies, distinct from fusion's *adaptive*
   p70 `maxCost` which by construction keeps 70% of pixels however bad the distribution.
 
   Sampling **one** source pixel is what makes this discriminate. Fusion's own check

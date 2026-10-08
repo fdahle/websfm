@@ -24,7 +24,8 @@ by-product.
 median/speckle filter that removes isolated wrong depths within one map; a
 **cross-view consistency** pass that reprojects each pixel through a neighbouring
 view's own depth and back, keeping only pixels several views independently agree
-on; and finally fusion. That middle pass is the only stage that can remove sky
+on (a view only votes if it sees the point from a few degrees apart: one standing next
+to the reference would agree with any depth); and finally fusion. That middle pass is the only stage that can remove sky
 and vegetation, because both correlate well photometrically — a textured bush
 matches itself, and smooth sky matches at *any* depth — and give themselves away
 only by disagreeing between views.

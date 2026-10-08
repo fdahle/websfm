@@ -210,6 +210,8 @@ export const DEPTHMAP_DEFAULTS = {
   geomConsistency: true, // enable the cross-view check
   maxGeomCost: 1.0,      // max forward–backward reprojection error (px) to call a view consistent
   minConsistent: 2,      // min consistent views to keep a pixel
+  minGeomAngleDeg: 3.0,  // a view only counts if it sees the point at ≥ this parallax (COLMAP's
+                         // filter_min_triangulation_angle) — near-duplicate views can't vouch for sky
   minNcc: 0.1,           // absolute per-pixel ZNCC floor (drops cost > 1 − minNcc)
 }
 // Depth-map quality cards. Unlike the other presets these are NOT deltas — `quality` is
