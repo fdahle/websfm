@@ -32,6 +32,12 @@ back, removing pixels that do not agree across views. This is particularly impor
 for sky, foliage, water, haze, and silhouettes, where a photometric score alone can
 look deceptively good.
 
+**Minimum parallax** (default 3°) decides which views may vote. A view taken from
+almost the same spot sees along the same ray, so it "agrees" with any depth, including
+a sky pixel at an arbitrary distance. Only views that see the point from at least this
+angle apart count. Lower it (or set 0) only for sets shot with very short baselines,
+such as a slow video sweep, and check that the background does not come back.
+
 ## Photometric and speckle filters
 The NCC floor rejects pixels without sufficient appearance agreement. Speckle cleanup
 removes small inconsistent regions. Tight filters produce cleaner but less complete

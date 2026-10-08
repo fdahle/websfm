@@ -496,8 +496,14 @@ export function geomFilterLoopShare({ loopMs, done, total, pxDone, usPerPx = DEN
 //   P' = unproject(src, p, srcDepth(p))   what the source *actually* has there
 //   e  = ‖project(ref, P') − (u,v)‖       forward–backward reprojection error, px
 //
-// A view counts as consistent when e ≤ maxGeomCost. Requiring `minConsistent` such
-// views kills anything only one view believes in. Note this samples the source's depth
+// A view counts as consistent when e ≤ maxGeomCost **and** it sees P at a
+// triangulation angle ≥ minGeomAngleDeg (COLMAP's filter_min_triangulation_angle, also
+// applied per view). Requiring `minConsistent` such views kills anything only one view
+// believes in. The angle matters because at ~0° parallax the round trip is vacuous: a
+// source next to the reference sees the same ray, so any depth — a sky pixel at an
+// arbitrary distance — returns to (u,v). Without it, near-duplicate views vouched for
+// sky, which then survived in the persisted maps the orthophoto uses as a z-buffer
+// (fusion's own parallax gate only cleans the fused cloud). Note this samples the source's depth
 // at ONE pixel, which is what makes it strict: fuseDepthMaps' own check searches a
 // (2·consistencyPx+1)² window and accepts if *any* pixel there is within tolerance, so
 // a noisy depth cloud (a bush) passes it by chance. That check stays as a cheap second
@@ -527,6 +533,7 @@ export function filterDepthMapsGeometric(maps, opts = {}, onLog = () => {}, hook
     minNcc = DEPTHMAP_DEFAULTS.minNcc,
     maxGeomCost = DEPTHMAP_DEFAULTS.maxGeomCost,
     minConsistent = DEPTHMAP_DEFAULTS.minConsistent,
+    minGeomAngleDeg = DEPTHMAP_DEFAULTS.minGeomAngleDeg,
     cull = true,
   } = opts
   const { onProgress } = hooks
@@ -545,9 +552,13 @@ export function filterDepthMapsGeometric(maps, opts = {}, onLog = () => {}, hook
       + `views/map (of ${nMaps - 1})${cull ? ' after the frustum cull' : ''}`, 'info', 'Dense')
   }
   const params = maps.map(camParams)
+  // Camera centres for the per-view parallax gate (cos > cosMinAngle ⇔ angle too small).
+  const angleOn = minGeomAngleDeg > 0
+  const cosMinAngle = Math.cos(minGeomAngleDeg * Math.PI / 180)
+  const centres = maps.map((m) => cameraCenter(m))
 
   const masks = maps.map((m) => new Uint8Array(m.width * m.height)) // 1 = drop
-  let considered = 0, lowNcc = 0, inconsistent = 0, kept = 0
+  let considered = 0, lowNcc = 0, inconsistent = 0, lowParallax = 0, kept = 0
 
   for (let mi = 0; mi < nMaps; mi++) {
     const m = maps[mi]
@@ -567,7 +578,8 @@ export function filterDepthMapsGeometric(maps, opts = {}, onLog = () => {}, hook
     const mR00 = pm[0], mR01 = pm[1], mR02 = pm[2], mR10 = pm[3], mR11 = pm[4], mR12 = pm[5]
     const mR20 = pm[6], mR21 = pm[7], mR22 = pm[8], mt0 = pm[9], mt1 = pm[10], mt2 = pm[11]
     const mfx = pm[12], mfy = pm[13], mcx = pm[14], mcy = pm[15]
-    let mapLowNcc = 0, mapInconsistent = 0
+    const [mCx, mCy, mCz] = centres[mi]
+    let mapLowNcc = 0, mapInconsistent = 0, mapLowParallax = 0
     for (let v = 0; v < h; v++) {
       // Within-map progress (a map is seconds on a big set): time-throttled so a
       // 1000-row plane doesn't post 1000 events.
@@ -590,7 +602,12 @@ export function filterDepthMapsGeometric(maps, opts = {}, onLog = () => {}, hook
         const Py = mR01 * ax + mR11 * ay + mR21 * az
         const Pz = mR02 * ax + mR12 * ay + mR22 * az
         const cand = flatList ?? lists[rowBlock + ((u / FILTER_BLOCK) | 0)]
-        let agree = 0
+        // Reference ray P→C, for the parallax gate.
+        const rx = mCx - Px, ry = mCy - Py, rz = mCz - Pz
+        const rr = rx * rx + ry * ry + rz * rz
+        // `flat` counts views that round-trip but at too little parallax: they decide
+        // only which bucket a rejected pixel is reported in, never the verdict.
+        let agree = 0, flat = 0
         for (let k = 0; k < cand.length && agree < minConsistent; k++) {
           const ci = cand[k]
           const c = maps[ci], pc = params[ci]
@@ -616,9 +633,21 @@ export function filterDepthMapsGeometric(maps, opts = {}, onLog = () => {}, hook
           if (!(qz > 1e-9)) continue
           const qx = mR00 * Qx + mR01 * Qy + mR02 * Qz + mt0
           const qy = mR10 * Qx + mR11 * Qy + mR12 * Qz + mt1
-          if (Math.hypot(mfx * (qx / qz) + mcx - u, mfy * (qy / qz) + mcy - v) <= maxGeomCost) agree++
+          if (Math.hypot(mfx * (qx / qz) + mcx - u, mfy * (qy / qz) + mcy - v) > maxGeomCost) continue
+          if (angleOn) {
+            const Cs = centres[ci]
+            const sx = Cs[0] - Px, sy = Cs[1] - Py, sz = Cs[2] - Pz
+            const ss = sx * sx + sy * sy + sz * sz
+            if (rx * sx + ry * sy + rz * sz > cosMinAngle * Math.sqrt(rr * ss)) { flat++; continue }
+          }
+          agree++
         }
-        if (agree < minConsistent) { mask[idx] = 1; inconsistent++; mapInconsistent++; continue }
+        if (agree < minConsistent) {
+          mask[idx] = 1
+          // Would have passed on views that only lacked parallax ⇒ report it as such.
+          if (agree + flat >= minConsistent) { lowParallax++; mapLowParallax++ } else { inconsistent++; mapInconsistent++ }
+          continue
+        }
         kept++
       }
     }
@@ -626,14 +655,16 @@ export function filterDepthMapsGeometric(maps, opts = {}, onLog = () => {}, hook
       considered: (() => { let n = 0; for (const d of depth) if (d > 0) n++; return n })(),
       lowNcc: mapLowNcc,
       inconsistent: mapInconsistent,
+      lowParallax: mapLowParallax,
     }
-    m.filterStats.kept = m.filterStats.considered - mapLowNcc - mapInconsistent
+    m.filterStats.kept = m.filterStats.considered - mapLowNcc - mapInconsistent - mapLowParallax
     m.filterStats.keptPct = m.filterStats.considered
       ? 100 * m.filterStats.kept / m.filterStats.considered : 0
     // Info, like Stage A's per-image line: this pass can run for minutes, and at the
     // default log level it was otherwise silent from start to summary.
     onLog(`Depth filter: ${label || '?'} (${mi + 1}/${nMaps}) — kept ${m.filterStats.keptPct.toFixed(1)}%; `
-      + `dropped ${mapLowNcc} low-NCC, ${mapInconsistent} inconsistent px; ${candidates[mi].length} candidate views, `
+      + `dropped ${mapLowNcc} low-NCC, ${mapInconsistent} inconsistent`
+      + `${angleOn ? `, ${mapLowParallax} low-parallax` : ''} px; ${candidates[mi].length} candidate views, `
       + `${((Date.now() - tMap) / 1000).toFixed(1)}s`, 'info', 'Dense')
   }
 
@@ -650,10 +681,11 @@ export function filterDepthMapsGeometric(maps, opts = {}, onLog = () => {}, hook
   }
   onLog(`Depth filter: ${considered} px with depth → ${kept} kept (${pct(kept)}%); dropped `
     + `${lowNcc} NCC<${minNcc} (${pct(lowNcc)}%), `
-    + `${inconsistent} <${minConsistent} consistent views @${maxGeomCost}px (${pct(inconsistent)}%)`,
+    + `${inconsistent} <${minConsistent} consistent views @${maxGeomCost}px (${pct(inconsistent)}%)`
+    + `${angleOn ? `, ${lowParallax} consistent only at <${minGeomAngleDeg}° parallax (${pct(lowParallax)}%)` : ''}`,
     'info', 'Dense')
 
-  return { considered, kept, lowNcc, inconsistent }
+  return { considered, kept, lowNcc, inconsistent, lowParallax }
 }
 
 // ── Step 3: quality presets + derived params ─────────────────────────────────
@@ -806,9 +838,13 @@ function* mergeCellSteps(maps) {
 // parallel growable typed-array sums (~44 B per *merged cell* ≈ one ground pixel,
 // vs ~200 B per raw point). Cell keys are packed numerically — `(dix·ny+diy)·nz+diz`
 // — from per-axis offsets/counts derived from `bounds`; the caller keeps the product
-// < 2^53 (float64-exact) via clampCellForBounds. `bounds` may be a coarse estimate:
-// out-of-range offsets clamp into the border cell (a rare, negligible quality nick,
-// never a key collision).
+// < 2^53 (float64-exact) via clampCellForBounds. `bounds` may be a coarse estimate
+// (fusion samples every 16th pixel): a point outside the packed grid goes to a small
+// string-keyed **overflow** map with the same origin-anchored cell, so the merge stays
+// exact for every input. Clamping it into the border cell instead collapsed thin, tall
+// features the stride sampling missed (a pole's top 16 px all averaged into one cell).
+// Exact bounds are not the alternative: one far sky flyer would stretch the box, and
+// clampCellForBounds would then coarsen the merge cell for the whole scene.
 export function createVoxelAccumulator(cellSize, bounds) {
   const inv = 1 / cellSize
   const ix0 = Math.floor(bounds.minX * inv), iy0 = Math.floor(bounds.minY * inv), iz0 = Math.floor(bounds.minZ * inv)
@@ -818,6 +854,12 @@ export function createVoxelAccumulator(cellSize, bounds) {
   const bx = ix0 - 1, by = iy0 - 1, bz = iz0 - 1
   const nx = (ix1 - ix0) + 3, ny = (iy1 - iy0) + 3, nz = (iz1 - iz0) + 3
   const slot = new Map()
+  // Cells outside the packed grid, keyed `${dix},${diy},${diz}` in the same grid-relative
+  // indices (negative or ≥ n* there). Empty for callers that pass exact bounds.
+  const overflow = new Map()
+  const inGrid = (dix, diy, diz) => dix >= 0 && dix < nx && diy >= 0 && diy < ny && diz >= 0 && diz < nz
+  const slotAt = (dix, diy, diz) => (inGrid(dix, diy, diz) ? slot.get((dix * ny + diy) * nz + diz)
+    : overflow.size ? overflow.get(`${dix},${diy},${diz}`) : undefined)
   let cap = 1024, n = 0
   let sx = new Float64Array(cap), sy = new Float64Array(cap), sz = new Float64Array(cap)
   let sr = new Float64Array(cap), sg = new Float64Array(cap), sb = new Float64Array(cap)
@@ -835,31 +877,54 @@ export function createVoxelAccumulator(cellSize, bounds) {
     snx = g(snx, Float64Array); sny = g(sny, Float64Array); snz = g(snz, Float64Array)
     cnt = g(cnt, Uint32Array)
   }
-  const clamp = (i, hi) => (i < 0 ? 0 : (i >= hi ? hi - 1 : i))
+  // Occupied 26-neighbours of a cell, stopping at `need` (filterIsolated's probe).
+  const neighbours = (dix, diy, diz, radius, need) => {
+    let neigh = 0
+    for (let ddx = -radius; ddx <= radius; ddx++) {
+      for (let ddy = -radius; ddy <= radius; ddy++) {
+        for (let ddz = -radius; ddz <= radius; ddz++) {
+          if (ddx === 0 && ddy === 0 && ddz === 0) continue
+          const ns = slotAt(dix + ddx, diy + ddy, diz + ddz)
+          if (ns !== undefined && cnt[ns] > 0 && ++neigh >= need) return neigh
+        }
+      }
+    }
+    return neigh
+  }
   return {
     // Normals (nx,ny,nz) are optional (world-space, unit) — omitted callers still
     // get the exact same cells/averages for the 6-float wire format.
     add(x, y, z, r, g, b, nx_ = 0, ny_ = 0, nz_ = 0) {
-      const dix = clamp(Math.floor(x * inv) - bx, nx)
-      const diy = clamp(Math.floor(y * inv) - by, ny)
-      const diz = clamp(Math.floor(z * inv) - bz, nz)
-      const key = (dix * ny + diy) * nz + diz
-      let s = slot.get(key)
-      if (s === undefined) { if (n === cap) grow(); s = n++; slot.set(key, s) } // fresh slot is zeroed
+      const dix = Math.floor(x * inv) - bx
+      const diy = Math.floor(y * inv) - by
+      const diz = Math.floor(z * inv) - bz
+      let s
+      if (inGrid(dix, diy, diz)) {
+        const key = (dix * ny + diy) * nz + diz
+        s = slot.get(key)
+        if (s === undefined) { if (n === cap) grow(); s = n++; slot.set(key, s) } // fresh slot is zeroed
+      } else {
+        const key = `${dix},${diy},${diz}`
+        s = overflow.get(key)
+        if (s === undefined) { if (n === cap) grow(); s = n++; overflow.set(key, s) }
+      }
       sx[s] += x; sy[s] += y; sz[s] += z
       sr[s] += r; sg[s] += g; sb[s] += b
       snx[s] += nx_; sny[s] += ny_; snz[s] += nz_
       cnt[s]++
     },
     get count() { return n - removed },
+    // Cells that fell outside `bounds` (kept exact in the overflow map). Non-zero means
+    // the caller's bounds estimate missed real points — worth a log line, not an error.
+    get overflowCells() { return overflow.size },
     // Post-fusion isolated-cell removal (WS4): a real surface cell has occupied
     // neighbours; a lone low-support cell is fusion noise (a sky/vegetation flyer that
     // slipped the consistency gate). Only *low-support* cells (cnt ≤ maxSupport) are
     // tested — a ≥3-pixel cell is never a floater — so this stays O(noise tail), not
     // O(all cells). For each tested cell, probe the 26 (radius 1) neighbour keys
     // arithmetically; if fewer than `minNeighbors` are occupied, zero its count so the
-    // finalizers skip it. Cell indices are recovered from the packed key. Returns the
-    // number removed.
+    // finalizers skip it. Cell indices are recovered from the packed key (or parsed
+    // from an overflow key; neighbours straddle the two maps). Returns the number removed.
     filterIsolated({ radius = 1, minNeighbors = 2, maxSupport = 2 } = {}) {
       let dropped = 0
       for (const [key, s] of slot) {
@@ -867,20 +932,12 @@ export function createVoxelAccumulator(cellSize, bounds) {
         const diz = key % nz
         const diy = Math.floor(key / nz) % ny
         const dix = Math.floor(key / (nz * ny))
-        let neigh = 0
-        for (let ddx = -radius; ddx <= radius && neigh < minNeighbors; ddx++) {
-          const nix = dix + ddx; if (nix < 0 || nix >= nx) continue
-          for (let ddy = -radius; ddy <= radius && neigh < minNeighbors; ddy++) {
-            const niy = diy + ddy; if (niy < 0 || niy >= ny) continue
-            for (let ddz = -radius; ddz <= radius; ddz++) {
-              if (ddx === 0 && ddy === 0 && ddz === 0) continue
-              const niz = diz + ddz; if (niz < 0 || niz >= nz) continue
-              const ns = slot.get((nix * ny + niy) * nz + niz)
-              if (ns !== undefined && cnt[ns] > 0) { neigh++; if (neigh >= minNeighbors) break }
-            }
-          }
-        }
-        if (neigh < minNeighbors) { cnt[s] = 0; dropped++ }
+        if (neighbours(dix, diy, diz, radius, minNeighbors) < minNeighbors) { cnt[s] = 0; dropped++ }
+      }
+      for (const [key, s] of overflow) {
+        if (cnt[s] === 0 || cnt[s] > maxSupport) continue
+        const [dix, diy, diz] = key.split(',').map(Number)
+        if (neighbours(dix, diy, diz, radius, minNeighbors) < minNeighbors) { cnt[s] = 0; dropped++ }
       }
       removed += dropped
       return dropped
@@ -1229,6 +1286,10 @@ function* fusionSteps(maps, opts = {}, onLog = () => {}, hooks = {}) {
   // The voxel merge already collapsed the per-source-pixel "shell" duplicates (a
   // surface seen by k views → k coincident points → one averaged cell). Report it.
   const mergedCells = acc.count
+  if (acc.overflowCells) {
+    onLog(`Fusion: ${acc.overflowCells} merged cell(s) lay outside the ${bboxStride}-px-sampled scene bounds `
+      + '— merged exactly in the overflow map (thin features the bounds sample missed)', 'debug', 'Dense')
+  }
   if (mergedCells !== kept) {
     onLog(`Fusion: spatial merge cell ${mergeCell.toExponential(2)} — ${kept} → ${mergedCells} pts `
       + `(−${kept - mergedCells} dupes, ${(100 * (kept - mergedCells) / Math.max(1, kept)).toFixed(1)}%)`,

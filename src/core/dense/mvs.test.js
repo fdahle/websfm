@@ -309,6 +309,49 @@ describe('createVoxelAccumulator (streaming fusion merge)', () => {
     expect(flat.length).toBe(3000 * 6)
   })
 
+  it('merges points outside the estimated bounds exactly instead of clamping them to the border', () => {
+    // A 4×4 base slab plus a thin spire rising to z = 20 that the bounds estimate missed
+    // (fusion samples every 16th pixel, so a pole narrower than that is never sampled).
+    // Clamping put every spire point above the slab into one border cell; the overflow
+    // map must keep one cell per unit of height, matching mergePointsSpatial.
+    const base = []
+    for (let x = 0; x < 4; x++) for (let y = 0; y < 4; y++) base.push({ x: x + 0.5, y: y + 0.5, z: 0.5, color: [9, 9, 9] })
+    const spire = Array.from({ length: 20 }, (_, k) => ({ x: 1.5, y: 1.5, z: k + 1.5, color: [200, 0, 0] }))
+    const below = { x: 1.5, y: 1.5, z: -7.5, color: [0, 0, 200] } // and one past the other face
+    const pts = [...base, ...spire, below]
+    const acc = createVoxelAccumulator(1.0, boundsOf(base))
+    for (const p of pts) acc.add(p.x, p.y, p.z, p.color[0], p.color[1], p.color[2])
+    expect(acc.count).toBe(mergePointsSpatial(pts, 1.0).length)
+    expect(acc.overflowCells).toBe(19 + 1) // z 2.5 … 20.5 above the 1-cell pad, plus −7.5
+    const flat = acc.finalizeFlat()
+    const zs = []
+    for (let o = 0; o < flat.length; o += 6) if (flat[o + 3] === 200) zs.push(flat[o + 2])
+    expect(zs.sort((p, q) => p - q)).toEqual(spire.map((p) => p.z)) // every spire cell kept, unaveraged
+  })
+
+  it('exact bounds never use the overflow map', () => {
+    const pts = Array.from({ length: 50 }, (_, i) => ({ x: i * 0.37 - 9, y: -i * 0.11, z: i * 0.05 }))
+    const acc = createVoxelAccumulator(0.25, boundsOf(pts))
+    for (const p of pts) acc.add(p.x, p.y, p.z, 0, 0, 0)
+    expect(acc.overflowCells).toBe(0)
+  })
+
+  it('filterIsolated sees neighbours across the packed grid / overflow boundary', () => {
+    // Grid covers a single cell (+ pad); a 3-cell column continues straight up out of it
+    // into overflow, and one lone overflow cell floats far away. The column's overflow
+    // cells have in-grid and overflow neighbours and must survive; the lone one goes.
+    const inside = { x: 0.5, y: 0.5, z: 0.5 }
+    const column = [1.5, 2.5, 3.5].map((z) => ({ x: 0.5, y: 0.5, z }))
+    const lone = { x: 40.5, y: 0.5, z: 0.5 }
+    const acc = createVoxelAccumulator(1.0, boundsOf([inside]))
+    for (const p of [inside, ...column, lone]) acc.add(p.x, p.y, p.z, 1, 1, 1)
+    expect(acc.overflowCells).toBe(3) // z 2.5, 3.5 and the lone cell (z 1.5 is in the pad)
+    expect(acc.filterIsolated({ radius: 1, minNeighbors: 1, maxSupport: 2 })).toBe(1)
+    expect(acc.count).toBe(4)
+    const flat = acc.finalizeFlat()
+    for (let o = 0; o < flat.length; o += 6) expect(flat[o]).toBeLessThan(10) // lone cell gone
+  })
+
   it('filterIsolated (WS4) removes a lone cell but keeps a neighbour cluster', () => {
     // A 2×2×2 block of 8 single-support cells (each has ≥2 occupied neighbours) plus one
     // far-away lone cell. filterIsolated must drop only the lone cell, and finalizeFlat/
@@ -447,6 +490,40 @@ describe('filterDepthMapsGeometric (cross-view consistency)', () => {
     const total = cand.reduce((n, c) => n + c.length, 0)
     expect(total).toBeLessThan(18 * 17) // the corner cameras see none of each other
     expect(total).toBeGreaterThan(0)
+  })
+
+  it('does not let a near-duplicate view vouch for a pixel (parallax gate)', () => {
+    // b sits 1 mm from a: at ~0° parallax the forward–backward round trip is vacuous —
+    // a "sky" pixel at depth 50 projects into b, picks up b's surface at depth 1 and
+    // still lands 0.1 px from home. c (10 cm away) sees through the claim. With
+    // minConsistent 1, b alone would keep the sky pixel; the gate must refuse b's vote
+    // and report the drop as low parallax, while the true surface (c vouches) stays.
+    const build = () => {
+      const maps = [mkPlane('a', 0), mkPlane('b', -0.001), mkPlane('c', -0.1)]
+      maps[0].depth[CENTER] = 50
+      return maps
+    }
+    const ungated = build()
+    filterDepthMapsGeometric(ungated, { minConsistent: 1, minGeomAngleDeg: 0 }, () => {})
+    expect(ungated[0].depth[CENTER]).toBe(50) // the vacuous vote kept it
+
+    const maps = build()
+    const logs = []
+    const s = filterDepthMapsGeometric(maps, { minConsistent: 1, minGeomAngleDeg: 3 }, (m) => logs.push(m))
+    expect(maps[0].depth[CENTER]).toBe(0)
+    // (Also the right-edge strip that only b sees: it, too, has no real second view.)
+    expect(maps[0].filterStats.lowParallax).toBeGreaterThan(0)
+    expect(s.lowParallax).toBeGreaterThanOrEqual(1)
+    expect(maps[0].depth[at(10, 16)]).toBeGreaterThan(0) // real surface: c vouches at 5.7°
+    expect(logs.some((m) => m.includes('parallax'))).toBe(true)
+  })
+
+  it('applies the parallax gate by default (COLMAP 3°)', () => {
+    const maps = [mkPlane('a', 0), mkPlane('b', -0.001)] // only a near-duplicate view
+    const s = filterDepthMapsGeometric(maps, { minConsistent: 1 }, () => {})
+    expect(maps[0].depth[CENTER]).toBe(0)
+    expect(s.lowParallax).toBe(s.considered)
+    expect(s.inconsistent).toBe(0)
   })
 
   it('is disabled by minConsistent 0 (NCC floor only)', () => {

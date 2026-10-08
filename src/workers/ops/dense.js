@@ -4,6 +4,7 @@ import {
   filterDepthMapsGeometric, geomFilterLoopShare, autoBestK,
 } from '../../core/dense/mvs.js'
 import { buildMaskLookup } from '../../core/mask.js'
+import { DEPTHMAP_DEFAULTS } from '../../core/defaults.user.js'
 import { hasDistortion } from '../../core/sfm/distortion.js'
 import { makeSampleMap } from '../../core/sfm/displayFrame.js'
 import {
@@ -139,7 +140,11 @@ export function makeDenseOps({ rasterize }) {
     const {
       maxDim = 800, maxSources: maxSourcesReq = 6, minAngleDeg = 3, window = 3, iterations = 3, bestK = null,
       speckleFilter = true, filterRadius = 1, filterRelTol = 0.1, coarseLong = 600,
-      geomConsistency = true, maxGeomCost, minConsistent, minNcc,
+      // Resolved here (not left to the filter's own defaults) so the run record below
+      // states the values the filter actually used, also for a recipe saved before a knob existed.
+      geomConsistency = true, maxGeomCost = DEPTHMAP_DEFAULTS.maxGeomCost,
+      minConsistent = DEPTHMAP_DEFAULTS.minConsistent, minNcc = DEPTHMAP_DEFAULTS.minNcc,
+      minGeomAngleDeg = DEPTHMAP_DEFAULTS.minGeomAngleDeg,
     } = settings
     // The GPU kernel packs sources into a fixed MAX_SRC=16 array and silently drops
     // any beyond that (depthMapGpu.js), while the WASM path + the first-image A/B
@@ -445,7 +450,7 @@ export function makeDenseOps({ rasterize }) {
       const loopMs = performance.now() - tLoop
       emit('progress', [0, maps.length, 'Filtering depth maps…', LOOP_SHARE])
       const tFilt = performance.now()
-      filterDepthMapsGeometric(maps, { maxGeomCost, minConsistent, minNcc },
+      filterDepthMapsGeometric(maps, { maxGeomCost, minConsistent, minNcc, minGeomAngleDeg },
         (m, l, c) => emit('log', [m, l, c]),
         {
           onProgress: (d, t, lbl) => emit('progress', [d, t,
@@ -492,6 +497,7 @@ export function makeDenseOps({ rasterize }) {
         maxGeomCost: geomConsistency ? maxGeomCost : null,
         minConsistent: geomConsistency ? minConsistent : null,
         minNcc: geomConsistency ? minNcc : null,
+        minGeomAngleDeg: geomConsistency ? minGeomAngleDeg : null,
       },
       medianMsPerImage: med(perImage.map((p) => p.ms)),
       totalMs: performance.now() - t0,
