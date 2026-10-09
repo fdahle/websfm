@@ -93,12 +93,22 @@ pub(crate) fn depth_in_camera(p: &M34, x: &V3) -> f64 {
 
 // ── Jacobi eigendecomposition for symmetric N×N matrices ─────────────────────
 // Adapted from the matching crate. Returns (eigenvalues, eigenvectors as columns).
+//
+// The stop test is RELATIVE to ‖A‖_F (invariant under the rotations, so computed
+// once). It used to be an absolute 1e-14: an input whose entries are small in
+// absolute terms (AᵀA of mm-scale coordinates is ~1e-12) stopped before the first
+// rotation and handed back the identity as its eigenvectors. 1e-14·‖A‖_F is the
+// old threshold exactly at unit norm, where every existing test was calibrated.
 
 macro_rules! make_jacobi {
     ($name:ident, $n:expr) => {
         pub(crate) fn $name(a: &mut [[f64; $n]; $n]) -> [[f64; $n]; $n] {
             let mut v = [[0f64; $n]; $n];
             for i in 0..$n { v[i][i] = 1.0; }
+            let mut frob = 0f64;
+            for i in 0..$n { for j in 0..$n { frob += a[i][j] * a[i][j]; } }
+            let tol = JACOBI_REL_TOL * frob.sqrt();
+            if !(tol > 0.0) { return v; } // zero or non-finite input
             for _ in 0..200 {
                 let mut max_off = 0f64;
                 let (mut p, mut q) = (0, 1);
@@ -108,7 +118,7 @@ macro_rules! make_jacobi {
                         if a_ij > max_off { max_off = a_ij; p = i; q = j; }
                     }
                 }
-                if max_off < 1e-14 { break; }
+                if max_off <= tol { break; }
                 let theta = 0.5 * (a[q][q] - a[p][p]) / a[p][q];
                 let t = if theta >= 0.0 {
                     1.0 / (theta + (1.0 + theta * theta).sqrt())
@@ -141,6 +151,8 @@ macro_rules! make_jacobi {
         }
     };
 }
+
+const JACOBI_REL_TOL: f64 = 1e-14;
 
 make_jacobi!(jacobi3, 3);
 make_jacobi!(jacobi4, 4);

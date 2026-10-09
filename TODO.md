@@ -226,9 +226,9 @@ ones are in HANDOVER. Ordered by expected impact.
 - **Accuracy statistics**: control residuals normalised by Σ_gcp only (Baarda's
   Σ − Σ_ŷ reads ~35 % higher with 4 controls); LOO omits prediction covariance;
   SfM-point uncertainty ignored; pose fits drop anisotropic σ; "RMS" is weighted.
-- **Rust numerics**: Jacobi stops on an absolute 1e-14 (matching + reconstruction);
-  F-RANSAC's final linear refit can replace the best model with one of fewer
-  inliers; no LO step; H/F ratio compares one-sided transfer error to Sampson.
+- **Rust numerics**: H/F ratio compares one-sided transfer error to Sampson (COLMAP
+  does the same; revisit only if the degeneracy label misfires). Jacobi and the
+  F-RANSAC refit/LO shipped 2026-10-08.
 - **Smaller**: dense applies the calibrated bag with the refined K (explicit refine
   string + calibrated lens only); a camera without a sensor loses its refined k1
   unfolded; the composed radial bag is fitted about the final principal point only;

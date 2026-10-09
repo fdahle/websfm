@@ -193,8 +193,13 @@ false matches the looser ratio admits.
 pipeline. Every candidate pair (both matcher paths) passes through
 `core/features/verify.js`:
 1. **Fundamental-matrix RANSAC** (`verify_matches_hf`, 8-point + RANSAC in
-   `crates/matching`) → inlier mask + inlier count. It also fits a homography so
-   an **H-vs-F** degeneracy signal is available.
+   `crates/matching`) → inlier mask + inlier count. Each new best sample gets a
+   **local optimisation** (the simple LO-RANSAC step): refit the normalised 8-point
+   F on its inliers and recount, up to four rounds while the set changes, keeping
+   a refit only if it explains at least as many points. The returned model is
+   therefore never worse than the sample that won, and the adaptive stop sees the
+   polished inlier ratio. It also fits a homography so an **H-vs-F** degeneracy
+   signal is available.
 2. **Inlier-ratio gate** — rejects spurious epipolar fits on repetitive structure
    (a low inlier/putative ratio even when the absolute count looks fine).
 3. **Positional-spread gate** (`inlierSpread`) — a geometry check no count/ratio/

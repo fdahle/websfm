@@ -807,4 +807,53 @@ mod tests {
         }
         assert!(cost_after < 0.2, "BA did not fit the refined k1,k2: {cost_after}px");
     }
+
+    // Jacobi's stop test was an absolute 1e-14 on the largest off-diagonal. Any
+    // input whose AᵀA is small in absolute terms (a cross-covariance of mm-scale
+    // points, DLT rows in small units) stopped before the first rotation and
+    // returned the identity as "eigenvectors". The test must hold at every scale.
+    #[test]
+    fn svd3_is_scale_invariant() {
+        let mut rng = Lcg(31);
+        for &scale in &[1e-7, 1e-4, 1e-2, 1.0, 1e3, 1e6] {
+            for _ in 0..500 {
+                let a: M3 = [0, 1, 2].map(|_| [rng.sym(scale), rng.sym(scale), rng.sym(scale)]);
+                let (u, s, v) = svd3(&a);
+                let mut us = u;
+                for i in 0..3 { for j in 0..3 { us[i][j] *= s[j]; } }
+                let back = mat3_mul(&us, &mat3_transpose(&v));
+                let norm = mat_diff(&a, &[[0.0; 3]; 3]);
+                // κ(A) can be large for a random A, and U's columns are only formed
+                // for s_j > 1e-6·s₁; judge V (the eigenvectors) and the reconstruction.
+                let vtv = mat3_mul(&mat3_transpose(&v), &v);
+                let mut off = 0.0;
+                for i in 0..3 { for j in 0..3 { off += (vtv[i][j] - if i == j { 1.0 } else { 0.0 }).abs(); } }
+                assert!(off < 1e-9, "V not orthonormal at scale {scale}: {off}");
+                if s[2] > 1e-3 * s[0] {
+                    assert!(mat_diff(&a, &back) < 1e-9 * norm, "A ≠ USVᵀ at scale {scale}: {}", mat_diff(&a, &back) / norm);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn null4_is_scale_invariant() {
+        let mut rng = Lcg(37);
+        for &scale in &[1e-7, 1e-4, 1.0, 1e4] {
+            for _ in 0..500 {
+                // Rows orthogonal to a known null vector x: r = y − (y·x)x.
+                let mut x = [rng.sym(1.0), rng.sym(1.0), rng.sym(1.0), rng.sym(1.0)];
+                let xn = (x.iter().map(|v| v * v).sum::<f64>()).sqrt();
+                for v in x.iter_mut() { *v /= xn; }
+                let rows: Vec<[f64; 4]> = (0..4).map(|_| {
+                    let y = [rng.sym(scale), rng.sym(scale), rng.sym(scale), rng.sym(scale)];
+                    let d: f64 = (0..4).map(|i| y[i] * x[i]).sum();
+                    [y[0] - d * x[0], y[1] - d * x[1], y[2] - d * x[2], y[3] - d * x[3]]
+                }).collect();
+                let n = null4(&rows);
+                let cos: f64 = (0..4).map(|i| n[i] * x[i]).sum::<f64>().abs();
+                assert!(cos > 1.0 - 1e-9, "null4 missed the null vector at scale {scale}: |cos| {cos}");
+            }
+        }
+    }
 }

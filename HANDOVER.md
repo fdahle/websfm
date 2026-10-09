@@ -861,6 +861,13 @@ fiducials; self-calibration (A2) + fiducials (F4) are the code-side support.
   (`WEBSFM_SLOW_TESTS=1`) pins > 2^24 cells. `core/dense/mvs.js`, `core/dense/memBudget.js`,
   `workers/ops/dense.js`, `useReconstructionStore.densify`; guide `dense-cloud.md`;
   browser check `DEN-17`.
+- **2026-10-08 · Rust numerics (TODO ▸ RV).** Jacobi eigensolvers in `crates/matching`
+  and `crates/reconstruction/src/linalg.rs` stop relative to ‖A‖_F instead of an
+  absolute 1e-14: at 1e-7 scale `svd3`/`null4` returned the identity (A ≠ USVᵀ by 72 %);
+  scale-sweep tests pin both. F-RANSAC refits by LO (`local_optimize_f`) on every new best
+  and never accepts a refit that loses inliers; the old one-shot refit did in 1 of 400
+  synthetic runs, LO gains +0.2 % inliers over 400 scenes, recall 98.4 % / outlier leak
+  0.7 % at 30 % outliers. Needs `npm run build:wasm` + a bench rerun (`SFM-01`/`SFM-03`).
 - **2026-10-08 · SfM worker: compact keypoints and tracks (TODO ▸ MEM 1–3).** Keypoints
   are immutable typed-array sets shared across seed retries / secondary models
   (`core/sfm/keypointSet.js`); tracks live in a typed-array arena behind a `TrackStore`
