@@ -341,7 +341,7 @@ components/*.vue ──► stores/*.js ──► workers/computeClient.js ──
   selection before it leaves the tool). The ribbon's command TABLES are pure data in
   `core/help/ribbonTabs.js` (Ribbon.vue only renders them): a menu (`menu: [...]`,
   PowerPoint's "Shapes ▾") per object family keeps the Tools tab a fixed width
-  however many tools exist. A greyed row prints its reason inline and a menu never
+  however many tools exist. A greyed row prints its reason inline, a menu opens even when every row is greyed (it is how tools are discovered), and a menu never
   hides a row by state. The menu is teleported because `.ribbon-body` scrolls
   horizontally, which clips an absolute child. **Gating has ONE table**
   (`core/help/commands.js` `NEED_CHECKS`): commands declare `needs: [...]` and
