@@ -17,6 +17,7 @@ import { DENSE_TUNING } from '../tuning.js'
 import { normalizeRegion, regionContains, pointsInRegion } from '../products/region.js'
 import { DEPTHMAP_DEFAULTS } from '../defaults.user.js'
 import { levelPerturbStarts } from './refineSchedule.js'
+import { projectDensifyPeakBytes, densifyInputBytes, formatBytes } from './memBudget.js'
 import {
   cameraCenter, projectWithDepth, triangulationAngle, scaleK, rgbaToGray, toScaledPx,
 } from '../sfm/geometry.js'
@@ -832,14 +833,23 @@ function* mergeCellSteps(maps) {
   return gsds[gsds.length >> 1]
 }
 
+// murmur3's 32-bit finalizer: a bijective avalanche mix of an int32 (→ uint32). The
+// voxel accumulator's index and the fusion cell-count estimate hash with it.
+function mix32(h) {
+  h ^= h >>> 16; h = Math.imul(h, 0x85ebca6b)
+  h ^= h >>> 13; h = Math.imul(h, 0xc2b2ae35)
+  return (h ^ (h >>> 16)) >>> 0
+}
+
 // Streaming voxel accumulator: the fusion loop feeds kept pixels **one at a time**
 // into this, so the raw per-source-pixel point list — the fusion OOM (25–30 M boxed
 // {x,y,z,color} objects ≈ 3 GB on a 50-image set) — never materializes. It's the
 // spatial merge of `mergePointsSpatial` done incrementally: cells are anchored at
 // the world origin (`floor(coord/cell)`), identical to that function, so the merged
-// cells/averages match exactly. Storage is a `Map<numeric key → slot idx>` plus
-// parallel growable typed-array sums (~44 B per *merged cell* ≈ one ground pixel,
-// vs ~200 B per raw point). Cell keys are packed numerically — `(dix·ny+diy)·nz+diz`
+// cells/averages match exactly. Storage is an open-addressing hash of numeric keys
+// → slot idx plus parallel typed-array sums (60 B per *merged cell* ≈ one ground
+// pixel, + ≤ 16 B of index; memBudget.js DENSIFY_CELL_BYTES). Cell keys are packed
+// numerically — `(dix·ny+diy)·nz+diz`
 // — from per-axis offsets/counts derived from `bounds`; the caller keeps the product
 // < 2^53 (float64-exact) via clampCellForBounds. `bounds` may be a coarse estimate
 // (fusion samples every 16th pixel): a point outside the packed grid goes to a small
@@ -848,7 +858,13 @@ function* mergeCellSteps(maps) {
 // features the stride sampling missed (a pole's top 16 px all averaged into one cell).
 // Exact bounds are not the alternative: one far sky flyer would stretch the box, and
 // clampCellForBounds would then coarsen the merge cell for the whole scene.
-export function createVoxelAccumulator(cellSize, bounds) {
+// The index is NOT a JS Map: V8 caps a Map at 2^24 (16,777,216) entries and throws
+// "Map maximum size exceeded" past it, which a large fused cloud reaches, and every
+// Map entry lives on the ~4 GB V8 heap. Colour sums are Uint32 (exact for integer
+// channels, as every caller passes) and normal sums Float32 (renormalized on output).
+// `capacity` presizes the slot arrays and the table (fusion passes its measured cell
+// count), so a run that stays within it never reallocates.
+export function createVoxelAccumulator(cellSize, bounds, { capacity = 1024 } = {}) {
   const inv = 1 / cellSize
   const ix0 = Math.floor(bounds.minX * inv), iy0 = Math.floor(bounds.minY * inv), iz0 = Math.floor(bounds.minZ * inv)
   const ix1 = Math.floor(bounds.maxX * inv), iy1 = Math.floor(bounds.maxY * inv), iz1 = Math.floor(bounds.maxZ * inv)
@@ -856,28 +872,51 @@ export function createVoxelAccumulator(cellSize, bounds) {
   // to a unique in-range key instead of aliasing onto the opposite face.
   const bx = ix0 - 1, by = iy0 - 1, bz = iz0 - 1
   const nx = (ix1 - ix0) + 3, ny = (iy1 - iy0) + 3, nz = (iz1 - iz0) + 3
-  const slot = new Map()
   // Cells outside the packed grid, keyed `${dix},${diy},${diz}` in the same grid-relative
   // indices (negative or ≥ n* there). Empty for callers that pass exact bounds.
   const overflow = new Map()
   const inGrid = (dix, diy, diz) => dix >= 0 && dix < nx && diy >= 0 && diy < ny && diz >= 0 && diz < nz
-  const slotAt = (dix, diy, diz) => (inGrid(dix, diy, diz) ? slot.get((dix * ny + diy) * nz + diz)
-    : overflow.size ? overflow.get(`${dix},${diy},${diz}`) : undefined)
-  let cap = 1024, n = 0
+  let cap = Math.max(16, Math.ceil(capacity)), n = 0, nGrid = 0
+  // keyOf[s]: the packed key of an in-grid slot, −1 for an overflow slot.
+  let keyOf = new Float64Array(cap)
   let sx = new Float64Array(cap), sy = new Float64Array(cap), sz = new Float64Array(cap)
-  let sr = new Float64Array(cap), sg = new Float64Array(cap), sb = new Float64Array(cap)
+  let sr = new Uint32Array(cap), sg = new Uint32Array(cap), sb = new Uint32Array(cap)
   // World-space normal sums (Phase: Poisson meshing). Averaging unit normals then
   // renormalizing is a valid orientation estimate; the k coincident shell points a
   // surface produces all carry ~the same normal, so the sum stays well-conditioned.
-  let snx = new Float64Array(cap), sny = new Float64Array(cap), snz = new Float64Array(cap)
+  let snx = new Float32Array(cap), sny = new Float32Array(cap), snz = new Float32Array(cap)
   let cnt = new Uint32Array(cap)
   let removed = 0 // cells zeroed by filterIsolated (WS4); excluded from count + finalize
+  // Open-addressing index (linear probing): table[i] = slot, −1 = empty. Power-of-two
+  // size, load kept ≤ ½.
+  let tsize = 1
+  while (tsize < 2 * cap) tsize *= 2
+  let table = new Int32Array(tsize).fill(-1), tmask = tsize - 1
+  // Table position holding `key`, or −1 − (the empty position where it belongs).
+  const find = (key) => {
+    const hi = Math.floor(key / 4294967296)
+    let i = mix32(mix32(hi) ^ (key - hi * 4294967296)) & tmask
+    for (;;) {
+      const s = table[i]
+      if (s === -1) return -1 - i
+      if (keyOf[s] === key) return i
+      i = (i + 1) & tmask
+    }
+  }
+  const growTable = () => {
+    tsize *= 2; table = new Int32Array(tsize).fill(-1); tmask = tsize - 1
+    for (let s = 0; s < n; s++) if (keyOf[s] >= 0) table[-1 - find(keyOf[s])] = s
+  }
+  const lookup = (key) => { const i = find(key); return i >= 0 ? table[i] : undefined }
+  const slotAt = (dix, diy, diz) => (inGrid(dix, diy, diz) ? lookup((dix * ny + diy) * nz + diz)
+    : overflow.size ? overflow.get(`${dix},${diy},${diz}`) : undefined)
   const grow = () => {
     cap *= 2
     const g = (a, T) => { const b = new T(cap); b.set(a); return b } // tail zero-filled
+    keyOf = g(keyOf, Float64Array)
     sx = g(sx, Float64Array); sy = g(sy, Float64Array); sz = g(sz, Float64Array)
-    sr = g(sr, Float64Array); sg = g(sg, Float64Array); sb = g(sb, Float64Array)
-    snx = g(snx, Float64Array); sny = g(sny, Float64Array); snz = g(snz, Float64Array)
+    sr = g(sr, Uint32Array); sg = g(sg, Uint32Array); sb = g(sb, Uint32Array)
+    snx = g(snx, Float32Array); sny = g(sny, Float32Array); snz = g(snz, Float32Array)
     cnt = g(cnt, Uint32Array)
   }
   // Occupied 26-neighbours of a cell, stopping at `need` (filterIsolated's probe).
@@ -904,12 +943,17 @@ export function createVoxelAccumulator(cellSize, bounds) {
       let s
       if (inGrid(dix, diy, diz)) {
         const key = (dix * ny + diy) * nz + diz
-        s = slot.get(key)
-        if (s === undefined) { if (n === cap) grow(); s = n++; slot.set(key, s) } // fresh slot is zeroed
+        const i = find(key)
+        if (i >= 0) s = table[i]
+        else { // fresh slot is zeroed
+          if (n === cap) grow()
+          s = n++; keyOf[s] = key; table[-1 - i] = s
+          if (2 * ++nGrid > tsize) growTable()
+        }
       } else {
         const key = `${dix},${diy},${diz}`
         s = overflow.get(key)
-        if (s === undefined) { if (n === cap) grow(); s = n++; overflow.set(key, s) }
+        if (s === undefined) { if (n === cap) grow(); s = n++; keyOf[s] = -1; overflow.set(key, s) }
       }
       sx[s] += x; sy[s] += y; sz[s] += z
       sr[s] += r; sg[s] += g; sb[s] += b
@@ -920,6 +964,9 @@ export function createVoxelAccumulator(cellSize, bounds) {
     // Cells that fell outside `bounds` (kept exact in the overflow map). Non-zero means
     // the caller's bounds estimate missed real points — worth a log line, not an error.
     get overflowCells() { return overflow.size },
+    // Bytes the accumulator holds (slot arrays at capacity + the index table) — the
+    // figure fusion logs against its pre-flight projection.
+    get bytes() { return cap * 60 + tsize * 4 },
     // Post-fusion isolated-cell removal (WS4): a real surface cell has occupied
     // neighbours; a lone low-support cell is fusion noise (a sky/vegetation flyer that
     // slipped the consistency gate). Only *low-support* cells (cnt ≤ maxSupport) are
@@ -930,8 +977,12 @@ export function createVoxelAccumulator(cellSize, bounds) {
     // from an overflow key; neighbours straddle the two maps). Returns the number removed.
     filterIsolated({ radius = 1, minNeighbors = 2, maxSupport = 2 } = {}) {
       let dropped = 0
-      for (const [key, s] of slot) {
-        if (cnt[s] === 0 || cnt[s] > maxSupport) continue
+      // In-grid slots in creation order (what a Map's insertion order gave), then the
+      // overflow cells — the order matters, since a zeroed cell stops counting as a
+      // neighbour for the cells tested after it.
+      for (let s = 0; s < n; s++) {
+        const key = keyOf[s]
+        if (key < 0 || cnt[s] === 0 || cnt[s] > maxSupport) continue
         const diz = key % nz
         const diy = Math.floor(key / nz) % ny
         const dix = Math.floor(key / (nz * ny))
@@ -1057,6 +1108,48 @@ export async function fuseDepthMapsStreamed(metas, loadMap, opts = {}, onLog = (
   return next.value
 }
 
+// Measured fusion size: the distinct merge cells of every pixel fusion could keep —
+// valid depth, cost ≤ maxCost, on the `step` grid, inside the region — at the real
+// merge cell. An upper bound on the fused cloud (the consistency, parallax, grazing
+// and isolated-cell filters only remove), measured instead of guessed from the pixel
+// count: with a merge cell of one ground pixel, a surface seen by k views collapses
+// ~k pixels into a cell, and that overlap is what a pixel-count guess cannot see.
+// Distinct counting by hash sampling: a cell is tracked only while its hash's low
+// `level` bits are zero, and the level rises whenever more than `sampleCap` cells
+// are tracked, so memory stays bounded and the estimate is exact for small scenes
+// (level 0) and within ~1/√sampleCap otherwise. Cells are identified by two
+// independent hashes (53 bits), never by coordinates. Same origin-anchored cells as
+// createVoxelAccumulator, so the count is the accumulator's.
+function* fusionCellEstimateSteps(maps, { cell, step, maxCost, region, sampleCap }) {
+  const inv = 1 / cell
+  let level = 0, mask = 0, candidates = 0
+  const seen = new Set()
+  for (let mi = 0; mi < maps.length; mi++) {
+    const m = yield mi
+    const { width: w, height: h, depth, cost } = m
+    for (let v = 0; v < h; v += step) {
+      for (let u = 0; u < w; u += step) {
+        const idx = v * w + u, d = depth[idx]
+        if (!(d > 0) || cost[idx] > maxCost) continue
+        const P = unprojectPixel(m, u, v, d)
+        if (region && !regionContains(region, P.x, P.y, P.z)) continue
+        candidates++
+        const ix = Math.floor(P.x * inv) | 0, iy = Math.floor(P.y * inv) | 0, iz = Math.floor(P.z * inv) | 0
+        const h1 = mix32(mix32(mix32(ix) ^ iy) ^ iz)
+        if ((h1 & mask) !== 0) continue
+        const h2 = mix32(mix32(mix32(iz ^ 0x5bd1e995) ^ ix) ^ iy) & 0x1fffff
+        seen.add(h1 * 2097152 + h2)
+        if (seen.size > sampleCap) {
+          level++; mask = (2 ** level - 1) | 0
+          for (const k of seen) if ((Math.floor(k / 2097152) & mask) !== 0) seen.delete(k)
+        }
+      }
+    }
+  }
+  const cells = Math.min(candidates, Math.ceil(seen.size * 2 ** level))
+  return { cells, candidates, level, sampled: seen.size }
+}
+
 function* fusionSteps(maps, opts = {}, onLog = () => {}, hooks = {}) {
   // depthTolRel/step are user-facing (DENSE_FUSE_DEFAULTS); consistencyPx is internal (tuning.js).
   const { consistencyPx = DENSE_TUNING.consistencyPx, depthTolRel = 0.01, step = 1 } = opts
@@ -1134,13 +1227,40 @@ function* fusionSteps(maps, opts = {}, onLog = () => {}, hooks = {}) {
       + `(flat output, no raw point objects)`, 'warn', 'Dense')
   }
   mergeCell = clampCellForBounds(bounds, mergeCell)
-  const acc = createVoxelAccumulator(mergeCell, bounds)
+  const region = normalizeRegion(opts.region)
+
+  // Stage B pre-flight: measure the merged size, project the peak and refuse before
+  // the expensive consistency pass. Runs in the worker because the cell count needs
+  // every map's pixels at the real merge cell; a refusal returns normally (no
+  // throw), so the caller still gets transferred buffers home.
+  const est = yield* fusionCellEstimateSteps(maps, {
+    cell: mergeCell, step, maxCost, region, sampleCap: DENSE_TUNING.fuseEstimateSampleCap,
+  })
+  const estCells = est.level > 0 ? Math.ceil(est.cells * DENSE_TUNING.fuseEstimateMargin) : est.cells
+  const proj = projectDensifyPeakBytes({
+    inputBytes: densifyInputBytes(maps, { streamed: !!hooks.streaming }), cells: estCells,
+  })
+  const budget = opts.memBudgetBytes > 0 ? opts.memBudgetBytes : 0
+  onLog(`Fusion: measured ${est.candidates.toLocaleString()} candidate px → ≤ ${estCells.toLocaleString()} `
+    + `merge cells at ${mergeCell.toExponential(2)}${est.level ? ` (hash-sampled 1/${2 ** est.level}, +${Math.round((DENSE_TUNING.fuseEstimateMargin - 1) * 100)}% margin)` : ' (exact)'}; `
+    + `projected peak ≈ ${formatBytes(proj.total)} (input ${formatBytes(proj.input)} + accumulator `
+    + `${formatBytes(proj.accumulator)} + output ${formatBytes(proj.output)})`
+    + (budget ? ` vs budget ${formatBytes(budget)}` : ''),
+    budget && proj.total > budget ? 'error' : 'info', 'Dense')
+  if (budget && proj.total > budget) {
+    onLog('Fusion: aborting before the consistency pass — projected memory exceeds the budget. '
+      + 'Raise the point-density sample step to 2 (¼ the pixels), set a Region around the subject '
+      + '(Tools ▸ Model), or build depth maps at a lower Quality; or raise the memory budget '
+      + '(Settings ▸ Compute) if the machine has the RAM.', 'error', 'Dense')
+    return Object.assign(new Float32Array(0), { nrm: null, summary: null, refused: { ...proj, budget, mergeCell } })
+  }
+  const acc = createVoxelAccumulator(mergeCell, bounds, { capacity: estCells })
 
   // Cull accounting (summed across all maps) so the user can see where pixels go.
   let considered = 0, noDepth = 0, highCost = 0, failedConsistency = 0, kept = 0
   let lowParallax = 0, grazing = 0 // WS4 geometric-filter culls
-  // Tools ▸ Model ▾ ▸ Region: a fused point outside the box is never accumulated.
-  const region = normalizeRegion(opts.region)
+  // Tools ▸ Model ▾ ▸ Region: a fused point outside the box is never accumulated
+  // (`region` is resolved above, for the pre-flight).
   let outsideRegion = 0
   // Precompute each camera centre for the triangulation-angle check (WS4).
   const camCenters = cams.map((c) => cameraCenter(c))
@@ -1299,6 +1419,12 @@ function* fusionSteps(maps, opts = {}, onLog = () => {}, hooks = {}) {
       'info', 'Dense')
   }
 
+  // Audit the pre-flight: how tight was the measured bound, and what did the
+  // accumulator actually hold.
+  onLog(`Fusion: ${mergedCells.toLocaleString()} merged cells vs the measured bound `
+    + `${estCells.toLocaleString()} (${(100 * mergedCells / Math.max(1, estCells)).toFixed(0)}%); `
+    + `accumulator held ${formatBytes(acc.bytes)}`, 'info', 'Dense')
+
   // WS4 post-fusion isolated-cell removal: drop lone low-support cells (fusion noise
   // that slipped the per-pixel gates) with too few occupied neighbours.
   let isolatedRemoved = 0
@@ -1333,6 +1459,7 @@ function* fusionSteps(maps, opts = {}, onLog = () => {}, hooks = {}) {
     costMedian: costStats.median,
     keptPct: 100 * kept / denom,
     mergeCell,
+    estimatedCells: estCells,
     mergedPct: kept ? 100 * (kept - mergedCells) / kept : 0,
     isolatedRemoved,
     cullBreakdown: {

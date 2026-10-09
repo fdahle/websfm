@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  createMemLedger, projectDensePeakBytes, projectDensifyPeakBytes, formatBytes, DEFAULT_BUDGET_BYTES,
+  createMemLedger, projectDensePeakBytes, projectDensifyPeakBytes, densifyInputBytes, DENSIFY_CELL_BYTES, formatBytes, DEFAULT_BUDGET_BYTES,
   deviceBudget,
 } from './memBudget.js'
 
@@ -107,41 +107,40 @@ describe('projectDensePeakBytes', () => {
 })
 
 describe('projectDensifyPeakBytes', () => {
-  // Two 2×2 maps; 3 of 4 pixels valid in each ⇒ 6 valid px total.
+  it('sums input + measured cells × the accumulator and output footprints', () => {
+    const p = projectDensifyPeakBytes({ inputBytes: 1000, cells: 3 })
+    expect(p.cells).toBe(3)
+    expect(p.input).toBe(1000)
+    expect(p.accumulator).toBe(3 * DENSIFY_CELL_BYTES)
+    expect(p.output).toBe(3 * 36) // 6·4 (pos+col) + 3·4 (normals)
+    expect(p.total).toBe(p.input + p.accumulator + p.output)
+  })
+})
+
+describe('densifyInputBytes', () => {
+  // 2×2 maps.
   const mk = () => ({
+    width: 2, height: 2,
     depth: Float32Array.from([1, 1, 0, 1]),
     cost: Float32Array.from([0.1, 0.1, 0, 0.1]),
     rgb: new Uint8Array(4 * 3),
     normals: new Float32Array(4 * 3),
   })
+  const perMap = 4 * 4 + 4 * 4 + 12 + 4 * 12
 
-  it('counts valid pixels and sums input/accumulator/output', () => {
-    const maps = [mk(), mk()]
-    const p = projectDensifyPeakBytes({ maps, mergeOverlap: 2 })
-    expect(p.validPx).toBe(6)
-    expect(p.cells).toBe(3) // ceil(6 / 2)
-    // input = per map (4·4 depth + 4·4 cost + 12 rgb + 4·12 normals) × 2 maps
-    const perMap = 4 * 4 + 4 * 4 + 12 + 4 * 12
-    expect(p.input).toBe(perMap * 2)
-    expect(p.accumulator).toBe(3 * 210)
-    expect(p.output).toBe(3 * 36) // 6·4 (pos+col) + 3·4 (normals)
-    expect(p.total).toBe(p.input + p.accumulator + p.output)
+  it('sums the resident planes, times residency', () => {
+    expect(densifyInputBytes([mk(), mk()])).toBe(perMap * 2)
+    expect(densifyInputBytes([mk()], { residency: 2 })).toBe(perMap * 2)
   })
 
-  it('scales the accumulator down as assumed merge overlap rises', () => {
-    const maps = [mk(), mk()]
-    const lo = projectDensifyPeakBytes({ maps, mergeOverlap: 1 })
-    const hi = projectDensifyPeakBytes({ maps, mergeOverlap: 3 })
-    expect(lo.cells).toBe(6)
-    expect(hi.cells).toBe(2) // ceil(6/3)
-    expect(hi.accumulator).toBeLessThan(lo.accumulator)
-  })
-
-  it('residency multiplies the input term (pre- vs post-transfer)', () => {
-    const maps = [mk()]
-    const once = projectDensifyPeakBytes({ maps, residency: 1 })
-    const twice = projectDensifyPeakBytes({ maps, residency: 2 })
-    expect(twice.input).toBe(2 * once.input)
+  it('bounds a streamed run by two full maps + the scratch planes of the largest', () => {
+    const metas = [
+      { width: 10, height: 10, hasNormals: true },
+      { width: 20, height: 10, hasNormals: false },
+      { width: 5, height: 5, hasNormals: true },
+    ]
+    // largest two: 100·23 = 2300, 200·11 = 2200; scratch 200·12
+    expect(densifyInputBytes(metas, { streamed: true })).toBe(2300 + 2200 + 200 * 12)
   })
 })
 

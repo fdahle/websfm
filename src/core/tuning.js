@@ -250,6 +250,12 @@ export const DENSE_TUNING = {
   fuseProgressMs: 250,    // min ms between fusion progress emits (~4/s; no postMessage spam)
   fuseCostMaxSamples: 2_000_000, // cost-histogram sample budget (stride-subsampled, sorted once)
   fuseMaxCells: 2 ** 50,  // packed-key exactness ceiling (float64); clamp cellSize up past this
+  // Measured pre-flight (fusionCellEstimateSteps): distinct merge cells counted by hash
+  // sampling. The cap bounds the tracked set (~1/√cap ≈ 0.4% relative error once the
+  // scene exceeds it); the margin covers that error so the accumulator presized from
+  // the estimate rarely has to grow.
+  fuseEstimateSampleCap: 65536,
+  fuseEstimateMargin: 1.05,
   // ── Post-fusion isolated-cell removal (WS4, gated by removeIsolated) ──
   // Only low-support cells are tested (a ≥3-pixel cell is never a floater), so this stays
   // O(noise tail). A tested cell survives if ≥ isolatedMinNeighbors of its 26 (radius 1)

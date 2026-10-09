@@ -19,7 +19,7 @@ import { qualityToMaxDim } from '../core/dense/mvs.js'
 import { normalizeRegion, regionStatus, regionMask } from '../core/products/region.js'
 import { selectPoints } from '../core/products/cloudEdit.js'
 import { normalizeOrientation, orientationStatus, orientationBasis } from '../core/products/orientation.js'
-import { projectDensifyPeakBytes, formatBytes, DEFAULT_BUDGET_BYTES, deviceBudget } from '../core/dense/memBudget.js'
+import { formatBytes, DEFAULT_BUDGET_BYTES, deviceBudget } from '../core/dense/memBudget.js'
 import { depthMapBytes } from '../core/dense/depthMapCodec.js'
 import { distortionOf } from '../core/sfm/distortion.js'
 import { parseColmapModel, parseColmapModelBin, readColmapModel, makeNameResolver, colmapToSparse } from '../core/io/colmapModel.js'
@@ -911,31 +911,12 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
       log('Dense: compute depth maps before building the dense cloud', 'warn', 'Dense')
       return
     }
-    // Stage B pre-flight (Phase 7): project the fusion peak from the real depth maps
-    // and refuse before starting, rather than OOM-killing the tab mid-fuse. Run it
-    // here — before the buffers are transferred to the worker — so a refusal leaves
-    // the depth maps intact (a worker-side gate would throw after transfer and lose
-    // them). Same budget knob as Stage A.
+    // Stage B pre-flight: fusion itself measures the merged cell count (at the real
+    // merge cell, step and region) and refuses over budget before its consistency
+    // pass, returning the transferred buffers home — a pixel-count guess here could
+    // not see the merge cell, the step or the view overlap. Same budget knob as Stage A.
     const budget = settings.memBudgetBytes > 0 ? settings.memBudgetBytes : DEFAULT_BUDGET_BYTES
-    const proj = projectDensifyPeakBytes({ maps })
-    if (streamed) {
-      const sizes = maps.map(m => m.width * m.height * (m.hasNormals ? 23 : 11)).sort((a, b) => b - a)
-      const bounded = (sizes[0] || 0) + (sizes[1] || 0) + Math.max(...maps.map(m => m.width * m.height)) * 12
-      proj.total += bounded - proj.input; proj.input = bounded
-      log('Dense: reading saved maps on demand (one reference + one comparison); releasing planes after use', 'info', 'Dense')
-    }
-    log(`Dense fuse: projected peak memory ≈ ${formatBytes(proj.total)} `
-      + `(input ${formatBytes(proj.input)} + accumulator ${formatBytes(proj.accumulator)} + `
-      + `output ${formatBytes(proj.output)}; ${proj.validPx.toLocaleString()} valid px → `
-      + `~${proj.cells.toLocaleString()} cells) vs budget ${formatBytes(budget)}`,
-      proj.total > budget ? 'error' : 'info', 'Dense')
-    if (proj.total > budget) {
-      log('Dense: aborting fusion before start — projected memory exceeds the budget. '
-        + 'Re-run depth maps at a lower Quality, use a larger merge cell / fusion step, '
-        + 'or raise the memory budget, then retry.', 'error', 'Dense')
-      reconStatus.value = 'error'
-      return
-    }
+    if (streamed) log('Dense: reading saved maps on demand (one reference + one comparison); releasing planes after use', 'info', 'Dense')
     reconStatus.value = 'running'
     // Transfer (not clone) each map's depth/cost/rgb buffers to the worker — they're
     // the bulk of dense memory, and a clone briefly doubles it (the fusion OOM's
@@ -958,8 +939,8 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
       if (m.normals) transfer.push(m.normals.buffer)
     }
     try {
-      const { points: flat, nrm, summary: dSummary, mapBuffers } = await workerDensify(
-        { maps: mapsInput, streamed, settings: withRegion(settings) },
+      const { points: flat, nrm, summary: dSummary, refused, mapBuffers } = await workerDensify(
+        { maps: mapsInput, streamed, settings: withRegion({ ...settings, memBudgetBytes: budget }) },
         { onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f), transfer },
       )
       if (!stillCurrent()) return
@@ -970,6 +951,8 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
           if (m) { m.depth = mb.depth; m.cost = mb.cost; m.rgb = mb.rgb; if (mb.normals) m.normals = mb.normals }
         }
       }
+      // Refused by fusion's measured pre-flight (logged there with its numbers).
+      if (refused) { reconStatus.value = 'error'; return }
       // De-interleave the worker's flat [x,y,z,r,g,b] into the dense cloud's split
       // position/colour buffers (one typed-array pass, no per-point objects).
       const n = flat.length / 6

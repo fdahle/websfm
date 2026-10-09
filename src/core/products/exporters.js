@@ -60,7 +60,7 @@ export function prepareCloudForExport(points, { sim = null, cell = 0, onLog } = 
   })
   for (let i = 0; i < n; i++) {
     const c = (hasCol && getC(i)) || [200, 200, 200]
-    acc.add(xyz[i * 3] - shift[0], xyz[i * 3 + 1] - shift[1], xyz[i * 3 + 2] - shift[2], c[0], c[1], c[2])
+    acc.add(xyz[i * 3] - shift[0], xyz[i * 3 + 1] - shift[1], xyz[i * 3 + 2] - shift[2], byte(c[0]), byte(c[1]), byte(c[2]))
   }
   const merged = acc.finalizeFlat() // [x,y,z,r,g,b] per cell
   const m = merged.length / 6
