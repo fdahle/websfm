@@ -4,6 +4,7 @@ import { computed, ref, watch } from 'vue'
 import ModalShell from './ui/ModalShell.vue'
 import SettingsField from './ui/SettingsField.vue'
 import WarnBox from './ui/WarnBox.vue'
+import CrsSuggestion from './ui/CrsSuggestion.vue'
 import GlossaryTerm from '../glossary/GlossaryTerm.vue'
 import { ORTHO_DEFAULTS } from '../../core/defaults.user.js'
 
@@ -21,9 +22,29 @@ const props = defineProps({
   hasScale: { type: Boolean, default: false },
   demUnit: { type: String, default: null },
   projectCrs: { type: String, default: null },
+  // Why the project-CRS option is off ('geographic' | 'evidence' | null) and, for a
+  // geographic CRS, the projected one the camera positions suggest (store getters).
+  georeferenceBlocker: { type: String, default: null },
+  crsSuggestion: { type: Object, default: null },
 })
 
-const emit = defineEmits(['close', 'run'])
+const emit = defineEmits(['close', 'run', 'apply-crs-suggestion'])
+
+const blockedReason = computed(() => ({
+  geographic: ' — geographic CRS',
+  evidence: ' — needs ≥3 camera positions or GCPs',
+}[props.georeferenceBlocker] ?? ''))
+
+// Applying the suggested CRS says the user wants a georeferenced product, so once
+// the fit becomes possible the frame flips to it (only after their click).
+const appliedCrsSuggestion = ref(false)
+function applyCrsSuggestion(suggestion) {
+  appliedCrsSuggestion.value = true
+  emit('apply-crs-suggestion', suggestion)
+}
+watch(() => props.canGeoreference, (can) => {
+  if (can && appliedCrsSuggestion.value) settings.value.crs = 'project'
+})
 
 const settings = ref({ ...ORTHO_DEFAULTS })
 
@@ -96,9 +117,12 @@ function run() {
       <select id="ortho-crs" v-model="settings.crs" class="field-input field-select">
         <option value="local">{{ hasScale ? 'Local (metres, no CRS)' : 'Local (model units)' }}</option>
         <option value="project" :disabled="!canGeoreference">
-          {{ projectCrs || 'Project CRS' }}{{ canGeoreference ? '' : ' — needs camera poses' }}
+          {{ projectCrs || 'Project CRS' }}{{ canGeoreference ? '' : blockedReason }}
         </option>
       </select>
+      <CrsSuggestion v-if="georeferenceBlocker === 'geographic'"
+        :suggestion="crsSuggestion" :current-crs="projectCrs || 'EPSG:4326'"
+        @apply="applyCrsSuggestion" />
     </SettingsField>
 
     <SettingsField label-for="ortho-gsd"

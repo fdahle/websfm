@@ -1328,7 +1328,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
 
   const {
     georefPairs, imagesById, qualifyingGcps, canGeoreferenceGcps, gcpGeorefPairs,
-    canGeoreference, georeference, validGeoref, poseResidualReport, gcpAccuracyReport,
+    canGeoreference, georeferenceBlocker, crsSuggestion, georeference, validGeoref, poseResidualReport, gcpAccuracyReport,
     gcpGuides, gcpEstimate,
   } = createGeoreferencing({
     sparseCameras, images, georef, healthDirty,
@@ -2115,6 +2115,8 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     ortho,
     orthoSurfaces,
     canGeoreference,
+    georeferenceBlocker,
+    crsSuggestion,
     canGeoreferenceGcps,
     georeference,
     // Scale constraints (F11). `effectiveFrameSpec` is THE resolver — product

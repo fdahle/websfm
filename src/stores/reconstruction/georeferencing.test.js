@@ -28,3 +28,44 @@ it.each(['pose', 'control', 'model', 'camera'])('invalidates a fitted georeferen
   expect(api.poseResidualReport()).toEqual([])
   scope.stop()
 })
+
+it('names why a geographic project cannot be georeferenced and suggests a projected CRS', async () => {
+  const scope = effectScope()
+  const crs = ref('EPSG:4326')
+  // EXIF positions in a geographic project CRS: x = lon, y = lat (St Nazaire, zone 31N).
+  const poses = ref([
+    { imageId: 'a', x: 5.2755, y: 44.5688, z: 518 },
+    { imageId: 'b', x: 5.2760, y: 44.5690, z: 519 },
+    { imageId: 'c', x: 5.2765, y: 44.5692, z: 520 },
+  ])
+  const cameras = ref(new Map([['a', { R, t: [0,0,0] }], ['b', { R, t: [-1,0,0] }], ['c', { R, t: [0,-1,0] }]]))
+  const log = vi.fn()
+  const api = scope.run(() => createGeoreferencing({ sparseCameras: cameras,
+    images: ref(['a','b','c'].map(id => ({ id, uuid: id }))), georef: ref(null), healthDirty: ref(0),
+    poses: () => poses.value, gcps: () => [], currentCrs: () => crs.value,
+    persist: vi.fn(), log }))
+  expect(api.canGeoreference.value).toBe(false)
+  expect(api.georeferenceBlocker.value).toBe('geographic')
+  expect(api.crsSuggestion.value).toMatchObject({ code: 'EPSG:32631', count: 3 })
+  expect(await api.georeference()).toBeNull()
+  expect(log.mock.calls.at(-1)[0]).toContain('EPSG:32631')
+
+  // A projected CRS with the same three cameras can be fitted; nothing is suggested.
+  crs.value = 'EPSG:3031'
+  expect(api.georeferenceBlocker.value).toBeNull()
+  expect(api.crsSuggestion.value).toBeNull()
+  // …and with too few positions the blocker is the evidence, not the CRS.
+  poses.value = poses.value.slice(0, 2)
+  expect(api.georeferenceBlocker.value).toBe('evidence')
+  scope.stop()
+})
+
+it('falls back to the images\' EXIF GPS when no positions are materialised yet', () => {
+  const scope = effectScope()
+  const api = scope.run(() => createGeoreferencing({ sparseCameras: ref(new Map()),
+    images: ref([{ id: 'a', uuid: 'a', meta: { gpsLat: -33.9, gpsLon: 18.4 } }]), georef: ref(null),
+    healthDirty: ref(0), poses: () => [], gcps: () => [], currentCrs: () => 'EPSG:4326',
+    persist: vi.fn(), log: vi.fn() }))
+  expect(api.crsSuggestion.value.code).toBe('EPSG:32734')
+  scope.stop()
+})

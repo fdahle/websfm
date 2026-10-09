@@ -14,6 +14,10 @@ cloud is acceptable only for a coarse preview.
 **Local** uses the model orientation and its best available scale. **Project CRS**
 requires a georeference fit and produces real-world coordinates. For an object with
 a scale bar, Local is metric but still has no CRS.
+The option names why it is unavailable. "Geographic CRS" means the project is still
+in degrees (WGS 84): use the projected CRS suggested under the field, or choose one in
+Project Settings; the frame switches to it once the fit is possible. "Needs ≥3 camera
+positions or GCPs" means there is not enough evidence yet.
 
 ## Ground sample distance
 <!-- param: gsd default: Auto -->

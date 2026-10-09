@@ -8,6 +8,7 @@ import { gcpsInPinholeFrame, guideToScan, makePinholeToMark } from '../../core/s
 import { isGeographic, ensureProjection, transform, metresPerCrsUnit } from '../../core/crs.js'
 import { normalizedGroundResidual, precisionFromGcp } from '../../core/gcpAccuracy.js'
 import { isGroundControl } from '../../core/io/gcp.js'
+import { suggestProjectedCrs, formatLatLon } from '../../core/crsSuggest.js'
 
 // One spelling of "may this point constrain the solve" (core/io/gcp.js), shared
 // with the anchored-BA gate. Never re-derive it from finite coordinates alone.
@@ -155,6 +156,32 @@ export function createGeoreferencing({
   const canGeoreference = computed(() => !isGeographic(currentCrs())
     && (canGeoreferenceGcps.value || georefPairs().length >= 3))
 
+  // Why `canGeoreference` is false, so the product modals can say so instead of a
+  // generic "needs camera poses": 'geographic' (the project CRS is in degrees — a
+  // similarity cannot be fitted into it, however many poses exist), 'evidence'
+  // (fewer than 3 registered camera positions / GCPs), or null when it can.
+  const georeferenceBlocker = computed(() => {
+    if (isGeographic(currentCrs())) return 'geographic'
+    return canGeoreference.value ? null : 'evidence'
+  })
+
+  // A projected CRS to offer while the project CRS is geographic
+  // (core/crsSuggest.js). Positions are in degrees exactly then: camera positions
+  // (EXIF or imported) and control points store lon/lat as x/y, with the images'
+  // own EXIF GPS as the fallback when nothing has been materialised yet. Null in a
+  // projected CRS — the choice was already made, and is not second-guessed.
+  const crsSuggestion = computed(() => {
+    if (!isGeographic(currentCrs())) return null
+    const fromXy = (list) => list.filter((p) => Number.isFinite(p?.x) && Number.isFinite(p?.y))
+      .map((p) => ({ lon: p.x, lat: p.y }))
+    let positions = fromXy(poses())
+    if (!positions.length) positions = fromXy(gcps().filter(groundControl))
+    if (!positions.length) {
+      positions = images.value.map((im) => ({ lat: im.meta?.gpsLat, lon: im.meta?.gpsLon }))
+    }
+    return suggestProjectedCrs(positions)
+  })
+
   // Fit (or refit) the SfM→CRS similarity, targeting the current project CRS.
   // GCPs are the accuracy-defining source and win when ≥3 triangulate; imported
   // camera poses are the fallback. Returns the georef record or null.
@@ -168,7 +195,10 @@ export function createGeoreferencing({
     }
     if (isGeographic(currentCrs())) {
       clearFit()
-      log(`Georeference: ${currentCrs()} uses angular coordinates; choose a projected metric CRS`,
+      const hint = crsSuggestion.value
+      log(`Georeference: ${currentCrs()} uses angular coordinates; choose a projected metric CRS`
+        + (hint ? ` — for positions around ${formatLatLon(hint.lat, hint.lon)}, ${hint.code} (${hint.name}) `
+          + 'in Project Settings' : ''),
         'warn', 'Products')
       return null
     }
@@ -357,7 +387,7 @@ export function createGeoreferencing({
 
   return { validGeoref, evidenceKey,
     georefPairs, imagesById, qualifyingGcps, canGeoreferenceGcps, gcpGeorefPairs,
-    canGeoreference, georeference, poseResidualReport, gcpAccuracyReport,
+    canGeoreference, georeferenceBlocker, crsSuggestion, georeference, poseResidualReport, gcpAccuracyReport,
     gcpGuides, gcpEstimate,
   }
 }

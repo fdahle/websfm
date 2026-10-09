@@ -2,7 +2,7 @@ import { coalescedSave } from '../utils/coalescedSave.js'
 import { ref, watch, computed } from 'vue'
 import { defineStore, storeToRefs } from 'pinia'
 import { useLog } from '../composables/useLog.js'
-import { ensureProjection, metresPerCrsUnit, metresToCrsUnits, transform } from '../core/crs.js'
+import { ensureProjection, isGeographic, metresPerCrsUnit, metresToCrsUnits, transform } from '../core/crs.js'
 import * as opfs from '../utils/opfs.js'
 import { registerProjectStore } from './projectStores.js'
 import { makeNameResolver, relinkImageRecord } from '../core/io/nameMatch.js'
@@ -10,6 +10,7 @@ import { pluralize } from '../core/textFormat.js'
 import { useImagesStore } from './useImagesStore.js'
 import { useProjectsStore } from './useProjectsStore.js'
 import { exifPoseFromMetadata, projectExifPose } from '../core/io/exifPose.js'
+import { suggestProjectedCrs, formatLatLon } from '../core/crsSuggest.js'
 
 // Camera poses (exterior orientation / extrinsics): one per image, used as
 // georeferencing priors for bundle adjustment. Positions are stored in the
@@ -276,6 +277,17 @@ export const usePosesStore = registerProjectStore(defineStore('poses', () => {
     }
     if (changed) await save()
     if (added) log(`EXIF GPS: ${pluralize(added, 'camera position')} added in ${projectCrs}`, 'success', 'Pose')
+    // Positions land in degrees, so nothing can be georeferenced until the user
+    // picks a projected CRS. Say so once, when they arrive — with the derived
+    // choice and its inputs — rather than first at Build DEM.
+    if (added && isGeographic(projectCrs)) {
+      const hint = suggestProjectedCrs(poses.value.filter((p) => p.source === 'exif').map((p) => ({ lon: p.x, lat: p.y })))
+      if (hint) {
+        log(`EXIF GPS: ${projectCrs} is geographic, so georeferenced DEMs and orthophotos need a projected CRS — `
+          + `median of ${pluralize(hint.count, 'position')} at ${formatLatLon(hint.lat, hint.lon)} suggests `
+          + `${hint.code} (${hint.name}); set it in Project Settings`, 'info', 'Pose')
+      }
+    }
     return added
   }
 
