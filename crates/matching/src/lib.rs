@@ -309,12 +309,30 @@ fn dot3(a: V3, b: V3) -> f64 {
 /// Jacobi symmetric eigendecomposition — generated for N=3 and N=9.
 /// Modifies `a` in-place (becomes diagonal, eigenvalues on diagonal).
 /// Returns eigenvector matrix V (column k = eigenvector for eigenvalue a[k][k]).
+///
+/// Convergence is judged RELATIVE to ‖A‖_F (rotation-invariant, so computed once).
+/// The old absolute 1e-14 stop / 1e-15 skip never rotated an input that is small in
+/// absolute terms (identity returned as the eigenvectors) and could not be reached
+/// by a large one (AᵀA of a several-thousand-inlier refit), which then ran all 200
+/// sweeps. At unit norm the relative test is the old one exactly.
+const JACOBI_REL_TOL: f64 = 1e-14;
+
 macro_rules! make_jacobi {
     ($name:ident, $n:expr) => {
         fn $name(a: &mut [[f64; $n]; $n]) -> [[f64; $n]; $n] {
             let mut v = [[0.0f64; $n]; $n];
             for i in 0..$n {
                 v[i][i] = 1.0;
+            }
+            let mut frob = 0.0f64;
+            for i in 0..$n {
+                for j in 0..$n {
+                    frob += a[i][j] * a[i][j];
+                }
+            }
+            let tol = JACOBI_REL_TOL * frob.sqrt();
+            if !(tol > 0.0) {
+                return v; // zero or non-finite input
             }
             'sweep: for _ in 0..200 {
                 let mut max_off = 0.0f64;
@@ -326,13 +344,13 @@ macro_rules! make_jacobi {
                         }
                     }
                 }
-                if max_off < 1e-14 {
+                if max_off <= tol {
                     break 'sweep;
                 }
                 for p in 0..$n {
                     for q in (p + 1)..$n {
                         let apq = a[p][q];
-                        if apq.abs() < 1e-15 {
+                        if apq.abs() <= 0.1 * tol {
                             continue;
                         }
                         let tau = (a[q][q] - a[p][p]) / (2.0 * apq);
@@ -593,16 +611,9 @@ fn ransac_fundamental(
         let sub_b: Vec<_> = idx.iter().map(|&i| pb[i]).collect();
         let Some(f) = fundamental_8pt(&sub_a, &sub_b) else { continue };
 
-        let mut mask = vec![false; n];
-        let mut count = 0;
-        for i in 0..n {
-            if sampson_sq(&f, pa[i], pb[i]) < thresh_sq {
-                mask[i] = true;
-                count += 1;
-            }
-        }
-
+        let (mask, count) = inliers_f(&f, pa, pb, thresh_sq);
         if count > best_count {
+            let (f, mask, count) = local_optimize_f(pa, pb, thresh_sq, f, mask, count);
             best_count = count;
             best_mask = mask;
             best_f = Some(f);
@@ -614,21 +625,62 @@ fn ransac_fundamental(
     if best_count < 8 {
         return None;
     }
+    Some((best_f?, best_mask, iters))
+}
 
-    // Refit F on the full inlier set for a better estimate
-    let pa_in: Vec<_> = (0..n).filter(|&i| best_mask[i]).map(|i| pa[i]).collect();
-    let pb_in: Vec<_> = (0..n).filter(|&i| best_mask[i]).map(|i| pb[i]).collect();
-    let f_ref = fundamental_8pt(&pa_in, &pb_in).or(best_f)?;
-
-    let final_mask: Vec<bool> = (0..n)
-        .map(|i| sampson_sq(&f_ref, pa[i], pb[i]) < thresh_sq)
-        .collect();
-    let final_count = final_mask.iter().filter(|&&x| x).count();
-    if final_count < 8 {
-        return None;
+fn inliers_f(f: &M3, pa: &[(f64, f64)], pb: &[(f64, f64)], thresh_sq: f64) -> (Vec<bool>, usize) {
+    let n = pa.len().min(pb.len());
+    let mut mask = vec![false; n];
+    let mut count = 0;
+    for i in 0..n {
+        if sampson_sq(f, pa[i], pb[i]) < thresh_sq {
+            mask[i] = true;
+            count += 1;
+        }
     }
+    (mask, count)
+}
 
-    Some((f_ref, final_mask, iters))
+// Refit rounds per new RANSAC best (stop earlier once the inlier set is stable).
+const LO_ROUNDS: usize = 4;
+
+// Local optimisation of a new RANSAC best (the simple LO-RANSAC step): refit F by
+// the 8-point algorithm on the current inliers, recount, and repeat while the set
+// changes. A refit is ACCEPTED ONLY IF IT KEEPS AT LEAST AS MANY INLIERS. The code
+// this replaces refitted once after the loop and returned that model whatever its
+// count: the algebraic fit weights every inlier alike, so borderline points can
+// tilt it until it explains fewer points than the minimal sample it came from.
+// Running it on each new best (not only at the end) also lets the adaptive stop
+// see the polished inlier ratio.
+fn local_optimize_f(
+    pa: &[(f64, f64)],
+    pb: &[(f64, f64)],
+    thresh_sq: f64,
+    f: M3,
+    mask: Vec<bool>,
+    count: usize,
+) -> (M3, Vec<bool>, usize) {
+    let (mut f, mut mask, mut count) = (f, mask, count);
+    for _ in 0..LO_ROUNDS {
+        if count < 8 {
+            break;
+        }
+        let sa: Vec<_> = mask.iter().zip(pa).filter(|(m, _)| **m).map(|(_, p)| *p).collect();
+        let sb: Vec<_> = mask.iter().zip(pb).filter(|(m, _)| **m).map(|(_, p)| *p).collect();
+        let Some(f_ref) = fundamental_8pt(&sa, &sb) else { break };
+        let (m_ref, c_ref) = inliers_f(&f_ref, pa, pb, thresh_sq);
+        if c_ref < count {
+            break;
+        }
+        let stable = m_ref == mask;
+        f = f_ref;
+        mask = m_ref;
+        count = c_ref;
+        if stable {
+            break;
+        }
+    }
+    (f, mask, count)
 }
 
 // ─── Homography (4-point DLT + RANSAC) — H-vs-F degeneracy test ────────────────
@@ -935,6 +987,110 @@ mod tests {
         // Same inlier set as a short run — adaptive stop is behaviour-preserving.
         let (_, mask_short, _) = ransac_fundamental(&a, &b, 4.0, iters.max(50)).unwrap();
         assert_eq!(mask_cap, mask_short, "adaptive stop changed the inlier set");
+    }
+
+    // Jacobi used to stop on an absolute 1e-14: a small-norm input returned the
+    // identity as its eigenvectors. Pin A·V = V·Λ across scales.
+    #[test]
+    fn jacobi_eig_9_is_scale_invariant() {
+        let mut rng = Lcg(0xfeed);
+        for &scale in &[1e-8, 1e-3, 1.0, 1e4] {
+            for _ in 0..200 {
+                let mut a = [[0.0f64; 9]; 9];
+                for i in 0..9 {
+                    for j in i..9 {
+                        let x = rng.range(-1.0, 1.0) * scale;
+                        a[i][j] = x;
+                        a[j][i] = x;
+                    }
+                }
+                let orig = a;
+                let v = jacobi_eig_9(&mut a);
+                let mut worst = 0.0f64;
+                for k in 0..9 {
+                    for i in 0..9 {
+                        let av: f64 = (0..9).map(|j| orig[i][j] * v[j][k]).sum();
+                        worst = worst.max((av - a[k][k] * v[i][k]).abs());
+                    }
+                }
+                assert!(worst < 1e-10 * scale, "A·v ≠ λ·v at scale {scale}: {worst}");
+            }
+        }
+    }
+
+    // Noisy general-motion scene with a fraction of random outliers.
+    fn noisy_scene(rng: &mut Lcg, n: usize, noise: f64, outliers: f64) -> (Vec<(f64, f64)>, Vec<(f64, f64)>, Vec<bool>) {
+        let rb = roty(rng.range(-0.2, 0.2));
+        let tb: V3 = [rng.range(0.3, 0.8), rng.range(-0.2, 0.2), rng.range(-0.1, 0.1)];
+        let id: M3 = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let (f, c) = (1500.0, 1000.0);
+        let (mut pa, mut pb, mut truth) = (Vec::new(), Vec::new(), Vec::new());
+        for _ in 0..n {
+            let outlier = rng.f() < outliers;
+            truth.push(!outlier);
+            if outlier {
+                pa.push((rng.range(0.0, 2000.0), rng.range(0.0, 2000.0)));
+                pb.push((rng.range(0.0, 2000.0), rng.range(0.0, 2000.0)));
+                continue;
+            }
+            let x: V3 = [rng.range(-3.0, 3.0), rng.range(-3.0, 3.0), rng.range(4.0, 12.0)];
+            let (ax, ay) = proj(&id, &[0.0, 0.0, 0.0], x, f, c);
+            let (bx, by) = proj(&rb, &tb, x, f, c);
+            let g = |rng: &mut Lcg| (rng.f() + rng.f() + rng.f() - 1.5) * 2.0 * noise;
+            pa.push((ax + g(rng), ay + g(rng)));
+            pb.push((bx + g(rng), by + g(rng)));
+        }
+        (pa, pb, truth)
+    }
+
+    // The refit after RANSAC used to be accepted whatever it scored, so the
+    // returned model could explain FEWER points than the sample that won (1 run in
+    // 400 on these scenes, measured 2026-10-08). The local optimisation must never
+    // lose inliers.
+    #[test]
+    fn local_optimisation_never_loses_inliers() {
+        let mut rng = Lcg(0xbeef);
+        let thresh_sq = 2.0f64 * 2.0;
+        let mut trials = 0;
+        for _ in 0..300 {
+            let (pa, pb, _) = noisy_scene(&mut rng, 200, 1.0, 0.3);
+            let n = pa.len();
+            let idx = sample8(&mut Xorshift::new((rng.f() * 1e9) as u32 + 1), n);
+            let sa: Vec<_> = idx.iter().map(|&i| pa[i]).collect();
+            let sb: Vec<_> = idx.iter().map(|&i| pb[i]).collect();
+            let Some(f) = fundamental_8pt(&sa, &sb) else { continue };
+            let (mask, count) = inliers_f(&f, &pa, &pb, thresh_sq);
+            if count < 20 {
+                continue;
+            }
+            trials += 1;
+            let (_, m_lo, c_lo) = local_optimize_f(&pa, &pb, thresh_sq, f, mask, count);
+            assert!(c_lo >= count, "LO lost inliers: {count} → {c_lo}");
+            assert_eq!(c_lo, m_lo.iter().filter(|&&x| x).count());
+        }
+        assert!(trials > 50, "too few usable trials: {trials}");
+    }
+
+    // End to end: with 30 % outliers and 0.7 px noise, RANSAC + LO keeps nearly
+    // every true correspondence and few outliers (a random pair lands in the 2 px
+    // band around its epipolar line now and then, so not zero).
+    #[test]
+    fn ransac_recovers_noisy_inliers() {
+        let mut rng = Lcg(0xcafe);
+        let (mut true_n, mut true_kept, mut out_n, mut out_kept) = (0, 0, 0, 0);
+        for _ in 0..40 {
+            let (pa, pb, truth) = noisy_scene(&mut rng, 300, 0.7, 0.3);
+            let (f, mask, _) = ransac_fundamental(&pa, &pb, 4.0, 5000).unwrap();
+            for (m, t) in mask.iter().zip(&truth) {
+                if *t { true_n += 1; if *m { true_kept += 1; } } else { out_n += 1; if *m { out_kept += 1; } }
+            }
+            // The returned mask is exactly the returned model's inlier set.
+            assert_eq!(inliers_f(&f, &pa, &pb, 4.0).0, mask);
+        }
+        let recall = true_kept as f64 / true_n as f64;
+        let leak = out_kept as f64 / out_n as f64;
+        assert!(recall > 0.9, "kept {:.1} % of true correspondences", recall * 100.0);
+        assert!(leak < 0.1, "kept {:.1} % of outliers", leak * 100.0);
     }
 
     // ── Descriptor matching (GEMM kernel vs naive reference) ─────────────────
