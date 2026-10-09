@@ -22,6 +22,17 @@ curvature, so the fit, GCP anchoring and camera positions are all solved in a lo
 metric frame around the site and converted back to the CRS. The log reports the
 scale factor k it divided out; near the poles this removes metres of error.
 
+Georeferenced products are the exception: a DEM or orthophoto in the project CRS
+needs a projected CRS, because the model cannot be fitted to degrees. New projects
+start in WGS 84 (EPSG:4326). When the project CRS is geographic and the cameras have
+positions (EXIF GPS or imported), websfm suggests a projected CRS: the UTM zone of
+the median camera position, or polar stereographic beyond UTM's range (EPSG:3031 in
+the far south, EPSG:3413 in the far north). The log names the suggestion when the
+GPS positions are read. **Project Settings** and the Build DEM / Build Orthophoto
+frame field offer it as one click. Applying it reprojects positions, GCPs and
+footprints; nothing changes until you click. A national grid (e.g. Lambert-93,
+EPSG:2154 in France) works just as well; pick it in the CRS list.
+
 ## Camera positions
 Imported or EXIF positions can fit the reconstruction when at least three registered
 cameras have usable 3D coordinates. They are convenient but consumer GNSS may be too

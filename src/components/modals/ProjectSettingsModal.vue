@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import CrsPicker from '../controls/CrsPicker.vue'
+import CrsSuggestion from './ui/CrsSuggestion.vue'
 import { formatBytes, ARCHIVE_DERIVED_DIRS } from '../../core/io/projectArchive.js'
 import { folderLabel, isFolderProject } from '../../core/io/folderProject.js'
 import * as opfs from '../../utils/opfs.js'
@@ -9,8 +10,11 @@ import { version as appVersion } from '../../../package.json'
 const props = defineProps({
   project: { type: Object, required: true },
   clearDerived: { type: Function, required: true },
+  // Projected CRS derived from the camera positions while the CRS is geographic
+  // (reconstruction store `crsSuggestion`); null otherwise.
+  crsSuggestion: { type: Object, default: null },
 })
-const emit = defineEmits(['close', 'rename', 'set-crs'])
+const emit = defineEmits(['close', 'rename', 'set-crs', 'apply-crs-suggestion'])
 
 const name = ref(props.project.name || '')
 const measuring = ref(true)
@@ -113,6 +117,9 @@ onMounted(measure)
           <h3>Coordinate system</h3>
           <p>Working CRS for maps, GCPs, footprints, and camera positions. Changing it reprojects existing spatial data.</p>
           <CrsPicker :model-value="project.crs || 'EPSG:4326'" @update:model-value="emit('set-crs', $event)" />
+          <CrsSuggestion v-if="crsSuggestion" context="settings"
+            :suggestion="crsSuggestion" :current-crs="project.crs || 'EPSG:4326'"
+            @apply="emit('apply-crs-suggestion', $event)" />
         </section>
 
         <section class="section">

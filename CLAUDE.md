@@ -1037,7 +1037,14 @@ the reason). Nothing is dropped from the report, only from the fit.
 
 ## CRS / GCP / poses
 Per-project working CRS (proj4). GCPs, footprints, and camera poses store positions in
-the project CRS and are reprojected on CRS change (`handleSetCrs` in App.vue). See memory
+the project CRS and are reprojected on CRS change (`handleSetCrs` in App.vue). A geographic
+CRS (the EPSG:4326 default) can never be georeferenced — the fit is a similarity, and a
+similarity into degrees is meaningless — so `georeferenceBlocker` (`'geographic'` |
+`'evidence'` | null) tells the product modals which reason to show, and `crsSuggestion`
+(`core/crsSuggest.js`: UTM zone of the median position, polar stereographic beyond
+UTM's range) is **offered, never applied**: one click through `applyCrsSuggestion` →
+`handleSetCrs`, logged with its inputs. The working CRS is the user's choice and
+changing it reprojects every spatial record. See memory
 `gcp-crs-architecture` and `works-in-antarctica`.
 
 There are **three roles**, and the difference is a *constraint* boundary, not a

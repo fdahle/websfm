@@ -837,6 +837,16 @@ fiducials; self-calibration (A2) + fiducials (F4) are the code-side support.
 
 ## Done log (most recent first)
 
+- **2026-10-08 · Projected-CRS suggestion for geotagged projects.** A project left at the
+  EPSG:4326 default could not be georeferenced (no similarity into degrees), and the DEM /
+  ortho dialogs blamed "needs camera poses" while 127 EXIF positions sat there (St Nazaire
+  DJI set). `core/crsSuggest.js` derives the UTM zone of the median position (Norway /
+  Svalbard exceptions; EPSG:3031 / 3413 beyond UTM). The georeferencing store exposes
+  `georeferenceBlocker` + `crsSuggestion`; the frame option now names the real reason, and a
+  one-click "Use EPSG:32631 · WGS 84 / UTM zone 31N" sits under it and in Project Settings
+  (`CrsSuggestion.vue`, App `applyCrsSuggestion`). EXIF ingest logs the suggestion once,
+  the geographic-CRS georeference warning names it too. Guides: georeferencing, dem,
+  orthophoto. Browser check `UI-18`.
 - **2026-10-08 · Measured dense-fusion pre-flight; accumulator without a `Map`.** The Stage B
   gate guessed cells as valid px ÷ 2 and ignored step, merge cell and region, so a project with
   116M valid px was refused at 13.35 GB vs 8 GB, and the remedies the refusal named could not

@@ -228,7 +228,7 @@ const { sidebarWidth, startSidebarResize } = useSidebarResize()
 // ── Reconstruction ────────────────────────────────────────────────────────────
 // Project-scoped store; restore/clear run through the project-store registry.
 const reconstructionStore = useReconstructionStore()
-const { cameras, sparseCameras, reconStatus, clouds, selectedCloudId, selectedCloud, mainSparseId, mainSparseCloud, depthMaps, depthMapCount, dem, demSource, meshSources, meshSource, ortho, orthoSurfaces, georef, canGeoreference, canGeoreferenceGcps, denseSummary, summary: reconSummary } = storeToRefs(reconstructionStore)
+const { cameras, sparseCameras, reconStatus, clouds, selectedCloudId, selectedCloud, mainSparseId, mainSparseCloud, depthMaps, depthMapCount, dem, demSource, meshSources, meshSource, ortho, orthoSurfaces, georef, canGeoreference, canGeoreferenceGcps, denseSummary, summary: reconSummary, georeferenceBlocker, crsSuggestion } = storeToRefs(reconstructionStore)
 const { reconstruct, importColmapModel, importInteropModel, importCloud, editClouds, computeDepthMaps, densify, generateDem, generateOrtho, generateMesh, georeference, effectiveFrameSpec, gcpAccuracyReport, gcpGuides, gcpEstimate, selectCloud, setCloudStyle, setCloudVisible, removeCloud, renameCloud, removeProduct, renameProduct, setMainSparse, clearDerived: clearReconstructionDerived } = reconstructionStore
 
 async function clearCurrentProjectDerived() {
@@ -1375,6 +1375,17 @@ async function handleSetCrs(crs) {
   })
 }
 
+// The one-click projected CRS offered while the project CRS is geographic
+// (reconstructionStore.crsSuggestion, core/crsSuggest.js). Same path as picking it
+// by hand; the log line carries the derived value and its inputs.
+async function applyCrsSuggestion(suggestion) {
+  if (!suggestion?.code) return
+  log(`Project CRS → ${suggestion.code} (${suggestion.name}), suggested from the median of `
+    + `${suggestion.count} camera position(s) at ${suggestion.lat.toFixed(4)}, ${suggestion.lon.toFixed(4)} (lat, lon)`,
+  'info', 'Project')
+  await handleSetCrs(suggestion.code)
+}
+
 // ── Import (dropped / picked files) ──────────────────────────────────────────────
 // The whole import funnel lives in useImportRouting; it drives the import modals
 // (state in useModalsStore) and commits through these store actions.
@@ -2210,6 +2221,9 @@ function onRibbonPick(event) {
         v-if="demOpen"
         :can-georeference="canGeoreference"
         :has-scale="scaleFitValid || georef?.crs === currentCrs"
+        :georeference-blocker="georeferenceBlocker"
+        :crs-suggestion="crsSuggestion"
+        @apply-crs-suggestion="applyCrsSuggestion"
         :project-crs="currentCrs"
         :source="demSource"
         @close="demOpen = false"
@@ -2248,6 +2262,9 @@ function onRibbonPick(event) {
         :can-georeference="canGeoreference"
         :has-scale="scaleFitValid || georef?.crs === currentCrs"
         :dem-unit="dem?.unit ?? null"
+        :georeference-blocker="georeferenceBlocker"
+        :crs-suggestion="crsSuggestion"
+        @apply-crs-suggestion="applyCrsSuggestion"
         :project-crs="currentCrs"
         @close="orthoOpen = false"
         @run="onOrthoRun"
@@ -2467,7 +2484,9 @@ function onRibbonPick(event) {
         :clear-derived="clearCurrentProjectDerived"
         @close="projectSettingsOpen = false"
         @rename="(name) => renameProject(currentProjectId, name)"
+        :crs-suggestion="crsSuggestion"
         @set-crs="handleSetCrs"
+        @apply-crs-suggestion="applyCrsSuggestion"
       />
     </Teleport>
 

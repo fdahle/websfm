@@ -17,8 +17,10 @@ displacement, double edges, or holes in the orthophoto.
 
 ## Coordinate frame and resolution
 When a DEM is selected, the orthophoto inherits its frame. For mesh or plane, choose
-Local or Project CRS. Auto resolution follows the surface; a smaller pixel size than
-the imagery and surface support does not add real detail.
+Local or Project CRS. Project CRS needs a projected CRS; in a geographic one (WGS 84)
+the field suggests one from the camera positions (see Build DEM). Auto resolution
+follows the surface; a smaller pixel size than the imagery and surface support does
+not add real detail.
 
 ## Blending
 <!-- param: blend default: Best -->
