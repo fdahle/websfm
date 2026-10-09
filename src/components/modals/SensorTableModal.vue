@@ -7,7 +7,7 @@ defineProps({
   cameras: { type: Map,   default: () => new Map() },
 })
 
-const emit = defineEmits(['close', 'update', 'remove', 'toggle-fixed', 'set-fiducial-marks', 'detect-fiducials', 'calibrate-fiducials'])
+const emit = defineEmits(['close', 'update', 'apply-film-format', 'remove', 'toggle-fixed', 'set-fiducial-marks', 'detect-fiducials', 'calibrate-fiducials'])
 </script>
 
 <template>
@@ -23,6 +23,7 @@ const emit = defineEmits(['close', 'update', 'remove', 'toggle-fixed', 'set-fidu
           :images="images"
           :cameras="cameras"
           @update="emit('update', $event)"
+          @apply-film-format="emit('apply-film-format', $event)"
           @remove="emit('remove', $event)"
           @toggle-fixed="emit('toggle-fixed', $event)"
           @set-fiducial-marks="emit('set-fiducial-marks', $event)"

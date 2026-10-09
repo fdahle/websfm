@@ -2,6 +2,7 @@
 import { ref, computed } from 'vue'
 import { estimatedIntrinsics } from '../../core/sfm/cameraEstimated.js'
 import { resolveK, sensorWidthMm } from '../../core/sfm/reconstruction.js'
+import { filmFormatStatus, scanWidthPx } from '../../core/sfm/filmFormat.js'
 import { DISTORTION_MODELS, coeffsForModel } from '../../core/sfm/distortion.js'
 import { parseRows, sniffDelimiter } from '../../core/io/gcp.js'
 
@@ -14,7 +15,7 @@ const props = defineProps({
   cameras: { type: Map,    default: () => new Map() }, // uuid → { R, t, K }
 })
 
-const emit = defineEmits(['update', 'remove', 'toggle-fixed', 'set-fiducial-marks', 'detect-fiducials', 'calibrate-fiducials'])
+const emit = defineEmits(['update', 'apply-film-format', 'remove', 'toggle-fixed', 'set-fiducial-marks', 'detect-fiducials', 'calibrate-fiducials'])
 
 const isFixed = (s, field) => !!s.fixed?.[field]
 
@@ -226,6 +227,86 @@ function exifSensorWidth(s) {
   return mm ? round(mm) : null
 }
 
+// ── Format (mm) vs px size: which one resolveK uses, and the implied-width check ──
+// A declared format outranks a pixel size in resolveK, so when a format is in effect
+// the px-size cell shows the pitch DERIVED from it (format ÷ image width) read-only —
+// one stored value, one meaning. With only a pitch, the format cell shows the width
+// that pitch implies, and when that is no standard aerial width it offers the nearest
+// standard format (core/sfm/filmFormat.js). Evaluated per assigned image through
+// resolveK itself, like `fallbacks` above.
+const formatStatus = computed(() => {
+  const m = new Map()
+  for (const s of props.sensors) {
+    const imgs = props.images.filter((i) => i.sensorId === s.id)
+    const probe = imgs.length ? imgs : [{ meta: null }]
+    m.set(s.id, filmFormatStatus(s, probe.map((img) => ({
+      widthPx: scanWidthPx(img.meta, s), K: resolveK(img.meta, s),
+    }))))
+  }
+  return m
+})
+const fmtSig = (x) => String(Number(x.toPrecision(4)))
+const spanText = (sp, fmt) => (fmt(sp.min) === fmt(sp.max) ? fmt(sp.min) : `${fmt(sp.min)}–${fmt(sp.max)}`)
+const fmtWidth = (x) => x.toFixed(0)
+const impliedWarn = (s) => formatStatus.value.get(s.id)?.warnCount > 0
+
+function formatPlaceholder(s) {
+  const st = formatStatus.value.get(s.id)
+  if (st?.source === 'pitch') return `${spanText(st.impliedMm, fmtWidth)} (implied)`
+  const ex = exifSensorWidth(s)
+  return ex != null ? `${ex} (EXIF)` : ''
+}
+
+function formatTitle(s) {
+  const st = formatStatus.value.get(s.id)
+  const film = isFilm(s)
+  if (st?.source === 'pitch') {
+    const w = `${spanText(st.impliedMm, fmtWidth)} mm`
+    return st.warnCount
+      ? `The px size implies a ${w} wide film (px size × image width), which is no standard aerial `
+        + `format (230 mm frame, 240 mm roll). Enter the format width from the camera calibration `
+        + `certificate: it outranks the px size.`
+      : `Implied by px size × image width: ${w}. Enter a format width to use it instead `
+        + `(a format outranks a px size).`
+  }
+  if (s.sensorWidthMm == null && exifSensorWidth(s) != null) {
+    return `Auto-derived from EXIF (FocalPlaneXResolution): ${exifSensorWidth(s)} mm. Type a value to override.`
+  }
+  return film
+    ? 'Film format width (mm) from the camera calibration certificate: the width the scan spans '
+      + 'across its pixel columns. It converts the focal to pixels and outranks a px size, whose '
+      + 'cell then shows the pitch derived from it. Once fiducials are calibrated, the fitted '
+      + 'interior orientation sets the pixel scale and this is the fallback.'
+    : 'Physical sensor / film width (mm) — converts an mm focal to pixels; outranks a px size'
+}
+
+// Derived pitch (mm/px) shown in the px-size cell while a format is in effect.
+function derivedPitchText(s) {
+  return spanText(formatStatus.value.get(s.id).pitchMm, fmtSig)
+}
+function derivedPitchTitle(s) {
+  const st = formatStatus.value.get(s.id)
+  const um = spanText({ min: st.pitchMm.min * 1000, max: st.pitchMm.max * 1000 }, fmtSig)
+  return `Derived from the format: ${st.formatMm} mm ÷ image width = ${derivedPitchText(s)} mm/px `
+    + `(${um} µm). The format outranks a px size; clear the format to enter a pitch instead.`
+    + (st.ignoredPitchMm != null
+      ? ` The entered px size ${st.ignoredPitchMm} mm is kept but not used while the format is set.`
+      : '')
+}
+
+const suggestionFor = (s) => formatStatus.value.get(s.id)?.suggestion ?? null
+function applySuggestion(s) {
+  const sug = suggestionFor(s)
+  if (sug) emit('apply-film-format', { id: s.id, widthMm: sug.widthMm, reason: sug.reason })
+}
+function suggestionTitle(s) {
+  const sug = suggestionFor(s)
+  return `Set the format to ${sug.widthMm} mm (${sug.label}), ${sug.gapPct.toFixed(1)}% from the implied `
+    + `width. Right when the scan is cropped to the image frame and the scanner pitch is off. If the `
+    + `scan keeps the film margins, the pitch may be correct instead: check the fiducial-mark `
+    + `distances in the scan first.`
+}
+
 // ── Per-cell content for the read-only Estimated / Δ modes (column-driven) ───────
 // Returns { text, unit? } so the two mode blocks can iterate NUM_COLS like the
 // editable modes — a hidden column then can't misalign a hardcoded <td> sequence.
@@ -245,9 +326,10 @@ function diffCell(s, key) {
 }
 
 // Editable numeric columns (label handled separately). `focal` carries a
-// px/mm unit toggle; `pixelSize`/`sensorWidthMm` convert an mm focal to pixels
+// px/mm unit toggle; `sensorWidthMm`/`pixelSize` convert an mm focal to pixels
 // (a film/scanned-aerial camera: focal length + film format from a calibration
-// sheet — fill either pixel size or format width, not both). The columns are always
+// sheet). Format comes first because it outranks a pixel size in resolveK; while
+// one is set the px-size cell shows the derived pitch (see `formatStatus`). The columns are always
 // present — applicability is a per-*cell* concern (a px-focal sensor shows '—', see
 // the initial-mode cell) rather than a whole-column hide, which caused chicken-and-egg
 // (couldn't reveal a hidden column to type into) and dropped px size on film scans.
@@ -256,8 +338,8 @@ const NUM_COLS = [
   { key: 'height',       label: 'H' },
   { key: 'focal',        label: 'Focal', lockable: true },
   { key: 'fx',           label: 'fx (px)', readonly: true },
-  { key: 'pixelSize',    label: 'px size (mm)' },
   { key: 'sensorWidthMm', label: 'format (mm)' },
+  { key: 'pixelSize',    label: 'px size (mm)' },
   { key: 'cx',           label: 'cx', lockable: true },
   { key: 'cy',           label: 'cy', lockable: true },
   { key: 'k1',           label: 'k1', lockable: true },
@@ -444,22 +526,38 @@ const totalCols = computed(() => 4 + NUM_COLS.length + 2)
               <!-- Pixel size / format only convert an mm focal. On a px-focal (or EXIF)
                    sensor they don't apply, so show '—' rather than a dimmed stale value
                    that reads as "still used". -->
-              <!-- format (mm): when the user hasn't entered one, show the EXIF-derived
-                   sensor width (FocalPlaneXResolution) as a placeholder, so the scale
-                   resolveK is actually using is visible. Typing overrides it. -->
-              <input
-                v-else-if="c.key === 'sensorWidthMm' && usesMmScale(s)"
-                class="cell-input"
-                :class="{ 'exif-placeholder': s.sensorWidthMm == null && exifSensorWidth(s) != null }"
-                type="number"
-                step="any"
-                :value="s.sensorWidthMm ?? ''"
-                :placeholder="exifSensorWidth(s) != null ? `${exifSensorWidth(s)} (EXIF)` : ''"
-                :title="s.sensorWidthMm == null && exifSensorWidth(s) != null
-                  ? `Auto-derived from EXIF (FocalPlaneXResolution): ${exifSensorWidth(s)} mm. Type a value to override.`
-                  : 'Physical sensor / film width (mm) — converts an mm focal to pixels'"
-                @change="onEdit(s.id, c.key, $event)"
-              />
+              <!-- format (mm): the primary scale field (it outranks px size). When
+                   empty, the placeholder shows the width resolveK is actually using —
+                   implied by the px size, else EXIF-derived. An off-standard implied
+                   width is flagged and, when a standard format is near, offered as a
+                   one-click "Set to 230 mm?" (the only mutation; the store logs it). -->
+              <span v-else-if="c.key === 'sensorWidthMm' && usesMmScale(s)" class="format-cell">
+                <input
+                  class="cell-input"
+                  :class="{
+                    'exif-placeholder': s.sensorWidthMm == null && formatPlaceholder(s) !== '',
+                    'implied-warn': impliedWarn(s),
+                  }"
+                  type="number"
+                  step="any"
+                  :value="s.sensorWidthMm ?? ''"
+                  :placeholder="formatPlaceholder(s)"
+                  :title="formatTitle(s)"
+                  @change="onEdit(s.id, c.key, $event)"
+                />
+                <button
+                  v-if="suggestionFor(s)"
+                  class="suggest-btn"
+                  :title="suggestionTitle(s)"
+                  @click="applySuggestion(s)"
+                >Set to {{ suggestionFor(s).widthMm }} mm?</button>
+              </span>
+              <!-- px size while a format is in effect: derived (format ÷ width), read-only. -->
+              <span
+                v-else-if="c.key === 'pixelSize' && formatStatus.get(s.id)?.source === 'format'"
+                class="derived"
+                :title="derivedPitchTitle(s)"
+              >= {{ derivedPitchText(s) }}<span v-if="formatStatus.get(s.id).ignoredPitchMm != null" class="ignored-mark">*</span></span>
               <input
                 v-else-if="c.key === 'pixelSize' && usesMmScale(s)"
                 class="cell-input"
@@ -653,6 +751,21 @@ tbody td.dim { color: var(--text-dim); }
    italic placeholder mark it as auto-filled (used-but-not-user-entered). */
 .cell-input.exif-placeholder { border-style: dashed; }
 .cell-input.exif-placeholder::placeholder { color: var(--text-dim); font-style: italic; opacity: 1; }
+/* Implied film width that is no standard aerial format (resolveK's filmWidthOk false). */
+.cell-input.implied-warn { border-color: #e0a020; }
+.cell-input.implied-warn::placeholder { color: #e0a020; }
+
+/* Format cell: input + the optional "Set to 230 mm?" suggestion. */
+.format-cell { display: inline-flex; gap: 4px; align-items: center; }
+.format-cell .cell-input { width: 88px; } /* fits a "253 (implied)" placeholder */
+.suggest-btn {
+  background: rgba(224, 160, 32, 0.12); border: 1px solid #e0a020; border-radius: 4px;
+  color: var(--text); font: inherit; font-size: 11px; padding: 2px 6px; cursor: pointer; white-space: nowrap;
+}
+.suggest-btn:hover { background: rgba(224, 160, 32, 0.25); }
+/* Pitch derived from the format: read-only, visibly not an input. */
+.derived { color: var(--text-dim); font-style: italic; font-variant-numeric: tabular-nums; cursor: help; }
+.ignored-mark { color: #e0a020; font-style: normal; margin-left: 1px; }
 
 /* Focal cell: numeric input + compact px/mm unit selector. */
 .focal-cell { display: inline-flex; gap: 4px; align-items: center; }

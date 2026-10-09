@@ -15,6 +15,26 @@ Reconstruction uses the marks only once both exist.
 Assign the images to a sensor of kind **Film** in the sensor table first; both
 commands live under **Tools → Images** and appear only for film sensors.
 
+## Film width and scan pitch
+The sensor table converts the focal length (mm) to pixels with the **format (mm)**
+column: the width of the image frame from the camera calibration certificate (230 mm
+for a 9-inch mapping camera). Enter it there. A format outranks a **px size**: while
+one is set, the px size cell shows the pitch derived from it (format ÷ scan width in
+pixels) and cannot be edited. To work from a scan pitch instead, clear the format and
+type the pitch.
+
+With only a px size, the format cell shows the film width that pitch implies (px size
+× scan width). If that is not a standard aerial width (a 230 mm frame or a 240 mm
+roll, within 5 %), the cell is outlined in amber and reconstruction logs a warning.
+When a 230 mm frame is within 15 %, the cell offers **Set to 230 mm?**. One click sets
+the format, and the Activity log records the value and the reason. Accept it only when
+the scan is cropped to the image frame. A scan that keeps the film margins spans more
+than the frame, so its pitch may be correct. Measure the distance between opposite
+fiducial marks in the scan before deciding.
+
+Once the fiducials are calibrated, reconstruction measures each scan's pitch from the
+marks, and the format or px size is used only if that fit fails.
+
 ## Detect fiducials
 **Detect Fiducials** searches every scan of the sensor; no calibration is needed.
 Choose the mark **family** (Generic, Right angle, 45° cut, or Frame for the film

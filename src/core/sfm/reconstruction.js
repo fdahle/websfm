@@ -2,6 +2,10 @@ import init, { recover_pose, triangulate_dlt, solve_pnp, bundle_adjust, compute_
   from '../../wasm/reconstruction/reconstruction.js'
 import { isObservationList } from './baObservations.js'
 import { SFM_TUNING } from '../tuning.js'
+import { isKnownAerialFilmWidth, scanWidthPx, usesFormatWidth } from './filmFormat.js'
+
+// Re-exported: the known-width list now lives with the sensor table's format helpers.
+export { isKnownAerialFilmWidth }
 
 let initPromise = null
 function ensureWasm() {
@@ -44,13 +48,6 @@ export function sensorWidthMm(meta) {
   return sensorWidthFromDb(meta)
 }
 
-// True when a physical film width (mm) matches a standard aerial format within
-// ±5%. Historical mapping cameras use 230mm (9") or 240mm frames; a scan whose
-// implied width is far from these usually means a wrong pixel pitch.
-export function isKnownAerialFilmWidth(mm) {
-  return [230, 240].some((w) => Math.abs(mm - w) / w <= 0.05)
-}
-
 // Resolve K intrinsics (pixels) for one image, preferring the (user-editable)
 // assigned sensor over raw EXIF. Order of reliability:
 //   1. sensor focal already in pixels        (table value — authoritative)
@@ -63,7 +60,7 @@ export function isKnownAerialFilmWidth(mm) {
 //   6. default-FOV guess (fx = max(w,h)) — poor; registration may fail
 // Returns { fx, fy, cx, cy, source } where `source` explains the path taken.
 export function resolveK(meta, sensor = null) {
-  const w = sensor?.width || meta?.width || 1000
+  const w = scanWidthPx(meta, sensor)
   const h = sensor?.height || meta?.height || 1000
   const cx = sensor?.cx ?? w / 2
   const cy = sensor?.cy ?? h / 2
@@ -93,7 +90,7 @@ export function resolveK(meta, sensor = null) {
   //    goes wrong (the CA…V set's 0.025mm/px implies a 253mm frame — no such film
   //    exists — for a ~9% focal error). When both are present the certificate wins, and
   //    the pitch is then only a cross-check.
-  if (sensorFocalMm != null && sensor.sensorWidthMm) {
+  if (usesFormatWidth(sensor)) {
     const fx = (sensorFocalMm / sensor.sensorWidthMm) * w
     return { fx, fy: fx, cx, cy, source: `sensor table (${sensorFocalMm}mm, ${sensor.sensorWidthMm}mm format)` }
   }

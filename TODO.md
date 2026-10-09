@@ -177,14 +177,6 @@ sky/vegetation plan is retired: this section contains all remaining decisions.
   Antarctica (snow vs sky). Manual masking already works and is what Metashape users
   do; if this ever resurfaces it is a SAM2-seeded feature, not a heuristic.
 
-### P0.3 — first-class "film width (mm)" input
-In `SensorTable.vue`, for scan/film sensors offer format-width-mm as the primary
-field (pitch derived) and surface a store suggestion when the implied-width warning
-fires ("set to 230 mm?"). The `sfm.js` K path already supports width-derived focal,
-and an explicit format **outranks** the pitch in `resolveK` since 2026-07-16, so the
-warning's advice is now literally actionable — this item is just the UI half.
-Related evidence: `VERIFICATION.csv` ▸ `FID-08` (the TMA set's implied 253 mm).
-
 ### MS — mesh: confirm on real data (fix shipped 2026-10-07)
 - **Run `MESH-01` on the eagle** (cleaned cloud, defaults) and `MESH-02` on an aerial
   set. If pieces survive or real surface is lost, retune `MESH_TUNING.trimRatio` /

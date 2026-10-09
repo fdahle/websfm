@@ -861,6 +861,11 @@ fiducials; self-calibration (A2) + fiducials (F4) are the code-side support.
   (`WEBSFM_SLOW_TESTS=1`) pins > 2^24 cells. `core/dense/mvs.js`, `core/dense/memBudget.js`,
   `workers/ops/dense.js`, `useReconstructionStore.densify`; guide `dense-cloud.md`;
   browser check `DEN-17`.
+- **2026-10-08 · Film width (mm) in the sensor table (TODO ▸ P0.3).** Format width is
+  the primary scale field; with a format set the pixel size shows as derived (an ignored
+  stored pitch is flagged), and an off-standard implied width offers "Set to 230 mm?"
+  (`core/sfm/filmFormat.js`, shared with `resolveK`; `useSensorsStore.applyFilmFormat`
+  logs value + reason). Guide: `film-fiducials.md`. Check: `FID-09`.
 - **2026-10-08 · Rust numerics (TODO ▸ RV).** Jacobi eigensolvers in `crates/matching`
   and `crates/reconstruction/src/linalg.rs` stop relative to ‖A‖_F instead of an
   absolute 1e-14: at 1e-7 scale `svd3`/`null4` returned the identity (A ≠ USVᵀ by 72 %);
