@@ -19,7 +19,9 @@ const props = defineProps({
   label:  { type: String, required: true },
   icon:   { type: String, required: true },
   rows:   { type: Array,  required: true },
-  // Non-empty ⇒ every row is blocked; the button greys with this reason.
+  // Non-empty ⇒ every row is blocked. The button dims and shows this as its
+  // tooltip, but still OPENS: the menu is how a user learns which tools exist,
+  // and each greyed row prints its own prerequisite.
   reason: { type: String, default: '' },
 })
 const emit = defineEmits(['run'])
@@ -64,7 +66,6 @@ function close(returnFocus = false) {
 }
 
 function toggle() {
-  if (props.reason) return
   if (open.value) close()
   else show()
 }
@@ -106,8 +107,7 @@ onBeforeUnmount(() => close())
   <button
     ref="btn"
     class="cmd rm-button"
-    :class="{ active: open, disabled: !!reason }"
-    :aria-disabled="!!reason"
+    :class="{ active: open, blocked: !!reason }"
     aria-haspopup="menu"
     :aria-expanded="open"
     :title="reason"
@@ -168,7 +168,7 @@ onBeforeUnmount(() => close())
   cursor: pointer;
   font: inherit;
 }
-.cmd:hover:not(.disabled) {
+.cmd:hover {
   background: var(--hover-bg);
   border-color: var(--panel-border);
 }
@@ -176,10 +176,9 @@ onBeforeUnmount(() => close())
   background: rgba(14, 99, 156, 0.25);
   border-color: var(--accent);
 }
-.cmd.disabled {
-  opacity: 0.4;
-  cursor: default;
-}
+/* Every row blocked: dimmed like a disabled command, yet still clickable. */
+.cmd.blocked .cmd-icon,
+.cmd.blocked .cmd-label { opacity: 0.45; }
 .cmd-icon {
   width: 18px;
   height: 18px;

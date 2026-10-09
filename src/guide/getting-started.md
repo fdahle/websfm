@@ -82,8 +82,9 @@ Clean, align, compare and measure the results with the **Tools** tab's
 ## Where things are
 The ribbon chooses what to do: a dialog, a mode, or a display setting such as point
 and camera size (View → Scene). The **Tools** tab groups its tools by what they act on:
-Images, Model, Point Cloud, Mesh and Products, each a menu. A tool whose prerequisite
-is missing stays in its menu, greyed, with the reason. Interactive tools (selecting
+Images, Model, Point Cloud, Mesh and Products, each a menu. Every menu opens even
+before anything in it is usable, so you can see what is there: a tool whose
+prerequisite is missing stays in its menu, greyed, with the reason. Interactive tools (selecting
 points, editing masks or ground control, measuring, region, orientation, point-pair
 alignment) open a small floating toolbox over the view. You can drag it by its title,
 and close it with × or Esc.
