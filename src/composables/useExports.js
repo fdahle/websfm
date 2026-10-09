@@ -185,10 +185,16 @@ export function useExports({
   function toFlatCloud(src) {
     if (src && src.pos) {
       const count = src.count ?? src.pos.length / 3
+      // One copy per attribute: a restored cloud's attributes are views into ONE
+      // shared sidecar buffer, and a transfer list may not name a buffer twice.
+      const attributes = src.attributes && Object.keys(src.attributes).length
+        ? Object.fromEntries(Object.entries(src.attributes).map(([k, v]) => [k, v.slice(0, count)]))
+        : null
       return {
         count,
         pos: new Float64Array(src.pos.subarray(0, count * 3)),
         col: src.col ? new Uint8Array(src.col.subarray(0, count * 3)) : null,
+        ...(attributes ? { attributes } : {}),
       }
     }
     const n = src.length
@@ -209,8 +215,11 @@ export function useExports({
     if (!cloud) return
     // cloudToPly/Las/Xyz all accept either the sparse point-object array or the
     // dense flat shape; prepareCloudForExport normalizes when georef/downsample apply.
+    // Attributes (a computed distance, imported intensity/classification) ride along:
+    // PLY and LAS write them, LAZ its standard LAS fields only (see core/io/laz.js).
     const raw = cloud.kind === 'dense'
-      ? { count: cloud.count, pos: cloud.pos, col: cloud.col, nrm: cloud.nrm }
+      ? { count: cloud.count, pos: cloud.pos, col: cloud.col, nrm: cloud.nrm,
+          ...(cloud.attributes ? { attributes: cloud.attributes } : {}) }
       : cloud.points
     const frame = applyGeoref ? await exportSimilarity() : { sim: null, unit: 'model', crs: null, source: null }
     const src = prepareCloudForExport(raw, {

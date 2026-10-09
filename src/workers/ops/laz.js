@@ -1,5 +1,6 @@
 import init, { compress_points, decompress_points, LazEncoder } from '../../wasm/lazcodec/lazcodec.js'
 import { cloudToLaz } from '../../core/io/laz.js'
+import { attributeBuffers } from '../../core/io/cloudAttributes.js'
 
 // LAZ codec ownership (lazy wasm init, like workers/ops/mesh.js gates the mesh
 // module). Two consumers share one instance: the export op below and the cloud
@@ -42,7 +43,7 @@ export function makeLazCodec() {
 }
 
 export function makeLazOps(codec) {
-  // args: [{ cloud: { count, pos, col? }, crsCode, geographic }]
+  // args: [{ cloud: { count, pos, col?, attributes? }, crsCode, geographic }]
   // → { bytes } (transferred). The cloud buffers are transferred IN by the caller
   // and round-tripped home under `home`, the same convention densify/mesh use, so
   // a store's cloud is never left detached by an export.
@@ -54,6 +55,7 @@ export function makeLazOps(codec) {
     })
     const transfer = [bytes.buffer, cloud.pos.buffer]
     if (cloud.col) transfer.push(cloud.col.buffer)
+    transfer.push(...attributeBuffers(cloud))
     return { result: { bytes, home: cloud }, transfer }
   }
 

@@ -53,8 +53,8 @@ imported one. The dialogs show what that means for the current project.
   negative below. The result opens coloured blue → white → red around zero, which is
   change detection between two aligned epochs. Points beyond **Ignore beyond** get no
   value and show grey. The distance is kept as a point attribute and saved with the
-  project, so the symbology dialog can recolour it; point-cloud file exports do not
-  carry it yet.
+  project, so the symbology dialog can recolour it, and PLY and LAS exports carry it
+  (see *Exporting attributes* below).
 - **Section…** cuts a vertical slice along a line A→B, a few point spacings thick by
   default, adds it as a cloud and downloads it as a profile: CSV (distance along the
   line, height, offset, original X/Y) or DXF points for CAD.
@@ -64,3 +64,23 @@ imported one. The dialogs show what that means for the current project.
   usually arrive without normals, and [meshing](guide:mesh) needs them. *Automatic*
   points the normals towards the cameras for a computed cloud and upwards for an
   imported one.
+
+## Exporting attributes
+**Export ▸ Point Cloud** writes a cloud's point attributes along with its coordinates
+and colours: a computed distance, and whatever an imported file brought (intensity,
+classification, GPS time, PLY scalar fields).
+- **PLY** stores each attribute as a vertex property of its own type (a distance is a
+  `float`). CloudCompare, MeshLab and PDAL read them as scalar fields.
+- **LAS** writes intensity, classification, return numbers, scan angle, user data and
+  point source ID into the standard fields when every value fits, and switches to
+  point format 3 for a GPS time. Anything else (a distance, a class number above 31,
+  a fractional intensity) is written as an *extra bytes* field under its own name,
+  which PDAL, CloudCompare and LAStools read. Programs that don't support extra bytes
+  ignore those fields.
+- **LAZ** keeps the standard fields only. Extra-bytes attributes are left out and the
+  log says which ones, so export LAS or PLY to keep a distance.
+- **XYZ** has coordinates and colour only.
+
+A **voxel downsample** in the export dialog keeps one real point per cell, with its
+own colour and attribute values. Averaging would give class numbers and timestamps
+that no point had. Without attributes the cell average is written, as before.

@@ -229,6 +229,34 @@ describe('prepareCloudForExport', () => {
     expect(Math.abs(out.pos[0] - 500000.015)).toBeLessThan(1e-4)
     expect(out.col[0]).toBe(100)
   })
+
+  it('carries attributes through a transform unchanged', () => {
+    const sim = { scale: 2, R: IDENTITY, t: [100, 0, 0] }
+    const distance = Float32Array.from([0.5, NaN])
+    const out = prepareCloudForExport({ count: 2, pos: new Float64Array([0, 0, 0, 1, 1, 1]), attributes: { distance } }, { sim })
+    expect(out.pos[3]).toBeCloseTo(102, 12)
+    expect([...out.attributes.distance]).toEqual([0.5, NaN])
+  })
+
+  it('downsamples an attributed cloud to one real point per cell (no averaging)', () => {
+    // Cell 1: three points in [0,1)³, one in [5,6)³. The first point of each cell is kept whole.
+    const pos = new Float64Array([0.1, 0.1, 0.1, 0.9, 0.9, 0.9, 5.5, 5.5, 5.5, 0.5, 0.5, 0.5])
+    const col = new Uint8Array([10, 10, 10, 20, 20, 20, 30, 30, 30, 40, 40, 40])
+    const classification = Uint8Array.from([2, 6, 9, 6])
+    const distance = Float32Array.from([1, 2, 3, 4])
+    const logs = []
+    const out = prepareCloudForExport({ count: 4, pos, col, attributes: { classification, distance } },
+      { cell: 1, onLog: (m) => logs.push(m) })
+    expect(out.count).toBe(2)
+    expect([...out.pos]).toEqual([0.1, 0.1, 0.1, 5.5, 5.5, 5.5])
+    expect([...out.col]).toEqual([10, 10, 10, 30, 30, 30])
+    expect(out.attributes.classification).toBeInstanceOf(Uint8Array)
+    expect([...out.attributes.classification]).toEqual([2, 9])
+    expect([...out.attributes.distance]).toEqual([1, 3])
+    expect(logs.at(-1)).toMatch(/one real point per cell/)
+    // Never written into the source.
+    expect([...distance]).toEqual([1, 2, 3, 4])
+  })
 })
 
 describe('prepareMeshForExport', () => {

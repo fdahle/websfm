@@ -15,7 +15,8 @@
 // on the way in.
 
 import {
-  validateLasAllocation, LAS_RECORD_F2, encodeLasPoints, writeLasHeader, readLasHeader, decodeLasPoints,
+  validateLasAllocation, encodeLasPoints, writeLasHeader, readLasHeader, decodeLasPoints, planLasAttributes,
+  pointsByReturn,
 } from './las.js'
 import { geoKeysForEpsg } from '../products/geotiff.js'
 
@@ -37,9 +38,16 @@ export const LAZ_CHUNK_POINTS = 50_000
 // several compressor instances would produce several independent LAZ blocks, not
 // one file. The chunking this module does is only in how the records are *built*.
 //
+// Point attributes: the ones that fit a standard LAS field (intensity,
+// classification, GPS time → format 3, …) are written exactly as cloudToLas writes
+// them. Extra-bytes attributes (a computed `distance`, PLY scalars) are NOT: the
+// codec (crates/lazcodec) builds its LASzip item list from the point format alone
+// — Point10 [+ GpsTime] + RGB12, no BYTE item — and rejects a record longer than
+// those items. They are dropped with a warning; LAS and PLY carry them.
+//
 // Returns a Uint8Array. Throws if no compressor was supplied — silently writing
 // an uncompressed .las under a .laz name would be worse.
-export function cloudToLaz(points, { crsCode = null, geographic = false, compress, createCompressor, onLog } = {}) {
+export function cloudToLaz(points, { crsCode = null, geographic = false, attributes = true, compress, createCompressor, onLog } = {}) {
   if (typeof compress !== 'function' && typeof createCompressor !== 'function') {
     throw new Error('cloudToLaz: no LAZ compressor supplied (the lazcodec WASM module failed to load)')
   }
@@ -53,25 +61,34 @@ export function cloudToLaz(points, { crsCode = null, geographic = false, compres
     : (i) => points[i].color
 
   const { scale, offset, bbox } = quantization(n, getX, getY, getZ)
+  const { format, recordLength, native, dropped } = planLasAttributes(
+    attributes && flat ? flat.attributes : null, n, { extraBytes: false, onLog })
+  if (dropped.length) {
+    onLog?.(`LAZ export: ${dropped.join(', ')} not written — LAZ here carries standard LAS fields only; `
+      + 'export LAS or PLY to keep them', 'warn', 'Export')
+  }
 
   // The browser codec keeps one encoder alive across bounded chunks. The
   // whole-buffer adapter remains for small callers with an injected legacy codec.
-  if (!createCompressor && n * LAS_RECORD_F2 > 64 * 1024 ** 2) {
+  if (!createCompressor && n * recordLength > 64 * 1024 ** 2) {
     throw new Error('Large LAZ exports require an incremental compressor')
   }
-  const encoder = createCompressor?.(2, LAS_RECORD_F2)
+  const encoder = createCompressor?.(format, recordLength)
   let packed
   try {
-    const pointBytes = encoder ? null : new Uint8Array(n * LAS_RECORD_F2)
+    const pointBytes = encoder ? null : new Uint8Array(n * recordLength)
     for (let start = 0; start < n; start += LAZ_CHUNK_POINTS) {
       const len = Math.min(LAZ_CHUNK_POINTS, n - start)
+      // Attribute VIEWS onto this chunk, so encodeLasPoints indexes from 0 like getX.
+      const chunkNative = {}
+      for (const [name, values] of Object.entries(native)) chunkNative[name] = values.subarray(start, start + len)
       const chunk = encodeLasPoints({ n: len,
         getX: i => getX(start + i), getY: i => getY(start + i), getZ: i => getZ(start + i),
-        getC: i => getC(start + i), scale, offset })
+        getC: i => getC(start + i), scale, offset, format, recordLength, native: chunkNative })
       if (encoder) encoder.push(chunk)
-      else pointBytes.set(chunk, start * LAS_RECORD_F2)
+      else pointBytes.set(chunk, start * recordLength)
     }
-    packed = encoder ? encoder.finish() : compress(pointBytes, 2, LAS_RECORD_F2)
+    packed = encoder ? encoder.finish() : compress(pointBytes, format, recordLength)
   } finally { encoder?.free?.() }
 
   const vlrs = []
@@ -83,14 +100,15 @@ export function cloudToLaz(points, { crsCode = null, geographic = false, compres
     description: 'lazcodec', data: packed.vlr,
   })
 
-  const header = writeLasHeader({ n, vlrs, scale, offset, bbox, compressed: true })
+  const header = writeLasHeader({ n, vlrs, scale, offset, bbox, compressed: true, format, recordLength,
+    pointsByReturn: pointsByReturn(native, n) })
   const out = new Uint8Array(header.length + packed.data.length)
   out.set(header, 0)
   out.set(packed.data, header.length)
   // The codec writes a standalone point block; LASzip files store absolute
   // chunk-table offsets, so account for the header and VLRs when embedding it.
   relocateChunkTable(out.subarray(header.length), packed.vlr, header.length)
-  const ratio = n ? (n * LAS_RECORD_F2 / packed.data.length) : 1
+  const ratio = n ? (n * recordLength / packed.data.length) : 1
   onLog?.(`LAZ export: ${n.toLocaleString()} points, ${(out.length / 1024 ** 2).toFixed(1)} MB `
     + `(${ratio.toFixed(1)}× smaller than LAS)`
     + (crsCode ? `, EPSG:${crsCode} GeoKey VLR` : ', no CRS VLR (local frame)'), 'info', 'Export')
@@ -107,7 +125,7 @@ export function parseLaz(buffer, { decompress, onLog } = {}) {
     beforeDecompress: (hdr) => validateLasAllocation(hdr.count, hdr.recordLength,
       bytes.byteLength + 2 * (bytes.byteLength - hdr.offsetToPoints)),
   })
-  const cloud = decodeLasPoints(records, h.count, h.recordLength, h.format, h.scale, h.offset)
+  const cloud = decodeLasPoints(records, h.count, h.recordLength, h.format, h.scale, h.offset, h.extraBytes)
   onLog?.(`LAZ: read ${h.count.toLocaleString()} points (v${h.versionMajor}.${h.versionMinor}, `
     + `format ${h.format}${cloud.col ? ', RGB' : ''})`, 'info', 'Import')
   return cloud

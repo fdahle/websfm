@@ -10,14 +10,21 @@ import { createVoxelAccumulator } from '../dense/mvs.js'
 // Applies (in this order — the cell size is in target-CRS units) an optional
 // similarity transform (the stored Horn georef fit) and an optional voxel
 // downsample to a cloud, returning the flat shape every cloud writer accepts:
-// { count, pos: Float64Array(3N), col?: Uint8Array(3N) }. Accepts the usual dual
-// input (sparse point-objects or flat dense). Normals are DROPPED whenever a
-// transform/downsample applies (rotating them is not worth the wire for export
+// { count, pos: Float64Array(3N), col?: Uint8Array(3N), attributes? }. Accepts the
+// usual dual input (sparse point-objects or flat dense). Normals are DROPPED whenever
+// a transform/downsample applies (rotating them is not worth the wire for export
 // consumers; the writers only emit normals the input carries). With neither
 // option active the input is returned untouched. Never materializes per-point
 // objects (dense-scale invariant): the downsample streams into the same voxel
 // accumulator fusion uses, shifted near the origin so the Float32 sums keep
 // survey-coordinate precision.
+//
+// Per-point attributes survive both steps. A transform leaves them as they are (they
+// are scalars, not coordinates: a `distance` is not rescaled into CRS units). A
+// downsample with attributes keeps ONE REAL POINT per cell — position, colour and
+// attributes all from that point — instead of averaging, the same rule as
+// cloudEdit.js voxelDownsample: a mean class id, return number or GPS time is an
+// observation nobody made.
 export function prepareCloudForExport(points, { sim = null, cell = 0, onLog } = {}) {
   const down = cell > 0
   if (!sim && !down) return points
@@ -32,6 +39,7 @@ export function prepareCloudForExport(points, { sim = null, cell = 0, onLog } = 
     : (i) => points[i].color
   const hadNormals = flat ? !!flat.nrm : n > 0 && !!points[0]?.normal
   if (hadNormals) onLog?.('Export: normals dropped (georeference/downsample applied)', 'info', 'Export')
+  const attrs = flat && flat.attributes && Object.keys(flat.attributes).length ? flat.attributes : null
 
   // Pass 1: transformed coordinates + bbox. Held as one Float64Array (flat).
   const xyz = new Float64Array(n * 3)
@@ -47,8 +55,11 @@ export function prepareCloudForExport(points, { sim = null, cell = 0, onLog } = 
   if (!down) {
     const col = hasCol ? new Uint8Array(n * 3) : null
     if (col) for (let i = 0; i < n; i++) { const c = getC(i) || [200, 200, 200]; col.set(c.map(byte), i * 3) }
-    return { count: n, pos: xyz, ...(col ? { col } : {}) }
+    // Shared, not copied: nothing downstream writes into them.
+    const attributes = attrs ? Object.fromEntries(Object.entries(attrs).map(([k, v]) => [k, v.subarray(0, n)])) : null
+    return { count: n, pos: xyz, ...(col ? { col } : {}), ...(attributes ? { attributes } : {}) }
   }
+  if (attrs) return firstPointPerCell({ n, xyz, hasCol, getC, attrs, cell, min: [minX, minY, minZ], onLog })
 
   // Pass 2: voxel downsample. Shift the frame to a cell-aligned origin near the
   // bbox so the accumulator's Float32 finalize keeps precision on CRS-sized
@@ -75,6 +86,44 @@ export function prepareCloudForExport(points, { sim = null, cell = 0, onLog } = 
   return { count: m, pos, ...(col ? { col } : {}) }
 }
 
+// Voxel downsample that keeps the first point of each cell, whole: its (already
+// transformed) position, colour and every attribute. Cell ids are packed into one
+// number when the grid fits 2⁵³ cells (the usual case), else a string key — never a
+// per-point object.
+function firstPointPerCell({ n, xyz, hasCol, getC, attrs, cell, min, onLog }) {
+  const dims = [0, 1, 2].map((a) => {
+    let max = -Infinity
+    for (let i = 0; i < n; i++) if (xyz[i * 3 + a] > max) max = xyz[i * 3 + a]
+    return Math.floor((max - min[a]) / cell) + 1
+  })
+  const packed = dims[0] * dims[1] * dims[2] <= Number.MAX_SAFE_INTEGER
+  const seen = new Set()
+  const keep = new Uint32Array(n)
+  let m = 0
+  for (let i = 0; i < n; i++) {
+    const ix = Math.floor((xyz[i * 3] - min[0]) / cell)
+    const iy = Math.floor((xyz[i * 3 + 1] - min[1]) / cell)
+    const iz = Math.floor((xyz[i * 3 + 2] - min[2]) / cell)
+    const key = packed ? ix + dims[0] * (iy + dims[1] * iz) : `${ix},${iy},${iz}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    keep[m++] = i
+  }
+  const pos = new Float64Array(m * 3)
+  const col = hasCol ? new Uint8Array(m * 3) : null
+  const attributes = Object.fromEntries(Object.entries(attrs).map(([k, v]) => [k, new v.constructor(m)]))
+  const lists = Object.entries(attrs).map(([k, v]) => [v, attributes[k]])
+  for (let j = 0; j < m; j++) {
+    const i = keep[j]
+    pos[j * 3] = xyz[i * 3]; pos[j * 3 + 1] = xyz[i * 3 + 1]; pos[j * 3 + 2] = xyz[i * 3 + 2]
+    if (col) { const c = getC(i) || [200, 200, 200]; col[j * 3] = byte(c[0]); col[j * 3 + 1] = byte(c[1]); col[j * 3 + 2] = byte(c[2]) }
+    for (const [src, dst] of lists) dst[j] = src[i]
+  }
+  onLog?.(`Export: voxel downsample ${cell} → ${m.toLocaleString()} of ${n.toLocaleString()} points kept `
+    + `(one real point per cell, so its attributes ${Object.keys(attrs).join(', ')} stay observed values)`, 'info', 'Export')
+  return { count: m, pos, ...(col ? { col } : {}), attributes }
+}
+
 // Apply the same optional target-frame similarity to an indexed mesh while
 // preserving topology and colours. Unlike a cloud export there is no voxel
 // stage: changing vertex count would invalidate the face indices. A fresh
@@ -95,11 +144,15 @@ export function prepareMeshForExport(mesh, { sim = null } = {}) {
 // ── Point cloud → PLY ────────────────────────────────────────────────────────
 // points is either a sparse cloud's [{ x, y, z, color?: [r,g,b] (0–255),
 // normal?: [nx,ny,nz] }] or a dense cloud's flat descriptor { count,
-// pos:Float32Array(3N), col?:Uint8Array(3N), nrm?:Float32Array(3N) }. opts:
-// { binary = true, color = true, normals = true }. Normals are emitted only when
-// the cloud actually carries them (normals opt just lets a caller suppress). Binary
-// returns a Uint8Array (little-endian body); ASCII returns a string.
-export function cloudToPly(points, { binary = true, color = true, normals = true } = {}) {
+// pos:Float32Array(3N), col?:Uint8Array(3N), nrm?:Float32Array(3N),
+// attributes?: { name: TypedArray(N) } }. opts: { binary = true, color = true,
+// normals = true, attributes = true }. Normals are emitted only when the cloud
+// actually carries them (normals opt just lets a caller suppress). Each per-point
+// attribute (a computed `distance`, imported intensity/classification, …) becomes
+// one vertex property after the colour, in its own type (Float32 → float, Float64 →
+// double, Uint8 → uchar, …), which CloudCompare/MeshLab/PDAL read as scalar fields.
+// Binary returns a Uint8Array (little-endian body); ASCII returns a string.
+export function cloudToPly(points, { binary = true, color = true, normals = true, attributes = true } = {}) {
   const flat = points && points.pos ? points : null
   const n = flat ? (flat.count ?? flat.pos.length / 3) : points.length
   const getX = flat ? (i) => flat.pos[i*3]   : (i) => points[i].x
@@ -113,9 +166,11 @@ export function cloudToPly(points, { binary = true, color = true, normals = true
   const getN = flat
     ? (i) => [flat.nrm[i*3], flat.nrm[i*3+1], flat.nrm[i*3+2]]
     : (i) => points[i].normal || [0, 0, 0]
+  const fields = attributes && flat ? plyAttributeFields(flat.attributes, n) : []
   const props = 'property float x\nproperty float y\nproperty float z\n' +
     (hasNrm ? 'property float nx\nproperty float ny\nproperty float nz\n' : '') +
-    (color ? 'property uchar red\nproperty uchar green\nproperty uchar blue\n' : '')
+    (color ? 'property uchar red\nproperty uchar green\nproperty uchar blue\n' : '') +
+    fields.map((f) => `property ${f.type} ${f.name}\n`).join('')
   const header =
     'ply\n' +
     `format ${binary ? 'binary_little_endian' : 'ascii'} 1.0\n` +
@@ -128,15 +183,17 @@ export function cloudToPly(points, { binary = true, color = true, normals = true
       let s = `${getX(i)} ${getY(i)} ${getZ(i)}`
       if (hasNrm) { const nn = getN(i); s += ` ${nn[0]} ${nn[1]} ${nn[2]}` }
       if (color) { const c = getC(i) || [200, 200, 200]; s += ` ${byte(c[0])} ${byte(c[1])} ${byte(c[2])}` }
+      for (const f of fields) s += ` ${f.text(f.values[i])}`
       lines[i] = s
     }
     return header + lines.join('\n') + '\n'
   }
 
   const headerBytes = new TextEncoder().encode(header)
-  // 3×f32 xyz (12) [+ 3×f32 normals (12)] [+ 3×u8 rgb (3)].
+  // 3×f32 xyz (12) [+ 3×f32 normals (12)] [+ 3×u8 rgb (3)] [+ attributes].
   const NRM = hasNrm ? 12 : 0
-  const STRIDE = 12 + NRM + (color ? 3 : 0)
+  const ATTR = color ? 12 + NRM + 3 : 12 + NRM
+  const STRIDE = ATTR + fields.reduce((sum, f) => sum + f.size, 0)
   const out = new Uint8Array(headerBytes.length + n * STRIDE)
   out.set(headerBytes, 0)
   const dv = new DataView(out.buffer, headerBytes.length)
@@ -153,8 +210,46 @@ export function cloudToPly(points, { binary = true, color = true, normals = true
       const c = getC(i) || [200, 200, 200]
       dv.setUint8(o + 12 + NRM, byte(c[0])); dv.setUint8(o + 13 + NRM, byte(c[1])); dv.setUint8(o + 14 + NRM, byte(c[2]))
     }
+    let a = o + ATTR
+    for (const f of fields) { f.set(dv, a, f.values[i]); a += f.size }
   }
   return out
+}
+
+// PLY scalar type per attribute array type, with its byte size and writer.
+const PLY_TYPES = {
+  Uint8Array: ['uchar', 1, (dv, o, v) => dv.setUint8(o, v)],
+  Int8Array: ['char', 1, (dv, o, v) => dv.setInt8(o, v)],
+  Uint16Array: ['ushort', 2, (dv, o, v) => dv.setUint16(o, v, true)],
+  Int16Array: ['short', 2, (dv, o, v) => dv.setInt16(o, v, true)],
+  Uint32Array: ['uint', 4, (dv, o, v) => dv.setUint32(o, v, true)],
+  Int32Array: ['int', 4, (dv, o, v) => dv.setInt32(o, v, true)],
+  Float32Array: ['float', 4, (dv, o, v) => dv.setFloat32(o, v, true)],
+  Float64Array: ['double', 8, (dv, o, v) => dv.setFloat64(o, v, true)],
+}
+// Names a PLY reader maps to geometry or colour; an attribute so named would be read
+// back as one, so it is written as `scalar_<name>` (CloudCompare's own prefix).
+const PLY_RESERVED = new Set(['x', 'y', 'z', 'nx', 'ny', 'nz', 'red', 'green', 'blue', 'alpha',
+  'diffuse_red', 'diffuse_green', 'diffuse_blue', 'vertex_indices', 'vertex_index'])
+
+// [{ name, type, size, set, text, values }] for each writable attribute. A PLY
+// property name is one whitespace-free token; anything else becomes '_'.
+function plyAttributeFields(attributes, n) {
+  const fields = []
+  const used = new Set()
+  for (const [rawName, values] of Object.entries(attributes || {})) {
+    const spec = PLY_TYPES[values?.constructor?.name]
+    if (!spec || !(values.length >= n)) continue
+    let name = String(rawName).replace(/[^A-Za-z0-9_.-]/g, '_') || 'attribute'
+    if (PLY_RESERVED.has(name.toLowerCase())) name = `scalar_${name}`
+    for (let k = 2; used.has(name); k++) name = `${name}_${k}`
+    used.add(name)
+    const [type, size, set] = spec
+    // float: the shortest text that reads back to the same float32.
+    const text = type === 'float' ? (v) => String(Number(v.toPrecision(9))) : (v) => String(v)
+    fields.push({ name, type, size, set, text, values })
+  }
+  return fields
 }
 
 const byte = (v) => Math.max(0, Math.min(255, Math.round(v ?? 0)))

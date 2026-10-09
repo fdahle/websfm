@@ -193,12 +193,11 @@ sky/vegetation plan is retired: this section contains all remaining decisions.
 ## Next
 
 ### TL — Tools-tab follow-ups (tools shipped 2026-10-07; checks in VERIFICATION ▸ TOOL-*)
-- **Attributes in cloud exports.** A computed `distance` (and any non-LAS attribute)
-  is saved with the project but not written to PLY/LAS/LAZ; LAS needs extra-bytes
-  VLRs, PLY just a property.
-- **Unwelded imported meshes.** Clean mesh / Area & volume assume shared vertices; an
-  STL-style import (each triangle its own corners) reads as all boundary. Add an
-  epsilon vertex weld as the first Clean step.
+- **Extra-bytes attributes in LAZ.** PLY and LAS carry them since 2026-10-08; LAZ drops
+  them (logged) because `crates/lazcodec` `vlr_for_format` builds the LASzip item list
+  from the point format alone and rejects a longer `point_size`. Add a
+  `LazItemType::Byte(extra)` item when the record exceeds the base size, rebuild the
+  wasm, then pass the longer record length from `core/io/laz.js` and stop dropping.
 - **ICP to a mesh** matches mesh vertices, not closest surface points: coarse meshes
   converge to vertex spacing. Use the exact C2M search (`cloudDistance.js`) for
   correspondences.

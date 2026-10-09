@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   meshTopology, compactMesh, removeSmallComponents, removeLongEdges, fillHoles,
-  cleanMesh, taubinSmooth, cropMesh, sampleMesh, meshMeasure,
+  cleanMesh, taubinSmooth, cropMesh, sampleMesh, meshMeasure, weldVertices,
 } from './meshEdit.js'
 
 // ── Synthetic meshes ─────────────────────────────────────────────────────────
@@ -71,6 +71,21 @@ function cube(offset = 0) {
   for (let i = 0; i < 8; i++) verts.push([(i & 1) + offset, ((i >> 1) & 1) + offset, ((i >> 2) & 1) + offset])
   const quads = [[0, 2, 3, 1], [4, 5, 7, 6], [0, 1, 5, 4], [2, 6, 7, 3], [0, 4, 6, 2], [1, 3, 7, 5]]
   return makeMesh(verts, quads.flatMap(([a, b, c, d]) => [[a, b, c], [a, c, d]]))
+}
+
+// STL-style: every triangle carries its own three corners (and colour).
+function unweld(mesh) {
+  const nT = mesh.count
+  const pos = new Float64Array(nT * 9)
+  const col = mesh.col ? new Uint8Array(nT * 9) : null
+  const idx = new Uint32Array(nT * 3)
+  for (let k = 0; k < nT * 3; k++) {
+    const v = mesh.idx[k]
+    pos.set(mesh.pos.subarray(v * 3, v * 3 + 3), k * 3)
+    if (col) col.set(mesh.col.subarray(v * 3, v * 3 + 3), k * 3)
+    idx[k] = k
+  }
+  return { nVerts: nT * 3, count: nT, pos, idx, col }
 }
 
 const vtx = (mesh, v) => [mesh.pos[v * 3], mesh.pos[v * 3 + 1], mesh.pos[v * 3 + 2]]
@@ -237,6 +252,76 @@ describe('fillHoles', () => {
   })
 })
 
+describe('weldVertices', () => {
+  it('welds a cube of 12 independent triangles to 8 vertices and a closed surface', () => {
+    const soup = unweld(cube())
+    expect(soup.nVerts).toBe(36)
+    expect(meshTopology(soup).boundaryEdges).toBe(36)
+    const r = weldVertices(soup)
+    expect(r.merged).toBe(28)
+    expect(r.mesh.nVerts).toBe(8)
+    expect(r.mesh.count).toBe(12)
+    const t = meshTopology(r.mesh)
+    expect(t.boundaryEdges).toBe(0)
+    expect(t.nonManifoldEdges).toBe(0)
+    expect(t.inconsistentEdges).toBe(0)
+    const m = meshMeasure(r.mesh)
+    expect(m.watertight).toBe(true)
+    expect(m.volume).toBeCloseTo(1, 12)
+  })
+  it('logs ε with its inputs and keeps the first corner\'s colour', () => {
+    const c = cube()
+    const coloured = makeMesh(Array.from({ length: 8 }, (_, i) => vtx(c, i)), Array.from({ length: 12 }, (_, t) => [...c.idx.subarray(t * 3, t * 3 + 3)]),
+      { col: (i) => [i * 10, 0, 255 - i] })
+    const logs = []
+    const r = weldVertices(unweld(coloured), {}, (m) => logs.push(m))
+    expect(logs[0]).toMatch(/ε .*bbox diagonal 1\.732.*median edge 1\.000.*merged 28 duplicate vertices/)
+    // Each representative's colour equals the colour that vertex had before unwelding.
+    for (let v = 0; v < 8; v++) {
+      const p = vtx(r.mesh, v)
+      const orig = [0, 1, 2, 3, 4, 5, 6, 7].find((i) => vtx(coloured, i).every((x, k) => x === p[k]))
+      expect([...r.mesh.col.subarray(v * 3, v * 3 + 3)]).toEqual([...coloured.col.subarray(orig * 3, orig * 3 + 3)])
+    }
+  })
+  it('is a no-op on an already-welded mesh and never aliases the input', () => {
+    const m = icosphere(3)
+    const r = weldVertices(m)
+    expect(r.merged).toBe(0)
+    expect(r.mesh.pos).not.toBe(m.pos)
+    expect(r.mesh.idx).not.toBe(m.idx)
+    expect([...r.mesh.idx]).toEqual([...m.idx])
+    expect([...r.mesh.pos]).toEqual([...m.pos])
+  })
+  it('merges within ε but not near-coincident vertices beyond it', () => {
+    // Two triangles sharing an edge, the second's copy of the edge jittered.
+    const d = 1e-9 // below the default ε (1e-6 × diagonal ≈ 2.2e-6)
+    const near = makeMesh([[0, 0, 0], [1, 0, 0], [0, 1, 0], [1 + d, 0, 0], [0, 1 - d, 0], [1, 1, 0]],
+      [[0, 1, 2], [3, 5, 4]])
+    expect(weldVertices(near).merged).toBe(2)
+    const gap = 1e-4 // a real feature, well above ε
+    const far = makeMesh([[0, 0, 0], [1, 0, 0], [0, 1, 0], [1 + gap, 0, 0], [0, 1 - gap, 0], [1, 1, 0]],
+      [[0, 1, 2], [3, 5, 4]])
+    expect(weldVertices(far).merged).toBe(0)
+    // An explicit ε overrides the derived one.
+    expect(weldVertices(far, { epsilon: 1e-3 }).merged).toBe(2)
+  })
+  it('does not chain: points ε/2 apart in a row join only the first within ε', () => {
+    const eps = 1
+    const row = makeMesh([[0, 0, 0], [0.6, 0, 0], [1.2, 0, 0], [1.8, 0, 0], [0, 5, 0], [0, 0, 5]],
+      [[0, 4, 5], [1, 4, 5], [2, 4, 5], [3, 4, 5]])
+    const r = weldVertices(row, { epsilon: eps })
+    // 0.6 joins 0; 1.2 is 1.2 from rep 0 → new rep; 1.8 joins 1.2.
+    expect(r.mesh.nVerts).toBe(4)
+    expect(vtx(r.mesh, 1)).toEqual([1.2, 0, 0])
+  })
+  it('keeps survey coordinates exact', () => {
+    const soup = unweld(cube(1e6))
+    const r = weldVertices(soup)
+    expect(r.mesh.nVerts).toBe(8)
+    for (let v = 0; v < 8; v++) for (const x of vtx(r.mesh, v)) expect([1e6, 1e6 + 1]).toContain(x)
+  })
+})
+
 describe('cleanMesh', () => {
   it('runs components → long edges → holes → compact and reports per-step stats', () => {
     const main = gridParts(10, 10, { skip: (i, j) => i === 4 && j === 4 })
@@ -254,6 +339,14 @@ describe('cleanMesh', () => {
     expect(mesh.count).toBe(198 + 4)
     expect(stats.outputTriangles).toBe(mesh.count)
     expect(meshMeasure(mesh).components).toBe(1)
+  })
+  it('welds an STL-style import first, so the rest sees one closed piece', () => {
+    const { mesh, stats } = cleanMesh(unweld(cube()), { maxHoleEdges: 0 })
+    expect(stats.weld.merged).toBe(28)
+    expect(stats.components.components).toBe(1)
+    expect(stats.holes.filled).toBe(0)
+    expect(mesh.nVerts).toBe(8)
+    expect(meshMeasure(mesh).volume).toBeCloseTo(1, 12)
   })
   it('honours the methods list and never aliases the input', () => {
     const m = grid(3, 3)
@@ -403,6 +496,16 @@ describe('meshMeasure', () => {
     expect(m.components).toBe(2)
     expect(m.area).toBeCloseTo(8, 12)
   })
+  it('reads an unwelded (STL-style) cube as closed via an internal weld', () => {
+    const m = meshMeasure(unweld(cube()))
+    expect(m.watertight).toBe(true)
+    expect(m.volume).toBeCloseTo(1, 12)
+    expect(m.components).toBe(1)
+    expect(m.vertices).toBe(36)
+    expect(m.weldedVertices).toBe(28)
+    expect(meshMeasure(cube()).weldedVertices).toBe(0)
+    expect(meshMeasure(unweld(cube()), { weld: false }).boundaryEdges).toBe(36)
+  })
   it('sphere volume approaches 4/3π', () => {
     const m = meshMeasure(icosphere(4))
     expect(Math.abs(m.volume - 4 / 3 * Math.PI) / (4 / 3 * Math.PI)).toBeLessThan(0.01)
@@ -430,5 +533,16 @@ describe('performance smoke', () => {
     expect(stats.holes.filled).toBe(36)
     expect(meas.boundaryEdges).toBe(4 * n)
     expect(t3 - t0).toBeLessThan(8000)
+  })
+  it('welds a ~200k-triangle STL-style soup in linear time', () => {
+    const n = 316
+    const m = grid(n, n, { z: (i, j) => Math.sin(i * 0.1) * Math.cos(j * 0.1) })
+    const soup = unweld(m)
+    const t0 = performance.now()
+    const r = weldVertices(soup)
+    const t1 = performance.now()
+    console.log(`meshEdit perf: weld ${soup.nVerts} corners → ${r.mesh.nVerts} vertices in ${(t1 - t0).toFixed(0)} ms`)
+    expect(r.mesh.nVerts).toBe(m.nVerts)
+    expect(t1 - t0).toBeLessThan(4000)
   })
 })

@@ -861,6 +861,13 @@ fiducials; self-calibration (A2) + fiducials (F4) are the code-side support.
   (`WEBSFM_SLOW_TESTS=1`) pins > 2^24 cells. `core/dense/mvs.js`, `core/dense/memBudget.js`,
   `workers/ops/dense.js`, `useReconstructionStore.densify`; guide `dense-cloud.md`;
   browser check `DEN-17`.
+- **2026-10-08 · Cloud attributes in exports + mesh weld (TODO ▸ TL).** PLY writes every
+  `cloud.attributes` array as a typed vertex property; LAS puts standard names in their
+  fields (format 3 when `gpsTime` exists) and the rest in `LASF_Spec`/4 extra bytes, and
+  the reader decodes extra bytes (LAZ too); voxel-downsampled exports keep one real point
+  per cell when attributes exist. LAZ drops extra bytes (TODO ▸ TL). `meshEdit.js`
+  `weldVertices` (spatial hash, ε = min(1e-6·diag, 1e-2·median edge), no averaging) is
+  Clean mesh's first step and runs inside Area & volume. Checks: `TOOL-10`…`TOOL-12`, `MESH-04`.
 - **2026-10-08 · Film width (mm) in the sensor table (TODO ▸ P0.3).** Format width is
   the primary scale field; with a format set the pixel size shows as derived (an ignored
   stored pitch is flagged), and an off-standard implied width offers "Set to 230 mm?"

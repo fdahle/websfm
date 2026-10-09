@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { cloudToLaz, parseLaz, LASZIP_VLR_RECORD_ID } from './laz.js'
+import { cloudToLaz, parseLaz, decompressLazRecords, LASZIP_VLR_RECORD_ID } from './laz.js'
 import { cloudToLas, parseLas, readLasHeader } from './las.js'
 
 // A stand-in for crates/lazcodec with the same contract: the point stream in, an
@@ -8,7 +8,7 @@ import { cloudToLas, parseLas, readLasHeader } from './las.js'
 // with the LAS writer), which is this module's whole job. The arithmetic coding
 // itself is pinned by the crate's own round-trip test, which runs 200k points
 // through several chunks.
-function fakeCodec({ compressor = 2, footer = false } = {}) {
+function fakeCodec({ compressor = 2, footer = false, format: expectFormat = 2 } = {}) {
   return {
     compress(pointBytes, format, size) {
       const vlr = new Uint8Array([compressor, 0, format, size & 0xff, size >> 8])
@@ -27,7 +27,7 @@ function fakeCodec({ compressor = 2, footer = false } = {}) {
       return { vlr, data }
     },
     decompress(vlrData, compressed, count, size) {
-      expect(vlrData[2]).toBe(2)                        // the format we wrote
+      expect(vlrData[2]).toBe(expectFormat)             // the format we wrote
       const start = compressor === 1 ? 0 : 8
       if (start) {
         const view = new DataView(compressed.buffer, compressed.byteOffset, compressed.byteLength)
@@ -104,6 +104,56 @@ describe('cloudToLaz', () => {
       expect(back.pos[i * 3]).toBeCloseTo(i * 0.01, 3)
       expect(back.pos[i * 3 + 1]).toBeCloseTo(-i * 0.02, 3)
     }
+  })
+})
+
+describe('cloudToLaz — point attributes', () => {
+  const withAttrs = {
+    ...cloud,
+    attributes: {
+      intensity: Uint16Array.from([1, 2, 3, 65535]),
+      classification: Uint8Array.from([2, 2, 6, 9]),
+      gpsTime: Float64Array.from([10.5, 11.5, 12.5, 13.5]),
+      distance: Float32Array.from([0.1, 0.2, NaN, -4]),
+    },
+  }
+
+  it('writes standard fields (format 3 for GPS time) and drops extra bytes with a warning', () => {
+    const codec = fakeCodec({ format: 3 })
+    const logs = []
+    const bytes = cloudToLaz(withAttrs, { compress: codec.compress, onLog: (m, l) => logs.push([m, l]) })
+    const h = readLasHeader(bytes)
+    expect(h.formatRaw).toBe(3 | 0x80)
+    // The codec's LASzip items (Point10 + GpsTime + RGB12) are exactly 34 bytes; it
+    // rejects any longer record, so no extra bytes and no extra-bytes VLR.
+    expect(h.recordLength).toBe(34)
+    expect(h.vlrs.some((v) => v.userId === 'LASF_Spec')).toBe(false)
+    expect(logs.some(([m, l]) => l === 'warn' && /distance not written/.test(m))).toBe(true)
+    const back = parseLaz(bytes, { decompress: codec.decompress })
+    for (const k of ['intensity', 'classification', 'gpsTime']) {
+      expect([...back.attributes[k]]).toEqual([...withAttrs.attributes[k]])
+    }
+    expect(back.attributes.distance).toBeUndefined()
+  })
+
+  it('writes the same standard-field records as the LAS writer, chunk by chunk', () => {
+    const n = 120_000
+    const big = { count: n, pos: new Float64Array(n * 3), col: new Uint8Array(n * 3),
+      attributes: { intensity: new Uint16Array(n), classification: new Uint8Array(n) } }
+    for (let i = 0; i < n; i++) {
+      big.pos[i * 3] = i * 0.01
+      big.attributes.intensity[i] = i & 0xffff
+      big.attributes.classification[i] = i % 32
+    }
+    const codec = fakeCodec()
+    const laz = cloudToLaz(big, { compress: codec.compress })
+    const las = cloudToLas(big)
+    const { records } = decompressLazRecords(laz, { decompress: codec.decompress })
+    const want = las.subarray(readLasHeader(las).offsetToPoints)
+    expect(records.length).toBe(want.length)
+    let firstDiff = -1
+    for (let i = 0; i < want.length && firstDiff < 0; i++) if (records[i] !== want[i]) firstDiff = i
+    expect(firstDiff).toBe(-1)
   })
 })
 

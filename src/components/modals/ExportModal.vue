@@ -155,6 +155,10 @@ function run() {
         :hint="`World units${hasGeoref ? ' (project CRS when georeferenced)' : (hasScale ? ' (metres when scaled)' : '')}; 0 = keep every point.`">
         <input id="dscell" v-model.number="settings.downsampleCell" type="number" min="0" step="any" class="field-input" />
       </SettingsField>
+      <p class="field-hint">
+        Point attributes (a computed distance, imported intensity or classification) are written to PLY and LAS.
+        LAZ keeps only the standard LAS fields; XYZ keeps none.
+      </p>
     </template>
 
     <!-- Mesh -->
