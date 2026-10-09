@@ -133,38 +133,49 @@ export function projectDensePeakBytes({
   return { store, raster, gpu, total: store + raster + gpu }
 }
 
-// SoA voxel accumulator: Float64×3 position sums (24) + Float64×3 colour sums (24)
-// + Float64×3 normal sums (24) + Uint32 count (4) ≈ 76 B/cell steady-state; ×2 for
-// growth (arrays double) and a numeric Map<key→slot> entry ≈ 210 B/cell. Conservative
-// on purpose (over-count).
-const DENSIFY_CELL_BYTES = 210
+// Fusion's voxel accumulator (core/dense/mvs.js createVoxelAccumulator), per merged
+// cell: Float64×3 position sums (24) + Uint32×3 colour sums (12) + Float32×3 normal
+// sums (12) + Uint32 count (4) + Float64 packed key (8) = 60 B, plus the
+// open-addressing index — an Int32 table kept at load ≤ ½, so ≤ 16 B/cell. Fusion
+// presizes the accumulator from the measured cell count, so there is no doubling
+// slack to charge for.
+export const DENSIFY_CELL_BYTES = 76
+// The flat [x,y,z,r,g,b] Float32 output (24) + Float32 world normals (12).
+export const DENSIFY_OUTPUT_BYTES_PER_CELL = 36
 
-// Project the peak resident bytes of a Build-Point-Cloud (Stage B fusion) run from
-// the ACTUAL depth maps (dims + valid-pixel counts are all known at densify time),
-// so the gate can refuse before the browser OOM-kills the tab — same strategy as the
-// Stage A pre-flight, applied to the stage that actually crashed. Three terms:
-//   • input   — the depth/cost/rgb/normals planes the fusion reads (23 B/valid-or-not
-//     px). Post-transfer these live once in the worker (×1); pass residency=2 to model
-//     the pre-transfer clone if ever gated before the transfer landed.
-//   • accumulator — the streaming voxel merge. Kept ≤ valid, and the merge collapses
-//     ~mergeOverlap coincident "shell" points per surface cell, so projected cells ≈
-//     valid / mergeOverlap. Over-counted per cell (DENSIFY_CELL_BYTES).
-//   • output  — the flat [x,y,z,r,g,b] Float32 buffer (24 B/cell) + the Float32 world
-//     normals (12 B/cell) = 36 B/cell.
-// Returns { input, accumulator, output, total, validPx, cells }.
-export function projectDensifyPeakBytes({ maps, mergeOverlap = 2, residency = 1 }) {
-  let inputBytes = 0
-  let validPx = 0
-  for (const m of maps) {
-    inputBytes += (m.depth?.byteLength || 0) + (m.cost?.byteLength || 0)
-      + (m.rgb?.byteLength || 0) + (m.normals?.byteLength || 0)
-    const d = m.depth
-    if (d) { for (let i = 0; i < d.length; i++) if (d[i] > 0) validPx++ }
-    else validPx += m.validPx ?? m.width * m.height
+// Bytes the fusion input holds resident. Resident maps (`streamed: false`) are the
+// planes themselves, transferred to the worker (×1; residency 2 models a clone).
+// Streamed maps are read from disk on demand: one full reference map, one full
+// comparison map, and the 12 B/px agree/angle scratch planes of the largest map.
+export function densifyInputBytes(maps, { streamed = false, residency = 1 } = {}) {
+  if (streamed) {
+    let first = 0, second = 0, maxPx = 0
+    for (const m of maps) {
+      const px = m.width * m.height
+      const bytes = px * (m.hasNormals ? 23 : 11) // depth 4 + cost 4 + rgb 3 (+ normals 12)
+      if (bytes > first) { second = first; first = bytes } else if (bytes > second) second = bytes
+      if (px > maxPx) maxPx = px
+    }
+    return first + second + maxPx * 12
   }
-  const input = inputBytes * residency
-  const cells = Math.ceil(validPx / Math.max(1, mergeOverlap))
+  let bytes = 0
+  for (const m of maps) {
+    bytes += (m.depth?.byteLength || 0) + (m.cost?.byteLength || 0)
+      + (m.rgb?.byteLength || 0) + (m.normals?.byteLength || 0)
+  }
+  return bytes * residency
+}
+
+// Project the peak resident bytes of a Build-Point-Cloud (Stage B fusion) run, so
+// the gate can refuse before the browser OOM-kills the tab. `cells` is MEASURED by
+// fusion itself (mvs.js fusionCellEstimateSteps: the distinct merge cells of every
+// pixel that passes the cost gate, at the real merge cell, step and region) — an
+// upper bound, since the consistency/parallax/grazing/isolated filters only remove.
+// It used to be guessed as valid px ÷ 2, which ignored the merge cell, the step and
+// the view overlap, so the remedies the refusal suggested could not change it.
+// Returns { input, accumulator, output, total, cells }.
+export function projectDensifyPeakBytes({ inputBytes, cells }) {
   const accumulator = cells * DENSIFY_CELL_BYTES
-  const output = cells * (6 * 4 + 3 * 4)
-  return { input, accumulator, output, total: input + accumulator + output, validPx, cells }
+  const output = cells * DENSIFY_OUTPUT_BYTES_PER_CELL
+  return { input: inputBytes, accumulator, output, total: inputBytes + accumulator + output, cells }
 }

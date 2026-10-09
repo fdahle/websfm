@@ -3,6 +3,7 @@ import {
   filterDepthMap, depthMapForImage, qualityToMaxDim, autoBestK, autoFusionMaxCost,
   fuseDepthMaps, mergePointsSpatial, createVoxelAccumulator, filterDepthMapsGeometric, filterCandidates, geomFilterLoopShare,
 } from './mvs.js'
+import { DENSE_TUNING } from '../tuning.js'
 
 // Build a w×h Float32Array depth plane from a 2-D array of numbers (0 = hole).
 const plane = (rows) => Float32Array.from(rows.flat())
@@ -375,6 +376,91 @@ describe('createVoxelAccumulator (streaming fusion merge)', () => {
     expect(nrm.length).toBe(8 * 3)    // row-aligned with flat
     // The surviving points are all in the block (none near the lone cell's 50,50,50).
     for (let s = 0; s < 8; s++) expect(flat[s * 6]).toBeLessThan(10)
+  })
+})
+
+describe('createVoxelAccumulator index', () => {
+  it('grows its slot arrays and hash table from a tiny capacity without losing cells', () => {
+    // 50k distinct cells from capacity 16 forces many slot doublings and table rehashes;
+    // every re-added point must land back in its own cell.
+    const acc = createVoxelAccumulator(1.0, { minX: 0, minY: 0, minZ: 0, maxX: 500, maxY: 100, maxZ: 0 }, { capacity: 16 })
+    for (let pass = 0; pass < 2; pass++) {
+      for (let i = 0; i < 50000; i++) acc.add((i % 500) + 0.5, Math.floor(i / 500) + 0.5, 0.5, i % 256, 1, 2)
+    }
+    expect(acc.count).toBe(50000)
+    const flat = acc.finalizeFlat()
+    for (let s = 0; s < 50000; s += 4999) {
+      expect(flat[s * 6]).toBeCloseTo((s % 500) + 0.5, 6)
+      expect(flat[s * 6 + 1]).toBeCloseTo(Math.floor(s / 500) + 0.5, 6)
+      expect(flat[s * 6 + 3]).toBe(s % 256) // integer colour sums are exact
+    }
+  })
+
+  it('presizing leaves the reported footprint at the requested capacity', () => {
+    const acc = createVoxelAccumulator(1.0, { minX: 0, minY: 0, minZ: 0, maxX: 10, maxY: 10, maxZ: 10 }, { capacity: 1000 })
+    for (let i = 0; i < 1000; i++) acc.add(i % 10 + 0.5, Math.floor(i / 10) % 10 + 0.5, Math.floor(i / 100) + 0.5, 0, 0, 0)
+    expect(acc.count).toBe(1000)
+    expect(acc.bytes).toBe(1000 * 60 + 2048 * 4) // no slot growth; table 2048 ≥ 2·1000
+  })
+
+  // V8 caps a Map at 2^24 entries; the old Map index threw "Map maximum size exceeded"
+  // here. ~1.3 GB and several seconds, so opt-in.
+  it.skipIf(!process.env.WEBSFM_SLOW_TESTS)('holds more than 2^24 cells', () => {
+    const N = 2 ** 24 + 1000, side = 4200
+    const acc = createVoxelAccumulator(1.0, { minX: 0, minY: 0, minZ: 0, maxX: side, maxY: side, maxZ: 0 }, { capacity: N })
+    for (let i = 0; i < N; i++) acc.add((i % side) + 0.5, Math.floor(i / side) + 0.5, 0.5, 0, 0, 0)
+    expect(acc.count).toBe(N)
+  }, 120_000)
+})
+
+describe('fusion pre-flight (measured cell count)', () => {
+  // Two identical fronto-parallel views of a plane at depth 1 (fx 100 ⇒ GSD 0.01).
+  const mk = (uuid, W = 40, H = 40) => ({
+    uuid, width: W, height: H,
+    // cx/cy off the pixel grid by ½ so no pixel lands exactly on a cell boundary.
+    K: { fx: 100, fy: 100, cx: W / 2 + 0.5, cy: H / 2 + 0.5 }, R: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], t: [0, 0, 0],
+    depth: new Float32Array(W * H).fill(1),
+    cost: new Float32Array(W * H).fill(0.1),
+    rgb: new Uint8Array(W * H * 3).fill(128),
+  })
+  const opts = { minTriAngleDeg: 0, maxIncidenceDeg: 0, removeIsolated: false, mergeCell: 0.02 }
+
+  it('counts the merge cells exactly on a small scene and bounds the fused count', () => {
+    const out = fuseDepthMaps([mk('a'), mk('b')], opts, () => {})
+    // 40 px at 0.01 span −0.205…0.185 ⇒ 21 cells of 0.02 per axis, and both views land
+    // in the same cells.
+    expect(out.summary.estimatedCells).toBe(441)
+    expect(out.length / 6).toBeLessThanOrEqual(out.summary.estimatedCells)
+  })
+
+  it('the estimate follows the fusion step and the merge cell', () => {
+    const fine = fuseDepthMaps([mk('a'), mk('b')], { ...opts, mergeCell: 0.01 }, () => {})
+    const stepped = fuseDepthMaps([mk('a'), mk('b')], { ...opts, mergeCell: 0.01, step: 2 }, () => {})
+    expect(fine.summary.estimatedCells).toBe(1600)
+    expect(stepped.summary.estimatedCells).toBe(400)
+  })
+
+  it('hash sampling stays close to the exact count once the scene exceeds the sample cap', () => {
+    const exact = fuseDepthMaps([mk('a', 240, 240), mk('b', 240, 240)], { ...opts, mergeCell: 0.01 }, () => {}).summary.estimatedCells
+    expect(exact).toBe(240 * 240)
+    const cap = DENSE_TUNING.fuseEstimateSampleCap
+    DENSE_TUNING.fuseEstimateSampleCap = 1024
+    try {
+      const sampled = fuseDepthMaps([mk('a', 240, 240), mk('b', 240, 240)], { ...opts, mergeCell: 0.01 }, () => {}).summary.estimatedCells
+      expect(Math.abs(sampled / (exact * DENSE_TUNING.fuseEstimateMargin) - 1)).toBeLessThan(0.15)
+    } finally { DENSE_TUNING.fuseEstimateSampleCap = cap }
+  })
+
+  it('refuses over budget before fusing, without throwing', () => {
+    const logs = []
+    const out = fuseDepthMaps([mk('a'), mk('b')], { ...opts, memBudgetBytes: 1000 }, (m, l) => logs.push([m, l]))
+    expect(out.length).toBe(0)
+    expect(out.refused.cells).toBe(441)
+    expect(out.refused.total).toBeGreaterThan(1000)
+    expect(logs.some(([m, l]) => l === 'error' && m.includes('aborting before the consistency pass'))).toBe(true)
+    const ok = fuseDepthMaps([mk('a'), mk('b')], { ...opts, memBudgetBytes: 1e9 }, () => {})
+    expect(ok.refused).toBeUndefined()
+    expect(ok.length).toBeGreaterThan(0)
   })
 })
 

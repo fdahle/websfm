@@ -65,5 +65,15 @@ cloud reads one reference map and one comparison map at a time; orthophoto
 generation reads one map at a time. The same consistency and blending rules apply.
 This reduces resident input memory, though the merged point cloud and its output
 still need memory. Unsaved maps remain in memory if project storage is unavailable.
-The memory estimate shown before fusion includes the streamed inputs and scratch
-arrays. Streaming may trade repeated disk reads for a lower memory peak.
+Streaming may trade repeated disk reads for a lower memory peak.
+
+Before the slow consistency check, fusion makes one quick pass over the depth maps
+and counts how many merged points the cloud can have at most (pixels that fail the
+cost gate or lie outside the Region don't count). The log line "Fusion: measured …
+projected peak …" shows that count and the memory it implies. If it is over the
+memory budget (Settings ▸ Compute), fusion stops there and nothing is lost. To get
+under the budget: raise **Point density (sample step)** to 2, which reads a quarter of
+the pixels; set a Region around the subject (Tools ▸ Model); or build the depth maps
+at a lower Quality. Raise the budget only if the machine really has that much free
+memory. After fusion, a second log line compares the real point count with the
+measured limit.

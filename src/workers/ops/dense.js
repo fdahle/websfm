@@ -532,7 +532,9 @@ export function makeDenseOps({ rasterize }) {
       (m, l, c) => emit('log', [m, l, c]),
       { onProgress: (d, t, lbl) => emit('progress', [d, t, lbl]) })
     const nPoints = flat.length / 6
-    emit('log', [`Dense cloud: fused ${maps.length} depth maps → ${nPoints} points `
+    // The fusion pre-flight refused (already logged with its numbers): no cloud, but
+    // the transferred planes still go home below.
+    if (!flat.refused) emit('log', [`Dense cloud: fused ${maps.length} depth maps → ${nPoints} points `
       + `in ${((performance.now() - tFuse) / 1000).toFixed(1)}s`
       + (nPoints === 0 ? ' — no pixels survived cross-view consistency; check intrinsics/distortion, Quality, or fusion gates (maxCost / minViews / parallax)' : ''),
       nPoints === 0 ? 'error' : 'success', 'Dense'])
@@ -547,7 +549,7 @@ export function makeDenseOps({ rasterize }) {
       transfer.push(m.depth.buffer, m.cost.buffer, m.rgb.buffer)
       if (m.normals) transfer.push(m.normals.buffer)
     }
-    return { result: { points: flat, nrm: flat.nrm ?? null, summary: flat.summary ?? null, mapBuffers }, transfer }
+    return { result: { points: flat, nrm: flat.nrm ?? null, summary: flat.summary ?? null, refused: flat.refused ?? null, mapBuffers }, transfer }
   }
 
   return { computeDepthMaps, densify }

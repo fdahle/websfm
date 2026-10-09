@@ -837,6 +837,20 @@ fiducials; self-calibration (A2) + fiducials (F4) are the code-side support.
 
 ## Done log (most recent first)
 
+- **2026-10-08 · Measured dense-fusion pre-flight; accumulator without a `Map`.** The Stage B
+  gate guessed cells as valid px ÷ 2 and ignored step, merge cell and region, so a project with
+  116M valid px was refused at 13.35 GB vs 8 GB, and the remedies the refusal named could not
+  move the number. Fusion now measures an upper bound first (`mvs.js`
+  `fusionCellEstimateSteps`: distinct merge cells of every cost-passing pixel, hash-sampled,
+  at the real cell/step/region), refuses there without throwing, and presizes the
+  accumulator from it; the store's guess gate is gone. `createVoxelAccumulator`'s index is a
+  typed open-addressing hash, not a `Map` (V8 caps a Map at 2^24 entries, so any fused cloud
+  over 16.8M cells threw "Map maximum size exceeded" whatever the budget); colour sums
+  Uint32, normal sums Float32 ⇒ 76 B/cell charged, was 210. Node microbench, 8M adds into
+  5.84M cells: 3.9 s (Map) → 2.6–2.9 s (hash), 2.4 s presized. Opt-in test
+  (`WEBSFM_SLOW_TESTS=1`) pins > 2^24 cells. `core/dense/mvs.js`, `core/dense/memBudget.js`,
+  `workers/ops/dense.js`, `useReconstructionStore.densify`; guide `dense-cloud.md`;
+  browser check `DEN-17`.
 - **2026-10-08 · SfM worker: compact keypoints and tracks (TODO ▸ MEM 1–3).** Keypoints
   are immutable typed-array sets shared across seed retries / secondary models
   (`core/sfm/keypointSet.js`); tracks live in a typed-array arena behind a `TrackStore`

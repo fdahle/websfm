@@ -809,7 +809,9 @@ self-contained, file-based project format.
    ground-pixel footprint). **Invariant — fusion must never materialize a
    per-pixel point-object list** (25–30 M boxed `{x,y,z,color}` ≈ 3 GB was the
    2026-07-12 OOM). Kept pixels stream **directly** into `createVoxelAccumulator`
-   (SoA typed-array sums, numeric packed cell keys sized from a coarse scene bbox;
+   (SoA typed-array sums, numeric packed cell keys sized from a coarse scene bbox and
+   indexed by a typed-array open-addressing hash — **never a JS `Map`**, which V8 caps at
+   2^24 = 16,777,216 entries ("Map maximum size exceeded") and keeps on the V8 heap;
    a point outside that bbox spills into an exact string-keyed overflow map, never a
    clamp into the border cell, which collapsed thin tall features. Exact bounds are not
    the fix: one sky flyer would stretch the box and `clampCellForBounds` would coarsen
@@ -818,10 +820,16 @@ self-contained, file-based project format.
    `step` a **speed lever, not the density knob** — density is controlled by the
    merge cell in world units, and `step` defaults to 1 (full res in, dedupe out).
    Progress: depth maps emit fractional within-image ticks (pyramid-level weighted);
-   fusion emits per-map (throttled). A **Stage B pre-flight**
-   (`projectDensifyPeakBytes`, `memBudget.js`) projects the fusion peak (input +
-   accumulator + output) from the real maps and the store refuses over budget
-   **before transferring** the buffers (so a refusal keeps the depth maps). The
+   fusion emits per-map (throttled). The **Stage B pre-flight** runs inside fusion,
+   before the consistency pass: `fusionCellEstimateSteps` **measures** the merge-cell
+   count of every pixel that passes the cost gate, at the real merge cell, step and
+   region (hash-sampled distinct counting) — an upper bound, since every later filter
+   only removes — and `projectDensifyPeakBytes` (`memBudget.js`) turns it into input +
+   accumulator + output. Over `memBudgetBytes` it returns `{ refused }` without
+   throwing, so the op still round-trips the transferred buffers home; the
+   accumulator is presized from the same count. Never gate fusion on a guess from the
+   pixel count: it cannot see the view overlap the merge collapses, nor the step or
+   region, so the remedies a refusal names would not move it. The
    store↔worker densify **transfers** the depth/cost/rgb buffers (no clone; strips
    `displayDataUrl`) and the op round-trips them home for ortho reuse. **Perf**:
    cost scales with overlap×sources×pixels²; levers are `maxDim`/`maxSources`/
