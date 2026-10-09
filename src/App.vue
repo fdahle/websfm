@@ -564,7 +564,7 @@ const sensorsStore = useSensorsStore()
 const { sensors } = storeToRefs(sensorsStore)
 const {
   imageCount: sensorImageCount,
-  addSensors, updateSensor, toggleSensorFixed, setFiducialMarks, setFiducialCalibration,
+  addSensors, updateSensor, applyFilmFormat, toggleSensorFixed, setFiducialMarks, setFiducialCalibration,
   assignSensor, mergeSensors, removeSensor,
 } = sensorsStore
 
@@ -2537,6 +2537,7 @@ function onRibbonPick(event) {
         :cameras="sparseCameras"
         @close="sensorTableOpen = false"
         @update="({ id, field, value }) => updateSensor(id, field, value)"
+        @apply-film-format="({ id, widthMm, reason }) => applyFilmFormat(id, widthMm, reason)"
         @toggle-fixed="({ id, field }) => toggleSensorFixed(id, field)"
         @set-fiducial-marks="({ id, marks }) => setFiducialMarks(id, marks)"
         @detect-fiducials="(id) => { fiducialDetectSensorId = id; fiducialDetectOpen = true }"

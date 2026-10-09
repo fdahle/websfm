@@ -243,6 +243,23 @@ export const useSensorsStore = defineStore('sensors', () => {
     save()
   }
 
+  // Apply a suggested film format width (mm) — the sensor table's "Set to 230 mm?"
+  // action when the scan pitch implies an off-standard film width
+  // (core/sfm/filmFormat.js). The format outranks the pitch in resolveK, so this alone
+  // moves the sensor onto the format path; the stored pitch is kept (inert) so
+  // clearing the format restores it. The suggestion is a user decision, so it is
+  // logged with its value and reason on the activity channel.
+  function applyFilmFormat(id, widthMm, reason = '') {
+    const s = sensors.value.find((x) => x.id === id)
+    const mm = Number(widthMm)
+    if (!s || !Number.isFinite(mm) || mm <= 0) return
+    const prev = s.sensorWidthMm
+    s.sensorWidthMm = mm
+    log(`Sensor ${s.label}: film format set to ${mm} mm${prev ? ` (was ${prev} mm)` : ''}`
+      + `${reason ? ` — ${reason}` : ''}`, 'info', 'Sensor', { channel: 'activity' })
+    save()
+  }
+
   // Intrinsics a future bundle adjustment may refine; the others (width/height)
   // are physical facts, never solved for. A truthy `sensor.fixed[field]` tells
   // the solver to hold that parameter constant. Absent ⇒ free to refine.
@@ -353,6 +370,7 @@ export const useSensorsStore = defineStore('sensors', () => {
     addSensors,
     importCameraGroups,
     updateSensor,
+    applyFilmFormat,
     toggleSensorFixed,
     setFiducialMarks,
     setFiducialCalibration,
