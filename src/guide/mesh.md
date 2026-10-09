@@ -79,11 +79,19 @@ The **Tools → Mesh ▾** menu works on any mesh, built or imported. Like the p
 tools, each adds a new mesh and leaves the source alone; a later **Build Mesh** never
 replaces these copies.
 
-- **Clean mesh…** runs, in order: remove small pieces (by share of the largest piece),
-  remove long-edge bridges (triangles Poisson stretched across gaps, measured against
-  the median edge), fill holes up to a size, and drop unused vertices. **Close all
-  holes** makes the mesh watertight, for 3D printing or a volume. Do not use it on
-  terrain: an open surface's outer rim counts as a hole and would be closed too.
+- **Clean mesh…** runs, in order: weld duplicate vertices, remove small pieces (by
+  share of the largest piece), remove long-edge bridges (triangles Poisson stretched
+  across gaps, measured against the median edge), fill holes up to a size, and drop
+  unused vertices. **Close all holes** makes the mesh watertight, for 3D printing or a
+  volume. Do not use it on terrain: an open surface's outer rim counts as a hole and
+  would be closed too.
+- The **weld** step matters for imported meshes. An STL, and the output of some
+  other programs, gives every triangle its own three corners, so without welding
+  every triangle is a separate piece and every edge an open edge. Welding joins
+  corners that lie within a tiny distance of each other: a millionth of the mesh's
+  diagonal or a hundredth of its median edge length, whichever is smaller. The log
+  records the distance used. A mesh that already shares its vertices, such as one
+  from **Build Mesh**, is left unchanged.
 - **Smooth…** applies Taubin smoothing, which removes small noise without the
   shrinkage plain smoothing causes. The boundary stays fixed by default.
 - **Decimate…** reduces the triangle count to a share or a number, removing
@@ -95,5 +103,7 @@ replaces these copies.
   with normals and colour, so the point-cloud tools and the DEM can use a mesh.
 - **Area & volume…** reports the surface area and, when the mesh is closed and
   consistently wound, its volume. An open mesh reports how many open edges it has
-  instead of a volume that would mean nothing. Values are in metres once the project
+  instead of a volume that would mean nothing. It welds duplicate corners itself
+  before checking whether the mesh is closed, so an imported STL is measured
+  correctly; the dialog says when it did, and **Clean mesh** saves a welded copy. Values are in metres once the project
   has a scale or georeference, otherwise in model units.

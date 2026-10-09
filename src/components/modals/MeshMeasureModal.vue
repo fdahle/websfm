@@ -9,7 +9,8 @@ import { meshMeasure } from '../../core/products/meshEdit.js'
 import { cloudUnits, formatMeasure } from '../../core/products/cloudUnits.js'
 
 // Area & Volume (Tools ▸ Mesh ▾) — read-only. One linear pass over the triangles
-// (core/products/meshEdit.js `meshMeasure`), cheap enough to run on open. Volume is
+// (core/products/meshEdit.js `meshMeasure`, topology read on a welded copy so an
+// STL-style import is not all boundary), cheap enough to run on open. Volume is
 // reported only for a watertight, consistently wound mesh; anything else would be
 // a number with no meaning, so the dialog says why instead.
 const props = defineProps({
@@ -63,6 +64,10 @@ const whyNoVolume = computed(() => {
         No volume: the surface is not closed — {{ whyNoVolume }}. <strong>Mesh ▸ Clean mesh</strong> with
         “Close all holes” makes it watertight.
       </WarnBox>
+      <p v-if="result?.weldedVertices" class="field-hint">
+        {{ result.weldedVertices.toLocaleString() }} duplicate vertices were joined to read the topology
+        (each triangle carried its own corners). <strong>Mesh ▸ Clean mesh</strong> welds them in a new mesh.
+      </p>
       <p v-if="units.unit !== 'm'" class="field-hint">
         {{ units.unit === 'model'
           ? 'In model units: the project has no georeference or scale bars yet, so these are not metres.'

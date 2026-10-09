@@ -21,6 +21,7 @@ const source = computed(() => props.meshes.find((m) => m.id === sourceId.value) 
 // Steps run in this order whatever is ticked (cleanMesh fixes it), so the list
 // order IS the pipeline order.
 const STEPS = [
+  { id: 'weld',       label: 'Weld duplicate vertices' },
   { id: 'components', label: 'Remove small pieces' },
   { id: 'longEdges',  label: 'Remove long-edge bridges' },
   { id: 'holes',      label: 'Fill holes' },

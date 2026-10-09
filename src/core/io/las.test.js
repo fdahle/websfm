@@ -180,3 +180,126 @@ describe('untrusted LAS headers', () => {
     expect(() => parseLas(bytes)).toThrow('VLR payload')
   })
 })
+
+describe('point attributes in LAS', () => {
+  // Survey-sized flat cloud with a computed distance (NaN = beyond the cutoff).
+  const flat = (attributes) => ({
+    count: 3,
+    pos: new Float64Array([500000.1, 7100000.2, 10, 500001.3, 7100001.4, 11, 500002.5, 7100002.6, 12]),
+    col: new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9]),
+    attributes,
+  })
+  const vlrAt = (bytes, k = 0) => {
+    // Walk the VLR directory from the header (227) to VLR k.
+    const dv = new DataView(bytes.buffer)
+    let p = 227
+    for (let i = 0; i < k; i++) p += 54 + dv.getUint16(p + 20, true)
+    return {
+      userId: new TextDecoder().decode(bytes.slice(p + 2, p + 18)).replace(/\0+$/, ''),
+      recordId: dv.getUint16(p + 18, true), length: dv.getUint16(p + 20, true), body: p + 54,
+    }
+  }
+
+  it('writes a non-LAS attribute as an extra-bytes field (VLR + record layout)', () => {
+    const distance = Float32Array.from([0.25, -1.5, NaN])
+    const las = cloudToLas(flat({ distance }))
+    const dv = new DataView(las.buffer)
+    expect(las[104]).toBe(2)                    // still point format 2
+    expect(dv.getUint16(105, true)).toBe(26 + 4) // + one float32
+    expect(dv.getUint32(100, true)).toBe(1)
+    const v = vlrAt(las)
+    expect(v).toMatchObject({ userId: 'LASF_Spec', recordId: 4, length: 192 })
+    expect(las[v.body + 2]).toBe(9)              // data_type 9 = float
+    expect(las[v.body + 3]).toBe(0)              // options: none
+    expect(new TextDecoder().decode(las.slice(v.body + 4, v.body + 12))).toBe('distance')
+    expect(las[v.body + 12]).toBe(0)             // name is NUL-padded
+    const off = dv.getUint32(96, true)
+    expect(off).toBe(227 + 54 + 192)
+    expect(dv.getFloat32(off + 26, true)).toBe(0.25)       // first record, after the 26 standard bytes
+    expect(dv.getFloat32(off + 30 + 26, true)).toBe(-1.5)  // second record (30-byte stride)
+    expect(las.length).toBe(off + 3 * 30)
+  })
+
+  it('reads its extra bytes back with their type (Float32 exact, NaN kept)', () => {
+    const distance = Float32Array.from([0.25, -1.5, NaN])
+    const height = Float64Array.from([1e-9, 2.5, -3])
+    const out = parseLas(cloudToLas(flat({ distance, height })))
+    expect(out.attributes.distance).toBeInstanceOf(Float32Array)
+    expect([...out.attributes.distance]).toEqual([0.25, -1.5, NaN])
+    expect(out.attributes.height).toBeInstanceOf(Float64Array)
+    expect([...out.attributes.height]).toEqual([1e-9, 2.5, -3])
+    expect([...out.col]).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9])
+  })
+
+  it('puts standard LAS attributes into their own fields, not extra bytes', () => {
+    const attrs = {
+      intensity: Uint16Array.from([0, 1000, 65535]),
+      classification: Uint8Array.from([2, 6, 31]),
+      returnNumber: Uint8Array.from([1, 2, 1]),
+      numberOfReturns: Uint8Array.from([1, 2, 1]),
+      withheld: Uint8Array.from([0, 1, 0]),
+      scanAngle: Float32Array.from([-12, 0, 45]),
+      pointSourceId: Uint16Array.from([7, 7, 9]),
+    }
+    const las = cloudToLas(flat(attrs))
+    const dv = new DataView(las.buffer)
+    expect(dv.getUint32(100, true)).toBe(0)      // no extra-bytes VLR
+    expect(dv.getUint16(105, true)).toBe(26)
+    expect(dv.getUint32(111, true)).toBe(2)      // points by return: 2 first returns
+    expect(dv.getUint32(115, true)).toBe(1)      // 1 second return
+    const p = 227 + 26                           // second record
+    expect(dv.getUint16(p + 12, true)).toBe(1000)
+    expect(las[p + 14]).toBe(2 | (2 << 3))
+    expect(las[p + 15]).toBe(6 | (1 << 7))       // class 6, withheld flag
+    const out = parseLas(las)
+    for (const [k, v] of Object.entries(attrs)) expect([...out.attributes[k]]).toEqual([...v])
+  })
+
+  it('switches to point format 3 for a GPS time', () => {
+    const gpsTime = Float64Array.from([1e9 + 0.125, 1e9 + 0.25, 1e9 + 0.5])
+    const las = cloudToLas(flat({ gpsTime }))
+    const dv = new DataView(las.buffer)
+    expect(las[104]).toBe(3)
+    expect(dv.getUint16(105, true)).toBe(34)
+    const out = parseLas(las)
+    expect([...out.attributes.gpsTime]).toEqual([...gpsTime])
+    expect([...out.col]).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9])
+  })
+
+  it('a standard name whose values do not fit its field goes to extra bytes and wins on read', () => {
+    // LAS 1.4 class 40 does not fit format 2's 5 bits; a 0–1 float intensity is not a u16.
+    const classification = Uint8Array.from([2, 40, 6])
+    const intensity = Float64Array.from([0.1, 0.5, 1])
+    const las = cloudToLas(flat({ classification, intensity }))
+    const dv = new DataView(las.buffer)
+    expect(dv.getUint16(105, true)).toBe(26 + 1 + 8)
+    const out = parseLas(las)
+    expect([...out.attributes.classification]).toEqual([2, 40, 6])
+    expect([...out.attributes.intensity]).toEqual([0.1, 0.5, 1])
+  })
+
+  it('round-trips an imported LAS cloud (every attribute the reader made)', () => {
+    const first = parseLas(cloudToLas(flat({ gpsTime: Float64Array.from([1, 2, 3]), distance: Float32Array.from([1, 2, 3]) })))
+    const again = parseLas(cloudToLas(first))
+    expect(Object.keys(again.attributes).sort()).toEqual(Object.keys(first.attributes).sort())
+    for (const [k, v] of Object.entries(first.attributes)) expect([...again.attributes[k]]).toEqual([...v])
+  })
+
+  it('applies an extra-bytes scale/offset written by another tool', () => {
+    const las = cloudToLas(flat({ height: Int16Array.from([100, -200, 300]) }))
+    const v = vlrAt(las)
+    const dv = new DataView(las.buffer)
+    las[v.body + 3] = 8 | 16                     // options: scale + offset present
+    dv.setFloat64(v.body + 112, 0.01, true)
+    dv.setFloat64(v.body + 136, 1000, true)
+    const out = parseLas(las)
+    expect(out.attributes.height).toBeInstanceOf(Float64Array)
+    expect(out.attributes.height[0]).toBeCloseTo(1001, 9)
+    expect(out.attributes.height[1]).toBeCloseTo(998, 9)
+  })
+
+  it('attributes:false writes the plain format-2 file', () => {
+    const las = cloudToLas(flat({ distance: Float32Array.from([1, 2, 3]) }), { attributes: false })
+    expect(new DataView(las.buffer).getUint16(105, true)).toBe(26)
+  })
+})

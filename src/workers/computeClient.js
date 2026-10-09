@@ -365,6 +365,8 @@ export function undistortImage(args, { onLog } = {}) {
 export function exportLazCloud(cloud, { crsCode = null, geographic = false, onLog } = {}) {
   const transfer = [cloud.pos.buffer]
   if (cloud.col) transfer.push(cloud.col.buffer)
+  // Deduplicated: attributes may share one buffer, and a transfer list may not repeat one.
+  for (const b of new Set(Object.values(cloud.attributes || {}).map((v) => v.buffer))) transfer.push(b)
   return call('exportLaz', [{ cloud, crsCode, geographic }], {
     transfer,
     onEvent: onLog ? (ev, a) => { if (ev === 'log') onLog(...a) } : undefined,

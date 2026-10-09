@@ -103,3 +103,44 @@ describe('parsePly — spec edge cases', () => {
     expect(() => parsePly(new TextEncoder().encode('LASF and some padding here for length'))).toThrow(/PLY/)
   })
 })
+
+describe('cloudToPly — point attributes', () => {
+  const flat = {
+    count: 3,
+    pos: new Float64Array([0, 0, 0, 1, 2, 3, 4, 5, 6]),
+    col: new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9]),
+    attributes: {
+      distance: Float32Array.from([0.1, -2.5, NaN]),
+      classification: Uint8Array.from([2, 6, 255]),
+      gpsTime: Float64Array.from([1e9 + 0.123456789, 2, 3]),
+      x: Int16Array.from([-1, 0, 1]), // would read back as a coordinate if not renamed
+    },
+  }
+
+  it('declares one property per attribute in its own type', () => {
+    const text = cloudToPly(flat, { binary: false })
+    const header = text.slice(0, text.indexOf('end_header'))
+    expect(header).toContain('property uchar blue\nproperty float distance\nproperty uchar classification\n'
+      + 'property double gpsTime\nproperty short scalar_x\n')
+  })
+
+  for (const binary of [true, false]) {
+    it(`round-trips attributes through parsePly (${binary ? 'binary' : 'ascii'})`, () => {
+      const out = parsePly(cloudToPly(flat, { binary }))
+      expect(out.count).toBe(3)
+      expect([...out.col]).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9])
+      expect(out.pos[3]).toBe(1)
+      // Float32-exact (the ascii text reads back to the same float32), NaN kept.
+      expect([...Float32Array.from(out.attributes.distance)]).toEqual([...flat.attributes.distance])
+      expect([...out.attributes.classification]).toEqual([2, 6, 255])
+      expect([...out.attributes.gpsTime]).toEqual([...flat.attributes.gpsTime])
+      expect([...out.attributes.scalar_x]).toEqual([-1, 0, 1])
+    })
+  }
+
+  it('attributes:false and colour off still give a readable file', () => {
+    const out = parsePly(cloudToPly(flat, { attributes: false, color: false }))
+    expect(Object.keys(out.attributes)).toEqual([])
+    expect(out.col).toBeUndefined()
+  })
+})

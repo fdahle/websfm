@@ -379,7 +379,10 @@ export const MERGE_CLOUDS_DEFAULTS = {
 
 // Clean mesh: an ordered chain, each step on the previous output.
 export const CLEAN_MESH_DEFAULTS = {
-  methods: ['components', 'longEdges', 'holes', 'compact'],
+  // 'weld' first: an STL-style import (every triangle its own corners) must share
+  // vertices before pieces, edges or holes mean anything. Its ε is relative to the
+  // mesh (meshEdit.js WELD_REL_*), so a mesh that already shares vertices is untouched.
+  methods: ['weld', 'components', 'longEdges', 'holes', 'compact'],
   // Drop pieces smaller than this share of the largest piece (Poisson specks).
   minFraction: 0.01,
   minTriangles: 50,
