@@ -169,7 +169,8 @@ export function lidarCheck(pointsEnu, origin, grid, { flatRangeM = 0.15 } = {}) 
     return { cost: median(dz.map((v) => Math.abs(v - m))), dz }
   }
   let best = { dx: 0, dy: 0, cost: Infinity }
-  for (let dx = -6; dx <= 6; dx += 0.5) for (let dy = -6; dy <= 6; dy += 0.5) {
+  // ±12 m: a standalone receiver's along-track lag reached −6 m on ZM (the old edge).
+  for (let dx = -12; dx <= 12; dx += 0.5) for (let dy = -12; dy <= 12; dy += 0.5) {
     const c = spread(dx, dy, sub).cost
     if (c < best.cost) best = { dx, dy, cost: c }
   }
