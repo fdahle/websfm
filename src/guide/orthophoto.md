@@ -28,7 +28,10 @@ a nadir survey uses its viewing direction. The log names which one was used. Wit
 core by default, or all points. Project CRS needs a projected CRS; in a geographic one (WGS 84)
 the field suggests one from the camera positions (see Build DEM). Auto resolution
 follows the surface; a smaller pixel size than the imagery and surface support does
-not add real detail.
+not add real detail. An orthophoto is at most 4,096 pixels on its long side: if the
+pixel size you enter would exceed that over the surface's area, it is coarsened to fit
+and the log says so. To get a finer orthophoto, limit the area with Region and rebuild
+the surface.
 
 ## Blending
 <!-- param: blend default: Best -->

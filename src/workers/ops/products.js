@@ -219,6 +219,15 @@ export function makeProductsOps({ rasterize } = {}) {
       emit('log', [`Ortho: resampled the ${label} surface to ${grid.width}×${grid.height} @ `
         + `${grid.gsd.toPrecision(3)} ${frameUnitName(frame.unit)}/px`, 'info', 'Products'])
     }
+    // Products are capped at 4,096 px per side (surface.js MAX_GRID): a finer GSD over
+    // this extent is coarsened, never silently.
+    if (settings.gsd > 0 && grid.gsd > settings.gsd * (1 + 1e-6)) {
+      const unit = frameUnitName(frame.unit)
+      const want = Math.ceil(Math.max(grid.width, grid.height) * grid.gsd / settings.gsd)
+      emit('log', [`Ortho: the requested ${settings.gsd.toPrecision(3)} ${unit}/px would need ~${want.toLocaleString()} px `
+        + `on the long side; products are capped at 4,096 px, so this ortho is ${grid.gsd.toPrecision(3)} ${unit}/px. `
+        + 'Limit the area (Tools ▸ Model ▸ Region, then rebuild the surface) for a finer GSD.', 'warn', 'Products'])
+    }
 
     emit('progress', [0, grid.height, 'Orthorectifying…'])
     const t0 = performance.now()

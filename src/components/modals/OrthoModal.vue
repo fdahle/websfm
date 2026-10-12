@@ -141,7 +141,7 @@ function run() {
 
     <SettingsField label-for="ortho-gsd"
       :unit="outputUnit"
-      hint="Ortho cell size. 0 = the surface's own resolution. The ortho can be finer than the surface — a coarse surface is enough to reproject onto.">
+      hint="Ortho cell size. 0 = the surface's own resolution. Finer than the surface is fine; the ortho is capped at 4,096 px per side (the log says when a GSD was coarsened).">
       <template #label>
         <GlossaryTerm id="ground-sample-distance">Ground sample distance</GlossaryTerm>
       </template>
