@@ -1209,7 +1209,8 @@ export const useImagesStore = defineStore('images', () => {
       : `≤${maxDim}px`
     const concurrency = detectionConcurrency(pending, settings, POOL_SIZE, navigator.deviceMemory)
     const started = performance.now()
-    log(`${batchTag} batch: ${total} image(s) queued — ${resLabel}, ${concurrency} concurrent`
+    const budgetNote = settings.memBudgetBytes > 0 ? ` (memory budget ${(settings.memBudgetBytes / 1024 ** 3).toFixed(1)} GB)` : ''
+    log(`${batchTag} batch: ${total} image(s) queued — ${resLabel}, ${concurrency} concurrent${budgetNote}`
       + `${learnedSpec ? '' : `, contrast ${contrastThreshold}`}, ≤${maxKeypoints} kp`
       + `${learnedSpec ? '' : `, ≤${settings.maxOrientations ?? DETECT_TUNING.siftMaxOrientations} orientation(s) per extremum`
         + `, cap rule ${settings.capRule ?? DETECT_TUNING.siftCapRule}, RootSIFT descriptors`}`,

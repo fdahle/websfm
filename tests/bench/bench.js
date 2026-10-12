@@ -329,7 +329,8 @@ window.bench = {
     // Defaults per detector, exactly as DetectFeaturesModal resolves them.
     const detector = overrides.detector ?? 'sift'
     const settings = { detector, overwrite: true,
-      ...withPreset(DETECT_DEFAULTS_BY_DETECTOR[detector], DETECT_PRESETS_BY_DETECTOR[detector], preset), ...overrides }
+      ...withPreset(DETECT_DEFAULTS_BY_DETECTOR[detector], DETECT_PRESETS_BY_DETECTOR[detector], preset),
+      memBudgetBytes: useComputeSettings().memBudgetBytes.value, ...overrides }
     const spec = learnedDetector(detector)
     if (spec) await provideModels([spec.modelId])
     const t0 = performance.now()

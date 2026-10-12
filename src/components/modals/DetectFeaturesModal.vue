@@ -10,6 +10,7 @@ import WarnBox from './ui/WarnBox.vue'
 import GlossaryTerm from '../glossary/GlossaryTerm.vue'
 import { useDatasetRecommendations } from '../../composables/useDatasetRecommendations.js'
 import { useRecommendedPreset } from '../../composables/useRecommendedPreset.js'
+import { useComputeSettings } from '../../composables/useComputeSettings.js'
 import {
   DETECT_SIFT_DEFAULTS, DETECT_SIFT_PRESETS, DETECT_PRESET_META,
   DETECT_DEFAULTS_BY_DETECTOR, DETECT_PRESETS_BY_DETECTOR,
@@ -27,6 +28,8 @@ const props = defineProps({
 
 const emit = defineEmits(['close', 'run'])
 const { recommendations } = useDatasetRecommendations()
+// The machine compute budget bounds how many images SIFT runs at once (injected at run()).
+const { memBudgetBytes } = useComputeSettings()
 
 const overwrite = ref(false)
 const modeOptions = [
@@ -243,7 +246,7 @@ const awaitingOversizeChoice = ref(false)
 
 function doRun() {
   awaitingOversizeChoice.value = false
-  emit('run', { detector: detector.value, overwrite: overwrite.value, ...settings.value })
+  emit('run', { detector: detector.value, overwrite: overwrite.value, ...settings.value, memBudgetBytes: memBudgetBytes.value })
 }
 function attemptRun() {
   if (oversizedSpImages.value.length > 0) { awaitingOversizeChoice.value = true; return }

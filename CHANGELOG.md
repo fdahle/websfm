@@ -61,6 +61,8 @@ Notable changes to websfm. The format follows
   non-commercial license. You can supply the file yourself.
 
 ### Performance
+- Feature detection runs more images in parallel: its memory limit now follows the
+  machine budget in Settings ▸ Compute instead of a fixed 1 GB.
 - Project opening: the slowest step went from 11.6 s to 0.18 s on a 300 k-point
   model. Keypoints and matches now load on demand, and a progress bar names each
   loading step.

@@ -205,7 +205,7 @@ export function resolveWorkflowSettings(type, settings = {}, runtime = {}) {
   if (type === 'detect-features') {
     const base = DETECT_DEFAULTS_BY_DETECTOR[value.detector] ?? DETECT_SIFT_DEFAULTS
     const presets = DETECT_PRESETS_BY_DETECTOR[value.detector] ?? DETECT_SIFT_PRESETS
-    return { ...base, ...value, ...(presets[value.preset] || {}), useGpu: runtime.useGpu }
+    return { ...base, ...value, ...(presets[value.preset] || {}), useGpu: runtime.useGpu, memBudgetBytes: runtime.memBudgetBytes }
   }
   if (type === 'match-features') return { ...MATCH_DEFAULTS, ...value, ...(MATCH_PRESETS[value.preset] || {}), useGpu: runtime.useGpu }
   if (type === 'reconstruct') return { ...RECONSTRUCT_DEFAULTS, ...value, ...(RECONSTRUCT_PRESETS[value.preset] || {}) }
