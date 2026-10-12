@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { pickSpreadIndices, sliceDescriptorRows, resolveSubsetGateSize, SUBSET_GATE_SIZE_DEFAULTS } from './subsetGate.js'
+import { keypointsFromObjects as K } from './keypoints.js'
 
 // Build kps on a regular WxH grid so we can reason about spatial spread.
 function gridKps(w, h) {
@@ -12,13 +13,13 @@ function gridKps(w, h) {
 describe('pickSpreadIndices', () => {
   it('returns all indices when n <= count', () => {
     const kps = gridKps(3, 3) // 9 points
-    const idx = pickSpreadIndices(kps, 20)
+    const idx = pickSpreadIndices(K(kps), 20)
     expect(idx).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8])
   })
 
   it('returns roughly count indices, all in range and unique', () => {
     const kps = gridKps(20, 20) // 400 points
-    const idx = pickSpreadIndices(kps, 50)
+    const idx = pickSpreadIndices(K(kps), 50)
     expect(idx.length).toBeLessThanOrEqual(60) // ~50, one per grid cell
     expect(idx.length).toBeGreaterThan(30)
     expect(new Set(idx).size).toBe(idx.length) // no dupes
@@ -27,7 +28,7 @@ describe('pickSpreadIndices', () => {
 
   it('samples across the whole frame, not one corner', () => {
     const kps = gridKps(20, 20)
-    const idx = pickSpreadIndices(kps, 50)
+    const idx = pickSpreadIndices(K(kps), 50)
     const xs = idx.map((i) => kps[i].x)
     const ys = idx.map((i) => kps[i].y)
     // spread should cover most of the [0,190] extent in both axes
@@ -37,7 +38,7 @@ describe('pickSpreadIndices', () => {
 
   it('handles degenerate (all-collinear) keypoints without crashing', () => {
     const kps = Array.from({ length: 100 }, (_, i) => ({ x: i, y: 5 }))
-    const idx = pickSpreadIndices(kps, 20)
+    const idx = pickSpreadIndices(K(kps), 20)
     expect(idx.length).toBeGreaterThan(0)
     expect(new Set(idx).size).toBe(idx.length)
   })

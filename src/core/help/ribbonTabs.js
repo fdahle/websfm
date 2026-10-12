@@ -19,6 +19,61 @@
 //                                        a half-height − value + row (inside a pair);
 //                                        emits (id, newValue).
 // `disabled: true` = "Coming soon": only for work already planned in TODO.md.
+//
+// ONE HOME PER TOOL. Anything that enters a mode or opens a toolbox (selection,
+// mask/GCP editing, measuring, region, orient…) lives in the Tools tab, in its
+// object family's menu. The View tab and the contextual tabs (Picture, DEM /
+// Orthophoto) only show and arrange: camera presets, toggles, fit/zoom, styling,
+// on-map, remove. A command that does appear twice (Rebuild / Export on a raster
+// tab) is the SAME object below, so its prerequisites cannot drift.
+
+// Shared between Reconstruct/Export and the raster tab's object actions.
+const GEN_DEM      = { id: 'gen-dem',      label: 'DEM',   icon: 'dem',   needs: ['cloud'], aerialOnly: true }
+const GEN_ORTHO    = { id: 'gen-ortho',    label: 'Ortho', icon: 'ortho', needs: ['imagesReady', 'depthMaps', 'surface'], aerialOnly: true }
+const EXPORT_DEM   = { id: 'export-dem',   label: 'DEM',   icon: 'dem',   needs: ['dem'],   aerialOnly: true }
+const EXPORT_ORTHO = { id: 'export-ortho', label: 'Ortho', icon: 'ortho', needs: ['ortho'], aerialOnly: true }
+
+// Tools ▸ Measure ▾. Raster tools run on the raster in front: a DEM/Orthophoto
+// tab, or the 2D map's measure target. On the map the menu also lists the
+// target choices (the map stacks several rasters; profile/volume need a DEM even
+// while an orthophoto is drawn above it).
+//   m: { targets: [{ id, name, kind }], targetId } — the map's raster layers, or null.
+// `measure-target:<id>` rows pick the target; App dispatches the prefix.
+export function measureMenu(m = null) {
+  const targets = m?.targets ?? []
+  return [
+    { section: 'DEM / orthophoto in front' },
+    { id: 'measure-length',  label: 'Ruler',   icon: 'ruler',   measureTool: 'length', needs: ['measureHost'],
+      blurb: 'Ground distance along a polyline' },
+    { id: 'measure-area',    label: 'Area',    icon: 'area',    measureTool: 'area', needs: ['measureHost'],
+      blurb: 'Planimetric area and perimeter of a polygon' },
+    { id: 'measure-profile', label: 'Profile', icon: 'profile', measureTool: 'profile', demOnly: true, needs: ['measureHost'],
+      blurb: 'Elevation profile along a line (DEM)' },
+    { id: 'measure-volume',  label: 'Volume',  icon: 'volume',  measureTool: 'volume', demOnly: true, needs: ['measureHost'],
+      blurb: 'Cut / fill against a base surface (DEM)' },
+    { id: 'measure-saved',   label: 'Saved measurements', icon: 'list', activeKey: 'measureSaved',
+      needsSavedMeasurements: true, needs: ['measureHost'], blurb: 'Show, reopen and export saved results' },
+    ...(targets.length ? [
+      { section: 'Map layer to measure' },
+      ...targets.map((t) => ({
+        id: `measure-target:${t.id}`, label: t.name, icon: t.kind === 'dem' ? 'dem' : 'ortho',
+        selected: t.id === m.targetId,
+        blurb: t.kind === 'dem' ? 'DEM — all tools, including profile and volume' : 'Orthophoto — ruler and area',
+      })),
+    ] : []),
+    { section: 'Clouds & meshes' },
+    { id: 'cloud-distance', label: 'Distance to reference…', icon: 'distance', needs: ['dense'],
+      blurb: 'Per-point distance to another cloud or a mesh (change detection)' },
+    { id: 'cloud-section', label: 'Section…', icon: 'section', needs: ['dense'],
+      blurb: 'Cut a thin slice and export it as a 2D profile' },
+    { id: 'mesh-measure', label: 'Mesh area & volume…', icon: 'volume', needs: ['mesh'],
+      blurb: 'Surface area; enclosed volume when watertight' },
+    { section: 'Change' },
+    // TODO.md ▸ F11 (DEM-of-difference volume).
+    { id: 'dem-difference', label: 'DEM of difference…', icon: 'volume', disabled: true,
+      blurb: 'Volume change between the DEM and a reference DEM' },
+  ]
+}
 
 export const TABS = [
   {
@@ -126,8 +181,8 @@ export const TABS = [
       {
         label: 'Products',
         commands: [
-          { id: 'gen-dem',       label: 'DEM',     icon: 'dem',   needs: ['cloud'], aerialOnly: true },
-          { id: 'gen-ortho',     label: 'Ortho',   icon: 'ortho', needs: ['imagesReady', 'depthMaps', 'surface'], aerialOnly: true },
+          GEN_DEM,
+          GEN_ORTHO,
           { id: 'gen-mesh',      label: 'Mesh',    icon: 'cube',  needs: ['dense'] },
         ],
       },
@@ -154,6 +209,11 @@ export const TABS = [
               blurb: 'Find the fiducial marks on scanned film frames' },
             { id: 'calibrate-fiducials', label: 'Calibrate fiducials…', icon: 'calibration', needs: ['filmSensor'],
               blurb: 'Camera-certificate or batch-estimated fiducial layout' },
+            { section: 'Edit' },
+            // A mode on the image in front; brush/eraser/rect/invert/undo live in the
+            // floating MaskToolbar over the image view.
+            { id: 'img-mask-edit', label: 'Edit mask', icon: 'pencil', activeKey: 'maskEdit', needs: ['imageView'],
+              blurb: 'Paint the mask of the image in front' },
           ] },
         ],
       },
@@ -192,7 +252,10 @@ export const TABS = [
           // CRS at all. Deliberately NOT aerialOnly: scale bars are the object-capture
           // way to get metres, and an object project is exactly where there is no
           // georeference to supply one.
-          { id: 'scale-bars',     label: 'Scale\nBars',     icon: 'ruler',   needs: ['sparse'] },
+          { id: 'scale-bars',     label: 'Scale\nBars',     icon: 'scale-bar', needs: ['sparse'] },
+          // One mode for the view in front: on an image a click marks a GCP (the
+          // floating GcpToolbar), on the map it places/moves surveyed points.
+          { id: 'edit-gcps',      label: 'Edit\nGCPs',      icon: 'map-pin', activeKey: 'gcpEdit', needs: ['gcpView'] },
         ],
       },
       {
@@ -210,8 +273,11 @@ export const TABS = [
             { id: 'cloud-subsample', label: 'Subsample…', icon: 'grid', needs: ['dense'],
               blurb: 'Thin to one point per voxel' },
             { section: 'Edit' },
-            { id: 'select-points', label: 'Select points', icon: 'lasso', needs: ['dense'],
-              blurb: 'Lasso or rectangle in the 3D view, then delete or keep' },
+            // Modes in the 3D view; Delete / Keep only / Clear are its floating toolbox.
+            { id: 'view-select-rect', label: 'Select (rectangle)', icon: 'rect', activeKey: 'selectRect', needs: ['dense'],
+              blurb: 'Drag a box in the 3D view, then delete or keep' },
+            { id: 'view-select-lasso', label: 'Select (lasso)', icon: 'lasso', activeKey: 'selectLasso', needs: ['dense'],
+              blurb: 'Draw a freehand outline in the 3D view, then delete or keep' },
             { id: 'crop-cloud', label: 'Crop…', icon: 'rect', needs: ['dense'],
               blurb: 'Keep or remove an axis-aligned box' },
             { id: 'transform-cloud', label: 'Transform…', icon: 'transform', needs: ['dense'],
@@ -223,11 +289,6 @@ export const TABS = [
               blurb: 'Pick ≥3 matching points in both clouds' },
             { id: 'align-icp', label: 'Align to reference (ICP)…', icon: 'align', needs: ['dense'],
               blurb: 'Refine an approximate alignment automatically' },
-            { section: 'Analyse' },
-            { id: 'cloud-distance', label: 'Distance to reference…', icon: 'distance', needs: ['dense'],
-              blurb: 'Per-point distance to another cloud or a mesh (change detection)' },
-            { id: 'cloud-section', label: 'Section…', icon: 'section', needs: ['dense'],
-              blurb: 'Cut a thin slice and export it as a 2D profile' },
             { section: 'Attributes' },
             { id: 'estimate-normals', label: 'Estimate normals…', icon: 'normals', needs: ['dense'],
               blurb: 'Per-point normals, e.g. to mesh an imported cloud' },
@@ -256,9 +317,6 @@ export const TABS = [
             { section: 'Convert' },
             { id: 'mesh-to-points', label: 'Sample to points…', icon: 'point-cloud', needs: ['mesh'],
               blurb: 'Uniform surface sampling into a dense cloud' },
-            { section: 'Analyse' },
-            { id: 'mesh-measure', label: 'Area & volume…', icon: 'volume', needs: ['mesh'],
-              blurb: 'Surface area; enclosed volume when watertight' },
             { section: 'Colour' },
             // TODO.md ▸ Remaining interoperability ▸ Mesh texturing.
             { id: 'texture-mesh', label: 'Texture…', icon: 'image', disabled: true,
@@ -275,13 +333,18 @@ export const TABS = [
               blurb: 'Contour lines from the DEM (GeoJSON / DXF)' },
             { id: 'dem-derivatives', label: 'Slope, aspect, hillshade…', icon: 'dem', needs: ['dem'], aerialOnly: true,
               blurb: 'Terrain derivative rasters as GeoTIFF' },
-            // TODO.md ▸ F11 (DEM-of-difference volume).
-            { id: 'dem-difference', label: 'DEM of difference…', icon: 'volume', disabled: true,
-              blurb: 'Change between the DEM and a reference DEM' },
             { section: 'Export' },
             { id: 'clip-raster', label: 'Clip to polygon…', icon: 'clip', needs: ['products'], aerialOnly: true,
               blurb: 'Export a DEM/ortho clipped to a polygon' },
           ] },
+        ],
+      },
+      {
+        // Every measuring tool, whatever it measures. The rows are rebuilt with the
+        // map's targets while the map is in front (Ribbon.vue → measureMenu).
+        label: 'Measure',
+        commands: [
+          { id: 'menu-measure', label: 'Measure', icon: 'ruler', menu: measureMenu() },
         ],
       },
     ],
@@ -362,8 +425,8 @@ export const TABS = [
       {
         label: 'Products',
         commands: [
-          { id: 'export-dem',   label: 'DEM',   icon: 'dem',   needs: ['dem'], aerialOnly: true },
-          { id: 'export-ortho', label: 'Ortho', icon: 'ortho', needs: ['ortho'], aerialOnly: true },
+          EXPORT_DEM,
+          EXPORT_ORTHO,
         ],
       },
       {
@@ -461,19 +524,6 @@ export const SCENE_GROUP = {
   ],
 }
 
-// Choosing a selection tool is a mode; what you do with the selection (count,
-// Delete / Keep only / Clear) is the tool's floating toolbox in the 3D view.
-export const SELECT_GROUP = {
-  label: 'Select',
-  dynamic: '3D',
-  commands: [
-    { pair: [
-      { id: 'view-select-rect',  label: 'Rectangle', icon: 'rect',  activeKey: 'selectRect',  needs: ['dense'] },
-      { id: 'view-select-lasso', label: 'Lasso',     icon: 'lasso', activeKey: 'selectLasso', needs: ['dense'] },
-    ] },
-  ],
-}
-
 export const MAP_GROUP = {
   label: 'Map',
   dynamic: '2D',
@@ -482,8 +532,8 @@ export const MAP_GROUP = {
     { id: 'map-toggle-grid',       label: 'Grid',        icon: 'grid',      activeKey: 'showMapGrid' },
     { id: 'map-toggle-footprints', label: 'Footprints',  icon: 'footprint', activeKey: 'showFootprints', needs: ['footprints'] },
     { id: 'map-toggle-poses',      label: 'Poses',       icon: 'camera',    disabled: true },
-    // Enters the mode; the floating "Points" toolbox on the map does the editing.
-    { id: 'map-gcp-edit',          label: 'Edit\nGCPs',  icon: 'map-pin',   activeKey: 'mapGcpEdit' },
+    // Project CRS ↔ the sparse model's local frame (composables/useMapProducts.js).
+    { id: 'map-toggle-model-frame', label: 'Model\nFrame', icon: 'sparse-model', activeKey: 'mapModelFrame', needs: ['sparse'] },
   ],
 }
 
@@ -526,29 +576,15 @@ export const PICTURE_TAB = {
         { id: 'img-toggle-fiducials', label: 'Fiducials', icon: 'target', activeKey: 'showFiducials', filmOnly: true },
       ],
     },
-    {
-      label: 'Mask',
-      // One toggle — the tools themselves (brush/eraser/rect/invert/undo/…)
-      // live in the floating MaskToolbar over the image view.
-      commands: [
-        { id: 'img-mask-edit', label: 'Edit\nMask', icon: 'pencil', activeKey: 'maskEdit' },
-      ],
-    },
-    {
-      label: 'GCPs',
-      // One toggle — in GCP-edit mode a click on the image adds a new GCP (or marks
-      // the sidebar-selected one). The floating GcpToolbar sits over the image view.
-      commands: [
-        { id: 'img-gcp-edit', label: 'Edit\nGCPs', icon: 'map-pin', activeKey: 'gcpEdit' },
-      ],
-    },
+    // Edit mask / Edit GCPs are tools: Tools ▸ Images ▾ and Tools ▸ Georeferencing.
   ],
 }
 
 // The raster counterpart of PICTURE_TAB. Its last group depends on provenance:
 // a *computed* product can be rebuilt and exported, an *imported* reference
-// raster can be restyled, drawn on the map, or removed — the pipeline never
-// rebuilds one.
+// raster can be restyled or removed — the pipeline never rebuilds one. Both can
+// be drawn on the map (one raster-layer concept); the toggle is the same
+// command, and a computed product in the local frame greys it with the reason.
 export function rasterTab(r) {
   const isOrtho = r?.kind === 'ortho'
   return {
@@ -564,19 +600,6 @@ export function rasterTab(r) {
           { id: 'raster-zoom-out', label: 'Zoom\nOut', icon: 'zoom-out' },
         ],
       },
-      {
-        // Tools draw in the raster view; the drawing bar + result card live in
-        // RasterMeasurements. Height tools need DEM samples, so an orthophoto
-        // hides them rather than greying them (not applicable, not "not yet").
-        label: 'Measure',
-        commands: [
-          { id: 'measure-length',  label: 'Ruler',   icon: 'ruler',   measureTool: 'length' },
-          { id: 'measure-area',    label: 'Area',    icon: 'area',    measureTool: 'area' },
-          { id: 'measure-profile', label: 'Profile', icon: 'profile', measureTool: 'profile', demOnly: true },
-          { id: 'measure-volume',  label: 'Volume',  icon: 'volume',  measureTool: 'volume',  demOnly: true },
-          { id: 'measure-saved',   label: 'Saved',   icon: 'list',    activeKey: 'measureSaved', needsSavedMeasurements: true },
-        ],
-      },
       r?.imported
         ? {
             label: 'Reference',
@@ -589,10 +612,10 @@ export function rasterTab(r) {
         : {
             label: isOrtho ? 'Orthophoto' : 'DEM',
             commands: [
-              isOrtho
-                ? { id: 'gen-ortho', label: 'Rebuild', icon: 'ortho', needs: ['depthMaps', 'surface'] }
-                : { id: 'gen-dem',   label: 'Rebuild', icon: 'dem',   needs: ['cloud'] },
-              { id: isOrtho ? 'export-ortho' : 'export-dem', label: 'Export',  icon: 'download' },
+              // The Reconstruct / Export commands themselves, relabelled.
+              { ...(isOrtho ? GEN_ORTHO : GEN_DEM), label: 'Rebuild' },
+              { ...(isOrtho ? EXPORT_ORTHO : EXPORT_DEM), label: 'Export', icon: 'download' },
+              { id: 'raster-toggle-map', label: 'On\nMap', icon: 'layers', activeKey: 'rasterOnMap' },
             ],
           },
     ],
@@ -616,10 +639,13 @@ export function leafCommands(groups) {
 export function allGroups() {
   return [
     ...TABS.flatMap((t) => t.groups),
-    CAMERA_GROUP, SCENE_GROUP, SELECT_GROUP, MAP_GROUP,
+    CAMERA_GROUP, SCENE_GROUP, MAP_GROUP,
     ...PICTURE_TAB.groups,
     ...rasterTab({ kind: 'dem', imported: true }).groups,
     ...rasterTab({ kind: 'ortho', imported: false }).groups,
+    // The Measure menu as the map shows it, with its target rows.
+    { label: 'Measure (map)', commands: [{ id: 'menu-measure', label: 'Measure', icon: 'ruler',
+      menu: measureMenu({ targets: [{ id: 'product:dem', name: 'DEM', kind: 'dem' }], targetId: 'product:dem' }) }] },
   ]
 }
 

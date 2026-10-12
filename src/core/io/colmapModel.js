@@ -23,7 +23,9 @@
 //                  track:[[imageId, point2dIdx]] }],
 //   }
 
+import { asKeypoints } from '../features/keypoints.js'
 import { makeNameResolver as makeIdResolver } from './nameMatch.js'
+import { PART_BYTES, PART_CHARS, lineParts, chunkedByteWriter } from './parts.js'
 
 // ── Rotation ↔ quaternion (Hamilton, world-to-cam) ───────────────────────────
 
@@ -105,28 +107,31 @@ export function intrinsicsFromCamera({ model, params }) {
   return { fx, fy, cx: named.cx, cy: named.cy, dropped }
 }
 
-// ── Serialize (ColmapModel → { filename: text }) ─────────────────────────────
+// ── Serialize (ColmapModel → { filename: string parts }) ─────────────────────
+// Each file is a generator of bounded string parts (core/io/parts.js): images.txt
+// carries every 2D observation, which at a few thousand cameras is far past one
+// string. A non-finite value throws while the parts are drawn.
 
-export function serializeColmapModel(model) {
+export function serializeColmapModelParts(model, { partChars = PART_CHARS } = {}) {
   return {
-    'cameras.txt': serializeCameras(model.cameras),
-    'images.txt': serializeImages(model.images),
-    'points3D.txt': serializePoints3D(model.points3D),
+    'cameras.txt': serializeCameras(model.cameras, partChars),
+    'images.txt': serializeImages(model.images, partChars),
+    'points3D.txt': serializePoints3D(model.points3D, partChars),
   }
 }
 
-function serializeCameras(cameras) {
+function* serializeCameras(cameras, partChars) {
   const head =
     '# Camera list with one line of data per camera:\n' +
     '#   CAMERA_ID, MODEL, WIDTH, HEIGHT, PARAMS[]\n' +
     `# Number of cameras: ${cameras.length}\n`
-  const lines = cameras.map((c) =>
-    [c.cameraId, c.model, c.width, c.height, ...c.params.map(fmt)].join(' '),
-  )
-  return head + lines.join('\n') + (lines.length ? '\n' : '')
+  yield* lineParts(head, cameras.length, (i) => {
+    const c = cameras[i]
+    return [c.cameraId, c.model, c.width, c.height, ...c.params.map(fmt)].join(' ')
+  }, { partChars })
 }
 
-function serializeImages(images) {
+function* serializeImages(images, partChars) {
   const meanObs = images.length
     ? images.reduce((s, im) => s + im.points2D.length, 0) / images.length
     : 0
@@ -135,15 +140,15 @@ function serializeImages(images) {
     '#   IMAGE_ID, QW, QX, QY, QZ, TX, TY, TZ, CAMERA_ID, NAME\n' +
     '#   POINTS2D[] as (X, Y, POINT3D_ID)\n' +
     `# Number of images: ${images.length}, mean observations per image: ${fmt(meanObs)}\n`
-  const lines = []
-  for (const im of images) {
-    lines.push([im.imageId, ...im.q.map(fmt), ...im.t.map(fmt), im.cameraId, im.name].join(' '))
-    lines.push(im.points2D.map(([x, y, id]) => `${fmt(x)} ${fmt(y)} ${id}`).join(' '))
-  }
-  return head + lines.join('\n') + (lines.length ? '\n' : '')
+  yield* lineParts(head, images.length * 2, (k) => {
+    const im = images[k >> 1]
+    return k & 1
+      ? im.points2D.map(([x, y, id]) => `${fmt(x)} ${fmt(y)} ${id}`).join(' ')
+      : [im.imageId, ...im.q.map(fmt), ...im.t.map(fmt), im.cameraId, im.name].join(' ')
+  }, { partChars })
 }
 
-function serializePoints3D(points) {
+function* serializePoints3D(points, partChars) {
   const meanTrack = points.length
     ? points.reduce((s, p) => s + p.track.length, 0) / points.length
     : 0
@@ -151,13 +156,13 @@ function serializePoints3D(points) {
     '# 3D point list with one line of data per point:\n' +
     '#   POINT3D_ID, X, Y, Z, R, G, B, ERROR, TRACK[] as (IMAGE_ID, POINT2D_IDX)\n' +
     `# Number of points: ${points.length}, mean track length: ${fmt(meanTrack)}\n`
-  const lines = points.map((p) => {
+  yield* lineParts(head, points.length, (i) => {
+    const p = points[i]
     const track = p.track.map(([imgId, idx]) => `${imgId} ${idx}`).join(' ')
     return [p.point3dId, ...p.xyz.map(fmt), ...p.rgb, fmt(p.error ?? -1), track]
       .join(' ')
       .trimEnd()
-  })
-  return head + lines.join('\n') + (lines.length ? '\n' : '')
+  }, { partChars })
 }
 
 // Full round-trippable double precision; integers stay integer-looking. Throws on a
@@ -170,6 +175,9 @@ function fmt(v) {
 }
 
 // ── Parse ({ filename: text } → ColmapModel) ─────────────────────────────────
+// A file is a string or its UTF-8 bytes (Uint8Array / ArrayBuffer). Bytes are
+// decoded a slice at a time and parsed line by line, so a multi-hundred-MB
+// images.txt is never one string.
 
 export function parseColmapModel(files) {
   return {
@@ -179,11 +187,33 @@ export function parseColmapModel(files) {
   }
 }
 
-// Split into lines, dropping comment lines (leading '#') but KEEPING blank
-// lines — an image with zero observations writes an empty points2D line that
-// the pairing in `parseImages` must not lose.
-function contentLines(text) {
-  return text.split(/\r?\n/).filter((l) => !l.trimStart().startsWith('#'))
+// Lines of a string or of UTF-8 bytes (split on \n, one trailing \r dropped —
+// the /\r?\n/ rule), with comment lines (leading '#') removed but blank lines
+// KEPT: an image with zero observations writes an empty points2D line that the
+// pairing in `parseImages` must not lose.
+function* contentLines(src, chunkBytes = 8 * 1024 * 1024) {
+  const keep = (l) => !l.trimStart().startsWith('#')
+  const strip = (l) => (l.endsWith('\r') ? l.slice(0, -1) : l)
+  if (typeof src === 'string') {
+    let start = 0
+    for (let nl = src.indexOf('\n'); nl >= 0; nl = src.indexOf('\n', start)) {
+      const l = strip(src.slice(start, nl)); start = nl + 1
+      if (keep(l)) yield l
+    }
+    const last = strip(src.slice(start))
+    if (keep(last)) yield last
+    return
+  }
+  const bytes = src instanceof Uint8Array ? src : new Uint8Array(src)
+  const dec = new TextDecoder()
+  let carry = ''
+  for (let off = 0; off < bytes.length; off += chunkBytes) {
+    const lines = (carry + dec.decode(bytes.subarray(off, off + chunkBytes), { stream: true })).split('\n')
+    carry = lines.pop()
+    for (const l of lines) { const s = strip(l); if (keep(s)) yield s }
+  }
+  const last = strip(carry + dec.decode())
+  if (keep(last)) yield last
 }
 
 function parseCameras(text) {
@@ -203,26 +233,25 @@ function parseCameras(text) {
 }
 
 function parseImages(text) {
-  const lines = contentLines(text)
   const images = []
-  let i = 0
-  while (i < lines.length) {
-    if (!lines[i].trim()) { i++; continue } // skip blanks while seeking a header
-    const tok = lines[i].trim().split(/\s+/).filter(Boolean)
-    i++
+  let header = null // a header line waiting for its POINTS2D line
+  const push = (tok, pts2dLine) => images.push({
+    imageId: Number(tok[0]),
+    q: [Number(tok[1]), Number(tok[2]), Number(tok[3]), Number(tok[4])],
+    t: [Number(tok[5]), Number(tok[6]), Number(tok[7])],
+    cameraId: Number(tok[8]),
+    name: tok.slice(9).join(' '), // names may contain spaces
+    points2D: parsePoints2D(pts2dLine),
+  })
+  for (const line of contentLines(text)) {
+    // The very next line (blank or not) after a header is its POINTS2D line.
+    if (header) { push(header, line); header = null; continue }
+    if (!line.trim()) continue // skip blanks while seeking a header
+    const tok = line.trim().split(/\s+/).filter(Boolean)
     if (tok.length < 10) continue // not a valid header line
-    // The very next line (blank or not) is this image's POINTS2D line.
-    const pts2dLine = i < lines.length ? lines[i] : ''
-    i++
-    images.push({
-      imageId: Number(tok[0]),
-      q: [Number(tok[1]), Number(tok[2]), Number(tok[3]), Number(tok[4])],
-      t: [Number(tok[5]), Number(tok[6]), Number(tok[7])],
-      cameraId: Number(tok[8]),
-      name: tok.slice(9).join(' '), // names may contain spaces
-      points2D: parsePoints2D(pts2dLine),
-    })
+    header = tok
   }
+  if (header) push(header, '')
   return images
 }
 
@@ -286,33 +315,19 @@ const MODEL_BY_ID = {
 }
 const ID_BY_MODEL = Object.fromEntries(Object.entries(MODEL_BY_ID).map(([id, m]) => [m.name, Number(id)]))
 
-// A tiny growable little-endian byte writer (the models are small — hundreds of
-// cameras, up to ~millions of points, but each record is a fixed handful of writes).
-function makeWriter() {
-  let buf = new ArrayBuffer(1 << 16)
-  let dv = new DataView(buf)
-  let len = 0
-  const ensure = (extra) => {
-    if (len + extra <= buf.byteLength) return
-    let cap = buf.byteLength
-    while (len + extra > cap) cap *= 2
-    const nb = new ArrayBuffer(cap)
-    new Uint8Array(nb).set(new Uint8Array(buf, 0, len))
-    buf = nb; dv = new DataView(buf)
-  }
+// Little-endian writer over bounded parts (core/io/parts.js chunkedByteWriter):
+// images.bin carries 24 bytes per 2D observation, which at thousands of cameras is
+// gigabytes. f64 refuses a non-finite value, as the text writer does.
+function makeWriter(partBytes) {
+  const w = chunkedByteWriter(partBytes)
   return {
-    u8(v) { ensure(1); dv.setUint8(len, v); len += 1 },
-    i32(v) { ensure(4); dv.setInt32(len, v, true); len += 4 },
-    u64(v) { ensure(8); dv.setBigUint64(len, BigInt(v), true); len += 8 },
-    i64(v) { ensure(8); dv.setBigInt64(len, BigInt(v), true); len += 8 },
-    f64(v) { if (!Number.isFinite(v)) throw new Error(`COLMAP bin serialize: non-finite value ${v}`); ensure(8); dv.setFloat64(len, v, true); len += 8 },
-    bytes(arr) { ensure(arr.length); new Uint8Array(buf).set(arr, len); len += arr.length },
-    done() { return new Uint8Array(buf, 0, len) },
+    ...w,
+    f64(v) { if (!Number.isFinite(v)) throw new Error(`COLMAP bin serialize: non-finite value ${v}`); w.f64(v) },
   }
 }
 
-function serializeCamerasBin(cameras) {
-  const w = makeWriter()
+function serializeCamerasBin(cameras, partBytes) {
+  const w = makeWriter(partBytes)
   w.u64(cameras.length)
   for (const c of cameras) {
     const modelId = ID_BY_MODEL[c.model]
@@ -323,8 +338,8 @@ function serializeCamerasBin(cameras) {
   return w.done()
 }
 
-function serializeImagesBin(images) {
-  const w = makeWriter()
+function serializeImagesBin(images, partBytes) {
+  const w = makeWriter(partBytes)
   w.u64(images.length)
   const enc = new TextEncoder()
   for (const im of images) {
@@ -339,8 +354,8 @@ function serializeImagesBin(images) {
   return w.done()
 }
 
-function serializePoints3DBin(points) {
-  const w = makeWriter()
+function serializePoints3DBin(points, partBytes) {
+  const w = makeWriter(partBytes)
   w.u64(points.length)
   for (const p of points) {
     w.u64(p.point3dId)
@@ -355,12 +370,13 @@ function serializePoints3DBin(points) {
 
 const byte255 = (v) => Math.max(0, Math.min(255, Math.round(v ?? 0)))
 
-// Serialize a ColmapModel to the three .bin files ({ name: Uint8Array }).
-export function serializeColmapModelBin(model) {
+// Serialize a ColmapModel to the three .bin files, each as Uint8Array parts
+// ({ name: Uint8Array[] }) for a Blob or a zip entry.
+export function serializeColmapModelBinParts(model, { partBytes = PART_BYTES } = {}) {
   return {
-    'cameras.bin': serializeCamerasBin(model.cameras),
-    'images.bin': serializeImagesBin(model.images),
-    'points3D.bin': serializePoints3DBin(model.points3D),
+    'cameras.bin': serializeCamerasBin(model.cameras, partBytes),
+    'images.bin': serializeImagesBin(model.images, partBytes),
+    'points3D.bin': serializePoints3DBin(model.points3D, partBytes),
   }
 }
 
@@ -475,7 +491,8 @@ export function buildColmapModel({ images, points }) {
     // Supplying the full feature array preserves keypoint indices across a
     // database + sparse-workspace round trip. Sparse-only callers omit it and
     // retain the compact observed-points behaviour.
-    points2D.set(im.uuid, (im.keypoints ?? []).map((kp) => [kp.x, kp.y, -1]))
+    const kps = asKeypoints(im.keypoints ?? [])
+    points2D.set(im.uuid, Array.from({ length: kps.length }, (_, k) => [kps.x(k), kps.y(k), -1]))
   })
 
   const points3D = points.map((p, i) => {

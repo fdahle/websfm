@@ -1,11 +1,8 @@
 <script setup>
 import { formatFileSize } from '../../core/io/metadata.js'
 import { useTableSort } from '../../composables/useTableSort.js'
-import { useImagesStore } from '../../stores/useImagesStore.js'
-
-// See ViewerImage: the thumbnail's @error routes here so a dead blob: URL is
-// healed from OPFS, or the image is flagged, instead of rendering blank.
-const imagesStore = useImagesStore()
+import { useVirtualList } from '../../composables/useVirtualList.js'
+import ImageThumb from './ImageThumb.vue'
 
 const props = defineProps({
   images: {
@@ -39,6 +36,12 @@ function metaVal(img, key) {
   }
 }
 const { toggleSort, sortArrow, sorted: sortedImages } = useTableSort(() => props.images, metaVal)
+
+// Thousands of rows: only those in view are in the DOM (composables/useVirtualList).
+// Rows have a fixed CSS height (tbody tr), measured once rendered.
+const {
+  listRef: bodyRef, visibleItems: visibleImages, padTop, padBottom,
+} = useVirtualList({ items: () => sortedImages.value, itemHeight: 53, measure: true })
 </script>
 
 <template>
@@ -58,30 +61,19 @@ const { toggleSort, sortArrow, sorted: sortedImages } = useTableSort(() => props
           <th class="sortable" @click="toggleSort('size')">Size <span class="arrow">{{ sortArrow('size') }}</span></th>
         </tr>
       </thead>
-      <tbody>
+      <tbody ref="bodyRef">
+        <tr v-if="padTop" class="v-spacer" aria-hidden="true" :style="{ height: padTop + 'px' }"><td colspan="10"></td></tr>
         <tr
-          v-for="img in sortedImages"
+          v-for="img in visibleImages"
           :key="img.id"
+          data-vrow
           :class="{ selected: img.id === selectedId }"
           @click="$emit('select', img.id)"
           @dblclick="$emit('open', img.id)"
         >
           <td class="thumb-cell">
-            <img
-              v-if="!img.previewPending && !img.previewFailed"
-              :src="img.url"
-              :alt="img.name"
-              class="thumb"
-              @error="imagesStore.reportImageLoadError(img.id)"
-            />
-            <div
-              v-else-if="img.previewFailed"
-              class="thumb thumb-error"
-              :title="img.previewFailReason === 'source-lost'
-                ? 'Image file no longer available — re-add the file'
-                : 'Preview unavailable — decode failed'"
-            >!</div>
-            <div v-else class="thumb thumb-pending" title="Decoding image…" />
+            <!-- The list thumbnail (useImagesStore), never the full-resolution image. -->
+            <ImageThumb :image="img" class="thumb" />
           </td>
           <td class="name-cell" :title="img.name">{{ img.name }}</td>
 
@@ -111,6 +103,7 @@ const { toggleSort, sortArrow, sorted: sortedImages } = useTableSort(() => props
             <td>{{ formatFileSize(img.meta.fileSize) }}</td>
           </template>
         </tr>
+        <tr v-if="padBottom" class="v-spacer" aria-hidden="true" :style="{ height: padBottom + 'px' }"><td colspan="10"></td></tr>
       </tbody>
     </table>
 
@@ -156,7 +149,13 @@ tbody td {
 
 tbody tr {
   cursor: pointer;
+  /* Fixed row height (thumbnail 36 + padding 16 + border 1): the virtual list's
+     spacers assume every row is as tall as the first. */
+  height: 53px;
 }
+
+tbody tr.v-spacer, tbody tr.v-spacer:hover { cursor: default; background: none; }
+tbody tr.v-spacer > td { padding: 0; border: 0; }
 
 tbody tr:hover {
   background: rgba(255, 255, 255, 0.04);
@@ -177,27 +176,6 @@ tbody tr.selected {
   border-radius: 4px;
   background: #000;
   display: block;
-}
-
-.thumb-pending {
-  position: relative;
-  overflow: hidden;
-  background: linear-gradient(90deg, #000 25%, #222 37%, #000 63%);
-  background-size: 400% 100%;
-  animation: thumb-pending-shimmer 1.4s ease infinite;
-}
-
-@keyframes thumb-pending-shimmer {
-  0% { background-position: 100% 50%; }
-  100% { background-position: 0% 50%; }
-}
-
-.thumb-error {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-dim);
-  font-weight: 600;
 }
 
 .name-cell {

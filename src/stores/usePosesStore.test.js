@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useImagesStore } from './useImagesStore.js'
 import { usePosesStore } from './usePosesStore.js'
 import { useProjectsStore } from './useProjectsStore.js'
+import { useLog } from '../composables/useLog.js'
 
 describe('EXIF pose synchronization', () => {
   beforeEach(() => setActivePinia(createPinia()))
@@ -82,6 +83,31 @@ describe('EXIF pose synchronization', () => {
       accuracyMetersEast: 1, accuracyMetersNorth: 4, accuracyMetersUp: 2,
       omegaEnu: 0, phiEnu: 0, kappaEnu: 0,
     })
+  })
+
+  it('reports a batch of EXIF positions once, after the import goes idle', async () => {
+    openTransientProject('EPSG:4326')
+    const images = useImagesStore()
+    const poses = usePosesStore()
+    const { entries } = useLog()
+    const exifLines = () => entries.value.map((e) => e.message).filter((m) => m.startsWith('EXIF GPS'))
+    const before = exifLines().length
+    images.pendingWorkCount = 1 // an import is running
+    // Metadata lands one image at a time, each triggering its own sync.
+    for (let i = 0; i < 3; i++) {
+      images.images = [...images.images, {
+        id: `image-${i}`, uuid: `uuid-${i}`, name: `drone-${i}.jpg`,
+        meta: { gpsLat: 48 + i * 1e-4, gpsLon: 9, gpsAlt: 120 },
+      }]
+      await vi.waitFor(() => expect(poses.poses).toHaveLength(i + 1))
+    }
+    expect(exifLines().length).toBe(before)
+    images.pendingWorkCount = 0
+    await vi.waitFor(() => expect(exifLines().length).toBe(before + 2))
+    const lines = exifLines().slice(before)
+    expect(lines[0]).toContain('3 camera positions added in EPSG:4326')
+    expect(lines[1]).toContain('EPSG:4326 is geographic')
+    expect(lines[1]).toContain('EPSG:32632')
   })
 
   it('lets an imported pose override EXIF for the same image', async () => {

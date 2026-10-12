@@ -24,7 +24,8 @@ export async function writeBinaryDocument(dir, filename, metadata, buffers, { wr
     if (buffer.reuse) { files[key] = { name: buffer.reuse.name, bytes: buffer.reuse.bytes }; continue }
     const name = `${filename}.${generation}.${key}.bin`
     await writeBin(dir, name, buffer)
-    files[key] = { name, bytes: buffer.byteLength }
+    // A typed array / ArrayBuffer, or a Blob (written without copying it into memory).
+    files[key] = { name, bytes: buffer.byteLength ?? buffer.size }
   }
   await writeJson(dir, filename, { ...metadata, binaryFiles: files })
   if (dir.keys) {

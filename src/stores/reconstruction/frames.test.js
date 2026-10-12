@@ -41,3 +41,21 @@ it('puts a user orientation on the local frame, and lets a georeference outrank 
   expect(geo.frameSpec.kind).toBe('similarity')
   expect(geo.frameSpec.east).toBeUndefined()
 })
+
+it('returns a frame spec the worker can clone, though it is spread from reactive state', async () => {
+  // A ref makes the georef's nested sim.R / sim.t (and the orientation basis
+  // arrays) proxies; a shallow spread leaves them in the spec, and postMessage
+  // throws "could not be cloned".
+  proj4.defs('EPSG:32632', '+proj=utm +zone=32 +datum=WGS84 +units=m +no_defs')
+  const validGeoref = ref({ crs: 'EPSG:32632', sim: { scale: 2, R: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], t: [5, 6, 7], local: { origin: [1, 2, 3] } } })
+  const orientation = ref({ origin: [1, 2, 3], east: [1, 0, 0], north: [0, 0, -1], up: [0, 1, 0] })
+  const resolver = createFrameResolver({ mainSparseCloud: ref({ id: 'c', createdAt: 1 }), validGeoref,
+    currentCrs: () => 'EPSG:32632', georeference: vi.fn(), scaleFit: ref(null), scaleFitStatus: () => ({ valid: false }),
+    log: vi.fn(), orientationBasis: () => orientation.value })
+  const geo = await resolver.effectiveFrameSpec()
+  expect(structuredClone(geo.frameSpec)).toEqual(geo.frameSpec)
+  expect(geo.frameSpec).toMatchObject({ kind: 'similarity', R: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], t: [5, 6, 7] })
+  validGeoref.value = null
+  const local = await resolver.effectiveFrameSpec()
+  expect(structuredClone(local.frameSpec)).toEqual(local.frameSpec)
+})

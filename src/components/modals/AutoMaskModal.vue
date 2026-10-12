@@ -2,6 +2,7 @@
 import { ref, reactive, computed } from 'vue'
 import { useImagesStore } from '../../stores/useImagesStore.js'
 import { buildBorderMask } from '../../core/mask.js'
+import ImageThumb from '../controls/ImageThumb.vue'
 
 // Auto-Mask: generate masks from a rule rather than a painted/imported file.
 // v1 has a single strategy — exclude the outer N pixels on each side (the film
@@ -55,7 +56,7 @@ async function applyToGroup(g) {
   busy.value = true
   try {
     for (const img of g.images) {
-      const base = existing.value === 'merge' && img.mask ? img.mask : null
+      const base = existing.value === 'merge' && img.mask ? img.mask.blob : null
       updateMask(img.id, await buildBorderMask(g.w, g.h, { ...sides }, base))
     }
   } finally { busy.value = false }
@@ -67,7 +68,7 @@ async function applyToAll() {
   try {
     for (const g of sizedGroups.value) {
       for (const img of g.images) {
-        const base = existing.value === 'merge' && img.mask ? img.mask : null
+        const base = existing.value === 'merge' && img.mask ? img.mask.blob : null
         updateMask(img.id, await buildBorderMask(g.w, g.h, { ...sides }, base))
       }
     }
@@ -122,13 +123,7 @@ async function applyToAll() {
 
         <div v-for="g in groups" :key="g.key" class="group">
           <div class="preview" :title="g.label">
-            <img
-              v-if="g.images[0]"
-              class="thumb"
-              :src="g.images[0].url"
-              :alt="g.label"
-              @error="imagesStore.reportImageLoadError(g.images[0].id)"
-            />
+            <ImageThumb v-if="g.images[0]" class="thumb" :image="g.images[0]" :alt="g.label" />
             <div v-if="g.w" class="border-overlay" :style="{ inset: previewInset(g) }"></div>
           </div>
           <div class="group-info">

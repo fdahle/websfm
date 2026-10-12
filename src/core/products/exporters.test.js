@@ -1,5 +1,14 @@
 import { describe, it, expect } from 'vitest'
-import { cloudToPly, meshToPly, meshToGlb, meshToObj, meshToStl, reconstructionToJson, demToAsciiGrid, rasterWorldFile, prepareCloudForExport, prepareMeshForExport } from './exporters.js'
+import { cloudToPlyParts, meshToPlyParts, meshToGlbParts, meshToObjParts, meshToStlParts, reconstructionToJson, demToAsciiGridParts, rasterWorldFile, prepareCloudForExport, prepareMeshForExport } from './exporters.js'
+import { joinParts, jsonParts } from '../io/parts.js'
+
+// The writers yield bounded parts (core/io/parts.js); these join them for small fixtures.
+const cloudToPly = (...a) => joinParts(cloudToPlyParts(...a))
+const meshToPly = (...a) => joinParts(meshToPlyParts(...a))
+const meshToGlb = (...a) => joinParts(meshToGlbParts(...a))
+const meshToObj = (...a) => joinParts(meshToObjParts(...a))
+const meshToStl = (...a) => joinParts(meshToStlParts(...a))
+const demToAsciiGrid = (...a) => joinParts(demToAsciiGridParts(...a))
 
 describe('meshToPly', () => {
   // A single triangle with per-vertex colour.
@@ -145,7 +154,8 @@ describe('reconstructionToJson', () => {
   it('emits cameras with centres (C = −Rᵀt) + tracks + crs', () => {
     const cameras = [{ uuid: 'a', R: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], t: [1, 2, 3], K: { fx: 100, fy: 100, cx: 50, cy: 40, extra: 9 } }]
     const points = [{ x: 1, y: 2, z: 3, color: [10, 20, 30], views: [['a', 5]] }]
-    const j = reconstructionToJson(cameras, points, 'EPSG:3031')
+    // points is a lazyArray: read the document the way the export writes it.
+    const j = JSON.parse(joinParts(jsonParts(reconstructionToJson(cameras, points, 'EPSG:3031'))))
     expect(j.crs).toBe('EPSG:3031')
     expect(j.cameras[0].center).toEqual([-1, -2, -3]) // identity R ⇒ C = −t
     expect(j.cameras[0].K).toEqual({ fx: 100, fy: 100, cx: 50, cy: 40 }) // trimmed
@@ -332,5 +342,65 @@ describe('meshToStl', () => {
     }
     const dv = new DataView(meshToStl(degen).buffer)
     for (let i = 0; i < 3; i++) expect(dv.getFloat32(84 + i * 4, true)).toBe(0)
+  })
+})
+
+describe('part writers — chunking never changes the bytes', () => {
+  // Deterministic pseudo-random fixtures, big enough that tiny part sizes split them
+  // many times.
+  let seed = 7
+  const rand = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648)
+  const n = 2000
+  const cloud = {
+    count: n,
+    pos: Float32Array.from({ length: n * 3 }, () => (rand() - 0.5) * 1e4),
+    col: Uint8Array.from({ length: n * 3 }, () => rand() * 256),
+    nrm: Float32Array.from({ length: n * 3 }, () => rand() - 0.5),
+    attributes: { distance: Float32Array.from({ length: n }, () => rand()), classification: Uint8Array.from({ length: n }, () => rand() * 20) },
+  }
+  const nV = 600, nF = 1100
+  const mesh = {
+    nVerts: nV, count: nF,
+    pos: Float64Array.from({ length: nV * 3 }, () => rand() * 1e5),
+    idx: Uint32Array.from({ length: nF * 3 }, () => Math.floor(rand() * nV)),
+    col: Uint8Array.from({ length: nV * 3 }, () => rand() * 256),
+  }
+  const dem = { width: 16, height: 400, gsd: 0.5, originX: 1000, originY: 2000,
+    data: Float32Array.from({ length: 16 * 400 }, () => (rand() < 0.1 ? NaN : rand() * 100)) }
+  const tiny = { partBytes: 512, partChars: 512 }
+  const writers = {
+    'cloud PLY binary': (o) => cloudToPlyParts(cloud, { binary: true, ...o }),
+    'cloud PLY ascii': (o) => cloudToPlyParts(cloud, { binary: false, ...o }),
+    'mesh PLY binary': (o) => meshToPlyParts(mesh, { binary: true, ...o }),
+    'mesh PLY ascii': (o) => meshToPlyParts(mesh, { binary: false, ...o }),
+    'mesh OBJ': (o) => meshToObjParts(mesh, o),
+    'mesh STL': (o) => meshToStlParts(mesh, o),
+    'mesh GLB': (o) => meshToGlbParts(mesh, o),
+    'DEM ASCII grid': (o) => demToAsciiGridParts(dem, o),
+  }
+  for (const [name, write] of Object.entries(writers)) {
+    it(`${name}: many bounded parts, same bytes as one part`, () => {
+      const parts = [...write(tiny)]
+      expect(parts.length).toBeGreaterThan(10)
+      // Binary parts are whole records within the limit; text parts close as soon as
+      // they reach it, overshooting by at most one line.
+      for (const p of parts) expect(p.length).toBeLessThan(512 + 400)
+      expect(joinParts(parts)).toEqual(joinParts(write({})))
+    })
+  }
+
+  it('an empty cloud keeps the historical lone newline after an ASCII header', () => {
+    const text = cloudToPly([], { binary: false })
+    expect(text.endsWith('end_header\n\n')).toBe(true)
+    expect(demToAsciiGrid({ width: 0, height: 0, gsd: 1, originX: 0, originY: 0, data: new Float32Array(0) })
+      .endsWith('NODATA_value -9999\n\n')).toBe(true)
+  })
+
+  it('GLB total length and BIN chunk length match the bytes written', () => {
+    const glb = meshToGlb(mesh)
+    const dv = new DataView(glb.buffer)
+    expect(dv.getUint32(8, true)).toBe(glb.length)
+    const jsonLen = dv.getUint32(12, true)
+    expect(dv.getUint32(20 + jsonLen, true)).toBe(glb.length - 28 - jsonLen)
   })
 })

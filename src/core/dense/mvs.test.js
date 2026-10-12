@@ -2,7 +2,9 @@ import { describe, it, expect } from 'vitest'
 import {
   filterDepthMap, depthMapForImage, qualityToMaxDim, autoBestK, autoFusionMaxCost,
   fuseDepthMaps, mergePointsSpatial, createVoxelAccumulator, filterDepthMapsGeometric, filterCandidates, geomFilterLoopShare,
+  filterDepthMapsGeometricStreamed, applyPackedMask,
 } from './mvs.js'
+import { packSparseForDense } from './sparseInput.js'
 import { DENSE_TUNING } from '../tuning.js'
 
 // Build a w×h Float32Array depth plane from a 2-D array of numbers (0 = hole).
@@ -72,7 +74,7 @@ describe('depthMapForImage — coarse-to-fine pyramid (Step 2)', () => {
 
   it('runs coarsest → finest with the working res as the final level', async () => {
     const { fn, calls } = makeMock()
-    const out = await depthMapForImage(ref, sources, points, { coarseLong: 10 }, fn)
+    const out = await depthMapForImage(ref, sources, packSparseForDense(points).pos, { coarseLong: 10 }, fn)
     // 40 → 20 → 10 ⇒ 3 levels.
     expect(calls.map((c) => c.w)).toEqual([10, 20, 40])
     // Refinement continues across levels (5 / 4 / 3 sweeps) instead of restarting.
@@ -83,14 +85,14 @@ describe('depthMapForImage — coarse-to-fine pyramid (Step 2)', () => {
 
   it('gives coarser levels more iterations than the finest', async () => {
     const { fn, calls } = makeMock()
-    await depthMapForImage(ref, sources, points, { coarseLong: 10, iterations: 3 }, fn)
+    await depthMapForImage(ref, sources, packSparseForDense(points).pos, { coarseLong: 10, iterations: 3 }, fn)
     expect(calls[0].iters).toBeGreaterThan(calls[2].iters) // coarsest > finest
     expect(calls[2].iters).toBe(3)                          // finest honours the user setting
   })
 
   it('seeds coarser levels sparsely but finer levels at full coverage', async () => {
     const { fn, calls } = makeMock()
-    await depthMapForImage(ref, sources, points, { coarseLong: 10 }, fn)
+    await depthMapForImage(ref, sources, packSparseForDense(points).pos, { coarseLong: 10 }, fn)
     const nonZero = (a) => a.reduce((n, x) => n + (x > 0 ? 1 : 0), 0)
     // Coarsest seed = sparse splat (not every pixel set); finer seeds = upsampled
     // full-coverage depth (constant 7 from the mock ⇒ every pixel > 0).
@@ -101,7 +103,7 @@ describe('depthMapForImage — coarse-to-fine pyramid (Step 2)', () => {
 
   it('runs a single level when the working image is already at the coarse target', async () => {
     const { fn, calls } = makeMock()
-    await depthMapForImage(ref, sources, points, { coarseLong: 100 }, fn) // 40 ≤ 100
+    await depthMapForImage(ref, sources, packSparseForDense(points).pos, { coarseLong: 100 }, fn) // 40 ≤ 100
     expect(calls.length).toBe(1)
     expect(calls[0].w).toBe(W)
   })
@@ -538,7 +540,7 @@ describe('filterDepthMapsGeometric (cross-view consistency)', () => {
     expect(rev[1].depth[CENTER]).toBe(0)
   })
 
-  it('frustum cull is exact: same planes as walking every map, with fewer candidates', () => {
+  it('frustum cull is exact: same planes as walking every map, with fewer candidates', async () => {
     // A 6×3 nadir grid over a sloped ground plane, with seeded noise: flyers (depth
     // ×0.5–2), holes, and low-NCC pixels. Far-apart cameras share no ground, so the cull
     // must drop them — and must never drop a map the full walk would have used.
@@ -573,6 +575,37 @@ describe('filterDepthMapsGeometric (cross-view consistency)', () => {
     expect(sa).toEqual(sb)
     for (let i = 0; i < a.length; i++) expect(a[i].depth).toEqual(b[i].depth)
     expect(sa.inconsistent).toBeGreaterThan(0) // the flyers were actually judged
+
+    // The streamed filter (planes read on demand through a tiny LRU, so most reads
+    // miss) reaches the same verdict on every pixel.
+    const c = build()
+    const metas = c.map(({ depth, cost, ...meta }) => meta)
+    let reads = 0
+    const io = {
+      loadReference: async (i) => ({ depth: c[i].depth, cost: c[i].cost }),
+      loadDepth: async (i) => { reads++; return c[i].depth },
+    }
+    const sc = await filterDepthMapsGeometricStreamed(metas, io, { minConsistent: 2, cacheBytes: 3 * S * S * 4 }, () => {})
+    expect(sc.totals).toEqual(sa)
+    expect(reads).toBeGreaterThan(c.length) // the cache really evicted
+    for (let i = 0; i < c.length; i++) {
+      expect(applyPackedMask(Float32Array.from(c[i].depth), sc.masks[i])).toEqual(a[i].depth)
+      expect(sc.stats[i]).toEqual(a[i].filterStats)
+    }
+
+    // Split over workers (disjoint contiguous reference chunks, as the store does):
+    // the merged masks, stats and totals are the single run's.
+    const chunks = [[0, 1, 2, 3, 4], [5, 6, 7, 8, 9, 10], [11, 12, 13, 14, 15, 16, 17]]
+    const merged = { considered: 0, kept: 0, lowNcc: 0, inconsistent: 0, lowParallax: 0 }
+    for (const refs of chunks) {
+      const p = await filterDepthMapsGeometricStreamed(metas, io, { minConsistent: 2, cacheBytes: S * S * 4, refs, summaryLogs: false }, () => {})
+      for (const k of Object.keys(merged)) merged[k] += p.totals[k]
+      for (const i of refs) {
+        expect(applyPackedMask(Float32Array.from(c[i].depth), p.masks[i])).toEqual(a[i].depth)
+        expect(p.stats[i]).toEqual(a[i].filterStats)
+      }
+    }
+    expect(merged).toEqual(sc.totals)
 
     const cand = filterCandidates(build())
     const total = cand.reduce((n, c) => n + c.length, 0)

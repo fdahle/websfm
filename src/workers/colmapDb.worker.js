@@ -2,6 +2,7 @@
 // not join the compute pool: the review modal holds one read-only DB session and
 // later fetches only the components the user selected.
 import sqlite3InitModule from '@sqlite.org/sqlite-wasm'
+import { asKeypoints } from '../core/features/keypoints.js'
 import {
   decodeColmapCamera, decodeColmapDescriptors, decodeColmapKeypoints,
   decodeColmapMatches, decodeColmapMatrix, pairIdToImageIds,
@@ -121,11 +122,15 @@ function f32Blob(values) {
   const a = values instanceof Float32Array ? values : new Float32Array(values)
   return new Uint8Array(a.buffer, a.byteOffset, a.byteLength)
 }
+// Matches arrive flat ([a0, b0, a1, b1, …] Uint32Array, the store's shape) or, from
+// older callers, as [[a, b], …].
 function u32Blob(pairs) {
+  if (pairs instanceof Uint32Array) return new Uint8Array(pairs.buffer, pairs.byteOffset, pairs.byteLength)
   const a = new Uint32Array(pairs.length * 2)
   pairs.forEach(([x, y], i) => { a[i * 2] = x; a[i * 2 + 1] = y })
   return new Uint8Array(a.buffer)
 }
+const matchRows = (pairs) => (pairs instanceof Uint32Array ? pairs.length / 2 : pairs.length)
 
 async function exportDatabase(bundle) {
   closeDb()
@@ -145,16 +150,18 @@ async function exportDatabase(bundle) {
     for (const c of bundle.cameras) outDb.exec({ sql: 'INSERT INTO cameras(camera_id,model,width,height,params,prior_focal_length) VALUES(?,?,?,?,?,1)', bind: [c.cameraId, 1, c.width, c.height, f64Blob(c.params)] })
     for (const im of bundle.images) outDb.exec({ sql: 'INSERT INTO images(image_id,name,camera_id) VALUES(?,?,?)', bind: [im.imageId, im.name, im.cameraId] })
     for (const f of bundle.features) {
-      const xy = new Float32Array(f.keypoints.length * 2)
-      f.keypoints.forEach((kp, i) => { xy[i * 2] = kp.x; xy[i * 2 + 1] = kp.y })
-      outDb.exec({ sql: 'INSERT INTO keypoints(image_id,rows,cols,data) VALUES(?,?,2,?)', bind: [f.imageId, f.keypoints.length, f32Blob(xy)] })
-      if (f.descriptors) outDb.exec({ sql: 'INSERT INTO descriptors(image_id,rows,cols,data) VALUES(?,?,128,?)', bind: [f.imageId, f.keypoints.length, f.descriptors] })
+      // Typed keypoints arrive structured-cloned ({ data, rgb }); rewrap to read them.
+      const kps = asKeypoints(f.keypoints)
+      const xy = new Float32Array(kps.length * 2)
+      for (let i = 0; i < kps.length; i++) { xy[i * 2] = kps.x(i); xy[i * 2 + 1] = kps.y(i) }
+      outDb.exec({ sql: 'INSERT INTO keypoints(image_id,rows,cols,data) VALUES(?,?,2,?)', bind: [f.imageId, kps.length, f32Blob(xy)] })
+      if (f.descriptors) outDb.exec({ sql: 'INSERT INTO descriptors(image_id,rows,cols,data) VALUES(?,?,128,?)', bind: [f.imageId, kps.length, f.descriptors] })
     }
     for (const p of bundle.pairs) {
       const pairId = p.pairId
       const data = u32Blob(p.matches)
-      outDb.exec({ sql: 'INSERT INTO matches(pair_id,rows,cols,data) VALUES(?,?,2,?)', bind: [pairId, p.matches.length, data] })
-      outDb.exec({ sql: 'INSERT INTO two_view_geometries(pair_id,rows,cols,data,config,F,E,H) VALUES(?,?,2,?,2,?,?,?)', bind: [pairId, p.matches.length, data, p.F ? f64Blob(p.F.flat()) : null, p.E ? f64Blob(p.E.flat()) : null, p.H ? f64Blob(p.H.flat()) : null] })
+      outDb.exec({ sql: 'INSERT INTO matches(pair_id,rows,cols,data) VALUES(?,?,2,?)', bind: [pairId, matchRows(p.matches), data] })
+      outDb.exec({ sql: 'INSERT INTO two_view_geometries(pair_id,rows,cols,data,config,F,E,H) VALUES(?,?,2,?,2,?,?,?)', bind: [pairId, matchRows(p.matches), data, p.F ? f64Blob(p.F.flat()) : null, p.E ? f64Blob(p.E.flat()) : null, p.H ? f64Blob(p.H.flat()) : null] })
     }
     outDb.exec('COMMIT')
     return s.capi.sqlite3_js_db_export(outDb)

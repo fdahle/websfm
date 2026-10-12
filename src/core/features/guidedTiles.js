@@ -263,7 +263,7 @@ export function kptIndicesInRect(kps, rect) {
   const x1 = x + w, y1 = y + h
   const out = []
   for (let i = 0; i < kps.length; i++) {
-    const kx = kps[i].x, ky = kps[i].y
+    const kx = kps.x(i), ky = kps.y(i) // typed keypoints (core/features/keypoints.js)
     if (kx >= x && kx < x1 && ky >= y && ky < y1) out.push(i)
   }
   return out

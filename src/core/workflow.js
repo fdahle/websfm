@@ -227,7 +227,7 @@ export function resolveWorkflowSettings(type, settings = {}, runtime = {}) {
     }
   }
   if (type === 'gen-dem') {
-    const { gsd, ...rest } = { ...DEM_DEFAULTS, ...value }
+    const { gsd, ...rest } = { ...DEM_DEFAULTS, ...value, memBudgetBytes: runtime.memBudgetBytes }
     return gsd > 0 ? { ...rest, gsd } : rest
   }
   if (type === 'gen-ortho') {

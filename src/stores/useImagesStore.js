@@ -11,9 +11,11 @@ import { FIDUCIAL_DETECT_TUNING } from '../core/sfm/fiducialDetect.js'
 import { migrateLegacyFiducialImage } from '../core/sfm/fiducialModel.js'
 import { fiducialBatchConsensus, fiducialShapeCheck } from '../core/sfm/fiducialConsensus.js'
 import { detectionConfidence } from '../core/sfm/fiducialDetection.js'
-import { buildBorderMask } from '../core/mask.js'
+import { buildBorderMask, dataUrlToBlob } from '../core/mask.js'
+import { Keypoints, asKeypoints, fillNormalized } from '../core/features/keypoints.js'
 import { resolveDetectMaxDim } from '../core/features/detectResolution.js'
-import { DETECT_TUNING } from '../core/tuning.js'
+import { DETECT_TUNING, RESIDENT_TUNING } from '../core/tuning.js'
+import { createByteLru } from '../utils/byteLru.js'
 import { learnedDetector, detectorLabel } from '../core/features/learnedDetectors.js'
 import { detectionConcurrency, fiducialDetectionConcurrency } from '../core/features/detectConcurrency.js'
 import { useLog } from '../composables/useLog.js'
@@ -23,6 +25,7 @@ import { useMatchesStore } from './useMatchesStore.js'
 import { useModelsStore } from './useModelsStore.js'
 import { mapConcurrent } from '../utils/concurrency.js'
 import { moveListEntry, nextGroupName, normalizeImageGroups } from '../utils/imageGroups.js'
+import { createImageThumbnails } from './images/thumbnails.js'
 
 // The image set: source images, their metadata, keypoints, masks, depth maps, and
 // sensor assignments. Project-scoped and persisted, but its restore/clear have
@@ -37,13 +40,123 @@ export const useImagesStore = defineStore('images', () => {
   // User-named folders for the sidebar list — display only, never read by the
   // pipeline (see utils/imageGroups.js). Membership is `img.groupId`.
   const imageGroups = ref([])
-  // A status flag alone is insufficient after restore: a missing/corrupt keypoint
-  // sidecar used to leave an empty array advertised as ready to matching.
-  const keypointReadyImages = computed(() => images.value.filter((img) =>
-    img.kpStatus === 'done' && (img.keypoints?.length ?? 0) > 0))
+  // Gates read the COUNT, never the buffer: keypoints are loaded per image on demand
+  // (below), so "not resident" says nothing about "not detected". A restore whose
+  // keypoint file is missing sets kpStatus 'error' / kpCount 0 (restoreImages).
+  const hasKeypoints = (img) => img?.kpStatus === 'done' && (img.kpCount ?? 0) > 0
+  const keypointReadyImages = computed(() => images.value.filter(hasKeypoints))
 
   // Persist only when a project is open and OPFS is usable (see useProjectsStore).
   const isPersisting = () => projects.isPersisting
+
+  // ── Keypoints: on disk, read per image on demand (TODO ▸ SC-3) ──────────────
+  // An image record carries `kpCount`/`kpStatus` (reactive, persisted) and `kpRev`
+  // (bumped whenever its keypoints are replaced, session-only); the Keypoints
+  // themselves (core/features/keypoints.js) live in this byte-bounded LRU keyed by
+  // uuid, never on the record. Fresh detections/imports are PINNED until their save
+  // lands (and forever in a project that cannot persist); a copy read back from
+  // disk is clean and evictable. Consumers:
+  //   ensureKeypoints(img)  — cached; the open image tab, the match preview, matching
+  //   readKeypoints(img)    — resident or read straight through, NOT cached; a bulk
+  //                           pass (SfM input, exports, fingerprints) that would
+  //                           otherwise flush the interactive working set
+  //   residentKeypoints(img) — synchronous peek, null when not loaded
+  const keypointCache = createByteLru({ budgetBytes: RESIDENT_TUNING.keypointCacheMiB * 2 ** 20 })
+  const keypointLoads = new Map() // uuid → in-flight read
+  let keypointEpoch = 0 // bumps on restore/clear: a read that straddles it is dropped
+  const keypointBytes = (k) => k.data.byteLength + (k.rgb?.byteLength ?? 0)
+  // Callers hand an image record or an id; mutate the store's proxy when there is one.
+  const resolveImage = (ref) => {
+    if (ref == null) return null
+    if (typeof ref === 'string') return imageById(ref)
+    return (ref.id != null ? imageById(ref.id) : null) ?? ref
+  }
+
+  function residentKeypoints(ref) {
+    const img = resolveImage(ref)
+    return hasKeypoints(img) ? (keypointCache.get(img.uuid) ?? null) : null
+  }
+
+  // Attach a fresh result (detection, import): resident and pinned until `persist`
+  // resolves. Returns the wrapped set.
+  function holdKeypoints(img, kps, persist = null) {
+    const held = markRaw(kps)
+    img.kpRev = (img.kpRev ?? 0) + 1
+    keypointCache.set(img.uuid, held, keypointBytes(held), { pinned: true })
+    persist?.then(() => keypointCache.unpin(img.uuid, held))
+      .catch((err) => log(`Keypoints for ${img.name} could not be saved — kept in memory (${err?.message ?? err})`,
+        'warn', 'Detection'))
+    return held
+  }
+
+  // One image's keypoints from OPFS, or null. Not cached here.
+  async function readKeypointsFromDisk(img) {
+    const projectId = projects.currentProjectId
+    const epoch = keypointEpoch, rev = img.kpRev
+    const data = projectId ? await opfs.loadKeypoints(projectId, img.uuid) : null
+    const rgb = data ? await opfs.loadColors(projectId, img.uuid) : null
+    // Replaced (re-detected, cleared) or the project changed while reading.
+    if (epoch !== keypointEpoch || rev !== img.kpRev) return { stale: true }
+    if (!data) {
+      img.kpStatus = 'error'
+      img.kpCount = 0
+      log(`Keypoints missing for ${img.name} — re-run feature detection`, 'warn', 'Project')
+      return { kps: null }
+    }
+    const kps = new Keypoints(data)
+    if (rgb?.length === 3 * kps.length) kps.rgb = rgb
+    // The file is what match indices refer to, so it wins over a disagreeing count.
+    if (kps.length !== img.kpCount) {
+      log(`Keypoints for ${img.name}: the file holds ${kps.length}, the project said ${img.kpCount} — using the file`,
+        'warn', 'Project')
+      img.kpCount = kps.length
+      if (isPersisting()) sync()
+    }
+    return { kps: markRaw(kps) }
+  }
+
+  function loadKeypointsShared(img, cache) {
+    let p = keypointLoads.get(img.uuid)
+    if (!p) {
+      const epoch = keypointEpoch
+      p = readKeypointsFromDisk(img).finally(() => { if (keypointLoads.get(img.uuid) === p) keypointLoads.delete(img.uuid) })
+      keypointLoads.set(img.uuid, p)
+      if (cache) {
+        p.then((r) => {
+          if (r.kps && epoch === keypointEpoch && !keypointCache.has(img.uuid)) {
+            keypointCache.set(img.uuid, r.kps, keypointBytes(r.kps))
+          }
+        }, () => {})
+      }
+    }
+    return p.then((r) => (r.stale ? (keypointCache.get(img.uuid) ?? null) : r.kps))
+  }
+
+  // The image's keypoints, loaded (and kept, LRU) on first use; null when it has none.
+  async function ensureKeypoints(ref) {
+    const img = resolveImage(ref)
+    if (!hasKeypoints(img)) return null
+    return keypointCache.get(img.uuid) ?? loadKeypointsShared(img, true)
+  }
+
+  // The image's keypoints for a one-pass consumer: the resident copy if there is one,
+  // else read straight from disk without displacing the cache.
+  async function readKeypoints(ref) {
+    const img = resolveImage(ref)
+    if (!hasKeypoints(img)) return null
+    const hit = keypointCache.peek(img.uuid)
+    if (hit) return hit
+    if (keypointLoads.has(img.uuid)) return loadKeypointsShared(img, false)
+    const r = await readKeypointsFromDisk(img)
+    return r.stale ? (keypointCache.peek(img.uuid) ?? null) : r.kps
+  }
+
+  const keypointCacheStats = () => keypointCache.stats()
+  function resetKeypointCache() {
+    keypointEpoch++
+    keypointCache.clear()
+    keypointLoads.clear()
+  }
 
   // TIFF compute-source readiness. A TIFF's `computeUrl` (lossless PNG) is encoded
   // *after* the display JPEG so the viewer is usable sooner (see addImages), which
@@ -165,8 +278,32 @@ export const useImagesStore = defineStore('images', () => {
     })
   }
 
+  // id → image, rebuilt lazily when the list changes. Per-image calls in a batch
+  // (a depth run's updateDepth, a group's updateMask, the thumbnail queue) were each
+  // a linear scan of the reactive list: O(N²) over thousands of images.
+  const imageIndex = computed(() => {
+    const m = new Map()
+    for (const img of images.value) if (!m.has(img.id)) m.set(img.id, img)
+    return m
+  })
   function imageById(id) {
-    return images.value.find((img) => img.id === id) || null
+    return imageIndex.value.get(id) ?? null
+  }
+
+  const thumbnails = createImageThumbnails({
+    imageById,
+    currentProjectId: () => projects.currentProjectId,
+    isPersisting,
+    trackWrite,
+    log,
+    healImage: (id) => reportImageLoadError(id),
+  })
+  // Release every per-image object URL (display, compute, overlays, thumbnail).
+  function releaseImageUrls(img) {
+    URL.revokeObjectURL(img.url)
+    if (img.computeUrl && img.computeUrl !== img.url) URL.revokeObjectURL(img.computeUrl)
+    releasePreview(img.mask); releasePreview(img.depth)
+    thumbnails.release(img.thumb)
   }
 
   function selectImage(id) {
@@ -213,6 +350,9 @@ export const useImagesStore = defineStore('images', () => {
     const tiffItems = []
     const metadataTasks = []
     const batchWrites = []
+    // One id set for the whole batch: a per-file scan of the (growing, reactive)
+    // list was O(N²) on a multi-thousand-image drop.
+    const knownIds = new Set(images.value.map((img) => img.id))
     for (const file of files) {
       const item = createImage(file)
       // Keep the immutable source filename separate from the user-editable label.
@@ -220,10 +360,12 @@ export const useImagesStore = defineStore('images', () => {
       // in the label they choose later.
       item.sourceName = file.name
       item.groupId = null
-      if (images.value.some((img) => img.id === item.id)) {
+      if (knownIds.has(item.id)) {
+        URL.revokeObjectURL(item.url)
         log(`Skip duplicate: ${file.name}`, 'warn', 'Images')
         continue
       }
+      knownIds.add(item.id)
       images.value.push(item)
       added++
       log(`Added image: ${file.name} (${(file.size / 1024).toFixed(0)} KB)`, 'info', 'Images')
@@ -252,6 +394,9 @@ export const useImagesStore = defineStore('images', () => {
           .catch(() => extractMetadataFor(item, file, projectId)))
       } else {
         metadataTasks.push(extractMetadataFor(item, file, projectId))
+        // The list thumbnail, from the File itself — background, behind any row in
+        // view. Not awaited: a 5,000-image drop must not wait on 5,000 decodes.
+        thumbnails.requestThumbnail(item, { source: file })
       }
     }
 
@@ -266,6 +411,8 @@ export const useImagesStore = defineStore('images', () => {
             const found = images.value.find((img) => img.id === item.id)
             if (found) { found.computeUrl = found.url; found.previewPending = false }
             resolveComputeReady(item.uuid)
+            // This engine decodes the TIFF itself, so the File is the display source.
+            thumbnails.requestThumbnail(item, { source: file })
             return
           }
           const { displayBlob, computeBlob, width, height, timings, srcInfo } = await transcodeTiff(file, undefined, {
@@ -274,6 +421,9 @@ export const useImagesStore = defineStore('images', () => {
             // something long before the full-quality one is ready.
             onThumbnail: (thumbBlob) => {
               const found = images.value.find((img) => img.id === item.id)
+              // The ≤512 px transcode preview is also the cheapest source for the
+              // list thumbnail: no second decode of the full-resolution display JPEG.
+              if (found) thumbnails.requestThumbnail(found, { source: thumbBlob })
               if (!found || !found.previewPending) return
               URL.revokeObjectURL(found.url)
               found.url = URL.createObjectURL(thumbBlob)
@@ -301,6 +451,8 @@ export const useImagesStore = defineStore('images', () => {
           }
           found.computeUrl = URL.createObjectURL(computeBlob)
           resolveComputeReady(item.uuid)
+          // No preview event (an older worker): fall back to the display JPEG.
+          if (!found.thumb) thumbnails.requestThumbnail(found)
           log(`Decoded TIFF: ${file.name} — ${width}×${height}`, 'info', 'Images')
           if (timings) {
             // Per-stage baseline for the TIFF-codec plan (TODO.md): which stage
@@ -361,9 +513,9 @@ export const useImagesStore = defineStore('images', () => {
     const idx = images.value.findIndex((img) => img.id === id)
     if (idx !== -1) {
       const img = images.value[idx]
-      URL.revokeObjectURL(img.url)
-      if (img.computeUrl && img.computeUrl !== img.url) URL.revokeObjectURL(img.computeUrl)
+      releaseImageUrls(img)
       images.value.splice(idx, 1)
+      keypointCache.delete(img.uuid)
       if (selectedId.value === id) selectedId.value = null
       log(`Removed image: ${img.name}`, 'info', 'Images')
       useMatchesStore().removeMatchesForImage(img.uuid)
@@ -585,30 +737,47 @@ export const useImagesStore = defineStore('images', () => {
   // overlay, and the sidebar badge stay live) WITHOUT the OPFS write, log line,
   // or project sync — used for the many intermediate commits during a mask-edit
   // session, which flushes once (persist true) when editing closes.
-  function updateMask(imageId, dataUrl, persist = true) {
+  // A mask or depth preview on an image record: `{ blob, url }`. The Blob holds the
+  // PNG bytes outside the V8 heap (after a restore it is the OPFS File itself, read
+  // only when something decodes it); `url` is its blob: URL for the viewers, and
+  // workers are handed the Blob. Never a base64 data URL: that was one heap string
+  // per image for the whole session (TODO ▸ SC-1). `source` is a Blob/File or a
+  // data: URL (a canvas export), decoded once here.
+  function previewOf(source) {
+    if (!source) return null
+    const blob = typeof source === 'string' ? dataUrlToBlob(source) : source
+    return markRaw({ blob, url: URL.createObjectURL(blob) })
+  }
+  function releasePreview(p) { if (p?.url) URL.revokeObjectURL(p.url) }
+
+  function updateMask(imageId, source, persist = true) {
     const img = imageById(imageId)
     if (!img) return
-    img.mask = dataUrl ? { dataUrl } : null
+    releasePreview(img.mask)
+    img.mask = previewOf(source)
     if (!persist) return
-    log(dataUrl ? `Mask saved: ${img.name}` : `Mask cleared: ${img.name}`, 'info', 'Images')
+    log(img.mask ? `Mask saved: ${img.name}` : `Mask cleared: ${img.name}`, 'info', 'Images')
     if (isPersisting()) {
       const pid = projects.currentProjectId
-      if (dataUrl) opfs.saveMask(pid, img.uuid, dataUrl).catch(() => {})
+      if (img.mask) opfs.saveMask(pid, img.uuid, img.mask.blob).catch(() => {})
       else opfs.deleteMask(pid, img.uuid).catch(() => {})
       sync()
     }
   }
 
-  function updateDepth(imageId, dataUrl) {
+  // `{ quiet, persistSync }`: a depth run updates hundreds of images at once, so it
+  // logs once and syncs project.json once itself instead of per image.
+  function updateDepth(imageId, source, { quiet = false, persistSync = true } = {}) {
     const img = imageById(imageId)
     if (!img) return
-    img.depth = dataUrl ? { dataUrl } : null
-    log(dataUrl ? `Depth map saved: ${img.name}` : `Depth map cleared: ${img.name}`, 'info', 'Images')
+    releasePreview(img.depth)
+    img.depth = previewOf(source)
+    if (!quiet) log(img.depth ? `Depth map saved: ${img.name}` : `Depth map cleared: ${img.name}`, 'info', 'Images')
     if (isPersisting()) {
       const pid = projects.currentProjectId
-      if (dataUrl) opfs.saveDepth(pid, img.uuid, dataUrl).catch(() => {})
+      if (img.depth) opfs.saveDepth(pid, img.uuid, img.depth.blob).catch(() => {})
       else opfs.deleteDepth(pid, img.uuid).catch(() => {})
-      sync()
+      if (persistSync) sync()
     }
   }
 
@@ -834,9 +1003,9 @@ export const useImagesStore = defineStore('images', () => {
         try {
           const sides = { left: f.left, top: f.top,
             right: row.out.natW - 1 - f.right, bottom: row.out.natH - 1 - f.bottom }
-          const dataUrl = await buildBorderMask(row.out.natW, row.out.natH, sides,
-            settings.overwrite ? null : img.mask?.dataUrl ?? null)
-          updateMask(img.id, dataUrl, true)
+          const blob = await buildBorderMask(row.out.natW, row.out.natH, sides,
+            settings.overwrite ? null : img.mask?.blob ?? null)
+          updateMask(img.id, blob, true)
           masksGenerated++
         } catch (err) { log(`${img.name}: frame mask failed — ${err.message}`, 'warn', 'Fiducial') }
       }
@@ -894,7 +1063,7 @@ export const useImagesStore = defineStore('images', () => {
       // dropped at detection — this propagates to matching and reconstruction.
       const res = await detectKeypoints(
         img.computeUrl ?? img.url,
-        { ...settings, maxDim: res0.maxDim, mask: img.mask?.dataUrl ?? null,
+        { ...settings, maxDim: res0.maxDim, mask: img.mask?.blob ?? null,
           ...(maxOrientations != null ? { maxOrientations } : {}),
           ...(capRule != null ? { capRule } : {}) },
         { onLog: (msg) => log(msg, 'info', 'Detection') },
@@ -913,9 +1082,17 @@ export const useImagesStore = defineStore('images', () => {
         // markRaw: these are large and never need reactivity; leaving them as
         // Vue proxies also breaks the worker boundary (a Proxy can't be
         // structured-cloned, so postMessage throws "could not be cloned").
-        found.keypoints   = markRaw(res.keypoints)
+        // Typed (core/features/keypoints.js): the worker's transferred buffers, wrapped,
+        // resident and pinned until both sidecars are saved (then evictable like any
+        // other image's — they are read back on demand).
+        const pid = projects.currentProjectId
+        const persisting = isPersisting()
+        const kpsNew = new Keypoints(res.keypoints.data, res.keypoints.rgb)
+        holdKeypoints(found, kpsNew, persisting
+          ? Promise.all([opfs.saveKeypoints(pid, found.uuid, kpsNew), opfs.saveColors(pid, found.uuid, kpsNew)])
+          : null)
         found.descriptors = markRaw(res.descriptors)   // keep in-memory for non-persistent matching
-        found.kpCount  = res.keypoints.length
+        found.kpCount  = kpsNew.length
         found.kpMs     = Math.round(res.ms)
         found.kpStatus = 'done'
         // Detector + descriptor width travel with the image so matching can pick
@@ -977,10 +1154,7 @@ export const useImagesStore = defineStore('images', () => {
               + `; response p50 ${d.respP50.toFixed(3)} / p95 ${d.respP95.toFixed(3)}`, 'debug', 'Detection')
           }
         }
-        if (isPersisting()) {
-          const pid = projects.currentProjectId
-          opfs.saveKeypoints(pid, found.uuid, found.keypoints).catch(() => {})
-          opfs.saveColors(pid, found.uuid, found.keypoints).catch(() => {})
+        if (persisting) {
           // A persistent project's matching reads descriptors from OPFS, so the
           // in-memory copy is dead weight once saved — 1.4 GB at 128 × 25k SIFT
           // descriptors, enough to fail the sparse memory preflight hours later.
@@ -1070,12 +1244,19 @@ export const useImagesStore = defineStore('images', () => {
     const writes = []
     for (const entry of entries || []) {
       const img = images.value.find((i) => i.uuid === entry.uuid)
-      if (!img || !Array.isArray(entry.keypoints)) continue
+      if (!img || !entry.keypoints || typeof entry.keypoints.length !== 'number') continue
       if (invalidateMatches) useMatchesStore().removeMatchesForImage(img.uuid)
-      img.keypoints = markRaw(entry.keypoints)
+      // An import hands objects ({ x, y, … }) or typed keypoints; the store keeps typed.
+      const kps = fillNormalized(asKeypoints(entry.keypoints), img.meta?.width, img.meta?.height)
+      const persist = isPersisting()
+        // Colours too: an import without them must not inherit a previous detection's file.
+        ? Promise.all([opfs.saveKeypoints(pid, img.uuid, kps), opfs.saveColors(pid, img.uuid, kps)])
+        : null
+      if (persist) writes.push(persist)
+      holdKeypoints(img, kps, persist)
       img.descriptors = entry.descriptors ? markRaw(entry.descriptors) : null
       img.kpStatus = 'done'
-      img.kpCount = entry.keypoints.length
+      img.kpCount = kps.length
       img.kpMs = 0
       img.detector = entry.detector ?? 'sift'
       img.descDim = entry.descDim ?? 128
@@ -1083,10 +1264,7 @@ export const useImagesStore = defineStore('images', () => {
       img.detectScale = 1
       img.detectSettings = { source: entry.source ?? 'external' }
       imported++
-      if (isPersisting()) {
-        writes.push(opfs.saveKeypoints(pid, img.uuid, img.keypoints))
-        if (img.descriptors) writes.push(opfs.saveDescriptors(pid, img.uuid, img.descriptors))
-      }
+      if (isPersisting() && img.descriptors) writes.push(opfs.saveDescriptors(pid, img.uuid, img.descriptors))
     }
     if (writes.length) await Promise.all(writes)
     if (imported && isPersisting()) await sync(pid)
@@ -1097,7 +1275,8 @@ export const useImagesStore = defineStore('images', () => {
   function clearKeypoints(id) {
     const img = imageById(id)
     if (!img) return
-    img.keypoints = []
+    keypointCache.delete(img.uuid)
+    img.kpRev     = (img.kpRev ?? 0) + 1
     img.kpCount   = 0
     img.kpMs      = 0
     img.kpStatus  = null
@@ -1124,10 +1303,9 @@ export const useImagesStore = defineStore('images', () => {
   function clearAll(onCleared, { purge = false } = {}) {
     restoreGeneration++
     const n = images.value.length
-    for (const img of images.value) {
-      URL.revokeObjectURL(img.url)
-      if (img.computeUrl && img.computeUrl !== img.url) URL.revokeObjectURL(img.computeUrl)
-    }
+    for (const img of images.value) releaseImageUrls(img)
+    thumbnails.reset()
+    resetKeypointCache()
     images.value = []
     imageGroups.value = []
     selectedId.value = null
@@ -1143,10 +1321,9 @@ export const useImagesStore = defineStore('images', () => {
   // loading overlay up, so command guards and viewers never observe a nominally
   // open project whose required image state is still empty.
   async function restoreImages(records, projectId, onProgress, { groups } = {}) {
-    for (const img of images.value) {
-      URL.revokeObjectURL(img.url)
-      if (img.computeUrl && img.computeUrl !== img.url) URL.revokeObjectURL(img.computeUrl)
-    }
+    for (const img of images.value) releaseImageUrls(img)
+    thumbnails.reset()
+    resetKeypointCache()
     images.value = []
     imageGroups.value = normalizeImageGroups(groups)
     const groupIds = new Set(imageGroups.value.map((g) => g.id))
@@ -1156,6 +1333,12 @@ export const useImagesStore = defineStore('images', () => {
     urlHeal.clear()
 
     const generation = ++restoreGeneration
+    // Keypoints are NOT read at open (ensureKeypoints / readKeypoints load them per
+    // image when something needs them); one directory listing tells which images
+    // still have a keypoint file, so a lost sidecar is flagged now, not later.
+    const kpFiles = records.some((r) => r.kpStatus === 'done') ? await opfs.listKeypointFiles(projectId) : new Set()
+    if (generation !== restoreGeneration) return
+    const missingKp = []
     const restored = records.map((record) => ({
       id: record.id,
       uuid: record.uuid,
@@ -1171,9 +1354,10 @@ export const useImagesStore = defineStore('images', () => {
       previewPending: true,
       previewFailed: false,
       previewFailReason: null,
-      keypoints: [],
-      kpStatus: record.kpStatus,
-      kpCount: record.kpCount || 0,
+      ...(record.kpStatus === 'done' && !kpFiles.has(record.uuid)
+        ? (missingKp.push(record.name), { kpStatus: 'error', kpCount: 0 })
+        : { kpStatus: record.kpStatus, kpCount: record.kpCount || 0 }),
+      kpRev: 0,
       kpMs: record.kpMs || 0,
       detector: record.detector ?? 'sift',
       descDim: record.descDim ?? 128,
@@ -1183,10 +1367,16 @@ export const useImagesStore = defineStore('images', () => {
       quality: record.quality ?? null,
       mask: null,
       depth: null,
+      // Filled on demand (a row in view) from images-derived/{uuid}.thumb — never at open.
+      thumb: null,
       fiducialObs: Array.isArray(record.fiducialObs) ? record.fiducialObs.map((o) => ({ ...o })) : [],
       fiducialDetections: Array.isArray(record.fiducialDetections) ? record.fiducialDetections.map((d) => ({ ...d })) : [],
     }))
     images.value = restored
+    for (const name of missingKp.slice(0, 20)) {
+      log(`Keypoints missing for ${name} — re-run feature detection`, 'warn', 'Project')
+    }
+    if (missingKp.length > 20) log(`Keypoints missing for ${missingKp.length - 20} more image(s)`, 'warn', 'Project')
 
     const total = records.length
     if (total === 0) {
@@ -1194,6 +1384,11 @@ export const useImagesStore = defineStore('images', () => {
       return
     }
     let done = 0
+    // One directory walk for the whole restore (opfs.projectSubDirs); a failure leaves
+    // the loaders walking per file, as before.
+    const dirNames = ['images', ...(records.some((r) => r.hasMask) ? ['masks'] : []),
+      ...(records.some((r) => r.hasDepth) ? ['depthmaps'] : [])]
+    const dirs = await opfs.projectSubDirs(projectId, dirNames).catch(() => null)
     await mapConcurrent(records, 12, async (record, index) => {
       // `images` is a deep ref: assigning `restored` above makes its entries
       // reactive proxies, but the entries retained in the local `restored` array
@@ -1205,7 +1400,7 @@ export const useImagesStore = defineStore('images', () => {
         // Load the original lazily — a TIFF cache hit needs neither the
         // original nor a (re-)decode, so we skip the OPFS read entirely there.
         let blob = null
-        const loadOriginal = async () => (blob ??= await opfs.loadImageBlob(projectId, record.uuid))
+        const loadOriginal = async () => (blob ??= await opfs.loadImageBlob(projectId, record.uuid, dirs))
         // OPFS keeps the original file, so TIFFs need the same transcode as on
         // ingest (the Blob has no name, so classify by the record's name).
         let url, computeUrl
@@ -1255,29 +1450,9 @@ export const useImagesStore = defineStore('images', () => {
         img.url = url
         img.computeUrl = computeUrl
         img.previewPending = false
-        if (record.kpStatus === 'done') {
-          const kps = await opfs.loadKeypoints(projectId, record.uuid)
-          if (kps) {
-            // Re-attach per-keypoint colours (stored separately) so a restored
-            // project can still colour the sparse cloud without re-detecting.
-            const colors = await opfs.loadColors(projectId, record.uuid)
-            if (colors) kps.forEach((kp, i) => { if (colors[i]) kp.color = colors[i] })
-            img.keypoints = markRaw(kps)
-            img.kpCount = kps.length
-          } else {
-            img.kpStatus = 'error'
-            img.kpCount = 0
-            log(`Keypoints missing for ${record.name} — re-run feature detection`, 'warn', 'Project')
-          }
-        }
-        if (record.hasMask) {
-          const maskDataUrl = await opfs.loadMaskDataUrl(projectId, record.uuid)
-          if (maskDataUrl) img.mask = { dataUrl: maskDataUrl }
-        }
-        if (record.hasDepth) {
-          const depthDataUrl = await opfs.loadDepthDataUrl(projectId, record.uuid)
-          if (depthDataUrl) img.depth = { dataUrl: depthDataUrl }
-        }
+        // The OPFS Files themselves: nothing is read until a viewer or worker decodes.
+        if (record.hasMask) img.mask = previewOf(await opfs.loadMaskFile(projectId, record.uuid, dirs))
+        if (record.hasDepth) img.depth = previewOf(await opfs.loadDepthFile(projectId, record.uuid, dirs))
       } catch (err) {
         if (generation === restoreGeneration) {
           log(`Restore failed: ${record.name} — ${err?.message ?? err}`, 'error', 'Project')
@@ -1286,7 +1461,6 @@ export const useImagesStore = defineStore('images', () => {
           img.previewFailReason = err?.message ?? String(err)
           // A source image that cannot be restored is not a usable matching input,
           // even if project.json says its old keypoint job completed.
-          img.keypoints = markRaw([])
           img.kpStatus = 'error'
           img.kpCount = 0
         }
@@ -1329,7 +1503,7 @@ export const useImagesStore = defineStore('images', () => {
     await mapConcurrent(targets, Math.max(1, Math.min(4, POOL_SIZE)), async (img) => {
       try {
         await whenComputeReady(img)
-        const q = await imageQualityWorker(img.computeUrl ?? img.url, { mask: img.mask?.dataUrl ?? null })
+        const q = await imageQualityWorker(img.computeUrl ?? img.url, { mask: img.mask?.blob ?? null })
         img.quality = {
           sharpness: q.sharpness, sharpnessP90: q.sharpnessP90, meanLuma: q.meanLuma,
           overexposed: q.overexposed, underexposed: q.underexposed,
@@ -1353,6 +1527,11 @@ export const useImagesStore = defineStore('images', () => {
     imageGroups,
     estimateImageQuality,
     keypointReadyImages,
+    // Keypoints on demand (the "Keypoints: on disk" section at the top).
+    ensureKeypoints,
+    readKeypoints,
+    residentKeypoints,
+    keypointCacheStats,
     pendingWorkCount,
     sync,
     imageById,
@@ -1367,6 +1546,10 @@ export const useImagesStore = defineStore('images', () => {
     setImageGroupCollapsed,
     moveImageGroup,
     reportImageLoadError,
+    // List thumbnails (stores/images/thumbnails.js).
+    requestThumbnail: thumbnails.requestThumbnail,
+    reportThumbnailError: thumbnails.reportThumbnailError,
+    thumbsVersion: thumbnails.version,
     updateMask,
     updateDepth,
     setFiducialObservation,

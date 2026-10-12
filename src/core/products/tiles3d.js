@@ -178,7 +178,7 @@ export function cloudToGlbPoints(cloud, { origin = [0, 0, 0], yUp = true, color 
   }, bin)
 }
 
-// glTF JSON + BIN → a .glb container. Shared shape with meshToGlb's tail; kept
+// glTF JSON + BIN → a .glb container. Shared shape with meshToGlbParts' tail; kept
 // here so this module has no dependency on the mesh exporter.
 export function packGlb(gltf, bin) {
   const enc = new TextEncoder()

@@ -88,14 +88,17 @@ export async function selectInitPair(
   // Picking purely by inlier count tends to choose near-identical viewpoints
   // (tiny parallax) whose triangulated points collapse onto a line. Probe the
   // top candidates and score every one that recovers a valid pose.
-  const { minInitInliers = 15, minInitAngleDeg = 2.0, initCandidates = 24, excludedInitPairs = [] } = settings
+  const {
+    minInitInliers = 15, minInitAngleDeg = 2.0, initCandidates = 24, initCandidateMax = 240,
+    excludedInitPairs = [],
+  } = settings
   const excluded = new Set(excludedInitPairs)
   const pairId = (a, b) => (a < b ? `${a}--${b}` : `${b}--${a}`)
-  const candidates = donePairs
+  const ranked = donePairs
     .filter((e) => e.inlierCount >= minInitInliers
       && Kmap.has(e.idA) && Kmap.has(e.idB) && e.F && !excluded.has(pairId(e.idA, e.idB)))
     .sort((a, b) => b.inlierCount - a.inlierCount)
-    .slice(0, initCandidates)
+  const candidates = ranked.slice(0, initCandidates)
 
   log(`${candidates.length} init candidate(s) of ${donePairs.length} done pairs `
     + `(≥${minInitInliers} inliers, need ≥${minInitAngleDeg}° parallax)`, 'info', 'Reconstruction')
@@ -241,45 +244,100 @@ export async function selectInitPair(
   // cameras yet); emit a throttled label-only tick so the user sees it working.
   let lastEmit = 0
   const nowMs = () => (typeof performance !== 'undefined' ? performance.now() : Date.now())
-  for (let ci = 0; ci < candidates.length; ci++) {
-    const entry = candidates[ci]
-    if (onProgress) {
-      const t = nowMs()
-      if (t - lastEmit >= 250) { lastEmit = t; onProgress(ci, candidates.length) }
+  async function probe(batch) {
+    for (let ci = 0; ci < batch.length; ci++) {
+      const entry = batch[ci]
+      if (onProgress) {
+        const t = nowMs()
+        if (t - lastEmit >= 250) { lastEmit = t; onProgress(ci, batch.length) }
+      }
+      const init = await tryInitPair(entry)
+      const nameA = imageByUuid(entry.idA)?.name ?? entry.idA
+      const nameB = imageByUuid(entry.idB)?.name ?? entry.idB
+      if (!init.ok) {
+        log(`candidate ${nameA} ↔ ${nameB} rejected — ${init.reason}`, 'debug', 'Reconstruction')
+        continue
+      }
+      // Cheirality survival = how many triangulated points are in front of both
+      // cameras. A low ratio almost always means the recovered pose is wrong.
+      const kept = init.cheiralKept, tri = init.triCount
+      const pct = tri ? (100 * kept / tri).toFixed(0) : '0'
+      if (kept < 10) {
+        log(`candidate ${nameA} ↔ ${nameB} rejected — only ${kept}/${tri} pts `
+          + `survived cheirality (${pct}%), need ≥10`, 'debug', 'Reconstruction')
+        continue
+      }
+      init.reproj = initReprojStats(init)
+      init.nameA = nameA
+      init.nameB = nameB
+      init.growth = seedGrowth(init)
+      init.score = seedScore(init)
+      const candRatio = init.esv.s1 > 0 ? init.esv.s2 / init.esv.s1 : 0
+      // Log the score AND its factors: a seed decision that can only be re-derived by
+      // hand from raw candidate numbers is what made the B4 post-mortem manual.
+      log(`candidate ${nameA} ↔ ${nameB} — ${init.inliers} inliers, `
+        + `${kept}/${tri} pts kept after cheirality (${pct}%), median parallax ${init.angle.toFixed(2)}°, `
+        + `init reproj median ${init.reproj.median.toFixed(2)}px, E σ2/σ1 ${candRatio.toFixed(2)}, `
+        + `graph degree ${pairDegree(entry)} (median ${medianDegree}) `
+        + `⇒ score ${init.score.toFixed(1)} (parallax ×${parallaxHealth(init.angle).toFixed(2)}, `
+        + `connectivity ×${connectivityHealth(init).toFixed(2)}, `
+        + `growth ×${growthHealth(init).toFixed(2)} from ${init.growth.views} PnP-ready view(s))`,
+        'debug', 'Reconstruction')
+      viable.push(init)
     }
-    const init = await tryInitPair(entry)
-    const nameA = imageByUuid(entry.idA)?.name ?? entry.idA
-    const nameB = imageByUuid(entry.idB)?.name ?? entry.idB
-    if (!init.ok) {
-      log(`candidate ${nameA} ↔ ${nameB} rejected — ${init.reason}`, 'debug', 'Reconstruction')
-      continue
+  }
+  await probe(candidates)
+
+  // ── Widening the search ────────────────────────────────────────────────────
+  // The batch above is the top pairs by inlier COUNT, and inlier count is highest
+  // exactly where viewpoints barely differ: a drone hovering or turning on the spot
+  // shoots a burst whose pairs all overlap ~100%. Nine such frames make 36 pairs, so
+  // they can fill the whole batch and leave nothing to clear the parallax floor (St
+  // Nazaire with SuperPoint + LightGlue, 2026-10-09: all 24 candidates at 0.17–0.21°,
+  // every seed retry from the same burst, 7/127 cameras and 0 points after the first
+  // track filter). COLMAP keeps searching until a pair satisfies its init constraints;
+  // so do we, up to `initCandidateMax` probes. Only reached when nothing has cleared
+  // the floor, so a run that found a sound seed in the first batch is unchanged.
+  //
+  // Probing the rest of the burst would waste the budget, so a candidate is skipped
+  // when parallax already rules it out: triangulation angle obeys the triangle
+  // inequality, so if X and Y each sit within half the floor of some probed image Z,
+  // X–Y sits below the floor. Only measured pairs feed this, never a guess.
+  const halfFloor = minInitAngleDeg / 2
+  const nearViews = new Map() // image → Set of images probed within halfFloor of it
+  const noteNear = (v) => {
+    if (!(v.angle < halfFloor)) return
+    for (const [a, b] of [[v.entry.idA, v.entry.idB], [v.entry.idB, v.entry.idA]]) {
+      if (!nearViews.has(a)) nearViews.set(a, new Set())
+      nearViews.get(a).add(b)
     }
-    // Cheirality survival = how many triangulated points are in front of both
-    // cameras. A low ratio almost always means the recovered pose is wrong.
-    const kept = init.cheiralKept, tri = init.triCount
-    const pct = tri ? (100 * kept / tri).toFixed(0) : '0'
-    if (kept < 10) {
-      log(`candidate ${nameA} ↔ ${nameB} rejected — only ${kept}/${tri} pts `
-        + `survived cheirality (${pct}%), need ≥10`, 'debug', 'Reconstruction')
-      continue
+  }
+  const predictedLow = (e) => {
+    const na = nearViews.get(e.idA), nb = nearViews.get(e.idB)
+    if (!na || !nb) return false
+    if (na.has(e.idB)) return true
+    for (const z of na) if (nb.has(z)) return true
+    return false
+  }
+  let next = candidates.length
+  let probed = candidates.length
+  while (!viable.some((v) => v.angle >= minInitAngleDeg) && next < ranked.length && probed < initCandidateMax) {
+    viable.forEach(noteNear)
+    const batch = []
+    let skipped = 0
+    while (next < ranked.length && batch.length < initCandidates && probed + batch.length < initCandidateMax) {
+      const e = ranked[next++]
+      if (predictedLow(e)) skipped++
+      else batch.push(e)
     }
-    init.reproj = initReprojStats(init)
-    init.nameA = nameA
-    init.nameB = nameB
-    init.growth = seedGrowth(init)
-    init.score = seedScore(init)
-    const candRatio = init.esv.s1 > 0 ? init.esv.s2 / init.esv.s1 : 0
-    // Log the score AND its factors: a seed decision that can only be re-derived by
-    // hand from raw candidate numbers is what made the B4 post-mortem manual.
-    log(`candidate ${nameA} ↔ ${nameB} — ${init.inliers} inliers, `
-      + `${kept}/${tri} pts kept after cheirality (${pct}%), median parallax ${init.angle.toFixed(2)}°, `
-      + `init reproj median ${init.reproj.median.toFixed(2)}px, E σ2/σ1 ${candRatio.toFixed(2)}, `
-      + `graph degree ${pairDegree(entry)} (median ${medianDegree}) `
-      + `⇒ score ${init.score.toFixed(1)} (parallax ×${parallaxHealth(init.angle).toFixed(2)}, `
-      + `connectivity ×${connectivityHealth(init).toFixed(2)}, `
-      + `growth ×${growthHealth(init).toFixed(2)} from ${init.growth.views} PnP-ready view(s))`,
-      'debug', 'Reconstruction')
-    viable.push(init)
+    const widest = viable.reduce((m, v) => Math.max(m, v.angle), 0)
+    log(`no candidate among ${probed} probed clears ${minInitAngleDeg}° parallax (widest ${widest.toFixed(2)}°) — `
+      + `widening the search: next ${batch.length} pair(s) by inlier count`
+      + (skipped ? `, ${skipped} skipped as near-coincident with already-probed views` : ''),
+    'info', 'Reconstruction')
+    if (!batch.length) break
+    probed += batch.length
+    await probe(batch)
   }
 
   // Among candidates clearing the parallax floor take the highest-scoring seed (see the
@@ -325,8 +383,18 @@ export async function selectInitPair(
     return { status: 'error' }
   }
   if (best.angle < minInitAngleDeg) {
+    // Below the track filter's own floor the seed is not merely weak: the first
+    // interim cleanup drops every point it triangulated, and with no points left no
+    // further image can register. Say that, and the usual cause, instead of "flat".
+    const trackFloor = settings.filterMinTriAngleDeg
+    const doomed = Number.isFinite(trackFloor) && best.angle < trackFloor
     log(`best initial parallax is only ${best.angle.toFixed(2)}° `
-      + `(< ${minInitAngleDeg}°) — the sparse cloud may look flat/linear`, 'warn', 'Reconstruction')
+      + `(< ${minInitAngleDeg}°) — `
+      + (doomed
+        ? `below the ${trackFloor}° the track filter requires, so this seed's points will be filtered out and `
+          + `the model is unlikely to grow. Every probed pair views the scene from (almost) one position — a hover, `
+          + `a turn on the spot, or a very distant scene.`
+        : 'the sparse cloud may look flat/linear'), 'warn', 'Reconstruction')
   }
 
   return { status: 'ok', best, perPairInitReproj }

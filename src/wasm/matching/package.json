@@ -3,7 +3,7 @@
   "type": "module",
   "description": "SIFT descriptor matching and RANSAC geometric verification compiled to WebAssembly",
   "version": "0.1.0",
-  "license": "MIT OR Apache-2.0",
+  "license": "MIT",
   "files": [
     "matching_bg.wasm",
     "matching.js",

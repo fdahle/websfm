@@ -18,6 +18,8 @@
 // Conventions match geometry.js: rotation R is row-major [[…],[…],[…]] mapping
 // world→camera (x_cam = R·x_world + t); t is [x,y,z].
 
+import { planeUpOverride } from '../sfm/geometry.js'
+
 // ── small vector helpers ─────────────────────────────────────────────────────
 const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
 const add = (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]]
@@ -72,6 +74,18 @@ export function estimateUpFromViewingDirs(cameras) {
   // |mean| ≪ 1 ⇒ viewing directions largely cancel (not a coherent nadir set).
   if (norm(mean) < 0.3) return null
   return normalize([-mean[0], -mean[1], -mean[2]])
+}
+
+// The cameras' reading of "up" for products and the aerial auto-orient: a level
+// camera plane seen obliquely (geometry.js planeUpOverride — St Nazaire's
+// south-facing −26°/−50° frames put the viewing-direction mean 55° off vertical),
+// else the viewing-direction mean. { up: null } keeps the cloud-PCA fallback.
+// → { up, source: 'camera-plane' | 'cameras' | null, viewTiltDeg }
+export function sceneUpFromCameras(cams) {
+  const view = estimateUpFromViewingDirs(cams)
+  const plane = planeUpOverride(cams, view, null)
+  if (plane) return { up: plane.up, source: 'camera-plane', viewTiltDeg: plane.viewTiltDeg }
+  return { up: view, source: view ? 'cameras' : null, viewTiltDeg: null }
 }
 
 // Estimate "up" from the point cloud: the ground is the dominant plane, so the
@@ -164,8 +178,7 @@ export function basisFromUp(up) {
 //   cameras: iterable of { R, t }   points: [{ x, y, z }]
 export function buildLocalFrame(cameras = [], points = []) {
   const cams = [...cameras]
-  let up = estimateUpFromViewingDirs(cams)
-  let source = 'cameras'
+  let { up, source } = sceneUpFromCameras(cams)
   if (!up) {
     up = estimateUpFromCloud(points, null)
     source = 'cloud-pca'
@@ -198,7 +211,7 @@ export function buildLocalFrame(cameras = [], points = []) {
 // lifts them above the ground (fixes the SfM gauge/flip ambiguity).
 export function aerialUpRotation(cameras) {
   const cams = cameras instanceof Map ? [...cameras.values()] : [...cameras]
-  const up = estimateUpFromViewingDirs(cams)
+  const { up } = sceneUpFromCameras(cams)
   if (!up) return null
   const { east, north, up: u } = basisFromUp(up)
   return [east.slice(), north.slice(), u.slice()]

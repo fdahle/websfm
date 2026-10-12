@@ -22,9 +22,13 @@ import { makePackedPoints } from '../../core/sfm/resultCodec.js'
 // point i, flattened into vcam/vkp; camera uuids are dictionary-encoded via
 // viewUuids (seeded from the cloud's cameras, extended for any stray uuid).
 // Dense clouds are already flat ({ count, pos:Float32, col:Uint8 }) with no
-// view-tracks, so serialization is near-passthrough. pos is widened to Float64 on
-// disk to match the sparse sidecar format (so the reader stays dtype-uniform and
-// dense clouds persisted before the flat rework still load through this branch).
+// view-tracks, so serialization is near-passthrough. pos keeps its in-memory width
+// on disk: a computed Float32 cloud writes 12 bytes per point, an imported Float64
+// one 24. The file is self-describing by its size (posArray below), so a cloud
+// whose older Float64 file is reused (savedCloudFiles.js) still reads correctly.
+// Earlier saves widened every dense/mesh pos to Float64: twice the bytes to read,
+// plus a full widening copy on every save and a narrowing copy on every load — at
+// 20 M points that was 494 MB read and two transient copies per open.
 // `{ buffers: false }` returns the same metadata with `buffers: null` and allocates
 // nothing — the save path for a cloud whose sidecars are reused (savedCloudFiles.js).
 export function serializeDenseCloud(c, { buffers = true } = {}) {
@@ -36,8 +40,7 @@ export function serializeDenseCloud(c, { buffers = true } = {}) {
     cameras: [], pointCount: N, hasColor: !!c.col, hasNormals: !!c.nrm, viewUuids: [],
   }
   if (!buffers) return { ...meta, buffers: null }
-  const pos = new Float64Array(N * 3)
-  pos.set(c.pos.subarray(0, N * 3))
+  const pos = c.pos.slice(0, N * 3)
   const col = c.col ? c.col.slice(0, N * 3) : null
   // World-space normals stay Float32 on disk (unit scale — no precision gain from
   // widening). Absent on normal-less/legacy runs; the reader leaves nrm undefined.
@@ -49,7 +52,7 @@ export function serializeDenseCloud(c, { buffers = true } = {}) {
   }
 }
 
-// Mesh cloud on-disk shape: pos (Float64, per-vertex, uniform sidecar dtype) + col
+// Mesh cloud on-disk shape: pos (per-vertex, its in-memory width as for dense) + col
 // (Uint8, per-vertex) + idx (Uint32, 3·triangles). nVerts + count(=tris) in metadata.
 export function serializeMeshCloud(c, { buffers = true } = {}) {
   const nVerts = c.nVerts || 0
@@ -62,8 +65,7 @@ export function serializeMeshCloud(c, { buffers = true } = {}) {
     ...(c.meshSummary ? { meshSummary: c.meshSummary } : {}),
   }
   if (!buffers) return { ...meta, buffers: null }
-  const pos = new Float64Array(nVerts * 3)
-  pos.set(c.pos.subarray(0, nVerts * 3))
+  const pos = c.pos.slice(0, nVerts * 3)
   const col = c.col ? c.col.slice(0, nVerts * 3) : null
   const idx = c.idx ? Uint32Array.from(c.idx) : new Uint32Array(0)
   return {
@@ -165,14 +167,23 @@ function serializeCloudData(c, opts) {
   }
 }
 
+// A dense/mesh pos sidecar as stored: 12 bytes per point is Float32 (a view, no
+// copy), 24 is Float64 — narrowed to Float32 only for an older computed cloud that
+// was Float32 in memory when saved. Imported Float64 coordinates are never narrowed.
+function posArray(c, buffer, n) {
+  if (!buffer) return new Float64Array(0)
+  if (n > 0 && buffer.byteLength === n * 12) return new Float32Array(buffer)
+  const stored = new Float64Array(buffer)
+  return c.posType === 'f32' && !c.imported ? new Float32Array(stored) : stored
+}
+
 function deserializeCloudData(c, makeCloudId) {
   const N = c.pointCount ?? 0
   const b = c.buffers || {}
   // Dense clouds restore into the flat shape with their original position precision.
   // Retain Float64 precision in memory, including imported projected coordinates.
   if (c.kind === 'dense') {
-    const storedPos = b.pos ? new Float64Array(b.pos) : new Float64Array(0)
-    const posF = c.posType === 'f32' && !c.imported ? Float32Array.from(storedPos) : storedPos
+    const posF = posArray(c, b.pos, N)
     const col = c.hasColor && b.col ? new Uint8Array(b.col) : null
     // Normals stay Float32 on disk; undefined when the run produced none (no heal).
     const nrm = c.hasNormals && b.nrm ? new Float32Array(b.nrm) : null
@@ -188,8 +199,7 @@ function deserializeCloudData(c, makeCloudId) {
   }
   if (c.kind === 'mesh') {
     const nVerts = c.nVerts ?? N
-    const storedPos = b.pos ? new Float64Array(b.pos) : new Float64Array(0)
-    const posF = c.posType === 'f32' && !c.imported ? Float32Array.from(storedPos) : storedPos
+    const posF = posArray(c, b.pos, nVerts)
     const col = c.hasColor && b.col ? new Uint8Array(b.col) : null
     const idx = b.idx ? new Uint32Array(b.idx) : new Uint32Array(0)
     return {

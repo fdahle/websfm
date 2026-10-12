@@ -17,7 +17,12 @@ displacement, double edges, or holes in the orthophoto.
 
 ## Coordinate frame and resolution
 When a DEM is selected, the orthophoto inherits its frame. For mesh or plane, choose
-Local or Project CRS. Project CRS needs a projected CRS; in a geographic one (WGS 84)
+Local or Project CRS; once the project has a georeference, Project CRS is preselected,
+so the orthophoto lands on the map's CRS view with the basemap and GCPs.
+Local levels the model from the cameras. When the camera positions share one height
+(a drone flight plan) and the photos are oblique, that level plane sets the vertical;
+a nadir survey uses its viewing direction. The log names which one was used. With a mesh or plane surface, **Extent** works as in Build DEM: the dense
+core by default, or all points. Project CRS needs a projected CRS; in a geographic one (WGS 84)
 the field suggests one from the camera positions (see Build DEM). Auto resolution
 follows the surface; a smaller pixel size than the imagery and surface support does
 not add real detail.
@@ -45,10 +50,33 @@ with a world file and `.prj`; keep those sidecars beside the image when moving i
 GIS. Inspect seams, leaning objects, ghosting, holes, and boundary behaviour at full
 resolution before using the result.
 
+## Show on the 2D map
+Choose **On Map** in the orthophoto's ribbon tab, or **Display on map** in the
+Products row's right-click menu. The row then shows ◉ and an **Opacity** slider while
+expanded. The map draws the orthophoto's preview image under GCPs and footprints, and
+above imported reference rasters; **Fit View** includes it.
+
+The 2D map has two frames, switched with **View ▸ Map ▸ Model Frame**:
+- **Project CRS** (Model Frame off): the basemap, GPS positions, GCPs, footprints,
+  reference rasters and Project CRS products. A Local orthophoto is not drawn here; a
+  note on the map says so.
+- **Model frame** (on): a top-down view of the sparse model's local frame, labelled
+  X/Y in model units (or metres with scale bars). It shows the registered cameras
+  and Local products. Everything that only has a CRS position is hidden, and Edit
+  GCPs is unavailable. Markers appear where their marks triangulate. A product
+  built on an older sparse model, or in a different model orientation, is not drawn
+  until it is rebuilt.
+
+Until you choose, the map uses the model frame only when there is a sparse model and
+nothing with a CRS position (no georeference, GPS, poses, GCP coordinates or
+reference rasters on the map).
+
 ## Measure an orthophoto
-With the orthophoto tab in front, use **Ruler** or **Area** in the ribbon's
-**Measure** group. Click vertices, press Enter to finish, Backspace to remove the
-last point, and Esc to clear (a second Esc leaves the tool). Shift-drag pans.
+With the orthophoto tab in front, use **Ruler** or **Area** in **Tools ▸ Measure ▾**.
+Click vertices, press Enter to finish, Backspace to remove the last point, and Esc
+to clear (a second Esc leaves the tool). Shift-drag pans. On the 2D map, choose the
+orthophoto under **Map layer to measure** in the same menu (see Build DEM ▸ Measure
+a raster).
 Results use the orthophoto's recorded units; in a projected CRS they are ground
 lengths and areas, with the projection scale factor k divided out and shown. Type a name and choose **Save
 measurement** to keep it with the project. **Saved** in the ribbon lists saved

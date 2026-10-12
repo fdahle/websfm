@@ -7,9 +7,12 @@
 // in CLAUDE.md. The impure binding (calling handleCommand, reading store state,
 // echoing to the log) lives in `composables/useCommands.js`.
 //
-// Guard parity: `needs` lists prerequisite keys; `guardReason(needs, state)`
-// returns the same "do X first" message the ribbon shows for a disabled button,
-// so `dense` typed before depth maps exist explains itself instead of no-op'ing.
+// Guard parity: a console command that dispatches a ribbon command takes that
+// command's prerequisites (`needs`, `aerialOnly`, `disabled`) straight from the
+// ribbon table (`consoleReason`), so the two front ends cannot drift — copies of
+// the needs here once did. Only console-only verbs carry their own `needs`.
+
+import { allGroups, leafCommands } from './ribbonTabs.js'
 
 // Prerequisite checks: the ONE table behind both gates, the ribbon's greyed
 // buttons/menu rows (Ribbon.vue `needs: [...]`) and this command line, so the two
@@ -39,6 +42,43 @@ export const NEED_CHECKS = {
   selection: { ok: (s) => !!s.hasSelection,   reason: 'Select an image first' },
   sensors:   { ok: (s) => s.sensorCount > 0,  reason: 'No sensors available' },
   filmSensor: { ok: (s) => s.filmSensorCount > 0, reason: 'Set at least one sensor to Film first' },
+  // The 2D map in the model frame has no CRS positions (useMapProducts).
+  crsMap:    { ok: (s) => !s.mapModelFrame, reason: 'The map shows the model frame, which has no CRS positions — turn off Model Frame' },
+  // Tools that act on the view in front (`frontView`: 'image' | 'map' | 'viewer' |
+  // 'raster' | ''). A mode belongs to one view, so the tool says which one it needs.
+  imageView: { ok: (s) => s.frontView === 'image', reason: 'Open an image first' },
+  gcpView:   { ok: (s) => s.frontView === 'image' || (s.frontView === 'map' && !s.mapModelFrame),
+               reason: 'Open an image, or the map in a CRS frame (not Model Frame)' },
+  measureHost: { ok: (s) => s.frontView === 'raster' || (s.frontView === 'map' && s.mapRasterCount > 0),
+                 reason: 'Open a DEM or orthophoto, or show one on the map' },
+}
+
+export const AERIAL_ONLY_REASON = 'Only for aerial projects — an object capture has no coordinate system'
+
+/**
+ * Why a command (a ribbon table entry, or a console-only entry) is unavailable
+ * in `state`, or '' when it can run: "coming soon", aerial-only, then the first
+ * unmet prerequisite. The ribbon adds only its view-specific checks on top.
+ */
+export function commandReason(cmd, state) {
+  if (cmd?.disabled) return 'Coming soon'
+  if (cmd?.aerialOnly && state?.sceneType === 'object') return AERIAL_ONLY_REASON
+  return guardReason(cmd?.needs, state)
+}
+
+// Ribbon command id → its table entry (the first one; duplicates are the same
+// shared object, see ribbonTabs.js).
+const RIBBON_BY_ID = new Map()
+for (const c of leafCommands(allGroups())) if (c.id && !RIBBON_BY_ID.has(c.id)) RIBBON_BY_ID.set(c.id, c)
+
+/** The ribbon entry a console command dispatches, or null for a console-only verb. */
+export function ribbonCommandFor(cmd) {
+  return RIBBON_BY_ID.get(cmd?.dispatch) ?? null
+}
+
+/** The console's guard: the ribbon command's own checks when it has one. */
+export function consoleReason(cmd, state) {
+  return commandReason(ribbonCommandFor(cmd) ?? cmd, state)
 }
 
 // The command catalogue. `group` only drives help layout. `dispatch` is the
@@ -47,66 +87,78 @@ export const NEED_CHECKS = {
 // are resolved before single-word ones so `export` + subcommand works.
 export const COMMANDS = [
   // --- Pipeline ---
-  { name: 'workflow', aliases: ['workflow-builder', 'recipe'], dispatch: 'workflow-builder', needs: ['project'], group: 'Pipeline', help: 'Open the visual workflow builder' },
-  { name: 'detect',   aliases: ['detect-features'], dispatch: 'detect-features', needs: ['images', 'imagesReady'], group: 'Pipeline', help: 'Open the feature-detection dialog' },
-  { name: 'match',    aliases: ['match-features'],  dispatch: 'match-features',  needs: ['keypoints'], group: 'Pipeline', help: 'Open the feature-matching dialog' },
-  { name: 'sparse',   aliases: ['reconstruct'],     dispatch: 'reconstruct',     needs: ['matches'],   group: 'Pipeline', help: 'Open the sparse reconstruction dialog' },
-  { name: 'depth',    aliases: ['depthmaps'],       dispatch: 'compute-depth',   needs: ['sparse'],    group: 'Pipeline', help: 'Open the depth-map dialog' },
-  { name: 'dense',    aliases: [],                  dispatch: 'dense',           needs: ['depthMaps'], group: 'Pipeline', help: 'Open the dense reconstruction dialog' },
-  { name: 'dem',      aliases: [],                  dispatch: 'gen-dem',         needs: ['cloud'],     group: 'Pipeline', help: 'Open the DEM generation dialog' },
-  { name: 'ortho',    aliases: [],                  dispatch: 'gen-ortho',       needs: ['surface', 'depthMaps'], group: 'Pipeline', help: 'Open the orthophoto dialog' },
+  { name: 'workflow', aliases: ['workflow-builder', 'recipe'], dispatch: 'workflow-builder', group: 'Pipeline', help: 'Open the visual workflow builder' },
+  { name: 'detect',   aliases: ['detect-features'], dispatch: 'detect-features', group: 'Pipeline', help: 'Open the feature-detection dialog' },
+  { name: 'match',    aliases: ['match-features'],  dispatch: 'match-features',  group: 'Pipeline', help: 'Open the feature-matching dialog' },
+  { name: 'sparse',   aliases: ['reconstruct'],     dispatch: 'reconstruct',     group: 'Pipeline', help: 'Open the sparse reconstruction dialog' },
+  { name: 'depth',    aliases: ['depthmaps'],       dispatch: 'compute-depth',   group: 'Pipeline', help: 'Open the depth-map dialog' },
+  { name: 'dense',    aliases: [],                  dispatch: 'dense',           group: 'Pipeline', help: 'Open the dense reconstruction dialog' },
+  { name: 'dem',      aliases: [],                  dispatch: 'gen-dem',         group: 'Pipeline', help: 'Open the DEM generation dialog' },
+  { name: 'ortho',    aliases: [],                  dispatch: 'gen-ortho',       group: 'Pipeline', help: 'Open the orthophoto dialog' },
+  { name: 'mesh',     aliases: [],                  dispatch: 'gen-mesh',        group: 'Pipeline', help: 'Open the mesh dialog' },
 
   // --- Tools ---
-  { name: 'find gcps', aliases: ['auto-gcps'],       dispatch: 'find-gcps',          needs: ['sparse'], group: 'Tools', help: 'Find and review reference-ortho control candidates' },
-  { name: 'georeference', aliases: ['georef'],       dispatch: 'georeference',       needs: ['sparse'], group: 'Tools', help: 'Adjust with GCPs or transform the current model to the project CRS' },
-  { name: 'automask',     aliases: ['auto-mask'],   dispatch: 'auto-mask',          needs: ['images', 'imagesReady'], group: 'Tools', help: 'Open the auto-mask dialog' },
-  { name: 'footprints',   aliases: [],              dispatch: 'footprints-from-poses', needs: ['poses', 'sensors'], group: 'Tools', help: 'Build footprints from poses' },
-  { name: 'fiducials',    aliases: ['detect-fiducials'], dispatch: 'detect-fiducials', needs: ['filmSensor'], group: 'Tools', help: 'Auto-detect fiducial marks on film scans' },
-  { name: 'calibrate-fiducials', aliases: ['fiducial-calibration'], dispatch: 'calibrate-fiducials', needs: ['filmSensor'], group: 'Tools', help: 'Calibrate detected film fiducials' },
-  { name: 'image quality', aliases: ['blur', 'sharpness'], dispatch: 'image-quality', needs: ['images', 'imagesReady'], group: 'Tools', help: 'Score image sharpness and exposure' },
-  { name: 'optimize',     aliases: ['optimize cameras'], dispatch: 'optimize-cameras', needs: ['sparse'], group: 'Tools', help: 'Re-run bundle adjustment with the focal length free' },
-  { name: 'gradual',      aliases: ['gradual selection'], dispatch: 'gradual-selection', needs: ['sparse'], group: 'Tools', help: 'Remove weak tie points from the sparse model' },
-  { name: 'region',       aliases: [],               dispatch: 'set-region',          needs: ['sparse'], group: 'Tools', help: 'Set the box that bounds depth maps, fusion, mesh and DEM' },
-  { name: 'orient',       aliases: ['orient model', 'level'], dispatch: 'orient-model', needs: ['sparse'], group: 'Tools', help: 'Set up, origin and heading of the local frame' },
-  { name: 'normals',      aliases: ['estimate normals'], dispatch: 'estimate-normals', needs: ['dense'], group: 'Tools', help: 'Estimate per-point normals on a dense cloud' },
-  { name: 'transform',    aliases: [],               dispatch: 'transform-cloud',     needs: ['dense'], group: 'Tools', help: 'Move, rotate, scale or matrix-transform a cloud' },
-  { name: 'align pairs',  aliases: ['align points'], dispatch: 'align-points',        needs: ['dense'], group: 'Tools', help: 'Align a cloud by picking point pairs' },
-  { name: 'icp',          aliases: ['align'],        dispatch: 'align-icp',           needs: ['dense'], group: 'Tools', help: 'Refine an alignment to a reference cloud or mesh' },
-  { name: 'distance',     aliases: ['c2c', 'c2m'],   dispatch: 'cloud-distance',      needs: ['dense'], group: 'Tools', help: 'Per-point distance to another cloud or a mesh' },
-  { name: 'section',      aliases: ['profile'],      dispatch: 'cloud-section',       needs: ['dense'], group: 'Tools', help: 'Cut a vertical slice and export its profile' },
-  { name: 'clean mesh',   aliases: ['clean'],        dispatch: 'clean-mesh',          needs: ['mesh'],  group: 'Tools', help: 'Remove specks and bridges, fill holes' },
-  { name: 'decimate',     aliases: ['simplify'],     dispatch: 'decimate-mesh',       needs: ['mesh'],  group: 'Tools', help: 'Reduce a mesh to a target triangle count' },
-  { name: 'smooth',       aliases: [],               dispatch: 'smooth-mesh',         needs: ['mesh'],  group: 'Tools', help: 'Taubin-smooth a mesh' },
-  { name: 'mesh area',    aliases: ['volume'],       dispatch: 'mesh-measure',        needs: ['mesh'],  group: 'Tools', help: 'Surface area and enclosed volume of a mesh' },
-  { name: 'contours',     aliases: [],               dispatch: 'dem-contours',        needs: ['dem'],   group: 'Tools', help: 'Export contour lines from the DEM' },
-  { name: 'terrain',      aliases: ['slope', 'hillshade', 'aspect'], dispatch: 'dem-derivatives', needs: ['dem'], group: 'Tools', help: 'Export slope, aspect and hillshade rasters' },
-  { name: 'clip',         aliases: [],               dispatch: 'clip-raster',         needs: ['products'], group: 'Tools', help: 'Export the DEM or ortho clipped to a polygon' },
+  { name: 'find gcps', aliases: ['auto-gcps'],       dispatch: 'find-gcps',          group: 'Tools', help: 'Find and review reference-ortho control candidates' },
+  { name: 'georeference', aliases: ['georef'],       dispatch: 'georeference',       group: 'Tools', help: 'Adjust with GCPs or transform the current model to the project CRS' },
+  { name: 'scale bars', aliases: ['scalebars'],      dispatch: 'scale-bars',         group: 'Tools', help: 'Scale the model with known distances' },
+  { name: 'edit gcps', aliases: ['mark gcps'],       dispatch: 'edit-gcps',          group: 'Tools', help: 'Toggle GCP editing on the image or map in front' },
+  { name: 'automask',     aliases: ['auto-mask'],   dispatch: 'auto-mask',          group: 'Tools', help: 'Open the auto-mask dialog' },
+  { name: 'edit mask',    aliases: ['mask edit'],   dispatch: 'img-mask-edit',      group: 'Tools', help: 'Toggle mask painting on the image in front' },
+  { name: 'footprints',   aliases: [],              dispatch: 'footprints-from-poses', group: 'Tools', help: 'Build footprints from poses' },
+  { name: 'fiducials',    aliases: ['detect-fiducials'], dispatch: 'detect-fiducials', group: 'Tools', help: 'Auto-detect fiducial marks on film scans' },
+  { name: 'calibrate-fiducials', aliases: ['fiducial-calibration'], dispatch: 'calibrate-fiducials', group: 'Tools', help: 'Calibrate detected film fiducials' },
+  { name: 'image quality', aliases: ['blur', 'sharpness'], dispatch: 'image-quality', group: 'Tools', help: 'Score image sharpness and exposure' },
+  { name: 'optimize',     aliases: ['optimize cameras'], dispatch: 'optimize-cameras', group: 'Tools', help: 'Re-run bundle adjustment with the focal length free' },
+  { name: 'gradual',      aliases: ['gradual selection'], dispatch: 'gradual-selection', group: 'Tools', help: 'Remove weak tie points from the sparse model' },
+  { name: 'region',       aliases: [],               dispatch: 'set-region',          group: 'Tools', help: 'Set the box that bounds depth maps, fusion, mesh and DEM' },
+  { name: 'orient',       aliases: ['orient model', 'level'], dispatch: 'orient-model', group: 'Tools', help: 'Set up, origin and heading of the local frame' },
+  { name: 'select',       aliases: ['lasso'],        dispatch: 'view-select-lasso',   group: 'Tools', help: 'Lasso-select dense points in the 3D view' },
+  { name: 'normals',      aliases: ['estimate normals'], dispatch: 'estimate-normals', group: 'Tools', help: 'Estimate per-point normals on a dense cloud' },
+  { name: 'transform',    aliases: [],               dispatch: 'transform-cloud',     group: 'Tools', help: 'Move, rotate, scale or matrix-transform a cloud' },
+  { name: 'align pairs',  aliases: ['align points'], dispatch: 'align-points',        group: 'Tools', help: 'Align a cloud by picking point pairs' },
+  { name: 'icp',          aliases: ['align'],        dispatch: 'align-icp',           group: 'Tools', help: 'Refine an alignment to a reference cloud or mesh' },
+  { name: 'clean mesh',   aliases: ['clean'],        dispatch: 'clean-mesh',          group: 'Tools', help: 'Remove specks and bridges, fill holes' },
+  { name: 'decimate',     aliases: ['simplify'],     dispatch: 'decimate-mesh',       group: 'Tools', help: 'Reduce a mesh to a target triangle count' },
+  { name: 'smooth',       aliases: [],               dispatch: 'smooth-mesh',         group: 'Tools', help: 'Taubin-smooth a mesh' },
+  { name: 'contours',     aliases: [],               dispatch: 'dem-contours',        group: 'Tools', help: 'Export contour lines from the DEM' },
+  { name: 'terrain',      aliases: ['slope', 'hillshade', 'aspect'], dispatch: 'dem-derivatives', group: 'Tools', help: 'Export slope, aspect and hillshade rasters' },
+  { name: 'clip',         aliases: [],               dispatch: 'clip-raster',         group: 'Tools', help: 'Export the DEM or ortho clipped to a polygon' },
+
+  // --- Measure (Tools ▸ Measure ▾) ---
+  { name: 'ruler',        aliases: ['length'],       dispatch: 'measure-length',      group: 'Measure', help: 'Measure a distance on the DEM / orthophoto in front' },
+  { name: 'area',         aliases: [],               dispatch: 'measure-area',        group: 'Measure', help: 'Measure an area on the DEM / orthophoto in front' },
+  { name: 'profile',      aliases: [],               dispatch: 'measure-profile',     group: 'Measure', help: 'Draw an elevation profile on the DEM in front' },
+  { name: 'volume',       aliases: ['cut fill'],     dispatch: 'measure-volume',      group: 'Measure', help: 'Measure a cut/fill volume on the DEM in front' },
+  { name: 'cloud distance', aliases: ['c2c', 'c2m'], dispatch: 'cloud-distance',      group: 'Measure', help: 'Per-point distance to another cloud or a mesh' },
+  { name: 'section',      aliases: ['slice'],        dispatch: 'cloud-section',       group: 'Measure', help: 'Cut a vertical slice of a cloud and export its profile' },
+  { name: 'mesh area',    aliases: ['mesh volume'],  dispatch: 'mesh-measure',        group: 'Measure', help: 'Surface area and enclosed volume of a mesh' },
 
   // --- Tables / views ---
-  { name: 'images',   aliases: ['image-table'],     dispatch: 'open-image-table',  needs: ['images'],  group: 'View', help: 'Open the image table' },
-  { name: 'masks',    aliases: ['mask-manager'],    dispatch: 'open-mask-manager', needs: ['images'],  group: 'View', help: 'Open the mask manager' },
-  { name: 'sensors',  aliases: ['sensor-table'],    dispatch: 'open-sensor-table', needs: ['sensors'], group: 'View', help: 'Open the sensor table' },
-  { name: 'gcps',     aliases: ['gcp-table'],       dispatch: 'open-gcp-table',                       group: 'View', help: 'Open the GCP table' },
-  { name: 'matchlist', aliases: ['match-list'],     dispatch: 'open-match-list',   needs: ['matches'], group: 'View', help: 'Open the match list' },
+  { name: 'images',   aliases: ['image-table'],     dispatch: 'open-image-table',  group: 'View', help: 'Open the image table' },
+  { name: 'masks',    aliases: ['mask-manager'],    dispatch: 'open-mask-manager', group: 'View', help: 'Open the mask manager' },
+  { name: 'sensors',  aliases: ['sensor-table'],    dispatch: 'open-sensor-table', group: 'View', help: 'Open the sensor table' },
+  { name: 'gcps',     aliases: ['gcp-table'],       dispatch: 'open-gcp-table',    group: 'View', help: 'Open the GCP table' },
+  { name: 'matchlist', aliases: ['match-list'],     dispatch: 'open-match-list',   group: 'View', help: 'Open the match list' },
   { name: 'viewer',   aliases: ['3d'],              dispatch: 'view-viewer',       group: 'View', help: 'Switch to the 3D viewer' },
   { name: 'map',      aliases: ['2d'],              dispatch: 'view-map',          group: 'View', help: 'Switch to the map view' },
 
   // --- Import ---
   { name: 'import',   aliases: ['import-images'],   dispatch: 'import-images',     group: 'Import', help: 'Import images' },
-  { name: 'import colmap', aliases: ['colmap-import'], dispatch: 'import-colmap', needs: ['images'], group: 'Import', help: 'Import a COLMAP sparse model (.zip or .txt set)' },
+  { name: 'import colmap', aliases: ['colmap-import'], dispatch: 'import-colmap',  group: 'Import', help: 'Import an SfM project (COLMAP and others)' },
 
   // --- Export (multi-word: "export <what>") ---
-  { name: 'export cloud',     dispatch: 'export-cloud',     needs: ['cloud'],     group: 'Export', help: 'Export the point cloud' },
-  { name: 'export model',     dispatch: 'export-model',     needs: ['cloud'],     group: 'Export', help: 'Export the model JSON' },
-  { name: 'export dem',       dispatch: 'export-dem',       needs: ['dem'],       group: 'Export', help: 'Export the DEM' },
-  { name: 'export ortho',     dispatch: 'export-ortho',     needs: ['ortho'],     group: 'Export', help: 'Export the orthophoto' },
-  { name: 'export cameras',   dispatch: 'export-cameras',   needs: ['poses'],     group: 'Export', help: 'Export camera poses' },
-  { name: 'export sensors',   dispatch: 'export-sensors',   needs: ['sensors'],   group: 'Export', help: 'Export sensors' },
-  { name: 'export keypoints', dispatch: 'export-keypoints', needs: ['keypoints'], group: 'Export', help: 'Export keypoints' },
-  { name: 'export matches',   dispatch: 'export-matches',   needs: ['matches'],   group: 'Export', help: 'Export matches' },
+  { name: 'export cloud',     dispatch: 'export-cloud',     group: 'Export', help: 'Export the point cloud' },
+  { name: 'export mesh',      dispatch: 'export-mesh',      group: 'Export', help: 'Export the mesh' },
+  { name: 'export model',     dispatch: 'export-model',     group: 'Export', help: 'Export the model JSON' },
+  { name: 'export dem',       dispatch: 'export-dem',       group: 'Export', help: 'Export the DEM' },
+  { name: 'export ortho',     dispatch: 'export-ortho',     group: 'Export', help: 'Export the orthophoto' },
+  { name: 'export cameras',   dispatch: 'export-cameras',   group: 'Export', help: 'Export camera poses' },
+  { name: 'export sensors',   dispatch: 'export-sensors',   group: 'Export', help: 'Export sensors' },
+  { name: 'export keypoints', dispatch: 'export-keypoints', group: 'Export', help: 'Export keypoints' },
+  { name: 'export matches',   dispatch: 'export-matches',   group: 'Export', help: 'Export matches' },
 
   // --- App ---
-  { name: 'project settings', aliases: ['project properties'], dispatch: 'open-project-settings', needs: ['project'], group: 'App', help: 'Open settings for the current project' },
+  { name: 'project settings', aliases: ['project properties'], dispatch: 'open-project-settings', group: 'App', help: 'Open settings for the current project' },
   { name: 'settings', aliases: [],                  dispatch: 'open-settings', group: 'App', help: 'Open settings' },
   { name: 'theme',    aliases: ['dark mode', 'light mode'], dispatch: 'toggle-theme', group: 'App', help: 'Cycle appearance: system / light / dark' },
   { name: 'glossary', aliases: [],                  dispatch: 'open-glossary', group: 'App', help: 'Open the glossary' },
@@ -230,6 +282,7 @@ export function helpFor(name) {
   if (!cmd) return null
   const lines = [`${cmd.name} — ${cmd.help}`]
   if ((cmd.aliases ?? []).length) lines.push(`  aliases: ${cmd.aliases.join(', ')}`)
-  if ((cmd.needs ?? []).length)   lines.push(`  requires: ${cmd.needs.join(', ')}`)
+  const needs = (ribbonCommandFor(cmd) ?? cmd).needs ?? []
+  if (needs.length) lines.push(`  requires: ${needs.join(', ')}`)
   return lines
 }

@@ -34,9 +34,9 @@ Use the 3D viewer to inspect floating clusters, edge shells, holes, and over-smo
 areas. Cloud filtering can remove statistical outliers or isolated components, but
 systematic defects are better fixed in the depth maps, masks, or source imagery.
 
-To remove points by hand, pick **Rectangle** or **Lasso** in the ribbon's
-**View → Select** group (or **Tools → Point Cloud ▾ → Select points**), then drag
-around the points in the 3D view. The **Select points** toolbox over the view shows
+To remove points by hand, pick **Select (rectangle)** or **Select (lasso)** in
+**Tools → Point Cloud ▾** (from another view this brings the 3D view forward), then
+drag around the points in the 3D view. The **Select points** toolbox over the view shows
 the count and the Delete / Keep only / Clear buttons. Shift-drag adds to the selection,
 Alt-drag removes from it, and a plain click clears it. Selected points turn pink.
 Then choose **Delete** (or press Delete) or **Keep only**. Esc while dragging
@@ -60,7 +60,8 @@ buttons and the wheel while a tool is active.
 
 
 ## Saved depth maps and memory
-After depth maps are saved, their pixel arrays are released. Building a dense
+Depth maps are saved one by one as they finish, and their pixel arrays are released
+(a project that cannot use browser storage keeps them in memory instead). Building a dense
 cloud reads one reference map and one comparison map at a time; orthophoto
 generation reads one map at a time. The same consistency and blending rules apply.
 This reduces resident input memory, though the merged point cloud and its output
@@ -70,8 +71,13 @@ Streaming may trade repeated disk reads for a lower memory peak.
 Before the slow consistency check, fusion makes one quick pass over the depth maps
 and counts how many merged points the cloud can have at most (pixels that fail the
 cost gate or lie outside the Region don't count). The log line "Fusion: measured …
-projected peak …" shows that count and the memory it implies. If it is over the
-memory budget (Settings ▸ Compute), fusion stops there and nothing is lost. To get
+projected peak …" shows that count and the memory it implies. If building the cloud
+in one piece would exceed the memory budget (Settings ▸ Compute), fusion builds it in
+slabs along the scene's longest axis instead ("fusing in N slabs"), keeping only one
+slab's working memory at a time. The cloud is identical either way; the slabs only
+cost extra reading time, because a depth map that reaches two slabs is read for both.
+Only when the finished cloud itself cannot fit (it is held twice while the slabs are
+joined) does fusion stop there, and nothing is lost. To get
 under the budget: raise **Point density (sample step)** to 2, which reads a quarter of
 the pixels; set a Region around the subject (Tools ▸ Model); or build the depth maps
 at a lower Quality. Raise the budget only if the machine really has that much free

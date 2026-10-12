@@ -2,8 +2,8 @@
 import { ref, computed } from 'vue'
 import ModalShell from './ui/ModalShell.vue'
 import SettingsField from './ui/SettingsField.vue'
-import SettingsGroup from './ui/SettingsGroup.vue'
 import AdvancedDisclosure from './ui/AdvancedDisclosure.vue'
+import SettingsStep from './ui/SettingsStep.vue'
 import SegmentedControl from './ui/SegmentedControl.vue'
 import PresetCards from './ui/PresetCards.vue'
 import WarnBox from './ui/WarnBox.vue'
@@ -17,6 +17,7 @@ import {
 import { DETECT_TUNING } from '../../core/tuning.js'
 import { LEARNED_DETECTORS, learnedDetector, detectorLabel } from '../../core/features/learnedDetectors.js'
 import { MODELS, isRedistributable } from '../../core/models/registry.js'
+import { planDetection, planImageDetection } from '../../core/features/detectPlan.js'
 
 const props = defineProps({
   // Current image list — used to warn when Append mode would leave a mix of
@@ -51,10 +52,11 @@ const showMixWarning = computed(() => !overwrite.value && staleDetectorImages.va
 // Surface that here, before the user commits to a slow run.
 const isChromium = /Chrome\//.test(globalThis.navigator?.userAgent || '')
 
-// Tiling defaults (Advanced): 'off' | 'auto' | 'manual'. When on, detection runs
-// per overlapping tile at native-ish resolution then merges — more, better-
-// localised keypoints, and it sidesteps the learned detectors' WebGPU OOM. `tileSize` 0
-// means auto-derive; each tile keeps only keypoints ≥ `overlap`/2 from a cut.
+// Tiling (Advanced): 'off' | 'auto' | 'manual'. When on, the image is first resized to
+// the detection resolution and THAT raster is cut into overlapping tiles, detected
+// per tile and merged — it bounds memory (the learned detectors' WebGPU OOM) but adds
+// no resolution. `tileSize` 0 means auto-derive; each tile keeps only keypoints
+// ≥ `overlap`/2 from a cut.
 // Prefill from the single source of truth (see core/defaults.user.js). Cloned so
 // edits don't mutate the shared constants.
 const siftSettings = ref({ ...DETECT_SIFT_DEFAULTS })
@@ -170,16 +172,68 @@ function selectPreset(id) {
 // auto-tile before dispatching instead of letting the run fail per image.
 const untiledCeilingPx = computed(() => (detector.value === 'disk'
   ? DETECT_TUNING.diskMaxUntiledInputPx : DETECT_TUNING.spMaxUntiledInputPx))
+// The images this run will actually touch (Append skips finished ones).
+const runImages = computed(() => props.images.filter((img) => overwrite.value || img.kpStatus !== 'done'))
 const oversizedSpImages = computed(() => {
   if (!isLearned.value || lp.value.tiling !== 'off') return []
-  const maxDim = lp.value.maxDim || Infinity
-  return props.images.filter((img) => {
-    if (!overwrite.value && img.kpStatus === 'done') return false // skipped in Append mode
+  return runImages.value.filter((img) => {
     const w = img.meta?.width, h = img.meta?.height
     if (!w || !h) return false
-    const scale = Math.min(1, maxDim / Math.max(w, h))
-    return Math.round(w * scale) * Math.round(h * scale) > untiledCeilingPx.value
+    // Same resolution rule as the run (incl. the auto mode), tiling off.
+    const p = planImageDetection(w, h, { ...settings.value, detector: detector.value })
+    return p.width * p.height > untiledCeilingPx.value
   })
+})
+
+// ── Live readout: what each step does to this project's images ────────────────
+// The steps run in a fixed order — resize, tile, detect, keep — and the confusion
+// this answers is that tiling acts on the RESIZED image (core/features/detectPlan.js).
+const plan = computed(() => planDetection(
+  runImages.value.map((img) => ({ width: img.meta?.width, height: img.meta?.height })),
+  { ...settings.value, detector: detector.value }))
+const fmt = (n) => Number(n).toLocaleString('en-US')
+const dims = (w, h) => `${fmt(w)}×${fmt(h)}`
+const tilingOn = computed(() => activeSettings.value.tiling !== 'off')
+const tileLimit = computed(() => {
+  const t = plan.value?.tileSize
+  if (!t?.size) return ''
+  return t.exact ? `${fmt(t.size)} px` : `${fmt(t.size)} px or less (fits GPU memory)`
+})
+
+const resizeEffect = computed(() => {
+  const p = plan.value
+  if (!p) return ''
+  const n = p.count
+  const range = p.minDetect === p.maxDetect ? `${fmt(p.maxDetect)} px` : `${fmt(p.minDetect)}–${fmt(p.maxDetect)} px`
+  if (p.downscaled === 0) return `All ${fmt(n)} images run at their native size (${range} long side) — nothing is reduced.`
+  const L = p.largest
+  return `${fmt(p.downscaled)} of ${fmt(n)} images are reduced before detection, to ${range} on the long side. `
+    + `Largest: ${dims(L.natW, L.natH)} → ${dims(L.width, L.height)} (${Math.round(L.scale * 100)} %).`
+})
+// Tiling only matters when a detection image is larger than one tile.
+const tilingIdle = computed(() => tilingOn.value && plan.value && plan.value.tiled === 0)
+const tileEffect = computed(() => {
+  const p = plan.value
+  if (!tilingOn.value) return 'Off — each detection image is processed in a single pass.'
+  if (!p) return `Detection images larger than ${tileLimit.value} are split into overlapping tiles.`
+  if (p.tiled === 0) {
+    return `No effect at this resolution: the largest detection image (${fmt(p.maxDetect)} px) already fits in one `
+      + `${tileLimit.value} tile. Tiles are cut from the resized image, so raise the detection resolution for tiling to matter.`
+  }
+  const L = p.largest
+  return `${fmt(p.tiled)} of ${fmt(p.count)} images are split into tiles of ${tileLimit.value}`
+    + (L.tiles > 1 ? ` — the largest into ${L.tilesX}×${L.tilesY}` : '')
+    + '. Tiles are cut from the resized image: tiling saves memory, it does not add resolution.'
+})
+const detectEffect = computed(() => (isLearned.value
+  ? `${learnedLabel.value} uses its learned score threshold — nothing to tune here.`
+  : 'SIFT keeps blobs whose contrast clears the threshold.'))
+const keepEffect = computed(() => {
+  const k = fmt(activeSettings.value.maxKeypoints)
+  const where = tilingOn.value && plan.value?.tiled ? ', ranked over the whole image across all tiles' : ''
+  return isLearned.value
+    ? `The ${k} highest-scoring keypoints per image are kept${where}.`
+    : `At most ${k} keypoints per image are kept, largest features first${where}.`
 })
 
 // Clicking Run while images are oversized opens a confirmation dialog rather than
@@ -242,33 +296,87 @@ function attemptRun() {
       @select="selectPreset"
     />
 
+    <!-- The run at a glance, in execution order, on the largest image it will touch. -->
+    <div class="plan-strip">
+      <template v-if="plan">
+        <div class="plan-caption">
+          What happens to the largest of {{ fmt(plan.count) }} image{{ plan.count !== 1 ? 's' : '' }}<span v-if="plan.unknown">
+          ({{ fmt(plan.unknown) }} without a known size yet)</span>:
+        </div>
+        <div class="plan-chain">
+          <span class="plan-chip"><b>{{ dims(plan.largest.natW, plan.largest.natH) }}</b> native</span>
+          <span class="plan-arrow">→</span>
+          <span class="plan-chip" :class="{ dim: plan.largest.scale >= 1 }">
+            <span class="plan-n">1</span>
+            <template v-if="plan.largest.scale < 1"><b>{{ dims(plan.largest.width, plan.largest.height) }}</b> resized</template>
+            <template v-else>not resized</template>
+          </span>
+          <span class="plan-arrow">→</span>
+          <span class="plan-chip" :class="{ dim: plan.largest.tiles <= 1 }">
+            <span class="plan-n">2</span>
+            <template v-if="plan.largest.tiles > 1"><b>{{ plan.largest.tilesX }}×{{ plan.largest.tilesY }}</b> tiles</template>
+            <template v-else>one pass</template>
+          </span>
+          <span class="plan-arrow">→</span>
+          <span class="plan-chip"><span class="plan-n">3</span>{{ isLearned ? learnedLabel : 'SIFT' }}</span>
+          <span class="plan-arrow">→</span>
+          <span class="plan-chip"><span class="plan-n">4</span>≤ <b>{{ fmt(activeSettings.maxKeypoints) }}</b> keypoints</span>
+        </div>
+      </template>
+      <div v-else-if="!runImages.length" class="plan-caption">
+        Every image already has keypoints — Append mode has nothing to do. Switch to Overwrite to re-detect.
+      </div>
+      <div v-else class="plan-caption">Image sizes are still being read…</div>
+    </div>
+
     <AdvancedDisclosure label="Advanced settings">
-      <SettingsGroup title="Detection">
+      <SettingsStep step="1" title="Resize to detection resolution" :effect="resizeEffect">
         <SettingsField label="Resolution rule" label-for="maxDimMode"
           :hint="maxDimMode === 'auto'
-            ? 'Each image is detected at a fraction of its own size, never below the fixed value. Best for mixed or very large images such as film scans.'
-            : 'Every image is detected at the same fixed resolution, whatever its native size.'">
+            ? 'Each image is detected at a fraction of its own size, never below the value below. Best for mixed or very large images such as film scans.'
+            : 'Every image is reduced to the same long side, whatever its native size. Smaller images are never enlarged.'">
           <select id="maxDimMode" v-model="maxDimMode" class="field-input field-select">
             <option value="absolute">Fixed for all images</option>
             <option value="auto">Scale with image size</option>
           </select>
         </SettingsField>
 
-        <SettingsField v-if="!isLearned" :label="siftSettings.maxDimMode === 'auto' ? 'Minimum resolution' : 'Detection resolution'"
+        <SettingsField :label="maxDimMode === 'auto' ? 'Minimum resolution' : 'Detection resolution'"
           label-for="maxDim" unit="px"
-          :hint="siftSettings.maxDimMode === 'auto'
+          :hint="maxDimMode === 'auto'
             ? 'Floor for the scaled resolution — larger images get proportionally more, up to a per-preset ceiling.'
-            : 'Longest side the detector runs at (keypoints map back to native pixels).'">
-          <input id="maxDim" v-model.number="siftSettings.maxDim" type="number" min="100" max="10000" step="100" class="field-input" />
+            : 'Long side the detector works at. Keypoints are mapped back to native pixels afterwards.'">
+          <input id="maxDim" v-model.number="activeSettings.maxDim" type="number" min="100" max="10000" step="100" class="field-input" />
         </SettingsField>
-        <SettingsField v-else :label="lp.maxDimMode === 'auto' ? 'Minimum resolution' : 'Detection resolution'"
-          label-for="sp-maxDim" unit="px"
-          :hint="lp.maxDimMode === 'auto'
-            ? `Floor for the scaled resolution. ${learnedLabel} ceilings stay well below the untiled-input limit.`
-            : 'Longest side before detection. Raising it only helps with tiling on.'">
-          <input id="sp-maxDim" v-model.number="lp.maxDim" type="number" min="100" max="10000" step="100" class="field-input" />
-        </SettingsField>
+      </SettingsStep>
 
+      <SettingsStep step="2" title="Split into tiles" :effect="tileEffect" :inactive="!tilingOn || tilingIdle">
+        <SettingsField label="Tiling" label-for="tiling"
+          :hint="isLearned
+            ? 'Processes the resized image in overlapping pieces that fit GPU memory, then merges them.'
+            : 'Processes the resized image in overlapping pieces, then merges them. Same keypoints, less memory.'">
+          <select id="tiling" v-model="activeSettings.tiling" class="field-input field-select">
+            <option value="off">Off</option>
+            <option value="auto">{{ isLearned ? 'Auto (fit GPU memory)' : 'Auto (fit tile size)' }}</option>
+            <option value="manual">Manual</option>
+          </select>
+        </SettingsField>
+        <SettingsField v-if="activeSettings.tiling === 'manual'" label="Max tile size" label-for="tileSize" unit="px"
+          hint="Upper limit; websfm uses the fewest tiles that fit.">
+          <input id="tileSize" v-model.number="activeSettings.tileSize" type="number" min="256" max="4096" step="64" class="field-input" />
+        </SettingsField>
+        <SettingsField v-if="tilingOn" label="Tile overlap" label-for="overlap" unit="px"
+          hint="Each tile keeps only features at least half this far from a cut.">
+          <input id="overlap" v-model.number="activeSettings.overlap" type="number" min="0" max="512" step="16" class="field-input" />
+        </SettingsField>
+        <WarnBox v-if="oversizedSpImages.length">
+          {{ oversizedSpImages.length }} image{{ oversizedSpImages.length !== 1 ? 's' : '' }}
+          will exceed {{ learnedLabel }}'s single-pass size limit at this resolution and
+          <strong>fail</strong>. Turn <strong>Tiling</strong> on, or lower the detection resolution.
+        </WarnBox>
+      </SettingsStep>
+
+      <SettingsStep step="3" :title="`Detect (${isLearned ? learnedLabel : 'SIFT'})`" :effect="detectEffect">
         <SettingsField v-if="!isLearned" label-for="contrast"
           hint="Higher = fewer but more distinctive keypoints.">
           <template #label>
@@ -276,62 +384,20 @@ function attemptRun() {
           </template>
           <input id="contrast" v-model.number="siftSettings.contrastThreshold" type="number" min="0.001" max="0.5" step="0.001" class="field-input" />
         </SettingsField>
+      </SettingsStep>
 
+      <SettingsStep step="4" title="Keep the strongest" :effect="keepEffect">
         <SettingsField v-if="!isLearned" label="Max keypoints" label-for="maxKp">
           <input id="maxKp" v-model.number="siftSettings.maxKeypoints" type="number" min="100" max="50000" step="100" class="field-input" />
         </SettingsField>
         <SettingsField v-else label-for="sp-maxKp"
-          hint="Top-K by score after tile merge. LightGlue matching cost grows with this.">
+          hint="LightGlue matching cost grows with the square of this.">
           <template #label>
             Max <GlossaryTerm id="descriptor">keypoints</GlossaryTerm>
           </template>
           <input id="sp-maxKp" v-model.number="lp.maxKeypoints" type="number" min="128" max="8192" step="128" class="field-input" />
         </SettingsField>
-      </SettingsGroup>
-
-      <WarnBox v-if="oversizedSpImages.length">
-        {{ oversizedSpImages.length }} image{{ oversizedSpImages.length !== 1 ? 's' : '' }}
-        will exceed {{ learnedLabel }}'s single-pass size limit at this resolution and
-        <strong>fail</strong>. Turn <strong>Tiling</strong> on below, or lower the resolution.
-      </WarnBox>
-
-      <SettingsGroup title="Tiling">
-        <SettingsField v-if="!isLearned" label="Tiling" label-for="sift-tiling"
-          hint="Detect on overlapping full-resolution tiles, then merge. Off = single downsampled pass.">
-          <select id="sift-tiling" v-model="siftSettings.tiling" class="field-input field-select">
-            <option value="off">Off</option>
-            <option value="auto">Auto (fit tile size)</option>
-            <option value="manual">Manual</option>
-          </select>
-        </SettingsField>
-        <SettingsField v-else label="Tiling" label-for="sp-tiling"
-          hint="Overlapping full-res tiles fit GPU memory (avoids the OOM); auto derives the tile size.">
-          <select id="sp-tiling" v-model="lp.tiling" class="field-input field-select">
-            <option value="off">Off</option>
-            <option value="auto">Auto (fit GPU memory)</option>
-            <option value="manual">Manual</option>
-          </select>
-        </SettingsField>
-
-        <template v-if="!isLearned">
-          <SettingsField v-if="siftSettings.tiling === 'manual'" label="Max tile size" label-for="sift-tileSize" unit="px">
-            <input id="sift-tileSize" v-model.number="siftSettings.tileSize" type="number" min="256" max="4096" step="64" class="field-input" />
-          </SettingsField>
-          <SettingsField v-if="siftSettings.tiling !== 'off'" label="Tile overlap" label-for="sift-overlap" unit="px"
-            hint="Each tile keeps only features at least half this far from a cut.">
-            <input id="sift-overlap" v-model.number="siftSettings.overlap" type="number" min="0" max="512" step="16" class="field-input" />
-          </SettingsField>
-        </template>
-        <template v-else>
-          <SettingsField v-if="lp.tiling === 'manual'" label="Max tile size" label-for="sp-tileSize" unit="px">
-            <input id="sp-tileSize" v-model.number="lp.tileSize" type="number" min="256" max="4096" step="64" class="field-input" />
-          </SettingsField>
-          <SettingsField v-if="lp.tiling !== 'off'" label="Tile overlap" label-for="sp-overlap" unit="px"
-            hint="Each tile keeps only features at least half this far from a cut.">
-            <input id="sp-overlap" v-model.number="lp.overlap" type="number" min="0" max="512" step="16" class="field-input" />
-          </SettingsField>
-        </template>
-      </SettingsGroup>
+      </SettingsStep>
     </AdvancedDisclosure>
 
     <template #footer>
@@ -367,4 +433,21 @@ function attemptRun() {
 <style scoped src="./ui/modal.css"></style>
 <style scoped>
 .confirm-text { font-size: 12px; line-height: 1.5; color: var(--text); margin: 0; }
+/* The run in execution order: native → resize → tiles → detect → keep. */
+.plan-strip { display: flex; flex-direction: column; gap: 6px; }
+.plan-caption { font-size: 11px; color: var(--text-dim); }
+.plan-chain { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.plan-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 8px; border: 1px solid var(--panel-border); border-radius: 12px;
+  font-size: 11px; color: var(--text); font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.plan-chip.dim { color: var(--text-dim); border-style: dashed; }
+.plan-n {
+  width: 14px; height: 14px; border-radius: 50%; flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 9px; font-weight: 700; color: #fff; background: var(--accent);
+}
+.plan-chip.dim .plan-n { background: var(--text-dim); }
+.plan-arrow { font-size: 11px; color: var(--text-dim); }
 </style>

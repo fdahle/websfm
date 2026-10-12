@@ -49,7 +49,8 @@ describe('image project restore readiness', () => {
     projects.projects = [{ id: 'project-1', name: 'test', sceneType: 'object' }]
     projects.currentProjectId = 'project-1'
     vi.spyOn(opfs, 'loadImageBlob').mockResolvedValue(new Blob(['pixels'], { type: 'image/jpeg' }))
-    vi.spyOn(opfs, 'loadKeypoints').mockResolvedValue(null)
+    vi.spyOn(opfs, 'listKeypointFiles').mockResolvedValue(new Set())
+    const load = vi.spyOn(opfs, 'loadKeypoints').mockResolvedValue(null)
     vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:restored-image')
 
     const store = useImagesStore()
@@ -58,8 +59,76 @@ describe('image project restore readiness', () => {
       kpStatus: 'done', kpCount: 250,
     }], 'project-1')
 
-    expect(store.images[0]).toMatchObject({ kpStatus: 'error', kpCount: 0, keypoints: [] })
+    // One directory listing decides it; no keypoint file is opened at restore.
+    expect(load).not.toHaveBeenCalled()
+    expect(store.images[0]).toMatchObject({ kpStatus: 'error', kpCount: 0 })
+    expect(store.images[0].keypoints).toBeUndefined()
     expect(store.keypointReadyImages).toEqual([])
+    expect(await store.ensureKeypoints('image-1')).toBeNull()
+  })
+})
+
+describe('keypoints on demand', () => {
+  const records = [
+    { id: 'image-1', uuid: 'uuid-1', name: 'a.jpg', meta: { width: 100, height: 80 }, kpStatus: 'done', kpCount: 2 },
+    { id: 'image-2', uuid: 'uuid-2', name: 'b.jpg', meta: { width: 100, height: 80 }, kpStatus: 'done', kpCount: 3 },
+    { id: 'image-3', uuid: 'uuid-3', name: 'c.jpg', meta: { width: 100, height: 80 }, kpStatus: 'idle', kpCount: 0 },
+  ]
+  // On-disk layout (core/features/keypoints.js): 6 floats per keypoint.
+  const files = { 'uuid-1': new Float32Array(12).fill(1), 'uuid-2': new Float32Array(18).fill(2) }
+  let load
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.restoreAllMocks()
+    const projects = useProjectsStore()
+    projects.persistenceAvailable = false
+    projects.projects = [{ id: 'project-1', name: 'test', sceneType: 'object' }]
+    projects.currentProjectId = 'project-1'
+    vi.spyOn(opfs, 'loadImageBlob').mockResolvedValue(new Blob(['pixels'], { type: 'image/jpeg' }))
+    vi.spyOn(opfs, 'listKeypointFiles').mockResolvedValue(new Set(Object.keys(files)))
+    load = vi.spyOn(opfs, 'loadKeypoints').mockImplementation(async (_p, uuid) => files[uuid]?.slice() ?? null)
+    vi.spyOn(opfs, 'loadColors').mockResolvedValue(null)
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:restored-image')
+  })
+
+  it('restores counts without reading a keypoint file, then loads one image once', async () => {
+    const store = useImagesStore()
+    await store.restoreImages(records, 'project-1')
+    expect(load).not.toHaveBeenCalled()
+    expect(store.keypointReadyImages.map((im) => im.id)).toEqual(['image-1', 'image-2'])
+    expect(store.keypointCacheStats().entries).toBe(0)
+    expect(store.residentKeypoints('image-1')).toBeNull()
+
+    const kps = await store.ensureKeypoints('image-1')
+    expect(kps.length).toBe(2)
+    expect(await store.ensureKeypoints(store.images[0])).toBe(kps) // cached
+    expect(store.residentKeypoints('image-1')).toBe(kps)
+    expect(load).toHaveBeenCalledTimes(1)
+    // A bulk read goes past the cache.
+    expect((await store.readKeypoints('image-2')).length).toBe(3)
+    expect(store.residentKeypoints('image-2')).toBeNull()
+    expect(store.keypointCacheStats().entries).toBe(1)
+    // Nothing detected ⇒ nothing read.
+    expect(await store.ensureKeypoints('image-3')).toBeNull()
+    expect(load).toHaveBeenCalledTimes(2)
+  })
+
+  it('shares one read between concurrent requests and trusts the file over a stale count', async () => {
+    const store = useImagesStore()
+    await store.restoreImages([{ ...records[0], kpCount: 5 }], 'project-1')
+    const [a, b] = await Promise.all([store.ensureKeypoints('image-1'), store.ensureKeypoints('image-1')])
+    expect(a).toBe(b)
+    expect(load).toHaveBeenCalledTimes(1)
+    expect(store.images[0].kpCount).toBe(2)
+  })
+
+  it('drops a read that a re-detection or a clear overtook', async () => {
+    const store = useImagesStore()
+    await store.restoreImages(records, 'project-1')
+    const pending = store.ensureKeypoints('image-1')
+    store.clearKeypoints('image-1')
+    expect(await pending).toBeNull()
+    expect(store.keypointCacheStats().entries).toBe(0)
   })
 })
 

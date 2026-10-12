@@ -69,10 +69,11 @@ test('two tabs preserve independent projects and refuse simultaneous editing', a
 test('LAS import/export retains survey precision and ZIP extraction runs in a worker', async ({ page }) => {
   await page.goto(harness)
   const result = await page.evaluate(async () => {
-    const { cloudToLas, parseLas } = await import('/src/core/io/las.js')
+    const { cloudToLasParts, parseLas } = await import('/src/core/io/las.js')
+    const { joinParts } = await import('/src/core/io/parts.js')
     const { readSfmZip } = await import('/src/workers/archive/zipClient.js')
     const { zipStore } = await import('/src/utils/zip.js')
-    const bytes = cloudToLas([{ x: 7e6 + .01, y: 5e5, z: 1 }, { x: 7e6 + .02, y: 5e5, z: 2 }])
+    const bytes = joinParts(cloudToLasParts([{ x: 7e6 + .01, y: 5e5, z: 1 }, { x: 7e6 + .02, y: 5e5, z: 2 }]))
     const cloud = parseLas(bytes)
     const archive = zipStore([{ name: 'cameras.txt', data: new TextEncoder().encode('camera-model') }])
     const extracted = await readSfmZip(new File([archive], 'model.zip'))

@@ -80,21 +80,36 @@ export function paintBorderExclude(data, w, h, { top = 0, right = 0, bottom = 0,
 }
 
 // ── Canvas I/O (works on main thread and in workers via OffscreenCanvas) ───────
+//
+// A mask travels as a PNG **Blob**: its bytes live outside the V8 heap, and posting
+// one to a worker clones a reference, not the bytes. A base64 data URL string is the
+// opposite on both counts — it was held per image for the whole session.
 
-function blobToDataUrl(blob) {
-  return new Promise((resolve) => {
-    const reader = new FileReader()
-    reader.onload = (e) => resolve(e.target.result)
-    reader.readAsDataURL(blob)
-  })
+// A data URL decoded synchronously into a Blob (atob; no fetch).
+export function dataUrlToBlob(dataUrl) {
+  const comma = dataUrl.indexOf(',')
+  const head = dataUrl.slice(5, comma)
+  const type = head.split(';')[0] || 'application/octet-stream'
+  const body = dataUrl.slice(comma + 1)
+  if (!head.includes(';base64')) return new Blob([decodeURIComponent(body)], { type })
+  const bin = atob(body)
+  const bytes = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+  return new Blob([bytes], { type })
 }
 
-// Decode any mask source (File/Blob or a dataUrl string), draw it into a w×h
-// canvas, normalize to the exclude convention, and return a PNG dataUrl sized to
-// w×h. Used for importing a file as a mask and for rescaling a mask across
-// images of a different resolution.
+// Any mask source — a Blob/File, or a data:/blob: URL string — as a Blob.
+export async function maskBlob(source) {
+  if (typeof source !== 'string') return source
+  return source.startsWith('data:') ? dataUrlToBlob(source) : (await fetch(source)).blob()
+}
+
+// Decode any mask source (File/Blob or a URL string), draw it into a w×h canvas,
+// normalize to the exclude convention, and return a PNG Blob sized to w×h. Used for
+// importing a file as a mask and for rescaling a mask across images of a different
+// resolution.
 export async function maskFromSource(source, w, h) {
-  const blob = typeof source === 'string' ? await (await fetch(source)).blob() : source
+  const blob = await maskBlob(source)
   const bmp = await createImageBitmap(blob)
   const canvas = new OffscreenCanvas(w, h)
   const ctx = canvas.getContext('2d', { willReadFrequently: true })
@@ -103,15 +118,13 @@ export async function maskFromSource(source, w, h) {
   const id = ctx.getImageData(0, 0, w, h)
   normalizeMaskPixels(id.data)
   ctx.putImageData(id, 0, 0)
-  const out = await canvas.convertToBlob({ type: 'image/png' })
-  return blobToDataUrl(out)
+  return canvas.convertToBlob({ type: 'image/png' })
 }
 
-// Rasterize a stored mask dataUrl to a w×h "is-masked" lookup. Used by the
+// Rasterize a stored mask (Blob or URL) to a w×h "is-masked" lookup. Used by the
 // compute worker to test keypoint / depth-map pixels against the mask.
-export async function buildMaskLookup(dataUrl, w, h) {
-  const blob = await (await fetch(dataUrl)).blob()
-  const bmp = await createImageBitmap(blob)
+export async function buildMaskLookup(source, w, h) {
+  const bmp = await createImageBitmap(await maskBlob(source))
   const canvas = new OffscreenCanvas(w, h)
   const ctx = canvas.getContext('2d', { willReadFrequently: true })
   ctx.drawImage(bmp, 0, 0, w, h)
@@ -119,8 +132,8 @@ export async function buildMaskLookup(dataUrl, w, h) {
   return maskLookupFromRgba(ctx.getImageData(0, 0, w, h).data, w, h)
 }
 
-// Build a w×h border mask PNG dataUrl excluding the outer `sides` margins (px).
-// When `base` (an existing stored mask dataUrl, already in exclude form) is given,
+// Build a w×h border mask PNG Blob excluding the outer `sides` margins (px).
+// When `base` (an existing stored mask Blob or URL, already in exclude form) is given,
 // it is drawn in first so the result is the UNION of that mask and the border
 // (merge mode); pass null to start blank (replace mode). Used by the Auto-Mask
 // modal's "border" strategy.
@@ -128,12 +141,12 @@ export async function buildBorderMask(w, h, sides, base = null) {
   const canvas = new OffscreenCanvas(w, h)
   const ctx = canvas.getContext('2d', { willReadFrequently: true })
   if (base) {
-    const bmp = await createImageBitmap(await (await fetch(base)).blob())
+    const bmp = await createImageBitmap(await maskBlob(base))
     ctx.drawImage(bmp, 0, 0, w, h)
     bmp.close()
   }
   const id = ctx.getImageData(0, 0, w, h)
   paintBorderExclude(id.data, w, h, sides)
   ctx.putImageData(id, 0, 0)
-  return blobToDataUrl(await canvas.convertToBlob({ type: 'image/png' }))
+  return canvas.convertToBlob({ type: 'image/png' })
 }

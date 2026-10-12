@@ -2,9 +2,9 @@
 import { ref, computed, watch } from 'vue'
 import Icon from '../Icon.vue'
 import RibbonMenu from './RibbonMenu.vue'
-import { guardReason } from '../../core/help/commands.js'
+import { commandReason } from '../../core/help/commands.js'
 import {
-  TABS, CAMERA_GROUP, SCENE_GROUP, SELECT_GROUP, MAP_GROUP, PICTURE_TAB, rasterTab as buildRasterTab,
+  TABS, CAMERA_GROUP, SCENE_GROUP, MAP_GROUP, PICTURE_TAB, rasterTab as buildRasterTab, measureMenu,
   menuReason, stepValue,
 } from '../../core/help/ribbonTabs.js'
 
@@ -25,9 +25,14 @@ const props = defineProps({
   activeImageName: { type: String, default: null },
   imageViewState: { type: Object, default: null },
   // The raster tab currently in front, if any: { kind: 'dem'|'ortho',
-  // imported: boolean, onMap: boolean }. Drives the contextual Raster tab, the
+  // imported: boolean, onMap: boolean, mapBlocked?: string — why a computed product
+  // cannot go on the map }. Drives the contextual Raster tab, the
   // exact mirror of PICTURE_TAB for an image tab.
   activeRaster: { type: Object, default: null },
+  // The 2D map's measuring context (App): { targets: [{ id, name, kind }],
+  // targetId, kind (the target's), measure (RasterMeasurements state) } — null
+  // when no raster is on the map. Adds the target rows to Tools ▸ Measure ▾.
+  mapMeasure: { type: Object, default: null },
   consoleOpen: { type: Boolean, default: false },
   persistenceEnabled: { type: Boolean, default: false },
   currentProjectName: { type: String, default: null },
@@ -38,6 +43,9 @@ const props = defineProps({
 const emit = defineEmits(['command'])
 
 const rasterTab = computed(() => buildRasterTab(props.activeRaster))
+// Whose Measure tools the ribbon is showing: the raster tab in front, else the 2D
+// map's target. Same commands, same state shape, one set of checks below.
+const measureCtx = computed(() => props.activeRaster ?? (props.activeView === 'map' ? props.mapMeasure : null))
 
 const activeTab = ref('view')
 
@@ -68,9 +76,16 @@ const currentTab = computed(() => {
   if (tab.id === 'view') {
     // The contextual groups track the *active viewer*, not merely "not map": while
     // an image detail tab is open activeView is neither, so no 3D/2D group applies.
-    if (props.activeView === 'map')    return { ...tab, groups: [...tab.groups, MAP_GROUP] }
-    if (props.activeView === 'viewer') return { ...tab, groups: [...tab.groups, CAMERA_GROUP, SCENE_GROUP, SELECT_GROUP] }
+    // Display only — the tools these views run are in the Tools tab.
+    if (props.activeView === 'map') return { ...tab, groups: [...tab.groups, MAP_GROUP] }
+    if (props.activeView === 'viewer') return { ...tab, groups: [...tab.groups, CAMERA_GROUP, SCENE_GROUP] }
     return tab
+  }
+  if (tab.id === 'tools' && props.activeView === 'map' && !props.activeRaster && props.mapMeasure?.targets?.length) {
+    // The map stacks rasters, so its Measure menu also picks which one is measured.
+    const menu = measureMenu(props.mapMeasure)
+    return { ...tab, groups: tab.groups.map((g) => ({
+      ...g, commands: g.commands.map((c) => (c.id === 'menu-measure' ? { ...c, menu } : c)) })) }
   }
   return tab
 })
@@ -81,15 +96,16 @@ function isHidden(cmd) {
   // hub follows. Hiding made a whole ribbon group silently vanish, which reads as
   // a broken build rather than as "not applicable here".
   // Film-only overlays (fiducial marks) show only for a scanned-film image tab.
+  // (A DEM-only measure row is greyed with its reason, not hidden: a menu never
+  // hides a row by state.)
   if (cmd.filmOnly && !props.imageViewState?.isFilm) return true
-  if (cmd.demOnly && props.activeRaster?.kind !== 'dem') return true
   return false
 }
 
 // Keys answered by the View tab's display state rather than the image view.
 const VIEW_KEYS = new Set([
   'showCameras', 'showGrid', 'showLegend', 'showMapGrid', 'showFootprints',
-  'selectRect', 'selectLasso', 'mapGcpEdit',
+  'selectRect', 'selectLasso', 'mapModelFrame',
 ])
 
 function isActive(cmd) {
@@ -101,8 +117,11 @@ function isActive(cmd) {
   if (cmd.activeKey === 'consoleOpen') return props.consoleOpen
   if (VIEW_KEYS.has(cmd.activeKey)) return !!props.viewState[cmd.activeKey]
   if (cmd.activeKey === 'rasterOnMap')    return !!props.activeRaster?.onMap
-  if (cmd.measureTool) return props.activeRaster?.measure?.tool === cmd.measureTool
-  if (cmd.activeKey === 'measureSaved')   return !!props.activeRaster?.measure?.showSaved
+  if (cmd.selected !== undefined) return cmd.selected // a map measure-target row
+  // Edit GCPs is one mode per view: the map's own flag, else the image view's.
+  if (cmd.activeKey === 'gcpEdit' && props.activeView === 'map') return !!props.viewState.mapGcpEdit
+  if (cmd.measureTool) return measureCtx.value?.measure?.tool === cmd.measureTool
+  if (cmd.activeKey === 'measureSaved')   return !!measureCtx.value?.measure?.showSaved
   const s = props.imageViewState
   if (!s || !cmd.activeKey) return false
   return !!s[cmd.activeKey]
@@ -116,16 +135,18 @@ function isDisabled(cmd) {
 }
 
 function disabledReason(cmd) {
-  if (cmd.disabled) return 'Coming soon'
-  const m = props.activeRaster?.measure
+  // Coming-soon, aerial-only and prerequisites: the console's checks too.
+  const base = commandReason(cmd, { ...props.state, sceneType: props.sceneType })
+  if (base) return base
+  const m = measureCtx.value?.measure
+  if (cmd.demOnly && measureCtx.value?.kind !== 'dem')
+    return props.activeRaster ? 'Needs a DEM — this is an orthophoto' : 'Needs a DEM — pick a DEM layer to measure below'
   if (cmd.measureTool && !m?.available)
     return 'Measuring needs a current frame with linear coordinates (not geographic, not an outdated frame)'
   if (cmd.measureTool && cmd.demOnly && !m?.heights) return 'Needs the DEM elevation values, which are not loaded yet'
   if (cmd.needsSavedMeasurements && !m?.savedCount) return 'No saved measurements on this raster yet'
-  if (cmd.aerialOnly && props.sceneType === 'object')
-    return 'Only for aerial projects — an object capture has no coordinate system'
-  const need = guardReason(cmd.needs, props.state)
-  if (need) return need
+  // A computed product in the local frame has no map position (productLayers.js).
+  if (cmd.activeKey === 'rasterOnMap' && props.activeRaster?.mapBlocked) return props.activeRaster.mapBlocked
   const s = props.imageViewState
   if (cmd.disableKey === 'kpNotDone' && s?.kpStatus !== 'done') return 'Detect keypoints first'
   if (cmd.disableKey === 'noMask'    && !s?.hasMask)            return 'No mask available'
@@ -134,12 +155,22 @@ function disabledReason(cmd) {
   return ''
 }
 
+// A row that is a mode (it has an on state) or an option (a map measure target).
+const isToggleRow = (row) => !!(row.activeKey || row.measureTool || row.selected !== undefined)
+
 // A menu's rows, resolved: each real row carries its own disabled reason (printed
-// inline in the menu), sections pass through; hidden rows are dropped.
+// inline in the menu) and, for a mode, whether it is on; sections pass through;
+// hidden rows are dropped.
 function menuRows(cmd) {
   return cmd.menu
     .filter((row) => row.section || !isHidden(row))
-    .map((row) => row.section ? row : { ...row, reason: disabledReason(row) })
+    .map((row) => row.section ? row
+      : { ...row, reason: disabledReason(row), active: isToggleRow(row) ? isActive(row) : undefined })
+}
+// A menu whose tool is running shows as on, so a mode entered from a menu is
+// visible without opening it (a chosen target is an option, not a running tool).
+function menuActive(cmd) {
+  return cmd.menu.some((row) => !row.section && (row.activeKey || row.measureTool) && isActive(row))
 }
 function menuDisabledReason(cmd) {
   return menuReason(cmd.menu.filter((row) => row.section || !isHidden(row)), disabledReason)
@@ -261,6 +292,7 @@ function step(cmd, dir) {
                 :icon="item.icon"
                 :rows="menuRows(item)"
                 :reason="menuDisabledReason(item)"
+                :active="menuActive(item)"
                 @run="(id) => emit('command', id)"
               />
               <button

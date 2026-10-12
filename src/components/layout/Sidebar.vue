@@ -30,6 +30,8 @@ const props = defineProps({
   // Raster products (recomputable): DEM / orthophoto, or null when not built.
   dem:        { type: Object, default: null },
   ortho:      { type: Object, default: null },
+  // Map-layer state of the computed DEM/ortho (useReconstructionStore.productLayers).
+  productLayers: { type: Object, default: () => ({}) },
   // Imported georeferenced rasters (useExternalStore) — metadata only, planes lazy.
   rasters:    { type: Array,  default: () => [] },
   // Transient rows created as soon as a reference GeoTIFF starts parsing.
@@ -60,6 +62,7 @@ const emit = defineEmits([
   'select', 'open', 'show-info', 'delete-keypoints', 'zoom-to-image',
   'cloud-symbology', 'cloud-visibility', 'select-cloud', 'remove-cloud', 'rename-cloud', 'set-main-cloud',
   'open-matches', 'remove-matches', 'open-product', 'remove-product', 'rename-product', 'zoom-to-cloud',
+  'set-product-on-map', 'set-product-opacity',
   'open-raster', 'remove-raster', 'rename-raster', 'set-raster-kind', 'style-raster',
   'set-raster-on-map', 'set-raster-opacity', 'convert-raster-to-image',
 ])
@@ -233,8 +236,11 @@ watch(() => props.pendingRasters.length, (count, previous) => {
       :selected-cloud-id="selectedCloudId"
       :dem="dem"
       :ortho="ortho"
+      :product-layers="productLayers"
       :open-tab-ids="openTabIds"
       @toggle="toggle('products')"
+      @set-product-on-map="emit('set-product-on-map', $event)"
+      @set-product-opacity="emit('set-product-opacity', $event)"
       @open-product="emit('open-product', $event)"
       @remove-product="emit('remove-product', $event)"
       @rename-product="emit('rename-product', $event)"

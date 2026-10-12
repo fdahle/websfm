@@ -18,7 +18,7 @@ function makeMap(overrides = {}) {
     cost: Float32Array.from({ length: px }, (_, i) => i * 0.1),
     rgb: Uint8Array.from({ length: px * 3 }, (_, i) => i),
     normals: Float32Array.from({ length: px * 3 }, (_, i) => -i),
-    displayDataUrl: 'data:image/png;base64,zzz',
+    displayBlob: new Blob(['png']),
     ...overrides,
   }
 }
@@ -47,9 +47,9 @@ describe('serialize/deserializeDepthMap', () => {
 
   it('drops the display PNG (the images store owns it)', () => {
     const { meta, buffers } = serializeDepthMap(makeMap())
-    expect(meta.displayDataUrl).toBeUndefined()
-    expect(buffers.displayDataUrl).toBeUndefined()
-    expect(roundTrip(makeMap()).displayDataUrl).toBeUndefined()
+    expect(meta.displayBlob).toBeUndefined()
+    expect(buffers.displayBlob).toBeUndefined()
+    expect(roundTrip(makeMap()).displayBlob).toBeUndefined()
   })
 
   it('round-trips a map without normals', () => {

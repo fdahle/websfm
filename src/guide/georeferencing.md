@@ -62,6 +62,12 @@ enabled control points, each marked in two registered images; more well-distribu
 control is far better. Spread points across the area and elevation range, and keep
 independent checkpoints out of the fit when you need an honest accuracy test.
 
+To place marks, open an image and choose **Tools → Georeferencing → Edit GCPs**: a
+click on the image then marks the GCP selected in the sidebar, or adds a new one. With
+the 2D map in front, the same button places and moves the surveyed points on the map
+instead. Click it again to leave the mode; a right-click on an image or the
+map adds a point without entering it.
+
 ## Adjust or transform
 **Adjust reconstruction with GCPs** rebuilds the sparse model with control inside
 bundle adjustment. It is the stronger choice after adding good control, but invalidates

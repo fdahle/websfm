@@ -7,6 +7,7 @@ import WarnBox from './ui/WarnBox.vue'
 import CrsSuggestion from './ui/CrsSuggestion.vue'
 import GlossaryTerm from '../glossary/GlossaryTerm.vue'
 import { DEM_DEFAULTS } from '../../core/defaults.user.js'
+import { useComputeSettings } from '../../composables/useComputeSettings.js'
 
 // Build DEM (Digital Surface Model). Rasterises the point cloud into a height
 // grid in the chosen frame. Defaults are the single source of truth in
@@ -55,12 +56,19 @@ watch(() => props.canGeoreference, (can) => {
   if (can && appliedCrsSuggestion.value) settings.value.crs = 'project'
 })
 
-const settings = ref({ ...DEM_DEFAULTS })
+// A georeferenced project defaults to the project CRS: a local-frame product has no
+// map position (core/products/productLayers.js), so 'local' there would be a trap.
+// Read once at open — a fact about the project, never re-applied over the user's pick.
+const settings = ref({ ...DEM_DEFAULTS, crs: props.canGeoreference ? 'project' : DEM_DEFAULTS.crs })
+// The machine-level memory budget (Settings ▸ Compute), injected at run() like
+// the dense modals: it bounds the staged points and the grid.
+const { memBudgetBytes } = useComputeSettings()
 
 function run() {
   // Pass gsd only when set (0 ⇒ let the worker auto-suggest).
   const { gsd, ...rest } = settings.value
-  emit('run', gsd > 0 ? { ...rest, gsd } : rest)
+  const out = { ...rest, memBudgetBytes: memBudgetBytes.value }
+  emit('run', gsd > 0 ? { ...out, gsd } : out)
 }
 </script>
 
@@ -104,6 +112,17 @@ function run() {
         <GlossaryTerm id="ground-sample-distance">Ground sample distance</GlossaryTerm>
       </template>
       <input id="dem-gsd" v-model.number="settings.gsd" type="number" min="0" step="0.1" class="field-input" />
+    </SettingsField>
+
+    <!-- The raw min/max lets far background (an oblique capture sees almost to the
+         horizon) set the raster size; the dense core keeps the site. The run logs
+         how many points the core leaves out. -->
+    <SettingsField label="Extent" label-for="dem-extent"
+      hint="Dense core trims sparse far background (oblique views), and logs what it leaves out. All points uses the raw extent.">
+      <select id="dem-extent" v-model="settings.extent" class="field-input field-select">
+        <option value="core">Dense core of the cloud</option>
+        <option value="all">All points</option>
+      </select>
     </SettingsField>
 
     <SettingsField label="Surface aggregation" label-for="dem-agg"

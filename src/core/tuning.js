@@ -51,11 +51,22 @@ export const SFM_TUNING = {
   // ── Bundle-adjustment linear solver (bundle.rs SolverOpts) ──
   // Policy for the reduced camera system of every bundle adjustment. null ⇒ the crate
   // default: PCG from n ≥ 600 (≈ 100 cameras), rel_tol 1e-10, 2,000 iterations, Cholesky
-  // fallback at the cap. Open question (TODO ▸ MEM ▸ PCG): quarry ran slower with PCG.
+  // fallback at the cap. The policy here is inexact Newton instead: CG to 1e-6, at most
+  // 200 iterations, and the capped iterate taken as the step (it still lowers the
+  // quadratic model; LM accepts it only if the true cost falls). HANDOVER ▸ B-parity,
+  // corrected sweep: SfM −50 % (PUTI), −24 % (quarry), −14 % (South Building) with the
+  // same LM solve counts, camera/checkpoint accuracy and point counts — the exact default
+  // spent much of its time hitting the 2,000 cap and then paying a dense Cholesky too.
   // Every BA logs what its solves did and the run totals land in summary.baSolver, so a
-  // bench decides by overriding this per run: { pcgMinN: 1e9 } (Cholesky only) or
-  // { pcgRelTol: 1e-6, pcgMaxIter: 200, pcgAcceptPartial: true } (inexact Newton).
-  baSolver: { pcgMinN: null, pcgRelTol: null, pcgMaxIter: null, pcgAcceptPartial: null },
+  // bench compares by overriding keys per run (merged key by key, sfm.js): { pcgMinN: 1e9 }
+  // (Cholesky only), { pcgRelTol: 1e-10, pcgMaxIter: 2000, pcgAcceptPartial: false }
+  // (the exact solve), { pcgPreconditioner: 'ic0' } (block IC(0), ≤ 12 % in the sweep).
+  // functionTolerance: LM stops once an accepted step lowers the robust cost by less than
+  // this fraction (Ceres' function_tolerance; 0 ⇒ run to the iteration cap, the old
+  // behaviour). St Nazaire SIFT (HANDOVER ▸ B-ba-ftol): BA 608 → 205 s at 1e-6 with the
+  // same cameras, points, reprojection and GNSS fit to 4 decimals; 1e-5 saved another
+  // 54 s but moved the median reprojection by 0.01 px, so the standard value stays.
+  baSolver: { pcgMinN: null, pcgRelTol: 1e-6, pcgMaxIter: 200, pcgAcceptPartial: true, functionTolerance: 1e-6 },
   // ── Interleaved bundle-adjustment / track filtering ──
   // Observation pruning threshold, in **detection pixels** — sfm.js resolves it to
   // native px against the run's detection scale (core/scaleContext.js, which owns
@@ -100,8 +111,18 @@ export const SFM_TUNING = {
   // ba_global_images_ratio is 1.1). Each solve costs the whole model, so every-5 alone
   // is quadratic: quarry (347 images) registration 1,005 → 143 s, SB 106 → 45 s, points
   // and RTK accuracy unchanged (SB −0.4 %). 0 = every interimBaEvery cameras.
-  interimBaGrowth: 1.2,
+  // 2 since 2026-10-11 (HANDOVER ▸ B-parity, interim-BA spacing): against 1.2, SfM −25…33 %
+  // on PUTI, quarry, South Building and St Nazaire with every camera kept and camera /
+  // checkpoint accuracy unchanged, and the hard sets (building's weak bridge, eagle) lose
+  // nothing either. Local BA between the solves bought nothing on top.
+  interimBaGrowth: 2,
   interimBaIterations: 12,   // fewer iters for the interim solves than the final BA
+  // Local BA after each registration (sfm.js runLocalBundleAdjust): the new camera + its
+  // localBaWindow − 1 most co-visible cameras free, their neighbours fixed. 0 = off: on six
+  // bench sets it only added 5–10 % time at growth 2 (B-parity); kept opt-in for a
+  // thousands-of-cameras set, where the gaps between global solves get long.
+  localBaWindow: 0,
+  localBaIterations: 6,
   // Track storage (core/sfm/trackStore.js): 'typed' is the arena the solver runs on;
   // 'map' is the Map-based reference it is tested against. Same output, bit for bit.
   trackStore: 'typed',
@@ -256,6 +277,10 @@ export const DENSE_TUNING = {
   // the estimate rarely has to grow.
   fuseEstimateSampleCap: 65536,
   fuseEstimateMargin: 1.05,
+  // Workers fusion splits over (store densifyParallel). 1 = one worker: fusion is bound by
+  // plane reads, and 8 workers on quarry took 630 s vs 557 s (plan 262 s of re-reads +
+  // slabs contending for OPFS). Kept for machines / storage where that turns around.
+  fuseWorkers: 1,
   // ── Post-fusion isolated-cell removal (WS4, gated by removeIsolated) ──
   // Only low-support cells are tested (a ≥3-pixel cell is never a floater), so this stays
   // O(noise tail). A tested cell survives if ≥ isolatedMinNeighbors of its 26 (radius 1)
@@ -307,4 +332,19 @@ export const MESH_TUNING = {
   // Spacing estimate for a cloud without a fusion merge cell (an imported cloud): median
   // nearest-neighbour distance over this many sampled points.
   spacingSampleMax: 20000,
+}
+
+// ── Resident feature data (stores; TODO ▸ SC-2/SC-3) ─────────────────────────────
+// Keypoints and matches live on disk and are read per image / per pair on demand
+// (utils/byteLru.js). These budgets bound the CLEAN copies kept for re-use — the open
+// image tabs, the match preview, a matching run's working set. Unsaved results are
+// pinned and never count against eviction. A bulk consumer (SfM input, exports,
+// fingerprints) streams past the cache rather than through it. 256 MiB is ~470 images
+// of 20 k keypoints, or ~33 M matches.
+export const RESIDENT_TUNING = {
+  keypointCacheMiB: 256,
+  matchCacheMiB: 256,
+  // One read of the matches file serves every consecutive pair inside this window
+  // (core/features/matchStorage.js planMatchReads).
+  matchReadWindowMiB: 32,
 }

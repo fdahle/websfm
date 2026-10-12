@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { normalizeRegion, regionStatus, regionContains, regionMask, pointsInRegion, regionFromPositions } from './region.js'
+import { normalizeRegion, regionStatus, regionContains, regionMask, regionFromPositions } from './region.js'
+import { positionsInRegion } from '../dense/sparseInput.js'
 
 const box = { min: [0, 0, 0], max: [10, 5, 2], sourceStamp: { id: 's', createdAt: 7 } }
 
@@ -26,7 +27,7 @@ describe('region', () => {
     const { keep, kept } = regionMask(pos, 3, box)
     expect([...keep]).toEqual([1, 0, 1])
     expect(kept).toBe(2)
-    expect(pointsInRegion([{ x: 1, y: 1, z: 1 }, { x: -1, y: 0, z: 0 }], box)).toHaveLength(1)
+    expect(positionsInRegion(Float64Array.from([1, 1, 1, -1, 0, 0]), box)).toEqual(Float64Array.from([1, 1, 1]))
   })
 
   it('fits a robust box that ignores a few strays', () => {

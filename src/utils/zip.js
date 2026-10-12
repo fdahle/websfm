@@ -1,80 +1,134 @@
-// Minimal dependency-free ZIP writer (STORE method, no compression). Enough to
-// bundle a handful of small text files (e.g. a COLMAP model's three .txt files)
-// into one download. Pure: entries in → Uint8Array out; the UI wraps it in a Blob.
-//
-// entries: [{ name, data:Uint8Array }]. Returns the ZIP archive bytes.
+// Minimal dependency-free ZIP writer (STORE method, no compression). Two forms
+// over the same records:
+//   zipStore(entries)        — sync, Uint8Array in → Uint8Array out, for small sets.
+//   await zipParts(entries)  — the export form: an entry's data may be a Blob (an
+//     undistorted image, a source photo) or an iterable of string/Uint8Array parts
+//     (core/io/parts.js), and the result is parts for `new Blob(parts)`. Nothing is
+//     concatenated, so a multi-GB workspace never becomes one buffer.
+// Plain ZIP, not ZIP64: sizes and offsets are u32 and the entry count u16, so both
+// forms refuse an archive past those limits instead of writing a corrupt one.
 
+const U32_MAX = 0xffffffff
+
+// entries: [{ name, data:Uint8Array }]. Returns the ZIP archive bytes.
 export function zipStore(entries) {
   const enc = new TextEncoder()
-  const files = entries.map((e) => {
-    const nameBytes = enc.encode(e.name)
-    return { nameBytes, data: e.data, crc: crc32(e.data) }
-  })
-
-  // Sum sizes to allocate once. Local header = 30 + name + data; central dir
-  // header = 46 + name; end-of-central-directory = 22.
-  let localSize = 0
-  let centralSize = 0
-  for (const f of files) {
-    localSize += 30 + f.nameBytes.length + f.data.length
-    centralSize += 46 + f.nameBytes.length
-  }
-  const out = new Uint8Array(localSize + centralSize + 22)
-  const dv = new DataView(out.buffer)
+  const parts = []
+  const central = []
   let off = 0
-  const offsets = []
-
-  for (const f of files) {
-    offsets.push(off)
-    dv.setUint32(off, 0x04034b50, true) // local file header signature
-    dv.setUint16(off + 4, 20, true) // version needed
-    dv.setUint16(off + 6, 0, true) // flags
-    dv.setUint16(off + 8, 0, true) // compression: store
-    dv.setUint16(off + 10, 0, true) // mod time
-    dv.setUint16(off + 12, 0, true) // mod date
-    dv.setUint32(off + 14, f.crc, true)
-    dv.setUint32(off + 18, f.data.length, true) // compressed size
-    dv.setUint32(off + 22, f.data.length, true) // uncompressed size
-    dv.setUint16(off + 26, f.nameBytes.length, true)
-    dv.setUint16(off + 28, 0, true) // extra length
-    off += 30
-    out.set(f.nameBytes, off); off += f.nameBytes.length
-    out.set(f.data, off); off += f.data.length
+  for (const e of entries) {
+    const nameBytes = enc.encode(e.name)
+    const crc = crc32(e.data)
+    checkZipLimits(off, e.data.length, entries.length)
+    parts.push(localHeader(nameBytes, crc, e.data.length), e.data)
+    central.push(centralHeader(nameBytes, crc, e.data.length, off))
+    off += 30 + nameBytes.length + e.data.length
   }
-
-  const centralStart = off
-  files.forEach((f, i) => {
-    dv.setUint32(off, 0x02014b50, true) // central dir header signature
-    dv.setUint16(off + 4, 20, true) // version made by
-    dv.setUint16(off + 6, 20, true) // version needed
-    dv.setUint16(off + 8, 0, true) // flags
-    dv.setUint16(off + 10, 0, true) // compression
-    dv.setUint16(off + 12, 0, true) // mod time
-    dv.setUint16(off + 14, 0, true) // mod date
-    dv.setUint32(off + 16, f.crc, true)
-    dv.setUint32(off + 20, f.data.length, true)
-    dv.setUint32(off + 24, f.data.length, true)
-    dv.setUint16(off + 28, f.nameBytes.length, true)
-    dv.setUint16(off + 30, 0, true) // extra length
-    dv.setUint16(off + 32, 0, true) // comment length
-    dv.setUint16(off + 34, 0, true) // disk number start
-    dv.setUint16(off + 36, 0, true) // internal attrs
-    dv.setUint32(off + 38, 0, true) // external attrs
-    dv.setUint32(off + 42, offsets[i], true) // local header offset
-    off += 46
-    out.set(f.nameBytes, off); off += f.nameBytes.length
-  })
-
-  dv.setUint32(off, 0x06054b50, true) // end of central directory signature
-  dv.setUint16(off + 4, 0, true) // disk number
-  dv.setUint16(off + 6, 0, true) // disk with central dir
-  dv.setUint16(off + 8, files.length, true) // entries on this disk
-  dv.setUint16(off + 10, files.length, true) // total entries
-  dv.setUint32(off + 12, off - centralStart, true) // central dir size
-  dv.setUint32(off + 16, centralStart, true) // central dir offset
-  dv.setUint16(off + 20, 0, true) // comment length
-
+  const all = [...parts, ...central, endRecord(entries.length, central, off)]
+  const out = new Uint8Array(all.reduce((s, p) => s + p.length, 0))
+  let o = 0
+  for (const p of all) { out.set(p, o); o += p.length }
   return out
+}
+
+// entries: [{ name, data, crc? }] — data a Uint8Array, a string (UTF-8), a Blob,
+// or an iterable of string/Uint8Array parts. `crc` skips re-reading data whose
+// CRC-32 the caller already has (a Blob it computed while it held the bytes).
+export async function zipParts(entries) {
+  const enc = new TextEncoder()
+  const out = []
+  const central = []
+  let off = 0
+  for (const e of entries) {
+    const nameBytes = enc.encode(e.name)
+    let data, size, crc
+    if (typeof Blob !== 'undefined' && e.data instanceof Blob) {
+      data = [e.data]; size = e.data.size
+      crc = e.crc ?? await crc32Blob(e.data)
+    } else {
+      data = byteParts(e.data, enc)
+      size = data.reduce((s, p) => s + p.length, 0)
+      crc = e.crc ?? data.reduce((c, p) => crc32Update(c, p), ~0) ^ ~0
+    }
+    crc >>>= 0
+    checkZipLimits(off, size, entries.length)
+    out.push(localHeader(nameBytes, crc, size), ...data)
+    central.push(centralHeader(nameBytes, crc, size, off))
+    off += 30 + nameBytes.length + size
+  }
+  out.push(...central, endRecord(entries.length, central, off))
+  return out
+}
+
+function byteParts(data, enc) {
+  if (data instanceof Uint8Array) return [data]
+  if (typeof data === 'string') return [enc.encode(data)]
+  return [...data].map((p) => (typeof p === 'string' ? enc.encode(p) : p))
+}
+
+function checkZipLimits(offset, size, count) {
+  if (count > 0xffff || size > U32_MAX || offset + size > U32_MAX) {
+    throw new Error('Export exceeds the 4 GB / 65,535-entry ZIP limit (no ZIP64 writer). '
+      + 'Export fewer images or a smaller model, or lower the output resolution.')
+  }
+}
+
+function localHeader(nameBytes, crc, size) {
+  const h = new Uint8Array(30 + nameBytes.length)
+  const dv = new DataView(h.buffer)
+  dv.setUint32(0, 0x04034b50, true) // local file header signature
+  dv.setUint16(4, 20, true) // version needed
+  dv.setUint16(6, 0, true) // flags
+  dv.setUint16(8, 0, true) // compression: store
+  dv.setUint16(10, 0, true) // mod time
+  dv.setUint16(12, 0, true) // mod date
+  dv.setUint32(14, crc, true)
+  dv.setUint32(18, size, true) // compressed size
+  dv.setUint32(22, size, true) // uncompressed size
+  dv.setUint16(26, nameBytes.length, true)
+  dv.setUint16(28, 0, true) // extra length
+  h.set(nameBytes, 30)
+  return h
+}
+
+function centralHeader(nameBytes, crc, size, localOffset) {
+  const h = new Uint8Array(46 + nameBytes.length)
+  const dv = new DataView(h.buffer)
+  dv.setUint32(0, 0x02014b50, true) // central dir header signature
+  dv.setUint16(4, 20, true) // version made by
+  dv.setUint16(6, 20, true) // version needed
+  dv.setUint16(8, 0, true) // flags
+  dv.setUint16(10, 0, true) // compression
+  dv.setUint16(12, 0, true) // mod time
+  dv.setUint16(14, 0, true) // mod date
+  dv.setUint32(16, crc, true)
+  dv.setUint32(20, size, true)
+  dv.setUint32(24, size, true)
+  dv.setUint16(28, nameBytes.length, true)
+  dv.setUint16(30, 0, true) // extra length
+  dv.setUint16(32, 0, true) // comment length
+  dv.setUint16(34, 0, true) // disk number start
+  dv.setUint16(36, 0, true) // internal attrs
+  dv.setUint32(38, 0, true) // external attrs
+  dv.setUint32(42, localOffset, true) // local header offset
+  h.set(nameBytes, 46)
+  return h
+}
+
+function endRecord(count, central, centralStart) {
+  const centralSize = central.reduce((s, h) => s + h.length, 0)
+  if (centralStart + centralSize > U32_MAX) checkZipLimits(U32_MAX, 1, count)
+  const h = new Uint8Array(22)
+  const dv = new DataView(h.buffer)
+  dv.setUint32(0, 0x06054b50, true) // end of central directory signature
+  dv.setUint16(4, 0, true) // disk number
+  dv.setUint16(6, 0, true) // disk with central dir
+  dv.setUint16(8, count, true) // entries on this disk
+  dv.setUint16(10, count, true) // total entries
+  dv.setUint32(12, centralSize, true) // central dir size
+  dv.setUint32(16, centralStart, true) // central dir offset
+  dv.setUint16(20, 0, true) // comment length
+  return h
 }
 
 // Read a ZIP archive (STORE method only — the inverse of zipStore, enough for a
@@ -131,8 +185,21 @@ const CRC_TABLE = (() => {
   return t
 })()
 
-function crc32(buf) {
-  let crc = ~0
+export function crc32(buf) {
+  return (~crc32Update(~0, buf)) >>> 0
+}
+
+// The running (un-finalized) CRC after `buf`; start from ~0, finish with ~crc >>> 0.
+function crc32Update(crc, buf) {
   for (let i = 0; i < buf.length; i++) crc = CRC_TABLE[(crc ^ buf[i]) & 0xff] ^ (crc >>> 8)
+  return crc
+}
+
+// CRC-32 of a Blob, read a slice at a time.
+async function crc32Blob(blob, chunkBytes = 8 * 1024 * 1024) {
+  let crc = ~0
+  for (let off = 0; off < blob.size; off += chunkBytes) {
+    crc = crc32Update(crc, new Uint8Array(await blob.slice(off, off + chunkBytes).arrayBuffer()))
+  }
   return (~crc) >>> 0
 }

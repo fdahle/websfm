@@ -13,6 +13,8 @@ they are expensive and are also reused as visibility evidence by orthophoto gene
 **Medium** runs at one-quarter native resolution and is the normal starting point.
 Low is useful for a preview; High and Ultra preserve finer detail but increase runtime
 and memory sharply. Resolution cannot create texture that is absent from the photos.
+A **Working resolution override** under Advanced settings replaces the resolution the
+quality card would choose; the cards then say so. Picking a card clears the override.
 
 ## Source views
 <!-- param: maxSources default: 6 -->
@@ -45,9 +47,13 @@ maps; inspect whether losses affect genuine surfaces before loosening them.
 
 ## Compute and memory
 WebGPU acceleration is experimental and configured under Settings → Compute. The
-worker estimates memory before running and may reduce concurrency. If the browser
-runs out of memory, lower quality first; this has the clearest effect on both memory
-and time.
+worker estimates memory before running and may reduce concurrency. Each depth map is
+saved to the project as soon as it is finished and then released, so the number of
+images no longer multiplies the memory a run needs. The cross-view check runs
+afterwards as its own pass over the saved maps (the log's "Depth filter" lines), and
+a run stopped halfway leaves no half-finished set behind: the maps of an interrupted
+run are not offered to the dense cloud. If the browser runs out of memory, lower
+quality first; this has the clearest effect on both memory and time.
 
 ## Limit the area
 If a **Region** is set (**Tools → Model ▾ → Region**, see

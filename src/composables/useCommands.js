@@ -4,7 +4,7 @@
 // calls runLine(); the pure parsing/validation stays testable in core.
 import {
   resolveCommand,
-  guardReason,
+  consoleReason,
   helpLines,
   helpFor,
 } from '../core/help/commands.js'
@@ -39,7 +39,7 @@ export function useCommands(dispatch, getState) {
     }
     if (res.error) return // empty — already guarded above
 
-    const reason = guardReason(res.cmd.needs, getState?.() ?? {})
+    const reason = consoleReason(res.cmd, getState?.() ?? {})
     if (reason) { log(reason, 'warn', SOURCE); return }
 
     if (res.args.length) {

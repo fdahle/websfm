@@ -98,6 +98,10 @@ async function reconstructSingleModel(input, hooks = {}) {
   // `settings` (from the modal / a dev experiment override) win. User-facing defaults
   // live in defaults.user.js (mirrored by ReconstructModal); internal ones in tuning.js.
   const cfg = { ...RECONSTRUCT_DEFAULTS, ...SFM_TUNING, ...settings }
+  // The solver policy merges key by key: a partial override ({ pcgRelTol }) replacing the
+  // whole object silently dropped functionTolerance, so LM ran to its iteration cap and an
+  // overnight sweep read that as the override's cost (HANDOVER ▸ B-parity).
+  cfg.baSolver = { ...SFM_TUNING.baSolver, ...(settings.baSolver ?? {}) }
   const log = hooks.onLog ?? (() => {})
 
   // ── Run record (baseline bookkeeping) ────────────────────────────────────────
@@ -549,7 +553,7 @@ async function reconstructSingleModel(input, hooks = {}) {
       corrPairs: [...donePairs, ...weakPairs],
       cameras, tracks, ids, keypointsAt, registeredUuids,
       refreshTracks, foldOneEndpointMatches, mergeTracks,
-      runBundleAdjust, filterTracks, modelReprojStats, imageByUuid, numStats,
+      runBundleAdjust, runLocalBundleAdjust, filterTracks, modelReprojStats, imageByUuid, numStats,
       log, onProgress,
       reportPhase: (local, label, counts) => report('register', local, label, counts),
     })
@@ -569,6 +573,56 @@ async function reconstructSingleModel(input, hooks = {}) {
     // `cameraPriors` (optional) adds GNSS/pose centre constraints. A prior-constrained
     // solve is SUPPOSED to trade some image residual for geometry, so it is judged by
     // the bounded-increase rule (cameraPriorReprojectionAccepts), not "cost must fall".
+    // Local bundle adjustment (COLMAP's, between the geometric global solves): the newly
+    // registered camera and the `window − 1` registered cameras sharing the most points
+    // with it are free, with every point the new camera observes; the other cameras
+    // observing those points stay fixed (bundle.rs `fixed_cam`), so their observations
+    // constrain the window without moving the rest of the model. Poses and points only —
+    // self-calibration stays with the global solves. Off unless cfg.localBaWindow > 0.
+    async function runLocalBundleAdjust(uuid, window, iters) {
+      const img = ids.img(uuid)
+      const set = keypointsAt(img)
+      if (!(window > 1) || !(iters > 0) || !set || !cameras.has(uuid) || cameras.size <= 2) return
+      const ptSet = new Set()
+      for (let kp = 0, n = set.xy.length / 2; kp < n; kp++) {
+        const p = tracks.pointAt(img, kp)
+        if (p >= 0) ptSet.add(p)
+      }
+      if (ptSet.size < 10) return
+      const shared = new Map() // camera uuid → points shared with the new camera
+      for (const p of ptSet) tracks.forEachView(p, (vi) => {
+        const u = ids.uuid(vi)
+        if (u !== uuid && cameras.has(u)) shared.set(u, (shared.get(u) ?? 0) + 1)
+      })
+      const free = [uuid, ...[...shared].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)).slice(0, window - 1).map(([u]) => u)]
+      const freeSet = new Set(free)
+      const fixed = [...shared.keys()].filter((u) => !freeSet.has(u))
+      const uuidList = [...free, ...fixed]
+      const camList = uuidList.map((u) => cameras.get(u))
+      const kList = camList.map((c) => c.K)
+      const camIdxOf = new Map(uuidList.map((u, i) => [u, i]))
+      const ptIds = [...ptSet]
+      const observations = buildBaObservations(tracks, ptIds, (vi) => camIdxOf.get(ids.uuid(vi)) ?? -1, keypointsAt)
+      const posBefore = trackPositions(tracks, ptIds)
+      const result = await bundleAdjust(camList, kList, posBefore, observations, {
+        maxIters: iters, refineIntrinsics: 'none', solver: cfg.baSolver, flatPoints: true,
+        fixedCams: fixed.map((_, k) => free.length + k),
+      })
+      noteBaSolver('local BA', result)
+      if (!result) return
+      if (result.costAfter > result.costBefore) {
+        const robust = compareRobustCost({
+          before: { cams: camList, Ks: kList, points: posBefore },
+          after: { cams: result.cameras, Ks: kList, points: result.pos }, observations,
+        })
+        if (!robust.improved) return
+      }
+      free.forEach((u, ci) => { const old = cameras.get(u); cameras.set(u, { ...old, ...result.cameras[ci], K: old.K }) })
+      setTrackPositions(ptIds, result.pos)
+      log(`local BA (${imageByUuid(uuid)?.name ?? uuid}) — ${free.length} free + ${fixed.length} fixed cameras, `
+        + `${ptIds.length} points: RMS ${result.costBefore.toFixed(2)} → ${result.costAfter.toFixed(2)}px`, 'debug', 'Reconstruction')
+    }
+
     async function runBundleAdjust(label, iters, refineMode = refineIntrinsics, { cameraPriors = null } = {}) {
       if (!(cameras.size >= 2 && tracks.liveCount() >= 10 && iters > 0)) {
         log(`${label} skipped (cameras=${cameras.size}, `
@@ -874,7 +928,11 @@ async function reconstructSingleModel(input, hooks = {}) {
         const lastDrop = prev > 0 ? (prev - last) / prev : 0
         const verdict = lastDrop > 0.02
           ? `still descending (${(lastDrop * 100).toFixed(1)}% on last iter — raising baIterations may help)`
-          : `plateaued (converged in ${trace.length} iter)`
+          // Saying "converged" at the cap hid that every BA ran all its iterations
+          // (St Nazaire: 30 × ~4 s each after the first had already converged).
+          : trace.length >= iters
+            ? `plateaued, but ran all ${trace.length} iterations (no stopping rule fired)`
+            : `converged in ${trace.length} iter`
         log(`${label} convergence (RMS px) — ${fmtTrace.join(' → ')}; ${verdict}`,
           'debug', 'Reconstruction')
       }

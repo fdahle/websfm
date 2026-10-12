@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { zipStore, unzipStore } from './zip.js'
+import { zipStore, zipParts, unzipStore, crc32 } from './zip.js'
 
 // Parse zipStore's own output structurally: signatures at the recorded offsets, name
 // round-trip, CRC of known bytes, and the EOCD's central-directory size/offset. A
@@ -95,5 +95,42 @@ describe('unzipStore', () => {
 
   it('throws on a non-ZIP buffer', () => {
     expect(() => unzipStore(enc.encode('not a zip'))).toThrow(/not a ZIP/)
+  })
+})
+
+describe('zipParts — the streaming form', () => {
+  const bytesOf = async (parts) => new Uint8Array(await new Blob(parts).arrayBuffer())
+  const big = Uint8Array.from({ length: 20000 }, (_, i) => (i * 31) % 256)
+  const reference = zipStore([
+    { name: 'a.txt', data: enc.encode('hello') },
+    { name: 'dir/b.bin', data: big },
+    { name: 'ü.txt', data: new Uint8Array(0) },
+  ])
+
+  it('is byte-identical to zipStore for strings, part lists, generators and Blobs', async () => {
+    const parts = await zipParts([
+      { name: 'a.txt', data: 'hello' },
+      { name: 'dir/b.bin', data: new Blob([big.subarray(0, 7), big.subarray(7)]) },
+      { name: 'ü.txt', data: (function* () {})() },
+    ])
+    expect(await bytesOf(parts)).toEqual(reference)
+    const again = await zipParts([
+      { name: 'a.txt', data: ['he', enc.encode('llo')] },
+      { name: 'dir/b.bin', data: new Blob([big]), crc: crc32(big) }, // CRC supplied: not re-read
+      { name: 'ü.txt', data: [] },
+    ])
+    expect(await bytesOf(again)).toEqual(reference)
+  })
+
+  it('keeps a Blob entry as a Blob part (never read into one buffer)', async () => {
+    const blob = new Blob([big])
+    const parts = await zipParts([{ name: 'x', data: blob }])
+    expect(parts).toContain(blob)
+    expect(unzipStore(await bytesOf(parts))[0].data).toEqual(big)
+  })
+
+  it('refuses more entries than plain ZIP can count', () => {
+    const many = Array.from({ length: 0x10000 }, (_, i) => ({ name: `f${i}`, data: new Uint8Array(0) }))
+    expect(() => zipStore(many)).toThrow(/ZIP limit/)
   })
 })

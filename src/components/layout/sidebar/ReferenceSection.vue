@@ -290,31 +290,4 @@ function ctxRemove()   { emit('remove-raster', ctx.value.raster.id); closeCtx() 
   to { transform: rotate(360deg); }
 }
 
-/* On-map indicator — accent-coloured so it reads as "active", not as a warning. */
-.map-flag {
-  flex-shrink: 0;
-  font-size: 10px;
-  line-height: 15px;
-  color: var(--accent, #4a9eff);
-}
-
-.opacity-cell {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.opacity-slider {
-  flex: 1;
-  min-width: 60px;
-  accent-color: var(--accent, #4a9eff);
-  cursor: pointer;
-}
-
-.opacity-pct {
-  flex-shrink: 0;
-  min-width: 30px;          /* keeps the row from reflowing as the value changes */
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
 </style>

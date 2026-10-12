@@ -4,10 +4,10 @@
 // both call in here. Coordinates import VERBATIM into the current frame — no
 // CRS reprojection (polar reprojection of arbitrary clouds is out of scope).
 
-import { parsePly } from './ply.js'
-import { parseLas } from './las.js'
+import { parsePly, parsePlySource } from './ply.js'
+import { parseLas, parseLasSource } from './las.js'
 import { parseLaz } from './laz.js'
-import { parseXyzText } from './cloudText.js'
+import { parseXyzText, parseXyzChunks } from './cloudText.js'
 import { prepareCloudForExport } from '../products/exporters.js'
 import { voxelDownsample } from '../products/cloudEdit.js'
 
@@ -60,6 +60,21 @@ export function parseCloudFile(buffer, name = '', { onLog, lazDecompress = null 
   if (fmt === 'las') return parseLas(buffer, { onLog })
   const text = new TextDecoder().decode(buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer))
   return parseXyzText(text, { onLog })
+}
+
+// parseCloudFile over injected I/O — { name, size, read(start, end), chunks(start) },
+// utils/blobParts.js blobSource over a File — so the file is never one buffer or
+// one string: XYZ and ASCII PLY are decoded and parsed a chunk at a time, LAS
+// point records are read a slice at a time. Binary PLY and LAZ are read whole (the
+// codec has no streaming decoder), as bytes outside the JS heap. Same results as
+// parseCloudFile on the file's bytes.
+export async function parseCloudSource(source, { onLog, lazDecompress = null } = {}) {
+  const fmt = sniffCloudFormat(await source.read(0, Math.min(source.size, 256)), source.name)
+  if (!fmt) throw new Error(`Unrecognized point-cloud format: ${source.name || '(unnamed file)'}`)
+  if (fmt === 'ply') return parsePlySource(source, { onLog })
+  if (fmt === 'laz') return parseLaz(await source.read(0, source.size), { decompress: lazDecompress, onLog })
+  if (fmt === 'las') return parseLasSource(source, { onLog })
+  return parseXyzChunks(source.chunks(0), { onLog })
 }
 
 // Basic stats for the import modal: point/face counts, bbox, carried attributes.

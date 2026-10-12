@@ -2,6 +2,7 @@
 import { computed, ref, nextTick } from 'vue'
 import CloudRows from './CloudRows.vue'
 import { useContextMenu } from '../../../composables/useContextMenu.js'
+import { productMapBlocker } from '../../../core/products/productLayers.js'
 
 // Deliverables the app produced: computed dense/mesh clouds plus the DEM/ortho
 // rasters. Split from Reference Data by *provenance*, not data type — everything
@@ -14,17 +15,24 @@ const props = defineProps({
   dem:   { type: Object, default: null },
   ortho: { type: Object, default: null },
   openTabIds: { type: Object, default: () => new Set() },
+  // Map-layer state per raster product ({ dem: { onMap, opacity }, … }), the
+  // store's productLayers — the same controls Reference Data has for its rasters.
+  productLayers: { type: Object, default: () => ({}) },
 })
 const emit = defineEmits([
-  'toggle', 'open-product', 'remove-product', 'rename-product',
+  'toggle', 'open-product', 'remove-product', 'rename-product', 'set-product-on-map', 'set-product-opacity',
   'cloud-symbology', 'cloud-visibility', 'select-cloud', 'remove-cloud', 'rename-cloud', 'zoom-to-cloud',
 ])
 
 // One row per built raster; opening (double-click) shows it in a tab like an image.
 const productRows = computed(() => {
   const rows = []
-  if (props.dem) rows.push({ kind: 'dem', name: props.dem.name || 'DEM', product: props.dem })
-  if (props.ortho) rows.push({ kind: 'ortho', name: props.ortho.name || 'Orthophoto', product: props.ortho })
+  for (const [kind, product, fallback] of [['dem', props.dem, 'DEM'], ['ortho', props.ortho, 'Orthophoto']]) {
+    if (!product) continue
+    const layer = props.productLayers[kind]
+    rows.push({ kind, name: product.name || fallback, product, onMap: !!layer?.onMap,
+      opacity: layer?.opacity ?? 1, mapBlocked: productMapBlocker(product) })
+  }
   return rows
 })
 
@@ -62,7 +70,7 @@ function commitRename() {
 function cancelRename() { editingKind.value = null }
 
 const { menu: productCtx, open: openProductCtx, close: closeProductCtx } = useContextMenu()
-function onProductRightClick(e, row) { openProductCtx(e, { row }, { w: 190, h: 132 }) }
+function onProductRightClick(e, row) { openProductCtx(e, { row }, { w: 190, h: 168 }) }
 const ctxOpenLabel = computed(() => productCtx.value
   ? openLabel(productCtx.value.row.kind)
   : 'Open in tab')
@@ -71,6 +79,19 @@ function ctxOpen() {
   closeProductCtx()
 }
 function ctxRename() { startRename(productCtx.value.row); closeProductCtx() }
+// A greyed entry keeps its place and names why (.ctx-disabled swallows pointer
+// events, so a title tooltip would never show).
+// The product's frame never blocks the toggle: the map explains when its current
+// frame cannot place a product (useMapProducts notes).
+function mapCtxLabel(row) {
+  if (row.mapBlocked) return 'Display on map (rebuild first)'
+  return row.onMap ? 'Hide from map' : 'Display on map'
+}
+function ctxToggleMap() {
+  const row = productCtx.value.row
+  if (!row.mapBlocked) emit('set-product-on-map', { kind: row.kind, onMap: !row.onMap })
+  closeProductCtx()
+}
 function ctxRemove() {
   emit('remove-product', productCtx.value.row.kind)
   closeProductCtx()
@@ -120,6 +141,7 @@ function ctxRemove() {
             @blur="commitRename"
           />
           <span v-else class="item-name">{{ row.name }}</span>
+          <span v-if="row.onMap" class="map-flag" title="Shown on the map — right-click to hide">◉</span>
           <span class="obs-badge" :title="`${row.product.width}×${row.product.height} px`">
             {{ row.product.width }}×{{ row.product.height }}
           </span>
@@ -147,6 +169,20 @@ function ctxRemove() {
             <span class="detail-label">Coverage</span>
             <span class="detail-value">{{ Math.round(100 * row.product.covered / (row.product.width * row.product.height)) }}%</span>
           </div>
+          <!-- Opacity only matters while the layer is up (same rule as Reference Data). -->
+          <div v-if="row.onMap" class="detail-row">
+            <span class="detail-label">Opacity</span>
+            <span class="detail-value opacity-cell">
+              <input
+                type="range" min="0" max="1" step="0.05"
+                :value="row.opacity"
+                class="opacity-slider"
+                @click.stop
+                @input="emit('set-product-opacity', { kind: row.kind, opacity: Number($event.target.value) })"
+              />
+              <span class="opacity-pct">{{ Math.round(row.opacity * 100) }}%</span>
+            </span>
+          </div>
           <button class="link-btn products-open" @click.stop="emit('open-product', row.kind)">{{ openLabel(row.kind) }}</button>
         </li>
       </template>
@@ -161,6 +197,10 @@ function ctxRemove() {
         @click.stop
       >
         <button class="ctx-item" @click="ctxOpen">{{ ctxOpenLabel }}</button>
+        <div class="ctx-sep"></div>
+        <!-- Greyed with the reason (not hidden) when the product has no map position. -->
+        <button class="ctx-item" :class="{ 'ctx-disabled': !!productCtx.row.mapBlocked }"
+          :disabled="!!productCtx.row.mapBlocked" @click="ctxToggleMap">{{ mapCtxLabel(productCtx.row) }}</button>
         <div class="ctx-sep"></div>
         <button class="ctx-item" @click="ctxRename">Rename</button>
         <div class="ctx-sep"></div>

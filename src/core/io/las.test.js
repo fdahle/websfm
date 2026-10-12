@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest'
-import { cloudToLas, parseLas } from './las.js'
+import { cloudToLasParts, parseLas, parseLasSource } from './las.js'
+import { blobSource } from '../../utils/blobParts.js'
+import { joinParts } from './parts.js'
+
+// The writers yield bounded parts (core/io/parts.js); these join them for small fixtures.
+const cloudToLas = (...a) => joinParts(cloudToLasParts(...a))
 
 // Survey-scale coordinates (UTM-ish) so the scale/offset quantization is exercised
 // where it matters.
@@ -301,5 +306,53 @@ describe('point attributes in LAS', () => {
   it('attributes:false writes the plain format-2 file', () => {
     const las = cloudToLas(flat({ distance: Float32Array.from([1, 2, 3]) }), { attributes: false })
     expect(new DataView(las.buffer).getUint16(105, true)).toBe(26)
+  })
+})
+
+describe('cloudToLasParts / parseLasSource — chunked both ways', () => {
+  const n = 2500
+  const flat = (attributes) => ({
+    count: n,
+    pos: Float64Array.from({ length: n * 3 }, (_, i) => 500000 + Math.sin(i) * 1000),
+    col: Uint8Array.from({ length: n * 3 }, (_, i) => (i * 13) % 256),
+    ...(attributes ? { attributes } : {}),
+  })
+  const attrs = {
+    gpsTime: Float64Array.from({ length: n }, (_, i) => i * 0.01),
+    classification: Uint8Array.from({ length: n }, (_, i) => i % 40), // > 31 ⇒ extra bytes
+    distance: Float32Array.from({ length: n }, (_, i) => i / 3),
+  }
+  const memSource = (bytes) => blobSource(new Blob([bytes]), 'x.las')
+  const plain = (r) => JSON.parse(JSON.stringify(r, (k, v) => (ArrayBuffer.isView(v) ? [v.constructor.name, ...v] : v)))
+
+  it('splits records into bounded parts without changing a byte', () => {
+    const parts = [...cloudToLasParts(flat(attrs), { partBytes: 4096 })]
+    expect(parts.length).toBeGreaterThan(10)
+    for (const p of parts.slice(1)) expect(p.length).toBeLessThanOrEqual(4096)
+    expect(joinParts(parts)).toEqual(cloudToLas(flat(attrs)))
+  })
+
+  for (const [name, bytes] of [
+    ['plain', () => cloudToLas(flat())],
+    ['attributes + extra bytes + GPS time', () => cloudToLas(flat(attrs))],
+    ['8-bit colour words', () => {
+      const b = cloudToLas(flat()).slice()
+      const dv = new DataView(b.buffer), off = dv.getUint32(96, true), rl = dv.getUint16(105, true)
+      for (let i = 0; i < n; i++) for (let c = 0; c < 3; c++) dv.setUint16(off + i * rl + 20 + c * 2, (i + c) % 256, true)
+      return b
+    }],
+    ['truncated', () => cloudToLas(flat()).slice(0, -100)],
+  ]) {
+    it(`${name}: parseLasSource (tiny slices) equals parseLas`, async () => {
+      const b = bytes()
+      const whole = parseLas(b)
+      expect(plain(await parseLasSource(memSource(b), { chunkBytes: 100 }))).toEqual(plain(whole))
+    })
+  }
+
+  it('refuses LAZ like parseLas', async () => {
+    const b = cloudToLas(flat()).slice()
+    b[104] |= 0x80
+    await expect(parseLasSource(memSource(b))).rejects.toThrow(/LAZ/)
   })
 })

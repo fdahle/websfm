@@ -186,7 +186,7 @@ export const usePosesStore = registerProjectStore(defineStore('poses', () => {
     return changed
   }
 
-  async function syncExifPoses() {
+  async function syncExifPosesNow() {
     const generation = ++exifSyncGeneration
     const projectId = projects.currentProjectId
     const projectCrs = currentCrs.value
@@ -206,12 +206,19 @@ export const usePosesStore = registerProjectStore(defineStore('poses', () => {
     const kept = poses.value.filter((p) => p.source !== 'exif' || liveIds.has(p.imageId))
     if (kept.length !== poses.value.length) { poses.value = kept; changed = true }
 
+    // One index per sync, not a linear search per image: the sync walks every image,
+    // so a find() per image made it O(images × poses).
+    const byImageId = new Map(), byImageName = new Map()
+    for (const p of poses.value) {
+      if (p.imageId != null && !byImageId.has(p.imageId)) byImageId.set(p.imageId, p)
+      if (p.imageName != null && !byImageName.has(p.imageName)) byImageName.set(p.imageName, p)
+    }
     for (const im of images.value) {
       const raw = exifPoseFromMetadata(im.meta)
       if (!raw) continue
       const projected = projectExifPose(raw, projectCrs)
       if (!projected) continue
-      const existing = poses.value.find((p) => p.imageId === im.id || p.imageName === im.name)
+      const existing = byImageId.get(im.id) ?? byImageName.get(im.name)
       if (existing && existing.source !== 'exif') continue
       if (existing) {
         changed = assignIfChanged(existing, {
@@ -247,7 +254,7 @@ export const usePosesStore = registerProjectStore(defineStore('poses', () => {
           }) || changed
         }
       } else {
-        poses.value.push(normalizePose({
+        const pose = normalizePose({
           imageId: im.id, imageName: im.name,
           x: projected.x, y: projected.y, z: projected.z,
           omega: projected.omega, phi: projected.phi, kappa: projected.kappa,
@@ -270,32 +277,86 @@ export const usePosesStore = registerProjectStore(defineStore('poses', () => {
           orientationAccuracySource: raw.orientationSource ? 'exif' : null,
           direction: raw.direction, directionRef: raw.directionRef,
           source: 'exif', enabled: true,
-        }))
+        })
+        poses.value.push(pose)
+        byImageId.set(im.id, pose); byImageName.set(im.name, pose)
         added++
         changed = true
       }
     }
     if (changed) await save()
-    if (added) log(`EXIF GPS: ${pluralize(added, 'camera position')} added in ${projectCrs}`, 'success', 'Pose')
-    // Positions land in degrees, so nothing can be georeferenced until the user
-    // picks a projected CRS. Say so once, when they arrive — with the derived
-    // choice and its inputs — rather than first at Build DEM.
-    if (added && isGeographic(projectCrs)) {
+    if (added) queueExifReport(projectId, projectCrs, added)
+    return added
+  }
+
+  // Each image's metadata arrives on its own, so one dropped batch runs the sync
+  // above once per image. Reporting per sync printed "1 camera position added" and
+  // the geographic-CRS advice 127 times for 127 images; instead the counts are
+  // collected per CRS and reported once the image store goes idle (or right away
+  // when nothing is importing, e.g. an edit to one image's metadata).
+  const imagesStore = useImagesStore()
+  let pendingExif = null // { projectId, byCrs: Map<crs, added> }
+  let exifSyncsInFlight = 0
+  function queueExifReport(projectId, crs, added) {
+    if (pendingExif?.projectId !== projectId) pendingExif = { projectId, byCrs: new Map() }
+    pendingExif.byCrs.set(crs, (pendingExif.byCrs.get(crs) ?? 0) + added)
+  }
+  function flushExifReport() {
+    if (!pendingExif || exifSyncsInFlight > 0 || imagesStore.pendingWorkCount > 0) return
+    const { projectId, byCrs } = pendingExif
+    pendingExif = null
+    if (projectId !== projects.currentProjectId) return
+    for (const [crs, added] of byCrs) {
+      log(`EXIF GPS: ${pluralize(added, 'camera position')} added in ${crs}`, 'success', 'Pose')
+      // Positions land in degrees, so nothing can be georeferenced until the user
+      // picks a projected CRS. Say so once per batch, when they arrive — with the
+      // derived choice and its inputs — rather than first at Build DEM. Only for the
+      // CRS still in force: an earlier one has since been replaced.
+      if (!isGeographic(crs) || crs !== currentCrs.value) continue
       const hint = suggestProjectedCrs(poses.value.filter((p) => p.source === 'exif').map((p) => ({ lon: p.x, lat: p.y })))
       if (hint) {
-        log(`EXIF GPS: ${projectCrs} is geographic, so georeferenced DEMs and orthophotos need a projected CRS — `
+        log(`EXIF GPS: ${crs} is geographic, so georeferenced DEMs and orthophotos need a projected CRS — `
           + `median of ${pluralize(hint.count, 'position')} at ${formatLatLon(hint.lat, hint.lon)} suggests `
           + `${hint.code} (${hint.name}); set it in Project Settings`, 'info', 'Pose')
       }
     }
-    return added
+  }
+  watch(() => imagesStore.pendingWorkCount, (n) => { if (n === 0) flushExifReport() })
+  async function syncExifPoses() {
+    exifSyncsInFlight++
+    try { return await syncExifPosesNow() } finally {
+      exifSyncsInFlight--
+      flushExifReport()
+    }
   }
 
-  const exifSig = computed(() => images.value.map((im) => {
-    const m = im.meta || {}
-    return `${im.id}:${im.name}:${m.gpsLat ?? ''}:${m.gpsLon ?? ''}:${m.gpsAlt ?? ''}:${m.gpsAltRef ?? ''}:${m.gpsHorizontalAccuracy ?? ''}:${m.gpsAccuracyX ?? ''}:${m.gpsAccuracyY ?? ''}:${m.gpsAccuracyZ ?? ''}:${m.gpsDirection ?? ''}:${m.gpsDirectionRef ?? ''}:${m.cameraOmega ?? ''}:${m.cameraPhi ?? ''}:${m.cameraKappa ?? ''}:${m.cameraAccuracyOmega ?? ''}:${m.cameraAccuracyPhi ?? ''}:${m.cameraAccuracyKappa ?? ''}`
-  }).join('|'))
-  watch(exifSig, () => { syncExifPoses() }, { immediate: true })
+  // Which EXIF fields the poses derive from, as a NUMBER (FNV-1a over them). Each
+  // image's metadata lands separately, so this re-evaluates once per image: as one
+  // joined string it built ~150 characters × every image on every landing (O(N²)
+  // characters for one import) and ran a full sync each time (O(N³) with the old
+  // linear lookups). The sync itself is debounced to the end of a burst, with a
+  // maximum wait so a long import still shows its cameras on the way.
+  const EXIF_FIELDS = ['gpsLat', 'gpsLon', 'gpsAlt', 'gpsAltRef', 'gpsHorizontalAccuracy', 'gpsAccuracyX',
+    'gpsAccuracyY', 'gpsAccuracyZ', 'gpsDirection', 'gpsDirectionRef', 'cameraOmega', 'cameraPhi',
+    'cameraKappa', 'cameraAccuracyOmega', 'cameraAccuracyPhi', 'cameraAccuracyKappa']
+  const exifSig = computed(() => {
+    let h = 0x811c9dc5
+    const mixStr = (s) => { s = String(s ?? ''); for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 0x01000193) >>> 0; h = Math.imul(h ^ 0x7c, 0x01000193) >>> 0 }
+    for (const im of images.value) {
+      const m = im.meta || {}
+      mixStr(im.id); mixStr(im.name)
+      for (const k of EXIF_FIELDS) mixStr(m[k])
+    }
+    return `${images.value.length}:${h}`
+  })
+  let syncTimer = null, syncDeadline = 0
+  const scheduleExifSync = () => {
+    const now = Date.now()
+    if (syncTimer == null) syncDeadline = now + 3000
+    clearTimeout(syncTimer)
+    syncTimer = setTimeout(() => { syncTimer = null; syncExifPoses() }, Math.max(0, Math.min(300, syncDeadline - now)))
+  }
+  watch(exifSig, scheduleExifSync, { immediate: true })
 
   function removePose(imageName) {
     const idx = poses.value.findIndex((p) => p.imageName === imageName)

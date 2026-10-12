@@ -29,11 +29,19 @@ const show = (n) => (n == null ? '—' : round(n))
 
 const anyEstimated = computed(() => props.images.some((i) => props.cameras.get(i.uuid)))
 
+// Indexed once per list: these run per row AND per sort comparison, and a linear
+// scan of every pose there was O(images · log images · poses) per header click.
+const sensorById = computed(() => new Map(props.sensors.map((s) => [s.id, s])))
+const poseByImageId = computed(() => {
+  const m = new Map()
+  for (const p of props.poses) if (p.imageId != null && !m.has(p.imageId)) m.set(p.imageId, p)
+  return m
+})
 function sensorFor(img) {
-  return props.sensors.find((s) => s.id === img.sensorId) || null
+  return sensorById.value.get(img.sensorId) || null
 }
 function poseFor(img) {
-  return props.poses.find((p) => p.imageId === img.id) || null
+  return poseByImageId.value.get(img.id) || null
 }
 
 // ── Intrinsics row (resolved, read-only) ──────────────────────────────────────

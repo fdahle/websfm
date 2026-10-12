@@ -2,29 +2,33 @@ import { ref } from 'vue'
 import { metresPerCrsUnit } from '../core/crs.js'
 import { toScaledPx } from '../core/sfm/geometry.js'
 import { buildPosesCsv, buildSensorsCsv, downloadCsv } from '../utils/exportCsv.js'
-import { cloudToPly, meshToPly, meshToGlb, meshToObj, meshToStl, reconstructionToJson, demToAsciiGrid, demToGeoTiff, demToCog, orthoToGeoTiff, orthoToCog, rasterWorldFile, prepareCloudForExport, prepareMeshForExport } from '../core/products/exporters.js'
-import { cloudToLas } from '../core/io/las.js'
-import { cloudToXyz } from '../core/io/cloudText.js'
-import { buildColmapModel, serializeColmapModel, serializeColmapModelBin } from '../core/io/colmapModel.js'
+import { reconstructionToJson, demToAsciiGridParts, demToGeoTiff, demToCog, orthoToGeoTiff, orthoToCog, rasterWorldFile, prepareCloudForExport } from '../core/products/exporters.js'
+import { buildColmapModel, serializeColmapModelParts, serializeColmapModelBinParts } from '../core/io/colmapModel.js'
 import { imageIdsToPairId } from '../core/io/colmapDatabase.js'
 import { exportColmapDatabase } from '../workers/colmapDbClient.js'
-import { undistortImage, exportLazCloud, demTool as workerDemTool } from '../workers/computeClient.js'
+import { undistortImage, exportCloudFile, exportMeshFile, demTool as workerDemTool } from '../workers/computeClient.js'
 import { buildTransformsJson } from '../core/io/transforms.js'
-import { buildNvm, buildOpenMvg } from '../core/io/sfmInterop.js'
+import { buildNvmParts, buildOpenMvg } from '../core/io/sfmInterop.js'
+import { jsonParts, lazyArray, jsonArrayItemParts, jsonArrayEnd } from '../core/io/parts.js'
+import { partsToBlob } from '../utils/blobParts.js'
 import { epsgToWkt } from '../core/products/wkt.js'
 import {
   ecefTransformFromProbes, boundingBox, buildTileset, cloudToGlbPoints,
   localBounds, cloudCentroid,
 } from '../core/products/tiles3d.js'
-import { transform, transformAsync, ensureProjection } from '../core/crs.js'
-import { pointScaleFactor } from '../core/products/localFrame.js'
+import { transformAsync, ensureProjection } from '../core/crs.js'
+import { rasterGroundScale, rasterUnits } from '../core/products/rasterUnits.js'
+import { productDescriptor } from '../core/io/rasterSource.js'
 import { useLog } from './useLog.js'
 import { distortionOf } from '../core/sfm/distortion.js'
-import { downloadBlob, dataUrlToBlob } from '../utils/download.js'
-import { zipStore } from '../utils/zip.js'
+import { downloadBlob } from '../utils/download.js'
+import { asPairList } from '../core/sfm/matchCodec.js'
+import { zipParts, crc32 } from '../utils/zip.js'
 import { showToast } from './useToasts.js'
 import * as opfs from '../utils/opfs.js'
 import { useProjectsStore } from '../stores/useProjectsStore.js'
+import { useImagesStore } from '../stores/useImagesStore.js'
+import { useMatchesStore } from '../stores/useMatchesStore.js'
 import { siftDescNorm, toMatchSpace } from '../core/features/siftDescriptors.js'
 
 // Camera-params + product export funnel, lifted out of App.vue. Owns `exportKind`
@@ -43,6 +47,9 @@ export function useExports({
 }) {
   const { log } = useLog()
   const projects = useProjectsStore()
+  // Keypoints and matches are read from disk on demand (TODO ▸ SC-2/SC-3).
+  const imagesStore = useImagesStore()
+  const matchesStore = useMatchesStore()
 
   // The similarity a cloud/mesh export should apply, from THE resolver:
   //   georeference  → the full CRS similarity (scale + rotation + translation)
@@ -90,47 +97,81 @@ export function useExports({
     downloadCsv(`${currentProjectName.value || 'project'}-sensors.csv`, buildSensorsCsv(sensors.value))
   }
 
+  // Pretty-printed JSON (`JSON.stringify(data, null, 2)`, byte for byte), streamed
+  // into the Blob in bounded parts: a keypoint or match export of a big project is
+  // far past V8's ~512 M-char string limit. Arrays that scale with the data are
+  // lazyArrays, so their elements exist only while they are written.
   function saveJson(data, filename) {
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = filename
-    a.click()
-    setTimeout(() => URL.revokeObjectURL(url), 1000)
+    downloadBlob(filename, partsToBlob(jsonParts(data, { space: 2 }), 'application/json'))
   }
 
-  function exportKeypoints() {
-    const stamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-')
-    const data = images.value
-      .filter(img => img.kpStatus === 'done' && img.keypoints?.length)
-      .map(img => ({
-        image: img.name,
-        uuid: img.uuid,
-        kpCount: img.kpCount,
-        keypoints: img.keypoints.map(kp => ({ x: kp.x, y: kp.y, scale: kp.scale, response: kp.response })),
-      }))
-    saveJson(data, `keypoints-${stamp}.json`)
+  // A top-level JSON array whose elements are built one at a time from data read in
+  // between (core/io/parts.js jsonArrayItemParts): each element becomes a Blob before
+  // the next one's data is read, so only one image's keypoints / one read window of
+  // matches is ever resident. Byte-identical to saveJson on the whole array.
+  function jsonArrayWriter() {
+    const blobs = []
+    return {
+      add(value) { blobs.push(partsToBlob(jsonArrayItemParts(value, blobs.length, { space: 2 }))) },
+      save(filename) {
+        downloadBlob(filename, new Blob([...blobs, jsonArrayEnd(blobs.length, { space: 2 })], { type: 'application/json' }))
+      },
+    }
   }
 
-  function exportMatches() {
-    const stamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-')
-    const byUuid = Object.fromEntries(images.value.map(img => [img.uuid, img.name]))
-    const data = []
-    for (const [, entry] of matchStore.value) {
-      if (entry.status !== 'done') continue
-      data.push({
+  async function exportKeypoints() {
+    try {
+      const stamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-')
+      const out = jsonArrayWriter()
+      for (const img of images.value) {
+        if (img.kpStatus !== 'done' || !img.kpCount) continue
+        const kps = await imagesStore.readKeypoints(img)
+        if (!kps?.length) continue
+        out.add({
+          image: img.name,
+          uuid: img.uuid,
+          kpCount: img.kpCount,
+          keypoints: lazyArray(kps.length, (i) => ({ x: kps.x(i), y: kps.y(i), scale: kps.scale(i), response: kps.response(i) })),
+        })
+      }
+      out.save(`keypoints-${stamp}.json`)
+    } catch (err) {
+      log(`Keypoint export failed: ${err?.message ?? err}`, 'error', 'Export')
+    }
+  }
+
+  async function exportMatches() {
+    try {
+      const stamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-')
+      const byUuid = Object.fromEntries(images.value.map(img => [img.uuid, img.name]))
+      const out = jsonArrayWriter()
+      const done = [...matchStore.value.values()].filter((entry) => entry.status === 'done')
+      // In the store's order, which after a reopen is the document's: a few large reads.
+      await matchesStore.streamPairMatches(done, (entry, m) => out.add({
         imageA: byUuid[entry.idA] ?? entry.idA,
         imageB: byUuid[entry.idB] ?? entry.idB,
         rawCount: entry.rawCount,
         inlierCount: entry.inlierCount,
-        matches: entry.matches,
-      })
+        // The store keeps a flat Uint32Array; the file keeps the [[ia, ib], …] format.
+        // Serialized inside this call: `m` may be a view into the stream's read window.
+        matches: pairListOf(m),
+      }))
+      out.save(`matches-${stamp}.json`)
+    } catch (err) {
+      log(`Match export failed: ${err?.message ?? err}`, 'error', 'Export')
     }
-    saveJson(data, `matches-${stamp}.json`)
   }
 
+  // A flat [a, b, …] match array as the lazy [[a, b], …] the JSON file carries.
+  const pairListOf = (m) => { const l = asPairList(m); return lazyArray(l.length, (k) => [l.a(k), l.b(k)]) }
+
   const projectBase = () => currentProjectName.value || 'project'
+  // A flat [a, b, …] match array with every pair reversed (a fresh copy).
+  const swapPairs = (m) => {
+    const out = new Uint32Array(m.length)
+    for (let i = 0; i < m.length; i += 2) { out[i] = m[i + 1]; out[i + 1] = m[i] }
+    return out
+  }
 
   // Which export dialog is open ('cloud' | 'model' | 'colmap' | 'undistorted' | 'dem' |
   // 'ortho'), or null.
@@ -174,14 +215,12 @@ export function useExports({
       ?? (selectedCloud.value?.cameras?.size ? selectedCloud.value : null)
   }
 
-  // Point cloud (selected, else the first non-empty) → PLY / LAS / XYZ, with an
+  // Point cloud (selected, else the first non-empty) → PLY / LAS / LAZ / XYZ, with an
   // optional georeference transform (the stored Horn fit → project CRS) and an
   // optional voxel downsample (cell in target-frame units, applied after georef).
   const cloudHasPoints = (c) => c && (c.kind === 'dense' ? c.count > 0 : c.points?.length > 0)
-  // Normalize either cloud shape to flat typed arrays for the worker. This
-  // COPIES rather than handing over the store's own buffers: the worker call
-  // transfers, and a detached store cloud would be a far worse outcome than one
-  // extra buffer during an export the user asked for.
+  // Normalize either cloud shape to flat Float64 positions + colours (the 3D Tiles
+  // export's input; its glb is built on this thread).
   function toFlatCloud(src) {
     if (src && src.pos) {
       const count = src.count ?? src.pos.length / 3
@@ -208,85 +247,97 @@ export function useExports({
     return { count: n, pos, col }
   }
 
+  // A cloud as the flat shape the export worker takes, every array a COPY (the
+  // worker call transfers them, and a detached store cloud would be far worse than
+  // one extra buffer during an export the user asked for). Unlike toFlatCloud this
+  // keeps everything a writer could emit — normals, attributes, the source array
+  // types — so the file is byte-identical to writing the store cloud directly. A
+  // sparse cloud gets a colour plane when any point is coloured (the rest at the
+  // writers' 200 grey) and a normal plane when its first point has one (the
+  // writers' own test).
+  function exportCloudCopy(cloud) {
+    if (cloud.kind === 'dense') {
+      const n = cloud.count
+      const attributes = cloud.attributes && Object.keys(cloud.attributes).length
+        ? Object.fromEntries(Object.entries(cloud.attributes).map(([k, v]) => [k, v.slice(0, n)])) : null
+      return {
+        count: n, pos: cloud.pos.slice(0, n * 3),
+        ...(cloud.col ? { col: cloud.col.slice(0, n * 3) } : {}),
+        ...(cloud.nrm ? { nrm: cloud.nrm.slice(0, n * 3) } : {}),
+        ...(attributes ? { attributes } : {}),
+      }
+    }
+    const pts = cloud.points, n = pts.length
+    const byte = (v) => Math.max(0, Math.min(255, Math.round(v ?? 0)))
+    const pos = new Float64Array(n * 3)
+    const col = pts.some((p) => p.color) ? new Uint8Array(n * 3) : null
+    const nrm = n && pts[0]?.normal ? new Float64Array(n * 3) : null
+    for (let i = 0; i < n; i++) {
+      const p = pts[i]
+      pos[i * 3] = p.x; pos[i * 3 + 1] = p.y; pos[i * 3 + 2] = p.z
+      if (col) { const c = p.color || [200, 200, 200]; col[i * 3] = byte(c[0]); col[i * 3 + 1] = byte(c[1]); col[i * 3 + 2] = byte(c[2]) }
+      if (nrm && p.normal) { nrm[i * 3] = p.normal[0]; nrm[i * 3 + 1] = p.normal[1]; nrm[i * 3 + 2] = p.normal[2] }
+    }
+    return { count: n, pos, ...(col ? { col } : {}), ...(nrm ? { nrm } : {}) }
+  }
+
+  function logExportFrame(what, frame) {
+    if (frame.source === 'georef') log(`${what} export: georeferenced to ${frame.crs}`, 'info', 'Export')
+    else if (frame.source === 'scalebars') {
+      log(`${what} export: scaled to metres (×${frame.sim.scale.toPrecision(6)}) `
+        + 'from the scale bars — metric coordinates, no CRS', 'info', 'Export')
+    } else if (frame.source === 'orientation') {
+      log(`${what} export: in the oriented local frame (Orient model) — model units, no CRS`, 'info', 'Export')
+    }
+  }
+
+  // Serialization (and the georeference / downsample before it) runs in the export
+  // worker, which streams the file into a Blob — see workers/ops/export.js.
   async function doExportCloud({ format, includeColor, applyGeoref, downsampleCell }) {
     const cloud = cloudHasPoints(selectedCloud.value)
       ? selectedCloud.value
       : clouds.value.find(cloudHasPoints)
     if (!cloud) return
-    // cloudToPly/Las/Xyz all accept either the sparse point-object array or the
-    // dense flat shape; prepareCloudForExport normalizes when georef/downsample apply.
     // Attributes (a computed distance, imported intensity/classification) ride along:
     // PLY and LAS write them, LAZ its standard LAS fields only (see core/io/laz.js).
-    const raw = cloud.kind === 'dense'
-      ? { count: cloud.count, pos: cloud.pos, col: cloud.col, nrm: cloud.nrm,
-          ...(cloud.attributes ? { attributes: cloud.attributes } : {}) }
-      : cloud.points
     const frame = applyGeoref ? await exportSimilarity() : { sim: null, unit: 'model', crs: null, source: null }
-    const src = prepareCloudForExport(raw, {
-      sim: frame.sim,
-      cell: downsampleCell > 0 ? downsampleCell : 0,
-      onLog: log,
-    })
-    if (frame.source === 'georef') log(`Cloud export: georeferenced to ${frame.crs}`, 'info', 'Export')
-    else if (frame.source === 'scalebars') {
-      log(`Cloud export: scaled to metres (×${frame.sim.scale.toPrecision(6)}) `
-        + 'from the scale bars — metric coordinates, no CRS', 'info', 'Export')
-    } else if (frame.source === 'orientation') {
-      log('Cloud export: in the oriented local frame (Orient model) — model units, no CRS', 'info', 'Export')
+    logExportFrame('Cloud', frame)
+    // NEVER attach a CRS merely because the coordinates are metric: only a real
+    // georeference names one.
+    const m = frame.source === 'georef' && frame.crs ? /EPSG:(\d+)/i.exec(frame.crs) : null
+    const crsCode = m ? Number(m[1]) : null
+    const cell = downsampleCell > 0 ? downsampleCell : 0
+    const copy = exportCloudCopy(cloud)
+    let color = includeColor
+    // A sparse cloud whose FIRST point has no colour: the writers decide "has colour"
+    // from that point in two places (XYZ, and the georeference / downsample pass)
+    // and per point everywhere else. Keep both rules.
+    if (cloud.kind !== 'dense' && copy.col && !cloud.points[0]?.color) {
+      if (frame.sim || cell) delete copy.col
+      else if (format === 'xyz') color = false
     }
-    const base = `${projectBase()}-${cloud.kind}`
-    if (format === 'las' || format === 'laz') {
-      // NEVER attach a CRS merely because the coordinates are metric: only a real
-      // georeference names one.
-      const m = frame.source === 'georef' && frame.crs ? /EPSG:(\d+)/i.exec(frame.crs) : null
-      const crsCode = m ? Number(m[1]) : null
-      const geographic = m ? Number(m[1]) === 4326 : false
-      if (format === 'laz') {
-        // LASzip runs in the worker (crates/lazcodec) — the arithmetic coder on a
-        // multi-million-point cloud would freeze the UI thread.
-        const { bytes } = await exportLazCloud(toFlatCloud(src), { crsCode, geographic, onLog: log })
-        downloadBlob(`${base}.laz`, bytes, 'application/octet-stream')
-        return
-      }
-      const las = cloudToLas(src, { crsCode, geographic, onLog: log })
-      downloadBlob(`${base}.las`, las, 'application/octet-stream')
-    } else if (format === 'xyz') {
-      downloadBlob(`${base}.xyz`, cloudToXyz(src, { color: includeColor }), 'text/plain;charset=utf-8')
-    } else {
-      const binary = format !== 'ply-ascii'
-      const ply = cloudToPly(src, { binary, color: includeColor })
-      downloadBlob(`${base}.ply`, ply, binary ? 'application/octet-stream' : 'text/plain;charset=utf-8')
-    }
+    const { blob } = await exportCloudFile({
+      cloud: copy, format, color, sim: frame.sim, cell, crsCode, geographic: crsCode === 4326,
+    }, { onLog: (msg, l, c) => log(msg, l, c ?? 'Export') })
+    const ext = format === 'las' || format === 'laz' || format === 'xyz' ? format : 'ply'
+    downloadBlob(`${projectBase()}-${cloud.kind}.${ext}`, blob)
   }
 
-  // Mesh (screened Poisson) → PLY (faces) or GLB. Uses the selected mesh cloud, else
-  // the first mesh cloud.
+  // Mesh (screened Poisson) → PLY (faces) / GLB / OBJ / STL, in the export worker.
+  // Uses the selected mesh cloud, else the first mesh cloud.
   async function doExportMesh({ format, includeColor, applyGeoref }) {
     const cloud = selectedCloud.value?.kind === 'mesh'
       ? selectedCloud.value
       : clouds.value.find((c) => c.kind === 'mesh' && c.count > 0)
     if (!cloud) return
-    const raw = { nVerts: cloud.nVerts, count: cloud.count, pos: cloud.pos, idx: cloud.idx, col: cloud.col }
     const frame = applyGeoref ? await exportSimilarity() : { sim: null, unit: 'model', crs: null, source: null }
-    const mesh = prepareMeshForExport(raw, { sim: frame.sim })
-    if (frame.source === 'georef') log(`Mesh export: georeferenced to ${frame.crs}`, 'info', 'Export')
-    else if (frame.source === 'scalebars') {
-      log(`Mesh export: scaled to metres (×${frame.sim.scale.toPrecision(6)}) `
-        + 'from the scale bars — metric coordinates, no CRS', 'info', 'Export')
-    } else if (frame.source === 'orientation') {
-      log('Mesh export: in the oriented local frame (Orient model) — model units, no CRS', 'info', 'Export')
-    }
-    if (format === 'glb') {
-      downloadBlob(`${projectBase()}-mesh.glb`, meshToGlb(mesh, { color: includeColor }), 'model/gltf-binary')
-    } else if (format === 'obj') {
-      downloadBlob(`${projectBase()}-mesh.obj`, meshToObj(mesh, { color: includeColor }), 'text/plain;charset=utf-8')
-    } else if (format === 'stl') {
-      downloadBlob(`${projectBase()}-mesh.stl`, meshToStl(mesh), 'model/stl')
-    } else {
-      const binary = format !== 'ply-ascii'
-      const ply = meshToPly(mesh, { binary, color: includeColor })
-      downloadBlob(`${projectBase()}-mesh.ply`, ply, binary ? 'application/octet-stream' : 'text/plain;charset=utf-8')
-    }
+    logExportFrame('Mesh', frame)
+    const mesh = { nVerts: cloud.nVerts, count: cloud.count, pos: cloud.pos.slice(), idx: cloud.idx.slice(),
+      ...(cloud.col ? { col: cloud.col.slice() } : {}) }
+    const { blob } = await exportMeshFile({ mesh, format, color: includeColor, sim: frame.sim },
+      { onLog: (msg, l, c) => log(msg, l, c ?? 'Export') })
+    const ext = format === 'glb' || format === 'obj' || format === 'stl' ? format : 'ply'
+    downloadBlob(`${projectBase()}-mesh.${ext}`, blob)
   }
 
   // SfM cameras → websfm JSON (cameras + optional tracks), or a NeRF/3DGS
@@ -310,11 +361,10 @@ export function useExports({
       return
     }
     const cams = [...cloud.cameras.entries()].map(([uuid, c]) => ({ uuid, R: c.R, t: c.t, K: c.K }))
-    const pts = cloud.points.map((p) => ({
-      x: p.x, y: p.y, z: p.z, color: p.color,
-      views: includeTracks && p.views ? [...p.views.entries()] : [],
-    }))
-    saveJson(reconstructionToJson(cams, pts, currentCrs.value), `${projectBase()}-model.json`)
+    // The points are written one at a time from the cloud itself (a lazyArray), never
+    // copied into a second per-point structure first.
+    saveJson(reconstructionToJson(cams, cloud.points, currentCrs.value, { tracks: !!includeTracks }),
+      `${projectBase()}-model.json`)
   }
 
   // Sparse model → COLMAP text model (cameras/images/points3D.txt) zipped into
@@ -338,10 +388,14 @@ export function useExports({
       .map(([uuid, cam]) => {
         const im = imgByUuid.get(uuid)
         if (!im || !cam.K || !im.meta?.width || !im.meta?.height) return null
-        return { uuid, name: im.name, width: im.meta.width, height: im.meta.height, K: cam.K, R: cam.R, t: cam.t, keypoints: im.keypoints ?? [], file: im.file ?? null }
+        return { uuid, name: im.name, width: im.meta.width, height: im.meta.height, K: cam.K, R: cam.R, t: cam.t, keypoints: null, file: im.file ?? null }
       })
       .filter(Boolean)
     if (!exportImages.length) return
+    // The COLMAP model lists every keypoint of every exported image, so it needs them
+    // all at once (TODO ▸ SC-7: the model is still built in memory). Read them from
+    // disk here, past the keypoint cache, rather than assume they are resident.
+    for (const im of exportImages) im.keypoints = (await imagesStore.readKeypoints(imgByUuid.get(im.uuid))) ?? []
     const exported = new Set(exportImages.map((im) => im.uuid))
 
     // Warn if we're about to fall back to raw store keypoints for a project whose BA
@@ -360,6 +414,7 @@ export function useExports({
       }
     }
 
+    const keypointsByUuid = new Map(exportImages.map((im) => [im.uuid, im.keypoints]))
     const points = cloud.points.map((p) => ({
       xyz: [p.x, p.y, p.z],
       color: p.color,
@@ -369,8 +424,8 @@ export function useExports({
               if (!exported.has(uuid)) return null
               const px = p.viewsPx?.get(uuid)
               if (px) return { uuid, x: px[0], y: px[1], featureIdx: kpIdx }
-              const kp = imgByUuid.get(uuid)?.keypoints?.[kpIdx]
-              return kp ? { uuid, x: kp.x, y: kp.y, featureIdx: kpIdx } : null
+              const kps = keypointsByUuid.get(uuid)
+              return kps && kpIdx < kps.length ? { uuid, x: kps.x(kpIdx), y: kps.y(kpIdx), featureIdx: kpIdx } : null
             })
             .filter(Boolean)
         : [],
@@ -381,7 +436,7 @@ export function useExports({
     // track ids remain stable across every export representation.
     model.images.forEach((im, i) => { im.R = exportImages[i].R; im.K = exportImages[i].K; im.width = exportImages[i].width; im.height = exportImages[i].height })
     if (format === 'nvm') {
-      downloadBlob(`${projectBase()}.nvm`, buildNvm(model), 'text/plain;charset=utf-8')
+      downloadBlob(`${projectBase()}.nvm`, partsToBlob(buildNvmParts(model), 'text/plain;charset=utf-8'))
       log(`NVM export: ${model.images.length} cameras, ${model.points3D.length} points`, 'success', 'Export')
       return
     }
@@ -415,42 +470,48 @@ export function useExports({
           + 'are not SIFT or were not found; COLMAP will need to re-extract them', 'warn', 'Export')
       }
       const pairs = []
-      for (const [, pair] of matchStore.value) {
+      const wanted = [...matchStore.value.values()].filter((pair) => pair.status === 'done' && pair.nMatches > 0
+        && imageIdByUuid.get(pair.idA) && imageIdByUuid.get(pair.idB))
+      await matchesStore.streamPairMatches(wanted, (pair, m) => {
         const imageIdA = imageIdByUuid.get(pair.idA), imageIdB = imageIdByUuid.get(pair.idB)
-        if (!imageIdA || !imageIdB || pair.status !== 'done' || !pair.matches?.length) continue
         const flip = imageIdA > imageIdB
         pairs.push({
           pairId: imageIdsToPairId(imageIdA, imageIdB),
-          matches: flip ? pair.matches.map(([a, b]) => [b, a]) : pair.matches,
+          // Flat [a, b, …]; flipped into COLMAP's image order when it differs from ours.
+          // Always a copy: the stream hands views into its read windows, and posting a
+          // view to the worker would clone that whole window once per pair.
+          matches: flip ? swapPairs(m) : m.slice(),
           F: flip && pair.F ? [[pair.F[0][0], pair.F[1][0], pair.F[2][0]], [pair.F[0][1], pair.F[1][1], pair.F[2][1]], [pair.F[0][2], pair.F[1][2], pair.F[2][2]]] : (pair.F ?? null),
           E: pair.E ?? null, H: pair.H ?? null,
         })
-      }
+      })
       const database = await exportColmapDatabase({ cameras: model.cameras, images: model.images, features, pairs })
       if (format === 'database') {
         downloadBlob(`${projectBase()}-database.db`, database, 'application/vnd.sqlite3')
         log(`COLMAP database export: ${model.images.length} images, ${pairs.length} match pairs`, 'success', 'Export')
         return
       }
-      const modelFiles = serializeColmapModelBin(model)
+      const modelFiles = serializeColmapModelBinParts(model)
       const entries = [
         { name: 'database.db', data: database },
         ...Object.entries(modelFiles).map(([name, data]) => ({ name: `sparse/0/${name}`, data })),
       ]
+      // Source photos go in as Blobs: the zip references the files and never reads
+      // the image set into memory (only a CRC pass, a slice at a time).
       if (includeImages) {
-        for (const im of exportImages) if (im.file) entries.push({ name: `images/${im.name}`, data: new Uint8Array(await im.file.arrayBuffer()) })
+        for (const im of exportImages) if (im.file) entries.push({ name: `images/${im.name}`, data: im.file })
       }
-      downloadBlob(`${projectBase()}-colmap-workspace.zip`, zipStore(entries), 'application/zip')
+      downloadBlob(`${projectBase()}-colmap-workspace.zip`, new Blob(await zipParts(entries), { type: 'application/zip' }))
       log(`COLMAP workspace export: database + sparse model${includeImages ? ' + images' : ''}`, 'success', 'Export')
       return
     }
     // Binary (.bin) or text (.txt) — both share the ColmapModel struct; only the
-    // encoding differs. Binary files are already Uint8Array; text is UTF-8 encoded.
-    const files = format === 'bin' ? serializeColmapModelBin(model) : serializeColmapModel(model)
-    const entries = Object.entries(files).map(([name, data]) => ({
-      name, data: typeof data === 'string' ? new TextEncoder().encode(data) : data,
-    }))
-    downloadBlob(`${projectBase()}-colmap-${format === 'bin' ? 'bin' : 'txt'}.zip`, zipStore(entries), 'application/zip')
+    // encoding differs. Each file is bounded parts (Uint8Arrays, or string parts the
+    // zip writer UTF-8 encodes one at a time).
+    const files = format === 'bin' ? serializeColmapModelBinParts(model) : serializeColmapModelParts(model)
+    const entries = Object.entries(files).map(([name, data]) => ({ name, data }))
+    downloadBlob(`${projectBase()}-colmap-${format === 'bin' ? 'bin' : 'txt'}.zip`,
+      new Blob(await zipParts(entries), { type: 'application/zip' }))
     log(`COLMAP export: ${exportImages.length} cameras, ${points.length} points → ${format === 'bin' ? '.bin' : '.txt'} zip`, 'success', 'Export')
   }
 
@@ -507,14 +568,14 @@ export function useExports({
     }
     if (format === 'png') {
       // Hillshade PNG — the DEM's hillshaded preview canvas + world file + .prj.
-      if (!dem.value.previewDataUrl) { log('DEM: no hillshade preview to export', 'warn', 'Export'); return }
-      downloadBlob(`${projectBase()}-dem-hillshade.png`, await dataUrlToBlob(dem.value.previewDataUrl))
+      if (!dem.value.previewBlob) { log('DEM: no hillshade preview to export', 'warn', 'Export'); return }
+      downloadBlob(`${projectBase()}-dem-hillshade.png`, dem.value.previewBlob)
       downloadBlob(`${projectBase()}-dem-hillshade.wld`, rasterWorldFile(dem.value), 'text/plain;charset=utf-8')
       if (info.crs) downloadBlob(`${projectBase()}-dem-hillshade.prj`, prjText(info), 'text/plain;charset=utf-8')
       log('DEM export: hillshade PNG + world file', 'success', 'Export')
       return
     }
-    downloadBlob(`${projectBase()}-dem.asc`, demToAsciiGrid(dem.value, { nodata }), 'text/plain;charset=utf-8')
+    downloadBlob(`${projectBase()}-dem.asc`, partsToBlob(demToAsciiGridParts(dem.value, { nodata }), 'text/plain;charset=utf-8'))
     if (info.crs) downloadBlob(`${projectBase()}-dem.prj`, prjText(info), 'text/plain;charset=utf-8')
   }
 
@@ -542,12 +603,12 @@ export function useExports({
       log(`Ortho export: GeoTIFF${deflate ? ' (DEFLATE)' : ''}`, 'success', 'Export')
       return
     }
-    if (!ortho.value.previewDataUrl) return
+    if (!ortho.value.previewBlob) return
     const jpeg = format === 'jpeg'
     const ext = jpeg ? 'jpg' : 'png'
     const blob = jpeg
-      ? await reencodeDataUrl(ortho.value.previewDataUrl, 'image/jpeg', jpegQuality ?? 0.9)
-      : await dataUrlToBlob(ortho.value.previewDataUrl)
+      ? await reencodeDataUrl(ortho.value.previewUrl, 'image/jpeg', jpegQuality ?? 0.9)
+      : ortho.value.previewBlob
     downloadBlob(`${projectBase()}-ortho.${ext}`, blob)
     // World file extension mirrors the image (.wld works for both; .jgw/.pgw are the
     // strict siblings — .wld is universally accepted, so keep it simple).
@@ -639,7 +700,9 @@ export function useExports({
           throw new Error('Undistorted images exceed the 4 GB ZIP limit. Lower the output '
             + 'resolution or the JPEG quality, or export in batches.')
         }
-        entries.push({ name: `images/${name}`, data })
+        // Held as a Blob (browser blob storage, not the JS heap) with its CRC taken
+        // now, while the bytes are in hand, so the zip never re-reads it.
+        entries.push({ name: `images/${name}`, data: new Blob([data]), crc: crc32(data) })
         outImages.push({
           uuid, name, width: res.width, height: res.height, K: res.K,
           R: cam.R, t: cam.t, outScale: res.outScale, rect: res.rect,
@@ -679,10 +742,10 @@ export function useExports({
       // No `keypoints` — the store's are in scan space, and the compact
       // observed-points form is what a sparse-only consumer wants anyway.
       const model = buildColmapModel({ images: outImages, points })
-      const files = serializeColmapModelBin(model)
+      const files = serializeColmapModelBinParts(model)
       for (const [n, data] of Object.entries(files)) entries.push({ name: `sparse/${n}`, data })
 
-      downloadBlob(`${projectBase()}-undistorted.zip`, zipStore(entries), 'application/zip')
+      downloadBlob(`${projectBase()}-undistorted.zip`, new Blob(await zipParts(entries), { type: 'application/zip' }))
       const cropped = outImages.filter((o) => o.rect.x || o.rect.y).length
       log(`Undistorted export: ${outImages.length} images (${ext.toUpperCase()}, ${mode}`
         + `${cropped ? `, ${cropped} cropped` : ''}) + PINHOLE sparse model, `
@@ -700,7 +763,7 @@ export function useExports({
   // is the usual shortcut and it fails precisely here — near the poles a
   // projected CRS's convergence approaches the longitude difference itself.
   //
-  // LOD tiling is deliberately not attempted (see docs/planning/plan-interop-formats.md).
+  // LOD tiling is deliberately not attempted: the export is one tile.
   async function doExportTiles3d({ includeColor = true } = {}) {
     const cloud = cloudHasPoints(selectedCloud.value)
       ? selectedCloud.value
@@ -743,10 +806,10 @@ export function useExports({
       transform, box: boundingBox(min, max), contentUri: 'content.glb',
     })
     const entries = [
-      { name: 'tileset.json', data: new TextEncoder().encode(JSON.stringify(tileset, null, 2)) },
+      { name: 'tileset.json', data: JSON.stringify(tileset, null, 2) },
       { name: 'content.glb', data: glb },
     ]
-    downloadBlob(`${projectBase()}-3dtiles.zip`, zipStore(entries), 'application/zip')
+    downloadBlob(`${projectBase()}-3dtiles.zip`, new Blob(await zipParts(entries), { type: 'application/zip' }))
     log(`3D Tiles export: ${src.count.toLocaleString()} points, `
       + `${transform ? `placed in ${crs}` : 'local frame (unplaced)'}`, 'success', 'Export')
   }
@@ -756,17 +819,12 @@ export function useExports({
   // plane goes to the worker as a COPY (transferred), so the product stays intact.
 
   // Grid E/N in a projected CRS carry the point scale factor k (heights do not):
-  // the true horizontal spacing is gsd / k. 1 for local/model/geographic frames.
-  // Same rule as the raster measurement tools (RasterMeasurements.vue).
+  // the true horizontal spacing is gsd / k. 1 for local/model frames, and for a
+  // geographic grid, which has no linear scale (rasterUnits.js — the same rule as
+  // the raster measurement tools).
   async function gridScaleFactor(product) {
-    const crs = product?.crs
-    if (!crs || crs === 'local') return 1
     try {
-      await ensureProjection(crs)
-      const x = product.originX + (product.width * product.gsd) / 2
-      const y = product.originY - (product.height * product.gsd) / 2
-      const k = pointScaleFactor((xy) => transform(xy, crs, 'EPSG:4326'), x, y, { metresPerUnit: metresPerCrsUnit(crs) ?? 1 })
-      return k > 0 ? k : 1
+      return (await rasterGroundScale(productDescriptor(product), product?.crs)) ?? 1
     } catch { return 1 }
   }
 
@@ -774,7 +832,7 @@ export function useExports({
     width: g.width, height: g.height, gsd: g.gsd, originX: g.originX, originY: g.originY,
     data: g.data.slice(), mask: g.mask ? g.mask.slice() : null, crs: g.crs ?? null,
   })
-  const unitLabelOf = (g) => (g.unit === 'model' ? 'model units' : (g.unit || 'units'))
+  const unitLabelOf = (g) => rasterUnits(g).vertical
 
   async function exportContours({ interval, indexEvery, smooth, minLength, format }) {
     const grid = dem.value

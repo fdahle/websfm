@@ -3,15 +3,21 @@ import {
   rotationToQuat,
   quatToRotation,
   intrinsicsFromCamera,
-  serializeColmapModel,
+  serializeColmapModelParts,
   parseColmapModel,
-  serializeColmapModelBin,
+  serializeColmapModelBinParts,
   parseColmapModelBin,
   buildColmapModel,
   readColmapModel,
   makeNameResolver,
   colmapToSparse,
 } from './colmapModel.js'
+import { joinParts } from './parts.js'
+
+// The serializers yield bounded parts per file (core/io/parts.js); join them here.
+const joinFiles = (files) => Object.fromEntries(Object.entries(files).map(([k, v]) => [k, joinParts(v)]))
+const serializeColmapModel = (m) => joinFiles(serializeColmapModelParts(m))
+const serializeColmapModelBin = (m) => joinFiles(serializeColmapModelBinParts(m))
 
 // A non-trivial proper rotation (30° about a tilted axis), row-major.
 const R30 = (() => {
@@ -323,5 +329,32 @@ describe('colmapToSparse', () => {
     expect(unmatched).toEqual(['b.jpg'])
     expect(cameras.has('ub')).toBe(false)
     expect(pts).toHaveLength(0) // point observed only by the dropped image
+  })
+})
+
+describe('COLMAP text — parts and byte input', () => {
+  const big = {
+    cameras: Array.from({ length: 30 }, (_, i) => ({ cameraId: i + 1, model: 'PINHOLE', width: 4000, height: 3000, params: [1000 + i, 1000, 2000, 1500] })),
+    images: Array.from({ length: 30 }, (_, i) => ({ imageId: i + 1, q: [1, 0, 0, 0], t: [i, 0.5, -i - 1], cameraId: i + 1, name: `img ${i}.jpg`,
+      points2D: Array.from({ length: 50 }, (_, k) => [k * 1.5, k * 0.25, k % 3 ? -1 : k + 1]) })),
+    points3D: Array.from({ length: 200 }, (_, i) => ({ point3dId: i + 1, xyz: [i, i / 2, -i - 1], rgb: [i % 256, 1, 2], error: 0.5, track: [[1 + (i % 30), i % 50]] })),
+  }
+  it('every file arrives in bounded parts that join to the one-part text', () => {
+    const small = serializeColmapModelParts(big, { partChars: 256 })
+    const whole = serializeColmapModel(big)
+    for (const [name, gen] of Object.entries(small)) {
+      const parts = [...gen]
+      expect(parts.length).toBeGreaterThan(name === 'cameras.txt' ? 3 : 10)
+      expect(parts.join('')).toBe(whole[name])
+    }
+    const bin = serializeColmapModelBinParts(big, { partBytes: 512 })
+    expect(bin['images.bin'].length).toBeGreaterThan(10)
+    expect(joinFiles(bin)).toEqual(serializeColmapModelBin(big))
+  })
+  it('parses UTF-8 bytes (CRLF, any slice size) exactly like the string', () => {
+    const text = serializeColmapModel(big)
+    const bytes = Object.fromEntries(Object.entries(text).map(([k, v]) => [k, new TextEncoder().encode(v.replace(/\n/g, '\r\n'))]))
+    expect(parseColmapModel(bytes)).toEqual(parseColmapModel(text))
+    expect(parseColmapModel(bytes)).toEqual(big)
   })
 })

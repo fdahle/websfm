@@ -66,14 +66,19 @@ export const useSensorsStore = defineStore('sensors', () => {
   function ensureExifSensors() {
     if (!images.value.length) return
     let changed = false
+    // Indexed once per run: this runs once per image's EXIF landing, so a search
+    // per image made an import O(images² × sensors).
+    const liveIds = new Set(sensors.value.map((s) => s.id))
+    const bySignature = new Map()
+    for (const s of sensors.value) if (s.signature && !bySignature.has(s.signature)) bySignature.set(s.signature, s)
     for (const img of images.value) {
       // Skip images already bound to a live sensor. A sensorId that points to no
       // existing sensor (e.g. a restore race, or a removed sensor) is re-resolved.
-      const bound = img.sensorId && sensors.value.some((s) => s.id === img.sensorId)
+      const bound = img.sensorId && liveIds.has(img.sensorId)
       if (bound || !img.meta) continue
       const sig = exifSignature(img.meta)
       if (!sig) continue
-      let sensor = sensors.value.find((s) => s.signature === sig)
+      let sensor = bySignature.get(sig)
       if (!sensor) {
         const seed = sensorFromExif(img.meta)
         // No make/model in EXIF (scanned/historic imagery): give it a numbered
@@ -92,6 +97,7 @@ export const useSensorsStore = defineStore('sensors', () => {
           source: 'exif',
         }
         sensors.value.push(sensor)
+        liveIds.add(sensor.id); bySignature.set(sig, sensor)
         log(`Sensor detected: ${sensor.label}`, 'info', 'Sensor')
       }
       img.sensorId = sensor.id
@@ -106,9 +112,14 @@ export const useSensorsStore = defineStore('sensors', () => {
   // Re-group whenever an image is added/removed, its EXIF lands, or its sensor
   // assignment changes. Keyed on id+sensorId+EXIF-signature rather than a deep
   // watch, so unrelated image mutations (keypoints, masks) don't re-scan.
-  const imageSensorSig = computed(() =>
-    images.value.map((i) => `${i.id}:${i.sensorId ?? ''}:${exifSignature(i.meta) ?? ''}`).join('|'),
-  )
+  // A number (FNV-1a), not one joined string: it re-evaluates on every image's EXIF
+  // landing, and a string over all images made that O(images²) characters.
+  const imageSensorSig = computed(() => {
+    let h = 0x811c9dc5
+    const mix = (s) => { s = String(s ?? ''); for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 0x01000193) >>> 0; h = Math.imul(h ^ 0x7c, 0x01000193) >>> 0 }
+    for (const i of images.value) { mix(i.id); mix(i.sensorId); mix(i.meta ? exifSignature(i.meta) : '') }
+    return `${images.value.length}:${h}`
+  })
   watch(imageSensorSig, ensureExifSensors)
 
   // Add sensors parsed from a calibration file. These are not EXIF-grouped

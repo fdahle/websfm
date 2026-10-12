@@ -24,7 +24,10 @@
 // outside neighbour of an edge lying exactly on a pixel boundary — such a pixel
 // shares only a line with the polygon, zero area).
 
+import { polygonSpans } from './polygonSpans.js'
+
 const SNAP = 1e-9
+
 // World→pixel arithmetic leaves 2.9999999997 where the user drew 3; snap so a
 // boundary drawn on a pixel edge stays on it (matters only for allTouched).
 const snap = (v) => { const r = Math.round(v); return Math.abs(v - r) < SNAP ? r : v }
@@ -131,46 +134,10 @@ export function polygonsFromGeoJSON(geojson) {
   return { polygons, ignored }
 }
 
-// Even-odd scanline fill of one polygon's pixel-space rings, OR-ed into `mask`.
+// Even-odd scanline fill of one polygon's pixel-space rings, OR-ed into `mask`
+// (the centre-inside rule shared with measure.js polygonVolume: polygonSpans.js).
 function fillPolygon(mask, w, h, rings) {
-  let minRow = Infinity, maxRow = -Infinity
-  for (const ring of rings) for (const p of ring) {
-    if (p[1] < minRow) minRow = p[1]
-    if (p[1] > maxRow) maxRow = p[1]
-  }
-  const r0 = Math.max(0, Math.ceil(minRow - 0.5))
-  const r1 = Math.min(h - 1, Math.ceil(maxRow - 0.5) - 1)
-  if (r1 < r0) return
-  const rows = new Array(r1 - r0 + 1)
-  for (const ring of rings) {
-    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-      const a = ring[j], b = ring[i]
-      if (a[1] === b[1]) continue // horizontal: never crosses a centre line
-      const lo = a[1] < b[1] ? a : b, hi = a[1] < b[1] ? b : a
-      // Centre lines yc = r + ½ with lo.y ≤ yc < hi.y (half-open: a shared
-      // vertex is counted once).
-      const ra = Math.max(r0, Math.ceil(lo[1] - 0.5))
-      const rb = Math.min(r1, Math.ceil(hi[1] - 0.5) - 1)
-      const dxdy = (hi[0] - lo[0]) / (hi[1] - lo[1])
-      for (let r = ra; r <= rb; r++) {
-        const x = lo[0] + (r + 0.5 - lo[1]) * dxdy
-        const k = r - r0
-        if (rows[k]) rows[k].push(x); else rows[k] = [x]
-      }
-    }
-  }
-  for (let k = 0; k < rows.length; k++) {
-    const xs = rows[k]
-    if (!xs) continue
-    xs.sort((p, q) => p - q)
-    const off = (r0 + k) * w
-    for (let i = 0; i + 1 < xs.length; i += 2) {
-      // Centres c+½ in [xs[i], xs[i+1]).
-      const c0 = Math.max(0, Math.ceil(xs[i] - 0.5))
-      const c1 = Math.min(w - 1, Math.ceil(xs[i + 1] - 0.5) - 1)
-      if (c1 >= c0) mask.fill(1, off + c0, off + c1 + 1)
-    }
-  }
+  polygonSpans(rings, (r, c0, c1) => mask.fill(1, r * w + c0, r * w + c1 + 1), { width: w, height: h })
 }
 
 // Columns whose open interval (c, c+1) meets [xa, xb] (xa ≤ xb), in row r.

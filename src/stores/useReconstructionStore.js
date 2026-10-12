@@ -1,22 +1,27 @@
 import { createFrameResolver } from './reconstruction/frames.js'
-import { ref, shallowRef, computed, markRaw } from 'vue'
+import { ref, shallowRef, computed, markRaw, nextTick, watch } from 'vue'
 import { defineStore, storeToRefs } from 'pinia'
 import {
   reconstruct as workerReconstruct,
   computeDepthMaps as workerComputeDepthMaps,
+  filterDepthMaps as workerFilterDepthMaps,
   densify as workerDensify,
   generateDem as workerGenerateDem,
   generateOrtho as workerGenerateOrtho,
   meshify as workerMeshify,
   editCloud as workerEditCloud,
   refineSparse as workerRefineSparse, optimizeSparse as workerOptimizeSparse,
-  terminateAll,
+  terminateAll, POOL_SIZE,
 } from '../workers/computeClient.js'
 import { useLog } from '../composables/useLog.js'
 import * as opfs from '../utils/opfs.js'
-import { aerialUpRotation, rotateReconstruction } from '../core/products/projection.js'
-import { qualityToMaxDim } from '../core/dense/mvs.js'
-import { normalizeRegion, regionStatus, regionMask } from '../core/products/region.js'
+import { yieldToPaint } from '../utils/concurrency.js'
+import { aerialUpRotation, rotateReconstruction, sceneUpFromCameras } from '../core/products/projection.js'
+import { qualityToMaxDim, filterConfig, filterSettings, logFilterCache, logFilterTotals, finishFusion, mergeFusionCounters, logFusionStream } from '../core/dense/mvs.js'
+import { normalizeRegion, regionStatus, regionMask, regionContains } from '../core/products/region.js'
+import { stageDemPoints } from '../core/products/dem.js'
+import { packSparseForDense, sparseInputTransfer } from '../core/dense/sparseInput.js'
+import { normalizeProductLayers, productMapBlocker } from '../core/products/productLayers.js'
 import { selectPoints } from '../core/products/cloudEdit.js'
 import { normalizeOrientation, orientationStatus, orientationBasis } from '../core/products/orientation.js'
 import { formatBytes, DEFAULT_BUDGET_BYTES, deviceBudget } from '../core/dense/memBudget.js'
@@ -43,11 +48,11 @@ import { buildCameraPriors, surveyFrameFor, gcpToSurveyFrame, normalizeLeverArm 
 import { makeFrameModelResolver, gcpsInPinholeFrame } from '../core/sfm/displayFrame.js'
 import { packSparseCloud, unpackReconstructionResult } from '../core/sfm/resultCodec.js'
 import { toMatchSpace } from '../core/features/siftDescriptors.js'
-import { SFM_TUNING } from '../core/tuning.js'
+import { SFM_TUNING, DENSE_TUNING } from '../core/tuning.js'
 import { packMatchPairs } from '../core/sfm/matchCodec.js'
 import { keypointSetFrom, keypointSetTransfer } from '../core/sfm/keypointSet.js'
 import {
-  projectSparsePeakBreakdownBytes, sparseMemoryDecision, planSparseRun, SPARSE_HEAP_FRACTION,
+  projectSparsePeakBreakdownBytes, sparseMemoryDecision, planSparseRun, SPARSE_HEAP_FRACTION, WASM_SOLVER_LIMIT_BYTES,
 } from '../core/sfm/memBudget.js'
 
 // Tools-tab edits (`editClouds` modes, dispatched by workers/ops/cloud.js):
@@ -101,7 +106,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
   // stream their planes during fusion and ortho. Saved planes are evicted.
   const {
     depthMaps, depthMapsMeta, depthMapCount,
-    persistDepthMaps, depthMapInput, loadDepthIndexIntoMeta, clearDepthMaps,
+    persistDepthMaps, beginStreamedDepthMaps, depthMapInput, loadDepthIndexIntoMeta, clearDepthMaps,
   } = createDepthMapCache({
     isPersisting: () => isPersisting(),
     currentProjectId: () => projects.currentProjectId,
@@ -222,13 +227,28 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
   // per open and re-runs when this moves, so pruning a bad GCP updates the overview.
   const healthDirty = ref(0)
 
-  // Products (DEM + orthophoto). Transient, recomputable rasters (large typed
-  // arrays) — shallowRef so the planes stay PLAIN, NOT persisted (like depthMaps).
+  // Products (DEM + orthophoto): large typed arrays — shallowRef so the planes stay
+  // PLAIN. Persisted by opfs.saveProduct.
   //   dem:   { width, height, gsd, originX, originY, data, mask, zMin, zMax,
-  //            crs, unit, previewDataUrl }
-  //   ortho: { width, height, rgba, covered, previewDataUrl }
+  //            crs, unit, previewBlob, previewUrl }
+  //   ortho: { width, height, rgba, covered, previewBlob, previewUrl }
+  // The preview is a PNG Blob (off the V8 heap; a 4096² preview was ~100 MB as a
+  // base64 string) plus its blob: URL for the viewer and the map layer, made here
+  // when a product enters the store and revoked when its record is replaced.
   const dem = shallowRef(null)
   const ortho = shallowRef(null)
+  const withPreviewUrl = (p) => (p?.previewBlob && !p.previewUrl
+    ? { ...p, previewUrl: URL.createObjectURL(p.previewBlob) } : p)
+  for (const product of [dem, ortho]) {
+    watch(product, (now, before) => {
+      if (before?.previewUrl && before.previewUrl !== now?.previewUrl) URL.revokeObjectURL(before.previewUrl)
+    })
+  }
+  // Map-layer view state per computed product ({ dem: { onMap, opacity }, … };
+  // core/products/productLayers.js). Kept in reconstruction.json, NOT on the
+  // product record: saving a product rewrites its raster buffers, and a map
+  // toggle must not. It survives a rebuild, so a DEM on the map stays there.
+  const productLayers = ref({})
 
   let cloudSeq = 0
   const makeCloudId = () => `cloud-${Date.now()}-${cloudSeq++}`
@@ -415,6 +435,29 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     return true
   }
 
+  // Show/hide a computed DEM/ortho on the map. Refused (logged, false) when the
+  // product cannot be placed — the ribbon and sidebar grey the toggle for the same
+  // reason, from the same productMapBlocker.
+  function setProductOnMap(kind, onMap) {
+    const product = productForKind(kind)
+    const blocker = onMap ? productMapBlocker(product) : null
+    if (blocker) { log(`Map: ${blocker}`, 'warn', 'Products'); return false }
+    const prev = productLayers.value[kind] ?? { onMap: false, opacity: 1 }
+    if (prev.onMap === !!onMap) return true
+    productLayers.value = { ...productLayers.value, [kind]: { ...prev, onMap: !!onMap } }
+    log(`${product?.name || (kind === 'ortho' ? 'Orthophoto' : 'DEM')} ${onMap ? 'shown on' : 'hidden from'} the map`,
+      'info', 'Products', { channel: 'activity' })
+    persist()
+    return true
+  }
+  function setProductOpacity(kind, opacity) {
+    const prev = productLayers.value[kind] ?? { onMap: false, opacity: 1 }
+    const next = Math.min(1, Math.max(0, Number(opacity)))
+    if (!Number.isFinite(next) || next === prev.opacity) return
+    productLayers.value = { ...productLayers.value, [kind]: { ...prev, opacity: next } }
+    persist()
+  }
+
   async function removeProduct(kind) {
     const product = productForKind(kind)
     if (!product) return false
@@ -447,6 +490,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
       scaleFit: scaleFit.value,
       region: region.value,
       orientation: orientation.value,
+      productLayers: productLayers.value,
       // Run-quality summaries (Q3) — tiny, kept for cross-run comparison.
       summary: summary.value,
       denseSummary: denseSummary.value,
@@ -854,7 +898,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
         inputImages.push({
           uuid, name: im.name, url: im.computeUrl ?? im.url,
           // Per-image mask (if any) so masked regions are excluded from the dense cloud.
-          mask: im.mask?.dataUrl ?? null,
+          mask: im.mask?.blob ?? null,
           R: cam.R.map((row) => [...row]),
           t: [...cam.t],
           K: { fx: cam.K.fx, fy: cam.K.fy, cx: cam.K.cx, cy: cam.K.cy },
@@ -871,32 +915,193 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
         log(`Dense: applying self-calibrated distortion from the sparse run — ${parts.join('; ')}`,
           'info', 'Dense')
       }
-      const points = cloud.points.map((p) => ({
-        x: p.x, y: p.y, z: p.z,
-        views: [...p.views.entries()].map(([u, kp]) => [u, kp]),
-      }))
+      // Packed typed arrays, transferred (core/dense/sparseInput.js) — not an object
+      // plus a views array per point, structured-cloned.
+      const sparse = packSparseForDense(cloud.points)
 
-      const { maps, summary: aSummary } = await workerComputeDepthMaps(
-        { images: inputImages, points, settings: withRegion(settings) },
-        { onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f) },
-      )
-
-      depthMaps.value = new Map(maps.map((m) => [m.uuid, m]))
-      depthMapsMeta.value = []   // the fresh maps supersede any restored index
-      depthSummary.value = aSummary ?? null
-      for (const m of maps) {
+      // The image's depth preview (display PNG), then drop it from the map.
+      let previews = 0
+      const takePreview = (m) => {
         const im = imgByUuid.get(m.uuid)
-        if (im && m.displayDataUrl) imagesStore.updateDepth(im.id, m.displayDataUrl)
+        if (im && m.displayBlob) { imagesStore.updateDepth(im.id, m.displayBlob, { quiet: true, persistSync: false }); previews++ }
+        delete m.displayBlob
       }
-      log(`Dense: ${maps.length} depth map(s) computed`, 'success', 'Dense')
+      // Streamed (TODO ▸ SC-4) whenever the maps can be saved: each finished map is
+      // written and released at once, and the cross-view filter runs as its own pass
+      // over the saved files. Holding every map to the end (the in-memory path, kept
+      // for a project that cannot persist) made the preflight refuse ~100+ images.
+      const run = await beginStreamedDepthMaps()
+      const { maps, summary: aSummary, loopShare } = await workerComputeDepthMaps(
+        { images: inputImages, sparse, settings: withRegion({ ...settings, streamMaps: !!run }) },
+        { transfer: sparseInputTransfer(sparse), onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f),
+          onEvent: (ev, [m]) => { if (ev === 'map' && run) { takePreview(m); run.add(m) } } },
+      )
+      let stageSummary = aSummary ?? null
+      if (run) {
+        await run.settled()
+        if (settings.geomConsistency !== false && run.metas.length) {
+          stageSummary = await filterSavedDepthMaps(run, settings, stageSummary, loopShare, onProgress)
+        }
+        await run.commit(settings)
+      } else {
+        depthMaps.value = new Map(maps.map((m) => [m.uuid, m]))
+        depthMapsMeta.value = []   // the fresh maps supersede any restored index
+        for (const m of maps) takePreview(m)
+      }
+      depthSummary.value = stageSummary
+      if (previews && isPersisting()) imagesStore.sync()
+      log(`Dense: ${run ? run.metas.length : maps.length} depth map(s) computed`, 'success', 'Dense')
       reconStatus.value = 'done'
-      // Persist before densify can transfer the buffers away. Writing does not
-      // detach them, so the live cache is untouched.
-      await persistDepthMaps(maps, settings)
+      // In memory only: persist before densify can transfer the buffers away (a no-op
+      // when the project cannot persist, which is why this path exists).
+      if (!run) await persistDepthMaps(maps, settings)
     } catch (err) {
       log(`Depth-map error: ${err?.message ?? err}`, 'error', 'Dense')
       reconStatus.value = 'error'
     }
+  }
+
+  // The cross-view filter over a streamed run's saved maps: the worker reads them on
+  // demand and returns each filtered depth plane, which is written back over the
+  // unfiltered one (the worker has judged every map before the first comes back).
+  // Folds the filter's numbers into the Stage A summary, as the in-memory pass does.
+  async function filterSavedDepthMaps(run, settings, stageSummary, from, onProgress) {
+    const metaByUuid = new Map(run.metas.map((m) => [m.uuid, m]))
+    const nameByUuid = new Map(images.value.map((im) => [im.uuid, im.name]))
+    const entries = (await opfs.loadDepthFiles(run.projectId, run.metas))
+      .map((e) => ({ ...e, name: nameByUuid.get(e.uuid) }))
+    const writes = []
+    const onEvent = (ev, [f]) => {
+      if (ev !== 'filtered') return
+      const meta = metaByUuid.get(f.uuid)
+      if (meta) Object.assign(meta, f.coverage)
+      writes.push(opfs.saveDepthPlane(run.projectId, f.uuid, { depth: f.depth }))
+    }
+    // References are judged independently against the unfiltered planes, so the maps
+    // split over the pool in contiguous chunks (neighbouring captures share candidate
+    // views, which keeps each worker's cache warm) give the single run's verdicts.
+    const n = entries.length
+    const workers = Math.max(1, Math.min(POOL_SIZE, Math.floor(n / 16)))
+    let stats, ms
+    if (workers === 1) {
+      ({ stats, ms } = await workerFilterDepthMaps({ maps: entries, settings, from },
+        { onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f), onEvent }))
+    } else {
+      const t0 = performance.now()
+      const fractions = new Array(workers).fill(from), counts = new Array(workers).fill(0)
+      const chunks = Array.from({ length: workers }, (_, w) => {
+        const a = Math.floor(w * n / workers), b = Math.floor((w + 1) * n / workers)
+        return Array.from({ length: b - a }, (_, k) => a + k)
+      })
+      const parts = await Promise.all(chunks.map((refs, w) => workerFilterDepthMaps(
+        { maps: entries, settings, from, refs, workers },
+        { worker: w, onLog: (m, l, c) => log(m, l, c), onEvent,
+          onProgress: (d, t, lbl, f) => {
+            fractions[w] = f; counts[w] = d
+            onProgress?.(counts.reduce((x, y) => x + y, 0), n, lbl, fractions.reduce((x, y) => x + y, 0) / workers)
+          } })))
+      stats = new Array(n)
+      const totals = { considered: 0, kept: 0, lowNcc: 0, inconsistent: 0, lowParallax: 0 }
+      let loads = 0, hits = 0, nCand = 0
+      parts.forEach((p, w) => {
+        for (const i of chunks[w]) stats[i] = p.stats[i]
+        for (const k of Object.keys(totals)) totals[k] += p.totals[k]
+        loads += p.loads; hits += p.hits; nCand += p.nCand
+      })
+      // Every map is judged now; only now may any of them be rewritten.
+      await Promise.all(chunks.map((refs, w) => workerFilterDepthMaps(
+        { maps: entries, apply: { refs, masks: parts[w].masks, stats: refs.map((i) => parts[w].stats[i]) } },
+        { worker: w, onEvent, transfer: parts[w].masks.map((m) => m.buffer) })))
+      ms = performance.now() - t0
+      const cfg = filterConfig(filterSettings(settings))
+      if (n >= 2 && cfg.minConsistent > 0) logFilterCache(log, { nMaps: n, nCand, loads, hits, cacheBytes: parts[0].cacheBytes, cull: cfg.cull, workers })
+      logFilterTotals(log, totals, n, cfg)
+      const marginal = entries.map((e, i) => ({ e, s: stats[i] })).filter(({ s }) => s.considered > 0 && s.keptPct < 1)
+      if (marginal.length) {
+        const names = marginal.slice(0, 12).map(({ e, s }) => `${e.name || e.uuid} ${s.keptPct.toFixed(1)}%`).join('; ')
+        log(`Depth filter: ${marginal.length} marginal map(s) kept <1% after cross-view filtering — `
+          + `${names}${marginal.length > 12 ? `; +${marginal.length - 12} more` : ''}. `
+          + 'They remain cached for diagnostics/orthophoto use but will contribute little to fusion.', 'warn', 'Dense')
+      }
+      log(`Depth filter: cross-view consistency in ${(ms / 1000).toFixed(1)}s on ${workers} workers `
+        + `(streamed from saved maps; judging ${(Math.max(...parts.map((p) => p.judgeMs)) / 1000).toFixed(1)}s in the slowest)`, 'info', 'Dense')
+      onProgress?.(n, n, 'Depth maps complete', 1)
+    }
+    await Promise.all(writes)
+    const kept = stats.map((s) => s.keptPct)
+    const sorted = [...kept].sort((a, b) => a - b)
+    return stageSummary && {
+      ...stageSummary,
+      geomFilterMs: ms,
+      geomFilterMedianKeptPct: sorted.length ? sorted[Math.round(0.5 * (sorted.length - 1))] : null,
+      geomFilterMinKeptPct: sorted.length ? sorted[0] : null,
+      geomFilterMarginalMaps: kept.filter((v) => v < 1).length,
+    }
+  }
+
+  // Fusion over saved maps on `workers` pool slots. The plan's preflight already counted
+  // every worker's input, accumulator and the join; a plan that cannot split (small
+  // scene, tight budget) runs whole on one worker without repeating the pre-passes.
+  // Returns { cloud, summary } or null (refused, already logged).
+  async function densifyParallel(mapsInput, settings, budget, workers, onProgress, stillCurrent) {
+    const t0 = performance.now()
+    // Each worker's comparison cache; the plan's preflight counts it per worker. An
+    // eighth of the budget split K ways starved the cache (96 MB each on quarry).
+    const cacheBytes = Math.floor(Math.min(512 * 1024 ** 2, budget / (4 * workers)))
+    const fuseSettings = withRegion({ ...settings, memBudgetBytes: budget, cacheBytes, parallel: workers })
+    const PLAN_SHARE = 0.1 // the pre-passes read every map four times, the slabs do the rest
+    const onLog = (m, l, c) => log(m, l, c)
+    onProgress?.(0, 1, 'Planning fusion…', 0)
+    const { plan, refused } = await workerDensify({ maps: mapsInput, streamed: true, settings: fuseSettings, mode: 'plan' }, { onLog, worker: 0 })
+    if (refused || !plan || !stillCurrent()) return null
+    if (plan.workers <= 1) {
+      const { cloud, summary } = await workerDensify({ maps: mapsInput, streamed: true, settings: { ...fuseSettings, plan } },
+        { onLog, worker: 0, onProgress: (d, t, lbl) => onProgress?.(d, t, lbl, PLAN_SHARE + (1 - PLAN_SHARE) * (t > 0 ? d / t : 0)) })
+      return { cloud, summary }
+    }
+    const nM = plan.nMaps, nT = plan.slabs.length
+    const totalCells = plan.slabs.reduce((s, x) => s + x.cells, 0) || 1
+    const slabDone = new Float64Array(nT)
+    const report = (lbl) => {
+      let f = 0
+      for (let i = 0; i < nT; i++) f += slabDone[i] * plan.slabs[i].cells / totalCells
+      onProgress?.(Math.round(f * nT), nT, lbl, PLAN_SHARE + (1 - PLAN_SHARE) * f)
+    }
+    // Largest slabs first, so the pool does not end on one long straggler.
+    const queue = plan.slabs.map((s, i) => i).sort((a, b) => plan.slabs[b].cells - plan.slabs[a].cells)
+    const parts = new Array(nT), counters = [], streams = []
+    const runner = async (w) => {
+      while (queue.length) {
+        const i = queue.shift()
+        const res = await workerDensify({ maps: mapsInput, streamed: true, settings: fuseSettings, mode: 'slab', plan, slab: i }, {
+          onLog, worker: w,
+          onProgress: (d, t, lbl) => { slabDone[i] = Math.min(1, Math.max(0, (d - i * nM) / nM)); report(lbl) },
+        })
+        parts[i] = res.part; counters.push(res.counters); streams.push(res.stream)
+        slabDone[i] = 1
+        report(`slab ${i + 1}/${nT} done`)
+      }
+    }
+    await Promise.all(Array.from({ length: plan.workers }, (_, w) => runner(w)))
+    if (!stillCurrent()) return null
+    const merged = mergeFusionCounters(counters)
+    const sum = (k) => streams.reduce((s, x) => s + (x?.[k] ?? 0), 0)
+    logFusionStream(onLog, { compared: sum('compared'), culled: sum('culled'), reads: sum('reads'), hits: sum('hits'),
+      cacheBytes, workers: plan.workers })
+    const { summary } = finishFusion(plan, merged, [], onLog)
+    // Join the slabs (in slab order, so a run is deterministic for a given plan).
+    const n = parts.reduce((s, p) => s + p.count, 0)
+    const cloud = { count: n, pos: new Float32Array(n * 3), col: new Uint8Array(n * 3), nrm: new Float32Array(n * 3) }
+    let o = 0
+    for (let i = 0; i < nT; i++) {
+      const p = parts[i]
+      cloud.pos.set(p.pos, o * 3); cloud.col.set(p.col, o * 3); cloud.nrm.set(p.nrm, o * 3)
+      o += p.count; parts[i] = null
+    }
+    log(`Dense cloud: fused ${nM} depth maps → ${n} points in ${((performance.now() - t0) / 1000).toFixed(1)}s `
+      + `(${nT} slabs on ${plan.workers} workers)`, n === 0 ? 'error' : 'success', 'Dense')
+    onProgress?.(1, 1, 'Done', 1)
+    return { cloud, summary }
   }
 
   // Dense Stage B — fuse the Stage A depth maps into a coloured dense cloud.
@@ -920,7 +1125,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     reconStatus.value = 'running'
     // Transfer (not clone) each map's depth/cost/rgb buffers to the worker — they're
     // the bulk of dense memory, and a clone briefly doubles it (the fusion OOM's
-    // secondary contributor). The heavy per-map displayDataUrl PNG is display-only,
+    // secondary contributor). The per-map display PNG (displayBlob) is display-only,
     // so strip it from the wire payload entirely. The worker returns the buffers so
     // we re-attach them below; until then the store's copies are detached.
     // Resolve uuid → filename for the fusion progress/log labels. Deliberately derived
@@ -938,8 +1143,29 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
       transfer.push(m.depth.buffer, m.cost.buffer, m.rgb.buffer)
       if (m.normals) transfer.push(m.normals.buffer)
     }
+    // Saved maps can be read by every worker, so fusion CAN split over the pool: one
+    // worker plans (pre-passes + slab layout), then the slabs run in parallel, each
+    // exact on its own (core/dense/mvs.js fusionSteps), and are joined in slab order.
+    // Off by default (DENSE_TUNING.fuseWorkers): fusion is bound by plane reads, and on
+    // quarry 8 workers took 630 s against one worker's 557 s (HANDOVER ▸ B-parity).
+    const workers = streamed && maps.length >= 16 ? Math.min(POOL_SIZE, DENSE_TUNING.fuseWorkers ?? 1) : 1
+    if (workers > 1) {
+      try {
+        const done = await densifyParallel(mapsInput, settings, budget, workers, onProgress, stillCurrent)
+        if (!stillCurrent() || !done) { if (!done) reconStatus.value = 'error'; return }
+        upsertDenseCloud(done.cloud)
+        denseSummary.value = done.summary
+        reconStatus.value = 'done'
+        await persist()
+      } catch (err) {
+        if (!stillCurrent()) return
+        log(`Densify error: ${err?.message ?? err}`, 'error', 'Dense')
+        reconStatus.value = 'error'
+      }
+      return
+    }
     try {
-      const { points: flat, nrm, summary: dSummary, refused, mapBuffers } = await workerDensify(
+      const { cloud, summary: dSummary, refused, mapBuffers } = await workerDensify(
         { maps: mapsInput, streamed, settings: withRegion({ ...settings, memBudgetBytes: budget }) },
         { onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f), transfer },
       )
@@ -953,19 +1179,9 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
       }
       // Refused by fusion's measured pre-flight (logged there with its numbers).
       if (refused) { reconStatus.value = 'error'; return }
-      // De-interleave the worker's flat [x,y,z,r,g,b] into the dense cloud's split
-      // position/colour buffers (one typed-array pass, no per-point objects).
-      const n = flat.length / 6
-      const pos = new Float32Array(n * 3)
-      const col = new Uint8Array(n * 3)
-      for (let i = 0; i < n; i++) {
-        const s = i * 6, d = i * 3
-        pos[d] = flat[s]; pos[d+1] = flat[s+1]; pos[d+2] = flat[s+2]
-        col[d] = flat[s+3]; col[d+1] = flat[s+4]; col[d+2] = flat[s+5]
-      }
-      // nrm (world-space unit normals, 3N) rides along when present — the Poisson
-      // mesh stage consumes it; absent on GPU-less legacy runs (upsert leaves it off).
-      upsertDenseCloud({ count: n, pos, col, ...(nrm ? { nrm } : {}) })
+      // The worker returns the cloud already split (Float32 pos, Uint8 col, Float32
+      // world-space normals for the Poisson mesh), assembled from its fusion slabs.
+      upsertDenseCloud(cloud)
       denseSummary.value = dSummary ?? null
       reconStatus.value = 'done'
       await persist()
@@ -1341,7 +1557,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
   })
 
   const {
-    canFitScale, fitScaleBars, scaleBarReport, scaleFitStatus,
+    canFitScale, fitScaleBars, scaleBarReport, scaleFitStatus, markerPositions,
   } = createScaling({
     sparseCameras, images, mainSparseCloud, scaleFit, healthDirty,
     bars: () => scaleBarsStore.bars,
@@ -1384,31 +1600,29 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     }
     reconStatus.value = 'running'
     try {
-      // Plain copies: cloud state is reactive (Vue proxies can't be cloned). Dense
-      // clouds are flat typed arrays — read xyz straight out (colour isn't needed).
-      const count = src.kind === 'dense' ? src.count : src.points.length
-      if (count * 48 > 512 * 1024 ** 2) throw new Error('DEM point staging exceeds 512 MiB; subsample the cloud first')
-      const pos = new Float64Array(count * 3)
-      if (src.kind === 'dense') pos.set(src.pos.subarray(0, count * 3))
-      else for (let i = 0; i < count; i++) {
-        const p = src.points[i]
-        pos[i*3] = p.x; pos[i*3+1] = p.y; pos[i*3+2] = p.z
-      }
-      const inRegion = src.imported ? null : clipToRegion({ count, pos }, 'DEM')
-      if (inRegion && !inRegion.count) throw new Error('no point of the source lies inside the region')
-      const points = inRegion ? { pos: inRegion.pos, count: inRegion.count } : { pos, count }
+      // Plain copy: cloud state is reactive (Vue proxies can't be cloned), and the
+      // worker takes it by transfer. Only in-region points are copied, and the copy
+      // is checked against the machine's memory budget (Settings ▸ Compute).
+      const budgetBytes = settings.memBudgetBytes > 0 ? settings.memBudgetBytes : DEFAULT_BUDGET_BYTES
+      const r = src.imported ? null : activeRegion()
+      const staged = stageDemPoints(src.kind === 'dense' ? src : { points: src.points }, {
+        budgetBytes, inside: r ? (x, y, z) => regionContains(r, x, y, z) : null,
+      })
+      if (r) log(`DEM: region keeps ${staged.count.toLocaleString()} of ${staged.total.toLocaleString()} points`, 'info', 'Products')
+      if (r && !staged.count) throw new Error('no point of the source lies inside the region')
+      const points = { pos: staged.pos, count: staged.count }
       const cameras = [...(sparse?.cameras ?? new Map()).entries()].map(([uuid, cam]) => ({
         uuid, R: cam.R.map((r) => [...r]), t: [...cam.t], K: { ...cam.K },
       }))
       const grid = await workerGenerateDem(
-        { points, cameras, frame: frameSpec, settings },
+        { points, cameras, frame: frameSpec, settings: { ...settings, memBudgetBytes: budgetBytes } },
         { transfer: [points.pos.buffer], onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f) },
       )
-      dem.value = {
+      dem.value = withPreviewUrl({
         ...grid, createdAt: Date.now(),
         name: dem.value?.name || 'DEM',
         frameStamp: frameStampOf(resolved),
-      }
+      })
       // A new DEM invalidates an ortho BUILT ON IT — but not one built over the
       // mesh/plane surface, which this run didn't touch. (An ortho with no
       // recorded surface predates the choice, so it was a DEM ortho.)
@@ -1468,7 +1682,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
         || Math.abs((reusable?.scale ?? 0) - resolved.frameSpec.scale) < 1e-12
       frameSpec = sameKind && sameScale ? reusable : resolved.frameSpec
     }
-    const surfSettings = { gsd: settings.surfaceGsd > 0 ? settings.surfaceGsd : 0 }
+    const surfSettings = { gsd: settings.surfaceGsd > 0 ? settings.surfaceGsd : 0, extent: settings.extent ?? 'core' }
 
     // Point sample from the densest cloud: the plane's fit input, and the local
     // frame's origin/PCA fallback. Subsampled — a plane needs spread, not every
@@ -1539,13 +1753,13 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
       // An ortho built ON the DEM inherits the DEM's recorded frame — its cells are
       // that grid's cells, so claiming today's frame would be a claim about a raster
       // this run never re-projected.
-      ortho.value = {
+      ortho.value = withPreviewUrl({
         ...res, createdAt: Date.now(),
         name: ortho.value?.name || 'Orthophoto',
         frameStamp: (settings.surface ?? 'dem') === 'dem'
           ? (dem.value?.frameStamp ?? frameStampOf(resolved))
           : frameStampOf(resolved),
-      }
+      })
       if (isPersisting()) opfs.saveProduct(projects.currentProjectId, 'ortho', ortho.value).catch(() => {})
       reconStatus.value = 'done'
     } catch (err) {
@@ -1649,7 +1863,9 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
         // uses the observed value without subtracting bytes optimistically.
         await new Promise((resolve) => setTimeout(resolve, 0))
       }
-      const imgs = images.value.filter((img) => img.kpStatus === 'done' && (img.keypoints?.length ?? 0) > 0)
+      // Counts gate and size the run: keypoints and matches are on disk, read below
+      // image by image / pair by pair straight into the worker input.
+      let imgs = images.value.filter((img) => img.kpStatus === 'done' && (img.kpCount ?? 0) > 0)
       const sensorById = new Map(sensors.value.map((s) => [s.id, s]))
       const reconstructionTransfers = []
       const reconstructionPairs = [...matchStore.value.values()]
@@ -1657,8 +1873,8 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
 
       // Renderer OOM cannot be caught after the fact. Refuse before constructing
       // the large plain worker input when its projected peak exceeds safe headroom.
-      const keypointCount = imgs.reduce((sum, img) => sum + (img.keypoints?.length ?? 0), 0)
-      const matchCount = reconstructionPairs.reduce((sum, pair) => sum + (pair.matches?.length ?? 0), 0)
+      const keypointCount = imgs.reduce((sum, img) => sum + (img.kpCount ?? 0), 0)
+      const matchCount = reconstructionPairs.reduce((sum, pair) => sum + (pair.nMatches ?? 0), 0)
       // Guided track extension ships 128 B of descriptors per keypoint and builds
       // keypoint grids. When it is what pushes a run past a ceiling, the run goes ahead
       // without it (logged, recorded in the summary, flagged by the verdict) rather than
@@ -1734,7 +1950,8 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
         + `input buffers ${formatBytes(peak.rendererBufferBytes)}; `
         + `worker projected heap ${formatBytes(peak.workerHeapBytes)}${ceiling(decisions.worker)}, `
         + `buffers ${formatBytes(peak.workerBufferBytes)}`
-        + `${decisions.worker.bufferLimitBytes ? ` ≤ ${formatBytes(decisions.worker.bufferLimitBytes)} device budget` : ''}`,
+        + `${decisions.worker.bufferLimitBytes ? ` ≤ ${formatBytes(decisions.worker.bufferLimitBytes)} device budget` : ''}`
+        + ` (of which bundle adjustment ${formatBytes(peak.solverWasmBytes)} ≤ ${formatBytes(WASM_SOLVER_LIMIT_BYTES)} wasm memory)`,
       decisionSafe ? 'info' : 'error', 'Compute')
       if (!decisionSafe) {
         reconStatus.value = 'error'
@@ -1742,14 +1959,43 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
         if (!decisions.renderer.heapSafe) parts.push('renderer heap')
         if (!decisions.worker.heapSafe) parts.push('worker heap')
         if (!decisions.renderer.buffersSafe || !decisions.worker.buffersSafe) parts.push('device memory')
+        if (!peak.wasmSolverSafe) parts.push('bundle-adjustment (wasm) memory')
         const where = parts.join(' and ') || 'memory'
         log(`Sparse reconstruction stopped before start because the projected ${where} would exceed `
-          + 'its safety ceiling. Close other memory-heavy tabs or reduce the image/keypoint/match set.',
+          + 'its safety ceiling. Close other memory-heavy tabs or reduce the image/keypoint/match set'
+          + (!peak.wasmSolverSafe ? ' (fewer keypoints per image lowers the solver\'s observation count)' : '') + '.',
         'error', 'Reconstruction')
         return
       }
 
       const survey = await surveyConstraintInput({ marks: 'raw' })
+
+      // Keypoints and matches are on disk (TODO ▸ SC-2/SC-3): read image by image and
+      // pair by pair straight into the packed, transferred worker input — never all
+      // resident first. Typed arrays (core/sfm/keypointSet.js): ~20 B per keypoint
+      // instead of a 104 B object per keypoint per copy.
+      const keypointSets = new Map()
+      const missingKeypoints = []
+      for (const img of imgs) {
+        const kps = await imagesStore.readKeypoints(img)
+        if (!kps) { missingKeypoints.push(img.name); continue }
+        const set = keypointSetFrom(kps)
+        reconstructionTransfers.push(...keypointSetTransfer(set))
+        keypointSets.set(img.uuid, set)
+      }
+      if (missingKeypoints.length) {
+        log(`Reconstruction: ${missingKeypoints.length} image(s) left out — their keypoints could not be read `
+          + `(${missingKeypoints.slice(0, 5).join(', ')}${missingKeypoints.length > 5 ? ', …' : ''})`, 'warn', 'Reconstruction')
+        imgs = imgs.filter((img) => keypointSets.has(img.uuid))
+      }
+      // Millions of tuple arrays are catastrophic to clone. Each pair's matches are a
+      // fresh packed copy (the stream hands views into its read windows), transferred.
+      const packedPairMatches = new Map()
+      await useMatchesStore().streamPairMatches(reconstructionPairs, (e, m) => {
+        const packed = packMatchPairs(m)
+        reconstructionTransfers.push(packed.buffer)
+        packedPairMatches.set(e, packed)
+      })
 
       const input = {
         images: imgs.map((img) => {
@@ -1769,13 +2015,8 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
             // Sensor id lets BA share one focal across images on the same sensor
             // (self-calibration); null → the image is its own intrinsics group.
             sensorId: img.sensorId ?? null,
-            // Typed arrays (core/sfm/keypointSet.js), transferred rather than cloned:
-            // ~20 B per keypoint instead of a 104 B object per keypoint per copy.
-            keypoints: (() => {
-              const set = keypointSetFrom(img.keypoints || [])
-              reconstructionTransfers.push(...keypointSetTransfer(set))
-              return set
-            })(),
+            // Read above, one image at a time; transferred rather than cloned.
+            keypoints: keypointSets.get(img.uuid),
             // Fiducial-mark observations (F4) — scan-pixel clicks the sfm ingest
             // uses to fit this image's scan→canonical affine. Spread to plain
             // objects (the Vue proxy can't be structured-cloned).
@@ -1827,13 +2068,8 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
             // as plain arrays or the Vue proxy can't be structured-cloned to the
             // worker ("[object Array] could not be cloned").
             F: e.F ? e.F.map((row) => [...row]) : null,
-            // Millions of tuple arrays are catastrophic to clone. This fresh
-            // packed buffer is disposable and transferred into the worker below.
-            matches: (() => {
-              const packed = packMatchPairs(e.matches)
-              reconstructionTransfers.push(packed.buffer)
-              return packed
-            })(),
+            // Streamed above: a fresh packed buffer, transferred into the worker below.
+            matches: packedPairMatches.get(e),
             // WS1: weak pairs (valid F below the accept gate) ride through with the flag.
             // sfm.js keeps them out of init / triangulation and feeds
             // them only to PnP correspondence collection (register.js).
@@ -1861,7 +2097,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
             ? (await opfs.loadDescriptors(projects.currentProjectId, img.uuid)) ?? img.descriptors
             : img.descriptors
           const d = toMatchSpace(raw, img, 128)
-          if (!d || d.length !== img.keypoints.length * 128) continue
+          if (!d || d.length !== img.kpCount * 128) continue
           const u8 = new Uint8Array(d.length)
           for (let k = 0; k < d.length; k++) u8[k] = Math.min(255, Math.round(d[k] * 512))
           input.images[i].descU8 = u8
@@ -1920,7 +2156,12 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
             const oriented = rotateReconstruction(camMap, pts, R, { inPlace: true })
             camMap = oriented.cameras
             pts = oriented.points
-            log('Oriented model Z-up (aerial: cameras above ground)', 'info', 'Reconstruction')
+            // Which camera signal set "up" — an oblique set's viewing directions are
+            // not vertical, so say when the level camera plane overrode them.
+            const how = sceneUpFromCameras([...camMap.values()])
+            log(how.source === 'camera-plane'
+              ? `Oriented model Z-up from the level camera plane (aerial; the mean viewing direction is ${how.viewTiltDeg.toFixed(1)}° off it — an oblique capture)`
+              : 'Oriented model Z-up from the mean viewing direction (aerial: cameras above ground)', 'info', 'Reconstruction')
           }
         }
         upsertSparseCloud(camMap, pts)
@@ -1985,6 +2226,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     scaleFit.value = null
     region.value = null
     orientation.value = null
+    productLayers.value = {}
     summary.value = null
     denseSummary.value = null
     depthSummary.value = null
@@ -2009,15 +2251,29 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
   // Rebuild one cloud from version-2 metadata + binary buffers (inverse of
   // serializeCloud). markRaw: point clouds are large and only ever replaced
   // wholesale, never mutated per-point — deep reactivity freezes render/restore.
-  async function restore({ projectId }) {
+  //
+  // `report` feeds the project-load overlay (stores/projectStores.js). Every slow
+  // step announces itself and then yields once so the label is actually painted:
+  // decoding a cloud and the first render of the restored model are each one long
+  // synchronous task, and a label set inside such a task is never drawn. The
+  // per-phase timing line is how a slow open is attributed to a step.
+  async function restore({ projectId, report = () => {} }) {
     // Reset first so switching to a project without a saved model doesn't leave
     // the previous project's clouds in memory (loadReconstruction returns null for
     // an empty project and would otherwise no-op).
     clear()
     const generation = restoreGeneration
     const isCurrentRestore = () => generation === restoreGeneration && projectId === projects.currentProjectId
+    const phases = []
+    let lapStart = performance.now()
+    const lap = (phase) => {
+      const t = performance.now()
+      phases.push(`${phase} ${Math.round(t - lapStart)} ms`)
+      lapStart = t
+    }
     // The model, the raster products and the depth index are independent files:
     // read them concurrently so project open waits for the slowest, not the sum.
+    report('Reading the model files…')
     const productsRead = Promise.all([
       opfs.loadProduct(projectId, 'dem'),
       opfs.loadProduct(projectId, 'ortho'),
@@ -2032,6 +2288,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
       await loadDepthIndexIntoMeta(projectId, isCurrentRestore, depthIndexRead)
       return
     }
+    lap('read')
 
     // New shape: { clouds: [...] }. Legacy shape: a single model
     // { cameras: [...], points: [...] } — wrap it as one sparse cloud.
@@ -2041,7 +2298,27 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
         ? [{ name: 'Sparse cloud', kind: 'sparse', ...data }]
         : []
 
-    clouds.value = raw.map((c) => (c.buffers ? deserializeCloud(c, makeCloudId) : legacyDeserializeCloud(c, makeCloudId)))
+    // One cloud per task, so the overlay can say which one is decoding. Each cloud's
+    // own decode time goes into the timing line, so a slow open names its cloud.
+    const restored = []
+    const perCloud = []
+    for (let i = 0; i < raw.length; i++) {
+      const c = raw[i]
+      const name = c.name ?? c.kind ?? 'cloud'
+      report(`Decoding "${name}"`, i + 1, raw.length)
+      await yieldToPaint()
+      if (!isCurrentRestore()) return
+      const t = performance.now()
+      restored.push(c.buffers ? deserializeCloud(c, makeCloudId) : legacyDeserializeCloud(c, makeCloudId))
+      perCloud.push(`${name} [${c.kind ?? 'sparse'}, ${(c.pointCount ?? c.points?.length ?? 0).toLocaleString()} pts] `
+        + `${Math.round(performance.now() - t)} ms`)
+    }
+    lap('decode')
+    if (perCloud.length) phases[phases.length - 1] += ` (${perCloud.join(', ')})`
+    report('Preparing the 3D view and panels…')
+    await yieldToPaint()
+    if (!isCurrentRestore()) return
+    clouds.value = restored
     // The arrays just read ARE the committed files' contents, so the first save after
     // opening need not rewrite them (a v3 document only; legacy shapes carry no list).
     savedCloudFiles.clear()
@@ -2059,19 +2336,27 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     scaleFit.value = data.scaleFit ?? null    // absent in older projects ⇒ no scale
     region.value = normalizeRegion(data.region) ?? null
     orientation.value = normalizeOrientation(data.orientation) ?? null
+    productLayers.value = normalizeProductLayers(data.productLayers)  // absent ⇒ nothing on the map
     summary.value = data.summary ?? null
     denseSummary.value = data.denseSummary ?? null
     depthSummary.value = data.depthSummary ?? null
     summaryHistory.value = Array.isArray(data.summaryHistory) ? data.summaryHistory : []
+    // The render + watcher flush these assignments queued (sidebar, 3D layers, map
+    // frame) — timed on its own, since it is not part of reading or decoding.
+    await nextTick()
+    lap('first render')
 
     // Restore persisted raster products (DEM / ortho), if any.
+    report('Reading the DEM / orthophoto…')
     const [savedDem, savedOrtho] = await productsRead
     if (!isCurrentRestore()) return
-    dem.value = savedDem
-    ortho.value = savedOrtho
+    dem.value = withPreviewUrl(savedDem)
+    ortho.value = withPreviewUrl(savedOrtho)
     if (savedDem || savedOrtho) {
       log(`Products restored: ${[savedDem && 'DEM', savedOrtho && 'ortho'].filter(Boolean).join(' + ')}`, 'success', 'Products')
     }
+    await nextTick()
+    lap('products')
 
     if (clouds.value.length) {
       const camTotal = clouds.value.reduce((n, c) => n + c.cameras.size, 0)
@@ -2085,6 +2370,17 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
       log(`Dense: ${depthMapsMeta.value.length} saved depth map(s) available `
         + `(${formatBytes(depthMapBytes(depthMapsMeta.value))}, loaded on demand)`, 'success', 'Dense')
     }
+    lap('depth index')
+    // JS memory at the end (Chromium only). The decode itself is ~0.1 s for 20 M
+    // dense points, so a decode measured in seconds is memory pressure (GC or paging)
+    // landing in it. Caveat, measured: `usedJSHeapSize` INCLUDES ArrayBuffer backing
+    // stores (a 32.8 M-point dense cloud moved it by its ~0.9 GB of typed arrays),
+    // which the ~4 GB V8 heap limit does not count — the bench's DevTools reading
+    // (`V8 heap + ArrayBuffers`) separates the two.
+    const mem = globalThis.performance?.memory
+    const heap = mem?.usedJSHeapSize
+      ? ` · JS memory (heap + ArrayBuffers) ${formatBytes(mem.usedJSHeapSize)}, heap limit ${formatBytes(mem.jsHeapSizeLimit)}` : ''
+    log(`Reconstruction restore timing: ${phases.join(' · ')}${heap}`, 'info', 'Reconstruction')
   }
 
   return {
@@ -2155,5 +2451,8 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     renameCloud,
     removeProduct,
     renameProduct,
+    productLayers, setProductOnMap, setProductOpacity,
+    // Triangulated marker positions (SfM frame) for the model-frame map.
+    markerPositions,
   }
 }))

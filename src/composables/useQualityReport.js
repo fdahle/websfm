@@ -12,7 +12,7 @@ import { useImagesStore } from '../stores/useImagesStore.js'
 import { useMatchesStore } from '../stores/useMatchesStore.js'
 import { useSensorsStore } from '../stores/useSensorsStore.js'
 import { useGcpsStore } from '../stores/useGcpsStore.js'
-import { reprojectionStats, trackLengthHistogram } from '../core/eval/reconStats.js'
+import { sparseModelStats } from '../core/eval/sparseStats.js'
 import { completedMatchGraphHealth } from '../core/eval/matchGraph.js'
 import { perImageResiduals, unregisteredReason } from '../core/eval/imageStats.js'
 import { sampleDemAtGcps } from '../core/eval/demCheck.js'
@@ -23,7 +23,7 @@ import { resolveK } from '../core/sfm/reconstruction.js'
 import { buildReportHtml } from '../core/products/report.js'
 import { buildProjectDigest, digestToMarkdown, digestToJson } from '../core/eval/summaryDigest.js'
 import { buildVerdict } from '../core/sfm/verdict.js'
-import { buildRunFingerprints } from '../core/eval/runFingerprint.js'
+import { featureHasher, matchHasher, featureRows, matchRows, FINGERPRINT_ALGORITHM } from '../core/eval/runFingerprint.js'
 
 // Role → report label. 'marker' is a scale-bar endpoint (no surveyed position),
 // so a binary control/check ternary would silently mislabel it as ground control.
@@ -43,8 +43,14 @@ export function useQualityReport() {
   const projects = useProjectsStore()
   const crsUnit = computed(() => linearCrsUnit(projects.currentCrs))
 
-  const reproj = computed(() => reprojectionStats(cameras.value, points.value))
-  const histogram = computed(() => trackLengthHistogram(points.value))
+  // Heavy per-model statistics, computed once per model and shared by every section,
+  // the export and the digest (core/eval/sparseStats.js memoises on the model's
+  // identity) — not once per section mount, and nothing until the hub reads them.
+  const modelStats = computed(() => sparseModelStats(cameras.value, points.value))
+  const reproj = computed(() => modelStats.value.reproj)
+  const histogram = computed(() => modelStats.value.histogram)
+  const perImage = computed(() => modelStats.value.perImage)
+  const coverage = computed(() => modelStats.value.coverage)
 
   // Null before matching has produced any terminal result; an empty accepted
   // graph after a completed run remains a real (split) result.
@@ -144,7 +150,7 @@ export function useQualityReport() {
         { key: 'name', label: 'Image' }, { key: 'nObs', label: 'Obs', align: 'right' },
         { key: 'rms', label: 'RMS px', align: 'right' },
       ],
-      rows: perImageResiduals(cameras.value, points.value)
+      rows: perImage.value
         .filter((r) => r.rmsPx != null)
         .sort((a, b) => b.rmsPx - a.rmsPx).slice(0, 20)
         .map((r) => ({ name: nameByUuid.value.get(r.uuid) ?? r.uuid, nObs: r.nObs, rms: f2(r.rmsPx) })),
@@ -276,11 +282,22 @@ export function useQualityReport() {
   // The compact copy-pasteable digest (PLAN-debug-summary): the same classified health
   // rows as the hub, plus top offenders + run figures, in ONE structured object the two
   // renderers turn into markdown or JSON. Async for the GCP report (via computeHealth).
+  // Feature + match fingerprints (core/eval/runFingerprint.js) over data that is on
+  // disk: keypoints read image by image, matches streamed pair by pair, in the
+  // fingerprint's own order — never all resident at once.
+  async function runFingerprints() {
+    const features = featureHasher()
+    for (const im of featureRows(imagesStore.images)) features.add(im, await imagesStore.readKeypoints(im))
+    const matches = matchHasher()
+    await matchesStore.streamPairMatches(matchRows(matchesStore.matchStore.values()), (e, m) => matches.add(e, m))
+    return { algorithm: FINGERPRINT_ALGORITHM, features: features.digest(), matches: matches.digest() }
+  }
+
   async function computeDigest(projectName) {
     const { snapshot, rows } = await computeHealth()
 
     // Top offenders — worst images by reprojection RMS + unregistered-with-reason.
-    const residuals = perImageResiduals(cameras.value, points.value)
+    const residuals = perImage.value
       .filter((r) => r.rmsPx != null)
       .sort((a, b) => b.rmsPx - a.rmsPx)
       .slice(0, 10)
@@ -339,7 +356,8 @@ export function useQualityReport() {
       depthSummary: recon.depthMapCount ? (recon.depthSummary ?? null) : null,
       detect: detectConfig.value,
       matchRun: matchesStore.matchRun ?? null,
-      fingerprints: buildRunFingerprints(imagesStore.images, matchesStore.matchStore.values()),
+      // Unreadable feature data leaves the fingerprints absent, never the digest.
+      fingerprints: await runFingerprints().catch(() => ({ algorithm: FINGERPRINT_ALGORITHM, features: null, matches: null })),
       // Recorded as-is. A fit whose evidence has moved is still what this project
       // last computed, and the digest is the record; the *resolver* is what refuses
       // to hand stale metres to a product.
@@ -351,7 +369,7 @@ export function useQualityReport() {
 
   return {
     cameras, points, imageIds, nameByUuid, crsUnit,
-    reproj, histogram, graph, selfCal, sensorRows, focalDeltas, depth,
+    reproj, histogram, perImage, coverage, graph, selfCal, sensorRows, focalDeltas, depth,
     perImageResiduals, unregisteredReason,
     detectConfig, computeHealth, buildExportReport, computeDigest,
   }

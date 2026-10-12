@@ -1,62 +1,46 @@
 import { readDepthFiles } from '../../core/dense/depthFileReader.js'
 import { pointView } from '../../core/products/pointView.ts'
 import { hillshadeRgba } from '../../core/products/colormap.js'
-import { rasterToDataUrl } from '../rasterPreview.js'
-import { buildLocalFrame, makeFrame, frameFromScaledLocal } from '../../core/products/projection.js'
-import { frameFromSimilarity } from '../../core/products/georef.js'
-import { rasterizeDem } from '../../core/products/dem.js'
+import { rasterToPng } from '../rasterPreview.js'
+import { frameFromSpec, describeFrame } from '../../core/products/frameSpec.js'
+import { rasterizeDem, coreExtent } from '../../core/products/dem.js'
 import { orthorectify, orthorectifyStreamed } from '../../core/products/ortho.js'
 import { meshSurface, planeSurface, resampleSurface } from '../../core/products/surface.js'
 import { traceContours, contoursToGeoJSON, contoursToDxf } from '../../core/products/contours.js'
 import { terrainProducts } from '../../core/products/terrain.js'
 import { clipDem, clipOrtho } from '../../core/products/rasterClip.js'
+import { unitName as frameUnitName } from '../../core/products/rasterUnits.js'
 
 // Product ops (DEM + orthophoto). The frame rebuild/descriptor + raster→dataURL
 // canvas helpers live here next to the two handlers; pure compute is in
 // core/products/*. No injected worker helpers (products don't rasterise sources).
 export function makeProductsOps() {
-  // Rebuild a projection frame from a serialisable descriptor (frames carry
-  // closures, so they can't cross postMessage — the store sends a spec, the worker
-  // resolves it). 'local' is derived from the scene; 'similarity' from a fit.
-  function rebuildFrame(spec, cameras, points) {
-    if (spec?.kind === 'similarity') {
-      return frameFromSimilarity({ scale: spec.scale, R: spec.R, t: spec.t, local: spec.local ?? null }, spec.crs, spec)
-    }
-    // 'scaled-local' = the local frame with a scale-bar factor (metric, no CRS).
-    // The base descriptor's basis is unit-length; NEVER hand makeFrame scaled
-    // vectors (see frameFromScaledLocal). The base half may itself be an
-    // unresolved request, so recurse rather than duplicating the fallback.
-    if (spec?.kind === 'scaled-local') {
-      const base = rebuildFrame({ ...spec, kind: 'local' }, cameras, points)
-      return frameFromScaledLocal(base, spec.scale) ?? base
-    }
-    if (spec && spec.origin && spec.east) {
-      // A fully-resolved local descriptor (re-used by the ortho pass).
-      return makeFrame(spec)
-    }
-    return buildLocalFrame(cameras.values(), points)
-  }
+  // Frames carry closures, so they can't cross postMessage — the store sends a
+  // spec, the worker resolves it (core/products/frameSpec.js, shared with the
+  // main thread's map placement). `cameras` is the uuid → { R, t } Map here.
+  const rebuildFrame = (spec, cameras, points) => frameFromSpec(spec, cameras ? [...cameras.values()] : [], points ?? [])
+  const frameDescriptor = describeFrame
 
-  // A serialisable snapshot of a frame (basis + metadata) so the DEM result can
-  // carry the exact frame its grid was built in, for the ortho pass to reuse.
-  function frameDescriptor(frame, spec) {
-    if (spec?.kind === 'similarity') return { ...spec }
-    return {
-      // frame.origin/east/north/up are the UNSCALED basis for a scaled-local
-      // frame too (frameFromScaledLocal keeps the basis orthonormal and carries
-      // the factor separately), so one descriptor shape covers both.
-      kind: spec?.kind === 'scaled-local' ? 'scaled-local' : 'local',
-      ...(spec?.kind === 'scaled-local' ? { scale: frame.scale ?? spec.scale } : {}),
-      origin: frame.origin, east: frame.east, north: frame.north, up: frame.up,
-      crs: frame.crs, unit: frame.unit, source: frame.source,
-    }
+  // The product extent (dem.js coreExtent): the cloud's dense footprint unless the
+  // user asked for every point. Logged with what it leaves out, so a cut is never
+  // silent. `pos` is interleaved xyz in FRAME coordinates. → bounds | undefined
+  function productBounds(pos, count, mode, label, unit, emit) {
+    if (mode === 'all') return undefined
+    const core = coreExtent(pos, count)
+    if (!core) return undefined
+    const out = count - core.inside
+    const f = (v) => v.toPrecision(4)
+    emit('log', [`${label}: extent is the cloud's dense core, ${f(core.maxX - core.minX)} × ${f(core.maxY - core.minY)} ${unit}`
+      + (out ? ` — ${out.toLocaleString()} of ${count.toLocaleString()} points (${(100 * out / count).toFixed(1)}%) lie outside and are left out; choose Extent ▸ All points to keep them` : ''),
+    out / count > 0.05 ? 'warn' : 'info', 'Products'])
+    return core
   }
 
   // Colourise + hillshade a DEM height grid to a PNG data URL for the preview.
   // The pixel math is shared with the imported reference-DEM preview
   // (core/products/colormap.js `hillshadeRgba`) so the two look identical.
-  async function demToDataUrl(grid) {
-    return rasterToDataUrl(hillshadeRgba(grid), grid.width, grid.height)
+  async function demPreviewPng(grid) {
+    return rasterToPng(hillshadeRgba(grid), grid.width, grid.height)
   }
 
   // Build a DEM: transform the (dense) points into the chosen frame, rasterise a
@@ -80,14 +64,21 @@ export function makeProductsOps() {
     const framed = pointView({ pos, count: view.length })
 
     emit('progress', [0, 1, 'Rasterising grid…'])
-    const grid = rasterizeDem(framed, settings)
+    // The staged points stay alive through the rasterise, so the grid gets what
+    // the budget leaves after them.
+    const budget = settings.memBudgetBytes > 0 ? settings.memBudgetBytes - pos.byteLength : undefined
+    const unitName = frameUnitName(frame.unit)
+    const bounds = productBounds(pos, view.length, settings.extent, 'DEM', unitName, emit)
+    const grid = rasterizeDem(framed, { ...settings, bounds, memBudgetBytes: budget })
     if (!grid) throw new Error('DEM: could not rasterise (need a denser cloud or a smaller GSD)')
 
-    const previewDataUrl = await demToDataUrl(grid)
-    const unitLabel = frame.unit === 'model' ? 'model units' : frame.unit
+    const previewBlob = await demPreviewPng(grid)
+    const unitLabel = frameUnitName(frame.unit)
     emit('log', [`DEM: ${grid.width}×${grid.height} @ ${grid.gsd.toPrecision(3)} ${unitLabel}/px, `
       + `z ${grid.zMin.toPrecision(4)}–${grid.zMax.toPrecision(4)}, `
-      + `${grid.count} measured + ${grid.filled} filled cells (${frame.crs})`, 'success', 'Products'])
+      + `${grid.count} measured + ${grid.filled} filled cells (${frame.crs}`
+      // A local frame's vertical is an estimate; say which camera signal set it.
+      + `${frame.crs === 'local' && frame.source ? `, up from ${frame.source}` : ''})`, 'success', 'Products'])
     emit('progress', [1, 1, 'Done'])
 
     const result = {
@@ -96,7 +87,7 @@ export function makeProductsOps() {
       data: grid.data, mask: grid.mask, zMin: grid.zMin, zMax: grid.zMax,
       count: grid.count, filled: grid.filled,
       frame: frameDescriptor(frame, frameSpec), crs: frame.crs, unit: frame.unit,
-      previewDataUrl,
+      previewBlob,
     }
     return { result, transfer: [grid.data.buffer, grid.mask.buffer] }
   }
@@ -138,11 +129,13 @@ export function makeProductsOps() {
         const [x, y, z] = frame.fromSfm([surface.pos[i * 3], surface.pos[i * 3 + 1], surface.pos[i * 3 + 2]])
         framed[i * 3] = x; framed[i * 3 + 1] = y; framed[i * 3 + 2] = z
       }
-      const grid = meshSurface({ pos: framed, idx: surface.idx }, surface.settings ?? {},
+      const unitName = frameUnitName(frame.unit)
+      const bounds = productBounds(framed, n, surface.settings?.extent, 'Ortho (mesh surface)', unitName, emit)
+      const grid = meshSurface({ pos: framed, idx: surface.idx }, { ...(surface.settings ?? {}), bounds },
         (done, total) => emit('progress', [done, total, 'Rasterising mesh surface…']))
       if (!grid) throw new Error('Ortho: the mesh has no triangles to rasterise')
       emit('log', [`Ortho: mesh surface ${grid.width}×${grid.height} @ `
-        + `${grid.gsd.toPrecision(3)} ${frame.unit === 'model' ? 'model units' : frame.unit}/px from `
+        + `${grid.gsd.toPrecision(3)} ${frameUnitName(frame.unit)}/px from `
         + `${grid.triangles.toLocaleString()} triangles, ${grid.count} cells with height`,
       'info', 'Products'])
       return { grid: { ...grid, frame: frameDescriptor(frame, surface.frame) }, frame, label: 'mesh' }
@@ -154,11 +147,15 @@ export function makeProductsOps() {
         const [x, y, z] = frame.fromSfm([surface.pos[i * 3], surface.pos[i * 3 + 1], surface.pos[i * 3 + 2]])
         framed[i] = { x, y, z }
       }
-      const grid = planeSurface(framed, surface.settings ?? {})
+      const flat = new Float64Array(surface.count * 3)
+      for (let i = 0; i < surface.count; i++) { flat[i * 3] = framed[i].x; flat[i * 3 + 1] = framed[i].y }
+      const unitName = frameUnitName(frame.unit)
+      const bounds = productBounds(flat, surface.count, surface.settings?.extent, 'Ortho (plane surface)', unitName, emit)
+      const grid = planeSurface(framed, { ...(surface.settings ?? {}), bounds })
       if (!grid) throw new Error('Ortho: could not fit a plane (need ≥3 spread points)')
       const p = grid.plane
       emit('log', [`Ortho: plane surface ${grid.width}×${grid.height} @ `
-        + `${grid.gsd.toPrecision(3)} ${frame.unit === 'model' ? 'model units' : frame.unit}/px — `
+        + `${grid.gsd.toPrecision(3)} ${frameUnitName(frame.unit)}/px — `
         + `slope ${(Math.hypot(p.a, p.b) * 100).toFixed(1)}%, residual RMS `
         + `${p.rms.toPrecision(3)} over ${p.n.toLocaleString()} points`
         + (p.dropped ? ` (${p.dropped.toLocaleString()} outliers dropped)` : ''),
@@ -180,7 +177,7 @@ export function makeProductsOps() {
     const grid = settings.gsd > 0 ? resampleSurface(built.grid, settings.gsd) : built.grid
     if (grid !== built.grid) {
       emit('log', [`Ortho: resampled the ${label} surface to ${grid.width}×${grid.height} @ `
-        + `${grid.gsd.toPrecision(3)} ${frame.unit === 'model' ? 'model units' : frame.unit}/px`, 'info', 'Products'])
+        + `${grid.gsd.toPrecision(3)} ${frameUnitName(frame.unit)}/px`, 'info', 'Products'])
     }
 
     emit('progress', [0, grid.height, 'Orthorectifying…'])
@@ -191,7 +188,7 @@ export function makeProductsOps() {
     const { width, height, rgba, covered, sampled, filled } = await rectify(grid, maps, frame.toSfm, settings,
       (done, total) => emit('progress', [done, total, 'Orthorectifying…']))
 
-    const previewDataUrl = await rasterToDataUrl(new ImageData(rgba, width, height), width, height)
+    const previewBlob = await rasterToPng(new ImageData(rgba, width, height), width, height)
     const cells = width * height
     emit('log', [`Ortho: ${width}×${height}, ${covered}/${cells} cells coloured `
       + `(${(100 * covered / cells).toFixed(0)}%) from ${maps.length} view(s) over the `
@@ -205,7 +202,7 @@ export function makeProductsOps() {
       // The geotransform travels WITH the ortho: its grid no longer has to be the
       // DEM's, so the exporters/viewer must read it here, not off the DEM.
       result: {
-        width, height, rgba: rgbaBuf, covered, sampled, filled, previewDataUrl,
+        width, height, rgba: rgbaBuf, covered, sampled, filled, previewBlob,
         gsd: grid.gsd, originX: grid.originX, originY: grid.originY,
         surface: label, surfaceCells: grid.count,
         frame: grid.frame, crs: frame.crs, unit: frame.unit,

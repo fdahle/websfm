@@ -300,9 +300,11 @@ export const BA_SOLVER_KEYS = ['n', 'solves', 'cholesky', 'pcgConverged', 'pcgPa
 // bundle.rs `solver_flat`; NaN keeps that slot's crate default.
 export function baSolverFlat(solver = {}) {
   const num = (v) => (v == null || v === '' ? NaN : Number(v))
-  const { pcgMinN, pcgRelTol, pcgMaxIter, pcgAcceptPartial } = solver ?? {}
+  const { pcgMinN, pcgRelTol, pcgMaxIter, pcgAcceptPartial, functionTolerance, pcgPreconditioner } = solver ?? {}
+  // pcgPreconditioner: 'jacobi' (default) | 'ic0' (block incomplete Cholesky, opt-in).
   return Float32Array.of(num(pcgMinN), num(pcgRelTol), num(pcgMaxIter),
-    pcgAcceptPartial == null ? NaN : (pcgAcceptPartial ? 1 : 0))
+    pcgAcceptPartial == null ? NaN : (pcgAcceptPartial ? 1 : 0), num(functionTolerance),
+    pcgPreconditioner === 'ic0' ? 1 : NaN)
 }
 
 export async function bundleAdjust(cameras, intrinsics, points3d, observations, opts = {}) {
@@ -310,6 +312,7 @@ export async function bundleAdjust(cameras, intrinsics, points3d, observations, 
   const {
     maxIters = 30, refineIntrinsics = 'none', sensorOfCam = null,
     gcpAnchors = [], cameraPriors = [], solver = SFM_TUNING.baSolver, flatPoints = false,
+    fixedCams = null,
   } = opts
   const refineMode = refineModeMask(refineIntrinsics)
   const nCam = cameras.length
@@ -338,23 +341,27 @@ export async function bundleAdjust(cameras, intrinsics, points3d, observations, 
   const ptsFlat = flatIn ? Float32Array.from(points3d) : new Float32Array(nPts * 3)
   if (!flatIn) points3d.forEach(({ x, y, z }, i) => { ptsFlat.set([x, y, z], i * 3) })
 
-  const obsFlat = new Float32Array(nObs * 4)
+  // Indices as integers, pixels as floats: an f32 index is exact only to 2²⁴, so
+  // above 16.7 M points observations attached to the wrong point (TODO ▸ SC-6).
+  const obsIdx = new Uint32Array(nObs * 2)
+  const obsPx = new Float32Array(nObs * 2)
   const obsWFlat = new Float32Array(nObs * 2)
   const weight = (v) => (Number.isFinite(v) && v > 0 ? v : 1)
   if (soa) {
     const { cam, pt, x, y, wx, wy } = observations
     for (let i = 0; i < nObs; i++) {
-      obsFlat[i * 4] = cam[i]; obsFlat[i * 4 + 1] = pt[i]; obsFlat[i * 4 + 2] = x[i]; obsFlat[i * 4 + 3] = y[i]
+      obsIdx[i * 2] = cam[i]; obsIdx[i * 2 + 1] = pt[i]; obsPx[i * 2] = x[i]; obsPx[i * 2 + 1] = y[i]
       obsWFlat[i * 2] = wx ? weight(wx[i]) : 1; obsWFlat[i * 2 + 1] = wy ? weight(wy[i]) : 1
     }
   } else {
     observations.forEach(({ camIdx, ptIdx, x, y, weightX = 1, weightY = 1 }, i) => {
-      obsFlat.set([camIdx, ptIdx, x, y], i * 4)
+      obsIdx[i * 2] = camIdx; obsIdx[i * 2 + 1] = ptIdx; obsPx[i * 2] = x; obsPx[i * 2 + 1] = y
       obsWFlat.set([weightX, weightY].map(weight), i * 2)
     })
   }
 
-  const anchorFlat  = new Float32Array(gcpAnchors.length * 4)
+  // Doubles: the point index exact at any size, the survey targets at full precision.
+  const anchorFlat  = new Float64Array(gcpAnchors.length * 4)
   const anchorWFlat = new Float32Array(gcpAnchors.length * 9)
   gcpAnchors.forEach(({ ptIdx, target, precision, weights, weight }, i) => {
     anchorFlat.set([ptIdx, target[0], target[1], target[2]], i * 4)
@@ -384,10 +391,15 @@ export async function bundleAdjust(cameras, intrinsics, points3d, observations, 
     sensorFlat[c] = Number.isInteger(id) ? id : -1
   }
 
+  // `fixedCams`: indices of cameras held fixed (a local BA window's surroundings);
+  // they keep their observations as constraints. None ⇒ every camera is free.
+  const fixedMask = new Uint8Array(fixedCams?.length ? nCam : 0)
+  for (const c of fixedCams ?? []) if (c >= 0 && c < nCam) fixedMask[c] = 1
+
   const tCall = performance.now()
   const raw = bundle_adjust(
-    camFlat, kFlat, ptsFlat, obsFlat, obsWFlat, anchorFlat, anchorWFlat, cameraPriorFlat,
-    maxIters, sensorFlat, refineMode, baSolverFlat(solver),
+    camFlat, kFlat, ptsFlat, obsIdx, obsPx, obsWFlat, anchorFlat, anchorWFlat, cameraPriorFlat,
+    maxIters, sensorFlat, refineMode, baSolverFlat(solver), fixedMask,
   )
   const ms = performance.now() - tCall
   // Layout: cameras(nCam×12), points(nPts×3), intrinsics(nCam×7 = fx,fy,cx,cy,k1,k2,k3),

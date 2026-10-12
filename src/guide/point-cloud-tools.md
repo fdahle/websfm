@@ -23,8 +23,9 @@ imported one. The dialogs show what that means for the current project.
 - **Filter…** chains height/brightness range, voxel thinning, isolated-cluster removal
   and statistical outlier removal, in that order.
 - **Remove outliers…** and **Subsample…** open the same dialog with only that step on.
-- **Select points** switches to the 3D view with the lasso, for hand cleanup (see
-  [Build the Dense Cloud](guide:dense-cloud)).
+- **Select (rectangle)** and **Select (lasso)** switch to the 3D view with that tool,
+  for hand cleanup (see [Build the Dense Cloud](guide:dense-cloud)). The row shows
+  which tool is on; choosing it again turns it off.
 
 ## Edit
 - **Crop…** keeps (or removes) an axis-aligned box.
@@ -46,7 +47,8 @@ imported one. The dialogs show what that means for the current project.
   mesh, or a cloud after *Estimate normals*) it uses point-to-plane matching, which
   converges in a few iterations. The log reports the RMS, the rotation and the shift.
 
-## Analyse
+## Measure
+These two are in **Tools → Measure ▾**, with the raster and mesh measurements.
 - **Distance to reference…** gives every point its distance to another cloud (to its
   nearest point) or to a mesh (exactly, to the surface). With a mesh, or a reference
   cloud with normals, the distance is **signed**: positive above the reference,
@@ -84,3 +86,9 @@ classification, GPS time, PLY scalar fields).
 A **voxel downsample** in the export dialog keeps one real point per cell, with its
 own colour and attribute values. Averaging would give class numbers and timestamps
 that no point had. Without attributes the cell average is written, as before.
+
+Cloud and mesh files are written in the background and streamed into the download,
+so the app stays responsive and size is not limited by the format: an ASCII PLY or
+XYZ of tens of millions of points works the same as a binary one, only larger.
+Importing works the same way: XYZ, ASCII PLY and LAS files are read in pieces, so a
+multi-gigabyte text cloud does not have to fit in memory as text.

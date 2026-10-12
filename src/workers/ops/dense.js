@@ -1,8 +1,10 @@
-import { readDepthFiles, readDepthOnly } from '../../core/dense/depthFileReader.js'
+import { readDepthFiles, readDepthOnly, readDepthAndCost } from '../../core/dense/depthFileReader.js'
 import {
   selectSourceViews, scaleK, rgbaToGray, depthMapForImage, fuseDepthMaps, fuseDepthMapsStreamed, filterDepthMap,
-  filterDepthMapsGeometric, geomFilterLoopShare, autoBestK,
+  filterDepthMapsGeometric, filterDepthMapsGeometricStreamed, applyPackedMask, geomFilterLoopShare, autoBestK, filterSettings,
 } from '../../core/dense/mvs.js'
+import { depthCoverage } from '../../core/dense/depthMapCodec.js'
+import { viewIndex } from '../../core/dense/sparseInput.js'
 import { buildMaskLookup } from '../../core/mask.js'
 import { DEPTHMAP_DEFAULTS } from '../../core/defaults.user.js'
 import { hasDistortion } from '../../core/sfm/distortion.js'
@@ -82,9 +84,9 @@ export function makeDenseOps({ rasterize }) {
 
   // Warp a scan-space mask LUT (built at scan working size) into the canonical
   // working grid of raster `r` (a warpFilmRaster output). Nearest sample.
-  async function filmMaskLut(maskDataUrl, r) {
+  async function filmMaskLut(mask, r) {
     const sd = r.scanDims
-    const scanLut = await buildMaskLookup(maskDataUrl, sd.w, sd.h)
+    const scanLut = await buildMaskLookup(mask, sd.w, sd.h)
     const map = filmSampleMap(r.canonK, r.dist, r.fid, r.scale, sd.scale, r.selfCal)
     return resampleMaskLut(scanLut, sd.w, sd.h, map, r.width, r.height)
   }
@@ -98,10 +100,11 @@ export function makeDenseOps({ rasterize }) {
     return rgb
   }
 
-  // Render a depth plane to a colourized PNG data URL for the image viewer's depth
-  // overlay. Valid depths are normalised to a blue→red ramp (near = red); holes
+  // Render a depth plane to a colourized PNG Blob for the image viewer's depth
+  // overlay (a Blob, not a data URL: it crosses to the page by reference and stays
+  // off both V8 heaps). Valid depths are normalised to a blue→red ramp (near = red); holes
   // are transparent so the underlying image shows through.
-  async function depthToDataUrl(depth, w, h) {
+  async function depthToPng(depth, w, h) {
     let lo = Infinity, hi = -Infinity
     for (let i = 0; i < depth.length; i++) {
       const d = depth[i]
@@ -123,12 +126,7 @@ export function makeDenseOps({ rasterize }) {
     }
     const canvas = new OffscreenCanvas(w, h)
     canvas.getContext('2d').putImageData(img, 0, 0)
-    const blob = await canvas.convertToBlob({ type: 'image/png' })
-    return await new Promise((resolve) => {
-      const fr = new FileReader()
-      fr.onload = () => resolve(fr.result)
-      fr.readAsDataURL(blob)
-    })
+    return canvas.convertToBlob({ type: 'image/png' })
   }
 
   // Stage A — Build Depth Maps. Rasterises each registered image (and its source
@@ -136,7 +134,8 @@ export function makeDenseOps({ rasterize }) {
   // (raw depth/cost planes + colours for fusion, plus a display PNG). Pure compute
   // lives in core/dense/mvs.js; pixel decoding is worker-only (OffscreenCanvas).
   async function computeDepthMaps([input], { emit }) {
-    const { images, points, settings = {} } = input
+    // `sparse`: the packed sparse model (core/dense/sparseInput.js), transferred.
+    const { images, sparse, settings = {} } = input
     const {
       maxDim = 800, maxSources: maxSourcesReq = 6, minAngleDeg = 3, window = 3, iterations = 3, bestK = null,
       speckleFilter = true, filterRadius = 1, filterRelTol = 0.1, coarseLong = 600,
@@ -145,6 +144,12 @@ export function makeDenseOps({ rasterize }) {
       geomConsistency = true, maxGeomCost = DEPTHMAP_DEFAULTS.maxGeomCost,
       minConsistent = DEPTHMAP_DEFAULTS.minConsistent, minNcc = DEPTHMAP_DEFAULTS.minNcc,
       minGeomAngleDeg = DEPTHMAP_DEFAULTS.minGeomAngleDeg,
+      // Stream each finished map to the caller ('map' event, planes transferred) instead
+      // of holding all of them to the end; the caller then runs the cross-view filter
+      // over the saved maps (filterDepthMaps below). Holding every map was 23 B/px ×
+      // every image in this worker and again on the page — the preflight refused
+      // quarry (347 images) at Medium (TODO ▸ SC-4).
+      streamMaps = false,
     } = settings
     // The GPU kernel packs sources into a fixed MAX_SRC=16 array and silently drops
     // any beyond that (depthMapGpu.js), while the WASM path + the first-image A/B
@@ -204,6 +209,7 @@ export function makeDenseOps({ rasterize }) {
     const budget = settings.memBudgetBytes > 0 ? settings.memBudgetBytes : DEFAULT_BUDGET_BYTES
     const proj = projectDensePeakBytes({
       nImages: images.length, maxDim, nSources: maxSources, backend: backend ? 'gpu' : 'wasm',
+      retainedMaps: streamMaps ? 1 : images.length,
     })
     emit('log', [`Dense: projected peak memory ≈ ${formatBytes(proj.total)} `
       + `(store ${formatBytes(proj.store)} + raster ${formatBytes(proj.raster)}`
@@ -218,8 +224,9 @@ export function makeDenseOps({ rasterize }) {
     // Precompute each image's source views once (also drives the raster refcounts),
     // so the cache can evict a raster the moment it's no longer needed — keeping the
     // resident working set small instead of holding every image's pixels at once.
+    const sparseIndex = viewIndex(sparse) // image → the points it sees, once per run
     const srcUuidsByImg = images.map((img) =>
-      selectSourceViews(cameras, points, img.uuid, { maxSources, minAngleDeg }))
+      selectSourceViews(cameras, sparse, img.uuid, { maxSources, minAngleDeg }, sparseIndex))
     const urlByUuid = new Map(images.map((im) => [im.uuid, im.url]))
     // Per-url intrinsics + distortion, so getRaster can undistort each source once
     // (url↔image is 1:1, and undistortion is independent of ref/source role).
@@ -263,6 +270,7 @@ export function makeDenseOps({ rasterize }) {
 
     const maps = []
     const transfer = []
+    let streamed = 0
     // Stage A is a per-image loop FOLLOWED by the cross-view filter, which needs every
     // map before it can start. The loop therefore owns only the first slice of the bar
     // — reporting it as the whole thing left the filter (minutes on a big set) running
@@ -339,7 +347,7 @@ export function makeDenseOps({ rasterize }) {
       }
       let dm
       try {
-        dm = await depthMapForImage(ref, sources, points, { window, iterations, bestK: imgBestK, coarseLong, region: settings.region ?? null }, backend, hooks)
+        dm = await depthMapForImage(ref, sources, sparse.pos, { window, iterations, bestK: imgBestK, coarseLong, region: settings.region ?? null }, backend, hooks)
       } catch (err) {
         // A GPU failure mid-run must not abort the whole batch: log it, drop to WASM
         // for this image and every image after, and retry once on the CPU path.
@@ -350,7 +358,7 @@ export function makeDenseOps({ rasterize }) {
           gpuFallbacks++
           // Keep streaming the coarse-to-fine plan log on the retry (validate no
           // longer applies once we've dropped off the GPU path).
-          dm = await depthMapForImage(ref, sources, points, { window, iterations, bestK: imgBestK, coarseLong, region: settings.region ?? null }, backend, { onLog: hooks.onLog, onProgress: hooks.onProgress })
+          dm = await depthMapForImage(ref, sources, sparse.pos, { window, iterations, bestK: imgBestK, coarseLong, region: settings.region ?? null }, backend, { onLog: hooks.onLog, onProgress: hooks.onProgress })
         } else {
           throw err
         }
@@ -391,7 +399,7 @@ export function makeDenseOps({ rasterize }) {
         for (let k = 0; k < dm.depth.length; k++) if (maskLut[k]) dm.depth[k] = 0
       }
       const rgb = rgbFromRgba(rRef.data, rRef.width, rRef.height)
-      const displayDataUrl = await depthToDataUrl(dm.depth, dm.width, dm.height)
+      const displayBlob = await depthToPng(dm.depth, dm.width, dm.height)
       // F4: for film images the depth preview is in the canonical frame, not scan
       // space, so it won't line up with the scan in the viewer (v1 limitation).
       if (rRef.fid) {
@@ -419,22 +427,28 @@ export function makeDenseOps({ rasterize }) {
         + `cost median ${cs.median.toFixed(2)} / p95 ${cs.p95.toFixed(2)}, ${(imgMs / 1000).toFixed(1)}s`,
         'info', 'Dense'])
 
-      maps.push({
+      const map = {
         uuid: img.uuid, name: img.name, width: dm.width, height: dm.height,
         K: ref.K, R: img.R, t: img.t,
         // Per-pixel converged plane normals (camera-frame, unit, nz<0). Kept
         // alongside depth for fusion → Poisson meshing. Holes are defined by
         // depth<=0 everywhere downstream, so stale normals under a zeroed depth are
         // harmless and deliberately NOT cleaned up.
-        depth: dm.depth, cost: dm.cost, normals: dm.normals || null, rgb, displayDataUrl,
-      })
+        depth: dm.depth, cost: dm.cost, normals: dm.normals || null, rgb, displayBlob,
+      }
       pxDone += dm.width * dm.height
-      transfer.push(dm.depth.buffer, dm.cost.buffer, rgb.buffer)
-      if (dm.normals) transfer.push(dm.normals.buffer)
+      const planes = [dm.depth.buffer, dm.cost.buffer, rgb.buffer, ...(dm.normals ? [dm.normals.buffer] : [])]
+      if (streamMaps) {
+        emit('map', [map], planes)
+        streamed++
+      } else {
+        maps.push(map)
+        transfer.push(...planes)
+      }
       releaseAfter(i) // evict rasters this image was the last consumer of
     }
 
-    emit('log', [`Depth maps: ${maps.length}/${images.length} computed in ${((performance.now() - t0) / 1000).toFixed(1)}s; `
+    emit('log', [`Depth maps: ${streamMaps ? streamed : maps.length}/${images.length} computed in ${((performance.now() - t0) / 1000).toFixed(1)}s; `
       + `raster cache peak ${formatBytes(ledger.peak())}`, 'success', 'Dense'])
 
     // Cross-view geometric consistency — the only filter that sees sky/vegetation for
@@ -444,7 +458,7 @@ export function makeDenseOps({ rasterize }) {
     // filtered plane. The display PNGs above were rendered pre-filter and are only a
     // preview, so they intentionally still show the raw plane.
     let geomFilterMs = null
-    if (geomConsistency && maps.length) {
+    if (geomConsistency && maps.length && !streamMaps) {
       updateLoopShare(images.length)
       const LOOP_SHARE = loopShare
       const loopMs = performance.now() - tLoop
@@ -473,7 +487,8 @@ export function makeDenseOps({ rasterize }) {
         + `progress bar gave it ${(100 * (1 - LOOP_SHARE)).toFixed(0)}%)`, 'info', 'Dense'])
     }
 
-    emit('progress', [images.length, images.length, 'Depth maps complete', 1])
+    // Streaming: the caller's filter pass owns the rest of the bar, from `loopShare`.
+    if (!streamMaps) emit('progress', [images.length, images.length, 'Depth maps complete', 1])
     // Stage A summary — settings + throughput + the cross-view filter's cost and bite.
     // Persisted by the store (reconstruction.json) so a dense baseline survives a reload.
     const med = (vals) => {
@@ -484,7 +499,7 @@ export function makeDenseOps({ rasterize }) {
     const filterKept = maps.map((m) => m.filterStats?.keptPct).filter((v) => v != null)
     const summary = {
       date: new Date().toISOString(),
-      nMaps: maps.length,
+      nMaps: streamMaps ? streamed : maps.length,
       nImages: images.length,
       backend: startedOnGpu ? (gpuFallbacks ? 'gpu→wasm' : 'gpu') : 'wasm',
       gpuRequested: !!settings.useGpu,
@@ -511,14 +526,110 @@ export function makeDenseOps({ rasterize }) {
       geomFilterMarginalMaps: filterKept.filter((v) => v < 1).length,
       projectedPeakBytes: proj.total,
       budgetBytes: budget,
+      streamed: !!streamMaps,
     }
-    return { result: { maps, summary }, transfer }
+    // Streaming: the bar share the cross-view filter pass should take over from.
+    if (geomConsistency && streamMaps) updateLoopShare(images.length)
+    return { result: { maps, summary, loopShare: streamMaps && geomConsistency ? loopShare : 1 }, transfer }
+  }
+
+  // The cross-view consistency filter over SAVED depth maps: file handles in, read on
+  // demand (reference: depth + cost; candidates: depth, through a byte-bounded LRU).
+  // Judges every map against the unfiltered planes first, then emits each filtered
+  // depth plane as a 'filtered' event for the caller to write back. Same verdicts as
+  // the in-memory pass (core/dense/mvs.js filterDepthMapsGeometricStreamed).
+  //   input: { maps: [entry with files], settings, from } — `from` is where Stage A's
+  //   loop left the progress bar.
+  // `refs` (a subset of map indices) and `workers` (how many such calls run at once)
+  // split one filter over the pool: each call judges its own maps with a 1/workers share
+  // of the cache budget and returns their masks, WITHOUT writing anything — the other
+  // calls are still reading these maps' unfiltered planes as candidates (and a File read
+  // after its file was rewritten fails as NotReadable). Once every call has judged, the
+  // caller sends the masks back (`apply`: { refs, masks }) to be applied and emitted.
+  async function filterDepthMaps([input], { emit }) {
+    const { maps: entries, settings = {}, from = 0, refs = null, workers = 1, apply = null } = input
+    if (apply) {
+      for (let k = 0; k < apply.refs.length; k++) {
+        const i = apply.refs[k]
+        const depth = applyPackedMask((await readDepthOnly(entries[i])).depth, apply.masks[k])
+        emit('filtered', [{ uuid: entries[i].uuid, depth, coverage: depthCoverage(depth), filterStats: apply.stats?.[k] }], [depth.buffer])
+        emit('progress', [k + 1, apply.refs.length, 'Writing filtered depth maps…'])
+      }
+      return { result: { written: apply.refs.length }, transfer: [] }
+    }
+    const partial = !!refs
+    const opts = {
+      ...filterSettings(settings),
+      // A share of the run's memory budget for cached candidate planes.
+      cacheBytes: Math.max(64 * 1024 ** 2, Math.min(2 * 1024 ** 3, (settings.memBudgetBytes || DEFAULT_BUDGET_BYTES) / 4)) / workers,
+      ...(partial ? { refs, summaryLogs: false } : {}),
+    }
+    const metas = entries.map(({ files: _files, ...meta }) => meta)
+    const judgeShare = 0.9 // judging dominates; writing back is one read + one write per map
+    const at = (f) => from + (1 - from) * f
+    const t0 = performance.now()
+    const io = {
+      loadReference: (i) => readDepthAndCost(entries[i]),
+      loadDepth: async (i) => (await readDepthOnly(entries[i])).depth,
+    }
+    const own = refs ?? entries.map((_, i) => i)
+    emit('progress', [0, own.length, 'Filtering depth maps…', at(0)])
+    const { masks, stats, totals, loads, hits, nCand } = await filterDepthMapsGeometricStreamed(metas, io, opts,
+      (m, l, c) => emit('log', [m, l, c]),
+      { onProgress: (d, t, lbl) => emit('progress', [d, t, `Cross-view filter: ${lbl}`, at(judgeShare * (t > 0 ? d / t : 0))]) })
+    const judgeMs = performance.now() - t0
+    if (partial) {
+      const own = refs.map((i) => masks[i])
+      return { result: { stats, totals, loads, hits, nCand, judgeMs, ms: performance.now() - t0, cacheBytes: opts.cacheBytes, masks: own },
+        transfer: own.map((m) => m.buffer) }
+    }
+    for (let k = 0; k < own.length; k++) {
+      const i = own[k]
+      const depth = applyPackedMask((await readDepthOnly(entries[i])).depth, masks[i])
+      masks[i] = null
+      emit('filtered', [{ uuid: entries[i].uuid, depth, coverage: depthCoverage(depth), filterStats: stats[i] }], [depth.buffer])
+      emit('progress', [k + 1, own.length, 'Writing filtered depth maps…', at(judgeShare + (1 - judgeShare) * (k + 1) / own.length)])
+    }
+    const marginal = metas.map((m, i) => ({ m, s: stats[i] })).filter(({ s }) => s.considered > 0 && s.keptPct < 1)
+    if (marginal.length) {
+      const names = marginal.slice(0, 12).map(({ m, s }) => `${m.name || m.uuid} ${s.keptPct.toFixed(1)}%`).join('; ')
+      emit('log', [`Depth filter: ${marginal.length} marginal map(s) kept <1% after cross-view filtering — `
+        + `${names}${marginal.length > 12 ? `; +${marginal.length - 12} more` : ''}. `
+        + 'They remain cached for diagnostics/orthophoto use but will contribute little to fusion.', 'warn', 'Dense'])
+    }
+    const ms = performance.now() - t0
+    let px = 0
+    for (const m of metas) px += m.width * m.height
+    emit('log', [`Depth filter: cross-view consistency in ${(ms / 1000).toFixed(1)}s (streamed from saved maps; `
+      + `${(judgeMs * 1000 / Math.max(1, px)).toFixed(2)} µs/px judging)`, 'info', 'Dense'])
+    emit('progress', [entries.length, entries.length, 'Depth maps complete', 1])
+    return { result: { stats, totals, ms }, transfer: [] }
   }
 
   // Stage B — Build Point Cloud (dense). Fuses the depth maps from Stage A into a
   // single coloured point cloud (pure compute in core/dense/mvs.js).
+  // Parallel fusion over saved maps (the store drives it): `mode: 'plan'` runs the
+  // pre-passes and returns the slab plan; `mode: 'slab'` fuses one slab of `plan` and
+  // returns it in the cloud's layout with its counters. Without a mode, one call does
+  // it all (with `settings.plan`, it skips the pre-passes).
   async function densify([input], { emit }) {
-    const { maps, streamed = false, settings = {} } = input
+    const { maps, streamed = false, settings = {}, mode = null, plan = null, slab = null } = input
+    if (mode) {
+      const log = (m, l, c) => emit('log', [m, l, c])
+      const load = (i) => readDepthFiles(maps[i])
+      const loadDepth = (i) => readDepthOnly(maps[i])
+      if (mode === 'plan') {
+        const res = await fuseDepthMapsStreamed(maps, load, { ...settings, planOnly: true }, log, { loadDepth })
+        return { result: res.refused ? { plan: null, refused: res.refused } : { plan: res, refused: null }, transfer: [] }
+      }
+      const parts = []
+      const run = await fuseDepthMapsStreamed(maps, load, { ...settings, plan, slabIndices: [slab] }, log, {
+        loadDepth, onTile: (f) => parts.push(denseFromFlat(f)),
+        onProgress: (d, t, lbl) => emit('progress', [d, t, lbl]),
+      })
+      const part = parts[0]
+      return { result: { part, counters: run.counters, stream: run.stream }, transfer: [part.pos.buffer, part.col.buffer, part.nrm.buffer] }
+    }
     const total = Math.max(1, maps.length)
     emit('progress', [0, total, 'Fusing depth maps…'])
     const tFuse = performance.now()
@@ -528,10 +639,15 @@ export function makeDenseOps({ rasterize }) {
       ? (ms, options, log, hooks) => fuseDepthMapsStreamed(ms, i => readDepthFiles(ms[i]), options, log,
         { ...hooks, loadDepth: i => readDepthOnly(ms[i]) })
       : fuseDepthMaps
+    // Each finished slab (one, unless fusion tiles to fit the budget) is converted at
+    // once to the cloud's own layout, so its flat [x,y,z,r,g,b] buffer is dropped
+    // before the next slab's accumulator exists; the slabs are joined at the end.
+    const parts = []
     const flat = await fuse(maps, settings,
       (m, l, c) => emit('log', [m, l, c]),
-      { onProgress: (d, t, lbl) => emit('progress', [d, t, lbl]) })
-    const nPoints = flat.length / 6
+      { onProgress: (d, t, lbl) => emit('progress', [d, t, lbl]), onTile: (f) => parts.push(denseFromFlat(f)) })
+    const cloud = joinDenseParts(parts)
+    const nPoints = cloud.count
     // The fusion pre-flight refused (already logged with its numbers): no cloud, but
     // the transferred planes still go home below.
     if (!flat.refused) emit('log', [`Dense cloud: fused ${maps.length} depth maps → ${nPoints} points `
@@ -543,14 +659,39 @@ export function makeDenseOps({ rasterize }) {
     // return them so they round-trip home and the store can re-attach them to its
     // depthMaps cache (ortho reuses them). dims/K/R/t never left the main thread.
     const mapBuffers = (streamed ? [] : maps).map((m) => ({ uuid: m.uuid, depth: m.depth, cost: m.cost, rgb: m.rgb, normals: m.normals || null }))
-    const transfer = [flat.buffer]
-    if (flat.nrm) transfer.push(flat.nrm.buffer)
+    const transfer = [cloud.pos.buffer, cloud.col.buffer, cloud.nrm.buffer]
     for (const m of streamed ? [] : maps) {
       transfer.push(m.depth.buffer, m.cost.buffer, m.rgb.buffer)
       if (m.normals) transfer.push(m.normals.buffer)
     }
-    return { result: { points: flat, nrm: flat.nrm ?? null, summary: flat.summary ?? null, refused: flat.refused ?? null, mapBuffers }, transfer }
+    return { result: { cloud, summary: flat.summary ?? null, refused: flat.refused ?? null, mapBuffers }, transfer }
   }
 
-  return { computeDepthMaps, densify }
+  // One fused slab → the dense cloud's split Float32 position / Uint8 colour / Float32
+  // normal arrays.
+  function denseFromFlat(flat) {
+    const n = flat.length / 6
+    const pos = new Float32Array(n * 3), col = new Uint8Array(n * 3)
+    for (let i = 0; i < n; i++) {
+      const s = i * 6, d = i * 3
+      pos[d] = flat[s]; pos[d + 1] = flat[s + 1]; pos[d + 2] = flat[s + 2]
+      col[d] = flat[s + 3]; col[d + 1] = flat[s + 4]; col[d + 2] = flat[s + 5]
+    }
+    return { count: n, pos, col, nrm: flat.nrm ?? new Float32Array(n * 3) }
+  }
+  function joinDenseParts(parts) {
+    if (parts.length === 1) return parts[0]
+    const n = parts.reduce((s, p) => s + p.count, 0)
+    const out = { count: n, pos: new Float32Array(n * 3), col: new Uint8Array(n * 3), nrm: new Float32Array(n * 3) }
+    let o = 0
+    for (let i = 0; i < parts.length; i++) {
+      const p = parts[i]
+      out.pos.set(p.pos, o * 3); out.col.set(p.col, o * 3); out.nrm.set(p.nrm, o * 3)
+      o += p.count
+      parts[i] = null // each slab can be collected once copied
+    }
+    return out
+  }
+
+  return { computeDepthMaps, filterDepthMaps, densify }
 }

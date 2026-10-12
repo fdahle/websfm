@@ -1,6 +1,12 @@
 import { describe, it, expect } from 'vitest'
-import { parsePly } from './ply.js'
-import { cloudToPly, meshToPly } from '../products/exporters.js'
+import { parsePly, parsePlySource } from './ply.js'
+import { blobSource, blobChunks } from '../../utils/blobParts.js'
+import { cloudToPlyParts, meshToPlyParts } from '../products/exporters.js'
+import { joinParts } from './parts.js'
+
+// The writers yield bounded parts (core/io/parts.js); these join them for small fixtures.
+const cloudToPly = (...a) => joinParts(cloudToPlyParts(...a))
+const meshToPly = (...a) => joinParts(meshToPlyParts(...a))
 
 describe('parsePly — self-consistency with our writers', () => {
   const sparse = [
@@ -142,5 +148,42 @@ describe('cloudToPly — point attributes', () => {
     const out = parsePly(cloudToPly(flat, { attributes: false, color: false }))
     expect(Object.keys(out.attributes)).toEqual([])
     expect(out.col).toBeUndefined()
+  })
+})
+
+describe('parsePlySource — the streaming reader', () => {
+  // A Blob source whose body arrives in tiny chunks, so lines and UTF-8 split.
+  const source = (bytes, chunkBytes = 5) => {
+    const blob = new Blob([bytes])
+    return { ...blobSource(blob, 'x.ply'), chunks: (start) => blobChunks(blob, { start, chunkBytes }) }
+  }
+  const plain = (r) => JSON.parse(JSON.stringify(r, (k, v) => (ArrayBuffer.isView(v) ? [v.constructor.name, ...v] : v)))
+  const n = 500
+  const flat = {
+    count: n, pos: Float32Array.from({ length: n * 3 }, (_, i) => Math.sin(i) * 1000),
+    col: Uint8Array.from({ length: n * 3 }, (_, i) => i % 256), nrm: Float32Array.from({ length: n * 3 }, (_, i) => Math.cos(i)),
+    attributes: { distance: Float32Array.from({ length: n }, (_, i) => i / 7) },
+  }
+  const mesh = { nVerts: 4, count: 2, pos: Float32Array.from([0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 1, 0]), idx: Uint32Array.from([0, 1, 2, 1, 3, 2]) }
+  const inputs = {
+    'ascii cloud': cloudToPly(flat, { binary: false }),
+    'binary cloud': cloudToPly(flat, { binary: true }),
+    'ascii mesh': meshToPly(mesh, { binary: false }),
+    'binary mesh': meshToPly(mesh, { binary: true }),
+    'CRLF, comments, skipped element, quad': 'ply\r\nformat ascii 1.0\r\nelement vertex 4\r\nproperty float x\r\nproperty float y\r\nproperty float z\r\n'
+      + 'element junk 2\r\nproperty int a\r\nelement face 1\r\nproperty list uchar int vertex_indices\r\nend_header\r\n'
+      + '0 0 0\r\n1 0 0\r\n\r\ncomment mid\r\n1 1 0\r\n0 1 0\r\n7\r\n8\r\n4 0 1 2 3\r\n',
+  }
+  for (const [name, input] of Object.entries(inputs)) {
+    it(`${name}: identical to parsePly`, async () => {
+      const bytes = typeof input === 'string' ? new TextEncoder().encode(input) : input
+      expect(plain(await parsePlySource(source(bytes)))).toEqual(plain(parsePly(bytes)))
+    })
+  }
+
+  it('throws on an ASCII body that ends inside the vertex list', async () => {
+    const text = 'ply\nformat ascii 1.0\nelement vertex 3\nproperty float x\nproperty float y\nproperty float z\nend_header\n1 2 3\n'
+    await expect(parsePlySource(source(new TextEncoder().encode(text)))).rejects.toThrow(/truncated/)
+    expect(() => parsePly(text)).toThrow(/truncated/)
   })
 })

@@ -1,6 +1,8 @@
 <script setup>
 import { defineAsyncComponent, ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
-import { pixelToWorld } from '../../core/io/rasterSample.js'
+import { pixelToWorld, worldToPixel } from '../../core/io/rasterSample.js'
+import { productDescriptor, createProductRasterSource } from '../../core/io/rasterSource.js'
+import { rasterUnits } from '../../core/products/rasterUnits.js'
 import { copyToClipboard } from '../../composables/useToasts.js'
 import RasterMeasurements from './RasterMeasurements.vue'
 const GpuRasterCanvas = defineAsyncComponent(() => import('./raster/GpuRasterCanvas.vue'))
@@ -34,19 +36,12 @@ const props = defineProps({
 // became unresolved) nothing would un-hide the preview, leaving a blank viewer.
 watch(() => !!gpuCapable.value, (capable) => { if (!capable) gpuReady.value = false })
 
-// One descriptor for both shapes. A computed product's grid is north-up with a
-// square cell, i.e. scaleX = gsd, scaleY = -gsd.
-const desc = computed(() => {
-  const p = props.product
-  if (!p) return null
-  if (p.geoTransform) return { width: p.width, height: p.height, geoTransform: p.geoTransform }
-  if (p.gsd == null) return null
-  return {
-    width: p.width,
-    height: p.height,
-    geoTransform: { originX: p.originX, originY: p.originY, scaleX: p.gsd, scaleY: -p.gsd },
-  }
-})
+// One descriptor for both shapes (core/io/rasterSource.js productDescriptor).
+const desc = computed(() => productDescriptor(props.product))
+// What the tools read values from: the imported raster's own source, or the
+// computed product wrapped behind the same RasterSource boundary.
+const toolSource = computed(() => props.source
+  ?? (props.product && !props.product.geoTransform ? createProductRasterSource(props.kind, props.product) : null))
 
 // Cell size in world units (for the GSD readout), sign-independent.
 const gsdOf = computed(() => {
@@ -169,6 +164,18 @@ function onMouseMove(e) {
 }
 
 function onMouseUp() { dragging.value = false }
+
+// The measuring tools' view adapter: raster world ↔ viewport pixels through this
+// tab's pan/zoom. A new object per transform change re-renders their overlay.
+const view = computed(() => {
+  const d = desc.value
+  if (!d) return null
+  const s = scale.value, x0 = tx.value, y0 = ty.value
+  return {
+    toScreen(wx, wy) { const p = worldToPixel(d, wx, wy); return { x: x0 + p.col * s, y: y0 + p.row * s } },
+    fromScreen(sx, sy) { return pixelToWorld(d, (sx - x0) / s, (sy - y0) / s) },
+  }
+})
 function onMouseLeave() { dragging.value = false; hover.value = null }
 
 // Read out the raster value under viewport coords (x,y).
@@ -189,7 +196,13 @@ function updateHover(x, y) {
   const idx = py * p.width + px
 
   if (props.kind === 'dem') {
-    hover.value = { px, py, fx: world?.x ?? null, fy: world?.y ?? null, z: demValueAt(idx, world) }
+    // The cell's own value, never a neighbour's: a hole reads "no data". A reference
+    // DEM's declared vertical offset applies here exactly as on the map readout and
+    // in the measurements (useExternalStore.sampleReferenceDem), so one cell reads
+    // one height everywhere.
+    const raw = world ? (toolSource.value?.cellValueAt(world.x, world.y) ?? null) : null
+    const z = raw == null ? null : raw + (p.vOffset || 0)
+    hover.value = { px, py, fx: world?.x ?? null, fy: world?.y ?? null, z }
   } else {
     const rgba = props.source ? props.source.rgba() : p.rgba
     if (!rgba) { hover.value = { px, py, r: null }; return }
@@ -198,21 +211,12 @@ function updateHover(x, y) {
   }
 }
 
-// Elevation under a cell, from whichever backing the tab has: an imported
-// raster reads through its RasterSource (nodata already folded to NaN), a
-// computed DEM reads its mask+data directly.
-function demValueAt(idx, world) {
-  if (props.source) {
-    // sampleAt takes the raster's own CRS, which is exactly the frame `world` is in.
-    return world ? props.source.sampleAt(world.x, world.y) : null
-  }
-  const p = props.product
-  if (!p?.data) return null
-  const has = p.mask ? p.mask[idx] : !Number.isNaN(p.data[idx])
-  return has ? p.data[idx] : null
-}
-
-const unitLabel = () => (props.product?.unit && props.product.unit !== 'model' ? props.product.unit : 'model units')
+// Z is in the vertical unit, the GSD in the horizontal one (rasterUnits.js — an
+// imported raster records only its CRS, which still says metres).
+const units = computed(() => rasterUnits(props.product))
+// A computed product's preview is a blob: URL over its PNG Blob; an imported raster's
+// small (≤1024 px) preview is a data URL in its index record.
+const previewSrc = computed(() => props.product?.previewUrl ?? props.product?.previewDataUrl ?? null)
 const fmt = (v, d = 3) => (v == null ? '—' : (Math.abs(v) >= 1000 ? v.toFixed(2) : Number(v.toPrecision(d))))
 
 watch(() => props.product, () => { hover.value = null; requestAnimationFrame(fit) })
@@ -274,9 +278,9 @@ defineExpose({ fit, zoomBy, measureState, setMeasureTool, toggleSavedMeasurement
            big raster renders at preview scale — tiny, and off-centre, because the
            centring offset was computed for the full width/height. -->
       <img
-        v-if="product?.previewDataUrl"
+        v-if="previewSrc"
         v-show="!gpuReady"
-        :src="product.previewDataUrl"
+        :src="previewSrc"
         class="raster"
         :style="{
           width: product.width + 'px',
@@ -308,8 +312,8 @@ defineExpose({ fit, zoomBy, measureState, setMeasureTool, toggleSavedMeasurement
         <button class="ctx-item" @click="menuFit">Fit to view</button>
       </div>
 
-      <RasterMeasurements ref="measurements" :product="product" :source="source" :descriptor="desc"
-        :frame-status="frameStatus" :kind="kind" :scale="scale" :tx="tx" :ty="ty" />
+      <RasterMeasurements ref="measurements" :product="product" :source="toolSource" :descriptor="desc"
+        :frame-status="frameStatus" :kind="kind" :view="view" />
     </div>
 
     <!-- Layout mirrors the image view: live cursor readout on the left, static
@@ -326,7 +330,7 @@ defineExpose({ fit, zoomBy, measureState, setMeasureTool, toggleSavedMeasurement
           <span class="coord">Y&nbsp;{{ fmt(hover.fy, 6) }}</span>
           <span class="sep">|</span>
           <span class="value" :class="{ dim: hover.z == null }">
-            Z&nbsp;{{ hover.z == null ? 'no data' : `${fmt(hover.z, 5)} ${unitLabel()}` }}
+            Z&nbsp;{{ hover.z == null ? 'no data' : `${fmt(hover.z, 5)} ${units.vertical}` }}
           </span>
         </template>
         <template v-else>
@@ -347,7 +351,7 @@ defineExpose({ fit, zoomBy, measureState, setMeasureTool, toggleSavedMeasurement
         <span class="meta">{{ product.width }}×{{ product.height }}</span>
         <template v-if="gsdOf != null">
           <span class="sep">|</span>
-          <span class="meta">GSD {{ fmt(gsdOf) }} {{ unitLabel() }}/px</span>
+          <span class="meta">GSD {{ fmt(gsdOf) }} {{ units.horizontal }}/px</span>
         </template>
         <template v-if="product.crs">
           <span class="sep">|</span>

@@ -124,14 +124,16 @@ function num(data, i) {
 }
 
 // LightGlue's expected keypoint normalization (see header). Centre on the image,
-// scale by half the longer side → roughly [-1,1].
-function normalizeKpts(kps, w, h) {
-  const n = kps.length
-  const out = new Float32Array(n * 2)
+// scale by half the longer side → roughly [-1,1]. `kps` is typed
+// (core/features/keypoints.js); the first `n`, or the keypoints listed in `idx`.
+function normalizeKpts(kps, w, h, { n = kps.length, idx = null } = {}) {
+  const m = idx ? idx.length : n
+  const out = new Float32Array(m * 2)
   const cx = w / 2, cy = h / 2, s = Math.max(w, h) / 2 || 1
-  for (let i = 0; i < n; i++) {
-    out[i * 2]     = (kps[i].x - cx) / s
-    out[i * 2 + 1] = (kps[i].y - cy) / s
+  for (let i = 0; i < m; i++) {
+    const k = idx ? idx[i] : i
+    out[i * 2]     = (kps.x(k) - cx) / s
+    out[i * 2 + 1] = (kps.y(k) - cy) / s
   }
   return out
 }
@@ -241,8 +243,8 @@ function prefixFeeds(kpsA, descA, wA, hA, kpsB, descB, wB, hB, maxKeypoints) {
   const nB = Math.min(kpsB.length, cap)
   return {
     spec: {
-      kptsA: normalizeKpts(kpsA.slice(0, nA), wA, hA),
-      kptsB: normalizeKpts(kpsB.slice(0, nB), wB, hB),
+      kptsA: normalizeKpts(kpsA, wA, hA, { n: nA }),
+      kptsB: normalizeKpts(kpsB, wB, hB, { n: nB }),
       descsA: descA.subarray(0, nA * dim),
       descsB: descB.subarray(0, nB * dim),
       nA, nB, dim,
@@ -255,10 +257,10 @@ function prefixFeeds(kpsA, descA, wA, hA, kpsB, descB, wB, hB, maxKeypoints) {
  * Match two images with LightGlue.
  *
  * @param {object} args
- * @param {{x:number,y:number}[]} args.kpsA  keypoints of image A (original px)
+ * @param {Keypoints} args.kpsA  keypoints of image A (original px; core/features/keypoints.js)
  * @param {Float32Array} args.descA          A's descriptors, N_a × dim row-major
  * @param {number} args.wA @param {number} args.hA  A's original image size (px)
- * @param {{x:number,y:number}[]} args.kpsB
+ * @param {Keypoints} args.kpsB
  * @param {Float32Array} args.descB
  * @param {number} args.wB @param {number} args.hB
  * @param {number} [args.minConf=0]  drop matches below this LightGlue confidence
@@ -404,8 +406,8 @@ export async function matchLightGlueTiled(args) {
     // image diagonal: the guide only predicts where a tile lands (the margin
     // absorbs the slack), and a fixed few-px threshold on a 10k-px frame with
     // terrain relief would reject nearly every real aerial pair.
-    const ptsA = coarse.map((m) => [kpsA[m.ia].x, kpsA[m.ia].y])
-    const ptsB = coarse.map((m) => [kpsB[m.ib].x, kpsB[m.ib].y])
+    const ptsA = coarse.map((m) => [kpsA.x(m.ia), kpsA.y(m.ia)])
+    const ptsB = coarse.map((m) => [kpsB.x(m.ib), kpsB.y(m.ib)])
     const guideThreshPx = Math.max(3, Math.ceil(
       Math.hypot(Math.max(wA, wB), Math.max(hA, hB)) * guideRelThresh))
     const fit = estimateHomographyRansac(ptsA, ptsB, { threshPx: guideThreshPx, iters: 500 })
@@ -444,11 +446,9 @@ export async function matchLightGlueTiled(args) {
       if (idxA.length > tileBudget) idxA = idxA.slice(0, tileBudget)
       if (idxB.length > tileBudget) idxB = idxB.slice(0, tileBudget)
 
-      const subKpsA = idxA.map((i) => kpsA[i])
-      const subKpsB = idxB.map((i) => kpsB[i])
       const spec = {
-        kptsA: normalizeKpts(subKpsA, wA, hA),
-        kptsB: normalizeKpts(subKpsB, wB, hB),
+        kptsA: normalizeKpts(kpsA, wA, hA, { idx: idxA }),
+        kptsB: normalizeKpts(kpsB, wB, hB, { idx: idxB }),
         descsA: sliceDescriptorRows(descA, idxA, dim),
         descsB: sliceDescriptorRows(descB, idxB, dim),
         nA: idxA.length, nB: idxB.length, dim,

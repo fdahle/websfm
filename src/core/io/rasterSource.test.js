@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { createFlatRasterSource } from './rasterSource.js'
+import { createFlatRasterSource, productDescriptor, createProductRasterSource } from './rasterSource.js'
+import { rasterizeDem, cellCenter } from '../products/dem.js'
 
 const meta = {
   name: 'test.tif',
@@ -75,5 +76,60 @@ describe('createFlatRasterSource', () => {
     expect(s.worldToPixel(145, 175)).toEqual({ col: 4.5, row: 2.5 })
     expect(s.pixelToWorld(0.5, 0.5)).toEqual({ x: 105, y: 195 })
     expect(s.bounds()).toEqual([100, 170, 140, 200])
+  })
+})
+
+describe('computed products as raster sources', () => {
+  const dem = rasterizeDem([{ x: 0, y: 0, z: 1 }, { x: 4, y: 0, z: 2 }, { x: 0, y: 3, z: 3 }, { x: 4, y: 3, z: 4 }],
+    { gsd: 1, fillRadius: 0 })
+
+  it('normalises a computed grid to a north-up corner geotransform', () => {
+    expect(productDescriptor(dem).geoTransform).toEqual({ originX: dem.originX, originY: dem.originY, scaleX: 1, scaleY: -1 })
+    expect(productDescriptor({ width: 2, height: 2, geoTransform: { originX: 5 } }).geoTransform).toEqual({ originX: 5 })
+    expect(productDescriptor({ width: 2, height: 2 })).toBeNull()
+  })
+
+  it('samples a DEM cell centre to that cell and agrees with dem.js on geometry', () => {
+    const src = createProductRasterSource('dem', dem)
+    for (let row = 0; row < dem.height; row++) for (let col = 0; col < dem.width; col++) {
+      const i = row * dem.width + col
+      if (!dem.mask[i]) continue
+      const [x, y] = cellCenter(dem, col, row)
+      expect(src.sampleAt(x, y)).toBe(dem.data[i])
+      expect(src.worldToPixel(x, y)).toEqual({ col: col + 0.5, row: row + 0.5 })
+    }
+    expect(src.unsafePlane()).toBe(dem.data)
+    expect(src.rgba()).toBeNull()
+  })
+
+  it('exposes an ortho through rgba with no value plane', () => {
+    const rgba = new Uint8ClampedArray(4)
+    const src = createProductRasterSource('ortho', { width: 1, height: 1, gsd: 1, originX: 0, originY: 1, rgba })
+    expect(src.rgba()).toBe(rgba)
+    expect(src.unsafePlane()).toBeNull()
+  })
+})
+
+describe('cellValueAt (cursor readout)', () => {
+  // 3×1 DEM, middle cell nodata. A readout over the hole must say "no data";
+  // sampleAt keeps its documented neighbour fallback for GCP Z fill.
+  const meta = { width: 3, height: 1, nodata: -9999, geoTransform: { originX: 0, originY: 1, scaleX: 1, scaleY: -1 } }
+  const src = createFlatRasterSource(meta, new Float32Array([10, -9999, 30]))
+
+  it('reads the containing cell and never a neighbour', () => {
+    expect(src.cellValueAt(1.5, 0.5)).toBeNull()
+    expect(src.cellValueAt(1.01, 0.99)).toBeNull()
+    expect(src.sampleAt(1.5, 0.5)).not.toBeNull()
+    expect(src.cellValueAt(0.2, 0.3)).toBe(10)
+    expect(src.cellValueAt(2.9, 0.1)).toBe(30)
+  })
+
+  it('reads null off the raster and for a computed DEM hole', () => {
+    expect(src.cellValueAt(-0.1, 0.5)).toBeNull()
+    expect(src.cellValueAt(3, 0.5)).toBeNull()
+    const dem = createProductRasterSource('dem', { width: 2, height: 1, gsd: 1, originX: 0, originY: 1,
+      data: new Float32Array([5, NaN]) })
+    expect(dem.cellValueAt(1.5, 0.5)).toBeNull()
+    expect(dem.cellValueAt(0.5, 0.5)).toBe(5)
   })
 })

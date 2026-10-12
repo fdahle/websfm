@@ -245,5 +245,18 @@ export function createScaling({
     })
   }
 
-  return { canFitScale, fitScaleBars, scaleBarReport, scaleFitStatus, measureBars }
+  // Every enabled marker that triangulates, in the SfM world frame — what the 2D
+  // map draws in its model frame (useMapProducts). The scale-bar endpoint path, so
+  // a marker sits in one place everywhere it is shown.
+  async function markerPositions() {
+    const out = []
+    for (const g of gcps()) {
+      if (g.role !== 'marker' || g.enabled === false) continue
+      const r = await endpointPosition({ kind: 'marker', id: g.id })
+      if (r.pos) out.push({ id: g.id, name: g.name, pos: r.pos })
+    }
+    return out
+  }
+
+  return { canFitScale, fitScaleBars, scaleBarReport, scaleFitStatus, measureBars, markerPositions }
 }

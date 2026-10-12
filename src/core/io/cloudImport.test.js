@@ -1,8 +1,15 @@
 import { describe, it, expect } from 'vitest'
-import { sniffCloudFormat, looksLikeXyzText, parseCloudFile, cloudStats, applyImportTransform } from './cloudImport.js'
-import { cloudToPly } from '../products/exporters.js'
-import { cloudToLas } from './las.js'
-import { cloudToXyz } from './cloudText.js'
+import { sniffCloudFormat, looksLikeXyzText, parseCloudFile, parseCloudSource, cloudStats, applyImportTransform } from './cloudImport.js'
+import { blobSource } from '../../utils/blobParts.js'
+import { cloudToPlyParts } from '../products/exporters.js'
+import { cloudToLasParts } from './las.js'
+import { cloudToXyzParts } from './cloudText.js'
+import { joinParts } from './parts.js'
+
+// The writers yield bounded parts (core/io/parts.js); these join them for small fixtures.
+const cloudToPly = (...a) => joinParts(cloudToPlyParts(...a))
+const cloudToLas = (...a) => joinParts(cloudToLasParts(...a))
+const cloudToXyz = (...a) => joinParts(cloudToXyzParts(...a))
 
 describe('sniffCloudFormat', () => {
   it('detects LAS/PLY by magic bytes regardless of name', () => {
@@ -88,5 +95,26 @@ describe('applyImportTransform', () => {
   it('returns the input untouched with default settings', () => {
     const parsed = { count: 1, pos: Float64Array.from([1, 2, 3]) }
     expect(applyImportTransform(parsed, {})).toBe(parsed)
+  })
+})
+
+describe('parseCloudSource — streaming dispatch', () => {
+  const pts = [{ x: 1, y: 2, z: 3, color: [10, 20, 30] }, { x: 4, y: 5, z: 6, color: [1, 2, 3] }]
+  const plain = (r) => JSON.parse(JSON.stringify(r, (k, v) => (ArrayBuffer.isView(v) ? [v.constructor.name, ...v] : v)))
+  const files = {
+    'a.ply': cloudToPly(pts, { binary: false }),
+    'b.ply': cloudToPly(pts),
+    'c.las': cloudToLas(pts),
+    'd.xyz': cloudToXyz(pts),
+  }
+  for (const [name, data] of Object.entries(files)) {
+    it(`${name}: same result as parseCloudFile on the bytes`, async () => {
+      const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : data
+      const src = blobSource(new Blob([bytes]), name)
+      expect(plain(await parseCloudSource(src))).toEqual(plain(parseCloudFile(bytes, name)))
+    })
+  }
+  it('rejects an unrecognized format', async () => {
+    await expect(parseCloudSource(blobSource(new Blob(['name,x']), 'g.csv'))).rejects.toThrow(/Unrecognized/)
   })
 })

@@ -56,11 +56,6 @@ export function regionMask(pos, count, r) {
   return { keep, kept }
 }
 
-/** Sparse point objects ({x,y,z}) inside the region. */
-export function pointsInRegion(points, r) {
-  return points.filter((p) => regionContains(r, p.x, p.y, p.z))
-}
-
 /**
  * A robust box around a set of positions: the per-axis [q, 1−q] quantiles, grown
  * by `margin` × the extent — so a handful of stray sparse points does not set the

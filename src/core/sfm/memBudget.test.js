@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   projectSparsePeakBytes, projectSparsePeakBreakdownBytes, sparseMemoryDecision, SPARSE_MEMORY_MODEL, planSparseRun,
+  projectSolverWasmBytes, WASM_SOLVER_LIMIT_BYTES,
 } from './memBudget.js'
 
 const GiB = 1024 ** 3
@@ -90,5 +91,30 @@ describe('planSparseRun', () => {
 
   it('never turns guided extension on', () => {
     expect(planSparseRun({ guided: false, project, decide: decide(1) })).toMatchObject({ safe: false, guided: false })
+  })
+})
+
+describe('bundle-adjustment solver memory (wasm32)', () => {
+  it('grows linearly in cameras once they outnumber the co-visible partners', () => {
+    // Block-sparse reduced system: doubling the cameras (with the observations)
+    // about doubles the solver, it does not quadruple it.
+    const a = projectSolverWasmBytes({ cameras: 2000, observations: 4e6 })
+    const b = projectSolverWasmBytes({ cameras: 4000, observations: 8e6 })
+    expect(b / a).toBeGreaterThan(1.6) // the dense-Cholesky term is a constant ≤ 256 MiB
+    expect(b / a).toBeLessThan(2.2)
+  })
+  it('fits 5,000 cameras with 10 M observations, which the dense system could not', () => {
+    const p = projectSparsePeakBreakdownBytes({ keypointCount: 5000 * 8000, matchCount: 12e6, imageCount: 5000 })
+    expect(p.wasmSolverSafe).toBe(true)
+    expect(p.solverWasmBytes).toBeLessThan(WASM_SOLVER_LIMIT_BYTES)
+    // A dense 30,000² reduced system alone is 7.2 GB.
+    expect(8 * (6 * 5000) ** 2).toBeGreaterThan(4 * GiB)
+  })
+  it('refuses a run whose solver would not fit in wasm memory, guided or not', () => {
+    const project = () => ({ wasmSolverSafe: false })
+    const decide = () => ({ renderer: { safe: true }, worker: { safe: true } })
+    expect(planSparseRun({ guided: true, project, decide })).toMatchObject({ safe: false })
+    const huge = projectSparsePeakBreakdownBytes({ keypointCount: 60e6, matchCount: 80e6, imageCount: 8000 })
+    expect(huge.wasmSolverSafe).toBe(false)
   })
 })

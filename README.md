@@ -97,8 +97,9 @@ writing a shared folder.
 SfM ZIP extraction runs in a worker with limits of 1 GiB compressed, 512 MiB
 selected output, 256 MiB per entry, 20,000 entries and a 200:1 expansion ratio.
 LAS/LAZ imports have a 1 GiB estimated working-memory budget; the WASM decompressor
-also caps raw records at 512 MiB. DEM staging and raster allocations each have a
-512 MiB budget. Split or subsample larger inputs. CSV exports prefix potentially
+also caps raw records at 512 MiB. DEM point staging (24 B per in-region point) and
+the DEM grid share the memory budget set in Settings ▸ Compute. Split or subsample
+larger inputs. CSV exports prefix potentially
 executable **text** with an apostrophe; numerical coordinates remain numbers.
 That protective apostrophe is part of the exported value when reimported.
 

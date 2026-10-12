@@ -68,3 +68,27 @@ it('drops the in-memory descriptors once a persistent project has saved them, ke
   expect(store.images[0].descriptors).toBeNull()
   expect(store.images[1].descriptors).toBeInstanceOf(Float32Array)
 })
+
+it('keeps a fresh detection resident and pinned until both keypoint sidecars are saved', async () => {
+  const opfs = await import('../utils/opfs.js')
+  const projects = useProjectsStore()
+  projects.persistenceAvailable = true
+  projects.currentProjectId = 'p1'
+  let release
+  const gate = new Promise((resolve) => { release = resolve })
+  vi.spyOn(opfs, 'saveKeypoints').mockImplementation(() => gate)
+  vi.spyOn(opfs, 'saveColors').mockResolvedValue()
+  vi.spyOn(opfs, 'saveDescriptors').mockResolvedValue()
+  vi.spyOn(opfs, 'writeProject').mockResolvedValue()
+  const store = setup(1)
+  detectKeypoints.mockResolvedValue({ keypoints: { data: new Float32Array(12), rgb: null }, descriptors: new Float32Array(256), ms: 1 })
+  await store.detectAll({ maxDim: 1200 })
+  const img = store.images[0]
+  expect(img).toMatchObject({ kpStatus: 'done', kpCount: 2, kpRev: 1 })
+  expect(img.keypoints).toBeUndefined()
+  expect(store.residentKeypoints(img).length).toBe(2)
+  expect(store.keypointCacheStats()).toMatchObject({ pinned: 1, pinnedBytes: 48 })
+  release()
+  await vi.waitFor(() => expect(store.keypointCacheStats().pinned).toBe(0))
+  expect(store.residentKeypoints(img).length).toBe(2) // still resident, now evictable
+})

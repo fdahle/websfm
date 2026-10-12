@@ -1,10 +1,16 @@
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import { asPairList } from '../../core/sfm/matchCodec.js'
 
 const props = defineProps({
   imageA: { type: Object, required: true },
   imageB: { type: Object, required: true },
-  matches: { type: Array, default: () => [] },  // [[ia, ib], ...]
+  // The two images' keypoints (core/features/keypoints.js). Not on the image records —
+  // the host loads them on demand (useImagesStore.ensureKeypoints); null while loading.
+  keypointsA: { type: Object, default: null },
+  keypointsB: { type: Object, default: null },
+  // Flat Uint32Array [ia0, ib0, ia1, ib1, …] (the match store's shape) or [[ia, ib], …].
+  matches: { type: [Uint32Array, Array], default: () => new Uint32Array(0) },
   // Correspondences that became surviving tie-points in the sparse model, as a
   // Set of "ia:ib" keys (kpIdx in the same sorted-uuid order as `matches`). When
   // provided, matches are two-tone: green = aligned (used in the cloud), red =
@@ -12,6 +18,8 @@ const props = defineProps({
   // every inlier one neutral colour (nothing to distinguish pre-alignment).
   usedKeys: { type: Object, default: null },
 })
+// Read as [ia, ib] pairs whatever the shape (core/sfm/matchCodec.js).
+const pairList = computed(() => asPairList(props.matches))
 
 // aligned / unused / via-PnP split for the status-bar legend (only meaningful with
 // usedKeys). `used` = direct matches that triangulated; `unused` = verified inliers
@@ -22,8 +30,9 @@ const props = defineProps({
 const usedStats = computed(() => {
   if (!props.usedKeys) return null
   let used = 0
-  for (const [ia, ib] of props.matches) if (props.usedKeys.has(`${ia}:${ib}`)) used++
-  const unused = props.matches.length - used
+  const list = pairList.value
+  for (const [ia, ib] of list) if (props.usedKeys.has(`${ia}:${ib}`)) used++
+  const unused = list.length - used
   const viaPnp = Math.max(0, props.usedKeys.size - used)
   return { used, unused, viaPnp }
 })
@@ -155,19 +164,20 @@ function drawOverlay() {
   const rOx = rcRect.left - panelsRect.left
   const rOy = rcRect.top  - panelsRect.top
 
-  const kpsA   = props.imageA.keypoints || []
-  const kpsB   = props.imageB.keypoints || []
-  const pairs  = props.matches || []
+  // Typed keypoints (core/features/keypoints.js), read by index.
+  const kpsA   = props.keypointsA
+  const kpsB   = props.keypointsB
+  const pairs  = pairList.value
 
-  if (!li?.naturalWidth || !ri?.naturalWidth || !pairs.length) return
+  if (!li?.naturalWidth || !ri?.naturalWidth || !pairs.length || !kpsA?.length || !kpsB?.length) return
 
   const lNW = li.naturalWidth,  lNH = li.naturalHeight
   const rNW = ri.naturalWidth,  rNH = ri.naturalHeight
   const ls = L.value.scale, ltx = L.value.tx + lOx, lty = L.value.ty + lOy
   const rs = R.value.scale, rtx = R.value.tx + rOx, rty = R.value.ty + rOy
 
-  function lPos(kp) { return { x: kp.nx * lNW * ls + ltx, y: kp.ny * lNH * ls + lty } }
-  function rPos(kp) { return { x: kp.nx * rNW * rs + rtx, y: kp.ny * rNH * rs + rty } }
+  function lPos(i) { return { x: kpsA.nx(i) * lNW * ls + ltx, y: kpsA.ny(i) * lNH * ls + lty } }
+  function rPos(i) { return { x: kpsB.nx(i) * rNW * rs + rtx, y: kpsB.ny(i) * rNH * rs + rty } }
 
   const used = props.usedKeys
   const colorOf = (ia, ib) =>
@@ -179,15 +189,15 @@ function drawOverlay() {
   ctx.lineWidth = 1
   const drawLines = (wantUsed) => {
     for (const [ia, ib] of pairs) {
-      const a = kpsA[ia], b = kpsB[ib]
-      if (!a || !b) continue
+      if (ia >= kpsA.length || ib >= kpsB.length) continue
       const isUsed = used ? used.has(`${ia}:${ib}`) : true
       if (used && isUsed !== wantUsed) continue
       ctx.globalAlpha = used ? (isUsed ? 0.45 : 0.2) : 0.35
       ctx.strokeStyle = colorOf(ia, ib)
       ctx.beginPath()
-      ctx.moveTo(lPos(a).x, lPos(a).y)
-      ctx.lineTo(rPos(b).x, rPos(b).y)
+      const a = lPos(ia), b = rPos(ib)
+      ctx.moveTo(a.x, a.y)
+      ctx.lineTo(b.x, b.y)
       ctx.stroke()
     }
   }
@@ -212,9 +222,9 @@ function drawOverlay() {
     }
     for (const [ia, ib] of pairs) {
       if (used && hideUnused.value && !used.has(`${ia}:${ib}`)) continue
-      const kp = kps[side === 'L' ? ia : ib]
-      if (!kp) continue
-      const p = pos(kp)
+      const k = side === 'L' ? ia : ib
+      if (k >= kps.length) continue
+      const p = pos(k)
       ctx.fillStyle = colorOf(ia, ib)
       ctx.beginPath()
       ctx.arc(p.x, p.y, DOT, 0, Math.PI * 2)
@@ -252,8 +262,8 @@ watch(() => props.matches,          () => drawOverlay(), { deep: false })
 watch(() => props.usedKeys,         () => drawOverlay())
 watch(hideUnused,                   () => drawOverlay())
 watch(spillPoints,                  () => drawOverlay())
-watch(() => props.imageA.keypoints, () => drawOverlay())
-watch(() => props.imageB.keypoints, () => drawOverlay())
+watch(() => props.keypointsA,       () => drawOverlay())
+watch(() => props.keypointsB,       () => drawOverlay())
 
 function onImgLoad(side) {
   fit(side)

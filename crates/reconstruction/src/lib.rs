@@ -19,6 +19,14 @@ mod mvs;
 mod tests {
     use super::*;
 
+    // The tests build observations as [cam, pt, x, y] floats; bundle_adjust takes the
+    // indices as u32 and the pixels as f32.
+    fn split_obs(obs: &[f32]) -> (Vec<u32>, Vec<f32>) {
+        let idx = obs.chunks(4).flat_map(|o| [o[0] as u32, o[1] as u32]).collect();
+        let px = obs.chunks(4).flat_map(|o| [o[2], o[3]]).collect();
+        (idx, px)
+    }
+
     // Frobenius distance between two 3×3 matrices.
     fn mat_diff(a: &M3, b: &M3) -> f64 {
         let mut s = 0.0;
@@ -242,7 +250,7 @@ mod tests {
             pt_flat.push((x[2] + d * 0.5) as f32);
         }
 
-        let out = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &obs, &[], &[], &[], &[], 60, &[], 0, &[]);
+        let out = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &split_obs(&obs).0, &split_obs(&obs).1, &[], &[], &[], &[], 60, &[], 0, &[], &[]);
         let base = n_cam * 12 + n_pts * 3 + n_cam * 7;
         // cameras + points + intrinsics (7 each: fx,fy,cx,cy,k1,k2,k3) + [cost_before, cost_after] + trace.
         assert!(out.len() >= base + 4, "unexpected BA output length");
@@ -312,7 +320,7 @@ mod tests {
             pt_flat.push((x[2] + d * 0.5) as f32);
         }
 
-        let out = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &obs, &[], &[], &[], &[], 80, &[], 0, &[]);
+        let out = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &split_obs(&obs).0, &split_obs(&obs).1, &[], &[], &[], &[], 80, &[], 0, &[], &[]);
         let base = n_cam * 12 + n_pts * 3 + n_cam * 7;
         let cost_before = out[base];
         let cost_after = out[base + 1];
@@ -326,6 +334,19 @@ mod tests {
         assert!(cost_after < cost_before, "BA did not reduce cost under noise: {cost_before} -> {cost_after}");
         // ±0.5px uniform noise ⇒ RMS floor ≈ 0.41px; converge near it, not the start.
         assert!(cost_after < 0.7, "BA did not reach the noise floor: {cost_after}px");
+
+        // The function-tolerance stop (solver slot 4): the same problem must reach the
+        // same floor in fewer iterations — without it, LM keeps accepting ever-smaller
+        // improvements until max_iters, which on St Nazaire (1.45 M observations) cost
+        // ~4 s per wasted iteration.
+        let tol = [f32::NAN, f32::NAN, f32::NAN, f32::NAN, 1e-6];
+        let out_tol = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &split_obs(&obs).0, &split_obs(&obs).1, &[], &[], &[], &[], 80, &[], 0, &tol, &[]);
+        let cost_after_tol = out_tol[base + 1];
+        let trace_tol = &out_tol[base + 4 + crate::bundle::BA_STATS_LEN..];
+        assert!(trace_tol.len() < trace.len(),
+            "tolerance did not stop early: {} vs {} iterations", trace_tol.len(), trace.len());
+        assert!((cost_after_tol - cost_after).abs() < 1e-3,
+            "early stop changed the result: {cost_after_tol} vs {cost_after} px");
     }
 
     // Self-calibration (A2): a scene rendered with the TRUE focal, but BA seeded
@@ -375,7 +396,7 @@ mod tests {
         let mut pt_flat: Vec<f32> = Vec::new();
         for x in &gt_pts { for &v in x { pt_flat.push(v as f32); } }
 
-        let out = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &obs, &[], &[], &[], &[], 100, &sensor_of_cam, 1, &[]);
+        let out = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &split_obs(&obs).0, &split_obs(&obs).1, &[], &[], &[], &[], 100, &sensor_of_cam, 1, &[], &[]);
         let intr_base = n_cam * 12 + n_pts * 3;
         let cost_after = out[intr_base + n_cam * 7 + 1];
         // Refined focal is returned per camera; sharing ⇒ all equal, ≈ f_true.
@@ -439,11 +460,11 @@ mod tests {
         let mut pt_flat: Vec<f32> = Vec::new();
         for x in &render_pts { for &v in x { pt_flat.push(v as f32); } }
 
-        let anchor_flat: Vec<f32> = vec![0.0, anchor_target[0] as f32, anchor_target[1] as f32, anchor_target[2] as f32];
+        let anchor_flat: Vec<f64> = vec![0.0, anchor_target[0], anchor_target[1], anchor_target[2]];
         let anchor_weight: Vec<f32> = vec![1e4, 0.0, 0.0, 0.0, 1e4, 0.0, 0.0, 0.0, 1e4];
 
-        let out_no_anchor = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &obs, &[], &[], &[], &[], 60, &[], 0, &[]);
-        let out_anchor = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &obs, &[], &anchor_flat, &anchor_weight, &[], 60, &[], 0, &[]);
+        let out_no_anchor = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &split_obs(&obs).0, &split_obs(&obs).1, &[], &[], &[], &[], 60, &[], 0, &[], &[]);
+        let out_anchor = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &split_obs(&obs).0, &split_obs(&obs).1, &[], &anchor_flat, &anchor_weight, &[], 60, &[], 0, &[], &[]);
 
         let pts_base = n_cam * 12;
         let dist = |out: &Vec<f32>| -> f64 {
@@ -515,7 +536,7 @@ mod tests {
         ]); }
 
         let out = bundle_adjust(
-            &cam_flat, &k_flat, &pt_flat, &obs, &[], &[], &[], &prior_flat, 80, &[], 0, &[],
+            &cam_flat, &k_flat, &pt_flat, &split_obs(&obs).0, &split_obs(&obs).1, &[], &[], &[], &prior_flat, 80, &[], 0, &[], &[],
         );
         let base = n_cam * 12 + n_pts * 3 + n_cam * 7;
         assert!(out[base + 3] < 1e-3,
@@ -571,7 +592,7 @@ mod tests {
             pt_flat.extend_from_slice(&[rotated[0] as f32, rotated[1] as f32, rotated[2] as f32]);
         }
         let out = bundle_adjust(
-            &cam_flat, &k_flat, &pt_flat, &obs, &[], &[], &[], &prior_flat, 80, &[], 0, &[],
+            &cam_flat, &k_flat, &pt_flat, &split_obs(&obs).0, &split_obs(&obs).1, &[], &[], &[], &prior_flat, 80, &[], 0, &[], &[],
         );
         let mut angular_sse = 0.0;
         for (ci, (target_r, _)) in gt_cams.iter().enumerate() {
@@ -736,7 +757,7 @@ mod tests {
         for x in &gt_pts { for &v in x { pt_flat.push(v as f32); } }
 
         // refine_mask 5 = f | k1 (bits 1 and 4).
-        let out = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &obs, &[], &[], &[], &[], 100, &sensor_of_cam, 5, &[]);
+        let out = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &split_obs(&obs).0, &split_obs(&obs).1, &[], &[], &[], &[], 100, &sensor_of_cam, 5, &[], &[]);
         let intr_base = n_cam * 12 + n_pts * 3;
         let cost_before = out[intr_base + n_cam * 7];
         let cost_after = out[intr_base + n_cam * 7 + 1];
@@ -796,7 +817,7 @@ mod tests {
         let mut pt_flat: Vec<f32> = Vec::new();
         for x in &gt_pts { for &v in x { pt_flat.push(v as f32); } }
 
-        let out = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &obs, &[], &[], &[], &[], 120, &sensor_of_cam, 13, &[]);
+        let out = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &split_obs(&obs).0, &split_obs(&obs).1, &[], &[], &[], &[], 120, &sensor_of_cam, 13, &[], &[]);
         let intr_base = n_cam * 12 + n_pts * 3;
         let cost_after = out[intr_base + n_cam * 7 + 1];
         for c in 0..n_cam {

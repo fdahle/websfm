@@ -4,20 +4,31 @@ import Icon from '../Icon.vue'
 import FloatingToolbox from './FloatingToolbox.vue'
 import { useMeasurementsStore } from '../../stores/useMeasurementsStore.js'
 import { measurementSource, measurementStamp, measurementStale } from '../../core/products/measurementRecord.js'
-import { pixelToWorld } from '../../core/io/rasterSample.js'
+import { pixelToWorld, worldToPixel } from '../../core/io/rasterSample.js'
 import { polylineLength, planimetricArea, sampleProfile, polygonVolume, groundVolume } from '../../core/products/measure.js'
-import { isGeographic, linearCrsUnit, ensureProjection, transform, metresPerCrsUnit } from '../../core/crs.js'
-import { pointScaleFactor } from '../../core/products/localFrame.js'
+import { isGeographic } from '../../core/crs.js'
+import { rasterGroundScale, rasterUnits, volumeUnitLabel } from '../../core/products/rasterUnits.js'
 
 // Raster measurements over the active ProductViewer. The tool is CHOSEN from the
 // Ribbon's contextual DEM/Orthophoto tab (Measure group) — this component only
 // draws: a slim drawing bar while a tool is active, the geometry overlay, a result
 // card, and the saved-measurement list. ProductViewer re-exposes `state` /
 // `setTool` / `toggleSaved` so the Ribbon can show which tool is on.
+//
+// Host-agnostic on purpose (the raster tab and the 2D map host it): values come only
+// from `source` (a RasterSource, computed or imported alike) and screen geometry
+// only from `view`, so the same tool can run over the product tab and the map.
+//   view: { toScreen(wx, wy) → {x, y}, fromScreen(sx, sy) → {x, y} } in the
+//         RASTER's own world frame. The host replaces the object whenever its
+//         transform changes, which is what re-renders the overlay.
+// All measuring happens in the raster's frame; a host's reprojection only ever
+// touches drawing and input.
 
 const props = defineProps({
   product: Object, source: Object, descriptor: Object, frameStatus: Object,
-  kind: String, scale: Number, tx: Number, ty: Number,
+  kind: String, view: Object,
+  // How this host pans while a tool is active (the hint line names it).
+  panHint: { type: String, default: 'Shift-drag pans' },
 })
 
 const TOOLS = {
@@ -35,42 +46,43 @@ const records = computed(() => saved.records.filter(r => r.source === sourceKey.
 const selected = computed(() => records.value.find(r => r.id === selectedId.value))
 const stale = computed(() => selected.value && measurementStale(selected.value, props.product, props.frameStatus))
 const tool = ref('pan')
+// Raster-world {x, y}; saved records also keep the pixel form (see saveMeasurement).
 const vertices = ref([])
 const finished = ref(false)
-const unit = computed(() => selected.value?.unit || (props.product?.unit === 'model' ? 'model units'
-  : props.product?.unit || (props.product?.crs && props.product.crs !== 'local' ? linearCrsUnit(props.product.crs) : 'model units')))
-const verticalUnit = computed(() => selected.value?.verticalUnit || props.product?.verticalUnit || unit.value)
-const unavailable = computed(() => !props.descriptor || props.frameStatus?.stale || props.product?.crsUnresolved
+// A saved record keeps the units it was measured in; live drawing asks the raster.
+const productUnits = computed(() => rasterUnits(props.product))
+const unit = computed(() => selected.value?.unit || productUnits.value.horizontal)
+const verticalUnit = computed(() => selected.value?.verticalUnit || productUnits.value.vertical)
+const unavailable = computed(() => !props.descriptor || !props.view || props.frameStatus?.stale || props.product?.crsUnresolved
   || (props.product?.crs && isGeographic(props.product.crs)))
 const grid = computed(() => {
   if (props.kind !== 'dem' || !props.descriptor) return null
-  const data = props.source?.unsafePlane() ?? props.product?.data
+  const data = props.source?.unsafePlane()
   // zOffset: a reference DEM's declared vertical offset, the same correction
   // sampleReferenceDem applies — the measurement stamp already records it.
   return data ? { ...props.descriptor, data, mask: props.product?.mask, nodata: props.product?.nodata,
     zOffset: props.product?.vOffset || 0 } : null
 })
-const world = computed(() => selected.value?.world ?? vertices.value.map(p => pixelToWorld(props.descriptor, p.x, p.y)))
-// Point scale factor of the raster's projected CRS at its centre: grid lengths are
-// ground lengths × k, so every horizontal quantity below is divided back to ground
-// (localFrame.js / measure.js groundVolume). 1 for local/model frames.
+const world = computed(() => selected.value?.world ?? vertices.value)
+// Point scale factor of the raster's projected CRS at its centre (rasterUnits.js):
+// every horizontal quantity below is divided back to ground. 1 for local/model
+// frames; a geographic CRS has none, and measuring is disabled for it.
 const gridScale = ref(1)
 let scaleToken = 0
 watch([() => props.product?.crs, () => props.descriptor], async ([crs, desc]) => {
   const token = ++scaleToken
   gridScale.value = 1
-  if (!crs || crs === 'local' || !desc) return
   try {
-    await ensureProjection(crs)
-    if (token !== scaleToken || isGeographic(crs)) return
-    const c = pixelToWorld(desc, desc.width / 2, desc.height / 2)
-    const k = pointScaleFactor((xy) => transform(xy, crs, 'EPSG:4326'), c.x, c.y, { metresPerUnit: metresPerCrsUnit(crs) ?? 1 })
-    if (token === scaleToken && k > 0) gridScale.value = k
+    const k = await rasterGroundScale(desc, crs)
+    if (token === scaleToken && k != null) gridScale.value = k
   } catch { /* unresolvable CRS: measuring is already disabled for it */ }
 }, { immediate: true })
-const distance = computed(() => polylineLength(world.value) / gridScale.value)
-const area = computed(() => { const a = planimetricArea(world.value); return a == null ? a : a / gridScale.value ** 2 })
-const perimeter = computed(() => (world.value.length > 2 ? polylineLength([...world.value, world.value[0]]) / gridScale.value : 0))
+// A reopened record reads with the scale it was saved with, so its numbers stay
+// the ones that were saved.
+const recordScale = computed(() => selected.value?.groundScale ?? gridScale.value)
+const distance = computed(() => polylineLength(world.value) / recordScale.value)
+const area = computed(() => { const a = planimetricArea(world.value); return a == null ? a : a / recordScale.value ** 2 })
+const perimeter = computed(() => (world.value.length > 2 ? polylineLength([...world.value, world.value[0]]) / recordScale.value : 0))
 const profile = computed(() => selected.value?.profile ?? (tool.value === 'profile' && grid.value
   ? sampleProfile(grid.value, world.value).map((p) => ({ ...p, distance: p.distance / gridScale.value })) : []))
 
@@ -86,7 +98,7 @@ const volume = computed(() => {
   const h = baseHeight.value
   return groundVolume(polygonVolume(grid.value, world.value, { base: baseKind.value, height: h === '' || h == null ? null : Number(h) }), gridScale.value)
 })
-const volumeUnit = computed(() => (verticalUnit.value === unit.value ? `${unit.value}³` : `${unit.value}²·${verticalUnit.value}`))
+const volumeUnit = computed(() => volumeUnitLabel({ horizontal: unit.value, vertical: verticalUnit.value }))
 const VOLUME_ERRORS = {
   'self-intersecting': 'The polygon crosses itself — move or undo a point.',
   base: 'Base undetermined: the plane needs three non-collinear vertices on valid DEM cells, the lowest point needs one, a custom base needs a height.',
@@ -159,10 +171,11 @@ const canSave = computed(() => !unavailable.value && !result.value.error && vert
 const hint = computed(() => {
   if (finished.value) return 'Click to start a new measurement'
   const need = (TOOLS[tool.value]?.min ?? 2) - vertices.value.length
-  return need > 0 ? `Click ${need === 1 ? 'one more point' : `${need} points`} · Shift-drag pans`
-    : 'Click to add points · Enter finishes · Shift-drag pans'
+  return need > 0 ? `Click ${need === 1 ? 'one more point' : `${need} points`} · ${props.panHint}`
+    : `Click to add points · Enter finishes · ${props.panHint}`
 })
-const screenPoints = computed(() => vertices.value.map(p => `${props.tx + p.x * props.scale},${props.ty + p.y * props.scale}`).join(' '))
+const screenVertices = computed(() => (props.view ? vertices.value.map(p => props.view.toScreen(p.x, p.y)) : []))
+const screenPoints = computed(() => screenVertices.value.map(p => `${p.x},${p.y}`).join(' '))
 const closedShape = computed(() => (shownKind.value === 'area' || shownKind.value === 'volume') && vertices.value.length > 2)
 
 function reset() { selectedId.value = ''; name.value = ''; vertices.value = []; finished.value = false }
@@ -173,17 +186,21 @@ function toggleSaved() { showSaved.value = !showSaved.value }
 function pick(x, y) {
   if (tool.value === 'pan' || unavailable.value || stale.value) return false
   if (finished.value) reset()
-  const px = (x - props.tx) / props.scale, py = (y - props.ty) / props.scale
-  if (px >= 0 && py >= 0 && px < props.product.width && py < props.product.height)
-    vertices.value.push({ x: px, y: py })
+  const w = props.view.fromScreen(x, y)
+  const px = w && worldToPixel(props.descriptor, w.x, w.y)
+  if (px && px.col >= 0 && px.row >= 0 && px.col < props.descriptor.width && px.row < props.descriptor.height)
+    vertices.value.push({ x: w.x, y: w.y })
   return true
 }
 function finish() { if (vertices.value.length >= (TOOLS[tool.value]?.min ?? 2)) finished.value = true }
 function saveMeasurement() {
   selectedId.value = saved.add({ name: name.value.trim() || `${TOOLS[tool.value].label} ${records.value.length + 1}`,
     source: sourceKey.value, stamp: measurementStamp(props.product), kind: tool.value,
-    vertices: vertices.value, world: world.value, distance: distance.value, area: area.value,
-    unit: unit.value, verticalUnit: props.product?.verticalUnit || unit.value, groundScale: gridScale.value,
+    // `vertices` (pixel) is what older records hold and what the store validates;
+    // `world` is what reopening reads.
+    vertices: vertices.value.map(p => { const c = worldToPixel(props.descriptor, p.x, p.y); return { x: c.col, y: c.row } }),
+    world: vertices.value.map(p => ({ x: p.x, y: p.y })), distance: distance.value, area: area.value,
+    unit: unit.value, verticalUnit: verticalUnit.value, groundScale: gridScale.value,
     profile: tool.value === 'profile' ? profile.value : null,
     volume: tool.value === 'volume' ? volume.value : null })
   name.value = selected.value?.name ?? ''
@@ -193,7 +210,8 @@ function openMeasurement(id) {
   selectedId.value = id
   const r = selected.value
   if (!r) { reset(); return }
-  tool.value = r.kind; vertices.value = r.vertices.map(p => ({ ...p })); name.value = r.name; finished.value = true
+  const pts = r.world ?? r.vertices.map(p => pixelToWorld(props.descriptor, p.x, p.y))
+  tool.value = r.kind; vertices.value = pts.map(p => ({ x: p.x, y: p.y })); name.value = r.name; finished.value = true
 }
 function deleteMeasurement() { saved.remove(selectedId.value); reset() }
 function recordValue(r) {
@@ -201,7 +219,7 @@ function recordValue(r) {
   if (r.kind === 'area') return r.area == null ? '—' : `${num(r.area)} ${u}²`
   if (r.kind === 'volume') {
     if (!r.volume || r.volume.error) return '—'
-    const v = r.verticalUnit && r.verticalUnit !== u ? `${u}²·${r.verticalUnit}` : `${u}³`
+    const v = volumeUnitLabel({ horizontal: u, vertical: r.verticalUnit || u })
     return `${r.volume.net.toLocaleString(undefined, { maximumFractionDigits: 2 })} ${v}`
   }
   return `${num(r.distance)} ${u}`
@@ -249,7 +267,7 @@ defineExpose({ pick, active: computed(() => tool.value !== 'pan'), state, setToo
     <svg v-if="vertices.length && !stale" class="measure-overlay" aria-label="Measurement geometry">
       <polygon v-if="closedShape" :points="screenPoints" class="geom geom-fill" />
       <polyline v-else :points="screenPoints" class="geom" />
-      <circle v-for="(p, i) in vertices" :key="i" :cx="tx + p.x * scale" :cy="ty + p.y * scale" r="4" class="vertex" />
+      <circle v-for="(p, i) in screenVertices" :key="i" :cx="p.x" :cy="p.y" r="4" class="vertex" />
     </svg>
 
     <!-- The measuring tool's toolbox: the ribbon (raster ▸ Measure) picks the tool. -->

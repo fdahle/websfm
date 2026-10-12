@@ -446,7 +446,9 @@ export const useExternalStore = registerProjectStore(defineStore('external', () 
       if (rx < minX || rx > maxX || ry < minY || ry > maxY) continue
       const source = sources.value.get(meta.id)
       if (!source) return { id: meta.id, name: meta.name, kind: meta.kind, loaded: false, value: null }
-      const raw = meta.kind === 'dem' ? source.sampleAt(rx, ry) : null
+      // The cell under the cursor, not an interpolated/neighbour value: a nodata
+      // hole must read as no data on the map too.
+      const raw = meta.kind === 'dem' ? source.cellValueAt(rx, ry) : null
       return {
         id: meta.id,
         name: meta.name,

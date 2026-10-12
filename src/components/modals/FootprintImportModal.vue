@@ -2,6 +2,7 @@
 import { ref, computed } from 'vue'
 import CrsPicker from '../controls/CrsPicker.vue'
 import { geoJsonToFootprints, guessNameKey } from '../../core/io/geojson.js'
+import { makeNameResolver } from '../../core/io/nameMatch.js'
 
 const props = defineProps({
   features:     { type: Array,  default: () => [] },
@@ -19,15 +20,13 @@ const nameKey = ref(guessNameKey(props.propertyKeys))
 // Footprints rebuilt whenever the chosen name field changes.
 const built = computed(() => geoJsonToFootprints(props.features, nameKey.value))
 
-// Resolve an image name to an image (case-insensitive, extension-tolerant) — mirrors useFootprints.
+// Resolve an image name to an image id with THE name rule (core/io/nameMatch.js) —
+// the one useFootprintsStore links the imported footprints with, so the preview's
+// "matched" count is the import's. Indexed once per image list: a per-footprint scan
+// of every image was O(footprints × images) per keystroke in the name-field select.
+const resolveImage = computed(() => makeNameResolver(props.images))
 function matchImage(imageName) {
-  if (!imageName) return null
-  const lc = imageName.toLowerCase()
-  const base = lc.replace(/\.[^.]+$/, '')
-  return props.images.find((img) => {
-    const n = img.name.toLowerCase()
-    return n === lc || n.replace(/\.[^.]+$/, '') === base
-  }) || null
+  return resolveImage.value(imageName)
 }
 
 const preview = computed(() =>

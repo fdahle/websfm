@@ -2,6 +2,7 @@ import { trackPersistence, persistenceLock, ignoreMissing } from './persistence.
 import { writeBinaryDocument, readBinaryDocument } from './binaryDocument.js'
 import { DEPTH_BIN_KEYS, planeBytes } from '../core/dense/depthMapCodec.js'
 import { mapConcurrent } from './concurrency.js'
+import { dataUrlToBlob } from '../core/mask.js'
 
 const FLOATS_PER_KP = 6 // x, y, nx, ny, scale, response
 
@@ -376,8 +377,19 @@ export async function saveImage(projectId, uuid, file) {
   })
 }
 
-export async function loadImageBlob(projectId, uuid) {
-  const dir = await getSubDir(projectId, 'images')
+// Directory handles for one batch of reads (a project restore): the root → project →
+// subdirectory walk once instead of once per file. A per-file walk is seven OPFS round
+// trips, and an origin's OPFS operations queue behind each other — quarry's 347
+// images held every other store's restore for ~9 s. Valid only while those
+// directories exist, so pass them to the loaders for that batch and drop them.
+export async function projectSubDirs(projectId, names) {
+  const out = {}
+  for (const n of names) out[n] = await getSubDir(projectId, n)
+  return out
+}
+
+export async function loadImageBlob(projectId, uuid, dirs = null) {
+  const dir = dirs?.images ?? await getSubDir(projectId, 'images')
   const fh = await dir.getFileHandle(uuid)
   return fh.getFile()
 }
@@ -397,9 +409,14 @@ export async function deleteImage(projectId, uuid) {
 // from the immutable original at any time, so absence is never an error.
 // NOTE: this cache assumes fixed transcode params (jpegQuality etc.); if those
 // ever become user-configurable it needs a version/params check to invalidate.
+// `kind` 'thumb' is the small list thumbnail (≤256 px JPEG, utils/thumbnail.js)
+// that every image gets, TIFF or not — same rules: recomputable, absence heals
+// lazily (useImagesStore.requestThumbnail).
+
+const DERIVED_KINDS = ['display', 'compute', 'thumb']
 
 async function derivedName(uuid, kind) {
-  return `${uuid}.${kind === 'compute' ? 'compute' : 'display'}`
+  return `${uuid}.${DERIVED_KINDS.includes(kind) ? kind : 'display'}`
 }
 
 export async function saveImageDerived(projectId, uuid, kind, blob) {
@@ -423,43 +440,47 @@ export async function deleteImageDerived(projectId, uuid) {
   return trackPersistence('deleteImageDerived:' + String(projectId) + ':' + String(uuid), async () => {
     try {
       const dir = await getSubDir(projectId, 'images-derived')
-      await dir.removeEntry(await derivedName(uuid, 'display')).catch(ignoreMissing)
-      await dir.removeEntry(await derivedName(uuid, 'compute')).catch(ignoreMissing)
+      for (const kind of DERIVED_KINDS) await dir.removeEntry(await derivedName(uuid, kind)).catch(ignoreMissing)
     } catch (error) { ignoreMissing(error) }
   })
 }
 
 // ── Keypoints ─────────────────────────────────────────────────────────────────
+// keypoints/{uuid}.bin is the Keypoints `data` buffer itself (Float32, KP_STRIDE = 6:
+// x, y, nx, ny, scale, response) and keypoint_colors/{uuid}.bin its `rgb` (Uint8,
+// N×3): core/features/keypoints.js. Saving writes them as they are, loading wraps the
+// bytes — no object per keypoint either way.
 
 export async function saveKeypoints(projectId, uuid, keypoints) {
   return trackPersistence('saveKeypoints:' + String(projectId) + ':' + String(uuid), async () => {
-    const buf = new Float32Array(keypoints.length * FLOATS_PER_KP)
-    keypoints.forEach((kp, i) => {
-      const o = i * FLOATS_PER_KP
-      buf[o] = kp.x; buf[o + 1] = kp.y; buf[o + 2] = kp.nx
-      buf[o + 3] = kp.ny; buf[o + 4] = kp.scale; buf[o + 5] = kp.response
-    })
     const dir = await getSubDir(projectId, 'keypoints')
-    await writeFileIn(dir, uuid + '.bin', buf.buffer)
+    await writeFileIn(dir, uuid + '.bin', keypoints.data)
   })
 }
 
+// The Float32 data buffer, or null when the file is missing or malformed.
 export async function loadKeypoints(projectId, uuid) {
   try {
     const dir = await getSubDir(projectId, 'keypoints')
-    const fh = await dir.getFileHandle(uuid + '.bin')
-    const file = await fh.getFile()
-    const buf = new Float32Array(await file.arrayBuffer())
-    const n = buf.length / FLOATS_PER_KP
-    const keypoints = []
-    for (let i = 0; i < n; i++) {
-      const o = i * FLOATS_PER_KP
-      keypoints.push({ x: buf[o], y: buf[o + 1], nx: buf[o + 2], ny: buf[o + 3], scale: buf[o + 4], response: buf[o + 5] })
-    }
-    return keypoints
+    const buffer = await (await (await dir.getFileHandle(uuid + '.bin')).getFile()).arrayBuffer()
+    if (buffer.byteLength % (FLOATS_PER_KP * 4)) return null
+    return new Float32Array(buffer)
   } catch {
     return null
   }
+}
+
+// The uuids that have a keypoint file — one directory listing, no file opened. A
+// project open reads this instead of the keypoints themselves (they load per image on
+// demand, useImagesStore.ensureKeypoints), so a missing sidecar still turns into
+// "re-run detection" at open rather than at the first viewer that asks.
+export async function listKeypointFiles(projectId) {
+  const uuids = new Set()
+  try {
+    const dir = await getSubDir(projectId, 'keypoints')
+    for await (const name of dir.keys()) if (name.endsWith('.bin')) uuids.add(name.slice(0, -4))
+  } catch { /* no directory ⇒ none */ }
+  return uuids
 }
 
 export async function deleteKeypoints(projectId, uuid) {
@@ -472,32 +493,22 @@ export async function deleteKeypoints(projectId, uuid) {
 }
 
 // ── Keypoint colours ────────────────────────────────────────────────────────
-// Per-keypoint RGB sampled at detection, stored separately from the packed
-// keypoint floats (Uint8Array, N×3) so the keypoint format stays back-compatible.
-// Parallel array to keypoints; used to colour the sparse cloud.
+// Per-keypoint RGB sampled at detection (Uint8Array, N×3), parallel to keypoints;
+// used to colour the sparse cloud. Absent ⇔ the keypoints carry no colour.
 
 export async function saveColors(projectId, uuid, keypoints) {
   return trackPersistence('saveColors:' + String(projectId) + ':' + String(uuid), async () => {
-    const buf = new Uint8Array(keypoints.length * 3)
-    keypoints.forEach((kp, i) => {
-      const c = kp.color
-      if (c) { buf[i * 3] = c[0]; buf[i * 3 + 1] = c[1]; buf[i * 3 + 2] = c[2] }
-    })
     const dir = await getSubDir(projectId, 'keypoint_colors')
-    await writeFileIn(dir, uuid + '.bin', buf.buffer)
+    if (keypoints.rgb) await writeFileIn(dir, uuid + '.bin', keypoints.rgb)
+    else await dir.removeEntry(uuid + '.bin').catch(ignoreMissing)
   })
 }
 
+// The Uint8 rgb buffer, or null.
 export async function loadColors(projectId, uuid) {
   try {
     const dir = await getSubDir(projectId, 'keypoint_colors')
-    const fh = await dir.getFileHandle(uuid + '.bin')
-    const file = await fh.getFile()
-    const buf = new Uint8Array(await file.arrayBuffer())
-    const n = Math.floor(buf.length / 3)
-    const colors = new Array(n)
-    for (let i = 0; i < n; i++) colors[i] = [buf[i * 3], buf[i * 3 + 1], buf[i * 3 + 2]]
-    return colors
+    return new Uint8Array(await (await (await dir.getFileHandle(uuid + '.bin')).getFile()).arrayBuffer())
   } catch {
     return null
   }
@@ -535,45 +546,90 @@ export async function deleteDescriptors(projectId, uuid) {
 }
 
 // ── Matches ───────────────────────────────────────────────────────────────────
-// JSON: { idA, idB, rawCount, inlierCount, F, matches: [[ia,ib],...], disabled, weak }
-//   weak: valid-F pair below the accept gate — kept as a PnP registration bridge only.
-// pairId = sorted([uuidA, uuidB]).join('--')
+// One packed binary document, `matches/matches.json` + its generation buffers
+// (layout: core/features/matchStorage.js). Written whole by the store (coalesced);
+// a buffer passed as `{ reuse }` keeps an earlier generation's file, so excluding a
+// pair rewrites only the flags.
 
-export async function saveMatches(projectId, pairId, data) {
-  return trackPersistence('saveMatches:' + String(projectId) + ':' + String(pairId), async () => {
-    const dir = await getSubDir(projectId, 'matches')
-    await writeJson(dir, pairId + '.json', data)
-  })
-}
-
-export async function deleteMatches(projectId, pairId) {
-  return trackPersistence('deleteMatches:' + String(projectId) + ':' + String(pairId), async () => {
-    try {
+export async function saveMatchDocument(projectId, meta, buffers) {
+  return trackPersistence('saveMatchDocument:' + String(projectId), async () => (
+    persistenceLock(`matches:${projectId}`, async () => {
       const dir = await getSubDir(projectId, 'matches')
-      await dir.removeEntry(pairId + '.json')
-    } catch (error) { ignoreMissing(error) }
+      return writeBinaryDocument(dir, 'matches.json', meta, buffers, { writeJson, writeBin })
+    })))
+}
+
+// The document's INDEX — every column except the matches themselves — plus the
+// matches column as a File (nothing read), from which a pair is one Blob slice
+// (core/features/matchStorage.js has the offsets). { meta, buffers, files,
+// matchesFile } or null when the project has no match document; throws when the
+// document is there but unreadable (a buffer missing or the wrong size).
+export async function loadMatchIndex(projectId, indexKeys) {
+  return persistenceLock(`matches:${projectId}`, async () => {
+    let dir, meta
+    try {
+      dir = await getSubDir(projectId, 'matches')
+      meta = await readJson(dir, 'matches.json')
+    } catch {
+      return null
+    }
+    if (!meta?.binaryFiles) return null
+    const files = meta.binaryFiles
+    const index = Object.fromEntries(Object.entries(files).filter(([key]) => indexKeys.includes(key)))
+    const buffers = await readBinaryDocument(dir, { binaryFiles: index }, readBin)
+    const matchesFile = files.matches ? await matchFileIn(dir, files.matches) : null
+    delete meta.binaryFiles
+    return { meta, buffers, files, matchesFile }
   })
 }
 
-export async function loadAllMatches(projectId) {
+// The committed matches column of one generation, as a File (see loadMatchIndex).
+export async function loadMatchesFile(projectId, file) {
+  return matchFileIn(await getSubDir(projectId, 'matches'), file)
+}
+
+async function matchFileIn(dir, file) {
+  if (!file?.name || /[/\\]/.test(file.name)) throw new Error('Invalid match document manifest')
+  const f = await (await dir.getFileHandle(file.name)).getFile()
+  if (f.size !== file.bytes) throw new Error('Incomplete saved buffer: matches')
+  return f
+}
+
+// Projects saved before the packed document kept one JSON file per pair:
+//   { idA, idB, rawCount, inlierCount, F, matches: [[ia,ib],...], disabled, weak }
+// Read once to migrate (the store writes the document, then removes these).
+export async function loadLegacyPairFiles(projectId, onProgress = null) {
   try {
     const dir = await getSubDir(projectId, 'matches')
     const files = []
     for await (const [name, handle] of dir) {
-      if (handle.kind !== 'file' || !name.endsWith('.json')) continue
+      if (handle.kind !== 'file' || !name.endsWith('.json') || name === 'matches.json') continue
       files.push({ name, handle })
     }
+    let done = 0
+    onProgress?.(0, files.length)
     const loaded = await mapConcurrent(files, 12, async ({ name, handle }) => {
       try {
         const file = await handle.getFile()
         const data = JSON.parse(await file.text())
         return { pairId: name.replace(/\.json$/, ''), ...data }
-      } catch { return null }
+      } catch { return null } finally { onProgress?.(++done, files.length) }
     })
     return loaded.filter(Boolean)
   } catch {
     return []
   }
+}
+
+export async function removeLegacyPairFiles(projectId) {
+  return trackPersistence('removeLegacyPairFiles:' + String(projectId), async () => {
+    try {
+      const dir = await getSubDir(projectId, 'matches')
+      const names = []
+      for await (const name of dir.keys()) if (name.endsWith('.json') && name !== 'matches.json') names.push(name)
+      for (const name of names) await dir.removeEntry(name).catch(ignoreMissing)
+    } catch (error) { ignoreMissing(error) }
+  })
 }
 
 export async function clearAllMatches(projectId) {
@@ -586,26 +642,22 @@ export async function clearAllMatches(projectId) {
 }
 
 // ── Masks ─────────────────────────────────────────────────────────────────────
+// Mask and depth previews are PNG Blobs (core/mask.js). A load returns the OPFS
+// File itself: file-backed, nothing is read until a viewer or worker decodes it,
+// and nothing sits on the V8 heap. Reading them as data URLs at restore held every
+// image's preview as a base64 string for the whole session.
 
-export async function saveMask(projectId, uuid, dataUrl) {
+export async function saveMask(projectId, uuid, blob) {
   return trackPersistence('saveMask:' + String(projectId) + ':' + String(uuid), async () => {
-    const res = await fetch(dataUrl)
-    const blob = await res.blob()
     const dir = await getSubDir(projectId, 'masks')
     await writeFileIn(dir, uuid + '.png', blob)
   })
 }
 
-export async function loadMaskDataUrl(projectId, uuid) {
+export async function loadMaskFile(projectId, uuid, dirs = null) {
   try {
-    const dir = await getSubDir(projectId, 'masks')
-    const fh = await dir.getFileHandle(uuid + '.png')
-    const file = await fh.getFile()
-    return new Promise((resolve) => {
-      const reader = new FileReader()
-      reader.onload = (e) => resolve(e.target.result)
-      reader.readAsDataURL(file)
-    })
+    const dir = dirs?.masks ?? await getSubDir(projectId, 'masks')
+    return await (await dir.getFileHandle(uuid + '.png')).getFile()
   } catch {
     return null
   }
@@ -624,25 +676,17 @@ export async function deleteMask(projectId, uuid) {
 // The per-image preview PNG shown in the viewer. The heavy float planes behind
 // it are a separate concern — see "Depth-map planes" below.
 
-export async function saveDepth(projectId, uuid, dataUrl) {
+export async function saveDepth(projectId, uuid, blob) {
   return trackPersistence('saveDepth:' + String(projectId) + ':' + String(uuid), async () => {
-    const res = await fetch(dataUrl)
-    const blob = await res.blob()
     const dir = await getSubDir(projectId, 'depthmaps')
     await writeFileIn(dir, uuid + '.png', blob)
   })
 }
 
-export async function loadDepthDataUrl(projectId, uuid) {
+export async function loadDepthFile(projectId, uuid, dirs = null) {
   try {
-    const dir = await getSubDir(projectId, 'depthmaps')
-    const fh = await dir.getFileHandle(uuid + '.png')
-    const file = await fh.getFile()
-    return new Promise((resolve) => {
-      const reader = new FileReader()
-      reader.onload = (e) => resolve(e.target.result)
-      reader.readAsDataURL(file)
-    })
+    const dir = dirs?.depthmaps ?? await getSubDir(projectId, 'depthmaps')
+    return await (await dir.getFileHandle(uuid + '.png')).getFile()
   } catch {
     return null
   }
@@ -699,6 +743,40 @@ export async function saveDepthPlanes(projectId, index, entries) {
     }
     await writeJson(dir, 'index.json', index)
     await removeStaleDepthBins(dir, keep)   // drop planes of images no longer mapped
+  })
+}
+
+// Streamed Stage A (TODO ▸ SC-4) writes one map's planes as it finishes and the
+// index last, so a run that dies midway never leaves an index pointing at a
+// half-written set; `beginDepthPlanes` drops the old index first for the same reason.
+export async function beginDepthPlanes(projectId) {
+  return trackPersistence('beginDepthPlanes:' + String(projectId), async () => {
+    const dir = await getSubDir(projectId, 'depthmaps')
+    await dir.removeEntry('index.json').catch(ignoreMissing)
+  })
+}
+
+// Write the given planes of one map (`{ depth, cost, nrm, rgb }` ArrayBuffers or
+// views). A key set to null is removed (e.g. no normals); an absent key is untouched,
+// which is how the filter pass rewrites depth alone.
+export async function saveDepthPlane(projectId, uuid, buffers) {
+  return trackPersistence('saveDepthPlane:' + String(projectId) + ':' + String(uuid), async () => {
+    const dir = await getSubDir(projectId, 'depthmaps')
+    for (const key of DEPTH_BIN_KEYS) {
+      if (!(key in buffers)) continue
+      const buf = buffers[key], name = `${uuid}.${key}.bin`
+      if (buf && buf.byteLength) await writeBin(dir, name, buf)
+      else await dir.removeEntry(name).catch(ignoreMissing)
+    }
+  })
+}
+
+// Commit a streamed set: the index, then drop planes of images it does not list.
+export async function commitDepthIndex(projectId, index) {
+  return trackPersistence('commitDepthIndex:' + String(projectId), async () => {
+    const dir = await getSubDir(projectId, 'depthmaps')
+    await writeJson(dir, 'index.json', index)
+    await removeStaleDepthBins(dir, new Set(index.maps.map((m) => m.uuid)))
   })
 }
 
@@ -1260,7 +1338,11 @@ export async function loadReconstruction(projectId) {
         : readBin(dir, `recon.${c.id}.${key}.bin`).catch(() => null))
       RECON_BIN_KEYS.forEach((key, index) => { buffers[key] = loaded[index] })
       const n = c.pointCount ?? 0
-      if (!Number.isSafeInteger(n) || n < 0 || (buffers.pos?.byteLength ?? 0) !== n * 24
+      // A dense/mesh pos is stored at its in-memory width (Float32 = 12 bytes per
+      // point, Float64 = 24; cloudSerde posArray); a sparse pos is always Float64.
+      const posBytes = buffers.pos?.byteLength ?? 0
+      const posOk = posBytes === n * 24 || (c.kind !== 'sparse' && c.kind != null && posBytes === n * 12)
+      if (!Number.isSafeInteger(n) || n < 0 || !posOk
           || (c.hasColor && buffers.col?.byteLength !== n * 3)
           || (c.hasNormals && buffers.nrm?.byteLength !== n * 12)
           || (c.kind === 'mesh' && buffers.idx?.byteLength !== (c.triCount ?? 0) * 12)) {
@@ -1313,9 +1395,11 @@ export async function saveProduct(projectId, kind, product) {
     validateProduct(kind, product)
     return persistenceLock(`product:${projectId}:${kind}`, async () => {
       const dir = await getSubDir(projectId, 'products')
-      const { data, mask, rgba, ...meta } = product
+      // The preview PNG is a sidecar file (a Blob, written as is), never a string in
+      // the JSON: a 4096² preview was ~100 MB of base64 parsed back at every open.
+      const { data, mask, rgba, previewBlob, previewUrl: _url, ...meta } = product
       // Pass views, not their underlying buffer: subarrays may have a nonzero offset.
-      await writeBinaryDocument(dir, `${kind}.json`, meta, { data, mask, rgba }, { writeJson, writeBin })
+      await writeBinaryDocument(dir, `${kind}.json`, meta, { data, mask, rgba, preview: previewBlob ?? null }, { writeJson, writeBin })
     })
   })
 }
@@ -1333,7 +1417,12 @@ export async function loadProduct(projectId, kind) {
         mask: new Uint8Array(buffers ? buffers.mask : await readBin(dir, 'dem_mask.bin')),
       } : { ...meta, rgba: new Uint8Array(buffers ? buffers.rgba : await readBin(dir, `${kind}_rgba.bin`)) }
       validateProduct(kind, product)
-      return product
+      // The store turns `previewBlob` into the record's preview URL. A product saved
+      // before the sidecar carried its preview inline as a data URL.
+      const { previewDataUrl, ...rest } = product
+      const previewBlob = buffers?.preview ? new Blob([buffers.preview], { type: 'image/png' })
+        : (typeof previewDataUrl === 'string' ? dataUrlToBlob(previewDataUrl) : null)
+      return previewBlob ? { ...rest, previewBlob } : rest
     } catch { return null }
   })
 }

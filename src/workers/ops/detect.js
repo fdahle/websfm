@@ -10,6 +10,7 @@ import { SIFT_DESC_NORM, rootSiftInPlace } from '../../core/features/siftDescrip
 import { buildMaskLookup } from '../../core/mask.js'
 import { analyzeImageQuality, IMAGE_QUALITY_DEFAULTS } from '../../core/features/imageQuality.js'
 import { fromScaledPx } from '../../core/sfm/geometry.js'
+import { KP_STRIDE } from '../../core/features/keypoints.js'
 import {
   FIDUCIAL_DETECT_TUNING, grayFromRgba, detectFiducialsInImage,
 } from '../../core/sfm/fiducialDetect.js'
@@ -263,8 +264,10 @@ export function makeDetectOps({ rasterize }) {
         : capSift(await runSift(data, width, height, { contrastThreshold, maxOrientations }),
           { maxKeypoints, capRule, maskLut, width, height })
 
-    const keypoints = []
-    // Upper bound; the descriptor buffer is trimmed to the kept count below.
+    // Keypoints leave as the typed layout the store keeps (core/features/keypoints.js),
+    // never one object per keypoint. Upper bounds, trimmed to the kept count below.
+    const kpBuf = new Float32Array(feats.count * KP_STRIDE)
+    const rgbBuf = new Uint8Array(feats.count * 3)
     const descBuf = new Float32Array(feats.count * feats.descLen)
     let kept = 0
     for (let i = 0; i < feats.count; i++) {
@@ -276,19 +279,22 @@ export function makeDetectOps({ rasterize }) {
       const py = Math.min(height - 1, Math.max(0, Math.round(dy)))
       if (maskLut && maskLut[py * width + px]) continue
       const o = (py * width + px) * 4
-      keypoints.push({
-        // Back to native pixels, centre-aligned (core/sfm/geometry.js fromScaledPx),
-        // per axis with the factor the resize actually used (rounded raster size).
-        x: fromScaledPx(dx, sx), y: fromScaledPx(dy, sy),
-        nx: dx / width, ny: dy / height,
-        scale: kscale / scale, response,
-        color: [data[o], data[o + 1], data[o + 2]],
-      })
+      const k = kept * KP_STRIDE
+      // Back to native pixels, centre-aligned (core/sfm/geometry.js fromScaledPx),
+      // per axis with the factor the resize actually used (rounded raster size).
+      kpBuf[k] = fromScaledPx(dx, sx); kpBuf[k + 1] = fromScaledPx(dy, sy)
+      kpBuf[k + 2] = dx / width; kpBuf[k + 3] = dy / height
+      kpBuf[k + 4] = kscale / scale; kpBuf[k + 5] = response
+      rgbBuf[3 * kept] = data[o]; rgbBuf[3 * kept + 1] = data[o + 1]; rgbBuf[3 * kept + 2] = data[o + 2]
       descBuf.set(feats.desc(i), kept * feats.descLen)
       kept++
     }
     // Trim to the kept keypoints (copy so the transferred buffer is exactly sized).
     const descriptors = kept === feats.count ? descBuf : descBuf.slice(0, kept * feats.descLen)
+    const keypoints = {
+      data: kept === feats.count ? kpBuf : kpBuf.slice(0, kept * KP_STRIDE),
+      rgb: kept === feats.count ? rgbBuf : rgbBuf.slice(0, kept * 3),
+    }
     // SIFT is stored and matched as RootSIFT (core/features/siftDescriptors.js); the
     // stamp travels with the image so legacy L2 projects convert on load.
     const descNorm = spec ? null : SIFT_DESC_NORM.ROOT
@@ -305,7 +311,7 @@ export function makeDetectOps({ rasterize }) {
         keypoints, descriptors, descDim: feats.descLen, descNorm, detector,
         width: natW, height: natH, detectWidth: width, detectHeight: height, ms: feats.ms, diag,
       },
-      transfer: [descriptors.buffer],
+      transfer: [descriptors.buffer, keypoints.data.buffer, keypoints.rgb.buffer],
     }
   }
 

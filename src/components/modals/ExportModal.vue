@@ -117,6 +117,9 @@ const settings = ref({
 // nothing, since the format exists to make partial reads cheap.
 const isTiff = computed(() => settings.value.format === 'geotiff' || settings.value.format === 'cog')
 const isCog = computed(() => settings.value.format === 'cog')
+// LAS/LAZ point format 2 always carries RGB (written when the cloud has colour), so
+// the colour toggle only steers PLY and XYZ (useExports.js exportCloud).
+const isLasFormat = computed(() => settings.value.format === 'las' || settings.value.format === 'laz')
 watch(isCog, (cog) => { settings.value.compression = cog ? 'deflate' : EXPORT_DEFAULTS.compression })
 
 function run() {
@@ -149,7 +152,10 @@ function run() {
 
     <!-- Point cloud -->
     <template v-if="kind === 'cloud'">
-      <label class="checkbox-row"><input type="checkbox" v-model="settings.includeColor" class="checkbox" /> Include vertex colours</label>
+      <label class="checkbox-row">
+        <input type="checkbox" v-model="settings.includeColor" :disabled="isLasFormat" class="checkbox" />
+        Include vertex colours{{ isLasFormat ? ' (LAS always stores RGB when the cloud has colour)' : '' }}
+      </label>
       <label v-if="hasFrame" class="checkbox-row"><input type="checkbox" v-model="settings.applyGeoref" class="checkbox" /> {{ frameLabel }}</label>
       <SettingsField label="Voxel downsample cell" label-for="dscell"
         :hint="`World units${hasGeoref ? ' (project CRS when georeferenced)' : (hasScale ? ' (metres when scaled)' : '')}; 0 = keep every point.`">
@@ -242,7 +248,8 @@ function run() {
         one window with a few range requests instead of the whole file. Readable
         anywhere a normal GeoTIFF is.
       </p>
-      <SettingsField label="NODATA value" label-for="nodata"
+      <!-- The hillshade PNG is a rendered preview: it has no elevation cells to flag. -->
+      <SettingsField v-if="settings.format !== 'png'" label="NODATA value" label-for="nodata"
         hint="Written for empty cells (holes with no measurement).">
         <input id="nodata" v-model.number="settings.nodata" type="number" step="any" class="field-input" />
       </SettingsField>

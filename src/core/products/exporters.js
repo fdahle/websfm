@@ -1,10 +1,12 @@
 // Pure exporters: turn reconstruction / product data into standard interchange
-// formats (bytes or text). No DOM/Blob here — the UI layer wraps the return value
-// in a Blob and triggers the download (see utils/download.js).
+// formats. No DOM/Blob here. The writers whose output scales with points / faces /
+// cells are generators of bounded PARTS (core/io/parts.js); the caller folds them
+// into a Blob (utils/blobParts.js partsToBlob) and triggers the download.
 
 import { writeGeoTiff, writeCogDeflate, geoKeysForEpsg } from './geotiff.js'
 import { applySimilarity } from './georef.js'
 import { createVoxelAccumulator } from '../dense/mvs.js'
+import { PART_BYTES, PART_CHARS, lineParts, recordParts, lazyArray } from '../io/parts.js'
 
 // ── Export preprocessing: georeference + voxel downsample ────────────────────
 // Applies (in this order — the cell size is in target-CRS units) an optional
@@ -151,8 +153,9 @@ export function prepareMeshForExport(mesh, { sim = null } = {}) {
 // attribute (a computed `distance`, imported intensity/classification, …) becomes
 // one vertex property after the colour, in its own type (Float32 → float, Float64 →
 // double, Uint8 → uchar, …), which CloudCompare/MeshLab/PDAL read as scalar fields.
-// Binary returns a Uint8Array (little-endian body); ASCII returns a string.
-export function cloudToPly(points, { binary = true, color = true, normals = true, attributes = true } = {}) {
+// Yields parts: Uint8Arrays for binary (little-endian body), strings for ASCII.
+export function* cloudToPlyParts(points, { binary = true, color = true, normals = true, attributes = true,
+  partBytes = PART_BYTES, partChars = PART_CHARS } = {}) {
   const flat = points && points.pos ? points : null
   const n = flat ? (flat.count ?? flat.pos.length / 3) : points.length
   const getX = flat ? (i) => flat.pos[i*3]   : (i) => points[i].x
@@ -178,27 +181,23 @@ export function cloudToPly(points, { binary = true, color = true, normals = true
     `element vertex ${n}\n` + props + 'end_header\n'
 
   if (!binary) {
-    const lines = new Array(n)
-    for (let i = 0; i < n; i++) {
+    // An empty cloud keeps the historical lone newline after the header.
+    yield* lineParts(header, n, (i) => {
       let s = `${getX(i)} ${getY(i)} ${getZ(i)}`
       if (hasNrm) { const nn = getN(i); s += ` ${nn[0]} ${nn[1]} ${nn[2]}` }
       if (color) { const c = getC(i) || [200, 200, 200]; s += ` ${byte(c[0])} ${byte(c[1])} ${byte(c[2])}` }
       for (const f of fields) s += ` ${f.text(f.values[i])}`
-      lines[i] = s
-    }
-    return header + lines.join('\n') + '\n'
+      return s
+    }, { emptyBody: '\n', partChars })
+    return
   }
 
-  const headerBytes = new TextEncoder().encode(header)
+  yield new TextEncoder().encode(header)
   // 3×f32 xyz (12) [+ 3×f32 normals (12)] [+ 3×u8 rgb (3)] [+ attributes].
   const NRM = hasNrm ? 12 : 0
   const ATTR = color ? 12 + NRM + 3 : 12 + NRM
   const STRIDE = ATTR + fields.reduce((sum, f) => sum + f.size, 0)
-  const out = new Uint8Array(headerBytes.length + n * STRIDE)
-  out.set(headerBytes, 0)
-  const dv = new DataView(out.buffer, headerBytes.length)
-  for (let i = 0; i < n; i++) {
-    const o = i * STRIDE
+  yield* recordParts(n, STRIDE, (dv, o, i) => {
     dv.setFloat32(o, getX(i), true)
     dv.setFloat32(o + 4, getY(i), true)
     dv.setFloat32(o + 8, getZ(i), true)
@@ -212,8 +211,7 @@ export function cloudToPly(points, { binary = true, color = true, normals = true
     }
     let a = o + ATTR
     for (const f of fields) { f.set(dv, a, f.values[i]); a += f.size }
-  }
-  return out
+  }, partBytes)
 }
 
 // PLY scalar type per attribute array type, with its byte size and writer.
@@ -257,9 +255,9 @@ const byte = (v) => Math.max(0, Math.min(255, Math.round(v ?? 0)))
 // ── Mesh → PLY (with faces) ──────────────────────────────────────────────────
 // mesh: { nVerts, count /* triangles */, pos:Float32Array(3·nVerts),
 // idx:Uint32Array(3·count), col?:Uint8Array(3·nVerts) }. Binary little-endian
-// (a Uint8Array) by default; ASCII (a string) when binary:false. Faces are
+// (Uint8Array parts) by default; ASCII (string parts) when binary:false. Faces are
 // triangles (list: uchar count=3 + 3×int vertex indices).
-export function meshToPly(mesh, { binary = true, color = true } = {}) {
+export function* meshToPlyParts(mesh, { binary = true, color = true, partBytes = PART_BYTES, partChars = PART_CHARS } = {}) {
   const nV = mesh.nVerts ?? (mesh.pos.length / 3)
   const nF = mesh.count ?? (mesh.idx.length / 3)
   const hasCol = color && !!mesh.col
@@ -275,75 +273,63 @@ export function meshToPly(mesh, { binary = true, color = true } = {}) {
     'end_header\n'
 
   if (!binary) {
-    const lines = [header.trimEnd()]
-    for (let i = 0; i < nV; i++) {
-      let s = `${mesh.pos[i*3]} ${mesh.pos[i*3+1]} ${mesh.pos[i*3+2]}`
-      if (hasCol) s += ` ${byte(mesh.col[i*3])} ${byte(mesh.col[i*3+1])} ${byte(mesh.col[i*3+2])}`
-      lines.push(s)
-    }
-    for (let f = 0; f < nF; f++) lines.push(`3 ${mesh.idx[f*3]} ${mesh.idx[f*3+1]} ${mesh.idx[f*3+2]}`)
-    return lines.join('\n') + '\n'
+    yield* lineParts(header, nV + nF, (k) => {
+      if (k >= nV) { const f = k - nV; return `3 ${mesh.idx[f*3]} ${mesh.idx[f*3+1]} ${mesh.idx[f*3+2]}` }
+      let s = `${mesh.pos[k*3]} ${mesh.pos[k*3+1]} ${mesh.pos[k*3+2]}`
+      if (hasCol) s += ` ${byte(mesh.col[k*3])} ${byte(mesh.col[k*3+1])} ${byte(mesh.col[k*3+2])}`
+      return s
+    }, { partChars })
+    return
   }
 
-  const headerBytes = new TextEncoder().encode(header)
+  yield new TextEncoder().encode(header)
   const vStride = 12 + (hasCol ? 3 : 0)
-  const fStride = 1 + 12 // uchar count + 3×int32
-  const out = new Uint8Array(headerBytes.length + nV * vStride + nF * fStride)
-  out.set(headerBytes, 0)
-  const dv = new DataView(out.buffer)
-  let o = headerBytes.length
-  for (let i = 0; i < nV; i++) {
+  yield* recordParts(nV, vStride, (dv, o, i) => {
     dv.setFloat32(o, mesh.pos[i*3], true)
     dv.setFloat32(o + 4, mesh.pos[i*3+1], true)
     dv.setFloat32(o + 8, mesh.pos[i*3+2], true)
     if (hasCol) { dv.setUint8(o + 12, byte(mesh.col[i*3])); dv.setUint8(o + 13, byte(mesh.col[i*3+1])); dv.setUint8(o + 14, byte(mesh.col[i*3+2])) }
-    o += vStride
-  }
-  for (let f = 0; f < nF; f++) {
+  }, partBytes)
+  // uchar count + 3×int32
+  yield* recordParts(nF, 13, (dv, o, f) => {
     dv.setUint8(o, 3)
     dv.setInt32(o + 1, mesh.idx[f*3], true)
     dv.setInt32(o + 5, mesh.idx[f*3+1], true)
     dv.setInt32(o + 9, mesh.idx[f*3+2], true)
-    o += fStride
-  }
-  return out
+  }, partBytes)
 }
 
 // ── Mesh → OBJ (Wavefront) ───────────────────────────────────────────────────
-// mesh as in meshToPly. `v x y z [r g b]` (the MeshLab/CloudCompare vertex-colour
-// extension, r/g/b in 0–1) + `f a b c` with **1-based** indices (the classic OBJ
-// bug — OBJ counts vertices from 1). No MTL (no textures yet). Returns a string.
-export function meshToObj(mesh, { color = true } = {}) {
+// mesh as in meshToPlyParts. `v x y z [r g b]` (the MeshLab/CloudCompare
+// vertex-colour extension, r/g/b in 0–1) + `f a b c` with **1-based** indices (the
+// classic OBJ bug — OBJ counts vertices from 1). No MTL (no textures yet). Yields
+// string parts.
+export function* meshToObjParts(mesh, { color = true, partChars = PART_CHARS } = {}) {
   const nV = mesh.nVerts ?? (mesh.pos.length / 3)
   const nF = mesh.count ?? (mesh.idx.length / 3)
   const hasCol = color && !!mesh.col
-  const lines = ['# generated by websfm']
-  for (let i = 0; i < nV; i++) {
-    let s = `v ${mesh.pos[i*3]} ${mesh.pos[i*3+1]} ${mesh.pos[i*3+2]}`
-    if (hasCol) s += ` ${(byte(mesh.col[i*3])/255).toFixed(6)} ${(byte(mesh.col[i*3+1])/255).toFixed(6)} ${(byte(mesh.col[i*3+2])/255).toFixed(6)}`
-    lines.push(s)
-  }
-  for (let f = 0; f < nF; f++) {
+  yield* lineParts('# generated by websfm\n', nV + nF, (k) => {
     // +1: OBJ vertex indices are 1-based.
-    lines.push(`f ${mesh.idx[f*3]+1} ${mesh.idx[f*3+1]+1} ${mesh.idx[f*3+2]+1}`)
-  }
-  return lines.join('\n') + '\n'
+    if (k >= nV) { const f = k - nV; return `f ${mesh.idx[f*3]+1} ${mesh.idx[f*3+1]+1} ${mesh.idx[f*3+2]+1}` }
+    let s = `v ${mesh.pos[k*3]} ${mesh.pos[k*3+1]} ${mesh.pos[k*3+2]}`
+    if (hasCol) s += ` ${(byte(mesh.col[k*3])/255).toFixed(6)} ${(byte(mesh.col[k*3+1])/255).toFixed(6)} ${(byte(mesh.col[k*3+2])/255).toFixed(6)}`
+    return s
+  }, { partChars })
 }
 
 // ── Mesh → STL (binary) ──────────────────────────────────────────────────────
 // 80-byte header + u32 triangle count + per triangle: normal f32×3 (per-face,
 // from the cross product), 3 vertices f32×3, u16 attribute (0). No colour (STL
 // vertex colour is non-standard). A degenerate triangle yields a zero normal
-// rather than NaN. Returns a Uint8Array.
-export function meshToStl(mesh) {
+// rather than NaN. Yields Uint8Array parts.
+export function* meshToStlParts(mesh, { partBytes = PART_BYTES } = {}) {
   const nF = mesh.count ?? (mesh.idx.length / 3)
-  const out = new Uint8Array(84 + nF * 50)
-  const dv = new DataView(out.buffer)
+  const head = new Uint8Array(84)
   // 80-byte header (zeroed) then triangle count.
-  new TextEncoder().encodeInto('websfm binary STL', out.subarray(0, 80))
-  dv.setUint32(80, nF, true)
-  let o = 84
-  for (let f = 0; f < nF; f++) {
+  new TextEncoder().encodeInto('websfm binary STL', head.subarray(0, 80))
+  new DataView(head.buffer).setUint32(80, nF, true)
+  yield head
+  yield* recordParts(nF, 50, (dv, o, f) => {
     const a = mesh.idx[f*3], b = mesh.idx[f*3+1], c = mesh.idx[f*3+2]
     const ax = mesh.pos[a*3], ay = mesh.pos[a*3+1], az = mesh.pos[a*3+2]
     const bx = mesh.pos[b*3], by = mesh.pos[b*3+1], bz = mesh.pos[b*3+2]
@@ -359,17 +345,16 @@ export function meshToStl(mesh) {
     dv.setFloat32(o+24, bx, true); dv.setFloat32(o+28, by, true); dv.setFloat32(o+32, bz, true)
     dv.setFloat32(o+36, cx, true); dv.setFloat32(o+40, cy, true); dv.setFloat32(o+44, cz, true)
     // attribute byte count u16 = 0 (o+48)
-    o += 50
-  }
-  return out
+  }, partBytes)
 }
 
 // ── Mesh → GLB (binary glTF 2.0) ─────────────────────────────────────────────
 // A minimal, dependency-free single-buffer GLB: one mesh, one primitive, with
 // POSITION (f32 VEC3) + optional COLOR_0 (u8 VEC4 normalized) + indices (u32
 // SCALAR). Correct 4-byte alignment; POSITION accessor carries min/max (required
-// by the spec and by many viewers for framing). Returns a Uint8Array.
-export function meshToGlb(mesh, { color = true } = {}) {
+// by the spec and by many viewers for framing). Yields Uint8Array parts: the
+// container header + JSON chunk + BIN chunk header, then the BIN sections.
+export function* meshToGlbParts(mesh, { color = true, partBytes = PART_BYTES } = {}) {
   const nV = mesh.nVerts ?? (mesh.pos.length / 3)
   const nIdx = mesh.idx.length
   const hasCol = color && !!mesh.col
@@ -384,8 +369,8 @@ export function meshToGlb(mesh, { color = true } = {}) {
   }
   if (!Number.isFinite(minX)) { minX = minY = minZ = 0; maxX = maxY = maxZ = 0 }
 
-  // Build the binary buffer: [positions f32][colors u8×4?][indices u32], each
-  // section 4-byte aligned (all already are: 12/4/4-byte elements).
+  // The binary buffer: [positions f32][colors u8×4?][indices u32], each section
+  // 4-byte aligned (all already are: 12/4/4-byte elements).
   const align4 = (n) => (n + 3) & ~3
   const posBytes = nV * 12
   const colBytes = hasCol ? nV * 4 : 0
@@ -394,20 +379,6 @@ export function meshToGlb(mesh, { color = true } = {}) {
   const colOff = posOff + align4(posBytes)
   const idxOff = colOff + align4(colBytes)
   const binLen = idxOff + align4(idxBytes)
-  const bin = new Uint8Array(binLen)
-  const bv = new DataView(bin.buffer)
-  for (let i = 0; i < nV; i++) {
-    bv.setFloat32(posOff + i*12, mesh.pos[i*3], true)
-    bv.setFloat32(posOff + i*12 + 4, mesh.pos[i*3+1], true)
-    bv.setFloat32(posOff + i*12 + 8, mesh.pos[i*3+2], true)
-  }
-  if (hasCol) {
-    for (let i = 0; i < nV; i++) {
-      bin[colOff + i*4] = byte(mesh.col[i*3]); bin[colOff + i*4+1] = byte(mesh.col[i*3+1])
-      bin[colOff + i*4+2] = byte(mesh.col[i*3+2]); bin[colOff + i*4+3] = 255
-    }
-  }
-  for (let i = 0; i < nIdx; i++) bv.setUint32(idxOff + i*4, mesh.idx[i], true)
 
   // Accessors: 0 POSITION, [1 COLOR_0], last = indices.
   const accessors = [
@@ -441,27 +412,46 @@ export function meshToGlb(mesh, { color = true } = {}) {
   let jsonBytes = enc.encode(JSON.stringify(gltf))
   const jsonPad = (4 - (jsonBytes.length & 3)) & 3
   if (jsonPad) { const p = new Uint8Array(jsonBytes.length + jsonPad).fill(0x20); p.set(jsonBytes); jsonBytes = p }
-  // bin is already 4-aligned (binLen).
-  const total = 12 + 8 + jsonBytes.length + 8 + bin.length
-  const out = new Uint8Array(total)
-  const dv = new DataView(out.buffer)
+  const total = 12 + 8 + jsonBytes.length + 8 + binLen
+  const head = new Uint8Array(20 + jsonBytes.length + 8)
+  const dv = new DataView(head.buffer)
   dv.setUint32(0, 0x46546c67, true) // 'glTF'
   dv.setUint32(4, 2, true)          // version
   dv.setUint32(8, total, true)      // total length
   dv.setUint32(12, jsonBytes.length, true)
   dv.setUint32(16, 0x4e4f534a, true) // 'JSON'
-  out.set(jsonBytes, 20)
+  head.set(jsonBytes, 20)
   const binChunkOff = 20 + jsonBytes.length
-  dv.setUint32(binChunkOff, bin.length, true)
+  dv.setUint32(binChunkOff, binLen, true)
   dv.setUint32(binChunkOff + 4, 0x004e4942, true) // 'BIN\0'
-  out.set(bin, binChunkOff + 8)
-  return out
+  yield head
+
+  const pad = (bytes) => (align4(bytes) > bytes ? [new Uint8Array(align4(bytes) - bytes)] : [])
+  yield* recordParts(nV, 12, (bv, o, i) => {
+    bv.setFloat32(o, mesh.pos[i*3], true)
+    bv.setFloat32(o + 4, mesh.pos[i*3+1], true)
+    bv.setFloat32(o + 8, mesh.pos[i*3+2], true)
+  }, partBytes)
+  yield* pad(posBytes)
+  if (hasCol) {
+    yield* recordParts(nV, 4, (bv, o, i, bin) => {
+      bin[o] = byte(mesh.col[i*3]); bin[o+1] = byte(mesh.col[i*3+1])
+      bin[o+2] = byte(mesh.col[i*3+2]); bin[o+3] = 255
+    }, partBytes)
+    yield* pad(colBytes)
+  }
+  yield* recordParts(nIdx, 4, (bv, o, i) => bv.setUint32(o, mesh.idx[i], true), partBytes)
+  yield* pad(idxBytes)
 }
 
 // ── Reconstruction → JSON (cameras + tracks) ─────────────────────────────────
-// cameras: [{ uuid, R, t, K? }], points: [{ x, y, z, color?, views? }]. Camera
-// centres (C = −Rᵀt) are precomputed for convenience. Returns a plain object.
-export function reconstructionToJson(cameras, points, crs = 'local') {
+// cameras: [{ uuid, R, t, K? }], points: [{ x, y, z, color?, views? }] — `views`
+// an array of [uuid, kpIdx] or a Map uuid → kpIdx. Camera centres (C = −Rᵀt) are
+// precomputed for convenience. Returns the document with `points` as a lazyArray
+// (core/io/parts.js): serialize it with `jsonParts`, which writes one point at a
+// time instead of materializing a copy of the cloud. `tracks: false` writes every
+// point's views as [].
+export function reconstructionToJson(cameras, points, crs = 'local', { tracks = true } = {}) {
   return {
     format: 'websfm-model',
     version: 1,
@@ -473,11 +463,14 @@ export function reconstructionToJson(cameras, points, crs = 'local') {
       K: c.K ? { fx: c.K.fx, fy: c.K.fy, cx: c.K.cx, cy: c.K.cy } : null,
       center: cameraCenter(c.R, c.t),
     })),
-    points: points.map((p) => ({
-      x: p.x, y: p.y, z: p.z,
-      color: p.color ?? null,
-      views: p.views ?? [],
-    })),
+    points: lazyArray(points.length, (i) => {
+      const p = points[i]
+      return {
+        x: p.x, y: p.y, z: p.z,
+        color: p.color ?? null,
+        views: !tracks || !p.views ? [] : p.views instanceof Map ? [...p.views.entries()] : p.views,
+      }
+    }),
   }
 }
 
@@ -494,8 +487,8 @@ function cameraCenter(R, t) {
 // ── DEM → ESRI ASCII grid (.asc) ─────────────────────────────────────────────
 // dem: { width, height, gsd, originX (left), originY (top), data:Float32Array
 // (row-major, top→bottom; NaN = nodata) }. Dependency-free, float-preserving, and
-// read by QGIS/ArcGIS/GDAL. Pair with a .prj carrying the CRS.
-export function demToAsciiGrid(dem, { nodata = -9999 } = {}) {
+// read by QGIS/ArcGIS/GDAL. Pair with a .prj carrying the CRS. Yields string parts.
+export function* demToAsciiGridParts(dem, { nodata = -9999, partChars = PART_CHARS } = {}) {
   const { width, height, gsd, originX, originY, data } = dem
   const yllcorner = originY - height * gsd
   const head =
@@ -506,16 +499,14 @@ export function demToAsciiGrid(dem, { nodata = -9999 } = {}) {
     `cellsize ${gsd}\n` +
     `NODATA_value ${nodata}\n`
   // Row 0 is the northernmost (top) row, which is exactly what ASCII grid wants.
-  const rows = new Array(height)
-  for (let r = 0; r < height; r++) {
-    const row = new Array(width)
+  const row = new Array(width)
+  yield* lineParts(head, height, (r) => {
     for (let c = 0; c < width; c++) {
       const v = data[r * width + c]
       row[c] = Number.isFinite(v) ? v : nodata
     }
-    rows[r] = row.join(' ')
-  }
-  return head + rows.join('\n') + '\n'
+    return row.join(' ')
+  }, { emptyBody: '\n', partChars })
 }
 
 // ── DEM → GeoTIFF (single-band float32) ──────────────────────────────────────

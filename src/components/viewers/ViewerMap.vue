@@ -22,7 +22,8 @@ import Point from 'ol/geom/Point'
 import Polygon from 'ol/geom/Polygon'
 import LineString from 'ol/geom/LineString'
 import { Style, Circle as CircleStyle, RegularShape, Fill, Stroke, Text } from 'ol/style'
-import { get as getOlProjection } from 'ol/proj'
+import { get as getOlProjection, transformExtent, addProjection } from 'ol/proj'
+import Projection from 'ol/proj/Projection'
 import { Attribution } from 'ol/control'
 import Translate from 'ol/interaction/Translate'
 import { createEmpty, extend, buffer, getIntersection, isEmpty as extentIsEmpty } from 'ol/extent'
@@ -32,6 +33,9 @@ import { useContextMenu } from '../../composables/useContextMenu.js'
 import { copyToClipboard } from '../../composables/useToasts.js'
 import ViewerContextMenu from './ViewerContextMenu.vue'
 import GcpToolbar from './GcpToolbar.vue'
+import RasterMeasurements from './RasterMeasurements.vue'
+import DoubleClickZoom from 'ol/interaction/DoubleClickZoom'
+import { productDescriptor } from '../../core/io/rasterSource.js'
 import { useMapSettings } from '../../composables/useMapSettings.js'
 
 const { basemap } = useMapSettings()
@@ -52,15 +56,33 @@ const props = defineProps({
   crs:        { type: String, default: 'EPSG:4326' },
   showFootprints: { type: Boolean, default: true },
   showGrid:       { type: Boolean, default: true },
-  // Imported reference rasters flagged "Display on map" (useExternalStore.mapRasters),
-  // in the order they should stack. Metadata only — see makeRasterLayer.
+  // Raster layers flagged "On map", in the order they should stack: imported
+  // reference rasters and computed DEM/ortho (`product: true`) alike
+  // (composables/useMapProducts.js). Metadata only — see makeRasterLayer.
   rasters:    { type: Array, default: () => [] },
-  // Status-bar value readout: a SYNC probe of already-hydrated reference rasters
-  // (useExternalStore.probeRasterAt) plus the hydrator behind the "load" button.
+  // Status-bar value readout: a SYNC probe of the on-map layers (useMapProducts
+  // probeAt, falling through to useExternalStore.probeRasterAt) plus the hydrator
+  // behind the "load" button.
   // Kept as injected functions so this viewer stays store-free like its siblings.
   probeRaster: { type: Function, default: null },
   loadRaster:  { type: Function, default: null },
+  // Non-null ⇒ the map shows the MODEL frame instead of the project CRS
+  // (composables/useMapProducts.js): { code, unit, extent, key }. A plain metric
+  // projection, no basemap; only `modelCameras` and the rasters placed in it are
+  // drawn — GCPs, footprints, GPS and poses are CRS data and stay hidden.
+  modelFrame:   { type: Object, default: null },
+  modelCameras: { type: Array, default: () => [] },  // [{ imageId, imageName, x, y }]
+  // One line per requested layer this frame cannot show (and the model-frame
+  // notice), so nothing on the map disappears without a reason.
+  notes:        { type: Array, default: () => [] },
+  // The raster the Measure tools run against (composables/useMapProducts.js):
+  // { layer, product, source, kind, frameStatus } | null. The tools measure in that
+  // raster's OWN frame; this viewer only maps their geometry onto the screen.
+  measureTarget: { type: Object, default: null },
+  // Markers (role 'marker') triangulated into the model frame: [{ id, name, x, y }].
+  modelMarkers: { type: Array, default: () => [] },
 })
+const isModel = computed(() => !!props.modelFrame)
 
 // 'command' bubbles ribbon command ids to App (toggles/fit live there).
 // The gcp-* events drive absolute (ground) GCP editing from the map.
@@ -85,9 +107,10 @@ const hover = ref(null)   // { text, x, y }
 // Cursor position in the PROJECT CRS (the map's view projection) + the value of
 // the topmost reference raster under it. Mirrors the image view's status bar.
 const cursor = ref(null)  // { x, y } | null
-const axes = computed(() => crsInfo(props.crs).axes)
-// Degrees need more decimals than metres to be useful at all.
-const coordDigits = computed(() => (crsInfo(props.crs).geographic ? 6 : 2))
+const axes = computed(() => (isModel.value ? ['X', 'Y'] : crsInfo(props.crs).axes))
+// Degrees need more decimals than metres to be useful at all; model units are
+// usually small numbers.
+const coordDigits = computed(() => (isModel.value ? 3 : crsInfo(props.crs).geographic ? 6 : 2))
 const fmt = (v) => v.toFixed(coordDigits.value)
 
 const cursorRaster = computed(() => {
@@ -111,7 +134,9 @@ function onContextMenu(e) {
   openCtx(e, {}, { w: 190, h: 90 })
 }
 const ctxItems = computed(() => [
-  { id: 'add-gcp-here', label: 'Add GCP here', disabled: !ctxCoord.value },
+  // A GCP is stored in the project CRS; the model frame has no CRS position.
+  { id: 'add-gcp-here', label: isModel.value ? 'Add GCP here (project CRS only)' : 'Add GCP here',
+    disabled: !ctxCoord.value || isModel.value },
   { id: 'copy-coords', label: 'Copy coordinates', disabled: !ctxCoord.value },
 ])
 function onCtxSelect(id) {
@@ -125,6 +150,41 @@ function onCtxSelect(id) {
     copyToClipboard(`${coord[0].toFixed(3)}, ${coord[1].toFixed(3)}`, 'coordinate')
   }
 }
+
+// ── Raster measuring ─────────────────────────────────────────────────
+// The same RasterMeasurements the raster tab hosts. Its geometry lives in the
+// target raster's own world frame; this adapter takes it to the screen through
+// the model-frame offset or a CRS transform, then OL's pixel mapping. `viewRev`
+// ticks per rendered frame so the overlay follows pan/zoom.
+const measurements = ref(null)
+const viewRev = ref(0)
+const measureDesc = computed(() => productDescriptor(props.measureTarget?.product))
+const measureView = computed(() => {
+  viewRev.value // eslint-disable-line no-unused-expressions -- re-evaluate per frame
+  const t = props.measureTarget
+  if (!t || !map) return null
+  const off = t.layer?.offset
+  const from = t.layer?.crs, to = props.modelFrame?.code ?? props.crs
+  const same = !off && from === to
+  const toMap = (x, y) => (off ? [x + off[0], y + off[1]] : same ? [x, y] : transform([x, y], from, to))
+  const fromMap = (x, y) => (off ? [x - off[0], y - off[1]] : same ? [x, y] : transform([x, y], to, from))
+  return {
+    toScreen(wx, wy) {
+      const p = map?.getPixelFromCoordinate(toMap(wx, wy))
+      return p ? { x: p[0], y: p[1] } : { x: NaN, y: NaN }
+    },
+    fromScreen(sx, sy) {
+      const c = map?.getCoordinateFromPixel([sx, sy])
+      if (!c) return null
+      const [x, y] = fromMap(c[0], c[1])
+      return { x, y }
+    },
+  }
+})
+const measuring = computed(() => !!measurements.value?.active)
+const measureState = computed(() => measurements.value?.state ?? null)
+function setMeasureTool(tool) { measurements.value?.setTool(tool) }
+function toggleSavedMeasurements() { measurements.value?.toggleSaved() }
 
 let map             = null
 let vSource         = null
@@ -197,8 +257,19 @@ const checkStyle = new Style({
   }),
 })
 
+// A marker has no surveyed position; on the model map it sits where its marks
+// triangulate.
+const markerStyle = new Style({
+  image: new RegularShape({
+    points: 4, radius: 7, angle: Math.PI / 4,
+    fill: new Fill({ color: '#e0a030' }),
+    stroke: new Stroke({ color: '#fff', width: 1.5 }),
+  }),
+})
+
 function gcpStyleFor(feature) {
-  return feature.get('gcpRole') === 'check' ? checkStyle : controlStyle
+  const role = feature.get('gcpRole')
+  return role === 'check' ? checkStyle : role === 'marker' ? markerStyle : controlStyle
 }
 
 // Camera-position markers: purple triangle, distinct from GPS circles and GCP diamonds.
@@ -253,28 +324,31 @@ function footprintStyleFor(feature) {
 
 // ── GPS extraction ────────────────────────────────────────────────────────────
 
-const gpsImages = computed(() =>
+const gpsImages = computed(() => isModel.value ? [] :
   props.images.filter((img) => img.meta?.gpsLat != null && img.meta?.gpsLon != null
     && !props.poses.some((p) => p.imageId === img.id && p.enabled !== false))
 )
 
 // GCPs are stored in the project CRS already (= the map view CRS), so they need
 // no transform. Only enabled points with a valid position are plotted.
-const mapGcps = computed(() =>
+const mapGcps = computed(() => isModel.value
+  ? props.modelMarkers.map((m) => ({ id: m.id, name: m.name, x: m.x, y: m.y, role: 'marker' }))
+  :
   props.gcps.filter((g) => g.enabled !== false && Number.isFinite(g.x) && Number.isFinite(g.y))
 )
 const hasGcps = computed(() => mapGcps.value.length > 0)
 
 // Footprints are stored in the project CRS already (= the map view CRS), no transform.
-const mapFootprints = computed(() =>
+const mapFootprints = computed(() => isModel.value ? [] :
   props.footprints.filter((f) => f.enabled !== false && f.rings?.length)
 )
 const hasFootprints = computed(() => mapFootprints.value.length > 0)
 
 // Camera poses are stored in the project CRS already (= the map view CRS), no transform.
-const mapPoses = computed(() =>
-  props.poses.filter((p) => p.enabled !== false && Number.isFinite(p.x) && Number.isFinite(p.y))
-)
+// On the model map the cameras are the SfM centres in the model frame instead.
+const mapPoses = computed(() => (isModel.value
+  ? props.modelCameras.map((c) => ({ x: c.x, y: c.y, imageId: c.imageId, imageName: c.imageName, source: 'sfm' }))
+  : props.poses.filter((p) => p.enabled !== false && Number.isFinite(p.x) && Number.isFinite(p.y))))
 const hasPoses = computed(() => mapPoses.value.length > 0)
 
 // ── Features ──────────────────────────────────────────────────────────────────
@@ -346,17 +420,36 @@ function refreshPoses() {
   fitToMarkers()
 }
 
+// Extents of the on-map raster layers in the VIEW projection. Each raster keeps
+// its native CRS (see makeRasterLayer), so its bounds are transformed here; one
+// whose CRS OL does not know is skipped rather than guessed.
+function rasterExtents() {
+  const view = map?.getView().getProjection()
+  const out = []
+  for (const r of props.rasters ?? []) {
+    const b = rasterBounds({ width: r.width, height: r.height, geoTransform: r.geoTransform })
+    const proj = r.crs ? getOlProjection(r.crs) : null
+    if (!b || !proj || !view) continue
+    try { out.push(transformExtent(b, proj, view)) } catch { /* unknown transform */ }
+  }
+  return out
+}
+
+// Fit View: every marker AND every on-map raster, so a project whose only map
+// content is a DEM or orthophoto still has something to fit to.
 function fitToMarkers() {
   if (!map) return
   const features = [...(vSource?.getFeatures() || []), ...(gcpSource?.getFeatures() || []), ...(footprintSource?.getFeatures() || []), ...(poseSource?.getFeatures() || [])]
-  if (!features.length) return
-  const geom = features.length === 1 ? features[0].getGeometry() : null
+  const rasters = rasterExtents()
+  if (!features.length && !rasters.length) return
+  const geom = features.length === 1 && !rasters.length ? features[0].getGeometry() : null
   if (geom?.getType() === 'Point') {
     map.getView().animate({ center: geom.getCoordinates(), zoom: 17, duration: 300 })
     return
   }
   let extent = createEmpty()
   for (const f of features) extend(extent, f.getGeometry().getExtent())
+  for (const e of rasters) extend(extent, e)
   map.getView().fit(extent, { padding: [48, 48, 48, 48], maxZoom: 18, duration: 300 })
 }
 
@@ -400,7 +493,9 @@ const rasterLayers = new Map() // id → ImageLayer
 const external = useExternalStore()
 let rasterSync = 0
 async function makeRasterLayer(r) {
-  if ([1, 2].includes(r.photometric ?? 1)) {
+  // A computed DEM/ortho (`product: true`, core/products/productLayers.js) has no
+  // tiled original in the external store, so it always draws its preview.
+  if (!r.product && [1, 2].includes(r.photometric ?? 1)) {
     try {
       const file = await external.displayFile(r.id)
       if (file) {
@@ -440,7 +535,8 @@ async function syncRasterLayers() {
   const generation = ++rasterSync
   const want = [...(props.rasters ?? [])]
   for (const r of want) {
-    if (r.crs) await ensureProjection(r.crs).catch(() => {})
+    // The model frame's code is registered by build(); never look it up remotely.
+    if (r.crs && r.crs !== props.modelFrame?.code) await ensureProjection(r.crs).catch(() => {})
   }
 
   if (generation !== rasterSync || !map) return
@@ -515,6 +611,9 @@ function formatGridLabel(v, spacing, axis) {
   const num = v.toLocaleString('en-US', { minimumFractionDigits: dec, maximumFractionDigits: dec })
   return `${axis} ${num} ${gridUnits}`
 }
+// Axis letters: easting/northing for a CRS; plain X/Y for the model frame, whose
+// "north" is wherever the auto frame put it, not geographic north.
+let gridAxes = ['E', 'N']
 
 function makeGridLabel(coord, text, align) {
   const f = new Feature(new Point(coord))
@@ -576,12 +675,12 @@ function updateGrid() {
   let n = 0
   for (let x = Math.ceil(bounds[0] / spacing) * spacing; x <= bounds[2] && n < GRID_MAX_LINES; x += spacing, n++) {
     features.push(new Feature(new LineString([[x, bounds[1]], [x, bounds[3]]])))
-    features.push(makeGridLabel([x, labelY], formatGridLabel(x, spacing, 'E'), 'center'))
+    features.push(makeGridLabel([x, labelY], formatGridLabel(x, spacing, gridAxes[0]), 'center'))
   }
   n = 0
   for (let y = Math.ceil(bounds[1] / spacing) * spacing; y <= bounds[3] && n < GRID_MAX_LINES; y += spacing, n++) {
     features.push(new Feature(new LineString([[bounds[0], y], [bounds[2], y]])))
-    features.push(makeGridLabel([labelX, y], formatGridLabel(y, spacing, 'N'), 'left'))
+    features.push(makeGridLabel([labelX, y], formatGridLabel(y, spacing, gridAxes[1]), 'left'))
   }
 
   gridSource.clear(true)
@@ -605,7 +704,8 @@ function makeGridLayer(info, projection) {
   gridExtent = projection?.getExtent() || info.extent || null
   // Label suffix. OL reports 'm' for metric projections, 'ft'/'us-ft' for the
   // handful in feet; coordinates are printed in that unit as-is, never rescaled.
-  gridUnits = projection?.getUnits() === 'us-ft' ? 'ft' : (projection?.getUnits() || 'm')
+  gridUnits = info.gridUnit ?? (projection?.getUnits() === 'us-ft' ? 'ft' : (projection?.getUnits() || 'm'))
+  gridAxes = info.gridAxes ?? ['E', 'N']
   gridViewKey = ''
   return new VectorLayer({
     source: gridSource,
@@ -620,10 +720,22 @@ function makeGridLayer(info, projection) {
 // OpenLayers can't change a View's projection in place, so we rebuild the map
 // whenever the project CRS changes.
 
+// The model frame as an OpenLayers projection: plain metric units (OL needs a
+// unit for its resolution maths; the labels say "model units" when unscaled), an
+// extent from the cameras, no geographic meaning and no basemap.
+function modelProjection(frame) {
+  const projection = new Projection({ code: frame.code, units: 'm', extent: frame.extent })
+  addProjection(projection)
+  return projection
+}
+
 async function build() {
-  await ensureProjection(props.crs).catch(() => {})
-  const info = crsInfo(props.crs)
-  const projection = getOlProjection(props.crs)
+  const model = props.modelFrame
+  if (!model) await ensureProjection(props.crs).catch(() => {})
+  const info = model
+    ? { geographic: false, basemap: null, extent: model.extent, gridUnit: model.unit, gridAxes: ['X', 'Y'] }
+    : crsInfo(props.crs)
+  const projection = model ? modelProjection(model) : getOlProjection(props.crs)
   // crs.js gives every projection an extent; fall back to the catalog value.
   const viewExtent = projection?.getExtent() || info.extent || null
   basemapNote.value = ''
@@ -661,7 +773,9 @@ async function build() {
         ? [(viewExtent[0] + viewExtent[2]) / 2, (viewExtent[1] + viewExtent[3]) / 2]
         : [0, 0],
       zoom: viewExtent ? 3 : 2,
-      extent: info.extent || undefined,
+      // A CRS view stays inside the CRS's validity area; the model frame has no
+      // such edge, and its projection extent is only the zoom-out bound.
+      extent: model ? undefined : (info.extent || undefined),
     }),
     controls: [new Attribution({ collapsible: true })],
   })
@@ -669,7 +783,8 @@ async function build() {
 
   // Add the selected basemap below the grid (index 0). "Automatic" preserves
   // the CRS-aware polar layers; an explicit street layer uses OSM everywhere.
-  if (basemap.value === 'streets' || (basemap.value === 'auto' && info.basemap === 'osm')) {
+  // The model frame has no position on Earth, so it never gets a basemap.
+  if (model) { /* grid only */ } else if (basemap.value === 'streets' || (basemap.value === 'auto' && info.basemap === 'osm')) {
     map.getLayers().insertAt(0, makeOsmLayer())
   } else if (basemap.value === 'auto' && info.basemap === 'gibs') {
     addGibsLayer(info)
@@ -685,8 +800,9 @@ async function build() {
   // view), so it regenerates per frame while the map moves — see updateGrid, which
   // self-skips an unchanged view. No-op for the geographic graticule layer, which
   // OL keeps up to date itself.
-  map.on('postrender', updateGrid)
+  map.on('postrender', () => { updateGrid(); viewRev.value++ })
   updateGrid()
+  viewRev.value++
 
   fitToMarkers()
 
@@ -704,6 +820,8 @@ async function build() {
   map.addInteraction(gcpTranslate)
 
   map.on('click', (e) => {
+    // A measuring tool owns the click: it adds a vertex, nothing gets selected.
+    if (measurements.value?.active) { measurements.value.pick(e.pixel[0], e.pixel[1]); return }
     const hit = pickFeature(e.pixel)
     if (hit) {
       const gcpId = hit.get('gcpId')
@@ -722,14 +840,14 @@ async function build() {
 
   map.on('pointermove', (e) => {
     cursor.value = { x: e.coordinate[0], y: e.coordinate[1] }
-    const hit = pickFeature(e.pixel)
-    map.getViewport().style.cursor = hit ? 'pointer' : ''
+    const hit = measuring.value ? null : pickFeature(e.pixel)
+    map.getViewport().style.cursor = measuring.value ? 'crosshair' : hit ? 'pointer' : ''
     if (hit) {
       const gcpName = hit.get('gcpName')
       const fpName = hit.get('footprintName')
       const poseName = hit.get('poseName')
       const imgName = hit.get('name')
-      const text = gcpName ? `GCP: ${gcpName}`
+      const text = gcpName ? `${hit.get('gcpRole') === 'marker' ? 'Marker' : 'GCP'}: ${gcpName}`
         : fpName ? `Footprint: ${fpName}`
         : poseName ? `Camera: ${poseName}`
         : featureUnaligned(hit) ? `${imgName} (not aligned)` : imgName
@@ -795,13 +913,20 @@ watch(() => props.alignedUuids, () => vSource?.changed())
 // Enable/disable marker dragging with edit mode.
 watch(editMode, (on) => gcpTranslate?.setActive(on))
 
+// While measuring, a quick second click adds a vertex — it must not zoom.
+watch(measuring, (on) => {
+  map?.getInteractions().forEach((i) => { if (i instanceof DoubleClickZoom) i.setActive(!on) })
+})
+
 // Add/remove/restack reference raster layers and follow opacity changes. Deep,
 // because `opacity` is edited in place on the raster record (the id list alone
 // wouldn't change when the slider moves).
 watch(() => props.rasters, syncRasterLayers, { deep: true })
 
-// Rebuild the whole map when the project CRS changes
-watch(() => props.crs, async () => {
+// Rebuild the whole map when its frame changes: the project CRS, a switch to or
+// from the model frame, or a new model frame (`key`).
+watch(() => props.modelFrame?.key ?? props.crs, async () => {
+  if (isModel.value) editMode.value = false // GCPs are CRS data
   destroy()
   await build()
   map?.updateSize()
@@ -836,8 +961,13 @@ onBeforeUnmount(() => {
 function zoomToImage(imgId) {
   if (!map) return
   let coord = null
-  const pose = props.poses.find((p) => p.imageId === imgId && Number.isFinite(p.x) && Number.isFinite(p.y))
-  if (pose) {
+  const cam = isModel.value ? props.modelCameras.find((c) => c.imageId === imgId) : null
+  const pose = isModel.value ? null : props.poses.find((p) => p.imageId === imgId && Number.isFinite(p.x) && Number.isFinite(p.y))
+  if (cam) {
+    coord = [cam.x, cam.y]
+  } else if (isModel.value) {
+    return
+  } else if (pose) {
     coord = [pose.x, pose.y]
   } else {
     const img = props.images.find((i) => i.id === imgId)
@@ -862,7 +992,7 @@ function zoomToFootprints(polygons) {
   }
 }
 
-defineExpose({ zoomToImage, fitView: fitToMarkers, zoomToFootprints })
+defineExpose({ zoomToImage, fitView: fitToMarkers, zoomToFootprints, measureState, setMeasureTool, toggleSavedMeasurements })
 </script>
 
 <template>
@@ -870,6 +1000,12 @@ defineExpose({ zoomToImage, fitView: fitToMarkers, zoomToFootprints })
     <div class="map-body" @pointerleave="cursor = null">
       <div ref="mapEl" class="ol-map" />
       <ViewerContextMenu :menu="ctxMenu" :items="ctxItems" @select="onCtxSelect" />
+      <!-- Keyed by layer: a new target starts a fresh drawing (the tab does the same
+           when its raster changes). -->
+      <RasterMeasurements v-if="measureTarget" :key="measureTarget.layer.id" ref="measurements"
+        :product="measureTarget.product" :source="measureTarget.source" :descriptor="measureDesc"
+        :frame-status="measureTarget.frameStatus" :kind="measureTarget.kind" :view="measureView"
+        pan-hint="drag pans" />
 
       <GcpToolbar
         v-if="editMode"
@@ -881,15 +1017,19 @@ defineExpose({ zoomToImage, fitView: fitToMarkers, zoomToFootprints })
         @delete="(id) => emit('delete-gcp', id)"
         @close="editMode = false"
       />
-      <div v-if="basemapNote" class="basemap-note">{{ basemapNote }}</div>
+      <div v-if="basemapNote || notes.length" class="basemap-note">
+        <div v-if="basemapNote">{{ basemapNote }}</div>
+        <div v-for="(n, i) in notes" :key="i">{{ n }}</div>
+      </div>
 
       <div v-if="hover" class="hover-label" :style="{ left: hover.x + 12 + 'px', top: hover.y + 12 + 'px' }">
         {{ hover.text }}
       </div>
 
       <div v-if="hasGcps || hasFootprints || hasPoses" class="legend">
-        <span class="legend-item"><span class="legend-dot img"></span>Image GPS</span>
-        <span v-if="hasGcps" class="legend-item"><span class="legend-dot gcp"></span>GCP</span>
+        <span v-if="!isModel" class="legend-item"><span class="legend-dot img"></span>Image GPS</span>
+        <span v-if="hasGcps && !isModel" class="legend-item"><span class="legend-dot gcp"></span>GCP</span>
+        <span v-if="hasGcps && isModel" class="legend-item"><span class="legend-dot marker"></span>Marker</span>
         <span v-if="hasPoses" class="legend-item"><span class="legend-dot pose"></span>Camera</span>
         <span v-if="hasFootprints" class="legend-item"><span class="legend-dot footprint"></span>Footprint</span>
       </div>
@@ -985,7 +1125,10 @@ defineExpose({ zoomToImage, fitView: fitToMarkers, zoomToFootprints })
   font-size: 12px;
   color: var(--text-dim);
   pointer-events: none;
-  white-space: nowrap;
+  /* Frame notes are sentences; wrap inside the map rather than run off it. */
+  max-width: min(640px, calc(100% - 40px));
+  width: max-content;
+  text-align: center;
 }
 
 .hover-label {
@@ -1021,6 +1164,7 @@ defineExpose({ zoomToImage, fitView: fitToMarkers, zoomToFootprints })
 .legend-dot { width: 9px; height: 9px; display: inline-block; }
 .legend-dot.img { background: #0e639c; border-radius: 50%; }
 .legend-dot.gcp { background: #3fae6a; transform: rotate(45deg); }
+.legend-dot.marker { background: #e0a030; transform: rotate(45deg); }
 .legend-dot.pose { width: 0; height: 0; background: none; border-left: 5px solid transparent; border-right: 5px solid transparent; border-bottom: 9px solid #b06ad9; }
 .legend-dot.footprint { background: rgba(14, 99, 156, 0.2); border: 1.5px solid rgba(14, 99, 156, 0.8); }
 </style>

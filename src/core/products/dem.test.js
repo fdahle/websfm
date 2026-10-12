@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { rasterizeDem, suggestGsd, cellCenter } from './dem.js'
+import { rasterizeDem, suggestGsd, cellCenter, stageDemPoints, coreExtent } from './dem.js'
 
 describe('suggestGsd', () => {
   it('scales as √(area/n)', () => {
@@ -85,5 +85,97 @@ describe('rasterizeDem', () => {
   it('returns null for degenerate input', () => {
     expect(rasterizeDem([], {})).toBeNull()
     expect(rasterizeDem([{ x: 1, y: 1, z: 0 }], { gsd: 1 })).toBeNull()
+  })
+})
+
+describe('rasterizeDem median', () => {
+  // The typed counting-sort median must pick exactly what a per-cell sorted
+  // bucket picks (sorted[len >> 1]), including even counts and empty cells.
+  it('matches a per-cell bucket reference', () => {
+    let seed = 7
+    const rnd = () => ((seed = (seed * 1103515245 + 12345) % 2 ** 31) / 2 ** 31)
+    const pts = []
+    for (let i = 0; i < 2000; i++) pts.push({ x: rnd() * 20, y: rnd() * 20, z: rnd() * 100 })
+    const dem = rasterizeDem(pts, { gsd: 1, aggregate: 'median', fillRadius: 0 })
+    const buckets = new Map()
+    for (const p of pts) {
+      const col = Math.min(dem.width - 1, Math.floor((p.x - dem.originX) / dem.gsd))
+      const row = Math.min(dem.height - 1, Math.floor((dem.originY - p.y) / dem.gsd))
+      const k = row * dem.width + col
+      if (!buckets.has(k)) buckets.set(k, [])
+      buckets.get(k).push(p.z)
+    }
+    for (let i = 0; i < dem.width * dem.height; i++) {
+      const b = buckets.get(i)
+      if (!b) { expect(Number.isNaN(dem.data[i])).toBe(true); continue }
+      b.sort((a, c) => a - c)
+      expect(dem.data[i]).toBe(Math.fround(b[b.length >> 1]))
+    }
+  })
+
+  it('refuses a grid over the given budget, naming the size', () => {
+    const pts = [{ x: 0, y: 0, z: 0 }, { x: 99, y: 99, z: 1 }]
+    expect(() => rasterizeDem(pts, { gsd: 1, memBudgetBytes: 100 * 100 * 24 - 1 })).toThrow(/\(100×100\) needs .*working-memory limit/)
+    expect(rasterizeDem(pts, { gsd: 1, memBudgetBytes: 100 * 100 * 24 })).not.toBeNull()
+  })
+})
+
+describe('stageDemPoints', () => {
+  const dense = { count: 3, pos: new Float64Array([0, 0, 1, 5, 5, 2, 9, 9, 3, 99]) }
+
+  it('copies a dense cloud into a fresh buffer without touching the source', () => {
+    const s = stageDemPoints(dense)
+    expect([...s.pos]).toEqual([0, 0, 1, 5, 5, 2, 9, 9, 3])
+    expect(s.pos.buffer).not.toBe(dense.pos.buffer)
+    expect(s).toMatchObject({ count: 3, total: 3 })
+  })
+
+  it('copies only in-region points, sized to the survivors', () => {
+    const s = stageDemPoints(dense, { inside: (x) => x > 1 })
+    expect([...s.pos]).toEqual([5, 5, 2, 9, 9, 3])
+    expect(s).toMatchObject({ count: 2, total: 3 })
+  })
+
+  it('stages sparse point objects', () => {
+    const s = stageDemPoints({ points: [{ x: 1, y: 2, z: 3 }] })
+    expect([...s.pos]).toEqual([1, 2, 3])
+  })
+
+  it('checks the in-region count, not the cloud size, against the budget', () => {
+    expect(() => stageDemPoints(dense, { budgetBytes: 3 * 24 - 1 })).toThrow(/memory budget/)
+    expect(stageDemPoints(dense, { budgetBytes: 2 * 24, inside: (x) => x > 1 }).count).toBe(2)
+  })
+})
+
+describe('coreExtent', () => {
+  let seed = 11
+  const rnd = () => ((seed = (seed * 1103515245 + 12345) % 2 ** 31) / 2 ** 31)
+  const pack = (pts) => { const a = new Float64Array(pts.length * 3); pts.forEach((p, i) => { a[i * 3] = p[0]; a[i * 3 + 1] = p[1] }); return a }
+
+  it('keeps an oblique capture\'s site and drops its thin far field', () => {
+    // 20 × 20 site with 40k points; 4k points thinning out over 2 km to the south.
+    const pts = []
+    for (let i = 0; i < 40000; i++) pts.push([rnd() * 20, rnd() * 20])
+    for (let i = 0; i < 4000; i++) { const d = 20 + 2000 * rnd() ** 2; pts.push([rnd() * 400 - 190, -d]) }
+    const e = coreExtent(pack(pts), pts.length)
+    // Within a few metres of the site (the far field starts at its southern edge,
+    // so adjacent ground may stay); the 2 km of thin background is gone.
+    expect(e.minX).toBeGreaterThan(-10); expect(e.maxX).toBeLessThan(30)
+    expect(e.maxY).toBeLessThan(25); expect(e.minY).toBeGreaterThan(-40)
+    expect(e.inside).toBeGreaterThan(40000 * 0.99)
+  })
+
+  it('loses nothing from a uniform cloud', () => {
+    const pts = Array.from({ length: 20000 }, () => [rnd() * 100, rnd() * 50])
+    const e = coreExtent(pack(pts), pts.length)
+    expect(e.inside).toBeGreaterThan(pts.length * 0.99)
+    expect(coreExtent(pack([[1, 1]]), 1)).toBeNull()
+  })
+
+  it('rasterizeDem leaves points outside the bounds out instead of clamping them', () => {
+    const pts = [{ x: 0, y: 0, z: 1 }, { x: 4, y: 0, z: 1 }, { x: 0, y: 4, z: 1 }, { x: 4, y: 4, z: 1 }, { x: 500, y: 2, z: 99 }]
+    const dem = rasterizeDem(pts, { gsd: 1, fillRadius: 0, bounds: { minX: 0, minY: 0, maxX: 4, maxY: 4 } })
+    expect(dem.width).toBe(5)
+    expect(dem.zMax).toBe(1) // the far point's 99 did not land on the border
   })
 })

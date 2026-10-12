@@ -30,15 +30,15 @@ export function useDepthOverlay({ imgEl, image, drawOverlay, emit }) {
     const img = imgEl.value
     if (!img || !img.naturalWidth) return
     depthCanvas.value = new OffscreenCanvas(img.naturalWidth, img.naturalHeight)
-    if (image().depth?.dataUrl) loadDepthFromDataUrl(image().depth.dataUrl)
+    if (image().depth?.blob) loadDepthBlob(image().depth.blob)
   }
 
-  // Already-colorized depth maps are stored as PNG data URLs; just blit them in.
-  async function loadDepthFromDataUrl(dataUrl) {
+  // Already-colorized depth previews are PNG Blobs (the store's `{ blob, url }`
+  // record); just blit them in.
+  async function loadDepthBlob(blob) {
     const canvas = depthCanvas.value
     if (!canvas) return
     try {
-      const blob = await (await fetch(dataUrl)).blob()
       const bmp  = await createImageBitmap(blob)
       const ctx  = canvas.getContext('2d')
       ctx.clearRect(0, 0, canvas.width, canvas.height)
@@ -98,13 +98,7 @@ export function useDepthOverlay({ imgEl, image, drawOverlay, emit }) {
   async function exportDepth() {
     const canvas = depthCanvas.value
     if (!canvas) return
-    const blob = await canvas.convertToBlob({ type: 'image/png' })
-    const dataUrl = await new Promise((resolve) => {
-      const fr = new FileReader()
-      fr.onload = () => resolve(fr.result)
-      fr.readAsDataURL(blob)
-    })
-    emit('update-depth', dataUrl)
+    emit('update-depth', await canvas.convertToBlob({ type: 'image/png' }))
   }
 
   function clearDepth() {
@@ -120,8 +114,8 @@ export function useDepthOverlay({ imgEl, image, drawOverlay, emit }) {
   watch(() => image().depth, (depth, prev) => {
     if (depth === prev) return
     const canvas = depthCanvas.value
-    if (depth?.dataUrl && canvas) {
-      loadDepthFromDataUrl(depth.dataUrl)
+    if (depth?.blob && canvas) {
+      loadDepthBlob(depth.blob)
     } else if (!depth && canvas) {
       canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height)
       hasDepth.value = false

@@ -1,4 +1,17 @@
-import { computed } from 'vue'
+import { computed, toRaw } from 'vue'
+
+// A frame spec is posted to the worker, but it is spread from reactive state (the
+// georeference's `sim`, the orientation basis): the top level is a fresh object
+// while the nested R/t/local/origin arrays are still Vue proxies, which
+// postMessage cannot clone. Typed arrays pass through (they clone as-is).
+function plainCopy(v) {
+  v = toRaw(v)
+  if (Array.isArray(v)) return v.map(plainCopy)
+  if (v && typeof v === 'object' && !ArrayBuffer.isView(v)) {
+    return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, plainCopy(x)]))
+  }
+  return v
+}
 import { metresPerCrsUnit, linearCrsUnit } from '../../core/crs.js'
 
 export function createFrameResolver({
@@ -41,6 +54,11 @@ export function createFrameResolver({
   }
 
   async function effectiveFrameSpec(opts = {}) {
+    const resolved = await resolveFrameSpec(opts)
+    return { ...resolved, frameSpec: plainCopy(resolved.frameSpec) }
+  }
+
+  async function resolveFrameSpec(opts) {
     const stamp = (() => {
       const c = mainSparseCloud.value
       return c ? { id: c.id, createdAt: c.createdAt ?? null } : null

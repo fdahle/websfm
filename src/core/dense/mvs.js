@@ -14,10 +14,11 @@
 import { computeDepthMap } from '../sfm/reconstruction.js'
 import { planeCostRef, aggregateValidCosts } from './planeCost.js'
 import { DENSE_TUNING } from '../tuning.js'
-import { normalizeRegion, regionContains, pointsInRegion } from '../products/region.js'
+import { normalizeRegion, regionContains } from '../products/region.js'
+import { viewIndex, positionsInRegion } from './sparseInput.js'
 import { DEPTHMAP_DEFAULTS } from '../defaults.user.js'
 import { levelPerturbStarts } from './refineSchedule.js'
-import { projectDensifyPeakBytes, densifyInputBytes, formatBytes } from './memBudget.js'
+import { projectDensifyPeakBytes, densifyInputBytes, formatBytes, maxFusionTileCells, DENSIFY_CLOUD_BYTES_PER_CELL } from './memBudget.js'
 import {
   cameraCenter, projectWithDepth, triangulationAngle, scaleK, rgbaToGray, toScaledPx,
 } from '../sfm/geometry.js'
@@ -73,8 +74,10 @@ function unprojectPixel(m, u, v, depth) {
 // Pick the best source views for a reference image: candidates that share the
 // most sparse 3D points with the reference at a healthy parallax angle. Returns
 // up to `maxSources` source uuids, best first.
-//   cameras: Map<uuid, { R, t, K }>   points: [{ x, y, z, views: [[uuid,kpIdx],…] }]
-export function selectSourceViews(cameras, points, refUuid, opts = {}) {
+//   cameras: Map<uuid, { R, t, K }>   sparse: the packed sparse input (sparseInput.js)
+//   index: viewIndex(sparse) — pass the run's one index; built here when omitted.
+// Walks only the points the reference sees: O(its observations), not O(points).
+export function selectSourceViews(cameras, sparse, refUuid, opts = {}, index = viewIndex(sparse)) {
   // maxSources is user-facing (DEPTHMAP_DEFAULTS); the angle window is internal (tuning.js).
   const { maxSources = 6, minAngleDeg = DENSE_TUNING.minAngleDeg, maxAngleDeg = DENSE_TUNING.maxAngleDeg } = opts
   const refCam = cameras.get(refUuid)
@@ -83,10 +86,12 @@ export function selectSourceViews(cameras, points, refUuid, opts = {}) {
   const centers = new Map()
   const score = new Map()
 
-  for (const pt of points) {
-    const viewers = pt.views.map(([u]) => u)
-    if (!viewers.includes(refUuid)) continue
-    for (const u of viewers) {
+  const { pos, vstart, vcam, viewUuids } = sparse
+  const pt = { x: 0, y: 0, z: 0 }
+  for (const i of index.get(refUuid) ?? []) {
+    pt.x = pos[3 * i]; pt.y = pos[3 * i + 1]; pt.z = pos[3 * i + 2]
+    for (let k = vstart[i]; k < vstart[i + 1]; k++) {
+      const u = viewUuids[vcam[k]]
       if (u === refUuid || !cameras.has(u)) continue
       if (!centers.has(u)) centers.set(u, cameraCenter(cameras.get(u)))
       const ang = triangulationAngle(Cref, centers.get(u), pt)
@@ -100,14 +105,14 @@ export function selectSourceViews(cameras, points, refUuid, opts = {}) {
 }
 
 // Seed a depth map + depth range for a reference image from the sparse cloud:
-// project every point in front of the reference camera, splat its depth to the
-// nearest working pixel. Returns { seedDepth: Float32Array(w*h), depthMin, depthMax }
-// where the range is a padded 5–95th percentile of the seeded depths.
-export function seedDepthFromSparse(refCam, points, width, height) {
+// project every point (`pos`, flat xyz) in front of the reference camera, splat its
+// depth to the nearest working pixel. Returns { seedDepth: Float32Array(w*h),
+// depthMin, depthMax } where the range is a padded 5–95th percentile of the seeds.
+export function seedDepthFromSparse(refCam, pos, width, height) {
   const seed = new Float32Array(width * height) // 0 ⇒ no seed
   const depths = []
-  for (const pt of points) {
-    const p = project(refCam, pt.x, pt.y, pt.z)
+  for (let i = 0; i < pos.length; i += 3) {
+    const p = project(refCam, pos[i], pos[i + 1], pos[i + 2])
     if (!p) continue
     const u = Math.round(p.u), v = Math.round(p.v)
     if (u < 0 || v < 0 || u >= width || v >= height) continue
@@ -205,7 +210,8 @@ function pyramidLevelCount(w, h, coarseLong = DENSE_TUNING.coarseLong) {
 // implementation). The worker injects a WebGPU backend here when available — both
 // share the (refGray, refW, refH, refK, sources, opts) → { depth, cost, w, h }
 // contract, so this orchestration is backend-agnostic.
-export async function depthMapForImage(ref, sources, points, settings = {}, computeDepthMapFn = computeDepthMap, hooks = {}) {
+// `pos`: the sparse positions (flat xyz Float64Array; sparseInput.js `pos`).
+export async function depthMapForImage(ref, sources, pos, settings = {}, computeDepthMapFn = computeDepthMap, hooks = {}) {
   // window/iterations/bestK are user-facing (DEPTHMAP_DEFAULTS); coarseLong is internal (tuning.js).
   const { window = 3, iterations = 3, bestK = 3, coarseLong = DENSE_TUNING.coarseLong } = settings
   const refCamScaled = { R: ref.cam.R, t: ref.cam.t, K: ref.K }
@@ -213,8 +219,8 @@ export async function depthMapForImage(ref, sources, points, settings = {}, comp
   // working-res projection (most sparse points visible → tightest percentiles).
   // A region narrows the depth search to the sparse points inside it.
   const region = normalizeRegion(settings.region)
-  const seedPoints = region ? pointsInRegion(points, region) : points
-  const { depthMin, depthMax, seeded } = seedDepthFromSparse(refCamScaled, seedPoints, ref.width, ref.height)
+  const seedPos = region ? positionsInRegion(pos, region) : pos
+  const { depthMin, depthMax, seeded } = seedDepthFromSparse(refCamScaled, seedPos, ref.width, ref.height)
   if (!(depthMax > depthMin)) return null // no sparse support → can't bound depth
 
   // Relative poses are resolution-independent (R,t only) — shared across levels.
@@ -272,7 +278,7 @@ export async function depthMapForImage(ref, sources, points, settings = {}, comp
     let seedDepth
     if (li === 0) {
       const camL = { R: ref.cam.R, t: ref.cam.t, K: L.K }
-      seedDepth = seedDepthFromSparse(camL, points, L.w, L.h).seedDepth
+      seedDepth = seedDepthFromSparse(camL, pos, L.w, L.h).seedDepth
     } else {
       seedDepth = upsampleDepthNearest(prevDepth, prevW, prevH, L.w, L.h)
     }
@@ -416,7 +422,7 @@ function sliceCorners(m, ua, ub, va, vb) {
   return corners
 }
 
-function sliceMisses(corners, c) {
+function sliceMisses(corners, c, margin = CULL_MARGIN) {
   let minU = Infinity, maxU = -Infinity, minV = Infinity, maxV = -Infinity, behind = 0
   for (const P of corners) {
     const p = project(c, P.x, P.y, P.z)
@@ -427,35 +433,40 @@ function sliceMisses(corners, c) {
     if (p.v > maxV) maxV = p.v
   }
   if (behind === corners.length) return true
-  return !behind && (maxU < -0.5 - CULL_MARGIN || minU > c.width - 0.5 + CULL_MARGIN
-    || maxV < -0.5 - CULL_MARGIN || minV > c.height - 0.5 + CULL_MARGIN)
+  return !behind && (maxU < -0.5 - margin || minU > c.width - 0.5 + margin
+    || maxV < -0.5 - margin || minV > c.height - 0.5 + margin)
+}
+
+// Candidate views of ONE reference map: every other map its depth slice can reach,
+// nearest camera first. Needs only the reference's depth (its slice corners) and the
+// others' cameras — which is what lets the streamed filter pick candidates before it
+// loads any of their planes. `others[ci]` needs { width, height, K, R, t }.
+function referenceCandidates(ref, mi, others, centres) {
+  const corners = sliceCorners(ref, 0, ref.width, 0, ref.height)
+  if (!corners) return []
+  const C = centres[mi]
+  const dist = (ci) => Math.hypot(centres[ci][0] - C[0], centres[ci][1] - C[1], centres[ci][2] - C[2])
+  const out = []
+  for (let ci = 0; ci < others.length; ci++) if (ci !== mi && !sliceMisses(corners, others[ci])) out.push(ci)
+  return out.map((ci) => [dist(ci), ci]).sort((a, b) => a[0] - b[0] || a[1] - b[1]).map((e) => e[1])
 }
 
 // Per map: the surviving candidate indices, nearest first.
 export function filterCandidates(maps) {
   const centres = maps.map((m) => cameraCenter(m))
-  return maps.map((m, mi) => {
-    const corners = sliceCorners(m, 0, m.width, 0, m.height)
-    if (!corners) return []
-    const C = centres[mi]
-    const dist = (ci) => Math.hypot(centres[ci][0] - C[0], centres[ci][1] - C[1], centres[ci][2] - C[2])
-    const out = []
-    for (let ci = 0; ci < maps.length; ci++) if (ci !== mi && !sliceMisses(corners, maps[ci])) out.push(ci)
-    return out.map((ci) => [dist(ci), ci]).sort((a, b) => a[0] - b[0] || a[1] - b[1]).map((e) => e[1])
-  })
+  return maps.map((m, mi) => referenceCandidates(m, mi, maps, centres))
 }
 
-// Per block of map `mi`: the subset of its map-level candidates (order kept) that
-// survive that block's own slice. Row-major blocks of FILTER_BLOCK px.
-function blockCandidates(maps, mi, mapCand) {
-  const m = maps[mi]
-  const bw = Math.ceil(m.width / FILTER_BLOCK), bh = Math.ceil(m.height / FILTER_BLOCK)
+// Per block of the reference map: the subset of its map-level candidates (order kept)
+// that survive that block's own slice. Row-major blocks of FILTER_BLOCK px.
+function blockCandidates(ref, others, mapCand) {
+  const bw = Math.ceil(ref.width / FILTER_BLOCK), bh = Math.ceil(ref.height / FILTER_BLOCK)
   const out = new Array(bw * bh)
   for (let by = 0; by < bh; by++) {
     for (let bx = 0; bx < bw; bx++) {
       const ua = bx * FILTER_BLOCK, va = by * FILTER_BLOCK
-      const corners = sliceCorners(m, ua, Math.min(m.width, ua + FILTER_BLOCK), va, Math.min(m.height, va + FILTER_BLOCK))
-      out[by * bw + bx] = corners ? Int32Array.from(mapCand.filter((ci) => !sliceMisses(corners, maps[ci]))) : new Int32Array(0)
+      const corners = sliceCorners(ref, ua, Math.min(ref.width, ua + FILTER_BLOCK), va, Math.min(ref.height, va + FILTER_BLOCK))
+      out[by * bw + bx] = corners ? Int32Array.from(mapCand.filter((ci) => !sliceMisses(corners, others[ci]))) : new Int32Array(0)
     }
   }
   return { bw, lists: out }
@@ -533,6 +544,146 @@ export function geomFilterLoopShare({ loopMs, done, total, pxDone, usPerPx = DEN
 // returned planes; no I/O. `opts.cull: false` walks every map in index order — the
 // reference the cull is tested against.
 export function filterDepthMapsGeometric(maps, opts = {}, onLog = () => {}, hooks = {}) {
+  const cfg = filterConfig(opts)
+  const { onProgress } = hooks
+  const nMaps = maps.length
+  const checkViews = nMaps >= 2 && cfg.minConsistent > 0
+  const params = maps.map(camParams)
+  const centres = maps.map((m) => cameraCenter(m))
+  const masks = maps.map((m) => new Uint8Array(m.width * m.height)) // 1 = drop
+  const totals = { considered: 0, kept: 0, lowNcc: 0, inconsistent: 0, lowParallax: 0 }
+  let nCand = 0
+  for (let mi = 0; mi < nMaps; mi++) {
+    const m = maps[mi]
+    const label = m.name ?? m.uuid?.slice(0, 8) ?? ''
+    onProgress?.(mi, nMaps, label)
+    const { cand, lists } = referencePlan(m, mi, maps, centres, cfg, checkViews)
+    nCand += cand.length
+    const depths = new Array(nMaps)
+    for (const ci of cand) depths[ci] = maps[ci].depth
+    const tMap = Date.now()
+    m.filterStats = judgeReference(mi, m, cand, lists, maps, params, centres, cfg, checkViews, depths,
+      masks[mi], totals, (frac) => onProgress?.(mi + frac, nMaps, label))
+    logReference(onLog, m.filterStats, label, mi, nMaps, cand.length, cfg, tMap)
+  }
+  if (checkViews) {
+    onLog(`Depth filter: cross-view check over ${nMaps} maps — ${(nCand / nMaps).toFixed(1)} candidate `
+      + `views/map (of ${nMaps - 1})${cfg.cull ? ' after the frustum cull' : ''}`, 'info', 'Dense')
+  }
+  // Apply now that every map has been judged against the original evidence.
+  for (let mi = 0; mi < nMaps; mi++) {
+    const { depth, width, height } = maps[mi]
+    const mask = masks[mi]
+    for (let k = 0; k < width * height; k++) if (mask[k]) depth[k] = 0
+  }
+  logFilterTotals(onLog, totals, nMaps, cfg)
+  return totals
+}
+
+/**
+ * The same cross-view filter over maps that are NOT all in memory — the path that
+ * lets Stage A scale past the number of maps one worker can hold (TODO ▸ SC-4).
+ * Verdicts are identical to filterDepthMapsGeometric: the per-reference kernel is
+ * shared, and every map is judged against UNFILTERED planes (each is read as stored;
+ * nothing is written until every map has been judged).
+ *
+ * metas[i]: { uuid, name, width, height, K, R, t } — cameras only.
+ * io.loadReference(i) → { depth, cost } (unfiltered); io.loadDepth(i) → depth plane.
+ * Candidate depth planes are cached in a byte-bounded LRU (`cacheBytes`); a reference
+ * whose candidates alone exceed it still runs, briefly over the bound.
+ * `opts.refs` (indices) judges only those references — every reference is judged
+ * against the same unfiltered planes, so disjoint subsets run in parallel workers give
+ * exactly the full run's verdicts; `opts.summaryLogs: false` leaves the run-level log
+ * lines to the caller that merges them (`logFilterTotals`).
+ * Returns { masks: Uint8Array per map (bit-packed, 1 = drop), stats: per map, totals,
+ * loads, hits, nCand } (masks/stats only at the judged indices).
+ */
+export async function filterDepthMapsGeometricStreamed(metas, io, opts = {}, onLog = () => {}, hooks = {}) {
+  const cfg = filterConfig(opts)
+  const { onProgress } = hooks
+  const cacheBytes = opts.cacheBytes ?? 512 * 1024 ** 2
+  const nMaps = metas.length
+  const checkViews = nMaps >= 2 && cfg.minConsistent > 0
+  const params = metas.map(camParams)
+  const centres = metas.map((m) => cameraCenter(m))
+  const cache = new Map() // ci → depth plane, in use order (LRU at the front)
+  let cached = 0, loads = 0, hits = 0
+  const depthOf = async (ci) => {
+    const hit = cache.get(ci)
+    if (hit) { hits++; cache.delete(ci); cache.set(ci, hit); return hit }
+    const plane = await io.loadDepth(ci)
+    loads++
+    cache.set(ci, plane); cached += plane.byteLength
+    return plane
+  }
+  const evict = (keep) => {
+    for (const [ci, plane] of cache) {
+      if (cached <= cacheBytes) break
+      if (keep.has(ci)) continue
+      cache.delete(ci); cached -= plane.byteLength
+    }
+  }
+  const masks = new Array(nMaps), stats = new Array(nMaps)
+  const totals = { considered: 0, kept: 0, lowNcc: 0, inconsistent: 0, lowParallax: 0 }
+  let nCand = 0
+  const refs = opts.refs ?? Array.from({ length: nMaps }, (_, i) => i)
+  for (let k = 0; k < refs.length; k++) {
+    const mi = refs[k]
+    const meta = metas[mi]
+    const label = meta.name ?? meta.uuid?.slice(0, 8) ?? ''
+    onProgress?.(k, refs.length, label)
+    const { depth, cost } = await io.loadReference(mi)
+    const ref = { ...meta, depth, cost }
+    const { cand, lists } = referencePlan(ref, mi, metas, centres, cfg, checkViews)
+    nCand += cand.length
+    const depths = new Array(nMaps)
+    for (const ci of cand) depths[ci] = await depthOf(ci)
+    evict(new Set(cand))
+    const mask = new Uint8Array(meta.width * meta.height)
+    const tMap = Date.now()
+    stats[mi] = judgeReference(mi, ref, cand, lists, metas, params, centres, cfg, checkViews, depths,
+      mask, totals, (frac) => onProgress?.(k + frac, refs.length, label))
+    logReference(onLog, stats[mi], label, mi, nMaps, cand.length, cfg, tMap)
+    masks[mi] = packBits(mask)
+  }
+  if (opts.summaryLogs !== false) {
+    if (checkViews) logFilterCache(onLog, { nMaps, nCand, loads, hits, cacheBytes, cull: cfg.cull })
+    logFilterTotals(onLog, totals, nMaps, cfg)
+  }
+  return { masks, stats, totals, loads, hits, nCand }
+}
+
+// The streamed filter's candidate/cache line, for one run or the merge of several.
+export function logFilterCache(onLog, { nMaps, nCand, loads, hits, cacheBytes, cull = true, workers = 1 }) {
+  onLog(`Depth filter: cross-view check over ${nMaps} maps — ${(nCand / nMaps).toFixed(1)} candidate `
+    + `views/map (of ${nMaps - 1})${cull ? ' after the frustum cull' : ''}; `
+    + `${loads} plane reads, ${hits} cache hits (≤${formatBytes(cacheBytes)} cache${workers > 1 ? ` per worker, ${workers} workers` : ''})`, 'info', 'Dense')
+}
+
+/** Zero the pixels a packed filter mask drops, in place. */
+export function applyPackedMask(depth, packed) {
+  for (let k = 0; k < depth.length; k++) if (packed[k >> 3] & (1 << (k & 7))) depth[k] = 0
+  return depth
+}
+
+function packBits(mask) {
+  const out = new Uint8Array((mask.length + 7) >> 3)
+  for (let k = 0; k < mask.length; k++) if (mask[k]) out[k >> 3] |= 1 << (k & 7)
+  return out
+}
+
+// The cross-view filter's knobs from the depth-map settings (DEPTHMAP_DEFAULTS for the
+// unset ones) — shared by the worker op and the store that merges a split run.
+export function filterSettings(settings = {}) {
+  return {
+    maxGeomCost: settings.maxGeomCost ?? DEPTHMAP_DEFAULTS.maxGeomCost,
+    minConsistent: settings.minConsistent ?? DEPTHMAP_DEFAULTS.minConsistent,
+    minNcc: settings.minNcc ?? DEPTHMAP_DEFAULTS.minNcc,
+    minGeomAngleDeg: settings.minGeomAngleDeg ?? DEPTHMAP_DEFAULTS.minGeomAngleDeg,
+  }
+}
+
+export function filterConfig(opts) {
   const {
     minNcc = DEPTHMAP_DEFAULTS.minNcc,
     maxGeomCost = DEPTHMAP_DEFAULTS.maxGeomCost,
@@ -540,156 +691,135 @@ export function filterDepthMapsGeometric(maps, opts = {}, onLog = () => {}, hook
     minGeomAngleDeg = DEPTHMAP_DEFAULTS.minGeomAngleDeg,
     cull = true,
   } = opts
-  const { onProgress } = hooks
+  return { minNcc, maxGeomCost, minConsistent, minGeomAngleDeg, cull,
+    maxCostGate: 1 - minNcc, // ZNCC ncc ≥ minNcc  ⇔  cost ≤ 1 − minNcc
+    angleOn: minGeomAngleDeg > 0, cosMinAngle: Math.cos(minGeomAngleDeg * Math.PI / 180) }
+}
 
-  // A lone map has no cross-view evidence — the test is meaningless, not "everything
-  // fails". Apply the NCC floor only.
-  const nMaps = maps.length
-  const maxCostGate = 1 - minNcc // ZNCC ncc ≥ minNcc  ⇔  cost ≤ 1 − minNcc
-  const checkViews = nMaps >= 2 && minConsistent > 0
-  const candidates = !checkViews ? maps.map(() => [])
-    : cull ? filterCandidates(maps)
-      : maps.map((_, mi) => maps.map((__, ci) => ci).filter((ci) => ci !== mi))
-  if (checkViews) {
-    const nCand = candidates.reduce((s, c) => s + c.length, 0)
-    onLog(`Depth filter: cross-view check over ${nMaps} maps — ${(nCand / nMaps).toFixed(1)} candidate `
-      + `views/map (of ${nMaps - 1})${cull ? ' after the frustum cull' : ''}`, 'info', 'Dense')
-  }
-  const params = maps.map(camParams)
-  // Camera centres for the per-view parallax gate (cos > cosMinAngle ⇔ angle too small).
-  const angleOn = minGeomAngleDeg > 0
-  const cosMinAngle = Math.cos(minGeomAngleDeg * Math.PI / 180)
-  const centres = maps.map((m) => cameraCenter(m))
+// Which views a reference is checked against, map level and per 64 px block. A lone
+// map has no cross-view evidence — the test is meaningless, not "everything fails".
+function referencePlan(ref, mi, others, centres, cfg, checkViews) {
+  if (!checkViews) return { cand: [], lists: null }
+  if (!cfg.cull) return { cand: others.map((_, ci) => ci).filter((ci) => ci !== mi), lists: null }
+  const cand = referenceCandidates(ref, mi, others, centres)
+  return { cand, lists: blockCandidates(ref, others, cand) }
+}
 
-  const masks = maps.map((m) => new Uint8Array(m.width * m.height)) // 1 = drop
-  let considered = 0, lowNcc = 0, inconsistent = 0, lowParallax = 0, kept = 0
-
-  for (let mi = 0; mi < nMaps; mi++) {
-    const m = maps[mi]
-    const { width: w, height: h, depth, cost } = m
-    const mask = masks[mi]
-    const label = m.name ?? m.uuid?.slice(0, 8) ?? ''
-    const tMap = Date.now()
-    let tTick = tMap
-    onProgress?.(mi, nMaps, label)
-    // Per-block candidate lists (one shared list when not culling).
-    const { bw, lists } = checkViews && cull
-      ? blockCandidates(maps, mi, candidates[mi])
-      : { bw: 1, lists: null }
-    const flatList = lists ? null : Int32Array.from(candidates[mi])
-    // This map's camera, unpacked once (see camParams).
-    const pm = params[mi]
-    const mR00 = pm[0], mR01 = pm[1], mR02 = pm[2], mR10 = pm[3], mR11 = pm[4], mR12 = pm[5]
-    const mR20 = pm[6], mR21 = pm[7], mR22 = pm[8], mt0 = pm[9], mt1 = pm[10], mt2 = pm[11]
-    const mfx = pm[12], mfy = pm[13], mcx = pm[14], mcy = pm[15]
-    const [mCx, mCy, mCz] = centres[mi]
-    let mapLowNcc = 0, mapInconsistent = 0, mapLowParallax = 0
-    for (let v = 0; v < h; v++) {
-      // Within-map progress (a map is seconds on a big set): time-throttled so a
-      // 1000-row plane doesn't post 1000 events.
-      if (onProgress && (v & 15) === 0 && v > 0) {
-        const now = Date.now()
-        if (now - tTick >= 100) { tTick = now; onProgress(mi + v / h, nMaps, label) }
-      }
-      const rowBlock = ((v / FILTER_BLOCK) | 0) * bw
-      for (let u = 0; u < w; u++) {
-        const idx = v * w + u
-        const d = depth[idx]
-        if (!(d > 0)) continue // already a hole
-        considered++
-        if (cost[idx] > maxCostGate) { mask[idx] = 1; lowNcc++; mapLowNcc++; continue }
-        if (!checkViews) { kept++; continue }
-
-        // P = unprojectPixel(m, u, v, d), inlined (same arithmetic, no allocation).
-        const ax = (u - mcx) / mfx * d - mt0, ay = (v - mcy) / mfy * d - mt1, az = d - mt2
-        const Px = mR00 * ax + mR10 * ay + mR20 * az
-        const Py = mR01 * ax + mR11 * ay + mR21 * az
-        const Pz = mR02 * ax + mR12 * ay + mR22 * az
-        const cand = flatList ?? lists[rowBlock + ((u / FILTER_BLOCK) | 0)]
-        // Reference ray P→C, for the parallax gate.
-        const rx = mCx - Px, ry = mCy - Py, rz = mCz - Pz
-        const rr = rx * rx + ry * ry + rz * rz
-        // `flat` counts views that round-trip but at too little parallax: they decide
-        // only which bucket a rejected pixel is reported in, never the verdict.
-        let agree = 0, flat = 0
-        for (let k = 0; k < cand.length && agree < minConsistent; k++) {
-          const ci = cand[k]
-          const c = maps[ci], pc = params[ci]
-          // p = project(c, P)
-          const zc = pc[6] * Px + pc[7] * Py + pc[8] * Pz + pc[11]
-          if (!(zc > 1e-9)) continue // behind the source camera
-          const xc = pc[0] * Px + pc[1] * Py + pc[2] * Pz + pc[9]
-          const yc = pc[3] * Px + pc[4] * Py + pc[5] * Pz + pc[10]
-          const cu = Math.round(pc[12] * (xc / zc) + pc[14]), cv = Math.round(pc[13] * (yc / zc) + pc[15])
-          if (cu < 0 || cu >= c.width || cv < 0 || cv >= c.height) continue
-          const od = c.depth[cv * c.width + cu]
-          if (!(od > 0)) continue // source has no depth here — no evidence either way
-          // The source's own surface point at that pixel. If the source is looking at
-          // something else entirely (occluder, or noise), the round trip lands far from
-          // (u,v) and this view simply doesn't vouch for the pixel.
-          // P2 = unprojectPixel(c, cu, cv, od)
-          const bx = (cu - pc[14]) / pc[12] * od - pc[9], by = (cv - pc[15]) / pc[13] * od - pc[10], bz = od - pc[11]
-          const Qx = pc[0] * bx + pc[3] * by + pc[6] * bz
-          const Qy = pc[1] * bx + pc[4] * by + pc[7] * bz
-          const Qz = pc[2] * bx + pc[5] * by + pc[8] * bz
-          // q = project(m, P2)
-          const qz = mR20 * Qx + mR21 * Qy + mR22 * Qz + mt2
-          if (!(qz > 1e-9)) continue
-          const qx = mR00 * Qx + mR01 * Qy + mR02 * Qz + mt0
-          const qy = mR10 * Qx + mR11 * Qy + mR12 * Qz + mt1
-          if (Math.hypot(mfx * (qx / qz) + mcx - u, mfy * (qy / qz) + mcy - v) > maxGeomCost) continue
-          if (angleOn) {
-            const Cs = centres[ci]
-            const sx = Cs[0] - Px, sy = Cs[1] - Py, sz = Cs[2] - Pz
-            const ss = sx * sx + sy * sy + sz * sz
-            if (rx * sx + ry * sy + rz * sz > cosMinAngle * Math.sqrt(rr * ss)) { flat++; continue }
-          }
-          agree++
-        }
-        if (agree < minConsistent) {
-          mask[idx] = 1
-          // Would have passed on views that only lacked parallax ⇒ report it as such.
-          if (agree + flat >= minConsistent) { lowParallax++; mapLowParallax++ } else { inconsistent++; mapInconsistent++ }
-          continue
-        }
-        kept++
-      }
+// The per-pixel verdict for one reference map (the filter's whole kernel, shared by
+// the in-memory and the streamed filter). `depths[ci]` is candidate ci's UNFILTERED
+// depth plane; `others[ci]` its camera and size. Writes 1 = drop into `mask`,
+// accumulates `totals`, returns the map's own counts.
+function judgeReference(mi, ref, cand, plan, others, params, centres, cfg, checkViews, depths, mask, totals, onTick) {
+  const { width: w, height: h, depth, cost } = ref
+  const { maxCostGate, maxGeomCost, minConsistent, angleOn, cosMinAngle } = cfg
+  const bw = plan ? plan.bw : 1
+  const lists = plan ? plan.lists : null
+  const flatList = lists ? null : Int32Array.from(cand)
+  // This map's camera, unpacked once (see camParams).
+  const pm = params[mi]
+  const mR00 = pm[0], mR01 = pm[1], mR02 = pm[2], mR10 = pm[3], mR11 = pm[4], mR12 = pm[5]
+  const mR20 = pm[6], mR21 = pm[7], mR22 = pm[8], mt0 = pm[9], mt1 = pm[10], mt2 = pm[11]
+  const mfx = pm[12], mfy = pm[13], mcx = pm[14], mcy = pm[15]
+  const [mCx, mCy, mCz] = centres[mi]
+  let mapLowNcc = 0, mapInconsistent = 0, mapLowParallax = 0
+  let tTick = Date.now()
+  for (let v = 0; v < h; v++) {
+    // Within-map progress (a map is seconds on a big set): time-throttled so a
+    // 1000-row plane doesn't post 1000 events.
+    if ((v & 15) === 0 && v > 0) {
+      const now = Date.now()
+      if (now - tTick >= 100) { tTick = now; onTick(v / h) }
     }
-    m.filterStats = {
-      considered: (() => { let n = 0; for (const d of depth) if (d > 0) n++; return n })(),
-      lowNcc: mapLowNcc,
-      inconsistent: mapInconsistent,
-      lowParallax: mapLowParallax,
+    const rowBlock = ((v / FILTER_BLOCK) | 0) * bw
+    for (let u = 0; u < w; u++) {
+      const idx = v * w + u
+      const d = depth[idx]
+      if (!(d > 0)) continue // already a hole
+      totals.considered++
+      if (cost[idx] > maxCostGate) { mask[idx] = 1; totals.lowNcc++; mapLowNcc++; continue }
+      if (!checkViews) { totals.kept++; continue }
+
+      // P = unprojectPixel(m, u, v, d), inlined (same arithmetic, no allocation).
+      const ax = (u - mcx) / mfx * d - mt0, ay = (v - mcy) / mfy * d - mt1, az = d - mt2
+      const Px = mR00 * ax + mR10 * ay + mR20 * az
+      const Py = mR01 * ax + mR11 * ay + mR21 * az
+      const Pz = mR02 * ax + mR12 * ay + mR22 * az
+      const list = flatList ?? lists[rowBlock + ((u / FILTER_BLOCK) | 0)]
+      // Reference ray P→C, for the parallax gate.
+      const rx = mCx - Px, ry = mCy - Py, rz = mCz - Pz
+      const rr = rx * rx + ry * ry + rz * rz
+      // `flat` counts views that round-trip but at too little parallax: they decide
+      // only which bucket a rejected pixel is reported in, never the verdict.
+      let agree = 0, flat = 0
+      for (let k = 0; k < list.length && agree < minConsistent; k++) {
+        const ci = list[k]
+        const c = others[ci], pc = params[ci]
+        // p = project(c, P)
+        const zc = pc[6] * Px + pc[7] * Py + pc[8] * Pz + pc[11]
+        if (!(zc > 1e-9)) continue // behind the source camera
+        const xc = pc[0] * Px + pc[1] * Py + pc[2] * Pz + pc[9]
+        const yc = pc[3] * Px + pc[4] * Py + pc[5] * Pz + pc[10]
+        const cu = Math.round(pc[12] * (xc / zc) + pc[14]), cv = Math.round(pc[13] * (yc / zc) + pc[15])
+        if (cu < 0 || cu >= c.width || cv < 0 || cv >= c.height) continue
+        const od = depths[ci][cv * c.width + cu]
+        if (!(od > 0)) continue // source has no depth here — no evidence either way
+        // The source's own surface point at that pixel. If the source is looking at
+        // something else entirely (occluder, or noise), the round trip lands far from
+        // (u,v) and this view simply doesn't vouch for the pixel.
+        // P2 = unprojectPixel(c, cu, cv, od)
+        const bx = (cu - pc[14]) / pc[12] * od - pc[9], by = (cv - pc[15]) / pc[13] * od - pc[10], bz = od - pc[11]
+        const Qx = pc[0] * bx + pc[3] * by + pc[6] * bz
+        const Qy = pc[1] * bx + pc[4] * by + pc[7] * bz
+        const Qz = pc[2] * bx + pc[5] * by + pc[8] * bz
+        // q = project(m, P2)
+        const qz = mR20 * Qx + mR21 * Qy + mR22 * Qz + mt2
+        if (!(qz > 1e-9)) continue
+        const qx = mR00 * Qx + mR01 * Qy + mR02 * Qz + mt0
+        const qy = mR10 * Qx + mR11 * Qy + mR12 * Qz + mt1
+        if (Math.hypot(mfx * (qx / qz) + mcx - u, mfy * (qy / qz) + mcy - v) > maxGeomCost) continue
+        if (angleOn) {
+          const Cs = centres[ci]
+          const sx = Cs[0] - Px, sy = Cs[1] - Py, sz = Cs[2] - Pz
+          const ss = sx * sx + sy * sy + sz * sz
+          if (rx * sx + ry * sy + rz * sz > cosMinAngle * Math.sqrt(rr * ss)) { flat++; continue }
+        }
+        agree++
+      }
+      if (agree < minConsistent) {
+        mask[idx] = 1
+        // Would have passed on views that only lacked parallax ⇒ report it as such.
+        if (agree + flat >= minConsistent) { totals.lowParallax++; mapLowParallax++ } else { totals.inconsistent++; mapInconsistent++ }
+        continue
+      }
+      totals.kept++
     }
-    m.filterStats.kept = m.filterStats.considered - mapLowNcc - mapInconsistent - mapLowParallax
-    m.filterStats.keptPct = m.filterStats.considered
-      ? 100 * m.filterStats.kept / m.filterStats.considered : 0
-    // Info, like Stage A's per-image line: this pass can run for minutes, and at the
-    // default log level it was otherwise silent from start to summary.
-    onLog(`Depth filter: ${label || '?'} (${mi + 1}/${nMaps}) — kept ${m.filterStats.keptPct.toFixed(1)}%; `
-      + `dropped ${mapLowNcc} low-NCC, ${mapInconsistent} inconsistent`
-      + `${angleOn ? `, ${mapLowParallax} low-parallax` : ''} px; ${candidates[mi].length} candidate views, `
-      + `${((Date.now() - tMap) / 1000).toFixed(1)}s`, 'info', 'Dense')
   }
+  let considered = 0
+  for (let k = 0; k < depth.length; k++) if (depth[k] > 0) considered++
+  const kept = considered - mapLowNcc - mapInconsistent - mapLowParallax
+  return { considered, lowNcc: mapLowNcc, inconsistent: mapInconsistent, lowParallax: mapLowParallax,
+    kept, keptPct: considered ? 100 * kept / considered : 0 }
+}
 
-  // Apply now that every map has been judged against the original evidence.
-  for (let mi = 0; mi < nMaps; mi++) {
-    const { depth, width, height } = maps[mi]
-    const mask = masks[mi]
-    for (let k = 0; k < width * height; k++) if (mask[k]) depth[k] = 0
-  }
+// Info, like Stage A's per-image line: this pass can run for minutes, and at the
+// default log level it was otherwise silent from start to summary.
+function logReference(onLog, s, label, mi, nMaps, nCand, cfg, tMap) {
+  onLog(`Depth filter: ${label || '?'} (${mi + 1}/${nMaps}) — kept ${s.keptPct.toFixed(1)}%; `
+    + `dropped ${s.lowNcc} low-NCC, ${s.inconsistent} inconsistent`
+    + `${cfg.angleOn ? `, ${s.lowParallax} low-parallax` : ''} px; ${nCand} candidate views, `
+    + `${((Date.now() - tMap) / 1000).toFixed(1)}s`, 'info', 'Dense')
+}
 
-  const pct = (n) => (100 * n / Math.max(1, considered)).toFixed(1)
+export function logFilterTotals(onLog, t, nMaps, cfg) {
+  const pct = (n) => (100 * n / Math.max(1, t.considered)).toFixed(1)
   if (nMaps < 2) {
     onLog(`Depth filter: only ${nMaps} map — cross-view check skipped, NCC floor only`, 'warn', 'Dense')
   }
-  onLog(`Depth filter: ${considered} px with depth → ${kept} kept (${pct(kept)}%); dropped `
-    + `${lowNcc} NCC<${minNcc} (${pct(lowNcc)}%), `
-    + `${inconsistent} <${minConsistent} consistent views @${maxGeomCost}px (${pct(inconsistent)}%)`
-    + `${angleOn ? `, ${lowParallax} consistent only at <${minGeomAngleDeg}° parallax (${pct(lowParallax)}%)` : ''}`,
+  onLog(`Depth filter: ${t.considered} px with depth → ${t.kept} kept (${pct(t.kept)}%); dropped `
+    + `${t.lowNcc} NCC<${cfg.minNcc} (${pct(t.lowNcc)}%), `
+    + `${t.inconsistent} <${cfg.minConsistent} consistent views @${cfg.maxGeomCost}px (${pct(t.inconsistent)}%)`
+    + `${cfg.angleOn ? `, ${t.lowParallax} consistent only at <${cfg.minGeomAngleDeg}° parallax (${pct(t.lowParallax)}%)` : ''}`,
     'info', 'Dense')
-
-  return { considered, kept, lowNcc, inconsistent, lowParallax }
 }
 
 // ── Step 3: quality presets + derived params ─────────────────────────────────
@@ -933,6 +1063,21 @@ export function createVoxelAccumulator(cellSize, bounds, { capacity = 1024 } = {
     }
     return neigh
   }
+  // Slot → origin-anchored cell index along `axis` (0 x, 1 y, 2 z), the same
+  // floor(coord/cell) the slot was keyed by. Overflow slots decode their string key
+  // (reverse map built on first use; overflow is the rare thin-feature spill).
+  let overflowKeyOf = null
+  const cellIndex = (s, axis) => {
+    const key = keyOf[s]
+    let d
+    if (key >= 0) d = axis === 0 ? Math.floor(key / (nz * ny)) : axis === 1 ? Math.floor(key / nz) % ny : key % nz
+    else {
+      if (!overflowKeyOf || overflowKeyOf.size !== overflow.size) overflowKeyOf = new Map([...overflow].map(([k, v]) => [v, k]))
+      d = Number(overflowKeyOf.get(s).split(',')[axis])
+    }
+    return d + (axis === 0 ? bx : axis === 1 ? by : bz)
+  }
+  const inRange = (s, { axis, lo, hi }) => { const a = cellIndex(s, axis); return a >= lo && a < hi }
   return {
     // Normals (nx,ny,nz) are optional (world-space, unit) — omitted callers still
     // get the exact same cells/averages for the 6-float wire format.
@@ -975,26 +1120,44 @@ export function createVoxelAccumulator(cellSize, bounds, { capacity = 1024 } = {
     // arithmetically; if fewer than `minNeighbors` are occupied, zero its count so the
     // finalizers skip it. Cell indices are recovered from the packed key (or parsed
     // from an overflow key; neighbours straddle the two maps). Returns the number removed.
-    filterIsolated({ radius = 1, minNeighbors = 2, maxSupport = 2 } = {}) {
-      let dropped = 0
-      // In-grid slots in creation order (what a Map's insertion order gave), then the
-      // overflow cells — the order matters, since a zeroed cell stops counting as a
-      // neighbour for the cells tested after it.
+    // Every verdict is taken against the unfiltered occupancy and applied afterwards, so
+    // the result does not depend on cell order. That is what lets a tile decide its
+    // own cells exactly from a one-cell halo (tiled fusion): a sequential pass let a
+    // cell zeroed earlier change a later cell's verdict, a chain no fixed halo bounds.
+    // `within` ({ axis, lo, hi }) tests only the cells in that cell-index range; the
+    // rest still count as neighbours.
+    filterIsolated({ radius = 1, minNeighbors = 2, maxSupport = 2, within = null } = {}) {
+      const drop = []
       for (let s = 0; s < n; s++) {
         const key = keyOf[s]
-        if (key < 0 || cnt[s] === 0 || cnt[s] > maxSupport) continue
+        if (key < 0 || cnt[s] === 0 || cnt[s] > maxSupport || (within && !inRange(s, within))) continue
         const diz = key % nz
         const diy = Math.floor(key / nz) % ny
         const dix = Math.floor(key / (nz * ny))
-        if (neighbours(dix, diy, diz, radius, minNeighbors) < minNeighbors) { cnt[s] = 0; dropped++ }
+        if (neighbours(dix, diy, diz, radius, minNeighbors) < minNeighbors) drop.push(s)
       }
       for (const [key, s] of overflow) {
-        if (cnt[s] === 0 || cnt[s] > maxSupport) continue
+        if (cnt[s] === 0 || cnt[s] > maxSupport || (within && !inRange(s, within))) continue
         const [dix, diy, diz] = key.split(',').map(Number)
-        if (neighbours(dix, diy, diz, radius, minNeighbors) < minNeighbors) { cnt[s] = 0; dropped++ }
+        if (neighbours(dix, diy, diz, radius, minNeighbors) < minNeighbors) drop.push(s)
       }
-      removed += dropped
-      return dropped
+      for (const s of drop) cnt[s] = 0
+      removed += drop.length
+      return drop.length
+    },
+    // Occupied cells inside `within` ({ axis, lo, hi } in origin-anchored cell indices).
+    countWithin(within) {
+      let c = 0
+      for (let s = 0; s < n; s++) if (cnt[s] > 0 && inRange(s, within)) c++
+      return c
+    },
+    // Drop every cell outside `within` (a tile's halo, once it has served as
+    // neighbours), so `count` and the finalizers see the tile's own cells only.
+    restrict(within) {
+      let c = 0
+      for (let s = 0; s < n; s++) if (cnt[s] > 0 && !inRange(s, within)) { cnt[s] = 0; c++ }
+      removed += c
+      return c
     },
     // Finalize straight into the wire format the densify op returns: a flat
     // Float32Array of [x,y,z,r,g,b] per merged cell (no intermediate objects). Cells
@@ -1061,25 +1224,93 @@ const STREAMED_CHECK_SHARE = 0.9
 export function fuseDepthMaps(maps, opts = {}, onLog = () => {}, hooks = {}) {
   return runWithMaps(fusionSteps(maps, opts, onLog, hooks), maps)
 }
+// The consistency check compares each reference only with the maps its depth frustum
+// can reach (the cull below), in index order, and reads those planes through a
+// byte-bounded cache (`opts.cacheBytes`, optimal eviction over the known request
+// sequence — see below). Both are exact: a map whose box misses the
+// reference's frustum by more than the ±consistencyPx window cannot produce a hit, and
+// the surviving comparisons run in the same order, so the cloud is identical to
+// fuseDepthMaps' (streamedProducts.test.js). Reading every other map for every
+// reference was N² plane reads: 33 min of fusion on quarry's 347 maps.
 export async function fuseDepthMapsStreamed(metas, loadMap, opts = {}, onLog = () => {}, hooks = {}) {
-  const iterator = fusionSteps(metas, opts, onLog, { ...hooks, streaming: true })
+  // The comparison cache is part of the run's memory: an eighth of the budget, at
+  // most 1 GiB, and counted in the fusion preflight's input term.
+  const cacheBytes = opts.cacheBytes ?? Math.min(1024 ** 3, (opts.memBudgetBytes > 0 ? opts.memBudgetBytes : 4 * 1024 ** 3) / 8)
+  const iterator = fusionSteps(metas, { ...opts, cacheBytes }, onLog, { ...hooks, streaming: true })
+  // ci → { map, next }: `next` is the position in the request sequence where the
+  // plane is wanted again. The whole sequence is known before the pass (each slab's
+  // visit list and every reference's frustum cull), so eviction is Belady's MIN: drop
+  // the plane wanted furthest ahead. LRU over index order thrashed (quarry: 39 k reads
+  // for 56 k comparisons at ~150 cached planes). Only the policy changes; the planes
+  // and their order of use do not, so neither does the cloud.
+  const cache = new Map()
+  let cached = 0, reads = 0, hits = 0, compared = 0, culled = 0
+  const planeBytes = (m) => m.depth?.byteLength ?? 0
+  const candidatesOf = (mi, corners, rad) => {
+    const cand = []
+    for (let ci = 0; ci < metas.length; ci++) {
+      if (ci === mi) continue
+      if (!corners[mi] || sliceMisses(corners[mi], metas[ci], rad + 1)) continue
+      cand.push(ci)
+    }
+    return cand
+  }
+  let planSlab = -1, candByRef = null, nextUse = null, pos = 0
+  const planSequence = ({ visits, corners }, rad) => {
+    candByRef = new Map(visits.map((mi) => [mi, candidatesOf(mi, corners, rad)]))
+    const seq = []
+    for (const mi of visits) for (const ci of candByRef.get(mi)) seq.push(ci)
+    nextUse = new Float64Array(seq.length)
+    const later = new Map()
+    for (let p = seq.length - 1; p >= 0; p--) { nextUse[p] = later.get(seq[p]) ?? Infinity; later.set(seq[p], p) }
+    pos = 0
+  }
   let next = iterator.next()
   while (!next.done) {
     const request = next.value
     if (typeof request === 'number') next = iterator.next(await loadMap(request))
     else {
-      const { m, mi, minViews, minTriAngleDeg, maxCost, depthTolRel, consistencyPx, step } = request
+      const { m, mi, minViews, minTriAngleDeg, maxCost, depthTolRel, consistencyPx, step, slab, slabIndex = 0, slabCount = 1 } = request
       const agree = new Uint32Array(m.width * m.height), angle = new Float64Array(agree.length)
       const C = cameraCenter(m), rad = Math.max(0, Math.round(consistencyPx))
       const loadComparison = hooks.loadDepth ?? loadMap
-      for (let ci = 0; ci < metas.length; ci++) {
-        if (ci === mi) continue
-        const other = await loadComparison(ci), otherC = cameraCenter(other)
-        for (let v = 0; v < m.height; v += step) for (let u = 0; u < m.width; u += step) {
-          const idx = v * m.width + u, d = m.depth[idx]
-          if (!(d > 0) || m.cost[idx] > maxCost
-            || (agree[idx] >= minViews && (minTriAngleDeg <= 0 || angle[idx] >= minTriAngleDeg))) continue
-          const P = unprojectPixel(m, u, v, d), p = project(other, P.x, P.y, P.z)
+      if (slabIndex !== planSlab) { planSequence(request.plan, rad); planSlab = slabIndex }
+      const cand = candByRef.get(mi)
+      culled += metas.length - 1 - cand.length
+      // The reference's eligible pixels (valid depth, cost-gated, in this slab) and their
+      // world points, found once: the loop below used to unproject every pixel again for
+      // every candidate and only then drop those outside the slab — with narrow slabs
+      // that was most of the work. Same pixels, same order, same points.
+      const W = m.width, elig = [], wp = []
+      for (let v = 0; v < m.height; v += step) for (let u = 0; u < W; u += step) {
+        const idx = v * W + u, d = m.depth[idx]
+        if (!(d > 0) || m.cost[idx] > maxCost) continue
+        const P = unprojectPixel(m, u, v, d)
+        // Tiled fusion: only the pixels whose point lands in this slab (or its halo).
+        if (slab) { const ca = Math.floor(P[slab.key] * slab.inv); if (ca < slab.lo || ca >= slab.hi) continue }
+        elig.push(idx); wp.push(P.x, P.y, P.z)
+      }
+      for (let k = 0; k < cand.length; k++) {
+        const ci = cand[k], want = nextUse[pos++]
+        let entry = cache.get(ci)
+        if (entry) { hits++; entry.next = want } else {
+          entry = { map: await loadComparison(ci), next: want }; reads++
+          cache.set(ci, entry); cached += planeBytes(entry.map)
+          while (cached > cacheBytes && cache.size > 1) {
+            let far = -1, farKey = -1
+            for (const [cj, e] of cache) if (cj !== ci && e.next > far) { far = e.next; farKey = cj }
+            if (farKey < 0) break
+            cached -= planeBytes(cache.get(farKey).map); cache.delete(farKey)
+          }
+        }
+        const other = entry.map
+        compared++
+        const otherC = cameraCenter(other)
+        for (let e = 0; e < elig.length; e++) {
+          const idx = elig[e]
+          if (agree[idx] >= minViews && (minTriAngleDeg <= 0 || angle[idx] >= minTriAngleDeg)) continue
+          const P = { x: wp[3 * e], y: wp[3 * e + 1], z: wp[3 * e + 2] }
+          const p = project(other, P.x, P.y, P.z)
           if (!p) continue
           const cu = Math.round(p.u), cv = Math.round(p.v), tol = depthTolRel * p.depth
           let hit = false
@@ -1100,12 +1331,23 @@ export async function fuseDepthMapsStreamed(metas, loadMap, opts = {}, onLog = (
         }
         // The N comparisons dominate a streamed map's time: they take the first
         // 90% of its progress slot, the single fusion pass the rest (see fusionSteps).
-        hooks.onProgress?.(mi + STREAMED_CHECK_SHARE * (ci + 1) / metas.length, metas.length, 'Checking depth consistency…')
+        hooks.onProgress?.(slabIndex * metas.length + mi + STREAMED_CHECK_SHARE * (k + 1) / cand.length,
+          slabCount * metas.length, 'Checking depth consistency…')
       }
       next = iterator.next({ agree, angle })
     }
   }
-  return next.value
+  const stream = { compared, culled, reads, hits, cacheBytes }
+  // A slab run (opts.slabIndices) hands its counters to the caller that merges them.
+  if (!opts.slabIndices && !opts.planOnly) logFusionStream(onLog, stream)
+  const out = next.value
+  if (out && typeof out === 'object') out.stream = stream
+  return out
+}
+
+export function logFusionStream(onLog, { compared, culled, reads, hits, cacheBytes, workers = 1 }) {
+  onLog(`Fusion: consistency over ${compared} map pair(s) (${culled} culled as out of view); `
+    + `${reads} plane reads, ${hits} cache hits (≤${formatBytes(cacheBytes)} cache${workers > 1 ? ` per worker, ${workers} workers` : ''})`, 'info', 'Dense')
 }
 
 // Measured fusion size: the distinct merge cells of every pixel fusion could keep —
@@ -1120,37 +1362,93 @@ export async function fuseDepthMapsStreamed(metas, loadMap, opts = {}, onLog = (
 // (level 0) and within ~1/√sampleCap otherwise. Cells are identified by two
 // independent hashes (53 bits), never by coordinates. Same origin-anchored cells as
 // createVoxelAccumulator, so the count is the accumulator's.
-function* fusionCellEstimateSteps(maps, { cell, step, maxCost, region, sampleCap }) {
+// It also records what tiled fusion plans from (`tile` = { axis }): the distinct
+// cells per cell index along the tile axis (`hist`, a Map over the sampled cells, so
+// at most sampleCap entries), and per map the cell range
+// along that axis of every pixel past the cost gate (`mapLo`/`mapHi`, ±∞ when none),
+// region or not — a tile visits exactly the maps whose range reaches it.
+// With `withCorners` it also keeps each map's depth-slice corners (`corners`, the
+// frustum the streamed consistency check culls with), so the streamed runner knows
+// every reference's comparison list before the pass starts.
+function* fusionCellEstimateSteps(maps, { cell, step, maxCost, region, sampleCap, tile = null, withCorners = false }) {
   const inv = 1 / cell
   let level = 0, mask = 0, candidates = 0
-  const seen = new Set()
+  const seen = new Map() // sampled cell hash → its cell index along the tile axis
+  const k = tile ? 'xyz'[tile.axis] : null
+  const mapLo = new Float64Array(maps.length).fill(Infinity), mapHi = new Float64Array(maps.length).fill(-Infinity)
+  const corners = withCorners ? new Array(maps.length).fill(null) : null
   for (let mi = 0; mi < maps.length; mi++) {
     const m = yield mi
     const { width: w, height: h, depth, cost } = m
+    let lo = Infinity, hi = -Infinity
     for (let v = 0; v < h; v += step) {
       for (let u = 0; u < w; u += step) {
         const idx = v * w + u, d = depth[idx]
         if (!(d > 0) || cost[idx] > maxCost) continue
         const P = unprojectPixel(m, u, v, d)
+        const ia = k ? Math.floor(P[k] * inv) : 0
+        if (ia < lo) lo = ia
+        if (ia > hi) hi = ia
         if (region && !regionContains(region, P.x, P.y, P.z)) continue
         candidates++
         const ix = Math.floor(P.x * inv) | 0, iy = Math.floor(P.y * inv) | 0, iz = Math.floor(P.z * inv) | 0
         const h1 = mix32(mix32(mix32(ix) ^ iy) ^ iz)
         if ((h1 & mask) !== 0) continue
         const h2 = mix32(mix32(mix32(iz ^ 0x5bd1e995) ^ ix) ^ iy) & 0x1fffff
-        seen.add(h1 * 2097152 + h2)
+        const key = h1 * 2097152 + h2
+        if (!seen.has(key)) seen.set(key, ia)
         if (seen.size > sampleCap) {
           level++; mask = (2 ** level - 1) | 0
-          for (const k of seen) if ((Math.floor(k / 2097152) & mask) !== 0) seen.delete(k)
+          for (const sk of seen.keys()) if ((Math.floor(sk / 2097152) & mask) !== 0) seen.delete(sk)
         }
       }
     }
+    mapLo[mi] = lo; mapHi[mi] = hi
+    if (corners) corners[mi] = sliceCorners(m, 0, w, 0, h)
   }
   const cells = Math.min(candidates, Math.ceil(seen.size * 2 ** level))
-  return { cells, candidates, level, sampled: seen.size }
+  let hist = null
+  if (tile) {
+    hist = new Map()
+    for (const ia of seen.values()) hist.set(ia, (hist.get(ia) ?? 0) + 2 ** level)
+  }
+  return { cells, candidates, level, sampled: seen.size, hist, mapLo, mapHi, corners }
 }
 
+// Slabs along the tile axis, each holding at most `cap` estimated cells (one cell
+// index over the cap stays one slab). `hist` maps a cell index along the axis to its
+// estimated cell count. Edges are integer cell indices, so a merge cell belongs to
+// exactly one slab, [lo, hi), and the outer slabs reach ±∞.
+export function planFusionSlabs(hist, cap) {
+  const idx = [...hist.keys()].sort((a, b) => a - b)
+  const slabs = []
+  let start = -Infinity, cur = 0
+  for (const ia of idx) {
+    const c = hist.get(ia)
+    if (cur > 0 && cur + c > cap) { slabs.push({ lo: start, hi: ia, cells: cur }); start = ia; cur = 0 }
+    cur += c
+  }
+  slabs.push({ lo: start, hi: Infinity, cells: cur })
+  return slabs
+}
+
+// Fusion in three parts, so a run can be split over workers: the plan (every pre-pass
+// over the maps, the preflight and the slab layout; serialisable), the slabs (any
+// subset of the plan's, each independent and exact thanks to its halo), and the
+// finish (merged counters → logs + summary). `opts.planOnly` returns the plan,
+// `opts.plan` + `opts.slabIndices` run those slabs and return { parts, counters };
+// without either, one call does all three, as before.
 function* fusionSteps(maps, opts = {}, onLog = () => {}, hooks = {}) {
+  const plan = opts.plan ?? (yield* fusionPlanSteps(maps, opts, onLog, hooks))
+  if (plan.refused) return Object.assign(new Float32Array(0), { nrm: null, summary: null, refused: plan.refused })
+  if (opts.planOnly) return plan
+  const slabIdx = opts.slabIndices ?? plan.slabs.map((_, i) => i)
+  const run = yield* fusionSlabSteps(maps, plan, slabIdx, onLog, hooks)
+  if (opts.slabIndices) return run
+  return finishFusion(plan, run.counters, run.parts, onLog, hooks)
+}
+
+function fusionGates(opts) {
   // depthTolRel/step are user-facing (DENSE_FUSE_DEFAULTS); consistencyPx is internal (tuning.js).
   const { consistencyPx = DENSE_TUNING.consistencyPx, depthTolRel = 0.01, step = 1 } = opts
   // WS4 geometric filters (0 disables each; fall back to DENSE_FUSE_DEFAULTS values).
@@ -1160,7 +1458,12 @@ function* fusionSteps(maps, opts = {}, onLog = () => {}, hooks = {}) {
   // cos of the incidence gate; ≤0 or ≥90 ⇒ disabled (cosInc ≥ 0 always passes).
   const incidenceOn = maxIncidenceDeg > 0 && maxIncidenceDeg < 90
   const cosIncGate = incidenceOn ? Math.cos(maxIncidenceDeg * Math.PI / 180) : -1
-  const { onProgress } = hooks
+  return { consistencyPx, depthTolRel, step, minTriAngleDeg, maxIncidenceDeg, removeIsolated, incidenceOn, cosIncGate }
+}
+
+function* fusionPlanSteps(maps, opts, onLog, hooks) {
+  const gates = fusionGates(opts)
+  const { consistencyPx, depthTolRel, step, removeIsolated } = gates
 
   // Cost histogram (sampled, one sort) — drives both the auto gate and the summary
   // median, so it's computed once regardless of whether maxCost is overridden.
@@ -1188,11 +1491,6 @@ function* fusionSteps(maps, opts = {}, onLog = () => {}, hooks = {}) {
     + `depth tol ${(depthTolRel * 100).toFixed(1)}%, consistency ±${consistencyPx}px, step ${step}px`,
     'info', 'Dense')
 
-  // Cameras for reprojection consistency checks.
-  const cams = maps.map((m) => ({ R: m.R, t: m.t, K: m.K, m }))
-
-  const unproject = unprojectPixel
-
   // Scene bounds from a coarse valid-depth grid (fuseBboxStride-th row/col of each
   // map) — enough to size the voxel-key packing without a full unprojection pass.
   const bounds = { minX: Infinity, minY: Infinity, minZ: Infinity, maxX: -Infinity, maxY: -Infinity, maxZ: -Infinity }
@@ -1204,7 +1502,7 @@ function* fusionSteps(maps, opts = {}, onLog = () => {}, hooks = {}) {
       for (let u = 0; u < w; u += bboxStride) {
         const d = depth[v * w + u]
         if (!(d > 0)) continue
-        const P = unproject(m, u, v, d)
+        const P = unprojectPixel(m, u, v, d)
         if (P.x < bounds.minX) bounds.minX = P.x; if (P.x > bounds.maxX) bounds.maxX = P.x
         if (P.y < bounds.minY) bounds.minY = P.y; if (P.y > bounds.maxY) bounds.maxY = P.y
         if (P.z < bounds.minZ) bounds.minZ = P.z; if (P.z > bounds.maxZ) bounds.maxZ = P.z
@@ -1229,39 +1527,166 @@ function* fusionSteps(maps, opts = {}, onLog = () => {}, hooks = {}) {
   mergeCell = clampCellForBounds(bounds, mergeCell)
   const region = normalizeRegion(opts.region)
 
+  // Tiles are slabs along the scene's longest axis, cut at merge-cell boundaries.
+  const ext = [bounds.maxX - bounds.minX, bounds.maxY - bounds.minY, bounds.maxZ - bounds.minZ]
+  const axis = ext[0] >= ext[1] && ext[0] >= ext[2] ? 0 : ext[1] >= ext[2] ? 1 : 2
+  const axKey = 'xyz'[axis]
+
   // Stage B pre-flight: measure the merged size, project the peak and refuse before
   // the expensive consistency pass. Runs in the worker because the cell count needs
   // every map's pixels at the real merge cell; a refusal returns normally (no
   // throw), so the caller still gets transferred buffers home.
   const est = yield* fusionCellEstimateSteps(maps, {
-    cell: mergeCell, step, maxCost, region, sampleCap: DENSE_TUNING.fuseEstimateSampleCap,
+    cell: mergeCell, step, maxCost, region, sampleCap: DENSE_TUNING.fuseEstimateSampleCap, tile: { axis },
+    withCorners: !!hooks.streaming,
   })
-  const estCells = est.level > 0 ? Math.ceil(est.cells * DENSE_TUNING.fuseEstimateMargin) : est.cells
-  const proj = projectDensifyPeakBytes({
-    inputBytes: densifyInputBytes(maps, { streamed: !!hooks.streaming }), cells: estCells,
-  })
+  const margin = est.level > 0 ? DENSE_TUNING.fuseEstimateMargin : 1
+  const estCells = Math.ceil(est.cells * margin)
+  // Per worker: its reference + comparison planes and its comparison cache.
+  const inputBytes = densifyInputBytes(maps, { streamed: !!hooks.streaming }) + (hooks.streaming ? (opts.cacheBytes ?? 0) : 0)
+  let proj = projectDensifyPeakBytes({ inputBytes, cells: estCells })
   const budget = opts.memBudgetBytes > 0 ? opts.memBudgetBytes : 0
   onLog(`Fusion: measured ${est.candidates.toLocaleString()} candidate px → ≤ ${estCells.toLocaleString()} `
     + `merge cells at ${mergeCell.toExponential(2)}${est.level ? ` (hash-sampled 1/${2 ** est.level}, +${Math.round((DENSE_TUNING.fuseEstimateMargin - 1) * 100)}% margin)` : ' (exact)'}; `
     + `projected peak ≈ ${formatBytes(proj.total)} (input ${formatBytes(proj.input)} + accumulator `
     + `${formatBytes(proj.accumulator)} + output ${formatBytes(proj.output)})`
-    + (budget ? ` vs budget ${formatBytes(budget)}` : ''),
-    budget && proj.total > budget ? 'error' : 'info', 'Dense')
+    + (budget ? ` vs budget ${formatBytes(budget)}` : ''), 'info', 'Dense')
+  const scaledHist = () => new Map([...est.hist].map(([ia, c]) => [ia, c * margin]))
+  let slabs = [{ lo: -Infinity, hi: Infinity, cells: estCells }]
+  let workers = 1
+  // Parallel (`opts.parallel` workers, each running whole slabs): about one slab per
+  // worker, each small enough that every worker can hold one slab's accumulator beside
+  // the finished slabs.
+  const parallel = Math.max(1, Math.floor(opts.parallel ?? 1))
+  if (parallel > 1 && est.hist.size > 1) {
+    const cap = maxFusionTileCells({ inputBytes, cells: estCells, budget: budget || Infinity, workers: parallel })
+    // One slab per worker, balanced by cells: every extra cut makes the maps that span
+    // it read and unprojected once more (17 slabs on quarry ran slower than one).
+    const planned = cap > 0 ? planFusionSlabs(scaledHist(), Math.min(cap, Math.ceil(estCells / parallel))) : []
+    if (planned.length > 1) {
+      const largest = Math.max(...planned.map((s) => s.cells))
+      const parProj = projectDensifyPeakBytes({ inputBytes, cells: estCells, tileCells: largest, workers: Math.min(parallel, planned.length) })
+      if (!budget || parProj.total <= budget) {
+        slabs = planned; proj = parProj; workers = Math.min(parallel, planned.length)
+        onLog(`Fusion: ${slabs.length} slabs along ${axKey} on ${workers} workers (≤ ${Math.ceil(largest).toLocaleString()} cells each); `
+          + `projected peak ≈ ${formatBytes(proj.total)} (accumulators ${formatBytes(proj.accumulator)} + finished slabs `
+          + `${formatBytes(proj.finished)}; joining ${formatBytes(proj.assemble)})`, 'info', 'Dense')
+      }
+    }
+  }
+  // Over budget in one piece: build the cloud slab by slab, so only one slab's
+  // accumulator is resident beside the finished slabs (already in the cloud's 27 B
+  // layout). The cloud itself still has to fit, twice while the slabs are joined.
+  if (workers === 1 && budget && proj.total > budget) {
+    const cap = maxFusionTileCells({ inputBytes, cells: estCells, budget })
+    if (cap > 0) {
+      const planned = planFusionSlabs(scaledHist(), cap)
+      const largest = Math.max(...planned.map((s) => s.cells))
+      const tiledProj = projectDensifyPeakBytes({ inputBytes, cells: estCells, tileCells: largest })
+      if (planned.length > 1 && tiledProj.total <= budget) {
+        slabs = planned; proj = tiledProj
+        onLog(`Fusion: one piece would need ${formatBytes(projectDensifyPeakBytes({ inputBytes, cells: estCells }).total)} — `
+          + `fusing in ${slabs.length} slabs along ${axKey} (≤ ${Math.ceil(largest).toLocaleString()} cells each); `
+          + `projected peak ≈ ${formatBytes(proj.total)} (accumulator ${formatBytes(proj.accumulator)} + finished slabs `
+          + `${formatBytes(proj.finished)}; joining ${formatBytes(proj.assemble)})`, 'info', 'Dense')
+      }
+    }
+  }
   if (budget && proj.total > budget) {
+    onLog(`Fusion: projected peak ${formatBytes(proj.total)} exceeds the budget ${formatBytes(budget)} even in slabs `
+      + `(the cloud alone is ${formatBytes(estCells * DENSIFY_CLOUD_BYTES_PER_CELL)}).`, 'error', 'Dense')
     onLog('Fusion: aborting before the consistency pass — projected memory exceeds the budget. '
       + 'Raise the point-density sample step to 2 (¼ the pixels), set a Region around the subject '
       + '(Tools ▸ Model), or build depth maps at a lower Quality; or raise the memory budget '
       + '(Settings ▸ Compute) if the machine has the RAM.', 'error', 'Dense')
-    return Object.assign(new Float32Array(0), { nrm: null, summary: null, refused: { ...proj, budget, mergeCell } })
+    return { refused: { ...proj, budget, mergeCell } }
   }
-  const acc = createVoxelAccumulator(mergeCell, bounds, { capacity: estCells })
+  const tiled = slabs.length > 1
+  // A slab also accumulates a halo as wide as the isolated-cell search, so every
+  // neighbour of its own cells is exactly as occupied as in a single pass.
+  const halo = tiled && removeIsolated ? DENSE_TUNING.isolatedRadius : 0
+  // A slab visits only the maps with a pixel past the cost gate that lands in it or
+  // its halo; a map with none is visited once, by the first slab, for the cull
+  // accounting. With each map's slice corners a slab's visit list is its whole
+  // sequence of plane requests (the streamed cache plans on it). Per-pixel culls
+  // before a world point exists are counted by a map's first visiting slab.
+  const nM = maps.length
+  const firstSlab = new Int32Array(nM).fill(-1)
+  const visits = slabs.map(({ lo, hi }, ti) => {
+    const list = []
+    for (let mi = 0; mi < nM; mi++) {
+      const hasRange = est.mapLo[mi] <= est.mapHi[mi]
+      if (!tiled || (hasRange ? est.mapHi[mi] >= lo - halo && est.mapLo[mi] < hi + halo : ti === 0)) {
+        list.push(mi)
+        if (firstSlab[mi] < 0) firstSlab[mi] = ti
+      }
+    }
+    return list
+  })
+  // Streamed + tiled: each map's frustum corners over just the pixels landing in each
+  // slab (+ halo), so a slab compares a map only with the views that can see ITS part of
+  // it. The whole-map corners made every slab compare with every view that sees any of
+  // the map — 17 slabs on quarry did 307 k comparisons for the single pass's 56 k. Exact
+  // for the same reason the whole-map cull is: the box still covers every pixel the slab
+  // considers. One more read of every map, only when tiled.
+  let slabCorners = null
+  if (tiled && hooks.streaming) {
+    const inv = 1 / mergeCell, k = 'xyz'[axis]
+    slabCorners = slabs.map(() => new Array(nM).fill(null))
+    for (let mi = 0; mi < nM; mi++) {
+      if (!(est.mapLo[mi] <= est.mapHi[mi])) continue
+      const m = yield mi
+      const { width: w, height: h, depth, cost } = m
+      const box = slabs.map(() => [Infinity, -Infinity, Infinity, -Infinity, Infinity, -Infinity]) // u0 u1 v0 v1 d0 d1
+      for (let v = 0; v < h; v += step) {
+        for (let u = 0; u < w; u += step) {
+          const idx = v * w + u, d = depth[idx]
+          if (!(d > 0) || cost[idx] > maxCost) continue
+          const ca = Math.floor(unprojectPixel(m, u, v, d)[k] * inv)
+          for (let ti = 0; ti < slabs.length; ti++) {
+            if (ca < slabs[ti].lo - halo || ca >= slabs[ti].hi + halo) continue
+            const b = box[ti]
+            if (u < b[0]) b[0] = u; if (u > b[1]) b[1] = u
+            if (v < b[2]) b[2] = v; if (v > b[3]) b[3] = v
+            if (d < b[4]) b[4] = d; if (d > b[5]) b[5] = d
+          }
+        }
+      }
+      box.forEach((b, ti) => {
+        if (!(b[5] > 0)) return
+        const cs = []
+        for (const d of [b[4], b[5]]) for (const u of [b[0], b[1]]) for (const v of [b[2], b[3]]) cs.push(unprojectPixel(m, u, v, d))
+        slabCorners[ti][mi] = cs
+      })
+    }
+  }
+  return {
+    nMaps: nM, gates, minViews, maxCost, costMedian: costStats.median, bounds, bboxStride, mergeCell, region,
+    axis, slabs, tiled, halo, workers, visits, firstSlab, estCells, slabCorners,
+    est: { mapLo: est.mapLo, mapHi: est.mapHi, corners: est.corners },
+  }
+}
 
-  // Cull accounting (summed across all maps) so the user can see where pixels go.
-  let considered = 0, noDepth = 0, highCost = 0, failedConsistency = 0, kept = 0
-  let lowParallax = 0, grazing = 0 // WS4 geometric-filter culls
-  // Tools ▸ Model ▾ ▸ Region: a fused point outside the box is never accumulated
-  // (`region` is resolved above, for the pre-flight).
-  let outsideRegion = 0
+const zeroFusionCounters = () => ({
+  considered: 0, noDepth: 0, highCost: 0, failedConsistency: 0, kept: 0, lowParallax: 0, grazing: 0,
+  outsideRegion: 0, mergedCells: 0, isolatedRemoved: 0, degenerate: 0, overflowCells: 0, accBytes: 0, cells: 0,
+  noNormalMaps: 0,
+})
+// Counters of several slab runs as one (sums; the accumulator figure is the largest).
+export function mergeFusionCounters(list) {
+  const out = zeroFusionCounters()
+  for (const c of list) for (const k of Object.keys(out)) out[k] = k === 'accBytes' ? Math.max(out[k], c[k]) : out[k] + c[k]
+  return out
+}
+
+function* fusionSlabSteps(maps, plan, slabIdx, onLog, hooks) {
+  const { consistencyPx, depthTolRel, step, minTriAngleDeg, removeIsolated, incidenceOn, cosIncGate } = plan.gates
+  const { minViews, maxCost, bounds, mergeCell, region, axis, slabs, tiled, halo, visits, firstSlab, est } = plan
+  const { onProgress } = hooks
+  const inv = 1 / mergeCell, axKey = 'xyz'[axis]
+  const unproject = unprojectPixel
+  // Cameras for reprojection consistency checks.
+  const cams = maps.map((m) => ({ R: m.R, t: m.t, K: m.K, m }))
   // Precompute each camera centre for the triangulation-angle check (WS4).
   const camCenters = cams.map((c) => cameraCenter(c))
   let lastEmit = 0
@@ -1274,128 +1699,192 @@ function* fusionSteps(maps, opts = {}, onLog = () => {}, hooks = {}) {
     y: m.R[0][1]*nx_ + m.R[1][1]*ny_ + m.R[2][1]*nz_,
     z: m.R[0][2]*nx_ + m.R[1][2]*ny_ + m.R[2][2]*nz_,
   })
-  let noNormalMaps = 0
+  const counters = zeroFusionCounters()
+  const parts = []
+  const nT = slabs.length, nM = maps.length
 
-  for (let mi = 0; mi < maps.length; mi++) {
-    const m = yield mi
-    const checks = hooks.streaming ? yield { mi, m, minViews, minTriAngleDeg, maxCost, depthTolRel, consistencyPx, step } : null
-    const { width: w, height: h, depth, cost, rgb, normals } = m
-    if (!normals) noNormalMaps++
-    // Camera centre C = −Rᵀt, for the view-direction normal fallback (stale caches).
-    const C = rotToWorld(m, -m.t[0], -m.t[1], -m.t[2])
-    let mapKept = 0, mapConsidered = 0
-    for (let v = 0; v < h; v += step) {
-      // Throttled progress: done = mapIdx + rowsDone/h, so the bar glides within a map.
-      if (onProgress) {
-        const t = now()
-        if (t - lastEmit >= DENSE_TUNING.fuseProgressMs) {
-          lastEmit = t
-          const base = hooks.streaming ? STREAMED_CHECK_SHARE : 0
-          onProgress(mi + base + (1 - base) * v / h, maps.length, m.name ?? m.uuid?.slice(0, 8) ?? '')
+  for (const ti of slabIdx) {
+    const { lo, hi } = slabs[ti], loH = lo - halo, hiH = hi + halo
+    const within = tiled ? { axis, lo, hi } : null
+    const tT = now()
+    let acc = createVoxelAccumulator(mergeCell, bounds, { capacity: Math.ceil(slabs[ti].cells * (tiled ? 1.05 : 1)) })
+    for (const mi of visits[ti]) {
+      const firstVisit = firstSlab[mi] === ti
+      const m = yield mi
+      const checks = hooks.streaming ? yield {
+        mi, m, minViews, minTriAngleDeg, maxCost, depthTolRel, consistencyPx, step,
+        slab: tiled ? { key: axKey, inv, lo: loH, hi: hiH } : null, slabIndex: ti, slabCount: nT,
+        plan: { visits: visits[ti], corners: plan.slabCorners?.[ti] ?? est.corners },
+      } : null
+      const { width: w, height: h, depth, cost, rgb, normals } = m
+      if (!normals && firstVisit) counters.noNormalMaps++
+      // Camera centre C = −Rᵀt, for the view-direction normal fallback (stale caches).
+      const C = rotToWorld(m, -m.t[0], -m.t[1], -m.t[2])
+      let mapKept = 0, mapConsidered = 0
+      let considered = 0, noDepth = 0, highCost = 0, failedConsistency = 0, kept = 0
+      let lowParallax = 0, grazing = 0, outsideRegion = 0
+      for (let v = 0; v < h; v += step) {
+        // Throttled progress: done = mapIdx + rowsDone/h, so the bar glides within a map.
+        if (onProgress) {
+          const t = now()
+          if (t - lastEmit >= DENSE_TUNING.fuseProgressMs) {
+            lastEmit = t
+            const base = hooks.streaming ? STREAMED_CHECK_SHARE : 0
+            onProgress(ti * nM + mi + base + (1 - base) * v / h, nT * nM, m.name ?? m.uuid?.slice(0, 8) ?? '')
+          }
         }
-      }
-      for (let u = 0; u < w; u += step) {
-        considered++; mapConsidered++
-        const idx = v * w + u
-        const d = depth[idx]
-        if (!(d > 0)) { noDepth++; continue }
-        if (cost[idx] > maxCost) { highCost++; continue }
-        const P = unproject(m, u, v, d)
+        for (let u = 0; u < w; u += step) {
+          const idx = v * w + u
+          const d = depth[idx]
+          if (!(d > 0)) { if (firstVisit) { considered++; mapConsidered++; noDepth++ } continue }
+          if (cost[idx] > maxCost) { if (firstVisit) { considered++; mapConsidered++; highCost++ } continue }
+          const P = unproject(m, u, v, d)
+          let own = true
+          if (tiled) {
+            const ca = Math.floor(P[axKey] * inv)
+            if (ca < loH || ca >= hiH) continue
+            own = ca >= lo && ca < hi
+          }
+          if (own) { considered++; mapConsidered++ }
 
-        // Geometric consistency: reproject into other maps and require a pixel
-        // within a `consistencyPx` radius whose depth agrees (relative tolerance).
-        // The radius search makes the check robust to sub-pixel reprojection /
-        // PatchMatch noise — a single rounded-pixel probe rejected most valid
-        // points (and `consistencyPx` was previously inert: added to a world-unit
-        // depth tolerance scaled by 1e-3, i.e. ≈0).
-        const rad = Math.max(0, Math.round(consistencyPx))
-        let agree = checks ? checks.agree[idx] : 0, maxAngle = checks ? checks.angle[idx] : 0
-        for (let ci = 0; ci < cams.length && !checks; ci++) {
-          const c = cams[ci]
-          if (c.m === m) continue
-          const p = project(c, P.x, P.y, P.z)
-          if (!p) continue
-          const cu = Math.round(p.u), cv = Math.round(p.v)
-          const tol = depthTolRel * p.depth
-          let hit = false
-          for (let dv = -rad; dv <= rad && !hit; dv++) {
-            const pv = cv + dv
-            if (pv < 0 || pv >= c.m.height) continue
-            for (let du = -rad; du <= rad; du++) {
-              const pu = cu + du
-              if (pu < 0 || pu >= c.m.width) continue
-              const od = c.m.depth[pv * c.m.width + pu]
-              if (od > 0 && Math.abs(od - p.depth) <= tol) { hit = true; break }
+          // Geometric consistency: reproject into other maps and require a pixel
+          // within a `consistencyPx` radius whose depth agrees (relative tolerance).
+          // The radius search makes the check robust to sub-pixel reprojection /
+          // PatchMatch noise — a single rounded-pixel probe rejected most valid
+          // points (and `consistencyPx` was previously inert: added to a world-unit
+          // depth tolerance scaled by 1e-3, i.e. ≈0).
+          const rad = Math.max(0, Math.round(consistencyPx))
+          let agree = checks ? checks.agree[idx] : 0, maxAngle = checks ? checks.angle[idx] : 0
+          for (let ci = 0; ci < cams.length && !checks; ci++) {
+            const c = cams[ci]
+            if (c.m === m) continue
+            const p = project(c, P.x, P.y, P.z)
+            if (!p) continue
+            const cu = Math.round(p.u), cv = Math.round(p.v)
+            const tol = depthTolRel * p.depth
+            let hit = false
+            for (let dv = -rad; dv <= rad && !hit; dv++) {
+              const pv = cv + dv
+              if (pv < 0 || pv >= c.m.height) continue
+              for (let du = -rad; du <= rad; du++) {
+                const pu = cu + du
+                if (pu < 0 || pu >= c.m.width) continue
+                const od = c.m.depth[pv * c.m.width + pu]
+                if (od > 0 && Math.abs(od - p.depth) <= tol) { hit = true; break }
+              }
+            }
+            if (hit) {
+              agree++
+              // WS4: track the widest triangulation angle among agreeing views. A pixel
+              // that only "agrees" at ~0° parallax (sky / distant haze) never reaches
+              // minTriAngleDeg, so it is culled below rather than fused into a flyer.
+              if (minTriAngleDeg > 0) {
+                // camCenters[mi] is the reference centre as an array — triangulationAngle
+                // indexes both centres as [x,y,z], so C ({x,y,z}) must NOT be passed here
+                // (it reads C[0] as undefined → NaN angle → every pixel culled as low-parallax).
+                const ang = triangulationAngle(camCenters[mi], camCenters[ci], P)
+                if (ang > maxAngle) maxAngle = ang
+              }
+              // Stop only when BOTH enough views AND enough parallax are satisfied.
+              if (agree >= minViews && (minTriAngleDeg <= 0 || maxAngle >= minTriAngleDeg)) break
             }
           }
-          if (hit) {
-            agree++
-            // WS4: track the widest triangulation angle among agreeing views. A pixel
-            // that only "agrees" at ~0° parallax (sky / distant haze) never reaches
-            // minTriAngleDeg, so it is culled below rather than fused into a flyer.
-            if (minTriAngleDeg > 0) {
-              // camCenters[mi] is the reference centre as an array — triangulationAngle
-              // indexes both centres as [x,y,z], so C ({x,y,z}) must NOT be passed here
-              // (it reads C[0] as undefined → NaN angle → every pixel culled as low-parallax).
-              const ang = triangulationAngle(camCenters[mi], camCenters[ci], P)
-              if (ang > maxAngle) maxAngle = ang
+          if (agree < minViews) { if (own) failedConsistency++; continue }
+          if (minTriAngleDeg > 0 && maxAngle < minTriAngleDeg) { if (own) lowParallax++; continue }
+
+          // World-space oriented normal: rotate the converged camera-frame normal
+          // (nz<0 ⇒ facing camera ⇒ outward for aerial). No normals (stale cache) ⇒
+          // view direction (C − P) normalized — always camera-facing, never skipped.
+          let nwx, nwy, nwz
+          if (normals) {
+            const no = idx * 3
+            const nw = rotToWorld(m, normals[no], normals[no+1], normals[no+2])
+            nwx = nw.x; nwy = nw.y; nwz = nw.z
+          } else {
+            nwx = C.x - P.x; nwy = C.y - P.y; nwz = C.z - P.z
+          }
+          const nm = Math.hypot(nwx, nwy, nwz)
+          if (nm > 1e-9) { nwx /= nm; nwy /= nm; nwz /= nm } else { nwx = 0; nwy = 0; nwz = 1 }
+          // Orient toward the camera that saw it. The kernels only keep n_z < 0 in the
+          // camera frame, which is not the same as facing the ray for an off-axis
+          // oblique surface — such a plane is only representable as −n, and its
+          // homography is identical. Poisson needs outward (camera-facing) normals, and
+          // averaging opposite normals in one voxel would cancel them.
+          if (nwx * (C.x - P.x) + nwy * (C.y - P.y) + nwz * (C.z - P.z) < 0) { nwx = -nwx; nwy = -nwy; nwz = -nwz }
+
+          // WS4 grazing-angle reject: the incidence angle between the surface normal and
+          // the viewing ray (C − P). A grazing (edge-on) surface — thin vegetation shells,
+          // silhouette fringes — is seen at ~90° incidence (cosInc ≈ 0), where depth is
+          // least reliable. Cull below cos(maxIncidenceDeg). The view-direction fallback
+          // normal (no per-pixel normal) equals the viewing ray, so cosInc = 1 and it is
+          // never culled — the filter is automatically inert on stale/normal-less maps.
+          if (incidenceOn) {
+            let vx = C.x - P.x, vy = C.y - P.y, vz = C.z - P.z
+            const vm = Math.hypot(vx, vy, vz)
+            if (vm > 1e-9) {
+              vx /= vm; vy /= vm; vz /= vm
+              const cosInc = Math.abs(nwx * vx + nwy * vy + nwz * vz)
+              if (cosInc < cosIncGate) { if (own) grazing++; continue }
             }
-            // Stop only when BOTH enough views AND enough parallax are satisfied.
-            if (agree >= minViews && (minTriAngleDeg <= 0 || maxAngle >= minTriAngleDeg)) break
           }
+
+          if (region && !regionContains(region, P.x, P.y, P.z)) { if (own) outsideRegion++; continue }
+
+          // Stream straight into the voxel merge — no raw point ever exists.
+          const o = idx * 3
+          acc.add(P.x, P.y, P.z, rgb[o], rgb[o+1], rgb[o+2], nwx, nwy, nwz)
+          if (own) { kept++; mapKept++ }
         }
-        if (agree < minViews) { failedConsistency++; continue }
-        if (minTriAngleDeg > 0 && maxAngle < minTriAngleDeg) { lowParallax++; continue }
-
-        // World-space oriented normal: rotate the converged camera-frame normal
-        // (nz<0 ⇒ facing camera ⇒ outward for aerial). No normals (stale cache) ⇒
-        // view direction (C − P) normalized — always camera-facing, never skipped.
-        let nwx, nwy, nwz
-        if (normals) {
-          const no = idx * 3
-          const nw = rotToWorld(m, normals[no], normals[no+1], normals[no+2])
-          nwx = nw.x; nwy = nw.y; nwz = nw.z
-        } else {
-          nwx = C.x - P.x; nwy = C.y - P.y; nwz = C.z - P.z
-        }
-        const nm = Math.hypot(nwx, nwy, nwz)
-        if (nm > 1e-9) { nwx /= nm; nwy /= nm; nwz /= nm } else { nwx = 0; nwy = 0; nwz = 1 }
-        // Orient toward the camera that saw it. The kernels only keep n_z < 0 in the
-        // camera frame, which is not the same as facing the ray for an off-axis
-        // oblique surface — such a plane is only representable as −n, and its
-        // homography is identical. Poisson needs outward (camera-facing) normals, and
-        // averaging opposite normals in one voxel would cancel them.
-        if (nwx * (C.x - P.x) + nwy * (C.y - P.y) + nwz * (C.z - P.z) < 0) { nwx = -nwx; nwy = -nwy; nwz = -nwz }
-
-        // WS4 grazing-angle reject: the incidence angle between the surface normal and
-        // the viewing ray (C − P). A grazing (edge-on) surface — thin vegetation shells,
-        // silhouette fringes — is seen at ~90° incidence (cosInc ≈ 0), where depth is
-        // least reliable. Cull below cos(maxIncidenceDeg). The view-direction fallback
-        // normal (no per-pixel normal) equals the viewing ray, so cosInc = 1 and it is
-        // never culled — the filter is automatically inert on stale/normal-less maps.
-        if (incidenceOn) {
-          let vx = C.x - P.x, vy = C.y - P.y, vz = C.z - P.z
-          const vm = Math.hypot(vx, vy, vz)
-          if (vm > 1e-9) {
-            vx /= vm; vy /= vm; vz /= vm
-            const cosInc = Math.abs(nwx * vx + nwy * vy + nwz * vz)
-            if (cosInc < cosIncGate) { grazing++; continue }
-          }
-        }
-
-        if (region && !regionContains(region, P.x, P.y, P.z)) { outsideRegion++; continue }
-
-        // Stream straight into the voxel merge — no raw point ever exists.
-        const o = idx * 3
-        acc.add(P.x, P.y, P.z, rgb[o], rgb[o+1], rgb[o+2], nwx, nwy, nwz)
-        kept++; mapKept++
       }
+      counters.considered += considered; counters.noDepth += noDepth; counters.highCost += highCost
+      counters.failedConsistency += failedConsistency; counters.kept += kept; counters.lowParallax += lowParallax
+      counters.grazing += grazing; counters.outsideRegion += outsideRegion
+      onLog(`Fusion: ${m.name ?? m.uuid?.slice(0, 8) ?? '?'}${tiled ? ` (slab ${ti + 1}/${nT})` : ''} — ${mapKept}/${mapConsidered} px kept `
+        + `(${(100 * mapKept / Math.max(1, mapConsidered)).toFixed(1)}%)`, 'debug', 'Dense')
     }
-    onLog(`Fusion: ${m.name ?? m.uuid?.slice(0, 8) ?? '?'} — ${mapKept}/${mapConsidered} px kept `
-      + `(${(100 * mapKept / Math.max(1, mapConsidered)).toFixed(1)}%)`, 'debug', 'Dense')
-  }
 
-  onProgress?.(maps.length - 0.02 * maps.length, maps.length, 'Packing points…')
+    // The slab's own cells: merged, then isolated-cell removal judged with the halo
+    // as neighbours, then the halo dropped before finalizing.
+    counters.mergedCells += within ? acc.countWithin(within) : acc.count
+    // WS4 post-fusion isolated-cell removal: drop lone low-support cells (fusion noise
+    // that slipped the per-pixel gates) with too few occupied neighbours.
+    if (removeIsolated) {
+      counters.isolatedRemoved += acc.filterIsolated({
+        radius: DENSE_TUNING.isolatedRadius,
+        minNeighbors: DENSE_TUNING.isolatedMinNeighbors,
+        maxSupport: DENSE_TUNING.isolatedMaxSupport,
+        within,
+      })
+    }
+    if (within) acc.restrict(within)
+    counters.overflowCells += acc.overflowCells
+    counters.accBytes = Math.max(counters.accBytes, acc.bytes)
+    const slabCells = acc.count
+    counters.cells += slabCells
+    const flat = acc.finalizeFlat()
+    const fin = acc.finalizeNormals()
+    counters.degenerate += fin.degenerate
+    flat.nrm = fin.nrm
+    acc = null // release the accumulator before the caller converts the slab
+    if (tiled) {
+      onLog(`Fusion: slab ${ti + 1}/${nT} (${axKey} cells ${Number.isFinite(lo) ? lo : '−∞'}…${Number.isFinite(hi) ? hi : '∞'}) → `
+        + `${slabCells.toLocaleString()} points in ${((now() - tT) / 1000).toFixed(1)}s`, 'info', 'Dense')
+    }
+    if (hooks.onTile) hooks.onTile(flat, { index: ti, count: nT })
+    else parts.push(flat)
+  }
+  return { parts, counters }
+}
+
+// Logs and summary of a fusion run from its (merged) counters; with `parts` (flat
+// slabs, in slab order) it also joins the cloud — empty when the slabs went to onTile.
+export function finishFusion(plan, counters, parts = [], onLog = () => {}, hooks = {}) {
+  const { minViews, maxCost, mergeCell, region, estCells, tiled, bboxStride, slabs, nMaps } = plan
+  const { minTriAngleDeg, maxIncidenceDeg, incidenceOn } = plan.gates
+  const { considered, noDepth, highCost, failedConsistency, kept, lowParallax, grazing, outsideRegion,
+    mergedCells, isolatedRemoved, degenerate, overflowCells, accBytes, cells, noNormalMaps } = counters
+  const nT = slabs.length
+  hooks.onProgress?.(nT * nMaps - 0.02 * nT * nMaps, nT * nMaps, 'Packing points…')
 
   // Where did the candidate pixels go? (kept + the cull buckets = considered.)
   const pct = (n) => (100 * n / Math.max(1, considered)).toFixed(1)
@@ -1408,9 +1897,8 @@ function* fusionSteps(maps, opts = {}, onLog = () => {}, hooks = {}) {
 
   // The voxel merge already collapsed the per-source-pixel "shell" duplicates (a
   // surface seen by k views → k coincident points → one averaged cell). Report it.
-  const mergedCells = acc.count
-  if (acc.overflowCells) {
-    onLog(`Fusion: ${acc.overflowCells} merged cell(s) lay outside the ${bboxStride}-px-sampled scene bounds `
+  if (overflowCells) {
+    onLog(`Fusion: ${overflowCells} merged cell(s) lay outside the ${bboxStride}-px-sampled scene bounds `
       + '— merged exactly in the overflow map (thin features the bounds sample missed)', 'debug', 'Dense')
   }
   if (mergedCells !== kept) {
@@ -1423,29 +1911,24 @@ function* fusionSteps(maps, opts = {}, onLog = () => {}, hooks = {}) {
   // accumulator actually hold.
   onLog(`Fusion: ${mergedCells.toLocaleString()} merged cells vs the measured bound `
     + `${estCells.toLocaleString()} (${(100 * mergedCells / Math.max(1, estCells)).toFixed(0)}%); `
-    + `accumulator held ${formatBytes(acc.bytes)}`, 'info', 'Dense')
-
-  // WS4 post-fusion isolated-cell removal: drop lone low-support cells (fusion noise
-  // that slipped the per-pixel gates) with too few occupied neighbours.
-  let isolatedRemoved = 0
-  if (removeIsolated) {
-    isolatedRemoved = acc.filterIsolated({
-      radius: DENSE_TUNING.isolatedRadius,
-      minNeighbors: DENSE_TUNING.isolatedMinNeighbors,
-      maxSupport: DENSE_TUNING.isolatedMaxSupport,
-    })
-    if (isolatedRemoved) {
-      onLog(`Fusion: isolated-cell removal — dropped ${isolatedRemoved} lone cell(s) `
-        + `(${(100 * isolatedRemoved / Math.max(1, mergedCells)).toFixed(1)}% of merged)`, 'info', 'Dense')
-    }
+    + `accumulator held ${formatBytes(accBytes)}${tiled ? ' (largest slab)' : ''}`, 'info', 'Dense')
+  if (isolatedRemoved) {
+    onLog(`Fusion: isolated-cell removal — dropped ${isolatedRemoved} lone cell(s) `
+      + `(${(100 * isolatedRemoved / Math.max(1, mergedCells)).toFixed(1)}% of merged)`, 'info', 'Dense')
   }
-  const cells = acc.count // after isolated-cell removal
 
-  const flat = acc.finalizeFlat()
-  const { nrm, degenerate } = acc.finalizeNormals()
-  flat.nrm = nrm
+  let flat
+  if (!parts.length) flat = Object.assign(new Float32Array(0), { nrm: null })
+  else if (parts.length === 1) flat = parts[0]
+  else {
+    flat = new Float32Array(cells * 6)
+    const nrm = new Float32Array(cells * 3)
+    let o = 0
+    for (const p of parts) { flat.set(p, o * 6); nrm.set(p.nrm, o * 3); o += p.length / 6 }
+    flat.nrm = nrm
+  }
   if (noNormalMaps) {
-    onLog(`Fusion: ${noNormalMaps}/${maps.length} map(s) had no per-pixel normals — `
+    onLog(`Fusion: ${noNormalMaps}/${nMaps} map(s) had no per-pixel normals — `
       + `used view-direction fallback (re-run depth maps to refresh)`, 'warn', 'Dense')
   }
   if (degenerate) {
@@ -1456,12 +1939,13 @@ function* fusionSteps(maps, opts = {}, onLog = () => {}, hooks = {}) {
   // (attached to the returned typed array — non-breaking for callers that iterate).
   const denom = Math.max(1, considered)
   flat.summary = {
-    costMedian: costStats.median,
+    costMedian: plan.costMedian,
     keptPct: 100 * kept / denom,
     mergeCell,
     estimatedCells: estCells,
     mergedPct: kept ? 100 * (kept - mergedCells) / kept : 0,
     isolatedRemoved,
+    slabs: nT,
     cullBreakdown: {
       noDepthPct: 100 * noDepth / denom,
       highCostPct: 100 * highCost / denom,

@@ -21,6 +21,7 @@
 //     coordinates keep ~mm precision; a round-trip is exact to the scale quantum.
 
 import { geoKeysForEpsg } from '../products/geotiff.js'
+import { PART_BYTES } from './parts.js'
 
 const HEADER_SIZE_12 = 227
 const VLR_HEADER_SIZE = 54
@@ -35,14 +36,15 @@ function asciiField(dst, offset, text, width) {
 }
 
 // ── Writer: cloud → LAS 1.2 (point format 2, or 3 with GPS time) ─────────────
-// `points` accepts the same dual input as cloudToPly: a sparse cloud's
+// `points` accepts the same dual input as cloudToPlyParts: a sparse cloud's
 // [{ x, y, z, color? }] or the flat dense shape { count, pos, col? }.
 // opts: { crsCode?: number|null, geographic?: boolean, attributes = true, onLog? }.
 // When an EPSG code is given, a GeoKeyDirectory VLR (LASF_Projection / 34735) is
 // written; without one (local frame) no CRS VLR is emitted. A flat cloud's
 // `attributes` are written as described at the top (attributes:false skips them).
-// Returns a Uint8Array.
-export function cloudToLas(points, { crsCode = null, geographic = false, attributes = true, onLog } = {}) {
+// Yields Uint8Array parts: the header (+ VLRs), then whole-record chunks.
+export function* cloudToLasParts(points, { crsCode = null, geographic = false, attributes = true, onLog,
+  partBytes = PART_BYTES } = {}) {
   const flat = points && points.pos ? points : null
   const n = flat ? (flat.count ?? flat.pos.length / 3) : points.length
   const getX = flat ? (i) => flat.pos[i * 3] : (i) => points[i].x
@@ -90,16 +92,26 @@ export function cloudToLas(points, { crsCode = null, geographic = false, attribu
   const plan = planLasAttributes(attributes && flat ? flat.attributes : null, n, { onLog })
   if (plan.extra.length) vlrs.push(extraBytesVlr(plan.extra))
 
-  // Point records, in the exact on-disk layout. Split out from the header so the
-  // LAZ writer (core/io/laz.js) hands this same buffer to the compressor — one
-  // definition of a point record, not two.
-  const pointBytes = encodeLasPoints({ n, getX, getY, getZ, getC, scale, offset, ...plan })
-  const header = writeLasHeader({ n, vlrs, scale, offset, bbox: { minX, minY, minZ, maxX, maxY, maxZ },
+  yield writeLasHeader({ n, vlrs, scale, offset, bbox: { minX, minY, minZ, maxX, maxY, maxZ },
     format: plan.format, recordLength: plan.recordLength, pointsByReturn: pointsByReturn(plan.native, n) })
-  const out = new Uint8Array(header.length + pointBytes.length)
-  out.set(header, 0)
-  out.set(pointBytes, header.length)
-  return out
+  // Point records, in the exact on-disk layout, a chunk at a time. encodeLasPoints
+  // is the one definition of a record — the LAZ writer (core/io/laz.js) feeds the
+  // same chunks to its compressor.
+  const per = Math.max(1, Math.floor(partBytes / plan.recordLength))
+  for (let start = 0; start < n; start += per) {
+    const len = Math.min(per, n - start)
+    yield encodeLasPoints({ n: len,
+      getX: (i) => getX(start + i), getY: (i) => getY(start + i), getZ: (i) => getZ(start + i),
+      getC: (i) => getC(start + i), scale, offset, ...sliceLasPlan(plan, start, len) })
+  }
+}
+
+// The attribute plan with every value array viewed onto [start, start+len), so a
+// chunk's encodeLasPoints indexes from 0 like its getters.
+export function sliceLasPlan(plan, start, len) {
+  const native = {}
+  for (const [name, values] of Object.entries(plan.native)) native[name] = values.subarray(start, start + len)
+  return { ...plan, native, extra: plan.extra.map((e) => ({ ...e, values: e.values.subarray(start, start + len) })) }
 }
 
 // Quantized point records for LAS point format 2 (26 bytes) or 3 (34: + GPS time),
@@ -462,11 +474,25 @@ export function decodeLasPoints(pointBytes, count, recordLength, format, scale, 
   validateLasAllocation(count, recordLength)
   if (!SUPPORTED_FORMATS.has(format) || recordLength < RECORD_MIN[format]
       || count * recordLength > pointBytes.byteLength) throw new Error('Truncated or invalid LAS point records')
-  const dv = new DataView(pointBytes.buffer, pointBytes.byteOffset, pointBytes.byteLength)
+  const decoder = createLasDecoder(count, recordLength, format, scale, offset, extraBytes)
+  decoder.decode(pointBytes, 0, count)
+  return decoder.finish()
+}
+
+// decodeLasPoints split so the records can arrive in chunks (parseLasSource reads
+// a file slice by slice): decode(bytes, start, n) fills points [start, start+n)
+// from `bytes` (n whole records), finish() returns the cloud.
+export function createLasDecoder(count, recordLength, format, scale, offset, extraBytes = []) {
+  if (!SUPPORTED_FORMATS.has(format) || recordLength < RECORD_MIN[format]) {
+    throw new Error('Truncated or invalid LAS point records')
+  }
   const rgbOff = RGB_OFFSET[format]
   const hasRgb = rgbOff != null && recordLength >= rgbOff + 6
   const pos = new Float64Array(count * 3)
   const col = hasRgb ? new Uint8Array(count * 3) : null
+  // The unshifted low bytes, kept only while every colour word so far fits 8 bits
+  // (see finish()).
+  let low = hasRgb ? new Uint8Array(count * 3) : null
   const modern = format >= 6
   const attributes = {
     intensity: new Uint16Array(count), classification: new Uint8Array(count),
@@ -482,66 +508,106 @@ export function decodeLasPoints(pointBytes, count, recordLength, format, scale, 
     attributes.scannerChannel = new Uint8Array(count)
   }
   if (format === 8) attributes.nir = new Uint16Array(count)
-  let p = 0, rgbMax = 0
-  for (let i = 0; i < count; i++) {
-    pos[i * 3] = dv.getInt32(p, true) * scale[0] + offset[0]
-    pos[i * 3 + 1] = dv.getInt32(p + 4, true) * scale[1] + offset[1]
-    pos[i * 3 + 2] = dv.getInt32(p + 8, true) * scale[2] + offset[2]
-    attributes.intensity[i] = dv.getUint16(p + 12, true)
-    const returns = dv.getUint8(p + 14)
-    const flags = dv.getUint8(p + 15)
-    attributes.returnNumber[i] = returns & (modern ? 15 : 7)
-    attributes.numberOfReturns[i] = (returns >> (modern ? 4 : 3)) & (modern ? 15 : 7)
-    attributes.classification[i] = modern ? dv.getUint8(p + 16) : flags & 31
-    const classFlags = modern ? flags : flags >> 5
-    attributes.synthetic[i] = classFlags & 1
-    attributes.keyPoint[i] = (classFlags >> 1) & 1
-    attributes.withheld[i] = (classFlags >> 2) & 1
-    attributes.scanDirection[i] = ((modern ? flags : returns) >> 6) & 1
-    attributes.edgeOfFlightLine[i] = ((modern ? flags : returns) >> 7) & 1
-    attributes.scanAngle[i] = modern ? dv.getInt16(p + 18, true) * 0.006 : dv.getInt8(p + 16)
-    attributes.userData[i] = dv.getUint8(p + 17)
-    attributes.pointSourceId[i] = dv.getUint16(p + (modern ? 20 : 18), true)
-    if (attributes.gpsTime) attributes.gpsTime[i] = dv.getFloat64(p + (modern ? 22 : 20), true)
-    if (modern) {
-      attributes.overlap[i] = (flags >> 3) & 1
-      attributes.scannerChannel[i] = (flags >> 4) & 3
-    }
-    if (attributes.nir) attributes.nir[i] = dv.getUint16(p + 36, true)
-    if (col) {
-      const r = dv.getUint16(p + rgbOff, true), g = dv.getUint16(p + rgbOff + 2, true), b = dv.getUint16(p + rgbOff + 4, true)
-      if (r > rgbMax) rgbMax = r; if (g > rgbMax) rgbMax = g; if (b > rgbMax) rgbMax = b
-      col[i * 3] = r >> 8; col[i * 3 + 1] = g >> 8; col[i * 3 + 2] = b >> 8
-    }
-    p += recordLength
-  }
   // Extra bytes start after the standard record. A field that would run past the
   // record (a descriptor list longer than the records it describes) is ignored.
   const base = RECORD_MIN[format]
+  const extras = []
   for (const e of extraBytes || []) {
     const at = base + e.offset
     if (at + e.size > recordLength) continue
     const [, getter, ArrayType] = EXTRA_TYPES[e.dataType]
     const transform = e.scale != null || e.add != null
     const values = new (transform ? Float64Array : ArrayType)(count)
-    const big = getter.startsWith('getBig')
-    const k = e.scale ?? 1, add = e.add ?? 0
-    for (let i = 0, q = at; i < count; i++, q += recordLength) {
-      const raw = big ? Number(dv[getter](q, true)) : dv[getter](q, true)
-      values[i] = transform ? raw * k + add : raw
-    }
+    extras.push({ at, getter, big: getter.startsWith('getBig'), transform, k: e.scale ?? 1, add: e.add ?? 0, values })
     // Own data property even for a hostile name like "__proto__".
     Object.defineProperty(attributes, e.name, { value: values, enumerable: true, writable: true, configurable: true })
   }
-  // The spec says 16-bit colour, but many writers store 0–255 in those fields;
-  // the >> 8 above would turn such a cloud black. A file whose colours never
-  // exceed 255 is 8-bit: re-read them unshifted (only the colour words).
-  if (col && rgbMax > 0 && rgbMax <= 255) {
-    for (let i = 0, q = rgbOff; i < count; i++, q += recordLength) {
-      col[i * 3] = dv.getUint16(q, true)
-      col[i * 3 + 1] = dv.getUint16(q + 2, true)
-      col[i * 3 + 2] = dv.getUint16(q + 4, true)
+  let rgbMax = 0
+
+  function decode(pointBytes, start, n) {
+    const dv = new DataView(pointBytes.buffer, pointBytes.byteOffset, pointBytes.byteLength)
+    let p = 0
+    for (let i = start; i < start + n; i++) {
+      pos[i * 3] = dv.getInt32(p, true) * scale[0] + offset[0]
+      pos[i * 3 + 1] = dv.getInt32(p + 4, true) * scale[1] + offset[1]
+      pos[i * 3 + 2] = dv.getInt32(p + 8, true) * scale[2] + offset[2]
+      attributes.intensity[i] = dv.getUint16(p + 12, true)
+      const returns = dv.getUint8(p + 14)
+      const flags = dv.getUint8(p + 15)
+      attributes.returnNumber[i] = returns & (modern ? 15 : 7)
+      attributes.numberOfReturns[i] = (returns >> (modern ? 4 : 3)) & (modern ? 15 : 7)
+      attributes.classification[i] = modern ? dv.getUint8(p + 16) : flags & 31
+      const classFlags = modern ? flags : flags >> 5
+      attributes.synthetic[i] = classFlags & 1
+      attributes.keyPoint[i] = (classFlags >> 1) & 1
+      attributes.withheld[i] = (classFlags >> 2) & 1
+      attributes.scanDirection[i] = ((modern ? flags : returns) >> 6) & 1
+      attributes.edgeOfFlightLine[i] = ((modern ? flags : returns) >> 7) & 1
+      attributes.scanAngle[i] = modern ? dv.getInt16(p + 18, true) * 0.006 : dv.getInt8(p + 16)
+      attributes.userData[i] = dv.getUint8(p + 17)
+      attributes.pointSourceId[i] = dv.getUint16(p + (modern ? 20 : 18), true)
+      if (attributes.gpsTime) attributes.gpsTime[i] = dv.getFloat64(p + (modern ? 22 : 20), true)
+      if (modern) {
+        attributes.overlap[i] = (flags >> 3) & 1
+        attributes.scannerChannel[i] = (flags >> 4) & 3
+      }
+      if (attributes.nir) attributes.nir[i] = dv.getUint16(p + 36, true)
+      if (col) {
+        const r = dv.getUint16(p + rgbOff, true), g = dv.getUint16(p + rgbOff + 2, true), b = dv.getUint16(p + rgbOff + 4, true)
+        if (r > rgbMax) rgbMax = r; if (g > rgbMax) rgbMax = g; if (b > rgbMax) rgbMax = b
+        col[i * 3] = r >> 8; col[i * 3 + 1] = g >> 8; col[i * 3 + 2] = b >> 8
+        if (low) { low[i * 3] = r; low[i * 3 + 1] = g; low[i * 3 + 2] = b }
+      }
+      p += recordLength
+    }
+    if (low && rgbMax > 255) low = null
+    for (const x of extras) {
+      for (let i = start, q = x.at; i < start + n; i++, q += recordLength) {
+        const raw = x.big ? Number(dv[x.getter](q, true)) : dv[x.getter](q, true)
+        x.values[i] = x.transform ? raw * x.k + x.add : raw
+      }
     }
   }
-  return { count, pos, ...(col ? { col } : {}), attributes }
+
+  function finish() {
+    // The spec says 16-bit colour, but many writers store 0–255 in those fields;
+    // the >> 8 above would turn such a cloud black. A file whose colours never
+    // exceed 255 is 8-bit: use the colour words unshifted.
+    const outCol = col && rgbMax > 0 && rgbMax <= 255 ? low : col
+    return { count, pos, ...(outCol ? { col: outCol } : {}), attributes }
+  }
+
+  return { decode, finish }
+}
+
+// parseLas over injected I/O ({ size, read(start, end) } — utils/blobParts.js
+// blobSource): the header and VLRs, then the point records a slice at a time, so
+// the file is never one buffer next to the decoded cloud.
+export async function parseLasSource(source, { onLog, chunkBytes = 8 * 1024 * 1024 } = {}) {
+  const first = await source.read(0, Math.min(source.size, HEADER_SIZE_12))
+  const offsetToPoints = first.length >= 100 ? new DataView(first.buffer, first.byteOffset, first.byteLength).getUint32(96, true) : 0
+  const h = readLasHeader(await source.read(0, Math.min(source.size, Math.max(offsetToPoints, 375))))
+  if (h.isLaz) {
+    throw new Error('This file is LAZ (compressed LAS) — open it through the LAZ reader '
+      + '(core/io/laz.js), which needs the lazcodec WASM module')
+  }
+  let count = h.count
+  const avail = Math.floor((source.size - h.offsetToPoints) / h.recordLength)
+  if (avail < count) {
+    onLog?.(`LAS: header claims ${count} points but the file holds ${avail} — reading ${avail}`, 'warn', 'Import')
+    count = Math.max(0, avail)
+  }
+  validateLasAllocation(count, h.recordLength)
+  const decoder = createLasDecoder(count, h.recordLength, h.format, h.scale, h.offset, h.extraBytes)
+  const per = Math.max(1, Math.floor(chunkBytes / h.recordLength))
+  for (let start = 0; start < count; start += per) {
+    const n = Math.min(per, count - start)
+    const at = h.offsetToPoints + start * h.recordLength
+    decoder.decode(await source.read(at, at + n * h.recordLength), start, n)
+  }
+  const cloud = decoder.finish()
+  onLog?.(`LAS: read ${count.toLocaleString()} points (v${h.versionMajor}.${h.versionMinor}, `
+    + `format ${h.format}${cloud.col ? ', RGB' : ''}`
+    + `${h.extraBytes.length ? `, extra bytes: ${h.extraBytes.map((e) => e.name).join(', ')}` : ''})`, 'info', 'Import')
+  return cloud
 }

@@ -3,7 +3,7 @@ name = "imagecodec"
 version = "0.1.0"
 edition = "2021"
 description = "Native TIFF decoder compiled to WebAssembly (ingest speedup)"
-license = "MIT OR Apache-2.0"
+license = "MIT"
 
 [lib]
 crate-type = ["cdylib", "rlib"]

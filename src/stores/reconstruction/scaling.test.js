@@ -223,3 +223,15 @@ describe('createScaling · staleness (D11)', () => {
     expect(harness().scaleFitStatus()).toEqual({ valid: false, reason: 'none' })
   })
 })
+
+describe('markerPositions (the model-frame map)', () => {
+  it('triangulates every enabled marker, and nothing else', async () => {
+    const control = { ...marker('g1', 'G1', [1, 1, 10]), role: 'control', x: 1, y: 1, z: 1 }
+    const off = { ...marker('m3', 'M3', [1, 0, 10]), enabled: false }
+    const { markerPositions } = harness({ gcps: [M1, M2, control, off] })
+    const list = await markerPositions()
+    expect(list.map((m) => m.id)).toEqual(['m1', 'm2'])
+    const m2 = list[1].pos
+    expect(Math.hypot(m2[0] - 2, m2[1], m2[2] - 10)).toBeLessThan(0.05)
+  })
+})

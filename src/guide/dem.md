@@ -12,8 +12,13 @@ cloud is acceptable only for a coarse preview.
 ## Coordinate frame
 <!-- param: crs default: Local -->
 **Local** uses the model orientation and its best available scale. **Project CRS**
-requires a georeference fit and produces real-world coordinates. For an object with
+requires a georeference fit and produces real-world coordinates. Once the project has
+a georeference, Project CRS is preselected, so the DEM lands on the map's CRS view
+with the basemap and GCPs. For an object with
 a scale bar, Local is metric but still has no CRS.
+Local levels the model from the cameras. When the camera positions share one height
+(a drone flight plan) and the photos are oblique, that level plane sets the vertical;
+a nadir survey uses its viewing direction. The log names which one was used.
 The option names why it is unavailable. "Geographic CRS" means the project is still
 in degrees (WGS 84): use the projected CRS suggested under the field, or choose one in
 Project Settings; the frame switches to it once the fit is possible. "Needs ≥3 camera
@@ -24,6 +29,15 @@ positions or GCPs" means there is not enough evidence yet.
 Cell size in metres or model units per pixel. Auto estimates a sensible value from
 point density. Choosing a much finer cell than the source spacing makes a larger file,
 not more detail, and forces interpolation across more empty cells.
+
+## Extent
+<!-- param: extent default: Dense core -->
+**Dense core** (default) grids only the area where the cloud is dense. Oblique photos
+see far past the site, almost to the horizon, and those thin distant points would
+otherwise make the DEM huge, coarse and mostly empty. The log says how many points
+fall outside and are left out; a warning appears when that is more than 5%. Choose
+**All points** to grid the full extent of the cloud. A Region (Tools ▸ Model ▸ Region)
+limits the input before either.
 
 ## Surface aggregation
 **Max** creates a DSM top surface, retaining roofs and vegetation. **Min** is only
@@ -36,23 +50,65 @@ preserves hard steps; **None** leaves nodata. The radius never enlarges the rast
 only fills an empty cell when measured data is close enough. Large radii can invent
 surface across real gaps, especially from a sparse cloud.
 
+## Show on the 2D map
+Choose **On Map** in the DEM's ribbon tab, or **Display on map** in the Products row's
+right-click menu. The row then shows ◉ and an **Opacity** slider while expanded. The
+map draws the DEM's hillshade preview under GCPs and footprints, and above imported
+reference rasters; **Fit View** includes it. With the cursor over it, the map's status
+bar shows the height of the cell under the cursor, and "no data" over a hole.
+
+The 2D map has two frames, switched with **View ▸ Map ▸ Model Frame**:
+- **Project CRS** (Model Frame off): the basemap, GPS positions, GCPs, footprints,
+  reference rasters and Project CRS products. A Local DEM is not drawn here; a
+  note on the map says so.
+- **Model frame** (on): a top-down view of the sparse model's local frame, labelled
+  X/Y in model units (or metres with scale bars). It shows the registered cameras
+  and Local products. Everything that only has a CRS position is hidden, and Edit
+  GCPs is unavailable. Markers appear where their marks triangulate. A product
+  built on an older sparse model, or in a different model orientation, is not drawn
+  until it is rebuilt.
+
+Until you choose, the map uses the model frame only when there is a sparse model and
+nothing with a CRS position (no georeference, GPS, poses, GCP coordinates or
+reference rasters on the map).
+
+## Memory
+The DEM copies the source cloud's points (about 24 bytes each, only those inside the
+region when one is set) and allocates the grid. Both must fit the memory budget in
+**Settings ▸ Compute**, the same budget dense matching uses. If a build is refused, the
+message names the size it needed: raise the budget, set a region, subsample the cloud
+(Tools ▸ Point Cloud ▸ Filter, voxel), or choose a coarser cell size for the grid.
+Median uses about 8 extra bytes per point; Max, Min and Mean need none.
+
 ## Inspect before export
 Look for spikes, pits, edge extrapolation, bridges across gaps, and a plausible height
 range. Export GeoTIFF when the product has a CRS; preserve nodata for downstream GIS.
 
 ## Measure a raster
-Open the DEM or orthophoto tab. The ribbon's contextual tab then shows a
-**Measure** group: **Ruler**, **Area**, **Profile** and **Volume**. Profile and
-Volume need elevations, so they appear for DEMs only. A bar at the top of the view
-shows the active tool. Click vertices on the raster. **Enter** finishes,
-**Backspace** removes the last point, and Shift-drag pans. **Esc** clears the
-drawing, and a second Esc leaves the tool; clicking the active ribbon button also
-turns it off. A click after Finish starts a new measurement.
+Every measuring tool is in **Tools ▸ Measure ▾**. With a DEM or orthophoto tab in
+front, choose **Ruler**, **Area**, **Profile** or **Volume**. Profile and Volume need
+elevations, so on an orthophoto they stay greyed with the reason. A bar at the top of
+the view shows the active tool, and the Measure button stays lit while one runs.
+Click vertices on the raster. **Enter** finishes, **Backspace** removes the last
+point, and Shift-drag pans. **Esc** clears the drawing, and a second Esc leaves the
+tool; choosing the active tool again in the menu also turns it off. A click after
+Finish starts a new measurement.
+
+**On the 2D map** the same menu works while a raster is on the map, and it adds a
+**Map layer to measure** section that picks which raster is measured: the DEM by
+default, because only a DEM serves Profile and Volume, so you can draw over the
+orthophoto and still read heights from the DEM underneath. Drag pans; clicks add
+vertices. A measurement saved on the map belongs to its raster, so it also appears
+under **Saved measurements** in that raster's tab, and the other way round.
+
+The same menu holds the measurements of clouds and meshes: **Distance to
+reference…** and **Section…** (see Point Cloud Tools) and **Mesh area & volume…**
+(see Mesh).
 
 The result card shows the value with its details (perimeter for an area, elevation
 range and relief for a profile, cut/fill/coverage for a volume). Type a name and
-choose **Save measurement** to keep it with the project. **Saved** in the ribbon
-opens the list of this raster's saved measurements. Click one to reopen it, then
+choose **Save measurement** to keep it with the project. **Saved measurements** in
+the menu opens the list of this raster's saved measurements. Click one to reopen it, then
 rename or delete it from its card. Rebuilding the raster or changing its coordinate
 frame marks older measurements **stale**. Their saved results remain readable;
 draw a new measurement on the current source to replace them.

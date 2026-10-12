@@ -1,6 +1,10 @@
 import { describe, it, expect } from 'vitest'
 import { cloudToLaz, parseLaz, decompressLazRecords, LASZIP_VLR_RECORD_ID } from './laz.js'
-import { cloudToLas, parseLas, readLasHeader } from './las.js'
+import { cloudToLasParts, parseLas, readLasHeader } from './las.js'
+import { joinParts } from './parts.js'
+
+// The writers yield bounded parts (core/io/parts.js); these join them for small fixtures.
+const cloudToLas = (...a) => joinParts(cloudToLasParts(...a))
 
 // A stand-in for crates/lazcodec with the same contract: the point stream in, an
 // opaque block + a VLR payload out. It is deliberately NOT a real coder — these

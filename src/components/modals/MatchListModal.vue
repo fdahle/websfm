@@ -1,7 +1,11 @@
 <script setup>
-import { ref, computed, onBeforeUnmount } from 'vue'
+import { ref, shallowRef, computed, watch, onBeforeUnmount } from 'vue'
 import ViewerMatch from '../viewers/ViewerMatch.vue'
 import MatchGraph from '../viewers/MatchGraph.vue'
+import { useVirtualList } from '../../composables/useVirtualList.js'
+import { useImagesStore } from '../../stores/useImagesStore.js'
+import { useMatchesStore } from '../../stores/useMatchesStore.js'
+import { useLog } from '../../composables/useLog.js'
 
 const props = defineProps({
   matchSummaries: { type: Array,  default: () => [] },
@@ -12,9 +16,10 @@ const props = defineProps({
   hasSparse:      { type: Boolean, default: false },
   // UUIDs registered in the sparse model — for colouring nodes in the graph view.
   alignedUuids:   { type: Object, default: () => new Set() },
-  // pairId → Set("kpA:kpB") of correspondences that became surviving tie-points.
-  // Feeds the preview's aligned/unused (green/red) match colouring.
-  usedMatchesByPair: { type: Object, default: () => new Map() },
+  // pairId → Set("kpA:kpB") of correspondences that became surviving tie-points,
+  // built on demand for the selected pair only (core/eval/usedMatches.js). Feeds
+  // the preview's aligned/unused (green/red) match colouring.
+  usedKeysOf: { type: Function, default: () => new Set() },
   // Imported camera positions keyed by uuid ({ x, y } in project CRS) — enables the
   // graph's geographic layout. Empty when no poses have been imported.
   nodePositions:  { type: Object, default: () => ({}) },
@@ -65,22 +70,40 @@ const imageOptions = computed(() => {
   return [...names].sort((a, b) => a.localeCompare(b))
 })
 
+// Trimmed names once per summary list, not per comparison: a sort of 10⁵ pairs runs
+// ~2·10⁶ comparisons, and each used to run two regexes.
+const trimmedNames = computed(() => {
+  const m = new Map()
+  for (const s of props.matchSummaries) {
+    const a = trimExt(s.nameA), b = trimExt(s.nameB)
+    m.set(s.pairId, { a, b, aKey: a.toLowerCase(), bKey: b.toLowerCase() })
+  }
+  return m
+})
+
 const displayedSummaries = computed(() => {
   const q = filterImage.value
+  const names = trimmedNames.value
   let rows = props.matchSummaries
-  if (q) rows = rows.filter((m) => trimExt(m.nameA) === q || trimExt(m.nameB) === q)
+  if (q) rows = rows.filter((m) => { const n = names.get(m.pairId); return n.a === q || n.b === q })
 
   const key = sortKey.value
   const dir = sortDir.value === 'asc' ? 1 : -1
-  const isText = key === 'nameA' || key === 'nameB'
+  const textKey = key === 'nameA' ? 'aKey' : key === 'nameB' ? 'bKey' : null
   return [...rows].sort((a, b) => {
-    const va = isText ? trimExt(a[key]).toLowerCase() : a[key]
-    const vb = isText ? trimExt(b[key]).toLowerCase() : b[key]
+    const va = textKey ? names.get(a.pairId)[textKey] : a[key]
+    const vb = textKey ? names.get(b.pairId)[textKey] : b[key]
     if (va < vb) return -1 * dir
     if (va > vb) return 1 * dir
     return 0
   })
 })
+
+// Only the rows in view are in the DOM (composables/useVirtualList); a project's
+// match list runs to tens of thousands of pairs. Row height measured once rendered.
+const {
+  listRef: matchBodyRef, visibleItems: visibleSummaries, padTop, padBottom,
+} = useVirtualList({ items: () => displayedSummaries.value, itemHeight: 32, measure: true })
 
 const selectedSummary = computed(() =>
   props.matchSummaries.find((m) => m.pairId === selectedPairId.value) ?? null
@@ -99,6 +122,29 @@ const selectedImgB = computed(() => {
   const s = selectedSummary.value
   return s ? props.images.find((img) => img.id === s.idB) ?? null : null
 })
+
+// The selected pair's matches and both images' keypoints, read on demand (neither is
+// resident after a project open — useMatchesStore.ensurePairMatches /
+// useImagesStore.ensureKeypoints). A shallowRef: the buffers are never reactive.
+const imagesStore = useImagesStore()
+const matchesStore = useMatchesStore()
+const { log } = useLog()
+const preview = shallowRef({ pairId: null, matches: null, kpsA: null, kpsB: null })
+let previewRequest = 0
+watch([selectedPairId, selectedEntry, selectedImgA, selectedImgB], async ([pairId, entry, a, b]) => {
+  const req = ++previewRequest
+  preview.value = { pairId, matches: null, kpsA: null, kpsB: null }
+  if (!pairId || !entry || !a || !b) return
+  try {
+    const [matches, kpsA, kpsB] = await Promise.all([
+      matchesStore.ensurePairMatches(pairId), imagesStore.ensureKeypoints(a), imagesStore.ensureKeypoints(b),
+    ])
+    if (req === previewRequest) preview.value = { pairId, matches, kpsA, kpsB }
+  } catch (err) {
+    // Say why the panel stays empty.
+    if (req === previewRequest) log(`Match preview: ${err?.message ?? err}`, 'warn', 'Matching')
+  }
+}, { immediate: true })
 
 function selectMatch(pairId) {
   selectedPairId.value = selectedPairId.value === pairId ? null : pairId
@@ -130,7 +176,7 @@ onBeforeUnmount(stopResize)
 // exists, so the preview draws neutral (undifferentiated) matches pre-alignment.
 const selectedUsedKeys = computed(() =>
   props.hasSparse && selectedPairId.value
-    ? (props.usedMatchesByPair.get(selectedPairId.value) ?? new Set())
+    ? props.usedKeysOf(selectedPairId.value)
     : null
 )
 </script>
@@ -181,13 +227,15 @@ const selectedUsedKeys = computed(() =>
                   <th v-if="hasSparse" class="sortable num-col" @click="sortBy('usedCount')" title="Matches that became tie-points in the sparse model">Used<span class="arrow">{{ sortKey === 'usedCount' ? (sortDir === 'asc' ? '▲' : '▼') : '' }}</span></th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody ref="matchBodyRef">
                 <tr v-if="!displayedSummaries.length">
                   <td :colspan="hasSparse ? 4 : 3" class="empty-row">No pairs match “{{ filterImage }}”.</td>
                 </tr>
+                <tr v-if="padTop" class="v-spacer" aria-hidden="true" :style="{ height: padTop + 'px' }"><td :colspan="hasSparse ? 4 : 3"></td></tr>
                 <tr
-                  v-for="m in displayedSummaries"
+                  v-for="m in visibleSummaries"
                   :key="m.pairId"
+                  data-vrow
                   class="match-row"
                   :class="{ active: m.pairId === selectedPairId, unused: hasSparse && !m.usedCount, disabled: m.disabled }"
                   :title="m.disabled ? 'Excluded from reconstruction' : ''"
@@ -201,6 +249,7 @@ const selectedUsedKeys = computed(() =>
                   <td class="num-col">{{ m.inlierCount }}</td>
                   <td v-if="hasSparse" class="num-col" :class="{ dim: !m.usedCount }">{{ m.usedCount }}</td>
                 </tr>
+                <tr v-if="padBottom" class="v-spacer" aria-hidden="true" :style="{ height: padBottom + 'px' }"><td :colspan="hasSparse ? 4 : 3"></td></tr>
               </tbody>
             </table>
             </div>
@@ -226,7 +275,9 @@ const selectedUsedKeys = computed(() =>
               v-if="selectedImgA && selectedImgB"
               :image-a="selectedImgA"
               :image-b="selectedImgB"
-              :matches="selectedEntry?.matches ?? []"
+              :matches="preview.matches ?? []"
+              :keypoints-a="preview.kpsA"
+              :keypoints-b="preview.kpsB"
               :used-keys="selectedUsedKeys"
             />
             <div v-else class="preview-placeholder">
@@ -467,6 +518,11 @@ const selectedUsedKeys = computed(() =>
   border-bottom: 1px solid var(--panel-border);
   color: var(--text);
 }
+
+/* Fixed row height for the virtual list (measured once rendered). Names never
+   wrap (.name-cell nowrap), so every row is one line tall. */
+.match-row { height: 32px; }
+.v-spacer > td { padding: 0; border: 0; }
 
 .name-cell {
   max-width: 120px;

@@ -93,7 +93,7 @@ describe('clipDem', () => {
     for (let i = 0; i < 80; i++) data[i] = i
     const mask = new Uint8Array(80).fill(1)
     mask[2 * 10 + 3] = 0 // a hole inside the clip polygon
-    return { ...geo, data, mask, zMin: 0, zMax: 79, count: 79, crs: 'EPSG:3031', previewDataUrl: 'stale' }
+    return { ...geo, data, mask, zMin: 0, zMax: 79, count: 79, crs: 'EPSG:3031', previewUrl: 'stale', previewBlob: 'stale' }
   }
 
   it('crops with exact origin arithmetic and keeps holes as holes', () => {
@@ -113,7 +113,8 @@ describe('clipDem', () => {
     expect(out.zMin).toBe(12)
     expect(out.zMax).toBe(45)
     expect(out.crs).toBe('EPSG:3031')
-    expect(out.previewDataUrl).toBeUndefined()
+    expect(out.previewUrl).toBeUndefined()
+    expect(out.previewBlob).toBeUndefined()
     expect(out.count).toBeUndefined()
     // Source untouched.
     expect(src.data[0]).toBe(0)

@@ -47,6 +47,13 @@ used by sequential matching stays the order the images were imported in. Removin
 group keeps its images. Images that must share one camera calibration belong in the
 same **sensor**, which is a different thing from a group.
 
+**Thumbnails.** The image table, the mask dialogs and the camera frames in the 3D view
+show a small thumbnail of each image, made once in the background when the image is
+added and stored with the project, so long lists stay quick with thousands of images.
+A project from an older version has none yet: each image's thumbnail is made the first
+time a list or the 3D view shows it, and a grey shimmer stands in until then. The
+full-resolution image is still what the image viewer, detection and dense matching use.
+
 ## 3 · Reconstruct
 Run [Detect Features](guide:detect-features), [Match Features](guide:match-features),
 then [Sparse Reconstruction](guide:sparse-reconstruction). The sparse model is your
@@ -81,12 +88,15 @@ Clean, align, compare and measure the results with the **Tools** tab's
 
 ## Where things are
 The ribbon chooses what to do: a dialog, a mode, or a display setting such as point
-and camera size (View → Scene). The **Tools** tab groups its tools by what they act on:
-Images, Model, Point Cloud, Mesh and Products, each a menu. Every menu opens even
-before anything in it is usable, so you can see what is there: a tool whose
-prerequisite is missing stays in its menu, greyed, with the reason. Interactive tools (selecting
-points, editing masks or ground control, measuring, region, orientation, point-pair
-alignment) open a small floating toolbox over the view. You can drag it by its title,
+and camera size (View → Scene). **Every tool is in the Tools tab**, grouped by what
+it acts on: Images, Model, Georeferencing, Point Cloud, Mesh, Products and Measure,
+mostly as menus. The View tab and the tabs that appear for an open image or raster
+only show things: camera presets, overlays, zoom, styling, on-map. Every menu opens
+even before anything in it is usable, so you can see what is there: a tool whose
+prerequisite is missing stays in its menu, greyed, with the reason. Interactive tools
+(selecting points, editing masks or ground control, measuring, region, orientation,
+point-pair alignment) act on the view in front and open a small floating toolbox over
+it; while one runs, its menu button stays lit. You can drag the toolbox by its title,
 and close it with × or Esc.
 
 ## If something goes wrong

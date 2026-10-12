@@ -1,5 +1,5 @@
 <script setup>
-import { ref, watch, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, shallowRef, watch, computed, onMounted, onBeforeUnmount } from 'vue'
 import { maskFromSource, invertMaskPixels, anyExcluded } from '../../core/mask.js'
 import { depthColor } from '../../core/products/colormap.js'
 import { fitFiducialAffine, mmToScan } from '../../core/sfm/fiducials.js'
@@ -186,9 +186,9 @@ let smartDown = null                 // { x, y, alt } pending click-vs-drag whil
 let smartMoved = false               // pointer moved past the click threshold → it's a pan, not a click
 let gcpDown = null                   // { x, y } pending click-vs-drag while GCP-edit mode active
 let gcpMoved = false                 // pointer moved past the click threshold → it's a pan, not a GCP click
-// Undo/redo as stacks of persisted mask dataUrls (null = no mask). Snapshots are
+// Undo/redo as stacks of persisted mask Blobs (null = no mask). Snapshots are
 // the *previous* store value taken just before each committed change, so memory
-// cost is a handful of compressed PNG strings, not raw pixel buffers.
+// cost is a handful of compressed PNG Blobs, not raw pixel buffers.
 const undoStack = ref([])
 const redoStack = ref([])
 const UNDO_MAX = 10
@@ -262,16 +262,31 @@ const DEPTH_STOPS = [0, 0.25, 0.5, 0.75, 1].map((t) => {
   return [t, `rgb(${r},${g},${b})`]
 })
 
+// This image's keypoints, read on demand (useImagesStore.ensureKeypoints — they are
+// not on the record) while the overlay is on. Re-read when the image is switched or
+// its keypoints are replaced (`kpRev`). A shallowRef: the set is never reactive.
+const keypoints = shallowRef(null)
+let keypointRequest = 0
+watch([() => props.image.id, () => props.image.kpRev, () => props.image.kpStatus, () => props.showKeypoints], async () => {
+  const req = ++keypointRequest
+  // Never draw the previous image's (or the replaced) set while the new one loads.
+  keypoints.value = imagesStore.residentKeypoints(props.image)
+  if (keypoints.value || !props.showKeypoints || props.image.kpStatus !== 'done') return
+  const kps = await imagesStore.ensureKeypoints(props.image)
+  if (req === keypointRequest) keypoints.value = kps
+}, { immediate: true })
+
 // Keypoint response range, for the cold→hot colour ramp. Recomputed only when the
 // keypoint array itself is replaced (re-detect / image switch), not on every draw —
 // it is a full pass over up to tens of thousands of points.
 const keypointRange = computed(() => {
-  const kps = props.image.keypoints
+  const kps = keypoints.value
   if (!kps?.length) return null
   let minR = Infinity, maxR = -Infinity
-  for (const kp of kps) {
-    if (kp.response < minR) minR = kp.response
-    if (kp.response > maxR) maxR = kp.response
+  for (let i = 0; i < kps.length; i++) { // typed keypoints (core/features/keypoints.js)
+    const r = kps.response(i)
+    if (r < minR) minR = r
+    if (r > maxR) maxR = r
   }
   return { minR, range: maxR - minR || 1 }
 })
@@ -405,7 +420,7 @@ function renderOverlay() {
 
   // Keypoints — colour-coded dots (cold=blue → hot=red by SIFT response)
   if (props.showKeypoints && keypointRange.value) {
-    const kps = props.image.keypoints
+    const kps = keypoints.value
     const { minR, range } = keypointRange.value
     // Batched into one Path2D per hue bucket. A `fillStyle` change flushes the 2D
     // context, so a per-point colour costs one state change per keypoint — with
@@ -414,12 +429,13 @@ function renderOverlay() {
     const BUCKETS = 24
     const paths = new Array(BUCKETS)
     const R = 2, edge = R + 1
-    for (const kp of kps) {
-      const x = kp.nx * dispW + tx.value
-      const y = kp.ny * dispH + ty.value
+    const ox = tx.value, oy = ty.value
+    for (let i = 0; i < kps.length; i++) {
+      const x = kps.nx(i) * dispW + ox
+      const y = kps.ny(i) * dispH + oy
       // Cull off-screen points: zoomed in, that is nearly all of them.
       if (x < -edge || y < -edge || x > w + edge || y > h + edge) continue
-      const t = (kp.response - minR) / range      // 0 = coldest, 1 = hottest
+      const t = (kps.response(i) - minR) / range  // 0 = coldest, 1 = hottest
       const b = clamp(Math.round(t * (BUCKETS - 1)), 0, BUCKETS - 1)
       const p = paths[b] ?? (paths[b] = new Path2D())
       p.moveTo(x + R, y)                          // arc start, so no joining line
@@ -695,13 +711,13 @@ function initMaskCanvas() {
   const img = imgEl.value
   if (!img || !img.naturalWidth) return
   maskOffscreen = new OffscreenCanvas(img.naturalWidth, img.naturalHeight)
-  if (props.image.mask?.dataUrl) loadMaskFromDataUrl(props.image.mask.dataUrl)
+  if (props.image.mask?.blob) loadMaskBlob(props.image.mask.blob)
 }
 
-async function loadMaskFromDataUrl(dataUrl) {
+// Masks travel as PNG Blobs (the store's `{ blob, url }` record; core/mask.js).
+async function loadMaskBlob(blob) {
   if (!maskOffscreen) return
   try {
-    const blob = await (await fetch(dataUrl)).blob()
     const bmp  = await createImageBitmap(blob)
     const ctx  = maskOffscreen.getContext('2d')
     ctx.clearRect(0, 0, maskOffscreen.width, maskOffscreen.height)
@@ -758,7 +774,7 @@ function paintAt(sx, sy) {
 // rectangle, invert, import, clear) snapshots first, so undo restores exactly
 // the states the store has seen.
 function snapshotForUndo() {
-  undoStack.value.push(props.image.mask?.dataUrl ?? null)
+  undoStack.value.push(props.image.mask?.blob ?? null)
   if (undoStack.value.length > UNDO_MAX) undoStack.value.shift()
   redoStack.value = []
 }
@@ -771,9 +787,9 @@ const canRedo = computed(() => redoStack.value.length > 0)
 // updates its in-memory copy (so undo/redo, overlay, and the sidebar badge stay
 // live) and we mark it dirty; the single flush happens when editing closes
 // (flushMask). Outside edit mode (ribbon/sidebar clear/import) we persist at once.
-function persistMask(url) {
-  if (props.maskEdit) { maskDirty = true; emit('update-mask', url, false) }
-  else emit('update-mask', url, true)
+function persistMask(blob) {
+  if (props.maskEdit) { maskDirty = true; emit('update-mask', blob, false) }
+  else emit('update-mask', blob, true)
 }
 
 // Persist the current in-memory mask once (on closing edit / unmount) if any
@@ -781,31 +797,32 @@ function persistMask(url) {
 function flushMask() {
   if (!maskDirty) return
   maskDirty = false
-  emit('update-mask', props.image.mask?.dataUrl ?? null, true)
+  emit('update-mask', props.image.mask?.blob ?? null, true)
 }
 
-// Restore a snapshot onto the canvas and re-emit it as the (deferred) mask.
-function applyMaskUrl(url) {
-  if (url) {
-    loadMaskFromDataUrl(url)
+// Restore a snapshot (a mask Blob, or null) onto the canvas and re-emit it as the
+// (deferred) mask.
+function applyMaskSnapshot(blob) {
+  if (blob) {
+    loadMaskBlob(blob)
   } else if (maskOffscreen) {
     maskOffscreen.getContext('2d').clearRect(0, 0, maskOffscreen.width, maskOffscreen.height)
     hasMask.value = false
     drawOverlay()
   }
-  persistMask(url)
+  persistMask(blob)
 }
 
 function undoMask() {
   if (!undoStack.value.length) return
-  redoStack.value.push(props.image.mask?.dataUrl ?? null)
-  applyMaskUrl(undoStack.value.pop())
+  redoStack.value.push(props.image.mask?.blob ?? null)
+  applyMaskSnapshot(undoStack.value.pop())
 }
 
 function redoMask() {
   if (!redoStack.value.length) return
-  undoStack.value.push(props.image.mask?.dataUrl ?? null)
-  applyMaskUrl(redoStack.value.pop())
+  undoStack.value.push(props.image.mask?.blob ?? null)
+  applyMaskSnapshot(redoStack.value.pop())
 }
 
 // ── Rectangle & invert ─────────────────────────────────────────────────────────
@@ -867,14 +884,9 @@ async function exportMask(checkEmpty = false) {
     persistMask(null)
     return
   }
-  const blob   = await maskOffscreen.convertToBlob({ type: 'image/png' })
-  const dataUrl = await new Promise((resolve) => {
-    const fr = new FileReader()
-    fr.onload = () => resolve(fr.result)
-    fr.readAsDataURL(blob)
-  })
+  const blob = await maskOffscreen.convertToBlob({ type: 'image/png' })
   hasMask.value = true
-  persistMask(dataUrl)
+  persistMask(blob)
 }
 
 // Clear is undoable (snapshot first) — no confirm dialog needed anymore.
@@ -919,9 +931,9 @@ async function onMaskFileChange(e) {
   e.target.value = ''
   if (!file || !maskOffscreen) return
   try {
-    const dataUrl = await maskFromSource(file, maskOffscreen.width, maskOffscreen.height)
+    const blob = await maskFromSource(file, maskOffscreen.width, maskOffscreen.height)
     snapshotForUndo()
-    await loadMaskFromDataUrl(dataUrl)
+    await loadMaskBlob(blob)
     await exportMask(true) // a blank imported image shouldn't register as a mask
   } catch (err) {
     console.error('Failed to import mask:', err)
@@ -1177,7 +1189,7 @@ watch(() => props.image.url, () => { imageReady.value = false })
 
 // Redraw when keypoints arrive or showKeypoints changes
 watch(() => props.image.kpStatus,    () => drawOverlay())
-watch(() => props.image.keypoints,   () => drawOverlay(), { deep: false })
+watch(keypoints,                     () => drawOverlay())
 watch(() => props.showKeypoints,     () => drawOverlay())
 watch(() => props.showMask,          () => drawOverlay())
 watch(() => props.showDepth,         () => drawOverlay())
@@ -1217,8 +1229,8 @@ watch(() => props.image?.uuid, (uuid, prev) => {
 // Sync mask canvas when parent clears or replaces the mask externally
 watch(() => props.image.mask, (mask, prev) => {
   if (mask === prev) return
-  if (mask?.dataUrl && maskOffscreen) {
-    loadMaskFromDataUrl(mask.dataUrl)
+  if (mask?.blob && maskOffscreen) {
+    loadMaskBlob(mask.blob)
   } else if (!mask && maskOffscreen) {
     maskOffscreen.getContext('2d').clearRect(0, 0, maskOffscreen.width, maskOffscreen.height)
     hasMask.value = false

@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest'
 import { NEED_CHECKS, guardReason } from './commands.js'
 import { icons } from '../../utils/icons.js'
 import {
-  TABS, SCENE_GROUP, allGroups, leafCommands, menuReason, stepValue,
+  TABS, SCENE_GROUP, CAMERA_GROUP, MAP_GROUP, PICTURE_TAB, rasterTab, measureMenu,
+  allGroups, leafCommands, menuReason, stepValue,
 } from './ribbonTabs.js'
 
 const leaves = leafCommands(allGroups())
@@ -87,5 +88,42 @@ describe('console parity', () => {
     // Verbs App.vue handles that are not ribbon buttons.
     const appOnly = new Set(['view-viewer', 'view-map', 'toggle-theme'])
     for (const cmd of COMMANDS) expect(ribbonIds.has(cmd.dispatch) || appOnly.has(cmd.dispatch), cmd.dispatch).toBe(true)
+  })
+})
+
+describe('one home per tool', () => {
+  const tabLeaves = (id) => leafCommands(TABS.find((t) => t.id === id).groups)
+  const toolIds = new Set(tabLeaves('tools').map((c) => c.id))
+  // Modes and measuring tools: everything that runs in a view.
+  const isTool = (c) => !!(c.measureTool || ['img-mask-edit', 'edit-gcps', 'view-select-rect', 'view-select-lasso',
+    'set-region', 'orient-model', 'align-points'].includes(c.id))
+
+  it('keeps every tool in the Tools tab and none in View or a contextual tab', () => {
+    const elsewhere = leafCommands([
+      ...TABS.filter((t) => t.id !== 'tools').flatMap((t) => t.groups),
+      CAMERA_GROUP, SCENE_GROUP, MAP_GROUP, ...PICTURE_TAB.groups,
+      ...rasterTab({ kind: 'dem', imported: true }).groups, ...rasterTab({ kind: 'ortho', imported: false }).groups,
+    ])
+    expect(elsewhere.filter(isTool).map((c) => c.id)).toEqual([])
+    for (const id of ['img-mask-edit', 'edit-gcps', 'view-select-rect', 'measure-length', 'measure-volume', 'mesh-measure'])
+      expect(toolIds.has(id), id).toBe(true)
+  })
+
+  it('greys DEM-only measuring instead of hiding it, and lists the map targets', () => {
+    const rows = measureMenu({ targets: [{ id: 'a', name: 'DEM', kind: 'dem' }, { id: 'b', name: 'Ortho', kind: 'ortho' }], targetId: 'b' })
+    expect(rows.filter((r) => r.demOnly).map((r) => r.id)).toEqual(['measure-profile', 'measure-volume'])
+    expect(rows.filter((r) => r.id?.startsWith('measure-target:')).map((r) => [r.id, r.selected]))
+      .toEqual([['measure-target:a', false], ['measure-target:b', true]])
+    expect(measureMenu().some((r) => r.id?.startsWith('measure-target:'))).toBe(false)
+  })
+
+  it("gives the raster tab's Rebuild / Export the Reconstruct / Export tabs' own checks", () => {
+    const pick = (c) => ({ id: c.id, needs: c.needs, aerialOnly: c.aerialOnly })
+    const byId = new Map([...tabLeaves('reconstruct'), ...tabLeaves('export')].map((c) => [c.id, pick(c)]))
+    for (const kind of ['dem', 'ortho']) {
+      for (const c of leafCommands(rasterTab({ kind, imported: false }).groups)) {
+        if (byId.has(c.id)) expect(pick(c), c.id).toEqual(byId.get(c.id))
+      }
+    }
   })
 })

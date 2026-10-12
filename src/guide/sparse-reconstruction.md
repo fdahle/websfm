@@ -39,7 +39,9 @@ geometry, or incorrect control—not an iteration shortage.
 **Auto** solves focal length and radial distortion for EXIF-only cameras, but preserves
 an existing calibrated distortion model. Turn calibration off only when the sensor
 parameters are trustworthy. Solving many parameters needs many well-distributed views;
-on a weak network it can absorb scene error into implausible intrinsics.
+on a weak network it can absorb scene error into implausible intrinsics. Self-calibration
+runs inside bundle adjustment, so it is unavailable when bundle adjustment iterations are
+set to 0.
 
 ## Check the result
 Camera positions should follow the capture path, most useful images should register,

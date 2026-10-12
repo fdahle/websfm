@@ -32,7 +32,19 @@ const qualityRec = computed(() => recommendations.value.depthmap?.quality ?? nul
 const qualityCards = computed(
   () => badgePreset(DEPTHMAP_QUALITY_META, qualityRec.value?.value, { title: qualityRec.value?.reason }),
 )
+// A working-resolution override (Advanced) replaces what Quality would derive —
+// the store only maps quality → maxDim when no override is set — so say that on
+// the cards rather than leave a selected card that does nothing.
+const resolutionOverridden = computed(() => settings.value.maxDim > 0)
+function selectQuality(id) {
+  settings.value.quality = id
+  // Picking a card IS a resolution choice; drop the override that would mask it.
+  settings.value.maxDim = null
+}
 const qualityNote = computed(() => {
+  if (resolutionOverridden.value) {
+    return `Overridden: the working resolution is fixed at ${settings.value.maxDim} px under Advanced. Pick a card to use Quality again.`
+  }
   const rec = qualityRec.value
   if (!rec) return ''
   const label = DEPTHMAP_QUALITY_META.find((p) => p.id === rec.value)?.label ?? rec.value
@@ -62,7 +74,7 @@ function run() {
       :base-id="settings.quality"
       :presets="qualityCards"
       :note="qualityNote"
-      @select="(id) => (settings.quality = id)"
+      @select="selectQuality"
     />
 
     <AdvancedDisclosure label="Advanced settings">

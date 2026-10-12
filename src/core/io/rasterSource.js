@@ -7,6 +7,7 @@
 //   {
 //     meta,                          // RasterMeta (see useExternalStore)
 //     sampleAt(x, y),                // native-CRS world coords → value | null
+//     cellValueAt(x, y),             // the containing cell's value, no fallback
 //     readWindow(rect, level),       // await → { data, width, height, … }
 //     previewDataUrl(),              // small pre-rendered preview, or null
 //   }
@@ -17,7 +18,39 @@
 // site. `FlatRasterSource` (below) is the eager one: the whole plane decoded
 // once into a typed array and persisted as an OPFS sidecar.
 
-import { sampleRaster, worldToPixel, pixelToWorld, rasterBounds } from './rasterSample.js'
+import { sampleRaster, cellValue, worldToPixel, pixelToWorld, rasterBounds } from './rasterSample.js'
+
+// One descriptor for both raster shapes: an imported raster carries a full
+// `geoTransform`; a computed DEM/ortho carries { originX, originY, gsd } on a
+// north-up grid with square cells (scaleX = gsd, scaleY = −gsd, origin at the
+// top-left CORNER — dem.js `cellCenter` adds the half cell). Null when the record
+// has no geometry.
+export function productDescriptor(product) {
+  if (!product) return null
+  if (product.geoTransform) return { width: product.width, height: product.height, geoTransform: product.geoTransform }
+  if (product.gsd == null) return null
+  return {
+    width: product.width,
+    height: product.height,
+    geoTransform: { originX: product.originX, originY: product.originY, scaleX: product.gsd, scaleY: -product.gsd },
+  }
+}
+
+// A computed DEM/orthophoto behind the same RasterSource boundary as an imported
+// raster, so tools never ask which kind they were handed. A DEM's value plane
+// already marks nodata as NaN (its `mask` mirrors that, plus filled cells); an
+// ortho has no value plane, only display RGBA.
+export function createProductRasterSource(kind, product) {
+  const desc = productDescriptor(product)
+  if (!desc) return null
+  const meta = { width: desc.width, height: desc.height, bands: kind === 'dem' ? 1 : 4,
+    dtype: kind === 'dem' ? 'float32' : 'uint8', nodata: null, geoTransform: desc.geoTransform,
+    crs: product.crs ?? null }
+  return createFlatRasterSource(meta, kind === 'dem' ? (product.data ?? null) : null, {
+    rgba: kind === 'dem' ? null : (product.rgba ?? null),
+    previewDataUrl: product.previewUrl ?? null,
+  })
+}
 
 // meta: RasterMeta — { width, height, bands, dtype, nodata, geoTransform, … }
 // data: the single-band plane (Float32Array for a DEM; for an ortho this is the
@@ -44,6 +77,11 @@ export function createFlatRasterSource(meta, data, { rgba = null, previewDataUrl
     // raster never has to be warped.
     sampleAt(x, y) {
       return sampleRaster(desc, x, y)
+    },
+    // The value of the cell containing (x, y), or null on nodata — never a
+    // neighbour's. For cursor readouts (rasterSample.js cellValue).
+    cellValueAt(x, y) {
+      return cellValue(desc, x, y)
     },
     // Pixel-space read. `level` is accepted and ignored — a flat source has only
     // full resolution; a COG source will use it to pick an overview.

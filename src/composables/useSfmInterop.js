@@ -127,7 +127,9 @@ export function useSfmInterop({ addImages, importColmapModel, importInteropModel
           const group = slash >= 0 ? entry.path.slice(0, slash) : 'sparse model'
           if (!modelGroups.has(group)) modelGroups.set(group, {})
           const bytes = entry.data ?? new Uint8Array(await entry.file.arrayBuffer())
-          modelGroups.get(group)[canonical] = canonical.endsWith('.txt') ? new TextDecoder().decode(bytes) : new Uint8Array(bytes)
+          // Bytes for .txt too: parseColmapModel decodes a slice at a time, so a large
+          // images.txt never becomes one string.
+          modelGroups.get(group)[canonical] = new Uint8Array(bytes)
         }
       }
 

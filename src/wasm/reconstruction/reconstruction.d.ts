@@ -8,7 +8,9 @@
  * translation) and every 3D point, and — when `refine_mode > 0` — a small set of
  * shared per-sensor intrinsic parameters (self-calibration). Points are always
  * eliminated by the Schur complement; the reduced system holds the camera poses
- * plus the intrinsic groups, solved by dense Cholesky. Huber robustification (an
+ * plus the intrinsic groups, stored block-sparse (a camera couples only with the
+ * cameras it shares points with) and solved by block-Jacobi PCG when large, dense
+ * Cholesky when small (`solve_reduced_with`, `DENSE_MAX_N`). Huber robustification (an
  * adaptive threshold tracking the residual median) keeps surviving gross
  * mis-triangulations from dragging the solution.
  *
@@ -17,9 +19,6 @@
  * for `refine_mode == 2`, shared principal-point offsets `dcx, dcy`. Modelling
  * the focal as a scale (not an absolute) preserves any per-camera differences in
  * the seed intrinsics while still sharing one degree of freedom across the group.
- *
- * At large camera counts the dense reduced-camera Cholesky (`chol_solve`) is the
- * only part that needs swapping for an iterative Schur solve.
  *
  * GCP support: `anchor_flat`/`anchor_weight` optionally pull specific 3D points
  * toward a known target position (e.g. a GCP triangulated in this same SfM
@@ -37,8 +36,11 @@
  * - `cameras_flat`: n_cam × 12 floats `[R(9)|t(3), …]`
  * - `intrinsics_flat`: n_cam × 4 floats `[fx,fy,cx,cy, …]` (the seed / base K)
  * - `pts_flat`: n_pts × 3 floats `[x,y,z, …]`
- * - `obs_flat`: n_obs × 4 floats `[cam_i, pt_i, pixel_x, pixel_y, …]`
- * - `anchor_flat`: n_anchor × 4 floats `[pt_i, target_x, target_y, target_z, …]`
+ * - `obs_index`: n_obs × 2 u32 `[cam_i, pt_i, …]` and `obs_px`: n_obs × 2 floats
+ *   `[pixel_x, pixel_y, …]`. Indices are integers on purpose: as f32 they were exact
+ *   only to 2²⁴, so above 16.7 M points observations silently attached to the wrong
+ *   point (TODO ▸ SC-6).
+ * - `anchor_flat`: n_anchor × 4 doubles `[pt_i, target_x, target_y, target_z, …]`
  * - `observation_weight`: n_obs × 2 inverse-variance pixel weights (X/Y);
  *   feature observations use 1, GCP marks use their declared pixel variances
  * - `anchor_weight`: n_anchor × 9 floats, row-major 3×3 precision matrices
@@ -53,6 +55,9 @@
  *   1 = focal scale s, 2 = principal point (dcx,dcy), 4 = radial k1, 8 = k2, 16 = k3.
  *   0 ⇒ poses+points only. The per-group param vector is the ordered subset
  *   `[s?, dcx?, dcy?, k1?, k2?, k3?]` (kdim ≤ 6). fy stays locked to fx (single scale).
+ * - `fixed_cam`: n_cam bytes, non-zero ⇒ that camera's pose is held fixed (local BA:
+ *   the cameras outside the window keep their observations as constraints but are
+ *   not variables). Empty ⇒ every camera is free, the original behaviour exactly.
  * - `solver_flat`: reduced-system policy `[pcg_min_n, rel_tol, max_iter, accept_partial]`;
  *   empty / NaN slots ⇒ `SolverOpts::DEFAULT` (see there).
  *
@@ -67,7 +72,7 @@
  * residual in the caller's world units, and camera_prior_rms_after is the RMS
  * camera-centre residual (both 0 when their respective prior list is empty).
  */
-export function bundle_adjust(cameras_flat: Float32Array, intrinsics_flat: Float32Array, pts_flat: Float32Array, obs_flat: Float32Array, observation_weight: Float32Array, anchor_flat: Float32Array, anchor_weight: Float32Array, camera_prior_flat: Float32Array, max_iters: number, sensor_of_cam: Int32Array, refine_mask: number, solver_flat: Float32Array): Float32Array;
+export function bundle_adjust(cameras_flat: Float32Array, intrinsics_flat: Float32Array, pts_flat: Float32Array, obs_index: Uint32Array, obs_px: Float32Array, observation_weight: Float32Array, anchor_flat: Float64Array, anchor_weight: Float32Array, camera_prior_flat: Float32Array, max_iters: number, sensor_of_cam: Int32Array, refine_mask: number, solver_flat: Float32Array, fixed_cam: Uint8Array): Float32Array;
 
 export function compute_depth_map(ref_gray: Uint8Array, ref_w: number, ref_h: number, ref_k: Float32Array, src_gray: Uint8Array, src_dims: Uint32Array, src_k: Float32Array, src_rel: Float32Array, src_mask: Uint8Array, seed_depth: Float32Array, depth_min: number, depth_max: number, window: number, iterations: number, best_k: number, seed: number, perturb_start: number): Float32Array;
 
@@ -127,7 +132,7 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
-    readonly bundle_adjust: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number, s: number, t: number, u: number, v: number) => [number, number];
+    readonly bundle_adjust: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number, s: number, t: number, u: number, v: number, w: number, x: number, y: number, z: number) => [number, number];
     readonly compute_depth_map: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number, s: number, t: number, u: number, v: number, w: number, x: number, y: number) => [number, number];
     readonly recover_pose: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number];
     readonly solve_pnp: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number];

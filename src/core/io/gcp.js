@@ -49,7 +49,9 @@ function contentLines(text) {
   return text.split(/\r?\n/).map((l) => l.trimEnd()).filter((l) => l.trim() && !l.trimStart().startsWith('#'))
 }
 
-function splitRow(line, delimId) {
+// One content line → trimmed cells (exported for the streaming XYZ reader, which
+// applies the same rule line by line).
+export function splitRow(line, delimId) {
   if (delimId === 'space') return line.trim().split(/\s+/)
   const char = DELIMITERS.find((d) => d.id === delimId)?.char ?? ','
   return line.split(char).map((c) => c.trim())
@@ -151,7 +153,7 @@ export const ROLE_LABELS = {
 }
 
 // Three roles, and the difference between them is a *constraint* boundary, not a
-// label — see D4 in docs/planning/plan-scale-and-measurement.md:
+// label:
 //   control — surveyed coordinates that constrain georeferencing / anchored BA
 //   check   — surveyed coordinates deliberately withheld from the fit
 //   marker  — image observations and NO surveyed coordinates: a scale-bar

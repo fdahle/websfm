@@ -1,8 +1,7 @@
 <script setup>
 import { ref, computed, watch, onMounted, nextTick } from 'vue'
 import { useReconstructionStore } from '../../../stores/useReconstructionStore.js'
-import { coverageGrid } from '../../../core/eval/coverage.js'
-import { cameraCenter } from '../../../core/sfm/geometry.js'
+import { useQualityReport } from '../../../composables/useQualityReport.js'
 
 // Quality Report ▸ Coverage (WS4): a top-down 2D density map of the sparse frame —
 // "where is my survey thin". Cells coloured by MAX view count (the photogrammetric
@@ -15,15 +14,9 @@ const canvas = ref(null)
 const wrap = ref(null)
 
 const points = computed(() => recon.mainSparseCloud?.points ?? [])
-const cams = computed(() => {
-  const out = []
-  for (const cam of recon.sparseCameras.values()) {
-    const c = cameraCenter(cam)
-    if (c) out.push({ x: c[0], y: c[1] })
-  }
-  return out
-})
-const grid = computed(() => coverageGrid(points.value.map((p) => ({ x: p.x, y: p.y, views: p.views })), cams.value, { targetCells: 64 }))
+// The model's memoised coverage grid (core/eval/sparseStats.js), shared with the
+// rest of the hub — binned once per model, straight off the points (no copy).
+const { coverage: grid } = useQualityReport()
 
 // View-count → colour: 0 empty, 1 red (single view, unusable), 2 amber (minimum),
 // ≥3 green (comfortable, deepening with count).

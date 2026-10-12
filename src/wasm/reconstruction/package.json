@@ -3,7 +3,7 @@
   "type": "module",
   "description": "Incremental SfM sparse reconstruction compiled to WebAssembly",
   "version": "0.1.0",
-  "license": "MIT OR Apache-2.0",
+  "license": "MIT",
   "files": [
     "reconstruction_bg.wasm",
     "reconstruction.js",

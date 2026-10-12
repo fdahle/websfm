@@ -35,7 +35,7 @@ function bufferOf(ta) {
 // true GSD, replacing the midpoint approximation). Collecting the valid depths to
 // sort is a one-time cost at write, dwarfed by the minutes already spent computing
 // the map.
-function depthCoverage(depth) {
+export function depthCoverage(depth) {
   if (!depth || !depth.length) return { validPx: 0, depthMin: null, depthMax: null, depthMedian: null }
   let min = Infinity, max = -Infinity
   const vals = []
@@ -52,7 +52,7 @@ function depthCoverage(depth) {
 }
 
 // Split one in-memory depth map into { meta, buffers } for the writer. The
-// display PNG (`displayDataUrl`) is deliberately dropped: the images store
+// display PNG (`displayBlob`) is deliberately dropped: the images store
 // already persists it per image, and it is display-only.
 export function serializeDepthMap(m) {
   const cov = depthCoverage(m.depth)

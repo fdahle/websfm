@@ -7,8 +7,9 @@
 //   async restore(ctx)  — load this store's slice for the given project
 //   clear()             — reset this store (optionally purging persisted data)
 //
-//   ctx = { projectId: string, projectData: object }
-//     projectData carries the project record, including `images` and `crs`.
+//   ctx = { projectId: string, projectData: object, report(label, done?, total?) }
+//     projectData carries the project record, including `images` and `crs`;
+//     report (always present) feeds the load overlay — see restoreProjectStores.
 //
 // Registration happens on module import, via the registerProjectStore() wrapper
 // around each store's defineStore(). App.vue imports every store (for their direct
@@ -37,13 +38,27 @@ const now = () => globalThis.performance?.now?.() ?? Date.now()
 
 // Restore every registered store concurrently. Sensors and images are handled
 // before this registry; the registered stores are independent once those exist.
+//
+// `onProgress(storeId, state)` (optional) is the load overlay's sink: `state` is
+// `{ label, done?, total? }` while a store is restoring and `null` once it is done.
+// Each store receives `ctx.report(label, done?, total?)` bound to its own id, so a
+// slow restore can say what it is doing; a store that never reports still shows
+// as pending under its id.
 export async function restoreProjectStores(ctx) {
+  const { onProgress, ...base } = ctx
   return Promise.all(registry.map(async (useStore) => {
     const store = useStore()
     if (typeof store.restore !== 'function') return null
+    const id = store.$id || 'unknown'
+    const report = (label, done = null, total = null) => onProgress?.(id, { label, done, total })
+    report(null)
     const started = now()
-    await store.restore(ctx)
-    return { store: store.$id || 'unknown', ms: now() - started }
+    try {
+      await store.restore({ ...base, report })
+    } finally {
+      onProgress?.(id, null)
+    }
+    return { store: id, ms: now() - started }
   })).then((items) => items.filter(Boolean))
 }
 

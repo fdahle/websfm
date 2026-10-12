@@ -10,6 +10,9 @@ import {
   commonPrefix,
   helpLines,
   helpFor,
+  consoleReason,
+  ribbonCommandFor,
+  AERIAL_ONLY_REASON,
 } from './commands.js'
 
 // A state where every prerequisite is satisfied — start here and knock one out.
@@ -116,7 +119,8 @@ describe('help', () => {
   it('gives per-command detail including requirements', () => {
     const lines = helpFor('ortho')
     expect(lines[0]).toContain('ortho')
-    expect(lines.join('\n')).toContain('requires: surface, depthMaps')
+    // The ribbon's own prerequisites — the console never restates them.
+    expect(lines.join('\n')).toContain('requires: imagesReady, depthMaps, surface')
     expect(helpFor('nope')).toBeNull()
   })
 })
@@ -138,5 +142,30 @@ describe('registry integrity', () => {
       expect(cmd.dispatch, `${cmd.name} missing dispatch`).toBeTruthy()
       expect(getCommand(cmd.name)).toBe(cmd)
     }
+  })
+})
+
+describe('console ↔ ribbon parity', () => {
+  it('takes every ribbon-backed command checks from the ribbon, never its own copy', () => {
+    for (const cmd of COMMANDS) {
+      if (ribbonCommandFor(cmd)) expect(cmd.needs, `${cmd.name} restates needs`).toBeUndefined()
+    }
+  })
+
+  it('applies the ribbon prerequisites and aerial-only rule', () => {
+    const match = getCommand('match')
+    expect(consoleReason(match, { ...READY, imagesLoading: true })).toBe('Images still loading…')
+    const dem = getCommand('dem')
+    expect(consoleReason(dem, { ...READY, sceneType: 'object' })).toBe(AERIAL_ONLY_REASON)
+    expect(consoleReason(dem, { ...READY, sceneType: 'aerial' })).toBe('')
+  })
+
+  it('routes the measuring words to the measuring tools', () => {
+    expect(getCommand('profile').dispatch).toBe('measure-profile')
+    expect(getCommand('volume').dispatch).toBe('measure-volume')
+    expect(getCommand('section').dispatch).toBe('cloud-section')
+    expect(consoleReason(getCommand('ruler'), { ...READY, frontView: 'viewer' }))
+      .toBe('Open a DEM or orthophoto, or show one on the map')
+    expect(consoleReason(getCommand('ruler'), { ...READY, frontView: 'raster' })).toBe('')
   })
 })

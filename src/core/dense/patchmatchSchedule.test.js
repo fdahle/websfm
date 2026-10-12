@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url'
 import { beforeAll, describe, expect, it } from 'vitest'
 import initRecon from '../../wasm/reconstruction/reconstruction.js'
 import { depthMapForImage } from './mvs.js'
+import { packSparseForDense } from './sparseInput.js'
 import { refineScale, levelPerturbStarts } from './refineSchedule.js'
 
 // End-to-end yardstick for the PatchMatch refinement schedule: the real WASM kernel,
@@ -76,7 +77,7 @@ function score(dm, gt, W, H) {
 describe('PatchMatch refinement on a deep scene (real WASM kernel)', () => {
   const run = async (settings, plane = []) => {
     const s = planeScene(...plane)
-    const dm = await depthMapForImage(s.ref, s.sources, s.points, { window: 3, iterations: 3, bestK: 2, ...settings })
+    const dm = await depthMapForImage(s.ref, s.sources, packSparseForDense(s.points).pos, { window: 3, iterations: 3, bestK: 2, ...settings })
     return score(dm, s.gt, s.W, s.H)
   }
   // Measured 2026-10-08 (share of pixels within 1 % / 0.2 %, median error), deep scene:
@@ -108,7 +109,7 @@ describe('PatchMatch refinement on a deep scene (real WASM kernel)', () => {
     expect(single.within02).toBeGreaterThan(0.44)
     const pyramid = await run({ coarseLong: 40 }, SHALLOW)
     expect(pyramid.within02).toBeGreaterThan(0.47)
-  })
+  }, 60_000) // two full kernel runs: ~5 s alone, past vitest's 5 s default under a loaded machine
 })
 
 describe('refinement schedule', () => {

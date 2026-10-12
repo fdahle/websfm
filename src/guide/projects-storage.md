@@ -24,8 +24,8 @@ is not always retained.
 ## Save project as .websfm
 A `.websfm` file is a portable archive containing source images, features, matches,
 reconstruction, and control. Including cached and derived data makes reopening faster
-but can make the archive much larger. Excluding it is safe: previews, depth maps, DEM,
-and orthophoto can be rebuilt.
+but can make the archive much larger. Excluding it is safe: previews, image thumbnails,
+depth maps, DEM, and orthophoto can be rebuilt.
 
 The archive has a 4 GB ZIP limit. For a large project, exclude derived data or use a
 folder-backed project as the working copy.
@@ -34,6 +34,13 @@ folder-backed project as the working copy.
 Opening an archive imports it into local project storage; it does not work directly
 inside the downloaded file. Let current writes finish before closing the tab. The
 project picker switches between local projects without uploading anything.
+
+Opening a project reads the image list, each image's keypoint count and the match
+graph's per-pair summary, not the features themselves. An image's keypoints and a
+pair's matches are read from storage when something needs them: the keypoint overlay,
+the match preview, a matching or reconstruction run, an export. The first overlay or
+preview after opening can therefore take a moment. An image whose keypoint file is
+missing shows an error status as soon as the project opens; detect it again.
 
 ## Safe backup routine
 At important milestones, save a `.websfm` archive and copy it outside the browser.

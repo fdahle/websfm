@@ -10,7 +10,10 @@ import Icon from '../Icon.vue'
 
 // A ribbon dropdown (PowerPoint's "Shapes ▾"): one button per object family, a
 // menu of that family's tools. Rows are pre-resolved by Ribbon.vue so the gating
-// stays in one place: { id, label, icon, blurb, reason } or { section }.
+// stays in one place: { id, label, icon, blurb, reason, active? } or { section }.
+// `active` (boolean) is present on a row that is a mode (a selection or measuring
+// tool) or an option (a map measure target); the button lights up while one of
+// its tools runs.
 //
 // The popover is TELEPORTED to <body>: `.ribbon-body` scrolls horizontally, and
 // `overflow-x: auto` forces `overflow-y` to auto too, so an absolutely positioned
@@ -23,6 +26,7 @@ const props = defineProps({
   // tooltip, but still OPENS: the menu is how a user learns which tools exist,
   // and each greyed row prints its own prerequisite.
   reason: { type: String, default: '' },
+  active: { type: Boolean, default: false },
 })
 const emit = defineEmits(['run'])
 
@@ -107,7 +111,7 @@ onBeforeUnmount(() => close())
   <button
     ref="btn"
     class="cmd rm-button"
-    :class="{ active: open, blocked: !!reason }"
+    :class="{ active: open || active, blocked: !!reason }"
     aria-haspopup="menu"
     :aria-expanded="open"
     :title="reason"
@@ -134,8 +138,9 @@ onBeforeUnmount(() => close())
         <button
           v-else
           class="rm-row"
-          :class="{ disabled: !!row.reason }"
-          role="menuitem"
+          :class="{ disabled: !!row.reason, on: row.active }"
+          :role="row.active === undefined ? 'menuitem' : 'menuitemcheckbox'"
+          :aria-checked="row.active === undefined ? undefined : String(row.active)"
           :aria-disabled="!!row.reason"
           @click="run(row)"
         >
@@ -239,6 +244,11 @@ onBeforeUnmount(() => close())
 }
 .rm-row:focus-visible { outline: 1px solid var(--accent); }
 .rm-row.disabled { cursor: default; }
+/* A running mode / the chosen option: same accent as an active ribbon button. */
+.rm-row.on {
+  background: rgba(14, 99, 156, 0.25);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
 .rm-row.disabled .rm-icon,
 .rm-row.disabled .rm-label { opacity: 0.45; }
 .rm-icon {

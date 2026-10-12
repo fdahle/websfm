@@ -351,9 +351,14 @@ function onWheel(e) {
 function zoomButton(factor) { zoomAt(W / 2, H / 2, factor) }
 
 // ── Rendering ───────────────────────────────────────────────────────────────────
+// Redraw only when something changed: a settle step, any pointer/wheel/click on the
+// graph (captured on the wrapper), a data or selection change, a resize. Drawing every
+// frame cost ~0.3–1 s per frame at 200 k edges, for as long as the graph was open.
+let dirty = true
+const invalidate = () => { dirty = true }
 function loop() {
-  if (settleFrames > 0) advanceSettle()
-  draw()
+  if (settleFrames > 0) { advanceSettle(); dirty = true }
+  if (dirty) { dirty = false; draw() }
   raf = requestAnimationFrame(loop)
 }
 
@@ -546,7 +551,7 @@ onMounted(() => {
   resize()
   if (hasPositions.value) layoutMode.value = 'geo'
   applyLayout()
-  ro = new ResizeObserver(() => resize())
+  ro = new ResizeObserver(() => { resize(); invalidate() })
   ro.observe(wrapEl.value)
   loop()
 })
@@ -557,18 +562,24 @@ onBeforeUnmount(() => {
 })
 
 // Re-sync when summaries change: full re-layout on topology change, in-place patch
-// when only flags (disabled/aligned) toggled.
-watch(() => props.matchSummaries, () => sync(), { deep: true })
-watch(() => props.alignedUuids, () => patch())
+// when only flags (disabled/aligned) toggled. Not deep: the summaries are a computed
+// (App.vue) that rebuilds the whole array on any change, so its identity moves on
+// every flag toggle too, and a deep watch traversed every field of every pair (10⁵
+// objects) on each trigger.
+watch(() => props.matchSummaries, () => { sync(); invalidate() })
+watch(() => props.alignedUuids, () => { patch(); invalidate() })
+watch([() => props.selectedPairId, () => props.hasSparse], invalidate)
 // Positions may arrive after the modal opens (poses import / restore); adopt a geo
 // layout the first time they show up.
 watch(hasPositions, (has) => {
-  if (has && layoutMode.value === 'force') { layoutMode.value = 'geo'; applyLayout() }
+  if (has && layoutMode.value === 'force') { layoutMode.value = 'geo'; applyLayout(); invalidate() }
 })
 </script>
 
 <template>
-  <div ref="wrapEl" class="graph-wrap">
+  <div ref="wrapEl" class="graph-wrap"
+    @mousedown.capture="invalidate" @mousemove.capture="invalidate" @mouseup.capture="invalidate"
+    @mouseleave.capture="invalidate" @dblclick.capture="invalidate" @wheel.capture="invalidate" @click.capture="invalidate">
     <canvas
       ref="canvasEl"
       class="graph-canvas"

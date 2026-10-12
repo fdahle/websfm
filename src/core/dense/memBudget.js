@@ -111,11 +111,12 @@ export function createMemLedger() {
   }
 }
 
-// Project the peak resident bytes of a Build-Depth-Maps run with the CURRENT
-// (non-streaming) architecture, so the pre-flight over- rather than under-counts:
-//   • store cache — depth (f32) + cost (f32) + rgb (u8) + normals (3×f32) planes
-//     retained for ALL images after Stage A (kept for densify + ortho): 23 B/px ×
-//     nImages (was 11 before per-pixel normals were plumbed for Poisson meshing).
+// Project the peak resident bytes of a Build-Depth-Maps run, so the pre-flight over-
+// rather than under-counts:
+//   • store cache — depth (f32) + cost (f32) + rgb (u8) + normals (3×f32) planes:
+//     23 B/px × `retainedMaps`. Without streaming every map is retained to the end
+//     (retainedMaps = nImages); a streamed run hands each map off as it finishes, so
+//     only the one in flight is resident (retainedMaps = 1).
 //   • worker raster cache — RGBA per image held for the whole batch: 4 B/px ×
 //     nImages (Step 4's eviction + gray-only caching reduces this; pass
 //     rasterBytesPerPx to reflect it).
@@ -124,10 +125,10 @@ export function createMemLedger() {
 // Working dims are the maxDim² upper bound (longest side = maxDim, other ≤ it).
 // Returns a byte breakdown { store, raster, gpu, total }.
 export function projectDensePeakBytes({
-  nImages, maxDim, nSources = 6, backend = 'wasm', rasterBytesPerPx = 4,
+  nImages, maxDim, nSources = 6, backend = 'wasm', rasterBytesPerPx = 4, retainedMaps = nImages,
 }) {
   const npix = maxDim * maxDim
-  const store = nImages * 23 * npix // depth 4 + cost 4 + rgb 3 + normals 12
+  const store = retainedMaps * 23 * npix // depth 4 + cost 4 + rgb 3 + normals 12
   const raster = nImages * rasterBytesPerPx * npix
   const gpu = backend === 'gpu' ? (48 * npix + nSources * 4 * npix) : 0
   return { store, raster, gpu, total: store + raster + gpu }
@@ -173,9 +174,34 @@ export function densifyInputBytes(maps, { streamed = false, residency = 1 } = {}
 // upper bound, since the consistency/parallax/grazing/isolated filters only remove.
 // It used to be guessed as valid px ÷ 2, which ignored the merge cell, the step and
 // the view overlap, so the remedies the refusal suggested could not change it.
-// Returns { input, accumulator, output, total, cells }.
-export function projectDensifyPeakBytes({ inputBytes, cells }) {
-  const accumulator = cells * DENSIFY_CELL_BYTES
-  const output = cells * DENSIFY_OUTPUT_BYTES_PER_CELL
-  return { input: inputBytes, accumulator, output, total: inputBytes + accumulator + output, cells }
+// A tiled run (`tileCells` < `cells`, mvs.js planFusionSlabs) holds one slab's
+// accumulator and flat output at a time, beside the finished slabs already in the
+// cloud's own layout; joining the slabs at the end holds the cloud twice.
+// `workers` slabs in flight at once (parallel fusion) each hold their own input,
+// accumulator and flat output.
+// Returns { input, accumulator, output, finished, assemble, total, cells, tileCells, workers }.
+export function projectDensifyPeakBytes({ inputBytes, cells, tileCells = cells, workers = 1 }) {
+  const t = Math.min(tileCells, cells), k = Math.max(1, workers)
+  const live = Math.min(cells, k * t)
+  const input = k * inputBytes
+  const accumulator = live * DENSIFY_CELL_BYTES
+  const output = live * DENSIFY_OUTPUT_BYTES_PER_CELL
+  const finished = (cells - live) * DENSIFY_CLOUD_BYTES_PER_CELL
+  const assemble = t < cells ? 2 * cells * DENSIFY_CLOUD_BYTES_PER_CELL : 0
+  const fusing = input + accumulator + output + finished
+  return { input, accumulator, output, finished, assemble, total: Math.max(fusing, assemble), cells, tileCells: t, workers: k }
+}
+
+// The dense cloud's own arrays per point: Float32 position (12) + Uint8 colour (3) +
+// Float32 normal (12) — what a finished slab is converted to.
+export const DENSIFY_CLOUD_BYTES_PER_CELL = 27
+
+// The largest slab (in cells) that keeps a tiled fusion run within `budget`; 0 when
+// no slab size does (the cloud itself, held twice while joining, is over budget).
+export function maxFusionTileCells({ inputBytes, cells, budget, workers = 1 }) {
+  if (2 * cells * DENSIFY_CLOUD_BYTES_PER_CELL > budget) return 0
+  const k = Math.max(1, workers)
+  const perTileCell = DENSIFY_CELL_BYTES + DENSIFY_OUTPUT_BYTES_PER_CELL - DENSIFY_CLOUD_BYTES_PER_CELL
+  const t = Math.floor((budget - k * inputBytes - cells * DENSIFY_CLOUD_BYTES_PER_CELL) / (k * perTileCell))
+  return Math.max(0, Math.min(cells, t))
 }

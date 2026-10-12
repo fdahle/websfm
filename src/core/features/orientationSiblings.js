@@ -18,7 +18,7 @@
  * Returns null when the image has no siblings (every keypoint is its own canon) —
  * the common case for pre-2026-10 detections and SuperPoint — so callers can skip.
  *
- * @param {{x:number,y:number,scale?:number}[]} keypoints
+ * @param {import('./keypoints.js').Keypoints} keypoints  typed (core/features/keypoints.js)
  * @returns {Int32Array|null}
  */
 export function siblingCanonicalMap(keypoints) {
@@ -27,9 +27,9 @@ export function siblingCanonicalMap(keypoints) {
   const firstAt = new Map()
   let canon = null
   for (let i = 0; i < n; i++) {
-    const k = keypoints[i]
-    if (k.scale === undefined) return null // no scale ⇒ not SIFT ⇒ no siblings
-    const key = `${k.x},${k.y},${k.scale}`
+    const s = keypoints.scale(i)
+    if (!(s > 0)) return null // no scale (a learned detector, an import) ⇒ not SIFT ⇒ no siblings
+    const key = `${keypoints.x(i)},${keypoints.y(i)},${s}`
     const first = firstAt.get(key)
     if (first === undefined) { firstAt.set(key, i); continue }
     if (!canon) {

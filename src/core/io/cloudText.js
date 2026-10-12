@@ -1,12 +1,16 @@
 // XYZ / delimited-text point clouds: the lowest common denominator every tool
 // reads. Pure text ↔ flat arrays; no per-point objects (dense-scale invariant).
+// Both directions stream: the writer yields bounded string parts, the reader takes
+// text line by line (whole, or as decoded byte chunks) into growable typed arrays,
+// so a multi-GB .xyz never becomes one string.
 
-import { sniffDelimiter, parseRows } from './gcp.js'
+import { sniffDelimiter, splitRow } from './gcp.js'
+import { PART_CHARS, lineParts } from './parts.js'
 
 // ── Writer: cloud → "x y z [r g b]" lines ────────────────────────────────────
-// Same dual input as cloudToPly / cloudToLas: sparse [{ x, y, z, color? }] or
-// flat { count, pos, col? }. Colors are 0–255 integers.
-export function cloudToXyz(points, { color = true } = {}) {
+// Same dual input as cloudToPlyParts / cloudToLasParts: sparse [{ x, y, z, color? }]
+// or flat { count, pos, col? }. Colors are 0–255 integers. Yields string parts.
+export function* cloudToXyzParts(points, { color = true, partChars = PART_CHARS } = {}) {
   const flat = points && points.pos ? points : null
   const n = flat ? (flat.count ?? flat.pos.length / 3) : points.length
   const getX = flat ? (i) => flat.pos[i * 3] : (i) => points[i].x
@@ -16,16 +20,15 @@ export function cloudToXyz(points, { color = true } = {}) {
     ? (flat.col ? (i) => [flat.col[i * 3], flat.col[i * 3 + 1], flat.col[i * 3 + 2]] : () => null)
     : (i) => points[i].color
   const withColor = color && (flat ? !!flat.col : n > 0 && !!points[0]?.color)
-  const lines = new Array(n)
-  for (let i = 0; i < n; i++) {
+  // An empty cloud is a lone newline, as `lines.join('\n') + '\n'` always wrote.
+  yield* lineParts('', n, (i) => {
     let s = `${getX(i)} ${getY(i)} ${getZ(i)}`
     if (withColor) {
       const c = getC(i) || [200, 200, 200]
       s += ` ${byte(c[0])} ${byte(c[1])} ${byte(c[2])}`
     }
-    lines[i] = s
-  }
-  return lines.join('\n') + '\n'
+    return s
+  }, { emptyBody: '\n', partChars })
 }
 
 const byte = (v) => Math.max(0, Math.min(255, Math.round(v ?? 0)))
@@ -35,44 +38,94 @@ const byte = (v) => Math.max(0, Math.min(255, Math.round(v ?? 0)))
 // exist the LAST 3 are taken as r/g/b (covers both "x y z r g b" and the common
 // "x y z intensity r g b"). Color range is auto-detected: all values ≤ 1 → 0–1
 // floats scaled ×255, else 0–255. Non-numeric rows (headers, comments) are
-// skipped and counted. Returns { count, pos: Float64Array, col?, skipped }.
+// skipped and counted. The delimiter is sniffed from the first content line (the
+// GCP reader's rule). Returns { count, pos: Float64Array, col?, skipped,
+// attributes?: { intensity } }.
 export function parseXyzText(text, { onLog } = {}) {
-  const rows = parseRows(text, sniffDelimiter(text))
-  const xs = [], cols = [], intensities = []
-  let skipped = 0
-  let colMax = 0
-  for (const row of rows) {
-    const nums = row.map(Number)
-    if (row.length < 3 || row.length > 7 || nums.slice(0, 3).some((v) => !Number.isFinite(v))) {
-      skipped++
-      continue
-    }
-    xs.push(nums[0], nums[1], nums[2])
-    if (row.length === 4 || row.length === 7) intensities.push(nums[3])
-    else intensities.push(NaN)
-    if (row.length >= 6) {
-      const [r, g, b] = nums.slice(row.length - 3)
-      if ([r, g, b].every(Number.isFinite)) {
-        cols.push(r, g, b)
+  const parser = createXyzParser({ onLog })
+  parser.push(text)
+  return parser.finish()
+}
+
+// The same reader over an async iterable of byte chunks (a File read slice by
+// slice): UTF-8 decoded in streaming mode, partial lines carried across chunks.
+export async function parseXyzChunks(chunks, { onLog } = {}) {
+  const parser = createXyzParser({ onLog })
+  const dec = new TextDecoder()
+  for await (const chunk of chunks) parser.push(dec.decode(chunk, { stream: true }))
+  parser.push(dec.decode())
+  return parser.finish()
+}
+
+// Incremental reader: push(text) any number of times, then finish().
+export function createXyzParser({ onLog } = {}) {
+  const xs = growable(Float64Array), cols = growable(Float64Array), intensities = growable(Float64Array)
+  let carry = '', delim = null, skipped = 0, colMax = 0, anyIntensity = false
+
+  function row(raw) {
+    const l = raw.trimEnd()
+    if (!l.trim() || l.trimStart().startsWith('#')) return
+    if (delim === null) delim = sniffDelimiter(l)
+    const cells = splitRow(l, delim)
+    const k = cells.length
+    if (k < 3 || k > 7) { skipped++; return }
+    const x = Number(cells[0]), y = Number(cells[1]), z = Number(cells[2])
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) { skipped++; return }
+    xs.push(x); xs.push(y); xs.push(z)
+    if (k === 4 || k === 7) {
+      const v = Number(cells[3])
+      intensities.push(v)
+      if (Number.isFinite(v)) anyIntensity = true
+    } else intensities.push(NaN)
+    if (k >= 6) {
+      const r = Number(cells[k - 3]), g = Number(cells[k - 2]), b = Number(cells[k - 1])
+      if (Number.isFinite(r) && Number.isFinite(g) && Number.isFinite(b)) {
+        cols.push(r); cols.push(g); cols.push(b)
         colMax = Math.max(colMax, r, g, b)
       } else {
-        cols.push(200, 200, 200)
+        cols.push(200); cols.push(200); cols.push(200)
         colMax = Math.max(colMax, 200)
       }
     }
   }
-  const count = xs.length / 3
-  const pos = Float64Array.from(xs)
-  // Only emit color when every point carried one (a partial column would misalign).
-  let col
-  if (count > 0 && cols.length === count * 3) {
-    const scale01 = colMax <= 1.0001
-    col = new Uint8Array(count * 3)
-    for (let i = 0; i < col.length; i++) col[i] = byte(scale01 ? cols[i] * 255 : cols[i])
+
+  return {
+    push(text) {
+      const lines = (carry + text).split('\n')
+      carry = lines.pop()
+      for (const l of lines) row(l)
+    },
+    finish() {
+      row(carry); carry = ''
+      const count = xs.length / 3
+      const pos = xs.take()
+      // Only emit color when every point carried one (a partial column would misalign).
+      let col
+      if (count > 0 && cols.length === count * 3) {
+        const scale01 = colMax <= 1.0001
+        const raw = cols.view()
+        col = new Uint8Array(count * 3)
+        for (let i = 0; i < col.length; i++) col[i] = byte(scale01 ? raw[i] * 255 : raw[i])
+      }
+      onLog?.(`XYZ: read ${count.toLocaleString()} points`
+        + `${col ? ` with color (${colMax <= 1.0001 ? '0–1' : '0–255'} range)` : ''}`
+        + `${skipped ? `, skipped ${skipped} non-numeric row(s)` : ''}`, 'info', 'Import')
+      return { count, pos, ...(col ? { col } : {}), skipped,
+        ...(anyIntensity ? { attributes: { intensity: intensities.take() } } : {}) }
+    },
   }
-  onLog?.(`XYZ: read ${count.toLocaleString()} points`
-    + `${col ? ` with color (${colMax <= 1.0001 ? '0–1' : '0–255'} range)` : ''}`
-    + `${skipped ? `, skipped ${skipped} non-numeric row(s)` : ''}`, 'info', 'Import')
-  return { count, pos, ...(col ? { col } : {}), skipped,
-    ...(intensities.some(Number.isFinite) ? { attributes: { intensity: Float64Array.from(intensities) } } : {}) }
+}
+
+// A typed array that doubles as it fills; take() returns an exact-length copy.
+export function growable(Type, initial = 1024) {
+  let buf = new Type(initial), len = 0
+  return {
+    push(v) {
+      if (len === buf.length) { const next = new Type(buf.length * 2); next.set(buf); buf = next }
+      buf[len++] = v
+    },
+    get length() { return len },
+    view() { return buf.subarray(0, len) },
+    take() { return buf.slice(0, len) },
+  }
 }

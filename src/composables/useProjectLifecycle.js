@@ -6,7 +6,9 @@ import { ensureProjection } from '../core/crs.js'
 // `formatBytes` with different formatting.
 import { formatBytes } from '../core/io/projectArchive.js'
 import { clearProjectStores, restoreProjectStores } from '../stores/projectStores.js'
+import { loadProgressView } from '../utils/loadProgress.js'
 import { useImagesStore } from '../stores/useImagesStore.js'
+import { useMatchesStore } from '../stores/useMatchesStore.js'
 import { useExternalStore } from '../stores/useExternalStore.js'
 import { useModalsStore } from '../stores/useModalsStore.js'
 import { useProjectsStore } from '../stores/useProjectsStore.js'
@@ -42,6 +44,7 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene }) {
   } = storeToRefs(useModalsStore())
 
   const imagesStore = useImagesStore()
+  const matchesStore = useMatchesStore()
   const { images } = storeToRefs(imagesStore)
   const { clearAll, restoreImages, migrateLegacyFiducialDetections, flushPendingWork } = imagesStore
   const externalStore = useExternalStore()
@@ -93,6 +96,25 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene }) {
     clearSensors({ purge })
     clearProjectStores({ purge })
     clearViewerScene()
+  }
+
+  // What a reopened project holds — the data that once filled the renderer's ~4 GB
+  // V8 heap (TODO ▸ MEM). Keypoints and matches are typed (24 B per keypoint, 8 B per
+  // match, outside the heap) and live on disk, loaded on demand (TODO ▸ SC-2/SC-3):
+  // the counts are what the project holds, the cache figures what is resident now.
+  // A DevTools heap snapshot is the measurement.
+  function logHeapInventory() {
+    let keypoints = 0
+    for (const img of images.value) keypoints += img.kpCount ?? 0
+    let matches = 0
+    for (const entry of matchesStore.matchStore.values()) matches += entry.nMatches ?? 0
+    const kc = imagesStore.keypointCacheStats(), mc = matchesStore.matchCacheStats()
+    const mem = globalThis.performance?.memory
+    log(`Heap inventory: ${keypoints.toLocaleString()} keypoints (${kc.entries} image(s) resident, `
+      + `${formatBytes(kc.bytes)} typed), ${matches.toLocaleString()} matches (${mc.entries} pair(s) resident, `
+      + `${formatBytes(mc.bytes)} typed)`
+      + (mem?.usedJSHeapSize ? ` · JS memory (heap + ArrayBuffers) ${formatBytes(mem.usedJSHeapSize)}, heap limit ${formatBytes(mem.jsHeapSizeLimit)}` : ''),
+    'info', 'Project')
   }
 
   // ── Open ────────────────────────────────────────────────────────────────────
@@ -159,17 +181,35 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene }) {
       // restoreImages publishes the image list (ids + names) synchronously before
       // its first await; only previews and keypoints load after that. The registry
       // stores need the list, never the pixels, so both phases run concurrently.
-      const imagesDone = timed('images', () => restoreImages(projectData.images || [], id, (done, total, label) => {
+      // Both phases feed one overlay view (utils/loadProgress.js), refreshed at most
+      // once per frame: match restore reports once per pair file.
+      let imagesState = { done: 0, total: projectData.images?.length ?? 0, label: '' }
+      const storeStates = new Map()
+      let refreshQueued = false
+      const refreshProgress = () => {
+        refreshQueued = false
         if (projectLoading.value && currentProjectId.value === id) {
-          projectLoadingProgress.value = { done, total, label }
+          projectLoadingProgress.value = loadProgressView(imagesState, storeStates)
         }
+      }
+      const queueProgress = () => {
+        if (refreshQueued) return
+        refreshQueued = true
+        requestAnimationFrame(refreshProgress)
+      }
+      const imagesDone = timed('images', () => restoreImages(projectData.images || [], id, (done, total, label) => {
+        imagesState = { done, total, label }
+        queueProgress()
       }, { groups: projectData.imageGroups })).then(() => {
         migrateLegacyFiducialDetections(sensors.value)
         migrateLegacyFiducialCalibrations(images.value)
-        projectLoadingProgress.value = null
+        imagesState = null
+        refreshProgress()
       })
-      const storesDone = timed('project stores', () =>
-        restoreProjectStores({ projectId: id, projectData }))
+      const storesDone = timed('project stores', () => restoreProjectStores({
+        projectId: id, projectData,
+        onProgress: (store, state) => { storeStates.set(store, state); queueProgress() },
+      }))
       const [, storeTimings] = await Promise.all([imagesDone, storesDone])
       const detail = [...timings, ...storeTimings.map(({ store, ms }) => ({ phase: store, ms }))]
         .sort((a, b) => b.ms - a.ms)
@@ -177,6 +217,7 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene }) {
         .join(' · ')
       log(`Project load timing: ${Math.round(performance.now() - loadStarted)} ms total — ${detail}`,
         'info', 'Project')
+      logHeapInventory()
       // restore() sets selectedCloud, which the watcher pushes into the viewer.
     })
     return true
@@ -312,6 +353,8 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene }) {
         res = await moveProjectToFolder(id, dirHandle, { confirmed: true })
       }
       if (res.ok) {
+        // The match document's File handle pointed into the tree that was just removed.
+        await matchesStore.rebindMatchesFile()
         log(`Project moved to folder "${dirHandle.name}" (${res.files} files)`, 'info', 'Project')
         showToast('Project moved to folder', { detail: dirHandle.name })
       } else {
@@ -329,6 +372,7 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene }) {
     await withLoadingOverlay('Moving project into browser storage…', async () => {
       const res = await moveProjectToBrowser(id, { onProgress: fileProgress })
       if (res.ok) {
+        await matchesStore.rebindMatchesFile() // read from the browser copy from now on
         log(`Project moved into browser storage (${res.files} files)`, 'info', 'Project')
         showToast('Project moved into browser storage')
       } else {

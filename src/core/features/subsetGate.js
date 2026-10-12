@@ -96,7 +96,7 @@ export function pickSpreadIndices(kps, count) {
 
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
   for (let i = 0; i < n; i++) {
-    const { x, y } = kps[i]
+    const x = kps.x(i), y = kps.y(i) // typed keypoints (core/features/keypoints.js)
     if (x < minX) minX = x
     if (x > maxX) maxX = x
     if (y < minY) minY = y
@@ -110,8 +110,8 @@ export function pickSpreadIndices(kps, count) {
 
   const chosen = new Map()
   for (let i = 0; i < n; i++) {
-    const cx = Math.min(cols - 1, Math.floor(((kps[i].x - minX) / w) * cols))
-    const cy = Math.min(rows - 1, Math.floor(((kps[i].y - minY) / h) * rows))
+    const cx = Math.min(cols - 1, Math.floor(((kps.x(i) - minX) / w) * cols))
+    const cy = Math.min(rows - 1, Math.floor(((kps.y(i) - minY) / h) * rows))
     const cell = cy * cols + cx
     if (!chosen.has(cell)) chosen.set(cell, i)
   }

@@ -24,7 +24,8 @@ import { makeSegmentOps } from './ops/segment.js'
 import { makeIoOps } from './ops/io.js'
 import { makeReferenceGcpOps } from './ops/referenceGcps.js'
 import { makeUndistortOps } from './ops/undistort.js'
-import { makeLazCodec, makeLazOps } from './ops/laz.js'
+import { makeLazCodec } from './ops/laz.js'
+import { makeExportOps } from './ops/export.js'
 
 // Decode an image URL (blob: URLs work in a worker) and draw it into an
 // OffscreenCanvas, downscaled so the longest side is ≤ maxDim. Returns RGBA
@@ -69,7 +70,7 @@ async function rasterize(url, maxDim) {
 
 // Merge every domain's op registry. rasterize is the only worker-local helper the
 // ops need; the rest of each domain's helpers live in its own module.
-// One LAZ codec instance, shared by the import parser and the export op.
+// One LAZ codec instance, shared by the import parser and the cloud export op.
 const lazCodec = makeLazCodec()
 
 const ops = {
@@ -84,7 +85,7 @@ const ops = {
   ...makeSegmentOps({ rasterize }),
   ...makeIoOps({ lazCodec }),
   ...makeReferenceGcpOps({ rasterize }),
-  ...makeLazOps(lazCodec),
+  ...makeExportOps({ lazCodec }),
   ...makeUndistortOps({ rasterize }),
 }
 
@@ -95,8 +96,9 @@ self.onmessage = async (e) => {
     self.postMessage({ id, ok: false, error: `Unknown op: ${op}` })
     return
   }
-  // Intermediate events for streaming ops, tagged with the request id.
-  const emit = (ev, evArgs) => self.postMessage({ id, ev, args: evArgs })
+  // Intermediate events for streaming ops, tagged with the request id. `transfer`
+  // hands buffers over without a copy (Stage A streams each finished depth map).
+  const emit = (ev, evArgs, transfer) => self.postMessage({ id, ev, args: evArgs }, transfer ?? [])
   try {
     const started = performance.now()
     const { result, transfer } = await handler(args, { emit })

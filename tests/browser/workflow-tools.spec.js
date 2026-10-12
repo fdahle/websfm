@@ -164,9 +164,9 @@ test('bounded SIFT batch preserves serial results and records throughput', async
     let start=performance.now()
     for(const im of store.images)await store.detectOne(im.id,settings)
     const serialMs=performance.now()-start
-    const expected=store.images.map(im=>({points:JSON.stringify(im.keypoints),descriptors:im.descriptors.slice()}))
+    const expected=store.images.map(im=>({points:JSON.stringify(Array.from(store.residentKeypoints(im)?.data ?? [])),descriptors:im.descriptors.slice()}))
     start=performance.now();await store.detectAll(settings);const batchMs=performance.now()-start
-    const identical=store.images.every((im,i)=>JSON.stringify(im.keypoints)===expected[i].points && im.descriptors.every((v,j)=>v===expected[i].descriptors[j]))
+    const identical=store.images.every((im,i)=>JSON.stringify(Array.from(store.residentKeypoints(im)?.data ?? []))===expected[i].points && im.descriptors.every((v,j)=>v===expected[i].descriptors[j]))
     return {serialMs:Math.round(serialMs),batchMs:Math.round(batchMs),identical,pool:compute.POOL_SIZE}
   })
   console.log('SIFT throughput:', JSON.stringify(measured))

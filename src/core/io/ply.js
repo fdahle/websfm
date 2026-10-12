@@ -56,11 +56,9 @@ function parseHeader(text) {
 const COLOR_NAMES = { red: 0, green: 1, blue: 2, diffuse_red: 0, diffuse_green: 1, diffuse_blue: 2 }
 const FACE_LIST_NAMES = new Set(['vertex_indices', 'vertex_index'])
 
-export function parsePly(buffer, { onLog } = {}) {
-  const bytes = typeof buffer === 'string' ? new TextEncoder().encode(buffer)
-    : buffer instanceof Uint8Array ? buffer
-      : new Uint8Array(buffer)
-  // Magic + header end. The header is ASCII; search the raw bytes for end_header.
+// Header end + layout from the leading bytes (the header is ASCII and must fit
+// the first 64 KiB, as it always has).
+function readPlyHeader(bytes) {
   const probe = new TextDecoder().decode(bytes.subarray(0, Math.min(bytes.length, 65536)))
   if (!/^ply\r?\n/.test(probe)) throw new Error('Not a PLY file (missing "ply" magic)')
   const endMatch = /end_header\r?\n/.exec(probe)
@@ -74,7 +72,12 @@ export function parsePly(buffer, { onLog } = {}) {
   if (format !== 'ascii' && format !== 'binary_little_endian') {
     throw new Error(`PLY: unsupported format "${format}"`)
   }
+  return { format, elements, bodyOffset }
+}
 
+// Vertex layout + output arrays for one parse. Triangles grow in a typed array
+// (a JS number array of 30 M indices is the heap trap this format invites).
+function plyState({ format, elements }) {
   const vertexEl = elements.find((e) => e.name === 'vertex')
   if (!vertexEl) throw new Error('PLY: no vertex element')
   const faceEl = elements.find((e) => e.name === 'face')
@@ -101,85 +104,161 @@ export function parsePly(buffer, { onLog } = {}) {
   const hasNrm = layout.nrm.every((s) => s !== null)
 
   const n = vertexEl.count
-  const pos = new Float64Array(n * 3)
-  const col = hasCol ? new Uint8Array(n * 3) : null
-  const nrm = hasNrm ? new Float32Array(n * 3) : null
-  const attributes = Object.fromEntries(scalarFields.map(field => [field.name, new Float64Array(n)]))
-  const tris = [] // flat triangle indices (fanned)
+  return {
+    format, elements, faceEl, layout, scalarFields, stride, n,
+    pos: new Float64Array(n * 3),
+    col: hasCol ? new Uint8Array(n * 3) : null,
+    nrm: hasNrm ? new Float32Array(n * 3) : null,
+    attributes: Object.fromEntries(scalarFields.map(field => [field.name, new Float64Array(n)])),
+    tris: growableU32(), // flat triangle indices (fanned)
+  }
+}
 
-  // Color scale: uchar is the norm; float 0–1 colors appear in the wild.
-  const colByte = (v, type) =>
-    Math.max(0, Math.min(255, Math.round(type === 'float' || type === 'double' || type === 'float32' || type === 'float64' ? v * 255 : v)))
+function growableU32() {
+  let buf = new Uint32Array(1024), len = 0
+  return {
+    push(v) {
+      if (len === buf.length) { const next = new Uint32Array(buf.length * 2); next.set(buf); buf = next }
+      buf[len++] = v
+    },
+    get length() { return len },
+    take() { return buf.slice(0, len) },
+  }
+}
 
-  if (format === 'ascii') {
-    // The body is text: split into whitespace tokens and walk element by element.
-    const body = new TextDecoder().decode(bytes.subarray(bodyOffset))
-    const lines = body.split(/\r?\n/).filter((l) => l.trim() && !l.startsWith('comment'))
-    let li = 0
-    for (const el of elements) {
-      if (el.name === 'vertex') {
-        for (let i = 0; i < n; i++, li++) {
-          const t = lines[li].trim().split(/\s+/)
-          pos[i * 3] = Number(t[layout.x.index])
-          pos[i * 3 + 1] = Number(t[layout.y.index])
-          pos[i * 3 + 2] = Number(t[layout.z.index])
-          for (const field of scalarFields) attributes[field.name][i] = Number(t[field.index])
-          if (col) for (let c = 0; c < 3; c++) col[i * 3 + c] = colByte(Number(t[layout.col[c].index]), layout.col[c].type)
-          if (nrm) for (let c = 0; c < 3; c++) nrm[i * 3 + c] = Number(t[layout.nrm[c].index])
+// Color scale: uchar is the norm; float 0–1 colors appear in the wild.
+const colByte = (v, type) =>
+  Math.max(0, Math.min(255, Math.round(type === 'float' || type === 'double' || type === 'float32' || type === 'float64' ? v * 255 : v)))
+
+const isFaceList = (el) => el.name === 'face' && el.props.some((p) => p.type === 'list' && FACE_LIST_NAMES.has(p.name))
+
+// The ASCII body, one line at a time, walking element by element: push(text) any
+// number of times (partial lines are carried), then finish().
+function plyAsciiBody(st) {
+  const { elements, layout, scalarFields, pos, col, nrm, attributes, tris } = st
+  let ei = 0, ri = 0, carry = ''
+  const advance = () => { while (ei < elements.length && ri >= elements[ei].count) { ei++; ri = 0 } }
+  advance()
+  function line(l) {
+    if (!l.trim() || l.startsWith('comment')) return
+    if (ei >= elements.length) return
+    const el = elements[ei]
+    if (el.name === 'vertex') {
+      const i = ri
+      const t = l.trim().split(/\s+/)
+      pos[i * 3] = Number(t[layout.x.index])
+      pos[i * 3 + 1] = Number(t[layout.y.index])
+      pos[i * 3 + 2] = Number(t[layout.z.index])
+      for (const field of scalarFields) attributes[field.name][i] = Number(t[field.index])
+      if (col) for (let c = 0; c < 3; c++) col[i * 3 + c] = colByte(Number(t[layout.col[c].index]), layout.col[c].type)
+      if (nrm) for (let c = 0; c < 3; c++) nrm[i * 3 + c] = Number(t[layout.nrm[c].index])
+    } else if (isFaceList(el)) {
+      const t = l.trim().split(/\s+/).map(Number)
+      const k = t[0]
+      for (let v = 2; v < k; v++) { tris.push(t[1]); tris.push(t[v]); tris.push(t[v + 1]) }
+    } // else: an element we do not read, skipped line by line
+    ri++
+    advance()
+  }
+  const strip = (l) => (l.endsWith('\r') ? l.slice(0, -1) : l)
+  return {
+    push(text) {
+      const lines = (carry + text).split('\n')
+      carry = lines.pop()
+      for (const l of lines) line(strip(l))
+    },
+    finish() {
+      line(strip(carry)); carry = ''
+      // Running out inside a vertex or face element is a truncated file; trailing
+      // elements we only skip are not read anyway.
+      for (let k = ei; k < elements.length; k++) {
+        const el = elements[k]
+        if ((el.name === 'vertex' || isFaceList(el)) && el.count > (k === ei ? ri : 0)) {
+          throw new Error('PLY: ascii data truncated')
         }
-      } else if (el.name === 'face' && el.props.some((p) => p.type === 'list' && FACE_LIST_NAMES.has(p.name))) {
-        for (let f = 0; f < el.count; f++, li++) {
-          const t = lines[li].trim().split(/\s+/).map(Number)
-          const k = t[0]
-          for (let v = 2; v < k; v++) tris.push(t[1], t[v], t[v + 1])
-        }
-      } else {
-        li += el.count // skip unknown elements line-by-line
       }
-    }
-  } else {
-    const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
-    let p = bodyOffset
-    for (const el of elements) {
-      if (el.name === 'vertex') {
-        if (p + n * stride > bytes.length) throw new Error('PLY: vertex data truncated')
-        for (let i = 0; i < n; i++) {
-          pos[i * 3] = readScalar(dv, p + layout.x.offset, layout.x.type)
-          pos[i * 3 + 1] = readScalar(dv, p + layout.y.offset, layout.y.type)
-          pos[i * 3 + 2] = readScalar(dv, p + layout.z.offset, layout.z.type)
-          if (col) for (let c = 0; c < 3; c++) col[i * 3 + c] = colByte(readScalar(dv, p + layout.col[c].offset, layout.col[c].type), layout.col[c].type)
-          if (nrm) for (let c = 0; c < 3; c++) nrm[i * 3 + c] = readScalar(dv, p + layout.nrm[c].offset, layout.nrm[c].type)
-          for (const field of scalarFields) attributes[field.name][i] = readScalar(dv, p + field.offset, field.type)
-          p += stride
-        }
-      } else {
-        // Walk any list-bearing element record by record (fixed stride otherwise).
-        const listProp = el.props.find((pr) => pr.type === 'list')
-        const isFace = el.name === 'face' && listProp && FACE_LIST_NAMES.has(listProp.name)
-        if (!listProp) { p += el.count * el.props.reduce((s, pr) => s + SCALAR_BYTES[pr.type], 0); continue }
-        for (let f = 0; f < el.count; f++) {
-          for (const pr of el.props) {
-            if (pr.type !== 'list') { p += SCALAR_BYTES[pr.type]; continue }
-            const k = readScalar(dv, p, pr.listCountType)
-            p += SCALAR_BYTES[pr.listCountType]
-            if (isFace && pr === listProp) {
-              const idx = new Array(k)
-              for (let v = 0; v < k; v++) { idx[v] = readScalar(dv, p, pr.listItemType); p += SCALAR_BYTES[pr.listItemType] }
-              for (let v = 1; v + 1 < k; v++) tris.push(idx[0], idx[v], idx[v + 1])
-            } else {
-              p += k * SCALAR_BYTES[pr.listItemType]
-            }
+    },
+  }
+}
+
+function plyBinaryBody(st, bytes, bodyOffset) {
+  const { elements, layout, scalarFields, stride, n, pos, col, nrm, attributes, tris } = st
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  let p = bodyOffset
+  for (const el of elements) {
+    if (el.name === 'vertex') {
+      if (p + n * stride > bytes.length) throw new Error('PLY: vertex data truncated')
+      for (let i = 0; i < n; i++) {
+        pos[i * 3] = readScalar(dv, p + layout.x.offset, layout.x.type)
+        pos[i * 3 + 1] = readScalar(dv, p + layout.y.offset, layout.y.type)
+        pos[i * 3 + 2] = readScalar(dv, p + layout.z.offset, layout.z.type)
+        if (col) for (let c = 0; c < 3; c++) col[i * 3 + c] = colByte(readScalar(dv, p + layout.col[c].offset, layout.col[c].type), layout.col[c].type)
+        if (nrm) for (let c = 0; c < 3; c++) nrm[i * 3 + c] = readScalar(dv, p + layout.nrm[c].offset, layout.nrm[c].type)
+        for (const field of scalarFields) attributes[field.name][i] = readScalar(dv, p + field.offset, field.type)
+        p += stride
+      }
+    } else {
+      // Walk any list-bearing element record by record (fixed stride otherwise).
+      const listProp = el.props.find((pr) => pr.type === 'list')
+      const isFace = el.name === 'face' && listProp && FACE_LIST_NAMES.has(listProp.name)
+      if (!listProp) { p += el.count * el.props.reduce((s, pr) => s + SCALAR_BYTES[pr.type], 0); continue }
+      for (let f = 0; f < el.count; f++) {
+        for (const pr of el.props) {
+          if (pr.type !== 'list') { p += SCALAR_BYTES[pr.type]; continue }
+          const k = readScalar(dv, p, pr.listCountType)
+          p += SCALAR_BYTES[pr.listCountType]
+          if (isFace && pr === listProp) {
+            const idx = new Array(k)
+            for (let v = 0; v < k; v++) { idx[v] = readScalar(dv, p, pr.listItemType); p += SCALAR_BYTES[pr.listItemType] }
+            for (let v = 1; v + 1 < k; v++) { tris.push(idx[0]); tris.push(idx[v]); tris.push(idx[v + 1]) }
+          } else {
+            p += k * SCALAR_BYTES[pr.listItemType]
           }
         }
       }
     }
   }
+}
 
+function plyResult(st, { onLog }) {
+  const { format, faceEl, n, pos, col, nrm, attributes, tris } = st
   if (faceEl && tris.length) {
     onLog?.(`PLY: read mesh — ${n.toLocaleString()} vertices, ${(tris.length / 3).toLocaleString()} triangles`
       + `${col ? ', color' : ''}`, 'info', 'Import')
-    return { attributes, nVerts: n, count: tris.length / 3, pos, idx: Uint32Array.from(tris), ...(col ? { col } : {}) }
+    return { attributes, nVerts: n, count: tris.length / 3, pos, idx: tris.take(), ...(col ? { col } : {}) }
   }
   onLog?.(`PLY: read ${n.toLocaleString()} points (${format}${col ? ', color' : ''}${nrm ? ', normals' : ''})`, 'info', 'Import')
   return { attributes, count: n, pos, ...(col ? { col } : {}), ...(nrm ? { nrm } : {}) }
+}
+
+export function parsePly(buffer, { onLog } = {}) {
+  const bytes = typeof buffer === 'string' ? new TextEncoder().encode(buffer)
+    : buffer instanceof Uint8Array ? buffer
+      : new Uint8Array(buffer)
+  const header = readPlyHeader(bytes)
+  const st = plyState(header)
+  if (header.format === 'ascii') {
+    // The body is text: walk it line by line, element by element.
+    const body = plyAsciiBody(st)
+    body.push(new TextDecoder().decode(bytes.subarray(header.bodyOffset)))
+    body.finish()
+  } else plyBinaryBody(st, bytes, header.bodyOffset)
+  return plyResult(st, { onLog })
+}
+
+// The same reader over injected I/O ({ size, read(start, end), chunks(start) } —
+// utils/blobParts.js blobSource): an ASCII body is decoded and parsed chunk by
+// chunk and never becomes one string; a binary body is read whole (fixed-stride
+// records in an ArrayBuffer, outside the JS heap).
+export async function parsePlySource(source, { onLog } = {}) {
+  const head = await source.read(0, Math.min(source.size, 65536))
+  const header = readPlyHeader(head)
+  if (header.format !== 'ascii') return parsePly(await source.read(0, source.size), { onLog })
+  const st = plyState(header)
+  const body = plyAsciiBody(st)
+  const dec = new TextDecoder()
+  for await (const chunk of source.chunks(header.bodyOffset)) body.push(dec.decode(chunk, { stream: true }))
+  body.push(dec.decode())
+  body.finish()
+  return plyResult(st, { onLog })
 }

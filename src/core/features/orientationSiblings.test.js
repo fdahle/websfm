@@ -1,18 +1,19 @@
 import { describe, it, expect } from 'vitest'
 import { siblingCanonicalMap, canonicalizeMatches } from './orientationSiblings.js'
+import { keypointsFromObjects as K } from './keypoints.js'
 
 const kp = (x, y, scale = 2) => ({ x, y, scale })
 
 describe('siblingCanonicalMap', () => {
   it('maps every sibling to the first keypoint at the same x, y, scale', () => {
-    const canon = siblingCanonicalMap([kp(1, 1), kp(5, 5), kp(1, 1), kp(1, 1, 3), kp(5, 5)])
+    const canon = siblingCanonicalMap(K([kp(1, 1), kp(5, 5), kp(1, 1), kp(1, 1, 3), kp(5, 5)]))
     expect([...canon]).toEqual([0, 1, 0, 3, 1])
   })
 
   it('returns null when there are no siblings, or no scale (SuperPoint)', () => {
-    expect(siblingCanonicalMap([kp(1, 1), kp(2, 2)])).toBeNull()
-    expect(siblingCanonicalMap([{ x: 1, y: 1 }, { x: 1, y: 1 }])).toBeNull()
-    expect(siblingCanonicalMap([])).toBeNull()
+    expect(siblingCanonicalMap(K([kp(1, 1), kp(2, 2)]))).toBeNull()
+    expect(siblingCanonicalMap(K([{ x: 1, y: 1 }, { x: 1, y: 1 }]))).toBeNull()
+    expect(siblingCanonicalMap(K([]))).toBeNull()
   })
 })
 

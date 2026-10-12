@@ -45,7 +45,7 @@ async function find() {
   try {
     const raw = await external.readRasterWindow(refRaster.id, { maxDim: 1536, bands: [band.value - 1] })
     if (token !== generation) return
-    const result = await findReferenceMatches(ortho.previewDataUrl, raw)
+    const result = await findReferenceMatches(ortho.previewUrl, raw)
     if (token !== generation) return
     const frameModel = makeFrameModelResolver({ summary: recon.summary, sensors: sensors.sensors })
     const sourceImages = images.images.flatMap(image => {
@@ -63,7 +63,7 @@ async function find() {
       return { ...c, x, y, selected: false, role: 'control', z: null, accuracyX: null, accuracyY: null, accuracyZ: null, verticalDatum: 'unknown' }
     })
     activeIndex.value = 0
-    preview.value = { ...result, referenceWidth: raw.width, referenceHeight: raw.height, localUrl: ortho.previewDataUrl }
+    preview.value = { ...result, referenceWidth: raw.width, referenceHeight: raw.height, localUrl: ortho.previewUrl }
     message.value = `${result.inliers} verified matches; ${candidates.value.length} candidates with measured photo tracks. Alignment p95: ${result.p95.toFixed(2)} reference working pixels.`
     if (!candidates.value.length) message.value += ' No nearby sparse tracks were suitable; try another reference band or mark control manually.'
   } catch (err) { if (token === generation) error.value = err.message }

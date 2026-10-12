@@ -1,6 +1,8 @@
 // Small, pure readers for browser-friendly SfM interchange formats. They all
 // normalize to the same world-to-camera/OpenCV boundary consumed by the store.
 
+import { PART_CHARS, lineParts, lazyArray } from './parts.js'
+
 const transpose3 = (m) => [[m[0][0], m[1][0], m[2][0]], [m[0][1], m[1][1], m[2][1]], [m[0][2], m[1][2], m[2][2]]]
 const mul3v = (m, v) => m.map((r) => r[0] * v[0] + r[1] * v[1] + r[2] * v[2])
 
@@ -107,31 +109,35 @@ function cameraCenter(R, t) {
   ]
 }
 
-export function buildNvm(model) {
-  const lines = ['NVM_V3', '', String(model.images.length)]
-  for (const im of model.images) {
-    const c = cameraCenter(im.R, im.t)
-    lines.push(`${im.name} ${im.K.fx} ${im.q.join(' ')} ${c.join(' ')} 0 0`)
-  }
-  lines.push('', String(model.points3D.length))
-  for (const p of model.points3D) {
+// NVM_V3 text, as bounded string parts (core/io/parts.js): one line per camera and
+// per point, every point carrying its whole track.
+export function* buildNvmParts(model, { partChars = PART_CHARS } = {}) {
+  const nCam = model.images.length, nPts = model.points3D.length
+  yield* lineParts(`NVM_V3\n\n${nCam}\n`, nCam + 1 + nPts, (k) => {
+    if (k < nCam) {
+      const im = model.images[k], c = cameraCenter(im.R, im.t)
+      return `${im.name} ${im.K.fx} ${im.q.join(' ')} ${c.join(' ')} 0 0`
+    }
+    if (k === nCam) return `\n${nPts}`
+    const p = model.points3D[k - nCam - 1]
     const obs = p.track.map(([imageId, point2dIdx]) => {
       const im = model.images[imageId - 1], px = im?.points2D?.[point2dIdx]
       return im && px ? `${imageId - 1} ${point2dIdx} ${px[0] - im.K.cx} ${px[1] - im.K.cy}` : null
     }).filter(Boolean)
-    lines.push(`${p.xyz.join(' ')} ${p.rgb.join(' ')} ${obs.length}${obs.length ? ` ${obs.join(' ')}` : ''}`)
-  }
-  lines.push('', '0', '')
-  return lines.join('\n')
+    return `${p.xyz.join(' ')} ${p.rgb.join(' ')} ${obs.length}${obs.length ? ` ${obs.join(' ')}` : ''}`
+  }, { partChars })
+  yield '\n0\n'
 }
 
+// OpenMVG sfm_data, with `structure` as a lazyArray: serialize with jsonParts,
+// which writes one point (and its observations) at a time.
 export function buildOpenMvg(model) {
   return {
     sfm_data_version: '0.3', root_path: '',
     views: model.images.map((im) => ({ key: im.imageId, value: { ptr_wrapper: { id: im.imageId, data: { local_path: '', filename: im.name, width: im.width, height: im.height, id_view: im.imageId, id_intrinsic: im.cameraId, id_pose: im.imageId } } } })),
     intrinsics: model.images.map((im) => ({ key: im.cameraId, value: { ptr_wrapper: { id: im.cameraId, data: { width: im.width, height: im.height, focal_length: im.K.fx, principal_point: [im.K.cx, im.K.cy], disto_k3: [0, 0, 0] } } } })),
     extrinsics: model.images.map((im) => ({ key: im.imageId, value: { rotation: im.R, center: cameraCenter(im.R, im.t) } })),
-    structure: model.points3D.map((p) => ({ key: p.point3dId, value: { X: p.xyz, color: p.rgb, observations: p.track.map(([imageId, point2dIdx]) => ({ key: imageId, value: { id_feat: point2dIdx, x: model.images[imageId - 1].points2D[point2dIdx].slice(0, 2) } })) } })),
+    structure: lazyArray(model.points3D.length, (i) => { const p = model.points3D[i]; return { key: p.point3dId, value: { X: p.xyz, color: p.rgb, observations: p.track.map(([imageId, point2dIdx]) => ({ key: imageId, value: { id_feat: point2dIdx, x: model.images[imageId - 1].points2D[point2dIdx].slice(0, 2) } })) } } }),
     control_points: [],
   }
 }

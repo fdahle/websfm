@@ -24,13 +24,19 @@ export function createImage(file) {
     meta: null,
     sensorId: null, // id of the Sensor (shared intrinsics) this image belongs to
     loading: true,
-    keypoints: [],
+    // Keypoints live on disk + in useImagesStore's LRU, never on the record (TODO ▸ SC-3);
+    // kpRev bumps whenever they are replaced, so a viewer knows to re-read them.
+    kpRev: 0,
     descriptors: null, // Float32Array (N×128) kept in-memory for matching
     kpStatus: 'idle', // 'idle' | 'running' | 'done' | 'error'
     kpCount: 0,
     kpMs: 0,
     mask: null, // { dataUrl: string } | null
     depth: null, // { dataUrl: string } | null
+    // List thumbnail { blob, url } (≤256 px JPEG) — what rows, tables and the 3D
+    // camera glyphs show instead of `url`. Filled in the background
+    // (useImagesStore.requestThumbnail); null until then.
+    thumb: null,
     // Clicked scan-pixel observations of the film sensor's fiducial marks (F4).
     // [{ fidId, px, py }]; only meaningful when the image's sensor is kind:'film'.
     fiducialObs: [],

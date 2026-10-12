@@ -11,9 +11,11 @@ import { buildCloudStyle, scalarRange, sharedElevationRange, resolveCloudStyle }
 import { viewerClipping } from '../../core/products/viewerClipping.js'
 import { screenSelectMask, maskIndices } from '../../core/products/screenSelect.js'
 import { pickNearestPoint } from '../../core/products/screenPick.js'
+import { useImagesStore } from '../../stores/useImagesStore.js'
 
 // pointSize / cameraScale are set from the ribbon's View ▸ Scene steppers.
 const { gridZ, background, nearClip, pointSize, cameraScale } = useViewerSettings()
+const imagesStore = useImagesStore()
 
 const props = defineProps({
   theme: { type: String, default: 'dark' },
@@ -132,8 +134,24 @@ function robustBounds(positions, count, up) {
 // Independent cloud layers and shared camera frustums
 const cloudLayers = new Map()
 const legendLayers = ref([])
-const linearChannel = Float32Array.from({ length: 256 }, (_, i) =>
-  new THREE.Color().setRGB(i / 255, 0, 0, THREE.SRGBColorSpace).r)
+// Vertex colours go to the GPU as the style's own Uint8 sRGB bytes (normalized
+// attribute, 3 B/point) and are decoded to linear in the vertex shader — Three.js
+// shades vertex colours in linear space, and the source RGB, ramp colours and legend
+// swatches are sRGB. A Float32 linear copy was 12 B/point on the CPU and the GPU
+// (240 MB for a 20 M-point cloud). The decode is Three's own SRGBToLinear formula,
+// so colours are unchanged. One shared function, so every cloud material shares a
+// program (Three keys programs on onBeforeCompile's source).
+function srgbVertexColors(shader) {
+  shader.vertexShader = shader.vertexShader
+    .replace('#include <common>', `#include <common>
+vec3 websfmSrgbToLinear(vec3 c) {
+  return mix(c * 0.0773993808, pow(c * 0.9478672986 + 0.0521327014, vec3(2.4)), step(vec3(0.04045), c));
+}`)
+    .replace('#include <color_vertex>', `#include <color_vertex>
+#ifdef USE_COLOR
+  vColor.rgb = websfmSrgbToLinear(vColor.rgb);
+#endif`)
+}
 let lastCameraMaps = []
 let knownCloudIds = new Set()
 // Set when a selection edit is committed: the cloud it adds (a derived fork of a
@@ -157,12 +175,17 @@ const frustumGroup = new THREE.Group()
 // cameraScale step only rewrites matrices. Thumbnails are small (THUMB_PX²)
 // textures cached by image across rebuilds: re-decoding every full-resolution
 // photo and uploading it to the GPU on each size step or sparse-cloud toggle was
-// the lag. An entry is dropped only when its image is removed or its url changes.
+// the lag. The texture source is the image's LIST THUMBNAIL (img.thumb, ≤256 px,
+// useImagesStore) — never the full-resolution photo, which for 5,000 cameras meant
+// 5,000 full decodes per session. A missing thumbnail is requested in the
+// background; `thumbsVersion` says when one lands. An entry is dropped only when
+// its image is removed.
 const THUMB_PX = 256
-const THUMB_DECODES = 4 // concurrent full-size decodes (each is w·h·4 bytes)
-const thumbCache = new Map() // uuid → { url, tex, mat }
+const THUMB_DECODES = 4 // concurrent thumbnail decodes (each ≤ THUMB_PX², cheap)
+const thumbCache = new Map() // uuid → { url, tex, mat, queued, disposed }
 const thumbQueue = []
 let thumbActive = 0
+let thumbSyncRaf = 0
 let frustumLineMat = null, frustumLineGeo = null, frustumPlaneGeo = null
 
 function disposeMaterial(material, textures = new Set(), materials = new Set()) {
@@ -211,37 +234,75 @@ function disposeFrustumResources() {
 function pumpThumbQueue() {
   while (thumbActive < THUMB_DECODES && thumbQueue.length) {
     const entry = thumbQueue.shift()
-    if (entry.disposed) continue
+    entry.queued = false
+    if (entry.disposed || !entry.url) continue
+    const url = entry.url
     thumbActive++
     // createImageBitmap decodes off the main thread and resizes in one step.
     // The bitmap is flipped here because WebGL ignores UNPACK_FLIP_Y for it.
-    fetch(entry.url)
+    fetch(url)
       .then(r => r.blob())
       .then(blob => createImageBitmap(blob, {
         resizeWidth: THUMB_PX, resizeHeight: THUMB_PX, resizeQuality: 'medium', imageOrientation: 'flipY',
       }))
       .then((bitmap) => {
-        if (entry.disposed) { bitmap.close(); return }
+        if (entry.disposed || entry.url !== url) { bitmap.close(); return }
+        entry.tex.image?.close?.()
         entry.tex.image = bitmap
         entry.tex.needsUpdate = true
+        requestRender()
       })
       .catch(() => {}) // a dead blob: url just leaves the quad untextured
       .finally(() => { thumbActive--; pumpThumbQueue() })
   }
 }
 
-function thumbFor(uuid, url) {
+function thumbEntry(uuid) {
   let entry = thumbCache.get(uuid)
-  if (entry?.url === url) return entry
-  if (entry) disposeThumb(entry)
+  if (entry) return entry
   const tex = new THREE.Texture()
   tex.colorSpace = THREE.SRGBColorSpace
   tex.flipY = false
-  entry = { url, tex, mat: new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide }), disposed: false }
+  entry = { url: null, tex, mat: new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide }), queued: false, disposed: false }
   thumbCache.set(uuid, entry)
-  thumbQueue.push(entry)
-  pumpThumbQueue()
   return entry
+}
+
+// Point a glyph's texture at the image's list thumbnail; load it when it changed.
+function syncThumb(entry, img) {
+  const url = img.thumb?.url ?? null
+  if (!url || entry.url === url) return
+  entry.url = url
+  if (!entry.queued) { entry.queued = true; thumbQueue.push(entry) }
+  pumpThumbQueue()
+}
+
+// A thumbnail landed somewhere (thumbsVersion moved): re-point the glyphs, one pass
+// per frame however many arrived.
+function scheduleThumbSync() {
+  if (!thumbSyncRaf) thumbSyncRaf = requestAnimationFrame(syncAllThumbs)
+}
+function syncAllThumbs() {
+  thumbSyncRaf = 0
+  if (!thumbCache.size) return
+  const imgByUuid = new Map(props.images.map((im) => [im.uuid, im]))
+  for (const [uuid, entry] of thumbCache) {
+    const img = imgByUuid.get(uuid)
+    if (img) syncThumb(entry, img)
+  }
+}
+
+// Missing thumbnails are asked for only once the glyphs are actually drawn (the view
+// in front, cameras shown): a hidden 3D tab must not make a freshly opened
+// 5,000-image project generate a thumbnail for every camera. Background priority.
+let thumbRequestsPending = false
+function requestMissingThumbs() {
+  thumbRequestsPending = false
+  const imgByUuid = new Map(props.images.map((im) => [im.uuid, im]))
+  for (const [uuid, entry] of thumbCache) {
+    const img = imgByUuid.get(uuid)
+    if (img && !entry.url && !img.thumb && !img.previewFailed) imagesStore.requestThumbnail(img)
+  }
 }
 
 function ensureFrustumGeometry() {
@@ -384,7 +445,7 @@ function init() {
   resizeObserver = new ResizeObserver(onResize)
   resizeObserver.observe(el)
 
-  animate()
+  requestRender()
 }
 
 // ── Reconstruction visualisation ─────────────────────────────────────────────
@@ -412,6 +473,7 @@ function createCloudLayer(cloud) {
   const material = isMesh
     ? new THREE.MeshStandardMaterial({ side: THREE.DoubleSide, roughness: 0.95, metalness: 0 })
     : new THREE.PointsMaterial({ size: pointSize.value, sizeAttenuation: false })
+  material.onBeforeCompile = srgbVertexColors
   const object = isMesh ? new THREE.Mesh(geometry, material) : new THREE.Points(geometry, material)
   object.position.set(...origin)
   object.userData.cloudId = cloud.id
@@ -419,20 +481,48 @@ function createCloudLayer(cloud) {
   return { object, positions, count, source: cloud, bounds: robustBounds(positions, count, sceneUp) }
 }
 
+// Free the GPU buffers of the style-owned attributes (colour, a point cloud's
+// class-filter index) WITHOUT touching the geometry's position/normal buffers or a
+// mesh's triangle index. `geometry.dispose()` releases every attribute's buffer, so
+// disposing to drop a replaced colour buffer used to re-upload the whole position
+// buffer on each restyle (12 B/point). The kept attributes are detached for the
+// dispose and re-attached: their GL buffers stay resident in the renderer, keyed by
+// the attribute object, and the next draw reuses them as-is.
+function releaseStyleBuffers(geometry, { keepColor, keepIndex }) {
+  const kept = []
+  for (const name of Object.keys(geometry.attributes)) {
+    if (name === 'color' && !keepColor) continue
+    kept.push([name, geometry.getAttribute(name)])
+    geometry.deleteAttribute(name)
+  }
+  const index = keepIndex ? geometry.index : null
+  if (index) geometry.setIndex(null)
+  geometry.dispose()
+  for (const [name, attribute] of kept) geometry.setAttribute(name, attribute)
+  if (index) geometry.setIndex(index)
+}
+
 function styleLayer(layer, cloud, elevationRange) {
   const visual = buildCloudStyle(cloud, undefined, { elevationRange })
   const { geometry, material } = layer.object
-  // Release replaced colour/index GPU buffers before uploading a new style.
-  // The geometry's CPU position array remains available for the next upload.
-  if (layer.legend) geometry.dispose()
-  if (visual.colors) {
-    // Three.js shades vertex colours in linear space; source RGB, ramp colours
-    // and legend swatches are sRGB. Convert so the displayed legend matches.
-    const colors = new Float32Array(visual.colors.length)
-    for (let i = 0; i < colors.length; i++) colors[i] = linearChannel[visual.colors[i]]
-    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3))
-  } else geometry.deleteAttribute('color')
-  if (cloud.kind !== 'mesh') geometry.setIndex(visual.indices ? new THREE.BufferAttribute(visual.indices, 1) : null)
+  const isMesh = cloud.kind === 'mesh'
+  const colors = visual.colors
+    ? (visual.colors instanceof Uint8Array ? visual.colors : Uint8Array.from(visual.colors)) : null
+  const indices = isMesh ? null : (visual.indices ?? null)
+  // A restyle that keeps the same colour bytes (an RGB cloud's own `col`) and the same
+  // index keeps its buffers; only what changed is replaced (and only that re-uploads).
+  const colorAttr = geometry.getAttribute('color')
+  const sameColors = colorAttr ? colorAttr.array === colors : !colors
+  const sameIndex = isMesh || (geometry.index?.array ?? null) === indices
+  if (layer.legend && (!sameColors || !sameIndex)) {
+    releaseStyleBuffers(geometry, { keepColor: sameColors, keepIndex: sameIndex })
+  }
+  if (!sameColors) {
+    // Uint8 sRGB, normalized; decoded to linear in the shader (srgbVertexColors).
+    if (colors) geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3, true))
+    else geometry.deleteAttribute('color')
+  }
+  if (!sameIndex) geometry.setIndex(indices ? new THREE.BufferAttribute(indices, 1) : null)
   material.vertexColors = !!visual.colors
   material.color.set(visual.colors ? 0xffffff : visual.style.colour)
   material.opacity = visual.style.opacity
@@ -523,6 +613,7 @@ function setCloudLayers(clouds) {
   if (addedCloud) keepViewForEdit = false
   updateClipping()
   pruneSelections()
+  requestRender()
 }
 
 function zoomToCloud(id) {
@@ -533,6 +624,7 @@ function zoomToCloud(id) {
   resetView()
   sceneCenter.copy(center); sceneRadius = radius
   updateClipping()
+  requestRender()
 }
 
 function updateClipping() {
@@ -549,9 +641,9 @@ function updateClipping() {
 function buildFrustums(cams, frustumDepth) {
   clearFrustums()
   ensureFrustumGeometry()
-  const urlByUuid = new Map(props.images.map((im) => [im.uuid, im.url]))
+  const imgByUuid = new Map(props.images.map((im) => [im.uuid, im]))
   for (const [uuid, entry] of thumbCache) {
-    if (urlByUuid.get(uuid) !== entry.url) { disposeThumb(entry); thumbCache.delete(uuid) }
+    if (!imgByUuid.has(uuid)) { disposeThumb(entry); thumbCache.delete(uuid) }
   }
 
   for (const { uuid, R, centre } of cams) {
@@ -559,8 +651,13 @@ function buildFrustums(cams, frustumDepth) {
     obj.matrixAutoUpdate = false
     obj.userData = { R, centre }
     obj.add(new THREE.LineSegments(frustumLineGeo, frustumLineMat))
-    const url = urlByUuid.get(uuid)
-    if (url) obj.add(new THREE.Mesh(frustumPlaneGeo, thumbFor(uuid, url).mat))
+    const img = imgByUuid.get(uuid)
+    if (img) {
+      const entry = thumbEntry(uuid)
+      obj.add(new THREE.Mesh(frustumPlaneGeo, entry.mat))
+      syncThumb(entry, img)
+      if (!entry.url) thumbRequestsPending = true
+    }
     placeFrustum(obj, frustumDepth)
     frustumGroup.add(obj)
   }
@@ -602,6 +699,7 @@ function refreshSelectionSummary() {
   for (const e of selections.values()) if (e.selected) { total += e.selected; clouds++ }
   selectionCount.value = total
   selectionClouds.value = clouds
+  requestRender() // every selection change adds, rebuilds or drops an overlay
 }
 
 // Highlight: a compact copy of only the selected positions, drawn on top without
@@ -792,6 +890,9 @@ function makeControls() {
   // into the tie-points, orbit/pan then work around the region under the cursor
   // instead of the far scene centre (which otherwise makes navigation fiddly).
   c.zoomToCursor = true
+  // Every user gesture runs `update()`, which dispatches 'change' when the camera
+  // moved: that is what wakes the on-demand render loop.
+  c.addEventListener('change', requestRender)
   c.update()
   return c
 }
@@ -832,6 +933,7 @@ function setView(dir) {
   camera.position.copy(sceneCenter).addScaledVector(dirVec, d)
   camera.updateProjectionMatrix()
   controls.update()
+  requestRender()
 }
 
 function resetView() {
@@ -848,6 +950,7 @@ function resetView() {
     .addScaledVector(up, sceneRadius * 1.2)
   camera.updateProjectionMatrix()
   controls.update()
+  requestRender()
 }
 
 defineExpose({ setCloudLayers, clearReconstructionData, setView, resetView, zoomToCloud, toggleSelectTool })
@@ -856,16 +959,40 @@ function onResize() {
   const el = container.value
   if (!el || !renderer) return
   const w = el.clientWidth, h = el.clientHeight
+  // A tab hidden under v-show measures 0×0; keep the last real size (the observer
+  // fires again, with the real size, when the tab comes back to the front).
+  if (!w || !h) return
   camera.aspect = w / h
   camera.updateProjectionMatrix()
   renderer.setSize(w, h)
+  requestRender()
 }
 
-function animate() {
-  animationId = requestAnimationFrame(animate)
+// ── On-demand rendering ──────────────────────────────────────────────────────
+// A frame is drawn only when something changed: a camera move (OrbitControls
+// 'change', including the damping glide after release, which keeps requesting
+// frames while `update()` still moves the camera), a resize or tab switch (the
+// ResizeObserver), or a scene edit (every mutation path below calls requestRender).
+// A continuous loop redrew a multi-million-point cloud 60× a second while nothing
+// moved, competing with WebGPU compute for the GPU and draining laptop batteries.
+// Tabs stay mounted under v-show; a hidden view defers its frame until it is shown.
+let frameRequested = false
+let unmounted = false
+function requestRender() {
+  if (frameRequested || !renderer || unmounted) return
+  frameRequested = true
+  animationId = requestAnimationFrame(renderFrame)
+}
+function renderFrame() {
+  frameRequested = false
+  if (!renderer || !scene || !camera || !controls) return
+  if (!container.value?.offsetParent) return // hidden: the resize on show re-requests
+  // Damping: update() keeps moving the camera for a while after the gesture ends and
+  // returns true while it does; its 'change' event re-requests the next frame.
   controls.update()
   updateClipping()
   renderer.render(scene, camera)
+  if (thumbRequestsPending && frustumGroup.visible) requestMissingThumbs()
 }
 
 watch(() => props.theme, (t) => {
@@ -876,15 +1003,17 @@ watch(() => props.theme, (t) => {
   grid = makeGrid(t)
   updateGrid()
   scene.add(grid)
+  requestRender()
 })
 
 watch(background, () => {
   if (scene) scene.background = new THREE.Color(backgroundColor())
+  requestRender()
 })
 
-watch(() => props.showCameras, (v) => { if (frustumGroup) frustumGroup.visible = v })
-watch(() => props.showGrid, (v) => { if (grid) grid.visible = v })
-watch(gridZ, () => updateGrid())
+watch(() => props.showCameras, (v) => { if (frustumGroup) frustumGroup.visible = v; requestRender() })
+watch(() => props.showGrid, (v) => { if (grid) grid.visible = v; requestRender() })
+watch(gridZ, () => { updateGrid(); requestRender() })
 // The reconstruction's up estimate can arrive/refine after content is already shown
 // (e.g. a dense cloud selected before the sparse cameras are pushed). Re-orient the
 // grid to it without yanking the user's current viewpoint.
@@ -893,6 +1022,7 @@ watch(() => props.sceneUp, (u) => {
     sceneUp.set(u[0], u[1], u[2]).normalize()
     for (const layer of cloudLayers.values()) layer.bounds = robustBounds(layer.positions, layer.count, sceneUp)
     updateLayerBounds(); updateGrid()
+    requestRender()
   }
 })
 
@@ -902,6 +1032,7 @@ watch(() => props.sceneUp, (u) => {
 let regionHelper = null
 function updateRegionBox(b) {
   if (regionHelper) { scene?.remove(regionHelper); disposeObject(regionHelper); regionHelper = null }
+  requestRender()
   if (!scene || !b?.min || !b?.max) return
   const box = new THREE.Box3(new THREE.Vector3(...b.min), new THREE.Vector3(...b.max))
   if (box.isEmpty()) return
@@ -958,6 +1089,7 @@ function onPickPointerUp(e) {
 let markerObject = null
 function updateMarkers(markers) {
   if (markerObject) { scene?.remove(markerObject); disposeObject(markerObject); markerObject = null }
+  requestRender()
   if (!scene || !markers?.length) return
   const o = markers[0].position
   const pos = new Float32Array(markers.length * 3), col = new Float32Array(markers.length * 3)
@@ -978,17 +1110,28 @@ function updateMarkers(markers) {
 watch(() => props.markers, updateMarkers, { deep: true })
 
 // Ribbon steppers — cheap live updates, no cloud recompute.
-watch(cameraScale, () => scaleFrustums(lastBaseDepth * cameraScale.value))
-// A thumbnail url can arrive or change after the frustums were built (TIFF display
-// transcode, a healed blob: url). A string key compares by value.
-watch(() => props.images.map(im => `${im.uuid}|${im.url ?? ''}`).join('\n'), () => {
-  if (scene && lastCams.length) buildFrustums(lastCams, lastBaseDepth * cameraScale.value)
+watch(cameraScale, () => { scaleFrustums(lastBaseDepth * cameraScale.value); requestRender() })
+// A list thumbnail can land after the frustums were built (generated in the
+// background, or regenerated). One counter instead of a watch over every image.
+watch(() => imagesStore.thumbsVersion, scheduleThumbSync)
+// An image joining or leaving re-points glyphs too (a camera whose image arrives
+// late). Debounced: a multi-thousand-image drop changes the length once per file,
+// and each rebuild touches every camera.
+let frustumRebuildTimer = 0
+watch(() => props.images.length, () => {
+  clearTimeout(frustumRebuildTimer)
+  frustumRebuildTimer = setTimeout(() => {
+    if (unmounted || !scene || !lastCams.length) return
+    buildFrustums(lastCams, lastBaseDepth * cameraScale.value)
+    requestRender()
+  }, 300)
 })
 watch(pointSize, (v) => {
   for (const { object } of cloudLayers.values()) if (object.isPoints) object.material.size = v
   for (const e of selections.values()) if (e.overlay) e.overlay.material.size = v + 1
+  requestRender()
 })
-watch(nearClip, updateClipping)
+watch(nearClip, () => { updateClipping(); requestRender() })
 
 // No right-click context menu here on purpose: OrbitControls uses the right mouse
 // button to pan, so any menu competes with the primary navigation gesture. Coordinate
@@ -1000,7 +1143,10 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  unmounted = true
   cancelAnimationFrame(animationId)
+  if (thumbSyncRaf) cancelAnimationFrame(thumbSyncRaf)
+  clearTimeout(frustumRebuildTimer)
   window.removeEventListener('keydown', onSelectKey)
   clearSelection()
   resizeObserver?.disconnect()

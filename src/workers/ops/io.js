@@ -3,7 +3,8 @@ import { attributeBuffers } from '../../core/io/cloudAttributes.js'
 import { GeoTIFF, fromArrayBuffer, fromBlob } from 'geotiff'
 import { rasterWindow } from '../../core/io/rasterWindow.js'
 import { edgeOriginFromTags } from '../../core/io/rasterSample.js'
-import { parseCloudFile, cloudStats, sniffCloudFormat } from '../../core/io/cloudImport.js'
+import { parseCloudSource, cloudStats, sniffCloudFormat } from '../../core/io/cloudImport.js'
+import { blobSource } from '../../utils/blobParts.js'
 import { classifyRasterKind } from '../../core/io/rasterKind.js'
 import { hillshadeRgba } from '../../core/products/colormap.js'
 import { rasterToDataUrl } from '../rasterPreview.js'
@@ -40,16 +41,20 @@ export function makeIoOps({ lazCodec = null } = {}) {
     const nodata = parseNodata(await readTiffTag(image.getFileDirectory(), 'GDAL_NODATA'))
     return { result: { ...layout, bands, data: channels[0], channels: Array.from(channels), nodata }, transfer: [...new Set(Array.from(channels, c => c.buffer))] }
   }
-  // args: [{ buffer: ArrayBuffer, name: string }] → { parsed, stats }
+  // args: [{ file: File|Blob, name: string }] → { parsed, stats }
   // parsed: cloud { count, pos, col?, nrm? } | mesh { nVerts, count, pos, idx, col? }
-  async function parseCloud([{ buffer, name }], { emit }) {
+  // The File itself comes over (a handle, no bytes): text formats are decoded and
+  // parsed a chunk at a time and LAS records read a slice at a time, so neither the
+  // page nor this worker ever holds the file as one buffer or one string.
+  async function parseCloud([{ file, name = file?.name ?? '' }], { emit }) {
     const t0 = performance.now()
+    const source = blobSource(file, name)
     // A LAZ needs the LASzip codec; load it only when the file actually is one
     // (the sniff reads the header's high bit, not the extension).
-    if (lazCodec && sniffCloudFormat(new Uint8Array(buffer, 0, Math.min(256, buffer.byteLength)), name) === 'laz') {
+    if (lazCodec && sniffCloudFormat(await source.read(0, Math.min(256, file.size)), name) === 'laz') {
       await lazCodec.ensure()
     }
-    const parsed = parseCloudFile(buffer, name, {
+    const parsed = await parseCloudSource(source, {
       onLog: (m, l, c) => emit('log', [m, l, c]),
       lazDecompress: lazCodec?.decompress ?? null,
     })

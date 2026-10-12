@@ -2,6 +2,7 @@
 import { ref, computed } from 'vue'
 import { useImagesStore } from '../../stores/useImagesStore.js'
 import { maskFromSource } from '../../core/mask.js'
+import ImageThumb from '../controls/ImageThumb.vue'
 
 // Central mask manager. Lists every image grouped by resolution and lets you
 // import a file as a mask, apply one mask to a whole resolution group (or all
@@ -123,7 +124,7 @@ function edit(img)         { emit('edit', img.id) }
 
           <div class="rows">
             <div v-for="img in group.images" :key="img.id" class="row">
-              <img class="thumb" :src="img.url" :alt="img.name" @error="imagesStore.reportImageLoadError(img.id)" />
+              <ImageThumb class="thumb" :image="img" />
               <span class="name" :title="img.name">{{ img.name }}</span>
               <span class="badge" :class="{ on: !!img.mask }">{{ img.mask ? 'Masked' : 'None' }}</span>
               <div class="row-actions">

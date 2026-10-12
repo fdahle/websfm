@@ -46,7 +46,10 @@ watch(() => props.canGeoreference, (can) => {
   if (can && appliedCrsSuggestion.value) settings.value.crs = 'project'
 })
 
-const settings = ref({ ...ORTHO_DEFAULTS })
+// A georeferenced project defaults to the project CRS: a local-frame product has no
+// map position (core/products/productLayers.js), so 'local' there would be a trap.
+// Read once at open — a fact about the project, never re-applied over the user's pick.
+const settings = ref({ ...ORTHO_DEFAULTS, crs: props.canGeoreference ? 'project' : ORTHO_DEFAULTS.crs })
 
 // Open on the first available surface rather than a dead default: with a mesh
 // built and no DEM, 'dem' would greet the user disabled.
@@ -123,6 +126,17 @@ function run() {
       <CrsSuggestion v-if="georeferenceBlocker === 'geographic'"
         :suggestion="crsSuggestion" :current-crs="projectCrs || 'EPSG:4326'"
         @apply="applyCrsSuggestion" />
+    </SettingsField>
+
+    <!-- The raw min/max lets far background (an oblique capture sees almost to the
+         horizon) set the raster size; the dense core keeps the site. The run logs
+         how many points the core leaves out. -->
+    <SettingsField v-if="framePicked" label="Extent" label-for="ortho-extent"
+      hint="Dense core trims sparse far background (oblique views), and logs what it leaves out. All points uses the raw extent.">
+      <select id="ortho-extent" v-model="settings.extent" class="field-input field-select">
+        <option value="core">Dense core of the surface</option>
+        <option value="all">All points</option>
+      </select>
     </SettingsField>
 
     <SettingsField label-for="ortho-gsd"

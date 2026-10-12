@@ -35,6 +35,23 @@ sparse reconstruction, so a false match here quietly poisons
 [bundle adjustment](help:bundle-adjustment) downstream — which is why the defaults
 lean strict and every pair is checked with [RANSAC](help:ransac) before it counts.
 
+## How the settings fit together
+Matching runs four steps, and the dialog is laid out in that order: **choose image
+pairs** (pairing strategy), **match descriptors** (brute-force or LightGlue), **verify
+geometry** (RANSAC), and **accept the pair** (minimum matches and inlier ratio). Each
+step states what it will do with the current settings. The pairing step shows how many
+pairs the run will match, for example `127 images → at most 1,270 pairs (16 % of all 8,001)` with Preselect at 10 neighbours.
+Fields that would be ignored by the current choices are either hidden or greyed with
+the reason, so every visible number is one that changes the run.
+
+## Matching density (LightGlue)
+**Fast** matches the strongest *Keypoints per image* of each image in one pass.
+**Full** first matches a coarse sample to align the two images, then matches every
+detected keypoint in aligned tiles of at most *Keypoints per tile*. The dialog shows the
+budget for the density you picked. With Full, the per-image number is used only as a
+fallback when the coarse alignment fails for a pair; it then appears under Advanced as
+*Fallback keypoints per image*.
+
 ## Matcher
 **Brute-force** compares descriptors directly and works with every detector.
 **LightGlue** is a learned matcher. It needs every image detected with the same
@@ -135,7 +152,9 @@ says how many pairs ran where. LightGlue uses its own GPU path and is unaffected
 Because exhaustive matching becomes cheap on the GPU, consider turning the **Subset gate (fast pre-test)**
 off for unordered image sets: the gate saves time by skipping pairs that look
 non-overlapping on a small sample, and occasionally skips a pair that would have
-matched.
+matched. The gate only runs for exhaustive pairing with at least 50 pairs. Sequential
+and Preselect pairing have already chosen overlapping pairs, so the dialog greys the
+gate out there and says why.
 
 ## Read the timing report
 After matching, the log reports wall time and summed pair times for descriptor

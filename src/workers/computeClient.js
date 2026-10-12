@@ -265,13 +265,16 @@ export function transcodeTiff(blob, jpegQuality, { onThumbnail, onDisplay } = {}
 // The three long-running ops share one streaming shape: intermediate `log` /
 // `progress` events during the run, a final result on resolve. This factory wires
 // the { onLog, onProgress } hooks to the worker's event stream.
+// Any other event goes to `onEvent(ev, args)` (Stage A's per-map 'map' stream).
+// `worker` pins the call to one pool slot (a caller spreading one job over the pool).
 function streamingOp(op) {
-  return (input, { onLog, onProgress, transfer = [] } = {}) =>
+  return (input, { onLog, onProgress, onEvent, transfer = [], worker } = {}) =>
     call(op, [input], {
-      transfer,
+      transfer, worker,
       onEvent: (ev, args) => {
         if (ev === 'log') onLog?.(...args)
         else if (ev === 'progress') onProgress?.(...args)
+        else onEvent?.(ev, args)
       },
     })
 }
@@ -282,20 +285,29 @@ function streamingOp(op) {
 export const reconstruct = streamingOp('reconstruct')
 
 // Dense Stage A — Build Depth Maps (PatchMatch MVS, see core/dense/mvs.js). Resolves to
-// { maps: [{ uuid, width, height, K, R, t, depth, cost, rgb, displayDataUrl }] }.
+// { maps: [{ uuid, width, height, K, R, t, depth, cost, rgb, displayBlob }] }.
+// With `settings.streamMaps` each finished map is instead emitted as a 'map' event
+// (its planes transferred) and the result carries no maps: the caller persists and
+// drops them, and runs the cross-view filter itself (filterDepthMaps).
 export const computeDepthMaps = streamingOp('computeDepthMaps')
 
-// Dense Stage B — fuse the Stage A depth maps into a coloured point cloud.
-// Resolves to { points: Float32Array } packed as [x,y,z,r,g,b] per point.
+// The cross-view filter over SAVED depth maps (file handles, read on demand). Emits
+// one 'filtered' event per map ({ uuid, depth, coverage }, the filtered plane
+// transferred) for the caller to write back; resolves to { stats, totals }.
+export const filterDepthMaps = streamingOp('filterDepthMaps')
+
+// Dense Stage B — fuse the Stage A depth maps into a coloured point cloud. Resolves to
+// { cloud: { count, pos, col, nrm }, summary, refused, mapBuffers } (fused in slabs
+// when one piece would exceed the memory budget).
 export const densify = streamingOp('densify')
 
 // Products — DEM (rasterise a height grid in the chosen frame). Resolves to the
 // grid { width, height, gsd, originX, originY, data, mask, zMin, zMax, frame,
-// crs, unit, previewDataUrl }. See core/products/dem.js.
+// crs, unit, previewBlob }. See core/products/dem.js.
 export const generateDem = streamingOp('generateDem')
 
 // Products — orthophoto (reproject each DEM cell into the cached depth maps).
-// Resolves to { width, height, rgba:Uint8Array, covered, previewDataUrl }.
+// Resolves to { width, height, rgba:Uint8Array, covered, previewBlob }.
 // See core/products/ortho.js.
 export const generateOrtho = streamingOp('generateOrtho')
 
@@ -315,12 +327,12 @@ export const meshify = streamingOp('meshify')
 // { cloud:{ count, pos, col?, nrm? }, home }.
 export const editCloud = streamingOp('editCloud')
 
-// Import — parse a point-cloud / mesh file (PLY / LAS / XYZ text) off the main
-// thread. The buffer is transferred in (detached for the caller); resolves to
-// { parsed, stats } with the flat cloud buffers transferred back.
-export function parseCloudFile(buffer, name, { onLog } = {}) {
-  return call('parseCloud', [{ buffer, name }], {
-    transfer: [buffer],
+// Import — parse a point-cloud / mesh file (PLY / LAS / LAZ / XYZ text) off the
+// main thread. The File goes over as a handle (never read on this thread); the
+// worker reads it in slices. Resolves to { parsed, stats } with the flat cloud
+// buffers transferred back.
+export function parseCloudFile(file, { onLog } = {}) {
+  return call('parseCloud', [{ file, name: file.name }], {
     onEvent: onLog ? (ev, a) => { if (ev === 'log') onLog(...a) } : undefined,
   })
 }
@@ -359,18 +371,31 @@ export function undistortImage(args, { onLog } = {}) {
   })
 }
 
-// LAZ export — LASzip compression off the main thread (a 30 M-point cloud is
-// ~780 MB of point records). The cloud buffers are transferred in and round-
-// tripped home under `home`, so the caller's cloud is never left detached.
-export function exportLazCloud(cloud, { crsCode = null, geographic = false, onLog } = {}) {
-  const transfer = [cloud.pos.buffer]
-  if (cloud.col) transfer.push(cloud.col.buffer)
-  // Deduplicated: attributes may share one buffer, and a transfer list may not repeat one.
-  for (const b of new Set(Object.values(cloud.attributes || {}).map((v) => v.buffer))) transfer.push(b)
-  return call('exportLaz', [{ cloud, crsCode, geographic }], {
-    transfer,
+// Exports — serialize a cloud / mesh to a file off the main thread (workers/ops/
+// export.js). Pass COPIES of the store's typed arrays (one per array, never a view
+// of a shared buffer): they are transferred in. Resolves to { blob, count }; the
+// Blob posts back as a handle, whatever its size.
+function exportOp(op, key) {
+  return (input, { onLog } = {}) => call(op, [input], {
+    transfer: transferList(input[key]),
     onEvent: onLog ? (ev, a) => { if (ev === 'log') onLog(...a) } : undefined,
   })
+}
+// cloud: { count, pos, col?, nrm?, attributes? } (flat); format 'ply' | 'ply-ascii' |
+// 'xyz' | 'las' | 'laz'; plus { color, sim, cell, crsCode, geographic }.
+export const exportCloudFile = exportOp('exportCloud', 'cloud')
+// mesh: { nVerts, count, pos, idx, col? }; format 'ply' | 'ply-ascii' | 'obj' | 'stl'
+// | 'glb'; plus { color, sim }.
+export const exportMeshFile = exportOp('exportMesh', 'mesh')
+
+// Every distinct buffer under a flat cloud/mesh — a transfer list may not name one twice.
+function transferList(obj) {
+  const out = new Set()
+  for (const v of Object.values(obj || {})) {
+    if (ArrayBuffer.isView(v)) out.add(v.buffer)
+    else if (v && typeof v === 'object') for (const a of Object.values(v)) if (ArrayBuffer.isView(a)) out.add(a.buffer)
+  }
+  return [...out]
 }
 
 export const prepareRasterCog = (file, meta) => call('prepareRasterCog', [{ file, meta }], { worker: 1 })

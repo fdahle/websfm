@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed, watch, useSlots } from 'vue'
+import { useVirtualList } from '../../../composables/useVirtualList.js'
 
 // Shared sortable table for the Evaluate views (step 0 of PLAN-eval-views). A row
 // of headline StatTiles over one of these is the shape six of the eight views take.
@@ -57,6 +58,17 @@ const sortedRows = computed(() => {
   })
 })
 
+// Long tables (a Quality Report over thousands of images) render only the rows in
+// view (composables/useVirtualList, measured row height). A table with an
+// `expanded` slot keeps rendering every row: its detail rows have content-defined
+// heights, and those tables (GCPs, fiducial drafts) are short.
+const { listRef: bodyRef, visibleItems: visibleRows, padTop, padBottom } = useVirtualList({
+  items: () => sortedRows.value,
+  itemHeight: 31,
+  measure: true,
+  threshold: slots.expanded ? Infinity : 150,
+})
+
 const expanded = ref(new Set())
 function toggleExpand(row) {
   const s = new Set(expanded.value)
@@ -86,9 +98,11 @@ function fmt(col, row) {
           </th>
         </tr>
       </thead>
-      <tbody>
-        <template v-for="row in sortedRows" :key="row.id">
+      <tbody ref="bodyRef">
+        <tr v-if="padTop" class="dt-spacer" aria-hidden="true" :style="{ height: padTop + 'px' }"><td :colspan="columns.length"></td></tr>
+        <template v-for="row in visibleRows" :key="row.id">
           <tr
+            data-vrow
             class="dt-row"
             :class="{ expandable: !!slots.expanded }"
             @click="slots.expanded ? toggleExpand(row) : emit('row-click', row)"
@@ -109,6 +123,7 @@ function fmt(col, row) {
             </td>
           </tr>
         </template>
+        <tr v-if="padBottom" class="dt-spacer" aria-hidden="true" :style="{ height: padBottom + 'px' }"><td :colspan="columns.length"></td></tr>
       </tbody>
     </table>
     <div v-else class="dt-empty">{{ emptyText }}</div>
@@ -116,3 +131,7 @@ function fmt(col, row) {
 </template>
 
 <style scoped src="./modal.css"></style>
+<style scoped>
+/* Virtual-list spacers stand in for off-screen rows; they carry no cell chrome. */
+.dt tbody tr.dt-spacer > td { padding: 0; border: 0; }
+</style>

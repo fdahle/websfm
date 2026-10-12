@@ -7,6 +7,7 @@ import {
   marginFromResiduals,
   applyHomography,
 } from './guidedTiles.js'
+import { keypointsFromObjects as K } from './keypoints.js'
 
 // Map a point through a flat-9 H — used to synthesize correspondences.
 const warp = (H, x, y) => applyHomography(H, x, y)
@@ -97,13 +98,13 @@ describe('planGuidedTiles', () => {
 describe('kptIndicesInRect', () => {
   it('selects only keypoints inside the rect, preserving order', () => {
     const kps = [{ x: 5, y: 5 }, { x: 50, y: 50 }, { x: 5, y: 60 }, { x: 40, y: 40 }]
-    const idx = kptIndicesInRect(kps, { x: 10, y: 10, w: 50, h: 50 })
+    const idx = kptIndicesInRect(K(kps), { x: 10, y: 10, w: 50, h: 50 })
     expect(idx).toEqual([1, 3]) // (50,50) and (40,40); order preserved
   })
 
   it('is half-open on the far edges', () => {
     const kps = [{ x: 0, y: 0 }, { x: 10, y: 10 }]
-    const idx = kptIndicesInRect(kps, { x: 0, y: 0, w: 10, h: 10 })
+    const idx = kptIndicesInRect(K(kps), { x: 0, y: 0, w: 10, h: 10 })
     expect(idx).toEqual([0]) // (10,10) is on the far edge → excluded
   })
 })

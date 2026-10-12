@@ -1,4 +1,4 @@
-import { shallowRef, triggerRef, computed } from 'vue'
+import { shallowRef, triggerRef, computed, markRaw } from 'vue'
 import { defineStore } from 'pinia'
 import * as opfs from '../utils/opfs.js'
 import {
@@ -6,6 +6,12 @@ import {
   matchDescriptorsGpu, matchGpuBegin, matchGpuEnd, GPU_MATCH_WORKER,
 } from '../workers/computeClient.js'
 import { createGpuMatchRun } from './matching/gpuMatchRun.js'
+import { createDescriptorCache } from './matching/descriptorCache.js'
+import {
+  packMatchDocument, packMatchFlags, unpackMatchIndex, toMatchArray, MATCH_HEAVY_KEYS, MATCH_INDEX_KEYS,
+  isPersistedMatchEntry, planMatchReads, matchByteRange,
+} from '../core/features/matchStorage.js'
+import { createByteLru } from '../utils/byteLru.js'
 import { useLog } from '../composables/useLog.js'
 import { preselectPairs, positionsForProximity, preselectByFootprintOverlap } from '../core/features/preselect.js'
 import { sequentialPairs } from '../core/features/sequentialPairs.js'
@@ -16,22 +22,26 @@ import { siblingCanonicalMap, canonicalizeMatches } from '../core/features/orien
 import { toMatchSpace } from '../core/features/siftDescriptors.js'
 import { learnedDetector, lightGlueModelFor } from '../core/features/learnedDetectors.js'
 import { MATCH_DEFAULTS } from '../core/defaults.user.js'
-import { MATCH_TUNING } from '../core/tuning.js'
+import { MATCH_TUNING, RESIDENT_TUNING } from '../core/tuning.js'
 import { pairScaleContext, buildScaleContext, describeScaleContext, resolveScaledPx } from '../core/scaleContext.js'
 import { registerProjectStore } from './projectStores.js'
 import { useProjectsStore } from './useProjectsStore.js'
 import { usePosesStore } from './usePosesStore.js'
 import { useFootprintsStore } from './useFootprintsStore.js'
 import { useModelsStore } from './useModelsStore.js'
+import { useImagesStore } from './useImagesStore.js'
+
+const EMPTY_MATCHES = new Uint32Array(0)
 
 // Original image dimensions (px) in the same space as keypoint x,y — needed by
 // LightGlue's coord normalization. Prefer EXIF meta; else recover from a keypoint
 // (x = nx·natW, where nx is the detect-normalized coord stored alongside).
-function imageDims(img) {
+function imageDims(img, kps) {
   const w = img.meta?.width, h = img.meta?.height
   if (w && h) return [w, h]
-  const kp = img.keypoints?.find((k) => k.nx > 0 && k.ny > 0)
-  if (kp) return [Math.round(kp.x / kp.nx), Math.round(kp.y / kp.ny)]
+  for (let i = 0; i < (kps?.length ?? 0); i++) {
+    if (kps.nx(i) > 0 && kps.ny(i) > 0) return [Math.round(kps.x(i) / kps.nx(i)), Math.round(kps.y(i) / kps.ny(i))]
+  }
   return [1, 1]
 }
 
@@ -42,14 +52,149 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
   const projects = useProjectsStore()
   const posesStore = usePosesStore()
 
-  // pairId → { idA, idB, rawCount, inlierCount, F, matches: [[ia,ib],...], status,
-  //            disabled }. `disabled` is a user override that excludes an otherwise-
-  //            verified pair from reconstruction (obviously-wrong matches) — reversible.
+  // pairId → { idA, idB, rawCount, inlierCount, F, nMatches, src, status, disabled,
+  //            weak }. The entry is the pair's SUMMARY; its matches (a flat Uint32Array
+  //            [ia0, ib0, ia1, ib1, …], read as pairs via core/sfm/matchCodec.js) are
+  //            not on it. They live in the committed match document (`src` = { file,
+  //            off }: the matches column as a File and the pair's element offset, null
+  //            until saved) and, when something has asked for them, in the byte-bounded
+  //            `matchCache` below (TODO ▸ SC-2). Gate on `nMatches`, never on whether
+  //            the matches are resident. `disabled` is a user override that excludes an
+  //            otherwise-verified pair from reconstruction (obviously-wrong matches) —
+  //            reversible.
   // shallowRef + in-place mutation + triggerRef (NOT a whole-Map copy per write):
   // this is what makes concurrent matchPair() calls safe — copying the Map on every
   // write races (one writer's snapshot clobbers another's set). See P2 in HANDOVER.
   const matchStore = shallowRef(new Map())
   const touch = () => triggerRef(matchStore)
+
+  // ── A pair's matches, on demand ──────────────────────────────────────────────
+  // pairId → { entry, matches }. A fresh result (matchPair, import, the legacy
+  // migration) is PINNED until a document commit holds it, and forever in a project
+  // that cannot persist; a copy read back from the document is clean and evictable.
+  // `entry` is kept with it because a re-match replaces the entry under the same id.
+  //   ensurePairMatches(pid) — cached (the match preview)
+  //   readPairMatches(pid)   — read through, not cached
+  //   streamPairMatches(entries, onPair) — a bulk pass in the caller's order, one read
+  //     per run of adjacent pairs (SfM input, exports, fingerprints)
+  const matchCache = createByteLru({ budgetBytes: RESIDENT_TUNING.matchCacheMiB * 2 ** 20 })
+  const matchLoads = new Map() // pairId → { entry, promise }
+  const pairIdOf = (e) => `${e.idA}--${e.idB}` // entries keep idA < idB
+  function holdMatches(pid, entry, matches) {
+    entry.nMatches = matches.length >>> 1
+    if (!entry.nMatches) { matchCache.delete(pid); return }
+    matchCache.set(pid, { entry, matches: markRaw(matches) }, matches.byteLength, { pinned: true })
+  }
+  function residentFor(pid, entry, touchIt = true) {
+    const v = touchIt ? matchCache.get(pid) : matchCache.peek(pid)
+    return v && v.entry === entry ? v.matches : null
+  }
+  /** The pair's matches if they are in memory now, else null (never reads). */
+  function residentPairMatches(pid) {
+    const entry = matchStore.value.get(pid)
+    return entry ? residentFor(pid, entry) : null
+  }
+  // The committed generation's matches column as a File (restore / adoptCommit), and
+  // a re-fetch of it by name from the CURRENT project root. A File is a handle to one
+  // file: moving the project between browser storage and a folder deletes (or leaves
+  // behind) the one every entry points at, and the copy in the new root has the same
+  // name. Shared, so concurrent failed reads rebind once.
+  let matchesFile = null, rebinding = null
+  function rebindMatchesFile() {
+    rebinding ??= (async () => {
+      const c = committed
+      if (!c?.files?.matches || c.projectId !== projects.currentProjectId) return false
+      let file
+      try { file = await opfs.loadMatchesFile(c.projectId, c.files.matches) } catch { return false }
+      const old = matchesFile
+      for (const e of matchStore.value.values()) if (e.src?.file === old) e.src = { file, off: e.src.off }
+      matchesFile = file
+      return true
+    })().finally(() => { rebinding = null })
+    return rebinding
+  }
+  // One pair from the committed document. A save commits a new generation and then
+  // collects the old one, so a read that loses that race retries once on the entry's
+  // new location; a read whose file went away otherwise (a storage move) rebinds.
+  async function readFromDocument(entry) {
+    for (let attempt = 0; ; attempt++) {
+      const src = entry.src
+      if (!src) return null
+      try {
+        const [start, end] = matchByteRange(src.off, entry.nMatches)
+        return new Uint32Array(await src.file.slice(start, end).arrayBuffer())
+      } catch (err) {
+        if (attempt > 0) throw err
+        if (saving) await saving.catch(() => {})
+        if (entry.src === src && !(await rebindMatchesFile())) throw err
+      }
+    }
+  }
+  function unavailable(pid) {
+    return new Error(`Matches of pair ${pid} are neither in memory nor in the saved match document — re-run matching`)
+  }
+  async function loadPair(pid, cache) {
+    const entry = matchStore.value.get(pid)
+    if (!entry || !(entry.nMatches > 0)) return EMPTY_MATCHES
+    const hit = residentFor(pid, entry, cache)
+    if (hit) return hit
+    const pending = matchLoads.get(pid)
+    if (pending?.entry === entry) return pending.promise
+    if (!entry.src) throw unavailable(pid)
+    const promise = readFromDocument(entry).then((m) => {
+      if (!m) throw unavailable(pid)
+      if (cache && matchStore.value.get(pid) === entry && !residentFor(pid, entry, false)) {
+        matchCache.set(pid, { entry, matches: markRaw(m) }, m.byteLength)
+      }
+      return m
+    }).finally(() => { if (matchLoads.get(pid)?.promise === promise) matchLoads.delete(pid) })
+    matchLoads.set(pid, { entry, promise })
+    return promise
+  }
+  /** The pair's matches (flat Uint32Array), read and kept (LRU) on first use. */
+  const ensurePairMatches = (pid) => loadPair(pid, true)
+  /** The pair's matches for a one-off read: resident, else straight from the document. */
+  const readPairMatches = (pid) => loadPair(pid, false)
+  /**
+   * Visit `entries` in the given order with their matches: `await onPair(entry,
+   * matches)`. `matches` may be a VIEW into a shared read window, valid only during the
+   * call — copy it to keep it. Adjacent pairs in the document share one read
+   * (core/features/matchStorage.js planMatchReads), so a pass in document order (the
+   * store's own order after a reopen) costs a few large reads, not one per pair.
+   */
+  async function streamPairMatches(entries, onPair) {
+    const windowBytes = RESIDENT_TUNING.matchReadWindowMiB * 2 ** 20
+    let run = []
+    const flush = async () => {
+      if (!run.length) return
+      const items = run.map((e) => ({ file: e.src.file, off: e.src.off, n: e.nMatches, entry: e }))
+      run = []
+      for (const w of planMatchReads(items, { windowBytes })) {
+        let buf = null
+        try { buf = new Uint32Array(await w.file.slice(w.start, w.end).arrayBuffer()) } catch { buf = null }
+        for (const it of w.items) {
+          if (buf) {
+            const s = it.off - w.start / 4
+            await onPair(it.entry, buf.subarray(s, s + 2 * it.n))
+          } else {
+            const m = await readFromDocument(it.entry) // the generation moved under us
+            if (!m) throw unavailable(pairIdOf(it.entry))
+            await onPair(it.entry, m)
+          }
+        }
+      }
+    }
+    for (const e of entries) {
+      const n = e.nMatches ?? 0
+      const pid = pairIdOf(e)
+      const hit = n > 0 ? residentFor(pid, e, false) : EMPTY_MATCHES
+      if (hit) { await flush(); await onPair(e, hit); continue }
+      if (!e.src) { await flush(); throw unavailable(pid) }
+      run.push(e)
+    }
+    await flush()
+  }
+  const matchCacheStats = () => matchCache.stats()
   // SIFT orientation-sibling maps (core/features/orientationSiblings.js), keyed by the
   // keypoint array itself: re-detection replaces the array, so an entry can never go
   // stale, and a dropped array takes its map with it.
@@ -84,6 +229,90 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
   // Persist only when a project is open and OPFS is usable (see useProjectsStore).
   const isPersisting = () => projects.isPersisting
 
+  // ── Persistence: the whole store is ONE packed document ────────────────────────
+  // (core/features/matchStorage.js; one JSON file per pair before). Writes are
+  // coalesced: one in flight, one trailing re-run that picks up whatever changed
+  // meanwhile. `heavyVersion` bumps whenever a pair's matches/F/counts change, or a
+  // pair is added or removed; a save at the version of the last commit (excluding a
+  // pair) rewrites only the flags and reuses that commit's other buffers. Inside
+  // matchAll (`batchDepth` > 0) pairs save periodically and once at the end; a lone
+  // matchPair saves before it returns, so a superseded result never resurrects.
+  let heavyVersion = 0
+  let committed = null // { projectId, heavyVersion, meta, files }
+  let saving = null, saveAgain = false, saveTimer = null, batchDepth = 0
+  const markHeavy = () => { heavyVersion++ }
+  const persistable = isPersistedMatchEntry
+  // A pair's matches for a full rewrite: the resident copy, else a slice of the
+  // committed matches column (a Blob part — referenced, not read into memory).
+  const documentPart = (pid, e) => {
+    const hit = residentFor(pid, e, false)
+    if (hit) return hit
+    if (!e.src) throw unavailable(pid)
+    const [start, end] = matchByteRange(e.src.off, e.nMatches)
+    return e.src.file.slice(start, end)
+  }
+  // After a commit: every packed pair now lives at `off` of the new matches file, and
+  // its resident copy (if any) is no longer the only one.
+  async function adoptCommit(projectId, files, layout) {
+    if (!layout || !files?.matches) return
+    let file
+    try { file = await opfs.loadMatchesFile(projectId, files.matches) } catch { return }
+    matchesFile = file
+    for (const { pairId, entry, off } of layout) {
+      entry.src = { file, off }
+      const v = matchCache.peek(pairId)
+      if (v?.entry === entry) matchCache.unpin(pairId, v)
+    }
+  }
+  function persistMatches() {
+    if (!isPersisting()) return Promise.resolve()
+    if (saveTimer != null) { clearTimeout(saveTimer); saveTimer = null }
+    if (saving) { saveAgain = true; return saving }
+    saving = (async () => {
+      do {
+        saveAgain = false
+        const projectId = projects.currentProjectId, version = heavyVersion
+        const reuse = committed?.projectId === projectId && committed.heavyVersion === version
+        let meta, buffers, layout = null
+        if (reuse) {
+          meta = committed.meta
+          buffers = { flags: packMatchFlags([...matchStore.value.values()].filter(persistable)) }
+          for (const key of MATCH_HEAVY_KEYS) buffers[key] = { reuse: committed.files[key] }
+        } else {
+          const packed = packMatchDocument(matchStore.value, { matchesOf: documentPart })
+          meta = packed.meta; layout = packed.layout
+          // One Blob over resident arrays and slices of the previous generation: the
+          // writer streams it, so a rewrite never holds every pair's matches at once.
+          buffers = { ...packed.buffers, matches: new Blob(packed.matchParts) }
+        }
+        const res = await opfs.saveMatchDocument(projectId, meta, buffers)
+        if (res?.stale) { committed = null; saveAgain = true; continue } // a reused file went: write in full
+        if (res?.files) {
+          committed = { projectId, heavyVersion: version, meta, files: res.files }
+          await adoptCommit(projectId, res.files, layout)
+        }
+      } while (saveAgain)
+    })().catch((err) => {
+      log(`Matches: could not save — ${err?.message ?? err}`, 'warn', 'Matching')
+    }).finally(() => { saving = null })
+    return saving
+  }
+  // During a run: a save at most every 60 s, so a crash loses at most a minute of
+  // matching without rewriting the document per pair.
+  const schedulePersist = () => {
+    if (saveTimer != null || !isPersisting()) return
+    saveTimer = setTimeout(() => { saveTimer = null; persistMatches() }, 60_000)
+  }
+  // A flat Uint32Array of the putatives kept by `keep(i)` (all when omitted).
+  const packPutatives = (raw, keep = null) => {
+    let n = 0
+    for (let i = 0; i < raw.length; i++) if (!keep || keep(i)) n++
+    const out = new Uint32Array(2 * n)
+    let o = 0
+    for (let i = 0; i < raw.length; i++) if (!keep || keep(i)) { out[o++] = raw[i].ia; out[o++] = raw[i].ib }
+    return out
+  }
+
   function pairId(uuidA, uuidB) {
     return [uuidA, uuidB].sort().join('--')
   }
@@ -112,18 +341,17 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
   // image appears in N−1 pairs, so this turns O(N²) loads into O(N)).
   // `gpuRun` (optional): matchAll's WebGPU router (stores/matching/gpuMatchRun.js);
   // null ⇒ brute-force runs on the WASM pool exactly as before.
-  async function matchPair(imgA, imgB, settings = {}, onDone, descCache = null, gpuRun = null) {
+  async function matchPairOnce(imgA, imgB, settings = {}, onDone, descCache = null, gpuRun = null) {
     // Resolve every knob from the single source of truth (defaults.user.js +
     // tuning.js), caller's `settings` winning. Downstream reads `settings.X` directly.
     settings = { ...MATCH_DEFAULTS, ...MATCH_TUNING, ...settings }
     const [idA, idB] = [imgA.uuid, imgB.uuid].sort()
     const pid = pairId(idA, idB)
-    // Ensure descriptors are ordered the same way as IDs
-    const [kpsA, kpsB] = idA === imgA.uuid
-      ? [imgA.keypoints, imgB.keypoints]
-      : [imgB.keypoints, imgA.keypoints]
 
-    const entry = { idA, idB, rawCount: 0, inlierCount: 0, F: null, matches: [], status: 'running', disabled: false, weak: false }
+    // `matches` is this run's result; it reaches the entry (as `nMatches`) and the
+    // match cache together, once the pair is done (holdMatches).
+    let matches = EMPTY_MATCHES
+    const entry = { idA, idB, rawCount: 0, inlierCount: 0, F: null, nMatches: 0, src: null, status: 'running', disabled: false, weak: false }
     entry.timing = { descriptorLoadMs: 0, descriptorBytes: 0, postMessageMs: 0, matchingMs: 0, verificationMs: 0, roundTripMs: 0 }
     const timing = stage => ({ onTiming: t => {
       entry.timing.postMessageMs += t.postMessageMs
@@ -137,18 +365,29 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
     const bruteForce = (dA, dB, opts, kind, ids = [null, null]) => (gpuRun
       ? gpuRun.match(dA, dB, { ...opts, kind, idA: ids[0], idB: ids[1] }, timing('matchingMs'))
       : matchDescriptors(dA, dB, opts, timing('matchingMs')))
+    // Supersedes the old result before any early exit (gated, failed or cancelled):
+    // the next save writes this entry, never the old one — nor keeps its matches.
     matchStore.value.set(pid, entry)
+    matchCache.delete(pid)
+    markHeavy()
     // Trigger reactivity
     touchSoon()
 
     const projectId = projects.currentProjectId
-    const persist = isPersisting()
     try {
-      // Supersede the old result before any early exit (gated, failed or cancelled).
-      if (persist) await opfs.deleteMatches(projectId, pid)
       // Image whose uuid sorts first → idA; its descriptors go to descA
       const srcA = idA === imgA.uuid ? imgA : imgB
       const srcB = idA === imgA.uuid ? imgB : imgA
+      // Keypoints load per image on demand (useImagesStore.ensureKeypoints; LRU-kept
+      // across a run's pairs), ordered the same way as the ids.
+      const images = useImagesStore()
+      const [kpsA, kpsB] = await Promise.all([images.ensureKeypoints(srcA), images.ensureKeypoints(srcB)])
+      if (!kpsA || !kpsB) {
+        entry.status = 'error'
+        log(`Match failed: keypoints missing for ${imgA.name} / ${imgB.name} — re-run feature detection`, 'error', 'Matching')
+        touchSoon()
+        return
+      }
 
       // Cache the in-flight PROMISE (not just the result) so that concurrent pairs
       // sharing an image load its descriptors from OPFS exactly once.
@@ -250,8 +489,8 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
       // is a [{ia,ib}] list that flows through the same verify/gate path below.
       let raw
       if (settings.matcher === 'lightglue') {
-        const [wA, hA] = imageDims(srcA)
-        const [wB, hB] = imageDims(srcB)
+        const [wA, hA] = imageDims(srcA, kpsA)
+        const [wB, hB] = imageDims(srcB, kpsB)
         const res = await matchLightGlue({
           kpsA, descA, wA, hA, kpsB, descB, wB, hB,
           // LightGlue weights are trained per detector (SuperPoint ≠ DISK).
@@ -342,14 +581,12 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
           // sfm.js feeds it to PnP but never seeds init or triangulates from it.
           entry.F = result.F
           entry.inlierCount = result.inlierCount
-          entry.matches = raw
-            .filter((_, i) => result.inlierMask[i] > 0.5)
-            .map(m => [m.ia, m.ib])
+          matches = packPutatives(raw, (i) => result.inlierMask[i] > 0.5)
           entry.weak = verdict.weak
           if (verdict.weak) entry.rejectReason = verdict.reason
         } else {
           entry.inlierCount = 0
-          entry.matches = []
+          matches = EMPTY_MATCHES
           entry.rejectRatio = ratio // for the run summary stats
           entry.rejectReason = verdict.reason
         }
@@ -367,26 +604,17 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
           + `${scaleCtx.factor === 1 ? '' : ` (${settings.ransacThreshPx} detect-px ×${scaleCtx.factor.toFixed(2)} `
             + `for detection scale ${scaleCtx.medianScale.toFixed(3)})`}`, 'debug', 'Matching')
       } else {
-        entry.matches = raw.map(m => [m.ia, m.ib])
+        matches = packPutatives(raw)
         entry.inlierCount = raw.length
       }
 
+      holdMatches(pid, entry, matches)
       entry.status = 'done'
 
-      // Persist any pair carrying inlier matches — accepted AND weak (a weak bridge must
-      // survive a reload or the graph re-severs on restore). The old `>= minMatches` gate
-      // dropped weak pairs whenever minMatches was raised above their inlier count.
-      if (persist && entry.matches.length > 0) {
-        await opfs.saveMatches(projectId, pid, {
-          idA, idB,
-          rawCount: entry.rawCount,
-          inlierCount: entry.inlierCount,
-          F: entry.F,
-          matches: entry.matches,
-          disabled: entry.disabled,
-          weak: entry.weak,
-        })
-      }
+      // Every pair carrying inlier matches persists — accepted AND weak (a weak bridge
+      // must survive a reload or the graph re-severs on restore): packMatchDocument
+      // keeps any done pair with matches.
+      markHeavy()
 
       const label = `${imgA.name} ↔ ${imgB.name}`
       // A pair with 0 inliers failed geometric verification — it is not a usable
@@ -415,7 +643,23 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
     }
 
     touchSoon()
+    markHeavy()
     onDone?.(pairId(imgA.uuid, imgB.uuid), entry)
+  }
+
+  // Every way out of a pair — accepted, rejected, gated, missing descriptors, an
+  // error — saves, so a superseded result can never resurrect: inside matchAll on
+  // the periodic schedule, alone before returning.
+  async function matchPair(...args) {
+    const projectId = projects.currentProjectId
+    try {
+      await matchPairOnce(...args)
+    } finally {
+      if (projectId === projects.currentProjectId) {
+        if (batchDepth > 0) schedulePersist()
+        else await persistMatches()
+      }
+    }
   }
 
   // Camera positions (project CRS) from imported poses, keyed by image **uuid** —
@@ -463,7 +707,8 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
     // Same merge as matchPair so this function's own settings reads (and its
     // matchPair calls) all draw from the single source of truth.
     settings = { ...MATCH_DEFAULTS, ...MATCH_TUNING, ...settings }
-    const ready = images.filter((img) => img.kpStatus === 'done' && (img.keypoints?.length ?? 0) > 0)
+    // The COUNT gates, never resident keypoints (they load per pair on demand).
+    const ready = images.filter((img) => img.kpStatus === 'done' && (img.kpCount ?? 0) > 0)
     const strategy = settings.strategy ?? 'exhaustive'
 
     // LightGlue's weights are trained per learned detector (SuperPoint 256-d, DISK
@@ -664,8 +909,9 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
         'info', 'Matching')
     }
 
-    // Load each image's descriptors from OPFS at most once for the whole run.
-    const descCache = new Map()
+    // Each image's descriptors load from OPFS once per run, and are released after its
+    // last pair or under a byte budget (stores/matching/descriptorCache.js).
+    const descCache = createDescriptorCache({ pairs, budgetBytes: (settings.descCacheMiB ?? 2048) * 2 ** 20 })
     // Concurrency-limited dispatch: `concurrency` drain loops pull from a shared
     // cursor so up to POOL_SIZE pairs are matched at once (each matchPair issues its
     // own round-robin worker calls). Cancellation is cooperative — stop pulling.
@@ -678,18 +924,26 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
         if (i >= pairs.length) return
         const [a, b] = pairs[i]
         await matchPair(a, b, settings, tally, descCache, gpuRun)
+        descCache.release(a.uuid); descCache.release(b.uuid)
         done++
         onProgress?.(done, pairs.length)
       }
     }
     const runStarted = performance.now()
     let backendRecord = lightglue ? null : { backend: 'wasm', gpuRequested }
+    batchDepth++
     try {
       await Promise.all(Array.from({ length: concurrency }, drain))
     } finally {
+      batchDepth--
       // Flush matchPair's throttled reactivity so everything reading the store's
       // computeds after the run sees the final state.
       touch()
+      // One save for the whole run (and for a cancelled one, so what matched survives).
+      await persistMatches()
+      const dc = descCache.stats()
+      log(`Matching: descriptors loaded ${dc.loads}× for ${ready.length} image(s), `
+        + `resident peak ${(dc.peakBytes / 2 ** 20).toFixed(0)} MiB`, 'debug', 'Matching')
       // Always release the GPU-side descriptor cache, unless Cancel already
       // terminated the pool (and with it the cache).
       if (gpuRun) backendRecord = await gpuRun.finish({ cancelled: cancelled || !!shouldCancel?.() })
@@ -781,11 +1035,13 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
     for (const [pid, e] of matchStore.value) {
       if (e.idA === uuid || e.idB === uuid) {
         matchStore.value.delete(pid)
-        if (isPersisting()) opfs.deleteMatches(projects.currentProjectId, pid).catch(() => {})
+        matchCache.delete(pid)
         removed++
       }
     }
     if (removed) {
+      markHeavy()
+      persistMatches()
       touch()
       log(`Matches invalidated: ${removed} pair(s) — keypoints changed, re-match these`, 'warn', 'Matching')
     }
@@ -797,7 +1053,6 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
   // uuid ordering here; when it flips, each [ia,ib] pair flips with it.
   async function importMatches(entries, { replace = false } = {}) {
     restoreGeneration++
-    const writes = []
     let imported = 0, skipped = 0
     for (const src of entries || []) {
       if (!src.uuidA || !src.uuidB || src.uuidA === src.uuidB) { skipped++; continue }
@@ -805,20 +1060,21 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
       const pid = pairId(idA, idB)
       if (!replace && matchStore.value.has(pid)) { skipped++; continue }
       const flip = idA !== src.uuidA
-      const matches = (src.matches || []).map(([a, b]) => flip ? [b, a] : [a, b])
+      const matches = toMatchArray(src.matches).slice()
+      if (flip) for (let i = 0; i < matches.length; i += 2) { const t = matches[i]; matches[i] = matches[i + 1]; matches[i + 1] = t }
       const entry = {
-        idA, idB, rawCount: src.rawCount ?? matches.length,
-        inlierCount: src.verified === false ? 0 : (src.inlierCount ?? matches.length),
+        idA, idB, rawCount: src.rawCount ?? matches.length / 2,
+        inlierCount: src.verified === false ? 0 : (src.inlierCount ?? matches.length / 2),
         F: flip && src.F ? transpose3(src.F) : (src.F ?? null),
-        matches, status: 'done', disabled: false, weak: src.verified === false,
+        nMatches: 0, src: null, status: 'done', disabled: false, weak: src.verified === false,
         source: src.source ?? 'external',
       }
+      holdMatches(pid, entry, matches)
       matchStore.value.set(pid, entry)
       imported++
-      if (isPersisting()) writes.push(opfs.saveMatches(projects.currentProjectId, pid, entry))
     }
     touch()
-    if (writes.length) await Promise.all(writes)
+    if (imported) { markHeavy(); await persistMatches() }
     log(`Matches imported: ${imported} pair(s)${skipped ? `, ${skipped} skipped` : ''}`,
       imported ? 'success' : 'warn', 'Import')
     return { imported, skipped }
@@ -836,41 +1092,66 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
     if (!entry || !!entry.disabled === !!disabled) return
     entry.disabled = !!disabled
     touch()
-    if (isPersisting() && entry.matches.length) {
-      opfs.saveMatches(projects.currentProjectId, pid, {
-        idA: entry.idA, idB: entry.idB,
-        rawCount: entry.rawCount, inlierCount: entry.inlierCount,
-        F: entry.F, matches: entry.matches, disabled: entry.disabled, weak: entry.weak,
-      }).catch(() => {})
-    }
+    persistMatches() // flags only: the matches buffers are reused
     log(`Pair ${disabled ? 'excluded from' : 'restored to'} reconstruction`, 'info', 'Matching', { channel: 'activity' })
   }
 
   // Project-store contract.
-  async function restore({ projectId }) {
+  async function restore({ projectId, report = () => {} }) {
     const generation = ++restoreGeneration
     matchStore.value = new Map()
-    // Pair JSON is potentially the largest collection of small files in a
-    // project, but reconstruction cannot run correctly against a partially loaded
-    // graph. Await it as part of project open; descriptor planes remain lazy and
-    // are still read only when a new matching run needs them.
-    const all = await opfs.loadAllMatches(projectId)
+    matchCache.clear()
+    matchLoads.clear()
+    committed = null
+    matchesFile = null
+    // Project open reads the match graph's INDEX only — pairs, counts, flags, F: every
+    // summary the UI and the gates need, ~93 B per pair. Each pair's matches stay in
+    // the document's matches column (a File, nothing read) until something asks for
+    // them (ensurePairMatches / streamPairMatches). Descriptors stay lazy too.
+    report('Reading image pairs')
+    let doc = null, unreadable = null
+    try {
+      doc = await opfs.loadMatchIndex(projectId, MATCH_INDEX_KEYS)
+    } catch (err) { unreadable = err }
     if (generation !== restoreGeneration || projectId !== projects.currentProjectId) return
-    const newMap = new Map()
-    for (const { pairId, idA, idB, rawCount, inlierCount, F, matches, disabled, weak } of all) {
-      newMap.set(pairId, {
-        idA, idB,
-        rawCount:     rawCount    ?? 0,
-        inlierCount:  inlierCount ?? 0,
-        F:            F           ?? null,
-        matches:      matches     ?? [],
-        status: 'done',
-        disabled:     disabled    ?? false,
-        weak:         weak        ?? false,
+    let restored = []
+    if (doc || unreadable) {
+      try {
+        if (unreadable) throw unreadable
+        restored = unpackMatchIndex(doc.meta, doc.buffers, { matchBytes: doc.matchesFile?.size ?? 0 })
+        for (const [, e] of restored) {
+          e.src = doc.matchesFile ? { file: doc.matchesFile, off: e.off } : null
+          delete e.off
+        }
+        committed = { projectId, heavyVersion, meta: doc.meta, files: doc.files }
+        matchesFile = doc.matchesFile
+      } catch (err) {
+        restored = []
+        log(`Matches: the saved match document is unreadable (${err.message}) — re-run matching`, 'error', 'Matching')
+      }
+    } else {
+      // A project saved before the packed document: one JSON file per pair. Migrate once.
+      const legacy = await opfs.loadLegacyPairFiles(projectId, (done, total) => report('Reading image pairs', done, total))
+      if (generation !== restoreGeneration || projectId !== projects.currentProjectId) return
+      restored = legacy.map(({ pairId: pid, idA, idB, rawCount, inlierCount, F, matches, disabled, weak }) => {
+        const entry = {
+          idA, idB, rawCount: rawCount ?? 0, inlierCount: inlierCount ?? 0, F: F ?? null,
+          nMatches: 0, src: null, status: 'done', disabled: disabled ?? false, weak: weak ?? false,
+        }
+        // Resident (pinned) until the migration's save below commits them.
+        holdMatches(pid, entry, toMatchArray(matches))
+        return [pid, entry]
       })
+      if (restored.length) {
+        matchStore.value = new Map(restored)
+        markHeavy()
+        await persistMatches()
+        await opfs.removeLegacyPairFiles(projectId)
+        log(`Matches: migrated ${restored.length} per-pair file(s) into one match document`, 'info', 'Matching')
+      }
     }
-    matchStore.value = newMap
-    if (all.length > 0) log(`Matches restored: ${all.length} pair(s)`, 'success', 'Matching')
+    matchStore.value = new Map(restored)
+    if (restored.length > 0) log(`Matches restored: ${restored.length} pair(s)`, 'success', 'Matching')
   }
 
   // Reset in-memory matches. Only purge deletes the persisted match files — a plain
@@ -881,7 +1162,12 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
     restoreGeneration++
     matchStore.value.clear()
     matchStore.value = new Map()
+    matchCache.clear()
+    matchLoads.clear()
     matchRun.value = null
+    committed = null
+    matchesFile = null
+    if (saveTimer != null) { clearTimeout(saveTimer); saveTimer = null }
     if (purge && isPersisting()) {
       opfs.clearAllMatches(projects.currentProjectId).catch(() => {})
     }
@@ -893,5 +1179,9 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
   return {
     matchStore, matchRun, pairId, getMatch, verifiedPairs, usableMatchCount,
     matchPair, matchAll, importMatches, removeMatchesForImage, setPairDisabled, restore, clear,
+    // A pair's matches on demand (the "A pair's matches" section at the top).
+    ensurePairMatches, readPairMatches, residentPairMatches, streamPairMatches, matchCacheStats,
+    // After the project root moved (browser storage ⇄ folder): re-point at the copy.
+    rebindMatchesFile,
   }
 }))

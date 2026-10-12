@@ -3,7 +3,7 @@
   "type": "module",
   "description": "LASzip (LAZ) compression/decompression compiled to WebAssembly",
   "version": "0.1.0",
-  "license": "MIT OR Apache-2.0",
+  "license": "MIT",
   "files": [
     "lazcodec_bg.wasm",
     "lazcodec.js",

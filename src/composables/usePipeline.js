@@ -187,12 +187,12 @@ export function usePipeline({ images, detectAll, matchAll, reconstruct, computeD
     // No per-image overlay callback: the keypoint overlay is a global toggle gated on
     // the image's own kpStatus, so it lights up reactively as each detection lands.
     await detectAll(settings, null, report, shouldCancel)
-    const ok = pending.every((img) => img.kpStatus === 'done' && (img.keypoints?.length ?? 0) > 0)
+    const ok = pending.every((img) => img.kpStatus === 'done' && (img.kpCount ?? 0) > 0)
     return finishRun(ok, ok ? '' : 'Feature detection failed for one or more images')
   }
 
   async function runMatch(settings) {
-    const ready = images.value.filter((img) => img.kpStatus === 'done' && (img.keypoints?.length ?? 0) > 0)
+    const ready = images.value.filter((img) => img.kpStatus === 'done' && (img.kpCount ?? 0) > 0)
     if (ready.length < 2) return refused('Matching requires at least two images with keypoints')
     // Model consent BEFORE openProgress — see ensureModels. Gated on the same
     // descriptor precondition useMatchesStore checks (LightGlue needs one learned
@@ -213,7 +213,7 @@ export function usePipeline({ images, detectAll, matchAll, reconstruct, computeD
   }
 
   async function runReconstruct(settings) {
-    const ready = images.value.filter((img) => img.kpStatus === 'done' && (img.keypoints?.length ?? 0) > 0)
+    const ready = images.value.filter((img) => img.kpStatus === 'done' && (img.kpCount ?? 0) > 0)
     if (ready.length < 2) return refused('Sparse reconstruction requires at least two images with keypoints')
     // Reconstruct is a single worker call — cancel by terminating the worker
     // (the store catches the resulting rejection and resets its status).

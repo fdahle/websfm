@@ -5,8 +5,7 @@ import DataTable from '../ui/DataTable.vue'
 import { useReconstructionStore } from '../../../stores/useReconstructionStore.js'
 import { useImagesStore } from '../../../stores/useImagesStore.js'
 import { useQualityReport } from '../../../composables/useQualityReport.js'
-import { perImageResiduals, unregisteredReason } from '../../../core/eval/imageStats.js'
-import { trackLengthHistogram } from '../../../core/eval/reconStats.js'
+import { unregisteredReason } from '../../../core/eval/imageStats.js'
 import { EVAL_THRESHOLDS, classify, thresholdHint } from '../../../core/eval/health.js'
 
 // Quality Report ▸ Sparse (WS2.1 + WS2.2): Recon Report and Image Errors merged into
@@ -18,12 +17,13 @@ import { EVAL_THRESHOLDS, classify, thresholdHint } from '../../../core/eval/hea
 const emit = defineEmits(['open-image', 'open-image-residuals'])
 const recon = useReconstructionStore()
 const imagesStore = useImagesStore()
-const { reproj, graph } = useQualityReport()
+// reproj / histogram / perImage are the model's memoised stats (core/eval/sparseStats.js):
+// computed once per model, not on every visit to this section.
+const { reproj, graph, histogram, perImage } = useQualityReport()
 
 const cameras = computed(() => recon.sparseCameras)
 const points = computed(() => recon.mainSparseCloud?.points ?? [])
 const byUuid = computed(() => new Map(imagesStore.images.map((im) => [im.uuid, im])))
-const histogram = computed(() => trackLengthHistogram(points.value))
 const maxBin = computed(() => Math.max(1, ...histogram.value.map((b) => b.count)))
 
 const fmt = (v, d = 2) => (v == null ? '—' : v.toFixed(d))
@@ -58,7 +58,7 @@ const summaryTiles = computed(() => {
 
 // Per-image residual rows joined with keypoint count + accepted-edge degree.
 const rows = computed(() =>
-  perImageResiduals(cameras.value, points.value).map((r) => {
+  perImage.value.map((r) => {
     const im = byUuid.value.get(r.uuid)
     return {
       id: r.uuid, imageId: im?.id ?? null, name: im?.name ?? r.uuid,

@@ -112,6 +112,9 @@ export function estimateUpFromCameras(cameras) {
   const viewUp = Math.hypot(vx, vy, vz) / n >= 0.3
     ? unit([-vx, -vy, -vz])
     : null
+  // A level camera plane seen obliquely outranks both readings (planeUpOverride).
+  const plane = planeUpOverride(list, viewUp, axisUp)
+  if (plane) return plane.up
   if (!viewUp) return axisUp
   if (!axisUp) return viewUp
 
@@ -122,6 +125,63 @@ export function estimateUpFromCameras(cameras) {
     (b.travel ? Math.abs(dot3(c, b.travel)) : 0)
   // Only switch on a clear margin, so an ambiguous rig keeps the historical answer.
   return (score(viewUp) - score(axisUp) > 0.3) ? viewUp : axisUp
+}
+
+// ── Up from the camera-centre PLANE ──────────────────────────────────────────
+// A drone flight plan holds one altitude, and a walk or turntable ring one height,
+// so camera centres that spread in two directions but not the third lie in a
+// level plane: its normal is up. That is the only camera signal that survives an
+// OBLIQUE capture. St Nazaire (127 DJI frames, all facing south at −26°/−50°
+// pitch) puts the viewing-direction "up" 55° off vertical and the image-up axes
+// ~36° off, while the centres' thin axis is 0.06 m against 6–18 m of spread.
+//
+// It overrides the viewing-direction reading only when the cameras look obliquely
+// at the plane (> PLANE_UP_OBLIQUE_DEG from its normal). A nadir set keeps the
+// viewing direction: there both agree on level ground, and on a terrain-following
+// flight the plane tilts with the slope while the gimbal still points down. The
+// threshold separates the two: terrain-following slopes rarely exceed ~25°, an
+// oblique gimbal setting is usually ≥ 30° off nadir. An oblique set shallower than
+// that keeps the old (tilted) viewing-direction reading — no worse than before.
+// Known blind spot (unchanged from before): a vertical camera grid in front of a
+// facade is planar with cameras looking along the normal, exactly like a nadir
+// block turned 90°; nothing here can tell them apart.
+export const PLANE_UP_OBLIQUE_DEG = 25
+const PLANE_THIN_RATIO = 0.05   // thinnest std ≤ 5% of the middle one ⇒ planar
+const PLANE_SPREAD_RATIO = 0.2  // middle std ≥ 20% of the largest ⇒ not a single strip
+
+// The signed plane normal, or null when the centres are not a usable plane, the
+// cameras look near-perpendicular at it (nadir: keep `viewUp`), or no candidate
+// can give it a sign. `viewUp`/`axisUp`: the viewing-direction and image-up
+// readings (either may be null); the sign follows the first one present.
+// → { up, viewTiltDeg } — viewTiltDeg = angle between viewUp and the plane normal.
+export function planeUpOverride(cameras, viewUp = null, axisUp = null) {
+  const list = cameras && typeof cameras.values === 'function' ? [...cameras.values()] : (cameras || [])
+  const C = []
+  for (const cam of list) if (cam?.R && cam?.t) C.push(cameraCenter(cam))
+  if (C.length < 4) return null
+  let mx = 0, my = 0, mz = 0
+  for (const c of C) { mx += c[0]; my += c[1]; mz += c[2] }
+  mx /= C.length; my /= C.length; mz /= C.length
+  let xx = 0, xy = 0, xz = 0, yy = 0, yz = 0, zz = 0
+  for (const c of C) {
+    const dx = c[0] - mx, dy = c[1] - my, dz = c[2] - mz
+    xx += dx * dx; xy += dx * dy; xz += dx * dz
+    yy += dy * dy; yz += dy * dz; zz += dz * dz
+  }
+  if (!(xx + yy + zz > 1e-12)) return null
+  const { values, vectors } = jacobiEigen3([[xx, xy, xz], [xy, yy, yz], [xz, yz, zz]])
+  const [hi, mid, lo] = [0, 1, 2].sort((a, c) => values[c] - values[a])
+  const s1 = Math.sqrt(Math.max(0, values[hi])), s2 = Math.sqrt(Math.max(0, values[mid]))
+  const s3 = Math.sqrt(Math.max(0, values[lo]))
+  if (!(s2 >= PLANE_SPREAD_RATIO * s1) || !(s3 <= PLANE_THIN_RATIO * s2)) return null
+  let n = unit(vectors[lo])
+  if (!n) return null
+  const ref = viewUp ?? axisUp
+  if (!ref) return null
+  if (dot3(n, ref) < 0) n = [-n[0], -n[1], -n[2]]
+  const viewTiltDeg = viewUp ? Math.acos(Math.min(1, Math.abs(dot3(n, viewUp)))) * 180 / Math.PI : null
+  if (viewTiltDeg != null && viewTiltDeg <= PLANE_UP_OBLIQUE_DEG) return null
+  return { up: n, viewTiltDeg }
 }
 
 const dot3 = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2]

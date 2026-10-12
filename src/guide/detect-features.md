@@ -14,6 +14,25 @@ similar-looking texture apart better. Projects detected before this change keep
 working: their descriptors are converted when matching loads them, so you do not need
 to detect again.
 
+## How the settings fit together
+Detection runs four steps in a fixed order, and the dialog's Advanced settings are
+laid out in that order:
+
+1. **Resize** — each image is reduced so its long side is at most the detection
+   resolution. Smaller images are never enlarged.
+2. **Tile** — if tiling is on and the *resized* image is larger than one tile, it is
+   cut into overlapping tiles. Tiling never adds resolution: to detect a large scan in
+   more detail, raise the detection resolution; tiling then keeps memory in bounds.
+3. **Detect** — SIFT or the learned detector runs on each tile (or once).
+4. **Keep** — the strongest keypoints are kept, up to the per-image limit, ranked over
+   the whole image across all tiles.
+
+The strip under the quality cards shows these steps for the largest image the run will
+touch, for example `10,137×9,600 native → 2,400×2,273 resized → 2×2 tiles → SIFT → ≤ 10,000
+keypoints`. Each step in Advanced settings also says what it does to your images. A step
+that has no effect, such as tiling when the resized image already fits in one tile, is
+shown greyed with the reason.
+
 ## Detector
 **SIFT** is the dependable default and works entirely in WASM. **DISK** and
 **SuperPoint** are learned detectors meant to be paired with LightGlue matching; each
@@ -65,10 +84,12 @@ a second, weaker orientation, because on real data that cost matching time witho
 adding points.
 
 ## Tiling
-Tiling detects overlapping pieces near native resolution. Each piece keeps only the
-features in its own central region, so every feature is found exactly once and never
-right at a cut. Use **Auto** for SuperPoint or DISK inputs that exceed the single-pass limit, or
-for scans too large to detect in one pass. For SIFT, tiling gives the same keypoints
+Tiling detects overlapping pieces of the **resized** image (step 2 above), so it only
+does something when the detection resolution is larger than one tile. Each piece keeps
+only the features in its own central region, so every feature is found exactly once and
+never right at a cut. Use **Auto** for SuperPoint or DISK inputs that exceed the
+single-pass limit, or when a high detection resolution makes one pass too large for
+memory. For SIFT, tiling gives the same keypoints
 and matches as an untiled run (99.5 % identical on a building pair) and uses less
 memory, so it is safe to turn on for large images.
 

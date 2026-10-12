@@ -126,3 +126,15 @@ describe('cloud buffer reuse', () => {
     expect(res2.ok).toBe(false)
   })
 })
+
+it('stores a product preview as a PNG sidecar, never inline in the JSON', async () => {
+  const previewBlob = new Blob([new Uint8Array([137, 80, 78, 71])], { type: 'image/png' })
+  await opfs.saveProduct('binary-test', 'dem', { ...dem(1), previewBlob, previewUrl: 'blob:x' })
+  const products = await dir.getDirectoryHandle('products')
+  const meta = JSON.parse(new TextDecoder().decode(products.files.get('dem.json')))
+  expect(meta.previewUrl).toBeUndefined()
+  expect(meta.binaryFiles.preview.bytes).toBe(4)
+  const back = await opfs.loadProduct('binary-test', 'dem')
+  expect(back.previewBlob.type).toBe('image/png')
+  expect([...new Uint8Array(await back.previewBlob.arrayBuffer())]).toEqual([137, 80, 78, 71])
+})

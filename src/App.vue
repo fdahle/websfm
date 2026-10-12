@@ -54,6 +54,7 @@ import { planeFromThreePoints } from './core/products/screenPick.js'
 import { matrixFromTransform } from './core/products/cloudAlign.js'
 import { sectionCloud, sectionToCsv, sectionToDxf } from './core/products/cloudSection.js'
 import { imageResidualVectors } from './core/eval/imageStats.js'
+import { usedKeysForPair, usedPairCounts } from './core/eval/usedMatches.js'
 import { makeCanonicalToScan, makeFrameModelResolver } from './core/sfm/displayFrame.js'
 import { useProjectsStore } from './stores/useProjectsStore.js'
 import { useTheme } from './composables/useTheme.js'
@@ -63,6 +64,8 @@ import { useGuideStore } from './stores/useGuideStore.js'
 import { usePipeline } from './composables/usePipeline.js'
 import { useWorkflowRunner } from './composables/useWorkflowRunner.js'
 import { useComputeSettings } from './composables/useComputeSettings.js'
+import { useMapProducts } from './composables/useMapProducts.js'
+import { productMapBlocker } from './core/products/productLayers.js'
 import { useTabDrag } from './composables/useTabDrag.js'
 import { useSidebarResize } from './composables/useSidebarResize.js'
 import { useImportRouting } from './composables/useImportRouting.js'
@@ -166,6 +169,9 @@ const {
 // a LightGlue cap would discard most of them (P6 auto-hint).
 const detectedMaxKeypoints = computed(() =>
   images.value.reduce((m, img) => Math.max(m, img.kpCount || 0), 0))
+// The images matching will pair up — same filter as useMatchesStore.matchAll's `ready`.
+const detectedImageCount = computed(() =>
+  images.value.filter((img) => img.kpStatus === 'done' && (img.kpCount || 0) > 0).length)
 
 // ── Matches ───────────────────────────────────────────────────────────────────
 // Project-scoped store; restore/clear run through the project-store registry.
@@ -228,8 +234,8 @@ const { sidebarWidth, startSidebarResize } = useSidebarResize()
 // ── Reconstruction ────────────────────────────────────────────────────────────
 // Project-scoped store; restore/clear run through the project-store registry.
 const reconstructionStore = useReconstructionStore()
-const { cameras, sparseCameras, reconStatus, clouds, selectedCloudId, selectedCloud, mainSparseId, mainSparseCloud, depthMaps, depthMapCount, dem, demSource, meshSources, meshSource, ortho, orthoSurfaces, georef, canGeoreference, canGeoreferenceGcps, denseSummary, summary: reconSummary, georeferenceBlocker, crsSuggestion } = storeToRefs(reconstructionStore)
-const { reconstruct, importColmapModel, importInteropModel, importCloud, editClouds, computeDepthMaps, densify, generateDem, generateOrtho, generateMesh, georeference, effectiveFrameSpec, gcpAccuracyReport, gcpGuides, gcpEstimate, selectCloud, setCloudStyle, setCloudVisible, removeCloud, renameCloud, removeProduct, renameProduct, setMainSparse, clearDerived: clearReconstructionDerived } = reconstructionStore
+const { cameras, sparseCameras, reconStatus, clouds, selectedCloudId, selectedCloud, mainSparseId, mainSparseCloud, depthMaps, depthMapCount, dem, demSource, meshSources, meshSource, ortho, orthoSurfaces, productLayers, georef, canGeoreference, canGeoreferenceGcps, denseSummary, summary: reconSummary, georeferenceBlocker, crsSuggestion } = storeToRefs(reconstructionStore)
+const { reconstruct, importColmapModel, importInteropModel, importCloud, editClouds, computeDepthMaps, densify, generateDem, generateOrtho, generateMesh, georeference, effectiveFrameSpec, gcpAccuracyReport, gcpGuides, gcpEstimate, selectCloud, setCloudStyle, setCloudVisible, removeCloud, renameCloud, removeProduct, renameProduct, setProductOnMap, setProductOpacity, setMainSparse, clearDerived: clearReconstructionDerived } = reconstructionStore
 
 async function clearCurrentProjectDerived() {
   await clearReconstructionDerived()
@@ -243,9 +249,16 @@ async function clearCurrentProjectDerived() {
 const externalStore = useExternalStore()
 const {
   rasters, pendingRasters, pendingWorkCount: pendingRasterWork,
-  sources: rasterSources, hasReferenceDem, orthoRasters: referenceOrthos, mapRasters,
+  sources: rasterSources, hasReferenceDem, orthoRasters: referenceOrthos,
 } = storeToRefs(externalStore)
-const { importRaster, setRasterKind, setRasterStyle, setVerticalInfo, setRasterOnMap, setRasterOpacity, renameRaster, removeRaster, rasterById, probeRasterAt, ensureRasterLoaded } = externalStore
+const { importRaster, setRasterKind, setRasterStyle, setVerticalInfo, setRasterOnMap, setRasterOpacity, renameRaster, removeRaster, rasterById, ensureRasterLoaded } = externalStore
+// The map's raster layers + status-bar probe: reference rasters and computed
+// DEM/ortho alike (CLAUDE.md ▸ useExternalStore, map raster layers).
+const {
+  mapLayers, probeAt: probeMapLayersAt, mapMode, toggleModelFrame, mapFrame, modelCameras, modelMarkers, mapNotes,
+  measureTargets: mapMeasureTargets, measureTargetId: mapMeasureTargetId, setMeasureTarget: setMapMeasureTarget,
+  measureTarget: mapMeasureTarget,
+} = useMapProducts()
 
 function updateTabTitle(tabId, title) {
   const tab = tabs.value.find((candidate) => candidate.id === tabId)
@@ -746,6 +759,13 @@ const imagesLoading = computed(() => images.value.some(img => img.loading || img
 
 // Guard state for BOTH the ribbon and the DevConsole command line: the fields the
 // one shared prerequisite table reads (core/help/commands.js NEED_CHECKS).
+// 'image' | 'raster' (a DEM/ortho tab) | 'map' | 'viewer' | '' (tables, inspectors).
+const frontView = computed(() => {
+  const type = activeTab.value?.type
+  if (type === 'image') return 'image'
+  if (type === 'product' || type === 'raster') return 'raster'
+  return activeView.value === 'map' || activeView.value === 'viewer' ? activeView.value : ''
+})
 const commandState = computed(() => ({
   projectReady:  !!currentProjectId.value,
   imageCount:    images.value.length,
@@ -767,6 +787,12 @@ const commandState = computed(() => ({
   meshReady:     meshReady.value,
   orthoReady:    orthoReady.value,
   productReady:  productReady.value,
+  mapModelFrame: mapMode.value === 'model',
+  // The view in front, for the tools that act on one (NEED_CHECKS imageView /
+  // gcpView / measureHost), and the scene type the console's aerial-only check reads.
+  frontView: frontView.value,
+  mapRasterCount: mapMeasureTargets.value.length,
+  sceneType: currentSceneType.value,
 }))
 
 // Workflow preflight/execution state uses semantic output names rather than UI
@@ -796,7 +822,7 @@ async function runAutomatedWorkflowBlock(type, rawSettings) {
     ? (settings.overwrite ? [...images.value] : images.value.filter((img) => img.kpStatus !== 'done'))
     : []
   const before = type === 'detect-features'
-    ? new Map(targets.map((img) => [img.uuid, img.keypoints]))
+    ? new Map(targets.map((img) => [img.uuid, img.kpRev ?? 0]))
     : workflowOutputToken(type)
 
   let result
@@ -812,7 +838,7 @@ async function runAutomatedWorkflowBlock(type, rawSettings) {
 
   if (result?.ok === false || result?.unchanged) return result
   const changed = type === 'detect-features'
-    ? targets.every((img) => img.kpStatus === 'done' && img.keypoints !== before.get(img.uuid))
+    ? targets.every((img) => img.kpStatus === 'done' && (img.kpRev ?? 0) !== before.get(img.uuid))
     : workflowOutputToken(type) !== before
   return changed
     ? { ok: true, cancelled: false }
@@ -871,34 +897,14 @@ const hasSparse = computed(() => clouds.value.some((c) => c.kind === 'sparse'))
 // versus "reconstruction hasn't run yet". Used to dim unregistered images.
 const alignedUuids = computed(() => new Set(sparseCameras.value.keys()))
 
-// Per-pair count of matches that became tie-points in the sparse model.
-// Walk every tie-point's view-track ([uuid, kpIdx] observations); a pair of
-// observations (sorted by uuid to match `pairId`) is a "used correspondence"
-// of that image pair. Recomputed only when the sparse cloud changes.
-const usedMatchesByPair = computed(() => {
-  const byPair = new Map()   // pairId → Set("kpA:kpB")
-  // The MAIN model — the one reconstruction consumed. "First sparse cloud" was a
-  // COLMAP import's tracks whenever one sat ahead of the computed model, and it
-  // re-walked every track whenever any cloud (dense, mesh…) changed.
-  const sparse = mainSparseCloud.value
-  if (!sparse) return byPair
-  for (const pt of sparse.points) {
-    if (!pt.views || pt.views.size < 2) continue
-    const obs = [...pt.views.entries()]              // [[uuid, kpIdx], …]
-    for (let i = 0; i < obs.length; i++) {
-      for (let j = i + 1; j < obs.length; j++) {
-        let [ua, ka] = obs[i]
-        let [ub, kb] = obs[j]
-        if (ua > ub) { [ua, ka, ub, kb] = [ub, kb, ua, ka] }
-        const pid = `${ua}--${ub}`
-        let set = byPair.get(pid)
-        if (!set) { set = new Set(); byPair.set(pid, set) }
-        set.add(`${ka}:${kb}`)
-      }
-    }
-  }
-  return byPair
-})
+// Per-pair count of matches that became tie-points in the sparse model
+// (core/eval/usedMatches.js). The MAIN model — the one reconstruction consumed;
+// "first sparse cloud" was a COLMAP import's tracks whenever one sat ahead of the
+// computed model. Counts only: the per-keypoint keys are built for the one pair the
+// match preview shows (usedKeysOf), never for the whole model — that was a
+// many-second stall at project open.
+const usedCountsByPair = computed(() => usedPairCounts(mainSparseCloud.value?.points))
+const usedKeysOf = (pairId) => usedKeysForPair(mainSparseCloud.value?.points, pairId)
 
 const matchSummaries = computed(() => {
   const result = []
@@ -918,7 +924,7 @@ const matchSummaries = computed(() => {
       nameB:       imgB.name,
       inlierCount: entry.inlierCount,
       rawCount:    entry.rawCount,
-      usedCount:   usedMatchesByPair.value.get(pid)?.size ?? 0,
+      usedCount:   usedCountsByPair.value.get(pid) ?? 0,
       disabled:    entry.disabled ?? false,
     })
   }
@@ -963,7 +969,7 @@ const matchStats = computed(() => {
   }
   // Pairs that contributed at least one tie-point to the sparse model (0 until
   // reconstruction has run).
-  const used = hasSparse.value ? usedMatchesByPair.value.size : null
+  const used = hasSparse.value ? usedCountsByPair.value.size : null
   return { total, verified, running, error, used, disabled, weak }
 })
 
@@ -1294,6 +1300,7 @@ const ribbonViewState = computed(() => ({
   showGrid: showGrid.value,
   showLegend: showLegend.value,
   showMapGrid: showMapGrid.value,
+  mapModelFrame: mapMode.value === 'model',
   showFootprints: showFootprints.value,
   pointSize: pointSize.value,
   cameraScale: cameraScale.value,
@@ -1674,7 +1681,9 @@ const activeRasterTab = computed(() => {
   // through the tab's ProductViewer ref so the Ribbon's Measure group can show it.
   const measure = tab ? productViewerRefs[tab.id]?.measureState ?? null : null
   if (tab?.type === 'product') {
-    return { tabId: tab.id, kind: tab.productKind, imported: false, name: tab.title, measure }
+    const product = tab.productKind === 'ortho' ? ortho.value : dem.value
+    return { tabId: tab.id, kind: tab.productKind, imported: false, name: tab.title, measure,
+      onMap: !!productLayers.value[tab.productKind]?.onMap, mapBlocked: productMapBlocker(product) }
   }
   if (tab?.type === 'raster') {
     const r = rasterById(tab.rasterId)
@@ -1690,6 +1699,15 @@ const activeRasterTab = computed(() => {
   }
   return null
 })
+
+// The 2D map's Measure context for the Ribbon (null without a raster on the map):
+// the same state shape the raster tab reports, read through the map's handles.
+const mapMeasure = computed(() => (mapMeasureTargets.value.length ? {
+  targets: mapMeasureTargets.value,
+  targetId: mapMeasureTargetId.value,
+  kind: mapMeasureTarget.value?.kind ?? null,
+  measure: mapViewerRef.value?.measureState ?? null,
+} : null))
 
 function activeProductViewer() {
   const t = activeRasterTab.value
@@ -1859,6 +1877,16 @@ async function onProductToolRun(fn, settings) {
 // Filter Cloud deep links: the same dialog, starting on one method.
 const FILTER_DEEP_LINKS = { 'cloud-outliers': 'sor', 'cloud-subsample': 'voxel' }
 
+// Tools ▸ Point Cloud ▾ ▸ Select: the rows show whether a tool is on, so a click in
+// the 3D view toggles it. From another view it brings the 3D view forward with
+// that tool on — never off, which would read as the click doing nothing.
+function chooseSelectTool(kind) {
+  const fromElsewhere = activeView.value !== 'viewer'
+  activateTab('viewer')
+  if (fromElsewhere && selectTool3d.value === kind) return
+  viewerRef.value?.toggleSelectTool(kind)
+}
+
 // `value` is set only by a ribbon stepper (the new display value).
 function handleCommand(id, value) {
   // A deep link's starting method must not leak into a plain "Filter…" (Escape
@@ -1871,9 +1899,12 @@ function handleCommand(id, value) {
   if (EVAL_SECTIONS[id]) { openQuality(EVAL_SECTIONS[id]); return }
   // 3D view presets: 'view-preset-top' → setView('top').
   if (id.startsWith('view-preset-')) { viewerRef.value?.setView(id.slice('view-preset-'.length)); return }
-  // Raster Measure group: 'measure-length' → the active viewer's ruler, etc.
-  if (id === 'measure-saved') { activeProductViewer()?.toggleSavedMeasurements(); return }
-  if (id.startsWith('measure-')) { activeProductViewer()?.setMeasureTool(id.slice('measure-'.length)); return }
+  // Measure groups: 'measure-length' → the ruler of the viewer in front (a raster
+  // tab, or the 2D map), etc. The map also picks which raster it measures.
+  if (id.startsWith('measure-target:')) { setMapMeasureTarget(id.slice('measure-target:'.length)); return }
+  const measureHost = activeView.value === 'map' ? mapViewerRef.value : activeProductViewer()
+  if (id === 'measure-saved') { measureHost?.toggleSavedMeasurements(); return }
+  if (id.startsWith('measure-')) { measureHost?.setMeasureTool(id.slice('measure-'.length)); return }
 
   switch (id) {
     case 'import-images':        ribbonInput.value.click(); break
@@ -1906,20 +1937,19 @@ function handleCommand(id, value) {
     case 'map-fit-view':         mapViewerRef.value?.fitView(); break
     case 'map-toggle-grid': showMapGrid.value = !showMapGrid.value; break
     case 'map-toggle-footprints': showFootprints.value = !showFootprints.value; break
-    case 'map-gcp-edit':         mapGcpEdit.value = !mapGcpEdit.value; break
+    // Tools ▸ Georeferencing ▸ Edit GCPs: the mode of the view in front.
+    case 'edit-gcps':
+      if (activeView.value === 'map') mapGcpEdit.value = !mapGcpEdit.value
+      else handleCommand('img-gcp-edit')
+      break
+    case 'map-toggle-model-frame': toggleModelFrame(); break
     case 'set-region':           openRegionTool(); break
     case 'orient-model':         openOrientTool(); break
     case 'align-points':         openAlignPairs(); break
     case 'view-point-size':      setPointSize(value); break
     case 'view-camera-scale':    setCameraScale(value); break
-    case 'view-select-rect':     viewerRef.value?.toggleSelectTool('rect'); break
-    case 'view-select-lasso':    viewerRef.value?.toggleSelectTool('lasso'); break
-    // From the Point Cloud menu: bring the 3D view forward and make sure a tool is
-    // on (never toggle it off, which the ribbon's own Lasso button would).
-    case 'select-points':
-      activateTab('viewer')
-      if (!selectTool3d.value) viewerRef.value?.toggleSelectTool('lasso')
-      break
+    case 'view-select-rect':     chooseSelectTool('rect'); break
+    case 'view-select-lasso':    chooseSelectTool('lasso'); break
     case 'img-fit':              if (activeImageTab.value) imageViewerRefs[activeImageTab.value.id]?.fit(); break
     case 'img-zoom-in':          if (activeImageTab.value) imageViewerRefs[activeImageTab.value.id]?.zoomIn(); break
     case 'img-zoom-out':         if (activeImageTab.value) imageViewerRefs[activeImageTab.value.id]?.zoomOut(); break
@@ -1940,6 +1970,7 @@ function handleCommand(id, value) {
     case 'raster-toggle-map': {
       const r = activeRasterTab.value
       if (r?.rasterId) setRasterOnMap(r.rasterId, !r.onMap)
+      else if (r && !r.imported) setProductOnMap(r.kind, !r.onMap)
       break
     }
     case 'raster-remove':        if (activeRasterTab.value?.rasterId) confirmRemoveRaster(activeRasterTab.value.rasterId); break
@@ -2026,6 +2057,7 @@ function onRibbonPick(event) {
       :active-image-name="activeImageTab?.name ?? null"
       :image-view-state="activeImageViewState"
       :active-raster="activeRasterTab"
+      :map-measure="mapMeasure"
       :console-open="consoleOpen"
       :persistence-enabled="persistenceAvailable"
       :current-project-name="currentProjectName"
@@ -2048,13 +2080,15 @@ function onRibbonPick(event) {
         <div class="loading-spinner" />
         <div class="loading-text">
           <span>{{ projectLoadingLabel }}</span>
-          <span v-if="projectLoadingProgress" class="loading-detail">
-            <template v-if="projectLoadingProgress.total">
-              Loading image {{ projectLoadingProgress.done }}/{{ projectLoadingProgress.total }}
-              — {{ projectLoadingProgress.label }}
-            </template>
-            <template v-else>{{ projectLoadingProgress.label }}</template>
-          </span>
+          <template v-if="projectLoadingProgress">
+            <span class="loading-detail">
+              {{ projectLoadingProgress.label }}<template v-if="projectLoadingProgress.total">
+                ({{ projectLoadingProgress.done }}/{{ projectLoadingProgress.total }})</template>
+            </span>
+            <progress v-if="projectLoadingProgress.total" class="loading-bar"
+              :max="projectLoadingProgress.total" :value="projectLoadingProgress.done" />
+            <span v-if="projectLoadingProgress.detail" class="loading-detail">{{ projectLoadingProgress.detail }}</span>
+          </template>
         </div>
       </div>
     </div>
@@ -2120,6 +2154,7 @@ function onRibbonPick(event) {
       <MatchFeaturesModal
         v-if="matchFeaturesOpen"
         :detected-max-keypoints="detectedMaxKeypoints"
+        :detected-image-count="detectedImageCount"
         :posed-image-count="posedImageCount"
         :footprint-image-count="footprintImageCount"
         @close="matchFeaturesOpen = false"
@@ -2598,7 +2633,7 @@ function onRibbonPick(event) {
         :match-store="matchStore"
         :has-sparse="hasSparse"
         :aligned-uuids="alignedUuids"
-        :used-matches-by-pair="usedMatchesByPair"
+        :used-keys-of="usedKeysOf"
         :node-positions="matchNodePositions"
         @toggle-disabled="setPairDisabled"
         @close="matchListOpen = false"
@@ -2679,12 +2714,15 @@ function onRibbonPick(event) {
         :has-sparse="hasSparse"
         :dem="dem"
         :ortho="ortho"
+        :product-layers="productLayers"
         :rasters="rasters"
         :pending-rasters="pendingRasters"
         :open-tab-ids="openTabIds"
         @open-product="openComputedProductTab"
         @remove-product="confirmRemoveProduct"
         @rename-product="renameProductFromSidebar"
+        @set-product-on-map="({ kind, onMap }) => setProductOnMap(kind, onMap)"
+        @set-product-opacity="({ kind, opacity }) => setProductOpacity(kind, opacity)"
         @open-raster="openRasterTab"
         @convert-raster-to-image="(id) => onRasterImportAsImage({ id })"
         @remove-raster="confirmRemoveRaster"
@@ -2772,7 +2810,7 @@ function onRibbonPick(event) {
                 @undo="alignPairs.pairs = alignPairs.pairs.slice(0, -1)" @clear="alignPairs.pairs = []" @apply="applyAlignPairs" @close="alignPairs = null" />
             </template>
           </Viewer3D>
-          <ViewerMap v-if="mapMounted" ref="mapViewerRef" v-show="activeTabId === 'map'" v-model:gcp-edit="mapGcpEdit" :images="images" :gcps="gcps" :footprints="mapFootprints" :poses="poses" :selected-id="selectedId" :selected-gcp-id="selectedGcpId" :aligned-uuids="alignedUuids" :has-sparse="hasSparse" :crs="currentCrs" :show-footprints="showFootprints" :show-grid="showMapGrid" :rasters="mapRasters" :probe-raster="probeRasterAt" :load-raster="ensureRasterLoaded" @select="selectImage" @command="handleCommand" @select-gcp="selectGcp" @set-gcp-position="setGcpGroundPosition" @add-gcp-at="addGcpAtCoord" @delete-gcp="deleteGcpFromEditor" />
+          <ViewerMap v-if="mapMounted" ref="mapViewerRef" v-show="activeTabId === 'map'" v-model:gcp-edit="mapGcpEdit" :images="images" :gcps="gcps" :footprints="mapFootprints" :poses="poses" :selected-id="selectedId" :selected-gcp-id="selectedGcpId" :aligned-uuids="alignedUuids" :has-sparse="hasSparse" :crs="currentCrs" :show-footprints="showFootprints" :show-grid="showMapGrid" :rasters="mapLayers" :probe-raster="probeMapLayersAt" :model-frame="mapFrame" :model-cameras="modelCameras" :model-markers="modelMarkers" :measure-target="mapMeasureTarget" :notes="mapNotes" :load-raster="ensureRasterLoaded" @select="selectImage" @command="handleCommand" @select-gcp="selectGcp" @set-gcp-position="setGcpGroundPosition" @add-gcp-at="addGcpAtCoord" @delete-gcp="deleteGcpFromEditor" />
           <template v-for="tab in tabs" :key="tab.id">
             <ViewerImage
               v-if="tab.type === 'image' && imageById(tab.imageId)"
@@ -2794,8 +2832,8 @@ function onRibbonPick(event) {
               :scene-type="currentSceneType"
               @exit-mask-edit="patchImageView({ maskEdit: false })"
               @exit-gcp-edit="exitGcpEdit"
-              @update-mask="(dataUrl, persist) => updateMask(tab.imageId, dataUrl, persist)"
-              @update-depth="(dataUrl) => updateDepth(tab.imageId, dataUrl)"
+              @update-mask="(blob, persist) => updateMask(tab.imageId, blob, persist)"
+              @update-depth="(blob) => updateDepth(tab.imageId, blob)"
               :is-film="sensorForImage(tab.imageId)?.kind === 'film'"
               :show-fiducials="imageViewPrefs.showFiducials"
               :fiducial-marks="fiducialDisplayForImage(tab.imageId).marks"
@@ -2966,6 +3004,18 @@ function onRibbonPick(event) {
   font-size: 12px;
   color: var(--text-dim, #9a9aa4);
 }
+.loading-bar {
+  width: 280px;
+  height: 6px;
+  appearance: none;
+  border: none;
+  border-radius: 3px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.12);
+}
+.loading-bar::-webkit-progress-bar { background: rgba(255, 255, 255, 0.12); }
+.loading-bar::-webkit-progress-value { background: var(--accent, #44aaff); }
+.loading-bar::-moz-progress-bar { background: var(--accent, #44aaff); }
 @keyframes loading-spin {
   to { transform: rotate(360deg); }
 }

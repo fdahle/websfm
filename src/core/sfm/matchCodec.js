@@ -39,7 +39,10 @@ export function asPairList(matches) {
   return new Uint32PairList(packMatchPairs(matches))
 }
 
+// A fresh flat [a0, b0, a1, b1, …] buffer: a copy of an already-flat Uint32Array (the
+// store's own shape), or a packed [[a, b], …] list.
 export function packMatchPairs(matches) {
+  if (matches instanceof Uint32Array) return matches.slice()
   const data = new Uint32Array((matches?.length ?? 0) * 2)
   let i = 0
   for (const pair of (matches || [])) {

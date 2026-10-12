@@ -5,7 +5,7 @@ import { parseGeoJson, looksLikeGeoJson, geoJsonToGcps, guessNameKey } from '../
 import { detectCameraMode } from '../core/io/cameraKind.js'
 import { detectFileKind, isColmapFile } from '../core/io/importKind.js'
 import { parseFiducialObs } from '../core/io/fiducialObs.js'
-import { sniffCloudFormat } from '../core/io/cloudImport.js'
+import { sniffCloudFormat, looksLikeXyzText } from '../core/io/cloudImport.js'
 import { looksLikeZipHead, isProjectArchiveName } from '../core/io/projectArchive.js'
 import { applyImportTransform } from '../core/io/cloudImport.js'
 import { parseCloudFile as parseCloudFileWorker } from '../workers/computeClient.js'
@@ -31,6 +31,9 @@ export function useImportRouting({ addGcps, addFootprints, addSensors, addPoses,
     importRasterOpen, importRasterData,
   } = storeToRefs(useModalsStore())
   const { log } = useLog()
+
+  // Text files past this size are routed by their head (see openDroppedImport).
+  const LARGE_TEXT_BYTES = 64 * 1024 * 1024
 
   // sensor | pose | null, set before opening the file picker (by the command dispatch).
   const cameraPickMode = ref(null)
@@ -104,6 +107,14 @@ export function useImportRouting({ addGcps, addFootprints, addSensors, addPoses,
       const fmt = sniffCloudFormat(head, file.name)
       if (fmt === 'ply' || fmt === 'las') { openCloudImport(file); return }
     } catch { /* fall through to text routing */ }
+    // A large text file is sniffed from its head alone: a multi-GB .xyz must reach
+    // the streaming cloud reader without ever becoming one string here. GCP / pose /
+    // GeoJSON files are small, so everything else keeps the whole-text detection.
+    if (file.size > LARGE_TEXT_BYTES && !isColmapFile(file.name)) {
+      try {
+        if (looksLikeXyzText(await headText(file))) { openCloudImport(file); return }
+      } catch { /* fall through */ }
+    }
 
     let text
     try {
@@ -113,6 +124,13 @@ export function useImportRouting({ addGcps, addFootprints, addSensors, addPoses,
       return
     }
     routeImport(file, detectFileKind(text, file.name).kind)
+  }
+
+  // The first ~1 MiB as text, cut at the last complete line.
+  async function headText(file) {
+    const text = new TextDecoder().decode(await file.slice(0, 1024 * 1024).arrayBuffer())
+    const nl = text.lastIndexOf('\n')
+    return nl > 0 ? text.slice(0, nl) : text
   }
 
   // Cheap two-step: ZIP magic (4 bytes) then, only for a zip, the manifest peek
@@ -224,13 +242,13 @@ export function useImportRouting({ addGcps, addFootprints, addSensors, addPoses,
 
   // ── Import (point cloud / mesh) ─────────────────────────────────────────────
   // Parse the file off the main thread (the parseCloud worker op), then open the
-  // settings modal with the parsed cloud + stats. The parse buffer is transferred
-  // to the worker and back, so it never clones dense-scale data.
+  // settings modal with the parsed cloud + stats. The File goes to the worker as a
+  // handle and is read there in slices (text formats stream), so this thread never
+  // holds its bytes; the parsed buffers are transferred back.
   async function openCloudImport(file) {
     if (!file || !importCloud) return
     try {
-      const buffer = await file.arrayBuffer()
-      const { parsed, stats } = await parseCloudFileWorker(buffer, file.name, {
+      const { parsed, stats } = await parseCloudFileWorker(file, {
         onLog: (m, l, c) => log(m, l, c),
       })
       importCloudData.value = { parsed, stats, fileName: file.name }
@@ -273,12 +291,12 @@ export function useImportRouting({ addGcps, addFootprints, addSensors, addPoses,
     const model = {}
     try {
       const zip = files.find((f) => /\.zip$/i.test(f.name))
-      const dec = new TextDecoder()
-      // Binary entries stay bytes; text entries decode to a string.
+      // Every entry stays bytes: parseColmapModel decodes a .txt a slice at a time,
+      // so a large images.txt never becomes one string.
       const add = (name, data) => {
         const key = COLMAP_CANON[String(name).split(/[\\/]/).pop().toLowerCase()]
         if (!key) return
-        model[key] = key.endsWith('.bin') ? new Uint8Array(data) : (typeof data === 'string' ? data : dec.decode(data))
+        model[key] = typeof data === 'string' ? data : new Uint8Array(data)
       }
       if (zip) {
         for (const e of unzipStore(new Uint8Array(await zip.arrayBuffer()))) add(e.name, e.data)

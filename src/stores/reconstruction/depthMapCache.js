@@ -45,6 +45,41 @@ export function createDepthMapCache({ isPersisting, currentProjectId, mainSparse
     }
   }
 
+  // A streamed Stage A run (TODO ▸ SC-4): the worker hands each map off as it
+  // finishes, it is written here at once and dropped, and the index is committed
+  // only at the end — nothing holds every map. Returns null when nothing can be
+  // persisted (the caller then keeps the maps in memory, as before).
+  //   const run = await beginStreamedDepthMaps()
+  //   run.add(map)            per finished map (planes written, then released)
+  //   await run.settled()     all writes landed; run.metas = index entries in order
+  //   await run.commit(settings)
+  async function beginStreamedDepthMaps() {
+    if (!isPersisting()) return null
+    const projectId = currentProjectId()
+    await opfs.beginDepthPlanes(projectId)
+    depthMaps.value = new Map()
+    depthMapsMeta.value = []   // the old set is gone; the new one is advertised on commit
+    const metas = [], writes = []
+    return {
+      projectId,
+      metas,
+      add(m) {
+        const { meta, buffers } = serializeDepthMap(m)
+        metas.push(meta)
+        writes.push(opfs.saveDepthPlane(projectId, m.uuid, buffers))
+      },
+      settled: () => Promise.all(writes),
+      async commit(settings) {
+        await Promise.all(writes)
+        const index = { ...buildDepthIndex([], { sparseCloud: mainSparseCloud(), settings }), maps: metas }
+        await opfs.commitDepthIndex(projectId, index)
+        if (currentProjectId() === projectId) depthMapsMeta.value = metas
+        log(`Dense: ${metas.length} depth map(s) saved (${formatBytes(depthMapBytes(metas))}) as they finished `
+          + `— reopening this project will not need a Stage A re-run`, 'info', 'Dense')
+      },
+    }
+  }
+
   async function depthMapInput() {
     const projectId = currentProjectId()
     if (depthMapsMeta.value.length && isPersisting()) {
@@ -90,6 +125,6 @@ export function createDepthMapCache({ isPersisting, currentProjectId, mainSparse
 
   return {
     depthMaps, depthMapsMeta, depthMapCount,
-    persistDepthMaps, depthMapInput, loadDepthIndexIntoMeta, clearDepthMaps,
+    persistDepthMaps, beginStreamedDepthMaps, depthMapInput, loadDepthIndexIntoMeta, clearDepthMaps,
   }
 }

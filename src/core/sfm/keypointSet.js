@@ -15,13 +15,27 @@
 // Replaces arrays of `{x, y, color}` objects: ~104 B per keypoint per copy as JS
 // objects, 16–20 B here (TODO ▸ MEM; measured in HANDOVER ▸ B-mem).
 
+import { KP_STRIDE } from '../features/keypoints.js'
+
 export function isKeypointSet(v) {
   return !!v && v.xy instanceof Float64Array
 }
 
-/** A set from `[{x, y, color?}]` (store / tests); a set is returned unchanged. */
+/**
+ * A set from the store's typed keypoints (core/features/keypoints.js: `data` with
+ * KP_STRIDE, optional `rgb`) or from `[{x, y, color?}]` (tests, worker callers); a
+ * set is returned unchanged.
+ */
 export function keypointSetFrom(objects) {
   if (isKeypointSet(objects)) return objects
+  if (objects?.data instanceof Float32Array) {
+    const { data, rgb } = objects
+    const n = Math.floor(data.length / KP_STRIDE)
+    const xy = new Float64Array(2 * n)
+    for (let k = 0; k < n; k++) { xy[2 * k] = data[KP_STRIDE * k]; xy[2 * k + 1] = data[KP_STRIDE * k + 1] }
+    const colored = rgb?.length === 3 * n
+    return { n, xy, rgb: colored ? rgb.slice() : null, hasColor: colored ? new Uint8Array(n).fill(1) : null }
+  }
   const list = objects ?? []
   const n = list.length
   const xy = new Float64Array(2 * n)

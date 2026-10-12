@@ -135,7 +135,7 @@ export interface DepthMap extends DepthMapMeta {
    */
   normals: Float32Array | null
   /** display-only preview PNG; not persisted here (the images store owns it). */
-  displayDataUrl?: string
+  displayBlob?: Blob
 }
 
 /** A 2D observation of a 3D point in a given camera, in pixel coords. */

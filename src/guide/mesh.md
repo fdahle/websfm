@@ -101,7 +101,8 @@ replaces these copies.
 - **Crop…** keeps the triangles whose three corners lie inside a box.
 - **Sample to points…** turns the surface into a dense cloud of evenly spread points
   with normals and colour, so the point-cloud tools and the DEM can use a mesh.
-- **Area & volume…** reports the surface area and, when the mesh is closed and
+- **Mesh area & volume…** (in **Tools → Measure ▾**, with the other measurements)
+  reports the surface area and, when the mesh is closed and
   consistently wound, its volume. An open mesh reports how many open edges it has
   instead of a volume that would mean nothing. It welds duplicate corners itself
   before checking whether the mesh is closed, so an imported STL is measured

@@ -4,6 +4,7 @@ import { beforeAll, describe, it, expect } from 'vitest'
 
 import initMatching from '../../wasm/matching/matching.js'
 import { verifyMatches, verifyPointPairs, packMatchedPoints, inlierSpread } from './verify.js'
+import { keypointsFromObjects as K } from './keypoints.js'
 
 // Load the matching wasm bytes ourselves (Node can't fetch() the .wasm URL the
 // glue defaults to); the module-level singleton then makes the core module's own
@@ -41,7 +42,7 @@ describe('verifyMatches (F + H-vs-F degeneracy)', () => {
 
   it('reports a homography inlier count alongside the fundamental inliers', async () => {
     const { kpsA, kpsB, matches } = scene(false)
-    const res = await verifyMatches(kpsA, kpsB, matches, { ransacThreshPx: 2.0, maxIters: 2000 })
+    const res = await verifyMatches(K(kpsA), K(kpsB), matches, { ransacThreshPx: 2.0, maxIters: 2000 })
     expect(res).toBeTruthy()
     expect(typeof res.hInlierCount).toBe('number')
     // General motion: F fits nearly every point, H fits far fewer (degeneracy ratio low).
@@ -51,18 +52,18 @@ describe('verifyMatches (F + H-vs-F degeneracy)', () => {
 
   it('flags a planar scene as degenerate (H ≈ F)', async () => {
     const { kpsA, kpsB, matches } = scene(true)
-    const res = await verifyMatches(kpsA, kpsB, matches, { ransacThreshPx: 2.0, maxIters: 2000 })
+    const res = await verifyMatches(K(kpsA), K(kpsB), matches, { ransacThreshPx: 2.0, maxIters: 2000 })
     expect(res).toBeTruthy()
     expect(res.hInlierCount / res.inlierCount).toBeGreaterThan(0.9)
   })
 
   it('skips the homography count when F inliers are below hSkipBelow', async () => {
     const { kpsA, kpsB, matches } = scene(true) // planar → strong H when computed
-    const base = await verifyMatches(kpsA, kpsB, matches, { ransacThreshPx: 2.0, maxIters: 2000 })
+    const base = await verifyMatches(K(kpsA), K(kpsB), matches, { ransacThreshPx: 2.0, maxIters: 2000 })
     expect(base.hInlierCount).toBeGreaterThan(0)
 
     // Floor above this pair's F-inlier count ⇒ H skipped ⇒ reported 0, F untouched.
-    const skipped = await verifyMatches(kpsA, kpsB, matches,
+    const skipped = await verifyMatches(K(kpsA), K(kpsB), matches,
       { ransacThreshPx: 2.0, maxIters: 2000, hSkipBelow: base.inlierCount + 1 })
     expect(skipped.hInlierCount).toBe(0)
     expect(skipped.inlierCount).toBe(base.inlierCount)
@@ -75,8 +76,8 @@ describe('verifyMatches (F + H-vs-F degeneracy)', () => {
     // Scramble the match order and indices so the packing really has to index.
     const perm = matches.map((m, i) => ({ ia: (i * 7) % 60, ib: (i * 7) % 60 }))
     const opts = { ransacThreshPx: 2.0, maxIters: 2000 }
-    const viaKps = await verifyMatches(kpsA, kpsB, perm, opts)
-    const { ptsA, ptsB } = packMatchedPoints(kpsA, kpsB, perm)
+    const viaKps = await verifyMatches(K(kpsA), K(kpsB), perm, opts)
+    const { ptsA, ptsB } = packMatchedPoints(K(kpsA), K(kpsB), perm)
     expect(ptsA).toBeInstanceOf(Float32Array)
     expect([ptsA[2], ptsA[3]]).toEqual([Math.fround(kpsA[7].x), Math.fround(kpsA[7].y)])
     const viaPts = await verifyPointPairs(ptsA, ptsB, opts)
@@ -97,7 +98,7 @@ describe('inlierSpread (positional degeneracy)', () => {
       kpsB.push({ x: 120 + i * 30, y: 60 + i * 20 })
       matches.push({ ia: i, ib: i })
     }
-    const s = inlierSpread(kpsA, kpsB, matches, all(20))
+    const s = inlierSpread(K(kpsA), K(kpsB), matches, all(20))
     expect(s.count).toBe(20)
     expect(s.uniqueA).toBe(20)
     expect(s.uniqueB).toBe(20)
@@ -114,7 +115,7 @@ describe('inlierSpread (positional degeneracy)', () => {
       kpsB.push({ x: 400 + (i % 2) * 0.3, y: 300 + (i % 2) * 0.3 }) // all within ~1px
       matches.push({ ia: i, ib: i })
     }
-    const s = inlierSpread(kpsA, kpsB, matches, all(20))
+    const s = inlierSpread(K(kpsA), K(kpsB), matches, all(20))
     expect(s.count).toBe(20)
     expect(s.uniqueA).toBe(20)
     expect(s.uniqueB).toBeLessThanOrEqual(2)
@@ -128,7 +129,7 @@ describe('inlierSpread (positional degeneracy)', () => {
       kpsB.push({ x: 500 + Math.random() * 3, y: 500 + Math.random() * 3 })
       matches.push({ ia: i, ib: i })
     }
-    const s = inlierSpread(kpsA, kpsB, matches, all(20))
+    const s = inlierSpread(K(kpsA), K(kpsB), matches, all(20))
     expect(Math.min(s.extentA, s.extentB)).toBeLessThan(8)
   })
 
@@ -136,7 +137,7 @@ describe('inlierSpread (positional degeneracy)', () => {
     const kpsA = [{ x: 0, y: 0 }, { x: 500, y: 500 }]
     const kpsB = [{ x: 10, y: 10 }, { x: 510, y: 510 }]
     const matches = [{ ia: 0, ib: 0 }, { ia: 1, ib: 1 }]
-    const s = inlierSpread(kpsA, kpsB, matches, new Float32Array([1, 0]))
+    const s = inlierSpread(K(kpsA), K(kpsB), matches, new Float32Array([1, 0]))
     expect(s.count).toBe(1)
     expect(s.uniqueA).toBe(1)
     expect(s.extentA).toBe(0)

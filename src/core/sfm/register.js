@@ -37,7 +37,7 @@ export async function registerImages(ctx) {
     imgs, donePairs, Kmap, cfg,
     cameras, tracks, ids, keypointsAt, registeredUuids,
     refreshTracks, foldOneEndpointMatches, mergeTracks,
-    runBundleAdjust, filterTracks, modelReprojStats, imageByUuid, numStats,
+    runBundleAdjust, runLocalBundleAdjust = null, filterTracks, modelReprojStats, imageByUuid, numStats,
     log, onProgress,
   } = ctx
   // Phase-relative progress (core/sfm/progressPlan.js). The caller binds this to a
@@ -89,6 +89,8 @@ export async function registerImages(ctx) {
     interimBaEvery,
     interimBaGrowth = 0,
     interimBaIterations,
+    localBaWindow = 0,
+    localBaIterations = 6,
     rescueStalled,
     rescueRefineRatio,
   } = cfg
@@ -489,6 +491,10 @@ export async function registerImages(ctx) {
       // model — so later PnP registers at the *tight* gate and the final BA starts
       // near the optimum. Poses/points only here (no self-calibration on the pre-
       // filter mess — that's deferred to the post-filter passes, R6).
+      // Local BA (localBaWindow > 0): refine the new camera's neighbourhood right away, so
+      // the global solves can be spaced further apart (interimBaGrowth) without letting
+      // fresh cameras drift until the next one.
+      if (localBaWindow > 1 && runLocalBundleAdjust) await runLocalBundleAdjust(img.uuid, localBaWindow, localBaIterations)
       registeredSinceBA++
       // With `interimBaGrowth` > 1 the solves are also spaced geometrically (COLMAP's
       // ba_global_images_ratio): each one costs the whole model, so a fixed every-N
@@ -499,13 +505,18 @@ export async function registerImages(ctx) {
         reportRegister(`Bundle adjustment (${cameras.size} cameras)…`)
         await runBundleAdjust(`interim BA (${cameras.size} cameras)`, interimBaIterations,
           distortionRefine(cameras.size))
+        const ptsBeforeFilter = tracks.liveCount()
         const f = filterTracks({ maxReprojPx: filterMaxReprojPx * 2, minTriAngleDeg: filterMinTriAngleDeg })
         const mergedTr = mergeTracks(filterMaxReprojPx) // fold split tracks (both-endpoint case)
         refreshTracks() // BA + filter + merge dropped points; compact + reindex first
         const folded = foldOneEndpointMatches(filterMaxReprojPx)
         log(`interim BA cleanup — filtered ${f.obsRemoved} obs + ${f.ptsRemoved} points, `
           + `merged ${mergedTr} split track(s), folded ${folded} track observation(s); `
-          + `${tracks.liveCount()} points`, 'debug', 'Reconstruction')
+          + `${tracks.liveCount()} points`,
+          // A cleanup that removes most of the model is the failure itself, not detail:
+          // with no points left, nothing further can register (St Nazaire, 2026-10-09,
+          // where every point sat under the parallax floor and this line was invisible).
+          f.ptsRemoved > 0.5 * ptsBeforeFilter ? 'warn' : 'debug', 'Reconstruction')
         registeredSinceBA = 0
         camerasAtLastBA = cameras.size
       }

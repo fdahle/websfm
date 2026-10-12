@@ -32,6 +32,17 @@ function valueAt(desc, c, r) {
   return v
 }
 
+// The value of the cell CONTAINING world (x, y): no interpolation and no
+// neighbour fallback, so a nodata cell reads null. This is what a cursor readout
+// shows. `sampleRaster` (below) is for consumers that want a height near a point
+// even at a hole's edge (GCP Z fill) — reading a neighbour there is its contract,
+// but a readout doing it prints a height over a hole.
+export function cellValue(desc, x, y) {
+  const { originX, originY, scaleX, scaleY } = desc?.geoTransform || {}
+  if (!desc || !scaleX || !scaleY) return null
+  return valueAt(desc, Math.floor((x - originX) / scaleX), Math.floor((y - originY) / scaleY))
+}
+
 // Bilinear when all four neighbours are valid; else the nearest valid cell; else
 // null. Returning null (rather than 0) is load-bearing — a nodata hole reported
 // as an elevation of 0 is an error you only notice after it has poisoned a fit.

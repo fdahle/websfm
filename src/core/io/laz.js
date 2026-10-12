@@ -39,15 +39,16 @@ export const LAZ_CHUNK_POINTS = 50_000
 // one file. The chunking this module does is only in how the records are *built*.
 //
 // Point attributes: the ones that fit a standard LAS field (intensity,
-// classification, GPS time → format 3, …) are written exactly as cloudToLas writes
+// classification, GPS time → format 3, …) are written exactly as cloudToLasParts writes
 // them. Extra-bytes attributes (a computed `distance`, PLY scalars) are NOT: the
 // codec (crates/lazcodec) builds its LASzip item list from the point format alone
 // — Point10 [+ GpsTime] + RGB12, no BYTE item — and rejects a record longer than
 // those items. They are dropped with a warning; LAS and PLY carry them.
 //
-// Returns a Uint8Array. Throws if no compressor was supplied — silently writing
-// an uncompressed .las under a .laz name would be worse.
-export function cloudToLaz(points, { crsCode = null, geographic = false, attributes = true, compress, createCompressor, onLog } = {}) {
+// Returns a Uint8Array, or with `parts: true` [header, points] for a Blob (no
+// concatenated copy). Throws if no compressor was supplied — silently writing an
+// uncompressed .las under a .laz name would be worse.
+export function cloudToLaz(points, { crsCode = null, geographic = false, attributes = true, compress, createCompressor, onLog, parts = false } = {}) {
   if (typeof compress !== 'function' && typeof createCompressor !== 'function') {
     throw new Error('cloudToLaz: no LAZ compressor supplied (the lazcodec WASM module failed to load)')
   }
@@ -102,16 +103,19 @@ export function cloudToLaz(points, { crsCode = null, geographic = false, attribu
 
   const header = writeLasHeader({ n, vlrs, scale, offset, bbox, compressed: true, format, recordLength,
     pointsByReturn: pointsByReturn(native, n) })
-  const out = new Uint8Array(header.length + packed.data.length)
-  out.set(header, 0)
-  out.set(packed.data, header.length)
   // The codec writes a standalone point block; LASzip files store absolute
   // chunk-table offsets, so account for the header and VLRs when embedding it.
-  relocateChunkTable(out.subarray(header.length), packed.vlr, header.length)
+  relocateChunkTable(packed.data, packed.vlr, header.length)
+  const size = header.length + packed.data.length
   const ratio = n ? (n * recordLength / packed.data.length) : 1
-  onLog?.(`LAZ export: ${n.toLocaleString()} points, ${(out.length / 1024 ** 2).toFixed(1)} MB `
+  onLog?.(`LAZ export: ${n.toLocaleString()} points, ${(size / 1024 ** 2).toFixed(1)} MB `
     + `(${ratio.toFixed(1)}× smaller than LAS)`
     + (crsCode ? `, EPSG:${crsCode} GeoKey VLR` : ', no CRS VLR (local frame)'), 'info', 'Export')
+  // parts: the two pieces for a Blob, without the concatenated copy.
+  if (parts) return [header, packed.data]
+  const out = new Uint8Array(size)
+  out.set(header, 0)
+  out.set(packed.data, header.length)
   return out
 }
 

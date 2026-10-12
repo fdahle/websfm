@@ -115,7 +115,7 @@ function run() {
 
       <SettingsGroup title="Optimization">
         <SettingsField label-for="baIter"
-          hint="Bundle-adjustment iterations per pass. Set to 0 to skip bundle adjustment.">
+          hint="Bundle-adjustment iterations per pass. 0 skips bundle adjustment — and with it self-calibration.">
           <template #label>
             <GlossaryTerm id="bundle-adjustment">Bundle adjustment</GlossaryTerm> iterations
           </template>
@@ -133,7 +133,9 @@ function run() {
           <template #label>
             <GlossaryTerm id="self-calibration">Self-calibration</GlossaryTerm>
           </template>
-          <select id="refineIntr" v-model="settings.refineIntrinsics" class="field-input field-select">
+          <!-- Self-calibration happens inside bundle adjustment; with 0 iterations it never runs. -->
+          <select id="refineIntr" v-model="settings.refineIntrinsics" class="field-input field-select"
+            :disabled="!(settings.baIterations > 0)">
             <option value="auto">Auto (recommended)</option>
             <option value="none">Off — use sensor table</option>
             <option value="f">Focal length</option>
@@ -141,7 +143,8 @@ function run() {
             <option value="f,k1">Focal + radial k1</option>
             <option value="f,cxcy,k1,k2,k3">Focal + principal point + k1,k2,k3</option>
           </select>
-          <template #hint>{{ selfCalHint }}</template>
+          <template #hint>{{ settings.baIterations > 0 ? selfCalHint
+            : 'Not used: bundle adjustment is off (0 iterations), and self-calibration runs inside it.' }}</template>
         </SettingsField>
       </SettingsGroup>
     </AdvancedDisclosure>

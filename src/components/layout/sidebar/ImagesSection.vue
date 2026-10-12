@@ -3,6 +3,7 @@ import { ref, computed, watch, nextTick } from 'vue'
 import { useContextMenu } from '../../../composables/useContextMenu.js'
 import { isTiff } from '../../../utils/tiff.js'
 import { groupImageSections } from '../../../utils/imageGroups.js'
+import { useVirtualList } from '../../../composables/useVirtualList.js'
 
 const props = defineProps({
   open:       { type: Boolean, default: true },
@@ -36,14 +37,24 @@ const emit = defineEmits([
 const UNGROUPED = '__ungrouped__'
 const ungroupedCollapsed = ref(false)
 const sections = computed(() => groupImageSections(props.images, props.imageGroups))
+// An expanded image contributes a third row kind, its 'details' card, right after
+// it — so every element the list renders is one entry here (the virtual list's unit).
 const rows = computed(() => {
-  if (!props.imageGroups.length) return props.images.map((img) => ({ kind: 'image', key: img.id, img }))
   const out = []
+  const open = expanded.value
+  const pushImage = (img, groupKey) => {
+    out.push({ kind: 'image', key: img.id, img, groupKey })
+    if (open[img.id]) out.push({ kind: 'details', key: `details:${img.id}`, img, groupKey })
+  }
+  if (!props.imageGroups.length) {
+    for (const img of props.images) pushImage(img, undefined)
+    return out
+  }
   for (const { group, images } of sections.value) {
     const groupKey = group?.id ?? UNGROUPED
     const collapsed = group ? group.collapsed : ungroupedCollapsed.value
     out.push({ kind: 'group', key: `group:${groupKey}`, groupKey, group, count: images.length, collapsed })
-    if (!collapsed) for (const img of images) out.push({ kind: 'image', key: img.id, img, groupKey })
+    if (!collapsed) for (const img of images) pushImage(img, groupKey)
   }
   return out
 })
@@ -71,7 +82,11 @@ function startGroupRename(id) {
   if (!group) return
   editingGroupId.value = id
   editingGroupName.value = group.name
-  nextTick(() => { groupRenameInput.value?.focus(); groupRenameInput.value?.select() })
+  // In a long (virtualised) list the header may be outside the rendered window.
+  nextTick(() => {
+    revealRow(`group:${id}`)
+    nextTick(() => { groupRenameInput.value?.focus(); groupRenameInput.value?.select() })
+  })
 }
 function commitGroupRename() {
   if (editingGroupId.value == null) return
@@ -86,8 +101,8 @@ function cancelGroupRename() { editingGroupId.value = null }
 const DRAG_TYPE = 'application/x-websfm-image-ids'
 const dropTarget = ref(null)
 function onRowDragStart(e, img) {
-  const ids = localSelected.value.includes(img.id)
-    ? visibleIds.value.filter((id) => localSelected.value.includes(id))
+  const ids = selectedSet.value.has(img.id)
+    ? visibleIds.value.filter((id) => selectedSet.value.has(id))
     : [img.id]
   e.dataTransfer.setData(DRAG_TYPE, JSON.stringify(ids))
   e.dataTransfer.effectAllowed = 'move'
@@ -153,9 +168,16 @@ function toggleExpand(id) {
   else expanded.value[id] = true
 }
 
-// Pose record (exterior orientation) for an image, if any.
+// Pose record (exterior orientation) for an image, if any. Indexed once per pose
+// list: a scan of every pose per row was O(images × poses).
+const poseByImageId = computed(() => {
+  const m = new Map()
+  for (const p of props.poses) if (p.imageId != null && !m.has(p.imageId)) m.set(p.imageId, p)
+  return m
+})
+const sensorById = computed(() => new Map(props.sensors.map((s) => [s.id, s])))
 function poseFor(img) {
-  return props.poses.find((p) => p.imageId === img.id) || null
+  return poseByImageId.value.get(img.id) || null
 }
 // Pose status shown on the image row: an imported pose, an EXIF GPS prior, or none.
 function poseStatus(img) {
@@ -165,11 +187,11 @@ function poseStatus(img) {
 }
 // Label of the sensor an image is bound to.
 function sensorLabel(img) {
-  return props.sensors.find((s) => s.id === img.sensorId)?.label || '—'
+  return sensorById.value.get(img.sensorId)?.label || '—'
 }
 // Film sensor (F4) an image belongs to, or null — gates the fiducial-marks flag.
 function filmSensor(img) {
-  const s = props.sensors.find((x) => x.id === img.sensorId)
+  const s = sensorById.value.get(img.sensorId)
   return s?.kind === 'film' ? s : null
 }
 // Marks placed on this image (F4). <3 ⇒ interior orientation incomplete.
@@ -203,6 +225,8 @@ function rowTitle(img) {
 
 // Multi-select: local array of selected ids + anchor for shift-range
 const localSelected = ref([])
+// Membership test for rendering: `includes` per row was O(rows × selection).
+const selectedSet = computed(() => new Set(localSelected.value))
 const anchor = ref(null)
 let suppressWatch = false
 
@@ -217,7 +241,7 @@ function handleItemClick(e, img) {
     const [from, to] = ai <= ci ? [ai, ci] : [ci, ai]
     localSelected.value = ids.slice(from, to + 1)
   } else if (e.ctrlKey || e.metaKey) {
-    localSelected.value = localSelected.value.includes(img.id)
+    localSelected.value = selectedSet.value.has(img.id)
       ? localSelected.value.filter((id) => id !== img.id)
       : [...localSelected.value, img.id]
     anchor.value = img.id
@@ -242,8 +266,8 @@ const { menu: ctxMenu, open: openImageCtx, close: closeMenu } = useContextMenu()
 const ctxTargets = computed(() => {
   if (!ctxMenu.value) return []
   const { img } = ctxMenu.value
-  if (localSelected.value.length > 1 && localSelected.value.includes(img.id))
-    return props.images.filter((i) => localSelected.value.includes(i.id))
+  if (localSelected.value.length > 1 && selectedSet.value.has(img.id))
+    return props.images.filter((i) => selectedSet.value.has(i.id))
   return [img]
 })
 const ctxIsMulti = computed(() => ctxTargets.value.length > 1)
@@ -283,7 +307,7 @@ function cancelRename() { editingImageId.value = null }
 
 function onRightClick(e, img) {
   // Right-clicking outside the current selection collapses to that single image
-  if (!localSelected.value.includes(img.id)) {
+  if (!selectedSet.value.has(img.id)) {
     localSelected.value = [img.id]
     anchor.value = img.id
     suppressWatch = true
@@ -337,6 +361,29 @@ function ctxRemove() {
   emit('remove-image', ctxTargets.value.map((img) => img.id))
   closeMenu()
 }
+
+// ── Virtual scrolling (TODO ▸ SC-8) ──
+// Thousands of images: only the rows inside the sidebar's scroll viewport are in the
+// DOM. Heights are fixed by CSS, so the spacers need no measuring: an image row or a
+// group header is ROW_PX; a details card is its 4 + 4 px padding, DETAIL_ROW_PX per
+// line (how many lines depends on the image) and its 4 px bottom margin. Declared
+// last: its watchers read `rows` (and through it everything above) immediately.
+const ROW_PX = 24
+const DETAIL_ROW_PX = 20
+function detailLines(img) {
+  return 4 + (filmSensor(img) ? 1 : 0) + (props.hasSparse ? 1 : 0)
+}
+function rowHeight(row) {
+  return row.kind === 'details' ? 8 + DETAIL_ROW_PX * detailLines(row.img) + 4 : ROW_PX
+}
+const {
+  listRef: listEl, visibleItems: visibleRows, padTop, padBottom, scrollToIndex,
+} = useVirtualList({ items: () => rows.value, heightOf: rowHeight, threshold: 150 })
+// Scroll a row into the rendered window (a rename on a header that is off-screen).
+function revealRow(key) {
+  const i = rows.value.findIndex((r) => r.key === key)
+  if (i >= 0) scrollToIndex(i)
+}
 </script>
 
 <template>
@@ -356,8 +403,9 @@ function ctxRemove() {
       </div>
       <span class="meta-progress-label">Reading metadata… {{ metaDone }}/{{ images.length }}</span>
     </div>
-    <ul v-if="open" class="item-list" @dragleave="onListDragLeave" @dragend="dropTarget = null">
-      <template v-for="row in rows" :key="row.key">
+    <ul v-if="open" ref="listEl" class="item-list" @dragleave="onListDragLeave" @dragend="dropTarget = null">
+      <li v-if="padTop" class="v-spacer" aria-hidden="true" :style="{ height: padTop + 'px' }"></li>
+      <template v-for="row in visibleRows" :key="row.key">
         <li
           v-if="row.kind === 'group'"
           class="group-hd"
@@ -382,10 +430,10 @@ function ctxRemove() {
           <span v-else class="group-name">{{ row.group ? row.group.name : 'Ungrouped' }}</span>
           <span class="group-count">{{ row.count }}</span>
         </li>
-        <template v-else>
         <li
+          v-else-if="row.kind === 'image'"
           class="list-item"
-          :class="{ selected: localSelected.includes(row.img.id), unaligned: isUnaligned(row.img), loading: row.img.previewPending, failed: row.img.previewFailed, 'in-group': row.groupKey, 'drop-target': row.groupKey && dropTarget === row.groupKey }"
+          :class="{ selected: selectedSet.has(row.img.id), unaligned: isUnaligned(row.img), loading: row.img.previewPending, failed: row.img.previewFailed, 'in-group': row.groupKey, 'drop-target': row.groupKey && dropTarget === row.groupKey }"
           :title="rowTitle(row.img)"
           :draggable="imageGroups.length > 0 && editingImageId !== row.img.id"
           @click="handleItemClick($event, row.img)"
@@ -421,7 +469,7 @@ function ctxRemove() {
           <span v-else-if="row.img.previewFailed" class="unaligned-tag failed-tag" :title="failReason(row.img)">⚠</span>
           <span v-else-if="isUnaligned(row.img)" class="unaligned-tag" title="Not aligned — no camera in the sparse model">⚠</span>
         </li>
-        <li v-if="expanded[row.img.id]" :key="`details:${row.img.id}`" class="img-details" :class="{ 'in-group': row.groupKey }" @contextmenu.stop>
+        <li v-else class="img-details" :class="{ 'in-group': row.groupKey }" @contextmenu.stop>
           <div class="detail-row">
             <span class="detail-label">Keypoints</span>
             <span class="detail-value">
@@ -442,7 +490,7 @@ function ctxRemove() {
           </div>
           <div class="detail-row">
             <span class="detail-label">Sensor</span>
-            <span class="detail-value" :class="{ 'detail-dim': !row.img.sensorId }">{{ sensorLabel(row.img) }}</span>
+            <span class="detail-value" :class="{ 'detail-dim': !row.img.sensorId }" :title="sensorLabel(row.img)">{{ sensorLabel(row.img) }}</span>
           </div>
           <div class="detail-row">
             <span class="detail-label">Pose</span>
@@ -461,8 +509,8 @@ function ctxRemove() {
             <span class="detail-value" :class="{ 'detail-error': isUnaligned(row.img) }">{{ isUnaligned(row.img) ? 'no' : 'yes' }}</span>
           </div>
         </li>
-        </template>
       </template>
+      <li v-if="padBottom" class="v-spacer" aria-hidden="true" :style="{ height: padBottom + 'px' }"></li>
       <li v-if="!images.length" class="empty">No images — drop here to add</li>
     </ul>
 
@@ -550,6 +598,12 @@ function ctxRemove() {
 .group-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .group-count { font-size: 11px; font-weight: 400; color: var(--text-dim); flex-shrink: 0; }
 .list-item.in-group { padding-left: 24px; }
+/* Fixed line height: the virtual list computes a details card's height from it
+   (ImagesSection DETAIL_ROW_PX) instead of measuring. */
+.img-details .detail-row { height: 20px; line-height: 20px; gap: 8px; }
+.img-details .detail-label { flex-shrink: 0; }
+.img-details .detail-value { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.v-spacer { list-style: none; pointer-events: none; }
 .img-details.in-group { margin-left: 31px; }
 .drop-target { background: rgba(14, 99, 156, 0.18); }
 .group-hd.drop-target { box-shadow: inset 0 0 0 1px var(--accent); }

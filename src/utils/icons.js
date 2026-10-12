@@ -91,11 +91,15 @@ export const icons = {
     <circle cx="12" cy="12" r="8" />
     <circle cx="12" cy="12" r="3.5" />
     <path d="M12 2v3M12 19v3M2 12h3M19 12h3" />`,
-  // Scale bar: a ruler laid between two marked endpoints — the graduations are
-  // what distinguishes it from the plain 'link'/measure glyphs.
+  // The Measure ▸ Ruler tool: a graduated ruler.
   ruler: `
     <rect x="2.5" y="8.5" width="19" height="7" rx="1" />
     <path d="M6.5 8.5v3M10 8.5v4.5M13.5 8.5v3M17 8.5v4.5" />`,
+  // Scale bars (Georeferencing): a known distance between two target marks, so it
+  // does not read as the Ruler measuring tool.
+  'scale-bar': `
+    <circle cx="4.5" cy="12" r="2.5" /><circle cx="19.5" cy="12" r="2.5" />
+    <path d="M7 12h10M9.5 9.5L7 12l2.5 2.5M14.5 9.5L17 12l-2.5 2.5" />`,
   // Measure group (DEM / orthophoto tab): planimetric area, elevation profile,
   // cut/fill volume.
   area: `

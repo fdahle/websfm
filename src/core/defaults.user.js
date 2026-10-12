@@ -248,6 +248,7 @@ export const DEM_DEFAULTS = {
   aggregate: 'max', // 'max' (DSM top surface) | 'mean' | 'median'
   fillMethod: 'idw', // 'none' | 'nearest' | 'idw'
   fillRadius: 2,    // IDW hole-fill radius (cells); 0 = none
+  extent: 'core',   // 'core' = the cloud's dense footprint (dem.js coreExtent) | 'all' = raw min/max
 }
 
 // Orthophoto (core/products/ortho.js). Mirrored by OrthoModal.vue.
@@ -264,6 +265,7 @@ export const ORTHO_DEFAULTS = {
   maxCost: 0,       // 0 = no cost gate; else drop matches above this cost
   fillMethod: 'idw', // colour interpolation: 'none' | 'nearest' | 'idw'
   fillRadius: 2,    // fill unsampled pixels inside the chosen surface (cells)
+  extent: 'core',   // mesh/plane surface extent, as DEM_DEFAULTS.extent; 'dem' follows the DEM grid
 }
 
 // Product export (core/products/exporters.js + geotiff.js). Mirrored by ExportModal.vue.

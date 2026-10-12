@@ -126,13 +126,25 @@ describe('dense cloud round trip', () => {
     ...extra,
   })
 
-  it('preserves the flat layout through the Float64 on-disk widening', () => {
-    const out = roundTrip(dense())
+  it('preserves the flat layout, storing a Float32 cloud as Float32 (12 bytes/point)', () => {
+    const ser = serializeCloud(dense())
+    expect(ser.buffers.pos.byteLength).toBe(2 * 12)
+    const out = deserializeCloud(ser, makeCloudId)
     expect(out.kind).toBe('dense')
     expect(out.count).toBe(2)
     expect([...out.pos]).toEqual([1, 2, 3, 4, 5, 6])
     expect([...out.col]).toEqual([10, 20, 30, 40, 50, 60])
     expect(out.pos).toBeInstanceOf(Float32Array)
+    // A view on the read buffer, not a copy.
+    expect(out.pos.buffer).toBe(ser.buffers.pos)
+  })
+
+  it('still reads an older save that widened pos to Float64', () => {
+    const ser = serializeCloud(dense())
+    const wide = new Float64Array(new Float32Array(ser.buffers.pos))
+    const out = deserializeCloud({ ...ser, buffers: { ...ser.buffers, pos: wide.buffer } }, makeCloudId)
+    expect(out.pos).toBeInstanceOf(Float32Array)
+    expect([...out.pos]).toEqual([1, 2, 3, 4, 5, 6])
   })
 
   it('round-trips normals when present and leaves them undefined when not', () => {

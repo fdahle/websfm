@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed } from 'vue'
+import { useImagesStore } from '../../stores/useImagesStore.js'
 
 // Multi-image GCP inspector: one panel per registered observation, each cropped
 // and zoomed to centre the GCP's marked pixel, with a crosshair marker. Opened
@@ -26,6 +27,9 @@ const imageById = computed(() => {
   for (const img of props.images) m.set(img.id, img)
   return m
 })
+
+// A dead blob: URL is healed from the OPFS copy (CLAUDE.md: every <img> on img.url).
+const imagesStore = useImagesStore()
 
 function reprojFor(imageId) {
   return props.report?.observations?.find((o) => o.imageId === imageId)?.reprojPx ?? null
@@ -94,7 +98,8 @@ function fmtCoord(v) {
     <div v-if="panels.length" class="gcp-grid">
       <div v-for="p in panels" :key="p.imageId" class="gcp-panel">
         <div class="panel-viewport">
-          <img class="panel-img" :src="p.url" :alt="p.name" :style="imgStyle(p)" draggable="false" />
+          <img class="panel-img" :src="p.url" :alt="p.name" :style="imgStyle(p)" draggable="false" decoding="async"
+            @error="imagesStore.reportImageLoadError(p.imageId)" />
           <div class="panel-crosshair">
             <span class="ch-h"></span>
             <span class="ch-v"></span>

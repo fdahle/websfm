@@ -1,5 +1,6 @@
 // Coordinates are already in the raster's recorded frame. No implicit scaling.
 import { sampleRaster, worldToPixel } from '../io/rasterSample.js'
+import { polygonSpans } from './polygonSpans.js'
 
 export function polylineLength(points) {
   let total = 0
@@ -135,34 +136,24 @@ export function polygonVolume(grid, points, { base = 'plane', height = null } = 
   }
   baseInfo.vertexHeights = vertexHeights
 
-  // Scanline fill in pixel space: a cell is inside when its centre (c+½, r+½) is.
-  const poly = points.map(p => worldToPixel(grid, p.x, p.y))
-  let minRow = Infinity, maxRow = -Infinity
-  for (const p of poly) { if (p.row < minRow) minRow = p.row; if (p.row > maxRow) maxRow = p.row }
+  // A cell is inside when its centre (c+½, r+½) is — the same spans raster
+  // clipping uses (polygonSpans.js). Unclamped: cells off the raster count as
+  // inside-but-unmeasured, so a polygon hanging off the edge lowers coverage.
+  const ring = points.map(p => { const px = worldToPixel(grid, p.x, p.y); return [px.col, px.row] })
   const cellArea = Math.abs(scaleX * scaleY)
   let cut = 0, fill = 0, insideCells = 0, validCells = 0
-  const xs = []
-  for (let r = Math.ceil(minRow - 0.5); r + 0.5 <= maxRow; r++) {
-    const yc = r + 0.5
-    xs.length = 0
-    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-      const a = poly[j], b = poly[i]
-      if ((a.row > yc) !== (b.row > yc)) xs.push(a.col + (yc - a.row) * (b.col - a.col) / (b.row - a.row))
+  polygonSpans([ring], (r, c0, c1) => {
+    const y = grid.geoTransform.originY + (r + 0.5) * scaleY
+    for (let c = c0; c <= c1; c++) {
+      insideCells++
+      if (!validCell(grid, c, r)) continue
+      validCells++
+      const x = grid.geoTransform.originX + (c + 0.5) * scaleX
+      const dz = grid.data[r * grid.width + c] + zOffset - baseAt(x, y)
+      if (dz > 0) cut += dz * cellArea
+      else fill -= dz * cellArea
     }
-    xs.sort((p, q) => p - q)
-    for (let k = 0; k + 1 < xs.length; k += 2) {
-      for (let c = Math.ceil(xs[k] - 0.5); c + 0.5 < xs[k + 1]; c++) {
-        insideCells++
-        if (!validCell(grid, c, r)) continue
-        validCells++
-        const x = grid.geoTransform.originX + (c + 0.5) * scaleX
-        const y = grid.geoTransform.originY + yc * scaleY
-        const dz = grid.data[r * grid.width + c] + zOffset - baseAt(x, y)
-        if (dz > 0) cut += dz * cellArea
-        else fill -= dz * cellArea
-      }
-    }
-  }
+  })
   if (!validCells) return { error: 'no-data', insideCells }
   return { cut, fill, net: cut - fill, cellArea, insideCells, validCells,
     coverage: validCells / insideCells, base: baseInfo }

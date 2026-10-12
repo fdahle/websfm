@@ -26,3 +26,22 @@ it('stages DEM points as a disposable transferable buffer without detaching the 
   expect(store.clouds[0].pos[0]).toBe(7000000.01)
   generate.mockRestore()
 })
+
+it('puts a computed product on the map unless it has no preview, whatever its frame', async () => {
+  setActivePinia(createPinia())
+  useProjectsStore().persistenceAvailable = false
+  const store = useReconstructionStore()
+  const base = { width: 2, height: 2, gsd: 1, originX: 0, originY: 2, data: new Float32Array(4), previewUrl: 'data:x' }
+  store.dem = { ...base, crs: 'local', previewUrl: null }
+  expect(store.setProductOnMap('dem', true)).toBe(false)
+  expect(store.productLayers.dem).toBeUndefined()
+  // A local-frame product may be requested: the model-frame map can place it.
+  store.dem = { ...base, crs: 'local' }
+  expect(store.setProductOnMap('dem', true)).toBe(true)
+  store.setProductOpacity('dem', 0.3)
+  expect(store.productLayers.dem).toEqual({ onMap: true, opacity: 0.3 })
+  // Hiding is always allowed, even once the product could no longer be placed.
+  store.dem = { ...base, crs: 'local', previewUrl: null }
+  expect(store.setProductOnMap('dem', false)).toBe(true)
+  expect(store.productLayers.dem.onMap).toBe(false)
+})

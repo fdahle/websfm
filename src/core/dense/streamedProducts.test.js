@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { fuseDepthMaps, fuseDepthMapsStreamed } from './mvs.js'
+import { fuseDepthMaps, fuseDepthMapsStreamed, finishFusion, mergeFusionCounters } from './mvs.js'
 import { orthorectify, orthorectifyStreamed } from '../products/ortho.js'
 import { serializeDepthMap } from './depthMapCodec.js'
 import { readDepthFiles, readDepthOnly } from './depthFileReader.js'
@@ -28,6 +28,99 @@ describe('bounded map loading', () => {
     expect([...actual]).toEqual([...expected]); expect([...actual.nrm]).toEqual([...expected.nrm])
     expect(actual.summary).toEqual(expected.summary)
   })
+  it('culls maps out of view and caches planes, and still fuses the identical cloud', async () => {
+    // Two groups 1 km apart: neither sees the other, so every cross-group pair is culled.
+    const ms = [...maps(), ...maps().map((m, j) => ({ ...m, uuid: `far${j}`, t: [m.t[0] - 1000, 0, 10] }))]
+    const entries = files(ms), expected = fuseDepthMaps(ms, {})
+    const logs = []
+    let reads = 0
+    const actual = await fuseDepthMapsStreamed(entries, i => readDepthFiles(entries[i]), { cacheBytes: 2 * 32 * 32 * 4 },
+      (m) => logs.push(m), { loadDepth: (i) => { reads++; return readDepthOnly(entries[i]) } })
+    expect([...actual]).toEqual([...expected])
+    expect(actual.summary).toEqual(expected.summary)
+    const culled = Number(/\((\d+) culled/.exec(logs.find((m) => m.includes('culled as out of view')))[1])
+    expect(culled).toBe(8 * 4) // each map skips the 4 of the other group
+    expect(reads).toBeLessThan(8 * 7)
+  })
+
+  it('plans its comparison cache on the known request sequence (fewer reads, same cloud)', async () => {
+    // Four mutually visible maps, a two-plane cache: the sequence is 1,2,3 | 0,2,3 |
+    // 0,1,3 | 0,1,2. Evicting the plane wanted furthest ahead reads 8 planes; LRU
+    // would miss on all 12.
+    const ms = maps(), entries = files(ms), expected = fuseDepthMaps(ms, {})
+    let reads = 0
+    const actual = await fuseDepthMapsStreamed(entries, i => readDepthFiles(entries[i]), { cacheBytes: 2 * 32 * 32 * 4 },
+      () => {}, { loadDepth: (i) => { reads++; return readDepthOnly(entries[i]) } })
+    expect([...actual]).toEqual([...expected])
+    expect(reads).toBe(8)
+  })
+
+  // Tiled fusion emits slab by slab, so the rows come in another order: compare the
+  // multiset of [x,y,z,r,g,b,nx,ny,nz] rows.
+  const rows = (flat) => Array.from({ length: flat.length / 6 }, (_, i) =>
+    [...flat.subarray(i * 6, i * 6 + 6), ...flat.nrm.subarray(i * 3, i * 3 + 3)].join(',')).sort()
+  const slabBudget = (refused, slabsWanted) => refused.input + 27 * refused.cells + 85 * Math.ceil(refused.cells / slabsWanted)
+  it.each([{}, { step: 2 }, { removeIsolated: false, mergeCell: 0.2 }, { minViews: 1, minTriAngleDeg: 0, mergeCell: 0.15 }])(
+    'over budget, fusion in slabs builds the identical cloud: %j', async (opts) => {
+      // Two groups far apart along x (the slab axis), so some slabs skip some maps.
+      const ms = [...maps(), ...maps().map((m, j) => ({ ...m, uuid: `far${j}`, t: [m.t[0] - 30, 0, 10] }))]
+      const one = fuseDepthMaps(ms, opts)
+      const tiled = fuseDepthMaps(ms, { ...opts, memBudgetBytes: slabBudget(fuseDepthMaps(ms, { ...opts, memBudgetBytes: 1 }).refused, 5) })
+      expect(tiled.refused).toBeUndefined()
+      expect(tiled.summary.slabs).toBeGreaterThan(2)
+      expect(one.length).toBeGreaterThan(0)
+      expect(rows(tiled)).toEqual(rows(one))
+      expect({ ...tiled.summary, slabs: 1 }).toEqual(one.summary)
+
+      const entries = files(ms), io = [(i) => readDepthFiles(entries[i]), { cacheBytes: 3 * 32 * 32 * 4 }]
+      const sOpts = { ...opts, ...io[1] }
+      const refused = (await fuseDepthMapsStreamed(entries, io[0], { ...sOpts, memBudgetBytes: 1 })).refused
+      const parts = []
+      const streamed = await fuseDepthMapsStreamed(entries, io[0], { ...sOpts, memBudgetBytes: slabBudget(refused, 5) }, () => {},
+        { loadDepth: (i) => readDepthOnly(entries[i]), onTile: (flat) => parts.push(flat) })
+      expect(streamed.length).toBe(0)
+      expect(parts.length).toBe(streamed.summary.slabs)
+      expect(parts.length).toBeGreaterThan(2)
+      const joined = new Float32Array(parts.reduce((n, p) => n + p.length, 0)), nrm = new Float32Array(joined.length / 2)
+      let o = 0
+      for (const p of parts) { joined.set(p, o * 6); nrm.set(p.nrm, o * 3); o += p.length / 6 }
+      joined.nrm = nrm
+      expect(rows(joined)).toEqual(rows(one))
+      expect({ ...streamed.summary, slabs: 1 }).toEqual(one.summary)
+    })
+  it.each([{}, { removeIsolated: false, mergeCell: 0.2 }])('a plan split over workers, slab by slab, fuses the identical cloud: %j', async (opts) => {
+    const ms = [...maps(), ...maps().map((m, j) => ({ ...m, uuid: `far${j}`, t: [m.t[0] - 30, 0, 10] }))]
+    const one = fuseDepthMaps(ms, opts)
+    const entries = files(ms), load = (i) => readDepthFiles(entries[i])
+    const sOpts = { ...opts, cacheBytes: 2 * 32 * 32 * 4, parallel: 3 }
+    const plan = await fuseDepthMapsStreamed(entries, load, { ...sOpts, planOnly: true })
+    expect(plan.workers).toBe(3)
+    expect(plan.slabs.length).toBeGreaterThanOrEqual(3) // ~ one per worker
+    // The plan crosses a worker boundary: it must survive structured cloning.
+    const sent = structuredClone(plan)
+    // Run the slabs in a scrambled order, as a worker pool would finish them.
+    const order = sent.slabs.map((_, i) => i).reverse()
+    const bySlab = new Map(), counters = []
+    for (const i of order) {
+      const run = await fuseDepthMapsStreamed(entries, load, { ...sOpts, plan: sent, slabIndices: [i] }, () => {},
+        { loadDepth: (k) => readDepthOnly(entries[k]), onTile: (flat) => bySlab.set(i, flat) })
+      counters.push(run.counters)
+      expect(run.stream.compared).toBeGreaterThanOrEqual(0)
+    }
+    const parts = sent.slabs.map((_, i) => bySlab.get(i))
+    const joined = finishFusion(sent, mergeFusionCounters(counters), parts)
+    expect(rows(joined)).toEqual(rows(one))
+    expect({ ...joined.summary, slabs: 1 }).toEqual(one.summary)
+  })
+  it('refuses when even the cloud itself does not fit', () => {
+    const ms = maps()
+    const { cells } = fuseDepthMaps(ms, { memBudgetBytes: 1 }).refused
+    const logs = []
+    const out = fuseDepthMaps(ms, { memBudgetBytes: 2 * 27 * cells - 1 }, (m, l) => logs.push([m, l]))
+    expect(out.refused).toBeTruthy()
+    expect(logs.some(([m, l]) => l === 'error' && m.includes('even in slabs'))).toBe(true)
+  })
+
   it('depth-only comparison loads give the identical cloud and a monotonic bar', async () => {
     const ms = maps(), entries = files(ms), expected = fuseDepthMaps(ms, {})
     const progress = []

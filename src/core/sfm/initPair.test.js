@@ -269,3 +269,76 @@ describe('selectInitPair — match-graph connectivity bias', () => {
     expect([res.best.entry.idA, res.best.entry.idB]).toEqual(['growingA', 'growingB'])
   })
 })
+
+// A hovering burst: `ids.length` cameras a few mm apart, all seeing the same points, so
+// every pair among them has the most inliers in the project and ~0.1° of parallax.
+function makeBurst(ids, nPoints, seed, step = 0.01) {
+  const rng = mulberry32(seed)
+  const X = Array.from({ length: nPoints }, () => [(rng() - 0.5) * 3, (rng() - 0.5) * 3, 4 + rng() * 2])
+  const R = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
+  const t = ids.map((_, k) => [-step * k, 0, 0])
+  const images = Object.fromEntries(ids.map((id, k) =>
+    [id, { name: id, kp: keypointSetFrom(X.map((p) => project(R, t[k], p))) }]))
+  const entries = []
+  for (let a = 0; a < ids.length; a++) {
+    for (let b = a + 1; b < ids.length; b++) {
+      entries.push({
+        idA: ids[a], idB: ids[b], F: fundamental(R, t[a], R, t[b]),
+        matches: X.map((_, i) => [i, i]), inlierCount: nPoints,
+      })
+    }
+  }
+  return { entries, images }
+}
+
+describe('selectInitPair — widening past a near-coincident burst', () => {
+  // St Nazaire, SuperPoint + LightGlue (2026-10-09): a 9-frame hover had the 36
+  // highest-inlier pairs in the project, so the whole candidate batch sat at ~0.2°;
+  // the fallback seed's points all fell under the track filter's parallax floor and
+  // the model died at 7 cameras with 0 points.
+  function hoverScene() {
+    const burst = makeBurst(['h0', 'h1', 'h2', 'h3', 'h4'], 100, 31)
+    const good = makePair('goodA', 'goodB', 40, 33)
+    const images = { ...burst.images, ...good.images }
+    const Kmap = new Map(Object.keys(images).map((uuid) => [uuid, K]))
+    return { donePairs: [...burst.entries, good.entry], images, Kmap }
+  }
+
+  it('keeps probing beyond the first batch until a pair clears the floor', async () => {
+    const { donePairs, images, Kmap } = hoverScene()
+    const logs = []
+    const res = await selectInitPair({
+      donePairs, Kmap, settings: { initCandidates: 3 },
+      imageByUuid: (uuid) => images[uuid] ?? null, numStats, projDepth,
+    }, { onLog: (m) => logs.push(m) })
+    expect(res.status).toBe('ok')
+    expect([res.best.entry.idA, res.best.entry.idB]).toEqual(['goodA', 'goodB'])
+    expect(res.best.angle).toBeGreaterThan(2)
+    // The rest of the burst is predicted below the floor from the first batch and skipped,
+    // so the widened search reaches the good pair without probing all 10 burst pairs.
+    expect(logs.some((m) => /widening the search/.test(m) && /skipped as near-coincident/.test(m))).toBe(true)
+    expect(res.perPairInitReproj.length).toBeLessThan(donePairs.length)
+  })
+
+  it('is unchanged when the first batch already holds a sound seed', async () => {
+    const { donePairs, images, Kmap } = hoverScene()
+    const logs = []
+    await selectInitPair({
+      donePairs, Kmap, settings: { initCandidates: 24 },
+      imageByUuid: (uuid) => images[uuid] ?? null, numStats, projDepth,
+    }, { onLog: (m) => logs.push(m) })
+    expect(logs.some((m) => /widening the search/.test(m))).toBe(false)
+  })
+
+  it('says plainly when the fallback seed is below the track filter floor', async () => {
+    const { donePairs, images, Kmap } = hoverScene()
+    const logs = []
+    const res = await selectInitPair({
+      donePairs, Kmap, settings: { initCandidates: 3, initCandidateMax: 3, filterMinTriAngleDeg: 1.5 },
+      imageByUuid: (uuid) => images[uuid] ?? null, numStats, projDepth,
+    }, { onLog: (m) => logs.push(m) })
+    expect(res.status).toBe('ok')
+    expect(res.best.angle).toBeLessThan(1.5)
+    expect(logs.some((m) => /below the 1.5° the track filter requires/.test(m))).toBe(true)
+  })
+})

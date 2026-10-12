@@ -14,8 +14,8 @@ function ensureWasm() {
 /**
  * RANSAC fundamental matrix estimation on a set of putative matches.
  *
- * @param {Array<{x,y}>} kpsA - keypoints from image A (original pixel coords)
- * @param {Array<{x,y}>} kpsB - keypoints from image B (original pixel coords)
+ * @param {Keypoints} kpsA - typed keypoints of image A (original px; core/features/keypoints.js)
+ * @param {Keypoints} kpsB - typed keypoints of image B
  * @param {Array<{ia,ib}>} matches - putative match pairs (indices into kpsA/kpsB)
  * @param {object} options
  * @returns {Promise<{ F: number[][], inlierMask: Float32Array, inlierCount: number, hInlierCount: number } | null>}
@@ -37,10 +37,10 @@ export function packMatchedPoints(kpsA, kpsB, matches) {
   const ptsB = new Float32Array(n * 2)
   for (let i = 0; i < n; i++) {
     const { ia, ib } = matches[i]
-    ptsA[i * 2]     = kpsA[ia].x
-    ptsA[i * 2 + 1] = kpsA[ia].y
-    ptsB[i * 2]     = kpsB[ib].x
-    ptsB[i * 2 + 1] = kpsB[ib].y
+    ptsA[i * 2]     = kpsA.x(ia)
+    ptsA[i * 2 + 1] = kpsA.y(ia)
+    ptsB[i * 2]     = kpsB.x(ib)
+    ptsB[i * 2 + 1] = kpsB.y(ib)
   }
   return { ptsA, ptsB }
 }
@@ -99,18 +99,19 @@ export function inlierSpread(kpsA, kpsB, matches, inlierMask, roundPx = 1) {
   let count = 0
   for (let i = 0; i < matches.length; i++) {
     if (!(inlierMask[i] > 0.5)) continue
-    const a = kpsA[matches[i].ia], b = kpsB[matches[i].ib]
+    const ax = kpsA.x(matches[i].ia), ay = kpsA.y(matches[i].ia)
+    const bx = kpsB.x(matches[i].ib), by = kpsB.y(matches[i].ib)
     count++
-    seenA.add(`${Math.round(a.x / roundPx)},${Math.round(a.y / roundPx)}`)
-    seenB.add(`${Math.round(b.x / roundPx)},${Math.round(b.y / roundPx)}`)
-    if (a.x < minAx) minAx = a.x
-    if (a.x > maxAx) maxAx = a.x
-    if (a.y < minAy) minAy = a.y
-    if (a.y > maxAy) maxAy = a.y
-    if (b.x < minBx) minBx = b.x
-    if (b.x > maxBx) maxBx = b.x
-    if (b.y < minBy) minBy = b.y
-    if (b.y > maxBy) maxBy = b.y
+    seenA.add(`${Math.round(ax / roundPx)},${Math.round(ay / roundPx)}`)
+    seenB.add(`${Math.round(bx / roundPx)},${Math.round(by / roundPx)}`)
+    if (ax < minAx) minAx = ax
+    if (ax > maxAx) maxAx = ax
+    if (ay < minAy) minAy = ay
+    if (ay > maxAy) maxAy = ay
+    if (bx < minBx) minBx = bx
+    if (bx > maxBx) maxBx = bx
+    if (by < minBy) minBy = by
+    if (by > maxBy) maxBy = by
   }
   return {
     count,

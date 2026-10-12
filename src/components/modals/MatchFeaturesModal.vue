@@ -3,7 +3,7 @@ import { ref, computed, watch } from 'vue'
 import FieldHelp from '../guide/FieldHelp.vue'
 import ModalShell from './ui/ModalShell.vue'
 import SettingsField from './ui/SettingsField.vue'
-import SettingsGroup from './ui/SettingsGroup.vue'
+import SettingsStep from './ui/SettingsStep.vue'
 import AdvancedDisclosure from './ui/AdvancedDisclosure.vue'
 import SegmentedControl from './ui/SegmentedControl.vue'
 import PresetCards from './ui/PresetCards.vue'
@@ -14,10 +14,14 @@ import { useDatasetRecommendations } from '../../composables/useDatasetRecommend
 import { useLog } from '../../composables/useLog.js'
 import { MATCH_DEFAULTS, MATCH_PRESETS, MATCH_PRESET_META } from '../../core/defaults.user.js'
 import { initialMatchStrategy } from '../../core/recommend.js'
+import { MATCH_TUNING } from '../../core/tuning.js'
+import { estimatePairCount, subsetGateStatus } from '../../core/features/matchPlan.js'
 
 const props = defineProps({
   // Largest detected keypoint count over all images (for the density auto-hint).
   detectedMaxKeypoints: { type: Number, default: 0 },
+  // Images with finished detection — what the pair-count readout counts over.
+  detectedImageCount: { type: Number, default: 0 },
   // How many images can drive each preselect method (gates the method choice).
   posedImageCount: { type: Number, default: 0 },
   footprintImageCount: { type: Number, default: 0 },
@@ -148,6 +152,45 @@ const capBites = computed(() =>
   && settings.value.lgMaxKeypoints > 0 // 0 = uncapped, nothing is dropped
   && props.detectedMaxKeypoints > settings.value.lgMaxKeypoints)
 
+// ── Live readout: what each step will do, in the order matchAll does it ───────
+const fmt = (n) => Number(n).toLocaleString('en-US')
+const pairs = computed(() => estimatePairCount(props.detectedImageCount, { strategy: strategy.value, ...settings.value }))
+const pairsEffect = computed(() => {
+  const n = props.detectedImageCount
+  if (n < 2) return 'Needs at least 2 images with keypoints.'
+  const { count, exact } = pairs.value
+  const all = (n * (n - 1)) / 2
+  if (count == null) return `${fmt(n)} images: pairs whose footprints overlap enough, out of ${fmt(all)} possible.`
+  const share = all > 0 && count < all ? ` (${Math.round((100 * count) / all)} % of all ${fmt(all)})` : ''
+  return `${fmt(n)} images → ${exact ? '' : 'at most '}${fmt(count)} pairs${share}.`
+})
+// Subset gate: the store bypasses it for an overlap-prefiltered pair set or a
+// small one; say so here instead of offering a knob that will be ignored.
+const gate = computed(() => subsetGateStatus({
+  matcher: matcher.value, strategy: strategy.value, subsetGate: settings.value.subsetGate,
+  pairCount: pairs.value.exact ? pairs.value.count : null,
+}))
+// LightGlue's per-image cap is the Fast path's budget; on the Full (tiled) path it is
+// only the fallback when the coarse guidance pass fails (core/features/lightglue.js).
+const capField = computed(() => (density.value === 'full'
+  ? { key: 'lgTileBudget', label: 'Keypoints per tile', hint: 'Attention budget per tile. Higher = denser matches per tile, slower.' }
+  : { key: 'lgMaxKeypoints', label: 'Keypoints per image', hint: 'The strongest keypoints per image are matched. Runtime grows with the square of this; 0 = no cap.' }))
+const descriptorEffect = computed(() => {
+  if (matcher.value === 'bruteforce') {
+    return `Each keypoint is paired with its nearest descriptor in the other image if it is clearly closer than the runner-up (ratio ${settings.value.ratioThreshold})${settings.value.crossCheck ? ', and only if the choice is mutual' : ''}.`
+  }
+  return density.value === 'full'
+    ? 'LightGlue first matches a coarse sample to align the images, then matches every keypoint in aligned tiles.'
+    : `LightGlue matches the strongest ${settings.value.lgMaxKeypoints > 0 ? fmt(settings.value.lgMaxKeypoints) : 'keypoints (all)'} per image in one pass.`
+})
+const verifyEffect = computed(() => (settings.value.geometricVerification
+  ? `Matches that do not fit one epipolar geometry (within ${settings.value.ransacThreshPx} px at detection resolution) are discarded.`
+  : 'Off — every putative match is kept, including the wrong ones.'))
+const acceptFloor = computed(() => Math.min(MATCH_TUNING.rawSkipFloor, settings.value.minMatches))
+const acceptEffect = computed(() => (settings.value.geometricVerification
+  ? `A pair is kept with at least ${settings.value.minMatches} verified matches and at least ${Math.round(settings.value.minInlierRatio * 100)} % of its putatives surviving (${MATCH_TUNING.overrideInliers}+ verified matches pass regardless of the share).`
+  : `Without verification a pair is kept with at least ${acceptFloor.value} putative matches.`))
+
 function run() {
   emit('run', { strategy: strategy.value, matcher: matcher.value, ...settings.value, useGpu: useGpu.value })
 }
@@ -162,7 +205,7 @@ function run() {
       @select="selectPreset"
     />
 
-    <SettingsGroup title="Strategy">
+    <SettingsStep step="1" title="Choose image pairs" :effect="pairsEffect">
       <SettingsField
         hint="Exhaustive matches all pairs. Sequential uses a capture-order neighbour window and needs no GPS. Preselect prunes pairs by camera position or footprint overlap (EXIF GPS, imported poses, or footprints).">
         <template #label>Pairing</template>
@@ -212,13 +255,13 @@ function run() {
           <input id="minOverlap" v-model.number="settings.minOverlap" type="number" min="1" max="100" step="1" class="field-input" />
         </SettingsField>
       </template>
-    </SettingsGroup>
+    </SettingsStep>
 
-    <SettingsGroup title="Matcher">
+    <SettingsStep step="2" title="Match descriptors" :effect="descriptorEffect">
       <SettingsField
         :hint="matcher === 'lightglue'
-          ? 'Learned joint matcher — requires every image detected with the same learned detector (SuperPoint or DISK). Geometric verification still applies.'
-          : 'Nearest-neighbour descriptor matching with Lowe\'s ratio test.'">
+          ? 'Learned joint matcher — requires every image detected with the same learned detector (SuperPoint or DISK).'
+          : 'Nearest-neighbour descriptor matching with Lowe\'s ratio test. Works with any detector.'">
         <template #label>Algorithm</template>
         <SegmentedControl v-model="matcher" :options="matchers" />
       </SettingsField>
@@ -230,68 +273,61 @@ function run() {
         <input id="ratio" v-model.number="settings.ratioThreshold" type="number" min="0.5" max="0.95" step="0.01" class="field-input" />
       </SettingsField>
 
-      <SettingsField v-if="matcher === 'lightglue'"
-        :hint="density === 'full'
-          ? 'Matches every detected keypoint in homography-guided tiles. Slower — best with GPU + tiled detection.'
-          : (settings.lgMaxKeypoints > 0
-            ? 'Matches only the strongest keypoints per image (LightGlue attention is O(N²)).'
-            : 'Matches every detected keypoint per image (no cap — attention is O(N²)).')">
-        <template #label>Matching density</template>
-        <SegmentedControl v-model="density" :options="densityOptions" />
-      </SettingsField>
-      <WarnBox v-if="capBites">
-        Detection stored up to {{ detectedMaxKeypoints }} keypoints — only the strongest
-        {{ settings.lgMaxKeypoints }} will be matched. Switch to <b>Full</b> density to use all of them.
-      </WarnBox>
-    </SettingsGroup>
+      <template v-if="matcher === 'lightglue'">
+        <SettingsField
+          :hint="density === 'full'
+            ? 'Matches every detected keypoint in homography-guided tiles. Slower — best with GPU + tiled detection.'
+            : 'Matches only the strongest keypoints per image (LightGlue attention is O(N²)).'">
+          <template #label>Matching density</template>
+          <SegmentedControl v-model="density" :options="densityOptions" />
+        </SettingsField>
+        <!-- The one budget that governs the chosen density — the other is not used. -->
+        <SettingsField :label="capField.label" :label-for="capField.key" :hint="capField.hint">
+          <input :id="capField.key" v-model.number="settings[capField.key]" type="number"
+            :min="capField.key === 'lgMaxKeypoints' ? 0 : 256" max="8192" step="256" class="field-input" />
+        </SettingsField>
+        <WarnBox v-if="capBites">
+          Detection stored up to {{ fmt(detectedMaxKeypoints) }} keypoints — only the strongest
+          {{ fmt(settings.lgMaxKeypoints) }} will be matched. Switch to <b>Full</b> density to use all of them.
+        </WarnBox>
+      </template>
+    </SettingsStep>
 
     <AdvancedDisclosure label="Advanced settings">
-      <SettingsGroup title="Acceptance">
-        <SettingsField label-for="minMatches"
-          hint="Accept floor: pairs whose inliers fall below this aren't accepted as verified.">
-          <template #label>Min matches per <GlossaryTerm id="match-graph">pair</GlossaryTerm>
-            <FieldHelp op="match-features" param="minMatches" :default-value="settings.minMatches" /></template>
-          <input id="minMatches" v-model.number="settings.minMatches" type="number" min="4" max="100" step="1" class="field-input" />
-        </SettingsField>
-        <WarnBox v-if="settings.minMatches > 30">
-          A high min-matches threshold can sever the match graph on low-overlap datasets.
-          Pairs above the weak-pair floor are kept as <b>PnP registration bridges</b>, but
-          15 is recommended unless you have a specific reason to raise it.
-        </WarnBox>
-
+      <SettingsStep step="2" title="Match descriptors — advanced">
         <SettingsField v-if="matcher === 'bruteforce'"
           hint="Keeps only mutual nearest neighbours. Slower but more precise.">
           <template #label><GlossaryTerm id="lowe-ratio-test">Cross-check (mutual NN)</GlossaryTerm></template>
           <label class="checkbox-row"><input v-model="settings.crossCheck" type="checkbox" class="checkbox" /> Enabled</label>
         </SettingsField>
 
-        <SettingsField v-if="matcher === 'bruteforce'"
-          hint="Match a small spatially-uniform subset first; skip the full match for pairs that clearly don't overlap.">
-          <template #label>Subset gate (fast pre-test)</template>
-          <label class="checkbox-row"><input v-model="settings.subsetGate" type="checkbox" class="checkbox" /> Enabled</label>
-        </SettingsField>
-        <div v-if="matcher === 'bruteforce' && settings.subsetGate" class="input-row" style="gap: 12px;">
-          <SettingsField label="Subset size" label-for="gateSize">
-            <input id="gateSize" v-model.number="settings.subsetGateSize" type="number" min="50" max="1000" step="10" class="field-input" />
+        <template v-if="matcher === 'bruteforce'">
+          <SettingsField
+            :hint="gate.reason ?? 'Match a small spatially-uniform subset first; skip the full match for pairs that clearly don\'t overlap.'">
+            <template #label>Subset gate (fast pre-test)</template>
+            <label class="checkbox-row"><input v-model="settings.subsetGate" type="checkbox" class="checkbox"
+              :disabled="!!gate.reason" /> {{ gate.reason ? 'Not used for this run' : 'Enabled' }}</label>
           </SettingsField>
-          <SettingsField label="Min subset matches" label-for="gateThresh">
-            <input id="gateThresh" v-model.number="settings.subsetGateThreshold" type="number" min="1" max="100" step="1" class="field-input" />
-          </SettingsField>
-        </div>
-      </SettingsGroup>
+          <div v-if="gate.active" class="input-row" style="gap: 12px;">
+            <SettingsField label="Subset size" label-for="gateSize">
+              <input id="gateSize" v-model.number="settings.subsetGateSize" type="number" min="50" max="1000" step="10" class="field-input" />
+            </SettingsField>
+            <SettingsField label="Min subset matches" label-for="gateThresh">
+              <input id="gateThresh" v-model.number="settings.subsetGateThreshold" type="number" min="1" max="100" step="1" class="field-input" />
+            </SettingsField>
+          </div>
+        </template>
 
-      <SettingsGroup v-if="matcher === 'lightglue'" title="LightGlue keypoint caps">
-        <SettingsField label="Max keypoints per image (Fast path)" label-for="lgMaxKpts"
-          hint="Strongest-first cap on the Fast path. Runtime grows with the square of this; 0 = no cap.">
+        <SettingsField v-if="matcher === 'lightglue' && density === 'full'" label="Fallback keypoints per image" label-for="lgMaxKpts"
+          hint="Used only when the coarse alignment fails for a pair: it is then matched unguided with this many strongest keypoints.">
           <input id="lgMaxKpts" v-model.number="settings.lgMaxKeypoints" type="number" min="256" max="8192" step="256" class="field-input" />
         </SettingsField>
-        <SettingsField v-if="settings.lgTiled" label="Keypoints per tile (Full path)" label-for="lgTileBudget"
-          hint="Per-tile attention budget when tiled. Higher = denser matches per tile, slower.">
-          <input id="lgTileBudget" v-model.number="settings.lgTileBudget" type="number" min="256" max="8192" step="256" class="field-input" />
-        </SettingsField>
-      </SettingsGroup>
+        <span v-if="matcher === 'lightglue' && density === 'fast'" class="field-hint">
+          No further LightGlue settings for the Fast density.
+        </span>
+      </SettingsStep>
 
-      <SettingsGroup title="Geometric verification">
+      <SettingsStep step="3" title="Verify geometry" :effect="verifyEffect" :inactive="!settings.geometricVerification">
         <SettingsField hint="Filter outliers using the fundamental matrix. Strongly recommended.">
           <template #label>
             <GlossaryTerm id="ransac">RANSAC</GlossaryTerm>
@@ -309,20 +345,36 @@ function run() {
             <input id="ransacThresh" v-model.number="settings.ransacThreshPx" type="number" min="0.5" max="8.0" step="0.5" class="field-input" />
           </SettingsField>
 
-          <SettingsField label-for="minInlierRatio"
-            hint="Reject pairs whose inliers/raw is below this — kills false matches on repetitive structure.">
-            <template #label>Min inlier ratio
-              <FieldHelp op="match-features" param="minInlierRatio" :default-value="settings.minInlierRatio" /></template>
-            <input id="minInlierRatio" v-model.number="settings.minInlierRatio" type="number" min="0" max="0.9" step="0.05" class="field-input" />
-          </SettingsField>
-
           <SettingsField label-for="maxIters">
             <template #label>RANSAC iterations
               <FieldHelp op="match-features" param="maxIters" :default-value="settings.maxIters" /></template>
             <input id="maxIters" v-model.number="settings.maxIters" type="number" min="100" max="5000" step="100" class="field-input" />
           </SettingsField>
         </template>
-      </SettingsGroup>
+      </SettingsStep>
+
+      <SettingsStep step="4" title="Accept the pair" :effect="acceptEffect">
+        <SettingsField label-for="minMatches"
+          :hint="settings.geometricVerification
+            ? 'Accept floor: pairs whose verified matches fall below this aren\'t accepted.'
+            : 'Only lowers the skip floor without verification; raising it above ' + MATCH_TUNING.rawSkipFloor + ' has no effect.'">
+          <template #label>Min matches per <GlossaryTerm id="match-graph">pair</GlossaryTerm>
+            <FieldHelp op="match-features" param="minMatches" :default-value="settings.minMatches" /></template>
+          <input id="minMatches" v-model.number="settings.minMatches" type="number" min="4" max="100" step="1" class="field-input" />
+        </SettingsField>
+        <WarnBox v-if="settings.geometricVerification && settings.minMatches > 30">
+          A high min-matches threshold can sever the match graph on low-overlap datasets.
+          Pairs above the weak-pair floor are kept as <b>PnP registration bridges</b>, but
+          15 is recommended unless you have a specific reason to raise it.
+        </WarnBox>
+
+        <SettingsField v-if="settings.geometricVerification" label-for="minInlierRatio"
+          hint="Reject pairs whose verified/putative share is below this — kills false matches on repetitive structure.">
+          <template #label>Min inlier ratio
+            <FieldHelp op="match-features" param="minInlierRatio" :default-value="settings.minInlierRatio" /></template>
+          <input id="minInlierRatio" v-model.number="settings.minInlierRatio" type="number" min="0" max="0.9" step="0.05" class="field-input" />
+        </SettingsField>
+      </SettingsStep>
     </AdvancedDisclosure>
 
     <template #footer>

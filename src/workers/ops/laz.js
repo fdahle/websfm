@@ -1,11 +1,9 @@
 import init, { compress_points, decompress_points, LazEncoder } from '../../wasm/lazcodec/lazcodec.js'
-import { cloudToLaz } from '../../core/io/laz.js'
-import { attributeBuffers } from '../../core/io/cloudAttributes.js'
 
 // LAZ codec ownership (lazy wasm init, like workers/ops/mesh.js gates the mesh
-// module). Two consumers share one instance: the export op below and the cloud
-// *import* op in workers/ops/io.js, which needs the decompressor injected into
-// core/io/cloudImport.js.
+// module). Two consumers share one instance: the cloud export op
+// (workers/ops/export.js) and the cloud *import* op in workers/ops/io.js, which
+// need the codec injected into core/io/laz.js.
 //
 // LAZ runs off the main thread for the same reason LAS parsing does — a 30 M-point
 // cloud is ~780 MB of point records, and the arithmetic coder is not fast.
@@ -40,24 +38,4 @@ export function makeLazCodec() {
     }
   }
   return { ensure, compress, decompress, createCompressor }
-}
-
-export function makeLazOps(codec) {
-  // args: [{ cloud: { count, pos, col?, attributes? }, crsCode, geographic }]
-  // → { bytes } (transferred). The cloud buffers are transferred IN by the caller
-  // and round-tripped home under `home`, the same convention densify/mesh use, so
-  // a store's cloud is never left detached by an export.
-  async function exportLaz([{ cloud, crsCode = null, geographic = false }], { emit }) {
-    await codec.ensure()
-    const log = (m, l = 'info') => emit('log', [m, l, 'Export'])
-    const bytes = cloudToLaz(cloud, {
-      crsCode, geographic, compress: codec.compress, createCompressor: codec.createCompressor, onLog: (m, l) => log(m, l),
-    })
-    const transfer = [bytes.buffer, cloud.pos.buffer]
-    if (cloud.col) transfer.push(cloud.col.buffer)
-    transfer.push(...attributeBuffers(cloud))
-    return { result: { bytes, home: cloud }, transfer }
-  }
-
-  return { exportLaz }
 }

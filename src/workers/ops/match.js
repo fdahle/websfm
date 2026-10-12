@@ -1,5 +1,6 @@
 import { matchDescriptors } from '../../core/features/bruteforce.js'
 import { compareMatchSets } from '../../core/features/nnSelect.js'
+import { asKeypoints } from '../../core/features/keypoints.js'
 import { matchLightGlue, matchLightGlueTiled } from '../../core/features/lightglue.js'
 import { verifyMatches, verifyPointPairs } from '../../core/features/verify.js'
 import { beginGpuMatchRun, endGpuMatchRun, matchDescriptorsGpu } from '../gpu/matchGpu.js'
@@ -42,11 +43,12 @@ export function makeMatchOps() {
     // One op name, one pinned worker: route to the coarse-to-fine tiled variant
     // when the caller asked for it, else the plain capped match.
     const fn = args.tiled ? matchLightGlueTiled : matchLightGlue
-    return { result: await fn({ ...args, onLog }) }
+    // Keypoints arrive structured-cloned ({ data, rgb }: the class does not survive).
+    return { result: await fn({ ...args, kpsA: asKeypoints(args.kpsA), kpsB: asKeypoints(args.kpsB), onLog }) }
   }
 
   async function verify([kpsA, kpsB, matches, options = {}]) {
-    const res = await verifyMatches(kpsA, kpsB, matches, options)
+    const res = await verifyMatches(asKeypoints(kpsA), asKeypoints(kpsB), matches, options)
     if (!res) return { result: null }
     // res.inlierMask is a fresh Float32Array → transfer it back.
     return { result: res, transfer: [res.inlierMask.buffer] }

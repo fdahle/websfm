@@ -39,12 +39,25 @@ export const SPARSE_MEMORY_MODEL = {
   workerHeapPerObservation: 64,
   workerHeapPerKeypoint: 64,
   // Worker buffers: keypoint sets (input + a folded copy + a transient fold), packed
-  // matches (input + the run's clone), the track arena and BA marshalling, and the
-  // wasm solver's dense reduced camera system (n = 6·cameras: 8·n² bytes).
+  // matches (input + the run's clone), the track arena and BA marshalling.
   workerBufPerKeypoint: 60,
   workerBufPerMatch: 16,
   workerBufPerObservation: 40,
-  workerBufPerCameraSq: 288,
+  // The wasm solver (crates/reconstruction bundle.rs) — its own linear memory, capped
+  // at 4 GiB by wasm32 whatever the device has. Per observation: the copied inputs
+  // (index, pixel, weight: 24) + the unpacked observation (40) + two CSR indices (8)
+  // + the Huber median's sort buffer (8). Per point: the f32 input, f64 working,
+  // tentative and step copies, C, gp, C⁻¹, C⁻¹·gp (~300). The reduced camera system is
+  // block-sparse: two copies (S and the damped, eliminated one) of a 6×6 f64 block per
+  // co-visible camera pair (2·288 + index), at most `solverCovisible` partners per
+  // camera, plus the dense Cholesky copy + factor below DENSE_MAX_N (16·n², n ≤ 4096).
+  solverPerObservation: 80,
+  solverPerPoint: 300,
+  solverPerCameraPair: 600,
+  solverCovisible: 150,
+  solverDenseMaxN: 4096,
+  // Average track length turning observations into points (measured 3–4 on the bench sets).
+  observationsPerPoint: 3,
   // Guided track extension: its keypoint grids (heap) on top of the descriptors.
   guidedHeapPerKeypoint: 24,
 }
@@ -75,12 +88,15 @@ export function projectSparsePeakBreakdownBytes({
   const guidedHeapBytes = guided ? up(K * m.guidedHeapPerKeypoint) : 0
   const workerHeapBytes = up(m.workerHeapBase + O * m.workerHeapPerObservation + K * m.workerHeapPerKeypoint)
     + guidedHeapBytes
+  const solverWasmBytes = projectSolverWasmBytes({ cameras: C, observations: O }, m)
   // Descriptors are held once: every sub-run shares them (sfm.js cloneSfmInput).
-  const workerBufferBytes = up(K * m.workerBufPerKeypoint + M * m.workerBufPerMatch + O * m.workerBufPerObservation
-    + C * C * m.workerBufPerCameraSq + D)
+  const workerBufferBytes = up(K * m.workerBufPerKeypoint + M * m.workerBufPerMatch + O * m.workerBufPerObservation + D)
+    + solverWasmBytes
   return {
     rendererHeapBytes, rendererBufferBytes, workerHeapBytes, workerBufferBytes, guidedHeapBytes,
     guidedBufferBytes: up(D),
+    // The solver's linear memory, a hard per-module ceiling (wasmSolverSafe).
+    solverWasmBytes, wasmSolverSafe: solverWasmBytes <= WASM_SOLVER_LIMIT_BYTES,
     // Per isolate, heap + buffers: what the device has to hold for each.
     rendererBytes: rendererHeapBytes + rendererBufferBytes,
     workerBytes: workerHeapBytes + workerBufferBytes,
@@ -88,6 +104,21 @@ export function projectSparsePeakBreakdownBytes({
     // so this must never be compared to either isolate's jsHeapSizeLimit.
     totalBytes: rendererHeapBytes + rendererBufferBytes + workerHeapBytes + workerBufferBytes,
   }
+}
+
+// wasm32 linear memory is 4 GiB; keep headroom for the allocator, the module's own
+// data and the output vector.
+export const WASM_SOLVER_LIMIT_BYTES = 3.5 * 1024 ** 3
+
+// Peak wasm memory of the largest bundle adjustment of a run: every camera, every
+// observation (`points` defaults from the observations by the average track length).
+export function projectSolverWasmBytes({ cameras = 0, observations = 0, points = null }, model = SPARSE_MEMORY_MODEL) {
+  const m = model
+  const C = Math.max(0, cameras), O = Math.max(0, observations)
+  const P = points ?? Math.ceil(O / m.observationsPerPoint)
+  const pairs = C * Math.min(C, m.solverCovisible + 1)
+  const n = Math.min(6 * C, m.solverDenseMaxN)
+  return Math.ceil((O * m.solverPerObservation + P * m.solverPerPoint + pairs * m.solverPerCameraPair + 16 * n * n) * m.margin)
 }
 
 export function projectSparsePeakBytes(counts = {}) {
@@ -138,15 +169,17 @@ export function sparseMemoryDecision({
  *   withGuidedPeak: object | null, safe: boolean }}
  */
 export function planSparseRun({ guided, project, decide }) {
-  const ok = (d) => d.renderer.safe && d.worker.safe
+  // The solver's wasm memory is a ceiling of its own (wasmSolverSafe), whatever the
+  // heap and device say; guided extension does not change it.
+  const ok = (d, p) => d.renderer.safe && d.worker.safe && p.wasmSolverSafe !== false
   const peak = project(guided)
   const decisions = decide(peak)
-  if (ok(decisions) || !guided) {
-    return { peak, decisions, guided, guidedDropped: false, withGuidedPeak: null, safe: ok(decisions) }
+  if (ok(decisions, peak) || !guided) {
+    return { peak, decisions, guided, guidedDropped: false, withGuidedPeak: null, safe: ok(decisions, peak) }
   }
   const lean = project(false)
   const leanDecisions = decide(lean)
-  if (ok(leanDecisions)) {
+  if (ok(leanDecisions, lean)) {
     return { peak: lean, decisions: leanDecisions, guided: false, guidedDropped: true, withGuidedPeak: peak, safe: true }
   }
   return { peak, decisions, guided, guidedDropped: false, withGuidedPeak: null, safe: false }
