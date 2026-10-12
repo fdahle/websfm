@@ -58,16 +58,33 @@ project:
 - `sceneType`: `object` or `aerial`.
 - `detect`, `match`, `recon`: settings layered over the app's defaults, exactly as the
   modals do it. `preset` selects a preset delta (`low` / `high`).
-- `stages`: default `detect,match,recon`.
+- `stages`: default `detect,match,recon`. Also `depth` and `dense` (settings as the
+  Depth Maps / Dense modals resolve them; config keys `depth`, `dense`), and `reopen`:
+  reload the page (OPFS survives in the on-disk profile) and restore the project through
+  the app's own open sequence, timed per store. After every stage an `== inventory` line
+  prints what the page holds per item (keypoints, match tuples, clouds, depth maps) and
+  its memory: the **V8 heap** and the ArrayBuffers apart (DevTools `Runtime.getHeapUsage`),
+  plus `performance.memory`, which counts both together.
+- `profileReopen: true`: a CPU profile of the `reopen` restore, saved as
+  `<out>.reopen.cpuprofile` (load it in DevTools) with its top self-time functions on the
+  console.
+- Learned detectors: `detect: { "detector": "superpoint" }` (or `disk`) starts from that
+  detector's defaults, as the modal does; `match: { "matcher": "lightglue" }` picks the
+  LightGlue for it. The page puts the weights into Cache Storage itself (the consent
+  dialog cannot be clicked headless), so the `.onnx` files must be in `public/models/`.
+  SuperPoint's are not redistributable: copy your own `superpoint.onnx` there, and
+  remove it before a release build (`check-release` refuses a build that contains it).
 - `variants`: `[{ label, match?, recon? }]`. Detection runs once; each variant then
   re-matches only when its match settings change, and always reconstructs. Use this
   for SfM-only experiments on identical inputs.
 - `dev`: use the Vite dev server instead of a frozen build (faster to start). Any
   source edit then reloads the page mid-run.
 - `build <dir>`: reuse an earlier snapshot. `headed`: show the browser window.
-- `recon.baSolver`: the bundle-adjustment linear-solver policy (`SFM_TUNING.baSolver`),
-  e.g. variants `{ "pcgMinN": 1e9 }` (Cholesky only), `{}` (default PCG) and
-  `{ "pcgRelTol": 1e-6, "pcgMaxIter": 200, "pcgAcceptPartial": true }` (inexact).
+- `recon.baSolver`: the bundle-adjustment linear-solver policy (`SFM_TUNING.baSolver`,
+  merged key by key, so a variant names only what it changes), e.g. `{ "pcgMinN": 1e9 }`
+  (Cholesky only), `{}` (the default: inexact PCG, 200 iterations, partial accepted),
+  `{ "pcgRelTol": 1e-10, "pcgMaxIter": 2000, "pcgAcceptPartial": false }` (the exact solve)
+  and `{ "pcgPreconditioner": "ic0" }` (block incomplete Cholesky).
   The result JSON carries `baSolver` (solves, CG iterations, fallbacks, BA seconds)
   and `timings`.
 - `recon.posePriors: false`: disable every camera pose for that run. That includes the

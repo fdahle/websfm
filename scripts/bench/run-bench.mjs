@@ -14,7 +14,8 @@
 //   <prefix>.json  settings + per-stage numbers (keypoints, pairs, points ≥3 views, …)
 //
 // Config keys (JSON file and/or flags; flags win): name, images (folder), include (regex
-// on file names), limit (first N after sorting), sceneType, stages ("detect,match,recon"),
+// on file names), limit (first N after sorting), sceneType, stages ("detect,match,recon";
+// also depth, dense, and reopen = reload the page and restore the project),
 // detect / match / recon (settings objects; `preset` selects a preset delta), port, headed,
 // variants ([{ label, match?, recon? }]: one detection, then a match + reconstruct per
 // variant, so SfM-only experiments reuse the same keypoints and matches).
@@ -47,7 +48,7 @@ const json = (v) => (typeof v === 'string' ? JSON.parse(v) : v)
 
 const args = parseArgs(process.argv.slice(2))
 const cfg = { ...(args.config ? JSON.parse(await readFile(args.config, 'utf8')) : {}) }
-for (const k of ['name', 'images', 'include', 'limit', 'sceneType', 'stages', 'out', 'port', 'headed', 'dev', 'build', 'maxOldSpaceMb', 'dumpSfmInput']) if (args[k] !== undefined) cfg[k] = args[k]
+for (const k of ['name', 'images', 'include', 'limit', 'sceneType', 'stages', 'out', 'port', 'headed', 'dev', 'build', 'maxOldSpaceMb', 'dumpSfmInput', 'profileReopen', 'colmap', 'exportDense']) if (args[k] !== undefined) cfg[k] = args[k]
 for (const k of ['detect', 'match', 'recon']) cfg[k] = { ...(cfg[k] ?? {}), ...(args[k] ? json(args[k]) : {}) }
 if (!cfg.images) throw new Error('--images <folder> (or "images" in --config) is required')
 const name = cfg.name ?? 'bench'
@@ -238,7 +239,103 @@ try {
   }
   await memory('after ingest')
 
-  const run = { detect: 'detect', match: 'match', recon: 'reconstruct' }
+  const run = { detect: 'detect', match: 'match', recon: 'reconstruct', depth: 'depth', dense: 'dense' }
+  const gbStr = (v) => (v == null ? '?' : `${(v / 1024 ** 3).toFixed(2)} GB`)
+  // `performance.memory` counts ArrayBuffer backing stores, which the ~4 GB V8 limit
+  // does not: the DevTools protocol separates the two (V8 heap vs backing storage).
+  const v8Heap = async () => {
+    try {
+      const s = await page.context().newCDPSession(page)
+      const u = await s.send('Runtime.getHeapUsage')
+      await s.detach()
+      return u
+    } catch { return null }
+  }
+  const invLine = (inv) => `${inv.v8 ? `V8 heap ${gbStr(inv.v8.usedSize)} + ArrayBuffers ${gbStr(inv.v8.backingStorageSize)} · ` : ''}`
+    + `performance.memory ${gbStr(inv.heapBytes)} of ${gbStr(inv.heapLimit)} · ${inv.images} images, `
+    + `${inv.keypoints.toLocaleString()} keypoints, ${inv.pairs.toLocaleString()} pairs / ${inv.matchTuples.toLocaleString()} match tuples`
+    + `${inv.clouds.length ? `, clouds: ${inv.clouds.map((c) => `${c.kind} ${c.points.toLocaleString()}${c.posType ? ` (${c.posType})` : ''}`).join(', ')}` : ''}`
+    + `, ${inv.depthMaps} depth maps`
+    + (inv.resident ? ` · resident: ${inv.resident.keypointImages} images' keypoints (${gbStr(inv.resident.keypointBytes)}), `
+      + `${inv.resident.matchPairs} pairs' matches (${gbStr(inv.resident.matchBytes)})` : '')
+  // What the renderer holds per item after each stage (bench.inventory): counts plus
+  // the live heap after a GC — the data that scales the ~4 GB V8 ceiling.
+  const inventory = async (label) => {
+    const inv = await page.evaluate(() => window.bench.inventory())
+    inv.v8 = await v8Heap()
+    console.log(`== inventory ${label}: ${invLine(inv)}`)
+    ;(result.inventory ??= {})[label] = inv
+  }
+  // Reopen the project in a fresh page: reload (OPFS survives in the on-disk profile),
+  // then restore through the app's own sequence — what a user's reopen costs.
+  // `colmap: "<dir with cameras.txt, images.txt, points3D.txt>"`: import that model as the
+  // main sparse cloud (stage "colmap", instead of "recon").
+  const importColmap = async () => {
+    const files = Object.fromEntries(await Promise.all(['cameras.txt', 'images.txt', 'points3D.txt']
+      .map(async (f) => [f, await readFile(join(cfg.colmap, f), 'utf8')])))
+    const r = await page.evaluate((files) => window.bench.importColmap({ files }), files)
+    console.log(`== colmap: ${JSON.stringify(r)}`)
+    result.stages.colmap = r
+    if (!r.ok) throw new Error('COLMAP import failed (see the log)')
+  }
+  // `exportDense: true`: after the dense stage, write the fused positions as raw
+  // Float32 xyz to <out>.dense.bin (scripts/bench/eth3d.mjs scores it).
+  const exportDense = async () => {
+    const info = await page.evaluate(() => window.bench.denseInfo())
+    if (!info) { console.log('== exportDense: no dense cloud'); return }
+    const out = createWriteStream(`${outPrefix}.dense.bin`)
+    const step = 1 << 20
+    for (let s = 0; s < info.count; s += step) {
+      const b64 = await page.evaluate(([a, n]) => window.bench.denseChunk(a, n), [s, step])
+      await new Promise((res, rej) => out.write(Buffer.from(b64, 'base64'), (e) => (e ? rej(e) : res())))
+    }
+    await new Promise((res) => out.end(res))
+    console.log(`== exportDense: ${info.count} points → ${outPrefix}.dense.bin`)
+    result.stages.exportDense = { points: info.count, file: `${outPrefix}.dense.bin` }
+  }
+  const reopen = async () => {
+    const id = await page.evaluate(() => window.bench.currentProject())
+    lastLogAt = Date.now()
+    await page.reload()
+    await page.waitForFunction(() => window.benchReady === true, null, { timeout: 120_000 })
+    // `profileReopen`: a CPU profile of the restore (DevTools-loadable .cpuprofile),
+    // plus its top self-time functions on the console.
+    let cdp = null
+    if (cfg.profileReopen) {
+      cdp = await page.context().newCDPSession(page)
+      await cdp.send('Profiler.enable')
+      await cdp.send('Profiler.setSamplingInterval', { interval: 500 })
+      await cdp.send('Profiler.start')
+    }
+    let r
+    try {
+      r = await Promise.race([page.evaluate((x) => window.bench.reopen(x), id), watchdog()])
+    } finally {
+      for (const t of watchdog.timers.splice(0)) clearInterval(t)
+    }
+    if (cdp) {
+      const { profile } = await cdp.send('Profiler.stop')
+      await writeFile(`${outPrefix}.reopen.cpuprofile`, JSON.stringify(profile))
+      const byId = new Map(profile.nodes.map((n) => [n.id, n]))
+      const self = new Map()
+      const dt = profile.timeDeltas
+      profile.samples.forEach((id, i) => {
+        const n = byId.get(id), f = n.callFrame
+        const key = `${f.functionName || '(anon)'} ${f.url.split('/').pop()}:${f.lineNumber + 1}`
+        self.set(key, (self.get(key) ?? 0) + (dt[i] ?? 0))
+      })
+      const top = [...self].sort((a, b) => b[1] - a[1]).slice(0, 25)
+      const NL = String.fromCharCode(10)
+      console.log('== reopen CPU profile (self ms):' + NL + top.map(([k, us]) => `   ${(us / 1000).toFixed(0).padStart(6)}  ${k}`).join(NL))
+    }
+    const { inventory: inv, ...numbers } = r
+    inv.v8 = await v8Heap()
+    result.stages.reopen = numbers
+    ;(result.inventory ??= {}).reopen = inv
+    console.log(`== reopen: ${JSON.stringify(numbers)}`)
+    console.log(`== inventory reopen: ${invLine(inv)}`)
+    await writeFile(`${outPrefix}.json`, JSON.stringify(result, null, 2))
+  }
   // A LiDAR reference (scripts/bench/lidar.mjs) is gridded once, then every
   // reconstruction's points are scored against it here, in node.
   const lidarCfg = cfg.reference?.lidar ?? null
@@ -293,6 +390,7 @@ try {
     const { settings: _s, model: _m, workerHeap: _w, ...numbers } = r
     console.log(`== ${key}: ${JSON.stringify(numbers)}`)
     if (stage !== 'recon') await memory(`after ${key}`)
+    await inventory(`after ${key}`)
     await writeFile(`${outPrefix}.json`, JSON.stringify(result, null, 2))
   }
   if (cfg.variants?.length) {
@@ -309,8 +407,11 @@ try {
     }
   } else {
     for (const stage of stages) {
+      if (stage === 'reopen') { await reopen(); continue }
+      if (stage === 'colmap') { await importColmap(); continue }
       if (!run[stage]) throw new Error(`unknown stage ${stage}`)
       await runStage(stage, cfg[stage])
+      if (stage === 'dense' && cfg.exportDense) await exportDense()
     }
   }
   result.finishedAt = new Date().toISOString()

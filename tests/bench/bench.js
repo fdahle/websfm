@@ -14,10 +14,22 @@ import { useSensorsStore } from '/src/stores/useSensorsStore.js'
 import { useMatchesStore } from '/src/stores/useMatchesStore.js'
 import { useReconstructionStore } from '/src/stores/useReconstructionStore.js'
 import { usePosesStore } from '/src/stores/usePosesStore.js'
+// Every other registered project store, so a reopen restores what the app restores.
+import '/src/stores/useExternalStore.js'
+import '/src/stores/useFootprintsStore.js'
+import '/src/stores/useGcpsStore.js'
+import '/src/stores/useLogStore.js'
+import '/src/stores/useMeasurementsStore.js'
+import '/src/stores/useScaleBarsStore.js'
+import '/src/stores/useWorkflowsStore.js'
+import { restoreProjectStores } from '/src/stores/projectStores.js'
+import { useComputeSettings } from '/src/composables/useComputeSettings.js'
 import {
-  DETECT_SIFT_DEFAULTS, DETECT_SIFT_PRESETS, MATCH_DEFAULTS, MATCH_PRESETS,
-  RECONSTRUCT_DEFAULTS, RECONSTRUCT_PRESETS,
+  DETECT_DEFAULTS_BY_DETECTOR, DETECT_PRESETS_BY_DETECTOR, MATCH_DEFAULTS, MATCH_PRESETS,
+  RECONSTRUCT_DEFAULTS, RECONSTRUCT_PRESETS, DEPTHMAP_DEFAULTS, DENSE_FUSE_DEFAULTS,
 } from '/src/core/defaults.user.js'
+import { learnedDetector } from '/src/core/features/learnedDetectors.js'
+import { MODEL_CACHE_NAME, modelUrl } from '/src/core/models/registry.js'
 import { cameraPositionCheck, gcpCheck } from '/src/core/eval/positionCheck.js'
 import { applySimilarity } from '/src/core/products/georef.js'
 import { makeFrameModelResolver, gcpsInPinholeFrame } from '/src/core/sfm/displayFrame.js'
@@ -103,7 +115,130 @@ async function checkpoints(cloud, pc, offsetPx = 0) {
 
 const until = async (pred, ms = 100) => { while (!pred()) await new Promise((r) => setTimeout(r, ms)) }
 
+// A learned detector / LightGlue asks for consent before its weights load
+// (useModelsStore.ensureReady), and a fresh bench profile has an empty Cache Storage,
+// so the run would wait on a dialog nobody sees. Do what the consent does: put the
+// served file (public/models/, copied into the frozen build) into the cache under the
+// URL the app resolves, so ensureReady finds it and loads it unchanged.
+async function provideModels(ids) {
+  const cache = await caches.open(MODEL_CACHE_NAME)
+  for (const id of ids) {
+    const url = modelUrl(id)
+    if (await cache.match(url)) continue
+    const resp = await fetch(url)
+    const type = resp.headers.get('content-type') ?? ''
+    if (!resp.ok || type.toLowerCase().includes('text/html')) throw new Error(`model ${id}: ${url} is not served — place it in public/models/`)
+    await cache.put(url, resp)
+  }
+}
+
+// Live JS heap after a forced GC (the runner starts Chrome with --expose-gc).
+async function liveHeap() {
+  if (typeof globalThis.gc === 'function') { globalThis.gc(); await new Promise((r) => setTimeout(r, 200)); globalThis.gc() }
+  return performance.memory?.usedJSHeapSize ?? null
+}
+
 window.bench = {
+  // What the page holds per item, after a GC: the counts that scale the renderer's
+  // V8 heap (TODO ▸ MEM). Counts, not estimates — compare with heapBytes. Keypoints and
+  // matches load on demand (TODO ▸ SC-2/SC-3): `keypoints`/`matchTuples` are what the
+  // project holds, `resident` what is in memory now (LRU caches; pinned = unsaved).
+  async inventory() {
+    let keypoints = 0, kpImages = 0
+    for (const i of images.images) { const n = i.kpStatus === 'done' ? i.kpCount ?? 0 : 0; keypoints += n; if (n) kpImages++ }
+    let pairs = 0, matchTuples = 0
+    for (const e of matches.matchStore.values()) { pairs++; matchTuples += e.nMatches ?? 0 }
+    const kc = images.keypointCacheStats(), mc = matches.matchCacheStats()
+    const resident = {
+      keypointImages: kc.entries, keypointBytes: kc.bytes, keypointPinnedBytes: kc.pinnedBytes,
+      matchPairs: mc.entries, matchBytes: mc.bytes, matchPinnedBytes: mc.pinnedBytes,
+    }
+    const clouds = recon.clouds.map((c) => ({ kind: c.kind, name: c.name,
+      points: c.kind === 'sparse' ? c.points?.length ?? 0 : c.count ?? 0,
+      posType: c.pos?.constructor?.name ?? null }))
+    return { images: images.images.length, kpImages, keypoints, pairs, matchTuples, resident, clouds,
+      depthMaps: recon.depthMapCount, heapBytes: await liveHeap(), heapLimit: performance.memory?.jsHeapSizeLimit ?? null }
+  },
+
+  currentProject() { return projects.currentProjectId },
+
+  // Reopen a project in a FRESH page (the runner reloads first), through the same
+  // sequence useProjectLifecycle.openProject runs: switch → sensors → images ∥ stores.
+  async reopen(id) {
+    // Where a slow reopen waits: the first storage access of the fresh page, the index,
+    // the project switch, sensors — before images and the stores start in parallel.
+    const tFirst = performance.now()
+    const est = await navigator.storage.estimate().catch(() => null)
+    const firstAccessMs = performance.now() - tFirst
+    const tIdx = performance.now()
+    await projects.loadIndex()
+    const indexMs = performance.now() - tIdx
+    const t0 = performance.now()
+    const projectData = await projects.switchProject(id)
+    if (!projectData) throw new Error('reopen: project.json missing')
+    const switchMs = performance.now() - t0
+    await sensorsStore.restoreSensors(id)
+    const sensorsMs = performance.now() - t0 - switchMs
+    const imagesDone = images.restoreImages(projectData.images || [], id, null, { groups: projectData.imageGroups })
+      .then(() => performance.now() - t0)
+    const storesDone = restoreProjectStores({ projectId: id, projectData })
+    const [imagesMs, storeTimings] = await Promise.all([imagesDone, storesDone])
+    return { seconds: (performance.now() - t0) / 1000, imagesSeconds: imagesMs / 1000,
+      phases: { storageEstimateMs: Math.round(firstAccessMs), usageGB: est ? +(est.usage / 1024 ** 3).toFixed(2) : null,
+        indexMs: Math.round(indexMs), switchMs: Math.round(switchMs), sensorsMs: Math.round(sensorsMs) },
+      stores: Object.fromEntries(storeTimings.map(({ store, ms }) => [store, Math.round(ms)])),
+      inventory: await window.bench.inventory() }
+  },
+
+  // Dense Stage A, settings resolved exactly as DepthMapsModal.run() does.
+  async depth({ ...overrides } = {}) {
+    const { memBudgetBytes } = useComputeSettings()
+    const { filterRelTol, maxDim, bestK, ...rest } = { ...DEPTHMAP_DEFAULTS, ...overrides }
+    const settings = { ...rest, filterRelTol: filterRelTol / 100, useGpu: overrides.useGpu ?? true, memBudgetBytes: memBudgetBytes.value }
+    if (maxDim > 0) settings.maxDim = maxDim
+    if (bestK > 0) settings.bestK = bestK
+    const t0 = performance.now()
+    await recon.computeDepthMaps(settings, report)
+    return { settings, seconds: (performance.now() - t0) / 1000, depthMaps: recon.depthMapCount }
+  },
+
+  // Dense Stage B, settings resolved exactly as DenseModal.run() does.
+  async dense({ ...overrides } = {}) {
+    const { memBudgetBytes } = useComputeSettings()
+    const v = { ...DENSE_FUSE_DEFAULTS, ...overrides }
+    const settings = { minViews: v.auto ? null : v.minViews, maxCost: v.auto ? null : v.maxCost,
+      depthTolRel: v.depthTolPct / 100, step: v.step, minTriAngleDeg: v.minTriAngleDeg,
+      maxIncidenceDeg: v.maxIncidenceDeg, removeIsolated: v.removeIsolated, memBudgetBytes: memBudgetBytes.value }
+    const t0 = performance.now()
+    await recon.densify(settings, report)
+    const dense = recon.clouds.filter((c) => c.kind === 'dense')
+    return { settings, seconds: (performance.now() - t0) / 1000, points: dense.reduce((n, c) => n + (c.count ?? 0), 0) }
+  },
+
+  // A COLMAP text model as the main sparse cloud, through the app's own import (the
+  // runner reads the files): dense then runs on known poses, e.g. ETH3D's ground truth.
+  async importColmap({ files }) {
+    const t0 = performance.now()
+    const ok = recon.importColmapModel(files)
+    const cloud = recon.mainSparseCloud
+    return { ok, seconds: (performance.now() - t0) / 1000, cameras: cloud?.cameras?.size ?? 0, points: cloud?.points?.length ?? 0 }
+  },
+
+  // The fused dense cloud's positions, `n` points from `start`, as base64 Float32 xyz —
+  // the runner pulls it in chunks for a node-side comparison (scripts/bench/eth3d.mjs).
+  denseInfo() {
+    const c = recon.clouds.find((x) => x.kind === 'dense' && !x.imported)
+    return c ? { count: c.count, posType: c.pos.constructor.name } : null
+  },
+  denseChunk(start, n) {
+    const c = recon.clouds.find((x) => x.kind === 'dense' && !x.imported)
+    const f = new Float32Array(c.pos.subarray(3 * start, 3 * Math.min(c.count, start + n)))
+    const u8 = new Uint8Array(f.buffer)
+    let s = ''
+    for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000))
+    return btoa(s)
+  },
+
   // The reference camera positions as imported poses (WGS84), as a user importing a
   // camera CSV would: preselection uses them; `posePriors` decides whether SfM does.
   async importReferencePoses() {
@@ -134,7 +269,12 @@ window.bench = {
   },
 
   async detect({ preset = null, ...overrides } = {}) {
-    const settings = { detector: 'sift', overwrite: true, ...withPreset(DETECT_SIFT_DEFAULTS, DETECT_SIFT_PRESETS, preset), ...overrides }
+    // Defaults per detector, exactly as DetectFeaturesModal resolves them.
+    const detector = overrides.detector ?? 'sift'
+    const settings = { detector, overwrite: true,
+      ...withPreset(DETECT_DEFAULTS_BY_DETECTOR[detector], DETECT_PRESETS_BY_DETECTOR[detector], preset), ...overrides }
+    const spec = learnedDetector(detector)
+    if (spec) await provideModels([spec.modelId])
     const t0 = performance.now()
     await images.detectAll(settings, null, report, () => false)
     const done = images.images.filter((i) => i.kpStatus === 'done')
@@ -146,11 +286,15 @@ window.bench = {
 
   async match({ preset = null, ...overrides } = {}) {
     const settings = { strategy: 'exhaustive', matcher: 'bruteforce', useGpu: true, ...withPreset(MATCH_DEFAULTS, MATCH_PRESETS, preset), ...overrides }
+    if (settings.matcher === 'lightglue') {
+      const spec = learnedDetector(images.images.find((i) => i.kpStatus === 'done')?.detector)
+      if (spec) await provideModels([spec.matcherModelId])
+    }
     const t0 = performance.now()
     await matches.matchAll(images.images, settings, report, () => false)
     let accepted = 0, inliers = 0
     for (const e of matches.matchStore.values()) {
-      if (e.status === 'done' && !e.weak && (e.matches?.length ?? 0) > 0) { accepted++; inliers += e.inlierCount ?? e.matches.length }
+      if (e.status === 'done' && !e.weak && (e.nMatches ?? 0) > 0) { accepted++; inliers += e.inlierCount ?? e.nMatches }
     }
     return { settings, seconds: (performance.now() - t0) / 1000, pairs: matches.matchStore.size, accepted, inliers }
   },
