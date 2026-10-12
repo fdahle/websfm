@@ -219,6 +219,17 @@ export function lidarCheck(pointsEnu, origin, grid, { flatRangeM = 0.15 } = {}) 
     rmsM: r4(Math.sqrt(pr.reduce((s, v) => s + v * v, 0) / pr.length)),
     medianAbsM: r4(median(ab)), p90AbsM: r4(quantile(ab, 0.9)),
     within10cm: r4(ab.filter((v) => v <= 0.1).length / ab.length),
+    // The same after the dome is removed too: what is left is the cloud's own scatter
+    // about the surface, comparable between two clouds of one SfM model (the dome is
+    // the model's, shared by both).
+    ...(() => {
+      const dr = kept(dome), da = dr.map(Math.abs)
+      return {
+        domeInlierShare: r4(dr.length / rows.length),
+        domeRmsM: r4(Math.sqrt(dr.reduce((s, v) => s + v * v, 0) / dr.length)),
+        domeMedianAbsM: r4(median(da)), domeWithin10cm: r4(da.filter((v) => v <= 0.1).length / da.length),
+      }
+    })(),
   }
 }
 

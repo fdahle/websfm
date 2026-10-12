@@ -280,18 +280,36 @@ try {
   }
   // `exportDense: true`: after the dense stage, write the fused positions as raw
   // Float32 xyz to <out>.dense.bin (scripts/bench/eth3d.mjs scores it).
-  const exportDense = async () => {
+  const exportDense = async (tag) => {
     const info = await page.evaluate(() => window.bench.denseInfo())
     if (!info) { console.log('== exportDense: no dense cloud'); return }
-    const out = createWriteStream(`${outPrefix}.dense.bin`)
+    const file = `${outPrefix}${tag ? `.${tag}` : ''}.dense.bin`
+    const out = createWriteStream(file)
     const step = 1 << 20
     for (let s = 0; s < info.count; s += step) {
       const b64 = await page.evaluate(([a, n]) => window.bench.denseChunk(a, n), [s, step])
       await new Promise((res, rej) => out.write(Buffer.from(b64, 'base64'), (e) => (e ? rej(e) : res())))
     }
     await new Promise((res) => out.end(res))
-    console.log(`== exportDense: ${info.count} points → ${outPrefix}.dense.bin`)
-    result.stages.exportDense = { points: info.count, file: `${outPrefix}.dense.bin` }
+    console.log(`== exportDense: ${info.count} points → ${file}`)
+    result.stages[tag ? `exportDense:${tag}` : 'exportDense'] = { points: info.count, file }
+  }
+  // With `reference.lidar`: score the fused cloud (a ≤1 M-point stride sample, in the
+  // reconstruction's camera-GPS ENU frame) against the LiDAR surface, like the sparse
+  // points after recon. Read `domeRmsM` / `domeWithin10cm` to compare two fusions of
+  // one model: the dome is the model's and cancels.
+  const denseLidarCheck = async (key) => {
+    const d = await page.evaluate(() => window.bench.densePointsEnu())
+    if (!d) { console.log(`== ${key} LiDAR: no dense cloud or no GPS fit`); return }
+    const f = new Float32Array(Uint8Array.from(Buffer.from(d.b64, 'base64')).buffer) // own buffer: a Buffer may sit in a shared pool
+    const pts = []
+    for (let i = 0; i < f.length; i += 3) pts.push([f[i], f[i + 1], f[i + 2]])
+    const { loadLidarGrid, lidarCheck } = await import('./lidar.mjs')
+    lidarGrid ??= await loadLidarGrid(lidarCfg, (m) => console.log(`== ${m}`))
+    const r = { ...lidarCheck(pts, d.origin, lidarGrid, { flatRangeM: lidarCfg.flatRangeM ?? 0.15 }), denseCount: d.count, stride: d.stride }
+    result.stages[key].lidarCheck = r
+    console.log(`== ${key} LiDAR: ${JSON.stringify(r)}`)
+    await writeFile(`${outPrefix}.json`, JSON.stringify(result, null, 2))
   }
   // After the ortho stage, write its PNG to <out>.ortho.png (side-by-sides, plan O0).
   const exportOrtho = async () => {
@@ -418,12 +436,17 @@ try {
       await runStage('recon', { ...cfg.recon, ...(v.recon ?? {}) }, `recon[${label}]`)
     }
   } else {
-    for (const stage of stages) {
-      if (stage === 'reopen') { await reopen(); continue }
-      if (stage === 'colmap') { await importColmap(); continue }
+    // A stage may carry a tag, `dense:loose`: it runs the `dense` stage with the config
+    // key `dense:loose` (falling back to `dense`) and reports under that key, so one run
+    // can repeat a stage with other settings on the same inputs.
+    for (const entry of stages) {
+      if (entry === 'reopen') { await reopen(); continue }
+      if (entry === 'colmap') { await importColmap(); continue }
+      const [stage, tag] = entry.split(':')
       if (!run[stage]) throw new Error(`unknown stage ${stage}`)
-      await runStage(stage, cfg[stage])
-      if (stage === 'dense' && cfg.exportDense) await exportDense()
+      await runStage(stage, cfg[entry] ?? cfg[stage], entry)
+      if (stage === 'dense' && cfg.exportDense) await exportDense(tag)
+      if (stage === 'dense' && lidarCfg) await denseLidarCheck(entry)
       if (stage === 'ortho') await exportOrtho()
     }
   }

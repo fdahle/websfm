@@ -118,7 +118,14 @@ The camera GPS that defines the frame may be metres off, and ellipsoidal where t
 LiDAR uses a national height datum. The check therefore fits a horizontal shift and a
 vertical offset first, and reports only the shape that remains: `rmsM`, `medianAbsM`,
 `p90AbsM`, `within10cm`, the block tilt (`tiltPer100m`) and the dome (`domeAtEdgeM`,
-the quadratic term at the 95 % radius; positive means a bowl).
+the quadratic term at the 95 % radius; positive means a bowl). The `dome*` fields
+(`domeRmsM`, `domeWithin10cm`, …) are the same after the dome is removed as well.
+
+After a `dense` stage the fused cloud is scored the same way (a ≤1 M-point stride
+sample), under `stages.dense.lidarCheck`. Two fusions of one model share its dome, so
+compare them on the `dome*` fields. A stage may carry a tag to repeat it with other
+settings on the same inputs: `"stages": "…,depth,dense,dense:loose"` runs the dense
+stage again with config key `dense:loose`.
 
 ## More config keys
 

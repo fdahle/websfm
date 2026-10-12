@@ -42,6 +42,9 @@ import { encodeSfmInput } from './sfmInputDump.js'
 // are only readable here), then handed to the runner as a download. Node replays it
 // through reconstruct() as a real-data golden scene (src/core/sfm/sfmGolden.test.js).
 let sfmCaptureArmed = false, sfmCapture = null
+// The last reconstruction's camera-GPS fit (SfM → local ENU): later stages put their
+// points in that frame for the node-side LiDAR comparison (densePointsEnu).
+let lastPositionCheck = null
 const postMessage = Worker.prototype.postMessage
 Worker.prototype.postMessage = function (message, ...rest) {
   if (sfmCaptureArmed && message?.op === 'reconstruct') {
@@ -273,6 +276,26 @@ window.bench = {
     return btoa(s)
   },
 
+  // The fused dense cloud in the last reconstruction's positionCheck ENU frame, every
+  // `stride`-th point so at most `maxPoints` come back (base64 Float32 e,n,u), for the
+  // node-side LiDAR check (scripts/bench/lidar.mjs). Null without a GPS fit.
+  densePointsEnu(maxPoints = 1_000_000) {
+    const c = recon.clouds.find((x) => x.kind === 'dense' && !x.imported)
+    const pc = lastPositionCheck
+    if (!c || !pc) return null
+    const stride = Math.max(1, Math.ceil(c.count / maxPoints))
+    const out = new Float32Array(3 * Math.ceil(c.count / stride))
+    let k = 0
+    for (let i = 0; i < c.count; i += stride) {
+      const q = applySimilarity(pc.sim, [c.pos[3 * i], c.pos[3 * i + 1], c.pos[3 * i + 2]])
+      out[k++] = q[0]; out[k++] = q[1]; out[k++] = q[2]
+    }
+    const u8 = new Uint8Array(out.buffer, 0, 4 * k)
+    let s = ''
+    for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000))
+    return { count: c.count, stride, origin: pc.origin, b64: btoa(s) }
+  },
+
   // The reference camera positions as imported poses (WGS84), as a user importing a
   // camera CSV would: preselection uses them; `posePriors` decides whether SfM does.
   async importReferencePoses() {
@@ -381,6 +404,7 @@ window.bench = {
         .filter((i) => Number.isFinite(i.meta?.gpsLat) && Number.isFinite(i.meta?.gpsLon) && Number.isFinite(i.meta?.gpsAlt))
         .map((i) => [i.uuid, { lat: i.meta.gpsLat, lon: i.meta.gpsLon, alt: i.meta.gpsAlt }]))
     const pc = cloud?.cameras ? cameraPositionCheck(cloud.cameras, positions, { leverArm: reference?.leverArm ?? null }) : null
+    lastPositionCheck = pc
     const checkpointCheck = pc && reference?.gcps
       ? await checkpoints(cloud, pc).catch((e) => ({ error: String(e?.stack ?? e) }))
       : null
