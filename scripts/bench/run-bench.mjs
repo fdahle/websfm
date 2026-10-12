@@ -15,7 +15,7 @@
 //
 // Config keys (JSON file and/or flags; flags win): name, images (folder), include (regex
 // on file names), limit (first N after sorting), sceneType, stages ("detect,match,recon";
-// also depth, dense, and reopen = reload the page and restore the project),
+// also depth, dense, dem, ortho, and reopen = reload the page and restore the project),
 // detect / match / recon (settings objects; `preset` selects a preset delta), port, headed,
 // variants ([{ label, match?, recon? }]: one detection, then a match + reconstruct per
 // variant, so SfM-only experiments reuse the same keypoints and matches).
@@ -239,7 +239,7 @@ try {
   }
   await memory('after ingest')
 
-  const run = { detect: 'detect', match: 'match', recon: 'reconstruct', depth: 'depth', dense: 'dense' }
+  const run = { detect: 'detect', match: 'match', recon: 'reconstruct', depth: 'depth', dense: 'dense', dem: 'dem', ortho: 'ortho' }
   const gbStr = (v) => (v == null ? '?' : `${(v / 1024 ** 3).toFixed(2)} GB`)
   // `performance.memory` counts ArrayBuffer backing stores, which the ~4 GB V8 limit
   // does not: the DevTools protocol separates the two (V8 heap vs backing storage).
@@ -292,6 +292,18 @@ try {
     await new Promise((res) => out.end(res))
     console.log(`== exportDense: ${info.count} points → ${outPrefix}.dense.bin`)
     result.stages.exportDense = { points: info.count, file: `${outPrefix}.dense.bin` }
+  }
+  // After the ortho stage, write its PNG to <out>.ortho.png (side-by-sides, plan O0).
+  const exportOrtho = async () => {
+    const size = await page.evaluate(() => window.bench.orthoPngSize())
+    if (!size) { console.log('== exportOrtho: no ortho'); return }
+    const out = createWriteStream(`${outPrefix}.ortho.png`)
+    for (let s = 0; s < size; s += 8 << 20) {
+      const b64 = await page.evaluate(([a, n]) => window.bench.orthoPngChunk(a, n), [s, 8 << 20])
+      await new Promise((res, rej) => out.write(Buffer.from(b64, 'base64'), (e) => (e ? rej(e) : res())))
+    }
+    await new Promise((res) => out.end(res))
+    console.log(`== exportOrtho: ${(size / 1024 ** 2).toFixed(1)} MiB → ${outPrefix}.ortho.png`)
   }
   const reopen = async () => {
     const id = await page.evaluate(() => window.bench.currentProject())
@@ -412,6 +424,7 @@ try {
       if (!run[stage]) throw new Error(`unknown stage ${stage}`)
       await runStage(stage, cfg[stage])
       if (stage === 'dense' && cfg.exportDense) await exportDense()
+      if (stage === 'ortho') await exportOrtho()
     }
   }
   result.finishedAt = new Date().toISOString()

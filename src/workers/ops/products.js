@@ -5,6 +5,7 @@ import { rasterToPng } from '../rasterPreview.js'
 import { frameFromSpec, describeFrame } from '../../core/products/frameSpec.js'
 import { rasterizeDem, coreExtent } from '../../core/products/dem.js'
 import { orthorectify, orthorectifyStreamed } from '../../core/products/ortho.js'
+import { orthoStats, describeOrthoStats } from '../../core/eval/orthoStats.js'
 import { meshSurface, planeSurface, resampleSurface } from '../../core/products/surface.js'
 import { traceContours, contoursToGeoJSON, contoursToDxf } from '../../core/products/contours.js'
 import { terrainProducts } from '../../core/products/terrain.js'
@@ -185,7 +186,7 @@ export function makeProductsOps() {
     const rectify = streamed
       ? (g, ms, toSfm, options, progress) => orthorectifyStreamed(g, ms, i => readDepthFiles(ms[i]), toSfm, options, progress)
       : orthorectify
-    const { width, height, rgba, covered, sampled, filled } = await rectify(grid, maps, frame.toSfm, settings,
+    const { width, height, rgba, covered, sampled, filled, labels } = await rectify(grid, maps, frame.toSfm, settings,
       (done, total) => emit('progress', [done, total, 'Orthorectifying…']))
 
     const previewBlob = await rasterToPng(new ImageData(rgba, width, height), width, height)
@@ -195,6 +196,10 @@ export function makeProductsOps() {
       + `${label} surface (${grid.count}/${cells} cells had a height) `
       + `— ${sampled} sampled + ${filled} interpolated `
       + `in ${((performance.now() - t0) / 1000).toFixed(1)}s`, 'success', 'Products'])
+    // The ortho's quality figures travel with it (its run record): sharpness, and
+    // with a source label per cell, how visible the seams between images are.
+    const stats = orthoStats(rgba, width, height, labels)
+    emit('log', [`Ortho: ${describeOrthoStats(stats)}`, 'info', 'Products'])
     emit('progress', [height, height, 'Done'])
 
     const rgbaBuf = new Uint8Array(rgba.buffer)
@@ -205,7 +210,7 @@ export function makeProductsOps() {
         width, height, rgba: rgbaBuf, covered, sampled, filled, previewBlob,
         gsd: grid.gsd, originX: grid.originX, originY: grid.originY,
         surface: label, surfaceCells: grid.count,
-        frame: grid.frame, crs: frame.crs, unit: frame.unit,
+        frame: grid.frame, crs: frame.crs, unit: frame.unit, stats,
       },
       transfer: [rgbaBuf.buffer],
     }

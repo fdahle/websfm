@@ -27,6 +27,7 @@ import { useComputeSettings } from '/src/composables/useComputeSettings.js'
 import {
   DETECT_DEFAULTS_BY_DETECTOR, DETECT_PRESETS_BY_DETECTOR, MATCH_DEFAULTS, MATCH_PRESETS,
   RECONSTRUCT_DEFAULTS, RECONSTRUCT_PRESETS, DEPTHMAP_DEFAULTS, DENSE_FUSE_DEFAULTS,
+  DEM_DEFAULTS, ORTHO_DEFAULTS,
 } from '/src/core/defaults.user.js'
 import { learnedDetector } from '/src/core/features/learnedDetectors.js'
 import { MODEL_CACHE_NAME, modelUrl } from '/src/core/models/registry.js'
@@ -213,6 +214,39 @@ window.bench = {
     await recon.densify(settings, report)
     const dense = recon.clouds.filter((c) => c.kind === 'dense')
     return { settings, seconds: (performance.now() - t0) / 1000, points: dense.reduce((n, c) => n + (c.count ?? 0), 0) }
+  },
+
+  // DEM, settings resolved exactly as DemModal.run() does.
+  async dem({ ...overrides } = {}) {
+    const { memBudgetBytes } = useComputeSettings()
+    const { gsd, ...rest } = { ...DEM_DEFAULTS, ...overrides }
+    const settings = { ...rest, memBudgetBytes: memBudgetBytes.value, ...(gsd > 0 ? { gsd } : {}) }
+    const t0 = performance.now()
+    await recon.generateDem(settings, report)
+    const d = recon.dem
+    return { settings, seconds: (performance.now() - t0) / 1000,
+      width: d?.width ?? 0, height: d?.height ?? 0, gsd: d?.gsd ?? null }
+  },
+
+  // Orthophoto, settings resolved exactly as OrthoModal.run() does; returns the
+  // ortho's own quality figures (its `stats` run record, core/eval/orthoStats.js).
+  async ortho({ ...overrides } = {}) {
+    const { depthTolRel, maxCost, gsd, ...rest } = { ...ORTHO_DEFAULTS, ...overrides }
+    const settings = { ...rest, gsd: gsd > 0 ? gsd : 0, depthTolRel: depthTolRel / 100, maxCost: maxCost > 0 ? maxCost : Infinity }
+    const t0 = performance.now()
+    await recon.generateOrtho(settings, report)
+    const o = recon.ortho
+    return { settings, seconds: (performance.now() - t0) / 1000,
+      width: o?.width ?? 0, height: o?.height ?? 0, gsd: o?.gsd ?? null,
+      covered: o?.covered ?? 0, sampled: o?.sampled ?? 0, filled: o?.filled ?? 0, stats: o?.stats ?? null }
+  },
+  // The ortho's PNG (its full-resolution preview), base64 in chunks for the runner.
+  orthoPngSize() { return recon.ortho?.previewBlob?.size ?? 0 },
+  async orthoPngChunk(start, n) {
+    const u8 = new Uint8Array(await recon.ortho.previewBlob.slice(start, start + n).arrayBuffer())
+    let s = ''
+    for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000))
+    return btoa(s)
   },
 
   // A COLMAP text model as the main sparse cloud, through the app's own import (the

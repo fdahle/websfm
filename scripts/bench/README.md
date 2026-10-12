@@ -59,7 +59,11 @@ project:
 - `detect`, `match`, `recon`: settings layered over the app's defaults, exactly as the
   modals do it. `preset` selects a preset delta (`low` / `high`).
 - `stages`: default `detect,match,recon`. Also `depth` and `dense` (settings as the
-  Depth Maps / Dense modals resolve them; config keys `depth`, `dense`), and `reopen`:
+  Depth Maps / Dense modals resolve them; config keys `depth`, `dense`), `dem` and
+  `ortho` (as the DEM / Orthophoto modals resolve them; keys `dem`, `ortho`). The ortho
+  stage reports the ortho's quality figures (`stats`: sharpness in grey levels per cell,
+  and the seam step between source images vs the step inside one image) and writes the
+  ortho as `<out>.ortho.png` for side-by-sides. And `reopen`:
   reload the page (OPFS survives in the on-disk profile) and restore the project through
   the app's own open sequence, timed per store. After every stage an `== inventory` line
   prints what the page holds per item (keypoints, match tuples, clouds, depth maps) and

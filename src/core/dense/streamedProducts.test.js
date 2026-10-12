@@ -150,6 +150,7 @@ describe('bounded map loading', () => {
     const expected = orthorectify(grid, ms, p => p, opts)
     const actual = await orthorectifyStreamed(grid, entries, i => readDepthFiles(entries[i]), p => p, opts)
     expect(actual).toEqual(expected)
+    if (blend === 'best') expect(new Set(expected.labels).size).toBeGreaterThan(2) // ≥ 2 sources + unlabelled
   })
   it('rejects a truncated map before fusion', async () => {
     const entry = files(maps())[0]; entry.files.depth = new Blob([new Uint8Array(4)])

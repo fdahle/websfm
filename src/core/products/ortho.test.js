@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { fillOrthoGaps, sampleOrtho, orthorectify, affineToSfm } from './ortho.js'
+import { fillOrthoGaps, sampleOrtho, orthorectify, affineToSfm, NO_LABEL } from './ortho.js'
 import { frameFromSimilarity } from './georef.js'
 import { rasterizeDem } from './dem.js'
 import { makeFrame } from './projection.js'
@@ -73,6 +73,23 @@ describe('orthorectify', () => {
     const dem = rasterizeDem(pts, { gsd: 0.5, fillRadius: 0 })
     const ortho = orthorectify(dem, [m], identity.toSfm, {})
     expect(ortho.covered).toBe(0)
+  })
+
+  it('labels each sampled cell with the map that coloured it', () => {
+    // Two cameras over x = 2 and x = 8; each sees ±5 around itself (H 10, fx 100).
+    const west = nadirMap({ cx: 2, cy: 5, uuid: 'west' })
+    const east = nadirMap({ cx: 8, cy: 5, uuid: 'east' })
+    east.cost.fill(0.5) // west wins wherever both see the cell
+    const pts = []
+    for (let x = 0; x <= 12; x += 0.5) for (let y = 3; y <= 7; y += 0.5) pts.push({ x, y, z: 0 })
+    const dem = rasterizeDem(pts, { gsd: 0.5, fillRadius: 0 })
+    const ortho = orthorectify(dem, [west, east], identity.toSfm, { fillRadius: 0 })
+    const seen = new Set(ortho.labels)
+    expect(seen.has(0) && seen.has(1)).toBe(true)
+    for (let i = 0; i < ortho.labels.length; i++) {
+      expect(ortho.labels[i] === NO_LABEL).toBe(ortho.rgba[i * 4 + 3] === 0)
+    }
+    expect(orthorectify(dem, [west, east], identity.toSfm, { blend: 'average' }).labels).toBeNull()
   })
 })
 

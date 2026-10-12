@@ -34,11 +34,18 @@ function projectInto(m, P) {
 //   opts: { depthTolRel=0.02, blend='best'|'average', maxCost=Infinity }
 // Returns [r,g,b] (0..255) or null when no view sees the point.
 export function sampleOrtho(P, maps, opts = {}) {
+  return pickOrthoView(P, maps, opts)?.rgb ?? null
+}
+
+// sampleOrtho plus the index of the map that supplied the colour (`mi`, the label;
+// -1 for 'average', which mixes every visible view).
+function pickOrthoView(P, maps, opts) {
   const { depthTolRel = 0.02, blend = 'best', maxCost = Infinity } = opts
-  let best = null           // { score, rgb }
+  let best = null           // { score, rgb, mi }
   let wsum = 0, r = 0, g = 0, b = 0  // for 'average'
 
-  for (const m of maps) {
+  for (let mi = 0; mi < maps.length; mi++) {
+    const m = maps[mi]
     const p = projectInto(m, P)
     if (!p) continue
     const u = Math.round(p.u), v = Math.round(p.v)
@@ -62,16 +69,23 @@ export function sampleOrtho(P, maps, opts = {}) {
       const w = 1 / (cost + 1e-3)
       wsum += w; r += w * rgb[0]; g += w * rgb[1]; b += w * rgb[2]
     } else if (!best || score < best.score) {
-      best = { score, rgb }
+      best = { score, rgb, mi }
     }
   }
 
   if (blend === 'average') {
     if (wsum <= 0) return null
-    return [Math.round(r / wsum), Math.round(g / wsum), Math.round(b / wsum)]
+    return { rgb: [Math.round(r / wsum), Math.round(g / wsum), Math.round(b / wsum)], mi: -1 }
   }
-  return best ? best.rgb : null
+  return best
 }
+
+// The per-cell source label (Uint16Array): which map coloured the cell, NO_LABEL where
+// none did. Only 'best' has one ('average' mixes every visible view), and only below
+// 65,535 maps — otherwise null.
+export const NO_LABEL = 0xffff
+const newLabels = (n, opts, nMaps) =>
+  opts.blend !== 'average' && nMaps < NO_LABEL ? new Uint16Array(n).fill(NO_LABEL) : null
 
 // Fill small transparent holes that lie INSIDE the selected surface. Reads only
 // original sampled pixels, so interpolation cannot propagate across a large gap
@@ -124,11 +138,13 @@ export function fillOrthoGaps(rgba, surfaceMask, width, height, radius, method =
 // gives the ground XY. Cells with no height (mask 0) or no visible view become
 // transparent.
 //   grid: from dem.rasterizeDem ({ width, height, gsd, originX, originY, data, mask })
-// Returns { width, height, rgba:Uint8ClampedArray(w*h*4), covered } where
-// `covered` is the number of cells that received a colour.
+// Returns { width, height, rgba:Uint8ClampedArray(w*h*4), covered, labels } where
+// `covered` is the number of cells that received a colour and `labels` the source
+// map per sampled cell (see NO_LABEL; gap-filled cells stay unlabelled).
 export function orthorectify(grid, maps, toSfm, opts = {}, onProgress = () => {}) {
   const { width, height, gsd, originX, originY, data, mask } = grid
   const rgba = new Uint8ClampedArray(width * height * 4)
+  const labels = newLabels(width * height, opts, maps.length)
   let covered = 0
   for (let row = 0; row < height; row++) {
     for (let col = 0; col < width; col++) {
@@ -138,9 +154,11 @@ export function orthorectify(grid, maps, toSfm, opts = {}, onProgress = () => {}
       const x = originX + (col + 0.5) * gsd
       const y = originY - (row + 0.5) * gsd
       const P = toSfm([x, y, data[idx]])
-      const rgb = sampleOrtho(P, maps, opts)
-      if (!rgb) continue
+      const view = pickOrthoView(P, maps, opts)
+      if (!view) continue
+      const { rgb } = view
       rgba[o] = rgb[0]; rgba[o + 1] = rgb[1]; rgba[o + 2] = rgb[2]; rgba[o + 3] = 255
+      if (labels) labels[idx] = view.mi
       covered++
     }
     if (row % 32 === 0) onProgress(row, height)
@@ -149,7 +167,7 @@ export function orthorectify(grid, maps, toSfm, opts = {}, onProgress = () => {}
   const filled = fillOrthoGaps(rgba, mask, width, height, opts.fillRadius ?? 2, opts.fillMethod ?? 'idw')
   covered += filled
   onProgress(height, height)
-  return { width, height, rgba, covered, sampled, filled }
+  return { width, height, rgba, covered, sampled, filled, labels }
 }
 
 /**
@@ -192,6 +210,7 @@ export async function orthorectifyStreamed(grid, metas, loadMap, toSfm, opts = {
   // the chosen blend reads — 8 B/cell for 'best', 32 B/cell for 'average'.
   const scores = average ? null : new Float64Array(n).fill(Infinity)
   const sums = average ? new Float64Array(n * 4) : null
+  const labels = newLabels(n, opts, metas.length)
   const { depthTolRel = 0.02, maxCost = Infinity } = opts
   let zLo = Infinity, zHi = -Infinity
   for (let i = 0; i < n; i++) if (mask[i]) { const z = data[i]; if (z < zLo) zLo = z; if (z > zHi) zHi = z }
@@ -225,6 +244,7 @@ export async function orthorectifyStreamed(grid, metas, loadMap, toSfm, opts = {
       } else if (score < scores[idx]) {
         scores[idx] = score
         rgba[o] = m.rgb[c]; rgba[o + 1] = m.rgb[c + 1]; rgba[o + 2] = m.rgb[c + 2]; rgba[o + 3] = 255
+        if (labels) labels[idx] = mi
       }
     }
     onProgress(mi + 1, metas.length)
@@ -238,5 +258,5 @@ export async function orthorectifyStreamed(grid, metas, loadMap, toSfm, opts = {
     if (rgba[o + 3]) sampled++
   }
   const filled = fillOrthoGaps(rgba, mask, width, height, opts.fillRadius ?? 2, opts.fillMethod ?? 'idw')
-  return { width, height, rgba, covered: sampled + filled, sampled, filled }
+  return { width, height, rgba, covered: sampled + filled, sampled, filled, labels }
 }
