@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { Uint32PairList, packMatchPairs, wrapPackedMatches, asPairList } from './matchCodec.js'
+import { Uint32PairList, packMatchPairs, wrapPackedMatches, asPairList, swapMatchRoles, transposeF } from './matchCodec.js'
 
 describe('reconstruction match transport', () => {
   it('packs tuples into eight bytes per match and preserves the solver read API', () => {
@@ -29,5 +29,19 @@ describe('asPairList', () => {
     expect([fromArray.length, fromArray.a(1), fromArray.b(1)]).toEqual([2, 7, 8])
     const fromTyped = asPairList(Uint32Array.from([9, 10]))
     expect([fromTyped.a(0), fromTyped.b(0)]).toEqual([9, 10])
+  })
+})
+
+describe('swapMatchRoles / transposeF', () => {
+  it('swaps each pair and leaves the input alone', () => {
+    const m = Uint32Array.from([1, 2, 3, 4])
+    expect(Array.from(swapMatchRoles(m))).toEqual([2, 1, 4, 3])
+    expect(Array.from(m)).toEqual([1, 2, 3, 4])
+  })
+  it('transposes F so the epipolar constraint holds with the roles swapped', () => {
+    const F = [[0, -0.3, 0.2], [0.4, 0, -1.1], [-0.25, 0.9, 0.05]]
+    const a = [3, 7, 1], b = [5, -2, 1]
+    const xFy = (x, M, y) => x.reduce((s, xi, r) => s + xi * M[r].reduce((t, m, c) => t + m * y[c], 0), 0)
+    expect(xFy(b, F, a)).toBeCloseTo(xFy(a, transposeF(F), b), 12)
   })
 })

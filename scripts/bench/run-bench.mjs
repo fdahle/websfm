@@ -418,7 +418,7 @@ try {
       }
     }
     result.stages[key] = r
-    const { settings: _s, model: _m, workerHeap: _w, perPair: _p, kpPerImage: _k, ...numbers } = r
+    const { settings: _s, model: _m, workerHeap: _w, perPair: _p, kpPerImage: _k, featureDigest: _f, ...numbers } = r
     console.log(`== ${key}: ${JSON.stringify(numbers)}`)
     if (stage !== 'recon') await memory(`after ${key}`)
     await inventory(`after ${key}`)

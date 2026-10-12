@@ -23,6 +23,7 @@ import '/src/stores/useMeasurementsStore.js'
 import '/src/stores/useScaleBarsStore.js'
 import '/src/stores/useWorkflowsStore.js'
 import { restoreProjectStores } from '/src/stores/projectStores.js'
+import * as opfs from '/src/utils/opfs.js'
 import { useComputeSettings } from '/src/composables/useComputeSettings.js'
 import {
   DETECT_DEFAULTS_BY_DETECTOR, DETECT_PRESETS_BY_DETECTOR, MATCH_DEFAULTS, MATCH_PRESETS,
@@ -348,10 +349,25 @@ window.bench = {
     // Per-image keypoint counts by name, hashed: two runs' detections compare at a glance.
     let h = 2166136261
     for (const s of done.map((i) => `${i.name}:${i.kpCount}`).sort()) for (const c of s) h = Math.imul(h ^ c.charCodeAt(0), 16777619) >>> 0
+    // And their CONTENT: keypoint buffer and descriptor bytes per image, hashed by
+    // 32-bit word — equal counts do not mean equal features (determinism, PAR-6).
+    const hashWords = (ta) => {
+      if (!ta) return null
+      const w = new Uint32Array(ta.buffer, ta.byteOffset, ta.byteLength >> 2)
+      let x = 2166136261
+      for (let i = 0; i < w.length; i++) x = Math.imul(x ^ w[i], 16777619)
+      return (x >>> 0).toString(16)
+    }
+    const featureDigest = {}
+    for (const img of done) {
+      const kps = await images.readKeypoints(img)
+      const desc = await opfs.loadDescriptors(projects.currentProjectId, img.uuid)
+      featureDigest[img.name] = `${hashWords(kps?.data)}/${hashWords(desc)}`
+    }
     return {
       settings, seconds: (performance.now() - t0) / 1000, images: done.length,
       keypoints: done.reduce((s, i) => s + (i.kpCount ?? 0), 0), kpDigest: h.toString(16),
-      kpPerImage: Object.fromEntries(done.map((i) => [i.name, i.kpCount])),
+      kpPerImage: Object.fromEntries(done.map((i) => [i.name, i.kpCount])), featureDigest,
     }
   },
 

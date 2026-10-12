@@ -60,3 +60,17 @@ export function wrapPackedMatches(pairs) {
   }
   return pairs
 }
+
+// A packed [ia0, ib0, ia1, ib1, …] match list with the two images' roles swapped:
+// [ib0, ia0, ib1, ia1, …]. A new array; the input is not touched.
+export function swapMatchRoles(matches) {
+  const out = new Uint32Array(matches.length)
+  for (let i = 0; i < matches.length; i += 2) { out[i] = matches[i + 1]; out[i + 1] = matches[i] }
+  return out
+}
+
+// The fundamental matrix of the swapped pair: x_B·F·x_A = 0 ⇔ x_A·Fᵀ·x_B = 0.
+// Row-major nested 3×3, as verify.js returns it.
+export function transposeF(F) {
+  return [0, 1, 2].map((r) => [0, 1, 2].map((c) => F[c][r]))
+}

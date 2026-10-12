@@ -20,6 +20,7 @@ import { evaluatePairAcceptance } from '../core/features/pairGate.js'
 import { pickSpreadIndices, sliceDescriptorRows, resolveSubsetGateSize } from '../core/features/subsetGate.js'
 import { siblingCanonicalMap, canonicalizeMatches } from '../core/features/orientationSiblings.js'
 import { toMatchSpace } from '../core/features/siftDescriptors.js'
+import { swapMatchRoles, transposeF } from '../core/sfm/matchCodec.js'
 import { learnedDetector, lightGlueModelFor } from '../core/features/learnedDetectors.js'
 import { MATCH_DEFAULTS } from '../core/defaults.user.js'
 import { MATCH_TUNING, RESIDENT_TUNING } from '../core/tuning.js'
@@ -375,9 +376,19 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
 
     const projectId = projects.currentProjectId
     try {
-      // Image whose uuid sorts first → idA; its descriptors go to descA
-      const srcA = idA === imgA.uuid ? imgA : imgB
-      const srcB = idA === imgA.uuid ? imgB : imgA
+      // STORAGE order is by uuid (idA/idB, the pair id, the packed [ia, ib] layout),
+      // but uuids are random per project, so matching in that order made which image
+      // plays "A" a coin flip per pair per project — and brute-force matching is
+      // asymmetric (the ratio test runs from A's side, RANSAC samples in A's match
+      // order): two fresh runs of the same images differed on ~8 % of pairs. Match in
+      // NAME order instead (the files' names, stable across projects; uuid order on a
+      // tie), and turn the result back into storage order below (`swapRoles`).
+      const storeA = idA === imgA.uuid ? imgA : imgB
+      const storeB = idA === imgA.uuid ? imgB : imgA
+      const swapRoles = (storeB.name ?? '') < (storeA.name ?? '')
+      // From here srcA/kpsA/descA are the MATCHING roles.
+      const srcA = swapRoles ? storeB : storeA
+      const srcB = swapRoles ? storeA : storeB
       // Keypoints load per image on demand (useImagesStore.ensureKeypoints; LRU-kept
       // across a run's pairs), ordered the same way as the ids.
       const images = useImagesStore()
@@ -406,8 +417,8 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
         return p
       }
       const loadStarted = performance.now()
-      const descA = await loadDesc(idA, srcA)
-      const descB = await loadDesc(idB, srcB)
+      const descA = await loadDesc(srcA.uuid, srcA)
+      const descB = await loadDesc(srcB.uuid, srcB)
 
       entry.timing.descriptorLoadMs = performance.now() - loadStarted
       entry.timing.descriptorBytes = (descA?.byteLength ?? 0) + (descB?.byteLength ?? 0)
@@ -520,7 +531,7 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
           // The crate slices the flat buffer by `dim`; a wrong dim yields phantom
           // rows and out-of-range match indices → the `reading 'x'` crash in verify.
           dim: srcA.descDim ?? 128,
-        }, 'full', [idA, idB])
+        }, 'full', [srcA.uuid, srcB.uuid])
         // One index per physical feature from here on: matches made through a
         // secondary SIFT orientation are re-expressed on the dominant keypoint and
         // deduplicated, so verification and SfM never see a feature twice (a split
@@ -608,6 +619,12 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
         entry.inlierCount = raw.length
       }
 
+      // Back into storage order: swap each [ia, ib] and transpose F (x_B·F·x_A = 0
+      // becomes x_A·Fᵀ·x_B = 0). Every other entry field is symmetric in the roles.
+      if (swapRoles) {
+        matches = swapMatchRoles(matches)
+        if (entry.F) entry.F = transposeF(entry.F)
+      }
       holdMatches(pid, entry, matches)
       entry.status = 'done'
 

@@ -38,6 +38,8 @@ Notable changes to websfm. The format follows
 - The theme can follow the operating system.
 
 ### Changed
+- Feature matching is reproducible: the same images now give the same matches in
+  every project, where before a few percent of image pairs varied slightly.
 - Sharper orthophotos: colour now comes from the original photos at full resolution
   instead of the lower-resolution depth maps.
 - Dense clouds are more complete: fusion's matching-cost gate is now a fixed, looser

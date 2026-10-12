@@ -71,6 +71,36 @@ it('posts only the putatives\' packed coordinates to verification', async () => 
   expect([ptsB[2], ptsB[3]]).toEqual([485, 144])   // b's keypoint 48
 })
 
+it('matches in image-name order and stores the result in uuid order', async () => {
+  // uuid order a < b, name order "alpha" (b) < "zeta" (a): b plays A in matching.
+  vi.spyOn(opfs, 'saveMatchDocument').mockResolvedValue({ files: {} })
+  const n = 20
+  const kps = (dx) => Array.from({ length: 50 }, (_, i) => ({ x: i * 10 + dx, y: i * 7 % 300, nx: 0, ny: 0 }))
+  const a = { ...withKeypoints('a', kps(0)), name: 'zeta.jpg' }
+  const b = { ...withKeypoints('b', kps(5)), name: 'alpha.jpg' }
+  // Distinguishable after RootSIFT: a's rows are e0, b's rows e1.
+  const rows = (k) => Float32Array.from({ length: 50 * 128 }, (_, i) => (i % 128 === k ? 1 : 0))
+  const descOf = { a: rows(0), b: rows(1) }
+  vi.spyOn(opfs, 'loadDescriptors').mockImplementation(async (_p, uuid) => descOf[uuid])
+  const match = vi.spyOn(workers, 'matchDescriptors').mockResolvedValue({
+    matches: Array.from({ length: n }, (_, i) => ({ ia: i, ib: 49 - i, dist: 1 })),
+  })
+  const F = [[0, -0.3, 0.2], [0.4, 0, -1.1], [-0.25, 0.9, 0.05]]
+  const verify = vi.spyOn(workers, 'verifyPointPairs').mockResolvedValue({
+    F, inlierMask: new Float32Array(n).fill(1), inlierCount: n, hInlierCount: 0,
+  })
+  const store = useMatchesStore()
+  await store.matchPair(a, b, { subsetGate: false })
+  // Matching saw b first: its descriptors and keypoints in the A role.
+  expect([match.mock.calls[0][0][0], match.mock.calls[0][0][1]]).toEqual([0, 1])
+  expect([verify.mock.calls[0][0][2], verify.mock.calls[0][0][3]]).toEqual([15, 7]) // b's keypoint 1
+  // Stored in uuid order: [a index, b index] and F for x_b·F·x_a = 0.
+  const entry = store.getMatch('a', 'b')
+  expect(entry.idA).toBe('a')
+  expect([...store.residentPairMatches('a--b')].slice(0, 4)).toEqual([49, 0, 48, 1])
+  expect(entry.F).toEqual([[0, 0.4, -0.25], [-0.3, 0, 0.9], [0.2, -1.1, 0.05]])
+})
+
 it('folds SIFT orientation siblings onto one keypoint before verification', async () => {
   vi.spyOn(opfs, 'saveMatchDocument').mockResolvedValue({ files: {} })
   // 30 features; in both images keypoint 30+i is the second-orientation sibling of i.
