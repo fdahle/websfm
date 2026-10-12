@@ -1,0 +1,20 @@
+name: Feature request
+description: Suggest a new feature or an improvement.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: Describe the task or the data you're working with, not only the feature.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would help?
+      description: How you'd like it to work. Mention another tool if it does this well.
+  - type: textarea
+    id: context
+    attributes:
+      label: Anything else?

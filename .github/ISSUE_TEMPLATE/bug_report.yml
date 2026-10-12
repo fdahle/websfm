@@ -1,0 +1,42 @@
+name: Bug report
+description: Something broke, or a result looks wrong.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Import 40 drone images
+        2. Run Detect → Match → Reconstruct with default settings
+        3. ...
+  - type: textarea
+    id: data
+    attributes:
+      label: Dataset
+      description: Number of images, camera, aerial or close-range, and image size. Attach a few images if you can share them.
+  - type: input
+    id: browser
+    attributes:
+      label: Browser and operating system
+      placeholder: Chrome 141 on Windows 11
+    validations:
+      required: true
+  - type: input
+    id: gpu
+    attributes:
+      label: GPU (if WebGPU was involved)
+      placeholder: NVIDIA RTX 3060
+  - type: textarea
+    id: log
+    attributes:
+      label: Log
+      description: Developer console → Save TXT, then attach the file or paste the relevant part.
+      render: text

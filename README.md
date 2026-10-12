@@ -243,12 +243,88 @@ the Rust change so fresh clones keep working without a toolchain.
   exportable as `.websfm` archives.
 - **Build/test:** Vite, Vitest.
 
-Architecture notes for contributors live in [`CLAUDE.md`](CLAUDE.md) (code layout)
-and [`METHODS.md`](METHODS.md) (the photogrammetry/SfM methods). Open work is in
-[`TODO.md`](TODO.md), the record of what shipped and what it measured is in
-[`HANDOVER.md`](HANDOVER.md), and [`VERIFICATION.csv`](VERIFICATION.csv) tracks
-which manual/real-data checks have actually been run. Planning docs are under
-[`docs/planning/`](docs/planning/).
+How the code is organised is described in [ARCHITECTURE.md](ARCHITECTURE.md).
+What changed between versions is in [CHANGELOG.md](CHANGELOG.md).
+
+## How it's tested
+
+The compute code has a large suite of unit and regression tests, and any change to
+how the sparse solver stores its data must reproduce recorded results bit for bit.
+A headless bench runs the real pipeline (ingest, detection, matching, SfM, depth
+maps, fusion) in headless Chrome, using the same workers, WASM and WebGPU code as
+the app, with fresh browser storage for every run. Wherever a dataset has
+independent reference data, results are scored against it: RTK camera positions,
+surveyed GCPs held out as checkpoints, and ETH3D ground truth. COLMAP 4.0.3 is run on
+the same images on the same machine for comparison.
+
+Latest results (October 2026):
+
+| Dataset | Images registered | Result | Compared against |
+| --- | --- | --- | --- |
+| Aerial survey block with RTK and 15 surveyed GCPs | 444 / 444 | Checkpoints: 3.2–3.4 cm horizontal, ~7 cm vertical (RTK camera priors, no GCP used as control) | Surveyed GCPs |
+| Same block, pure SfM (no GCPs, no RTK) | 444 / 444 | Cameras vs RTK: 24.8 cm H / 49.6 cm V | COLMAP: 24.0 / 65.0 cm |
+| Quarry, Pix4D example (RTK in EXIF), pure SfM | 347 / 347 | Cameras vs RTK: 28.7 cm H / 70.2 cm V, ~530 s end to end | COLMAP: 49.5 / 84.7 cm, 1,104 s |
+| COLMAP South Building | 128 / 128 | 60,045 sparse points | COLMAP: 84,954 points |
+| ETH3D high-res, 13 scenes (dense, from ground-truth cameras) | – | Mean F1 52.6 at 2 cm, 76.0 at 10 cm | COLMAP dense: 59.1 / 81.0 |
+| Historical Antarctic aerial film (USGS, 97 MP scans) | 5 / 5 | Self-calibrated, median reprojection error 1.48 px | – |
+
+The ETH3D figures come from an approximation of the official scorer, so they compare
+websfm with COLMAP rather than with the public leaderboard.
+
+Known gaps: without GCPs or camera priors, nadir blocks bend into a dome of about
+0.5–0.7 m (COLMAP's dome is larger on the same images). COLMAP keeps 40–260 % more
+sparse points, and dense accuracy at 2 cm is behind COLMAP.
+
+Not yet verified:
+
+- Firefox and Safari. So far only Chromium has been exercised.
+- WebGPU on other GPUs. Every GPU number above comes from one NVIDIA GPU.
+- Exported files in external tools: GeoTIFF/COG in QGIS or GDAL, LAZ in
+  CloudCompare, the COLMAP export round trip.
+- Interactive workflows end to end in a browser: GCP marking and georeferencing,
+  scale bars, film fiducial calibration, meshing, and the learned detectors.
+- Project portability: reopening a saved `.websfm` in a fresh browser profile, and
+  folder-backed projects.
+- Volume measurements against an independent tool.
+
+## Roadmap
+
+**Now**
+- Parity with established SfM tools (COLMAP, Metashape) on standard benchmarks,
+  measured for accuracy, robustness and speed
+- Larger projects (1,000+ images) that stay fast and within browser memory, from
+  sparse reconstruction through dense fusion and viewing
+- Checking recent features in real browsers on real datasets, so "shipped" also
+  means "verified"
+- Better georeferenced accuracy, including less dome-shaped distortion when no
+  ground control points are available
+- Dense filtering and meshing tuned on real data (sky, vegetation, snow and ice)
+
+**Next**
+- Automatic ground control points found by matching against a reference
+  orthophoto, so historical imagery can be georeferenced without survey data
+- More robust fiducial detection for large historical film-scan batches (rotated or
+  mirrored scans, sub-pixel marks, faster review)
+- Faster feature detection and matching on large image sets
+- Denser, more complete depth maps on weakly textured surfaces, with smaller
+  depth-map storage
+- Content-based automatic masking (film frames, colour keys, low-texture areas)
+- Importing large LiDAR and reference point clouds, and comparing your DEM against a
+  reference DEM
+
+**Later**
+- 3D measurement tools: 3D rulers, true surface area and DEM-of-difference volumes
+  for change detection
+- Ground classification and bare-earth terrain models (DTM)
+- Bundle adjustment constrained by a reference DEM, to correct long strips without
+  ground control
+- Fisheye lens support
+- Textured meshes (textured OBJ, glTF and 3D Tiles)
+- More learned feature detectors and matchers, plus quality gates and branching in
+  the Workflow Builder
+
+Priorities follow real use: if something here matters to you, or something is
+missing, please open an issue to discuss it.
 
 ## Development & AI assistance
 
@@ -266,9 +342,11 @@ What that means for you:
   against known control.
 - Not all code paths have been exercised on real data yet; bug reports are genuinely
   useful and very welcome.
-- The methods behind each stage are documented in [`METHODS.md`](METHODS.md) so you
-  can see *what* the algorithms do and judge them on their merits, independent of how
-  the code was written.
+- The methods behind each stage are explained in the in-app glossary
+  (**Other ▸ Glossary**, source in [`src/glossary/`](src/glossary/)), so you can see
+  *what* the algorithms do and judge them on their merits, independent of how the
+  code was written. [How it's tested](#how-its-tested) lists what has been checked
+  against independent reference data, and what hasn't yet.
 
 If this approach affects whether you'd use or trust the tool, I'd rather you know
 than guess.
@@ -277,3 +355,12 @@ than guess.
 
 Found a bug or have a suggestion? Use the 🐞 button in the app, or open an issue:
 **[github.com/fdahle/websfm/issues](https://github.com/fdahle/websfm/issues)**.
+To contribute code, see [CONTRIBUTING.md](CONTRIBUTING.md). Security issues go
+through [SECURITY.md](SECURITY.md), not public issues.
+
+## License
+
+websfm is released under the [MIT License](LICENSE). Bundled third-party code and
+the downloadable model weights keep their own licenses, listed in the app under
+**About**. Note that the SuperPoint weights are licensed for non-commercial research
+only and are not distributed with websfm.

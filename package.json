@@ -2,6 +2,16 @@
   "name": "websfm",
   "private": true,
   "version": "0.1.0-beta.1",
+  "description": "Structure-from-Motion and photogrammetry, entirely in the browser",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fdahle/websfm.git"
+  },
+  "homepage": "https://github.com/fdahle/websfm#readme",
+  "bugs": {
+    "url": "https://github.com/fdahle/websfm/issues"
+  },
   "type": "module",
   "scripts": {
     "dev": "vite",

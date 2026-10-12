@@ -3,8 +3,9 @@ FROM node:22-alpine AS build
 WORKDIR /app
 
 # Where the app is mounted on the host (must start and end with "/"), and where
-# the four .onnx weights are served from. Leave VITE_MODEL_BASE_URL empty to
-# bundle public/models/*.onnx into the image instead.
+# the .onnx weights are served from. Leave VITE_MODEL_BASE_URL empty to
+# bundle public/models/*.onnx into the image instead (`npm run fetch:models`
+# downloads the redistributable ones; superpoint.onnx must never be bundled).
 ARG VITE_BASE_PATH=/
 ARG VITE_MODEL_BASE_URL=
 ENV VITE_BASE_PATH=$VITE_BASE_PATH
@@ -21,7 +22,7 @@ COPY . .
 # Opt in with --build-arg RUN_RELEASE_CHECK=1 to also run
 # scripts/check-release.mjs, which verifies the artifact is actually deployable
 # (LICENSE, favicon, the ORT runtime, and — unless VITE_MODEL_BASE_URL is set —
-# the four bundled model weights). It is off by default because the weights are
+# the redistributable model weights). It is off by default because the weights are
 # gitignored: a fresh clone has no public/models/*.onnx and would fail the check.
 ARG RUN_RELEASE_CHECK=0
 RUN npm run build \

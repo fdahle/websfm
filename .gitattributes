@@ -1,2 +1,13 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Binary artifacts: never diff or normalise line endings.
+*.wasm binary
+*.onnx binary
+*.glb  binary
+*.laz  binary
+*.tif  binary
+*.tiff binary
+*.png  binary
+*.jpg  binary
+*.jpeg binary

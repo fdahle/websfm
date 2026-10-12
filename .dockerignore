@@ -16,6 +16,12 @@ crates/target
 # Test images / datasets — hundreds of MB, never needed to build the app.
 data
 
+# Bench and browser-test output (bench-out/ reaches tens of GB on a dev machine).
+bench-out
+test-results
+playwright-report
+scripts/bench/configs
+
 .git
 .gitignore
 Dockerfile
@@ -24,10 +30,7 @@ Dockerfile
 # Docs are not inputs to the build, with one exception: LICENSE is copied into
 # dist by vite-plugin-static-copy and checked by scripts/check-release.mjs.
 CLAUDE.md
-METHODS.md
-TODO.md
-HANDOVER.md
-docs
+dev
 
 .vscode
 .claude

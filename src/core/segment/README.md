@@ -23,7 +23,7 @@ The compute layer for click-to-segment masking is implemented and unit-tested:
 - `workers/computeClient.js` — `segmentEncode` / `segmentDecode` / `segmentForget`,
   all **pinned to worker 0** (one heavy ORT session + the embedding cache live there).
 
-## Before building the UI — DE-RISK FIRST (TODO.md F12)
+## Before building the UI — DE-RISK FIRST
 
 The ORT glue matches decoder inputs by **name fragment** and outputs by **shape**,
 because exact tensor names differ between SAM2 exports. That guessing must be
