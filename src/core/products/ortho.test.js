@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest'
-import { fillOrthoGaps, sampleOrtho, orthorectify, affineToSfm, NO_LABEL } from './ortho.js'
+import { fillOrthoGaps, sampleOrtho, orthorectify, orthorectifyStreamed, affineToSfm, NO_LABEL } from './ortho.js'
+import { makeSampleMap } from '../sfm/displayFrame.js'
+import { scaleK } from '../sfm/geometry.js'
 import { frameFromSimilarity } from './georef.js'
 import { rasterizeDem } from './dem.js'
 import { makeFrame } from './projection.js'
@@ -90,6 +92,56 @@ describe('orthorectify', () => {
       expect(ortho.labels[i] === NO_LABEL).toBe(ortho.rgba[i * 4 + 3] === 0)
     }
     expect(orthorectify(dem, [west, east], identity.toSfm, { blend: 'average' }).labels).toBeNull()
+  })
+})
+
+describe('orthorectifyStreamed with the source photo (O1)', () => {
+  // A nadir camera 10 above (5,5) with a 400 px photo (fx 400, pixel centres at
+  // integers) whose depth map is at ¼ resolution and whose own rgb plane is flat
+  // grey. One ortho cell = one photo pixel: cell (col,row) lands on photo pixel
+  // (col+160, row+160) exactly, so the ortho must reproduce the photo's checker.
+  const Kfull = { fx: 400, fy: 400, cx: 199.5, cy: 199.5 }
+  const s = 0.25
+  const K = scaleK(Kfull, s)
+  const map = {
+    uuid: 'p', width: 100, height: 100, K, R: [[1, 0, 0], [0, -1, 0], [0, 0, -1]], t: [-5, 5, 10],
+    depth: new Float32Array(100 * 100).fill(10), cost: new Float32Array(100 * 100),
+    rgb: new Uint8Array(100 * 100 * 3).fill(77),
+  }
+  const photo = new Uint8ClampedArray(400 * 400 * 4)
+  for (let y = 0; y < 400; y++) for (let x = 0; x < 400; x++) {
+    const o = 4 * (y * 400 + x), v = ((x >> 3) + (y >> 3)) % 2 ? 255 : 0
+    photo[o] = v; photo[o + 1] = 255 - v; photo[o + 2] = 30; photo[o + 3] = 255
+  }
+  const grid = { width: 80, height: 80, gsd: 0.025, originX: 4, originY: 6,
+    data: new Float32Array(80 * 80), mask: new Uint8Array(80 * 80).fill(1) }
+  const opts = { fillRadius: 0 }
+
+  it('samples colour from the photo at full resolution through the sample map', async () => {
+    const loadImage = async () => ({ data: photo, width: 400, height: 400,
+      map: makeSampleMap({ K: Kfull, outScale: s, srcScale: 1 }) })
+    const out = await orthorectifyStreamed(grid, [map], async () => map, (p) => p, opts, () => {}, loadImage)
+    expect(out.sampled).toBe(80 * 80)
+    for (const [col, row] of [[0, 0], [7, 0], [8, 0], [37, 51], [79, 79]]) {
+      const o = 4 * (row * 80 + col), po = 4 * ((row + 160) * 400 + col + 160)
+      expect([out.rgba[o], out.rgba[o + 1], out.rgba[o + 2]]).toEqual([photo[po], photo[po + 1], photo[po + 2]])
+    }
+  })
+
+  it('without loadImage (or when it returns null) colours from the depth map', async () => {
+    for (const loadImage of [null, async () => null]) {
+      const out = await orthorectifyStreamed(grid, [map], async () => map, (p) => p, opts, () => {}, loadImage)
+      expect(out.rgba[0]).toBe(77)
+      expect(out.rgba[4 * 80 * 80 - 4]).toBe(77)
+    }
+  })
+
+  it('leaves a cell the photo does not cover uncoloured', async () => {
+    // A photo cropped to its left half: cells mapping to x ≥ 200 have no colour.
+    const half = { data: photo, width: 200, height: 400, map: makeSampleMap({ K: Kfull, outScale: s, srcScale: 1 }) }
+    const out = await orthorectifyStreamed(grid, [map], async () => map, (p) => p, opts, () => {}, async () => half)
+    expect(out.rgba[4 * 39 + 3]).toBe(255)   // col 39 → x 199
+    expect(out.rgba[4 * 41 + 3]).toBe(0)     // col 41 → x 201
   })
 })
 

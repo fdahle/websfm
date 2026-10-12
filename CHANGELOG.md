@@ -38,6 +38,8 @@ Notable changes to websfm. The format follows
 - The theme can follow the operating system.
 
 ### Changed
+- Sharper orthophotos: colour now comes from the original photos at full resolution
+  instead of the lower-resolution depth maps.
 - Dense clouds are more complete: fusion's matching-cost gate is now a fixed, looser
   default (0.8) instead of one adapted to each dataset, which was discarding real
   surface. On the ETH3D benchmark this closes the gap to COLMAP at 2 cm with no loss of

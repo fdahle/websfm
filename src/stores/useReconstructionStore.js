@@ -1745,8 +1745,21 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
         uuid: m.uuid, width: m.width, height: m.height, K: m.K, R: m.R, t: m.t,
         depth: m.depth, cost: m.cost, rgb: m.rgb,
       }))
+      // The source photo per map, for full-resolution colour (the depth maps then only
+      // decide visibility): the same image + frame-model join dense used to build them.
+      const imgByUuid = new Map(images.value.map((im) => [im.uuid, im]))
+      const frameModel = frameModelFor.value
+      const photos = []
+      for (const m of maps) {
+        const im = imgByUuid.get(m.uuid), cam = sparse?.cameras?.get(m.uuid)
+        if (!im || !cam) continue
+        try { await imagesStore.whenComputeReady(im) } catch { continue } // falls back to map colour
+        const { dist, selfCal, fiducial } = frameModel(im)
+        photos.push({ uuid: m.uuid, name: im.name, url: im.computeUrl ?? im.url,
+          K: { fx: cam.K.fx, fy: cam.K.fy, cx: cam.K.cx, cy: cam.K.cy }, dist, selfCal, fiducial })
+      }
       const res = await workerGenerateOrtho(
-        { surface, maps: mapsPayload, streamed, settings },
+        { surface, maps: mapsPayload, streamed, settings, images: photos },
         { onLog: (m, l, c) => log(m, l, c), onProgress: (dn, t, lbl, f) => onProgress?.(dn, t, lbl, f) },
       )
       if (!stillCurrent()) return

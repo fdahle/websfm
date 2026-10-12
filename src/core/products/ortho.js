@@ -16,6 +16,7 @@
 // Each map: { uuid, width, height, K:{fx,fy,cx,cy}, R, t,
 //             depth:Float32Array, cost:Float32Array, rgb:Uint8Array(w*h*3) }.
 // Conventions match geometry.js (x_cam = R·x_world + t; K working-res).
+import { sampleRgbaBilinear } from './undistort.js'
 
 // Project a world point into a map, requiring it in front of the camera.
 // Returns { u, v, depth } (u,v continuous px) or null.
@@ -202,7 +203,15 @@ export function affineToSfm(toSfm, lo, hi) {
 }
 
 // Map-major counterpart: identical selection/weights, one decoded map resident.
-export async function orthorectifyStreamed(grid, metas, loadMap, toSfm, opts = {}, onProgress = () => {}) {
+//
+// `loadImage(mi, map)` (optional) returns the map's SOURCE photo for colour:
+// `{ data: RGBA, width, height, map }`, where `map(u, v)` takes a depth-map pixel to
+// the photo's raw pixel (core/sfm/displayFrame.js makeSampleMap — the same chain dense
+// used to build the map; null = identity). The depth map then only decides visibility,
+// and colour is bilinear at the photo's full resolution instead of nearest from the
+// map's working-resolution rgb plane (plan-ortho-mosaic O1). Return null for a map
+// to fall back to its rgb plane. Without loadImage the output equals orthorectify().
+export async function orthorectifyStreamed(grid, metas, loadMap, toSfm, opts = {}, onProgress = () => {}, loadImage = null) {
   const { width, height, gsd, originX, originY, data, mask } = grid
   const n = width * height, rgba = new Uint8ClampedArray(n * 4)
   const average = opts.blend === 'average'
@@ -217,8 +226,10 @@ export async function orthorectifyStreamed(grid, metas, loadMap, toSfm, opts = {
   const affine = zLo <= zHi ? affineToSfm(toSfm,
     [originX, originY - height * gsd, zLo], [originX + width * gsd, originY, zHi]) : null
   const P = [0, 0, 0]
+  const px = new Float32Array(4)
   for (let mi = 0; mi < metas.length; mi++) {
     const m = await loadMap(mi)
+    const photo = loadImage ? await loadImage(mi, m) : null
     for (let row = 0; row < height; row++) for (let col = 0; col < width; col++) {
       const idx = row * width + col
       if (!mask[idx]) continue
@@ -237,13 +248,22 @@ export async function orthorectifyStreamed(grid, metas, loadMap, toSfm, opts = {
       if (u < 0 || v < 0 || u >= m.width || v >= m.height) continue
       const i = v * m.width + u, stored = m.depth[i], cost = m.cost ? m.cost[i] : 0
       if (!(stored > 0) || Math.abs(stored - p.depth) > depthTolRel * p.depth || cost > maxCost) continue
-      const score = cost + 1e-6 * p.depth, o = idx * 4, c = i * 3
+      const score = cost + 1e-6 * p.depth, o = idx * 4
+      if (photo) {
+        const q = photo.map ? photo.map(p.u, p.v) : { x: p.u, y: p.v }
+        // Pixel centres at integers: the photo spans [−½, size − ½].
+        if (!(q.x >= -0.5 && q.y >= -0.5 && q.x <= photo.width - 0.5 && q.y <= photo.height - 0.5)) continue
+        sampleRgbaBilinear(photo.data, photo.width, photo.height, q.x, q.y, px, 0)
+      } else {
+        const c = i * 3
+        px[0] = m.rgb[c]; px[1] = m.rgb[c + 1]; px[2] = m.rgb[c + 2]
+      }
       if (average) {
         const w = 1 / (cost + 1e-3)
-        sums[o] += w * m.rgb[c]; sums[o + 1] += w * m.rgb[c + 1]; sums[o + 2] += w * m.rgb[c + 2]; sums[o + 3] += w
+        sums[o] += w * px[0]; sums[o + 1] += w * px[1]; sums[o + 2] += w * px[2]; sums[o + 3] += w
       } else if (score < scores[idx]) {
         scores[idx] = score
-        rgba[o] = m.rgb[c]; rgba[o + 1] = m.rgb[c + 1]; rgba[o + 2] = m.rgb[c + 2]; rgba[o + 3] = 255
+        rgba[o] = px[0]; rgba[o + 1] = px[1]; rgba[o + 2] = px[2]; rgba[o + 3] = 255
         if (labels) labels[idx] = mi
       }
     }

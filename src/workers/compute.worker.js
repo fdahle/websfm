@@ -78,7 +78,7 @@ const ops = {
   ...makeMatchOps(),
   ...makeSfmOps(),
   ...makeDenseOps({ rasterize }),
-  ...makeProductsOps(),
+  ...makeProductsOps({ rasterize }),
   ...makeMeshOps(),
   ...makeCloudOps(),
   ...makeTiffOps(),

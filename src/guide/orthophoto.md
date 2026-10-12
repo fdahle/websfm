@@ -7,7 +7,10 @@ order: 90
 ---
 An [orthophoto](help:orthophoto) uses the chosen surface for geometry and cached depth
 maps for visibility. It therefore needs both depth maps and a DEM or mesh (a fitted
-plane is available for genuinely flat scenes).
+plane is available for genuinely flat scenes). Colour is read from the original photos
+at full resolution, so the orthophoto can be as sharp as the photos even when the depth
+maps were computed at a lower quality. Each photo is decoded once while it is used,
+which adds time on large projects.
 
 ## Surface
 <!-- param: surface default: DEM -->

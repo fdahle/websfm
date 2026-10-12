@@ -4,7 +4,8 @@ import { hillshadeRgba } from '../../core/products/colormap.js'
 import { rasterToPng } from '../rasterPreview.js'
 import { frameFromSpec, describeFrame } from '../../core/products/frameSpec.js'
 import { rasterizeDem, coreExtent } from '../../core/products/dem.js'
-import { orthorectify, orthorectifyStreamed } from '../../core/products/ortho.js'
+import { orthorectifyStreamed } from '../../core/products/ortho.js'
+import { makeSampleMap } from '../../core/sfm/displayFrame.js'
 import { orthoStats, describeOrthoStats } from '../../core/eval/orthoStats.js'
 import { meshSurface, planeSurface, resampleSurface } from '../../core/products/surface.js'
 import { traceContours, contoursToGeoJSON, contoursToDxf } from '../../core/products/contours.js'
@@ -12,10 +13,41 @@ import { terrainProducts } from '../../core/products/terrain.js'
 import { clipDem, clipOrtho } from '../../core/products/rasterClip.js'
 import { unitName as frameUnitName } from '../../core/products/rasterUnits.js'
 
+// The ortho's source photos (plan-ortho-mosaic O1). `images` comes from the store, one
+// per depth map: { uuid, name, url, K (the camera's full-resolution K), dist, selfCal,
+// fiducial }. Returns orthorectifyStreamed's loadImage(mi, map): the photo decoded at
+// native resolution plus the depth-map-pixel → photo-pixel map, built exactly as dense
+// built the depth map (same makeSampleMap chain; the map's K fixes its working scale).
+// Null when there are no photos; a photo that fails to decode falls back to the
+// depth map's own colour for that map, logged.
+function makePhotoLoader(images, rasterize, emit) {
+  if (!images?.length || !rasterize) return null
+  const byUuid = new Map(images.map((im) => [im.uuid, im]))
+  const load = async (mi, m) => {
+    const im = byUuid.get(m.uuid)
+    if (!im) { load.fellBack++; return null }
+    try {
+      const r = await rasterize(im.url, Infinity)
+      const map = makeSampleMap({ K: im.K, dist: im.dist, selfCal: im.selfCal, fiducial: im.fiducial,
+        outScale: m.K.fx / im.K.fx, srcScale: r.scale })
+      load.decoded++
+      return { data: r.data, width: r.width, height: r.height, map }
+    } catch (err) {
+      emit('log', [`Ortho: ${im.name ?? m.uuid} — source photo unavailable (${err?.message ?? err}); `
+        + 'using its depth-map colour', 'warn', 'Products'])
+      load.fellBack++
+      return null
+    }
+  }
+  load.decoded = 0
+  load.fellBack = 0
+  return load
+}
+
 // Product ops (DEM + orthophoto). The frame rebuild/descriptor + raster→dataURL
 // canvas helpers live here next to the two handlers; pure compute is in
-// core/products/*. No injected worker helpers (products don't rasterise sources).
-export function makeProductsOps() {
+// core/products/*. `rasterize` (injected) decodes the ortho's source photos.
+export function makeProductsOps({ rasterize } = {}) {
   // Frames carry closures, so they can't cross postMessage — the store sends a
   // spec, the worker resolves it (core/products/frameSpec.js, shared with the
   // main thread's map placement). `cameras` is the uuid → { R, t } Map here.
@@ -183,11 +215,17 @@ export function makeProductsOps() {
 
     emit('progress', [0, grid.height, 'Orthorectifying…'])
     const t0 = performance.now()
-    const rectify = streamed
-      ? (g, ms, toSfm, options, progress) => orthorectifyStreamed(g, ms, i => readDepthFiles(ms[i]), toSfm, options, progress)
-      : orthorectify
-    const { width, height, rgba, covered, sampled, filled, labels } = await rectify(grid, maps, frame.toSfm, settings,
-      (done, total) => emit('progress', [done, total, 'Orthorectifying…']))
+    // Map-major whether the maps are saved (read one at a time) or in memory, so each
+    // map's source photo is decoded once, used, and dropped before the next.
+    const loadMap = streamed ? (i) => readDepthFiles(maps[i]) : async (i) => maps[i]
+    const loadImage = makePhotoLoader(input.images, rasterize, emit)
+    const { width, height, rgba, covered, sampled, filled, labels } = await orthorectifyStreamed(
+      grid, maps, loadMap, frame.toSfm, settings,
+      (done, total) => emit('progress', [done, total, 'Orthorectifying…']), loadImage)
+    if (loadImage) {
+      emit('log', [`Ortho: colour from ${loadImage.decoded} source photo(s) at full resolution`
+        + `${loadImage.fellBack ? `, ${loadImage.fellBack} from depth-map colour (photo unavailable)` : ''}`, 'info', 'Products'])
+    }
 
     const previewBlob = await rasterToPng(new ImageData(rgba, width, height), width, height)
     const cells = width * height
