@@ -239,7 +239,7 @@ try {
   }
   await memory('after ingest')
 
-  const run = { detect: 'detect', match: 'match', recon: 'reconstruct', depth: 'depth', dense: 'dense', dem: 'dem', ortho: 'ortho' }
+  const run = { detect: 'detect', match: 'match', recon: 'reconstruct', depth: 'depth', dense: 'dense', dem: 'dem', mesh: 'mesh', ortho: 'ortho' }
   const gbStr = (v) => (v == null ? '?' : `${(v / 1024 ** 3).toFixed(2)} GB`)
   // `performance.memory` counts ArrayBuffer backing stores, which the ~4 GB V8 limit
   // does not: the DevTools protocol separates the two (V8 heap vs backing storage).
@@ -312,16 +312,17 @@ try {
     await writeFile(`${outPrefix}.json`, JSON.stringify(result, null, 2))
   }
   // After the ortho stage, write its PNG to <out>.ortho.png (side-by-sides, plan O0).
-  const exportOrtho = async () => {
+  const exportOrtho = async (tag) => {
     const size = await page.evaluate(() => window.bench.orthoPngSize())
     if (!size) { console.log('== exportOrtho: no ortho'); return }
-    const out = createWriteStream(`${outPrefix}.ortho.png`)
+    const file = `${outPrefix}${tag ? `.${tag}` : ''}.ortho.png`
+    const out = createWriteStream(file)
     for (let s = 0; s < size; s += 8 << 20) {
       const b64 = await page.evaluate(([a, n]) => window.bench.orthoPngChunk(a, n), [s, 8 << 20])
       await new Promise((res, rej) => out.write(Buffer.from(b64, 'base64'), (e) => (e ? rej(e) : res())))
     }
     await new Promise((res) => out.end(res))
-    console.log(`== exportOrtho: ${(size / 1024 ** 2).toFixed(1)} MiB → ${outPrefix}.ortho.png`)
+    console.log(`== exportOrtho: ${(size / 1024 ** 2).toFixed(1)} MiB → ${file}`)
   }
   const reopen = async () => {
     const id = await page.evaluate(() => window.bench.currentProject())
@@ -417,7 +418,7 @@ try {
       }
     }
     result.stages[key] = r
-    const { settings: _s, model: _m, workerHeap: _w, ...numbers } = r
+    const { settings: _s, model: _m, workerHeap: _w, perPair: _p, kpPerImage: _k, ...numbers } = r
     console.log(`== ${key}: ${JSON.stringify(numbers)}`)
     if (stage !== 'recon') await memory(`after ${key}`)
     await inventory(`after ${key}`)
@@ -447,7 +448,7 @@ try {
       await runStage(stage, cfg[entry] ?? cfg[stage], entry)
       if (stage === 'dense' && cfg.exportDense) await exportDense(tag)
       if (stage === 'dense' && lidarCfg) await denseLidarCheck(entry)
-      if (stage === 'ortho') await exportOrtho()
+      if (stage === 'ortho') await exportOrtho(tag)
     }
   }
   result.finishedAt = new Date().toISOString()

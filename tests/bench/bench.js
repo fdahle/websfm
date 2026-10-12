@@ -27,7 +27,7 @@ import { useComputeSettings } from '/src/composables/useComputeSettings.js'
 import {
   DETECT_DEFAULTS_BY_DETECTOR, DETECT_PRESETS_BY_DETECTOR, MATCH_DEFAULTS, MATCH_PRESETS,
   RECONSTRUCT_DEFAULTS, RECONSTRUCT_PRESETS, DEPTHMAP_DEFAULTS, DENSE_FUSE_DEFAULTS,
-  DEM_DEFAULTS, ORTHO_DEFAULTS,
+  DEM_DEFAULTS, ORTHO_DEFAULTS, MESH_DEFAULTS,
 } from '/src/core/defaults.user.js'
 import { learnedDetector } from '/src/core/features/learnedDetectors.js'
 import { MODEL_CACHE_NAME, modelUrl } from '/src/core/models/registry.js'
@@ -231,6 +231,15 @@ window.bench = {
       width: d?.width ?? 0, height: d?.height ?? 0, gsd: d?.gsd ?? null }
   },
 
+  // Mesh, settings resolved exactly as MeshModal.run() does (source: meshSource).
+  async mesh({ ...overrides } = {}) {
+    const settings = { ...MESH_DEFAULTS, ...overrides, sourceId: overrides.sourceId ?? recon.meshSource?.id ?? null }
+    const t0 = performance.now()
+    await recon.generateMesh(settings, report)
+    const m = recon.clouds.find((c) => c.kind === 'mesh' && !c.imported && !c.derived)
+    return { settings, seconds: (performance.now() - t0) / 1000, triangles: m?.count ?? 0, vertices: m?.nVerts ?? 0 }
+  },
+
   // Orthophoto, settings resolved exactly as OrthoModal.run() does; returns the
   // ortho's own quality figures (its `stats` run record, core/eval/orthoStats.js).
   async ortho({ ...overrides } = {}) {
@@ -336,9 +345,13 @@ window.bench = {
     const t0 = performance.now()
     await images.detectAll(settings, null, report, () => false)
     const done = images.images.filter((i) => i.kpStatus === 'done')
+    // Per-image keypoint counts by name, hashed: two runs' detections compare at a glance.
+    let h = 2166136261
+    for (const s of done.map((i) => `${i.name}:${i.kpCount}`).sort()) for (const c of s) h = Math.imul(h ^ c.charCodeAt(0), 16777619) >>> 0
     return {
       settings, seconds: (performance.now() - t0) / 1000, images: done.length,
-      keypoints: done.reduce((s, i) => s + (i.kpCount ?? 0), 0),
+      keypoints: done.reduce((s, i) => s + (i.kpCount ?? 0), 0), kpDigest: h.toString(16),
+      kpPerImage: Object.fromEntries(done.map((i) => [i.name, i.kpCount])),
     }
   },
 
@@ -351,10 +364,19 @@ window.bench = {
     const t0 = performance.now()
     await matches.matchAll(images.images, settings, report, () => false)
     let accepted = 0, inliers = 0
-    for (const e of matches.matchStore.values()) {
+    // Per pair "status:nMatches:weak", keyed by image NAMES (uuids differ between runs),
+    // so two runs on the same detection can be diffed pair by pair (determinism).
+    const nameOf = new Map(images.images.map((i) => [i.uuid, i.name]))
+    const perPair = {}
+    for (const [id, e] of matches.matchStore) {
       if (e.status === 'done' && !e.weak && (e.nMatches ?? 0) > 0) { accepted++; inliers += e.inlierCount ?? e.nMatches }
+      const key = id.split('--').map((u) => nameOf.get(u) ?? u).sort().join('|')
+      perPair[key] = `${e.status}:${e.nMatches ?? 0}:${e.weak ? 1 : 0}`
     }
-    return { settings, seconds: (performance.now() - t0) / 1000, pairs: matches.matchStore.size, accepted, inliers }
+    let h = 2166136261
+    for (const k of Object.keys(perPair).sort()) for (const c of k + perPair[k]) h = Math.imul(h ^ c.charCodeAt(0), 16777619) >>> 0
+    return { settings, seconds: (performance.now() - t0) / 1000, pairs: matches.matchStore.size, accepted, inliers,
+      pairDigest: h.toString(16), perPair }
   },
 
   // posePriors: false disables every camera pose (incl. the EXIF GNSS the app imports
