@@ -225,13 +225,17 @@ export const DEPTHMAP_QUALITY_META = [
 ]
 
 // Dense — Stage B fusion (fuseDepthMaps). Mirrored by DenseModal.vue.
-// UI units: depthTolPct is a %, ÷100 on run; in `auto` mode minViews/maxCost are
-// derived from the data (the modal sends null).
+// UI units: depthTolPct is a %, ÷100 on run; in `auto` mode the modal sends null for
+// minViews/maxCost and fusion picks them (minViews from the map count, maxCost below).
 export const DENSE_FUSE_DEFAULTS = {
-  auto: true,        // derive minViews + maxCost from the data
+  auto: true,        // fusion picks minViews (from the map count) and maxCost (below)
   minViews: 2,       // manual cross-view consistency count (when not auto)
   depthTolPct: 1.0,  // manual depth agreement tolerance, % of depth
-  maxCost: 0.6,      // manual per-pixel cost gate (when not auto)
+  // Per-pixel cost gate (1 − ZNCC; also what `auto` uses). A loose backstop: the depth
+  // maps' cross-view filter has already applied an absolute ZNCC floor, and a tighter
+  // gate only removed true surface — 0.8 vs the old adaptive p70 (≈ 0.3): ETH3D mean
+  // F1 @2 cm 52.6 → 58.9, accuracy unchanged on all 13 scenes; 0.8 and 1.0 score alike.
+  maxCost: 0.8,
   step: 1,           // fusion pixel stride (full res; spatial merge dedupes overlap)
   // ── Geometric outlier filters (WS4; 0 disables each) ──
   minTriAngleDeg: 2.0, // min triangulation angle between the reference and an agreeing

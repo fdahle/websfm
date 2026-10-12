@@ -1,11 +1,12 @@
 import { describe, it, expect } from 'vitest'
 import {
-  filterDepthMap, depthMapForImage, qualityToMaxDim, autoBestK, autoFusionMaxCost,
+  filterDepthMap, depthMapForImage, qualityToMaxDim, autoBestK, fusionCostStats,
   fuseDepthMaps, mergePointsSpatial, createVoxelAccumulator, filterDepthMapsGeometric, filterCandidates, geomFilterLoopShare,
   filterDepthMapsGeometricStreamed, applyPackedMask,
 } from './mvs.js'
 import { packSparseForDense } from './sparseInput.js'
 import { DENSE_TUNING } from '../tuning.js'
+import { DENSE_FUSE_DEFAULTS } from '../defaults.user.js'
 
 // Build a w×h Float32Array depth plane from a 2-D array of numbers (0 = hole).
 const plane = (rows) => Float32Array.from(rows.flat())
@@ -130,36 +131,41 @@ describe('quality presets & derived params (Step 3)', () => {
     expect(autoBestK(20)).toBe(4) // clamped
   })
 
-  it('autoFusionMaxCost clamps a weak p70 down to the 0.45 upper bound', () => {
-    // depth>0 pixels: costs 0.1..1.0; raw p70 ≈ 0.7, clamped down to hi = 0.45.
+  it('fusionCostStats reports the p70 and median of the valid pixels', () => {
     const depth = Float32Array.from([1, 1, 1, 1, 1, 1, 1, 1, 1, 1])
     const cost = Float32Array.from([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0])
-    const { maxCost, n, raw } = autoFusionMaxCost([{ depth, cost }])
+    const { n, p70, median } = fusionCostStats([{ depth, cost }])
     expect(n).toBe(10)
-    expect(maxCost).toBe(0.45)
-    expect(raw).toBeCloseTo(0.7, 6)
+    expect(p70).toBeCloseTo(0.7, 6)
+    expect(median).toBeCloseTo(0.6, 6) // index round(0.5·9) = 5 (round half up)
   })
 
-  it('autoFusionMaxCost leaves an in-range p70 unclamped', () => {
-    // p70 index = round(0.7×3) = 2 ⇒ 0.4 (within [0.3, 0.45]) — returned as-is.
-    const depth = Float32Array.from([1, 1, 1, 1])
-    const cost = Float32Array.from([0.3, 0.35, 0.4, 0.44])
-    const { maxCost, raw } = autoFusionMaxCost([{ depth, cost }])
-    expect(maxCost).toBeCloseTo(0.4, 6)
-    expect(raw).toBeCloseTo(0.4, 6)
-  })
-
-  it('autoFusionMaxCost ignores holes and clamps up to the 0.3 lower bound', () => {
-    // Only two valid pixels, both very low cost ⇒ p70 below 0.3 ⇒ clamped up to 0.3.
+  it('fusionCostStats ignores holes', () => {
     const depth = Float32Array.from([1, 0, 1, 0])
     const cost = Float32Array.from([0.05, 9, 0.1, 9])
-    const { maxCost, n } = autoFusionMaxCost([{ depth, cost }])
+    const { n, p70 } = fusionCostStats([{ depth, cost }])
     expect(n).toBe(2)
-    expect(maxCost).toBe(0.3)
+    expect(p70).toBeCloseTo(0.1, 6)
   })
 
-  it('fuseDepthMaps warns when the raw cost p70 signals a weak distribution', () => {
-    // A single 2×2 map of high-cost valid pixels ⇒ raw p70 > 0.55 ⇒ warn logged.
+  it('fusion gates on the fixed default maxCost, not on the cost distribution', () => {
+    // Uniform costs 0..1 over one map: the old adaptive gate (p70 clamped to ≤ 0.45)
+    // kept under half; the fixed default keeps every pixel up to it.
+    const n = 64
+    const map = {
+      uuid: 'm', width: 8, height: 8,
+      K: { fx: 8, fy: 8, cx: 4, cy: 4 }, R: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], t: [0, 0, 0],
+      depth: new Float32Array(n).fill(5),
+      cost: Float32Array.from({ length: n }, (_, i) => i / (n - 1)),
+      rgb: new Uint8Array(n * 3),
+    }
+    const logs = []
+    fuseDepthMaps([map], {}, (m) => logs.push(m))
+    expect(logs.some((m) => new RegExp(`maxCost ${DENSE_FUSE_DEFAULTS.maxCost}\\b`).test(m))).toBe(true)
+  })
+
+  it('fuseDepthMaps warns when the cost p70 signals a weak distribution', () => {
+    // A single 2×2 map of high-cost valid pixels ⇒ p70 > 0.55 ⇒ warn logged.
     const map = {
       uuid: 'test', width: 2, height: 2,
       K: { fx: 1, fy: 1, cx: 1, cy: 1 }, R: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], t: [0, 0, 0],
@@ -176,7 +182,7 @@ describe('quality presets & derived params (Step 3)', () => {
     expect(out.summary.cullBreakdown).toHaveProperty('lowViewsPct')
   })
 
-  it('autoFusionMaxCost returns the median and matches an exact sort on sampled input', () => {
+  it('fusionCostStats returns the median and matches an exact sort on sampled input', () => {
     // A distribution large enough to force subsampling (maxSamples tiny) — the sampled
     // p50/p70 must land within a small tolerance of the exact percentiles.
     const N = 50_000
@@ -184,10 +190,10 @@ describe('quality presets & derived params (Step 3)', () => {
     const cost = new Float32Array(N)
     for (let i = 0; i < N; i++) cost[i] = i / (N - 1) // uniform 0..1
     const exactMedian = 0.5, exactP70 = 0.7
-    const { median, raw, n } = autoFusionMaxCost([{ depth, cost }], { maxSamples: 2000, lo: 0, hi: 1 })
+    const { median, p70, n } = fusionCostStats([{ depth, cost }], { maxSamples: 2000 })
     expect(n).toBe(N)                         // true valid count, not the sample size
     expect(median).toBeCloseTo(exactMedian, 2)
-    expect(raw).toBeCloseTo(exactP70, 2)
+    expect(p70).toBeCloseTo(exactP70, 2)
   })
 })
 

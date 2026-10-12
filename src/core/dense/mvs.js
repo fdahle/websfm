@@ -16,7 +16,7 @@ import { planeCostRef, aggregateValidCosts } from './planeCost.js'
 import { DENSE_TUNING } from '../tuning.js'
 import { normalizeRegion, regionContains } from '../products/region.js'
 import { viewIndex, positionsInRegion } from './sparseInput.js'
-import { DEPTHMAP_DEFAULTS } from '../defaults.user.js'
+import { DEPTHMAP_DEFAULTS, DENSE_FUSE_DEFAULTS } from '../defaults.user.js'
 import { levelPerturbStarts } from './refineSchedule.js'
 import { projectDensifyPeakBytes, densifyInputBytes, formatBytes, maxFusionTileCells, DENSIFY_CLOUD_BYTES_PER_CELL } from './memBudget.js'
 import {
@@ -525,8 +525,8 @@ export function geomFilterLoopShare({ loopMs, done, total, pxDone, usPerPx = DEN
 // line of defence; this is the one that discriminates.
 //
 // Also applies an absolute per-pixel photometric floor (`minNcc`, COLMAP's
-// filter_min_ncc): distinct from fusion's *adaptive* p70 maxCost, which by construction
-// keeps 70% of pixels no matter how bad the whole distribution is.
+// filter_min_ncc). This floor is what vets the photometry; fusion's `maxCost` is only a
+// loose backstop above it.
 //
 // Runs across all maps at once (needs every view's depth), and zeroes rejected pixels
 // in the maps themselves — so the persisted depth maps, and therefore the orthophoto
@@ -841,23 +841,21 @@ export function autoBestK(nSources) {
   return Math.min(4, Math.max(1, Math.ceil(nSources / 2)))
 }
 
-// Auto fusion cost threshold + median: the `percentile` (default p70) and median of
-// the valid-pixel costs across all depth maps, clamped to [lo, hi]. After Step 1 the
-// per-pixel cost histogram is meaningful (no-measurement sources no longer floor
-// it), so the gate can adapt to the data instead of a fixed 0.6. The upper clamp
-// is deliberately tight (0.45): a genuine ZNCC match is ≥ ~0.55 (cost ≤ 0.45), so
-// a p70 above that means the distribution itself is weak (bad intrinsics / window
-// / working resolution) — keeping such points would only fuse junk.
+// The valid-pixel cost distribution across all depth maps: its median (the run
+// summary) and p70 (the weak-signal warning: a genuine ZNCC match is ≥ ~0.55, cost
+// ≤ 0.45, so a p70 above 0.55 means the whole set matches poorly — bad intrinsics,
+// window or working resolution). It does NOT set the fusion gate any more. It used to
+// (p70 clamped to [0.30, 0.45]), which by construction dropped ~30 % of the pixels the
+// cross-view filter's absolute minNcc floor had already vetted: the fixed default
+// (DENSE_FUSE_DEFAULTS.maxCost) raised the ETH3D mean F1 at 2 cm from 52.6 to 58.9 with
+// accuracy unchanged on every scene (HANDOVER ▸ B-parity, 2026-10-12).
 //
 // Costs are **stride-subsampled** into a single Float32Array and sorted once, so
 // the whole set can pool tens of millions of pixels without a per-pixel JS-boxed
 // array (the double-sort memory hog). `n` is the true valid-pixel count; `median`
 // feeds the run summary (replaces the old second full pool + sort in medianOf).
-// Returns { maxCost, n, raw, median } (raw = unclamped p70, so callers can flag a
-// weak signal).
-function* fusionCostSteps(maps, {
-  percentile = 0.7, lo = 0.3, hi = 0.45, maxSamples = DENSE_TUNING.fuseCostMaxSamples,
-} = {}) {
+// Returns { n, p70, median }.
+function* fusionCostSteps(maps, { maxSamples = DENSE_TUNING.fuseCostMaxSamples } = {}) {
   // One cheap scan for the true valid count → a stride that caps the sample budget.
   let totalValid = 0
   for (let mi = 0; mi < maps.length; mi++) {
@@ -865,7 +863,7 @@ function* fusionCostSteps(maps, {
     const { depth } = m
     for (let i = 0; i < depth.length; i++) if (depth[i] > 0) totalValid++
   }
-  if (!totalValid) return { maxCost: hi, n: 0, raw: hi, median: 0 }
+  if (!totalValid) return { n: 0, p70: 0, median: 0 }
   const stride = Math.max(1, Math.floor(totalValid / maxSamples))
   const samples = new Float32Array(Math.ceil(totalValid / stride) + 1)
   let s = 0, vi = 0
@@ -882,8 +880,7 @@ function* fusionCostSteps(maps, {
   const arr = samples.subarray(0, s)
   arr.sort() // TypedArray.sort is numeric ascending
   const at = (q) => arr[Math.min(s - 1, Math.max(0, Math.round(q * (s - 1))))]
-  const q = at(percentile)
-  return { maxCost: Math.min(hi, Math.max(lo, q)), n: totalValid, raw: q, median: at(0.5) }
+  return { n: totalValid, p70: at(0.7), median: at(0.5) }
 }
 
 function runWithMaps(iterator, maps) {
@@ -891,7 +888,7 @@ function runWithMaps(iterator, maps) {
   while (!step.done) step = iterator.next(maps[step.value])
   return step.value
 }
-export function autoFusionMaxCost(maps, options = {}) {
+export function fusionCostStats(maps, options = {}) {
   return runWithMaps(fusionCostSteps(maps, options), maps)
 }
 
@@ -1465,26 +1462,22 @@ function* fusionPlanSteps(maps, opts, onLog, hooks) {
   const gates = fusionGates(opts)
   const { consistencyPx, depthTolRel, step, removeIsolated } = gates
 
-  // Cost histogram (sampled, one sort) — drives both the auto gate and the summary
-  // median, so it's computed once regardless of whether maxCost is overridden.
+  // Cost histogram (sampled, one sort): the summary median and the weak-signal check.
   const costStats = yield* fusionCostSteps(maps)
 
-  // Derived defaults (Step 3): when the user hasn't overridden them, adapt to the
-  // data. minViews = min(2, nMaps−1) so a 2-image project can still fuse (needs 1
-  // agreeing view); maxCost = p70 of the pooled valid-pixel costs, clamped.
+  // Defaults when the user hasn't overridden them: minViews = min(2, nMaps−1) so a
+  // 2-image project can still fuse (needs 1 agreeing view); maxCost = the fixed
+  // default (fusionCostSteps says why it no longer adapts to the data).
   const minViews = opts.minViews != null ? opts.minViews : Math.max(1, Math.min(2, maps.length - 1))
-  let maxCost = opts.maxCost
-  if (maxCost == null) {
-    maxCost = costStats.maxCost
-    onLog(`Fusion: auto maxCost ${maxCost.toFixed(2)} (p70 of ${costStats.n} valid px, raw ${costStats.raw.toFixed(2)})`, 'info', 'Dense')
-    // A real ZNCC match is ≥ ~0.55 (cost ≤ 0.45). A raw p70 above 0.55 means the
-    // photoconsistency signal is weak across the whole set — the problem is
-    // upstream, not the fusion gate; say so instead of silently keeping junk.
-    if (costStats.raw > 0.55) {
-      onLog(`Fusion: weak cost distribution — raw p70 ${costStats.raw.toFixed(2)} > 0.55 (median ZNCC < 0.45). `
-        + `Check intrinsics / window size / working resolution; the kept fraction below will be low by design.`,
-        'warn', 'Dense')
-    }
+  const maxCost = opts.maxCost ?? DENSE_FUSE_DEFAULTS.maxCost
+  onLog(`Fusion: valid-pixel cost median ${costStats.median.toFixed(2)}, p70 ${costStats.p70.toFixed(2)} `
+    + `(${costStats.n} px)`, 'info', 'Dense')
+  // A real ZNCC match is ≥ ~0.55 (cost ≤ 0.45). A p70 above 0.55 means the
+  // photoconsistency signal is weak across the whole set: the problem is upstream of
+  // fusion, so say so.
+  if (costStats.p70 > 0.55) {
+    onLog(`Fusion: weak cost distribution — p70 ${costStats.p70.toFixed(2)} > 0.55 (most pixels match at ZNCC < 0.45). `
+      + 'Check intrinsics / window size / working resolution.', 'warn', 'Dense')
   }
 
   onLog(`Fusion: ${maps.length} map(s), minViews ${minViews}, maxCost ${maxCost}, `

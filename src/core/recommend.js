@@ -116,9 +116,9 @@ function recommendDepthmap(p, budget) {
 
 // ── fuse (dense Stage B) ──────────────────────────────────────────────────────
 function recommendFuse() {
-  // Fusion runs in `auto` mode by default (derives minViews/maxCost from the
-  // data), and the geometric-outlier gates are dataset-independent. There is
-  // nothing to derive from metadata alone here.
+  // Fusion runs in `auto` mode by default (minViews from the map count, a fixed
+  // loose cost gate), and the geometric-outlier gates are dataset-independent.
+  // There is nothing to derive from metadata alone here.
   return {}
 }
 

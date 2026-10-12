@@ -10,8 +10,13 @@ samples, and emits a coloured [point cloud](help:point-cloud) with normals for m
 
 ## Auto thresholds
 <!-- param: auto default: Enabled -->
-Auto derives the minimum view count and maximum PatchMatch cost from the current data.
-Leave it on unless you are diagnosing a specific completeness-versus-noise tradeoff.
+Auto picks the minimum view count from the number of depth maps and uses the default
+maximum matching cost (0.8). The cost gate is deliberately loose: the depth maps have
+already been checked for photometric and cross-view agreement, and a stricter gate
+mostly removes real surface, leaving holes rather than a cleaner cloud. Leave Auto on
+unless you are diagnosing a specific completeness-versus-noise tradeoff. If the log
+warns of a "weak cost distribution", most pixels match poorly: check the camera
+calibration and the depth-map resolution before tightening fusion.
 
 ## Depth agreement tolerance
 <!-- param: depthTolPct default: 1.0% -->

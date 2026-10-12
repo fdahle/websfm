@@ -15,10 +15,10 @@ const { memBudgetBytes } = useComputeSettings()
 
 // Stage B — Build Dense Cloud (fuse depth maps). `depthTolPct` is exposed as a
 // percentage; converted to the fraction core/dense/mvs.js fuseDepthMaps expects. In
-// Auto mode minViews + maxCost are derived by fusion from the data.
+// Auto mode fusion picks minViews (from the map count) and the default maxCost.
 // Defaults live in core/defaults.user.js; run() transforms depthTolPct (%) below.
-// No dataset recommendation here by design: fusion already derives minViews/maxCost
-// from the data in `auto` mode, and the geometric gates are dataset-independent
+// No dataset recommendation here by design: `auto` picks minViews from the map count,
+// maxCost is a fixed loose backstop, and the geometric gates are dataset-independent
 // (core/recommend.js `recommendFuse`). An empty banner is worse than none.
 const settings = ref({ ...DENSE_FUSE_DEFAULTS })
 
@@ -40,7 +40,7 @@ function run() {
 <template>
   <ModalShell title="Build Dense Cloud" @close="emit('close')">
     <SettingsGroup title="Consistency">
-      <SettingsField hint="Derive min-views and max-cost from the data. Turn off to set them by hand.">
+      <SettingsField hint="Min-views from the image count, the default cost gate. Turn off to set them by hand.">
         <template #label>Auto thresholds (recommended)</template>
         <label class="checkbox-row"><input v-model="settings.auto" type="checkbox" class="checkbox" /> Enabled</label>
       </SettingsField>
