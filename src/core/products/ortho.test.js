@@ -128,6 +128,12 @@ describe('orthorectifyStreamed with the source photo (O1)', () => {
     }
   })
 
+  it('tells the loader how many depth-map pixels one ortho cell spans', async () => {
+    let seen = null
+    await orthorectifyStreamed(grid, [map], async () => map, (p) => p, opts, () => {}, async (mi, m, perCell) => { seen = perCell; return null })
+    expect(seen).toBeCloseTo(0.25, 9) // one cell = one photo pixel = ¼ depth-map pixel
+  })
+
   it('without loadImage (or when it returns null) colours from the depth map', async () => {
     for (const loadImage of [null, async () => null]) {
       const out = await orthorectifyStreamed(grid, [map], async () => map, (p) => p, opts, () => {}, loadImage)

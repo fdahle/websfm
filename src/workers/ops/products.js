@@ -23,11 +23,17 @@ import { unitName as frameUnitName } from '../../core/products/rasterUnits.js'
 function makePhotoLoader(images, rasterize, emit) {
   if (!images?.length || !rasterize) return null
   const byUuid = new Map(images.map((im) => [im.uuid, im]))
-  const load = async (mi, m) => {
+  const load = async (mi, m, mapPxPerCell) => {
     const im = byUuid.get(m.uuid)
     if (!im) { load.fellBack++; return null }
     try {
-      const r = await rasterize(im.url, Infinity)
+      // Decode no finer than ~2 photo pixels per ortho cell (bilinear needs no more),
+      // never above native: a coarse ortho then pays a fraction of the decode.
+      const s = m.K.fx / im.K.fx   // depth-map pixels per native photo pixel
+      const scale = mapPxPerCell > 0 ? Math.min(1, (2 * s) / mapPxPerCell) : 1
+      const nativeMax = Math.max(m.width, m.height) / s
+      const r = await rasterize(im.url, scale < 1 ? Math.ceil(nativeMax * scale) : Infinity)
+      load.scaleSum += r.scale
       const map = makeSampleMap({ K: im.K, dist: im.dist, selfCal: im.selfCal, fiducial: im.fiducial,
         outScale: m.K.fx / im.K.fx, srcScale: r.scale })
       load.decoded++
@@ -40,6 +46,7 @@ function makePhotoLoader(images, rasterize, emit) {
     }
   }
   load.decoded = 0
+  load.scaleSum = 0
   load.fellBack = 0
   return load
 }
@@ -223,15 +230,20 @@ export function makeProductsOps({ rasterize } = {}) {
       grid, maps, loadMap, frame.toSfm, settings,
       (done, total) => emit('progress', [done, total, 'Orthorectifying…']), loadImage)
     if (loadImage) {
-      emit('log', [`Ortho: colour from ${loadImage.decoded} source photo(s) at full resolution`
+      const meanScale = loadImage.decoded ? loadImage.scaleSum / loadImage.decoded : 0
+      emit('log', [`Ortho: colour from ${loadImage.decoded} source photo(s), decoded at `
+        + `${(100 * meanScale).toFixed(0)}% of native on average (≈ 2 photo px per ortho cell, at most native)`
         + `${loadImage.fellBack ? `, ${loadImage.fellBack} from depth-map colour (photo unavailable)` : ''}`, 'info', 'Products'])
     }
 
     const previewBlob = await rasterToPng(new ImageData(rgba, width, height), width, height)
     const cells = width * height
+    // A DEM surface arrives as the stored DEM grid, which carries no cell count.
+    let surfaceCells = grid.count
+    if (surfaceCells == null) { surfaceCells = 0; for (let i = 0; i < cells; i++) if (grid.mask[i]) surfaceCells++ }
     emit('log', [`Ortho: ${width}×${height}, ${covered}/${cells} cells coloured `
       + `(${(100 * covered / cells).toFixed(0)}%) from ${maps.length} view(s) over the `
-      + `${label} surface (${grid.count}/${cells} cells had a height) `
+      + `${label} surface (${surfaceCells}/${cells} cells had a height) `
       + `— ${sampled} sampled + ${filled} interpolated `
       + `in ${((performance.now() - t0) / 1000).toFixed(1)}s`, 'success', 'Products'])
     // The ortho's quality figures travel with it (its run record): sharpness, and
@@ -247,7 +259,7 @@ export function makeProductsOps({ rasterize } = {}) {
       result: {
         width, height, rgba: rgbaBuf, covered, sampled, filled, previewBlob,
         gsd: grid.gsd, originX: grid.originX, originY: grid.originY,
-        surface: label, surfaceCells: grid.count,
+        surface: label, surfaceCells,
         frame: grid.frame, crs: frame.crs, unit: frame.unit, stats,
       },
       transfer: [rgbaBuf.buffer],

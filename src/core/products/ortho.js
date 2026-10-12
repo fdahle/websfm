@@ -211,6 +211,9 @@ export function affineToSfm(toSfm, lo, hi) {
 // and colour is bilinear at the photo's full resolution instead of nearest from the
 // map's working-resolution rgb plane (plan-ortho-mosaic O1). Return null for a map
 // to fall back to its rgb plane. Without loadImage the output equals orthorectify().
+// Its third argument is how many depth-map pixels one ortho cell spans in that map
+// (measured at the grid centre; null when the centre does not project), so the loader
+// can decode the photo no finer than the ortho can use.
 export async function orthorectifyStreamed(grid, metas, loadMap, toSfm, opts = {}, onProgress = () => {}, loadImage = null) {
   const { width, height, gsd, originX, originY, data, mask } = grid
   const n = width * height, rgba = new Uint8ClampedArray(n * 4)
@@ -225,11 +228,21 @@ export async function orthorectifyStreamed(grid, metas, loadMap, toSfm, opts = {
   for (let i = 0; i < n; i++) if (mask[i]) { const z = data[i]; if (z < zLo) zLo = z; if (z > zHi) zHi = z }
   const affine = zLo <= zHi ? affineToSfm(toSfm,
     [originX, originY - height * gsd, zLo], [originX + width * gsd, originY, zHi]) : null
+  // Depth-map pixels per ortho cell in map m: the grid centre and its east neighbour,
+  // projected. A footprint, not a visibility test, so the centre needn't be seen.
+  let zMid = 0
+  for (let i = 0, k = 0; i < n; i++) if (mask[i]) { zMid += (data[i] - zMid) / ++k }
+  const cx = originX + (width / 2) * gsd, cy = originY - (height / 2) * gsd
+  const P0 = toSfm([cx, cy, zMid]), P1 = toSfm([cx + gsd, cy, zMid])
+  const mapPxPerCell = (m) => {
+    const a = projectInto(m, P0), b = projectInto(m, P1)
+    return a && b ? Math.hypot(b.u - a.u, b.v - a.v) : null
+  }
   const P = [0, 0, 0]
   const px = new Float32Array(4)
   for (let mi = 0; mi < metas.length; mi++) {
     const m = await loadMap(mi)
-    const photo = loadImage ? await loadImage(mi, m) : null
+    const photo = loadImage ? await loadImage(mi, m, mapPxPerCell(m)) : null
     for (let row = 0; row < height; row++) for (let col = 0; col < width; col++) {
       const idx = row * width + col
       if (!mask[idx]) continue
