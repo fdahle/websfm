@@ -7,6 +7,7 @@
 import { MESH_DEFAULTS } from '../defaults.user.js'
 import { MESH_TUNING } from '../tuning.js'
 import { removeIsolated } from './cloudEdit.js'
+import { createCellIndex } from './cellIndex.js'
 
 // Parse the wasm byte buffer into typed arrays. Layout (little-endian):
 //   header [u32 nVerts, u32 nTris] + f32 positions (3·nVerts) + u32 indices (3·nTris).
@@ -55,6 +56,12 @@ function packingFor(pos, cell) {
   }
 }
 
+// createCellIndex's get/set over a Map, for string keys (an extent too large to pack).
+function mapIndex() {
+  const m = new Map()
+  return { get: (k, missing) => m.get(k) ?? missing, set: (k, v) => { m.set(k, v) } }
+}
+
 // Cell key for `pack`: the packed number, or the legacy string when packing would not
 // stay float64-exact. `dix/diy/diz` are offsets already rebased by `bx/by/bz`.
 function cellKey(pack, dix, diy, diz) {
@@ -97,13 +104,13 @@ export function transferVertexColors(meshPos, dense, cell, opts = {}) {
   }
   const pack = packingFor(dpos, cell)
   const { bx, by, bz, nx, ny, nz } = pack
-  const grid = buildColorGrid(dpos, cell, pack)
   const inv = 1 / cell
-  let misses = 0
-  for (let v = 0; v < nVerts; v++) {
-    const vx = meshPos[v * 3], vy = meshPos[v * 3 + 1], vz = meshPos[v * 3 + 2]
-    const cx = Math.floor(vx * inv), cy = Math.floor(vy * inv), cz = Math.floor(vz * inv)
-    let bestI = -1, bestD2 = Infinity
+  // Every in-range cell of each vertex's (2r+1)³ neighbourhood, in vertex order.
+  // Poisson extrapolates past the cloud, so a mesh vertex can sit outside the packed
+  // range: skip rather than let the key alias onto an unrelated cell — out of range
+  // genuinely means "no dense point here".
+  const eachCell = (v, visit) => {
+    const cx = Math.floor(meshPos[v * 3] * inv), cy = Math.floor(meshPos[v * 3 + 1] * inv), cz = Math.floor(meshPos[v * 3 + 2] * inv)
     for (let dz = -searchRadius; dz <= searchRadius; dz++) {
       const diz = cz + dz - bz
       if (diz < 0 || diz >= nz) continue
@@ -111,19 +118,42 @@ export function transferVertexColors(meshPos, dense, cell, opts = {}) {
         const diy = cy + dy - by
         if (diy < 0 || diy >= ny) continue
         for (let dx = -searchRadius; dx <= searchRadius; dx++) {
-          // Poisson extrapolates past the cloud, so a mesh vertex can sit outside the
-          // packed range. Skip rather than let the key alias onto an unrelated cell —
-          // out of range genuinely means "no dense point here".
           const dix = cx + dx - bx
           if (dix < 0 || dix >= nx) continue
-          const idx = grid.get(cellKey(pack, dix, diy, diz))
-          if (idx === undefined) continue
-          const ex = dpos[idx*3] - vx, ey = dpos[idx*3+1] - vy, ez = dpos[idx*3+2] - vz
-          const d2 = ex*ex + ey*ey + ez*ez
-          if (d2 < bestD2) { bestD2 = d2; bestI = idx }
+          visit(cellKey(pack, dix, diy, diz))
         }
       }
     }
+  }
+  // Cell → representative dense point, for the cells the vertices read only: indexing
+  // the whole cloud overflowed a Map at 2^24 cells (a 29 M-point quarry cloud). Points
+  // stream in index order and the last one in a cell wins — what Map.set did over the
+  // whole cloud, so the colours are unchanged. String keys (an extent too large to
+  // pack) keep the whole-cloud Map: they only arise at sizes a Map still holds.
+  let grid
+  if (pack.packed) {
+    grid = createCellIndex(nVerts * 4)
+    for (let v = 0; v < nVerts; v++) eachCell(v, (k) => { if (grid.get(k, -2) === -2) grid.set(k, -1) })
+    const nd = dpos.length / 3
+    for (let i = 0; i < nd; i++) {
+      grid.update(cellKey(pack, Math.floor(dpos[i * 3] * inv) - bx, Math.floor(dpos[i * 3 + 1] * inv) - by,
+        Math.floor(dpos[i * 3 + 2] * inv) - bz), i)
+    }
+  } else {
+    const all = buildColorGrid(dpos, cell, pack)
+    grid = { get: (k, missing) => all.get(k) ?? missing }
+  }
+  let misses = 0
+  for (let v = 0; v < nVerts; v++) {
+    const vx = meshPos[v * 3], vy = meshPos[v * 3 + 1], vz = meshPos[v * 3 + 2]
+    let bestI = -1, bestD2 = Infinity
+    eachCell(v, (key) => {
+      const idx = grid.get(key, -1)
+      if (idx < 0) return
+      const ex = dpos[idx*3] - vx, ey = dpos[idx*3+1] - vy, ez = dpos[idx*3+2] - vz
+      const d2 = ex*ex + ey*ey + ez*ez
+      if (d2 < bestD2) { bestD2 = d2; bestI = idx }
+    })
     const o = v * 3
     if (bestI >= 0) { col[o] = dcol[bestI*3]; col[o+1] = dcol[bestI*3+1]; col[o+2] = dcol[bestI*3+2] }
     else { col[o] = grayFallback[0]; col[o+1] = grayFallback[1]; col[o+2] = grayFallback[2]; misses++; missed[v] = 1 }
@@ -256,14 +286,14 @@ export function estimatePointSpacing(pos, sampleMax = 20000) {
   for (let attempt = 0; attempt < 8; attempt++, cell *= 2) {
     const pack = packingFor(pos, cell)
     const inv = 1 / cell
-    const head = new Map()
+    // Up to one cell per point: typed, since an imported cloud can pass a Map's 2^24.
+    const head = pack.packed ? createCellIndex(Math.min(n, 1 << 22)) : mapIndex()
     const next = new Int32Array(n)
     const keyOf = (i) => cellKey(pack, Math.floor(pos[i * 3] * inv) - pack.bx,
       Math.floor(pos[i * 3 + 1] * inv) - pack.by, Math.floor(pos[i * 3 + 2] * inv) - pack.bz)
     for (let i = 0; i < n; i++) {
       const k = keyOf(i)
-      const h = head.get(k)
-      next[i] = h === undefined ? -1 : h
+      next[i] = head.get(k, -1)
       head.set(k, i)
     }
     const found = []
@@ -277,7 +307,7 @@ export function estimatePointSpacing(pos, sampleMax = 20000) {
       for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) {
         const ix = cx + dx, iy = cy + dy, iz = cz + dz
         if (ix < 0 || iy < 0 || iz < 0 || ix >= pack.nx || iy >= pack.ny || iz >= pack.nz) continue
-        for (let j = head.get(cellKey(pack, ix, iy, iz)) ?? -1; j >= 0; j = next[j]) {
+        for (let j = head.get(cellKey(pack, ix, iy, iz), -1); j >= 0; j = next[j]) {
           if (j === i) continue
           const ex = pos[j * 3] - pos[i * 3], ey = pos[j * 3 + 1] - pos[i * 3 + 1], ez = pos[j * 3 + 2] - pos[i * 3 + 2]
           const d2 = ex * ex + ey * ey + ez * ez

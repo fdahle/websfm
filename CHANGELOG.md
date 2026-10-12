@@ -74,6 +74,8 @@ Notable changes to websfm. The format follows
 - Saving after a 3D edit writes only the clouds that changed.
 
 ### Fixed
+- Building a mesh from a large dense cloud (around 17 million points or more) failed
+  with "Map maximum size exceeded" after the surface was solved.
 - Georeferencing in polar regions was off by metres. Error-free control at 80°S now
   fits to 0.07 mm, and measurements report ground values.
 - Heights in 3D Tiles exports were scaled wrongly near the poles.

@@ -95,6 +95,37 @@ describe('transferVertexColors', () => {
     expect(Array.from(col)).toEqual([7, 8, 9])
   })
 
+  it('matches the whole-cloud Map rule: last point in a cell represents it', () => {
+    // The transfer indexes only the cells the vertices read; it must pick exactly what
+    // a Map over every dense point (Map.set in index order, last writer wins) picked.
+    let s = 7
+    const rnd = () => ((s = Math.imul(s, 1103515245) + 12345 >>> 0) / 4294967296)
+    const nd = 4000, nv = 300, cell = 0.5
+    const pos = Float32Array.from({ length: nd * 3 }, () => rnd() * 6)   // ~1.7k cells ⇒ shared cells
+    const col = Uint8Array.from({ length: nd * 3 }, (_, i) => (i * 37) & 255)
+    const meshPos = Float32Array.from({ length: nv * 3 }, () => rnd() * 7 - 0.5) // some outside the cloud
+    const { col: got, misses } = transferVertexColors(meshPos, { pos, col }, cell, { searchRadius: 1, grayFallback: [1, 2, 3] })
+    // Reference: the old implementation's semantics, written out.
+    const key = (x, y, z) => `${Math.floor(x / cell)},${Math.floor(y / cell)},${Math.floor(z / cell)}`
+    const rep = new Map()
+    for (let i = 0; i < nd; i++) rep.set(key(pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2]), i)
+    let refMisses = 0
+    for (let v = 0; v < nv; v++) {
+      const vx = meshPos[v * 3], vy = meshPos[v * 3 + 1], vz = meshPos[v * 3 + 2]
+      let best = -1, bestD2 = Infinity
+      for (let dz = -1; dz <= 1; dz++) for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+        const i = rep.get(key(vx + dx * cell, vy + dy * cell, vz + dz * cell))
+        if (i === undefined) continue
+        const d2 = (pos[i * 3] - vx) ** 2 + (pos[i * 3 + 1] - vy) ** 2 + (pos[i * 3 + 2] - vz) ** 2
+        if (d2 < bestD2) { bestD2 = d2; best = i }
+      }
+      const want = best >= 0 ? [col[best * 3], col[best * 3 + 1], col[best * 3 + 2]] : (refMisses++, [1, 2, 3])
+      expect(Array.from(got.slice(v * 3, v * 3 + 3))).toEqual(want)
+    }
+    expect(misses).toBe(refMisses)
+    expect(refMisses).toBeGreaterThan(0)
+  })
+
   it('falls back to gray and counts a vertex with no dense point in range', () => {
     const dense = { pos: Float32Array.from([0, 0, 0]), col: Uint8Array.from([10, 20, 30]) }
     // Vertex far away (many cells off) with searchRadius 1 ⇒ miss.
