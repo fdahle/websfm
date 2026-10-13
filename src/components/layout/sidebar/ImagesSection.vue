@@ -21,7 +21,7 @@ const props = defineProps({
 })
 const emit = defineEmits([
   'toggle', 'select', 'open', 'show-info', 'zoom-to-image',
-  'delete-keypoints', 'remove-image', 'rename-image', 'convert-to-raster',
+  'delete-keypoints', 'remove-image', 'rename-image', 'convert-to-raster', 'download-image',
   // { op: 'create', id, imageIds } | { op: 'rename', id, name } | { op: 'remove', id }
   // | { op: 'assign', imageIds, groupId|null } | { op: 'collapse', id, collapsed }
   // | { op: 'move', id, delta }
@@ -313,7 +313,7 @@ function onRightClick(e, img) {
     suppressWatch = true
     emit('select', img.id)
   }
-  openImageCtx(e, { img }, { w: 200, h: 290 })
+  openImageCtx(e, { img }, { w: 200, h: 318 })
 }
 
 // The action is the same either way (openImageTab focuses an existing tab), but
@@ -323,6 +323,7 @@ const ctxOpenLabel = computed(() =>
 
 function ctxOpen()     { emit('open', ctxMenu.value.img.id); closeMenu() }
 function ctxInfo()     { emit('show-info', ctxMenu.value.img.id); closeMenu() }
+function ctxDownload() { emit('download-image', ctxMenu.value.img.id); closeMenu() }
 function ctxZoom()     { emit('zoom-to-image', ctxMenu.value.img.id); closeMenu() }
 function ctxRename()   { startRename(ctxMenu.value.img); closeMenu() }
 function ctxDeleteKp() {
@@ -528,6 +529,7 @@ function revealRow(key) {
         <button class="ctx-item" :class="{ 'ctx-disabled': ctxIsMulti || !ctxHasPosition }" :disabled="ctxIsMulti || !ctxHasPosition" @click="ctxZoom">Zoom to position on map</button>
         <div class="ctx-sep"></div>
         <button class="ctx-item" :class="{ 'ctx-disabled': ctxIsMulti }" :disabled="ctxIsMulti" @click="ctxInfo">Show information</button>
+        <button class="ctx-item" :class="{ 'ctx-disabled': ctxIsMulti }" :disabled="ctxIsMulti" @click="ctxDownload">Download original</button>
         <button class="ctx-item" :class="{ 'ctx-disabled': ctxIsMulti }" :disabled="ctxIsMulti" @click="ctxRename">Rename</button>
         <div class="ctx-sep"></div>
         <button class="ctx-item" @click="ctxNewGroup">{{ ctxIsMulti ? 'New group from selection' : 'New group with this image' }}</button>

@@ -5,6 +5,7 @@ import { parseGeoJson, looksLikeGeoJson, geoJsonToGcps, guessNameKey } from '../
 import { detectCameraMode } from '../core/io/cameraKind.js'
 import { detectFileKind, isColmapFile } from '../core/io/importKind.js'
 import { parseFiducialObs } from '../core/io/fiducialObs.js'
+import { parseFiducialMarks } from '../core/io/fiducialMarks.js'
 import { sniffCloudFormat, looksLikeXyzText } from '../core/io/cloudImport.js'
 import { looksLikeZipHead, isProjectArchiveName } from '../core/io/projectArchive.js'
 import { applyImportTransform } from '../core/io/cloudImport.js'
@@ -21,7 +22,7 @@ import { useLog } from './useLog.js'
 //   activateTab(id) — switch the active tab (to 'map' after a spatial import)
 // `cameraPickMode` is returned so the Ribbon command dispatch (still in App.vue)
 // can hint the file-picker mode before opening the hidden <input>.
-export function useImportRouting({ addGcps, addFootprints, addSensors, addPoses, addFiducialObs, importColmap, openSfmProject, importCloud, importRaster, importProjectFile, addImages, activateTab, showGcps, showSensors, showPoses }) {
+export function useImportRouting({ addGcps, addFootprints, addSensors, addPoses, addFiducialObs, addFiducialMarks, importColmap, openSfmProject, importCloud, importRaster, importProjectFile, addImages, activateTab, showGcps, showSensors, showPoses }) {
   const {
     gcpImportOpen, gcpImportText, gcpImportName, gcpImportGeojson, gcpImportCrs,
     footprintImportOpen, footprintImportData,
@@ -151,6 +152,7 @@ export function useImportRouting({ addGcps, addFootprints, addSensors, addPoses,
     if (kind === 'pose' || kind === 'sensor') openCameraImport(file, kind, { declared })
     else if (kind === 'gcp' || kind === 'footprint') openImportFile(file, { declared })
     else if (kind === 'fiducialObs') openFiducialObsImport(file)
+    else if (kind === 'fiducialMarks') openFiducialMarksImport(file)
     else if (kind === 'colmap') openColmapImport([file])
     else if (kind === 'cloud') openCloudImport(file)
     else { importKindFile.value = file; importKindOpen.value = true }
@@ -321,6 +323,17 @@ export function useImportRouting({ addGcps, addFootprints, addSensors, addPoses,
     addFiducialObs(rows)
   }
 
+  // Camera fiducial marks (a film camera's certificate, mm) commit the same way:
+  // rows group by sensor label, the store matches each group to a sensor.
+  async function openFiducialMarksImport(file) {
+    if (!file || !addFiducialMarks) return
+    let text
+    try { text = await file.text() } catch (err) { console.error('Could not read fiducial file', err); return }
+    const { groups } = parseFiducialMarks(text)
+    if (!groups.length) { log('Camera fiducials: no marks with finite x_mm / y_mm found', 'warn', 'Sensor'); return }
+    if (addFiducialMarks(groups)) showSensors?.()
+  }
+
   // User answered the "what is this file?" chooser.
   function onImportKindChosen(kind) {
     const file = importKindFile.value
@@ -411,6 +424,17 @@ export function useImportRouting({ addGcps, addFootprints, addSensors, addPoses,
     event.target.value = ''
   }
 
+  // Ribbon ▸ Import ▸ Image / Camera Fiducials: the command is the declaration.
+  function onFiducialObsPick(event) {
+    openFiducialObsImport(event.target.files?.[0])
+    event.target.value = ''
+  }
+
+  function onFiducialMarksPick(event) {
+    openFiducialMarksImport(event.target.files?.[0])
+    event.target.value = ''
+  }
+
   function onColmapPick(event) {
     openColmapImport(event.target.files)
     event.target.value = ''
@@ -419,11 +443,11 @@ export function useImportRouting({ addGcps, addFootprints, addSensors, addPoses,
   return {
     cameraPickMode,
     openImportFile, openDroppedImport, routeImport, isProjectArchive,
-    openFiducialObsImport, openColmapImport,
+    openFiducialObsImport, openFiducialMarksImport, openColmapImport,
     openCloudImport, onCloudImport, onCloudPick,
     openRasterImport, onRasterPick, forkGeoreferencedRasters, addImagesRouted,
     onImportKindChosen, onImportSwitchKind,
     openCameraImport, onCameraImport, onGcpImport, onFootprintImport,
-    onGcpPick, onCameraPick, onColmapPick,
+    onGcpPick, onCameraPick, onColmapPick, onFiducialObsPick, onFiducialMarksPick,
   }
 }

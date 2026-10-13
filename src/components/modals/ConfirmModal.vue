@@ -1,15 +1,20 @@
 <script setup lang="ts">
+import { ref } from 'vue'
+
 // Generic confirmation dialog for destructive/irreversible actions. Driven by the
 // caller: pass a title/message, listen for confirm/cancel. Enter activates the focused button, Esc
-// cancels. `danger` styles the confirm button red.
+// cancels. `danger` styles the confirm button red. `dontAsk` adds a "Don't ask
+// again" checkbox; its state rides along on `confirm` (cancelling never stores it).
 defineProps({
   title: { type: String, default: 'Are you sure?' },
   message: { type: String, default: '' },
   confirmLabel: { type: String, default: 'Confirm' },
   cancelLabel: { type: String, default: 'Cancel' },
   danger: { type: Boolean, default: false },
+  dontAsk: { type: Boolean, default: false },
 })
 const emit = defineEmits(['confirm', 'cancel'])
+const dontAskAgain = ref(false)
 </script>
 
 <template>
@@ -21,10 +26,14 @@ const emit = defineEmits(['confirm', 'cancel'])
       </div>
       <div class="modal-body">
         <p class="message">{{ message }}</p>
+        <label v-if="dontAsk" class="dont-ask">
+          <input v-model="dontAskAgain" type="checkbox" />
+          Don't ask again
+        </label>
       </div>
       <div class="modal-footer">
         <button class="btn" autofocus @click="emit('cancel')">{{ cancelLabel }}</button>
-        <button ref="confirmBtn" class="btn" :class="danger ? 'btn-danger' : 'btn-primary'" @click="emit('confirm')">
+        <button ref="confirmBtn" class="btn" :class="danger ? 'btn-danger' : 'btn-primary'" @click="emit('confirm', dontAskAgain)">
           {{ confirmLabel }}
         </button>
       </div>
@@ -60,6 +69,10 @@ const emit = defineEmits(['confirm', 'cancel'])
 .modal-close:hover { background: var(--hover-bg); color: var(--text); }
 .modal-body { padding: 16px; }
 .message { margin: 0; font-size: 13px; line-height: 1.5; color: var(--text); }
+.dont-ask {
+  display: flex; align-items: center; gap: 6px;
+  margin-top: 12px; font-size: 12px; color: var(--text-dim); cursor: pointer;
+}
 .modal-footer {
   display: flex; justify-content: flex-end; gap: 8px;
   padding: 12px 16px; border-top: 1px solid var(--panel-border);

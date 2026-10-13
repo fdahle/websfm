@@ -7,6 +7,7 @@ import { DISTORTION_MODELS, inferDistortionModel } from '../core/sfm/distortion.
 import * as opfs from '../utils/opfs.js'
 import { useImagesStore } from './useImagesStore.js'
 import { deriveLegacyCalibration } from '../core/sfm/fiducialModel.js'
+import { applyFiducialMarks } from '../core/io/fiducialMarks.js'
 import { normalizeLeverArm } from '../core/sfm/cameraPriors.js'
 import { useProjectsStore } from './useProjectsStore.js'
 
@@ -313,6 +314,34 @@ export const useSensorsStore = defineStore('sensors', () => {
     if (isPersisting()) imagesStore.sync()
   }
 
+  // Import ▸ Camera Fiducials: `groups` from core/io/fiducialMarks.js. A group
+  // goes to the sensor with its label (case-insensitive); a lone group with no
+  // matching label (or no sensor column) goes to the only film sensor, else the
+  // only sensor. Returns the number of sensors updated.
+  function importFiducialMarks(groups) {
+    const list = groups || []
+    const film = sensors.value.filter((s) => s.kind === 'film')
+    const sole = film.length === 1 ? film[0] : sensors.value.length === 1 ? sensors.value[0] : null
+    let applied = 0
+    const unmatched = []
+    for (const g of list) {
+      const lc = g.sensor.toLowerCase()
+      const s = (lc && sensors.value.find((x) => x.label.toLowerCase() === lc)) || (list.length === 1 ? sole : null)
+      if (!s || !g.marks.length) { unmatched.push(g.sensor || '(no sensor column)'); continue }
+      const { fiducials, fiducialCalibration } = applyFiducialMarks(s, g)
+      s.kind = 'film'
+      s.fiducials = fiducials
+      s.fiducialCalibration = fiducialCalibration
+      if (fiducials.focalMm > 0) { s.focal = fiducials.focalMm; s.focalUnit = 'mm' }
+      log(`Sensor ${s.label}: ${g.marks.length} fiducial mark(s) imported`
+        + (fiducialCalibration ? ' — validate them in Calibrate fiducials' : ''), 'success', 'Sensor')
+      applied++
+    }
+    if (unmatched.length) log(`Camera fiducials: no sensor matched ${unmatched.join(', ')}`, 'warn', 'Sensor')
+    if (applied) { save(); if (isPersisting()) imagesStore.sync() }
+    return applied
+  }
+
   function migrateLegacyFiducialCalibrations(imageList) {
     let count = 0
     for (const s of sensors.value) {
@@ -385,6 +414,7 @@ export const useSensorsStore = defineStore('sensors', () => {
     toggleSensorFixed,
     setFiducialMarks,
     setFiducialCalibration,
+    importFiducialMarks,
     migrateLegacyFiducialCalibrations,
     assignSensor,
     mergeSensors,

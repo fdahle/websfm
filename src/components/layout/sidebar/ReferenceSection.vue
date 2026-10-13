@@ -19,7 +19,8 @@ const props = defineProps({
   openTabIds: { type: Object, default: () => new Set() },
 })
 const emit = defineEmits([
-  'toggle', 'cloud-symbology', 'cloud-visibility', 'select-cloud', 'remove-cloud', 'rename-cloud', 'zoom-to-cloud',
+  'toggle', 'cloud-symbology', 'cloud-visibility', 'select-cloud', 'remove-cloud', 'rename-cloud', 'zoom-to-cloud', 'download-cloud',
+  'download-raster',
   'open-raster', 'remove-raster', 'rename-raster', 'set-raster-kind', 'style-raster',
   'set-raster-on-map', 'set-raster-opacity', 'convert-to-image',
 ])
@@ -61,7 +62,7 @@ function cancelRename() { editingRasterId.value = null }
 
 const { menu: ctx, open: openCtx, close: closeCtx } = useContextMenu()
 function onRasterRightClick(e, raster) {
-  openCtx(e, { raster }, { w: 200, h: canMap(raster) ? 248 : 220 })
+  openCtx(e, { raster }, { w: 200, h: canMap(raster) ? 268 : 240 })
 }
 
 // Tab id per useTabs.openRasterTab — the emit focuses an existing tab either way,
@@ -70,6 +71,7 @@ const ctxOpenLabel = computed(() =>
   props.openTabIds.has(`raster:${ctx.value?.raster?.id}`) ? 'Switch to tab' : 'Open in tab')
 
 function ctxOpen()     { emit('open-raster', ctx.value.raster.id); closeCtx() }
+function ctxDownload() { emit('download-raster', ctx.value.raster.id); closeCtx() }
 function ctxToggleMap() {
   const r = ctx.value.raster
   emit('set-raster-on-map', { id: r.id, onMap: !r.onMap })
@@ -107,6 +109,7 @@ function ctxRemove()   { emit('remove-raster', ctx.value.raster.id); closeCtx() 
         @remove-cloud="emit('remove-cloud', $event)"
         @rename-cloud="emit('rename-cloud', $event)"
         @zoom-to-cloud="emit('zoom-to-cloud', $event)"
+        @download-cloud="emit('download-cloud', $event)"
       />
 
       <li
@@ -220,22 +223,23 @@ function ctxRemove()   { emit('remove-raster', ctx.value.raster.id); closeCtx() 
         :style="{ left: ctx.x + 'px', top: ctx.y + 'px' }"
         @click.stop
       >
-        <!-- Groups: go there → change how it's displayed → change what it is →
-             destructive. Same order as the image menu. -->
+        <!-- Groups: get at it / how it's displayed → change what it is →
+             destructive. Same order as the Products and cloud menus; the map
+             toggle and styling join the first group, so an unstyleable raster
+             never leaves "Display on map" alone between two lines. -->
         <button class="ctx-item" @click="ctxOpen">{{ ctxOpenLabel }}</button>
+        <!-- The file exactly as imported, not a re-encode. -->
+        <button class="ctx-item" @click="ctxDownload">Download original</button>
         <!-- A toggle, not a one-shot "show": which reference layers are up is
              something you adjust continuously while working. -->
-        <template v-if="canMap(ctx.raster) || ctx.raster.styleable">
-          <div class="ctx-sep"></div>
-          <button v-if="canMap(ctx.raster)" class="ctx-item" @click="ctxToggleMap">
-            {{ ctx.raster.onMap ? 'Hide from map' : 'Display on map' }}
-          </button>
-          <!-- Only for rasters band math can actually change: >3 bands or deeper
-               than 8-bit. An 8-bit RGB ortho has nothing to choose. -->
-          <button v-if="ctx.raster.styleable" class="ctx-item" @click="ctxStyle">
-            Style bands…
-          </button>
-        </template>
+        <button v-if="canMap(ctx.raster)" class="ctx-item" @click="ctxToggleMap">
+          {{ ctx.raster.onMap ? 'Hide from map' : 'Display on map' }}
+        </button>
+        <!-- Only for rasters band math can actually change: >3 bands or deeper
+             than 8-bit. An 8-bit RGB ortho has nothing to choose. -->
+        <button v-if="ctx.raster.styleable" class="ctx-item" @click="ctxStyle">
+          Style bands…
+        </button>
 
         <div class="ctx-sep"></div>
         <!-- The classifier is confident but not infallible (an 8-bit hillshade is

@@ -4,15 +4,16 @@ import { useImagesStore } from '../../stores/useImagesStore.js'
 
 // Multi-image GCP inspector: one panel per registered observation, each cropped
 // and zoomed to centre the GCP's marked pixel, with a crosshair marker. Opened
-// by double-clicking a GCP in the sidebar. Read-only — marking still happens in
-// the full image view (a panel's "Open" jumps there).
+// by double-clicking a GCP in the sidebar. Marking still happens in the full
+// image view (a panel's "Open" jumps there); a bad mark can be dropped here,
+// where the crops make it easy to spot.
 const props = defineProps({
   gcp:    { type: Object, default: null },   // { id, name, x, y, z, observations }
   images: { type: Array,  default: () => [] }, // full image list (resolve imageId → url)
   // Accuracy-report entry for this GCP: { observations: [{ imageId, reprojPx }] }.
   report: { type: Object, default: null },
 })
-const emit = defineEmits(['jump-to-image'])
+const emit = defineEmits(['jump-to-image', 'remove-observation'])
 
 // Shared zoom across all panels (native px → screen px). Kept consistent so the
 // eye can compare the same-size neighbourhood in every image.
@@ -109,6 +110,8 @@ function fmtCoord(v) {
         <div class="panel-cap">
           <button class="panel-open" :title="`Open ${p.name}`" @click="emit('jump-to-image', { imageId: p.imageId })">{{ p.name }}</button>
           <span v-if="p.reprojPx != null" class="panel-reproj" title="Reprojection error (px)">{{ p.reprojPx.toFixed(1) }}px</span>
+          <button class="panel-remove" :title="`Remove the mark in ${p.name}`"
+            @click="emit('remove-observation', { gcpId: gcp.id, imageId: p.imageId })">×</button>
         </div>
       </div>
     </div>
@@ -239,6 +242,17 @@ function fmtCoord(v) {
 }
 .panel-open:hover { text-decoration: underline; }
 .panel-reproj { flex: none; font-size: 10px; color: var(--text-dim, #9a9aa5); font-variant-numeric: tabular-nums; }
+.panel-remove {
+  flex: none;
+  background: none;
+  border: none;
+  color: var(--text-dim, #9a9aa5);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+}
+.panel-remove:hover { color: #e55; }
 
 .gcp-empty {
   flex: 1;

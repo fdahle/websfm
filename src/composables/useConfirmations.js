@@ -7,6 +7,7 @@ import { useImagesStore } from '../stores/useImagesStore.js'
 import { useMatchesStore } from '../stores/useMatchesStore.js'
 import { useReconstructionStore } from '../stores/useReconstructionStore.js'
 import { useSensorsStore } from '../stores/useSensorsStore.js'
+import { useUiSettings } from './useUiSettings.js'
 
 // Confirm-before-destroy for every irreversible user action, lifted out of App.vue.
 //
@@ -14,14 +15,17 @@ import { useSensorsStore } from '../stores/useSensorsStore.js'
 //   • `pendingImageDelete` — removing images. Its own state because the message is
 //     computed from a name list and the sidebar multi-select drives it.
 //   • `pendingConfirm` — everything else. Holds `{ title, message, confirmLabel,
-//     onConfirm }`; `askConfirm` opens it and the dialog runs `onConfirm` on accept.
-//     One dialog for N destructive actions is what keeps the wording consistent.
+//     onConfirm, onDontAsk? }`; `askConfirm` opens it and the dialog runs `onConfirm`
+//     on accept. One dialog for N destructive actions is what keeps the wording
+//     consistent. `onDontAsk` (optional) shows a "Don't ask again" checkbox and runs
+//     when it is ticked on accept — only for small, easily redone removals.
 //
 // Stores are read directly (the composable convention here — see useImportRouting);
 // only the tab-management callbacks are injected, since tabs live in App.vue:
 //   closeTabForImage / closeTabForRaster — close a tab whose subject is going away
 //   removeGcpAndCloseTab — App.vue's remove-GCP-plus-close-its-inspector-tab
-export function useConfirmations({ closeTabForImage, closeTabForRaster, removeGcpAndCloseTab }) {
+//   removeGcpObservation — App.vue's remove-one-mark-plus-refresh-the-report
+export function useConfirmations({ closeTabForImage, closeTabForRaster, removeGcpAndCloseTab, removeGcpObservation }) {
   const imagesStore = useImagesStore()
   const { imageById, removeImage, clearKeypoints } = imagesStore
   const { sensors } = storeToRefs(useSensorsStore())
@@ -34,6 +38,7 @@ export function useConfirmations({ closeTabForImage, closeTabForRaster, removeGc
   const { gcps } = storeToRefs(useGcpsStore())
   const footprintsStore = useFootprintsStore()
   const { sets: shapefiles } = storeToRefs(footprintsStore)
+  const { confirmRemoveMark, setConfirmRemoveMark } = useUiSettings()
 
   // ── Image removal ───────────────────────────────────────────────────────────
   const pendingImageDelete = ref(null)
@@ -61,10 +66,11 @@ export function useConfirmations({ closeTabForImage, closeTabForRaster, removeGc
   // ── Generic confirm-before-delete (sidebar removals) ────────────────────────
   const pendingConfirm = ref(null)
   function askConfirm(opts) { pendingConfirm.value = opts }
-  function runPendingConfirm() {
-    const fn = pendingConfirm.value?.onConfirm
+  function runPendingConfirm(dontAskAgain = false) {
+    const { onConfirm, onDontAsk } = pendingConfirm.value ?? {}
     pendingConfirm.value = null
-    fn?.()
+    if (dontAskAgain) onDontAsk?.()
+    onConfirm?.()
   }
 
   function confirmRemoveSensor(id) {
@@ -106,6 +112,22 @@ export function useConfirmations({ closeTabForImage, closeTabForRaster, removeGc
     })
   }
 
+  // One image mark of a control point/marker. Re-marking is a right-click away, so
+  // this is the one removal that can be told not to ask again (Settings ▸ General
+  // turns the question back on).
+  function confirmRemoveGcpObservation({ gcpId, imageId }) {
+    if (!confirmRemoveMark.value) { removeGcpObservation({ gcpId, imageId }); return }
+    const g = gcps.value.find((x) => x.id === gcpId)
+    const imageName = g?.observations.find((o) => o.imageId === imageId)?.imageName
+      ?? imageById(imageId)?.name ?? 'this image'
+    askConfirm({
+      title: 'Remove mark?',
+      message: `Remove the mark of “${g?.name ?? gcpId}” in “${imageName}”?`,
+      onConfirm: () => removeGcpObservation({ gcpId, imageId }),
+      onDontAsk: () => setConfirmRemoveMark(false),
+    })
+  }
+
   function confirmRemoveShapefile(id) {
     const set = shapefiles.value.find((s) => s.id === id)
     askConfirm({
@@ -144,6 +166,7 @@ export function useConfirmations({ closeTabForImage, closeTabForRaster, removeGc
     pendingImageDelete, requestRemoveImages, confirmRemoveImages, deleteMessage,
     pendingConfirm, askConfirm, runPendingConfirm,
     confirmRemoveSensor, confirmRemoveCloud, confirmRemoveRaster,
-    confirmRemoveGcp, confirmRemoveShapefile, confirmClearKeypoints, confirmRemoveMatches,
+    confirmRemoveGcp, confirmRemoveGcpObservation, confirmRemoveShapefile, confirmClearKeypoints,
+    confirmRemoveMatches,
   }
 }

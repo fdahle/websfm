@@ -19,6 +19,11 @@ function applyUiPreferences() {
   document.documentElement.toggleAttribute('data-reduce-motion', motion.value === 'reduce')
 }
 
+// confirmRemoveMark: ask before removing one image mark of a control point/marker.
+// The dialog's "Don't ask again" turns it off; the Settings toggle turns it back on.
+const CONFIRM_REMOVE_MARK_KEY = 'websfm.ui.confirmRemoveMark'
+const confirmRemoveMark = ref(localStorage.getItem(CONFIRM_REMOVE_MARK_KEY) !== 'false') // default on
+
 applyUiPreferences()
 
 export function useUiSettings() {
@@ -32,10 +37,16 @@ export function useUiSettings() {
     localStorage.setItem(MOTION_KEY, v)
     applyUiPreferences()
   }
+  function setConfirmRemoveMark(v) {
+    confirmRemoveMark.value = !!v
+    localStorage.setItem(CONFIRM_REMOVE_MARK_KEY, String(!!v))
+  }
   return {
     advancedSettingsExpanded: advancedExpanded,
     setAdvancedSettingsExpanded: setAdvancedExpanded,
     motion,
     setMotion,
+    confirmRemoveMark,
+    setConfirmRemoveMark,
   }
 }

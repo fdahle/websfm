@@ -1,6 +1,7 @@
 import { readDepthFiles } from '../../core/dense/depthFileReader.js'
 import { pointView } from '../../core/products/pointView.ts'
 import { hillshadeRgba } from '../../core/products/colormap.js'
+import { demRenderOptions } from '../../core/products/productStyle.js'
 import { rasterToPng } from '../rasterPreview.js'
 import { frameFromSpec, describeFrame } from '../../core/products/frameSpec.js'
 import { rasterizeDem, coreExtent } from '../../core/products/dem.js'
@@ -104,8 +105,15 @@ export function makeProductsOps({ rasterize } = {}) {
   // Colourise + hillshade a DEM height grid to a PNG data URL for the preview.
   // The pixel math is shared with the imported reference-DEM preview
   // (core/products/colormap.js `hillshadeRgba`) so the two look identical.
-  async function demPreviewPng(grid) {
-    return rasterToPng(hillshadeRgba(grid), grid.width, grid.height)
+  async function demPreviewPng(grid, style = null) {
+    return rasterToPng(hillshadeRgba(grid, demRenderOptions(style, grid)), grid.width, grid.height)
+  }
+
+  // Products ▸ DEM ▸ Symbology… — re-bake the preview PNG from the stored heights in
+  // a new style ({ grid: { width, height, data, mask, gsd, zMin, zMax }, style }).
+  // The plane arrives as a copy; only the PNG comes back.
+  async function demPreview([input]) {
+    return { result: { previewBlob: await demPreviewPng(input.grid, input.style) } }
   }
 
   // Build a DEM: transform the (dense) points into the chosen frame, rasterise a
@@ -137,7 +145,9 @@ export function makeProductsOps({ rasterize } = {}) {
     const grid = rasterizeDem(framed, { ...settings, bounds, memBudgetBytes: budget })
     if (!grid) throw new Error('DEM: could not rasterise (need a denser cloud or a smaller GSD)')
 
-    const previewBlob = await demPreviewPng(grid)
+    // A rebuild keeps the previous DEM's symbology (an automatic range follows the new
+    // heights; a manual one is the user's and stays).
+    const previewBlob = await demPreviewPng(grid, settings.style)
     const unitLabel = frameUnitName(frame.unit)
     emit('log', [`DEM: ${grid.width}×${grid.height} @ ${grid.gsd.toPrecision(3)} ${unitLabel}/px, `
       + `z ${grid.zMin.toPrecision(4)}–${grid.zMax.toPrecision(4)}, `
@@ -152,7 +162,7 @@ export function makeProductsOps({ rasterize } = {}) {
       data: grid.data, mask: grid.mask, zMin: grid.zMin, zMax: grid.zMax,
       count: grid.count, filled: grid.filled,
       frame: frameDescriptor(frame, frameSpec), crs: frame.crs, unit: frame.unit,
-      previewBlob,
+      previewBlob, ...(settings.style && { style: settings.style }),
     }
     return { result, transfer: [grid.data.buffer, grid.mask.buffer] }
   }
@@ -420,5 +430,5 @@ export function makeProductsOps({ rasterize } = {}) {
     throw new Error(`unknown raster tool "${tool}"`)
   }
 
-  return { generateDem, generateOrtho, demTool }
+  return { generateDem, generateOrtho, demTool, demPreview }
 }

@@ -2,6 +2,7 @@
 import 'ol/ol.css'
 import { useExternalStore } from '../../stores/useExternalStore.js'
 import { createGpuRasterLayer, gpuRasterStyle, disposeRasterLayer } from './raster/gpuRaster.js'
+import { orthoAdjustFilter } from '../../utils/orthoFilter.js'
 import { onMounted, onBeforeUnmount, ref, computed, watch } from 'vue'
 // Aliased: a bare `Map` import shadows the global Map constructor, and this file
 // keeps id→layer lookups in real JS Maps.
@@ -9,6 +10,8 @@ import OlMap from 'ol/Map'
 import View from 'ol/View'
 import TileLayer from 'ol/layer/Tile'
 import OSM from 'ol/source/OSM'
+import XYZ from 'ol/source/XYZ'
+import ImageTileSource from 'ol/source/ImageTile'
 import WMTS, { optionsFromCapabilities } from 'ol/source/WMTS'
 import WMTSCapabilities from 'ol/format/WMTSCapabilities'
 import VectorLayer from 'ol/layer/Vector'
@@ -37,8 +40,11 @@ import RasterMeasurements from './RasterMeasurements.vue'
 import DoubleClickZoom from 'ol/interaction/DoubleClickZoom'
 import { productDescriptor } from '../../core/io/rasterSource.js'
 import { useMapSettings } from '../../composables/useMapSettings.js'
+import {
+  BASEMAPS, SATELLITE, TERRAIN, CUSTOM_SATELLITE_MAX_ZOOM, basemapReason, customAttribution, decodeTerrarium, hillshade,
+} from '../../core/basemaps.js'
 
-const { basemap } = useMapSettings()
+const { basemap, satelliteUrl, satelliteAttribution } = useMapSettings()
 
 const props = defineProps({
   images:     { type: Array,  default: () => [] },
@@ -86,8 +92,11 @@ const isModel = computed(() => !!props.modelFrame)
 
 // 'command' bubbles ribbon command ids to App (toggles/fit live there).
 // The gcp-* events drive absolute (ground) GCP editing from the map.
+// 'open-image' opens a linked image's tab (context menu on a footprint, pose or
+// GPS marker). Right-click only: footprints cover most of an aerial block, so a
+// double-click handler would take double-click zoom away over all of it.
 const emit = defineEmits([
-  'select', 'command', 'select-gcp', 'set-gcp-position', 'add-gcp-at', 'delete-gcp',
+  'select', 'command', 'select-gcp', 'set-gcp-position', 'add-gcp-at', 'delete-gcp', 'open-image',
 ])
 
 // GCP edit mode: shows the target-selector toolbox, makes markers draggable, and
@@ -129,11 +138,19 @@ const { menu: ctxMenu, open: openCtx, close: closeCtx } = useContextMenu()
 // `let`: `ctxItems` reads it, and a non-reactive one leaves both entries stuck at
 // the disabled state they had when the computed first evaluated (i.e. always).
 const ctxCoord = ref(null)
+// Loaded image linked to the feature under the right-click, or null.
+const ctxImage = ref(null)
 function onContextMenu(e) {
   ctxCoord.value = map ? map.getEventCoordinate(e) : null
-  openCtx(e, {}, { w: 190, h: 90 })
+  const hit = map && !measuring.value ? pickFeature(map.getEventPixel(e)) : null
+  ctxImage.value = hit ? linkedImage(hit) : null
+  openCtx(e, {}, { w: 220, h: ctxImage.value ? 130 : 90 })
 }
 const ctxItems = computed(() => [
+  ...(ctxImage.value ? [
+    { id: 'open-image', label: `Open image ${ctxImage.value.name}` },
+    { separator: true },
+  ] : []),
   // A GCP is stored in the project CRS; the model frame has no CRS position.
   { id: 'add-gcp-here', label: isModel.value ? 'Add GCP here (project CRS only)' : 'Add GCP here',
     disabled: !ctxCoord.value || isModel.value },
@@ -142,7 +159,9 @@ const ctxItems = computed(() => [
 function onCtxSelect(id) {
   closeCtx()
   const coord = ctxCoord.value
-  if (id === 'add-gcp-here' && coord) {
+  if (id === 'open-image' && ctxImage.value) {
+    emit('open-image', ctxImage.value.id)
+  } else if (id === 'add-gcp-here' && coord) {
     // Map coordinates are already in the project CRS (= GCP storage CRS).
     emit('add-gcp-at', { x: coord[0], y: coord[1] })
   } else if (id === 'copy-coords' && coord) {
@@ -454,11 +473,47 @@ function fitToMarkers() {
 }
 
 // ── Basemap ─────────────────────────────────────────────────────────────────
-// OSM (auto-reprojected by OL) for Mercator-compatible CRS; NASA GIBS WMTS for
-// polar CRS. A grid is always drawn so any CRS is usable even without tiles.
+// OSM, satellite and terrain are Web-Mercator tiles (auto-reprojected by OL) for
+// Mercator-compatible CRS; NASA GIBS WMTS for polar CRS. A grid is always drawn
+// so any CRS is usable even without tiles. Catalogue: core/basemaps.js.
 
 function makeOsmLayer() {
   return new TileLayer({ source: new OSM() })
+}
+
+// Esri World Imagery, or the user's own XYZ source from Settings.
+function makeSatelliteLayer() {
+  const url = satelliteUrl.value
+  const options = url
+    ? { url, maxZoom: CUSTOM_SATELLITE_MAX_ZOOM, attributions: customAttribution(url, satelliteAttribution.value) }
+    : { url: SATELLITE.url, maxZoom: SATELLITE.maxZoom, attributions: SATELLITE.attributions }
+  return new TileLayer({ source: new XYZ({ ...options, crossOrigin: 'anonymous' }) })
+}
+
+// Terrain: elevation tiles shaded on a canvas per tile. Shading the source tile
+// (not the screen) keeps the slopes true to the ground and lets OL reproject
+// and upsample the result like any image tile.
+async function loadHillshadeTile(z, x, y, { signal }) {
+  const res = await fetch(TERRAIN.url(z, x, y), { signal })
+  if (!res.ok) throw new Error(`Terrain tile ${z}/${x}/${y}: HTTP ${res.status}`)
+  // The PNG's bytes ARE the elevations: no colour management, no premultiply.
+  const bitmap = await createImageBitmap(await res.blob(), { colorSpaceConversion: 'none', premultiplyAlpha: 'none' })
+  const { width: w, height: h } = bitmap
+  const canvas = document.createElement('canvas')
+  canvas.width = w
+  canvas.height = h
+  const ctx = canvas.getContext('2d', { willReadFrequently: true })
+  ctx.drawImage(bitmap, 0, 0)
+  bitmap.close()
+  const shaded = hillshade(decodeTerrarium(ctx.getImageData(0, 0, w, h).data, w, h), w, h, z, y)
+  ctx.putImageData(new ImageData(shaded, w, h), 0, 0)
+  return canvas
+}
+
+function makeTerrainLayer() {
+  return new TileLayer({ source: new ImageTileSource({
+    loader: loadHillshadeTile, maxZoom: TERRAIN.maxZoom, attributions: TERRAIN.attributions,
+  }) })
 }
 
 async function addGibsLayer(info) {
@@ -526,6 +581,14 @@ async function makeRasterLayer(r) {
   // construction, so a restyle (which swaps previewDataUrl on the same raster
   // record) can only reach the map by rebuilding the source — see syncRasterLayers.
   layer.set('previewUrl', r.previewDataUrl)
+  // A computed ortho's brightness/contrast/gamma (the GPU path's style entries) as a
+  // canvas filter around this layer's draw — the same maths (utils/orthoFilter.js).
+  const filter = r.product ? orthoAdjustFilter(r.adjust) : null
+  if (filter) {
+    layer.on('prerender', (e) => { e.context.filter = filter })
+    layer.on('postrender', (e) => { e.context.filter = 'none' })
+  }
+  layer.set('filter', filter)
   return layer
 }
 
@@ -554,7 +617,8 @@ async function syncRasterLayers() {
         if ((!r.product || r.cog) && existing.get('fileKey') === (r.fileKey ?? r.id)) {
           existing.setStyle(gpuRasterStyle(r)); continue
         }
-      } else if (existing.get('previewUrl') === r.previewDataUrl) {
+      } else if (existing.get('previewUrl') === r.previewDataUrl
+        && existing.get('filter') === (r.product ? orthoAdjustFilter(r.adjust) : null)) {
         // Opacity is a live property; the image itself is not. A restyle (or a
         // kind flip) replaces previewDataUrl in place on the same record, so an
         // unchanged url is the ONLY case that may keep its source — otherwise the
@@ -647,6 +711,14 @@ function makeGridLabel(coord, text, align) {
 // empty hover box (they carry none of the name properties the tooltip reads).
 function pickFeature(pixel) {
   return map.forEachFeatureAtPixel(pixel, (f) => f, { layerFilter: (l) => l !== gridLayer })
+}
+
+// The loaded image a footprint / pose / GPS marker links to. An imported
+// footprint's imageId may name an image that is not (or no longer) in the
+// project, so only a link that resolves counts.
+function linkedImage(feature) {
+  const imgId = feature.get('imgId')
+  return imgId ? props.images.find((i) => i.id === imgId) ?? null : null
 }
 
 // Regenerate the grid for the current view. Driven from `postrender`, i.e. once
@@ -792,10 +864,20 @@ async function build() {
 
   // Add the selected basemap below the grid (index 0). "Automatic" preserves
   // the CRS-aware polar layers; an explicit street layer uses OSM everywhere.
-  // The model frame has no position on Earth, so it never gets a basemap.
-  if (model) { /* grid only */ } else if (basemap.value === 'streets' || (basemap.value === 'auto' && info.basemap === 'osm')) {
+  // The model frame has no position on Earth, so it never gets a basemap. A
+  // choice this CRS cannot show (greyed in the ribbon) falls back to Automatic.
+  let choice = basemap.value
+  if (!model && basemapReason(choice, info)) {
+    basemapNote.value = `${BASEMAPS.find((b) => b.value === choice)?.label} base layer is not available for this coordinate system — showing the automatic one.`
+    choice = 'auto'
+  }
+  if (model) { /* grid only */ } else if (choice === 'satellite') {
+    map.getLayers().insertAt(0, makeSatelliteLayer())
+  } else if (choice === 'terrain') {
+    map.getLayers().insertAt(0, makeTerrainLayer())
+  } else if (choice === 'streets' || (choice === 'auto' && info.basemap === 'osm')) {
     map.getLayers().insertAt(0, makeOsmLayer())
-  } else if (basemap.value === 'auto' && info.basemap === 'gibs') {
+  } else if (choice === 'auto' && info.basemap === 'gibs') {
     addGibsLayer(info)
       .then((layer) => { if (map === builtMap) builtMap.getLayers().insertAt(0, layer) })
       .catch(() => {
@@ -941,12 +1023,15 @@ watch(() => props.modelFrame?.key ?? props.crs, async () => {
   map?.updateSize()
 })
 
-// A basemap preference change is immediately visible in an already-open map.
-watch(basemap, async () => {
+// A basemap preference change is immediately visible in an already-open map;
+// so is a new satellite source while Satellite is showing.
+async function rebuild() {
   destroy()
   await build()
   map?.updateSize()
-})
+}
+watch(basemap, rebuild)
+watch([satelliteUrl, satelliteAttribution], () => { if (basemap.value === 'satellite') rebuild() })
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
 

@@ -19,7 +19,8 @@ const props = defineProps({
   state: { type: Object, default: () => ({}) },
   // Display toggles and values the View tab shows as active / as stepper values:
   // { showCameras, showGrid, showLegend, showMapGrid, showFootprints, pointSize,
-  //   cameraScale, selectRect, selectLasso, mapGcpEdit }.
+  //   cameraScale, selectRect, selectLasso, mapGcpEdit, mapBasemap,
+  //   mapBasemapReasons: { [value]: why that base layer is unavailable } }.
   viewState: { type: Object, default: () => ({}) },
   activeImageId: { type: String, default: null },
   activeImageName: { type: String, default: null },
@@ -118,6 +119,7 @@ function isActive(cmd) {
   if (VIEW_KEYS.has(cmd.activeKey)) return !!props.viewState[cmd.activeKey]
   if (cmd.activeKey === 'rasterOnMap')    return !!props.activeRaster?.onMap
   if (cmd.selected !== undefined) return cmd.selected // a map measure-target row
+  if (cmd.basemap) return props.viewState.mapBasemap === cmd.basemap
   // Edit GCPs is one mode per view: the map's own flag, else the image view's.
   if (cmd.activeKey === 'gcpEdit' && props.activeView === 'map') return !!props.viewState.mapGcpEdit
   if (cmd.measureTool) return measureCtx.value?.measure?.tool === cmd.measureTool
@@ -147,6 +149,9 @@ function disabledReason(cmd) {
   if (cmd.needsSavedMeasurements && !m?.savedCount) return 'No saved measurements on this raster yet'
   // A computed product in the local frame has no map position (productLayers.js).
   if (cmd.activeKey === 'rasterOnMap' && props.activeRaster?.mapBlocked) return props.activeRaster.mapBlocked
+  if (cmd.id === 'raster-style' && props.activeRaster?.imported && !props.activeRaster.styleable)
+    return 'Nothing to style — an 8-bit raster with up to 3 bands is shown as it is'
+  if (cmd.basemap && props.viewState.mapBasemapReasons?.[cmd.basemap]) return props.viewState.mapBasemapReasons[cmd.basemap]
   const s = props.imageViewState
   if (cmd.disableKey === 'kpNotDone' && s?.kpStatus !== 'done') return 'Detect keypoints first'
   if (cmd.disableKey === 'noMask'    && !s?.hasMask)            return 'No mask available'
@@ -155,8 +160,9 @@ function disabledReason(cmd) {
   return ''
 }
 
-// A row that is a mode (it has an on state) or an option (a map measure target).
-const isToggleRow = (row) => !!(row.activeKey || row.measureTool || row.selected !== undefined)
+// A row that is a mode (it has an on state) or an option (a map measure target,
+// a base layer).
+const isToggleRow = (row) => !!(row.activeKey || row.measureTool || row.selected !== undefined || row.basemap)
 
 // A menu's rows, resolved: each real row carries its own disabled reason (printed
 // inline in the menu) and, for a mode, whether it is on; sections pass through;

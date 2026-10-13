@@ -54,3 +54,30 @@ export function buildSensorsCsv(sensors) {
   ])
   return toCsv(header, rows)
 }
+
+// Image fiducials: one row per (image, mark) in scan pixels, readable back by
+// core/io/fiducialObs.js. The current slot detections, else an image's legacy
+// mark-id clicks (the same precedence as the rest of the app).
+export function buildFiducialObsCsv(images) {
+  const header = ['image', 'fiducial', 'px', 'py', 'source', 'confidence']
+  const rows = images.flatMap((img) => (img.fiducialDetections?.length
+    ? img.fiducialDetections.map((d) => [img.name, d.slot, d.px, d.py, d.source, d.confidence])
+    : (img.fiducialObs || []).map((o) => [img.name, o.fidId, o.px, o.py, 'manual', null])))
+  return toCsv(header, rows)
+}
+
+// Camera fiducials: one row per (film sensor, calibrated mark) in millimetres,
+// readable back by core/io/fiducialMarks.js. The applied calibration (with each
+// mark's raster slot), else the sensor's certificate marks.
+export function buildFiducialMarksCsv(sensors) {
+  const header = ['sensor', 'fiducial', 'x_mm', 'y_mm', 'slot', 'focal_mm', 'ppx_mm', 'ppy_mm']
+  const rows = sensors.flatMap((s) => {
+    const cal = s.fiducialCalibration?.marks?.length ? s.fiducialCalibration : null
+    const src = cal ?? s.fiducials
+    const slotOf = new Map(Object.entries(cal?.slotMap || {}).filter(([, id]) => id).map(([slot, id]) => [id, slot]))
+    return (src?.marks || []).map((m) => [
+      s.label, m.id, m.xMm, m.yMm, slotOf.get(m.id), src.focalMm, src.ppxMm, src.ppyMm,
+    ])
+  })
+  return toCsv(header, rows)
+}

@@ -82,6 +82,8 @@ export function placeProductLayer(kind, product, state, view) {
     opacity: state.opacity ?? 1,
     // Model map only: product coords = map coords − offset (the status-bar probe).
     offset,
+    // An ortho's brightness/contrast/gamma (productStyle.js), applied at draw time.
+    ...(kind === 'ortho' && product.style && { adjust: product.style }),
     ...(cog && { cog, fileKey: tiled.fileKey, bands: tiled.bands, bitsPerSample: 8, sampleFormat: 1,
       photometric: tiled.photometric, alphaBand: tiled.alphaBand }),
   } }

@@ -8,7 +8,7 @@ import {
   detectFiducialSpots as detectFiducialSpotsWorker, POOL_SIZE, imageQuality as imageQualityWorker,
 } from '../workers/computeClient.js'
 import { FIDUCIAL_DETECT_TUNING } from '../core/sfm/fiducialDetect.js'
-import { migrateLegacyFiducialImage } from '../core/sfm/fiducialModel.js'
+import { migrateLegacyFiducialImage, observationsToDetections } from '../core/sfm/fiducialModel.js'
 import { fiducialBatchConsensus, fiducialShapeCheck } from '../core/sfm/fiducialConsensus.js'
 import { detectionConfidence } from '../core/sfm/fiducialDetection.js'
 import { buildBorderMask, dataUrlToBlob } from '../core/mask.js'
@@ -798,9 +798,12 @@ export const useImagesStore = defineStore('images', () => {
 
   // Bulk-import fiducial observations parsed from a file (F4). `rows` are
   // `[{ imageName, fidId, px, py }]`; each is matched to an image by name
-  // (case-insensitive, extension-tolerant) and upserted. Returns the count applied.
+  // (case-insensitive, extension-tolerant) and upserted into the image's
+  // fiducialDetections by slot (observationsToDetections: a slot id is kept, a
+  // mark id is placed by position). Returns the count applied.
   function addFiducialObservations(rows) {
     let applied = 0, unmatched = 0
+    const byImage = new Map()
     for (const r of rows || []) {
       const lc = String(r.imageName || '').toLowerCase()
       const base = lc.replace(/\.[^.]+$/, '')
@@ -809,11 +812,17 @@ export const useImagesStore = defineStore('images', () => {
         return n === lc || n.replace(/\.[^.]+$/, '') === base
       })
       if (!img) { unmatched++; continue }
-      if (!Array.isArray(img.fiducialObs)) img.fiducialObs = []
-      const existing = img.fiducialObs.find((o) => o.fidId === r.fidId)
-      if (existing) { existing.px = r.px; existing.py = r.py }
-      else img.fiducialObs.push({ fidId: r.fidId, px: r.px, py: r.py })
-      applied++
+      if (!byImage.has(img)) byImage.set(img, [])
+      byImage.get(img).push({ fidId: r.fidId, px: r.px, py: r.py })
+    }
+    for (const [img, obs] of byImage) {
+      if (!Array.isArray(img.fiducialDetections)) img.fiducialDetections = []
+      for (const d of observationsToDetections(obs, img.meta?.width, img.meta?.height, { family: 'generic', source: 'import' })) {
+        const existing = img.fiducialDetections.find((x) => x.slot === d.slot)
+        if (existing) Object.assign(existing, d)
+        else img.fiducialDetections.push(d)
+        applied++
+      }
     }
     log(`Fiducial observations imported: ${applied}${unmatched ? `, ${unmatched} unmatched image(s)` : ''}`,
       applied ? 'success' : 'warn', 'Sensor')

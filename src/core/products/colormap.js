@@ -78,10 +78,16 @@ export function rampByName(name) {
 // grid: { width, height, data, mask?, gsd, zMin, zMax }
 //   `mask` (1 = valid) is optional; without it, non-finite values are nodata,
 //   which is the shape a float GeoTIFF arrives in.
+// opts (a computed DEM's symbology, core/products/productStyle.js):
+//   { ramp = 'turbo', min = zMin, max = zMax, hillshade = true } — heights outside
+//   min…max clamp to the ramp's ends. The defaults are the unstyled preview.
 // → Uint8ClampedArray(width·height·4), ready for `new ImageData(rgba, w, h)`.
-export function hillshadeRgba(grid) {
-  const { width: w, height: h, data, mask, gsd, zMin, zMax } = grid
+export function hillshadeRgba(grid, { ramp = 'turbo', min, max, hillshade = true } = {}) {
+  const { width: w, height: h, data, mask, gsd } = grid
+  const zMin = Number.isFinite(min) ? min : grid.zMin
+  const zMax = Number.isFinite(max) ? max : grid.zMax
   const span = zMax > zMin ? zMax - zMin : 1
+  const colour = RAMPS[ramp] || depthColor
   const out = new Uint8ClampedArray(w * h * 4)
 
   // Light from the north-west, 45° up.
@@ -97,7 +103,8 @@ export function hillshadeRgba(grid) {
       const o = (r * w + c) * 4
       const z = at(c, r)
       if (Number.isNaN(z)) { out[o + 3] = 0; continue }
-      const [cr, cg, cb] = depthColor((z - zMin) / span)
+      const [cr, cg, cb] = colour((z - zMin) / span)
+      if (!hillshade) { out[o] = cr; out[o + 1] = cg; out[o + 2] = cb; out[o + 3] = 255; continue }
       // Central-difference slope (fall back to this cell at borders/holes).
       const zl = at(Math.max(0, c - 1), r), zr = at(Math.min(w - 1, c + 1), r)
       const zt = at(c, Math.max(0, r - 1)), zb = at(c, Math.min(h - 1, r + 1))

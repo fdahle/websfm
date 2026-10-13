@@ -21,6 +21,18 @@ Notable changes to websfm. The format follows
   "marker" points carry image marks but no surveyed position.
 - **Rectangle and lasso selection** in the 3D viewer, to delete or keep points.
 - **Gradual selection**: remove weak tie points from the sparse model and re-adjust.
+- **DEM vs reference DEM** in the Quality Report (Evaluate ▸ DEM vs Reference):
+  bias, NMAD, RMSE, LE90 and overlap against an imported reference DEM, with a
+  difference map and histogram, also in the exported report.
+- **DEM and orthophoto symbology** (Products ▸ right-click ▸ Symbology…): colour
+  ramp, height range and hillshade for the DEM; brightness, contrast and gamma for
+  the orthophoto. Display only, kept across rebuilds.
+- **Download from the sidebar**: right-click a point cloud, mesh, DEM or orthophoto
+  for its export dialog (aimed at that item), or download a reference raster or
+  source image as imported, a polygon layer as GeoJSON, or the match list.
+- The **DEM / Orthophoto ribbon tab** offers the same actions for a computed and an
+  imported raster: a computed one gains Symbology… and Remove, an imported one
+  Download.
 - **Find GCPs**: match photos against a reference orthophoto to propose
   control-point candidates for review.
 - **WebGPU feature matching**, with automatic fallback to the CPU.
@@ -40,6 +52,10 @@ Notable changes to websfm. The format follows
 - Extra point attributes (such as intensity and GPS time) survive import and are
   written to PLY and LAS exports.
 - The theme can follow the operating system.
+- **Fiducial import and export** for film scans (Import / Export ▸ Image Fiducials
+  and Camera Fiducials): each image's marks in pixels, and the camera's calibrated
+  marks in mm with their slots, focal length and principal point, as CSV that
+  imports back.
 
 ### Changed
 - Orthophotos built with an earlier version must be rebuilt (the storage format
@@ -88,6 +104,8 @@ Notable changes to websfm. The format follows
 - Saving after a 3D edit writes only the clouds that changed.
 
 ### Fixed
+- Imported image fiducial observations were ignored by calibration and
+  reconstruction until the project was reopened; they now land as detections.
 - An orthophoto built at a chosen pixel size lost its coordinate frame, so Find GCPs
   refused it and the model-frame map could not place it.
 - An imported orthophoto's tab showed "no data" under the cursor; it now reads the

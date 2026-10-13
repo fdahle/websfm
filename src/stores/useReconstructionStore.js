@@ -7,6 +7,7 @@ import {
   filterDepthMaps as workerFilterDepthMaps,
   densify as workerDensify,
   generateDem as workerGenerateDem,
+  demPreview as workerDemPreview,
   generateOrtho as workerGenerateOrtho,
   meshify as workerMeshify,
   editCloud as workerEditCloud,
@@ -22,6 +23,7 @@ import { normalizeRegion, regionStatus, regionMask, regionContains } from '../co
 import { stageDemPoints } from '../core/products/dem.js'
 import { packSparseForDense, sparseInputTransfer } from '../core/dense/sparseInput.js'
 import { normalizeProductLayers, productMapBlocker } from '../core/products/productLayers.js'
+import { resolveDemStyle, resolveOrthoStyle, isDefaultOrthoStyle, describeDemStyle } from '../core/products/productStyle.js'
 import { selectPoints } from '../core/products/cloudEdit.js'
 import { normalizeOrientation, orientationStatus, orientationBasis } from '../core/products/orientation.js'
 import { formatBytes, DEFAULT_BUDGET_BYTES, deviceBudget } from '../core/dense/memBudget.js'
@@ -437,6 +439,41 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     log(`Renamed product "${previous}" → "${trimmed}"`, 'info', 'Products', { channel: 'activity' })
     saveProductRecord(kind, renamed)
     return true
+  }
+
+  // Products ▸ Symbology… — display only (core/products/productStyle.js). An ortho's
+  // adjustments apply at draw time, so the record just carries them; a DEM's preview
+  // PNG is re-baked from its heights in the worker, and the record (with its new
+  // preview URL) replaces the old one only if the DEM was not rebuilt meanwhile.
+  async function setProductStyle(kind, style) {
+    const product = productForKind(kind)
+    if (!product) return false
+    const label = product.name || (kind === 'ortho' ? 'Orthophoto' : 'DEM')
+    if (kind === 'ortho') {
+      const next = resolveOrthoStyle(style)
+      const { style: _old, ...rest } = product
+      ortho.value = isDefaultOrthoStyle(next) ? rest : { ...rest, style: next }
+      log(`${label}: brightness ${next.brightness}, contrast ${next.contrast}, gamma ${next.gamma}`,
+        'info', 'Products', { channel: 'activity' })
+      saveProductRecord('ortho', ortho.value)
+      return true
+    }
+    const next = resolveDemStyle(style)
+    try {
+      const { previewBlob } = await workerDemPreview({ style: next, grid: {
+        width: product.width, height: product.height, data: product.data, mask: product.mask,
+        gsd: product.gsd, zMin: product.zMin, zMax: product.zMax,
+      } })
+      if (dem.value?.createdAt !== product.createdAt) return false
+      const { previewUrl: _url, ...rest } = dem.value
+      dem.value = withPreviewUrl({ ...rest, style: next, previewBlob })
+      log(`${label}: ${describeDemStyle(next, product)}`, 'info', 'Products', { channel: 'activity' })
+      saveProductRecord('dem', dem.value)
+      return true
+    } catch (err) {
+      log(`${label} symbology failed: ${err?.message ?? err}`, 'error', 'Products')
+      return false
+    }
   }
 
   // Persist a DEM/ortho. An ortho's record is then pointed at the committed COG
@@ -1634,7 +1671,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
         uuid, R: cam.R.map((r) => [...r]), t: [...cam.t], K: { ...cam.K },
       }))
       const grid = await workerGenerateDem(
-        { points, cameras, frame: frameSpec, settings: { ...settings, memBudgetBytes: budgetBytes } },
+        { points, cameras, frame: frameSpec, settings: { ...settings, memBudgetBytes: budgetBytes, style: dem.value?.style ?? null } },
         { transfer: [points.pos.buffer], onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f) },
       )
       dem.value = withPreviewUrl({
@@ -1791,6 +1828,8 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
       ortho.value = withPreviewUrl({
         ...res, createdAt: Date.now(),
         name: ortho.value?.name || 'Orthophoto',
+        // Symbology survives a rebuild, like the name (display only).
+        ...(ortho.value?.style && { style: ortho.value.style }),
         frameStamp: (settings.surface ?? 'dem') === 'dem'
           ? (dem.value?.frameStamp ?? frameStampOf(resolved))
           : frameStampOf(resolved),
@@ -2492,7 +2531,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     removeCloud,
     renameCloud,
     removeProduct,
-    renameProduct,
+    renameProduct, setProductStyle,
     productLayers, setProductOnMap, setProductOpacity,
     // Triangulated marker positions (SfM frame) for the model-frame map.
     markerPositions,

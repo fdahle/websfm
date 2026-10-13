@@ -12,10 +12,13 @@ import { useImagesStore } from '../stores/useImagesStore.js'
 import { useMatchesStore } from '../stores/useMatchesStore.js'
 import { useSensorsStore } from '../stores/useSensorsStore.js'
 import { useGcpsStore } from '../stores/useGcpsStore.js'
+import { useExternalStore } from '../stores/useExternalStore.js'
 import { sparseModelStats } from '../core/eval/sparseStats.js'
 import { completedMatchGraphHealth } from '../core/eval/matchGraph.js'
 import { perImageResiduals, unregisteredReason } from '../core/eval/imageStats.js'
 import { sampleDemAtGcps } from '../core/eval/demCheck.js'
+import { compareDemToReference } from '../core/eval/demCompare.js'
+import { rasterUnits } from '../core/products/rasterUnits.js'
 import { focalDelta } from '../core/eval/calibration.js'
 import { projectHealth } from '../core/eval/health.js'
 import { estimatedIntrinsics } from '../core/sfm/cameraEstimated.js'
@@ -29,12 +32,19 @@ import { featureHasher, matchHasher, featureRows, matchRows, FINGERPRINT_ALGORIT
 // so a binary control/check ternary would silently mislabel it as ground control.
 const ROLE_LABEL = { control: 'Control', check: 'Check', marker: 'Marker' }
 
+// DEM vs reference DEM: one comparison, cached at module scope so reopening the hub,
+// switching sections and the HTML export reuse it. Keyed on everything that moves
+// the numbers: the DEM build, the reference raster, its vertical offset and CRS.
+let demRefCache = null // { key, promise }
+let demRefLastRasterId = null
+
 export function useQualityReport() {
   const recon = useReconstructionStore()
   const imagesStore = useImagesStore()
   const matchesStore = useMatchesStore()
   const sensorsStore = useSensorsStore()
   const gcpsStore = useGcpsStore()
+  const external = useExternalStore()
 
   const cameras = computed(() => recon.sparseCameras)
   const points = computed(() => recon.mainSparseCloud?.points ?? [])
@@ -125,6 +135,73 @@ export function useQualityReport() {
     // don't pull them a second time: gcpAccuracyReport re-triangulates every GCP,
     // and two pulls could straddle a mid-edit change and disagree.
     return { snapshot, rows: projectHealth(snapshot), gcpReport, poseReport, demCheck }
+  }
+
+  // Computed DEM minus the reference DEM `rasterId`, over their overlap (core/eval/
+  // demCompare.js), plus what the reader needs to trust the sign and the units.
+  // Throws with a user-facing reason (model-frame DEM, unreadable reference).
+  // → null without a DEM or that raster, else { ...comparison, demUnit, refUnit,
+  //   reference: { id, name, datum, accuracy, vOffset }, warnings: string[] }
+  function demReferenceComparison(rasterId) {
+    const dem = recon.dem
+    const meta = external.rasterById(rasterId)
+    if (!dem || !meta || meta.kind !== 'dem') return Promise.resolve(null)
+    demRefLastRasterId = rasterId
+    const key = [dem.createdAt, dem.width, dem.height, dem.crs, meta.id, meta.crs,
+      meta.vOffset || 0, meta.planeStyleStamp ?? ''].join('|')
+    if (demRefCache?.key === key) return demRefCache.promise
+    const promise = (async () => {
+      const { sample } = await external.referenceDemSampler(meta.id, dem.crs ?? null)
+      const cmp = await compareDemToReference(dem, sample)
+      const demUnit = rasterUnits(dem).vertical
+      const refUnit = rasterUnits(meta).vertical
+      const warnings = []
+      // Only two KNOWN units can disagree: a geographic reference (SRTM, Copernicus
+      // in EPSG:4326) has no linear unit to infer its heights from.
+      const known = (u) => u === 'm' || u === 'ft' || u === 'US-ft'
+      if (known(demUnit) && known(refUnit) && demUnit !== refUnit) {
+        warnings.push(`The DEM's heights are in ${demUnit} and the reference's in ${refUnit} — the differences mix units.`)
+      }
+      if (!meta.verticalDatum || meta.verticalDatum === 'unknown') {
+        warnings.push('The reference DEM declares no vertical datum: a constant bias may be a datum '
+          + 'offset (ellipsoidal vs geoid heights differ by tens of metres) rather than an error.')
+      }
+      if (!meta.crs) warnings.push('The reference DEM declares no CRS; it is read as if it were in the DEM\'s frame.')
+      return {
+        ...cmp, demUnit, refUnit, warnings,
+        reference: { id: meta.id, name: meta.name, datum: meta.verticalDatum || 'unknown',
+          accuracy: meta.verticalAccuracy ?? null, vOffset: meta.vOffset || 0 },
+      }
+    })()
+    demRefCache = { key, promise }
+    promise.catch(() => { if (demRefCache?.promise === promise) demRefCache = null })
+    return promise
+  }
+
+  // The headline tiles for a comparison — the hub section and the export share them.
+  function demReferenceTiles(cmp) {
+    const s = cmp?.stats
+    const u = cmp?.demUnit
+    const f = (v) => (v == null ? '—' : v.toFixed(3))
+    const signed = (v) => (v == null ? '—' : `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(3)}`)
+    const overlap = cmp?.demCells ? (cmp.compared / cmp.demCells) * 100 : null
+    const sigma = cmp?.reference?.accuracy
+    // A bias is worth flagging once it stands out of the noise: larger than the
+    // spread of the differences and than what the reference itself claims.
+    const biasLoud = s && Math.abs(s.median) > Math.max(s.nmad, sigma ?? 0)
+    return [
+      { label: 'Median ΔZ', value: signed(s?.median), unit: u, tone: s ? (biasLoud ? 'warn' : undefined) : undefined,
+        hint: 'robust bias (DEM − reference)' },
+      { label: 'NMAD', value: f(s?.nmad), unit: u,
+        hint: sigma != null ? `robust spread · reference σ ${sigma}` : 'robust spread (≈σ)' },
+      { label: 'RMSE', value: f(s?.rmse), unit: u, hint: 'includes bias and blunders' },
+      { label: 'Mean ± std', value: s ? `${signed(s.mean)} ± ${f(s.std)}` : '—', unit: u },
+      { label: 'LE90', value: f(s?.le90), unit: u, hint: '90 % of |ΔZ| are below' },
+      { label: 'Min / max', value: s ? `${signed(s.min)} / ${signed(s.max)}` : '—', unit: u },
+      { label: 'Overlap', value: overlap == null ? '—' : overlap.toFixed(1), unit: '%',
+        tone: overlap != null && overlap < 50 ? 'warn' : undefined,
+        hint: `${(cmp?.compared ?? 0).toLocaleString()} of ${(cmp?.demCells ?? 0).toLocaleString()} DEM cells` },
+    ]
   }
 
   // Assemble the full export report object (plain) for buildReportHtml — same numbers
@@ -228,6 +305,27 @@ export function useQualityReport() {
           ? 'The georeference defines the scale; these bars are independent checks against it.'
           : 'Residuals are measured minus entered. Bars with no declared 1σ are equally weighted, not surveyed.',
       })
+    }
+
+    // DEM vs reference DEM — the one the hub last compared, else the only one. A
+    // failed comparison is reported in place rather than failing the export.
+    const refId = demRefLastRasterId && external.rasterById(demRefLastRasterId)
+      ? demRefLastRasterId : external.defaultDem?.id
+    if (recon.dem && refId) {
+      try {
+        const cmp = await demReferenceComparison(refId)
+        if (cmp) {
+          sections.push({
+            title: `DEM vs reference DEM (${cmp.reference.name})`,
+            tiles: demReferenceTiles(cmp),
+            note: ['ΔZ = DEM − reference at each compared DEM cell'
+              + (cmp.step > 1 ? ` (every ${cmp.step}th cell each way)` : '')
+              + `; reference vertical datum: ${cmp.reference.datum}.`, ...cmp.warnings].join(' '),
+          })
+        }
+      } catch (err) {
+        sections.push({ title: 'DEM vs reference DEM', note: `Not compared: ${err?.message ?? err}` })
+      }
     }
 
     return buildReportHtml({
@@ -372,5 +470,6 @@ export function useQualityReport() {
     reproj, histogram, perImage, coverage, graph, selfCal, sensorRows, focalDeltas, depth,
     perImageResiduals, unregisteredReason,
     detectConfig, computeHealth, buildExportReport, computeDigest,
+    demReferenceComparison, demReferenceTiles,
   }
 }

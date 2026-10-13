@@ -7,7 +7,7 @@ const props = defineProps({
   // Pairwise-match summary: { total, verified, running, error, used?, disabled? }
   matchStats: { type: Object, default: () => ({ total: 0, verified: 0, running: 0, error: 0 }) },
 })
-const emit = defineEmits(['toggle', 'open-matches', 'remove-matches'])
+const emit = defineEmits(['toggle', 'open-matches', 'remove-matches', 'download-matches'])
 
 // Matches summary is a single expandable row (no per-pair list — pairs are O(N²)
 // and live in the dedicated modal). This just toggles the inline stats card.
@@ -17,7 +17,7 @@ const matchesExpanded = ref(false)
 // dedicated modal; destructive removal is routed to App's shared confirmation.
 const { menu: matchesCtx, open: openMatchesCtx, close: closeMenu } = useContextMenu()
 function onMatchesRightClick(e) {
-  openMatchesCtx(e, {}, { w: 180, h: 88 })
+  openMatchesCtx(e, {}, { w: 180, h: 116 })
 }
 function ctxOpenMatches() {
   emit('open-matches')
@@ -92,6 +92,7 @@ function ctxRemoveMatches() {
         @click.stop
       >
         <button class="ctx-item" @click="ctxOpenMatches">Open match list</button>
+        <button class="ctx-item" @click="emit('download-matches'); closeMenu()">Download matches (JSON)</button>
         <div class="ctx-sep"></div>
         <button
           class="ctx-item danger"

@@ -7,6 +7,7 @@ import { useUiSettings } from '../../composables/useUiSettings.js'
 import { useBrowserWarning } from '../../composables/useBrowserWarning.js'
 import { useMobileWarning } from '../../composables/useMobileWarning.js'
 import { useMapSettings } from '../../composables/useMapSettings.js'
+import { BASEMAPS, SATELLITE } from '../../core/basemaps.js'
 import { formatBytes } from '../../core/io/projectArchive.js'
 import { MODEL_CACHE_NAME } from '../../core/models/registry.js'
 import * as opfs from '../../utils/opfs.js'
@@ -27,9 +28,27 @@ const {
   memBudgetGb, memBudgetAuto, setMemBudgetGb, resetMemBudgetAuto, deviceBudgetInfo,
   useGpu, setUseGpu, workerCount, setWorkerCount, MAX_POOL_SIZE,
 } = useComputeSettings()
-const { advancedSettingsExpanded, setAdvancedSettingsExpanded, motion, setMotion } = useUiSettings()
+const {
+  advancedSettingsExpanded, setAdvancedSettingsExpanded, motion, setMotion,
+  confirmRemoveMark, setConfirmRemoveMark,
+} = useUiSettings()
 const { gridZ, setGridZ, background, setBackground, nearClip, setNearClip } = useViewerSettings()
-const { basemap, setBasemap } = useMapSettings()
+const { basemap, setBasemap, satelliteUrl, satelliteAttribution, setSatelliteSource } = useMapSettings()
+// Satellite source drafts: saved together on Apply, so a half-typed URL never
+// reaches the map.
+const satUrlDraft = ref(satelliteUrl.value)
+const satAttributionDraft = ref(satelliteAttribution.value)
+const satError = ref('')
+const satDirty = computed(() => satUrlDraft.value.trim() !== satelliteUrl.value
+  || satAttributionDraft.value.trim() !== satelliteAttribution.value)
+function applySatelliteSource() {
+  satError.value = setSatelliteSource(satUrlDraft.value, satAttributionDraft.value)
+}
+function resetSatelliteSource() {
+  satUrlDraft.value = ''
+  satAttributionDraft.value = ''
+  applySatelliteSource()
+}
 
 const themeDesc = computed(() => (props.theme === 'system'
   ? `Following your operating system — currently ${props.resolvedTheme === 'light' ? 'light' : 'dark'}.`
@@ -168,6 +187,17 @@ onMounted(refreshStorage)
             </label>
           </div>
 
+          <div class="setting-row">
+            <div class="setting-info">
+              <span class="setting-label">Confirm before removing a mark</span>
+              <span class="setting-desc">Ask before deleting a single image mark of a control point or marker.</span>
+            </div>
+            <label class="switch">
+              <input type="checkbox" :checked="confirmRemoveMark" @change="setConfirmRemoveMark($event.target.checked)">
+              <span class="slider"></span>
+            </label>
+          </div>
+
           <div v-if="!isChromium" class="setting-row">
             <div class="setting-info">
               <span class="setting-label">Warn on unsupported browser</span>
@@ -195,13 +225,35 @@ onMounted(refreshStorage)
           <div class="setting-row">
             <div class="setting-info">
               <span class="setting-label">Map base layer</span>
-              <span class="setting-desc">Automatic uses OpenStreetMap normally and the matching NASA layer for polar coordinate systems.</span>
+              <span class="setting-desc">Automatic uses OpenStreetMap normally and the matching NASA layer for polar coordinate systems. Satellite and Terrain are not available for polar systems.</span>
             </div>
             <select class="select" :value="basemap" @change="setBasemap($event.target.value)">
-              <option value="auto">Automatic</option>
-              <option value="streets">Street map</option>
-              <option value="none">None (grid only)</option>
+              <option v-for="b in BASEMAPS" :key="b.value" :value="b.value">{{ b.label }}</option>
             </select>
+          </div>
+
+          <div class="setting-row setting-row-stacked">
+            <div class="setting-info">
+              <span class="setting-label">Satellite imagery source</span>
+              <span class="setting-desc">
+                By default Satellite shows Esri World Imagery, which is provided under
+                <a :href="SATELLITE.terms" target="_blank" rel="noopener">Esri's terms of use</a> —
+                commercial use may need an ArcGIS account. To use a provider you hold a licence for,
+                enter its XYZ tile URL with <code>{z}</code>, <code>{x}</code> and <code>{y}</code>
+                (and your API key, if it needs one). It is stored only in this browser.
+              </span>
+            </div>
+            <input v-model="satUrlDraft" class="text-input" type="url" spellcheck="false"
+              placeholder="Esri World Imagery (default)" aria-label="Satellite tile URL"
+              @keydown.enter="applySatelliteSource">
+            <input v-model="satAttributionDraft" class="text-input" type="text"
+              placeholder="Attribution, e.g. © Provider" aria-label="Satellite attribution"
+              :disabled="!satUrlDraft.trim()" @keydown.enter="applySatelliteSource">
+            <div class="setting-actions">
+              <button class="btn" :disabled="!satDirty" @click="applySatelliteSource">Apply</button>
+              <button class="btn" :disabled="!satelliteUrl && !satUrlDraft" @click="resetSatelliteSource">Use Esri</button>
+              <span v-if="satError" class="field-error">{{ satError }}</span>
+            </div>
           </div>
 
           <div class="setting-row">
@@ -351,6 +403,11 @@ onMounted(refreshStorage)
 .seg-toggle button.active { background: var(--accent); color: #fff; }
 .select, .num-input input { background: var(--input-bg, var(--panel)); border: 1px solid var(--panel-border); border-radius: 6px; color: var(--text); font: inherit; font-size: 12px; padding: 5px 8px; }
 .select { max-width: 165px; }
+.text-input { background: var(--input-bg, var(--panel)); border: 1px solid var(--panel-border); border-radius: 6px; color: var(--text); font: inherit; font-size: 12px; padding: 5px 8px; min-width: 0; }
+.text-input:disabled { opacity: .5; }
+.setting-desc a { color: var(--accent); }
+.setting-desc code { font-size: 10.5px; }
+.field-error { font-size: 11px; color: var(--danger); }
 /* The memory-limit row pairs a number input with its "Auto" reset; without this
    the two stack against the row's stretch alignment instead of sitting on one line. */
 .setting-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }

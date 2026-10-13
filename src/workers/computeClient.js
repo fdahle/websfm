@@ -317,6 +317,10 @@ export const generateOrtho = streamingOp('generateOrtho')
 // in; an ortho is clipped from a window of its COG file, read in the worker.
 export const demTool = streamingOp('demTool')
 
+// Products ▸ DEM ▸ Symbology… — { grid, style } → { previewBlob }: the DEM's preview
+// re-baked in a new style (workers/ops/products.js `demPreview`).
+export const demPreview = streamingOp('demPreview')
+
 // An orthophoto file made from its stored COG — { file, format: 'geotiff'|'png'|'jpeg',
 // deflate, quality, crs } → { blob, width, height } (workers/ops/export.js exportOrtho).
 export const exportOrthoFile = streamingOp('exportOrtho')

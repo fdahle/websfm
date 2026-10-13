@@ -11,6 +11,7 @@ import { sniffDelimiter, parseRows, guessMapping as guessGcps } from './gcp.js'
 import { guessMapping as guessPoses } from './pose.js'
 import { guessMapping as guessSensors } from './sensor.js'
 import { guessMapping as guessFiducials } from './fiducialObs.js'
+import { looksLikeFiducialMarks } from './fiducialMarks.js'
 import { looksLikeGeoJson, parseGeoJson } from './geojson.js'
 import { looksLikeXyzText } from './cloudImport.js'
 
@@ -29,7 +30,8 @@ export function isColmapFile(fileName = '') {
 }
 
 // Returns { kind, confidence } where
-//   kind:       'colmap' | 'gcp' | 'footprint' | 'pose' | 'sensor' | 'cloud' | 'ambiguous'
+//   kind:       'colmap' | 'gcp' | 'footprint' | 'pose' | 'sensor' | 'fiducialObs' |
+//               'fiducialMarks' | 'cloud' | 'ambiguous'
 //   confidence: 'high' | 'low'
 // 'gcp' and 'footprint' both route through the GeoJSON/GCP importer. NOTE: this
 // takes decoded TEXT — binary cloud formats (PLY/LAS) are sniffed by magic bytes
@@ -71,6 +73,8 @@ export function detectFileKind(text, fileName = '') {
   const hasFiducialCol = fidMap.fiducial != null && fidMap.image != null && fidMap.px != null && fidMap.py != null
   const hasGroundCoords = gcpMap.x != null && gcpMap.y != null
 
+  // Camera fiducial marks: a mark id plus millimetre x/y (no image, no pixels).
+  if (looksLikeFiducialMarks(header) && fidMap.image == null) return { kind: 'fiducialMarks', confidence: 'high' }
   if (hasIntrinsics && poseMap.image == null) return { kind: 'sensor', confidence: 'high' }
   if (hasFiducialCol && !hasGroundCoords) return { kind: 'fiducialObs', confidence: 'high' }
   if (hasPixels) return { kind: 'gcp', confidence: 'high' }

@@ -49,15 +49,28 @@ export function calibratedFiducialPairs(image, sensor) {
   })
 }
 
+const NAMED_SLOTS = new Set([...CORNER_SLOTS, ...SIDE_SLOTS])
+const isSlotId = (id) => NAMED_SLOTS.has(id) || String(id).startsWith('custom-')
+
+// Mark-id observations (`{ fidId, px, py }`: a legacy click or an imported file
+// row) → anonymous detections. An id that already names a slot keeps it, so a
+// websfm export round-trips; any other id (a certificate id like "F1") is placed
+// by position and kept as `legacyFidId`, which deriveLegacyCalibration maps back.
+export function observationsToDetections(obs, width, height, { family = 'legacy', source = 'manual' } = {}) {
+  const allowed = obs.length > 4 ? [...CORNER_SLOTS, ...SIDE_SLOTS] : CORNER_SLOTS
+  return obs.map((o) => {
+    const named = isSlotId(o.fidId)
+    return {
+      slot: named ? o.fidId : (classifyDetectionSlot(o.px, o.py, width, height, allowed) ?? `custom-${o.fidId}`),
+      px: o.px, py: o.py, family, source, confidence: 1, reviewed: true,
+      ...(named ? {} : { legacyFidId: o.fidId }),
+    }
+  })
+}
+
 export function migrateLegacyFiducialImage(image, sensor) {
   if (image?.fiducialDetections?.length || !image?.fiducialObs?.length) return image?.fiducialDetections || []
-  const width = image.meta?.width, height = image.meta?.height
-  const allowed = image.fiducialObs.length > 4 ? [...CORNER_SLOTS, ...SIDE_SLOTS] : CORNER_SLOTS
-  return image.fiducialObs.map((o) => ({
-    slot: classifyDetectionSlot(o.px, o.py, width, height, allowed) ?? `custom-${o.fidId}`,
-    px: o.px, py: o.py, family: 'legacy', source: 'manual', confidence: 1, reviewed: true,
-    legacyFidId: o.fidId,
-  }))
+  return observationsToDetections(image.fiducialObs, image.meta?.width, image.meta?.height)
 }
 
 export function deriveLegacyCalibration(sensor, detections = []) {

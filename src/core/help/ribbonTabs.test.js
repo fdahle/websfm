@@ -117,6 +117,13 @@ describe('one home per tool', () => {
     expect(measureMenu().some((r) => r.id?.startsWith('measure-target:'))).toBe(false)
   })
 
+  it('offers the same object actions on a computed and an imported raster tab', () => {
+    const ids = (r) => leafCommands(rasterTab(r).groups).map((c) => c.id).filter((id) => !id.startsWith('raster-fit') && !id.startsWith('raster-zoom'))
+    expect(ids({ kind: 'dem', imported: false })).toEqual(['gen-dem', 'export-dem', 'raster-symbology', 'raster-toggle-map', 'raster-remove'])
+    expect(ids({ kind: 'ortho', imported: false })).toEqual(['gen-ortho', 'export-ortho', 'raster-symbology', 'raster-toggle-map', 'raster-remove'])
+    expect(ids({ kind: 'dem', imported: true })).toEqual(['raster-download', 'raster-style', 'raster-toggle-map', 'raster-remove'])
+  })
+
   it("gives the raster tab's Rebuild / Export the Reconstruct / Export tabs' own checks", () => {
     const pick = (c) => ({ id: c.id, needs: c.needs, aerialOnly: c.aerialOnly })
     const byId = new Map([...tabLeaves('reconstruct'), ...tabLeaves('export')].map((c) => [c.id, pick(c)]))

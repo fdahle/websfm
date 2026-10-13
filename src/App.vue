@@ -121,9 +121,12 @@ import ImportRasterModal from './components/modals/ImportRasterModal.vue'
 import InteropImportModal from './components/modals/InteropImportModal.vue'
 import InteropSourceModal from './components/modals/InteropSourceModal.vue'
 import CloudSymbologyModal from './components/modals/CloudSymbologyModal.vue'
+import ProductSymbologyModal from './components/modals/ProductSymbologyModal.vue'
 import RasterStyleModal from './components/modals/RasterStyleModal.vue'
 import * as opfs from './utils/opfs.js'
-import { ensureProjection } from './core/crs.js'
+import { ensureProjection, crsInfo } from './core/crs.js'
+import { BASEMAPS, basemapReason } from './core/basemaps.js'
+import { useMapSettings } from './composables/useMapSettings.js'
 import { resolveK } from './core/sfm/reconstruction.js'
 import { estimateUpFromCameras, cameraCenter } from './core/sfm/geometry.js'
 import { CORNER_SLOTS, SIDE_SLOTS } from './core/sfm/fiducialModel.js'
@@ -235,7 +238,7 @@ const { sidebarWidth, startSidebarResize } = useSidebarResize()
 // Project-scoped store; restore/clear run through the project-store registry.
 const reconstructionStore = useReconstructionStore()
 const { cameras, sparseCameras, reconStatus, clouds, selectedCloudId, selectedCloud, mainSparseId, mainSparseCloud, depthMaps, depthMapCount, dem, demSource, meshSources, meshSource, ortho, orthoSurfaces, productLayers, georef, canGeoreference, canGeoreferenceGcps, denseSummary, summary: reconSummary, georeferenceBlocker, crsSuggestion } = storeToRefs(reconstructionStore)
-const { reconstruct, importColmapModel, importInteropModel, importCloud, editClouds, computeDepthMaps, densify, generateDem, generateOrtho, generateMesh, georeference, effectiveFrameSpec, gcpAccuracyReport, gcpGuides, gcpEstimate, selectCloud, setCloudStyle, setCloudVisible, removeCloud, renameCloud, removeProduct, renameProduct, setProductOnMap, setProductOpacity, setMainSparse, clearDerived: clearReconstructionDerived } = reconstructionStore
+const { reconstruct, importColmapModel, importInteropModel, importCloud, editClouds, computeDepthMaps, densify, generateDem, generateOrtho, generateMesh, georeference, effectiveFrameSpec, gcpAccuracyReport, gcpGuides, gcpEstimate, selectCloud, setCloudStyle, setCloudVisible, removeCloud, renameCloud, removeProduct, renameProduct, setProductStyle, setProductOnMap, setProductOpacity, setMainSparse, clearDerived: clearReconstructionDerived } = reconstructionStore
 
 async function clearCurrentProjectDerived() {
   await clearReconstructionDerived()
@@ -309,6 +312,10 @@ async function renameRasterFromSidebar({ id, name }) {
   updateTabTitle(`raster:${id}`, trimmed)
 }
 
+// Products ▸ right-click ▸ Symbology… — the DEM or ortho being styled ('dem' | 'ortho').
+const symbologyProductKind = ref(null)
+const symbologyProduct = computed(() => (symbologyProductKind.value === 'dem' ? dem.value
+  : symbologyProductKind.value === 'ortho' ? ortho.value : null))
 const symbologyCloudId = ref(null)
 const symbologyCloud = computed(() => clouds.value.find(c => c.id === symbologyCloudId.value) ?? null)
 function openCloudSymbology(id) {
@@ -577,7 +584,7 @@ const sensorsStore = useSensorsStore()
 const { sensors } = storeToRefs(sensorsStore)
 const {
   imageCount: sensorImageCount,
-  addSensors, updateSensor, applyFilmFormat, toggleSensorFixed, setFiducialMarks, setFiducialCalibration,
+  addSensors, updateSensor, applyFilmFormat, toggleSensorFixed, setFiducialMarks, setFiducialCalibration, importFiducialMarks,
   assignSensor, mergeSensors, removeSensor,
 } = sensorsStore
 
@@ -778,6 +785,8 @@ const commandState = computed(() => ({
   footprintCount: footprintCount.value,
   sensorCount:   sensors.value.length,
   filmSensorCount: filmSensors.value.length,
+  fiducialImageCount: images.value.filter((i) => i.fiducialDetections?.length || i.fiducialObs?.length).length,
+  fiducialMarkSensorCount: sensors.value.filter((s) => s.fiducialCalibration?.marks?.length || s.fiducials?.marks?.length).length,
   sparseReady:   sparseReady.value,
   depthMapCount: depthMapCount.value,
   cloudReady:    cloudReady.value,
@@ -787,6 +796,8 @@ const commandState = computed(() => ({
   meshReady:     meshReady.value,
   orthoReady:    orthoReady.value,
   productReady:  productReady.value,
+  // The index, never the hydrated planes (useExternalStore invariant 1).
+  referenceDemReady: hasReferenceDem.value,
   mapModelFrame: mapMode.value === 'model',
   // The view in front, for the tools that act on one (NEED_CHECKS imageView /
   // gcpView / measureHost), and the scene type the console's aerial-only check reads.
@@ -1294,6 +1305,12 @@ const viewerMarkers = computed(() => {
 const viewerRegionBox = computed(() => (regionEdit.value ? regionDraft.value : normalizeRegion(reconstructionStore.region)))
 const viewerRegionStale = computed(() => !regionEdit.value && reconstructionStore.regionState.reason === 'stale')
 const { pointSize, setPointSize, cameraScale, setCameraScale } = useViewerSettings()
+const { basemap: mapBasemap, setBasemap: setMapBasemap } = useMapSettings()
+// Why each base layer is unavailable in the map's current frame ('' = available).
+const mapBasemapReasons = computed(() => {
+  const info = mapFrame.value ? null : crsInfo(currentCrs.value)
+  return Object.fromEntries(BASEMAPS.map((b) => [b.value, basemapReason(b.value, info)]))
+})
 // Everything the ribbon's View tab shows as on / as a stepper value.
 const ribbonViewState = computed(() => ({
   showCameras: showCameras.value,
@@ -1307,6 +1324,8 @@ const ribbonViewState = computed(() => ({
   selectRect: selectTool3d.value === 'rect',
   selectLasso: selectTool3d.value === 'lasso',
   mapGcpEdit: mapGcpEdit.value,
+  mapBasemap: mapBasemap.value,
+  mapBasemapReasons: mapBasemapReasons.value,
 }))
 
 // ── Console ───────────────────────────────────────────────────────────────────
@@ -1407,9 +1426,9 @@ const {
   onCloudImport, onCloudPick,
   openRasterImport, onRasterPick, addImagesRouted,
   openCameraImport, onCameraImport, onGcpImport, onFootprintImport,
-  onGcpPick, onCameraPick, onColmapPick,
+  onGcpPick, onCameraPick, onColmapPick, onFiducialObsPick, onFiducialMarksPick,
 } = useImportRouting({
-  addGcps, addFootprints, addSensors, addPoses, addFiducialObs: addFiducialObservations,
+  addGcps, addFootprints, addSensors, addPoses, addFiducialObs: addFiducialObservations, addFiducialMarks: importFiducialMarks,
   importColmap: importColmapModel, importCloud,
   openSfmProject: openSfmImport,
   // A dropped `.tif` arrives as `image/tiff` and would otherwise be ingested as
@@ -1446,7 +1465,8 @@ function zoomToShapefile(id) {
 
 // ── Export (camera params + products) ───────────────────────────────────────────
 const {
-  exportKind, exportPoses, exportSensors, exportKeypoints, exportMatches, onExportRun,
+  exportKind, exportPoses, exportSensors, exportCameraFiducials, exportImageFiducials, exportKeypoints, exportMatches, onExportRun,
+  exportTargetCloud, openCloudExport, downloadRasterOriginal, downloadImageOriginal, downloadShapefile,
   exportContours, exportTerrain, exportClipped,
 } = useExports({
   poses, sensors, images, matchStore, clouds, selectedCloud, mainSparseCloud, dem, ortho,
@@ -1546,8 +1566,9 @@ const {
   pendingImageDelete, requestRemoveImages, confirmRemoveImages, deleteMessage,
   pendingConfirm, askConfirm, runPendingConfirm,
   confirmRemoveSensor, confirmRemoveCloud, confirmRemoveRaster,
-  confirmRemoveGcp, confirmRemoveShapefile, confirmClearKeypoints, confirmRemoveMatches,
-} = useConfirmations({ closeTabForImage, closeTabForRaster, removeGcpAndCloseTab })
+  confirmRemoveGcp, confirmRemoveGcpObservation, confirmRemoveShapefile, confirmClearKeypoints,
+  confirmRemoveMatches,
+} = useConfirmations({ closeTabForImage, closeTabForRaster, removeGcpAndCloseTab, removeGcpObservation })
 
 function confirmRemoveProduct(kind) {
   const name = computedProductName(kind)
@@ -1694,6 +1715,8 @@ const activeRasterTab = computed(() => {
       imported: true,
       name: r?.name ?? 'Raster',
       onMap: !!r?.onMap,
+      // Band math has something to choose (>3 bands or deeper than 8-bit).
+      styleable: !!r?.styleable,
       measure,
     }
   }
@@ -1716,6 +1739,8 @@ function activeProductViewer() {
 const ribbonInput = ref(null)
 const gcpInput = ref(null)
 const cameraInput = ref(null)
+const imageFiducialInput = ref(null)
+const cameraFiducialInput = ref(null)
 const colmapInput = ref(null)
 const sfmFolderInput = ref(null)
 const sfmSourceOpen = ref(false)
@@ -1777,6 +1802,7 @@ const EVAL_SECTIONS = {
   'eval-match-graph':    'matching',
   'eval-coverage':       'coverage',
   'eval-depth-coverage': 'dense',
+  'eval-dem-reference':  'products',
 }
 
 // Tools-tab dialogs that share the one `toolModal` slot (see useModalsStore): the
@@ -1902,6 +1928,7 @@ function handleCommand(id, value) {
   // Measure groups: 'measure-length' → the ruler of the viewer in front (a raster
   // tab, or the 2D map), etc. The map also picks which raster it measures.
   if (id.startsWith('measure-target:')) { setMapMeasureTarget(id.slice('measure-target:'.length)); return }
+  if (id.startsWith('map-basemap:')) { setMapBasemap(id.slice('map-basemap:'.length)); return }
   const measureHost = activeView.value === 'map' ? mapViewerRef.value : activeProductViewer()
   if (id === 'measure-saved') { measureHost?.toggleSavedMeasurements(); return }
   if (id.startsWith('measure-')) { measureHost?.setMeasureTool(id.slice('measure-'.length)); return }
@@ -1911,11 +1938,15 @@ function handleCommand(id, value) {
     case 'import-gcps':          gcpInput.value.click(); break
     case 'import-camera-list':   cameraPickMode.value = 'pose';   cameraInput.value.click(); break
     case 'import-calib':         cameraPickMode.value = 'sensor'; cameraInput.value.click(); break
+    case 'import-image-fiducials':  imageFiducialInput.value.click(); break
+    case 'import-camera-fiducials': cameraFiducialInput.value.click(); break
     case 'import-colmap':        sfmSourceOpen.value = true; break
     case 'import-cloud':         cloudInput.value.click(); break
     case 'import-raster':        rasterInput.value.click(); break
     case 'export-cameras':       exportPoses(); break
     case 'export-sensors':       exportSensors(); break
+    case 'export-camera-fiducials': exportCameraFiducials(); break
+    case 'export-image-fiducials':  exportImageFiducials(); break
     case 'export-cloud':         exportKind.value = 'cloud'; break
     case 'export-mesh':          exportKind.value = 'mesh'; break
     case 'export-model':         exportKind.value = 'model'; break
@@ -1973,7 +2004,14 @@ function handleCommand(id, value) {
       else if (r && !r.imported) setProductOnMap(r.kind, !r.onMap)
       break
     }
-    case 'raster-remove':        if (activeRasterTab.value?.rasterId) confirmRemoveRaster(activeRasterTab.value.rasterId); break
+    case 'raster-symbology':     if (activeRasterTab.value && !activeRasterTab.value.imported) symbologyProductKind.value = activeRasterTab.value.kind; break
+    case 'raster-download':      if (activeRasterTab.value?.rasterId) downloadRasterOriginal(activeRasterTab.value.rasterId); break
+    case 'raster-remove': {
+      const r = activeRasterTab.value
+      if (r?.rasterId) confirmRemoveRaster(r.rasterId)
+      else if (r && !r.imported) confirmRemoveProduct(r.kind)
+      break
+    }
     case 'img-show-info':        if (activeImageTab.value) infoImageId.value = activeImageTab.value.id; break
     case 'img-remove':           if (activeImageTab.value) requestRemoveImages(activeImageTab.value.id); break
     case 'img-toggle-keypoints': {
@@ -2067,6 +2105,8 @@ function onRibbonPick(event) {
     <input ref="ribbonInput" type="file" accept="image/*" multiple hidden @change="onRibbonPick" />
     <input ref="gcpInput" type="file" accept=".csv,.txt,.tsv,.gcp,.pts,.geojson,.json,application/geo+json,text/*" hidden @change="onGcpPick" />
     <input ref="cameraInput" type="file" accept=".csv,.txt,.tsv,.cam,text/*" hidden @change="onCameraPick" />
+    <input ref="imageFiducialInput" type="file" accept=".csv,.txt,.tsv,text/*" hidden @change="onFiducialObsPick" />
+    <input ref="cameraFiducialInput" type="file" accept=".csv,.txt,.tsv,text/*" hidden @change="onFiducialMarksPick" />
     <input ref="colmapInput" type="file" accept=".db,.sqlite,.txt,.bin,.zip,.json,.nvm" multiple hidden @change="(e) => { sfmSourceOpen = false; onColmapPick(e) }" />
     <input ref="sfmFolderInput" type="file" webkitdirectory multiple hidden @change="(e) => { sfmSourceOpen = false; onColmapPick(e) }" />
     <input ref="cloudInput" type="file" accept=".ply,.las,.laz,.xyz,.pts" hidden @change="onCloudPick" />
@@ -2231,6 +2271,7 @@ function onRibbonPick(event) {
         :has-scale="scaleFitValid || georef?.crs === currentCrs"
         :has-orientation="reconstructionStore.orientationState.active"
         :ortho-cells="reconstructionStore.ortho ? reconstructionStore.ortho.width * reconstructionStore.ortho.height : 0"
+        :subject="exportTargetCloud?.name ?? ''"
         @close="exportKind = null"
         @run="onExportRun"
       />
@@ -2285,6 +2326,7 @@ function onRibbonPick(event) {
         :title="pendingConfirm.title"
         :message="pendingConfirm.message"
         :confirm-label="pendingConfirm.confirmLabel || 'Remove'"
+        :dont-ask="!!pendingConfirm.onDontAsk"
         danger
         @confirm="runPendingConfirm"
         @cancel="pendingConfirm = null"
@@ -2439,6 +2481,8 @@ function onRibbonPick(event) {
     </Teleport>
 
     <Teleport to="body">
+      <ProductSymbologyModal v-if="symbologyProduct" :key="symbologyProductKind" :kind="symbologyProductKind" :product="symbologyProduct"
+        @close="symbologyProductKind = null" @apply="({ kind, style }) => setProductStyle(kind, style)" />
       <CloudSymbologyModal v-if="symbologyCloud" :key="symbologyCloud.id" :cloud="symbologyCloud" :clouds="clouds"
         @close="symbologyCloudId = null" @apply="({ id, style }) => setCloudStyle(id, style)" />
       <RasterStyleModal
@@ -2616,6 +2660,7 @@ function onRibbonPick(event) {
         @close="gcpTableOpen = false"
         @remove="removeGcpAndCloseTab"
         @update-accuracy="({ id, kind, value }) => setGcpAccuracy(id, kind, value)"
+        @update-observation-accuracy="({ gcpId, imageId, axis, value }) => setObservationAccuracy(gcpId, imageId, axis, value)"
         @update-name="({ id, name }) => setGcpName(id, name)"
         @update-role="changeGcpRole"
         @update-vertical-datum="({ id, verticalDatum }) => setGcpVerticalDatum(id, verticalDatum)"
@@ -2724,6 +2769,13 @@ function onRibbonPick(event) {
         @rename-product="renameProductFromSidebar"
         @set-product-on-map="({ kind, onMap }) => setProductOnMap(kind, onMap)"
         @set-product-opacity="({ kind, opacity }) => setProductOpacity(kind, opacity)"
+        @product-symbology="(kind) => (symbologyProductKind = kind)"
+        @download-cloud="openCloudExport"
+        @download-product="(kind) => (exportKind = kind)"
+        @download-raster="downloadRasterOriginal"
+        @download-image="downloadImageOriginal"
+        @download-shapefile="downloadShapefile"
+        @download-matches="exportMatches"
         @open-raster="openRasterTab"
         @convert-raster-to-image="(id) => onRasterImportAsImage({ id })"
         @remove-raster="confirmRemoveRaster"
@@ -2749,8 +2801,6 @@ function onRibbonPick(event) {
         @remove-gcp="confirmRemoveGcp"
         @select-gcp="selectGcp"
         @jump-to-image="jumpToImage"
-        @remove-gcp-observation="removeGcpObservation"
-        @update-gcp-observation-accuracy="({ gcpId, imageId, axis, value }) => setObservationAccuracy(gcpId, imageId, axis, value)"
         @open-gcp="openGcpView"
         @remove-sensor="confirmRemoveSensor"
         @merge-sensors="({ target, source }) => mergeSensors(target, source)"
@@ -2811,7 +2861,7 @@ function onRibbonPick(event) {
                 @undo="alignPairs.pairs = alignPairs.pairs.slice(0, -1)" @clear="alignPairs.pairs = []" @apply="applyAlignPairs" @close="alignPairs = null" />
             </template>
           </Viewer3D>
-          <ViewerMap v-if="mapMounted" ref="mapViewerRef" v-show="activeTabId === 'map'" v-model:gcp-edit="mapGcpEdit" :images="images" :gcps="gcps" :footprints="mapFootprints" :poses="poses" :selected-id="selectedId" :selected-gcp-id="selectedGcpId" :aligned-uuids="alignedUuids" :has-sparse="hasSparse" :crs="currentCrs" :show-footprints="showFootprints" :show-grid="showMapGrid" :rasters="mapLayers" :probe-raster="probeMapLayersAt" :model-frame="mapFrame" :model-cameras="modelCameras" :model-markers="modelMarkers" :measure-target="mapMeasureTarget" :notes="mapNotes" :load-raster="ensureRasterLoaded" @select="selectImage" @command="handleCommand" @select-gcp="selectGcp" @set-gcp-position="setGcpGroundPosition" @add-gcp-at="addGcpAtCoord" @delete-gcp="deleteGcpFromEditor" />
+          <ViewerMap v-if="mapMounted" ref="mapViewerRef" v-show="activeTabId === 'map'" v-model:gcp-edit="mapGcpEdit" :images="images" :gcps="gcps" :footprints="mapFootprints" :poses="poses" :selected-id="selectedId" :selected-gcp-id="selectedGcpId" :aligned-uuids="alignedUuids" :has-sparse="hasSparse" :crs="currentCrs" :show-footprints="showFootprints" :show-grid="showMapGrid" :rasters="mapLayers" :probe-raster="probeMapLayersAt" :model-frame="mapFrame" :model-cameras="modelCameras" :model-markers="modelMarkers" :measure-target="mapMeasureTarget" :notes="mapNotes" :load-raster="ensureRasterLoaded" @select="selectImage" @open-image="(id) => openImageTab(id)" @command="handleCommand" @select-gcp="selectGcp" @set-gcp-position="setGcpGroundPosition" @add-gcp-at="addGcpAtCoord" @delete-gcp="deleteGcpFromEditor" />
           <template v-for="tab in tabs" :key="tab.id">
             <ViewerImage
               v-if="tab.type === 'image' && imageById(tab.imageId)"
@@ -2853,6 +2903,7 @@ function onRibbonPick(event) {
               :images="images"
               :report="gcpReport.find((r) => r.gcpId === tab.gcpId) ?? null"
               @jump-to-image="jumpToImage"
+              @remove-observation="confirmRemoveGcpObservation"
             />
             <ProductViewer
               v-else-if="tab.type === 'product'"

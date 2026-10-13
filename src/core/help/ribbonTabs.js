@@ -27,6 +27,8 @@
 // on-map, remove. A command that does appear twice (Rebuild / Export on a raster
 // tab) is the SAME object below, so its prerequisites cannot drift.
 
+import { BASEMAPS } from '../basemaps.js'
+
 // Shared between Reconstruct/Export and the raster tab's object actions.
 const GEN_DEM      = { id: 'gen-dem',      label: 'DEM',   icon: 'dem',   needs: ['cloud'], aerialOnly: true }
 const GEN_ORTHO    = { id: 'gen-ortho',    label: 'Ortho', icon: 'ortho', needs: ['imagesReady', 'depthMaps', 'surface'], aerialOnly: true }
@@ -108,6 +110,9 @@ export const TABS = [
         label: 'Images',
         commands: [
           { id: 'import-images', label: 'Images', icon: 'image' },
+          // Scan-pixel mark positions per image; rows match images by name, so
+          // (unlike GCPs) the images must be there first.
+          { id: 'import-image-fiducials', label: 'Image\nFiducials', icon: 'target', needs: ['images'] },
         ],
       },
       {
@@ -115,6 +120,8 @@ export const TABS = [
         commands: [
           { id: 'import-camera-list', label: 'Camera\nPoses', icon: 'camera-pose' },
           { id: 'import-calib', label: 'Calibration', icon: 'calibration' },
+          // A film camera's certificate marks (mm); rows match sensors by label.
+          { id: 'import-camera-fiducials', label: 'Camera\nFiducials', icon: 'camera', needs: ['sensors'] },
         ],
       },
       {
@@ -386,6 +393,13 @@ export const TABS = [
           { id: 'eval-depth-coverage', label: 'Depth\nCoverage', icon: 'depth', needs: ['depthMaps'] },
         ],
       },
+      {
+        label: 'Products',
+        commands: [
+          // The computed DEM against an imported reference DEM (TODO.md ▸ A-6).
+          { id: 'eval-dem-reference', label: 'DEM vs\nReference', icon: 'dem', needs: ['dem', 'referenceDem'], aerialOnly: true },
+        ],
+      },
     ],
   },
   {
@@ -400,11 +414,13 @@ export const TABS = [
         commands: [
           { id: 'export-cameras', label: 'Camera\nPoses', icon: 'camera-pose', needs: ['poses'] },
           { id: 'export-sensors', label: 'Calibration',   icon: 'calibration', needs: ['sensors'] },
+          { id: 'export-camera-fiducials', label: 'Camera\nFiducials', icon: 'camera', needs: ['fiducialMarks'] },
         ],
       },
       {
         label: 'Features',
         commands: [
+          { id: 'export-image-fiducials', label: 'Image\nFiducials', icon: 'target', needs: ['fiducials'] },
           { id: 'export-keypoints', label: 'Key\npoints', icon: 'keypoints', needs: ['imagesReady', 'keypoints'] },
           { id: 'export-matches',   label: 'Matches',     icon: 'link',      needs: ['matches'] },
         ],
@@ -531,6 +547,11 @@ export const MAP_GROUP = {
     { id: 'map-fit-view',          label: 'Fit\nView',   icon: 'fit-view' },
     { id: 'map-toggle-grid',       label: 'Grid',        icon: 'grid',      activeKey: 'showMapGrid' },
     { id: 'map-toggle-footprints', label: 'Footprints',  icon: 'footprint', activeKey: 'showFootprints', needs: ['footprints'] },
+    // `map-basemap:<value>` rows pick the base layer (core/basemaps.js); App
+    // dispatches the prefix. A layer the frame cannot show is greyed with its reason.
+    { id: 'menu-basemap', label: 'Basemap', icon: 'layers', menu: BASEMAPS.map((b) => ({
+      id: `map-basemap:${b.value}`, label: b.label, icon: b.icon, blurb: b.blurb, basemap: b.value,
+    })) },
     { id: 'map-toggle-poses',      label: 'Poses',       icon: 'camera',    disabled: true },
     // Project CRS ↔ the sparse model's local frame (composables/useMapProducts.js).
     { id: 'map-toggle-model-frame', label: 'Model\nFrame', icon: 'sparse-model', activeKey: 'mapModelFrame', needs: ['sparse'] },
@@ -580,11 +601,14 @@ export const PICTURE_TAB = {
   ],
 }
 
-// The raster counterpart of PICTURE_TAB. Its last group depends on provenance:
-// a *computed* product can be rebuilt and exported, an *imported* reference
-// raster can be restyled or removed — the pipeline never rebuilds one. Both can
-// be drawn on the map (one raster-layer concept); the toggle is the same
-// command, and a computed product in the local frame greys it with the reason.
+// The raster counterpart of PICTURE_TAB. Both provenances offer the same object
+// actions in the same order — get a copy out, change how it looks, put it on the
+// map, remove it — and differ only where the object does: a *computed* product
+// can also be rebuilt, and exports through the Export tab's dialog; an *imported*
+// reference raster downloads as the file it was (the pipeline never rebuilds
+// one), and its Style… is band math (greyed when there is nothing to choose).
+// The map toggle is one command; a product the map cannot place greys it with
+// the reason. Same entries as the sidebar's right-click menus.
 export function rasterTab(r) {
   const isOrtho = r?.kind === 'ortho'
   return {
@@ -604,6 +628,7 @@ export function rasterTab(r) {
         ? {
             label: 'Reference',
             commands: [
+              { id: 'raster-download',   label: 'Download', icon: 'download' },
               { id: 'raster-style',      label: 'Style…',  icon: 'settings' },
               { id: 'raster-toggle-map', label: 'On\nMap', icon: 'layers', activeKey: 'rasterOnMap' },
               { id: 'raster-remove',     label: 'Remove',  icon: 'remove', danger: true },
@@ -615,7 +640,9 @@ export function rasterTab(r) {
               // The Reconstruct / Export commands themselves, relabelled.
               { ...(isOrtho ? GEN_ORTHO : GEN_DEM), label: 'Rebuild' },
               { ...(isOrtho ? EXPORT_ORTHO : EXPORT_DEM), label: 'Export', icon: 'download' },
+              { id: 'raster-symbology',  label: 'Symbology…', icon: 'settings' },
               { id: 'raster-toggle-map', label: 'On\nMap', icon: 'layers', activeKey: 'rasterOnMap' },
+              { id: 'raster-remove',     label: 'Remove',  icon: 'remove', danger: true },
             ],
           },
     ],

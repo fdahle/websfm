@@ -12,7 +12,7 @@ defineProps({
   mainSparseId:    { type: String, default: null },
   reconStatus:     { type: String, default: 'idle' }, // 'idle'|'running'|'done'|'error'
 })
-const emit = defineEmits(['toggle', 'cloud-symbology', 'cloud-visibility', 'select-cloud', 'remove-cloud', 'rename-cloud', 'set-main-cloud', 'zoom-to-cloud'])
+const emit = defineEmits(['toggle', 'cloud-symbology', 'cloud-visibility', 'select-cloud', 'remove-cloud', 'rename-cloud', 'set-main-cloud', 'zoom-to-cloud', 'download-cloud'])
 </script>
 
 <template>
@@ -36,6 +36,7 @@ const emit = defineEmits(['toggle', 'cloud-symbology', 'cloud-visibility', 'sele
         @rename-cloud="emit('rename-cloud', $event)"
         @set-main-cloud="emit('set-main-cloud', $event)"
         @zoom-to-cloud="emit('zoom-to-cloud', $event)"
+        @download-cloud="emit('download-cloud', $event)"
       />
       <li v-if="reconStatus === 'running' && !clouds.length" class="empty">Reconstructing…</li>
       <li v-else-if="!clouds.length" class="empty">No sparse model yet</li>

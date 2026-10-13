@@ -1,5 +1,6 @@
 import { resolveRasterStyle, bandsUsedBy } from './rasterStyle.js'
 import { rampByName } from '../products/colormap.js'
+import { orthoGpuAdjustments } from '../products/productStyle.js'
 
 // A stretch must have finite, increasing ends: a DEM with no recorded zMax (an
 // all-nodata or never-scanned plane) or a constant band would otherwise compile a
@@ -39,6 +40,9 @@ export function gpuRasterStyle(meta) {
     const channels = used.map((i, c) => ['*', 255, normalized(band(i), meta.style?.ranges?.[c] ?? (meta.kind === 'dem' ? [meta.zMin ?? 0, meta.zMax] : [0, 255]))])
     color = ['color', channels[0], channels[1] ?? channels[0], channels[2] ?? channels[0], alpha ? ['/', alpha, 255] : 1]
   }
-  return { color: ['case', valid.length === 2 ? valid[1] : valid, color, ['color', 0, 0, 0, 0]] }
+  // `adjust`: a computed ortho's brightness/contrast/gamma (productStyle.js), as the
+  // layer's own adjustments — after `color`, so the alpha mask above is untouched.
+  return { color: ['case', valid.length === 2 ? valid[1] : valid, color, ['color', 0, 0, 0, 0]],
+    ...orthoGpuAdjustments(meta.adjust) }
 }
 

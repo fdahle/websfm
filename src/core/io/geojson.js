@@ -1,4 +1,4 @@
-// GeoJSON import parsing.
+// GeoJSON import parsing (and the polygon-layer export, its inverse).
 //
 // A GeoJSON file can carry Point/MultiPoint features (which we import as Ground
 // Control Points) or Polygon/MultiPolygon features (which we import as image
@@ -153,4 +153,24 @@ export function geoJsonToFootprints(features, nameKey) {
     }
   }
   return footprints
+}
+
+// A polygon layer (useFootprintsStore set) → a GeoJSON FeatureCollection, one
+// Polygon feature per footprint (outer ring + holes, each ring closed), named by its
+// image so a re-import links the polygons back up (geoJsonToFootprints reads `name`).
+// Coordinates are the stored ones (the project CRS), named in the legacy `crs`
+// member as the contour export does — the import reads it to seed its CRS picker.
+export function polygonSetToGeoJson(set, { crs = null } = {}) {
+  const close = (ring) => {
+    const [a, b] = [ring[0], ring[ring.length - 1]]
+    return a && b && (a[0] !== b[0] || a[1] !== b[1]) ? [...ring, [a[0], a[1]]] : ring
+  }
+  const features = (set?.footprints ?? []).filter((fp) => fp.rings?.length).map((fp) => ({
+    type: 'Feature',
+    properties: { name: fp.imageName ?? fp.name ?? null },
+    geometry: { type: 'Polygon', coordinates: fp.rings.map((ring) => close(ring.map((c) => [c[0], c[1]]))) },
+  }))
+  const fc = { type: 'FeatureCollection', name: set?.name ?? null, features }
+  if (crs && /^EPSG:\d+$/i.test(crs)) fc.crs = { type: 'name', properties: { name: crs.toUpperCase() } }
+  return fc
 }

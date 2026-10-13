@@ -56,15 +56,16 @@ const props = defineProps({
 
 const emit = defineEmits([
   'add-images', 'import-file', 'remove-image', 'rename-image', 'convert-image-to-raster', 'image-group', 'remove-gcp', 'select-gcp',
-  'jump-to-image', 'remove-gcp-observation', 'update-gcp-observation-accuracy', 'open-gcp',
+  'jump-to-image', 'open-gcp',
   'remove-sensor', 'merge-sensors', 'open-sensor', 'assign-sensor', 'remove-pose',
   'remove-shapefile', 'rename-shapefile', 'set-shapefile-on-map', 'zoom-to-shapefile',
   'select', 'open', 'show-info', 'delete-keypoints', 'zoom-to-image',
   'cloud-symbology', 'cloud-visibility', 'select-cloud', 'remove-cloud', 'rename-cloud', 'set-main-cloud',
   'open-matches', 'remove-matches', 'open-product', 'remove-product', 'rename-product', 'zoom-to-cloud',
-  'set-product-on-map', 'set-product-opacity',
+  'set-product-on-map', 'set-product-opacity', 'product-symbology',
   'open-raster', 'remove-raster', 'rename-raster', 'set-raster-kind', 'style-raster',
   'set-raster-on-map', 'set-raster-opacity', 'convert-raster-to-image',
+  'download-cloud', 'download-product', 'download-raster', 'download-image', 'download-shapefile', 'download-matches',
 ])
 
 // The provenance+role split behind the three cloud sections. Sparse is the model
@@ -164,6 +165,7 @@ watch(() => props.pendingRasters.length, (count, previous) => {
       @delete-keypoints="emit('delete-keypoints', $event)"
       @remove-image="emit('remove-image', $event)"
       @rename-image="emit('rename-image', $event)"
+      @download-image="emit('download-image', $event)"
       @convert-to-raster="emit('convert-image-to-raster', $event)"
       @image-group="emit('image-group', $event)"
     />
@@ -185,6 +187,7 @@ watch(() => props.pendingRasters.length, (count, previous) => {
       @toggle="toggle('matches')"
       @open-matches="emit('open-matches')"
       @remove-matches="emit('remove-matches')"
+      @download-matches="emit('download-matches')"
     />
 
     <GcpsSection
@@ -196,8 +199,6 @@ watch(() => props.pendingRasters.length, (count, previous) => {
       @remove-gcp="emit('remove-gcp', $event)"
       @select="emit('select-gcp', $event)"
       @jump-to-image="emit('jump-to-image', $event)"
-      @remove-observation="emit('remove-gcp-observation', $event)"
-      @update-observation-accuracy="emit('update-gcp-observation-accuracy', $event)"
       @open-gcp="emit('open-gcp', $event)"
     />
 
@@ -208,6 +209,7 @@ watch(() => props.pendingRasters.length, (count, previous) => {
       :sets="shapefiles"
       @toggle="toggle('footprints')"
       @remove-shapefile="emit('remove-shapefile', $event)"
+      @download-shapefile="emit('download-shapefile', $event)"
       @rename-shapefile="emit('rename-shapefile', $event)"
       @set-shapefile-on-map="emit('set-shapefile-on-map', $event)"
       @zoom-to-shapefile="emit('zoom-to-shapefile', $event)"
@@ -228,6 +230,7 @@ watch(() => props.pendingRasters.length, (count, previous) => {
       @rename-cloud="emit('rename-cloud', $event)"
       @set-main-cloud="emit('set-main-cloud', $event)"
       @zoom-to-cloud="emit('zoom-to-cloud', $event)"
+      @download-cloud="emit('download-cloud', $event)"
     />
 
     <ProductsSection
@@ -241,8 +244,10 @@ watch(() => props.pendingRasters.length, (count, previous) => {
       @toggle="toggle('products')"
       @set-product-on-map="emit('set-product-on-map', $event)"
       @set-product-opacity="emit('set-product-opacity', $event)"
+      @product-symbology="emit('product-symbology', $event)"
       @open-product="emit('open-product', $event)"
       @remove-product="emit('remove-product', $event)"
+      @download-product="emit('download-product', $event)"
       @rename-product="emit('rename-product', $event)"
       @select-cloud="emit('select-cloud', $event)"
       @cloud-symbology="emit('cloud-symbology', $event)"
@@ -250,6 +255,7 @@ watch(() => props.pendingRasters.length, (count, previous) => {
       @remove-cloud="emit('remove-cloud', $event)"
       @rename-cloud="emit('rename-cloud', $event)"
       @zoom-to-cloud="emit('zoom-to-cloud', $event)"
+      @download-cloud="emit('download-cloud', $event)"
     />
 
     <!-- Only shown once something imported exists — an always-empty section is
@@ -269,8 +275,10 @@ watch(() => props.pendingRasters.length, (count, previous) => {
       @remove-cloud="emit('remove-cloud', $event)"
       @rename-cloud="emit('rename-cloud', $event)"
       @zoom-to-cloud="emit('zoom-to-cloud', $event)"
+      @download-cloud="emit('download-cloud', $event)"
       @open-raster="emit('open-raster', $event)"
       @remove-raster="emit('remove-raster', $event)"
+      @download-raster="emit('download-raster', $event)"
       @rename-raster="emit('rename-raster', $event)"
       @set-raster-kind="emit('set-raster-kind', $event)"
       @style-raster="emit('style-raster', $event)"

@@ -1,4 +1,6 @@
 <script setup>
+import { ref } from 'vue'
+
 const props = defineProps({
   gcps:   { type: Array,  required: true },
   crs:    { type: String, default: null },
@@ -17,8 +19,26 @@ const props = defineProps({
 
 const emit = defineEmits([
   'remove', 'update-accuracy', 'update-name', 'update-position', 'select', 'add',
-  'update-role', 'update-vertical-datum', 'fill-z', 'check-z',
+  'update-role', 'update-vertical-datum', 'fill-z', 'check-z', 'update-observation-accuracy',
 ])
+
+// Rows whose per-image observations are expanded (click the Observations count).
+// That sub-row is the one place a single mark's σ is edited — the sidebar only
+// displays — so a mark that was hard to place can be down-weighted on its own.
+const obsExpanded = ref({})
+function toggleObs(id) {
+  if (obsExpanded.value[id]) delete obsExpanded.value[id]
+  else obsExpanded.value[id] = true
+}
+const COLUMN_COUNT = 15
+
+function reprojFor(gcp, imageId) {
+  return reportFor(gcp)?.observations?.find((o) => o.imageId === imageId)?.reprojPx ?? null
+}
+
+function onObsAccuracyInput(gcp, obs, axis, e) {
+  emit('update-observation-accuracy', { gcpId: gcp.id, imageId: obs.imageId, axis, value: e.target.value })
+}
 
 // A MARKER is a scale-bar endpoint: image marks and no surveyed position. Its
 // coordinate and ground-accuracy cells are not "blank", they do not exist — so
@@ -120,9 +140,8 @@ function onPositionInput(gcp, axis, e) {
         </tr>
       </thead>
       <tbody>
+        <template v-for="gcp in gcps" :key="gcp.id">
         <tr
-          v-for="gcp in gcps"
-          :key="gcp.id"
           :class="{ selected: gcp.id === selectedGcpId }"
           @click="emit('select', gcp.id)"
         >
@@ -234,9 +253,12 @@ function onPositionInput(gcp, axis, e) {
             />
           </td>
           <td class="num">
-            <span :class="{ 'obs-low': obsCount(gcp) < 2 }" :title="obsCount(gcp) < 2 ? 'Needs ≥2 marked images to be usable' : ''">
+            <button class="obs-toggle" :class="{ 'obs-low': obsCount(gcp) < 2 }" :disabled="!obsCount(gcp)"
+              :title="obsCount(gcp) < 2 ? 'Needs ≥2 marked images to be usable' : 'Show marked images and their accuracy'"
+              @click.stop="toggleObs(gcp.id)">
+              <span v-if="obsCount(gcp)" class="chevron">{{ obsExpanded[gcp.id] ? '▾' : '▸' }}</span>
               {{ obsCount(gcp) }}<span v-if="obsCount(gcp) < 2"> ⚠</span>
-            </span>
+            </button>
           </td>
           <td class="num">
             <span v-if="reportFor(gcp)?.dTotal != null" :title="reportFor(gcp).normalized == null ? '' : `Mahalanobis residual ${reportFor(gcp).normalized.toFixed(2)}σ`">
@@ -252,6 +274,41 @@ function onPositionInput(gcp, axis, e) {
             <button class="row-remove" title="Remove point" @click.stop="emit('remove', gcp.id)">×</button>
           </td>
         </tr>
+        <tr v-if="obsExpanded[gcp.id] && obsCount(gcp)" class="obs-row">
+          <td :colspan="COLUMN_COUNT">
+            <table class="obs-table">
+              <thead>
+                <tr>
+                  <th>Marked image</th>
+                  <th title="Per-observation X marking accuracy (1σ pixels)">Image X σ (px)</th>
+                  <th title="Per-observation Y marking accuracy (1σ pixels)">Image Y σ (px)</th>
+                  <th title="Reprojection error of this mark">Reproj (px)</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="obs in gcp.observations" :key="obs.imageId ?? obs.imageName">
+                  <td :class="{ 'obs-missing': obs.imageId == null }"
+                    :title="obs.imageId == null ? `${obs.imageName} — not loaded yet` : obs.imageName">{{ obs.imageName }}</td>
+                  <td class="acc-cell">
+                    <input class="acc-input" type="number" min="0" step="any" :disabled="obs.imageId == null"
+                      :value="obs.accuracyX ?? gcp.accuracyImgX"
+                      @click.stop @change="onObsAccuracyInput(gcp, obs, 'x', $event)" />
+                  </td>
+                  <td class="acc-cell">
+                    <input class="acc-input" type="number" min="0" step="any" :disabled="obs.imageId == null"
+                      :value="obs.accuracyY ?? gcp.accuracyImgY"
+                      @click.stop @change="onObsAccuracyInput(gcp, obs, 'y', $event)" />
+                  </td>
+                  <td class="num">
+                    <span v-if="reprojFor(gcp, obs.imageId) != null">{{ reprojFor(gcp, obs.imageId).toFixed(2) }}</span>
+                    <span v-else class="na">—</span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </td>
+        </tr>
+        </template>
       </tbody>
     </table>
 
@@ -415,6 +472,28 @@ tbody tr:hover {
 .obs-low {
   color: #e0a030;
 }
+
+.obs-toggle {
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  padding: 0;
+}
+.obs-toggle.obs-low { color: #e0a030; }
+.obs-toggle:disabled { cursor: default; }
+.obs-toggle .chevron { color: var(--text-dim); font-size: 10px; margin-right: 2px; }
+
+tbody tr.obs-row { cursor: default; background: rgba(255, 255, 255, 0.02); }
+tbody tr.obs-row:hover { background: rgba(255, 255, 255, 0.02); }
+tbody tr.obs-row > td { padding: 4px 12px 8px 36px; }
+.obs-table { width: auto; font-size: 12px; }
+.obs-table thead th { position: static; padding: 4px 12px 4px 0; background: none; font-size: 11px; }
+.obs-table tbody td { padding: 2px 12px 2px 0; border-bottom: none; }
+.obs-table tbody tr:hover { background: none; }
+.obs-missing { color: var(--text-dim); font-style: italic; }
 
 .uncertainty-cell { max-width: 90px; font-size: 10px; color: var(--text-dim); }
 .uncertainty-cell.unknown { color: #e0a030; }

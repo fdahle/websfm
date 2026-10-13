@@ -20,8 +20,9 @@ const props = defineProps({
   productLayers: { type: Object, default: () => ({}) },
 })
 const emit = defineEmits([
-  'toggle', 'open-product', 'remove-product', 'rename-product', 'set-product-on-map', 'set-product-opacity',
-  'cloud-symbology', 'cloud-visibility', 'select-cloud', 'remove-cloud', 'rename-cloud', 'zoom-to-cloud',
+  'toggle', 'open-product', 'remove-product', 'rename-product', 'set-product-on-map', 'set-product-opacity', 'product-symbology',
+  'cloud-symbology', 'cloud-visibility', 'select-cloud', 'remove-cloud', 'rename-cloud', 'zoom-to-cloud', 'download-cloud',
+  'download-product',
 ])
 
 // One row per built raster; opening (double-click) shows it in a tab like an image.
@@ -70,7 +71,7 @@ function commitRename() {
 function cancelRename() { editingKind.value = null }
 
 const { menu: productCtx, open: openProductCtx, close: closeProductCtx } = useContextMenu()
-function onProductRightClick(e, row) { openProductCtx(e, { row }, { w: 190, h: 168 }) }
+function onProductRightClick(e, row) { openProductCtx(e, { row }, { w: 190, h: 204 }) }
 const ctxOpenLabel = computed(() => productCtx.value
   ? openLabel(productCtx.value.row.kind)
   : 'Open in tab')
@@ -79,6 +80,8 @@ function ctxOpen() {
   closeProductCtx()
 }
 function ctxRename() { startRename(productCtx.value.row); closeProductCtx() }
+function ctxSymbology() { emit('product-symbology', productCtx.value.row.kind); closeProductCtx() }
+function ctxDownload() { emit('download-product', productCtx.value.row.kind); closeProductCtx() }
 // A greyed entry keeps its place and names why (.ctx-disabled swallows pointer
 // events, so a title tooltip would never show).
 // The product's frame never blocks the toggle: the map explains when its current
@@ -115,6 +118,7 @@ function ctxRemove() {
         @remove-cloud="emit('remove-cloud', $event)"
         @rename-cloud="emit('rename-cloud', $event)"
         @zoom-to-cloud="emit('zoom-to-cloud', $event)"
+        @download-cloud="emit('download-cloud', $event)"
       />
       <template v-for="row in productRows" :key="row.kind">
         <li
@@ -196,11 +200,14 @@ function ctxRemove() {
         :style="{ left: productCtx.x + 'px', top: productCtx.y + 'px' }"
         @click.stop
       >
+        <!-- Groups: go there / display → change it → destructive. Same order as
+             the cloud and reference-raster menus. -->
         <button class="ctx-item" @click="ctxOpen">{{ ctxOpenLabel }}</button>
-        <div class="ctx-sep"></div>
         <!-- Greyed with the reason (not hidden) when the product has no map position. -->
         <button class="ctx-item" :class="{ 'ctx-disabled': !!productCtx.row.mapBlocked }"
           :disabled="!!productCtx.row.mapBlocked" @click="ctxToggleMap">{{ mapCtxLabel(productCtx.row) }}</button>
+        <button class="ctx-item" @click="ctxSymbology">Symbology…</button>
+        <button class="ctx-item" @click="ctxDownload">Download…</button>
         <div class="ctx-sep"></div>
         <button class="ctx-item" @click="ctxRename">Rename</button>
         <div class="ctx-sep"></div>

@@ -22,6 +22,9 @@ const props = defineProps({
   // The orthophoto's cell count: a PNG/JPEG is made whole through a canvas, so one
   // beyond MAX_ORTHO_IMAGE_CELLS is offered greyed, with the reason.
   orthoCells: { type: Number, default: 0 },
+  // The one cloud a sidebar "Download…" aimed the dialog at (its name), or '' for
+  // the ribbon's "the selected cloud, else the first".
+  subject: { type: String, default: '' },
 })
 
 const hasFrame = computed(() => props.hasGeoref || props.hasScale || props.hasOrientation)
@@ -152,6 +155,7 @@ function run() {
 
 <template>
   <ModalShell :title="cfg.title" @close="emit('close')">
+    <p v-if="subject" class="subject">Exporting <strong>{{ subject }}</strong></p>
     <SettingsField label="Format" label-for="fmt">
       <select id="fmt" v-model="settings.format" class="field-input field-select">
         <option v-for="f in cfg.formats" :key="f.value" :value="f.value" :disabled="f.disabled">
@@ -300,6 +304,7 @@ function run() {
 <style scoped src="./ui/modal.css"></style>
 <style scoped>
 .warn-hint { color: var(--warn, #b45309); }
+.subject { margin: 0; font-size: 13px; overflow-wrap: anywhere; }
 .field-input.range { width: 100%; padding: 0; }
 code { font-size: 11px; }
 </style>

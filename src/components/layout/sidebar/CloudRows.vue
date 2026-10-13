@@ -13,7 +13,7 @@ const props = defineProps({
   selectedCloudId: { type: String, default: null },
   mainSparseId:    { type: String, default: null }, // sparse cloud downstream stages consume
 })
-const emit = defineEmits(['cloud-symbology', 'cloud-visibility', 'select-cloud', 'remove-cloud', 'rename-cloud', 'set-main-cloud', 'zoom-to-cloud'])
+const emit = defineEmits(['cloud-symbology', 'cloud-visibility', 'select-cloud', 'remove-cloud', 'rename-cloud', 'set-main-cloud', 'zoom-to-cloud', 'download-cloud'])
 
 const cloudExpanded = ref({})
 function toggleCloudExpand(id) {
@@ -78,10 +78,11 @@ const { menu: cloudCtx, open: openCloudCtx, close: closeMenu } = useContextMenu(
 function onCloudRightClick(e, cloud) {
   // "Set as main" adds a row for sparse clouds that aren't already main.
   const extra = cloud.kind === 'sparse' && cloud.id !== props.mainSparseId ? 28 : 0
-  openCloudCtx(e, { cloud }, { w: 190, h: 160 + extra })
+  openCloudCtx(e, { cloud }, { w: 190, h: 188 + extra })
 }
 function ctxSetMain()      { emit('set-main-cloud', cloudCtx.value.cloud.id); closeMenu() }
 function ctxZoomCloud()    { emit('zoom-to-cloud', cloudCtx.value.cloud.id); closeMenu() }
+function ctxDownloadCloud() { emit('download-cloud', cloudCtx.value.cloud.id); closeMenu() }
 function ctxRenameCloud()  { startRename(cloudCtx.value.cloud); closeMenu() }
 function ctxRemoveCloud()  { emit('remove-cloud', cloudCtx.value.cloud.id); closeMenu() }
 </script>
@@ -179,6 +180,8 @@ function ctxRemoveCloud()  { emit('remove-cloud', cloudCtx.value.cloud.id); clos
            reference-raster menus. -->
       <button class="ctx-item" @click="ctxZoomCloud">Zoom to</button>
       <button class="ctx-item" @click="emit('cloud-symbology', cloudCtx.cloud.id); closeMenu()">Symbology…</button>
+      <!-- The export dialog (format, georeference, …) aimed at this cloud. -->
+      <button class="ctx-item" @click="ctxDownloadCloud">Download…</button>
       <div class="ctx-sep"></div>
       <button
         v-if="cloudCtx.cloud.kind === 'sparse' && cloudCtx.cloud.id !== mainSparseId"

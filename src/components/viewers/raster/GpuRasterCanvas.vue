@@ -58,7 +58,7 @@ onMounted(() => {
   load()
 })
 watch(() => props.product?.id, load)
-watch(() => props.product?.style, () => { if (layer) layer.setStyle(gpuRasterStyle(props.product)) }, { deep: true })
+watch(() => [props.product?.style, props.product?.adjust], () => { if (layer) layer.setStyle(gpuRasterStyle(props.product)) }, { deep: true })
 watch(() => [props.scale, props.tx, props.ty], position)
 onBeforeUnmount(() => { generation++; observer?.disconnect(); disposeRasterLayer(layer); map?.setTarget(null); map?.dispose() })
 </script>

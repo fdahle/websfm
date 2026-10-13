@@ -50,6 +50,8 @@ export function productTiledMeta(kind, product) {
     kind: 'ortho', name: product.name ?? 'Orthophoto', crs: product.crs && product.crs !== 'local' ? product.crs : null,
     width: desc.width, height: desc.height, geoTransform: desc.geoTransform,
     bands: 4, bitsPerSample: 8, sampleFormat: 1, photometric: 2, alphaBand: 3,
+    // Its symbology (productStyle.js), applied by the GPU style at draw time.
+    adjust: product.style ?? null,
   }
 }
 

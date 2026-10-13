@@ -134,3 +134,53 @@ test('Point Cloud ▾ transforms, ICP-aligns and sections a cloud', async ({ pag
   expect(rows.length).toBeGreaterThan(20)
   expect(errors).toEqual([])
 })
+
+test('Evaluate ▸ DEM vs Reference compares the DEM with a reference DEM in another CRS', async ({ page }) => {
+  const errors = []
+  page.on('pageerror', (e) => errors.push(e.message))
+  await createProject(page)
+  // A tilted-plane DEM in UTM 33N, and the same plane 0.5 m lower as a reference
+  // DEM in EPSG:4326 covering only the DEM's western half — the comparison must
+  // reproject every query into degrees and find a +0.5 m bias over ~50 % overlap.
+  await page.evaluate(async () => {
+    const { ensureProjection, transform } = await import('/src/core/crs.js')
+    const { createFlatRasterSource } = await import('/src/core/io/rasterSource.js')
+    const { useReconstructionStore } = await import('/src/stores/useReconstructionStore.js')
+    const { useExternalStore } = await import('/src/stores/useExternalStore.js')
+    await ensureProjection('EPSG:32633')
+    const plane = (x, y) => 100 + 0.2 * (x - 500000) - 0.1 * (y - 4600000)
+    const W = 60, X0 = 500000, Y0 = 4600060
+    const data = new Float32Array(W * W), mask = new Uint8Array(W * W).fill(1)
+    for (let r = 0; r < W; r++) for (let c = 0; c < W; c++) data[r * W + c] = plane(X0 + c + 0.5, Y0 - r - 0.5)
+    useReconstructionStore().dem = { width: W, height: W, gsd: 1, originX: X0, originY: Y0, data, mask,
+      zMin: Math.min(...data), zMax: Math.max(...data), unit: 'm', crs: 'EPSG:32633', name: 'DEM', createdAt: 1 }
+
+    const [lon0, lat0] = transform([X0 - 10, Y0 - W - 10], 'EPSG:32633', 'EPSG:4326')
+    const [lon1, lat1] = transform([X0 + 30, Y0 + 10], 'EPSG:32633', 'EPSG:4326')
+    const N = 80, sx = (lon1 - lon0) / N, sy = (lat1 - lat0) / N
+    const ref = new Float32Array(N * N)
+    for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
+      const [x, y] = transform([lon0 + (c + 0.5) * sx, lat1 - (r + 0.5) * sy], 'EPSG:4326', 'EPSG:32633')
+      ref[r * N + c] = plane(x, y) - 0.5
+    }
+    const meta = { id: 'ext-ref', name: 'Reference', kind: 'dem', width: N, height: N, bands: 1,
+      crs: 'EPSG:4326', geoTransform: { originX: lon0, originY: lat1, scaleX: sx, scaleY: -sy },
+      nodata: null, verticalDatum: 'EGM2008', verticalAccuracy: 0.2 }
+    const external = useExternalStore()
+    external.rasters.push(meta)
+    external.sources = new Map([[meta.id, createFlatRasterSource(meta, ref)]])
+  })
+
+  await page.getByRole('button', { name: 'Evaluate', exact: true }).click()
+  await page.locator('.ribbon').getByRole('button', { name: /DEM vs\s*Reference/ }).click()
+  const report = page.getByRole('dialog', { name: 'Quality Report', exact: true })
+  const tile = (label) => report.locator('.tile').filter({ hasText: label }).locator('.tile-value')
+  await expect(tile('Median ΔZ')).toContainText('+0.500')
+  await expect(tile('NMAD')).toContainText('0.000')
+  const overlap = parseFloat(await tile('Overlap').textContent())
+  expect(overlap).toBeGreaterThan(40)
+  expect(overlap).toBeLessThan(60)
+  await expect(report.getByRole('img', { name: /DEM minus reference/ })).toBeVisible()
+  await expect(report.locator('.warn-box')).toHaveCount(0)
+  expect(errors).toEqual([])
+})

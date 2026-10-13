@@ -11,7 +11,7 @@ defineProps({
 })
 
 const emit = defineEmits([
-  'close', 'remove', 'update-accuracy', 'update-name', 'update-position',
+  'close', 'remove', 'update-accuracy', 'update-observation-accuracy', 'update-name', 'update-position',
   'update-role', 'update-vertical-datum', 'refresh-report', 'select', 'add', 'fill-z', 'check-z',
 ])
 </script>
@@ -38,6 +38,7 @@ const emit = defineEmits([
           @check-z="emit('check-z')"
           @remove="emit('remove', $event)"
           @update-accuracy="emit('update-accuracy', $event)"
+          @update-observation-accuracy="emit('update-observation-accuracy', $event)"
           @update-name="emit('update-name', $event)"
           @update-position="emit('update-position', $event)"
           @update-role="emit('update-role', $event)"

@@ -1,7 +1,7 @@
 import { ref, shallowRef, computed, toRaw } from 'vue'
 import { defineStore, storeToRefs } from 'pinia'
 import { useLog } from '../composables/useLog.js'
-import { ensureProjection, transform } from '../core/crs.js'
+import { ensureProjection, transform, transformer } from '../core/crs.js'
 import { createFlatRasterSource } from '../core/io/rasterSource.js'
 import { rasterBounds } from '../core/io/rasterSample.js'
 import { describeStyle, styleStamp, resolveRasterStyle, bandsUsedBy } from '../core/io/rasterStyle.js'
@@ -427,6 +427,42 @@ export const useExternalStore = registerProjectStore(defineStore('external', () 
     }
   }
 
+  // The same sampling as `sampleReferenceDem`, prepared once for a caller that
+  // queries the raster many times (Quality Report ▸ Products ▸ DEM vs reference):
+  // CRS resolved, plane hydrated and the transform built up front, then a
+  // synchronous `sample(x, y)` per point. `fromCrs` is the CRS of the query
+  // points — a computed DEM's own frame, which outlives a later project-CRS
+  // change. A raster with no declared CRS is read in `fromCrs`, as in
+  // `toRasterCoords`. Throws with a user-facing reason when it cannot sample.
+  // → { meta, sample(x, y) → z | null }
+  async function referenceDemSampler(rasterId, fromCrs) {
+    const meta = rasterById(rasterId)
+    if (!meta || meta.kind !== 'dem') throw new Error('The reference DEM is no longer in the project')
+    if (meta.crsUnresolved && !(await resolveRasterCrs(meta))) {
+      throw new Error(`The reference DEM's CRS (${meta.crs}) could not be resolved`)
+    }
+    let toRaster = (x, y) => [x, y]
+    if (meta.crs && meta.crs !== fromCrs) {
+      if (!fromCrs || fromCrs === 'local') {
+        throw new Error('The DEM is in the model frame, so it has no position in the reference DEM\'s CRS — georeference the model and rebuild the DEM')
+      }
+      await ensureProjection(fromCrs)
+      toRaster = transformer(fromCrs, meta.crs)
+    }
+    const source = await ensureRasterLoaded(meta.id)
+    if (!source) throw new Error(`The pixel data of "${meta.name}" is unavailable — re-import it`)
+    const vOffset = meta.vOffset || 0
+    return {
+      meta,
+      sample(x, y) {
+        let rx, ry
+        try { [rx, ry] = toRaster(x, y) } catch { return null }
+        const raw = source.sampleAt(rx, ry)
+        return raw == null ? null : raw + vOffset
+      },
+    }
+  }
+
   // Synchronous point probe for the map status bar: the topmost on-map raster
   // whose extent covers this **project-CRS** point. Deliberately reads only
   // already-hydrated planes (invariant 1) — a cursor move must never kick off the
@@ -783,7 +819,7 @@ export const useExternalStore = registerProjectStore(defineStore('external', () 
     demRasters, orthoRasters, hasReferenceDem, defaultDem, mixedVerticalDatums,
     mapRasters,
     rasterById,
-    importRaster, originalFile, displayFile, ensureRasterLoaded, sampleReferenceDem, probeRasterAt,
+    importRaster, originalFile, displayFile, ensureRasterLoaded, sampleReferenceDem, referenceDemSampler, probeRasterAt,
     toRasterCoords, toProjectCoords,
     setRasterKind, setRasterStyle, setVerticalInfo, setRasterOnMap, setRasterOpacity, readRasterWindow,
     renameRaster, removeRaster,

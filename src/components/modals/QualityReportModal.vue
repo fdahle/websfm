@@ -12,6 +12,7 @@ import EvalAccuracySection from './eval/EvalAccuracySection.vue'
 import EvalMatchingSection from './eval/EvalMatchingSection.vue'
 import EvalDenseSection from './eval/EvalDenseSection.vue'
 import EvalCoverageSection from './eval/EvalCoverageSection.vue'
+import EvalProductsSection from './eval/EvalProductsSection.vue'
 
 // The Quality Report hub (PLAN-eval-quality-hub WS0): one wide modal, a left section
 // nav, an Overview landing page, and the eight former eval modals folded into section
@@ -36,6 +37,7 @@ const hasMatches = computed(() => {
   return false
 })
 const hasDepth = computed(() => recon.depthMapCount > 0)
+const hasDem = computed(() => !!recon.dem)
 
 const SECTIONS = computed(() => [
   { id: 'overview', label: 'Overview', avail: true, prereq: '' },
@@ -45,12 +47,13 @@ const SECTIONS = computed(() => [
   { id: 'accuracy', label: 'Accuracy', avail: hasSparse.value, prereq: 'Reconstruct + GCPs/poses' },
   { id: 'coverage', label: 'Coverage', avail: hasSparse.value, prereq: 'Reconstruct first' },
   { id: 'dense', label: 'Dense', avail: hasDepth.value, prereq: 'Build depth maps first' },
+  { id: 'products', label: 'Products', avail: hasDem.value, prereq: 'Build a DEM first' },
 ])
 
 const componentFor = {
   overview: EvalOverviewSection, matching: EvalMatchingSection, sparse: EvalSparseSection,
   calibration: EvalCalibrationSection, accuracy: EvalAccuracySection,
-  coverage: EvalCoverageSection, dense: EvalDenseSection,
+  coverage: EvalCoverageSection, dense: EvalDenseSection, products: EvalProductsSection,
 }
 const activeMeta = computed(() => SECTIONS.value.find((s) => s.id === active.value) ?? SECTIONS.value[0])
 const activeComponent = computed(() => componentFor[active.value] ?? EvalOverviewSection)

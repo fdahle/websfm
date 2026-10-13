@@ -1,7 +1,7 @@
-import { ref } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { metresPerCrsUnit } from '../core/crs.js'
 import { toScaledPx } from '../core/sfm/geometry.js'
-import { buildPosesCsv, buildSensorsCsv, downloadCsv } from '../utils/exportCsv.js'
+import { buildPosesCsv, buildSensorsCsv, buildFiducialObsCsv, buildFiducialMarksCsv, downloadCsv } from '../utils/exportCsv.js'
 import { reconstructionToJson, demToAsciiGridParts, demToGeoTiff, demToCog, orthoToGeoTiff, rasterWorldFile, prepareCloudForExport } from '../core/products/exporters.js'
 import { buildColmapModel, serializeColmapModelParts, serializeColmapModelBinParts } from '../core/io/colmapModel.js'
 import { imageIdsToPairId } from '../core/io/colmapDatabase.js'
@@ -30,6 +30,9 @@ import * as opfs from '../utils/opfs.js'
 import { useProjectsStore } from '../stores/useProjectsStore.js'
 import { useImagesStore } from '../stores/useImagesStore.js'
 import { useMatchesStore } from '../stores/useMatchesStore.js'
+import { useExternalStore } from '../stores/useExternalStore.js'
+import { useFootprintsStore } from '../stores/useFootprintsStore.js'
+import { polygonSetToGeoJson } from '../core/io/geojson.js'
 import { siftDescNorm, toMatchSpace } from '../core/features/siftDescriptors.js'
 
 // Camera-params + product export funnel, lifted out of App.vue. Owns `exportKind`
@@ -51,6 +54,8 @@ export function useExports({
   // Keypoints and matches are read from disk on demand (TODO ▸ SC-2/SC-3).
   const imagesStore = useImagesStore()
   const matchesStore = useMatchesStore()
+  const external = useExternalStore()
+  const footprints = useFootprintsStore()
 
   // The similarity a cloud/mesh export should apply, from THE resolver:
   //   georeference  → the full CRS similarity (scale + rotation + translation)
@@ -96,6 +101,20 @@ export function useExports({
   function exportSensors() {
     if (!sensors.value.length) return
     downloadCsv(`${currentProjectName.value || 'project'}-sensors.csv`, buildSensorsCsv(sensors.value))
+  }
+
+  // Film fiducials, in the two shapes Import reads back (core/io/fiducialMarks.js,
+  // core/io/fiducialObs.js): the camera's marks in mm, each image's marks in pixels.
+  function exportCameraFiducials() {
+    const film = sensors.value.filter((s) => s.fiducialCalibration?.marks?.length || s.fiducials?.marks?.length)
+    if (!film.length) return
+    downloadCsv(`${currentProjectName.value || 'project'}-camera-fiducials.csv`, buildFiducialMarksCsv(film))
+  }
+
+  function exportImageFiducials() {
+    const marked = images.value.filter((i) => i.fiducialDetections?.length || i.fiducialObs?.length)
+    if (!marked.length) return
+    downloadCsv(`${currentProjectName.value || 'project'}-image-fiducials.csv`, buildFiducialObsCsv(marked))
   }
 
   // Pretty-printed JSON (`JSON.stringify(data, null, 2)`, byte for byte), streamed
@@ -177,6 +196,59 @@ export function useExports({
   // Which export dialog is open ('cloud' | 'model' | 'colmap' | 'undistorted' | 'dem' |
   // 'ortho'), or null.
   const exportKind = ref(null)
+  // The cloud a sidebar "Download…" opened the dialog for (its id), or null for the
+  // ribbon's "the selected cloud, else the first". Cleared whenever the dialog closes,
+  // so a later ribbon export never inherits it.
+  const exportTarget = ref(null)
+  watch(exportKind, (kind) => { if (!kind) exportTarget.value = null })
+  const exportTargetCloud = computed(() => clouds.value.find((c) => c.id === exportTarget.value) ?? null)
+
+  // Sidebar ▸ right-click ▸ Download… on a cloud or mesh: the same dialog as the
+  // ribbon, aimed at that one cloud.
+  function openCloudExport(id) {
+    const cloud = clouds.value.find((c) => c.id === id)
+    if (!cloud) return
+    exportKind.value = cloud.kind === 'mesh' ? 'mesh' : 'cloud'
+    exportTarget.value = id
+  }
+  // A cloud's own name in its file name, so two exported clouds never collide.
+  // "Imported (south.laz)" → "Imported_south": the source extension would read as
+  // the export's format.
+  const fileSafe = (name) => String(name ?? '').replace(/[^\w.-]+/g, '_').replace(/^_+|_+$/g, '')
+    .replace(/\.[a-z0-9]{2,4}$/i, '').slice(0, 80)
+  const cloudFileBase = (cloud, target) => (target && fileSafe(cloud.name)
+    ? `${projectBase()}-${fileSafe(cloud.name)}` : `${projectBase()}-${cloud.kind}`)
+
+  // Sidebar ▸ Download… on an imported reference raster: the file as imported.
+  async function downloadRasterOriginal(id) {
+    const meta = external.rasters.find((r) => r.id === id)
+    const file = await external.originalFile(id).catch(() => null)
+    if (!file) {
+      log(`${meta?.name ?? 'Raster'}: the original file is not stored in this project — re-import it to download it`, 'warn', 'Export')
+      return
+    }
+    downloadBlob(file.name || meta?.name || 'raster.tif', file)
+  }
+
+  // Sidebar ▸ Download original on a source image: the bytes as imported (the OPFS
+  // copy is the authority; an in-session image falls back to its blob: URL).
+  async function downloadImageOriginal(id) {
+    const img = images.value.find((i) => i.id === id)
+    if (!img) return
+    let blob = await opfs.loadImageBlob(projects.currentProjectId, img.uuid).catch(() => null)
+    if (!blob && img.url) blob = await fetch(img.url).then((r) => r.blob()).catch(() => null)
+    if (!blob) { log(`${img.name}: the image file is no longer available`, 'warn', 'Export'); return }
+    downloadBlob(img.name || `${img.uuid}.jpg`, blob)
+  }
+
+  // Sidebar ▸ Download (GeoJSON) on a polygon layer: its polygons in the project CRS.
+  function downloadShapefile(id) {
+    const set = footprints.sets.find((s) => s.id === id)
+    if (!set) return
+    const fc = polygonSetToGeoJson(set, { crs: currentCrs.value })
+    downloadBlob(`${fileSafe(set.name) || 'polygons'}.geojson`, JSON.stringify(fc), 'application/geo+json')
+    log(`Exported ${set.footprints.length} polygon(s) of "${set.name}" as GeoJSON`, 'success', 'Export')
+  }
 
   // Parse the current DEM's CRS into an EPSG code + geographic flag for GeoTIFF /
   // .prj. The working CRS is a proj4 string or "EPSG:xxxx"; only the latter yields a
@@ -184,11 +256,11 @@ export function useExports({
   const crsInfo = crsTagInfo
 
   async function onExportRun(settings) {
-    const kind = exportKind.value
+    const kind = exportKind.value, target = exportTargetCloud.value
     exportKind.value = null
     try {
-      if (kind === 'cloud') await doExportCloud(settings)
-      else if (kind === 'mesh') await doExportMesh(settings)
+      if (kind === 'cloud') await doExportCloud(settings, target)
+      else if (kind === 'mesh') await doExportMesh(settings, target)
       else if (kind === 'model') await doExportModel(settings)
       else if (kind === 'colmap') await doExportColmap(settings)
       else if (kind === 'undistorted') await doExportUndistorted(settings)
@@ -287,10 +359,10 @@ export function useExports({
 
   // Serialization (and the georeference / downsample before it) runs in the export
   // worker, which streams the file into a Blob — see workers/ops/export.js.
-  async function doExportCloud({ format, includeColor, applyGeoref, downsampleCell }) {
-    const cloud = cloudHasPoints(selectedCloud.value)
+  async function doExportCloud({ format, includeColor, applyGeoref, downsampleCell }, target = null) {
+    const cloud = target ?? (cloudHasPoints(selectedCloud.value)
       ? selectedCloud.value
-      : clouds.value.find(cloudHasPoints)
+      : clouds.value.find(cloudHasPoints))
     if (!cloud) return
     // Attributes (a computed distance, imported intensity/classification) ride along:
     // PLY and LAS write them, LAZ its standard LAS fields only (see core/io/laz.js).
@@ -314,15 +386,15 @@ export function useExports({
       cloud: copy, format, color, sim: frame.sim, cell, crsCode, geographic: crsCode === 4326,
     }, { onLog: (msg, l, c) => log(msg, l, c ?? 'Export') })
     const ext = format === 'las' || format === 'laz' || format === 'xyz' ? format : 'ply'
-    downloadBlob(`${projectBase()}-${cloud.kind}.${ext}`, blob)
+    downloadBlob(`${cloudFileBase(cloud, target)}.${ext}`, blob)
   }
 
   // Mesh (screened Poisson) → PLY (faces) / GLB / OBJ / STL, in the export worker.
   // Uses the selected mesh cloud, else the first mesh cloud.
-  async function doExportMesh({ format, includeColor, applyGeoref }) {
-    const cloud = selectedCloud.value?.kind === 'mesh'
+  async function doExportMesh({ format, includeColor, applyGeoref }, target = null) {
+    const cloud = target ?? (selectedCloud.value?.kind === 'mesh'
       ? selectedCloud.value
-      : clouds.value.find((c) => c.kind === 'mesh' && c.count > 0)
+      : clouds.value.find((c) => c.kind === 'mesh' && c.count > 0))
     if (!cloud) return
     const frame = applyGeoref ? await exportSimilarity() : { sim: null, unit: 'model', crs: null, source: null }
     logExportFrame('Mesh', frame)
@@ -331,7 +403,7 @@ export function useExports({
     const { blob } = await exportMeshFile({ mesh, format, color: includeColor, sim: frame.sim },
       { onLog: (msg, l, c) => log(msg, l, c ?? 'Export') })
     const ext = format === 'glb' || format === 'obj' || format === 'stl' ? format : 'ply'
-    downloadBlob(`${projectBase()}-mesh.${ext}`, blob)
+    downloadBlob(`${target ? cloudFileBase(cloud, target) : `${projectBase()}-mesh`}.${ext}`, blob)
   }
 
   // SfM cameras → websfm JSON (cameras + optional tracks), or a NeRF/3DGS
@@ -878,7 +950,8 @@ export function useExports({
   }
 
   return {
-    exportKind, exportPoses, exportSensors, exportKeypoints, exportMatches, onExportRun,
+    exportKind, exportTargetCloud, exportPoses, exportSensors, exportCameraFiducials, exportImageFiducials, exportKeypoints, exportMatches, onExportRun,
+    openCloudExport, downloadRasterOriginal, downloadImageOriginal, downloadShapefile,
     exportContours, exportTerrain, exportClipped,
   }
 }

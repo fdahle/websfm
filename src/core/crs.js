@@ -271,6 +271,14 @@ export function transform(coord, from, to) {
   return coord.length > 2 ? [x, y, coord[2]] : [x, y]
 }
 
+// A reusable (x, y) → [x, y] for many points between the same two CRS: proj4
+// builds the converter once instead of per call. Both CRS must already be ensured.
+export function transformer(from, to) {
+  if (from === to) return (x, y) => [x, y]
+  const conv = proj4(from, to)
+  return (x, y) => conv.forward([x, y])
+}
+
 // Ensure both endpoints, then transform. Async convenience wrapper.
 export async function transformAsync(coord, from, to) {
   await ensureProjection(from)

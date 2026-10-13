@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   parseGeoJson,
+  polygonSetToGeoJson,
   looksLikeGeoJson,
   guessNameKey,
   geoJsonToGcps,
@@ -173,5 +174,31 @@ describe('geoJsonToFootprints', () => {
   it('skips non-Polygon geometries', () => {
     const fps = geoJsonToFootprints([pointFeature([1, 2])], null)
     expect(fps).toHaveLength(0)
+  })
+})
+
+describe('polygonSetToGeoJson', () => {
+  const set = { name: 'Footprints', footprints: [
+    { id: 'a', imageName: 'IMG_1.jpg', rings: [[[0, 0], [2, 0], [2, 2], [0, 2]]] },
+    { id: 'b', imageName: 'IMG_2.jpg', rings: [] },
+  ] }
+
+  it('writes closed Polygon features named by image, with the project CRS', () => {
+    const fc = polygonSetToGeoJson(set, { crs: 'EPSG:32632' })
+    expect(fc.crs.properties.name).toBe('EPSG:32632')
+    expect(fc.features).toHaveLength(1)
+    expect(fc.features[0].properties.name).toBe('IMG_1.jpg')
+    expect(fc.features[0].geometry.coordinates[0]).toEqual([[0, 0], [2, 0], [2, 2], [0, 2], [0, 0]])
+  })
+
+  it('round-trips through the importer', () => {
+    const parsed = parseGeoJson(JSON.stringify(polygonSetToGeoJson(set, { crs: 'EPSG:32632' })))
+    expect(parsed.sourceCrs).toBe('EPSG:32632')
+    const fps = geoJsonToFootprints(parsed.features, 'name')
+    expect(fps.map((f) => f.imageName)).toEqual(['IMG_1.jpg'])
+  })
+
+  it('leaves out a CRS that is not an EPSG code', () => {
+    expect(polygonSetToGeoJson(set, { crs: '+proj=utm +zone=32' }).crs).toBeUndefined()
   })
 })

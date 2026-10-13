@@ -14,7 +14,7 @@ const props = defineProps({
 })
 const emit = defineEmits([
   'toggle', 'remove-shapefile', 'rename-shapefile', 'set-shapefile-on-map',
-  'zoom-to-shapefile', 'jump-to-image',
+  'zoom-to-shapefile', 'jump-to-image', 'download-shapefile',
 ])
 
 const expanded = ref({})
@@ -45,13 +45,14 @@ function commitRename() {
 function cancelRename() { editingId.value = null }
 
 const { menu: ctx, open: openCtx, close: closeMenu } = useContextMenu()
-function onRightClick(e, set) { openCtx(e, { set }, { w: 180, h: 156 }) }
+function onRightClick(e, set) { openCtx(e, { set }, { w: 180, h: 184 }) }
 function ctxToggleMap() {
   const s = ctx.value.set
   emit('set-shapefile-on-map', { id: s.id, onMap: s.onMap === false })
   closeMenu()
 }
 function ctxZoom()   { emit('zoom-to-shapefile', ctx.value.set.id); closeMenu() }
+function ctxDownload() { emit('download-shapefile', ctx.value.set.id); closeMenu() }
 function ctxRename() { startRename(ctx.value.set); closeMenu() }
 function ctxRemove() { emit('remove-shapefile', ctx.value.set.id); closeMenu() }
 </script>
@@ -129,6 +130,7 @@ function ctxRemove() { emit('remove-shapefile', ctx.value.set.id); closeMenu() }
           {{ ctx.set.onMap === false ? 'Display on map' : 'Hide from map' }}
         </button>
         <button class="ctx-item" @click="ctxZoom">Zoom to layer</button>
+        <button class="ctx-item" @click="ctxDownload">Download GeoJSON</button>
         <button class="ctx-item" @click="ctxRename">Rename…</button>
         <div class="ctx-sep"></div>
         <button class="ctx-item danger" @click="ctxRemove">Remove</button>

@@ -6,6 +6,7 @@ import { rasterUnits } from '../../core/products/rasterUnits.js'
 import { copyToClipboard } from '../../composables/useToasts.js'
 import { readRasterWindow } from '../../workers/computeClient.js'
 import RasterMeasurements from './RasterMeasurements.vue'
+import { orthoAdjustFilter } from '../../utils/orthoFilter.js'
 const GpuRasterCanvas = defineAsyncComponent(() => import('./raster/GpuRasterCanvas.vue'))
 const gpuReady = ref(false)
 // What the tiled canvas draws: an imported raster's own meta, or a computed ortho's
@@ -267,6 +268,10 @@ const units = computed(() => rasterUnits(props.product))
 // A computed product's preview is a blob: URL over its PNG Blob; an imported raster's
 // small (≤1024 px) preview is a data URL in its index record.
 const previewSrc = computed(() => props.product?.previewUrl ?? props.product?.previewDataUrl ?? null)
+// A computed ortho's brightness/contrast/gamma, matching what the GPU tiles draw
+// (an imported raster's `style` is band math, already baked into its preview).
+const previewFilter = computed(() => (computedProduct.value && props.kind === 'ortho'
+  ? orthoAdjustFilter(props.product?.style) : null))
 const fmt = (v, d = 3) => (v == null ? '—' : (Math.abs(v) >= 1000 ? v.toFixed(2) : Number(v.toPrecision(d))))
 
 watch(() => props.product, () => { hover.value = null; requestAnimationFrame(fit) })
@@ -336,6 +341,7 @@ defineExpose({ fit, zoomBy, measureState, setMeasureTool, toggleSavedMeasurement
           width: product.width + 'px',
           height: product.height + 'px',
           transform: `translate(${tx}px, ${ty}px) scale(${scale})`,
+          filter: previewFilter ?? undefined,
         }"
         draggable="false"
       />

@@ -31,6 +31,8 @@ export const NEED_CHECKS = {
   twoClouds: { ok: (s) => s.editableCloudCount >= 2, reason: 'Needs at least two dense clouds' },
   mesh:      { ok: (s) => s.meshReady,        reason: 'Build a mesh first' },
   dem:     { ok: (s) => s.demReady,         reason: 'Build a DEM first' },
+  referenceDem: { ok: (s) => !!s.referenceDemReady,
+                  reason: 'Import a reference DEM first (Import ▸ Reference DEM / Ortho)' },
   // An ortho reprojects onto a SURFACE — a DEM or a mesh, not a DEM specifically.
   surface:   { ok: (s) => s.demReady || s.meshReady, reason: 'Build a DEM or a mesh first' },
   ortho:     { ok: (s) => s.orthoReady,       reason: 'Build an orthophoto first' },
@@ -42,6 +44,9 @@ export const NEED_CHECKS = {
   selection: { ok: (s) => !!s.hasSelection,   reason: 'Select an image first' },
   sensors:   { ok: (s) => s.sensorCount > 0,  reason: 'No sensors available' },
   filmSensor: { ok: (s) => s.filmSensorCount > 0, reason: 'Set at least one sensor to Film first' },
+  fiducials: { ok: (s) => s.fiducialImageCount > 0, reason: 'Detect or mark fiducials first' },
+  fiducialMarks: { ok: (s) => s.fiducialMarkSensorCount > 0,
+                   reason: 'No camera fiducial marks yet — enter them in the sensor table, or calibrate fiducials' },
   // The 2D map in the model frame has no CRS positions (useMapProducts).
   crsMap:    { ok: (s) => !s.mapModelFrame, reason: 'The map shows the model frame, which has no CRS positions — turn off Model Frame' },
   // Tools that act on the view in front (`frontView`: 'image' | 'map' | 'viewer' |
@@ -154,6 +159,8 @@ export const COMMANDS = [
   { name: 'export ortho',     dispatch: 'export-ortho',     group: 'Export', help: 'Export the orthophoto' },
   { name: 'export cameras',   dispatch: 'export-cameras',   group: 'Export', help: 'Export camera poses' },
   { name: 'export sensors',   dispatch: 'export-sensors',   group: 'Export', help: 'Export sensors' },
+  { name: 'export camera fiducials', dispatch: 'export-camera-fiducials', group: 'Export', help: 'Export camera fiducial marks (mm)' },
+  { name: 'export image fiducials',  dispatch: 'export-image-fiducials',  group: 'Export', help: 'Export image fiducial positions (pixels)' },
   { name: 'export keypoints', dispatch: 'export-keypoints', group: 'Export', help: 'Export keypoints' },
   { name: 'export matches',   dispatch: 'export-matches',   group: 'Export', help: 'Export matches' },
 
