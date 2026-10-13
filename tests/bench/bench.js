@@ -251,9 +251,11 @@ window.bench = {
     const o = recon.ortho
     return { settings, seconds: (performance.now() - t0) / 1000,
       width: o?.width ?? 0, height: o?.height ?? 0, gsd: o?.gsd ?? null,
-      covered: o?.covered ?? 0, sampled: o?.sampled ?? 0, filled: o?.filled ?? 0, stats: o?.stats ?? null }
+      covered: o?.covered ?? 0, sampled: o?.sampled ?? 0, filled: o?.filled ?? 0, stats: o?.stats ?? null,
+      cogBytes: o?.cog?.size ?? 0 }
   },
-  // The ortho's PNG (its full-resolution preview), base64 in chunks for the runner.
+  // The ortho's preview PNG (≤ 2,048 px a side; the ortho itself is its stored COG),
+  // base64 in chunks for the runner.
   orthoPngSize() { return recon.ortho?.previewBlob?.size ?? 0 },
   async orthoPngChunk(start, n) {
     const u8 = new Uint8Array(await recon.ortho.previewBlob.slice(start, start + n).arrayBuffer())
