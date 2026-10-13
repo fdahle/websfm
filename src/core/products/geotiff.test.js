@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import { fromArrayBuffer } from 'geotiff'
 import {
-  writeGeoTiff, writeCog, writeCogDeflate, planCog, assembleCog, geoKeysForEpsg,
+  writeGeoTiff, writeCog, writeCogDeflate, planCog, assembleCog, geoKeysForEpsg, createCogBuilder, cogRawBytes,
+  assembleStripTiff,
 } from './geotiff.js'
 
 // Minimal baseline-TIFF reader (little-endian) — enough to verify the writer.
@@ -464,4 +465,87 @@ it('assembles COG Blob parts with the same offsets and bytes as contiguous outpu
   const expected = assembleCog(plan, tiles)
   const parts = assembleCog(plan, tiles.map(t => ({ length: t.length, part: new Blob([t]) })), { parts: true })
   expect(new Uint8Array(await new Blob(parts).arrayBuffer())).toEqual(expected)
+})
+
+describe('createCogBuilder (a COG from blocks)', () => {
+  // An RGBA scene with structure at every scale and transparent holes.
+  const rgbaScene = (w, h) => Uint8Array.from({ length: w * h * 4 }, (_, i) => {
+    const p = i >> 2, x = p % w, y = (p / w) | 0
+    if ((i & 3) === 3) return (x * 3 + y * 5) % 17 === 0 ? 0 : 255
+    return (x * 7 + y * 13 + (i & 3) * 50 + ((x >> 4) ^ (y >> 3)) * 9) % 256
+  })
+  const spec = (w, h, tileSize) => ({ width: w, height: h, tileSize,
+    samples: [0, 1, 2, 3].map(() => ({ bits: 8, format: 1 })), photometric: 2, extraSamples: [2],
+    pixelScale: [0.5, 0.5, 0], tiepoint: [0, 0, 0, 2.5e6, 1.2e6, 0], geoKeys: geoKeysForEpsg(3031, false) })
+  const blockOf = (data, w, h, col0, row0, B) => {
+    const bw = Math.min(B, w - col0), bh = Math.min(B, h - row0), out = new Uint8ClampedArray(bw * bh * 4)
+    for (let r = 0; r < bh; r++) out.set(data.subarray(((row0 + r) * w + col0) * 4, ((row0 + r) * w + col0 + bw) * 4), r * bw * 4)
+    return { col0, row0, width: bw, height: bh, data: out }
+  }
+  it.each([
+    [300, 170, 16, 64], [257, 33, 16, 32], [100, 100, 16, 48], [40, 24, 16, 16], [1025, 3, 16, 64], [512, 512, 32, 64],
+  ])('is byte-identical to writeCogDeflate (%i×%i, tile %i, block %i)', async (w, h, tileSize, B) => {
+    const data = rgbaScene(w, h)
+    const expected = await writeCogDeflate({ ...spec(w, h, tileSize), data }, deflateBytes)
+    const builder = createCogBuilder(spec(w, h, tileSize), { blockSize: B, compress: deflateBytes, previewMaxDim: 64 })
+    const blocks = []
+    for (let row0 = 0; row0 < h; row0 += B) for (let col0 = 0; col0 < w; col0 += B) blocks.push(blockOf(data, w, h, col0, row0, B))
+    for (const b of blocks.reverse()) await builder.addBlock(b) // any arrival order
+    const { parts, preview } = await builder.finish()
+    const bytes = new Uint8Array(await new Blob(parts).arrayBuffer())
+    expect(bytes.length).toBe(expected.length)
+    expect(Buffer.from(bytes).equals(Buffer.from(expected))).toBe(true)
+    // The preview is the first level that fits, as the reader decodes it.
+    const tiff = await fromArrayBuffer(toBuf(bytes))
+    const n = await tiff.getImageCount()
+    for (let li = 0; li < n; li++) {
+      const img = await tiff.getImage(li)
+      if (Math.max(img.getWidth(), img.getHeight()) > 64) continue
+      expect([preview.width, preview.height]).toEqual([img.getWidth(), img.getHeight()])
+      const read = await img.readRasters({ interleave: true })
+      expect(Array.from(preview.data)).toEqual(Array.from(read))
+      break
+    }
+  })
+  it('refuses a block off the grid and a missing block', async () => {
+    const b = createCogBuilder(spec(64, 64, 16), { blockSize: 32 })
+    await expect(b.addBlock({ col0: 16, row0: 0, width: 32, height: 32, data: new Uint8Array(32 * 32 * 4) })).rejects.toThrow('not on the 32 grid')
+    await b.addBlock({ col0: 0, row0: 0, width: 32, height: 32, data: new Uint8Array(32 * 32 * 4) })
+    await expect(b.finish()).rejects.toThrow('never arrived')
+  })
+  it('bounds the uncompressed size from the tile grid', () => {
+    expect(cogRawBytes({ width: 512, height: 512, tileSize: 512, bytesPerPixel: 4 })).toBe(512 * 512 * 4 + 65536)
+    expect(cogRawBytes({ width: 1024, height: 512, tileSize: 512, bytesPerPixel: 4 })).toBe(3 * 512 * 512 * 4 + 65536)
+  })
+})
+
+describe('assembleStripTiff (a GeoTIFF streamed in strips)', () => {
+  const w = 37, h = 23
+  const rgba = Uint8Array.from({ length: w * h * 4 }, (_, i) => (i * 13 + (i >> 7)) % 256)
+  const stripsOf = async (rows, deflate) => {
+    const out = []
+    for (let y = 0; y < h; y += rows) {
+      const bytes = rgba.slice(y * w * 4, Math.min(h, y + rows) * w * 4)
+      out.push(deflate ? await deflateBytes(bytes) : bytes)
+    }
+    return out
+  }
+  const base = { width: w, height: h, samples: [0, 1, 2, 3].map(() => ({ bits: 8, format: 1 })), photometric: 2, extraSamples: [2],
+    pixelScale: [0.25, 0.25, 0], tiepoint: [0, 0, 0, 2.5e6, 1.2e6, 0], geoKeys: geoKeysForEpsg(3031, false) }
+  it.each([[5, false], [5, true], [23, false], [1, true], [100, false]])('round-trips through a reader: %i rows per strip, deflate %s', async (rows, deflate) => {
+    const strips = await stripsOf(Math.min(rows, h), deflate)
+    const spec = { ...base, rowsPerStrip: Math.min(rows, h), compression: deflate ? 8 : 1 }
+    const whole = assembleStripTiff(spec, strips)
+    const parts = assembleStripTiff(spec, strips.map((s) => ({ length: s.length, part: new Blob([s]) })), { parts: true })
+    expect(new Uint8Array(await new Blob(parts).arrayBuffer())).toEqual(whole)
+    const img = await (await fromArrayBuffer(toBuf(whole))).getImage()
+    expect([img.getWidth(), img.getHeight()]).toEqual([w, h])
+    expect(img.getOrigin().slice(0, 2)).toEqual([2.5e6, 1.2e6])
+    expect(img.getResolution().slice(0, 2)).toEqual([0.25, -0.25])
+    expect(await tag(img, 'Compression')).toBe(deflate ? 8 : 1)
+    expect(Array.from(await img.readRasters({ interleave: true }))).toEqual(Array.from(rgba))
+  })
+  it('refuses a strip count that does not match the rows', () => {
+    expect(() => assembleStripTiff({ ...base, rowsPerStrip: 5 }, [rgba])).toThrow('strips')
+  })
 })

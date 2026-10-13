@@ -115,6 +115,99 @@ export function writeGeoTiff(spec) {
   return out
 }
 
+// Baseline GeoTIFF in STRIPS whose bytes are already made — the export path for a
+// raster too large to hold as one array (an orthophoto read out of its stored COG a
+// band of rows at a time). Same tags as writeGeoTiff plus RowsPerStrip; the IFD comes
+// first, then the strips in order, so the header can be written before any strip is
+// read back. `strips` = Uint8Array or { length, part } (a Blob part, as assembleCog
+// takes), ceil(height / rowsPerStrip) of them, each the rows' interleaved samples —
+// raw, or deflated when `compression` is 8. → Uint8Array, or the parts for a Blob.
+export function assembleStripTiff(spec, strips, { parts = false } = {}) {
+  const { width, height, samples, photometric, extraSamples, pixelScale, tiepoint, geoKeys, gdalNoData,
+    compression = 1, rowsPerStrip } = spec
+  const n = strips.length
+  if (!(rowsPerStrip > 0) || n !== Math.ceil(height / rowsPerStrip))
+    throw new Error(`assembleStripTiff: ${n} strips for ${height} rows of ${rowsPerStrip}`)
+  const entries = [], externals = []
+  const inline = (tag, type, value, count = 1) => { const e = { tag, type, count, inline: value }; entries.push(e); return e }
+  const extern = (tag, type, count, bytes) => {
+    const e = { tag, type, count, externIndex: externals.length }
+    entries.push(e); externals.push(bytes); return e
+  }
+  const shortField = (tag, vals) =>
+    vals.length === 1 ? inline(tag, TYPE.SHORT, vals[0]) : extern(tag, TYPE.SHORT, vals.length, shortArrayBytes(vals))
+  const longField = (tag, vals) => (vals.length === 1 ? inline(tag, TYPE.LONG, vals[0])
+    : extern(tag, TYPE.LONG, vals.length, new Uint8Array(vals.length * 4)))
+
+  inline(256, TYPE.LONG, width)
+  inline(257, TYPE.LONG, height)
+  shortField(258, samples.map((s) => s.bits))
+  inline(259, TYPE.SHORT, compression)
+  inline(262, TYPE.SHORT, photometric)
+  const offsetsEntry = longField(273, new Array(n).fill(0)) // filled once laid out
+  inline(277, TYPE.SHORT, samples.length)
+  inline(278, TYPE.LONG, rowsPerStrip)
+  const countsEntry = longField(279, strips.map((s) => s.length))
+  if (extraSamples && extraSamples.length) shortField(338, extraSamples)
+  shortField(339, samples.map((s) => s.format))
+  extern(33550, TYPE.DOUBLE, 3, doubleArrayBytes(pixelScale))
+  extern(33922, TYPE.DOUBLE, 6, doubleArrayBytes(tiepoint))
+  const dir = [1, 1, 0, geoKeys.length]
+  for (const k of geoKeys) dir.push(k[0], k[1], k[2], k[3])
+  extern(34735, TYPE.SHORT, dir.length, shortArrayBytes(dir))
+  if (gdalNoData != null) {
+    const bytes = new TextEncoder().encode(String(gdalNoData) + '\0')
+    extern(42113, TYPE.ASCII, bytes.length, bytes)
+  }
+
+  const even = (v) => (v % 2 ? v + 1 : v)
+  const ifdOffset = 8
+  let cur = ifdOffset + 2 + 12 * entries.length + 4
+  const externOffsets = externals.map((b) => { cur = even(cur); const o = cur; cur += b.length; return o })
+  const headerLength = cur
+  const stripOffsets = strips.map((s) => { cur = even(cur); const o = cur; cur += s.length; return o })
+  if (cur > 0xffffffff) throw new Error('GeoTIFF exceeds the classic TIFF 4 GiB limit')
+
+  const fillLongs = (entry, vals) => {
+    if (entry.externIndex == null) { entry.inline = vals[0]; return }
+    const block = externals[entry.externIndex], bdv = new DataView(block.buffer, block.byteOffset, block.byteLength)
+    vals.forEach((v, i) => bdv.setUint32(i * 4, v, true))
+  }
+  fillLongs(offsetsEntry, stripOffsets)
+  fillLongs(countsEntry, strips.map((s) => s.length))
+
+  const out = new Uint8Array(parts ? headerLength : cur)
+  const dv = new DataView(out.buffer)
+  out[0] = 0x49; out[1] = 0x49
+  dv.setUint16(2, 42, true)
+  dv.setUint32(4, ifdOffset, true)
+  let p = ifdOffset
+  dv.setUint16(p, entries.length, true); p += 2
+  for (const e of entries) {
+    dv.setUint16(p, e.tag, true)
+    dv.setUint16(p + 2, e.type, true)
+    dv.setUint32(p + 4, e.count, true)
+    if (e.externIndex != null) dv.setUint32(p + 8, externOffsets[e.externIndex], true)
+    else if (e.type === TYPE.SHORT) dv.setUint16(p + 8, e.inline, true)
+    else dv.setUint32(p + 8, e.inline, true)
+    p += 12
+  }
+  dv.setUint32(p, 0, true)
+  externals.forEach((b, i) => out.set(b, externOffsets[i]))
+  if (!parts) {
+    strips.forEach((s, i) => out.set(s, stripOffsets[i]))
+    return out
+  }
+  const result = [out]
+  let position = headerLength
+  strips.forEach((s, i) => {
+    if (stripOffsets[i] > position) result.push(new Uint8Array(stripOffsets[i] - position))
+    result.push(s.part ?? s)
+    position = stripOffsets[i] + s.length
+  })
+  return result
+}
+
 // ---------------------------------------------------------------------------
 // COG writer: internally tiled, multi-IFD (full resolution + reduced-resolution
 // overviews). Same georeferencing tags as writeGeoTiff, different image layout.
@@ -152,8 +245,14 @@ const isFloatFormat = (f) => f === 3
 // honest choice for both elevations and reflectance — a decimated overview of a
 // noisy DEM reads as noise rather than terrain.
 function downsampleHalf(src, w, h, spp, nodata, float) {
-  const w2 = Math.max(1, w >> 1)
-  const h2 = Math.max(1, h >> 1)
+  return downsampleTo(src, w, h, Math.max(1, w >> 1), Math.max(1, h >> 1), spp, nodata, float)
+}
+
+// downsampleHalf into explicit output dims. A window of a level halves into the
+// matching window of the next level as long as it starts on an even cell: output
+// cell x reads source cells 2x and min(2x + 1, w − 1), and a window that ends at the
+// level's edge clamps there exactly as the whole level does (createCogBuilder).
+function downsampleTo(src, w, h, w2, h2, spp, nodata, float) {
   const out = new src.constructor(w2 * h2 * spp)
   for (let y = 0; y < h2; y++) {
     const y0 = y * 2
@@ -438,6 +537,145 @@ export async function writeCogDeflate(spec, deflate) {
   const packed = []
   for (const t of tiles) packed.push(await deflate(t))
   return assembleCog(plan, packed, { compression: 8 })
+}
+
+// ── COG from blocks (plan SC-9 / T2) ─────────────────────────────────────────
+//
+// planCog needs the whole raster as one array, which a tiled orthophoto never has.
+// createCogBuilder takes it a block at a time instead — square blocks on a grid of
+// `blockSize` cells (a multiple of tileSize) — and keeps only what the file needs:
+//   - levels whose tiles lie wholly inside one block (blockSize / 2^k a multiple of
+//     the tile size) are cut, compressed and kept as packed tiles the moment the block
+//     arrives; its pixels are dropped;
+//   - the first level where a tile spans several blocks is accumulated whole — it is
+//     1/4^k of the image (1/64 for 2,048-cell blocks of 512 tiles) — and every coarser
+//     level is halved from it at finish().
+// Every level is the one planCog would compute (downsampleTo), so for the same pixels
+// the file is byte-identical to writeCogDeflate's (geotiff.test.js pins it).
+//
+// The shape planCog would give a raster of this size: level dims and tile grid.
+export function planCogFromTiles({ width, height, tileSize = 256, maxOverviews = Infinity }) {
+  if (tileSize % 16 || tileSize <= 0) throw new Error('planCogFromTiles: tileSize must be a positive multiple of 16')
+  const levels = [{ width, height }]
+  while (levels.length <= maxOverviews) {
+    const last = levels[levels.length - 1]
+    if (last.width <= tileSize && last.height <= tileSize) break
+    if (last.width <= 1 && last.height <= 1) break
+    levels.push({ width: Math.max(1, last.width >> 1), height: Math.max(1, last.height >> 1) })
+  }
+  const across = levels.map((l) => Math.ceil(l.width / tileSize))
+  const tileCounts = levels.map((l, li) => across[li] * Math.ceil(l.height / tileSize))
+  return { levels, across, tileCounts, tileSize }
+}
+
+// spec: planCog's, minus `data`, plus `ArrayType` (the samples' TypedArray constructor,
+// default Uint8Array). options:
+//   blockSize    the block grid, a multiple of tileSize (default 2048)
+//   compress     async (Uint8Array) → Uint8Array | { length, part } — one tile's DEFLATE
+//                (zlib) stream; null = uncompressed
+//   previewMaxDim  also keep the first level whose long side fits, for a preview
+// → { addBlock({ col0, row0, width, height, data }), finish() → { parts, preview,
+//     levels } } — `parts` for a Blob (assembleCog parts), `preview` = { data, width,
+//     height } or null. Blocks may arrive in any order; every block must arrive once.
+export function createCogBuilder(spec, { blockSize = 2048, compress = null, previewMaxDim = 0 } = {}) {
+  const { width, height, samples, photometric, extraSamples, pixelScale, tiepoint, geoKeys, gdalNoData,
+    tileSize = 256, maxOverviews = Infinity, ArrayType = Uint8Array } = spec
+  const spp = samples.length
+  const { bits, format } = samples[0]
+  if (!samples.every((s) => s.bits === bits && s.format === format))
+    throw new Error('createCogBuilder: every sample must share bits and format')
+  if (!(blockSize > 0) || blockSize % tileSize) throw new Error('createCogBuilder: blockSize must be a multiple of tileSize')
+  const layout = planCogFromTiles({ width, height, tileSize, maxOverviews })
+  const { levels, across, tileCounts } = layout
+  const nodataNum = gdalNoData == null ? null : Number(gdalNoData)
+  const nodata = nodataNum == null || Number.isNaN(nodataNum) ? null : nodataNum
+  const float = isFloatFormat(format)
+
+  // Levels cut per block, then the accumulated level (if the pyramid goes that far).
+  let blockLevels = 0
+  while (blockLevels < levels.length && (blockSize / 2 ** blockLevels) % tileSize === 0) blockLevels++
+  const accLevel = blockLevels < levels.length ? blockLevels : -1
+  const acc = accLevel >= 0 ? new ArrayType(levels[accLevel].width * levels[accLevel].height * spp) : null
+  let previewLevel = -1
+  if (previewMaxDim > 0) previewLevel = levels.findIndex((l) => Math.max(l.width, l.height) <= previewMaxDim)
+  const preview = previewLevel >= 0 && previewLevel < blockLevels
+    ? new ArrayType(levels[previewLevel].width * levels[previewLevel].height * spp) : null
+
+  const packed = levels.map((_, li) => new Array(tileCounts[li]).fill(null))
+  const pack = async (li, tiles, tx0, ty0, nAcross) => {
+    const out = compress ? await Promise.all(tiles.map((t) => compress(t))) : tiles
+    out.forEach((t, i) => { packed[li][(ty0 + Math.floor(i / nAcross)) * across[li] + tx0 + (i % nAcross)] = t })
+  }
+  // Copy a window into a whole-level plane.
+  const place = (dst, lw, win, x0, y0) => {
+    for (let r = 0; r < win.height; r++) {
+      dst.set(win.data.subarray(r * win.width * spp, (r + 1) * win.width * spp), ((y0 + r) * lw + x0) * spp)
+    }
+  }
+
+  async function addBlock({ col0, row0, width: bw, height: bh, data }) {
+    if (col0 % blockSize || row0 % blockSize || bw !== Math.min(blockSize, width - col0) || bh !== Math.min(blockSize, height - row0))
+      throw new Error(`createCogBuilder: block at ${col0},${row0} (${bw}×${bh}) is not on the ${blockSize} grid`)
+    if (data.length !== bw * bh * spp) throw new Error('createCogBuilder: block data length mismatch')
+    let cur = { data, width: bw, height: bh }
+    const last = accLevel >= 0 ? accLevel : levels.length - 1
+    for (let k = 0; k <= last; k++) {
+      const f = 2 ** k, x0 = col0 / f, y0 = row0 / f
+      if (k > 0) {
+        const lw = Math.min(levels[k].width - x0, blockSize / f), lh = Math.min(levels[k].height - y0, blockSize / f)
+        cur = downsampleTo(cur.data, cur.width, cur.height, lw, lh, spp, nodata, float)
+      }
+      if (k === previewLevel && preview) place(preview, levels[k].width, cur, x0, y0)
+      if (k === accLevel) { place(acc, levels[k].width, cur, x0, y0); break }
+      const { tiles, across: nAcross } = cutTiles(cur, spp, tileSize, nodata)
+      await pack(k, tiles, x0 / tileSize, y0 / tileSize, nAcross)
+    }
+  }
+
+  async function finish() {
+    let previewOut = preview ? { data: preview, ...levels[previewLevel] } : null
+    if (acc) {
+      let cur = { data: acc, ...levels[accLevel] }
+      for (let li = accLevel; li < levels.length; li++) {
+        if (li > accLevel) cur = downsampleHalf(cur.data, cur.width, cur.height, spp, nodata, float)
+        if (li === previewLevel) previewOut = { data: cur.data, width: cur.width, height: cur.height }
+        await pack(li, cutTiles(cur, spp, tileSize, nodata).tiles, 0, 0, across[li])
+      }
+    }
+    const order = [], buffers = []
+    for (let li = levels.length - 1; li >= 0; li--) {
+      packed[li].forEach((t, ti) => {
+        if (t == null) throw new Error(`createCogBuilder: level ${li} tile ${ti} never arrived`)
+        order.push({ li, ti }); buffers.push(t)
+      })
+    }
+    const plan = { levels, tileCounts, order, spp, samples, photometric, extraSamples,
+      pixelScale, tiepoint, geoKeys, gdalNoData, tileSize }
+    const parts = assembleCog(plan, buffers, { compression: compress ? 8 : 1, parts: true })
+    return { parts, preview: previewOut, levels }
+  }
+
+  return { addBlock, finish, layout }
+}
+
+// Upper bound on a COG's bytes before compression: every level's padded tiles plus
+// headers — what decides whether the classic-TIFF 4 GiB offsets can hold it.
+export function cogRawBytes({ width, height, tileSize = 256, bytesPerPixel }) {
+  const { tileCounts } = planCogFromTiles({ width, height, tileSize })
+  return tileCounts.reduce((n, c) => n + c, 0) * tileSize * tileSize * bytesPerPixel + 65536
+}
+
+// What a product's GeoTIFF tags (and .prj) say about its frame: { crs, code,
+// geographic }. A local frame has no CRS — never a fabricated one (CLAUDE.md ▸ Scale
+// & units) — so its keys are user-defined. One home for the stored ortho COG (built
+// in the products worker) and every export, so the two can never tag differently.
+export function crsTagInfo(source) {
+  const crs = source?.crs
+  if (!crs || crs === 'local') return { crs: null, code: null, geographic: false }
+  const m = /EPSG:(\d+)/i.exec(crs)
+  const code = m ? Number(m[1]) : null
+  const geographic = code === 4326 || /degree|deg\b/i.test(source.unit || '')
+  return { crs, code, geographic }
 }
 
 // GeoKeyDirectory entries for an EPSG code (or a bare geotransform when unknown).
