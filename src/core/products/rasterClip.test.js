@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { polygonMask, clipBounds, clipDem, clipOrtho, polygonsFromGeoJSON, normalizePolygons } from './rasterClip.js'
+import { polygonMask, clipBounds, clipDem, clipOrtho, polygonsFromGeoJSON, normalizePolygons, polygonPixelWindow, windowGeometry } from './rasterClip.js'
 
 // 10×8 grid of 2-unit cells at survey-sized coordinates.
 const ox = 5e5, oy = 7e6, gsd = 2
@@ -208,5 +208,29 @@ describe('polygonsFromGeoJSON', () => {
     const gc = polygonsFromGeoJSON({ type: 'GeometryCollection', geometries: [poly, { type: 'Point', coordinates: [0, 0] }] })
     expect(gc).toEqual({ polygons: [[[[0, 0], [1, 0], [1, 1]]]], ignored: 1 })
     expect(normalizePolygons({ type: 'Feature', geometry: poly })).toEqual(gc.polygons)
+  })
+})
+
+describe('polygonPixelWindow (clipping a file-backed ortho)', () => {
+  const big = { width: 40, height: 30, gsd, originX: ox, originY: oy }
+  const plane = () => Uint8Array.from({ length: 40 * 30 * 4 }, (_, i) => (i * 7) % 256)
+  const crop = (data, w, win) => {
+    const out = new Uint8Array(win.width * win.height * 4)
+    for (let r = 0; r < win.height; r++) out.set(data.subarray(((win.row0 + r) * w + win.col0) * 4, ((win.row0 + r) * w + win.col0 + win.width) * 4), r * win.width * 4)
+    return out
+  }
+  const tri = [[ox + 13.3, oy - 9.1], [ox + 51.7, oy - 22.4], [ox + 20.2, oy - 47.9]]
+  it.each([{}, { allTouched: true }])('a window read clips exactly as the whole plane does: %j', (opts) => {
+    const data = plane()
+    const whole = clipOrtho({ ...big, data }, [tri], opts)
+    const win = polygonPixelWindow(big, [tri])
+    expect(win.width * win.height).toBeLessThan(big.width * big.height / 2)
+    const part = clipOrtho({ ...windowGeometry(big, win), data: crop(data, big.width, win) }, [tri], opts)
+    expect([part.width, part.height, part.originX, part.originY]).toEqual([whole.width, whole.height, whole.originX, whole.originY])
+    expect([...part.data]).toEqual([...whole.data])
+    expect(part.clip.insideCells).toBe(whole.clip.insideCells)
+  })
+  it('is null when the polygons miss the raster', () => {
+    expect(polygonPixelWindow(big, [[[ox - 50, oy + 50], [ox - 40, oy + 50], [ox - 40, oy + 40]]])).toBeNull()
   })
 })

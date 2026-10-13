@@ -264,7 +264,11 @@ export const ORTHO_DEFAULTS = {
   surface: 'dem',
   crs: 'local',     // frame for a mesh/plane surface; 'dem' reuses the DEM's frame
   gsd: 0,           // ortho cell size; 0 = the surface's own (auto) resolution
-  blend: 'best',    // 'best' (sharpest) | 'average' (smoother seams)
+  // 'mosaic' (most nadir view per cell, smoothed seamlines, gains, feathering) |
+  // 'best' (lowest matching cost per cell) | 'average' (every visible view).
+  blend: 'mosaic',
+  colourBalance: true, // mosaic: per-image gains over the overlaps (Brown & Lowe)
+  seamWidth: 1,     // mosaic: seam feathering band, % of the ortho's short side; 0 = hard seams
   depthTolRel: 2,   // occlusion tolerance, % of depth
   maxCost: 0,       // 0 = no cost gate; else drop matches above this cost
   fillMethod: 'idw', // colour interpolation: 'none' | 'nearest' | 'idw'

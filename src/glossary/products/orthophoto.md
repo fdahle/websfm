@@ -19,6 +19,20 @@ visible in each direction contributes colour.
 
 <!-- TODO(image): assets/orthophoto-vs-perspective.svg - a terrain profile with a building, showing the perspective camera's rays making the building lean and displacing a hilltop, next to the parallel top-down rays of the ortho projection, with one occluded facade greyed out to motivate the z-buffer. -->
 
+Most ground is seen by several photos, so an orthophoto is also a **mosaic**: each
+area has to come from one of them. WebSfM gives each area to the photo that looks
+most nearly straight down on it, at the finest ground resolution. On a flight at one
+altitude this splits the ground into regions around each photo's nadir point, and the
+borders between regions are the **seamlines**. Choosing by viewing angle rather than
+by image content keeps buildings and trees from leaning differently from one pixel to
+the next. Two corrections then hide the seams. **Colour balance** gives each photo one
+brightness gain per colour channel, fitted by least squares so that overlapping photos
+agree (after Brown & Lowe, 2007). **Feathering** cross-fades neighbouring photos over
+a narrow band either side of each seam. Both work in linear light, the physical
+intensity before display gamma.
+
+<!-- TODO(image): assets/ortho-seamlines.svg - nadir points of a 3×3 photo block over the ground, the region each photo is given (Voronoi-like cells), one seam highlighted with the feathering band either side of it. -->
+
 Where a surface is hidden from every camera, no colour can be recovered — the
 orthophoto's holes are an honest map of what the block did not see, and are best
 fixed by taking more photos rather than by interpolation.

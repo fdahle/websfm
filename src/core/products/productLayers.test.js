@@ -40,3 +40,16 @@ it('translates a local product into the model map by its origin offset', () => {
   expect(placeProductLayer('dem', dem, on, view).reason).toMatch(/project CRS/)
   expect(placeProductLayer('dem', localDem, on, { ...view, stale: new Set(['dem']) }).reason).toMatch(/older sparse model/)
 })
+
+it('draws a computed ortho from its COG, except where a frame offset would misplace the file\'s own tiles', () => {
+  const cog = new Blob([])
+  const ortho = { ...dem, name: 'Ortho', createdAt: 5, cog }
+  const crsLayer = placeProductLayer('ortho', ortho, on, { mode: 'crs' }).layer
+  expect(crsLayer).toMatchObject({ cog, fileKey: 'product:ortho:5', bands: 4, alphaBand: 3, photometric: 2 })
+  expect(placeProductLayer('dem', { ...dem, cog }, on, { mode: 'crs' }).layer.cog).toBeUndefined()
+  const localOrtho = { ...localDem, createdAt: 5, cog }
+  const shifted = { mode: 'model', frame: { origin: [7, 18, 0], ...basis }, stale: new Set() }
+  expect(placeProductLayer('ortho', localOrtho, on, shifted).layer.cog).toBeUndefined()
+  const same = { mode: 'model', frame: { origin: [10, 20, 5], ...basis }, stale: new Set() }
+  expect(placeProductLayer('ortho', localOrtho, on, same).layer.cog).toBe(cog)
+})

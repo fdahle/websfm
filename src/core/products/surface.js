@@ -22,9 +22,9 @@
 // Hard cap on the longer grid side (matches dem.js); gsd is grown to respect it.
 const MAX_GRID = 4096
 
-// Allocate an empty (all-nodata) grid covering [minX,maxX]×[minY,maxY].
-// Returns null for a degenerate extent. `gsd` may be grown to honour maxGrid.
-function makeGrid(minX, minY, maxX, maxY, gsd, maxGrid = MAX_GRID) {
+// The cells covering [minX,maxX]×[minY,maxY], without allocating them. Returns
+// null for a degenerate extent. `gsd` may be grown to honour maxGrid.
+function gridGeometry(minX, minY, maxX, maxY, gsd, maxGrid = MAX_GRID) {
   if (!(maxX > minX) || !(maxY > minY) || !(gsd > 0)) return null
   const spanMax = Math.max(maxX - minX, maxY - minY)
   if (spanMax / gsd > maxGrid - 1) gsd = spanMax / (maxGrid - 1)
@@ -34,8 +34,13 @@ function makeGrid(minX, minY, maxX, maxY, gsd, maxGrid = MAX_GRID) {
     width, height, gsd,
     originX: minX,
     originY: maxY, // top-left origin: row 0 is the max-Y edge
-    data: new Float32Array(width * height).fill(NaN),
   }
+}
+
+// Allocate an empty (all-nodata) grid covering [minX,maxX]×[minY,maxY].
+function makeGrid(minX, minY, maxX, maxY, gsd, maxGrid = MAX_GRID) {
+  const g = gridGeometry(minX, minY, maxX, maxY, gsd, maxGrid)
+  return g && { ...g, data: new Float32Array(g.width * g.height).fill(NaN) }
 }
 
 // Derive mask/zMin/zMax/count from a filled `data` plane. Mirrors the tail of
@@ -267,30 +272,61 @@ export function planeSurface(points, opts = {}) {
 // average over whatever is in range would smear nodata boundaries by a cell).
 // Returns a fresh grid, or the input unchanged when the cell size already matches.
 export function resampleSurface(grid, gsd, opts = {}) {
-  if (!grid || !(gsd > 0)) return grid
-  if (Math.abs(gsd - grid.gsd) <= 1e-9 * grid.gsd) return grid
+  const g = resampledGeometry(grid, gsd, opts.maxGrid ?? MAX_GRID)
+  if (!g || g.identity) return grid
+  const data = new Float32Array(g.width * g.height)
+  sampleSurfaceWindow(grid, g, 0, 0, g.width, g.height, data, new Uint8Array(g.width * g.height))
+  return finalize({ ...g, data })
+}
 
+// The grid resampleSurface(grid, gsd) would produce, without allocating it:
+// { width, height, gsd, originX, originY, identity }. `identity` = the cell size
+// already matches, so the cells ARE the surface's. Null for a degenerate grid.
+// The ortho calls this with a much larger maxGrid than the 4,096 surface cap and
+// samples the heights a window at a time (sampleSurfaceWindow).
+export function resampledGeometry(grid, gsd, maxGrid = MAX_GRID) {
+  if (!grid) return null
+  const own = { width: grid.width, height: grid.height, gsd: grid.gsd, originX: grid.originX, originY: grid.originY, identity: true }
+  if (!(gsd > 0) || Math.abs(gsd - grid.gsd) <= 1e-9 * grid.gsd) return own
   const minX = grid.originX
   const maxY = grid.originY
   const maxX = minX + grid.width * grid.gsd
   const minY = maxY - grid.height * grid.gsd
-  const g = makeGrid(minX, minY, maxX, maxY, gsd, opts.maxGrid ?? MAX_GRID)
-  if (!g) return grid
+  const g = gridGeometry(minX, minY, maxX, maxY, gsd, maxGrid)
+  return g ? { ...g, identity: false } : own
+}
 
+// Heights of the cells [col0, col0+w) × [row0, row0+h) of `geom` (from
+// resampledGeometry) into `data` (NaN = nodata) and `mask`, row-major with stride w.
+// Exactly the arithmetic resampleSurface uses, so a window reads the same bits the
+// full resample would; an identity geometry copies the surface's own cells (and its
+// own mask, which a DEM may set differently from its NaNs).
+export function sampleSurfaceWindow(grid, geom, col0, row0, w, h, data, mask) {
   const sw = grid.width, sh = grid.height, sd = grid.data, sm = grid.mask
-  for (let row = 0; row < g.height; row++) {
-    const y = g.originY - (row + 0.5) * g.gsd
+  if (geom.identity) {
+    for (let r = 0; r < h; r++) {
+      const src = (row0 + r) * sw + col0
+      data.set(sd.subarray(src, src + w), r * w)
+      mask.set(sm.subarray(src, src + w), r * w)
+    }
+    return
+  }
+  for (let r = 0; r < h; r++) {
+    const row = row0 + r
+    const y = geom.originY - (row + 0.5) * geom.gsd
     // Continuous source cell-centre coordinates of this target centre.
     const fy = (grid.originY - y) / grid.gsd - 0.5
     const r0 = Math.floor(fy), wy = fy - r0
-    for (let col = 0; col < g.width; col++) {
-      const x = g.originX + (col + 0.5) * g.gsd
+    const nr = Math.min(sh - 1, Math.max(0, Math.round(fy)))
+    for (let c = 0; c < w; c++) {
+      const col = col0 + c, o = r * w + c
+      const x = geom.originX + (col + 0.5) * geom.gsd
       const fx = (x - grid.originX) / grid.gsd - 0.5
       const c0 = Math.floor(fx), wx = fx - c0
 
-      const nr = Math.min(sh - 1, Math.max(0, Math.round(fy)))
       const nc = Math.min(sw - 1, Math.max(0, Math.round(fx)))
-      if (!sm[nr * sw + nc]) continue // outside the surface — stays nodata
+      // Outside the surface — stays nodata.
+      if (!sm[nr * sw + nc]) { data[o] = NaN; mask[o] = 0; continue }
 
       let wsum = 0, vsum = 0
       for (let dr = 0; dr < 2; dr++) {
@@ -301,13 +337,16 @@ export function resampleSurface(grid, gsd, opts = {}) {
           if (cc < 0 || cc >= sw) continue
           const si = rr * sw + cc
           if (!sm[si]) continue
-          const w = (dr ? wy : 1 - wy) * (dc ? wx : 1 - wx)
-          if (!(w > 0)) continue
-          wsum += w; vsum += w * sd[si]
+          const wt = (dr ? wy : 1 - wy) * (dc ? wx : 1 - wx)
+          if (!(wt > 0)) continue
+          wsum += wt; vsum += wt * sd[si]
         }
       }
-      g.data[row * g.width + col] = wsum > 0 ? vsum / wsum : sd[nr * sw + nc]
+      // Stored as Float32 exactly like the resampled grid's plane, so a window's
+      // heights are bit-identical to that plane's.
+      const v = Math.fround(wsum > 0 ? vsum / wsum : sd[nr * sw + nc])
+      data[o] = v
+      mask[o] = Number.isNaN(v) ? 0 : 1
     }
   }
-  return finalize(g)
 }

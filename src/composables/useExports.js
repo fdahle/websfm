@@ -2,16 +2,17 @@ import { ref } from 'vue'
 import { metresPerCrsUnit } from '../core/crs.js'
 import { toScaledPx } from '../core/sfm/geometry.js'
 import { buildPosesCsv, buildSensorsCsv, downloadCsv } from '../utils/exportCsv.js'
-import { reconstructionToJson, demToAsciiGridParts, demToGeoTiff, demToCog, orthoToGeoTiff, orthoToCog, rasterWorldFile, prepareCloudForExport } from '../core/products/exporters.js'
+import { reconstructionToJson, demToAsciiGridParts, demToGeoTiff, demToCog, orthoToGeoTiff, rasterWorldFile, prepareCloudForExport } from '../core/products/exporters.js'
 import { buildColmapModel, serializeColmapModelParts, serializeColmapModelBinParts } from '../core/io/colmapModel.js'
 import { imageIdsToPairId } from '../core/io/colmapDatabase.js'
 import { exportColmapDatabase } from '../workers/colmapDbClient.js'
-import { undistortImage, exportCloudFile, exportMeshFile, demTool as workerDemTool } from '../workers/computeClient.js'
+import { undistortImage, exportCloudFile, exportMeshFile, exportOrthoFile, demTool as workerDemTool } from '../workers/computeClient.js'
 import { buildTransformsJson } from '../core/io/transforms.js'
 import { buildNvmParts, buildOpenMvg } from '../core/io/sfmInterop.js'
 import { jsonParts, lazyArray, jsonArrayItemParts, jsonArrayEnd } from '../core/io/parts.js'
 import { partsToBlob } from '../utils/blobParts.js'
 import { epsgToWkt } from '../core/products/wkt.js'
+import { crsTagInfo } from '../core/products/geotiff.js'
 import {
   ecefTransformFromProbes, boundingBox, buildTileset, cloudToGlbPoints,
   localBounds, cloudCentroid,
@@ -180,14 +181,7 @@ export function useExports({
   // Parse the current DEM's CRS into an EPSG code + geographic flag for GeoTIFF /
   // .prj. The working CRS is a proj4 string or "EPSG:xxxx"; only the latter yields a
   // code (else the geotransform is still written, without a CRS).
-  function crsInfo(source) {
-    const crs = source?.crs
-    if (!crs || crs === 'local') return { crs: null, code: null, geographic: false }
-    const m = /EPSG:(\d+)/i.exec(crs)
-    const code = m ? Number(m[1]) : null
-    const geographic = code === 4326 || /degree|deg\b/i.test(source.unit || '')
-    return { crs, code, geographic }
-  }
+  const crsInfo = crsTagInfo
 
   async function onExportRun(settings) {
     const kind = exportKind.value
@@ -533,17 +527,6 @@ export function useExports({
     return info.crs
   }
 
-  // Re-encode a data: URL (a canvas PNG) to a JPEG/PNG Blob at the given quality.
-  async function reencodeDataUrl(dataUrl, mime = 'image/jpeg', quality = 0.9) {
-    const img = await new Promise((resolve, reject) => {
-      const el = new Image(); el.onload = () => resolve(el); el.onerror = reject; el.src = dataUrl
-    })
-    const canvas = document.createElement('canvas')
-    canvas.width = img.naturalWidth; canvas.height = img.naturalHeight
-    canvas.getContext('2d').drawImage(img, 0, 0)
-    return new Promise((resolve) => canvas.toBlob(resolve, mime, quality))
-  }
-
   // DEM → GeoTIFF (optional DEFLATE), ESRI ASCII grid, or hillshade PNG — each
   // with a .prj sidecar carrying the CRS (real WKT where possible).
   async function doExportDem({ format, nodata, compression }) {
@@ -579,40 +562,36 @@ export function useExports({
     if (info.crs) downloadBlob(`${projectBase()}-dem.prj`, prjText(info), 'text/plain;charset=utf-8')
   }
 
-  // Ortho → GeoTIFF (optional DEFLATE), or PNG/JPEG + world file (.wld) + .prj.
-  // The geotransform comes from the ORTHO, not the DEM: an ortho can now be built
-  // over a mesh/plane surface and at its own GSD, so the two grids need not match.
-  // Orthos written before that (persisted without gsd/originX) fall back to the DEM,
-  // which is exactly the grid they were built on.
+  // Ortho → COG, GeoTIFF (optional DEFLATE), or PNG/JPEG + world file (.wld) + .prj.
+  // An orthophoto IS a stored Cloud-Optimized GeoTIFF (tiled, DEFLATE, overviews,
+  // its CRS tagged): the COG export is that file, and the other forms are streamed
+  // out of it in the export worker (workers/ops/export.js exportOrtho), so no export
+  // ever holds the ortho as one array. The geotransform is the ORTHO's own.
   async function doExportOrtho({ format, compression, jpegQuality }) {
-    if (!ortho.value) return
-    const geo = ortho.value.gsd != null ? ortho.value : dem.value
-    if (!geo) return
-    const info = crsInfo(geo)
+    const o = ortho.value
+    if (!o?.cog) return
+    const info = crsInfo(o)
     if (format === 'cog') {
-      const deflate = compression === 'none' ? null : deflateBytes
-      const tif = await orthoToCog(ortho.value, geo, { crs: info, deflate })
-      downloadBlob(`${projectBase()}-ortho-cog.tif`, tif, 'image/tiff')
-      log(`Ortho export: Cloud-Optimized GeoTIFF${deflate ? ' (DEFLATE)' : ''}`, 'success', 'Export')
+      downloadBlob(`${projectBase()}-ortho-cog.tif`, o.cog, 'image/tiff')
+      log('Ortho export: Cloud-Optimized GeoTIFF (the stored file, DEFLATE)', 'success', 'Export')
       return
     }
+    const onLog = (m, l, c) => log(m, l, c)
     if (format === 'geotiff') {
-      const deflate = compression === 'deflate' ? deflateBytes : null
-      const tif = await orthoToGeoTiff(ortho.value, geo, { crs: info, deflate })
-      downloadBlob(`${projectBase()}-ortho.tif`, tif, 'image/tiff')
+      const deflate = compression === 'deflate'
+      const { blob } = await exportOrthoFile({ file: o.cog, format, deflate, crs: { code: info.code, geographic: info.geographic } }, { onLog })
+      downloadBlob(`${projectBase()}-ortho.tif`, blob, 'image/tiff')
       log(`Ortho export: GeoTIFF${deflate ? ' (DEFLATE)' : ''}`, 'success', 'Export')
       return
     }
-    if (!ortho.value.previewBlob) return
     const jpeg = format === 'jpeg'
     const ext = jpeg ? 'jpg' : 'png'
-    const blob = jpeg
-      ? await reencodeDataUrl(ortho.value.previewUrl, 'image/jpeg', jpegQuality ?? 0.9)
-      : ortho.value.previewBlob
+    // Full resolution, so the world file's cell size is the image's (the preview is not).
+    const { blob } = await exportOrthoFile({ file: o.cog, format: jpeg ? 'jpeg' : 'png', quality: jpegQuality ?? 0.9 }, { onLog })
     downloadBlob(`${projectBase()}-ortho.${ext}`, blob)
     // World file extension mirrors the image (.wld works for both; .jgw/.pgw are the
     // strict siblings — .wld is universally accepted, so keep it simple).
-    downloadBlob(`${projectBase()}-ortho.wld`, rasterWorldFile(geo), 'text/plain;charset=utf-8')
+    downloadBlob(`${projectBase()}-ortho.wld`, rasterWorldFile(o), 'text/plain;charset=utf-8')
     if (info.crs) downloadBlob(`${projectBase()}-ortho.prj`, prjText(info), 'text/plain;charset=utf-8')
     log(`Ortho export: ${jpeg ? 'JPEG' : 'PNG'} + world file`, 'success', 'Export')
   }
@@ -878,14 +857,14 @@ export function useExports({
 
   async function exportClipped({ kind, polygons, compression }) {
     const product = kind === 'ortho' ? ortho.value : dem.value
-    if (!product || !polygons?.length) return
-    // An ortho carries its own geotransform; older ones fall back to the DEM's grid.
-    const geo = kind === 'ortho' ? (product.gsd != null ? product : dem.value) : product
+    if (!product || !polygons?.length || (kind === 'ortho' && !product.cog)) return
+    const geo = product
+    // An ortho is clipped from a window of its COG, read in the worker (no plane here).
     const input = kind === 'ortho'
-      ? { tool: 'clip', kind, polygons, ortho: { width: product.width, height: product.height, gsd: geo.gsd,
-          originX: geo.originX, originY: geo.originY, data: product.rgba.slice() } }
+      ? { tool: 'clip', kind, polygons, cog: product.cog,
+          geo: { width: product.width, height: product.height, gsd: product.gsd, originX: product.originX, originY: product.originY } }
       : { tool: 'clip', kind, polygons, grid: gridCopy(product) }
-    const buffers = kind === 'ortho' ? [input.ortho.data.buffer]
+    const buffers = kind === 'ortho' ? []
       : [input.grid.data.buffer, ...(input.grid.mask ? [input.grid.mask.buffer] : [])]
     const { raster } = await workerDemTool(input, { transfer: buffers, onLog: (m, l, c) => log(m, l, c) })
     if (!raster) { log('Clip: the polygon does not overlap the raster', 'warn', 'Export'); return }

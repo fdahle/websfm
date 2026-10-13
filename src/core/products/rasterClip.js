@@ -292,6 +292,34 @@ export function clipDem(grid, polygons, { crop = true, allTouched = false, onLog
 }
 
 /**
+ * The pixel window a clip can touch: the polygons' bounding box in pixels, one pixel
+ * of padding for rounding and allTouched, clamped to the raster. A large orthophoto
+ * lives in a file, not an array, so its clip reads this window and runs clipOrtho on
+ * it as a sub-raster ({ ...geo, width, height, originX/Y moved by whole cells }) —
+ * the same result as clipping the whole plane, since no pixel outside the window
+ * can be inside a polygon.
+ * → { col0, row0, width, height } or null (no overlap).
+ */
+export function polygonPixelWindow(geo, polygons) {
+  const { width: w, height: h, gsd, originX, originY } = geo
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity
+  for (const poly of normalizePolygons(polygons)) for (const ring of poly) for (const [x, y] of ring) {
+    const c = (x - originX) / gsd, r = (originY - y) / gsd
+    if (c < x0) x0 = c; if (c > x1) x1 = c
+    if (r < y0) y0 = r; if (r > y1) y1 = r
+  }
+  const col0 = Math.max(0, Math.floor(x0) - 1), row0 = Math.max(0, Math.floor(y0) - 1)
+  const col1 = Math.min(w, Math.ceil(x1) + 1), row1 = Math.min(h, Math.ceil(y1) + 1)
+  return col1 > col0 && row1 > row0 ? { col0, row0, width: col1 - col0, height: row1 - row0 } : null
+}
+
+// The sub-raster geometry of a pixel window (see polygonPixelWindow).
+export function windowGeometry(geo, win) {
+  return { width: win.width, height: win.height, gsd: geo.gsd,
+    originX: geo.originX + win.col0 * geo.gsd, originY: geo.originY - win.row0 * geo.gsd }
+}
+
+/**
  * Clip an RGBA orthophoto to polygons: pixels outside become (0,0,0,0); inside
  * pixels are copied unchanged (their own alpha included). Crop and origin
  * arithmetic as clipDem. An existing `mask` is cropped and AND-ed with the

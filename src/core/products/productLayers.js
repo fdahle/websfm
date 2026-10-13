@@ -3,7 +3,7 @@
 // state into the same layer descriptor ViewerMap draws for an imported raster, so
 // the map has one raster-layer concept whoever made the raster.
 
-import { productDescriptor } from '../io/rasterSource.js'
+import { productDescriptor, productTiledMeta } from '../io/rasterSource.js'
 import { MODEL_MAP_CRS, frameOffset } from './modelMap.js'
 
 export const PRODUCT_KINDS = ['dem', 'ortho']
@@ -63,6 +63,11 @@ export function placeProductLayer(kind, product, state, view) {
     gt = { ...gt, originX: gt.originX + off.dx, originY: gt.originY + off.dy }
     offset = [off.dx, off.dy]
   }
+  // A computed ortho draws its stored COG as GPU tiles, like an imported raster. The
+  // tiles carry the file's own geotransform, so a model-map layer shifted by a frame
+  // offset falls back to the preview image, which can be placed anywhere.
+  const tiled = productTiledMeta(kind, product)
+  const cog = tiled && !(offset && (offset[0] || offset[1])) ? product.cog : null
   return { layer: {
     id: `product:${kind}`,
     product: true,
@@ -77,5 +82,7 @@ export function placeProductLayer(kind, product, state, view) {
     opacity: state.opacity ?? 1,
     // Model map only: product coords = map coords − offset (the status-bar probe).
     offset,
+    ...(cog && { cog, fileKey: tiled.fileKey, bands: tiled.bands, bitsPerSample: 8, sampleFormat: 1,
+      photometric: tiled.photometric, alphaBand: tiled.alphaBand }),
   } }
 }

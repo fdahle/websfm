@@ -2230,6 +2230,7 @@ function onRibbonPick(event) {
         :has-georef="!!georef"
         :has-scale="scaleFitValid || georef?.crs === currentCrs"
         :has-orientation="reconstructionStore.orientationState.active"
+        :ortho-cells="reconstructionStore.ortho ? reconstructionStore.ortho.width * reconstructionStore.ortho.height : 0"
         @close="exportKind = null"
         @run="onExportRun"
       />

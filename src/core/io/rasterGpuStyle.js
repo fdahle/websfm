@@ -22,6 +22,11 @@ export function gpuRasterStyle(meta) {
   const valid = ['all', ...used.map(i => ['<', ['abs', band(i)], 3.4e38])]
   const nodata = meta.rawNodata ?? meta.nodata
   if (Number.isFinite(nodata)) for (const i of used) valid.push(['!=', band(i), nodata])
+  // An 8-bit alpha band (`alphaBand`, 0-based — a computed orthophoto's 4th sample):
+  // a transparent cell is nodata, a partial one (an overview's edge) blends. Without
+  // it an RGBA ortho's uncovered cells draw black.
+  const alpha = Number.isInteger(meta.alphaBand) ? band(meta.alphaBand) : null
+  if (alpha) valid.push(['>', alpha, 0])
   let color
   if (style.mode === 'index') {
     const a = band(used[0]), b = band(used[1]), sum = ['+', a, b]
@@ -32,7 +37,7 @@ export function gpuRasterStyle(meta) {
     color = ['interpolate', ['linear'], t, ...stops]
   } else {
     const channels = used.map((i, c) => ['*', 255, normalized(band(i), meta.style?.ranges?.[c] ?? (meta.kind === 'dem' ? [meta.zMin ?? 0, meta.zMax] : [0, 255]))])
-    color = ['color', channels[0], channels[1] ?? channels[0], channels[2] ?? channels[0], 1]
+    color = ['color', channels[0], channels[1] ?? channels[0], channels[2] ?? channels[0], alpha ? ['/', alpha, 255] : 1]
   }
   return { color: ['case', valid.length === 2 ? valid[1] : valid, color, ['color', 0, 0, 0, 0]] }
 }

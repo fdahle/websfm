@@ -29,6 +29,10 @@ Notable changes to websfm. The format follows
   get a top-down map in the model's own frame.
 - Orthophotos can be projected onto a DEM, the mesh or a fitted plane, at their own
   resolution.
+- **Orthophotos at the photos' own ground resolution**: no longer capped at 4,096
+  pixels — up to about 28,000 pixels square. They are built in blocks and stored as a
+  tiled Cloud-Optimized GeoTIFF, and the orthophoto tab and the 2D map draw them at
+  full resolution as you zoom in.
 - One-click suggestion of a projected CRS (UTM or polar stereographic) for
   geotagged projects.
 - Image groups (folders) in the sidebar, a per-sensor GNSS antenna offset, and film
@@ -38,10 +42,18 @@ Notable changes to websfm. The format follows
 - The theme can follow the operating system.
 
 ### Changed
+- Orthophotos built with an earlier version must be rebuilt (the storage format
+  changed). The Cloud-Optimized GeoTIFF export is now the stored file itself (always
+  DEFLATE). PNG and JPEG exports are full resolution and offered up to 8,192 × 8,192
+  pixels. Orthophoto builds follow the memory budget in Settings ▸ Compute.
 - Feature matching is reproducible: the same images now give the same matches in
   every project, where before a few percent of image pairs varied slightly.
 - Sharper orthophotos: colour now comes from the original photos at full resolution
   instead of the lower-resolution depth maps.
+- Orthophotos are now mosaicked by default: each area comes from the photo looking
+  most straight down on it, exposure is balanced between photos, and seams are
+  cross-faded. The previous per-pixel "Best match" and "Average" modes remain
+  available.
 - Dense clouds are more complete: fusion's matching-cost gate is now a fixed, looser
   default (0.8) instead of one adapted to each dataset, which was discarding real
   surface. On the ETH3D benchmark this closes the gap to COLMAP at 2 cm with no loss of
@@ -76,6 +88,10 @@ Notable changes to websfm. The format follows
 - Saving after a 3D edit writes only the clouds that changed.
 
 ### Fixed
+- An orthophoto built at a chosen pixel size lost its coordinate frame, so Find GCPs
+  refused it and the model-frame map could not place it.
+- An imported orthophoto's tab showed "no data" under the cursor; it now reads the
+  pixel's band values.
 - Building a mesh from a large dense cloud (around 17 million points or more) failed
   with "Map maximum size exceeded" after the surface was solved.
 - Georeferencing in polar regions was off by metres. Error-free control at 80°S now

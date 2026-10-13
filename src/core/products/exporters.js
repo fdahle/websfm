@@ -579,23 +579,13 @@ export async function orthoToGeoTiff(ortho, geo, { crs = {}, deflate = null } = 
 }
 
 // ── Ortho → Cloud-Optimized GeoTIFF ──────────────────────────────────────────
-// Overviews box-average the RGBA; alpha averages with it, so a half-covered
-// overview cell is half-transparent rather than snapping to opaque.
-export async function orthoToCog(ortho, geo, { crs = {}, deflate = null, tileSize = 512 } = {}) {
-  const { width, height, rgba } = ortho
-  const { gsd, originX, originY } = geo
-  const data = rgba instanceof Uint8Array
-    ? rgba : new Uint8Array(rgba.buffer, rgba.byteOffset, rgba.byteLength)
-  return writeCogDeflate({
-    width, height,
-    samples: [0, 1, 2, 3].map(() => ({ bits: 8, format: 1 })),
-    photometric: 2, extraSamples: [2], // unassociated alpha
-    data, tileSize,
-    pixelScale: [gsd, gsd, 0],
-    tiepoint: [0, 0, 0, originX, originY, 0],
-    geoKeys: geoKeysForEpsg(crs.code, crs.geographic),
-  }, deflate)
-}
+// Nothing to write: a computed orthophoto IS a COG (workers/ops/products.js
+// generateOrtho), so the export copies the stored file. Its GeoTIFF / PNG / JPEG
+// forms are streamed out of that file by workers/ops/export.js exportOrtho.
+//
+// The largest orthophoto exported as one PNG/JPEG (8,192² — a canvas and its encoder
+// hold it whole, ~256 MB of RGBA). Larger ones export as a GeoTIFF.
+export const MAX_ORTHO_IMAGE_CELLS = 8192 * 8192
 
 // ── Raster world file (.wld / .pgw) for a georeferenced image ─────────────────
 // geo: { gsd, originX (left corner), originY (top corner) }. Six lines; lines 5–6

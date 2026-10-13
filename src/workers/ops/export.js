@@ -3,6 +3,14 @@ import { cloudToLasParts } from '../../core/io/las.js'
 import { cloudToLaz } from '../../core/io/laz.js'
 import { cloudToXyzParts } from '../../core/io/cloudText.js'
 import { partsToBlob } from '../../utils/blobParts.js'
+import { assembleStripTiff, geoKeysForEpsg } from '../../core/products/geotiff.js'
+import { MAX_ORTHO_IMAGE_CELLS as MAX_IMAGE_CELLS } from '../../core/products/exporters.js'
+import { openRaster, readWindowBytes, rowsPerBand } from '../cogRead.js'
+
+async function deflatePart(bytes) {
+  const part = await new Response(new Blob([bytes]).stream().pipeThrough(new CompressionStream('deflate'))).blob()
+  return { length: part.size, part }
+}
 
 // Cloud / mesh file exports off the main thread. The writers yield bounded parts
 // (core/io/parts.js) and partsToBlob folds them into a Blob a batch at a time, so
@@ -61,5 +69,60 @@ export function makeExportOps({ lazCodec = null } = {}) {
     return { result: { blob, count } }
   }
 
-  return { exportCloud, exportMesh }
+  // args: [{ file, format: 'geotiff'|'png'|'jpeg', deflate, quality, crs: { code, geographic } }]
+  // → { blob, width, height }. A computed orthophoto lives as its stored COG (RGBA,
+  // tiled, overviews); every other ortho file is made from it here, read back a band
+  // of rows at a time:
+  //   geotiff — a baseline GeoTIFF in strips (core/products/geotiff.js
+  //             assembleStripTiff), optionally DEFLATE per strip; the 4 GiB classic-TIFF
+  //             ceiling refuses an uncompressed one that would not fit.
+  //   png/jpeg — the full-resolution image through a canvas, up to MAX_IMAGE_CELLS
+  //             (a canvas and its encode must hold it whole); beyond that, refused.
+  async function exportOrtho([{ file, format, deflate = false, quality = 0.9, crs = {} }], { emit }) {
+    const t0 = performance.now()
+    const image = await openRaster(file)
+    const width = image.getWidth(), height = image.getHeight()
+    const [sx, sy] = image.getResolution(), [ox, oy] = image.getOrigin()
+    if (format === 'geotiff') {
+      const rows = rowsPerBand(width, 4)
+      const n = Math.ceil(height / rows)
+      if (!deflate && width * height * 4 > 0xffffffff - 65536) {
+        throw new Error('an uncompressed GeoTIFF of this orthophoto would exceed the 4 GiB classic-TIFF limit — choose DEFLATE, or the Cloud-Optimized GeoTIFF')
+      }
+      const strips = []
+      for (let i = 0; i < n; i++) {
+        const y0 = i * rows, y1 = Math.min(height, y0 + rows)
+        const bytes = await readWindowBytes(image, 0, y0, width, y1)
+        strips.push(deflate ? await deflatePart(bytes) : { length: bytes.length, part: new Blob([bytes]) })
+        emit('progress', [i + 1, n, 'Writing GeoTIFF strips…'])
+      }
+      const parts = assembleStripTiff({
+        width, height, samples: [0, 1, 2, 3].map(() => ({ bits: 8, format: 1 })), photometric: 2, extraSamples: [2],
+        pixelScale: [sx, -sy, 0], tiepoint: [0, 0, 0, ox, oy, 0], geoKeys: geoKeysForEpsg(crs.code, crs.geographic),
+        compression: deflate ? 8 : 1, rowsPerStrip: rows,
+      }, strips, { parts: true })
+      const blob = new Blob(parts, { type: 'image/tiff' })
+      emit('log', [`Ortho GeoTIFF: ${width}×${height} in ${n} strip(s), ${(blob.size / 1024 ** 2).toFixed(1)} MB `
+        + `in ${((performance.now() - t0) / 1000).toFixed(1)}s`, 'info', 'Export'])
+      return { result: { blob, width, height } }
+    }
+    if (width * height > MAX_IMAGE_CELLS) {
+      throw new Error(`a ${width.toLocaleString()}×${height.toLocaleString()} px orthophoto is too large for a ${format.toUpperCase()} `
+        + `(at most ${MAX_IMAGE_CELLS.toLocaleString()} px) — export a GeoTIFF instead`)
+    }
+    const rgba = new Uint8ClampedArray(width * height * 4)
+    const rows = rowsPerBand(width, 4)
+    for (let y0 = 0; y0 < height; y0 += rows) {
+      rgba.set(await readWindowBytes(image, 0, y0, width, Math.min(height, y0 + rows)), y0 * width * 4)
+    }
+    // JPEG has no alpha; the encoder flattens uncovered cells to black.
+    const canvas = new OffscreenCanvas(width, height)
+    canvas.getContext('2d').putImageData(new ImageData(rgba, width, height), 0, 0)
+    const blob = await canvas.convertToBlob({ type: format === 'jpeg' ? 'image/jpeg' : 'image/png', quality })
+    emit('log', [`Ortho ${format.toUpperCase()}: ${width}×${height}, ${(blob.size / 1024 ** 2).toFixed(1)} MB `
+      + `in ${((performance.now() - t0) / 1000).toFixed(1)}s`, 'info', 'Export'])
+    return { result: { blob, width, height } }
+  }
+
+  return { exportCloud, exportMesh, exportOrtho }
 }

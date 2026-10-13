@@ -1,14 +1,23 @@
 <script setup>
 import { defineAsyncComponent, ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { pixelToWorld, worldToPixel } from '../../core/io/rasterSample.js'
-import { productDescriptor, createProductRasterSource } from '../../core/io/rasterSource.js'
+import { productDescriptor, createProductRasterSource, productTiledMeta } from '../../core/io/rasterSource.js'
 import { rasterUnits } from '../../core/products/rasterUnits.js'
 import { copyToClipboard } from '../../composables/useToasts.js'
+import { readRasterWindow } from '../../workers/computeClient.js'
 import RasterMeasurements from './RasterMeasurements.vue'
 const GpuRasterCanvas = defineAsyncComponent(() => import('./raster/GpuRasterCanvas.vue'))
 const gpuReady = ref(false)
-const gpuCapable = computed(() => props.product?.id && props.product?.crs && !props.product.crsUnresolved
-  && Math.abs(props.product.geoTransform?.scaleX + props.product.geoTransform?.scaleY) < 1e-9)
+// What the tiled canvas draws: an imported raster's own meta, or a computed ortho's
+// stored COG (productTiledMeta — a local-frame one too, which has no CRS).
+const computedProduct = computed(() => !!props.product && !props.product.geoTransform)
+const gpuMeta = computed(() => (computedProduct.value ? productTiledMeta(props.kind, props.product) : props.product))
+const gpuFile = computed(() => (computedProduct.value && props.product?.cog ? () => props.product.cog : null))
+const gpuCapable = computed(() => {
+  const m = gpuMeta.value
+  return !!(m?.id && (m.crs || computedProduct.value) && !m.crsUnresolved
+    && Math.abs(m.geoTransform?.scaleX + m.geoTransform?.scaleY) < 1e-9)
+})
 
 // Tab viewer for ANY georeferenced raster — a computed DEM/orthophoto product,
 // or an imported reference raster. Shows the baked preview PNG (hillshaded
@@ -39,9 +48,16 @@ watch(() => !!gpuCapable.value, (capable) => { if (!capable) gpuReady.value = fa
 // One descriptor for both shapes (core/io/rasterSource.js productDescriptor).
 const desc = computed(() => productDescriptor(props.product))
 // What the tools read values from: the imported raster's own source, or the
-// computed product wrapped behind the same RasterSource boundary.
-const toolSource = computed(() => props.source
-  ?? (props.product && !props.product.geoTransform ? createProductRasterSource(props.kind, props.product) : null))
+// computed product wrapped behind the same RasterSource boundary — an ortho's pixels
+// read from its stored COG in the io worker, a window at a time.
+const toolSource = computed(() => {
+  if (props.source) return props.source
+  const p = props.product
+  if (!p || p.geoTransform) return null
+  const readRawWindow = props.kind === 'ortho' && p.cog
+    ? (rect, _level, opts = {}) => readRasterWindow(p.cog, { rect, ...opts }) : null
+  return createProductRasterSource(props.kind, p, { readRawWindow })
+})
 
 // Cell size in world units (for the GSD readout), sign-independent.
 const gsdOf = computed(() => {
@@ -204,11 +220,45 @@ function updateHover(x, y) {
     const z = raw == null ? null : raw + (p.vOffset || 0)
     hover.value = { px, py, fx: world?.x ?? null, fy: world?.y ?? null, z }
   } else {
-    const rgba = props.source ? props.source.rgba() : p.rgba
-    if (!rgba) { hover.value = { px, py, r: null }; return }
+    // An imported ortho decoded into memory before tiled display reads its plane;
+    // every other ortho reads the cell from its file.
+    const rgba = props.source?.rgba() ?? null
+    if (!rgba) { readColour(px, py); return }
     const o = idx * 4
     hover.value = { px, py, r: rgba[o + 3] > 0 ? rgba[o] : null, g: rgba[o + 1], b: rgba[o + 2] }
   }
+}
+
+// The colour under the cursor, read as a 1×1 window off the raster's file (an async
+// worker read). Mouse moves outrun it, so at most one read is in flight and the
+// newest cell is read next; a stale answer is dropped. A transparent cell (alpha 0)
+// reads "no data".
+let colourBusy = false, colourWanted = null
+function readColour(px, py) {
+  if (hover.value?.px === px && hover.value?.py === py && (hover.value.pending || hover.value.r !== undefined)) return
+  hover.value = { px, py, r: null, pending: !!toolSource.value }
+  if (!toolSource.value) return
+  colourWanted = [px, py]
+  if (!colourBusy) pumpColour()
+}
+async function pumpColour() {
+  colourBusy = true
+  while (colourWanted) {
+    const [px, py] = colourWanted
+    colourWanted = null
+    const src = toolSource.value
+    const nb = Math.min(4, src?.meta?.bands ?? 0)
+    let read = null
+    try {
+      const bands = Array.from({ length: nb }, (_, i) => i)
+      const w = nb ? await src.readWindow({ col: px, row: py, width: 1, height: 1 }, 0, { bands }) : null
+      const ch = w?.channels ?? []
+      const alpha = nb === 4 ? ch[3]?.[0] : 255
+      read = ch.length ? { r: alpha > 0 ? ch[0][0] : null, g: (ch[1] ?? ch[0])[0], b: (ch[2] ?? ch[0])[0] } : { r: null }
+    } catch { read = { r: null } }
+    if (hover.value?.px === px && hover.value?.py === py) hover.value = { px, py, ...read }
+  }
+  colourBusy = false
 }
 
 // Z is in the vertical unit, the GSD in the horizontal one (rasterUnits.js — an
@@ -294,7 +344,7 @@ defineExpose({ fit, zoomBy, measureState, setMeasureTool, toggleSavedMeasurement
         {{ source === null && product?.geoTransform ? 're-import it.' : 'rebuild it.' }}
       </div>
 
-      <GpuRasterCanvas v-if="gpuCapable" :product="product" :scale="scale" :tx="tx" :ty="ty" @ready="gpuReady = $event" />
+      <GpuRasterCanvas v-if="gpuCapable" :product="gpuMeta" :file="gpuFile" :scale="scale" :tx="tx" :ty="ty" @ready="gpuReady = $event" />
       <div
         v-if="menu"
         class="ctx-menu"
@@ -341,7 +391,7 @@ defineExpose({ fit, zoomBy, measureState, setMeasureTool, toggleSavedMeasurement
             <span class="channel g">G&nbsp;{{ hover.g }}</span>
             <span class="channel b">B&nbsp;{{ hover.b }}</span>
           </template>
-          <span v-else class="value dim">no data</span>
+          <span v-else class="value dim">{{ hover.pending ? '…' : 'no data' }}</span>
         </template>
       </template>
 

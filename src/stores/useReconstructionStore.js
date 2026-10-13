@@ -227,11 +227,15 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
   // per open and re-runs when this moves, so pruning a bad GCP updates the overview.
   const healthDirty = ref(0)
 
-  // Products (DEM + orthophoto): large typed arrays — shallowRef so the planes stay
-  // PLAIN. Persisted by opfs.saveProduct.
+  // Products (DEM + orthophoto) — shallowRef so the planes stay PLAIN. Persisted by
+  // opfs.saveProduct.
   //   dem:   { width, height, gsd, originX, originY, data, mask, zMin, zMax,
   //            crs, unit, previewBlob, previewUrl }
-  //   ortho: { width, height, rgba, covered, previewBlob, previewUrl }
+  //   ortho: { width, height, gsd, originX, originY, frame, crs, unit, covered, stats,
+  //            cog, cogSaved?, tileSize, previewBlob, previewUrl }
+  //          NO pixel plane: `cog` (a Blob/File) is a tiled, overviewed RGBA GeoTIFF
+  //          of any size, read a window at a time (viewer tiles, hover, clip, export).
+  //          `cogSaved` = its committed OPFS file, so a re-save reuses it.
   // The preview is a PNG Blob (off the V8 heap; a 4096² preview was ~100 MB as a
   // base64 string) plus its blob: URL for the viewer and the map layer, made here
   // when a product enters the store and revoked when its record is replaced.
@@ -431,8 +435,23 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     if (kind === 'dem') dem.value = renamed
     else ortho.value = renamed
     log(`Renamed product "${previous}" → "${trimmed}"`, 'info', 'Products', { channel: 'activity' })
-    if (isPersisting()) opfs.saveProduct(projects.currentProjectId, kind, renamed).catch(() => {})
+    saveProductRecord(kind, renamed)
     return true
+  }
+
+  // Persist a DEM/ortho. An ortho's record is then pointed at the committed COG
+  // file (if it is still the current ortho), so the worker's in-memory Blob can go
+  // and the next save of the same ortho reuses the file instead of rewriting it.
+  // Only the LATEST save may do that: an earlier one's file is collected by the next.
+  const productSaveSeq = { dem: 0, ortho: 0 }
+  function saveProductRecord(kind, record) {
+    if (!isPersisting()) return
+    const projectId = projects.currentProjectId, seq = ++productSaveSeq[kind]
+    opfs.saveProduct(projectId, kind, record).then((saved) => {
+      if (kind !== 'ortho' || !saved?.cogSaved || seq !== productSaveSeq[kind] || projectId !== projects.currentProjectId) return
+      const now = ortho.value
+      if (now && now.createdAt === record.createdAt) ortho.value = { ...now, cog: saved.cog, cogSaved: saved.cogSaved }
+    }).catch(() => {})
   }
 
   // Show/hide a computed DEM/ortho on the map. Refused (logged, false) when the
@@ -1758,8 +1777,11 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
         photos.push({ uuid: m.uuid, name: im.name, url: im.computeUrl ?? im.url,
           K: { fx: cam.K.fx, fy: cam.K.fy, cx: cam.K.cx, cy: cam.K.cy }, dist, selfCal, fiducial })
       }
+      // The machine's memory gate (Settings ▸ Compute): the worker sizes its map/photo
+      // cache from it and refuses, with the figures, a run whose working set exceeds it.
+      const memBudgetBytes = settings.memBudgetBytes > 0 ? settings.memBudgetBytes : DEFAULT_BUDGET_BYTES
       const res = await workerGenerateOrtho(
-        { surface, maps: mapsPayload, streamed, settings, images: photos },
+        { surface, maps: mapsPayload, streamed, settings: { ...settings, memBudgetBytes }, images: photos },
         { onLog: (m, l, c) => log(m, l, c), onProgress: (dn, t, lbl, f) => onProgress?.(dn, t, lbl, f) },
       )
       if (!stillCurrent()) return
@@ -1773,7 +1795,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
           ? (dem.value?.frameStamp ?? frameStampOf(resolved))
           : frameStampOf(resolved),
       })
-      if (isPersisting()) opfs.saveProduct(projects.currentProjectId, 'ortho', ortho.value).catch(() => {})
+      saveProductRecord('ortho', ortho.value)
       reconStatus.value = 'done'
     } catch (err) {
       if (!stillCurrent()) return
@@ -2361,8 +2383,15 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
 
     // Restore persisted raster products (DEM / ortho), if any.
     report('Reading the DEM / orthophoto…')
-    const [savedDem, savedOrtho] = await productsRead
+    let [savedDem, savedOrtho] = await productsRead
     if (!isCurrentRestore()) return
+    if (savedOrtho?.outdated) {
+      // Saved before orthophotos were stored as tiled GeoTIFFs; that shape is not read.
+      log('The saved orthophoto uses an older storage format and was removed — rebuild it (Products ▸ Orthophoto)',
+        'warn', 'Products')
+      savedOrtho = null
+      opfs.deleteProduct(projectId, 'ortho').catch(() => {})
+    }
     dem.value = withPreviewUrl(savedDem)
     ortho.value = withPreviewUrl(savedOrtho)
     if (savedDem || savedOrtho) {

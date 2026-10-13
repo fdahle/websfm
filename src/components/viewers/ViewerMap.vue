@@ -493,13 +493,15 @@ const rasterLayers = new Map() // id → ImageLayer
 const external = useExternalStore()
 let rasterSync = 0
 async function makeRasterLayer(r) {
-  // A computed DEM/ortho (`product: true`, core/products/productLayers.js) has no
-  // tiled original in the external store, so it always draws its preview.
-  if (!r.product && [1, 2].includes(r.photometric ?? 1)) {
+  // An imported raster draws its tiled display file; a computed ortho (`product:
+  // true`, core/products/productLayers.js) its stored COG when the layer carries one.
+  // A computed DEM, or a product the COG cannot place here, draws its preview.
+  if (r.product ? !!r.cog : [1, 2].includes(r.photometric ?? 1)) {
     try {
-      const file = await external.displayFile(r.id)
+      const file = r.product ? r.cog : await external.displayFile(r.id)
       if (file) {
         const layer = await createGpuRasterLayer(r, file)
+        layer.set('fileKey', r.fileKey ?? r.id)
         layer.once('postrender', () => { r.gpuReady = true })
         return layer
       }
@@ -546,13 +548,20 @@ async function syncRasterLayers() {
     const existing = rasterLayers.get(r.id)
     if (existing) {
       existing.setOpacity(r.opacity ?? 1)
-      if (existing.get('gpuRaster')) { existing.setStyle(gpuRasterStyle(r)); continue }
-      // Opacity is a live property; the image itself is not. A restyle (or a
-      // kind flip) replaces previewDataUrl in place on the same record, so an
-      // unchanged url is the ONLY case that may keep its source — otherwise the
-      // layer would keep painting the pre-restyle PNG until the view is torn
-      // down, which is exactly the "reload the view to see it" bug.
-      if (existing.get('previewUrl') === r.previewDataUrl) continue
+      if (existing.get('gpuRaster')) {
+        // A GPU layer restyles in place while it draws the same file; a rebuilt
+        // product (new fileKey), or one that must now draw its preview, is rebuilt.
+        if ((!r.product || r.cog) && existing.get('fileKey') === (r.fileKey ?? r.id)) {
+          existing.setStyle(gpuRasterStyle(r)); continue
+        }
+      } else if (existing.get('previewUrl') === r.previewDataUrl) {
+        // Opacity is a live property; the image itself is not. A restyle (or a
+        // kind flip) replaces previewDataUrl in place on the same record, so an
+        // unchanged url is the ONLY case that may keep its source — otherwise the
+        // layer would keep painting the pre-restyle PNG until the view is torn
+        // down, which is exactly the "reload the view to see it" bug.
+        continue
+      }
       disposeRasterLayer(existing)
       rasterLayers.delete(r.id)
     }

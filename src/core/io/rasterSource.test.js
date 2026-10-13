@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { createFlatRasterSource, productDescriptor, createProductRasterSource } from './rasterSource.js'
+import { createFlatRasterSource, productDescriptor, createProductRasterSource, productTiledMeta } from './rasterSource.js'
 import { rasterizeDem, cellCenter } from '../products/dem.js'
 
 const meta = {
@@ -102,11 +102,23 @@ describe('computed products as raster sources', () => {
     expect(src.rgba()).toBeNull()
   })
 
-  it('exposes an ortho through rgba with no value plane', () => {
-    const rgba = new Uint8ClampedArray(4)
-    const src = createProductRasterSource('ortho', { width: 1, height: 1, gsd: 1, originX: 0, originY: 1, rgba })
-    expect(src.rgba()).toBe(rgba)
+  it('reads an ortho through its injected window reader, never a plane', async () => {
+    const calls = []
+    const readRawWindow = async (rect, level, opts) => { calls.push([rect, level, opts]); return { channels: [[1], [2], [3], [255]] } }
+    const src = createProductRasterSource('ortho', { width: 4, height: 3, gsd: 1, originX: 0, originY: 3 }, { readRawWindow })
+    expect(src.rgba()).toBeNull()
     expect(src.unsafePlane()).toBeNull()
+    expect((await src.readWindow({ col: 2, row: 1, width: 1, height: 1 }, 0, { bands: [0, 1, 2, 3] })).channels[3]).toEqual([255])
+    expect(calls).toEqual([[{ col: 2, row: 1, width: 1, height: 1 }, 0, { bands: [0, 1, 2, 3] }]])
+  })
+
+  it('describes a computed ortho\'s COG for the tiled layer, with its alpha band', () => {
+    const product = { width: 4, height: 3, gsd: 0.5, originX: 10, originY: 20, crs: 'EPSG:3031', createdAt: 7, cog: new Blob([]) }
+    expect(productTiledMeta('ortho', product)).toMatchObject({ id: 'product:ortho:7', crs: 'EPSG:3031', bands: 4, alphaBand: 3,
+      photometric: 2, geoTransform: { originX: 10, originY: 20, scaleX: 0.5, scaleY: -0.5 } })
+    expect(productTiledMeta('ortho', { ...product, crs: 'local' }).crs).toBeNull()
+    expect(productTiledMeta('ortho', { ...product, cog: null })).toBeNull()
+    expect(productTiledMeta('dem', product)).toBeNull()
   })
 })
 

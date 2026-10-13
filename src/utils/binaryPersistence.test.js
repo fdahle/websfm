@@ -138,3 +138,40 @@ it('stores a product preview as a PNG sidecar, never inline in the JSON', async 
   expect(back.previewBlob.type).toBe('image/png')
   expect([...new Uint8Array(await back.previewBlob.arrayBuffer())]).toEqual([137, 80, 78, 71])
 })
+
+describe('orthophoto (a COG file, never a plane)', () => {
+  const cogBytes = Uint8Array.from({ length: 300 }, (_, i) => i % 251)
+  const ortho = (extra = {}) => ({ width: 3000, height: 2000, gsd: 0.1, originX: 0, originY: 0, covered: 5, name: 'Orthophoto',
+    cog: new Blob([cogBytes], { type: 'image/tiff' }), previewBlob: new Blob([new Uint8Array([137, 80])], { type: 'image/png' }),
+    previewUrl: 'blob:x', ...extra })
+
+  it('saves the COG as a generation file and loads it back as a handle, with nothing read', async () => {
+    const saved = await opfs.saveProduct('binary-test', 'ortho', ortho())
+    expect(saved.cogSaved.bytes).toBe(300)
+    expect(new Uint8Array(await saved.cog.arrayBuffer())).toEqual(cogBytes)
+    const products = await dir.getDirectoryHandle('products')
+    const meta = JSON.parse(new TextDecoder().decode(products.files.get('ortho.json')))
+    expect(meta.cog).toBeUndefined(); expect(meta.cogSaved).toBeUndefined(); expect(meta.rgba).toBeUndefined()
+    const back = await opfs.loadProduct('binary-test', 'ortho')
+    expect(back.width).toBe(3000)
+    expect(back.cogSaved).toEqual(saved.cogSaved)
+    expect(new Uint8Array(await back.cog.arrayBuffer())).toEqual(cogBytes)
+    expect([...new Uint8Array(await back.previewBlob.arrayBuffer())]).toEqual([137, 80])
+  })
+
+  it('a rename reuses the committed COG instead of rewriting it', async () => {
+    const saved = await opfs.saveProduct('binary-test', 'ortho', ortho())
+    control.written = []
+    const again = await opfs.saveProduct('binary-test', 'ortho', { ...ortho(saved), name: 'Renamed' })
+    expect(control.written.some((n) => n.endsWith('.cog.bin'))).toBe(false)
+    expect(again.cogSaved).toEqual(saved.cogSaved)
+    expect((await opfs.loadProduct('binary-test', 'ortho')).name).toBe('Renamed')
+    control.written = null
+  })
+
+  it('reports an ortho saved in the old whole-plane shape as outdated', async () => {
+    const products = await dir.getDirectoryHandle('products')
+    products.files.set('ortho.json', new TextEncoder().encode(JSON.stringify({ width: 1, height: 1, binaryFiles: {} })))
+    expect(await opfs.loadProduct('binary-test', 'ortho')).toEqual({ outdated: true })
+  })
+})

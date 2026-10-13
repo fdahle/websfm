@@ -73,7 +73,7 @@ export const WORKFLOW_BLOCKS = [
     { ...ORTHO_DEFAULTS }, [
       { key: 'surface', label: 'Surface', type: 'select', options: ['dem', 'mesh', 'plane'] },
       { key: 'gsd', label: 'GSD (0 = auto)', type: 'number', min: 0 },
-      { key: 'blend', label: 'Blending', type: 'select', options: ['best', 'average'] },
+      { key: 'blend', label: 'Blending', type: 'select', options: ['mosaic', 'best', 'average'] },
     ]),
   automated('gen-mesh', 'Build Mesh', 'Products', ['dense'], ['mesh'], { preset: 'medium', ...MESH_DEFAULTS }, [
     { key: 'preset', label: 'Preset', type: 'select', options: ['low', 'medium', 'high', 'custom'] },
@@ -232,7 +232,8 @@ export function resolveWorkflowSettings(type, settings = {}, runtime = {}) {
   }
   if (type === 'gen-ortho') {
     const v = { ...ORTHO_DEFAULTS, ...value }
-    return { ...v, gsd: v.gsd > 0 ? v.gsd : 0, depthTolRel: v.depthTolRel / 100, maxCost: v.maxCost > 0 ? v.maxCost : Infinity }
+    return { ...v, gsd: v.gsd > 0 ? v.gsd : 0, depthTolRel: v.depthTolRel / 100, maxCost: v.maxCost > 0 ? v.maxCost : Infinity,
+      memBudgetBytes: runtime.memBudgetBytes }
   }
   if (type === 'gen-mesh') return { ...MESH_DEFAULTS, ...value, ...(MESH_PRESETS[value.preset] || {}) }
   return value

@@ -3,6 +3,7 @@ import { ref, computed, watch } from 'vue'
 import ModalShell from './ui/ModalShell.vue'
 import SettingsField from './ui/SettingsField.vue'
 import { EXPORT_DEFAULTS } from '../../core/defaults.user.js'
+import { MAX_ORTHO_IMAGE_CELLS } from '../../core/products/exporters.js'
 
 // One reusable export dialog, parameterised by `kind`. It collects a format + a
 // few settings and emits them on run; App.vue maps the result to the right
@@ -18,6 +19,9 @@ const props = defineProps({
   // A user orientation (Tools ▸ Model ▾ ▸ Orient model) exists → the export can be
   // levelled, re-origined and turned. Combines with scale; a georeference outranks it.
   hasOrientation: { type: Boolean, default: false },
+  // The orthophoto's cell count: a PNG/JPEG is made whole through a canvas, so one
+  // beyond MAX_ORTHO_IMAGE_CELLS is offered greyed, with the reason.
+  orthoCells: { type: Number, default: 0 },
 })
 
 const hasFrame = computed(() => props.hasGeoref || props.hasScale || props.hasOrientation)
@@ -102,7 +106,13 @@ const CONFIG = {
   },
 }
 
-const cfg = computed(() => CONFIG[props.kind])
+const imageTooLarge = computed(() => props.kind === 'ortho' && props.orthoCells > MAX_ORTHO_IMAGE_CELLS)
+const cfg = computed(() => {
+  const c = CONFIG[props.kind]
+  if (!imageTooLarge.value) return c
+  const why = ` — too large (at most ${Math.sqrt(MAX_ORTHO_IMAGE_CELLS).toLocaleString()}² px); use a GeoTIFF`
+  return { ...c, formats: c.formats.map((f) => (f.value === 'png' || f.value === 'jpeg' ? { ...f, label: f.label + why, disabled: true } : f)) }
+})
 
 // `format` is chosen dynamically per kind; the rest are the single source of truth
 // in core/defaults.user.js.
@@ -264,10 +274,12 @@ function run() {
     <!-- Ortho -->
     <template v-else-if="kind === 'ortho'">
       <p v-if="isCog" class="field-hint">
-        Internally tiled with halving overviews, for web/GIS delivery of a large
-        orthophoto. Readable anywhere a normal GeoTIFF is.
+        Internally tiled with halving overviews and DEFLATE compression — the
+        orthophoto exactly as it is stored, for web/GIS delivery. Readable anywhere a
+        normal GeoTIFF is.
       </p>
-      <SettingsField v-if="isTiff" label="Compression" label-for="ocomp">
+      <!-- The COG export is the stored file itself, always DEFLATE. -->
+      <SettingsField v-if="isTiff && !isCog" label="Compression" label-for="ocomp">
         <select id="ocomp" v-model="settings.compression" class="field-input field-select">
           <option value="none">None (uncompressed)</option>
           <option value="deflate">DEFLATE (lossless)</option>

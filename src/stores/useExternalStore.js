@@ -283,7 +283,7 @@ export const useExternalStore = registerProjectStore(defineStore('external', () 
     // An ortho has no scalar value plane — sampleAt returns null and callers use
     // the geometry helpers (worldToPixel) plus `rgba()` for colour.
     return createFlatRasterSource(meta, null, { rgba, previewDataUrl: meta.previewDataUrl,
-      readRawWindow: (rect) => readRasterWindow(meta.id, { rect }),
+      readRawWindow: (rect, _level, opts = {}) => readRasterWindow(meta.id, { rect, ...opts }),
     })
   }
 

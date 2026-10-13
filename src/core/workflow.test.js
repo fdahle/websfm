@@ -67,6 +67,7 @@ describe('workflow schema', () => {
     expect(resolveWorkflowSettings('reconstruct', { preset: 'high' }).baIterations).toBe(60)
     expect(resolveWorkflowSettings('dense', { depthTolPct: 2 }, { memBudgetBytes: 123 }).depthTolRel).toBe(0.02)
     expect(resolveWorkflowSettings('gen-ortho', { depthTolRel: 3 }).depthTolRel).toBe(0.03)
+    expect(resolveWorkflowSettings('gen-ortho', {}, { memBudgetBytes: 123 }).memBudgetBytes).toBe(123)
   })
 
   it('resets detector-specific limits when switching to SuperPoint', () => {

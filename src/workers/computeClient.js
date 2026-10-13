@@ -307,13 +307,19 @@ export const densify = streamingOp('densify')
 export const generateDem = streamingOp('generateDem')
 
 // Products — orthophoto (reproject each DEM cell into the cached depth maps).
-// Resolves to { width, height, rgba:Uint8Array, covered, previewBlob }.
-// See core/products/ortho.js.
+// Resolves to { width, height, gsd, originX, originY, covered, stats, cog: Blob (the
+// tiled RGBA GeoTIFF — the ortho has no other pixel store), previewBlob, … }.
+// See core/products/ortho.js orthorectifyTiled and workers/ops/products.js.
 export const generateOrtho = streamingOp('generateOrtho')
 
 // Tools ▸ Products ▾ — contours / terrain derivatives / polygon clip of a DEM or
-// ortho (see workers/ops/products.js `demTool`). The plane is a copy, transferred in.
+// ortho (see workers/ops/products.js `demTool`). A DEM plane is a copy, transferred
+// in; an ortho is clipped from a window of its COG file, read in the worker.
 export const demTool = streamingOp('demTool')
+
+// An orthophoto file made from its stored COG — { file, format: 'geotiff'|'png'|'jpeg',
+// deflate, quality, crs } → { blob, width, height } (workers/ops/export.js exportOrtho).
+export const exportOrthoFile = streamingOp('exportOrtho')
 
 // Products — mesh (screened Poisson over the dense cloud, see core/products/mesh.js).
 // Input { dense:{ count, pos, col, nrm }, settings }; resolves to

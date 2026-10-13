@@ -7,6 +7,7 @@ import WarnBox from './ui/WarnBox.vue'
 import CrsSuggestion from './ui/CrsSuggestion.vue'
 import GlossaryTerm from '../glossary/GlossaryTerm.vue'
 import { ORTHO_DEFAULTS } from '../../core/defaults.user.js'
+import { useComputeSettings } from '../../composables/useComputeSettings.js'
 
 // Build Orthophoto. Reprojects each cell of a SURFACE through the cached depth
 // maps (occlusion via their depth planes, colour from their RGB planes). The
@@ -72,10 +73,21 @@ watch(() => props.canGeoreference, (ok) => {
   if (!ok && settings.value.crs === 'project') settings.value.crs = 'local'
 })
 
+const blendHint = computed(() => ({
+  mosaic: 'Each area comes from the photo looking most straight down on it; seams are then evened out.',
+  best: 'Per pixel, the view whose depth matched best. Sources can switch from pixel to pixel.',
+  average: 'Blends every view that sees a pixel. Smooth, but small misalignments ghost.',
+}[settings.value.blend] ?? ''))
+
+// The machine-level memory budget (Settings ▸ Compute), injected at run() like
+// Build DEM: it sizes the run's map/photo cache and gates its working set.
+const { memBudgetBytes } = useComputeSettings()
+
 function run() {
   const { depthTolRel, maxCost, gsd, ...rest } = settings.value
   emit('run', {
     ...rest,
+    memBudgetBytes: memBudgetBytes.value,
     // The surface is built at its own natural resolution and the ortho grid is
     // resampled to `gsd`; passing it through as the surface GSD too would make a
     // fine ortho pay for a needlessly fine mesh rasterisation.
@@ -141,20 +153,34 @@ function run() {
 
     <SettingsField label-for="ortho-gsd"
       :unit="outputUnit"
-      hint="Ortho cell size. 0 = the surface's own resolution. Finer than the surface is fine; the ortho is capped at 4,096 px per side (the log says when a GSD was coarsened).">
+      hint="Ortho cell size. 0 = the surface's own resolution. Finer than the surface is fine — down to the photos' own GSD. The stored GeoTIFF holds at most 4 GiB (~28,000 px square); the log says when a GSD was coarsened.">
       <template #label>
         <GlossaryTerm id="ground-sample-distance">Ground sample distance</GlossaryTerm>
       </template>
       <input id="ortho-gsd" v-model.number="settings.gsd" type="number" min="0" step="0.01" class="field-input" />
     </SettingsField>
 
-    <SettingsField label="View blending" label-for="ortho-blend"
-      hint="Best picks the lowest-cost view per cell; average blends all visible views.">
+    <SettingsField label="View blending" label-for="ortho-blend" :hint="blendHint">
       <select id="ortho-blend" v-model="settings.blend" class="field-input field-select">
-        <option value="best">Best view (sharpest)</option>
-        <option value="average">Average (smoother seams)</option>
+        <option value="mosaic">Mosaic (most nadir view, balanced seams)</option>
+        <option value="best">Best match (lowest matching cost per pixel)</option>
+        <option value="average">Average (all visible views)</option>
       </select>
     </SettingsField>
+
+    <!-- Both act only on a mosaic: best/average have no regions to balance or feather. -->
+    <template v-if="settings.blend === 'mosaic'">
+      <SettingsField label="Colour balance" label-for="ortho-balance"
+        hint="Evens out exposure between photos with one brightness gain per photo and colour, fitted where photos overlap.">
+        <label class="checkbox-row">
+          <input id="ortho-balance" v-model="settings.colourBalance" type="checkbox" class="checkbox" /> Enabled
+        </label>
+      </SettingsField>
+      <SettingsField label="Seam blending width" label-for="ortho-seam" unit="%"
+        hint="Width of the cross-fade at each seam, as a % of the orthophoto's shorter side (at most 128 px). 0 = hard seams.">
+        <input id="ortho-seam" v-model.number="settings.seamWidth" type="number" min="0" max="5" step="0.25" class="field-input" />
+      </SettingsField>
+    </template>
 
     <SettingsField label-for="ortho-tol" unit="%"
       hint="How closely a cell's depth must match a view's depth map to count as visible.">
@@ -165,7 +191,7 @@ function run() {
     </SettingsField>
 
     <SettingsField label-for="ortho-cost"
-      hint="Drop colours from poorly-matched (high-cost) pixels. 0 = keep all.">
+      hint="Never take colour where the depth map matched poorly (high cost), in every blending mode. 0 = keep all.">
       <template #label>
         Max <GlossaryTerm id="photometric-consistency">match cost</GlossaryTerm>
       </template>

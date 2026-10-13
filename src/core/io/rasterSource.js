@@ -36,19 +36,38 @@ export function productDescriptor(product) {
   }
 }
 
+// A computed orthophoto as the tiled GPU layer draws it (components/viewers/raster/
+// gpuRaster.js): the same fields an imported raster's RasterMeta carries, over its
+// stored COG — 8-bit RGB plus an alpha band. `fileKey` changes exactly when the file
+// does (a rebuild), so a layer knows when to reload. Null for a DEM (drawn from its
+// preview) or an ortho with no COG.
+export function productTiledMeta(kind, product) {
+  if (kind !== 'ortho' || !product?.cog) return null
+  const desc = productDescriptor(product)
+  if (!desc) return null
+  return {
+    id: `product:ortho:${product.createdAt ?? 0}`, fileKey: `product:ortho:${product.createdAt ?? 0}`,
+    kind: 'ortho', name: product.name ?? 'Orthophoto', crs: product.crs && product.crs !== 'local' ? product.crs : null,
+    width: desc.width, height: desc.height, geoTransform: desc.geoTransform,
+    bands: 4, bitsPerSample: 8, sampleFormat: 1, photometric: 2, alphaBand: 3,
+  }
+}
+
 // A computed DEM/orthophoto behind the same RasterSource boundary as an imported
 // raster, so tools never ask which kind they were handed. A DEM's value plane
 // already marks nodata as NaN (its `mask` mirrors that, plus filled cells); an
-// ortho has no value plane, only display RGBA.
-export function createProductRasterSource(kind, product) {
+// ortho has no plane at all — its pixels live in its stored COG, read a window at a
+// time through `readRawWindow(rect, level, { bands })` (injected: the read runs in a
+// worker, which this pure module cannot reach).
+export function createProductRasterSource(kind, product, { readRawWindow = null } = {}) {
   const desc = productDescriptor(product)
   if (!desc) return null
   const meta = { width: desc.width, height: desc.height, bands: kind === 'dem' ? 1 : 4,
     dtype: kind === 'dem' ? 'float32' : 'uint8', nodata: null, geoTransform: desc.geoTransform,
     crs: product.crs ?? null }
   return createFlatRasterSource(meta, kind === 'dem' ? (product.data ?? null) : null, {
-    rgba: kind === 'dem' ? null : (product.rgba ?? null),
     previewDataUrl: product.previewUrl ?? null,
+    readRawWindow: kind === 'dem' ? null : readRawWindow,
   })
 }
 
@@ -85,8 +104,9 @@ export function createFlatRasterSource(meta, data, { rgba = null, previewDataUrl
     },
     // Pixel-space read. `level` is accepted and ignored — a flat source has only
     // full resolution; a COG source will use it to pick an overview.
-    readWindow({ col = 0, row = 0, width = meta.width, height = meta.height } = {}, _level = 0) {
-      if (readRawWindow) return readRawWindow({ col, row, width, height }, _level)
+    // `options.bands` (0-based) asks a window-reading source for more than band 0.
+    readWindow({ col = 0, row = 0, width = meta.width, height = meta.height } = {}, _level = 0, options = {}) {
+      if (readRawWindow) return readRawWindow({ col, row, width, height }, _level, options)
       if (!data) throw new Error('Raw raster pixels are unavailable; re-import the original raster')
       const c0 = Math.max(0, Math.floor(col))
       const r0 = Math.max(0, Math.floor(row))

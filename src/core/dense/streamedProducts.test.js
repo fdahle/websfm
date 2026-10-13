@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import { fuseDepthMaps, fuseDepthMapsStreamed, finishFusion, mergeFusionCounters } from './mvs.js'
-import { orthorectify, orthorectifyStreamed } from '../products/ortho.js'
+import { orthorectify, orthorectifyStreamed, orthorectifyTiled } from '../products/ortho.js'
+import { resampleSurface, resampledGeometry } from '../products/surface.js'
+import { orthoStats } from '../eval/orthoStats.js'
 import { serializeDepthMap } from './depthMapCodec.js'
 import { readDepthFiles, readDepthOnly } from './depthFileReader.js'
 
@@ -151,6 +153,127 @@ describe('bounded map loading', () => {
     const actual = await orthorectifyStreamed(grid, entries, i => readDepthFiles(entries[i]), p => p, opts)
     expect(actual).toEqual(expected)
     if (blend === 'best') expect(new Set(expected.labels).size).toBeGreaterThan(2) // ≥ 2 sources + unlabelled
+  })
+  // A surface over both camera groups (near x ≈ 0, far x ≈ 30), with relief inside the
+  // occlusion tolerance and a ragged hole, so blocks see different maps and the gap
+  // fill and the stats' neighbours cross block edges.
+  function tiledScene() {
+    const ms = [...maps(), ...maps().map((m, j) => ({ ...m, uuid: `far${j}`, t: [m.t[0] - 30, 0, 10] }))]
+    const w = 70, h = 20, n = w * h
+    const data = new Float32Array(n), mask = new Uint8Array(n)
+    for (let r = 0; r < h; r++) for (let c = 0; c < w; c++) {
+      const i = r * w + c
+      if ((c - 20) ** 2 + (r - 9) ** 2 < 9 || (c * 7 + r * 3) % 23 === 0) { data[i] = NaN; continue }
+      data[i] = 0.05 * Math.sin(c / 3) * Math.cos(r / 4); mask[i] = 1
+    }
+    return { ms, surface: { width: w, height: h, gsd: 0.6, originX: -6, originY: 6, data, mask } }
+  }
+  // The blocks' cores laid back into one plane.
+  function assemble(blocks, w, h, withLabels) {
+    const rgba = new Uint8ClampedArray(w * h * 4), labels = withLabels ? new Uint16Array(w * h) : null
+    for (const b of blocks) for (let r = 0; r < b.height; r++) {
+      rgba.set(b.rgba.subarray(r * b.width * 4, (r + 1) * b.width * 4), ((b.row0 + r) * w + b.col0) * 4)
+      if (labels) labels.set(b.labels.subarray(r * b.width, (r + 1) * b.width), (b.row0 + r) * w + b.col0)
+    }
+    return { rgba, labels }
+  }
+  // A photo per map at twice the depth map's size, its colour a function of the map.
+  const photoFor = (mi, m) => ({ width: 64, height: 64, map: (u, v) => ({ x: 2 * u + 0.5, y: 2 * v + 0.5 }),
+    data: Uint8ClampedArray.from({ length: 64 * 64 * 4 }, (_, i) => (i * 11 + mi * 37) % 256) })
+  it.each([
+    [{ blend: 'best', maxCost: 0.3 }, 0.25, 8],
+    [{ blend: 'average', maxCost: 0.3 }, 0.25, 16],
+    [{ blend: 'best', fillRadius: 3, fillMethod: 'nearest' }, 0.6, 5],
+    [{ blend: 'best', fillMethod: 'none' }, 0.45, 7],
+    [{ blend: 'best', photos: true }, 0.25, 12],
+    [{ blend: 'average', photos: true, affine: true }, 0.3, 9],
+  ])('tiled orthorectification ≡ the single pass incl. labels and stats: %j gsd %s block %s', async ({ photos, affine, ...opts }, gsd, blockSize) => {
+    const { ms, surface } = tiledScene(), entries = files(ms)
+    // An affine frame at survey-sized coordinates exercises the linearisation.
+    const toSfm = affine ? ([x, y, z]) => [0.5 * (x - 2.5e6) + 0.1 * (y - 1.2e6), 0.5 * (y - 1.2e6) - 0.1 * (x - 2.5e6), 0.5 * z]
+      : (p) => p
+    const shift = affine ? ({ originX, originY, ...g }) => ({ ...g, originX: 2 * originX + 2.5e6, originY: 2 * originY + 1.2e6, gsd: 2 * g.gsd }) : (g) => g
+    const surf = affine ? { ...shift(surface), data: surface.data.map((z) => 2 * z), mask: surface.mask } : surface
+    const g = affine ? 2 * gsd : gsd
+    const geom = resampledGeometry(surf, g, 1 << 16)
+    const loadImage = photos ? async (mi, m) => photoFor(mi, m) : null
+    const grid = resampleSurface(surf, g, { maxGrid: 1 << 16 })
+    const expected = await orthorectifyStreamed(grid, entries, (i) => readDepthFiles(entries[i]), toSfm, opts, () => {}, loadImage)
+    for (const cacheBytes of [0, 1 << 30]) {
+      const blocks = []
+      const progress = []
+      const actual = await orthorectifyTiled(surf, geom, entries, (i) => readDepthFiles(entries[i]), toSfm,
+        { ...opts, blockSize, cacheBytes }, { loadImage, onBlock: (b) => blocks.push(b), onProgress: (d) => progress.push(d) })
+      const { rgba, labels } = assemble(blocks, geom.width, geom.height, !!expected.labels)
+      expect(blocks.length).toBe(actual.blocks)
+      expect(actual.blocks).toBeGreaterThan(4)
+      expect(Buffer.from(rgba.buffer).equals(Buffer.from(expected.rgba.buffer))).toBe(true)
+      if (expected.labels) expect([...labels]).toEqual([...expected.labels])
+      expect({ covered: actual.covered, sampled: actual.sampled, filled: actual.filled })
+        .toEqual({ covered: expected.covered, sampled: expected.sampled, filled: expected.filled })
+      expect(actual.stats).toEqual(orthoStats(expected.rgba, grid.width, grid.height, expected.labels))
+      expect(actual.surfaceCells).toBe(grid.mask.reduce((n, v) => n + v, 0))
+      // The cull: not every block reads every map.
+      expect(actual.visits).toBeLessThan(actual.blocks * ms.length)
+      for (let i = 1; i < progress.length; i++) expect(progress[i]).toBeGreaterThan(progress[i - 1])
+      if (cacheBytes === 0) expect(actual.mapLoads).toBe(actual.visits)
+      else expect(actual.mapLoads).toBe(ms.length)
+    }
+    expect(expected.covered).toBeGreaterThan(100)
+  })
+  // The mosaic has no whole-grid reference implementation: its reference is the same
+  // code with one block covering the grid. Small blocks must reproduce it bit for bit —
+  // labels, feathering, the gains' effect, gap fill and stats — whatever the cache.
+  it.each([
+    [{ seamWidth: 0 }, 0.25, 7],
+    [{ seamWidth: 15 }, 0.25, 6],
+    [{ seamWidth: 10, colourBalance: true, photos: true }, 0.3, 8],
+    [{ seamWidth: 20, colourBalance: true, photos: true, affine: true, fillRadius: 3, fillMethod: 'nearest' }, 0.25, 5],
+    [{ seamWidth: 10, maxCost: 0.3 }, 0.45, 4],
+  ])('a tiled mosaic ≡ one block: %j gsd %s block %s', async ({ photos, affine, ...rest }, gsd, blockSize) => {
+    const opts = { blend: 'mosaic', ...rest }
+    const { ms, surface } = tiledScene(), entries = files(ms)
+    const toSfm = affine ? ([x, y, z]) => [0.5 * (x - 2.5e6) + 0.1 * (y - 1.2e6), 0.5 * (y - 1.2e6) - 0.1 * (x - 2.5e6), 0.5 * z]
+      : (p) => p
+    const surf = affine
+      ? { ...surface, originX: 2 * surface.originX + 2.5e6, originY: 2 * surface.originY + 1.2e6, gsd: 2 * surface.gsd, data: surface.data.map((z) => 2 * z) }
+      : surface
+    const geom = resampledGeometry(surf, affine ? 2 * gsd : gsd, 1 << 16)
+    const loadImage = photos ? async (mi, m) => photoFor(mi, m) : null
+    const tile = async (bs, cacheBytes) => {
+      const blocks = []
+      const res = await orthorectifyTiled(surf, geom, entries, (i) => readDepthFiles(entries[i]), toSfm,
+        { ...opts, blockSize: bs, cacheBytes }, { loadImage, onBlock: (b) => blocks.push(b) })
+      return { res, ...assemble(blocks, geom.width, geom.height, true) }
+    }
+    const one = await tile(1 << 16, 1 << 30)
+    expect(one.res.blocks).toBe(1)
+    expect(one.res.covered).toBeGreaterThan(100)
+    expect(new Set(one.labels).size).toBeGreaterThan(2)
+    if (rest.colourBalance) expect(one.res.mosaic.balance.pairs).toBeGreaterThan(0)
+    for (const cacheBytes of [0, 1 << 30]) {
+      const many = await tile(blockSize, cacheBytes)
+      expect(many.res.blocks).toBeGreaterThan(4)
+      expect(Buffer.from(many.rgba.buffer).equals(Buffer.from(one.rgba.buffer))).toBe(true)
+      expect([...many.labels]).toEqual([...one.labels])
+      expect(many.res.stats).toEqual(one.res.stats)
+      expect(many.res.mosaic).toEqual(one.res.mosaic)
+      expect({ covered: many.res.covered, sampled: many.res.sampled }).toEqual({ covered: one.res.covered, sampled: one.res.sampled })
+      expect(many.res.stats).toEqual(orthoStats(one.rgba, geom.width, geom.height, one.labels))
+    }
+  })
+  it('tiles the surface\'s own grid (gsd 0) cell for cell, holes included', async () => {
+    const { ms, surface } = tiledScene()
+    const geom = resampledGeometry(surface, 0)
+    expect(geom.identity).toBe(true)
+    const expected = orthorectify(surface, ms, (p) => p, {})
+    const blocks = []
+    const actual = await orthorectifyTiled(surface, geom, ms, async (i) => ms[i], (p) => p, { blockSize: 6, mapsResident: true },
+      { onBlock: (b) => blocks.push(b) })
+    const { rgba, labels } = assemble(blocks, surface.width, surface.height, true)
+    expect([...rgba]).toEqual([...expected.rgba])
+    expect([...labels]).toEqual([...expected.labels])
+    expect(actual.covered).toBe(expected.covered)
   })
   it('rejects a truncated map before fusion', async () => {
     const entry = files(maps())[0]; entry.files.depth = new Blob([new Uint8Array(4)])
