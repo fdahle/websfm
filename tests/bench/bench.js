@@ -207,7 +207,10 @@ window.bench = {
   async depth({ ...overrides } = {}) {
     const { memBudgetBytes } = useComputeSettings()
     const { filterRelTol, maxDim, bestK, ...rest } = { ...DEPTHMAP_DEFAULTS, ...overrides }
-    const settings = { ...rest, filterRelTol: filterRelTol / 100, useGpu: overrides.useGpu ?? true, memBudgetBytes: memBudgetBytes.value }
+    // `memBudgetBytes` in the stage config overrides Settings ▸ Compute (e.g. to exercise
+    // the quality step-down); otherwise the app's own budget, as the modal passes it.
+    const settings = { ...rest, filterRelTol: filterRelTol / 100, useGpu: overrides.useGpu ?? true,
+      memBudgetBytes: overrides.memBudgetBytes ?? memBudgetBytes.value }
     if (maxDim > 0) settings.maxDim = maxDim
     if (bestK > 0) settings.bestK = bestK
     const t0 = performance.now()
