@@ -124,12 +124,17 @@ export function makeScanToPinhole({ K, dist = null, selfCal = null, fiducial = n
 //   sensors  — the sensor list (plain or reactive)
 export function makeFrameModelResolver({ summary = null, sensors = [] } = {}) {
   const sensorById = new Map((sensors || []).map((s) => [s.id, s]))
-  const selfCalBySensor = new Map((summary?.selfCalDistortion ?? []).map((d) => [d.sensorId, d]))
+  // A row is a sensor's, or — `sensorId` null — one sensorless image's (`imageUuid`):
+  // such an image self-calibrates as its own group (runRecord.js ▸ selfCalDistortion (rows built by selfCalFold.js)).
+  const rows = summary?.selfCalDistortion ?? []
+  const selfCalBySensor = new Map(rows.filter((d) => d.sensorId != null).map((d) => [d.sensorId, d]))
+  const selfCalByImage = new Map(rows.filter((d) => d.sensorId == null && d.imageUuid != null).map((d) => [d.imageUuid, d]))
   const fidByUuid = new Map((summary?.fiducialTransforms ?? []).map((t) =>
     [t.uuid, { A: t.A ?? null, transform: t.transform ?? null, frame: t.frame }]))
   return (image) => {
     const sensor = image?.sensorId != null ? sensorById.get(image.sensorId) : null
-    const sc = image?.sensorId != null ? selfCalBySensor.get(image.sensorId) : null
+    const sc = image?.sensorId != null ? selfCalBySensor.get(image.sensorId)
+      : image?.uuid != null ? selfCalByImage.get(image.uuid) : null
     const selfCal = sc && (sc.k1 || sc.k2 || sc.k3) ? { k1: sc.k1 || 0, k2: sc.k2 || 0, k3: sc.k3 || 0 } : null
     const fiducial = image?.uuid != null ? fidByUuid.get(image.uuid) ?? null : null
     return { dist: sensor ? distortionOf(sensor) : null, selfCal, fiducial,

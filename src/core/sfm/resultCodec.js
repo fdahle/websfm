@@ -79,8 +79,8 @@ export function attachPackedTracks(points, tracks) {
 }
 
 // Build lightweight point records around transferred/restored numeric buffers.
-// `pos` may be Float32 or Float64. Legacy persisted clouds omit colorMask, in
-// which case every stored colour is considered present for backward compatibility.
+// `pos` may be Float32 or Float64. Without a colorMask every stored colour counts
+// as present.
 export function makePackedPoints({
   pos, col = null, colorMask = null, viewUuids = [], vcount, vcam, vkp,
   vx = null, vy = null, missingColorIsUndefined = false,

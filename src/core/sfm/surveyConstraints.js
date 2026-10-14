@@ -1,6 +1,6 @@
 // Survey constraints for bundle adjustment — camera-position/orientation priors
 // and GCP anchors — built from a model and the external evidence. Pure: the
-// incremental pipeline (sfm.js) and the gradual-selection refinement
+// incremental pipeline (bundleSession.js) and the gradual-selection refinement
 // (gradualSelection.js) both build their constraints here, so a refinement BA can
 // never quietly drop what the original solve was held to (a GCP doming correction
 // undone by an unconstrained re-solve was the bug that motivated the split).

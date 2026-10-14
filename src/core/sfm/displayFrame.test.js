@@ -47,6 +47,14 @@ describe('makeFrameModelResolver', () => {
     expect(resolve({ uuid: 'u3', sensorId: 's3' }).fiducial.frame).toBe(frame)
     expect(resolve({ uuid: 'u4', sensorId: 's3' }).filmMissing).toBe(true)
   })
+  it("gives a sensorless image its own self-cal row, and no other image's", () => {
+    const resolve = makeFrameModelResolver({
+      summary: { selfCalDistortion: [{ sensorId: null, imageUuid: 'u1', k1: -0.05, k2: 0, k3: 0 }] },
+    })
+    expect(resolve({ uuid: 'u1', sensorId: null }).selfCal).toEqual({ k1: -0.05, k2: 0, k3: 0 })
+    expect(resolve({ uuid: 'u2', sensorId: null }).selfCal).toBeNull()
+    expect(resolve({ uuid: 'u1', sensorId: 's1' }).selfCal).toBeNull()
+  })
 })
 
 describe('GCP marks and guides cross the frame boundary', () => {

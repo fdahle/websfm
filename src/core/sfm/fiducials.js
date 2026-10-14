@@ -58,7 +58,7 @@ function solve3(N, b) {
 
 /**
  * Least-squares affine `scan px → camera mm` from paired observations.
- * `obs`: `[{ px, py, xMm, yMm }]` (the join of `image.fiducialObs` with the
+ * `obs`: `[{ px, py, xMm, yMm }]` (an image's fiducial detections joined with the
  * sensor's calibrated marks). Returns `null` when < 3 usable pairs or the system
  * is degenerate (collinear marks).
  *

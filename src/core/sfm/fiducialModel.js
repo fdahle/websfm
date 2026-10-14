@@ -31,58 +31,49 @@ export function classifyDetectionSlot(px, py, width, height, allowed = [...CORNE
   return best
 }
 
+// A film sensor's one fiducial record (`sensor.fiducialCalibration`): the camera
+// certificate (marks in mm, focal, principal point) plus how the raster slots map
+// onto it. Certificate marks entered before calibration live here too, with an
+// empty slot map and no fit — so the sensor table, the importers and Calibrate
+// fiducials all edit the values reconstruction reads.
+export function emptyFiducialCalibration(focalMm = 0) {
+  return {
+    version: 1, method: 'certificate', transform: 'affine', allowReflection: false,
+    slotMap: {}, marks: [], focalMm, ppxMm: 0, ppyMm: 0, scanPitchMm: null, fit: null,
+  }
+}
+
+// Calibrated = at least one raster slot maps onto a certificate mark. A record
+// holding only typed certificate marks is not, so slots stay the image-view marks.
+export function isFiducialCalibrated(cal) {
+  return !!cal?.marks?.length && Object.values(cal.slotMap || {}).some(Boolean)
+}
+
 export function calibratedFiducialPairs(image, sensor) {
   const cal = sensor?.fiducialCalibration
-  if (cal?.marks?.length && cal.slotMap) {
-    const byId = new Map(cal.marks.map((m) => [m.id, m]))
-    return (image?.fiducialDetections || []).flatMap((d) => {
-      const fidId = cal.slotMap[d.slot], m = byId.get(fidId)
-      return m ? [{ slot: d.slot, fidId, px: d.px, py: d.py, xMm: m.xMm, yMm: m.yMm }] : []
-    })
-  }
-  // One-release compatibility for pre-split projects.
-  const marks = sensor?.fiducials?.marks || []
-  const byId = new Map(marks.map((m) => [m.id, m]))
-  return (image?.fiducialObs || []).flatMap((o) => {
-    const m = byId.get(o.fidId)
-    return m ? [{ slot: null, fidId: o.fidId, px: o.px, py: o.py, xMm: m.xMm, yMm: m.yMm }] : []
+  if (!cal?.marks?.length || !cal.slotMap) return []
+  const byId = new Map(cal.marks.map((m) => [m.id, m]))
+  return (image?.fiducialDetections || []).flatMap((d) => {
+    const fidId = cal.slotMap[d.slot], m = byId.get(fidId)
+    return m ? [{ slot: d.slot, fidId, px: d.px, py: d.py, xMm: m.xMm, yMm: m.yMm }] : []
   })
 }
 
 const NAMED_SLOTS = new Set([...CORNER_SLOTS, ...SIDE_SLOTS])
 const isSlotId = (id) => NAMED_SLOTS.has(id) || String(id).startsWith('custom-')
 
-// Mark-id observations (`{ fidId, px, py }`: a legacy click or an imported file
-// row) → anonymous detections. An id that already names a slot keeps it, so a
-// websfm export round-trips; any other id (a certificate id like "F1") is placed
-// by position and kept as `legacyFidId`, which deriveLegacyCalibration maps back.
-export function observationsToDetections(obs, width, height, { family = 'legacy', source = 'manual' } = {}) {
+// Imported mark-id observations (`{ fidId, px, py }`, a file row) → anonymous
+// detections. An id that already names a slot keeps it, so a websfm export
+// round-trips; any other id (a certificate id like "F1") is placed by position and
+// kept as `markId`, which Calibrate fiducials offers as that slot's mapping.
+export function observationsToDetections(obs, width, height, { family = 'generic', source = 'import' } = {}) {
   const allowed = obs.length > 4 ? [...CORNER_SLOTS, ...SIDE_SLOTS] : CORNER_SLOTS
   return obs.map((o) => {
     const named = isSlotId(o.fidId)
     return {
       slot: named ? o.fidId : (classifyDetectionSlot(o.px, o.py, width, height, allowed) ?? `custom-${o.fidId}`),
       px: o.px, py: o.py, family, source, confidence: 1, reviewed: true,
-      ...(named ? {} : { legacyFidId: o.fidId }),
+      ...(named ? {} : { markId: o.fidId }),
     }
   })
 }
-
-export function migrateLegacyFiducialImage(image, sensor) {
-  if (image?.fiducialDetections?.length || !image?.fiducialObs?.length) return image?.fiducialDetections || []
-  return observationsToDetections(image.fiducialObs, image.meta?.width, image.meta?.height)
-}
-
-export function deriveLegacyCalibration(sensor, detections = []) {
-  if (sensor?.fiducialCalibration || !sensor?.fiducials?.marks?.length) return sensor?.fiducialCalibration ?? null
-  const slotMap = {}
-  for (const d of detections) if (d.legacyFidId && !slotMap[d.slot]) slotMap[d.slot] = d.legacyFidId
-  const f = sensor.fiducials
-  return {
-    version: 1, method: 'certificate', transform: 'affine', allowReflection: false,
-    slotMap, marks: f.marks.map((m) => ({ ...m })), focalMm: f.focalMm,
-    ppxMm: f.ppxMm ?? 0, ppyMm: f.ppyMm ?? 0, scanPitchMm: null,
-    fit: null, legacy: true,
-  }
-}
-

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
-import { fitComposedRadial, radialCurveOk } from './selfCalCompose.js'
+import { fitComposedRadial, fitComposedRadialSets, radialCurveOk } from './selfCalCompose.js'
 import { distortPixel, undistortPixel } from './distortion.js'
+import { keypointSetFrom } from './keypointSet.js'
 
 const K = { fx: 1000, fy: 1000, cx: 640, cy: 480 }
 
@@ -40,6 +41,25 @@ describe('fitComposedRadial', () => {
     }
     expect(maxErr).toBeLessThan(0.5)
     expect(fit.fitRmsPx).toBeLessThan(0.5)
+  })
+})
+
+describe('fitComposedRadialSets', () => {
+  // One lens bag on two images of one sensor whose K differ (per-image EXIF focal): each
+  // was folded about its own K, so only a fit that normalises each set by ITS K finds
+  // the bag exactly; normalising both by the first K is off for the second image.
+  it('normalises each set by its own K', () => {
+    const bag = { k1: -0.1, k2: 0, k3: 0 }
+    const K2 = { ...K, fx: 1100, fy: 1100 }
+    const sets = [K, K2].map((k) => {
+      const folded = idealGrid()
+      return { pristine: keypointSetFrom(folded.map((p) => distortPixel(p.x, p.y, k, bag))), folded: keypointSetFrom(folded), K: k }
+    })
+    const own = fitComposedRadialSets(sets, K, {})
+    expect(Math.abs(own.k1 - bag.k1)).toBeLessThan(1e-6)
+    expect(own.fitRmsPx).toBeLessThan(1e-3)
+    const shared = fitComposedRadialSets(sets.map(({ pristine, folded }) => ({ pristine, folded })), K, {})
+    expect(shared.fitRmsPx).toBeGreaterThan(0.1)
   })
 })
 

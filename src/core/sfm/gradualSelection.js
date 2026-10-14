@@ -84,7 +84,7 @@ async function constrainedRefine(cameras, kept, bundleAdjust, constraints, { sub
       ...(anchorSetup ? { gcpAnchors: anchorSetup.anchors } : {}),
       ...(priorSet ? { cameraPriors: priorSet.priors } : {}) })
   // An unconstrained re-solve must not raise the residual. A constrained one may,
-  // within the allowance the main solve grants survey constraints (sfm.js).
+  // within the allowance the main solve grants survey constraints (bundleSession.js).
   const allowance = constrained
     ? Math.max(SFM_TUNING.cameraPriorMaxReprojIncreasePx, (result?.costBefore ?? 0) * SFM_TUNING.cameraPriorMaxReprojIncreaseFrac)
     : (result?.costBefore ?? 0) * 0.001

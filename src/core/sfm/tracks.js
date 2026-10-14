@@ -1,5 +1,7 @@
 import { makeP34flat } from './reconstruction.js'
-import { cameraCenter, projectWithDepth, triangulationAngle } from './geometry.js'
+import {
+  cameraCenter, projectWithDepth, triangulationAngle, projectPoint, medianTriangulationAngle,
+} from './geometry.js'
 import { hasKp, kpX, kpY } from './keypointSet.js'
 import { asPairList } from './matchCodec.js'
 
@@ -14,8 +16,8 @@ import { asPairList } from './matchCodec.js'
 //   maxReprojPx : reprojection gate (px)
 //
 // toNorm / camToP34flat / reprojErr live here (rather than in the orchestrator)
-// because retriangulatePairs consumes them; sfm.js imports them back for its own
-// use, keeping the dependency one-directional (sfm.js → tracks.js).
+// because retriangulatePairs consumes them, keeping the dependency one-directional
+// (the orchestrator → tracks.js).
 
 // Convert pixel coord to normalised (K^-1 applied).
 export function toNorm(px, py, K) {
@@ -216,4 +218,38 @@ export function completeTracks({
   let lifted = 0
   for (const [p, before] of sizeBefore) if (before <= 2 && tracks.viewCount(p) >= 3) lifted++
   return { added, rounds, lifted }
+}
+
+// Track filtering: remove the fragile/outlier geometry that BA can only
+// down-weight. Prunes individual observations behind the camera or beyond
+// maxReprojPx, then drops points left under-supported (<2 views) or whose
+// viewing rays are too parallel to triangulate stably (< minTriAngleDeg).
+// Removes the views and points from `tracks`; returns { obsRemoved, ptsRemoved }.
+export function filterTracks({ tracks, ids, cameras, keypointsAt, maxReprojPx, minTriAngleDeg }) {
+  let obsRemoved = 0, ptsRemoved = 0
+  tracks.forEachPoint((p) => {
+    const x = tracks.x(p), y = tracks.y(p), z = tracks.z(p)
+    tracks.forEachView(p, (img, kpIdx) => {
+      const cam = cameras.get(ids.uuid(img))
+      const set = keypointsAt(img)
+      if (!cam || !hasKp(set, kpIdx)) { tracks.removeView(p, img); obsRemoved++; return }
+      // Cheirality: point must be in front of the camera.
+      const zc = cam.R[2][0] * x + cam.R[2][1] * y + cam.R[2][2] * z + cam.t[2]
+      const proj = zc > 0 ? projectPoint(cam, x, y, z) : null
+      if (!proj || Math.hypot(proj.u - kpX(set, kpIdx), proj.v - kpY(set, kpIdx)) > maxReprojPx) {
+        tracks.removeView(p, img); obsRemoved++
+      }
+    })
+    if (tracks.viewCount(p) < 2) { ptsRemoved++; tracks.removePoint(p); return }
+    // Max parallax angle between any two surviving rays.
+    const cs = []
+    tracks.forEachView(p, (img) => { const c = cameras.get(ids.uuid(img)); if (c) cs.push(c) })
+    const pt = [{ x, y, z }]
+    let maxAng = 0
+    for (let i = 0; i < cs.length; i++)
+      for (let j = i + 1; j < cs.length; j++)
+        maxAng = Math.max(maxAng, medianTriangulationAngle(cs[i], cs[j], pt))
+    if (maxAng < minTriAngleDeg) { ptsRemoved++; tracks.removePoint(p) }
+  })
+  return { obsRemoved, ptsRemoved }
 }

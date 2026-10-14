@@ -123,7 +123,7 @@ export async function registerImages(ctx) {
   // calibration is baked into the keypoints. `runBundleAdjust`'s only divergence guard is
   // cost-based, so it passes such a pass cleanly.
   //
-  // The post-filter passes already gate on this (sfm.js ▸ distortionIdentifiable); the
+  // The post-filter passes already gate on this (refinePipeline.js ▸ distortionIdentifiable); the
   // in-registration solves did not, which left the identical failure live at this call
   // site. Same predicate, same reduction: not identifiable at all ⇒ 'none'; identifiable
   // focal but 2-view-dominated tracks ⇒ drop the radial terms and keep solving f.

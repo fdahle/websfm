@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { calibratedFiducialPairs, classifyDetectionSlot, deriveLegacyCalibration, migrateLegacyFiducialImage, observationsToDetections, slotsForPositions } from './fiducialModel.js'
+import {
+  calibratedFiducialPairs, classifyDetectionSlot, emptyFiducialCalibration, isFiducialCalibrated, observationsToDetections, slotsForPositions,
+} from './fiducialModel.js'
 
-describe('fiducial model split', () => {
+describe('fiducial model', () => {
   it('defines stable raster-relative corner and side slots', () => {
     expect(slotsForPositions('corners+sides')).toHaveLength(8)
     expect(classifyDetectionSlot(5, 5, 100, 100)).toBe('corner-tl')
@@ -13,19 +15,12 @@ describe('fiducial model split', () => {
     const sensor = { fiducialCalibration: { slotMap: { 'corner-tl': 'F1' }, marks: [{ id: 'F1', xMm: -10, yMm: -20 }] } }
     expect(calibratedFiducialPairs(image, sensor)[0]).toMatchObject({ fidId: 'F1', px: 5, xMm: -10 })
   })
-  it('migrates legacy observations and preserves their metric identity mapping', () => {
-    const sensor = { fiducials: { focalMm: 100, marks: [
-      { id: 'A', xMm: -10, yMm: -10 }, { id: 'B', xMm: 10, yMm: -10 },
-      { id: 'C', xMm: 10, yMm: 10 }, { id: 'D', xMm: -10, yMm: 10 },
-    ] } }
-    const image = { meta: { width: 100, height: 100 }, fiducialObs: [
-      { fidId: 'A', px: 2, py: 2 }, { fidId: 'B', px: 98, py: 2 },
-      { fidId: 'C', px: 98, py: 98 }, { fidId: 'D', px: 2, py: 98 },
-    ] }
-    const detections = migrateLegacyFiducialImage(image, sensor)
-    const calibration = deriveLegacyCalibration(sensor, detections)
-    expect(detections.map((d) => d.slot)).toEqual(['corner-tl', 'corner-tr', 'corner-br', 'corner-bl'])
-    expect(calibration.slotMap['corner-tl']).toBe('A')
+  it('treats a certificate without a slot map as uncalibrated', () => {
+    const marks = [{ id: 'F1', xMm: -10, yMm: -20 }]
+    expect(isFiducialCalibrated(emptyFiducialCalibration())).toBe(false)
+    expect(isFiducialCalibrated({ ...emptyFiducialCalibration(), marks })).toBe(false)
+    expect(isFiducialCalibrated({ ...emptyFiducialCalibration(), marks, slotMap: { 'corner-tl': '' } })).toBe(false)
+    expect(isFiducialCalibrated({ ...emptyFiducialCalibration(), marks, slotMap: { 'corner-tl': 'F1' } })).toBe(true)
   })
   it('keeps an imported slot id and places a mark id by position', () => {
     const d = observationsToDetections([
@@ -33,6 +28,6 @@ describe('fiducial model split', () => {
     ], 100, 100, { family: 'generic', source: 'import' })
     expect(d.map((x) => x.slot)).toEqual(['side-left', 'corner-tr', 'custom-x'])
     expect(d[0]).toEqual({ slot: 'side-left', px: 50, py: 50, family: 'generic', source: 'import', confidence: 1, reviewed: true })
-    expect(d[1].legacyFidId).toBe('F2')
+    expect(d[1].markId).toBe('F2')
   })
 })

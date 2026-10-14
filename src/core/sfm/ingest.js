@@ -1,6 +1,6 @@
 // SfM ingest (pure): everything that moves keypoints ONCE, before reconstruction
 // starts, so the rest of the pipeline is pinhole in one pixel frame per sensor.
-// Lifted verbatim from sfm.js `reconstructSingleModel`, in the order it runs there:
+// Lifted verbatim from `reconstructSingleModel` (singleModel.js), in the order it runs there:
 //   1. applyFiducialFrames  — film scans: scan px → one canonical frame per sensor
 //   2. resolveIntrinsics    — one K per image (after 1: film K comes from the frame)
 //   3. gcpObservationMover  — GCP marks follow every keypoint move (here and the
@@ -13,7 +13,7 @@
 import { resolveK } from './reconstruction.js'
 import { undistortPixel, distortionOf } from './distortion.js'
 import { fitFundamental, sampsonRmsPx } from './fundamental.js'
-import { fitFiducialAffine, canonicalFrame, scanToCanonical } from './fiducials.js'
+import { canonicalFrame, scanToCanonical } from './fiducials.js'
 import { calibratedFiducialPairs } from './fiducialModel.js'
 import { mapPositions, kpX, kpY } from './keypointSet.js'
 import { asPairList } from './matchCodec.js'
@@ -36,17 +36,16 @@ export function applyFiducialFrames({ imgs, gcps, log }) {
     for (const img of imgs) {
       const s = img.sensor
       const cal = s?.fiducialCalibration
-      const legacy = s?.fiducials
-      if (s?.kind !== 'film' || !(cal?.marks?.length || legacy?.marks?.length)) continue
+      if (s?.kind !== 'film' || !cal?.marks?.length) continue
       const obs = calibratedFiducialPairs(img, s)
-      const fit = cal ? fitFiducialTransform(obs, cal.transform || 'affine') : fitFiducialAffine(obs)
+      const fit = fitFiducialTransform(obs, cal.transform || 'affine')
       if (!fit) {
         log(`${img.name} — fiducial fit failed (${obs.length} usable mark(s), `
           + `need ≥3); falling back to standard intrinsics`, 'warn', 'Reconstruction')
         continue
       }
       const pitchUm = fit.pitchMm * 1000
-      log(`${img.name} — fiducial ${cal?.transform || 'affine'} fit: pitch ${pitchUm.toFixed(2)}µm/px, `
+      log(`${img.name} — fiducial ${cal.transform || 'affine'} fit: pitch ${pitchUm.toFixed(2)}µm/px, `
         + `${fit.rotDeg == null ? '' : `rot ${fit.rotDeg.toFixed(2)}°, shear ${fit.shear.toFixed(4)}, `}RMS ${fit.rmsUm.toFixed(1)}µm`,
         'info', 'Reconstruction')
       if (fit.rmsUm > 0.5 * pitchUm) {
@@ -55,7 +54,7 @@ export function applyFiducialFrames({ imgs, gcps, log }) {
       }
       const sid = img.sensorId ?? '__nosensor__'
       if (!filmGroups.has(sid)) filmGroups.set(sid, [])
-      filmGroups.get(sid).push({ img, fit, calibration: cal || legacy })
+      filmGroups.get(sid).push({ img, fit, calibration: cal })
     }
     for (const [sid, entries] of filmGroups) {
       const pitches = entries.map((e) => e.fit.pitchMm).sort((a, b) => a - b)

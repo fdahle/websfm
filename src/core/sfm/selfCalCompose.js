@@ -11,7 +11,9 @@
 // ideal/folded radius — is LINEAR in the coefficients, so this is one small
 // normal-equation solve over the real keypoint pairs (which already span the frame).
 //
-// Pure: no Vue/OPFS/worker. `K` = { fx, fy, cx, cy }.
+// Pure: no Vue/OPFS/worker. `K` = { fx, fy, cx, cy }. The fit is in normalised
+// coordinates, so the bag is only meaningful together with the K it was fitted about —
+// refit it (selfCalFold.js composeSelfCalRecord) whenever that K changes.
 
 // Solve a small symmetric system A·x = b (m ≤ 3) by Gaussian elimination with partial
 // pivoting. Returns null if singular.
@@ -46,26 +48,29 @@ export function fitComposedRadial(pristineKps, foldedKps, K, active = {}) {
   }, K, active)
 }
 
-// The same fit over KeypointSets (keypointSet.js): `pairs` = [{ pristine, folded }],
+// The same fit over KeypointSets (keypointSet.js): `pairs` = [{ pristine, folded, K? }],
 // one per image, pooled in order — no per-keypoint objects for a sensor's whole set.
+// A pair's own `K` (else the shared `K`) normalises its keypoints: images of one sensor
+// can carry different K (per-image EXIF focal), and each was folded about its own.
 export function fitComposedRadialSets(pairs, K, active = {}) {
   return fitComposed((visit) => {
-    for (const { pristine, folded } of pairs) {
+    for (const { pristine, folded, K: Kp } of pairs) {
+      const k = Kp ?? K
       const n = Math.min(pristine.n, folded.n)
       const P = pristine.xy, F = folded.xy
       for (let i = 0; i < n; i++) {
         // A missing (NaN) keypoint is skipped, as a missing object was.
         // eslint-disable-next-line no-self-compare
-        if (P[2 * i] === P[2 * i] && F[2 * i] === F[2 * i]) visit(P[2 * i], P[2 * i + 1], F[2 * i], F[2 * i + 1])
+        if (P[2 * i] === P[2 * i] && F[2 * i] === F[2 * i]) visit(P[2 * i], P[2 * i + 1], F[2 * i], F[2 * i + 1], k)
       }
     }
   }, K, active)
 }
 
-// `forEachPair(visit)` calls visit(pristineX, pristineY, foldedX, foldedY) per pair, in
-// a fixed order; it is walked twice (normal equations, then the fit RMS).
+// `forEachPair(visit)` calls visit(pristineX, pristineY, foldedX, foldedY, K?) per pair,
+// in a fixed order; it is walked twice (normal equations, then the fit RMS). A pair's
+// K (default: the shared `K`) is the one its normalised coordinates are taken about.
 function fitComposed(forEachPair, K, active) {
-  const { fx, fy, cx, cy } = K
   const cols = ['k1']
   if (active.k2) cols.push('k2')
   if (active.k3) cols.push('k3')
@@ -76,7 +81,7 @@ function fitComposed(forEachPair, K, active) {
   const AtA = Array.from({ length: m }, () => new Array(m).fill(0))
   const Atb = new Array(m).fill(0)
   let used = 0
-  forEachPair((px, py, fX, fY) => {
+  forEachPair((px, py, fX, fY, { fx, fy, cx, cy } = K) => {
     const fxn = (fX - cx) / fx, fyn = (fY - cy) / fy       // ideal (folded) normalised
     const pxn = (px - cx) / fx, pyn = (py - cy) / fy       // distorted (pristine) normalised
     const r2 = fxn * fxn + fyn * fyn
@@ -97,7 +102,7 @@ function fitComposed(forEachPair, K, active) {
 
   // Fit RMS in pixels: predicted pristine vs actual over the same points.
   let sse = 0, cnt = 0
-  forEachPair((px, py, fX, fY) => {
+  forEachPair((px, py, fX, fY, { fx, fy, cx, cy } = K) => {
     const fxn = (fX - cx) / fx, fyn = (fY - cy) / fy
     const r2 = fxn * fxn + fyn * fyn
     const d = 1 + bag.k1 * r2 + bag.k2 * r2 * r2 + bag.k3 * r2 * r2 * r2

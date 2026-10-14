@@ -9,7 +9,9 @@ import {
   pruneFinalTwoViewTracks, completeTracks, cloneSfmInput,
 } from './sfm.js'
 import { resolveK } from './reconstruction.js'
-import { distortPixel } from './distortion.js'
+import { distortPixel, undistortPixel } from './distortion.js'
+import { projectPoint } from './geometry.js'
+import { aerialBlock } from './syntheticScene.testutil.js'
 import { Uint32PairList } from './matchCodec.js'
 import { canonicalFrame } from './fiducials.js'
 import { keypointSetFrom, mapPositions } from './keypointSet.js'
@@ -66,6 +68,49 @@ function fundamental(Ri, ti, Rj, tj) {
   const trel = tj.map((v, k) => v - mv(Rrel, ti)[k])
   const E = mul(skew(trel), Rrel)
   return mul(mul(T(KINV), E), KINV) // K_B^{-T} E K_A^{-1}
+}
+
+// The D1 scene: three cameras, 80 points, pure radial k1 (Brown r²) on every image —
+// exactly BA's shared-k1 model, so self-cal can capture it fully. No `sensor` →
+// ingest does NOT undistort; BA must self-calibrate. `sensorId` groups the images
+// (null: each camera is its own self-calibration group); `focal35` gives each camera
+// its own (true and EXIF) 35 mm-equivalent focal — the lens bag stays the same.
+function k1Scene(sensorId, { focal35 = [35, 35, 35] } = {}) {
+  const rng = mulberry32(7)
+  const N = 80
+  const world = Array.from({ length: N }, () => [
+    (rng() - 0.5) * 4, (rng() - 0.5) * 3, 8 + rng() * 4,
+  ])
+  const centers = [[0, 0, 0], [2, 0, 0], [-2, 0, 0]]
+  const Rs = [rotY(0), rotY(0.15), rotY(-0.15)]
+  const ts = Rs.map((R, i) => mv(R, centers[i]).map((v) => -v))
+  const uuids = ['c0', 'c1', 'c2']
+  const metas = focal35.map((f) => ({ ...META, focalLength35: f }))
+  const Ks = metas.map((m) => resolveK(m))
+  const Kinv = (k) => [[1 / k.fx, 0, -k.cx / k.fx], [0, 1 / k.fy, -k.cy / k.fy], [0, 0, 1]]
+  const dist = { k1: -0.05, k2: 0, k3: 0, p1: 0, p2: 0 }
+  const distorted = uuids.map((uuid, ci) =>
+    world.map((X) => {
+      const c = mv(Rs[ci], X).map((v, i) => v + ts[ci][i])
+      const k = Ks[ci]
+      return distortPixel(k.fx * (c[0] / c[2]) + k.cx, k.fy * (c[1] / c[2]) + k.cy, k, dist)
+    }))
+  const matches = world.map((_, i) => [i, i])
+  const pairs = []
+  for (let a = 0; a < 3; a++) for (let b = a + 1; b < 3; b++) {
+    const Rrel = mul(Rs[b], T(Rs[a]))
+    const trel = ts[b].map((v, k) => v - mv(Rrel, ts[a])[k])
+    pairs.push({
+      idA: uuids[a], idB: uuids[b],
+      F: mul(mul(T(Kinv(Ks[b])), mul(skew(trel), Rrel)), Kinv(Ks[a])),
+      matches, inlierCount: N, status: 'done',
+    })
+  }
+  const images = uuids.map((uuid, ci) => ({
+    uuid, name: uuid, kpStatus: 'done', meta: metas[ci], sensor: null, sensorId,
+    keypoints: distorted[ci].map((p) => ({ x: p.x, y: p.y })),
+  }))
+  return { images, pairs, uuids }
 }
 
 describe('reconstruct (incremental SfM, synthetic 3-view scene)', () => {
@@ -326,37 +371,8 @@ describe('reconstruct (incremental SfM, synthetic 3-view scene)', () => {
   })
 
   it('folds self-calibrated k1 back into the keypoints, keeping the model pinhole (D1)', async () => {
-    const rng = mulberry32(7)
-    const N = 80
-    const world = Array.from({ length: N }, () => [
-      (rng() - 0.5) * 4, (rng() - 0.5) * 3, 8 + rng() * 4,
-    ])
-    const centers = [[0, 0, 0], [2, 0, 0], [-2, 0, 0]]
-    const Rs = [rotY(0), rotY(0.15), rotY(-0.15)]
-    const ts = Rs.map((R, i) => mv(R, centers[i]).map((v) => -v))
-    const uuids = ['c0', 'c1', 'c2']
-    // Pure radial k1 (Brown r²) = exactly BA's shared-k1 model, so self-cal can
-    // capture it fully. No sensor → ingest does NOT undistort; BA must self-calibrate.
-    const dist = { k1: -0.05, k2: 0, k3: 0, p1: 0, p2: 0 }
-    const distorted = uuids.map((uuid, ci) =>
-      world.map((X) => {
-        const p = project(Rs[ci], ts[ci], X)
-        return distortPixel(p.x, p.y, Kobj, dist)
-      }))
-    const matches = world.map((_, i) => [i, i])
-    const pairs = []
-    for (let a = 0; a < 3; a++) for (let b = a + 1; b < 3; b++) {
-      pairs.push({
-        idA: uuids[a], idB: uuids[b],
-        F: fundamental(Rs[a], ts[a], Rs[b], ts[b]),
-        matches, inlierCount: N, status: 'done',
-      })
-    }
     // Shared sensor id on every image so the run reports one self-cal group (D2).
-    const images = uuids.map((uuid, ci) => ({
-      uuid, name: uuid, kpStatus: 'done', meta: META, sensor: null, sensorId: 'sensorA',
-      keypoints: distorted[ci].map((p) => ({ x: p.x, y: p.y })),
-    }))
+    const { images, pairs } = k1Scene('sensorA')
 
     const logs = []
     // Wide filter gate so the (still-distorted) pre-self-cal residuals survive the
@@ -891,5 +907,227 @@ describe('reconstruct (film scans, fiducial interior orientation)', () => {
     // The run records a per-image scan→canonical transform for the dense stage.
     expect(out.summary.fiducialTransforms).toHaveLength(3)
     expect(new Set(out.summary.fiducialTransforms.map((t) => t.uuid))).toEqual(new Set(uuids))
+  })
+})
+
+// ── Self-calibration bookkeeping ────────────────────────────────────────────────
+// Every observation of a result as { uuid, kp, x, y, X }: the keypoint index, the
+// (folded) pixel the model was fitted to, and the point it belongs to.
+function resultObservations(out) {
+  const { viewUuids, vcount, vcam, vkp, vx, vy } = out.points.packedTracks
+  const obs = []
+  let j = 0
+  out.points.forEach((pt, i) => {
+    for (const end = j + vcount[i]; j < end; j++) {
+      obs.push({ uuid: viewUuids[vcam[j]], kp: vkp[j], x: vx[j], y: vy[j], X: pt })
+    }
+  })
+  return obs
+}
+
+// Reprojection residuals of the COMMITTED model: pinhole camera K against the folded
+// keypoints — what every downstream consumer measures. Sorted ascending.
+function committedResiduals(out, uuid = null) {
+  const cams = new Map(out.cameras.map((c) => [c.uuid, c]))
+  const res = []
+  for (const o of resultObservations(out)) {
+    if (uuid && o.uuid !== uuid) continue
+    const q = projectPoint(cams.get(o.uuid), o.X.x, o.X.y, o.X.z)
+    if (q) res.push(Math.hypot(q.u - o.x, q.v - o.y))
+  }
+  return res.sort((a, b) => a - b)
+}
+const quantile = (sorted, q) => sorted[Math.min(sorted.length - 1, Math.round(q * (sorted.length - 1)))]
+
+// What dense and the GCP tools do with the run record: undistort the pristine
+// keypoint with the image's composed self-cal bag about the camera's FINAL K. It must
+// land where the sparse fold put it. Returns the per-observation mismatch (px), sorted.
+function recordMismatch(out, pristineByUuid) {
+  const cams = new Map(out.cameras.map((c) => [c.uuid, c]))
+  const rec = out.summary.selfCalDistortion
+  const bagOf = (uuid, sensorId) => rec.find((d) => (d.imageUuid ? d.imageUuid === uuid : d.sensorId === sensorId))
+  const err = []
+  for (const o of resultObservations(out)) {
+    const { kps, sensorId } = pristineByUuid.get(o.uuid)
+    const bag = bagOf(o.uuid, sensorId)
+    const u = undistortPixel(kps[o.kp].x, kps[o.kp].y, cams.get(o.uuid).K, bag)
+    err.push(Math.hypot(u.x - o.x, u.y - o.y))
+  }
+  return err.sort((a, b) => a - b)
+}
+const pristineOf = (images) =>
+  new Map(images.map((im) => [im.uuid, { kps: im.keypoints, sensorId: im.sensorId ?? null }]))
+
+describe('reconstruct — self-calibration propagation and bookkeeping', () => {
+  // A 4×6 EXIF-only block, no lens distortion, EXIF focal 6 % long. Focal-only
+  // self-calibration used to reach only the cameras already registered: Kmap (what
+  // every later PnP reads) kept the nominal focal, and the crate's per-group focal
+  // SCALE then kept the early and late cameras apart for good (fx spread over
+  // 1178.7–1265.2 px on one sensor; true 1221).
+  for (const mode of ['f', 'f,cxcy']) {
+    it(`propagates a '${mode}' self-calibration to every image of the sensor`, async () => {
+      const sc = aerialBlock({ seed: 3, rows: 4, cols: 6, nPoints: 2500, dist: { k1: 0, k2: 0 }, focalError: 1.06 })
+      const out = await reconstruct({ images: sc.images, pairs: sc.pairs,
+        settings: { refineIntrinsics: mode, secondaryModels: false } }, { onLog: () => {} })
+      expect(out.status).toBe('done')
+      expect(out.cameras.length).toBe(24)
+      const spread = (key) => Math.max(...out.cameras.map((c) => c.K[key])) - Math.min(...out.cameras.map((c) => c.K[key]))
+      expect(spread('fx')).toBeLessThan(0.01)
+      expect(spread('fy')).toBeLessThan(0.01)
+      if (mode.includes('cxcy')) { expect(spread('cx')).toBeLessThan(0.01); expect(spread('cy')).toBeLessThan(0.01) }
+      const [rec] = out.summary.intrinsics
+      expect(rec.fxFinal).toBeCloseTo(out.cameras[0].K.fx, 3)
+      expect(Math.abs(rec.fxFinal - sc.truth.Ktrue.fx) / sc.truth.Ktrue.fx).toBeLessThan(0.02)
+    }, 120_000)
+  }
+
+  // Images without a sensor are each their own intrinsics group in the crate, so BA
+  // estimated a k1 per camera — which the fold then skipped (`g < 0`) while zeroing it
+  // on K: the jointly refined focal was kept, the distortion it was fitted with thrown
+  // away (BA 0.03 → 0.00 px, committed pinhole model median 0.12 / p95 0.61 / max 1.50).
+  it('folds and records the self-calibrated distortion of cameras without a sensor', async () => {
+    const { images, pairs, uuids } = k1Scene(null)
+    const logs = []
+    const out = await reconstruct(
+      { images, pairs, settings: { baIterations: 40, refineIntrinsics: 'f,k1', filterMaxReprojPx: 30 } },
+      { onLog: (m) => logs.push(m) },
+    )
+    expect(out.status).toBe('done')
+    expect(out.cameras).toHaveLength(3)
+    for (const c of out.cameras) expect(c.K.k1 || 0).toBe(0)
+    const res = committedResiduals(out)
+    expect(quantile(res, 0.5)).toBeLessThan(0.05)
+    expect(quantile(res, 0.95)).toBeLessThan(0.15)
+    expect(res.at(-1)).toBeLessThan(0.4)
+    expect(logs.some((m) => /folded self-calibrated distortion/.test(m))).toBe(true)
+    // One record per sensorless image, keyed by the image.
+    const recs = out.summary.selfCalDistortion
+    expect(recs.map((d) => d.imageUuid).sort()).toEqual([...uuids].sort())
+    for (const d of recs) {
+      expect(d.sensorId).toBeNull()
+      expect(Math.abs(d.k1 - (-0.05))).toBeLessThan(0.02)
+    }
+    expect(quantile(recordMismatch(out, pristineOf(images)), 0.95)).toBeLessThan(0.05)
+  })
+
+  // The fold used the FIRST camera's refined K for every image of the group, though the
+  // crate keeps each camera's own focal (a group scale × its seed focal). A sensor whose
+  // images resolve different nominal focals (EXIF per image) had the others' keypoints
+  // undistorted about the wrong K, and the record dense reads matched only the first.
+  it('folds each camera about its own refined K', async () => {
+    const { images, pairs } = k1Scene('sensorA', { focal35: [35, 35, 37] })
+    const out = await reconstruct(
+      { images, pairs, settings: { baIterations: 40, refineIntrinsics: 'f,k1', filterMaxReprojPx: 30 } },
+      { onLog: () => {} },
+    )
+    expect(out.status).toBe('done')
+    const fx = new Map(out.cameras.map((c) => [c.uuid, c.K.fx]))
+    expect(fx.get('c2') / fx.get('c0')).toBeCloseTo(37 / 35, 3)
+    // Every image was folded with the same bag about its own K, so one record about
+    // each camera's final K reproduces every fold (was p95 0.039 / max 0.169 px).
+    const err = recordMismatch(out, pristineOf(images))
+    expect(quantile(err, 0.95)).toBeLessThan(0.005)
+    expect(err.at(-1)).toBeLessThan(0.02)
+  })
+
+  // The composed record was refitted only in passes that refined k1, about THAT pass's
+  // K. A later accepted BA that moves the focal without k1 (here the camera-prior BA
+  // re-estimating 'f') left it normalised by a K the cameras no longer have, so dense
+  // (final K + record) no longer reproduced the sparse fold.
+  it('keeps the composed distortion record consistent with the final K', async () => {
+    const sc = aerialBlock({ seed: 7, rows: 4, cols: 6, priors: true, focalError: 1.04 })
+    const logs = []
+    const out = await reconstruct({ images: sc.images, pairs: sc.pairs, cameraPriors: sc.cameraPriors,
+      settings: { refineIntrinsics: 'f,k1', cameraPriorRefineIntrinsics: 'f', secondaryModels: false } },
+    { onLog: (m) => logs.push(m) })
+    expect(out.status).toBe('done')
+    // The camera-prior pass did move the focal after the last fold.
+    expect(logs.some((m) => /camera-prior bundle adjustment \(round 1, intrinsics 'f'\) self-calibration/.test(m))).toBe(true)
+    expect(out.summary.selfCalDistortion).toHaveLength(1)
+    const err = recordMismatch(out, pristineOf(sc.images))
+    expect(quantile(err, 0.95)).toBeLessThan(0.01)
+  }, 120_000)
+
+  // Film: K lives in the fiducial canonical frame, but the guard measured the principal
+  // point against the scan's pixel size. A scan with a generous border (4000×3000 px
+  // around a ~1580×1180 px canonical frame) had every self-calibration rejected.
+  it('judges film self-calibration in the canonical frame, not the scan', async () => {
+    const sc = aerialBlock({ seed: 45, rows: 3, cols: 4, nPoints: 2000, film: true, prefix: 'fm' })
+    for (const im of sc.images) im.meta = { width: 4000, height: 3000 }
+    const out = await reconstruct({ images: sc.images, pairs: sc.pairs,
+      settings: { refineIntrinsics: 'f', secondaryModels: false } }, { onLog: () => {} })
+    expect(out.status).toBe('done')
+    const adj = out.summary.selfCal.adjustments
+    expect(adj.length).toBeGreaterThan(0)
+    for (const a of adj) expect(a.sensors.map((x) => x.rejectionCode)).not.toContain('principal-point')
+  }, 120_000)
+})
+
+describe('reconstruct — focal pre-solve', () => {
+  // No focal anywhere ⇒ resolveK's default-FOV guess (fx = max(w, h)).
+  const guessScene = (o = {}) => {
+    const sc = aerialBlock({ seed: 3, rows: 3, cols: 5, nPoints: 2000, dist: { k1: 0, k2: 0 }, ...o })
+    for (const im of sc.images) im.meta = { width: im.meta.width, height: im.meta.height }
+    return sc
+  }
+
+  it("leaves the intrinsics alone under refineIntrinsics 'none'", async () => {
+    const sc = guessScene()
+    const logs = []
+    const out = await reconstruct({ images: sc.images, pairs: sc.pairs,
+      settings: { refineIntrinsics: 'none', secondaryModels: false } }, { onLog: (m) => logs.push(m) })
+    expect(out.status).toBe('done')
+    expect(logs.some((m) => /focal pre-solve/.test(m))).toBe(false)
+    for (const c of out.cameras) expect(c.K.fx).toBe(1600)
+    expect(out.summary.selfCal.adjustments).toHaveLength(0)
+  }, 120_000)
+
+  // Half the block on a calibrated sensor (focal in px — authoritative), half on a
+  // sensor with no focal at all. The pre-solve exists for the guess; it must not refit
+  // the calibration.
+  it('refines only the default-FOV groups', async () => {
+    const sc = aerialBlock({ seed: 3, rows: 4, cols: 6, nPoints: 2500, dist: { k1: 0, k2: 0 }, focalError: 1 })
+    const { Ktrue } = sc.truth
+    sc.images.forEach((im, i) => {
+      if (Math.floor(i / 6) % 2 === 0) {
+        im.sensorId = 'cal'
+        im.sensor = { kind: 'digital', focal: Ktrue.fx, focalUnit: 'px', cx: Ktrue.cx, cy: Ktrue.cy,
+          width: im.meta.width, height: im.meta.height }
+      } else {
+        im.sensorId = 'guess'
+        im.meta = { width: im.meta.width, height: im.meta.height }
+      }
+    })
+    const logs = []
+    const out = await reconstruct({ images: sc.images, pairs: sc.pairs,
+      settings: { refineIntrinsics: 'f', secondaryModels: false } }, { onLog: (m) => logs.push(m) })
+    expect(out.status).toBe('done')
+    const pre = out.summary.selfCal.adjustments.filter((a) => /^focal pre-solve/.test(a.label))
+    expect(pre.length).toBeGreaterThan(0)
+    for (const a of pre) expect(a.sensors.map((x) => x.sensorId)).toEqual(['guess'])
+    // The calibrated K was restored, so the poses are re-settled around it.
+    expect(logs.some((m) => /^focal pre-solve re-settle .* RMS/.test(m))).toBe(true)
+  }, 120_000)
+})
+
+describe('reconstruct — alternate-seed retries', () => {
+  // A retry that fails after choosing its seed returns no summary, so its seed never
+  // entered the exclusion set and every later retry deterministically repeated it.
+  it('excludes the seed of a failed retry from the next one', async () => {
+    const { images, pairs } = k1Scene('sensorA')
+    const seeds = []
+    const out = await reconstruct({ images, pairs,
+      settings: { baIterations: 10, refineIntrinsics: 'none', seedRetryMax: 3, seedRetryMinFraction: 2 } },
+    { onLog: (m) => {
+      const hit = /^Seed retry (\d+): initial pair (\S+) ↔ (\S+)/.exec(m)
+      if (!hit) return
+      seeds.push([hit[2], hit[3]].sort().join('--'))
+      throw new Error('injected failure after seed selection')
+    } })
+    expect(out.status).toBe('done')
+    expect(seeds.length).toBeGreaterThan(1)
+    expect(new Set(seeds).size).toBe(seeds.length)
+    const failed = out.summary.attempts.seeds.filter((s) => s.attempt > 0 && s.pair)
+    expect(failed.length).toBe(seeds.length)
   })
 })
