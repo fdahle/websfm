@@ -29,8 +29,9 @@ import { makeExportOps } from './ops/export.js'
 
 // Decode an image URL (blob: URLs work in a worker) and draw it into an
 // OffscreenCanvas, downscaled so the longest side is ≤ maxDim. Returns RGBA
-// pixels, the working dimensions, the scale back to the original, and the
-// original (natural) dimensions.
+// pixels, the working dimensions, the nominal scale, the per-axis factors the
+// rounded size actually applied (`scaleXY`, for K and sample maps — they differ
+// from `scale` by up to ½ px over the image), and the original (natural) dimensions.
 // A bare "Failed to fetch" names neither the URL nor the stage it died in, and
 // the three plausible causes — a revoked/foreign blob: URL, a blocked request,
 // an undecodable payload — are indistinguishable in that message. Keep the URL
@@ -65,7 +66,7 @@ async function rasterize(url, maxDim) {
   ctx.drawImage(bmp, 0, 0, width, height)
   const { data } = ctx.getImageData(0, 0, width, height)
   bmp.close()
-  return { data, width, height, scale, natW, natH }
+  return { data, width, height, scale, scaleXY: [width / natW, height / natH], natW, natH }
 }
 
 // Merge every domain's op registry. rasterize is the only worker-local helper the

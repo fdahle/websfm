@@ -32,6 +32,10 @@ export function makeDenseOps({ rasterize }) {
   // undistorted-image export) and the *resampling* from core/products/undistort.js.
   // Dense supplies the two scale factors because it works at reduced resolution.
 
+  // A working raster's per-axis scale: what the rounded resize applied (rasterize's
+  // scaleXY), never the nominal `scale` alone — see geometry.js scaleK.
+  const gridScale = (r) => r.scaleXY ?? r.scale
+
   // Any distortion to remove (calibrated OR self-calibrated)?
   function hasAnyDistortion(dist, selfCal) {
     return hasDistortion(dist) || hasDistortion(selfCal)
@@ -39,11 +43,11 @@ export function makeDenseOps({ rasterize }) {
 
   // Remove lens distortion from a working-resolution raster. Kfull is the
   // native-resolution K; output and source share the working grid, so both scales
-  // are `r.scale`. A no-op when both bags are empty — that early return is what
+  // are its per-axis factors (`r.scaleXY`). A no-op when both bags are empty — that early return is what
   // keeps the common EXIF-only case free (a pure scale change is still a real map).
   function undistortRaster(r, Kfull, dist, selfCal) {
     if (!hasAnyDistortion(dist, selfCal)) return r
-    const map = makeSampleMap({ K: Kfull, dist, selfCal, outScale: r.scale, srcScale: r.scale })
+    const map = makeSampleMap({ K: Kfull, dist, selfCal, outScale: gridScale(r), srcScale: gridScale(r) })
     return { ...r, data: resampleRgba(r, map, r.width, r.height) }
   }
 
@@ -69,7 +73,8 @@ export function makeDenseOps({ rasterize }) {
   }
 
   function warpFilmRaster(r, canonK, dist, fid, maxDim, selfCal) {
-    const { width: sw, height: sh, scale: scanScale } = r
+    const { width: sw, height: sh } = r
+    const scanScale = gridScale(r)
     const { frame } = fid
     const cScale = maxDim / Math.max(frame.width, frame.height)
     const { width: ow, height: oh } = pinholeFrameSize({ fiducial: fid, scale: cScale })
@@ -77,7 +82,9 @@ export function makeDenseOps({ rasterize }) {
     const useSelf = hasDistortion(selfCal) ? selfCal : null
     const map = filmSampleMap(canonK, useDist, fid, cScale, scanScale, useSelf)
     return {
-      data: resampleRgba(r, map, ow, oh), width: ow, height: oh, scale: cScale,
+      // The canonical grid is defined by cScale on both axes (the map above), so K
+      // scales uniformly; only the scan it samples has rounded per-axis factors.
+      data: resampleRgba(r, map, ow, oh), width: ow, height: oh, scale: cScale, scaleXY: [cScale, cScale],
       fid, canonK, dist: useDist, selfCal: useSelf, scanDims: { w: sw, h: sh, scale: scanScale },
     }
   }
@@ -323,7 +330,7 @@ export function makeDenseOps({ rasterize }) {
       const ref = {
         gray: rgbaToGray(rRef.data, rRef.width, rRef.height),
         width: rRef.width, height: rRef.height,
-        K: scaleK(img.K, rRef.scale),
+        K: scaleK(img.K, gridScale(rRef)),
         cam: { R: img.R, t: img.t },
       }
       const sources = []
@@ -341,13 +348,13 @@ export function makeDenseOps({ rasterize }) {
           if (rs.fid) srcMask = await filmMaskLut(s.mask, rs)
           else {
             srcMask = await buildMaskLookup(s.mask, rs.width, rs.height)
-            if (s.dist || s.selfCal) srcMask = undistortMaskLut(srcMask, rs.width, rs.height, s.K, s.dist, rs.scale, s.selfCal)
+            if (s.dist || s.selfCal) srcMask = undistortMaskLut(srcMask, rs.width, rs.height, s.K, s.dist, gridScale(rs), s.selfCal)
           }
         }
         sources.push({
           gray: rgbaToGray(rs.data, rs.width, rs.height),
           w: rs.width, h: rs.height,
-          K: scaleK(s.K, rs.scale),
+          K: scaleK(s.K, gridScale(rs)),
           cam: { R: s.R, t: s.t },
           mask: srcMask,
         })

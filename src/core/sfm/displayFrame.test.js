@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { makeCanonicalToScan, makeScanToPinhole, makePinholeToMark, markToCentrePx, centreToMarkPx, makeFrameModelResolver, gcpsInPinholeFrame, guideToScan } from './displayFrame.js'
+import { makeSampleMap, makeCanonicalToScan, makeScanToPinhole, makePinholeToMark, markToCentrePx, centreToMarkPx, makeFrameModelResolver, gcpsInPinholeFrame, guideToScan } from './displayFrame.js'
 import { fitFiducialAffine, canonicalFrame } from './fiducials.js'
 
 const K = { fx: 3000, fy: 3000, cx: 2000, cy: 1500 }
@@ -82,5 +82,21 @@ describe('GCP marks and guides cross the frame boundary', () => {
       const s = toScan(x, 1500)
       expect(Math.abs(line[0] * s.x + line[1] * s.y + line[2])).toBeLessThan(1e-6)
     }
+  })
+})
+
+describe('makeSampleMap per-axis scales', () => {
+  it('maps an output grid onto a source grid with its own x and y factors', () => {
+    const K = { fx: 1000, fy: 1000, cx: 500, cy: 250 }
+    // Output at a uniform 0.5, source resized 1001×500 → 501×250 (0.5005 × 0.5).
+    const map = makeSampleMap({ K, outScale: 0.5, srcScale: [501 / 1001, 0.5] })
+    const p = map(100, 60)
+    const nx = (100 + 0.5) / 0.5 - 0.5, ny = (60 + 0.5) / 0.5 - 0.5
+    expect(p.x).toBeCloseTo((nx + 0.5) * (501 / 1001) - 0.5, 12)
+    expect(p.y).toBeCloseTo((ny + 0.5) * 0.5 - 0.5, 12)
+    // Same factors in and out, no distortion: the identity.
+    const id = makeSampleMap({ K, outScale: [0.4, 0.5], srcScale: [0.4, 0.5] })
+    expect(id(37.25, 12.5).x).toBeCloseTo(37.25, 12)
+    expect(id(37.25, 12.5).y).toBeCloseTo(12.5, 12)
   })
 })

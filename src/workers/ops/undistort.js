@@ -33,7 +33,7 @@ export function makeUndistortOps({ rasterize }) {
     // The source grid is whatever rasterize gave us; the output grid is the
     // pinhole frame (the canonical frame for a film scan — usually a very
     // different size from the scan raster).
-    const srcScale = r.scale
+    const srcScale = r.scaleXY ?? r.scale
     const outScale = fid
       ? (maxDim > 0 ? Math.min(1, maxDim / Math.max(fid.frame.width, fid.frame.height)) : 1)
       : r.scale

@@ -39,7 +39,7 @@ function makePhotoLoader(images, rasterize, emit) {
       const r = await rasterize(im.url, scale < 1 ? Math.ceil(nativeMax * scale) : Infinity)
       load.scaleSum += r.scale
       const map = makeSampleMap({ K: im.K, dist: im.dist, selfCal: im.selfCal, fiducial: im.fiducial,
-        outScale: m.K.fx / im.K.fx, srcScale: r.scale })
+        outScale: [m.K.fx / im.K.fx, m.K.fy / im.K.fy], srcScale: r.scaleXY ?? r.scale })
       load.decoded++
       return { data: r.data, width: r.width, height: r.height, map }
     } catch (err) {

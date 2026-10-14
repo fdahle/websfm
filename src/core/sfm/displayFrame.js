@@ -19,7 +19,7 @@
 
 import { distortPixel, undistortPixel, hasDistortion, distortionOf } from './distortion.js'
 import { canonicalToScan, scanToCanonical } from './fiducials.js'
-import { toScaledPx, fromScaledPx } from './geometry.js'
+import { toScaledPx, fromScaledPx, scaleAxes } from './geometry.js'
 
 // Apply both distortion bags: ideal pinhole pixel → the pixel the lens recorded.
 // `Kw` must be the K the coefficients were fitted against (working-res if the
@@ -71,17 +71,21 @@ export function makeSampleMap({
   K, dist = null, selfCal = null, fiducial = null, outScale = 1, srcScale = 1,
 } = {}) {
   const needsDist = !!K && (hasDistortion(dist) || hasDistortion(selfCal))
-  const needsScale = outScale !== 1 || srcScale !== 1
+  // Either scale may be per axis [sx, sy] (geometry.js scaleAxes): a raster resized to
+  // a rounded size has slightly different factors per axis.
+  const [ox, oy] = scaleAxes(outScale), [qx, qy] = scaleAxes(srcScale)
+  const needsScale = ox !== 1 || oy !== 1 || qx !== 1 || qy !== 1
   if (!needsDist && !fiducial && !needsScale) return null
   return (u, v) => {
     // Into K's own (full-resolution canonical) frame — pixel-centre aligned
     // (geometry.js toScaledPx), the same convention scaleK uses.
-    let x = outScale === 1 ? u : fromScaledPx(u, outScale)
-    let y = outScale === 1 ? v : fromScaledPx(v, outScale)
+    let x = ox === 1 ? u : fromScaledPx(u, ox)
+    let y = oy === 1 ? v : fromScaledPx(v, oy)
     if (needsDist) { const d = distortComposed(x, y, K, dist, selfCal); x = d.x; y = d.y }
     if (fiducial) { const s = canonicalToScan(x, y, fiducial.transform ?? fiducial.A, fiducial.frame); x = s.x; y = s.y }
     // Into the source raster's grid.
-    if (srcScale !== 1) { x = toScaledPx(x, srcScale); y = toScaledPx(y, srcScale) }
+    if (qx !== 1) x = toScaledPx(x, qx)
+    if (qy !== 1) y = toScaledPx(y, qy)
     return { x, y }
   }
 }

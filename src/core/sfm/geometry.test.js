@@ -6,6 +6,7 @@ import {
   triangulationAngle,
   medianTriangulationAngle,
   scaleK,
+  resizeScale,
   rgbaToGray,
   estimateUpFromCameras,
 } from './geometry.js'
@@ -124,6 +125,25 @@ describe('scaleK', () => {
         expect(scaled.v).toBeCloseTo(toScaledPx(native.v, s), 9)
       }
     }
+  })
+
+  it('takes per-axis factors: a rounded resize scales x and y differently', () => {
+    // 4107×2054 → 2054×1027: x by 0.50012, y by exactly 0.5. Projecting with the
+    // per-axis K lands on the resized grid; one factor for both is off in y by the
+    // ratio (the 41 m depth bias of a synthetic KH-9 block).
+    const K = { fx: 2721.4, fy: 2721.4, cx: 2053, cy: 1026.5 }
+    const sxy = resizeScale(2054, 1027, 4107, 2054)
+    expect(sxy[1]).toBe(0.5)
+    const Ks = scaleK(K, sxy)
+    expect(Ks.fx).toBeCloseTo(K.fx * 2054 / 4107, 9)
+    expect(Ks.fy).toBe(K.fy * 0.5)
+    const cam = { R: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], t: [0, 0, 0] }
+    const P = [0.31, -0.22, 5]
+    const native = projectPoint({ ...cam, K }, ...P)
+    const scaled = projectPoint({ ...cam, K: Ks }, ...P)
+    expect(scaled.u).toBeCloseTo(toScaledPx(native.u, sxy[0]), 9)
+    expect(scaled.v).toBeCloseTo(toScaledPx(native.v, sxy[1]), 9)
+    expect(scaleK(K, [0.4, 0.4])).toEqual(scaleK(K, 0.4))
   })
 
   it('toScaledPx and fromScaledPx are inverses, and centre maps to centre', () => {

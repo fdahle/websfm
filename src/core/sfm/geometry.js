@@ -280,10 +280,21 @@ export const toScaledPx = (x, s) => (x + 0.5) * s - 0.5
 export const fromScaledPx = (x, s) => (x + 0.5) / s - 0.5
 
 // K for a grid scaled by s (same convention as toScaledPx: the principal point is a
-// pixel coordinate, the focal a length).
+// pixel coordinate, the focal a length). `scale` is one factor or per axis [sx, sy]:
+// a resize to a rounded size scales the axes slightly differently (4107×2054 → 2054×1027
+// is 0.50012 × 0.5), and a focal scaled by the wrong one biases depth by their ratio
+// (2.4e-4 of the range: 41 m at 170 km on a synthetic KH-9 block).
 export function scaleK(K, scale) {
-  return { fx: K.fx * scale, fy: K.fy * scale, cx: toScaledPx(K.cx, scale), cy: toScaledPx(K.cy, scale) }
+  const [sx, sy] = scaleAxes(scale)
+  return { fx: K.fx * sx, fy: K.fy * sy, cx: toScaledPx(K.cx, sx), cy: toScaledPx(K.cy, sy) }
 }
+
+// A grid scale as [sx, sy]: a number applies to both axes.
+export const scaleAxes = (s) => (Array.isArray(s) ? s : [s, s])
+
+// The per-axis factors a resize from natW×natH to width×height applied: drawImage maps
+// the whole source extent onto the whole target, so each axis scales by its own ratio.
+export const resizeScale = (width, height, natW, natH) => [width / natW, height / natH]
 
 // RGBA pixel buffer → grayscale Uint8Array (Rec. 601 luma).
 export function rgbaToGray(data, w, h) {
