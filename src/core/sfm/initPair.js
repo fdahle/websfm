@@ -74,8 +74,15 @@ export async function selectInitPair(
       }
     }
     const angle = medianTriangulationAngle(cA, cB, points)
+    // Relative depth spread of the seed points in camera A (std / mean): the planar
+    // twin tie-break below. Ground seen from above sits at nearly one depth; the twin
+    // of a nadir pair puts it on a steeply tilted plane.
+    let zs = 0, zz = 0
+    for (const q of points) { zs += q.z; zz += q.z * q.z }
+    const zMean = points.length ? zs / points.length : 0
+    const depthCv = zMean > 0 ? Math.sqrt(Math.max(0, zz / points.length - zMean * zMean)) / zMean : Infinity
     const init = {
-      ok: true, entry, iA, iB, cA, cB, points, angle, esv, eSource,
+      ok: true, entry, iA, iB, cA, cB, points, angle, esv, eSource, depthCv,
       inliers: entry.inlierCount, triCount: tri.length, cheiralKept: points.length,
     }
     init.reproj = points.length ? initReprojStats(init) : { median: Infinity }
@@ -100,17 +107,35 @@ export async function selectInitPair(
       const na = pa.map((p) => [(p.x - KA.cx) / KA.fx, (p.y - KA.cy) / KA.fy])
       const nb = pb.map((p) => [(p.x - KB.cx) / KB.fx, (p.y - KB.cy) / KB.fy])
       const r = ransacEssential(na, nb, { thresh: essThreshPx / ((KA.fx + KB.fx) / 2) })
-      if (r) tried.push(await poseCandidate(entry, iA, iB, KA, KB, pa, pb, matches, r.E, '5pt'))
+      for (const [k, alt] of (r?.alternatives ?? []).entries()) {
+        const c = await poseCandidate(entry, iA, iB, KA, KB, pa, pb, matches, alt.E, k ? `5pt alt ${k}` : '5pt')
+        if (c) { c.eInliers = alt.count; tried.push(c) }
+      }
     }
     const ok = tried.filter((c) => c && c.cheiralKept >= 10)
     if (!ok.length) {
       return tried[0] ?? { ok: false, reason: 'pose recovery (essential decomposition) failed' }
     }
     // Keep the pose that explains the matches: most points in front of both cameras
-    // (within 10 %), then the lower init reprojection.
+    // (within 10 %), then the lower init reprojection …
     const most = Math.max(...ok.map((c) => c.cheiralKept))
-    const best = ok.filter((c) => c.cheiralKept >= 0.9 * most)
-      .reduce((a, b) => (b.reproj.median < a.reproj.median ? b : a))
+    const fit = ok.filter((c) => c.cheiralKept >= 0.9 * most)
+    let best = fit.reduce((a, b) => (b.reproj.median < a.reproj.median ? b : a))
+    // … unless it has a planar twin: another five-point solution that explains the
+    // matches as well (inliers within 5 %, reprojection within 1.5× + 1 px). Their
+    // counts differ by noise, so take the one that puts the points at the more uniform
+    // depth — the twin of a camera moving across a surface moves along its normal and
+    // tilts the surface steeply (Casa Grande 1978: a twin seed gave a block whose
+    // camera axes spread 18° instead of 0.3°, and the GCP fit collapsed).
+    const twins = fit.filter((c) => c.eInliers != null && best.eInliers != null
+      && c.eInliers >= 0.95 * best.eInliers && c.reproj.median <= 1.5 * best.reproj.median + 1)
+    if (twins.length > 1) {
+      const flat = twins.reduce((a, b) => (b.depthCv < a.depthCv ? b : a))
+      if (flat !== best) {
+        flat.twinOf = { eSource: best.eSource, depthCv: best.depthCv, reproj: best.reproj.median }
+        best = flat
+      }
+    }
     best.fEsv = essentialSingularValues(fromF)
     return best
   }
@@ -310,7 +335,9 @@ export async function selectInitPair(
       // hand from raw candidate numbers is what made the B4 post-mortem manual.
       log(`candidate ${nameA} ↔ ${nameB} — ${init.inliers} inliers, `
         + `${kept}/${tri} pts kept after cheirality (${pct}%), median parallax ${init.angle.toFixed(2)}°, `
-        + `init reproj median ${init.reproj.median.toFixed(2)}px (E from ${init.eSource}), KᵀFK σ2/σ1 ${candRatio.toFixed(2)}, `
+        + `init reproj median ${init.reproj.median.toFixed(2)}px (E from ${init.eSource}`
+        + `${init.twinOf ? `, planar twin of ${init.twinOf.eSource}: depth spread ${init.depthCv.toFixed(3)} vs ${init.twinOf.depthCv.toFixed(3)}` : ''}), `
+        + `KᵀFK σ2/σ1 ${candRatio.toFixed(2)}, `
         + `graph degree ${pairDegree(entry)} (median ${medianDegree}) `
         + `⇒ score ${init.score.toFixed(1)} (parallax ×${parallaxHealth(init.angle).toFixed(2)}, `
         + `connectivity ×${connectivityHealth(init).toFixed(2)}, `

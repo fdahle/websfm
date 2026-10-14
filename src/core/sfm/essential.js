@@ -374,15 +374,31 @@ export function sampsonSq(E, p1, p2) {
  * RANSAC over the five-point solver. x1, x2: normalised [x, y] correspondences.
  * `thresh`: Sampson inlier threshold in normalised units (pixels / focal).
  * Deterministic (LCG seeded by the input size) so runs reproduce.
- * Returns { E, inliers (Uint8Array), count } or null.
+ * Returns { E, inliers (Uint8Array), count, alternatives } or null.
+ *
+ * `alternatives`: the distinct models (up to sign) that scored within `altFrac` of the
+ * best, best first. Over a plane the calibrated problem has TWO exact solutions (the
+ * "twin": camera moving along the plane normal instead of across it), and their
+ * inlier counts differ by noise — which one RANSAC returns is a coin flip. Casa Grande
+ * 1978: one seed took the twin, the whole block registered onto it at 0.75 px, and
+ * no similarity could fit the GCPs (9 km). The caller disambiguates (initPair.js);
+ * `minIters` keeps the adaptive stop from ending before both twins were sampled.
  */
-export function ransacEssential(x1, x2, { thresh = 1e-3, maxIters = 400, confidence = 0.999 } = {}) {
+export function ransacEssential(x1, x2, { thresh = 1e-3, maxIters = 400, minIters = 64, confidence = 0.999, altFrac = 0.9, maxAlternatives = 4 } = {}) {
   const n = Math.min(x1.length, x2.length)
   if (n < 5) return null
   const t2 = thresh * thresh
   let seed = (0x2545f491 ^ n) >>> 0
   const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 2 ** 32 }
-  let best = null, bestCount = 0, iters = maxIters
+  let bestCount = 0, iters = maxIters
+  const top = [] // { E, count }, distinct up to sign, best first
+  const same = (a, b) => Math.abs(a.reduce((acc, v, i) => acc + v * b[i], 0)) > 0.999
+  const note = (E, c) => {
+    const j = top.findIndex((t) => same(t.E, E))
+    if (j >= 0) { if (c > top[j].count) top[j] = { E, count: c } } else top.push({ E, count: c })
+    top.sort((a, b) => b.count - a.count)
+    if (top.length > maxAlternatives * 2) top.length = maxAlternatives * 2
+  }
   const s1 = new Array(5), s2 = new Array(5)
   for (let it = 0; it < iters; it++) {
     const idx = new Set()
@@ -392,16 +408,22 @@ export function ransacEssential(x1, x2, { thresh = 1e-3, maxIters = 400, confide
     for (const E of fivePoint(s1, s2)) {
       let c = 0
       for (let i = 0; i < n; i++) if (sampsonSq(E, x1[i], x2[i]) <= t2) c++
+      if (c >= altFrac * bestCount) note(E, c)
       if (c > bestCount) {
-        bestCount = c; best = E
+        bestCount = c
         const w = c / n
         const need = Math.log(1 - confidence) / Math.log(Math.max(1e-12, 1 - w ** 5))
-        iters = Math.min(maxIters, Math.max(it + 1, Math.ceil(need)))
+        // Never stop before minIters: at a 97 % inlier ratio the adaptive bound is ~3
+        // samples, and the planar twin's partner may not be among their roots (Casa
+        // Grande pair 48–49: only the twin was found, 74° off the true baseline).
+        iters = Math.min(maxIters, Math.max(it + 1, minIters, Math.ceil(need)))
       }
     }
   }
-  if (!best) return null
+  if (!top.length) return null
+  const best = top[0].E
   const inliers = new Uint8Array(n)
   for (let i = 0; i < n; i++) inliers[i] = sampsonSq(best, x1[i], x2[i]) <= t2 ? 1 : 0
-  return { E: best, inliers, count: bestCount }
+  const alternatives = top.filter((t) => t.count >= altFrac * bestCount).slice(0, maxAlternatives)
+  return { E: best, inliers, count: bestCount, alternatives }
 }

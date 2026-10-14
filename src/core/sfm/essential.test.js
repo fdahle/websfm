@@ -56,6 +56,19 @@ describe('ransacEssential', () => {
     expect(dist(r.E, trueE(R, t))).toBeLessThan(0.02)
   })
 
+  it('keeps the planar twin as an alternative so the true pose is always on the table', () => {
+    // Exactly planar ground, lateral nadir baseline: two exact solutions (the true one and
+    // its twin). Whichever RANSAC ranks first, the true E must be among the alternatives.
+    const R = rot(0.004, -0.003, 0.006), t = [-1, 0.02, 0.001]
+    const { x1, x2 } = scene(R, t, 300, 0)
+    const sigma = 0.3 / 6000
+    for (let i = 0; i < x1.length; i++) { x2[i][0] += sigma * (rnd() - 0.5) * 2; x2[i][1] += sigma * (rnd() - 0.5) * 2 }
+    const r = ransacEssential(x1, x2, { thresh: 1.5 / 6000, maxIters: 2000 })
+    expect(r.alternatives.length).toBeGreaterThanOrEqual(1)
+    expect(r.alternatives[0].E).toEqual(r.E)
+    expect(Math.min(...r.alternatives.map((a) => dist(a.E, trueE(R, t))))).toBeLessThan(0.02)
+  })
+
   it('is deterministic', () => {
     const R = rot(0.1, 0.05, -0.02), t = [0.8, 0.1, 0.05]
     const { x1, x2 } = scene(R, t, 200, 2)
