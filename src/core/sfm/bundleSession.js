@@ -132,7 +132,10 @@ export function createBundleSession(ctx) {
   // the others keep their K, as if their group had been held fixed (the crate cannot
   // hold one group fixed while refining another). Their poses still come from the
   // joint solve, so a caller re-settles with a 'none' solve afterwards.
-  async function runBundleAdjust(label, iters, refineMode = refineIntrinsics, { cameraPriors = null, refineOnly = null } = {}) {
+  // `gcp` (optional, from buildGcpAnchors): GCP anchor points appended after the real
+  // tracks, their mark observations and the anchor residuals — so a GCP-anchored solve
+  // can refine intrinsics through the same validation + fold path as every other pass.
+  async function runBundleAdjust(label, iters, refineMode = refineIntrinsics, { cameraPriors = null, refineOnly = null, gcp = null } = {}) {
     if (!(cameras.size >= 2 && tracks.liveCount() >= 10 && iters > 0)) {
       log(`${label} skipped (cameras=${cameras.size}, `
         + `points=${tracks.liveCount()}, iters=${iters})`, 'debug', 'Reconstruction')
@@ -145,8 +148,12 @@ export function createBundleSession(ctx) {
     const camIdxOf = new Map(uuidList.map((u, i) => [u, i]))
     // Point rank in this solve → point id; the solve's point i is ptIds[i].
     const ptIds = tracks.liveIds()
-    const observations = buildBaObservations(tracks, ptIds, camIdxOfImg(camIdxOf), keypointsAt)
-    const posBefore = trackPositions(tracks, ptIds)
+    const tieObs = buildBaObservations(tracks, ptIds, camIdxOfImg(camIdxOf), keypointsAt)
+    const observations = gcp ? appendObservations(tieObs, gcp.observations) : tieObs
+    const posBefore = gcp ? trackPositions(tracks, ptIds, gcp.anchorPts) : trackPositions(tracks, ptIds)
+    // A survey-constrained solve (camera priors or GCP anchors) is judged by the
+    // bounded-increase rule, not "cost must fall".
+    const constrained = !!(cameraPriors || gcp)
     log(`${label} — ${camList.length} cameras, ${ptIds.length} points, `
       + `${observations.n} observations, ${iters} iters`, 'info', 'Reconstruction')
     // Diagnostic: where do the gross pre-solve residuals sit? Grouped by camera, split
@@ -167,7 +174,8 @@ export function createBundleSession(ctx) {
         if (!(e > gross)) return
         const ci = oCam[i]
         const rec = byCam.get(ci) ?? { n: 0, fresh: 0, max: 0 }
-        rec.n++; if (tracks.viewCount(ptIds[oPt[i]]) <= 2) rec.fresh++
+        const pid = ptIds[oPt[i]]
+        rec.n++; if (pid != null && tracks.viewCount(pid) <= 2) rec.fresh++
         rec.max = Math.max(rec.max, e)
         byCam.set(ci, rec)
       })
@@ -182,15 +190,15 @@ export function createBundleSession(ctx) {
 
     const result = await bundleAdjust(camList, kList, posBefore, observations,
       { maxIters: iters, refineIntrinsics: refineMode, sensorOfCam, solver: cfg.baSolver, flatPoints: true,
-        ...(cameraPriors ? { cameraPriors } : {}) })
+        ...(cameraPriors ? { cameraPriors } : {}), ...(gcp ? { gcpAnchors: gcp.anchors } : {}) })
     noteBaSolver(label, result)
     if (!result) {
       log(`${label} returned no result (skipped)`, 'warn', 'Reconstruction')
       return
     }
-    if (cameraPriors && !cameraPriorReprojectionAccepts(result)) {
+    if (constrained && result.costAfter > result.costBefore + 0.01 && !cameraPriorReprojectionAccepts(result)) {
       log(`${label} REJECTED — reprojection RMS ${result.costBefore.toFixed(2)}px → `
-        + `${result.costAfter.toFixed(2)}px exceeds the camera-prior safety bound`, 'warn', 'Reconstruction')
+        + `${result.costAfter.toFixed(2)}px exceeds the survey-constraint safety bound`, 'warn', 'Reconstruction')
       return
     }
     // A correct bundle adjustment can only lower the cost; reject a worsening
@@ -204,7 +212,7 @@ export function createBundleSession(ctx) {
     // registered cameras unrefined and seeded the later RMS 185–902 px interim
     // starts (baAcceptance.js). So a plain-RMS rise is only a rejection when the
     // robust cost rose too.
-    if (!cameraPriors && result.costBefore != null && result.costAfter != null && result.costAfter > result.costBefore) {
+    if (!constrained && result.costBefore != null && result.costAfter != null && result.costAfter > result.costBefore) {
       const delta = result.costAfter - result.costBefore
       const afterKs = refineMode !== 'none' && result.intrinsics
         ? kList.map((k, ci) => ({ ...k, ...result.intrinsics[ci] })) : kList
@@ -464,12 +472,31 @@ export function createBundleSession(ctx) {
       // in this joint pass, keeping point and camera targets in the same gauge.
       const constrainedCameras = buildCameraPriorConstraints(uuidList, { fit, frame })
 
-      const observations = appendObservations(
-        buildBaObservations(tracks, ptIds, camIdxOfImg(camIdxOf), keypointsAt), setup.observations)
-
       log(`GCP-anchored bundle adjustment (round ${round + 1}/2) — `
         + `${anchors.length} GCP(s), seed scale ${fit.scale.toPrecision(4)}, `
         + `seed RMS ${fit.rms.toPrecision(3)}`, 'info', 'Reconstruction')
+
+      // With enough control, let the anchored solve re-estimate the intrinsics, as
+      // Metashape's GCP optimisation does. Fixed K cannot undo a focal error: over a
+      // nadir block f and flying height trade off, so the free network's relief scales
+      // with it and only control at different heights pins it down. Casa Grande 1978
+      // (certificate 152.9 mm, self-cal 5687 px, Metashape with GCPs ≈ 133 mm): fixed K
+      // left checkpoints at 8.6 m vertical RMS. Routed through runBundleAdjust, so the
+      // self-cal validation, the distortion fold (GCP marks move with it) and the
+      // composed self-cal record apply exactly as in every other pass.
+      const gcpMode = cfg.gcpRefineIntrinsics === 'auto'
+        ? (selfCalRecord.passes.at(-1)?.mode ?? refineIntrinsics) : (cfg.gcpRefineIntrinsics ?? 'none')
+      if (gcpMode && gcpMode !== 'none' && anchors.length >= (cfg.gcpRefineIntrinsicsMinGcps ?? 5)) {
+        const r = await runBundleAdjust(`GCP-anchored bundle adjustment (round ${round + 1}, intrinsics '${gcpMode}')`,
+          baIterations, gcpMode, { cameraPriors: constrainedCameras?.priors ?? null, gcp: setup })
+        if (!r) return
+        log(`GCP-anchored bundle adjustment anchor residual → ${(r.anchorRmsAfter * fit.scale).toPrecision(3)} project units`,
+          'success', 'Reconstruction')
+        continue
+      }
+
+      const observations = appendObservations(
+        buildBaObservations(tracks, ptIds, camIdxOfImg(camIdxOf), keypointsAt), setup.observations)
 
       const result = await bundleAdjust(camList, kList, trackPositions(tracks, ptIds, anchorPts), observations,
         { maxIters: baIterations, refineIntrinsics: 'none', sensorOfCam, gcpAnchors: anchors, flatPoints: true,
@@ -479,10 +506,15 @@ export function createBundleSession(ctx) {
         log('GCP-anchored bundle adjustment returned no result (skipped)', 'warn', 'Reconstruction')
         return
       }
-      if (result.costAfter > result.costBefore + 0.01
-          && !(constrainedCameras && cameraPriorReprojectionAccepts(result))) {
-        log(`GCP-anchored bundle adjustment REJECTED — would worsen reprojection RMS `
-          + `${result.costBefore.toFixed(2)}px → ${result.costAfter.toFixed(2)}px`, 'warn', 'Reconstruction')
+      // Like a camera-prior solve, an anchored solve is SUPPOSED to trade some image
+      // residual for geometry: pulling a domed or bent free network onto its control
+      // costs reprojection by construction. So it is judged by the same bounded-increase
+      // rule, not "cost must fall". The old 0.01 px gate rejected Casa Grande's 1978
+      // block at 1.69 → 1.71 px and left its checkpoints at 10.6 m vertical RMS.
+      if (result.costAfter > result.costBefore + 0.01 && !cameraPriorReprojectionAccepts(result)) {
+        log(`GCP-anchored bundle adjustment REJECTED — reprojection RMS `
+          + `${result.costBefore.toFixed(2)}px → ${result.costAfter.toFixed(2)}px exceeds the survey-constraint safety bound`,
+        'warn', 'Reconstruction')
         return
       }
       uuidList.forEach((uuid, ci) => {
@@ -492,7 +524,7 @@ export function createBundleSession(ctx) {
       // points were scratch space for this BA pass, not real SIFT tracks.
       setTrackPositions(ptIds, result.pos)
       log(`GCP-anchored bundle adjustment RMS ${result.costBefore.toFixed(2)}px → `
-        + `${result.costAfter.toFixed(2)}px, anchor residual (SfM units) → ${result.anchorRmsAfter.toFixed(4)}`
+        + `${result.costAfter.toFixed(2)}px, anchor residual → ${(result.anchorRmsAfter * fit.scale).toPrecision(3)} project units`
         + (constrainedCameras ? `, camera-centre residual → `
           + `${(result.cameraPriorRmsAfter * fit.scale).toPrecision(3)} project units` : ''),
         'success', 'Reconstruction')

@@ -141,6 +141,11 @@ export const SFM_TUNING = {
   // residual 0.43 → 0.20 m, GeoScan checkpoints H 6.1 → 4.4 cm, V 16.4 → 10.8 cm.
   // Loose priors (5 m default, consumer GNSS) carry too little weight to move K.
   cameraPriorRefineIntrinsics: 'auto',
+  // Same for the GCP-anchored BA (bundleSession.js), once at least
+  // gcpRefineIntrinsicsMinGcps control points qualify: over a nadir block only control
+  // at different heights pins the focal (Casa Grande 1978 film, HANDOVER ▸ B-hist).
+  gcpRefineIntrinsics: 'auto',
+  gcpRefineIntrinsicsMinGcps: 5,
   // ── In-registration distortion self-calibration (D3) ──
   // Once the model has this many cameras, the interim BA refines a shared focal + radial
   // k1 and folds the distortion out of the keypoints (+ Kmap) mid-registration, instead
