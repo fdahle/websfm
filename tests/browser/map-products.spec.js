@@ -22,13 +22,20 @@ async function setup(page, crs) {
     const canvas = document.createElement('canvas'); canvas.width = canvas.height = W
     const ctx = canvas.getContext('2d'); ctx.fillStyle = '#c84'; ctx.fillRect(0, 0, W, W)
     useReconstructionStore().dem = { width: W, height: W, gsd: 1, originX: ORIGIN_X, originY: ORIGIN_Y, data, mask,
-      zMin: 42, zMax: 42, unit: 'm', crs, name: 'DEM', previewDataUrl: canvas.toDataURL() }
+      zMin: 42, zMax: 42, unit: 'm', crs, name: 'DEM', previewUrl: canvas.toDataURL() }
   }, { W, ORIGIN_X, ORIGIN_Y, crs })
   await page.getByRole('button', { name: /Products/ }).first().click() // the section starts collapsed
   await page.locator('.item-name', { hasText: /^DEM$/ }).dblclick()
 }
 
 const onMapButton = (page) => page.locator('.ribbon').getByRole('button', { name: /On\s*Map/ })
+
+// Tools ▸ Measure ▾ ▸ <row>: the measuring tools are checkable menu rows.
+async function measureTool(page, row) {
+  await page.getByRole('button', { name: 'Tools', exact: true }).click()
+  await page.locator('.ribbon').getByRole('button', { name: 'Measure', exact: true }).click()
+  await page.getByRole('menuitemcheckbox', { name: row }).click()
+}
 
 test('a computed DEM in the project CRS goes on the map, fits, and probes cell values', async ({ page }) => {
   const errors = []
@@ -44,7 +51,7 @@ test('a computed DEM in the project CRS goes on the map, fits, and probes cell v
   await onMapButton(page).click()
   await expect.poll(() => page.evaluate(async () => {
     const { useReconstructionStore } = await import('/src/stores/useReconstructionStore.js')
-    return useReconstructionStore().productLayers.dem?.onMap
+    return useReconstructionStore().productLayers.dem?.visible
   })).toBe(true)
   await expect(onMapButton(page)).toHaveClass(/active/)
 
@@ -72,7 +79,7 @@ test('a computed DEM in the project CRS goes on the map, fits, and probes cell v
   }
   const x1 = mb.x + mb.width / 2 - 80, x2 = mb.x + mb.width / 2 + 80
   const dE = (await eastingAt(x2)) - (await eastingAt(x1))
-  await page.locator('.ribbon').getByRole('button', { name: /^Ruler$/ }).click()
+  await measureTool(page, /^Ruler/)
   await page.mouse.click(x1, y); await page.mouse.click(x2, y)
   const result = page.getByRole('region', { name: 'Measurement result' })
   const metres = Number((await result.locator('.mp-value').textContent()).replace(/[^\d.]/g, ''))
@@ -82,7 +89,7 @@ test('a computed DEM in the project CRS goes on the map, fits, and probes cell v
   // One record per raster: the DEM tab lists what was measured on the map.
   await page.keyboard.press('Escape'); await page.keyboard.press('Escape')
   await page.locator('.tab .tab-title', { hasText: /^DEM$/ }).click()
-  await page.locator('.ribbon').getByRole('button', { name: /^Saved$/ }).click()
+  await measureTool(page, /^Saved measurements/)
   await expect(page.getByRole('complementary', { name: 'Saved measurements' })).toContainText('Map ruler')
   expect(errors).toEqual([])
 })
@@ -112,16 +119,19 @@ test('without CRS content the map shows the model frame, and a local DEM is plac
     const canvas = document.createElement('canvas'); canvas.width = canvas.height = W
     const ctx = canvas.getContext('2d'); ctx.fillStyle = '#4a8'; ctx.fillRect(0, 0, W, W)
     s.dem = { width: W, height: W, gsd: 1, originX: -50, originY: 50, data, mask, zMin: 42, zMax: 42,
-      unit: 'model', crs: 'local', frame, name: 'DEM', previewDataUrl: canvas.toDataURL(),
+      unit: 'model', crs: 'local', frame, name: 'DEM', previewUrl: canvas.toDataURL(),
       frameStamp: { source: null, cloudId: 'sparse-1', cloudCreatedAt: 42 } }
-    s.setProductOnMap('dem', true)
+    s.setProductVisible('dem', true)
   })
 
   await page.locator('.tab', { hasText: /^2D$/ }).click()
   await page.locator('.ribbon').getByRole('button', { name: 'View', exact: true }).click()
   const ribbon = page.locator('.ribbon')
   await expect(ribbon.getByRole('button', { name: /Model\s*Frame/ })).toHaveClass(/active/)
+  // Edit GCPs (Tools ▸ Georeferencing) needs a CRS frame on the map.
+  await page.getByRole('button', { name: 'Tools', exact: true }).click()
   await expect(ribbon.getByRole('button', { name: /Edit\s*GCPs/ })).toHaveAttribute('aria-disabled', 'true')
+  await ribbon.getByRole('button', { name: 'View', exact: true }).click()
   const note = page.locator('.map-viewer .basemap-note')
   await expect(note).toContainText('Model frame (model units, no CRS)')
 

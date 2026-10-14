@@ -1,8 +1,8 @@
 import { test, expect } from '@playwright/test'
 import { readFile } from 'node:fs/promises'
 
-// Tools ▸ Products ▾ (contours, terrain derivatives, polygon clip) and the
-// remaining Point Cloud ▾ tools (Transform, ICP, Section), against the full app.
+// Tools ▸ Products ▾ (contours, terrain derivatives, polygon clip), the remaining
+// Point Cloud ▾ tools (Transform, ICP) and Measure ▾ ▸ Section, against the full app.
 // Every product tool ends as a download; its contents are checked, not just its name.
 
 async function createProject(page) {
@@ -80,7 +80,7 @@ test('Products ▾ exports contours, terrain derivatives and a polygon clip of t
   expect(errors).toEqual([])
 })
 
-test('Point Cloud ▾ transforms, ICP-aligns and sections a cloud', async ({ page }) => {
+test('Point Cloud ▾ transforms and ICP-aligns a cloud, and Measure ▾ sections it', async ({ page }) => {
   const errors = []
   page.on('pageerror', (e) => errors.push(e.message))
   await createProject(page)
@@ -124,7 +124,7 @@ test('Point Cloud ▾ transforms, ICP-aligns and sections a cloud', async ({ pag
   expect(back[2]).toBeCloseTo(0, 2)
 
   // Section across the middle: a slice cloud plus a CSV profile.
-  await openTool(page, /Point\s*Cloud/, /Section/)
+  await openTool(page, 'Measure', /Section/)
   const sec = page.getByRole('dialog', { name: 'Cloud Section' })
   await selectByText(sec.getByLabel('Cloud', { exact: true }), 'Imported (surface.ply) —')
   const csv = await download(page, () => sec.getByRole('button', { name: 'Cut section', exact: true }).click())

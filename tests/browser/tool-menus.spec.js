@@ -1,7 +1,8 @@
 import { test, expect } from '@playwright/test'
 
-// Tools tab dropdowns (Point Cloud ▾ / Mesh ▾) → tool dialogs → the store's
-// non-destructive edit path → the real worker ops, against the full application.
+// Tools tab dropdowns (Point Cloud ▾ / Mesh ▾ / Measure ▾) → tool dialogs → the
+// store's non-destructive edit path → the real worker ops, against the full
+// application.
 // Synthetic inputs: a 30×30 wavy grid as a dense cloud and as a mesh of the same
 // surface, imported (no pipeline run needed).
 
@@ -53,7 +54,7 @@ test('Point Cloud ▾ and Mesh ▾ tools add derived results through the worker'
   await expect.poll(async () => (await clouds(page)).some((c) => c.name.endsWith('(normals)') && c.nrm)).toBe(true)
 
   // Distance to the mesh: the copy carries a distance attribute and opens coloured by it.
-  await openTool(page, /Point\s*Cloud/, /Distance to reference/)
+  await openTool(page, 'Measure', /Distance to reference/)
   const dist = page.getByRole('dialog', { name: 'Distance to Reference' })
   await dist.getByLabel('To', { exact: true }).selectOption({ label: 'Imported (surface.ply) (mesh)' })
   await dist.getByRole('button', { name: 'Compute', exact: true }).click()
@@ -73,7 +74,7 @@ test('Point Cloud ▾ and Mesh ▾ tools add derived results through the worker'
   expect(source.count).toBe(29 * 29 * 2)
 
   // Area & volume reads the selected mesh synchronously.
-  await openTool(page, 'Mesh', /Area & volume/)
+  await openTool(page, 'Measure', /Mesh area & volume/)
   const measure = page.getByRole('dialog', { name: 'Mesh Area & Volume' })
   await expect(measure.getByText('Surface area')).toBeVisible()
   // An open terrain surface: no volume, and the dialog says why.

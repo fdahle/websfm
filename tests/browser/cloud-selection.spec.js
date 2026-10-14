@@ -1,8 +1,17 @@
 import { test, expect } from '@playwright/test'
 
-// 3D-viewer rectangle/lasso selection (tool chosen in the ribbon's View ▸ Select,
-// acted on from the floating toolbox) → Delete / Keep only through the cloud-edit
-// worker path, against the real Viewer3D, store, worker and OPFS persistence.
+// 3D-viewer rectangle/lasso selection (tool chosen in the ribbon's Tools ▸ Point
+// Cloud ▾, acted on from the floating toolbox) → Delete / Keep only through the
+// cloud-edit worker path, against the real Viewer3D, store, worker and OPFS
+// persistence.
+
+// Tools ▸ Point Cloud ▾ ▸ <row>: a selection mode is a checkable menu row.
+async function selectTool(page, row) {
+  await page.getByRole('button', { name: 'Tools', exact: true }).click()
+  await page.locator('.ribbon').getByRole('button', { name: /Point\s*Cloud/ }).click()
+  await page.getByRole('menuitemcheckbox', { name: row }).click()
+}
+
 test('rectangle and lasso selection edit a dense cloud non-destructively', async ({ page }) => {
   const errors = []
   page.on('pageerror', error => errors.push(error.message))
@@ -53,7 +62,7 @@ test('rectangle and lasso selection edit a dense cloud non-destructively', async
   // Columns x = 0..4 → 50 points. Pad well under half the pitch.
   const half = await pixelBox(4)
   const pad = Math.max(2, ((half.x1 - half.x0) / 4) * 0.3)
-  await page.getByRole('button', { name: 'Rectangle', exact: true }).click()
+  await selectTool(page, /Select \(rectangle\)/)
   await drag(half, pad)
   await expect(page.getByRole('toolbar', { name: 'Select points' })).toContainText('50 points selected')
   // Orbit is untouched by a selection drag (the camera did not move).
@@ -77,7 +86,7 @@ test('rectangle and lasso selection edit a dense cloud non-destructively', async
   const editedId = list[1].id
 
   // Lasso on the edited copy: keep only the row y = 0 (6 survivors: x = 0, 5..9).
-  await page.getByRole('button', { name: 'Lasso', exact: true }).click()
+  await selectTool(page, /Select \(lasso\)/)
   await expect.poll(() => viewer.evaluate(el => el.__vueParentComponent.setupState.cloudLayers.size)).toBe(1)
   await viewer.evaluate(el => el.__vueParentComponent.setupState.setView('top'))
   await page.waitForTimeout(300)
@@ -102,6 +111,9 @@ test('rectangle and lasso selection edit a dense cloud non-destructively', async
   list = await clouds()
   expect(list).toHaveLength(2) // refined in place, no third copy
 
+  // The edit ran behind the progress dialog; while any dialog is up the viewer
+  // leaves keys to it (utils/keyRouting.js), so Escape waits for it to close.
+  await expect(page.locator('[role="dialog"][aria-modal="true"]')).toHaveCount(0)
   await page.keyboard.press('Escape')
   await expect(page.getByRole('toolbar', { name: 'Select points' })).toHaveCount(0)
 

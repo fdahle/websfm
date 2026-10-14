@@ -106,6 +106,7 @@ test('Find GCPs matches real pixels and imports only explicitly reviewed candida
   await page.evaluate(async () => {
     const { writeGeoTiff,geoKeysForEpsg } = await import('/src/core/products/geotiff.js')
     const { detectKeypoints } = await import('/src/workers/computeClient.js')
+    const { asKeypoints } = await import('/src/core/features/keypoints.js')
     const canvas = document.createElement('canvas'); canvas.width=canvas.height=700
     const ctx = canvas.getContext('2d'); ctx.fillStyle='#888'; ctx.fillRect(0,0,700,700)
     let seed=1234; const random=()=>{seed=(1664525*seed+1013904223)>>>0;return seed/4294967296}
@@ -118,9 +119,10 @@ test('Find GCPs matches real pixels and imports only explicitly reviewed candida
     images.images=[{id:'a',uuid:'a',name:'a.jpg'},{id:'b',uuid:'b',name:'b.jpg'}]
     const R=[[1,0,0],[0,1,0],[0,0,1]],K={fx:100,fy:100,cx:0,cy:0}
     const cameras=new Map([['a',{R,t:[0,0,0],K}],['b',{R,t:[-1,0,0],K}]])
-    const points=detected.keypoints.map((p,i)=>({x:p.x+0.5,y:700-p.y-0.5,z:10,views:new Map([['a',i],['b',i]]),viewsPx:new Map([['a',[p.x,p.y]],['b',[p.x+1,p.y]]])}))
+    const kps=asKeypoints(detected.keypoints) // typed (core/features/keypoints.js)
+    const points=Array.from({length:kps.length},(_,i)=>{const p={x:kps.x(i),y:kps.y(i)};return {x:p.x+0.5,y:700-p.y-0.5,z:10,views:new Map([['a',i],['b',i]]),viewsPx:new Map([['a',[p.x,p.y]],['b',[p.x+1,p.y]]])}})
     recon.clouds=[{id:'s',kind:'sparse',name:'Sparse',createdAt:1,cameras,points}];recon.mainSparseId='s'
-    recon.ortho={width:700,height:700,originX:0,originY:700,gsd:1,previewDataUrl:url,frame:{kind:'local',origin:[0,0,0],east:[1,0,0],north:[0,1,0],up:[0,0,1]}}
+    recon.ortho={width:700,height:700,originX:0,originY:700,gsd:1,previewUrl:url,frame:{kind:'local',origin:[0,0,0],east:[1,0,0],north:[0,1,0],up:[0,0,1]}}
     const bytes=writeGeoTiff({width:700,height:700,samples:[{bits:8,format:1}],photometric:1,data,pixelScale:[2,2,0],tiepoint:[0,0,0,1000,2000,0],geoKeys:geoKeysForEpsg(3031,false)})
     const imported = await external.importRaster(new File([bytes],'reference.tif'),{forceKind:'ortho'})
     if (!imported) { const { useLog } = await import('/src/composables/useLog.js'); throw new Error(JSON.stringify(useLog().entries.value)) }
@@ -225,10 +227,14 @@ test('matching records worker stages separately from descriptor serialization', 
     let seed=17; const random=()=>{seed=(1664525*seed+1013904223)>>>0;return seed/4294967296}
     const n=800, descriptors=Float32Array.from({length:n*128},random)
     const points=Array.from({length:n},()=>({x:random()*4-2,y:random()*3-1.5,z:5+random()*6}))
-    const images=Array.from({length:3},(_,j)=>({id:`m${j}`,uuid:`m${j}`,name:`match-${j}`,kpStatus:'done',descDim:128,detector:'sift',descriptors:descriptors.slice(),meta:{width:1000,height:1000},
-      keypoints:points.map(p=>({x:500+500*(p.x-j*.4)/p.z,y:500+500*p.y/p.z,scale:1}))}))
+    // Keypoints live in the images store (typed, per uuid), not on the records: attach
+    // them through its feature import, as an external feature index would.
+    const images=window.workflowTools.images
+    images.images=Array.from({length:3},(_,j)=>({id:`m${j}`,uuid:`m${j}`,name:`match-${j}`,meta:{width:1000,height:1000}}))
+    await images.importFeatures(images.images.map((im,j)=>({uuid:im.uuid,detector:'sift',descDim:128,descriptors:descriptors.slice(),
+      keypoints:points.map(p=>({x:500+500*(p.x-j*.4)/p.z,y:500+500*p.y/p.z,scale:1}))})),{invalidateMatches:false})
     const store=useMatchesStore()
-    await store.matchAll(images,{strategy:'exhaustive',subsetGate:false,minMatches:8,maxIters:200,overwrite:true})
+    await store.matchAll(images.images,{strategy:'exhaustive',subsetGate:false,minMatches:8,maxIters:200,overwrite:true})
     return store.matchRun.timings
   })
   expect(timings.wallMs).toBeGreaterThan(0)
@@ -258,4 +264,30 @@ test('saved depth maps fuse through file handles without hydrating the full set'
     return { count:recon.clouds.find(c=>c.kind==='dense')?.count, resident:recon.depthMaps.size, saved:recon.depthMapsMeta.length }
   })
   expect(result.count).toBeGreaterThan(0); expect(result.resident).toBe(0); expect(result.saved).toBe(3)
+})
+
+test('a synthetic three-view scene reconstructs through the store into one sparse model', async ({ page }) => {
+  await page.goto(harness)
+  const model = await page.evaluate(async () => {
+    const { useMatchesStore } = await import('/src/stores/useMatchesStore.js')
+    const { useReconstructionStore } = await import('/src/stores/useReconstructionStore.js')
+    let seed=17; const random=()=>{seed=(1664525*seed+1013904223)>>>0;return seed/4294967296}
+    const n=800, descriptors=Float32Array.from({length:n*128},random)
+    const points=Array.from({length:n},()=>({x:random()*4-2,y:random()*3-1.5,z:5+random()*6}))
+    // Three cameras translated along x, observing the same points (exact projections).
+    const images=window.workflowTools.images
+    images.images=Array.from({length:3},(_,j)=>({id:`r${j}`,uuid:`r${j}`,name:`recon-${j}`,meta:{width:1000,height:1000}}))
+    await images.importFeatures(images.images.map((im,j)=>({uuid:im.uuid,detector:'sift',descDim:128,descriptors:descriptors.slice(),
+      keypoints:points.map(p=>({x:500+500*(p.x-j*.4)/p.z,y:500+500*p.y/p.z,scale:1}))})),{invalidateMatches:false})
+    await useMatchesStore().matchAll(images.images,{strategy:'exhaustive',subsetGate:false,minMatches:8,maxIters:200,overwrite:true})
+    const recon=useReconstructionStore()
+    await recon.reconstruct({})
+    const sparse=recon.mainSparseCloud
+    return { status: recon.reconStatus, cameras: sparse?.cameras?.size ?? 0, points: sparse?.points?.length ?? 0,
+      summary: !!recon.summary }
+  })
+  expect(model.status).toBe('done')
+  expect(model.cameras).toBe(3)
+  expect(model.points).toBeGreaterThan(700)
+  expect(model.summary).toBe(true)
 })
