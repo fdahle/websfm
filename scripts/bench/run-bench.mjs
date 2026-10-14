@@ -48,7 +48,7 @@ const json = (v) => (typeof v === 'string' ? JSON.parse(v) : v)
 
 const args = parseArgs(process.argv.slice(2))
 const cfg = { ...(args.config ? JSON.parse(await readFile(args.config, 'utf8')) : {}) }
-for (const k of ['name', 'images', 'include', 'limit', 'sceneType', 'stages', 'out', 'port', 'headed', 'dev', 'build', 'maxOldSpaceMb', 'dumpSfmInput', 'profileReopen', 'colmap', 'exportDense', 'exportDem', 'crs']) if (args[k] !== undefined) cfg[k] = args[k]
+for (const k of ['name', 'images', 'include', 'limit', 'sceneType', 'stages', 'out', 'port', 'headed', 'dev', 'build', 'maxOldSpaceMb', 'dumpSfmInput', 'profileReopen', 'colmap', 'exportDense', 'exportDem', 'exportCloudsProject', 'crs']) if (args[k] !== undefined) cfg[k] = args[k]
 for (const k of ['detect', 'match', 'recon']) cfg[k] = { ...(cfg[k] ?? {}), ...(args[k] ? json(args[k]) : {}) }
 if (!cfg.images) throw new Error('--images <folder> (or "images" in --config) is required')
 const name = cfg.name ?? 'bench'
@@ -321,6 +321,16 @@ try {
     console.log(`== exportDense: ${info.count} points → ${file}`)
     result.stages[tag ? `exportDense:${tag}` : 'exportDense'] = { points: info.count, file }
   }
+  // `exportCloudsProject: true`: after recon (sparse, with view counts) and dense, the
+  // points in the project CRS as raw Float64 (x, y, z[, views]) to <out>.<kind>.project.bin.
+  const exportCloudProject = async (kind, tag) => {
+    const d = await page.evaluate((kind) => window.bench.cloudPointsProject({ kind }), kind)
+    if (!d) { console.log(`== exportCloudsProject: no ${kind} cloud or no georeference`); return }
+    const file = `${outPrefix}${tag ? `.${tag}` : ''}.${kind}.project.bin`
+    await writeFile(file, Buffer.from(d.b64, 'base64'))
+    console.log(`== exportCloudsProject: ${kind} ${d.count} points (stride ${d.stride}, ${d.width} values) → ${file}`)
+    result.stages[`export:${kind}${tag ? `:${tag}` : ''}`] = { points: d.count, stride: d.stride, width: d.width, file }
+  }
   // With `reference.lidar`: score the fused cloud (a ≤1 M-point stride sample, in the
   // reconstruction's camera-GPS ENU frame) against the LiDAR surface, like the sparse
   // points after recon. Read `domeRmsM` / `domeWithin10cm` to compare two fusions of
@@ -495,6 +505,7 @@ try {
       if (!run[stage]) throw new Error(`unknown stage ${stage}`)
       await runStage(stage, cfg[entry] ?? cfg[stage], entry)
       if (stage === 'dense' && cfg.exportDense) await exportDense(tag)
+      if ((stage === 'recon' || stage === 'dense') && cfg.exportCloudsProject) await exportCloudProject(stage === 'recon' ? 'sparse' : 'dense', tag)
       if (stage === 'dense' && lidarCfg) await denseLidarCheck(entry)
       if (stage === 'ortho') await exportOrtho(tag)
       if (stage === 'dem' && (cfg.exportDem || cfg.hist?.refDem)) await exportDem(tag)

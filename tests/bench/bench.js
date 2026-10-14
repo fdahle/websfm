@@ -34,6 +34,7 @@ import { learnedDetector } from '/src/core/features/learnedDetectors.js'
 import { MODEL_CACHE_NAME, modelUrl } from '/src/core/models/registry.js'
 import { cameraPositionCheck, gcpCheck } from '/src/core/eval/positionCheck.js'
 import { applySimilarity } from '/src/core/products/georef.js'
+import { frameFromSpec } from '/src/core/products/frameSpec.js'
 import { makeFrameModelResolver, gcpsInPinholeFrame } from '/src/core/sfm/displayFrame.js'
 import { triangulateGcp } from '/src/core/sfm/gcpTriangulation.js'
 import { encodeSfmInput } from './sfmInputDump.js'
@@ -313,6 +314,34 @@ window.bench = {
     let s = ''
     for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000))
     return { count: c.count, stride, origin: pc.origin, b64: btoa(s) }
+  },
+
+  // A cloud in the project CRS (grid E, N and height, through the products' own frame
+  // resolver), every `stride`-th point so at most `maxPoints` come back, as base64
+  // Float64 xyz — for scoring points against a truth surface (synthetic blocks).
+  // kind: 'sparse' (with each point's view count as a 4th value) | 'dense'.
+  async cloudPointsProject({ kind = 'dense', maxPoints = 2_000_000 } = {}) {
+    const resolved = await recon.effectiveFrameSpec({ crs: 'project' })
+    if (resolved.source !== 'georef') return null
+    const frame = frameFromSpec(resolved.frameSpec)
+    const sparse = recon.clouds.find((x) => x.kind === 'sparse' && !x.imported)
+    const c = kind === 'sparse' ? sparse : recon.clouds.find((x) => x.kind === 'dense' && !x.imported)
+    if (!c) return null
+    const n = kind === 'sparse' ? c.points.length : c.count
+    const stride = Math.max(1, Math.ceil(n / maxPoints))
+    const width = kind === 'sparse' ? 4 : 3
+    const out = new Float64Array(width * Math.ceil(n / stride))
+    let k = 0
+    for (let i = 0; i < n; i += stride) {
+      const p = kind === 'sparse' ? c.points[i] : null
+      const q = frame.fromSfm(p ? [p.x, p.y, p.z] : [c.pos[3 * i], c.pos[3 * i + 1], c.pos[3 * i + 2]])
+      out[k++] = q[0]; out[k++] = q[1]; out[k++] = q[2]
+      if (p) out[k++] = p.views?.length ?? p.views?.size ?? 0
+    }
+    const u8 = new Uint8Array(out.buffer, 0, 8 * k)
+    let s = ''
+    for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000))
+    return { count: n, stride, width, crs: resolved.frameSpec?.crs ?? null, b64: btoa(s) }
   },
 
   // The reference camera positions as imported poses (WGS84), as a user importing a

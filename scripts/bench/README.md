@@ -219,3 +219,20 @@ reference DEMs) the same way for websfm, COLMAP and Metashape:
 
 Python scripts need an interpreter with rasterio (+ Metashape for the last); the
 `hist_env3` conda env has both.
+
+## Synthetic satellite blocks (`synth/`)
+
+`synth/synth_sat.py` renders a strip of frame-camera scans of a fractal terrain on the
+WGS84 ellipsoid (default: the KH-9 mapping camera, 304.8 mm over 46 × 23 cm film from
+170 km, 70 % forward overlap) and writes them in the `hist` layout with the truth beside
+them: `images/`, `camera_model_intrinsics.csv`, `gcp.csv`, `truth_dem.tif` (ellipsoidal
+heights in the projected CRS), `truth.json` (poses, GSD) and a ready `bench.json`.
+Rays are intersected with the terrain in ECEF, so Earth curvature is in the images.
+
+    python synth/synth_sat.py <out> --pitch-mm 0.112    # 6 × 4107×2054, ~2 min
+    python synth/synth_sat.py <out> --pitch-mm 0.028    # 6 × 16k×8k (¼ of KH-9 native)
+
+`exportCloudsProject: true` in a config writes the sparse (with view counts) and dense
+clouds in the project CRS after recon / dense (`<out>.sparse.project.bin`, Float64), and
+`synth/score_points.py <truth_dem.tif> <bins…>` scores their heights against the truth.
+Run both with the hist_env3 interpreter.
