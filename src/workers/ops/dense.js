@@ -2,11 +2,11 @@ import { readDepthFiles, readDepthOnly, readDepthAndCost } from '../../core/dens
 import {
   selectSourceViews, scaleK, rgbaToGray, depthMapForImage, fuseDepthMaps, fuseDepthMapsStreamed, filterDepthMap,
   filterDepthMapsGeometric, filterDepthMapsGeometricStreamed, applyPackedMask, geomFilterLoopShare, autoBestK, filterSettings,
+  depthMapSettings,
 } from '../../core/dense/mvs.js'
 import { depthCoverage } from '../../core/dense/depthMapCodec.js'
 import { viewIndex } from '../../core/dense/sparseInput.js'
 import { buildMaskLookup } from '../../core/mask.js'
-import { DEPTHMAP_DEFAULTS } from '../../core/defaults.user.js'
 import { hasDistortion } from '../../core/sfm/distortion.js'
 import { makeSampleMap } from '../../core/sfm/displayFrame.js'
 import {
@@ -136,21 +136,21 @@ export function makeDenseOps({ rasterize }) {
   async function computeDepthMaps([input], { emit }) {
     // `sparse`: the packed sparse model (core/dense/sparseInput.js), transferred.
     const { images, sparse, settings = {} } = input
+    // Every knob through the engine-boundary checks (core/dense/mvs.js depthMapSettings):
+    // a blank / non-finite / out-of-range value takes its default.
     const {
-      maxDim = 800, maxSources: maxSourcesReq = 6, minAngleDeg = 3, window = 3, iterations = 3, bestK = null,
-      speckleFilter = true, filterRadius = 1, filterRelTol = 0.1, coarseLong = 600,
+      maxDim, maxSources: maxSourcesReq, minAngleDeg, window, iterations, bestK,
+      speckleFilter, filterRadius, filterRelTol, coarseLong,
       // Resolved here (not left to the filter's own defaults) so the run record below
       // states the values the filter actually used, also for a recipe saved before a knob existed.
-      geomConsistency = true, maxGeomCost = DEPTHMAP_DEFAULTS.maxGeomCost,
-      minConsistent = DEPTHMAP_DEFAULTS.minConsistent, minNcc = DEPTHMAP_DEFAULTS.minNcc,
-      minGeomAngleDeg = DEPTHMAP_DEFAULTS.minGeomAngleDeg,
+      geomConsistency, maxGeomCost, minConsistent, minNcc, minGeomAngleDeg,
       // Stream each finished map to the caller ('map' event, planes transferred) instead
       // of holding all of them to the end; the caller then runs the cross-view filter
       // over the saved maps (filterDepthMaps below). Holding every map was 23 B/px ×
       // every image in this worker and again on the page — the preflight refused
       // quarry (347 images) at Medium (TODO ▸ SC-4).
-      streamMaps = false,
-    } = settings
+      streamMaps,
+    } = depthMapSettings(settings)
     // The GPU kernel packs sources into a fixed MAX_SRC=16 array and silently drops
     // any beyond that (depthMapGpu.js), while the WASM path + the first-image A/B
     // validation use every source. Clamp here so both backends see the same source
@@ -210,10 +210,12 @@ export function makeDenseOps({ rasterize }) {
     const proj = projectDensePeakBytes({
       nImages: images.length, maxDim, nSources: maxSources, backend: backend ? 'gpu' : 'wasm',
       retainedMaps: streamMaps ? 1 : images.length,
+      // The in-memory cross-view filter below; streamed maps are filtered by its own pass.
+      filterMaps: geomConsistency && !streamMaps ? images.length : 0,
     })
     emit('log', [`Dense: projected peak memory ≈ ${formatBytes(proj.total)} `
       + `(store ${formatBytes(proj.store)} + raster ${formatBytes(proj.raster)}`
-      + `${proj.gpu ? ` + GPU ${formatBytes(proj.gpu)}` : ''}) vs budget ${formatBytes(budget)}`,
+      + `${proj.gpu ? ` + GPU ${formatBytes(proj.gpu)}` : ''}${proj.filter ? ` + filter masks ${formatBytes(proj.filter)}` : ''}) vs budget ${formatBytes(budget)}`,
       proj.total > budget ? 'error' : 'info', 'Dense'])
     if (proj.total > budget) {
       emit('log', ['Dense: aborting before start — projected memory exceeds the budget. '

@@ -10,6 +10,8 @@
 // buffers; the pre-flight is a plain arithmetic projection from image count,
 // working dims, source count, and backend.
 
+import { formatBytes } from '../formatBytes.js'
+
 // Default budget: ~2 GB. Conservative for a browser tab on unified-memory Macs
 // (the GPU competes for the same RAM Safari polices).
 export const DEFAULT_BUDGET_BYTES = 2 * 1024 * 1024 * 1024
@@ -72,15 +74,6 @@ export function deviceBudget({ deviceMemoryGB = null, jsHeapLimitBytes = null } 
   }
 }
 
-// Human-readable byte size (GiB/MiB) for logs and UI.
-export function formatBytes(n) {
-  if (!(n > 0)) return '0 B'
-  const g = n / (1024 ** 3)
-  if (g >= 1) return `${g.toFixed(2)} GB`
-  const m = n / (1024 ** 2)
-  if (m >= 1) return `${m.toFixed(0)} MB`
-  return `${(n / 1024).toFixed(0)} KB`
-}
 
 // A tagged allocation ledger. track()/release() by tag; used() is the current
 // live total; peak() the high-water mark. Re-tracking a live tag replaces its
@@ -122,16 +115,24 @@ export function createMemLedger() {
 //     rasterBytesPerPx to reflect it).
 //   • GPU transient (gpu backend only) — for the image in flight: state (16) +
 //     readback (16) + JS-heap slice (16) + source textures (4 B/px × nSources).
+//   • cross-view filter masks — the in-memory filter (mvs.js filterDepthMapsGeometric)
+//     holds an unpacked 1 B/px drop mask for every map it judges, all at once, beside
+//     the retained maps: 1 B/px × `filterMaps`. The worker passes 0 when the filter is
+//     off or runs as its own streamed pass over the saved maps; the default assumes it
+//     runs over every retained map. Charged on top of the raster term (already the
+//     batch-long upper bound), so the projection still over-counts.
 // Working dims are the maxDim² upper bound (longest side = maxDim, other ≤ it).
-// Returns a byte breakdown { store, raster, gpu, total }.
+// Returns a byte breakdown { store, raster, gpu, filter, total }.
 export function projectDensePeakBytes({
   nImages, maxDim, nSources = 6, backend = 'wasm', rasterBytesPerPx = 4, retainedMaps = nImages,
+  filterMaps = retainedMaps,
 }) {
   const npix = maxDim * maxDim
   const store = retainedMaps * 23 * npix // depth 4 + cost 4 + rgb 3 + normals 12
   const raster = nImages * rasterBytesPerPx * npix
   const gpu = backend === 'gpu' ? (48 * npix + nSources * 4 * npix) : 0
-  return { store, raster, gpu, total: store + raster + gpu }
+  const filter = filterMaps * npix
+  return { store, raster, gpu, filter, total: store + raster + gpu + filter }
 }
 
 // Fusion's voxel accumulator (core/dense/mvs.js createVoxelAccumulator), per merged
@@ -144,20 +145,27 @@ export const DENSIFY_CELL_BYTES = 76
 // The flat [x,y,z,r,g,b] Float32 output (24) + Float32 world normals (12).
 export const DENSIFY_OUTPUT_BYTES_PER_CELL = 36
 
+// What the streamed consistency check (mvs.js fuseDepthMapsStreamed) allocates per
+// reference pixel beside the map itself: the agree (Uint32) + angle (Float64) scratch
+// planes, 12 B/px, and the eligible-pixel buffers (mvs.js streamedEligible) — Int32
+// index + Float64×3 world point, 28 B per eligible pixel, charged as if every pixel were.
+export const DENSIFY_STREAMED_REF_BYTES_PER_PX = 12 + 28
+
 // Bytes the fusion input holds resident. Resident maps (`streamed: false`) are the
 // planes themselves, transferred to the worker (×1; residency 2 models a clone).
-// Streamed maps are read from disk on demand: one full reference map, one full
-// comparison map, and the 12 B/px agree/angle scratch planes of the largest map.
+// Streamed maps are read from disk on demand, one reference at a time: the peak is the
+// largest reference's full map plus its check buffers (DENSIFY_STREAMED_REF_BYTES_PER_PX).
+// Comparison maps are depth planes in the comparison cache, which the caller charges
+// separately (mvs.js adds `cacheBytes`) — no second full map is ever held.
 export function densifyInputBytes(maps, { streamed = false, residency = 1 } = {}) {
   if (streamed) {
-    let first = 0, second = 0, maxPx = 0
+    let peak = 0
     for (const m of maps) {
-      const px = m.width * m.height
-      const bytes = px * (m.hasNormals ? 23 : 11) // depth 4 + cost 4 + rgb 3 (+ normals 12)
-      if (bytes > first) { second = first; first = bytes } else if (bytes > second) second = bytes
-      if (px > maxPx) maxPx = px
+      // depth 4 + cost 4 + rgb 3 (+ normals 12), plus the check's per-pixel buffers.
+      const bytes = m.width * m.height * ((m.hasNormals ? 23 : 11) + DENSIFY_STREAMED_REF_BYTES_PER_PX)
+      if (bytes > peak) peak = bytes
     }
-    return first + second + maxPx * 12
+    return peak
   }
   let bytes = 0
   for (const m of maps) {
@@ -205,3 +213,6 @@ export function maxFusionTileCells({ inputBytes, cells, budget, workers = 1 }) {
   const t = Math.floor((budget - k * inputBytes - cells * DENSIFY_CLOUD_BYTES_PER_CELL) / (k * perTileCell))
   return Math.max(0, Math.min(cells, t))
 }
+
+// The one byte formatter (core/formatBytes.js), re-exported for existing importers.
+export { formatBytes }

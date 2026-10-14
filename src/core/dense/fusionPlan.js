@@ -1,0 +1,404 @@
+// Stage B's plan: every pre-pass over the depth maps before the consistency pass —
+// cost statistics, the auto merge cell, scene bounds, the measured cell estimate —
+// the memory preflight and the slab layout (planFusionSlabs), plus fusion's per-pixel
+// gates. The plan object fusionPlanSteps returns is structured-cloned to slab workers:
+// keep it plain data (objects, arrays, numbers incl. ±Infinity slab edges, typed
+// arrays) — no functions or class instances. The slab pass and the runners are fusion.js.
+
+import { DENSE_TUNING } from '../tuning.js'
+import { normalizeRegion, regionContains } from '../products/region.js'
+import { DENSE_FUSE_DEFAULTS } from '../defaults.user.js'
+import { projectDensifyPeakBytes, densifyInputBytes, formatBytes, maxFusionTileCells, DENSIFY_CLOUD_BYTES_PER_CELL } from './memBudget.js'
+import { unprojectPixel, sliceCorners } from './denseGeometry.js'
+import { mix32, clampCellForBounds } from './voxelAccumulator.js'
+import { numOpt, boolOpt } from './denseOptions.js'
+
+// The valid-pixel cost distribution across all depth maps: its median (the run
+// summary) and p70 (the weak-signal warning: a genuine ZNCC match is ≥ ~0.55, cost
+// ≤ 0.45, so a p70 above 0.55 means the whole set matches poorly — bad intrinsics,
+// window or working resolution). It does NOT set the fusion gate any more. It used to
+// (p70 clamped to [0.30, 0.45]), which by construction dropped ~30 % of the pixels the
+// cross-view filter's absolute minNcc floor had already vetted: the fixed default
+// (DENSE_FUSE_DEFAULTS.maxCost) raised the ETH3D mean F1 at 2 cm from 52.6 to 58.9 with
+// accuracy unchanged on every scene (HANDOVER ▸ B-parity, 2026-10-12).
+//
+// Costs are **stride-subsampled** into a single Float32Array and sorted once, so
+// the whole set can pool tens of millions of pixels without a per-pixel JS-boxed
+// array (the double-sort memory hog). `n` is the true valid-pixel count; `median`
+// feeds the run summary (replaces the old second full pool + sort in medianOf).
+// Returns { n, p70, median }.
+function* fusionCostSteps(maps, { maxSamples = DENSE_TUNING.fuseCostMaxSamples } = {}) {
+  // One cheap scan for the true valid count → a stride that caps the sample budget.
+  let totalValid = 0
+  for (let mi = 0; mi < maps.length; mi++) {
+    const m = yield mi
+    const { depth } = m
+    for (let i = 0; i < depth.length; i++) if (depth[i] > 0) totalValid++
+  }
+  if (!totalValid) return { n: 0, p70: 0, median: 0 }
+  const stride = Math.max(1, Math.floor(totalValid / maxSamples))
+  const samples = new Float32Array(Math.ceil(totalValid / stride) + 1)
+  let s = 0, vi = 0
+  for (let mi = 0; mi < maps.length; mi++) {
+    const m = yield mi
+    const { depth, cost } = m
+    for (let i = 0; i < depth.length; i++) {
+      if (depth[i] > 0) {
+        if (vi % stride === 0 && s < samples.length) samples[s++] = cost[i]
+        vi++
+      }
+    }
+  }
+  const arr = samples.subarray(0, s)
+  arr.sort() // TypedArray.sort is numeric ascending
+  const at = (q) => arr[Math.min(s - 1, Math.max(0, Math.round(q * (s - 1))))]
+  return { n: totalValid, p70: at(0.7), median: at(0.5) }
+}
+
+// ── The map-request protocol (fusion's generators ↔ their runners) ─────────────
+// Every Stage B pass is a generator, so one body serves resident and streamed maps:
+//   • yield mi (a number)  ⇒ the runner sends back map `mi` ({ width, height, K, R, t,
+//     depth, cost, rgb?, normals? }). runWithMaps answers from a resident array;
+//     fusion.js fuseDepthMapsStreamed answers with `await loadMap(mi)`.
+//   • yield a check request (an object; only fusion.js fusionSlabSteps, only when
+//     hooks.streaming) { mi, m, minViews, minTriAngleDeg, maxCost, depthTolRel,
+//     consistencyPx, step, slab, slabIndex, slabCount, plan: { visits, corners } }
+//     ⇒ the streamed runner runs the consistency check for reference `mi` and sends
+//     back { agree: Uint32Array(w·h), angle: Float64Array(w·h) }. The runner plans its
+//     comparison cache from `plan` when slabIndex changes and then consumes that plan
+//     in order, so a slab must issue exactly one request per map of plan.visits, in
+//     visits order (its nextUse positions are visits × each reference's cull).
+// The generator's return value is the pass's result.
+export function runWithMaps(iterator, maps) {
+  let step = iterator.next()
+  while (!step.done) step = iterator.next(maps[step.value])
+  return step.value
+}
+export function fusionCostStats(maps, options = {}) {
+  return runWithMaps(fusionCostSteps(maps, options), maps)
+}
+
+// Auto voxel size for the spatial merge: the median ground-sample-distance across
+// maps (median valid depth / fx = the world-space span of one pixel). One cell ≈ one
+// pixel footprint, so cross-view overlap dedupes without discarding real resolution.
+function* mergeCellSteps(maps) {
+  const gsds = []
+  for (let mi = 0; mi < maps.length; mi++) {
+    const m = yield mi
+    const { depth } = m
+    const ds = []
+    for (let i = 0; i < depth.length; i++) if (depth[i] > 0) ds.push(depth[i])
+    if (!ds.length) continue
+    ds.sort((a, b) => a - b)
+    const fx = m.K?.fx || 0
+    if (fx > 0) gsds.push(ds[ds.length >> 1] / fx)
+  }
+  if (!gsds.length) return 0
+  gsds.sort((a, b) => a - b)
+  return gsds[gsds.length >> 1]
+}
+
+// Measured fusion size: the distinct merge cells of every pixel fusion could keep —
+// valid depth, cost ≤ maxCost, on the `step` grid, inside the region — at the real
+// merge cell. An upper bound on the fused cloud (the consistency, parallax, grazing
+// and isolated-cell filters only remove), measured instead of guessed from the pixel
+// count: with a merge cell of one ground pixel, a surface seen by k views collapses
+// ~k pixels into a cell, and that overlap is what a pixel-count guess cannot see.
+// Distinct counting by hash sampling: a cell is tracked only while its hash's low
+// `level` bits are zero, and the level rises whenever more than `sampleCap` cells
+// are tracked, so memory stays bounded and the estimate is exact for small scenes
+// (level 0) and within ~1/√sampleCap otherwise. Cells are identified by two
+// independent hashes (53 bits), never by coordinates. Same origin-anchored cells as
+// createVoxelAccumulator, so the count is the accumulator's.
+// It also records what tiled fusion plans from (`tile` = { axis }): the distinct
+// cells per cell index along the tile axis (`hist`, a Map over the sampled cells, so
+// at most sampleCap entries), and per map the cell range
+// along that axis of every pixel past the cost gate (`mapLo`/`mapHi`, ±∞ when none),
+// region or not — a tile visits exactly the maps whose range reaches it.
+// With `withCorners` it also keeps each map's depth-slice corners (`corners`, the
+// frustum the streamed consistency check culls with), so the streamed runner knows
+// every reference's comparison list before the pass starts.
+function* fusionCellEstimateSteps(maps, { cell, step, maxCost, region, sampleCap, tile = null, withCorners = false }) {
+  const inv = 1 / cell
+  let level = 0, mask = 0, candidates = 0
+  const seen = new Map() // sampled cell hash → its cell index along the tile axis
+  const k = tile ? 'xyz'[tile.axis] : null
+  const mapLo = new Float64Array(maps.length).fill(Infinity), mapHi = new Float64Array(maps.length).fill(-Infinity)
+  const corners = withCorners ? new Array(maps.length).fill(null) : null
+  for (let mi = 0; mi < maps.length; mi++) {
+    const m = yield mi
+    const { width: w, height: h, depth, cost } = m
+    let lo = Infinity, hi = -Infinity
+    for (let v = 0; v < h; v += step) {
+      for (let u = 0; u < w; u += step) {
+        const idx = v * w + u, d = depth[idx]
+        if (!(d > 0) || cost[idx] > maxCost) continue
+        const P = unprojectPixel(m, u, v, d)
+        const ia = k ? Math.floor(P[k] * inv) : 0
+        if (ia < lo) lo = ia
+        if (ia > hi) hi = ia
+        if (region && !regionContains(region, P.x, P.y, P.z)) continue
+        candidates++
+        const ix = Math.floor(P.x * inv) | 0, iy = Math.floor(P.y * inv) | 0, iz = Math.floor(P.z * inv) | 0
+        const h1 = mix32(mix32(mix32(ix) ^ iy) ^ iz)
+        if ((h1 & mask) !== 0) continue
+        const h2 = mix32(mix32(mix32(iz ^ 0x5bd1e995) ^ ix) ^ iy) & 0x1fffff
+        const key = h1 * 2097152 + h2
+        if (!seen.has(key)) seen.set(key, ia)
+        if (seen.size > sampleCap) {
+          level++; mask = (2 ** level - 1) | 0
+          for (const sk of seen.keys()) if ((Math.floor(sk / 2097152) & mask) !== 0) seen.delete(sk)
+        }
+      }
+    }
+    mapLo[mi] = lo; mapHi[mi] = hi
+    if (corners) corners[mi] = sliceCorners(m, 0, w, 0, h)
+  }
+  const cells = Math.min(candidates, Math.ceil(seen.size * 2 ** level))
+  let hist = null
+  if (tile) {
+    hist = new Map()
+    for (const ia of seen.values()) hist.set(ia, (hist.get(ia) ?? 0) + 2 ** level)
+  }
+  return { cells, candidates, level, sampled: seen.size, hist, mapLo, mapHi, corners }
+}
+
+// Slabs along the tile axis, each holding at most `cap` estimated cells (one cell
+// index over the cap stays one slab). `hist` maps a cell index along the axis to its
+// estimated cell count. Edges are integer cell indices, so a merge cell belongs to
+// exactly one slab, [lo, hi), and the outer slabs reach ±∞.
+export function planFusionSlabs(hist, cap) {
+  const idx = [...hist.keys()].sort((a, b) => a - b)
+  const slabs = []
+  let start = -Infinity, cur = 0
+  for (const ia of idx) {
+    const c = hist.get(ia)
+    if (cur > 0 && cur + c > cap) { slabs.push({ lo: start, hi: ia, cells: cur }); start = ia; cur = 0 }
+    cur += c
+  }
+  slabs.push({ lo: start, hi: Infinity, cells: cur })
+  return slabs
+}
+
+// Fusion's per-pixel gates, read through the engine-boundary checks (numOpt): a blank,
+// non-finite or out-of-range value takes its DENSE_FUSE_DEFAULTS / tuning value, and
+// `step` is an integer ≥ 1 — the slab loops advance by it.
+export function fusionGates(opts = {}) {
+  // depthTolRel/step are user-facing (DENSE_FUSE_DEFAULTS); consistencyPx is internal (tuning.js).
+  const consistencyPx = numOpt(opts.consistencyPx, DENSE_TUNING.consistencyPx, { min: 0, max: 64 })
+  const depthTolRel = numOpt(opts.depthTolRel, DENSE_FUSE_DEFAULTS.depthTolPct / 100, { positive: true, max: 1 })
+  const step = numOpt(opts.step, DENSE_FUSE_DEFAULTS.step, { int: true, min: 1, max: 1024 })
+  // WS4 geometric filters (0 disables each).
+  const minTriAngleDeg = numOpt(opts.minTriAngleDeg, DENSE_FUSE_DEFAULTS.minTriAngleDeg, { min: 0, max: 90 })
+  const maxIncidenceDeg = numOpt(opts.maxIncidenceDeg, DENSE_FUSE_DEFAULTS.maxIncidenceDeg, { min: 0, max: 180 })
+  const removeIsolated = boolOpt(opts.removeIsolated, DENSE_FUSE_DEFAULTS.removeIsolated)
+  // cos of the incidence gate; ≤0 or ≥90 ⇒ disabled (cosInc ≥ 0 always passes).
+  const incidenceOn = maxIncidenceDeg > 0 && maxIncidenceDeg < 90
+  const cosIncGate = incidenceOn ? Math.cos(maxIncidenceDeg * Math.PI / 180) : -1
+  return { consistencyPx, depthTolRel, step, minTriAngleDeg, maxIncidenceDeg, removeIsolated, incidenceOn, cosIncGate }
+}
+
+export function* fusionPlanSteps(maps, opts, onLog, hooks) {
+  const gates = fusionGates(opts)
+  const { consistencyPx, depthTolRel, step, removeIsolated } = gates
+
+  // Cost histogram (sampled, one sort): the summary median and the weak-signal check.
+  const costStats = yield* fusionCostSteps(maps)
+
+  // Defaults when the user hasn't overridden them (null, or blank / out of range): minViews
+  // = min(2, nMaps−1) so a 2-image project can still fuse (needs 1 agreeing view); maxCost
+  // = the fixed default (fusionCostSteps says why it no longer adapts to the data);
+  // Infinity is an explicit "no cost gate".
+  const minViews = numOpt(opts.minViews, Math.max(1, Math.min(2, maps.length - 1)), { int: true, min: 1 })
+  const maxCost = opts.maxCost === Infinity ? Infinity : numOpt(opts.maxCost, DENSE_FUSE_DEFAULTS.maxCost, { min: 0 })
+  onLog(`Fusion: valid-pixel cost median ${costStats.median.toFixed(2)}, p70 ${costStats.p70.toFixed(2)} `
+    + `(${costStats.n} px)`, 'info', 'Dense')
+  // A real ZNCC match is ≥ ~0.55 (cost ≤ 0.45). A p70 above 0.55 means the
+  // photoconsistency signal is weak across the whole set: the problem is upstream of
+  // fusion, so say so.
+  if (costStats.p70 > 0.55) {
+    onLog(`Fusion: weak cost distribution — p70 ${costStats.p70.toFixed(2)} > 0.55 (most pixels match at ZNCC < 0.45). `
+      + 'Check intrinsics / window size / working resolution.', 'warn', 'Dense')
+  }
+
+  onLog(`Fusion: ${maps.length} map(s), minViews ${minViews}, maxCost ${maxCost}, `
+    + `depth tol ${(depthTolRel * 100).toFixed(1)}%, consistency ±${consistencyPx}px, step ${step}px`,
+    'info', 'Dense')
+
+  // Scene bounds from a coarse valid-depth grid (fuseBboxStride-th row/col of each
+  // map) — enough to size the voxel-key packing without a full unprojection pass.
+  const bounds = { minX: Infinity, minY: Infinity, minZ: Infinity, maxX: -Infinity, maxY: -Infinity, maxZ: -Infinity }
+  const bboxStride = DENSE_TUNING.fuseBboxStride
+  for (let mi = 0; mi < maps.length; mi++) {
+    const m = yield mi
+    const { width: w, height: h, depth } = m
+    for (let v = 0; v < h; v += bboxStride) {
+      for (let u = 0; u < w; u += bboxStride) {
+        const d = depth[v * w + u]
+        if (!(d > 0)) continue
+        const P = unprojectPixel(m, u, v, d)
+        if (P.x < bounds.minX) bounds.minX = P.x; if (P.x > bounds.maxX) bounds.maxX = P.x
+        if (P.y < bounds.minY) bounds.minY = P.y; if (P.y > bounds.maxY) bounds.maxY = P.y
+        if (P.z < bounds.minZ) bounds.minZ = P.z; if (P.z > bounds.maxZ) bounds.maxZ = P.z
+      }
+    }
+  }
+  const hasBounds = Number.isFinite(bounds.minX)
+  if (!hasBounds) { bounds.minX = bounds.minY = bounds.minZ = 0; bounds.maxX = bounds.maxY = bounds.maxZ = 0 }
+
+  // Merge cell in world units (≈ one ground-sample-distance), clamped up if the
+  // packed key would overflow float64. mergeCell: null ⇒ auto (median GSD); ≤0 ⇒
+  // "disabled" — streamed as a tiny cell so the flat output ≈ raw count but never a
+  // per-point object list (a true no-merge would resurrect the OOM). autoMergeCell
+  // and the cost histogram only read `maps`, so both resolve before the loop.
+  const mergeOpt = numOpt(opts.mergeCell, null) // blank / non-finite ⇒ auto
+  let mergeCell = mergeOpt != null ? mergeOpt : yield* mergeCellSteps(maps)
+  if (!(mergeCell > 0)) {
+    const auto = yield* mergeCellSteps(maps)
+    mergeCell = (auto > 0 ? auto : 1) * 1e-3
+    onLog(`Fusion: merge disabled — streaming near-unmerged at cell ${mergeCell.toExponential(2)} `
+      + `(flat output, no raw point objects)`, 'warn', 'Dense')
+  }
+  mergeCell = clampCellForBounds(bounds, mergeCell)
+  const region = normalizeRegion(opts.region)
+
+  // Tiles are slabs along the scene's longest axis, cut at merge-cell boundaries.
+  const ext = [bounds.maxX - bounds.minX, bounds.maxY - bounds.minY, bounds.maxZ - bounds.minZ]
+  const axis = ext[0] >= ext[1] && ext[0] >= ext[2] ? 0 : ext[1] >= ext[2] ? 1 : 2
+  const axKey = 'xyz'[axis]
+
+  // Stage B pre-flight: measure the merged size, project the peak and refuse before
+  // the expensive consistency pass. Runs in the worker because the cell count needs
+  // every map's pixels at the real merge cell; a refusal returns normally (no
+  // throw), so the caller still gets transferred buffers home.
+  const est = yield* fusionCellEstimateSteps(maps, {
+    cell: mergeCell, step, maxCost, region, sampleCap: DENSE_TUNING.fuseEstimateSampleCap, tile: { axis },
+    withCorners: !!hooks.streaming,
+  })
+  const margin = est.level > 0 ? DENSE_TUNING.fuseEstimateMargin : 1
+  const estCells = Math.ceil(est.cells * margin)
+  // Per worker: its maps (streamed: the largest reference + its check buffers) and,
+  // streamed, its comparison cache (memBudget.js densifyInputBytes).
+  const inputBytes = densifyInputBytes(maps, { streamed: !!hooks.streaming }) + (hooks.streaming ? (opts.cacheBytes ?? 0) : 0)
+  let proj = projectDensifyPeakBytes({ inputBytes, cells: estCells })
+  const budget = opts.memBudgetBytes > 0 ? opts.memBudgetBytes : 0
+  onLog(`Fusion: measured ${est.candidates.toLocaleString()} candidate px → ≤ ${estCells.toLocaleString()} `
+    + `merge cells at ${mergeCell.toExponential(2)}${est.level ? ` (hash-sampled 1/${2 ** est.level}, +${Math.round((DENSE_TUNING.fuseEstimateMargin - 1) * 100)}% margin)` : ' (exact)'}; `
+    + `projected peak ≈ ${formatBytes(proj.total)} (input ${formatBytes(proj.input)} + accumulator `
+    + `${formatBytes(proj.accumulator)} + output ${formatBytes(proj.output)})`
+    + (budget ? ` vs budget ${formatBytes(budget)}` : ''), 'info', 'Dense')
+  const scaledHist = () => new Map([...est.hist].map(([ia, c]) => [ia, c * margin]))
+  let slabs = [{ lo: -Infinity, hi: Infinity, cells: estCells }]
+  let workers = 1
+  // Parallel (`opts.parallel` workers, each running whole slabs): about one slab per
+  // worker, each small enough that every worker can hold one slab's accumulator beside
+  // the finished slabs.
+  const parallel = Math.max(1, Math.floor(opts.parallel ?? 1))
+  if (parallel > 1 && est.hist.size > 1) {
+    const cap = maxFusionTileCells({ inputBytes, cells: estCells, budget: budget || Infinity, workers: parallel })
+    // One slab per worker, balanced by cells: every extra cut makes the maps that span
+    // it read and unprojected once more (17 slabs on quarry ran slower than one).
+    const planned = cap > 0 ? planFusionSlabs(scaledHist(), Math.min(cap, Math.ceil(estCells / parallel))) : []
+    if (planned.length > 1) {
+      const largest = Math.max(...planned.map((s) => s.cells))
+      const parProj = projectDensifyPeakBytes({ inputBytes, cells: estCells, tileCells: largest, workers: Math.min(parallel, planned.length) })
+      if (!budget || parProj.total <= budget) {
+        slabs = planned; proj = parProj; workers = Math.min(parallel, planned.length)
+        onLog(`Fusion: ${slabs.length} slabs along ${axKey} on ${workers} workers (≤ ${Math.ceil(largest).toLocaleString()} cells each); `
+          + `projected peak ≈ ${formatBytes(proj.total)} (accumulators ${formatBytes(proj.accumulator)} + finished slabs `
+          + `${formatBytes(proj.finished)}; joining ${formatBytes(proj.assemble)})`, 'info', 'Dense')
+      }
+    }
+  }
+  // Over budget in one piece: build the cloud slab by slab, so only one slab's
+  // accumulator is resident beside the finished slabs (already in the cloud's 27 B
+  // layout). The cloud itself still has to fit, twice while the slabs are joined.
+  if (workers === 1 && budget && proj.total > budget) {
+    const cap = maxFusionTileCells({ inputBytes, cells: estCells, budget })
+    if (cap > 0) {
+      const planned = planFusionSlabs(scaledHist(), cap)
+      const largest = Math.max(...planned.map((s) => s.cells))
+      const tiledProj = projectDensifyPeakBytes({ inputBytes, cells: estCells, tileCells: largest })
+      if (planned.length > 1 && tiledProj.total <= budget) {
+        slabs = planned; proj = tiledProj
+        onLog(`Fusion: one piece would need ${formatBytes(projectDensifyPeakBytes({ inputBytes, cells: estCells }).total)} — `
+          + `fusing in ${slabs.length} slabs along ${axKey} (≤ ${Math.ceil(largest).toLocaleString()} cells each); `
+          + `projected peak ≈ ${formatBytes(proj.total)} (accumulator ${formatBytes(proj.accumulator)} + finished slabs `
+          + `${formatBytes(proj.finished)}; joining ${formatBytes(proj.assemble)})`, 'info', 'Dense')
+      }
+    }
+  }
+  if (budget && proj.total > budget) {
+    onLog(`Fusion: projected peak ${formatBytes(proj.total)} exceeds the budget ${formatBytes(budget)} even in slabs `
+      + `(the cloud alone is ${formatBytes(estCells * DENSIFY_CLOUD_BYTES_PER_CELL)}).`, 'error', 'Dense')
+    onLog('Fusion: aborting before the consistency pass — projected memory exceeds the budget. '
+      + 'Raise the point-density sample step to 2 (¼ the pixels), set a Region around the subject '
+      + '(Tools ▸ Model), or build depth maps at a lower Quality; or raise the memory budget '
+      + '(Settings ▸ Compute) if the machine has the RAM.', 'error', 'Dense')
+    return { refused: { ...proj, budget, mergeCell } }
+  }
+  const tiled = slabs.length > 1
+  // A slab also accumulates a halo as wide as the isolated-cell search, so every
+  // neighbour of its own cells is exactly as occupied as in a single pass.
+  const halo = tiled && removeIsolated ? DENSE_TUNING.isolatedRadius : 0
+  // A slab visits only the maps with a pixel past the cost gate that lands in it or
+  // its halo; a map with none is visited once, by the first slab, for the cull
+  // accounting. With each map's slice corners a slab's visit list is its whole
+  // sequence of plane requests (the streamed cache plans on it). Per-pixel culls
+  // before a world point exists are counted by a map's first visiting slab.
+  const nM = maps.length
+  const firstSlab = new Int32Array(nM).fill(-1)
+  const visits = slabs.map(({ lo, hi }, ti) => {
+    const list = []
+    for (let mi = 0; mi < nM; mi++) {
+      const hasRange = est.mapLo[mi] <= est.mapHi[mi]
+      if (!tiled || (hasRange ? est.mapHi[mi] >= lo - halo && est.mapLo[mi] < hi + halo : ti === 0)) {
+        list.push(mi)
+        if (firstSlab[mi] < 0) firstSlab[mi] = ti
+      }
+    }
+    return list
+  })
+  // Streamed + tiled: each map's frustum corners over just the pixels landing in each
+  // slab (+ halo), so a slab compares a map only with the views that can see ITS part of
+  // it. The whole-map corners made every slab compare with every view that sees any of
+  // the map — 17 slabs on quarry did 307 k comparisons for the single pass's 56 k. Exact
+  // for the same reason the whole-map cull is: the box still covers every pixel the slab
+  // considers. One more read of every map, only when tiled.
+  let slabCorners = null
+  if (tiled && hooks.streaming) {
+    const inv = 1 / mergeCell, k = 'xyz'[axis]
+    slabCorners = slabs.map(() => new Array(nM).fill(null))
+    for (let mi = 0; mi < nM; mi++) {
+      if (!(est.mapLo[mi] <= est.mapHi[mi])) continue
+      const m = yield mi
+      const { width: w, height: h, depth, cost } = m
+      const box = slabs.map(() => [Infinity, -Infinity, Infinity, -Infinity, Infinity, -Infinity]) // u0 u1 v0 v1 d0 d1
+      for (let v = 0; v < h; v += step) {
+        for (let u = 0; u < w; u += step) {
+          const idx = v * w + u, d = depth[idx]
+          if (!(d > 0) || cost[idx] > maxCost) continue
+          const ca = Math.floor(unprojectPixel(m, u, v, d)[k] * inv)
+          for (let ti = 0; ti < slabs.length; ti++) {
+            if (ca < slabs[ti].lo - halo || ca >= slabs[ti].hi + halo) continue
+            const b = box[ti]
+            if (u < b[0]) b[0] = u; if (u > b[1]) b[1] = u
+            if (v < b[2]) b[2] = v; if (v > b[3]) b[3] = v
+            if (d < b[4]) b[4] = d; if (d > b[5]) b[5] = d
+          }
+        }
+      }
+      box.forEach((b, ti) => {
+        if (!(b[5] > 0)) return
+        const cs = []
+        for (const d of [b[4], b[5]]) for (const u of [b[0], b[1]]) for (const v of [b[2], b[3]]) cs.push(unprojectPixel(m, u, v, d))
+        slabCorners[ti][mi] = cs
+      })
+    }
+  }
+  return {
+    nMaps: nM, gates, minViews, maxCost, costMedian: costStats.median, bounds, bboxStride, mergeCell, region,
+    axis, slabs, tiled, halo, workers, visits, firstSlab, estCells, slabCorners,
+    est: { mapLo: est.mapLo, mapHi: est.mapHi, corners: est.corners },
+  }
+}

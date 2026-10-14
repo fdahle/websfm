@@ -2,11 +2,12 @@ import { describe, it, expect } from 'vitest'
 import {
   filterDepthMap, depthMapForImage, qualityToMaxDim, autoBestK, fusionCostStats,
   fuseDepthMaps, mergePointsSpatial, createVoxelAccumulator, filterDepthMapsGeometric, filterCandidates, geomFilterLoopShare,
-  filterDepthMapsGeometricStreamed, applyPackedMask,
+  filterDepthMapsGeometricStreamed, applyPackedMask, fuseDepthMapsStreamed, fusionGates, filterConfig, filterSettings,
+  depthMapSettings, streamedEligible,
 } from './mvs.js'
 import { packSparseForDense } from './sparseInput.js'
 import { DENSE_TUNING } from '../tuning.js'
-import { DENSE_FUSE_DEFAULTS } from '../defaults.user.js'
+import { DENSE_FUSE_DEFAULTS, DEPTHMAP_DEFAULTS } from '../defaults.user.js'
 
 // Build a w×h Float32Array depth plane from a 2-D array of numbers (0 = hole).
 const plane = (rows) => Float32Array.from(rows.flat())
@@ -470,6 +471,7 @@ describe('fusion pre-flight (measured cell count)', () => {
     expect(ok.refused).toBeUndefined()
     expect(ok.length).toBeGreaterThan(0)
   })
+
 })
 
 describe('filterDepthMapsGeometric (cross-view consistency)', () => {
@@ -769,5 +771,277 @@ describe('fuseDepthMaps progress emits', () => {
       expect(e.d).toBeLessThanOrEqual(e.t)     // never exceeds total
       prev = e.d
     }
+  })
+})
+
+describe('user-facing numeric options (engine-boundary sanitizing)', () => {
+  // A cleared <input v-model.number> hands back '' (and partial input NaN). Destructuring
+  // defaults only replace undefined, so '' used to reach the loops: `v += ''` made the
+  // row index the string "0" and fusion never finished.
+  const mk = (uuid, tx) => ({
+    uuid, width: 24, height: 24,
+    K: { fx: 100, fy: 100, cx: 12.5, cy: 12.5 }, R: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], t: [tx, 0, 0],
+    depth: new Float32Array(24 * 24).fill(1),
+    cost: new Float32Array(24 * 24).fill(0.1),
+    rgb: new Uint8Array(24 * 24 * 3).fill(128),
+  })
+
+  it('fusionGates falls back to the documented defaults for blank / non-finite / out-of-range values', () => {
+    const defaults = fusionGates({})
+    expect(defaults).toMatchObject({
+      step: DENSE_FUSE_DEFAULTS.step, depthTolRel: DENSE_FUSE_DEFAULTS.depthTolPct / 100,
+      consistencyPx: DENSE_TUNING.consistencyPx, minTriAngleDeg: DENSE_FUSE_DEFAULTS.minTriAngleDeg,
+      maxIncidenceDeg: DENSE_FUSE_DEFAULTS.maxIncidenceDeg, removeIsolated: DENSE_FUSE_DEFAULTS.removeIsolated,
+    })
+    for (const bad of ['', '  ', NaN, null, undefined, Infinity, -Infinity, 'abc', {}, []]) {
+      const g = fusionGates({ step: bad, depthTolRel: bad, consistencyPx: bad, minTriAngleDeg: bad, maxIncidenceDeg: bad, removeIsolated: bad })
+      expect(g).toEqual(defaults)
+    }
+    // Out of range: a zero/negative step, a zero tolerance (a cleared % field ÷ 100).
+    expect(fusionGates({ step: 0 }).step).toBe(1)
+    expect(fusionGates({ step: -3 }).step).toBe(1)
+    expect(fusionGates({ step: 0.5 }).step).toBe(1)
+    expect(fusionGates({ depthTolRel: 0 }).depthTolRel).toBe(defaults.depthTolRel)
+    expect(fusionGates({ depthTolRel: '' / 100 }).depthTolRel).toBe(defaults.depthTolRel)
+    expect(fusionGates({ depthTolRel: -0.02 }).depthTolRel).toBe(defaults.depthTolRel)
+    expect(fusionGates({ minTriAngleDeg: -1 }).minTriAngleDeg).toBe(defaults.minTriAngleDeg)
+    // Valid values pass through; a step is an integer.
+    expect(fusionGates({ step: 2.7 }).step).toBe(2)
+    expect(fusionGates({ step: '3' }).step).toBe(3)
+    expect(fusionGates({ depthTolRel: 0.05, minTriAngleDeg: 0, maxIncidenceDeg: 0, removeIsolated: false }))
+      .toMatchObject({ depthTolRel: 0.05, minTriAngleDeg: 0, maxIncidenceDeg: 0, removeIsolated: false, incidenceOn: false })
+  })
+
+  it('a fusion with blank fields terminates and fuses exactly what the defaults fuse', () => {
+    const maps = () => [mk('a', 0), mk('b', -0.1), mk('c', -0.2)]
+    const expected = fuseDepthMaps(maps(), {}, () => {})
+    expect(expected.length).toBeGreaterThan(0)
+    const blank = fuseDepthMaps(maps(), {
+      step: '', depthTolRel: '' / 100, minViews: '', maxCost: '', minTriAngleDeg: '', maxIncidenceDeg: NaN,
+      removeIsolated: '', mergeCell: '',
+    }, () => {})
+    expect([...blank]).toEqual([...expected])
+    expect(blank.summary).toEqual(expected.summary)
+  })
+
+  it('the streamed runner terminates on a blank step too', async () => {
+    const ms = [mk('a', 0), mk('b', -0.1)]
+    const expected = fuseDepthMaps(ms, {}, () => {})
+    const out = await fuseDepthMapsStreamed(ms, async (i) => ms[i], { step: '', depthTolRel: NaN }, () => {})
+    expect([...out]).toEqual([...expected])
+  })
+
+  it('minViews / maxCost: blank means auto / the default gate, real values pass', () => {
+    const ms = () => [mk('a', 0), mk('b', -0.1), mk('c', -0.2)]
+    const logs = []
+    fuseDepthMaps(ms(), { minViews: '', maxCost: NaN }, (m) => logs.push(m))
+    expect(logs.find((m) => m.includes('minViews'))).toContain(`minViews 2, maxCost ${DENSE_FUSE_DEFAULTS.maxCost}`)
+    logs.length = 0
+    fuseDepthMaps(ms(), { minViews: 0, maxCost: -1 }, (m) => logs.push(m))
+    expect(logs.find((m) => m.includes('minViews'))).toContain(`minViews 2, maxCost ${DENSE_FUSE_DEFAULTS.maxCost}`)
+    logs.length = 0
+    fuseDepthMaps(ms(), { minViews: 1, maxCost: 0.5 }, (m) => logs.push(m))
+    expect(logs.find((m) => m.includes('minViews'))).toContain('minViews 1, maxCost 0.5')
+  })
+
+  it('filterConfig / filterSettings fall back to DEPTHMAP_DEFAULTS', () => {
+    const blank = { minNcc: '', maxGeomCost: NaN, minConsistent: '', minGeomAngleDeg: '', cull: '' }
+    const want = { minNcc: DEPTHMAP_DEFAULTS.minNcc, maxGeomCost: DEPTHMAP_DEFAULTS.maxGeomCost,
+      minConsistent: DEPTHMAP_DEFAULTS.minConsistent, minGeomAngleDeg: DEPTHMAP_DEFAULTS.minGeomAngleDeg }
+    expect(filterSettings(blank)).toEqual(want)
+    expect(filterConfig(blank)).toEqual(filterConfig({}))
+    expect(filterConfig({ maxGeomCost: 0, minConsistent: -1, minNcc: 2, minGeomAngleDeg: -5 })).toEqual(filterConfig({}))
+    // 0 consistent views is the documented "off" switch, not out of range.
+    expect(filterConfig({ minConsistent: 0 }).minConsistent).toBe(0)
+    expect(filterConfig({ minConsistent: 3, minNcc: 0.3, cull: false })).toMatchObject({ minConsistent: 3, minNcc: 0.3, cull: false })
+  })
+
+  it('depthMapSettings falls back to the defaults for the Stage A knobs', () => {
+    const d = depthMapSettings({})
+    expect(d).toMatchObject({
+      quality: DEPTHMAP_DEFAULTS.quality, maxSources: DEPTHMAP_DEFAULTS.maxSources, window: DEPTHMAP_DEFAULTS.window,
+      iterations: DEPTHMAP_DEFAULTS.iterations, bestK: null, filterRelTol: DEPTHMAP_DEFAULTS.filterRelTol / 100,
+      filterRadius: 1, coarseLong: DENSE_TUNING.coarseLong, minAngleDeg: DENSE_TUNING.minAngleDeg,
+      speckleFilter: true, geomConsistency: true, streamMaps: false,
+      maxGeomCost: DEPTHMAP_DEFAULTS.maxGeomCost, minConsistent: DEPTHMAP_DEFAULTS.minConsistent,
+      minNcc: DEPTHMAP_DEFAULTS.minNcc, minGeomAngleDeg: DEPTHMAP_DEFAULTS.minGeomAngleDeg,
+    })
+    const blank = depthMapSettings({
+      quality: '', maxDim: '', maxSources: '', minAngleDeg: NaN, window: '', iterations: '', bestK: '',
+      filterRadius: '', filterRelTol: '' / 100, coarseLong: '', maxGeomCost: '', minConsistent: '', minNcc: '',
+      minGeomAngleDeg: '', speckleFilter: '', geomConsistency: '', streamMaps: '',
+    })
+    expect(blank).toEqual(d)
+    expect(depthMapSettings({ iterations: 0, window: -1, maxSources: 0, bestK: 0, maxDim: 0 })).toEqual(d)
+    expect(depthMapSettings({ window: 4, iterations: 5, bestK: 2, maxDim: 1200, quality: 'high' }))
+      .toMatchObject({ window: 4, iterations: 5, bestK: 2, maxDim: 1200, quality: 'high' })
+  })
+
+  it('depthMapForImage hands the kernel numbers even when the knobs arrive blank', async () => {
+    const I = [[1, 0, 0], [0, 1, 0], [0, 0, 1]], K = { fx: 40, fy: 40, cx: 20, cy: 20 }
+    const ref = { gray: new Uint8Array(1600), width: 40, height: 40, K, cam: { R: I, t: [0, 0, 0] } }
+    const src = [{ gray: new Uint8Array(1600), w: 40, h: 40, K, cam: { R: I, t: [-1, 0, 0] } }]
+    const pos = packSparseForDense([{ x: 0, y: 0, z: 5 }, { x: 0.1, y: 0, z: 7 }, { x: 0, y: 0.1, z: 9 }]).pos
+    const seen = []
+    const fn = async (g, w, h, k, srcs, opts) => {
+      seen.push(opts)
+      return { depth: new Float32Array(w * h).fill(7), cost: new Float32Array(w * h).fill(0.1), width: w, height: h }
+    }
+    await depthMapForImage(ref, src, pos, { window: '', iterations: '', bestK: NaN, coarseLong: '' }, fn)
+    expect(seen.length).toBe(1) // 40 px ≤ the default coarseLong: one level
+    expect(seen[0]).toMatchObject({ window: DEPTHMAP_DEFAULTS.window, iterations: DEPTHMAP_DEFAULTS.iterations, bestK: 3 })
+  })
+
+  it('filterDepthMap treats blank radius / tolerance as the defaults', () => {
+    const depth = plane([[5, 5, 5], [5, 100, 5], [5, 5, 5]])
+    expect(filterDepthMap(depth, 3, 3, { radius: '', relTol: NaN, minValidNeighbors: '' }))
+      .toEqual(filterDepthMap(depth, 3, 3, {}))
+  })
+})
+
+describe('depthMapForImage — odd-sized pyramid levels', () => {
+  // 41×40 with coarseLong 20 ⇒ two levels, 41×40 → 20×20. The box downsample drops the
+  // last odd column, so the coarse grid is the fine one at exactly ½ — not 20/41.
+  const I = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
+  const K = { fx: 40, fy: 40, cx: 20, cy: 20 }
+  const W = 41, H = 40
+  const ref = { gray: new Uint8Array(W * H), width: W, height: H, K, cam: { R: I, t: [0, 0, 0] } }
+  const sources = [{ gray: new Uint8Array(W * H), w: W, h: H, K, cam: { R: I, t: [-1, 0, 0] } }]
+  const pos = packSparseForDense([{ x: 0, y: 0, z: 5 }, { x: 0.1, y: 0, z: 6 }, { x: 0, y: 0.1, z: 7 }, { x: -0.1, y: 0, z: 8 }]).pos
+
+  it('projects a point onto the coarse pixel the box filter put its fine pixel in', async () => {
+    const calls = []
+    const fn = async (g, w, h, k, srcs, opts) => {
+      calls.push({ w, h, K: k, srcK: srcs[0].K, seed: opts.seedDepth })
+      // The coarse level answers with depth = 1 + its column, so the next level's seed
+      // shows which coarse pixel each fine pixel was upsampled from.
+      const depth = new Float32Array(w * h)
+      for (let v = 0; v < h; v++) for (let u = 0; u < w; u++) depth[v * w + u] = 1 + u
+      return { depth, cost: new Float32Array(w * h).fill(0.1), width: w, height: h }
+    }
+    await depthMapForImage(ref, sources, pos, { coarseLong: 20 }, fn)
+    expect(calls.map((c) => [c.w, c.h])).toEqual([[20, 20], [41, 40]])
+    // A world point that projects onto fine pixel u = 38 (centre). Fine columns 38–39 are
+    // box-averaged into coarse column 19, at coarse coordinate (38 + ½)·½ − ½ = 18.75.
+    const z = 4, x = (38 - K.cx) / K.fx * z
+    for (const Kc of [calls[0].K, calls[0].srcK]) {
+      expect(Kc.fx).toBe(K.fx / 2)
+      expect(Kc.fy).toBe(K.fy / 2)
+      const u = Kc.fx * x / z + Kc.cx
+      expect(u).toBeCloseTo(18.75, 10)
+      expect(Math.round(u)).toBe(19)
+    }
+    // Nearest upsample: fine column u came from coarse column ⌊u/2⌋ (the cropped last
+    // fine column 40 maps to the last coarse one, 19).
+    const seed = calls[1].seed
+    for (let u = 0; u < W; u++) expect(seed[10 * W + u]).toBe(1 + Math.min(19, u >> 1))
+  })
+})
+
+describe('depthMapForImage — Region seeding', () => {
+  const I = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
+  const K = { fx: 40, fy: 40, cx: 20, cy: 20 }
+  const W = 40, H = 40
+  const ref = { gray: new Uint8Array(W * H), width: W, height: H, K, cam: { R: I, t: [0, 0, 0] } }
+  const sources = [{ gray: new Uint8Array(W * H), w: W, h: H, K, cam: { R: I, t: [-1, 0, 0] } }]
+
+  it('seeds only from the sparse points inside the Region', async () => {
+    // Two points inside the Region (depth 5–5.5) and one behind it on the same ray as
+    // the first — listed last, so it used to overwrite the good seed at the centre pixel.
+    const pos = packSparseForDense([{ x: 0, y: 0, z: 5 }, { x: 0.1, y: 0, z: 5.5 }, { x: 0, y: 0, z: 9 }]).pos
+    const region = { min: [-1, -1, 4], max: [1, 1, 6] }
+    let seed = null, range = null
+    const fn = async (g, w, h, k, srcs, opts) => {
+      seed = opts.seedDepth; range = [opts.depthMin, opts.depthMax]
+      return { depth: new Float32Array(w * h).fill(5), cost: new Float32Array(w * h).fill(0.1), width: w, height: h }
+    }
+    await depthMapForImage(ref, sources, pos, { coarseLong: 100, region }, fn)
+    expect(seed[20 * W + 20]).toBe(5)
+    for (const d of seed) if (d > 0) { expect(d).toBeGreaterThanOrEqual(range[0]); expect(d).toBeLessThanOrEqual(range[1]) }
+  })
+})
+
+describe('filterDepthMapsGeometricStreamed — candidate cache bound', () => {
+  // Eight mutually visible maps of a plane, so every reference's candidates are the seven
+  // others; a cache of 2.5 planes can never hold them, and must never hold more.
+  const W = 32, H = 32
+  const mk = (j) => ({
+    uuid: `m${j}`, width: W, height: H,
+    K: { fx: 100, fy: 100, cx: 16, cy: 16 }, R: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], t: [-0.02 * j, 0, 0],
+    depth: new Float32Array(W * H).fill(1), cost: new Float32Array(W * H).fill(0.1),
+  })
+  const run = async (maps, cacheBytes) => {
+    const metas = maps.map(({ depth, cost, ...meta }) => meta)
+    let loads = 0
+    const io = {
+      loadReference: async (i) => ({ depth: maps[i].depth, cost: maps[i].cost }),
+      // A fresh copy per read: only the filter's own cache can keep a plane alive.
+      loadDepth: async (i) => { loads++; return Float32Array.from(maps[i].depth) },
+    }
+    const out = await filterDepthMapsGeometricStreamed(metas, io, { minConsistent: 2, cacheBytes }, () => {})
+    return { ...out, counted: loads }
+  }
+
+  it('never holds more than max(bound, the current reference\'s candidates)', async () => {
+    const maps = Array.from({ length: 8 }, (_, j) => mk(j))
+    const plane = W * H * 4
+    const cand = filterCandidates(maps)
+    const candBytes = Math.max(...cand.map((c) => c.length * plane))
+    for (const cacheBytes of [2.5 * plane, 6.5 * plane, 7.5 * plane, 20 * plane]) {
+      const out = await run(maps, cacheBytes)
+      expect(out.loads).toBe(out.counted)
+      expect(out.peakCached).toBeLessThanOrEqual(Math.max(cacheBytes, candBytes))
+    }
+    // With a bound above the candidates' bytes (7 planes), the bound itself is never
+    // exceeded — the old order (load all, evict after) held the previous reference's
+    // planes on top of this one's: 8 planes here.
+    const out = await run(maps, 7.5 * plane)
+    expect(out.peakCached).toBeLessThanOrEqual(7.5 * plane)
+    // And the verdicts are the in-memory filter's.
+    const resident = maps.map((m) => ({ ...m, depth: Float32Array.from(m.depth) }))
+    const totals = filterDepthMapsGeometric(resident, { minConsistent: 2 }, () => {})
+    expect(out.totals).toEqual(totals)
+  })
+})
+
+describe('fuseDepthMapsStreamed — eligible-pixel buffers', () => {
+  const mk = (W, H) => {
+    const depth = new Float32Array(W * H).fill(2), cost = new Float32Array(W * H).fill(0.1)
+    for (let i = 0; i < W * H; i += 7) depth[i] = 0
+    for (let i = 3; i < W * H; i += 11) cost[i] = 0.95
+    return { width: W, height: H, K: { fx: 50, fy: 50, cx: W / 2, cy: H / 2 }, R: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], t: [0, 0, 0], depth, cost }
+  }
+  // The reference loop it replaces: every pixel on the step grid with valid depth, past
+  // the cost gate and (tiled) inside the slab, in row-major order.
+  const brute = (m, { step, maxCost, slab }) => {
+    const idx = [], wp = []
+    for (let v = 0; v < m.height; v += step) for (let u = 0; u < m.width; u += step) {
+      const i = v * m.width + u, d = m.depth[i]
+      if (!(d > 0) || m.cost[i] > maxCost) continue
+      const x = (u - m.K.cx) / m.K.fx * d, y = (v - m.K.cy) / m.K.fy * d
+      const P = { x, y, z: d }
+      if (slab) { const ca = Math.floor(P[slab.key] * slab.inv); if (ca < slab.lo || ca >= slab.hi) continue }
+      idx.push(i); wp.push(P.x, P.y, P.z)
+    }
+    return { idx, wp }
+  }
+
+  it.each([
+    { step: 1, maxCost: 0.8, slab: null },
+    { step: 2, maxCost: 0.8, slab: null },
+    { step: 1, maxCost: 0.8, slab: { key: 'x', inv: 10, lo: -3, hi: 4 } },
+    { step: 3, maxCost: 0.05, slab: null },
+  ])('collects them into exactly sized typed arrays, in scan order: %j', (opts) => {
+    const m = mk(37, 23)
+    const got = streamedEligible(m, opts)
+    const want = brute(m, opts)
+    expect(got.idx).toBeInstanceOf(Int32Array)
+    expect(got.wp).toBeInstanceOf(Float64Array)
+    expect(got.idx.length).toBe(want.idx.length)
+    expect(got.wp.length).toBe(3 * want.idx.length)
+    expect(got.idx.buffer.byteLength).toBe(4 * want.idx.length) // not a view of a larger buffer
+    expect(got.wp.buffer.byteLength).toBe(24 * want.idx.length)
+    expect([...got.idx]).toEqual(want.idx)
+    expect([...got.wp]).toEqual(want.wp)
   })
 })

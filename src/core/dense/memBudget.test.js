@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   createMemLedger, projectDensePeakBytes, projectDensifyPeakBytes, densifyInputBytes, DENSIFY_CELL_BYTES, formatBytes, DEFAULT_BUDGET_BYTES,
-  deviceBudget,
+  deviceBudget, DENSIFY_STREAMED_REF_BYTES_PER_PX,
 } from './memBudget.js'
 
 const GiB = 1024 ** 3
@@ -84,7 +84,7 @@ describe('projectDensePeakBytes', () => {
     expect(p.store).toBe(5 * 23 * npix) // depth 4 + cost 4 + rgb 3 + normals 12
     expect(p.raster).toBe(5 * 4 * npix)
     expect(p.gpu).toBe(0)
-    expect(p.total).toBe(p.store + p.raster)
+    expect(p.total).toBe(p.store + p.raster + p.filter)
   })
 
   it('adds a GPU transient term on the GPU path', () => {
@@ -97,6 +97,16 @@ describe('projectDensePeakBytes', () => {
   it('scales with maxDim² and flags an over-budget 8000px run', () => {
     const p = projectDensePeakBytes({ nImages: 5, maxDim: 8000, backend: 'gpu' })
     expect(p.total).toBeGreaterThan(DEFAULT_BUDGET_BYTES) // the reported tab-kill case
+  })
+
+  it('charges the cross-view filter\'s 1 B/px drop mask per map it judges in memory', () => {
+    const npix = 1000 * 1000
+    const p = projectDensePeakBytes({ nImages: 5, maxDim: 1000 })
+    expect(p.filter).toBe(5 * npix) // in-memory filter: every map's mask at once
+    expect(p.total).toBe(p.store + p.raster + p.gpu + p.filter)
+    // Streamed maps are filtered by a separate pass over the saved maps; off is off.
+    expect(projectDensePeakBytes({ nImages: 5, maxDim: 1000, retainedMaps: 1, filterMaps: 0 }).filter).toBe(0)
+    expect(projectDensePeakBytes({ nImages: 5, maxDim: 1000, filterMaps: 3 }).filter).toBe(3 * npix)
   })
 
   it('a lower rasterBytesPerPx (gray-only cache) reduces the raster term', () => {
@@ -133,22 +143,30 @@ describe('densifyInputBytes', () => {
     expect(densifyInputBytes([mk()], { residency: 2 })).toBe(perMap * 2)
   })
 
-  it('bounds a streamed run by two full maps + the scratch planes of the largest', () => {
+  it('bounds a streamed run by the largest reference: its planes, the agree/angle scratch and the eligible-pixel buffers', () => {
     const metas = [
       { width: 10, height: 10, hasNormals: true },
       { width: 20, height: 10, hasNormals: false },
       { width: 5, height: 5, hasNormals: true },
     ]
-    // largest two: 100·23 = 2300, 200·11 = 2200; scratch 200·12
-    expect(densifyInputBytes(metas, { streamed: true })).toBe(2300 + 2200 + 200 * 12)
+    // Per map: planes (23 B/px with normals, 11 without) + agree/angle 12 B/px + every
+    // pixel eligible, Int32 index + Float64×3 point = 28 B/px. Comparison planes live in
+    // the separately charged cache — no second full map is ever held.
+    // 100·(23+12+28) = 6300 vs 200·(11+12+28) = 10200.
+    expect(densifyInputBytes(metas, { streamed: true })).toBe(200 * (11 + 12 + 28))
+    expect(densifyInputBytes([metas[0], metas[2]], { streamed: true })).toBe(100 * (23 + 12 + 28))
+    expect(DENSIFY_STREAMED_REF_BYTES_PER_PX).toBe(12 + 28)
   })
 })
 
 describe('formatBytes', () => {
-  it('formats GB / MB / KB', () => {
-    expect(formatBytes(2 * 1024 ** 3)).toBe('2.00 GB')
+  it('formats GB / MB / KB with one decimal below 10, and a missing value as a dash', () => {
+    expect(formatBytes(2 * 1024 ** 3)).toBe('2.0 GB')
+    expect(formatBytes(1.25 * 1024 ** 4)).toBe('1.3 TB')
     expect(formatBytes(512 * 1024 ** 2)).toBe('512 MB')
-    expect(formatBytes(4 * 1024)).toBe('4 KB')
+    expect(formatBytes(4 * 1024)).toBe('4.0 KB')
     expect(formatBytes(0)).toBe('0 B')
+    expect(formatBytes(null)).toBe('—')
+    expect(formatBytes(NaN)).toBe('—')
   })
 })
