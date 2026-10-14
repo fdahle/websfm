@@ -251,6 +251,11 @@ export const MATCH_TUNING = {
   // more severe as keypoint counts rise. The CA…V gating above is consistent with
   // that failure mode as well as with the low pair count.
   subsetGateMinPairs: 50,
+  // Gate rescue (useMatchesStore.matchAll): images left with fewer than this many
+  // accepted pairs re-test their gated pairs on a subsetGateRescueScale× larger subset
+  // (scale² more expected putatives). 0 = off. Iceland 1980 film: 7 images stranded.
+  subsetGateRescueDegree: 6,
+  subsetGateRescueScale: 4,
 }
 
 // Dense MVS knobs read in core/dense/mvs.js but NOT exposed in DepthMapsModal /

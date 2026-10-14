@@ -17,7 +17,7 @@ import { preselectPairs, positionsForProximity, preselectByFootprintOverlap } fr
 import { sequentialPairs } from '../core/features/sequentialPairs.js'
 import { inlierSpread, packMatchedPoints } from '../core/features/verify.js'
 import { evaluatePairAcceptance } from '../core/features/pairGate.js'
-import { pickSpreadIndices, sliceDescriptorRows, resolveSubsetGateSize } from '../core/features/subsetGate.js'
+import { pickSpreadIndices, sliceDescriptorRows, resolveSubsetGateSize, SUBSET_GATE_SIZE_DEFAULTS } from '../core/features/subsetGate.js'
 import { siblingCanonicalMap, canonicalizeMatches } from '../core/features/orientationSiblings.js'
 import { toMatchSpace } from '../core/features/siftDescriptors.js'
 import { swapMatchRoles, transposeF } from '../core/sfm/matchCodec.js'
@@ -469,8 +469,13 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
         // the sample size fixed makes the test ~1/N more severe as keypoint counts
         // rise — at the Detailed detection preset a fixed 200 would veto nearly
         // every pair. See core/features/subsetGate.js for the arithmetic.
+        // `_gateScale` (matchAll's rescue pass): the same test on a k× larger sample —
+        // k² more expected putatives on a real pair, still a few % of the full match.
+        const k = settings._gateScale > 1 ? settings._gateScale : 1
         const gateSizing = resolveSubsetGateSize(kpsA.length, kpsB.length, {
           floorSize: settings.subsetGateSize,
+          ...(k > 1 ? { fraction: SUBSET_GATE_SIZE_DEFAULTS.fraction * k, minSize: SUBSET_GATE_SIZE_DEFAULTS.minSize * k,
+            maxSize: SUBSET_GATE_SIZE_DEFAULTS.maxSize * k } : {}),
         })
         const gateSize = gateSizing.size
         const dim = srcA.descDim ?? 128
@@ -485,6 +490,7 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
             dim,
           }, 'gate')
           const gateThreshold = settings.subsetGateThreshold
+          entry.gateScore = gate.matches.length
           if (gate.matches.length < gateThreshold) {
             entry.rawCount = 0
             entry.status = 'done'
@@ -960,6 +966,52 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
     batchDepth++
     try {
       await Promise.all(Array.from({ length: concurrency }, drain))
+      // Gate rescue. The subset gate's sample count scales with the pair's TRUE match
+      // count, so a real pair with a few hundred matches reads as ~0–2 sampled
+      // putatives and is vetoed — the side-lap pairs of a film block. Iceland 1980
+      // (125 scans, ~9600 kp): 7415/7750 pairs gated, 334 accepted (COLMAP verified
+      // 746, half of them under 300 inliers); a 7-image strip hung off the block by
+      // one pair and never registered. Images left with fewer than
+      // subsetGateRescueDegree accepted pairs re-test their gated pairs on a
+      // subsetGateRescueScale× larger sample; those that pass get the full match.
+      const rescueDegree = settings.subsetGateRescueDegree ?? 0
+      if (!cancelled && !shouldCancel?.() && rescueDegree > 0 && settings.subsetGate !== false && !lightglue && !settings._skipSubsetGate) {
+        const degree = new Map()
+        const bump = (u) => degree.set(u, (degree.get(u) ?? 0) + 1)
+        for (const [a, b] of pairs) {
+          const e = matchStore.value.get(pairId(a.uuid, b.uuid))
+          if (e?.status === 'done' && !e.gated && (e.inlierCount ?? 0) > 0) { bump(a.uuid); bump(b.uuid) }
+        }
+        const low = (u) => (degree.get(u) ?? 0) < rescueDegree
+        const rescue = pairs.filter(([a, b]) => matchStore.value.get(pairId(a.uuid, b.uuid))?.gated && (low(a.uuid) || low(b.uuid)))
+        if (rescue.length) {
+          const nLow = new Set(rescue.flatMap(([a, b]) => [a, b]).filter((im) => low(im.uuid)).map((im) => im.uuid)).size
+          const before = { matched: stats.matched, weak: stats.weak }
+          stats.gated -= rescue.length // re-tallied by the rescue run
+          log(`Matching: gate rescue — ${nLow} image(s) under ${rescueDegree} accepted pair(s); re-testing their `
+            + `${rescue.length} gated pair(s) on a ${settings.subsetGateRescueScale}× larger sample`, 'info', 'Matching')
+          const rescueSettings = { ...settings, _gateScale: settings.subsetGateRescueScale ?? 4 }
+          const rescueCache = createDescriptorCache({ pairs: rescue, budgetBytes: (settings.descCacheMiB ?? 2048) * 2 ** 20 })
+          let rc = 0
+          const total = pairs.length + rescue.length
+          const drainRescue = async () => {
+            while (true) {
+              if (cancelled || shouldCancel?.()) { cancelled = true; return }
+              const i = rc++
+              if (i >= rescue.length) return
+              const [a, b] = rescue[i]
+              await matchPair(a, b, rescueSettings, tally, rescueCache, gpuRun)
+              rescueCache.release(a.uuid); rescueCache.release(b.uuid)
+              done++
+              onProgress?.(done, total)
+            }
+          }
+          await Promise.all(Array.from({ length: concurrency }, drainRescue))
+          log(`Matching: gate rescue recovered ${stats.matched - before.matched} accepted`
+            + `${stats.weak - before.weak ? ` + ${stats.weak - before.weak} weak` : ''} pair(s) of ${rescue.length} re-tested`,
+          'info', 'Matching')
+        }
+      }
     } finally {
       batchDepth--
       // Flush matchPair's throttled reactivity so everything reading the store's
@@ -992,7 +1044,7 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
     }
     const meanRatio = stats.ratios.length
       ? stats.ratios.reduce((s, r) => s + r, 0) / stats.ratios.length : 0
-    log(`Matching complete: ${done} pair(s) — ${stats.matched} accepted`
+    log(`Matching complete: ${pairs.length} pair(s) — ${stats.matched} accepted`
       + `${stats.weak ? `, ${stats.weak} weak (PnP bridges)` : ''}`
       + `, ${stats.rejected} rejected, ${stats.skipped} skipped`
       + `${stats.gated ? `, ${stats.gated} gated (subset pre-test)` : ''}`
