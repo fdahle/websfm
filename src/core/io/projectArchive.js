@@ -12,6 +12,8 @@
 // (a) recognise the file before writing anything, (b) refuse an archive from a
 // newer app, and (c) name the project without first parsing `project.json`.
 
+import { formatBytes } from '../formatBytes.js'
+
 export const PROJECT_ARCHIVE_FORMAT = 'websfm-project'
 export const PROJECT_ARCHIVE_VERSION = 1
 export const PROJECT_ARCHIVE_EXT = '.websfm'
@@ -147,15 +149,6 @@ export function isSafeArchiveEntry(name) {
   return !n.split('/').some((p) => p === '' || p === '.' || p === '..')
 }
 
-export function formatBytes(bytes) {
-  const n = Number(bytes) || 0
-  if (n < 1024) return `${n} B`
-  const units = ['kB', 'MB', 'GB', 'TB']
-  let v = n / 1024
-  let i = 0
-  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++ }
-  return `${v < 10 ? v.toFixed(1) : Math.round(v)} ${units[i]}`
-}
 
 // Per-top-level-section byte counts, for the export log line (heavy-logging
 // convention: every derived number the user might question gets printed).
@@ -170,3 +163,6 @@ export function summarizeSections(entries) {
     .sort((a, b) => b[1] - a[1])
     .map(([section, bytes]) => ({ section, bytes }))
 }
+
+// The one byte formatter (core/formatBytes.js), re-exported for existing importers.
+export { formatBytes }

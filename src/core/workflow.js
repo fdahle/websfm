@@ -123,15 +123,7 @@ export function createWorkflowBlock(type) {
 export function normalizeWorkflow(value) {
   const src = value && typeof value === 'object' ? value : {}
   const rawBlocks = Array.isArray(src.blocks) ? src.blocks : []
-  // Version 1 silently created one of these scene-specific starters. They were
-  // never a user choice, so migrate only the exact untouched starter to the new
-  // empty canvas. Any edited or renamed workflow is preserved.
-  const legacyTypes = rawBlocks.map((block) => block?.type).join(',')
-  const isLegacyStarter = src.version === 1 && (
-    (src.name === 'Aerial DEM + orthophoto' && legacyTypes === 'detect-features,match-features,reconstruct,compute-depth,dense,gen-dem,gen-ortho')
-    || (src.name === 'Object model + mesh' && legacyTypes === 'detect-features,match-features,reconstruct,compute-depth,dense,gen-mesh')
-  )
-  const blocks = (isLegacyStarter ? [] : rawBlocks).flatMap((block) => {
+  const blocks = rawBlocks.flatMap((block) => {
     const spec = WORKFLOW_BLOCK_BY_ID.get(block?.type)
     if (!spec) return []
     return [{
@@ -144,7 +136,7 @@ export function normalizeWorkflow(value) {
   return {
     version: WORKFLOW_VERSION,
     id: String(src.id || makeId('workflow')),
-    name: isLegacyStarter ? 'Untitled workflow' : String(src.name || 'Untitled workflow'),
+    name: String(src.name || 'Untitled workflow'),
     displayLevel: ['guided', 'standard', 'expert'].includes(src.displayLevel) ? src.displayLevel : 'standard',
     defaults: {
       warningPolicy: ['pause', 'continue', 'stop'].includes(src.defaults?.warningPolicy) ? src.defaults.warningPolicy : 'pause',

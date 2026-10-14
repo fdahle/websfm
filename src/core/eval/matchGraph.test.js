@@ -17,14 +17,14 @@ describe('completedMatchGraphHealth', () => {
 })
 
 describe('graphHealth', () => {
-  it('finds two components and excludes weak/disabled edges', () => {
+  it('finds two components and excludes weak/excluded edges', () => {
     const ids = ['a', 'b', 'c', 'd', 'e']
     const pairs = [
       { idA: 'a', idB: 'b', inlierCount: 100 },
       { idA: 'b', idB: 'c', inlierCount: 80 },
       { idA: 'd', idB: 'e', inlierCount: 50 },
       { idA: 'a', idB: 'e', inlierCount: 5, weak: true },      // weak — must NOT join
-      { idA: 'c', idB: 'd', inlierCount: 40, disabled: true }, // disabled — must NOT join
+      { idA: 'c', idB: 'd', inlierCount: 40, enabled: false }, // excluded — must NOT join
     ]
     const h = graphHealth(pairs, ids)
     expect(h.components).toHaveLength(2)
@@ -103,7 +103,7 @@ describe('bridgeEdges', () => {
     expect(b[0].inlierCount).toBe(10) // sorted ascending
   })
 
-  it('excludes weak/disabled edges', () => {
+  it('excludes weak/excluded edges', () => {
     const ids = ['a', 'b', 'c']
     const pairs = [
       { idA: 'a', idB: 'b', inlierCount: 30 },

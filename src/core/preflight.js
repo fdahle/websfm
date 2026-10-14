@@ -18,7 +18,7 @@ import { formatBytes } from './dense/memBudget.js'
  * @property {number} [nImages]                total source images
  * @property {number} [detectedImageCount]     images with keypoints computed
  * @property {number} [verifiedPairCount]      enabled + verified match pairs
- * @property {number} [totalPairCount]         all match pairs (to tell "none" from "all disabled")
+ * @property {number} [totalPairCount]         all match pairs (to tell "none" from "all excluded")
  * @property {Array<{label?: string}>} [sensorsMissingFocal]         sensors with no focal length
  * @property {Array<{label?: string}>} [filmSensorsMissingFiducials] film sensors lacking calibrated fiducials
  * @property {{ projectedBytes: number, budgetBytes: number } | null} [dense] dense-run memory projection
@@ -69,7 +69,7 @@ export function preflight(state = {}) {
   if ((s.detectedImageCount ?? 0) > 0 && s.verifiedPairCount != null && s.verifiedPairCount === 0) {
     if ((s.totalPairCount ?? 0) > 0) {
       add('block', 'all-pairs-disabled',
-        `All ${s.totalPairCount} match pair(s) are disabled or rejected.`,
+        `All ${s.totalPairCount} match pair(s) are excluded or rejected.`,
         'Re-enable pairs in the match list, or lower the matching gates (minMatches / inlier ratio) and re-run matching.')
     } else {
       add('block', 'no-matches',

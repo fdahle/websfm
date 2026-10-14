@@ -5,7 +5,7 @@
 
 import { writeGeoTiff, writeCogDeflate, geoKeysForEpsg } from './geotiff.js'
 import { applySimilarity } from './georef.js'
-import { createVoxelAccumulator } from '../dense/mvs.js'
+import { createVoxelAccumulator } from '../dense/voxelAccumulator.js'
 import { PART_BYTES, PART_CHARS, lineParts, recordParts, lazyArray } from '../io/parts.js'
 
 // ── Export preprocessing: georeference + voxel downsample ────────────────────

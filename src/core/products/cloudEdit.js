@@ -16,7 +16,7 @@
 // per-point object list. Selection is a Uint8Array mask + a compacting copy; the
 // voxel paths stream into `createVoxelAccumulator` exactly as fusion does.
 
-import { createVoxelAccumulator } from '../dense/mvs.js'
+import { createVoxelAccumulator } from '../dense/voxelAccumulator.js'
 
 // ── Shared helpers ───────────────────────────────────────────────────────────
 

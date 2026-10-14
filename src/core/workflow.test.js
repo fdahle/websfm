@@ -48,16 +48,6 @@ describe('workflow schema', () => {
     expect(() => createWorkflowBlock('export-cloud')).toThrow('Unknown workflow block')
   })
 
-  it('migrates the untouched version 1 starter to an empty canvas', () => {
-    const old = {
-      version: 1,
-      name: 'Aerial DEM + orthophoto',
-      blocks: ['detect-features', 'match-features', 'reconstruct', 'compute-depth', 'dense', 'gen-dem', 'gen-ortho']
-        .map((type) => ({ type })),
-    }
-    expect(normalizeWorkflow(old)).toMatchObject({ version: 2, name: 'Untitled workflow', blocks: [] })
-  })
-
   it('recognises reusable outputs', () => {
     expect(blockOutputValid('reconstruct', { sparse: true })).toBe(true)
     expect(blockOutputValid('gen-ortho', { ortho: false })).toBe(false)

@@ -46,18 +46,17 @@ describe('applyFiducialMarks', () => {
     ],
   })
 
-  it('sets only the certificate when the file has no slots and nothing is calibrated', () => {
-    const r = applyFiducialMarks({ fiducials: { marks: [], ppxMm: 0.5, ppyMm: 0, focalMm: 0 } }, group(false))
-    expect(r.fiducials).toEqual({
+  it('records an uncalibrated certificate when the file has no slots and nothing is calibrated', () => {
+    const r = applyFiducialMarks({ fiducialCalibration: { marks: [], slotMap: {}, ppxMm: 0.5, ppyMm: 0, focalMm: 0 } }, group(false))
+    expect(r).toMatchObject({
       marks: [{ id: 'F1', xMm: -106, yMm: -106 }, { id: 'F2', xMm: 106, yMm: -106 }],
-      ppxMm: 0.5, ppyMm: 0, focalMm: 152.8,
+      ppxMm: 0.5, ppyMm: 0, focalMm: 152.8, slotMap: {}, fit: null,
     })
-    expect(r.fiducialCalibration).toBeNull()
   })
 
   it('builds a certificate calibration from slotted marks', () => {
     const r = applyFiducialMarks({}, group(true))
-    expect(r.fiducialCalibration).toMatchObject({
+    expect(r).toMatchObject({
       method: 'certificate', transform: 'affine', focalMm: 152.8, fit: null,
       slotMap: { 'corner-tl': 'F1', 'corner-tr': 'F2' },
     })
@@ -69,7 +68,7 @@ describe('applyFiducialMarks', () => {
       slotMap: { 'corner-tl': 'F1', 'corner-br': 'F9' }, marks: [], focalMm: 150, ppxMm: 0.1, ppyMm: 0.2,
     }
     const r = applyFiducialMarks({ fiducialCalibration: old }, group(false))
-    expect(r.fiducialCalibration).toMatchObject({
+    expect(r).toMatchObject({
       method: 'certificate', transform: 'projective', scanPitchMm: 0.021, fit: null,
       slotMap: { 'corner-tl': 'F1' }, focalMm: 152.8, ppxMm: 0.1, ppyMm: 0.2,
     })

@@ -8,6 +8,8 @@
 // so the user copies this ~30-50 line digest instead. Markdown for reading, JSON for
 // precise machine parsing — same content, the modal lets the user pick.
 
+import { formatBytes } from '../formatBytes.js'
+
 // A second, equally important use (added 2026-07-25): the **baseline record**. The
 // owed verification runs in TODO.md are all "dataset × settings → numbers", and a
 // number without its settings is not a baseline. So the digest also states what was
@@ -240,15 +242,6 @@ function fmtValue(value, unit) {
   return unit ? `${n} ${unit}` : n
 }
 
-// Bytes → a short human figure. Local (not core/dense/memBudget's formatBytes) to keep
-// this module dependency-free — it is a pure formatter and nothing else.
-function fmtBytes(v) {
-  if (v == null || !Number.isFinite(v)) return '—'
-  const u = ['B', 'KB', 'MB', 'GB', 'TB']
-  let i = 0, n = v
-  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++ }
-  return `${n.toFixed(n < 10 && i > 0 ? 1 : 0)} ${u[i]}`
-}
 
 function statusLine(status) {
   return `${status.ok} ok · ${status.warn} warn · ${status.bad} bad`
@@ -511,8 +504,8 @@ export function digestToMarkdown(digest) {
           + `, ${fmtNum(depth.geomFilterMarginalMaps)} marginal map(s) (<1%)`)
       }
       if (depth.projectedPeakBytes != null) {
-        L.push(`Memory: projected peak ${fmtBytes(depth.projectedPeakBytes)}`
-          + ` vs budget ${fmtBytes(depth.budgetBytes)}`)
+        L.push(`Memory: projected peak ${formatBytes(depth.projectedPeakBytes)}`
+          + ` vs budget ${formatBytes(depth.budgetBytes)}`)
       }
     }
     if (dense) {

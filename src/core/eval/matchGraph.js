@@ -1,5 +1,5 @@
 // Pure match-graph health for Evaluate ▸ Graph Health (PLAN-eval-views step 5).
-// Union-find over ACCEPTED edges only — a `disabled` pair is a user exclusion and a
+// Union-find over ACCEPTED edges only — an excluded pair (`enabled: false`) is a user exclusion and a
 // `weak` pair is a PnP registration bridge, not verified geometry. Counting weak
 // edges here would report a graph better-connected than the one SfM actually seeds
 // from, which is precisely the lie this view exists to catch.
@@ -24,7 +24,7 @@ export function completedMatchGraphHealth(entries, imageIds) {
   return graphHealth(pairs, imageIds)
 }
 
-// pairs: [{ idA, idB, inlierCount, weak, disabled }] — plain, marshalled by caller.
+// pairs: [{ idA, idB, inlierCount, weak, enabled }] — plain, marshalled by caller.
 // imageIds: string[] of every image uuid/id (so isolated images with no edge appear).
 // → { components: [[id,…],…] (largest first), degrees: Map<id,number>,
 //     isolated: [id], weaklyConnected: [{ id, degree }] (degree < WEAK_DEGREE, asc) }
@@ -46,7 +46,7 @@ export function graphHealth(pairs, imageIds) {
   }
 
   for (const p of pairs || []) {
-    if (p.disabled || p.weak) continue     // accepted geometry only
+    if (p.enabled === false || p.weak) continue     // accepted geometry only
     union(p.idA, p.idB)
     degrees.set(p.idA, (degrees.get(p.idA) ?? 0) + 1)
     degrees.set(p.idB, (degrees.get(p.idB) ?? 0) + 1)
@@ -84,14 +84,14 @@ export function graphHealth(pairs, imageIds) {
 // block. Found by iterative Tarjan low-link (iterative to survive thousand-image
 // Antarctic blocks without blowing the JS stack). Returns
 // [{ idA, idB, inlierCount }] sorted by inlierCount asc (weakest bridge first —
-// the one most worth re-checking). weak/disabled edges are excluded, matching the
+// the one most worth re-checking). weak/excluded edges are left out, matching the
 // connectivity graph above.
 export function bridgeEdges(pairs, imageIds) {
   const ids = [...new Set(imageIds || [])]
   const adj = new Map(ids.map((id) => [id, []]))   // id → [{ to, inlierCount }]
   const seen = new Set()
   for (const p of pairs || []) {
-    if (p.disabled || p.weak) continue
+    if (p.enabled === false || p.weak) continue
     if (!adj.has(p.idA)) adj.set(p.idA, [])
     if (!adj.has(p.idB)) adj.set(p.idB, [])
     const key = p.idA < p.idB ? p.idA + '\0' + p.idB : p.idB + '\0' + p.idA

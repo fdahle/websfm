@@ -5,13 +5,13 @@ import { MODEL_MAP_CRS } from './modelMap.js'
 const basis = { east: [1, 0, 0], north: [0, 1, 0], up: [0, 0, 1] }
 const dem = { width: 4, height: 3, gsd: 2, originX: 100, originY: 50, crs: 'EPSG:32632', previewUrl: 'data:x', name: 'Site DEM' }
 const localDem = { ...dem, crs: 'local', frame: { kind: 'local', origin: [10, 20, 5], ...basis } }
-const on = { onMap: true, opacity: 0.5 }
+const on = { visible: true, opacity: 0.5 }
 
 it('normalises persisted layer state and drops anything malformed', () => {
   expect(normalizeProductLayers(null)).toEqual({})
-  expect(normalizeProductLayers({ dem: { onMap: true, opacity: 3 }, ortho: { onMap: 'yes' }, mesh: { onMap: true } }))
-    .toEqual({ dem: { onMap: true, opacity: 1 }, ortho: { onMap: false, opacity: 1 } })
-  expect(normalizeProductLayers({ dem: { onMap: true, opacity: 0.4 } }).dem.opacity).toBe(0.4)
+  expect(normalizeProductLayers({ dem: { visible: true, opacity: 3 }, ortho: { visible: 'yes' }, mesh: { visible: true } }))
+    .toEqual({ dem: { visible: true, opacity: 1 }, ortho: { visible: false, opacity: 1 } })
+  expect(normalizeProductLayers({ dem: { visible: true, opacity: 0.4 } }).dem.opacity).toBe(0.4)
 })
 
 it('never blocks the toggle for the frame, only for a missing preview or geometry', () => {
@@ -23,7 +23,7 @@ it('never blocks the toggle for the frame, only for a missing preview or geometr
 })
 
 it('places a CRS product on the CRS map in its own CRS, and explains a local one', () => {
-  expect(placeProductLayer('dem', dem, { onMap: false }, { mode: 'crs' })).toBeNull()
+  expect(placeProductLayer('dem', dem, { visible: false }, { mode: 'crs' })).toBeNull()
   expect(placeProductLayer('dem', localDem, on, { mode: 'crs' }).reason).toMatch(/Model Frame/)
   expect(placeProductLayer('dem', dem, on, { mode: 'crs' }).layer).toEqual({
     id: 'product:dem', product: true, kind: 'dem', name: 'Site DEM', crs: 'EPSG:32632', width: 4, height: 3,

@@ -71,33 +71,25 @@ export function parseFiducialMarks(text) {
   return { groups: [...groups.values()] }
 }
 
-// The sensor fields an imported group sets, as { fiducials, fiducialCalibration }.
-// `fiducials` is the certificate (what the paste box edits). The calibration is
-// what reconstruction reads, so it follows the file too:
-//   - every mark has a slot → a certificate calibration with that slot map;
-//   - otherwise an existing calibration takes the new marks, focal and principal
-//     point, keeping the slot-map entries whose mark id survives;
-//   - otherwise none (the user runs Calibrate fiducials).
+// The sensor's fiducial record after importing a group (sensor.fiducialCalibration):
+//   - marks, focal and principal point come from the file, else the old record;
+//   - every mark has a slot → that slot map;
+//   - otherwise the old slot-map entries whose mark id survives (often none, so a
+//     plain certificate leaves the sensor uncalibrated until Calibrate fiducials).
 // Either way `fit` is cleared: the previous residuals no longer describe it.
 export function applyFiducialMarks(sensor, group) {
   const marks = group.marks.map((m) => ({ id: m.id, xMm: m.xMm, yMm: m.yMm }))
   const old = sensor?.fiducialCalibration ?? null
-  const prev = sensor?.fiducials ?? {}
-  const pick = (k) => group[k] ?? old?.[k] ?? prev[k] ?? 0
-  const fiducials = { marks, ppxMm: pick('ppxMm'), ppyMm: pick('ppyMm'), focalMm: pick('focalMm') }
+  const pick = (k) => group[k] ?? old?.[k] ?? 0
+  const ids = new Set(marks.map((m) => m.id))
   const slotted = group.marks.length > 0 && group.marks.every((m) => m.slot)
-  let fiducialCalibration = old
-  if (slotted || old) {
-    const ids = new Set(marks.map((m) => m.id))
-    const slotMap = slotted
-      ? Object.fromEntries(group.marks.map((m) => [m.slot, m.id]))
-      : Object.fromEntries(Object.entries(old.slotMap || {}).filter(([, id]) => ids.has(id)))
-    fiducialCalibration = {
-      version: 1, method: 'certificate', transform: old?.transform ?? 'affine',
-      allowReflection: old?.allowReflection ?? false, slotMap, marks: marks.map((m) => ({ ...m })),
-      focalMm: fiducials.focalMm, ppxMm: fiducials.ppxMm, ppyMm: fiducials.ppyMm,
-      scanPitchMm: old?.scanPitchMm ?? null, fit: null,
-    }
+  const slotMap = slotted
+    ? Object.fromEntries(group.marks.map((m) => [m.slot, m.id]))
+    : Object.fromEntries(Object.entries(old?.slotMap || {}).filter(([, id]) => ids.has(id)))
+  return {
+    version: 1, method: 'certificate', transform: old?.transform ?? 'affine',
+    allowReflection: old?.allowReflection ?? false, slotMap, marks,
+    focalMm: pick('focalMm'), ppxMm: pick('ppxMm'), ppyMm: pick('ppyMm'),
+    scanPitchMm: old?.scanPitchMm ?? null, fit: null,
   }
-  return { fiducials, fiducialCalibration }
 }

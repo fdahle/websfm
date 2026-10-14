@@ -8,7 +8,7 @@ import { MODEL_MAP_CRS, frameOffset } from './modelMap.js'
 
 export const PRODUCT_KINDS = ['dem', 'ortho']
 
-// The persisted per-product view state: { dem: { onMap, opacity }, ortho: … }.
+// The persisted per-product view state: { dem: { visible, opacity }, ortho: … }.
 // Unknown kinds and malformed values are dropped, so an old or hand-edited
 // reconstruction.json can never put a layer on the map by accident.
 export function normalizeProductLayers(raw) {
@@ -17,7 +17,7 @@ export function normalizeProductLayers(raw) {
     const v = raw?.[kind]
     if (!v || typeof v !== 'object') continue
     const opacity = Number(v.opacity)
-    out[kind] = { onMap: v.onMap === true, opacity: Number.isFinite(opacity) ? Math.min(1, Math.max(0, opacity)) : 1 }
+    out[kind] = { visible: v.visible === true, opacity: Number.isFinite(opacity) ? Math.min(1, Math.max(0, opacity)) : 1 }
   }
   return out
 }
@@ -47,7 +47,7 @@ export const productLabel = (kind, product) => product?.name || (kind === 'ortho
 // image layer cannot rotate. Model map: a local product is translated by its
 // frame's origin offset (modelMap.js frameOffset); a CRS one cannot be placed.
 export function placeProductLayer(kind, product, state, view) {
-  if (!state?.onMap) return null
+  if (!state?.visible) return null
   const blocker = productMapBlocker(product)
   if (blocker) return { reason: blocker }
   const local = !product.crs || product.crs === 'local'

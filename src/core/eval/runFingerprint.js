@@ -48,7 +48,7 @@ export function matchHasher() {
     add(e, matches) {
       h = mixString(h, e.idA); h = mixString(h, e.idB); h = mixString(h, e.status)
       h = mix(h, e.rawCount ?? 0); h = mix(h, e.inlierCount ?? 0)
-      h = mix(h, e.weak ? 1 : 0); h = mix(h, e.disabled ? 1 : 0)
+      h = mix(h, e.weak ? 1 : 0); h = mix(h, e.enabled === false ? 1 : 0)
       // Flat [ia, ib, …] (the store's shape) hashes the same sequence as [[ia, ib], …].
       if (matches instanceof Uint32Array) for (let i = 0; i < matches.length; i++) h = mix(h, matches[i])
       else for (const pair of matches || []) { h = mix(h, pair[0] ?? 0); h = mix(h, pair[1] ?? 0) }

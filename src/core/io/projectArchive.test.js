@@ -122,7 +122,7 @@ describe('isSafeArchiveEntry', () => {
 describe('reporting helpers', () => {
   it('formats bytes', () => {
     expect(formatBytes(512)).toBe('512 B')
-    expect(formatBytes(2048)).toBe('2.0 kB')
+    expect(formatBytes(2048)).toBe('2.0 KB')
     expect(formatBytes(50 * 1024 * 1024)).toBe('50 MB')
   })
 
