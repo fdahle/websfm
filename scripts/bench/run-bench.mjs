@@ -241,6 +241,11 @@ try {
     const h = await histSetup({ imagesDir: cfg.images, ...cfg.hist }, files)
     if (h.sensor) console.log(`== hist sensor: ${JSON.stringify(await page.evaluate((f) => window.bench.setSensor(f), h.sensor))}`)
     if (h.maskDataUrl) console.log(`== hist mask: ${await page.evaluate((u) => window.bench.setMask(u), h.maskDataUrl)} image(s)`)
+    if (h.fiducials) {
+      const f = await page.evaluate((x) => window.bench.setFiducials(x), h.fiducials)
+      console.log(`== hist fiducials: ${JSON.stringify(f)}`)
+      result.fiducials = f
+    }
     if (h.gcps) console.log(`== hist GCPs: ${JSON.stringify(await page.evaluate((g) => window.bench.setGcps(g), { gcps: h.gcps, crs: cfg.crs }))}`)
     result.hist = { sensor: h.sensor, gcps: h.gcps?.length ?? 0, checks: h.checks }
   }

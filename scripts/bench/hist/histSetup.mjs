@@ -57,7 +57,7 @@ function tiffSize(path) {
 }
 
 export async function histSetup(h, imageNames) {
-  const out = { sensor: null, maskDataUrl: null, gcps: null, checks: [] }
+  const out = { sensor: null, maskDataUrl: null, gcps: null, checks: [], fiducials: null }
   if (h.intrinsics) {
     const r = csvRows(await readFile(h.intrinsics, 'utf8'))[0]
     const pitch = Number(r.pixel_pitch)
@@ -87,6 +87,31 @@ export async function histSetup(h, imageNames) {
       if (r.status !== 0) throw new Error(`mask conversion failed: ${r.stderr}`)
     }
     out.maskDataUrl = `data:image/png;base64,${(await readFile(png)).toString('base64')}`
+  }
+  // Film fiducials: the certificate from the intrinsics CSV (corner_* / midside_* mm,
+  // y up) and the per-image marks from detected_fiducial_markers.csv.
+  if (h.fiducials) {
+    const SLOTS = { corner_top_left: 'corner-tl', corner_top_right: 'corner-tr', corner_bottom_right: 'corner-br',
+      corner_bottom_left: 'corner-bl', midside_top: 'side-top', midside_right: 'side-right', midside_bottom: 'side-bottom',
+      midside_left: 'side-left' }
+    const r = csvRows(await readFile(h.intrinsics, 'utf8'))[0]
+    const marks = []
+    for (const [col, slot] of Object.entries(SLOTS)) {
+      const x = Number(r[`${col}_x_mm`]), y = Number(r[`${col}_y_mm`])
+      if (r[`${col}_x_mm`] !== '' && Number.isFinite(x) && Number.isFinite(y)) marks.push({ id: `F${marks.length + 1}`, xMm: x, yMm: y, slot })
+    }
+    const provided = []
+    for (const row of csvRows(await readFile(h.fiducials.csv, 'utf8'))) {
+      for (const [col, slot] of Object.entries(SLOTS)) {
+        const px = Number(row[`${col}_x`]), py = Number(row[`${col}_y`])
+        if (row[`${col}_x`] !== '' && Number.isFinite(px) && Number.isFinite(py)) provided.push({ imageName: row.image_id, slot, px, py })
+      }
+    }
+    out.fiducials = { certificate: { focalMm: Number(r.focal_length), ppxMm: Number(r.principal_point_x_mm) || 0,
+      ppyMm: Number(r.principal_point_y_mm) || 0, marks }, provided, mode: h.fiducials.mode ?? 'provided',
+    positions: h.fiducials.positions ?? 'corners+sides', frameMask: h.fiducials.frameMask !== false }
+    // The scan pitch comes from the fiducial fit; the preprocessed-frame cx/cy do not apply.
+    if (out.sensor) { delete out.sensor.cx; delete out.sensor.cy; delete out.sensor.pixelSize }
   }
   if (h.gcps && !h.noGcps) {
     const names = new Set(imageNames)

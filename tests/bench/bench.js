@@ -39,6 +39,9 @@ import { triangulateGcp } from '/src/core/sfm/gcpTriangulation.js'
 import { encodeSfmInput } from './sfmInputDump.js'
 import { demToGeoTiff } from '/src/core/products/exporters.js'
 import { crsTagInfo } from '/src/core/products/geotiff.js'
+import { emptyFiducialCalibration } from '/src/core/sfm/fiducialModel.js'
+import { buildBorderMask } from '/src/core/mask.js'
+import { FIDUCIAL_SPOT_DEFAULTS } from '/src/core/defaults.user.js'
 
 // SfM input capture (config `dumpSfmInput`): the next `reconstruct` op posted to a
 // worker is encoded before it is sent (its match buffers are transferred, so they
@@ -349,6 +352,73 @@ window.bench = {
     for (const img of images.images) images.updateMask(img.id, blob, true)
     return images.images.filter((i) => i.mask).length
   },
+  // Film scans (config `hist.fiducials`): the camera certificate on the one sensor and,
+  // in mode 'provided', the per-image fiducial marks from the benchmark's CSV;
+  // mode 'detect' runs the app's own detector (Detect Fiducials) instead and reports
+  // how far its marks land from the provided ones. certificate = { focalMm, ppxMm,
+  // ppyMm, marks: [{ id, xMm, yMm, slot }] }; provided = [{ imageName, slot, px, py }].
+  // `frameMask` masks the film frame outside the corner fiducials (2 % inside them):
+  // a raw scan without it matches its fiducials, frame edge and data strip across
+  // every image (Casa Grande raw: 665/666 pairs accepted, 34/37 cameras, GCPs off).
+  // In mode 'detect' it is the detector's own generateMasks.
+  async setFiducials({ certificate, provided = [], mode = 'provided', positions = 'corners+sides', frameMask = true }) {
+    const sensor = sensorsStore.sensors[0]
+    if (!sensor) return { error: 'no sensor' }
+    const cal = { ...emptyFiducialCalibration(certificate.focalMm), ppxMm: certificate.ppxMm ?? 0, ppyMm: certificate.ppyMm ?? 0,
+      marks: certificate.marks.map(({ id, xMm, yMm }) => ({ id, xMm, yMm })),
+      slotMap: Object.fromEntries(certificate.marks.map((m) => [m.slot, m.id])) }
+    sensorsStore.setFiducialCalibration(sensor.id, cal)
+    const byName = new Map(images.images.map((i) => [i.name, i]))
+    const out = { mode, sensor: sensor.label, marks: cal.marks.length }
+    if (mode === 'provided') {
+      let n = 0
+      for (const d of provided) {
+        const img = byName.get(d.imageName)
+        if (img) { images.setFiducialDetection(img.id, { slot: d.slot, px: d.px, py: d.py, source: 'import' }); n++ }
+      }
+      out.applied = n
+      if (frameMask) {
+        let masked = 0
+        for (const img of images.images) {
+          const d = Object.fromEntries(provided.filter((x) => x.imageName === img.name).map((x) => [x.slot, x]))
+          const W = img.meta?.width, H = img.meta?.height
+          if (!(W > 0 && H > 0) || !['corner-tl', 'corner-tr', 'corner-br', 'corner-bl'].every((k) => d[k])) continue
+          const m = 0.02 * Math.max(W, H)
+          const left = Math.max(d['corner-tl'].px, d['corner-bl'].px) + m, right = Math.min(d['corner-tr'].px, d['corner-br'].px) - m
+          const top = Math.max(d['corner-tl'].py, d['corner-tr'].py) + m, bottom = Math.min(d['corner-bl'].py, d['corner-br'].py) - m
+          const blob = await buildBorderMask(W, H, { left: Math.round(left), top: Math.round(top),
+            right: Math.round(W - 1 - right), bottom: Math.round(H - 1 - bottom) })
+          images.updateMask(img.id, blob, true)
+          masked++
+        }
+        out.masked = masked
+      }
+      return out
+    }
+    const t0 = performance.now()
+    const r = await images.detectFiducialsForSensor({ sensor, settings: { ...FIDUCIAL_SPOT_DEFAULTS, positions, generateMasks: frameMask, overwrite: true }, overwrite: true })
+    out.seconds = (performance.now() - t0) / 1000
+    out.applied = r?.applied ?? null
+    out.drafts = r?.drafts?.length ?? 0
+    out.masked = images.images.filter((i) => i.mask).length
+    // Against the provided marks: per-slot distance of the detector's mark (px).
+    const ref = new Map(provided.map((d) => [`${d.imageName}|${d.slot}`, d]))
+    const dist = [], missing = []
+    for (const img of images.images) {
+      const found = new Set()
+      for (const det of img.fiducialDetections ?? []) {
+        const q = ref.get(`${img.name}|${det.slot}`)
+        if (q) { dist.push(Math.hypot(det.px - q.px, det.py - q.py)); found.add(det.slot) }
+      }
+      for (const d of provided) if (d.imageName === img.name && !found.has(d.slot)) missing.push(`${img.name}:${d.slot}`)
+    }
+    dist.sort((a, b) => a - b)
+    const q = (f) => (dist.length ? dist[Math.min(dist.length - 1, Math.floor(f * dist.length))] : null)
+    Object.assign(out, { matched: dist.length, of: provided.length, medianPx: q(0.5), p90Px: q(0.9), maxPx: dist.at(-1) ?? null,
+      over5px: dist.filter((v) => v > 5).length, missing: missing.length, missingSample: missing.slice(0, 8) })
+    return out
+  },
+
   // Control and checkpoint residuals against the current georeference.
   async gcpReport() {
     if (!recon.validGeoref) await recon.georeference()
