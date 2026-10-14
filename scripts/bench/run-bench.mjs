@@ -223,7 +223,16 @@ try {
   // In batches, so the page never holds the whole dataset as blobs at once.
   let added = 0
   const list = files.map((f) => ({ url: `${base}/__bench_data/${encodeURIComponent(f)}`, name: baseName(f) }))
-  for (let i = 0; i < list.length; i += 32) added = await page.evaluate((l) => window.bench.addImages(l), list.slice(i, i + 32))
+  // Under the same crash/stall watchdog as the stages: a renderer that dies mid-ingest
+  // (Iceland 1980, 125 × 130 MP scans under a memory cap) left the run waiting forever.
+  try {
+    for (let i = 0; i < list.length; i += 32) {
+      lastLogAt = Date.now()
+      added = await Promise.race([page.evaluate((l) => window.bench.addImages(l), list.slice(i, i + 32)), watchdog()])
+    }
+  } finally {
+    for (const t of watchdog.timers.splice(0)) clearInterval(t)
+  }
   result.stages.ingest = { images: added, seconds: (Date.now() - t0) / 1000 }
   // `hist` (scripts/bench/hist/README.md): a historical block's certificate focal +
   // scan pitch on one sensor, a static mask, and the surveyed GCPs (gcp.csv).

@@ -262,6 +262,10 @@ def grid_dem(xyz, origin, res, epsg, out_tif, fill_cells=0):
     x0, y1 = np.floor(e.min() / res) * res, np.ceil(n.max() / res) * res
     W = int(np.ceil((e.max() - x0) / res)) + 1
     H = int(np.ceil((y1 - n.min()) / res)) + 1
+    # ~13 bytes per cell (float32 grid + int64 index); a KH-9 frame (140 × 70 km) at the
+    # 2 m default is 2.5 G cells and took 40 GB. Refuse rather than exhaust the machine.
+    if W * H > 400_000_000:
+        sys.exit(f"DEM grid {W}×{H} at {res} m is too large; pass a coarser --dem-res")
     col = ((e - x0) / res).astype(np.int64)
     row = ((y1 - n) / res).astype(np.int64)
     idx = row * W + col

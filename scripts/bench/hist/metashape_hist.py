@@ -61,7 +61,9 @@ def main():
 
     doc = Metashape.Document()
     if psx.exists():
-        doc.open(str(psx))
+        # A run that was killed leaves the project locked, and a locked project opens
+        # read-only: the next stage then computes and fails on save.
+        doc.open(str(psx), read_only=False, ignore_lock=True)
         chunk = doc.chunk
     else:
         doc.save(str(psx))
