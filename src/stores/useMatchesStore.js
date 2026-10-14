@@ -17,6 +17,7 @@ import { preselectPairs, positionsForProximity, preselectByFootprintOverlap } fr
 import { sequentialPairs } from '../core/features/sequentialPairs.js'
 import { inlierSpread, packMatchedPoints } from '../core/features/verify.js'
 import { evaluatePairAcceptance } from '../core/features/pairGate.js'
+import { filterStationaryMatches, stationaryTolPx } from '../core/features/stationary.js'
 import { pickSpreadIndices, sliceDescriptorRows, resolveSubsetGateSize, SUBSET_GATE_SIZE_DEFAULTS } from '../core/features/subsetGate.js'
 import { siblingCanonicalMap, canonicalizeMatches } from '../core/features/orientationSiblings.js'
 import { toMatchSpace } from '../core/features/siftDescriptors.js'
@@ -556,6 +557,12 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
         entry.siblingMerged = sib.merged
         entry.siblingAmbiguous = sib.ambiguous
       }
+      if (settings.filterStationary) {
+        const [w, h] = imageDims(srcA, kpsA)
+        const st = filterStationaryMatches(kpsA, kpsB, raw, { tolPx: stationaryTolPx(w, h, settings.stationaryTolPct) })
+        raw = st.matches
+        entry.stationaryDropped = st.dropped
+      }
       entry.rawCount = raw.length
 
       const minMatches = settings.minMatches
@@ -895,9 +902,10 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
     // matches to bother verifying; rejected = verified but failed the count/ratio
     // gate; matched = kept (with ≥1 inlier).
     const stats = { matched: 0, weak: 0, rejected: 0, skipped: 0, gated: 0, inliers: 0, ratios: [], degenerate: 0,
-      siblingMerged: 0, siblingAmbiguous: 0 }
+      siblingMerged: 0, siblingAmbiguous: 0, stationary: 0 }
     const tally = (_pid, entry) => {
       if (entry.status !== 'done') return
+      stats.stationary += entry.stationaryDropped ?? 0
       stats.siblingMerged += entry.siblingMerged ?? 0
       stats.siblingAmbiguous += entry.siblingAmbiguous ?? 0
       // Order matters: outcome flags are mutually exclusive but explicit (weak/gated/
@@ -1048,6 +1056,7 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
       + `${stats.weak ? `, ${stats.weak} weak (PnP bridges)` : ''}`
       + `, ${stats.rejected} rejected, ${stats.skipped} skipped`
       + `${stats.gated ? `, ${stats.gated} gated (subset pre-test)` : ''}`
+      + `${settings.filterStationary ? `; ${stats.stationary} stationary putative(s) dropped` : ''}`
       + `; ${stats.inliers} total inliers, mean inlier ratio ${meanRatio.toFixed(2)}`
       + `${stats.matched ? `, ${stats.degenerate}/${stats.matched} accepted pair(s) H/F-degenerate `
         + `(${(100 * stats.degenerate / stats.matched).toFixed(0)}% planar / pure-rotation)` : ''}`,

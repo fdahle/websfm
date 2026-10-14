@@ -221,6 +221,9 @@ export const MATCH_TUNING = {
   // `minMatches` (defaults.user.js, user-facing) is the ACCEPT floor + the H-skip floor.
   // These two are the other two gates it used to conflate, split out so raising minMatches
   // (e.g. to 500) can never widen the pre-verification kill zone or sever the match graph:
+  // filterStationary: a match moving at most this % of the image diagonal between
+  // the two images is stationary (1 % = 130 px on a 9139² film scan).
+  stationaryTolPct: 1,
   rawSkipFloor: 15,        // skip verification below this many RAW putatives (clamped to ≤ minMatches)
   weakMinInliers: 15,      // valid-F pairs with ≥ this many inliers but below the accept gate → WEAK
                            // (kept for PnP registration only; never seed init or triangulate)

@@ -105,6 +105,11 @@ export const MATCH_DEFAULTS = {
   // collapse" (always A-side-full / B-side-collapsed, never the reverse: see the
   // 2026-07-17 building baseline). Cross-check removes the cause rather than the symptom.
   crossCheck: true,
+  // Drop putatives that sit at (almost) the same pixel in both images (Metashape's
+  // "filter stationary points"): fiducials, frame and data strip, reseau crosses,
+  // scanner dust — fixed to the camera, not the scene (core/features/stationary.js).
+  // Off by default while it is measured; tolerance in tuning.js ▸ stationaryTolPct.
+  filterStationary: false,
   minMatches: 15,              // min surviving matches to keep a pair
   geometricVerification: true, // run F-RANSAC verification
   // F-RANSAC inlier threshold, in **detection pixels** — i.e. at the resolution the

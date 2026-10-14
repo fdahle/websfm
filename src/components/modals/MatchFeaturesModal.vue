@@ -323,6 +323,12 @@ function run() {
           <label class="checkbox-row"><input v-model="settings.crossCheck" type="checkbox" class="checkbox" /> Enabled</label>
         </SettingsField>
 
+        <SettingsField
+          hint="Drops matches that stay at the same pixel in both images — fiducials, frame edges, data strips, reseau crosses, scanner dust. For film and satellite scans; a real scene point moves with the baseline.">
+          <template #label>Ignore stationary points</template>
+          <label class="checkbox-row"><input v-model="settings.filterStationary" type="checkbox" class="checkbox" /> Enabled</label>
+        </SettingsField>
+
         <template v-if="matcher === 'bruteforce'">
           <SettingsField
             :hint="gate.reason ?? 'Match a small spatially-uniform subset first; skip the full match for pairs that clearly don\'t overlap.'">
