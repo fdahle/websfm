@@ -17,7 +17,7 @@ import { usePosesStore } from '/src/stores/usePosesStore.js'
 // Every other registered project store, so a reopen restores what the app restores.
 import '/src/stores/useExternalStore.js'
 import '/src/stores/useFootprintsStore.js'
-import '/src/stores/useGcpsStore.js'
+import { useGcpsStore } from '/src/stores/useGcpsStore.js'
 import '/src/stores/useLogStore.js'
 import '/src/stores/useMeasurementsStore.js'
 import '/src/stores/useScaleBarsStore.js'
@@ -37,6 +37,8 @@ import { applySimilarity } from '/src/core/products/georef.js'
 import { makeFrameModelResolver, gcpsInPinholeFrame } from '/src/core/sfm/displayFrame.js'
 import { triangulateGcp } from '/src/core/sfm/gcpTriangulation.js'
 import { encodeSfmInput } from './sfmInputDump.js'
+import { demToGeoTiff } from '/src/core/products/exporters.js'
+import { crsTagInfo } from '/src/core/products/geotiff.js'
 
 // SfM input capture (config `dumpSfmInput`): the next `reconstruct` op posted to a
 // worker is encoded before it is sent (its match buffers are transferred, so they
@@ -65,6 +67,7 @@ const sensorsStore = useSensorsStore() // its watcher groups images into EXIF se
 const matches = useMatchesStore()
 const recon = useReconstructionStore()
 const poses = usePosesStore()
+const gcpsStore = useGcpsStore()
 
 const withPreset = (defaults, presets, preset) => ({ ...defaults, ...(preset ? presets[preset] : {}) })
 const report = () => {}
@@ -82,6 +85,7 @@ const stem = (n) => n.replace(/.[^.]+$/, '').toLowerCase()
 // before the first override, so a later run without one starts from the EXIF grouping.
 const SENSOR_OVERRIDE_FIELDS = ['focal', 'focalUnit', 'cx', 'cy', 'k1', 'k2', 'k3', 'p1', 'p2', 'distortionModel']
 const sensorBase = {}
+let demTiff = null
 let reference = null // scripts/bench/reference.mjs: { positions, leverArm, gcps }
 
 // Checkpoints: every reference GCP triangulated from its marks through the app's own
@@ -316,11 +320,66 @@ window.bench = {
     return poses.addPoses(raw, 'EPSG:4326')
   },
 
+  // Historical blocks (config `hist`, scripts/bench/hist/): surveyed GCPs as control
+  // (and every `checkEvery`-th as a checkpoint), through the GCP import's own call:
+  // gcps = [{ name, x, y, z, accuracyX/Y/Z, role, observations: [{ imageName, px, py }] }]
+  // in `crs` (pixel-edge marks, the app's convention).
+  async setGcps({ gcps, crs }) {
+    const n = await gcpsStore.addGcps(gcps, crs, { x: 0.5, y: 0.5, z: 0.5 }, { convention: '1sigma', unit: 'metres', rememberDefaults: false }, { x: 1, y: 1 })
+    const all = gcpsStore.gcps
+    return { added: n, total: all.length, control: all.filter((g) => g.role === 'control').length,
+      check: all.filter((g) => g.role === 'check').length, observations: all.reduce((k, g) => k + (g.observations?.length ?? 0), 0) }
+  },
+  // One sensor for the whole block (film scans can differ by a pixel and would split
+  // into several), with the certificate's focal (mm) and the scan pitch (mm/px):
+  // resolveK's focal-mm + pixelSize path. `fields` go onto the sensor as given.
+  setSensor(fields) {
+    const [first, ...rest] = sensorsStore.sensors
+    if (!first) return null
+    for (const s of rest) sensorsStore.mergeSensors(first.id, s.id)
+    Object.assign(first, fields)
+    // A later run's `sensor` override restores to these values, not the EXIF guess.
+    sensorBase[first.id] = Object.fromEntries(SENSOR_OVERRIDE_FIELDS.map((k) => [k, first[k]]))
+    return { sensors: sensorsStore.sensors.length, ...Object.fromEntries(Object.keys(fields).map((k) => [k, first[k]])) }
+  },
+  // One static mask for every image (fiducial borders, data strip): a PNG data URL,
+  // opaque = excluded, transparent = kept (core/mask.js).
+  async setMask(dataUrl) {
+    const blob = await (await fetch(dataUrl)).blob()
+    for (const img of images.images) images.updateMask(img.id, blob, true)
+    return images.images.filter((i) => i.mask).length
+  },
+  // Control and checkpoint residuals against the current georeference.
+  async gcpReport() {
+    if (!recon.validGeoref) await recon.georeference()
+    const rows = await recon.gcpAccuracyReport()
+    const rms = (rs, f) => (rs.length ? Math.sqrt(rs.reduce((a, r) => a + f(r), 0) / rs.length) : null)
+    const ok = rows.filter((r) => r.dx != null)
+    const by = (role) => ok.filter((r) => r.role === role)
+    const sum = (rs) => ({ n: rs.length, rmsH: rms(rs, (r) => r.dx * r.dx + r.dy * r.dy), rmsV: rms(rs, (r) => r.dz * r.dz),
+      meanU: rs.length ? rs.reduce((a, r) => a + r.dz, 0) / rs.length : null })
+    return { georef: recon.validGeoref ? { method: recon.validGeoref.method, count: recon.validGeoref.count, rms: recon.validGeoref.rms, crs: recon.validGeoref.crs } : null,
+      control: sum(by('control')), check: sum(by('check')), untriangulated: rows.filter((r) => r.dx == null).map((r) => r.name),
+      rows: ok.map((r) => `${r.name} ${r.role}: dE ${r.dx.toFixed(2)} dN ${r.dy.toFixed(2)} dU ${r.dz.toFixed(2)} m (${r.viewCount} views)`) }
+  },
+  // The DEM as a GeoTIFF (NaN → -9999), base64 in chunks for the runner.
+  async demTiffSize() {
+    if (!recon.dem) return 0
+    demTiff = await demToGeoTiff(recon.dem, { crs: crsTagInfo(recon.dem), nodata: -9999 })
+    return demTiff.byteLength
+  },
+  demTiffChunk(start, n) {
+    const u8 = demTiff.subarray(start, start + n)
+    let s = ''
+    for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000))
+    return btoa(s)
+  },
+
   setReference(r) { reference = r; return { positions: Object.keys(r?.positions ?? {}).length, gcps: r?.gcps?.length ?? 0, leverArm: r?.leverArm } },
 
-  async start({ name = 'bench', sceneType = 'object' } = {}) {
+  async start({ name = 'bench', sceneType = 'object', crs = undefined } = {}) {
     await projects.loadIndex()
-    await projects.createProject(name, sceneType)
+    await projects.createProject(name, sceneType, crs)
     return projects.currentProjectId
   },
 
@@ -463,6 +522,10 @@ window.bench = {
       : null
     const nameOf = new Map(images.images.map((i) => [i.uuid, i.name]))
     const r4 = (v) => (v == null ? null : Math.round(v * 1e4) / 1e4)
+    // Projects with GCPs (historical blocks): control + checkpoint residuals in the CRS.
+    const gcpResiduals = gcpsStore.gcps.length && cloud?.cameras?.size
+      ? await window.bench.gcpReport().catch((e) => ({ error: String(e?.stack ?? e) }))
+      : null
     const positionCheck = pc && {
       count: pc.count, scale: r4(pc.scale), rms3d: r4(pc.rms3d), rmsH: r4(pc.rmsH), rmsV: r4(pc.rmsV),
       medianH: r4(pc.medianH), p95H: r4(pc.p95H), maxH: r4(pc.maxH), medianV: r4(pc.medianV), p95V: r4(pc.p95V), maxV: r4(pc.maxV),
@@ -476,7 +539,7 @@ window.bench = {
       // BA linear-solver totals + stage wall clock: the PCG-vs-Cholesky comparison
       // (TODO ▸ MEM ▸ PCG) reads these; set recon.baSolver per variant to compare.
       baSolver: s?.baSolver ?? null, timings: s?.timings ?? null,
-      positionCheck, checkpointCheck, checkpointOffsets, posePriors: priors, leverArm: arm, sensor,
+      positionCheck, checkpointCheck, checkpointOffsets, gcpResiduals, posePriors: priors, leverArm: arm, sensor,
       pointsEnu, enuOrigin: pc?.origin ?? null,
       // The posed cameras (pinhole frame), so accuracy can be re-analysed without a rerun.
       model: cloud?.cameras ? Object.fromEntries([...cloud.cameras].map(([u, c]) => [nameOf.get(u) ?? u, { R: c.R, t: c.t, K: c.K }])) : null,

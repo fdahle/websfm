@@ -175,3 +175,41 @@ stage again with config key `dense:loose`.
   WASM, as in the app.
 - One run at a time: runs share the GPU, and timings are only comparable when nothing
   else is loading the machine.
+
+## Linux: reaching the GPU
+
+Headless Chrome on Linux offers no WebGPU adapter, or only SwiftShader (software)
+with `--enable-features=Vulkan`. Matching and depth maps then fall back to WASM with
+one `GPU requested but … no adapter` warning, and a dense stage takes hours. Run headed
+with Vulkan on (it needs a display, e.g. a remote-desktop session):
+
+```json
+{ "headed": true, "chromeArgs": ["--enable-unsafe-webgpu", "--enable-features=Vulkan", "--ignore-gpu-blocklist"] }
+```
+
+Measured 2026-10-14 on the NVIDIA Turing box (driver on Chrome's GPU blocklist):
+headless → SwiftShader whatever the flags; headed without `--ignore-gpu-blocklist` →
+SwiftShader in workers; headed with all three flags → `nvidia / turing`. Check the
+`backend = WebGPU (…)` log line: SwiftShader is slower than the WASM path.
+
+## Historical blocks (`hist`)
+
+`hist/` scores film and satellite frame blocks (the Grenoble benchmark layout:
+`preprocessed_images/`, `image_mask.tif`, `gcp.csv`, `camera_model_intrinsics.csv`,
+reference DEMs) the same way for websfm, COLMAP and Metashape:
+
+- config key `hist` (`hist/histSetup.mjs`): the certificate focal + scan pitch on one
+  sensor, the static mask on every image, GCPs as control with every Nth as a
+  checkpoint, and after the `dem` stage the DEM as `<out>.dem.tif`, scored against
+  `hist.refDem`. The recon result carries `gcpResiduals` (control / checkpoint RMS in
+  the CRS). Set `crs` to the GCPs' projected CRS and `dem: { "crs": "project" }`.
+- `hist/colmap_hist.py`: COLMAP defaults (one camera, certificate focal as the prior),
+  GCP similarity with leave-one-out checkpoints, PatchMatch, fusion, DEM.
+- `hist/metashape_hist.py`: Metashape defaults (High), the same GCP split, depth maps,
+  DEM.
+- `hist/score_dem.py`: DEM − reference over their overlap on the reference grid
+  (bilinear), mean / median / std / RMSE / NMAD — the protocol of the earlier
+  Metashape evaluation (`historic_sfm` ▸ dem_diff.json), reproduced to the cell count.
+
+Python scripts need an interpreter with rasterio (+ Metashape for the last); the
+`hist_env3` conda env has both.

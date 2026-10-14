@@ -41,3 +41,6 @@ scripts/bench/configs/
 # verification register, planning specs).
 /CLAUDE.md
 /dev/
+
+# Python bytecode (scripts/bench/hist)
+__pycache__/

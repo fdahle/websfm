@@ -48,7 +48,7 @@ const json = (v) => (typeof v === 'string' ? JSON.parse(v) : v)
 
 const args = parseArgs(process.argv.slice(2))
 const cfg = { ...(args.config ? JSON.parse(await readFile(args.config, 'utf8')) : {}) }
-for (const k of ['name', 'images', 'include', 'limit', 'sceneType', 'stages', 'out', 'port', 'headed', 'dev', 'build', 'maxOldSpaceMb', 'dumpSfmInput', 'profileReopen', 'colmap', 'exportDense']) if (args[k] !== undefined) cfg[k] = args[k]
+for (const k of ['name', 'images', 'include', 'limit', 'sceneType', 'stages', 'out', 'port', 'headed', 'dev', 'build', 'maxOldSpaceMb', 'dumpSfmInput', 'profileReopen', 'colmap', 'exportDense', 'exportDem', 'crs']) if (args[k] !== undefined) cfg[k] = args[k]
 for (const k of ['detect', 'match', 'recon']) cfg[k] = { ...(cfg[k] ?? {}), ...(args[k] ? json(args[k]) : {}) }
 if (!cfg.images) throw new Error('--images <folder> (or "images" in --config) is required')
 const name = cfg.name ?? 'bench'
@@ -160,7 +160,10 @@ const profileDir = `${outPrefix}.profile`
 const jsFlags = ['--expose-gc', ...(cfg.maxOldSpaceMb ? [`--max-old-space-size=${Number(cfg.maxOldSpaceMb)}`] : [])]
 const browser = await chromium.launchPersistentContext(profileDir, {
   channel: 'chrome', headless: !cfg.headed,
-  args: ['--enable-precise-memory-info', `--js-flags=${jsFlags.join(' ')}`],
+  // `chromeArgs`: extra Chrome flags. On Linux, headless Chrome only offers SwiftShader
+  // WebGPU; `"headed": true, "chromeArgs": ["--enable-unsafe-webgpu", "--enable-features=Vulkan", "--ignore-gpu-blocklist"]`
+  // reaches the real GPU (scripts/bench/README.md ▸ Linux).
+  args: ['--enable-precise-memory-info', `--js-flags=${jsFlags.join(' ')}`, ...(cfg.chromeArgs ?? [])],
 })
 const result = { name, config: cfg, files: files.length, startedAt: new Date().toISOString(), stages: {} }
 let heap = null // worker heap sampler (workerHeap.mjs), started with the page
@@ -215,13 +218,23 @@ try {
   await page.waitForFunction(() => window.benchReady === true, null, { timeout: 120_000 })
 
   const t0 = Date.now()
-  await page.evaluate((o) => window.bench.start(o), { name, sceneType: cfg.sceneType ?? 'object' })
+  await page.evaluate((o) => window.bench.start(o), { name, sceneType: cfg.sceneType ?? 'object', crs: cfg.crs })
   if (cfg.reference) console.log('== reference:', JSON.stringify(await page.evaluate((r) => window.bench.setReference(r), await loadReference(cfg.reference))))
   // In batches, so the page never holds the whole dataset as blobs at once.
   let added = 0
   const list = files.map((f) => ({ url: `${base}/__bench_data/${encodeURIComponent(f)}`, name: baseName(f) }))
   for (let i = 0; i < list.length; i += 32) added = await page.evaluate((l) => window.bench.addImages(l), list.slice(i, i + 32))
   result.stages.ingest = { images: added, seconds: (Date.now() - t0) / 1000 }
+  // `hist` (scripts/bench/hist/README.md): a historical block's certificate focal +
+  // scan pitch on one sensor, a static mask, and the surveyed GCPs (gcp.csv).
+  if (cfg.hist) {
+    const { histSetup } = await import('./hist/histSetup.mjs')
+    const h = await histSetup({ imagesDir: cfg.images, ...cfg.hist }, files)
+    if (h.sensor) console.log(`== hist sensor: ${JSON.stringify(await page.evaluate((f) => window.bench.setSensor(f), h.sensor))}`)
+    if (h.maskDataUrl) console.log(`== hist mask: ${await page.evaluate((u) => window.bench.setMask(u), h.maskDataUrl)} image(s)`)
+    if (h.gcps) console.log(`== hist GCPs: ${JSON.stringify(await page.evaluate((g) => window.bench.setGcps(g), { gcps: h.gcps, crs: cfg.crs }))}`)
+    result.hist = { sensor: h.sensor, gcps: h.gcps?.length ?? 0, checks: h.checks }
+  }
   if (cfg.reference?.importPoses) console.log(`== imported ${await page.evaluate(() => window.bench.importReferencePoses())} reference pose(s)`)
   console.log(`== ingest: ${added} images in ${result.stages.ingest.seconds.toFixed(1)} s`)
   // Renderer heap after each stage, before and after a forced GC: the sparse memory
@@ -323,6 +336,27 @@ try {
     }
     await new Promise((res) => out.end(res))
     console.log(`== exportOrtho: ${(size / 1024 ** 2).toFixed(1)} MiB → ${file}`)
+  }
+  // After the dem stage: <out>.dem.tif, scored against `hist.refDem` (score_dem.py,
+  // the Grenoble evaluation's protocol) when one is given.
+  const exportDem = async (tag) => {
+    const size = await page.evaluate(() => window.bench.demTiffSize())
+    if (!size) { console.log('== exportDem: no DEM'); return }
+    const file = `${outPrefix}${tag ? `.${tag}` : ''}.dem.tif`
+    const out = createWriteStream(file)
+    for (let s = 0; s < size; s += 8 << 20) {
+      const b64 = await page.evaluate(([a, n]) => window.bench.demTiffChunk(a, n), [s, 8 << 20])
+      await new Promise((res, rej) => out.write(Buffer.from(b64, 'base64'), (e) => (e ? rej(e) : res())))
+    }
+    await new Promise((res) => out.end(res))
+    console.log(`== exportDem: ${(size / 1024 ** 2).toFixed(1)} MiB → ${file}`)
+    if (cfg.hist?.refDem) {
+      const { scoreDem } = await import('./hist/histSetup.mjs')
+      const key = tag ? `dem:${tag}` : 'dem'
+      result.stages[key].demScore = scoreDem(file, cfg.hist.refDem, cfg.hist.python)
+      console.log(`== ${key} vs reference: ${JSON.stringify(result.stages[key].demScore)}`)
+      await writeFile(`${outPrefix}.json`, JSON.stringify(result, null, 2))
+    }
   }
   const reopen = async () => {
     const id = await page.evaluate(() => window.bench.currentProject())
@@ -449,6 +483,7 @@ try {
       if (stage === 'dense' && cfg.exportDense) await exportDense(tag)
       if (stage === 'dense' && lidarCfg) await denseLidarCheck(entry)
       if (stage === 'ortho') await exportOrtho(tag)
+      if (stage === 'dem' && (cfg.exportDem || cfg.hist?.refDem)) await exportDem(tag)
     }
   }
   result.finishedAt = new Date().toISOString()
