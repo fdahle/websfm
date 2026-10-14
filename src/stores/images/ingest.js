@@ -4,6 +4,30 @@ import * as opfs from '../../utils/opfs.js'
 import { isTiff, readTiffDimensions, canDecodeTiffNatively } from '../../utils/tiff.js'
 import { transcodeTiff } from '../../workers/computeClient.js'
 
+// TIFF transcodes in flight, bounded by pixels rather than by count. Each holds the
+// decoded RGBA, its canvas and the JPEG + PNG encodes (~12 bytes per pixel), all in
+// the renderer process (the workers share it). A batch used to transcode all its
+// files at once: 32 Iceland 1980 scans (130 MP each) killed the renderer, and with
+// GPU canvas the overlapping readbacks failed 31 of 125 images. A file larger than
+// the budget still runs, alone.
+const TIFF_TRANSCODE_PIXEL_BUDGET = 400e6
+function createPixelBudget(cap) {
+  let inFlight = 0
+  const waiting = []
+  const pump = () => {
+    while (waiting.length && (inFlight === 0 || inFlight + waiting[0].px <= cap)) {
+      const w = waiting.shift()
+      inFlight += w.px
+      w.resolve()
+    }
+  }
+  return {
+    acquire(px) { return new Promise((resolve) => { waiting.push({ px, resolve }); pump() }) },
+    release(px) { inFlight -= px; pump() },
+  }
+}
+const tiffBudget = createPixelBudget(TIFF_TRANSCODE_PIXEL_BUDGET)
+
 // Adding images, split out of useImagesStore: dedupe against the session, write
 // the originals and derived display/compute copies, read EXIF in the workers, and
 // publish each record as soon as it can be shown. TIFFs get their lossless
@@ -119,38 +143,47 @@ export function createIngest({
             thumbnails.requestThumbnail(item, { source: file })
             return
           }
-          const { displayBlob, computeBlob, width, height, timings, srcInfo } = await transcodeTiff(file, undefined, {
-            // Fires once the decode finishes, well before the full-res JPEG+PNG
-            // encode below — swap in a quick low-res preview so the user sees
-            // something long before the full-quality one is ready.
-            onThumbnail: (thumbBlob) => {
-              const found = images.value.find((img) => img.id === item.id)
-              // The ≤512 px transcode preview is also the cheapest source for the
-              // list thumbnail: no second decode of the full-resolution display JPEG.
-              if (found) thumbnails.requestThumbnail(found, { source: thumbBlob })
-              if (!found || !found.previewPending) return
-              URL.revokeObjectURL(found.url)
-              found.url = URL.createObjectURL(thumbBlob)
-              // Tells the image viewer that `url` is this reduced preview, not the
-              // native-resolution image: it maps coordinates through meta.width/height
-              // and holds off editing until a later swap replaces `url` (it compares
-              // the two, so any replacement — onDisplay, a heal — clears it). Session
-              // only; never persisted.
-              found.lowResUrl = found.url
-              found.previewPending = false
-            },
-            // Fires when the full-res display JPEG is encoded, before the slower
-            // compute PNG — swap in the full-quality display so the viewer is
-            // fully usable while the PNG (computeUrl) is still encoding.
-            onDisplay: (dispBlob) => {
-              const found = images.value.find((img) => img.id === item.id)
-              if (!found) return
-              URL.revokeObjectURL(found.url)
-              found.url = URL.createObjectURL(dispBlob)
-              found.lowResUrl = null
-              found.previewPending = false
-            },
-          })
+          const dims = await readTiffDimensions(file).catch(() => null)
+          const px = dims?.width > 0 && dims?.height > 0 ? dims.width * dims.height : 100e6
+          await tiffBudget.acquire(px)
+          let transcoded
+          try {
+            transcoded = await transcodeTiff(file, undefined, {
+              // Fires once the decode finishes, well before the full-res JPEG+PNG
+              // encode below — swap in a quick low-res preview so the user sees
+              // something long before the full-quality one is ready.
+              onThumbnail: (thumbBlob) => {
+                const found = images.value.find((img) => img.id === item.id)
+                // The ≤512 px transcode preview is also the cheapest source for the
+                // list thumbnail: no second decode of the full-resolution display JPEG.
+                if (found) thumbnails.requestThumbnail(found, { source: thumbBlob })
+                if (!found || !found.previewPending) return
+                URL.revokeObjectURL(found.url)
+                found.url = URL.createObjectURL(thumbBlob)
+                // Tells the image viewer that `url` is this reduced preview, not the
+                // native-resolution image: it maps coordinates through meta.width/height
+                // and holds off editing until a later swap replaces `url` (it compares
+                // the two, so any replacement — onDisplay, a heal — clears it). Session
+                // only; never persisted.
+                found.lowResUrl = found.url
+                found.previewPending = false
+              },
+              // Fires when the full-res display JPEG is encoded, before the slower
+              // compute PNG — swap in the full-quality display so the viewer is
+              // fully usable while the PNG (computeUrl) is still encoding.
+              onDisplay: (dispBlob) => {
+                const found = images.value.find((img) => img.id === item.id)
+                if (!found) return
+                URL.revokeObjectURL(found.url)
+                found.url = URL.createObjectURL(dispBlob)
+                found.lowResUrl = null
+                found.previewPending = false
+              },
+            })
+          } finally {
+            tiffBudget.release(px)
+          }
+          const { displayBlob, computeBlob, width, height, timings, srcInfo } = transcoded
           const found = images.value.find((img) => img.id === item.id)
           if (!found) { resolveComputeReady(item.uuid); return } // removed mid-decode
           // onDisplay already set found.url from displayBlob; if the display
