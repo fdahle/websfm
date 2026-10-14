@@ -6,6 +6,9 @@ import SettingsGroup from './ui/SettingsGroup.vue'
 import AdvancedDisclosure from './ui/AdvancedDisclosure.vue'
 import PresetCards from './ui/PresetCards.vue'
 import WarnBox from './ui/WarnBox.vue'
+import SourcePicker from './ui/SourcePicker.vue'
+import { useSourcePick } from '../../composables/useSourcePick.js'
+import { usePresetSettings } from '../../composables/usePresetSettings.js'
 import GlossaryTerm from '../glossary/GlossaryTerm.vue'
 import {
   FILTER_CLOUD_DEFAULTS, FILTER_CLOUD_PRESETS, FILTER_CLOUD_PRESET_META,
@@ -23,6 +26,8 @@ const props = defineProps({
   // A deep link (Point Cloud ▾ ▸ Remove outliers / Subsample) starts on ONE
   // method, with its settings open; null ⇒ the normal preset.
   startMethod: { type: String, default: null },
+  // The cloud selected when the dialog opened (falls back to the first one).
+  initialId: { type: String, default: null },
 })
 
 const emit = defineEmits(['close', 'run'])
@@ -31,8 +36,7 @@ const settings = ref({
   ...FILTER_CLOUD_DEFAULTS,
   methods: props.startMethod ? [props.startMethod] : [...FILTER_CLOUD_DEFAULTS.methods],
 })
-const sourceId = ref(props.clouds[0]?.id ?? null)
-const source = computed(() => props.clouds.find((c) => c.id === sourceId.value) ?? null)
+const { id: sourceId, item: source } = useSourcePick(() => props.clouds, { initialId: props.initialId })
 
 // Methods run in the listed order, so the checkbox order IS the pipeline order:
 // cheap linear rejections first, the neighbour sweep last over the smallest cloud.
@@ -50,22 +54,11 @@ function toggle(id) {
     .map((m) => m.id)
 }
 
-const resolvePreset = (id) => ({ ...FILTER_CLOUD_DEFAULTS, ...FILTER_CLOUD_PRESETS[id] })
-const baseId = ref('medium')
-const activePreset = computed(() => {
-  for (const { id } of FILTER_CLOUD_PRESET_META) {
-    const r = resolvePreset(id)
-    const same = Object.keys(r).every((k) => (k === 'methods'
-      ? r.methods.join() === settings.value.methods.join()
-      : settings.value[k] === r[k]))
-    if (same) return id
-  }
-  return 'custom'
+// A card (and Reset) restores every filter setting; any edit reads as "· modified".
+const { baseId, activePreset, selectPreset } = usePresetSettings({
+  settings, defaults: FILTER_CLOUD_DEFAULTS, presets: FILTER_CLOUD_PRESETS, cards: FILTER_CLOUD_PRESET_META,
+  ownedKeys: Object.keys(FILTER_CLOUD_DEFAULTS),
 })
-function selectPreset(id) {
-  settings.value = { ...resolvePreset(id), methods: [...resolvePreset(id).methods] }
-  baseId.value = id
-}
 
 // 0 ⇒ auto. Voxel auto uses the dense merge cell when we know it; the core module
 // falls back to its own estimate otherwise.
@@ -108,14 +101,8 @@ function run() {
       />
 
       <SettingsGroup title="Source">
-        <SettingsField label="Cloud" label-for="filter-src"
-          hint="The filter adds a new cloud; this one is left untouched.">
-          <select id="filter-src" v-model="sourceId" class="field-select">
-            <option v-for="c in clouds" :key="c.id" :value="c.id">
-              {{ c.name }} — {{ c.count.toLocaleString() }} points
-            </option>
-          </select>
-        </SettingsField>
+        <SourcePicker id="filter-src" v-model="sourceId" label="Cloud" :items="clouds"
+          hint="The filter adds a new cloud; this one is left untouched." />
       </SettingsGroup>
 
       <SettingsGroup title="Filters">

@@ -1,4 +1,5 @@
 <script setup>
+import { formatBytes } from '../../core/formatBytes.js'
 // Hardware / capability / storage diagnostics. Split out of the About modal
 // (which is now identity + acknowledgments + licenses) because this is a
 // different job: what you point a user at when debugging "what GPU / is SIMD on
@@ -21,12 +22,6 @@ const opfsDurable = ref(false)
 const opfsUsed = ref(null)
 const opfsQuota = ref(null)
 
-function fmtBytes(n) {
-  if (n == null) return '—'
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
-  if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`
-  return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`
-}
 
 onMounted(async () => {
   const canvas = document.createElement('canvas')
@@ -120,10 +115,10 @@ onMounted(async () => {
         </span>
 
         <span class="info-key">Used</span>
-        <span class="info-val">{{ fmtBytes(opfsUsed) }}</span>
+        <span class="info-val">{{ formatBytes(opfsUsed) }}</span>
 
         <span class="info-key">Quota</span>
-        <span class="info-val">{{ fmtBytes(opfsQuota) }}</span>
+        <span class="info-val">{{ formatBytes(opfsQuota) }}</span>
       </template>
     </div>
 

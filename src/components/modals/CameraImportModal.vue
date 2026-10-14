@@ -1,10 +1,14 @@
 <script setup>
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed } from 'vue'
 import CrsPicker from '../controls/CrsPicker.vue'
-import { DELIMITER_OPTIONS, sniffDelimiter, parseRows } from '../../core/io/gcp.js'
+import ModalShell from './ui/ModalShell.vue'
+import ColumnMappingTable from './ui/ColumnMappingTable.vue'
+import ImportKindSwitch from './ui/ImportKindSwitch.vue'
+import { DELIMITER_OPTIONS } from '../../core/io/gcp.js'
 import { SENSOR_ROLES, SENSOR_ROLE_LABELS, guessMapping as guessSensors, buildSensors } from '../../core/io/sensor.js'
 import { POSE_ROLES, POSE_ROLE_LABELS, guessMapping as guessPoses, buildPoses } from '../../core/io/pose.js'
-import { roleSelectStyle } from './ui/importRoles.js'
+import { useDelimitedImport } from '../../composables/useDelimitedImport.js'
+import { axisLabels } from '../../core/crs.js'
 
 // Imports camera parameters from delimited text in one of two modes:
 //   - 'sensor' : shared intrinsics (one row per sensor) — no CRS
@@ -25,60 +29,44 @@ const props = defineProps({
 })
 const emit = defineEmits(['close', 'import', 'switch-kind'])
 
-// Re-interpret this same file as a different content type (hands off to App,
-// which opens the matching importer).
-function switchKind(kind) {
-  emit('switch-kind', { kind, rawText: props.rawText, fileName: props.fileName })
+const mode = ref(props.detectedMode === 'sensor' ? 'sensor' : 'pose')
+const sourceCrs = ref(props.projectCrs)
+
+// Pose ⇄ sensor is a mode switch in here; GCP re-interprets this same file as a
+// different content type (hands off to App, which opens the GCP importer).
+function pickKind(kind) {
+  if (kind === 'gcp') emit('switch-kind', { kind, rawText: props.rawText, fileName: props.fileName })
+  else mode.value = kind
 }
 
-const mode = ref(props.detectedMode === 'sensor' ? 'sensor' : 'pose')
-const delimiter = ref(sniffDelimiter(props.rawText))
-const hasHeader = ref(true)
-const sourceCrs = ref(props.projectCrs)
-const columnRoles = ref([])   // index → role id
-
-// ── Parsing ────────────────────────────────────────────────────────────────────
-
-const rows = computed(() => parseRows(props.rawText, delimiter.value))
-const columnCount = computed(() => rows.value.reduce((m, r) => Math.max(m, r.length), 0))
-const headerCells = computed(() => (hasHeader.value ? (rows.value[0] || []) : []))
-const dataRows = computed(() => (hasHeader.value ? rows.value.slice(1) : rows.value))
-const previewRows = computed(() => dataRows.value.slice(0, 8))
+// ── Column roles + parsing (composables/useDelimitedImport.js) ─────────────────
 
 const ROLES = computed(() => (mode.value === 'sensor' ? SENSOR_ROLES : POSE_ROLES))
 const ROLE_LABELS = computed(() => (mode.value === 'sensor' ? SENSOR_ROLE_LABELS : POSE_ROLE_LABELS))
 
+// Pose positions are in the source CRS, so their labels name its axes
+// (Abs E/N/H, Abs Lon/Lat/h…) rather than a generic X/Y/Z.
+const axes = computed(() => axisLabels(sourceCrs.value))
+const roleLabel = (id) => {
+  if (mode.value === 'pose') {
+    const axis = { x: 0, y: 1, z: 2 }[id]
+    if (axis != null) return `Abs ${axes.value[axis]}`
+  }
+  return ROLE_LABELS.value[id]
+}
+
 const roleOptions = computed(() => [
   { id: 'ignore', label: 'Ignore' },
-  ...ROLES.value.map((id) => ({ id, label: ROLE_LABELS.value[id] })),
+  ...ROLES.value.map((id) => ({ id, label: roleLabel(id) })),
 ])
 
-function reguess() {
-  const guess = mode.value === 'sensor' ? guessSensors : guessPoses
-  const m = guess(headerCells.value, columnCount.value, hasHeader.value)
-  const roles = new Array(columnCount.value).fill('ignore')
-  for (const [role, idx] of Object.entries(m)) if (idx != null) roles[idx] = role
-  columnRoles.value = roles
-}
-
-onMounted(reguess)
-watch([delimiter, hasHeader, mode], reguess)
-
-// Each role used at most once.
-function setRole(colIdx, role) {
-  const roles = [...columnRoles.value]
-  if (role !== 'ignore') {
-    const prev = roles.indexOf(role)
-    if (prev !== -1 && prev !== colIdx) roles[prev] = 'ignore'
-  }
-  roles[colIdx] = role
-  columnRoles.value = roles
-}
-
-const mapping = computed(() => {
-  const m = Object.fromEntries(ROLES.value.map((r) => [r, null]))
-  columnRoles.value.forEach((role, i) => { if (role !== 'ignore' && m[role] == null) m[role] = i })
-  return m
+// A mode switch swaps the guesser, which re-guesses every column.
+const {
+  delimiter, hasHeader, columnRoles, columnCount, headerCells, dataRows, previewRows, setRole, mapping,
+} = useDelimitedImport({
+  rawText: () => props.rawText,
+  guessMapping: computed(() => (mode.value === 'sensor' ? guessSensors : guessPoses)),
+  roles: ROLES,
 })
 
 // ── Result ──────────────────────────────────────────────────────────────────────
@@ -107,110 +95,65 @@ function doImport() {
 </script>
 
 <template>
-  <div class="modal-overlay" @click.self="emit('close')">
-    <div class="modal" role="dialog" aria-modal="true" aria-label="Import camera parameters">
-      <div class="modal-header">
-        <span class="modal-title">Import Camera Parameters</span>
-        <button class="modal-close" title="Close" @click="emit('close')">×</button>
+  <ModalShell title="Import Camera Parameters" aria-label="Import camera parameters" width="760px" flush @close="emit('close')">
+    <div class="import-body">
+      <div class="filename">{{ fileName }}</div>
+
+      <ImportKindSwitch :active="mode" :declared="kindDeclared" @pick="pickKind" />
+
+      <div class="controls">
+        <div class="ctrl">
+          <label class="ctrl-label">Delimiter</label>
+          <select v-model="delimiter" class="ctrl-input">
+            <option v-for="d in DELIMITER_OPTIONS" :key="d.id" :value="d.id">{{ d.label }}</option>
+          </select>
+        </div>
+        <label class="ctrl-check">
+          <input type="checkbox" v-model="hasHeader" />
+          First row is a header
+        </label>
+        <div v-if="mode === 'pose'" class="ctrl ctrl-crs">
+          <label class="ctrl-label">Source CRS of these positions</label>
+          <CrsPicker v-model="sourceCrs" />
+        </div>
       </div>
 
-      <div class="modal-body">
-        <div class="filename">{{ fileName }}</div>
+      <label class="section-label">Column mapping</label>
+      <p v-if="mode === 'pose'" class="kind-note">
+        Accuracies are 1σ values. Position accuracies constrain reconstruction;
+        orientation accuracies constrain omega, phi and kappa.
+      </p>
+      <ColumnMappingTable
+        :column-count="columnCount" :column-roles="columnRoles" :role-options="roleOptions"
+        :has-header="hasHeader" :header-cells="headerCells" :preview-rows="previewRows"
+        @set-role="setRole"
+      />
 
-        <template v-if="!kindDeclared">
-          <label class="section-label kind-label">Import as</label>
-          <div class="kind-toggle">
-            <button class="kind-btn" @click="switchKind('gcp')">Ground Control Points</button>
-            <button class="kind-btn" :class="{ active: mode === 'pose' }" @click="mode = 'pose'">Camera Positions</button>
-            <button class="kind-btn" :class="{ active: mode === 'sensor' }" @click="mode = 'sensor'">Camera Intrinsics</button>
-          </div>
+      <div class="summary">
+        <template v-if="mode === 'sensor'">
+          <span v-if="sensorCount" class="ok">{{ sensorCount }} sensor{{ sensorCount === 1 ? '' : 's' }}<template v-if="built.skipped"> · {{ built.skipped }} row{{ built.skipped === 1 ? '' : 's' }} skipped</template></span>
+          <span v-else class="warn">Assign at least one intrinsic column (focal, dimensions…).</span>
         </template>
-        <p v-else class="kind-note">
-          Importing as <b>{{ mode === 'sensor' ? 'Camera Intrinsics' : 'Camera Positions' }}</b>.
-          Not right? Import as
-          <button class="kind-link" @click="mode = mode === 'sensor' ? 'pose' : 'sensor'">
-            {{ mode === 'sensor' ? 'Camera Positions' : 'Camera Intrinsics' }}
-          </button>
-          or <button class="kind-link" @click="switchKind('gcp')">Ground Control Points</button>.
-        </p>
-
-        <div class="controls">
-          <div class="ctrl">
-            <label class="ctrl-label">Delimiter</label>
-            <select v-model="delimiter" class="ctrl-input">
-              <option v-for="d in DELIMITER_OPTIONS" :key="d.id" :value="d.id">{{ d.label }}</option>
-            </select>
-          </div>
-          <label class="ctrl-check">
-            <input type="checkbox" v-model="hasHeader" />
-            First row is a header
-          </label>
-          <div v-if="mode === 'pose'" class="ctrl ctrl-crs">
-            <label class="ctrl-label">Source CRS of these positions</label>
-            <CrsPicker v-model="sourceCrs" />
-          </div>
-        </div>
-
-        <label class="section-label">Column mapping</label>
-        <p v-if="mode === 'pose'" class="kind-note">
-          Accuracies are 1σ values. Position accuracies constrain reconstruction;
-          orientation accuracies constrain omega, phi and kappa.
-        </p>
-        <div class="table-wrap">
-          <table class="preview">
-            <thead>
-              <tr>
-                <th v-for="i in columnCount" :key="'r' + i" class="role-cell">
-                  <select
-                    class="role-select"
-                    :style="roleSelectStyle(columnRoles[i - 1] || 'ignore', roleOptions)"
-                    :value="columnRoles[i - 1] || 'ignore'"
-                    @change="setRole(i - 1, $event.target.value)"
-                  >
-                    <option v-for="o in roleOptions" :key="o.id" :value="o.id">{{ o.label }}</option>
-                  </select>
-                </th>
-              </tr>
-              <tr v-if="hasHeader">
-                <th v-for="i in columnCount" :key="'h' + i" class="header-cell">{{ headerCells[i - 1] ?? '' }}</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="(row, ri) in previewRows" :key="ri">
-                <td v-for="i in columnCount" :key="i">{{ row[i - 1] ?? '' }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        <div class="summary">
-          <template v-if="mode === 'sensor'">
-            <span v-if="sensorCount" class="ok">{{ sensorCount }} sensor{{ sensorCount === 1 ? '' : 's' }}<template v-if="built.skipped"> · {{ built.skipped }} row{{ built.skipped === 1 ? '' : 's' }} skipped</template></span>
-            <span v-else class="warn">Assign at least one intrinsic column (focal, dimensions…).</span>
-          </template>
-          <template v-else>
-            <span v-if="!hasImage" class="warn">Assign an <b>Image name</b> column.</span>
-            <span v-else-if="!hasXY" class="warn">Assign <b>Abs X</b> and <b>Abs Y</b> columns.</span>
-            <span v-else class="ok">{{ poseCount }} pose{{ poseCount === 1 ? '' : 's' }}<template v-if="built.skipped"> · {{ built.skipped }} row{{ built.skipped === 1 ? '' : 's' }} skipped</template></span>
-          </template>
-        </div>
-      </div>
-
-      <div class="modal-footer">
-        <button class="btn-secondary" @click="emit('close')">Cancel</button>
-        <button class="btn-primary" :disabled="!canImport" @click="doImport">
-          Import {{ mode === 'sensor' ? 'Sensors' : 'Poses' }}
-        </button>
+        <template v-else>
+          <span v-if="!hasImage" class="warn">Assign an <b>Image name</b> column.</span>
+          <span v-else-if="!hasXY" class="warn">Assign <b>Abs {{ axes[0] }}</b> and <b>Abs {{ axes[1] }}</b> columns.</span>
+          <span v-else class="ok">{{ poseCount }} pose{{ poseCount === 1 ? '' : 's' }}<template v-if="built.skipped"> · {{ built.skipped }} row{{ built.skipped === 1 ? '' : 's' }} skipped</template></span>
+        </template>
       </div>
     </div>
-  </div>
+
+    <template #footer>
+      <button class="btn-secondary" @click="emit('close')">Cancel</button>
+      <button class="btn-primary" :disabled="!canImport" @click="doImport">
+        Import {{ mode === 'sensor' ? 'Sensors' : 'Poses' }}
+      </button>
+    </template>
+  </ModalShell>
 </template>
 
 <style scoped src="./ui/import-modal.css"></style>
 <style scoped>
-/* Only what differs from the shared import-preview chrome (see ui/import-modal.css). */
-.modal { width: 760px; }
+/* Only what differs from the shared import-preview styling (see ui/import-modal.css). */
 .controls { grid-template-columns: auto auto 1fr; }
 .ctrl-crs { grid-column: 1 / -1; }
-.preview td { color: var(--text); font-family: monospace; }
 </style>

@@ -11,6 +11,8 @@ import { BASEMAPS, SATELLITE } from '../../core/basemaps.js'
 import { formatBytes } from '../../core/io/projectArchive.js'
 import { MODEL_CACHE_NAME } from '../../core/models/registry.js'
 import * as opfs from '../../utils/opfs.js'
+import { confirmDialog } from '../../composables/useConfirmations.js'
+import ModalShell from './ui/ModalShell.vue'
 
 // `theme` is the stored preference ('system' | 'light' | 'dark'); `resolvedTheme`
 // is what 'system' currently evaluates to, shown so the choice isn't opaque.
@@ -104,7 +106,10 @@ async function requestDurableStorage() {
 }
 
 async function clearModelCache() {
-  if (!window.confirm('Remove downloaded AI models? They will be downloaded again when needed. Projects are not affected.')) return
+  if (!(await confirmDialog({
+    title: 'Remove downloaded models?',
+    message: 'Remove downloaded AI models? They will be downloaded again when needed. Projects are not affected.',
+  }))) return
   storageBusy.value = true
   try {
     const removed = typeof caches !== 'undefined' && await caches.delete(MODEL_CACHE_NAME)
@@ -121,272 +126,260 @@ onMounted(refreshStorage)
 </script>
 
 <template>
-  <div class="modal-overlay" @click.self="emit('close')" @keydown.esc="emit('close')">
-    <div class="modal" role="dialog" aria-modal="true" aria-label="Settings">
-      <div class="modal-header">
-        <span class="modal-title">Settings</span>
-        <button class="modal-close" title="Close" @click="emit('close')">×</button>
-      </div>
-
-      <div class="tab-bar" role="tablist">
-        <button
-          v-for="tab in tabs"
-          :key="tab.id"
-          class="tab"
-          role="tab"
-          :class="{ active: activeTab === tab.id }"
-          :aria-selected="activeTab === tab.id"
-          @click="activeTab = tab.id"
-        >{{ tab.label }}</button>
-      </div>
-
-      <div class="modal-body">
-        <template v-if="activeTab === 'general'">
-          <div class="setting-row">
-            <div class="setting-info">
-              <span class="setting-label">Theme</span>
-              <span class="setting-desc">{{ themeDesc }}</span>
-            </div>
-            <div class="seg-toggle compact">
-              <button :class="{ active: theme === 'system' }" @click="emit('set-theme', 'system')">System</button>
-              <button :class="{ active: theme === 'light' }" @click="emit('set-theme', 'light')">Light</button>
-              <button :class="{ active: theme === 'dark' }" @click="emit('set-theme', 'dark')">Dark</button>
-            </div>
-          </div>
-
-          <div class="setting-row">
-            <div class="setting-info">
-              <span class="setting-label">Motion</span>
-              <span class="setting-desc">Follow the operating system or minimize interface animation.</span>
-            </div>
-            <select class="select" :value="motion" @change="setMotion($event.target.value)">
-              <option value="system">Follow system</option>
-              <option value="reduce">Reduce motion</option>
-            </select>
-          </div>
-
-          <div class="setting-row">
-            <div class="setting-info">
-              <span class="setting-label">Glossary terms</span>
-              <span class="setting-desc">Highlight explained keywords; hover for a definition and a link to the full entry.</span>
-            </div>
-            <label class="switch">
-              <input type="checkbox" :checked="glossaryTermsEnabled" @change="setGlossaryTermsEnabled($event.target.checked)">
-              <span class="slider"></span>
-            </label>
-          </div>
-
-          <div class="setting-row">
-            <div class="setting-info">
-              <span class="setting-label">Expand advanced settings</span>
-              <span class="setting-desc">Open processing dialogs with their advanced controls visible.</span>
-            </div>
-            <label class="switch">
-              <input type="checkbox" :checked="advancedSettingsExpanded" @change="setAdvancedSettingsExpanded($event.target.checked)">
-              <span class="slider"></span>
-            </label>
-          </div>
-
-          <div class="setting-row">
-            <div class="setting-info">
-              <span class="setting-label">Confirm before removing a mark</span>
-              <span class="setting-desc">Ask before deleting a single image mark of a control point or marker.</span>
-            </div>
-            <label class="switch">
-              <input type="checkbox" :checked="confirmRemoveMark" @change="setConfirmRemoveMark($event.target.checked)">
-              <span class="slider"></span>
-            </label>
-          </div>
-
-          <div v-if="!isChromium" class="setting-row">
-            <div class="setting-info">
-              <span class="setting-label">Warn on unsupported browser</span>
-              <span class="setting-desc">Remind me when browser limitations can affect compute or file access.</span>
-            </div>
-            <label class="switch">
-              <input type="checkbox" :checked="warningEnabled" @change="setBrowserWarningEnabled($event.target.checked)">
-              <span class="slider"></span>
-            </label>
-          </div>
-
-          <div v-if="isMobile" class="setting-row">
-            <div class="setting-info">
-              <span class="setting-label">Warn on mobile devices</span>
-              <span class="setting-desc">Show the notice that websfm is a desktop application and mobile layout is unsupported.</span>
-            </div>
-            <label class="switch">
-              <input type="checkbox" :checked="mobileWarningEnabled" @change="setMobileWarningEnabled($event.target.checked)">
-              <span class="slider"></span>
-            </label>
-          </div>
-        </template>
-
-        <template v-else-if="activeTab === 'visualization'">
-          <div class="setting-row">
-            <div class="setting-info">
-              <span class="setting-label">Map base layer</span>
-              <span class="setting-desc">Automatic uses OpenStreetMap normally and the matching NASA layer for polar coordinate systems. Satellite and Terrain are not available for polar systems.</span>
-            </div>
-            <select class="select" :value="basemap" @change="setBasemap($event.target.value)">
-              <option v-for="b in BASEMAPS" :key="b.value" :value="b.value">{{ b.label }}</option>
-            </select>
-          </div>
-
-          <div class="setting-row setting-row-stacked">
-            <div class="setting-info">
-              <span class="setting-label">Satellite imagery source</span>
-              <span class="setting-desc">
-                By default Satellite shows Esri World Imagery, which is provided under
-                <a :href="SATELLITE.terms" target="_blank" rel="noopener">Esri's terms of use</a> —
-                commercial use may need an ArcGIS account. To use a provider you hold a licence for,
-                enter its XYZ tile URL with <code>{z}</code>, <code>{x}</code> and <code>{y}</code>
-                (and your API key, if it needs one). It is stored only in this browser.
-              </span>
-            </div>
-            <input v-model="satUrlDraft" class="text-input" type="url" spellcheck="false"
-              placeholder="Esri World Imagery (default)" aria-label="Satellite tile URL"
-              @keydown.enter="applySatelliteSource">
-            <input v-model="satAttributionDraft" class="text-input" type="text"
-              placeholder="Attribution, e.g. © Provider" aria-label="Satellite attribution"
-              :disabled="!satUrlDraft.trim()" @keydown.enter="applySatelliteSource">
-            <div class="setting-actions">
-              <button class="btn" :disabled="!satDirty" @click="applySatelliteSource">Apply</button>
-              <button class="btn" :disabled="!satelliteUrl && !satUrlDraft" @click="resetSatelliteSource">Use Esri</button>
-              <span v-if="satError" class="field-error">{{ satError }}</span>
-            </div>
-          </div>
-
-          <div class="setting-row">
-            <div class="setting-info">
-              <span class="setting-label">3D background</span>
-              <span class="setting-desc">Choose a neutral canvas independently of the application theme.</span>
-            </div>
-            <select class="select" :value="background" @change="setBackground($event.target.value)">
-              <option value="theme">Follow theme</option>
-              <option value="dark">Dark grey</option>
-              <option value="light">Light grey</option>
-              <option value="black">Black</option>
-            </select>
-          </div>
-
-          <div class="setting-row">
-            <div class="setting-info">
-              <span class="setting-label">3D ground-grid height</span>
-              <span class="setting-desc">Place the reference grid at the bottom, centre, or top of the loaded point cloud.</span>
-            </div>
-            <div class="seg-toggle compact">
-              <button :class="{ active: gridZ === 'min' }" @click="setGridZ('min')">Bottom</button>
-              <button :class="{ active: gridZ === 'avg' }" @click="setGridZ('avg')">Middle</button>
-              <button :class="{ active: gridZ === 'max' }" @click="setGridZ('max')">Top</button>
-            </div>
-          </div>
-
-          <div class="setting-row">
-            <div class="setting-info">
-              <label class="setting-label" for="viewer-near-clip">3D near clipping distance</label>
-              <span class="setting-desc">0 adjusts automatically as you zoom. A smaller manual distance keeps nearby points visible. Values use scene units.</span>
-            </div>
-            <div class="num-input"><input id="viewer-near-clip" type="number" min="0" max="1000" step="0.001" :value="nearClip" @change="setNearClip($event.target.value)" /></div>
-          </div>
-        </template>
-
-        <template v-else-if="activeTab === 'compute'">
-          <div class="setting-row">
-            <div class="setting-info">
-              <span class="setting-label">Memory safety limit</span>
-              <span class="setting-desc">
-                Dense runs stop before starting when estimated peak memory exceeds this amount.
-                {{ memBudgetAuto ? `Automatically derived from ${deviceBudgetInfo.source}.` : 'Manually overridden.' }}
-              </span>
-            </div>
-            <div class="setting-actions">
-              <div class="num-input">
-                <input type="number" min="0.25" step="0.5" :value="memBudgetGb" @change="setMemBudgetGb($event.target.value)">
-                <span class="num-unit">GB</span>
-              </div>
-              <button
-                class="btn btn-compact"
-                :disabled="memBudgetAuto"
-                :title="memBudgetAuto ? 'Already using the detected device budget' : 'Use the detected device budget'"
-                @click="resetMemBudgetAuto"
-              >Auto</button>
-            </div>
-          </div>
-
-          <div class="setting-row">
-            <div class="setting-info">
-              <span class="setting-label">Compute workers</span>
-              <span class="setting-desc">Limit parallel CPU tasks to reduce memory pressure. Automatic uses up to {{ MAX_POOL_SIZE }} workers on this device.</span>
-            </div>
-            <select class="select" :value="workerCount" @change="setWorkerCount($event.target.value)">
-              <option value="0">Automatic ({{ MAX_POOL_SIZE }})</option>
-              <option v-for="n in MAX_POOL_SIZE" :key="n" :value="n">{{ n }}</option>
-            </select>
-          </div>
-
-          <div class="setting-row">
-            <div class="setting-info">
-              <span class="setting-label">Use GPU <span class="badge">Recommended</span></span>
-              <span class="setting-desc">Automatically enabled when this browser offers WebGPU. Supported matching and dense operations use it; unavailable operations fall back to CPU.</span>
-            </div>
-            <label class="switch">
-              <input type="checkbox" :checked="useGpu" @change="setUseGpu($event.target.checked)">
-              <span class="slider"></span>
-            </label>
-          </div>
-
-        </template>
-
-        <template v-else-if="activeTab === 'storage'">
-          <div class="setting-row setting-row-stacked">
-            <div class="setting-info">
-              <span class="setting-label">Browser storage</span>
-              <span class="setting-desc">Includes browser-backed projects, derived files, downloaded AI models, and other data stored for this site.</span>
-            </div>
-            <div v-if="storageUsage != null && storageQuota" class="usage-bar" role="progressbar" :aria-valuenow="usagePercent" aria-valuemin="0" aria-valuemax="100">
-              <div class="usage-fill" :style="{ width: usagePercent + '%' }"></div>
-            </div>
-            <span v-if="storageUsage != null && storageQuota" class="setting-desc">{{ formatBytes(storageUsage) }} used of {{ formatBytes(storageQuota) }} available to this site</span>
-            <span v-else class="setting-desc">Storage usage is unavailable in this browser.</span>
-          </div>
-
-          <div class="setting-row">
-            <div class="setting-info">
-              <span class="setting-label">Storage protection</span>
-              <span class="setting-desc">Persistent storage makes the browser less likely to evict local projects when disk space is low. The browser decides this itself — usually without asking — based on how often the site is used.</span>
-            </div>
-            <span v-if="storageDurable" class="status-ok">Protected</span>
-            <button v-else-if="storageDurable === false" class="btn" :disabled="storageBusy" @click="requestDurableStorage">{{ storageBusy ? 'Requesting…' : 'Request' }}</button>
-            <span v-else class="readout">Unavailable</span>
-          </div>
-
-          <div class="setting-row">
-            <div class="setting-info">
-              <span class="setting-label">Downloaded AI models</span>
-              <span class="setting-desc">Remove reusable SuperPoint, DISK, LightGlue, and Smart Select weights. They download again only when needed.</span>
-            </div>
-            <button class="btn" :disabled="storageBusy" @click="clearModelCache">Clear models</button>
-          </div>
-
-          <div v-if="storageMessage" class="status-message" aria-live="polite">{{ storageMessage }}</div>
-        </template>
-      </div>
+  <!-- Flush: the tab bar runs edge to edge; each tab's rows carry their own padding. -->
+  <ModalShell title="Settings" width="540px" flush @close="emit('close')">
+    <div class="tab-bar" role="tablist">
+      <button
+        v-for="tab in tabs"
+        :key="tab.id"
+        class="tab"
+        role="tab"
+        :class="{ active: activeTab === tab.id }"
+        :aria-selected="activeTab === tab.id"
+        @click="activeTab = tab.id"
+      >{{ tab.label }}</button>
     </div>
-  </div>
+
+    <div class="settings-body">
+      <template v-if="activeTab === 'general'">
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-label">Theme</span>
+            <span class="setting-desc">{{ themeDesc }}</span>
+          </div>
+          <div class="seg-toggle compact">
+            <button :class="{ active: theme === 'system' }" @click="emit('set-theme', 'system')">System</button>
+            <button :class="{ active: theme === 'light' }" @click="emit('set-theme', 'light')">Light</button>
+            <button :class="{ active: theme === 'dark' }" @click="emit('set-theme', 'dark')">Dark</button>
+          </div>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-label">Motion</span>
+            <span class="setting-desc">Follow the operating system or minimize interface animation.</span>
+          </div>
+          <select class="select" :value="motion" @change="setMotion($event.target.value)">
+            <option value="system">Follow system</option>
+            <option value="reduce">Reduce motion</option>
+          </select>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-label">Glossary terms</span>
+            <span class="setting-desc">Highlight explained keywords; hover for a definition and a link to the full entry.</span>
+          </div>
+          <label class="switch">
+            <input type="checkbox" :checked="glossaryTermsEnabled" @change="setGlossaryTermsEnabled($event.target.checked)">
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-label">Expand advanced settings</span>
+            <span class="setting-desc">Open processing dialogs with their advanced controls visible.</span>
+          </div>
+          <label class="switch">
+            <input type="checkbox" :checked="advancedSettingsExpanded" @change="setAdvancedSettingsExpanded($event.target.checked)">
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-label">Confirm before removing a mark</span>
+            <span class="setting-desc">Ask before deleting a single image mark of a control point or marker.</span>
+          </div>
+          <label class="switch">
+            <input type="checkbox" :checked="confirmRemoveMark" @change="setConfirmRemoveMark($event.target.checked)">
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <div v-if="!isChromium" class="setting-row">
+          <div class="setting-info">
+            <span class="setting-label">Warn on unsupported browser</span>
+            <span class="setting-desc">Remind me when browser limitations can affect compute or file access.</span>
+          </div>
+          <label class="switch">
+            <input type="checkbox" :checked="warningEnabled" @change="setBrowserWarningEnabled($event.target.checked)">
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <div v-if="isMobile" class="setting-row">
+          <div class="setting-info">
+            <span class="setting-label">Warn on mobile devices</span>
+            <span class="setting-desc">Show the notice that websfm is a desktop application and mobile layout is unsupported.</span>
+          </div>
+          <label class="switch">
+            <input type="checkbox" :checked="mobileWarningEnabled" @change="setMobileWarningEnabled($event.target.checked)">
+            <span class="slider"></span>
+          </label>
+        </div>
+      </template>
+
+      <template v-else-if="activeTab === 'visualization'">
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-label">Map base layer</span>
+            <span class="setting-desc">Automatic uses OpenStreetMap normally and the matching NASA layer for polar coordinate systems. Satellite and Terrain are not available for polar systems.</span>
+          </div>
+          <select class="select" :value="basemap" @change="setBasemap($event.target.value)">
+            <option v-for="b in BASEMAPS" :key="b.value" :value="b.value">{{ b.label }}</option>
+          </select>
+        </div>
+
+        <div class="setting-row setting-row-stacked">
+          <div class="setting-info">
+            <span class="setting-label">Satellite imagery source</span>
+            <span class="setting-desc">
+              By default Satellite shows Esri World Imagery, which is provided under
+              <a :href="SATELLITE.terms" target="_blank" rel="noopener">Esri's terms of use</a> —
+              commercial use may need an ArcGIS account. To use a provider you hold a licence for,
+              enter its XYZ tile URL with <code>{z}</code>, <code>{x}</code> and <code>{y}</code>
+              (and your API key, if it needs one). It is stored only in this browser.
+            </span>
+          </div>
+          <input v-model="satUrlDraft" class="text-input" type="url" spellcheck="false"
+            placeholder="Esri World Imagery (default)" aria-label="Satellite tile URL"
+            @keydown.enter="applySatelliteSource">
+          <input v-model="satAttributionDraft" class="text-input" type="text"
+            placeholder="Attribution, e.g. © Provider" aria-label="Satellite attribution"
+            :disabled="!satUrlDraft.trim()" @keydown.enter="applySatelliteSource">
+          <div class="setting-actions">
+            <button class="btn" :disabled="!satDirty" @click="applySatelliteSource">Apply</button>
+            <button class="btn" :disabled="!satelliteUrl && !satUrlDraft" @click="resetSatelliteSource">Use Esri</button>
+            <span v-if="satError" class="field-error">{{ satError }}</span>
+          </div>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-label">3D background</span>
+            <span class="setting-desc">Choose a neutral canvas independently of the application theme.</span>
+          </div>
+          <select class="select" :value="background" @change="setBackground($event.target.value)">
+            <option value="theme">Follow theme</option>
+            <option value="dark">Dark grey</option>
+            <option value="light">Light grey</option>
+            <option value="black">Black</option>
+          </select>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-label">3D ground-grid height</span>
+            <span class="setting-desc">Place the reference grid at the bottom, centre, or top of the loaded point cloud.</span>
+          </div>
+          <div class="seg-toggle compact">
+            <button :class="{ active: gridZ === 'min' }" @click="setGridZ('min')">Bottom</button>
+            <button :class="{ active: gridZ === 'avg' }" @click="setGridZ('avg')">Middle</button>
+            <button :class="{ active: gridZ === 'max' }" @click="setGridZ('max')">Top</button>
+          </div>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <label class="setting-label" for="viewer-near-clip">3D near clipping distance</label>
+            <span class="setting-desc">0 adjusts automatically as you zoom. A smaller manual distance keeps nearby points visible. Values use scene units.</span>
+          </div>
+          <div class="num-input"><input id="viewer-near-clip" type="number" min="0" max="1000" step="0.001" :value="nearClip" @change="setNearClip($event.target.value)" /></div>
+        </div>
+      </template>
+
+      <template v-else-if="activeTab === 'compute'">
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-label">Memory safety limit</span>
+            <span class="setting-desc">
+              Dense runs stop before starting when estimated peak memory exceeds this amount.
+              {{ memBudgetAuto ? `Automatically derived from ${deviceBudgetInfo.source}.` : 'Manually overridden.' }}
+            </span>
+          </div>
+          <div class="setting-actions">
+            <div class="num-input">
+              <input type="number" min="0.25" step="0.5" :value="memBudgetGb" @change="setMemBudgetGb($event.target.value)">
+              <span class="num-unit">GB</span>
+            </div>
+            <button
+              class="btn btn-compact"
+              :disabled="memBudgetAuto"
+              :title="memBudgetAuto ? 'Already using the detected device budget' : 'Use the detected device budget'"
+              @click="resetMemBudgetAuto"
+            >Auto</button>
+          </div>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-label">Compute workers</span>
+            <span class="setting-desc">Limit parallel CPU tasks to reduce memory pressure. Automatic uses up to {{ MAX_POOL_SIZE }} workers on this device.</span>
+          </div>
+          <select class="select" :value="workerCount" @change="setWorkerCount($event.target.value)">
+            <option value="0">Automatic ({{ MAX_POOL_SIZE }})</option>
+            <option v-for="n in MAX_POOL_SIZE" :key="n" :value="n">{{ n }}</option>
+          </select>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-label">Use GPU <span class="badge">Recommended</span></span>
+            <span class="setting-desc">Automatically enabled when this browser offers WebGPU. Supported matching and dense operations use it; unavailable operations fall back to CPU.</span>
+          </div>
+          <label class="switch">
+            <input type="checkbox" :checked="useGpu" @change="setUseGpu($event.target.checked)">
+            <span class="slider"></span>
+          </label>
+        </div>
+
+      </template>
+
+      <template v-else-if="activeTab === 'storage'">
+        <div class="setting-row setting-row-stacked">
+          <div class="setting-info">
+            <span class="setting-label">Browser storage</span>
+            <span class="setting-desc">Includes browser-backed projects, derived files, downloaded AI models, and other data stored for this site.</span>
+          </div>
+          <div v-if="storageUsage != null && storageQuota" class="usage-bar" role="progressbar" :aria-valuenow="usagePercent" aria-valuemin="0" aria-valuemax="100">
+            <div class="usage-fill" :style="{ width: usagePercent + '%' }"></div>
+          </div>
+          <span v-if="storageUsage != null && storageQuota" class="setting-desc">{{ formatBytes(storageUsage) }} used of {{ formatBytes(storageQuota) }} available to this site</span>
+          <span v-else class="setting-desc">Storage usage is unavailable in this browser.</span>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-label">Storage protection</span>
+            <span class="setting-desc">Persistent storage makes the browser less likely to evict local projects when disk space is low. The browser decides this itself — usually without asking — based on how often the site is used.</span>
+          </div>
+          <span v-if="storageDurable" class="status-ok">Protected</span>
+          <button v-else-if="storageDurable === false" class="btn" :disabled="storageBusy" @click="requestDurableStorage">{{ storageBusy ? 'Requesting…' : 'Request' }}</button>
+          <span v-else class="readout">Unavailable</span>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-label">Downloaded AI models</span>
+            <span class="setting-desc">Remove reusable SuperPoint, DISK, LightGlue, and Smart Select weights. They download again only when needed.</span>
+          </div>
+          <button class="btn" :disabled="storageBusy" @click="clearModelCache">Clear models</button>
+        </div>
+
+        <div v-if="storageMessage" class="status-message" aria-live="polite">{{ storageMessage }}</div>
+      </template>
+    </div>
+  </ModalShell>
 </template>
 
 <style scoped>
-.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: flex; align-items: center; justify-content: center; z-index: 200; }
-.modal { background: var(--panel); border: 1px solid var(--panel-border); border-radius: 8px; width: 540px; max-width: 92vw; max-height: 86vh; overflow: auto; box-shadow: 0 8px 32px rgba(0,0,0,.4); }
-.modal-header { display: flex; align-items: center; justify-content: space-between; padding: 13px 16px; border-bottom: 1px solid var(--panel-border); }
-.modal-title { font-size: 14px; font-weight: 600; color: var(--text); }
-.modal-close { background: none; border: 0; color: var(--text-dim); font-size: 20px; line-height: 1; cursor: pointer; padding: 1px 6px; border-radius: 4px; }
-.modal-close:hover { background: var(--hover-bg); color: var(--text); }
 .tab-bar { display: flex; gap: 2px; padding: 0 12px; border-bottom: 1px solid var(--panel-border); }
 .tab { background: none; border: 0; border-bottom: 2px solid transparent; color: var(--text-dim); font: inherit; font-size: 13px; padding: 10px 12px; margin-bottom: -1px; cursor: pointer; }
 .tab:hover:not(.active) { color: var(--text); }
 .tab.active { color: var(--text); border-bottom-color: var(--accent); }
-.modal-body { padding: 8px 0; min-height: 240px; }
+.settings-body { padding: 8px 0; min-height: 240px; }
 .setting-row { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 12px 16px; }
 .setting-row + .setting-row { border-top: 1px solid var(--panel-border); }
 .setting-row-stacked { flex-direction: column; align-items: stretch; gap: 10px; }

@@ -8,7 +8,7 @@ import { graphHealth } from '../../../core/eval/matchGraph.js'
 
 // Quality Report ▸ Matching (WS2.3): connectivity of the accepted match graph, now
 // with component MEMBERSHIP (which images fell in each component) and BRIDGE edges
-// ("fragile links" whose failure would split the block). Weak/disabled pairs are
+// ("fragile links" whose failure would split the block). Weak/excluded pairs are
 // excluded — the graph shown is the one SfM actually seeds from.
 const emit = defineEmits(['open-match-list'])
 const matchesStore = useMatchesStore()
@@ -22,14 +22,14 @@ const pairs = computed(() => {
   const out = []
   for (const e of matchesStore.matchStore.values()) {
     if (e.status !== 'done' || !e.inlierCount) continue
-    out.push({ idA: e.idA, idB: e.idB, inlierCount: e.inlierCount, weak: !!e.weak, disabled: !!e.disabled })
+    out.push({ idA: e.idA, idB: e.idB, inlierCount: e.inlierCount, weak: !!e.weak, enabled: e.enabled !== false })
   }
   return out
 })
 const counts = computed(() => {
-  let verified = 0, weak = 0, disabled = 0
-  for (const p of pairs.value) { if (p.disabled) disabled++; else if (p.weak) weak++; else verified++ }
-  return { verified, weak, disabled }
+  let verified = 0, weak = 0, excluded = 0
+  for (const p of pairs.value) { if (!p.enabled) excluded++; else if (p.weak) weak++; else verified++ }
+  return { verified, weak, excluded }
 })
 const health = computed(() => graphHealth(pairs.value, imageIds.value))
 

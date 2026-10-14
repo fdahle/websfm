@@ -3,6 +3,7 @@ import { ref, watch, computed } from 'vue'
 import { useReconstructionStore } from '../../../stores/useReconstructionStore.js'
 import { useQualityReport } from '../../../composables/useQualityReport.js'
 import { diffSummaries } from '../../../core/eval/compareRuns.js'
+import { createLatest } from '../../../utils/latestOnly.js'
 
 // Quality Report ▸ Overview (WS1). One status list answering "is my project healthy,
 // where is it bad" — dot + label + value + hint per metric; click jumps to the owning
@@ -16,11 +17,18 @@ const { computeHealth } = useQualityReport()
 const rows = ref([])
 const loading = ref(true)
 
+// healthDirty can move again while a report is computing: only the newest
+// refresh writes, and a failed one still clears the spinner (finally).
+const refreshes = createLatest()
 async function refresh() {
+  const token = refreshes.begin()
   loading.value = true
-  const { rows: r } = await computeHealth()
-  rows.value = r
-  loading.value = false
+  try {
+    const { rows: r } = await computeHealth()
+    if (refreshes.isCurrent(token)) rows.value = r
+  } finally {
+    if (refreshes.isCurrent(token)) loading.value = false
+  }
 }
 watch(() => recon.healthDirty, refresh, { immediate: true })
 

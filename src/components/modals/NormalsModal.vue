@@ -3,7 +3,9 @@ import { ref, computed } from 'vue'
 import ModalShell from './ui/ModalShell.vue'
 import SettingsField from './ui/SettingsField.vue'
 import SettingsGroup from './ui/SettingsGroup.vue'
-import WarnBox from './ui/WarnBox.vue'
+import NoSourceWarn from './ui/NoSourceWarn.vue'
+import SourcePicker from './ui/SourcePicker.vue'
+import { useSourcePick, cloudOptionLabel } from '../../composables/useSourcePick.js'
 import { NORMALS_DEFAULTS } from '../../core/defaults.user.js'
 import { cameraCenter } from '../../core/sfm/geometry.js'
 
@@ -20,8 +22,8 @@ const props = defineProps({
 const emit = defineEmits(['close', 'run'])
 
 const settings = ref({ ...NORMALS_DEFAULTS })
-const sourceId = ref(props.clouds.some((c) => c.id === props.initialId) ? props.initialId : props.clouds[0]?.id ?? null)
-const source = computed(() => props.clouds.find((c) => c.id === sourceId.value) ?? null)
+const { id: sourceId, item: source } = useSourcePick(() => props.clouds, { initialId: props.initialId })
+const normalsOptionLabel = (c) => `${cloudOptionLabel(c)}${c.nrm ? ' · has normals' : ''}`
 const hasCameras = computed(() => (props.cameras?.size ?? 0) > 0)
 
 // 'auto': a computed cloud shares the model frame with the cameras, so "towards the
@@ -53,16 +55,11 @@ function run() {
 
 <template>
   <ModalShell title="Estimate Normals" @close="emit('close')">
-    <WarnBox v-if="!clouds.length">No dense cloud yet. Build one with <strong>Dense Model</strong> or import one.</WarnBox>
+    <NoSourceWarn v-if="!clouds.length" kind="cloud" />
     <template v-else>
       <SettingsGroup title="Source">
-        <SettingsField label="Cloud" label-for="nrm-src" hint="Adds a new cloud with normals; this one is left untouched.">
-          <select id="nrm-src" v-model="sourceId" class="field-select">
-            <option v-for="c in clouds" :key="c.id" :value="c.id">
-              {{ c.name }} — {{ c.count.toLocaleString() }} points{{ c.nrm ? ' · has normals' : '' }}
-            </option>
-          </select>
-        </SettingsField>
+        <SourcePicker id="nrm-src" v-model="sourceId" label="Cloud" :items="clouds" :option-label="normalsOptionLabel"
+          hint="Adds a new cloud with normals; this one is left untouched." />
       </SettingsGroup>
       <SettingsGroup title="Estimation">
         <SettingsField label="Neighbours" label-for="nrm-k"

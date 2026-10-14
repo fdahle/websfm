@@ -2,7 +2,9 @@
 import { ref } from 'vue'
 import CrsPicker from '../controls/CrsPicker.vue'
 import Icon from '../Icon.vue'
+import ModalShell from './ui/ModalShell.vue'
 import { folderStorageSupported } from '../../core/io/folderProject.js'
+import { takeNewProjectDraft } from '../../composables/newProjectDraft.js'
 
 defineProps({
   canCancel: { type: Boolean, default: true },
@@ -10,18 +12,21 @@ defineProps({
 
 const emit = defineEmits(['create', 'cancel'])
 
-const name = ref('My Project')
-const sceneType = ref('aerial')
-const crs = ref('EPSG:4326')
+// Defaults, or — when this mount is the reopen after a failed create — what the
+// user submitted then (composables/newProjectDraft.js), folder choice included.
+const initial = takeNewProjectDraft({ name: 'My Project', sceneType: 'aerial', crs: 'EPSG:4326', dirHandle: null })
+const name = ref(initial.name)
+const sceneType = ref(initial.sceneType)
+const crs = ref(initial.crs)
 
 // Storage backend. OPFS ('browser') is the default everywhere; the folder option
 // needs showDirectoryPicker, which is Chromium-only — hidden, not disabled,
 // elsewhere, so the choice never looks broken.
 const canUseFolder = folderStorageSupported()
-const storage = ref('browser')
+const storage = ref(canUseFolder && initial.dirHandle ? 'folder' : 'browser')
 // Picked here rather than at submit time: the directory picker itself needs a
 // user gesture, and it is also the only way to show *which* folder was chosen.
-const folderHandle = ref(null)
+const folderHandle = ref(canUseFolder ? initial.dirHandle : null)
 const folderError = ref('')
 
 async function pickFolder() {
@@ -50,149 +55,95 @@ function submit() {
 </script>
 
 <template>
-  <div class="modal-overlay" @click.self="canCancel && emit('cancel')">
-    <div class="modal" role="dialog" aria-modal="true" aria-label="New Project">
-      <div class="modal-header">
-        <span class="modal-title">New Project</span>
-        <button v-if="canCancel" class="modal-close" @click="emit('cancel')">×</button>
+  <!-- Not cancellable (no project to go back to): backdrop, Escape and × do nothing. -->
+  <ModalShell class="new-project" title="New Project" width="460px" :dismissible="canCancel" @close="emit('cancel')">
+    <div class="form">
+      <label class="field-label">Project name</label>
+      <input
+        v-model="name"
+        class="name-input"
+        type="text"
+        placeholder="My Project"
+        maxlength="80"
+        autofocus
+        @keydown.enter="submit"
+      />
+
+      <label class="field-label" style="margin-top: 20px">Scene type</label>
+      <div class="scene-cards">
+        <button
+          class="scene-card"
+          :class="{ active: sceneType === 'aerial' }"
+          @click="sceneType = 'aerial'"
+        >
+          <span class="scene-icon"><Icon name="plane" /></span>
+          <span class="scene-name">Aerial survey</span>
+          <span class="scene-desc">Drone or aerial imagery with GPS coordinates, geo-referenced output</span>
+        </button>
+        <button
+          class="scene-card"
+          :class="{ active: sceneType === 'object' }"
+          @click="sceneType = 'object'"
+        >
+          <span class="scene-icon"><Icon name="cube" /></span>
+          <span class="scene-name">Object capture</span>
+          <span class="scene-desc">Objects or scenes without GPS — scale set manually</span>
+        </button>
       </div>
 
-      <div class="modal-body">
-        <label class="field-label">Project name</label>
-        <input
-          v-model="name"
-          class="name-input"
-          type="text"
-          placeholder="My Project"
-          maxlength="80"
-          autofocus
-          @keydown.enter="submit"
-        />
-
-        <label class="field-label" style="margin-top: 20px">Scene type</label>
+      <template v-if="canUseFolder">
+        <label class="field-label" style="margin-top: 20px">Where to keep the files</label>
         <div class="scene-cards">
           <button
             class="scene-card"
-            :class="{ active: sceneType === 'aerial' }"
-            @click="sceneType = 'aerial'"
+            :class="{ active: storage === 'browser' }"
+            @click="storage = 'browser'"
           >
-            <span class="scene-icon"><Icon name="plane" /></span>
-            <span class="scene-name">Aerial survey</span>
-            <span class="scene-desc">Drone or aerial imagery with GPS coordinates, geo-referenced output</span>
+            <span class="scene-icon"><Icon name="browser" /></span>
+            <span class="scene-name">In this browser</span>
+            <span class="scene-desc">Private browser storage. Nothing to manage — save a
+              <code>.websfm</code> file when you want a copy.</span>
           </button>
           <button
             class="scene-card"
-            :class="{ active: sceneType === 'object' }"
-            @click="sceneType = 'object'"
+            :class="{ active: storage === 'folder' }"
+            @click="pickFolder"
           >
-            <span class="scene-icon"><Icon name="cube" /></span>
-            <span class="scene-name">Object capture</span>
-            <span class="scene-desc">Objects or scenes without GPS — scale set manually</span>
+            <span class="scene-icon"><Icon name="folder" /></span>
+            <span class="scene-name">In a folder…</span>
+            <span class="scene-desc">
+              <template v-if="folderHandle">Chosen: <code>{{ folderHandle.name }}</code></template>
+              <template v-else>A folder on this computer, so the project lives with your other files.</template>
+            </span>
           </button>
         </div>
+        <span v-if="folderError" class="crs-hint error">{{ folderError }}</span>
+      </template>
 
-        <template v-if="canUseFolder">
-          <label class="field-label" style="margin-top: 20px">Where to keep the files</label>
-          <div class="scene-cards">
-            <button
-              class="scene-card"
-              :class="{ active: storage === 'browser' }"
-              @click="storage = 'browser'"
-            >
-              <span class="scene-icon"><Icon name="browser" /></span>
-              <span class="scene-name">In this browser</span>
-              <span class="scene-desc">Private browser storage. Nothing to manage — save a
-                <code>.websfm</code> file when you want a copy.</span>
-            </button>
-            <button
-              class="scene-card"
-              :class="{ active: storage === 'folder' }"
-              @click="pickFolder"
-            >
-              <span class="scene-icon"><Icon name="folder" /></span>
-              <span class="scene-name">In a folder…</span>
-              <span class="scene-desc">
-                <template v-if="folderHandle">Chosen: <code>{{ folderHandle.name }}</code></template>
-                <template v-else>A folder on this computer, so the project lives with your other files.</template>
-              </span>
-            </button>
-          </div>
-          <span v-if="folderError" class="crs-hint error">{{ folderError }}</span>
-        </template>
-
-        <label class="field-label" style="margin-top: 20px">Coordinate system</label>
-        <CrsPicker v-model="crs" :disabled="sceneType === 'object'" />
-        <span class="crs-hint">{{
-          sceneType === 'object'
-            ? 'Object-capture projects have no coordinate system — scale is set manually.'
-            : 'Working CRS for the map, GCPs and cameras. You can change it later in Settings.'
-        }}</span>
-      </div>
-
-      <div class="modal-footer">
-        <span class="footer-spacer" />
-        <button v-if="canCancel" class="btn-secondary" @click="emit('cancel')">Cancel</button>
-        <button class="btn-primary" :disabled="!name.trim()" @click="submit">Create project</button>
-      </div>
+      <label class="field-label" style="margin-top: 20px">Coordinate system</label>
+      <CrsPicker v-model="crs" :disabled="sceneType === 'object'" />
+      <span class="crs-hint">{{
+        sceneType === 'object'
+          ? 'Object-capture projects have no coordinate system — scale is set manually.'
+          : 'Working CRS for the map, GCPs and cameras. You can change it later in Settings.'
+      }}</span>
     </div>
-  </div>
+
+    <template #footer>
+      <button v-if="canCancel" class="btn-secondary" @click="emit('cancel')">Cancel</button>
+      <button class="btn-primary" :disabled="!name.trim()" @click="submit">Create project</button>
+    </template>
+  </ModalShell>
 </template>
 
 <style scoped>
-.modal-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.55);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 200;
-}
+/* The CRS search list drops below the last field; the shell's scrolling body would
+   clip it, so this body does not scroll (it never did — the dialog is short). */
+.new-project :deep(.modal-body) { overflow: visible; }
 
-.modal {
-  background: var(--panel);
-  border: 1px solid var(--panel-border);
-  border-radius: 8px;
-  width: 460px;
-  max-width: 92vw;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
-}
-
-.modal-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 13px 16px;
-  border-bottom: 1px solid var(--panel-border);
-}
-
-.modal-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text);
-}
-
-.modal-close {
-  background: none;
-  border: none;
-  color: var(--text-dim);
-  font-size: 20px;
-  line-height: 1;
-  cursor: pointer;
-  padding: 1px 6px;
-  border-radius: 4px;
-}
-
-.modal-close:hover {
-  background: var(--hover-bg);
-  color: var(--text);
-}
-
-.modal-body {
-  padding: 16px;
-  display: flex;
-  flex-direction: column;
-}
+/* One column so the shell's 12px body gap does not apply; spacing below is the
+   dialog's own (label margins). */
+.form { display: flex; flex-direction: column; }
 
 .field-label {
   font-size: 11px;
@@ -298,16 +249,6 @@ function submit() {
   border-radius: 3px;
   background: var(--hover-bg);
 }
-
-.modal-footer {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 12px 16px;
-  border-top: 1px solid var(--panel-border);
-}
-
-.footer-spacer { flex: 1; }
 
 .btn-secondary {
   background: none;

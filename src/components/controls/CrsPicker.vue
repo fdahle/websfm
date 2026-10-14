@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, watch, useId } from 'vue'
+import { ref, computed, watch, useId, onBeforeUnmount } from 'vue'
 import { CRS_CATALOG, ensureProjection } from '../../core/crs.js'
 import { loadCrsRegistry, searchCrsRecords } from '../../core/crsRegistry.js'
 
@@ -19,6 +19,40 @@ const loading = ref(false)
 const applying = ref(false)
 const error = ref('')
 const activeIndex = ref(-1)
+
+// The result list is teleported to <body> and positioned `fixed` against the
+// input: hosts like ModalShell scroll their body (overflow clips an absolute
+// list) and may sit in a transformed ancestor (which re-roots `fixed`).
+const comboboxEl = ref(null)
+const resultsEl = ref(null)
+const listStyle = ref({})
+const LIST_MAX_HEIGHT = 310
+
+function placeList() {
+  const rect = comboboxEl.value?.getBoundingClientRect()
+  if (!rect) return
+  const below = window.innerHeight - rect.bottom - 8
+  const above = rect.top - 8
+  const flip = below < Math.min(LIST_MAX_HEIGHT, 160) && above > below
+  listStyle.value = {
+    left: `${rect.left}px`,
+    width: `${rect.width}px`,
+    maxHeight: `${Math.min(LIST_MAX_HEIGHT, (flip ? above : below) - 4)}px`,
+    ...(flip ? { bottom: `${window.innerHeight - rect.top + 4}px` } : { top: `${rect.bottom + 4}px` }),
+  }
+}
+
+function trackPlacement(on) {
+  const method = on ? 'addEventListener' : 'removeEventListener'
+  window[method]('scroll', placeList, true)
+  window[method]('resize', placeList)
+}
+
+watch(open, (isOpen) => {
+  if (isOpen) placeList()
+  trackPlacement(isOpen)
+})
+onBeforeUnmount(() => trackPlacement(false))
 
 function labelFor(code) {
   const known = [...presets, ...registry.value].find((c) => c.code === code)
@@ -102,13 +136,15 @@ function onKeydown(event) {
     event.preventDefault()
     choose(results.value[Math.max(0, activeIndex.value)])
   } else if (event.key === 'Escape') {
+    // An open list consumes Escape; a closed one lets it close the dialog.
+    if (open.value) event.stopPropagation()
     open.value = false
     query.value = selectedLabel.value
   }
 }
 
 function onFocusout(event) {
-  if (event.currentTarget.contains(event.relatedTarget)) return
+  if (event.currentTarget.contains(event.relatedTarget) || resultsEl.value?.contains(event.relatedTarget)) return
   open.value = false
   query.value = selectedLabel.value
 }
@@ -116,7 +152,7 @@ function onFocusout(event) {
 
 <template>
   <div class="crs-picker" :class="{ disabled }" @focusout="onFocusout">
-    <div class="crs-combobox">
+    <div ref="comboboxEl" class="crs-combobox">
       <span class="search-icon" aria-hidden="true">⌕</span>
       <input
         class="crs-input"
@@ -137,7 +173,11 @@ function onFocusout(event) {
       />
       <span v-if="loading || applying" class="crs-spinner" aria-hidden="true"></span>
 
-      <div v-if="open && !disabled" :id="listboxId" class="crs-results" role="listbox">
+      <Teleport to="body">
+      <div
+        v-if="open && !disabled" ref="resultsEl" :id="listboxId" class="crs-results" role="listbox"
+        :style="listStyle" @mousedown.prevent
+      >
         <button
           v-for="(record, index) in results"
           :id="`${listboxId}-option-${index}`"
@@ -163,6 +203,7 @@ function onFocusout(event) {
         </p>
         <p v-if="loading" class="crs-empty">Loading EPSG coordinate systems…</p>
       </div>
+      </Teleport>
     </div>
 
     <p class="crs-hint">Search by code, CRS name, country, or region.</p>
@@ -222,12 +263,9 @@ function onFocusout(event) {
 @keyframes crs-spin { to { transform: rotate(360deg); } }
 
 .crs-results {
-  position: absolute;
-  z-index: 50;
-  top: calc(100% + 4px);
-  left: 0;
-  right: 0;
-  max-height: 310px;
+  position: fixed;
+  z-index: 1000;
+  box-sizing: border-box;
   overflow-y: auto;
   background: var(--panel-bg, var(--bg));
   border: 1px solid var(--panel-border);

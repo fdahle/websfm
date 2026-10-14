@@ -87,6 +87,9 @@
 .field-input { width: 100px; }
 .field-input:focus,
 .field-select:focus { outline: none; border-color: var(--accent); }
+/* A numeric field the dialog's Run is blocked on (utils/numberFields.js) — stays red
+   while focused, so the field being fixed keeps saying it is the problem. */
+.field-input[aria-invalid="true"] { border-color: #e0533d; }
 .field-select { width: auto; min-width: 180px; cursor: pointer; }
 .field-select:disabled,
 .field-input:disabled { opacity: 0.5; cursor: not-allowed; }

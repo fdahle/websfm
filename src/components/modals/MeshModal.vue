@@ -7,9 +7,13 @@ import AdvancedDisclosure from './ui/AdvancedDisclosure.vue'
 import PresetCards from './ui/PresetCards.vue'
 import SegmentedControl from './ui/SegmentedControl.vue'
 import WarnBox from './ui/WarnBox.vue'
+import SourcePicker from './ui/SourcePicker.vue'
+import { useSourcePick } from '../../composables/useSourcePick.js'
+import { usePresetSettings } from '../../composables/usePresetSettings.js'
 import GlossaryTerm from '../glossary/GlossaryTerm.vue'
 import { MESH_DEFAULTS, MESH_PRESETS, MESH_PRESET_META } from '../../core/defaults.user.js'
 import { recommendMeshDepth } from '../../core/products/mesh.js'
+import { checkNumberFields } from '../../utils/numberFields.js'
 
 // Build Mesh (screened Poisson over a dense cloud). Defaults are the single source of
 // truth in core/defaults.user.js (core/products/mesh.js keeps matching fallbacks).
@@ -25,25 +29,15 @@ const props = defineProps({
 const emit = defineEmits(['close', 'run'])
 
 const settings = ref({ ...MESH_DEFAULTS })
-const sourceId = ref(props.defaultSourceId ?? props.sources[0]?.id ?? null)
-const source = computed(() => props.sources.find((s) => s.id === sourceId.value) ?? null)
+const { id: sourceId, item: source } = useSourcePick(() => props.sources, { initialId: props.defaultSourceId })
 const sourceLabel = (s) => `${s.name} — ${s.count.toLocaleString()} points`
   + (s.derived ? ' · edited' : '') + (s.imported ? ' · imported' : '')
 
-// Quality presets set the octree depth (detail/cost lever; deltas over defaults).
-const resolvePreset = (id) => ({ ...MESH_DEFAULTS, ...MESH_PRESETS[id] })
-const baseId = ref('medium')
-const activePreset = computed(() => {
-  for (const { id } of MESH_PRESET_META) {
-    const r = resolvePreset(id)
-    if (Object.keys(r).every((k) => settings.value[k] === r[k])) return id
-  }
-  return 'custom'
+// Quality presets set the octree depth (detail/cost lever; deltas over defaults) —
+// only the depth: trimming, hole filling, floaters and colour are the user's.
+const { baseId, activePreset, selectPreset } = usePresetSettings({
+  settings, defaults: MESH_DEFAULTS, presets: MESH_PRESETS, cards: MESH_PRESET_META,
 })
-function selectPreset(id) {
-  settings.value = { ...resolvePreset(id) }
-  baseId.value = id
-}
 
 const TRIM_OPTIONS = [
   { id: 'off', label: 'Off' },
@@ -62,6 +56,15 @@ const pointCount = computed(() => source.value?.count ?? 0)
 const recommendedDepth = computed(() => recommendMeshDepth(pointCount.value))
 const depthTooHigh = computed(() => pointCount.value > 0 && settings.value.depth > recommendedDepth.value)
 
+// Run stays disabled while a field is blank or out of range (rules = the inputs'
+// own min/max/step); the floater size is only checked while that cleanup is on.
+const numbers = computed(() => checkNumberFields(settings.value, {
+  depth: { label: 'Octree depth', min: 4, max: 12, integer: true },
+  screening: { label: 'Screening weight', min: 0, max: 16 },
+  minPiecePct: { label: 'Floating piece size', min: 0, max: 50, when: settings.value.removeFloaters },
+  distanceTrim: { label: 'Distance trim', min: 0, max: 32 },
+}))
+
 function run() {
   emit('run', { ...settings.value, sourceId: sourceId.value })
 }
@@ -78,13 +81,8 @@ function run() {
       <strong>Densify</strong> to compute them, then build the mesh.
     </WarnBox>
 
-    <div v-if="sources.length" class="source-row">
-      <label class="field-label" for="mesh-source">Source</label>
-      <select v-if="sources.length > 1" id="mesh-source" v-model="sourceId" class="field-select source-select">
-        <option v-for="s in sources" :key="s.id" :value="s.id">{{ sourceLabel(s) }}</option>
-      </select>
-      <span v-else class="field-hint source-value">{{ sourceLabel(sources[0]) }}</span>
-    </div>
+    <SourcePicker v-if="sources.length" id="mesh-source" v-model="sourceId" variant="inline"
+      :items="sources" :option-label="sourceLabel" />
 
     <PresetCards
       :model-value="activePreset"
@@ -117,7 +115,7 @@ function run() {
           <template #label>
             <GlossaryTerm id="mesh">Octree depth</GlossaryTerm>
           </template>
-          <input id="mesh-depth" v-model.number="settings.depth" type="number" min="4" max="12" step="1" class="field-input" />
+          <input id="mesh-depth" v-model.number="settings.depth" :aria-invalid="numbers.bad.depth" type="number" min="4" max="12" step="1" class="field-input" />
         </SettingsField>
         <WarnBox v-if="depthTooHigh">
           Depth {{ settings.depth }} is high for {{ pointCount.toLocaleString() }} points
@@ -126,15 +124,15 @@ function run() {
         </WarnBox>
         <SettingsField label="Screening weight" label-for="mesh-screen"
           hint="How tightly the surface fits the points. 0 = smoothest/fastest; higher hugs the data.">
-          <input id="mesh-screen" v-model.number="settings.screening" type="number" min="0" max="16" step="0.5" class="field-input" />
+          <input id="mesh-screen" v-model.number="settings.screening" :aria-invalid="numbers.bad.screening" type="number" min="0" max="16" step="0.5" class="field-input" />
         </SettingsField>
         <SettingsField v-if="settings.removeFloaters" label="Floating piece size" label-for="mesh-minpiece" unit="%"
           hint="Pieces supported by less than this share of the main surface's points are removed.">
-          <input id="mesh-minpiece" v-model.number="settings.minPiecePct" type="number" min="0" max="50" step="0.5" class="field-input" />
+          <input id="mesh-minpiece" v-model.number="settings.minPiecePct" :aria-invalid="numbers.bad.minPiecePct" type="number" min="0" max="50" step="0.5" class="field-input" />
         </SettingsField>
         <SettingsField label="Distance trim" label-for="mesh-dist" unit="× spacing"
           hint="Also cut triangles farther than this many sample spacings from any point. 0 = off.">
-          <input id="mesh-dist" v-model.number="settings.distanceTrim" type="number" min="0" max="32" step="1" class="field-input" />
+          <input id="mesh-dist" v-model.number="settings.distanceTrim" :aria-invalid="numbers.bad.distanceTrim" type="number" min="0" max="32" step="1" class="field-input" />
         </SettingsField>
       </SettingsGroup>
       <SettingsGroup title="Colour">
@@ -148,15 +146,9 @@ function run() {
 
     <template #footer>
       <button class="btn" @click="emit('close')">Cancel</button>
-      <button class="btn btn-primary" :disabled="!source" @click="run">Build Mesh</button>
+      <button class="btn btn-primary" :disabled="!source || !numbers.valid" :title="numbers.reason" @click="run">Build Mesh</button>
     </template>
   </ModalShell>
 </template>
 
 <style scoped src="./ui/modal.css"></style>
-<style scoped>
-/* Source is a statement or a short pick, not a settings field: label and value on one line. */
-.source-row { display: flex; align-items: baseline; gap: 8px; }
-.source-value { color: var(--text); }
-.source-select { flex: 1; min-width: 0; }
-</style>

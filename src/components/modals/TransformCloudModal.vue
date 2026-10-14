@@ -5,6 +5,9 @@ import SettingsField from './ui/SettingsField.vue'
 import SettingsGroup from './ui/SettingsGroup.vue'
 import SegmentedControl from './ui/SegmentedControl.vue'
 import WarnBox from './ui/WarnBox.vue'
+import NoSourceWarn from './ui/NoSourceWarn.vue'
+import SourcePicker from './ui/SourcePicker.vue'
+import { useSourcePick } from '../../composables/useSourcePick.js'
 import { transformFromEuler, parseMatrixText, matrixFromTransform } from '../../core/products/cloudAlign.js'
 import { cloudBounds } from '../../core/products/cloudEdit.js'
 
@@ -18,8 +21,7 @@ const props = defineProps({
 })
 const emit = defineEmits(['close', 'run'])
 
-const sourceId = ref(props.clouds.some((c) => c.id === props.initialId) ? props.initialId : props.clouds[0]?.id ?? null)
-const source = computed(() => props.clouds.find((c) => c.id === sourceId.value) ?? null)
+const { id: sourceId, item: source } = useSourcePick(() => props.clouds, { initialId: props.initialId })
 const mode = ref('params')
 const MODES = [{ id: 'params', label: 'Move / rotate / scale' }, { id: 'matrix', label: '4×4 matrix' }]
 const p = ref({ tx: 0, ty: 0, tz: 0, rx: 0, ry: 0, rz: 0, scale: 1, pivot: 'centre' })
@@ -59,14 +61,11 @@ function run() {
 
 <template>
   <ModalShell title="Transform Cloud" @close="emit('close')">
-    <WarnBox v-if="!clouds.length">No dense cloud yet. Build one with <strong>Dense Model</strong> or import one.</WarnBox>
+    <NoSourceWarn v-if="!clouds.length" kind="cloud" />
     <template v-else>
       <SettingsGroup title="Source">
-        <SettingsField label="Cloud" label-for="tf-src" hint="Adds a transformed copy; this one is left untouched.">
-          <select id="tf-src" v-model="sourceId" class="field-select">
-            <option v-for="c in clouds" :key="c.id" :value="c.id">{{ c.name }} — {{ c.count.toLocaleString() }} points</option>
-          </select>
-        </SettingsField>
+        <SourcePicker id="tf-src" v-model="sourceId" label="Cloud" :items="clouds"
+          hint="Adds a transformed copy; this one is left untouched." />
         <SettingsField label="Define by">
           <SegmentedControl v-model="mode" :options="MODES" />
         </SettingsField>

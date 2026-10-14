@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed } from 'vue'
 import CrsPicker from '../controls/CrsPicker.vue'
+import ModalShell from './ui/ModalShell.vue'
 import { geoJsonToFootprints, guessNameKey } from '../../core/io/geojson.js'
 import { makeNameResolver } from '../../core/io/nameMatch.js'
 
@@ -47,70 +48,62 @@ function doImport() {
 </script>
 
 <template>
-  <div class="modal-overlay" @click.self="emit('close')">
-    <div class="modal" role="dialog" aria-modal="true" aria-label="Import footprints">
-      <div class="modal-header">
-        <span class="modal-title">Import Image Footprints</span>
-        <button class="modal-close" title="Close" @click="emit('close')">×</button>
-      </div>
+  <ModalShell title="Import Image Footprints" aria-label="Import footprints" width="620px" flush @close="emit('close')">
+    <div class="import-body">
+      <div class="filename">{{ fileName }}</div>
 
-      <div class="modal-body">
-        <div class="filename">{{ fileName }}</div>
-
-        <div class="controls">
-          <div class="ctrl" v-if="propertyKeys.length">
-            <label class="ctrl-label">Name / image field</label>
-            <select v-model="nameKey" class="ctrl-input">
-              <option v-for="k in propertyKeys" :key="k" :value="k">{{ k }}</option>
-            </select>
-          </div>
-          <div class="ctrl ctrl-crs">
-            <label class="ctrl-label">Source CRS of these coordinates</label>
-            <CrsPicker v-model="sourceCrs" />
-          </div>
+      <div class="controls">
+        <div class="ctrl" v-if="propertyKeys.length">
+          <label class="ctrl-label">Name / image field</label>
+          <select v-model="nameKey" class="ctrl-input">
+            <option v-for="k in propertyKeys" :key="k" :value="k">{{ k }}</option>
+          </select>
         </div>
-
-        <label class="section-label">Preview</label>
-        <div class="table-wrap">
-          <table class="preview">
-            <thead>
-              <tr><th>Name</th><th>Vertices</th><th>Matched image</th></tr>
-            </thead>
-            <tbody>
-              <tr v-for="(p, i) in preview" :key="i">
-                <td>{{ p.name }}</td>
-                <td>{{ p.vertices }}</td>
-                <td>
-                  <span v-if="p.matched" class="ok">✓</span>
-                  <span v-else class="dim">no match</span>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        <div class="summary">
-          <span v-if="!canImport" class="warn">No polygon features found.</span>
-          <span v-else class="ok">
-            {{ built.length }} footprint{{ built.length === 1 ? '' : 's' }}, {{ matchedCount }} matched to images
-          </span>
+        <div class="ctrl ctrl-crs">
+          <label class="ctrl-label">Source CRS of these coordinates</label>
+          <CrsPicker v-model="sourceCrs" />
         </div>
       </div>
 
-      <div class="modal-footer">
-        <button class="btn-secondary" @click="emit('close')">Cancel</button>
-        <button class="btn-primary" :disabled="!canImport" @click="doImport">Import Footprints</button>
+      <label class="section-label">Preview</label>
+      <div class="table-wrap">
+        <table class="preview">
+          <thead>
+            <tr><th>Name</th><th>Vertices</th><th>Matched image</th></tr>
+          </thead>
+          <tbody>
+            <tr v-for="(p, i) in preview" :key="i">
+              <td>{{ p.name }}</td>
+              <td>{{ p.vertices }}</td>
+              <td>
+                <span v-if="p.matched" class="ok">✓</span>
+                <span v-else class="dim">no match</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="summary">
+        <span v-if="!canImport" class="warn">No polygon features found.</span>
+        <span v-else class="ok">
+          {{ built.length }} footprint{{ built.length === 1 ? '' : 's' }}, {{ matchedCount }} matched to images
+        </span>
       </div>
     </div>
-  </div>
+
+    <template #footer>
+      <button class="btn-secondary" @click="emit('close')">Cancel</button>
+      <button class="btn-primary" :disabled="!canImport" @click="doImport">Import Footprints</button>
+    </template>
+  </ModalShell>
 </template>
 
 <style scoped src="./ui/import-modal.css"></style>
 <style scoped>
-/* Only what differs from the shared import-preview chrome (see ui/import-modal.css).
-   This modal styles the header row directly rather than through .role-cell /
-   .header-cell, and keeps body cells in the UI font (no column-role assignment). */
-.modal { width: 620px; }
+/* Only what differs from the shared import-preview styling (see ui/import-modal.css).
+   This modal has no column-role assignment (no ColumnMappingTable): it styles its
+   header row directly and keeps body cells in the UI font. */
 .controls { grid-template-columns: auto 1fr; }
 .preview th { background: var(--bg); color: var(--text-dim); font-weight: 600; position: sticky; top: 0; }
 .preview td { color: var(--text); }

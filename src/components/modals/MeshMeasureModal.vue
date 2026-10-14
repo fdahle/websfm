@@ -1,9 +1,11 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import ModalShell from './ui/ModalShell.vue'
-import SettingsField from './ui/SettingsField.vue'
 import SettingsGroup from './ui/SettingsGroup.vue'
 import WarnBox from './ui/WarnBox.vue'
+import NoSourceWarn from './ui/NoSourceWarn.vue'
+import SourcePicker from './ui/SourcePicker.vue'
+import { useSourcePick, meshOptionLabel } from '../../composables/useSourcePick.js'
 import StatTiles from './ui/StatTiles.vue'
 import { meshMeasure } from '../../core/products/meshEdit.js'
 import { cloudUnits, formatMeasure } from '../../core/products/cloudUnits.js'
@@ -21,8 +23,7 @@ const props = defineProps({
 })
 const emit = defineEmits(['close'])
 
-const sourceId = ref(props.meshes.some((m) => m.id === props.initialId) ? props.initialId : props.meshes[0]?.id ?? null)
-const source = computed(() => props.meshes.find((m) => m.id === sourceId.value) ?? null)
+const { id: sourceId, item: source } = useSourcePick(() => props.meshes, { initialId: props.initialId })
 const units = computed(() => cloudUnits(source.value, props.frameSignature))
 const result = ref(null)
 watch(source, (m) => { result.value = m ? meshMeasure(m) : null }, { immediate: true })
@@ -50,14 +51,10 @@ const whyNoVolume = computed(() => {
 
 <template>
   <ModalShell title="Mesh Area & Volume" @close="emit('close')">
-    <WarnBox v-if="!meshes.length">No mesh yet. Build one with <strong>Reconstruct ▸ Mesh</strong> or import one.</WarnBox>
+    <NoSourceWarn v-if="!meshes.length" kind="mesh" />
     <template v-else>
       <SettingsGroup title="Mesh">
-        <SettingsField label="Mesh" label-for="measure-src">
-          <select id="measure-src" v-model="sourceId" class="field-select">
-            <option v-for="m in meshes" :key="m.id" :value="m.id">{{ m.name }} — {{ m.count.toLocaleString() }} triangles</option>
-          </select>
-        </SettingsField>
+        <SourcePicker id="measure-src" v-model="sourceId" label="Mesh" :items="meshes" :option-label="meshOptionLabel" />
       </SettingsGroup>
       <StatTiles :tiles="tiles" />
       <WarnBox v-if="whyNoVolume">

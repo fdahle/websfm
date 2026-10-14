@@ -4,7 +4,9 @@ import ModalShell from './ui/ModalShell.vue'
 import SettingsField from './ui/SettingsField.vue'
 import SettingsGroup from './ui/SettingsGroup.vue'
 import AdvancedDisclosure from './ui/AdvancedDisclosure.vue'
-import WarnBox from './ui/WarnBox.vue'
+import NoSourceWarn from './ui/NoSourceWarn.vue'
+import SourcePicker from './ui/SourcePicker.vue'
+import { useSourcePick, meshOptionLabel } from '../../composables/useSourcePick.js'
 import { SMOOTH_MESH_DEFAULTS } from '../../core/defaults.user.js'
 
 // Smooth Mesh (Tools ▸ Mesh ▾) — Taubin λ/μ smoothing (core/products/meshEdit.js
@@ -17,8 +19,7 @@ const props = defineProps({
 const emit = defineEmits(['close', 'run'])
 
 const settings = ref({ ...SMOOTH_MESH_DEFAULTS })
-const sourceId = ref(props.meshes.some((m) => m.id === props.initialId) ? props.initialId : props.meshes[0]?.id ?? null)
-const source = computed(() => props.meshes.find((m) => m.id === sourceId.value) ?? null)
+const { id: sourceId, item: source } = useSourcePick(() => props.meshes, { initialId: props.initialId })
 // μ must exceed λ in magnitude, or the second half-step cannot undo the shrink.
 const valid = computed(() => settings.value.iterations >= 1 && settings.value.lambda > 0
   && settings.value.mu < -settings.value.lambda)
@@ -35,14 +36,11 @@ function run() {
 
 <template>
   <ModalShell title="Smooth Mesh" @close="emit('close')">
-    <WarnBox v-if="!meshes.length">No mesh yet. Build one with <strong>Reconstruct ▸ Mesh</strong> or import one.</WarnBox>
+    <NoSourceWarn v-if="!meshes.length" kind="mesh" />
     <template v-else>
       <SettingsGroup title="Source">
-        <SettingsField label="Mesh" label-for="smooth-src" hint="The result is a new mesh; this one is left untouched.">
-          <select id="smooth-src" v-model="sourceId" class="field-select">
-            <option v-for="m in meshes" :key="m.id" :value="m.id">{{ m.name }} — {{ m.count.toLocaleString() }} triangles</option>
-          </select>
-        </SettingsField>
+        <SourcePicker id="smooth-src" v-model="sourceId" label="Mesh" :items="meshes" :option-label="meshOptionLabel"
+          hint="The result is a new mesh; this one is left untouched." />
       </SettingsGroup>
       <SettingsGroup title="Smoothing">
         <SettingsField label="Iterations" label-for="smooth-it" hint="Each pass removes finer noise; more passes also soften real edges.">

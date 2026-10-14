@@ -1,7 +1,8 @@
 <script setup>
-import { computed, onMounted, onBeforeUnmount } from 'vue'
+import { computed } from 'vue'
 import { FIELD_DEFS } from '../../core/io/metadata.js'
 import { useImagesStore } from '../../stores/useImagesStore.js'
+import ModalShell from './ui/ModalShell.vue'
 
 const props = defineProps({
   image: { type: Object, required: true },
@@ -11,7 +12,7 @@ const props = defineProps({
 // from OPFS, or the image is flagged, instead of silently rendering blank.
 const imagesStore = useImagesStore()
 
-const emit = defineEmits(['close'])
+defineEmits(['close'])
 
 const rows = computed(() => {
   const meta = props.image.meta
@@ -29,100 +30,64 @@ const gpsUrl = computed(() => {
   return `https://www.openstreetmap.org/?mlat=${m.gpsLat}&mlon=${m.gpsLon}#map=15/${m.gpsLat}/${m.gpsLon}`
 })
 
-function onKey(e) {
-  if (e.key === 'Escape') emit('close')
-}
-
-onMounted(() => window.addEventListener('keydown', onKey))
-onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
+// No Escape listener of its own: the global closer (composables/useModalEscape.js,
+// `infoImageId`) dismisses this dialog in stacking order. A window listener here
+// closed it on every Escape — even one meant for a dialog stacked above it.
+// (ModalShell's own Escape handling only sees keys pressed inside this dialog.)
 </script>
 
 <template>
-  <div class="overlay" @click.self="$emit('close')">
-    <div class="modal" role="dialog" aria-modal="true">
-      <div class="modal-header">
-        <span class="modal-title" :title="image.name">{{ image.name }}</span>
-        <button class="modal-close" title="Close" @click="$emit('close')">×</button>
+  <ModalShell :title="image.name" width="520px" flush @close="$emit('close')">
+    <template #header>
+      <span class="info-title" :title="image.name">{{ image.name }}</span>
+    </template>
+
+    <div class="preview">
+      <img
+        v-if="!image.previewPending && !image.previewFailed"
+        :src="image.url"
+        :alt="image.name"
+        class="preview-img"
+        @error="imagesStore.reportImageLoadError(image.id)"
+      />
+      <div v-else-if="image.previewFailed" class="preview-img preview-pending">
+        {{ image.previewFailReason === 'source-lost'
+          ? 'Image file no longer available — re-add the file'
+          : 'Preview unavailable — decode failed' }}
       </div>
-
-      <div class="modal-body">
-        <div class="preview">
-          <img
-            v-if="!image.previewPending && !image.previewFailed"
-            :src="image.url"
-            :alt="image.name"
-            class="preview-img"
-            @error="imagesStore.reportImageLoadError(image.id)"
-          />
-          <div v-else-if="image.previewFailed" class="preview-img preview-pending">
-            {{ image.previewFailReason === 'source-lost'
-              ? 'Image file no longer available — re-add the file'
-              : 'Preview unavailable — decode failed' }}
-          </div>
-          <div v-else class="preview-img preview-pending">Decoding image…</div>
-        </div>
-
-        <div v-if="image.kpStatus !== null" class="kp-bar">
-          <span v-if="image.kpStatus === 'done'" class="kp-info">
-            {{ image.kpCount }} keypoints · {{ image.kpMs }} ms
-          </span>
-          <span v-else-if="image.kpStatus === 'running'" class="kp-running">Detecting features…</span>
-          <span v-else-if="image.kpStatus === 'error'" class="kp-error">Feature detection failed</span>
-          <span v-else class="kp-none">No features detected yet</span>
-        </div>
-
-        <div v-if="image.loading" class="loading">Reading metadata…</div>
-
-        <dl v-else class="meta">
-          <template v-for="row in rows" :key="row.key">
-            <dt>{{ row.label }}</dt>
-            <dd v-if="row.value">{{ row.value }}</dd>
-            <dd v-else-if="row.important" class="missing">missing</dd>
-            <dd v-else class="na">—</dd>
-          </template>
-        </dl>
-
-        <a v-if="gpsUrl" class="map-link" :href="gpsUrl" target="_blank" rel="noopener">
-          Open location in map ↗
-        </a>
-      </div>
+      <div v-else class="preview-img preview-pending">Decoding image…</div>
     </div>
-  </div>
+
+    <div v-if="image.kpStatus !== null" class="kp-bar">
+      <span v-if="image.kpStatus === 'done'" class="kp-info">
+        {{ image.kpCount }} keypoints · {{ image.kpMs }} ms
+      </span>
+      <span v-else-if="image.kpStatus === 'running'" class="kp-running">Detecting features…</span>
+      <span v-else-if="image.kpStatus === 'error'" class="kp-error">Feature detection failed</span>
+      <span v-else class="kp-none">No features detected yet</span>
+    </div>
+
+    <div v-if="image.loading" class="loading">Reading metadata…</div>
+
+    <dl v-else class="meta">
+      <template v-for="row in rows" :key="row.key">
+        <dt>{{ row.label }}</dt>
+        <dd v-if="row.value">{{ row.value }}</dd>
+        <dd v-else-if="row.important" class="missing">missing</dd>
+        <dd v-else class="na">—</dd>
+      </template>
+    </dl>
+
+    <a v-if="gpsUrl" class="map-link" :href="gpsUrl" target="_blank" rel="noopener">
+      Open location in map ↗
+    </a>
+  </ModalShell>
 </template>
 
 <style scoped>
-.overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.55);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 200;
-}
-
-.modal {
-  background: var(--panel);
-  border: 1px solid var(--panel-border);
-  border-radius: 8px;
-  width: 520px;
-  max-width: 92vw;
-  max-height: 85vh;
-  display: flex;
-  flex-direction: column;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
-}
-
-.modal-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--panel-border);
-  flex-shrink: 0;
-}
-
-.modal-title {
+/* #header replaces the shell's title: a smaller name that ellipsizes, kept clear
+   of the close button. */
+.info-title {
   flex: 1;
   font-size: 13px;
   font-weight: 600;
@@ -130,27 +95,6 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
   overflow: hidden;
   text-overflow: ellipsis;
   color: var(--text);
-}
-
-.modal-close {
-  background: none;
-  border: none;
-  color: var(--text-dim);
-  font-size: 20px;
-  line-height: 1;
-  cursor: pointer;
-  padding: 1px 5px;
-  border-radius: 4px;
-}
-
-.modal-close:hover {
-  background: var(--hover-bg);
-  color: var(--text);
-}
-
-.modal-body {
-  overflow-y: auto;
-  flex: 1;
 }
 
 .preview {

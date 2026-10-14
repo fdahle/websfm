@@ -1,6 +1,7 @@
 <script setup>
-import { ref, computed, watch, useSlots } from 'vue'
+import { ref, watch, useSlots } from 'vue'
 import { useVirtualList } from '../../../composables/useVirtualList.js'
+import { useTableSort } from '../../../composables/useTableSort.js'
 
 // Shared sortable table for the Evaluate views (step 0 of PLAN-eval-views). A row
 // of headline StatTiles over one of these is the shape six of the eight views take.
@@ -24,39 +25,24 @@ const props = defineProps({
 const emit = defineEmits(['row-click', 'sort'])
 const slots = useSlots()
 
-const key = ref(props.sortKey)
-const dir = ref(props.sortDir)
+const asDir = (d) => (d === 'asc' ? 1 : -1)
+// Sorting is composables/useTableSort; a newly clicked column starts descending.
+const { sortKey, sortDir, toggleSort, sortArrow, sorted: sortedRows } = useTableSort(
+  () => props.rows, (row, k) => row[k],
+  { initialKey: props.sortKey, initialDir: asDir(props.sortDir), firstDir: -1 },
+)
 // Follow a caller that changes the default sort (e.g. after switching data source).
-watch(() => props.sortKey, (k) => { key.value = k })
-watch(() => props.sortDir, (d) => { dir.value = d })
+watch(() => props.sortKey, (k) => { sortKey.value = k })
+watch(() => props.sortDir, (d) => { sortDir.value = asDir(d) })
 
 function toggle(col) {
   if (col.sortable === false) return
-  if (key.value === col.key) dir.value = dir.value === 'asc' ? 'desc' : 'asc'
-  else { key.value = col.key; dir.value = 'desc' }
-  emit('sort', key.value, dir.value)
+  toggleSort(col.key)
+  emit('sort', sortKey.value, sortDir.value === 1 ? 'asc' : 'desc')
 }
 function arrow(col) {
-  if (key.value !== col.key) return ''
-  return dir.value === 'asc' ? '▲' : '▼'
+  return sortArrow(col.key)
 }
-
-const isEmpty = (v) => v == null || v === ''
-
-const sortedRows = computed(() => {
-  const list = props.rows
-  const k = key.value
-  if (!k) return list
-  const sign = dir.value === 'asc' ? 1 : -1
-  return [...list].sort((a, b) => {
-    const va = a[k], vb = b[k]
-    if (isEmpty(va) && isEmpty(vb)) return 0
-    if (isEmpty(va)) return 1   // nulls last, both directions
-    if (isEmpty(vb)) return -1
-    if (typeof va === 'number' && typeof vb === 'number') return (va - vb) * sign
-    return String(va).localeCompare(String(vb), undefined, { numeric: true }) * sign
-  })
-})
 
 // Long tables (a Quality Report over thousands of images) render only the rows in
 // view (composables/useVirtualList, measured row height). A table with an

@@ -2,7 +2,9 @@
 import { ref, shallowRef, computed, watch, onBeforeUnmount } from 'vue'
 import ViewerMatch from '../viewers/ViewerMatch.vue'
 import MatchGraph from '../viewers/MatchGraph.vue'
+import ModalShell from './ui/ModalShell.vue'
 import { useVirtualList } from '../../composables/useVirtualList.js'
+import { useTableSort, compareRaw } from '../../composables/useTableSort.js'
 import { useImagesStore } from '../../stores/useImagesStore.js'
 import { useMatchesStore } from '../../stores/useMatchesStore.js'
 import { useLog } from '../../composables/useLog.js'
@@ -25,16 +27,16 @@ const props = defineProps({
   nodePositions:  { type: Object, default: () => ({}) },
 })
 
-const emit = defineEmits(['close', 'toggle-disabled'])
+const emit = defineEmits(['close', 'set-pair-enabled'])
 
 // List ⇄ Graph toggle.
 const viewMode = ref('list')  // 'list' | 'graph'
 
 // Flip a pair's exclusion from reconstruction. Emits the target state (not a toggle
 // verb) so the parent action is idempotent.
-function toggleDisabled(pairId) {
+function togglePair(pairId) {
   const s = props.matchSummaries.find((m) => m.pairId === pairId)
-  emit('toggle-disabled', pairId, !s?.disabled)
+  emit('set-pair-enabled', pairId, s?.enabled === false)
 }
 
 function trimExt(name) {
@@ -48,17 +50,6 @@ const selectedPairId = ref(null)
 // lands in A vs B is arbitrary (pairId is the uuid-sorted join), so an A-only
 // filter silently hides roughly half the pairs the chosen image appears in.
 const filterImage = ref('')
-const sortKey = ref('nameA')   // 'nameA' | 'nameB' | 'inlierCount' | 'rawCount'
-const sortDir = ref('asc')     // 'asc' | 'desc'
-
-function sortBy(key) {
-  if (sortKey.value === key) {
-    sortDir.value = sortDir.value === 'asc' ? 'desc' : 'asc'
-  } else {
-    sortKey.value = key
-    sortDir.value = 'asc'
-  }
-}
 
 // Distinct image names appearing on *either* side of a pair, for the dropdown.
 const imageOptions = computed(() => {
@@ -81,23 +72,27 @@ const trimmedNames = computed(() => {
   return m
 })
 
-const displayedSummaries = computed(() => {
+const filteredSummaries = computed(() => {
   const q = filterImage.value
+  if (!q) return props.matchSummaries
   const names = trimmedNames.value
-  let rows = props.matchSummaries
-  if (q) rows = rows.filter((m) => { const n = names.get(m.pairId); return n.a === q || n.b === q })
-
-  const key = sortKey.value
-  const dir = sortDir.value === 'asc' ? 1 : -1
-  const textKey = key === 'nameA' ? 'aKey' : key === 'nameB' ? 'bKey' : null
-  return [...rows].sort((a, b) => {
-    const va = textKey ? names.get(a.pairId)[textKey] : a[key]
-    const vb = textKey ? names.get(b.pairId)[textKey] : b[key]
-    if (va < vb) return -1 * dir
-    if (va > vb) return 1 * dir
-    return 0
-  })
+  return props.matchSummaries.filter((m) => { const n = names.get(m.pairId); return n.a === q || n.b === q })
 })
+
+// Sorted by Image A on open; 'nameA' | 'nameB' | 'inlierCount' | 'usedCount'. Names
+// sort on their lower-cased trimmed key with plain `<` (compareRaw) — no collation,
+// which matters at 10⁵ pairs. The name map is read once per sort (in the rows
+// getter), not reactively per comparison.
+let sortNames = new Map()
+function sortValue(m, key) {
+  if (key === 'nameA') return sortNames.get(m.pairId).aKey
+  if (key === 'nameB') return sortNames.get(m.pairId).bKey
+  return m[key]
+}
+const { toggleSort: sortBy, sortArrow, sorted: displayedSummaries } = useTableSort(
+  () => { sortNames = trimmedNames.value; return filteredSummaries.value },
+  sortValue, { initialKey: 'nameA', compare: compareRaw },
+)
 
 // Only the rows in view are in the DOM (composables/useVirtualList); a project's
 // match list runs to tens of thousands of pairs. Row height measured once rendered.
@@ -182,150 +177,128 @@ const selectedUsedKeys = computed(() =>
 </script>
 
 <template>
-  <div class="overlay" @click.self="emit('close')">
-    <div class="modal" role="dialog" aria-modal="true" aria-label="Match List">
-      <div class="modal-header">
-        <span class="modal-title">Matches</span>
+  <ModalShell title="Matches" aria-label="Match List" width="min(96vw, 1440px)" height="min(88vh, 1000px)" flush @close="emit('close')">
+    <template #header>
+      <div class="match-head">
+        <span class="match-title">Matches</span>
         <span v-if="matchSummaries.length" class="modal-count">{{ matchSummaries.length }} pair{{ matchSummaries.length !== 1 ? 's' : '' }}</span>
         <div class="view-toggle">
           <button class="view-btn" :class="{ active: viewMode === 'list' }" @click="viewMode = 'list'">List</button>
           <button class="view-btn" :class="{ active: viewMode === 'graph' }" @click="viewMode = 'graph'">Graph</button>
         </div>
-        <button class="modal-close" title="Close" @click="emit('close')">×</button>
+      </div>
+    </template>
+
+    <div class="modal-main">
+      <!-- Left: match list (or graph) -->
+      <div v-if="viewMode === 'graph'" class="graph-panel">
+        <MatchGraph
+          :match-summaries="matchSummaries"
+          :aligned-uuids="alignedUuids"
+          :has-sparse="hasSparse"
+          :node-positions="nodePositions"
+          :selected-pair-id="selectedPairId"
+          @select="selectMatch"
+          @toggle-pair="togglePair"
+        />
+      </div>
+      <div v-else class="list-panel" :style="{ width: listWidth + 'px' }">
+        <div v-if="!matchSummaries.length" class="empty">No matches yet — run Match Features first.</div>
+        <template v-else>
+          <div class="filter-bar">
+            <select v-model="filterImage" class="filter-input" title="Show only pairs containing this image (either side)">
+              <option value="">All images</option>
+              <option v-for="name in imageOptions" :key="name" :value="name">{{ name }}</option>
+            </select>
+            <button v-if="filterImage" class="filter-clear" title="Clear filter" @click="filterImage = ''">×</button>
+          </div>
+          <div class="table-scroll">
+          <table v-col-resize class="match-table">
+            <thead>
+              <tr>
+                <th class="sortable" @click="sortBy('nameA')">Image A<span class="arrow">{{ sortArrow('nameA') }}</span></th>
+                <th class="sortable" @click="sortBy('nameB')">Image B<span class="arrow">{{ sortArrow('nameB') }}</span></th>
+                <th class="sortable num-col" @click="sortBy('inlierCount')">Matches<span class="arrow">{{ sortArrow('inlierCount') }}</span></th>
+                <th v-if="hasSparse" class="sortable num-col" @click="sortBy('usedCount')" title="Matches that became tie-points in the sparse model">Used<span class="arrow">{{ sortArrow('usedCount') }}</span></th>
+              </tr>
+            </thead>
+            <tbody ref="matchBodyRef">
+              <tr v-if="!displayedSummaries.length">
+                <td :colspan="hasSparse ? 4 : 3" class="empty-row">No pairs match “{{ filterImage }}”.</td>
+              </tr>
+              <tr v-if="padTop" class="v-spacer" aria-hidden="true" :style="{ height: padTop + 'px' }"><td :colspan="hasSparse ? 4 : 3"></td></tr>
+              <tr
+                v-for="m in visibleSummaries"
+                :key="m.pairId"
+                data-vrow
+                class="match-row"
+                :class="{ active: m.pairId === selectedPairId, unused: hasSparse && !m.usedCount, excluded: !m.enabled }"
+                :title="m.enabled ? '' : 'Excluded from reconstruction'"
+                @click="selectMatch(m.pairId)"
+              >
+                <td class="name-cell">
+                  <span v-if="!m.enabled" class="excluded-tag" title="Excluded from reconstruction">⦸</span>
+                  {{ trimExt(m.nameA) }}
+                </td>
+                <td class="name-cell">{{ trimExt(m.nameB) }}</td>
+                <td class="num-col">{{ m.inlierCount }}</td>
+                <td v-if="hasSparse" class="num-col" :class="{ dim: !m.usedCount }">{{ m.usedCount }}</td>
+              </tr>
+              <tr v-if="padBottom" class="v-spacer" aria-hidden="true" :style="{ height: padBottom + 'px' }"><td :colspan="hasSparse ? 4 : 3"></td></tr>
+            </tbody>
+          </table>
+          </div>
+        </template>
       </div>
 
-      <div class="modal-main">
-        <!-- Left: match list (or graph) -->
-        <div v-if="viewMode === 'graph'" class="graph-panel">
-          <MatchGraph
-            :match-summaries="matchSummaries"
-            :aligned-uuids="alignedUuids"
-            :has-sparse="hasSparse"
-            :node-positions="nodePositions"
-            :selected-pair-id="selectedPairId"
-            @select="selectMatch"
-            @toggle-disabled="toggleDisabled"
+      <!-- Drag handle to resize the list panel (list view only). -->
+      <div v-if="viewMode === 'list'" class="resizer" title="Drag to resize" @mousedown="startResize" />
+
+      <!-- Right: match viewer preview -->
+      <div class="preview-panel">
+        <div v-if="selectedSummary" class="preview-bar">
+          <span class="preview-name">{{ trimExt(selectedSummary.nameA) }} ↔ {{ trimExt(selectedSummary.nameB) }}</span>
+          <button
+            class="exclude-btn"
+            :class="{ on: !selectedSummary.enabled }"
+            :title="!selectedSummary.enabled ? 'Include this pair in reconstruction' : 'Exclude this pair from reconstruction (obviously-wrong match)'"
+            @click="togglePair(selectedSummary.pairId)"
+          >{{ !selectedSummary.enabled ? 'Excluded — click to restore' : 'Exclude from reconstruction' }}</button>
+        </div>
+        <div class="preview-body">
+          <ViewerMatch
+            v-if="selectedImgA && selectedImgB"
+            :image-a="selectedImgA"
+            :image-b="selectedImgB"
+            :matches="preview.matches ?? []"
+            :keypoints-a="preview.kpsA"
+            :keypoints-b="preview.kpsB"
+            :used-keys="selectedUsedKeys"
           />
-        </div>
-        <div v-else class="list-panel" :style="{ width: listWidth + 'px' }">
-          <div v-if="!matchSummaries.length" class="empty">No matches yet — run Match Features first.</div>
-          <template v-else>
-            <div class="filter-bar">
-              <select v-model="filterImage" class="filter-input" title="Show only pairs containing this image (either side)">
-                <option value="">All images</option>
-                <option v-for="name in imageOptions" :key="name" :value="name">{{ name }}</option>
-              </select>
-              <button v-if="filterImage" class="filter-clear" title="Clear filter" @click="filterImage = ''">×</button>
-            </div>
-            <div class="table-scroll">
-            <table v-col-resize class="match-table">
-              <thead>
-                <tr>
-                  <th class="sortable" @click="sortBy('nameA')">Image A<span class="arrow">{{ sortKey === 'nameA' ? (sortDir === 'asc' ? '▲' : '▼') : '' }}</span></th>
-                  <th class="sortable" @click="sortBy('nameB')">Image B<span class="arrow">{{ sortKey === 'nameB' ? (sortDir === 'asc' ? '▲' : '▼') : '' }}</span></th>
-                  <th class="sortable num-col" @click="sortBy('inlierCount')">Matches<span class="arrow">{{ sortKey === 'inlierCount' ? (sortDir === 'asc' ? '▲' : '▼') : '' }}</span></th>
-                  <th v-if="hasSparse" class="sortable num-col" @click="sortBy('usedCount')" title="Matches that became tie-points in the sparse model">Used<span class="arrow">{{ sortKey === 'usedCount' ? (sortDir === 'asc' ? '▲' : '▼') : '' }}</span></th>
-                </tr>
-              </thead>
-              <tbody ref="matchBodyRef">
-                <tr v-if="!displayedSummaries.length">
-                  <td :colspan="hasSparse ? 4 : 3" class="empty-row">No pairs match “{{ filterImage }}”.</td>
-                </tr>
-                <tr v-if="padTop" class="v-spacer" aria-hidden="true" :style="{ height: padTop + 'px' }"><td :colspan="hasSparse ? 4 : 3"></td></tr>
-                <tr
-                  v-for="m in visibleSummaries"
-                  :key="m.pairId"
-                  data-vrow
-                  class="match-row"
-                  :class="{ active: m.pairId === selectedPairId, unused: hasSparse && !m.usedCount, disabled: m.disabled }"
-                  :title="m.disabled ? 'Excluded from reconstruction' : ''"
-                  @click="selectMatch(m.pairId)"
-                >
-                  <td class="name-cell">
-                    <span v-if="m.disabled" class="excluded-tag" title="Excluded from reconstruction">⦸</span>
-                    {{ trimExt(m.nameA) }}
-                  </td>
-                  <td class="name-cell">{{ trimExt(m.nameB) }}</td>
-                  <td class="num-col">{{ m.inlierCount }}</td>
-                  <td v-if="hasSparse" class="num-col" :class="{ dim: !m.usedCount }">{{ m.usedCount }}</td>
-                </tr>
-                <tr v-if="padBottom" class="v-spacer" aria-hidden="true" :style="{ height: padBottom + 'px' }"><td :colspan="hasSparse ? 4 : 3"></td></tr>
-              </tbody>
-            </table>
-            </div>
-          </template>
-        </div>
-
-        <!-- Drag handle to resize the list panel (list view only). -->
-        <div v-if="viewMode === 'list'" class="resizer" title="Drag to resize" @mousedown="startResize" />
-
-        <!-- Right: match viewer preview -->
-        <div class="preview-panel">
-          <div v-if="selectedSummary" class="preview-bar">
-            <span class="preview-name">{{ trimExt(selectedSummary.nameA) }} ↔ {{ trimExt(selectedSummary.nameB) }}</span>
-            <button
-              class="exclude-btn"
-              :class="{ on: selectedSummary.disabled }"
-              :title="selectedSummary.disabled ? 'Include this pair in reconstruction' : 'Exclude this pair from reconstruction (obviously-wrong match)'"
-              @click="toggleDisabled(selectedSummary.pairId)"
-            >{{ selectedSummary.disabled ? 'Excluded — click to restore' : 'Exclude from reconstruction' }}</button>
-          </div>
-          <div class="preview-body">
-            <ViewerMatch
-              v-if="selectedImgA && selectedImgB"
-              :image-a="selectedImgA"
-              :image-b="selectedImgB"
-              :matches="preview.matches ?? []"
-              :keypoints-a="preview.kpsA"
-              :keypoints-b="preview.kpsB"
-              :used-keys="selectedUsedKeys"
-            />
-            <div v-else class="preview-placeholder">
-              <span>Select a pair to preview matches</span>
-            </div>
+          <div v-else class="preview-placeholder">
+            <span>Select a pair to preview matches</span>
           </div>
         </div>
       </div>
     </div>
-  </div>
+  </ModalShell>
 </template>
 
 <style scoped>
-.overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.55);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 200;
-}
+/* Roomy on purpose: the right panel holds two photos side by side, so the
+   preview is the constraint — at 1100×75vh each half was barely wider than a
+   thumbnail once the list took its 320px (hence the large width/height). */
 
-.modal {
-  background: var(--panel);
-  border: 1px solid var(--panel-border);
-  border-radius: 8px;
-  /* Roomy on purpose: the right panel holds two photos side by side, so the
-     preview is the constraint — at 1100×75vh each half was barely wider than a
-     thumbnail once the list took its 320px. */
-  width: min(96vw, 1440px);
-  height: min(88vh, 1000px);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.modal-header {
+/* #header replaces the shell's title: title, pair count and the List/Graph toggle,
+   spread over the free width with the toggle beside the close button. */
+.match-head {
+  flex: 1;
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 13px 16px;
-  border-bottom: 1px solid var(--panel-border);
-  flex-shrink: 0;
 }
 
-.modal-title {
+.match-title {
   font-size: 14px;
   font-weight: 600;
   color: var(--text);
@@ -357,22 +330,6 @@ const selectedUsedKeys = computed(() =>
 
 .view-btn:hover { background: var(--hover-bg); color: var(--text); }
 .view-btn.active { background: var(--accent); color: #fff; }
-
-.modal-close {
-  background: none;
-  border: none;
-  color: var(--text-dim);
-  font-size: 20px;
-  line-height: 1;
-  cursor: pointer;
-  padding: 1px 6px;
-  border-radius: 4px;
-}
-
-.modal-close:hover {
-  background: var(--hover-bg);
-  color: var(--text);
-}
 
 /* Two-panel layout */
 .modal-main {
@@ -508,8 +465,8 @@ const selectedUsedKeys = computed(() =>
 .match-row.unused .name-cell { color: var(--text-dim); }
 
 /* A user-excluded pair — greyed with a struck-through name. */
-.match-row.disabled td { color: var(--text-dim); }
-.match-row.disabled .name-cell { text-decoration: line-through; opacity: 0.75; }
+.match-row.excluded td { color: var(--text-dim); }
+.match-row.excluded .name-cell { text-decoration: line-through; opacity: 0.75; }
 
 .excluded-tag { color: #e06060; margin-right: 3px; }
 

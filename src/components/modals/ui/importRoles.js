@@ -1,6 +1,6 @@
-/* Sizing for the per-column role <select> in the tabular import modals
-   (CameraImportModal, GcpImportModal) — the JS half of `.role-select` in
-   import-modal.css.
+/* Sizing for the per-column role <select> of the tabular import dialogs
+   (ColumnMappingTable.vue, used by CameraImportModal and GcpImportModal) — the JS
+   half of its `.role-select` rule.
 
    The preview table sizes each column from its data cells ("3.14", "1"), which
    are far narrower than a role label ("Image X accuracy (px)"), so a select at

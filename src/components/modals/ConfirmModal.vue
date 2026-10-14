@@ -1,9 +1,13 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import ModalShell from './ui/ModalShell.vue'
 
 // Generic confirmation dialog for destructive/irreversible actions. Driven by the
-// caller: pass a title/message, listen for confirm/cancel. Enter activates the focused button, Esc
-// cancels. `danger` styles the confirm button red. `dontAsk` adds a "Don't ask
+// caller: pass a title/message, listen for confirm/cancel. Cancel takes the initial
+// focus (utils/modalFocus.js honours `autofocus`) — the safe default for a
+// destructive action, checked by tests/browser/hardening.spec.js — so Enter on open
+// cancels; Enter activates whichever button is focused. Esc, the backdrop and ×
+// cancel. `danger` styles the confirm button red. `dontAsk` adds a "Don't ask
 // again" checkbox; its state rides along on `confirm` (cancelling never stores it).
 defineProps({
   title: { type: String, default: 'Are you sure?' },
@@ -18,73 +22,32 @@ const dontAskAgain = ref(false)
 </script>
 
 <template>
-  <div class="overlay" @click.self="emit('cancel')" @keydown.esc.stop="emit('cancel')">
-    <div class="modal" role="dialog" aria-modal="true" :aria-label="title">
-      <div class="modal-header">
-        <span class="modal-title">{{ title }}</span>
-        <button class="modal-close" title="Close" @click="emit('cancel')">×</button>
-      </div>
-      <div class="modal-body">
-        <p class="message">{{ message }}</p>
-        <label v-if="dontAsk" class="dont-ask">
-          <input v-model="dontAskAgain" type="checkbox" />
-          Don't ask again
-        </label>
-      </div>
-      <div class="modal-footer">
-        <button class="btn" autofocus @click="emit('cancel')">{{ cancelLabel }}</button>
-        <button ref="confirmBtn" class="btn" :class="danger ? 'btn-danger' : 'btn-primary'" @click="emit('confirm', dontAskAgain)">
-          {{ confirmLabel }}
-        </button>
-      </div>
-    </div>
-  </div>
+  <!-- `confirm-overlay` lands on the shell's root overlay (attribute fallthrough). -->
+  <ModalShell class="confirm-overlay" :title="title" width="380px" @close="emit('cancel')">
+    <p class="message">{{ message }}</p>
+    <label v-if="dontAsk" class="dont-ask">
+      <input v-model="dontAskAgain" type="checkbox" />
+      Don't ask again
+    </label>
+
+    <template #footer>
+      <button class="btn" autofocus @click="emit('cancel')">{{ cancelLabel }}</button>
+      <button class="btn" :class="danger ? 'btn-danger' : 'btn-primary'" @click="emit('confirm', dontAskAgain)">
+        {{ confirmLabel }}
+      </button>
+    </template>
+  </ModalShell>
 </template>
 
 <style scoped>
-.overlay {
-  position: fixed; inset: 0;
-  background: rgba(0,0,0,0.55);
-  display: flex; align-items: center; justify-content: center;
-  z-index: 250;
-}
-.modal {
-  background: var(--panel);
-  border: 1px solid var(--panel-border);
-  border-radius: 8px;
-  width: 380px; max-width: 90vw;
-  box-shadow: 0 8px 32px rgba(0,0,0,0.4);
-  display: flex; flex-direction: column;
-}
-.modal-header {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 13px 16px;
-  border-bottom: 1px solid var(--panel-border);
-}
-.modal-title { font-size: 14px; font-weight: 600; color: var(--text); }
-.modal-close {
-  background: none; border: none; color: var(--text-dim);
-  font-size: 20px; line-height: 1; cursor: pointer; padding: 1px 6px; border-radius: 4px;
-}
-.modal-close:hover { background: var(--hover-bg); color: var(--text); }
-.modal-body { padding: 16px; }
+/* Above the project picker (z 300), which asks through this dialog too; the
+   shell's own overlay is z 200. Two classes outrank the shell's `.overlay`. */
+.overlay.confirm-overlay { z-index: 350; }
 .message { margin: 0; font-size: 13px; line-height: 1.5; color: var(--text); }
 .dont-ask {
   display: flex; align-items: center; gap: 6px;
-  margin-top: 12px; font-size: 12px; color: var(--text-dim); cursor: pointer;
+  font-size: 12px; color: var(--text-dim); cursor: pointer;
 }
-.modal-footer {
-  display: flex; justify-content: flex-end; gap: 8px;
-  padding: 12px 16px; border-top: 1px solid var(--panel-border);
-}
-.btn {
-  background: none; border: 1px solid var(--panel-border);
-  border-radius: 5px; color: var(--text); font: inherit; font-size: 13px;
-  padding: 5px 14px; cursor: pointer;
-}
-.btn:hover { background: var(--hover-bg); }
-.btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-.btn-primary:hover { opacity: 0.88; }
 .btn-danger { background: #c0453a; border-color: #c0453a; color: #fff; }
 .btn-danger:hover { opacity: 0.88; }
 </style>

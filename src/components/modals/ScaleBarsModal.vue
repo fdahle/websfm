@@ -8,6 +8,7 @@ import { useScaleBarsStore } from '../../stores/useScaleBarsStore.js'
 import { useReconstructionStore } from '../../stores/useReconstructionStore.js'
 import { useGcpsStore } from '../../stores/useGcpsStore.js'
 import { useImagesStore } from '../../stores/useImagesStore.js'
+import { createLatest } from '../../utils/latestOnly.js'
 
 // Scale Bars — declare known real-world distances so an up-to-scale model gets a
 // metric unit. This is the object-capture counterpart of georeferencing: same job
@@ -69,22 +70,28 @@ function parseEndpoint(value) {
 // Rows come from the store (one measurement pass shared with the fit, so the two
 // can never disagree). `scaleSource` says WHOSE metres these are.
 const rows = ref([])
-const busy = ref(false)
+// Two separate kinds of work: `applying` is the scale fit (gates Apply), the
+// report refresh runs on every edit. One shared flag let a refresh finishing
+// mid-fit re-enable Apply. Refreshes overlap freely; only the newest one writes,
+// so an older report can never land over a newer edit's.
+const applying = ref(false)
+const refreshes = createLatest()
 const resolved = ref({ unit: 'model', scale: 1, source: null })
 const fitStatus = ref({ valid: false, reason: 'none' })
 
 async function refresh() {
-  busy.value = true
-  try {
-    resolved.value = await recon.effectiveFrameSpec()
-    fitStatus.value = recon.scaleFitStatus()
-    // Residuals are always against whatever currently DEFINES the scale — with a
-    // georeference present the bars are checks against the CRS fit, not against a
-    // scale they did not set.
-    rows.value = await recon.scaleBarReport(resolved.value.unit !== 'model' ? resolved.value.scale : null)
-  } finally {
-    busy.value = false
-  }
+  const token = refreshes.begin()
+  const frame = await recon.effectiveFrameSpec()
+  if (!refreshes.isCurrent(token)) return
+  const status = recon.scaleFitStatus()
+  // Residuals are always against whatever currently DEFINES the scale — with a
+  // georeference present the bars are checks against the CRS fit, not against a
+  // scale they did not set.
+  const report = await recon.scaleBarReport(frame.unit !== 'model' ? frame.scale : null)
+  if (!refreshes.isCurrent(token)) return
+  resolved.value = frame
+  fitStatus.value = status
+  rows.value = report
 }
 onMounted(refresh)
 watch(() => scaleBars.bars.length, refresh)
@@ -113,7 +120,7 @@ function fmtSigned(v) {
 
 const barReady = (bar) => endpointReady(bar?.a) && endpointReady(bar?.b)
   && Number.isFinite(bar?.knownDistanceM) && bar.knownDistanceM > 0
-const canApply = computed(() => !busy.value && recon.sparseCameras.size > 0
+const canApply = computed(() => !applying.value && recon.sparseCameras.size > 0
   && scaleBars.bars.some((bar) => bar.enabled !== false && barReady(bar)))
 const setupBar = computed(() => {
   const unfinished = [...scaleBars.bars].reverse().find((bar) => !barReady(bar))
@@ -141,11 +148,12 @@ const guidedAction = computed(() => {
 })
 
 async function apply() {
-  busy.value = true
+  if (applying.value) return
+  applying.value = true
   try {
     await recon.fitScaleBars()
   } finally {
-    busy.value = false
+    applying.value = false
   }
   await refresh()
 }
@@ -380,7 +388,7 @@ const statusLine = computed(() => {
       </span>
       <button class="btn" @click="emit('close')">Close</button>
       <button class="btn btn-primary" :disabled="!canApply" @click="apply">
-        {{ busy ? 'Working…' : (resolved.source === 'scalebars' ? 'Recalculate scale' : 'Set project scale') }}
+        {{ applying ? 'Working…' : (resolved.source === 'scalebars' ? 'Recalculate scale' : 'Set project scale') }}
       </button>
     </template>
   </ModalShell>

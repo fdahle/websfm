@@ -5,6 +5,7 @@ import { useMatchesStore } from '../../stores/useMatchesStore.js'
 import { useProjectsStore } from '../../stores/useProjectsStore.js'
 import { useQualityReport } from '../../composables/useQualityReport.js'
 import { useLog } from '../../composables/useLog.js'
+import ModalShell from './ui/ModalShell.vue'
 import EvalOverviewSection from './eval/EvalOverviewSection.vue'
 import EvalSparseSection from './eval/EvalSparseSection.vue'
 import EvalCalibrationSection from './eval/EvalCalibrationSection.vue'
@@ -82,68 +83,45 @@ async function onExport() {
 </script>
 
 <template>
-  <div class="overlay" @click.self="emit('close')" @keydown.esc="emit('close')">
-    <div class="qmodal" role="dialog" aria-modal="true" aria-label="Quality Report">
-      <div class="qhead">
-        <span class="qtitle">Quality Report</span>
-        <button class="modal-close" title="Close" @click="emit('close')">×</button>
-      </div>
+  <ModalShell title="Quality Report" width="920px" height="640px" flush @close="emit('close')">
+    <div class="qbody">
+      <nav class="qnav">
+        <button
+          v-for="s in SECTIONS"
+          :key="s.id"
+          class="qnav-item"
+          :class="{ active: active === s.id, disabled: !s.avail }"
+          :title="s.avail ? '' : s.prereq"
+          @click="go(s.id)"
+        >{{ s.label }}</button>
+      </nav>
 
-      <div class="qbody">
-        <nav class="qnav">
-          <button
-            v-for="s in SECTIONS"
-            :key="s.id"
-            class="qnav-item"
-            :class="{ active: active === s.id, disabled: !s.avail }"
-            :title="s.avail ? '' : s.prereq"
-            @click="go(s.id)"
-          >{{ s.label }}</button>
-        </nav>
-
-        <div class="qsection">
-          <div v-if="!activeMeta.avail" class="qempty">
-            <div class="qempty-icon">◔</div>
-            <div class="qempty-text">{{ activeMeta.prereq }}</div>
-          </div>
-          <component
-            v-else
-            :is="activeComponent"
-            @go="go"
-            @open-image="emit('open-image', $event)"
-            @open-image-residuals="emit('open-image-residuals', $event)"
-            @open-match-list="emit('open-match-list')"
-          />
+      <div class="qsection">
+        <div v-if="!activeMeta.avail" class="qempty">
+          <div class="qempty-icon">◔</div>
+          <div class="qempty-text">{{ activeMeta.prereq }}</div>
         </div>
-      </div>
-
-      <div class="qfoot">
-        <button class="btn" :disabled="exporting" @click="onExport">
-          {{ exporting ? 'Exporting…' : 'Export report' }}
-        </button>
-        <button class="btn" @click="emit('close')">Close</button>
+        <component
+          v-else
+          :is="activeComponent"
+          @go="go"
+          @open-image="emit('open-image', $event)"
+          @open-image-residuals="emit('open-image-residuals', $event)"
+          @open-match-list="emit('open-match-list')"
+        />
       </div>
     </div>
-  </div>
+
+    <template #footer>
+      <button class="btn" :disabled="exporting" @click="onExport">
+        {{ exporting ? 'Exporting…' : 'Export report' }}
+      </button>
+      <button class="btn" @click="emit('close')">Close</button>
+    </template>
+  </ModalShell>
 </template>
 
-<style scoped src="./ui/modal.css"></style>
 <style scoped>
-.overlay {
-  position: fixed; inset: 0; background: rgba(0, 0, 0, 0.55);
-  display: flex; align-items: center; justify-content: center; z-index: 200;
-}
-.qmodal {
-  background: var(--panel); border: 1px solid var(--panel-border); border-radius: 8px;
-  width: 920px; max-width: 94vw; height: 640px; max-height: 90vh;
-  display: flex; flex-direction: column; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
-  overflow: hidden;
-}
-.qhead {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 13px 16px; border-bottom: 1px solid var(--panel-border); flex-shrink: 0;
-}
-.qtitle { font-size: 14px; font-weight: 600; color: var(--text); }
 .qbody { flex: 1; display: flex; min-height: 0; }
 .qnav {
   width: 150px; flex-shrink: 0; border-right: 1px solid var(--panel-border);
@@ -164,8 +142,4 @@ async function onExport() {
 .qempty { margin: auto; text-align: center; color: var(--text-dim); }
 .qempty-icon { font-size: 34px; opacity: 0.5; }
 .qempty-text { font-size: 13px; margin-top: 8px; }
-.qfoot {
-  display: flex; justify-content: flex-end; gap: 8px;
-  padding: 12px 16px; border-top: 1px solid var(--panel-border); flex-shrink: 0;
-}
 </style>

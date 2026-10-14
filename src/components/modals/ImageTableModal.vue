@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import MetadataTable from '../controls/MetadataTable.vue'
+import ModalShell from './ui/ModalShell.vue'
 import { useTableSort } from '../../composables/useTableSort.js'
 import { estimatedIntrinsics, estimatedCenter, estimatedAngles } from '../../core/sfm/cameraEstimated.js'
 
@@ -112,182 +113,160 @@ watch(tab, resetSort)
 </script>
 
 <template>
-  <div class="overlay" @click.self="emit('close')">
-    <div class="modal" role="dialog" aria-modal="true" aria-label="Image Table">
-      <div class="modal-header">
-        <div class="tabs">
-          <button class="tab" :class="{ active: tab === 'metadata' }" @click="tab = 'metadata'">Metadata</button>
-          <button class="tab" :class="{ active: tab === 'intrinsics' }" @click="tab = 'intrinsics'">Intrinsics</button>
-          <button class="tab" :class="{ active: tab === 'extrinsics' }" @click="tab = 'extrinsics'">Extrinsics</button>
-        </div>
-        <button class="modal-close" title="Close" @click="emit('close')">×</button>
+  <ModalShell title="Image Table" width="min(92vw, 960px)" height="80vh" flush @close="emit('close')">
+    <template #header>
+      <div class="tabs">
+        <button class="tab" :class="{ active: tab === 'metadata' }" @click="tab = 'metadata'">Metadata</button>
+        <button class="tab" :class="{ active: tab === 'intrinsics' }" @click="tab = 'intrinsics'">Intrinsics</button>
+        <button class="tab" :class="{ active: tab === 'extrinsics' }" @click="tab = 'extrinsics'">Extrinsics</button>
+      </div>
+    </template>
+
+    <!-- Initial/Estimated toggle (intrinsics & extrinsics only) -->
+    <div v-if="tab !== 'metadata'" class="subbar">
+      <div class="seg">
+        <button class="seg-btn" :class="{ active: mode === 'initial' }" @click="mode = 'initial'">Initial</button>
+        <button
+          class="seg-btn"
+          :class="{ active: mode === 'estimated' }"
+          :disabled="!anyEstimated"
+          :title="anyEstimated ? '' : 'Run a reconstruction to get estimated values'"
+          @click="mode = 'estimated'"
+        >Estimated</button>
+      </div>
+      <span v-if="tab === 'intrinsics' && mode === 'initial'" class="hint">
+        Inherited from each image's sensor (read-only).
+        <button class="link" @click="emit('open-sensor-table')">Edit in Sensor Table →</button>
+      </span>
+      <span v-else-if="tab === 'extrinsics'" class="hint">
+        {{ mode === 'estimated' ? 'Bundle-adjusted — model space (not georeferenced)' : (crs ? `Positions in ${crs}` : 'Imported priors') }}
+      </span>
+      <span v-else class="hint">Bundle-adjusted intrinsics (pixels).</span>
+    </div>
+
+    <div class="table-area">
+      <!-- Metadata -->
+      <MetadataTable
+        v-if="tab === 'metadata'"
+        :images="images"
+        :selected-id="selectedId"
+        @select="onSelect"
+        @open="onOpen"
+      />
+
+      <!-- Intrinsics -->
+      <div v-else-if="tab === 'intrinsics'" class="table-wrap">
+        <table v-if="images.length" v-col-resize>
+          <thead>
+            <tr>
+              <th class="sortable" @click="toggleSort('name')">Name <span class="arrow">{{ sortArrow('name') }}</span></th>
+              <th class="sortable" @click="toggleSort('sensor')">Sensor <span class="arrow">{{ sortArrow('sensor') }}</span></th>
+              <th class="sortable" @click="toggleSort('focal')">Focal <span class="arrow">{{ sortArrow('focal') }}</span></th>
+              <th class="sortable" @click="toggleSort('cx')">cx <span class="arrow">{{ sortArrow('cx') }}</span></th>
+              <th class="sortable" @click="toggleSort('cy')">cy <span class="arrow">{{ sortArrow('cy') }}</span></th>
+              <th class="sortable" @click="toggleSort('k1')">k1 <span class="arrow">{{ sortArrow('k1') }}</span></th>
+              <th class="sortable" @click="toggleSort('k2')">k2 <span class="arrow">{{ sortArrow('k2') }}</span></th>
+              <th class="sortable" @click="toggleSort('k3')">k3 <span class="arrow">{{ sortArrow('k3') }}</span></th>
+              <th class="sortable" @click="toggleSort('p1')">p1 <span class="arrow">{{ sortArrow('p1') }}</span></th>
+              <th class="sortable" @click="toggleSort('p2')">p2 <span class="arrow">{{ sortArrow('p2') }}</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              v-for="img in sortedImages"
+              :key="img.id"
+              :class="{ selected: img.id === selectedId }"
+              @click="onSelect(img.id)"
+              @dblclick="onOpen(img.id)"
+            >
+              <td class="name-cell" :title="img.name">{{ img.name }}</td>
+              <td @click.stop>
+                <select
+                  v-if="mode === 'initial' && sensors.length"
+                  class="sensor-select"
+                  :value="img.sensorId || ''"
+                  @change="emit('assign-sensor', { imageId: img.id, sensorId: $event.target.value || null })"
+                >
+                  <option value="">—</option>
+                  <option v-for="s in sensors" :key="s.id" :value="s.id">{{ s.label }}</option>
+                </select>
+                <span v-else class="dim">{{ sensorFor(img)?.label || '—' }}</span>
+              </td>
+              <template v-if="intrinsics(img)">
+                <td>{{ show(intrinsics(img).focal) }}<span class="unit"> {{ intrinsics(img).unit }}</span></td>
+                <td>{{ show(intrinsics(img).cx) }}</td>
+                <td>{{ show(intrinsics(img).cy) }}</td>
+                <td :class="{ dim: intrinsics(img).k1 == null }">{{ show(intrinsics(img).k1) }}</td>
+                <td :class="{ dim: intrinsics(img).k2 == null }">{{ show(intrinsics(img).k2) }}</td>
+                <td :class="{ dim: intrinsics(img).k3 == null }">{{ show(intrinsics(img).k3) }}</td>
+                <td :class="{ dim: intrinsics(img).p1 == null }">{{ show(intrinsics(img).p1) }}</td>
+                <td :class="{ dim: intrinsics(img).p2 == null }">{{ show(intrinsics(img).p2) }}</td>
+              </template>
+              <template v-else>
+                <td colspan="8" class="dim">{{ mode === 'estimated' ? 'not reconstructed' : 'no sensor assigned' }}</td>
+              </template>
+            </tr>
+          </tbody>
+        </table>
+        <div v-else class="empty">No images.</div>
       </div>
 
-      <!-- Initial/Estimated toggle (intrinsics & extrinsics only) -->
-      <div v-if="tab !== 'metadata'" class="subbar">
-        <div class="seg">
-          <button class="seg-btn" :class="{ active: mode === 'initial' }" @click="mode = 'initial'">Initial</button>
-          <button
-            class="seg-btn"
-            :class="{ active: mode === 'estimated' }"
-            :disabled="!anyEstimated"
-            :title="anyEstimated ? '' : 'Run a reconstruction to get estimated values'"
-            @click="mode = 'estimated'"
-          >Estimated</button>
-        </div>
-        <span v-if="tab === 'intrinsics' && mode === 'initial'" class="hint">
-          Inherited from each image's sensor (read-only).
-          <button class="link" @click="emit('open-sensor-table')">Edit in Sensor Table →</button>
-        </span>
-        <span v-else-if="tab === 'extrinsics'" class="hint">
-          {{ mode === 'estimated' ? 'Bundle-adjusted — model space (not georeferenced)' : (crs ? `Positions in ${crs}` : 'Imported priors') }}
-        </span>
-        <span v-else class="hint">Bundle-adjusted intrinsics (pixels).</span>
-      </div>
-
-      <div class="modal-body">
-        <!-- Metadata -->
-        <MetadataTable
-          v-if="tab === 'metadata'"
-          :images="images"
-          :selected-id="selectedId"
-          @select="onSelect"
-          @open="onOpen"
-        />
-
-        <!-- Intrinsics -->
-        <div v-else-if="tab === 'intrinsics'" class="table-wrap">
-          <table v-if="images.length" v-col-resize>
-            <thead>
-              <tr>
-                <th class="sortable" @click="toggleSort('name')">Name <span class="arrow">{{ sortArrow('name') }}</span></th>
-                <th class="sortable" @click="toggleSort('sensor')">Sensor <span class="arrow">{{ sortArrow('sensor') }}</span></th>
-                <th class="sortable" @click="toggleSort('focal')">Focal <span class="arrow">{{ sortArrow('focal') }}</span></th>
-                <th class="sortable" @click="toggleSort('cx')">cx <span class="arrow">{{ sortArrow('cx') }}</span></th>
-                <th class="sortable" @click="toggleSort('cy')">cy <span class="arrow">{{ sortArrow('cy') }}</span></th>
-                <th class="sortable" @click="toggleSort('k1')">k1 <span class="arrow">{{ sortArrow('k1') }}</span></th>
-                <th class="sortable" @click="toggleSort('k2')">k2 <span class="arrow">{{ sortArrow('k2') }}</span></th>
-                <th class="sortable" @click="toggleSort('k3')">k3 <span class="arrow">{{ sortArrow('k3') }}</span></th>
-                <th class="sortable" @click="toggleSort('p1')">p1 <span class="arrow">{{ sortArrow('p1') }}</span></th>
-                <th class="sortable" @click="toggleSort('p2')">p2 <span class="arrow">{{ sortArrow('p2') }}</span></th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr
-                v-for="img in sortedImages"
-                :key="img.id"
-                :class="{ selected: img.id === selectedId }"
-                @click="onSelect(img.id)"
-                @dblclick="onOpen(img.id)"
-              >
-                <td class="name-cell" :title="img.name">{{ img.name }}</td>
-                <td @click.stop>
-                  <select
-                    v-if="mode === 'initial' && sensors.length"
-                    class="sensor-select"
-                    :value="img.sensorId || ''"
-                    @change="emit('assign-sensor', { imageId: img.id, sensorId: $event.target.value || null })"
-                  >
-                    <option value="">—</option>
-                    <option v-for="s in sensors" :key="s.id" :value="s.id">{{ s.label }}</option>
-                  </select>
-                  <span v-else class="dim">{{ sensorFor(img)?.label || '—' }}</span>
-                </td>
-                <template v-if="intrinsics(img)">
-                  <td>{{ show(intrinsics(img).focal) }}<span class="unit"> {{ intrinsics(img).unit }}</span></td>
-                  <td>{{ show(intrinsics(img).cx) }}</td>
-                  <td>{{ show(intrinsics(img).cy) }}</td>
-                  <td :class="{ dim: intrinsics(img).k1 == null }">{{ show(intrinsics(img).k1) }}</td>
-                  <td :class="{ dim: intrinsics(img).k2 == null }">{{ show(intrinsics(img).k2) }}</td>
-                  <td :class="{ dim: intrinsics(img).k3 == null }">{{ show(intrinsics(img).k3) }}</td>
-                  <td :class="{ dim: intrinsics(img).p1 == null }">{{ show(intrinsics(img).p1) }}</td>
-                  <td :class="{ dim: intrinsics(img).p2 == null }">{{ show(intrinsics(img).p2) }}</td>
-                </template>
-                <template v-else>
-                  <td colspan="8" class="dim">{{ mode === 'estimated' ? 'not reconstructed' : 'no sensor assigned' }}</td>
-                </template>
-              </tr>
-            </tbody>
-          </table>
-          <div v-else class="empty">No images.</div>
-        </div>
-
-        <!-- Extrinsics -->
-        <div v-else class="table-wrap">
-          <table v-if="images.length" v-col-resize>
-            <thead>
-              <tr>
-                <th class="sortable" @click="toggleSort('name')">Name <span class="arrow">{{ sortArrow('name') }}</span></th>
-                <th class="sortable" @click="toggleSort('x')">X <span class="arrow">{{ sortArrow('x') }}</span></th>
-                <th class="sortable" @click="toggleSort('y')">Y <span class="arrow">{{ sortArrow('y') }}</span></th>
-                <th class="sortable" @click="toggleSort('z')">Z <span class="arrow">{{ sortArrow('z') }}</span></th>
-                <th class="sortable" @click="toggleSort('omega')">ω <span class="arrow">{{ sortArrow('omega') }}</span></th>
-                <th class="sortable" @click="toggleSort('phi')">φ <span class="arrow">{{ sortArrow('phi') }}</span></th>
-                <th class="sortable" @click="toggleSort('kappa')">κ <span class="arrow">{{ sortArrow('kappa') }}</span></th>
-                <th class="sortable" @click="toggleSort('status')">Status <span class="arrow">{{ sortArrow('status') }}</span></th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr
-                v-for="img in sortedImages"
-                :key="img.id"
-                :class="{ selected: img.id === selectedId }"
-                @click="onSelect(img.id)"
-                @dblclick="onOpen(img.id)"
-              >
-                <td class="name-cell" :title="img.name">{{ img.name }}</td>
-                <template v-if="extrinsics(img)">
-                  <td>{{ show(extrinsics(img).x) }}</td>
-                  <td>{{ show(extrinsics(img).y) }}</td>
-                  <td :class="{ dim: extrinsics(img).z == null }">{{ show(extrinsics(img).z) }}</td>
-                  <td :class="{ dim: extrinsics(img).omega == null }">{{ show(extrinsics(img).omega) }}</td>
-                  <td :class="{ dim: extrinsics(img).phi == null }">{{ show(extrinsics(img).phi) }}</td>
-                  <td :class="{ dim: extrinsics(img).kappa == null }">{{ show(extrinsics(img).kappa) }}</td>
-                </template>
-                <template v-else>
-                  <td colspan="6" class="dim">{{ mode === 'estimated' ? 'not reconstructed' : '—' }}</td>
-                </template>
-                <td class="dim">{{ mode === 'estimated' ? (extrinsics(img) ? 'estimated' : '—') : poseStatus(img) }}</td>
-              </tr>
-            </tbody>
-          </table>
-          <div v-else class="empty">No images.</div>
-        </div>
+      <!-- Extrinsics -->
+      <div v-else class="table-wrap">
+        <table v-if="images.length" v-col-resize>
+          <thead>
+            <tr>
+              <th class="sortable" @click="toggleSort('name')">Name <span class="arrow">{{ sortArrow('name') }}</span></th>
+              <th class="sortable" @click="toggleSort('x')">X <span class="arrow">{{ sortArrow('x') }}</span></th>
+              <th class="sortable" @click="toggleSort('y')">Y <span class="arrow">{{ sortArrow('y') }}</span></th>
+              <th class="sortable" @click="toggleSort('z')">Z <span class="arrow">{{ sortArrow('z') }}</span></th>
+              <th class="sortable" @click="toggleSort('omega')">ω <span class="arrow">{{ sortArrow('omega') }}</span></th>
+              <th class="sortable" @click="toggleSort('phi')">φ <span class="arrow">{{ sortArrow('phi') }}</span></th>
+              <th class="sortable" @click="toggleSort('kappa')">κ <span class="arrow">{{ sortArrow('kappa') }}</span></th>
+              <th class="sortable" @click="toggleSort('status')">Status <span class="arrow">{{ sortArrow('status') }}</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              v-for="img in sortedImages"
+              :key="img.id"
+              :class="{ selected: img.id === selectedId }"
+              @click="onSelect(img.id)"
+              @dblclick="onOpen(img.id)"
+            >
+              <td class="name-cell" :title="img.name">{{ img.name }}</td>
+              <template v-if="extrinsics(img)">
+                <td>{{ show(extrinsics(img).x) }}</td>
+                <td>{{ show(extrinsics(img).y) }}</td>
+                <td :class="{ dim: extrinsics(img).z == null }">{{ show(extrinsics(img).z) }}</td>
+                <td :class="{ dim: extrinsics(img).omega == null }">{{ show(extrinsics(img).omega) }}</td>
+                <td :class="{ dim: extrinsics(img).phi == null }">{{ show(extrinsics(img).phi) }}</td>
+                <td :class="{ dim: extrinsics(img).kappa == null }">{{ show(extrinsics(img).kappa) }}</td>
+              </template>
+              <template v-else>
+                <td colspan="6" class="dim">{{ mode === 'estimated' ? 'not reconstructed' : '—' }}</td>
+              </template>
+              <td class="dim">{{ mode === 'estimated' ? (extrinsics(img) ? 'estimated' : '—') : poseStatus(img) }}</td>
+            </tr>
+          </tbody>
+        </table>
+        <div v-else class="empty">No images.</div>
       </div>
     </div>
-  </div>
+  </ModalShell>
 </template>
 
 <style scoped>
-.overlay {
-  position: fixed; inset: 0; background: rgba(0, 0, 0, 0.55);
-  display: flex; align-items: center; justify-content: center; z-index: 200;
-}
 
-.modal {
-  background: var(--panel); border: 1px solid var(--panel-border); border-radius: 8px;
-  width: min(92vw, 960px); height: 80vh; max-height: 80vh;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4); display: flex; flex-direction: column;
-}
-
-.modal-header {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 8px 16px; border-bottom: 1px solid var(--panel-border); flex-shrink: 0;
-}
-
-.tabs { display: flex; gap: 2px; }
+/* The tabs are taller than a title line; the negative margin keeps the header as
+   slim as it was before the shell's 13px padding (the tabs had 8px). */
+.tabs { display: flex; gap: 2px; margin: -5px 0; }
 .tab {
   background: none; border: none; color: var(--text-dim);
   font: inherit; font-size: 13px; padding: 7px 14px; cursor: pointer; border-radius: 5px;
 }
 .tab:hover { background: var(--hover-bg); color: var(--text); }
 .tab.active { background: var(--bg); color: var(--text); box-shadow: inset 0 -2px 0 var(--accent); }
-
-.modal-close {
-  background: none; border: none; color: var(--text-dim);
-  font-size: 20px; line-height: 1; cursor: pointer; padding: 1px 6px; border-radius: 4px;
-}
-.modal-close:hover { background: var(--hover-bg); color: var(--text); }
 
 .subbar {
   display: flex; align-items: center; gap: 14px;
@@ -305,7 +284,7 @@ watch(tab, resetSort)
 .link { background: none; border: none; color: var(--accent); font: inherit; font-size: 11px; cursor: pointer; padding: 0; }
 .link:hover { text-decoration: underline; }
 
-.modal-body { flex: 1; overflow: auto; min-height: 0; position: relative; }
+.table-area { flex: 1; overflow: auto; min-height: 0; position: relative; }
 
 .table-wrap { position: absolute; inset: 0; overflow: auto; background: var(--bg); }
 table { width: 100%; border-collapse: collapse; font-size: 13px; }

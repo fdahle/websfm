@@ -42,7 +42,7 @@ const ARM_AXES = [
   { field: 'gnssLeverArmY', label: 'y down (m)' },
   { field: 'gnssLeverArmZ', label: 'z forward (m)' },
 ]
-const fidMarks = (s) => s.fiducials?.marks ?? []
+const fidMarks = (s) => s.fiducialCalibration?.marks ?? []
 const fidCount = (s) => fidMarks(s).length
 
 // Emit the full updated marks array (marks are few; simplest source of truth).
@@ -168,7 +168,7 @@ function diff(sensorId, key) {
 // canonical pixel scale isn't reconstructable from the stored sensor).
 function focalMmPerPx(s) {
   if (!isFilm(s) && s.focalUnit === 'px') return null
-  const focalMm = isFilm(s) ? s.fiducials?.focalMm : s.focal
+  const focalMm = isFilm(s) ? s.fiducialCalibration?.focalMm : s.focal
   if (focalMm == null || focalMm === '') return null
   const img = props.images.find((i) => i.sensorId === s.id)
   const k = resolveK(img?.meta ?? null, s)
@@ -189,7 +189,7 @@ function estFocal(s) {
 function focalDiff(s) {
   const ef = estFocal(s)
   if (!ef) return null
-  const init = isFilm(s) ? s.fiducials?.focalMm : s.focal
+  const init = isFilm(s) ? s.fiducialCalibration?.focalMm : s.focal
   if (init == null || init === '') return null
   return { value: ef.value - Number(init), unit: ef.unit }
 }
@@ -489,7 +489,7 @@ const totalCols = computed(() => 4 + NUM_COLS.length + 2)
                     type="number"
                     disabled
                     title="Film sensor: the focal (mm) is set in the fiducial editor below — open it with the ⛶ button in the Kind column. It lives there (alongside the fiducial marks) because interior orientation needs it; this field is read-only to avoid two focal values drifting apart."
-                    :value="s.fiducials?.focalMm ?? ''"
+                    :value="s.fiducialCalibration?.focalMm ?? ''"
                   />
                   <span class="unit-static" title="Focal is in mm for a film sensor">mm</span>
                 </template>
@@ -619,13 +619,13 @@ const totalCols = computed(() => 4 + NUM_COLS.length + 2)
             <div class="fid-editor">
               <div class="fid-io">
                 <label>Focal (mm)
-                  <input class="cell-input" type="number" step="any" :value="s.fiducials?.focalMm ?? ''"
+                  <input class="cell-input" type="number" step="any" :value="s.fiducialCalibration?.focalMm ?? ''"
                     @change="onEdit(s.id, 'focalMm', $event)" /></label>
                 <label>Principal x (mm)
-                  <input class="cell-input" type="number" step="any" :value="s.fiducials?.ppxMm ?? ''"
+                  <input class="cell-input" type="number" step="any" :value="s.fiducialCalibration?.ppxMm ?? ''"
                     @change="onEdit(s.id, 'ppxMm', $event)" /></label>
                 <label>Principal y (mm)
-                  <input class="cell-input" type="number" step="any" :value="s.fiducials?.ppyMm ?? ''"
+                  <input class="cell-input" type="number" step="any" :value="s.fiducialCalibration?.ppyMm ?? ''"
                     @change="onEdit(s.id, 'ppyMm', $event)" /></label>
                 <span class="fid-note" :class="{ warn: fidCount(s) < 3 }">
                   {{ fidCount(s) < 3 ? `≥3 marks needed (have ${fidCount(s)})` : `${fidCount(s)} marks` }}

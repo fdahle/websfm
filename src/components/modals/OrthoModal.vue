@@ -1,13 +1,14 @@
 <script setup>
 import { linearCrsUnit } from '../../core/crs.js'
-import { computed, ref, watch } from 'vue'
+import { computed, ref } from 'vue'
 import ModalShell from './ui/ModalShell.vue'
 import SettingsField from './ui/SettingsField.vue'
 import WarnBox from './ui/WarnBox.vue'
-import CrsSuggestion from './ui/CrsSuggestion.vue'
+import FrameCrsField from './ui/FrameCrsField.vue'
 import GlossaryTerm from '../glossary/GlossaryTerm.vue'
 import { ORTHO_DEFAULTS } from '../../core/defaults.user.js'
 import { useComputeSettings } from '../../composables/useComputeSettings.js'
+import { checkNumberFields } from '../../utils/numberFields.js'
 
 // Build Orthophoto. Reprojects each cell of a SURFACE through the cached depth
 // maps (occlusion via their depth planes, colour from their RGB planes). The
@@ -31,25 +32,10 @@ const props = defineProps({
 
 const emit = defineEmits(['close', 'run', 'apply-crs-suggestion'])
 
-const blockedReason = computed(() => ({
-  geographic: ' — geographic CRS',
-  evidence: ' — needs ≥3 camera positions or GCPs',
-}[props.georeferenceBlocker] ?? ''))
-
-// Applying the suggested CRS says the user wants a georeferenced product, so once
-// the fit becomes possible the frame flips to it (only after their click).
-const appliedCrsSuggestion = ref(false)
-function applyCrsSuggestion(suggestion) {
-  appliedCrsSuggestion.value = true
-  emit('apply-crs-suggestion', suggestion)
-}
-watch(() => props.canGeoreference, (can) => {
-  if (can && appliedCrsSuggestion.value) settings.value.crs = 'project'
-})
-
 // A georeferenced project defaults to the project CRS: a local-frame product has no
 // map position (core/products/productLayers.js), so 'local' there would be a trap.
 // Read once at open — a fact about the project, never re-applied over the user's pick.
+// <FrameCrsField> keeps it valid afterwards (back to local when the georeference goes).
 const settings = ref({ ...ORTHO_DEFAULTS, crs: props.canGeoreference ? 'project' : ORTHO_DEFAULTS.crs })
 
 // Open on the first available surface rather than a dead default: with a mesh
@@ -67,12 +53,6 @@ const outputUnit = computed(() => {
     : props.hasScale ? 'm/px' : 'model units/px'
 })
 
-// The project frame can't be chosen without a georeference — don't leave a stale
-// selection that would silently fall back to local at run time.
-watch(() => props.canGeoreference, (ok) => {
-  if (!ok && settings.value.crs === 'project') settings.value.crs = 'local'
-})
-
 const blendHint = computed(() => ({
   mosaic: 'Each area comes from the photo looking most straight down on it; seams are then evened out.',
   best: 'Per pixel, the view whose depth matched best. Sources can switch from pixel to pixel.',
@@ -82,6 +62,20 @@ const blendHint = computed(() => ({
 // The machine-level memory budget (Settings ▸ Compute), injected at run() like
 // Build DEM: it sizes the run's map/photo cache and gates its working set.
 const { memBudgetBytes } = useComputeSettings()
+
+// Run stays disabled while a field is blank or out of range (rules = the inputs'
+// own min/max/step). 0 is a meaningful GSD / max cost; blank is not. Fields hidden
+// by their blend / fill choice are not checked.
+const numbers = computed(() => {
+  const s = settings.value
+  return checkNumberFields(s, {
+    gsd: { label: 'Ground sample distance', min: 0 },
+    seamWidth: { label: 'Seam blending width', min: 0, max: 5, when: s.blend === 'mosaic' },
+    depthTolRel: { label: 'Occlusion tolerance', min: 0.5, max: 10 },
+    maxCost: { label: 'Max match cost', min: 0, max: 2 },
+    fillRadius: { label: 'Colour fill radius', min: 1, max: 16, integer: true, when: s.fillMethod !== 'none' },
+  })
+})
 
 function run() {
   const { depthTolRel, maxCost, gsd, ...rest } = settings.value
@@ -121,24 +115,13 @@ function run() {
     </WarnBox>
 
     <!-- A DEM already fixes the frame; mesh/plane surfaces are built here, so
-         they need the same choice Build DEM offers. -->
-    <SettingsField v-if="framePicked" label-for="ortho-crs"
-      :hint="hasScale
-        ? 'Local uses a camera-estimated orientation and the current highest-ranked scale evidence, so coordinates are metric but have no CRS.'
-        : 'Local uses a camera-estimated up-vector (up-to-scale); the project CRS fits a similarity to imported poses for real-world coordinates & GSD.'">
-      <template #label>
-        <GlossaryTerm id="coordinate-reference-system">Coordinate frame</GlossaryTerm>
-      </template>
-      <select id="ortho-crs" v-model="settings.crs" class="field-input field-select">
-        <option value="local">{{ hasScale ? 'Local (metres, no CRS)' : 'Local (model units)' }}</option>
-        <option value="project" :disabled="!canGeoreference">
-          {{ projectCrs || 'Project CRS' }}{{ canGeoreference ? '' : blockedReason }}
-        </option>
-      </select>
-      <CrsSuggestion v-if="georeferenceBlocker === 'geographic'"
-        :suggestion="crsSuggestion" :current-crs="projectCrs || 'EPSG:4326'"
-        @apply="applyCrsSuggestion" />
-    </SettingsField>
+         they need the same choice Build DEM offers. v-show, not v-if: the field
+         keeps the frame valid (and remembers an applied CRS suggestion) while a
+         DEM surface hides it. -->
+    <FrameCrsField v-show="framePicked" id="ortho-crs" v-model="settings.crs"
+      :can-georeference="canGeoreference" :has-scale="hasScale" :project-crs="projectCrs"
+      :georeference-blocker="georeferenceBlocker" :crs-suggestion="crsSuggestion"
+      @apply-crs-suggestion="(s) => emit('apply-crs-suggestion', s)" />
 
     <!-- The raw min/max lets far background (an oblique capture sees almost to the
          horizon) set the raster size; the dense core keeps the site. The run logs
@@ -157,7 +140,7 @@ function run() {
       <template #label>
         <GlossaryTerm id="ground-sample-distance">Ground sample distance</GlossaryTerm>
       </template>
-      <input id="ortho-gsd" v-model.number="settings.gsd" type="number" min="0" step="0.01" class="field-input" />
+      <input id="ortho-gsd" v-model.number="settings.gsd" :aria-invalid="numbers.bad.gsd" type="number" min="0" step="0.01" class="field-input" />
     </SettingsField>
 
     <SettingsField label="View blending" label-for="ortho-blend" :hint="blendHint">
@@ -178,7 +161,7 @@ function run() {
       </SettingsField>
       <SettingsField label="Seam blending width" label-for="ortho-seam" unit="%"
         hint="Width of the cross-fade at each seam, as a % of the orthophoto's shorter side (at most 128 px). 0 = hard seams.">
-        <input id="ortho-seam" v-model.number="settings.seamWidth" type="number" min="0" max="5" step="0.25" class="field-input" />
+        <input id="ortho-seam" v-model.number="settings.seamWidth" :aria-invalid="numbers.bad.seamWidth" type="number" min="0" max="5" step="0.25" class="field-input" />
       </SettingsField>
     </template>
 
@@ -187,7 +170,7 @@ function run() {
       <template #label>
         <GlossaryTerm id="depth-map">Occlusion tolerance</GlossaryTerm>
       </template>
-      <input id="ortho-tol" v-model.number="settings.depthTolRel" type="number" min="0.5" max="10" step="0.5" class="field-input" />
+      <input id="ortho-tol" v-model.number="settings.depthTolRel" :aria-invalid="numbers.bad.depthTolRel" type="number" min="0.5" max="10" step="0.5" class="field-input" />
     </SettingsField>
 
     <SettingsField label-for="ortho-cost"
@@ -195,7 +178,7 @@ function run() {
       <template #label>
         Max <GlossaryTerm id="photometric-consistency">match cost</GlossaryTerm>
       </template>
-      <input id="ortho-cost" v-model.number="settings.maxCost" type="number" min="0" max="2" step="0.1" class="field-input" />
+      <input id="ortho-cost" v-model.number="settings.maxCost" :aria-invalid="numbers.bad.maxCost" type="number" min="0" max="2" step="0.1" class="field-input" />
     </SettingsField>
 
     <SettingsField label="Colour gap interpolation" label-for="ortho-fill-method"
@@ -209,12 +192,12 @@ function run() {
 
     <SettingsField v-if="settings.fillMethod !== 'none'" label="Colour fill radius" label-for="ortho-fill" unit="px"
       hint="Maximum distance to an originally sampled colour. Small values close speckles without bridging large unseen areas.">
-      <input id="ortho-fill" v-model.number="settings.fillRadius" type="number" min="1" max="16" step="1" class="field-input" />
+      <input id="ortho-fill" v-model.number="settings.fillRadius" :aria-invalid="numbers.bad.fillRadius" type="number" min="1" max="16" step="1" class="field-input" />
     </SettingsField>
 
     <template #footer>
       <button class="btn" @click="emit('close')">Cancel</button>
-      <button class="btn btn-primary" :disabled="!canRun" @click="run">Build Orthophoto</button>
+      <button class="btn btn-primary" :disabled="!canRun || !numbers.valid" :title="numbers.reason" @click="run">Build Orthophoto</button>
     </template>
   </ModalShell>
 </template>

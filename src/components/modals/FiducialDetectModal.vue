@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onBeforeUnmount } from 'vue'
 import ModalShell from './ui/ModalShell.vue'
 import SettingsField from './ui/SettingsField.vue'
 import SettingsGroup from './ui/SettingsGroup.vue'
@@ -120,6 +120,12 @@ const draftRows = computed(() => drafts.value.map((d) => ({
   reason: d.reason, confidence: d.confidence, draft: d,
 })))
 
+// Every way out of the dialog — the footer's Cancel, ×, Escape, the backdrop, the
+// global Escape closer — unmounts it, so cancelling here makes each of them a real
+// cancel: the store stops starting images and stores nothing from this run.
+let cancelRequested = false
+onBeforeUnmount(() => { cancelRequested = true })
+
 async function run() {
   if (running.value || !props.images.length) return
   running.value = true; error.value = ''; results.value = null; drafts.value = []; masksGenerated.value = 0
@@ -130,7 +136,9 @@ async function run() {
       settings: settings.value,
       overwrite: settings.value.overwrite,
       onProgress: (done, total) => { progress.value = { done, total } },
+      shouldCancel: () => cancelRequested,
     })
+    if (out.cancelled) return
     results.value = out.perImage; drafts.value = out.drafts; masksGenerated.value = out.masksGenerated ?? 0
   } catch (err) { error.value = err.message }
   finally { running.value = false }
@@ -245,7 +253,8 @@ function rejectDraft(draft) { drafts.value = drafts.value.filter((d) => d !== dr
     </template>
 
     <template #footer>
-      <button class="btn" @click="emit('close')">{{ results ? 'Done' : 'Cancel' }}</button>
+      <button class="btn" :title="running ? 'Stop detecting and close — nothing from this run is stored' : ''"
+        @click="emit('close')">{{ results ? 'Done' : 'Cancel' }}</button>
       <button class="btn btn-primary" :disabled="running || !images.length" @click="run">
         {{ running ? 'Detecting…' : 'Detect Fiducials' }}
       </button>

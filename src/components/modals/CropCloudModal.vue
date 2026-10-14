@@ -4,6 +4,9 @@ import ModalShell from './ui/ModalShell.vue'
 import SettingsField from './ui/SettingsField.vue'
 import SettingsGroup from './ui/SettingsGroup.vue'
 import WarnBox from './ui/WarnBox.vue'
+import NoSourceWarn from './ui/NoSourceWarn.vue'
+import SourcePicker from './ui/SourcePicker.vue'
+import { useSourcePick, cloudOptionLabel, meshOptionLabel } from '../../composables/useSourcePick.js'
 import { CROP_CLOUD_DEFAULTS } from '../../core/defaults.user.js'
 import { cloudBounds, cloudCount } from '../../core/products/cloudEdit.js'
 
@@ -24,8 +27,7 @@ const props = defineProps({
 const emit = defineEmits(['close', 'run'])
 
 const settings = ref({ ...CROP_CLOUD_DEFAULTS })
-const sourceId = ref(props.clouds.some((c) => c.id === props.initialId) ? props.initialId : props.clouds[0]?.id ?? null)
-const picked = computed(() => props.clouds.find((c) => c.id === sourceId.value) ?? null)
+const { id: sourceId, item: picked } = useSourcePick(() => props.clouds, { initialId: props.initialId })
 // The points the box is tested against: a cloud's points, or a mesh's vertices.
 const source = computed(() => (picked.value && props.mesh
   ? { count: picked.value.nVerts, pos: picked.value.pos } : picked.value))
@@ -101,7 +103,7 @@ function run() {
 
 <template>
   <ModalShell :title="mesh ? 'Crop Mesh' : 'Crop Cloud'" @close="emit('close')">
-    <WarnBox v-if="!clouds.length && mesh">No mesh yet. Build one with <strong>Reconstruct ▸ Mesh</strong> or import one.</WarnBox>
+    <NoSourceWarn v-if="!clouds.length && mesh" kind="mesh" />
     <WarnBox v-else-if="!clouds.length">
       No editable point cloud. Run <strong>Densify</strong> or import a cloud first — cropping
       applies to dense clouds; a sparse cloud carries the view-tracks the later stages read
@@ -110,14 +112,9 @@ function run() {
 
     <template v-else>
       <SettingsGroup title="Source">
-        <SettingsField :label="mesh ? 'Mesh' : 'Cloud'" label-for="crop-src"
-          :hint="mesh ? 'The crop adds a new mesh; this one is left untouched.' : 'The crop adds a new cloud; this one is left untouched.'">
-          <select id="crop-src" v-model="sourceId" class="field-select">
-            <option v-for="c in clouds" :key="c.id" :value="c.id">
-              {{ c.name }} — {{ c.count.toLocaleString() }} {{ mesh ? 'triangles' : 'points' }}
-            </option>
-          </select>
-        </SettingsField>
+        <SourcePicker id="crop-src" v-model="sourceId" :label="mesh ? 'Mesh' : 'Cloud'" :items="clouds"
+          :option-label="mesh ? meshOptionLabel : cloudOptionLabel"
+          :hint="mesh ? 'The crop adds a new mesh; this one is left untouched.' : 'The crop adds a new cloud; this one is left untouched.'" />
       </SettingsGroup>
 
       <SettingsGroup title="Bounds">

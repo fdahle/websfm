@@ -49,10 +49,21 @@ const columns = [
 ]
 const flagged = computed(() => rows.value.filter((r) => r.ok === false).map((r) => r.id))
 const unscored = computed(() => props.images.length - scored.value.length)
+
+// The store files them under ONE "Low image quality" group (reused on later clicks,
+// stores/images/imageGroups.js). Say it worked, and rest the button until the
+// flagged set changes (new threshold or rescore) so a second click is not a no-op.
+const groupedKey = ref('')
+const flaggedKey = computed(() => flagged.value.join('|'))
+const grouped = computed(() => !!flagged.value.length && groupedKey.value === flaggedKey.value)
+function groupFlagged() {
+  emit('group', flagged.value)
+  groupedKey.value = flaggedKey.value
+}
 </script>
 
 <template>
-  <ModalShell title="Image Quality" @close="emit('close')">
+  <ModalShell title="Image Quality" width="760px" @close="emit('close')">
     <WarnBox v-if="!images.length">Import images first.</WarnBox>
     <template v-else>
       <SettingsGroup title="Score">
@@ -75,8 +86,10 @@ const unscored = computed(() => props.images.length - scored.value.length)
       </p>
     </template>
     <template #footer>
-      <button class="btn" :disabled="!flagged.length" title="Put the flagged images in one image group (display only)"
-        @click="emit('group', flagged)">Group flagged</button>
+      <button class="btn" :disabled="!flagged.length || grouped"
+        :title="grouped ? 'The flagged images are in the “Low image quality” image group'
+          : 'Put the flagged images in the “Low image quality” image group (display only)'"
+        @click="groupFlagged">{{ grouped ? 'Grouped ✓' : 'Group flagged' }}</button>
       <button class="btn btn-danger" :disabled="!flagged.length" @click="emit('remove', flagged)">Remove flagged…</button>
       <button class="btn btn-primary" @click="emit('close')">Close</button>
     </template>
@@ -86,5 +99,4 @@ const unscored = computed(() => props.images.length - scored.value.length)
 <style scoped src="./ui/modal.css"></style>
 <style scoped>
 .bad { color: var(--danger); }
-:deep(.modal) { width: min(760px, 94vw); }
 </style>

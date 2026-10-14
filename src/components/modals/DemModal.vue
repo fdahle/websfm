@@ -1,13 +1,14 @@
 <script setup>
 import { linearCrsUnit } from '../../core/crs.js'
-import { computed, ref, watch } from 'vue'
+import { computed, ref } from 'vue'
 import ModalShell from './ui/ModalShell.vue'
 import SettingsField from './ui/SettingsField.vue'
 import WarnBox from './ui/WarnBox.vue'
-import CrsSuggestion from './ui/CrsSuggestion.vue'
+import FrameCrsField from './ui/FrameCrsField.vue'
 import GlossaryTerm from '../glossary/GlossaryTerm.vue'
 import { DEM_DEFAULTS } from '../../core/defaults.user.js'
 import { useComputeSettings } from '../../composables/useComputeSettings.js'
+import { checkNumberFields } from '../../utils/numberFields.js'
 
 // Build DEM (Digital Surface Model). Rasterises the point cloud into a height
 // grid in the chosen frame. Defaults are the single source of truth in
@@ -40,29 +41,21 @@ const sourceLabel = computed(() => {
 
 const emit = defineEmits(['close', 'run', 'apply-crs-suggestion'])
 
-const blockedReason = computed(() => ({
-  geographic: ' — geographic CRS',
-  evidence: ' — needs ≥3 camera positions or GCPs',
-}[props.georeferenceBlocker] ?? ''))
-
-// Applying the suggested CRS says the user wants a georeferenced product, so once
-// the fit becomes possible the frame flips to it (only after their click).
-const appliedCrsSuggestion = ref(false)
-function applyCrsSuggestion(suggestion) {
-  appliedCrsSuggestion.value = true
-  emit('apply-crs-suggestion', suggestion)
-}
-watch(() => props.canGeoreference, (can) => {
-  if (can && appliedCrsSuggestion.value) settings.value.crs = 'project'
-})
-
 // A georeferenced project defaults to the project CRS: a local-frame product has no
 // map position (core/products/productLayers.js), so 'local' there would be a trap.
 // Read once at open — a fact about the project, never re-applied over the user's pick.
+// <FrameCrsField> keeps it valid afterwards (back to local when the georeference goes).
 const settings = ref({ ...DEM_DEFAULTS, crs: props.canGeoreference ? 'project' : DEM_DEFAULTS.crs })
 // The machine-level memory budget (Settings ▸ Compute), injected at run() like
 // the dense modals: it bounds the staged points and the grid.
 const { memBudgetBytes } = useComputeSettings()
+
+// Run stays disabled while a field is blank or out of range (rules = the inputs'
+// own min/max/step). GSD 0 is auto; blank is not — it would read as 0 silently.
+const numbers = computed(() => checkNumberFields(settings.value, {
+  gsd: { label: 'Ground sample distance', min: 0 },
+  fillRadius: { label: 'Interpolation radius', min: 1, max: 32, integer: true, when: settings.value.fillMethod !== 'none' },
+}))
 
 function run() {
   // Pass gsd only when set (0 ⇒ let the worker auto-suggest).
@@ -87,23 +80,10 @@ function run() {
       so the surface is approximate. Run <b>Depth maps → Densify</b> for a true DSM.
     </WarnBox>
 
-    <SettingsField label-for="dem-crs"
-      :hint="hasScale
-        ? 'Local uses a camera-estimated orientation and the current highest-ranked scale evidence, so coordinates are metric but have no CRS.'
-        : 'Local uses a camera-estimated up-vector (up-to-scale); the project CRS fits a similarity to imported poses for real-world heights & GSD.'">
-      <template #label>
-        <GlossaryTerm id="coordinate-reference-system">Coordinate frame</GlossaryTerm>
-      </template>
-      <select id="dem-crs" v-model="settings.crs" class="field-input field-select">
-        <option value="local">{{ hasScale ? 'Local (metres, no CRS)' : 'Local (model units)' }}</option>
-        <option value="project" :disabled="!canGeoreference">
-          {{ projectCrs || 'Project CRS' }}{{ canGeoreference ? '' : blockedReason }}
-        </option>
-      </select>
-      <CrsSuggestion v-if="georeferenceBlocker === 'geographic'"
-        :suggestion="crsSuggestion" :current-crs="projectCrs || 'EPSG:4326'"
-        @apply="applyCrsSuggestion" />
-    </SettingsField>
+    <FrameCrsField id="dem-crs" v-model="settings.crs" real-world="heights"
+      :can-georeference="canGeoreference" :has-scale="hasScale" :project-crs="projectCrs"
+      :georeference-blocker="georeferenceBlocker" :crs-suggestion="crsSuggestion"
+      @apply-crs-suggestion="(s) => emit('apply-crs-suggestion', s)" />
 
     <SettingsField label-for="dem-gsd"
       :unit="settings.crs === 'project' ? `${linearCrsUnit(projectCrs)}/px` : localUnit"
@@ -111,7 +91,7 @@ function run() {
       <template #label>
         <GlossaryTerm id="ground-sample-distance">Ground sample distance</GlossaryTerm>
       </template>
-      <input id="dem-gsd" v-model.number="settings.gsd" type="number" min="0" step="0.1" class="field-input" />
+      <input id="dem-gsd" v-model.number="settings.gsd" :aria-invalid="numbers.bad.gsd" type="number" min="0" step="0.1" class="field-input" />
     </SettingsField>
 
     <!-- The raw min/max lets far background (an oblique capture sees almost to the
@@ -150,12 +130,12 @@ function run() {
       :hint="isSparseSource
         ? 'Fill empty cells with measured neighbours inside this radius. On a sparse source, a large radius invents surface between distant tie points.'
         : 'Fill empty cells only when an original measured cell lies within this radius.'">
-      <input id="dem-fill" v-model.number="settings.fillRadius" type="number" min="1" max="32" step="1" class="field-input" />
+      <input id="dem-fill" v-model.number="settings.fillRadius" :aria-invalid="numbers.bad.fillRadius" type="number" min="1" max="32" step="1" class="field-input" />
     </SettingsField>
 
     <template #footer>
       <button class="btn" @click="emit('close')">Cancel</button>
-      <button class="btn btn-primary" @click="run">Build DEM</button>
+      <button class="btn btn-primary" :disabled="!numbers.valid" :title="numbers.reason" @click="run">Build DEM</button>
     </template>
   </ModalShell>
 </template>

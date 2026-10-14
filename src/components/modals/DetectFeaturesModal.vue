@@ -10,6 +10,7 @@ import WarnBox from './ui/WarnBox.vue'
 import GlossaryTerm from '../glossary/GlossaryTerm.vue'
 import { useDatasetRecommendations } from '../../composables/useDatasetRecommendations.js'
 import { useRecommendedPreset } from '../../composables/useRecommendedPreset.js'
+import { usePresetSettings, presetOwnedKeys } from '../../composables/usePresetSettings.js'
 import { useComputeSettings } from '../../composables/useComputeSettings.js'
 import {
   DETECT_SIFT_DEFAULTS, DETECT_SIFT_PRESETS, DETECT_PRESET_META,
@@ -19,6 +20,7 @@ import { DETECT_TUNING } from '../../core/tuning.js'
 import { LEARNED_DETECTORS, learnedDetector, detectorLabel } from '../../core/features/learnedDetectors.js'
 import { MODELS, isRedistributable } from '../../core/models/registry.js'
 import { planDetection, planImageDetection } from '../../core/features/detectPlan.js'
+import { checkNumberFields } from '../../utils/numberFields.js'
 
 const props = defineProps({
   // Current image list — used to warn when Append mode would leave a mix of
@@ -89,7 +91,8 @@ const settings = computed(() => {
 })
 
 // Quality presets apply to whichever detector is active (deltas over that detector's
-// defaults). `activePreset` derives from the active settings so any edit flips to Custom.
+// defaults). `activePreset` derives from the active settings, so editing a key the
+// presets set flips to Custom.
 const learnedSpec = computed(() => learnedDetector(detector.value))
 const isLearned = computed(() => !!learnedSpec.value)
 const learnedLabel = computed(() => detectorLabel(detector.value))
@@ -108,14 +111,25 @@ const presetBase = computed(() => DETECT_DEFAULTS_BY_DETECTOR[detector.value] ??
 // Licence note for a learned detector whose weights websfm does not distribute.
 const restrictedModel = computed(() => (learnedSpec.value && !isRedistributable(learnedSpec.value.modelId)
   ? MODELS[learnedSpec.value.modelId] : null))
-const baseId = ref('medium')
-// `maxDimMode` is a mode, not a quality delta — it is orthogonal to the preset and
-// identical across all three, so switching it must not flip the card to Custom.
-const PRESET_MATCH_IGNORE = new Set(['maxDimMode'])
 // Writable proxy onto the active detector's resolution rule, kept in script.
 const maxDimMode = computed({
   get: () => activeSettings.value.maxDimMode ?? 'absolute',
   set: (v) => { activeSettings.value = { ...activeSettings.value, maxDimMode: v } },
+})
+
+// Run stays disabled while a field of the ACTIVE detector is blank or out of range
+// (rules = the inputs' own min/max/step); tiling fields only while they are shown.
+const numbers = computed(() => {
+  const s = activeSettings.value
+  return checkNumberFields(s, {
+    maxDim: { label: s.maxDimMode === 'auto' ? 'Minimum resolution' : 'Detection resolution', min: 100, max: 10000, integer: true },
+    tileSize: { label: 'Max tile size', min: 256, max: 4096, integer: true, when: s.tiling === 'manual' },
+    overlap: { label: 'Tile overlap', min: 0, max: 512, integer: true, when: s.tiling !== 'off' },
+    contrastThreshold: { label: 'Contrast threshold', min: 0.001, max: 0.5, when: !isLearned.value },
+    maxKeypoints: isLearned.value
+      ? { label: 'Max keypoints', min: 128, max: 8192, integer: true }
+      : { label: 'Max keypoints', min: 100, max: 50000, integer: true },
+  })
 })
 
 const detectRecommendations = computed(() => {
@@ -143,26 +157,25 @@ const {
 })
 const presetCards = computed(() => withRecommended(DETECT_PRESET_META))
 
-const resolvePreset = (id) => (id === RECOMMENDED_PRESET_ID
-  ? { ...presetBase.value, ...recommendedPatch.value }
-  : { ...presetBase.value, ...presetMap.value[id] })
+// A card (and Reset) restores every detector setting except `maxDimMode`: that is a
+// mode, not a quality delta, so picking "Detailed" keeps the resolution rule and
+// switching it does not flip the card to Custom.
 // Recommended is checked first (it is the more specific claim) — it only exists
 // when it differs from the defaults, but it can coincide with another preset.
-const activePreset = computed(() => {
-  const s = activeSettings.value
-  for (const { id } of presetCards.value) {
-    const r = resolvePreset(id)
-    if (Object.keys(r).every((k) => PRESET_MATCH_IGNORE.has(k) || s[k] === r[k])) return id
-  }
-  return 'custom'
+const {
+  baseId, activePreset, selectPreset: applyPreset,
+} = usePresetSettings({
+  settings: activeSettings,
+  defaults: presetBase,
+  presets: () => ({ ...presetMap.value, [RECOMMENDED_PRESET_ID]: recommendedPatch.value }),
+  cards: presetCards,
+  ownedKeys: () => [...new Set([...Object.keys(presetBase.value),
+    ...presetOwnedKeys({ ...presetMap.value, [RECOMMENDED_PRESET_ID]: recommendedPatch.value })])]
+    .filter((k) => k !== 'maxDimMode'),
 })
 
 function selectPreset(id) {
-  // Preserve the orthogonal mode across a preset change — picking "Detailed"
-  // should not silently switch the resolution rule back to absolute.
-  const { maxDimMode } = activeSettings.value
-  activeSettings.value = { ...resolvePreset(id), maxDimMode }
-  baseId.value = id
+  applyPreset(id)
   if (id === RECOMMENDED_PRESET_ID) logApplied()
 }
 
@@ -252,10 +265,18 @@ function attemptRun() {
   if (oversizedSpImages.value.length > 0) { awaitingOversizeChoice.value = true; return }
   doRun()
 }
+// Escape / × / backdrop on the dialog underneath must only dismiss the confirmation
+// stacked on it ("Go back"), never the whole dialog. The global modal-focus owner
+// (utils/modalFocus.js) normally moves focus into the confirmation and makes this
+// dialog inert, so this is the backstop for a key that still lands here.
+function onShellClose() {
+  if (awaitingOversizeChoice.value) awaitingOversizeChoice.value = false
+  else emit('close')
+}
 </script>
 
 <template>
-  <ModalShell title="Detect Features" @close="emit('close')">
+  <ModalShell title="Detect Features" @close="onShellClose">
     <SettingsField label-for="detector-sel"
       hint="SIFT works on any image; SuperPoint and DISK (learned) pair with LightGlue matching.">
       <template #label>
@@ -349,7 +370,7 @@ function attemptRun() {
           :hint="maxDimMode === 'auto'
             ? 'Floor for the scaled resolution — larger images get proportionally more, up to a per-preset ceiling.'
             : 'Long side the detector works at. Keypoints are mapped back to native pixels afterwards.'">
-          <input id="maxDim" v-model.number="activeSettings.maxDim" type="number" min="100" max="10000" step="100" class="field-input" />
+          <input id="maxDim" v-model.number="activeSettings.maxDim" :aria-invalid="numbers.bad.maxDim" type="number" min="100" max="10000" step="100" class="field-input" />
         </SettingsField>
       </SettingsStep>
 
@@ -366,11 +387,11 @@ function attemptRun() {
         </SettingsField>
         <SettingsField v-if="activeSettings.tiling === 'manual'" label="Max tile size" label-for="tileSize" unit="px"
           hint="Upper limit; websfm uses the fewest tiles that fit.">
-          <input id="tileSize" v-model.number="activeSettings.tileSize" type="number" min="256" max="4096" step="64" class="field-input" />
+          <input id="tileSize" v-model.number="activeSettings.tileSize" :aria-invalid="numbers.bad.tileSize" type="number" min="256" max="4096" step="64" class="field-input" />
         </SettingsField>
         <SettingsField v-if="tilingOn" label="Tile overlap" label-for="overlap" unit="px"
           hint="Each tile keeps only features at least half this far from a cut.">
-          <input id="overlap" v-model.number="activeSettings.overlap" type="number" min="0" max="512" step="16" class="field-input" />
+          <input id="overlap" v-model.number="activeSettings.overlap" :aria-invalid="numbers.bad.overlap" type="number" min="0" max="512" step="16" class="field-input" />
         </SettingsField>
         <WarnBox v-if="oversizedSpImages.length">
           {{ oversizedSpImages.length }} image{{ oversizedSpImages.length !== 1 ? 's' : '' }}
@@ -385,27 +406,27 @@ function attemptRun() {
           <template #label>
             <GlossaryTerm id="keypoint">Contrast threshold</GlossaryTerm>
           </template>
-          <input id="contrast" v-model.number="siftSettings.contrastThreshold" type="number" min="0.001" max="0.5" step="0.001" class="field-input" />
+          <input id="contrast" v-model.number="siftSettings.contrastThreshold" :aria-invalid="numbers.bad.contrastThreshold" type="number" min="0.001" max="0.5" step="0.001" class="field-input" />
         </SettingsField>
       </SettingsStep>
 
       <SettingsStep step="4" title="Keep the strongest" :effect="keepEffect">
         <SettingsField v-if="!isLearned" label="Max keypoints" label-for="maxKp">
-          <input id="maxKp" v-model.number="siftSettings.maxKeypoints" type="number" min="100" max="50000" step="100" class="field-input" />
+          <input id="maxKp" v-model.number="siftSettings.maxKeypoints" :aria-invalid="numbers.bad.maxKeypoints" type="number" min="100" max="50000" step="100" class="field-input" />
         </SettingsField>
         <SettingsField v-else label-for="sp-maxKp"
           hint="LightGlue matching cost grows with the square of this.">
           <template #label>
             Max <GlossaryTerm id="descriptor">keypoints</GlossaryTerm>
           </template>
-          <input id="sp-maxKp" v-model.number="lp.maxKeypoints" type="number" min="128" max="8192" step="128" class="field-input" />
+          <input id="sp-maxKp" v-model.number="lp.maxKeypoints" :aria-invalid="numbers.bad.maxKeypoints" type="number" min="128" max="8192" step="128" class="field-input" />
         </SettingsField>
       </SettingsStep>
     </AdvancedDisclosure>
 
     <template #footer>
       <button class="btn" @click="emit('close')">Cancel</button>
-      <button class="btn btn-primary" @click="attemptRun">Run on All Images</button>
+      <button class="btn btn-primary" :disabled="!numbers.valid" :title="numbers.reason" @click="attemptRun">Run on All Images</button>
     </template>
   </ModalShell>
 

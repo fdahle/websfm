@@ -130,7 +130,7 @@ async function copyRecipe() {
 </script>
 
 <template>
-  <ModalShell title="Workflow Builder" aria-label="Workflow Builder" @close="emit('close')">
+  <ModalShell title="Workflow Builder" aria-label="Workflow Builder" width="1380px" height="860px" flush :scroll="false" @close="emit('close')">
     <div v-if="workflow" class="builder">
       <header class="builder-toolbar">
         <label class="workflow-identity">
@@ -342,8 +342,6 @@ async function copyRecipe() {
 
 <style scoped src="./ui/modal.css"></style>
 <style scoped>
-:deep(.modal) { width: min(1380px, 94vw); height: min(860px, 92vh); }
-:deep(.modal-body) { padding: 0; overflow: hidden; flex: 1; }
 :deep(.modal-footer) { flex-wrap: wrap; }
 .builder { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .builder-toolbar { display: flex; gap: 8px; align-items: flex-end; padding: 10px 12px; border-bottom: 1px solid var(--panel-border); }

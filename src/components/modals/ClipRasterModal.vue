@@ -1,9 +1,10 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import ModalShell from './ui/ModalShell.vue'
 import SettingsField from './ui/SettingsField.vue'
 import SettingsGroup from './ui/SettingsGroup.vue'
 import WarnBox from './ui/WarnBox.vue'
+import { useSourcePick } from '../../composables/useSourcePick.js'
 import { polygonsFromGeoJSON } from '../../core/products/rasterClip.js'
 
 // Clip to Polygon (Tools ▸ Products ▾) — export the DEM or orthophoto with every
@@ -24,7 +25,11 @@ const product = computed(() => (kind.value === 'ortho' ? props.ortho : props.dem
 const candidates = computed(() => props.measurements.filter((m) => (m.kind === 'area' || m.kind === 'volume')
   && m.source === `product:${kind.value}` && (m.world?.length ?? 0) >= 3))
 const sourceMode = ref(candidates.value.length ? 'measurement' : 'file')
-const measurementId = ref(candidates.value[0]?.id ?? null)
+// Always one of THIS product's measurements (the first, unless the user picked another).
+const { id: measurementId } = useSourcePick(candidates)
+// The measurements are per product: switching DEM ↔ orthophoto re-decides the polygon
+// source from the new product's own, instead of keeping a mode with nothing to pick.
+watch(kind, () => { sourceMode.value = candidates.value.length ? 'measurement' : 'file' })
 const filePolygons = ref(null)
 const fileNote = ref('')
 const compression = ref('deflate')

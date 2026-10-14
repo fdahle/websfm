@@ -10,7 +10,6 @@ import { configureWorkerPoolSize, MAX_POOL_SIZE } from '../workers/computeClient
 // memBudgetGb: the dense pre-flight (Build Depth Maps, Step 5) refuses to start if
 // the projected peak memory exceeds this, to stop the browser killing the tab. It's
 // a property of *this machine's* RAM, not of a given project — hence a global setting.
-// Key preserved from the old DepthMapsModal field so existing values migrate.
 const BUDGET_KEY = 'websfm.dense.memBudgetGb'
 const GiB = 1024 ** 3
 const DEFAULT_BUDGET_GB = DEFAULT_BUDGET_BYTES / GiB

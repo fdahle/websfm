@@ -5,6 +5,7 @@ import SettingsField from './ui/SettingsField.vue'
 import SettingsGroup from './ui/SettingsGroup.vue'
 import WarnBox from './ui/WarnBox.vue'
 import { TERRAIN_DEFAULTS } from '../../core/defaults.user.js'
+import { checkNumberFields } from '../../utils/numberFields.js'
 
 // Slope, Aspect, Hillshade (Tools ▸ Products ▾) — terrain derivatives of the DEM
 // (Horn's method, as gdaldem; core/products/terrain.js), each downloaded as a
@@ -28,6 +29,12 @@ function toggle(id) {
   settings.value.products = PRODUCTS.filter((p) => (p.id === id ? !on : has(p.id))).map((p) => p.id)
 }
 const geographic = computed(() => /longlat|EPSG:4326\b/i.test(props.dem?.crs || ''))
+// Export stays disabled while a sun angle is blank or out of range (rules = the
+// inputs' own min/max); they only matter when a hillshade is requested.
+const numbers = computed(() => checkNumberFields(settings.value, {
+  azimuth: { label: 'Sun azimuth', min: 0, max: 360, when: has('hillshade') },
+  altitude: { label: 'Sun altitude', min: 1, max: 90, when: has('hillshade') },
+}))
 
 function run() {
   const s = settings.value
@@ -60,10 +67,10 @@ function run() {
       </SettingsGroup>
       <SettingsGroup v-if="has('hillshade')" title="Hillshade">
         <SettingsField label="Sun azimuth" label-for="tr-az" unit="°" hint="315 = from the north-west, the cartographic convention.">
-          <input id="tr-az" v-model.number="settings.azimuth" type="number" min="0" max="360" step="5" class="field-input" />
+          <input id="tr-az" v-model.number="settings.azimuth" :aria-invalid="numbers.bad.azimuth" type="number" min="0" max="360" step="5" class="field-input" />
         </SettingsField>
         <SettingsField label="Sun altitude" label-for="tr-alt" unit="°">
-          <input id="tr-alt" v-model.number="settings.altitude" type="number" min="1" max="90" step="5" class="field-input" />
+          <input id="tr-alt" v-model.number="settings.altitude" :aria-invalid="numbers.bad.altitude" type="number" min="1" max="90" step="5" class="field-input" />
         </SettingsField>
         <SettingsField hint="Blends four sun directions, so no slope disappears into shadow.">
           <label class="checkbox-row"><input v-model="settings.multidirectional" type="checkbox" class="checkbox" /> Multidirectional</label>
@@ -80,7 +87,7 @@ function run() {
     </template>
     <template #footer>
       <button class="btn" @click="emit('close')">Cancel</button>
-      <button class="btn btn-primary" :disabled="!dem || geographic || !settings.products.length" @click="run">Export</button>
+      <button class="btn btn-primary" :disabled="!dem || geographic || !settings.products.length || !numbers.valid" :title="numbers.reason" @click="run">Export</button>
     </template>
   </ModalShell>
 </template>

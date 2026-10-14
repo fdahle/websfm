@@ -2,9 +2,11 @@
 import { computed, onMounted, ref } from 'vue'
 import CrsPicker from '../controls/CrsPicker.vue'
 import CrsSuggestion from './ui/CrsSuggestion.vue'
+import ModalShell from './ui/ModalShell.vue'
 import { formatBytes, ARCHIVE_DERIVED_DIRS } from '../../core/io/projectArchive.js'
 import { folderLabel, isFolderProject } from '../../core/io/folderProject.js'
 import * as opfs from '../../utils/opfs.js'
+import { confirmDialog } from '../../composables/useConfirmations.js'
 import { version as appVersion } from '../../../package.json'
 
 const props = defineProps({
@@ -64,7 +66,11 @@ function commitName() {
 
 async function onClearDerived() {
   if (!derivedBytes.value) return
-  if (!window.confirm(`Clear ${formatBytes(derivedBytes.value)} of derived data? Depth maps and raster products will need to be recomputed; source data and reconstructions are kept.`)) return
+  if (!(await confirmDialog({
+    title: 'Clear derived data?',
+    message: `Clear ${formatBytes(derivedBytes.value)} of derived data? Depth maps and raster products will need to be recomputed; source data and reconstructions are kept.`,
+    confirmLabel: 'Clear',
+  }))) return
   clearing.value = true
   error.value = ''
   try {
@@ -81,86 +87,78 @@ onMounted(measure)
 </script>
 
 <template>
-  <div class="modal-overlay" @click.self="emit('close')" @keydown.esc="emit('close')">
-    <div class="modal" role="dialog" aria-modal="true" aria-label="Project settings">
-      <div class="modal-header">
-        <span class="modal-title">Project Settings</span>
-        <button class="modal-close" title="Close" @click="emit('close')">×</button>
-      </div>
+  <!-- Flush: each section carries its own padding and divider. -->
+  <ModalShell class="project-settings" title="Project Settings" aria-label="Project settings" width="520px" flush @close="emit('close')">
+    <div class="sections">
+      <section class="section">
+        <h3>Project</h3>
+        <label class="field">
+          <span>Name</span>
+          <input v-model="name" maxlength="80" @change="commitName" @keydown.enter="commitName">
+        </label>
+        <div class="readout-row">
+          <span>Capture type</span>
+          <strong>{{ project.sceneType === 'object' ? 'Object capture' : 'Aerial / mapping' }}</strong>
+        </div>
+        <div class="readout-row">
+          <span>Location</span>
+          <strong>{{ isFolderProject(project) ? folderLabel(project) : 'Browser storage' }}</strong>
+        </div>
+        <div class="readout-row">
+          <span>Created with</span>
+          <strong>{{ project.createdWithVersion ? `websfm v${project.createdWithVersion}` : 'Unknown' }}</strong>
+        </div>
+        <div class="readout-row">
+          <span>Current app</span>
+          <strong>websfm v{{ appVersion }}</strong>
+        </div>
+      </section>
 
-      <div class="modal-body">
-        <section class="section">
-          <h3>Project</h3>
-          <label class="field">
-            <span>Name</span>
-            <input v-model="name" maxlength="80" @change="commitName" @keydown.enter="commitName">
-          </label>
-          <div class="readout-row">
-            <span>Capture type</span>
-            <strong>{{ project.sceneType === 'object' ? 'Object capture' : 'Aerial / mapping' }}</strong>
-          </div>
-          <div class="readout-row">
-            <span>Location</span>
-            <strong>{{ isFolderProject(project) ? folderLabel(project) : 'Browser storage' }}</strong>
-          </div>
-          <div class="readout-row">
-            <span>Created with</span>
-            <strong>{{ project.createdWithVersion ? `websfm v${project.createdWithVersion}` : 'Unknown' }}</strong>
-          </div>
-          <div class="readout-row">
-            <span>Current app</span>
-            <strong>websfm v{{ appVersion }}</strong>
-          </div>
-        </section>
+      <section v-if="project.sceneType !== 'object'" class="section">
+        <h3>Coordinate system</h3>
+        <p>Working CRS for maps, GCPs, footprints, and camera positions. Changing it reprojects existing spatial data.</p>
+        <CrsPicker :model-value="project.crs || 'EPSG:4326'" @update:model-value="emit('set-crs', $event)" />
+        <CrsSuggestion v-if="crsSuggestion" context="settings"
+          :suggestion="crsSuggestion" :current-crs="project.crs || 'EPSG:4326'"
+          @apply="emit('apply-crs-suggestion', $event)" />
+      </section>
 
-        <section v-if="project.sceneType !== 'object'" class="section">
-          <h3>Coordinate system</h3>
-          <p>Working CRS for maps, GCPs, footprints, and camera positions. Changing it reprojects existing spatial data.</p>
-          <CrsPicker :model-value="project.crs || 'EPSG:4326'" @update:model-value="emit('set-crs', $event)" />
-          <CrsSuggestion v-if="crsSuggestion" context="settings"
-            :suggestion="crsSuggestion" :current-crs="project.crs || 'EPSG:4326'"
-            @apply="emit('apply-crs-suggestion', $event)" />
-        </section>
-
-        <section class="section">
-          <div class="section-heading">
-            <div>
-              <h3>Project storage</h3>
-              <p>Files owned by this project only.</p>
-            </div>
-            <strong v-if="!measuring">{{ formatBytes(totalBytes) }}</strong>
+      <section class="section">
+        <div class="section-heading">
+          <div>
+            <h3>Project storage</h3>
+            <p>Files owned by this project only.</p>
           </div>
-          <div v-if="measuring" class="muted">Calculating…</div>
-          <div v-else class="breakdown">
-            <div v-for="row in sections" :key="row.id" class="breakdown-row">
-              <span>{{ row.label }}</span>
-              <span>{{ formatBytes(row.bytes) }}</span>
-            </div>
-            <div v-if="!sections.length" class="muted">No stored project files found.</div>
+          <strong v-if="!measuring">{{ formatBytes(totalBytes) }}</strong>
+        </div>
+        <div v-if="measuring" class="muted">Calculating…</div>
+        <div v-else class="breakdown">
+          <div v-for="row in sections" :key="row.id" class="breakdown-row">
+            <span>{{ row.label }}</span>
+            <span>{{ formatBytes(row.bytes) }}</span>
           </div>
-          <div class="clear-row">
-            <div>
-              <span>Recomputable data</span>
-              <small>Image transcodes, depth maps, DEMs, and orthophotos.</small>
-            </div>
-            <button class="btn danger" :disabled="clearing || measuring || !derivedBytes" @click="onClearDerived">
-              Clear {{ derivedBytes ? formatBytes(derivedBytes) : '' }}
-            </button>
+          <div v-if="!sections.length" class="muted">No stored project files found.</div>
+        </div>
+        <div class="clear-row">
+          <div>
+            <span>Recomputable data</span>
+            <small>Image transcodes, depth maps, DEMs, and orthophotos.</small>
           </div>
-          <div v-if="error" class="error" aria-live="polite">{{ error }}</div>
-        </section>
-      </div>
+          <button class="btn danger" :disabled="clearing || measuring || !derivedBytes" @click="onClearDerived">
+            Clear {{ derivedBytes ? formatBytes(derivedBytes) : '' }}
+          </button>
+        </div>
+        <div v-if="error" class="error" aria-live="polite">{{ error }}</div>
+      </section>
     </div>
-  </div>
+  </ModalShell>
 </template>
 
 <style scoped>
-.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: flex; align-items: center; justify-content: center; z-index: 210; }
-.modal { width: 520px; max-width: 92vw; max-height: 86vh; overflow: auto; background: var(--panel); border: 1px solid var(--panel-border); border-radius: 8px; box-shadow: 0 8px 32px rgba(0,0,0,.4); }
-.modal-header { display: flex; align-items: center; justify-content: space-between; padding: 13px 16px; border-bottom: 1px solid var(--panel-border); }
-.modal-title { font-size: 14px; font-weight: 600; }
-.modal-close { border: 0; background: none; color: var(--text-dim); font-size: 20px; cursor: pointer; padding: 1px 6px; }
-.modal-body { padding: 4px 0; }
+/* One step above the other settings-family dialogs (z 200), as before; two classes
+   outrank the shell's `.overlay`. */
+.overlay.project-settings { z-index: 210; }
+.sections { padding: 4px 0; }
 .section { padding: 14px 16px; }
 .section + .section { border-top: 1px solid var(--panel-border); }
 h3 { font-size: 12px; font-weight: 650; margin-bottom: 8px; color: var(--text); }

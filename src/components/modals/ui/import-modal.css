@@ -1,60 +1,25 @@
-/* Shared chrome for the three tabular *import preview* modals — CameraImportModal,
-   GcpImportModal, FootprintImportModal. Consumed via
+/* Shared styling for the three tabular *import preview* dialogs — CameraImportModal,
+   GcpImportModal, FootprintImportModal — and the two pieces they share,
+   ColumnMappingTable.vue and ImportKindSwitch.vue. Consumed via
    `<style scoped src="./ui/import-modal.css">` (the modal.css / sidebar-sections.css
-   pattern), so rules are scoped per component: a modal that never renders
-   `.role-select` pays nothing for it.
+   pattern), so rules are scoped per component: a component that never renders
+   `.table-wrap` pays nothing for it.
 
-   These three are NOT the `ModalShell` + `modal.css` settings-modal family. They are
-   a file previewer — drop a CSV/GeoJSON, see a header/rows table, assign a role per
-   column, confirm — with their own wider chrome and their own table styling. Camera
-   and GCP import carried byte-identical 151-line copies of all of this; footprint
-   import carried a near-copy.
+   The dialog chrome (overlay, panel, header, ×, footer bar) is ModalShell's. These
+   dialogs mount it `flush` and lay their body out in `.import-body` — normal block
+   flow with margins, not the shell's flex-column-with-gap — so the spacing below
+   holds. What is left here is the file previewer itself: drop a CSV/GeoJSON, see a
+   header/rows table, assign a role per column, confirm. The column-role cells and
+   the "Import as" buttons live in the component that renders them.
 
    Deliberately NOT here, because the three genuinely disagree — each declares its own:
-     .modal              width         (760px camera/GCP, 620px footprint)
+     panel width         ModalShell `width` (960px GCP, 760px camera, 620px footprint)
      .controls           grid-template-columns
      .ctrl-crs           grid-column
      .preview th / td    header styling and monospace body cells
    Keep it that way. A shared value plus a per-modal "undo" is worse than no sharing. */
 
-.modal-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.55);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 200;
-}
-
-.modal {
-  background: var(--panel);
-  border: 1px solid var(--panel-border);
-  border-radius: 8px;
-  max-width: 94vw;
-  max-height: 90vh;
-  display: flex;
-  flex-direction: column;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
-}
-
-.modal-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 13px 16px;
-  border-bottom: 1px solid var(--panel-border);
-}
-
-.modal-title { font-size: 14px; font-weight: 600; color: var(--text); }
-
-.modal-close {
-  background: none; border: none; color: var(--text-dim);
-  font-size: 20px; line-height: 1; cursor: pointer; padding: 1px 6px; border-radius: 4px;
-}
-.modal-close:hover { background: var(--hover-bg); color: var(--text); }
-
-.modal-body { padding: 16px; overflow-y: auto; }
+.import-body { padding: 16px; }
 
 .filename {
   font-size: 12px;
@@ -63,48 +28,14 @@
   font-family: monospace;
 }
 
-/* Content-type toggle */
-.kind-label { margin-bottom: 8px; }
-.kind-toggle {
-  display: inline-flex;
-  border: 1px solid var(--panel-border);
-  border-radius: 6px;
-  overflow: hidden;
-  margin-bottom: 16px;
-}
-
-.kind-btn {
-  background: var(--bg);
-  border: none;
-  color: var(--text-dim);
-  font: inherit;
-  font-size: 13px;
-  padding: 7px 16px;
-  cursor: pointer;
-}
-.kind-btn + .kind-btn { border-left: 1px solid var(--panel-border); }
-.kind-btn:hover { color: var(--text); }
-.kind-btn.active { background: var(--accent); color: #fff; }
-
-/* The declared-kind variant of the toggle above: the user picked the content
-   type before the file dialog, so this states it and offers the correction as
-   a link rather than re-asking with three equal-weight buttons. */
+/* A one-line dim note: ImportKindSwitch's declared-kind sentence, and the camera
+   dialog's accuracy hint. */
 .kind-note {
   margin: 0 0 16px;
   font-size: 12px;
   color: var(--text-dim);
 }
 .kind-note b { color: var(--text); font-weight: 600; }
-.kind-link {
-  background: none;
-  border: none;
-  padding: 0;
-  font: inherit;
-  color: var(--accent);
-  cursor: pointer;
-  text-decoration: underline;
-}
-.kind-link:hover { filter: brightness(1.15); }
 
 .controls {
   display: grid;
@@ -153,27 +84,9 @@
   white-space: nowrap;
 }
 
-.role-cell { padding: 4px; background: var(--bg); position: sticky; top: 0; z-index: 1; }
-
-/* The per-column floor that keeps the selected role label readable lives in
-   ui/importRoles.js `roleSelectStyle` — the data cells are too narrow to size
-   this column, and it depends on the chosen label. */
-.role-select {
-  background: var(--panel); border: 1px solid var(--panel-border); border-radius: 4px;
-  color: var(--text); font: inherit; font-size: 11px; padding: 3px 6px; outline: none; width: 100%;
-}
-.role-select:focus { border-color: var(--accent); }
-
-.header-cell { background: var(--bg); color: var(--text-dim); font-weight: 600; }
-
 .summary { margin-top: 12px; font-size: 12px; }
 .summary .warn { color: #d89a3a; }
 .summary .ok { color: var(--text-dim); }
-
-.modal-footer {
-  display: flex; justify-content: flex-end; gap: 8px;
-  padding: 12px 16px; border-top: 1px solid var(--panel-border);
-}
 
 .btn-secondary {
   background: none; border: 1px solid var(--panel-border); border-radius: 5px;

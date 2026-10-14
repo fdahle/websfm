@@ -1,9 +1,11 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref } from 'vue'
 import ModalShell from './ui/ModalShell.vue'
 import SettingsField from './ui/SettingsField.vue'
 import SettingsGroup from './ui/SettingsGroup.vue'
-import WarnBox from './ui/WarnBox.vue'
+import NoSourceWarn from './ui/NoSourceWarn.vue'
+import SourcePicker from './ui/SourcePicker.vue'
+import { useSourcePick, meshOptionLabel } from '../../composables/useSourcePick.js'
 import { SAMPLE_MESH_DEFAULTS } from '../../core/defaults.user.js'
 
 // Sample to Points (Tools ▸ Mesh ▾) — area-uniform random samples of the surface
@@ -16,8 +18,7 @@ const props = defineProps({
 const emit = defineEmits(['close', 'run'])
 
 const settings = ref({ ...SAMPLE_MESH_DEFAULTS })
-const sourceId = ref(props.meshes.some((m) => m.id === props.initialId) ? props.initialId : props.meshes[0]?.id ?? null)
-const source = computed(() => props.meshes.find((m) => m.id === sourceId.value) ?? null)
+const { id: sourceId, item: source } = useSourcePick(() => props.meshes, { initialId: props.initialId })
 const MAX = 50_000_000
 
 function run() {
@@ -31,14 +32,10 @@ function run() {
 
 <template>
   <ModalShell title="Sample Mesh to Points" @close="emit('close')">
-    <WarnBox v-if="!meshes.length">No mesh yet. Build one with <strong>Reconstruct ▸ Mesh</strong> or import one.</WarnBox>
+    <NoSourceWarn v-if="!meshes.length" kind="mesh" />
     <template v-else>
       <SettingsGroup title="Source">
-        <SettingsField label="Mesh" label-for="sample-src">
-          <select id="sample-src" v-model="sourceId" class="field-select">
-            <option v-for="m in meshes" :key="m.id" :value="m.id">{{ m.name }} — {{ m.count.toLocaleString() }} triangles</option>
-          </select>
-        </SettingsField>
+        <SourcePicker id="sample-src" v-model="sourceId" label="Mesh" :items="meshes" :option-label="meshOptionLabel" />
       </SettingsGroup>
       <SettingsGroup title="Points">
         <SettingsField label="Number of points" label-for="sample-n"

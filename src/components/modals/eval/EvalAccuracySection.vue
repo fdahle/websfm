@@ -11,6 +11,7 @@ import { useImagesStore } from '../../../stores/useImagesStore.js'
 import { sampleDemAtGcps } from '../../../core/eval/demCheck.js'
 import { EVAL_THRESHOLDS as T } from '../../../core/eval/health.js'
 import { useLog } from '../../../composables/useLog.js'
+import { createLatest } from '../../../utils/latestOnly.js'
 
 // Quality Report ▸ Accuracy: the three georeference-accuracy views (GCP residuals,
 // pose residuals, DEM-vs-GCP vertical check) sub-tabbed — they all answer "how
@@ -39,9 +40,20 @@ const ROLE_LABEL = { control: 'Control', check: 'Check', marker: 'Marker' }
 const imageName = (id) => imagesStore.images.find((im) => im.id === id)?.name ?? id
 const gcpRows = ref([])
 const gcpLoading = ref(true)
+// Only the newest refresh writes; a failed one still clears the spinner.
+const gcpRefreshes = createLatest()
 async function refreshGcps() {
+  const token = gcpRefreshes.begin()
   gcpLoading.value = true
+  try {
+    await loadGcpRows(token)
+  } finally {
+    if (gcpRefreshes.isCurrent(token)) gcpLoading.value = false
+  }
+}
+async function loadGcpRows(token) {
   const report = await recon.gcpAccuracyReport()
+  if (!gcpRefreshes.isCurrent(token)) return
   const byId = new Map(report.map((r) => [r.gcpId, r]))
   gcpRows.value = gcpsStore.gcps.map((g) => {
     const r = byId.get(g.id)
@@ -57,14 +69,24 @@ async function refreshGcps() {
       observations: r?.observations ?? [],
     }
   })
-  gcpLoading.value = false
 }
 onMounted(() => { refreshGcps(); refreshScale() })
+// One refit at a time: every toggle re-runs georeference() and the report, and two
+// overlapping refits would race each other's result. The checkboxes are disabled
+// while one is in flight (`toggling`), and the guard below backs that up.
+const toggling = ref(false)
 async function onToggle(row) {
-  gcpsStore.setGcpEnabled(row.id, !row.enabled)
-  await recon.georeference()
-  await refreshGcps()
-  log(`GCP accuracy: refit after ${row.enabled ? 'disabling' : 'enabling'} "${row.name}"`, 'info', 'Evaluate')
+  if (toggling.value) return
+  toggling.value = true
+  try {
+    gcpsStore.setGcpEnabled(row.id, !row.enabled)
+    await recon.georeference()
+    log(`GCP accuracy: refit after ${row.enabled ? 'disabling' : 'enabling'} "${row.name}"`, 'info', 'Evaluate')
+  } catch (err) {
+    log(`GCP accuracy: refit failed — ${err.message}`, 'error', 'Evaluate')
+  } finally {
+    try { await refreshGcps() } finally { toggling.value = false }
+  }
 }
 const rmse = (rows, sel) => {
   const used = rows.filter((r) => sel(r) != null)
@@ -148,11 +170,14 @@ const scaleResolved = ref({ unit: 'model', scale: 1, source: null })
 const scaleLoading = ref(true)
 async function refreshScale() {
   scaleLoading.value = true
-  scaleResolved.value = await recon.effectiveFrameSpec()
-  const rows = await recon.scaleBarReport(
-    scaleResolved.value.unit !== 'model' ? scaleResolved.value.scale : null)
-  scaleRows.value = rows.map((r) => ({ ...r, absResidual: r.residualM == null ? null : Math.abs(r.residualM) }))
-  scaleLoading.value = false
+  try {
+    scaleResolved.value = await recon.effectiveFrameSpec()
+    const rows = await recon.scaleBarReport(
+      scaleResolved.value.unit !== 'model' ? scaleResolved.value.scale : null)
+    scaleRows.value = rows.map((r) => ({ ...r, absResidual: r.residualM == null ? null : Math.abs(r.residualM) }))
+  } finally {
+    scaleLoading.value = false
+  }
 }
 const scaleStats = computed(() => {
   const used = scaleRows.value.filter((r) => r.enabled && r.residualM != null)
@@ -241,7 +266,8 @@ const demColumns = [
       <StatTiles :tiles="gcpTiles" />
       <DataTable :columns="gcpColumns" :rows="gcpRows" sort-key="dTotal" sort-dir="desc" empty-text="No GCPs.">
         <template #cell-enabled="{ row }">
-          <input type="checkbox" class="checkbox" :checked="row.enabled" @click.stop="onToggle(row)" />
+          <input type="checkbox" class="checkbox" :checked="row.enabled" :disabled="toggling"
+            :title="toggling ? 'Refitting…' : ''" @click.stop="onToggle(row)" />
         </template>
         <template #expanded="{ row }">
           <div v-if="row.observations.length" class="obs-list">

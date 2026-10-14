@@ -3,7 +3,9 @@ import { ref, computed, watch } from 'vue'
 import ModalShell from './ui/ModalShell.vue'
 import SettingsField from './ui/SettingsField.vue'
 import SettingsGroup from './ui/SettingsGroup.vue'
-import WarnBox from './ui/WarnBox.vue'
+import NoSourceWarn from './ui/NoSourceWarn.vue'
+import SourcePicker from './ui/SourcePicker.vue'
+import { useSourcePick } from '../../composables/useSourcePick.js'
 import { SECTION_DEFAULTS } from '../../core/defaults.user.js'
 import { cloudBounds, estimateSpacing } from '../../core/products/cloudEdit.js'
 import { cloudUnits } from '../../core/products/cloudUnits.js'
@@ -20,8 +22,7 @@ const props = defineProps({
 const emit = defineEmits(['close', 'run'])
 
 const settings = ref({ ...SECTION_DEFAULTS, ax: 0, ay: 0, bx: 1, by: 0, format: 'csv' })
-const sourceId = ref(props.clouds.some((c) => c.id === props.initialId) ? props.initialId : props.clouds[0]?.id ?? null)
-const source = computed(() => props.clouds.find((c) => c.id === sourceId.value) ?? null)
+const { id: sourceId, item: source } = useSourcePick(() => props.clouds, { initialId: props.initialId })
 const units = computed(() => cloudUnits(source.value, props.frameSignature))
 // A typed coordinate/length is in the cloud's own frame: model units for a computed
 // cloud even when the project has metres (those come from the frame's scale, shown
@@ -62,14 +63,10 @@ function run() {
 
 <template>
   <ModalShell title="Cloud Section" @close="emit('close')">
-    <WarnBox v-if="!clouds.length">No dense cloud yet. Build one with <strong>Dense Model</strong> or import one.</WarnBox>
+    <NoSourceWarn v-if="!clouds.length" kind="cloud" />
     <template v-else>
       <SettingsGroup title="Source">
-        <SettingsField label="Cloud" label-for="sec-src">
-          <select id="sec-src" v-model="sourceId" class="field-select">
-            <option v-for="c in clouds" :key="c.id" :value="c.id">{{ c.name }} — {{ c.count.toLocaleString() }} points</option>
-          </select>
-        </SettingsField>
+        <SourcePicker id="sec-src" v-model="sourceId" label="Cloud" :items="clouds" />
       </SettingsGroup>
       <SettingsGroup title="Section line">
         <SettingsField label="Start A (X, Y)">

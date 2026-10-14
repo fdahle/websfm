@@ -10,6 +10,7 @@ import { useComputeSettings } from '../../composables/useComputeSettings.js'
 import { useDatasetRecommendations } from '../../composables/useDatasetRecommendations.js'
 import { DEPTHMAP_DEFAULTS, DEPTHMAP_QUALITY_META } from '../../core/defaults.user.js'
 import { badgePreset } from '../../core/recommendUi.js'
+import { checkNumberFields } from '../../utils/numberFields.js'
 
 const emit = defineEmits(['close', 'run'])
 
@@ -24,6 +25,24 @@ const { recommendations } = useDatasetRecommendations()
 // Defaults are the single source of truth in core/defaults.user.js; run() below
 // transforms filterRelTol (%) and drops null overrides before dispatch.
 const settings = ref({ ...DEPTHMAP_DEFAULTS })
+// Run stays disabled while a field is blank or out of range (rules = the inputs'
+// own min/max/step). The two overrides may be blank (= auto); fields hidden by
+// their toggle are not checked.
+const numbers = computed(() => {
+  const s = settings.value
+  return checkNumberFields(s, {
+    filterRelTol: { label: 'Speckle tolerance', min: 1, max: 50, integer: true, when: s.speckleFilter },
+    maxGeomCost: { label: 'Agreement tolerance', min: 0.1, max: 10, when: s.geomConsistency },
+    minConsistent: { label: 'Consistent views', min: 1, max: 8, integer: true, when: s.geomConsistency },
+    minGeomAngleDeg: { label: 'Minimum parallax', min: 0, max: 20, when: s.geomConsistency },
+    minNcc: { label: 'Minimum NCC', min: 0, max: 0.9, when: s.geomConsistency },
+    maxDim: { label: 'Working resolution override', min: 200, integer: true, optional: true },
+    maxSources: { label: 'Source views per image', min: 1, max: 16, integer: true },
+    bestK: { label: 'Sources aggregated (best-K)', min: 1, max: 16, integer: true, optional: true },
+    window: { label: 'Patch window radius', min: 1, max: 5, integer: true },
+    iterations: { label: 'Iterations (per level)', min: 1, max: 8, integer: true },
+  })
+})
 
 // Quality is a first-class field whose values ARE the cards, so the dataset
 // recommendation marks the card it points at instead of adding a second one that
@@ -87,7 +106,7 @@ function run() {
 
         <SettingsField v-if="settings.speckleFilter" label="Speckle tolerance" label-for="filterRelTol" unit="%"
           hint="Drop a pixel whose depth differs from its 3×3 median by more than this. Lower = more aggressive.">
-          <input id="filterRelTol" v-model.number="settings.filterRelTol" type="number" min="1" max="50" step="1" class="field-input" />
+          <input id="filterRelTol" v-model.number="settings.filterRelTol" :aria-invalid="numbers.bad.filterRelTol" type="number" min="1" max="50" step="1" class="field-input" />
         </SettingsField>
 
         <SettingsField
@@ -98,17 +117,17 @@ function run() {
 
         <SettingsField v-if="settings.geomConsistency" label="Agreement tolerance" label-for="maxGeomCost" unit="px"
           hint="How closely another view's own depth must round-trip back to this pixel. Lower = stricter.">
-          <input id="maxGeomCost" v-model.number="settings.maxGeomCost" type="number" min="0.1" max="10" step="0.1" class="field-input" />
+          <input id="maxGeomCost" v-model.number="settings.maxGeomCost" :aria-invalid="numbers.bad.maxGeomCost" type="number" min="0.1" max="10" step="0.1" class="field-input" />
         </SettingsField>
 
         <SettingsField v-if="settings.geomConsistency" label="Consistent views" label-for="minConsistent"
           hint="Minimum other views that must agree. Raise for cleaner but sparser clouds.">
-          <input id="minConsistent" v-model.number="settings.minConsistent" type="number" min="1" max="8" step="1" class="field-input" />
+          <input id="minConsistent" v-model.number="settings.minConsistent" :aria-invalid="numbers.bad.minConsistent" type="number" min="1" max="8" step="1" class="field-input" />
         </SettingsField>
 
         <SettingsField v-if="settings.geomConsistency" label="Minimum parallax" label-for="minGeomAngleDeg" unit="°"
           hint="A view only counts if it sees the point from at least this angle apart. 0 disables.">
-          <input id="minGeomAngleDeg" v-model.number="settings.minGeomAngleDeg" type="number" min="0" max="20" step="0.5" class="field-input" />
+          <input id="minGeomAngleDeg" v-model.number="settings.minGeomAngleDeg" :aria-invalid="numbers.bad.minGeomAngleDeg" type="number" min="0" max="20" step="0.5" class="field-input" />
         </SettingsField>
 
         <SettingsField v-if="settings.geomConsistency" label-for="minNcc"
@@ -116,24 +135,24 @@ function run() {
           <template #label>
             Minimum <GlossaryTerm id="photometric-consistency">NCC</GlossaryTerm>
           </template>
-          <input id="minNcc" v-model.number="settings.minNcc" type="number" min="0" max="0.9" step="0.05" class="field-input" />
+          <input id="minNcc" v-model.number="settings.minNcc" :aria-invalid="numbers.bad.minNcc" type="number" min="0" max="0.9" step="0.05" class="field-input" />
         </SettingsField>
       </SettingsGroup>
 
       <SettingsGroup title="Resolution & sources">
         <SettingsField label="Working resolution override" label-for="maxDim" unit="px"
           hint="Leave blank to derive from Quality. A memory pre-flight guards very large values.">
-          <input id="maxDim" v-model.number="settings.maxDim" type="number" min="200" step="100" placeholder="auto" class="field-input" />
+          <input id="maxDim" v-model.number="settings.maxDim" :aria-invalid="numbers.bad.maxDim" type="number" min="200" step="100" placeholder="auto" class="field-input" />
         </SettingsField>
 
         <SettingsField label="Source views per image" label-for="maxSources"
           hint="Neighbouring images compared against each reference (chosen by shared tie-points).">
-          <input id="maxSources" v-model.number="settings.maxSources" type="number" min="1" max="16" step="1" class="field-input" />
+          <input id="maxSources" v-model.number="settings.maxSources" :aria-invalid="numbers.bad.maxSources" type="number" min="1" max="16" step="1" class="field-input" />
         </SettingsField>
 
         <SettingsField label="Sources aggregated (best-K)" label-for="bestK"
           hint="Average the K best-matching sources per pixel. Blank = auto (≈half the sources, 1–4).">
-          <input id="bestK" v-model.number="settings.bestK" type="number" min="1" max="16" step="1" placeholder="auto" class="field-input" />
+          <input id="bestK" v-model.number="settings.bestK" :aria-invalid="numbers.bad.bestK" type="number" min="1" max="16" step="1" placeholder="auto" class="field-input" />
         </SettingsField>
       </SettingsGroup>
 
@@ -143,19 +162,19 @@ function run() {
           <template #label>
             <GlossaryTerm id="patchmatch">Patch window radius</GlossaryTerm>
           </template>
-          <input id="window" v-model.number="settings.window" type="number" min="1" max="5" step="1" class="field-input" />
+          <input id="window" v-model.number="settings.window" :aria-invalid="numbers.bad.window" type="number" min="1" max="5" step="1" class="field-input" />
         </SettingsField>
 
         <SettingsField label="Iterations (per level)" label-for="iterations"
           hint="Propagation/refinement sweeps at the finest pyramid level (coarser levels get more).">
-          <input id="iterations" v-model.number="settings.iterations" type="number" min="1" max="8" step="1" class="field-input" />
+          <input id="iterations" v-model.number="settings.iterations" :aria-invalid="numbers.bad.iterations" type="number" min="1" max="8" step="1" class="field-input" />
         </SettingsField>
       </SettingsGroup>
     </AdvancedDisclosure>
 
     <template #footer>
       <button class="btn" @click="emit('close')">Cancel</button>
-      <button class="btn btn-primary" @click="run">Build Depth Maps</button>
+      <button class="btn btn-primary" :disabled="!numbers.valid" :title="numbers.reason" @click="run">Build Depth Maps</button>
     </template>
   </ModalShell>
 </template>

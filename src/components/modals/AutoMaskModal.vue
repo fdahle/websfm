@@ -3,6 +3,8 @@ import { ref, reactive, computed } from 'vue'
 import { useImagesStore } from '../../stores/useImagesStore.js'
 import { buildBorderMask } from '../../core/mask.js'
 import ImageThumb from '../controls/ImageThumb.vue'
+import ModalShell from './ui/ModalShell.vue'
+import { maskGroups } from '../../utils/maskGroups.js'
 
 // Auto-Mask: generate masks from a rule rather than a painted/imported file.
 // v1 has a single strategy — exclude the outer N pixels on each side (the film
@@ -28,20 +30,9 @@ function onSideInput(key, e) {
   else sides[key] = v
 }
 
-// Group images by "width×height"; images without known dims fall into 'unknown'
-// (mirrors the Mask Manager — a border in px needs concrete dimensions).
-const groups = computed(() => {
-  const map = new Map()
-  for (const img of imagesStore.images) {
-    const w = img.meta?.width, h = img.meta?.height
-    const key = w && h ? `${w}×${h}` : 'unknown'
-    if (!map.has(key)) map.set(key, { key, w: w || null, h: h || null, label: w && h ? `${w} × ${h}` : 'Unknown size', images: [] })
-    map.get(key).images.push(img)
-  }
-  return [...map.values()]
-})
-const sizedGroups = computed(() => groups.value.filter((g) => g.w && g.h))
-const maskedCount = computed(() => imagesStore.images.filter((i) => i.mask).length)
+// Images by resolution, shared with the Mask Manager (utils/maskGroups.js) — a
+// border in px needs concrete dimensions, so the 'unknown' group can't be applied to.
+const grouping = computed(() => maskGroups(imagesStore.images))
 
 // CSS inset (top/right/bottom/left %) for the preview overlay — the border as a
 // fraction of each dimension, so the schematic tracks the real proportions.
@@ -66,7 +57,7 @@ async function applyToAll() {
   if (busy.value) return
   busy.value = true
   try {
-    for (const g of sizedGroups.value) {
+    for (const g of grouping.value.sizedGroups) {
       for (const img of g.images) {
         const base = existing.value === 'merge' && img.mask ? img.mask.blob : null
         updateMask(img.id, await buildBorderMask(g.w, g.h, { ...sides }, base))
@@ -77,91 +68,63 @@ async function applyToAll() {
 </script>
 
 <template>
-  <div class="overlay" @click.self="emit('close')" @keydown.esc="emit('close')">
-    <div class="modal" role="dialog" aria-modal="true" aria-label="Auto Mask">
-      <div class="modal-header">
-        <span class="modal-title">Auto Mask</span>
-        <button class="modal-close" title="Close" @click="emit('close')">×</button>
+  <!-- Flush: the strategy controls and sub-bar stay put while the group list scrolls. -->
+  <ModalShell class="auto-mask" title="Auto Mask" width="620px" flush :scroll="false" @close="emit('close')">
+    <!-- Strategy controls. v1 = border only; future strategies add sections here. -->
+    <div class="controls">
+      <div class="section-title">Mask border (exclude outer pixels)</div>
+      <div class="sides">
+        <label v-for="k in SIDE_KEYS" :key="k" class="side">
+          <span class="side-label">{{ k }}</span>
+          <input
+            class="num"
+            type="number"
+            min="0"
+            step="1"
+            :value="sides[k]"
+            @input="onSideInput(k, $event)"
+          />
+          <span class="unit">px</span>
+        </label>
       </div>
-
-      <!-- Strategy controls. v1 = border only; future strategies add sections here. -->
-      <div class="controls">
-        <div class="section-title">Mask border (exclude outer pixels)</div>
-        <div class="sides">
-          <label v-for="k in SIDE_KEYS" :key="k" class="side">
-            <span class="side-label">{{ k }}</span>
-            <input
-              class="num"
-              type="number"
-              min="0"
-              step="1"
-              :value="sides[k]"
-              @input="onSideInput(k, $event)"
-            />
-            <span class="unit">px</span>
-          </label>
-        </div>
-        <div class="opts">
-          <label class="opt"><input v-model="linked" type="checkbox" /> Link all sides</label>
-          <span class="sep">·</span>
-          <span class="opt-label">If a mask exists:</span>
-          <label class="opt"><input v-model="existing" type="radio" value="merge" /> Merge</label>
-          <label class="opt"><input v-model="existing" type="radio" value="replace" /> Replace</label>
-        </div>
-      </div>
-
-      <div class="subbar">
-        <button class="btn" :disabled="busy || !sizedGroups.length" @click="applyToAll">Apply to all groups</button>
-        <span class="hint">
-          {{ maskedCount }} of {{ imagesStore.images.length }} masked.
-          Red regions are excluded from feature detection and the dense cloud — applied on the next detect/dense run.
-        </span>
-      </div>
-
-      <div class="modal-body">
-        <div v-if="!imagesStore.images.length" class="empty">No images.</div>
-
-        <div v-for="g in groups" :key="g.key" class="group">
-          <div class="preview" :title="g.label">
-            <ImageThumb v-if="g.images[0]" class="thumb" :image="g.images[0]" :alt="g.label" />
-            <div v-if="g.w" class="border-overlay" :style="{ inset: previewInset(g) }"></div>
-          </div>
-          <div class="group-info">
-            <span class="group-title">{{ g.label }}</span>
-            <span class="group-count">{{ g.images.length }} image{{ g.images.length !== 1 ? 's' : '' }}</span>
-          </div>
-          <button
-            class="btn sm"
-            :disabled="busy || !g.w"
-            :title="g.w ? '' : 'Unknown size — open an image to draw a mask manually'"
-            @click="applyToGroup(g)"
-          >Apply to group</button>
-        </div>
+      <div class="opts">
+        <label class="opt"><input v-model="linked" type="checkbox" /> Link all sides</label>
+        <span class="sep">·</span>
+        <span class="opt-label">If a mask exists:</span>
+        <label class="opt"><input v-model="existing" type="radio" value="merge" /> Merge</label>
+        <label class="opt"><input v-model="existing" type="radio" value="replace" /> Replace</label>
       </div>
     </div>
-  </div>
+
+    <div class="subbar">
+      <button class="btn" :disabled="busy || !grouping.sizedGroups.length" @click="applyToAll">Apply to all groups</button>
+      <span class="hint">{{ grouping.hint }}</span>
+    </div>
+
+    <div class="list">
+      <div v-if="!imagesStore.images.length" class="empty">No images.</div>
+
+      <div v-for="g in grouping.groups" :key="g.key" class="group">
+        <div class="preview" :title="g.label">
+          <ImageThumb v-if="g.images[0]" class="thumb" :image="g.images[0]" :alt="g.label" />
+          <div v-if="g.w" class="border-overlay" :style="{ inset: previewInset(g) }"></div>
+        </div>
+        <div class="group-info">
+          <span class="group-title">{{ g.label }}</span>
+          <span class="group-count">{{ g.images.length }} image{{ g.images.length !== 1 ? 's' : '' }}</span>
+        </div>
+        <button
+          class="btn sm"
+          :disabled="busy || !g.w"
+          :title="g.w ? '' : 'Unknown size — open an image to draw a mask manually'"
+          @click="applyToGroup(g)"
+        >Apply to group</button>
+      </div>
+    </div>
+  </ModalShell>
 </template>
 
 <style scoped>
-.overlay {
-  position: fixed; inset: 0; background: rgba(0, 0, 0, 0.55);
-  display: flex; align-items: center; justify-content: center; z-index: 200;
-}
-.modal {
-  background: var(--panel); border: 1px solid var(--panel-border); border-radius: 8px;
-  width: min(92vw, 620px); max-height: 80vh;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4); display: flex; flex-direction: column;
-}
-.modal-header {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 8px 16px; border-bottom: 1px solid var(--panel-border); flex-shrink: 0;
-}
-.modal-title { font-size: 14px; font-weight: 600; color: var(--text); }
-.modal-close {
-  background: none; border: none; color: var(--text-dim);
-  font-size: 20px; line-height: 1; cursor: pointer; padding: 1px 6px; border-radius: 4px;
-}
-.modal-close:hover { background: var(--hover-bg); color: var(--text); }
 
 .controls { padding: 12px 16px; border-bottom: 1px solid var(--panel-border); flex-shrink: 0; }
 .section-title { font-size: 12px; font-weight: 600; color: var(--text); margin-bottom: 8px; }
@@ -190,7 +153,7 @@ async function applyToAll() {
 }
 .hint { font-size: 11px; color: var(--text-dim); }
 
-.modal-body { flex: 1; overflow: auto; min-height: 0; background: var(--bg); }
+.list { flex: 1; overflow: auto; min-height: 0; background: var(--bg); }
 .empty { padding: 40px; text-align: center; color: var(--text-dim); }
 
 .group {

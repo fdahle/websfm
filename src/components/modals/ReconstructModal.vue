@@ -7,11 +7,13 @@ import SettingsGroup from './ui/SettingsGroup.vue'
 import AdvancedDisclosure from './ui/AdvancedDisclosure.vue'
 import PresetCards from './ui/PresetCards.vue'
 import { useDatasetRecommendations } from '../../composables/useDatasetRecommendations.js'
+import { usePresetSettings } from '../../composables/usePresetSettings.js'
 import {
   RECONSTRUCT_DEFAULTS,
   RECONSTRUCT_PRESETS,
   RECONSTRUCT_PRESET_META,
 } from '../../core/defaults.user.js'
+import { checkNumberFields } from '../../utils/numberFields.js'
 
 const props = defineProps({
   // Set when Georeference hands off here for its GCP-constrained adjustment path.
@@ -25,24 +27,25 @@ const { recommendations } = useDatasetRecommendations()
 // Prefill from the single source of truth (core/sfm/sfm.js falls back to the same
 // values). Clone so edits don't mutate the shared constant.
 const settings = ref({ ...RECONSTRUCT_DEFAULTS })
+// Run stays disabled while a field is blank or out of range (rules = the inputs'
+// own min/max/step).
+const numbers = computed(() => checkNumberFields(settings.value, {
+  minMatchesForRegistration: { label: 'Min correspondences', min: 6, max: 500, integer: true },
+  reprjThreshold: { label: 'Reprojection threshold', min: 0.5, max: 20 },
+  baIterations: { label: 'Bundle adjustment iterations', min: 0, max: 200, integer: true },
+}))
 
-// Quality presets are deltas over the defaults (medium ≡ defaults). `activePreset`
-// derives from the current settings (so editing any field shows "Custom" automatically).
-// `baseId` remembers which preset the current (possibly-edited) values came from, so the
-// "· modified" tag + Reset target the right one.
-const resolvePreset = (id) => ({ ...RECONSTRUCT_DEFAULTS, ...RECONSTRUCT_PRESETS[id] })
-const baseId = ref('medium')
-const activePreset = computed(() => {
-  for (const { id } of RECONSTRUCT_PRESET_META) {
-    const r = resolvePreset(id)
-    if (Object.keys(r).every((k) => settings.value[k] === r[k])) return id
-  }
-  return 'custom'
+// Quality presets are deltas over the defaults (medium ≡ defaults) and own the keys
+// they patch (BA iterations, reprojection gate). `activePreset` derives from those
+// (so editing one shows "· modified" automatically); `baseId` remembers which preset
+// the current values came from, so the "· modified" tag + Reset target the right one.
+// Every setting here is solver tuning, so a card (and Reset) restores all of them and
+// any edit reads as "· modified" — unlike Match/Mesh, whose cards leave the
+// orthogonal choices (pairing strategy, cleanup) alone.
+const { baseId, activePreset, selectPreset } = usePresetSettings({
+  settings, defaults: RECONSTRUCT_DEFAULTS, presets: RECONSTRUCT_PRESETS, cards: RECONSTRUCT_PRESET_META,
+  ownedKeys: Object.keys(RECONSTRUCT_DEFAULTS),
 })
-function selectPreset(id) {
-  settings.value = { ...resolvePreset(id) }
-  baseId.value = id
-}
 
 // Self-calibration: short <option> labels + a hint that explains the selected mode
 // (the long prose lives here, one selection at a time, instead of overflowing the option).
@@ -93,6 +96,7 @@ function run() {
           <input
             id="minMatches"
             v-model.number="settings.minMatchesForRegistration"
+            :aria-invalid="numbers.bad.minMatchesForRegistration"
             type="number" min="6" max="500" step="1"
             class="field-input"
           />
@@ -107,6 +111,7 @@ function run() {
           <input
             id="reprj"
             v-model.number="settings.reprjThreshold"
+            :aria-invalid="numbers.bad.reprjThreshold"
             type="number" min="0.5" max="20" step="0.5"
             class="field-input"
           />
@@ -122,6 +127,7 @@ function run() {
           <input
             id="baIter"
             v-model.number="settings.baIterations"
+            :aria-invalid="numbers.bad.baIterations"
             type="number" min="0" max="200" step="5"
             class="field-input"
           />
@@ -151,7 +157,7 @@ function run() {
 
     <template #footer>
       <button class="btn" @click="emit('close')">Cancel</button>
-      <button class="btn btn-primary" @click="run">
+      <button class="btn btn-primary" :disabled="!numbers.valid" :title="numbers.reason" @click="run">
         {{ props.groundControlAdjustment ? 'Adjust & Georeference' : 'Run Reconstruction' }}
       </button>
     </template>
