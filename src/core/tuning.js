@@ -82,6 +82,10 @@ export const SFM_TUNING = {
   finalMinTrackViews: 3,
   finalTrackPruneMinCount: 50,
   finalTrackPruneMinShare: 0.2,
+  // …and only where corroborated tracks already cover the image area (a grid of this
+  // many cells a side per image; 0 = the old blanket prune). Casa Grande 1978: the
+  // blanket prune left a lattice of strips around empty squares (tracks.js).
+  finalTrackPruneCoverageGrid: 16,
   // Track completion (tracks.js `completeTracks`, COLMAP's CompleteTracks) after the
   // final BA and before each post-filter pass: verified matches with one endpoint in a
   // point add the other endpoint when it reprojects within the track-filter gate.

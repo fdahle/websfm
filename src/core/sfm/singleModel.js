@@ -369,7 +369,7 @@ export async function reconstructSingleModel(input, hooks = {}) {
     }
     markStage('bundleAdjust')
 
-    const finalTrackPrune = pruneFinalTracks({ cfg, tracks, refreshTracks, log })
+    const finalTrackPrune = pruneFinalTracks({ cfg, tracks, refreshTracks, keypointsAt, log })
 
     // ── Run record + summary (runRecord.js) ──────────────────────────────────
     logPerCameraResiduals({ tracks, ids, cameras, keypointsAt, imageByUuid, modelResiduals, log })

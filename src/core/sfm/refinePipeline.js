@@ -314,17 +314,22 @@ export async function refineModel(ctx) {
 // available. This removes the one class of point for which a wrong match along an
 // epipolar line can retain low reprojection error with no independent witness.
 // Returns the prune result (tracks.js pruneFinalTwoViewTracks) for the run summary.
-export function pruneFinalTracks({ cfg, tracks, refreshTracks, log }) {
-  const { finalMinTrackViews, finalTrackPruneMinCount, finalTrackPruneMinShare } = cfg
+// Coverage-aware (tracks.js): a 2-view point that is the only witness of its image
+// area stays, so a block seen mostly by image pairs keeps a continuous sparse cloud.
+export function pruneFinalTracks({ cfg, tracks, refreshTracks, keypointsAt = null, log }) {
+  const { finalMinTrackViews, finalTrackPruneMinCount, finalTrackPruneMinShare, finalTrackPruneCoverageGrid } = cfg
   const finalTrackPrune = pruneFinalTwoViewTracks(tracks, {
     minViews: finalMinTrackViews,
     minSupportedTracks: finalTrackPruneMinCount,
     minSupportedShare: finalTrackPruneMinShare,
+    keypointsAt, coverageGrid: finalTrackPruneCoverageGrid ?? 16,
   })
   if (finalTrackPrune.applied) {
     refreshTracks()
     log(`final track-quality cleanup — removed ${finalTrackPrune.removed} uncorroborated `
-      + `2-view point(s); ${finalTrackPrune.supported} point(s) with ≥${finalMinTrackViews} views remain`,
+      + `2-view point(s); ${finalTrackPrune.supported} point(s) with ≥${finalMinTrackViews} views remain`
+      + (finalTrackPrune.keptForCoverage ? `, plus ${finalTrackPrune.keptForCoverage} 2-view point(s) kept as the only `
+        + 'coverage of their image area' : ''),
     finalTrackPrune.removed ? 'info' : 'debug', 'Reconstruction')
   } else if (finalTrackPrune.total > 0 && finalMinTrackViews > 2) {
     log(`final track-quality cleanup kept 2-view points — only ${finalTrackPrune.supported}/`

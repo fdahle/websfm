@@ -780,6 +780,28 @@ describe('pruneFinalTwoViewTracks', () => {
     expect(pts.every((pt) => pt.views.size >= 3)).toBe(true)
   })
 
+  it('keeps a 2-view point that is the only coverage of its image area', () => {
+    // 80 corroborated tracks all observed in the left half of every image; 20 two-view
+    // points in the empty right half of image a, 20 more inside the covered half.
+    const kpsByImg = { a: [], b: [], c: [] }
+    const at = (img, x, y) => { kpsByImg[img].push({ x, y }); return kpsByImg[img].length - 1 }
+    const pts = []
+    for (let i = 0; i < 80; i++) {
+      const x = 10 + (i % 8) * 50, y = 10 + Math.floor(i / 8) * 90
+      pts.push({ x: 0, y: 0, z: 1, views: new Map([['a', at('a', x, y)], ['b', at('b', x, y)], ['c', at('c', x, y)]]) })
+    }
+    for (let i = 0; i < 20; i++) pts.push({ x: 0, y: 0, z: 1, views: new Map([['a', at('a', 600 + i * 15, 400)], ['b', at('b', 600 + i * 15, 400)]]) })
+    for (let i = 0; i < 20; i++) pts.push({ x: 0, y: 0, z: 1, views: new Map([['a', at('a', 12 + (i % 8) * 50, 12 + Math.floor(i / 8) * 90)], ['b', at('b', 12 + (i % 8) * 50, 12 + Math.floor(i / 8) * 90)]]) })
+    const { tracks, ids } = tracksFrom(pts, ['a', 'b', 'c'], { kpCount: 200 })
+    const sets = Object.fromEntries(Object.entries(kpsByImg).map(([k, v]) => [k, keypointSetFrom(v)]))
+    const keypointsAt = (img) => sets[ids.uuid(img)]
+    const res = pruneFinalTwoViewTracks(tracks, { keypointsAt, coverageGrid: 4 })
+    expect(res.applied).toBe(true)
+    expect(res.keptForCoverage).toBe(20)
+    expect(res.removed).toBe(20)
+    expect(tracks.liveCount()).toBe(100)
+  })
+
   it('keeps 2-view points when pruning would erase a weak or tiny model', () => {
     const strong = Array.from({ length: 10 }, () => track(['a', 'b', 'c']))
     const fragile = Array.from({ length: 90 }, () => track(['a', 'b']))

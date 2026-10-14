@@ -110,6 +110,15 @@ export function pruneFinalTwoViewTracks(tracks, {
   minViews = 3,
   minSupportedTracks = 50,
   minSupportedShare = 0.2,
+  // Coverage-aware (with `keypointsAt`): a short track is removed only where its image
+  // area is already covered by corroborated tracks — each image is split into a
+  // coverageGrid² grid by its observed keypoint extent, and a short track survives when
+  // ANY of its observations lands in a cell no ≥minViews observation reaches. Over a
+  // film block most ground is seen by exactly two images (60 % forward, 20–30 % side
+  // overlap): the blanket rule removed 54,025 of 79,656 Casa Grande points and left the
+  // sparse cloud a lattice of strips around empty squares.
+  keypointsAt = null,
+  coverageGrid = 16,
 } = {}) {
   const total = tracks.liveCount()
   let supported = 0
@@ -118,10 +127,48 @@ export function pruneFinalTwoViewTracks(tracks, {
   const applied = minViews > 2
     && supported >= minSupportedTracks
     && supportedShare >= minSupportedShare
-  if (applied) tracks.forEachPoint((p) => { if (tracks.viewCount(p) < minViews) tracks.removePoint(p) })
+  let keptForCoverage = 0
+  if (applied) {
+    let cellOf = null
+    if (keypointsAt && coverageGrid > 0) {
+      // Per-image extent from every observation, then the corroborated cells.
+      const extent = new Map()
+      tracks.forEachPoint((p) => tracks.forEachView(p, (img, kp) => {
+        const set = keypointsAt(img)
+        if (!set || !hasKp(set, kp)) return
+        const e = extent.get(img) ?? { w: 1, h: 1 }
+        e.w = Math.max(e.w, kpX(set, kp) + 1); e.h = Math.max(e.h, kpY(set, kp) + 1)
+        extent.set(img, e)
+      }))
+      cellOf = (img, kp) => {
+        const set = keypointsAt(img), e = extent.get(img)
+        if (!set || !e || !hasKp(set, kp)) return -1
+        const cx = Math.min(coverageGrid - 1, Math.floor(kpX(set, kp) / e.w * coverageGrid))
+        const cy = Math.min(coverageGrid - 1, Math.floor(kpY(set, kp) / e.h * coverageGrid))
+        return img * coverageGrid * coverageGrid + cy * coverageGrid + cx
+      }
+    }
+    const covered = new Set()
+    if (cellOf) {
+      tracks.forEachPoint((p) => {
+        if (tracks.viewCount(p) < minViews) return
+        tracks.forEachView(p, (img, kp) => { const c = cellOf(img, kp); if (c >= 0) covered.add(c) })
+      })
+    }
+    tracks.forEachPoint((p) => {
+      if (tracks.viewCount(p) >= minViews) return
+      if (cellOf) {
+        let fillsGap = false
+        tracks.forEachView(p, (img, kp) => { const c = cellOf(img, kp); if (c >= 0 && !covered.has(c)) fillsGap = true })
+        if (fillsGap) { keptForCoverage++; return }
+      }
+      tracks.removePoint(p)
+    })
+  }
   return {
     applied,
-    removed: applied ? total - supported : 0,
+    removed: applied ? total - supported - keptForCoverage : 0,
+    keptForCoverage,
     supported,
     supportedShare,
     total,
