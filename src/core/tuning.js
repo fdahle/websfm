@@ -282,6 +282,9 @@ export const DENSE_TUNING = {
   // the estimate rarely has to grow.
   fuseEstimateSampleCap: 65536,
   fuseEstimateMargin: 1.05,
+  // Over budget at the requested sample step: re-plan at 2× (then 4×) the step before
+  // refusing (fusionPlan.js). 1 = never coarsen.
+  fuseAutoStepMax: 4,
   // Workers fusion splits over (store densifyParallel). 1 = one worker: fusion is bound by
   // plane reads, and 8 workers on quarry took 630 s vs 557 s (plan 262 s of re-reads +
   // slabs contending for OPFS). Kept for machines / storage where that turns around.

@@ -67,7 +67,7 @@ describe('bounded map loading', () => {
       // Two groups far apart along x (the slab axis), so some slabs skip some maps.
       const ms = [...maps(), ...maps().map((m, j) => ({ ...m, uuid: `far${j}`, t: [m.t[0] - 30, 0, 10] }))]
       const one = fuseDepthMaps(ms, opts)
-      const tiled = fuseDepthMaps(ms, { ...opts, memBudgetBytes: slabBudget(fuseDepthMaps(ms, { ...opts, memBudgetBytes: 1 }).refused, 5) })
+      const tiled = fuseDepthMaps(ms, { ...opts, memBudgetBytes: slabBudget(fuseDepthMaps(ms, { ...opts, memBudgetBytes: 1, autoStep: false }).refused, 5) })
       expect(tiled.refused).toBeUndefined()
       expect(tiled.summary.slabs).toBeGreaterThan(2)
       expect(one.length).toBeGreaterThan(0)
@@ -76,7 +76,7 @@ describe('bounded map loading', () => {
 
       const entries = files(ms), io = [(i) => readDepthFiles(entries[i]), { cacheBytes: 3 * 32 * 32 * 4 }]
       const sOpts = { ...opts, ...io[1] }
-      const refused = (await fuseDepthMapsStreamed(entries, io[0], { ...sOpts, memBudgetBytes: 1 })).refused
+      const refused = (await fuseDepthMapsStreamed(entries, io[0], { ...sOpts, memBudgetBytes: 1, autoStep: false })).refused
       const parts = []
       const streamed = await fuseDepthMapsStreamed(entries, io[0], { ...sOpts, memBudgetBytes: slabBudget(refused, 5) }, () => {},
         { loadDepth: (i) => readDepthOnly(entries[i]), onTile: (flat) => parts.push(flat) })
@@ -116,7 +116,7 @@ describe('bounded map loading', () => {
   })
   it('refuses when even the cloud itself does not fit', () => {
     const ms = maps()
-    const { cells } = fuseDepthMaps(ms, { memBudgetBytes: 1 }).refused
+    const { cells } = fuseDepthMaps(ms, { memBudgetBytes: 1, autoStep: false }).refused
     const logs = []
     const out = fuseDepthMaps(ms, { memBudgetBytes: 2 * 27 * cells - 1 }, (m, l) => logs.push([m, l]))
     expect(out.refused).toBeTruthy()

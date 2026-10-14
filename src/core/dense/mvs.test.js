@@ -462,7 +462,7 @@ describe('fusion pre-flight (measured cell count)', () => {
 
   it('refuses over budget before fusing, without throwing', () => {
     const logs = []
-    const out = fuseDepthMaps([mk('a'), mk('b')], { ...opts, memBudgetBytes: 1000 }, (m, l) => logs.push([m, l]))
+    const out = fuseDepthMaps([mk('a'), mk('b')], { ...opts, memBudgetBytes: 1000, autoStep: false }, (m, l) => logs.push([m, l]))
     expect(out.length).toBe(0)
     expect(out.refused.cells).toBe(441)
     expect(out.refused.total).toBeGreaterThan(1000)
@@ -472,6 +472,19 @@ describe('fusion pre-flight (measured cell count)', () => {
     expect(ok.length).toBeGreaterThan(0)
   })
 
+  it('over budget at step 1, re-plans at a coarser step instead of refusing', () => {
+    const o = { ...opts, mergeCell: 0.01 } // 1600 cells at step 1, 400 at step 2
+    const half = fuseDepthMaps([mk('a'), mk('b')], { ...o, step: 2, memBudgetBytes: 1, autoStep: false }).refused
+    const budget = Math.ceil(half.total * 1.01) // step 2 fits in one piece …
+    expect(fuseDepthMaps([mk('a'), mk('b')], { ...o, memBudgetBytes: budget, autoStep: false }).refused).toBeDefined() // … step 1 does not
+    const logs = []
+    const auto = fuseDepthMaps([mk('a'), mk('b')], { ...o, memBudgetBytes: budget }, (m, l) => logs.push([m, l]))
+    const step2 = fuseDepthMaps([mk('a'), mk('b')], { ...o, step: 2, memBudgetBytes: budget }, () => {})
+    expect(auto.refused).toBeUndefined()
+    expect(auto.length).toBeGreaterThan(0)
+    expect(auto.length).toBe(step2.length)
+    expect(logs.some(([m, l]) => l === 'warn' && m.includes('re-planning at step 2px'))).toBe(true)
+  })
 })
 
 describe('filterDepthMapsGeometric (cross-view consistency)', () => {

@@ -328,6 +328,18 @@ export function* fusionPlanSteps(maps, opts, onLog, hooks) {
       }
     }
   }
+  // Over budget even in slabs: coarsen the sample grid before refusing. Stage A has
+  // already been paid for (37 min on Casa Grande's 1978 film at High), and a refusal
+  // left the user with 0 points and a DEM from the sparse cloud; a cloud at ¼ the
+  // pixels is the useful outcome. Each doubling quarters the candidates; the plan is
+  // re-measured, not extrapolated, because overlapping views share merge cells.
+  // `autoStep: false` keeps the old refusal.
+  const autoStepMax = DENSE_TUNING.fuseAutoStepMax ?? 4
+  if (budget && proj.total > budget && opts.autoStep !== false && step * 2 <= autoStepMax) {
+    onLog(`Fusion: projected peak ${formatBytes(proj.total)} exceeds the budget ${formatBytes(budget)} at sample step `
+      + `${step}px — re-planning at step ${step * 2}px (¼ the pixels) instead of refusing`, 'warn', 'Dense')
+    return yield* fusionPlanSteps(maps, { ...opts, step: step * 2 }, onLog, hooks)
+  }
   if (budget && proj.total > budget) {
     onLog(`Fusion: projected peak ${formatBytes(proj.total)} exceeds the budget ${formatBytes(budget)} even in slabs `
       + `(the cloud alone is ${formatBytes(estCells * DENSIFY_CLOUD_BYTES_PER_CELL)}).`, 'error', 'Dense')
