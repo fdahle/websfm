@@ -90,7 +90,12 @@ fn nn2Tile(@builtin(local_invocation_id) lid: vec3<u32>,
   let nTilesB = (P.nB + TB - 1u) / TB;
   for (var tb = 0u; tb < nTilesB; tb++) {
     let colBase = tb * TB;
-    var acc: array<array<f32, 4>, 4>; // [r][c], zero-initialised
+    // [r][c]. Zeroed EXPLICITLY per B tile: WGSL zero-initialises a `var` each time
+    // its declaration runs, but Chrome's Vulkan path on NVIDIA (Linux, 2026-10)
+    // initialised it once, so every tile after the first kept the earlier tiles'
+    // dot products — wrong neighbours, 0 matches on any pair wider than 64 columns.
+    var acc: array<array<f32, 4>, 4>;
+    for (var r = 0u; r < 4u; r++) { for (var c = 0u; c < 4u; c++) { acc[r][c] = 0.0; } }
 
     for (var k0 = 0u; k0 < dim4; k0 += KV) {
       let ar = rowBase + lr;

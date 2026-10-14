@@ -77,10 +77,12 @@ export async function createGpuMatchRun({ client, log, cacheBudgetBytes, runId =
 
   const checkCancel = () => { if (shouldCancel()) throw new Error('matching cancelled') }
 
-  // A failed check on a pair with almost no matches says nothing about the GPU: Iceland
-  // 1980 film's first subset-gate pair had WASM 1 / GPU 0 matches, read as 0 % agreement,
-  // and moved a 125-image run to WASM. Such a check is inconclusive and the NEXT pair of
-  // that kind validates instead; pairs waiting on the gate keep waiting for a verdict.
+  // A failed check on a pair with almost no matches is too little evidence to judge the
+  // GPU by (one match either way is 0 % or 100 % agreement), so it is inconclusive and
+  // the NEXT pair of that kind validates instead; pairs waiting on the gate keep waiting
+  // for a verdict. A broken GPU still fails on that next pair: the 2026-10 Vulkan/NVIDIA
+  // miscompile (match.wgsl) showed as WASM 1 / GPU 0 on Iceland's first pair and as
+  // WASM 63 / GPU 0 on Casa Grande's.
   const conclusive = (v) => v.pass || Math.max(v.nCpu ?? 0, v.nGpu ?? 0) >= MIN_VALIDATE_MATCHES
   const validated = { full: false, gate: false }
 

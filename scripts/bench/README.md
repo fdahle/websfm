@@ -192,6 +192,12 @@ headless → SwiftShader whatever the flags; headed without `--ignore-gpu-blockl
 SwiftShader in workers; headed with all three flags → `nvidia / turing`. Check the
 `backend = WebGPU (…)` log line: SwiftShader is slower than the WASM path.
 
+`node scripts/bench/gpu-match-check.mjs` checks that the WebGPU matcher agrees with
+WASM on this machine (planted pairs, 64² to 9000²). It found the 2026-10 miscompile on
+Vulkan/NVIDIA: the kernel's accumulator was zeroed only once, so every pair wider than
+one 64-column tile came back with 0 matches and each run fell back to WASM after its
+first validation (match.wgsl now zeroes it explicitly).
+
 ## Historical blocks (`hist`)
 
 `hist/` scores film and satellite frame blocks (the Grenoble benchmark layout:
