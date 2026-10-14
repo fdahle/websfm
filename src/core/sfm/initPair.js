@@ -1,4 +1,5 @@
 import { fundamentalToEssential, recoverPose, triangulateDlt } from './reconstruction.js'
+import { ransacEssential } from './essential.js'
 import { hasKp, kpX, kpY } from './keypointSet.js'
 import { asPairList } from './matchCodec.js'
 import { I3, essentialSingularValues } from './rotations.js'
@@ -44,23 +45,18 @@ export async function selectInitPair(
     return numStats(residuals)
   }
 
-  async function tryInitPair(entry) {
-    const iA = imageByUuid(entry.idA)
-    const iB = imageByUuid(entry.idB)
-    if (!iA || !iB || !entry.F) return { ok: false, reason: 'missing image or fundamental matrix' }
-    const KA = Kmap.get(entry.idA)
-    const KB = Kmap.get(entry.idB)
-    const E = fundamentalToEssential(entry.F, KA, KB)
-    const esv = essentialSingularValues(E)
-    const matches = asPairList(entry.matches)
-    const pa = new Array(matches.length), pb = new Array(matches.length)
-    for (let i = 0; i < matches.length; i++) {
-      pa[i] = { x: kpX(iA.kp, matches.a(i)), y: kpY(iA.kp, matches.a(i)) }
-      pb[i] = { x: kpX(iB.kp, matches.b(i)), y: kpY(iB.kp, matches.b(i)) }
-    }
-    const pose = await recoverPose(pa, pb, E, KA, KB)
-    if (!pose) return { ok: false, reason: 'pose recovery (essential decomposition) failed' }
+  // Calibrated E straight from the pair's matches (five-point RANSAC, essential.js),
+  // tried beside Kᵀ F K. On a near-planar scene the matcher's uncalibrated F is
+  // undetermined and Kᵀ F K decomposes into a wrong pose (Casa Grande 1978 aerial
+  // film, pair 49–50: 174 px init reprojection via F, 0.61 px via five-point); the
+  // calibrated problem has no planar degeneracy. Off with initFivePoint: false.
+  const { initFivePoint = true, initEssentialThreshPx = 1.5 } = settings
+  const essThreshPx = initEssentialThreshPx * (settings.detectScaleFactor ?? 1)
 
+  async function poseCandidate(entry, iA, iB, KA, KB, pa, pb, matches, E, eSource) {
+    const esv = essentialSingularValues(E)
+    const pose = await recoverPose(pa, pb, E, KA, KB)
+    if (!pose) return null
     const cA = { R: I3, t: [0, 0, 0], K: KA }
     const cB = { R: pose.R, t: pose.t, K: KB }
     const PA = camToP34flat(cA)
@@ -78,10 +74,45 @@ export async function selectInitPair(
       }
     }
     const angle = medianTriangulationAngle(cA, cB, points)
-    return {
-      ok: true, entry, iA, iB, cA, cB, points, angle, esv,
+    const init = {
+      ok: true, entry, iA, iB, cA, cB, points, angle, esv, eSource,
       inliers: entry.inlierCount, triCount: tri.length, cheiralKept: points.length,
     }
+    init.reproj = points.length ? initReprojStats(init) : { median: Infinity }
+    return init
+  }
+
+  async function tryInitPair(entry) {
+    const iA = imageByUuid(entry.idA)
+    const iB = imageByUuid(entry.idB)
+    if (!iA || !iB || !entry.F) return { ok: false, reason: 'missing image or fundamental matrix' }
+    const KA = Kmap.get(entry.idA)
+    const KB = Kmap.get(entry.idB)
+    const matches = asPairList(entry.matches)
+    const pa = new Array(matches.length), pb = new Array(matches.length)
+    for (let i = 0; i < matches.length; i++) {
+      pa[i] = { x: kpX(iA.kp, matches.a(i)), y: kpY(iA.kp, matches.a(i)) }
+      pb[i] = { x: kpX(iB.kp, matches.b(i)), y: kpY(iB.kp, matches.b(i)) }
+    }
+    const fromF = fundamentalToEssential(entry.F, KA, KB)
+    const tried = [await poseCandidate(entry, iA, iB, KA, KB, pa, pb, matches, fromF, 'F')]
+    if (initFivePoint && matches.length >= 5) {
+      const na = pa.map((p) => [(p.x - KA.cx) / KA.fx, (p.y - KA.cy) / KA.fy])
+      const nb = pb.map((p) => [(p.x - KB.cx) / KB.fx, (p.y - KB.cy) / KB.fy])
+      const r = ransacEssential(na, nb, { thresh: essThreshPx / ((KA.fx + KB.fx) / 2) })
+      if (r) tried.push(await poseCandidate(entry, iA, iB, KA, KB, pa, pb, matches, r.E, '5pt'))
+    }
+    const ok = tried.filter((c) => c && c.cheiralKept >= 10)
+    if (!ok.length) {
+      return tried[0] ?? { ok: false, reason: 'pose recovery (essential decomposition) failed' }
+    }
+    // Keep the pose that explains the matches: most points in front of both cameras
+    // (within 10 %), then the lower init reprojection.
+    const most = Math.max(...ok.map((c) => c.cheiralKept))
+    const best = ok.filter((c) => c.cheiralKept >= 0.9 * most)
+      .reduce((a, b) => (b.reproj.median < a.reproj.median ? b : a))
+    best.fEsv = essentialSingularValues(fromF)
+    return best
   }
 
   // ── Select initial pair: enough inliers AND a wide-enough baseline ──────
@@ -267,17 +298,19 @@ export async function selectInitPair(
           + `survived cheirality (${pct}%), need ≥10`, 'debug', 'Reconstruction')
         continue
       }
-      init.reproj = initReprojStats(init)
       init.nameA = nameA
       init.nameB = nameB
       init.growth = seedGrowth(init)
       init.score = seedScore(init)
-      const candRatio = init.esv.s1 > 0 ? init.esv.s2 / init.esv.s1 : 0
+      // σ2/σ1 of Kᵀ F K, whichever E the pose came from: it is the planar-degeneracy
+      // and wrong-intrinsics signal, and the five-point E is ≈1 by construction.
+      const fe = init.fEsv ?? init.esv
+      const candRatio = fe.s1 > 0 ? fe.s2 / fe.s1 : 0
       // Log the score AND its factors: a seed decision that can only be re-derived by
       // hand from raw candidate numbers is what made the B4 post-mortem manual.
       log(`candidate ${nameA} ↔ ${nameB} — ${init.inliers} inliers, `
         + `${kept}/${tri} pts kept after cheirality (${pct}%), median parallax ${init.angle.toFixed(2)}°, `
-        + `init reproj median ${init.reproj.median.toFixed(2)}px, E σ2/σ1 ${candRatio.toFixed(2)}, `
+        + `init reproj median ${init.reproj.median.toFixed(2)}px (E from ${init.eSource}), KᵀFK σ2/σ1 ${candRatio.toFixed(2)}, `
         + `graph degree ${pairDegree(entry)} (median ${medianDegree}) `
         + `⇒ score ${init.score.toFixed(1)} (parallax ×${parallaxHealth(init.angle).toFixed(2)}, `
         + `connectivity ×${connectivityHealth(init).toFixed(2)}, `

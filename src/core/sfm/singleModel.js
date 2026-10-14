@@ -239,22 +239,23 @@ export async function reconstructSingleModel(input, hooks = {}) {
       + `(${best.inliers} inliers, ${best.points.length} pts, ${best.angle.toFixed(2)}° parallax)`,
       'success', 'Reconstruction')
     log(`init reprojection — ${fmtStats(modelReprojStats())}`, 'debug', 'Reconstruction')
-    // Essential-matrix conditioning: σ2/σ1 ≈ 1 for a valid E. A low ratio means
-    // F→E used wrong intrinsics, which inflates init reprojection and typically
-    // blocks PnP registration of otherwise well-connected images.
+    // Essential-matrix conditioning: σ2/σ1 ≈ 1 for a valid E. A low ratio of Kᵀ F K
+    // means wrong intrinsics OR a degenerate F (near-planar scene: F is undetermined
+    // there). When the seed came from the calibrated five-point E instead
+    // (initPair.js), say so — that is the planar case, not a focal problem.
     {
-      const { s1, s2, s3 } = best.esv
+      const { s1, s2, s3 } = best.fEsv ?? best.esv
       const ratio = s1 > 0 ? s2 / s1 : 0
-      // Only flag intrinsics when the ratio is genuinely low. A healthy E sits at
-      // ~0.95–1.0, so the old unconditional "well below 1 → wrong focal" note fired on
-      // every init (0.98 is fine) and read as an alarm — append it only below 0.9.
-      const conditioning = ratio < 0.9
-        ? ' — well below 1 points to wrong intrinsics (focal / principal point), which '
-          + 'inflates init reprojection and typically blocks PnP registration'
-        : ''
-      log(`essential matrix σ = [${s1.toFixed(3)}, ${s2.toFixed(3)}, ${s3.toFixed(3)}] — `
+      const fivePt = best.eSource === '5pt'
+      // Only flag below 0.9: a healthy E sits at ~0.95–1.0.
+      const conditioning = ratio >= 0.9 ? ''
+        : fivePt
+          ? ' — the matcher\'s F is degenerate here (near-planar scene); the seed pose comes from the calibrated five-point E'
+          : ' — well below 1 points to wrong intrinsics (focal / principal point), which '
+            + 'inflates init reprojection and typically blocks PnP registration'
+      log(`essential matrix (Kᵀ F K) σ = [${s1.toFixed(3)}, ${s2.toFixed(3)}, ${s3.toFixed(3)}] — `
         + `σ2/σ1 ${ratio.toFixed(2)} (ideal ≈ 1.0)${conditioning}`,
-        ratio < 0.7 ? 'warn' : 'debug', 'Reconstruction')
+        ratio < 0.7 && !fivePt ? 'warn' : 'debug', 'Reconstruction')
     }
     markStage('init')
     report('initPair', 1, `Initial pair: ${imgA.name} ↔ ${imgB.name}`, { done: 2, total: imgs.length })
