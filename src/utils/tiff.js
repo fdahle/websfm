@@ -314,8 +314,13 @@ export async function tiffToDisplayBlob(blob, { jpegQuality = 0.92, onThumbnail,
     }
   }
 
+  // A CPU-backed canvas (willReadFrequently): it exists only to be encoded, and a
+  // GPU-backed one has to be read back for every convertToBlob. With GPU canvas on
+  // (NVIDIA, Vulkan, --ignore-gpu-blocklist) a 125-scan ingest of 130 MP film lost 31
+  // images to "Readback of the source image has failed" / "Encoding … has failed"
+  // when several encodes overlapped (Iceland 1980, 2026-10-14).
   const canvas = new OffscreenCanvas(width, height)
-  canvas.getContext('2d').putImageData(new ImageData(rgba, width, height), 0, 0)
+  canvas.getContext('2d', { willReadFrequently: true }).putImageData(new ImageData(rgba, width, height), 0, 0)
 
   if (onThumbnail) {
     const maxDim = 512
@@ -334,8 +339,11 @@ export async function tiffToDisplayBlob(blob, { jpegQuality = 0.92, onThumbnail,
   // fully usable while compute (computeUrl) waits on the final result — nothing
   // lossy ever reaches detection/dense.
   const tEncode = performance.now()
-  const displayPromise = canvas.convertToBlob({ type: 'image/jpeg', quality: jpegQuality })
-  const computePromise = canvas.convertToBlob({ type: 'image/png' })
+  // One retry per encode: a transient codec/readback failure must not lose the image.
+  const encode = (opts) => canvas.convertToBlob(opts)
+    .catch(() => new Promise((r) => setTimeout(r, 250)).then(() => canvas.convertToBlob(opts)))
+  const displayPromise = encode({ type: 'image/jpeg', quality: jpegQuality })
+  const computePromise = encode({ type: 'image/png' })
   let jpegDoneAt = null
   if (onDisplay) displayPromise.then(onDisplay).catch(() => {})
   displayPromise.then(() => { jpegDoneAt = performance.now() }).catch(() => {})
