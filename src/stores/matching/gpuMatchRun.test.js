@@ -6,7 +6,8 @@ const INIT = {
   geometry: { tileA: 64, tileB: 64, workgroup: '16×16', microTile: '4×4', kChunk: 16 },
 }
 const PASS = { pass: true, nA: 10, nB: 10, nCpu: 5, nGpu: 5, common: 5, share: 1, countSlack: 5, gpuMs: 1, cpuMs: 9 }
-const FAIL = { ...PASS, pass: false, common: 1, share: 0.2 }
+const FAIL = { ...PASS, pass: false, nCpu: 100, nGpu: 100, common: 20, share: 0.2 }
+const TINY = { ...PASS, pass: false, nCpu: 1, nGpu: 0, common: 0, share: 0 }
 
 function fakeClient({ init = INIT, gpu } = {}) {
   const calls = []
@@ -86,6 +87,21 @@ describe('createGpuMatchRun', () => {
     expect(rec.backend).toBe('gpu→wasm')
     expect(rec.disabledReason).toMatch(/disagreement/)
     expect(rec.gpuMatches.full).toBe(0) // the validator's answer came from WASM
+  })
+
+  it('an inconclusive check (a pair with almost no matches) validates on the next pair instead', async () => {
+    const log = vi.fn()
+    const { client, calls } = fakeClient({
+      gpu: (args, n) => (args.validate ? { matches: [], count: 0, validation: n === 1 ? TINY : PASS } : { matches: [], count: 0 }),
+    })
+    const run = await createGpuMatchRun({ client, log, cacheBudgetBytes: 2 ** 30 })
+    await Promise.all([run.match(D, D, opts()), run.match(D, D, opts({ idB: 'c' })), run.match(D, D, opts({ idB: 'd' }))])
+    expect(calls.map((c) => c.validate)).toEqual([true, true, false])
+    expect(client.cpuMatch).not.toHaveBeenCalled()
+    expect(log.mock.calls.some(([m]) => /inconclusive/.test(m))).toBe(true)
+    const rec = await run.finish()
+    expect(rec.backend).toBe('gpu')
+    expect(rec.disabledReason ?? null).toBeNull()
   })
 
   it('falls back per pair on a GPU error and logs only the first', async () => {

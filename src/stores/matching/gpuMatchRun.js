@@ -23,6 +23,8 @@
 //   { begin(opts), gpuMatch(args, hooks), end(opts), cpuMatch(descA, descB, opts, hooks) }
 
 const MiB = 2 ** 20
+// A failed GPU/WASM agreement check counts only when either side found this many matches.
+const MIN_VALIDATE_MATCHES = 20
 
 function newRunId() {
   return globalThis.crypto?.randomUUID?.() ?? `run-${Date.now()}-${Math.random().toString(36).slice(2)}`
@@ -75,15 +77,25 @@ export async function createGpuMatchRun({ client, log, cacheBudgetBytes, runId =
 
   const checkCancel = () => { if (shouldCancel()) throw new Error('matching cancelled') }
 
+  // A failed check on a pair with almost no matches says nothing about the GPU: Iceland
+  // 1980 film's first subset-gate pair had WASM 1 / GPU 0 matches, read as 0 % agreement,
+  // and moved a 125-image run to WASM. Such a check is inconclusive and the NEXT pair of
+  // that kind validates instead; pairs waiting on the gate keep waiting for a verdict.
+  const conclusive = (v) => v.pass || Math.max(v.nCpu ?? 0, v.nGpu ?? 0) >= MIN_VALIDATE_MATCHES
+  const validated = { full: false, gate: false }
+
   async function match(descA, descB, { idA = null, idB = null, dim, ratioThreshold, crossCheck, kind = 'full' }, hooks) {
     const cpu = () => { checkCancel(); return client.cpuMatch(descA, descB, { dim, ratioThreshold, crossCheck }, hooks) }
     checkCancel()
     let validator = false
     let release = null
-    if (!gates[kind]) {
-      validator = true
-      gates[kind] = new Promise((resolve) => { release = resolve })
-    } else {
+    for (;;) {
+      if (validated[kind] || disabledReason) break
+      if (!gates[kind]) {
+        validator = true
+        gates[kind] = new Promise((resolve) => { release = resolve })
+        break
+      }
       await gates[kind]
       checkCancel()
     }
@@ -103,8 +115,17 @@ export async function createGpuMatchRun({ client, log, cacheBudgetBytes, runId =
       if (idB != null) sent.add(idB)
       if (validator && res.validation) {
         validation[kind] = res.validation
-        log(describeValidation(kind, res.validation), res.validation.pass ? 'info' : 'error')
-        if (!res.validation.pass) disable(`GPU/WASM disagreement on the first ${kind === 'gate' ? 'subset-gate' : 'full'} match`)
+        if (!conclusive(res.validation)) {
+          log(`${describeValidation(kind, res.validation)} — inconclusive (fewer than ${MIN_VALIDATE_MATCHES} matches), `
+            + 'validating on the next pair', 'info')
+          gates[kind] = null // the next caller (or a waiter) becomes the validator
+        } else {
+          validated[kind] = true
+          log(describeValidation(kind, res.validation), res.validation.pass ? 'info' : 'error')
+          if (!res.validation.pass) disable(`GPU/WASM disagreement on the first ${kind === 'gate' ? 'subset-gate' : 'full'} match`)
+        }
+      } else if (validator) {
+        validated[kind] = true
       }
       if (res.backend !== 'wasm') counts[kind]++
       return res
