@@ -161,12 +161,28 @@ export function makeDenseOps({ rasterize }) {
     // that image's source count (clamp(ceil(nSources/2),1,4)) rather than a fixed 3.
     const autoBestKMode = !(bestK > 0)
 
-    // Median / p95 of an array (for cost distributions). Mutates a copy.
-    const stat = (arr) => {
-      if (!arr.length) return { median: 0, p95: 0 }
-      const s = [...arr].sort((a, b) => a - b)
-      const at = (q) => s[Math.min(s.length - 1, Math.round(q * (s.length - 1)))]
-      return { median: at(0.5), p95: at(0.95) }
+    // Median / p95 of the matching cost over the pixels with depth. A histogram, not a
+    // sort: costs live in [0, 2], and copying + comparator-sorting the ~20 M costs of a
+    // 4570² map took most of the per-image tail on Casa Grande's 1978 scans (62 s in
+    // node for 19 M values). 4096 bins resolve 0.0005, below the logged 2 decimals.
+    const COST_BINS = 4096, COST_MAX = 2
+    const costStat = (depth, cost) => {
+      const hist = new Uint32Array(COST_BINS)
+      let n = 0
+      for (let k = 0; k < depth.length; k++) {
+        if (!(depth[k] > 0)) continue
+        const c = cost[k]
+        hist[c >= COST_MAX ? COST_BINS - 1 : c > 0 ? Math.floor(c * (COST_BINS / COST_MAX)) : 0]++
+        n++
+      }
+      if (!n) return { median: 0, p95: 0, valid: 0 }
+      const at = (q) => {
+        const target = Math.min(n - 1, Math.round(q * (n - 1)))
+        let acc = 0
+        for (let b = 0; b < COST_BINS; b++) { acc += hist[b]; if (acc > target) return (b + 0.5) * (COST_MAX / COST_BINS) }
+        return COST_MAX
+      }
+      return { median: at(0.5), p95: at(0.95), valid: n }
     }
 
     const t0 = performance.now()
@@ -411,12 +427,8 @@ export function makeDenseOps({ rasterize }) {
       // Per-pixel diagnostics: how many pixels got a depth, and the matching-cost
       // distribution over those pixels (low cost = confident; high = likely junk
       // that fusion's maxCost gate will drop — the key signal for dense quality).
-      let valid = 0
-      const costs = []
-      for (let k = 0; k < dm.depth.length; k++) {
-        if (dm.depth[k] > 0) { valid++; costs.push(dm.cost[k]) }
-      }
-      const cs = stat(costs)
+      const cs = costStat(dm.depth, dm.cost)
+      const valid = cs.valid
       perImage.push({
         ms: imgMs,
         coveragePct: 100 * valid / dm.depth.length,
