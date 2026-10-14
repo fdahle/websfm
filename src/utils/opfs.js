@@ -224,11 +224,27 @@ export async function readProject(projectId) {
   }
 }
 
+// project.json has two writers: the images store rewrites it whole from memory,
+// and the projects store changes the name or CRS. One lock per project serialises
+// them, and updateProject reads inside it, so a rename never writes back an image
+// list that a concurrent sync has already replaced.
 export async function writeProject(projectId, data) {
-  return trackPersistence('writeProject:' + String(projectId), async () => {
+  return trackPersistence('writeProject:' + String(projectId), () => persistenceLock(`project:${projectId}`, async () => {
     const dir = await getProjectDir(projectId, true)
     await writeJson(dir, 'project.json', data)
-  })
+  }))
+}
+
+// Read-modify-write: `update(data)` returns the new document. False when there is
+// no project.json to update.
+export async function updateProject(projectId, update) {
+  return trackPersistence('updateProject:' + String(projectId), () => persistenceLock(`project:${projectId}`, async () => {
+    const dir = await getProjectDir(projectId)
+    const data = await readJson(dir, 'project.json')
+    if (!data) return false
+    await writeJson(dir, 'project.json', update(data))
+    return true
+  }))
 }
 
 // Remove the project's OPFS tree. A folder-backed project has none — its files
@@ -595,43 +611,6 @@ async function matchFileIn(dir, file) {
   return f
 }
 
-// Projects saved before the packed document kept one JSON file per pair:
-//   { idA, idB, rawCount, inlierCount, F, matches: [[ia,ib],...], disabled, weak }
-// Read once to migrate (the store writes the document, then removes these).
-export async function loadLegacyPairFiles(projectId, onProgress = null) {
-  try {
-    const dir = await getSubDir(projectId, 'matches')
-    const files = []
-    for await (const [name, handle] of dir) {
-      if (handle.kind !== 'file' || !name.endsWith('.json') || name === 'matches.json') continue
-      files.push({ name, handle })
-    }
-    let done = 0
-    onProgress?.(0, files.length)
-    const loaded = await mapConcurrent(files, 12, async ({ name, handle }) => {
-      try {
-        const file = await handle.getFile()
-        const data = JSON.parse(await file.text())
-        return { pairId: name.replace(/\.json$/, ''), ...data }
-      } catch { return null } finally { onProgress?.(++done, files.length) }
-    })
-    return loaded.filter(Boolean)
-  } catch {
-    return []
-  }
-}
-
-export async function removeLegacyPairFiles(projectId) {
-  return trackPersistence('removeLegacyPairFiles:' + String(projectId), async () => {
-    try {
-      const dir = await getSubDir(projectId, 'matches')
-      const names = []
-      for await (const name of dir.keys()) if (name.endsWith('.json') && name !== 'matches.json') names.push(name)
-      for (const name of names) await dir.removeEntry(name).catch(ignoreMissing)
-    } catch (error) { ignoreMissing(error) }
-  })
-}
-
 export async function clearAllMatches(projectId) {
   return trackPersistence('clearAllMatches:' + String(projectId), async () => {
     try {
@@ -779,9 +758,6 @@ export async function commitDepthIndex(projectId, index) {
     await removeStaleDepthBins(dir, new Set(index.maps.map((m) => m.uuid)))
   })
 }
-
-// Rewrite the index alone, leaving the planes untouched (e.g. after dropping the
-// entries of images that were removed).
 
 export async function loadDepthIndex(projectId) {
   try {
@@ -975,10 +951,8 @@ export async function deleteGcps(projectId) {
 }
 
 // ── Shapefiles (footprint / polygon vector layers) ────────────────────────────────
-// JSON: { crs, sets: [{ id, name, source, onMap,
+// JSON: { crs, sets: [{ id, name, source, visible,
 //         footprints: [{ id, imageId, imageName, rings }] }] }
-// Older projects carry a flat { footprints: [...] } array — the store wraps those
-// into one set on restore (see useFootprintsStore.normalizeStored).
 
 export async function saveFootprints(projectId, data) {
   return trackPersistence('saveFootprints:' + String(projectId), async () => {
@@ -1091,7 +1065,6 @@ export async function deleteWorkflows(projectId) {
 // record, so scroll-back and TXT export read from it rather than memory.
 // Callers must serialise appends (≤1 in flight) — see useLogStore — since each
 // append reads the current size to seek to the end.
-// (Legacy `log.json` was a single rewritten array; migrated on first restore.)
 
 export async function appendLog(projectId, entries) {
   return trackPersistence('appendLog:' + String(projectId), async () => {
@@ -1155,31 +1128,9 @@ export async function truncateLog(projectId) {
 
 export async function deleteLog(projectId) {
   return trackPersistence('deleteLog:' + String(projectId), async () => {
-    for (const name of ['log.ndjson', 'log.json' /* legacy */]) {
-      try {
-        const dir = await getProjectDir(projectId)
-        await dir.removeEntry(name)
-      } catch (error) { ignoreMissing(error) }
-    }
-  })
-}
-
-// One-time migration off the legacy whole-array `log.json`. Returns its entries
-// (to seed the stream) or null; caller appends them and removes the old file.
-export async function loadLegacyLog(projectId) {
-  try {
-    const dir = await getProjectDir(projectId)
-    return readJson(dir, 'log.json')
-  } catch {
-    return null
-  }
-}
-
-export async function deleteLegacyLog(projectId) {
-  return trackPersistence('deleteLegacyLog:' + String(projectId), async () => {
     try {
       const dir = await getProjectDir(projectId)
-      await dir.removeEntry('log.json')
+      await dir.removeEntry('log.ndjson')
     } catch (error) { ignoreMissing(error) }
   })
 }
@@ -1252,7 +1203,7 @@ export async function deletePoses(projectId) {
 //       cameras: [{ uuid, R, t, K }], viewUuids: [uuid, …] }],
 //     georef, summary, denseSummary }
 // The heavy per-point data lives in binary sidecars, one set per cloud, named
-// `reconstruction.json.{generation}.{cloudId}.{key}.bin` (legacy: recon.{cloudId}.{key}.bin):
+// `reconstruction.json.{generation}.{cloudId}.{key}.bin`:
 //   pos    Float64  3·N   x,y,z (world-frame precision)
 //   col    Uint8    3·N   r,g,b (present only when hasColor)
 //   colorMask Uint8 N     1 when a sparse point has colour; absent on legacy saves
@@ -1275,15 +1226,6 @@ export async function deletePoses(projectId) {
 // or `{ ok: false, stale: [cloudId] }` — nothing written — when a reused file has gone
 // (another tab's save collected it); the caller then resends those clouds' buffers.
 const RECON_BIN_KEYS = ['pos', 'col', 'colorMask', 'nrm', 'idx', 'vcount', 'vcam', 'vkp', 'vx', 'vy', 'attributes']
-
-async function removeStaleReconBins(dir, keepIds) {
-  const stale = []
-  for await (const name of dir.keys()) {
-    const m = name.match(/^recon\.(.+)\.(?:pos|col|colorMask|nrm|idx|vcount|vcam|vkp|vx|vy|attributes)\.bin$/)
-    if (m && !keepIds.has(m[1])) stale.push(name)
-  }
-  for (const name of stale) await dir.removeEntry(name).catch(ignoreMissing)
-}
 
 export async function saveReconstruction(projectId, data) {
   return trackPersistence('saveReconstruction:' + String(projectId), async () => {
@@ -1320,23 +1262,27 @@ function filesByCloud(files) {
   return out
 }
 
+// null means no model was ever saved. Anything else that stops the read (bad JSON,
+// a missing or short buffer, a storage error) throws: the caller must not mistake
+// an unreadable model for an empty one and then save the empty one over it.
 export async function loadReconstruction(projectId) {
   return persistenceLock(`reconstruction:${projectId}`, async () => {
-  try {
-    const dir = await getProjectDir(projectId)
-    const meta = await readJson(dir, 'reconstruction.json')
+    let dir, file
+    try {
+      dir = await getProjectDir(projectId)
+      file = await (await dir.getFileHandle('reconstruction.json')).getFile()
+    } catch (error) {
+      ignoreMissing(error)
+      return null
+    }
+    const meta = JSON.parse(await file.text())
     if (!meta) return null
-    // Legacy inline shape (points embedded in JSON) — hand back untouched; the
-    // store still understands it. New saves write version 3 with immutable generation buffers.
-    if (meta.version !== 2 && meta.version !== 3) return meta
-    const saved = meta.binaryFiles ? await readBinaryDocument(dir, meta, readBin) : null
-    const savedFiles = meta.binaryFiles ? filesByCloud(meta.binaryFiles) : {}
+    if (meta.version !== 3) throw new Error(`unsupported document version ${meta.version ?? '(none)'}`)
+    const saved = await readBinaryDocument(dir, meta, readBin)
+    const savedFiles = filesByCloud(meta.binaryFiles)
     await mapConcurrent(meta.clouds || [], 3, async (c) => {
       const buffers = {}
-      const loaded = await mapConcurrent(RECON_BIN_KEYS, 6, async (key) => saved
-        ? saved[`${c.id}.${key}`] ?? null
-        : readBin(dir, `recon.${c.id}.${key}.bin`).catch(() => null))
-      RECON_BIN_KEYS.forEach((key, index) => { buffers[key] = loaded[index] })
+      RECON_BIN_KEYS.forEach((key) => { buffers[key] = saved[`${c.id}.${key}`] ?? null })
       const n = c.pointCount ?? 0
       // A dense/mesh pos is stored at its in-memory width (Float32 = 12 bytes per
       // point, Float64 = 24; cloudSerde posArray); a sparse pos is always Float64.
@@ -1355,9 +1301,6 @@ export async function loadReconstruction(projectId) {
     })
     delete meta.binaryFiles
     return meta
-  } catch {
-    return null
-  }
   })
 }
 
@@ -1365,7 +1308,6 @@ export async function deleteReconstruction(projectId) {
   return trackPersistence('deleteReconstruction:' + String(projectId), () => persistenceLock(`reconstruction:${projectId}`, async () => {
     const dir = await getProjectDir(projectId)
     await dir.removeEntry('reconstruction.json').catch(ignoreMissing)
-    await removeStaleReconBins(dir, new Set())
     if (dir.keys) for await (const name of dir.keys()) {
       if (name.startsWith('reconstruction.json.') && name.endsWith('.bin')) await dir.removeEntry(name).catch(ignoreMissing)
     }

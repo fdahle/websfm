@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { flushPersistence, trackPersistence, pendingPersistence, retryPersistence, persistenceFailures } from './persistence.js'
 import { mergeProjectIndex } from './projectIndex.ts'
-import { coalescedSave } from './coalescedSave.js'
+import { createDocumentSaver } from './documentSaver.js'
 import { buildPosesCsv, buildSensorsCsv } from './exportCsv.js'
 import { isModelCached } from '../core/models/modelCache.js'
 
@@ -35,14 +35,17 @@ it('tracks work before its first await and waits through trailing coalesced save
   let finish
   const first = new Promise(resolve => { finish = resolve })
   const written = []
-  const save = coalescedSave('test-drain', async (id, value) => {
-    if (!written.length) { written.push([id, value]); await first }
-    else written.push([id, value])
-  })
-  const a = save('old-project', { n: 1 })
+  let state = { n: 1 }
+  const save = createDocumentSaver({ label: 'test-drain', currentProjectId: () => 'old-project', build: () => state,
+    write: async (id, value) => {
+      if (!written.length) { written.push([id, value]); await first }
+      else written.push([id, value])
+    } })
+  const a = save()
   expect(pendingPersistence.value).toBeGreaterThan(0)
   await Promise.resolve()
-  const b = save('old-project', { n: 2 })
+  state = { n: 2 }
+  const b = save()
   expect(a).toBe(b)
   let flushed = false
   const flush = flushPersistence().then(() => { flushed = true })

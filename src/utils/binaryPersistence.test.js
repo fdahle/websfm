@@ -175,3 +175,28 @@ describe('orthophoto (a COG file, never a plane)', () => {
     expect(await opfs.loadProduct('binary-test', 'ortho')).toEqual({ outdated: true })
   })
 })
+
+describe('loading a reconstruction', () => {
+  it('returns null when no model was ever saved', async () => {
+    expect(await opfs.loadReconstruction('binary-test')).toBeNull()
+  })
+  it('throws, rather than reporting no model, when the document is unreadable', async () => {
+    dir.files.set('reconstruction.json', new TextEncoder().encode('{"version":3,"clo'))
+    await expect(opfs.loadReconstruction('binary-test')).rejects.toThrow()
+  })
+  it('throws when a cloud buffer the document names is missing', async () => {
+    const res = await opfs.saveReconstruction('binary-test', { clouds: [
+      { id: 'a', kind: 'dense', pointCount: 1, buffers: { pos: new Float64Array(3).buffer } },
+    ] })
+    dir.files.delete(res.files.a.pos.name)
+    await expect(opfs.loadReconstruction('binary-test')).rejects.toThrow()
+  })
+})
+
+it('a project.json update starts from a whole-document write already queued', async () => {
+  await opfs.writeProject('binary-test', { name: 'a', images: [] })
+  const write = opfs.writeProject('binary-test', { name: 'a', images: [{ id: 1 }] })
+  const rename = opfs.updateProject('binary-test', (data) => ({ ...data, name: 'b' }))
+  await Promise.all([write, rename])
+  expect(await opfs.readProject('binary-test')).toEqual({ name: 'b', images: [{ id: 1 }] })
+})

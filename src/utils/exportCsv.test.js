@@ -31,25 +31,26 @@ describe('buildPosesCsv', () => {
 })
 
 describe('fiducial CSVs round-trip through their importers', () => {
-  it('image fiducials: slot detections, else legacy mark-id clicks', () => {
+  it('image fiducials: one row per slot detection', () => {
     const csv = buildFiducialObsCsv([
-      { name: 'scan1.tif', fiducialDetections: [{ slot: 'corner-tl', px: 10.5, py: 20, source: 'template', confidence: 0.9 }],
-        fiducialObs: [{ fidId: 'F1', px: 1, py: 2 }] },
-      { name: 'scan2.tif', fiducialObs: [{ fidId: 'F3', px: 3, py: 4 }] },
+      { name: 'scan1.tif', fiducialDetections: [{ slot: 'corner-tl', px: 10.5, py: 20, source: 'template', confidence: 0.9 }] },
+      { name: 'scan2.tif', fiducialDetections: [{ slot: 'side-left', px: 3, py: 4, source: 'manual', confidence: 1 }] },
+      { name: 'scan3.tif' },
     ])
     expect(detectFileKind(csv, 'x.csv').kind).toBe('fiducialObs')
     expect(parseFiducialObs(csv).rows).toEqual([
       { imageName: 'scan1.tif', fidId: 'corner-tl', px: 10.5, py: 20 },
-      { imageName: 'scan2.tif', fidId: 'F3', px: 3, py: 4 },
+      { imageName: 'scan2.tif', fidId: 'side-left', px: 3, py: 4 },
     ])
   })
 
-  it('camera fiducials: the calibration with its slots, else the certificate', () => {
+  it('camera fiducials: the marks, with slots where calibrated', () => {
     const csv = buildFiducialMarksCsv([
       { label: 'RC10', fiducialCalibration: {
         marks: [{ id: 'F1', xMm: -106, yMm: -106 }, { id: 'F2', xMm: 106, yMm: -106 }],
         slotMap: { 'corner-tl': 'F1', 'corner-tr': 'F2', 'corner-br': '' }, focalMm: 152.8, ppxMm: 0.01, ppyMm: -0.02 } },
-      { label: 'RC20', fiducials: { marks: [{ id: '1', xMm: -110, yMm: 110 }], focalMm: 153.1, ppxMm: 0, ppyMm: 0 } },
+      { label: 'RC20', fiducialCalibration: {
+        marks: [{ id: '1', xMm: -110, yMm: 110 }], slotMap: {}, focalMm: 153.1, ppxMm: 0, ppyMm: 0 } },
     ])
     expect(detectFileKind(csv, 'x.csv').kind).toBe('fiducialMarks')
     const { groups } = parseFiducialMarks(csv)

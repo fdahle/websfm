@@ -37,11 +37,9 @@ export function createImage(file) {
     // camera glyphs show instead of `url`. Filled in the background
     // (useImagesStore.requestThumbnail); null until then.
     thumb: null,
-    // Clicked scan-pixel observations of the film sensor's fiducial marks (F4).
-    // [{ fidId, px, py }]; only meaningful when the image's sensor is kind:'film'.
-    fiducialObs: [],
-    // Anonymous raster-relative detections. Calibration lives on the sensor and
-    // is deliberately not required to populate these.
+    // Fiducial marks found or placed on the scan (F4): anonymous raster-relative
+    // detections [{ slot, px, py, … }]. Calibration lives on the sensor and is
+    // deliberately not required to populate these.
     fiducialDetections: [],
   }
 }
