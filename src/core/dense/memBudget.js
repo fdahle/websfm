@@ -125,14 +125,29 @@ export function createMemLedger() {
 // Returns a byte breakdown { store, raster, gpu, filter, total }.
 export function projectDensePeakBytes({
   nImages, maxDim, nSources = 6, backend = 'wasm', rasterBytesPerPx = 4, retainedMaps = nImages,
-  filterMaps = retainedMaps,
+  filterMaps = retainedMaps, pixels = null,
 }) {
-  const npix = maxDim * maxDim
-  const store = retainedMaps * 23 * npix // depth 4 + cost 4 + rgb 3 + normals 12
-  const raster = nImages * rasterBytesPerPx * npix
-  const gpu = backend === 'gpu' ? (48 * npix + nSources * 4 * npix) : 0
-  const filter = filterMaps * npix
+  // Per-image working pixels when the sizes are known (workingPixels); else the
+  // maxDim² upper bound, which counts a 2 : 1 frame at twice its size (the KH-9
+  // mapping camera's 7.1 GB at High was 3.6 GB of real pixels).
+  const px = pixels?.length ? pixels : Array.from({ length: nImages }, () => maxDim * maxDim)
+  const largest = px.reduce((m, v) => Math.max(m, v), 0)
+  const sum = px.reduce((a, v) => a + v, 0)
+  // `count` maps of the largest size, or all of them when every map is held.
+  const some = (count) => (count >= px.length ? sum : count * largest)
+  const store = 23 * some(retainedMaps) // depth 4 + cost 4 + rgb 3 + normals 12
+  const raster = rasterBytesPerPx * sum
+  const gpu = backend === 'gpu' ? (48 * largest + nSources * 4 * largest) : 0
+  const filter = some(filterMaps)
   return { store, raster, gpu, filter, total: store + raster + gpu + filter }
+}
+
+// Working pixels of one image when its long side is brought to ≤ maxDim (the dense
+// rasterize rule): width·height scaled, not maxDim². Unknown size ⇒ the square bound.
+export function workingPixels(width, height, maxDim) {
+  if (!(width > 0 && height > 0)) return maxDim * maxDim
+  const s = Math.min(1, maxDim / Math.max(width, height))
+  return Math.round(width * s) * Math.round(height * s)
 }
 
 // Fusion's voxel accumulator (core/dense/mvs.js createVoxelAccumulator), per merged

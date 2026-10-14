@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   createMemLedger, projectDensePeakBytes, projectDensifyPeakBytes, densifyInputBytes, DENSIFY_CELL_BYTES, formatBytes, DEFAULT_BUDGET_BYTES,
-  deviceBudget, DENSIFY_STREAMED_REF_BYTES_PER_PX,
+  deviceBudget, DENSIFY_STREAMED_REF_BYTES_PER_PX, workingPixels,
 } from './memBudget.js'
 
 const GiB = 1024 ** 3
@@ -78,6 +78,21 @@ describe('createMemLedger', () => {
 })
 
 describe('projectDensePeakBytes', () => {
+  it('counts real working pixels when sizes are given, not maxDim²', () => {
+    // A 2 : 1 frame at maxDim 8000 is 8000 × 4000: half the square bound.
+    expect(workingPixels(16000, 8000, 8000)).toBe(8000 * 4000)
+    expect(workingPixels(1000, 500, 4000)).toBe(1000 * 500) // never upscaled
+    expect(workingPixels(0, 0, 300)).toBe(300 * 300) // unknown size: the bound
+    const sq = projectDensePeakBytes({ nImages: 4, maxDim: 8000, backend: 'gpu' })
+    const px = Array(4).fill(workingPixels(16000, 8000, 8000))
+    const real = projectDensePeakBytes({ nImages: 4, maxDim: 8000, backend: 'gpu', pixels: px })
+    expect(real.total).toBe(sq.total / 2)
+    // Streaming holds one map: the largest, whatever the mix of sizes.
+    const mixed = projectDensePeakBytes({ nImages: 2, maxDim: 1000, retainedMaps: 1, filterMaps: 0, pixels: [100, 400] })
+    expect(mixed.store).toBe(23 * 400)
+    expect(mixed.raster).toBe(4 * 500)
+  })
+
   it('sums store + raster with no GPU term on the WASM path', () => {
     const npix = 1000 * 1000
     const p = projectDensePeakBytes({ nImages: 5, maxDim: 1000, backend: 'wasm' })

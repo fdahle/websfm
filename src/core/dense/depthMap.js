@@ -13,6 +13,7 @@ import { levelPerturbStarts } from './refineSchedule.js'
 import { cameraCenter, triangulationAngle, toScaledPx } from '../sfm/geometry.js'
 import { relativePose, project } from './denseGeometry.js'
 import { numOpt, boolOpt } from './denseOptions.js'
+import { projectDensePeakBytes, workingPixels } from './memBudget.js'
 import { filterSettings } from './geomFilter.js'
 
 // ── Stage A helpers ──────────────────────────────────────────────────────────
@@ -355,6 +356,30 @@ const QUALITY_FRACTION = { low: 1 / 8, medium: 1 / 4, high: 1 / 2, ultra: 1 }
 export function qualityToMaxDim(quality, nativeLongSide) {
   const f = QUALITY_FRACTION[quality] ?? QUALITY_FRACTION.medium
   return Math.max(200, Math.round((nativeLongSide || 0) * f))
+}
+
+// The highest depth quality at or below `quality` whose projected peak fits `budget`
+// (memBudget.js projectDensePeakBytes over the images' real working sizes) — the
+// depth stage steps down and says so rather than refusing, as fusion re-plans its
+// step. `sizes`: [{ width, height }] of each image's working basis (native, or the
+// film canonical frame). Returns { quality, maxDim, proj, steps } (steps = levels
+// dropped) or null when not even Low fits; `proj` is the chosen level's projection.
+export const DEPTH_QUALITY_ORDER = ['ultra', 'high', 'medium', 'low']
+export function fitDepthQuality({ quality, sizes, budget, backend = 'wasm', nSources = 6, streamMaps = true, geomConsistency = true }) {
+  const nativeLong = sizes.reduce((m, s) => Math.max(m, s.width || 0, s.height || 0), 0)
+  const start = Math.max(0, DEPTH_QUALITY_ORDER.indexOf(quality))
+  for (let k = start; k < DEPTH_QUALITY_ORDER.length; k++) {
+    const q = DEPTH_QUALITY_ORDER[k]
+    const maxDim = qualityToMaxDim(q, nativeLong)
+    const proj = projectDensePeakBytes({
+      nImages: sizes.length, maxDim, nSources, backend,
+      pixels: sizes.map((s) => workingPixels(s.width, s.height, maxDim)),
+      retainedMaps: streamMaps ? 1 : sizes.length,
+      filterMaps: geomConsistency && !streamMaps ? sizes.length : 0,
+    })
+    if (proj.total <= budget) return { quality: q, maxDim, proj, steps: k - start }
+  }
+  return null
 }
 
 // Per-image best-K from the number of available source views: average roughly the

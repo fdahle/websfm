@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  filterDepthMap, depthMapForImage, qualityToMaxDim, autoBestK, fusionCostStats,
+  filterDepthMap, depthMapForImage, qualityToMaxDim, fitDepthQuality, autoBestK, fusionCostStats,
   fuseDepthMaps, mergePointsSpatial, createVoxelAccumulator, filterDepthMapsGeometric, filterCandidates, geomFilterLoopShare,
   filterDepthMapsGeometricStreamed, applyPackedMask, fuseDepthMapsStreamed, fusionGates, filterConfig, filterSettings,
   depthMapSettings, streamedEligible,
@@ -117,6 +117,21 @@ describe('quality presets & derived params (Step 3)', () => {
     expect(qualityToMaxDim('medium', 8000)).toBe(2000)  // ¼
     expect(qualityToMaxDim('high', 8000)).toBe(4000)    // ½
     expect(qualityToMaxDim('ultra', 8000)).toBe(8000)   // full
+  })
+
+  it('fitDepthQuality keeps the requested level when it fits and steps down when not', () => {
+    // Four 2 : 1 KH-9-like frames of 16k × 8k native, GPU, streamed maps.
+    const sizes = Array(4).fill({ width: 16000, height: 8000 })
+    const GiB = 1024 ** 3
+    const big = fitDepthQuality({ quality: 'high', sizes, budget: 64 * GiB, backend: 'gpu' })
+    expect(big).toMatchObject({ quality: 'high', maxDim: 8000, steps: 0 })
+    // High needs ≈ 3.5 GB of real pixels here (the maxDim² bound said ≈ 7 GB).
+    expect(big.proj.total / GiB).toBeGreaterThan(3)
+    expect(big.proj.total / GiB).toBeLessThan(4)
+    const tight = fitDepthQuality({ quality: 'high', sizes, budget: 2 * GiB, backend: 'gpu' })
+    expect(tight).toMatchObject({ quality: 'medium', maxDim: 4000, steps: 1 })
+    expect(tight.proj.total).toBeLessThanOrEqual(2 * GiB)
+    expect(fitDepthQuality({ quality: 'high', sizes, budget: 1, backend: 'gpu' })).toBeNull()
   })
 
   it('qualityToMaxDim floors at 200px and defaults unknown presets to medium', () => {

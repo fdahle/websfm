@@ -16,7 +16,7 @@ import { depthColor } from '../../core/products/colormap.js'
 import { isGpuAvailable, ensureDevice } from '../gpu/device.js'
 import { computeDepthMapGPU } from '../gpu/depthMapGpu.js'
 import {
-  createMemLedger, projectDensePeakBytes, formatBytes, DEFAULT_BUDGET_BYTES,
+  createMemLedger, projectDensePeakBytes, workingPixels, formatBytes, DEFAULT_BUDGET_BYTES,
 } from '../../core/dense/memBudget.js'
 
 // Dense MVS ops (Stage A depth maps + Stage B fusion). `rasterize` (OffscreenCanvas
@@ -227,11 +227,12 @@ export function makeDenseOps({ rasterize }) {
 
     // Pre-flight memory budget (Step 5): project the peak allocation and refuse to
     // start when it exceeds the budget, rather than letting the browser OOM-kill the
-    // tab mid-run (Safari can't be observed or intercepted). Working dims use the
-    // maxDim² upper bound; source count uses maxSources.
+    // tab mid-run (Safari can't be observed or intercepted). Working dims from each
+    // image's own size (maxDim² when unknown); source count uses maxSources.
     const budget = settings.memBudgetBytes > 0 ? settings.memBudgetBytes : DEFAULT_BUDGET_BYTES
     const proj = projectDensePeakBytes({
       nImages: images.length, maxDim, nSources: maxSources, backend: backend ? 'gpu' : 'wasm',
+      pixels: images.map((im) => workingPixels(im.width, im.height, maxDim)),
       retainedMaps: streamMaps ? 1 : images.length,
       // The in-memory cross-view filter below; streamed maps are filtered by its own pass.
       filterMaps: geomConsistency && !streamMaps ? images.length : 0,

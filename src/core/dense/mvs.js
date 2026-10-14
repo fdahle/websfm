@@ -27,7 +27,7 @@ export { cameraCenter, scaleK, rgbaToGray } from '../sfm/geometry.js'
 
 export { relativePose } from './denseGeometry.js'
 export {
-  selectSourceViews, seedDepthFromSparse, depthMapForImage, filterDepthMap, qualityToMaxDim, autoBestK, depthMapSettings,
+  selectSourceViews, seedDepthFromSparse, depthMapForImage, filterDepthMap, qualityToMaxDim, fitDepthQuality, autoBestK, depthMapSettings,
 } from './depthMap.js'
 export {
   filterCandidates, geomFilterLoopShare, filterDepthMapsGeometric, filterDepthMapsGeometricStreamed, logFilterCache,

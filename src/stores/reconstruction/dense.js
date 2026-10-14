@@ -1,11 +1,11 @@
 import { makeFrameModelResolver } from '../../core/sfm/displayFrame.js'
-import { qualityToMaxDim, filterConfig, filterSettings, logFilterCache, logFilterTotals, mergeFusionCounters, logFusionStream, finishFusion } from '../../core/dense/mvs.js'
+import { qualityToMaxDim, fitDepthQuality, filterConfig, filterSettings, logFilterCache, logFilterTotals, mergeFusionCounters, logFusionStream, finishFusion } from '../../core/dense/mvs.js'
 import { distortionOf } from '../../core/sfm/distortion.js'
 import { isFiducialCalibrated } from '../../core/sfm/fiducialModel.js'
 import { packSparseForDense, sparseInputTransfer } from '../../core/dense/sparseInput.js'
 import { computeDepthMaps as workerComputeDepthMaps, POOL_SIZE, filterDepthMaps as workerFilterDepthMaps, densify as workerDensify, meshify as workerMeshify } from '../../workers/computeClient.js'
 import * as opfs from '../../utils/opfs.js'
-import { DEFAULT_BUDGET_BYTES } from '../../core/dense/memBudget.js'
+import { DEFAULT_BUDGET_BYTES, formatBytes } from '../../core/dense/memBudget.js'
 import { DENSE_TUNING } from '../../core/tuning.js'
 
 // The dense pipeline, split out of useReconstructionStore: Stage A depth maps
@@ -40,17 +40,6 @@ export function createDense({
     }
     reconStatus.value = 'running'
     try {
-      // Resolve a quality preset → working maxDim from the largest native image
-      // dimension (Step 3), unless the user set an explicit maxDim in Advanced.
-      const resolved = { ...settings }
-      if (resolved.quality && !(resolved.maxDim > 0)) {
-        const nativeLong = images.value.reduce(
-          (m, im) => Math.max(m, im.meta?.width || 0, im.meta?.height || 0), 0)
-        resolved.maxDim = qualityToMaxDim(resolved.quality, nativeLong)
-        log(`Dense: quality '${resolved.quality}' → working ≤${resolved.maxDim}px `
-          + `(¼-scale presets of ${nativeLong}px native)`, 'info', 'Dense')
-      }
-      settings = resolved
       // Rebuild every value as plain arrays/objects: cloud cameras + points are
       // reactive Pinia state, and Vue's Proxy wrappers can't be structured-cloned
       // to the worker ("object can not be cloned").
@@ -116,6 +105,10 @@ export function createDense({
           selfCal,
           // Film scan→canonical warp (plain data; the frame is already a plain object).
           fid,
+          // The working grid's basis (the canonical frame for a film scan), so the
+          // worker's memory pre-flight counts real pixels, not maxDim².
+          width: fid?.frame?.width ?? im.meta?.width ?? 0,
+          height: fid?.frame?.height ?? im.meta?.height ?? 0,
         })
       }
       if (selfCalRows.length) {
@@ -142,6 +135,33 @@ export function createDense({
       // over the saved files. Holding every map to the end (the in-memory path, kept
       // for a project that cannot save) made the preflight refuse ~100+ images.
       const run = await beginStreamedDepthMaps()
+      // Resolve a quality preset → working maxDim from the largest native image
+      // dimension (Step 3), unless the user set an explicit maxDim in Advanced. A
+      // quality whose projected peak exceeds the memory budget steps down (High →
+      // Medium → Low) with a warning, rather than the worker refusing to start.
+      const resolved = { ...settings }
+      if (resolved.quality && !(resolved.maxDim > 0)) {
+        const nativeLong = images.value.reduce(
+          (m, im) => Math.max(m, im.meta?.width || 0, im.meta?.height || 0), 0)
+        resolved.maxDim = qualityToMaxDim(resolved.quality, nativeLong)
+        const budget = settings.memBudgetBytes > 0 ? settings.memBudgetBytes : DEFAULT_BUDGET_BYTES
+        const plan = (quality, cap) => fitDepthQuality({
+          quality, budget: cap, sizes: inputImages.map((im) => ({ width: im.width, height: im.height })),
+          backend: settings.useGpu ? 'gpu' : 'wasm', nSources: Math.min(16, settings.maxSources ?? 6),
+          streamMaps: !!run, geomConsistency: settings.geomConsistency !== false,
+        })
+        const fit = plan(resolved.quality, budget)
+        if (fit?.steps > 0) {
+          log(`Dense: quality '${resolved.quality}' would need ≈ ${formatBytes(plan(resolved.quality, Infinity).proj.total)} `
+            + `against the ${formatBytes(budget)} budget — using '${fit.quality}' (≤${fit.maxDim}px, ≈ ${formatBytes(fit.proj.total)}). `
+            + 'Raise the memory budget (Settings ▸ Compute) to keep the higher quality.', 'warn', 'Dense')
+          resolved.quality = fit.quality
+          resolved.maxDim = fit.maxDim
+        }
+        log(`Dense: quality '${resolved.quality}' → working ≤${resolved.maxDim}px `
+          + `(¼-scale presets of ${nativeLong}px native)`, 'info', 'Dense')
+      }
+      settings = resolved
       const { maps, summary: aSummary, loopShare } = await workerComputeDepthMaps(
         { images: inputImages, sparse, settings: withRegion({ ...settings, streamMaps: !!run }) },
         { transfer: sparseInputTransfer(sparse), onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f),
