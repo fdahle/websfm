@@ -8,6 +8,7 @@ import { pixelToWorld, worldToPixel } from '../../core/io/rasterSample.js'
 import { polylineLength, planimetricArea, sampleProfile, polygonVolume, groundVolume } from '../../core/products/measure.js'
 import { isGeographic } from '../../core/crs.js'
 import { rasterGroundScale, rasterUnits, volumeUnitLabel } from '../../core/products/rasterUnits.js'
+import { viewerMayHandleKey } from '../../utils/keyRouting.js'
 
 // Raster measurements over the active ProductViewer. The tool is CHOSEN from the
 // Ribbon's contextual DEM/Orthophoto tab (Measure group) — this component only
@@ -233,13 +234,14 @@ function exportProfile() {
 }
 
 // Keyboard while a tool is active and this tab is in front (v-show hides others).
+// Ignored while a dialog is open or a field has focus (see utils/keyRouting); a key
+// acted on is consumed, so App's Escape does not also leave the map's GCP edit.
 function onKey(e) {
   if (tool.value === 'pan' || !root.value?.offsetParent) return
-  const t = e.target
-  if (t && (t.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName))) return
+  if (!viewerMayHandleKey(e)) return
   if (e.key === 'Enter') { finish(); e.preventDefault() }
   else if (e.key === 'Backspace' && vertices.value.length && !finished.value) { vertices.value.pop(); e.preventDefault() }
-  else if (e.key === 'Escape') { if (vertices.value.length) reset(); else choose('pan') }
+  else if (e.key === 'Escape') { e.preventDefault(); if (vertices.value.length) reset(); else choose('pan') }
 }
 onMounted(() => window.addEventListener('keydown', onKey))
 onBeforeUnmount(() => window.removeEventListener('keydown', onKey))

@@ -1,5 +1,6 @@
 import { ref, shallowRef, watch } from 'vue'
 import { depthColor } from '../core/products/colormap.js'
+import { createRevision } from '../utils/revision.js'
 
 // The image view's depth-map overlay: an OffscreenCanvas at native image
 // resolution that `renderOverlay` blits under the other overlays, plus the
@@ -17,19 +18,28 @@ import { depthColor } from '../core/products/colormap.js'
 // draw path is rAF-driven, not a reactive effect, so nothing tracks it.
 //
 // Deps:
-//   imgEl      — ref to the <img>, for the native dimensions
+//   frame      — ref to the viewer's native pixel frame (utils/imageViewport.js
+//                imageFrame; null until the bitmap has loaded). The canvas is sized
+//                from it — the NATIVE size, never the displayed bitmap's, which is
+//                ~20× smaller while a TIFF preview is shown — and is not built for
+//                a preview frame at all (initDepthCanvas is a no-op then; the viewer
+//                calls it again once the full-resolution bitmap loads).
 //   image      — getter returning the current image record (reads `.depth`)
 //   drawOverlay— schedule an overlay repaint
 //   emit       — component emit, for 'update-depth'
-export function useDepthOverlay({ imgEl, image, drawOverlay, emit }) {
+export function useDepthOverlay({ frame, image, drawOverlay, emit }) {
   const depthFileInput = ref(null)
   const depthCanvas = shallowRef(null)
   const hasDepth = ref(!!image().depth)
+  // Latest wins (utils/revision.js): a decode that lands after a newer load, import
+  // or clear must not repaint the canvas, and an export of a superseded state is
+  // not emitted.
+  const rev = createRevision()
 
   function initDepthCanvas() {
-    const img = imgEl.value
-    if (!img || !img.naturalWidth) return
-    depthCanvas.value = new OffscreenCanvas(img.naturalWidth, img.naturalHeight)
+    const f = frame.value
+    if (!f || f.preview) return
+    depthCanvas.value = new OffscreenCanvas(f.width, f.height)
     if (image().depth?.blob) loadDepthBlob(image().depth.blob)
   }
 
@@ -38,8 +48,10 @@ export function useDepthOverlay({ imgEl, image, drawOverlay, emit }) {
   async function loadDepthBlob(blob) {
     const canvas = depthCanvas.value
     if (!canvas) return
+    const t = rev.bump()
     try {
       const bmp  = await createImageBitmap(blob)
+      if (!rev.isCurrent(t) || depthCanvas.value !== canvas) return
       const ctx  = canvas.getContext('2d')
       ctx.clearRect(0, 0, canvas.width, canvas.height)
       ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height)
@@ -59,8 +71,10 @@ export function useDepthOverlay({ imgEl, image, drawOverlay, emit }) {
     e.target.value = ''
     const canvas = depthCanvas.value
     if (!file || !canvas) return
+    const t = rev.bump()
     try {
       const bmp    = await createImageBitmap(file)
+      if (!rev.isCurrent(t) || depthCanvas.value !== canvas) return
       const tmp    = new OffscreenCanvas(canvas.width, canvas.height)
       const tmpCtx = tmp.getContext('2d')
       tmpCtx.drawImage(bmp, 0, 0, tmp.width, tmp.height)
@@ -98,12 +112,15 @@ export function useDepthOverlay({ imgEl, image, drawOverlay, emit }) {
   async function exportDepth() {
     const canvas = depthCanvas.value
     if (!canvas) return
-    emit('update-depth', await canvas.convertToBlob({ type: 'image/png' }))
+    const t = rev.current()
+    const blob = await canvas.convertToBlob({ type: 'image/png' })
+    if (rev.isCurrent(t)) emit('update-depth', blob)
   }
 
   function clearDepth() {
     const canvas = depthCanvas.value
     if (!canvas) return
+    rev.bump()
     canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height)
     hasDepth.value = false
     emit('update-depth', null)
@@ -117,6 +134,7 @@ export function useDepthOverlay({ imgEl, image, drawOverlay, emit }) {
     if (depth?.blob && canvas) {
       loadDepthBlob(depth.blob)
     } else if (!depth && canvas) {
+      rev.bump()
       canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height)
       hasDepth.value = false
       drawOverlay()

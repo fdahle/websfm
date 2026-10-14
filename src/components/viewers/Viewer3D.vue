@@ -11,6 +11,8 @@ import { buildCloudStyle, scalarRange, sharedElevationRange, resolveCloudStyle }
 import { viewerClipping } from '../../core/products/viewerClipping.js'
 import { screenSelectMask, maskIndices } from '../../core/products/screenSelect.js'
 import { pickNearestPoint } from '../../core/products/screenPick.js'
+import { settleEditLatch } from '../../core/products/editFraming.js'
+import { viewerMayHandleKey } from '../../utils/keyRouting.js'
 import { useImagesStore } from '../../stores/useImagesStore.js'
 
 // pointSize / cameraScale are set from the ribbon's View ▸ Scene steppers.
@@ -154,10 +156,12 @@ vec3 websfmSrgbToLinear(vec3 c) {
 }
 let lastCameraMaps = []
 let knownCloudIds = new Set()
-// Set when a selection edit is committed: the cloud it adds (a derived fork of a
-// computed/imported source) replaces the one the user was zoomed into, so it must
-// not re-frame the scene the way a newly imported cloud does.
-let keepViewForEdit = false
+// The cloud ids a committed selection edit will rewrite: its result (a derived
+// fork of a computed/imported source, or the derived cloud refined in place)
+// replaces the one the user was zoomed into, so it must not re-frame the scene the
+// way a newly imported cloud does. Settled per layer update (see settleEditLatch),
+// so a failed or cancelled edit does not suppress framing of a later import.
+let editPendingIds = new Set()
 // Imported point buffers are immutable; replacing a buffer invalidates its range.
 const elevationRanges = new WeakMap()
 function cachedElevationRange(cloud) {
@@ -562,6 +566,9 @@ function setCloudLayers(clouds) {
   if (!scene) return
   const hadContent = cloudLayers.size > 0 || frustumGroup.children.length > 0
   const addedCloud = clouds.some(c => c.visible !== false && !knownCloudIds.has(c.id))
+  // Read against the layers as last drawn, before this update reconciles them.
+  const edit = settleEditLatch(editPendingIds, clouds, (id) => cloudLayers.get(id)?.source, addedCloud)
+  editPendingIds = edit.pending
   knownCloudIds = new Set(clouds.map(c => c.id))
   const visible = clouds.filter(c => c.visible !== false)
   const elevationRange = sharedElevationRange(clouds, cachedElevationRange)
@@ -574,8 +581,12 @@ function setCloudLayers(clouds) {
   const cameras = new Map()
   for (const map of cameraMaps) for (const [id, cam] of map) cameras.set(id, cam)
   const up = props.sceneUp || estimateUpFromCameras(cameras)
+  const prevUp = sceneUp.clone()
   if (up) sceneUp.set(...up).normalize()
   else sceneUp.set(0, 0, 1)
+  // Bounds are measured along sceneUp: when the estimate moved (new cameras, no
+  // prop), the layers kept below must be re-measured like the prop watcher does.
+  const upChanged = !prevUp.equals(sceneUp)
   for (const cloud of visible) {
     let layer = cloudLayers.get(cloud.id)
     if (layer && (layer.source.pos !== cloud.pos || layer.source.points !== cloud.points || layer.source.idx !== cloud.idx
@@ -586,6 +597,8 @@ function setCloudLayers(clouds) {
       layer = createCloudLayer(cloud)
       if (!layer) continue
       cloudLayers.set(cloud.id, layer)
+    } else if (upChanged) {
+      layer.bounds = robustBounds(layer.positions, layer.count, sceneUp)
     }
     const style = resolveCloudStyle(cloud)
     const sharedRange = style.field === 'elevation' && style.range === 'auto' ? elevationRange : null
@@ -609,8 +622,7 @@ function setCloudLayers(clouds) {
   }
   // Fit newly added layers together, including distant survey tiles. Selection,
   // symbology and visibility toggles preserve the user's camera position.
-  if ((!hadContent || (addedCloud && !keepViewForEdit)) && cloudLayers.size) resetView()
-  if (addedCloud) keepViewForEdit = false
+  if ((!hadContent || (addedCloud && !edit.editResult)) && cloudLayers.size) resetView()
   updateClipping()
   pruneSelections()
   requestRender()
@@ -842,19 +854,23 @@ function commitSelection(keepSelected) {
   const edits = [...selections].filter(([, e]) => e.selected).map(([cloudId, e]) => ({ cloudId, mask: e.mask }))
   if (!edits.length) return
   clearSelection()
-  keepViewForEdit = true
+  editPendingIds = new Set(edits.map((e) => e.cloudId))
   emit('edit-selection', { edits, keepSelected })
 }
 
+// Keys reach this before App's global handler (see utils/keyRouting): nothing is
+// done while a dialog is open or a field has focus, and a key acted on is consumed
+// so App does not also close a modal or leave the active 3D tool on the same press.
 function onSelectKey(e) {
   if (!container.value?.offsetParent) return // tab hidden (v-show)
-  const t = e.target
-  if (t && (t.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName))) return
+  if (!viewerMayHandleKey(e)) return
   if (e.key === 'Escape' && drawing) {
     // Abort the stroke in progress; the pointerup that follows finds nothing.
+    e.preventDefault()
     drawing = null
     drawShape.value = null
   } else if (e.key === 'Escape' && (selectionCount.value || selectTool.value)) {
+    e.preventDefault()
     if (selectionCount.value) clearSelection()
     else selectTool.value = null
   } else if ((e.key === 'Delete' || e.key === 'Backspace') && selectionCount.value) {

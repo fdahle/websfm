@@ -1,19 +1,23 @@
 <script setup>
-import { ref, shallowRef, watch, computed, onMounted, onBeforeUnmount } from 'vue'
-import { maskFromSource, invertMaskPixels, anyExcluded } from '../../core/mask.js'
-import { depthColor } from '../../core/products/colormap.js'
-import { fitFiducialAffine, mmToScan } from '../../core/sfm/fiducials.js'
-import { fitFiducialTransform, applyFiducialTransform } from '../../core/sfm/fiducialCalibration.js'
+import { ref, watch, computed, onMounted, onBeforeUnmount } from 'vue'
 import { clipLineToRect } from '../../core/sfm/gcpGuides.js'
 import { segmentForget } from '../../workers/computeClient.js'
 import { useImagesStore } from '../../stores/useImagesStore.js'
 import { copyToClipboard } from '../../composables/useToasts.js'
+import { useImageViewport } from '../../composables/useImageViewport.js'
+import { useMaskEditor } from '../../composables/useMaskEditor.js'
 import { useDepthOverlay } from '../../composables/useDepthOverlay.js'
-import { useSmartSelect } from '../../composables/useSmartSelect.js'
+import { useImageKeypoints } from '../../composables/useImageKeypoints.js'
+import { useFiducialFit } from '../../composables/useFiducialFit.js'
+import { bitmapPixel } from '../../utils/imageViewport.js'
+import {
+  overlayView, beginOverlayFrame, paintRaster, paintRampLegend, paintResidualLegend,
+  paintKeypoints, paintResiduals, paintGcpGuides, paintGcps, paintFiducials,
+  paintLoupe, paintBrushCursor, paintRectPreview, KEYPOINT_LEGEND, DEPTH_LEGEND,
+} from '../../utils/imageOverlay.js'
 import MaskToolbar from './MaskToolbar.vue'
 import GcpToolbar from './GcpToolbar.vue'
-
-// Smart Select (SAM2) fetches its learned weights on demand via this store.
+import ImageContextMenu from './ImageContextMenu.vue'
 
 const props = defineProps({
   image:         { type: Object,  required: true },
@@ -74,8 +78,9 @@ function onSelectNewRole(role) {
 // exit-mask-edit: user closed the mask toolbar (×) — parent owns the maskEdit flag.
 const emit = defineEmits(['update-mask', 'update-depth', 'mark-gcp', 'add-gcp', 'select-gcp', 'delete-gcp', 'mark-fiducial', 'exit-mask-edit', 'exit-gcp-edit'])
 
-// Only for the <img>'s @error: a blob: URL can outlive the file behind it, and
-// the store heals it from OPFS or flags the image (see reportImageLoadError).
+// The <img>'s @error (a blob: URL can outlive the file behind it, and the store
+// heals it from OPFS or flags the image — see reportImageLoadError), and the
+// on-demand keypoint reads.
 const imagesStore = useImagesStore()
 
 // Ids of GCPs already marked on this image, shown with a dot in the GCP-edit
@@ -84,216 +89,90 @@ const markedGcpIds = computed(() =>
   (props.gcps ?? []).map((g) => g.id).filter((id) => id != null)
 )
 
-// Live fiducial fit (F4): join this image's observations with the sensor's
-// calibrated marks and fit the scan→mm affine once ≥3 land, so per-mark residual
-// (µm) can be shown next to each marker — the same live feedback as GCP reproj.
-const fidFit = computed(() => {
-  if (!props.isFilm || !props.fiducialObs?.length) return { obs: [], fit: null }
-  const byId = new Map(props.fiducialMarks.map((m) => [m.id, m]))
-  const obs = props.fiducialObs
-    .map((o) => {
-      const m = byId.get(o.fidId)
-      return m ? { fidId: o.fidId, px: o.px, py: o.py, xMm: m.xMm, yMm: m.yMm } : null
-    })
-    .filter(Boolean)
-  const model = props.fiducialTransform || 'affine'
-  return { obs, fit: model === 'affine' ? (obs.length >= 3 ? fitFiducialAffine(obs) : null) : fitFiducialTransform(obs, model) }
-})
-// fidId → residual µm (aligned with fidFit.obs order).
-const fidResidual = computed(() => {
-  const { obs, fit } = fidFit.value
-  const m = new Map()
-  if (fit) obs.forEach((o, i) => m.set(o.fidId, fit.residualsUm[i]))
-  return m
-})
-// Which mark ids are already placed on this image (for the menu ✓).
-const markedFidIds = computed(() => new Set(props.fiducialObs.map((o) => o.fidId)))
+// ── Pieces ────────────────────────────────────────────────────────────────────
+// Pan/zoom + native frame (useImageViewport), the mask editor with Smart Select
+// (useMaskEditor), the depth overlay (useDepthOverlay), the keypoint set
+// (useImageKeypoints), the live fiducial fit (useFiducialFit), the overlay painters
+// (utils/imageOverlay.js) and the right-click menu (ImageContextMenu.vue). What
+// stays here is the wiring, the pointer router, the overlay compositor and the
+// hover readout.
+//
+// ORDER MATTERS below: Vue runs watchers that one change triggers in creation
+// order. useImageViewport's url/meta watchers must precede useMaskEditor's
+// (editable / maskEdit / tool / uuid / mask) — as they did in the single file —
+// so that, e.g., an image switch has cleared the frame before the uuid watcher
+// decides whether to re-encode for Smart Select.
 
-// Rough position label per mark ("top-left", "mid-top", "center"…) derived from
-// its calibrated mm coordinates relative to the layout centroid. A guide only —
-// tells the user which physical corner/edge a mark id refers to. mm frame is
-// camera-standard (x right, y up), so larger yMm ⇒ top.
-const fidMarkPos = computed(() => {
-  const marks = props.fiducialMarks.filter((m) => Number.isFinite(m.xMm) && Number.isFinite(m.yMm))
-  const out = new Map()
-  if (!marks.length) return out
-  let cx = 0, cy = 0, ext = 0
-  for (const m of marks) { cx += m.xMm; cy += m.yMm }
-  cx /= marks.length; cy /= marks.length
-  for (const m of marks) ext = Math.max(ext, Math.abs(m.xMm - cx), Math.abs(m.yMm - cy))
-  const tol = 0.15 * (ext || 1)
-  for (const m of marks) {
-    const dx = m.xMm - cx, dy = m.yMm - cy
-    const v = dy > tol ? 'top' : dy < -tol ? 'bottom' : ''
-    const h = dx > tol ? 'right' : dx < -tol ? 'left' : ''
-    const label = [v, h].filter(Boolean).join('-') || 'center'
-    out.set(m.id, v && h ? label : (v || h ? `mid-${label}` : 'center'))
-  }
-  return out
-})
+const container     = ref(null)
+const imgEl         = ref(null)
+const overlayCanvas = ref(null)
 
-// Ghost guides: once a fit exists (≥3 marks placed), predict where each
-// not-yet-placed mark should land on the raster (mm → scan px), so the user can
-// aim at the remaining fiducials. [{ id, px, py }] in native image pixels.
-const fidGhosts = computed(() => {
-  const { fit } = fidFit.value
-  if (!fit) return []
-  const placed = markedFidIds.value
-  const out = []
-  for (const m of props.fiducialMarks) {
-    if (placed.has(m.id) || !Number.isFinite(m.xMm) || !Number.isFinite(m.yMm)) continue
-    const p = fit.A ? mmToScan(m.xMm, m.yMm, fit.A) : applyFiducialTransform({ x: m.xMm, y: m.yMm }, { forward: fit.inverse })
-    if (p && Number.isFinite(p.x) && Number.isFinite(p.y)) out.push({ id: m.id, px: p.x, py: p.y })
-  }
-  return out
-})
-
-const container      = ref(null)
-const imgEl          = ref(null)
-const overlayCanvas  = ref(null)
-const maskFileInput  = ref(null)
-
-// Pan/zoom
-const scale    = ref(1)
-const tx       = ref(0)
-const ty       = ref(0)
-const dragging = ref(false)
-const hoverPx  = ref(null)
-
-// True once the current image has loaded AND been fitted to the viewport —
-// gates the <img> visibility so the browser never paints it at native
-// (potentially huge) size for a frame before fit() scales it down.
-const imageReady = ref(false)
-
-// Mask canvas state
-const hasMask = ref(!!props.image.mask)
-
-// Mask-edit tool state (local: the floating toolbar and this viewer are the
-// only consumers; per-tab persistence comes free from v-show-kept instances).
-const tool        = ref(null)   // 'brush' | 'erase' | 'rect' | 'smart' | null (pan while editing)
-const brushRadius = ref(20)     // screen pixels — constant on screen, ÷scale in image space
-const maskOpacity = ref(0.45)   // red-overlay alpha while editing/viewing
-
-// Smart Select (SAM2 click-to-segment). The image is encoded once when the tool
-// is activated; each click decodes a *fresh* candidate segment (clicks are
-// independent — a plain click resets to one positive point at that spot), which
-// is previewed (cyan) until the user commits it into the red mask or discards it.
 const {
-  smartStatus, smartHasPreview, smartPreviewCanvas,
-  ensureEncoded, smartClick, buildCommitCanvas, discardSmart, resetSmart,
-} = useSmartSelect({ image: () => props.image, imgEl, drawOverlay })
-let smartDown = null                 // { x, y, alt } pending click-vs-drag while Smart tool active
-let smartMoved = false               // pointer moved past the click threshold → it's a pan, not a click
-let gcpDown = null                   // { x, y } pending click-vs-drag while GCP-edit mode active
-let gcpMoved = false                 // pointer moved past the click threshold → it's a pan, not a GCP click
-// Undo/redo as stacks of persisted mask Blobs (null = no mask). Snapshots are
-// the *previous* store value taken just before each committed change, so memory
-// cost is a handful of compressed PNG Blobs, not raw pixel buffers.
-const undoStack = ref([])
-const redoStack = ref([])
-const UNDO_MAX = 10
-let maskDirty = false // uncommitted mask edits pending a flush to the store on close
+  scale, tx, ty, imageReady, frame, editable,
+  refreshFrame, fit, zoomAt, zoomIn, zoomOut, getViewportCoords, toImagePixel,
+  observeResize, disconnectResize,
+} = useImageViewport({
+  container, imgEl, image: () => props.image,
+  onViewChange: drawOverlay,
+  // Late TIFF metadata re-derived the frame: rebuild the (native-sized) mask canvas.
+  onFrameChange: () => initMaskCanvas(),
+})
 
-let rectDrag = null // { x0, y0, x1, y1, erase } image-px corners of an in-flight rectangle
+const { fidResidual, markedFidIds, fidMarkPos, fidGhosts } = useFiducialFit({
+  isFilm: () => props.isFilm,
+  marks: () => props.fiducialMarks,
+  obs: () => props.fiducialObs,
+  transform: () => props.fiducialTransform,
+})
 
-let maskOffscreen  = null  // OffscreenCanvas at native image resolution
-// Depth-map overlay (its own canvas + import/export/clear). `depthCanvas` is what
-// renderOverlay blits; the rest is the ribbon's depth buttons.
+// Depth-map overlay (its own native-sized canvas + import/export/clear).
+// `depthCanvas` is what renderOverlay blits; the rest is the ribbon's depth buttons.
 const {
   depthFileInput, depthCanvas, hasDepth,
   initDepthCanvas, triggerDepthImport, onDepthFileChange, clearDepth,
-} = useDepthOverlay({ imgEl, image: () => props.image, drawOverlay, emit })
-let mousePos      = null  // { x, y } screen coords for brush cursor
-let isDrawing     = false
-let strokeHit     = false // did the in-flight brush/erase stroke touch the image?
-let startX = 0, startY = 0, startTx = 0, startTy = 0
-let resizeObserver = null
-let lastSize       = null // { w, h } last non-zero container size the observer fitted to
-let offscreenCtx   = null
+} = useDepthOverlay({ frame, image: () => props.image, drawOverlay, emit })
 
-const MIN_SCALE = 0.05
-const MAX_SCALE = 40
-
-function clamp(v, lo, hi) { return Math.min(hi, Math.max(lo, v)) }
-
-// ── Fit & zoom ───────────────────────────────────────────────────────────────
-
-function fit() {
-  const c   = container.value
-  const img = imgEl.value
-  if (!c || !img || !img.naturalWidth) return
-  const s = Math.min(c.clientWidth / img.naturalWidth, c.clientHeight / img.naturalHeight, 1)
-  scale.value = s
-  tx.value = (c.clientWidth  - img.naturalWidth  * s) / 2
-  ty.value = (c.clientHeight - img.naturalHeight * s) / 2
-  drawOverlay()
-}
-
-// Zoom by `factor` keeping the viewport point (cx, cy) fixed on screen.
-function zoomAt(factor, cx, cy) {
-  const newScale = clamp(scale.value * factor, MIN_SCALE, MAX_SCALE)
-  const ratio = newScale / scale.value
-  tx.value = cx - (cx - tx.value) * ratio
-  ty.value = cy - (cy - ty.value) * ratio
-  scale.value = newScale
-  drawOverlay()
-}
-
-function applyZoom(factor) {
-  const c = container.value
-  if (!c) return
-  zoomAt(factor, c.clientWidth / 2, c.clientHeight / 2)
-}
-
-function zoomIn()  { applyZoom(1.5) }
-function zoomOut() { applyZoom(1 / 1.5) }
-
-// ── Overlay canvas (mask + keypoints + brush cursor) ─────────────────────────
-
-// Legend colour ramps as [offset, cssColor] stops.
-const KEYPOINT_STOPS = [
-  [0,   'hsl(240,100%,55%)'],
-  [0.5, 'hsl(120,100%,55%)'],
-  [1,   'hsl(0,100%,55%)'],
-]
-// Sample the depth ramp (core/colormap depthColor) at a few points for the gradient.
-const DEPTH_STOPS = [0, 0.25, 0.5, 0.75, 1].map((t) => {
-  const [r, g, b] = depthColor(t)
-  return [t, `rgb(${r},${g},${b})`]
+const { keypoints, keypointRange } = useImageKeypoints({
+  image: () => props.image, show: () => props.showKeypoints, store: imagesStore,
 })
 
-// This image's keypoints, read on demand (useImagesStore.ensureKeypoints — they are
-// not on the record) while the overlay is on. Re-read when the image is switched or
-// its keypoints are replaced (`kpRev`). A shallowRef: the set is never reactive.
-const keypoints = shallowRef(null)
-let keypointRequest = 0
-watch([() => props.image.id, () => props.image.kpRev, () => props.image.kpStatus, () => props.showKeypoints], async () => {
-  const req = ++keypointRequest
-  // Never draw the previous image's (or the replaced) set while the new one loads.
-  keypoints.value = imagesStore.residentKeypoints(props.image)
-  if (keypoints.value || !props.showKeypoints || props.image.kpStatus !== 'done') return
-  const kps = await imagesStore.ensureKeypoints(props.image)
-  if (req === keypointRequest) keypoints.value = kps
-}, { immediate: true })
-
-// Keypoint response range, for the cold→hot colour ramp. Recomputed only when the
-// keypoint array itself is replaced (re-detect / image switch), not on every draw —
-// it is a full pass over up to tens of thousands of points.
-const keypointRange = computed(() => {
-  const kps = keypoints.value
-  if (!kps?.length) return null
-  let minR = Infinity, maxR = -Infinity
-  for (let i = 0; i < kps.length; i++) { // typed keypoints (core/features/keypoints.js)
-    const r = kps.response(i)
-    if (r < minR) minR = r
-    if (r > maxR) maxR = r
-  }
-  return { minR, range: maxR - minR || 1 }
+const {
+  maskFileInput, hasMask, tool, brushRadius, maskOpacity, canUndo, canRedo,
+  smartStatus, smartHasPreview, smartPreviewCanvas, smartClick, discardSmart,
+  canvas: maskCanvas, rect: maskRect, isDrawing,
+  initMaskCanvas, maskedAt, flushMask,
+  beginStroke, continueStroke, endStroke,
+  beginRect, updateRect, cancelRect, commitRect,
+  undoMask, redoMask, invertMask, clearMask, commitSmart,
+  triggerMaskImport, onMaskFileChange, onKeydown,
+} = useMaskEditor({
+  image: () => props.image,
+  maskEdit: () => props.maskEdit,
+  viewport: { scale, tx, ty, frame, editable },
+  drawOverlay, emit,
+  // Instances are kept alive per tab via v-show: offsetParent is null while hidden.
+  isVisible: () => container.value?.offsetParent !== null,
 })
 
-// Every overlay input (18 prop watchers, plus pan/zoom/paint) funnels through
-// here, and one user action commonly trips several at once — a mask-edit toggle
-// moves `maskEdit`, `showMask` and `tool` together, and a drag fires per
+// Every overlay input redraws: prop toggles and data. The GCP and fiducial lists
+// are watched deep (an edit inside them must repaint), the rest shallow (a large
+// residual set is replaced, never edited in place). All getters, never a ref/reactive source: one of those would force the whole
+// group to fire on any dep trigger (e.g. a record replaced with the same
+// kpStatus), not only on a changed value as the separate watchers did.
+watch([
+  () => keypoints.value, () => props.image.kpStatus, () => props.showKeypoints,
+  () => props.showMask, () => props.showDepth,
+  () => props.showGcps, () => props.gcpGuides, () => props.gcpEdit, () => props.selectedGcpId, // gcpEdit gates the guides too
+  () => props.isFilm, () => props.showFiducials,
+  () => props.showResiduals, () => props.residuals,
+], drawOverlay)
+watch([() => props.gcps, () => props.fiducialObs, () => props.fiducialMarks], drawOverlay, { deep: true })
+
+// ── Overlay canvas ────────────────────────────────────────────────────────────
+
+// Every overlay input (the prop watchers above, plus pan/zoom/paint) funnels
+// through here, and one user action commonly trips several at once — a mask-edit
+// toggle moves `maskEdit`, `showMask` and `tool` together, and a drag fires per
 // mousemove. Coalesce to at most one repaint per animation frame; `renderOverlay`
 // below is the actual draw and is never called directly. Same pattern as
 // App.vue's queueGcpGuidesRefresh.
@@ -306,662 +185,113 @@ function drawOverlay() {
   })
 }
 
-// Draw a labelled colour-ramp legend stacked up from the bottom-left corner.
-// `slot` (0-based) offsets successive legends vertically so they don't overlap.
-function drawLegend(ctx, h, slot, stops, leftLabel, rightLabel, title) {
-  const LW = 72, LH = 8, ROW = 34
-  const LX = 12
-  const LY = h - 36 - slot * ROW
-  ctx.save()
-  const grad = ctx.createLinearGradient(LX, 0, LX + LW, 0)
-  for (const [offset, color] of stops) grad.addColorStop(offset, color)
-  ctx.fillStyle = 'rgba(0,0,0,0.45)'
-  ctx.fillRect(LX - 4, LY - 14, LW + 8, LH + 22)
-  ctx.fillStyle = grad
-  ctx.fillRect(LX, LY, LW, LH)
-  ctx.font = '9px sans-serif'
-  ctx.fillStyle = 'rgba(255,255,255,0.75)'
-  ctx.textAlign = 'left'
-  ctx.fillText(leftLabel, LX, LY + LH + 10)
-  ctx.textAlign = 'right'
-  ctx.fillText(rightLabel, LX + LW, LY + LH + 10)
-  ctx.textAlign = 'center'
-  ctx.fillText(title, LX + LW / 2, LY - 3)
-  ctx.restore()
-}
-
-// Caption for the residual overlay: notes the ×25 amplification + colour meaning.
-function drawResidualLegend(ctx, h, slot) {
-  const ROW = 34, LX = 12, LY = h - 36 - slot * ROW
-  ctx.save()
-  const text = '×25  red > 2 px'
-  ctx.font = '9px sans-serif'
-  const tw = ctx.measureText(text).width
-  ctx.fillStyle = 'rgba(0,0,0,0.45)'
-  ctx.fillRect(LX - 4, LY - 6, tw + 8, 16)
-  ctx.fillStyle = 'rgba(255,255,255,0.8)'
-  ctx.textAlign = 'left'
-  ctx.fillText(text, LX, LY + 5)
-  ctx.restore()
-}
-
-// Small boxed caption at (x, y) — the guide equivalent of the marker labels,
-// kept solid-line so the dashed guide stroke doesn't bleed into the text.
-function drawGuideLabel(ctx, x, y, text, color) {
-  ctx.save()
-  ctx.setLineDash([])
-  ctx.font = '11px sans-serif'
-  const tw = ctx.measureText(text).width
-  ctx.fillStyle = 'rgba(0,0,0,0.55)'
-  ctx.fillRect(x - 3, y - 7, tw + 6, 14)
-  ctx.textAlign = 'left'
-  ctx.textBaseline = 'middle'
-  ctx.fillStyle = color
-  ctx.fillText(text, x, y)
-  ctx.restore()
-}
-
-// The actual repaint. Call `drawOverlay()` instead — it coalesces to one frame.
+// The actual repaint — which layers are on, bottom to top. Call `drawOverlay()`
+// instead — it coalesces to one frame.
 function renderOverlay() {
-  const c   = overlayCanvas.value
-  const img = imgEl.value
-  if (!c || !img || !img.naturalWidth || !container.value) return
+  const c = overlayCanvas.value
+  const f = frame.value
+  if (!c || !f || !container.value) return
 
   const w = container.value.clientWidth
   const h = container.value.clientHeight
   if (!w || !h) return
 
-  const dpr = window.devicePixelRatio || 1
-  const pw  = Math.round(w * dpr)
-  const ph  = Math.round(h * dpr)
-  if (c.width !== pw || c.height !== ph) {
-    c.width  = pw
-    c.height = ph
-    c.style.width  = `${w}px`
-    c.style.height = `${h}px`
-  }
-
-  const ctx = c.getContext('2d')
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-  ctx.clearRect(0, 0, w, h)
-
-  const dispW = img.naturalWidth  * scale.value
-  const dispH = img.naturalHeight * scale.value
+  const ctx = beginOverlayFrame(c, w, h, window.devicePixelRatio || 1)
+  // Native-pixel overlays map through the native frame (f.width/height), never the
+  // bitmap's naturalWidth — they differ while a TIFF preview is shown. `exact` is
+  // false only for a preview whose native size is still unknown; native-pixel
+  // overlays are skipped then rather than misplaced.
+  const view = overlayView({ w, h, tx: tx.value, ty: ty.value, scale: scale.value, frame: f })
+  const exact = f.exact
 
   // Colour legends stack up from the bottom-left corner (one row per active overlay).
   let legendSlot = 0
 
-  // Depth — colorized semi-transparent overlay at image position
+  // Depth — colorized semi-transparent overlay at image position.
   if (depthCanvas.value && hasDepth.value && props.showDepth) {
-    ctx.save()
-    ctx.globalAlpha = 0.6
-    ctx.drawImage(depthCanvas.value, tx.value, ty.value, dispW, dispH)
-    ctx.restore()
-    drawLegend(ctx, h, legendSlot++, DEPTH_STOPS, 'near', 'far', 'depth')
+    paintRaster(ctx, view, depthCanvas.value, 0.6)
+    paintRampLegend(ctx, view, legendSlot++, DEPTH_LEGEND)
   }
 
   // Mask — red semi-transparent overlay at image position. Always shown while
   // editing (regardless of the view toggle) so you can see what you're painting.
-  if (maskOffscreen && hasMask.value && (props.showMask || props.maskEdit)) {
-    ctx.save()
-    ctx.globalAlpha = maskOpacity.value
-    ctx.drawImage(maskOffscreen, tx.value, ty.value, dispW, dispH)
-    ctx.restore()
+  const mask = maskCanvas()
+  if (mask && hasMask.value && (props.showMask || props.maskEdit)) {
+    paintRaster(ctx, view, mask, maskOpacity.value)
   }
 
-  // Smart Select candidate — cyan preview overlay (uncommitted) while the tool is active.
+  // Smart Select candidate — cyan preview overlay (uncommitted) while the tool is
+  // active; smoothed, it is the low-res encoder raster.
   if (props.maskEdit && tool.value === 'smart' && smartPreviewCanvas.value) {
-    ctx.save()
-    ctx.imageSmoothingEnabled = true // smooth the low-res preview edges
-    ctx.globalAlpha = 0.55
-    ctx.drawImage(smartPreviewCanvas.value, tx.value, ty.value, dispW, dispH)
-    ctx.restore()
+    paintRaster(ctx, view, smartPreviewCanvas.value, 0.55, { smooth: true })
   }
 
-  // Keypoints — colour-coded dots (cold=blue → hot=red by SIFT response)
+  // Keypoints — colour-coded dots (cold=blue → hot=red by SIFT response).
   if (props.showKeypoints && keypointRange.value) {
-    const kps = keypoints.value
-    const { minR, range } = keypointRange.value
-    // Batched into one Path2D per hue bucket. A `fillStyle` change flushes the 2D
-    // context, so a per-point colour costs one state change per keypoint — with
-    // tens of thousands of them that dominates a drag frame. 24 buckets is finer
-    // than the eye resolves on a 4 px dot.
-    const BUCKETS = 24
-    const paths = new Array(BUCKETS)
-    const R = 2, edge = R + 1
-    const ox = tx.value, oy = ty.value
-    for (let i = 0; i < kps.length; i++) {
-      const x = kps.nx(i) * dispW + ox
-      const y = kps.ny(i) * dispH + oy
-      // Cull off-screen points: zoomed in, that is nearly all of them.
-      if (x < -edge || y < -edge || x > w + edge || y > h + edge) continue
-      const t = (kps.response(i) - minR) / range  // 0 = coldest, 1 = hottest
-      const b = clamp(Math.round(t * (BUCKETS - 1)), 0, BUCKETS - 1)
-      const p = paths[b] ?? (paths[b] = new Path2D())
-      p.moveTo(x + R, y)                          // arc start, so no joining line
-      p.arc(x, y, R, 0, Math.PI * 2)
-    }
-    for (let b = 0; b < BUCKETS; b++) {
-      if (!paths[b]) continue
-      const hue = Math.round((1 - b / (BUCKETS - 1)) * 240)   // 240° blue → 0° red
-      ctx.fillStyle = `hsl(${hue},100%,55%)`
-      ctx.fill(paths[b])
-    }
-
-    drawLegend(ctx, h, legendSlot++, KEYPOINT_STOPS, 'low', 'high', 'response')
+    paintKeypoints(ctx, view, keypoints.value, keypointRange.value)
+    paintRampLegend(ctx, view, legendSlot++, KEYPOINT_LEGEND)
   }
 
-  // Reprojection residual vectors (WS3): observation → (observation + AMP·residual),
-  // amplified ×25 so sub-pixel misfits are visible. A radial pattern = distortion
-  // misfit, a coherent translation = bad pose, random speckle = fine. Colour by raw
-  // magnitude (green < 1px, amber < 2px, red ≥ 2px). Native-pixel frame, like GCPs.
-  if (props.showResiduals && props.residuals?.length && img.naturalWidth) {
-    const nw = img.naturalWidth, nh = img.naturalHeight
-    const AMP = 25
-    const toDisp = (px, py) => ({ x: (px / nw) * dispW + tx.value, y: (py / nh) * dispH + ty.value })
-    ctx.save()
-    ctx.lineWidth = 1.2
-    for (const r of props.residuals) {
-      const a = toDisp(r.px, r.py)
-      const b = toDisp(r.px + r.du * AMP, r.py + r.dv * AMP)
-      ctx.strokeStyle = r.mag >= 2 ? '#e0533d' : (r.mag >= 1 ? '#e6a01e' : '#3fca77')
-      ctx.beginPath()
-      ctx.moveTo(a.x, a.y)
-      ctx.lineTo(b.x, b.y)
-      ctx.stroke()
-      ctx.fillStyle = ctx.strokeStyle
-      ctx.beginPath()
-      ctx.arc(a.x, a.y, 1.4, 0, Math.PI * 2)
-      ctx.fill()
-    }
-    ctx.restore()
-    drawResidualLegend(ctx, h, legendSlot++)
+  // Reprojection residual vectors (WS3), amplified ×25.
+  if (props.showResiduals && props.residuals?.length && exact) {
+    paintResiduals(ctx, view, props.residuals)
+    paintResidualLegend(ctx, view, legendSlot++)
   }
 
-  // Guided marking — where the posed cameras say a not-yet-marked GCP must lie
-  // in this image. Drawn under the real markers, in a distinct dashed green so a
-  // prediction is never mistaken for a placed mark:
-  //   • point (≥2 other views) — ghost cross-hair at the predicted pixel;
-  //   • line (1 other view) — the epipolar line the mark must sit on. Only for
-  //     the selected GCP: every GCP's line at once is a spider web.
-  // Gated on `gcpEdit` alone (not showGcps): a guide is an aid for *placing* a
-  // mark, so it has no business on screen once the user leaves edit mode. App.vue
-  // stops computing them on the same condition.
-  if (props.gcpEdit && props.gcpGuides?.length && img.naturalWidth) {
-    const nw = img.naturalWidth, nh = img.naturalHeight
-    const toDisp = (px, py) => ({ x: (px / nw) * dispW + tx.value, y: (py / nh) * dispH + ty.value })
-
-    for (const g of props.gcpGuides) {
-      const isSelected = g.gcpId != null && g.gcpId === props.selectedGcpId
-      const strong = 'rgba(120,230,180,0.95)'
-      const faint  = 'rgba(120,230,180,0.45)'
-      ctx.save()
-      ctx.setLineDash([5, 4])
-      ctx.lineWidth = isSelected ? 1.8 : 1.2
-      ctx.strokeStyle = isSelected ? strong : faint
-
-      if (g.kind === 'line' && isSelected) {
-        const seg = clipLineToRect(g.line, nw, nh)
-        if (seg) {
-          const p0 = toDisp(seg[0].x, seg[0].y)
-          const p1 = toDisp(seg[1].x, seg[1].y)
-          ctx.beginPath()
-          ctx.moveTo(p0.x, p0.y)
-          ctx.lineTo(p1.x, p1.y)
-          ctx.stroke()
-          if (g.name) {
-            drawGuideLabel(ctx, (p0.x + p1.x) / 2, (p0.y + p1.y) / 2, `${g.name} — on this line`, strong)
-          }
-        }
-      } else if (g.kind === 'point') {
-        // A prediction outside the frame just means the GCP isn't visible here.
-        if (g.u >= 0 && g.u <= nw && g.v >= 0 && g.v <= nh) {
-          const { x, y } = toDisp(g.u, g.v)
-          ctx.beginPath()
-          ctx.arc(x, y, 7, 0, Math.PI * 2)
-          ctx.stroke()
-          ctx.beginPath()
-          ctx.moveTo(x - 11, y); ctx.lineTo(x - 3, y)
-          ctx.moveTo(x + 3, y);  ctx.lineTo(x + 11, y)
-          ctx.moveTo(x, y - 11); ctx.lineTo(x, y - 3)
-          ctx.moveTo(x, y + 3);  ctx.lineTo(x, y + 11)
-          ctx.stroke()
-          // The mark count is the visible proof that the prediction is N-view:
-          // it climbs as the user marks the GCP elsewhere, and the cross-hair
-          // shifts with it. "7 of 9 marks" (rather than "9 marks, 2 ignored")
-          // because a left-out mark is dropped from *this prediction only* — it
-          // stays in the georeference fit and the accuracy report — and there is
-          // no room on a canvas label to say so; a bare "ignored" would imply the
-          // GCP itself was discarded.
-          // (A point guide always has ≥2 views — 1 would be an epipolar line.)
-          if (g.name && isSelected) {
-            const used = g.viewCount - (g.rejectedCount ?? 0)
-            const marks = g.rejectedCount ? `${used} of ${g.viewCount} marks` : `${g.viewCount} marks`
-            drawGuideLabel(ctx, x + 12, y - 9, `${g.name} — mark here (${marks})`, strong)
-          }
-        }
-      }
-      ctx.restore()
-    }
+  // Guided marking, under the real markers. Gated on `gcpEdit` alone (not
+  // showGcps): a guide is an aid for *placing* a mark, so it has no business on
+  // screen once the user leaves edit mode. App.vue stops computing them on the
+  // same condition.
+  if (props.gcpEdit && props.gcpGuides?.length && exact) {
+    paintGcpGuides(ctx, view, props.gcpGuides, props.selectedGcpId, clipLineToRect)
   }
 
-  // GCP markers — observation pixel positions on this image
-  if (props.showGcps && props.gcps?.length && img.naturalWidth) {
-    for (const g of props.gcps) {
-      if (g.px == null || g.py == null) continue
-      const x = (g.px / img.naturalWidth)  * dispW + tx.value
-      const y = (g.py / img.naturalHeight) * dispH + ty.value
-      const isSelected = g.id != null && g.id === props.selectedGcpId
-      ctx.save()
-      // Ring
-      ctx.strokeStyle = isSelected ? 'rgba(80,200,255,0.95)' : 'rgba(255,210,0,0.95)'
-      ctx.lineWidth = isSelected ? 2.5 : 1.5
-      ctx.beginPath()
-      ctx.arc(x, y, 7, 0, Math.PI * 2)
-      ctx.stroke()
-      // Cross-hair
-      ctx.beginPath()
-      ctx.moveTo(x - 11, y); ctx.lineTo(x - 3, y)
-      ctx.moveTo(x + 3, y);  ctx.lineTo(x + 11, y)
-      ctx.moveTo(x, y - 11);  ctx.lineTo(x, y - 3)
-      ctx.moveTo(x, y + 3);   ctx.lineTo(x, y + 11)
-      ctx.stroke()
-      // Label — name, plus the live reprojection error (px) when available so a
-      // bad mark is obvious. Colour the error red once it's clearly off (>5px).
-      if (g.name) {
-        const reproj = g.reprojPx != null ? `  ${g.reprojPx.toFixed(1)}px` : ''
-        const label = g.name + reproj
-        ctx.font = '11px sans-serif'
-        const tw = ctx.measureText(label).width
-        ctx.fillStyle = 'rgba(0,0,0,0.55)'
-        ctx.fillRect(x + 9, y - 16, tw + 6, 14)
-        ctx.textAlign = 'left'
-        ctx.textBaseline = 'middle'
-        ctx.fillStyle = isSelected ? 'rgba(80,200,255,0.95)' : 'rgba(255,210,0,0.95)'
-        ctx.fillText(g.name, x + 12, y - 9)
-        if (reproj) {
-          const nameW = ctx.measureText(g.name).width
-          ctx.fillStyle = g.reprojPx > 5 ? 'rgba(255,90,90,0.95)' : 'rgba(160,230,160,0.95)'
-          ctx.fillText(reproj, x + 12 + nameW, y - 9)
-        }
-      }
-      ctx.restore()
-    }
+  // GCP markers — observation pixel positions on this image.
+  if (props.showGcps && props.gcps?.length && exact) {
+    paintGcps(ctx, view, props.gcps, props.selectedGcpId)
   }
 
-  // Fiducial markers (F4) — distinct from GCPs: magenta squares with a diagonal
-  // cross. Show the per-mark fit residual (µm) once ≥3 marks give a fit.
-  if (props.showFiducials && props.isFilm && props.fiducialObs?.length && img.naturalWidth) {
-    for (const o of props.fiducialObs) {
-      if (o.px == null || o.py == null) continue
-      const x = (o.px / img.naturalWidth)  * dispW + tx.value
-      const y = (o.py / img.naturalHeight) * dispH + ty.value
-      ctx.save()
-      ctx.strokeStyle = 'rgba(255,80,220,0.95)'
-      ctx.lineWidth = 1.5
-      ctx.strokeRect(x - 6, y - 6, 12, 12)
-      ctx.beginPath()
-      ctx.moveTo(x - 6, y - 6); ctx.lineTo(x + 6, y + 6)
-      ctx.moveTo(x - 6, y + 6); ctx.lineTo(x + 6, y - 6)
-      ctx.stroke()
-      const res = fidResidual.value.get(o.fidId)
-      const label = o.fidId + (res != null ? `  ${res.toFixed(1)}µm` : '')
-      ctx.font = '11px sans-serif'
-      const tw = ctx.measureText(label).width
-      ctx.fillStyle = 'rgba(0,0,0,0.55)'
-      ctx.fillRect(x + 9, y - 16, tw + 6, 14)
-      ctx.textAlign = 'left'; ctx.textBaseline = 'middle'
-      ctx.fillStyle = 'rgba(255,120,230,0.95)'
-      ctx.fillText(o.fidId, x + 12, y - 9)
-      if (res != null) {
-        const nameW = ctx.measureText(o.fidId).width
-        // Warn (red) once residual exceeds ~½ a 23µm pixel — scanner-noise scale.
-        ctx.fillStyle = res > 12 ? 'rgba(255,90,90,0.95)' : 'rgba(160,230,160,0.95)'
-        ctx.fillText(`  ${res.toFixed(1)}µm`, x + 12 + nameW, y - 9)
-      }
-      ctx.restore()
-    }
-
-    // Ghost guides — faint dashed squares at the predicted location of each
-    // not-yet-placed mark, so the user can aim at the remaining fiducials.
-    for (const g of fidGhosts.value) {
-      const x = (g.px / img.naturalWidth)  * dispW + tx.value
-      const y = (g.py / img.naturalHeight) * dispH + ty.value
-      ctx.save()
-      ctx.strokeStyle = 'rgba(255,80,220,0.5)'
-      ctx.lineWidth = 1
-      ctx.setLineDash([3, 3])
-      ctx.strokeRect(x - 6, y - 6, 12, 12)
-      ctx.setLineDash([])
-      ctx.font = '11px sans-serif'
-      ctx.textAlign = 'left'; ctx.textBaseline = 'middle'
-      ctx.fillStyle = 'rgba(255,120,230,0.55)'
-      ctx.fillText(g.id, x + 10, y)
-      ctx.restore()
-    }
+  // Fiducial markers (F4) + ghost guides for the marks not placed yet.
+  if (props.showFiducials && props.isFilm && props.fiducialObs?.length && exact) {
+    paintFiducials(ctx, view, props.fiducialObs, fidResidual.value, fidGhosts.value)
   }
 
   // Magnifier loupe — a zoomed inset around the cursor while working with GCPs,
   // so marks can be placed precisely without zooming the whole view. Drawn last
   // (on top), pinned to a corner so it never covers the point being marked.
   if ((props.showGcps || (props.showFiducials && props.isFilm)) && mousePos) {
-    drawLoupe(ctx, w, h)
+    paintLoupe(ctx, view, imgEl.value, frame.value, mousePos)
   }
 
-  // Brush cursor circle (brush/eraser tools)
-  if (props.maskEdit && (tool.value === 'brush' || tool.value === 'erase') && mousePos) {
-    ctx.beginPath()
-    ctx.arc(mousePos.x, mousePos.y, brushRadius.value, 0, Math.PI * 2)
-    ctx.strokeStyle = tool.value === 'brush' ? 'rgba(255,80,80,0.9)' : 'rgba(100,180,255,0.9)'
-    ctx.lineWidth = 1.5
-    ctx.stroke()
+  // Brush cursor circle (brush/eraser tools).
+  if (props.maskEdit && editable.value && (tool.value === 'brush' || tool.value === 'erase') && mousePos) {
+    paintBrushCursor(ctx, mousePos, brushRadius.value, tool.value === 'erase')
   }
 
-  // In-flight rectangle preview (dashed; blue while Alt = erase)
-  if (rectDrag) {
-    const rx = Math.min(rectDrag.x0, rectDrag.x1) * scale.value + tx.value
-    const ry = Math.min(rectDrag.y0, rectDrag.y1) * scale.value + ty.value
-    const rw = Math.abs(rectDrag.x1 - rectDrag.x0) * scale.value
-    const rh = Math.abs(rectDrag.y1 - rectDrag.y0) * scale.value
-    ctx.save()
-    ctx.setLineDash([5, 4])
-    ctx.strokeStyle = rectDrag.erase ? 'rgba(100,180,255,0.9)' : 'rgba(255,80,80,0.9)'
-    ctx.lineWidth = 1.5
-    ctx.strokeRect(rx, ry, rw, rh)
-    ctx.restore()
-  }
+  // In-flight rectangle preview (dashed; blue while Alt = erase).
+  const rect = maskRect()
+  if (rect) paintRectPreview(ctx, view, rect)
 }
 
-// Magnified inset of the image around the cursor's pixel, pinned to the top-right
-// corner. Sampled straight from the <img> element (natural resolution) so it's
-// crisp regardless of the current zoom. A centre crosshair marks the exact pixel.
-function drawLoupe(ctx, w) {
-  const img = imgEl.value
-  if (!img?.naturalWidth) return
-  const ipx = (mousePos.x - tx.value) / scale.value
-  const ipy = (mousePos.y - ty.value) / scale.value
-  if (ipx < 0 || ipy < 0 || ipx >= img.naturalWidth || ipy >= img.naturalHeight) return
+// ── Pointer router ────────────────────────────────────────────────────────────
+// One owner for mouse input: rect / brush / smart / gcp / pan, chosen on press.
+// Smart and GCP presses arm a pan AND a pending click through the same drag-start
+// state as a plain pan; a move past the click threshold turns them into a pan.
 
-  const SIZE = 128, ZOOM = 8, src = SIZE / ZOOM
-  const lx = w - SIZE - 12, ly = 12
+const dragging = ref(false)
+const hoverPx  = ref(null)
 
-  ctx.save()
-  ctx.beginPath(); ctx.rect(lx, ly, SIZE, SIZE); ctx.clip()
-  ctx.fillStyle = '#000'; ctx.fillRect(lx, ly, SIZE, SIZE)
-  ctx.imageSmoothingEnabled = false
-  try {
-    ctx.drawImage(img, ipx - src / 2, ipy - src / 2, src, src, lx, ly, SIZE, SIZE)
-  } catch { /* source rect off-image near the edge — skip */ }
-  // Centre crosshair (the pixel that a mark would land on).
-  const cx = lx + SIZE / 2, cy = ly + SIZE / 2
-  ctx.strokeStyle = 'rgba(255,210,0,0.95)'; ctx.lineWidth = 1
-  ctx.beginPath()
-  ctx.moveTo(cx - 8, cy); ctx.lineTo(cx + 8, cy)
-  ctx.moveTo(cx, cy - 8); ctx.lineTo(cx, cy + 8)
-  ctx.stroke()
-  ctx.restore()
-  // Border.
-  ctx.strokeStyle = 'rgba(255,255,255,0.4)'; ctx.lineWidth = 1
-  ctx.strokeRect(lx + 0.5, ly + 0.5, SIZE, SIZE)
-}
+let smartDown = null   // { x, y, alt } pending click-vs-drag while Smart tool active
+let smartMoved = false // pointer moved past the click threshold → it's a pan, not a click
+let gcpDown = null     // { x, y } pending click-vs-drag while GCP-edit mode active
+let gcpMoved = false   // pointer moved past the click threshold → it's a pan, not a GCP click
+let mousePos = null    // { x, y } screen coords for brush cursor / loupe
+let startX = 0, startY = 0, startTx = 0, startTy = 0
+let offscreenCtx = null // the displayed bitmap, for colour sampling
 
-// ── Mask operations ───────────────────────────────────────────────────────────
-
-function initMaskCanvas() {
-  const img = imgEl.value
-  if (!img || !img.naturalWidth) return
-  maskOffscreen = new OffscreenCanvas(img.naturalWidth, img.naturalHeight)
-  if (props.image.mask?.blob) loadMaskBlob(props.image.mask.blob)
-}
-
-// Masks travel as PNG Blobs (the store's `{ blob, url }` record; core/mask.js).
-async function loadMaskBlob(blob) {
-  if (!maskOffscreen) return
-  try {
-    const bmp  = await createImageBitmap(blob)
-    const ctx  = maskOffscreen.getContext('2d')
-    ctx.clearRect(0, 0, maskOffscreen.width, maskOffscreen.height)
-    ctx.drawImage(bmp, 0, 0, maskOffscreen.width, maskOffscreen.height)
-    hasMask.value = true
-    drawOverlay()
-  } catch {}
-}
-
-// Does a brush circle (image coords, radius r) overlap the image rectangle at
-// all? The mask canvas is exactly image-sized, so a stroke fully outside paints
-// zero pixels — without this test it would still flip hasMask + save an empty
-// mask. Uses the closest point on [0,w]×[0,h] to the circle centre.
-function circleIntersectsImage(cx, cy, r) {
-  const img = imgEl.value
-  if (!img?.naturalWidth) return false
-  const dx = cx - clamp(cx, 0, img.naturalWidth)
-  const dy = cy - clamp(cy, 0, img.naturalHeight)
-  return dx * dx + dy * dy <= r * r
-}
-
-// Paint or erase a circle at screen position onto the mask canvas. Brush radius
-// stays constant in screen space (divided by scale → image coords). Returns
-// whether the stroke actually touched the image (so a fully-outside stroke can
-// be discarded rather than committed as an empty mask).
-function paintAt(sx, sy) {
-  if (!maskOffscreen) return false
-  const imgX = (sx - tx.value) / scale.value
-  const imgY = (sy - ty.value) / scale.value
-  const r    = brushRadius.value / scale.value
-  if (!circleIntersectsImage(imgX, imgY, r)) return false
-  const ctx  = maskOffscreen.getContext('2d')
-
-  if (tool.value === 'brush') {
-    ctx.globalCompositeOperation = 'source-over'
-    ctx.fillStyle = 'red'
-    ctx.beginPath()
-    ctx.arc(imgX, imgY, r, 0, Math.PI * 2)
-    ctx.fill()
-    hasMask.value = true
-  } else if (tool.value === 'erase') {
-    ctx.globalCompositeOperation = 'destination-out'
-    ctx.beginPath()
-    ctx.arc(imgX, imgY, r, 0, Math.PI * 2)
-    ctx.fill()
-    ctx.globalCompositeOperation = 'source-over'
-  }
-  return true
-}
-
-// ── Undo / redo ────────────────────────────────────────────────────────────────
-// Push the *current persisted* mask (still the pre-change value — commits happen
-// after the snapshot) onto the undo stack. Every committed change (stroke end,
-// rectangle, invert, import, clear) snapshots first, so undo restores exactly
-// the states the store has seen.
-function snapshotForUndo() {
-  undoStack.value.push(props.image.mask?.blob ?? null)
-  if (undoStack.value.length > UNDO_MAX) undoStack.value.shift()
-  redoStack.value = []
-}
-
-const canUndo = computed(() => undoStack.value.length > 0)
-const canRedo = computed(() => redoStack.value.length > 0)
-
-// Push the mask to the store. While mask-edit is open we DON'T persist every
-// commit (no OPFS write / log / sync per stroke or Smart click) — the store just
-// updates its in-memory copy (so undo/redo, overlay, and the sidebar badge stay
-// live) and we mark it dirty; the single flush happens when editing closes
-// (flushMask). Outside edit mode (ribbon/sidebar clear/import) we persist at once.
-function persistMask(blob) {
-  if (props.maskEdit) { maskDirty = true; emit('update-mask', blob, false) }
-  else emit('update-mask', blob, true)
-}
-
-// Persist the current in-memory mask once (on closing edit / unmount) if any
-// edit happened this session.
-function flushMask() {
-  if (!maskDirty) return
-  maskDirty = false
-  emit('update-mask', props.image.mask?.blob ?? null, true)
-}
-
-// Restore a snapshot (a mask Blob, or null) onto the canvas and re-emit it as the
-// (deferred) mask.
-function applyMaskSnapshot(blob) {
-  if (blob) {
-    loadMaskBlob(blob)
-  } else if (maskOffscreen) {
-    maskOffscreen.getContext('2d').clearRect(0, 0, maskOffscreen.width, maskOffscreen.height)
-    hasMask.value = false
-    drawOverlay()
-  }
-  persistMask(blob)
-}
-
-function undoMask() {
-  if (!undoStack.value.length) return
-  redoStack.value.push(props.image.mask?.blob ?? null)
-  applyMaskSnapshot(undoStack.value.pop())
-}
-
-function redoMask() {
-  if (!redoStack.value.length) return
-  undoStack.value.push(props.image.mask?.blob ?? null)
-  applyMaskSnapshot(redoStack.value.pop())
-}
-
-// ── Rectangle & invert ─────────────────────────────────────────────────────────
-
-async function commitRect() {
-  if (!rectDrag || !maskOffscreen) { rectDrag = null; return }
-  const { x0, y0, x1, y1, erase } = rectDrag
-  rectDrag = null
-  const x = Math.min(x0, x1), y = Math.min(y0, y1)
-  const w = Math.abs(x1 - x0), h = Math.abs(y1 - y0)
-  if (w < 1 || h < 1) { drawOverlay(); return }
-  snapshotForUndo()
-  const ctx = maskOffscreen.getContext('2d')
-  if (erase) {
-    ctx.globalCompositeOperation = 'destination-out'
-    ctx.fillRect(x, y, w, h)
-    ctx.globalCompositeOperation = 'source-over'
-  } else {
-    ctx.fillStyle = 'red'
-    ctx.fillRect(x, y, w, h)
-    hasMask.value = true
-  }
-  drawOverlay()
-  await exportMask(erase) // an erase-rectangle can empty the mask
-}
-
-// Swap excluded ↔ kept over the whole canvas. An inversion that leaves nothing
-// excluded commits `null` (no mask) rather than an all-transparent PNG.
-async function invertMask() {
-  if (!maskOffscreen) return
-  const ctx = maskOffscreen.getContext('2d')
-  const id  = ctx.getImageData(0, 0, maskOffscreen.width, maskOffscreen.height)
-  const excluded = invertMaskPixels(id.data)
-  ctx.putImageData(id, 0, 0)
-  snapshotForUndo()
-  hasMask.value = excluded > 0
-  drawOverlay()
-  if (excluded > 0) await exportMask()
-  else persistMask(null)
-}
-
-// True when the mask canvas has no excluded pixels left (e.g. after erasing the
-// last of a mask). Reads the whole canvas, so only call on commits that can
-// empty it (erase/rect-erase/import) — a draw is trivially non-empty.
-function maskCanvasEmpty() {
-  if (!maskOffscreen) return true
-  const ctx = maskOffscreen.getContext('2d')
-  const id  = ctx.getImageData(0, 0, maskOffscreen.width, maskOffscreen.height)
-  return !anyExcluded(id.data)
-}
-
-// Persist the current mask canvas. With `checkEmpty` (erase-type commits), first
-// tests whether anything is still masked and commits `null` (no mask) if not —
-// so erasing the last pixels clears the mask instead of saving an empty PNG.
-async function exportMask(checkEmpty = false) {
-  if (!maskOffscreen) return
-  if (checkEmpty && maskCanvasEmpty()) {
-    hasMask.value = false
-    persistMask(null)
-    return
-  }
-  const blob = await maskOffscreen.convertToBlob({ type: 'image/png' })
-  hasMask.value = true
-  persistMask(blob)
-}
-
-// Clear is undoable (snapshot first) — no confirm dialog needed anymore.
-function clearMask() {
-  if (!maskOffscreen || !hasMask.value) return
-  snapshotForUndo()
-  maskOffscreen.getContext('2d').clearRect(0, 0, maskOffscreen.width, maskOffscreen.height)
-  hasMask.value = false
-  persistMask(null)
-  drawOverlay()
-}
-
-// ── Smart Select (SAM2) ─────────────────────────────────────────────────────────
-// The SAM2 side (encode / click points / decode / cyan preview) lives in
-// useSmartSelect; committing stays here because it is a mask-canvas edit.
-
-// Commit the previewed segment into the red mask canvas (add), then clear the
-// preview so the next click starts fresh. Undoable like every other mask edit.
-async function commitSmart() {
-  if (!maskOffscreen) return
-  // The segment is upsampled to NATIVE resolution by the composable, so the red
-  // canvas blits 1:1 into the (native-sized) mask.
-  const red = buildCommitCanvas(maskOffscreen.width, maskOffscreen.height)
-  if (!red) return
-  snapshotForUndo()
-  const ctx = maskOffscreen.getContext('2d')
-  ctx.globalCompositeOperation = 'source-over'
-  ctx.drawImage(red, 0, 0)
-  hasMask.value = true
-  discardSmart()
-  await exportMask()
-}
-
-function triggerMaskImport() {
-  maskFileInput.value?.click()
-}
-
-// Import an image as mask: bright/opaque pixels → red (masked region). Shared
-// normalize/rescale logic lives in core/mask.js (also used by the Mask Manager).
-async function onMaskFileChange(e) {
-  const file = e.target.files?.[0]
-  e.target.value = ''
-  if (!file || !maskOffscreen) return
-  try {
-    const blob = await maskFromSource(file, maskOffscreen.width, maskOffscreen.height)
-    snapshotForUndo()
-    await loadMaskBlob(blob)
-    await exportMask(true) // a blank imported image shouldn't register as a mask
-  } catch (err) {
-    console.error('Failed to import mask:', err)
-  }
-}
-
-// ── Mouse handlers ────────────────────────────────────────────────────────────
-
-function getViewportCoords(e) {
-  const rect = container.value.getBoundingClientRect()
-  return { x: e.clientX - rect.left, y: e.clientY - rect.top }
-}
-
-// Convert viewport coords to native image pixel coords (clamped to the image).
-function toImagePixel(sx, sy) {
-  const img = imgEl.value
-  if (!img || !img.naturalWidth) return null
-  return {
-    px: clamp((sx - tx.value) / scale.value, 0, img.naturalWidth),
-    py: clamp((sy - ty.value) / scale.value, 0, img.naturalHeight),
-  }
-}
-
-// ── Right-click context menu ──────────────────────────────────────────────────
-// Two-stage: a general 'main' menu whose "Add point here…" entry switches the same
-// popup to 'gcp' mode (new-vs-existing chooser at the same anchor).
-// { x, y (viewport, for positioning), px, py (image pixel), mode } or null.
+// Right-click context menu (ImageContextMenu.vue): { x, y, sx, sy, px, py, mode } | null.
 const menu = ref(null)
+const ZOOM_HERE_FACTOR = 1.8
 
 function onContextMenu(e) {
   if (props.maskEdit && tool.value) return // don't hijack right-click while a mask tool is active
@@ -974,61 +304,33 @@ function onContextMenu(e) {
   menu.value = {
     x: Math.min(x, Math.max(0, cw - 200)),
     y: Math.min(y, Math.max(0, ch - 240)),
+    sx: x, sy: y,
     px: pix.px, py: pix.py, mode: 'main',
   }
 }
 
 function closeMenu() { menu.value = null }
-function menuBack()  { if (menu.value) menu.value = { ...menu.value, mode: 'main' } }
 
-// "Add point here…" → switch the popup to the new-vs-existing chooser.
-function menuAddGcp() { if (menu.value) menu.value = { ...menu.value, mode: 'gcp' } }
-function menuNewGcp(role) {
-  if (menu.value) emit('add-gcp', { px: menu.value.px, py: menu.value.py, role })
-  closeMenu()
-}
-function menuAssign(gcpId) {
-  if (menu.value) emit('mark-gcp', { gcpId, px: menu.value.px, py: menu.value.py })
-  closeMenu()
-}
-
-// "Mark fiducial…" (film sensors) → the mark chooser sub-menu.
-function menuAddFiducial() { if (menu.value) menu.value = { ...menu.value, mode: 'fiducial' } }
-function menuMarkFiducial(fidId) {
-  if (menu.value) emit('mark-fiducial', { fidId, px: menu.value.px, py: menu.value.py })
-  closeMenu()
-}
-
-function menuCopyCoords() {
-  if (menu.value) {
-    copyToClipboard(`${Math.round(menu.value.px)}, ${Math.round(menu.value.py)}`, 'pixel')
-  }
-  closeMenu()
-}
-function menuCopyColor() {
-  if (menu.value && offscreenCtx) {
-    const px = Math.floor(menu.value.px), py = Math.floor(menu.value.py)
-    const d = offscreenCtx.getImageData(px, py, 1, 1).data
+// "Copy color (RGB)": the bitmap pixel holding the clicked native pixel.
+function onMenuCopyColor({ px, py }) {
+  if (offscreenCtx && frame.value) {
+    const { x, y } = bitmapPixel(px, py, frame.value)
+    const d = offscreenCtx.getImageData(x, y, 1, 1).data
     copyToClipboard(`rgb(${d[0]}, ${d[1]}, ${d[2]})`, 'color')
   }
-  closeMenu()
 }
-function menuZoomIn() { if (menu.value) zoomAt(1.8, menu.value.x, menu.value.y); closeMenu() }
-function menuFit()    { fit(); closeMenu() }
 
 function onMouseDown(e) {
   if (menu.value && e.button === 0) { closeMenu(); return }
-  const activeTool = props.maskEdit ? tool.value : null
+  // Until the full-resolution bitmap is in (`editable`), presses just pan.
+  const activeTool = props.maskEdit && editable.value ? tool.value : null
   if (activeTool === 'rect' && e.button === 0) {
     const { x, y } = getViewportCoords(e)
-    const pix = toImagePixel(x, y)
-    if (pix) rectDrag = { x0: pix.px, y0: pix.py, x1: pix.px, y1: pix.py, erase: e.altKey }
+    beginRect(toImagePixel(x, y), e.altKey)
     drawOverlay()
   } else if ((activeTool === 'brush' || activeTool === 'erase') && e.button === 0) {
-    isDrawing = true
-    strokeHit = false
     const { x, y } = getViewportCoords(e)
-    strokeHit = paintAt(x, y) || strokeHit
+    beginStroke(x, y)
     drawOverlay()
   } else if (activeTool === 'smart' && e.button === 0) {
     // Arm BOTH a pan and a pending segment click — a real drag pans, a click (no
@@ -1039,7 +341,7 @@ function onMouseDown(e) {
     smartMoved = false
     dragging.value = true
     startX = e.clientX; startY = e.clientY; startTx = tx.value; startTy = ty.value
-  } else if (props.gcpEdit && e.button === 0) {
+  } else if (props.gcpEdit && editable.value && e.button === 0) {
     // Like the Smart tool: arm a pending click AND a pan; a real drag pans, a click
     // (no movement past the threshold, decided in onMouseUp) places/marks a GCP.
     const { x, y } = getViewportCoords(e)
@@ -1060,11 +362,10 @@ function onMouseMove(e) {
   const { x, y } = getViewportCoords(e)
   mousePos = { x, y }
 
-  if (rectDrag) {
-    const pix = toImagePixel(x, y)
-    if (pix) { rectDrag.x1 = pix.px; rectDrag.y1 = pix.py; rectDrag.erase = e.altKey }
-  } else if (isDrawing && tool.value) {
-    strokeHit = paintAt(x, y) || strokeHit
+  if (maskRect()) {
+    updateRect(toImagePixel(x, y), e.altKey)
+  } else if (isDrawing() && tool.value) {
+    continueStroke(x, y)
   } else if (dragging.value) {
     // Once the pointer moves past a small threshold, a Smart-tool press is a pan,
     // not a segment click.
@@ -1074,25 +375,7 @@ function onMouseMove(e) {
     ty.value = startTy + (e.clientY - startY)
   }
 
-  // Pixel color for status bar
-  const px  = Math.floor((x - tx.value) / scale.value)
-  const py  = Math.floor((y - ty.value) / scale.value)
-  const img = imgEl.value
-  if (img && px >= 0 && py >= 0 && px < img.naturalWidth && py < img.naturalHeight) {
-    const info = { x: px, y: py, r: null, g: null, b: null, masked: null }
-    if (offscreenCtx) {
-      const pixel = offscreenCtx.getImageData(px, py, 1, 1).data
-      info.r = pixel[0]; info.g = pixel[1]; info.b = pixel[2]
-    }
-    // Whether this pixel is excluded by the mask (opaque on the mask canvas).
-    if (maskOffscreen && hasMask.value) {
-      info.masked = maskOffscreen.getContext('2d').getImageData(px, py, 1, 1).data[3] > 127
-    }
-    hoverPx.value = info
-  } else {
-    hoverPx.value = null
-  }
-
+  updateHover(x, y)
   drawOverlay()
 }
 
@@ -1101,7 +384,7 @@ async function onMouseUp() {
   if (smartDown) {
     const down = smartDown, moved = smartMoved
     smartDown = null; smartMoved = false; dragging.value = false
-    if (!moved) {
+    if (!moved && editable.value) {
       const pix = toImagePixel(down.x, down.y)
       if (pix) await smartClick(pix.px, pix.py, down.alt) // Alt-click = refine (negative)
     }
@@ -1111,7 +394,7 @@ async function onMouseUp() {
   if (gcpDown) {
     const down = gcpDown, moved = gcpMoved
     gcpDown = null; gcpMoved = false; dragging.value = false
-    if (!moved) {
+    if (!moved && editable.value) {
       const pix = toImagePixel(down.x, down.y)
       if (pix) {
         // A selected GCP → mark this image's observation of it; otherwise create a
@@ -1124,22 +407,20 @@ async function onMouseUp() {
     }
     return
   }
-  if (rectDrag) { await commitRect(); return }
-  if (isDrawing) {
-    isDrawing = false
-    // A stroke that never touched the image is a no-op — don't save an empty mask.
-    // An erase can empty the mask, so re-check on that path.
-    if (strokeHit) { snapshotForUndo(); await exportMask(tool.value === 'erase') }
+  if (maskRect()) { await commitRect(); return }
+  if (isDrawing()) {
+    const exporting = endStroke() // null when the stroke never touched the image
+    if (exporting) await exporting
   }
   dragging.value = false
 }
 
 function onMouseLeave() {
   dragging.value = false
-  rectDrag = null // cancel an in-flight rectangle rather than guessing its corner
+  cancelRect() // cancel an in-flight rectangle rather than guessing its corner
   smartDown = null; smartMoved = false // cancel a pending Smart click/pan
   gcpDown = null; gcpMoved = false     // cancel a pending GCP click/pan
-  if (isDrawing) { isDrawing = false; if (strokeHit) { snapshotForUndo(); exportMask(tool.value === 'erase') } }
+  if (isDrawing()) endStroke()
   mousePos      = null
   hoverPx.value = null
   drawOverlay()
@@ -1148,19 +429,32 @@ function onMouseLeave() {
 function onWheel(e) {
   e.preventDefault()
   closeMenu() // its anchor pixel would drift under the zoom
-  const rect     = container.value.getBoundingClientRect()
-  const cx       = e.clientX - rect.left
-  const cy       = e.clientY - rect.top
-  const factor   = e.deltaY < 0 ? 1.15 : 1 / 1.15
-  const newScale = clamp(scale.value * factor, MIN_SCALE, MAX_SCALE)
-  const ratio    = newScale / scale.value
-  tx.value    = cx - (cx - tx.value) * ratio
-  ty.value    = cy - (cy - ty.value) * ratio
-  scale.value = newScale
-  drawOverlay()
+  const { x, y } = getViewportCoords(e)
+  zoomAt(e.deltaY < 0 ? 1.15 : 1 / 1.15, x, y)
 }
 
-// ── Lifecycle ─────────────────────────────────────────────────────────────────
+// ── Hover readout (status bar) ────────────────────────────────────────────────
+
+// Pixel under the cursor. Coordinates are native; the colour is sampled from the
+// bitmap pixel holding that native pixel (a preview's is approximate).
+function updateHover(x, y) {
+  const px = Math.floor((x - tx.value) / scale.value)
+  const py = Math.floor((y - ty.value) / scale.value)
+  const f  = frame.value
+  if (f?.exact && px >= 0 && py >= 0 && px < f.width && py < f.height) {
+    const info = { x: px, y: py, r: null, g: null, b: null, masked: null }
+    if (offscreenCtx) {
+      const b = bitmapPixel(px, py, f)
+      const pixel = offscreenCtx.getImageData(b.x, b.y, 1, 1).data
+      info.r = pixel[0]; info.g = pixel[1]; info.b = pixel[2]
+    }
+    // Whether this pixel is excluded by the mask (opaque on the mask canvas).
+    info.masked = maskedAt(px, py)
+    hoverPx.value = info
+  } else {
+    hoverPx.value = null
+  }
+}
 
 function setupOffscreenCanvas() {
   const img = imgEl.value
@@ -1174,119 +468,31 @@ function setupOffscreenCanvas() {
   }
 }
 
+// ── Lifecycle ─────────────────────────────────────────────────────────────────
+
 function onImgLoad() {
+  refreshFrame()
+  // fit() reveals the image (imageReady). In a hidden tab it defers instead, and
+  // the ResizeObserver fits + reveals once the tab is shown.
   fit()
   setupOffscreenCanvas()
   initMaskCanvas()
+  // Native-sized from the frame; a no-op for a preview frame, so the depth canvas
+  // is only built once the bitmap is the full-resolution one.
   initDepthCanvas()
-  imageReady.value = true
-}
-
-// A new `url` means a new decode (image switch, or the TIFF thumbnail →
-// full-res swap) — hide the old frame until the new one has loaded and been
-// fitted, instead of flashing native size or a stale image.
-watch(() => props.image.url, () => { imageReady.value = false })
-
-// Redraw when keypoints arrive or showKeypoints changes
-watch(() => props.image.kpStatus,    () => drawOverlay())
-watch(keypoints,                     () => drawOverlay())
-watch(() => props.showKeypoints,     () => drawOverlay())
-watch(() => props.showMask,          () => drawOverlay())
-watch(() => props.showDepth,         () => drawOverlay())
-watch(() => props.showGcps,          () => drawOverlay())
-watch(() => props.gcps,              () => drawOverlay(), { deep: true })
-watch(() => props.gcpGuides,         () => drawOverlay())
-watch(() => props.gcpEdit,           () => drawOverlay()) // gates the guides too
-watch(() => props.selectedGcpId,     () => drawOverlay())
-watch(() => props.fiducialObs,       () => drawOverlay(), { deep: true })
-watch(() => props.isFilm,            () => drawOverlay())
-watch(() => props.showFiducials,     () => drawOverlay())
-watch(() => props.showResiduals,     () => drawOverlay())
-watch(() => props.residuals,         () => drawOverlay(), { deep: false })
-watch(() => props.fiducialMarks,     () => drawOverlay(), { deep: true })
-
-// Entering edit mode arms the brush; leaving drops the tool + any in-flight rect
-// and clears any Smart Select candidate.
-watch(() => props.maskEdit, (on) => {
-  tool.value = on ? 'brush' : null
-  if (!on) { rectDrag = null; discardSmart(); flushMask() } // persist the session's edits once
-  drawOverlay()
-})
-watch(tool, (t, prev) => {
-  rectDrag = null
-  if (t === 'smart') ensureEncoded()       // encode this image (once) so clicks are ready
-  else if (prev === 'smart') discardSmart() // dropped Smart Select — clear its preview
-  drawOverlay()
-})
-
-// Switching the viewed image invalidates the SAM2 embedding — reset + free the
-// old one, and re-encode if Smart Select is the active tool.
-watch(() => props.image?.uuid, (uuid, prev) => {
-  resetSmart(prev)
-  if (props.maskEdit && tool.value === 'smart') ensureEncoded()
-})
-
-// Sync mask canvas when parent clears or replaces the mask externally
-watch(() => props.image.mask, (mask, prev) => {
-  if (mask === prev) return
-  if (mask?.blob && maskOffscreen) {
-    loadMaskBlob(mask.blob)
-  } else if (!mask && maskOffscreen) {
-    maskOffscreen.getContext('2d').clearRect(0, 0, maskOffscreen.width, maskOffscreen.height)
-    hasMask.value = false
-    drawOverlay()
-  }
-})
-
-// Mask-edit keyboard shortcuts. Instances are kept alive per tab via v-show, so
-// gate on being the *visible* one (offsetParent is null while display:none) and
-// on edit mode; skip while typing in a field. Escape is handled globally in
-// App.vue (it must yield to open modals first).
-function onKeydown(e) {
-  if (!props.maskEdit || container.value?.offsetParent === null) return
-  const t = e.target
-  if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
-  const k = e.key.toLowerCase()
-  if ((e.ctrlKey || e.metaKey) && k === 'z') { e.preventDefault(); e.shiftKey ? redoMask() : undoMask(); return }
-  if ((e.ctrlKey || e.metaKey) && k === 'y') { e.preventDefault(); redoMask(); return }
-  // Smart Select: Enter commits the previewed segment, Del/Backspace discards it.
-  if (tool.value === 'smart') {
-    if (e.key === 'Enter') { e.preventDefault(); if (smartHasPreview.value) commitSmart(); return }
-    if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); discardSmart(); return }
-  }
-  if (e.ctrlKey || e.metaKey || e.altKey) return
-  if      (k === 'b') tool.value = 'brush'
-  else if (k === 'e') tool.value = 'erase'
-  else if (k === 'r') tool.value = 'rect'
-  else if (k === 's') tool.value = 'smart'
-  else if (k === 'i') invertMask()
-  else if (e.key === '[') brushRadius.value = Math.max(4, brushRadius.value - 4)
-  else if (e.key === ']') brushRadius.value = Math.min(80, brushRadius.value + 4)
-  else return
-  drawOverlay()
 }
 
 onMounted(() => {
-  // Only refit on a *real* viewport change. A v-show-hidden tab collapses to 0×0
-  // and springs back to its old size when reactivated — refitting on that would
-  // throw away the zoom/pan the user left the tab with.
-  resizeObserver = new ResizeObserver(() => {
-    const c = container.value
-    if (!c) return
-    const w = c.clientWidth, h = c.clientHeight
-    if (!w || !h) return
-    if (lastSize && lastSize.w === w && lastSize.h === h) return
-    lastSize = { w, h }
-    fit()
-  })
-  if (container.value) resizeObserver.observe(container.value)
+  observeResize()
   document.addEventListener('keydown', onKeydown)
 })
 
+// Teardown order is deliberate: flush pending mask edits first (the tab may be
+// closed mid-edit), then stop the repaint/resize/key machinery, then free SAM2.
 onBeforeUnmount(() => {
   flushMask() // persist any pending mask edits if the tab is closed mid-edit
   if (overlayFrame) cancelAnimationFrame(overlayFrame)
-  resizeObserver?.disconnect()
+  disconnectResize()
   document.removeEventListener('keydown', onKeydown)
   if (props.image?.uuid) segmentForget(props.image.uuid) // free the SAM2 embedding
 })
@@ -1303,16 +509,16 @@ defineExpose({ fit, zoomIn, zoomOut, triggerMaskImport, clearMask, triggerDepthI
       ref="container"
       class="viewport"
       :class="{
-        grabbing: dragging && (!maskEdit || !tool) && !gcpEdit,
-        drawing: maskEdit && (tool === 'brush' || tool === 'erase'),
-        crosshair: (maskEdit && (tool === 'rect' || tool === 'smart')) || gcpEdit,
+        grabbing: dragging && (!maskEdit || !tool || !editable) && (!gcpEdit || !editable),
+        drawing: editable && maskEdit && (tool === 'brush' || tool === 'erase'),
+        crosshair: editable && ((maskEdit && (tool === 'rect' || tool === 'smart')) || gcpEdit),
       }"
       @wheel="onWheel"
       @mousedown="onMouseDown"
       @mousemove="onMouseMove"
       @mouseup="onMouseUp"
       @mouseleave="onMouseLeave"
-      @dblclick="(!maskEdit || !tool) && !gcpEdit && fit()"
+      @dblclick="(!maskEdit || !tool || !editable) && (!gcpEdit || !editable) && fit()"
       @contextmenu="onContextMenu"
     >
       <img
@@ -1322,7 +528,7 @@ defineExpose({ fit, zoomIn, zoomOut, triggerMaskImport, clearMask, triggerDepthI
         :alt="image.name"
         class="image"
         :class="{ pending: !imageReady }"
-        :style="{ transform: `translate(${tx}px, ${ty}px) scale(${scale})` }"
+        :style="{ transform: `translate(${tx}px, ${ty}px) scale(${scale / (frame?.bitmapScale ?? 1)})` }"
         draggable="false"
         @load="onImgLoad"
         @error="imagesStore.reportImageLoadError(image.id)"
@@ -1341,6 +547,12 @@ defineExpose({ fit, zoomIn, zoomOut, triggerMaskImport, clearMask, triggerDepthI
       </div>
 
       <canvas ref="overlayCanvas" class="overlay-canvas" />
+
+      <!-- Only the low-res TIFF preview is in: marks/masks would land imprecisely
+           and the mask canvas is rebuilt when full resolution arrives. -->
+      <div v-if="(maskEdit || gcpEdit) && imageReady && !editable" class="edit-locked">
+        Loading full resolution — editing resumes when it is ready
+      </div>
 
       <MaskToolbar
         v-if="maskEdit"
@@ -1377,59 +589,23 @@ defineExpose({ fit, zoomIn, zoomOut, triggerMaskImport, clearMask, triggerDepthI
         @close="emit('exit-gcp-edit')"
       />
 
-      <!-- Right-click context menu (general → GCP chooser sub-mode). -->
-      <div v-if="menu" class="ctx-menu" :style="{ left: menu.x + 'px', top: menu.y + 'px' }" @mousedown.stop @contextmenu.prevent>
-        <template v-if="menu.mode === 'main'">
-          <button class="ctx-item add" @click="menuAddGcp">Add control/marker here…</button>
-          <button v-if="isFilm" class="ctx-item add" @click="menuAddFiducial">Mark fiducial…</button>
-          <div class="ctx-sep"></div>
-          <button class="ctx-item" @click="menuCopyCoords">Copy pixel (X,&nbsp;Y)</button>
-          <button class="ctx-item" @click="menuCopyColor">Copy color (RGB)</button>
-          <div class="ctx-sep"></div>
-          <button class="ctx-item" @click="menuZoomIn">Zoom in here</button>
-          <button class="ctx-item" @click="menuFit">Fit to view</button>
-        </template>
-        <template v-else-if="menu.mode === 'fiducial'">
-          <div class="ctx-hd">Mark fiducial here</div>
-          <template v-if="fiducialMarks.length">
-            <button
-              v-for="m in fiducialMarks"
-              :key="m.id"
-              class="ctx-item"
-              @click="menuMarkFiducial(m.id)"
-            >{{ markedFidIds.has(m.id) ? '✓ ' : '' }}{{ m.id }}<span class="ctx-pos">{{ fidMarkPos.get(m.id) }}</span></button>
-          </template>
-          <div v-else class="ctx-sub">No marks defined — add them in the Sensor table.</div>
-          <div class="ctx-sep"></div>
-          <button class="ctx-item back" @click="menuBack">‹ Back</button>
-        </template>
-        <template v-else>
-          <div class="ctx-hd">Add reference point</div>
-          <!-- Two explicit actions, never one action plus a role edit afterwards:
-               a control point born with coordinates and re-roled to marker is
-               exactly the migration hazard core/io/gcp.js guards against. The
-               scene type only decides the ORDER, so both stay one click away. -->
-          <template v-if="defaultPointRole === 'marker'">
-            <button class="ctx-item add" @click="menuNewGcp('marker')">＋ New marker here</button>
-            <button class="ctx-item add" @click="menuNewGcp('control')">＋ New control point here</button>
-          </template>
-          <template v-else>
-            <button class="ctx-item add" @click="menuNewGcp('control')">＋ New control point here</button>
-            <button class="ctx-item add" @click="menuNewGcp('marker')">＋ New marker here</button>
-          </template>
-          <template v-if="allGcps.length">
-            <div class="ctx-sub">Assign to existing</div>
-            <button
-              v-for="g in allGcps"
-              :key="g.id"
-              class="ctx-item"
-              @click="menuAssign(g.id)"
-            >{{ g.name }}</button>
-          </template>
-          <div class="ctx-sep"></div>
-          <button class="ctx-item back" @click="menuBack">‹ Back</button>
-        </template>
-      </div>
+      <!-- Right-click context menu (general → GCP / fiducial chooser sub-modes). -->
+      <ImageContextMenu
+        v-model:menu="menu"
+        :editable="editable"
+        :is-film="isFilm"
+        :fiducial-marks="fiducialMarks"
+        :marked-fid-ids="markedFidIds"
+        :fid-mark-pos="fidMarkPos"
+        :all-gcps="allGcps"
+        :default-point-role="defaultPointRole"
+        @add-gcp="(p) => emit('add-gcp', p)"
+        @mark-gcp="(p) => emit('mark-gcp', p)"
+        @mark-fiducial="(p) => emit('mark-fiducial', p)"
+        @copy-color="onMenuCopyColor"
+        @zoom-in="(p) => zoomAt(ZOOM_HERE_FACTOR, p.sx, p.sy)"
+        @fit="fit"
+      />
     </div>
 
     <div class="status-bar">
@@ -1489,60 +665,6 @@ defineExpose({ fit, zoomIn, zoomOut, triggerMaskImport, clearMask, triggerDepthI
 .viewport.drawing   { cursor: none; }
 .viewport.crosshair { cursor: crosshair; }
 
-.ctx-menu {
-  position: absolute;
-  z-index: 20;
-  min-width: 180px;
-  max-height: 70%;
-  overflow-y: auto;
-  background: var(--panel);
-  border: 1px solid var(--panel-border);
-  border-radius: 6px;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
-  padding: 4px;
-}
-
-.ctx-hd {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text-dim);
-  padding: 4px 8px 2px;
-}
-
-.ctx-sub {
-  font-size: 10px;
-  color: var(--text-dim);
-  padding: 6px 8px 2px;
-}
-
-.ctx-sep {
-  height: 1px;
-  background: var(--panel-border);
-  margin: 4px 2px;
-}
-
-.ctx-item {
-  display: block;
-  width: 100%;
-  text-align: left;
-  padding: 5px 8px;
-  background: none;
-  border: none;
-  border-radius: 4px;
-  color: var(--text);
-  font: inherit;
-  font-size: 12px;
-  cursor: pointer;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.ctx-item:hover { background: var(--hover-bg); }
-.ctx-item.add { color: var(--accent, #5cf); font-weight: 500; }
-.ctx-item.back { color: var(--text-dim); }
-.ctx-pos { float: right; margin-left: 12px; color: var(--text-dim); font-size: 11px; }
-
 .image {
   position: absolute;
   top: 0;
@@ -1590,6 +712,20 @@ defineExpose({ fit, zoomIn, zoomOut, triggerMaskImport, clearMask, triggerDepthI
   top: 0;
   left: 0;
   pointer-events: none;
+}
+
+.edit-locked {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  padding: 4px 10px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  font-size: 12px;
+  pointer-events: none;
+  white-space: nowrap;
 }
 
 .spacer { flex: 1; }

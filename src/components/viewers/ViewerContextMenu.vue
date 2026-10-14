@@ -2,19 +2,23 @@
 // Small right-click context menu shared by the 3D and 2D (map) viewers. Purely
 // presentational: the owner opens/closes it (via useContextMenu, which also wires
 // the document-click dismiss) and supplies the item list; a click emits the item id.
-defineProps({
+import { useMenuPlacement } from '../../composables/useMenuPlacement.js'
+
+const props = defineProps({
   menu:  { type: Object, default: null },   // { x, y } | null
   items: { type: Array,  default: () => [] }, // [{ id, label, active?, separator?, disabled? }]
 })
 const emit = defineEmits(['select'])
+const { el, pos } = useMenuPlacement(() => props.menu)
 </script>
 
 <template>
   <Teleport to="body">
     <div
       v-if="menu"
+      ref="el"
       class="viewer-ctx"
-      :style="{ left: menu.x + 'px', top: menu.y + 'px' }"
+      :style="pos"
       @click.stop
       @contextmenu.prevent.stop
     >

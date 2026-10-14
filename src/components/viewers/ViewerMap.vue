@@ -1,48 +1,47 @@
 <script setup>
 import 'ol/ol.css'
-import { useExternalStore } from '../../stores/useExternalStore.js'
-import { createGpuRasterLayer, gpuRasterStyle, disposeRasterLayer } from './raster/gpuRaster.js'
-import { orthoAdjustFilter } from '../../utils/orthoFilter.js'
 import { onMounted, onBeforeUnmount, ref, computed, watch } from 'vue'
-// Aliased: a bare `Map` import shadows the global Map constructor, and this file
-// keeps id→layer lookups in real JS Maps.
+// Aliased: a bare `Map` import shadows the global Map constructor.
 import OlMap from 'ol/Map'
 import View from 'ol/View'
-import TileLayer from 'ol/layer/Tile'
-import OSM from 'ol/source/OSM'
-import XYZ from 'ol/source/XYZ'
-import ImageTileSource from 'ol/source/ImageTile'
-import WMTS, { optionsFromCapabilities } from 'ol/source/WMTS'
-import WMTSCapabilities from 'ol/format/WMTSCapabilities'
 import VectorLayer from 'ol/layer/Vector'
 import VectorSource from 'ol/source/Vector'
-import ImageLayer from 'ol/layer/Image'
-import Static from 'ol/source/ImageStatic'
-import LayerGroup from 'ol/layer/Group'
-import Graticule from 'ol/layer/Graticule'
-import Feature from 'ol/Feature'
-import Point from 'ol/geom/Point'
 import Polygon from 'ol/geom/Polygon'
-import LineString from 'ol/geom/LineString'
-import { Style, Circle as CircleStyle, RegularShape, Fill, Stroke, Text } from 'ol/style'
-import { get as getOlProjection, transformExtent, addProjection } from 'ol/proj'
+import { get as getOlProjection, addProjection } from 'ol/proj'
 import Projection from 'ol/proj/Projection'
 import { Attribution } from 'ol/control'
 import Translate from 'ol/interaction/Translate'
-import { createEmpty, extend, buffer, getIntersection, isEmpty as extentIsEmpty } from 'ol/extent'
+import DoubleClickZoom from 'ol/interaction/DoubleClickZoom'
+import { createEmpty, extend, isEmpty as extentIsEmpty } from 'ol/extent'
 import { ensureProjection, transform, crsInfo } from '../../core/crs.js'
-import { rasterBounds } from '../../core/io/rasterSample.js'
+import { createGeneration } from '../../utils/generation.js'
+import { productDescriptor } from '../../core/io/rasterSource.js'
+import { chooseBasemap } from '../../core/basemapChoice.js'
+import {
+  gpsImagesOf, plottedGcps, modelMarkerGcps, gcpPlacement, plottedFootprints, plottedPoses, modelCameraPoses,
+  isUnaligned, hoverText, linkedImageOf,
+} from '../../core/mapData.js'
 import { useContextMenu } from '../../composables/useContextMenu.js'
 import { copyToClipboard } from '../../composables/useToasts.js'
+import { useMapSettings } from '../../composables/useMapSettings.js'
+import { useMapRasterLayers } from '../../composables/useMapRasterLayers.js'
+import { createMapContext, clearMapContext } from './map/mapContext.js'
+import { imageStyle, gcpStyle, poseStyle, footprintStyle } from './map/mapStyles.js'
+import { projectLonLat, makeImageFeature, makeGcpFeature, makeFootprintFeature, makePoseFeature } from './map/mapFeatures.js'
+import { makeBasemapLayer, makeGibsLayer } from './map/mapBasemaps.js'
+import { makeGridLayer } from './map/mapGridLayer.js'
 import ViewerContextMenu from './ViewerContextMenu.vue'
 import GcpToolbar from './GcpToolbar.vue'
 import RasterMeasurements from './RasterMeasurements.vue'
-import DoubleClickZoom from 'ol/interaction/DoubleClickZoom'
-import { productDescriptor } from '../../core/io/rasterSource.js'
-import { useMapSettings } from '../../composables/useMapSettings.js'
-import {
-  BASEMAPS, SATELLITE, TERRAIN, CUSTOM_SATELLITE_MAX_ZOOM, basemapReason, customAttribution, decodeTerrarium, hillshade,
-} from '../../core/basemaps.js'
+
+// Module map (this file keeps the lifecycle, interactions and watchers):
+//   map/mapContext.js              the built map's OL handles (`ctx`)
+//   map/mapStyles.js               marker styles
+//   map/mapFeatures.js             marker features
+//   map/mapBasemaps.js             base layers      (choice: core/basemapChoice.js)
+//   map/mapGridLayer.js            grid layer       (lines/labels: core/mapGrid.js)
+//   composables/useMapRasterLayers raster layer reconcile
+//   core/mapData.js                what gets plotted, hover text
 
 const { basemap, satelliteUrl, satelliteAttribution } = useMapSettings()
 
@@ -64,12 +63,11 @@ const props = defineProps({
   showGrid:       { type: Boolean, default: true },
   // Raster layers flagged "On map", in the order they should stack: imported
   // reference rasters and computed DEM/ortho (`product: true`) alike
-  // (composables/useMapProducts.js). Metadata only — see makeRasterLayer.
+  // (composables/useMapProducts.js). Metadata only — see useMapRasterLayers.
   rasters:    { type: Array, default: () => [] },
   // Status-bar value readout: a SYNC probe of the on-map layers (useMapProducts
   // probeAt, falling through to useExternalStore.probeRasterAt) plus the hydrator
-  // behind the "load" button.
-  // Kept as injected functions so this viewer stays store-free like its siblings.
+  // behind the "load" button, injected by the host (WorkspaceView via useMapProducts).
   probeRaster: { type: Function, default: null },
   loadRaster:  { type: Function, default: null },
   // Non-null ⇒ the map shows the MODEL frame instead of the project CRS
@@ -112,6 +110,17 @@ const mapEl = ref(null)
 const basemapNote = ref('')
 const hover = ref(null)   // { text, x, y }
 
+// Every OpenLayers handle of the current build (map, sources, layers, the grid,
+// the GCP drag interaction): replaced by build(), nulled by destroy(), and read
+// as `ctx.<handle>` at call time everywhere else — see map/mapContext.js.
+const ctx = createMapContext()
+
+// Raster layers (imported + computed), reconciled against `props.rasters`.
+const rasterLayers = useMapRasterLayers(ctx, {
+  rasters: () => props.rasters,
+  modelCode: () => props.modelFrame?.code,
+})
+
 // ── Status bar ────────────────────────────────────────────────────────────────
 // Cursor position in the PROJECT CRS (the map's view projection) + the value of
 // the topmost reference raster under it. Mirrors the image view's status bar.
@@ -141,10 +150,10 @@ const ctxCoord = ref(null)
 // Loaded image linked to the feature under the right-click, or null.
 const ctxImage = ref(null)
 function onContextMenu(e) {
-  ctxCoord.value = map ? map.getEventCoordinate(e) : null
-  const hit = map && !measuring.value ? pickFeature(map.getEventPixel(e)) : null
-  ctxImage.value = hit ? linkedImage(hit) : null
-  openCtx(e, {}, { w: 220, h: ctxImage.value ? 130 : 90 })
+  ctxCoord.value = ctx.map ? ctx.map.getEventCoordinate(e) : null
+  const hit = ctx.map && !measuring.value ? pickFeature(ctx.map.getEventPixel(e)) : null
+  ctxImage.value = hit ? linkedImageOf(hit, props.images) : null
+  openCtx(e)
 }
 const ctxItems = computed(() => [
   ...(ctxImage.value ? [
@@ -181,7 +190,7 @@ const measureDesc = computed(() => productDescriptor(props.measureTarget?.produc
 const measureView = computed(() => {
   viewRev.value // eslint-disable-line no-unused-expressions -- re-evaluate per frame
   const t = props.measureTarget
-  if (!t || !map) return null
+  if (!t || !ctx.map) return null
   const off = t.layer?.offset
   const from = t.layer?.crs, to = props.modelFrame?.code ?? props.crs
   const same = !off && from === to
@@ -189,11 +198,11 @@ const measureView = computed(() => {
   const fromMap = (x, y) => (off ? [x - off[0], y - off[1]] : same ? [x, y] : transform([x, y], to, from))
   return {
     toScreen(wx, wy) {
-      const p = map?.getPixelFromCoordinate(toMap(wx, wy))
+      const p = ctx.map?.getPixelFromCoordinate(toMap(wx, wy))
       return p ? { x: p[0], y: p[1] } : { x: NaN, y: NaN }
     },
     fromScreen(sx, sy) {
-      const c = map?.getCoordinateFromPixel([sx, sy])
+      const c = ctx.map?.getCoordinateFromPixel([sx, sy])
       if (!c) return null
       const [x, y] = fromMap(c[0], c[1])
       return { x, y }
@@ -205,261 +214,76 @@ const measureState = computed(() => measurements.value?.state ?? null)
 function setMeasureTool(tool) { measurements.value?.setTool(tool) }
 function toggleSavedMeasurements() { measurements.value?.toggleSaved() }
 
-let map             = null
-let vSource         = null
-let gcpSource        = null
-let gcpLayer         = null
-let gcpTranslate     = null
-let footprintSource = null
-let footprintLayer  = null
-let gridLayer       = null
-let gridSource      = null // non-null only for the projected-grid variant (see below)
-let gridExtent      = null
-let gridUnits       = 'm'  // the projection's own linear unit; labels are in it, unscaled
-let gridViewKey     = ''   // last center/resolution the grid was generated for
-let poseSource      = null
+// ── What is plotted (core/mapData.js) ─────────────────────────────────────────
+// Each computed reads only the current frame's inputs. GCPs, footprints and poses
+// are in the project CRS already (= the map view CRS); image GPS is WGS84 and is
+// projected by the feature factory.
 
-// ── Styles ────────────────────────────────────────────────────────────────────
+const gpsImages = computed(() => isModel.value ? [] : gpsImagesOf(props.images, props.poses))
 
-const normalStyle = new Style({
-  image: new CircleStyle({
-    radius: 6,
-    fill:   new Fill({ color: '#0e639c' }),
-    stroke: new Stroke({ color: '#fff', width: 1.5 }),
-  }),
-})
-
-const selectedStyle = new Style({
-  image: new CircleStyle({
-    radius: 8,
-    fill:   new Fill({ color: '#f0a500' }),
-    stroke: new Stroke({ color: '#fff', width: 2 }),
-  }),
-})
-
-// Faded marker for an image that failed to register into the sparse model.
-const unalignedStyle = new Style({
-  image: new CircleStyle({
-    radius: 6,
-    fill:   new Fill({ color: 'rgba(120, 130, 140, 0.5)' }),
-    stroke: new Stroke({ color: 'rgba(255, 255, 255, 0.6)', width: 1.5 }),
-  }),
-})
-
-// True once a sparse model exists but this image's uuid wasn't registered into it.
-function featureUnaligned(feature) {
-  const uuid = feature.get('uuid')
-  return props.hasSparse && uuid != null && !props.alignedUuids.has(uuid)
-}
-
-function styleFor(feature) {
-  if (feature.get('imgId') === props.selectedId) return selectedStyle
-  return featureUnaligned(feature) ? unalignedStyle : normalStyle
-}
-
-// GCP markers: green diamond, visually distinct from the blue image-GPS circles.
-const controlStyle = new Style({
-  image: new RegularShape({
-    points: 4,
-    radius: 7,
-    angle: Math.PI / 4,
-    fill:   new Fill({ color: '#3fae6a' }),
-    stroke: new Stroke({ color: '#fff', width: 1.5 }),
-  }),
-})
-
-const checkStyle = new Style({
-  image: new RegularShape({
-    points: 4, radius: 7, angle: Math.PI / 4,
-    fill: new Fill({ color: '#38a9c7' }),
-    stroke: new Stroke({ color: '#fff', width: 1.5 }),
-  }),
-})
-
-// A marker has no surveyed position; on the model map it sits where its marks
-// triangulate.
-const markerStyle = new Style({
-  image: new RegularShape({
-    points: 4, radius: 7, angle: Math.PI / 4,
-    fill: new Fill({ color: '#e0a030' }),
-    stroke: new Stroke({ color: '#fff', width: 1.5 }),
-  }),
-})
-
-function gcpStyleFor(feature) {
-  const role = feature.get('gcpRole')
-  return role === 'check' ? checkStyle : role === 'marker' ? markerStyle : controlStyle
-}
-
-// Camera-position markers: purple triangle, distinct from GPS circles and GCP diamonds.
-const poseStyle = new Style({
-  image: new RegularShape({
-    points: 3,
-    radius: 7,
-    fill:   new Fill({ color: '#b06ad9' }),
-    stroke: new Stroke({ color: '#fff', width: 1.5 }),
-  }),
-})
-
-const exifPoseStyle = new Style({
-  image: new RegularShape({
-    points: 3,
-    radius: 7,
-    fill: new Fill({ color: '#297fb8' }),
-    stroke: new Stroke({ color: '#fff', width: 1.5 }),
-  }),
-})
-
-const poseSelectedStyle = new Style({
-  image: new RegularShape({
-    points: 3,
-    radius: 9,
-    fill:   new Fill({ color: '#f0a500' }),
-    stroke: new Stroke({ color: '#fff', width: 2 }),
-  }),
-})
-
-function poseStyleFor(feature) {
-  if (feature.get('imgId') === props.selectedId) return poseSelectedStyle
-  return feature.get('poseSource') === 'exif' ? exifPoseStyle : poseStyle
-}
-
-// Footprint polygons: translucent fill + stroke; brighter when the linked image is selected.
-const footprintStyle = new Style({
-  fill:   new Fill({ color: 'rgba(14, 99, 156, 0.12)' }),
-  stroke: new Stroke({ color: 'rgba(14, 99, 156, 0.8)', width: 1.5 }),
-})
-
-const footprintSelectedStyle = new Style({
-  fill:   new Fill({ color: 'rgba(240, 165, 0, 0.22)' }),
-  stroke: new Stroke({ color: '#f0a500', width: 2.5 }),
-})
-
-function footprintStyleFor(feature) {
-  return feature.get('imgId') && feature.get('imgId') === props.selectedId
-    ? footprintSelectedStyle
-    : footprintStyle
-}
-
-// ── GPS extraction ────────────────────────────────────────────────────────────
-
-const gpsImages = computed(() => isModel.value ? [] :
-  props.images.filter((img) => img.meta?.gpsLat != null && img.meta?.gpsLon != null
-    && !props.poses.some((p) => p.imageId === img.id && p.enabled !== false))
-)
-
-// GCPs are stored in the project CRS already (= the map view CRS), so they need
-// no transform. Only enabled points with a valid position are plotted.
-const mapGcps = computed(() => isModel.value
-  ? props.modelMarkers.map((m) => ({ id: m.id, name: m.name, x: m.x, y: m.y, role: 'marker' }))
-  :
-  props.gcps.filter((g) => g.enabled !== false && Number.isFinite(g.x) && Number.isFinite(g.y))
-)
+const mapGcps = computed(() => isModel.value ? modelMarkerGcps(props.modelMarkers) : plottedGcps(props.gcps))
 const hasGcps = computed(() => mapGcps.value.length > 0)
 
-// Footprints are stored in the project CRS already (= the map view CRS), no transform.
-const mapFootprints = computed(() => isModel.value ? [] :
-  props.footprints.filter((f) => f.enabled !== false && f.rings?.length)
-)
+const mapFootprints = computed(() => isModel.value ? [] : plottedFootprints(props.footprints))
 const hasFootprints = computed(() => mapFootprints.value.length > 0)
 
-// Camera poses are stored in the project CRS already (= the map view CRS), no transform.
 // On the model map the cameras are the SfM centres in the model frame instead.
-const mapPoses = computed(() => (isModel.value
-  ? props.modelCameras.map((c) => ({ x: c.x, y: c.y, imageId: c.imageId, imageName: c.imageName, source: 'sfm' }))
-  : props.poses.filter((p) => p.enabled !== false && Number.isFinite(p.x) && Number.isFinite(p.y))))
+const mapPoses = computed(() => (isModel.value ? modelCameraPoses(props.modelCameras) : plottedPoses(props.poses)))
 const hasPoses = computed(() => mapPoses.value.length > 0)
 
-// ── Features ──────────────────────────────────────────────────────────────────
-// Image GPS is always WGS84 (from EXIF); project it into the current view CRS.
+// Read by the style functions at render time.
+const featureUnaligned = (feature) => isUnaligned(feature.get('uuid'), props.hasSparse, props.alignedUuids)
+const imageFeature = (img) => makeImageFeature(img, props.crs)
 
-function projectLonLat(lon, lat) {
-  return transform([lon, lat], 'EPSG:4326', props.crs)
-}
-
-function makeFeature({ id, uuid, name, meta }) {
-  const f = new Feature({ geometry: new Point(projectLonLat(meta.gpsLon, meta.gpsLat)) })
-  f.set('imgId', id)
-  f.set('uuid', uuid)
-  f.set('name', name)
-  return f
-}
-
-function makeGcpFeature(g) {
-  const f = new Feature({ geometry: new Point([g.x, g.y]) })
-  f.set('gcpName', g.name)
-  f.set('gcpId', g.id)
-  f.set('gcpRole', g.role ?? 'control')
-  return f
-}
-
-function makeFootprintFeature(fp) {
-  const f = new Feature({ geometry: new Polygon(fp.rings) })
-  // Hover label: the image the polygon belongs to, else the layer name.
-  f.set('footprintName', fp.imageName ?? fp.setName ?? fp.name)
-  if (fp.imageId) f.set('imgId', fp.imageId)
-  return f
-}
-
-function makePoseFeature(p) {
-  const f = new Feature({ geometry: new Point([p.x, p.y]) })
-  f.set('poseName', p.imageName)
-  if (p.imageId) f.set('imgId', p.imageId)
-  f.set('poseSource', p.source ?? 'imported')
-  return f
-}
+// ── Marker refresh ────────────────────────────────────────────────────────────
 
 function refreshFeatures() {
-  if (!vSource) return
-  vSource.clear(true)
-  vSource.addFeatures(gpsImages.value.map(makeFeature))
+  if (!ctx.vSource) return
+  ctx.vSource.clear(true)
+  ctx.vSource.addFeatures(gpsImages.value.map(imageFeature))
   fitToMarkers()
 }
 
+// Placement (core/mapData.js gcpPlacement) of the markers on the map: a rename or
+// role change restyles them, only a moved/added/removed point re-fits.
+let gcpPlacementKey = ''
+
 function refreshGcps() {
-  if (!gcpSource) return
-  gcpSource.clear(true)
-  gcpSource.addFeatures(mapGcps.value.map(makeGcpFeature))
+  if (!ctx.gcpSource) return
+  ctx.gcpSource.clear(true)
+  ctx.gcpSource.addFeatures(mapGcps.value.map(makeGcpFeature))
+  const placement = gcpPlacement(mapGcps.value)
+  const moved = placement !== gcpPlacementKey
+  gcpPlacementKey = placement
   // While editing, a drag/place already keeps the point in view — re-fitting the
   // whole extent on every position tweak would yank the map around.
-  if (!editMode.value) fitToMarkers()
+  if (moved && !editMode.value) fitToMarkers()
 }
 
 function refreshFootprints() {
-  if (!footprintSource) return
-  footprintSource.clear(true)
-  footprintSource.addFeatures(mapFootprints.value.map(makeFootprintFeature))
+  if (!ctx.footprintSource) return
+  ctx.footprintSource.clear(true)
+  ctx.footprintSource.addFeatures(mapFootprints.value.map(makeFootprintFeature))
   fitToMarkers()
 }
 
 function refreshPoses() {
-  if (!poseSource) return
-  poseSource.clear(true)
-  poseSource.addFeatures(mapPoses.value.map(makePoseFeature))
+  if (!ctx.poseSource) return
+  ctx.poseSource.clear(true)
+  ctx.poseSource.addFeatures(mapPoses.value.map(makePoseFeature))
   fitToMarkers()
-}
-
-// Extents of the on-map raster layers in the VIEW projection. Each raster keeps
-// its native CRS (see makeRasterLayer), so its bounds are transformed here; one
-// whose CRS OL does not know is skipped rather than guessed.
-function rasterExtents() {
-  const view = map?.getView().getProjection()
-  const out = []
-  for (const r of props.rasters ?? []) {
-    const b = rasterBounds({ width: r.width, height: r.height, geoTransform: r.geoTransform })
-    const proj = r.crs ? getOlProjection(r.crs) : null
-    if (!b || !proj || !view) continue
-    try { out.push(transformExtent(b, proj, view)) } catch { /* unknown transform */ }
-  }
-  return out
 }
 
 // Fit View: every marker AND every on-map raster, so a project whose only map
 // content is a DEM or orthophoto still has something to fit to.
 function fitToMarkers() {
+  const map = ctx.map
   if (!map) return
-  const features = [...(vSource?.getFeatures() || []), ...(gcpSource?.getFeatures() || []), ...(footprintSource?.getFeatures() || []), ...(poseSource?.getFeatures() || [])]
-  const rasters = rasterExtents()
+  const features = [
+    ...(ctx.vSource?.getFeatures() || []), ...(ctx.gcpSource?.getFeatures() || []),
+    ...(ctx.footprintSource?.getFeatures() || []), ...(ctx.poseSource?.getFeatures() || []),
+  ]
+  const rasters = rasterLayers.extents()
   if (!features.length && !rasters.length) return
   const geom = features.length === 1 && !rasters.length ? features[0].getGeometry() : null
   if (geom?.getType() === 'Point') {
@@ -472,329 +296,12 @@ function fitToMarkers() {
   map.getView().fit(extent, { padding: [48, 48, 48, 48], maxZoom: 18, duration: 300 })
 }
 
-// ── Basemap ─────────────────────────────────────────────────────────────────
-// OSM, satellite and terrain are Web-Mercator tiles (auto-reprojected by OL) for
-// Mercator-compatible CRS; NASA GIBS WMTS for polar CRS. A grid is always drawn
-// so any CRS is usable even without tiles. Catalogue: core/basemaps.js.
-
-function makeOsmLayer() {
-  return new TileLayer({ source: new OSM() })
-}
-
-// Esri World Imagery, or the user's own XYZ source from Settings.
-function makeSatelliteLayer() {
-  const url = satelliteUrl.value
-  const options = url
-    ? { url, maxZoom: CUSTOM_SATELLITE_MAX_ZOOM, attributions: customAttribution(url, satelliteAttribution.value) }
-    : { url: SATELLITE.url, maxZoom: SATELLITE.maxZoom, attributions: SATELLITE.attributions }
-  return new TileLayer({ source: new XYZ({ ...options, crossOrigin: 'anonymous' }) })
-}
-
-// Terrain: elevation tiles shaded on a canvas per tile. Shading the source tile
-// (not the screen) keeps the slopes true to the ground and lets OL reproject
-// and upsample the result like any image tile.
-async function loadHillshadeTile(z, x, y, { signal }) {
-  const res = await fetch(TERRAIN.url(z, x, y), { signal })
-  if (!res.ok) throw new Error(`Terrain tile ${z}/${x}/${y}: HTTP ${res.status}`)
-  // The PNG's bytes ARE the elevations: no colour management, no premultiply.
-  const bitmap = await createImageBitmap(await res.blob(), { colorSpaceConversion: 'none', premultiplyAlpha: 'none' })
-  const { width: w, height: h } = bitmap
-  const canvas = document.createElement('canvas')
-  canvas.width = w
-  canvas.height = h
-  const ctx = canvas.getContext('2d', { willReadFrequently: true })
-  ctx.drawImage(bitmap, 0, 0)
-  bitmap.close()
-  const shaded = hillshade(decodeTerrarium(ctx.getImageData(0, 0, w, h).data, w, h), w, h, z, y)
-  ctx.putImageData(new ImageData(shaded, w, h), 0, 0)
-  return canvas
-}
-
-function makeTerrainLayer() {
-  return new TileLayer({ source: new ImageTileSource({
-    loader: loadHillshadeTile, maxZoom: TERRAIN.maxZoom, attributions: TERRAIN.attributions,
-  }) })
-}
-
-async function addGibsLayer(info) {
-  // Fetch + parse capabilities, then build the WMTS source for the configured layer.
-  const url = `${info.gibs.endpoint}?SERVICE=WMTS&REQUEST=GetCapabilities`
-  const text = await (await fetch(url)).text()
-  const caps = new WMTSCapabilities().read(text)
-  const opts = optionsFromCapabilities(caps, {
-    layer: info.gibs.layer,
-    matrixSet: info.gibs.matrixSet,
-  })
-  if (!opts) throw new Error('GIBS layer not found in capabilities')
-  return new TileLayer({ source: new WMTS(opts) })
-}
-
-// ── Reference raster layers (A-4) ─────────────────────────────────────────────
-// Imported DEMs/orthos drawn under the project's own vectors. Two things make
-// this cheap enough to be a toggle rather than a heavyweight mode:
-//
-//  1. **It renders `previewDataUrl`, never the pixel plane.** The ≤1024 px PNG is
-//     already in the index from restore, so showing a REMA tile costs no decode
-//     and no memory — `ensureRasterLoaded` is deliberately NOT called here. On a
-//     basemap-zoom view the tile is a few hundred screen pixels wide anyway; the
-//     full plane exists for *sampling*, and that's a different question.
-//  2. **The raster keeps its native CRS** (store invariant 2). We hand OpenLayers
-//     the extent in the raster's own projection and let it reproject the image on
-//     the fly, so this survives `handleSetCrs` with no resampling — the same
-//     reason the sampler reprojects the query instead of warping the raster.
-let rasterGroup = null
-const rasterLayers = new Map() // id → ImageLayer
-
-const external = useExternalStore()
-let rasterSync = 0
-async function makeRasterLayer(r) {
-  // An imported raster draws its tiled display file; a computed ortho (`product:
-  // true`, core/products/productLayers.js) its stored COG when the layer carries one.
-  // A computed DEM, or a product the COG cannot place here, draws its preview.
-  if (r.product ? !!r.cog : [1, 2].includes(r.photometric ?? 1)) {
-    try {
-      const file = r.product ? r.cog : await external.displayFile(r.id)
-      if (file) {
-        const layer = await createGpuRasterLayer(r, file)
-        layer.set('fileKey', r.fileKey ?? r.id)
-        layer.once('postrender', () => { r.gpuReady = true })
-        return layer
-      }
-    } catch (err) { console.warn('Tiled raster display failed; using preview', err) }
-  }
-  const bounds = rasterBounds({ width: r.width, height: r.height, geoTransform: r.geoTransform })
-  if (!bounds) return null
-  const projection = getOlProjection(r.crs)
-  if (!projection) return null
-  const layer = new ImageLayer({
-    source: new Static({
-      url: r.previewDataUrl,
-      imageExtent: bounds,
-      projection,
-      // The preview is a decimated view of the raster, so let OL scale it up
-      // rather than refuse to draw past its native size.
-      imageSmoothing: true,
-    }),
-    opacity: r.opacity ?? 1,
-  })
-  // Which PNG this layer was built from. An ImageStatic's url is fixed at
-  // construction, so a restyle (which swaps previewDataUrl on the same raster
-  // record) can only reach the map by rebuilding the source — see syncRasterLayers.
-  layer.set('previewUrl', r.previewDataUrl)
-  // A computed ortho's brightness/contrast/gamma (the GPU path's style entries) as a
-  // canvas filter around this layer's draw — the same maths (utils/orthoFilter.js).
-  const filter = r.product ? orthoAdjustFilter(r.adjust) : null
-  if (filter) {
-    layer.on('prerender', (e) => { e.context.filter = filter })
-    layer.on('postrender', (e) => { e.context.filter = 'none' })
-  }
-  layer.set('filter', filter)
-  return layer
-}
-
-// Reconcile the group against `props.rasters`. Diffed rather than rebuilt so that
-// dragging the opacity slider re-renders instead of tearing the image down and
-// reloading it on every input event.
-async function syncRasterLayers() {
-  if (!map || !rasterGroup) return
-  const generation = ++rasterSync
-  const want = [...(props.rasters ?? [])]
-  for (const r of want) {
-    // The model frame's code is registered by build(); never look it up remotely.
-    if (r.crs && r.crs !== props.modelFrame?.code) await ensureProjection(r.crs).catch(() => {})
-  }
-
-  if (generation !== rasterSync || !map) return
-  const seen = new Set()
-  for (const r of want) {
-    seen.add(r.id)
-    const existing = rasterLayers.get(r.id)
-    if (existing) {
-      existing.setOpacity(r.opacity ?? 1)
-      if (existing.get('gpuRaster')) {
-        // A GPU layer restyles in place while it draws the same file; a rebuilt
-        // product (new fileKey), or one that must now draw its preview, is rebuilt.
-        if ((!r.product || r.cog) && existing.get('fileKey') === (r.fileKey ?? r.id)) {
-          existing.setStyle(gpuRasterStyle(r)); continue
-        }
-      } else if (existing.get('previewUrl') === r.previewDataUrl
-        && existing.get('filter') === (r.product ? orthoAdjustFilter(r.adjust) : null)) {
-        // Opacity is a live property; the image itself is not. A restyle (or a
-        // kind flip) replaces previewDataUrl in place on the same record, so an
-        // unchanged url is the ONLY case that may keep its source — otherwise the
-        // layer would keep painting the pre-restyle PNG until the view is torn
-        // down, which is exactly the "reload the view to see it" bug.
-        continue
-      }
-      disposeRasterLayer(existing)
-      rasterLayers.delete(r.id)
-    }
-    const layer = await makeRasterLayer(r)
-    if (generation !== rasterSync || !map) { disposeRasterLayer(layer); return }
-    if (layer) rasterLayers.set(r.id, layer)
-  }
-  for (const [id, layer] of [...rasterLayers]) {
-    if (seen.has(id)) continue
-    disposeRasterLayer(layer)
-    rasterLayers.delete(id)
-  }
-
-  // Rewrite the collection in list order — the sidebar's order IS the draw order,
-  // so a raster moved in the list restacks on the map.
-  const ordered = want.map((r) => rasterLayers.get(r.id)).filter(Boolean)
-  rasterGroup.getLayers().clear()
-  for (const layer of ordered) rasterGroup.getLayers().push(layer)
-}
-
-// ── Grid ──────────────────────────────────────────────────────────────────────
-// `ol/layer/Graticule` is hardcoded to EPSG:4326 meridians and parallels — it
-// draws *geographic* lines whatever the view projection is, and there is no
-// option to switch it to the view's units. On EPSG:3031 that means lines
-// converging on the pole: useful for knowing where you are, useless for reading
-// a distance off the map. So for a projected CRS we draw our own grid instead —
-// straight lines at round intervals in the view's own units (10 km squares over
-// Antarctica). A geographic CRS keeps OL's graticule layer: there the projected
-// grid and the meridians/parallels are the same lines, so drawing ours would be
-// a worse-labelled duplicate. Both answer to the one `showGrid` toggle via
-// `gridLayer`.
-
-const GRID_STROKE = new Stroke({ color: 'rgba(140,140,140,0.45)', width: 1 })
-const GRID_LINE_STYLE = new Style({ stroke: GRID_STROKE })
-// Desired on-screen gap between grid lines. Full coordinates are wide labels
-// ("E -1,300,000 m" ≈ 85 px at 11 px type), so the spacing has to clear one.
-const GRID_TARGET_PX = 150
-const GRID_MAX_LINES = 400  // per axis; a stale resolution can't hang the renderer
-
-// Round spacing (1/2/5 × 10ⁿ) no smaller than `target` map units.
-function niceGridSpacing(target) {
-  if (!(target > 0)) return 1
-  const pow = Math.pow(10, Math.floor(Math.log10(target)))
-  const norm = target / pow
-  return (norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10) * pow
-}
-
-// Labels are the **full projected coordinate** in the CRS's own units, the number
-// you would type into a GCP row — for Adelaide Island on EPSG:3031 that is
-// "E -1,300,000 m", not "-1,300 km". Abbreviating to km reads as a *distance from
-// somewhere*, which is exactly what a projected easting/northing is not; and near
-// the projection origin it degenerates to "0 km / 200 km" whatever the CRS.
-// Decimals only appear if the spacing is sub-metre (a metre grid never needs them).
-function formatGridLabel(v, spacing, axis) {
-  const dec = spacing >= 1 ? 0 : Math.min(3, Math.ceil(-Math.log10(spacing)))
-  const num = v.toLocaleString('en-US', { minimumFractionDigits: dec, maximumFractionDigits: dec })
-  return `${axis} ${num} ${gridUnits}`
-}
-// Axis letters: easting/northing for a CRS; plain X/Y for the model frame, whose
-// "north" is wherever the auto frame put it, not geographic north.
-let gridAxes = ['E', 'N']
-
-function makeGridLabel(coord, text, align) {
-  const f = new Feature(new Point(coord))
-  f.setStyle(new Style({
-    text: new Text({
-      text,
-      font: '11px sans-serif',
-      textAlign: align,
-      textBaseline: 'bottom',
-      offsetX: align === 'left' ? 4 : 0,
-      offsetY: -3,
-      fill: new Fill({ color: 'rgba(140,140,140,0.95)' }),
-      // Halo: the grid runs over basemap imagery, which can be any brightness.
-      stroke: new Stroke({ color: 'rgba(0,0,0,0.55)', width: 3 }),
-    }),
-  }))
-  return f
-}
-
 // Feature under the cursor, ignoring the grid. Grid lines and labels are decor,
 // not targets: hit-testing them turned every line into a pointer cursor plus an
 // empty hover box (they carry none of the name properties the tooltip reads).
 function pickFeature(pixel) {
-  return map.forEachFeatureAtPixel(pixel, (f) => f, { layerFilter: (l) => l !== gridLayer })
-}
-
-// The loaded image a footprint / pose / GPS marker links to. An imported
-// footprint's imageId may name an image that is not (or no longer) in the
-// project, so only a link that resolves counts.
-function linkedImage(feature) {
-  const imgId = feature.get('imgId')
-  return imgId ? props.images.find((i) => i.id === imgId) ?? null : null
-}
-
-// Regenerate the grid for the current view. Driven from `postrender`, i.e. once
-// per animation frame while the map moves, so the edge-pinned labels track the
-// pan/zoom continuously instead of jumping at `moveend` — the same feel as OL's
-// own graticule. `gridViewKey` makes an unchanged view a no-op, so an idle map
-// costs nothing. Because it re-runs every frame the generation buffer only has to
-// cover the frame's own motion, not half a screen.
-function updateGrid() {
-  if (!map || !gridSource) return
-  const view = map.getView()
-  const resolution = view.getResolution()
-  const size = map.getSize()
-  if (!resolution || !size) return
-
-  const center = view.getCenter() || [0, 0]
-  const key = `${center[0]}|${center[1]}|${resolution}|${size[0]}x${size[1]}`
-  if (key === gridViewKey) return
-  gridViewKey = key
-
-  const view0 = view.calculateExtent(size)
-  let bounds = buffer(view0, Math.max(size[0], size[1]) * resolution * 0.1)
-  // Stop at the CRS validity edge — beyond it the coordinates aren't meaningful.
-  if (gridExtent) bounds = getIntersection(bounds, gridExtent)
-  if (extentIsEmpty(bounds)) { gridSource.clear(true); return }
-
-  const spacing = niceGridSpacing(resolution * GRID_TARGET_PX)
-  const features = []
-  // Labels ride the edge of the *visible* viewport, not the buffered generation
-  // area — anchoring them to the buffer parks them off-screen, and the grid then
-  // reads as unlabelled at anything but the widest zoom.
-  const labelX = Math.max(view0[0], bounds[0]) + resolution * 2
-  const labelY = Math.max(view0[1], bounds[1]) + resolution * 2
-
-  let n = 0
-  for (let x = Math.ceil(bounds[0] / spacing) * spacing; x <= bounds[2] && n < GRID_MAX_LINES; x += spacing, n++) {
-    features.push(new Feature(new LineString([[x, bounds[1]], [x, bounds[3]]])))
-    features.push(makeGridLabel([x, labelY], formatGridLabel(x, spacing, gridAxes[0]), 'center'))
-  }
-  n = 0
-  for (let y = Math.ceil(bounds[1] / spacing) * spacing; y <= bounds[3] && n < GRID_MAX_LINES; y += spacing, n++) {
-    features.push(new Feature(new LineString([[bounds[0], y], [bounds[2], y]])))
-    features.push(makeGridLabel([labelX, y], formatGridLabel(y, spacing, gridAxes[1]), 'left'))
-  }
-
-  gridSource.clear(true)
-  gridSource.addFeatures(features)
-}
-
-// Build whichever of the two the CRS calls for, and leave `gridSource` non-null
-// only in the projected case (updateGrid is a no-op without it).
-function makeGridLayer(info, projection) {
-  gridSource = null
-  gridExtent = null
-  if (info.geographic || projection?.getUnits() === 'degrees') {
-    return new Graticule({
-      strokeStyle: GRID_STROKE,
-      showLabels: true,
-      wrapX: false,
-      visible: props.showGrid,
-    })
-  }
-  gridSource = new VectorSource({ features: [], wrapX: false })
-  gridExtent = projection?.getExtent() || info.extent || null
-  // Label suffix. OL reports 'm' for metric projections, 'ft'/'us-ft' for the
-  // handful in feet; coordinates are printed in that unit as-is, never rescaled.
-  gridUnits = info.gridUnit ?? (projection?.getUnits() === 'us-ft' ? 'ft' : (projection?.getUnits() || 'm'))
-  gridAxes = info.gridAxes ?? ['E', 'N']
-  gridViewKey = ''
-  return new VectorLayer({
-    source: gridSource,
-    style: GRID_LINE_STYLE,       // labels carry their own per-feature style
-    visible: props.showGrid,
-    updateWhileAnimating: true,   // the grid should track the map, not snap in after it
-    updateWhileInteracting: true,
-  })
+  const gridLayer = ctx.grid?.layer ?? null
+  return ctx.map.forEachFeatureAtPixel(pixel, (f) => f, { layerFilter: (l) => l !== gridLayer })
 }
 
 // ── Map (re)build ─────────────────────────────────────────────────────────────
@@ -810,9 +317,20 @@ function modelProjection(frame) {
   return projection
 }
 
+// Builds overlap (a frame change while the CRS definition is still loading, a
+// basemap change, unmount mid-build): only the newest may create the map, or two
+// OlMaps would share the element (the loser leaking its render loop and tiles), an
+// older CRS build could replace a newer model-frame one, or a map would be created
+// on a detached element. destroy() invalidates any build still awaiting.
+const mapBuild = createGeneration()
+
 async function build() {
+  const token = mapBuild.next()
   const model = props.modelFrame
   if (!model) await ensureProjection(props.crs).catch(() => {})
+  if (!mapBuild.isCurrent(token) || !mapEl.value) return
+  // Synchronous from here on: nothing below awaits, so the handles this build
+  // writes into `ctx` are never interleaved with another build's.
   const info = model
     ? { geographic: false, basemap: null, extent: model.extent, gridUnit: model.unit, gridAxes: ['X', 'Y'] }
     : crsInfo(props.crs)
@@ -821,32 +339,31 @@ async function build() {
   const viewExtent = projection?.getExtent() || info.extent || null
   basemapNote.value = ''
 
-  vSource = new VectorSource({ features: gpsImages.value.map(makeFeature) })
-  gcpSource = new VectorSource({ features: mapGcps.value.map(makeGcpFeature) })
-  footprintSource = new VectorSource({ features: mapFootprints.value.map(makeFootprintFeature) })
-  footprintLayer = new VectorLayer({ source: footprintSource, style: footprintStyleFor, visible: props.showFootprints })
-  poseSource = new VectorSource({ features: mapPoses.value.map(makePoseFeature) })
-  gcpLayer = new VectorLayer({ source: gcpSource, style: gcpStyleFor })
+  ctx.vSource = new VectorSource({ features: gpsImages.value.map(imageFeature) })
+  ctx.gcpSource = new VectorSource({ features: mapGcps.value.map(makeGcpFeature) })
+  gcpPlacementKey = gcpPlacement(mapGcps.value)
+  ctx.footprintSource = new VectorSource({ features: mapFootprints.value.map(makeFootprintFeature) })
+  ctx.footprintLayer = new VectorLayer({
+    source: ctx.footprintSource, style: (f) => footprintStyle(f, props.selectedId), visible: props.showFootprints,
+  })
+  ctx.poseSource = new VectorSource({ features: mapPoses.value.map(makePoseFeature) })
+  ctx.gcpLayer = new VectorLayer({ source: ctx.gcpSource, style: gcpStyle })
 
-  const grid = makeGridLayer(info, projection)
-  gridLayer = grid
+  ctx.grid = makeGridLayer(info, projection, props.showGrid)
 
-  // Reference rasters sit above the basemap but below everything the project
-  // owns, so GCPs/footprints/poses always stay legible on top of them. A Group
-  // (rather than loose layers) keeps that position fixed no matter when the
-  // async basemap resolves and inserts itself at index 0.
-  rasterLayers.clear()
-  rasterGroup = new LayerGroup({ layers: [] })
+  // Raster layers sit above the basemap but below everything the project owns, so
+  // GCPs/footprints/poses always stay legible on top of them.
+  const rasterGroup = rasterLayers.createGroup()
 
-  map = new OlMap({
+  ctx.map = new OlMap({
     target: mapEl.value,
     layers: [
       rasterGroup,
-      grid,
-      footprintLayer,
-      new VectorLayer({ source: vSource, style: styleFor }),
-      gcpLayer,
-      new VectorLayer({ source: poseSource, style: poseStyleFor }),
+      ctx.grid.layer,
+      ctx.footprintLayer,
+      new VectorLayer({ source: ctx.vSource, style: (f) => imageStyle(f, props.selectedId, featureUnaligned) }),
+      ctx.gcpLayer,
+      new VectorLayer({ source: ctx.poseSource, style: (f) => poseStyle(f, props.selectedId) }),
     ],
     view: new View({
       projection: projection || 'EPSG:3857',
@@ -860,114 +377,82 @@ async function build() {
     }),
     controls: [new Attribution({ collapsible: true })],
   })
-  const builtMap = map
+  const builtMap = ctx.map
 
-  // Add the selected basemap below the grid (index 0). "Automatic" preserves
-  // the CRS-aware polar layers; an explicit street layer uses OSM everywhere.
-  // The model frame has no position on Earth, so it never gets a basemap. A
-  // choice this CRS cannot show (greyed in the ribbon) falls back to Automatic.
-  let choice = basemap.value
-  if (!model && basemapReason(choice, info)) {
-    basemapNote.value = `${BASEMAPS.find((b) => b.value === choice)?.label} base layer is not available for this coordinate system — showing the automatic one.`
-    choice = 'auto'
-  }
-  if (model) { /* grid only */ } else if (choice === 'satellite') {
-    map.getLayers().insertAt(0, makeSatelliteLayer())
-  } else if (choice === 'terrain') {
-    map.getLayers().insertAt(0, makeTerrainLayer())
-  } else if (choice === 'streets' || (choice === 'auto' && info.basemap === 'osm')) {
-    map.getLayers().insertAt(0, makeOsmLayer())
-  } else if (choice === 'auto' && info.basemap === 'gibs') {
-    addGibsLayer(info)
-      .then((layer) => { if (map === builtMap) builtMap.getLayers().insertAt(0, layer) })
+  // Add the selected basemap below the grid (index 0); core/basemapChoice.js.
+  const { kind, note } = chooseBasemap(basemap.value, info, !!model)
+  if (note) basemapNote.value = note
+  if (kind === 'gibs') {
+    // Async: only the map that asked may receive it (a rebuild replaces ctx.map).
+    makeGibsLayer(info)
+      .then((layer) => { if (ctx.map === builtMap) builtMap.getLayers().insertAt(0, layer) })
       .catch(() => {
-        if (map === builtMap) basemapNote.value = 'Polar basemap unavailable — showing grid only.'
+        if (ctx.map === builtMap) basemapNote.value = 'Polar basemap unavailable — showing grid only.'
       })
+  } else if (kind) {
+    builtMap.getLayers().insertAt(0, makeBasemapLayer(kind, { url: satelliteUrl.value, attribution: satelliteAttribution.value }))
   }
 
-  syncRasterLayers()
+  rasterLayers.sync()
 
   // The projected grid is view-dependent (spacing + edge-pinned labels follow the
-  // view), so it regenerates per frame while the map moves — see updateGrid, which
-  // self-skips an unchanged view. No-op for the geographic graticule layer, which
-  // OL keeps up to date itself.
-  map.on('postrender', () => { updateGrid(); viewRev.value++ })
-  updateGrid()
+  // view), so it regenerates per frame while the map moves; its update self-skips
+  // an unchanged view, and is a no-op for the geographic graticule layer.
+  builtMap.on('postrender', () => { ctx.grid?.update(ctx.map); viewRev.value++ })
+  ctx.grid.update(ctx.map)
   viewRev.value++
 
   fitToMarkers()
 
   // Drag GCP markers to set their ground position (edit mode only). On drop, read
   // the new project-CRS coordinate straight off the geometry.
-  gcpTranslate = new Translate({ layers: [gcpLayer] })
-  gcpTranslate.setActive(editMode.value)
-  gcpTranslate.on('translateend', (e) => {
+  ctx.gcpTranslate = new Translate({ layers: [ctx.gcpLayer] })
+  ctx.gcpTranslate.setActive(editMode.value)
+  ctx.gcpTranslate.on('translateend', (e) => {
     e.features.forEach((f) => {
       const id = f.get('gcpId')
       const [x, y] = f.getGeometry().getCoordinates()
       if (id) emit('set-gcp-position', { id, x, y })
     })
   })
-  map.addInteraction(gcpTranslate)
+  builtMap.addInteraction(ctx.gcpTranslate)
+  syncDoubleClickZoom()
 
-  map.on('click', (e) => {
-    // A measuring tool owns the click: it adds a vertex, nothing gets selected.
-    if (measurements.value?.active) { measurements.value.pick(e.pixel[0], e.pixel[1]); return }
-    const hit = pickFeature(e.pixel)
-    if (hit) {
-      const gcpId = hit.get('gcpId')
-      if (gcpId) { emit('select-gcp', gcpId); return }
-      const imgId = hit.get('imgId')
-      if (imgId) emit('select', imgId)
-      return
-    }
-    // Empty-map click while editing: place the selected GCP here, or add a new one.
-    if (editMode.value) {
-      const [x, y] = e.coordinate
-      if (props.selectedGcpId) emit('set-gcp-position', { id: props.selectedGcpId, x, y })
-      else emit('add-gcp-at', { x, y })
-    }
-  })
+  builtMap.on('click', onMapClick)
+  builtMap.on('pointermove', onPointerMove)
+}
 
-  map.on('pointermove', (e) => {
-    cursor.value = { x: e.coordinate[0], y: e.coordinate[1] }
-    const hit = measuring.value ? null : pickFeature(e.pixel)
-    map.getViewport().style.cursor = measuring.value ? 'crosshair' : hit ? 'pointer' : ''
-    if (hit) {
-      const gcpName = hit.get('gcpName')
-      const fpName = hit.get('footprintName')
-      const poseName = hit.get('poseName')
-      const imgName = hit.get('name')
-      const text = gcpName ? `${hit.get('gcpRole') === 'marker' ? 'Marker' : 'GCP'}: ${gcpName}`
-        : fpName ? `Footprint: ${fpName}`
-        : poseName ? `Camera: ${poseName}`
-        : featureUnaligned(hit) ? `${imgName} (not aligned)` : imgName
-      hover.value = { text, x: e.pixel[0], y: e.pixel[1] }
-    } else {
-      hover.value = null
-    }
-  })
+function onMapClick(e) {
+  // A measuring tool owns the click: it adds a vertex, nothing gets selected.
+  if (measurements.value?.active) { measurements.value.pick(e.pixel[0], e.pixel[1]); return }
+  const hit = pickFeature(e.pixel)
+  if (hit) {
+    const gcpId = hit.get('gcpId')
+    if (gcpId) { emit('select-gcp', gcpId); return }
+    const imgId = hit.get('imgId')
+    if (imgId) emit('select', imgId)
+    return
+  }
+  // Empty-map click while editing: place the selected GCP here, or add a new one.
+  if (editMode.value) {
+    const [x, y] = e.coordinate
+    if (props.selectedGcpId) emit('set-gcp-position', { id: props.selectedGcpId, x, y })
+    else emit('add-gcp-at', { x, y })
+  }
+}
+
+function onPointerMove(e) {
+  cursor.value = { x: e.coordinate[0], y: e.coordinate[1] }
+  const hit = measuring.value ? null : pickFeature(e.pixel)
+  ctx.map.getViewport().style.cursor = measuring.value ? 'crosshair' : hit ? 'pointer' : ''
+  hover.value = hit ? { text: hoverText(hit, featureUnaligned(hit)), x: e.pixel[0], y: e.pixel[1] } : null
 }
 
 function destroy() {
-  map?.setTarget(null)
-  map = null
-  vSource = null
-  gcpSource = null
-  gcpLayer = null
-  gcpTranslate = null
-  footprintSource = null
-  footprintLayer = null
-  gridLayer = null
-  gridSource = null
-  gridExtent = null
-  poseSource = null
-  // The Static sources hold a decoded image each; drop them with the map rather
-  // than leaving them attached to a detached group across a CRS rebuild.
-  rasterSync++
-  for (const layer of rasterLayers.values()) disposeRasterLayer(layer)
-  rasterLayers.clear()
-  rasterGroup = null
+  mapBuild.invalidate()
+  ctx.map?.setTarget(null)
+  clearMapContext(ctx)
+  rasterLayers.dispose()
   hover.value = null
   cursor.value = null
 }
@@ -989,30 +474,32 @@ watch(mapFootprints, refreshFootprints, { deep: true })
 watch(mapPoses, refreshPoses, { deep: true })
 
 // Show/hide the footprint layer from the ribbon toggle.
-watch(() => props.showFootprints, (v) => footprintLayer?.setVisible(v))
+watch(() => props.showFootprints, (v) => ctx.footprintLayer?.setVisible(v))
 
 // Show/hide the grid from the ribbon toggle.
-watch(() => props.showGrid, (v) => gridLayer?.setVisible(v))
+watch(() => props.showGrid, (v) => ctx.grid?.layer.setVisible(v))
 
 // Re-style on selection change without rebuilding features
-watch(() => props.selectedId, () => { vSource?.changed(); footprintSource?.changed(); poseSource?.changed() })
+watch(() => props.selectedId, () => { ctx.vSource?.changed(); ctx.footprintSource?.changed(); ctx.poseSource?.changed() })
 
 // Re-style image markers when the registered set changes (reconstruction finished
 // or a different cloud was selected) — the features themselves don't move.
-watch(() => props.alignedUuids, () => vSource?.changed())
+watch(() => props.alignedUuids, () => ctx.vSource?.changed())
 
 // Enable/disable marker dragging with edit mode.
-watch(editMode, (on) => gcpTranslate?.setActive(on))
+watch(editMode, (on) => ctx.gcpTranslate?.setActive(on))
 
-// While measuring, a quick second click adds a vertex — it must not zoom.
-watch(measuring, (on) => {
-  map?.getInteractions().forEach((i) => { if (i instanceof DoubleClickZoom) i.setActive(!on) })
-})
+// While measuring, a quick second click adds a vertex — it must not zoom. Also
+// applied by build(): a rebuilt map comes with a fresh, active DoubleClickZoom.
+function syncDoubleClickZoom() {
+  ctx.map?.getInteractions().forEach((i) => { if (i instanceof DoubleClickZoom) i.setActive(!measuring.value) })
+}
+watch(measuring, syncDoubleClickZoom)
 
-// Add/remove/restack reference raster layers and follow opacity changes. Deep,
-// because `opacity` is edited in place on the raster record (the id list alone
-// wouldn't change when the slider moves).
-watch(() => props.rasters, syncRasterLayers, { deep: true })
+// Add/remove/restack raster layers and follow opacity changes. Deep, because
+// `opacity` is edited in place on the raster record (the id list alone wouldn't
+// change when the slider moves).
+watch(() => props.rasters, rasterLayers.sync, { deep: true })
 
 // Rebuild the whole map when its frame changes: the project CRS, a switch to or
 // from the model frame, or a new model frame (`key`).
@@ -1020,7 +507,7 @@ watch(() => props.modelFrame?.key ?? props.crs, async () => {
   if (isModel.value) editMode.value = false // GCPs are CRS data
   destroy()
   await build()
-  map?.updateSize()
+  ctx.map?.updateSize()
 })
 
 // A basemap preference change is immediately visible in an already-open map;
@@ -1028,7 +515,7 @@ watch(() => props.modelFrame?.key ?? props.crs, async () => {
 async function rebuild() {
   destroy()
   await build()
-  map?.updateSize()
+  ctx.map?.updateSize()
 }
 watch(basemap, rebuild)
 watch([satelliteUrl, satelliteAttribution], () => { if (basemap.value === 'satellite') rebuild() })
@@ -1039,7 +526,8 @@ let resizeObserver = null
 
 onMounted(async () => {
   await build()
-  resizeObserver = new ResizeObserver(() => map?.updateSize())
+  if (!mapEl.value) return // unmounted while the first build awaited
+  resizeObserver = new ResizeObserver(() => ctx.map?.updateSize())
   resizeObserver.observe(mapEl.value)
 })
 
@@ -1053,7 +541,7 @@ onBeforeUnmount(() => {
 // Centre the view on an image's position — its imported pose if present,
 // otherwise its EXIF GPS. No-op if the image has neither.
 function zoomToImage(imgId) {
-  if (!map) return
+  if (!ctx.map) return
   let coord = null
   const cam = isModel.value ? props.modelCameras.find((c) => c.imageId === imgId) : null
   const pose = isModel.value ? null : props.poses.find((p) => p.imageId === imgId && Number.isFinite(p.x) && Number.isFinite(p.y))
@@ -1066,23 +554,23 @@ function zoomToImage(imgId) {
   } else {
     const img = props.images.find((i) => i.id === imgId)
     if (img?.meta?.gpsLat != null && img?.meta?.gpsLon != null) {
-      coord = projectLonLat(img.meta.gpsLon, img.meta.gpsLat)
+      coord = projectLonLat(img.meta.gpsLon, img.meta.gpsLat, props.crs)
     }
   }
   if (!coord) return
-  map.getView().animate({ center: coord, zoom: 17, duration: 300 })
+  ctx.map.getView().animate({ center: coord, zoom: 17, duration: 300 })
 }
 
 // Fit the view to one shapefile set's polygons (its combined extent). `polygons`
 // is the set's flat polygon list ([{ rings }]); ignores any without geometry.
 function zoomToFootprints(polygons) {
-  if (!map || !polygons?.length) return
+  if (!ctx.map || !polygons?.length) return
   let extent = createEmpty()
   for (const p of polygons) {
     if (p.rings?.length) extend(extent, new Polygon(p.rings).getExtent())
   }
   if (!extentIsEmpty(extent)) {
-    map.getView().fit(extent, { padding: [48, 48, 48, 48], maxZoom: 18, duration: 300 })
+    ctx.map.getView().fit(extent, { padding: [48, 48, 48, 48], maxZoom: 18, duration: 300 })
   }
 }
 

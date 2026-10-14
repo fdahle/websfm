@@ -16,7 +16,7 @@ import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 // recomputes the default arrangement, discarding any manual drags.
 const props = defineProps({
   // From App.vue matchSummaries: { pairId, idAUuid, idBUuid, nameA, nameB,
-  //   inlierCount, disabled }.
+  //   inlierCount, enabled }.
   matchSummaries: { type: Array,  default: () => [] },
   alignedUuids:   { type: Object, default: () => new Set() },
   hasSparse:      { type: Boolean, default: false },
@@ -26,7 +26,7 @@ const props = defineProps({
   nodePositions:  { type: Object, default: () => ({}) },
 })
 
-const emit = defineEmits(['select', 'toggle-disabled'])
+const emit = defineEmits(['select', 'toggle-pair'])
 
 const canvasEl  = ref(null)
 const wrapEl    = ref(null)
@@ -39,7 +39,7 @@ const hasPositions = computed(() => Object.keys(props.nodePositions || {}).lengt
 
 let ctx = null
 let nodes = []   // { uuid, name, x, y, vx, vy, aligned, deg, pinned }
-let edges = []   // { a, b, pairId, inlierCount, disabled, w }
+let edges = []   // { a, b, pairId, inlierCount, enabled, w }
 let nodeByUuid = new Map()
 let topoKey = ''  // signature of the pair set; a change forces a full re-layout
 let raf = null
@@ -94,7 +94,7 @@ function build() {
       a, b,
       pairId: m.pairId,
       inlierCount: m.inlierCount,
-      disabled: !!m.disabled,
+      enabled: m.enabled !== false,
       w: 0.8 + 3.2 * (m.inlierCount / maxInliers),  // 0.8–4 px
     })
   }
@@ -158,18 +158,18 @@ function seedPositions() {
   })
 }
 
-// Signature of the pair set — unchanged when only per-pair flags (disabled) toggle.
+// Signature of the pair set — unchanged when only per-pair flags (enabled) toggle.
 function pairSetKey() {
   return props.matchSummaries.map((m) => m.pairId).sort().join('|')
 }
 
-// Patch mutable per-pair/-node state (disabled, aligned) without disturbing the
+// Patch mutable per-pair/-node state (enabled, aligned) without disturbing the
 // existing layout — a full rebuild would jarringly re-scatter every node.
 function patch() {
   const byPair = new Map(props.matchSummaries.map((m) => [m.pairId, m]))
   for (const e of edges) {
     const m = byPair.get(e.pairId)
-    if (m) e.disabled = !!m.disabled
+    if (m) e.enabled = m.enabled !== false
   }
   for (const p of nodes) p.aligned = props.alignedUuids.has(p.uuid)
 }
@@ -390,7 +390,7 @@ function draw() {
     ctx.moveTo(sx(a.x), sy(a.y))
     ctx.lineTo(sx(b.x), sy(b.y))
     ctx.lineWidth = sel ? e.w + 1.5 : e.w
-    if (e.disabled) {
+    if (!e.enabled) {
       ctx.strokeStyle = sel ? 'rgba(240,80,80,0.9)' : 'rgba(150,150,150,0.4)'
       ctx.setLineDash([4, 4])
     } else {
@@ -486,7 +486,7 @@ function onMove(e) {
   const edge = edgeAt(x, y)
   if (edge) {
     const a = nodes[edge.a], b = nodes[edge.b]
-    hoverText.value = { text: `${a.name} ↔ ${b.name} · ${edge.inlierCount} matches${edge.disabled ? ' · excluded' : ''}`, x, y }
+    hoverText.value = { text: `${a.name} ↔ ${b.name} · ${edge.inlierCount} matches${edge.enabled ? '' : ' · excluded'}`, x, y }
     canvasEl.value.style.cursor = 'pointer'
   } else {
     hoverText.value = null
@@ -513,7 +513,7 @@ function onUp(e) {
 function onDblClick(e) {
   const { x, y } = pos(e)
   const edge = edgeAt(x, y)
-  if (edge) emit('toggle-disabled', edge.pairId)
+  if (edge) emit('toggle-pair', edge.pairId)
 }
 
 function onLeave() {
@@ -562,7 +562,7 @@ onBeforeUnmount(() => {
 })
 
 // Re-sync when summaries change: full re-layout on topology change, in-place patch
-// when only flags (disabled/aligned) toggled. Not deep: the summaries are a computed
+// when only flags (enabled/aligned) toggled. Not deep: the summaries are a computed
 // (App.vue) that rebuilds the whole array on any change, so its identity moves on
 // every flag toggle too, and a deep watch traversed every field of every pair (10⁵
 // objects) on each trigger.

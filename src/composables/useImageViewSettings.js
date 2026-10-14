@@ -63,5 +63,13 @@ export function useImageViewSettings() {
       // storage full / disabled — prefs still stick for this session
     }
   }
-  return { imageViewPrefs, setImageViewPrefs }
+  function patchImageView(patch) {
+    setImageViewPrefs({ ...imageViewPrefs.value, ...patch })
+  }
+  // Keypoints can only draw once the image has been detected, so the global toggle
+  // is gated per image rather than forced off on the preference itself.
+  function showKeypointsFor(img) {
+    return imageViewPrefs.value.showKeypoints && img?.kpStatus === 'done'
+  }
+  return { imageViewPrefs, setImageViewPrefs, patchImageView, showKeypointsFor }
 }
