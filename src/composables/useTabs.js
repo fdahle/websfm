@@ -208,6 +208,17 @@ export function useTabs(imageById, showMap) {
     keepActiveValid(id)
   }
 
+  function setTabTitle(id, title) {
+    const tab = tabs.value.find((t) => t.id === id)
+    if (tab) tab.title = title
+  }
+
+  // A computed product's tab shows whatever DEM/ortho the store holds now; when a
+  // rerun or edit retires the products, their tabs would show nothing.
+  function closeProductTabs() {
+    for (const tab of [...tabs.value]) if (tab.type === 'product') closeTab(tab.id)
+  }
+
   function resetToViewer() {
     tabs.value = tabs.value.filter((t) => !t.closable)
     activeTabId.value = 'viewer'
@@ -235,6 +246,8 @@ export function useTabs(imageById, showMap) {
     closeOtherTabs,
     closeTabsToLeft,
     closeTabsToRight,
+    setTabTitle,
+    closeProductTabs,
     resetToViewer,
   }
 }

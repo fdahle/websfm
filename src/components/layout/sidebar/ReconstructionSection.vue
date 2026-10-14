@@ -1,4 +1,6 @@
 <script setup>
+import { storeToRefs } from 'pinia'
+import { useReconstructionStore } from '../../../stores/useReconstructionStore.js'
 import CloudRows from './CloudRows.vue'
 
 // The *model* — sparse clouds, computed or COLMAP-imported. It gets its own
@@ -6,13 +8,12 @@ import CloudRows from './CloudRows.vue'
 // because `mainSparseCloud` is a first-class role with a set-as-main action, and
 // it's the layer you spend all your time inspecting.
 defineProps({
-  open:            { type: Boolean, default: true },
-  clouds:          { type: Array, default: () => [] }, // kind:'sparse' only
-  selectedCloudId: { type: String, default: null },
-  mainSparseId:    { type: String, default: null },
-  reconStatus:     { type: String, default: 'idle' }, // 'idle'|'running'|'done'|'error'
+  open:   { type: Boolean, default: true },
+  clouds: { type: Array, default: () => [] }, // kind:'sparse' only
 })
-const emit = defineEmits(['toggle', 'cloud-symbology', 'cloud-visibility', 'select-cloud', 'remove-cloud', 'rename-cloud', 'set-main-cloud', 'zoom-to-cloud', 'download-cloud'])
+const emit = defineEmits(['toggle'])
+// Last run: 'idle'|'running'|'done'|'error'
+const { reconStatus } = storeToRefs(useReconstructionStore())
 </script>
 
 <template>
@@ -25,19 +26,7 @@ const emit = defineEmits(['toggle', 'cloud-symbology', 'cloud-visibility', 'sele
       <span v-else-if="clouds.length" class="badge">{{ clouds.length }}</span>
     </button>
     <ul v-if="open" class="item-list">
-      <CloudRows
-        :clouds="clouds"
-        :selected-cloud-id="selectedCloudId"
-        :main-sparse-id="mainSparseId"
-        @select-cloud="emit('select-cloud', $event)"
-        @cloud-symbology="emit('cloud-symbology', $event)"
-        @cloud-visibility="emit('cloud-visibility', $event)"
-        @remove-cloud="emit('remove-cloud', $event)"
-        @rename-cloud="emit('rename-cloud', $event)"
-        @set-main-cloud="emit('set-main-cloud', $event)"
-        @zoom-to-cloud="emit('zoom-to-cloud', $event)"
-        @download-cloud="emit('download-cloud', $event)"
-      />
+      <CloudRows :clouds="clouds" />
       <li v-if="reconStatus === 'running' && !clouds.length" class="empty">Reconstructing…</li>
       <li v-else-if="!clouds.length" class="empty">No sparse model yet</li>
     </ul>

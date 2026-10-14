@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import { readFileSync } from 'node:fs'
 import { NEED_CHECKS, guardReason } from './commands.js'
 import { icons } from '../../utils/icons.js'
 import {
@@ -78,6 +79,56 @@ describe('stepValue', () => {
 
   it('starts from min on a missing value', () => {
     expect(stepValue(points, undefined, 1)).toBe(2)
+  })
+})
+
+// useCommandDispatch's handleCommand is a lookup table plus a switch; read the ids
+// it handles from the source, so a ribbon button with no handler (or a handler
+// nothing can reach any more) fails here instead of silently doing nothing.
+function dispatchedIds() {
+  // Dedented one level: the tables and the switch sit inside the composable.
+  const src = readFileSync(new URL('../../composables/useCommandDispatch.js', import.meta.url), 'utf8')
+    .replace(/^ {2}/gm, '')
+  const block = (start, end = '\n}') => {
+    const i = src.indexOf(start)
+    expect(i, start).toBeGreaterThan(-1)
+    return src.slice(i, src.indexOf(end, i))
+  }
+  const all = (text, re) => [...text.matchAll(re)].map((m) => m[1])
+  const dispatch = block('function handleCommand(')
+  return {
+    ids: new Set([
+      ...all(block('const MODAL_COMMANDS'), /^\s*'([^']+)':/gm),
+      ...all(block('const EVAL_SECTIONS'), /^\s*'([^']+)':/gm),
+      ...all(block('const FILTER_DEEP_LINKS'), /'([^']+)':/g),
+      ...all(block('const TOOL_MODALS', '\n])'), /'([^']+)'/g),
+      ...all(dispatch, /case '([^']+)'/g),
+      ...all(dispatch, /(?<![\w.])id === '([^']+)'/g),
+    ]),
+    prefixes: all(dispatch, /id\.startsWith\('([^']+)'\)/g),
+  }
+}
+
+describe('command dispatch', () => {
+  const { ids, prefixes } = dispatchedIds()
+  const handled = (id) => ids.has(id) || prefixes.some((p) => id.startsWith(p))
+  const ribbon = leafCommands([
+    ...allGroups(),
+    ...rasterTab({ kind: 'dem', imported: true }).groups, ...rasterTab({ kind: 'ortho', imported: false }).groups,
+  ]).filter((c) => !c.disabled)
+  for (const row of measureMenu({ targets: [{ id: 'a', name: 'DEM', kind: 'dem' }] })) if (row.id && !row.disabled) ribbon.push(row)
+
+  it('handles every enabled ribbon command', () => {
+    expect(ribbon.map((c) => c.id).filter((id) => !handled(id))).toEqual([])
+  })
+
+  it('handles no command id that nothing dispatches', async () => {
+    const { COMMANDS } = await import('./commands.js')
+    const reachable = new Set([...ribbon.map((c) => c.id), ...COMMANDS.map((c) => c.dispatch),
+      // Emitted outside the ribbon tables: Ribbon.vue's project button, and the
+      // image tab's own GCP-edit toggle.
+      'open-project-picker', 'img-gcp-edit'])
+    expect([...ids].filter((id) => !reachable.has(id))).toEqual([])
   })
 })
 

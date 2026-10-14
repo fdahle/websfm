@@ -1,6 +1,11 @@
 <script setup>
-import { ref, nextTick } from 'vue'
+import { storeToRefs } from 'pinia'
+import { useReconstructionStore } from '../../../stores/useReconstructionStore.js'
 import { useContextMenu } from '../../../composables/useContextMenu.js'
+import { useExpandedSet } from '../../../composables/useExpandedSet.js'
+import { useInlineRename } from '../../../composables/useInlineRename.js'
+import ContextMenu from './ContextMenu.vue'
+import { useSidebar } from './sidebarContext.js'
 
 // The cloud list rows, shared by the three provenance-split sections
 // (Reconstruction / Products / Reference Data). Renders a fragment of <li>s so
@@ -8,18 +13,14 @@ import { useContextMenu } from '../../../composables/useContextMenu.js'
 // (Products also lists DEM/ortho rasters). The section owns the header, the
 // empty state and *which* clouds it passes; this owns row rendering, inline
 // rename and the right-click menu.
-const props = defineProps({
-  clouds:          { type: Array, default: () => [] },
-  selectedCloudId: { type: String, default: null },
-  mainSparseId:    { type: String, default: null }, // sparse cloud downstream stages consume
+defineProps({
+  clouds: { type: Array, default: () => [] },
 })
-const emit = defineEmits(['cloud-symbology', 'cloud-visibility', 'select-cloud', 'remove-cloud', 'rename-cloud', 'set-main-cloud', 'zoom-to-cloud', 'download-cloud'])
+const sidebar = useSidebar()
+// mainSparseId: the sparse cloud downstream stages consume.
+const { selectedCloudId, mainSparseId } = storeToRefs(useReconstructionStore())
 
-const cloudExpanded = ref({})
-function toggleCloudExpand(id) {
-  if (cloudExpanded.value[id]) delete cloudExpanded.value[id]
-  else cloudExpanded.value[id] = true
-}
+const { isExpanded: isCloudExpanded, toggle: toggleCloudExpand } = useExpandedSet()
 
 const cloudKindLabel = (kind) => (kind === 'dense' ? 'Dense' : kind === 'mesh' ? 'Mesh' : 'Sparse')
 
@@ -45,46 +46,15 @@ function fmtCreated(ts) {
   return new Date(ts).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })
 }
 
-// Inline rename. Only one cloud edits at a time. The input lives inside the cloud
-// v-for, so a plain `ref="…"` would collect into an *array* (leaving `.focus()`
-// a silent no-op — the field never focuses and never blurs, so the row appears
-// stuck in rename mode). A function ref captures the single live element instead.
-const editingCloudId = ref(null)
-const editingName = ref('')
-const renameInput = ref(null)
-
-function setRenameInput(el) {
-  if (el) renameInput.value = el
-}
-
-function startRename(cloud) {
-  editingCloudId.value = cloud.id
-  editingName.value = cloud.name
-  nextTick(() => { renameInput.value?.focus(); renameInput.value?.select() })
-}
-
-function commitRename() {
-  if (editingCloudId.value == null) return
-  emit('rename-cloud', { id: editingCloudId.value, name: editingName.value })
-  editingCloudId.value = null
-}
-
-function cancelRename() {
-  editingCloudId.value = null
-}
+// Inline rename. Only one cloud edits at a time.
+const {
+  editingId: editingCloudId, editingName, setInput: setRenameInput, start: startRename, commit: commitRename, cancel: cancelRename,
+} = useInlineRename((id, name) => sidebar.renameCloud({ id, name }))
 
 // Point cloud context menu (right-click). { x, y, cloud }
 const { menu: cloudCtx, open: openCloudCtx, close: closeMenu } = useContextMenu()
-function onCloudRightClick(e, cloud) {
-  // "Set as main" adds a row for sparse clouds that aren't already main.
-  const extra = cloud.kind === 'sparse' && cloud.id !== props.mainSparseId ? 28 : 0
-  openCloudCtx(e, { cloud }, { w: 190, h: 188 + extra })
-}
-function ctxSetMain()      { emit('set-main-cloud', cloudCtx.value.cloud.id); closeMenu() }
-function ctxZoomCloud()    { emit('zoom-to-cloud', cloudCtx.value.cloud.id); closeMenu() }
-function ctxDownloadCloud() { emit('download-cloud', cloudCtx.value.cloud.id); closeMenu() }
-function ctxRenameCloud()  { startRename(cloudCtx.value.cloud); closeMenu() }
-function ctxRemoveCloud()  { emit('remove-cloud', cloudCtx.value.cloud.id); closeMenu() }
+// Run a menu item against the cloud it was opened on, then close.
+function fromMenu(fn) { const cloud = cloudCtx.value.cloud; closeMenu(); fn(cloud) }
 </script>
 
 <template>
@@ -93,18 +63,18 @@ function ctxRemoveCloud()  { emit('remove-cloud', cloudCtx.value.cloud.id); clos
       class="list-item"
       :class="{ selected: cloud.id === selectedCloudId }"
       :title="cloud.name"
-      @click="emit('select-cloud', cloud.id)"
-      @contextmenu="onCloudRightClick($event, cloud)"
+      @click="sidebar.selectCloud(cloud.id)"
+      @contextmenu="openCloudCtx($event, { cloud })"
     >
       <button
         class="expand-btn"
-        :class="{ open: cloudExpanded[cloud.id] }"
+        :class="{ open: isCloudExpanded(cloud.id) }"
         @click.stop="toggleCloudExpand(cloud.id)"
-        :title="cloudExpanded[cloud.id] ? 'Collapse' : 'Expand'"
+        :title="isCloudExpanded(cloud.id) ? 'Collapse' : 'Expand'"
       ></button>
       <input class="cloud-visibility" type="checkbox" :checked="cloud.visible !== false"
         :aria-label="`Show ${cloud.name} in 3D`" title="Visible in 3D"
-        @click.stop @change="emit('cloud-visibility', { id: cloud.id, visible: $event.target.checked })" />
+        @click.stop @change="sidebar.cloudVisibility({ id: cloud.id, visible: $event.target.checked })" />
       <input
         v-if="editingCloudId === cloud.id"
         :ref="setRenameInput"
@@ -113,7 +83,7 @@ function ctxRemoveCloud()  { emit('remove-cloud', cloudCtx.value.cloud.id); clos
         @click.stop
         @dblclick.stop
         @keydown.enter.prevent="commitRename"
-        @keydown.esc.prevent="cancelRename"
+        @keydown.esc.prevent.stop="cancelRename"
         @blur="commitRename"
       />
       <span v-else class="item-name">{{ cloud.name }}</span>
@@ -140,7 +110,7 @@ function ctxRemoveCloud()  { emit('remove-cloud', cloudCtx.value.cloud.id); clos
         :title="`${cloud.cameras.size} camera(s)`"
       >{{ cloud.cameras.size }}</span>
     </li>
-    <li v-if="cloudExpanded[cloud.id]" class="img-details" @contextmenu.stop>
+    <li v-if="isCloudExpanded(cloud.id)" class="img-details" @contextmenu.stop>
       <div class="detail-row">
         <span class="detail-label">Type</span>
         <span class="detail-value">{{ cloudKindLabel(cloud.kind) }}{{ cloud.imported ? ' (imported)' : '' }}</span>
@@ -169,30 +139,25 @@ function ctxRemoveCloud()  { emit('remove-cloud', cloudCtx.value.cloud.id); clos
   </template>
 
   <!-- Point cloud context menu -->
-  <Teleport to="body">
-    <div
-      v-if="cloudCtx"
-      class="ctx-menu"
-      :style="{ left: cloudCtx.x + 'px', top: cloudCtx.y + 'px' }"
-      @click.stop
-    >
+  <ContextMenu :menu="cloudCtx">
+    <template #default="{ menu }">
       <!-- Groups: go there → change it → destructive. Same order as the image and
            reference-raster menus. -->
-      <button class="ctx-item" @click="ctxZoomCloud">Zoom to</button>
-      <button class="ctx-item" @click="emit('cloud-symbology', cloudCtx.cloud.id); closeMenu()">Symbology…</button>
+      <button class="ctx-item" @click="fromMenu((c) => sidebar.zoomToCloud(c.id))">Zoom to</button>
+      <button class="ctx-item" @click="fromMenu((c) => sidebar.cloudSymbology(c.id))">Symbology…</button>
       <!-- The export dialog (format, georeference, …) aimed at this cloud. -->
-      <button class="ctx-item" @click="ctxDownloadCloud">Download…</button>
+      <button class="ctx-item" @click="fromMenu((c) => sidebar.downloadCloud(c.id))">Download…</button>
       <div class="ctx-sep"></div>
       <button
-        v-if="cloudCtx.cloud.kind === 'sparse' && cloudCtx.cloud.id !== mainSparseId"
+        v-if="menu.cloud.kind === 'sparse' && menu.cloud.id !== mainSparseId"
         class="ctx-item"
-        @click="ctxSetMain"
+        @click="fromMenu((c) => sidebar.setMainCloud(c.id))"
       >Set as main</button>
-      <button class="ctx-item" @click="ctxRenameCloud">Rename</button>
+      <button class="ctx-item" @click="fromMenu((c) => startRename(c.id, c.name))">Rename</button>
       <div class="ctx-sep"></div>
-      <button class="ctx-item danger" @click="ctxRemoveCloud">Remove</button>
-    </div>
-  </Teleport>
+      <button class="ctx-item danger" @click="fromMenu((c) => sidebar.removeCloud(c.id))">Remove</button>
+    </template>
+  </ContextMenu>
 </template>
 
 <style scoped src="./sidebar-sections.css"></style>

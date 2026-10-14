@@ -1,35 +1,30 @@
 <script setup>
-import { ref, computed, nextTick } from 'vue'
+import { computed } from 'vue'
+import { storeToRefs } from 'pinia'
+import { useExternalStore } from '../../../stores/useExternalStore.js'
 import CloudRows from './CloudRows.vue'
 import { useContextMenu } from '../../../composables/useContextMenu.js'
+import { useExpandedSet } from '../../../composables/useExpandedSet.js'
+import { useInlineRename } from '../../../composables/useInlineRename.js'
+import ContextMenu from './ContextMenu.vue'
+import { useSidebar } from './sidebarContext.js'
 
 // Evidence you brought in: imported dense/mesh clouds and imported georeferenced
 // rasters (reference DEM / orthophoto). The pipeline never overwrites anything
 // in here — that's the whole point of the section, and it's the one thing the
 // old type-split "Clouds vs Products" taxonomy could not express.
-const props = defineProps({
+defineProps({
   open:   { type: Boolean, default: true },
   // Imported (imported:true) kind:'dense' | 'mesh' clouds.
   clouds: { type: Array, default: () => [] },
-  selectedCloudId: { type: String, default: null },
-  // External rasters from useExternalStore (metadata only — the pixel plane is
-  // loaded lazily, so a row renders long before any plane is in memory).
-  rasters: { type: Array, default: () => [] },
-  pendingRasters: { type: Array, default: () => [] },
-  openTabIds: { type: Object, default: () => new Set() },
 })
-const emit = defineEmits([
-  'toggle', 'cloud-symbology', 'cloud-visibility', 'select-cloud', 'remove-cloud', 'rename-cloud', 'zoom-to-cloud', 'download-cloud',
-  'download-raster',
-  'open-raster', 'remove-raster', 'rename-raster', 'set-raster-kind', 'style-raster',
-  'set-raster-on-map', 'set-raster-opacity', 'convert-to-image',
-])
+const emit = defineEmits(['toggle'])
+const sidebar = useSidebar()
+// External rasters (metadata only — the pixel plane is loaded lazily, so a row
+// renders long before any plane is in memory).
+const { rasters, pendingRasters } = storeToRefs(useExternalStore())
 
-const rasterExpanded = ref({})
-function toggleRasterExpand(id) {
-  if (rasterExpanded.value[id]) delete rasterExpanded.value[id]
-  else rasterExpanded.value[id] = true
-}
+const { isExpanded: isRasterExpanded, toggle: toggleRasterExpand } = useExpandedSet()
 
 const kindLabel = (k) => (k === 'dem' ? 'DEM' : 'Ortho')
 const num = (v, d = 3) => (Number.isFinite(v) ? v.toPrecision(d) : '—')
@@ -44,50 +39,18 @@ const datumWarn = (r) => r.kind === 'dem' && (!r.verticalDatum || r.verticalDatu
 // the toggle is hidden rather than offered and silently doing nothing.
 const canMap = (r) => !!r.previewDataUrl && !!r.crs && !r.crsUnresolved
 
-const editingRasterId = ref(null)
-const editingName = ref('')
-const renameInput = ref(null)
-function setRenameInput(el) { if (el) renameInput.value = el }
-function startRename(raster) {
-  editingRasterId.value = raster.id
-  editingName.value = raster.name
-  nextTick(() => { renameInput.value?.focus(); renameInput.value?.select() })
-}
-function commitRename() {
-  if (editingRasterId.value == null) return
-  emit('rename-raster', { id: editingRasterId.value, name: editingName.value })
-  editingRasterId.value = null
-}
-function cancelRename() { editingRasterId.value = null }
+const {
+  editingId: editingRasterId, editingName, setInput: setRenameInput, start: startRename, commit: commitRename, cancel: cancelRename,
+} = useInlineRename((id, name) => sidebar.renameRaster({ id, name }))
 
 const { menu: ctx, open: openCtx, close: closeCtx } = useContextMenu()
-function onRasterRightClick(e, raster) {
-  openCtx(e, { raster }, { w: 200, h: canMap(raster) ? 268 : 240 })
-}
+// Run a menu item against the row it was opened on, then close.
+function fromMenu(fn) { const raster = ctx.value.raster; closeCtx(); fn(raster) }
 
-// Tab id per useTabs.openRasterTab — the emit focuses an existing tab either way,
-// so only the wording changes.
+// Tab id per useTabs.openRasterTab — openRaster focuses an existing tab either
+// way, so only the wording changes.
 const ctxOpenLabel = computed(() =>
-  props.openTabIds.has(`raster:${ctx.value?.raster?.id}`) ? 'Switch to tab' : 'Open in tab')
-
-function ctxOpen()     { emit('open-raster', ctx.value.raster.id); closeCtx() }
-function ctxDownload() { emit('download-raster', ctx.value.raster.id); closeCtx() }
-function ctxToggleMap() {
-  const r = ctx.value.raster
-  emit('set-raster-on-map', { id: r.id, onMap: !r.onMap })
-  closeCtx()
-}
-function ctxFlipKind() {
-  const r = ctx.value.raster
-  emit('set-raster-kind', { id: r.id, kind: r.kind === 'dem' ? 'ortho' : 'dem' })
-  closeCtx()
-}
-function ctxStyle()    { emit('style-raster', ctx.value.raster.id); closeCtx() }
-function ctxRename()   { startRename(ctx.value.raster); closeCtx() }
-// The mirror of ImagesSection's "Convert to reference data": the ingest geokey
-// sniff called this a raster, but it's really a source photo.
-function ctxToImage()  { emit('convert-to-image', ctx.value.raster.id); closeCtx() }
-function ctxRemove()   { emit('remove-raster', ctx.value.raster.id); closeCtx() }
+  sidebar.openTabIds.has(`raster:${ctx.value?.raster?.id}`) ? 'Switch to tab' : 'Open in tab')
 </script>
 
 <template>
@@ -100,17 +63,7 @@ function ctxRemove()   { emit('remove-raster', ctx.value.raster.id); closeCtx() 
       </span>
     </button>
     <ul v-if="open" class="item-list">
-      <CloudRows
-        :clouds="clouds"
-        :selected-cloud-id="selectedCloudId"
-        @select-cloud="emit('select-cloud', $event)"
-        @cloud-symbology="emit('cloud-symbology', $event)"
-        @cloud-visibility="emit('cloud-visibility', $event)"
-        @remove-cloud="emit('remove-cloud', $event)"
-        @rename-cloud="emit('rename-cloud', $event)"
-        @zoom-to-cloud="emit('zoom-to-cloud', $event)"
-        @download-cloud="emit('download-cloud', $event)"
-      />
+      <CloudRows :clouds="clouds" />
 
       <li
         v-for="r in pendingRasters"
@@ -128,14 +81,14 @@ function ctxRemove()   { emit('remove-raster', ctx.value.raster.id); closeCtx() 
         <li
           class="list-item"
           :title="`${r.name} — double-click to open`"
-          @dblclick="emit('open-raster', r.id)"
-          @contextmenu="onRasterRightClick($event, r)"
+          @dblclick="sidebar.openRaster(r.id)"
+          @contextmenu="openCtx($event, { raster: r })"
         >
           <button
             class="expand-btn"
-            :class="{ open: rasterExpanded[r.id] }"
+            :class="{ open: isRasterExpanded(r.id) }"
             @click.stop="toggleRasterExpand(r.id)"
-            :title="rasterExpanded[r.id] ? 'Collapse' : 'Expand'"
+            :title="isRasterExpanded(r.id) ? 'Collapse' : 'Expand'"
           ></button>
           <input
             v-if="editingRasterId === r.id"
@@ -145,21 +98,21 @@ function ctxRemove()   { emit('remove-raster', ctx.value.raster.id); closeCtx() 
             @click.stop
             @dblclick.stop
             @keydown.enter.prevent="commitRename"
-            @keydown.esc.prevent="cancelRename"
+            @keydown.esc.prevent.stop="cancelRename"
             @blur="commitRename"
           />
           <span v-else class="item-name">{{ r.name }}</span>
           <!-- On-map indicator: the toggle lives in the right-click menu, so
                without this the state is invisible until you open the menu again. -->
           <span
-            v-if="r.onMap"
+            v-if="r.visible"
             class="map-flag"
             title="Shown on the map — right-click to hide"
           >◉</span>
           <span v-if="datumWarn(r)" class="warn-flag" title="Vertical datum unknown — elevations may be offset by tens of metres">⚠</span>
           <span class="obs-badge" :title="`${r.width}×${r.height} px`">{{ kindLabel(r.kind) }}</span>
         </li>
-        <li v-if="rasterExpanded[r.id]" class="img-details" @contextmenu.stop>
+        <li v-if="isRasterExpanded(r.id)" class="img-details" @contextmenu.stop>
           <div class="detail-row">
             <span class="detail-label">Type</span>
             <span class="detail-value">{{ kindLabel(r.kind) }}</span>
@@ -192,7 +145,7 @@ function ctxRemove()   { emit('remove-raster', ctx.value.raster.id); closeCtx() 
           </template>
           <!-- Opacity only matters while the layer is up, and an always-present
                slider that does nothing invites fiddling with it to find out why. -->
-          <div v-if="r.onMap" class="detail-row">
+          <div v-if="r.visible" class="detail-row">
             <span class="detail-label">Opacity</span>
             <span class="detail-value opacity-cell">
               <input
@@ -200,13 +153,13 @@ function ctxRemove()   { emit('remove-raster', ctx.value.raster.id); closeCtx() 
                 :value="r.opacity ?? 1"
                 class="opacity-slider"
                 @click.stop
-                @input="emit('set-raster-opacity', { id: r.id, opacity: Number($event.target.value) })"
+                @input="sidebar.setRasterOpacity({ id: r.id, opacity: Number($event.target.value) })"
               />
               <span class="opacity-pct">{{ Math.round((r.opacity ?? 1) * 100) }}%</span>
             </span>
           </div>
-          <button class="link-btn products-open" @click.stop="emit('open-raster', r.id)">
-            {{ openTabIds.has(`raster:${r.id}`) ? 'Switch to tab' : 'Open in tab' }}
+          <button class="link-btn products-open" @click.stop="sidebar.openRaster(r.id)">
+            {{ sidebar.openTabIds.has(`raster:${r.id}`) ? 'Switch to tab' : 'Open in tab' }}
           </button>
         </li>
       </template>
@@ -216,28 +169,27 @@ function ctxRemove()   { emit('remove-raster', ctx.value.raster.id); closeCtx() 
       </li>
     </ul>
 
-    <Teleport to="body">
-      <div
-        v-if="ctx"
-        class="ctx-menu"
-        :style="{ left: ctx.x + 'px', top: ctx.y + 'px' }"
-        @click.stop
-      >
+    <ContextMenu :menu="ctx">
+      <template #default="{ menu }">
         <!-- Groups: get at it / how it's displayed → change what it is →
              destructive. Same order as the Products and cloud menus; the map
              toggle and styling join the first group, so an unstyleable raster
-             never leaves "Display on map" alone between two lines. -->
-        <button class="ctx-item" @click="ctxOpen">{{ ctxOpenLabel }}</button>
+             never leaves "Show on map" alone between two lines. -->
+        <button class="ctx-item" @click="fromMenu((r) => sidebar.openRaster(r.id))">{{ ctxOpenLabel }}</button>
         <!-- The file exactly as imported, not a re-encode. -->
-        <button class="ctx-item" @click="ctxDownload">Download original</button>
+        <button class="ctx-item" @click="fromMenu((r) => sidebar.downloadRaster(r.id))">Download original</button>
         <!-- A toggle, not a one-shot "show": which reference layers are up is
              something you adjust continuously while working. -->
-        <button v-if="canMap(ctx.raster)" class="ctx-item" @click="ctxToggleMap">
-          {{ ctx.raster.onMap ? 'Hide from map' : 'Display on map' }}
+        <button
+          v-if="canMap(menu.raster)"
+          class="ctx-item"
+          @click="fromMenu((r) => sidebar.setRasterVisible({ id: r.id, visible: !r.visible }))"
+        >
+          {{ menu.raster.visible ? 'Hide from map' : 'Show on map' }}
         </button>
         <!-- Only for rasters band math can actually change: >3 bands or deeper
              than 8-bit. An 8-bit RGB ortho has nothing to choose. -->
-        <button v-if="ctx.raster.styleable" class="ctx-item" @click="ctxStyle">
+        <button v-if="menu.raster.styleable" class="ctx-item" @click="fromMenu((r) => sidebar.styleRaster(r.id))">
           Style bands…
         </button>
 
@@ -246,20 +198,25 @@ function ctxRemove()   { emit('remove-raster', ctx.value.raster.id); closeCtx() 
              a DEM by intent and imagery by content). One click beats a
              delete-and-reimport, and it's what makes skipping the modal on a
              high-confidence sniff defensible. -->
-        <button class="ctx-item" @click="ctxFlipKind">
-          Treat as {{ ctx.raster.kind === 'dem' ? 'orthophoto' : 'DEM' }}
+        <button
+          class="ctx-item"
+          @click="fromMenu((r) => sidebar.setRasterKind({ id: r.id, kind: r.kind === 'dem' ? 'ortho' : 'dem' }))"
+        >
+          Treat as {{ menu.raster.kind === 'dem' ? 'orthophoto' : 'DEM' }}
         </button>
+        <!-- The mirror of ImagesSection's "Convert to reference data": the ingest
+             geokey sniff called this a raster, but it's really a source photo. -->
         <button
           class="ctx-item"
           title="This is really a source photo — re-import it as an image"
-          @click="ctxToImage"
+          @click="fromMenu((r) => sidebar.convertRasterToImage(r.id))"
         >Convert to source image</button>
-        <button class="ctx-item" @click="ctxRename">Rename</button>
+        <button class="ctx-item" @click="fromMenu((r) => startRename(r.id, r.name))">Rename</button>
 
         <div class="ctx-sep"></div>
-        <button class="ctx-item danger" @click="ctxRemove">Remove</button>
-      </div>
-    </Teleport>
+        <button class="ctx-item danger" @click="fromMenu((r) => sidebar.removeRaster(r.id))">Remove</button>
+      </template>
+    </ContextMenu>
   </div>
 </template>
 

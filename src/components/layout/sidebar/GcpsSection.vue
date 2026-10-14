@@ -1,16 +1,20 @@
 <script setup>
-import { ref } from 'vue'
+import { storeToRefs } from 'pinia'
+import { useGcpsStore } from '../../../stores/useGcpsStore.js'
 import { useContextMenu } from '../../../composables/useContextMenu.js'
+import { useExpandedSet } from '../../../composables/useExpandedSet.js'
+import ContextMenu from './ContextMenu.vue'
+import { useSidebar } from './sidebarContext.js'
 
-const props = defineProps({
-  open:          { type: Boolean, default: true },
-  gcps:          { type: Array,   default: () => [] },
-  // Per-GCP accuracy report (useReconstructionStore.gcpAccuracyReport()):
-  // [{ gcpId, dTotal, sfm: { x, y, z }, observations: [{ imageId, reprojPx }] }] —
-  // empty until refreshed.
-  report:        { type: Array,   default: () => [] },
-  selectedGcpId: { type: String,  default: null },
+defineProps({
+  open: { type: Boolean, default: true },
 })
+const emit = defineEmits(['toggle'])
+// sidebar.gcpReport — per-GCP accuracy report (useReconstructionStore.gcpAccuracyReport()):
+// [{ gcpId, dTotal, sfm: { x, y, z }, observations: [{ imageId, reprojPx }] }] —
+// empty until refreshed. sidebar.selectedGcpId — the highlighted row.
+const sidebar = useSidebar()
+const { gcps } = storeToRefs(useGcpsStore())
 
 // Role → badge. A **marker** is a scale-bar endpoint: image marks, no surveyed
 // position. It is listed alongside control/check because it is marked with the
@@ -28,26 +32,22 @@ const isMarker = (gcp) => gcp.role === 'marker'
 // MARKER this — with the per-view reprojection errors below — is the only quality
 // signal there is: there is no surveyed coordinate to diff against.
 function sfmPosFor(gcpId) {
-  return props.report.find((r) => r.gcpId === gcpId)?.sfm ?? null
+  return sidebar.gcpReport.find((r) => r.gcpId === gcpId)?.sfm ?? null
 }
 function fmtSfm(v) {
   return v == null || Number.isNaN(v) ? '—' : v.toPrecision(6)
 }
-const emit = defineEmits(['toggle', 'remove-gcp', 'select', 'jump-to-image', 'open-gcp'])
 
-const gcpExpanded = ref({})
-function toggleGcpExpand(id) {
-  if (gcpExpanded.value[id]) delete gcpExpanded.value[id]
-  else gcpExpanded.value[id] = true
-}
+const { isExpanded, toggle: toggleGcpExpand } = useExpandedSet()
 
 // Right-click a GCP row → context menu (Remove).
 const { menu: gcpCtx, open: openGcpCtx, close: closeMenu } = useContextMenu()
 function onGcpRightClick(e, gcp) {
-  emit('select', gcp.id)
-  openGcpCtx(e, { gcp }, { w: 160, h: 44 })
+  sidebar.selectGcp(gcp.id)
+  openGcpCtx(e, { gcp })
 }
-function ctxRemoveGcp() { emit('remove-gcp', gcpCtx.value.gcp.id); closeMenu() }
+// Run a menu item against the point it was opened on, then close.
+function fromMenu(fn) { const gcp = gcpCtx.value.gcp; closeMenu(); fn(gcp) }
 
 // Compact coordinate formatting (projected metres vs. lat/lon degrees).
 function fmtCoord(v) {
@@ -57,7 +57,7 @@ function fmtCoord(v) {
 
 // Live reprojection error (px) for one observation, from the accuracy report.
 function reprojFor(gcpId, imageId) {
-  const entry = props.report.find((r) => r.gcpId === gcpId)
+  const entry = sidebar.gcpReport.find((r) => r.gcpId === gcpId)
   const obs = entry?.observations?.find((o) => o.imageId === imageId)
   return obs?.reprojPx ?? null
 }
@@ -74,17 +74,17 @@ function reprojFor(gcpId, imageId) {
       <template v-for="gcp in gcps" :key="gcp.id">
         <li
           class="list-item"
-          :class="{ selected: gcp.id === selectedGcpId }"
+          :class="{ selected: gcp.id === sidebar.selectedGcpId }"
           :title="gcp.name"
-          @click="emit('select', gcp.id); toggleGcpExpand(gcp.id)"
-          @dblclick="emit('open-gcp', gcp.id)"
+          @click="sidebar.selectGcp(gcp.id); toggleGcpExpand(gcp.id)"
+          @dblclick="sidebar.openGcp(gcp.id)"
           @contextmenu="onGcpRightClick($event, gcp)"
         >
           <button
             class="expand-btn"
-            :class="{ open: gcpExpanded[gcp.id] }"
+            :class="{ open: isExpanded(gcp.id) }"
             @click.stop="toggleGcpExpand(gcp.id)"
-            :title="gcpExpanded[gcp.id] ? 'Collapse' : 'Expand'"
+            :title="isExpanded(gcp.id) ? 'Collapse' : 'Expand'"
           ></button>
           <span class="item-name">{{ gcp.name }}</span>
           <span class="role-badge" :class="roleBadge(gcp).cls" :title="roleBadge(gcp).title">
@@ -98,7 +98,7 @@ function reprojFor(gcpId, imageId) {
             {{ gcp.observations?.length || 0 }}<template v-if="(gcp.observations?.length || 0) < 2"> ⚠</template>
           </span>
         </li>
-        <li v-if="gcpExpanded[gcp.id]" class="img-details">
+        <li v-if="isExpanded(gcp.id)" class="img-details">
           <!-- A marker has no surveyed coordinates by definition; show where the
                model puts it instead, in SfM units. -->
           <template v-if="isMarker(gcp)">
@@ -143,7 +143,7 @@ function reprojFor(gcpId, imageId) {
                 v-if="obs.imageId != null"
                 class="obs-jump"
                 :title="`Open ${obs.imageName}`"
-                @click.stop="emit('jump-to-image', { imageId: obs.imageId })"
+                @click.stop="sidebar.jumpToImage({ imageId: obs.imageId })"
               >{{ obs.imageName }}</button>
               <span
                 v-else
@@ -162,16 +162,9 @@ function reprojFor(gcpId, imageId) {
     </ul>
 
     <!-- GCP context menu -->
-    <Teleport to="body">
-      <div
-        v-if="gcpCtx"
-        class="ctx-menu"
-        :style="{ left: gcpCtx.x + 'px', top: gcpCtx.y + 'px' }"
-        @click.stop
-      >
-        <button class="ctx-item danger" @click="ctxRemoveGcp">Remove point</button>
-      </div>
-    </Teleport>
+    <ContextMenu :menu="gcpCtx">
+      <button class="ctx-item danger" @click="fromMenu((g) => sidebar.removeGcp(g.id))">Remove point</button>
+    </ContextMenu>
   </div>
 </template>
 

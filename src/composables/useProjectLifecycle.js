@@ -2,19 +2,23 @@ import { flushPersistence } from '../utils/persistence.js'
 import { computed, nextTick, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { ensureProjection } from '../core/crs.js'
-// NB: the projectArchive one — `core/dense/memBudget.js` exports a different
-// `formatBytes` with different formatting.
-import { formatBytes } from '../core/io/projectArchive.js'
+import { formatBytes } from '../core/formatBytes.js'
 import { clearProjectStores, restoreProjectStores } from '../stores/projectStores.js'
 import { loadProgressView } from '../utils/loadProgress.js'
 import { useImagesStore } from '../stores/useImagesStore.js'
 import { useMatchesStore } from '../stores/useMatchesStore.js'
 import { useExternalStore } from '../stores/useExternalStore.js'
+import { useLogStore } from '../stores/useLogStore.js'
 import { useModalsStore } from '../stores/useModalsStore.js'
 import { useProjectsStore } from '../stores/useProjectsStore.js'
 import { useSensorsStore } from '../stores/useSensorsStore.js'
+import { useGcpsStore } from '../stores/useGcpsStore.js'
+import { useFootprintsStore } from '../stores/useFootprintsStore.js'
+import { usePosesStore } from '../stores/usePosesStore.js'
 import { useLog } from './useLog.js'
 import { showToast } from './useToasts.js'
+import { confirmDialog } from './useConfirmations.js'
+import { rememberNewProjectDraft } from './newProjectDraft.js'
 
 // Everything that opens, creates, switches, moves, saves or deletes a project,
 // lifted out of App.vue. Owns the blocking load overlay (`projectLoading` +
@@ -30,15 +34,19 @@ import { showToast } from './useToasts.js'
 // Injected (these live in App.vue, not a store):
 //   resetToViewer     — from useTabs; drop tabs back to the 3D viewer
 //   clearViewerScene  — blank the Three.js scene (viewerRef.clearReconstructionData)
-export function useProjectLifecycle({ resetToViewer, clearViewerScene }) {
+//   isBusy            — true while a compute run or workflow is in flight
+export function useProjectLifecycle({ resetToViewer, clearViewerScene, isBusy = () => false }) {
   const { log } = useLog()
   const projectsStore = useProjectsStore()
   const { projects, currentProjectId, currentProjectName } = storeToRefs(projectsStore)
   const {
     createProject, switchProject, deleteProjectById, exportProject, importProject,
     openPlan, reconnectProjectFolder, relinkProjectFolder,
-    createFolderProject, adoptFolderProject, moveProjectToFolder, moveProjectToBrowser,
+    createFolderProject, adoptFolderProject, moveProjectToFolder, moveProjectToBrowser, setProjectCrs,
   } = projectsStore
+  const { reprojectGcps } = useGcpsStore()
+  const { reprojectFootprints } = useFootprintsStore()
+  const { reprojectPoses } = usePosesStore()
   const {
     projectPickerOpen, newProjectOpen, newProjectCanCancel, saveProjectOpen,
   } = storeToRefs(useModalsStore())
@@ -46,16 +54,30 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene }) {
   const imagesStore = useImagesStore()
   const matchesStore = useMatchesStore()
   const { images } = storeToRefs(imagesStore)
-  const { clearAll, restoreImages, migrateLegacyFiducialDetections, flushPendingWork } = imagesStore
+  const { clearAll, restoreImages, flushPendingWork } = imagesStore
   const externalStore = useExternalStore()
   const sensorsStore = useSensorsStore()
-  const { sensors } = storeToRefs(sensorsStore)
-  const { clearSensors, restoreSensors, migrateLegacyFiducialCalibrations } = sensorsStore
+  const { clearSensors, restoreSensors } = sensorsStore
 
+  const logStore = useLogStore()
+
+  // Runs before currentProjectId moves, so every queued write — console lines
+  // included — still lands in the project that produced it.
   async function flushProjectWork() {
     await Promise.all([flushPendingWork(), externalStore.flushPendingWork()])
     await nextTick() // run store watchers that schedule autosaves
-    await flushPersistence()
+    await Promise.all([flushPersistence(), logStore.flushNow()])
+  }
+
+  // A run captures the open project's data and writes its result back on finish;
+  // tearing that project down underneath it would land the result in the next one.
+  // The progress overlay already blocks the UI, so this is the backstop for any
+  // path that gets past it (keyboard, a workflow between stages).
+  function refuseWhileBusy(action) {
+    if (!isBusy()) return false
+    log(`${action}: not while a computation is running — cancel it or wait for it to finish`, 'warn', 'Project')
+    showToast(`Can't ${action.toLowerCase()} now`, { detail: 'A computation is running.', kind: 'error', ms: 5000 })
+    return true
   }
 
   // ── Blocking load overlay ───────────────────────────────────────────────────
@@ -88,13 +110,12 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene }) {
     projectLoadingProgress.value = { done: n, total: 0, label: `${n} files — ${label}` }
   }
 
-  // Drop all in-memory project state. `purge` also deletes the persisted data, so
-  // it is ONLY for the explicit "clear everything" command — leaving a project to
-  // open another must never purge the one being left.
-  function resetInMemoryProject({ purge = false } = {}) {
-    clearAll(resetToViewer, { purge })
-    clearSensors({ purge })
-    clearProjectStores({ purge })
+  // Drop all in-memory project state. Never purges: leaving a project to open
+  // another must leave everything it saved on disk.
+  function resetInMemoryProject() {
+    clearAll(resetToViewer)
+    clearSensors()
+    clearProjectStores()
     clearViewerScene()
   }
 
@@ -119,6 +140,7 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene }) {
 
   // ── Open ────────────────────────────────────────────────────────────────────
   async function openProject(id) {
+    if (refuseWhileBusy('Open project')) return false
     const loadStarted = performance.now()
     await flushProjectWork()
     // A folder-backed project has to be reachable before anything reads it: the
@@ -178,6 +200,9 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene }) {
       // so they stay manual; every other project-scoped store restores through the
       // registry below (matches, reconstruction, GCPs, footprints, poses).
       await timed('sensors', () => restoreSensors(id))
+      // Sensors restore outside the registry (images depend on them); same rule as
+      // restoreProjectStores: a read that finished after a switch must not stay.
+      if (currentProjectId.value !== id) clearSensors()
       // restoreImages publishes the image list (ids + names) synchronously before
       // its first await; only previews and keypoints load after that. The registry
       // stores need the list, never the pixels, so both phases run concurrently.
@@ -201,13 +226,11 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene }) {
         imagesState = { done, total, label }
         queueProgress()
       }, { groups: projectData.imageGroups })).then(() => {
-        migrateLegacyFiducialDetections(sensors.value)
-        migrateLegacyFiducialCalibrations(images.value)
         imagesState = null
         refreshProgress()
       })
       const storesDone = timed('project stores', () => restoreProjectStores({
-        projectId: id, projectData,
+        projectId: id, projectData, isCurrent: () => currentProjectId.value === id,
         onProgress: (store, state) => { storeStates.set(store, state); queueProgress() },
       }))
       const [, storeTimings] = await Promise.all([imagesDone, storesDone])
@@ -225,6 +248,7 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene }) {
 
   // ── New project ─────────────────────────────────────────────────────────────
   async function handleCreateProject({ name, sceneType, crs, dirHandle = null }) {
+    if (refuseWhileBusy('Create project')) return
     newProjectOpen.value = false
     return withLoadingOverlay('Creating project…', async () => {
       await flushProjectWork()
@@ -237,6 +261,8 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene }) {
           const detail = String(err?.message ?? err)
           log(`Could not create project: ${detail}`, 'error', 'Project')
           showToast('Could not create project', { detail, kind: 'error', ms: 6000 })
+          // The reopened dialog is a fresh mount: hand it what was typed (newProjectDraft.js).
+          rememberNewProjectDraft({ name, sceneType, crs, dirHandle })
           newProjectCanCancel.value = !!currentProjectId.value
           newProjectOpen.value = true
         }
@@ -252,7 +278,11 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene }) {
         res = { ok: false, error: String(err?.message ?? err) }
       }
       if (!res.ok && res.needsConfirm
-          && confirm(`"${dirHandle.name}" is not empty. Create the project in it anyway?`)) {
+          && await confirmDialog({
+            title: 'Folder not empty',
+            message: `"${dirHandle.name}" is not empty. Create the project in it anyway?`,
+            confirmLabel: 'Create',
+          })) {
         try {
           res = await createFolderProject(name, sceneType, crs, dirHandle, { confirmed: true })
         } catch (err) {
@@ -266,6 +296,7 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene }) {
       }
       log(`Could not create project in folder: ${res.error}`, 'error', 'Project')
       showToast('Could not use that folder', { detail: res.error, kind: 'error', ms: 6000 })
+      rememberNewProjectDraft({ name, sceneType, crs, dirHandle })
       newProjectCanCancel.value = !!currentProjectId.value
       newProjectOpen.value = true
     })
@@ -342,14 +373,18 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene }) {
   // OPFS source is deleted afterwards — files on the user's disk are never removed
   // by websfm, so "move into browser storage" leaves the folder in place.
   async function moveCurrentProjectToFolder(id = currentProjectId.value) {
-    if (!id) return
+    if (!id || refuseWhileBusy('Move project')) return
     await flushProjectWork()
     const dirHandle = await pickDirectory()
     if (!dirHandle) return
     await withLoadingOverlay('Moving project to folder…', async () => {
       let res = await moveProjectToFolder(id, dirHandle, { onProgress: fileProgress })
       if (!res.ok && res.needsConfirm
-          && confirm(`"${dirHandle.name}" is not empty. Move the project into it anyway?`)) {
+          && await confirmDialog({
+            title: 'Folder not empty',
+            message: `"${dirHandle.name}" is not empty. Move the project into it anyway?`,
+            confirmLabel: 'Move',
+          })) {
         res = await moveProjectToFolder(id, dirHandle, { confirmed: true })
       }
       if (res.ok) {
@@ -365,10 +400,14 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene }) {
   }
 
   async function moveCurrentProjectToBrowser(id = currentProjectId.value) {
-    if (!id) return
+    if (!id || refuseWhileBusy('Move project')) return
     await flushProjectWork()
-    if (!confirm('Copy this project into browser storage? The folder on disk is left in place, '
-      + 'and websfm will stop writing to it.')) return
+    if (!(await confirmDialog({
+      title: 'Move into browser storage?',
+      message: 'Copy this project into browser storage? The folder on disk is left in place, '
+        + 'and websfm will stop writing to it.',
+      confirmLabel: 'Copy',
+    }))) return
     await withLoadingOverlay('Moving project into browser storage…', async () => {
       const res = await moveProjectToBrowser(id, { onProgress: fileProgress })
       if (res.ok) {
@@ -407,7 +446,7 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene }) {
   // one. Importing then switching is therefore non-destructive, so it needs no
   // confirmation: the current project is untouched and still in the picker.
   async function importProjectFile(file) {
-    if (!file) return
+    if (!file || refuseWhileBusy('Open project file')) return
     await flushProjectWork()
     const id = await withLoadingOverlay('Opening project file…', async () => {
       try {
@@ -434,6 +473,29 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene }) {
     event.target.value = ''
   }
 
+  // ── Coordinate system ───────────────────────────────────────────────────────
+  // Changing the project CRS re-projects everything stored in it.
+  async function handleSetCrs(crs) {
+    if (!currentProjectId.value) return
+    await ensureProjection(crs).catch(() => {})
+    await setProjectCrs(currentProjectId.value, crs, async (prevCrs, newCrs) => {
+      await reprojectGcps(prevCrs, newCrs)
+      await reprojectFootprints(prevCrs, newCrs)
+      await reprojectPoses(prevCrs, newCrs)
+    })
+  }
+
+  // The one-click projected CRS offered while the project CRS is geographic
+  // (reconstructionStore.crsSuggestion, core/crsSuggest.js). Same path as picking it
+  // by hand; the log line carries the derived value and its inputs.
+  async function applyCrsSuggestion(suggestion) {
+    if (!suggestion?.code) return
+    log(`Project CRS → ${suggestion.code} (${suggestion.name}), suggested from the median of `
+      + `${suggestion.count} camera position(s) at ${suggestion.lat.toFixed(4)}, ${suggestion.lon.toFixed(4)} (lat, lon)`,
+    'info', 'Project')
+    await handleSetCrs(suggestion.code)
+  }
+
   // ── Project picker actions ──────────────────────────────────────────────────
   async function handleSwitchProject(id) {
     if (id === currentProjectId.value) { projectPickerOpen.value = false; return }
@@ -442,6 +504,7 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene }) {
   }
 
   async function handleDeleteProject(id) {
+    if (refuseWhileBusy('Delete project')) return
     await flushProjectWork()
     // Capture before deleting: deleteProjectById nulls currentProjectId itself.
     const wasCurrent = id === currentProjectId.value
@@ -468,12 +531,11 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene }) {
 
   return {
     projectLoading, projectLoadingProgress, projectLoadingLabel,
-    resetInMemoryProject,
     handleCreateProject, handleCancelNewProject,
     folderPrompt, folderPromptProject,
     onFolderConnect, onFolderRepick, openProjectFolder,
     moveCurrentProjectToFolder, moveCurrentProjectToBrowser,
     onSaveProject, importProjectFile, onProjectFilePick,
-    handleSwitchProject, handleDeleteProject,
+    handleSwitchProject, handleDeleteProject, handleSetCrs, applyCrsSuggestion,
   }
 }

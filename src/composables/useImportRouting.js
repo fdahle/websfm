@@ -14,6 +14,7 @@ import { unzipStore } from '../utils/zip.js'
 import { peekArchiveManifest } from '../utils/projectFile.js'
 import { isTiff, isGeoreferencedTiff, probeTiffGeoTags } from '../utils/tiff.js'
 import { useLog } from './useLog.js'
+import { showToast } from './useToasts.js'
 
 // The dropped/picked-file import funnel, lifted out of App.vue. It drives the
 // import-related modals (all state lives in useModalsStore, pulled in here) and
@@ -33,6 +34,14 @@ export function useImportRouting({ addGcps, addFootprints, addSensors, addPoses,
   } = storeToRefs(useModalsStore())
   const { log } = useLog()
 
+  // A file that cannot even be read: log it and tell the user, the same way every
+  // other failed import does — the console alone is invisible to them.
+  function readFailed(what, file, err) {
+    const detail = `${file?.name ? `${file.name}: ` : ''}${err?.message ?? err}`
+    log(`Could not read ${what} — ${detail}`, 'error', 'Import')
+    showToast(`Could not read ${what}`, { detail, kind: 'error', ms: 6000 })
+  }
+
   // Text files past this size are routed by their head (see openDroppedImport).
   const LARGE_TEXT_BYTES = 64 * 1024 * 1024
 
@@ -51,7 +60,7 @@ export function useImportRouting({ addGcps, addFootprints, addSensors, addPoses,
     try {
       text = await file.text()
     } catch (err) {
-      console.error('Could not read import file', err)
+      readFailed('the import file', file, err)
       return
     }
 
@@ -121,7 +130,7 @@ export function useImportRouting({ addGcps, addFootprints, addSensors, addPoses,
     try {
       text = await file.text()
     } catch (err) {
-      console.error('Could not read dropped file', err)
+      readFailed('the dropped file', file, err)
       return
     }
     routeImport(file, detectFileKind(text, file.name).kind)
@@ -306,7 +315,7 @@ export function useImportRouting({ addGcps, addFootprints, addSensors, addPoses,
         for (const f of files) if (isColmapFile(f.name)) add(f.name, await f.arrayBuffer())
       }
     } catch (err) {
-      console.error('Could not read COLMAP model', err)
+      readFailed('the COLMAP model', null, err)
       return
     }
     if (importColmap(model)) activateTab('viewer')
@@ -318,7 +327,7 @@ export function useImportRouting({ addGcps, addFootprints, addSensors, addPoses,
   async function openFiducialObsImport(file) {
     if (!file || !addFiducialObs) return
     let text
-    try { text = await file.text() } catch (err) { console.error('Could not read fiducial file', err); return }
+    try { text = await file.text() } catch (err) { readFailed('the fiducial file', file, err); return }
     const { rows } = parseFiducialObs(text)
     addFiducialObs(rows)
   }
@@ -328,7 +337,7 @@ export function useImportRouting({ addGcps, addFootprints, addSensors, addPoses,
   async function openFiducialMarksImport(file) {
     if (!file || !addFiducialMarks) return
     let text
-    try { text = await file.text() } catch (err) { console.error('Could not read fiducial file', err); return }
+    try { text = await file.text() } catch (err) { readFailed('the fiducial file', file, err); return }
     const { groups } = parseFiducialMarks(text)
     if (!groups.length) { log('Camera fiducials: no marks with finite x_mm / y_mm found', 'warn', 'Sensor'); return }
     if (addFiducialMarks(groups)) showSensors?.()
@@ -395,7 +404,7 @@ export function useImportRouting({ addGcps, addFootprints, addSensors, addPoses,
     try {
       text = await file.text()
     } catch (err) {
-      console.error('Could not read camera file', err)
+      readFailed('the camera file', file, err)
       return
     }
     cameraImportText.value = text

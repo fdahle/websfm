@@ -630,7 +630,7 @@ export function rasterTab(r) {
             commands: [
               { id: 'raster-download',   label: 'Download', icon: 'download' },
               { id: 'raster-style',      label: 'Style…',  icon: 'settings' },
-              { id: 'raster-toggle-map', label: 'On\nMap', icon: 'layers', activeKey: 'rasterOnMap' },
+              { id: 'raster-toggle-map', label: 'On\nMap', icon: 'layers', activeKey: 'rasterVisible' },
               { id: 'raster-remove',     label: 'Remove',  icon: 'remove', danger: true },
             ],
           }
@@ -641,7 +641,7 @@ export function rasterTab(r) {
               { ...(isOrtho ? GEN_ORTHO : GEN_DEM), label: 'Rebuild' },
               { ...(isOrtho ? EXPORT_ORTHO : EXPORT_DEM), label: 'Export', icon: 'download' },
               { id: 'raster-symbology',  label: 'Symbology…', icon: 'settings' },
-              { id: 'raster-toggle-map', label: 'On\nMap', icon: 'layers', activeKey: 'rasterOnMap' },
+              { id: 'raster-toggle-map', label: 'On\nMap', icon: 'layers', activeKey: 'rasterVisible' },
               { id: 'raster-remove',     label: 'Remove',  icon: 'remove', danger: true },
             ],
           },

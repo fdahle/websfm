@@ -315,18 +315,7 @@
   color: rgb(80, 200, 255);
 }
 
-/* Context menu */
-.ctx-menu {
-  position: fixed;
-  z-index: 300;
-  background: var(--panel);
-  border: 1px solid var(--panel-border);
-  border-radius: 6px;
-  padding: 4px;
-  min-width: 165px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
-}
-
+/* Context menu items (the shell is ContextMenu.vue) */
 .ctx-item {
   display: block;
   width: 100%;

@@ -9,11 +9,16 @@ import { useProjectsStore } from '../stores/useProjectsStore.js'
 // dismisses the first that's open and stops. Modal state lives in the stores
 // (pulled in here); the handful of App-local refs/handlers are injected:
 //   pendingImageDelete  — ref, the batch-delete confirm
+//   pendingConfirm + cancelPendingConfirm — the generic confirm dialog (useConfirmations)
 //   exportKind          — ref (from useExports), which export dialog is open
 //   onCancelNewProject  — fn, cancels the (cancellable) New Project dialog
+//   sfmImportSession + onCloseSfmImport — the SfM import session (useSfmInterop)
+//   folderPrompt        — ref (from useProjectLifecycle), the folder reconnect prompt
 export function useModalEscape({
-  pendingImageDelete, exportKind, onCancelNewProject,
+  pendingImageDelete, pendingConfirm, cancelPendingConfirm, exportKind, onCancelNewProject,
   workflowRunning, onCloseWorkflow,
+  sfmImportSession, onCloseSfmImport,
+  folderPrompt,
 }) {
   const glossaryStore = useGlossaryStore()
   const guideStore = useGuideStore()
@@ -31,6 +36,7 @@ export function useModalEscape({
     cameraImportOpen,
     importKindOpen, importKindFile,
     importCloudOpen, importCloudData, importRasterOpen, importRasterData, rasterStyleId,
+    symbologyProductKind, symbologyCloudId, sfmSourceOpen,
     fiducialDetectOpen, fiducialDetectSensorId, fiducialCalibrateOpen, fiducialCalibrateSensorId,
     qualityOpen, debugSummaryOpen,
     infoImageId,
@@ -45,6 +51,8 @@ export function useModalEscape({
   function closeTopModal() {
     const closers = [
       [pendingImageDelete.value, () => { pendingImageDelete.value = null }],
+      [pendingConfirm?.value,    () => cancelPendingConfirm()],
+      [folderPrompt?.value,      () => { folderPrompt.value = null }],
       // Help browsers can be opened on top of any action dialog.
       [glossaryStore.isOpen,     () => glossaryStore.close()],
       [guideStore.isOpen,        () => guideStore.close()],
@@ -53,6 +61,10 @@ export function useModalEscape({
       [fiducialDetectOpen.value, () => { fiducialDetectOpen.value = false; fiducialDetectSensorId.value = null }],
       [fiducialCalibrateOpen.value, () => { fiducialCalibrateOpen.value = false; fiducialCalibrateSensorId.value = null }],
       [rasterStyleId.value,      () => { rasterStyleId.value = null }],
+      [symbologyProductKind.value, () => { symbologyProductKind.value = null }],
+      [symbologyCloudId.value,   () => { symbologyCloudId.value = null }],
+      [sfmImportSession?.value,  () => onCloseSfmImport?.()],
+      [sfmSourceOpen.value,      () => { sfmSourceOpen.value = false }],
       [importRasterOpen.value,   () => { importRasterOpen.value = false; importRasterData.value = null }],
       [importCloudOpen.value,    () => { importCloudOpen.value = false; importCloudData.value = null }],
       [importKindOpen.value,     () => { importKindOpen.value = false; importKindFile.value = null }],

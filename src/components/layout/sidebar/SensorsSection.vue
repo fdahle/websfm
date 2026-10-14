@@ -1,23 +1,24 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { computed } from 'vue'
+import { storeToRefs } from 'pinia'
+import { useSensorsStore } from '../../../stores/useSensorsStore.js'
 import { useContextMenu } from '../../../composables/useContextMenu.js'
+import { useExpandedSet } from '../../../composables/useExpandedSet.js'
+import ContextMenu from './ContextMenu.vue'
+import { useSidebar } from './sidebarContext.js'
 
-const props = defineProps({
-  open:    { type: Boolean, default: false },
-  sensors: { type: Array, default: () => [] },
-  // (sensorId) => number of images using that sensor
-  sensorImageCount: { type: Function, default: () => 0 },
-  // Set of sensor ids with no usable calibration — flagged with a ⚠.
-  incompleteSensorIds: { type: Object, default: () => new Set() },
+defineProps({
+  open: { type: Boolean, default: false },
 })
-const emit = defineEmits(['toggle', 'remove-sensor', 'merge-sensors', 'open-sensor'])
+const emit = defineEmits(['toggle'])
+// sidebar.sensorImageCount(sensorId) → number of images using that sensor;
+// sidebar.incompleteSensorIds — Set of sensor ids with no usable calibration,
+// flagged with a ⚠.
+const sidebar = useSidebar()
+const { sensors } = storeToRefs(useSensorsStore())
 
 // Per-sensor expand state
-const sensorExpanded = ref({})
-function toggleSensorExpand(id) {
-  if (sensorExpanded.value[id]) delete sensorExpanded.value[id]
-  else sensorExpanded.value[id] = true
-}
+const { isExpanded, toggle: toggleSensorExpand } = useExpandedSet()
 
 const round = (n, d = 1) => (n == null ? null : Number(n.toFixed(d)))
 function fmtFocal(s) {
@@ -31,18 +32,12 @@ const hasDistortion = (s) => [s.k1, s.k2, s.k3, s.p1, s.p2].some((v) => v != nul
 
 // Sensor context menu (right-click). { x, y, sensor }
 const { menu: sensorCtx, open: openSensorCtx, close: closeMenu } = useContextMenu()
-function onSensorRightClick(e, sensor) {
-  openSensorCtx(e, { sensor }, { w: 200, h: 160 })
-}
 // Other sensors a right-clicked sensor can be merged into.
 const mergeTargets = computed(() =>
-  sensorCtx.value ? props.sensors.filter((s) => s.id !== sensorCtx.value.sensor.id) : []
+  sensorCtx.value ? sensors.value.filter((s) => s.id !== sensorCtx.value.sensor.id) : []
 )
-function ctxRemoveSensor() { emit('remove-sensor', sensorCtx.value.sensor.id); closeMenu() }
-function ctxMergeSensor(targetId) {
-  emit('merge-sensors', { target: targetId, source: sensorCtx.value.sensor.id })
-  closeMenu()
-}
+// Run a menu item against the sensor it was opened on, then close.
+function fromMenu(fn) { const sensor = sensorCtx.value.sensor; closeMenu(); fn(sensor) }
 </script>
 
 <template>
@@ -58,24 +53,24 @@ function ctxMergeSensor(targetId) {
           class="list-item"
           :title="sensor.label"
           @click="toggleSensorExpand(sensor.id)"
-          @dblclick="emit('open-sensor', sensor.id)"
-          @contextmenu="onSensorRightClick($event, sensor)"
+          @dblclick="sidebar.openSensor(sensor.id)"
+          @contextmenu="openSensorCtx($event, { sensor })"
         >
           <button
             class="expand-btn"
-            :class="{ open: sensorExpanded[sensor.id] }"
+            :class="{ open: isExpanded(sensor.id) }"
             @click.stop="toggleSensorExpand(sensor.id)"
-            :title="sensorExpanded[sensor.id] ? 'Collapse' : 'Expand'"
+            :title="isExpanded(sensor.id) ? 'Collapse' : 'Expand'"
           ></button>
           <span class="item-name">{{ sensor.label }}</span>
           <span
-            v-if="incompleteSensorIds.has(sensor.id)"
+            v-if="sidebar.incompleteSensorIds.has(sensor.id)"
             class="unaligned-tag"
             title="No usable calibration — intrinsics fall back to a default field-of-view guess, which distorts SfM and depth maps. Set a focal length in the sensor table."
           >⚠</span>
-          <span class="obs-badge" :title="`${sensorImageCount(sensor.id)} image(s)`">{{ sensorImageCount(sensor.id) }}</span>
+          <span class="obs-badge" :title="`${sidebar.sensorImageCount(sensor.id)} image(s)`">{{ sidebar.sensorImageCount(sensor.id) }}</span>
         </li>
-        <li v-if="sensorExpanded[sensor.id]" class="img-details" @contextmenu.stop>
+        <li v-if="isExpanded(sensor.id)" class="img-details" @contextmenu.stop>
           <div class="detail-row">
             <span class="detail-label">Source</span>
             <span class="detail-value">{{ sensor.source === 'exif' ? 'EXIF' : 'imported' }}</span>
@@ -105,23 +100,21 @@ function ctxMergeSensor(targetId) {
     </ul>
 
     <!-- Sensor context menu -->
-    <Teleport to="body">
-      <div
-        v-if="sensorCtx"
-        class="ctx-menu"
-        :style="{ left: sensorCtx.x + 'px', top: sensorCtx.y + 'px' }"
-        @click.stop
-      >
-        <div v-if="mergeTargets.length" class="ctx-sub-wrap">
-          <button class="ctx-item ctx-has-sub">Merge into<span class="ctx-arrow">▸</span></button>
-          <div class="ctx-submenu">
-            <button v-for="s in mergeTargets" :key="s.id" class="ctx-item" @click="ctxMergeSensor(s.id)">{{ s.label }}</button>
-          </div>
+    <ContextMenu :menu="sensorCtx">
+      <div v-if="mergeTargets.length" class="ctx-sub-wrap">
+        <button class="ctx-item ctx-has-sub">Merge into<span class="ctx-arrow">▸</span></button>
+        <div class="ctx-submenu">
+          <button
+            v-for="t in mergeTargets"
+            :key="t.id"
+            class="ctx-item"
+            @click="fromMenu((s) => sidebar.mergeSensors({ target: t.id, source: s.id }))"
+          >{{ t.label }}</button>
         </div>
-        <div v-if="mergeTargets.length" class="ctx-sep"></div>
-        <button class="ctx-item danger" @click="ctxRemoveSensor">Remove sensor</button>
       </div>
-    </Teleport>
+      <div v-if="mergeTargets.length" class="ctx-sep"></div>
+      <button class="ctx-item danger" @click="fromMenu((s) => sidebar.removeSensor(s.id))">Remove sensor</button>
+    </ContextMenu>
   </div>
 </template>
 

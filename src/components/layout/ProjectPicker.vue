@@ -3,6 +3,8 @@ import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { isFolderProject, folderLabel } from '../../core/io/folderProject.js'
 import { version as appVersion } from '../../../package.json'
 import Icon from '../Icon.vue'
+import { useInlineRename } from '../../composables/useInlineRename.js'
+import { confirmDialog, confirmOpen } from '../../composables/useConfirmations.js'
 
 const props = defineProps({
   projects: { type: Array, required: true },
@@ -43,33 +45,23 @@ function closeMenu() { menu.value = null }
 // would throw on `null.project` — leaving every item dead.
 function runMenu(fn) { fn(); closeMenu() }
 
-const renamingId = ref(null)
-const renameValue = ref('')
-const renameInput = ref(null)
-
-function startRename(project) {
-  renamingId.value = project.id
-  renameValue.value = project.name
-  setTimeout(() => renameInput.value?.focus(), 0)
-}
-
-function commitRename(id) {
-  const trimmed = renameValue.value.trim()
-  if (trimmed) emit('rename', id, trimmed)
-  renamingId.value = null
-}
-
-function cancelRename() {
-  renamingId.value = null
-}
+const {
+  editingId: renamingId, editingName: renameValue, setInput: setRenameInput,
+  start: startRename, commit: commitRename, cancel: cancelRename,
+} = useInlineRename((id, name) => emit('rename', id, name))
 
 // A folder project's files are on the user's own disk, so removing it here only
 // forgets it — the wording has to say so, or "Delete" reads as a disk delete.
-function confirmDelete(project) {
-  const message = isFolderProject(project)
-    ? `Remove "${project.name}" from websfm? Its folder on disk is left untouched.`
-    : `Delete "${project.name}"? This cannot be undone.`
-  if (confirm(message)) emit('delete', project.id)
+async function confirmDelete(project) {
+  const folder = isFolderProject(project)
+  const ok = await confirmDialog({
+    title: folder ? 'Remove project?' : 'Delete project?',
+    message: folder
+      ? `Remove "${project.name}" from websfm? Its folder on disk is left untouched.`
+      : `Delete "${project.name}"? This cannot be undone.`,
+    confirmLabel: folder ? 'Remove' : 'Delete',
+  })
+  if (ok) emit('delete', project.id)
 }
 
 // A short, glanceable summary line for each project: scene type, then CRS (aerial
@@ -90,15 +82,20 @@ function formatDate(iso) {
   return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
 }
 
+// Escape is consumed here: App's window handler would otherwise also close
+// whatever modal sits under the picker (or exit the active tool mode).
 function onKey(e) {
-  if (e.key === 'Escape') {
-    if (menu.value) closeMenu()
-    else if (renamingId.value) cancelRename()
-    else if (props.dismissible) emit('close')
-  }
+  // A confirm asked from here sits on top and answers its own Escape.
+  if (e.key !== 'Escape' || confirmOpen.value) return
+  if (menu.value) closeMenu()
+  else if (renamingId.value) cancelRename()
+  else if (props.dismissible) emit('close')
+  else return
+  e.stopPropagation()
 }
 
 function onOutsideClick(e) {
+  if (confirmOpen.value) return
   const inMenu = !!e.target.closest('.row-menu')
   if (menu.value && !inMenu) closeMenu()
   if (!props.dismissible) return
@@ -130,13 +127,13 @@ onBeforeUnmount(() => {
       >
         <template v-if="renamingId === project.id">
           <input
-            ref="renameInput"
+            :ref="setRenameInput"
             v-model="renameValue"
             class="rename-input"
             maxlength="80"
-            @keydown.enter="commitRename(project.id)"
-            @keydown.esc="cancelRename"
-            @blur="commitRename(project.id)"
+            @keydown.enter="commitRename"
+            @keydown.esc.stop="cancelRename"
+            @blur="commitRename"
           />
         </template>
         <template v-else>
@@ -191,7 +188,7 @@ onBeforeUnmount(() => {
         :title="menu.id !== currentProjectId ? 'Open this project first' : 'Edit this project’s properties and storage'"
         @click="runMenu(() => emit('settings', menu.id))"
       >Project settings…</button>
-      <button class="menu-item" @click="runMenu(() => startRename(menu.project))">Rename…</button>
+      <button class="menu-item" @click="runMenu(() => startRename(menu.project.id, menu.project.name))">Rename</button>
       <button
         class="menu-item"
         :disabled="menu.id !== currentProjectId"

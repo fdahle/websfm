@@ -20,11 +20,37 @@ import { useUiSettings } from './useUiSettings.js'
 //     consistent. `onDontAsk` (optional) shows a "Don't ask again" checkbox and runs
 //     when it is ticked on accept — only for small, easily redone removals.
 //
+// `pendingConfirm` is module state (like the toast stack), so code outside App.vue —
+// the project lifecycle, the picker, settings dialogs — asks through the same dialog
+// instead of the browser's native confirm(). `confirmDialog` is the awaitable form.
+//
 // Stores are read directly (the composable convention here — see useImportRouting);
 // only the tab-management callbacks are injected, since tabs live in App.vue:
 //   closeTabForImage / closeTabForRaster — close a tab whose subject is going away
 //   removeGcpAndCloseTab — App.vue's remove-GCP-plus-close-its-inspector-tab
 //   removeGcpObservation — App.vue's remove-one-mark-plus-refresh-the-report
+const pendingConfirm = ref(null)
+
+export function askConfirm(opts) {
+  // A newer question replaces an unanswered one, which counts as cancelled.
+  pendingConfirm.value?.onCancel?.()
+  pendingConfirm.value = opts
+}
+
+export function confirmDialog(opts) {
+  return new Promise((resolve) => {
+    askConfirm({ ...opts, onConfirm: () => resolve(true), onCancel: () => resolve(false) })
+  })
+}
+
+export function cancelPendingConfirm() {
+  const onCancel = pendingConfirm.value?.onCancel
+  pendingConfirm.value = null
+  onCancel?.()
+}
+
+export const confirmOpen = computed(() => !!pendingConfirm.value)
+
 export function useConfirmations({ closeTabForImage, closeTabForRaster, removeGcpAndCloseTab, removeGcpObservation }) {
   const imagesStore = useImagesStore()
   const { imageById, removeImage, clearKeypoints } = imagesStore
@@ -64,8 +90,6 @@ export function useConfirmations({ closeTabForImage, closeTabForRaster, removeGc
   })
 
   // ── Generic confirm-before-delete (sidebar removals) ────────────────────────
-  const pendingConfirm = ref(null)
-  function askConfirm(opts) { pendingConfirm.value = opts }
   function runPendingConfirm(dontAskAgain = false) {
     const { onConfirm, onDontAsk } = pendingConfirm.value ?? {}
     pendingConfirm.value = null
@@ -164,7 +188,7 @@ export function useConfirmations({ closeTabForImage, closeTabForRaster, removeGc
 
   return {
     pendingImageDelete, requestRemoveImages, confirmRemoveImages, deleteMessage,
-    pendingConfirm, askConfirm, runPendingConfirm,
+    pendingConfirm, askConfirm, runPendingConfirm, cancelPendingConfirm,
     confirmRemoveSensor, confirmRemoveCloud, confirmRemoveRaster,
     confirmRemoveGcp, confirmRemoveGcpObservation, confirmRemoveShapefile, confirmClearKeypoints,
     confirmRemoveMatches,

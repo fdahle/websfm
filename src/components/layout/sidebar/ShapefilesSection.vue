@@ -1,60 +1,37 @@
 <script setup>
-import { ref, nextTick } from 'vue'
+import { storeToRefs } from 'pinia'
+import { useFootprintsStore } from '../../../stores/useFootprintsStore.js'
 import { useContextMenu } from '../../../composables/useContextMenu.js'
+import { useExpandedSet } from '../../../composables/useExpandedSet.js'
+import { useInlineRename } from '../../../composables/useInlineRename.js'
+import ContextMenu from './ContextMenu.vue'
+import { useSidebar } from './sidebarContext.js'
 
 // Vector polygon layers ("shapefiles") — one row per SET (a computed footprint
 // run, or an imported polygon file). Each set is managed as a unit, like an
 // imported raster: show/hide on the map, rename, zoom to, delete. The polygons
 // inside a set keep their own image link (used for spatial match preselection),
 // shown in the expanded detail.
-const props = defineProps({
+defineProps({
   open: { type: Boolean, default: true },
-  // [{ id, name, source, onMap, footprints: [{ id, imageId, imageName, rings }] }]
-  sets: { type: Array, default: () => [] },
 })
-const emit = defineEmits([
-  'toggle', 'remove-shapefile', 'rename-shapefile', 'set-shapefile-on-map',
-  'zoom-to-shapefile', 'jump-to-image', 'download-shapefile',
-])
+const emit = defineEmits(['toggle'])
+const sidebar = useSidebar()
+// [{ id, name, source, visible, footprints: [{ id, imageId, imageName, rings }] }]
+const { sets } = storeToRefs(useFootprintsStore())
 
-const expanded = ref({})
-function toggleExpand(id) {
-  if (expanded.value[id]) delete expanded.value[id]
-  else expanded.value[id] = true
-}
+const { isExpanded, toggle: toggleExpand } = useExpandedSet()
 
 const linkedCount = (set) => set.footprints.filter((fp) => fp.imageId).length
 const sourceLabel = (set) => (set.source === 'imported' ? 'Imported' : 'Computed')
 
-// Inline rename. Only one set edits at a time; a function ref captures the single
-// live input element (a plain ref inside the v-for would collect into an array).
-const editingId = ref(null)
-const editingName = ref('')
-const renameInput = ref(null)
-function setRenameInput(el) { if (el) renameInput.value = el }
-function startRename(set) {
-  editingId.value = set.id
-  editingName.value = set.name
-  nextTick(() => { renameInput.value?.focus(); renameInput.value?.select() })
-}
-function commitRename() {
-  if (editingId.value == null) return
-  emit('rename-shapefile', { id: editingId.value, name: editingName.value })
-  editingId.value = null
-}
-function cancelRename() { editingId.value = null }
+const {
+  editingId, editingName, setInput: setRenameInput, start: startRename, commit: commitRename, cancel: cancelRename,
+} = useInlineRename((id, name) => sidebar.renameShapefile({ id, name }))
 
 const { menu: ctx, open: openCtx, close: closeMenu } = useContextMenu()
-function onRightClick(e, set) { openCtx(e, { set }, { w: 180, h: 184 }) }
-function ctxToggleMap() {
-  const s = ctx.value.set
-  emit('set-shapefile-on-map', { id: s.id, onMap: s.onMap === false })
-  closeMenu()
-}
-function ctxZoom()   { emit('zoom-to-shapefile', ctx.value.set.id); closeMenu() }
-function ctxDownload() { emit('download-shapefile', ctx.value.set.id); closeMenu() }
-function ctxRename() { startRename(ctx.value.set); closeMenu() }
-function ctxRemove() { emit('remove-shapefile', ctx.value.set.id); closeMenu() }
+// Run a menu item against the row it was opened on, then close.
+function fromMenu(fn) { const set = ctx.value.set; closeMenu(); fn(set) }
 </script>
 
 <template>
@@ -69,14 +46,14 @@ function ctxRemove() { emit('remove-shapefile', ctx.value.set.id); closeMenu() }
         <li
           class="list-item"
           :title="`${set.name} — double-click to zoom`"
-          @dblclick="emit('zoom-to-shapefile', set.id)"
-          @contextmenu="onRightClick($event, set)"
+          @dblclick="sidebar.zoomToShapefile(set.id)"
+          @contextmenu="openCtx($event, { set })"
         >
           <button
             class="expand-btn"
-            :class="{ open: expanded[set.id] }"
+            :class="{ open: isExpanded(set.id) }"
             @click.stop="toggleExpand(set.id)"
-            :title="expanded[set.id] ? 'Collapse' : 'Expand'"
+            :title="isExpanded(set.id) ? 'Collapse' : 'Expand'"
           ></button>
           <input
             v-if="editingId === set.id"
@@ -86,18 +63,18 @@ function ctxRemove() { emit('remove-shapefile', ctx.value.set.id); closeMenu() }
             @click.stop
             @dblclick.stop
             @keydown.enter.prevent="commitRename"
-            @keydown.esc.prevent="cancelRename"
+            @keydown.esc.prevent.stop="cancelRename"
             @blur="commitRename"
           />
           <span v-else class="item-name">{{ set.name }}</span>
           <span
-            v-if="set.onMap !== false"
+            v-if="set.visible !== false"
             class="map-flag"
             title="Shown on the map — right-click to hide"
           >◉</span>
           <span class="obs-badge" :title="`${set.footprints.length} polygon(s)`">{{ set.footprints.length }}</span>
         </li>
-        <li v-if="expanded[set.id]" class="img-details" @contextmenu.stop>
+        <li v-if="isExpanded(set.id)" class="img-details" @contextmenu.stop>
           <div class="detail-row">
             <span class="detail-label">Source</span>
             <span class="detail-value">{{ sourceLabel(set) }}</span>
@@ -110,7 +87,7 @@ function ctxRemove() { emit('remove-shapefile', ctx.value.set.id); closeMenu() }
             <span class="detail-label">Linked to images</span>
             <span class="detail-value">{{ linkedCount(set) }} / {{ set.footprints.length }}</span>
           </div>
-          <button class="link-btn" @click.stop="emit('zoom-to-shapefile', set.id)">Zoom to layer</button>
+          <button class="link-btn" @click.stop="sidebar.zoomToShapefile(set.id)">Zoom to</button>
         </li>
       </template>
 
@@ -119,23 +96,18 @@ function ctxRemove() { emit('remove-shapefile', ctx.value.set.id); closeMenu() }
       </li>
     </ul>
 
-    <Teleport to="body">
-      <div
-        v-if="ctx"
-        class="ctx-menu"
-        :style="{ left: ctx.x + 'px', top: ctx.y + 'px' }"
-        @click.stop
-      >
-        <button class="ctx-item" @click="ctxToggleMap">
-          {{ ctx.set.onMap === false ? 'Display on map' : 'Hide from map' }}
+    <ContextMenu :menu="ctx">
+      <template #default="{ menu }">
+        <button class="ctx-item" @click="fromMenu((s) => sidebar.setShapefileVisible({ id: s.id, visible: s.visible === false }))">
+          {{ menu.set.visible === false ? 'Show on map' : 'Hide from map' }}
         </button>
-        <button class="ctx-item" @click="ctxZoom">Zoom to layer</button>
-        <button class="ctx-item" @click="ctxDownload">Download GeoJSON</button>
-        <button class="ctx-item" @click="ctxRename">Rename…</button>
+        <button class="ctx-item" @click="fromMenu((s) => sidebar.zoomToShapefile(s.id))">Zoom to</button>
+        <button class="ctx-item" @click="fromMenu((s) => sidebar.downloadShapefile(s.id))">Download GeoJSON</button>
+        <button class="ctx-item" @click="fromMenu((s) => startRename(s.id, s.name))">Rename</button>
         <div class="ctx-sep"></div>
-        <button class="ctx-item danger" @click="ctxRemove">Remove</button>
-      </div>
-    </Teleport>
+        <button class="ctx-item danger" @click="fromMenu((s) => sidebar.removeShapefile(s.id))">Remove</button>
+      </template>
+    </ContextMenu>
   </div>
 </template>
 

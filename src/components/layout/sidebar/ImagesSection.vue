@@ -1,32 +1,33 @@
 <script setup>
 import { ref, computed, watch, nextTick } from 'vue'
+import { storeToRefs } from 'pinia'
+import { useImagesStore } from '../../../stores/useImagesStore.js'
+import { useSensorsStore } from '../../../stores/useSensorsStore.js'
+import { usePosesStore } from '../../../stores/usePosesStore.js'
 import { useContextMenu } from '../../../composables/useContextMenu.js'
+import { useExpandedSet } from '../../../composables/useExpandedSet.js'
+import { useInlineRename } from '../../../composables/useInlineRename.js'
 import { isTiff } from '../../../utils/tiff.js'
 import { groupImageSections } from '../../../utils/imageGroups.js'
 import { useVirtualList } from '../../../composables/useVirtualList.js'
+import ContextMenu from './ContextMenu.vue'
+import { useSidebar } from './sidebarContext.js'
 
-const props = defineProps({
-  open:       { type: Boolean, default: true },
-  images:     { type: Array, required: true },
-  sensors:    { type: Array, default: () => [] },
-  poses:      { type: Array, default: () => [] },
-  selectedId: { type: String, default: null },
-  // UUIDs registered in the sparse model; hasSparse gates whether "not in this
-  // set" means unaligned (vs. reconstruction simply not having run yet).
-  alignedUuids: { type: Object, default: () => new Set() },
-  hasSparse:    { type: Boolean, default: false },
-  openTabIds:   { type: Object, default: () => new Set() },
-  // User-named display folders (utils/imageGroups.js); membership is img.groupId.
-  imageGroups:  { type: Array, default: () => [] },
+defineProps({
+  open: { type: Boolean, default: true },
 })
-const emit = defineEmits([
-  'toggle', 'select', 'open', 'show-info', 'zoom-to-image',
-  'delete-keypoints', 'remove-image', 'rename-image', 'convert-to-raster', 'download-image',
-  // { op: 'create', id, imageIds } | { op: 'rename', id, name } | { op: 'remove', id }
-  // | { op: 'assign', imageIds, groupId|null } | { op: 'collapse', id, collapsed }
-  // | { op: 'move', id, delta }
-  'image-group',
-])
+const emit = defineEmits(['toggle'])
+// sidebar.alignedUuids: UUIDs registered in the sparse model; sidebar.hasSparse
+// gates whether "not in this set" means unaligned (vs. reconstruction simply not
+// having run yet). sidebar.imageGroup takes
+// { op: 'create', id, imageIds } | { op: 'rename', id, name } | { op: 'remove', id }
+// | { op: 'assign', imageIds, groupId|null } | { op: 'collapse', id, collapsed }
+// | { op: 'move', id, delta }
+const sidebar = useSidebar()
+// imageGroups: user-named display folders (utils/imageGroups.js); membership is img.groupId.
+const { images, imageGroups, selectedId } = storeToRefs(useImagesStore())
+const { sensors } = storeToRefs(useSensorsStore())
+const { poses } = storeToRefs(usePosesStore())
 
 // ── Groups ───────────────────────────────────────────────────────────────────
 // With no groups the list is flat, exactly as before groups existed. Once one
@@ -36,18 +37,17 @@ const emit = defineEmits([
 // (a group id, or UNGROUPED); it is the drop-target identity.
 const UNGROUPED = '__ungrouped__'
 const ungroupedCollapsed = ref(false)
-const sections = computed(() => groupImageSections(props.images, props.imageGroups))
+const sections = computed(() => groupImageSections(images.value, imageGroups.value))
 // An expanded image contributes a third row kind, its 'details' card, right after
 // it — so every element the list renders is one entry here (the virtual list's unit).
 const rows = computed(() => {
   const out = []
-  const open = expanded.value
   const pushImage = (img, groupKey) => {
     out.push({ kind: 'image', key: img.id, img, groupKey })
-    if (open[img.id]) out.push({ kind: 'details', key: `details:${img.id}`, img, groupKey })
+    if (isExpanded(img.id)) out.push({ kind: 'details', key: `details:${img.id}`, img, groupKey })
   }
-  if (!props.imageGroups.length) {
-    for (const img of props.images) pushImage(img, undefined)
+  if (!imageGroups.value.length) {
+    for (const img of images.value) pushImage(img, undefined)
     return out
   }
   for (const { group, images } of sections.value) {
@@ -68,32 +68,25 @@ function membersOf(groupKey) {
 
 function setCollapsed(groupKey, collapsed) {
   if (groupKey === UNGROUPED) ungroupedCollapsed.value = collapsed
-  else emit('image-group', { op: 'collapse', id: groupKey, collapsed })
+  else sidebar.imageGroup({ op: 'collapse', id: groupKey, collapsed })
 }
 function toggleGroup(row) { setCollapsed(row.groupKey, !row.collapsed) }
 
 // Inline group rename (same interaction as an image rename).
-const editingGroupId = ref(null)
-const editingGroupName = ref('')
-const groupRenameInput = ref(null)
-function setGroupRenameInput(el) { if (el) groupRenameInput.value = el }
+const {
+  editingId: editingGroupId, editingName: editingGroupName, setInput: setGroupRenameInput,
+  start: beginGroupRename, commit: commitGroupRename, cancel: cancelGroupRename,
+} = useInlineRename((id, name) => sidebar.imageGroup({ op: 'rename', id, name }))
 function startGroupRename(id) {
-  const group = props.imageGroups.find((g) => g.id === id)
+  const group = imageGroups.value.find((g) => g.id === id)
   if (!group) return
-  editingGroupId.value = id
-  editingGroupName.value = group.name
-  // In a long (virtualised) list the header may be outside the rendered window.
+  // In a long (virtualised) list the header may be outside the rendered window:
+  // reveal it first, then start editing (which focuses on the next tick).
   nextTick(() => {
     revealRow(`group:${id}`)
-    nextTick(() => { groupRenameInput.value?.focus(); groupRenameInput.value?.select() })
+    beginGroupRename(id, group.name)
   })
 }
-function commitGroupRename() {
-  if (editingGroupId.value == null) return
-  emit('image-group', { op: 'rename', id: editingGroupId.value, name: editingGroupName.value })
-  editingGroupId.value = null
-}
-function cancelGroupRename() { editingGroupId.value = null }
 
 // Drag image rows onto a group header (or any row of that group) to move them.
 // A private MIME type keeps this apart from file drops: the sidebar's file
@@ -124,14 +117,15 @@ function onDrop(e, groupKey) {
   dropTarget.value = null
   let imageIds = []
   try { imageIds = JSON.parse(e.dataTransfer.getData(DRAG_TYPE)) } catch { return }
-  emit('image-group', { op: 'assign', imageIds, groupId: groupKey === UNGROUPED ? null : groupKey })
+  sidebar.imageGroup({ op: 'assign', imageIds, groupId: groupKey === UNGROUPED ? null : groupKey })
 }
 
 // Group header context menu. { x, y, row }
 const { menu: groupCtx, open: openGroupCtx, close: closeGroupMenu } = useContextMenu()
 const groupCtxIndex = computed(() =>
-  groupCtx.value?.row.group ? props.imageGroups.findIndex((g) => g.id === groupCtx.value.row.groupKey) : -1)
-function onGroupRightClick(e, row) { openGroupCtx(e, { row }, { w: 200, h: 200 }) }
+  groupCtx.value?.row.group ? imageGroups.value.findIndex((g) => g.id === groupCtx.value.row.groupKey) : -1)
+// Run a group menu item against the header it was opened on, then close.
+function fromGroupMenu(fn) { const { row } = groupCtx.value; closeGroupMenu(); fn(row) }
 function groupCtxSelect() {
   const { row } = groupCtx.value
   const ids = membersOf(row.groupKey).map((i) => i.id)
@@ -140,42 +134,29 @@ function groupCtxSelect() {
   anchor.value = ids[0] ?? null
   closeGroupMenu()
 }
-function groupCtxRename() { startGroupRename(groupCtx.value.row.groupKey); closeGroupMenu() }
-function groupCtxMove(delta) {
-  emit('image-group', { op: 'move', id: groupCtx.value.row.groupKey, delta })
-  closeGroupMenu()
-}
 function groupCtxCollapseAll(collapsed) {
-  for (const g of props.imageGroups) if (g.collapsed !== collapsed) setCollapsed(g.id, collapsed)
+  for (const g of imageGroups.value) if (g.collapsed !== collapsed) setCollapsed(g.id, collapsed)
   ungroupedCollapsed.value = collapsed
-  closeGroupMenu()
-}
-function groupCtxRemove() {
-  emit('image-group', { op: 'remove', id: groupCtx.value.row.groupKey })
   closeGroupMenu()
 }
 
 // Images added instantly, but metadata (EXIF + dimensions) extracts async per
 // file — for a 444-image drop that's a visible lag. Surface the progress so the
 // (disabled) pipeline buttons aren't the only signal something is still running.
-const metaPending = computed(() => props.images.filter((i) => i.loading).length)
-const metaDone = computed(() => props.images.length - metaPending.value)
+const metaPending = computed(() => images.value.filter((i) => i.loading).length)
+const metaDone = computed(() => images.value.length - metaPending.value)
 
 // Per-image expand state
-const expanded = ref({})
-function toggleExpand(id) {
-  if (expanded.value[id]) delete expanded.value[id]
-  else expanded.value[id] = true
-}
+const { isExpanded, toggle: toggleExpand } = useExpandedSet()
 
 // Pose record (exterior orientation) for an image, if any. Indexed once per pose
 // list: a scan of every pose per row was O(images × poses).
 const poseByImageId = computed(() => {
   const m = new Map()
-  for (const p of props.poses) if (p.imageId != null && !m.has(p.imageId)) m.set(p.imageId, p)
+  for (const p of poses.value) if (p.imageId != null && !m.has(p.imageId)) m.set(p.imageId, p)
   return m
 })
-const sensorById = computed(() => new Map(props.sensors.map((s) => [s.id, s])))
+const sensorById = computed(() => new Map(sensors.value.map((s) => [s.id, s])))
 function poseFor(img) {
   return poseByImageId.value.get(img.id) || null
 }
@@ -195,15 +176,13 @@ function filmSensor(img) {
   return s?.kind === 'film' ? s : null
 }
 // Marks placed on this image (F4). <3 ⇒ interior orientation incomplete.
-// Detection and hand-marking write fiducialDetections; fiducialObs is the
-// pre-split field, read only for an image that has not migrated yet.
 function fiducialCount(img) {
-  return img.fiducialDetections?.length || img.fiducialObs?.length || 0
+  return img.fiducialDetections?.length || 0
 }
 // True once a sparse model exists but this image wasn't registered into it — the
 // reconstruction couldn't place its camera. Meaningless before reconstruction runs.
 function isUnaligned(img) {
-  return props.hasSparse && !props.alignedUuids.has(img.uuid)
+  return sidebar.hasSparse && !sidebar.alignedUuids.has(img.uuid)
 }
 
 // Why an image can't be shown. 'source-lost' is the mid-session case: the file
@@ -249,10 +228,10 @@ function handleItemClick(e, img) {
     localSelected.value = [img.id]
     anchor.value = img.id
   }
-  emit('select', img.id)
+  sidebar.selectImage(img.id)
 }
 
-watch(() => props.selectedId, (newId) => {
+watch(selectedId, (newId) => {
   if (suppressWatch) { suppressWatch = false; return }
   localSelected.value = newId ? [newId] : []
   anchor.value = newId
@@ -267,7 +246,7 @@ const ctxTargets = computed(() => {
   if (!ctxMenu.value) return []
   const { img } = ctxMenu.value
   if (localSelected.value.length > 1 && selectedSet.value.has(img.id))
-    return props.images.filter((i) => selectedSet.value.has(i.id))
+    return images.value.filter((i) => selectedSet.value.has(i.id))
   return [img]
 })
 const ctxIsMulti = computed(() => ctxTargets.value.length > 1)
@@ -289,21 +268,10 @@ const ctxIsTiff = computed(() => !ctxIsMulti.value
 
 // Inline rename. Multi-selection deliberately cannot be renamed as one action;
 // the context menu leaves Rename disabled until it targets a single image.
-const editingImageId = ref(null)
-const editingName = ref('')
-const renameInput = ref(null)
-function setRenameInput(el) { if (el) renameInput.value = el }
-function startRename(img) {
-  editingImageId.value = img.id
-  editingName.value = img.name
-  nextTick(() => { renameInput.value?.focus(); renameInput.value?.select() })
-}
-function commitRename() {
-  if (editingImageId.value == null) return
-  emit('rename-image', { id: editingImageId.value, name: editingName.value })
-  editingImageId.value = null
-}
-function cancelRename() { editingImageId.value = null }
+const {
+  editingId: editingImageId, editingName, setInput: setRenameInput,
+  start: startRename, commit: commitRename, cancel: cancelRename,
+} = useInlineRename((id, name) => sidebar.renameImage({ id, name }))
 
 function onRightClick(e, img) {
   // Right-clicking outside the current selection collapses to that single image
@@ -311,55 +279,48 @@ function onRightClick(e, img) {
     localSelected.value = [img.id]
     anchor.value = img.id
     suppressWatch = true
-    emit('select', img.id)
+    sidebar.selectImage(img.id)
   }
-  openImageCtx(e, { img }, { w: 200, h: 318 })
+  openImageCtx(e, { img })
 }
 
 // The action is the same either way (openImageTab focuses an existing tab), but
 // the label should tell you which one you'll get. Tab id per useTabs.openImageTab.
 const ctxOpenLabel = computed(() =>
-  props.openTabIds.has(`img:${ctxMenu.value?.img?.id}`) ? 'Switch to tab' : 'Open in tab')
+  sidebar.openTabIds.has(`img:${ctxMenu.value?.img?.id}`) ? 'Switch to tab' : 'Open in tab')
 
-function ctxOpen()     { emit('open', ctxMenu.value.img.id); closeMenu() }
-function ctxInfo()     { emit('show-info', ctxMenu.value.img.id); closeMenu() }
-function ctxDownload() { emit('download-image', ctxMenu.value.img.id); closeMenu() }
-function ctxZoom()     { emit('zoom-to-image', ctxMenu.value.img.id); closeMenu() }
-function ctxRename()   { startRename(ctxMenu.value.img); closeMenu() }
+// Run a menu item against the image it was opened on, then close.
+function fromMenu(fn) { const { img } = ctxMenu.value; closeMenu(); fn(img) }
 function ctxDeleteKp() {
-  // Emit the whole target set at once so the parent confirms a batch with a single
+  // Pass the whole target set at once so App confirms a batch with a single
   // prompt (matches the remove-image path).
   const ids = ctxTargets.value.filter((img) => img.kpStatus === 'done').map((img) => img.id)
-  if (ids.length) emit('delete-keypoints', ids)
+  if (ids.length) sidebar.deleteKeypoints(ids)
   closeMenu()
 }
 // Grouping acts on the whole target set, like remove/delete-keypoints.
-const ctxMoveTargets = computed(() => props.imageGroups.filter((g) =>
+const ctxMoveTargets = computed(() => imageGroups.value.filter((g) =>
   ctxTargets.value.some((img) => img.groupId !== g.id)))
 const ctxInGroup = computed(() => ctxTargets.value.some((img) =>
-  img.groupId != null && props.imageGroups.some((g) => g.id === img.groupId)))
+  img.groupId != null && imageGroups.value.some((g) => g.id === img.groupId)))
 function ctxNewGroup() {
   const id = crypto.randomUUID()
-  emit('image-group', { op: 'create', id, imageIds: ctxTargets.value.map((img) => img.id) })
+  sidebar.imageGroup({ op: 'create', id, imageIds: ctxTargets.value.map((img) => img.id) })
   closeMenu()
   nextTick(() => startGroupRename(id))
 }
 function ctxMoveTo(groupId) {
-  emit('image-group', { op: 'assign', imageIds: ctxTargets.value.map((img) => img.id), groupId })
+  sidebar.imageGroup({ op: 'assign', imageIds: ctxTargets.value.map((img) => img.id), groupId })
   closeMenu()
 }
 function ctxUngroup() {
-  emit('image-group', { op: 'assign', imageIds: ctxTargets.value.map((img) => img.id), groupId: null })
-  closeMenu()
-}
-function ctxToRaster() {
-  emit('convert-to-raster', ctxMenu.value.img.id)
+  sidebar.imageGroup({ op: 'assign', imageIds: ctxTargets.value.map((img) => img.id), groupId: null })
   closeMenu()
 }
 function ctxRemove() {
-  // Emit the whole target set at once so the parent can confirm a batch delete
+  // Pass the whole target set at once so App can confirm a batch delete
   // with a single prompt.
-  emit('remove-image', ctxTargets.value.map((img) => img.id))
+  sidebar.removeImage(ctxTargets.value.map((img) => img.id))
   closeMenu()
 }
 
@@ -372,7 +333,7 @@ function ctxRemove() {
 const ROW_PX = 24
 const DETAIL_ROW_PX = 20
 function detailLines(img) {
-  return 4 + (filmSensor(img) ? 1 : 0) + (props.hasSparse ? 1 : 0)
+  return 4 + (filmSensor(img) ? 1 : 0) + (sidebar.hasSparse ? 1 : 0)
 }
 function rowHeight(row) {
   return row.kind === 'details' ? 8 + DETAIL_ROW_PX * detailLines(row.img) + 4 : ROW_PX
@@ -413,7 +374,7 @@ function revealRow(key) {
           :class="{ 'drop-target': dropTarget === row.groupKey, 'group-ungrouped': !row.group }"
           :title="row.group ? `${row.group.name} — ${row.count} image${row.count !== 1 ? 's' : ''}` : 'Images in no group'"
           @click="toggleGroup(row)"
-          @contextmenu="onGroupRightClick($event, row)"
+          @contextmenu="openGroupCtx($event, { row })"
           @dragover="onDragOver($event, row.groupKey)"
           @drop="onDrop($event, row.groupKey)"
         >
@@ -425,7 +386,7 @@ function revealRow(key) {
             class="rename-input"
             @click.stop
             @keydown.enter.prevent="commitGroupRename"
-            @keydown.esc.prevent="cancelGroupRename"
+            @keydown.esc.prevent.stop="cancelGroupRename"
             @blur="commitGroupRename"
           />
           <span v-else class="group-name">{{ row.group ? row.group.name : 'Ungrouped' }}</span>
@@ -438,7 +399,7 @@ function revealRow(key) {
           :title="rowTitle(row.img)"
           :draggable="imageGroups.length > 0 && editingImageId !== row.img.id"
           @click="handleItemClick($event, row.img)"
-          @dblclick="emit('open', row.img.id)"
+          @dblclick="sidebar.openImage(row.img.id)"
           @contextmenu="onRightClick($event, row.img)"
           @dragstart="onRowDragStart($event, row.img)"
           @dragover="onDragOver($event, row.groupKey)"
@@ -446,9 +407,9 @@ function revealRow(key) {
         >
           <button
             class="expand-btn"
-            :class="{ open: expanded[row.img.id] }"
+            :class="{ open: isExpanded(row.img.id) }"
             @click.stop="toggleExpand(row.img.id)"
-            :title="expanded[row.img.id] ? 'Collapse' : 'Expand'"
+            :title="isExpanded(row.img.id) ? 'Collapse' : 'Expand'"
           ></button>
           <span v-if="row.img.previewPending" class="status-dot loading"></span>
           <span v-else-if="row.img.loading" class="status-dot loading" title="Reading metadata…"></span>
@@ -462,7 +423,7 @@ function revealRow(key) {
             @click.stop
             @dblclick.stop
             @keydown.enter.prevent="commitRename"
-            @keydown.esc.prevent="cancelRename"
+            @keydown.esc.prevent.stop="cancelRename"
             @blur="commitRename"
           />
           <span v-else class="item-name">{{ row.img.name }}</span>
@@ -505,7 +466,7 @@ function revealRow(key) {
               :title="fiducialCount(row.img) < 3 ? 'Interior orientation incomplete — mark ≥3 fiducials' : ''"
             >{{ fiducialCount(row.img) }}{{ fiducialCount(row.img) < 3 ? ' (incomplete)' : '' }}</span>
           </div>
-          <div v-if="hasSparse" class="detail-row">
+          <div v-if="sidebar.hasSparse" class="detail-row">
             <span class="detail-label">Registered</span>
             <span class="detail-value" :class="{ 'detail-error': isUnaligned(row.img) }">{{ isUnaligned(row.img) ? 'no' : 'yes' }}</span>
           </div>
@@ -516,21 +477,16 @@ function revealRow(key) {
     </ul>
 
     <!-- Image context menu -->
-    <Teleport to="body">
-      <div
-        v-if="ctxMenu"
-        class="ctx-menu"
-        :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }"
-        @click.stop
-      >
+    <ContextMenu :menu="ctxMenu">
+      <template #default>
         <!-- Groups, in the order every sidebar menu uses: go there → inspect →
              change what it is → destructive. -->
-        <button class="ctx-item" :class="{ 'ctx-disabled': ctxIsMulti }" :disabled="ctxIsMulti" @click="ctxOpen">{{ ctxOpenLabel }}</button>
-        <button class="ctx-item" :class="{ 'ctx-disabled': ctxIsMulti || !ctxHasPosition }" :disabled="ctxIsMulti || !ctxHasPosition" @click="ctxZoom">Zoom to position on map</button>
+        <button class="ctx-item" :class="{ 'ctx-disabled': ctxIsMulti }" :disabled="ctxIsMulti" @click="fromMenu((img) => sidebar.openImage(img.id))">{{ ctxOpenLabel }}</button>
+        <button class="ctx-item" :class="{ 'ctx-disabled': ctxIsMulti || !ctxHasPosition }" :disabled="ctxIsMulti || !ctxHasPosition" @click="fromMenu((img) => sidebar.zoomToImage(img.id))">Locate on map</button>
         <div class="ctx-sep"></div>
-        <button class="ctx-item" :class="{ 'ctx-disabled': ctxIsMulti }" :disabled="ctxIsMulti" @click="ctxInfo">Show information</button>
-        <button class="ctx-item" :class="{ 'ctx-disabled': ctxIsMulti }" :disabled="ctxIsMulti" @click="ctxDownload">Download original</button>
-        <button class="ctx-item" :class="{ 'ctx-disabled': ctxIsMulti }" :disabled="ctxIsMulti" @click="ctxRename">Rename</button>
+        <button class="ctx-item" :class="{ 'ctx-disabled': ctxIsMulti }" :disabled="ctxIsMulti" @click="fromMenu((img) => sidebar.showInfo(img.id))">Show information</button>
+        <button class="ctx-item" :class="{ 'ctx-disabled': ctxIsMulti }" :disabled="ctxIsMulti" @click="fromMenu((img) => sidebar.downloadImage(img.id))">Download original</button>
+        <button class="ctx-item" :class="{ 'ctx-disabled': ctxIsMulti }" :disabled="ctxIsMulti" @click="fromMenu((img) => startRename(img.id, img.name))">Rename</button>
         <div class="ctx-sep"></div>
         <button class="ctx-item" @click="ctxNewGroup">{{ ctxIsMulti ? 'New group from selection' : 'New group with this image' }}</button>
         <div v-if="ctxMoveTargets.length" class="ctx-sub-wrap">
@@ -545,38 +501,33 @@ function revealRow(key) {
           <button
             class="ctx-item"
             title="Re-import this GeoTIFF as an imported DEM / orthophoto"
-            @click="ctxToRaster"
+            @click="fromMenu((img) => sidebar.convertImageToRaster(img.id))"
           >Convert to reference data</button>
         </template>
         <div class="ctx-sep"></div>
         <button v-if="ctxHasKp" class="ctx-item danger" @click="ctxDeleteKp">Delete keypoints</button>
         <button class="ctx-item danger" @click="ctxRemove">{{ ctxIsMulti ? 'Remove images' : 'Remove image' }}</button>
-      </div>
-    </Teleport>
+      </template>
+    </ContextMenu>
 
     <!-- Group header context menu -->
-    <Teleport to="body">
-      <div
-        v-if="groupCtx"
-        class="ctx-menu"
-        :style="{ left: groupCtx.x + 'px', top: groupCtx.y + 'px' }"
-        @click.stop
-      >
-        <button class="ctx-item" :class="{ 'ctx-disabled': !groupCtx.row.count }" :disabled="!groupCtx.row.count" @click="groupCtxSelect">Select images</button>
-        <template v-if="groupCtx.row.group">
-          <button class="ctx-item" @click="groupCtxRename">Rename</button>
-          <button class="ctx-item" :class="{ 'ctx-disabled': groupCtxIndex <= 0 }" :disabled="groupCtxIndex <= 0" @click="groupCtxMove(-1)">Move up</button>
-          <button class="ctx-item" :class="{ 'ctx-disabled': groupCtxIndex >= imageGroups.length - 1 }" :disabled="groupCtxIndex >= imageGroups.length - 1" @click="groupCtxMove(1)">Move down</button>
+    <ContextMenu :menu="groupCtx">
+      <template #default="{ menu }">
+        <button class="ctx-item" :class="{ 'ctx-disabled': !menu.row.count }" :disabled="!menu.row.count" @click="groupCtxSelect">Select images</button>
+        <template v-if="menu.row.group">
+          <button class="ctx-item" @click="fromGroupMenu((row) => startGroupRename(row.groupKey))">Rename</button>
+          <button class="ctx-item" :class="{ 'ctx-disabled': groupCtxIndex <= 0 }" :disabled="groupCtxIndex <= 0" @click="fromGroupMenu((row) => sidebar.imageGroup({ op: 'move', id: row.groupKey, delta: -1 }))">Move up</button>
+          <button class="ctx-item" :class="{ 'ctx-disabled': groupCtxIndex >= imageGroups.length - 1 }" :disabled="groupCtxIndex >= imageGroups.length - 1" @click="fromGroupMenu((row) => sidebar.imageGroup({ op: 'move', id: row.groupKey, delta: 1 }))">Move down</button>
         </template>
         <div class="ctx-sep"></div>
         <button class="ctx-item" @click="groupCtxCollapseAll(true)">Collapse all</button>
         <button class="ctx-item" @click="groupCtxCollapseAll(false)">Expand all</button>
-        <template v-if="groupCtx.row.group">
+        <template v-if="menu.row.group">
           <div class="ctx-sep"></div>
-          <button class="ctx-item" title="The images stay in the project, ungrouped" @click="groupCtxRemove">Remove group</button>
+          <button class="ctx-item" title="The images stay in the project, ungrouped" @click="fromGroupMenu((row) => sidebar.imageGroup({ op: 'remove', id: row.groupKey }))">Remove group</button>
         </template>
-      </div>
-    </Teleport>
+      </template>
+    </ContextMenu>
   </div>
 </template>
 

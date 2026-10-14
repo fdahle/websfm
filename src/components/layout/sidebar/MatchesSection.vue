@@ -1,13 +1,15 @@
 <script setup>
 import { ref } from 'vue'
 import { useContextMenu } from '../../../composables/useContextMenu.js'
+import ContextMenu from './ContextMenu.vue'
+import { useSidebar } from './sidebarContext.js'
 
-const props = defineProps({
+defineProps({
   open: { type: Boolean, default: true },
-  // Pairwise-match summary: { total, verified, running, error, used?, disabled? }
-  matchStats: { type: Object, default: () => ({ total: 0, verified: 0, running: 0, error: 0 }) },
 })
-const emit = defineEmits(['toggle', 'open-matches', 'remove-matches', 'download-matches'])
+const emit = defineEmits(['toggle'])
+// sidebar.matchStats — pairwise-match summary: { total, verified, running, error, used?, excluded? }
+const sidebar = useSidebar()
 
 // Matches summary is a single expandable row (no per-pair list — pairs are O(N²)
 // and live in the dedicated modal). This just toggles the inline stats card.
@@ -16,16 +18,11 @@ const matchesExpanded = ref(false)
 // Match summary context menu (right-click). The pair list itself lives in the
 // dedicated modal; destructive removal is routed to App's shared confirmation.
 const { menu: matchesCtx, open: openMatchesCtx, close: closeMenu } = useContextMenu()
-function onMatchesRightClick(e) {
-  openMatchesCtx(e, {}, { w: 180, h: 116 })
-}
-function ctxOpenMatches() {
-  emit('open-matches')
-  closeMenu()
-}
+// Close the menu, then run the item.
+function fromMenu(fn) { closeMenu(); fn() }
 function ctxRemoveMatches() {
-  if (props.matchStats.running) return
-  emit('remove-matches')
+  if (sidebar.matchStats.running) return
+  sidebar.removeMatches()
   closeMenu()
 }
 </script>
@@ -35,17 +32,17 @@ function ctxRemoveMatches() {
     <button class="section-hd" @click="emit('toggle')">
       <span class="chevron">{{ open ? '▾' : '▸' }}</span>
       <span class="section-name">Matches</span>
-      <span v-if="matchStats.running" class="status-dot running"></span>
-      <span v-else-if="matchStats.verified" class="badge">{{ matchStats.verified }}</span>
+      <span v-if="sidebar.matchStats.running" class="status-dot running"></span>
+      <span v-else-if="sidebar.matchStats.verified" class="badge">{{ sidebar.matchStats.verified }}</span>
     </button>
     <ul v-if="open" class="item-list">
-      <template v-if="matchStats.total">
+      <template v-if="sidebar.matchStats.total">
         <li
           class="list-item"
           title="Double-click to open the match list"
           @click="matchesExpanded = !matchesExpanded"
-          @dblclick="emit('open-matches')"
-          @contextmenu="onMatchesRightClick"
+          @dblclick="sidebar.openMatches()"
+          @contextmenu="openMatchesCtx"
         >
           <button
             class="expand-btn"
@@ -54,55 +51,48 @@ function ctxRemoveMatches() {
             :title="matchesExpanded ? 'Collapse' : 'Expand'"
           ></button>
           <span class="item-name">Verified pairs</span>
-          <span class="obs-badge" :title="`${matchStats.verified} of ${matchStats.total} pair(s)`">{{ matchStats.verified }}</span>
+          <span class="obs-badge" :title="`${sidebar.matchStats.verified} of ${sidebar.matchStats.total} pair(s)`">{{ sidebar.matchStats.verified }}</span>
         </li>
         <li v-if="matchesExpanded" class="img-details">
           <div class="detail-row">
             <span class="detail-label">Verified</span>
-            <span class="detail-value">{{ matchStats.verified.toLocaleString() }}</span>
+            <span class="detail-value">{{ sidebar.matchStats.verified.toLocaleString() }}</span>
           </div>
           <div class="detail-row">
             <span class="detail-label">Total pairs</span>
-            <span class="detail-value">{{ matchStats.total.toLocaleString() }}</span>
+            <span class="detail-value">{{ sidebar.matchStats.total.toLocaleString() }}</span>
           </div>
-          <div v-if="matchStats.used != null" class="detail-row">
+          <div v-if="sidebar.matchStats.used != null" class="detail-row">
             <span class="detail-label">Used in model</span>
-            <span class="detail-value">{{ matchStats.used.toLocaleString() }}</span>
+            <span class="detail-value">{{ sidebar.matchStats.used.toLocaleString() }}</span>
           </div>
-          <div v-if="matchStats.disabled" class="detail-row">
+          <div v-if="sidebar.matchStats.excluded" class="detail-row">
             <span class="detail-label">Excluded</span>
-            <span class="detail-value">{{ matchStats.disabled.toLocaleString() }}</span>
+            <span class="detail-value">{{ sidebar.matchStats.excluded.toLocaleString() }}</span>
           </div>
-          <div v-if="matchStats.error" class="detail-row">
+          <div v-if="sidebar.matchStats.error" class="detail-row">
             <span class="detail-label">Failed</span>
-            <span class="detail-value detail-error">{{ matchStats.error }}</span>
+            <span class="detail-value detail-error">{{ sidebar.matchStats.error }}</span>
           </div>
         </li>
       </template>
-      <li v-else-if="matchStats.running" class="empty">Matching…</li>
+      <li v-else-if="sidebar.matchStats.running" class="empty">Matching…</li>
       <li v-else class="empty">No matches — run matching</li>
     </ul>
 
     <!-- Match context menu -->
-    <Teleport to="body">
-      <div
-        v-if="matchesCtx"
-        class="ctx-menu"
-        :style="{ left: matchesCtx.x + 'px', top: matchesCtx.y + 'px' }"
-        @click.stop
-      >
-        <button class="ctx-item" @click="ctxOpenMatches">Open match list</button>
-        <button class="ctx-item" @click="emit('download-matches'); closeMenu()">Download matches (JSON)</button>
-        <div class="ctx-sep"></div>
-        <button
-          class="ctx-item danger"
-          :class="{ 'ctx-disabled': matchStats.running }"
-          :disabled="!!matchStats.running"
-          :title="matchStats.running ? 'Cancel matching before removing matches' : ''"
-          @click="ctxRemoveMatches"
-        >Remove matches</button>
-      </div>
-    </Teleport>
+    <ContextMenu :menu="matchesCtx">
+      <button class="ctx-item" @click="fromMenu(() => sidebar.openMatches())">Open match list</button>
+      <button class="ctx-item" @click="fromMenu(() => sidebar.downloadMatches())">Download JSON</button>
+      <div class="ctx-sep"></div>
+      <button
+        class="ctx-item danger"
+        :class="{ 'ctx-disabled': sidebar.matchStats.running }"
+        :disabled="!!sidebar.matchStats.running"
+        :title="sidebar.matchStats.running ? 'Cancel matching before removing matches' : ''"
+        @click="ctxRemoveMatches"
+      >Remove matches</button>
+    </ContextMenu>
   </div>
 </template>
 

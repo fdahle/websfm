@@ -26,7 +26,7 @@ const props = defineProps({
   activeImageName: { type: String, default: null },
   imageViewState: { type: Object, default: null },
   // The raster tab currently in front, if any: { kind: 'dem'|'ortho',
-  // imported: boolean, onMap: boolean, mapBlocked?: string — why a computed product
+  // imported: boolean, visible: boolean, mapBlocked?: string — why a computed product
   // cannot go on the map }. Drives the contextual Raster tab, the
   // exact mirror of PICTURE_TAB for an image tab.
   activeRaster: { type: Object, default: null },
@@ -117,7 +117,7 @@ function isActive(cmd) {
   if (isDisabled(cmd)) return false
   if (cmd.activeKey === 'consoleOpen') return props.consoleOpen
   if (VIEW_KEYS.has(cmd.activeKey)) return !!props.viewState[cmd.activeKey]
-  if (cmd.activeKey === 'rasterOnMap')    return !!props.activeRaster?.onMap
+  if (cmd.activeKey === 'rasterVisible')    return !!props.activeRaster?.visible
   if (cmd.selected !== undefined) return cmd.selected // a map measure-target row
   if (cmd.basemap) return props.viewState.mapBasemap === cmd.basemap
   // Edit GCPs is one mode per view: the map's own flag, else the image view's.
@@ -148,7 +148,7 @@ function disabledReason(cmd) {
   if (cmd.measureTool && cmd.demOnly && !m?.heights) return 'Needs the DEM elevation values, which are not loaded yet'
   if (cmd.needsSavedMeasurements && !m?.savedCount) return 'No saved measurements on this raster yet'
   // A computed product in the local frame has no map position (productLayers.js).
-  if (cmd.activeKey === 'rasterOnMap' && props.activeRaster?.mapBlocked) return props.activeRaster.mapBlocked
+  if (cmd.activeKey === 'rasterVisible' && props.activeRaster?.mapBlocked) return props.activeRaster.mapBlocked
   if (cmd.id === 'raster-style' && props.activeRaster?.imported && !props.activeRaster.styleable)
     return 'Nothing to style — an 8-bit raster with up to 3 bands is shown as it is'
   if (cmd.basemap && props.viewState.mapBasemapReasons?.[cmd.basemap]) return props.viewState.mapBasemapReasons[cmd.basemap]

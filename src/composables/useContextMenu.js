@@ -13,16 +13,12 @@ export function useContextMenu() {
   const menu = ref(null) // { x, y, …payload } | null
   const close = () => { menu.value = null }
 
-  // Open at the cursor, clamped so the menu (w×h) stays on screen. Closes any
-  // other open menu first.
-  function open(e, payload = {}, { w = 180, h = 156 } = {}) {
+  // Open at the cursor, closing any other open menu first. ContextMenu.vue keeps
+  // it on screen by its measured size.
+  function open(e, payload = {}) {
     e.preventDefault()
     closeAll()
-    menu.value = {
-      x: Math.min(e.clientX, window.innerWidth - w),
-      y: Math.min(e.clientY, window.innerHeight - h),
-      ...payload,
-    }
+    menu.value = { x: e.clientX, y: e.clientY, ...payload }
   }
 
   onMounted(() => {
