@@ -2,6 +2,7 @@ import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import { createWorkflow, normalizeWorkflow } from '../core/workflow.js'
 import * as opfs from '../utils/opfs.js'
+import { createDocumentSaver } from '../utils/documentSaver.js'
 import { registerProjectStore } from './projectStores.js'
 import { useProjectsStore } from './useProjectsStore.js'
 import { useLog } from '../composables/useLog.js'
@@ -28,14 +29,14 @@ export const useWorkflowsStore = registerProjectStore(defineStore('workflows', (
   const activeWorkflow = computed(() => workflows.value.find((w) => w.id === activeId.value) ?? workflows.value[0] ?? null)
   const isPersisting = () => projects.isPersisting
 
-  async function save() {
-    if (!isPersisting()) return
-    await opfs.saveWorkflows(projects.currentProjectId, {
-      workflows: workflows.value,
-      activeId: activeId.value,
-      runs: runs.value,
-    }).catch((err) => log(`Workflow save failed — ${err?.message ?? err}`, 'error', 'Workflow'))
-  }
+  const save = createDocumentSaver({
+    label: 'workflows',
+    currentProjectId: () => projects.currentProjectId,
+    isPersisting,
+    build: () => ({ workflows: workflows.value, activeId: activeId.value, runs: runs.value }),
+    write: opfs.saveWorkflows,
+    onError: (err) => log(`Workflow save failed — ${err?.message ?? err}`, 'error', 'Workflow'),
+  })
 
   function addWorkflow(workflow = createWorkflow()) {
     const value = normalizeWorkflow(workflow)
@@ -63,10 +64,11 @@ export const useWorkflowsStore = registerProjectStore(defineStore('workflows', (
 
   function removeWorkflow(id) {
     const index = workflows.value.findIndex((w) => w.id === id)
-    if (index < 0) return
+    if (index < 0) return false
     workflows.value.splice(index, 1)
     if (activeId.value === id) activeId.value = workflows.value[0]?.id ?? null
     save()
+    return true
   }
 
   function duplicateWorkflow(id) {
@@ -98,8 +100,10 @@ export const useWorkflowsStore = registerProjectStore(defineStore('workflows', (
   }
 
   function removeTemplate(id) {
+    if (!templates.value.some((w) => w.id === id)) return false
     templates.value = templates.value.filter((w) => w.id !== id)
     localStorage.setItem(TEMPLATE_KEY, JSON.stringify(templates.value))
+    return true
   }
 
   function recordRun(snapshot) {

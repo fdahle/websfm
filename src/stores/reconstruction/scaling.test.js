@@ -54,7 +54,7 @@ function harness({ bars = [], gcps = [M1, M2], cloud = { id: 'c1', createdAt: 't
     healthDirty: ref(0),
     bars: () => bars,
     gcps: () => gcps,
-    persist: () => {},
+    save: () => {},
     log: (m, level) => logs.push([level, m]),
   })
   return { ...s, scaleFit, logs }

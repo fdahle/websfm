@@ -117,6 +117,25 @@ export function createDepthMapCache({ isPersisting, currentProjectId, mainSparse
     return true
   }
 
+  // An image left the project: its map must stop contributing. The planes went
+  // with the image (opfs.deleteDepth); this drops the resident copy and the index
+  // entry, so counts and memory estimates stop including it.
+  async function forgetDepthMap(uuid) {
+    if (depthMaps.value.has(uuid)) {
+      const next = new Map(depthMaps.value)
+      next.delete(uuid)
+      depthMaps.value = next
+    }
+    if (!depthMapsMeta.value.some((m) => m.uuid === uuid)) return
+    depthMapsMeta.value = depthMapsMeta.value.filter((m) => m.uuid !== uuid)
+    if (!isPersisting()) return
+    const projectId = currentProjectId()
+    const index = await opfs.loadDepthIndex(projectId)
+    if (!index?.maps?.some((m) => m.uuid === uuid) || projectId !== currentProjectId()) return
+    await opfs.commitDepthIndex(projectId, { ...index, maps: index.maps.filter((m) => m.uuid !== uuid) })
+      .catch(() => {})
+  }
+
   // Drop the in-memory cache (project switch / clear). Does NOT touch disk.
   function clearDepthMaps() {
     depthMaps.value = new Map()
@@ -125,6 +144,6 @@ export function createDepthMapCache({ isPersisting, currentProjectId, mainSparse
 
   return {
     depthMaps, depthMapsMeta, depthMapCount,
-    persistDepthMaps, beginStreamedDepthMaps, depthMapInput, loadDepthIndexIntoMeta, clearDepthMaps,
+    persistDepthMaps, beginStreamedDepthMaps, depthMapInput, loadDepthIndexIntoMeta, clearDepthMaps, forgetDepthMap,
   }
 }

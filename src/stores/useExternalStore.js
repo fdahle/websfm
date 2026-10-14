@@ -7,6 +7,7 @@ import { rasterBounds } from '../core/io/rasterSample.js'
 import { describeStyle, styleStamp, resolveRasterStyle, bandsUsedBy } from '../core/io/rasterStyle.js'
 import { parseRasterFile, restyleRasterPreview, prepareRasterCog, readRasterWindow as workerReadRasterWindow } from '../workers/computeClient.js'
 import * as opfs from '../utils/opfs.js'
+import { createDocumentSaver } from '../utils/documentSaver.js'
 import { registerProjectStore } from './projectStores.js'
 import { useProjectsStore } from './useProjectsStore.js'
 
@@ -210,7 +211,7 @@ export const useExternalStore = registerProjectStore(defineStore('external', () 
       // Map display (A-4). Off by default: importing a reference dataset is not the
       // same as wanting it drawn over the project, and a large ortho appearing
       // unbidden under the tie-points is a surprise, not a feature.
-      onMap: false,
+      visible: false,
       opacity: 1,
     }
     delete record.plane
@@ -696,7 +697,7 @@ export const useExternalStore = registerProjectStore(defineStore('external', () 
   }
 
   // ── map display (A-4) ──────────────────────────────────────────────────────
-  // `onMap` + `opacity` are **view state**, persisted in the index so a project
+  // `visible` + `opacity` are **view state**, persisted in the index so a project
   // reopens looking the way you left it. Deliberately a toggle rather than a
   // one-shot "show on map" action: which reference layers are up is something you
   // adjust while working, and a one-shot has no way back.
@@ -706,9 +707,9 @@ export const useExternalStore = registerProjectStore(defineStore('external', () 
   // on screen at basemap zoom is a handful of screen pixels wide; decoding
   // hundreds of MB for that would undo invariant 1 for a purely cosmetic gain.
   const mapRasters = computed(() =>
-    rasters.value.filter((r) => r.onMap && r.previewDataUrl && !r.crsUnresolved))
+    rasters.value.filter((r) => r.visible && r.previewDataUrl && !r.crsUnresolved))
 
-  async function setRasterOnMap(id, on) {
+  async function setRasterVisible(id, on) {
     const meta = rasterById(id)
     if (!meta) return false
     if (on && meta.crs && !(await resolveRasterCrs(meta))) {
@@ -716,9 +717,9 @@ export const useExternalStore = registerProjectStore(defineStore('external', () 
         + 'be placed safely on the map.', 'warn', 'Import')
       return false
     }
-    meta.onMap = !!on
+    meta.visible = !!on
     if (meta.opacity == null) meta.opacity = 1
-    log(`Reference raster "${meta.name}": ${meta.onMap ? 'shown on' : 'hidden from'} map`, 'info', 'Import')
+    log(`Reference raster "${meta.name}": ${meta.visible ? 'shown on' : 'hidden from'} map`, 'info', 'Import')
     await save()
     return true
   }
@@ -757,17 +758,21 @@ export const useExternalStore = registerProjectStore(defineStore('external', () 
 
   // ── persistence ────────────────────────────────────────────────────────────
   // Only the index — the planes are written once at import and pruned on remove.
-  async function save() {
-    if (!isPersisting()) return
-    await opfs.saveExternalIndex(projects.currentProjectId, {
+  const save = createDocumentSaver({
+    label: 'external',
+    currentProjectId: () => projects.currentProjectId,
+    isPersisting,
+    build: () => ({
       version: 1,
       rasters: rasters.value.map((r) => {
         const persisted = { ...r }
         delete persisted.crsUnresolved
         return persisted
       }),
-    }).catch((err) => log(`Reference raster index save failed — ${err?.message ?? err}`, 'error', 'Import'))
-  }
+    }),
+    write: opfs.saveExternalIndex,
+    onError: (err) => log(`Reference raster index save failed — ${err?.message ?? err}`, 'error', 'Import'),
+  })
 
   // Only { purge: true } deletes persisted data; a plain clear (project
   // switch/close) leaves OPFS intact so restore can read it back.
@@ -793,10 +798,10 @@ export const useExternalStore = registerProjectStore(defineStore('external', () 
     const data = await opfs.loadExternalIndex(projectId)
     if (!data || !Array.isArray(data.rasters) || !data.rasters.length) return
 
-    // `onMap`/`opacity` are absent on rasters imported before A-4 — default to
+    // `visible`/`opacity` are absent on rasters imported before A-4 — default to
     // hidden at full opacity rather than healing the file (nothing is lost, and a
     // project that never used the map layer shouldn't gain rewritten records).
-    rasters.value = data.rasters.map((r) => ({ ...r, gpuReady: false, onMap: !!r.onMap, opacity: r.opacity ?? 1 }))
+    rasters.value = data.rasters.map((r) => ({ ...r, gpuReady: false, visible: !!r.visible, opacity: r.opacity ?? 1 }))
     // Re-resolve each raster's CRS so the first sample doesn't have to await a
     // projection fetch mid-interaction.
     await Promise.all(rasters.value.map((r) => r.crs ? resolveRasterCrs(r) : null))
@@ -821,7 +826,7 @@ export const useExternalStore = registerProjectStore(defineStore('external', () 
     rasterById,
     importRaster, originalFile, displayFile, ensureRasterLoaded, sampleReferenceDem, referenceDemSampler, probeRasterAt,
     toRasterCoords, toProjectCoords,
-    setRasterKind, setRasterStyle, setVerticalInfo, setRasterOnMap, setRasterOpacity, readRasterWindow,
+    setRasterKind, setRasterStyle, setVerticalInfo, setRasterVisible, setRasterOpacity, readRasterWindow,
     renameRaster, removeRaster,
     save, restore, clear, flushPendingWork,
   }

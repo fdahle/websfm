@@ -24,7 +24,7 @@ export const useLogStore = registerProjectStore(defineStore('log', () => {
   // Debounced, single-flight appender. Logging bursts (hundreds of lines during
   // a pipeline), so coalesce into batched appends ~0.8s after activity. Appends
   // must serialise — each reads the file size to seek to the end — so keep ≤1 in
-  // flight with a trailing re-run, mirroring useImagesStore.sync().
+  // flight with a trailing re-run, like the document saver (utils/documentSaver.js), but appending.
   let timer = null
   let inFlight = false
   let again = false
@@ -84,24 +84,17 @@ export const useLogStore = registerProjectStore(defineStore('log', () => {
   // appends are incremental, so no de-duplication is needed here.
   async function restore({ projectId }) {
     cancelTimer()
-    let saved = await opfs.readLogTail(projectId, MAX_BUFFER)
-    if (saved === null) {
-      // Migrate the legacy whole-array log.json into the stream, once.
-      const legacy = await opfs.loadLegacyLog(projectId)
-      if (Array.isArray(legacy) && legacy.length) {
-        await opfs.appendLog(projectId, legacy).catch(() => {})
-        saved = legacy
-      }
-      await opfs.deleteLegacyLog(projectId)
-    }
+    const saved = await opfs.readLogTail(projectId, MAX_BUFFER)
     if (!Array.isArray(saved) || saved.length === 0) return
     entries.value = [...saved, ...entries.value]
     if (entries.value.length > MAX_BUFFER) entries.value = entries.value.slice(-MAX_BUFFER)
   }
 
   // Project-store contract: reset the console. On a plain clear (leaving a
-  // project) flush any queued lines so reopening restores them; on a purge (new
-  // project / delete) drop the saved stream entirely.
+  // project) flush any queued lines; on a purge (new project / delete) drop the
+  // saved stream entirely. The lifecycle flushes the project being left BEFORE
+  // switching (flushProjectWork), so lines still queued here were logged after
+  // currentProjectId moved and belong to the project being opened.
   function clear(opts = {}) {
     cancelTimer()
     const pid = projects.currentProjectId

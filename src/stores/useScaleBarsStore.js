@@ -3,6 +3,7 @@ import { defineStore } from 'pinia'
 import { useLog } from '../composables/useLog.js'
 import { toMetres, LENGTH_UNITS } from '../core/products/scale.js'
 import * as opfs from '../utils/opfs.js'
+import { createDocumentSaver } from '../utils/documentSaver.js'
 import { registerProjectStore } from './projectStores.js'
 import { useProjectsStore } from './useProjectsStore.js'
 
@@ -38,11 +39,14 @@ export const useScaleBarsStore = registerProjectStore(defineStore('scaleBars', (
 
   const isPersisting = () => projects.isPersisting
 
-  async function save() {
-    if (!isPersisting()) return
-    await opfs.saveScaleBars(projects.currentProjectId, { bars: bars.value })
-      .catch((err) => log(`Scale bar save failed — ${err?.message ?? err}`, 'error', 'Scale'))
-  }
+  const save = createDocumentSaver({
+    label: 'scalebars',
+    currentProjectId: () => projects.currentProjectId,
+    isPersisting,
+    build: () => ({ bars: bars.value }),
+    write: opfs.saveScaleBars,
+    onError: (err) => log(`Scale bar save failed — ${err?.message ?? err}`, 'error', 'Scale'),
+  })
 
   // Bars that can define a scale. A bar is invalid — never silently dropped — when
   // its endpoints are missing, identical, or its distance/accuracy is not positive.
@@ -114,19 +118,21 @@ export const useScaleBarsStore = registerProjectStore(defineStore('scaleBars', (
 
   function setBarEnabled(id, enabled) {
     const bar = bars.value.find((b) => b.id === id)
-    if (!bar || bar.enabled === enabled) return
+    if (!bar || bar.enabled === enabled) return false
     bar.enabled = enabled
     log(`Scale bar "${bar.name}" ${enabled ? 'enabled' : 'excluded from the fit'}`,
       'info', 'Scale', { channel: 'activity' })
     save()
+    return true
   }
 
   function removeBar(id) {
     const idx = bars.value.findIndex((b) => b.id === id)
-    if (idx < 0) return
+    if (idx < 0) return false
     const [removed] = bars.value.splice(idx, 1)
     log(`Removed scale bar "${removed.name}"`, 'info', 'Scale', { channel: 'activity' })
     save()
+    return true
   }
 
   // Bars referencing a point/image that no longer exists. Reported, never

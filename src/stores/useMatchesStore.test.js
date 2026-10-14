@@ -167,7 +167,7 @@ it('keeps matches as a flat Uint32Array and rewrites only the flags when a pair 
   // Committed: the pair now has a home in the document and its copy is evictable.
   expect(entry.src).toMatchObject({ off: 0 })
   expect(store.matchCacheStats().pinned).toBe(0)
-  store.setPairDisabled('a--b', true)
+  store.setPairEnabled('a--b', false)
   await new Promise((r) => setTimeout(r, 0))
   const last = saves.at(-1)
   expect(last.matches).toEqual({ reuse: { name: 'm', bytes: 8 } })
@@ -237,11 +237,9 @@ it('rewrites the document from resident pairs plus slices of the previous genera
 
 it('refuses an unreadable document instead of opening an empty graph silently', async () => {
   vi.spyOn(opfs, 'loadMatchIndex').mockRejectedValue(new Error('Incomplete saved buffer: counts'))
-  const legacy = vi.spyOn(opfs, 'loadLegacyPairFiles').mockResolvedValue([])
   const store = useMatchesStore()
   await store.restore({ projectId: 'match-test' })
   expect(store.matchStore.size).toBe(0)
-  expect(legacy).not.toHaveBeenCalled()
 })
 
 it('re-points at the copy when the file it read from went away (a storage move)', async () => {

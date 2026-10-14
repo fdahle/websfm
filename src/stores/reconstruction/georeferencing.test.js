@@ -12,7 +12,7 @@ it.each(['pose', 'control', 'model', 'camera'])('invalidates a fitted georeferen
   const api = scope.run(() => createGeoreferencing({ sparseCameras: cameras,
     images: ref(['a','b','c'].map(id => ({ id, uuid: id }))), georef, healthDirty: ref(0),
     poses: () => poses.value, gcps: () => controls.value, currentCrs: () => 'EPSG:3031',
-    modelStamp: () => model.value, persist: vi.fn(), log: vi.fn() }))
+    modelStamp: () => model.value, save: vi.fn(), log: vi.fn() }))
   // Grid scale 2 at the pole of EPSG:3031, where the point scale factor is
   // k ≈ 0.97277: fitted in the local metric frame the similarity's scale is the
   // GROUND scale 2/k, and the frame travels with it.
@@ -43,7 +43,7 @@ it('names why a geographic project cannot be georeferenced and suggests a projec
   const api = scope.run(() => createGeoreferencing({ sparseCameras: cameras,
     images: ref(['a','b','c'].map(id => ({ id, uuid: id }))), georef: ref(null), healthDirty: ref(0),
     poses: () => poses.value, gcps: () => [], currentCrs: () => crs.value,
-    persist: vi.fn(), log }))
+    save: vi.fn(), log }))
   expect(api.canGeoreference.value).toBe(false)
   expect(api.georeferenceBlocker.value).toBe('geographic')
   expect(api.crsSuggestion.value).toMatchObject({ code: 'EPSG:32631', count: 3 })
@@ -65,7 +65,7 @@ it('falls back to the images\' EXIF GPS when no positions are materialised yet',
   const api = scope.run(() => createGeoreferencing({ sparseCameras: ref(new Map()),
     images: ref([{ id: 'a', uuid: 'a', meta: { gpsLat: -33.9, gpsLon: 18.4 } }]), georef: ref(null),
     healthDirty: ref(0), poses: () => [], gcps: () => [], currentCrs: () => 'EPSG:4326',
-    persist: vi.fn(), log: vi.fn() }))
+    save: vi.fn(), log: vi.fn() }))
   expect(api.crsSuggestion.value.code).toBe('EPSG:32734')
   scope.stop()
 })

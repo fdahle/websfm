@@ -1,5 +1,5 @@
 // Which committed sidecar files already hold a cloud's heavy data, so a save only
-// writes the clouds that changed. Without it every persist() re-serialised and
+// writes the clouds that changed. Without it every save() re-serialised and
 // rewrote every cloud: a single 3D lasso stroke cost > 1 GB of widening, copying and
 // writing with two 25 M-point clouds open, for one cloud's worth of change.
 //

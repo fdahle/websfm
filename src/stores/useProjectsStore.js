@@ -134,8 +134,7 @@ export const useProjectsStore = defineStore('projects', () => {
     const prevCrs = p.crs || 'EPSG:4326'
     p.crs = crs
     p.lastModified = new Date().toISOString()
-    const data = await opfs.readProject(id)
-    if (data) await opfs.writeProject(id, { ...data, crs })
+    await opfs.updateProject(id, (data) => ({ ...data, crs }))
     await saveIndex()
     await onChanged?.(prevCrs, crs)
   }
@@ -172,12 +171,12 @@ export const useProjectsStore = defineStore('projects', () => {
 
   async function renameProject(id, newName) {
     const p = projects.value.find((p) => p.id === id)
-    if (!p) return
+    if (!p) return false
     p.name = newName
     p.lastModified = new Date().toISOString()
-    const data = await opfs.readProject(id)
-    if (data) await opfs.writeProject(id, { ...data, name: newName })
+    await opfs.updateProject(id, (data) => ({ ...data, name: newName }))
     await saveIndex()
+    return true
   }
 
   // For a folder project this FORGETS rather than deletes: the files are on the

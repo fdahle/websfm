@@ -1,9 +1,9 @@
-import { coalescedSave } from '../utils/coalescedSave.js'
 import { ref, watch, computed } from 'vue'
 import { defineStore, storeToRefs } from 'pinia'
 import { useLog } from '../composables/useLog.js'
 import { ensureProjection, isGeographic, metresPerCrsUnit, metresToCrsUnits, transform } from '../core/crs.js'
 import * as opfs from '../utils/opfs.js'
+import { createDocumentSaver } from '../utils/documentSaver.js'
 import { registerProjectStore } from './projectStores.js'
 import { makeNameResolver, relinkImageRecord } from '../core/io/nameMatch.js'
 import { pluralize } from '../core/textFormat.js'
@@ -26,7 +26,7 @@ export const usePosesStore = registerProjectStore(defineStore('poses', () => {
   const { images } = storeToRefs(useImagesStore())
   const { currentCrs } = storeToRefs(projects)
 
-  // [{ imageId, imageName, x, y, z, omega, phi, kappa,
+  // [{ id, imageId, imageName, x, y, z, omega, phi, kappa,
   //    accuracyX, accuracyY, accuracyZ, accXYZ,
   //    accuracyOmega, accuracyPhi, accuracyKappa, accAngle, source, enabled }]
   const poses = ref([])
@@ -44,6 +44,9 @@ export const usePosesStore = registerProjectStore(defineStore('poses', () => {
     p.accAngle = angleScalar // retained as the isotropic fallback/legacy field
     p.source = p.source === 'exif' ? 'exif' : 'imported'
     if (p.enabled == null) p.enabled = true
+    // The record's own identity. A pose links to its image by imageId (imageName
+    // is the import-time key that resolves it), but rows, edits and removal key on this.
+    p.id ??= crypto.randomUUID()
     return p
   }
 
@@ -96,17 +99,18 @@ export const usePosesStore = registerProjectStore(defineStore('poses', () => {
   // `save()` fires from several places that overlap during a restore or a bulk
   // image add — the EXIF watcher (once per image as metadata lands),
   // `resolveImageMatches`, and `restore` itself — each rewriting the whole
-  // poses.json. Coalesced exactly like `useSensorsStore.save` /
-  // `useImagesStore.sync`: at most one in flight, a request arriving mid-write
-  // schedules a single trailing re-run that captures the latest state.
-  // (opfs.js serializes same-file writes regardless; this is about not queueing
-  // N redundant rewrites of one small file.)
-  const saveQueued = coalescedSave('poses', opfs.savePoses)
-  function save() {
-    if (!isPersisting()) return Promise.resolve()
-    return saveQueued(projects.currentProjectId, { crs: currentCrs.value, poses: poses.value })
-      .catch(err => log(`Poses save failed — ${err?.message ?? err}`, 'error', 'Poses'))
-  }
+  // poses.json — so it goes through the shared document saver
+  // (utils/documentSaver.js): at most one write in flight, one trailing re-run
+  // that captures the latest state. (opfs.js serializes same-file writes
+  // regardless; this is about not queueing N redundant rewrites of one small file.)
+  const save = createDocumentSaver({
+    label: 'poses',
+    currentProjectId: () => projects.currentProjectId,
+    isPersisting,
+    build: () => ({ crs: currentCrs.value, poses: poses.value }),
+    write: opfs.savePoses,
+    onError: (err) => log(`Poses save failed — ${err?.message ?? err}`, 'error', 'Poses'),
+  })
 
   // Name → image-id matching is shared with GCP observations / footprints /
   // COLMAP import (core/io/nameMatch.js). Indexed once per image-list change, so
@@ -358,12 +362,6 @@ export const usePosesStore = registerProjectStore(defineStore('poses', () => {
   }
   watch(exifSig, scheduleExifSync, { immediate: true })
 
-  function removePose(imageName) {
-    const idx = poses.value.findIndex((p) => p.imageName === imageName)
-    if (idx === -1) return
-    poses.value.splice(idx, 1)
-    save()
-  }
 
   // Only { purge: true } deletes persisted data; a plain clear (project
   // switch/close) leaves OPFS intact so restore can read it back.
@@ -404,7 +402,6 @@ export const usePosesStore = registerProjectStore(defineStore('poses', () => {
     poses,
     addPoses,
     syncExifPoses,
-    removePose,
     reprojectPoses,
     restore,
     clear,

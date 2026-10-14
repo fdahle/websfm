@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  serializeCloud, deserializeCloud, legacyDeserializeCloud,
+  serializeCloud, deserializeCloud,
 } from './cloudSerde.js'
 
 let seq = 0
@@ -201,33 +201,6 @@ describe('mesh cloud round trip', () => {
   it('round-trips the derived flag, absent ⇒ not derived', () => {
     expect(roundTrip({ ...mesh, derived: true }).derived).toBe(true)
     expect(roundTrip(mesh).derived).toBeUndefined()
-  })
-})
-
-describe('legacy (pre-binary) documents', () => {
-  it('reads an inline sparse cloud', () => {
-    const out = legacyDeserializeCloud({
-      id: 'L', name: 'Old', kind: 'sparse', createdAt: 5,
-      cameras: [{ uuid: 'ua', R: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], t: [0, 0, 0], K: { fx: 1 } }],
-      points: [{ x: 1, y: 2, z: 3, color: [1, 2, 3], views: [['ua', 4]] }],
-    }, makeCloudId)
-    expect(out.cameras.get('ua').K).toEqual({ fx: 1 })
-    expect([...out.points[0].views.entries()]).toEqual([['ua', 4]])
-  })
-
-  it('folds a legacy object-shaped dense cloud into the flat layout', () => {
-    const out = legacyDeserializeCloud({
-      kind: 'dense',
-      points: [{ x: 1, y: 2, z: 3, color: [9, 8, 7] }, { x: 4, y: 5, z: 6 }],
-    }, makeCloudId)
-    expect(out.count).toBe(2)
-    expect([...out.pos]).toEqual([1, 2, 3, 4, 5, 6])
-    expect([...out.col]).toEqual([9, 8, 7, 200, 200, 200]) // default grey
-  })
-
-  it('mints an id when a legacy doc has none', () => {
-    const out = legacyDeserializeCloud({ kind: 'sparse', points: [] }, makeCloudId)
-    expect(out.id).toMatch(/^minted-/)
   })
 })
 

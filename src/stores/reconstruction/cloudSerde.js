@@ -3,8 +3,8 @@ import { packAttributes, unpackAttributes, attributeLayout } from '../../core/io
 import { makePackedPoints } from '../../core/sfm/resultCodec.js'
 
 // Cloud ↔ on-disk shape. Lifted out of useReconstructionStore so the format has one
-// home and can be round-tripped in tests (it handles three cloud kinds, a CSR
-// view-track layout and two legacy shapes — none of which was covered before).
+// home and can be round-tripped in tests (it handles three cloud kinds and a CSR
+// view-track layout).
 //
 // Lives under stores/ rather than core/ because it applies `markRaw`: the big typed
 // arrays and the points array must stay PLAIN, both because a reactive Proxy is
@@ -12,8 +12,8 @@ import { makePackedPoints } from '../../core/sfm/resultCodec.js'
 // worker. core/ may not import Vue, so this is store-layer by construction.
 //
 // `makeCloudId` is injected rather than imported: cloud ids are minted by the store
-// (a monotonic per-session counter), and a restore only needs one for a legacy doc
-// that predates stored ids.
+// (a monotonic per-session counter); a restore only falls back to one for a
+// document cloud that carries no id.
 
 // Pack one cloud into the on-disk shape: small metadata (cameras stay JSON —
 // ~hundreds at most) plus binary buffers for the heavy per-point data. Colour is
@@ -246,41 +246,6 @@ function deserializeCloudData(c, makeCloudId) {
     ...(c.secondary ? { secondary: true } : {}),
     cameras: markRaw(cameras),
     points: markRaw(points),
-  }
-}
-
-// Legacy inline shape (points embedded in JSON) — kept so a pre-binary project
-// still opens. New projects write binary generation documents.
-export function legacyDeserializeCloud(c, makeCloudId) {
-  // Legacy dense clouds embedded points as objects; fold them into the flat shape.
-  if (c.kind === 'dense') {
-    const src = c.points || []
-    const n = src.length
-    const pos = new Float64Array(n * 3)
-    const col = new Uint8Array(n * 3)
-    for (let i = 0; i < n; i++) {
-      const p = src[i]
-      pos[i*3] = p.x; pos[i*3+1] = p.y; pos[i*3+2] = p.z
-      const cc = p.color || [200, 200, 200]
-      col[i*3] = cc[0]; col[i*3+1] = cc[1]; col[i*3+2] = cc[2]
-    }
-    return {
-      id: c.id ?? makeCloudId(), name: c.name ?? 'Dense cloud', kind: 'dense',
-      createdAt: c.createdAt ?? Date.now(), cameras: markRaw(new Map()),
-      count: n, pos: markRaw(pos), col: col ? markRaw(col) : null,
-    }
-  }
-  const map = new Map()
-  for (const cam of c.cameras || []) { const { uuid, R, t, K } = cam; map.set(uuid, { R, t, K }) }
-  return {
-    id: c.id ?? makeCloudId(),
-    name: c.name ?? 'Sparse cloud',
-    kind: c.kind ?? 'sparse',
-    createdAt: c.createdAt ?? Date.now(),
-    cameras: markRaw(map),
-    points: markRaw((c.points || []).map(({ x, y, z, color, views }) => ({
-      x, y, z, color, views: new Map(views || []),
-    }))),
   }
 }
 

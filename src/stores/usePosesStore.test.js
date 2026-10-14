@@ -110,6 +110,18 @@ describe('EXIF pose synchronization', () => {
     expect(lines[1]).toContain('EPSG:32632')
   })
 
+  it('gives every pose its own id, kept through a re-import and a CRS change', async () => {
+    openTransientProject()
+    const poses = usePosesStore()
+    await poses.addPoses([{ imageName: 'a.jpg', x: 500000, y: 5316000 }, { imageName: 'b.jpg', x: 500010, y: 5316000 }], 'EPSG:32632')
+    const [a, b] = poses.poses.map((p) => p.id)
+    expect(a).toBeTruthy()
+    expect(a).not.toBe(b)
+    await poses.addPoses([{ imageName: 'a.jpg', x: 500001, y: 5316001 }], 'EPSG:32632')   // re-import updates in place
+    await poses.reprojectPoses('EPSG:32632', 'EPSG:4326')
+    expect(poses.poses.map((p) => p.id)).toEqual([a, b])
+  })
+
   it('lets an imported pose override EXIF for the same image', async () => {
     openTransientProject()
     const images = useImagesStore()

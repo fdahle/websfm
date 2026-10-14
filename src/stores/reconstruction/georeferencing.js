@@ -42,9 +42,9 @@ const inverseVariance3d = (p) => {
 // Deps are getters/refs so the store keeps ownership of the state:
 //   sparseCameras, images, georef, healthDirty — refs/computeds
 //   poses(), gcps(), currentCrs() — snapshot getters over the other stores
-//   persist(), log() — store side effects
+//   save(), log() — store side effects
 export function createGeoreferencing({
-  sparseCameras, images, georef, healthDirty, poses, gcps, currentCrs, persist, log,
+  sparseCameras, images, georef, healthDirty, poses, gcps, currentCrs, save, log,
   modelStamp = () => null,
   // image → { dist, selfCal, fiducial } from the run record (displayFrame.js). Marks
   // are clicked on the raw scan; the cameras project into the pinhole/canonical
@@ -190,7 +190,7 @@ export function createGeoreferencing({
       if (georef.value) {
         georef.value = null
         healthDirty.value++
-        persist()
+        save()
       }
     }
     if (isGeographic(currentCrs())) {
@@ -247,7 +247,7 @@ export function createGeoreferencing({
       + (local ? ` (fitted in a local metric frame: grid scale factor k=${local.k.toFixed(6)}, `
         + `curvature restored; ground units)` : ''), 'success', 'Products')
     healthDirty.value++   // GCP prune / refit → the hub overview must recompute
-    persist()
+    save()
     return georef.value
   }
 

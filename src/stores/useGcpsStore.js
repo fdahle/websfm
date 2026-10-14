@@ -6,6 +6,7 @@ import { confidenceToSigma, precisionFromGcp, reprojectGcpWithAccuracy } from '.
 import { hasGcpElevation, normalizeGcpRole } from '../core/io/gcp.js'
 import { makeNameResolver, relinkImageRecord } from '../core/io/nameMatch.js'
 import * as opfs from '../utils/opfs.js'
+import { createDocumentSaver } from '../utils/documentSaver.js'
 import { registerProjectStore } from './projectStores.js'
 import { useImagesStore } from './useImagesStore.js'
 import { useProjectsStore } from './useProjectsStore.js'
@@ -74,14 +75,14 @@ export const useGcpsStore = registerProjectStore(defineStore('gcps', () => {
   // Persist only when a project is open and OPFS is usable (see useProjectsStore).
   const isPersisting = () => projects.isPersisting
 
-  async function save() {
-    if (!isPersisting()) return
-    await opfs.saveGcps(projects.currentProjectId, {
-      crs: projects.currentCrs,
-      gcps: gcps.value,
-      importDefaults: importDefaults.value,
-    }).catch((err) => log(`GCP save failed — ${err?.message ?? err}`, 'error', 'GCP'))
-  }
+  const save = createDocumentSaver({
+    label: 'gcps',
+    currentProjectId: () => projects.currentProjectId,
+    isPersisting,
+    build: () => ({ crs: projects.currentCrs, gcps: gcps.value, importDefaults: importDefaults.value }),
+    write: opfs.saveGcps,
+    onError: (err) => log(`GCP save failed — ${err?.message ?? err}`, 'error', 'GCP'),
+  })
 
   // Name → image-id matching is shared with poses / footprints / COLMAP import
   // (core/io/nameMatch.js). Indexed once per image-list change, so a full
@@ -367,18 +368,20 @@ export const useGcpsStore = registerProjectStore(defineStore('gcps', () => {
   // marks on its own.
   function setGcpEnabled(id, enabled) {
     const g = gcps.value.find((x) => x.id === id)
-    if (!g) return
+    if (!g) return false
     g.enabled = !!enabled
     log(`GCP ${g.name} ${g.enabled ? 'enabled' : 'disabled'}`, 'info', 'GCP', { channel: 'activity' })
     save()
+    return true
   }
 
   function removeGcp(id) {
     const idx = gcps.value.findIndex((g) => g.id === id)
-    if (idx === -1) return
+    if (idx === -1) return false
     const [removed] = gcps.value.splice(idx, 1)
     log(`Removed GCP ${removed.name}`, 'info', 'GCP', { channel: 'activity' })
     save()
+    return true
   }
 
   // ── Reference DEM: fill / check GCP elevations ──────────────────────────────
@@ -513,16 +516,17 @@ export const useGcpsStore = registerProjectStore(defineStore('gcps', () => {
 
   function removeObservation(gcpId, imageId) {
     const g = gcps.value.find((x) => x.id === gcpId)
-    if (!g) return
+    if (!g) return false
     const idx = g.observations.findIndex((o) => o.imageId === imageId)
-    if (idx === -1) return
+    if (idx === -1) return false
     g.observations.splice(idx, 1)
     save()
+    return true
   }
 
   // Project-store contract: reset state; only { purge: true } deletes persisted
   // data. A plain clear (project switch/close) must leave OPFS intact — restore
-  // reads it back and currentProjectId still points at the project being left.
+  // reads it back. On a switch currentProjectId already names the project being opened.
   function clear({ purge = false } = {}) {
     gcps.value = []
     importDefaults.value = { accuracies: { x: null, y: null, z: null },
@@ -545,7 +549,7 @@ export const useGcpsStore = registerProjectStore(defineStore('gcps', () => {
       gcps.value = data.gcps.map((g) => {
         return normalize(reprojectGcpWithAccuracy(normalize({ ...g }), data.crs, projectCrs))
       })
-      await opfs.saveGcps(projectId, { crs: projectCrs, gcps: gcps.value }).catch(() => {})
+      await opfs.saveGcps(projectId, { crs: projectCrs, gcps: gcps.value, importDefaults: importDefaults.value }).catch(() => {})
     } else {
       gcps.value = data.gcps.map(normalize)
     }
@@ -572,6 +576,7 @@ export const useGcpsStore = registerProjectStore(defineStore('gcps', () => {
     addGcp,
     setGcpName,
     setGcpRole,
+    setGcpEnabled,
     setGcpVerticalDatum,
     setGcpPosition,
     setGcpAccuracy,

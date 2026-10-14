@@ -44,8 +44,23 @@ const now = () => globalThis.performance?.now?.() ?? Date.now()
 // Each store receives `ctx.report(label, done?, total?)` bound to its own id, so a
 // slow restore can say what it is doing; a store that never reports still shows
 // as pending under its id.
-export async function restoreProjectStores(ctx) {
-  const { onProgress, ...base } = ctx
+//
+// Project currency is enforced HERE, so no store has to remember it: `isCurrent()`
+// (optional, from the caller) says whether `projectId` is still the open project.
+// Runs are serialized — a run starts only after the previous one settled — and a
+// store whose restore resolves after its project stopped being current is cleared
+// again, so a slow read of the project being left can never land in the next one
+// (whose own run starts after this one, from a clean store).
+let lastRun = Promise.resolve()
+
+export function restoreProjectStores(ctx) {
+  const run = lastRun.then(() => restoreAll(ctx), () => restoreAll(ctx))
+  lastRun = run.catch(() => {})
+  return run
+}
+
+async function restoreAll(ctx) {
+  const { onProgress, isCurrent = () => true, ...base } = ctx
   return Promise.all(registry.map(async (useStore) => {
     const store = useStore()
     if (typeof store.restore !== 'function') return null
@@ -57,6 +72,7 @@ export async function restoreProjectStores(ctx) {
       await store.restore({ ...base, report })
     } finally {
       onProgress?.(id, null)
+      if (!isCurrent() && typeof store.clear === 'function') store.clear()
     }
     return { store: id, ms: now() - started }
   })).then((items) => items.filter(Boolean))

@@ -1,12 +1,12 @@
-import { coalescedSave } from '../utils/coalescedSave.js'
 import { ref, watch, computed } from 'vue'
 import { defineStore, storeToRefs } from 'pinia'
 import { useLog } from '../composables/useLog.js'
 import { exifSignature, sensorFromExif } from '../core/io/sensor.js'
 import { DISTORTION_MODELS, inferDistortionModel } from '../core/sfm/distortion.js'
 import * as opfs from '../utils/opfs.js'
+import { createDocumentSaver } from '../utils/documentSaver.js'
 import { useImagesStore } from './useImagesStore.js'
-import { deriveLegacyCalibration } from '../core/sfm/fiducialModel.js'
+import { emptyFiducialCalibration, isFiducialCalibrated } from '../core/sfm/fiducialModel.js'
 import { applyFiducialMarks } from '../core/io/fiducialMarks.js'
 import { normalizeLeverArm } from '../core/sfm/cameraPriors.js'
 import { useProjectsStore } from './useProjectsStore.js'
@@ -35,15 +35,17 @@ export const useSensorsStore = defineStore('sensors', () => {
   // `save()` fires from the EXIF-grouping watcher, which re-runs once per image
   // as metadata lands during a bulk add. Overlapping `createWritable` streams on
   // the same sensors.json race the OPFS backend (Chrome: "Failed to create swap
-  // file"), so writes are coalesced exactly like `useImagesStore.sync()`: at most
-  // one in flight, a request arriving mid-write schedules a single trailing re-run
-  // that captures the latest state.
-  const saveQueued = coalescedSave('sensors', opfs.saveSensors)
-  function save() {
-    if (!isPersisting()) return Promise.resolve()
-    return saveQueued(projects.currentProjectId, { sensors: sensors.value })
-      .catch(err => log(`Sensors save failed — ${err?.message ?? err}`, 'error', 'Sensors'))
-  }
+  // file"), so writes go through the shared document saver (utils/documentSaver.js):
+  // at most one in flight, a request arriving mid-write schedules a single trailing
+  // re-run that captures the latest state.
+  const save = createDocumentSaver({
+    label: 'sensors',
+    currentProjectId: () => projects.currentProjectId,
+    isPersisting,
+    build: () => ({ sensors: sensors.value }),
+    write: opfs.saveSensors,
+    onError: (err) => log(`Sensors save failed — ${err?.message ?? err}`, 'error', 'Sensors'),
+  })
 
   // How many images currently reference a sensor.
   function imageCount(sensorId) {
@@ -106,7 +108,7 @@ export const useSensorsStore = defineStore('sensors', () => {
     }
     if (changed) {
       save()
-      if (isPersisting()) imagesStore.sync()
+      if (isPersisting()) imagesStore.save()
     }
   }
 
@@ -181,7 +183,7 @@ export const useSensorsStore = defineStore('sensors', () => {
       if (img && sensorId) img.sensorId = sensorId
     }
     await save()
-    if (isPersisting()) await imagesStore.sync()
+    if (isPersisting()) await imagesStore.save()
     log(`Camera calibration imported: ${idByExternal.size} group(s)`, idByExternal.size ? 'success' : 'warn', 'Import')
     return idByExternal
   }
@@ -191,8 +193,9 @@ export const useSensorsStore = defineStore('sensors', () => {
   const NUMERIC_FIELDS = new Set(['width', 'height', 'focal', 'cx', 'cy', 'k1', 'k2', 'k3', 'p1', 'p2', 'pixelSize', 'sensorWidthMm'])
   const LEVER_ARM_FIELDS = new Map([['gnssLeverArmX', 0], ['gnssLeverArmY', 1], ['gnssLeverArmZ', 2]])
 
-  // Film-camera fiducial fields (F4): the calibrated interior orientation. Numeric
-  // and edited inline like the intrinsics above, but only meaningful when the
+  // Film-camera fiducial fields (F4): the certificate's focal and principal point,
+  // kept on the sensor's one fiducial record (fiducialCalibration). Numeric and
+  // edited inline like the intrinsics above, but only meaningful when the
   // sensor's kind is 'film'. `focalMm` is authoritative for resolveK on the
   // fiducial path; keep `focal`/`focalUnit` in sync so the rest of the UI reads
   // sensibly (done here so the two can't drift).
@@ -207,18 +210,18 @@ export const useSensorsStore = defineStore('sensors', () => {
       // Digital (default) vs film (fiducial interior orientation).
       if (value !== 'digital' && value !== 'film') return
       s.kind = value
-      if (value === 'film' && !s.fiducials) {
-        s.fiducials = { marks: [], ppxMm: 0, ppyMm: 0, focalMm: s.focalUnit === 'mm' ? (s.focal ?? 0) : 0 }
+      if (value === 'film' && !s.fiducialCalibration) {
+        s.fiducialCalibration = emptyFiducialCalibration(s.focalUnit === 'mm' ? (s.focal ?? 0) : 0)
       }
       log(`Sensor ${s.label} set to ${value}`, 'info', 'Sensor', { channel: 'activity' })
       save()
-      if (isPersisting()) imagesStore.sync()
+      if (isPersisting()) imagesStore.save()
       return
     } else if (FIDUCIAL_NUMERIC.has(field)) {
-      if (!s.fiducials) s.fiducials = { marks: [], ppxMm: 0, ppyMm: 0, focalMm: 0 }
       const num = Number(value)
       if (!Number.isFinite(num)) return
-      s.fiducials[field] = num
+      s.fiducialCalibration ??= emptyFiducialCalibration()
+      s.fiducialCalibration[field] = num
       // focalMm is authoritative on the fiducial path — mirror it into focal/focalUnit.
       if (field === 'focalMm') { s.focal = num; s.focalUnit = 'mm' }
       log(`Sensor ${s.label}: ${field} = ${num}`, 'info', 'Sensor')
@@ -278,26 +281,36 @@ export const useSensorsStore = defineStore('sensors', () => {
   const LOCKABLE_FIELDS = new Set(['focal', 'cx', 'cy', 'k1', 'k2', 'k3', 'p1', 'p2'])
 
   function toggleSensorFixed(id, field) {
-    if (!LOCKABLE_FIELDS.has(field)) return
+    if (!LOCKABLE_FIELDS.has(field)) return false
     const s = sensors.value.find((x) => x.id === id)
-    if (!s) return
+    if (!s) return false
     const fixed = { ...(s.fixed || {}) }
     if (fixed[field]) delete fixed[field]
     else fixed[field] = true
     s.fixed = fixed
     save()
+    return true
   }
 
-  // Replace a film sensor's calibrated fiducial marks (F4). `marks` is
-  // `[{ id, xMm, yMm }]`; non-finite rows are dropped. Ensures kind:'film'.
+  // Replace a film sensor's certificate marks (F4). `marks` is `[{ id, xMm, yMm }]`;
+  // non-finite rows are dropped. Ensures kind:'film'. The slot map follows a mark
+  // renamed in place (same row count) and drops one whose mark is gone; `fit` is
+  // cleared, since its residuals were measured against the old marks.
   function setFiducialMarks(id, marks) {
     const s = sensors.value.find((x) => x.id === id)
     if (!s) return
     const clean = (marks || [])
       .filter((m) => m && Number.isFinite(Number(m.xMm)) && Number.isFinite(Number(m.yMm)))
       .map((m, i) => ({ id: String(m.id ?? `F${i + 1}`), xMm: Number(m.xMm), yMm: Number(m.yMm) }))
-    if (!s.fiducials) s.fiducials = { marks: [], ppxMm: 0, ppyMm: 0, focalMm: 0 }
-    s.fiducials.marks = clean
+    const cal = (s.fiducialCalibration ??= emptyFiducialCalibration())
+    const prev = cal.marks || []
+    const renamed = prev.length === clean.length
+      ? new Map(prev.map((m, i) => [m.id, clean[i].id]))
+      : new Map(clean.map((m) => [m.id, m.id]))
+    cal.slotMap = Object.fromEntries(Object.entries(cal.slotMap || {})
+      .flatMap(([slot, fidId]) => (renamed.has(fidId) ? [[slot, renamed.get(fidId)]] : [])))
+    cal.marks = clean
+    cal.fit = null
     if (!s.kind) s.kind = 'film'
     log(`Sensor ${s.label}: ${clean.length} fiducial mark(s) set`, 'info', 'Sensor')
     save()
@@ -311,7 +324,7 @@ export const useSensorsStore = defineStore('sensors', () => {
     if (calibration?.focalMm > 0) { s.focal = calibration.focalMm; s.focalUnit = 'mm' }
     log(`Sensor ${s.label}: fiducial calibration ${calibration ? 'applied' : 'cleared'}`, calibration ? 'success' : 'info', 'Sensor')
     save()
-    if (isPersisting()) imagesStore.sync()
+    if (isPersisting()) imagesStore.save()
   }
 
   // Import ▸ Camera Fiducials: `groups` from core/io/fiducialMarks.js. A group
@@ -328,30 +341,17 @@ export const useSensorsStore = defineStore('sensors', () => {
       const lc = g.sensor.toLowerCase()
       const s = (lc && sensors.value.find((x) => x.label.toLowerCase() === lc)) || (list.length === 1 ? sole : null)
       if (!s || !g.marks.length) { unmatched.push(g.sensor || '(no sensor column)'); continue }
-      const { fiducials, fiducialCalibration } = applyFiducialMarks(s, g)
+      const cal = applyFiducialMarks(s, g)
       s.kind = 'film'
-      s.fiducials = fiducials
-      s.fiducialCalibration = fiducialCalibration
-      if (fiducials.focalMm > 0) { s.focal = fiducials.focalMm; s.focalUnit = 'mm' }
+      s.fiducialCalibration = cal
+      if (cal.focalMm > 0) { s.focal = cal.focalMm; s.focalUnit = 'mm' }
       log(`Sensor ${s.label}: ${g.marks.length} fiducial mark(s) imported`
-        + (fiducialCalibration ? ' — validate them in Calibrate fiducials' : ''), 'success', 'Sensor')
+        + (isFiducialCalibrated(cal) ? ' — validate them in Calibrate fiducials' : ''), 'success', 'Sensor')
       applied++
     }
     if (unmatched.length) log(`Camera fiducials: no sensor matched ${unmatched.join(', ')}`, 'warn', 'Sensor')
-    if (applied) { save(); if (isPersisting()) imagesStore.sync() }
+    if (applied) { save(); if (isPersisting()) imagesStore.save() }
     return applied
-  }
-
-  function migrateLegacyFiducialCalibrations(imageList) {
-    let count = 0
-    for (const s of sensors.value) {
-      if (s.fiducialCalibration || !s.fiducials?.marks?.length) continue
-      const detections = (imageList || []).filter((i) => i.sensorId === s.id).flatMap((i) => i.fiducialDetections || [])
-      const cal = deriveLegacyCalibration(s, detections)
-      if (cal) { s.fiducialCalibration = cal; count++ }
-    }
-    if (count) save()
-    return count
   }
 
   function assignSensor(imageId, sensorId) {
@@ -359,7 +359,7 @@ export const useSensorsStore = defineStore('sensors', () => {
     if (!img) return
     img.sensorId = sensorId || null
     save()
-    if (isPersisting()) imagesStore.sync()
+    if (isPersisting()) imagesStore.save()
   }
 
   // Fold `sourceId` into `targetId`: move its images, then drop it.
@@ -371,22 +371,24 @@ export const useSensorsStore = defineStore('sensors', () => {
     const idx = sensors.value.findIndex((s) => s.id === sourceId)
     if (idx !== -1) sensors.value.splice(idx, 1)
     save()
-    if (isPersisting()) imagesStore.sync()
+    if (isPersisting()) imagesStore.save()
   }
 
   function removeSensor(id) {
+    const idx = sensors.value.findIndex((s) => s.id === id)
+    if (idx === -1) return false
     for (const img of images.value) {
       if (img.sensorId === id) img.sensorId = null
     }
-    const idx = sensors.value.findIndex((s) => s.id === id)
-    if (idx !== -1) sensors.value.splice(idx, 1)
+    sensors.value.splice(idx, 1)
     save()
-    if (isPersisting()) imagesStore.sync()
+    if (isPersisting()) imagesStore.save()
+    return true
   }
 
   // Reset in-memory sensors. Pass { purge: true } to also delete the persisted
-  // sensors file — do NOT purge on project switch/close, since currentProjectId
-  // still points at the project being left and restore reads its sensors back.
+  // sensors file — do NOT purge on project switch/close: restore reads the sensors
+  // back, and on a switch currentProjectId already names the project being opened.
   function clearSensors({ purge = false } = {}) {
     sensors.value = []
     if (purge && isPersisting()) opfs.deleteSensors(projects.currentProjectId).catch(() => {})
@@ -415,7 +417,6 @@ export const useSensorsStore = defineStore('sensors', () => {
     setFiducialMarks,
     setFiducialCalibration,
     importFiducialMarks,
-    migrateLegacyFiducialCalibrations,
     assignSensor,
     mergeSensors,
     removeSensor,

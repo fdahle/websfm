@@ -27,9 +27,9 @@ import { gcpsInPinholeFrame } from '../../core/sfm/displayFrame.js'
 // Deps are getters/refs so the store keeps ownership of the state:
 //   sparseCameras, images, mainSparseCloud, scaleFit, healthDirty — refs/computeds
 //   bars(), gcps() — snapshot getters over the other stores
-//   persist(), log() — store side effects
+//   save(), log() — store side effects
 export function createScaling({
-  sparseCameras, images, mainSparseCloud, scaleFit, healthDirty, bars, gcps, persist, log,
+  sparseCameras, images, mainSparseCloud, scaleFit, healthDirty, bars, gcps, save, log,
   frameModel = () => null, // see georeferencing.js: marks → the cameras' pinhole frame
 }) {
   const imagesById = () => new Map(images.value.map((im) => [im.id, im]))
@@ -147,7 +147,7 @@ export function createScaling({
   // whose inputs are not in the log is not reproducible.
   async function fitScaleBars() {
     const clearFit = () => {
-      if (scaleFit.value) { scaleFit.value = null; healthDirty.value++; persist() }
+      if (scaleFit.value) { scaleFit.value = null; healthDirty.value++; save() }
     }
     if (!sparseCameras.value.size) {
       log('Scale: build the sparse model first', 'warn', 'Scale')
@@ -205,7 +205,7 @@ export function createScaling({
         + (bar.accuracyM != null ? ` ±${bar.accuracyM}` : '')).join(', '),
     'success', 'Scale')
     healthDirty.value++
-    persist()
+    save()
     return scaleFit.value
   }
 

@@ -1,44 +1,28 @@
 import { createFrameResolver } from './reconstruction/frames.js'
+import { createSparseRun } from './reconstruction/sparseRun.js'
+import { createProductRuns } from './reconstruction/productRuns.js'
+import { createCloudEdits } from './reconstruction/cloudEdits.js'
+import { createDense } from './reconstruction/dense.js'
+import { createProducts } from './reconstruction/products.js'
+import { createImporters } from './reconstruction/importers.js'
 import { ref, shallowRef, computed, markRaw, nextTick, watch } from 'vue'
 import { defineStore, storeToRefs } from 'pinia'
-import {
-  reconstruct as workerReconstruct,
-  computeDepthMaps as workerComputeDepthMaps,
-  filterDepthMaps as workerFilterDepthMaps,
-  densify as workerDensify,
-  generateDem as workerGenerateDem,
-  demPreview as workerDemPreview,
-  generateOrtho as workerGenerateOrtho,
-  meshify as workerMeshify,
-  editCloud as workerEditCloud,
-  refineSparse as workerRefineSparse, optimizeSparse as workerOptimizeSparse,
-  terminateAll, POOL_SIZE,
-} from '../workers/computeClient.js'
 import { useLog } from '../composables/useLog.js'
 import * as opfs from '../utils/opfs.js'
 import { yieldToPaint } from '../utils/concurrency.js'
-import { aerialUpRotation, rotateReconstruction, sceneUpFromCameras } from '../core/products/projection.js'
-import { qualityToMaxDim, filterConfig, filterSettings, logFilterCache, logFilterTotals, finishFusion, mergeFusionCounters, logFusionStream } from '../core/dense/mvs.js'
-import { normalizeRegion, regionStatus, regionMask, regionContains } from '../core/products/region.js'
-import { stageDemPoints } from '../core/products/dem.js'
-import { packSparseForDense, sparseInputTransfer } from '../core/dense/sparseInput.js'
-import { normalizeProductLayers, productMapBlocker } from '../core/products/productLayers.js'
-import { resolveDemStyle, resolveOrthoStyle, isDefaultOrthoStyle, describeDemStyle } from '../core/products/productStyle.js'
+import { normalizeRegion, regionStatus, regionMask } from '../core/products/region.js'
+import { normalizeProductLayers } from '../core/products/productLayers.js'
 import { selectPoints } from '../core/products/cloudEdit.js'
 import { normalizeOrientation, orientationStatus, orientationBasis } from '../core/products/orientation.js'
-import { formatBytes, DEFAULT_BUDGET_BYTES, deviceBudget } from '../core/dense/memBudget.js'
+import { formatBytes } from '../core/dense/memBudget.js'
 import { depthMapBytes } from '../core/dense/depthMapCodec.js'
-import { distortionOf } from '../core/sfm/distortion.js'
-import { parseColmapModel, parseColmapModelBin, readColmapModel, makeNameResolver, colmapToSparse } from '../core/io/colmapModel.js'
-import { serializeCloud, deserializeCloud, legacyDeserializeCloud } from './reconstruction/cloudSerde.js'
+import { serializeCloud, deserializeCloud } from './reconstruction/cloudSerde.js'
 import { createSavedCloudFiles } from './reconstruction/savedCloudFiles.js'
 import { createDepthMapCache } from './reconstruction/depthMapCache.js'
 import { createGeoreferencing } from './reconstruction/georeferencing.js'
 import { createScaling } from './reconstruction/scaling.js'
-import { isGeographic, ensureProjection } from '../core/crs.js'
-import { precisionFromGcp } from '../core/gcpAccuracy.js'
-import { isGroundControl } from '../core/io/gcp.js'
 import { registerProjectStore } from './projectStores.js'
+import { showToast } from '../composables/useToasts.js'
 import { useImagesStore } from './useImagesStore.js'
 import { useMatchesStore } from './useMatchesStore.js'
 import { useProjectsStore } from './useProjectsStore.js'
@@ -46,25 +30,7 @@ import { useSensorsStore } from './useSensorsStore.js'
 import { usePosesStore } from './usePosesStore.js'
 import { useGcpsStore } from './useGcpsStore.js'
 import { useScaleBarsStore } from './useScaleBarsStore.js'
-import { buildCameraPriors, surveyFrameFor, gcpToSurveyFrame, normalizeLeverArm } from '../core/sfm/cameraPriors.js'
-import { makeFrameModelResolver, gcpsInPinholeFrame } from '../core/sfm/displayFrame.js'
-import { packSparseCloud, unpackReconstructionResult } from '../core/sfm/resultCodec.js'
-import { toMatchSpace } from '../core/features/siftDescriptors.js'
-import { SFM_TUNING, DENSE_TUNING } from '../core/tuning.js'
-import { packMatchPairs } from '../core/sfm/matchCodec.js'
-import { keypointSetFrom, keypointSetTransfer } from '../core/sfm/keypointSet.js'
-import {
-  projectSparsePeakBreakdownBytes, sparseMemoryDecision, planSparseRun, SPARSE_HEAP_FRACTION, WASM_SOLVER_LIMIT_BYTES,
-} from '../core/sfm/memBudget.js'
-
-// Tools-tab edits (`editClouds` modes, dispatched by workers/ops/cloud.js):
-// Mesh ▾ tools read a mesh (mesh-sample turns it into a dense cloud) …
-const MESH_EDIT_MODES = new Set(['mesh-clean', 'mesh-smooth', 'mesh-decimate', 'mesh-crop', 'mesh-sample'])
-// … these take [source, reference], where the reference may be a cloud or a mesh …
-const REFERENCE_MODES = new Set(['icp', 'distance'])
-// … and these produce a replacement view of their source (an aligned or
-// recoloured copy), so the source is hidden like a selection edit's.
-const REPLACES_SOURCE_VIEW = new Set(['transform', 'icp', 'distance', 'normals', 'mesh-clean', 'mesh-smooth', 'mesh-decimate'])
+import { makeFrameModelResolver } from '../core/sfm/displayFrame.js'
 
 // Project-scoped store: the sparse model (camera poses + 3D points) from
 // incremental SfM. Reads the image list and match graph from their stores;
@@ -72,6 +38,8 @@ const REPLACES_SOURCE_VIEW = new Set(['transform', 'icp', 'distance', 'normals',
 export const useReconstructionStore = registerProjectStore(defineStore('reconstruction', () => {
   const { log } = useLog()
   const projects = useProjectsStore()
+  // Persist only when a project is open and OPFS is usable (see useProjectsStore).
+  const isPersisting = () => projects.isPersisting
   const imagesStore = useImagesStore()
   const { images } = storeToRefs(imagesStore)
   const { matchStore } = storeToRefs(useMatchesStore())
@@ -93,7 +61,10 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
   // at one of them (see `ensureMainSparse`). Persisted in reconstruction.json.
   const mainSparseId = ref(null)
   const reconStatus = ref('idle') // last run: 'idle' | 'running' | 'done' | 'error'
+  // Bumped by anything that makes an in-flight restore stale (a new restore,
+  // clear, a reconstruct that will replace the model it is reading).
   let restoreGeneration = 0
+  const supersedeRestore = () => { restoreGeneration++ }
 
   // Per-image depth maps from the dense Stage A (Build Depth Maps), keyed by image
   // uuid. Each: { uuid, width, height, K, R, t, depth, cost, rgb, normals }.
@@ -108,7 +79,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
   // stream their planes during fusion and ortho. Saved planes are evicted.
   const {
     depthMaps, depthMapsMeta, depthMapCount,
-    persistDepthMaps, beginStreamedDepthMaps, depthMapInput, loadDepthIndexIntoMeta, clearDepthMaps,
+    persistDepthMaps, beginStreamedDepthMaps, depthMapInput, loadDepthIndexIntoMeta, clearDepthMaps, forgetDepthMap,
   } = createDepthMapCache({
     isPersisting: () => isPersisting(),
     currentProjectId: () => projects.currentProjectId,
@@ -152,7 +123,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     region.value = next
     const f = (v) => v.map((x) => x.toPrecision(5)).join(', ')
     log(`Region set: [${f(next.min)}] – [${f(next.max)}]`, 'info', 'Reconstruction', { channel: 'activity' })
-    persist()
+    save()
     return true
   }
   // A copy of a flat cloud ({ count, pos, col?, nrm? }) cut to the active region,
@@ -190,20 +161,20 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     log(`Orientation set: up [${f(next.up)}], origin [${f(next.origin)}], heading ${next.headingDeg}°`
       + (validGeoref.value ? ' — the georeference outranks it for georeferenced products' : ''),
     'info', 'Reconstruction', { channel: 'activity' })
-    persist()
+    save()
     return true
   }
   function clearOrientation() {
     if (!orientation.value) return
     orientation.value = null
     log('Orientation removed — the local frame is levelled from the cameras again', 'info', 'Reconstruction', { channel: 'activity' })
-    persist()
+    save()
   }
   function clearRegion() {
     if (!region.value) return
     region.value = null
     log('Region cleared', 'info', 'Reconstruction', { channel: 'activity' })
-    persist()
+    save()
   }
 
   // Quality summaries from the last sparse / dense run (Q3). Small, persisted in
@@ -250,7 +221,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
       if (before?.previewUrl && before.previewUrl !== now?.previewUrl) URL.revokeObjectURL(before.previewUrl)
     })
   }
-  // Map-layer view state per computed product ({ dem: { onMap, opacity }, … };
+  // Map-layer view state per computed product ({ dem: { visible, opacity }, … };
   // core/products/productLayers.js). Kept in reconstruction.json, NOT on the
   // product record: saving a product rewrites its raster buffers, and a map
   // toggle must not. It survives a rebuild, so a DEM on the map stays there.
@@ -375,7 +346,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     if (!cloud || mainSparseId.value === id) return
     mainSparseId.value = id
     log(`Main sparse cloud → "${cloud.name}"`, 'info', 'Reconstruction', { channel: 'activity' })
-    persist()
+    save()
   }
 
   function selectCloud(id) {
@@ -386,24 +357,26 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     const cloud = clouds.value.find(c => c.id === id)
     if (!cloud) return
     cloud.style = JSON.parse(JSON.stringify(style))
-    persist()
+    save()
   }
 
   function setCloudVisible(id, visible) {
     const cloud = clouds.value.find(c => c.id === id)
     if (!cloud) return
     cloud.visible = !!visible
-    persist()
+    save()
   }
 
   function removeCloud(id) {
     const removed = clouds.value.find((c) => c.id === id)
+    if (!removed) return false
     clouds.value = clouds.value.filter((c) => c.id !== id)
     if (selectedCloudId.value === id)
       selectedCloudId.value = clouds.value[0]?.id ?? null
     ensureMainSparse()
-    if (removed) log(`Removed cloud "${removed.name}"`, 'info', 'Reconstruction', { channel: 'activity' })
-    persist()
+    log(`Removed cloud "${removed.name}"`, 'info', 'Reconstruction', { channel: 'activity' })
+    save()
+    return true
   }
 
   // Rename is label-only — every link (selection, persistence, viewer) keys off
@@ -412,125 +385,29 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
   function renameCloud(id, name) {
     const cloud = clouds.value.find((c) => c.id === id)
     const trimmed = name.trim()
-    if (!cloud || !trimmed || trimmed === cloud.name) return
+    if (!cloud || !trimmed || trimmed === cloud.name) return false
     const prev = cloud.name
     cloud.name = trimmed
     log(`Renamed cloud "${prev}" → "${trimmed}"`, 'info', 'Reconstruction', { channel: 'activity' })
-    persist()
-  }
-
-  function productForKind(kind) {
-    if (kind === 'dem') return dem.value
-    if (kind === 'ortho') return ortho.value
-    return null
-  }
-
-  // Computed raster products have stable kind-based identities (one DEM and one
-  // orthophoto), so their user-facing names can change independently of every
-  // consumer. Replacing the shallow-ref object also updates sidebar/viewer users.
-  function renameProduct(kind, name) {
-    const product = productForKind(kind)
-    const trimmed = name?.trim()
-    if (!product || !trimmed || trimmed === product.name) return false
-    const previous = product.name || (kind === 'ortho' ? 'Orthophoto' : 'DEM')
-    const renamed = { ...product, name: trimmed }
-    if (kind === 'dem') dem.value = renamed
-    else ortho.value = renamed
-    log(`Renamed product "${previous}" → "${trimmed}"`, 'info', 'Products', { channel: 'activity' })
-    saveProductRecord(kind, renamed)
+    save()
     return true
   }
 
-  // Products ▸ Symbology… — display only (core/products/productStyle.js). An ortho's
-  // adjustments apply at draw time, so the record just carries them; a DEM's preview
-  // PNG is re-baked from its heights in the worker, and the record (with its new
-  // preview URL) replaces the old one only if the DEM was not rebuilt meanwhile.
-  async function setProductStyle(kind, style) {
-    const product = productForKind(kind)
-    if (!product) return false
-    const label = product.name || (kind === 'ortho' ? 'Orthophoto' : 'DEM')
-    if (kind === 'ortho') {
-      const next = resolveOrthoStyle(style)
-      const { style: _old, ...rest } = product
-      ortho.value = isDefaultOrthoStyle(next) ? rest : { ...rest, style: next }
-      log(`${label}: brightness ${next.brightness}, contrast ${next.contrast}, gamma ${next.gamma}`,
-        'info', 'Products', { channel: 'activity' })
-      saveProductRecord('ortho', ortho.value)
-      return true
-    }
-    const next = resolveDemStyle(style)
-    try {
-      const { previewBlob } = await workerDemPreview({ style: next, grid: {
-        width: product.width, height: product.height, data: product.data, mask: product.mask,
-        gsd: product.gsd, zMin: product.zMin, zMax: product.zMax,
-      } })
-      if (dem.value?.createdAt !== product.createdAt) return false
-      const { previewUrl: _url, ...rest } = dem.value
-      dem.value = withPreviewUrl({ ...rest, style: next, previewBlob })
-      log(`${label}: ${describeDemStyle(next, product)}`, 'info', 'Products', { channel: 'activity' })
-      saveProductRecord('dem', dem.value)
-      return true
-    } catch (err) {
-      log(`${label} symbology failed: ${err?.message ?? err}`, 'error', 'Products')
-      return false
-    }
-  }
-
-  // Persist a DEM/ortho. An ortho's record is then pointed at the committed COG
-  // file (if it is still the current ortho), so the worker's in-memory Blob can go
-  // and the next save of the same ortho reuses the file instead of rewriting it.
-  // Only the LATEST save may do that: an earlier one's file is collected by the next.
-  const productSaveSeq = { dem: 0, ortho: 0 }
-  function saveProductRecord(kind, record) {
-    if (!isPersisting()) return
-    const projectId = projects.currentProjectId, seq = ++productSaveSeq[kind]
-    opfs.saveProduct(projectId, kind, record).then((saved) => {
-      if (kind !== 'ortho' || !saved?.cogSaved || seq !== productSaveSeq[kind] || projectId !== projects.currentProjectId) return
-      const now = ortho.value
-      if (now && now.createdAt === record.createdAt) ortho.value = { ...now, cog: saved.cog, cogSaved: saved.cogSaved }
-    }).catch(() => {})
-  }
-
-  // Show/hide a computed DEM/ortho on the map. Refused (logged, false) when the
-  // product cannot be placed — the ribbon and sidebar grey the toggle for the same
-  // reason, from the same productMapBlocker.
-  function setProductOnMap(kind, onMap) {
-    const product = productForKind(kind)
-    const blocker = onMap ? productMapBlocker(product) : null
-    if (blocker) { log(`Map: ${blocker}`, 'warn', 'Products'); return false }
-    const prev = productLayers.value[kind] ?? { onMap: false, opacity: 1 }
-    if (prev.onMap === !!onMap) return true
-    productLayers.value = { ...productLayers.value, [kind]: { ...prev, onMap: !!onMap } }
-    log(`${product?.name || (kind === 'ortho' ? 'Orthophoto' : 'DEM')} ${onMap ? 'shown on' : 'hidden from'} the map`,
-      'info', 'Products', { channel: 'activity' })
-    persist()
-    return true
-  }
-  function setProductOpacity(kind, opacity) {
-    const prev = productLayers.value[kind] ?? { onMap: false, opacity: 1 }
-    const next = Math.min(1, Math.max(0, Number(opacity)))
-    if (!Number.isFinite(next) || next === prev.opacity) return
-    productLayers.value = { ...productLayers.value, [kind]: { ...prev, opacity: next } }
-    persist()
-  }
-
-  async function removeProduct(kind) {
-    const product = productForKind(kind)
-    if (!product) return false
-    const name = product.name || (kind === 'ortho' ? 'Orthophoto' : 'DEM')
-    if (kind === 'dem') dem.value = null
-    else ortho.value = null
-    if (isPersisting()) await opfs.deleteProduct(projects.currentProjectId, kind).catch(() => {})
-    log(`Removed product "${name}"`, 'info', 'Products', { channel: 'activity' })
-    return true
-  }
-
-  // Persist only when a project is open and OPFS is usable (see useProjectsStore).
-  const isPersisting = () => projects.isPersisting
+  // The DEM / orthophoto records (reconstruction/products.js).
+  const {
+    renameProduct, setProductStyle, saveProductRecord, setProductVisible,
+    setProductOpacity, removeProduct,
+  } = createProducts({
+    dem, isPersisting, log, ortho, save, productLayers, projects, withPreviewUrl,
+  })
 
   // Serialise every cloud to the on-disk shape (metadata + binary buffers).
   // Committed sidecar files per unchanged dense/mesh cloud (savedCloudFiles.js).
   const savedCloudFiles = createSavedCloudFiles()
+  // The project whose saved model could not be read this session (see restore).
+  // Until something is put in its place, an empty save would overwrite that
+  // document and collect its buffers — so save() declines it.
+  let unreadableProjectId = null
 
   // `reuse[i]` (optional) — files to point cloud i at instead of re-serialising it.
   function serialize(reuse = null) {
@@ -558,9 +435,10 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
   // Writes only the clouds whose heavy data changed since the last committed save; the
   // rest keep their files (savedCloudFiles.js). If a reused file has gone — another tab
   // saved this project in between — the saver writes nothing and this resends in full.
-  async function persist() {
+  async function save() {
     if (!isPersisting()) return false
     const projectId = projects.currentProjectId
+    if (projectId === unreadableProjectId && clouds.value.length === 0) return false
     try {
       for (const full of [false, true]) {
         const list = clouds.value
@@ -648,7 +526,8 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     denseSummary.value = null
     depthSummary.value = null
     healthDirty.value++
-    for (const img of images.value) if (img.depth) img.depth = null
+    // Depth previews stay: they are Blobs outside the heap, and leaving them lets
+    // invalidateSparseDependents find and retire them once the new solve lands.
     if (selectedCloudId.value && !clouds.value.some((c) => c.id === selectedCloudId.value))
       selectedCloudId.value = replaceId
 
@@ -678,13 +557,15 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     scaleFit.value = null
     denseSummary.value = null
     depthSummary.value = null
-    for (const im of depthPreviewImages) im.depth = null
+    // Through updateDepth so each preview's blob URL is revoked and its PNG deleted;
+    // one project.json sync then clears the hasDepth flags.
+    for (const im of depthPreviewImages) imagesStore.updateDepth(im.id, null, { quiet: true, persistSync: false })
 
     if (isPersisting()) {
+      if (depthPreviewImages.length) imagesStore.save()
       await Promise.all([
         opfs.deleteDepthPlanes(projects.currentProjectId).catch(() => {}),
         opfs.deleteProducts(projects.currentProjectId).catch(() => {}),
-        ...depthPreviewImages.map((im) => opfs.deleteDepth(projects.currentProjectId, im.uuid).catch(() => {})),
       ])
     }
     if (hadDerived) {
@@ -693,79 +574,13 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     }
   }
 
-  // Import a COLMAP sparse model (text OR binary) as a NEW sparse cloud (never
-  // replaces a computed one — MC lets both coexist for comparison; becomes main
-  // only when no sparse cloud exists yet). `files` is a map keyed by canonical
-  // name — `cameras.txt`/`images.txt`/`points3D.txt` (string values) or the `.bin`
-  // variants (Uint8Array values); the presence of a `.bin` key selects the binary
-  // parser. Images are matched to the loaded set by name. Returns true on success.
-  // Distortion coeffs of RADIAL/OPENCV cameras are read for fx/fy/cx/cy only — the
-  // model is treated as pinhole (consistent with the pipeline), dropped terms warned.
-  function importColmapModel(files) {
-    const isBin = files['cameras.bin'] || files['images.bin'] || files['points3D.bin']
-    let colImages, colPoints, droppedDistortion
-    try {
-      const model = isBin ? parseColmapModelBin(files) : parseColmapModel(files)
-      ;({ images: colImages, points: colPoints, droppedDistortion } = readColmapModel(model))
-    } catch (err) {
-      log(`COLMAP import: could not parse model — ${err?.message ?? err}`, 'error', 'Reconstruction')
-      return false
-    }
-    if (!colImages.length) {
-      log('COLMAP import: no images found (need cameras.txt + images.txt)', 'warn', 'Reconstruction')
-      return false
-    }
-
-    const resolve = makeNameResolver(images.value.map((im) => ({ uuid: im.uuid, name: im.name })))
-    const { cameras, points, matched, unmatched } = colmapToSparse(
-      { images: colImages, points: colPoints }, resolve)
-
-    log(`COLMAP import: matched ${matched.length}/${colImages.length} images by name`
-      + `, ${points.length}/${colPoints.length} points`, 'info', 'Reconstruction')
-    if (unmatched.length) {
-      log(`COLMAP import: ${unmatched.length} image(s) not in this project (skipped): `
-        + unmatched.slice(0, 8).join(', ') + (unmatched.length > 8 ? '…' : ''), 'warn', 'Reconstruction')
-    }
-    if (droppedDistortion.length) {
-      log(`COLMAP import: dropped distortion of ${droppedDistortion.join(', ')} camera(s) `
-        + '— intrinsics read as pinhole (fx/fy/cx/cy)', 'warn', 'Reconstruction')
-    }
-    if (cameras.size < 2) {
-      log('COLMAP import: fewer than 2 images matched the loaded set — nothing to import. '
-        + 'Load the matching images first (names must correspond).', 'warn', 'Reconstruction')
-      return false
-    }
-
-    upsertSparseCloud(cameras, points, {
-      replaceId: null,
-      asMain: !mainSparseCloud.value,
-      name: 'Imported (COLMAP)',
-      imported: true,
-    })
-    log(`COLMAP import: added sparse cloud (${cameras.size} cameras, ${points.length} points)`
-      + `${mainSparseId.value === selectedCloudId.value ? ' — set as main' : ''}`, 'success', 'Reconstruction')
-    persist()
-    return true
-  }
-
-  function importInteropModel(model) {
-    const resolve = makeNameResolver(images.value.map((im) => ({ uuid: im.uuid, name: im.name })))
-    const loadedByUuid = new Map(images.value.map((im) => [im.uuid, im]))
-    const normalizedImages = (model.images ?? []).map((im) => {
-      const uuid = resolve(im.name), loaded = loadedByUuid.get(uuid)
-      const width = im.width ?? loaded?.meta?.width ?? null, height = im.height ?? loaded?.meta?.height ?? null
-      return { ...im, width, height, K: { fx: im.K?.fx, fy: im.K?.fy ?? im.K?.fx, cx: im.K?.cx ?? (width ? width / 2 : 0), cy: im.K?.cy ?? (height ? height / 2 : 0) } }
-    })
-    const { cameras, points, matched, unmatched } = colmapToSparse({ images: normalizedImages, points: model.points ?? [] }, resolve)
-    if (cameras.size < 2) {
-      log(`${model.format} import: fewer than 2 cameras match loaded images`, 'warn', 'Reconstruction')
-      return false
-    }
-    upsertSparseCloud(cameras, points, { replaceId: null, asMain: !mainSparseCloud.value, name: `Imported (${model.format})`, imported: true })
-    log(`${model.format} import: ${matched.length} cameras, ${points.length} points${unmatched.length ? `, ${unmatched.length} unmatched` : ''}`, 'success', 'Reconstruction')
-    persist()
-    return true
-  }
+  // COLMAP / interop sparse models and imported clouds (reconstruction/importers.js).
+  const {
+    importColmapModel, importInteropModel, importCloud,
+  } = createImporters({
+    clouds, images, log, mainSparseCloud, mainSparseId, makeCloudId, save, selectedCloudId,
+    upsertSparseCloud,
+  })
 
   // Insert the fused dense model, replacing any existing dense cloud (carries the
   // previous name/id forward so a rename survives a re-fuse). Dense clouds have no
@@ -829,767 +644,25 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     selectedCloudId.value = cloud.id
   }
 
-  // Import an external point cloud or mesh (parsed off-thread by the `parseCloud`
-  // worker op, transformed by applyImportTransform). Always ADDS a new cloud —
-  // never replaces computed ones — flagged `imported: true` so upsertDense/Mesh
-  // skip it on a re-fuse/re-mesh. Coordinates land verbatim in the current frame
-  // (no CRS reprojection). Authoritative positions retain Float64 precision;
-  // the renderer builds origin-relative Float32 buffers. Returns true
-  // on success.
-  function importCloud(parsed, fileName = 'file') {
-    const isMesh = !!parsed.idx
-    const n = isMesh ? (parsed.nVerts ?? 0) : (parsed.count ?? 0)
-    if (!n) {
-      log(`Cloud import: ${fileName} contained no points`, 'warn', 'Reconstruction')
-      return false
-    }
-    const pos = parsed.pos instanceof Float64Array ? parsed.pos : Float64Array.from(parsed.pos)
-    const cloud = {
-      id: makeCloudId(),
-      name: `Imported (${fileName})`,
-      kind: isMesh ? 'mesh' : 'dense',
-      createdAt: Date.now(),
-      imported: true,
-      cameras: markRaw(new Map()),
-      pos: markRaw(pos),
-      ...(parsed.attributes ? { attributes: markRaw(parsed.attributes) } : {}),
-      ...(parsed.col ? { col: markRaw(parsed.col) } : { col: null }),
-      ...(isMesh
-        ? { nVerts: n, count: parsed.count, idx: markRaw(parsed.idx) }
-        : { count: n, ...(parsed.nrm ? { nrm: markRaw(parsed.nrm) } : {}) }),
-    }
-    clouds.value.push(cloud)
-    selectedCloudId.value = cloud.id
-    log(`Cloud import: added "${cloud.name}" — ${n.toLocaleString()} ${isMesh ? `vertices, ${parsed.count.toLocaleString()} triangles` : 'points'}`
-      + `${parsed.col ? ', color' : ''}${parsed.nrm ? ', normals' : ''}`, 'success', 'Reconstruction')
-    persist()
-    return true
-  }
+  // Depth maps, fusion and meshing (reconstruction/dense.js).
+  const {
+    computeDepthMaps, densify, generateMesh,
+  } = createDense({
+    beginStreamedDepthMaps, clipToRegion, clouds, denseSummary, depthMapInput, depthMaps,
+    depthMapsMeta, depthSummary, images, imagesStore, isPersisting, loadDepthIndexIntoMeta, log,
+    mainSparseCloud, meshSource, meshSources, save, persistDepthMaps, projects, reconStatus,
+    sensors, summary, upsertDenseCloud, upsertMeshCloud, withRegion,
+  })
 
-  // Dense Stage A — Build Depth Maps. Runs PatchMatch MVS in the worker over the
-  // sparse cloud's registered cameras, stores the raw depth maps for fusion, and
-  // pushes a display depth image into each image (viewer overlay). Needs a sparse
-  // cloud whose points carry view-tracks; these are now persisted, so a restored
-  // project works without rebuilding (legacy models saved before this still need
-  // a Reconstruct re-run).
-  async function computeDepthMaps(settings = {}, onProgress) {
-    const cloud = mainSparseCloud.value
-    if (!cloud || cloud.cameras.size < 2) {
-      log('Dense: need a sparse cloud with ≥2 cameras first', 'warn', 'Dense')
-      return
-    }
-    const hasTracks = cloud.points.some((p) => p.views.size > 0)
-    if (!hasTracks) {
-      log('Dense: sparse cloud has no view-tracks (rebuild the sparse model first)', 'warn', 'Dense')
-      return
-    }
-    reconStatus.value = 'running'
-    try {
-      // Resolve a quality preset → working maxDim from the largest native image
-      // dimension (Step 3), unless the user set an explicit maxDim in Advanced.
-      const resolved = { ...settings }
-      if (resolved.quality && !(resolved.maxDim > 0)) {
-        const nativeLong = images.value.reduce(
-          (m, im) => Math.max(m, im.meta?.width || 0, im.meta?.height || 0), 0)
-        resolved.maxDim = qualityToMaxDim(resolved.quality, nativeLong)
-        log(`Dense: quality '${resolved.quality}' → working ≤${resolved.maxDim}px `
-          + `(¼-scale presets of ${nativeLong}px native)`, 'info', 'Dense')
-      }
-      settings = resolved
-      // Rebuild every value as plain arrays/objects: cloud cameras + points are
-      // reactive Pinia state, and Vue's Proxy wrappers can't be structured-cloned
-      // to the worker ("object can not be cloned").
-      const imgByUuid = new Map(images.value.map((im) => [im.uuid, im]))
-      const sensorById = new Map(sensors.value.map((s) => [s.id, s]))
-      // WS2: composed radial distortion {k1,k2,k3} the sparse run self-calibrated per
-      // sensor (folded into the keypoints there). Passed to dense as a SECOND bag
-      // (`selfCal`) applied after the calibrated `dist` — dense's camera K is the
-      // BA-refined K the fold used, so it reproduces the same pinhole frame as the
-      // sparse cloud. Empty ⇒ no-op (the normal EXIF-only case has no calibrated dist,
-      // so selfCal is the only bag).
-      const selfCalBySensor = new Map(
-        (summary.value?.selfCalDistortion ?? []).map((d) => [d.sensorId, { k1: d.k1, k2: d.k2, k3: d.k3 }]))
-      // F4: per-image scan→canonical transform from the sparse run. The dense
-      // stage reproduces that exact frame (it must NOT re-fit) — the sparse run
-      // defines it. Fail loudly if a film image is in the cloud but its transform
-      // is missing (a stale/partial summary would silently mis-warp its raster).
-      const fidByUuid = new Map(
-        (summary.value?.fiducialTransforms ?? []).map((t) => [t.uuid, { A: t.A, transform: t.transform ?? null, frame: t.frame }]))
-      const inputImages = []
-      for (const [uuid, cam] of cloud.cameras) {
-        const im = imgByUuid.get(uuid)
-        if (!im) continue
-        // Lens distortion for this image's sensor — the worker undistorts the raster
-        // so depth maps / fusion / DEM / ortho all stay pinhole (matches sparse).
-        const s = im.sensorId ? sensorById.get(im.sensorId) : null
-        const fid = fidByUuid.get(uuid) ?? null
-        if (s?.kind === 'film' && !fid) {
-          // Three distinct causes — point the user at the actual fix, not always "re-run".
-          const nMarks = s.fiducialCalibration?.marks?.length || s.fiducials?.marks?.length || 0
-          const nObs = im.fiducialDetections?.length || im.fiducialObs?.length || 0
-          let why
-          if (nMarks < 3) {
-            why = `its detected fiducials are not calibrated (${nMarks} metric marks, need ≥3) — `
-              + `run Calibrate Fiducials, then re-run the sparse reconstruction`
-          } else if (nObs < 3) {
-            why = `this image has ${nObs} accepted fiducial detection(s) (need ≥3) — `
-              + `run Detect Fiducials or review its spots, then re-run the sparse reconstruction`
-          } else {
-            why = `the last sparse run produced no interior-orientation transform for it — `
-              + `re-run the sparse reconstruction before densifying`
-          }
-          log(`Dense: ${im.name} skipped — ${why}.`, 'error', 'Dense')
-          continue
-        }
-        // A TIFF's lossless compute PNG may still be encoding right after ingest;
-        // wait for it (rejects if its transcode failed) so dense reads the PNG,
-        // never the lossy display JPEG — see the computeUrl invariant.
-        await imagesStore.whenComputeReady(im)
-        const dist = s ? distortionOf(s) : null
-        // Composed self-cal bag for this image's sensor (a second undistortion applied
-        // after `dist`). Null when self-cal was off for it.
-        const sc = im.sensorId ? selfCalBySensor.get(im.sensorId) : null
-        const selfCal = sc && (sc.k1 || sc.k2 || sc.k3)
-          ? { k1: sc.k1 || 0, k2: sc.k2 || 0, k3: sc.k3 || 0 } : null
-        inputImages.push({
-          uuid, name: im.name, url: im.computeUrl ?? im.url,
-          // Per-image mask (if any) so masked regions are excluded from the dense cloud.
-          mask: im.mask?.blob ?? null,
-          R: cam.R.map((row) => [...row]),
-          t: [...cam.t],
-          K: { fx: cam.K.fx, fy: cam.K.fy, cx: cam.K.cx, cy: cam.K.cy },
-          dist,
-          selfCal,
-          // Film scan→canonical warp (plain data; the frame is already a plain object).
-          fid,
-        })
-      }
-      if (selfCalBySensor.size) {
-        const parts = [...selfCalBySensor].map(([id, d]) =>
-          `${sensorById.get(id)?.label ?? id.slice(0, 6)} k1 ${(d.k1 || 0).toFixed(5)}`
-          + `${d.k2 ? `, k2 ${d.k2.toFixed(5)}` : ''}${d.k3 ? `, k3 ${d.k3.toFixed(5)}` : ''}`)
-        log(`Dense: applying self-calibrated distortion from the sparse run — ${parts.join('; ')}`,
-          'info', 'Dense')
-      }
-      // Packed typed arrays, transferred (core/dense/sparseInput.js) — not an object
-      // plus a views array per point, structured-cloned.
-      const sparse = packSparseForDense(cloud.points)
-
-      // The image's depth preview (display PNG), then drop it from the map.
-      let previews = 0
-      const takePreview = (m) => {
-        const im = imgByUuid.get(m.uuid)
-        if (im && m.displayBlob) { imagesStore.updateDepth(im.id, m.displayBlob, { quiet: true, persistSync: false }); previews++ }
-        delete m.displayBlob
-      }
-      // Streamed (TODO ▸ SC-4) whenever the maps can be saved: each finished map is
-      // written and released at once, and the cross-view filter runs as its own pass
-      // over the saved files. Holding every map to the end (the in-memory path, kept
-      // for a project that cannot persist) made the preflight refuse ~100+ images.
-      const run = await beginStreamedDepthMaps()
-      const { maps, summary: aSummary, loopShare } = await workerComputeDepthMaps(
-        { images: inputImages, sparse, settings: withRegion({ ...settings, streamMaps: !!run }) },
-        { transfer: sparseInputTransfer(sparse), onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f),
-          onEvent: (ev, [m]) => { if (ev === 'map' && run) { takePreview(m); run.add(m) } } },
-      )
-      let stageSummary = aSummary ?? null
-      if (run) {
-        await run.settled()
-        if (settings.geomConsistency !== false && run.metas.length) {
-          stageSummary = await filterSavedDepthMaps(run, settings, stageSummary, loopShare, onProgress)
-        }
-        await run.commit(settings)
-      } else {
-        depthMaps.value = new Map(maps.map((m) => [m.uuid, m]))
-        depthMapsMeta.value = []   // the fresh maps supersede any restored index
-        for (const m of maps) takePreview(m)
-      }
-      depthSummary.value = stageSummary
-      if (previews && isPersisting()) imagesStore.sync()
-      log(`Dense: ${run ? run.metas.length : maps.length} depth map(s) computed`, 'success', 'Dense')
-      reconStatus.value = 'done'
-      // In memory only: persist before densify can transfer the buffers away (a no-op
-      // when the project cannot persist, which is why this path exists).
-      if (!run) await persistDepthMaps(maps, settings)
-    } catch (err) {
-      log(`Depth-map error: ${err?.message ?? err}`, 'error', 'Dense')
-      reconStatus.value = 'error'
-    }
-  }
-
-  // The cross-view filter over a streamed run's saved maps: the worker reads them on
-  // demand and returns each filtered depth plane, which is written back over the
-  // unfiltered one (the worker has judged every map before the first comes back).
-  // Folds the filter's numbers into the Stage A summary, as the in-memory pass does.
-  async function filterSavedDepthMaps(run, settings, stageSummary, from, onProgress) {
-    const metaByUuid = new Map(run.metas.map((m) => [m.uuid, m]))
-    const nameByUuid = new Map(images.value.map((im) => [im.uuid, im.name]))
-    const entries = (await opfs.loadDepthFiles(run.projectId, run.metas))
-      .map((e) => ({ ...e, name: nameByUuid.get(e.uuid) }))
-    const writes = []
-    const onEvent = (ev, [f]) => {
-      if (ev !== 'filtered') return
-      const meta = metaByUuid.get(f.uuid)
-      if (meta) Object.assign(meta, f.coverage)
-      writes.push(opfs.saveDepthPlane(run.projectId, f.uuid, { depth: f.depth }))
-    }
-    // References are judged independently against the unfiltered planes, so the maps
-    // split over the pool in contiguous chunks (neighbouring captures share candidate
-    // views, which keeps each worker's cache warm) give the single run's verdicts.
-    const n = entries.length
-    const workers = Math.max(1, Math.min(POOL_SIZE, Math.floor(n / 16)))
-    let stats, ms
-    if (workers === 1) {
-      ({ stats, ms } = await workerFilterDepthMaps({ maps: entries, settings, from },
-        { onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f), onEvent }))
-    } else {
-      const t0 = performance.now()
-      const fractions = new Array(workers).fill(from), counts = new Array(workers).fill(0)
-      const chunks = Array.from({ length: workers }, (_, w) => {
-        const a = Math.floor(w * n / workers), b = Math.floor((w + 1) * n / workers)
-        return Array.from({ length: b - a }, (_, k) => a + k)
-      })
-      const parts = await Promise.all(chunks.map((refs, w) => workerFilterDepthMaps(
-        { maps: entries, settings, from, refs, workers },
-        { worker: w, onLog: (m, l, c) => log(m, l, c), onEvent,
-          onProgress: (d, t, lbl, f) => {
-            fractions[w] = f; counts[w] = d
-            onProgress?.(counts.reduce((x, y) => x + y, 0), n, lbl, fractions.reduce((x, y) => x + y, 0) / workers)
-          } })))
-      stats = new Array(n)
-      const totals = { considered: 0, kept: 0, lowNcc: 0, inconsistent: 0, lowParallax: 0 }
-      let loads = 0, hits = 0, nCand = 0
-      parts.forEach((p, w) => {
-        for (const i of chunks[w]) stats[i] = p.stats[i]
-        for (const k of Object.keys(totals)) totals[k] += p.totals[k]
-        loads += p.loads; hits += p.hits; nCand += p.nCand
-      })
-      // Every map is judged now; only now may any of them be rewritten.
-      await Promise.all(chunks.map((refs, w) => workerFilterDepthMaps(
-        { maps: entries, apply: { refs, masks: parts[w].masks, stats: refs.map((i) => parts[w].stats[i]) } },
-        { worker: w, onEvent, transfer: parts[w].masks.map((m) => m.buffer) })))
-      ms = performance.now() - t0
-      const cfg = filterConfig(filterSettings(settings))
-      if (n >= 2 && cfg.minConsistent > 0) logFilterCache(log, { nMaps: n, nCand, loads, hits, cacheBytes: parts[0].cacheBytes, cull: cfg.cull, workers })
-      logFilterTotals(log, totals, n, cfg)
-      const marginal = entries.map((e, i) => ({ e, s: stats[i] })).filter(({ s }) => s.considered > 0 && s.keptPct < 1)
-      if (marginal.length) {
-        const names = marginal.slice(0, 12).map(({ e, s }) => `${e.name || e.uuid} ${s.keptPct.toFixed(1)}%`).join('; ')
-        log(`Depth filter: ${marginal.length} marginal map(s) kept <1% after cross-view filtering — `
-          + `${names}${marginal.length > 12 ? `; +${marginal.length - 12} more` : ''}. `
-          + 'They remain cached for diagnostics/orthophoto use but will contribute little to fusion.', 'warn', 'Dense')
-      }
-      log(`Depth filter: cross-view consistency in ${(ms / 1000).toFixed(1)}s on ${workers} workers `
-        + `(streamed from saved maps; judging ${(Math.max(...parts.map((p) => p.judgeMs)) / 1000).toFixed(1)}s in the slowest)`, 'info', 'Dense')
-      onProgress?.(n, n, 'Depth maps complete', 1)
-    }
-    await Promise.all(writes)
-    const kept = stats.map((s) => s.keptPct)
-    const sorted = [...kept].sort((a, b) => a - b)
-    return stageSummary && {
-      ...stageSummary,
-      geomFilterMs: ms,
-      geomFilterMedianKeptPct: sorted.length ? sorted[Math.round(0.5 * (sorted.length - 1))] : null,
-      geomFilterMinKeptPct: sorted.length ? sorted[0] : null,
-      geomFilterMarginalMaps: kept.filter((v) => v < 1).length,
-    }
-  }
-
-  // Fusion over saved maps on `workers` pool slots. The plan's preflight already counted
-  // every worker's input, accumulator and the join; a plan that cannot split (small
-  // scene, tight budget) runs whole on one worker without repeating the pre-passes.
-  // Returns { cloud, summary } or null (refused, already logged).
-  async function densifyParallel(mapsInput, settings, budget, workers, onProgress, stillCurrent) {
-    const t0 = performance.now()
-    // Each worker's comparison cache; the plan's preflight counts it per worker. An
-    // eighth of the budget split K ways starved the cache (96 MB each on quarry).
-    const cacheBytes = Math.floor(Math.min(512 * 1024 ** 2, budget / (4 * workers)))
-    const fuseSettings = withRegion({ ...settings, memBudgetBytes: budget, cacheBytes, parallel: workers })
-    const PLAN_SHARE = 0.1 // the pre-passes read every map four times, the slabs do the rest
-    const onLog = (m, l, c) => log(m, l, c)
-    onProgress?.(0, 1, 'Planning fusion…', 0)
-    const { plan, refused } = await workerDensify({ maps: mapsInput, streamed: true, settings: fuseSettings, mode: 'plan' }, { onLog, worker: 0 })
-    if (refused || !plan || !stillCurrent()) return null
-    if (plan.workers <= 1) {
-      const { cloud, summary } = await workerDensify({ maps: mapsInput, streamed: true, settings: { ...fuseSettings, plan } },
-        { onLog, worker: 0, onProgress: (d, t, lbl) => onProgress?.(d, t, lbl, PLAN_SHARE + (1 - PLAN_SHARE) * (t > 0 ? d / t : 0)) })
-      return { cloud, summary }
-    }
-    const nM = plan.nMaps, nT = plan.slabs.length
-    const totalCells = plan.slabs.reduce((s, x) => s + x.cells, 0) || 1
-    const slabDone = new Float64Array(nT)
-    const report = (lbl) => {
-      let f = 0
-      for (let i = 0; i < nT; i++) f += slabDone[i] * plan.slabs[i].cells / totalCells
-      onProgress?.(Math.round(f * nT), nT, lbl, PLAN_SHARE + (1 - PLAN_SHARE) * f)
-    }
-    // Largest slabs first, so the pool does not end on one long straggler.
-    const queue = plan.slabs.map((s, i) => i).sort((a, b) => plan.slabs[b].cells - plan.slabs[a].cells)
-    const parts = new Array(nT), counters = [], streams = []
-    const runner = async (w) => {
-      while (queue.length) {
-        const i = queue.shift()
-        const res = await workerDensify({ maps: mapsInput, streamed: true, settings: fuseSettings, mode: 'slab', plan, slab: i }, {
-          onLog, worker: w,
-          onProgress: (d, t, lbl) => { slabDone[i] = Math.min(1, Math.max(0, (d - i * nM) / nM)); report(lbl) },
-        })
-        parts[i] = res.part; counters.push(res.counters); streams.push(res.stream)
-        slabDone[i] = 1
-        report(`slab ${i + 1}/${nT} done`)
-      }
-    }
-    await Promise.all(Array.from({ length: plan.workers }, (_, w) => runner(w)))
-    if (!stillCurrent()) return null
-    const merged = mergeFusionCounters(counters)
-    const sum = (k) => streams.reduce((s, x) => s + (x?.[k] ?? 0), 0)
-    logFusionStream(onLog, { compared: sum('compared'), culled: sum('culled'), reads: sum('reads'), hits: sum('hits'),
-      cacheBytes, workers: plan.workers })
-    const { summary } = finishFusion(plan, merged, [], onLog)
-    // Join the slabs (in slab order, so a run is deterministic for a given plan).
-    const n = parts.reduce((s, p) => s + p.count, 0)
-    const cloud = { count: n, pos: new Float32Array(n * 3), col: new Uint8Array(n * 3), nrm: new Float32Array(n * 3) }
-    let o = 0
-    for (let i = 0; i < nT; i++) {
-      const p = parts[i]
-      cloud.pos.set(p.pos, o * 3); cloud.col.set(p.col, o * 3); cloud.nrm.set(p.nrm, o * 3)
-      o += p.count; parts[i] = null
-    }
-    log(`Dense cloud: fused ${nM} depth maps → ${n} points in ${((performance.now() - t0) / 1000).toFixed(1)}s `
-      + `(${nT} slabs on ${plan.workers} workers)`, n === 0 ? 'error' : 'success', 'Dense')
-    onProgress?.(1, 1, 'Done', 1)
-    return { cloud, summary }
-  }
-
-  // Dense Stage B — fuse the Stage A depth maps into a coloured dense cloud.
-  async function densify(settings = {}, onProgress) {
-    const projectId = projects.currentProjectId, sparse = mainSparseCloud.value
-    const stillCurrent = () => projectId === projects.currentProjectId && sparse === mainSparseCloud.value
-    let input
-    try { input = await depthMapInput() }
-    catch (err) { log(`Dense: ${err.message}`, 'error', 'Dense'); return }
-    const { maps, streamed } = input
-    if (!maps.length) {
-      log('Dense: compute depth maps before building the dense cloud', 'warn', 'Dense')
-      return
-    }
-    // Stage B pre-flight: fusion itself measures the merged cell count (at the real
-    // merge cell, step and region) and refuses over budget before its consistency
-    // pass, returning the transferred buffers home — a pixel-count guess here could
-    // not see the merge cell, the step or the view overlap. Same budget knob as Stage A.
-    const budget = settings.memBudgetBytes > 0 ? settings.memBudgetBytes : DEFAULT_BUDGET_BYTES
-    if (streamed) log('Dense: reading saved maps on demand (one reference + one comparison); releasing planes after use', 'info', 'Dense')
-    reconStatus.value = 'running'
-    // Transfer (not clone) each map's depth/cost/rgb buffers to the worker — they're
-    // the bulk of dense memory, and a clone briefly doubles it (the fusion OOM's
-    // secondary contributor). The per-map display PNG (displayBlob) is display-only,
-    // so strip it from the wire payload entirely. The worker returns the buffers so
-    // we re-attach them below; until then the store's copies are detached.
-    // Resolve uuid → filename for the fusion progress/log labels. Deliberately derived
-    // here rather than persisted in the depth-map index: the image list is the authority
-    // on names (a rename must not leave a stale copy in the sidecar), and a restored
-    // project has the list but no name on the map. Falls back to a uuid fragment in
-    // core/dense/mvs.js when the image is gone.
-    const nameByUuid = new Map(images.value.map((im) => [im.uuid, im.name]))
-    const mapsInput = streamed ? maps.map(m => ({ ...m, name: nameByUuid.get(m.uuid) })) : maps.map((m) => ({
-      uuid: m.uuid, name: m.name ?? nameByUuid.get(m.uuid), width: m.width, height: m.height, K: m.K, R: m.R, t: m.t,
-      depth: m.depth, cost: m.cost, rgb: m.rgb, normals: m.normals || null,
-    }))
-    const transfer = []
-    for (const m of streamed ? [] : mapsInput) {
-      transfer.push(m.depth.buffer, m.cost.buffer, m.rgb.buffer)
-      if (m.normals) transfer.push(m.normals.buffer)
-    }
-    // Saved maps can be read by every worker, so fusion CAN split over the pool: one
-    // worker plans (pre-passes + slab layout), then the slabs run in parallel, each
-    // exact on its own (core/dense/mvs.js fusionSteps), and are joined in slab order.
-    // Off by default (DENSE_TUNING.fuseWorkers): fusion is bound by plane reads, and on
-    // quarry 8 workers took 630 s against one worker's 557 s (HANDOVER ▸ B-parity).
-    const workers = streamed && maps.length >= 16 ? Math.min(POOL_SIZE, DENSE_TUNING.fuseWorkers ?? 1) : 1
-    if (workers > 1) {
-      try {
-        const done = await densifyParallel(mapsInput, settings, budget, workers, onProgress, stillCurrent)
-        if (!stillCurrent() || !done) { if (!done) reconStatus.value = 'error'; return }
-        upsertDenseCloud(done.cloud)
-        denseSummary.value = done.summary
-        reconStatus.value = 'done'
-        await persist()
-      } catch (err) {
-        if (!stillCurrent()) return
-        log(`Densify error: ${err?.message ?? err}`, 'error', 'Dense')
-        reconStatus.value = 'error'
-      }
-      return
-    }
-    try {
-      const { cloud, summary: dSummary, refused, mapBuffers } = await workerDensify(
-        { maps: mapsInput, streamed, settings: withRegion({ ...settings, memBudgetBytes: budget }) },
-        { onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f), transfer },
-      )
-      if (!stillCurrent()) return
-      // Re-attach the round-tripped buffers so ortho / a second densify still work.
-      if (mapBuffers) {
-        for (const mb of mapBuffers) {
-          const m = depthMaps.value.get(mb.uuid)
-          if (m) { m.depth = mb.depth; m.cost = mb.cost; m.rgb = mb.rgb; if (mb.normals) m.normals = mb.normals }
-        }
-      }
-      // Refused by fusion's measured pre-flight (logged there with its numbers).
-      if (refused) { reconStatus.value = 'error'; return }
-      // The worker returns the cloud already split (Float32 pos, Uint8 col, Float32
-      // world-space normals for the Poisson mesh), assembled from its fusion slabs.
-      upsertDenseCloud(cloud)
-      denseSummary.value = dSummary ?? null
-      reconStatus.value = 'done'
-      await persist()
-    } catch (err) {
-      if (!stillCurrent()) return
-      // The buffers were transferred out; if the worker failed before returning them
-      // they're detached (dead). Drop the in-memory cache so ortho / re-densify don't
-      // read empty buffers. The planes are on disk now, so point the store back at the
-      // saved index: a retry rehydrates from OPFS instead of forcing a Stage A re-run.
-      depthMaps.value = new Map()
-      const recovered = await loadDepthIndexIntoMeta()
-      log(`Densify error: ${err?.message ?? err}. Depth maps were released to the worker`
-        + (recovered
-          ? ' — they will be reloaded from disk on the next attempt.'
-          : ' and must be recomputed before retrying.'), 'error', 'Dense')
-      reconStatus.value = 'error'
-    }
-  }
-
-  // Mesh — screened Poisson over a dense cloud with oriented normals: `settings.sourceId`
-  // when given (the modal's picker), else `meshSource` — never "the first dense cloud".
-  // Sends disposable copies of the dense buffers to the worker. Keeping the
-  // authoritative arrays here costs one temporary copy, but makes cancellation
-  // genuinely non-destructive: terminating a worker cannot strand detached
-  // source buffers. Upserts a single kind:'mesh' cloud.
-  async function generateMesh(settings = {}, onProgress) {
-    const { sourceId, ...meshSettings } = settings
-    const pick = sourceId != null ? meshSources.value.find((s) => s.id === sourceId) : meshSource.value
-    const dense = pick ? clouds.value.find((c) => c.id === pick.id) : null
-    if (!dense?.count) {
-      log(sourceId != null
-        ? 'Mesh: the chosen dense cloud is gone or has no normals'
-        : 'Mesh: build a dense point cloud (with normals) first', 'warn', 'Products')
-      return
-    }
-    if (!dense.nrm || dense.nrm.length < dense.count * 3) {
-      log('Mesh: the dense cloud has no per-point normals — re-run Densify to compute them', 'warn', 'Products')
-      return
-    }
-    // The fusion merge cell is the sample spacing of the clouds fused in this project's
-    // frame — the computed cloud and its edits. An imported cloud (or an edit of one)
-    // has its own spacing, which the worker estimates.
-    const mergeCell = dense.imported ? 0 : (denseSummary.value?.mergeCell ?? 0)
-    log(`Mesh: source "${dense.name ?? 'Dense'}" (${dense.count.toLocaleString()} points`
-      + `${dense.derived ? ', edited' : ''}${dense.imported ? ', imported' : ''})`, 'info', 'Products')
-    const clipped = clipToRegion(dense, 'Mesh')
-    if (clipped && !clipped.count) {
-      log('Mesh: no point of the source lies inside the region', 'warn', 'Products')
-      return
-    }
-    const posCopy = clipped ? clipped.pos : dense.pos.slice()
-    const colCopy = clipped ? (clipped.col ?? null) : (dense.col?.slice() || null)
-    const nrmCopy = clipped ? clipped.nrm : dense.nrm.slice()
-    const input = {
-      dense: { count: clipped ? clipped.count : dense.count, pos: posCopy, col: colCopy, nrm: nrmCopy },
-      settings: { ...meshSettings, mergeCell },
-    }
-    const transfer = [posCopy.buffer]
-    if (colCopy) transfer.push(colCopy.buffer)
-    transfer.push(nrmCopy.buffer)
-    reconStatus.value = 'running'
-    try {
-      const { mesh } = await workerMeshify(input,
-        { onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f), transfer })
-      if (!mesh || !mesh.nVerts) {
-        log('Mesh: Poisson produced no surface — try a lower depth or check the cloud/normals', 'warn', 'Products')
-        reconStatus.value = 'done'
-        return
-      }
-      upsertMeshCloud(mesh, { sourceId: dense.id, sourceName: dense.name ?? null, settings: meshSettings })
-      reconStatus.value = 'done'
-      await persist()
-    } catch (err) {
-      log(`Mesh error: ${err?.message ?? err}`, 'error', 'Products')
-      reconStatus.value = 'error'
-    }
-  }
-
-  // ── Cloud editing (crop / filter / merge) ────────────────────────────────────
-
-  // Add a cloud produced by an edit. Always a NEW cloud — editing is
-  // non-destructive, so the source stays exactly as it was and the user can compare
-  // or discard. Flagged `derived: true` so upsertDenseCloud never replaces it with a
-  // re-fuse's output (the same protection `imported` gives an imported cloud, for
-  // the same reason: neither is the densify stage's own slot). `imported` is
-  // INHERITED from the source, because that flag is what sorts the sidebar into
-  // Products vs Reference Data — a crop of imported evidence is still evidence.
-  function addDerivedCloud(flat, { name, imported = false }) {
-    const cloud = {
-      id: makeCloudId(),
-      name,
-      kind: 'dense',
-      createdAt: Date.now(),
-      derived: true,
-      ...(imported ? { imported: true } : {}),
-      cameras: markRaw(new Map()),
-      count: flat.count,
-      pos: markRaw(flat.pos),
-      ...(flat.attributes ? { attributes: markRaw(flat.attributes) } : {}),
-      col: markRaw(flat.col || null),
-      ...(flat.nrm ? { nrm: markRaw(flat.nrm) } : {}),
-    }
-    clouds.value.push(cloud)
-    selectedCloudId.value = cloud.id
-    return cloud
-  }
-
-  // A Mesh ▾ tool's output: like addDerivedCloud, a NEW mesh flagged `derived`, so
-  // upsertMeshCloud (a re-mesh) never replaces it.
-  function addDerivedMesh(flat, { name, imported = false }) {
-    const cloud = {
-      id: makeCloudId(),
-      name,
-      kind: 'mesh',
-      createdAt: Date.now(),
-      derived: true,
-      ...(imported ? { imported: true } : {}),
-      cameras: markRaw(new Map()),
-      count: flat.count,
-      nVerts: flat.nVerts,
-      pos: markRaw(flat.pos),
-      idx: markRaw(flat.idx),
-      col: markRaw(flat.col || null),
-    }
-    clouds.value.push(cloud)
-    selectedCloudId.value = cloud.id
-    return cloud
-  }
-
-  // Swap a derived cloud's buffers for an edited result, keeping its identity
-  // (id/name/flags/style). A new object, like upsertSparseCloud, so the viewer
-  // and the sidebar see the change by reference.
-  function replaceDerivedCloud(snapshot, flat) {
-    // Re-read by id: the edit awaited the worker, and a rename/restyle made
-    // meanwhile must survive while a removal must not resurrect the cloud.
-    const idx = clouds.value.findIndex((c) => c.id === snapshot.id)
-    if (idx < 0) return null
-    const { attributes: _a, nrm: _n, ...rest } = clouds.value[idx]
-    const cloud = {
-      ...rest,
-      createdAt: Date.now(),
-      count: flat.count,
-      pos: markRaw(flat.pos),
-      ...(flat.attributes ? { attributes: markRaw(flat.attributes) } : {}),
-      col: markRaw(flat.col || null),
-      ...(flat.nrm ? { nrm: markRaw(flat.nrm) } : {}),
-    }
-    clouds.value.splice(idx, 1, cloud)
-    selectedCloudId.value = cloud.id
-    return cloud
-  }
-
-  // Crop / filter / merge / mask dense clouds in the worker. `sourceIds` are cloud ids
-  // (one for crop/filter/mask, two or more for merge); `settings` is already in the
-  // core/products/cloudEdit.js shape (the modals do the UI→core mapping in run()).
-  //
-  // Disposable copies are transferred to the worker. The source buffers remain
-  // attached throughout, including when Cancel hard-terminates the worker.
-  // Re-solve the MAIN sparse model in the worker and commit the result in place —
-  // gradual selection and Optimize cameras (Tools ▸ Model ▾). Both work on a
-  // disposable packed copy, are held to the same survey evidence (GCP anchors +
-  // camera priors), and on success retire every computed dependent (depth maps,
-  // dense, DEM/ortho…) through invalidateSparseDependents. A project switch or a
-  // set-as-main mid-run supersedes the edit and leaves the model as it was.
-  //   run(packed, { gcps, cameraPriors }) → worker result (packed)
-  //   describe(result) → the log line's middle part
-  async function refineMainSparse({ label, sourceId, createdAt, run, describe }) {
-    const original = mainSparseCloud.value
-    if (!original || original.id !== sourceId || original.createdAt !== createdAt) return null
-    const projectId = projects.currentProjectId
-    const statusBefore = reconStatus.value
-    reconStatus.value = 'running'
-    try {
-      // Do not transfer: compact tracks may share the live model's buffers.
-      const packed = packSparseCloud(original).result
-      const survey = await surveyConstraintInput({ marks: 'pinhole' })
-      if (projects.currentProjectId !== projectId || mainSparseCloud.value !== original) {
-        if (reconStatus.value === 'running') reconStatus.value = statusBefore
-        return null
-      }
-      const result = unpackReconstructionResult(await run(packed, { gcps: survey.gcps, cameraPriors: survey.cameraPriors }))
-      if (projects.currentProjectId !== projectId || mainSparseCloud.value !== original) {
-        // Superseded (project switch / set-as-main mid-run): nothing changed here.
-        if (reconStatus.value === 'running') reconStatus.value = statusBefore
-        return null
-      }
-      // An edit of the model, not a recompute: provenance and the user's
-      // display choices carry over (a reconstruct deliberately clears `imported`).
-      upsertSparseCloud(result.cameras, result.points, { replaceId: original.id, asMain: true,
-        name: original.name, imported: !!original.imported, secondary: !!original.secondary })
-      const edited = mainSparseCloud.value
-      if (edited && original.style !== undefined) edited.style = original.style
-      if (edited && original.visible !== undefined) edited.visible = original.visible
-      await invalidateSparseDependents()
-      // Calibration defines the canonical observation frame and must survive
-      // a re-solve (neither tool frees a radial term). Old run statistics must not
-      // masquerade as statistics of the edited cloud.
-      summary.value = {
-        selfCalDistortion: summary.value?.selfCalDistortion ?? [],
-        fiducialTransforms: summary.value?.fiducialTransforms ?? [],
-      }
-      healthDirty.value++
-      reconStatus.value = 'done'
-      if (!(await persist())) {
-        log(`${label}: the edited model could not be saved — it will be lost on reload`, 'warn', 'Reconstruction')
-      }
-      const held = result.constraints ?? {}
-      log(`${label}: ${describe(result)}; bundle adjustment ${result.costBefore.toFixed(3)} → ${result.costAfter.toFixed(3)} px`
-        + (held.gcpAnchors || held.cameraPriors
-          ? ` (held to ${held.gcpAnchors || 0} GCP anchor(s), ${held.cameraPriors || 0} camera prior(s))` : ' (no survey constraints)'),
-        'success', 'Reconstruction')
-      if (held.gcpError) log(`${label}: GCP anchoring skipped — ${held.gcpError}`, 'warn', 'Reconstruction')
-      return mainSparseCloud.value
-    } catch (err) {
-      log(`${label} stopped: ${err?.message ?? err}`, 'error', 'Reconstruction')
-      reconStatus.value = 'error'
-      return null
-    }
-  }
-
-  // Images' sensor ids as small integers (BA groups shared intrinsics by them).
-  function sensorIndexByUuid() {
-    const ids = new Map()
-    const out = {}
-    for (const img of imagesStore.images) {
-      if (img.sensorId == null) continue
-      if (!ids.has(img.sensorId)) ids.set(img.sensorId, ids.size)
-      out[img.uuid] = ids.get(img.sensorId)
-    }
-    return out
-  }
-
-  async function editClouds({ mode, sourceIds = [], settings = {}, name, style = null } = {}, onProgress) {
-    // Model edits (Tools ▸ Model ▾): one shared commit path, refineMainSparse.
-    if (mode === 'sparse') {
-      return refineMainSparse({
-        label: 'Gradual selection', sourceId: sourceIds[0], createdAt: settings.createdAt,
-        run: (packed, survey) => workerRefineSparse(packed, { metric: settings.metric, threshold: settings.threshold }, survey),
-        describe: (r) => `removed ${r.removed} points`,
-      })
-    }
-    if (mode === 'optimize') {
-      return refineMainSparse({
-        label: 'Optimize cameras', sourceId: sourceIds[0], createdAt: settings.createdAt,
-        run: (packed, survey) => workerOptimizeSparse(packed, { refine: settings.refine, sensorOfUuid: sensorIndexByUuid() }, survey),
-        describe: (r) => `refined ${settings.refine === 'f,cxcy' ? 'focal length and principal point' : 'focal length'} (largest change ${((r.focalChange ?? 0) * 100).toFixed(2)}%)`
-          + (r.removed ? `, dropped ${r.removed} points with fewer than two observations` : ''),
-      })
-    }
-    // Which kinds each slot accepts. Mesh ▾ tools read a mesh; the reference of an
-    // alignment or a distance may be a dense cloud or a mesh; everything else is
-    // dense-only (a sparse cloud's points carry view-tracks — never edited here).
-    const meshSource = MESH_EDIT_MODES.has(mode)
-    const resolved = sourceIds.map((id) => clouds.value.find((c) => c.id === id) ?? null)
-    const okKind = (c, slot) => c && c.count > 0 && (
-      slot === 0 ? (meshSource ? c.kind === 'mesh' : c.kind === 'dense')
-        : (REFERENCE_MODES.has(mode) ? (c.kind === 'dense' || c.kind === 'mesh') : c.kind === 'dense'))
-    const sources = resolved.filter((c, slot) => okKind(c, slot))
-    if (!sources.length || sources.length !== resolved.length) {
-      log(`Cloud edit: no usable ${meshSource ? 'mesh' : 'dense cloud'} for this tool`, 'warn', 'Products')
-      return null
-    }
-    if (mode === 'merge' && sources.length < 2) {
-      log('Cloud edit: merge needs at least two dense clouds', 'warn', 'Products')
-      return null
-    }
-    if (REFERENCE_MODES.has(mode) && (sources.length < 2 || sources[0].id === sources[1].id)) {
-      log('Cloud edit: choose a reference other than the source', 'warn', 'Products')
-      return null
-    }
-    const transfer = []
-    const payload = sources.map((c) => {
-      const pos = c.pos.slice()
-      const col = c.col?.slice() || null
-      const nrm = c.nrm?.slice() || null
-      transfer.push(pos.buffer)
-      if (col) transfer.push(col.buffer)
-      if (nrm) transfer.push(nrm.buffer)
-      if (c.kind === 'mesh') {
-        const idx = c.idx.slice()
-        transfer.push(idx.buffer)
-        return { id: c.id, kind: 'mesh', count: c.count, nVerts: c.nVerts, pos, col, idx }
-      }
-      const attributes = Object.fromEntries(Object.entries(c.attributes || {}).map(([key, values]) => {
-        const copy = values.slice()
-        transfer.push(copy.buffer)
-        return [key, copy]
-      }))
-      return { id: c.id, kind: 'dense', count: c.count, pos, col, nrm, attributes }
-    })
-    if (mode === 'mask') {
-      // The viewer's selection is stamped with the buffer it was drawn from; a
-      // replaced cloud (re-fuse, another edit) must not receive a stale mask.
-      if (!(settings.mask instanceof Uint8Array) || settings.mask.length !== sources[0].count) {
-        log('Selection edit: the selection no longer matches the cloud — select again', 'warn', 'Products')
-        return null
-      }
-      transfer.push(settings.mask.buffer)
-    }
-    reconStatus.value = 'running'
-    try {
-      const { cloud: edited, error, extra } = await workerEditCloud(
-        { mode, clouds: payload, settings },
-        { onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f), transfer },
-      )
-      if (error) throw new Error(error)
-      if (!edited?.count) {
-        log('Cloud edit: the result is empty — nothing was added', 'warn', 'Products')
-        reconStatus.value = 'done'
-        return null
-      }
-      let cloud
-      if (mode === 'mask' && sources[0].derived) {
-        // A derived cloud is already the user's own working copy, so selection
-        // edits refine it in place — repeated cleanup must not stack one full copy
-        // per stroke in memory and OPFS. Computed and imported clouds stay
-        // untouched: their first selection edit forks a derived copy (below).
-        cloud = replaceDerivedCloud(sources[0], edited)
-        if (!cloud) {
-          log('Selection edit: the cloud was removed while the edit ran', 'warn', 'Products')
-          reconStatus.value = 'done'
-          return null
-        }
-        log(`Selection edit: "${cloud.name}" now has ${cloud.count.toLocaleString()} points`,
-          'success', 'Products')
-      } else {
-        const opts = {
-          name: name || `${sources[0].name} (${mode === 'mask' ? 'edited' : mode})`,
-          // Provenance follows the SOURCE (slot 0) — a reference only informs the edit.
-          imported: REFERENCE_MODES.has(mode) ? !!sources[0].imported : sources.every((c) => c.imported),
-        }
-        cloud = edited.idx ? addDerivedMesh(edited, opts) : addDerivedCloud(edited, opts)
-        // A tool may start its result on a colouring (distance → a diverging ramp);
-        // a function sees the worker's small result record (e.g. the distance spread).
-        const startStyle = typeof style === 'function' ? style(extra ?? null) : style
-        if (startStyle) cloud.style = startStyle
-        // Show the edit in place of its source; the source stays one visibility
-        // toggle away for comparison or to start over.
-        if (mode === 'mask' || REPLACES_SOURCE_VIEW.has(mode)) sources[0].visible = false
-        log(`Cloud edit: added "${cloud.name}" — ${cloud.kind === 'mesh'
-          ? `${cloud.count.toLocaleString()} triangles` : `${cloud.count.toLocaleString()} points`}`,
-        'success', 'Products')
-      }
-      reconStatus.value = 'done'
-      await persist()
-      return cloud
-    } catch (err) {
-      log(`Cloud edit error: ${err?.message ?? err}`, 'error', 'Products')
-      reconStatus.value = 'error'
-      return null
-    }
-  }
+  // Crop / filter / merge / select and the other Tools-tab edits (reconstruction/cloudEdits.js).
+  const {
+    editClouds,
+  } = createCloudEdits({
+    clouds, healthDirty, imagesStore, invalidateSparseDependents, log, mainSparseCloud, makeCloudId,
+    save, projects, reconStatus, selectedCloudId, summary, upsertSparseCloud,
+    // Created below with the sparse run; resolved when an edit runs.
+    surveyConstraintInput: (opts) => surveyConstraintInput(opts),
+  })
 
   // ── Georeferencing + products (DEM / orthophoto) ─────────────────────────────
 
@@ -1599,8 +672,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
   const frameModelFor = computed(() => makeFrameModelResolver({ summary: summary.value, sensors: sensors.value }))
 
   const {
-    georefPairs, imagesById, qualifyingGcps, canGeoreferenceGcps, gcpGeorefPairs,
-    canGeoreference, georeferenceBlocker, crsSuggestion, georeference, validGeoref, poseResidualReport, gcpAccuracyReport,
+    imagesById, canGeoreferenceGcps, canGeoreference, georeferenceBlocker, crsSuggestion, georeference, validGeoref, poseResidualReport, gcpAccuracyReport,
     gcpGuides, gcpEstimate,
   } = createGeoreferencing({
     sparseCameras, images, georef, healthDirty,
@@ -1608,7 +680,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     poses: () => posesStore.poses,
     gcps: () => gcpsStore.gcps,
     currentCrs: () => projects.currentCrs,
-    persist, log,
+    save, log,
     frameModel: () => frameModelFor.value,
   })
 
@@ -1618,7 +690,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     sparseCameras, images, mainSparseCloud, scaleFit, healthDirty,
     bars: () => scaleBarsStore.bars,
     gcps: () => gcpsStore.gcps,
-    persist, log,
+    save, log,
     frameModel: () => frameModelFor.value,
   })
 
@@ -1628,667 +700,31 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     orientationBasis: activeOrientationBasis,
   })
 
-  // Build a DEM from the densest available cloud, in the requested frame
-  // (settings.crs: 'local' | 'project'). A new DEM invalidates the old ortho.
-  async function generateDem(settings = {}, onProgress) {
-    const sparse = mainSparseCloud.value
-    // Single source of truth for "which cloud" — the same getter the modal shows.
-    const source = demSource.value
-    if (!source) {
-      log('DEM: build a point cloud first', 'warn', 'Products')
-      return
-    }
-    const src = source.cloud
-    log(`DEM: source is the ${source.kind} cloud`
-      + `${source.name ? ` "${source.name}"` : ''} (${source.count.toLocaleString()} points)`
-      + (source.kind === 'sparse'
-        ? ' — cells are interpolated from tie points; densify for a true surface'
-        : ''),
-      source.kind === 'sparse' ? 'warn' : 'info', 'Products')
-    // Resolve the target frame through THE resolver — never independently. A
-    // 'project' request fits/refits the georeference on demand; otherwise a valid
-    // scale-bar fit still makes the local frame metric (with no CRS).
-    const resolved = await effectiveFrameSpec({ crs: settings.crs })
-    const frameSpec = resolved.frameSpec
-    if (settings.crs && settings.crs !== 'local' && resolved.source !== 'georef') {
-      log('DEM: no georeference available — using the local frame'
-        + (resolved.unit === 'm' ? ', scaled to metres by the scale bars' : ''), 'warn', 'Products')
-    }
-    reconStatus.value = 'running'
-    try {
-      // Plain copy: cloud state is reactive (Vue proxies can't be cloned), and the
-      // worker takes it by transfer. Only in-region points are copied, and the copy
-      // is checked against the machine's memory budget (Settings ▸ Compute).
-      const budgetBytes = settings.memBudgetBytes > 0 ? settings.memBudgetBytes : DEFAULT_BUDGET_BYTES
-      const r = src.imported ? null : activeRegion()
-      const staged = stageDemPoints(src.kind === 'dense' ? src : { points: src.points }, {
-        budgetBytes, inside: r ? (x, y, z) => regionContains(r, x, y, z) : null,
-      })
-      if (r) log(`DEM: region keeps ${staged.count.toLocaleString()} of ${staged.total.toLocaleString()} points`, 'info', 'Products')
-      if (r && !staged.count) throw new Error('no point of the source lies inside the region')
-      const points = { pos: staged.pos, count: staged.count }
-      const cameras = [...(sparse?.cameras ?? new Map()).entries()].map(([uuid, cam]) => ({
-        uuid, R: cam.R.map((r) => [...r]), t: [...cam.t], K: { ...cam.K },
-      }))
-      const grid = await workerGenerateDem(
-        { points, cameras, frame: frameSpec, settings: { ...settings, memBudgetBytes: budgetBytes, style: dem.value?.style ?? null } },
-        { transfer: [points.pos.buffer], onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f) },
-      )
-      dem.value = withPreviewUrl({
-        ...grid, createdAt: Date.now(),
-        name: dem.value?.name || 'DEM',
-        frameStamp: frameStampOf(resolved),
-      })
-      // A new DEM invalidates an ortho BUILT ON IT — but not one built over the
-      // mesh/plane surface, which this run didn't touch. (An ortho with no
-      // recorded surface predates the choice, so it was a DEM ortho.)
-      const orthoWasDem = ortho.value && (ortho.value.surface ?? 'DEM') === 'DEM'
-      if (orthoWasDem) ortho.value = null
-      if (isPersisting()) {
-        opfs.saveProduct(projects.currentProjectId, 'dem', dem.value).catch(() => {})
-        if (orthoWasDem) opfs.deleteProduct(projects.currentProjectId, 'ortho').catch(() => {})
-      }
-      reconStatus.value = 'done'
-    } catch (err) {
-      log(`DEM error: ${err?.message ?? err}`, 'error', 'Products')
-      reconStatus.value = 'error'
-    }
-  }
+  // DEM and orthophoto generation (reconstruction/productRuns.js).
+  const {
+    generateDem, generateOrtho,
+  } = createProductRuns({
+    activeRegion, dem, demSource, depthMapInput, effectiveFrameSpec, frameModelFor, frameStampOf,
+    images, imagesStore, isPersisting, log, mainSparseCloud, meshCloud, ortho, orthoSurfaces,
+    projects, reconStatus, saveProductRecord, sparseCameras, withPreviewUrl,
+  })
 
-  // Build the surface payload for an ortho run: the height source the worker will
-  // turn into a grid. `settings.surface` is one of orthoSurfaces' ids. Returns null
-  // (after logging why) when the chosen surface isn't available.
-  //
-  // A mesh/plane surface needs a frame of its own — a DEM carries the one it was
-  // built in, but there may be no DEM at all now. It's resolved exactly as
-  // generateDem does, so the two products stay co-registered.
-  async function orthoSurfacePayload(settings, resolved) {
-    const id = settings.surface ?? 'dem'
-    const opt = orthoSurfaces.value.find((s) => s.id === id)
-    if (!opt) { log(`Ortho: unknown surface "${id}"`, 'warn', 'Products'); return null }
-    if (!opt.available) { log(`Ortho: ${opt.hint}`, 'warn', 'Products'); return null }
-
-    if (id === 'dem') {
-      const d = dem.value
-      log('Ortho: surface is the DEM — cells the DEM has no height for stay transparent',
-        'info', 'Products')
-      return {
-        kind: 'dem',
-        grid: {
-          width: d.width, height: d.height, gsd: d.gsd, originX: d.originX, originY: d.originY,
-          data: d.data, mask: d.mask, frame: d.frame,
-        },
-      }
-    }
-
-    let frameSpec = resolved.source === 'georef' ? resolved.frameSpec : null
-    if (settings.crs && settings.crs !== 'local' && !frameSpec) {
-      log('Ortho: no georeference available — using the local frame', 'warn', 'Products')
-    }
-    // Local frame: reuse the DEM's when it was built locally, so a mesh ortho lands
-    // on the same grid origin as the DEM instead of a near-identical one of its own.
-    // A bare { kind:'local' } / { kind:'scaled-local' } spec is only a REQUEST —
-    // buildLocalFrame derives the up-vector from the scene, so cameras + points must
-    // travel with it. A reused DEM descriptor is only valid at the SAME scale: a
-    // refit since then means its metres are not these metres.
-    if (!frameSpec) {
-      const reusable = dem.value?.frame
-      const sameKind = reusable?.kind === resolved.frameSpec.kind
-      const sameScale = resolved.frameSpec.kind !== 'scaled-local'
-        || Math.abs((reusable?.scale ?? 0) - resolved.frameSpec.scale) < 1e-12
-      frameSpec = sameKind && sameScale ? reusable : resolved.frameSpec
-    }
-    const surfSettings = { gsd: settings.surfaceGsd > 0 ? settings.surfaceGsd : 0, extent: settings.extent ?? 'core' }
-
-    // Point sample from the densest cloud: the plane's fit input, and the local
-    // frame's origin/PCA fallback. Subsampled — a plane needs spread, not every
-    // point, and 25 M boxed {x,y,z} in the worker is the OOM we avoid everywhere.
-    const src = demSource.value
-    const cloud = src?.cloud
-    const total = src?.count ?? 0
-    const MAX_FIT = 200_000
-    const stride = Math.max(1, Math.ceil(total / MAX_FIT))
-    const n = total ? Math.ceil(total / stride) : 0
-    const pos = new Float64Array(n * 3)
-    for (let i = 0, k = 0; i < total; i += stride, k++) {
-      if (cloud.kind === 'dense') {
-        pos[k * 3] = cloud.pos[i * 3]; pos[k * 3 + 1] = cloud.pos[i * 3 + 1]; pos[k * 3 + 2] = cloud.pos[i * 3 + 2]
-      } else {
-        const p = cloud.points[i]
-        pos[k * 3] = p.x; pos[k * 3 + 1] = p.y; pos[k * 3 + 2] = p.z
-      }
-    }
-    const cameras = [...sparseCameras.value.entries()].map(([uuid, cam]) => ({
-      uuid, R: cam.R.map((r) => [...r]), t: [...cam.t], K: { ...cam.K },
-    }))
-
-    if (id === 'mesh') {
-      const m = meshCloud.value
-      log(`Ortho: surface is the mesh "${m.name ?? 'mesh'}" `
-        + `(${m.count.toLocaleString()} triangles)`, 'info', 'Products')
-      return {
-        kind: 'mesh', frame: frameSpec, cameras, framePoints: pos, framePointCount: n,
-        pos: m.pos, idx: m.idx, settings: surfSettings,
-      }
-    }
-
-    log(`Ortho: surface is a plane fitted to the ${src.kind} cloud `
-      + `(${n.toLocaleString()} of ${total.toLocaleString()} points)`, 'info', 'Products')
-    // The plane's fit points double as the local frame's — one sample, one array.
-    return {
-      kind: 'plane', frame: frameSpec, cameras, framePoints: pos, framePointCount: n,
-      pos, count: n, settings: surfSettings,
-    }
-  }
-
-  // Orthorectify a surface using the cached depth maps (occlusion via their depth
-  // planes, colour from their RGB planes). Needs depth maps and a surface — which
-  // is a DEM only when the user picks one (see orthoSurfaces).
-  async function generateOrtho(settings = {}, onProgress) {
-    const projectId = projects.currentProjectId, sparse = mainSparseCloud.value
-    const stillCurrent = () => projectId === projects.currentProjectId && sparse === mainSparseCloud.value
-    let input
-    try { input = await depthMapInput() }
-    catch (err) { log(`Ortho: ${err.message}`, 'error', 'Products'); return }
-    const { maps, streamed } = input
-    if (!maps.length) { log('Ortho: compute depth maps first', 'warn', 'Products'); return }
-    const resolved = await effectiveFrameSpec({ crs: settings.crs })
-    const surface = await orthoSurfacePayload(settings, resolved)
-    if (!surface) return
-    reconStatus.value = 'running'
-    try {
-      const mapsPayload = streamed ? maps : maps.map((m) => ({
-        uuid: m.uuid, width: m.width, height: m.height, K: m.K, R: m.R, t: m.t,
-        depth: m.depth, cost: m.cost, rgb: m.rgb,
-      }))
-      // The source photo per map, for full-resolution colour (the depth maps then only
-      // decide visibility): the same image + frame-model join dense used to build them.
-      const imgByUuid = new Map(images.value.map((im) => [im.uuid, im]))
-      const frameModel = frameModelFor.value
-      const photos = []
-      for (const m of maps) {
-        const im = imgByUuid.get(m.uuid), cam = sparse?.cameras?.get(m.uuid)
-        if (!im || !cam) continue
-        try { await imagesStore.whenComputeReady(im) } catch { continue } // falls back to map colour
-        const { dist, selfCal, fiducial } = frameModel(im)
-        photos.push({ uuid: m.uuid, name: im.name, url: im.computeUrl ?? im.url,
-          K: { fx: cam.K.fx, fy: cam.K.fy, cx: cam.K.cx, cy: cam.K.cy }, dist, selfCal, fiducial })
-      }
-      // The machine's memory gate (Settings ▸ Compute): the worker sizes its map/photo
-      // cache from it and refuses, with the figures, a run whose working set exceeds it.
-      const memBudgetBytes = settings.memBudgetBytes > 0 ? settings.memBudgetBytes : DEFAULT_BUDGET_BYTES
-      const res = await workerGenerateOrtho(
-        { surface, maps: mapsPayload, streamed, settings: { ...settings, memBudgetBytes }, images: photos },
-        { onLog: (m, l, c) => log(m, l, c), onProgress: (dn, t, lbl, f) => onProgress?.(dn, t, lbl, f) },
-      )
-      if (!stillCurrent()) return
-      // An ortho built ON the DEM inherits the DEM's recorded frame — its cells are
-      // that grid's cells, so claiming today's frame would be a claim about a raster
-      // this run never re-projected.
-      ortho.value = withPreviewUrl({
-        ...res, createdAt: Date.now(),
-        name: ortho.value?.name || 'Orthophoto',
-        // Symbology survives a rebuild, like the name (display only).
-        ...(ortho.value?.style && { style: ortho.value.style }),
-        frameStamp: (settings.surface ?? 'dem') === 'dem'
-          ? (dem.value?.frameStamp ?? frameStampOf(resolved))
-          : frameStampOf(resolved),
-      })
-      saveProductRecord('ortho', ortho.value)
-      reconStatus.value = 'done'
-    } catch (err) {
-      if (!stillCurrent()) return
-      log(`Ortho error: ${err?.message ?? err}`, 'error', 'Products')
-      reconStatus.value = 'error'
-    }
-  }
-
-  // The external 3D evidence a bundle adjustment is held to — enabled ground
-  // control and camera priors — as worker-ready plain data, in ONE Cartesian survey
-  // frame for a projected CRS (cameraPriors.js surveyFrameFor: scale factor divided
-  // out, curvature restored). Reconstruct and gradual selection share it, so a
-  // refinement is constrained exactly like the solve it refines.
-  //   marks: 'raw'     — GCP marks as clicked (sfm.js maps them alongside keypoints)
-  //          'pinhole' — marks mapped into the cameras' frame (for an existing model)
-  async function surveyConstraintInput({ marks = 'raw' } = {}) {
-    const crs = projects.currentCrs
-    if (crs && crs !== 'local') await ensureProjection(crs).catch(() => {})
-    const control = gcpsStore.gcps.filter((g) => isGroundControl(g, { precision: precisionFromGcp }))
-    const surveyFrame = surveyFrameFor([
-      ...control.map((g) => [g.x, g.y, g.z]),
-      ...posesStore.poses.filter((p) => p.enabled !== false).map((p) => [p.x, p.y, p.z]),
-    ], crs)
-    if (surveyFrame) {
-      log(`Survey constraints: fitted in a local metric frame (grid scale factor k=${surveyFrame.k.toFixed(6)}, `
-        + 'curvature restored) — the project CRS is unchanged for display and export', 'info', 'Reconstruction')
-    }
-    const imgById = imagesById()
-    // Anchored BA is a Euclidean 3D constraint. Do not mix longitude/latitude
-    // degrees with metre elevations, and never invent z=0 for a 2D control point.
-    // Post-hoc products enforce the same boundary.
-    const inFrame = marks === 'pinhole'
-      ? gcpsInPinholeFrame(control, { imagesById: imgById, sparseCameras: sparseCameras.value, frameModel: frameModelFor.value })
-      : control
-    const gcps = isGeographic(crs) ? [] : inFrame
-      .map((g) => gcpToSurveyFrame(g, surveyFrame))
-      .map((g) => ({
-        role: 'control',
-        x: g.x, y: g.y, z: g.z,
-        accuracyX: g.accuracyX, accuracyY: g.accuracyY, accuracyZ: g.accuracyZ,
-        correlationXY: g.correlationXY, correlationXZ: g.correlationXZ, correlationYZ: g.correlationYZ,
-        observations: (g.observations || [])
-          .map((o) => ({ uuid: imgById.get(o.imageId)?.uuid, px: o.px, py: o.py,
-            accuracyX: o.accuracyX ?? g.accuracyImgX,
-            accuracyY: o.accuracyY ?? g.accuracyImgY }))
-          .filter((o) => o.uuid != null),
-      }))
-    // Surveyed/imported and EXIF-derived camera positions; a geographic project's
-    // priors get their own survey-centred metric frame (buildCameraPriors).
-    // A sensor's GNSS antenna offset makes its images' priors antenna positions.
-    const armBySensor = new Map(sensors.value.map((s) => [s.id, normalizeLeverArm(s.gnssLeverArm)]))
-    const leverArmFor = (imageId) => armBySensor.get(imgById.get(imageId)?.sensorId) ?? null
-    const cameraPriors = buildCameraPriors(posesStore.poses, images.value, crs, { surveyFrame, leverArmFor })
-    if (isGeographic(crs) && cameraPriors.length) {
-      log(`Camera priors: ${cameraPriors.length} geographic position(s) converted to a `
-        + 'survey-centred metric frame for bundle adjustment', 'info', 'Pose')
-    }
-    const withArm = cameraPriors.filter((p) => p.leverArm)
-    if (withArm.length) {
-      const arms = [...new Set(withArm.map((p) => p.leverArm.map((v) => v.toFixed(3)).join(', ')))]
-      log(`Camera priors: ${withArm.length}/${cameraPriors.length} are GNSS antenna positions, `
-        + `offset from the camera centre by (${arms.slice(0, 3).join('), (')}) m in camera axes`
-        + `${arms.length > 3 ? ', …' : ''}`, 'info', 'Pose')
-    }
-    return { gcps, cameraPriors, surveyFrame }
-  }
-
-  // Run incremental SfM in the compute worker (off the main thread). The heavy
-  // orchestration lives in core/sfm/sfm.js; this gathers the plain inputs it needs
-  // (keypoints + match graph + settings), streams its log/progress back through
-  // the usual hooks, then writes the returned model into reactive state and
-  // persists it. (The model now lands all at once at the end rather than building
-  // up live in the viewer — a fair trade for never freezing the UI.)
-  async function reconstruct(settings = {}, onProgress) {
-    restoreGeneration++
-    reconStatus.value = 'running'
-    let stopMemoryWatchdog = () => {}
-
-    try {
-      // Descriptors are required for matching, never for SfM. In a persistent
-      // project they are already in OPFS and can be loaded on demand if matching
-      // is run again. Keeping 127 × 25k × 128 float SIFT descriptors resident can
-      // consume ~1.5 GiB and is enough to kill the renderer during reconstruction.
-      let descriptorBytesReleased = 0
-      let descriptorImagesReleased = 0
-      if (isPersisting()) {
-        for (const img of images.value) {
-          const bytes = img.descriptors?.byteLength ?? 0
-          if (!bytes) continue
-          descriptorBytesReleased += bytes
-          descriptorImagesReleased++
-          img.descriptors = null
-        }
-      }
-      if (descriptorBytesReleased) {
-        log(`Released ${formatBytes(descriptorBytesReleased)} of persisted descriptors from `
-          + `${descriptorImagesReleased} image(s) before reconstruction`, 'info', 'Compute')
-        // Yield once so the engine can reclaim detached descriptor backing stores
-        // before the live-heap reading below. Never assume it did: the decision
-        // uses the observed value without subtracting bytes optimistically.
-        await new Promise((resolve) => setTimeout(resolve, 0))
-      }
-      // Counts gate and size the run: keypoints and matches are on disk, read below
-      // image by image / pair by pair straight into the worker input.
-      let imgs = images.value.filter((img) => img.kpStatus === 'done' && (img.kpCount ?? 0) > 0)
-      const sensorById = new Map(sensors.value.map((s) => [s.id, s]))
-      const reconstructionTransfers = []
-      const reconstructionPairs = [...matchStore.value.values()]
-        .filter((e) => e.status === 'done' && !e.disabled)
-
-      // Renderer OOM cannot be caught after the fact. Refuse before constructing
-      // the large plain worker input when its projected peak exceeds safe headroom.
-      const keypointCount = imgs.reduce((sum, img) => sum + (img.kpCount ?? 0), 0)
-      const matchCount = reconstructionPairs.reduce((sum, pair) => sum + (pair.nMatches ?? 0), 0)
-      // Guided track extension ships 128 B of descriptors per keypoint and builds
-      // keypoint grids. When it is what pushes a run past a ceiling, the run goes ahead
-      // without it (logged, recorded in the summary, flagged by the verdict) rather than
-      // being refused or dying in the worker.
-      let guided = settings.guidedTrackExtension ?? SFM_TUNING.guidedTrackExtension
-      const project = (withGuided) => projectSparsePeakBreakdownBytes({ keypointCount, matchCount,
-        imageCount: imgs.length, descriptorBytesPerKeypoint: withGuided ? 128 : 0 })
-      const heap = globalThis.performance?.memory
-      const hardwareBudget = deviceBudget({
-        deviceMemoryGB: Number(globalThis.navigator?.deviceMemory) || null,
-        jsHeapLimitBytes: Number(heap?.jsHeapSizeLimit) || null,
-      }).budgetBytes
-      const decideMemory = (peak) => ({
-        renderer: sparseMemoryDecision({
-          estimateBytes: peak.rendererHeapBytes,
-          bufferBytes: peak.rendererBufferBytes,
-          usedHeapBytes: Number(globalThis.performance?.memory?.usedJSHeapSize),
-          heapLimitBytes: Number(globalThis.performance?.memory?.jsHeapSizeLimit),
-          fallbackBudgetBytes: hardwareBudget,
-        }),
-        // A Web Worker is a separate V8 isolate with its own heap ceiling. Comparing
-        // renderer-used + worker-projected bytes to one isolate's limit rejected safe
-        // runs (the 127-image DJI set: 1.40 + 2.35 > 3.52 GB) even though neither heap
-        // approached its own ceiling.
-        worker: sparseMemoryDecision({
-          estimateBytes: peak.workerHeapBytes,
-          // The renderer's input buffers are transferred into the worker, so they are
-          // part of this, not held twice.
-          bufferBytes: peak.workerBufferBytes,
-          usedHeapBytes: 0,
-          heapLimitBytes: Number(globalThis.performance?.memory?.jsHeapSizeLimit),
-          fallbackBudgetBytes: hardwareBudget,
-        }),
-      })
-      let plan = planSparseRun({ guided, project, decide: decideMemory })
-
-      // A reload restores the saved sparse model, so "reload and retry" alone does
-      // not create renderer headroom. If the only thing preventing a rerun is the
-      // replaceable current result, unload it in memory (the saved copy stays on disk),
-      // discard idle worker heaps, yield for collection, and measure again.
-      if (!plan.decisions.renderer.safe) {
-        const released = releaseReplaceableModelForRerun()
-        if (released.released) {
-          terminateAll('preparing a clean sparse-reconstruction rerun')
-          log(`Released the loaded reconstruction before rerun (${released.cameraCount} cameras, `
-            + `${released.pointCount.toLocaleString()} points`
-            + `${released.dependentClouds ? `, ${released.dependentClouds} computed dependent cloud(s)` : ''}). `
-            + 'The saved model remains recoverable by reloading until the replacement succeeds.',
-          'info', 'Compute')
-          await new Promise((resolve) => setTimeout(resolve, 50))
-          plan = planSparseRun({ guided, project, decide: decideMemory })
-        }
-      }
-      const { peak, decisions } = plan
-      let guidedSkippedForMemory = null
-      if (plan.guidedDropped) {
-        guided = false
-        const w = plan.withGuidedPeak
-        const reason = `worker heap ${formatBytes(w.workerHeapBytes)} / buffers `
-          + `${formatBytes(w.workerBufferBytes)} projected with it, `
-          + `${formatBytes(peak.workerHeapBytes)} / ${formatBytes(peak.workerBufferBytes)} without`
-        guidedSkippedForMemory = { reason, withBytes: w.workerBytes, withoutBytes: peak.workerBytes }
-        log(`Sparse memory preflight: guided track extension turned off for this run so it fits — ${reason}. `
-          + 'The model is complete without it; lower the keypoint cap or the preselection neighbours to keep it.',
-        'warn', 'Reconstruction')
-      }
-      const decisionSafe = plan.safe
-      const ceiling = (d) => (d.limitBytes ? ` ≤ ${formatBytes(d.limitBytes)} ceiling` : '')
-      log(`Sparse memory preflight — ${keypointCount.toLocaleString()} keypoints, `
-        + `${matchCount.toLocaleString()} matches${guided ? ', guided extension on' : ''}; renderer heap `
-        + `${decisions.renderer.usedBytes != null ? `${formatBytes(decisions.renderer.usedBytes)} current + ` : ''}`
-        + `${formatBytes(peak.rendererHeapBytes)}${ceiling(decisions.renderer)}, `
-        + `input buffers ${formatBytes(peak.rendererBufferBytes)}; `
-        + `worker projected heap ${formatBytes(peak.workerHeapBytes)}${ceiling(decisions.worker)}, `
-        + `buffers ${formatBytes(peak.workerBufferBytes)}`
-        + `${decisions.worker.bufferLimitBytes ? ` ≤ ${formatBytes(decisions.worker.bufferLimitBytes)} device budget` : ''}`
-        + ` (of which bundle adjustment ${formatBytes(peak.solverWasmBytes)} ≤ ${formatBytes(WASM_SOLVER_LIMIT_BYTES)} wasm memory)`,
-      decisionSafe ? 'info' : 'error', 'Compute')
-      if (!decisionSafe) {
-        reconStatus.value = 'error'
-        const parts = []
-        if (!decisions.renderer.heapSafe) parts.push('renderer heap')
-        if (!decisions.worker.heapSafe) parts.push('worker heap')
-        if (!decisions.renderer.buffersSafe || !decisions.worker.buffersSafe) parts.push('device memory')
-        if (!peak.wasmSolverSafe) parts.push('bundle-adjustment (wasm) memory')
-        const where = parts.join(' and ') || 'memory'
-        log(`Sparse reconstruction stopped before start because the projected ${where} would exceed `
-          + 'its safety ceiling. Close other memory-heavy tabs or reduce the image/keypoint/match set'
-          + (!peak.wasmSolverSafe ? ' (fewer keypoints per image lowers the solver\'s observation count)' : '') + '.',
-        'error', 'Reconstruction')
-        return
-      }
-
-      const survey = await surveyConstraintInput({ marks: 'raw' })
-
-      // Keypoints and matches are on disk (TODO ▸ SC-2/SC-3): read image by image and
-      // pair by pair straight into the packed, transferred worker input — never all
-      // resident first. Typed arrays (core/sfm/keypointSet.js): ~20 B per keypoint
-      // instead of a 104 B object per keypoint per copy.
-      const keypointSets = new Map()
-      const missingKeypoints = []
-      for (const img of imgs) {
-        const kps = await imagesStore.readKeypoints(img)
-        if (!kps) { missingKeypoints.push(img.name); continue }
-        const set = keypointSetFrom(kps)
-        reconstructionTransfers.push(...keypointSetTransfer(set))
-        keypointSets.set(img.uuid, set)
-      }
-      if (missingKeypoints.length) {
-        log(`Reconstruction: ${missingKeypoints.length} image(s) left out — their keypoints could not be read `
-          + `(${missingKeypoints.slice(0, 5).join(', ')}${missingKeypoints.length > 5 ? ', …' : ''})`, 'warn', 'Reconstruction')
-        imgs = imgs.filter((img) => keypointSets.has(img.uuid))
-      }
-      // Millions of tuple arrays are catastrophic to clone. Each pair's matches are a
-      // fresh packed copy (the stream hands views into its read windows), transferred.
-      const packedPairMatches = new Map()
-      await useMatchesStore().streamPairMatches(reconstructionPairs, (e, m) => {
-        const packed = packMatchPairs(m)
-        reconstructionTransfers.push(packed.buffer)
-        packedPairMatches.set(e, packed)
-      })
-
-      const input = {
-        images: imgs.map((img) => {
-          // Forward everything resolveK() may need: the EXIF fields that let it
-          // derive focal length in pixels, plus the assigned sensor's intrinsics
-          // (which take priority, so edits in the sensor table actually apply).
-          const s = img.sensorId ? sensorById.get(img.sensorId) : null
-          return {
-            uuid: img.uuid,
-            name: img.name,
-            kpStatus: img.kpStatus,
-            // Resolution the keypoints were MEASURED at (keypoint coords themselves
-            // are native px). core/scaleContext.js resolves the reprojection gates
-            // against it — a gate below the measurement quantum rejects good data.
-            // Absent on pre-scale projects ⇒ treated as 1 ⇒ no correction.
-            detectScale: img.detectScale ?? null,
-            // Sensor id lets BA share one focal across images on the same sensor
-            // (self-calibration); null → the image is its own intrinsics group.
-            sensorId: img.sensorId ?? null,
-            // Read above, one image at a time; transferred rather than cloned.
-            keypoints: keypointSets.get(img.uuid),
-            // Fiducial-mark observations (F4) — scan-pixel clicks the sfm ingest
-            // uses to fit this image's scan→canonical affine. Spread to plain
-            // objects (the Vue proxy can't be structured-cloned).
-            fiducialObs: (img.fiducialObs || []).map((o) => ({ fidId: o.fidId, px: o.px, py: o.py })),
-            fiducialDetections: (img.fiducialDetections || []).map((d) => ({ slot: d.slot, px: d.px, py: d.py,
-              family: d.family, source: d.source, confidence: d.confidence, reviewed: d.reviewed })),
-            meta: img.meta
-              ? {
-                  width: img.meta.width,
-                  height: img.meta.height,
-                  focalLength35: img.meta.focalLength35,
-                  focalLength: img.meta.focalLength,
-                  focalPlaneXRes: img.meta.focalPlaneXRes,
-                  focalPlaneResUnit: img.meta.focalPlaneResUnit,
-                  make: img.meta.make,
-                  model: img.meta.model,
-                }
-              : null,
-            sensor: s
-              ? {
-                  focal: s.focal, focalUnit: s.focalUnit, pixelSize: s.pixelSize,
-                  sensorWidthMm: s.sensorWidthMm,
-                  cx: s.cx, cy: s.cy, width: s.width, height: s.height,
-                  // Lens distortion (Brown–Conrady) — undistorted at ingest so the
-                  // pipeline stays pinhole. Null coeffs are treated as zero.
-                  k1: s.k1, k2: s.k2, k3: s.k3, p1: s.p1, p2: s.p2,
-                  distortionModel: s.distortionModel,
-                  // Film-scan interior orientation (F4): kind + calibrated fiducial
-                  // layout. The sfm ingest fits a per-image affine and builds one
-                  // canonical K per sensor (resolveK path 0). Plain-copy the marks.
-                  kind: s.kind ?? 'digital',
-                  fiducials: s.fiducials
-                    ? {
-                        marks: (s.fiducials.marks || []).map((m) => ({ id: m.id, xMm: m.xMm, yMm: m.yMm })),
-                        ppxMm: s.fiducials.ppxMm, ppyMm: s.fiducials.ppyMm, focalMm: s.fiducials.focalMm,
-                      }
-                    : null,
-                  fiducialCalibration: s.fiducialCalibration
-                    ? JSON.parse(JSON.stringify(s.fiducialCalibration))
-                    : null,
-                }
-              : null,
-          }
-        }),
-        pairs: reconstructionPairs
-          .map((e) => ({
-            idA: e.idA, idB: e.idB,
-            // F (3×3) and matches come from reactive store entries; rebuild them
-            // as plain arrays or the Vue proxy can't be structured-cloned to the
-            // worker ("[object Array] could not be cloned").
-            F: e.F ? e.F.map((row) => [...row]) : null,
-            // Streamed above: a fresh packed buffer, transferred into the worker below.
-            matches: packedPairMatches.get(e),
-            // WS1: weak pairs (valid F below the accept gate) ride through with the flag.
-            // sfm.js keeps them out of init / triangulation and feeds
-            // them only to PnP correspondence collection (register.js).
-            inlierCount: e.inlierCount, weak: e.weak ?? false, status: 'done',
-          })),
-        // GCP anchors + camera priors in one survey frame (surveyConstraintInput).
-        gcps: survey.gcps,
-        cameraPriors: survey.cameraPriors,
-        settings,
-      }
-
-      // Guided track extension needs each image's descriptors in the worker, as
-      // COLMAP-style uint8 RootSIFT (×512): 128 B per keypoint instead of 512.
-      if (guidedSkippedForMemory) {
-        input.settings = { ...settings, guidedTrackExtension: false, guidedSkippedForMemory }
-      }
-      if (guided) {
-        // One image at a time: the float descriptors are 4× the uint8 copy, and loading
-        // them all at once (2.2 M keypoints ≈ 1.1 GB) would be the renderer's peak.
-        let bytes = 0, shipped = 0
-        for (let i = 0; i < imgs.length; i++) {
-          const img = imgs[i]
-          if ((img.detector ?? 'sift') !== 'sift' || (img.descDim ?? 128) !== 128) continue
-          const raw = isPersisting()
-            ? (await opfs.loadDescriptors(projects.currentProjectId, img.uuid)) ?? img.descriptors
-            : img.descriptors
-          const d = toMatchSpace(raw, img, 128)
-          if (!d || d.length !== img.kpCount * 128) continue
-          const u8 = new Uint8Array(d.length)
-          for (let k = 0; k < d.length; k++) u8[k] = Math.min(255, Math.round(d[k] * 512))
-          input.images[i].descU8 = u8
-          reconstructionTransfers.push(u8.buffer)
-          bytes += u8.length; shipped++
-        }
-        if (shipped) {
-          log(`guided track extension: sending ${shipped}/${imgs.length} image(s)' descriptors `
-            + `to the worker (${formatBytes(bytes)}, uint8 RootSIFT)`, 'info', 'Reconstruction')
-        }
-      }
-
-      // Chrome exposes live heap usage. Poll while the main thread is idle and the
-      // worker solves; terminate early because a renderer OOM itself is uncatchable.
-      if (Number.isFinite(heap?.usedJSHeapSize) && Number.isFinite(heap?.jsHeapSizeLimit)) {
-        const stopAt = heap.jsHeapSizeLimit * SPARSE_HEAP_FRACTION
-        let stopped = false
-        const timer = setInterval(() => {
-          if (stopped || !(performance.memory?.usedJSHeapSize >= stopAt)) return
-          stopped = true
-          clearInterval(timer)
-          const used = performance.memory.usedJSHeapSize
-          log(`Sparse reconstruction stopped at ${formatBytes(used)} heap usage `
-            + `(safety ceiling ${formatBytes(stopAt)})`, 'error', 'Compute')
-          terminateAll('reconstruction stopped before browser memory exhaustion')
-        }, 500)
-        stopMemoryWatchdog = () => { stopped = true; clearInterval(timer) }
-      }
-
-      let packedResult = await workerReconstruct(input, {
-        onLog: (message, level, category) => log(message, level, category),
-        onProgress: (done, total, label, fraction) => onProgress?.(done, total, label, fraction),
-        transfer: reconstructionTransfers,
-      })
-      stopMemoryWatchdog()
-      stopMemoryWatchdog = () => {}
-      const result = unpackReconstructionResult(packedResult)
-      // The expanded Maps are now authoritative. Drop the transferred CSR buffers
-      // before orientation + persistence allocate their own compact arrays.
-      packedResult = null
-      log(`Compact result received: ${result.points.length.toLocaleString()} points`,
-        'info', 'Reconstruction')
-
-      // Apply the compact worker result. The transport codec has already expanded
-      // its CSR buffers directly into the Map-based point shape used by the app.
-      if (result.status === 'done') {
-        let camMap = result.cameras
-        let pts = result.points
-
-        // Aerial auto-orient: SfM leaves the model in an arbitrary frame (it can
-        // come out upside-down). For aerial surveys the cameras look down, so we
-        // rotate the whole model Z-up — cameras above the ground — before storing.
-        if (projects.currentSceneType === 'aerial') {
-          const R = aerialUpRotation(camMap)
-          if (R) {
-            const oriented = rotateReconstruction(camMap, pts, R, { inPlace: true })
-            camMap = oriented.cameras
-            pts = oriented.points
-            // Which camera signal set "up" — an oblique set's viewing directions are
-            // not vertical, so say when the level camera plane overrode them.
-            const how = sceneUpFromCameras([...camMap.values()])
-            log(how.source === 'camera-plane'
-              ? `Oriented model Z-up from the level camera plane (aerial; the mean viewing direction is ${how.viewTiltDeg.toFixed(1)}° off it — an oblique capture)`
-              : 'Oriented model Z-up from the mean viewing direction (aerial: cameras above ground)', 'info', 'Reconstruction')
-          }
-        }
-        upsertSparseCloud(camMap, pts)
-        // A secondary component that could not satisfy the conservative shared-camera
-        // alignment gates is still a valid reconstruction. Preserve it as a separate
-        // sparse cloud rather than discarding it or forcing it into the primary frame.
-        clouds.value = clouds.value.filter((c) => !(c.kind === 'sparse' && c.secondary))
-        for (const [si, model] of (result.secondaryModels || []).entries()) {
-          let secondaryCameras = model.cameras
-          let secondaryPoints = model.points
-          if (projects.currentSceneType === 'aerial') {
-            const R = aerialUpRotation(secondaryCameras)
-            if (R) ({ cameras: secondaryCameras, points: secondaryPoints } =
-              rotateReconstruction(secondaryCameras, secondaryPoints, R, { inPlace: true }))
-          }
-          upsertSparseCloud(secondaryCameras, secondaryPoints, {
-            replaceId: null,
-            asMain: false,
-            select: false,
-            secondary: true,
-            name: model.name || `Secondary sparse ${si + 1}`,
-          })
-        }
-        await invalidateSparseDependents()
-        // Retire the outgoing summary into the run history before overwriting it, so
-        // "vs previous run" compares against what was on screen a moment ago (WS5).
-        if (summary.value) {
-          summaryHistory.value = [...summaryHistory.value, summary.value].slice(-SUMMARY_HISTORY_MAX)
-        }
-        summary.value = result.summary ?? null
-        healthDirty.value++
-        reconStatus.value = 'done'
-        const saved = await persist()
-        log(saved
-          ? 'Reconstruction saved to project storage'
-          : 'Reconstruction is available in memory but could not be saved to project storage',
-        saved ? 'success' : 'warn', 'Project')
-      } else {
-        reconStatus.value = result.status === 'error' ? 'error' : 'idle'
-      }
-    } catch (err) {
-      log(`Reconstruction error: ${err?.message ?? err}`, 'error', 'Reconstruction')
-      reconStatus.value = 'error'
-    } finally {
-      stopMemoryWatchdog()
-    }
-  }
-
+  // Reconstruct and the survey constraints it shares with gradual selection
+  // (reconstruction/sparseRun.js).
+  const {
+    surveyConstraintInput, reconstruct,
+  } = createSparseRun({
+    SUMMARY_HISTORY_MAX, clouds, frameModelFor, gcpsStore, healthDirty, images, imagesById,
+    imagesStore, invalidateSparseDependents, isPersisting, log, matchStore, save, posesStore,
+    projects, reconStatus, releaseReplaceableModelForRerun, sensors, sparseCameras, summary,
+    summaryHistory, supersedeRestore, upsertSparseCloud,
+  })
 
   // Reset the in-memory clouds. Pass { purge: true } to also delete the persisted
   // reconstruction.json — do NOT purge on project switch, since restore reads it.
   function clear({ purge = false } = {}) {
     restoreGeneration++
+    unreadableProjectId = null
     clouds.value = []
     selectedCloudId.value = null
     mainSparseId.value = null
@@ -2353,7 +789,21 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
       opfs.loadProduct(projectId, 'ortho'),
     ])
     const depthIndexRead = opfs.loadDepthIndex(projectId).catch(() => null)
-    const data = await opfs.loadReconstruction(projectId)
+    let data
+    try {
+      data = await opfs.loadReconstruction(projectId)
+    } catch (err) {
+      if (!isCurrentRestore()) return
+      // Not the same as "no model yet": the document is there but unreadable. Keep
+      // it on disk untouched (save() refuses an empty save over it) and leave
+      // the depth planes alone, since their staleness check needs the model.
+      unreadableProjectId = projectId
+      const detail = String(err?.message ?? err)
+      log(`Could not read the saved reconstruction — ${detail}. It is left on disk unchanged; `
+        + 'a new reconstruction or import will replace it.', 'error', 'Reconstruction')
+      showToast('Saved reconstruction could not be read', { detail, kind: 'error', ms: 8000 })
+      return
+    }
     if (!isCurrentRestore()) return
     if (!data) {
       // No sparse model, so any saved depth planes are orphans (they only exist in a
@@ -2364,13 +814,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     }
     lap('read')
 
-    // New shape: { clouds: [...] }. Legacy shape: a single model
-    // { cameras: [...], points: [...] } — wrap it as one sparse cloud.
-    const raw = Array.isArray(data.clouds)
-      ? data.clouds
-      : data.cameras
-        ? [{ name: 'Sparse cloud', kind: 'sparse', ...data }]
-        : []
+    const raw = Array.isArray(data.clouds) ? data.clouds : []
 
     // One cloud per task, so the overlay can say which one is decoding. Each cloud's
     // own decode time goes into the timing line, so a slow open names its cloud.
@@ -2383,8 +827,8 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
       await yieldToPaint()
       if (!isCurrentRestore()) return
       const t = performance.now()
-      restored.push(c.buffers ? deserializeCloud(c, makeCloudId) : legacyDeserializeCloud(c, makeCloudId))
-      perCloud.push(`${name} [${c.kind ?? 'sparse'}, ${(c.pointCount ?? c.points?.length ?? 0).toLocaleString()} pts] `
+      restored.push(deserializeCloud(c, makeCloudId))
+      perCloud.push(`${name} [${c.kind ?? 'sparse'}, ${(c.pointCount ?? 0).toLocaleString()} pts] `
         + `${Math.round(performance.now() - t)} ms`)
     }
     lap('decode')
@@ -2394,7 +838,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     if (!isCurrentRestore()) return
     clouds.value = restored
     // The arrays just read ARE the committed files' contents, so the first save after
-    // opening need not rewrite them (a v3 document only; legacy shapes carry no list).
+    // opening need not rewrite them.
     savedCloudFiles.clear()
     raw.forEach((c, i) => { if (c.savedFiles) savedCloudFiles.remember(clouds.value[i], projectId, c.savedFiles) })
     for (const c of clouds.value) {
@@ -2477,6 +921,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     reconStatus,
     depthMaps,
     depthMapsMeta,
+    forgetDepthMap,
     depthMapCount,
     georef,
     scaleFit,
@@ -2532,7 +977,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     renameCloud,
     removeProduct,
     renameProduct, setProductStyle,
-    productLayers, setProductOnMap, setProductOpacity,
+    productLayers, setProductVisible, setProductOpacity,
     // Triangulated marker positions (SfM frame) for the model-frame map.
     markerPositions,
   }

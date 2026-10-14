@@ -5,8 +5,8 @@ import {
 
 const F = [[0, -1, 2], [1, 0, -3], [-2, 3, 0.5]]
 const entries = () => new Map([
-  ['a--b', { idA: 'a', idB: 'b', rawCount: 40, inlierCount: 3, F, matches: toMatchArray([[1, 2], [3, 4], [5, 6]]), status: 'done', disabled: false, weak: false }],
-  ['a--c', { idA: 'a', idB: 'c', rawCount: 9, inlierCount: 1, F: null, matches: [[7, 8]], status: 'done', disabled: true, weak: true }],
+  ['a--b', { idA: 'a', idB: 'b', rawCount: 40, inlierCount: 3, F, matches: toMatchArray([[1, 2], [3, 4], [5, 6]]), status: 'done', enabled: true, weak: false }],
+  ['a--c', { idA: 'a', idB: 'c', rawCount: 9, inlierCount: 1, F: null, matches: [[7, 8]], status: 'done', enabled: false, weak: true }],
   // Not persisted: running, or no matches.
   ['b--c', { idA: 'b', idB: 'c', rawCount: 5, inlierCount: 0, F: null, matches: new Uint32Array(0), status: 'done' }],
   ['c--d', { idA: 'c', idB: 'd', rawCount: 5, inlierCount: 2, F: null, matches: toMatchArray([[1, 1]]), status: 'running' }],
@@ -29,11 +29,11 @@ describe('match document', () => {
     const back = new Map(unpackMatchIndex(doc.meta, doc.buffers, { matchBytes: col.byteLength }))
     expect([...back.keys()]).toEqual(['a--b', 'a--c'])
     const ab = back.get('a--b')
-    expect(ab).toMatchObject({ rawCount: 40, inlierCount: 3, nMatches: 3, off: 0, disabled: false, weak: false, status: 'done' })
+    expect(ab).toMatchObject({ rawCount: 40, inlierCount: 3, nMatches: 3, off: 0, enabled: true, weak: false, status: 'done' })
     expect(ab.F).toEqual(F)
     expect([...slice(col, ab)]).toEqual([1, 2, 3, 4, 5, 6])
     const ac = back.get('a--c')
-    expect(ac).toMatchObject({ F: null, disabled: true, weak: true, nMatches: 1, off: 6 })
+    expect(ac).toMatchObject({ F: null, enabled: false, weak: true, nMatches: 1, off: 6 })
     expect([...slice(col, ac)]).toEqual([7, 8])
     expect(doc.layout.map(({ pairId, off, n }) => [pairId, off, n])).toEqual([['a--b', 0, 3], ['a--c', 6, 1]])
   })

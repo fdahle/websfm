@@ -53,16 +53,16 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
   const projects = useProjectsStore()
   const posesStore = usePosesStore()
 
-  // pairId → { idA, idB, rawCount, inlierCount, F, nMatches, src, status, disabled,
+  // pairId → { idA, idB, rawCount, inlierCount, F, nMatches, src, status, enabled,
   //            weak }. The entry is the pair's SUMMARY; its matches (a flat Uint32Array
   //            [ia0, ib0, ia1, ib1, …], read as pairs via core/sfm/matchCodec.js) are
   //            not on it. They live in the committed match document (`src` = { file,
   //            off }: the matches column as a File and the pair's element offset, null
   //            until saved) and, when something has asked for them, in the byte-bounded
   //            `matchCache` below (TODO ▸ SC-2). Gate on `nMatches`, never on whether
-  //            the matches are resident. `disabled` is a user override that excludes an
-  //            otherwise-verified pair from reconstruction (obviously-wrong matches) —
-  //            reversible.
+  //            the matches are resident. `enabled: false` is a user override that
+  //            excludes an otherwise-verified pair from reconstruction (obviously-wrong
+  //            matches) — reversible.
   // shallowRef + in-place mutation + triggerRef (NOT a whole-Map copy per write):
   // this is what makes concurrent matchPair() calls safe — copying the Map on every
   // write races (one writer's snapshot clobbers another's set). See P2 in HANDOVER.
@@ -70,8 +70,8 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
   const touch = () => triggerRef(matchStore)
 
   // ── A pair's matches, on demand ──────────────────────────────────────────────
-  // pairId → { entry, matches }. A fresh result (matchPair, import, the legacy
-  // migration) is PINNED until a document commit holds it, and forever in a project
+  // pairId → { entry, matches }. A fresh result (matchPair, import) is
+  // PINNED until a document commit holds it, and forever in a project
   // that cannot persist; a copy read back from the document is clean and evictable.
   // `entry` is kept with it because a re-match replaces the entry under the same id.
   //   ensurePairMatches(pid) — cached (the match preview)
@@ -240,7 +240,7 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
   // matchPair saves before it returns, so a superseded result never resurrects.
   let heavyVersion = 0
   let committed = null // { projectId, heavyVersion, meta, files }
-  let saving = null, saveAgain = false, saveTimer = null, batchDepth = 0
+  let saving = null, savingProjectId = null, saveAgain = false, saveTimer = null, batchDepth = 0
   const markHeavy = () => { heavyVersion++ }
   const persistable = isPersistedMatchEntry
   // A pair's matches for a full rewrite: the resident copy, else a slice of the
@@ -265,14 +265,23 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
       if (v?.entry === entry) matchCache.unpin(pairId, v)
     }
   }
-  function persistMatches() {
+  function save() {
     if (!isPersisting()) return Promise.resolve()
     if (saveTimer != null) { clearTimeout(saveTimer); saveTimer = null }
-    if (saving) { saveAgain = true; return saving }
+    // One project per save: a rerun queued while a commit was in flight must not
+    // pick up the next project's id (and its just-cleared store) after a switch. A
+    // request from the next project waits for the old save, then runs its own.
+    if (saving) {
+      if (savingProjectId !== projects.currentProjectId) return saving.then(() => save())
+      saveAgain = true
+      return saving
+    }
+    const projectId = savingProjectId = projects.currentProjectId
     saving = (async () => {
       do {
         saveAgain = false
-        const projectId = projects.currentProjectId, version = heavyVersion
+        if (projectId !== projects.currentProjectId) return
+        const version = heavyVersion
         const reuse = committed?.projectId === projectId && committed.heavyVersion === version
         let meta, buffers, layout = null
         if (reuse) {
@@ -302,7 +311,7 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
   // matching without rewriting the document per pair.
   const schedulePersist = () => {
     if (saveTimer != null || !isPersisting()) return
-    saveTimer = setTimeout(() => { saveTimer = null; persistMatches() }, 60_000)
+    saveTimer = setTimeout(() => { saveTimer = null; save() }, 60_000)
   }
   // A flat Uint32Array of the putatives kept by `keep(i)` (all when omitted).
   const packPutatives = (raw, keep = null) => {
@@ -332,7 +341,7 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
   const usableMatchCount = computed(() => {
     let n = 0
     for (const entry of matchStore.value.values()) {
-      if (entry.status === 'done' && !entry.disabled && entry.inlierCount > 0) n++
+      if (entry.status === 'done' && entry.enabled !== false && entry.inlierCount > 0) n++
     }
     return n
   })
@@ -352,7 +361,7 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
     // `matches` is this run's result; it reaches the entry (as `nMatches`) and the
     // match cache together, once the pair is done (holdMatches).
     let matches = EMPTY_MATCHES
-    const entry = { idA, idB, rawCount: 0, inlierCount: 0, F: null, nMatches: 0, src: null, status: 'running', disabled: false, weak: false }
+    const entry = { idA, idB, rawCount: 0, inlierCount: 0, F: null, nMatches: 0, src: null, status: 'running', enabled: true, weak: false }
     entry.timing = { descriptorLoadMs: 0, descriptorBytes: 0, postMessageMs: 0, matchingMs: 0, verificationMs: 0, roundTripMs: 0 }
     const timing = stage => ({ onTiming: t => {
       entry.timing.postMessageMs += t.postMessageMs
@@ -674,7 +683,7 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
     } finally {
       if (projectId === projects.currentProjectId) {
         if (batchDepth > 0) schedulePersist()
-        else await persistMatches()
+        else await save()
       }
     }
   }
@@ -957,7 +966,7 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
       // computeds after the run sees the final state.
       touch()
       // One save for the whole run (and for a cancelled one, so what matched survives).
-      await persistMatches()
+      await save()
       const dc = descCache.stats()
       log(`Matching: descriptors loaded ${dc.loads}× for ${ready.length} image(s), `
         + `resident peak ${(dc.peakBytes / 2 ** 20).toFixed(0)} MiB`, 'debug', 'Matching')
@@ -1058,7 +1067,7 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
     }
     if (removed) {
       markHeavy()
-      persistMatches()
+      save()
       touch()
       log(`Matches invalidated: ${removed} pair(s) — keypoints changed, re-match these`, 'warn', 'Matching')
     }
@@ -1083,7 +1092,7 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
         idA, idB, rawCount: src.rawCount ?? matches.length / 2,
         inlierCount: src.verified === false ? 0 : (src.inlierCount ?? matches.length / 2),
         F: flip && src.F ? transpose3(src.F) : (src.F ?? null),
-        nMatches: 0, src: null, status: 'done', disabled: false, weak: src.verified === false,
+        nMatches: 0, src: null, status: 'done', enabled: true, weak: src.verified === false,
         source: src.source ?? 'external',
       }
       holdMatches(pid, entry, matches)
@@ -1091,7 +1100,7 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
       imported++
     }
     touch()
-    if (imported) { markHeavy(); await persistMatches() }
+    if (imported) { markHeavy(); await save() }
     log(`Matches imported: ${imported} pair(s)${skipped ? `, ${skipped} skipped` : ''}`,
       imported ? 'success' : 'warn', 'Import')
     return { imported, skipped }
@@ -1101,16 +1110,18 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
     return [[m[0][0], m[1][0], m[2][0]], [m[0][1], m[1][1], m[2][1]], [m[0][2], m[1][2], m[2][2]]]
   }
 
-  // Toggle a verified pair's exclusion from reconstruction. A reversible user
-  // override for obviously-wrong matches that clear every automatic gate; disabled
-  // pairs stay stored (and re-enablable) but are filtered out at reconstruct time.
-  function setPairDisabled(pid, disabled) {
+  // Include or exclude a verified pair from reconstruction. A reversible user
+  // override for obviously-wrong matches that clear every automatic gate; an
+  // excluded pair stays stored (and re-enablable) but is filtered out at
+  // reconstruct time. Like GCPs, poses and scale bars: `enabled` = takes part.
+  function setPairEnabled(pid, enabled) {
     const entry = matchStore.value.get(pid)
-    if (!entry || !!entry.disabled === !!disabled) return
-    entry.disabled = !!disabled
+    if (!entry || (entry.enabled !== false) === !!enabled) return false
+    entry.enabled = !!enabled
     touch()
-    persistMatches() // flags only: the matches buffers are reused
-    log(`Pair ${disabled ? 'excluded from' : 'restored to'} reconstruction`, 'info', 'Matching', { channel: 'activity' })
+    save() // flags only: the matches buffers are reused
+    log(`Pair ${enabled ? 'restored to' : 'excluded from'} reconstruction`, 'info', 'Matching', { channel: 'activity' })
+    return true
   }
 
   // Project-store contract.
@@ -1146,34 +1157,14 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
         restored = []
         log(`Matches: the saved match document is unreadable (${err.message}) — re-run matching`, 'error', 'Matching')
       }
-    } else {
-      // A project saved before the packed document: one JSON file per pair. Migrate once.
-      const legacy = await opfs.loadLegacyPairFiles(projectId, (done, total) => report('Reading image pairs', done, total))
-      if (generation !== restoreGeneration || projectId !== projects.currentProjectId) return
-      restored = legacy.map(({ pairId: pid, idA, idB, rawCount, inlierCount, F, matches, disabled, weak }) => {
-        const entry = {
-          idA, idB, rawCount: rawCount ?? 0, inlierCount: inlierCount ?? 0, F: F ?? null,
-          nMatches: 0, src: null, status: 'done', disabled: disabled ?? false, weak: weak ?? false,
-        }
-        // Resident (pinned) until the migration's save below commits them.
-        holdMatches(pid, entry, toMatchArray(matches))
-        return [pid, entry]
-      })
-      if (restored.length) {
-        matchStore.value = new Map(restored)
-        markHeavy()
-        await persistMatches()
-        await opfs.removeLegacyPairFiles(projectId)
-        log(`Matches: migrated ${restored.length} per-pair file(s) into one match document`, 'info', 'Matching')
-      }
     }
     matchStore.value = new Map(restored)
     if (restored.length > 0) log(`Matches restored: ${restored.length} pair(s)`, 'success', 'Matching')
   }
 
   // Reset in-memory matches. Only purge deletes the persisted match files — a plain
-  // clear (project switch/close) must leave them, since restore reads them back and
-  // currentProjectId still points at the project being left.
+  // clear (project switch/close) must leave them, since restore reads them back. On
+  // a switch currentProjectId already names the project being opened.
   function clear({ purge = false } = {}) {
     const removed = matchStore.value.size
     restoreGeneration++
@@ -1195,7 +1186,7 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
 
   return {
     matchStore, matchRun, pairId, getMatch, verifiedPairs, usableMatchCount,
-    matchPair, matchAll, importMatches, removeMatchesForImage, setPairDisabled, restore, clear,
+    matchPair, matchAll, importMatches, removeMatchesForImage, setPairEnabled, restore, clear,
     // A pair's matches on demand (the "A pair's matches" section at the top).
     ensurePairMatches, readPairMatches, residentPairMatches, streamPairMatches, matchCacheStats,
     // After the project root moved (browser storage ⇄ folder): re-point at the copy.

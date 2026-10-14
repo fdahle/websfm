@@ -200,7 +200,7 @@ describe('image groups', () => {
 
     projects.persistenceAvailable = true
     const write = vi.spyOn(opfs, 'writeProject').mockResolvedValue(undefined)
-    await store.sync('project-1')
+    await store.save('project-1')
 
     const doc = write.mock.calls.at(-1)[1]
     expect(doc.imageGroups.map((g) => g.name)).toEqual(['First', 'North'])

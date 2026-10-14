@@ -1,30 +1,23 @@
 import { ref, markRaw, computed } from 'vue'
+import { createIngest } from './images/ingest.js'
+import { createDetection } from './images/detection.js'
+import { createImageFiducials } from './images/fiducials.js'
+import { createImageGroups } from './images/imageGroups.js'
+import { createKeypointCache } from './images/keypointCache.js'
 import { defineStore } from 'pinia'
-import { createImage } from '../utils/image.js'
-import { isTiff, canDecodeTiffNatively, nativeTiffDecodeResult, readTiffDimensions } from '../utils/tiff.js'
-import { extractMetadata } from '../core/io/metadata.js'
+import { isTiff, canDecodeTiffNatively, nativeTiffDecodeResult } from '../utils/tiff.js'
 import {
-  detectKeypoints, transcodeTiff, prepareFiducialTemplates, detectFiducials,
-  detectFiducialSpots as detectFiducialSpotsWorker, POOL_SIZE, imageQuality as imageQualityWorker,
+  transcodeTiff, POOL_SIZE, imageQuality as imageQualityWorker,
 } from '../workers/computeClient.js'
-import { FIDUCIAL_DETECT_TUNING } from '../core/sfm/fiducialDetect.js'
-import { migrateLegacyFiducialImage, observationsToDetections } from '../core/sfm/fiducialModel.js'
-import { fiducialBatchConsensus, fiducialShapeCheck } from '../core/sfm/fiducialConsensus.js'
-import { detectionConfidence } from '../core/sfm/fiducialDetection.js'
-import { buildBorderMask, dataUrlToBlob } from '../core/mask.js'
-import { Keypoints, asKeypoints, fillNormalized } from '../core/features/keypoints.js'
-import { resolveDetectMaxDim } from '../core/features/detectResolution.js'
-import { DETECT_TUNING, RESIDENT_TUNING } from '../core/tuning.js'
-import { createByteLru } from '../utils/byteLru.js'
-import { learnedDetector, detectorLabel } from '../core/features/learnedDetectors.js'
-import { detectionConcurrency, fiducialDetectionConcurrency } from '../core/features/detectConcurrency.js'
+import { dataUrlToBlob } from '../core/mask.js'
 import { useLog } from '../composables/useLog.js'
 import * as opfs from '../utils/opfs.js'
+import { createDocumentSaver } from '../utils/documentSaver.js'
 import { useProjectsStore } from './useProjectsStore.js'
 import { useMatchesStore } from './useMatchesStore.js'
-import { useModelsStore } from './useModelsStore.js'
+import { useReconstructionStore } from './useReconstructionStore.js'
 import { mapConcurrent } from '../utils/concurrency.js'
-import { moveListEntry, nextGroupName, normalizeImageGroups } from '../utils/imageGroups.js'
+import { normalizeImageGroups } from '../utils/imageGroups.js'
 import { createImageThumbnails } from './images/thumbnails.js'
 
 // The image set: source images, their metadata, keypoints, masks, depth maps, and
@@ -49,114 +42,13 @@ export const useImagesStore = defineStore('images', () => {
   // Persist only when a project is open and OPFS is usable (see useProjectsStore).
   const isPersisting = () => projects.isPersisting
 
-  // ── Keypoints: on disk, read per image on demand (TODO ▸ SC-3) ──────────────
-  // An image record carries `kpCount`/`kpStatus` (reactive, persisted) and `kpRev`
-  // (bumped whenever its keypoints are replaced, session-only); the Keypoints
-  // themselves (core/features/keypoints.js) live in this byte-bounded LRU keyed by
-  // uuid, never on the record. Fresh detections/imports are PINNED until their save
-  // lands (and forever in a project that cannot persist); a copy read back from
-  // disk is clean and evictable. Consumers:
-  //   ensureKeypoints(img)  — cached; the open image tab, the match preview, matching
-  //   readKeypoints(img)    — resident or read straight through, NOT cached; a bulk
-  //                           pass (SfM input, exports, fingerprints) that would
-  //                           otherwise flush the interactive working set
-  //   residentKeypoints(img) — synchronous peek, null when not loaded
-  const keypointCache = createByteLru({ budgetBytes: RESIDENT_TUNING.keypointCacheMiB * 2 ** 20 })
-  const keypointLoads = new Map() // uuid → in-flight read
-  let keypointEpoch = 0 // bumps on restore/clear: a read that straddles it is dropped
-  const keypointBytes = (k) => k.data.byteLength + (k.rgb?.byteLength ?? 0)
-  // Callers hand an image record or an id; mutate the store's proxy when there is one.
-  const resolveImage = (ref) => {
-    if (ref == null) return null
-    if (typeof ref === 'string') return imageById(ref)
-    return (ref.id != null ? imageById(ref.id) : null) ?? ref
-  }
-
-  function residentKeypoints(ref) {
-    const img = resolveImage(ref)
-    return hasKeypoints(img) ? (keypointCache.get(img.uuid) ?? null) : null
-  }
-
-  // Attach a fresh result (detection, import): resident and pinned until `persist`
-  // resolves. Returns the wrapped set.
-  function holdKeypoints(img, kps, persist = null) {
-    const held = markRaw(kps)
-    img.kpRev = (img.kpRev ?? 0) + 1
-    keypointCache.set(img.uuid, held, keypointBytes(held), { pinned: true })
-    persist?.then(() => keypointCache.unpin(img.uuid, held))
-      .catch((err) => log(`Keypoints for ${img.name} could not be saved — kept in memory (${err?.message ?? err})`,
-        'warn', 'Detection'))
-    return held
-  }
-
-  // One image's keypoints from OPFS, or null. Not cached here.
-  async function readKeypointsFromDisk(img) {
-    const projectId = projects.currentProjectId
-    const epoch = keypointEpoch, rev = img.kpRev
-    const data = projectId ? await opfs.loadKeypoints(projectId, img.uuid) : null
-    const rgb = data ? await opfs.loadColors(projectId, img.uuid) : null
-    // Replaced (re-detected, cleared) or the project changed while reading.
-    if (epoch !== keypointEpoch || rev !== img.kpRev) return { stale: true }
-    if (!data) {
-      img.kpStatus = 'error'
-      img.kpCount = 0
-      log(`Keypoints missing for ${img.name} — re-run feature detection`, 'warn', 'Project')
-      return { kps: null }
-    }
-    const kps = new Keypoints(data)
-    if (rgb?.length === 3 * kps.length) kps.rgb = rgb
-    // The file is what match indices refer to, so it wins over a disagreeing count.
-    if (kps.length !== img.kpCount) {
-      log(`Keypoints for ${img.name}: the file holds ${kps.length}, the project said ${img.kpCount} — using the file`,
-        'warn', 'Project')
-      img.kpCount = kps.length
-      if (isPersisting()) sync()
-    }
-    return { kps: markRaw(kps) }
-  }
-
-  function loadKeypointsShared(img, cache) {
-    let p = keypointLoads.get(img.uuid)
-    if (!p) {
-      const epoch = keypointEpoch
-      p = readKeypointsFromDisk(img).finally(() => { if (keypointLoads.get(img.uuid) === p) keypointLoads.delete(img.uuid) })
-      keypointLoads.set(img.uuid, p)
-      if (cache) {
-        p.then((r) => {
-          if (r.kps && epoch === keypointEpoch && !keypointCache.has(img.uuid)) {
-            keypointCache.set(img.uuid, r.kps, keypointBytes(r.kps))
-          }
-        }, () => {})
-      }
-    }
-    return p.then((r) => (r.stale ? (keypointCache.get(img.uuid) ?? null) : r.kps))
-  }
-
-  // The image's keypoints, loaded (and kept, LRU) on first use; null when it has none.
-  async function ensureKeypoints(ref) {
-    const img = resolveImage(ref)
-    if (!hasKeypoints(img)) return null
-    return keypointCache.get(img.uuid) ?? loadKeypointsShared(img, true)
-  }
-
-  // The image's keypoints for a one-pass consumer: the resident copy if there is one,
-  // else read straight from disk without displacing the cache.
-  async function readKeypoints(ref) {
-    const img = resolveImage(ref)
-    if (!hasKeypoints(img)) return null
-    const hit = keypointCache.peek(img.uuid)
-    if (hit) return hit
-    if (keypointLoads.has(img.uuid)) return loadKeypointsShared(img, false)
-    const r = await readKeypointsFromDisk(img)
-    return r.stale ? (keypointCache.peek(img.uuid) ?? null) : r.kps
-  }
-
-  const keypointCacheStats = () => keypointCache.stats()
-  function resetKeypointCache() {
-    keypointEpoch++
-    keypointCache.clear()
-    keypointLoads.clear()
-  }
+  // Keypoints: on disk, resident in a byte-budgeted LRU (images/keypointCache.js).
+  const {
+    residentKeypoints, holdKeypoints, ensureKeypoints,
+    readKeypoints, resetKeypointCache, keypointCache, keypointCacheStats,
+  } = createKeypointCache({
+    hasKeypoints, imageById, isPersisting, log, projects, save,
+  })
 
   // TIFF compute-source readiness. A TIFF's `computeUrl` (lossless PNG) is encoded
   // *after* the display JPEG so the viewer is usable sooner (see addImages), which
@@ -182,9 +74,10 @@ export const useImagesStore = defineStore('images', () => {
 
   // Lifecycle operations call this before switching, exporting, moving or
   // deleting a project. Loop because a TIFF import can enqueue derived writes
-  // after its original-image write has already completed.
+  // after its original-image write has already completed. (project.json saves are
+  // tracked persistence operations; the flushPersistence() that follows waits.)
   async function flushPendingWork() {
-    while (activeImports.size || pendingWrites.size || writing) {
+    while (activeImports.size || pendingWrites.size) {
       const pending = [...activeImports, ...pendingWrites]
       if (pending.length) await Promise.allSettled(pending)
       else await new Promise((resolve) => setTimeout(resolve, 0))
@@ -219,36 +112,29 @@ export const useImagesStore = defineStore('images', () => {
   // store owns the image content. Other stores that mutate image-borne data (e.g.
   // sensor assignments) call this to re-persist.
   //
-  // `sync()` is fired from many concurrent async callbacks (per-image metadata
+  // `save()` is fired from many concurrent async callbacks (per-image metadata
   // `.then`, per-map `updateDepth`), and each call rewrites the *whole* project
-  // doc. Overlapping writes to the same OPFS file race (last-writer-wins / lost
-  // updates / FS errors), so writes are coalesced: at most one is in flight, and a
-  // request that arrives mid-write schedules exactly one re-run afterwards (which
-  // captures the latest state). N callers collapse to ≤2 ordered writes.
-  let writing = false
-  let rerun = false
-  async function sync(expectedProjectId = projects.currentProjectId) {
-    if (!isPersisting()) return
-    if (projects.currentProjectId !== expectedProjectId) return
-    if (writing) { rerun = true; return }
-    writing = true
+  // doc, so it goes through the shared document saver (utils/documentSaver.js):
+  // coalesced to ≤ 2 ordered writes, each built from the state at write time.
+  // `expectedProjectId` lets an async caller (an ingest batch) save only if its
+  // project is still the open one.
+  const saveProjectDocument = createDocumentSaver({
+    label: 'project',
+    currentProjectId: () => projects.currentProjectId,
+    isPersisting,
+    build: () => projectDocument(projects.currentProjectId),
+    write: (pid, doc) => doc && opfs.writeProject(pid, doc),
+  })
+  function save(expectedProjectId = projects.currentProjectId) {
+    if (!isPersisting() || projects.currentProjectId !== expectedProjectId) return Promise.resolve()
     pendingWorkCount.value++
-    try {
-      do {
-        rerun = false
-        if (projects.currentProjectId !== expectedProjectId) return
-        await writeProjectNow(expectedProjectId)
-      } while (rerun)
-    } finally {
-      writing = false
-      pendingWorkCount.value--
-    }
+    return saveProjectDocument().finally(() => { pendingWorkCount.value-- })
   }
 
-  async function writeProjectNow(pid) {
+  function projectDocument(pid) {
     const proj = projects.projects.find((p) => p.id === pid)
-    if (!proj) return
-    await opfs.writeProject(pid, {
+    if (!proj) return null
+    return {
       ...proj,
       lastModified: new Date().toISOString(),
       imageGroups: imageGroups.value.map((g) => ({ id: g.id, name: g.name, collapsed: !!g.collapsed })),
@@ -268,14 +154,13 @@ export const useImagesStore = defineStore('images', () => {
           hasMask: !!img.mask, hasDepth: !!img.depth,
           sensorId: img.sensorId ?? null,
           groupId: img.groupId ?? null,
-          // Fiducial observations (F4) are user clicks on the raster — tiny, and
-          // persisted inline (independent of keypoint indices).
-          fiducialObs: img.fiducialObs?.length ? img.fiducialObs.map((o) => ({ ...o })) : [],
+          // Fiducial detections (F4) are spots on the raster — tiny, and persisted
+          // inline (independent of keypoint indices).
           fiducialDetections: img.fiducialDetections?.length ? img.fiducialDetections.map((d) => ({ ...d })) : [],
           meta: img.meta ? metaToSave : null,
         }
       }),
-    })
+    }
   }
 
   // id → image, rebuilt lazily when the list changes. Per-image calls in a batch
@@ -310,227 +195,36 @@ export const useImagesStore = defineStore('images', () => {
     selectedId.value = id
   }
 
-  function extractMetadataFor(item, file, projectId, presetDims) {
-    return extractMetadata(file, item.url, presetDims)
-      .then((meta) => {
-        const found = projects.currentProjectId === projectId
-          ? images.value.find((img) => img.uuid === item.uuid) : null
-        if (found) {
-          found.meta = meta
-          found.loading = false
-          const cam = [meta.make, meta.model].filter(Boolean).join(' ') || 'unknown camera'
-          const dim = meta.width && meta.height ? ` ${meta.width}×${meta.height}` : ''
-          log(`Metadata: ${file.name} — ${cam}${dim}`, 'success', 'Metadata')
-          if (isPersisting()) sync(projectId)
-        }
-      })
-      .catch((err) => {
-        const found = projects.currentProjectId === projectId
-          ? images.value.find((img) => img.uuid === item.uuid) : null
-        if (found) found.loading = false
-        log(`Metadata failed: ${file.name} — ${err?.message ?? err}`, 'error', 'Metadata')
-        if (isPersisting()) sync(projectId)
-      })
-  }
-
-  async function addImages(files, onProgress) {
-    const task = addImagesNow(files, onProgress)
-    activeImports.add(task)
-    pendingWorkCount.value++
-    try { return await task } finally {
-      activeImports.delete(task)
-      pendingWorkCount.value--
-    }
-  }
-
-  async function addImagesNow(files, onProgress) {
-    const projectId = projects.currentProjectId
-    const persistImport = !!projectId && isPersisting()
-    let added = 0
-    const tiffItems = []
-    const metadataTasks = []
-    const batchWrites = []
-    // One id set for the whole batch: a per-file scan of the (growing, reactive)
-    // list was O(N²) on a multi-thousand-image drop.
-    const knownIds = new Set(images.value.map((img) => img.id))
-    for (const file of files) {
-      const item = createImage(file)
-      // Keep the immutable source filename separate from the user-editable label.
-      // TIFF decoding must not depend on whether a user keeps the .tif extension
-      // in the label they choose later.
-      item.sourceName = file.name
-      item.groupId = null
-      if (knownIds.has(item.id)) {
-        URL.revokeObjectURL(item.url)
-        log(`Skip duplicate: ${file.name}`, 'warn', 'Images')
-        continue
-      }
-      knownIds.add(item.id)
-      images.value.push(item)
-      added++
-      log(`Added image: ${file.name} (${(file.size / 1024).toFixed(0)} KB)`, 'info', 'Images')
-
-      if (persistImport) {
-        batchWrites.push(trackWrite(opfs.saveImage(projectId, item.uuid, file)
-          .catch((err) => log(`OPFS save failed: ${file.name} — ${err?.message ?? err}`, 'error', 'Images'))))
-      }
-
-      // Browsers (bar Safari) can't decode TIFF natively, so createImage's blob
-      // URL renders blank until transcoded. Batch the transcode below — off the
-      // main thread, in parallel — instead of blocking this loop per file; mark
-      // the thumbnail as pending so the UI can show a placeholder instead of a
-      // broken image while that runs.
-      if (isTiff(file)) {
-        item.previewPending = true
-        // A TIFF's compute PNG isn't ready until the transcode finishes (or the
-        // native-decode probe passes) — gate compute consumers until then.
-        markComputePending(item.uuid)
-        tiffItems.push({ item, file })
-        // EXIF + dimensions don't need the slow full pixel decode — the TIFF
-        // header gives real width/height near-instantly (readTiffDimensions),
-        // so metadata shows up right away instead of waiting on the transcode.
-        metadataTasks.push(readTiffDimensions(file)
-          .then((dims) => extractMetadataFor(item, file, projectId, dims))
-          .catch(() => extractMetadataFor(item, file, projectId)))
-      } else {
-        metadataTasks.push(extractMetadataFor(item, file, projectId))
-        // The list thumbnail, from the File itself — background, behind any row in
-        // view. Not awaited: a 5,000-image drop must not wait on 5,000 decodes.
-        thumbnails.requestThumbnail(item, { source: file })
-      }
-    }
-
-    if (tiffItems.length) {
-      let done = 0
-      const total = tiffItems.length
-      await Promise.all(tiffItems.map(async ({ item, file }) => {
-        try {
-          if (await canDecodeTiffNatively(file)) {
-            // This engine renders the raw TIFF natively — item.url (already the
-            // raw object URL) works as-is for both display and compute.
-            const found = images.value.find((img) => img.id === item.id)
-            if (found) { found.computeUrl = found.url; found.previewPending = false }
-            resolveComputeReady(item.uuid)
-            // This engine decodes the TIFF itself, so the File is the display source.
-            thumbnails.requestThumbnail(item, { source: file })
-            return
-          }
-          const { displayBlob, computeBlob, width, height, timings, srcInfo } = await transcodeTiff(file, undefined, {
-            // Fires once the decode finishes, well before the full-res JPEG+PNG
-            // encode below — swap in a quick low-res preview so the user sees
-            // something long before the full-quality one is ready.
-            onThumbnail: (thumbBlob) => {
-              const found = images.value.find((img) => img.id === item.id)
-              // The ≤512 px transcode preview is also the cheapest source for the
-              // list thumbnail: no second decode of the full-resolution display JPEG.
-              if (found) thumbnails.requestThumbnail(found, { source: thumbBlob })
-              if (!found || !found.previewPending) return
-              URL.revokeObjectURL(found.url)
-              found.url = URL.createObjectURL(thumbBlob)
-              found.previewPending = false
-            },
-            // Fires when the full-res display JPEG is encoded, before the slower
-            // compute PNG — swap in the full-quality display so the viewer is
-            // fully usable while the PNG (computeUrl) is still encoding.
-            onDisplay: (dispBlob) => {
-              const found = images.value.find((img) => img.id === item.id)
-              if (!found) return
-              URL.revokeObjectURL(found.url)
-              found.url = URL.createObjectURL(dispBlob)
-              found.previewPending = false
-            },
-          })
-          const found = images.value.find((img) => img.id === item.id)
-          if (!found) { resolveComputeReady(item.uuid); return } // removed mid-decode
-          // onDisplay already set found.url from displayBlob; if the display
-          // event never fired (older worker), fall back to setting it here.
-          if (found.previewPending) {
-            URL.revokeObjectURL(found.url)
-            found.url = URL.createObjectURL(displayBlob)
-            found.previewPending = false
-          }
-          found.computeUrl = URL.createObjectURL(computeBlob)
-          resolveComputeReady(item.uuid)
-          // No preview event (an older worker): fall back to the display JPEG.
-          if (!found.thumb) thumbnails.requestThumbnail(found)
-          log(`Decoded TIFF: ${file.name} — ${width}×${height}`, 'info', 'Images')
-          if (timings) {
-            // Per-stage baseline for the TIFF-codec plan (TODO.md): which stage
-            // dominates decides whether/what to move to a Rust/WASM codec.
-            const c = { 1: 'none', 5: 'LZW', 7: 'JPEG', 8: 'Deflate', 32773: 'PackBits' }[srcInfo?.compression] ?? srcInfo?.compression
-            const p = { 1: 'gray', 2: 'RGB', 3: 'palette', 6: 'YCbCr' }[srcInfo?.photometric] ?? srcInfo?.photometric
-            const srcMB = srcInfo?.srcBytes ? (srcInfo.srcBytes / 1048576).toFixed(1) : '?'
-            log(
-              `TIFF timing (${timings.backend ?? '?'}): ${file.name} — decode ${timings.decodeMs?.toFixed(0)}ms · repack ${timings.repackMs?.toFixed(0)}ms · JPEG ${timings.jpegMs?.toFixed(0)}ms · PNG ${timings.pngMs?.toFixed(0)}ms · total ${timings.totalMs?.toFixed(0)}ms  ` +
-              `[${p ?? '?'}/${srcInfo?.bitsPerSample ?? '?'}-bit/${srcInfo?.samplesPerPixel ?? '?'}spp/${c ?? '?'}, src ${srcMB} MB]`,
-              'info', 'Images',
-            )
-            // A 16-bit source is stretched between its 0.5 / 99.5 % levels for display
-            // and detection (core/io/tonalStretch.js) — record the mapping it got.
-            if (srcInfo?.stretch) {
-              log(`16-bit TIFF stretched to 8-bit: ${file.name} — DN ${srcInfo.stretch.lo}…${srcInfo.stretch.hi} → 0…255 `
-                + `(0.5 / 99.5 % levels; the high byte alone would span ${srcInfo.stretch.lo >> 8}…${srcInfo.stretch.hi >> 8})`,
-              'info', 'Images')
-            }
-          }
-          // Cache the transcode outputs in OPFS so reopening the project skips
-          // the (multi-second) re-decode + re-encode — see the TIFF gotcha in
-          // CLAUDE.md. Pure function of the immutable original; fire-and-forget.
-          if (persistImport) {
-            log(`Caching TIFF derived blobs: ${file.name} — display ${(displayBlob.size / 1024).toFixed(0)} KB, compute ${(computeBlob.size / 1024).toFixed(0)} KB`, 'info', 'Images')
-            batchWrites.push(trackWrite(opfs.saveImageDerived(projectId, item.uuid, 'display', displayBlob)
-              .catch((err) => log(`OPFS derived save failed (display): ${file.name} — ${err?.message ?? err}`, 'error', 'Images'))))
-            batchWrites.push(trackWrite(opfs.saveImageDerived(projectId, item.uuid, 'compute', computeBlob)
-              .catch((err) => log(`OPFS derived save failed (compute): ${file.name} — ${err?.message ?? err}`, 'error', 'Images'))))
-          }
-        } catch (err) {
-          const found = images.value.find((img) => img.id === item.id)
-          if (found) {
-            found.loading = false
-            found.previewPending = false
-            found.previewFailed = true
-            found.previewFailReason = 'decode'
-          }
-          // Reject readiness so compute consumers error loudly rather than
-          // silently fall back to the lossy display JPEG for a TIFF (that would
-          // leak JPEG artifacts into keypoints/depth — the computeUrl invariant).
-          rejectComputeReady(item.uuid, err instanceof Error ? err : new Error(String(err)))
-          log(`TIFF decode failed: ${file.name} — ${err?.message ?? err}`, 'error', 'Images')
-        } finally {
-          done++
-          onProgress?.(done, total, file.name)
-        }
-      }))
-    }
-
-    await Promise.allSettled(metadataTasks)
-    await Promise.allSettled(batchWrites)
-    if (added > 1) log(`Added ${added} images`, 'success', 'Images')
-    if (persistImport) await sync(projectId)
-  }
+  // Adding images (images/ingest.js).
+  const {
+    addImages, } = createIngest({
+    activeImports, images, isPersisting, log, markComputePending, pendingWorkCount, projects,
+    rejectComputeReady, resolveComputeReady, save, thumbnails, trackWrite,
+  })
 
   function removeImage(id, onRemoved) {
     const idx = images.value.findIndex((img) => img.id === id)
-    if (idx !== -1) {
-      const img = images.value[idx]
-      releaseImageUrls(img)
-      images.value.splice(idx, 1)
-      keypointCache.delete(img.uuid)
-      if (selectedId.value === id) selectedId.value = null
-      log(`Removed image: ${img.name}`, 'info', 'Images')
-      useMatchesStore().removeMatchesForImage(img.uuid)
-      if (isPersisting()) {
-        const pid = projects.currentProjectId
-        opfs.deleteImage(pid, img.uuid).catch(() => {})
-        opfs.deleteImageDerived(pid, img.uuid).catch(() => {})
-        opfs.deleteKeypoints(pid, img.uuid).catch(() => {})
-        opfs.deleteDescriptors(pid, img.uuid).catch(() => {})
-        opfs.deleteMask(pid, img.uuid).catch(() => {})
-        opfs.deleteDepth(pid, img.uuid).catch(() => {})
-        sync()
-      }
-      onRemoved?.(id)
+    if (idx === -1) return false
+    const img = images.value[idx]
+    releaseImageUrls(img)
+    images.value.splice(idx, 1)
+    keypointCache.delete(img.uuid)
+    if (selectedId.value === id) selectedId.value = null
+    log(`Removed image: ${img.name}`, 'info', 'Images')
+    useMatchesStore().removeMatchesForImage(img.uuid)
+    useReconstructionStore().forgetDepthMap(img.uuid)
+    if (isPersisting()) {
+      const pid = projects.currentProjectId
+      opfs.deleteImage(pid, img.uuid).catch(() => {})
+      opfs.deleteImageDerived(pid, img.uuid).catch(() => {})
+      opfs.deleteKeypoints(pid, img.uuid).catch(() => {})
+      opfs.deleteDescriptors(pid, img.uuid).catch(() => {})
+      opfs.deleteMask(pid, img.uuid).catch(() => {})
+      opfs.deleteDepth(pid, img.uuid).catch(() => {})
+      save()
     }
+    onRemoved?.(id)
+    return true
   }
 
   // Rename is label-only. The stable id/uuid continue to key tabs, matches,
@@ -543,93 +237,16 @@ export const useImagesStore = defineStore('images', () => {
     const previous = img.name
     img.name = trimmed
     log(`Renamed image "${previous}" → "${trimmed}"`, 'info', 'Images', { channel: 'activity' })
-    if (isPersisting()) sync()
+    if (isPersisting()) save()
     return true
   }
 
-  // ── Image groups ──────────────────────────────────────────────────────────
-  // Display-only folders (utils/imageGroups.js). Every mutation is a reversible
-  // user edit, so it logs on the activity channel and re-persists project.json.
-  function persistGroups() { if (isPersisting()) sync() }
-  function groupById(id) { return imageGroups.value.find((g) => g.id === id) || null }
-
-  // Create a group, optionally filling it. `id` may be supplied by the caller
-  // (the sidebar picks it so it can start an inline rename on the new row).
-  function createImageGroup({ id = crypto.randomUUID(), name, imageIds = [] } = {}) {
-    if (groupById(id)) return null
-    const group = { id, name: name?.trim() || nextGroupName(imageGroups.value), collapsed: false }
-    imageGroups.value.push(group)
-    const moved = assignGroup(imageIds, id)
-    log(`Created image group "${group.name}"${moved ? ` with ${moved} image${moved !== 1 ? 's' : ''}` : ''}`,
-      'info', 'Images', { channel: 'activity' })
-    persistGroups()
-    return group
-  }
-
-  function renameImageGroup(id, name) {
-    const group = groupById(id)
-    const trimmed = name?.trim()
-    if (!group || !trimmed || trimmed === group.name) return false
-    const previous = group.name
-    group.name = trimmed
-    log(`Renamed image group "${previous}" → "${trimmed}"`, 'info', 'Images', { channel: 'activity' })
-    persistGroups()
-    return true
-  }
-
-  // Removing a group never removes images: its members become ungrouped.
-  function removeImageGroup(id) {
-    const group = groupById(id)
-    if (!group) return false
-    let freed = 0
-    for (const img of images.value) if (img.groupId === id) { img.groupId = null; freed++ }
-    imageGroups.value = imageGroups.value.filter((g) => g.id !== id)
-    log(`Removed image group "${group.name}"${freed ? ` (${freed} image${freed !== 1 ? 's' : ''} now ungrouped)` : ''}`,
-      'info', 'Images', { channel: 'activity' })
-    persistGroups()
-    return true
-  }
-
-  function assignGroup(imageIds, groupId) {
-    const ids = new Set(imageIds)
-    let moved = 0
-    for (const img of images.value) {
-      if (!ids.has(img.id) || (img.groupId ?? null) === groupId) continue
-      img.groupId = groupId
-      moved++
-    }
-    return moved
-  }
-
-  // Move images into a group, or out of every group with `groupId: null`.
-  function setImagesGroup(imageIds, groupId) {
-    const target = groupId == null ? null : groupById(groupId)
-    if (groupId != null && !target) return 0
-    const moved = assignGroup(imageIds, target?.id ?? null)
-    if (!moved) return 0
-    const what = `${moved} image${moved !== 1 ? 's' : ''}`
-    log(target ? `Moved ${what} to group "${target.name}"` : `Removed ${what} from their group`,
-      'info', 'Images', { channel: 'activity' })
-    persistGroups()
-    return moved
-  }
-
-  // Collapse state is persisted view state (like a raster's onMap): a 342-image
-  // project should reopen the way it was left. Not worth an activity line.
-  function setImageGroupCollapsed(id, collapsed) {
-    const group = groupById(id)
-    if (!group || group.collapsed === !!collapsed) return
-    group.collapsed = !!collapsed
-    persistGroups()
-  }
-
-  function moveImageGroup(id, delta) {
-    const next = moveListEntry(imageGroups.value, id, delta)
-    if (!next) return false
-    imageGroups.value = next
-    persistGroups()
-    return true
-  }
+  // Image groups (images/imageGroups.js).
+  const {
+    createImageGroup, renameImageGroup, removeImageGroup, setImagesGroup, setImageGroupCollapsed, moveImageGroup,
+  } = createImageGroups({
+    imageGroups, images, isPersisting, log, save,
+  })
 
   // ── Image source liveness ─────────────────────────────────────────────────
   // `img.url` is a blob: URL, which is a handle to a FILE — not a copy of the
@@ -735,7 +352,7 @@ export const useImagesStore = defineStore('images', () => {
 
   // `persist` false updates only the in-memory mask (so undo/redo, the viewer
   // overlay, and the sidebar badge stay live) WITHOUT the OPFS write, log line,
-  // or project sync — used for the many intermediate commits during a mask-edit
+  // or project save — used for the many intermediate commits during a mask-edit
   // session, which flushes once (persist true) when editing closes.
   // A mask or depth preview on an image record: `{ blob, url }`. The Blob holds the
   // PNG bytes outside the V8 heap (after a restore it is the OPFS File itself, read
@@ -761,7 +378,7 @@ export const useImagesStore = defineStore('images', () => {
       const pid = projects.currentProjectId
       if (img.mask) opfs.saveMask(pid, img.uuid, img.mask.blob).catch(() => {})
       else opfs.deleteMask(pid, img.uuid).catch(() => {})
-      sync()
+      save()
     }
   }
 
@@ -777,539 +394,29 @@ export const useImagesStore = defineStore('images', () => {
       const pid = projects.currentProjectId
       if (img.depth) opfs.saveDepth(pid, img.uuid, img.depth.blob).catch(() => {})
       else opfs.deleteDepth(pid, img.uuid).catch(() => {})
-      if (persistSync) sync()
+      if (persistSync) save()
     }
   }
 
-  // Upsert a fiducial-mark observation (scan pixels) for an image (F4), replacing
-  // any existing observation of the same mark — mirrors the GCP setObservation
-  // shape. Re-detecting keypoints does NOT invalidate these (they're user clicks
-  // on the raster, independent of keypoint indices).
-  function setFiducialObservation(imageId, fidId, px, py) {
-    const img = imageById(imageId)
-    if (!img || !Number.isFinite(px) || !Number.isFinite(py)) return
-    if (!Array.isArray(img.fiducialObs)) img.fiducialObs = []
-    const existing = img.fiducialObs.find((o) => o.fidId === fidId)
-    if (existing) { existing.px = px; existing.py = py }
-    else img.fiducialObs.push({ fidId, px, py })
-    log(`Fiducial ${fidId} marked on ${img.name} (${px.toFixed(1)}, ${py.toFixed(1)})`, 'info', 'Sensor')
-    if (isPersisting()) sync()
-  }
+  // Fiducial marks and detections (images/fiducials.js).
+  const {
+    addFiducialObservations, setFiducialDetection, removeFiducialDetection, detectFiducialsForSensor,
+  } = createImageFiducials({
+    imageById, images, isPersisting, log, save, updateMask, whenComputeReady,
+  })
 
-  // Bulk-import fiducial observations parsed from a file (F4). `rows` are
-  // `[{ imageName, fidId, px, py }]`; each is matched to an image by name
-  // (case-insensitive, extension-tolerant) and upserted into the image's
-  // fiducialDetections by slot (observationsToDetections: a slot id is kept, a
-  // mark id is placed by position). Returns the count applied.
-  function addFiducialObservations(rows) {
-    let applied = 0, unmatched = 0
-    const byImage = new Map()
-    for (const r of rows || []) {
-      const lc = String(r.imageName || '').toLowerCase()
-      const base = lc.replace(/\.[^.]+$/, '')
-      const img = images.value.find((i) => {
-        const n = i.name.toLowerCase()
-        return n === lc || n.replace(/\.[^.]+$/, '') === base
-      })
-      if (!img) { unmatched++; continue }
-      if (!byImage.has(img)) byImage.set(img, [])
-      byImage.get(img).push({ fidId: r.fidId, px: r.px, py: r.py })
-    }
-    for (const [img, obs] of byImage) {
-      if (!Array.isArray(img.fiducialDetections)) img.fiducialDetections = []
-      for (const d of observationsToDetections(obs, img.meta?.width, img.meta?.height, { family: 'generic', source: 'import' })) {
-        const existing = img.fiducialDetections.find((x) => x.slot === d.slot)
-        if (existing) Object.assign(existing, d)
-        else img.fiducialDetections.push(d)
-        applied++
-      }
-    }
-    log(`Fiducial observations imported: ${applied}${unmatched ? `, ${unmatched} unmatched image(s)` : ''}`,
-      applied ? 'success' : 'warn', 'Sensor')
-    if (applied && isPersisting()) sync()
-    return applied
-  }
-
-  function removeFiducialObservation(imageId, fidId) {
-    const img = imageById(imageId)
-    if (!img || !Array.isArray(img.fiducialObs)) return
-    const idx = img.fiducialObs.findIndex((o) => o.fidId === fidId)
-    if (idx === -1) return
-    img.fiducialObs.splice(idx, 1)
-    log(`Fiducial ${fidId} cleared on ${img.name}`, 'info', 'Sensor')
-    if (isPersisting()) sync()
-  }
-
-  function setFiducialDetection(imageId, detection) {
-    const img = imageById(imageId)
-    if (!img || !detection?.slot || !Number.isFinite(detection.px) || !Number.isFinite(detection.py)) return
-    if (!Array.isArray(img.fiducialDetections)) img.fiducialDetections = []
-    const clean = { slot: String(detection.slot), px: detection.px, py: detection.py,
-      family: detection.family ?? 'generic', source: detection.source ?? 'manual',
-      confidence: Number.isFinite(detection.confidence) ? detection.confidence : 1,
-      reviewed: detection.reviewed !== false }
-    const existing = img.fiducialDetections.find((d) => d.slot === clean.slot)
-    if (existing) Object.assign(existing, clean)
-    else img.fiducialDetections.push(clean)
-    if (isPersisting()) sync()
-  }
-
-  function removeFiducialDetection(imageId, slot) {
-    const img = imageById(imageId)
-    const i = img?.fiducialDetections?.findIndex((d) => d.slot === slot) ?? -1
-    if (i < 0) return
-    img.fiducialDetections.splice(i, 1)
-    if (isPersisting()) sync()
-  }
-
-  async function detectFiducialsForSensor({ sensor, imageIds = null, settings = {}, overwrite = false, onProgress } = {}) {
-    if (!sensor?.id) throw new Error('Choose a film sensor')
-    // Pinia/Vue callers may supply a reactive Proxy. Keep worker input plain even
-    // if this action is reused without the compute-client safeguard.
-    settings = { ...settings }
-    const selected = new Set(imageIds || [])
-    const targets = images.value.filter((img) => img.sensorId === sensor.id && (!selected.size || selected.has(img.id)))
-    if (!targets.length) return { perImage: [], drafts: [] }
-    const buffered = []; let cursor = 0, done = 0
-    const drain = async () => {
-      while (true) {
-        const i = cursor++
-        if (i >= targets.length) return
-        const img = targets[i]
-        try {
-          await whenComputeReady(img)
-          const out = await detectFiducialSpotsWorker(img.computeUrl ?? img.url, settings,
-            { onLog: (m) => log(`${img.name}: ${m}`, 'info', 'Fiducial') })
-          buffered.push({ id: img.id, name: img.name, out })
-        } catch (err) {
-          log(`${img.name}: fiducial spot detection failed — ${err.message}`, 'error', 'Fiducial')
-          buffered.push({ id: img.id, name: img.name, out: { accepted: [], drafts: [], requested: 0, frame: null, ms: 0 }, error: err.message })
-        }
-        onProgress?.(++done, targets.length)
-      }
-    }
-    const concurrency = fiducialDetectionConcurrency(targets, POOL_SIZE, navigator.deviceMemory)
-    log(`Fiducial detection: ${targets.length} image(s), ${concurrency} at a time (full-resolution decode budget)`, 'info', 'Fiducial')
-    await Promise.all(Array.from({ length: concurrency }, drain))
-
-    // Both checks judge one unfiltered snapshot (fiducialConsensus.js invariant 1):
-    // batch consensus across images, and the per-image opposite-pair shape gate.
-    const suspectsOf = () => {
-      const consensus = fiducialBatchConsensus(buffered.map((r) => ({
-        id: r.id, name: r.name, accepted: r.out.accepted || [],
-        frame: r.out.frame, natW: r.out.natW, natH: r.out.natH,
-      })))
-      const shape = buffered.map((r) => ({ row: r, check: fiducialShapeCheck(r.out.accepted || []) }))
-      const keys = new Set([
-        ...consensus.outliers.map((o) => `${o.imageId}|${o.slot}`),
-        ...shape.flatMap(({ row, check }) => check.outliers.map((o) => `${row.id}|${o.slot}`)),
-      ])
-      return { consensus, shape, keys }
-    }
-
-    // Learn real scan templates from the strongest anonymous detection per slot,
-    // then retry incomplete images at the batch-median raster-relative position.
-    // This remains detection-only: slots and image geometry, never metric marks.
-    // A donor must already agree with the batch and its own image: a confident hit
-    // on a data-strip blob would otherwise become the template every retry matches.
-    const preliminary = suspectsOf().keys
-    const donors = new Map(), normBySlot = new Map()
-    for (const row of buffered) for (const d of row.out.accepted || []) {
-      if (preliminary.has(`${row.id}|${d.slot}`)) continue
-      if (!donors.has(d.slot) || d.confidence > donors.get(d.slot).d.confidence) donors.set(d.slot, { row, d })
-      if (!normBySlot.has(d.slot)) normBySlot.set(d.slot, [])
-      normBySlot.get(d.slot).push({ x: d.px / row.out.natW, y: d.py / row.out.natH })
-    }
-    const templates = []
-    for (const { row, d } of donors.values()) {
-      const img = imageById(row.id)
-      if (!img) continue
-      try {
-        const p = await prepareFiducialTemplates(img.computeUrl ?? img.url,
-          [{ fidId: d.slot, px: d.px, py: d.py }], { templateHalf: FIDUCIAL_DETECT_TUNING.templateHalf })
-        templates.push(...p.templates)
-      } catch (err) { log(`${img.name}: donor crop failed — ${err.message}`, 'warn', 'Fiducial') }
-    }
-    const median = (v) => { const s = [...v].sort((a, b) => a - b), m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2 }
-    if (templates.length) for (const row of buffered) {
-      if ((row.out.accepted?.length ?? 0) >= (row.out.requested ?? 0)) continue
-      const img = imageById(row.id); if (!img) continue
-      const have = new Set((row.out.accepted || []).map((d) => d.slot))
-      const predictions = templates.flatMap((t) => {
-        if (have.has(t.fidId)) return []
-        const pts = normBySlot.get(t.fidId); if (!pts?.length) return []
-        return [{ fidId: t.fidId, px: median(pts.map((p) => p.x)) * row.out.natW,
-          py: median(pts.map((p) => p.y)) * row.out.natH,
-          radius: 0.06 * Math.max(row.out.natW, row.out.natH) }]
-      })
-      if (!predictions.length) continue
-      try {
-        const retry = await detectFiducials(img.computeUrl ?? img.url, templates, predictions,
-          { ...FIDUCIAL_DETECT_TUNING, tryRotations: false })
-        for (const d of retry.results.filter((x) => x.score >= 0.7)) {
-          row.out.accepted.push({ slot: d.fidId, px: d.px, py: d.py, family: settings.family,
-            source: 'template', confidence: detectionConfidence(d.score), score: d.score, peakMargin: null, reviewed: false })
-          row.out.drafts = (row.out.drafts || []).filter((x) => x.slot !== d.fidId)
-        }
-      } catch (err) { log(`${img.name}: anonymous template retry failed — ${err.message}`, 'warn', 'Fiducial') }
-    }
-    // Cross-image agreement, once the whole batch (including the template retry)
-    // is in. A mark that disagrees with the rest of the flight is demoted to the
-    // review queue — the case a per-image score cannot catch is a wrong-but-confident
-    // hit on something else near the slot (a data-strip annotation block).
-    const { consensus, shape } = suspectsOf()
-    for (const s of consensus.perSlot) {
-      if (!s.checked) { log(`Batch consensus: ${s.slot} skipped — only ${s.n} image(s)`, 'debug', 'Fiducial'); continue }
-      log(`Batch consensus (${consensus.basis}-relative): ${s.slot} over ${s.n} image(s), `
-        + `spread ${(s.spreadFrac * 100).toFixed(2)}% of frame width, tolerance ${(s.tolFrac * 100).toFixed(2)}%`,
-        'debug', 'Fiducial')
-    }
-    // slot → reason, per image. Batch disagreement wins the label when both fire.
-    const dropById = new Map()
-    const drop = (id, slot, reason) => {
-      if (!dropById.has(id)) dropById.set(id, new Map())
-      if (!dropById.get(id).has(slot)) dropById.get(id).set(slot, reason)
-    }
-    for (const o of consensus.outliers) {
-      drop(o.imageId, o.slot, 'batch-outlier')
-      log(`${o.imageName ?? o.imageId}: ${o.slot} disagrees with the batch — `
-        + `${o.distPx.toFixed(1)} px from the batch position (tolerance ${o.tolPx.toFixed(1)} px); sent to review`,
-        'warn', 'Fiducial')
-    }
-    for (const { row, check } of shape) {
-      if (!check.checked) continue
-      log(`${row.name}: opposite-mark centres agree within ${check.centreSpreadPx.toFixed(1)} px `
-        + `(tolerance ${check.tolPx.toFixed(1)} px)`, 'debug', 'Fiducial')
-      if (!check.outliers.length) continue
-      for (const o of check.outliers) drop(row.id, o.slot, 'shape-inconsistent')
-      log(`${row.name}: ${[...new Set(check.outliers.map((o) => o.slot))].join(', ')} break the layout's symmetry — `
-        + `opposite-mark centres ${check.outliers[0].distPx.toFixed(1)} px apart (tolerance ${check.tolPx.toFixed(1)} px); sent to review`,
-        'warn', 'Fiducial')
-    }
-    for (const row of buffered) {
-      const reasons = dropById.get(row.id)
-      if (!reasons) continue
-      row.out.drafts = [...(row.out.drafts || []),
-        ...(row.out.accepted || []).filter((d) => reasons.has(d.slot)).map((d) => ({ ...d, reason: reasons.get(d.slot) }))]
-      row.out.accepted = (row.out.accepted || []).filter((d) => !reasons.has(d.slot))
-    }
-
-    let applied = 0, masksGenerated = 0
-    for (const row of buffered) {
-      const img = imageById(row.id)
-      if (!img) continue
-      if (!Array.isArray(img.fiducialDetections)) img.fiducialDetections = []
-      for (const d of row.out.accepted || []) {
-        const old = img.fiducialDetections.find((x) => x.slot === d.slot)
-        if (old && !overwrite) continue
-        const clean = { slot: d.slot, px: d.px, py: d.py, family: d.family,
-          source: d.source, confidence: d.confidence, reviewed: false }
-        if (old) Object.assign(old, clean); else img.fiducialDetections.push(clean)
-        applied++
-      }
-      const f = row.out.frame
-      if (settings.generateMasks && f?.confidence >= 0.06 && row.out.natW > 0 && row.out.natH > 0) {
-        try {
-          const sides = { left: f.left, top: f.top,
-            right: row.out.natW - 1 - f.right, bottom: row.out.natH - 1 - f.bottom }
-          const blob = await buildBorderMask(row.out.natW, row.out.natH, sides,
-            settings.overwrite ? null : img.mask?.blob ?? null)
-          updateMask(img.id, blob, true)
-          masksGenerated++
-        } catch (err) { log(`${img.name}: frame mask failed — ${err.message}`, 'warn', 'Fiducial') }
-      }
-    }
-    if (applied && isPersisting()) sync()
-    const perImage = buffered.map((r) => ({ id: r.id, name: r.name,
-      accepted: r.out.accepted?.length ?? 0, drafts: r.out.drafts?.length ?? 0,
-      requested: r.out.requested ?? 0, confidence: r.out.accepted?.length
-        ? r.out.accepted.reduce((s, d) => s + d.confidence, 0) / r.out.accepted.length : 0,
-      frameConfidence: r.out.frame?.confidence ?? 0, ms: r.out.ms ?? 0, error: r.error ?? null }))
-    return { perImage, drafts: buffered.flatMap((r) => (r.out.drafts || []).map((d) => ({ ...d, imageId: r.id, imageName: r.name }))), applied, masksGenerated }
-  }
-
-  async function detectOne(id, settings = {}, onDetected, shouldCancel) {
-    const img = images.value.find((i) => i.id === id)
-    if (!img || img.kpStatus === 'running') return
-    // A learned detector needs its weights — fetch them (with consent) first.
-    const learned = learnedDetector(settings.detector)
-    if (learned && !(await useModelsStore().ensureReady([learned.modelId]))) {
-      log(`Detection cancelled — the ${learned.label} model is not available.`, 'warn', 'Detection')
-      return
-    }
-    // Re-detecting renumbers keypoints, so any existing matches for this image
-    // become stale — invalidate them once detection succeeds (below).
-    const hadKeypoints = img.kpStatus === 'done'
-    // Message-text label for the chosen detector (SIFT default, SuperPoint, DISK);
-    // the console *source* is the pipeline stage 'Detection', not the detector.
-    const tag = detectorLabel(settings.detector)
-    img.kpStatus = 'running'
-    log(`${tag} start: ${img.name}`, 'info', 'Detection')
-    try {
-      // A TIFF's lossless compute PNG may still be encoding (ingest sets the
-      // display JPEG first) — wait for it, or reject if its transcode failed,
-      // rather than detecting on the lossy display blob (computeUrl invariant).
-      await whenComputeReady(img)
-      // Working resolution. In 'auto' mode this is a fraction of THIS image's
-      // native size (core/features/detectResolution.js) rather than one absolute
-      // cap for a set that may span 2000–10000 px; 'absolute' (the default) passes
-      // the configured value straight through. Resolved here, per image, because
-      // this is where the native size is known — and logged, because a silently
-      // derived working resolution is not auditable.
-      const nativeMax = Math.max(img.meta?.width || 0, img.meta?.height || 0)
-      const res0 = resolveDetectMaxDim(nativeMax, settings)
-      if (res0.mode === 'auto') {
-        log(`${tag} ${img.name} — detect at ${res0.reason}`, 'debug', 'Detection')
-      }
-      // SIFT keypoints per extremum (dominant + secondary orientations, tuning.js
-      // DETECT_TUNING). Null for a learned detector: no orientation histogram.
-      const maxOrientations = learned
-        ? null : (settings.maxOrientations ?? DETECT_TUNING.siftMaxOrientations)
-      // Which keypoints the SIFT cap keeps (keypointCap.js). Learned ones rank by score.
-      const capRule = learned
-        ? null : (settings.capRule ?? DETECT_TUNING.siftCapRule)
-      // Pass the per-image mask (if any) so keypoints inside masked regions are
-      // dropped at detection — this propagates to matching and reconstruction.
-      const res = await detectKeypoints(
-        img.computeUrl ?? img.url,
-        { ...settings, maxDim: res0.maxDim, mask: img.mask?.blob ?? null,
-          ...(maxOrientations != null ? { maxOrientations } : {}),
-          ...(capRule != null ? { capRule } : {}) },
-        { onLog: (msg) => log(msg, 'info', 'Detection') },
-      )
-      // The worker can't be interrupted mid-image, so a cancel pressed while this
-      // one was in flight lands here with a finished result — drop it rather than
-      // attach it, reverting to the image's prior state.
-      if (shouldCancel?.()) {
-        const found = images.value.find((i) => i.id === id)
-        if (found) found.kpStatus = hadKeypoints ? 'done' : null
-        log(`${tag} discarded (cancelled): ${img.name}`, 'warn', 'Detection')
-        return
-      }
-      const found = images.value.find((i) => i.id === id)
-      if (found) {
-        // markRaw: these are large and never need reactivity; leaving them as
-        // Vue proxies also breaks the worker boundary (a Proxy can't be
-        // structured-cloned, so postMessage throws "could not be cloned").
-        // Typed (core/features/keypoints.js): the worker's transferred buffers, wrapped,
-        // resident and pinned until both sidecars are saved (then evictable like any
-        // other image's — they are read back on demand).
-        const pid = projects.currentProjectId
-        const persisting = isPersisting()
-        const kpsNew = new Keypoints(res.keypoints.data, res.keypoints.rgb)
-        holdKeypoints(found, kpsNew, persisting
-          ? Promise.all([opfs.saveKeypoints(pid, found.uuid, kpsNew), opfs.saveColors(pid, found.uuid, kpsNew)])
-          : null)
-        found.descriptors = markRaw(res.descriptors)   // keep in-memory for non-persistent matching
-        found.kpCount  = kpsNew.length
-        found.kpMs     = Math.round(res.ms)
-        found.kpStatus = 'done'
-        // Detector + descriptor width travel with the image so matching can pick
-        // the right matcher and read the descriptor stride off the buffer (SIFT
-        // 128-d, SuperPoint 256-d, DISK 128-d) rather than assume a constant.
-        found.detector = res.detector ?? 'sift'
-        found.descDim  = res.descDim ?? 128
-        // Which normalisation the stored SIFT descriptors are in (RootSIFT since
-        // 2026-10). Absent ⇒ legacy L2; matching converts on load, so it is never
-        // back-filled (core/features/siftDescriptors.js).
-        found.descNorm = res.descNorm ?? null
-        // Detection scale travels with the image for the same reason descDim does:
-        // keypoints come back in NATIVE pixels (detect.js maps them back), so every
-        // downstream pixel threshold is denominated in native px while the
-        // measurement quantum is 1/scale native px. core/scaleContext.js resolves
-        // the gates against it. Absent ⇒ 1 ⇒ no correction (back-compat).
-        found.detectScale = res.diag?.scale ?? 1
-        // The detection settings this image's keypoints were produced WITH. Persisted
-        // because a measured result without its settings is not a baseline: `detector`
-        // and `detectScale` alone cannot distinguish a Balanced run from a Detailed one
-        // (same scale, 2.5× the keypoint budget). Absent ⇒ null ⇒ "unknown, pre-dates
-        // this field"; deliberately not back-filled from the current modal values.
-        found.detectSettings = {
-          maxDim: settings.maxDim ?? null,
-          maxDimMode: settings.maxDimMode ?? null,
-          maxKeypoints: settings.maxKeypoints ?? null,
-          contrastThreshold: settings.contrastThreshold ?? null,
-          tiling: settings.tiling ?? null,
-          // Absent on images detected before 2026-10 ⇒ unknown (they ran with 1).
-          maxOrientations,
-          // Absent before 2026-10 ⇒ unknown (they ran with 'response').
-          capRule,
-        }
-        if (hadKeypoints) useMatchesStore().removeMatchesForImage(found.uuid)
-        log(`${tag} done: ${found.name} — ${found.kpCount} keypoints in ${found.kpMs} ms`, 'success', 'Detection')
-        // Detailed diagnostics (debug level): the working resolution actually
-        // used, how many features the cap discarded, mask drops, and the response
-        // spread (the signal for tuning maxKeypoints / contrastThreshold).
-        const d = res.diag
-        if (d) {
-          log(`${tag} ${found.name} — detect @ ${d.detectWidth}×${d.detectHeight} `
-            + `(${d.scale.toFixed(3)}× of ${d.natW}×${d.natH})`, 'debug', 'Detection')
-          if (learnedDetector(res.detector)) {
-            // Learned detector: no near-duplicate suppression / response, so report
-            // the cap + mask drops and the keypoint-score spread instead.
-            log(`${tag} ${found.name} — ${d.capped} keypoints`
-              + `${d.capHit ? ' (top-K cap hit)' : ''}`
-              + `${d.maskedPreCap > 0 ? `, −${d.maskedPreCap} masked before cap` : ''}`
-              + `${d.maskedDropped > 0 ? `, −${d.maskedDropped} in mask → ${d.kept}` : ''}`
-              + `; score p50 ${d.scoreP50.toFixed(3)} / p95 ${d.scoreP95.toFixed(3)}`, 'debug', 'Detection')
-          } else {
-            log(`${tag} ${found.name} — ${d.rawFound} found → ${d.capped}`
-              + `${!d.capHit ? ' (under cap)' : d.capRule === 'coarse-first'
-                ? ` capped coarse-first (smallest kept σ ${d.minScale.toFixed(2)} detect px)`
-                : ` capped (min response ${d.minResponse.toFixed(3)})`}`
-              + `${d.suppressed > 0 ? `, −${d.suppressed} duplicate-position keypoints suppressed` : ''}`
-              + `${d.maskedPreCap > 0 ? `, −${d.maskedPreCap} masked before cap` : ''}`
-              + `${d.maskedDropped > 0 ? `, −${d.maskedDropped} in mask → ${d.kept}` : ''}`
-              + `; response p50 ${d.respP50.toFixed(3)} / p95 ${d.respP95.toFixed(3)}`, 'debug', 'Detection')
-          }
-        }
-        if (persisting) {
-          // A persistent project's matching reads descriptors from OPFS, so the
-          // in-memory copy is dead weight once saved — 1.4 GB at 128 × 25k SIFT
-          // descriptors, enough to fail the sparse memory preflight hours later.
-          // Kept if the save fails: matching falls back to it.
-          const descriptors = res.descriptors
-          opfs.saveDescriptors(pid, found.uuid, descriptors)
-            .then(() => { if (found.descriptors === descriptors) found.descriptors = null })
-            .catch(() => {})
-          sync()
-        }
-        onDetected?.(id)
-      }
-    } catch (err) {
-      const found = images.value.find((i) => i.id === id)
-      // A cancel hard-terminates the worker pool, which rejects the in-flight
-      // call — that's the user stopping the run, not a detector failure, so
-      // revert the image to its prior state instead of flagging an error.
-      if (shouldCancel?.()) {
-        if (found) found.kpStatus = hadKeypoints ? 'done' : null
-        log(`${tag} aborted (cancelled): ${img.name}`, 'warn', 'Detection')
-        return
-      }
-      log(`${tag} error: ${img.name} — ${err?.message ?? err}`, 'error', 'Detection')
-      if (found) found.kpStatus = 'error'
-    }
-  }
-
-  async function detectAll(settings = {}, onDetected, onProgress, shouldCancel) {
-    const pending = (settings.overwrite
-      ? images.value
-      : images.value.filter((img) => img.kpStatus !== 'done')).filter((img) => img.kpStatus !== 'running')
-    const total = pending.length
-    // Echo the settings actually in effect so the console records what was run.
-    const {
-      detector = 'sift', maxDim = 1200, contrastThreshold = 0.01, maxKeypoints = 5000,
-      maxDimMode = 'absolute', preset = 'medium',
-    } = settings
-    // Message-text label only; the console source is the stage 'Detection'.
-    const batchTag = detectorLabel(detector)
-    // A learned detector needs its weights — fetch them (with consent) once for the
-    // whole batch before dispatching any image.
-    const learnedSpec = learnedDetector(detector)
-    if (learnedSpec && !(await useModelsStore().ensureReady([learnedSpec.modelId]))) {
-      log(`Detection cancelled — the ${learnedSpec.label} model is not available.`, 'warn', 'Detection')
-      return
-    }
-    // Resolution: one figure in absolute mode; in auto mode it varies per image, so
-    // report the band being applied rather than a number that would only be right
-    // for some of the batch.
-    const resLabel = maxDimMode === 'auto'
-      ? `auto resolution (${preset} band, ≥${maxDim}px)`
-      : `≤${maxDim}px`
-    const concurrency = detectionConcurrency(pending, settings, POOL_SIZE, navigator.deviceMemory)
-    const started = performance.now()
-    const budgetNote = settings.memBudgetBytes > 0 ? ` (memory budget ${(settings.memBudgetBytes / 1024 ** 3).toFixed(1)} GB)` : ''
-    log(`${batchTag} batch: ${total} image(s) queued — ${resLabel}, ${concurrency} concurrent${budgetNote}`
-      + `${learnedSpec ? '' : `, contrast ${contrastThreshold}`}, ≤${maxKeypoints} kp`
-      + `${learnedSpec ? '' : `, ≤${settings.maxOrientations ?? DETECT_TUNING.siftMaxOrientations} orientation(s) per extremum`
-        + `, cap rule ${settings.capRule ?? DETECT_TUNING.siftCapRule}, RootSIFT descriptors`}`,
-      'info', 'Detection')
-    let done = 0
-    let cursor = 0
-    let cancelled = false
-    const stop = () => cancelled || (cancelled = !!shouldCancel?.())
-    const drain = async () => {
-      while (!stop()) {
-        const img = pending[cursor++]
-        if (!img) return
-        await detectOne(img.id, settings, onDetected, stop)
-        if (stop()) return
-        done++
-        onProgress?.(done, total, img.name)
-      }
-    }
-    await Promise.all(Array.from({ length: concurrency }, drain))
-    const seconds = (performance.now() - started) / 1000
-    log(`${batchTag} ${stop() ? 'cancelled' : 'batch complete'} — ${done}/${total} processed in ${seconds.toFixed(2)} s`
-      + ` (${concurrency} concurrent)`, stop() ? 'warn' : 'success', 'Detection')
-  }
-
-  // Attach an external feature index to existing images in one batch. The caller
-  // has already resolved external names to uuids and coordinated replacement of
-  // dependent matches. Keeping this as a store action preserves markRaw + OPFS
-  // invariants and avoids a modal mutating reactive records directly.
-  async function importFeatures(entries, { invalidateMatches = true } = {}) {
-    const pid = projects.currentProjectId
-    let imported = 0
-    const writes = []
-    for (const entry of entries || []) {
-      const img = images.value.find((i) => i.uuid === entry.uuid)
-      if (!img || !entry.keypoints || typeof entry.keypoints.length !== 'number') continue
-      if (invalidateMatches) useMatchesStore().removeMatchesForImage(img.uuid)
-      // An import hands objects ({ x, y, … }) or typed keypoints; the store keeps typed.
-      const kps = fillNormalized(asKeypoints(entry.keypoints), img.meta?.width, img.meta?.height)
-      const persist = isPersisting()
-        // Colours too: an import without them must not inherit a previous detection's file.
-        ? Promise.all([opfs.saveKeypoints(pid, img.uuid, kps), opfs.saveColors(pid, img.uuid, kps)])
-        : null
-      if (persist) writes.push(persist)
-      holdKeypoints(img, kps, persist)
-      img.descriptors = entry.descriptors ? markRaw(entry.descriptors) : null
-      img.kpStatus = 'done'
-      img.kpCount = kps.length
-      img.kpMs = 0
-      img.detector = entry.detector ?? 'sift'
-      img.descDim = entry.descDim ?? 128
-      img.descNorm = entry.descNorm ?? null
-      img.detectScale = 1
-      img.detectSettings = { source: entry.source ?? 'external' }
-      imported++
-      if (isPersisting() && img.descriptors) writes.push(opfs.saveDescriptors(pid, img.uuid, img.descriptors))
-    }
-    if (writes.length) await Promise.all(writes)
-    if (imported && isPersisting()) await sync(pid)
-    log(`Features imported: ${imported} image(s)`, imported ? 'success' : 'warn', 'Import')
-    return imported
-  }
-
-  function clearKeypoints(id) {
-    const img = imageById(id)
-    if (!img) return
-    keypointCache.delete(img.uuid)
-    img.kpRev     = (img.kpRev ?? 0) + 1
-    img.kpCount   = 0
-    img.kpMs      = 0
-    img.kpStatus  = null
-    // The scale described keypoints that no longer exist. Inert either way (a
-    // null kpStatus excludes the image from matching and SfM), but a stale value
-    // must not survive into the next detection run at different settings.
-    img.detectScale = null
-    img.detectSettings = null
-    img.descNorm = null
-    log(`Keypoints cleared: ${img.name}`, 'info', 'Detection')
-    useMatchesStore().removeMatchesForImage(img.uuid)
-    if (isPersisting()) {
-      const pid = projects.currentProjectId
-      opfs.deleteKeypoints(pid, img.uuid).catch(() => {})
-      opfs.deleteDescriptors(pid, img.uuid).catch(() => {})
-      sync()
-    }
-  }
+  // Keypoint detection and feature import (images/detection.js).
+  const {
+    detectOne, detectAll, importFeatures, clearKeypoints,
+  } = createDetection({
+    holdKeypoints, imageById, images, isPersisting, keypointCache, log, projects, save,
+    whenComputeReady,
+  })
 
   // Reset the in-memory image session. Pass { purge: true } to also persist the
-  // emptied list (overwriting project.json) — do NOT purge on project switch/close,
-  // since that would clobber the project being left with an empty image list, and
-  // restore reads project.json back. Only the explicit "clear-all" command purges.
+  // emptied list (overwriting project.json) — do NOT purge on project switch/close:
+  // currentProjectId already names the project being opened, whose project.json
+  // restore is about to read.
   function clearAll(onCleared, { purge = false } = {}) {
     restoreGeneration++
     const n = images.value.length
@@ -1321,7 +428,7 @@ export const useImagesStore = defineStore('images', () => {
     selectedId.value = null
     urlHeal.clear()
     if (n > 0) log(`Session cleared (${n} image${n !== 1 ? 's' : ''} removed)`, 'warn', 'Images')
-    if (purge && isPersisting()) sync()
+    if (purge && isPersisting()) save()
     onCleared?.()
   }
 
@@ -1379,7 +486,6 @@ export const useImagesStore = defineStore('images', () => {
       depth: null,
       // Filled on demand (a row in view) from images-derived/{uuid}.thumb — never at open.
       thumb: null,
-      fiducialObs: Array.isArray(record.fiducialObs) ? record.fiducialObs.map((o) => ({ ...o })) : [],
       fiducialDetections: Array.isArray(record.fiducialDetections) ? record.fiducialDetections.map((d) => ({ ...d })) : [],
     }))
     images.value = restored
@@ -1488,18 +594,6 @@ export const useImagesStore = defineStore('images', () => {
     }
   }
 
-  function migrateLegacyFiducialDetections(sensors) {
-    const byId = new Map((sensors || []).map((s) => [s.id, s]))
-    let count = 0
-    for (const img of images.value) {
-      if (img.fiducialDetections?.length || !img.fiducialObs?.length) continue
-      img.fiducialDetections = migrateLegacyFiducialImage(img, byId.get(img.sensorId))
-      count += img.fiducialDetections.length
-    }
-    if (count) { log(`Migrated ${count} legacy fiducial observation(s) to anonymous slots`, 'info', 'Fiducial'); if (isPersisting()) sync() }
-    return count
-  }
-
   // Tools ▸ Images ▾ ▸ Image quality: score each image's sharpness and exposure
   // (core/features/imageQuality.js, in the worker) and keep the raw numbers on the
   // image (`quality`, persisted). The batch-relative verdict is derived where it is
@@ -1527,7 +621,7 @@ export const useImagesStore = defineStore('images', () => {
       onProgress?.(++done, targets.length)
     })
     log(`Image quality: scored ${targets.length - failed} of ${targets.length} image(s)`, failed ? 'warn' : 'success', 'Images')
-    sync()
+    save()
     return targets.length - failed
   }
 
@@ -1543,7 +637,7 @@ export const useImagesStore = defineStore('images', () => {
     residentKeypoints,
     keypointCacheStats,
     pendingWorkCount,
-    sync,
+    save,
     imageById,
     selectImage,
     addImages,
@@ -1562,8 +656,6 @@ export const useImagesStore = defineStore('images', () => {
     thumbsVersion: thumbnails.version,
     updateMask,
     updateDepth,
-    setFiducialObservation,
-    removeFiducialObservation,
     addFiducialObservations,
     setFiducialDetection,
     removeFiducialDetection,
@@ -1576,6 +668,5 @@ export const useImagesStore = defineStore('images', () => {
     clearKeypoints,
     clearAll,
     restoreImages,
-    migrateLegacyFiducialDetections,
   }
 })

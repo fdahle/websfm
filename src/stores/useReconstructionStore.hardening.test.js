@@ -3,6 +3,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { useProjectsStore } from './useProjectsStore.js'
 import { useReconstructionStore } from './useReconstructionStore.js'
 import * as workers from '../workers/computeClient.js'
+import * as opfs from '../utils/opfs.js'
 
 it('stages DEM points as a disposable transferable buffer without detaching the source', async () => {
   setActivePinia(createPinia())
@@ -33,15 +34,50 @@ it('puts a computed product on the map unless it has no preview, whatever its fr
   const store = useReconstructionStore()
   const base = { width: 2, height: 2, gsd: 1, originX: 0, originY: 2, data: new Float32Array(4), previewUrl: 'data:x' }
   store.dem = { ...base, crs: 'local', previewUrl: null }
-  expect(store.setProductOnMap('dem', true)).toBe(false)
+  expect(store.setProductVisible('dem', true)).toBe(false)
   expect(store.productLayers.dem).toBeUndefined()
   // A local-frame product may be requested: the model-frame map can place it.
   store.dem = { ...base, crs: 'local' }
-  expect(store.setProductOnMap('dem', true)).toBe(true)
+  expect(store.setProductVisible('dem', true)).toBe(true)
   store.setProductOpacity('dem', 0.3)
-  expect(store.productLayers.dem).toEqual({ onMap: true, opacity: 0.3 })
+  expect(store.productLayers.dem).toEqual({ visible: true, opacity: 0.3 })
   // Hiding is always allowed, even once the product could no longer be placed.
   store.dem = { ...base, crs: 'local', previewUrl: null }
-  expect(store.setProductOnMap('dem', false)).toBe(true)
-  expect(store.productLayers.dem.onMap).toBe(false)
+  expect(store.setProductVisible('dem', false)).toBe(true)
+  expect(store.productLayers.dem.visible).toBe(false)
+})
+
+it('drops the on-map flag with a removed product, so a rebuilt one starts off the map', async () => {
+  setActivePinia(createPinia())
+  useProjectsStore().persistenceAvailable = false
+  const store = useReconstructionStore()
+  store.dem = { width: 2, height: 2, gsd: 1, originX: 0, originY: 2, data: new Float32Array(4), previewUrl: 'data:x', crs: 'local' }
+  store.setProductVisible('dem', true)
+  store.setProductOpacity('dem', 0.4)
+  expect(await store.removeProduct('dem')).toBe(true)
+  expect(store.productLayers.dem).toEqual({ visible: false, opacity: 0.4 })
+})
+
+it('keeps an unreadable saved model on disk instead of saving an empty one over it', async () => {
+  setActivePinia(createPinia())
+  const projects = useProjectsStore()
+  projects.persistenceAvailable = true
+  projects.currentProjectId = 'unreadable'
+  const store = useReconstructionStore()
+  const spies = [
+    vi.spyOn(opfs, 'loadReconstruction').mockRejectedValue(new Error('Incomplete saved reconstruction')),
+    vi.spyOn(opfs, 'loadProduct').mockResolvedValue(null),
+    vi.spyOn(opfs, 'loadDepthIndex').mockResolvedValue(null),
+  ]
+  const save = vi.spyOn(opfs, 'saveReconstruction').mockResolvedValue({ ok: true, files: {} })
+  await store.restore({ projectId: 'unreadable' })
+  expect(store.clouds).toEqual([])
+  // A metadata change on the empty session must not reach the writer…
+  store.setProductOpacity('dem', 0.5)
+  await Promise.resolve()
+  expect(save).not.toHaveBeenCalled()
+  // …but real content does replace the unreadable document.
+  store.importCloud({ count: 1, pos: new Float64Array([1, 2, 3]) }, 'survey.las')
+  await vi.waitFor(() => expect(save).toHaveBeenCalled())
+  for (const spy of [...spies, save]) spy.mockRestore()
 })

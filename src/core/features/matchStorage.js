@@ -12,7 +12,7 @@
 //   meta    { version: 1, images: [uuid…], count: P }   — JSON
 //   pairs   Uint32 2P   image indices (idA, idB) into meta.images, idA < idB by uuid
 //   counts  Uint32 3P   rawCount, inlierCount, match count (in pairs)
-//   flags   Uint8   P   bit 0 disabled · bit 1 weak · bit 2 has F
+//   flags   Uint8   P   bit 0 excluded (enabled: false) · bit 1 weak · bit 2 has F
 //   F       Float64 9P  row-major; zero when the flag says there is none
 //   matches Uint32 2M   every pair's matches, concatenated in pair order
 // `flags` is its own buffer so excluding a pair rewrites P bytes, not the matches.
@@ -27,7 +27,7 @@ export const MATCH_HEAVY_KEYS = ['pairs', 'counts', 'F', 'matches']
 // The columns a project open reads (everything but the matches themselves).
 export const MATCH_INDEX_KEYS = ['pairs', 'counts', 'flags', 'F']
 
-const FLAG_DISABLED = 1, FLAG_WEAK = 2, FLAG_HAS_F = 4
+const FLAG_EXCLUDED = 1, FLAG_WEAK = 2, FLAG_HAS_F = 4
 
 /** The flat match array of a [[ia, ib], …] list (or an existing Uint32Array). */
 export function toMatchArray(matches) {
@@ -50,7 +50,7 @@ export const isPersistedMatchEntry = (e) => e.status === 'done' && countOf(e) > 
 
 /**
  * Pack the pairs worth keeping (done, with matches) into the document.
- * @param entries iterable of [pairId, { idA, idB, rawCount, inlierCount, F, nMatches?, matches?, disabled, weak }]
+ * @param entries iterable of [pairId, { idA, idB, rawCount, inlierCount, F, nMatches?, matches?, enabled, weak }]
  * @param matchesOf (pairId, entry) → that pair's matches as a part: a Uint32Array of
  *   2·count elements, or anything the caller's writer concatenates (a Blob slice of
  *   the previous document). Default: `entry.matches`.
@@ -107,7 +107,7 @@ export function concatMatchParts(parts) {
 export function packMatchFlags(keptEntries) {
   const flags = new Uint8Array(keptEntries.length)
   keptEntries.forEach((e, p) => {
-    flags[p] = (e.disabled ? FLAG_DISABLED : 0) | (e.weak ? FLAG_WEAK : 0) | (e.F ? FLAG_HAS_F : 0)
+    flags[p] = (e.enabled === false ? FLAG_EXCLUDED : 0) | (e.weak ? FLAG_WEAK : 0) | (e.F ? FLAG_HAS_F : 0)
   })
   return flags
 }
@@ -141,7 +141,7 @@ export function unpackMatchIndex(meta, buffers, { matchBytes } = {}) {
     out.push([`${idA}--${idB}`, {
       idA, idB, rawCount: counts[3 * p], inlierCount: counts[3 * p + 1], F: Fm,
       nMatches: n, off: o, status: 'done',
-      disabled: !!(f & FLAG_DISABLED), weak: !!(f & FLAG_WEAK),
+      enabled: !(f & FLAG_EXCLUDED), weak: !!(f & FLAG_WEAK),
     }])
     o += 2 * n
   }

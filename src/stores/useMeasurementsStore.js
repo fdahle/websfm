@@ -19,7 +19,11 @@ export const useMeasurementsStore = registerProjectStore(defineStore('measuremen
   }
   function rename(id, name) {
     const r = records.value.find(r => r.id === id)
-    if (r && name.trim()) { r.name = name.trim(); save() }
+    const trimmed = name?.trim()
+    if (!r || !trimmed || trimmed === r.name) return false
+    r.name = trimmed
+    save()
+    return true
   }
   function remove(id) { records.value = records.value.filter(r => r.id !== id); save() }
   async function restore({ projectId }) {

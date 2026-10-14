@@ -6,6 +6,7 @@ import { projectFootprint } from '../core/footprint.js'
 import { makeNameResolver, relinkImageRecord } from '../core/io/nameMatch.js'
 import { resolveK } from '../core/sfm/reconstruction.js'
 import * as opfs from '../utils/opfs.js'
+import { createDocumentSaver } from '../utils/documentSaver.js'
 import { registerProjectStore } from './projectStores.js'
 import { useImagesStore } from './useImagesStore.js'
 import { useSensorsStore } from './useSensorsStore.js'
@@ -30,7 +31,7 @@ export const useFootprintsStore = registerProjectStore(defineStore('footprints',
   const { poses } = storeToRefs(usePosesStore())
   const { currentCrs } = storeToRefs(projects)
 
-  // [{ id, name, source: 'computed' | 'imported', onMap, footprints: [
+  // [{ id, name, source: 'computed' | 'imported', visible, footprints: [
   //     { id, imageId, imageName, rings: [[ [x,y], ... ], ...] } ] }]
   // rings are stored in the project CRS.
   const sets = ref([])
@@ -40,20 +41,21 @@ export const useFootprintsStore = registerProjectStore(defineStore('footprints',
   // its polygons without re-flattening.
   const mapPolygons = computed(() =>
     sets.value
-      .filter((s) => s.onMap !== false)
+      .filter((s) => s.visible !== false)
       .flatMap((s) => s.footprints.map((fp) => ({ ...fp, setId: s.id, setName: s.name }))),
   )
 
   // Persist only when a project is open and OPFS is usable (see useProjectsStore).
   const isPersisting = () => projects.isPersisting
 
-  async function save() {
-    if (!isPersisting()) return
-    await opfs.saveFootprints(projects.currentProjectId, {
-      crs: currentCrs.value,
-      sets: sets.value,
-    }).catch((err) => log(`Shapefile save failed — ${err?.message ?? err}`, 'error', 'Footprint'))
-  }
+  const save = createDocumentSaver({
+    label: 'footprints',
+    currentProjectId: () => projects.currentProjectId,
+    isPersisting,
+    build: () => ({ crs: currentCrs.value, sets: sets.value }),
+    write: opfs.saveFootprints,
+    onError: (err) => log(`Shapefile save failed — ${err?.message ?? err}`, 'error', 'Footprint'),
+  })
 
   // Name → image-id matching is shared with GCP observations / poses / COLMAP
   // import (core/io/nameMatch.js). Indexed once per image-list change, so a full
@@ -121,7 +123,7 @@ export const useFootprintsStore = registerProjectStore(defineStore('footprints',
       id: crypto.randomUUID(),
       name: uniqueSetName(name),
       source: 'imported',
-      onMap: true,
+      visible: true,
       footprints,
     })
     log(`Shapefile imported: ${footprints.length} polygon(s)${matched ? `, ${matched} matched to images` : ''} (from ${sourceCrs})`, 'success', 'Footprint')
@@ -242,7 +244,7 @@ export const useFootprintsStore = registerProjectStore(defineStore('footprints',
     let setId = null
     if (footprints.length) {
       setId = crypto.randomUUID()
-      sets.value.push({ id: setId, name: uniqueSetName('footprints'), source: 'computed', onMap: true, footprints })
+      sets.value.push({ id: setId, name: uniqueSetName('footprints'), source: 'computed', visible: true, footprints })
     }
 
     const REASON_LABEL = {
@@ -259,27 +261,29 @@ export const useFootprintsStore = registerProjectStore(defineStore('footprints',
 
   function removeSet(id) {
     const idx = sets.value.findIndex((s) => s.id === id)
-    if (idx === -1) return
+    if (idx === -1) return false
     const [removed] = sets.value.splice(idx, 1)
     log(`Shapefile removed: ${removed.name}`, 'info', 'Footprint', { channel: 'activity' })
     save()
+    return true
   }
 
   function renameSet(id, name) {
     const set = sets.value.find((s) => s.id === id)
-    if (!set) return
+    if (!set) return false
     const clean = String(name ?? '').trim()
-    if (!clean || clean === set.name) return
+    if (!clean || clean === set.name) return false
     set.name = clean
     log(`Shapefile renamed to ${clean}`, 'info', 'Footprint', { channel: 'activity' })
     save()
+    return true
   }
 
-  function setSetOnMap(id, onMap) {
+  function setSetVisible(id, visible) {
     const set = sets.value.find((s) => s.id === id)
     if (!set) return
-    set.onMap = !!onMap
-    log(`Shapefile ${set.name} ${set.onMap ? 'shown on' : 'hidden from'} map`, 'info', 'Footprint', { channel: 'activity' })
+    set.visible = !!visible
+    log(`Shapefile ${set.name} ${set.visible ? 'shown on' : 'hidden from'} map`, 'info', 'Footprint', { channel: 'activity' })
     save()
   }
 
@@ -295,33 +299,11 @@ export const useFootprintsStore = registerProjectStore(defineStore('footprints',
     if (purge && isPersisting()) opfs.deleteFootprints(projects.currentProjectId).catch(() => {})
   }
 
-  // Normalise a stored payload into the sets shape. New projects carry `sets`;
-  // older ones carry a flat `footprints` array — wrap those into one set so an
-  // existing project isn't silently emptied.
-  function normalizeStored(data) {
-    if (Array.isArray(data?.sets)) return data.sets
-    if (Array.isArray(data?.footprints) && data.footprints.length) {
-      return [{
-        id: crypto.randomUUID(),
-        name: 'footprints',
-        source: 'computed',
-        onMap: true,
-        footprints: data.footprints.map((f) => ({
-          id: f.id ?? crypto.randomUUID(),
-          imageId: f.imageId ?? null,
-          imageName: f.imageName ?? f.name ?? null,
-          rings: f.rings,
-        })),
-      }]
-    }
-    return []
-  }
-
   async function restore({ projectId, projectData }) {
     const projectCrs = projectData?.crs
     sets.value = []
     const data = await opfs.loadFootprints(projectId)
-    const stored = normalizeStored(data)
+    const stored = Array.isArray(data?.sets) ? data.sets : []
     if (!stored.length) return
     // Stored CRS may differ from the current project CRS (e.g. CRS changed elsewhere).
     if (data.crs && projectCrs && data.crs !== projectCrs) {
@@ -361,7 +343,7 @@ export const useFootprintsStore = registerProjectStore(defineStore('footprints',
     resolveIntrinsics,
     removeSet,
     renameSet,
-    setSetOnMap,
+    setSetVisible,
     setRings,
     reprojectFootprints,
     restore,
