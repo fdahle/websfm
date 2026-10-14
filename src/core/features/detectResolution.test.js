@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { resolveDetectMaxDim, DETECT_RESOLUTION_BANDS } from './detectResolution.js'
+import { resolveDetectMaxDim, DETECT_RESOLUTION_BANDS, resolveDetectKeypoints, detectSize } from './detectResolution.js'
 import {
   DETECT_SIFT_DEFAULTS, DETECT_SIFT_PRESETS,
   DETECT_SUPERPOINT_DEFAULTS, DETECT_SUPERPOINT_PRESETS,
@@ -151,5 +151,29 @@ describe('DISK bands', () => {
       const ceil = DETECT_RESOLUTION_BANDS.disk[preset].ceilPx
       expect(ceil * Math.round(ceil * 0.75)).toBeLessThanOrEqual(DETECT_TUNING.diskMaxUntiledInputPx)
     }
+  })
+})
+
+describe('resolveDetectKeypoints — auto scales the SIFT cap with the detected area', () => {
+  const auto = { maxDimMode: 'auto', maxKeypoints: 10000, detector: 'sift', preset: 'medium' }
+  const capFor = (w, h) => resolveDetectKeypoints(detectSize(w, h, resolveDetectMaxDim(Math.max(w, h), auto).maxDim), auto)
+
+  it('leaves absolute mode and learned detectors at the configured cap', () => {
+    expect(resolveDetectKeypoints({ width: 4000, height: 4000 }, { ...auto, maxDimMode: 'absolute' }).maxKeypoints).toBe(10000)
+    expect(resolveDetectKeypoints({ width: 3000, height: 3000 }, { ...auto, detector: 'superpoint', maxKeypoints: 2048 }).maxKeypoints).toBe(2048)
+  })
+
+  it('never goes below the configured cap and stops at 4×', () => {
+    expect(capFor(6000, 4000).maxKeypoints).toBe(10000)   // 2400 × 1600: the reference frame
+    expect(capFor(2000, 1500).maxKeypoints).toBe(10000)   // native 3 MP: floor
+    expect(capFor(9139, 9139).maxKeypoints).toBe(Math.round(10000 * 3656 * 3656 / (2400 * 1600))) // Casa Grande ≈ 34.8 k
+    expect(capFor(11425, 11425).maxKeypoints).toBe(40000) // Iceland: 4000² = 16 MP → capped at 4×
+    expect(capFor(11425, 11425).reason).toMatch(/capped at 4×/)
+  })
+
+  it('counts a 2 : 1 frame by its real area', () => {
+    // Synthetic KH-9 block, 8214 × 4107 → detected 3286 × 1643 = 5.4 MP.
+    const r = capFor(8214, 4107)
+    expect(r.maxKeypoints).toBe(Math.round(10000 * 3286 * 1643 / (2400 * 1600)))
   })
 })

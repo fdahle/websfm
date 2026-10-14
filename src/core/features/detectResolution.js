@@ -123,3 +123,46 @@ export function resolveDetectMaxDim(nativeMax, settings = {}) {
 
   return { maxDim: maxDimOut, mode: 'auto', band, nativeMax, reason }
 }
+
+// ── Keypoint budget in auto mode ──────────────────────────────────────────────
+// Auto hands a large image more resolution, but a fixed `maxKeypoints` then keeps
+// the same number of features spread over more pixels: on film scans and satellite
+// frames detected at 3–4 k px the 10 k cap bound on every image (Casa Grande 1978,
+// Iceland 1980, the synthetic KH-9 blocks), while a 6000 × 4000 photo at 2400 px
+// sits right at it. So in auto mode the SIFT cap scales with the detected AREA:
+//
+//   effective = clamp(round(maxKeypoints × detectPx / refPx), maxKeypoints, maxFactor × maxKeypoints)
+//
+// refPx is a 3 : 2 frame at the medium band's floor (2400 × 1600), where the default
+// cap was tuned; the floor is the configured cap (auto never takes keypoints away,
+// as it never takes resolution away), the ceiling bounds the matching cost
+// (brute-force O(Na·Nb)): 4 × 10 k = Metashape's default 40 k. Learned detectors keep
+// their cap — LightGlue's attention is O(N²) and its budget is a hard limit.
+export const DETECT_KEYPOINT_SCALING = {
+  sift: { refPx: 2400 * 1600, maxFactor: 4 },
+}
+
+// The working size of an image whose long side is brought to ≤ maxDim.
+export function detectSize(natW, natH, maxDim) {
+  const s = Math.min(1, maxDim / Math.max(natW, natH))
+  return { width: Math.round(natW * s), height: Math.round(natH * s) }
+}
+
+// Resolve the keypoint cap for one image. `size` is the detection working size;
+// settings as resolveDetectMaxDim. Returns { maxKeypoints, factor, reason }.
+export function resolveDetectKeypoints(size, settings = {}) {
+  const { maxKeypoints = 10000, maxDimMode = 'absolute', detector = 'sift' } = settings
+  const rule = DETECT_KEYPOINT_SCALING[detector]
+  const px = (size?.width || 0) * (size?.height || 0)
+  if (maxDimMode !== 'auto' || !rule || !(px > 0)) {
+    return { maxKeypoints, factor: 1, reason: `fixed ${maxKeypoints}` }
+  }
+  const factor = Math.min(rule.maxFactor, Math.max(1, px / rule.refPx))
+  const out = Math.round(maxKeypoints * factor)
+  return {
+    maxKeypoints: out, factor,
+    reason: factor <= 1 ? `${out} (configured cap; ${(px / 1e6).toFixed(1)} MP detected)`
+      : `${out} = ${factor.toFixed(2)}× ${maxKeypoints} for ${(px / 1e6).toFixed(1)} MP detected`
+        + (factor >= rule.maxFactor ? ` (capped at ${rule.maxFactor}×)` : ''),
+  }
+}

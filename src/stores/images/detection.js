@@ -1,6 +1,6 @@
 import { learnedDetector, detectorLabel } from '../../core/features/learnedDetectors.js'
 import { useModelsStore } from '../useModelsStore.js'
-import { resolveDetectMaxDim } from '../../core/features/detectResolution.js'
+import { resolveDetectMaxDim, resolveDetectKeypoints, detectSize } from '../../core/features/detectResolution.js'
 import { DETECT_TUNING } from '../../core/tuning.js'
 import { detectKeypoints, POOL_SIZE } from '../../workers/computeClient.js'
 import { Keypoints, fillNormalized, asKeypoints } from '../../core/features/keypoints.js'
@@ -49,8 +49,12 @@ export function createDetection({
       // derived working resolution is not auditable.
       const nativeMax = Math.max(img.meta?.width || 0, img.meta?.height || 0)
       const res0 = resolveDetectMaxDim(nativeMax, settings)
+      // Auto mode also scales the SIFT keypoint cap with the detected area (same module).
+      const kp0 = resolveDetectKeypoints(
+        img.meta?.width > 0 && img.meta?.height > 0 ? detectSize(img.meta.width, img.meta.height, res0.maxDim) : null,
+        settings)
       if (res0.mode === 'auto') {
-        log(`${tag} ${img.name} — detect at ${res0.reason}`, 'debug', 'Detection')
+        log(`${tag} ${img.name} — detect at ${res0.reason}; keypoint cap ${kp0.reason}`, 'debug', 'Detection')
       }
       // SIFT keypoints per extremum (dominant + secondary orientations, tuning.js
       // DETECT_TUNING). Null for a learned detector: no orientation histogram.
@@ -63,7 +67,7 @@ export function createDetection({
       // dropped at detection — this propagates to matching and reconstruction.
       const res = await detectKeypoints(
         img.computeUrl ?? img.url,
-        { ...settings, maxDim: res0.maxDim, mask: img.mask?.blob ?? null,
+        { ...settings, maxDim: res0.maxDim, maxKeypoints: kp0.maxKeypoints, mask: img.mask?.blob ?? null,
           ...(maxOrientations != null ? { maxOrientations } : {}),
           ...(capRule != null ? { capRule } : {}) },
         { onLog: (msg) => log(msg, 'info', 'Detection') },
@@ -119,6 +123,8 @@ export function createDetection({
           maxDim: settings.maxDim ?? null,
           maxDimMode: settings.maxDimMode ?? null,
           maxKeypoints: settings.maxKeypoints ?? null,
+          // The cap this image ran with: auto mode scales it with the detected area.
+          maxKeypointsEffective: kp0.maxKeypoints ?? null,
           contrastThreshold: settings.contrastThreshold ?? null,
           tiling: settings.tiling ?? null,
           // Absent on images detected before 2026-10 ⇒ unknown (they ran with 1).
@@ -212,6 +218,7 @@ export function createDetection({
     const budgetNote = settings.memBudgetBytes > 0 ? ` (memory budget ${(settings.memBudgetBytes / 1024 ** 3).toFixed(1)} GB)` : ''
     log(`${batchTag} batch: ${total} image(s) queued — ${resLabel}, ${concurrency} concurrent${budgetNote}`
       + `${learnedSpec ? '' : `, contrast ${contrastThreshold}`}, ≤${maxKeypoints} kp`
+      + `${maxDimMode === 'auto' && !learnedSpec ? ' (auto: scaled with the detected area, up to 4×)' : ''}`
       + `${learnedSpec ? '' : `, ≤${settings.maxOrientations ?? DETECT_TUNING.siftMaxOrientations} orientation(s) per extremum`
         + `, cap rule ${settings.capRule ?? DETECT_TUNING.siftCapRule}, RootSIFT descriptors`}`,
       'info', 'Detection')
