@@ -264,10 +264,18 @@ def render_rows(job):
     dc = np.stack([X, Y, np.ones_like(X)], axis=-1)
     dc /= np.linalg.norm(dc, axis=-1, keepdims=True)
     R = np.array(cam['R'])
-    d = dc @ R  # world direction = Rᵀ·dc
+    d = (dc @ R).reshape(-1, 3)  # world direction = Rᵀ·dc
     C = np.array(cam['C'])
-    lat, lon, h, miss = intersect(C, d, cam['t0'])
-    img = texture(lat, lon) * dc[..., 2] ** 2  # cos² fall-off
+    # In cache-sized chunks: with every core busy, whole-strip temporaries (tens of
+    # 16 MB float64 arrays per step) made the pool memory-bound, ~7× slower in total.
+    img = np.empty(d.shape[0])
+    miss = np.empty(d.shape[0])
+    for c0 in range(0, d.shape[0], 8192):
+        lat, lon, _, m = intersect(C, d[c0:c0 + 8192], cam['t0'])
+        img[c0:c0 + 8192] = texture(lat, lon)
+        miss[c0:c0 + 8192] = m
+    img = img.reshape(X.shape) * dc[..., 2] ** 2  # cos² fall-off
+    miss = miss.reshape(X.shape)
     if s['blur'] > 0:
         img = cv2.GaussianBlur(img.astype(np.float32), (0, 0), s['blur'])
     img = img[r0 - rr0: r0 - rr0 + (r1 - r0)]
