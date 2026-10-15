@@ -406,7 +406,7 @@ function onShellClose() {
           <template #label>
             <GlossaryTerm id="keypoint">Contrast threshold</GlossaryTerm>
           </template>
-          <input id="contrast" v-model.number="siftSettings.contrastThreshold" :aria-invalid="numbers.bad.contrastThreshold" type="number" min="0.001" max="0.5" step="0.001" class="field-input" />
+          <input id="contrast" v-model.number="siftSettings.contrastThreshold" :aria-invalid="numbers.bad.contrastThreshold" type="number" min="0.001" max="0.5" step="0.0001" class="field-input" />
         </SettingsField>
       </SettingsStep>
 

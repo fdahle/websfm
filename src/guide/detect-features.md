@@ -62,10 +62,14 @@ sets while keeping the selected value as a floor. Keypoints are always mapped ba
 native image coordinates.
 
 ## Contrast threshold
-<!-- param: contrastThreshold default: 0.01 -->
+<!-- param: contrastThreshold default: 0.0067 -->
 SIFT only. Lower values retain weaker features and may help snow, ice, or low-contrast
-scans; higher values keep fewer, stronger features. If raising the keypoint cap changes
-nothing, the contrast threshold may be the limiting gate.
+scans; higher values keep fewer, stronger features. The default is COLMAP's: on
+textured images the keypoint cap binds first and the threshold changes nothing, while
+on low-texture ones (interiors, large aerial frames detected at reduced resolution) it
+is what decides how many features exist, and the weaker ones are often what links
+otherwise unconnected images. If raising the keypoint cap changes nothing, the contrast
+threshold is the limiting gate.
 
 ## Max keypoints
 <!-- param: maxKeypoints default: 10000 (SIFT) · 2048 (SuperPoint, DISK) -->
