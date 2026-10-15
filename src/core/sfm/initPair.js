@@ -146,14 +146,26 @@ export async function selectInitPair(
   // top candidates and score every one that recovers a valid pose.
   const {
     minInitInliers = 15, minInitAngleDeg = 2.0, initCandidates = 24, initCandidateMax = 240,
-    excludedInitPairs = [],
+    excludedInitPairs = [], exploredInitImages = [],
   } = settings
   const excluded = new Set(excludedInitPairs)
   const pairId = (a, b) => (a < b ? `${a}--${b}` : `${b}--${a}`)
-  const ranked = donePairs
+  const eligible = donePairs
     .filter((e) => e.inlierCount >= minInitInliers
       && Kmap.has(e.idA) && Kmap.has(e.idB) && e.F && !excluded.has(pairId(e.idA, e.idB)))
     .sort((a, b) => b.inlierCount - a.inlierCount)
+  // A seed retry (sfm.js) passes the images earlier attempts registered: a new seed
+  // must bring at least one image none of them reached, or the retry re-grows the same
+  // part of the match graph from a neighbouring pair (PUTI sample: three of four retries
+  // seeded in one 5-image group while an 11-image group went untried). Ignored when it
+  // would leave no candidate, so it can never be the reason a retry fails.
+  const explored = new Set(exploredInitImages)
+  const fresh = explored.size ? eligible.filter((e) => !(explored.has(e.idA) && explored.has(e.idB))) : eligible
+  if (explored.size && fresh.length < eligible.length) {
+    log(`${eligible.length - fresh.length} seed candidate(s) skipped — both images already registered by an `
+      + `earlier attempt${fresh.length ? '' : ' (none left, so they stay in)'}`, 'info', 'Reconstruction')
+  }
+  const ranked = fresh.length ? fresh : eligible
   const candidates = ranked.slice(0, initCandidates)
 
   log(`${candidates.length} init candidate(s) of ${donePairs.length} done pairs `

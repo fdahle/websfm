@@ -1268,4 +1268,21 @@ describe('reconstruct — alternate-seed retries', () => {
     const failed = out.summary.attempts.seeds.filter((s) => s.attempt > 0 && s.pair)
     expect(failed.length).toBe(seeds.length)
   })
+
+  // Excluding only the previous seed PAIR let retries re-seed next door, in the part of
+  // the match graph already reconstructed (a PUTI sample spent three of four retries in
+  // one 5-image group). A retry's seed must bring an image no earlier attempt registered.
+  it('seeds a retry outside what earlier attempts registered', async () => {
+    const sc = aerialBlock({ seed: 5, rows: 2, cols: 4, nPoints: 1500,
+      blocks: [{ rows: 2, cols: 4, offsetX: 900, offsetY: 0 }] })
+    const blockOf = (name) => (Number(name.match(/(\d+)/)[1]) < 8 ? 'A' : 'B')
+    const out = await reconstruct({ images: sc.images, pairs: sc.pairs,
+      settings: { baIterations: 5, refineIntrinsics: 'none', seedRetryMax: 1, seedRetryMinFraction: 2 } },
+    { onLog: () => {} })
+    const [first, retry] = out.summary.attempts.seeds
+    expect(retry?.pair).toBeTruthy()
+    const blocks = (pair) => new Set(pair.split(' ↔ ').map(blockOf))
+    expect(blocks(first.pair).size).toBe(1)
+    expect([...blocks(retry.pair)]).not.toEqual([...blocks(first.pair)])
+  }, 120_000)
 })

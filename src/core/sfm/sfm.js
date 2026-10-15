@@ -142,6 +142,9 @@ export async function reconstruct(input, hooks = {}) {
   }
   const initialKey = pairKey(primary.summary?.initPair)
   if (initialKey) excluded.add(initialKey)
+  // Images any attempt registered: a retry seeds where none of them reached
+  // (initPair.js exploredInitImages), so the retries explore the match graph.
+  const explored = new Set(primary.cameras.map((c) => c.uuid))
   attempts.seeds.push({
     attempt: 0,
     pair: primary.summary?.initPair
@@ -156,7 +159,8 @@ export async function reconstruct(input, hooks = {}) {
     'warn', 'Reconstruction')
     const candidate = await reconstructSingleModel({
       ...clone(input),
-      settings: { ...(input.settings || {}), secondaryModels: false, excludedInitPairs: [...excluded] },
+      settings: { ...(input.settings || {}), secondaryModels: false, excludedInitPairs: [...excluded],
+        exploredInitImages: [...explored] },
     }, {
       onLog: (message, level, category) => log(`Seed retry ${attempt + 1}: ${message}`, level, category),
       // Retries share the first half of the recovery budget, subdivided by the retry
@@ -212,6 +216,7 @@ export async function reconstruct(input, hooks = {}) {
     }
     const candidateKey = pairKey(candidate.summary?.initPair)
     if (candidateKey) excluded.add(candidateKey)
+    for (const c of candidate.cameras) explored.add(c.uuid)
   }
   if (primary.cameras.length < 0.25 * nInputImages) {
     log(`primary remains too small after alternate-seed retries `
