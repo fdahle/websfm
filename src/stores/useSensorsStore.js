@@ -2,7 +2,7 @@ import { ref, watch, computed } from 'vue'
 import { defineStore, storeToRefs } from 'pinia'
 import { useLog } from '../composables/useLog.js'
 import { exifSignature, sensorFromExif } from '../core/io/sensor.js'
-import { DISTORTION_MODELS, inferDistortionModel } from '../core/sfm/distortion.js'
+import { DISTORTION_MODELS, DISTORTION_COEFFS, inferDistortionModel } from '../core/sfm/distortion.js'
 import * as opfs from '../utils/opfs.js'
 import { createDocumentSaver } from '../utils/documentSaver.js'
 import { useImagesStore } from './useImagesStore.js'
@@ -26,7 +26,8 @@ export const useSensorsStore = defineStore('sensors', () => {
   const { images } = storeToRefs(imagesStore)
 
   // [{ id, label, width, height, focal, focalUnit, cx, cy,
-  //    k1, k2, k3, p1, p2, pixelSize, signature, source }]
+  //    k1…k6, p1, p2, distortionModel, pixelSize, signature, source }]
+  //    (distortionModel picks which coefficients are live — distortion.js)
   const sensors = ref([])
 
   // Persist only when a project is open and OPFS is usable (see useProjectsStore).
@@ -166,6 +167,7 @@ export const useSensorsStore = defineStore('sensors', () => {
         focal: raw.focal ?? raw.fx ?? null, focalUnit: 'px',
         cx: raw.cx ?? null, cy: raw.cy ?? null,
         k1: raw.k1 ?? null, k2: raw.k2 ?? null, k3: raw.k3 ?? null,
+        k4: raw.k4 ?? null, k5: raw.k5 ?? null, k6: raw.k6 ?? null,
         p1: raw.p1 ?? null, p2: raw.p2 ?? null,
         distortionModel: raw.distortionModel ?? inferDistortionModel(raw),
         pixelSize: null, signature: null, source: raw.source ?? 'imported',
@@ -190,7 +192,7 @@ export const useSensorsStore = defineStore('sensors', () => {
 
   // Editable intrinsic fields and their parsing. Blank input clears the field
   // to null; `label` is free text, everything else is numeric.
-  const NUMERIC_FIELDS = new Set(['width', 'height', 'focal', 'cx', 'cy', 'k1', 'k2', 'k3', 'p1', 'p2', 'pixelSize', 'sensorWidthMm'])
+  const NUMERIC_FIELDS = new Set(['width', 'height', 'focal', 'cx', 'cy', ...DISTORTION_COEFFS, 'pixelSize', 'sensorWidthMm'])
   const LEVER_ARM_FIELDS = new Map([['gnssLeverArmX', 0], ['gnssLeverArmY', 1], ['gnssLeverArmZ', 2]])
 
   // Film-camera fiducial fields (F4): the certificate's focal and principal point,
@@ -245,7 +247,8 @@ export const useSensorsStore = defineStore('sensors', () => {
       if (value === 'px' || value === 'mm') { s.focalUnit = value; save() }
       return
     } else if (field === 'distortionModel') {
-      // Lens distortion model (D3): which Brown coefficients this sensor uses.
+      // Lens model (D3): the projection (Brown / rational / fisheye) and which
+      // coefficients this sensor uses.
       if (DISTORTION_MODELS.some((m) => m.id === value)) { s.distortionModel = value; save() }
       return
     } else if (NUMERIC_FIELDS.has(field)) {
@@ -278,7 +281,7 @@ export const useSensorsStore = defineStore('sensors', () => {
   // Intrinsics a future bundle adjustment may refine; the others (width/height)
   // are physical facts, never solved for. A truthy `sensor.fixed[field]` tells
   // the solver to hold that parameter constant. Absent ⇒ free to refine.
-  const LOCKABLE_FIELDS = new Set(['focal', 'cx', 'cy', 'k1', 'k2', 'k3', 'p1', 'p2'])
+  const LOCKABLE_FIELDS = new Set(['focal', 'cx', 'cy', ...DISTORTION_COEFFS])
 
   function toggleSensorFixed(id, field) {
     if (!LOCKABLE_FIELDS.has(field)) return false

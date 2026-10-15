@@ -5,18 +5,20 @@
 //   2. resolveIntrinsics    — one K per image (after 1: film K comes from the frame)
 //   3. gcpObservationMover  — GCP marks follow every keypoint move (here and the
 //                             self-cal fold later)
-//   4. undistortAtIngest    — calibrated Brown–Conrady removed from the keypoints
-//   5. refitMovedPairs      — matching's F was fitted on the raw keypoints
+//   4. undistortAtIngest    — the calibrated lens (Brown / rational / fisheye)
+//                             removed from the keypoints
+//   5. refitMovedPairs      — matching's F was fitted on the raw keypoints; also
+//                             drops matches on keypoints ingest dropped (fisheye)
 // Each mutates the images / GCPs / pairs it is given, as the inline code did; the
 // caller's `input` is already this sub-run's own copy (sfm.js cloneSfmInput).
 
 import { resolveK } from './reconstruction.js'
-import { undistortPixel, distortionOf } from './distortion.js'
+import { undistortPixel, undistortKeypoint, distortionOf, FISHEYE_MAX_RAY_DEG } from './distortion.js'
 import { fitFundamental, sampsonRmsPx } from './fundamental.js'
 import { canonicalFrame, scanToCanonical } from './fiducials.js'
 import { calibratedFiducialPairs } from './fiducialModel.js'
 import { mapPositions, kpX, kpY } from './keypointSet.js'
-import { asPairList } from './matchCodec.js'
+import { asPairList, Uint32PairList } from './matchCodec.js'
 import { fitFiducialTransform } from './fiducialCalibration.js'
 
 // ── Fiducial interior orientation (F4) ───────────────────────────────────
@@ -188,21 +190,29 @@ export function gcpObservationMover(gcps) {
 }
 
 // ── Undistort keypoints at ingest ────────────────────────────────────────
-// Remove Brown–Conrady lens distortion once, up front, so every downstream
-// step (init, PnP, triangulation, BA) is pure pinhole. Keypoint indices are
-// preserved (matches reference them), only positions move.
+// Remove the calibrated lens once, up front, so every downstream step (init,
+// PnP, triangulation, BA) is pure pinhole. Keypoint indices are preserved
+// (matches reference them), only positions move. A fisheye keypoint too far
+// off-axis for a pinhole frame (distortion.js FISHEYE_MAX_RAY_DEG) becomes a
+// missing (NaN) keypoint, which every track/BA consumer already skips (hasKp).
 export function undistortAtIngest({ imgs, Kmap, moveGcpObs, log }) {
   let undistortedImgs = 0
   let anyCalibratedDistortion = false
   const undistortedUuids = new Set()
-  let shiftSum = 0, shiftMax = 0, shiftN = 0
+  let shiftSum = 0, shiftMax = 0, shiftN = 0, dropped = 0, fisheyeKps = 0
   for (const img of imgs) {
     const dist = distortionOf(img.sensor)
     if (!dist || !img.kp?.n) continue
-    anyCalibratedDistortion = true
+    // A fisheye with every k zero is the bare equidistant projection — no
+    // calibration to protect, so 'auto' self-cal may still solve its focal and
+    // principal point (bundleSession.js keeps radial terms off with fisheye).
+    if (!dist.fisheye || dist.k1 || dist.k2 || dist.k3 || dist.k4) anyCalibratedDistortion = true
     const K = Kmap.get(img.uuid)
+    if (dist.fisheye) fisheyeKps += img.kp.n
     img.kp = mapPositions(img.kp, (x, y) => {
-      const u = undistortPixel(x, y, K, dist)
+      const u = undistortKeypoint(x, y, K, dist)
+      // eslint-disable-next-line no-self-compare
+      if (u.x !== u.x) { dropped++; return u }
       const d = Math.hypot(u.x - x, u.y - y)
       shiftSum += d; if (d > shiftMax) shiftMax = d; shiftN++
       return u
@@ -217,6 +227,10 @@ export function undistortAtIngest({ imgs, Kmap, moveGcpObs, log }) {
       + `mean shift ${(shiftSum / Math.max(1, shiftN)).toFixed(2)}px, max ${shiftMax.toFixed(2)}px)`,
       'info', 'Reconstruction')
   }
+  if (dropped > 0) {
+    log(`dropped ${dropped} of ${fisheyeKps} fisheye keypoint(s) more than ${FISHEYE_MAX_RAY_DEG}° off-axis `
+      + '(too stretched in the pinhole frame to measure reliably)', 'info', 'Reconstruction')
+  }
   return { anyCalibratedDistortion, undistortedUuids }
 }
 
@@ -230,27 +244,45 @@ export function undistortAtIngest({ imgs, Kmap, moveGcpObs, log }) {
 // the moved coordinates is enough — no re-RANSAC. Applies to both keypoint
 // moves above: Brown undistortion and the film scan→canonical affine.
 // `movedUuids`: the images whose keypoints moved (undistortion + film frames).
-export function refitMovedPairs({ donePairs, movedUuids, imageByUuid, log }) {
+// `bridgePairs` (the weak PnP bridges) only lose their dropped-keypoint matches;
+// nothing reads their F.
+export function refitMovedPairs({ donePairs, bridgePairs = [], movedUuids, imageByUuid, log }) {
   if (movedUuids.size > 0) {
-    let refit = 0, skipped = 0
+    let refit = 0, skipped = 0, droppedMatches = 0
     const before = [], after = []
-    for (const e of donePairs) {
-      if (!e.F) continue
+    const bridges = new Set(bridgePairs)
+    for (const e of [...donePairs, ...bridgePairs]) {
       if (!movedUuids.has(e.idA) && !movedUuids.has(e.idB)) continue
       const iA = imageByUuid(e.idA), iB = imageByUuid(e.idB)
-      if (!iA || !iB || (e.matches?.length ?? 0) < 8) { skipped++; continue }
+      if (!iA || !iB || !e.matches?.length) { if (e.F) skipped++; continue }
+      // A keypoint dropped at ingest (a fisheye ray far off-axis) is NaN: its matches
+      // leave the pair here, once, so no init/PnP/triangulation path ever reads one.
       const m = asPairList(e.matches)
-      const ptsA = new Array(m.length), ptsB = new Array(m.length)
+      const kept = [], ptsA = [], ptsB = []
       for (let i = 0; i < m.length; i++) {
-        ptsA[i] = { x: kpX(iA.kp, m.a(i)), y: kpY(iA.kp, m.a(i)) }
-        ptsB[i] = { x: kpX(iB.kp, m.b(i)), y: kpY(iB.kp, m.b(i)) }
+        const xa = kpX(iA.kp, m.a(i)), xb = kpX(iB.kp, m.b(i))
+        // eslint-disable-next-line no-self-compare
+        if (xa !== xa || xb !== xb) continue
+        kept.push(m.a(i), m.b(i))
+        ptsA.push({ x: xa, y: kpY(iA.kp, m.a(i)) })
+        ptsB.push({ x: xb, y: kpY(iB.kp, m.b(i)) })
       }
+      if (ptsA.length < m.length) {
+        droppedMatches += m.length - ptsA.length
+        e.matches = new Uint32PairList(Uint32Array.from(kept))
+        if (e.inlierCount != null) e.inlierCount = ptsA.length
+      }
+      if (!e.F || bridges.has(e)) continue
+      if (ptsA.length < 8) { skipped++; continue }
       const fit = fitFundamental(ptsA, ptsB)
       if (!fit) { skipped++; continue }
       before.push(sampsonRmsPx(e.F, ptsA, ptsB))
       e.F = fit.F
       after.push(fit.rmsPx)
       refit++
+    }
+    if (droppedMatches > 0) {
+      log(`dropped ${droppedMatches} match(es) on fisheye keypoints too far off-axis`, 'info', 'Reconstruction')
     }
     if (refit > 0) {
       const med = (a) => [...a].sort((x, y) => x - y)[a.length >> 1]

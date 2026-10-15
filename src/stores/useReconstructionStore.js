@@ -659,7 +659,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     editClouds,
   } = createCloudEdits({
     clouds, healthDirty, imagesStore, invalidateSparseDependents, log, mainSparseCloud, makeCloudId,
-    save, projects, reconStatus, selectedCloudId, summary, upsertSparseCloud,
+    save, projects, reconStatus, selectedCloudId, summary, upsertSparseCloud, sensors,
     // Created below with the sparse run; resolved when an edit runs.
     surveyConstraintInput: (opts) => surveyConstraintInput(opts),
   })

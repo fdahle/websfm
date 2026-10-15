@@ -17,8 +17,12 @@ Left uncorrected, distortion pushes keypoints off their true projected positions
 and inflates [Reprojection Error](help:reprojection-error), because the geometry
 of the rest of the pipeline assumes a perfect pinhole camera.
 
-WebSfM models distortion with the **Brown–Conrady** coefficients (radial and
-tangential terms) and removes it **once at ingest** — the incoming pixels are
-undistorted up front so that matching, triangulation, and bundle adjustment can
-all treat every camera as an ideal pinhole. This keeps the core math simple and
-uniform rather than threading distortion parameters through every stage.
+WebSfM models distortion with the **Brown–Conrady** coefficients (radial terms
+$k_1$–$k_3$ and tangential terms $p_1, p_2$), their **rational** extension (OpenCV's
+`CALIB_RATIONAL_MODEL`, which adds $k_4$–$k_6$ in a denominator and suits wide lenses),
+or a [fisheye](help:fisheye-lens) model for ultra-wide lenses. Whichever model a
+[sensor](help:sensor) uses, the distortion is removed **once at ingest**: keypoints
+are undistorted up front so that triangulation and bundle adjustment can treat every
+camera as an ideal pinhole, and the dense stages resample each photo the same way. This
+keeps the core math simple and uniform rather than threading distortion parameters
+through every stage.

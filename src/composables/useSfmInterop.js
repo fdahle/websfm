@@ -146,7 +146,7 @@ export function useSfmInterop({ addImages, importColmapModel, importInteropModel
       const externalImages = database?.images ?? []
       const matchedImages = externalImages.filter((im) => resolve(im.name)).length
       const warnings = [...(database?.warnings ?? [])]
-      if (database?.unsupportedCameras) warnings.push(`${database.unsupportedCameras} fisheye/unsupported camera model(s) will be skipped`)
+      if (database?.unsupportedCameras) warnings.push(`${database.unsupportedCameras} camera(s) with an unsupported lens model (FOV, thin-prism fisheye) will be skipped`)
       if (database?.rigs || database?.frames) warnings.push('Rig/frame records are detected but rig constraints are not imported')
       if (database?.posePriors) warnings.push(`${database.posePriors} pose prior(s) detected; their coordinate reference is not self-describing and they will be skipped`)
       for (const model of models) if (!model.complete) warnings.push(`${model.name}: ${model.error || 'incomplete sparse model'}`)

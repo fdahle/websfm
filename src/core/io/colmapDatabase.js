@@ -1,6 +1,8 @@
 // Pure COLMAP SQLite row/blob adapters. SQLite itself lives in a dedicated
 // worker; this module owns the on-disk conventions so they remain unit-testable.
 
+import { parseDistortionModelName, coeffsForModel } from '../sfm/distortion.js'
+
 export const COLMAP_MAX_IMAGE_ID = 2147483647
 
 // Current COLMAP camera model ids (sensor/models.h). `names` is the parameter
@@ -60,20 +62,23 @@ export function decodeColmapCamera(row) {
   if (!spec) return { cameraId: Number(row.camera_id), modelId: Number(row.model), model: `UNKNOWN_${row.model}`, width: Number(row.width), height: Number(row.height), params: [], named: {}, supported: false, losses: ['unsupported camera model'] }
   const params = [...typedBlob(row.params, Float64Array, spec.names.length, `camera ${row.camera_id} params`)]
   const named = Object.fromEntries(spec.names.map((name, i) => [name, params[i]]))
-  const fisheye = spec.model.includes('FISHEYE') || spec.model === 'FOV'
+  // Every model with a websfm lens model (distortion.js DISTORTION_MODELS `colmap`)
+  // maps losslessly; the rest (FOV, the thin-prism fisheyes) are reported by name.
+  const supported = parseDistortionModelName(spec.model) != null
   return {
     cameraId: Number(row.camera_id), modelId: Number(row.model), model: spec.model,
     width: Number(row.width), height: Number(row.height), params, named,
-    // websfm can preserve Brown/radial calibration, but its sparse ingest remains
-    // pinhole. Fisheye models need a resampling stage and are reported, not guessed.
-    supported: !fisheye,
-    losses: fisheye ? ['fisheye projection cannot be mapped without resampling'] : [],
+    supported,
+    losses: supported ? [] : [`${spec.model} lens model is not supported`],
   }
 }
 
 export function cameraToWebsfmSensor(camera) {
   if (!camera?.supported) return null
   const p = camera.named
+  const distortionModel = parseDistortionModelName(camera.model)
+  const live = new Set(coeffsForModel(distortionModel))
+  const coeff = (k) => (live.has(k) ? p[k] ?? null : null)
   return {
     externalId: camera.cameraId,
     label: `COLMAP Camera ${camera.cameraId}`,
@@ -81,9 +86,10 @@ export function cameraToWebsfmSensor(camera) {
     focal: p.fx ?? p.f ?? null, focalUnit: 'px',
     fx: p.fx ?? p.f ?? null, fy: p.fy ?? p.f ?? null,
     cx: p.cx ?? null, cy: p.cy ?? null,
-    k1: p.k1 ?? p.k ?? null, k2: p.k2 ?? null, k3: p.k3 ?? null,
-    p1: p.p0 ?? p.p1 ?? null, p2: p.p0 != null ? (p.p1 ?? null) : (p.p2 ?? null),
-    distortionModel: (p.p1 != null || p.p0 != null) ? 'brown' : p.k2 != null ? 'radial2' : p.k1 != null ? 'radial' : 'pinhole',
+    k1: coeff('k1'), k2: coeff('k2'), k3: coeff('k3'),
+    k4: coeff('k4'), k5: coeff('k5'), k6: coeff('k6'),
+    p1: coeff('p1'), p2: coeff('p2'),
+    distortionModel,
     source: 'colmap',
   }
 }

@@ -16,6 +16,9 @@ import { useLog } from '../composables/useLog.js'
 import { preselectPairs, positionsForProximity, preselectByFootprintOverlap } from '../core/features/preselect.js'
 import { sequentialPairs } from '../core/features/sequentialPairs.js'
 import { inlierSpread, packMatchedPoints } from '../core/features/verify.js'
+import { makeVerifyMapper, mapVerifyPoints, expandInlierMask } from '../core/features/verifyFrame.js'
+import { distortionOf } from '../core/sfm/distortion.js'
+import { resolveK } from '../core/sfm/reconstruction.js'
 import { evaluatePairAcceptance } from '../core/features/pairGate.js'
 import { filterStationaryMatches, stationaryTolPx } from '../core/features/stationary.js'
 import { pickSpreadIndices, sliceDescriptorRows, resolveSubsetGateSize, SUBSET_GATE_SIZE_DEFAULTS } from '../core/features/subsetGate.js'
@@ -32,6 +35,7 @@ import { usePosesStore } from './usePosesStore.js'
 import { useFootprintsStore } from './useFootprintsStore.js'
 import { useModelsStore } from './useModelsStore.js'
 import { useImagesStore } from './useImagesStore.js'
+import { useSensorsStore } from './useSensorsStore.js'
 
 const EMPTY_MATCHES = new Uint32Array(0)
 
@@ -352,6 +356,16 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
   // image appears in N−1 pairs, so this turns O(N²) loads into O(N)).
   // `gpuRun` (optional): matchAll's WebGPU router (stores/matching/gpuMatchRun.js);
   // null ⇒ brute-force runs on the WASM pool exactly as before.
+  // The pinhole-frame mapper an image's putatives are verified through, or null
+  // (core/features/verifyFrame.js): only fisheye sensors get one. Same K and lens
+  // as SfM ingest (resolveK + distortionOf), so the verified F is that frame's.
+  function verifyMapperFor(img) {
+    const sensor = img?.sensorId ? useSensorsStore().sensors.find((s) => s.id === img.sensorId) : null
+    const dist = distortionOf(sensor)
+    if (!dist?.fisheye || sensor.kind === 'film') return null
+    return makeVerifyMapper(resolveK(img.meta, sensor), dist)
+  }
+
   async function matchPairOnce(imgA, imgB, settings = {}, onDone, descCache = null, gpuRun = null) {
     // Resolve every knob from the single source of truth (defaults.user.js +
     // tuning.js), caller's `settings` winning. Downstream reads `settings.X` directly.
@@ -590,8 +604,11 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
         // Both at full resolution ⇒ factor 1 ⇒ the configured value, unchanged.
         const scaleCtx = pairScaleContext(srcA, srcB)
         const ransacPx = resolveScaledPx(settings.ransacThreshPx, scaleCtx)
-        const { ptsA, ptsB } = packMatchedPoints(kpsA, kpsB, raw)
-        const result = await verifyPointPairs(ptsA, ptsB, {
+        // A fisheye image verifies in its pinhole frame (core/features/verifyFrame.js);
+        // `keep` maps the verified rows back to `raw` when off-axis putatives were left out.
+        const packed = packMatchedPoints(kpsA, kpsB, raw)
+        const { ptsA, ptsB, keep } = mapVerifyPoints(packed.ptsA, packed.ptsB, verifyMapperFor(imgA), verifyMapperFor(imgB))
+        const verified = await verifyPointPairs(ptsA, ptsB, {
           ransacThreshPx: ransacPx,
           maxIters: settings.maxIters,
           // Skip H-RANSAC on pairs below the hard acceptance floor: they're rejected
@@ -599,6 +616,7 @@ export const useMatchesStore = registerProjectStore(defineStore('matches', () =>
           // verify_matches_hf). minMatches is the one un-overridable accept gate.
           hSkipBelow: minMatches,
         }, { ...timing('verificationMs'), avoidWorker })
+        const result = verified && keep ? { ...verified, inlierMask: expandInlierMask(verified.inlierMask, keep, raw.length) } : verified
         // Classify via the pure gate (core/features/pairGate.js): accept / weak / reject.
         // `spread` is computed here (needs the store's keypoints); everything else is a
         // plain-data decision the gate owns so it can be unit-tested in isolation.

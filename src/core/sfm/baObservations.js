@@ -77,3 +77,26 @@ export function appendObservations(list, extra) {
   }
   return { n, cam, pt, x, y, wx, wy }
 }
+
+/**
+ * The same observations with some cameras' pixels moved — `mapFor(camIdx)` returns a
+ * pixel map (x, y) → { x, y } or null to keep that camera's as they are. Used to hand
+ * a fisheye camera's observations to the crate in the pixels its lens recorded
+ * (bundleSession.js). Returns `observations` itself when no camera has a map.
+ */
+export function mapObservations(observations, mapFor) {
+  const { n, cam } = observations
+  const maps = new Map()
+  const mapOf = (ci) => { if (!maps.has(ci)) maps.set(ci, mapFor(ci) ?? null); return maps.get(ci) }
+  let any = false
+  for (let i = 0; i < n && !any; i++) any = !!mapOf(cam[i])
+  if (!any) return observations
+  const x = Float64Array.from(observations.x.subarray(0, n)), y = Float64Array.from(observations.y.subarray(0, n))
+  for (let i = 0; i < n; i++) {
+    const m = mapOf(cam[i])
+    if (!m) continue
+    const p = m(x[i], y[i])
+    x[i] = p.x; y[i] = p.y
+  }
+  return { ...observations, x, y }
+}

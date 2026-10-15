@@ -37,7 +37,9 @@ geometry, or incorrect control—not an iteration shortage.
 ## Self-calibration
 <!-- param: refineIntrinsics default: Auto -->
 **Auto** solves focal length and radial distortion for EXIF-only cameras, but preserves
-an existing calibrated distortion model. Turn calibration off only when the sensor
+an existing calibrated distortion model. A [fisheye](help:fisheye-lens) sensor with all
+coefficients zero counts as uncalibrated: Auto refines its focal length, principal point
+and its own fisheye terms (up to k3) in the pixels the lens recorded. Turn calibration off only when the sensor
 parameters are trustworthy. Solving many parameters needs many well-distributed views;
 on a weak network it can absorb scene error into implausible intrinsics. Self-calibration
 runs inside bundle adjustment, so it is unavailable when bundle adjustment iterations are
@@ -94,5 +96,8 @@ than a refinement, and it refuses a solve that raises the residual (unless surve
 constraints explain the increase). Radial distortion stays as the reconstruction
 calibrated it: a different radial term would no longer match the observations the
 dense stage warps by. Re-run the reconstruction with self-calibration to change it.
+[Fisheye](help:fisheye-lens) cameras are solved in the pixels their lens recorded, with
+the lens the reconstruction ended with, and their stored observations are re-derived for
+the new focal length.
 Like gradual selection, a successful run replaces the main model in place and clears
 its dense, mesh, DEM, orthophoto, scale and georeference results.

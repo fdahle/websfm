@@ -1,6 +1,7 @@
 import { cameraCenter, projectWithDepth, triangulationAngle } from './geometry.js'
 import { buildCameraPriorConstraints, qualifyingGcps, buildGcpAnchors } from './surveyConstraints.js'
 import { SFM_TUNING } from '../tuning.js'
+import { distortPixel, undistortPixel } from './distortion.js'
 
 export function sparsePointMetrics(cameras, points) {
   const centers = new Map([...cameras].map(([id, camera]) => [id, cameraCenter(camera)]))
@@ -42,7 +43,11 @@ export function selectedSparseIndices(metrics, { metric, threshold }) {
 // pinhole frame, keyed by uuid) — the same evidence the solve was held to. Without
 // them a re-solve can only lower the reprojection cost, so the ≤-cost gate always
 // passed while it quietly undid a GCP doming correction.
-async function constrainedRefine(cameras, kept, bundleAdjust, constraints, { subject, baOpts = {} }) {
+//
+// `lensOf(uuid)` (optional) names the fisheye cameras: their observations go to the
+// solve in the pixels the lens recorded, with the lens on K (bundleSession.js
+// lensFrame, the same frame the reconstruction solved them in).
+async function constrainedRefine(cameras, kept, bundleAdjust, constraints, { subject, baOpts = {}, lensOf = null }) {
   const entries = [...cameras], cameraIndices = new Map(entries.map(([id], i) => [id, i]))
   const observations = [], support = new Uint32Array(entries.length)
   kept.forEach((p, ptIdx) => {
@@ -77,9 +82,20 @@ async function constrainedRefine(cameras, kept, bundleAdjust, constraints, { sub
     minCameras: SFM_TUNING.cameraPriorBaMinCameras,
     reference: anchorSetup ? { fit: anchorSetup.fit, frame: anchorSetup.frame } : null })
   const constrained = !!(anchorSetup || priorSet)
-  const result = await bundleAdjust(entries.map(([, c]) => c), entries.map(([, c]) => c.K),
+  const lenses = entries.map(([id]) => lensOf?.(id) ?? null)
+  const Ks = entries.map(([, c], i) => (lenses[i]
+    ? { ...c.K, fisheye: true, fisheyeTerms: 4, k1: lenses[i].k1, k2: lenses[i].k2, k3: lenses[i].k3, k4: lenses[i].k4 }
+    : c.K))
+  const toLensFrame = (o) => {
+    const lens = lenses[o.camIdx]
+    if (!lens) return o
+    const p = distortPixel(o.x, o.y, entries[o.camIdx][1].K, lens)
+    return { ...o, x: p.x, y: p.y }
+  }
+  const allObs = anchorSetup ? [...observations, ...anchorSetup.observations] : observations
+  const result = await bundleAdjust(entries.map(([, c]) => c), Ks,
     anchorSetup ? [...kept, ...anchorSetup.anchorPts] : kept,
-    anchorSetup ? [...observations, ...anchorSetup.observations] : observations,
+    lenses.some(Boolean) ? allObs.map(toLensFrame) : allObs,
     { maxIters: 30, refineIntrinsics: 'none', ...baOpts,
       ...(anchorSetup ? { gcpAnchors: anchorSetup.anchors } : {}),
       ...(priorSet ? { cameraPriors: priorSet.priors } : {}) })
@@ -142,8 +158,11 @@ export async function optimizeCameras(cameras, points, settings, bundleAdjust, c
   if (kept.length < 6) throw new Error('The model needs at least six points with two or more observations')
   const sensorOf = settings.sensorOfUuid || {}
   const sensorOfCam = [...cameras.keys()].map(id => (Number.isInteger(sensorOf[id]) ? sensorOf[id] : -1))
+  // settings.lensOfUuid: { [uuid]: fisheye lens bag } — the run's lens per fisheye camera.
+  const lensOfUuid = settings.lensOfUuid || {}
+  const lensOf = (id) => (lensOfUuid[id]?.fisheye ? lensOfUuid[id] : null)
   const { result, entries, constraints: held } = await constrainedRefine(cameras, kept, bundleAdjust, constraints,
-    { subject: { would: 'The model would' }, baOpts: { refineIntrinsics: refine, sensorOfCam } })
+    { subject: { would: 'The model would' }, baOpts: { refineIntrinsics: refine, sensorOfCam }, lensOf })
   if (!Array.isArray(result.intrinsics) || result.intrinsics.length !== entries.length)
     throw new Error('Refinement returned no intrinsics; the original model is unchanged')
   const intr = result.intrinsics
@@ -154,17 +173,34 @@ export async function optimizeCameras(cameras, points, settings, bundleAdjust, c
   if (!(worst <= OPTIMIZE_MAX_FOCAL_CHANGE))
     throw new Error(`The focal length moved ${(worst * 100).toFixed(0)}% — a runaway, not a refinement; the original model is unchanged`)
   const withCxCy = refine.includes('cxcy')
+  const newK = new Map(entries.map(([id, c], i) => [id,
+    { ...c.K, fx: intr[i].fx, fy: intr[i].fy, ...(withCxCy ? { cx: intr[i].cx, cy: intr[i].cy } : {}) }]))
+  // A fisheye camera's stored observations are its recorded pixels undistorted about
+  // its K; dense pairs the lens with the camera's K, so a moved focal / principal
+  // point re-derives them (old K → recorded pixel → new K), as selfCalFold.js does.
+  const remapViews = (p) => {
+    let moved = null
+    for (const [id, px] of p.viewsPx) {
+      const lens = lensOf(id), K0 = cameras.get(id)?.K
+      if (!lens || !K0 || !px?.every(Number.isFinite)) continue
+      const raw = distortPixel(px[0], px[1], K0, lens)
+      const q = undistortPixel(raw.x, raw.y, newK.get(id), lens)
+      ;(moved ??= new Map(p.viewsPx)).set(id, [q.x, q.y])
+    }
+    return moved ? { viewsPx: moved } : null
+  }
   return {
     status: 'done', costBefore: result.costBefore, costAfter: result.costAfter, constraints: held,
     focalChange: worst,
     cameras: new Map(entries.map(([id, c], i) => [id, {
       ...c, ...result.cameras[i],
-      // Pinhole only: k1–k3 were not free, so nothing is folded or carried.
-      K: { ...c.K, fx: intr[i].fx, fy: intr[i].fy, ...(withCxCy ? { cx: intr[i].cx, cy: intr[i].cy } : {}) },
+      // Pinhole only: k1–k3 were not free, so nothing is folded or carried (a
+      // fisheye's lens stays the run's; its observations follow the new K below).
+      K: newK.get(id),
     }])),
     // Points the solve could not see (< 2 stored observations) would sit stale
     // against the moved cameras, so they are dropped and counted, not kept.
-    points: kept.map((p, i) => ({ ...p, ...result.points3d[i] })),
+    points: kept.map((p, i) => ({ ...p, ...result.points3d[i], ...remapViews(p) })),
     dropped: points.length - kept.length,
   }
 }

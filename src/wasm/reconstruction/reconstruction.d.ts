@@ -52,27 +52,37 @@
  * - `sensor_of_cam`: n_cam ints — per-camera sensor id (shared → shared focal);
  *   `< 0` (or a short/empty list) ⇒ that camera is its own group
  * - `refine_mask`: **bitmask** of the shared per-sensor intrinsics to self-calibrate:
- *   1 = focal scale s, 2 = principal point (dcx,dcy), 4 = radial k1, 8 = k2, 16 = k3.
- *   0 ⇒ poses+points only. The per-group param vector is the ordered subset
- *   `[s?, dcx?, dcy?, k1?, k2?, k3?]` (kdim ≤ 6). fy stays locked to fx (single scale).
+ *   1 = focal scale s, 2 = principal point (dcx,dcy), 4 = radial k1, 8 = k2, 16 = k3,
+ *   32 = k4 (fisheye only). 0 ⇒ poses+points only. The per-group param vector is the
+ *   ordered subset `[s?, dcx?, dcy?, k1?, k2?, k3?, k4?]` (kdim ≤ 7). fy stays locked
+ *   to fx (single scale). A coefficient a group's lens does not have (k4 on a Brown
+ *   group, k3 on a two-term fisheye) is held at its seed.
  * - `fixed_cam`: n_cam bytes, non-zero ⇒ that camera's pose is held fixed (local BA:
  *   the cameras outside the window keep their observations as constraints but are
  *   not variables). Empty ⇒ every camera is free, the original behaviour exactly.
  * - `solver_flat`: reduced-system policy `[pcg_min_n, rel_tol, max_iter, accept_partial]`;
  *   empty / NaN slots ⇒ `SolverOpts::DEFAULT` (see there).
+ * - `fisheye_flat`: n_cam × 5 floats `[terms, k1, k2, k3, k4, …]`. `terms` 0 ⇒ the
+ *   camera is pinhole (+ the Brown self-cal residual) and its observations are in the
+ *   undistorted frame; `terms` 1–4 ⇒ a Kannala–Brandt fisheye with those seed
+ *   coefficients, observed in the pixels the lens recorded, of which the first `terms`
+ *   may be self-calibrated (the k bits then refine the fisheye's own polynomial).
+ *   Cameras sharing a sensor group must share a lens. Empty ⇒ every camera pinhole,
+ *   the original behaviour exactly.
  *
  * # Output
- * `[cameras_flat(n_cam×12), pts_flat(n_pts×3), intrinsics_flat(n_cam×7),
+ * `[cameras_flat(n_cam×12), pts_flat(n_pts×3), intrinsics_flat(n_cam×8),
  *   cost_before, cost_after, anchor_rms_after, camera_prior_rms_after,
  *   solver stats (BA_STATS_LEN), cost_trace…]` — the returned
- * intrinsics are the **refined** effective K per camera as `[fx,fy,cx,cy,k1,k2,k3]`
- * (radial coeffs 0 for the bits not set in `refine_mask`, identical to the input K
- * when `refine_mask == 0`); cost_before/cost_after are RMS reprojection error in
+ * intrinsics are the **refined** effective K per camera as `[fx,fy,cx,cy,k1,k2,k3,k4]`
+ * — for a pinhole camera the self-calibrated Brown residual (0 for the bits not set
+ * in `refine_mask`, k4 always 0), for a fisheye camera its full refined Kannala–Brandt
+ * coefficients (the seed when nothing was refined); cost_before/cost_after are RMS reprojection error in
  * pixels (anchors do not affect them); anchor_rms_after is the RMS anchor
  * residual in the caller's world units, and camera_prior_rms_after is the RMS
  * camera-centre residual (both 0 when their respective prior list is empty).
  */
-export function bundle_adjust(cameras_flat: Float32Array, intrinsics_flat: Float32Array, pts_flat: Float32Array, obs_index: Uint32Array, obs_px: Float32Array, observation_weight: Float32Array, anchor_flat: Float64Array, anchor_weight: Float32Array, camera_prior_flat: Float32Array, max_iters: number, sensor_of_cam: Int32Array, refine_mask: number, solver_flat: Float32Array, fixed_cam: Uint8Array): Float32Array;
+export function bundle_adjust(cameras_flat: Float32Array, intrinsics_flat: Float32Array, pts_flat: Float32Array, obs_index: Uint32Array, obs_px: Float32Array, observation_weight: Float32Array, anchor_flat: Float64Array, anchor_weight: Float32Array, camera_prior_flat: Float32Array, max_iters: number, sensor_of_cam: Int32Array, refine_mask: number, solver_flat: Float32Array, fixed_cam: Uint8Array, fisheye_flat: Float32Array): Float32Array;
 
 export function compute_depth_map(ref_gray: Uint8Array, ref_w: number, ref_h: number, ref_k: Float32Array, src_gray: Uint8Array, src_dims: Uint32Array, src_k: Float32Array, src_rel: Float32Array, src_mask: Uint8Array, seed_depth: Float32Array, depth_min: number, depth_max: number, window: number, iterations: number, best_k: number, seed: number, perturb_start: number): Float32Array;
 
@@ -132,7 +142,7 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
-    readonly bundle_adjust: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number, s: number, t: number, u: number, v: number, w: number, x: number, y: number, z: number) => [number, number];
+    readonly bundle_adjust: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number, s: number, t: number, u: number, v: number, w: number, x: number, y: number, z: number, a1: number, b1: number) => [number, number];
     readonly compute_depth_map: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number, s: number, t: number, u: number, v: number, w: number, x: number, y: number) => [number, number];
     readonly recover_pose: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number];
     readonly solve_pnp: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number];

@@ -30,6 +30,38 @@ describe('COLMAP database adapters', () => {
     expect(cameraToWebsfmSensor(cam)).toMatchObject({ focal: 900, fx: 900, fy: 910, cx: 500, k1: .1, distortionModel: 'brown' })
   })
 
+  it('maps rational and fisheye calibrations without dropping terms', () => {
+    const full = decodeColmapCamera({ camera_id: 2, model: 6, width: 1000, height: 800,
+      params: blob(Float64Array, [900, 900, 500, 400, .1, -.02, .001, -.001, .003, .2, -.01, .002]) })
+    expect(full.supported).toBe(true)
+    expect(full.losses).toEqual([])
+    expect(cameraToWebsfmSensor(full)).toMatchObject({ distortionModel: 'rational',
+      k1: .1, k2: -.02, p1: .001, p2: -.001, k3: .003, k4: .2, k5: -.01, k6: .002 })
+
+    const fish = decodeColmapCamera({ camera_id: 3, model: 5, width: 4000, height: 3000,
+      params: blob(Float64Array, [1700, 1700, 2000, 1500, .05, -.01, .002, -.0003]) })
+    expect(fish.supported).toBe(true)
+    expect(cameraToWebsfmSensor(fish)).toMatchObject({ distortionModel: 'fisheye',
+      focal: 1700, k1: .05, k2: -.01, k3: .002, k4: -.0003, p1: null, p2: null })
+
+    const simple = decodeColmapCamera({ camera_id: 4, model: 8, width: 4000, height: 3000,
+      params: blob(Float64Array, [1700, 2000, 1500, .04]) })
+    expect(cameraToWebsfmSensor(simple)).toMatchObject({ distortionModel: 'fisheye1', k1: .04, k2: null })
+    const radial = decodeColmapCamera({ camera_id: 5, model: 3, width: 10, height: 8,
+      params: blob(Float64Array, [9, 5, 4, .1, .02]) })
+    expect(cameraToWebsfmSensor(radial)).toMatchObject({ distortionModel: 'radial2', k1: .1, k2: .02 })
+  })
+
+  it('reports the lens models it cannot map', () => {
+    for (const model of [7, 10, 11]) {
+      const n = COLMAP_CAMERA_MODELS[model].names.length
+      const cam = decodeColmapCamera({ camera_id: 1, model, width: 10, height: 8, params: blob(Float64Array, new Array(n).fill(.5)) })
+      expect(cam.supported).toBe(false)
+      expect(cam.losses[0]).toContain(cam.model)
+      expect(cameraToWebsfmSensor(cam)).toBeNull()
+    }
+  })
+
   it('decodes keypoints, descriptors, matches, and matrices', () => {
     expect(decodeColmapKeypoints({ image_id: 1, rows: 2, cols: 4, data: blob(Float32Array, [1, 2, 3, 4, 5, 6, 7, 8]) })).toEqual([
       expect.objectContaining({ x: 1, y: 2, scale: 3, orientation: 4 }),

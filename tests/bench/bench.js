@@ -87,7 +87,7 @@ const fetchRetry = async (url, tries = 3) => {
 const stem = (n) => n.replace(/.[^.]+$/, '').toLowerCase()
 // The sensor-table fields a run's `sensor` override may set, and each sensor's values
 // before the first override, so a later run without one starts from the EXIF grouping.
-const SENSOR_OVERRIDE_FIELDS = ['focal', 'focalUnit', 'cx', 'cy', 'k1', 'k2', 'k3', 'p1', 'p2', 'distortionModel']
+const SENSOR_OVERRIDE_FIELDS = ['focal', 'focalUnit', 'cx', 'cy', 'k1', 'k2', 'k3', 'k4', 'k5', 'k6', 'p1', 'p2', 'distortionModel']
 const sensorBase = {}
 let demTiff = null
 let reference = null // scripts/bench/reference.mjs: { positions, leverArm, gcps }

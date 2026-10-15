@@ -22,10 +22,12 @@ A sensor definition carries:
 - **Physical sensor size** in millimetres, which converts a
   [focal length](help:focal-length) in mm into pixels.
 - **Focal length**, from EXIF or entered by hand.
-- A **distortion model** — pinhole, radial, radial2, or full Brown–Conrady —
-  declaring which coefficients this camera actually uses. Only the active
-  model's terms are applied and refined; declaring more terms than the data
-  supports invites overfitting.
+- A **lens model** — pinhole, radial, radial2, full Brown–Conrady, rational, or one
+  of three [fisheye](help:fisheye-lens) models — declaring how the lens projects and
+  which coefficients this camera actually uses. Only the active model's terms are
+  applied and refined; declaring more terms than the data supports invites
+  overfitting. A fisheye must be chosen by hand (or named in an imported
+  calibration): its coefficients alone do not say so.
 - A **kind**: a normal digital camera, or `film` for a scanned analogue frame,
   which additionally carries [fiducial marks](help:fiducial-marks) and a
   calibration certificate.

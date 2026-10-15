@@ -15,6 +15,8 @@
 // pixel the lens/scanner actually recorded), which is what lets the output grid be
 // filled with no gaps. Inverting it per pixel would leave holes.
 
+import { undistortNormalized } from '../sfm/distortion.js'
+
 // Bilinear-sample an RGBA buffer at (x,y), clamping to the edge. Writes 4 bytes
 // into `out` at `oi`. Clamping (rather than a border colour) is what makes the
 // `validSampleRect` crop the only place border policy is decided.
@@ -144,4 +146,57 @@ export function cropRgba(data, ow, oh, rect) {
 // focal length does not — a crop changes the field of view, not the scale.
 export function shiftPrincipalPoint(K, rect) {
   return { fx: K.fx, fy: K.fy, cx: K.cx - rect.x, cy: K.cy - rect.y }
+}
+
+// ── Fisheye: a wider pinhole canvas for dense ────────────────────────────────
+// A fisheye's pinhole image at its own size holds only the middle of its field: the
+// recorded radius θ·f becomes f·tan θ, so the frame edge moves outwards. Dense resamples
+// it onto a canvas grown on each side far enough to hold the recorded field along the
+// image axes, up to FISHEYE_DENSE_MAX_DEG off-axis — beyond that a pinhole pixel spans
+// so little of the photo (1/cos²θ) that matching it is mostly interpolation. The
+// canvas keeps K's focal; only the principal point moves (by dx, dy).
+export const FISHEYE_DENSE_MAX_DEG = 60
+
+// { width, height, dx, dy } in K's full-resolution pixel frame (pixel centres at
+// integers, so the photo spans [−½, width − ½]), or null when the lens is no fisheye
+// or the photo already fits its own frame. `width`/`height` are the photo's.
+export function fisheyeCanvas(K, dist, width, height, maxDeg = FISHEYE_DENSE_MAX_DEG) {
+  if (!dist?.fisheye || !K || !(width > 0 && height > 0)) return null
+  const cap = Math.tan((maxDeg * Math.PI) / 180)
+  // Recorded half-extent (px from the principal point) → pinhole half-extent.
+  const reach = (px, f) => {
+    if (!(px > 0)) return 0
+    const [t] = undistortNormalized(px / f, 0, dist)
+    return f * (Number.isFinite(t) && t > 0 ? Math.min(t, cap) : cap)
+  }
+  const grow = (pinhole, recorded) => Math.max(0, Math.ceil(pinhole - recorded))
+  const left = K.cx + 0.5, right = width - 0.5 - K.cx
+  const top = K.cy + 0.5, bottom = height - 0.5 - K.cy
+  const dx = grow(reach(left, K.fx), left), dxR = grow(reach(right, K.fx), right)
+  const dy = grow(reach(top, K.fy), top), dyB = grow(reach(bottom, K.fy), bottom)
+  if (!(dx || dxR || dy || dyB)) return null
+  return { width: width + dx + dxR, height: height + dy + dyB, dx, dy }
+}
+
+// resampleRgba for a grid that may reach past the source: also returns `outside`, a
+// 0/1 LUT of the output pixels whose sample falls off the photo (edge clamping would
+// otherwise smear its border across them — content a matcher would believe).
+export function resampleRgbaMarked(src, map, ow, oh) {
+  const { data, width: sw, height: sh } = src
+  const out = new Uint8ClampedArray(ow * oh * 4)
+  const outside = new Uint8Array(ow * oh)
+  let nOutside = 0
+  for (let v = 0; v < oh; v++) {
+    for (let u = 0; u < ow; u++) {
+      const s = map(u, v)
+      const i = v * ow + u
+      // eslint-disable-next-line no-self-compare
+      if (!(s.x >= -0.5 && s.y >= -0.5 && s.x <= sw - 0.5 && s.y <= sh - 0.5) || s.x !== s.x) {
+        outside[i] = 1; nOutside++
+        continue
+      }
+      sampleRgbaBilinear(data, sw, sh, s.x, s.y, out, i * 4)
+    }
+  }
+  return { data: out, outside: nOutside ? outside : null }
 }

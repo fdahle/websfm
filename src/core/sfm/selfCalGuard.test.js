@@ -67,3 +67,24 @@ describe('validateSelfCalUpdate', () => {
     })
   })
 })
+
+describe('validateSelfCalUpdate (fisheye)', () => {
+  // GoPro-class 4000×3000, f ≈ 1700: the corner is ~84° off-axis.
+  const fish = { fx: 1700, fy: 1700, cx: 2000, cy: 1500, fisheye: true, k1: 0, k2: 0, k3: 0, k4: 0 }
+  const check = (proposed) => validateSelfCalUpdate({
+    before: fish, proposed: { ...fish, ...proposed }, nominalFx: 1700, width: 4000, height: 3000,
+  })
+
+  it('accepts a realistic lens refined from the equidistant seed', () => {
+    // Its Brown reading (k1 = 0.05 at r ≈ 1.5) would fail the radial-shift check.
+    expect(check({ k1: 0.05, k2: -0.01 }).ok).toBe(true)
+  })
+
+  it('rejects a lens curve that folds before the corner', () => {
+    expect(check({ k1: -0.45 })).toMatchObject({ ok: false, code: 'fisheye-fold' })
+  })
+
+  it('rejects a lens that moves the rim too far in one pass', () => {
+    expect(check({ k1: 0.3 })).toMatchObject({ ok: false, code: 'fisheye-shift' })
+  })
+})

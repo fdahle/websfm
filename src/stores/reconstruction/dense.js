@@ -1,6 +1,5 @@
 import { makeFrameModelResolver } from '../../core/sfm/displayFrame.js'
 import { qualityToMaxDim, fitDepthQuality, filterConfig, filterSettings, logFilterCache, logFilterTotals, mergeFusionCounters, logFusionStream, finishFusion } from '../../core/dense/mvs.js'
-import { distortionOf } from '../../core/sfm/distortion.js'
 import { isFiducialCalibrated } from '../../core/sfm/fiducialModel.js'
 import { packSparseForDense, sparseInputTransfer } from '../../core/dense/sparseInput.js'
 import { computeDepthMaps as workerComputeDepthMaps, POOL_SIZE, filterDepthMaps as workerFilterDepthMaps, densify as workerDensify, meshify as workerMeshify } from '../../workers/computeClient.js'
@@ -90,10 +89,9 @@ export function createDense({
         // wait for it (rejects if its transcode failed) so dense reads the PNG,
         // never the lossy display JPEG — see the computeUrl invariant.
         await imagesStore.whenComputeReady(im)
-        const dist = s ? distortionOf(s) : null
-        // Composed self-cal bag for this image (a second undistortion applied after
-        // `dist`). Null when self-cal was off for it.
-        const { selfCal } = frameModel(im)
+        // The lens (the sensor's, or the run's self-calibrated fisheye) and the composed
+        // self-cal bag applied after it — null when self-cal was off for it.
+        const { dist, selfCal } = frameModel(im)
         inputImages.push({
           uuid, name: im.name, url: im.computeUrl ?? im.url,
           // Per-image mask (if any) so masked regions are excluded from the dense cloud.
@@ -114,8 +112,9 @@ export function createDense({
       if (selfCalRows.length) {
         const parts = selfCalRows.map((d) =>
           `${d.sensorId != null ? (sensorById.get(d.sensorId)?.label ?? d.sensorId.slice(0, 6))
-            : (imgByUuid.get(d.imageUuid)?.name ?? 'image')} k1 ${(d.k1 || 0).toFixed(5)}`
-          + `${d.k2 ? `, k2 ${d.k2.toFixed(5)}` : ''}${d.k3 ? `, k3 ${d.k3.toFixed(5)}` : ''}`)
+            : (imgByUuid.get(d.imageUuid)?.name ?? 'image')}${d.fisheye ? ' fisheye' : ''} k1 ${(d.k1 || 0).toFixed(5)}`
+          + `${d.k2 ? `, k2 ${d.k2.toFixed(5)}` : ''}${d.k3 ? `, k3 ${d.k3.toFixed(5)}` : ''}`
+          + `${d.k4 ? `, k4 ${d.k4.toFixed(5)}` : ''}`)
         log(`Dense: applying self-calibrated distortion from the sparse run — ${parts.join('; ')}`,
           'info', 'Dense')
       }

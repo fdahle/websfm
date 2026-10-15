@@ -136,7 +136,11 @@ stage again with config key `dense:loose`.
 - A variant's `recon.leverArm: true` sets `reference.leverArm` on every sensor
   (`gnssLeverArm`), so camera priors are treated as antenna positions. Without it the
   arm is used only to evaluate camera positions.
-- A variant's `recon.sensor: { focal, focalUnit, cx, cy, k1, k2, k3, p1, p2,
+- `sensor: { focal, focalUnit, cx, cy, k1 … k6, p1, p2, distortionModel }` (top level)
+  merges every sensor into one with that calibration right after ingest, before
+  detection, so matching already sees it (a fisheye block needs this: its matches are
+  verified in the pinhole frame).
+- A variant's `recon.sensor: { focal, focalUnit, cx, cy, k1 … k6, p1, p2,
   distortionModel }` pins every sensor's calibration for that run, in sensor-table
   conventions: absolute pixel-centre `cx`/`cy` (Metashape's are offsets from the centre
   in pixel-edge coordinates: `W/2 + cx − ½`) and OpenCV `p1`/`p2` (Metashape's are

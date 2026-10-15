@@ -298,9 +298,9 @@ export function createSparseRun({
                   focal: s.focal, focalUnit: s.focalUnit, pixelSize: s.pixelSize,
                   sensorWidthMm: s.sensorWidthMm,
                   cx: s.cx, cy: s.cy, width: s.width, height: s.height,
-                  // Lens distortion (Brown–Conrady) — undistorted at ingest so the
+                  // Lens model (Brown / rational / fisheye) — undistorted at ingest so the
                   // pipeline stays pinhole. Null coeffs are treated as zero.
-                  k1: s.k1, k2: s.k2, k3: s.k3, p1: s.p1, p2: s.p2,
+                  k1: s.k1, k2: s.k2, k3: s.k3, k4: s.k4, k5: s.k5, k6: s.k6, p1: s.p1, p2: s.p2,
                   distortionModel: s.distortionModel,
                   // Film-scan interior orientation (F4): kind + fiducial calibration.
                   // The sfm ingest fits a per-image transform and builds one canonical

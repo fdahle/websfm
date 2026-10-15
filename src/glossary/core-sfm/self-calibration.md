@@ -33,7 +33,12 @@ refine $f, k_1$ during registration, then escalate to $k_2$, then the principal
 point, then $k_3$ — each unlocked only once the camera and observation counts
 justify it. When a sensor already carries a calibrated distortion model,
 self-calibration of those terms is switched off instead: the distortion was
-removed at ingest, and refitting it would correct the same effect twice.
+removed at ingest, and refitting it would correct the same effect twice. A
+[fisheye](help:fisheye-lens) sensor is the exception to the folding below: bundle
+adjustment fits its observations in the pixels the lens recorded, so the $k$ terms it
+refines are the fisheye's own polynomial, and each refinement re-derives that sensor's
+keypoints from the recorded pixels with the new lens instead of folding a correction
+into them.
 
 One invariant underlies all of this: **the pipeline downstream of bundle
 adjustment is strictly pinhole**. So after each self-calibrating pass the newly

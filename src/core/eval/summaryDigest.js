@@ -380,8 +380,10 @@ function diagnosticsLines(d) {
       + `${r.source ? ` · ${r.source}` : ''}`)
   }
   for (const r of selfCalDistortion || []) {
-    out.push(`  composed radial: k1 ${fmtNum(r.k1, 5)}, k2 ${fmtNum(r.k2, 5)}, k3 ${fmtNum(r.k3, 5)}`
-      + ` (fit RMS ${fmtNum(r.fitRmsPx, 3)}px)`)
+    out.push(r.fisheye
+      ? `  self-calibrated fisheye: k1 ${fmtNum(r.k1, 5)}, k2 ${fmtNum(r.k2, 5)}, k3 ${fmtNum(r.k3, 5)}, k4 ${fmtNum(r.k4, 5)}`
+      : `  composed radial: k1 ${fmtNum(r.k1, 5)}, k2 ${fmtNum(r.k2, 5)}, k3 ${fmtNum(r.k3, 5)}`
+        + ` (fit RMS ${fmtNum(r.fitRmsPx, 3)}px)`)
   }
   if (trackCompletion?.length) {
     const sum = (k) => trackCompletion.reduce((s, r) => s + (r[k] ?? 0), 0)

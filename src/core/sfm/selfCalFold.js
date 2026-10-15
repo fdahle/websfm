@@ -13,9 +13,13 @@
 // Created before registration: the interim BA self-calibrates f,k1 mid-registration
 // (D3), so bundleSession.js's runBundleAdjust folds during the registration call.
 
-import { undistortPixel } from './distortion.js'
+import { undistortPixel, distortPixel, undistortKeypoint, distortionOf, coeffsForModel } from './distortion.js'
 import { fitComposedRadialSets, radialCurveOk } from './selfCalCompose.js'
 import { mapPositions } from './keypointSet.js'
+
+const xy = (p) => [p.x, p.y]
+const kChanged = (a, b) => a.fx !== b.fx || a.fy !== b.fy || a.cx !== b.cx || a.cy !== b.cy
+const lensChanged = (a, b) => a.k1 !== b.k1 || a.k2 !== b.k2 || a.k3 !== b.k3 || a.k4 !== b.k4
 
 export function createSelfCalFold({ imgs, cameras, Kmap, moveGcpObs, sensorIntByUuid, fiducialTransforms, log }) {
   // Self-calibration group of an image: its sensor's (BA shares one focal scale,
@@ -33,6 +37,25 @@ export function createSelfCalFold({ imgs, cameras, Kmap, moveGcpObs, sensorIntBy
     if (!imgsBySelfCalGroup.has(key)) imgsBySelfCalGroup.set(key, [])
     imgsBySelfCalGroup.get(key).push(img)
   }
+  // Fisheye lens per self-cal group: seeded from the sensor (distortionOf, plus how many
+  // of its terms the sensor's model lets self-calibration refine), replaced by every
+  // accepted solve that refines its k terms (fold). Every consumer — the BA's
+  // recorded-pixel observations (bundleSession.js), the fold, the summary dense reads —
+  // takes it from here, so all of them see the same lens at every point of the run.
+  const lensByGroup = new Map()        // group key → fisheye lens bag, or null (not a fisheye)
+  const refinedLensGroups = new Set()  // groups whose lens self-calibration has changed
+  const imgByUuid = new Map(imgs.map((img) => [img.uuid, img]))
+  function groupLens(key) {
+    if (!lensByGroup.has(key)) {
+      const img = imgsBySelfCalGroup.get(key)?.[0]
+      const dist = distortionOf(img?.sensor)
+      lensByGroup.set(key, dist?.fisheye
+        ? { ...dist, terms: coeffsForModel(img.sensor.distortionModel).length } : null)
+    }
+    return lensByGroup.get(key)
+  }
+  const lensOf = (uuid) => (imgByUuid.has(uuid) ? groupLens(selfCalGroupOf(uuid)) : null)
+
   // An image's size in K's pixel frame — what the self-cal guards measure the
   // principal point and corners against. A film scan's K lives in the fiducial
   // canonical frame (ingest.js applyFiducialFrames), not in its scan pixels.
@@ -95,10 +118,17 @@ export function createSelfCalFold({ imgs, cameras, Kmap, moveGcpObs, sensorIntBy
     // the identifiability guard can drop k2/k3 later): fitting only the current
     // pass's terms would silently erase them from what dense reproduces.
     const passTerms = { k2: refineMode.includes('k2'), k3: refineMode.includes('k3') }
-    let foldedImgs = 0, foldedShift = 0, foldedN = 0
+    let foldedImgs = 0, foldedShift = 0, foldedN = 0, refitFisheye = 0
     for (const [key, ci0] of solvedGroups) {
       const rk0 = refined[ci0], k0 = kList[ci0]
-      const bag = { k1: rk0.k1 || 0, k2: rk0.k2 || 0, k3: rk0.k3 || 0 }
+      // A fisheye group's k terms are its own lens, solved in recorded pixels: it
+      // never folds a Brown bag, it takes the new lens (fisheyeFold below).
+      const lensBefore = groupLens(key)
+      const lensAfter = lensBefore && {
+        ...lensBefore, k1: rk0.k1 ?? lensBefore.k1, k2: rk0.k2 ?? lensBefore.k2,
+        k3: rk0.k3 ?? lensBefore.k3, k4: rk0.k4 ?? lensBefore.k4,
+      }
+      const bag = lensBefore ? { k1: 0, k2: 0, k3: 0 } : { k1: rk0.k1 || 0, k2: rk0.k2 || 0, k3: rk0.k3 || 0 }
       const folds = !!(bag.k1 || bag.k2 || bag.k3)
       for (const img of imgsBySelfCalGroup.get(key) ?? []) {
         const ci = camIdxOf.get(img.uuid)
@@ -125,7 +155,21 @@ export function createSelfCalFold({ imgs, cameras, Kmap, moveGcpObs, sensorIntBy
           moveGcpObs(img.uuid, (x, y) => undistortPixel(x, y, Kc, bag))
           foldedImgs++
         }
+        // A fisheye image's keypoints are its recorded pixels undistorted about its K
+        // and lens; the dense/ortho sample map pairs the CURRENT K with the current
+        // lens, so a changed f, cx,cy or k must re-derive them (old K + lens → the
+        // recorded pixel → new K + lens) or the rasters would no longer match the model.
+        if (lensBefore && k && img.kp?.n && (kChanged(k, Kc) || lensChanged(lensBefore, lensAfter))) {
+          const remap = (x, y) => undistortKeypoint(...xy(distortPixel(x, y, k, lensBefore)), Kc, lensAfter)
+          img.kp = mapPositions(img.kp, remap)
+          moveGcpObs(img.uuid, (x, y) => undistortPixel(...xy(distortPixel(x, y, k, lensBefore)), Kc, lensAfter))
+          refitFisheye++
+        }
         if (k) Kmap.set(img.uuid, { ...k, ...Kc, k1: 0, k2: 0, k3: 0, p1: 0, p2: 0 })
+      }
+      if (lensBefore && lensChanged(lensBefore, lensAfter)) {
+        lensByGroup.set(key, lensAfter)
+        refinedLensGroups.add(key)
       }
       if (folds) {
         const ever = foldedTermsByGroup.get(key) ?? { k2: false, k3: false }
@@ -134,6 +178,10 @@ export function createSelfCalFold({ imgs, cameras, Kmap, moveGcpObs, sensorIntBy
         })
       }
       if (foldedTermsByGroup.has(key)) composeSelfCalRecord(key, label)
+    }
+    if (refitFisheye > 0) {
+      log(`${label} re-mapped ${refitFisheye} fisheye image(s)' keypoints onto the refined lens / focal / principal point`,
+        'info', 'Reconstruction')
     }
     if (foldedImgs > 0) {
       log(`${label} folded self-calibrated distortion into ${foldedImgs} image(s)' `
@@ -181,12 +229,24 @@ export function createSelfCalFold({ imgs, cameras, Kmap, moveGcpObs, sensorIntBy
 
   // The composed bags with any non-zero term, as the run summary's `selfCalDistortion`
   // rows (runRecord.js assembleSummary documents the field).
-  const distortionSummary = () => [...selfCalDistByGroup.values()]
-    .filter((d) => d.k1 || d.k2 || d.k3)
-    .map((d) => ({
-      sensorId: d.sensorId, ...(d.imageUuid ? { imageUuid: d.imageUuid } : {}),
-      k1: d.k1, k2: d.k2, k3: d.k3, fitRmsPx: d.fitRmsPx,
-    }))
+  // A fisheye group whose lens self-calibration changed adds a `fisheye: true` row: the
+  // whole refined lens, which REPLACES the sensor's for dense and the exports
+  // (displayFrame.js makeFrameModelResolver) instead of composing on top of it.
+  const distortionSummary = () => [
+    ...[...selfCalDistByGroup.values()]
+      .filter((d) => d.k1 || d.k2 || d.k3)
+      .map((d) => ({
+        sensorId: d.sensorId, ...(d.imageUuid ? { imageUuid: d.imageUuid } : {}),
+        k1: d.k1, k2: d.k2, k3: d.k3, fitRmsPx: d.fitRmsPx,
+      })),
+    ...[...refinedLensGroups].map((key) => {
+      const img = imgsBySelfCalGroup.get(key)[0], lens = lensByGroup.get(key)
+      return {
+        sensorId: img.sensorId ?? null, ...(img.sensorId == null ? { imageUuid: img.uuid } : {}),
+        fisheye: true, k1: lens.k1, k2: lens.k2, k3: lens.k3, k4: lens.k4, fitRmsPx: 0,
+      }
+    }),
+  ]
 
-  return { groupOf: selfCalGroupOf, kFrameDims, fold, distortionSummary }
+  return { groupOf: selfCalGroupOf, kFrameDims, fold, distortionSummary, lensOf }
 }

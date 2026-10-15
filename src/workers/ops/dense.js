@@ -10,8 +10,9 @@ import { buildMaskLookup } from '../../core/mask.js'
 import { hasDistortion } from '../../core/sfm/distortion.js'
 import { makeSampleMap } from '../../core/sfm/displayFrame.js'
 import {
-  resampleRgba, resampleMaskLut, pinholeFrameSize,
+  resampleRgba, resampleMaskLut, pinholeFrameSize, fisheyeCanvas, resampleRgbaMarked, FISHEYE_DENSE_MAX_DEG,
 } from '../../core/products/undistort.js'
+import { scaleAxes } from '../../core/sfm/geometry.js'
 import { depthColor } from '../../core/products/colormap.js'
 import { isGpuAvailable, ensureDevice } from '../gpu/device.js'
 import { computeDepthMapGPU } from '../gpu/depthMapGpu.js'
@@ -45,18 +46,45 @@ export function makeDenseOps({ rasterize }) {
   // native-resolution K; output and source share the working grid, so both scales
   // are its per-axis factors (`r.scaleXY`). A no-op when both bags are empty — that early return is what
   // keeps the common EXIF-only case free (a pure scale change is still a real map).
-  function undistortRaster(r, Kfull, dist, selfCal) {
+  //
+  // A fisheye goes onto a wider canvas (undistort.js fisheyeCanvas): the raster then
+  // carries `pad` (the principal-point shift, full-res px — use paddedK), `outside`
+  // (0/1 LUT of canvas pixels off the photo) and, like every undistorted raster,
+  // `undist` = { map, sw, sh } to move a photo-space mask the same way (undistortedMask).
+  // `photo` = { width, height } of the full-resolution photo.
+  function undistortRaster(r, Kfull, dist, selfCal, photo = null) {
     if (!hasAnyDistortion(dist, selfCal)) return r
-    const map = makeSampleMap({ K: Kfull, dist, selfCal, outScale: gridScale(r), srcScale: gridScale(r) })
-    return { ...r, data: resampleRgba(r, map, r.width, r.height) }
+    const base = makeSampleMap({ K: Kfull, dist, selfCal, outScale: gridScale(r), srcScale: gridScale(r) })
+    const canvas = !hasDistortion(selfCal) && photo ? fisheyeCanvas(Kfull, dist, photo.width, photo.height) : null
+    if (!canvas) {
+      return { ...r, data: resampleRgba(r, base, r.width, r.height), undist: { map: base, sw: r.width, sh: r.height } }
+    }
+    const [sx, sy] = scaleAxes(gridScale(r))
+    const ox = canvas.dx * sx, oy = canvas.dy * sy
+    const map = (u, v) => base(u - ox, v - oy)
+    const ow = Math.round(canvas.width * sx), oh = Math.round(canvas.height * sy)
+    const { data, outside } = resampleRgbaMarked(r, map, ow, oh)
+    return { ...r, data, width: ow, height: oh, pad: { dx: canvas.dx, dy: canvas.dy }, outside,
+      undist: { map, sw: r.width, sh: r.height } }
   }
 
-  // The same map, nearest sample, so a distorted-space mask lines up with the
-  // now-undistorted raster.
-  function undistortMaskLut(lut, w, h, Kfull, dist, scale, selfCal) {
-    if (!hasAnyDistortion(dist, selfCal)) return lut
-    const map = makeSampleMap({ K: Kfull, dist, selfCal, outScale: scale, srcScale: scale })
-    return resampleMaskLut(lut, w, h, map, w, h)
+  // The camera's K for an undistorted raster's grid (before scaling to it): a widened
+  // fisheye canvas shifts the principal point by its pad; the focal is unchanged.
+  const paddedK = (K, r) => (r.pad ? { ...K, cx: K.cx + r.pad.dx, cy: K.cy + r.pad.dy } : K)
+
+  // A photo-space mask (1 = excluded) on an undistorted raster's grid, nearest sample,
+  // OR the canvas pixels off the photo. Null when there is nothing to exclude.
+  async function undistortedMask(mask, r) {
+    let lut = null
+    if (mask) {
+      lut = await buildMaskLookup(mask, r.undist ? r.undist.sw : r.width, r.undist ? r.undist.sh : r.height)
+      if (r.undist) lut = resampleMaskLut(lut, r.undist.sw, r.undist.sh, r.undist.map, r.width, r.height)
+    }
+    if (!r.outside) return lut
+    if (!lut) return r.outside
+    const out = new Uint8Array(lut.length)
+    for (let k = 0; k < lut.length; k++) out[k] = lut[k] || r.outside[k] ? 1 : 0
+    return out
   }
 
   // ── Film scan → canonical warp (F4) ─────────────────────────────────────────
@@ -232,7 +260,12 @@ export function makeDenseOps({ rasterize }) {
     const budget = settings.memBudgetBytes > 0 ? settings.memBudgetBytes : DEFAULT_BUDGET_BYTES
     const proj = projectDensePeakBytes({
       nImages: images.length, maxDim, nSources: maxSources, backend: backend ? 'gpu' : 'wasm',
-      pixels: images.map((im) => workingPixels(im.width, im.height, maxDim)),
+      // A fisheye's widened canvas (undistortRaster) at the photo's working scale.
+      pixels: images.map((im) => {
+        const px = workingPixels(im.width, im.height, maxDim)
+        const c = !im.fid && !hasDistortion(im.selfCal) ? fisheyeCanvas(im.K, im.dist, im.width, im.height) : null
+        return c ? Math.round(px * (c.width * c.height) / (im.width * im.height)) : px
+      }),
       retainedMaps: streamMaps ? 1 : images.length,
       // The in-memory cross-view filter below; streamed maps are filtered by its own pass.
       filterMaps: geomConsistency && !streamMaps ? images.length : 0,
@@ -257,7 +290,8 @@ export function makeDenseOps({ rasterize }) {
     // Per-url intrinsics + distortion, so getRaster can undistort each source once
     // (url↔image is 1:1, and undistortion is independent of ref/source role).
     const metaByUrl = new Map(images.map((im) =>
-      [im.url, { K: im.K, dist: im.dist || null, selfCal: im.selfCal || null, fid: im.fid || null }]))
+      [im.url, { K: im.K, dist: im.dist || null, selfCal: im.selfCal || null, fid: im.fid || null,
+        photo: im.width > 0 && im.height > 0 ? { width: im.width, height: im.height } : null }]))
     const usedSets = srcUuidsByImg.map((srcUuids, i) => {
       const set = new Set([images[i].url])
       for (const u of srcUuids) { const url = urlByUuid.get(u); if (url) set.add(url) }
@@ -277,7 +311,7 @@ export function makeDenseOps({ rasterize }) {
           // Film scan: warp into the canonical frame (composes calibrated + self-cal).
           r = warpFilmRaster(r, meta.K, meta.dist, meta.fid, maxDim, meta.selfCal)
         } else if (meta?.dist || meta?.selfCal) {
-          r = undistortRaster(r, meta.K, meta.dist, meta.selfCal)
+          r = undistortRaster(r, meta.K, meta.dist, meta.selfCal, meta.photo)
         }
         rasterCache.set(url, r)
         ledger.track(`raster:${url}`, r.width * r.height * 4)
@@ -331,7 +365,7 @@ export function makeDenseOps({ rasterize }) {
       const ref = {
         gray: rgbaToGray(rRef.data, rRef.width, rRef.height),
         width: rRef.width, height: rRef.height,
-        K: scaleK(img.K, gridScale(rRef)),
+        K: scaleK(paddedK(img.K, rRef), gridScale(rRef)),
         cam: { R: img.R, t: img.t },
       }
       const sources = []
@@ -344,18 +378,12 @@ export function makeDenseOps({ rasterize }) {
         // those edges into the depth map. Build the LUT at the source's working size.
         // The mask is drawn in scan space; move it the same way the raster moved —
         // the film scan→canonical warp, or the plain distortion map.
-        let srcMask = null
-        if (s.mask) {
-          if (rs.fid) srcMask = await filmMaskLut(s.mask, rs)
-          else {
-            srcMask = await buildMaskLookup(s.mask, rs.width, rs.height)
-            if (s.dist || s.selfCal) srcMask = undistortMaskLut(srcMask, rs.width, rs.height, s.K, s.dist, gridScale(rs), s.selfCal)
-          }
-        }
+        // A widened fisheye canvas also excludes its pixels off the photo.
+        const srcMask = rs.fid ? (s.mask ? await filmMaskLut(s.mask, rs) : null) : await undistortedMask(s.mask, rs)
         sources.push({
           gray: rgbaToGray(rs.data, rs.width, rs.height),
           w: rs.width, h: rs.height,
-          K: scaleK(s.K, gridScale(rs)),
+          K: scaleK(paddedK(s.K, rs), gridScale(rs)),
           cam: { R: s.R, t: s.t },
           mask: srcMask,
         })
@@ -418,10 +446,12 @@ export function makeDenseOps({ rasterize }) {
       }
       // Drop masked regions from the dense cloud: zero the depth there so fusion
       // (which treats depth <= 0 as "no data") skips those pixels.
-      if (img.mask) {
-        const maskLut = rRef.fid
-          ? await filmMaskLut(img.mask, rRef)
-          : await buildMaskLookup(img.mask, dm.width, dm.height)
+      // The mask moves with the raster (undistortion, or the fisheye canvas, whose pixels
+      // off the photo are dropped too).
+      const maskLut = rRef.fid
+        ? (img.mask ? await filmMaskLut(img.mask, rRef) : null)
+        : await undistortedMask(img.mask, rRef)
+      if (maskLut && maskLut.length === dm.depth.length) {
         for (let k = 0; k < dm.depth.length; k++) if (maskLut[k]) dm.depth[k] = 0
       }
       const rgb = rgbFromRgba(rRef.data, rRef.width, rRef.height)
@@ -431,6 +461,10 @@ export function makeDenseOps({ rasterize }) {
       if (rRef.fid) {
         emit('log', [`Depth maps: ${img.name} — preview is in the canonical fiducial frame `
           + `(${dm.width}×${dm.height}), not scan space`, 'debug', 'Dense'])
+      }
+      if (rRef.pad) {
+        emit('log', [`Depth maps: ${img.name} — fisheye resampled onto a ${dm.width}×${dm.height} pinhole canvas `
+          + `(up to ${FISHEYE_DENSE_MAX_DEG}° off-axis); its preview is in that frame, not the photo's`, 'debug', 'Dense'])
       }
       // Per-pixel diagnostics: how many pixels got a depth, and the matching-cost
       // distribution over those pixels (low cost = confident; high = likely junk

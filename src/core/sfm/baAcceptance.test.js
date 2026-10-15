@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
+import { distortPixel } from './distortion.js'
 
-import { compareRobustCost, projectFull } from './baAcceptance.js'
+import { compareRobustCost, projectFull, projectFullXYZ } from './baAcceptance.js'
 
 const K = { fx: 1000, fy: 1000, cx: 500, cy: 400 }
 const I = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
@@ -49,5 +50,19 @@ describe('compareRobustCost', () => {
     const r = compareRobustCost({ before, after, observations })
     expect(r.improved).toBe(false)
     expect(r.after).toBeGreaterThan(r.before)
+  })
+})
+
+describe('projectFullXYZ (fisheye)', () => {
+  it('matches the pinhole projection pushed through distortPixel', () => {
+    const cam = { R: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], t: [0, 0, 0] }
+    const K = { fx: 320, fy: 320, cx: 500, cy: 400 }
+    const lens = { fisheye: true, k1: 0.04, k2: -0.006, k3: 0.001, k4: -0.0002 }
+    for (const [x, y, z] of [[0, 0, 5], [3, -2, 4], [-6, 5, 2], [1e-9, 0, 3]]) {
+      const q = projectFullXYZ(cam, { ...K, ...lens }, x, y, z)
+      const p = distortPixel(K.fx * x / z + K.cx, K.fy * y / z + K.cy, K, lens)
+      expect(q.x).toBeCloseTo(p.x, 9)
+      expect(q.y).toBeCloseTo(p.y, 9)
+    }
   })
 })

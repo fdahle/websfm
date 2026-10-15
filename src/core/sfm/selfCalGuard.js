@@ -20,6 +20,49 @@ export const SELF_CAL_GUARD_DEFAULTS = {
   // i.e. fx may end anywhere in [0.3, 1.7] × the guess.
   maxGuessFocalStepFrac: 0.6,
   maxGuessFocalNominalFrac: 0.7,
+  // A fisheye's whole lens is refined, not a residual on top of a calibration: one pass
+  // may move its recorded radius by up to this share of the image diagonal at any ray
+  // inside the frame. Equidistant → a real action-camera lens is ~5%.
+  maxFisheyeShiftFrac: 0.10,
+}
+
+// θd(θ) = θ·(1 + k1θ² + k2θ⁴ + k3θ⁶ + k4θ⁸) and its slope (distortion.js, bundle.rs).
+const thetaD = (k, th) => {
+  const t2 = th * th
+  return th * (1 + t2 * ((k.k1 || 0) + t2 * ((k.k2 || 0) + t2 * ((k.k3 || 0) + t2 * (k.k4 || 0)))))
+}
+const thetaDSlope = (k, th) => {
+  const t2 = th * th
+  return 1 + t2 * (3 * (k.k1 || 0) + t2 * (5 * (k.k2 || 0) + t2 * (7 * (k.k3 || 0) + t2 * 9 * (k.k4 || 0))))
+}
+
+// A proposed fisheye lens must stay invertible out to the farthest recorded corner —
+// θd(θ) rising until it reaches that radius, before θ = π (no lens sees behind
+// itself) — and may not move any in-frame ray by more than maxFisheyeShiftFrac of the
+// diagonal from the lens it replaces.
+function checkFisheye(before, proposed, width, height, maxShiftFrac) {
+  let rObs = 0
+  for (const [x, y] of [[0, 0], [width, 0], [0, height], [width, height]]) {
+    rObs = Math.max(rObs, Math.hypot((x - proposed.cx) / proposed.fx, (y - proposed.cy) / proposed.fy))
+  }
+  const steps = 512
+  let thCorner = null
+  for (let i = 1; i <= steps; i++) {
+    const th = (i / steps) * Math.PI
+    if (!(thetaDSlope(proposed, th) > 0)) break
+    if (thetaD(proposed, th) >= rObs) { thCorner = th; break }
+  }
+  if (thCorner == null) return { ok: false, code: 'fisheye-fold', reason: 'fisheye lens curve folds before the image corner' }
+  let maxShift = 0
+  for (let i = 1; i <= 64; i++) {
+    const th = (i / 64) * thCorner
+    maxShift = Math.max(maxShift, Math.abs(thetaD(proposed, th) - thetaD(before, th)) * proposed.fx)
+  }
+  const frac = maxShift / Math.hypot(width, height)
+  if (frac > maxShiftFrac) {
+    return { ok: false, code: 'fisheye-shift', reason: `fisheye lens moved a ray ${(100 * frac).toFixed(1)}% of the image diagonal, beyond the ${(100 * maxShiftFrac).toFixed(0)}% limit` }
+  }
+  return null
 }
 
 function radialScale(k, r2) {
@@ -75,6 +118,11 @@ export function validateSelfCalUpdate({ before, proposed, nominalFx, width, heig
     const oy = Math.abs(proposed.cy - height / 2) / height
     if (Math.max(ox, oy) > c.maxPrincipalOffsetFrac) {
       return fail(`principal point moved ${(100 * Math.max(ox, oy)).toFixed(1)}% of the image size from centre`, 'principal-point')
+    }
+
+    if (proposed.fisheye) {
+      const bad = checkFisheye(before, proposed, width, height, c.maxFisheyeShiftFrac)
+      return bad ? fail(bad.reason, bad.code) : { ok: true, code: null, reason: null, stepFrac, nominalFrac }
     }
 
     // Check the proposed forward radial map at all four corners. A negative scale

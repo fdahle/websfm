@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   sampleRgbaBilinear, resampleRgba, resampleMaskLut, pinholeFrameSize,
-  validSampleRect, cropRgba, shiftPrincipalPoint,
+  validSampleRect, cropRgba, shiftPrincipalPoint, fisheyeCanvas, resampleRgbaMarked,
 } from './undistort.js'
 import { makeSampleMap } from '../sfm/displayFrame.js'
 import { toScaledPx, fromScaledPx } from '../sfm/geometry.js'
@@ -193,5 +193,36 @@ describe('resampleMaskLut', () => {
     const out = resampleMaskLut(lut, 4, 4, (u, v) => ({ x: u + 1, y: v + 1 }), 4, 4)
     expect(out[1 * 4 + 1]).toBe(1)
     expect([...out].every((x) => x === 0 || x === 1)).toBe(true)
+  })
+})
+
+describe('fisheyeCanvas', () => {
+  // GoPro-class: 4000×3000, f = 1700 — the frame edge is ~67° off-axis along x.
+  const K = { fx: 1700, fy: 1700, cx: 1999.5, cy: 1499.5 }
+  const lens = { fisheye: true, k1: 0, k2: 0, k3: 0, k4: 0 }
+
+  it('grows the frame to hold the field up to the cap, principal point shifted', () => {
+    const c = fisheyeCanvas(K, lens, 4000, 3000)
+    // Along x the 60° cap binds: f·tan 60° ≈ 2944 px from the centre.
+    const half = 1700 * Math.tan(Math.PI / 3)
+    expect(c.dx).toBe(Math.ceil(half - 2000))
+    expect(c.width).toBe(4000 + 2 * c.dx)
+    // Along y the photo edge (1500 px = 50.6° equidistant) binds: f·tan(1500/1700).
+    expect(c.dy).toBe(Math.ceil(1700 * Math.tan(1500 / 1700) - 1500))
+    expect(c.height).toBe(3000 + 2 * c.dy)
+  })
+
+  it('leaves non-fisheye and narrow lenses alone', () => {
+    expect(fisheyeCanvas(K, { k1: -0.1, k2: 0, k3: 0, p1: 0, p2: 0 }, 4000, 3000)).toBeNull()
+    expect(fisheyeCanvas(K, lens, 4000, 3000, 0)).toBeNull()
+  })
+
+  it('marks the canvas pixels whose sample falls off the photo', () => {
+    const src = { data: new Uint8ClampedArray(4 * 4 * 4).fill(200), width: 4, height: 4 }
+    const { data, outside } = resampleRgbaMarked(src, (u, v) => ({ x: u - 1, y: v - 1 }), 6, 6)
+    expect(outside[0]).toBe(1)              // (0,0) → (−1,−1): off the photo
+    expect(outside[1 * 6 + 1]).toBe(0)      // (1,1) → (0,0)
+    expect(data[(1 * 6 + 1) * 4]).toBe(200)
+    expect(outside[5 * 6 + 5]).toBe(1)      // (5,5) → (4,4): past the last pixel
   })
 })

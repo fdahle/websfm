@@ -189,7 +189,7 @@ export async function reconstructSingleModel(input, hooks = {}) {
     const moveGcpObs = gcpObservationMover(gcps)
     const { anyCalibratedDistortion, undistortedUuids } = undistortAtIngest({ imgs, Kmap, moveGcpObs, log })
     refitMovedPairs({
-      donePairs, imageByUuid, log,
+      donePairs, bridgePairs: weakPairs, imageByUuid, log,
       movedUuids: new Set([...undistortedUuids, ...fiducialTransforms.keys()]),
     })
 

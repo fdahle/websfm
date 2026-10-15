@@ -467,17 +467,46 @@ impl<'a> BlockIc<'a> {
     }
 }
 
-// Pinhole projection with the shared radial polynomial (Brown, no tangential):
-// d = 1 + k1·r² + k2·r⁴ + k3·r⁶, u = fx·a·d + cx, v = fy·b·d + cy, with a,b =
-// normalised camera coords (xc/zc, yc/zc). All coeffs 0 ⇒ plain pinhole.
-fn project_full(r: &M3, t: &V3, fx: f64, fy: f64, cx: f64, cy: f64, k1: f64, k2: f64, k3: f64, x: &V3) -> (f64, f64) {
+// Both lens families project the normalised camera coords (a, b) = (xc/zc, yc/zc)
+// by one radial factor m: u = fx·a·m + cx, v = fy·b·m + cy.
+//   Brown radial (no tangential): m = 1 + k1·r² + k2·r⁴ + k3·r⁶ — the pinhole frame
+//     the pipeline undistorts into, plus any self-calibrated residual.
+//   Kannala–Brandt fisheye: m = θd/r with θ = atan r, θd = θ·(1 + k1θ² + k2θ⁴ + k3θ⁶ + k4θ⁸)
+//     — the pixels the lens recorded (OpenCV fisheye / COLMAP OPENCV_FISHEYE).
+// All coeffs 0 and not fisheye ⇒ plain pinhole.
+//
+// `lens_factor` returns (m, q, dm/dk) with q = (dm/dr)/r, the quantity every
+// Jacobian below needs (∂m/∂a = q·a, ∂m/∂b = q·b), and dm/dk the four coefficient
+// partials (k4's is 0 for Brown).
+fn lens_factor(r2: f64, k: &[f64; 4], fisheye: bool) -> (f64, f64, [f64; 4]) {
+    if !fisheye {
+        let r4 = r2 * r2;
+        let m = 1.0 + k[0] * r2 + k[1] * r4 + k[2] * r4 * r2;
+        // dm/dr = 2r·g with g = k1 + 2k2·r² + 3k3·r⁴, so q = 2g.
+        let g = k[0] + 2.0 * k[1] * r2 + 3.0 * k[2] * r4;
+        return (m, 2.0 * g, [r2, r4, r4 * r2, 0.0]);
+    }
+    // Below ~1e-8 the ray is on the axis: θd/r → 1, its slope and the k partials → 0.
+    if r2 < 1e-16 { return (1.0, 0.0, [0.0; 4]); }
+    let r = r2.sqrt();
+    let th = r.atan();
+    let t2 = th * th;
+    let p = 1.0 + t2 * (k[0] + t2 * (k[1] + t2 * (k[2] + t2 * k[3])));
+    let dp = 1.0 + t2 * (3.0 * k[0] + t2 * (5.0 * k[1] + t2 * (7.0 * k[2] + t2 * 9.0 * k[3]))); // dθd/dθ
+    let m = th * p / r;
+    // dm/dr = (dθd/dθ · dθ/dr − m) / r, with dθ/dr = 1/(1 + r²).
+    let q = (dp / (1.0 + r2) - m) / r2;
+    let t3 = th * t2;
+    (m, q, [t3 / r, t3 * t2 / r, t3 * t2 * t2 / r, t3 * t2 * t2 * t2 / r])
+}
+
+fn project_full(r: &M3, t: &V3, fx: f64, fy: f64, cx: f64, cy: f64, k: &[f64; 4], fisheye: bool, x: &V3) -> (f64, f64) {
     let pc = mat3_vec(r, x);
     let (xc, yc, zc) = (pc[0] + t[0], pc[1] + t[1], pc[2] + t[2]);
     if zc.abs() < 1e-9 { return (f64::NAN, f64::NAN); }
     let a = xc / zc; let b = yc / zc;
-    let r2 = a * a + b * b; let r4 = r2 * r2;
-    let d = 1.0 + k1 * r2 + k2 * r4 + k3 * r4 * r2;
-    (fx * a * d + cx, fy * b * d + cy)
+    let (m, _, _) = lens_factor(a * a + b * b, k, fisheye);
+    (fx * a * m + cx, fy * b * m + cy)
 }
 
 // Principal rotation vector Log(R), with magnitude in [0, π]. Camera orientation
@@ -514,15 +543,19 @@ pub(crate) fn so3_log(r: &M3) -> V3 {
 
 // ── Reduced-variable coupling blocks (Schur assembly) ─────────────────────────
 
+// Largest reduced block: a camera's 6 rows, or an intrinsic group's
+// [s, dcx, dcy, k1, k2, k3, k4] (≤ 7).
+const BLK_MAX: usize = 7;
+
 // One point's merged Jvarᵀ·Jp coupling block, keyed by its reduced-variable offset
-// (a camera's 6 rows, or an intrinsic group's 1–3 rows). Fixed 6-row storage (the
-// max block height) keeps assembly allocation-free; only `dim` rows are used.
+// (a camera's 6 rows, or an intrinsic group's 1–7 rows). Fixed BLK_MAX-row storage
+// keeps assembly allocation-free; only `dim` rows are used.
 // `blk` is the block's id in the reduced-system pattern (camera c, or n_cam + group).
-struct EBlock { blk: usize, off: usize, dim: usize, rows: [[f64; 3]; 6] }
+struct EBlock { blk: usize, off: usize, dim: usize, rows: [[f64; 3]; BLK_MAX] }
 
 // Accumulate a coupling block into a point's E-list, merging by block so that two
 // cameras sharing an intrinsic group fold into that group's single block.
-fn add_eblock(list: &mut Vec<EBlock>, blk: usize, off: usize, dim: usize, rows: &[[f64; 3]; 6]) {
+fn add_eblock(list: &mut Vec<EBlock>, blk: usize, off: usize, dim: usize, rows: &[[f64; 3]; BLK_MAX]) {
     if let Some(eb) = list.iter_mut().find(|e| e.blk == blk) {
         for a in 0..dim { for b in 0..3 { eb.rows[a][b] += rows[a][b]; } }
     } else {
@@ -612,22 +645,32 @@ fn build_groups(ids: &[i32], n_cam: usize) -> (Vec<usize>, usize) {
 /// - `sensor_of_cam`: n_cam ints — per-camera sensor id (shared → shared focal);
 ///   `< 0` (or a short/empty list) ⇒ that camera is its own group
 /// - `refine_mask`: **bitmask** of the shared per-sensor intrinsics to self-calibrate:
-///   1 = focal scale s, 2 = principal point (dcx,dcy), 4 = radial k1, 8 = k2, 16 = k3.
-///   0 ⇒ poses+points only. The per-group param vector is the ordered subset
-///   `[s?, dcx?, dcy?, k1?, k2?, k3?]` (kdim ≤ 6). fy stays locked to fx (single scale).
+///   1 = focal scale s, 2 = principal point (dcx,dcy), 4 = radial k1, 8 = k2, 16 = k3,
+///   32 = k4 (fisheye only). 0 ⇒ poses+points only. The per-group param vector is the
+///   ordered subset `[s?, dcx?, dcy?, k1?, k2?, k3?, k4?]` (kdim ≤ 7). fy stays locked
+///   to fx (single scale). A coefficient a group's lens does not have (k4 on a Brown
+///   group, k3 on a two-term fisheye) is held at its seed.
 /// - `fixed_cam`: n_cam bytes, non-zero ⇒ that camera's pose is held fixed (local BA:
 ///   the cameras outside the window keep their observations as constraints but are
 ///   not variables). Empty ⇒ every camera is free, the original behaviour exactly.
 /// - `solver_flat`: reduced-system policy `[pcg_min_n, rel_tol, max_iter, accept_partial]`;
 ///   empty / NaN slots ⇒ `SolverOpts::DEFAULT` (see there).
+/// - `fisheye_flat`: n_cam × 5 floats `[terms, k1, k2, k3, k4, …]`. `terms` 0 ⇒ the
+///   camera is pinhole (+ the Brown self-cal residual) and its observations are in the
+///   undistorted frame; `terms` 1–4 ⇒ a Kannala–Brandt fisheye with those seed
+///   coefficients, observed in the pixels the lens recorded, of which the first `terms`
+///   may be self-calibrated (the k bits then refine the fisheye's own polynomial).
+///   Cameras sharing a sensor group must share a lens. Empty ⇒ every camera pinhole,
+///   the original behaviour exactly.
 ///
 /// # Output
-/// `[cameras_flat(n_cam×12), pts_flat(n_pts×3), intrinsics_flat(n_cam×7),
+/// `[cameras_flat(n_cam×12), pts_flat(n_pts×3), intrinsics_flat(n_cam×8),
 ///   cost_before, cost_after, anchor_rms_after, camera_prior_rms_after,
 ///   solver stats (BA_STATS_LEN), cost_trace…]` — the returned
-/// intrinsics are the **refined** effective K per camera as `[fx,fy,cx,cy,k1,k2,k3]`
-/// (radial coeffs 0 for the bits not set in `refine_mask`, identical to the input K
-/// when `refine_mask == 0`); cost_before/cost_after are RMS reprojection error in
+/// intrinsics are the **refined** effective K per camera as `[fx,fy,cx,cy,k1,k2,k3,k4]`
+/// — for a pinhole camera the self-calibrated Brown residual (0 for the bits not set
+/// in `refine_mask`, k4 always 0), for a fisheye camera its full refined Kannala–Brandt
+/// coefficients (the seed when nothing was refined); cost_before/cost_after are RMS reprojection error in
 /// pixels (anchors do not affect them); anchor_rms_after is the RMS anchor
 /// residual in the caller's world units, and camera_prior_rms_after is the RMS
 /// camera-centre residual (both 0 when their respective prior list is empty).
@@ -647,6 +690,7 @@ pub fn bundle_adjust(
     refine_mask: u32,
     solver_flat: &[f32],
     fixed_cam: &[u8],
+    fisheye_flat: &[f32],
 ) -> Vec<f32> {
     let n_cam = cameras_flat.len() / 12;
     let n_pts = pts_flat.len() / 3;
@@ -732,6 +776,17 @@ pub fn bundle_adjust(
         (intrinsics_flat[b] as f64, intrinsics_flat[b+1] as f64,
          intrinsics_flat[b+2] as f64, intrinsics_flat[b+3] as f64)
     }).collect();
+    // Per-camera lens: (refinable fisheye terms, seed coefficients). terms 0 ⇒ pinhole.
+    let lens: Vec<(usize, [f64; 4])> = (0..n_cam).map(|c| {
+        let b = c * 5;
+        let terms = fisheye_flat.get(b).copied().unwrap_or(0.0);
+        if !(terms >= 1.0) { return (0, [0.0; 4]); }
+        let k = [1, 2, 3, 4].map(|j| {
+            let v = fisheye_flat.get(b + j).copied().unwrap_or(0.0) as f64;
+            if v.is_finite() { v } else { 0.0 }
+        });
+        ((terms as usize).min(4), k)
+    }).collect();
     let mut pts: Vec<V3> = (0..n_pts).map(|i| {
         [pts_flat[i*3] as f64, pts_flat[i*3+1] as f64, pts_flat[i*3+2] as f64]
     }).collect();
@@ -779,14 +834,15 @@ pub fn bundle_adjust(
     };
 
     // ── Intrinsic self-calibration setup ─────────────────────────────────────────
-    // `refine_mask` is a bitmask (1=f, 2=cxcy, 4=k1, 8=k2, 16=k3). The per-group param
-    // vector is the ordered subset [s?, dcx?, dcy?, k1?, k2?, k3?]; `idx_*` is each
-    // param's slot in that vector (−1 when its bit is clear). kdim ≤ 6.
+    // `refine_mask` is a bitmask (1=f, 2=cxcy, 4=k1, 8=k2, 16=k3, 32=k4). The per-group
+    // param vector is the ordered subset [s?, dcx?, dcy?, k1?, k2?, k3?, k4?]; `idx_*` is
+    // each param's slot in that vector (−1 when its bit is clear). kdim ≤ 7.
     let has_f = refine_mask & 1 != 0;
     let has_cxcy = refine_mask & 2 != 0;
     let has_k1 = refine_mask & 4 != 0;
     let has_k2 = refine_mask & 8 != 0;
     let has_k3 = refine_mask & 16 != 0;
+    let has_k4 = refine_mask & 32 != 0;
     let mut kdim = 0usize;
     let mut alloc = |on: bool| -> isize { if on { let i = kdim as isize; kdim += 1; i } else { -1 } };
     let idx_s   = alloc(has_f);
@@ -795,8 +851,19 @@ pub fn bundle_adjust(
     let idx_k1  = alloc(has_k1);
     let idx_k2  = alloc(has_k2);
     let idx_k3  = alloc(has_k3);
+    let idx_k4  = alloc(has_k4);
+    let idx_k = [idx_k1, idx_k2, idx_k3, idx_k4];
     let (grp, g_count) = if kdim > 0 { build_groups(sensor_of_cam, n_cam) } else { (vec![0usize; n_cam], 0) };
     let refine = kdim > 0 && g_count > 0;
+    // Each group's lens (its first camera's — a sensor group shares one), and which
+    // of its k slots exist: k1–k3 for Brown, the first `terms` for a fisheye.
+    let mut group_lens: Vec<(usize, [f64; 4])> = vec![(0, [0.0; 4]); g_count];
+    { let mut seen = vec![false; g_count];
+      for c in 0..n_cam { if refine && !seen[grp[c]] { seen[grp[c]] = true; group_lens[grp[c]] = lens[c]; } } }
+    let k_live = |g: usize, j: usize| -> bool {
+        let terms = group_lens[g].0;
+        if terms == 0 { j < 3 } else { j < terms }
+    };
     // Reduced slot of each free camera (fixed ones have none); with no fixed camera the
     // slot is the camera index, so the system is exactly the all-free one.
     const FIXED: usize = usize::MAX;
@@ -835,28 +902,34 @@ pub fn bundle_adjust(
     };
     let solver = SolverOpts::from_flat(solver_flat);
     let mut solve_stats = SolveStats::default();
-    // Per-group params, one [f64;6] slot each. The focal-scale slot (if present) inits
-    // to 1 (multiplies fx/fy); every distortion/principal-point slot inits to 0.
-    let mut gpar = vec![[0.0f64; 6]; g_count.max(1)];
+    // Per-group params, one [f64;7] slot each. The focal-scale slot (if present) inits
+    // to 1 (multiplies fx/fy); every distortion/principal-point slot inits to 0 — a
+    // fisheye group's k slots are offsets from its seed coefficients.
+    let mut gpar = vec![[0.0f64; BLK_MAX]; g_count.max(1)];
     if idx_s >= 0 { for g in gpar.iter_mut() { g[idx_s as usize] = 1.0; } }
 
-    // Effective K + radial coeffs (k1,k2,k3) for a camera under the current group params.
-    let eff = |ci: usize, gpar: &Vec<[f64; 6]>| -> (f64, f64, f64, f64, f64, f64, f64) {
+    // Effective K + lens coefficients (k1..k4) and whether the camera is a fisheye,
+    // under the current group params. Pinhole: the Brown residual; fisheye: seed + offset.
+    struct Eff { fx: f64, fy: f64, cx: f64, cy: f64, k: [f64; 4], fisheye: bool }
+    let eff = |ci: usize, gpar: &Vec<[f64; BLK_MAX]>| -> Eff {
         let (fx0, fy0, cx0, cy0) = ks[ci];
-        if !refine { return (fx0, fy0, cx0, cy0, 0.0, 0.0, 0.0); }
+        let (terms, k0) = lens[ci];
+        let fisheye = terms > 0;
+        if !refine { return Eff { fx: fx0, fy: fy0, cx: cx0, cy: cy0, k: k0, fisheye }; }
         let p = gpar[grp[ci]];
         let get = |idx: isize| -> f64 { if idx >= 0 { p[idx as usize] } else { 0.0 } };
         let s = if idx_s >= 0 { p[idx_s as usize] } else { 1.0 };
-        (s * fx0, s * fy0, cx0 + get(idx_dcx), cy0 + get(idx_dcy), get(idx_k1), get(idx_k2), get(idx_k3))
+        let k = [0, 1, 2, 3].map(|j| k0[j] + get(idx_k[j]));
+        Eff { fx: s * fx0, fy: s * fy0, cx: cx0 + get(idx_dcx), cy: cy0 + get(idx_dcy), k, fisheye }
     };
 
     // Plain RMS reprojection error over all observations (reported to the caller).
-    let rms = |cams: &Vec<(M3, V3)>, pts: &Vec<V3>, gpar: &Vec<[f64; 6]>| -> f64 {
+    let rms = |cams: &Vec<(M3, V3)>, pts: &Vec<V3>, gpar: &Vec<[f64; BLK_MAX]>| -> f64 {
         let mut sse = 0.0f64; let mut cnt = 0usize;
         for &(ci, pi, ox, oy, _, _) in &obs {
             let (r, t) = &cams[ci];
-            let (fx, fy, cx, cy, k1, k2, k3) = eff(ci, gpar);
-            let (px, py) = project_full(r, t, fx, fy, cx, cy, k1, k2, k3, &pts[pi]);
+            let e = eff(ci, gpar);
+            let (px, py) = project_full(r, t, e.fx, e.fy, e.cx, e.cy, &e.k, e.fisheye, &pts[pi]);
             if px.is_nan() { continue; }
             sse += (px - ox).powi(2) + (py - oy).powi(2); cnt += 1;
         }
@@ -865,12 +938,12 @@ pub fn bundle_adjust(
 
     // Huber-robustified cost Σ ρ(‖r‖) at pixel threshold δ, plus the (unrobustified,
     // quadratic) GCP anchor term — same total objective the LM step below descends.
-    let robust_cost = |cams: &Vec<(M3, V3)>, pts: &Vec<V3>, gpar: &Vec<[f64; 6]>, dh: f64| -> f64 {
+    let robust_cost = |cams: &Vec<(M3, V3)>, pts: &Vec<V3>, gpar: &Vec<[f64; BLK_MAX]>, dh: f64| -> f64 {
         let mut sum = 0.0f64;
         for &(ci, pi, ox, oy, wx, wy) in &obs {
             let (r, t) = &cams[ci];
-            let (fx, fy, cx, cy, k1, k2, k3) = eff(ci, gpar);
-            let (px, py) = project_full(r, t, fx, fy, cx, cy, k1, k2, k3, &pts[pi]);
+            let e = eff(ci, gpar);
+            let (px, py) = project_full(r, t, e.fx, e.fy, e.cx, e.cy, &e.k, e.fisheye, &pts[pi]);
             if px.is_nan() { sum += dh * dh; continue; }
             let dx=px-ox; let dy=py-oy; let e=(dx*dx+dy*dy).sqrt();
             // The Huber loss the IRLS weight r = δ/e actually descends: ρ = q·(2r − r²)
@@ -885,12 +958,12 @@ pub fn bundle_adjust(
 
     // Adaptive Huber threshold: a multiple of the residual median, so it tracks the
     // noise floor as the model tightens. Recomputed once per outer iteration.
-    let huber_threshold = |cams: &Vec<(M3, V3)>, pts: &Vec<V3>, gpar: &Vec<[f64; 6]>| -> f64 {
+    let huber_threshold = |cams: &Vec<(M3, V3)>, pts: &Vec<V3>, gpar: &Vec<[f64; BLK_MAX]>| -> f64 {
         let mut es: Vec<f64> = Vec::with_capacity(obs.len());
         for &(ci, pi, ox, oy, _, _) in &obs {
             let (r, t) = &cams[ci];
-            let (fx, fy, cx, cy, k1, k2, k3) = eff(ci, gpar);
-            let (px, py) = project_full(r, t, fx, fy, cx, cy, k1, k2, k3, &pts[pi]);
+            let e = eff(ci, gpar);
+            let (px, py) = project_full(r, t, e.fx, e.fy, e.cx, e.cy, &e.k, e.fisheye, &pts[pi]);
             if px.is_nan() { continue; }
             es.push(((px - ox).powi(2) + (py - oy).powi(2)).sqrt());
         }
@@ -904,30 +977,28 @@ pub fn bundle_adjust(
     // point sits on the camera plane. The assembly and the Schur steps both call it
     // (identically), instead of keeping each point's coupling blocks between them —
     // those were 160 B per observation, the largest term at thousands of cameras.
-    struct Jac { ci: usize, ru: f64, rv: f64, wu: f64, wv: f64, ju: [f64; 6], jv: [f64; 6], jpu: [f64; 3], jpv: [f64; 3], jku: [f64; 6], jkv: [f64; 6] }
-    let jac = |o: usize, cams: &Vec<(M3, V3)>, pts: &Vec<V3>, gpar: &Vec<[f64; 6]>, dh: f64| -> Option<Jac> {
+    struct Jac { ci: usize, ru: f64, rv: f64, wu: f64, wv: f64, ju: [f64; 6], jv: [f64; 6], jpu: [f64; 3], jpv: [f64; 3], jku: [f64; BLK_MAX], jkv: [f64; BLK_MAX] }
+    let jac = |o: usize, cams: &Vec<(M3, V3)>, pts: &Vec<V3>, gpar: &Vec<[f64; BLK_MAX]>, dh: f64| -> Option<Jac> {
         let (ci, pi, ox, oy, obs_wx, obs_wy) = obs[o];
         let (r, t) = &cams[ci];
-        let (fx, fy, cx, cy, k1, k2, k3) = eff(ci, gpar);
+        let Eff { fx, fy, cx, cy, k, fisheye } = eff(ci, gpar);
         let pc = mat3_vec(r, &pts[pi]); // R·X
         let xc = pc[0] + t[0]; let yc = pc[1] + t[1]; let zc = pc[2] + t[2];
         if zc.abs() < 1e-9 { return None; }
         let inv = 1.0 / zc;
-        // Normalised coords + the shared radial factor d = 1 + k1·r² + k2·r⁴ + k3·r⁶
-        // (d ≡ 1, and every derivative reduces to the pinhole case, when all k = 0).
+        // Normalised coords and the lens's radial factor m (lens_factor): m ≡ 1, and
+        // every derivative reduces to the pinhole case, for a pinhole with all k = 0.
         let a = xc * inv; let b = yc * inv;
-        let r2 = a * a + b * b; let r4 = r2 * r2;
-        let d = 1.0 + k1 * r2 + k2 * r4 + k3 * r4 * r2;
-        // g ≡ d'(r²) = k1 + 2k2·r² + 3k3·r⁴ — the k1 of the pinhole+k1 Jacobians
-        // generalises to g for the full polynomial (∂d/∂a = 2a·g, ∂d/∂b = 2b·g).
-        let g = k1 + 2.0*k2*r2 + 3.0*k3*r4;
+        let r2 = a * a + b * b;
+        let (d, q, dk) = lens_factor(r2, &k, fisheye);
         let ru = fx * a * d + cx - ox;
         let rv = fy * b * d + cy - oy;
-        // ∂proj/∂x_cam (2×3), exact analytic with the radial term (k1→g):
-        //   ∂u/∂xc = (fx/zc)(d+2g·a²), ∂u/∂yc = (fx/zc)(2g·a·b),
-        //   ∂u/∂zc = −(fx·a/zc)(d+2g·r²)  (and symmetrically for v).
-        let dudc = [fx * inv * (d + 2.0*g*a*a), fx * inv * (2.0*g*a*b), -fx * a * inv * (d + 2.0*g*r2)];
-        let dvdc = [fy * inv * (2.0*g*a*b), fy * inv * (d + 2.0*g*b*b), -fy * b * inv * (d + 2.0*g*r2)];
+        // ∂proj/∂x_cam (2×3), exact analytic. With ∂m/∂a = q·a, ∂m/∂b = q·b:
+        //   ∂u/∂xc = (fx/zc)(m+q·a²), ∂u/∂yc = (fx/zc)(q·a·b),
+        //   ∂u/∂zc = −(fx·a/zc)(m+q·r²)  (and symmetrically for v).
+        // For Brown q = 2g, g = k1 + 2k2·r² + 3k3·r⁴ (the earlier closed form).
+        let dudc = [fx * inv * (d + q*a*a), fx * inv * (q*a*b), -fx * a * inv * (d + q*r2)];
+        let dvdc = [fy * inv * (q*a*b), fy * inv * (d + q*b*b), -fy * b * inv * (d + q*r2)];
         // Camera Jacobian Jc (2×6): [I | −[pc]_×] through ∂proj/∂x_cam.
         let sp = skew(&pc);
         let mut ju = [0f64; 6]; let mut jv = [0f64; 6];
@@ -944,17 +1015,20 @@ pub fn bundle_adjust(
             jpv[k] = dvdc[0]*r[0][k] + dvdc[1]*r[1][k] + dvdc[2]*r[2][k];
         }
         // Intrinsic Jacobian Jk (2×kdim), filled by slot (idx_* is the param's
-        // position in [s?,dcx?,dcy?,k1?,k2?,k3?]). ∂/∂s = (fx0·a·d, fy0·b·d);
-        // ∂/∂dcx = (1,0), ∂/∂dcy = (0,1); ∂/∂kj = (fx·a·r^{2j}, fy·b·r^{2j}).
-        let mut jku = [0f64; 6]; let mut jkv = [0f64; 6];
+        // position in [s?,dcx?,dcy?,k1?,k2?,k3?,k4?]). ∂/∂s = (fx0·a·m, fy0·b·m);
+        // ∂/∂dcx = (1,0), ∂/∂dcy = (0,1); ∂/∂kj = (fx·a·∂m/∂kj, fy·b·∂m/∂kj) — r^{2j}
+        // for Brown, θ^{2j+1}/r for a fisheye. A slot the group's lens lacks stays 0.
+        let mut jku = [0f64; BLK_MAX]; let mut jkv = [0f64; BLK_MAX];
         if refine {
             let (fx0, fy0, _, _) = ks[ci];
             if idx_s   >= 0 { jku[idx_s   as usize] = fx0 * a * d; jkv[idx_s   as usize] = fy0 * b * d; }
             if idx_dcx >= 0 { jku[idx_dcx as usize] = 1.0; }
             if idx_dcy >= 0 { jkv[idx_dcy as usize] = 1.0; }
-            if idx_k1  >= 0 { jku[idx_k1  as usize] = fx * a * r2;      jkv[idx_k1  as usize] = fy * b * r2; }
-            if idx_k2  >= 0 { jku[idx_k2  as usize] = fx * a * r4;      jkv[idx_k2  as usize] = fy * b * r4; }
-            if idx_k3  >= 0 { jku[idx_k3  as usize] = fx * a * r4 * r2; jkv[idx_k3  as usize] = fy * b * r4 * r2; }
+            for j in 0..4 {
+                if idx_k[j] >= 0 && k_live(grp[ci], j) {
+                    jku[idx_k[j] as usize] = fx * a * dk[j]; jkv[idx_k[j] as usize] = fy * b * dk[j];
+                }
+            }
         }
         // Huber IRLS weight.
         let e = (ru*ru + rv*rv).sqrt();
@@ -962,16 +1036,16 @@ pub fn bundle_adjust(
         Some(Jac { ci, ru, rv, wu: w * obs_wx, wv: w * obs_wy, ju, jv, jpu, jpv, jku, jkv })
     };
     // A point's coupling blocks E (Jvarᵀ·Jp): camera then group, per observation.
-    let eblocks = |pi: usize, cams: &Vec<(M3, V3)>, pts: &Vec<V3>, gpar: &Vec<[f64; 6]>, dh: f64, list: &mut Vec<EBlock>| {
+    let eblocks = |pi: usize, cams: &Vec<(M3, V3)>, pts: &Vec<V3>, gpar: &Vec<[f64; BLK_MAX]>, dh: f64, list: &mut Vec<EBlock>| {
         list.clear();
         for q in pt_start[pi]..pt_start[pi + 1] {
             let Some(j) = jac(pt_obs[q as usize] as usize, cams, pts, gpar, dh) else { continue };
-            let mut cblk = [[0f64; 3]; 6];
+            let mut cblk = [[0f64; 3]; BLK_MAX];
             for a in 0..6 { for b in 0..3 { cblk[a][b] = j.wu*j.ju[a]*j.jpu[b] + j.wv*j.jv[a]*j.jpv[b]; } }
             if slot[j.ci] != FIXED { add_eblock(list, slot[j.ci], 6 * slot[j.ci], 6, &cblk); }
             if refine {
                 let g = grp[j.ci];
-                let mut kblk = [[0f64; 3]; 6];
+                let mut kblk = [[0f64; 3]; BLK_MAX];
                 for a in 0..kdim { for b in 0..3 { kblk[a][b] = j.wu*j.jku[a]*j.jpu[b] + j.wv*j.jkv[a]*j.jpv[b]; } }
                 add_eblock(list, n_free + g, group_off + g * kdim, kdim, &kblk);
             }
@@ -1101,6 +1175,18 @@ pub fn bundle_adjust(
             }
         }
 
+        // A k slot the group's lens does not have has no Jacobian: pin it (unit
+        // diagonal, zero gradient) so its offset solves to exactly 0 instead of
+        // resting on the 1e-12 damping floor.
+        if refine {
+            for g in 0..g_count {
+                let dg = pattern.diag_at[n_free + g];
+                for j in 0..4 {
+                    if idx_k[j] >= 0 && !k_live(g, j) { let a = idx_k[j] as usize; smat[dg + a*kdim + a] += 1.0; }
+                }
+            }
+        }
+
         // ── LM step with damping retries ────────────────────────────────────────
         let mut accepted = false;
         for _try in 0..8 {
@@ -1135,8 +1221,8 @@ pub fn bundle_adjust(
                     }
                 }
                 // M_v = E_v·C⁻¹ (dim×3); then S -= Σ_{v1,v2} M_{v1}·E_{v2}ᵀ.
-                let ms: Vec<[[f64; 3]; 6]> = el.iter().map(|eb| {
-                    let mut m = [[0f64; 3]; 6];
+                let ms: Vec<[[f64; 3]; BLK_MAX]> = el.iter().map(|eb| {
+                    let mut m = [[0f64; 3]; BLK_MAX];
                     for a in 0..eb.dim {
                         for k in 0..3 {
                             m[a][k] = eb.rows[a][0]*cinv[0][k] + eb.rows[a][1]*cinv[1][k] + eb.rows[a][2]*cinv[2][k];
@@ -1194,7 +1280,7 @@ pub fn bundle_adjust(
             if refine {
                 for g in 0..g_count {
                     let goff = group_off + g * kdim;
-                    // Slots are contiguous per group; kdim picks how many (1/2/3).
+                    // Slots are contiguous per group; kdim picks how many (1–7).
                     for a in 0..kdim { tent_gpar[g][a] += dsol[goff + a]; }
                 }
             }
@@ -1229,9 +1315,10 @@ pub fn bundle_adjust(
     let camera_prior_rms_after = camera_prior_rms(&cams);
 
     // Pack output: cameras (12 each), points (3 each), refined effective intrinsics
-    // (7 each: fx,fy,cx,cy,k1,k2,k3 — radial coeffs 0 for the bits not in refine_mask),
+    // (8 each: fx,fy,cx,cy,k1,k2,k3,k4 — a pinhole camera's Brown residual, 0 for the
+    // bits not in refine_mask; a fisheye's full Kannala–Brandt coefficients),
     // [cost_before, cost_after, anchor_rms_after, camera_prior_rms_after], then trace.
-    let mut out = Vec::with_capacity(n_cam * 12 + n_pts * 3 + n_cam * 7 + 4 + BA_STATS_LEN + trace.len());
+    let mut out = Vec::with_capacity(n_cam * 12 + n_pts * 3 + n_cam * 8 + 4 + BA_STATS_LEN + trace.len());
     for (r, t) in &cams {
         for row in r { for &v in row { out.push(v as f32); } }
         for &v in t { out.push(v as f32); }
@@ -1240,9 +1327,9 @@ pub fn bundle_adjust(
         for &v in pt { out.push(v as f32); }
     }
     for c in 0..n_cam {
-        let (fx, fy, cx, cy, k1, k2, k3) = eff(c, &gpar);
-        out.push(fx as f32); out.push(fy as f32); out.push(cx as f32); out.push(cy as f32);
-        out.push(k1 as f32); out.push(k2 as f32); out.push(k3 as f32);
+        let e = eff(c, &gpar);
+        out.push(e.fx as f32); out.push(e.fy as f32); out.push(e.cx as f32); out.push(e.cy as f32);
+        for j in 0..4 { out.push(e.k[j] as f32); }
     }
     out.push(cost_before as f32);
     out.push(cost_after as f32);
@@ -1551,8 +1638,8 @@ mod reduced_solve_tests {
         // The first camera's pose anchors the gauge loosely through a prior.
         let mut prior = vec![0f32; 25];
         prior[1] = 0.0; prior[2] = 0.0; prior[3] = -10.0; prior[4] = 1e4; prior[5] = 1e4; prior[6] = 1e4;
-        let out = bundle_adjust(&cams, &intr, &pts, &idx, &px, &[], &[], &[], &prior, 10, &[], 0, &[], &[]);
-        let base = n_cam * 12 + n_pts * 3 + n_cam * 7;
+        let out = bundle_adjust(&cams, &intr, &pts, &idx, &px, &[], &[], &[], &prior, 10, &[], 0, &[], &[], &[]);
+        let base = n_cam * 12 + n_pts * 3 + n_cam * 8;
         let (before, after) = (out[base], out[base + 1]);
         let n_red = out[base + 4] as usize;
         assert!(n_red > DENSE_MAX_N, "test must exercise the PCG-only path (n = {n_red})");
@@ -1560,19 +1647,19 @@ mod reduced_solve_tests {
         assert!(after < 0.2 * before && after < 0.5, "rms {before} → {after}");
         // An all-zero fixed mask is the all-free solve, bit for bit.
         let zeros = vec![0u8; n_cam];
-        assert_eq!(bundle_adjust(&cams, &intr, &pts, &idx, &px, &[], &[], &[], &prior, 10, &[], 0, &[], &zeros), out);
+        assert_eq!(bundle_adjust(&cams, &intr, &pts, &idx, &px, &[], &[], &[], &prior, 10, &[], 0, &[], &zeros, &[]), out);
         // A local window: cameras outside 300..340 fixed. They keep their exact poses,
         // and the window still converges against them.
         let mut fixed = vec![1u8; n_cam];
         for c in 300..340 { fixed[c] = 0; }
-        let loc = bundle_adjust(&cams, &intr, &pts, &idx, &px, &[], &[], &[], &[], 10, &[], 0, &[], &fixed);
+        let loc = bundle_adjust(&cams, &intr, &pts, &idx, &px, &[], &[], &[], &[], 10, &[], 0, &[], &fixed, &[]);
         for c in [0usize, 299, 340, 899] { assert_eq!(&loc[c * 12..c * 12 + 12], &cams[c * 12..c * 12 + 12], "fixed camera {c} moved"); }
         assert_ne!(&loc[310 * 12..310 * 12 + 12], &cams[310 * 12..310 * 12 + 12], "a window camera should move");
         assert_eq!(loc[base + 4] as usize, 6 * 40, "the reduced system holds the window only");
         assert!(loc[base + 1] < loc[base], "window RMS {} → {}", loc[base], loc[base + 1]);
         // The IC(0) preconditioner (solver slot 5) converges too, with fewer CG iterations.
         let solver = [f32::NAN, f32::NAN, f32::NAN, f32::NAN, f32::NAN, 1.0];
-        let ic = bundle_adjust(&cams, &intr, &pts, &idx, &px, &[], &[], &[], &prior, 10, &[], 0, &solver, &[]);
+        let ic = bundle_adjust(&cams, &intr, &pts, &idx, &px, &[], &[], &[], &prior, 10, &[], 0, &solver, &[], &[]);
         let after_ic = ic[base + 1];
         assert!(after_ic < 0.2 * before && after_ic < 0.5, "IC rms {before} → {after_ic}");
         assert!(ic[base + 11] < out[base + 11], "CG iterations: IC {} vs Jacobi {}", ic[base + 11], out[base + 11]);

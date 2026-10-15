@@ -35,7 +35,7 @@ export function distortComposed(u, v, Kw, dist, selfCal) {
 // no correction at all (no distortion bags, not a film scan) — callers treat null
 // as identity and skip the per-point work, which is the common case.
 //   K        — the canonical/pinhole intrinsics the positions were computed in
-//   dist     — calibrated Brown bag removed at ingest (or null)
+//   dist     — calibrated lens bag removed at ingest (distortion.js distortionOf, or null)
 //   selfCal  — composed self-calibration bag from summary.selfCalDistortion (or null)
 //   fiducial — { A, frame } from summary.fiducialTransforms for this image (or null)
 export function makeCanonicalToScan({ K, dist = null, selfCal = null, fiducial = null } = {}) {
@@ -120,7 +120,8 @@ export function makeScanToPinhole({ K, dist = null, selfCal = null, fiducial = n
 }
 
 // ONE join from the persisted run record to each image's frame model — the
-// calibrated bag of its sensor, the composed self-cal bag, the film transform.
+// calibrated bag of its sensor (or the run's self-calibrated fisheye lens), the
+// composed self-cal bag, the film transform.
 // Dense, exports, the GCP tools and the image overlays all need it, and copies
 // of this join had drifted (one normalised an all-zero self-cal bag, others
 // passed it raw). Returns image → { dist, selfCal, fiducial, filmMissing }.
@@ -139,8 +140,14 @@ export function makeFrameModelResolver({ summary = null, sensors = [] } = {}) {
     const sensor = image?.sensorId != null ? sensorById.get(image.sensorId) : null
     const sc = image?.sensorId != null ? selfCalBySensor.get(image.sensorId)
       : image?.uuid != null ? selfCalByImage.get(image.uuid) : null
-    const selfCal = sc && (sc.k1 || sc.k2 || sc.k3) ? { k1: sc.k1 || 0, k2: sc.k2 || 0, k3: sc.k3 || 0 } : null
     const fiducial = image?.uuid != null ? fidByUuid.get(image.uuid) ?? null : null
+    // A `fisheye` row is the run's self-calibrated lens (selfCalFold.js): it replaces
+    // the sensor's, it does not compose on top of it.
+    if (sc?.fisheye) {
+      return { dist: { fisheye: true, k1: sc.k1 || 0, k2: sc.k2 || 0, k3: sc.k3 || 0, k4: sc.k4 || 0 },
+        selfCal: null, fiducial, filmMissing: false }
+    }
+    const selfCal = sc && (sc.k1 || sc.k2 || sc.k3) ? { k1: sc.k1 || 0, k2: sc.k2 || 0, k3: sc.k3 || 0 } : null
     return { dist: sensor ? distortionOf(sensor) : null, selfCal, fiducial,
       filmMissing: sensor?.kind === 'film' && !fiducial }
   }
@@ -164,12 +171,13 @@ export function gcpsInPinholeFrame(gcps, { imagesById, sparseCameras, frameModel
   }
   return (gcps || []).map((g) => {
     let changed = false
-    const observations = (g.observations || []).map((o) => {
+    const observations = (g.observations || []).flatMap((o) => {
       const m = o.px != null && o.py != null ? mapperFor(o.imageId) : null
-      if (!m) return o
+      if (!m) return [o]
       changed = true
       const p = m(o.px, o.py)
-      return { ...o, px: p.x, py: p.y }
+      // A fisheye mark past 90° off-axis has no pinhole image: drop it.
+      return Number.isFinite(p.x) && Number.isFinite(p.y) ? [{ ...o, px: p.x, py: p.y }] : []
     })
     return changed ? { ...g, observations } : g
   })

@@ -134,3 +134,52 @@ it('optimizeCameras recovers a 4 % focal error through the real WASM bundle adju
   // Shared per sensor: one focal for all five.
   for (const c of result.cameras.values()) expect(c.K.fx).toBeCloseTo(fx, 6)
 })
+
+it('optimizeCameras solves fisheye cameras in recorded pixels and re-derives their observations', async () => {
+  const { bundleAdjust } = await import('./reconstruction.js')
+  const { distortPixel, undistortPixel } = await import('./distortion.js')
+  const lens = { fisheye: true, k1: 0.03, k2: -0.004, k3: 0, k4: 0 }
+  const trueK = { fx: 400, fy: 400, cx: 0, cy: 0 }, seedK = { ...trueK, fx: 384, fy: 384 }
+  const rotY = (a) => [[Math.cos(a), 0, Math.sin(a)], [0, 1, 0], [-Math.sin(a), 0, Math.cos(a)]]
+  const cams = new Map(Array.from({ length: 5 }, (_, i) => {
+    const a = (i - 2) * 0.15
+    const R = rotY(-a)
+    const C = [10 * Math.sin(a), 0.4 * i, 10 - 10 * Math.cos(a)]
+    const t = R.map((row) => -(row[0] * C[0] + row[1] * C[1] + row[2] * C[2]))
+    return [`f${i}`, { R, t, K: seedK }]
+  }))
+  // The lens recorded the true projection; the model holds it undistorted about the
+  // seed K (what the reconstruction left behind).
+  const recorded = (cam, [x, y, z]) => {
+    const p = cam.R.map((row, k) => row[0] * x + row[1] * y + row[2] * z + cam.t[k])
+    return distortPixel(trueK.fx * p[0] / p[2], trueK.fy * p[1] / p[2], trueK, lens)
+  }
+  let seed = 5
+  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647)
+  const raw = new Map([...cams.keys()].map((id) => [id, []]))
+  const pts = Array.from({ length: 150 }, (_, j) => {
+    const w = [rnd() * 20 - 10, rnd() * 14 - 7, 10 + rnd() * 4 - 2] // rays out to ~45°
+    const viewsPx = new Map([...cams].map(([id, c]) => {
+      const r = recorded(c, w); raw.get(id)[j] = r
+      const q = undistortPixel(r.x, r.y, seedK, lens)
+      return [id, [q.x, q.y]]
+    }))
+    return { x: w[0], y: w[1], z: w[2], views: new Map([...cams.keys()].map((id) => [id, j])), viewsPx }
+  })
+  const ids = [...cams.keys()]
+  const result = await optimizeCameras(cams, pts, {
+    refine: 'f', sensorOfUuid: Object.fromEntries(ids.map((id) => [id, 0])),
+    lensOfUuid: Object.fromEntries(ids.map((id) => [id, lens])),
+  }, bundleAdjust)
+  const K = result.cameras.get('f0').K
+  expect(Math.abs(K.fx / 400 - 1)).toBeLessThan(0.005)
+  // Every stored observation is the recorded pixel undistorted about the NEW K.
+  let worst = 0
+  result.points.forEach((p, j) => {
+    for (const [id, px] of p.viewsPx) {
+      const q = undistortPixel(raw.get(id)[j].x, raw.get(id)[j].y, result.cameras.get(id).K, lens)
+      worst = Math.max(worst, Math.hypot(q.x - px[0], q.y - px[1]))
+    }
+  })
+  expect(worst).toBeLessThan(1e-6)
+})

@@ -78,7 +78,7 @@ export function distortionIdentifiable({ nCams, nTracks, nMultiViewTracks }, cfg
 // nothing identifiable is left.
 export function withoutDistortionTerms(refineMode) {
   const kept = String(refineMode).split(',').map((s) => s.trim())
-    .filter((t) => t && !/^k[123]$/.test(t))
+    .filter((t) => t && !/^k[1-4]$/.test(t))
   return kept.length ? kept.join(',') : 'none'
 }
 

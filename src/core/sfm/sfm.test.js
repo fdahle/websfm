@@ -370,6 +370,122 @@ describe('reconstruct (incremental SfM, synthetic 3-view scene)', () => {
     expect(uncorrected.summary.postBaMedianPx).toBeGreaterThan(2 * corrected.summary.postBaMedianPx)
   })
 
+  it('reconstructs a wide fisheye from its calibrated Kannala–Brandt model', async () => {
+    // Rays up to ~65° off-axis: no pinhole lens covers that field. The image records
+    // them through an OPENCV_FISHEYE lens; a handful sit past the ingest limit (~79°)
+    // and must be dropped, not let poison the model.
+    const rng = mulberry32(7)
+    const world = Array.from({ length: 90 }, () => [(rng() - 0.5) * 30, (rng() - 0.5) * 24, 8 + rng() * 4])
+    for (let i = 0; i < 6; i++) world.push([40 + rng() * 5, (rng() - 0.5) * 4, 7 + rng()])
+    const N = world.length
+    const centers = [[0, 0, 0], [1.5, 0, 0], [-1.5, 0.4, 0]]
+    const Rs = [rotY(0), rotY(0.1), rotY(-0.1)]
+    const ts = Rs.map((R, i) => mv(R, centers[i]).map((v) => -v))
+    const uuids = ['f0', 'f1', 'f2']
+    const f = 320 // ~180° across the 1000 px frame's width
+    const K = { fx: f, fy: f, cx: META.width / 2, cy: META.height / 2 }
+    const lens = { fisheye: true, k1: 0.04, k2: -0.006, k3: 0.001, k4: -0.0002 }
+    const sensor = { focal: f, focalUnit: 'px', cx: K.cx, cy: K.cy, width: META.width, height: META.height,
+      distortionModel: 'fisheye', k1: lens.k1, k2: lens.k2, k3: lens.k3, k4: lens.k4 }
+    const projectK = (R, t, X) => {
+      const c = mv(R, X).map((v, i) => v + t[i])
+      return { x: K.fx * c[0] / c[2] + K.cx, y: K.fy * c[1] / c[2] + K.cy }
+    }
+    const recorded = uuids.map((_, ci) => world.map((X) => {
+      const p = projectK(Rs[ci], ts[ci], X)
+      return distortPixel(p.x, p.y, K, lens)
+    }))
+    const matches = world.map((_, i) => [i, i])
+    const pairs = []
+    for (let a = 0; a < 3; a++) for (let b = a + 1; b < 3; b++) {
+      pairs.push({ idA: uuids[a], idB: uuids[b], F: fundamental(Rs[a], ts[a], Rs[b], ts[b]),
+        matches, inlierCount: N, status: 'done' })
+    }
+    const build = (withSensor) => uuids.map((uuid, ci) => ({
+      uuid, name: uuid, kpStatus: 'done', meta: META,
+      sensor: withSensor ? sensor : { focal: f, focalUnit: 'px', cx: K.cx, cy: K.cy },
+      keypoints: recorded[ci].map((p) => ({ x: p.x, y: p.y })),
+    }))
+    const logs = []
+    const settings = { baIterations: 20, refineIntrinsics: 'none' }
+    const fisheye = await reconstruct({ images: build(true), pairs, settings }, { onLog: (m) => logs.push(String(m)) })
+    const pinhole = await reconstruct({ images: build(false), pairs, settings }, { onLog: () => {} })
+
+    expect(fisheye.status).toBe('done')
+    expect(fisheye.cameras).toHaveLength(3)
+    expect(fisheye.summary.postBaMedianPx).toBeLessThan(0.5)
+    expect(logs.some((m) => /dropped \d+ of \d+ fisheye keypoint/.test(m))).toBe(true)
+    // Read as a pinhole, the same keypoints cannot fit one model.
+    expect(pinhole.status !== 'done' || pinhole.summary.postBaMedianPx > 5 * fisheye.summary.postBaMedianPx).toBe(true)
+  })
+
+  it('self-calibrates a fisheye lens in its recorded pixels', async () => {
+    // The sensor table says equidistant (k1 = 0) with a focal 6% short. Refining
+    // 'f,k1' solves the fisheye's own k1 in recorded pixels (bundle.rs Kannala–Brandt
+    // residuals), never a Brown bag; the run records the refined lens, and the model's
+    // pinhole frame stays tied to the CURRENT K and lens (selfCalFold.js re-map): a
+    // model observation is the recorded keypoint undistorted about exactly those.
+    const rng = mulberry32(11)
+    const world = Array.from({ length: 300 }, () => {
+      const az = rng() * 2 * Math.PI, el = 0.2 + rng() * 1.1, d = 5 + rng() * 15
+      return [d * Math.cos(el) * Math.cos(az), d * Math.cos(el) * Math.sin(az), d * Math.sin(el)]
+    })
+    // Cameras look straight up (camera z = world z), each yawed and tilted a little.
+    const rotZ = (a) => { const c = Math.cos(a), s = Math.sin(a); return [[c, -s, 0], [s, c, 0], [0, 0, 1]] }
+    const yaw = [0, 0.5, -0.5, 1.0, -1.0, 0.25]
+    const Rs = yaw.map((a, i) => mul(rotY((i % 2 ? 1 : -1) * 0.2), rotZ(a)))
+    const centers = [[0, 0, 0], [1.2, 0, 0], [-1.2, 0.3, 0], [0.3, 1.3, 0], [0.6, -1.1, 0.2], [-0.8, -0.9, 0.1]]
+    const ts = Rs.map((R, i) => mv(R, centers[i]).map((v) => -v))
+    const uuids = centers.map((_, i) => `g${i}`)
+    const f = 320
+    const K = { fx: f, fy: f, cx: META.width / 2, cy: META.height / 2 }
+    const lens = { fisheye: true, k1: 0.04, k2: -0.006, k3: 0, k4: 0 }
+    const sensor = { focal: f * 0.94, focalUnit: 'px', cx: K.cx, cy: K.cy, width: META.width, height: META.height,
+      distortionModel: 'fisheye2', k1: 0, k2: lens.k2 }
+    const recorded = uuids.map((_, ci) => world.map((X) => {
+      const c = mv(Rs[ci], X).map((v, i) => v + ts[ci][i])
+      return c[2] > 0.5 ? distortPixel(K.fx * c[0] / c[2] + K.cx, K.fy * c[1] / c[2] + K.cy, K, lens) : null
+    }))
+    const images = uuids.map((uuid, ci) => ({
+      uuid, name: uuid, kpStatus: 'done', meta: META, sensorId: 's1', sensor,
+      keypoints: recorded[ci].map((p) => p ?? { x: NaN, y: NaN }),
+    }))
+    const pairs = []
+    for (let a = 0; a < uuids.length; a++) for (let b = a + 1; b < uuids.length; b++) {
+      const matches = world.map((_, i) => [i, i]).filter(([i]) => recorded[a][i] && recorded[b][i])
+      pairs.push({ idA: uuids[a], idB: uuids[b], F: fundamental(Rs[a], ts[a], Rs[b], ts[b]),
+        matches, inlierCount: matches.length, status: 'done' })
+    }
+    const logs = []
+    const out = await reconstruct({ images, pairs, settings: { baIterations: 30, refineIntrinsics: 'f,k1' } },
+      { onLog: (m) => logs.push(String(m)) })
+    expect(out.status).toBe('done')
+    expect(logs.some((m) => /re-mapped \d+ fisheye image/.test(m))).toBe(true)
+    expect(logs.some((m) => /folded self-calibrated distortion/.test(m))).toBe(false)
+
+    const camByUuid = new Map(out.cameras.map((c) => [c.uuid, c]))
+    expect(Math.abs(camByUuid.get('g0').K.fx - f) / f).toBeLessThan(0.01)
+    const row = out.summary.selfCalDistortion.find((d) => d.fisheye)
+    expect(row).toMatchObject({ sensorId: 's1', fisheye: true })
+    expect(Math.abs(row.k1 - lens.k1)).toBeLessThan(0.005)
+    expect(row.k2).toBeCloseTo(lens.k2, 6) // a term the solve did not refine stays at the seed
+    const refinedLens = { fisheye: true, k1: row.k1, k2: row.k2, k3: row.k3, k4: row.k4 }
+    // Each observation the model holds is the recorded keypoint undistorted about the
+    // camera's FINAL K and the refined lens — what dense pairs them with.
+    let worst = 0, n = 0
+    for (const pt of out.points) {
+      for (const [uuid, px] of pt.viewsPx) {
+        const kpIdx = new Map(pt.views).get(uuid)
+        const raw = recorded[uuids.indexOf(uuid)][kpIdx]
+        const p = undistortPixel(raw.x, raw.y, camByUuid.get(uuid).K, refinedLens)
+        worst = Math.max(worst, Math.hypot(p.x - px[0], p.y - px[1]))
+        n++
+      }
+    }
+    expect(n).toBeGreaterThan(300)
+    expect(worst).toBeLessThan(0.01)
+  }, 30_000)
+
   it('folds self-calibrated k1 back into the keypoints, keeping the model pinhole (D1)', async () => {
     // Shared sensor id on every image so the run reports one self-cal group (D2).
     const { images, pairs } = k1Scene('sensorA')

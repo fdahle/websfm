@@ -38,8 +38,14 @@ function makePhotoLoader(images, rasterize, emit) {
       const nativeMax = Math.max(m.width, m.height) / s
       const r = await rasterize(im.url, scale < 1 ? Math.ceil(nativeMax * scale) : Infinity)
       load.scaleSum += r.scale
-      const map = makeSampleMap({ K: im.K, dist: im.dist, selfCal: im.selfCal, fiducial: im.fiducial,
-        outScale: [m.K.fx / im.K.fx, m.K.fy / im.K.fy], srcScale: r.scaleXY ?? r.scale })
+      const outScale = [m.K.fx / im.K.fx, m.K.fy / im.K.fy]
+      const base = makeSampleMap({ K: im.K, dist: im.dist, selfCal: im.selfCal, fiducial: im.fiducial,
+        outScale, srcScale: r.scaleXY ?? r.scale })
+      // A fisheye's depth map sits on a widened canvas (dense undistortRaster): its
+      // principal point is shifted by the pad, so shift its pixels back first.
+      const ox = im.dist?.fisheye ? m.K.cx - ((im.K.cx + 0.5) * outScale[0] - 0.5) : 0
+      const oy = im.dist?.fisheye ? m.K.cy - ((im.K.cy + 0.5) * outScale[1] - 0.5) : 0
+      const map = ox || oy ? (u, v) => base(u - ox, v - oy) : base
       load.decoded++
       return { data: r.data, width: r.width, height: r.height, map }
     } catch (err) {

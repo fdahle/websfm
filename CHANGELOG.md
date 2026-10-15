@@ -56,6 +56,15 @@ Notable changes to websfm. The format follows
   and Camera Fiducials): each image's marks in pixels, and the camera's calibrated
   marks in mm with their slots, focal length and principal point, as CSV that
   imports back.
+- **Fisheye and rational lens models**: sensors can use a Kannala–Brandt fisheye (one,
+  two or four terms, as COLMAP's `SIMPLE_RADIAL_FISHEYE`, `RADIAL_FISHEYE` and
+  `OPENCV_FISHEYE`) or OpenCV's rational model (k1–k6, p1, p2). Fisheye matches are
+  verified in the pinhole frame and rays more than 75° off-axis are left out. Bundle
+  adjustment fits fisheye cameras in the pixels the lens recorded, so self-calibration
+  can refine the lens itself (up to k3) with the focal length and principal point; an
+  uncalibrated fisheye (equidistant, all terms zero) reconstructs from EXIF alone. Depth
+  maps use a fisheye's field up to 60° off-axis, and Optimize cameras handles fisheye
+  models. COLMAP databases import these cameras instead of skipping them, and the sensor CSV export writes k4–k6 and the lens model.
 
 ### Changed
 - Orthophotos built with an earlier version must be rebuilt (the storage format
@@ -134,6 +143,8 @@ Notable changes to websfm. The format follows
   project copy.
 - Some LAS files with 8-bit colour imported black, and some LAZ files failed to load.
 - Cancelling GPU matching did not stop the run.
+- COLMAP database import dropped the k4–k6 terms of `FULL_OPENCV` cameras without a
+  warning.
 
 ## [0.1.0-beta.1] — 2026-08-10
 

@@ -51,22 +51,32 @@
  * - `sensor_of_cam`: n_cam ints — per-camera sensor id (shared → shared focal);
  *   `< 0` (or a short/empty list) ⇒ that camera is its own group
  * - `refine_mask`: **bitmask** of the shared per-sensor intrinsics to self-calibrate:
- *   1 = focal scale s, 2 = principal point (dcx,dcy), 4 = radial k1, 8 = k2, 16 = k3.
- *   0 ⇒ poses+points only. The per-group param vector is the ordered subset
- *   `[s?, dcx?, dcy?, k1?, k2?, k3?]` (kdim ≤ 6). fy stays locked to fx (single scale).
+ *   1 = focal scale s, 2 = principal point (dcx,dcy), 4 = radial k1, 8 = k2, 16 = k3,
+ *   32 = k4 (fisheye only). 0 ⇒ poses+points only. The per-group param vector is the
+ *   ordered subset `[s?, dcx?, dcy?, k1?, k2?, k3?, k4?]` (kdim ≤ 7). fy stays locked
+ *   to fx (single scale). A coefficient a group's lens does not have (k4 on a Brown
+ *   group, k3 on a two-term fisheye) is held at its seed.
  * - `fixed_cam`: n_cam bytes, non-zero ⇒ that camera's pose is held fixed (local BA:
  *   the cameras outside the window keep their observations as constraints but are
  *   not variables). Empty ⇒ every camera is free, the original behaviour exactly.
  * - `solver_flat`: reduced-system policy `[pcg_min_n, rel_tol, max_iter, accept_partial]`;
  *   empty / NaN slots ⇒ `SolverOpts::DEFAULT` (see there).
+ * - `fisheye_flat`: n_cam × 5 floats `[terms, k1, k2, k3, k4, …]`. `terms` 0 ⇒ the
+ *   camera is pinhole (+ the Brown self-cal residual) and its observations are in the
+ *   undistorted frame; `terms` 1–4 ⇒ a Kannala–Brandt fisheye with those seed
+ *   coefficients, observed in the pixels the lens recorded, of which the first `terms`
+ *   may be self-calibrated (the k bits then refine the fisheye's own polynomial).
+ *   Cameras sharing a sensor group must share a lens. Empty ⇒ every camera pinhole,
+ *   the original behaviour exactly.
  *
  * # Output
- * `[cameras_flat(n_cam×12), pts_flat(n_pts×3), intrinsics_flat(n_cam×7),
+ * `[cameras_flat(n_cam×12), pts_flat(n_pts×3), intrinsics_flat(n_cam×8),
  *   cost_before, cost_after, anchor_rms_after, camera_prior_rms_after,
  *   solver stats (BA_STATS_LEN), cost_trace…]` — the returned
- * intrinsics are the **refined** effective K per camera as `[fx,fy,cx,cy,k1,k2,k3]`
- * (radial coeffs 0 for the bits not set in `refine_mask`, identical to the input K
- * when `refine_mask == 0`); cost_before/cost_after are RMS reprojection error in
+ * intrinsics are the **refined** effective K per camera as `[fx,fy,cx,cy,k1,k2,k3,k4]`
+ * — for a pinhole camera the self-calibrated Brown residual (0 for the bits not set
+ * in `refine_mask`, k4 always 0), for a fisheye camera its full refined Kannala–Brandt
+ * coefficients (the seed when nothing was refined); cost_before/cost_after are RMS reprojection error in
  * pixels (anchors do not affect them); anchor_rms_after is the RMS anchor
  * residual in the caller's world units, and camera_prior_rms_after is the RMS
  * camera-centre residual (both 0 when their respective prior list is empty).
@@ -84,9 +94,10 @@
  * @param {number} refine_mask
  * @param {Float32Array} solver_flat
  * @param {Uint8Array} fixed_cam
+ * @param {Float32Array} fisheye_flat
  * @returns {Float32Array}
  */
-export function bundle_adjust(cameras_flat, intrinsics_flat, pts_flat, obs_index, obs_px, observation_weight, anchor_flat, anchor_weight, camera_prior_flat, max_iters, sensor_of_cam, refine_mask, solver_flat, fixed_cam) {
+export function bundle_adjust(cameras_flat, intrinsics_flat, pts_flat, obs_index, obs_px, observation_weight, anchor_flat, anchor_weight, camera_prior_flat, max_iters, sensor_of_cam, refine_mask, solver_flat, fixed_cam, fisheye_flat) {
     const ptr0 = passArrayF32ToWasm0(cameras_flat, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
     const ptr1 = passArrayF32ToWasm0(intrinsics_flat, wasm.__wbindgen_malloc);
@@ -111,10 +122,12 @@ export function bundle_adjust(cameras_flat, intrinsics_flat, pts_flat, obs_index
     const len10 = WASM_VECTOR_LEN;
     const ptr11 = passArray8ToWasm0(fixed_cam, wasm.__wbindgen_malloc);
     const len11 = WASM_VECTOR_LEN;
-    const ret = wasm.bundle_adjust(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4, ptr5, len5, ptr6, len6, ptr7, len7, ptr8, len8, max_iters, ptr9, len9, refine_mask, ptr10, len10, ptr11, len11);
-    var v13 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
+    const ptr12 = passArrayF32ToWasm0(fisheye_flat, wasm.__wbindgen_malloc);
+    const len12 = WASM_VECTOR_LEN;
+    const ret = wasm.bundle_adjust(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4, ptr5, len5, ptr6, len6, ptr7, len7, ptr8, len8, max_iters, ptr9, len9, refine_mask, ptr10, len10, ptr11, len11, ptr12, len12);
+    var v14 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
     wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
-    return v13;
+    return v14;
 }
 
 /**

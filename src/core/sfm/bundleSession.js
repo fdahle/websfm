@@ -16,9 +16,10 @@
 
 import { bundleAdjust } from './reconstruction.js'
 import { validateSelfCalUpdate } from './selfCalGuard.js'
+import { distortPixel } from './distortion.js'
 import { buildCameraPriorConstraints as buildSurveyPriorConstraints, qualifyingGcps, buildGcpAnchors } from './surveyConstraints.js'
 import { compareRobustCost, projectFullXYZ } from './baAcceptance.js'
-import { buildBaObservations, appendObservations, trackPositions } from './baObservations.js'
+import { buildBaObservations, appendObservations, trackPositions, mapObservations } from './baObservations.js'
 import { fmtStats } from './modelStats.js'
 
 export function createBundleSession(ctx) {
@@ -55,6 +56,28 @@ export function createBundleSession(ctx) {
       + `; ${((result.ms ?? 0) / 1000).toFixed(1)}s`, 'debug', 'Reconstruction')
   }
 
+  // The frame a solve runs in. A pinhole camera's observations are its (undistorted)
+  // keypoints. A FISHEYE camera's go to the crate in the pixels its lens recorded —
+  // re-distorted with the K and lens they were undistorted about, which recovers them
+  // exactly — with that lens on its K, so bundle.rs fits Kannala–Brandt residuals: an
+  // honest pixel error at any field angle (the pinhole frame stretches the rim by
+  // 1/cos²θ) and a lens self-calibration can refine. Returns the solve's kList and
+  // observations; with no fisheye camera, the inputs unchanged.
+  function lensFrame(uuidList, kList, observations) {
+    const lenses = uuidList.map((u) => selfCal.lensOf(u))
+    if (!lenses.some(Boolean)) return { kList, observations }
+    return {
+      kList: kList.map((K, ci) => (lenses[ci]
+        ? { ...K, fisheye: true, fisheyeTerms: lenses[ci].terms,
+            k1: lenses[ci].k1, k2: lenses[ci].k2, k3: lenses[ci].k3, k4: lenses[ci].k4 }
+        : K)),
+      observations: mapObservations(observations, (ci) => {
+        const lens = lenses[ci], K = kList[ci]
+        return lens ? (x, y) => distortPixel(x, y, K, lens) : null
+      }),
+    }
+  }
+
   // Local bundle adjustment (COLMAP's, between the geometric global solves): the newly
   // registered camera and the `window − 1` registered cameras sharing the most points
   // with it are free, with every point the new camera observes; the other cameras
@@ -81,10 +104,10 @@ export function createBundleSession(ctx) {
     const fixed = [...shared.keys()].filter((u) => !freeSet.has(u))
     const uuidList = [...free, ...fixed]
     const camList = uuidList.map((u) => cameras.get(u))
-    const kList = camList.map((c) => c.K)
     const camIdxOf = new Map(uuidList.map((u, i) => [u, i]))
     const ptIds = [...ptSet]
-    const observations = buildBaObservations(tracks, ptIds, (vi) => camIdxOf.get(ids.uuid(vi)) ?? -1, keypointsAt)
+    const { kList, observations } = lensFrame(uuidList, camList.map((c) => c.K),
+      buildBaObservations(tracks, ptIds, (vi) => camIdxOf.get(ids.uuid(vi)) ?? -1, keypointsAt))
     const posBefore = trackPositions(tracks, ptIds)
     const result = await bundleAdjust(camList, kList, posBefore, observations, {
       maxIters: iters, refineIntrinsics: 'none', solver: cfg.baSolver, flatPoints: true,
@@ -143,13 +166,16 @@ export function createBundleSession(ctx) {
     }
     const uuidList = [...cameras.keys()]
     const camList  = uuidList.map((u) => cameras.get(u))
-    const kList    = camList.map((c) => c.K)
     const sensorOfCam = uuidList.map((u) => sensorIntByUuid.get(u) ?? -1)
     const camIdxOf = new Map(uuidList.map((u, i) => [u, i]))
     // Point rank in this solve → point id; the solve's point i is ptIds[i].
     const ptIds = tracks.liveIds()
     const tieObs = buildBaObservations(tracks, ptIds, camIdxOfImg(camIdxOf), keypointsAt)
-    const observations = gcp ? appendObservations(tieObs, gcp.observations) : tieObs
+    // kList / observations in the solve's frame: a fisheye camera's in recorded pixels
+    // with its lens on K (lensFrame). Everything below — the diagnostic, the robust
+    // acceptance, the validation — judges the solve in that same frame.
+    const { kList, observations } = lensFrame(uuidList, camList.map((c) => c.K),
+      gcp ? appendObservations(tieObs, gcp.observations) : tieObs)
     const posBefore = gcp ? trackPositions(tracks, ptIds, gcp.anchorPts) : trackPositions(tracks, ptIds)
     // A survey-constrained solve (camera priors or GCP anchors) is judged by the
     // bounded-increase rule, not "cost must fall".
@@ -299,7 +325,9 @@ export function createBundleSession(ctx) {
       // so subsequent BA passes and reprojection stats use the calibrated focal. The
       // radial terms are zeroed: the fold below moves them into the keypoints.
       const rk = refined?.[ci]
-      const K = rk ? { ...old.K, ...rk, k1: 0, k2: 0, k3: 0 } : old.K
+      // Only the pinhole K lands on the camera; a fisheye's lens lives in the
+      // self-cal state (selfCalFold.js lensOf) and Brown terms fold into the keypoints.
+      const K = rk ? { ...old.K, fx: rk.fx, fy: rk.fy, cx: rk.cx, cy: rk.cy, k1: 0, k2: 0, k3: 0 } : old.K
       cameras.set(uuid, { ...old, ...result.cameras[ci], K })
     })
     setTrackPositions(ptIds, result.pos)
@@ -328,11 +356,13 @@ export function createBundleSession(ctx) {
         if (w0 != null && fx1) implied = `, implied film width ${w0.toFixed(0)}mm → ${(w0 * fx0 / fx1).toFixed(0)}mm`
         const cxcy = wantsCxcy
           ? `, cx ${kList[ci].cx.toFixed(1)}→${rk.cx.toFixed(1)}, cy ${kList[ci].cy.toFixed(1)}→${rk.cy.toFixed(1)}` : ''
-        // Refined shared radial coeffs (copy the non-zero ones into the sensor table).
-        const kterms = ['k1', 'k2', 'k3']
-          .filter((k) => rk[k])
-          .map((k) => `${k} ${rk[k].toFixed(5)}`)
-        const kdist = kterms.length ? `, ${kterms.join(', ')}` : ''
+        // Refined shared radial coeffs (copy the non-zero ones into the sensor table);
+        // a fisheye's are its whole Kannala–Brandt lens, before → after.
+        const kterms = rk.fisheye
+          ? ['k1', 'k2', 'k3', 'k4'].slice(0, rk.fisheyeTerms || 4)
+            .map((k) => `${k} ${(kList[ci][k] ?? 0).toFixed(5)}→${(rk[k] ?? 0).toFixed(5)}`)
+          : ['k1', 'k2', 'k3'].filter((k) => rk[k]).map((k) => `${k} ${rk[k].toFixed(5)}`)
+        const kdist = kterms.length ? `, ${rk.fisheye ? 'fisheye ' : ''}${kterms.join(', ')}` : ''
         // A sensorless camera is a group of its own: one line each, so debug-level
         // (a sensorless set would otherwise print a line per image per pass).
         const who = g >= 0 ? `sensor group ${g}` : `camera ${imageByUuid(uuidList[ci])?.name ?? key} (no sensor)`
@@ -409,8 +439,9 @@ export function createBundleSession(ctx) {
         continue
       }
       const ptIds = tracks.liveIds()
-      const observations = buildBaObservations(tracks, ptIds, camIdxOfImg(camIdxOf), keypointsAt)
-      const result = await bundleAdjust(camList, camList.map((c) => c.K), trackPositions(tracks, ptIds), observations, {
+      const lf = lensFrame(uuidList, camList.map((c) => c.K),
+        buildBaObservations(tracks, ptIds, camIdxOfImg(camIdxOf), keypointsAt))
+      const result = await bundleAdjust(camList, lf.kList, trackPositions(tracks, ptIds), lf.observations, {
         maxIters: baIterations, refineIntrinsics: 'none', flatPoints: true,
         sensorOfCam: uuidList.map((u) => sensorIntByUuid.get(u) ?? -1),
         cameraPriors: constrained.priors, solver: cfg.baSolver,
@@ -495,10 +526,10 @@ export function createBundleSession(ctx) {
         continue
       }
 
-      const observations = appendObservations(
-        buildBaObservations(tracks, ptIds, camIdxOfImg(camIdxOf), keypointsAt), setup.observations)
+      const lf = lensFrame(uuidList, kList, appendObservations(
+        buildBaObservations(tracks, ptIds, camIdxOfImg(camIdxOf), keypointsAt), setup.observations))
 
-      const result = await bundleAdjust(camList, kList, trackPositions(tracks, ptIds, anchorPts), observations,
+      const result = await bundleAdjust(camList, lf.kList, trackPositions(tracks, ptIds, anchorPts), lf.observations,
         { maxIters: baIterations, refineIntrinsics: 'none', sensorOfCam, gcpAnchors: anchors, flatPoints: true,
           cameraPriors: constrainedCameras?.priors ?? [], solver: cfg.baSolver })
       noteBaSolver(`GCP-anchored bundle adjustment (round ${round + 1})`, result)

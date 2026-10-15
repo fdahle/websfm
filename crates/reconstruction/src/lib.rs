@@ -250,8 +250,8 @@ mod tests {
             pt_flat.push((x[2] + d * 0.5) as f32);
         }
 
-        let out = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &split_obs(&obs).0, &split_obs(&obs).1, &[], &[], &[], &[], 60, &[], 0, &[], &[]);
-        let base = n_cam * 12 + n_pts * 3 + n_cam * 7;
+        let out = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &split_obs(&obs).0, &split_obs(&obs).1, &[], &[], &[], &[], 60, &[], 0, &[], &[], &[]);
+        let base = n_cam * 12 + n_pts * 3 + n_cam * 8;
         // cameras + points + intrinsics (7 each: fx,fy,cx,cy,k1,k2,k3) + [cost_before, cost_after] + trace.
         assert!(out.len() >= base + 4, "unexpected BA output length");
         let cost_before = out[base];
@@ -320,8 +320,8 @@ mod tests {
             pt_flat.push((x[2] + d * 0.5) as f32);
         }
 
-        let out = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &split_obs(&obs).0, &split_obs(&obs).1, &[], &[], &[], &[], 80, &[], 0, &[], &[]);
-        let base = n_cam * 12 + n_pts * 3 + n_cam * 7;
+        let out = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &split_obs(&obs).0, &split_obs(&obs).1, &[], &[], &[], &[], 80, &[], 0, &[], &[], &[]);
+        let base = n_cam * 12 + n_pts * 3 + n_cam * 8;
         let cost_before = out[base];
         let cost_after = out[base + 1];
         let trace = &out[base + 4 + crate::bundle::BA_STATS_LEN..];
@@ -340,7 +340,7 @@ mod tests {
         // improvements until max_iters, which on St Nazaire (1.45 M observations) cost
         // ~4 s per wasted iteration.
         let tol = [f32::NAN, f32::NAN, f32::NAN, f32::NAN, 1e-6];
-        let out_tol = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &split_obs(&obs).0, &split_obs(&obs).1, &[], &[], &[], &[], 80, &[], 0, &tol, &[]);
+        let out_tol = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &split_obs(&obs).0, &split_obs(&obs).1, &[], &[], &[], &[], 80, &[], 0, &tol, &[], &[]);
         let cost_after_tol = out_tol[base + 1];
         let trace_tol = &out_tol[base + 4 + crate::bundle::BA_STATS_LEN..];
         assert!(trace_tol.len() < trace.len(),
@@ -396,13 +396,13 @@ mod tests {
         let mut pt_flat: Vec<f32> = Vec::new();
         for x in &gt_pts { for &v in x { pt_flat.push(v as f32); } }
 
-        let out = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &split_obs(&obs).0, &split_obs(&obs).1, &[], &[], &[], &[], 100, &sensor_of_cam, 1, &[], &[]);
+        let out = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &split_obs(&obs).0, &split_obs(&obs).1, &[], &[], &[], &[], 100, &sensor_of_cam, 1, &[], &[], &[]);
         let intr_base = n_cam * 12 + n_pts * 3;
-        let cost_after = out[intr_base + n_cam * 7 + 1];
+        let cost_after = out[intr_base + n_cam * 8 + 1];
         // Refined focal is returned per camera; sharing ⇒ all equal, ≈ f_true.
         for c in 0..n_cam {
-            let fx = out[intr_base + c * 7] as f64;
-            let fy = out[intr_base + c * 7 + 1] as f64;
+            let fx = out[intr_base + c * 8] as f64;
+            let fy = out[intr_base + c * 8 + 1] as f64;
             assert!((fx - f_true).abs() / f_true < 0.01, "focal not recovered: cam {c} fx {fx} vs {f_true}");
             assert!((fy - fx).abs() < 1e-3, "fx and fy diverged: {fx} vs {fy}");
         }
@@ -463,8 +463,8 @@ mod tests {
         let anchor_flat: Vec<f64> = vec![0.0, anchor_target[0], anchor_target[1], anchor_target[2]];
         let anchor_weight: Vec<f32> = vec![1e4, 0.0, 0.0, 0.0, 1e4, 0.0, 0.0, 0.0, 1e4];
 
-        let out_no_anchor = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &split_obs(&obs).0, &split_obs(&obs).1, &[], &[], &[], &[], 60, &[], 0, &[], &[]);
-        let out_anchor = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &split_obs(&obs).0, &split_obs(&obs).1, &[], &anchor_flat, &anchor_weight, &[], 60, &[], 0, &[], &[]);
+        let out_no_anchor = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &split_obs(&obs).0, &split_obs(&obs).1, &[], &[], &[], &[], 60, &[], 0, &[], &[], &[]);
+        let out_anchor = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &split_obs(&obs).0, &split_obs(&obs).1, &[], &anchor_flat, &anchor_weight, &[], 60, &[], 0, &[], &[], &[]);
 
         let pts_base = n_cam * 12;
         let dist = |out: &Vec<f32>| -> f64 {
@@ -478,7 +478,7 @@ mod tests {
         assert!(d_anchor < 0.05, "anchored point not close enough to target: {d_anchor}");
 
         // anchor_rms_after is reported right after cost_after.
-        let base = n_cam * 12 + n_pts * 3 + n_cam * 7;
+        let base = n_cam * 12 + n_pts * 3 + n_cam * 8;
         let anchor_rms_after = out_anchor[base + 2];
         assert!(anchor_rms_after < 0.05, "anchor_rms_after too high: {anchor_rms_after}");
         let anchor_rms_no_anchor = out_no_anchor[base + 2];
@@ -536,9 +536,9 @@ mod tests {
         ]); }
 
         let out = bundle_adjust(
-            &cam_flat, &k_flat, &pt_flat, &split_obs(&obs).0, &split_obs(&obs).1, &[], &[], &[], &prior_flat, 80, &[], 0, &[], &[],
+            &cam_flat, &k_flat, &pt_flat, &split_obs(&obs).0, &split_obs(&obs).1, &[], &[], &[], &prior_flat, 80, &[], 0, &[], &[], &[],
         );
-        let base = n_cam * 12 + n_pts * 3 + n_cam * 7;
+        let base = n_cam * 12 + n_pts * 3 + n_cam * 8;
         assert!(out[base + 3] < 1e-3,
             "camera-centre priors did not resolve translation: RMS {}", out[base + 3]);
         assert!(out[base + 1] < 1e-3,
@@ -592,7 +592,7 @@ mod tests {
             pt_flat.extend_from_slice(&[rotated[0] as f32, rotated[1] as f32, rotated[2] as f32]);
         }
         let out = bundle_adjust(
-            &cam_flat, &k_flat, &pt_flat, &split_obs(&obs).0, &split_obs(&obs).1, &[], &[], &[], &prior_flat, 80, &[], 0, &[], &[],
+            &cam_flat, &k_flat, &pt_flat, &split_obs(&obs).0, &split_obs(&obs).1, &[], &[], &[], &prior_flat, 80, &[], 0, &[], &[], &[],
         );
         let mut angular_sse = 0.0;
         for (ci, (target_r, _)) in gt_cams.iter().enumerate() {
@@ -606,7 +606,7 @@ mod tests {
             angular_sse += dot3(&e, &e);
         }
         let angular_rms = (angular_sse / n_cam as f64).sqrt();
-        let base = n_cam * 12 + n_pts * 3 + n_cam * 7;
+        let base = n_cam * 12 + n_pts * 3 + n_cam * 8;
         assert!(angular_rms < 1e-3, "orientation priors left {angular_rms} rad RMS");
         assert!(out[base + 1] < 1e-3, "orientation priors spoiled reprojection: {}px", out[base + 1]);
     }
@@ -757,14 +757,14 @@ mod tests {
         for x in &gt_pts { for &v in x { pt_flat.push(v as f32); } }
 
         // refine_mask 5 = f | k1 (bits 1 and 4).
-        let out = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &split_obs(&obs).0, &split_obs(&obs).1, &[], &[], &[], &[], 100, &sensor_of_cam, 5, &[], &[]);
+        let out = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &split_obs(&obs).0, &split_obs(&obs).1, &[], &[], &[], &[], 100, &sensor_of_cam, 5, &[], &[], &[]);
         let intr_base = n_cam * 12 + n_pts * 3;
-        let cost_before = out[intr_base + n_cam * 7];
-        let cost_after = out[intr_base + n_cam * 7 + 1];
+        let cost_before = out[intr_base + n_cam * 8];
+        let cost_after = out[intr_base + n_cam * 8 + 1];
         assert!(cost_before > 1.0, "test setup too easy: before {cost_before}px");
         // Refined k1 is returned per camera (index 4 of the 7-wide K); sharing ⇒ all equal.
         for c in 0..n_cam {
-            let k1 = out[intr_base + c * 7 + 4] as f64;
+            let k1 = out[intr_base + c * 8 + 4] as f64;
             assert!((k1 - k1_true).abs() < 0.02, "k1 not recovered: cam {c} k1 {k1} vs {k1_true}");
         }
         assert!(cost_after < 0.2, "BA did not fit the refined k1: {cost_after}px");
@@ -817,16 +817,104 @@ mod tests {
         let mut pt_flat: Vec<f32> = Vec::new();
         for x in &gt_pts { for &v in x { pt_flat.push(v as f32); } }
 
-        let out = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &split_obs(&obs).0, &split_obs(&obs).1, &[], &[], &[], &[], 120, &sensor_of_cam, 13, &[], &[]);
+        let out = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &split_obs(&obs).0, &split_obs(&obs).1, &[], &[], &[], &[], 120, &sensor_of_cam, 13, &[], &[], &[]);
         let intr_base = n_cam * 12 + n_pts * 3;
-        let cost_after = out[intr_base + n_cam * 7 + 1];
+        let cost_after = out[intr_base + n_cam * 8 + 1];
         for c in 0..n_cam {
-            let k1 = out[intr_base + c * 7 + 4] as f64;
-            let k2 = out[intr_base + c * 7 + 5] as f64;
+            let k1 = out[intr_base + c * 8 + 4] as f64;
+            let k2 = out[intr_base + c * 8 + 5] as f64;
             assert!((k1 - k1_true).abs() < 0.02, "k1 not recovered: cam {c} k1 {k1} vs {k1_true}");
             assert!((k2 - k2_true).abs() < 0.02, "k2 not recovered: cam {c} k2 {k2} vs {k2_true}");
         }
         assert!(cost_after < 0.2, "BA did not fit the refined k1,k2: {cost_after}px");
+    }
+
+    // A wide fisheye rig for the Kannala–Brandt tests: rays out to ~55° off-axis.
+    // Returns (cameras, points, observations rendered through `lens`, intrinsics flat).
+    fn fisheye_scene(f: f64, lens: [f64; 4]) -> (Vec<(M3, V3)>, Vec<V3>, Vec<f32>) {
+        let (cx, cy) = (320.0_f64, 240.0_f64);
+        let cams: Vec<(M3, V3)> = vec![
+            (so3_exp(&[0.0, 0.0, 0.0]),      [0.0, 0.0, 2.5]),
+            (so3_exp(&[0.10, -0.14, 0.03]),  [0.6, 0.15, 2.7]),
+            (so3_exp(&[-0.12, 0.10, -0.05]), [-0.5, 0.25, 2.4]),
+            (so3_exp(&[0.05, 0.18, 0.06]),   [0.3, -0.4, 2.6]),
+            (so3_exp(&[-0.08, -0.12, 0.10]), [-0.2, 0.5, 2.8]),
+        ];
+        let mut pts: Vec<V3> = Vec::new();
+        for ix in -3..=3 { for iy in -3..=3 {
+            pts.push([ix as f64 * 1.2, iy as f64 * 1.2, 0.4 * ((ix + 2 * iy) as f64).sin()]);
+        } }
+        let mut obs: Vec<f32> = Vec::new();
+        for (ci, (r, t)) in cams.iter().enumerate() {
+            for (pi, x) in pts.iter().enumerate() {
+                let p = mat3_vec(r, x);
+                let (xc, yc, zc) = (p[0] + t[0], p[1] + t[1], p[2] + t[2]);
+                let (a, b) = (xc / zc, yc / zc);
+                let rr = (a * a + b * b).sqrt();
+                let th = rr.atan(); let t2 = th * th;
+                let m = if rr < 1e-12 { 1.0 } else { th * (1.0 + t2 * (lens[0] + t2 * (lens[1] + t2 * (lens[2] + t2 * lens[3])))) / rr };
+                obs.extend_from_slice(&[ci as f32, pi as f32, (f * a * m + cx) as f32, (f * b * m + cy) as f32]);
+            }
+        }
+        (cams, pts, obs)
+    }
+    fn flat_scene(cams: &[(M3, V3)], pts: &[V3], f: f64) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
+        let mut cam_flat = Vec::new();
+        for (r, t) in cams { for row in r { for &v in row { cam_flat.push(v as f32); } } for &v in t { cam_flat.push(v as f32); } }
+        let pt_flat = pts.iter().flat_map(|x| x.iter().map(|&v| v as f32)).collect();
+        let k_flat = (0..cams.len()).flat_map(|_| [f as f32, f as f32, 320.0, 240.0]).collect();
+        (cam_flat, pt_flat, k_flat)
+    }
+
+    // A calibrated fisheye: observations in the recorded pixels, the seed lens exact.
+    // Perturbed points must settle back to zero residual — which only happens if the
+    // Kannala–Brandt projection and its pose/point Jacobians are right. Read as pinhole
+    // (no fisheye_flat) the same observations cannot be fitted.
+    #[test]
+    fn bundle_adjust_fits_a_calibrated_fisheye() {
+        let lens = [0.05, -0.01, 0.002, -0.0003];
+        let (cams, pts, obs) = fisheye_scene(300.0, lens);
+        let (n_cam, n_pts) = (cams.len(), pts.len());
+        let noisy: Vec<V3> = pts.iter().enumerate()
+            .map(|(i, p)| [p[0] + 0.03 * ((i % 5) as f64 - 2.0), p[1] - 0.02 * ((i % 3) as f64 - 1.0), p[2] + 0.04]).collect();
+        let (cam_flat, pt_flat, k_flat) = flat_scene(&cams, &noisy, 300.0);
+        let fish: Vec<f32> = (0..n_cam).flat_map(|_| [4.0, lens[0] as f32, lens[1] as f32, lens[2] as f32, lens[3] as f32]).collect();
+        let (idx, px) = split_obs(&obs);
+        let out = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &idx, &px, &[], &[], &[], &[], 60, &[], 0, &[], &[], &fish);
+        let base = n_cam * 12 + n_pts * 3 + n_cam * 8;
+        assert!(out[base] > 0.5, "test setup too easy: before {}px", out[base]);
+        assert!(out[base + 1] < 1e-3, "fisheye BA did not converge: {}px", out[base + 1]);
+        // The seed lens comes back unchanged when nothing is refined.
+        for j in 0..4 { assert!((out[n_cam * 12 + n_pts * 3 + 4 + j] as f64 - lens[j]).abs() < 1e-6); }
+
+        let pinhole = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &idx, &px, &[], &[], &[], &[], 60, &[], 0, &[], &[], &[]);
+        assert!(pinhole[base + 1] > 1.0, "a pinhole fitted fisheye pixels: {}px", pinhole[base + 1]);
+    }
+
+    // Self-calibrating a fisheye: seeded equidistant (all k = 0) with a 3% focal error,
+    // two refinable terms. BA must recover f, k1, k2 and hold k3/k4 — terms the
+    // two-term lens does not have — at their seed, even with the k3/k4 bits set.
+    #[test]
+    fn bundle_adjust_self_calibrates_a_fisheye() {
+        let (f_true, lens) = (300.0, [0.06, -0.012, 0.0, 0.0]);
+        let (cams, pts, obs) = fisheye_scene(f_true, lens);
+        let (n_cam, n_pts) = (cams.len(), pts.len());
+        let (cam_flat, pt_flat, k_flat) = flat_scene(&cams, &pts, f_true * 1.03);
+        let fish: Vec<f32> = (0..n_cam).flat_map(|_| [2.0f32, 0.0, 0.0, 0.0, 0.0]).collect();
+        let (idx, px) = split_obs(&obs);
+        // 1|4|8|16|32: f, k1, k2, k3, k4.
+        let out = bundle_adjust(&cam_flat, &k_flat, &pt_flat, &idx, &px, &[], &[], &[], &[], 150, &vec![0; n_cam], 61, &[], &[], &fish);
+        let ib = n_cam * 12 + n_pts * 3;
+        let cost_after = out[ib + n_cam * 8 + 1];
+        assert!(cost_after < 0.05, "fisheye self-calibration did not fit: {cost_after}px");
+        for c in 0..n_cam {
+            let k = &out[ib + c * 8..ib + c * 8 + 8];
+            assert!((k[0] as f64 - f_true).abs() < 0.5, "f not recovered: {}", k[0]);
+            assert!((k[4] as f64 - lens[0]).abs() < 0.005, "k1 not recovered: {}", k[4]);
+            assert!((k[5] as f64 - lens[1]).abs() < 0.005, "k2 not recovered: {}", k[5]);
+            assert_eq!(k[6], 0.0, "k3 moved on a two-term fisheye");
+            assert_eq!(k[7], 0.0, "k4 moved on a two-term fisheye");
+        }
     }
 
     // Jacobi's stop test was an absolute 1e-14 on the largest off-diagonal. Any

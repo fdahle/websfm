@@ -249,6 +249,9 @@ try {
     if (h.gcps) console.log(`== hist GCPs: ${JSON.stringify(await page.evaluate((g) => window.bench.setGcps(g), { gcps: h.gcps, crs: cfg.crs }))}`)
     result.hist = { sensor: h.sensor, gcps: h.gcps?.length ?? 0, checks: h.checks }
   }
+  // `sensor`: one calibration for the whole block, set before detection, so matching
+  // already verifies through it (a fisheye's putatives in its pinhole frame).
+  if (cfg.sensor) console.log(`== sensor: ${JSON.stringify(await page.evaluate((f) => window.bench.setSensor(f), cfg.sensor))}`)
   if (cfg.reference?.importPoses) console.log(`== imported ${await page.evaluate(() => window.bench.importReferencePoses())} reference pose(s)`)
   console.log(`== ingest: ${added} images in ${result.stages.ingest.seconds.toFixed(1)} s`)
   // Renderer heap after each stage, before and after a forced GC: the sparse memory

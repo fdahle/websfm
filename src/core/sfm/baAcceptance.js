@@ -10,14 +10,15 @@
 // So compare both states under ONE robust cost: the Huber loss at a single δ taken
 // from the pre-BA residuals (the crate re-derives δ per iteration; a fixed δ is what
 // makes before and after comparable). The projection mirrors bundle.rs `project_full`
-// (pinhole + radial k1..k3 on normalised coordinates). A projection behind or on the
-// camera costs δ², as in the crate.
+// (pinhole + radial k1..k3 on normalised coordinates, or — for a K carrying
+// `fisheye: true` — the Kannala–Brandt lens in recorded pixels). A projection behind
+// or on the camera costs δ², as in the crate.
 
 import { isObservationList } from './baObservations.js'
 
 /**
  * @param {{R:number[][], t:number[]}} cam
- * @param {{fx:number, fy:number, cx:number, cy:number, k1?:number, k2?:number, k3?:number}} K
+ * @param {{fx:number, fy:number, cx:number, cy:number, k1?:number, k2?:number, k3?:number, k4?:number, fisheye?:boolean}} K
  * @param {{x:number, y:number, z:number}} p
  */
 export function projectFull(cam, K, p) {
@@ -32,8 +33,17 @@ export function projectFullXYZ(cam, K, x, y, z) {
   const zc = R[2][0] * x + R[2][1] * y + R[2][2] * z + t[2]
   if (Math.abs(zc) < 1e-9) return null
   const a = xc / zc, b = yc / zc
-  const r2 = a * a + b * b, r4 = r2 * r2
-  const d = 1 + (K.k1 ?? 0) * r2 + (K.k2 ?? 0) * r4 + (K.k3 ?? 0) * r4 * r2
+  const r2 = a * a + b * b
+  let d
+  if (K.fisheye) {
+    // θd/r with θ = atan r — bundle.rs `lens_factor`, its on-axis limit included.
+    const r = Math.sqrt(r2), th = Math.atan(r), t2 = th * th
+    d = r2 < 1e-16 ? 1
+      : th * (1 + t2 * ((K.k1 ?? 0) + t2 * ((K.k2 ?? 0) + t2 * ((K.k3 ?? 0) + t2 * (K.k4 ?? 0))))) / r
+  } else {
+    const r4 = r2 * r2
+    d = 1 + (K.k1 ?? 0) * r2 + (K.k2 ?? 0) * r4 + (K.k3 ?? 0) * r4 * r2
+  }
   return { x: K.fx * a * d + K.cx, y: K.fy * b * d + K.cy }
 }
 

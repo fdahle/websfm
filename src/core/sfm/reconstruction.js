@@ -3,6 +3,7 @@ import init, { recover_pose, triangulate_dlt, solve_pnp, bundle_adjust, compute_
 import { isObservationList } from './baObservations.js'
 import { SFM_TUNING } from '../tuning.js'
 import { isKnownAerialFilmWidth, scanWidthPx, usesFormatWidth } from './filmFormat.js'
+import { isFisheyeModel } from './distortion.js'
 
 // Re-exported: the known-width list now lives with the sensor table's format helpers.
 export { isKnownAerialFilmWidth }
@@ -133,10 +134,16 @@ export function resolveK(meta, sensor = null) {
 
   // 6. No usable calibration. Distinguish "no focal at all" from "focal known but
   //    no sensor/pixel size to convert it" — the latter is fixable in the table.
-  const fx = Math.max(w, h)
+  //    A fisheye sensor guesses that the image corner is 90° off-axis (r = f·θ, so
+  //    f = half-diagonal ÷ π/2) rather than a ~53° pinhole field of view: a GoPro-
+  //    class 4000×3000 frame gets f ≈ 1590 px against a true ≈ 1700.
+  const fisheye = isFisheyeModel(sensor?.distortionModel)
+  const fx = fisheye ? Math.hypot(w, h) / Math.PI : Math.max(w, h)
+  // Callers test the 'default FOV' prefix, so the fisheye note goes inside the brackets.
+  const lens = fisheye ? 'fisheye; ' : ''
   const why = focalMm
-    ? `default FOV (focal ${focalMm}mm present but no pixel size or film/sensor format to convert it)`
-    : 'default FOV (no focal length in metadata)'
+    ? `default FOV (${lens}focal ${focalMm}mm present but no pixel size or film/sensor format to convert it)`
+    : `default FOV (${lens}no focal length in metadata)`
   return { fx, fy: fx, cx, cy, source: why }
 }
 
@@ -263,9 +270,15 @@ export async function solvePnp(pts3d, pts2d, K, opts = {}) {
 // `opts`:
 //   maxIters          — outer LM iterations (default 30)
 //   refineIntrinsics  — comma-separated self-calibration terms, any subset of
-//                       'f','cxcy','k1','k2','k3' (e.g. 'f,k1' or 'f,cxcy,k1,k2,k3');
+//                       'f','cxcy','k1','k2','k3','k4' (e.g. 'f,k1' or 'f,cxcy,k1,k2,k3');
 //                       'none'/'' disables. Parsed to the crate's refine BITMASK
-//                       (1=f, 2=cxcy, 4=k1, 8=k2, 16=k3) by refineModeMask.
+//                       (1=f, 2=cxcy, 4=k1, 8=k2, 16=k3, 32=k4) by refineModeMask. On a
+//                       fisheye camera the k terms are its own Kannala–Brandt terms
+//                       (k4 exists only there).
+//   intrinsics        — { fx, fy, cx, cy } per camera; a FISHEYE camera also carries
+//                       `fisheye: true`, its lens k1…k4 and `fisheyeTerms` (how many of
+//                       them may be refined, 1–4). Its observations must then be in the
+//                       pixels the lens recorded (bundle.rs Kannala–Brandt residuals).
 //   sensorOfCam       — per-camera integer sensor id (cameras sharing an id share
 //                       one focal); required for refinement, ignored for 'none'.
 //   gcpAnchors        — [{ ptIdx, target:[x,y,z], precision:3×3 }] — GCP-anchored 3D
@@ -280,11 +293,12 @@ export async function solvePnp(pts3d, pts2d, K, opts = {}) {
 //                       variances (orientation is expressed in radians).
 // Returns { cameras, points3d, intrinsics, costBefore, costAfter, costTrace,
 //   anchorRmsAfter, cameraPriorRmsAfter, solver, ms } — `intrinsics` is the refined effective K per camera
-// `{ fx, fy, cx, cy, k1, k2, k3 }` (radial coeffs 0 for terms not refined); anchorRmsAfter
+// `{ fx, fy, cx, cy, k1, k2, k3, k4 }` — a pinhole camera's self-calibrated Brown residual
+// (0 for terms not refined), a fisheye camera's full lens plus `fisheye: true`; anchorRmsAfter
 // is the RMS anchor residual in world units (0 when there are no anchors). `solver` is
 // what the reduced solves did (see BA_SOLVER_KEYS / bundle.rs SolveStats) and `ms` the
 // call's wall clock. `opts.solver` overrides the solver policy (SFM_TUNING.baSolver).
-const REFINE_BIT = { f: 1, cxcy: 2, k1: 4, k2: 8, k3: 16 }
+const REFINE_BIT = { f: 1, cxcy: 2, k1: 4, k2: 8, k3: 16, k4: 32 }
 // Parse a refine-terms string into the crate's bitmask. Unknown / 'none' tokens
 // contribute nothing (so 'none', '', undefined → 0).
 export function refineModeMask(spec) {
@@ -336,6 +350,13 @@ export async function bundleAdjust(cameras, intrinsics, points3d, observations, 
   const kFlat = new Float32Array(nCam * 4)
   intrinsics.forEach(({ fx, fy, cx, cy }, c) => {
     kFlat.set([fx, fy, cx, cy], c * 4)
+  })
+  // bundle.rs `fisheye_flat`: [terms, k1, k2, k3, k4] per camera; empty when no camera
+  // is a fisheye (the crate then runs exactly as before).
+  const anyFisheye = intrinsics.some((k) => k?.fisheye)
+  const fisheyeFlat = new Float32Array(anyFisheye ? nCam * 5 : 0)
+  if (anyFisheye) intrinsics.forEach((k, c) => {
+    if (k?.fisheye) fisheyeFlat.set([k.fisheyeTerms || 4, k.k1 || 0, k.k2 || 0, k.k3 || 0, k.k4 || 0], c * 5)
   })
 
   const ptsFlat = flatIn ? Float32Array.from(points3d) : new Float32Array(nPts * 3)
@@ -399,14 +420,14 @@ export async function bundleAdjust(cameras, intrinsics, points3d, observations, 
   const tCall = performance.now()
   const raw = bundle_adjust(
     camFlat, kFlat, ptsFlat, obsIdx, obsPx, obsWFlat, anchorFlat, anchorWFlat, cameraPriorFlat,
-    maxIters, sensorFlat, refineMode, baSolverFlat(solver), fixedMask,
+    maxIters, sensorFlat, refineMode, baSolverFlat(solver), fixedMask, fisheyeFlat,
   )
   const ms = performance.now() - tCall
-  // Layout: cameras(nCam×12), points(nPts×3), intrinsics(nCam×7 = fx,fy,cx,cy,k1,k2,k3),
+  // Layout: cameras(nCam×12), points(nPts×3), intrinsics(nCam×8 = fx,fy,cx,cy,k1,k2,k3,k4),
   // costBefore, costAfter, anchorRmsAfter, cameraPriorRmsAfter, the solver stats
   // (BA_SOLVER_KEYS), then a variable-length per-iteration RMS convergence trace.
   const intrBase = nCam * 12 + nPts * 3
-  const base = intrBase + nCam * 7
+  const base = intrBase + nCam * 8
   const traceBase = base + 4 + BA_SOLVER_KEYS.length
   if (!raw || raw.length < traceBase) return null
   const costBefore = raw[base]
@@ -431,8 +452,9 @@ export async function bundleAdjust(cameras, intrinsics, points3d, observations, 
   }))
 
   const outIntrinsics = cameras.map((_, c) => {
-    const b = intrBase + c * 7
-    return { fx: raw[b], fy: raw[b+1], cx: raw[b+2], cy: raw[b+3], k1: raw[b+4], k2: raw[b+5], k3: raw[b+6] }
+    const b = intrBase + c * 8
+    const k = { fx: raw[b], fy: raw[b+1], cx: raw[b+2], cy: raw[b+3], k1: raw[b+4], k2: raw[b+5], k3: raw[b+6], k4: raw[b+7] }
+    return intrinsics[c]?.fisheye ? { ...k, fisheye: true, fisheyeTerms: intrinsics[c].fisheyeTerms } : k
   })
 
   return {

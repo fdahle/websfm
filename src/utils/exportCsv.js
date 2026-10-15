@@ -47,10 +47,13 @@ export function buildPosesCsv(poses, crs) {
 
 // Shared sensor intrinsics.
 export function buildSensorsCsv(sensors) {
-  const header = ['label', 'width', 'height', 'focal', 'focal_unit', 'cx', 'cy', 'k1', 'k2', 'k3', 'p1', 'p2', 'pixel_size', 'source']
+  // `distortion_model` names which coefficients are live (and whether k1…k4 are
+  // fisheye terms); core/io/sensor.js reads every column back.
+  const header = ['label', 'width', 'height', 'focal', 'focal_unit', 'cx', 'cy', 'distortion_model',
+    'k1', 'k2', 'k3', 'k4', 'k5', 'k6', 'p1', 'p2', 'pixel_size', 'source']
   const rows = sensors.map((s) => [
-    s.label, s.width, s.height, s.focal, s.focalUnit, s.cx, s.cy,
-    s.k1, s.k2, s.k3, s.p1, s.p2, s.pixelSize, s.source,
+    s.label, s.width, s.height, s.focal, s.focalUnit, s.cx, s.cy, s.distortionModel,
+    s.k1, s.k2, s.k3, s.k4, s.k5, s.k6, s.p1, s.p2, s.pixelSize, s.source,
   ])
   return toCsv(header, rows)
 }

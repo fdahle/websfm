@@ -1,4 +1,6 @@
 import { markRaw } from 'vue'
+import { isFisheyeModel } from '../../core/sfm/distortion.js'
+import { makeFrameModelResolver } from '../../core/sfm/displayFrame.js'
 import { packSparseCloud, unpackReconstructionResult } from '../../core/sfm/resultCodec.js'
 import { refineSparse as workerRefineSparse, optimizeSparse as workerOptimizeSparse, editCloud as workerEditCloud } from '../../workers/computeClient.js'
 
@@ -20,7 +22,7 @@ const REPLACES_SOURCE_VIEW = new Set(['transform', 'icp', 'distance', 'normals',
 // Deps are the store's own refs and helpers; the store keeps the state.
 export function createCloudEdits({
   clouds, healthDirty, imagesStore, invalidateSparseDependents, log, mainSparseCloud, makeCloudId,
-  save, projects, reconStatus, selectedCloudId, summary, surveyConstraintInput, upsertSparseCloud,
+  save, projects, reconStatus, selectedCloudId, summary, surveyConstraintInput, upsertSparseCloud, sensors,
 }) {
   // ── Cloud editing (crop / filter / merge) ────────────────────────────────────
 
@@ -164,6 +166,23 @@ export function createCloudEdits({
     }
   }
 
+  // The lens each fisheye camera of the main model was solved with — the run's
+  // (self-calibrated) lens where it has one, else its sensor's (displayFrame.js
+  // resolver) — as plain data for the worker. Empty without fisheye sensors.
+  function fisheyeLensByUuid() {
+    const cams = mainSparseCloud.value?.cameras
+    const fisheyeIds = new Set((sensors?.value ?? []).filter((s) => isFisheyeModel(s.distortionModel)).map((s) => s.id))
+    if (!cams || !fisheyeIds.size) return {}
+    const frameModel = makeFrameModelResolver({ summary: summary.value, sensors: sensors.value })
+    const out = {}
+    for (const img of imagesStore.images) {
+      if (!fisheyeIds.has(img.sensorId) || !cams.has(img.uuid)) continue
+      const { dist } = frameModel(img)
+      if (dist?.fisheye) out[img.uuid] = { ...dist }
+    }
+    return out
+  }
+
   // Images' sensor ids as small integers (BA groups shared intrinsics by them).
   function sensorIndexByUuid() {
     const ids = new Map()
@@ -188,7 +207,10 @@ export function createCloudEdits({
     if (mode === 'optimize') {
       return refineMainSparse({
         label: 'Optimize cameras', sourceId: sourceIds[0], createdAt: settings.createdAt,
-        run: (packed, survey) => workerOptimizeSparse(packed, { refine: settings.refine, sensorOfUuid: sensorIndexByUuid() }, survey),
+        // Fisheye cameras solve in recorded pixels with the run's lens, and their
+        // observations are re-derived about the new K (gradualSelection.js).
+        run: (packed, survey) => workerOptimizeSparse(packed,
+          { refine: settings.refine, sensorOfUuid: sensorIndexByUuid(), lensOfUuid: fisheyeLensByUuid() }, survey),
         describe: (r) => `refined ${settings.refine === 'f,cxcy' ? 'focal length and principal point' : 'focal length'} (largest change ${((r.focalChange ?? 0) * 100).toFixed(2)}%)`
           + (r.removed ? `, dropped ${r.removed} points with fewer than two observations` : ''),
       })

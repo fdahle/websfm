@@ -106,7 +106,9 @@ export function qualifyingGcps(gcps, cameras) {
 export async function buildGcpAnchors({ cameras, qualifying, camIdxOf, firstPointIndex }) {
   const tri = []
   for (const g of qualifying) {
-    const obsWithCam = (g.observations || []).filter((o) => cameras.has(o.uuid))
+    // A mark with no pinhole image (a fisheye ray past 90°) comes out of ingest as NaN.
+    const obsWithCam = (g.observations || [])
+      .filter((o) => cameras.has(o.uuid) && Number.isFinite(o.px) && Number.isFinite(o.py))
     const t = await triangulateGcp(
       obsWithCam.map((o) => ({ imageId: o.uuid, px: o.px, py: o.py, accuracyX: o.accuracyX, accuracyY: o.accuracyY })),
       cameras,

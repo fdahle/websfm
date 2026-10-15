@@ -100,3 +100,16 @@ describe('makeSampleMap per-axis scales', () => {
     expect(id(37.25, 12.5).y).toBeCloseTo(12.5, 12)
   })
 })
+
+describe('makeFrameModelResolver (fisheye)', () => {
+  it('a self-calibrated fisheye row replaces the sensor lens instead of composing', () => {
+    const sensors = [{ id: 's', distortionModel: 'fisheye2', k1: 0.01, k2: 0.002 }]
+    const summary = { selfCalDistortion: [{ sensorId: 's', fisheye: true, k1: 0.04, k2: -0.003, k3: 0, k4: 0, fitRmsPx: 0 }] }
+    const fm = makeFrameModelResolver({ summary, sensors })({ uuid: 'u', sensorId: 's' })
+    expect(fm.dist).toEqual({ fisheye: true, k1: 0.04, k2: -0.003, k3: 0, k4: 0 })
+    expect(fm.selfCal).toBeNull()
+    // Without a run row, the sensor's own lens.
+    expect(makeFrameModelResolver({ summary: {}, sensors })({ uuid: 'u', sensorId: 's' }).dist)
+      .toEqual({ fisheye: true, k1: 0.01, k2: 0.002, k3: 0, k4: 0 })
+  })
+})

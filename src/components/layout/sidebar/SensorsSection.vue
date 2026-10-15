@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useSensorsStore } from '../../../stores/useSensorsStore.js'
+import { DISTORTION_MODELS, distortionOf } from '../../../core/sfm/distortion.js'
 import { useContextMenu } from '../../../composables/useContextMenu.js'
 import { useExpandedSet } from '../../../composables/useExpandedSet.js'
 import ContextMenu from './ContextMenu.vue'
@@ -28,7 +29,9 @@ function fmtFocal(s) {
 function fmtDims(s) {
   return s.width && s.height ? `${s.width} × ${s.height}` : '—'
 }
-const hasDistortion = (s) => [s.k1, s.k2, s.k3, s.p1, s.p2].some((v) => v != null)
+// The lens model when it changes anything (a fisheye always does), else null.
+const lensLabel = (s) => (distortionOf(s)
+  ? DISTORTION_MODELS.find((m) => m.id === s.distortionModel)?.label ?? 'Brown' : null)
 
 // Sensor context menu (right-click). { x, y, sensor }
 const { menu: sensorCtx, open: openSensorCtx, close: closeMenu } = useContextMenu()
@@ -91,8 +94,8 @@ function fromMenu(fn) { const sensor = sensorCtx.value.sensor; closeMenu(); fn(s
             </span>
           </div>
           <div class="detail-row">
-            <span class="detail-label">Distortion</span>
-            <span class="detail-value" :class="{ 'detail-dim': !hasDistortion(sensor) }">{{ hasDistortion(sensor) ? 'yes' : '—' }}</span>
+            <span class="detail-label">Lens</span>
+            <span class="detail-value" :class="{ 'detail-dim': !lensLabel(sensor) }">{{ lensLabel(sensor) ?? '—' }}</span>
           </div>
         </li>
       </template>

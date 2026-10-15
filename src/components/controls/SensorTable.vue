@@ -3,7 +3,8 @@ import { ref, computed } from 'vue'
 import { estimatedIntrinsics } from '../../core/sfm/cameraEstimated.js'
 import { resolveK, sensorWidthMm } from '../../core/sfm/reconstruction.js'
 import { filmFormatStatus, scanWidthPx } from '../../core/sfm/filmFormat.js'
-import { DISTORTION_MODELS, coeffsForModel } from '../../core/sfm/distortion.js'
+import { DISTORTION_MODELS, DISTORTION_COEFFS, coeffsForModel, isFisheyeModel } from '../../core/sfm/distortion.js'
+import GlossaryTerm from '../glossary/GlossaryTerm.vue'
 import { parseRows, sniffDelimiter } from '../../core/io/gcp.js'
 
 // Editable table of sensors (shared intrinsics). In 'initial' mode the numeric
@@ -345,6 +346,9 @@ const NUM_COLS = [
   { key: 'k1',           label: 'k1', lockable: true },
   { key: 'k2',           label: 'k2', lockable: true },
   { key: 'k3',           label: 'k3', lockable: true },
+  { key: 'k4',           label: 'k4', lockable: true },
+  { key: 'k5',           label: 'k5', lockable: true },
+  { key: 'k6',           label: 'k6', lockable: true },
   { key: 'p1',           label: 'p1', lockable: true },
   { key: 'p2',           label: 'p2', lockable: true },
 ]
@@ -353,13 +357,19 @@ const NUM_COLS = [
 // width to convert, so the mm-only columns are dimmed when the unit is px.
 const focalInMm = (s) => s.focalUnit !== 'px'
 
-// Distortion model (D3): which Brown coefficients this sensor uses. A coefficient
-// input outside the active model is disabled (a stale value would not be applied
-// anyway — distortionOf ignores it). No explicit model ⇒ all coefficients live
-// (back-compat with sensors saved before models existed).
-const DISTORTION_COEFFS = new Set(['k1', 'k2', 'k3', 'p1', 'p2'])
+// Lens model (D3): the projection and which coefficients this sensor uses. A
+// coefficient input outside the active model is disabled (a stale value would not
+// be applied anyway — distortionOf ignores it). No explicit model ⇒ the five Brown
+// coefficients are live (back-compat with sensors saved before models existed).
+// A fisheye model's k1…k4 are terms in the ray angle θ, not in the radius.
+const COEFF_KEYS = new Set(DISTORTION_COEFFS)
 const activeCoeffs = (s) => new Set(coeffsForModel(s.distortionModel))
-const coeffOff = (s, key) => DISTORTION_COEFFS.has(key) && !activeCoeffs(s).has(key)
+const coeffOff = (s, key) => COEFF_KEYS.has(key) && !activeCoeffs(s).has(key)
+const coeffTitle = (s, key) => {
+  if (coeffOff(s, key)) return `Not used by the ${modelLabel(s)} model`
+  return COEFF_KEYS.has(key) && isFisheyeModel(s.distortionModel)
+    ? `Fisheye term: θd = θ·(1 + k1·θ² + k2·θ⁴ + k3·θ⁶ + k4·θ⁸), θ the ray angle` : ''
+}
 const modelLabel = (s) =>
   DISTORTION_MODELS.find((m) => m.id === (s.distortionModel || 'pinhole'))?.label ?? '—'
 
@@ -402,7 +412,7 @@ const totalCols = computed(() => 4 + NUM_COLS.length + 2)
         <tr>
           <th>Label</th>
           <th>Source</th>
-          <th>Distortion</th>
+          <th><GlossaryTerm id="lens-distortion">Lens model</GlossaryTerm></th>
           <th>Kind</th>
           <th v-for="c in NUM_COLS" :key="c.key">{{ c.label }}</th>
           <th>Images</th>
@@ -437,7 +447,7 @@ const totalCols = computed(() => 4 + NUM_COLS.length + 2)
               v-if="mode === 'initial'"
               class="unit-select model-select"
               :value="s.distortionModel || 'pinhole'"
-              title="Lens distortion model — which Brown coefficients this sensor uses (removed at ingest; the pipeline stays pinhole)"
+              title="Lens model — Brown, rational or fisheye, and which coefficients it uses (removed at ingest; the pipeline stays pinhole)"
               @change="onEdit(s.id, 'distortionModel', $event)"
             >
               <option v-for="m in DISTORTION_MODELS" :key="m.id" :value="m.id">{{ m.label }}</option>
@@ -577,7 +587,7 @@ const totalCols = computed(() => 4 + NUM_COLS.length + 2)
                 type="number"
                 step="any"
                 :disabled="coeffOff(s, c.key)"
-                :title="coeffOff(s, c.key) ? `Not used by the ${modelLabel(s)} model` : ''"
+                :title="coeffTitle(s, c.key)"
                 :value="s[c.key] ?? ''"
                 @change="onEdit(s.id, c.key, $event)"
               />

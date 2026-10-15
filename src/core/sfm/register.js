@@ -434,6 +434,8 @@ export async function registerImages(ctx) {
         for (let i = 0; i < m.length; i++) {
           if (tracks.pointAt(imgI, newKpOf(i)) >= 0) continue
           if (tracks.pointAt(regI, regKpOf(i)) >= 0) continue
+          // A fisheye keypoint the self-cal re-map pushed past the ray limit is missing.
+          if (!hasKp(img.kp, newKpOf(i)) || !hasKp(regImg.kp, regKpOf(i))) continue
           pairsToTri.push(i)
         }
         if (pairsToTri.length === 0) continue

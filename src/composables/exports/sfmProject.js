@@ -230,7 +230,7 @@ export function createSfmProjectExports({
         const res = await undistortImage({
           url: im.computeUrl ?? im.url,
           K: { fx: cam.K.fx, fy: cam.K.fy, cx: cam.K.cx, cy: cam.K.cy },
-          dist: sensor ? distortionOf(sensor) : null,
+          dist: frameModel(im).dist,
           selfCal: frameModel(im).selfCal,
           fid, mode, maxDim, format, quality,
         }, { onLog: (m, l, c) => log(m, l, c ?? 'Export') })
