@@ -9,7 +9,7 @@ import { projectSparsePeakBreakdownBytes, sparseMemoryDecision, planSparseRun, W
 import { terminateAll, reconstruct as workerReconstruct } from '../../workers/computeClient.js'
 import { keypointSetFrom, keypointSetTransfer } from '../../core/sfm/keypointSet.js'
 import { useMatchesStore } from '../useMatchesStore.js'
-import { packMatchPairs } from '../../core/sfm/matchCodec.js'
+import { packMatchPairs, inNameOrder } from '../../core/sfm/matchCodec.js'
 import * as opfs from '../../utils/opfs.js'
 import { toMatchSpace } from '../../core/features/siftDescriptors.js'
 import { unpackReconstructionResult } from '../../core/sfm/resultCodec.js'
@@ -124,7 +124,10 @@ export function createSparseRun({
       }
       // Counts gate and size the run: keypoints and matches are on disk, read below
       // image by image / pair by pair straight into the worker input.
+      // By name, not import order (the file picker's order varies): with inNameOrder below,
+      // the same photos and matches always reach the solver in the same order.
       let imgs = images.value.filter((img) => img.kpStatus === 'done' && (img.kpCount ?? 0) > 0)
+        .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
       const sensorById = new Map(sensors.value.map((s) => [s.id, s]))
       const reconstructionTransfers = []
       const reconstructionPairs = [...matchStore.value.values()]
@@ -251,11 +254,10 @@ export function createSparseRun({
       // fresh packed copy (the stream hands views into its read windows), transferred.
       const packedPairMatches = new Map()
       await useMatchesStore().streamPairMatches(reconstructionPairs, (e, m) => {
-        const packed = packMatchPairs(m)
-        reconstructionTransfers.push(packed.buffer)
-        packedPairMatches.set(e, packed)
+        packedPairMatches.set(e, packMatchPairs(m))
       })
 
+      const imageNameByUuid = new Map(imgs.map((img) => [img.uuid, img.name]))
       const input = {
         images: imgs.map((img) => {
           // Forward everything resolveK() may need: the EXIF fields that let it
@@ -313,7 +315,9 @@ export function createSparseRun({
               : null,
           }
         }),
-        pairs: reconstructionPairs
+        // Name order, not uuid order (matchCodec.js inNameOrder): the same matches must
+        // reconstruct the same model in every session.
+        pairs: inNameOrder(reconstructionPairs
           .map((e) => ({
             idA: e.idA, idB: e.idB,
             // F (3×3) and matches come from reactive store entries; rebuild them
@@ -326,13 +330,15 @@ export function createSparseRun({
             // sfm.js keeps them out of init / triangulation and feeds
             // them only to PnP correspondence collection (register.js).
             inlierCount: e.inlierCount, weak: e.weak ?? false, status: 'done',
-          })),
+          })), (uuid) => imageNameByUuid.get(uuid)),
         // GCP anchors + camera priors in one survey frame (surveyConstraintInput).
         gcps: survey.gcps,
         cameraPriors: survey.cameraPriors,
         settings,
       }
 
+      // Each pair's packed matches (a swapped pair's are a new buffer) are transferred.
+      for (const p of input.pairs) if (p.matches) reconstructionTransfers.push(p.matches.buffer)
       // Guided track extension needs each image's descriptors in the worker, as
       // COLMAP-style uint8 RootSIFT (×512): 128 B per keypoint instead of 512.
       if (guidedSkippedForMemory) {

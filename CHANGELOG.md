@@ -145,6 +145,8 @@ Notable changes to websfm. The format follows
 - Cancelling GPU matching did not stop the run.
 - COLMAP database import dropped the k4–k6 terms of `FULL_OPENCV` cameras without a
   warning.
+- The same matches could reconstruct slightly differently in different sessions (the
+  solver's input order followed random image ids); it now follows image names.
 
 ## [0.1.0-beta.1] — 2026-08-10
 

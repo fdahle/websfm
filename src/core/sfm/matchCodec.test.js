@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { Uint32PairList, packMatchPairs, wrapPackedMatches, asPairList, swapMatchRoles, transposeF } from './matchCodec.js'
+import { Uint32PairList, packMatchPairs, wrapPackedMatches, asPairList, swapMatchRoles, transposeF, inNameOrder } from './matchCodec.js'
 
 describe('reconstruction match transport', () => {
   it('packs tuples into eight bytes per match and preserves the solver read API', () => {
@@ -43,5 +43,22 @@ describe('swapMatchRoles / transposeF', () => {
     const a = [3, 7, 1], b = [5, -2, 1]
     const xFy = (x, M, y) => x.reduce((s, xi, r) => s + xi * M[r].reduce((t, m, c) => t + m * y[c], 0), 0)
     expect(xFy(b, F, a)).toBeCloseTo(xFy(a, transposeF(F), b), 12)
+  })
+})
+
+describe('inNameOrder', () => {
+  it('orients each pair by image name and sorts the list, whatever the uuids', () => {
+    const names = new Map([['u9', 'IMG_1'], ['u1', 'IMG_2'], ['u5', 'IMG_3']])
+    const F = [[1, 2, 3], [4, 5, 6], [7, 8, 9]]
+    const pairs = [
+      { idA: 'u1', idB: 'u5', F, matches: Uint32Array.of(0, 1), inlierCount: 1 },
+      { idA: 'u1', idB: 'u9', F, matches: Uint32Array.of(3, 7, 4, 8), inlierCount: 2 },
+    ]
+    const out = inNameOrder(pairs, (id) => names.get(id))
+    expect(out.map((p) => `${names.get(p.idA)}|${names.get(p.idB)}`)).toEqual(['IMG_1|IMG_2', 'IMG_2|IMG_3'])
+    // The swapped pair: columns swapped, F transposed; the other untouched.
+    expect([...out[0].matches]).toEqual([7, 3, 8, 4])
+    expect(out[0].F).toEqual([[1, 4, 7], [2, 5, 8], [3, 6, 9]])
+    expect(out[1]).toBe(pairs[0])
   })
 })

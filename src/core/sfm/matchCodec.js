@@ -74,3 +74,22 @@ export function swapMatchRoles(matches) {
 export function transposeF(F) {
   return [0, 1, 2].map((r) => [0, 1, 2].map((c) => F[c][r]))
 }
+
+// SfM input pairs in a session-independent order. The match store keys pairs by image
+// uuid (random per import), so the role order (idA/idB) and the list order it hands
+// over differ from one session to the next while the matches are identical — and the
+// incremental solve is order-sensitive (seed ties, registration order): FIORD's 106
+// fisheye images gave 101 cameras in one session and 104 in another from one match
+// digest. Orient every pair so its first image sorts first by `nameOf` (swapping the
+// packed [a, b] columns and transposing F) and sort the list by the two names.
+// `pairs` = [{ idA, idB, F, matches: Uint32Array, … }]; returns new objects, the
+// matches of a swapped pair a new buffer.
+export function inNameOrder(pairs, nameOf) {
+  const name = (id) => String(nameOf(id) ?? id)
+  const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0)
+  return pairs.map((p) => {
+    if (cmp(name(p.idB), name(p.idA)) >= 0) return p
+    return { ...p, idA: p.idB, idB: p.idA, F: p.F ? transposeF(p.F) : p.F,
+      matches: p.matches ? swapMatchRoles(p.matches) : p.matches }
+  }).sort((a, b) => cmp(name(a.idA), name(b.idA)) || cmp(name(a.idB), name(b.idB)))
+}
