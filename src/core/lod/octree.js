@@ -117,16 +117,19 @@ export function buildSubtree(pts, idx, root, key = [0, 0, 0, 0], opts = {}) {
 }
 
 /**
- * Make the levels above `fromLevel` from the nodes at it (chunk roots): every parent
- * takes a grid subsample of its children's points, and those points leave the
- * children. `nodes` is a Map keyString → { key, idx } holding at least the nodes at
- * `fromLevel`; parents are added to it, emptied children removed. Bottom-up, one
- * level at a time, so each lift only sees the level directly below.
+ * Make the levels above the chunk roots: every parent takes a grid subsample of its
+ * children's points, and those points leave the children. `nodes` is a Map
+ * keyString → { key, idx } of the chunk roots only (disjoint cubes, any levels, not
+ * their descendants); the parents are added to it. A child the lift empties stays,
+ * with no points: the caller drops it when it has no children of its own. Bottom-up,
+ * one level at a time, so each lift only sees the level directly below.
  */
-export function liftLevels(pts, nodes, root, fromLevel, opts = {}) {
+export function liftLevels(pts, nodes, root, opts = {}) {
   const { grid = GRID } = opts
   const lifted = new Uint8Array(pts.count) // marks, cleared after each parent
-  for (let level = fromLevel; level > 0; level--) {
+  let deepest = 0
+  for (const n of nodes.values()) deepest = Math.max(deepest, n.key[0])
+  for (let level = deepest; level > 0; level--) {
     // Children at `level`, grouped by parent.
     const byParent = new Map()
     for (const n of nodes.values()) {
@@ -144,12 +147,7 @@ export function liftLevels(pts, nodes, root, fromLevel, opts = {}) {
       for (const c of children) { all.set(c.idx, o); o += c.idx.length }
       const { picked } = subsample(pts, all, nodeCube(root, key), grid)
       for (const i of picked) lifted[i] = 1
-      for (const c of children) {
-        const keep = c.idx.filter((i) => !lifted[i])
-        if (keep.length) c.idx = keep
-        else if (!hasChild(nodes, c.key)) nodes.delete(keyString(c.key))
-        else c.idx = keep
-      }
+      for (const c of children) c.idx = c.idx.filter((i) => !lifted[i])
       for (const i of picked) lifted[i] = 0
       const existing = nodes.get(s)
       if (existing) {
@@ -162,14 +160,16 @@ export function liftLevels(pts, nodes, root, fromLevel, opts = {}) {
   return nodes
 }
 
-function hasChild(nodes, key) {
+/** Whether any child of `key` is in `nodes` (a Map keyString → node). */
+export function hasChild(nodes, key) {
   for (let o = 0; o < 8; o++) if (nodes.has(keyString(childKey(key, o)))) return true
   return false
 }
 
 /**
  * The whole octree of an in-memory cloud, chunked at `chunkLevel` as the out-of-core
- * build does (0 = one chunk). → Map keyString → { key, idx }
+ * build does (0 = one chunk). → Map keyString → { key, idx }; a node the lift emptied
+ * is kept only when it has children.
  */
 export function buildOctree(pts, root, opts = {}) {
   const { chunkLevel = 0 } = opts
@@ -190,8 +190,14 @@ export function buildOctree(pts, root, opts = {}) {
     if (!chunks.has(s)) chunks.set(s, { key: [chunkLevel, cx, cy, cz], idx: [] })
     chunks.get(s).idx.push(i)
   }
+  const roots = new Map()
   for (const { key, idx } of chunks.values()) {
-    for (const n of buildSubtree(pts, Uint32Array.from(idx), root, key, opts)) nodes.set(keyString(n.key), n)
+    const sub = buildSubtree(pts, Uint32Array.from(idx), root, key, opts)
+    roots.set(keyString(sub[0].key), sub[0]) // parents first: [0] is the chunk root
+    for (const n of sub) nodes.set(keyString(n.key), n)
   }
-  return liftLevels(pts, nodes, root, chunkLevel, opts)
+  liftLevels(pts, roots, root, opts)
+  for (const [s, n] of roots) nodes.set(s, n)
+  for (const [s, n] of nodes) if (!n.idx.length && !hasChild(nodes, n.key)) nodes.delete(s)
+  return nodes
 }

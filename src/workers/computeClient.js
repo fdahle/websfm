@@ -341,6 +341,12 @@ export const meshify = streamingOp('meshify')
 // { mesh: { pos, idx, uv, col, nVerts, count }, texture: { data, pages, groups }, summary }.
 export const textureMesh = streamingOp('textureMesh')
 
+// Level-of-detail octree of a resident cloud (core/lod/build.js) into the given
+// directory handle: { cloud: { count, pos, col?, attributes? }, dir, name } (buffers
+// transferred). Resolves to the octree's metadata ({ dataFile, hierarchyFile, root,
+// layout, spacing, nodeCount, dataBytes, points, levels }).
+export const buildLod = streamingOp('buildLod')
+
 // Cloud editing — crop / filter / merge over flat (dense) clouds. See
 // core/products/cloudEdit.js. Input { mode, clouds:[{ id, count, pos, col, nrm }],
 // settings }; the source buffers are TRANSFERRED in and round-tripped back under

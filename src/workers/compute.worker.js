@@ -27,6 +27,7 @@ import { makeReferenceGcpOps } from './ops/referenceGcps.js'
 import { makeUndistortOps } from './ops/undistort.js'
 import { makeLazCodec } from './ops/laz.js'
 import { makeExportOps } from './ops/export.js'
+import { makeLodOps } from './ops/lod.js'
 import { isPyramid, openPyramid, rasterizePyramid } from './rasterSource.js'
 
 // Decode an image URL (blob: URLs work in a worker) and draw it into an
@@ -94,6 +95,7 @@ const ops = {
   ...makeReferenceGcpOps({ rasterize }),
   ...makeExportOps({ lazCodec }),
   ...makeUndistortOps({ rasterize }),
+  ...makeLodOps(),
 }
 
 self.onmessage = async (e) => {

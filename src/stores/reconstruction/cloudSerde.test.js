@@ -163,6 +163,15 @@ describe('dense cloud round trip', () => {
     expect('derived' in plain).toBe(false)
   })
 
+  it('carries its level-of-detail octree, unless it describes other points', () => {
+    const lod = { dataFile: 'd1-x.lod', hierarchyFile: 'd1-x.hier', points: 2, nodeCount: 1, root: { min: [1, 2, 3], size: 3 } }
+    const out = roundTrip(dense({ lod }))
+    expect(out.lod).toEqual(lod)
+    expect(serializeCloud(dense({ lod }), { reuse: { pos: { name: 'p', bytes: 24 } } }).lod).toEqual(lod)
+    expect('lod' in roundTrip(dense())).toBe(false)
+    expect('lod' in roundTrip(dense({ lod: { ...lod, points: 5 } }))).toBe(false)
+  })
+
   it('ignores buffer tail beyond count', () => {
     const c = dense({ count: 1, pos: Float32Array.from([1, 2, 3, 9, 9, 9]), col: Uint8Array.from([1, 2, 3, 9, 9, 9]) })
     const out = roundTrip(c)

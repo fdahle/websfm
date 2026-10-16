@@ -275,12 +275,16 @@ export function serializeCloud(c, { reuse = null } = {}) {
   if (reuse && (c.kind === 'dense' || c.kind === 'mesh')) {
     const data = serializeCloudData(c, { buffers: false })
     const { fields } = attributeLayout(c.attributes, count)
-    return { ...data, visible: c.visible !== false, style, attributeFields: fields, buffers: null, reuse }
+    return { ...data, visible: c.visible !== false, style, attributeFields: fields, ...lodMeta(c), buffers: null, reuse }
   }
   const data = serializeCloudData(c)
   const { fields, buffer } = packAttributes(c.attributes, count)
-  return { ...data, visible: c.visible !== false, style, attributeFields: fields, buffers: { ...data.buffers, attributes: buffer } }
+  return { ...data, visible: c.visible !== false, style, attributeFields: fields, ...lodMeta(c), buffers: { ...data.buffers, attributes: buffer } }
 }
+
+// A dense cloud's level-of-detail octree (reconstruction/cloudLod.js): metadata only,
+// its files live in lod/. Restored only when it still describes the cloud's points.
+const lodMeta = (c) => (c.kind === 'dense' && c.lod ? { lod: JSON.parse(JSON.stringify(c.lod)) } : {})
 
 // Attributes (intensity, classification, …) are optional extras: a damaged
 // attribute sidecar drops that cloud's attributes, never the cloud — and never,
@@ -294,7 +298,9 @@ export function deserializeCloud(c, makeCloudId) {
   } catch (err) {
     attributeError = err?.message ?? String(err)
   }
+  const lod = c.kind === 'dense' && c.lod?.points === (c.pointCount ?? 0) ? markRaw(c.lod) : null
   return { ...cloud, visible: c.visible !== false, style: c.style ?? null,
+    ...(lod ? { lod } : {}),
     ...(Object.keys(attributes).length ? { attributes: markRaw(attributes) } : {}),
     ...(attributeError ? { attributeError } : {}) }
 }

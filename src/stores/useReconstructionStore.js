@@ -3,6 +3,7 @@ import { createSparseRun } from './reconstruction/sparseRun.js'
 import { createProductRuns } from './reconstruction/productRuns.js'
 import { createCloudEdits } from './reconstruction/cloudEdits.js'
 import { createMeshTexture } from './reconstruction/meshTexture.js'
+import { createCloudLod } from './reconstruction/cloudLod.js'
 import { createDense } from './reconstruction/dense.js'
 import { createProducts } from './reconstruction/products.js'
 import { createImporters } from './reconstruction/importers.js'
@@ -719,6 +720,11 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     addDerivedMesh, clouds, frameModelFor, images, imagesStore, log, mainSparseCloud, reconStatus, save,
   })
 
+  // Level-of-detail octrees of big clouds (reconstruction/cloudLod.js).
+  const { buildCloudLod, openCloudLod, pruneLod } = createCloudLod({
+    clouds, log, save, projectId: () => (isPersisting() ? projects.currentProjectId : null),
+  })
+
   // DEM and orthophoto generation (reconstruction/productRuns.js).
   const {
     generateDem, generateOrtho,
@@ -860,6 +866,8 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     // opening need not rewrite them.
     savedCloudFiles.clear()
     raw.forEach((c, i) => { if (c.savedFiles) savedCloudFiles.remember(clouds.value[i], projectId, c.savedFiles) })
+    // Octree files no cloud names any more (a deleted cloud, an unfinished build).
+    pruneLod().catch(() => {})
     for (const c of clouds.value) {
       if (!c.attributeError) continue
       log(`Cloud "${c.name}": point attributes could not be restored (${c.attributeError}) — `
@@ -981,7 +989,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     reconstruct,
     importColmapModel, importInteropModel,
     importCloud,
-    editClouds, textureMesh,
+    editClouds, textureMesh, buildCloudLod, openCloudLod,
     // Tools ▸ Model ▾ ▸ Region (core/products/region.js).
     region, regionState, setRegion, clearRegion,
     // Tools ▸ Model ▾ ▸ Orient model (core/products/orientation.js).

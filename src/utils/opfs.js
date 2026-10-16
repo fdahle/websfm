@@ -1317,6 +1317,36 @@ export async function deleteReconstruction(projectId) {
   }))
 }
 
+// ── Level-of-detail octrees (dev/planning/plan-lod.md) ──────────────────────
+// lod/{name}.lod (the nodes' points) + lod/{name}.hier (the hierarchy), one pair per
+// octree; a cloud's metadata names its pair (`cloud.lod.dataFile` / `hierarchyFile`).
+// Kept by "exclude derived data": a streamed cloud's octree is its only copy.
+
+export async function lodDir(projectId) {
+  return getSubDir(projectId, 'lod')
+}
+
+export async function loadLodFile(projectId, name) {
+  const dir = await getSubDir(projectId, 'lod')
+  return (await dir.getFileHandle(name)).getFile()
+}
+
+// Remove every octree file not named in `keepNames`, and chunk files left in OPFS by
+// a build that never finished (a closed tab) unless `building`.
+export async function pruneLodFiles(projectId, keepNames, { building = false } = {}) {
+  return trackPersistence('pruneLodFiles:' + String(projectId), async () => {
+    const dir = await getSubDir(projectId, 'lod')
+    const stale = []
+    for await (const name of dir.keys()) if (/\.(lod|hier)$/.test(name) && !keepNames.has(name)) stale.push(name)
+    for (const name of stale) await dir.removeEntry(name).catch(ignoreMissing)
+    if (!building) {
+      const root = await getRoot()
+      await root.removeEntry('tmp', { recursive: true }).catch(ignoreMissing)
+    }
+    return stale.length
+  })
+}
+
 // ── Products (DEM / orthophoto rasters) ──────────────────────────────────────
 // Recomputable but expensive, so persisted like other project data. Metadata
 // (dimensions, geotransform, CRS) goes in products/{kind}.json; the binary parts
