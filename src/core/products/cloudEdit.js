@@ -211,6 +211,31 @@ export function maskCloud(cloud, { mask, keepSelected = false } = {}, onLog) {
   return selectPoints(cloud, keep, kept)
 }
 
+/**
+ * Manual reclassification (TODO ▸ F14): the same points with the selected ones set
+ * to LAS class `classValue`. A NEW classification array, so saving sees the change
+ * (savedCloudFiles.js compares arrays by identity); a cloud without one starts at
+ * class 0, "never classified". Positions, colours, normals and every other attribute
+ * pass through untouched.
+ */
+export function classifySelection(cloud, { mask, classValue } = {}, onLog) {
+  const n = cloudCount(cloud)
+  if (!mask || mask.length !== n) throw new Error(`selection covers ${mask?.length ?? 0} points but the cloud has ${n}`)
+  const c = Math.round(Number(classValue))
+  if (!(c >= 0 && c <= 255)) throw new Error(`class ${classValue} is not a LAS class (0–255)`)
+  const prev = cloud.attributes?.classification
+  const cls = prev ? Uint8Array.from(prev) : new Uint8Array(n)
+  let changed = 0, selected = 0
+  for (let i = 0; i < n; i++) {
+    if (!mask[i]) continue
+    selected++
+    if (cls[i] !== c) { cls[i] = c; changed++ }
+  }
+  onLog?.(`Classify: ${selected.toLocaleString()} selected points set to class ${c} (${changed.toLocaleString()} changed)`, 'info', 'Products')
+  return { count: n, pos: cloud.pos, col: cloud.col ?? null, ...(cloud.nrm ? { nrm: cloud.nrm } : {}),
+    attributes: { ...(cloud.attributes || {}), classification: cls } }
+}
+
 // ── Filters ──────────────────────────────────────────────────────────────────
 
 /**

@@ -63,6 +63,11 @@ the cloud, without the thin far background that oblique photos see. Points outsi
 it are left Never classified (class 0) and never reach a DTM. **All points**
 classifies the whole cloud, which makes the cloth larger.
 
+## Correcting the result by hand
+Where the filter is wrong, for example a hilltop it lifted off or a low roof it kept
+as ground, select those points in the 3D view (**Tools ▸ Point Cloud ▸ Select**) and
+use **Assign class** in the selection toolbox. See [Dense cloud](guide:dense-cloud).
+
 ## Low points and noise
 The filter takes the lowest point in each cloth cell as the ground there. One
 isolated point far below its neighbours is treated as noise and ignored. A cluster

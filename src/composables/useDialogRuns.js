@@ -108,10 +108,13 @@ export function useDialogRuns({ pipeline, closeProductTabs, openImageTab, refres
   async function onMergeCloudsRun(req) { mergeCloudsOpen.value = false; await runEditClouds({ ...req, mode: 'merge' }) }
   // 3D-viewer rectangle/lasso selection: one masked edit per selected cloud. The
   // store refines a derived cloud in place and forks a derived copy of anything else.
-  async function onEditSelection({ edits, keepSelected }) {
+  async function onEditSelection({ edits, keepSelected, classValue = null }) {
     for (const { cloudId, mask } of edits) {
       // Cancel terminates the worker for this cloud; it must also stop the rest.
-      const result = await runEditClouds({ mode: 'mask', sourceIds: [cloudId], settings: { mask, keepSelected } })
+      // With a class, the selection is reclassified instead of kept or deleted.
+      const result = classValue != null
+        ? await runEditClouds({ mode: 'classify', sourceIds: [cloudId], settings: { mask, classValue } })
+        : await runEditClouds({ mode: 'mask', sourceIds: [cloudId], settings: { mask, keepSelected } })
       if (result?.cancelled) break
     }
   }

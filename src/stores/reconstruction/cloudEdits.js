@@ -283,7 +283,7 @@ export function createCloudEdits({
       }))
       return { id: c.id, kind: 'dense', count: c.count, pos, col, nrm, attributes }
     })
-    if (mode === 'mask') {
+    if (mode === 'mask' || mode === 'classify') {
       // The viewer's selection is stamped with the buffer it was drawn from; a
       // replaced cloud (re-fuse, another edit) must not receive a stale mask.
       if (!(settings.mask instanceof Uint8Array) || settings.mask.length !== sources[0].count) {
@@ -305,7 +305,7 @@ export function createCloudEdits({
         return null
       }
       let cloud
-      if (mode === 'mask' && sources[0].derived) {
+      if ((mode === 'mask' || mode === 'classify') && sources[0].derived) {
         // A derived cloud is already the user's own working copy, so selection
         // edits refine it in place — repeated cleanup must not stack one full copy
         // per stroke in memory and OPFS. Computed and imported clouds stay
@@ -316,22 +316,25 @@ export function createCloudEdits({
           reconStatus.value = 'done'
           return null
         }
-        log(`Selection edit: "${cloud.name}" now has ${cloud.count.toLocaleString()} points`,
-          'success', 'Products')
+        log(mode === 'classify' ? `Classify: "${cloud.name}" updated`
+          : `Selection edit: "${cloud.name}" now has ${cloud.count.toLocaleString()} points`, 'success', 'Products')
+        // A reclassification shows its classes.
+        if (mode === 'classify' && cloud.style?.field !== 'attribute:classification') cloud.style = { ...(cloud.style || {}), field: 'attribute:classification' }
       } else {
         const opts = {
-          name: name || `${sources[0].name} (${mode === 'mask' ? 'edited' : mode})`,
+          name: name || `${sources[0].name} (${mode === 'mask' ? 'edited' : mode === 'classify' ? 'classified' : mode})`,
           // Provenance follows the SOURCE (slot 0) — a reference only informs the edit.
           imported: REFERENCE_MODES.has(mode) ? !!sources[0].imported : sources.every((c) => c.imported),
         }
         cloud = edited.idx ? addDerivedMesh(carryTexture(sources[0], edited, mode), opts) : addDerivedCloud(edited, opts)
         // A tool may start its result on a colouring (distance → a diverging ramp);
         // a function sees the worker's small result record (e.g. the distance spread).
-        const startStyle = typeof style === 'function' ? style(extra ?? null) : style
+        const startStyle = mode === 'classify' ? { field: 'attribute:classification' }
+          : typeof style === 'function' ? style(extra ?? null) : style
         if (startStyle) cloud.style = startStyle
         // Show the edit in place of its source; the source stays one visibility
         // toggle away for comparison or to start over.
-        if (mode === 'mask' || REPLACES_SOURCE_VIEW.has(mode)) sources[0].visible = false
+        if (mode === 'mask' || mode === 'classify' || REPLACES_SOURCE_VIEW.has(mode)) sources[0].visible = false
         log(`Cloud edit: added "${cloud.name}" — ${cloud.kind === 'mesh'
           ? `${cloud.count.toLocaleString()} triangles` : `${cloud.count.toLocaleString()} points`}`,
         'success', 'Products')

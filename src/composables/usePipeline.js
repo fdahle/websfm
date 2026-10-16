@@ -264,7 +264,7 @@ export function usePipeline({ images, detectAll, matchAll, reconstruct, computeD
   // cancel-by-terminate contract as the mesh run.
   async function runEditClouds(request) {
     const titles = {
-      crop: 'Cropping Cloud', filter: 'Filtering Cloud', merge: 'Merging Clouds', mask: 'Editing Selection',
+      crop: 'Cropping Cloud', filter: 'Filtering Cloud', merge: 'Merging Clouds', mask: 'Editing Selection', classify: 'Classifying Points',
       normals: 'Estimating Normals', 'classify-ground': 'Classifying Ground', transform: 'Transforming Cloud', icp: 'Aligning Clouds',
       sparse: 'Gradual Selection', optimize: 'Optimizing Cameras',
       distance: 'Computing Distances', section: 'Cutting Section',

@@ -14,6 +14,8 @@ Notable changes to websfm. The format follows
 - **DEM of difference**: the volume tool can measure the computed DEM against an
   imported reference DEM, reporting gain, loss and net change inside a polygon
   (Tools ▸ Measure ▸ DEM of difference).
+- **Reclassify by hand**: the 3D selection toolbox has an Assign class action, so
+  points the ground filter got wrong (or any selection) can be set to a LAS class.
 - **Textured meshes**: Tools ▸ Mesh ▸ Texture paints a mesh with the photos
   themselves, as a new mesh with an atlas of JPEG pages. Each triangle takes the photo
   that sees it largest, neighbouring triangles keep to the same photo so seams stay

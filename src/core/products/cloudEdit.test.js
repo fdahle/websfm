@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   cloudBounds, cloudCount, cropCloud, filterRange, removeIsolated,
   statisticalOutlierFilter, voxelDownsample, filterCloud, mergeClouds,
-  estimateSpacing, clampGridCell, maskCloud,
+  estimateSpacing, clampGridCell, maskCloud, classifySelection,
 } from './cloudEdit.js'
 
 // Build a flat cloud from [[x,y,z], …] plus optional colours/normals.
@@ -291,5 +291,20 @@ describe('maskCloud', () => {
 
   it('refuses a mask computed against a different cloud', () => {
     expect(() => maskCloud(src, { mask: new Uint8Array(2) })).toThrow(/covers 2 points/)
+  })
+})
+
+describe('classifySelection', () => {
+  it('sets the selected points to a class in a new array and keeps everything else', () => {
+    const src = { count: 4, pos: new Float64Array(12), col: new Uint8Array(12), attributes: { intensity: Uint16Array.of(1, 2, 3, 4) } }
+    const a = classifySelection(src, { mask: Uint8Array.of(1, 0, 1, 0), classValue: 2 })
+    expect([...a.attributes.classification]).toEqual([2, 0, 2, 0])
+    expect(a.attributes.intensity).toBe(src.attributes.intensity)
+    expect(a.pos).toBe(src.pos)
+    const b = classifySelection(a, { mask: Uint8Array.of(0, 1, 1, 0), classValue: 6 })
+    expect([...b.attributes.classification]).toEqual([2, 6, 6, 0])
+    expect(b.attributes.classification).not.toBe(a.attributes.classification)
+    expect(() => classifySelection(src, { mask: Uint8Array.of(1), classValue: 2 })).toThrow()
+    expect(() => classifySelection(src, { mask: Uint8Array.of(1, 0, 0, 0), classValue: 300 })).toThrow()
   })
 })

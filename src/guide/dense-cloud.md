@@ -93,6 +93,14 @@ Alt-drag removes from it, and a plain click clears it. Selected points turn pink
 Then choose **Delete** (or press Delete) or **Keep only**. Esc while dragging
 abandons that shape; otherwise Esc clears the selection, and a second Esc leaves the
 tool. Cancelling an edit that spans several clouds stops after the current cloud.
+
+To fix a classification by hand instead, choose a class in the toolbox's **Class to
+assign** list and click **Assign class**: the selected points take that LAS class
+(ground, building, vegetation, water, noise) and every other point keeps its own. A
+cloud without classes starts with every point "never classified" (class 0). The
+result opens coloured by class, and the classes go out with LAS, LAZ and PLY exports.
+Reclassifying follows the same non-destructive rule as deleting: a computed or
+imported cloud gets a "(classified)" copy, a copy is refined in place.
 The first edit keeps your current view. Orbit, pan and zoom keep working on the other mouse
 buttons and the wheel while a tool is active.
 

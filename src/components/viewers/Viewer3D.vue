@@ -920,13 +920,17 @@ function applySelectionShape(shape, op) {
 
 // Hand the masks to App (and on to the store). The masks are transferred to the
 // worker there, so the local selection is cleared immediately.
-function commitSelection(keepSelected) {
+function commitSelection(keepSelected, classValue = null) {
   const edits = [...selections].filter(([, e]) => e.selected).map(([cloudId, e]) => ({ cloudId, mask: e.mask }))
   if (!edits.length) return
   clearSelection()
   editPendingIds = new Set(edits.map((e) => e.cloudId))
-  emit('edit-selection', { edits, keepSelected })
+  emit('edit-selection', { edits, keepSelected, classValue })
 }
+// Manual reclassification: the LAS classes offered for a selection (TODO ▸ F14).
+const ASSIGN_CLASSES = [[2, 'Ground'], [1, 'Unclassified'], [3, 'Low vegetation'], [4, 'Medium vegetation'],
+  [5, 'High vegetation'], [6, 'Building'], [9, 'Water'], [7, 'Low noise'], [18, 'High noise']]
+const assignClass = ref(2)
 
 // Keys reach this before App's global handler (see utils/keyRouting): nothing is
 // done while a dialog is open or a field has focus, and a key acted on is consumed
@@ -1487,6 +1491,12 @@ onBeforeUnmount(() => {
           <button class="tb-textbtn" title="Keep only the selected points" @click="commitSelection(true)">Keep only</button>
           <button class="tb-textbtn" title="Clear the selection (Esc)" @click="clearSelection">Clear</button>
         </div>
+        <div class="tb-row">
+          <select v-model.number="assignClass" class="tb-input assign-class" aria-label="Class to assign">
+            <option v-for="[c, label] in ASSIGN_CLASSES" :key="c" :value="c">{{ c }} · {{ label }}</option>
+          </select>
+          <button class="tb-textbtn" title="Set the selected points to this LAS class" @click="commitSelection(false, assignClass)">Assign class</button>
+        </div>
       </template>
       <div v-else class="tb-hint">
         {{ selectableLayers().length
@@ -1509,6 +1519,7 @@ onBeforeUnmount(() => {
 .tb-textbtn.active { background: rgba(14, 99, 156, 0.25); border-color: var(--accent); }
 .tb-hint.warn { color: #e0a040; margin-top: 4px; }
 .saved-measure { display: grid; grid-template-columns: 1fr auto auto; gap: 6px; align-items: center; margin: 2px 0 0; }
+.assign-class { flex: 1; width: auto; }
 .saved-measure span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .gl-error {

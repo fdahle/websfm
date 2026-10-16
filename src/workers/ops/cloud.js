@@ -1,5 +1,5 @@
 import { attributeBuffers } from '../../core/io/cloudAttributes.js'
-import { cropCloud, filterCloud, mergeClouds, maskCloud, cloudCount } from '../../core/products/cloudEdit.js'
+import { cropCloud, filterCloud, mergeClouds, maskCloud, classifySelection, cloudCount } from '../../core/products/cloudEdit.js'
 import { cleanMesh, taubinSmooth, cropMesh, sampleMesh } from '../../core/products/meshEdit.js'
 import { sectionCloud } from '../../core/products/cloudSection.js'
 import { estimateNormals } from '../../core/products/cloudNormals.js'
@@ -56,6 +56,7 @@ export function makeCloudOps() {
     filter: ([c], s, log) => ({ out: filterCloud(c, s, log) }),
     merge:  (cs, s, log) => ({ out: mergeClouds(cs, s, log) }),
     mask:   ([c], s, log) => ({ out: maskCloud(c, s, log) }),
+    classify: ([c], s, log) => ({ out: classifySelection(c, s, log) }),
     // The same points with (re-)estimated normals; colour and attributes pass through.
     normals: ([c], s, log, progress) => {
       const { nrm } = estimateNormals(c, s, log, (f) => progress(f, 'Estimating normals…'))

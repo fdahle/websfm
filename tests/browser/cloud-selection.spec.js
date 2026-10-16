@@ -125,3 +125,56 @@ test('rectangle and lasso selection edit a dense cloud non-destructively', async
     .toEqual([[100, false, false], [6, true, true]])
   expect(errors).toEqual([])
 })
+
+// Manual reclassification (TODO ▸ F14): select points, Assign class → a classified
+// copy of an imported cloud, coloured by class; a second assignment refines that copy
+// in place.
+test('a selection can be reclassified', async ({ page }) => {
+  const errors = []
+  page.on('pageerror', error => errors.push(error.message))
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Create project', exact: true }).click()
+  await expect(page.locator('.loading-overlay')).toHaveCount(0)
+  await page.evaluate(async () => {
+    const { useReconstructionStore } = await import('/src/stores/useReconstructionStore.js')
+    const pos = new Float64Array(300), col = new Uint8Array(300).fill(200)
+    for (let i = 0; i < 100; i++) { pos[i * 3] = i % 10; pos[i * 3 + 1] = Math.floor(i / 10) }
+    useReconstructionStore().importCloud({ count: 100, pos, col }, 'grid.ply')
+  })
+  const viewer = page.locator('.viewer')
+  await expect.poll(() => viewer.evaluate(el => el.__vueParentComponent.setupState.cloudLayers.size)).toBe(1)
+  await viewer.evaluate(el => el.__vueParentComponent.setupState.setView('top'))
+  await page.waitForTimeout(300)
+  // Select the left half (x ≤ 4) by setting the viewer's selection directly through a
+  // rectangle drag over its screen box.
+  const box = await viewer.evaluate((el) => {
+    const s = el.__vueParentComponent.setupState, layer = [...s.cloudLayers.values()][0], r = el.getBoundingClientRect()
+    s.camera.updateMatrixWorld()
+    const pts = []
+    for (let i = 0; i < 100; i++) {
+      if (layer.source.pos[i * 3] > 4) continue
+      const v = layer.object.localToWorld(new (s.camera.position.constructor)(layer.source.pos[i * 3] - layer.object.position.x,
+        layer.source.pos[i * 3 + 1] - layer.object.position.y, 0)).project(s.camera)
+      pts.push([r.left + (v.x + 1) / 2 * r.width, r.top + (1 - v.y) / 2 * r.height])
+    }
+    return { x0: Math.min(...pts.map(p => p[0])), x1: Math.max(...pts.map(p => p[0])), y0: Math.min(...pts.map(p => p[1])), y1: Math.max(...pts.map(p => p[1])) }
+  })
+  await viewer.evaluate(el => el.__vueParentComponent.exposed.toggleSelectTool('rect'))
+  await page.mouse.move(box.x0 - 4, box.y0 - 4); await page.mouse.down()
+  await page.mouse.move(box.x1 + 4, box.y1 + 4, { steps: 5 }); await page.mouse.up()
+  const tb = page.locator('.floating-toolbox').filter({ hasText: 'Select points' })
+  await expect(tb).toContainText('50')
+  await tb.getByRole('combobox', { name: 'Class to assign' }).selectOption('6')
+  await tb.getByRole('button', { name: 'Assign class', exact: true }).click()
+  const state = () => page.evaluate(async () => {
+    const { useReconstructionStore } = await import('/src/stores/useReconstructionStore.js')
+    return useReconstructionStore().clouds.map(c => ({ name: c.name, derived: !!c.derived, visible: c.visible !== false,
+      field: c.style?.field ?? null, classes: c.attributes?.classification ? [...new Set(c.attributes.classification)].sort((a, b) => a - b) : null,
+      n6: c.attributes?.classification ? c.attributes.classification.filter(v => v === 6).length : 0 }))
+  })
+  await expect.poll(async () => (await state()).length).toBe(2)
+  const s = await state()
+  expect(s[1]).toMatchObject({ derived: true, visible: true, field: 'attribute:classification', classes: [0, 6], n6: 50 })
+  expect(s[0]).toMatchObject({ visible: false, classes: null })
+  expect(errors).toEqual([])
+})
