@@ -1,6 +1,6 @@
 import { makeP34flat } from './reconstruction.js'
 import {
-  cameraCenter, projectWithDepth, triangulationAngle, projectPoint, medianTriangulationAngle,
+  cameraCenter, projectWithDepth, triangulationAngle, projectPoint,
 } from './geometry.js'
 import { hasKp, kpX, kpY } from './keypointSet.js'
 import { asPairList } from './matchCodec.js'
@@ -274,6 +274,7 @@ export function completeTracks({
 // Removes the views and points from `tracks`; returns { obsRemoved, ptsRemoved }.
 export function filterTracks({ tracks, ids, cameras, keypointsAt, maxReprojPx, minTriAngleDeg }) {
   let obsRemoved = 0, ptsRemoved = 0
+  const centres = new Map() // camera → its centre
   tracks.forEachPoint((p) => {
     const x = tracks.x(p), y = tracks.y(p), z = tracks.z(p)
     tracks.forEachView(p, (img, kpIdx) => {
@@ -288,15 +289,27 @@ export function filterTracks({ tracks, ids, cameras, keypointsAt, maxReprojPx, m
       }
     })
     if (tracks.viewCount(p) < 2) { ptsRemoved++; tracks.removePoint(p); return }
-    // Max parallax angle between any two surviving rays.
+    // Max parallax angle between any two surviving rays; only whether it clears the
+    // floor matters, so the first pair that does ends the search. Camera centres are
+    // computed once per camera (they were per pair, per point).
     const cs = []
-    tracks.forEachView(p, (img) => { const c = cameras.get(ids.uuid(img)); if (c) cs.push(c) })
-    const pt = [{ x, y, z }]
-    let maxAng = 0
-    for (let i = 0; i < cs.length; i++)
-      for (let j = i + 1; j < cs.length; j++)
-        maxAng = Math.max(maxAng, medianTriangulationAngle(cs[i], cs[j], pt))
-    if (maxAng < minTriAngleDeg) { ptsRemoved++; tracks.removePoint(p) }
+    tracks.forEachView(p, (img) => {
+      const c = cameras.get(ids.uuid(img))
+      if (!c) return
+      let C = centres.get(c)
+      if (!C) { C = cameraCenter(c); centres.set(c, C) }
+      cs.push(C)
+    })
+    const pt = { x, y, z }
+    let clears = false
+    for (let i = 0; i < cs.length && !clears; i++) {
+      for (let j = i + 1; j < cs.length && !clears; j++) {
+        const a = triangulationAngle(cs[i], cs[j], pt)
+        // A NaN angle kept the point before too (Math.max carried it past the test).
+        if (a >= minTriAngleDeg || Number.isNaN(a)) clears = true
+      }
+    }
+    if (!clears) { ptsRemoved++; tracks.removePoint(p) }
   })
   return { obsRemoved, ptsRemoved }
 }

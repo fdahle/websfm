@@ -26,6 +26,9 @@ import { distortionIdentifiable, withoutDistortionTerms } from "./selfCalSchedul
 import { hasKp, kpX, kpY } from "./keypointSet.js"
 import { asPairList } from "./matchCodec.js"
 
+// Skip an interim BA when fewer images than this share of the model remain to register.
+const INTERIM_SKIP_REMAINING = 0.1
+
 // Depth of world point (x,y,z) along a flat 3×4 projection matrix's principal axis
 // (cheirality: positive ⇒ in front of the camera). Mirrors sfm.js's helper.
 function projDepth(P, x, y, z) {
@@ -57,6 +60,16 @@ export async function registerImages(ctx) {
   // still read `donePairs` only, so weak pairs never seed fresh structure. Defaults to
   // donePairs when the caller doesn't split (older tests), so behaviour is unchanged there.
   const corrPairs = ctx.corrPairs ?? donePairs
+  // The pairs of each image, in list order: the per-image sweeps below read only these,
+  // not every pair of the block (at 1,600 cameras that scan was most of registration).
+  const pairsByImage = (list) => {
+    const by = new Map()
+    const push = (uuid, e) => { let l = by.get(uuid); if (!l) by.set(uuid, l = []); l.push(e) }
+    for (const e of list) { push(e.idA, e); if (e.idB !== e.idA) push(e.idB, e) }
+    return (uuid) => by.get(uuid) ?? []
+  }
+  const corrPairsOf = pairsByImage(corrPairs)
+  const donePairsOf = corrPairs === donePairs ? corrPairsOf : pairsByImage(donePairs)
   // WS3 final second-chance sweep runs with rescue OFF (the rescue path already ran in
   // the main registration; a re-admission sweep only wants the plain PnP retries).
   const finalSweep = ctx.finalSweep === true
@@ -153,7 +166,7 @@ export async function registerImages(ctx) {
   // heuristic — used only to break ties when the model has no points yet).
   function countMatchesToRegistered(uuid) {
     let count = 0
-    for (const e of corrPairs) {
+    for (const e of corrPairsOf(uuid)) {
       const other = e.idA === uuid ? e.idB : e.idB === uuid ? e.idA : null
       if (other && registeredUuids.has(other)) count += e.inlierCount
     }
@@ -211,7 +224,7 @@ export async function registerImages(ctx) {
     const badIdx = new Set()     // newIdx reached from ≥2 distinct points (one→many)
     // corrPairs (strong + weak): a weak bridge can supply the 2D-3D links that resect a
     // camera even though it never triangulated the points it links to.
-    for (const entry of corrPairs) {
+    for (const entry of corrPairsOf(img.uuid)) {
       let regUuid = null
       if (entry.idA === img.uuid && registeredUuids.has(entry.idB)) regUuid = entry.idB
       else if (entry.idB === img.uuid && registeredUuids.has(entry.idA)) regUuid = entry.idA
@@ -249,13 +262,26 @@ export async function registerImages(ctx) {
   let pass = 0
   let registeredSinceBA = 0 // R3: cameras added since the last interim bundle adjust
   let camerasAtLastBA = 0   // model size at the last interim BA (interimBaGrowth spacing)
-  // P1: correspondences depend only on the model state (registered cameras +
-  // viewIndex + points). `modelVersion` bumps whenever a registration mutates that,
-  // so a per-pass cache built during scoring can be reused for the PnP attempt as
-  // long as nothing has registered since — halving the correspondence sweeps in
-  // stall passes (nothing registers → whole pass reuses the cache) and for the
-  // leading run of images before the first registration.
+  // P1: an image's correspondences depend only on its pairs to registered images and
+  // the points those images' keypoints belong to. A per-pass cache built during
+  // scoring is reused for the PnP attempt while that holds. A registration changes it
+  // only around the new camera (`markStale`); an interim BA and its cleanup change it
+  // everywhere (`modelVersion`).
   let modelVersion = 0
+  const stale = new Set() // images whose cached correspondences are out of date
+  // Registering `uuid` makes it a registered neighbour, extends tracks into it and
+  // triangulates points between it and its registered neighbours: every image paired
+  // with one of those has new correspondences.
+  function markStale(uuid) {
+    const touched = [uuid]
+    for (const e of donePairsOf(uuid)) {
+      const other = e.idA === uuid ? e.idB : e.idA
+      if (registeredUuids.has(other)) touched.push(other)
+    }
+    for (const t of touched) {
+      for (const e of corrPairsOf(t)) stale.add(e.idA === t ? e.idB : e.idA)
+    }
+  }
   // (3) Stalled-strip rescue: `relaxed` loosens the refine-recheck on the one retry
   // sweep the rescue triggers; `rescued` makes it a single shot.
   let relaxed = false
@@ -272,16 +298,16 @@ export async function registerImages(ctx) {
     // (and for candidates that have no well-tri correspondences yet). Correspondences
     // computed here are cached (corrCache) and reused in the attempt loop below.
     const corrCache = new Map()
+    stale.clear()
     const remaining = imgs
       .filter((img) => !registeredUuids.has(img.uuid))
       .map((img) => {
         const corr = collectCorrespondences(img)
-        corrCache.set(img.uuid, corr)
+        corrCache.set(img.uuid, { corr, version: modelVersion })
         return { img, score: nextViewScore(corr, img), links: countMatchesToRegistered(img.uuid) }
       })
       .sort((a, b) => (b.score - a.score) || (b.links - a.links))
       .map((r) => r.img)
-    const cacheVersion = modelVersion // cache is valid while no camera has registered
 
     // R2: gate is fixed (pnpThresh, set once above); log it against the model p95
     // so a diverging model is still visible without loosening the gate to match it.
@@ -291,12 +317,13 @@ export async function registerImages(ctx) {
 
     for (const img of remaining) {
       const K = Kmap.get(img.uuid)
-      // Reuse the scoring-time correspondences while the model is unchanged; once a
-      // camera has registered this pass (modelVersion moved), recompute against the
-      // grown model.
-      const { pts3, pts2, newIdx } = modelVersion === cacheVersion
-        ? corrCache.get(img.uuid)
-        : collectCorrespondences(img)
+      // Reuse the scoring-time correspondences unless a registration next to this
+      // image or an interim BA has changed them since.
+      if (corrCache.get(img.uuid).version !== modelVersion || stale.has(img.uuid)) {
+        corrCache.set(img.uuid, { corr: collectCorrespondences(img), version: modelVersion })
+        stale.delete(img.uuid)
+      }
+      const { pts3, pts2, newIdx } = corrCache.get(img.uuid).corr
       if (pts3.length < minMatchesForRegistration) {
         const reason = `too few correspondences (${pts3.length}/${minMatchesForRegistration})`
         deferReasons.set(img.uuid, reason)
@@ -372,7 +399,7 @@ export async function registerImages(ctx) {
       registeredUuids.add(img.uuid)
       deferReasons.delete(img.uuid)
       progressed = true
-      modelVersion++ // model changed → invalidate the per-pass correspondence cache
+      markStale(img.uuid) // after the track extension and triangulation below, which it covers
 
       // Reprojection error over the PnP inliers — how well this pose fits.
       const inlierResid = []
@@ -408,7 +435,7 @@ export async function registerImages(ctx) {
       let triTotal = 0    // triangulated before cheirality
       let lowParallax = 0 // rejected for too-parallel rays (P4.4)
       let badReproj = 0   // rejected: reprojection beyond the track-filter gate
-      for (const entry of donePairs) {
+      for (const entry of donePairsOf(img.uuid)) {
         let regUuid = null
         if (entry.idA === img.uuid && registeredUuids.has(entry.idB) && entry.idB !== img.uuid) regUuid = entry.idB
         else if (entry.idB === img.uuid && registeredUuids.has(entry.idA) && entry.idA !== img.uuid) regUuid = entry.idA
@@ -496,14 +523,22 @@ export async function registerImages(ctx) {
       // Local BA (localBaWindow > 0): refine the new camera's neighbourhood right away, so
       // the global solves can be spaced further apart (interimBaGrowth) without letting
       // fresh cameras drift until the next one.
-      if (localBaWindow > 1 && runLocalBundleAdjust) await runLocalBundleAdjust(img.uuid, localBaWindow, localBaIterations)
+      if (localBaWindow > 1 && runLocalBundleAdjust) {
+        await runLocalBundleAdjust(img.uuid, localBaWindow, localBaIterations)
+        modelVersion++; stale.clear()
+      }
       registeredSinceBA++
       // With `interimBaGrowth` > 1 the solves are also spaced geometrically (COLMAP's
       // ba_global_images_ratio): each one costs the whole model, so a fixed every-N
       // spacing makes registration quadratic — 837 of 998 s on the 347-image quarry.
+      // Nor when nearly every image is in: the model-wide solve that follows registration
+      // is about to run anyway, and an interim one now is the same solve twice (900
+      // synthetic cameras: 9.6 s at 896 cameras, then the final BA). A tenth of the model
+      // still to register keeps it.
+      const nearlyDone = imgs.length - cameras.size < INTERIM_SKIP_REMAINING * cameras.size
       if (baIterations > 0 && interimBaEvery > 0 && registeredSinceBA >= interimBaEvery
           && !(interimBaGrowth > 1 && cameras.size < interimBaGrowth * camerasAtLastBA)
-          && cameras.size >= 3 && tracks.liveCount() >= 10) {
+          && !nearlyDone && cameras.size >= 3 && tracks.liveCount() >= 10) {
         reportRegister(`Bundle adjustment (${cameras.size} cameras)…`)
         await runBundleAdjust(`interim BA (${cameras.size} cameras)`, interimBaIterations,
           distortionRefine(cameras.size))
@@ -521,6 +556,7 @@ export async function registerImages(ctx) {
           f.ptsRemoved > 0.5 * ptsBeforeFilter ? 'warn' : 'debug', 'Reconstruction')
         registeredSinceBA = 0
         camerasAtLastBA = cameras.size
+        modelVersion++; stale.clear() // the cleanup re-numbered and dropped points
       }
     }
 
@@ -592,7 +628,7 @@ export async function registerImages(ctx) {
     log(`${unregistered.length} image(s) never registered:`, 'warn', 'Reconstruction')
     for (const img of unregistered) {
       let regLinks = 0, regInliers = 0, unregLinks = 0, weakRegLinks = 0
-      for (const e of corrPairs) {
+      for (const e of corrPairsOf(img.uuid)) {
         const other = e.idA === img.uuid ? e.idB : e.idB === img.uuid ? e.idA : null
         if (!other || !(e.inlierCount > 0)) continue
         const toReg = registeredUuids.has(other)

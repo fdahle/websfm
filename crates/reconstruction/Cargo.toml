@@ -8,5 +8,10 @@ license = "MIT"
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+[features]
+# Exports a timing hook for the sparse Cholesky (sparse_chol.rs), for measurement
+# builds only; the app's wasm is built without it.
+bench = []
+
 [dependencies]
 wasm-bindgen = "0.2"

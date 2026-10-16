@@ -1,4 +1,3 @@
-import { projectWithDepth } from './geometry.js'
 
 // ── Projection-guided track extension (pure) ─────────────────────────────────
 // Every South Building run discarded 46–73k two-view points that had no verified
@@ -94,7 +93,10 @@ export function guidedExtendTracks({ tracks, ids, cameras, keypointsAt, descOf, 
       const key = Math.floor(x / gatePx) * 1e6 + Math.floor(y / gatePx)
       const c = cells.get(key); if (c) c.push(i); else cells.set(key, [i])
     }
-    camList.push({ img, cam, grid: { xy, cells, minX, minY, maxX, maxY } })
+    // The pose and K flat, for the projection inlined below.
+    const P = Float64Array.of(cam.R[0][0], cam.R[0][1], cam.R[0][2], cam.R[1][0], cam.R[1][1], cam.R[1][2],
+      cam.R[2][0], cam.R[2][1], cam.R[2][2], cam.t[0], cam.t[1], cam.t[2], cam.K.fx, cam.K.fy, cam.K.cx, cam.K.cy)
+    camList.push({ img, cam, P, grid: { xy, cells, minX, minY, maxX, maxY } })
   }
 
   const proposals = []
@@ -104,12 +106,18 @@ export function guidedExtendTracks({ tracks, ids, cameras, keypointsAt, descOf, 
     tracks.someView(p, (img, k) => { const d = descOf(img, k); if (d) refs.push(d); return refs.length >= refObs })
     if (!refs.length) return
     const px = tracks.x(p), py = tracks.y(p), pz = tracks.z(p)
-    for (const { img, cam, grid: g } of camList) {
+    for (const { img, P, grid: g } of camList) {
       if (tracks.viewKp(p, img) >= 0) continue
       if (!g) continue
       stats.projections++
-      const pr = projectWithDepth(cam, px, py, pz)
-      if (!pr || pr.u < g.minX || pr.u > g.maxX || pr.v < g.minY || pr.v > g.maxY) continue
+      // projectWithDepth, inlined (every point × every camera: 100 M calls at 1,600
+      // cameras, and each allocated its result). Same arithmetic, same order.
+      const zc = P[6] * px + P[7] * py + P[8] * pz + P[11]
+      if (!(zc > 1e-9)) continue
+      const u = P[12] * ((P[0] * px + P[1] * py + P[2] * pz + P[9]) / zc) + P[14]
+      const v = P[13] * ((P[3] * px + P[4] * py + P[5] * pz + P[10]) / zc) + P[15]
+      if (u < g.minX || u > g.maxX || v < g.minY || v > g.maxY) continue
+      const pr = { u, v }
       const cx = Math.floor(pr.u / gatePx), cy = Math.floor(pr.v / gatePx)
       let best = Infinity, second = Infinity, bestKp = -1, any = false
       for (let gx = cx - 1; gx <= cx + 1; gx++) {

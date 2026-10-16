@@ -62,7 +62,7 @@ async function recheckRegistrations({ cfg, cameras, tracks, ids, keypointsAt, do
   }
   refreshTracks()
   await reregister()
-  await runBundleAdjust('post-check bundle adjustment', cfg.baIterations, 'none')
+  await runBundleAdjust('post-check bundle adjustment', cfg.baIterations, 'none', { warm: true })
   const second = check()
   const stillBad = new Set(second.flagged.map((f) => f.uuid))
   for (const { uuid } of first.flagged) {
@@ -74,7 +74,7 @@ async function recheckRegistrations({ cfg, cameras, tracks, ids, keypointsAt, do
   }
   if (record.dropped.length) {
     refreshTracks()
-    await runBundleAdjust('post-check bundle adjustment (outliers left out)', cfg.baIterations, 'none')
+    await runBundleAdjust('post-check bundle adjustment (outliers left out)', cfg.baIterations, 'none', { warm: true })
   }
   log(`registration check: ${record.readmitted.length} re-registered consistently`
     + `${record.readmitted.length ? ` (${record.readmitted.join(', ')})` : ''}, ${record.dropped.length} left out`
@@ -431,7 +431,7 @@ export async function reconstructSingleModel(input, hooks = {}) {
     // ── Bundle adjustment + track filtering (Phase 2 + 3, refinePipeline.js) ──
     const { guidedRecord, trackCompletionRecord } = await refineModel({
       cfg, images, imgs, cameras, tracks, ids, keypointsAt, donePairs, refreshTracks,
-      modelResiduals, runBundleAdjust: bundles.runBundleAdjust, selfCalRecord, intrinsicsRecord,
+      modelResiduals, runBundleAdjust: bundles.runBundleAdjust, lastSolve: bundles.lastSolve, selfCalRecord, intrinsicsRecord,
       imageByUuid, defaultKCount, log, report, memoryMark,
     })
     // ── Registration plausibility (registrationCheck.js) ─────────────────────

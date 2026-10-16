@@ -85,14 +85,17 @@ pub(crate) const PCG_MIN_N: usize = 600;
 //                   step is accepted or `max_iters` — the original behaviour, which on
 //                   a converged model spends every remaining iteration on a full
 //                   Schur build for a negligible improvement.
+//   warm            1 = the model is already converged (a re-solve after a filter or
+//                   a retriangulation): with the direct solve, stop at
+//                   WARM_FUNCTION_TOL instead of DIRECT_FUNCTION_TOL.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct SolverOpts {
     pub pcg_min_n: usize, pub rel_tol: f64, pub max_iter: usize, pub accept_partial: bool, pub function_tol: f64,
-    pub precond: u8, pub direct: u8,
+    pub precond: u8, pub direct: u8, pub warm: u8,
 }
 
 impl SolverOpts {
-    pub(crate) const DEFAULT: SolverOpts = SolverOpts { pcg_min_n: PCG_MIN_N, rel_tol: 1e-10, max_iter: 2000, accept_partial: false, function_tol: 0.0, precond: 0, direct: 0 };
+    pub(crate) const DEFAULT: SolverOpts = SolverOpts { pcg_min_n: PCG_MIN_N, rel_tol: 1e-10, max_iter: 2000, accept_partial: false, function_tol: 0.0, precond: 0, direct: 0, warm: 0 };
 
     pub(crate) fn from_flat(f: &[f32]) -> SolverOpts {
         let d = SolverOpts::DEFAULT;
@@ -106,6 +109,7 @@ impl SolverOpts {
             function_tol: slot(4).map_or(d.function_tol, |v| v),
             precond: slot(5).filter(|v| *v == 1.0).map_or(d.precond, |_| 1),
             direct: slot(6).map_or(d.direct, |v| if v == 1.0 { 1 } else { 0 }),
+            warm: slot(7).map_or(d.warm, |v| if v == 1.0 { 1 } else { 0 }),
         }
     }
 }
@@ -150,8 +154,38 @@ pub(crate) const DENSE_MAX_N: usize = 4096;
 // The largest sparse Cholesky factor allowed (bytes of L); past it the solve stays PCG.
 pub(crate) const SPARSE_MAX_BYTES: usize = 1 << 30;
 
-// The LM stopping rule's floor when the direct solve runs (see bundle_adjust).
+// The LM stopping rule's floor when the direct solve runs (see bundle_adjust), and
+// for a re-solve of an already converged model (`warm`).
 pub(crate) const DIRECT_FUNCTION_TOL: f64 = 1e-5;
+pub(crate) const WARM_FUNCTION_TOL: f64 = 1e-4;
+
+// Phase timers for the native timing test (bundle_adjust_timing); no-ops in the app.
+#[cfg(test)]
+pub(crate) mod prof {
+    use std::cell::Cell;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::Instant;
+    pub static T: [AtomicU64; 5] = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
+    thread_local! { static LAST: Cell<Option<Instant>> = const { Cell::new(None) }; }
+    pub fn start() { LAST.with(|l| l.set(Some(Instant::now()))) }
+    pub fn mark(i: usize) {
+        LAST.with(|l| {
+            let now = Instant::now();
+            if let Some(t) = l.get() { T[i].fetch_add((now - t).as_micros() as u64, Ordering::Relaxed); }
+            l.set(Some(now));
+        })
+    }
+    pub fn take() -> [f64; 5] {
+        let mut out = [0.0; 5];
+        for (i, t) in T.iter().enumerate() { out[i] = t.swap(0, Ordering::Relaxed) as f64 / 1e6 }
+        out
+    }
+}
+#[cfg(not(test))]
+pub(crate) mod prof {
+    #[inline(always)] pub fn start() {}
+    #[inline(always)] pub fn mark(_: usize) {}
+}
 
 // The dispatcher behind both storage forms: `matvec` and the diagonal blocks are the
 // matrix as PCG sees it, `to_dense` builds the n×n copy only when Cholesky runs.
@@ -921,9 +955,28 @@ pub fn bundle_adjust(
     } else { None };
     // Exact steps keep finding improvements of a few 10⁻⁶ of the cost long after the
     // model has stopped changing (1,600 aerial cameras: all 30 iterations ran, RMS
-    // 0.46 px from the 13th on); a 10⁻⁵ stop ends them with the same final model. Only
-    // where the direct solve runs: an inexact PCG step needs the tighter rule.
-    let function_tol = if direct.is_some() { solver.function_tol.max(DIRECT_FUNCTION_TOL) } else { solver.function_tol };
+    // 0.46 px from the 13th on); a 10⁻⁵ stop ends them with the same final model.
+    // A re-solve of a converged model after a filter or a retriangulation (`warm`)
+    // stops at 10⁻⁴: quarry the same RTK camera error, South Building the same
+    // residuals. Not every solve: interim solves stopped that early hand the first
+    // global BA a model it then needs 44 instead of 25 solves for (1,600 cameras).
+    // Only where the direct solve runs: an inexact PCG step needs the tighter rule.
+    let function_tol = match direct {
+        Some(_) => solver.function_tol.max(if solver.warm != 0 { WARM_FUNCTION_TOL } else { DIRECT_FUNCTION_TOL }),
+        None => solver.function_tol,
+    };
+    // The direct solve reads the lower triangle only (sparse_chol.rs `factor`).
+    let lower_only = direct.is_some();
+    // With it, the Schur elimination visits the points grouped by their first camera, so
+    // consecutive points write nearby blocks of S (21 MB at 1,600 cameras: scattered
+    // writes were the cost). The full-matrix paths keep the index order (and their bits).
+    let schur_order: Vec<usize> = if lower_only {
+        let mut key: Vec<(usize, usize)> = (0..n_pts).map(|p| {
+            ((pt_start[p] as usize..pt_start[p + 1] as usize).map(|q| obs[pt_obs[q] as usize].0).min().unwrap_or(usize::MAX), p)
+        }).collect();
+        key.sort_unstable();
+        key.into_iter().map(|(_, p)| p).collect()
+    } else { (0..n_pts).collect() };
     // Per-group params, one [f64;7] slot each. The focal-scale slot (if present) inits
     // to 1 (multiplies fx/fy); every distortion/principal-point slot inits to 0 — a
     // fisheye group's k slots are offsets from its seed coefficients.
@@ -1078,11 +1131,14 @@ pub fn bundle_adjust(
     let mut lambda = 1e-3f64;              // LM damping
     let mut trace: Vec<f64> = Vec::new();  // RMS after each accepted iteration
     let mut el: Vec<EBlock> = Vec::new();  // one point's coupling blocks (reused)
+    let mut ms_buf: Vec<[[f64; 3]; BLK_MAX]> = Vec::new(); // their E·C⁻¹ (reused)
 
     for _outer in 0..max_iters {
+        prof::start();
         let dh = huber_threshold(&cams, &pts, &gpar);
         let mut cost = robust_cost(&cams, &pts, &gpar, dh);
         let cost_at_start = cost; // this iteration's robust cost, for the function-tolerance stop
+        prof::mark(0);
 
         // ── Assemble undamped blocks ────────────────────────────────────────────
         // S is the reduced-variable Hessian (camera poses + intrinsic groups) in the
@@ -1209,6 +1265,7 @@ pub fn bundle_adjust(
             }
         }
 
+        prof::mark(1);
         // ── LM step with damping retries ────────────────────────────────────────
         let mut accepted = false;
         for _try in 0..8 {
@@ -1225,7 +1282,7 @@ pub fn bundle_adjust(
             let mut cinv_store: Vec<Option<M3>> = vec![None; n_pts];
             let mut tmp_store: Vec<V3> = vec![[0.0; 3]; n_pts];
             let mut ok = true;
-            for pi in 0..n_pts {
+            for &pi in &schur_order {
                 eblocks(pi, &cams, &pts, &gpar, dh, &mut el);
                 // An anchored point with no camera coupling (edge case: every
                 // observing camera failed cheirality) still needs its C⁻¹·gp
@@ -1242,8 +1299,12 @@ pub fn bundle_adjust(
                         rhs[eb.off + a] += eb.rows[a][0]*tmp[0] + eb.rows[a][1]*tmp[1] + eb.rows[a][2]*tmp[2];
                     }
                 }
-                // M_v = E_v·C⁻¹ (dim×3); then S -= Σ_{v1,v2} M_{v1}·E_{v2}ᵀ.
-                let ms: Vec<[[f64; 3]; BLK_MAX]> = el.iter().map(|eb| {
+                // M_v = E_v·C⁻¹ (dim×3); then S -= Σ_{v1,v2} M_{v1}·E_{v2}ᵀ. The sparse direct
+                // solve reads only the lower triangle (block row ≥ block column), so with it
+                // the upper pairs are skipped: half of the Schur elimination, the largest
+                // part of a big BA (1,600 cameras: 4.1 of 7.8 s).
+                ms_buf.clear();
+                ms_buf.extend(el.iter().map(|eb| {
                     let mut m = [[0f64; 3]; BLK_MAX];
                     for a in 0..eb.dim {
                         for k in 0..3 {
@@ -1251,14 +1312,26 @@ pub fn bundle_adjust(
                         }
                     }
                     m
-                }).collect();
+                }));
                 for (i1, eb1) in el.iter().enumerate() {
+                    let m = &ms_buf[i1];
                     for eb2 in &el {
+                        if lower_only && eb2.blk > eb1.blk { continue; }
                         let base = pattern.at(eb1.blk, eb2.blk);
-                        for a in 0..eb1.dim {
-                            for b in 0..eb2.dim {
-                                let v = ms[i1][a][0]*eb2.rows[b][0] + ms[i1][a][1]*eb2.rows[b][1] + ms[i1][a][2]*eb2.rows[b][2];
-                                s[base + a*eb2.dim + b] -= v;
+                        if eb1.dim == 6 && eb2.dim == 6 {
+                            // Camera × camera, fixed size (the same sums as below).
+                            for a in 0..6 {
+                                for b in 0..6 {
+                                    let v = m[a][0]*eb2.rows[b][0] + m[a][1]*eb2.rows[b][1] + m[a][2]*eb2.rows[b][2];
+                                    s[base + a*6 + b] -= v;
+                                }
+                            }
+                        } else {
+                            for a in 0..eb1.dim {
+                                for b in 0..eb2.dim {
+                                    let v = m[a][0]*eb2.rows[b][0] + m[a][1]*eb2.rows[b][1] + m[a][2]*eb2.rows[b][2];
+                                    s[base + a*eb2.dim + b] -= v;
+                                }
                             }
                         }
                     }
@@ -1266,6 +1339,7 @@ pub fn bundle_adjust(
             }
             if !ok { lambda = (lambda * 4.0).min(1e8); continue; }
 
+            prof::mark(2);
             let dsol = if let Some(sym) = direct.as_ref() {
                 solve_stats.solves += 1;
                 solve_stats.cholesky += 1;
@@ -1282,6 +1356,7 @@ pub fn bundle_adjust(
                 }
             };
 
+            prof::mark(3);
             // Back-substitute points: δp = −C⁻¹·gp − C⁻¹·(Σ_v E_vᵀ·δv).
             let mut dp = vec![[0f64; 3]; n_pts];
             for pi in 0..n_pts {
@@ -1319,6 +1394,7 @@ pub fn bundle_adjust(
             for pi in 0..n_pts { for k in 0..3 { tent_pts[pi][k] += dp[pi][k]; } }
 
             let new_cost = robust_cost(&tent_cams, &tent_pts, &tent_gpar, dh);
+            prof::mark(4);
             if new_cost < cost {
                 cams = tent_cams;
                 pts = tent_pts;
@@ -1455,6 +1531,8 @@ mod reduced_solve_tests {
         // The direct solve is the seventh slot: 1 on, anything else off.
         assert_eq!(SolverOpts::from_flat(&[f32::NAN, f32::NAN, f32::NAN, f32::NAN, f32::NAN, f32::NAN, 1.0]).direct, 1);
         assert_eq!(SolverOpts::from_flat(&[f32::NAN, f32::NAN, f32::NAN, f32::NAN, f32::NAN, f32::NAN, 0.0]).direct, 0);
+        assert_eq!(SolverOpts::from_flat(&[f32::NAN, f32::NAN, f32::NAN, f32::NAN, f32::NAN, f32::NAN, f32::NAN, 1.0]).warm, 1);
+        assert_eq!(SolverOpts::from_flat(&[f32::NAN; 7]).warm, 0);
     }
 
     #[test]
@@ -1643,6 +1721,52 @@ mod reduced_solve_tests {
         assert!(Symbolic::new(&aerial_pattern(20, 20, 3, 4), 100).is_none());
     }
 
+    // A realistic aerial bundle adjustment, timed by phase:
+    // cargo test -p reconstruction --release -- --ignored --nocapture bundle_adjust_timing
+    #[test]
+    #[ignore]
+    fn bundle_adjust_timing() {
+        let side = 40usize;
+        let n_cam = side * side;
+        let mut rng = Lcg(17);
+        let mut cams = Vec::new();
+        let mut intr = Vec::new();
+        for c in 0..n_cam {
+            let (x, y) = ((c % side) as f32, (c / side) as f32);
+            cams.extend_from_slice(&[1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, -x, -y, 10.0]);
+            intr.extend_from_slice(&[800.0, 800.0, 320.0, 240.0]);
+        }
+        let (mut pts, mut idx, mut px) = (Vec::new(), Vec::new(), Vec::new());
+        let n_pts = n_cam * 70;
+        for p in 0..n_pts {
+            let (x, y, z) = (rng.next() * 0.5 * side as f64 + 0.5 * side as f64, rng.next() * 0.5 * side as f64 + 0.5 * side as f64, 0.5 * rng.next());
+            let (cx0, cy0) = (x.round() as isize, y.round() as isize);
+            let mut seen = 0;
+            for dy in -1..=1 { for dx in -1..=1 {
+                let (gx, gy) = (cx0 + dx, cy0 + dy);
+                if gx < 0 || gy < 0 || gx >= side as isize || gy >= side as isize { continue }
+                let c = gy as usize * side + gx as usize;
+                let (u, v) = (800.0 * (x - gx as f64) / (z + 10.0) + 320.0, 800.0 * (y - gy as f64) / (z + 10.0) + 240.0);
+                idx.extend_from_slice(&[c as u32, p as u32]);
+                px.extend_from_slice(&[(u + 0.3 * rng.next()) as f32, (v + 0.3 * rng.next()) as f32]);
+                seen += 1;
+            }}
+            assert!(seen > 0);
+            pts.extend_from_slice(&[(x + 0.01 * rng.next()) as f32, (y + 0.01 * rng.next()) as f32, (z + 0.01 * rng.next()) as f32]);
+        }
+        let mut prior = vec![0f32; 25];
+        prior[3] = -10.0; prior[4] = 1e4; prior[5] = 1e4; prior[6] = 1e4;
+        let policy = [f32::NAN, 1e-6, 200.0, 1.0, 1e-6, f32::NAN, 1.0];
+        let t = std::time::Instant::now();
+        let out = bundle_adjust(&cams, &intr, &pts, &idx, &px, &[], &[], &[], &prior, 30, &[], 0, &policy, &[], &[]);
+        let total = t.elapsed();
+        let base = n_cam * 12 + n_pts * 3 + n_cam * 8;
+        let ph = prof::take();
+        println!("{n_cam} cameras, {n_pts} points, {} observations: {total:?}, rms {:.3} → {:.3}, {} solves",
+            idx.len() / 2, out[base], out[base + 1], out[base + 5]);
+        println!("  phases (s): cost {:.2}, assemble {:.2}, schur {:.2}, solve {:.2}, back-substitute + trial cost {:.2}", ph[0], ph[1], ph[2], ph[3], ph[4]);
+    }
+
     // cargo test -p reconstruction --release -- --ignored --nocapture sparse_cholesky_timing
     #[test]
     #[ignore]
@@ -1667,8 +1791,10 @@ mod reduced_solve_tests {
             let mut y = vec![0f64; pat.n];
             for _ in 0..20 { pat.matvec(&vals, &b, &mut y) }
             let t_mv = t.elapsed() / 20;
-            println!("{} cameras (n {}): A {} blocks, L {} blocks ({:.0} MB); ordering {t_sym:?}, factor {t_fac:?}, solve {t_sol:?}; one matvec {t_mv:?}",
-                rows * cols, pat.n, a_blocks, sym.fill_blocks, sym.factor_bytes() as f64 / 1e6);
+            let (n_sn, mean_w) = sym.supernode_stats();
+            println!("{} cameras (n {}): A {} blocks, L {} blocks ({:.0} MB), {n_sn} supernodes ({mean_w:.1} blocks wide); ordering {t_sym:?}, factor {t_fac:?} ({:.2} GFLOP/s of {:.2} GFLOP), solve {t_sol:?}; one matvec {t_mv:?}",
+                rows * cols, pat.n, a_blocks, sym.fill_blocks, sym.factor_bytes() as f64 / 1e6,
+                sym.flops() / t_fac.as_secs_f64() / 1e9, sym.flops() / 1e9);
         }
     }
 

@@ -428,6 +428,9 @@ describe('bundleAdjust', () => {
     expect(baSolverFlat({ direct: true })[6]).toBe(1)
     expect(baSolverFlat({ direct: false })[6]).toBe(0)
     expect(baSolverFlat({})[6]).toBeNaN()
+    // Slot 7: a re-solve of a converged model (SolverOpts::warm).
+    expect(baSolverFlat({ warm: true })[7]).toBe(1)
+    expect(baSolverFlat({ warm: false })[7]).toBeNaN()
   })
 
   it('returns null when there are no observations', async () => {

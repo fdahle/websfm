@@ -314,12 +314,13 @@ export const BA_SOLVER_KEYS = ['n', 'solves', 'cholesky', 'pcgConverged', 'pcgPa
 // bundle.rs `solver_flat`; NaN keeps that slot's crate default.
 export function baSolverFlat(solver = {}) {
   const num = (v) => (v == null || v === '' ? NaN : Number(v))
-  const { pcgMinN, pcgRelTol, pcgMaxIter, pcgAcceptPartial, functionTolerance, pcgPreconditioner, direct } = solver ?? {}
+  const { pcgMinN, pcgRelTol, pcgMaxIter, pcgAcceptPartial, functionTolerance, pcgPreconditioner, direct, warm } = solver ?? {}
   // pcgPreconditioner: 'jacobi' (default) | 'ic0' (block incomplete Cholesky, opt-in).
   // direct: a sparse block Cholesky wherever PCG would run (bundle.rs, sparse_chol.rs).
+  // warm: a re-solve of a converged model; the direct solve stops earlier (bundle.rs).
   return Float32Array.of(num(pcgMinN), num(pcgRelTol), num(pcgMaxIter),
     pcgAcceptPartial == null ? NaN : (pcgAcceptPartial ? 1 : 0), num(functionTolerance),
-    pcgPreconditioner === 'ic0' ? 1 : NaN, direct == null ? NaN : (direct ? 1 : 0))
+    pcgPreconditioner === 'ic0' ? 1 : NaN, direct == null ? NaN : (direct ? 1 : 0), warm ? 1 : NaN)
 }
 
 export async function bundleAdjust(cameras, intrinsics, points3d, observations, opts = {}) {

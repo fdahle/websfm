@@ -33,7 +33,7 @@ import { trackHist } from './modelStats.js'
 export async function refineModel(ctx) {
   const {
     cfg, images, imgs, cameras, tracks, ids, keypointsAt, donePairs, refreshTracks,
-    modelResiduals, runBundleAdjust, selfCalRecord, intrinsicsRecord, imageByUuid,
+    modelResiduals, runBundleAdjust, lastSolve = () => null, selfCalRecord, intrinsicsRecord, imageByUuid,
     defaultKCount, log, report, memoryMark,
   } = ctx
   // Defaults + rationale for these live in defaults.user.js (baIterations,
@@ -169,7 +169,7 @@ export async function refineModel(ctx) {
           + `${tracks.liveCount()} points`, 'info', 'Reconstruction')
         log(`track lengths (2/3/4+ view) ${before.t2}/${before.t3}/${before.t4} → `
           + `${after.t2}/${after.t3}/${after.t4}`, 'info', 'Reconstruction')
-        await runBundleAdjust('post-retriangulation bundle adjustment', baIterations, 'none')
+        await runBundleAdjust('post-retriangulation bundle adjustment', baIterations, 'none', { warm: true })
       } else if (lowParallax) {
         log(`retriangulation found no stable missed structure — rejected ${lowParallax} `
           + `candidate point(s) below ${filterMinTriAngleDeg}° parallax`, 'info', 'Reconstruction')
@@ -187,7 +187,8 @@ export async function refineModel(ctx) {
       // Complete first (against the poses + folded keypoints the previous BA left),
       // so the threshold, filter and BA below treat the added observations like any
       // other.
-      completeTracksFinal(`pre-filter pass ${round}`)
+      const completedObs = completeTracksFinal(`pre-filter pass ${round}`)
+      let guidedObs = 0
       memoryMark(`track completion ${round}`)
       // Guided extension runs once, before the tight pass: by then the first
       // self-calibrated BA has folded the distortion, so projections and keypoints
@@ -213,6 +214,7 @@ export async function refineModel(ctx) {
         })
         const after = trackHist(tracks)
         guidedRecord = [...(guidedRecord ?? []), { pass: round, ...g, gatePx, before, after }]
+        guidedObs = g.added
         log(`guided track extension (pass ${round}) +${g.added} observation(s) on ${g.pointsExtended} point(s) — `
           + `${g.lifted} lifted from 2 to ≥3 views (≤${gatePx.toFixed(1)}px, descriptor ≤ `
           + `${g.tau?.toFixed(3) ?? '–'} measured from ≥3-view tracks, ratio ${cfg.guidedRatio ?? 0.8}; ${g.windows} search window(s), `
@@ -279,8 +281,19 @@ export async function refineModel(ctx) {
       }
       // One row per post-filter pass: what was actually refined, and why it was cut
       // back if it was. The escalation schedule is invisible in the final numbers.
-      selfCalRecord.passes.push({ pass: round, mode: refineMode, reducedReason })
-      await runBundleAdjust(`post-filter bundle adjustment ${round}`, baIterations, refineMode)
+      // Nothing to solve when the model is exactly what the last solve left and that
+      // solve converged with the same terms: no observation added or removed, no point
+      // gone. Re-solving it re-ran a full BA for nothing (1,600 cameras: 7 s a pass).
+      const prev = lastSolve()
+      const unchanged = !completedObs && !guidedObs && !obsRemoved && !ptsRemoved
+      if (unchanged && prev?.converged && prev.mode === refineMode) {
+        selfCalRecord.passes.push({ pass: round, mode: refineMode, reducedReason, skipped: 'unchanged' })
+        log(`post-filter bundle adjustment ${round} skipped — nothing changed since the last solve, `
+          + `which converged with the same terms ('${refineMode}')`, 'info', 'Reconstruction')
+      } else {
+        selfCalRecord.passes.push({ pass: round, mode: refineMode, reducedReason })
+        await runBundleAdjust(`post-filter bundle adjustment ${round}`, baIterations, refineMode, { warm: true })
+      }
       memoryMark(`filter + BA ${round}`)
     }
     logOutlierShare('post-filter residuals')

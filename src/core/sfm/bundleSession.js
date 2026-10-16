@@ -158,7 +158,13 @@ export function createBundleSession(ctx) {
   // `gcp` (optional, from buildGcpAnchors): GCP anchor points appended after the real
   // tracks, their mark observations and the anchor residuals — so a GCP-anchored solve
   // can refine intrinsics through the same validation + fold path as every other pass.
-  async function runBundleAdjust(label, iters, refineMode = refineIntrinsics, { cameraPriors = null, refineOnly = null, gcp = null } = {}) {
+  let lastSolve = null // see runBundleAdjust
+  // `warm`: the model is already converged (a re-solve after a filter, a
+  // retriangulation or with survey constraints added), so the solve may stop earlier.
+  async function runBundleAdjust(label, iters, refineMode = refineIntrinsics, { cameraPriors = null, refineOnly = null, gcp = null, warm = false } = {}) {
+    // Any solve replaces the record of the last one; it is set again below only when
+    // this one leaves a converged model (refinePipeline.js skips a re-solve of it).
+    lastSolve = null
     if (!(cameras.size >= 2 && tracks.liveCount() >= 10 && iters > 0)) {
       log(`${label} skipped (cameras=${cameras.size}, `
         + `points=${tracks.liveCount()}, iters=${iters})`, 'debug', 'Reconstruction')
@@ -215,7 +221,7 @@ export function createBundleSession(ctx) {
     }
 
     const result = await bundleAdjust(camList, kList, posBefore, observations,
-      { maxIters: iters, refineIntrinsics: refineMode, sensorOfCam, solver: cfg.baSolver, flatPoints: true,
+      { maxIters: iters, refineIntrinsics: refineMode, sensorOfCam, solver: warm ? { ...cfg.baSolver, warm: true } : cfg.baSolver, flatPoints: true,
         ...(cameraPriors ? { cameraPriors } : {}), ...(gcp ? { gcpAnchors: gcp.anchors } : {}) })
     noteBaSolver(label, result)
     if (!result) {
@@ -250,6 +256,7 @@ export function createBundleSession(ctx) {
       if (delta < 0.01) {
         log(`${label} already converged (RMS ${result.costBefore.toFixed(2)}px unchanged); `
           + `keeping the pre-BA estimate`, 'debug', 'Reconstruction')
+        lastSolve = { mode: refineMode, converged: true }
         return
       }
       if (!robust.improved) {
@@ -401,6 +408,8 @@ export function createBundleSession(ctx) {
         'debug', 'Reconstruction')
     }
     log(`${label} reprojection — ${fmtStats(modelReprojStats())}`, 'info', 'Reconstruction')
+    // Converged: LM stopped on its own rule before the iteration cap.
+    lastSolve = { mode: refineMode, converged: trace.length > 0 && trace.length < iters }
     return result
   }
 
@@ -432,7 +441,7 @@ export function createBundleSession(ctx) {
         const mode = cfg.cameraPriorRefineIntrinsics === 'auto'
           ? (selfCalRecord.passes.at(-1)?.mode ?? refineIntrinsics) : cfg.cameraPriorRefineIntrinsics
         const r = await runBundleAdjust(`camera-prior bundle adjustment (round ${round + 1}, intrinsics '${mode}')`,
-          baIterations, mode, { cameraPriors: constrained.priors })
+          baIterations, mode, { cameraPriors: constrained.priors, warm: true })
         if (!r) return
         log(`camera-prior bundle adjustment centre residual → `
           + `${(r.cameraPriorRmsAfter * constrained.fit.scale).toPrecision(3)} project units`, 'success', 'Reconstruction')
@@ -564,6 +573,8 @@ export function createBundleSession(ctx) {
 
   return {
     runBundleAdjust, runLocalBundleAdjust, runCameraPriorBundleAdjust, runGcpAnchoredBundleAdjust,
+    // { mode, converged } of the last runBundleAdjust, or null (none, rejected, skipped).
+    lastSolve: () => lastSolve,
     solverTotals: baSolverTotals,
   }
 }

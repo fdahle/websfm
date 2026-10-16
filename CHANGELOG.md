@@ -184,9 +184,11 @@ Notable changes to websfm. The format follows
 ### Performance
 - **SfM on big blocks**: bundle adjustment solves its camera system exactly with a
   sparse Cholesky factorisation instead of a capped iterative solve, wherever the
-  block has more than about 100 cameras. Quarry (347 images) reconstructs in 189 s
-  instead of 259 s and South Building in 63 s instead of 85 s, with the same cameras,
-  points and accuracy against RTK. Start-up on a large block with a calibrated lens no
+  block has more than about 100 cameras. Registration scans only the image pairs a new
+  camera touches, and re-solves of an already converged model stop sooner. Quarry
+  (347 images) reconstructs in 135 s instead of 259 s and South Building in 48 s
+  instead of 85 s, with the same cameras and accuracy against RTK; 1,600 synthetic
+  cameras take 97 s instead of 353 s. Start-up on a large block with a calibrated lens no
   longer re-fits every image pair's epipolar geometry up front (1,600 synthetic
   cameras: 88 s → 3 s).
 - **Outlier filter (statistical)**: about 16× faster on terrain and other surface-like

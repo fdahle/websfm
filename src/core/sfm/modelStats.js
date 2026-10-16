@@ -10,8 +10,11 @@ import { hasKp, kpX, kpY } from './keypointSet.js'
 export function numStats(arr) {
   const n = arr.length
   if (n === 0) return { mean: 0, median: 0, p95: 0, max: 0, count: 0 }
-  const sorted = [...arr].sort((a, b) => a - b)
-  const sum = sorted.reduce((s, v) => s + v, 0)
+  // A typed array sorts numerically and natively: the comparator sort of a plain array
+  // was seconds a run on a big block (every BA logs these). Same order, same sum.
+  const sorted = Float64Array.from(arr).sort()
+  let sum = 0
+  for (let i = 0; i < n; i++) sum += sorted[i]
   const at = (q) => sorted[Math.min(n - 1, Math.max(0, Math.round(q * (n - 1))))]
   return { mean: sum / n, median: at(0.5), p95: at(0.95), max: sorted[n - 1], count: n }
 }
