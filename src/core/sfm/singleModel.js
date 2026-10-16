@@ -21,6 +21,7 @@ import { SFM_TUNING } from '../tuning.js'
 import { compactTrackRecords } from './resultCodec.js'
 import { createTrackStore, makeImageIds } from './trackStore.js'
 import { hasKp, kpX, kpY } from './keypointSet.js'
+import { registrationOutliers, deregisterCamera } from './registrationCheck.js'
 import { numStats, fmtStats, modelResiduals as residualsOf, trackHist } from './modelStats.js'
 import { createSelfCalFold } from './selfCalFold.js'
 import { createBundleSession } from './bundleSession.js'
@@ -36,6 +37,48 @@ import {
 // Positive ⇒ the point is in front of that camera (cheirality).
 function projDepth(P, x, y, z) {
   return P[8] * x + P[9] * y + P[10] * z + P[11]
+}
+
+// Score, take out, re-register, re-check (see the call site). Returns the run record:
+// { median, limit, flagged: [{ name, px }], readmitted: [name], dropped: [name] }.
+async function recheckRegistrations({ cfg, cameras, tracks, ids, keypointsAt, donePairs, registeredUuids,
+  refreshTracks, imageByUuid, log, runBundleAdjust, reregister }) {
+  const check = () => registrationOutliers({ cameras, pairs: donePairs, keypointsAt, ids,
+    scale: cfg.detectScaleFactor ?? 1, cfg: cfg.registrationCheck })
+  const nameOf = (u) => imageByUuid(u)?.name ?? u
+  const first = check()
+  const record = { median: first.median, limit: first.limit, flagged: first.flagged.map((f) => ({ name: nameOf(f.uuid), px: f.px })),
+    readmitted: [], dropped: [] }
+  log(`registration check — ${first.scores.size} camera(s) against their strongest verified pairs: median `
+    + `${first.median.toFixed(2)}px, limit ${first.limit.toFixed(1)}px, ${first.flagged.length} outlier(s)`,
+  first.flagged.length ? 'warn' : 'info', 'Reconstruction')
+  if (!first.flagged.length || cameras.size - first.flagged.length < 2) return record
+  for (const { uuid, px } of first.flagged) {
+    const gone = deregisterCamera({ uuid, cameras, registeredUuids, tracks, ids })
+    log(`  ${nameOf(uuid)} disagrees with its pairs by ${px.toFixed(1)}px — taken out of the model `
+      + `(${gone} point(s) only it supported) for re-registration`, 'warn', 'Reconstruction')
+  }
+  refreshTracks()
+  await reregister()
+  await runBundleAdjust('post-check bundle adjustment', cfg.baIterations, 'none')
+  const second = check()
+  const stillBad = new Set(second.flagged.map((f) => f.uuid))
+  for (const { uuid } of first.flagged) {
+    if (!cameras.has(uuid)) record.dropped.push(nameOf(uuid))
+    else if (stillBad.has(uuid)) {
+      deregisterCamera({ uuid, cameras, registeredUuids, tracks, ids })
+      record.dropped.push(nameOf(uuid))
+    } else record.readmitted.push(nameOf(uuid))
+  }
+  if (record.dropped.length) {
+    refreshTracks()
+    await runBundleAdjust('post-check bundle adjustment (outliers left out)', cfg.baIterations, 'none')
+  }
+  log(`registration check: ${record.readmitted.length} re-registered consistently`
+    + `${record.readmitted.length ? ` (${record.readmitted.join(', ')})` : ''}, ${record.dropped.length} left out`
+    + `${record.dropped.length ? ` (${record.dropped.join(', ')})` : ''}`,
+  record.dropped.length ? 'warn' : 'success', 'Reconstruction')
+  return record
 }
 
 export async function reconstructSingleModel(input, hooks = {}) {
@@ -335,7 +378,7 @@ export async function reconstructSingleModel(input, hooks = {}) {
     // initial pair; the track store is shared and mutated in place by register.js
     // and the injected BA/filter closures alike.
     const registeredUuids = new Set([bestPair.idA, bestPair.idB])
-    await registerImages({
+    const registrationCtx = {
       imgs, donePairs, Kmap, cfg,
       // corrPairs = strong + weak bridges. register.js draws PnP
       // correspondences from this superset but triangulates fresh structure only from
@@ -347,7 +390,8 @@ export async function reconstructSingleModel(input, hooks = {}) {
       filterTracks: filterModelTracks, modelReprojStats, imageByUuid, numStats,
       log, onProgress,
       reportPhase: (local, label, counts) => report('register', local, label, counts),
-    })
+    }
+    await registerImages(registrationCtx)
     const preBaStats = modelReprojStats()
     log(`pre-BA reprojection — ${fmtStats(preBaStats)}`, 'info', 'Reconstruction')
     markStage('registration')
@@ -358,6 +402,18 @@ export async function reconstructSingleModel(input, hooks = {}) {
       modelResiduals, runBundleAdjust: bundles.runBundleAdjust, selfCalRecord, intrinsicsRecord,
       imageByUuid, defaultKCount, log, report, memoryMark,
     })
+    // ── Registration plausibility (registrationCheck.js) ─────────────────────
+    // A camera can register in a wrong place and stay there self-consistently (it
+    // triangulates its own points). Score every camera against the epipolar geometry of
+    // its strongest verified pairs; take outliers out, let a final registration sweep
+    // re-resect them against the now complete model, re-solve, and leave out any that
+    // still disagree — an unregistered camera is better than a misplaced one.
+    const registrationCheck = await recheckRegistrations({
+      cfg, cameras, tracks, ids, keypointsAt, donePairs, registeredUuids, refreshTracks,
+      imageByUuid, log, runBundleAdjust: bundles.runBundleAdjust,
+      reregister: () => registerImages({ ...registrationCtx, finalSweep: true }),
+    })
+
     // Survey-constrained solves (bundleSession.js): camera positions, then GCPs.
     if (cameraPriors.length && cameras.size >= 2 && tracks.liveCount() >= 10) {
       report('gcpBundle', 1, 'Camera-position constrained bundle adjustment…', { done: cameras.size, total: imgs.length })
@@ -391,6 +447,7 @@ export async function reconstructSingleModel(input, hooks = {}) {
       finalTrackPrune, finalMinTrackViews: cfg.finalMinTrackViews,
       remainingComponents, selfCalDistortion: selfCal.distortionSummary(), fiducialTransforms,
     })
+    summary.registrationCheck = registrationCheck
 
     memoryMark('final cleanup + summary')
     report('finalize', 1, 'Finalising model…', { done: cameras.size, total: imgs.length })
