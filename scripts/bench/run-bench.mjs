@@ -269,7 +269,7 @@ try {
   }
   await memory('after ingest')
 
-  const run = { detect: 'detect', match: 'match', recon: 'reconstruct', depth: 'depth', dense: 'dense', dem: 'dem', mesh: 'mesh', decimate: 'decimate', texture: 'texture', meshexport: 'meshexport', ortho: 'ortho' }
+  const run = { detect: 'detect', match: 'match', recon: 'reconstruct', depth: 'depth', dense: 'dense', dem: 'dem', mesh: 'mesh', decimate: 'decimate', texture: 'texture', meshexport: 'meshexport', texturedump: 'texturedump', ortho: 'ortho' }
   const gbStr = (v) => (v == null ? '?' : `${(v / 1024 ** 3).toFixed(2)} GB`)
   // `performance.memory` counts ArrayBuffer backing stores, which the ~4 GB V8 limit
   // does not: the DevTools protocol separates the two (V8 heap vs backing storage).
@@ -526,6 +526,17 @@ try {
       if (stage === 'dense' && lidarCfg) await denseLidarCheck(entry)
       if (stage === 'ortho') await exportOrtho(tag)
       if (stage === 'texture') await exportTexturePages(tag)
+      if (stage === 'texturedump') {
+        const r = result.stages[entry]
+        const parts = []
+        for (let s = 0; s < r.size; s += 8 << 20) {
+          parts.push(Buffer.from(await page.evaluate(([a, n]) => window.bench.textureDumpChunk(a, n), [s, 8 << 20]), 'base64'))
+        }
+        await writeFile(`${outPrefix}.texturedump.bin`, Buffer.concat(parts))
+        await writeFile(`${outPrefix}.texturedump.json`, JSON.stringify({ ...r.meta, images: cfg.images }, null, 1))
+        delete r.meta
+        console.log(`== texturedump: ${(r.size / 1024 ** 2).toFixed(1)} MiB → ${outPrefix}.texturedump.{json,bin}`)
+      }
       if (stage === 'meshexport') {
         const files = result.stages[entry]?.files ?? []
         for (let i = 0; i < files.length; i++) {

@@ -278,6 +278,37 @@ window.bench = {
     return { settings, seconds: (performance.now() - t0) / 1000, source: src?.name ?? null,
       sourceTriangles: src?.count ?? 0, summary: cloud?.textureSummary ?? null }
   },
+  // The texture lab's inputs (scripts/bench/textureLab.mjs): the newest untextured mesh
+  // and every registered camera with its frame model, as the texture run sees them.
+  // → { meta (JSON), mesh bytes (pos f64 | idx u32 | col u8) } via textureDumpChunk.
+  async texturedump() {
+    const meshes = recon.clouds.filter((c) => c.kind === 'mesh' && !c.texture)
+    const m = meshes[meshes.length - 1]
+    const frameModel = makeFrameModelResolver({ summary: recon.summary, sensors: sensorsStore.sensors })
+    const cams = recon.mainSparseCloud?.cameras ?? new Map()
+    const views = []
+    for (const im of images.images) {
+      const cam = cams.get(im.uuid)
+      if (!cam) continue
+      const { dist, selfCal, fiducial } = frameModel(im)
+      views.push({ name: im.name, R: cam.R, t: cam.t, K: { fx: cam.K.fx, fy: cam.K.fy, cx: cam.K.cx, cy: cam.K.cy },
+        width: im.meta?.width, height: im.meta?.height, dist, selfCal, fiducial, hasMask: !!im.mask })
+    }
+    const pos = new Float64Array(m.pos), idx = m.idx, col = m.col ?? new Uint8Array(0)
+    const bytes = new Uint8Array(pos.byteLength + idx.byteLength + col.byteLength)
+    bytes.set(new Uint8Array(pos.buffer), 0)
+    bytes.set(new Uint8Array(idx.buffer, idx.byteOffset, idx.byteLength), pos.byteLength)
+    bytes.set(col, pos.byteLength + idx.byteLength)
+    window.__textureDump = bytes
+    return { meta: { mesh: m.name, nVerts: m.nVerts, triangles: m.count, hasCol: !!m.col, views }, size: bytes.length }
+  },
+  textureDumpChunk(start, n) {
+    const u8 = window.__textureDump.subarray(start, start + n)
+    let s = ''
+    for (let k = 0; k < u8.length; k += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(k, k + 0x8000))
+    return btoa(s)
+  },
+
   // Export the newest textured mesh through the worker's own mesh export (as the Export
   // dialog does) in each format; the runner reads the files back in chunks.
   async meshexport({ formats = ['glb', 'obj'] } = {}) {

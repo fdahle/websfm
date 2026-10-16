@@ -202,6 +202,25 @@ Vulkan/NVIDIA: the kernel's accumulator was zeroed only once, so every pair wide
 one 64-column tile came back with 0 matches and each run fell back to WASM after its
 first validation (match.wgsl now zeroes it explicitly).
 
+## Texture lab
+
+`textureLab.mjs` reruns the mesh texture in Node on a real project, about 30 s per run
+instead of a browser pipeline run per change. The `texturedump` stage writes its inputs
+(the newest untextured mesh and every registered camera with its frame model) next to
+the run:
+
+```sh
+node scripts/bench/run-bench.mjs --config … # stages …,mesh,decimate,texturedump
+node scripts/bench/textureLab.mjs --dump <out> --out /tmp/lab [--opts '{"smoothness":1}'] [--pages] [--glb lab.glb]
+```
+
+Photos are read from the dataset folder and decoded with ffmpeg (cached under `--out`);
+lens, self-cal and film maps are built as the worker builds them, and masks are not
+applied. It prints the run summary, including `seams` (the mean colour step across seams,
+in levels, the figure the T4 work was measured with); `--pages` writes the atlas pages
+and `--glb` the textured mesh. The `meshexport` stage exports the browser's own textured
+mesh as GLB and OBJ.
+
 ## Historical blocks (`hist`)
 
 `hist/` scores film and satellite frame blocks (the Grenoble benchmark layout:
