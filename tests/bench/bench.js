@@ -28,7 +28,7 @@ import { useComputeSettings } from '/src/composables/useComputeSettings.js'
 import {
   DETECT_DEFAULTS_BY_DETECTOR, DETECT_PRESETS_BY_DETECTOR, MATCH_DEFAULTS, MATCH_PRESETS,
   RECONSTRUCT_DEFAULTS, RECONSTRUCT_PRESETS, DEPTHMAP_DEFAULTS, DENSE_FUSE_DEFAULTS,
-  DEM_DEFAULTS, ORTHO_DEFAULTS, MESH_DEFAULTS,
+  DEM_DEFAULTS, ORTHO_DEFAULTS, MESH_DEFAULTS, DECIMATE_MESH_DEFAULTS, TEXTURE_DEFAULTS,
 } from '/src/core/defaults.user.js'
 import { learnedDetector } from '/src/core/features/learnedDetectors.js'
 import { MODEL_CACHE_NAME, modelUrl } from '/src/core/models/registry.js'
@@ -168,7 +168,8 @@ window.bench = {
     }
     const clouds = recon.clouds.map((c) => ({ kind: c.kind, name: c.name,
       points: c.kind === 'sparse' ? c.points?.length ?? 0 : c.count ?? 0,
-      posType: c.pos?.constructor?.name ?? null }))
+      posType: c.pos?.constructor?.name ?? null,
+      ...(c.texture ? { texturePages: c.texture.pages.length, textureBytes: c.texture.data.byteLength, uvs: (c.uv?.length ?? 0) / 2 } : {}) }))
     return { images: images.images.length, kpImages, keypoints, pairs, matchTuples, resident, clouds,
       depthMaps: recon.depthMapCount, heapBytes: await liveHeap(), heapLimit: performance.memory?.jsHeapSizeLimit ?? null }
   },
@@ -250,6 +251,45 @@ window.bench = {
     await recon.generateMesh(settings, report)
     const m = recon.clouds.find((c) => c.kind === 'mesh' && !c.imported && !c.derived)
     return { settings, seconds: (performance.now() - t0) / 1000, triangles: m?.count ?? 0, vertices: m?.nVerts ?? 0 }
+  },
+
+  // Decimate the computed mesh (Tools ▸ Mesh ▾ ▸ Decimate), as DecimateMeshModal does.
+  async decimate({ ...overrides } = {}) {
+    const s = { ...DECIMATE_MESH_DEFAULTS, ...overrides }
+    const src = recon.clouds.find((c) => c.kind === 'mesh' && !c.imported && !c.derived)
+    const settings = s.targetTriangles > 0 && overrides.targetTriangles
+      ? { targetTriangles: Math.round(s.targetTriangles), preserveBoundary: !!s.preserveBoundary }
+      : { targetRatio: s.targetRatio, preserveBoundary: !!s.preserveBoundary }
+    const t0 = performance.now()
+    const cloud = await recon.editClouds({ mode: 'mesh-decimate', sourceIds: [src?.id], settings, name: `${src?.name} (decimated)` }, report)
+    return { settings, seconds: (performance.now() - t0) / 1000, triangles: cloud?.count ?? 0 }
+  },
+
+  // Texture the newest untextured mesh (a decimated copy if there is one), settings
+  // resolved as TextureMeshModal.run() does.
+  async texture({ ...overrides } = {}) {
+    const { useGpu, memBudgetBytes } = useComputeSettings()
+    const meshes = recon.clouds.filter((c) => c.kind === 'mesh' && !c.texture)
+    const src = meshes[meshes.length - 1]
+    const settings = { ...TEXTURE_DEFAULTS, useGpu: overrides.useGpu ?? useGpu.value,
+      memBudgetBytes: memBudgetBytes.value, ...overrides }
+    const t0 = performance.now()
+    const cloud = await recon.textureMesh({ sourceId: src?.id, settings }, report)
+    return { settings, seconds: (performance.now() - t0) / 1000, source: src?.name ?? null,
+      sourceTriangles: src?.count ?? 0, summary: cloud?.textureSummary ?? null }
+  },
+  // The textured mesh's atlas pages (JPEG), base64 in chunks for the runner.
+  texturePages() {
+    const c = [...recon.clouds].reverse().find((x) => x.texture)
+    return c ? c.texture.pages.map((p) => p.length) : []
+  },
+  texturePageChunk(page, start, n) {
+    const c = [...recon.clouds].reverse().find((x) => x.texture)
+    const p = c.texture.pages[page]
+    const u8 = c.texture.data.subarray(p.offset + start, p.offset + Math.min(p.length, start + n))
+    let s = ''
+    for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000))
+    return btoa(s)
   },
 
   // Orthophoto, settings resolved exactly as OrthoModal.run() does; returns the

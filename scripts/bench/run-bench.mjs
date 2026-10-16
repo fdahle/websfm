@@ -269,7 +269,7 @@ try {
   }
   await memory('after ingest')
 
-  const run = { detect: 'detect', match: 'match', recon: 'reconstruct', depth: 'depth', dense: 'dense', dem: 'dem', mesh: 'mesh', ortho: 'ortho' }
+  const run = { detect: 'detect', match: 'match', recon: 'reconstruct', depth: 'depth', dense: 'dense', dem: 'dem', mesh: 'mesh', decimate: 'decimate', texture: 'texture', ortho: 'ortho' }
   const gbStr = (v) => (v == null ? '?' : `${(v / 1024 ** 3).toFixed(2)} GB`)
   // `performance.memory` counts ArrayBuffer backing stores, which the ~4 GB V8 limit
   // does not: the DevTools protocol separates the two (V8 heap vs backing storage).
@@ -284,7 +284,8 @@ try {
   const invLine = (inv) => `${inv.v8 ? `V8 heap ${gbStr(inv.v8.usedSize)} + ArrayBuffers ${gbStr(inv.v8.backingStorageSize)} · ` : ''}`
     + `performance.memory ${gbStr(inv.heapBytes)} of ${gbStr(inv.heapLimit)} · ${inv.images} images, `
     + `${inv.keypoints.toLocaleString()} keypoints, ${inv.pairs.toLocaleString()} pairs / ${inv.matchTuples.toLocaleString()} match tuples`
-    + `${inv.clouds.length ? `, clouds: ${inv.clouds.map((c) => `${c.kind} ${c.points.toLocaleString()}${c.posType ? ` (${c.posType})` : ''}`).join(', ')}` : ''}`
+    + `${inv.clouds.length ? `, clouds: ${inv.clouds.map((c) => `${c.kind} ${c.points.toLocaleString()}${c.posType ? ` (${c.posType})` : ''}`
+      + (c.texturePages ? ` textured: ${c.texturePages} pages ${gbStr(c.textureBytes)}, ${c.uvs.toLocaleString()} UVs` : '')).join(', ')}` : ''}`
     + `, ${inv.depthMaps} depth maps`
     + (inv.resident ? ` · resident: ${inv.resident.keypointImages} images' keypoints (${gbStr(inv.resident.keypointBytes)}), `
       + `${inv.resident.matchPairs} pairs' matches (${gbStr(inv.resident.matchBytes)})` : '')
@@ -363,6 +364,19 @@ try {
     }
     await new Promise((res) => out.end(res))
     console.log(`== exportOrtho: ${(size / 1024 ** 2).toFixed(1)} MiB → ${file}`)
+  }
+  // After the texture stage: its atlas pages as <out>.texture-<n>.jpg.
+  const exportTexturePages = async (tag) => {
+    const sizes = await page.evaluate(() => window.bench.texturePages())
+    for (let i = 0; i < sizes.length; i++) {
+      const file = `${outPrefix}${tag ? `.${tag}` : ''}.texture-${i}.jpg`
+      const parts = []
+      for (let s = 0; s < sizes[i]; s += 8 << 20) {
+        parts.push(Buffer.from(await page.evaluate(([p, a, n]) => window.bench.texturePageChunk(p, a, n), [i, s, 8 << 20]), 'base64'))
+      }
+      await writeFile(file, Buffer.concat(parts))
+      console.log(`== exportTexture: page ${i} ${(sizes[i] / 1024 ** 2).toFixed(1)} MiB → ${file}`)
+    }
   }
   // After the dem stage: <out>.dem.tif, scored against `hist.refDem` (score_dem.py,
   // the Grenoble evaluation's protocol) when one is given.
@@ -511,6 +525,7 @@ try {
       if ((stage === 'recon' || stage === 'dense') && cfg.exportCloudsProject) await exportCloudProject(stage === 'recon' ? 'sparse' : 'dense', tag)
       if (stage === 'dense' && lidarCfg) await denseLidarCheck(entry)
       if (stage === 'ortho') await exportOrtho(tag)
+      if (stage === 'texture') await exportTexturePages(tag)
       if (stage === 'dem' && (cfg.exportDem || cfg.hist?.refDem)) await exportDem(tag)
     }
   }
