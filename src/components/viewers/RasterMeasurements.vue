@@ -1,8 +1,9 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import Icon from '../Icon.vue'
 import FloatingToolbox from './FloatingToolbox.vue'
 import { useMeasurementsStore } from '../../stores/useMeasurementsStore.js'
+import { useExternalStore } from '../../stores/useExternalStore.js'
 import { measurementSource, measurementStamp, measurementStale } from '../../core/products/measurementRecord.js'
 import { pixelToWorld, worldToPixel } from '../../core/io/rasterSample.js'
 import { polylineLength, planimetricArea, sampleProfile, polygonVolume, groundVolume } from '../../core/products/measure.js'
@@ -91,11 +92,32 @@ const profile = computed(() => selected.value?.profile ?? (tool.value === 'profi
 // once a record is open. Errors are surfaced as text, never as a zero volume.
 const baseKind = ref('plane')
 const baseHeight = ref(null)
+// DEM of difference: the computed DEM (no `id`; a reference raster has one) in a CRS
+// against an imported reference DEM, sampled through the external store's
+// reprojected query in the DEM's own CRS. Base value `ref:<rasterId>`.
+const external = useExternalStore()
+const referenceBases = computed(() => (props.kind === 'dem' && !props.product?.id && props.product?.crs
+  && props.product.crs !== 'local' ? external.demRasters : []))
+const refSampler = shallowRef(null)
+const refError = ref('')
+watch([baseKind, () => props.product?.crs], async ([kind, crs]) => {
+  refSampler.value = null; refError.value = ''
+  if (!kind.startsWith('ref:')) return
+  try {
+    const s = await external.referenceDemSampler(kind.slice(4), crs)
+    if (baseKind.value === kind) refSampler.value = { name: s.meta.name, sample: s.sample }
+  } catch (err) { refError.value = err?.message ?? String(err) }
+})
 const volume = computed(() => {
   if (selected.value?.kind === 'volume') return selected.value.volume
   if (tool.value !== 'volume' || !grid.value || vertices.value.length < 3) return null
   // An empty custom-height field is "no base", never 0: Number(null/'') is 0, and a
   // cut/fill against sea level on a plateau looks plausible enough to be saved.
+  if (baseKind.value.startsWith('ref:')) {
+    if (refError.value) return { error: 'reference' }
+    if (!refSampler.value) return null
+    return groundVolume(polygonVolume(grid.value, world.value, { base: 'surface', surface: refSampler.value }), gridScale.value)
+  }
   const h = baseHeight.value
   return groundVolume(polygonVolume(grid.value, world.value, { base: baseKind.value, height: h === '' || h == null ? null : Number(h) }), gridScale.value)
 })
@@ -103,7 +125,8 @@ const volumeUnit = computed(() => volumeUnitLabel({ horizontal: unit.value, vert
 const VOLUME_ERRORS = {
   'self-intersecting': 'The polygon crosses itself — move or undo a point.',
   base: 'Base undetermined: the plane needs three non-collinear vertices on valid DEM cells, the lowest point needs one, a custom base needs a height.',
-  'no-data': 'No valid DEM cells inside the polygon.',
+  'no-data': 'No valid DEM cells inside the polygon (where a reference DEM is the base: none it covers too).',
+  reference: 'The reference DEM cannot be sampled here.',
   polygon: 'Add at least three vertices.',
 }
 const num = (v, digits = 2) => v.toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits })
@@ -156,13 +179,18 @@ const baseResult = computed(() => {
   if (k === 'volume') {
     const v = volume.value
     if (!v || v.error) return { error: VOLUME_ERRORS[v?.error] ?? 'Volume unavailable.' }
-    const base = v.base.kind === 'plane' ? 'Best-fit plane'
+    const diff = v.base.kind === 'surface'
+    const base = diff ? `Reference DEM "${v.base.name}"` : v.base.kind === 'plane' ? 'Best-fit plane'
       : `${v.base.kind === 'lowest' ? 'Lowest vertex' : 'Custom'}, ${num(v.base.height)} ${verticalUnit.value}`
-    return { label: 'Net volume', value: fmtVolume(v.net),
-      rows: [['Cut (above base)', fmtVolume(v.cut)], ['Fill (below base)', fmtVolume(v.fill)], ['Base', base],
+    // Against another epoch, "cut/fill" reads as gain and loss.
+    return { label: diff ? 'Net change' : 'Net volume', value: fmtVolume(v.net),
+      rows: [[diff ? 'Gain (above the reference)' : 'Cut (above base)', fmtVolume(v.cut)],
+        [diff ? 'Loss (below the reference)' : 'Fill (below base)', fmtVolume(v.fill)], ['Base', base],
         ['Area', `${num(area.value ?? 0)} ${unit.value}²`],
         ['DEM coverage', `${(v.coverage * 100).toFixed(1)}% of ${v.insideCells.toLocaleString()} cells`]],
-      warn: v.coverage < 1 ? 'Holes and off-raster parts are excluded, not interpolated.' : '' }
+      warn: [v.coverage < 1 ? (diff ? 'Holes in either DEM and parts outside the reference are excluded, not interpolated.'
+        : 'Holes and off-raster parts are excluded, not interpolated.') : '',
+      diff ? 'Both DEMs must use the same vertical datum; a reference\'s declared offset is applied.' : ''].filter(Boolean).join(' ') }
   }
   return { label: 'Horizontal distance', value: `${num(selected.value?.distance ?? distance.value)} ${unit.value}`,
     rows: world.value.length > 2 ? [['Vertices', world.value.length]] : [] }
@@ -182,7 +210,16 @@ const closedShape = computed(() => (shownKind.value === 'area' || shownKind.valu
 function reset() { selectedId.value = ''; name.value = ''; vertices.value = []; finished.value = false }
 function choose(value) { tool.value = value; reset() }
 // Ribbon entry point: clicking the active tool again turns measuring off.
-function setTool(value) { choose(tool.value === value ? 'pan' : value) }
+// opts.base 'reference' (Measure ▸ DEM of difference): open Volume against the first
+// reference DEM, never toggling it off.
+function setTool(value, opts = {}) {
+  if (opts.base === 'reference' && value === 'volume') {
+    choose('volume')
+    baseKind.value = referenceBases.value.length ? `ref:${referenceBases.value[0].id}` : 'plane'
+    return
+  }
+  choose(tool.value === value ? 'pan' : value)
+}
 function toggleSaved() { showSaved.value = !showSaved.value }
 function pick(x, y) {
   if (tool.value === 'pan' || unavailable.value || stale.value) return false
@@ -283,6 +320,7 @@ defineExpose({ pick, active: computed(() => tool.value !== 'pan'), state, setToo
             <option value="plane">Best-fit plane</option>
             <option value="lowest">Lowest vertex</option>
             <option value="custom">Custom height</option>
+            <option v-for="r in referenceBases" :key="r.id" :value="`ref:${r.id}`">Reference DEM: {{ r.name }}</option>
           </select>
         </label>
         <input v-if="baseKind === 'custom'" v-model.number="baseHeight" type="number" step="any"

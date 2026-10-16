@@ -430,7 +430,7 @@ const mapMeasure = computed(() => (mapMeasureTargets.value.length ? {
 // ── Commands ──────────────────────────────────────────────────────────────────
 // Every ribbon button, console verb, viewer menu and interactive workflow block.
 const { handleCommand, pickSfmFiles, pickSfmFolder, pickProjectFile } = useCommandDispatch({
-  tabs: { activateTab, activeView, activeTab, activeImageTab },
+  tabs: { activateTab, activeView, activeTab, activeImageTab, openProductTab },
   viewers: { viewerRef, mapViewerRef, imageViewerRefs, activeProductViewer, activeRasterTab },
   view: {
     showCameras, showGrid, showLegend, showFootprints, showMapGrid, selectTool3d, mapGcpEdit,

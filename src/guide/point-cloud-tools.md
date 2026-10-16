@@ -48,7 +48,19 @@ imported one. The dialogs show what that means for the current project.
   converges in a few iterations. The log reports the RMS, the rotation and the shift.
 
 ## Measure
-These two are in **Tools → Measure ▾**, with the raster and mesh measurements.
+These are in **Tools → Measure ▾**, with the raster and mesh measurements.
+- **Measure in 3D** measures directly in the 3D view. Choose **Distance** (two
+  points), **Polyline** or **Area**, then click on a cloud or a mesh: on a mesh the
+  point lands exactly where you click on the surface, on a cloud it snaps to the
+  nearest drawn point. **Enter** or a double click finishes a polyline or area,
+  **Backspace** removes the last point and **Esc** clears, then exits. A length is split
+  into its horizontal part and its height change along the scene's up direction. An
+  area gives both the **surface area** of the outline (a wall has a large one) and
+  its **footprint** seen from above (near zero for a wall); the toolbox says when the
+  points are far from lying in one plane. Results are in metres once the project has
+  a georeference or scale bars, otherwise in model units, and in the file's own units
+  on an imported layer. **Save** keeps a measurement with the project; saved ones are
+  drawn while the tool is open and listed in its toolbox.
 - **Distance to reference…** gives every point its distance to another cloud (to its
   nearest point) or to a mesh (exactly, to the surface). With a mesh, or a reference
   cloud with normals, the distance is **signed**: positive above the reference,

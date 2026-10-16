@@ -175,6 +175,13 @@ the feature's toe, then choose the **Base** in the measuring toolbox:
 - **Custom height**: a horizontal base at an elevation you enter, in the DEM's
   vertical units. Until you enter one, no volume is shown: an empty field never
   means a base at zero.
+- **Reference DEM**: an imported reference DEM as the base, which turns the volume
+  into a [DEM of difference](help:dem-of-difference) between two epochs. It is
+  offered for the computed DEM in a CRS; **Tools ▸ Measure ▸ DEM of difference** opens
+  the tool with it chosen. The result reads as **Gain** (the DEM above the reference)
+  and **Loss** (below it). Cells the reference does not cover count as unmeasured, so
+  **DEM coverage** shows the overlap. Both DEMs must use the same vertical datum; the
+  reference's declared offset is applied.
 
 On an imported reference DEM, heights, profiles and volumes include the raster's
 declared **vertical offset** (Reference Data ▸ vertical info), the same correction

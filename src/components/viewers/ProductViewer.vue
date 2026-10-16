@@ -304,7 +304,7 @@ function zoomBy(factor) {
 // Measure group handles: the tool lives in RasterMeasurements; the Ribbon reads
 // `measureState` (via App's activeRasterTab) to render which tool is on.
 const measureState = computed(() => measurements.value?.state ?? null)
-function setMeasureTool(tool) { measurements.value?.setTool(tool) }
+function setMeasureTool(tool, opts) { measurements.value?.setTool(tool, opts) }
 function toggleSavedMeasurements() { measurements.value?.toggleSaved() }
 defineExpose({ fit, zoomBy, measureState, setMeasureTool, toggleSavedMeasurements })
 </script>

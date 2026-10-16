@@ -100,12 +100,16 @@ export function fitBasePlane(points) {
  *              (exact for 3 vertices; the usual stockpile toe surface)
  *   'lowest' — horizontal plane at the lowest vertex height
  *   'custom' — horizontal plane at `height`
+ *   'surface' — a second surface, `surface.sample(x, y) → z | null` in the grid's
+ *              own frame: the DEM of difference against a reference DEM (another
+ *              epoch, a lidar survey). A cell the base has no height for counts as
+ *              unmeasured, like a hole in the DEM.
  *
  * Units: horizontal² × vertical, exactly as the grid records them; no scaling.
  * Returns { cut, fill, net, cellArea, insideCells, validCells, coverage, base }
  * or { error } ('polygon' | 'self-intersecting' | 'base' | 'no-data').
  */
-export function polygonVolume(grid, points, { base = 'plane', height = null } = {}) {
+export function polygonVolume(grid, points, { base = 'plane', height = null, surface = null } = {}) {
   if (points.length < 3) return { error: 'polygon' }
   if (planimetricArea(points) == null) return { error: 'self-intersecting' }
   const { scaleX, scaleY } = grid.geoTransform
@@ -118,7 +122,11 @@ export function polygonVolume(grid, points, { base = 'plane', height = null } = 
   })
   const known = points.map((p, i) => ({ x: p.x, y: p.y, z: vertexHeights[i] })).filter(p => p.z != null)
   let baseAt, baseInfo
-  if (base === 'custom') {
+  if (base === 'surface') {
+    if (typeof surface?.sample !== 'function') return { error: 'base' }
+    baseAt = (x, y) => surface.sample(x, y)
+    baseInfo = { kind: 'surface', name: surface.name ?? null }
+  } else if (base === 'custom') {
     if (!Number.isFinite(height)) return { error: 'base' }
     baseAt = () => height
     baseInfo = { kind: 'custom', height }
@@ -147,9 +155,11 @@ export function polygonVolume(grid, points, { base = 'plane', height = null } = 
     for (let c = c0; c <= c1; c++) {
       insideCells++
       if (!validCell(grid, c, r)) continue
-      validCells++
       const x = grid.geoTransform.originX + (c + 0.5) * scaleX
-      const dz = grid.data[r * grid.width + c] + zOffset - baseAt(x, y)
+      const b = baseAt(x, y)
+      if (b == null || !Number.isFinite(b)) continue
+      validCells++
+      const dz = grid.data[r * grid.width + c] + zOffset - b
       if (dz > 0) cut += dz * cellArea
       else fill -= dz * cellArea
     }
@@ -171,4 +181,67 @@ export function groundVolume(v, k = 1) {
   if (!v || v.error || k === 1) return v
   const a = 1 / (k * k)
   return { ...v, cut: v.cut * a, fill: v.fill * a, net: v.net * a, cellArea: v.cellArea * a, groundScale: k }
+}
+
+// ── 3D measurements (picked in the 3D view) ──────────────────────────────────
+// Points are [x, y, z] in the cloud's own coordinates; `up` is the unit vertical
+// (the scene's up: the orientation, else the cameras'). Results are coordinate
+// lengths and areas: the caller scales them to its unit (cloudUnits.js) and never
+// prints a bare number. Differences, never products, of absolute coordinates.
+
+/**
+ * Length along a 3D polyline, split into its horizontal and vertical parts.
+ * → { length, horizontal, vertical (last − first along up, signed), climb (Σ rises),
+ *     segments: [length per segment] } — null for fewer than two points.
+ */
+export function polyline3d(points, up = [0, 0, 1]) {
+  if (!points || points.length < 2) return null
+  let length = 0, horizontal = 0, climb = 0
+  const segments = []
+  for (let i = 1; i < points.length; i++) {
+    const d = [0, 1, 2].map((k) => points[i][k] - points[i - 1][k])
+    const l = Math.hypot(d[0], d[1], d[2])
+    const v = d[0] * up[0] + d[1] * up[1] + d[2] * up[2]
+    segments.push(l)
+    length += l
+    horizontal += Math.sqrt(Math.max(0, l * l - v * v))
+    if (v > 0) climb += v
+  }
+  const first = points[0], last = points[points.length - 1]
+  const vertical = (last[0] - first[0]) * up[0] + (last[1] - first[1]) * up[1] + (last[2] - first[2]) * up[2]
+  return { length, horizontal, vertical, climb, segments }
+}
+
+/**
+ * A closed 3D polygon's true area and its footprint. The vector area (Newell's
+ * method, Σ pᵢ × pᵢ₊₁ / 2 relative to the first vertex) gives both: its length is the
+ * area of the polygon on its best-fit plane — exact when the vertices are coplanar,
+ * the projected area when they are not — and its component along `up` is the
+ * planimetric footprint. A façade has a large area and a footprint near zero; level
+ * ground has the two equal. Self-intersecting outlines are not detected.
+ * → { area, footprint, perimeter, normal: unit [x,y,z], planarity (largest distance
+ *     of a vertex from the best-fit plane) } — null for fewer than three points.
+ */
+export function polygon3d(points, up = [0, 0, 1]) {
+  if (!points || points.length < 3) return null
+  const o = points[0]
+  const rel = points.map((p) => [p[0] - o[0], p[1] - o[1], p[2] - o[2]])
+  const n = [0, 0, 0]
+  let perimeter = 0
+  for (let i = 0; i < rel.length; i++) {
+    const a = rel[i], b = rel[(i + 1) % rel.length]
+    n[0] += a[1] * b[2] - a[2] * b[1]
+    n[1] += a[2] * b[0] - a[0] * b[2]
+    n[2] += a[0] * b[1] - a[1] * b[0]
+    perimeter += Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2])
+  }
+  const len = Math.hypot(n[0], n[1], n[2])
+  const area = len / 2
+  const footprint = Math.abs(n[0] * up[0] + n[1] * up[1] + n[2] * up[2]) / 2
+  const normal = len > 0 ? n.map((c) => c / len) : [0, 0, 0]
+  // Planarity against the plane through the centroid with that normal.
+  const c = [0, 1, 2].map((k) => rel.reduce((s, p) => s + p[k], 0) / rel.length)
+  let planarity = 0
+  for (const p of rel) planarity = Math.max(planarity, Math.abs((p[0] - c[0]) * normal[0] + (p[1] - c[1]) * normal[1] + (p[2] - c[2]) * normal[2]))
+  return { area, footprint, perimeter, normal, planarity }
 }

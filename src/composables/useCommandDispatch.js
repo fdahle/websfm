@@ -1,3 +1,4 @@
+import { nextTick } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useGlossaryStore } from '../stores/useGlossaryStore.js'
 import { useGuideStore } from '../stores/useGuideStore.js'
@@ -26,7 +27,7 @@ import { useTheme } from './useTheme.js'
 //              and useProjectLifecycle's onProjectFilePick
 //   consoleOpen — App's console toggle
 export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, removals, imports, consoleOpen }) {
-  const { activateTab, activeView, activeTab, activeImageTab } = tabs
+  const { activateTab, activeView, activeTab, activeImageTab, openProductTab } = tabs
   const { viewerRef, mapViewerRef, imageViewerRefs, activeProductViewer, activeRasterTab } = viewers
   const {
     showCameras, showGrid, showLegend, showFootprints, showMapGrid, selectTool3d, mapGcpEdit,
@@ -166,6 +167,21 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
     // tab, or the 2D map), etc. The map also picks which raster it measures.
     if (id.startsWith('measure-target:')) { setMapMeasureTarget(id.slice('measure-target:'.length)); return }
     if (id.startsWith('map-basemap:')) { setMapBasemap(id.slice('map-basemap:'.length)); return }
+    // DEM of difference: the DEM's Volume tool with a reference DEM as the base.
+    if (id === 'dem-difference') {
+      openProductTab?.('dem')
+      // The tab's viewer mounts asynchronously; wait for it (≤ 2 s) before starting.
+      let tries = 0
+      const start = () => {
+        const v = activeProductViewer()
+        if (v?.setMeasureTool) v.setMeasureTool('volume', { base: 'reference' })
+        else if (++tries < 40) setTimeout(start, 50)
+      }
+      nextTick(start)
+      return
+    }
+    // Measure in 3D: the 3D view's own tool (before the raster measure-* prefix).
+    if (id === 'measure-3d') { activateTab('viewer'); viewerRef.value?.toggleMeasureTool('distance'); return }
     const measureHost = activeView.value === 'map' ? mapViewerRef.value : activeProductViewer()
     if (id === 'measure-saved') { measureHost?.toggleSavedMeasurements(); return }
     if (id.startsWith('measure-')) { measureHost?.setMeasureTool(id.slice('measure-'.length)); return }

@@ -173,7 +173,7 @@ onBeforeUnmount(() => {
   </div>
 
   <div class="content">
-    <Viewer3D :ref="setViewer" v-show="activeTabId === 'viewer'" :theme="theme" :images="images" :show-cameras="showCameras" :show-grid="showGrid" :show-legend="showLegend" :scene-up="viewerSceneUp" @command="handleCommand" @edit-selection="onEditSelection" @select-tool="(t) => { selectTool3d = t }"
+    <Viewer3D :ref="setViewer" v-show="activeTabId === 'viewer'" :theme="theme" :images="images" :show-cameras="showCameras" :show-grid="showGrid" :show-legend="showLegend" :scene-up="viewerSceneUp" :frame-signature="reconstructionStore.currentFrameSignature" @command="handleCommand" @edit-selection="onEditSelection" @select-tool="(t) => { selectTool3d = t }"
       :region-box="viewerRegionBox" :region-stale="viewerRegionStale"
       :pick-mode="viewerPickMode" :markers="viewerMarkers" @pick="onViewerPick">
       <template #toolbox>

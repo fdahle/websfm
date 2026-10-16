@@ -239,7 +239,7 @@ const measureView = computed(() => {
 })
 const measuring = computed(() => !!measurements.value?.active)
 const measureState = computed(() => measurements.value?.state ?? null)
-function setMeasureTool(tool) { measurements.value?.setTool(tool) }
+function setMeasureTool(tool, opts) { measurements.value?.setTool(tool, opts) }
 function toggleSavedMeasurements() { measurements.value?.toggleSaved() }
 
 // ── What is plotted (core/mapData.js) ─────────────────────────────────────────

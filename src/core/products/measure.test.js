@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { planimetricArea, polylineLength, sampleProfile, polygonVolume, fitBasePlane, groundVolume } from './measure.js'
+import { planimetricArea, polylineLength, sampleProfile, polygonVolume, fitBasePlane, groundVolume, polyline3d, polygon3d } from './measure.js'
 
 describe('raster measurements', () => {
   it('measures a polyline and a concave polygon at large survey coordinates', () => {
@@ -90,6 +90,24 @@ describe('polygonVolume', () => {
   })
 })
 
+describe('polygonVolume against a second surface', () => {
+  it('sums gain and loss between the DEM and a reference, skipping where the reference has no height', () => {
+    const grid = { width: 4, height: 4, geoTransform: { originX: 0, originY: 4, scaleX: 1, scaleY: -1 },
+      data: new Float32Array(16).fill(10) }
+    const square = [{ x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 4 }, { x: 0, y: 4 }]
+    // Reference 8 on the left half (gain 2 per cell), 11 on the right (loss 1), nothing above y = 3.
+    const surface = { name: 'lidar', sample: (x, y) => (y > 3 ? null : x < 2 ? 8 : 11) }
+    const v = polygonVolume(grid, square, { base: 'surface', surface })
+    expect(v.base).toMatchObject({ kind: 'surface', name: 'lidar' })
+    expect(v.insideCells).toBe(16)
+    expect(v.validCells).toBe(12)
+    expect(v.cut).toBeCloseTo(6 * 2)
+    expect(v.fill).toBeCloseTo(6 * 1)
+    expect(v.net).toBeCloseTo(6)
+    expect(polygonVolume(grid, square, { base: 'surface' }).error).toBe('base')
+  })
+})
+
 describe('groundVolume', () => {
   it('divides grid volumes by k² (heights are not scaled by the projection)', () => {
     const v = { cut: 100, fill: 20, net: 80, cellArea: 4, coverage: 1 }
@@ -100,5 +118,41 @@ describe('groundVolume', () => {
     expect(g.groundScale).toBe(0.98)
     expect(groundVolume(v, 1)).toBe(v)
     expect(groundVolume({ error: 'base' }, 0.98)).toEqual({ error: 'base' })
+  })
+})
+
+describe('3D measurements', () => {
+  it('splits a 3D polyline into horizontal and vertical parts', () => {
+    const r = polyline3d([[0, 0, 0], [3, 4, 0], [3, 4, 12]])
+    expect(r.length).toBeCloseTo(17)
+    expect(r.horizontal).toBeCloseTo(5)
+    expect(r.vertical).toBeCloseTo(12)
+    expect(r.climb).toBeCloseTo(12)
+    expect(r.segments.map((x) => +x.toFixed(6))).toEqual([5, 12])
+    // A tilted scene up: the same points along a different vertical.
+    const tilted = polyline3d([[0, 0, 0], [0, 0, 10]], [0, Math.SQRT1_2, Math.SQRT1_2])
+    expect(tilted.vertical).toBeCloseTo(10 * Math.SQRT1_2)
+    expect(polyline3d([[1, 2, 3]])).toBeNull()
+  })
+
+  it('gives a façade its true area and a near-zero footprint, a slope both', () => {
+    const wall = polygon3d([[500000, 7000000, 0], [500010, 7000000, 0], [500010, 7000000, 5], [500000, 7000000, 5]])
+    expect(wall.area).toBeCloseTo(50, 6)
+    expect(wall.footprint).toBeCloseTo(0, 6)
+    expect(wall.perimeter).toBeCloseTo(30, 6)
+    expect(wall.planarity).toBeCloseTo(0, 6)
+    // A unit square tilted 45° about x: true area 1, footprint 1/√2.
+    const c = Math.SQRT1_2
+    const slope = polygon3d([[0, 0, 0], [1, 0, 0], [1, c, c], [0, c, c]])
+    expect(slope.area).toBeCloseTo(1, 9)
+    expect(slope.footprint).toBeCloseTo(c, 9)
+    // Winding does not change the area.
+    expect(polygon3d([[0, 0, 0], [0, 1, 0], [1, 1, 0], [1, 0, 0]]).area).toBeCloseTo(1, 9)
+    expect(polygon3d([[0, 0, 0], [1, 0, 0]])).toBeNull()
+  })
+
+  it('reports how far a picked outline is from planar', () => {
+    const r = polygon3d([[0, 0, 0], [2, 0, 0], [2, 2, 0], [0, 2, 0.4]])
+    expect(r.planarity).toBeGreaterThan(0.05)
   })
 })

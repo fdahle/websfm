@@ -6,6 +6,14 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Added
+- **Measure in 3D**: Tools ▸ Measure ▸ Measure in 3D measures distance, polylines and
+  areas directly in the 3D view, picked on the surface of a mesh or on cloud points.
+  Lengths are split into horizontal and height change, areas into surface area and
+  footprint, all in metres once the project has a georeference or scale bars.
+  Measurements can be saved with the project.
+- **DEM of difference**: the volume tool can measure the computed DEM against an
+  imported reference DEM, reporting gain, loss and net change inside a polygon
+  (Tools ▸ Measure ▸ DEM of difference).
 - **Textured meshes**: Tools ▸ Mesh ▸ Texture paints a mesh with the photos
   themselves, as a new mesh with an atlas of JPEG pages. Each triangle takes the photo
   that sees it largest, neighbouring triangles keep to the same photo so seams stay

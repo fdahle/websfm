@@ -64,6 +64,8 @@ export function measureMenu(m = null) {
       })),
     ] : []),
     { section: 'Clouds & meshes' },
+    { id: 'measure-3d', label: 'Measure in 3D', icon: 'ruler', needs: ['cloud'],
+      blurb: 'Distance, height and surface area picked on clouds and meshes' },
     { id: 'cloud-distance', label: 'Distance to reference…', icon: 'distance', needs: ['dense'],
       blurb: 'Per-point distance to another cloud or a mesh (change detection)' },
     { id: 'cloud-section', label: 'Section…', icon: 'section', needs: ['dense'],
@@ -71,9 +73,8 @@ export function measureMenu(m = null) {
     { id: 'mesh-measure', label: 'Mesh area & volume…', icon: 'volume', needs: ['mesh'],
       blurb: 'Surface area; enclosed volume when watertight' },
     { section: 'Change' },
-    // TODO.md ▸ F11 (DEM-of-difference volume).
-    { id: 'dem-difference', label: 'DEM of difference…', icon: 'volume', disabled: true,
-      blurb: 'Volume change between the DEM and a reference DEM' },
+    { id: 'dem-difference', label: 'DEM of difference', icon: 'volume', needs: ['dem', 'referenceDem'],
+      blurb: 'Gain and loss between the DEM and a reference DEM inside a polygon' },
   ]
 }
 
