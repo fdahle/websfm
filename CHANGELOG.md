@@ -6,6 +6,12 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Added
+- **Installable app that works offline**: websfm can be installed from the browser
+  and starts without a connection. A new version asks before reloading, and never
+  interrupts a running task. Basemap areas viewed before stay available offline at
+  lower detail, and the map says when it is offline instead of looking broken.
+- **New app icon**: two cameras triangulating a point. The browser-tab icon has a
+  transparent background and follows the browser's light or dark theme.
 - **Workflow Builder**: arrange pipeline steps as blocks, choose per step whether to
   reuse or rerun existing results, and save recipes and run history with the project.
 - **Tools menus with floating toolboxes**, plus many new tools:
@@ -15,6 +21,11 @@ Notable changes to websfm. The format follows
   - DEMs: contours (GeoJSON/DXF), slope, aspect, hillshade, clip to polygon;
   - model: optimize cameras, region of interest, orient model;
   - images: image quality.
+- **Ground classification and terrain models (DTM)**: Tools ▸ Point Cloud ▸ Classify
+  ground labels every point as ground, above ground or low noise (standard LAS
+  classes, kept in LAS/LAZ/PLY exports) with a cloth simulation filter. Build DEM ▸
+  Points ▸ Ground only then makes a bare-earth DTM, and the new Fill enclosed gaps
+  option interpolates the ground under removed buildings.
 - **Measurements** on DEMs, orthophotos and the 2D map: ruler, area, elevation
   profile (CSV export) and cut/fill volume. Measurements are named and saved.
 - **Scale bars**: give an object capture real-world units from known distances. New
@@ -64,9 +75,38 @@ Notable changes to websfm. The format follows
   can refine the lens itself (up to k3) with the focal length and principal point; an
   uncalibrated fisheye (equidistant, all terms zero) reconstructs from EXIF alone. Depth
   maps use a fisheye's field up to 60° off-axis, and Optimize cameras handles fisheye
-  models. COLMAP databases import these cameras instead of skipping them, and the sensor CSV export writes k4–k6 and the lens model.
+  models. COLMAP databases import these cameras instead of skipping them, and sensor CSVs read and write k4–k6 and a lens-model column.
 
 ### Changed
+- **Calibration import updates sensors instead of always adding one**: Import ▸
+  Calibration shows where each row goes before importing, and lets you change it. A
+  row updates the sensor with its label, or the project's only sensor. With an image
+  column, rows become sensors for the images they name. An update only sets the values
+  the file has. The import also reads a film camera's certificate in one row (focal
+  length, pixel pitch, principal point and fiducial marks in mm), and asks whether the
+  focal length is in mm or pixels.
+- **Image Fiducials import reads one row per image**: files with an x and a y column
+  per mark position (`corner_top_left_x`, `midside_left_y`, …) are recognised on drop
+  and each mark goes to the slot its columns name.
+- **Fiducial imports preview first**: Image and Camera Fiducials open a dialog showing
+  what will be imported (matched images, marks replaced, the target sensor) instead of
+  applying the file straight away.
+- **Changing the project CRS asks first**: the confirmation lists what will be
+  reprojected (GCPs, camera positions, footprints) and whether the georeference has to
+  be redone. Project Settings shows the CRS name, not just its code.
+- **Help boxes stack**: hovering a link inside a pinned help box opens another box on
+  top, and hovering a new word replaces them all. Setting labels in the pipeline
+  dialogs (Detect, Match, Sparse, Depth maps, Dense, Mesh, DEM, Orthophoto) explain
+  themselves on hover, without separate `?` icons. Each box shows the setting's
+  current value next to its default. Every setting in these dialogs and in Auto mask
+  now has a Guide section.
+- **More help**: new Guide pages for masks and for working offline, a note on very
+  large scans, and glossary entries for ICP, normals, contours, slope/aspect/hillshade,
+  cloud distance, outlier removal, mesh smoothing and decimation, gap filling, COG,
+  seamlines, image sharpness and masks, linked from the tool dialogs.
+- EPSG codes from imported files, projects, GCPs and poses now resolve from the
+  built-in catalog (over 7,000 coordinate systems), so they work offline. epsg.io is
+  only asked for codes newer than the catalog.
 - Orthophotos built with an earlier version must be rebuilt (the storage format
   changed). The Cloud-Optimized GeoTIFF export is now the stored file itself (always
   DEFLATE). PNG and JPEG exports are full resolution and offered up to 8,192 × 8,192
@@ -113,6 +153,36 @@ Notable changes to websfm. The format follows
 - Saving after a 3D edit writes only the clouds that changed.
 
 ### Fixed
+- Picking a CRS from the search list by clicking it did nothing in Project Settings
+  and the import dialogs; the field went back to the old CRS.
+- Calibration and camera-position imports no longer assign unrecognised columns by
+  their position when the file has a header (a camera-position file's `x_map` became
+  omega).
+- **GCP import reads files with several coordinate pairs and image marks**: a point
+  label column (`gcp_label`, `point_label`) is the name, a bare `x`/`y` beside an image
+  column is the pixel position, `x_map`/`y_map` and `*_acc` columns are recognised, and
+  lon/lat is preferred with WGS 84 preselected. A file of image marks without
+  coordinates adds them to existing points of the same name, or adds markers.
+- Dropped files with an `image_file_name` (or `image_id`) column are recognised: a
+  camera-position list opens the camera import with lon/lat read as WGS 84, and a
+  file with a `gcp_label` / `point_label` column opens the GCP import, instead of the
+  "what is this file?" chooser.
+- Depth maps of a two-image project (or an image only one neighbour overlaps) came out
+  empty: Consistent views now drops to the number of views that image overlaps, and
+  the log says so.
+- Importing a mask without transparency (JPEG, plain black-and-white PNG) masked the
+  whole image. Such files are now read by brightness: black is masked, white is kept.
+- Very large scans: Auto mask, mask import and fiducial frame masks no longer try to
+  build a canvas at full scan size, which the browser can't hold. Masks for these
+  scans are stored at 8,192 px on the long side. Import, Invert and Clear work in the
+  viewer; painting says it isn't available yet instead of "editing resumes…" forever.
+- Orthophoto: a Max match cost the depth maps' own Minimum NCC already made
+  meaningless now shows a warning instead of silently doing nothing.
+- The Auto mask ribbon entry described sky/people masking it doesn't do.
+- Help boxes opened from inside a dialog could not be clicked ("Read more" and their
+  links did nothing).
+- Help text could link a word inside another link (e.g. "SIFT" inside "SIFT
+  descriptor"); stale help text was brought up to date with recent changes.
 - Imported image fiducial observations were ignored by calibration and
   reconstruction until the project was reopened; they now land as detections.
 - An orthophoto built at a chosen pixel size lost its coordinate frame, so Find GCPs
