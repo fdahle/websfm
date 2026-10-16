@@ -202,7 +202,8 @@ function deserializeCloudData(c, makeCloudId) {
   if (c.kind === 'dense' && c.streamed) {
     return {
       id: c.id ?? makeCloudId(), name: c.name ?? 'Dense cloud', kind: 'dense', createdAt: c.createdAt ?? Date.now(),
-      cameras: markRaw(new Map()), ...(c.imported ? { imported: true } : {}), count: N, pos: null, col: null,
+      cameras: markRaw(new Map()), ...(c.imported ? { imported: true } : {}), ...(c.derived ? { derived: true } : {}),
+      count: N, pos: null, col: null,
     }
   }
   if (c.kind === 'dense') {

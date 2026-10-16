@@ -109,12 +109,14 @@ export function useDialogRuns({ pipeline, closeProductTabs, openImageTab, refres
   // 3D-viewer rectangle/lasso selection: one masked edit per selected cloud. The
   // store refines a derived cloud in place and forks a derived copy of anything else.
   async function onEditSelection({ edits, keepSelected, classValue = null }) {
-    for (const { cloudId, mask } of edits) {
+    for (const { cloudId, mask, selection } of edits) {
       // Cancel terminates the worker for this cloud; it must also stop the rest.
-      // With a class, the selection is reclassified instead of kept or deleted.
+      // With a class, the selection is reclassified instead of kept or deleted. A
+      // streamed cloud's selection is its recorded shapes (core/lod/transform.js).
+      const pick = selection ? { selection } : { mask }
       const result = classValue != null
-        ? await runEditClouds({ mode: 'classify', sourceIds: [cloudId], settings: { mask, classValue } })
-        : await runEditClouds({ mode: 'mask', sourceIds: [cloudId], settings: { mask, keepSelected } })
+        ? await runEditClouds({ mode: 'classify', sourceIds: [cloudId], settings: { ...pick, classValue } })
+        : await runEditClouds({ mode: 'mask', sourceIds: [cloudId], settings: { ...pick, keepSelected } })
       if (result?.cancelled) break
     }
   }

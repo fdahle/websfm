@@ -355,6 +355,10 @@ export const extractLod = streamingOp('extractLod')
 // (core/lod/exportStream.js): { lod, data, hierarchy, format, color } → { blob, count }.
 export const exportLod = streamingOp('exportLod')
 
+// An edit of a streamed cloud into a new octree (core/lod/transform.js):
+// { lod, data, hierarchy, dir, name, mode, settings } → the new octree's metadata.
+export const transformLod = streamingOp('transformLod')
+
 // Cloud editing — crop / filter / merge over flat (dense) clouds. See
 // core/products/cloudEdit.js. Input { mode, clouds:[{ id, count, pos, col, nrm }],
 // settings }; the source buffers are TRANSFERRED in and round-tripped back under

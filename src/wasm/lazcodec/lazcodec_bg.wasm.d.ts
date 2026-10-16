@@ -14,6 +14,7 @@ export const lazdecoder_chunk_points: (a: number, b: number) => number;
 export const lazdecoder_decode: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
 export const lazdecoder_new: (a: number, b: number, c: number, d: number) => [number, number, number];
 export const lazdecoder_point_size: (a: number) => number;
+export const lazencoder_drain: (a: number) => [number, number, number, number];
 export const lazencoder_finish: (a: number) => [number, number, number];
 export const lazencoder_new: (a: number, b: number) => [number, number, number];
 export const lazencoder_push: (a: number, b: number, c: number) => [number, number];

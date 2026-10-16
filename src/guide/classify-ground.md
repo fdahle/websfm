@@ -63,6 +63,12 @@ the cloud, without the thin far background that oblique photos see. Points outsi
 it are left Never classified (class 0) and never reach a DTM. **All points**
 classifies the whole cloud, which makes the cloth larger.
 
+A *streamed* cloud (a survey too large for memory, see
+[Point Cloud Tools](guide:point-cloud-tools)) is classified tile by tile, always over
+all of its points. Each tile is read with a margin of 40 cloth cells (at least 30 m)
+around it, so a building on a tile edge is still spanned. The result is a new streamed
+cloud.
+
 ## Correcting the result by hand
 Where the filter is wrong, for example a hilltop it lifted off or a low roof it kept
 as ground, select those points in the 3D view (**Tools ▸ Point Cloud ▸ Select**) and

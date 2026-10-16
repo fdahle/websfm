@@ -29,6 +29,9 @@ export function makeLazCodec() {
     const encoder = new LazEncoder(format, size)
     return {
       push: bytes => encoder.push(bytes),
+      // Compressed bytes so far, past the first 8 (finish() returns those 8 + the rest):
+      // a long export hands its output over as it goes instead of holding it all.
+      drain: () => encoder.drain(),
       finish: () => {
         const packed = encoder.finish()
         const vlr = packed.vlr

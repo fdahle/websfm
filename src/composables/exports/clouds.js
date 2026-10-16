@@ -111,17 +111,12 @@ export function createCloudExports({
     // A streamed cloud (core/lod/streamed.js) is written from its octree, node by node,
     // in its own coordinates (an imported LAS's own quantisation and projection).
     if (isStreamed(cloud)) {
-      if (!['las', 'ply', 'xyz'].includes(format)) {
-        log(`Export: "${cloud.name}" is streamed, so it is written as LAS, binary PLY or XYZ; `
-          + `${format === 'laz' ? 'LAZ' : 'ASCII PLY'} needs all of its points in memory`, 'warn', 'Export')
-        return
-      }
       if (applyGeoref || downsampleCell > 0) {
         log(`Export: "${cloud.name}" is streamed, so it is written in its own coordinates`
           + `${downsampleCell > 0 ? ', without a downsample' : ''}`, 'info', 'Export')
       }
       const { blob } = await useReconstructionStore().exportCloudLod(cloud, { format, color: includeColor })
-      downloadBlob(`${cloudFileBase(cloud, target)}.${format}`, blob)
+      downloadBlob(`${cloudFileBase(cloud, target)}.${format === 'ply-ascii' ? 'ply' : format}`, blob)
       return
     }
     // Attributes (a computed distance, imported intensity/classification) ride along:

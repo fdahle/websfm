@@ -77,10 +77,79 @@ impl CompressedPoints {
     }
 }
 
+/// The encoder's output: the first 8 bytes (the chunk-table offset, the one place
+/// LASzip seeks back to and patches at the end) are kept; everything after them can
+/// be drained as it is written, so a long stream never sits in wasm memory whole.
+pub struct DrainSink {
+    head: [u8; 8],
+    body: Vec<u8>,
+    base: u64, // stream position of body[0]
+    pos: u64,
+}
+
+impl DrainSink {
+    fn new() -> Self {
+        DrainSink { head: [0; 8], body: Vec::new(), base: 8, pos: 0 }
+    }
+
+    fn drain(&mut self) -> Vec<u8> {
+        self.base += self.body.len() as u64;
+        std::mem::take(&mut self.body)
+    }
+
+    fn into_bytes(self) -> Vec<u8> {
+        let mut out = self.head.to_vec();
+        out.extend(self.body);
+        out
+    }
+}
+
+impl std::io::Write for DrainSink {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let mut done = 0;
+        while done < buf.len() {
+            let p = self.pos;
+            if p < 8 {
+                let n = (8 - p as usize).min(buf.len() - done);
+                self.head[p as usize..p as usize + n].copy_from_slice(&buf[done..done + n]);
+                done += n;
+                self.pos += n as u64;
+                continue;
+            }
+            if p < self.base || p > self.base + self.body.len() as u64 {
+                return Err(std::io::Error::other("lazcodec: write into bytes already drained"));
+            }
+            let off = (p - self.base) as usize;
+            let n = buf.len() - done;
+            let overlap = (self.body.len() - off).min(n);
+            self.body[off..off + overlap].copy_from_slice(&buf[done..done + overlap]);
+            self.body.extend_from_slice(&buf[done + overlap..]);
+            done += n;
+            self.pos += n as u64;
+        }
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl std::io::Seek for DrainSink {
+    fn seek(&mut self, to: std::io::SeekFrom) -> std::io::Result<u64> {
+        self.pos = match to {
+            std::io::SeekFrom::Start(n) => n,
+            std::io::SeekFrom::Current(d) => self.pos.checked_add_signed(d).ok_or_else(|| std::io::Error::other("lazcodec: seek before start"))?,
+            std::io::SeekFrom::End(d) => (self.base + self.body.len() as u64).checked_add_signed(d).ok_or_else(|| std::io::Error::other("lazcodec: seek before start"))?,
+        };
+        Ok(self.pos)
+    }
+}
+
 /// Incremental encoder: owns one continuous LASzip stream across JS chunks.
 #[wasm_bindgen]
 pub struct LazEncoder {
-    compressor: Option<LasZipCompressor<'static, Cursor<Vec<u8>>>>,
+    compressor: Option<LasZipCompressor<'static, DrainSink>>,
     vlr: Vec<u8>,
     point_size: u16,
 }
@@ -96,6 +165,12 @@ impl LazEncoder {
         self.push_impl(points).map_err(|e| JsError::new(&e))
     }
 
+    /// The compressed bytes written since the last drain, past the first 8 (see
+    /// DrainSink). `finish` then returns those 8 bytes followed by the rest.
+    pub fn drain(&mut self) -> Result<Vec<u8>, JsError> {
+        Ok(self.compressor.as_mut().ok_or_else(|| JsError::new("lazcodec: encoder already finished"))?.get_mut().drain())
+    }
+
     pub fn finish(&mut self) -> Result<CompressedPoints, JsError> {
         self.finish_impl().map_err(|e| JsError::new(&e))
     }
@@ -109,7 +184,7 @@ impl LazEncoder {
         }
         let mut bytes = Vec::new();
         vlr.write_to(&mut bytes).map_err(|e| e.to_string())?;
-        let compressor = LasZipCompressor::new(Cursor::new(Vec::new()), vlr)
+        let compressor = LasZipCompressor::new(DrainSink::new(), vlr)
             .map_err(|e| e.to_string())?;
         Ok(Self { compressor: Some(compressor), vlr: bytes, point_size })
     }
@@ -125,7 +200,7 @@ impl LazEncoder {
     fn finish_impl(&mut self) -> Result<CompressedPoints, String> {
         let mut compressor = self.compressor.take().ok_or("lazcodec: encoder already finished")?;
         compressor.done().map_err(|e| e.to_string())?;
-        Ok(CompressedPoints { data: compressor.into_inner().into_inner(), vlr: std::mem::take(&mut self.vlr) })
+        Ok(CompressedPoints { data: compressor.into_inner().into_bytes(), vlr: std::mem::take(&mut self.vlr) })
     }
 }
 
@@ -387,6 +462,26 @@ mod tests {
         let decoded = decompress_points_impl(&packed.vlr, &packed.data, 120_003, 26).unwrap();
         assert_eq!(decoded, points);
         assert!(encoder.finish_impl().is_err());
+    }
+
+    // Drained as it goes, the stream is the same bytes as kept whole.
+    #[test]
+    fn drained_encoder_writes_the_same_stream() {
+        let points = make_points(170_001);
+        let mut whole = LazEncoder::create(2, 26).unwrap();
+        let mut drained = LazEncoder::create(2, 26).unwrap();
+        let mut parts = Vec::new();
+        for chunk in points.chunks(26 * 30_000) {
+            whole.push_impl(chunk).unwrap();
+            drained.push_impl(chunk).unwrap();
+            parts.extend(drained.compressor.as_mut().unwrap().get_mut().drain());
+        }
+        let a = whole.finish_impl().unwrap().data;
+        let b = drained.finish_impl().unwrap().data;
+        let mut joined = b[..8].to_vec();
+        joined.extend(parts);
+        joined.extend(&b[8..]);
+        assert_eq!(joined, a);
     }
 
     // A file's points decoded a run of chunks at a time equal the whole decode.

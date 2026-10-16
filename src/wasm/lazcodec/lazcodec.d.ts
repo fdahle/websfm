@@ -62,6 +62,11 @@ export class LazDecoder {
 export class LazEncoder {
     free(): void;
     [Symbol.dispose](): void;
+    /**
+     * The compressed bytes written since the last drain, past the first 8 (see
+     * DrainSink). `finish` then returns those 8 bytes followed by the rest.
+     */
+    drain(): Uint8Array;
     finish(): CompressedPoints;
     constructor(point_format: number, point_size: number);
     push(points: Uint8Array): void;
@@ -103,6 +108,7 @@ export interface InitOutput {
     readonly lazdecoder_decode: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
     readonly lazdecoder_new: (a: number, b: number, c: number, d: number) => [number, number, number];
     readonly lazdecoder_point_size: (a: number) => number;
+    readonly lazencoder_drain: (a: number) => [number, number, number, number];
     readonly lazencoder_finish: (a: number) => [number, number, number];
     readonly lazencoder_new: (a: number, b: number) => [number, number, number];
     readonly lazencoder_push: (a: number, b: number, c: number) => [number, number];

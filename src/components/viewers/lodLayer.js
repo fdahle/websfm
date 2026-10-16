@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { buildCloudStyle, resolveCloudStyle } from '../../core/products/cloudStyle.js'
 import { pickNearestPoint } from '../../core/products/screenPick.js'
+import { screenSelectMask } from '../../core/products/screenSelect.js'
 import { keyString } from '../../core/lod/octree.js'
 import { LOD_MIN_POINTS } from '../../core/lod/build.js'
 
@@ -249,6 +250,30 @@ export function createLodLayer(cloud, { open, material, onChange }) {
       }
     }
     return best
+  }
+
+  // A recorded selection (core/lod/transform.js replaySelection) on the points drawn
+  // now: the highlight and the count while selecting. The edit itself replays the
+  // shapes on every point of the octree. → { selected, pos: Float32Array (offset-relative) }
+  layer.selectDrawn = (ops) => {
+    const parts = []
+    let selected = 0
+    for (const e of cache.values()) {
+      if (!e.object?.visible) continue
+      const indices = e.object.geometry.index?.array ?? null
+      let mask = new Uint8Array(e.pts.count)
+      for (const o of ops) mask = screenSelectMask(e.pts.pos, e.pts.count, { matrix: o.matrix, shape: o.shape, indices, base: mask, op: o.op }).mask
+      let n = 0
+      for (let i = 0; i < mask.length; i++) n += mask[i]
+      if (!n) continue
+      const pos = new Float32Array(3 * n)
+      for (let i = 0, k = 0; i < mask.length; i++) if (mask[i]) { pos[k++] = e.pts.pos[3 * i]; pos[k++] = e.pts.pos[3 * i + 1]; pos[k++] = e.pts.pos[3 * i + 2] }
+      parts.push(pos); selected += n
+    }
+    const pos = new Float32Array(3 * selected)
+    let o = 0
+    for (const p of parts) { pos.set(p, o); o += p.length }
+    return { selected, pos }
   }
 
   layer.dispose = () => {

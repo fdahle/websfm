@@ -9,6 +9,8 @@ import { refineSparse as workerRefineSparse, optimizeSparse as workerOptimizeSpa
 
 // A crop of a streamed cloud becomes a resident one: at most this many points.
 const STREAMED_CROP_MAX_POINTS = 25_000_000
+// Edits a streamed cloud takes as it is (core/lod/transform.js); the rest need a crop.
+const STREAMED_EDIT_MODES = new Set(['crop', 'mask', 'classify', 'filter', 'classify-ground'])
 
 // Tools-tab edits (`editClouds` modes, dispatched by workers/ops/cloud.js):
 // Mesh ▾ tools read a mesh (mesh-sample turns it into a dense cloud) …
@@ -29,7 +31,7 @@ const REPLACES_SOURCE_VIEW = new Set(['transform', 'icp', 'distance', 'normals',
 export function createCloudEdits({
   clouds, healthDirty, imagesStore, invalidateSparseDependents, log, mainSparseCloud, makeCloudId,
   save, projects, reconStatus, selectedCloudId, summary, surveyConstraintInput, upsertSparseCloud, sensors,
-  extractCloudPoints = null,
+  extractCloudPoints = null, editStreamedCloud = null,
 }) {
   // ── Cloud editing (crop / filter / merge) ────────────────────────────────────
 
@@ -224,10 +226,6 @@ export function createCloudEdits({
   // out of its octree as a new, resident cloud that every tool can use. Past the
   // budget the copy is thinned evenly (finer octree levels left out), never cut.
   async function cropStreamed(source, settings, name, onProgress) {
-    if (settings.invert) {
-      log('Crop: keeping what lies outside the box is not available for a streamed cloud', 'warn', 'Products')
-      return null
-    }
     reconStatus.value = 'running'
     try {
       const box = { min: settings.min ?? [], max: settings.max ?? [] }
@@ -283,8 +281,36 @@ export function createCloudEdits({
         : (REFERENCE_MODES.has(mode) ? (c.kind === 'dense' || c.kind === 'mesh') : c.kind === 'dense'))
     const sources = resolved.filter((c, slot) => okKind(c, slot))
     const streamed = resolved.find(isStreamed)
-    if (streamed && mode === 'crop' && resolved.length === 1 && extractCloudPoints) {
+    if (streamed && mode === 'crop' && !settings.invert && resolved.length === 1 && extractCloudPoints) {
       return cropStreamed(streamed, settings, name, onProgress)
+    }
+    // The edits that run on a streamed cloud itself, into a new streamed cloud.
+    if (streamed && resolved.length === 1 && STREAMED_EDIT_MODES.has(mode) && editStreamedCloud) {
+      if ((mode === 'mask' || mode === 'classify') && !settings.selection) {
+        log('Selection edit: the selection no longer matches the cloud — select again', 'warn', 'Products')
+        return null
+      }
+      reconStatus.value = 'running'
+      try {
+        const label = { crop: 'cropped', mask: 'edited', classify: 'reclassified', filter: 'filtered', 'classify-ground': 'ground' }[mode]
+        const selection = mode === 'mask' || mode === 'classify'
+        // A selection edit of a derived cloud refines it (as for a resident cloud): the
+        // new one takes its place, and the old octree's files are pruned.
+        const refine = selection && streamed.derived
+        const cloud = await editStreamedCloud(streamed, { mode, settings, name: refine ? streamed.name : (name || `${streamed.name} (${label})`) }, onProgress)
+        if (cloud && mode === 'classify-ground') cloud.style = { field: 'attribute:classification' }
+        if (cloud && refine) {
+          clouds.value = clouds.value.filter((c) => c !== streamed)
+          await save()
+        } else if (cloud && (selection || REPLACES_SOURCE_VIEW.has(mode))) streamed.visible = false
+        reconStatus.value = cloud ? 'done' : 'error'
+        if (cloud) log(`Cloud edit: added "${cloud.name}" (${cloud.count.toLocaleString()} points, streamed)`, 'success', 'Products')
+        return cloud
+      } catch (err) {
+        log(`Cloud edit error: ${err?.message ?? err}`, 'error', 'Products')
+        reconStatus.value = 'error'
+        return null
+      }
     }
     if (streamed) {
       log(streamedRefusal(streamed, 'Cloud edit'), 'warn', 'Products')

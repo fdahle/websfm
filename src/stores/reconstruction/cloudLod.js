@@ -1,6 +1,6 @@
 import { markRaw, watch } from 'vue'
 import * as opfs from '../../utils/opfs.js'
-import { buildLod as workerBuildLod, extractLod as workerExtractLod, exportLod as workerExportLod } from '../../workers/computeClient.js'
+import { buildLod as workerBuildLod, extractLod as workerExtractLod, exportLod as workerExportLod, transformLod as workerTransformLod } from '../../workers/computeClient.js'
 import { openLodReader } from '../../core/lod/reader.js'
 import { LOD_MIN_POINTS } from '../../core/lod/build.js'
 
@@ -152,5 +152,37 @@ export function createCloudLod({ clouds, log, save, projectId, makeCloudId, sele
       { onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f) })
   }
 
-  return { buildCloudLod, openCloudLod, importStreamedCloud, extractCloudPoints, exportCloudLod, pruneLod: prune }
+  // An edit of a streamed cloud (core/lod/transform.js): its points go through the
+  // edit into a new octree, and so a NEW streamed cloud, as every edit is non-destructive.
+  // mode 'crop' (invert) | 'mask' | 'classify' | 'filter' | 'classify-ground'. → the cloud, or null
+  async function editStreamedCloud(source, { mode, settings = {}, name }, onProgress) {
+    const pid = projectId()
+    if (!source?.lod || !pid) return null
+    const id = makeCloudId()
+    const fileName = `${id}-${Date.now().toString(36)}`
+    building.add(fileName)
+    try {
+      const [data, hierarchy] = await Promise.all([
+        opfs.loadLodFile(pid, source.lod.dataFile), opfs.loadLodFile(pid, source.lod.hierarchyFile),
+      ])
+      const dir = await opfs.lodDir(pid)
+      const meta = await workerTransformLod({ lod: JSON.parse(JSON.stringify(source.lod)), data, hierarchy, dir, name: fileName, mode,
+        settings: JSON.parse(JSON.stringify(settings)) },
+      { onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f) })
+      const cloud = {
+        id, name, kind: 'dense', createdAt: Date.now(), derived: true, ...(source.imported ? { imported: true } : {}),
+        cameras: markRaw(new Map()), count: meta.points, pos: null, col: null, lod: markRaw(meta),
+        ...(source.style ? { style: JSON.parse(JSON.stringify(source.style)) } : {}),
+      }
+      clouds.value.push(cloud)
+      selectedCloudId.value = cloud.id
+      await save()
+      return cloud
+    } finally {
+      building.delete(fileName)
+      await prune().catch(() => {})
+    }
+  }
+
+  return { buildCloudLod, openCloudLod, importStreamedCloud, extractCloudPoints, exportCloudLod, editStreamedCloud, pruneLod: prune }
 }

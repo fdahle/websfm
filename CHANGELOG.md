@@ -16,7 +16,9 @@ Notable changes to websfm. The format follows
   minutes) and displays; LAZ is decoded a run of chunks at a time. Such a cloud is
   marked *streamed*. Build DEM grids it (also as a DTM of its ground class), reading
   the octree only as finely as the cell size needs; Crop copies a box of it into an
-  ordinary cloud; Export writes LAS, binary PLY or XYZ node by node.
+  ordinary cloud; Export writes LAS, LAZ, PLY or XYZ node by node. Selection (delete,
+  keep only, assign class), an inverted crop, Filter and Classify ground run on it as
+  it is, node by node or tile by tile, into a new streamed cloud.
 - **Measure in 3D**: Tools ▸ Measure ▸ Measure in 3D measures distance, polylines and
   areas directly in the 3D view, picked on the surface of a mesh or on cloud points.
   Lengths are split into horizontal and height change, areas into surface area and
@@ -180,6 +182,11 @@ Notable changes to websfm. The format follows
   non-commercial license. You can supply the file yourself.
 
 ### Performance
+- **Outlier filter (statistical)**: about 16× faster on terrain and other surface-like
+  clouds (a 2 M-point survey tile: 178 s → 11 s). Its neighbour grid was sized from
+  the bounding box's volume, so on a surface each point compared against thousands of
+  candidates; the grid now follows the occupancy, and the neighbour search is exact
+  (results unchanged to 0.01 %).
 - Feature detection runs more images in parallel: its memory limit now follows the
   machine budget in Settings ▸ Compute instead of a fixed 1 GB.
 - Project opening: the slowest step went from 11.6 s to 0.18 s on a 300 k-point

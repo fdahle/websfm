@@ -157,6 +157,20 @@ export class LazEncoder {
         wasm.__wbg_lazencoder_free(ptr, 0);
     }
     /**
+     * The compressed bytes written since the last drain, past the first 8 (see
+     * DrainSink). `finish` then returns those 8 bytes followed by the rest.
+     * @returns {Uint8Array}
+     */
+    drain() {
+        const ret = wasm.lazencoder_drain(this.__wbg_ptr);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
+    }
+    /**
      * @returns {CompressedPoints}
      */
     finish() {

@@ -4,7 +4,8 @@ import { openLasStream } from '../../core/io/lasStream.js'
 import { blobSource } from '../../utils/blobParts.js'
 import { openLodReader } from '../../core/lod/reader.js'
 import { planExtract, extractPoints } from '../../core/lod/extract.js'
-import { lodToLas, lodToText } from '../../core/lod/exportStream.js'
+import { lodToLas, lodToText, lasPlanFor } from '../../core/lod/exportStream.js'
+import { streamedEditSource } from '../../core/lod/transform.js'
 
 // Level-of-detail octree build (dev/planning/plan-lod.md ▸ L2). The core
 // (core/lod/build.js) is pure; this side supplies the files:
@@ -170,7 +171,8 @@ export function makeLodOps({ lazCodec = null } = {}) {
   }
 
   // A streamed cloud to a file, node by node (core/lod/exportStream.js).
-  // input { lod, data: File, hierarchy: File, format: 'las' | 'ply' | 'xyz', color } → { blob, count }
+  // input { lod, data: File, hierarchy: File, format: 'las' | 'laz' | 'ply' | 'ply-ascii' | 'xyz', color }
+  // → { blob, count }
   async function exportLod([input], { emit }) {
     const { lod, data, hierarchy, format, color = true } = input
     const t0 = performance.now()
@@ -187,8 +189,22 @@ export function makeLodOps({ lazCodec = null } = {}) {
       const las = lodToLas(reader, lod, { onProgress })
       for await (const p of las.parts) add(p)
       blob = new Blob([las.header(), ...(blob ? [blob] : []), ...batch], { type })
+    } else if (format === 'laz') {
+      if (!lazCodec) throw new Error('LAZ export: the lazcodec module is not available')
+      await lazCodec.ensure()
+      const compressor = lazCodec.createCompressor(2, lasPlanFor(lod, { extraBytes: false }).recordLength)
+      try {
+        const laz = lodToLas(reader, lod, { onProgress, compressor })
+        if (laz.dropped.length) {
+          emit('log', [`LAZ export: ${laz.dropped.join(', ')} not written — its values do not fit a standard LAS field, `
+            + 'and LAZ here carries standard fields only; export LAS to keep it', 'warn', 'Export'])
+        }
+        for await (const p of laz.parts) add(p)
+        const { header, first, tail } = laz.lazEnds()
+        blob = new Blob([header, first, ...(blob ? [blob] : []), ...batch, tail], { type })
+      } finally { compressor.free?.() }
     } else {
-      if (format === 'xyz') type = 'text/plain;charset=utf-8'
+      if (format === 'xyz' || format === 'ply-ascii') type = 'text/plain;charset=utf-8'
       for await (const p of lodToText(reader, lod, { format, color, onProgress })) add(p)
       blob = new Blob([...(blob ? [blob] : []), ...batch], { type })
     }
@@ -197,5 +213,38 @@ export function makeLodOps({ lazCodec = null } = {}) {
     return { result: { blob, count: lod.points } }
   }
 
-  return { buildLod, extractLod, exportLod }
+  // An edit of a streamed cloud into a new octree (core/lod/transform.js): never all
+  // in memory. Point-wise modes run node by node, neighbourhood modes tile by tile.
+  // input { lod, data, hierarchy, dir, name, mode: 'crop' (invert) | 'mask' | 'classify'
+  //         | 'filter' | 'classify-ground', settings } → the new octree's metadata
+  async function transformLod([input], { emit }) {
+    const { lod, data, hierarchy, dir, name, mode, settings = {} } = input
+    const t0 = performance.now()
+    const reader = await openLodReader(lod, { data, hierarchy })
+    const log = (m, l = 'info') => emit('log', [m, l, 'Products'])
+    const source = streamedEditSource(reader, lod, mode, settings, {
+      log, progress: (done, total, label) => emit('progress', [done, total, label, done / Math.max(1, total)]),
+    })
+    const tmp = await tmpStore(`lod-${name}`)
+    const dataFile = `${name}.lod`, hierarchyFile = `${name}.hier`
+    const out = await dataWriter(dir, dataFile)
+    try {
+      const res = await runBuild(source, tmp, out, { layout: { offset: lod.layout.offset, scale: lod.layout.scale } })
+      await out.close()
+      const hw = await (await dir.getFileHandle(hierarchyFile, { create: true })).createWritable()
+      await hw.write(res.hierarchy)
+      await hw.close()
+      const { hierarchy: h, ...meta } = res
+      log(`Edit: ${meta.points.toLocaleString()} of ${lod.points.toLocaleString()} points into a new octree in ${((performance.now() - t0) / 1000).toFixed(1)} s`)
+      return { result: { ...meta, name, dataFile, hierarchyFile, hierarchyBytes: h.length, ...(lod.file ? { file: lod.file } : {}) } }
+    } catch (err) {
+      await out.abort()
+      await dir.removeEntry(dataFile).catch(() => {})
+      throw err
+    } finally {
+      await tmp.dispose()
+    }
+  }
+
+  return { buildLod, extractLod, exportLod, transformLod }
 }

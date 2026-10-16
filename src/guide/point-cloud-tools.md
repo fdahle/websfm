@@ -125,10 +125,20 @@ measure on it. Tools read it from its octree:
 - **Build DEM** grids it, also as a DTM of its ground class (see
   [Build DEM ▸ Memory](guide:dem)).
 - **Crop** copies the points inside the box into a new, ordinary cloud that every
-  tool can use (filter, classify, mesh, select). Past 25 million points the copy is
-  thinned evenly, so crop a smaller box for full detail.
-- **Export** writes LAS, binary PLY or XYZ node by node. LAS keeps the file's own
+  tool can use (normals, mesh, alignment, distances). Past 25 million points the copy
+  is thinned evenly, so crop a smaller box for full detail. With **Keep outside the
+  box**, the rest goes into a new streamed cloud instead, at full detail.
+- **Select** (rectangle or lasso) works on it too. The count shows the points drawn
+  at the moment; Delete, Keep only and Assign class take every point inside the shape,
+  at full detail, into a new streamed cloud (a selection of an edited one refines it).
+- **Filter** and **Classify ground** run tile by tile: each tile is read at full
+  detail with a margin around it, so points near a tile's edge still see their
+  neighbours, and the result is a new streamed cloud. The ground filter's margin is 40
+  times the cloth resolution (at least 30 m). The outlier filter reads the cloud twice:
+  first for the whole cloud's neighbour-distance statistics, then to filter every tile
+  against them, so the result is the one the whole cloud would give.
+- **Export** writes LAS, LAZ, PLY or XYZ node by node. LAS and LAZ keep the file's own
   coordinate quantisation and its projection records; the points come in a different
-  order than in the source file. LAZ and ASCII PLY are not available for it yet.
+  order than in the source file.
 
-Filtering, selecting and the other edits work on a crop of it.
+Other edits (normals, transform, alignment, distances, merge) work on a crop of it.

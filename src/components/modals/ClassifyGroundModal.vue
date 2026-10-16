@@ -30,7 +30,9 @@ const emit = defineEmits(['close', 'run'])
 
 const settings = ref({ ...GROUND_DEFAULTS })
 const { id: sourceId, item: source } = useSourcePick(() => props.clouds, { initialId: props.initialId })
-const groundOptionLabel = (c) => `${cloudOptionLabel(c)}${c.attributes?.classification ? ' · classified' : ''}`
+// A streamed cloud's classes are in its octree's layout (it has no resident attributes).
+const classified = (c) => !!c?.attributes?.classification || !!(c?.lod && !c.pos && c.lod.layout?.attributes?.some((a) => a.name === 'classification'))
+const groundOptionLabel = (c) => `${cloudOptionLabel(c)}${classified(c) ? ' · classified' : ''}${c.lod && !c.pos ? ' · streamed' : ''}`
 const units = computed(() => cloudUnits(source.value, props.frameSignature))
 const noScale = computed(() => units.value.unit === 'model')
 const { memBudgetBytes } = useComputeSettings()
@@ -60,7 +62,7 @@ function run() {
           This model has no real-world scale, so lengths in metres mean nothing yet.
           Georeference it or add scale bars first.
         </WarnBox>
-        <WarnBox v-else-if="source?.attributes?.classification">
+        <WarnBox v-else-if="classified(source)">
           This cloud is already classified. The new cloud replaces those classes.
         </WarnBox>
         <p v-if="source?.imported" class="field-hint">

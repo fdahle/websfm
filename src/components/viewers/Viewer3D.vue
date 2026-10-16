@@ -804,13 +804,38 @@ function clearReconstructionData() {
 // layer's geometry is rebuilt.
 const selectTool = ref(null)       // null | 'rect' | 'lasso'
 const selectionCount = ref(0)
+const selectionStreamed = ref(false) // a streamed cloud's count is of the points drawn now
 const selectionClouds = ref(0)
 const drawShape = ref(null)        // { kind, points:[x,y,…] } in container px, for the SVG
 const selections = new Map()       // cloudId → { mask, selected, pos, overlay }
 let drawing = null                 // { op, startX, startY, pts }
 
+// A streamed cloud (no points in memory) is selectable through its octree layer: its
+// selection is the shapes drawn, replayed on every point by the edit.
+const streamedLayer = (l) => !!l.lod && !l.source.pos
 function selectableLayers() {
-  return [...cloudLayers].filter(([, l]) => l.source.kind === 'dense' && l.object.isPoints && l.object.visible)
+  return [...cloudLayers].filter(([, l]) => l.source.kind === 'dense' && (l.object.isPoints || streamedLayer(l)) && l.object.visible)
+}
+// The classes a classification style hides: a shape drawn then cannot select them.
+function hiddenClasses(cloud) {
+  const style = resolveCloudStyle(cloud)
+  if (style.field !== 'attribute:classification') return []
+  return Object.entries(style.classes ?? {}).filter(([, c]) => c?.visible === false).map(([v]) => Number(v))
+}
+function lodSelectionOverlay(layer, entry, pos) {
+  disposeSelectionOverlay(entry)
+  if (!entry.selected) return
+  const geometry = new THREE.BufferGeometry()
+  geometry.setAttribute('position', new THREE.BufferAttribute(pos, 3))
+  const material = new THREE.PointsMaterial({
+    color: 0xff3d71, size: pointSize.value + 1, sizeAttenuation: false,
+    depthTest: false, depthWrite: false, transparent: true, opacity: 0.9,
+  })
+  const overlay = new THREE.Points(geometry, material)
+  overlay.position.copy(layer.object.position)
+  overlay.renderOrder = 10
+  scene.add(overlay)
+  entry.overlay = overlay
 }
 
 function disposeSelectionOverlay(entry) {
@@ -824,6 +849,7 @@ function refreshSelectionSummary() {
   let total = 0, clouds = 0
   for (const e of selections.values()) if (e.selected) { total += e.selected; clouds++ }
   selectionCount.value = total
+  selectionStreamed.value = [...selections.values()].some((e) => e.ops)
   selectionClouds.value = clouds
   requestRender() // every selection change adds, rebuilds or drops an overlay
 }
@@ -868,8 +894,9 @@ function pruneSelections() {
     const layer = cloudLayers.get(id)
     // A restyle that hides classes swaps the index buffer: a point selected while
     // drawn may now be hidden, and must not be deleted unseen.
-    if (!layer || layer.source.pos !== e.pos || !layer.object.visible
-        || (layer.object.geometry.index ?? null) !== e.index) {
+    const stale = e.ops ? !layer || layer.source.lod !== e.lod || !layer.object.visible
+      : !layer || layer.source.pos !== e.pos || !layer.object.visible || (layer.object.geometry.index ?? null) !== e.index
+    if (stale) {
       disposeSelectionOverlay(e)
       selections.delete(id)
     }
@@ -949,6 +976,17 @@ function applySelectionShape(shape, op) {
   for (const [id, layer] of layers) {
     layer.object.updateMatrixWorld()
     const matrix = viewProj.clone().multiply(layer.object.matrixWorld).elements
+    if (streamedLayer(layer)) {
+      const prev = selections.get(id)
+      const ops = [...(op !== 'replace' && prev?.ops ? prev.ops : []), { shape, matrix: [...matrix], op, hidden: hiddenClasses(layer.source) }]
+      const { selected, pos } = layer.selectDrawn(ops)
+      const entry = prev ?? { overlay: null }
+      Object.assign(entry, { ops, selected, lod: layer.source.lod })
+      // Kept while the shapes may select points not drawn now; dropped when nothing is.
+      if (selected || ops.some((o) => o.op !== 'subtract')) { selections.set(id, entry); lodSelectionOverlay(layer, entry, pos) }
+      else { disposeSelectionOverlay(entry); selections.delete(id) }
+      continue
+    }
     const geometry = layer.object.geometry
     const prev = selections.get(id)
     const base = prev && prev.pos === layer.source.pos ? prev.mask : null
@@ -966,7 +1004,8 @@ function applySelectionShape(shape, op) {
 // Hand the masks to App (and on to the store). The masks are transferred to the
 // worker there, so the local selection is cleared immediately.
 function commitSelection(keepSelected, classValue = null) {
-  const edits = [...selections].filter(([, e]) => e.selected).map(([cloudId, e]) => ({ cloudId, mask: e.mask }))
+  const edits = [...selections].filter(([, e]) => e.selected || e.ops)
+    .map(([cloudId, e]) => (e.ops ? { cloudId, selection: e.ops } : { cloudId, mask: e.mask }))
   if (!edits.length) return
   clearSelection()
   editPendingIds = new Set(edits.map((e) => e.cloudId))
@@ -1545,6 +1584,9 @@ onBeforeUnmount(() => {
         <div class="tb-line">
           <span class="tb-count">{{ selectionCount.toLocaleString() }}</span>
           point{{ selectionCount === 1 ? '' : 's' }} selected<template v-if="selectionClouds > 1"> in {{ selectionClouds }} clouds</template>
+        </div>
+        <div v-if="selectionStreamed" class="tb-hint tb-row">
+          Of the points drawn now: on a streamed cloud the edit takes every point inside the shape, at full detail.
         </div>
         <div class="tb-row">
           <button class="tb-textbtn danger" title="Delete the selected points (Delete)" @click="commitSelection(false)">Delete</button>

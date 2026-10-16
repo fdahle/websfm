@@ -673,7 +673,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
   })
 
   // Level-of-detail octrees of big clouds (reconstruction/cloudLod.js).
-  const { buildCloudLod, openCloudLod, importStreamedCloud, extractCloudPoints, exportCloudLod, pruneLod } = createCloudLod({
+  const { buildCloudLod, openCloudLod, importStreamedCloud, extractCloudPoints, exportCloudLod, editStreamedCloud, pruneLod } = createCloudLod({
     clouds, log, save, projectId: () => (isPersisting() ? projects.currentProjectId : null), makeCloudId, selectedCloudId,
   })
 
@@ -682,7 +682,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     editClouds, addDerivedMesh,
   } = createCloudEdits({
     clouds, healthDirty, imagesStore, invalidateSparseDependents, log, mainSparseCloud, makeCloudId,
-    save, projects, reconStatus, selectedCloudId, summary, upsertSparseCloud, sensors, extractCloudPoints,
+    save, projects, reconStatus, selectedCloudId, summary, upsertSparseCloud, sensors, extractCloudPoints, editStreamedCloud,
     // Created below with the sparse run; resolved when an edit runs.
     surveyConstraintInput: (opts) => surveyConstraintInput(opts),
   })

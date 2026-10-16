@@ -85,5 +85,13 @@ describe('streamed cloud export', () => {
     const xyz = []
     for await (const p of lodToText(reader, lod, { format: 'xyz' })) xyz.push(p)
     expect(xyz.join('').trim().split('\n').length).toBe(n)
+    const ascii = []
+    for await (const p of lodToText(reader, lod, { format: 'ply-ascii' })) ascii.push(p)
+    const lines = ascii.join('').split('\n')
+    expect(lines.filter((l) => l.startsWith('element vertex'))).toEqual([`element vertex ${n}`])
+    expect(lines.filter((l) => l === 'end_header')).toHaveLength(1)
+    const body = lines.slice(lines.indexOf('end_header') + 1).filter(Boolean)
+    expect(body).toHaveLength(n)
+    expect(body[0].split(' ')).toHaveLength(3 + 3 + 4)
   })
 })

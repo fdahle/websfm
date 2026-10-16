@@ -99,7 +99,7 @@ function run() {
     settings: {
       min: [num(s.minX), num(s.minY), num(s.minZ)],
       max: [num(s.maxX), num(s.maxY), num(s.maxZ)],
-      invert: !!s.invert && !streamed.value,
+      invert: !!s.invert,
     },
     name: `${picked.value?.name ?? (props.mesh ? 'Mesh' : 'Cloud')} (cropped)`,
   })
@@ -140,13 +140,17 @@ function run() {
         <SettingsField hint="Keep what falls outside the box instead of inside it.">
           <template #label>Invert</template>
           <label class="checkbox-row">
-            <input v-model="settings.invert" type="checkbox" class="checkbox" :disabled="streamed" /> Keep outside the box
+            <input v-model="settings.invert" type="checkbox" class="checkbox" /> Keep outside the box
           </label>
         </SettingsField>
       </SettingsGroup>
 
       <p class="field-hint">
-        <template v-if="streamed">
+        <template v-if="streamed && settings.invert">
+          A streamed cloud: the points outside the box go into a new streamed cloud, at full
+          detail.
+        </template>
+        <template v-else-if="streamed">
           A streamed cloud: the points inside the box are copied out of its octree into a new
           cloud that every tool can use. Past 25 million points the copy is thinned evenly;
           crop a smaller box for full detail.

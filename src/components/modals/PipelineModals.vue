@@ -50,8 +50,9 @@ const { currentCrs } = storeToRefs(useProjectsStore())
 const reconstructionStore = useReconstructionStore()
 const { canGeoreference, canGeoreferenceGcps, clouds, crsSuggestion, dem, demSource, groundSource, denseSummary, depthSummary, georef, georeferenceBlocker, meshSource, meshSources, ortho, orthoSurfaces } = storeToRefs(reconstructionStore)
 const { images } = storeToRefs(useImagesStore())
-// Crop also takes a streamed cloud (core/lod/streamed.js): its box is copied out of
-// the octree into a new, resident cloud.
+// Crop, filter and classify ground also take a streamed cloud (core/lod/streamed.js):
+// crop copies a box out of the octree into a resident cloud (or, inverted, rewrites the
+// octree); filter and classify run tile by tile into a new streamed cloud.
 const croppableClouds = computed(() => clouds.value.filter((c) => c.kind === 'dense' && c.count > 0 && (c.pos || c.lod)))
 const { gcps } = storeToRefs(useGcpsStore())
 const { poses } = storeToRefs(usePosesStore())
@@ -244,7 +245,7 @@ const measurementsStore = useMeasurementsStore()
   <Teleport to="body">
     <FilterCloudModal
       v-if="filterCloudOpen"
-      :clouds="editableClouds"
+      :clouds="croppableClouds"
       :initial-id="toolInitialId"
       :merge-cell="denseSummary?.mergeCell ?? 0"
       :start-method="filterCloudPreset"
@@ -268,7 +269,7 @@ const measurementsStore = useMeasurementsStore()
   <Teleport to="body">
     <NormalsModal v-if="toolModal === 'estimate-normals'" :clouds="editableClouds" :initial-id="toolInitialId"
       :cameras="reconstructionStore.mainSparseCloud?.cameras ?? null" @close="toolModal = null" @run="onToolEditRun" />
-    <ClassifyGroundModal v-else-if="toolModal === 'classify-ground'" :clouds="editableClouds" :initial-id="toolInitialId"
+    <ClassifyGroundModal v-else-if="toolModal === 'classify-ground'" :clouds="croppableClouds" :initial-id="toolInitialId"
       :frame-signature="reconstructionStore.currentFrameSignature" @close="toolModal = null" @run="onToolEditRun" />
     <TransformCloudModal v-else-if="toolModal === 'transform-cloud'" :clouds="editableClouds" :initial-id="toolInitialId"
       @close="toolModal = null" @run="onToolEditRun" />
