@@ -74,7 +74,20 @@ values give fewer, larger charts, so fewer seams, at the price of using a slight
 direct photo here and there. **0** takes the best photo for every triangle on its own,
 which scatters seams across the surface.
 
-## Viewing and limits
+## Viewing and export
 The 3D view shows the texture by default (**Colour by ▸ Texture** in the layer's
-symbology; RGB still shows the vertex colours). Mesh tools such as Smooth, Decimate or
-Crop produce untextured copies for now; texture the result again if needed.
+symbology; RGB still shows the vertex colours).
+
+**Export ▸ Mesh** keeps the texture in two formats:
+
+- **glTF binary (.glb)** embeds the atlas pages in the one file. Blender, web viewers,
+  Cesium, Unity and Unreal all read it. The materials are unlit, because the photos
+  already hold the light; a program that ignores that setting may shade the texture.
+- **Wavefront OBJ** downloads a .zip with the .obj, its material file (.mtl) and one
+  JPEG per page. Keep the files together: the .obj names the others.
+
+PLY and STL write the geometry only. **Export ▸ 3D Tiles…** with the textured mesh
+selected writes the mesh, with its texture, as the tile.
+
+Mesh tools such as Smooth, Decimate or Crop produce untextured copies for now; texture
+the result again if needed.

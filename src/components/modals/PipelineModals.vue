@@ -74,6 +74,14 @@ const {
 const scaleFitValid = computed(() => reconstructionStore.scaleFitStatus().valid)
 // A tool dialog starts on the cloud/mesh the user has selected, when it fits.
 const toolInitialId = computed(() => reconstructionStore.selectedCloudId)
+// The mesh a mesh or 3D Tiles export writes: the sidebar's target, else the selected
+// mesh, else (mesh export only) the first mesh — as exports/clouds.js picks it.
+const exportMeshCloud = computed(() => {
+  const target = exportTargetCloud.value, sel = reconstructionStore.selectedCloud
+  if (target) return target.kind === 'mesh' ? target : null
+  if (sel?.kind === 'mesh') return sel
+  return exportKind.value === 'mesh' ? reconstructionStore.clouds.find((c) => c.kind === 'mesh' && c.count > 0) ?? null : null
+})
 const measurementsStore = useMeasurementsStore()
 </script>
 
@@ -158,6 +166,7 @@ const measurementsStore = useMeasurementsStore()
       :has-orientation="reconstructionStore.orientationState.active"
       :ortho-cells="reconstructionStore.ortho ? reconstructionStore.ortho.width * reconstructionStore.ortho.height : 0"
       :subject="exportTargetCloud?.name ?? ''"
+      :textured="!!exportMeshCloud?.texture"
       @close="exportKind = null"
       @run="onExportRun"
     />

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { cloudToPlyParts, meshToPlyParts, meshToGlbParts, meshToObjParts, meshToStlParts, reconstructionToJson, demToAsciiGridParts, rasterWorldFile, prepareCloudForExport, prepareMeshForExport } from './exporters.js'
+import { cloudToPlyParts, meshToPlyParts, meshToGlbParts, meshToObjParts, meshToStlParts, reconstructionToJson, demToAsciiGridParts, rasterWorldFile, prepareCloudForExport, prepareMeshForExport, objMaterialLibrary } from './exporters.js'
 import { joinParts, jsonParts } from '../io/parts.js'
 
 // The writers yield bounded parts (core/io/parts.js); these join them for small fixtures.
@@ -402,5 +402,85 @@ describe('part writers — chunking never changes the bytes', () => {
     expect(dv.getUint32(8, true)).toBe(glb.length)
     const jsonLen = dv.getUint32(12, true)
     expect(dv.getUint32(20 + jsonLen, true)).toBe(glb.length - 28 - jsonLen)
+  })
+})
+
+// ── Textured meshes (core/products/texture/ output) ─────────────────────────────
+describe('textured mesh export', () => {
+  // A quad split over two atlas pages: triangle 0 on page 0, triangle 1 on page 1.
+  const mesh = {
+    nVerts: 6, count: 2,
+    pos: Float64Array.from([10, 20, 1, 11, 20, 1, 11, 21, 1, 10, 20, 1, 11, 21, 1, 10, 21, 1]),
+    idx: Uint32Array.of(0, 1, 2, 3, 4, 5),
+    col: new Uint8Array(18).fill(200),
+    uv: Float32Array.from([0.1, 0.9, 0.9, 0.9, 0.9, 0.1, 0.1, 0.9, 0.9, 0.1, 0.1, 0.1]),
+  }
+  const jpegA = Uint8Array.of(0xff, 0xd8, 1, 2, 3), jpegB = Uint8Array.of(0xff, 0xd8, 4, 5, 6, 7, 8)
+  const texture = { pages: [{ bytes: jpegA, type: 'image/jpeg' }, { bytes: jpegB, type: 'image/jpeg' }],
+    groups: [{ page: 0, start: 0, count: 1 }, { page: 1, start: 1, count: 1 }] }
+  const parse = (bytes) => {
+    const dv = new DataView(bytes.buffer, bytes.byteOffset)
+    const jsonLen = dv.getUint32(12, true)
+    const json = JSON.parse(new TextDecoder().decode(bytes.subarray(20, 20 + jsonLen)))
+    const binOff = 20 + jsonLen + 8
+    return { json, bin: bytes.subarray(binOff, binOff + dv.getUint32(20 + jsonLen, true)), total: dv.getUint32(8, true) }
+  }
+
+  it('GLB: UVs, one unlit primitive per page over its index range, pages embedded, no COLOR_0', () => {
+    const bytes = meshToGlb(mesh, { texture })
+    const { json, bin, total } = parse(bytes)
+    expect(total).toBe(bytes.length)
+    expect(json.extensionsUsed).toEqual(['KHR_materials_unlit'])
+    const prims = json.meshes[0].primitives
+    expect(prims.map((p) => p.material)).toEqual([0, 1])
+    expect(prims[0].attributes.COLOR_0).toBeUndefined()
+    const uvAcc = json.accessors[prims[0].attributes.TEXCOORD_0]
+    expect(uvAcc).toMatchObject({ componentType: 5126, count: 6, type: 'VEC2' })
+    const idx1 = json.accessors[prims[1].indices]
+    expect(idx1).toMatchObject({ byteOffset: 12, count: 3, componentType: 5125 })
+    expect(json.materials[1].extensions.KHR_materials_unlit).toEqual({})
+    expect(json.materials[1].pbrMetallicRoughness.baseColorTexture.index).toBe(1)
+    // Every bufferView offset is 4-byte aligned, and the images are the page bytes.
+    for (const v of json.bufferViews) expect(v.byteOffset % 4).toBe(0)
+    const img = (k) => { const v = json.bufferViews[json.images[k].bufferView]; return [...bin.subarray(v.byteOffset, v.byteOffset + v.byteLength)] }
+    expect(img(0)).toEqual([...jpegA])
+    expect(img(1)).toEqual([...jpegB])
+    // UVs as written.
+    const uvView = json.bufferViews[uvAcc.bufferView]
+    const uvs = new Float32Array(bin.slice(uvView.byteOffset, uvView.byteOffset + uvView.byteLength).buffer)
+    expect([...uvs].map((v) => +v.toFixed(3))).toEqual([...mesh.uv].map((v) => +v.toFixed(3)))
+  })
+
+  it('GLB: tile-local, Y-up positions for 3D Tiles', () => {
+    const { json, bin } = parse(meshToGlb(mesh, { origin: [10, 20, 1], yUp: true }))
+    const pos = new Float32Array(bin.slice(0, 18 * 4).buffer)
+    // (x, y, z) − origin → (x, z, −y): vertex 2 is (1, 1, 0) → (1, 0, −1).
+    expect([...pos.subarray(6, 9)]).toEqual([1, 0, -1])
+    expect(json.accessors[0].min).toEqual([0, 0, -1])
+    expect(json.accessors[0].max).toEqual([1, 0, 0])
+  })
+
+  it('GLB without a texture is unchanged by the new options', () => {
+    expect(meshToGlb(mesh)).toEqual(meshToGlb(mesh, { texture: null }))
+    expect(parse(meshToGlb(mesh)).json.meshes[0].primitives).toHaveLength(1)
+  })
+
+  it('OBJ: mtllib, flipped vt per vertex, usemtl per page, v/vt faces, no vertex colour', () => {
+    const text = joinParts(meshToObjParts(mesh, { texture: { mtl: 'quad.mtl', groups: texture.groups } }))
+    const lines = text.trim().split('\n')
+    expect(lines[1]).toBe('mtllib quad.mtl')
+    expect(lines.filter((l) => l.startsWith('v ')).every((l) => l.split(' ').length === 4)).toBe(true)
+    const vt = lines.filter((l) => l.startsWith('vt '))
+    expect(vt).toHaveLength(6)
+    expect(vt[0]).toBe('vt 0.100000 0.100000') // v' = 1 − 0.9
+    const tail = lines.slice(lines.findIndex((l) => l.startsWith('usemtl')))
+    expect(tail).toEqual(['usemtl atlas-0', 'f 1/1 2/2 3/3', 'usemtl atlas-1', 'f 4/4 5/5 6/6'])
+  })
+
+  it('MTL: one unlit material per page, pointing at its image', () => {
+    const mtl = objMaterialLibrary(['quad_atlas0.jpg', 'quad_atlas1.jpg'])
+    expect(mtl).toContain('newmtl atlas-1\n')
+    expect(mtl).toContain('map_Kd quad_atlas1.jpg\n')
+    expect(mtl.match(/illum 0/g)).toHaveLength(2)
   })
 })

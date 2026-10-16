@@ -87,7 +87,8 @@ uncoloured either way.
 
 ## Export choice
 OBJ preserves vertex colour only in applications that support the extension; STL is
-geometry-only. Check the target application's axis, units, and colour support before
+geometry-only. A textured mesh keeps its texture in GLB and OBJ (see
+[Texture a Mesh](guide:texture-mesh)). Check the target application's axis, units, and colour support before
 choosing a format.
 
 ## Cleaning, simplifying and measuring

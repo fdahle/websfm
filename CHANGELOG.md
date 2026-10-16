@@ -12,7 +12,8 @@ Notable changes to websfm. The format follows
   few, and the photos' exposure is levelled across seams. Masks are respected, lenses
   and film scans are sampled through their own camera model, and the depth pass runs
   on the GPU when one is available. The 3D view shows the texture (Colour by ▸
-  Texture).
+  Texture), and it exports as GLB (pages embedded), OBJ (a zip with the material
+  file and the pages) and 3D Tiles.
 - **Installable app that works offline**: websfm can be installed from the browser
   and starts without a connection. A new version asks before reloading, and never
   interrupts a running task. Basemap areas viewed before stay available offline at

@@ -405,8 +405,8 @@ function exportOp(op, key) {
 // cloud: { count, pos, col?, nrm?, attributes? } (flat); format 'ply' | 'ply-ascii' |
 // 'xyz' | 'las' | 'laz'; plus { color, sim, cell, crsCode, geographic }.
 export const exportCloudFile = exportOp('exportCloud', 'cloud')
-// mesh: { nVerts, count, pos, idx, col? }; format 'ply' | 'ply-ascii' | 'obj' | 'stl'
-// | 'glb'; plus { color, sim }.
+// mesh: { nVerts, count, pos, idx, col?, uv? }; format 'ply' | 'ply-ascii' | 'obj' | 'stl'
+// | 'glb'; plus { color, sim, texture?, name } → { blob, count, ext } (a textured OBJ is a zip).
 export const exportMeshFile = exportOp('exportMesh', 'mesh')
 
 // Every distinct buffer under a flat cloud/mesh — a transfer list may not name one twice.

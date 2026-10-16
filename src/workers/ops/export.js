@@ -1,4 +1,5 @@
-import { prepareCloudForExport, prepareMeshForExport, cloudToPlyParts, meshToPlyParts, meshToObjParts, meshToStlParts, meshToGlbParts } from '../../core/products/exporters.js'
+import { prepareCloudForExport, prepareMeshForExport, cloudToPlyParts, meshToPlyParts, meshToObjParts, meshToStlParts, meshToGlbParts, objMaterialLibrary } from '../../core/products/exporters.js'
+import { zipParts } from '../../utils/zip.js'
 import { cloudToLasParts } from '../../core/io/las.js'
 import { cloudToLaz } from '../../core/io/laz.js'
 import { cloudToXyzParts } from '../../core/io/cloudText.js'
@@ -49,14 +50,30 @@ export function makeExportOps({ lazCodec = null } = {}) {
     return { result: { blob, count } }
   }
 
-  // args: [{ mesh: { nVerts, count, pos, idx, col? }, format, color, sim }] → { blob, count }
-  async function exportMesh([{ mesh, format, color = true, sim = null }], { emit }) {
+  // args: [{ mesh: { nVerts, count, pos, idx, col?, uv? }, format, color, sim,
+  //   texture?: { data, pages, groups }, name }] → { blob, count, ext }
+  // A textured mesh: GLB embeds the atlas pages; OBJ becomes a zip of the .obj, its
+  // .mtl and one JPEG per page (OBJ refers to images by file name). Other formats
+  // write the geometry only.
+  async function exportMesh([{ mesh, format, color = true, sim = null, texture = null, name = 'mesh' }], { emit }) {
     const t0 = performance.now()
     const onLog = (m, l = 'info', c = 'Export') => emit('log', [m, l, c])
     const src = prepareMeshForExport(mesh, { sim })
-    let blob
-    if (format === 'glb') blob = partsToBlob(meshToGlbParts(src, { color }), 'model/gltf-binary')
-    else if (format === 'obj') blob = partsToBlob(meshToObjParts(src, { color }), 'text/plain;charset=utf-8')
+    const textured = !!(texture?.pages?.length && mesh.uv)
+    const pages = textured ? texture.pages.map((p) => ({ ...p, bytes: texture.data.subarray(p.offset, p.offset + p.length) })) : []
+    let blob, ext = format === 'glb' || format === 'obj' || format === 'stl' ? format : 'ply'
+    if (format === 'glb') {
+      blob = partsToBlob(meshToGlbParts(src, { color, texture: textured ? { pages, groups: texture.groups } : null }), 'model/gltf-binary')
+    } else if (format === 'obj' && textured) {
+      const files = pages.map((_, k) => `${name}_atlas${k}.jpg`)
+      const obj = partsToBlob(meshToObjParts(src, { texture: { mtl: `${name}.mtl`, groups: texture.groups } }), 'text/plain;charset=utf-8')
+      blob = new Blob(await zipParts([
+        { name: `${name}.obj`, data: obj },
+        { name: `${name}.mtl`, data: objMaterialLibrary(files) },
+        ...pages.map((p, k) => ({ name: files[k], data: p.bytes })),
+      ]), { type: 'application/zip' })
+      ext = 'zip'
+    } else if (format === 'obj') blob = partsToBlob(meshToObjParts(src, { color }), 'text/plain;charset=utf-8')
     else if (format === 'stl') blob = partsToBlob(meshToStlParts(src), 'model/stl')
     else {
       const binary = format !== 'ply-ascii'
@@ -64,9 +81,13 @@ export function makeExportOps({ lazCodec = null } = {}) {
         binary ? 'application/octet-stream' : 'text/plain;charset=utf-8')
     }
     const count = src.count ?? (src.idx.length / 3)
-    onLog(`Mesh ${format.toUpperCase()} written: ${count.toLocaleString()} triangles, `
+    onLog(`Mesh ${format.toUpperCase()} written: ${count.toLocaleString()} triangles`
+      + `${textured && (format === 'glb' || format === 'obj') ? `, ${pages.length} texture page${pages.length === 1 ? '' : 's'}` : ''}, `
       + `${(blob.size / 1024 ** 2).toFixed(1)} MB in ${((performance.now() - t0) / 1000).toFixed(1)}s`, 'info')
-    return { result: { blob, count } }
+    if (textured && format !== 'glb' && format !== 'obj') {
+      onLog(`${format.toUpperCase()} has no texture support here: geometry only (use GLB or OBJ for the texture)`, 'warn')
+    }
+    return { result: { blob, count, ext } }
   }
 
   // args: [{ file, format: 'geotiff'|'png'|'jpeg', deflate, quality, crs: { code, geographic } }]

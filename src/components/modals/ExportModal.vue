@@ -25,6 +25,9 @@ const props = defineProps({
   // The one cloud a sidebar "Download…" aimed the dialog at (its name), or '' for
   // the ribbon's "the selected cloud, else the first".
   subject: { type: String, default: '' },
+  // The mesh this export writes is textured (Tools ▸ Mesh ▸ Texture): GLB and OBJ can
+  // carry the texture; for 3D Tiles, the tile is that mesh.
+  textured: { type: Boolean, default: false },
 })
 
 const hasFrame = computed(() => props.hasGeoref || props.hasScale || props.hasOrientation)
@@ -120,10 +123,12 @@ const cfg = computed(() => {
 // `format` is chosen dynamically per kind; the rest are the single source of truth
 // in core/defaults.user.js.
 const settings = ref({
-  format: cfg.value.formats.find((f) => !f.disabled)?.value,
+  format: (props.kind === 'mesh' && props.textured ? 'glb' : null) ?? cfg.value.formats.find((f) => !f.disabled)?.value,
   includeImages: false,
+  includeTexture: true,
   ...EXPORT_DEFAULTS,
 })
+const textureFormat = computed(() => settings.value.format === 'glb' || settings.value.format === 'obj')
 
 // The compression selector applies to both TIFF flavours. A COG defaults to
 // DEFLATE — an uncompressed tiled file is larger than the baseline one and gains
@@ -183,7 +188,17 @@ function run() {
 
     <!-- Mesh -->
     <template v-else-if="kind === 'mesh'">
-      <label class="checkbox-row">
+      <template v-if="textured">
+        <label class="checkbox-row">
+          <input type="checkbox" v-model="settings.includeTexture" :disabled="!textureFormat" class="checkbox" />
+          Include the photo texture{{ textureFormat ? '' : ' (GLB or OBJ only)' }}
+        </label>
+        <p v-if="textureFormat && settings.includeTexture" class="field-hint">
+          {{ settings.format === 'glb' ? 'The atlas pages are embedded in the .glb.'
+            : 'Downloads a .zip with the .obj, its .mtl and one JPEG per atlas page.' }}
+        </p>
+      </template>
+      <label v-if="!(textured && textureFormat && settings.includeTexture)" class="checkbox-row">
         <input type="checkbox" v-model="settings.includeColor" :disabled="settings.format === 'stl'" class="checkbox" />
         Include vertex colours{{ settings.format === 'stl' ? ' (STL has no colour)' : '' }}
       </label>
@@ -223,7 +238,8 @@ function run() {
         CRS, so it lands correctly even at polar latitudes. Level-of-detail tiling
         is not included — this is the whole model in one tile.
       </p>
-      <label class="checkbox-row"><input type="checkbox" v-model="settings.includeColor" class="checkbox" /> Include vertex colours</label>
+      <p v-if="textured" class="field-hint">The tile is the selected textured mesh, with its photo texture.</p>
+      <label v-else class="checkbox-row"><input type="checkbox" v-model="settings.includeColor" class="checkbox" /> Include vertex colours</label>
       <p v-if="!hasGeoref" class="field-hint warn-hint">
         This project has no georeference, so the tileset will have no position on
         the globe. Georeference the model first.

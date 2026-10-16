@@ -1,7 +1,8 @@
 import { exportCloudFile, exportMeshFile } from '../../workers/computeClient.js'
 import { downloadBlob } from '../../utils/download.js'
 import { buildTransformsJson } from '../../core/io/transforms.js'
-import { reconstructionToJson, prepareCloudForExport } from '../../core/products/exporters.js'
+import { reconstructionToJson, prepareCloudForExport, prepareMeshForExport, meshToGlbParts } from '../../core/products/exporters.js'
+import { partsToBlob } from '../../utils/blobParts.js'
 import { cloudCentroid, ecefTransformFromProbes, cloudToGlbPoints, localBounds, buildTileset, boundingBox } from '../../core/products/tiles3d.js'
 import { ensureProjection, transformAsync, metresPerCrsUnit } from '../../core/crs.js'
 import { zipParts } from '../../utils/zip.js'
@@ -132,19 +133,23 @@ export function createCloudExports({
 
   // Mesh (screened Poisson) → PLY (faces) / GLB / OBJ / STL, in the export worker.
   // Uses the selected mesh cloud, else the first mesh cloud.
-  async function doExportMesh({ format, includeColor, applyGeoref }, target = null) {
+  async function doExportMesh({ format, includeColor, includeTexture = true, applyGeoref }, target = null) {
     const cloud = target ?? (selectedCloud.value?.kind === 'mesh'
       ? selectedCloud.value
       : clouds.value.find((c) => c.kind === 'mesh' && c.count > 0))
     if (!cloud) return
     const frame = applyGeoref ? await exportSimilarity() : { sim: null, unit: 'model', crs: null, source: null }
     logExportFrame('Mesh', frame)
+    const textured = includeTexture && !!(cloud.uv && cloud.texture)
     const mesh = { nVerts: cloud.nVerts, count: cloud.count, pos: cloud.pos.slice(), idx: cloud.idx.slice(),
-      ...(cloud.col ? { col: cloud.col.slice() } : {}) }
-    const { blob } = await exportMeshFile({ mesh, format, color: includeColor, sim: frame.sim },
+      ...(cloud.col ? { col: cloud.col.slice() } : {}), ...(textured ? { uv: cloud.uv.slice() } : {}) }
+    const texture = textured
+      ? { data: cloud.texture.data.slice(), pages: cloud.texture.pages.map((p) => ({ ...p })), groups: cloud.texture.groups.map((g) => ({ ...g })) }
+      : null
+    const base = target ? cloudFileBase(cloud, target) : `${projectBase()}-mesh`
+    const { blob, ext } = await exportMeshFile({ mesh, format, color: includeColor, sim: frame.sim, texture, name: base },
       { onLog: (msg, l, c) => log(msg, l, c ?? 'Export') })
-    const ext = format === 'glb' || format === 'obj' || format === 'stl' ? format : 'ply'
-    downloadBlob(`${target ? cloudFileBase(cloud, target) : `${projectBase()}-mesh`}.${ext}`, blob)
+    downloadBlob(`${base}.${ext}`, blob)
   }
 
   // SfM cameras → websfm JSON (cameras + optional tracks), or a NeRF/3DGS
@@ -194,14 +199,41 @@ export function createCloudExports({
   // projected CRS's convergence approaches the longitude difference itself.
   //
   // LOD tiling is deliberately not attempted: the export is one tile.
+  // The tile transform for a tile-local origin in the project CRS, or null (logged)
+  // when the project has no georeference.
+  async function tileTransform(origin, crs) {
+    if (!crs || crs === 'local') {
+      log('3D Tiles: no georeference — the tileset has no place on the globe. '
+        + 'Georeference the model first for a viewer to position it.', 'warn', 'Export')
+      return null
+    }
+    await ensureProjection(crs)
+    // One project-CRS unit east and north of the origin. Both round-trip through
+    // proj4, so the resulting basis carries the local rotation AND scale factor.
+    const geo = async ([x, y, z]) => {
+      const [lon, lat] = await transformAsync([x, y], crs, 'EPSG:4326')
+      return { lon, lat, h: z * (metresPerCrsUnit(crs) ?? 1) }
+    }
+    return ecefTransformFromProbes({
+      origin: await geo(origin),
+      east: await geo([origin[0] + 1, origin[1], origin[2]]),
+      north: await geo([origin[0], origin[1] + 1, origin[2]]),
+      verticalMetresPerUnit: metresPerCrsUnit(crs) ?? 1,
+    })
+  }
+
   async function doExportTiles3d({ includeColor = true } = {}) {
+    const resolved = await effectiveFrameSpec?.()
+    const g = resolved?.source === 'georef' ? { sim: resolved.frameSpec, crs: resolved.crs } : null
+    // A selected mesh is the tile (with its photo texture when it has one).
+    if (selectedCloud.value?.kind === 'mesh' && selectedCloud.value.count > 0) {
+      return exportMeshTile(selectedCloud.value, g, includeColor)
+    }
     const cloud = cloudHasPoints(selectedCloud.value)
       ? selectedCloud.value
       : clouds.value.find(cloudHasPoints)
     if (!cloud) return
 
-    const resolved = await effectiveFrameSpec?.()
-    const g = resolved?.source === 'georef' ? { sim: resolved.frameSpec, crs: resolved.crs } : null
     const raw = cloud.kind === 'dense'
       ? { count: cloud.count, pos: cloud.pos, col: cloud.col }
       : cloud.points
@@ -209,26 +241,8 @@ export function createCloudExports({
     const src = toFlatCloud(prepareCloudForExport(raw, { sim: g?.sim ?? null, cell: 0, onLog: log }))
 
     const origin = cloudCentroid(src)
-    let transform = null
     const crs = g?.crs ?? null
-    if (crs && crs !== 'local') {
-      await ensureProjection(crs)
-      // One project-CRS unit east and north of the origin. Both round-trip through
-      // proj4, so the resulting basis carries the local rotation AND scale factor.
-      const geo = async ([x, y, z]) => {
-        const [lon, lat] = await transformAsync([x, y], crs, 'EPSG:4326')
-        return { lon, lat, h: z * (metresPerCrsUnit(crs) ?? 1) }
-      }
-      transform = ecefTransformFromProbes({
-        origin: await geo(origin),
-        east: await geo([origin[0] + 1, origin[1], origin[2]]),
-        north: await geo([origin[0], origin[1] + 1, origin[2]]),
-        verticalMetresPerUnit: metresPerCrsUnit(crs) ?? 1,
-      })
-    } else {
-      log('3D Tiles: no georeference — the tileset has no place on the globe. '
-        + 'Georeference the model first for a viewer to position it.', 'warn', 'Export')
-    }
+    const transform = await tileTransform(origin, crs)
 
     const glb = cloudToGlbPoints(src, { origin, color: includeColor })
     const { min, max } = localBounds(src, origin)
@@ -241,6 +255,33 @@ export function createCloudExports({
     ]
     downloadBlob(`${projectBase()}-3dtiles.zip`, new Blob(await zipParts(entries), { type: 'application/zip' }))
     log(`3D Tiles export: ${src.count.toLocaleString()} points, `
+      + `${transform ? `placed in ${crs}` : 'local frame (unplaced)'}`, 'success', 'Export')
+  }
+
+  // A mesh as the tile: tile-local, Y-up GLB triangles (textured: its atlas pages
+  // embedded, unlit), placed like a cloud tile.
+  async function exportMeshTile(cloud, g, includeColor) {
+    const textured = !!(cloud.uv && cloud.texture)
+    const mesh = prepareMeshForExport({ nVerts: cloud.nVerts, count: cloud.count, pos: cloud.pos, idx: cloud.idx,
+      col: cloud.col ?? null, uv: cloud.uv ?? null }, { sim: g?.sim ?? null })
+    const vertices = { count: mesh.nVerts, pos: mesh.pos }
+    const origin = cloudCentroid(vertices)
+    const crs = g?.crs ?? null
+    const transform = await tileTransform(origin, crs)
+    const texture = textured ? {
+      pages: cloud.texture.pages.map((p) => ({ type: p.type, bytes: cloud.texture.data.subarray(p.offset, p.offset + p.length) })),
+      groups: cloud.texture.groups,
+    } : null
+    const glb = partsToBlob(meshToGlbParts(mesh, { color: includeColor, texture, origin, yUp: true }), 'model/gltf-binary')
+    const { min, max } = localBounds(vertices, origin)
+    const tileset = buildTileset({ transform, box: boundingBox(min, max), contentUri: 'content.glb' })
+    const entries = [
+      { name: 'tileset.json', data: JSON.stringify(tileset, null, 2) },
+      { name: 'content.glb', data: glb },
+    ]
+    downloadBlob(`${projectBase()}-3dtiles.zip`, new Blob(await zipParts(entries), { type: 'application/zip' }))
+    log(`3D Tiles export: mesh "${cloud.name}", ${cloud.count.toLocaleString()} triangles`
+      + `${textured ? `, ${texture.pages.length} texture page${texture.pages.length === 1 ? '' : 's'}` : ''}, `
       + `${transform ? `placed in ${crs}` : 'local frame (unplaced)'}`, 'success', 'Export')
   }
 
