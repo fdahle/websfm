@@ -67,10 +67,6 @@ Notable changes to websfm. The format follows
   models. COLMAP databases import these cameras instead of skipping them, and the sensor CSV export writes k4–k6 and the lens model.
 
 ### Changed
-- **More SIFT keypoints on low-texture images**: the default contrast threshold is now
-  COLMAP's 0.0067 (was 0.01). Images that already reach the keypoint cap are unchanged;
-  interiors and large aerial frames get more features, which links images that did not
-  connect before (a sparse quarry sample: 15 → 27 of 36 cameras registered).
 - Orthophotos built with an earlier version must be rebuilt (the storage format
   changed). The Cloud-Optimized GeoTIFF export is now the stored file itself (always
   DEFLATE). PNG and JPEG exports are full resolution and offered up to 8,192 × 8,192

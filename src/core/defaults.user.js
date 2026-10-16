@@ -24,13 +24,12 @@ export const DETECT_SIFT_DEFAULTS = {
   // band whose floor IS the absolute value above — so auto can only add resolution
   // to large images, never take it away. See core/features/detectResolution.js.
   maxDimMode: 'absolute',
-  // DoG response floor (lower = more, weaker keypoints). 0.0067 is COLMAP's / VLFeat's
-  // peak threshold (0.02 / 3 scales). Lowered from 0.01 on 2026-10-15 (HANDOVER ▸
-  // B-detect-contrast): where the 10 k cap binds (St Nazaire, eagle) nothing changes,
-  // and where it does not — low-texture interiors, 6000 px aerials at 2400 px — the
-  // weaker features add the bridge pairs: sparse quarry sample 15 → 27/36 cameras,
-  // ≥3-view points +18 % FIORD, +47 % PUTI, for +10–30 % detection, +0–50 % matching.
-  contrastThreshold: 0.0067,
+  // DoG response floor (lower = more, weaker keypoints). COLMAP's 0.0067 was tried and
+  // reverted (2026-10-16, HANDOVER ▸ B-full-2026-10-16): with the pair-focal estimate and
+  // the registration check in, it registered at most 1–2 more cameras on full blocks,
+  // was less accurate on ETH3D courtyard (6.5 → 8.9 mm) and pipes (2.9 → 17 mm), and
+  // cost +40–70 % matching time.
+  contrastThreshold: 0.01,
   maxKeypoints: 10000,      // per-image cap (strongest kept)
   tiling: 'off',            // 'off' | 'on' — tiled detection for very large images
   tileSize: 1024,           // max tile edge (px) when tiling is on
