@@ -29,6 +29,8 @@ import { createMapContext, clearMapContext } from './map/mapContext.js'
 import { imageStyle, gcpStyle, poseStyle, footprintStyle } from './map/mapStyles.js'
 import { projectLonLat, makeImageFeature, makeGcpFeature, makeFootprintFeature, makePoseFeature } from './map/mapFeatures.js'
 import { makeBasemapLayer, makeGibsLayer } from './map/mapBasemaps.js'
+import { watchTileFailures } from '../../utils/tileFailures.js'
+import { online } from '../../composables/useOnlineStatus.js'
 import { makeGridLayer } from './map/mapGridLayer.js'
 import ViewerContextMenu from './ViewerContextMenu.vue'
 import GcpToolbar from './GcpToolbar.vue'
@@ -108,6 +110,32 @@ const positionedGcpIds = computed(() =>
 
 const mapEl = ref(null)
 const basemapNote = ref('')
+
+// Basemap reachability, shown as a note so a blank or coarse map reads as
+// "offline" rather than "broken". Offline, the service worker still serves the
+// low-zoom tiles viewed before (core/offlineCache.js).
+const hasBasemap = ref(false)
+const tilesFailing = ref(false)
+let basemapSource = null
+const tileStatus = computed(() => {
+  if (!hasBasemap.value) return ''
+  if (!online.value) return 'Offline: the basemap shows only areas viewed before, at lower detail.'
+  if (tilesFailing.value) return 'Basemap tiles are not loading. The tile server may be unreachable.'
+  return ''
+})
+
+function resetBasemapState() {
+  hasBasemap.value = false
+  tilesFailing.value = false
+  basemapSource = null
+}
+
+function addBasemap(map, layer) {
+  map.getLayers().insertAt(0, layer)
+  hasBasemap.value = true
+  basemapSource = layer.getSource()
+  watchTileFailures(basemapSource, (failing) => { if (ctx.map === map) tilesFailing.value = failing })
+}
 const hover = ref(null)   // { text, x, y }
 
 // Every OpenLayers handle of the current build (map, sources, layers, the grid,
@@ -338,6 +366,7 @@ async function build() {
   // crs.js gives every projection an extent; fall back to the catalog value.
   const viewExtent = projection?.getExtent() || info.extent || null
   basemapNote.value = ''
+  resetBasemapState()
 
   ctx.vSource = new VectorSource({ features: gpsImages.value.map(imageFeature) })
   ctx.gcpSource = new VectorSource({ features: mapGcps.value.map(makeGcpFeature) })
@@ -385,12 +414,15 @@ async function build() {
   if (kind === 'gibs') {
     // Async: only the map that asked may receive it (a rebuild replaces ctx.map).
     makeGibsLayer(info)
-      .then((layer) => { if (ctx.map === builtMap) builtMap.getLayers().insertAt(0, layer) })
+      .then((layer) => { if (ctx.map === builtMap) addBasemap(builtMap, layer) })
       .catch(() => {
-        if (ctx.map === builtMap) basemapNote.value = 'Polar basemap unavailable — showing grid only.'
+        if (ctx.map !== builtMap) return
+        basemapNote.value = online.value
+          ? 'Polar basemap unavailable — showing grid only.'
+          : 'Offline: the polar basemap is unavailable until you reconnect. Showing grid only.'
       })
   } else if (kind) {
-    builtMap.getLayers().insertAt(0, makeBasemapLayer(kind, { url: satelliteUrl.value, attribution: satelliteAttribution.value }))
+    addBasemap(builtMap, makeBasemapLayer(kind, { url: satelliteUrl.value, attribution: satelliteAttribution.value }))
   }
 
   rasterLayers.sync()
@@ -453,6 +485,7 @@ function destroy() {
   ctx.map?.setTarget(null)
   clearMapContext(ctx)
   rasterLayers.dispose()
+  resetBasemapState()
   hover.value = null
   cursor.value = null
 }
@@ -518,6 +551,8 @@ async function rebuild() {
   ctx.map?.updateSize()
 }
 watch(basemap, rebuild)
+// Back online: retry the tiles that failed meanwhile (OpenLayers does not on its own).
+watch(online, (isOnline) => { if (isOnline) basemapSource?.refresh() })
 watch([satelliteUrl, satelliteAttribution], () => { if (basemap.value === 'satellite') rebuild() })
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
@@ -599,7 +634,8 @@ defineExpose({ zoomToImage, fitView: fitToMarkers, zoomToFootprints, measureStat
         @delete="(id) => emit('delete-gcp', id)"
         @close="editMode = false"
       />
-      <div v-if="basemapNote || notes.length" class="basemap-note">
+      <div v-if="basemapNote || tileStatus || notes.length" class="basemap-note">
+        <div v-if="tileStatus" class="tile-status"><span class="tile-status-dot" />{{ tileStatus }}</div>
         <div v-if="basemapNote">{{ basemapNote }}</div>
         <div v-for="(n, i) in notes" :key="i">{{ n }}</div>
       </div>
@@ -711,6 +747,15 @@ defineExpose({ zoomToImage, fitView: fitToMarkers, zoomToFootprints, measureStat
   max-width: min(640px, calc(100% - 40px));
   width: max-content;
   text-align: center;
+}
+
+.tile-status { display: flex; align-items: center; justify-content: center; gap: 7px; }
+.tile-status-dot {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 50%;
+  background: #e0a000;
 }
 
 .hover-label {

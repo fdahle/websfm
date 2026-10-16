@@ -151,14 +151,23 @@ Configure the production host as follows:
   incorrect MJS type prevents ONNX Runtime from loading.
 
 - **Caching and compression.** The files below `assets/` have content hashes and
-  can use `Cache-Control: public, max-age=31536000, immutable`. Keep `index.html`
-  on `no-cache` so a release can point browsers at its new hashes. ORT runtime files
+  can use `Cache-Control: public, max-age=31536000, immutable`. Keep `index.html`,
+  `sw.js` and `manifest.webmanifest` on `no-cache` so a release can point browsers
+  at its new hashes. ORT runtime files
   live under `ort/<installed-onnxruntime-version>/`; revalidate unversioned `.mjs`,
   `.wasm` and `.onnx` files. When replacing model weights under the same name, also
   bump `MODEL_CACHE_NAME` in `src/core/models/registry.js` to invalidate Cache Storage.
   Enable Brotli or
   gzip for HTML, JavaScript and CSS; do not recompress `.wasm` or `.onnx` unless the
   server is configured to do so efficiently.
+
+- **Installable app and offline use.** The build includes a web app manifest and a
+  service worker (`sw.js`) that stores the app in the browser, so it can be
+  installed and started without a connection. Model weights are stored separately,
+  after the user's download consent. Viewed basemap tiles up to zoom 12 are kept
+  for offline use (about 50 MB at most; `src/core/offlineCache.js`). A new release
+  installs in the background and asks the user to reload; it never reloads during
+  a running task. The service worker only works over HTTPS (or on `localhost`).
 
 Before sharing a release, verify the real production URL rather than only the Vite
 preview server:
@@ -183,7 +192,7 @@ assets of the [`models-v1` release](https://github.com/fdahle/websfm/releases/ta
 on the host, run this before the release build:
 
 ```bash
-npm run fetch:models   # downloads into public/models/, verifies SHA-256, removes superpoint.onnx
+npm run fetch:models   # downloads into public/models/ and verifies SHA-256
 npm run build:release
 ```
 
@@ -204,9 +213,8 @@ Runtime accepts them (see `src/core/segment/README.md`).
 **SuperPoint is not distributed.** Its pretrained weights carry Magic Leap's
 academic / non-commercial research license, so do not host `superpoint.onnx`: users
 who qualify download it themselves from the link in the app's download dialog and
-hand the file over once. `npm run check:release` fails if the build contains it, and
-Vite copies everything in `public/models/`, so remove a local copy before a release
-build.
+hand the file over once. A local copy in `public/models/` is fine for development:
+the build leaves it out, and `npm run check:release` fails if a build contains it.
 
 Place them wherever `VITE_MODEL_BASE_URL` (or the default `public/models/`)
 points. The first time a user runs a learned backend, a modal asks to download

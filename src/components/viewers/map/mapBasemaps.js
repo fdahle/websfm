@@ -13,8 +13,14 @@ import {
   SATELLITE, TERRAIN, CUSTOM_SATELLITE_MAX_ZOOM, customAttribution, decodeTerrarium, hillshade,
 } from '../../../core/basemaps.js'
 
+// Every basemap layer preloads all coarser levels under the view. Online this
+// fills the screen sooner; offline it is what lets the service worker's cached
+// low-zoom tiles (core/offlineCache.js) stand in, upsampled, for the detailed
+// levels it never stored.
+const basemapLayer = (source) => new TileLayer({ source, preload: Infinity })
+
 function makeOsmLayer() {
-  return new TileLayer({ source: new OSM() })
+  return basemapLayer(new OSM())
 }
 
 // Esri World Imagery, or the user's own XYZ source from Settings.
@@ -22,7 +28,7 @@ function makeSatelliteLayer(url, attribution) {
   const options = url
     ? { url, maxZoom: CUSTOM_SATELLITE_MAX_ZOOM, attributions: customAttribution(url, attribution) }
     : { url: SATELLITE.url, maxZoom: SATELLITE.maxZoom, attributions: SATELLITE.attributions }
-  return new TileLayer({ source: new XYZ({ ...options, crossOrigin: 'anonymous' }) })
+  return basemapLayer(new XYZ({ ...options, crossOrigin: 'anonymous' }))
 }
 
 // Terrain: elevation tiles shaded on a canvas per tile. Shading the source tile
@@ -46,9 +52,9 @@ async function loadHillshadeTile(z, x, y, { signal }) {
 }
 
 function makeTerrainLayer() {
-  return new TileLayer({ source: new ImageTileSource({
+  return basemapLayer(new ImageTileSource({
     loader: loadHillshadeTile, maxZoom: TERRAIN.maxZoom, attributions: TERRAIN.attributions,
-  }) })
+  }))
 }
 
 /**
@@ -73,5 +79,7 @@ export async function makeGibsLayer(info) {
     matrixSet: info.gibs.matrixSet,
   })
   if (!opts) throw new Error('GIBS layer not found in capabilities')
-  return new TileLayer({ source: new WMTS(opts) })
+  // CORS (GIBS allows it), so the service worker can cache the tiles: it stores
+  // no opaque responses.
+  return basemapLayer(new WMTS({ ...opts, crossOrigin: 'anonymous' }))
 }

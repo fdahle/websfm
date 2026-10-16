@@ -29,6 +29,13 @@ await Promise.all([
   requireFile('index.html'),
   requireFile('LICENSE', 500),
   requireFile('favicon.svg', 100),
+  requireFile('favicon-32.png', 100),
+  requireFile('apple-touch-icon.png', 1_000),
+  requireFile('icons/icon-192.png', 1_000),
+  requireFile('icons/icon-512.png', 1_000),
+  requireFile('icons/maskable-512.png', 1_000),
+  requireFile('manifest.webmanifest', 100),
+  requireFile('sw.js', 1_000),
   requireFile(`ort/${ortVersion}/ort-wasm-simd-threaded.mjs`, 1_000),
   requireFile(`ort/${ortVersion}/ort-wasm-simd-threaded.wasm`, 1_000_000),
 ])
@@ -52,7 +59,7 @@ for (const [, m] of restricted) {
 
 try {
   const html = await readFile(new URL('index.html', dist), 'utf8')
-  for (const fragment of [`href="${base}favicon.svg"`, `src="${base}assets/`, `href="${base}assets/`]) {
+  for (const fragment of [`href="${base}favicon.svg"`, `href="${base}manifest.webmanifest"`, `src="${base}assets/`, `href="${base}assets/`]) {
     if (!html.includes(fragment)) errors.push(`index.html does not contain ${fragment}`)
   }
 } catch { /* the missing index is already reported above */ }

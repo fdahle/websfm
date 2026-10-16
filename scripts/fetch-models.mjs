@@ -6,9 +6,10 @@
 //
 //   npm run fetch:models
 //
-// Files already present with the right checksum are skipped. A model whose
-// license forbids redistribution (registry.js, SuperPoint) is deleted if found,
-// since Vite copies public/models/ into dist/ wholesale.
+// Files already present with the right checksum are skipped. Models whose
+// license forbids redistribution (registry.js, SuperPoint) are not downloaded; a
+// local copy may stay in public/models/ for development, since the build leaves
+// it out (vite.config.js ▸ excludeRestrictedModels).
 import { createHash } from 'node:crypto'
 import { createWriteStream } from 'node:fs'
 import { mkdir, readFile, rename, rm } from 'node:fs/promises'
@@ -41,10 +42,7 @@ async function sha256Of(url) {
 let failed = false
 for (const [id, m] of Object.entries(MODELS)) {
   const target = new URL(m.file, dir)
-  if (!isRedistributable(id)) {
-    await rm(target, { force: true })
-    continue
-  }
+  if (!isRedistributable(id)) continue
   const want = SHA256[m.file]
   if (!want) {
     console.error(`✗ ${m.file}: no checksum recorded in fetch-models.mjs`)

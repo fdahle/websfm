@@ -15,6 +15,7 @@ import DevConsole from './components/layout/DevConsole.vue'
 import BrowserWarning from './components/layout/BrowserWarning.vue'
 import MobileWarning from './components/layout/MobileWarning.vue'
 import ToastStack from './components/layout/ToastStack.vue'
+import UpdatePrompt from './components/layout/UpdatePrompt.vue'
 
 import { useImagesStore } from './stores/useImagesStore.js'
 import { useMatchesStore } from './stores/useMatchesStore.js'
@@ -407,9 +408,11 @@ const { closeTopModal } = useModalEscape({
 
 // Autosaved idle sessions can close quietly. Prompt only while closing would
 // interrupt compute, project I/O, or an import whose source bytes are not yet safe.
-useBeforeUnload(() => progressOpen.value || projectLoading.value
+// The same condition holds back reloading into a new app version (UpdatePrompt).
+const workInFlight = computed(() => progressOpen.value || projectLoading.value
   || pendingImageWork.value > 0 || pendingRasterWork.value > 0
   || pendingPersistence.value > 0 || persistenceFailures.value.length > 0)
+useBeforeUnload(() => workInFlight.value)
 
 // ── ImageViewer refs (for imperative mask ops) ────────────────────────────────
 const imageViewerRefs = reactive({})
@@ -516,6 +519,7 @@ provideSidebar(sidebarContext)
     <MobileWarning />
     <BrowserWarning />
     <ToastStack />
+    <UpdatePrompt :busy="workInFlight" />
     <Ribbon
       :active-view="activeView"
       :state="commandState"
