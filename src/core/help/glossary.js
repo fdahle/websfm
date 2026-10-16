@@ -1,11 +1,9 @@
 // In-app glossary content: markdown files under src/glossary/, each with a
 // small frontmatter block (id/title/summary/aliases) and a markdown body.
 // Parsing is a pure function (no Vue/DOM) so it stays unit-testable and the
-// loader can run in the worker or main thread alike; rendering (markdown +
-// KaTeX + auto-linking) only ever runs on the main thread in the glossary
-// modal. See src/glossary/core-sfm/reprojection-error.md for the schema.
-import { Marked } from 'marked'
-import markedKatex from 'marked-katex-extension'
+// loader can run in the worker or main thread alike. Rendering (markdown + KaTeX,
+// then autoLinkHtml below) lives in helpMarkdown.js, a separate chunk loaded on
+// demand. See src/glossary/core-sfm/reprojection-error.md for the schema.
 
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/
 
@@ -81,49 +79,6 @@ export function parseGlossaryEntry(raw, sourcePath = '<string>') {
   }
 }
 
-// Markdown renderer. Internal `[label](help:other-id)` links become plain
-// anchors carrying data-help-id so the modal can intercept the click (open a
-// tab) instead of navigating; external links open in a new tab. Images resolve
-// against the bundled asset map (see assetUrl). KaTeX handles `$…$`/`$$…$$`.
-const markdown = new Marked({
-  renderer: {
-    link({ href, tokens }) {
-      const text = this.parser.parseInline(tokens)
-      if (href && href.startsWith('help:')) {
-        return `<a href="#" class="glossary-link" data-help-id="${href.slice(5)}">${text}</a>`
-      }
-      // `guide:op-id` links open (or focus) an operation tab in the Guide modal.
-      // Guide docs reuse this renderer, so both schemes resolve from either place.
-      if (href && href.startsWith('guide:')) {
-        return `<a href="#" class="guide-link" data-guide-id="${href.slice(6)}">${text}</a>`
-      }
-      return `<a href="${href}" target="_blank" rel="noopener">${text}</a>`
-    },
-    image({ href, title, text }) {
-      const src = assetUrl(href) || href
-      const t = title ? ` title="${title}"` : ''
-      return `<img class="glossary-img" src="${src}" alt="${text || ''}"${t}>`
-    },
-  },
-})
-markdown.use(markedKatex({ throwOnError: false, nonStandard: true }))
-
-// Images referenced as ![alt](assets/foo.png) resolve to hashed build URLs.
-let assetMap = null
-function assetUrl(href) {
-  if (!href || /^(https?:)?\/\//.test(href) || href.startsWith('data:')) return null
-  if (!assetMap) {
-    const mods = import.meta.glob('/src/glossary/assets/*', { eager: true, query: '?url', import: 'default' })
-    assetMap = new Map(Object.entries(mods).map(([p, url]) => [p.split('/').pop(), url]))
-  }
-  return assetMap.get(href.replace(/^\.?\/?assets\//, '')) || null
-}
-
-export function renderHelpMarkdown(body, { selfId = null } = {}) {
-  const html = markdown.parse(body)
-  return autoLinkHtml(html, selfId)
-}
-
 // ── Auto-linking ──────────────────────────────────────────────────────────────
 // Wrap the first occurrence of each known alias in the rendered HTML with a
 // glossary link, so cross-references between entries appear automatically. We
@@ -149,7 +104,8 @@ export function autoLinkHtml(html, selfId = null) {
   const entries = loadEntries()
   const index = buildAliasIndex(entries, selfId)
   if (!index.length) return html
-  const used = new Set()
+  // An explicit [text](help:id) link anywhere counts: don't auto-link that term too.
+  const used = new Set([...html.matchAll(/data-help-id="([^"]+)"/g)].map(m => m[1]))
 
   // Split on tags; even indices are text, odd indices are the tag strings.
   const parts = html.split(/(<[^>]+>)/)
@@ -186,16 +142,25 @@ export function autoLinkHtml(html, selfId = null) {
 }
 
 function linkText(text, index, used) {
-  let out = text
+  // Even indices are plain text, odd indices are links inserted here — never
+  // searched again, so "SIFT" can't link inside a fresh "SIFT descriptor" link.
+  const parts = [text]
   for (const { alias, id } of index) {
     if (used.has(id)) continue
     // Whole-word, case-insensitive, first hit only.
-    const re = new RegExp(`\\b(${escapeRe(alias)})\\b`, 'i')
-    if (!re.test(out)) continue
-    used.add(id)
-    out = out.replace(re, `<a href="#" class="glossary-link" data-help-id="${id}">$1</a>`)
+    const re = new RegExp(`\\b${escapeRe(alias)}\\b`, 'i')
+    for (let i = 0; i < parts.length; i += 2) {
+      const m = re.exec(parts[i])
+      if (!m) continue
+      used.add(id)
+      parts.splice(i, 1,
+        parts[i].slice(0, m.index),
+        `<a href="#" class="glossary-link" data-help-id="${id}">${m[0]}</a>`,
+        parts[i].slice(m.index + m[0].length))
+      break
+    }
   }
-  return out
+  return parts.join('')
 }
 
 // ── Entry loading + lookup ─────────────────────────────────────────────────────

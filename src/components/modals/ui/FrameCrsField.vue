@@ -15,6 +15,7 @@ import { ref, watch } from 'vue'
 import SettingsField from './SettingsField.vue'
 import CrsSuggestion from './CrsSuggestion.vue'
 import GlossaryTerm from '../../glossary/GlossaryTerm.vue'
+import FieldHelp from '../../guide/FieldHelp.vue'
 
 const props = defineProps({
   id: { type: String, required: true },
@@ -26,6 +27,9 @@ const props = defineProps({
   georeferenceBlocker: { type: String, default: null },
   crsSuggestion: { type: Object, default: null },
   realWorld: { type: String, default: 'coordinates' },
+  // Guide operation whose `crs` section explains this field; without one the label
+  // explains the concept (CRS) instead.
+  helpOp: { type: String, default: null },
 })
 const crs = defineModel({ type: String, default: 'local' })
 const emit = defineEmits(['apply-crs-suggestion'])
@@ -52,7 +56,8 @@ watch(() => props.canGeoreference, (can) => {
       ? 'Local uses a camera-estimated orientation and the current highest-ranked scale evidence, so coordinates are metric but have no CRS.'
       : `Local uses a camera-estimated up-vector (up-to-scale); the project CRS fits a similarity to imported poses for real-world ${realWorld} & GSD.`">
     <template #label>
-      <GlossaryTerm id="coordinate-reference-system">Coordinate frame</GlossaryTerm>
+      <FieldHelp v-if="helpOp" :op="helpOp" param="crs">Coordinate frame</FieldHelp>
+      <GlossaryTerm v-else id="coordinate-reference-system">Coordinate frame</GlossaryTerm>
     </template>
     <select :id="id" v-model="crs" class="field-input field-select">
       <option value="local">{{ hasScale ? 'Local (metres, no CRS)' : 'Local (model units)' }}</option>

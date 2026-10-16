@@ -44,21 +44,71 @@ pairs the run will match, for example `127 images → at most 1,270 pairs (16 % 
 Fields that would be ignored by the current choices are either hidden or greyed with
 the reason, so every visible number is one that changes the run.
 
-## Matching density (LightGlue)
-**Fast** matches the strongest *Keypoints per image* of each image in one pass.
-**Full** first matches a coarse sample to align the two images, then matches every
-detected keypoint in aligned tiles of at most *Keypoints per tile*. The dialog shows the
-budget for the density you picked. With Full, the per-image number is used only as a
-fallback when the coarse alignment fails for a pair; it then appears under Advanced as
-*Fallback keypoints per image*.
+## Pairing
+<!-- param: strategy  default: Preselect when images have camera positions, otherwise Exhaustive -->
+Decides which image pairs are matched at all. **Exhaustive** matches every pair, which
+is safe for any unordered set but grows as $O(N^2)$. **Sequential** matches each image
+to the next few in capture order and needs no metadata: use it for video, orbits and
+single flight strips. **Preselect** uses camera positions or image footprints to match
+only the pairs likely to overlap; see [pair preselection](help:preselection).
+
+The dialog starts on Preselect when at least two matched images have positions and on
+Exhaustive otherwise, and suggests a strategy for the dataset under the control. Fewer
+pairs make matching faster, but a pair that is never matched can never connect two
+images: if part of the block stays unregistered, widen the window or match exhaustively.
+
+## Following images
+<!-- param: sequentialOverlap  default: 10 -->
+Used by the **Sequential** strategy when GPS or imported camera positions are not
+available. Each image is matched to the next N images in capture order, retaining
+overlapping views while reducing exhaustive $O(N^2)$ matching to approximately
+$O(N \cdot w)$ for a window of $w$ images. Ten is a good starting point for a smoothly captured orbit.
+This assumes the image list follows capture order (normally filename/EXIF order).
+
+## Close capture loop
+<!-- param: sequentialLoopClosure  default: off -->
+Sequential pairing only. The window wraps around the end of the list, so the last
+images are also matched to the first ones and a complete orbit closes into a ring
+instead of a chain with two loose ends. Without it, small errors accumulate around the
+loop and the two ends need not meet. Turn it on only when the capture really returns to
+where it started; on an open strip it adds pairs that cannot overlap.
+
+## Preselect by
+<!-- param: preselectMethod  default: Camera position -->
+**Camera position** keeps each image's nearest cameras, from EXIF GPS or imported
+[camera poses](help:camera-pose). It is the usual choice for nadir aerial blocks.
+**Footprint overlap** keeps pairs whose ground footprints overlap, which follows where
+each camera is looking rather than where it stands: better for oblique or converging
+views, where two nearby cameras can face away from each other. Each option is greyed
+out when fewer than two images carry the information it needs.
+
+## Neighbours per image
+<!-- param: maxNeighbors  default: 10 -->
+Used by the **Preselect** strategy: instead of matching every pair (an $O(N^2)$
+explosion on large blocks), match each image only to its N nearest neighbours by
+camera position, from EXIF GPS or imported poses. Lower N is faster but risks missing real overlap on
+cross-strip or looping flight lines; raise it when the flight geometry is dense or
+irregular. An image without a position keeps all its pairs; with fewer than two
+positioned images the run matches exhaustively.
+
+## Minimum overlap %
+<!-- param: minOverlap  default: 30 -->
+Used by **Preselect by footprint overlap**: a pair is kept when the area the two
+footprints share is at least this share of the *smaller* footprint. Lower it to keep
+pairs at the edge of the block or across strips with little side-lap; raise it to drop
+marginal pairs and match faster. Footprints are approximate, so a value close to the
+real overlap can drop pairs that would have matched. An image without a footprint keeps
+all its pairs, and with fewer than two footprints the run matches exhaustively.
 
 ## Matcher
-**Brute-force** compares descriptors directly and works with every detector.
+<!-- param: matcher  default: Brute-force + RANSAC -->
+**Brute-force** compares [descriptor](help:descriptor)s directly, keeps each match that
+passes the [ratio test](help:lowe-ratio-test), and works with every detector.
 **LightGlue** is a learned matcher. It needs every image detected with the same
 learned detector (SuperPoint or DISK), and websfm loads the LightGlue weights trained
 for that detector, downloading them on first use. If some images were detected with
 another detector, matching stops and names them; re-detect those images with
-**Overwrite**.
+**Overwrite**. Both are followed by the same geometric verification.
 
 ## Ratio threshold
 <!-- param: ratioThreshold  default: 0.8 -->
@@ -74,33 +124,114 @@ Raise it toward `0.9` if you are getting too few matches on low-texture imagery
 otherwise produce confident-looking false matches. Only applies to the brute-force
 matcher; LightGlue decides acceptance internally.
 
-## Min matches per pair
-<!-- param: minMatches  default: 15 -->
-After matching and verification, discard any image pair left with fewer than this
-many matches. A pair with only a handful of correspondences rarely yields a stable
-two-view geometry and tends to inject noise into the reconstruction graph. Lower it
-only if your overlap is genuinely marginal and you would rather have a weak link
-than none.
+## Matching density
+<!-- param: density  default: Fast -->
+LightGlue only; see [matching density](help:matching-density).
+**Fast** matches the strongest *Keypoints per image* of each image in one pass.
+**Full** first matches a coarse sample to align the two images, then matches every
+detected keypoint in aligned tiles of at most *Keypoints per tile*. The dialog shows the
+budget for the density you picked. With Full, the per-image number is used only as a
+fallback when the coarse alignment fails for a pair; it then appears under Advanced as
+*Fallback keypoints per image*. Full gives more tie points from images detected with many
+keypoints, at a clear cost in time; it is best with the GPU and tiled detection.
 
-## Min inlier ratio
-<!-- param: minInlierRatio  default: 0.15 -->
-Once RANSAC fits a fundamental matrix, this rejects the whole pair when the fraction
-of raw matches that survive as inliers falls below the threshold. It is the main
-defence against a *spurious* epipolar fit: on repetitive structure RANSAC can find a
-fundamental matrix that explains a minority of matches while most are wrong. A
-healthy pair usually retains well above `0.15`; raise it to be more aggressive about
-dropping questionable pairs.
+## Keypoints per image
+<!-- param: lgMaxKeypoints  default: 2048 -->
+LightGlue with **Fast** density matches only this many of each image's strongest
+keypoints; `0` removes the cap. LightGlue's attention compares every keypoint with every
+other, so time grows with the square of this number. If detection stored more keypoints
+than this, the dialog warns that the rest will not be matched; switch to **Full** rather
+than raising the cap a long way. With **Full** density the same number is the
+*Fallback keypoints per image*, used only for a pair whose coarse alignment fails.
+
+## Keypoints per tile
+<!-- param: lgTileBudget  default: 2048 -->
+LightGlue with **Full** density: the most keypoints matched together in one aligned tile.
+Tiles are sized so that an average tile holds about this many, so images with more
+keypoints are cut into more tiles; an unusually dense tile keeps only this many. A higher
+budget means fewer, larger tiles and more context per match, but each tile costs
+quadratically more; lower it if the GPU runs out of memory.
+
+## Cross-check (mutual NN)
+<!-- param: crossCheck  default: on -->
+Brute-force only. Keeps a match only when each keypoint is the other's nearest
+neighbour, on top of the [ratio test](help:lowe-ratio-test). Without it, many keypoints
+in one image can claim the same keypoint in the other; those many-to-one matches pad the
+match count, lower every pair's inlier ratio and can let RANSAC fit a degenerate
+geometry. It is on by default, as in COLMAP. Turning it off gives more matches and a
+somewhat faster run, but expect more pairs rejected at verification.
+
+## Ignore stationary points
+<!-- param: filterStationary  default: off -->
+Drops matches whose keypoint sits at almost the same pixel in both images, before
+verification. A real scene point moves between two views with the
+[baseline](help:baseline); a mark fixed to the camera or scanner does not: film
+[fiducials](help:fiducial-marks), the frame edge and data strip, reseau crosses, scanner
+dust or a lens blemish. Matched across every pair, such marks pull each pair's geometry
+toward "no motion". On a set of unmasked 1978 film scans, 665 of 666 pairs were
+accepted and the georeferencing missed by kilometres; with the filter on, all 37 cameras
+registered and the checkpoints came within about 1 m.
+
+Turn it on for scanned film and satellite frames that have not been masked or cropped.
+A match counts as stationary when it moves at most 1 % of the image diagonal, so a
+near-duplicate view (a burst, a hover) loses its matches too, which costs nothing because
+such a pair has no parallax. It is off by default while it is being measured on more
+datasets; the run summary says how many matches it dropped.
+
+## Subset gate (fast pre-test)
+<!-- param: subsetGate  default: on -->
+Brute-force with exhaustive pairing only. Before the full match, each pair matches a
+small, evenly spread sample of both images' keypoints; if too few sample matches
+survive, the pair is assumed not to overlap and is skipped. This saves most of the time
+on large unordered sets, where most pairs share nothing, but now and then it skips a
+pair that would have matched. After the run, images left with fewer than six matched
+pairs re-test their skipped pairs on a 4× larger sample, and those that pass are
+matched in full.
+
+The gate only runs with at least 50 pairs. Sequential and Preselect pairing have already
+chosen overlapping pairs, so the dialog greys it out there and says why. Turn it off when
+matching is fast anyway (GPU, few keypoints) or when images that should connect stay
+apart.
+
+## Subset size
+<!-- param: subsetGateSize  default: 200 -->
+The smallest sample of keypoints per image the subset gate matches. The actual sample
+grows with the two images' keypoint counts (4 % of their geometric mean, up to 1000), so
+the gate judges sets detected with many keypoints as fairly as small ones; this value
+only sets the floor. A larger floor makes the gate more reliable on images with few
+keypoints and slower on every pair.
+
+## Min subset matches
+<!-- param: subsetGateThreshold  default: 8 -->
+How many sample matches a pair needs in the subset gate to go on to the full match.
+Lower it if pairs with real but modest overlap are being skipped (the debug log lists
+each gated pair with its score); raise it to skip more pairs and finish sooner.
+Because the sample scales with the keypoint count, the same value means the same
+thing at any detection setting.
+
+## RANSAC verification
+<!-- param: geometricVerification  default: on -->
+Checks every pair's matches against one [epipolar geometry](help:epipolar-geometry): a
+[fundamental matrix](help:fundamental-matrix) is fitted with [RANSAC](help:ransac), and
+matches that do not fit it are discarded. This removes most of the false matches that
+descriptors alone let through, and it is what the minimum inlier ratio and the weak-pair
+rule are measured against. Matches on a [fisheye](help:fisheye-lens) sensor's images are
+checked in that sensor's pinhole frame, where epipolar lines are straight; matches more
+than 75° off-axis are left out. Turn it off only to inspect raw matches: every putative
+match is then kept, including the wrong ones, and a pair is kept on its raw match count
+alone.
 
 ## RANSAC threshold
 <!-- param: ransacThreshPx  default: 2.0 -->
 The Sampson-distance tolerance for calling a match an inlier during
-fundamental-matrix estimation. Think of it as the same idea as
+fundamental-matrix estimation: how far a point may sit from the
+[epipolar line](help:epipolar-geometry) its partner predicts. Think of it as the same idea as
 [reprojection error](help:reprojection-error): tighter means only well-localized
 correspondences pass. Too tight throws away good matches; too loose lets outliers
 masquerade as inliers.
 
 The unit is **detection pixels** — pixels at the resolution the detector actually
-ran at, which is capped by the detection step's *Max dimension*. You do not need to
+ran at, which is capped by the detection step's *Detection resolution*. You do not need to
 loosen this by hand for large images: keypoints are reported in full-resolution
 coordinates, so websfm multiplies your value by the downscaling factor before use
 and logs the result. A 10000 px scan detected at 2400 px gets a gate about 4×
@@ -117,25 +248,26 @@ fundamental matrix. More iterations raise the chance of finding the correct mode
 when the inlier ratio is low, at a linear cost in time. The default is ample for
 typical overlap; increase it only for hard pairs with many outliers.
 
-## Neighbours per image
-<!-- param: maxNeighbors  default: 10 -->
-Used by the **Preselect** strategy: instead of matching every pair (an $O(N^2)$
-explosion on large blocks), match each image only to its N nearest neighbours by
-EXIF-derived or imported camera position. Lower N is faster but risks missing real overlap on
-cross-strip or looping flight lines; raise it when the flight geometry is dense or
-irregular. Needs imported poses — images without one fall back to exhaustive
-matching.
+## Min matches per pair
+<!-- param: minMatches  default: 15 -->
+The accept floor for an image pair: with verification on, a pair needs at least this
+many verified matches to become an edge of the [match graph](help:match-graph). A pair
+with only a handful of correspondences rarely yields a stable two-view geometry. Pairs
+below the floor that still keep 15 or more inliers are not thrown away: they are kept
+as *weak* pairs: PnP may use them to register a camera, but they never start the
+reconstruction or triangulate points. With verification off this value can only lower the 15-match floor
+below which a pair is skipped; raising it has no effect there.
 
-## Following images
-<!-- param: sequentialOverlap  default: 10 -->
-Used by the **Sequential** strategy when GPS or imported camera positions are not
-available. Each image is matched to the next N images in capture order, retaining
-overlapping views while reducing exhaustive $O(N^2)$ matching to approximately
-$O(N \cdot w)$ for a window of $w$ images. Ten is a good starting point for a smoothly captured orbit.
-Enable **Close capture loop** when the sequence makes a complete circuit so the
-last frames also match the first frames. This assumes the image list follows
-capture order (normally filename/EXIF order).
-
+## Min inlier ratio
+<!-- param: minInlierRatio  default: 0.15 -->
+Once RANSAC fits a fundamental matrix, this rejects the whole pair when the fraction
+of raw matches that survive as inliers falls below the threshold. It is the main
+defence against a *spurious* epipolar fit: on repetitive structure RANSAC can find a
+fundamental matrix that explains a minority of matches while most are wrong. A
+healthy pair usually retains well above `0.15`; raise it to be more aggressive about
+dropping questionable pairs. A pair with 30 or more verified inliers passes regardless
+of its ratio: that many inliers is real geometry, not the small spurious fit this
+gate targets.
 
 ## GPU acceleration
 With **Use GPU** on (Settings → Compute; on by default when the browser offers
@@ -152,9 +284,7 @@ says how many pairs ran where. LightGlue uses its own GPU path and is unaffected
 Because exhaustive matching becomes cheap on the GPU, consider turning the **Subset gate (fast pre-test)**
 off for unordered image sets: the gate saves time by skipping pairs that look
 non-overlapping on a small sample, and occasionally skips a pair that would have
-matched. The gate only runs for exhaustive pairing with at least 50 pairs. Sequential
-and Preselect pairing have already chosen overlapping pairs, so the dialog greys the
-gate out there and says why.
+matched.
 
 ## Read the timing report
 After matching, the log reports wall time and summed pair times for descriptor

@@ -3,17 +3,16 @@ import 'katex/dist/katex.min.css'
 import { ref, computed, watch, nextTick } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useGuideStore } from '../../stores/useGuideStore.js'
-import { useGlossaryStore } from '../../stores/useGlossaryStore.js'
 import { useHelpLinkPreview } from '../../composables/useHelpLinkPreview.js'
-import { getGuideDoc, getAllGuideDocs, searchGuide, renderGuide } from '../../core/help/guide.js'
-import GlossaryTooltip from '../glossary/GlossaryTooltip.vue'
+import { helpLinkFrom, followLink } from '../../composables/useHelpStack.js'
+import { getGuideDoc, getAllGuideDocs, searchGuide } from '../../core/help/guide.js'
+import { renderGuide } from '../../core/help/helpMarkdown.js'
 
 // Single centered modal holding the Guide. A Home/index tab lists every pipeline
 // operation; each opened operation gets a closeable tab showing its intro plus one
 // section per parameter (anchored by key so a field's `?` can scroll straight to
 // it). Mirrors GlossaryModal; cross-links reach the glossary or another operation.
 const guide = useGuideStore()
-const glossary = useGlossaryStore()
 const { isOpen, tabs, activeId, focusParam } = storeToRefs(guide)
 
 const query = ref('')
@@ -42,17 +41,7 @@ const sections = computed(() =>
 
 const tabDocs = computed(() => tabs.value.map(id => ({ id, doc: getGuideDoc(id) })))
 
-// Guide and Glossary are peer browsers. Switch between them instead of stacking
-// two same-z-index dialogs; each store retains its tabs for the next visit.
-function openGlossary(id) { guide.close(); glossary.openTerm(id) }
-function openGuide(id) { glossary.close(); guide.openOp(id) }
-const {
-  RING_MS: previewRingMs, anchor: previewAnchor, visible: previewVisible,
-  pinned: previewPinned, tooltipRef: previewTooltip, title: previewTitle,
-  summaryHtml: previewSummary, onMouseOver: onPreviewOver, onMouseOut: onPreviewOut,
-  hide: hidePreview, readMore: readPreview, followGlossary: previewGlossary,
-  followGuide: previewGuide,
-} = useHelpLinkPreview({ openGlossary, openGuide })
+const { onMouseOver: onPreviewOver, onMouseOut: onPreviewOut } = useHelpLinkPreview()
 
 const bodyEl = ref(null)
 
@@ -70,10 +59,8 @@ watch([activeId, focusParam], async () => {
 
 // help: links open the glossary; guide: links open/focus another operation tab.
 function onBodyClick(e) {
-  const help = e.target.closest('a[data-help-id]')
-  if (help) { e.preventDefault(); hidePreview(); openGlossary(help.dataset.helpId); return }
-  const g = e.target.closest('a[data-guide-id]')
-  if (g) { e.preventDefault(); hidePreview(); openGuide(g.dataset.guideId) }
+  const link = helpLinkFrom(e.target)
+  if (link) { e.preventDefault(); followLink(link) }
 }
 </script>
 
@@ -146,18 +133,6 @@ function onBodyClick(e) {
           <p v-else class="empty">No guide found for “{{ activeId }}”.</p>
         </div>
       </div>
-      <GlossaryTooltip
-        v-if="previewVisible"
-        ref="previewTooltip"
-        :anchor="previewAnchor"
-        :title="previewTitle"
-        :summary-html="previewSummary"
-        :pinned="previewPinned"
-        :ring-ms="previewRingMs"
-        @read-more="readPreview"
-        @link="previewGlossary"
-        @guide-link="previewGuide"
-      />
     </div>
   </Teleport>
 </template>

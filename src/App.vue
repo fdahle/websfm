@@ -54,6 +54,7 @@ import { usePosesStore } from './stores/usePosesStore.js'
 import './stores/useLogStore.js'   // registers the console as a project-scoped store
 import * as opfs from './utils/opfs.js'
 import { useSfmInterop } from './composables/useSfmInterop.js'
+import HelpPopupStack from './components/glossary/HelpPopupStack.vue'
 
 // These dialogs pull in large reports, Markdown/KaTeX, or diagnostic code and are
 // not needed for the initial workspace. Load them on first open instead of putting
@@ -542,6 +543,8 @@ provideSidebar(sidebarContext)
 
     <GlossaryModal v-if="glossaryStore.isOpen" />
     <GuideModal v-if="guideStore.isOpen" />
+    <!-- Hover help popups (glossary terms, field `?`s, nested cross-links). -->
+    <HelpPopupStack />
 
     <div class="layout">
       <Sidebar :style="{ width: sidebarWidth + 'px' }" />

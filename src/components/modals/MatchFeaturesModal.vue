@@ -8,7 +8,6 @@ import AdvancedDisclosure from './ui/AdvancedDisclosure.vue'
 import SegmentedControl from './ui/SegmentedControl.vue'
 import PresetCards from './ui/PresetCards.vue'
 import WarnBox from './ui/WarnBox.vue'
-import GlossaryTerm from '../glossary/GlossaryTerm.vue'
 import { useComputeSettings } from '../../composables/useComputeSettings.js'
 import { useDatasetRecommendations } from '../../composables/useDatasetRecommendations.js'
 import { useLog } from '../../composables/useLog.js'
@@ -165,11 +164,6 @@ const gate = computed(() => subsetGateStatus({
   matcher: matcher.value, strategy: strategy.value, subsetGate: settings.value.subsetGate,
   pairCount: pairs.value.exact ? pairs.value.count : null,
 }))
-// LightGlue's per-image cap is the Fast path's budget; on the Full (tiled) path it is
-// only the fallback when the coarse guidance pass fails (core/features/lightglue.js).
-const capField = computed(() => (density.value === 'full'
-  ? { key: 'lgTileBudget', label: 'Keypoints per tile', hint: 'Attention budget per tile. Higher = denser matches per tile, slower.' }
-  : { key: 'lgMaxKeypoints', label: 'Keypoints per image', hint: 'The strongest keypoints per image are matched. Runtime grows with the square of this; 0 = no cap.' }))
 const descriptorEffect = computed(() => {
   if (matcher.value === 'bruteforce') {
     return `Each keypoint is paired with its nearest descriptor in the other image if it is clearly closer than the runner-up (ratio ${settings.value.ratioThreshold})${settings.value.crossCheck ? ', and only if the choice is mutual' : ''}.`
@@ -230,7 +224,7 @@ function run() {
     <SettingsStep step="1" title="Choose image pairs" :effect="pairsEffect">
       <SettingsField
         hint="Exhaustive matches all pairs. Sequential uses a capture-order neighbour window and needs no GPS. Preselect prunes pairs by camera position or footprint overlap (EXIF GPS, imported poses, or footprints).">
-        <template #label>Pairing</template>
+        <template #label><FieldHelp op="match-features" param="strategy">Pairing</FieldHelp></template>
         <SegmentedControl :model-value="strategy" :options="strategies" @update:model-value="selectStrategy" />
         <div v-if="strategyRec" class="rec-inline">
           <button
@@ -246,13 +240,12 @@ function run() {
       <template v-if="strategy === 'sequential'">
         <SettingsField label-for="sequentialOverlap"
           hint="Match each image to this many following images in capture order. Ten is a strong starting point for an orbit and is much denser than adjacent-only matching.">
-          <template #label>Following images
-            <FieldHelp op="match-features" param="sequentialOverlap" :default-value="settings.sequentialOverlap" /></template>
+          <template #label><FieldHelp op="match-features" param="sequentialOverlap" :value="settings.sequentialOverlap" :default-value="MATCH_DEFAULTS.sequentialOverlap">Following images</FieldHelp></template>
           <input id="sequentialOverlap" v-model.number="settings.sequentialOverlap" :aria-invalid="numbers.bad.sequentialOverlap" type="number" min="1" max="50" step="1" class="field-input" />
         </SettingsField>
         <SettingsField
           hint="For a complete orbit, also match the last images to the first images so the match graph closes around the object.">
-          <template #label>Close capture loop</template>
+          <template #label><FieldHelp op="match-features" param="sequentialLoopClosure" :value="settings.sequentialLoopClosure" :default-value="MATCH_DEFAULTS.sequentialLoopClosure">Close capture loop</FieldHelp></template>
           <label class="checkbox-row"><input v-model="settings.sequentialLoopClosure" type="checkbox" class="checkbox" /> Enabled</label>
         </SettingsField>
       </template>
@@ -260,20 +253,19 @@ function run() {
       <template v-if="strategy === 'preselect'">
         <SettingsField
           hint="Camera position keeps each image's nearest cameras (EXIF GPS or imported poses). Footprint overlap keeps pairs whose footprints share ground (needs footprints) — better when views converge or point different ways.">
-          <template #label>Preselect by</template>
+          <template #label><FieldHelp op="match-features" param="preselectMethod">Preselect by</FieldHelp></template>
           <SegmentedControl v-model="settings.preselectMethod" :options="preselectMethods" />
         </SettingsField>
 
         <SettingsField v-if="settings.preselectMethod === 'position'" label-for="maxNeighbors"
           hint="Match each image to its N nearest by camera position. Needs EXIF GPS or imported poses.">
-          <template #label><GlossaryTerm id="camera-pose">Neighbours per image</GlossaryTerm>
-            <FieldHelp op="match-features" param="maxNeighbors" :default-value="settings.maxNeighbors" /></template>
+          <template #label><FieldHelp op="match-features" param="maxNeighbors" :value="settings.maxNeighbors" :default-value="MATCH_DEFAULTS.maxNeighbors">Neighbours per image</FieldHelp></template>
           <input id="maxNeighbors" v-model.number="settings.maxNeighbors" :aria-invalid="numbers.bad.maxNeighbors" type="number" min="1" max="50" step="1" class="field-input" />
         </SettingsField>
 
         <SettingsField v-else label-for="minOverlap"
           hint="Keep a pair when the smaller footprint shares at least this much of its area with the other. Needs image footprints.">
-          <template #label>Minimum overlap %</template>
+          <template #label><FieldHelp op="match-features" param="minOverlap" :value="settings.minOverlap" :default-value="MATCH_DEFAULTS.minOverlap">Minimum overlap %</FieldHelp></template>
           <input id="minOverlap" v-model.number="settings.minOverlap" :aria-invalid="numbers.bad.minOverlap" type="number" min="1" max="100" step="1" class="field-input" />
         </SettingsField>
       </template>
@@ -284,14 +276,13 @@ function run() {
         :hint="matcher === 'lightglue'
           ? 'Learned joint matcher — requires every image detected with the same learned detector (SuperPoint or DISK).'
           : 'Nearest-neighbour descriptor matching with Lowe\'s ratio test. Works with any detector.'">
-        <template #label>Algorithm</template>
+        <template #label><FieldHelp op="match-features" param="matcher">Matcher</FieldHelp></template>
         <SegmentedControl v-model="matcher" :options="matchers" />
       </SettingsField>
 
       <SettingsField v-if="matcher === 'bruteforce'" label-for="ratio"
         hint="Lowe's ratio test. Lower = fewer but more reliable matches.">
-        <template #label><GlossaryTerm id="lowe-ratio-test">Ratio threshold</GlossaryTerm>
-          <FieldHelp op="match-features" param="ratioThreshold" :default-value="settings.ratioThreshold" /></template>
+        <template #label><FieldHelp op="match-features" param="ratioThreshold" :value="settings.ratioThreshold" :default-value="MATCH_DEFAULTS.ratioThreshold">Ratio threshold</FieldHelp></template>
         <input id="ratio" v-model.number="settings.ratioThreshold" :aria-invalid="numbers.bad.ratioThreshold" type="number" min="0.5" max="0.95" step="0.01" class="field-input" />
       </SettingsField>
 
@@ -300,13 +291,21 @@ function run() {
           :hint="density === 'full'
             ? 'Matches every detected keypoint in homography-guided tiles. Slower — best with GPU + tiled detection.'
             : 'Matches only the strongest keypoints per image (LightGlue attention is O(N²)).'">
-          <template #label>Matching density</template>
+          <template #label><FieldHelp op="match-features" param="density">Matching density</FieldHelp></template>
           <SegmentedControl v-model="density" :options="densityOptions" />
         </SettingsField>
         <!-- The one budget that governs the chosen density — the other is not used. -->
-        <SettingsField :label="capField.label" :label-for="capField.key" :hint="capField.hint">
-          <input :id="capField.key" v-model.number="settings[capField.key]" :aria-invalid="numbers.bad[capField.key]" type="number"
-            :min="capField.key === 'lgMaxKeypoints' ? 0 : 256" max="8192" step="256" class="field-input" />
+        <SettingsField v-if="density === 'full'" label-for="lgTileBudget"
+          hint="Attention budget per tile. Higher = denser matches per tile, slower.">
+          <template #label><FieldHelp op="match-features" param="lgTileBudget" :value="settings.lgTileBudget" :default-value="MATCH_DEFAULTS.lgTileBudget">Keypoints per tile</FieldHelp></template>
+          <input id="lgTileBudget" v-model.number="settings.lgTileBudget" :aria-invalid="numbers.bad.lgTileBudget" type="number"
+            min="256" max="8192" step="256" class="field-input" />
+        </SettingsField>
+        <SettingsField v-else label-for="lgMaxKeypoints"
+          hint="The strongest keypoints per image are matched. Runtime grows with the square of this; 0 = no cap.">
+          <template #label><FieldHelp op="match-features" param="lgMaxKeypoints" :value="settings.lgMaxKeypoints" :default-value="MATCH_DEFAULTS.lgMaxKeypoints">Keypoints per image</FieldHelp></template>
+          <input id="lgMaxKeypoints" v-model.number="settings.lgMaxKeypoints" :aria-invalid="numbers.bad.lgMaxKeypoints" type="number"
+            min="0" max="8192" step="256" class="field-input" />
         </SettingsField>
         <WarnBox v-if="capBites">
           Detection stored up to {{ fmt(detectedMaxKeypoints) }} keypoints — only the strongest
@@ -319,35 +318,38 @@ function run() {
       <SettingsStep step="2" title="Match descriptors — advanced">
         <SettingsField v-if="matcher === 'bruteforce'"
           hint="Keeps only mutual nearest neighbours. Slower but more precise.">
-          <template #label><GlossaryTerm id="lowe-ratio-test">Cross-check (mutual NN)</GlossaryTerm></template>
+          <template #label><FieldHelp op="match-features" param="crossCheck" :value="settings.crossCheck" :default-value="MATCH_DEFAULTS.crossCheck">Cross-check (mutual NN)</FieldHelp></template>
           <label class="checkbox-row"><input v-model="settings.crossCheck" type="checkbox" class="checkbox" /> Enabled</label>
         </SettingsField>
 
         <SettingsField
           hint="Drops matches that stay at the same pixel in both images — fiducials, frame edges, data strips, reseau crosses, scanner dust. For film and satellite scans; a real scene point moves with the baseline.">
-          <template #label>Ignore stationary points</template>
+          <template #label><FieldHelp op="match-features" param="filterStationary" :value="settings.filterStationary" :default-value="MATCH_DEFAULTS.filterStationary">Ignore stationary points</FieldHelp></template>
           <label class="checkbox-row"><input v-model="settings.filterStationary" type="checkbox" class="checkbox" /> Enabled</label>
         </SettingsField>
 
         <template v-if="matcher === 'bruteforce'">
           <SettingsField
             :hint="gate.reason ?? 'Match a small spatially-uniform subset first; skip the full match for pairs that clearly don\'t overlap.'">
-            <template #label>Subset gate (fast pre-test)</template>
+            <template #label><FieldHelp op="match-features" param="subsetGate" :value="settings.subsetGate" :default-value="MATCH_DEFAULTS.subsetGate">Subset gate (fast pre-test)</FieldHelp></template>
             <label class="checkbox-row"><input v-model="settings.subsetGate" type="checkbox" class="checkbox"
               :disabled="!!gate.reason" /> {{ gate.reason ? 'Not used for this run' : 'Enabled' }}</label>
           </SettingsField>
           <div v-if="gate.active" class="input-row" style="gap: 12px;">
-            <SettingsField label="Subset size" label-for="gateSize">
+            <SettingsField label-for="gateSize">
+              <template #label><FieldHelp op="match-features" param="subsetGateSize" :value="settings.subsetGateSize" :default-value="MATCH_DEFAULTS.subsetGateSize">Subset size</FieldHelp></template>
               <input id="gateSize" v-model.number="settings.subsetGateSize" :aria-invalid="numbers.bad.subsetGateSize" type="number" min="50" max="1000" step="10" class="field-input" />
             </SettingsField>
-            <SettingsField label="Min subset matches" label-for="gateThresh">
+            <SettingsField label-for="gateThresh">
+              <template #label><FieldHelp op="match-features" param="subsetGateThreshold" :value="settings.subsetGateThreshold" :default-value="MATCH_DEFAULTS.subsetGateThreshold">Min subset matches</FieldHelp></template>
               <input id="gateThresh" v-model.number="settings.subsetGateThreshold" :aria-invalid="numbers.bad.subsetGateThreshold" type="number" min="1" max="100" step="1" class="field-input" />
             </SettingsField>
           </div>
         </template>
 
-        <SettingsField v-if="matcher === 'lightglue' && density === 'full'" label="Fallback keypoints per image" label-for="lgMaxKpts"
+        <SettingsField v-if="matcher === 'lightglue' && density === 'full'" label-for="lgMaxKpts"
           hint="Used only when the coarse alignment fails for a pair: it is then matched unguided with this many strongest keypoints.">
+          <template #label><FieldHelp op="match-features" param="lgMaxKeypoints" :value="settings.lgMaxKeypoints" :default-value="MATCH_DEFAULTS.lgMaxKeypoints">Fallback keypoints per image</FieldHelp></template>
           <input id="lgMaxKpts" v-model.number="settings.lgMaxKeypoints" :aria-invalid="numbers.bad.lgMaxKeypoints" type="number" min="256" max="8192" step="256" class="field-input" />
         </SettingsField>
         <span v-if="matcher === 'lightglue' && density === 'fast'" class="field-hint">
@@ -357,10 +359,7 @@ function run() {
 
       <SettingsStep step="3" title="Verify geometry" :effect="verifyEffect" :inactive="!settings.geometricVerification">
         <SettingsField hint="Filter outliers using the fundamental matrix. Strongly recommended.">
-          <template #label>
-            <GlossaryTerm id="ransac">RANSAC</GlossaryTerm>
-            <GlossaryTerm id="fundamental-matrix">verification</GlossaryTerm>
-          </template>
+          <template #label><FieldHelp op="match-features" param="geometricVerification" :value="settings.geometricVerification" :default-value="MATCH_DEFAULTS.geometricVerification">RANSAC verification</FieldHelp></template>
           <label class="checkbox-row"><input v-model="settings.geometricVerification" type="checkbox" class="checkbox" /> Enabled</label>
         </SettingsField>
 
@@ -368,14 +367,12 @@ function run() {
           <SettingsField label-for="ransacThresh" unit="detection px"
             hint="Sampson distance threshold for inlier classification. Measured at the
                   detection resolution, so it scales automatically on downscaled images.">
-            <template #label><GlossaryTerm id="epipolar-geometry">RANSAC threshold</GlossaryTerm>
-              <FieldHelp op="match-features" param="ransacThreshPx" :default-value="settings.ransacThreshPx" /></template>
+            <template #label><FieldHelp op="match-features" param="ransacThreshPx" :value="settings.ransacThreshPx" :default-value="MATCH_DEFAULTS.ransacThreshPx">RANSAC threshold</FieldHelp></template>
             <input id="ransacThresh" v-model.number="settings.ransacThreshPx" :aria-invalid="numbers.bad.ransacThreshPx" type="number" min="0.5" max="8.0" step="0.5" class="field-input" />
           </SettingsField>
 
           <SettingsField label-for="maxIters">
-            <template #label>RANSAC iterations
-              <FieldHelp op="match-features" param="maxIters" :default-value="settings.maxIters" /></template>
+            <template #label><FieldHelp op="match-features" param="maxIters" :value="settings.maxIters" :default-value="MATCH_DEFAULTS.maxIters">RANSAC iterations</FieldHelp></template>
             <input id="maxIters" v-model.number="settings.maxIters" :aria-invalid="numbers.bad.maxIters" type="number" min="100" max="5000" step="100" class="field-input" />
           </SettingsField>
         </template>
@@ -386,8 +383,7 @@ function run() {
           :hint="settings.geometricVerification
             ? 'Accept floor: pairs whose verified matches fall below this aren\'t accepted.'
             : 'Only lowers the skip floor without verification; raising it above ' + MATCH_TUNING.rawSkipFloor + ' has no effect.'">
-          <template #label>Min matches per <GlossaryTerm id="match-graph">pair</GlossaryTerm>
-            <FieldHelp op="match-features" param="minMatches" :default-value="settings.minMatches" /></template>
+          <template #label><FieldHelp op="match-features" param="minMatches" :value="settings.minMatches" :default-value="MATCH_DEFAULTS.minMatches">Min matches per pair</FieldHelp></template>
           <input id="minMatches" v-model.number="settings.minMatches" :aria-invalid="numbers.bad.minMatches" type="number" min="4" max="100" step="1" class="field-input" />
         </SettingsField>
         <WarnBox v-if="settings.geometricVerification && settings.minMatches > 30">
@@ -398,8 +394,7 @@ function run() {
 
         <SettingsField v-if="settings.geometricVerification" label-for="minInlierRatio"
           hint="Reject pairs whose verified/putative share is below this — kills false matches on repetitive structure.">
-          <template #label>Min inlier ratio
-            <FieldHelp op="match-features" param="minInlierRatio" :default-value="settings.minInlierRatio" /></template>
+          <template #label><FieldHelp op="match-features" param="minInlierRatio" :value="settings.minInlierRatio" :default-value="MATCH_DEFAULTS.minInlierRatio">Min inlier ratio</FieldHelp></template>
           <input id="minInlierRatio" v-model.number="settings.minInlierRatio" :aria-invalid="numbers.bad.minInlierRatio" type="number" min="0" max="0.9" step="0.05" class="field-input" />
         </SettingsField>
       </SettingsStep>

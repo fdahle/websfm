@@ -1,42 +1,44 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, watch, nextTick, onMounted } from 'vue'
 
-// Hover popup for a glossary term. Two phases:
+// One hover help popup. Two phases:
 //  1. filling  — a progress ring sweeps the border over `ringMs`. Leaving the
-//     term during this phase cancels it (handled by the parent).
+//     anchor during this phase cancels it.
 //  2. pinned   — the ring is full; the popup becomes interactive (pointer
-//     events on) so the user can click cross-links or "Read more".
-// The parent (GlossaryTerm) owns the phase/close logic; this component only
-// positions itself, animates the ring, and relays clicks.
+//     events on) so the user can hover cross-links (opening a popup on top),
+//     click them, or click "Read more".
+// useHelpStack owns the phase/close logic and HelpPopupStack renders one of
+// these per level; this component only positions itself, animates the ring,
+// and relays pointer events on its body.
 const props = defineProps({
-  anchor: { type: Object, required: true },   // DOM element to position below
+  anchor: { type: Object, required: true },   // DOM element to position against
+  level: { type: Number, default: 0 },        // stack depth: deeper popups sit on top
   title: { type: String, default: '' },
   summaryHtml: { type: String, default: '' }, // rendered (auto-linked) summary
   pinned: { type: Boolean, default: false },
   ringMs: { type: Number, default: 700 },
 })
-const emit = defineEmits(['read-more', 'link', 'guide-link', 'mouseenter'])
+const emit = defineEmits(['read-more', 'body-over', 'body-out', 'body-click'])
 
+const WIDTH = 268
+const GAP = 8
 const rootEl = ref(null)
 const style = ref({})
 
-onMounted(() => {
+// Below the anchor, or above it when there's no room below; clamped to the
+// viewport. Re-run when the body changes height (the renderer loads lazily).
+function place() {
   const rect = props.anchor.getBoundingClientRect()
-  const left = Math.min(rect.left, window.innerWidth - 288)
-  style.value = { left: `${Math.max(8, left)}px`, top: `${rect.bottom + 8}px` }
-})
-
-// Cross-links inside the summary open a tab instead of navigating. Glossary
-// (`data-help-id`) and Guide (`data-guide-id`) links are relayed separately so a
-// shared tooltip works from both the glossary term and the Guide field affordance.
-function onBodyClick(e) {
-  const help = e.target.closest('a[data-help-id]')
-  if (help) { e.preventDefault(); emit('link', help.dataset.helpId); return }
-  const guide = e.target.closest('a[data-guide-id]')
-  if (guide) { e.preventDefault(); emit('guide-link', guide.dataset.guideId) }
+  const height = rootEl.value?.offsetHeight ?? 0
+  const left = Math.max(GAP, Math.min(rect.left, window.innerWidth - WIDTH - 20))
+  let top = rect.bottom + GAP
+  if (top + height > window.innerHeight - GAP && rect.top - GAP - height >= GAP) {
+    top = rect.top - GAP - height
+  }
+  style.value = { left: `${left}px`, top: `${top}px`, zIndex: 500 + props.level }
 }
-
-defineExpose({ rootEl })
+onMounted(place)
+watch(() => props.summaryHtml, () => nextTick(place))
 </script>
 
 <template>
@@ -45,14 +47,20 @@ defineExpose({ rootEl })
     class="glossary-tooltip"
     :class="{ pinned }"
     :style="style"
-    @mouseenter="emit('mouseenter')"
+    data-modal-exempt
   >
     <svg class="ring" :style="{ '--ring-ms': ringMs + 'ms' }" preserveAspectRatio="none">
       <rect class="ring-track" x="1" y="1" rx="6" />
       <rect class="ring-fill" x="1" y="1" rx="6" pathLength="1" />
     </svg>
     <div class="tt-title">{{ title }}</div>
-    <div class="tt-summary" @click="onBodyClick" v-html="summaryHtml"></div>
+    <div
+      class="tt-summary"
+      @mouseover="emit('body-over', $event)"
+      @mouseout="emit('body-out', $event)"
+      @click="emit('body-click', $event)"
+      v-html="summaryHtml"
+    ></div>
     <button class="tt-more" @click="emit('read-more')">Read more →</button>
   </div>
 </template>
@@ -103,6 +111,7 @@ defineExpose({ rootEl })
 .tt-title { font-size: 12px; font-weight: 600; color: var(--text); margin-bottom: 4px; }
 .tt-summary { font-size: 11.5px; color: var(--text-dim); line-height: 1.45; }
 .tt-summary :deep(p) { margin: 0; }
+.tt-summary :deep(p + p) { margin-top: 5px; }
 .tt-summary :deep(a.glossary-link),
 .tt-summary :deep(a.guide-link) {
   color: var(--accent); cursor: pointer; text-decoration: underline dotted;

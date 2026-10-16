@@ -1,8 +1,9 @@
 import { describe, it, expect } from 'vitest'
 import {
-  parseGlossaryEntry, renderHelpMarkdown, autoLinkHtml, searchGlossary,
+  parseGlossaryEntry, autoLinkHtml, searchGlossary,
   getGlossaryEntriesByTopic, GLOSSARY_TOPICS, getAllGlossaryEntries,
 } from './glossary.js'
+import { renderHelpMarkdown } from './helpMarkdown.js'
 
 describe('parseGlossaryEntry', () => {
   it('parses frontmatter and body', () => {
@@ -129,6 +130,18 @@ describe('autoLinkHtml', () => {
   it('does not link inside anchors or code', () => {
     expect(autoLinkHtml('<a href="#">bundle adjustment</a>')).not.toContain('glossary-link')
     expect(autoLinkHtml('<code>bundle adjustment</code>')).not.toContain('glossary-link')
+  })
+
+  it('never links a shorter alias inside a link it just inserted', () => {
+    // "SIFT descriptor" (a descriptor alias) contains "SIFT" (the sift entry).
+    const html = autoLinkHtml('<p>Each SIFT descriptor is compared.</p>')
+    expect(html).not.toMatch(/<a [^>]*>[^<]*<a /)
+    expect(html.match(/glossary-link/g)).toHaveLength(1)
+  })
+
+  it('does not auto-link a term the text already links explicitly', () => {
+    const html = autoLinkHtml('<p>bundle adjustment, then <a href="#" class="glossary-link" data-help-id="bundle-adjustment">BA</a></p>')
+    expect(html.match(/data-help-id="bundle-adjustment"/g)).toHaveLength(1)
   })
 
   it('honours the no-help opt-out wrapper', () => {

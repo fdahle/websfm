@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest'
-import { parseGuideDoc, getAllGuideDocs, getGuideDoc } from './guide.js'
+import { readFileSync, readdirSync } from 'node:fs'
+import { parseGuideDoc, getAllGuideDocs, getGuideDoc, getParam } from './guide.js'
+import { getGlossaryEntry } from './glossary.js'
 
 describe('parseGuideDoc', () => {
   const raw = [
@@ -81,6 +83,23 @@ describe('bundled guide', () => {
       const markdown = [doc.intro, ...doc.params.values()].map(v => v?.body ?? v).join('\n')
       for (const match of markdown.matchAll(/\]\(guide:([^)]+)\)/g)) {
         expect(getGuideDoc(match[1]), `${doc.id} links to missing guide:${match[1]}`).not.toBeNull()
+      }
+      for (const match of markdown.matchAll(/\]\(help:([^)]+)\)/g)) {
+        expect(getGlossaryEntry(match[1]), `${doc.id} links to missing help:${match[1]}`).not.toBeNull()
+      }
+    }
+  })
+
+  // A renamed setting or guide heading would otherwise just turn the label plain.
+  it('resolves every help label in the components', () => {
+    const dir = new URL('../../components/', import.meta.url)
+    for (const file of readdirSync(dir, { recursive: true }).filter(f => f.endsWith('.vue'))) {
+      const src = readFileSync(new URL(file, dir), 'utf8')
+      for (const [, op, param] of src.matchAll(/<FieldHelp op="([^"]+)" param="([^"]+)"/g)) {
+        expect(getParam(op, param), `${file}: FieldHelp ${op}/${param}`).not.toBeNull()
+      }
+      for (const [, id] of src.matchAll(/<GlossaryTerm (?:v-else )?id="([^"]+)"/g)) {
+        expect(getGlossaryEntry(id), `${file}: GlossaryTerm ${id}`).not.toBeNull()
       }
     }
   })

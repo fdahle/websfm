@@ -3,17 +3,14 @@ import 'katex/dist/katex.min.css'
 import { ref, computed, watch, nextTick } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useGlossaryStore } from '../../stores/useGlossaryStore.js'
-import { useGuideStore } from '../../stores/useGuideStore.js'
 import { useHelpLinkPreview } from '../../composables/useHelpLinkPreview.js'
-import GlossaryTooltip from './GlossaryTooltip.vue'
-import {
-  getGlossaryEntry, getGlossaryEntriesByTopic, searchGlossary, renderHelpMarkdown,
-} from '../../core/help/glossary.js'
+import { helpLinkFrom, followLink } from '../../composables/useHelpStack.js'
+import { getGlossaryEntry, getGlossaryEntriesByTopic, searchGlossary } from '../../core/help/glossary.js'
+import { renderHelpMarkdown } from '../../core/help/helpMarkdown.js'
 
 // Single centered modal holding the glossary. A Home/index tab plus one tab per
 // opened term (unlimited, closeable). Cross-links inside a term open more tabs.
 const glossary = useGlossaryStore()
-const guide = useGuideStore()
 const { isOpen, tabs, activeId } = storeToRefs(glossary)
 
 const query = ref('')
@@ -35,15 +32,7 @@ const activeHtml = computed(() =>
 
 const tabEntries = computed(() => tabs.value.map(id => ({ id, entry: getGlossaryEntry(id) })))
 
-function openGlossary(id) { guide.close(); glossary.openTerm(id) }
-function openGuide(id) { glossary.close(); guide.openOp(id) }
-const {
-  RING_MS: previewRingMs, anchor: previewAnchor, visible: previewVisible,
-  pinned: previewPinned, tooltipRef: previewTooltip, title: previewTitle,
-  summaryHtml: previewSummary, onMouseOver: onPreviewOver, onMouseOut: onPreviewOut,
-  hide: hidePreview, readMore: readPreview, followGlossary: previewGlossary,
-  followGuide: previewGuide,
-} = useHelpLinkPreview({ openGlossary, openGuide })
+const { onMouseOver: onPreviewOver, onMouseOut: onPreviewOut } = useHelpLinkPreview()
 
 // A newly opened tab is appended at the right of the strip and can land past
 // the visible edge — scroll it into view so the user sees where it went.
@@ -63,10 +52,8 @@ watch([activeId, tabs], async () => {
 
 // Internal [label](help:id) / auto-links open (or focus) a tab.
 function onBodyClick(e) {
-  const help = e.target.closest('a[data-help-id]')
-  if (help) { e.preventDefault(); hidePreview(); openGlossary(help.dataset.helpId); return }
-  const g = e.target.closest('a[data-guide-id]')
-  if (g) { e.preventDefault(); hidePreview(); openGuide(g.dataset.guideId) }
+  const link = helpLinkFrom(e.target)
+  if (link) { e.preventDefault(); followLink(link) }
 }
 </script>
 
@@ -176,18 +163,6 @@ function onBodyClick(e) {
           </template>
         </div>
       </div>
-      <GlossaryTooltip
-        v-if="previewVisible"
-        ref="previewTooltip"
-        :anchor="previewAnchor"
-        :title="previewTitle"
-        :summary-html="previewSummary"
-        :pinned="previewPinned"
-        :ring-ms="previewRingMs"
-        @read-more="readPreview"
-        @link="previewGlossary"
-        @guide-link="previewGuide"
-      />
     </div>
   </Teleport>
 </template>

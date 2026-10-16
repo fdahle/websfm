@@ -6,10 +6,9 @@
 // a `<!-- param: key  default: … -->` marker.
 //
 // Parsing is a pure function (no Vue/DOM) so it stays unit-testable; rendering
-// reuses the glossary renderer (renderHelpMarkdown), so Guide prose auto-links
-// glossary terms and both `help:`/`guide:` cross-link schemes resolve from either
-// place. See src/guide/match-features.md for the schema.
-import { renderHelpMarkdown } from './glossary.js'
+// (renderGuide in helpMarkdown.js) reuses the glossary renderer, so Guide prose
+// auto-links glossary terms and both `help:`/`guide:` cross-link schemes resolve
+// from either place. See src/guide/match-features.md for the schema.
 
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/
 // `<!-- param: ratioThreshold  default: 0.75 -->` — key is required, default
@@ -103,12 +102,6 @@ export function getAllGuideDocs() {
   return [...loadDocs().values()].sort((a, b) =>
     a.sortOrder - b.sortOrder || a.title.localeCompare(b.title),
   )
-}
-
-// Render a guide markdown fragment (intro or a param body) to auto-linked HTML.
-// selfId stays null: guide docs aren't glossary entries, so nothing is suppressed.
-export function renderGuide(md) {
-  return renderHelpMarkdown(md || '', { selfId: null })
 }
 
 // Case-insensitive search over operation title/summary/intro and param labels.
