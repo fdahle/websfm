@@ -28,8 +28,12 @@ reconstruction, and control. Including cached and derived data makes reopening f
 but can make the archive much larger. Excluding it is safe: previews, image thumbnails,
 depth maps, DEM, and orthophoto can be rebuilt.
 
-The archive has a 4 GB ZIP limit. For a large project, exclude derived data or use a
-folder-backed project as the working copy.
+A project file can be any size: past 4 GB it is written in the ZIP64 form, which
+current archive tools (7-Zip, the Windows and macOS archive utilities, Python,
+`unzip` 6) read as well. In browsers without a save dialog (Firefox, Safari) the
+archive is built in memory before it is downloaded, so there a large project is better
+saved without derived data, or kept as a folder-backed project. Opening a project
+file needs as much free browser storage as the files it holds.
 
 ## Open and switch projects
 Opening an archive imports it into local project storage; it does not work directly

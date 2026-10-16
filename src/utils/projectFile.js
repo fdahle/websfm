@@ -1,21 +1,21 @@
 // `.websfm` project file I/O — the impure half of core/io/projectArchive.js.
-// Owns the zip library (fflate), OPFS reads/writes, and the File System Access
+// Owns the archive format (through utils/zip.js), OPFS reads/writes, and the File System Access
 // save target. Everything about *what* goes in the archive is in the core module.
 //
-// Both directions are STREAMING and that is load-bearing: a project is mostly
-// source images, so a 3 GB export must never be assembled in memory. Export
-// reads one OPFS file at a time and flushes zip output to the sink between
-// chunks; import pushes the source file's stream through the unzipper and drains
-// completed entries to OPFS between pushes. Peak memory is one entry, not one
-// archive.
+// Neither direction holds the archive in memory, and that is load-bearing: a project
+// is mostly source images, so a multi-GB export must never be assembled in memory.
+// Export writes one OPFS file at a time to the sink (a quick CRC pass, then the
+// bytes), ZIP64 past 4 GiB (utils/zip.js). Import reads the archive's central
+// directory and copies each entry to OPFS as a slice of the file; only a deflated
+// (JSON) entry is decompressed, and it is small. Archives from the earlier fflate
+// writer read the same way.
 
-import { Zip, ZipDeflate, ZipPassThrough, Unzip, UnzipInflate, UnzipPassThrough } from 'fflate'
 import * as opfs from './opfs.js'
+import { zipLocalHeader, zipCentralHeader, zipEndRecords, crc32, crc32Blob, readZipIndex, zipEntryBlob } from './zip.js'
 import {
   MANIFEST_NAME, shouldArchivePath, archiveCompression, archiveSizeVerdict,
   isSafeArchiveEntry, validateManifest, formatBytes, summarizeSections,
   ARCHIVE_DERIVED_DIRS,
-  ZIP32_MAX_BYTES,
 } from '../core/io/projectArchive.js'
 
 // ── Save target ───────────────────────────────────────────────────────────────
@@ -52,8 +52,7 @@ async function openArchiveSink(suggestedName) {
   const chunks = []
   return {
     streaming: false,
-    // fflate reuses its output buffer between callbacks, so a buffered sink must
-    // copy — keeping the view alive would leave every chunk pointing at the last.
+    // Copy: a stream reader may hand out views of a buffer it reuses.
     write: (chunk) => { chunks.push(chunk.slice()) },
     close: async () => {
       const blob = new Blob(chunks, { type: 'application/zip' })
@@ -118,47 +117,43 @@ export async function exportProjectArchive({
   if (!sink) { log('Save cancelled'); return { cancelled: true } }
 
   let archiveBytes = 0
-  let zipError = null
-  const queued = []
-  const zip = new Zip((err, chunk, final) => {
-    if (err) { zipError = err; return }
-    if (chunk?.length) { archiveBytes += chunk.length; queued.push(chunk) }
-    if (final) queued.push(null)
-  })
+  const enc = new TextEncoder()
+  const central = []
+  const write = async (bytes) => { await sink.write(bytes); archiveBytes += bytes.length }
 
-  // fflate's callback is synchronous; the sink is async. Drain between pushes so
-  // back-pressure is real and `queued` never grows past one file's output.
-  async function drain() {
-    if (zipError) throw zipError
-    while (queued.length) {
-      const chunk = queued.shift()
-      if (chunk === null) break   // end-of-archive marker
-      await sink.write(chunk)
-    }
-    if (zipError) throw zipError
-  }
-
+  // One entry: sizes and CRC known before its local header (a deflated JSON is
+  // compressed in memory; a stored file gets a CRC pass first), so the archive has no
+  // data descriptors and any reader, streaming or not, can read it.
   async function addEntry(name, source) {
     const method = archiveCompression(name)
-    const entry = method === 8 ? new ZipDeflate(name, { level: 6 }) : new ZipPassThrough(name)
-    zip.add(entry)
-    if (source instanceof Uint8Array) {
-      entry.push(source, true)
-      await drain()
-      return
+    const nameBytes = enc.encode(name)
+    let crc, size, data
+    if (method === 8) {
+      const raw = source instanceof Uint8Array ? source : new Uint8Array(await source.arrayBuffer())
+      crc = crc32(raw); size = raw.length
+      data = new Uint8Array(await new Response(new Blob([raw]).stream().pipeThrough(new CompressionStream('deflate-raw'))).arrayBuffer())
+    } else {
+      data = source instanceof Uint8Array ? new Blob([source]) : source
+      size = data.size
+      crc = await crc32Blob(data)
     }
-    // Stream the file rather than materialising it — a single scan can be 200 MB.
-    const reader = source.stream().getReader()
-    for (;;) {
-      const { done, value } = await reader.read()
-      if (done) { entry.push(new Uint8Array(0), true); break }
-      entry.push(value, false)
-      await drain()
-    }
-    await drain()
+    const compressedSize = data instanceof Blob ? data.size : data.length
+    const offset = archiveBytes
+    await write(zipLocalHeader(nameBytes, { crc, size, compressedSize, method }))
+    if (data instanceof Blob) {
+      // Stream the file rather than materialising it — a single scan can be 200 MB.
+      const reader = data.stream().getReader()
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) break
+        await write(value)
+      }
+    } else await write(data)
+    central.push(zipCentralHeader(nameBytes, { crc, size, compressedSize, offset, method }))
   }
 
   try {
+    // Manifest first  try {
     // Manifest first, so an import can recognise and reject the file after
     // reading only its first few kilobytes.
     await addEntry(MANIFEST_NAME, new TextEncoder().encode(JSON.stringify(manifest, null, 2)))
@@ -169,8 +164,10 @@ export async function exportProjectArchive({
       done++
       onProgress?.({ done, total: entries.length, label: relPath })
     }
-    zip.end()
-    await drain()
+    const cdOffset = archiveBytes
+    let cdSize = 0
+    for (const h of central) { await write(h); cdSize += h.length }
+    await write(zipEndRecords(central.length, cdOffset, cdSize))
     await sink.close()
   } catch (err) {
     await sink.abort()
@@ -186,88 +183,50 @@ export async function exportProjectArchive({
 
 const DEFAULT_IMPORT_LIMITS = Object.freeze({
   maxEntries: 100_000,
-  maxEntryBytes: 1024 * 1024 * 1024, // one expanded entry is buffered at a time
-  maxTotalBytes: ZIP32_MAX_BYTES,
+  maxDeflatedEntryBytes: 1024 * 1024 * 1024, // a deflated entry is decompressed whole
+  maxTotalBytes: Infinity,                   // bounded by the browser's storage below
   maxCompressionRatio: 1000,
   maxManifestBytes: 1024 * 1024,
 })
 
-function makeUnzip(onEntry, limits = {}) {
+// The archive's entries (central directory), checked against the limits before
+// anything is written. Throws with a user-facing reason.
+async function archiveIndex(file, limits) {
   const cfg = { ...DEFAULT_IMPORT_LIMITS, ...limits }
-  const unzip = new Unzip()
-  let entryCount = 0
-  let totalBytes = 0
-  unzip.register(UnzipInflate)
-  unzip.register(UnzipPassThrough)
-  unzip.onfile = (f) => {
-    entryCount++
-    if (entryCount > cfg.maxEntries) throw new Error(`project file has too many entries (limit ${cfg.maxEntries})`)
-    const entryLimit = f.name === MANIFEST_NAME ? cfg.maxManifestBytes : cfg.maxEntryBytes
-    if (Number.isFinite(f.originalSize) && f.originalSize > entryLimit) {
-      throw new Error(`archive entry "${f.name}" expands to ${formatBytes(f.originalSize)} `
-        + `(limit ${formatBytes(entryLimit)})`)
+  let entries
+  try { entries = await readZipIndex(file) } catch (err) { throw new Error(`not a readable project file (${err.message})`) }
+  if (entries.length > cfg.maxEntries) throw new Error(`project file has too many entries (limit ${cfg.maxEntries})`)
+  let total = 0
+  for (const e of entries) {
+    const limit = e.name === MANIFEST_NAME ? cfg.maxManifestBytes : e.method === 8 ? cfg.maxDeflatedEntryBytes : Infinity
+    if (e.size > limit) throw new Error(`archive entry "${e.name}" expands to ${formatBytes(e.size)} (limit ${formatBytes(limit)})`)
+    if (e.method === 8 && e.compressedSize > 0 && e.size / e.compressedSize > cfg.maxCompressionRatio) {
+      throw new Error(`archive entry "${e.name}" has an unsafe compression ratio`)
     }
-    if (Number.isFinite(f.originalSize) && Number.isFinite(f.size) && f.size > 0
-        && f.originalSize / f.size > cfg.maxCompressionRatio) {
-      throw new Error(`archive entry "${f.name}" has an unsafe compression ratio`)
-    }
-    const chunks = []
-    let bytes = 0
-    f.ondata = (err, chunk, final) => {
-      if (err) throw err
-      if (chunk?.length) {
-        bytes += chunk.length
-        totalBytes += chunk.length
-        if (bytes > entryLimit) throw new Error(`archive entry "${f.name}" exceeds ${formatBytes(entryLimit)}`)
-        if (totalBytes > cfg.maxTotalBytes) {
-          throw new Error(`project file expands beyond the ${formatBytes(cfg.maxTotalBytes)} import limit`)
-        }
-        chunks.push(chunk.slice())
-      }
-      if (final) onEntry({ name: f.name, chunks, bytes })
-    }
-    f.start()
+    total += e.size
   }
-  return unzip
+  if (total > cfg.maxTotalBytes) throw new Error(`project file expands to ${formatBytes(total)}, beyond the ${formatBytes(cfg.maxTotalBytes)} available`)
+  return { entries, total }
+}
+
+async function readManifest(file, entries) {
+  const e = entries.find((x) => x.name === MANIFEST_NAME)
+  if (!e) return null
+  try { return JSON.parse(await (await zipEntryBlob(file, e)).text()) } catch { return null }
 }
 
 /**
- * Read just enough of the head of a file to find and validate its manifest,
- * WITHOUT writing anything. Export always puts the manifest first, so this
- * succeeds on our own archives after a few kB. A foreign zip (a COLMAP model,
- * say) simply yields null and routes elsewhere.
+ * Read just the manifest of a file, WITHOUT writing anything: the archive's central
+ * directory, then that one entry. A foreign zip (a COLMAP model, say) or a non-zip
+ * simply yields null and routes elsewhere.
  */
-export async function peekArchiveManifest(file, { maxBytes = 4 * 1024 * 1024 } = {}) {
-  let found = null
-  let unzip
+export async function peekArchiveManifest(file) {
   try {
-    unzip = makeUnzip(({ name, chunks }) => {
-      if (name !== MANIFEST_NAME || found) return
-      try { found = JSON.parse(new TextDecoder().decode(concat(chunks))) } catch { found = null }
-    })
+    const entries = await readZipIndex(file)
+    return await readManifest(file, entries)
   } catch { return null }
-
-  const head = new Uint8Array(await file.slice(0, Math.min(maxBytes, file.size)).arrayBuffer())
-  const CHUNK = 256 * 1024
-  try {
-    for (let off = 0; off < head.length && !found; off += CHUNK) {
-      const end = Math.min(off + CHUNK, head.length)
-      unzip.push(head.subarray(off, end), end >= file.size)
-    }
-  } catch {
-    return found   // truncated tail is expected — we only fed the head
-  }
-  return found
 }
 
-function concat(chunks) {
-  let n = 0
-  for (const c of chunks) n += c.length
-  const out = new Uint8Array(n)
-  let o = 0
-  for (const c of chunks) { out.set(c, o); o += c.length }
-  return out
-}
 
 /**
  * Unpack a `.websfm` file into `projectId`'s (fresh) OPFS directory.
@@ -279,52 +238,32 @@ export async function importProjectArchive({
 }) {
   const log = (m, level = 'info') => onLog?.(m, level, 'Project')
 
-  let manifest = null
-  let entryCount = 0
-  let bytes = 0
-  let skipped = 0
-  const pending = []
-
-  // Keep decompression within both the ZIP32 format ceiling and the browser's
-  // currently available storage. A folder project remains the escape hatch for
-  // exceptionally large individual source files.
+  // Within the browser's currently available storage. A folder project remains the
+  // escape hatch for projects larger than the browser will store.
   let available = Infinity
   try {
     const estimate = await opfs.getQuota?.()
-    if (Number.isFinite(estimate?.quota)) {
-      available = Math.max(0, estimate.quota - (estimate.usage || 0))
-    }
+    if (Number.isFinite(estimate?.quota)) available = Math.max(0, estimate.quota - (estimate.usage || 0))
   } catch {}
-  const maxTotalBytes = Math.min(
-    limits.maxTotalBytes ?? DEFAULT_IMPORT_LIMITS.maxTotalBytes,
-    Number.isFinite(available) ? Math.floor(available * 0.9) : Infinity,
-  )
+  const maxTotalBytes = Math.min(limits.maxTotalBytes ?? DEFAULT_IMPORT_LIMITS.maxTotalBytes,
+    Number.isFinite(available) ? Math.floor(available * 0.9) : Infinity)
   if (maxTotalBytes <= 0) throw new Error('browser storage has no space available for this project')
-  const unzip = makeUnzip((entry) => pending.push(entry), { ...limits, maxTotalBytes })
+  const { entries } = await archiveIndex(file, { ...limits, maxTotalBytes })
 
-  async function drain() {
-    while (pending.length) {
-      const { name, chunks, bytes: size } = pending.shift()
-      if (name === MANIFEST_NAME) {
-        try { manifest = JSON.parse(new TextDecoder().decode(concat(chunks))) } catch { manifest = null }
-        const v = validateManifest(manifest)
-        if (!v.ok) throw new Error(v.error)
-        continue
-      }
-      if (!isSafeArchiveEntry(name)) { skipped++; continue }
-      await opfs.writeProjectFile(projectId, name, new Blob(chunks))
-      entryCount++
-      bytes += size
-      onProgress?.({ done: entryCount, total: null, label: name })
-    }
-  }
+  const manifest = await readManifest(file, entries)
+  if (!manifest) throw new Error('not a websfm project file (no manifest.json)')
+  const v = validateManifest(manifest)
+  if (!v.ok) throw new Error(v.error)
 
-  const reader = file.stream().getReader()
-  for (;;) {
-    const { done, value } = await reader.read()
-    unzip.push(done ? new Uint8Array(0) : value, done)
-    await drain()
-    if (done) break
+  let entryCount = 0, bytes = 0, skipped = 0
+  for (const e of entries) {
+    if (e.name === MANIFEST_NAME || e.name.endsWith('/')) continue
+    if (!isSafeArchiveEntry(e.name)) { skipped++; continue }
+    // A stored entry goes to OPFS as a slice of the file: never read into memory.
+    await opfs.writeProjectFile(projectId, e.name, await zipEntryBlob(file, e))
+    entryCount++
+    bytes += e.size
+    onProgress?.({ done: entryCount, total: entries.length - 1, label: e.name })
   }
 
   if (!manifest) throw new Error('not a websfm project file (no manifest.json)')

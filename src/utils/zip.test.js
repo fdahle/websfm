@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { zipStore, zipParts, unzipStore, crc32 } from './zip.js'
+import { zipStore, zipParts, unzipStore, crc32, readZipIndex, zipEntryBlob, zipLocalHeader, zipCentralHeader, zipEndRecords } from './zip.js'
 
 // Parse zipStore's own output structurally: signatures at the recorded offsets, name
 // round-trip, CRC of known bytes, and the EOCD's central-directory size/offset. A
@@ -129,8 +129,53 @@ describe('zipParts — the streaming form', () => {
     expect(unzipStore(await bytesOf(parts))[0].data).toEqual(big)
   })
 
-  it('refuses more entries than plain ZIP can count', () => {
-    const many = Array.from({ length: 0x10000 }, (_, i) => ({ name: `f${i}`, data: new Uint8Array(0) }))
-    expect(() => zipStore(many)).toThrow(/ZIP limit/)
+  it('writes ZIP64 end records past 65,535 entries, and reads them back', async () => {
+    const many = Array.from({ length: 0x10001 }, (_, i) => ({ name: `f${i}`, data: Uint8Array.of(i & 0xff) }))
+    const bytes = zipStore(many)
+    const dv = new DataView(bytes.buffer)
+    expect(dv.getUint32(bytes.length - 22, true)).toBe(0x06054b50)
+    expect(dv.getUint16(bytes.length - 22 + 10, true)).toBe(0xffff)
+    expect(dv.getUint32(bytes.length - 42, true)).toBe(0x07064b50) // the zip64 locator
+    const index = await readZipIndex(new Blob([bytes]))
+    expect(index.length).toBe(0x10001)
+    expect(index[0x10000]).toMatchObject({ name: 'f65536', size: 1, method: 0 })
+    expect([...new Uint8Array(await (await zipEntryBlob(new Blob([bytes]), index[300])).arrayBuffer())]).toEqual([300 & 0xff])
+  })
+})
+
+describe('ZIP64 records and the index reader', () => {
+  // A forced-zip64 archive of small entries (one stored, one deflated): every size
+  // and offset goes through the zip64 fields, and the reader must find them there.
+  async function forced() {
+    const enc = new TextEncoder()
+    const a = enc.encode('hello zip64'), json = enc.encode(JSON.stringify({ k: 'v'.repeat(500) }))
+    const deflated = new Uint8Array(await new Response(new Blob([json]).stream().pipeThrough(new CompressionStream('deflate-raw'))).arrayBuffer())
+    const parts = [], central = []
+    let off = 0
+    for (const [name, data, size, method, crc] of [['a.txt', a, a.length, 0, crc32(a)], ['m.json', deflated, json.length, 8, crc32(json)]]) {
+      const nb = enc.encode(name)
+      const lh = zipLocalHeader(nb, { crc, size, compressedSize: data.length, method, zip64: true })
+      parts.push(lh, data)
+      central.push(zipCentralHeader(nb, { crc, size, compressedSize: data.length, offset: off, method, zip64: true }))
+      off += lh.length + data.length
+    }
+    const cdSize = central.reduce((n, h) => n + h.length, 0)
+    return { blob: new Blob([...parts, ...central, zipEndRecords(2, off, cdSize, { zip64: true })]), a, json }
+  }
+
+  it('reads sizes and offsets from the zip64 fields, stored and deflated', async () => {
+    const { blob, a, json } = await forced()
+    const index = await readZipIndex(blob)
+    expect(index.map((e) => [e.name, e.size, e.method])).toEqual([['a.txt', a.length, 0], ['m.json', json.length, 8]])
+    expect(new TextDecoder().decode(await (await zipEntryBlob(blob, index[0])).arrayBuffer())).toBe('hello zip64')
+    expect(new Uint8Array(await (await zipEntryBlob(blob, index[1])).arrayBuffer())).toEqual(json)
+  })
+
+  it('reads plain archives written by zipParts', async () => {
+    const parts = await zipParts([{ name: 'x/y.bin', data: Uint8Array.of(1, 2, 3) }, { name: 'z.txt', data: 'zz' }])
+    const blob = new Blob(parts)
+    const index = await readZipIndex(blob)
+    expect(index.map((e) => e.name)).toEqual(['x/y.bin', 'z.txt'])
+    expect([...new Uint8Array(await (await zipEntryBlob(blob, index[0])).arrayBuffer())]).toEqual([1, 2, 3])
   })
 })

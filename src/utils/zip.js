@@ -5,10 +5,14 @@
 //     undistorted image, a source photo) or an iterable of string/Uint8Array parts
 //     (core/io/parts.js), and the result is parts for `new Blob(parts)`. Nothing is
 //     concatenated, so a multi-GB workspace never becomes one buffer.
-// Plain ZIP, not ZIP64: sizes and offsets are u32 and the entry count u16, so both
-// forms refuse an archive past those limits instead of writing a corrupt one.
+// ZIP64 where needed (APPNOTE 4.5): an entry size or offset at or past 4 GiB, or more
+// than 65,535 entries, gets the zip64 extra field and the zip64 end records; a small
+// archive is plain ZIP (names flagged UTF-8, dated 1980-01-01). The record builders are exported for
+// the project-file writer (utils/projectFile.js), and `readZipIndex` / `zipEntryBlob`
+// read any archive through its central directory, zip64 included.
 
 const U32_MAX = 0xffffffff
+const U16_MAX = 0xffff
 
 // entries: [{ name, data:Uint8Array }]. Returns the ZIP archive bytes.
 export function zipStore(entries) {
@@ -19,12 +23,12 @@ export function zipStore(entries) {
   for (const e of entries) {
     const nameBytes = enc.encode(e.name)
     const crc = crc32(e.data)
-    checkZipLimits(off, e.data.length, entries.length)
-    parts.push(localHeader(nameBytes, crc, e.data.length), e.data)
-    central.push(centralHeader(nameBytes, crc, e.data.length, off))
-    off += 30 + nameBytes.length + e.data.length
+    const lh = zipLocalHeader(nameBytes, { crc, size: e.data.length })
+    parts.push(lh, e.data)
+    central.push(zipCentralHeader(nameBytes, { crc, size: e.data.length, offset: off }))
+    off += lh.length + e.data.length
   }
-  const all = [...parts, ...central, endRecord(entries.length, central, off)]
+  const all = [...parts, ...central, zipEndRecords(entries.length, off, central.reduce((n, h) => n + h.length, 0))]
   const out = new Uint8Array(all.reduce((s, p) => s + p.length, 0))
   let o = 0
   for (const p of all) { out.set(p, o); o += p.length }
@@ -51,12 +55,12 @@ export async function zipParts(entries) {
       crc = e.crc ?? data.reduce((c, p) => crc32Update(c, p), ~0) ^ ~0
     }
     crc >>>= 0
-    checkZipLimits(off, size, entries.length)
-    out.push(localHeader(nameBytes, crc, size), ...data)
-    central.push(centralHeader(nameBytes, crc, size, off))
-    off += 30 + nameBytes.length + size
+    const lh = zipLocalHeader(nameBytes, { crc, size })
+    out.push(lh, ...data)
+    central.push(zipCentralHeader(nameBytes, { crc, size, offset: off }))
+    off += lh.length + size
   }
-  out.push(...central, endRecord(entries.length, central, off))
+  out.push(...central, zipEndRecords(entries.length, off, central.reduce((n, h) => n + h.length, 0)))
   return out
 }
 
@@ -66,69 +70,157 @@ function byteParts(data, enc) {
   return [...data].map((p) => (typeof p === 'string' ? enc.encode(p) : p))
 }
 
-function checkZipLimits(offset, size, count) {
-  if (count > 0xffff || size > U32_MAX || offset + size > U32_MAX) {
-    throw new Error('Export exceeds the 4 GB / 65,535-entry ZIP limit (no ZIP64 writer). '
-      + 'Export fewer images or a smaller model, or lower the output resolution.')
-  }
+// ── Records (zip64-aware) ────────────────────────────────────────────────────
+// A size or offset at or past U32_MAX is written as 0xFFFFFFFF and carried in the
+// zip64 extended-information extra field (id 0x0001); `zip64: true` forces the
+// zip64 form for a small entry (tests). Method 0 = store, 8 = deflate.
+const big = (v) => v >= U32_MAX
+
+function zip64Extra(values) {
+  const x = new Uint8Array(4 + 8 * values.length)
+  const dv = new DataView(x.buffer)
+  dv.setUint16(0, 0x0001, true)
+  dv.setUint16(2, 8 * values.length, true)
+  values.forEach((v, k) => dv.setBigUint64(4 + 8 * k, BigInt(v), true))
+  return x
 }
 
-function localHeader(nameBytes, crc, size) {
-  const h = new Uint8Array(30 + nameBytes.length)
+export function zipLocalHeader(nameBytes, { crc, size, compressedSize = size, method = 0, zip64 = false }) {
+  const z = zip64 || big(size) || big(compressedSize)
+  // In a local header the zip64 field holds both sizes, uncompressed first.
+  const extra = z ? zip64Extra([size, compressedSize]) : new Uint8Array(0)
+  const h = new Uint8Array(30 + nameBytes.length + extra.length)
   const dv = new DataView(h.buffer)
   dv.setUint32(0, 0x04034b50, true) // local file header signature
-  dv.setUint16(4, 20, true) // version needed
-  dv.setUint16(6, 0, true) // flags
-  dv.setUint16(8, 0, true) // compression: store
+  dv.setUint16(4, z ? 45 : 20, true) // version needed
+  dv.setUint16(6, 0x0800, true) // flags: UTF-8 names
+  dv.setUint16(8, method, true)
   dv.setUint16(10, 0, true) // mod time
-  dv.setUint16(12, 0, true) // mod date
-  dv.setUint32(14, crc, true)
-  dv.setUint32(18, size, true) // compressed size
-  dv.setUint32(22, size, true) // uncompressed size
+  dv.setUint16(12, 0x21, true) // mod date: 1980-01-01, not the invalid 0
+  dv.setUint32(14, crc >>> 0, true)
+  dv.setUint32(18, z ? U32_MAX : compressedSize, true)
+  dv.setUint32(22, z ? U32_MAX : size, true)
   dv.setUint16(26, nameBytes.length, true)
-  dv.setUint16(28, 0, true) // extra length
+  dv.setUint16(28, extra.length, true)
   h.set(nameBytes, 30)
+  h.set(extra, 30 + nameBytes.length)
   return h
 }
 
-function centralHeader(nameBytes, crc, size, localOffset) {
-  const h = new Uint8Array(46 + nameBytes.length)
+export function zipCentralHeader(nameBytes, { crc, size, compressedSize = size, offset, method = 0, zip64 = false }) {
+  // Only the fields that overflow go into the zip64 field, in this order.
+  const over = [zip64 || big(size), zip64 || big(compressedSize), zip64 || big(offset)]
+  const values = [size, compressedSize, offset].filter((_, k) => over[k])
+  const extra = values.length ? zip64Extra(values) : new Uint8Array(0)
+  const h = new Uint8Array(46 + nameBytes.length + extra.length)
   const dv = new DataView(h.buffer)
   dv.setUint32(0, 0x02014b50, true) // central dir header signature
-  dv.setUint16(4, 20, true) // version made by
-  dv.setUint16(6, 20, true) // version needed
-  dv.setUint16(8, 0, true) // flags
-  dv.setUint16(10, 0, true) // compression
+  dv.setUint16(4, values.length ? 45 : 20, true) // version made by
+  dv.setUint16(6, values.length ? 45 : 20, true) // version needed
+  dv.setUint16(8, 0x0800, true) // flags: UTF-8 names
+  dv.setUint16(10, method, true)
   dv.setUint16(12, 0, true) // mod time
-  dv.setUint16(14, 0, true) // mod date
-  dv.setUint32(16, crc, true)
-  dv.setUint32(20, size, true)
-  dv.setUint32(24, size, true)
+  dv.setUint16(14, 0x21, true) // mod date
+  dv.setUint32(16, crc >>> 0, true)
+  dv.setUint32(20, over[1] ? U32_MAX : compressedSize, true)
+  dv.setUint32(24, over[0] ? U32_MAX : size, true)
   dv.setUint16(28, nameBytes.length, true)
-  dv.setUint16(30, 0, true) // extra length
+  dv.setUint16(30, extra.length, true)
   dv.setUint16(32, 0, true) // comment length
   dv.setUint16(34, 0, true) // disk number start
   dv.setUint16(36, 0, true) // internal attrs
   dv.setUint32(38, 0, true) // external attrs
-  dv.setUint32(42, localOffset, true) // local header offset
+  dv.setUint32(42, over[2] ? U32_MAX : offset, true)
   h.set(nameBytes, 46)
+  h.set(extra, 46 + nameBytes.length)
   return h
 }
 
-function endRecord(count, central, centralStart) {
-  const centralSize = central.reduce((s, h) => s + h.length, 0)
-  if (centralStart + centralSize > U32_MAX) checkZipLimits(U32_MAX, 1, count)
-  const h = new Uint8Array(22)
-  const dv = new DataView(h.buffer)
-  dv.setUint32(0, 0x06054b50, true) // end of central directory signature
-  dv.setUint16(4, 0, true) // disk number
-  dv.setUint16(6, 0, true) // disk with central dir
-  dv.setUint16(8, count, true) // entries on this disk
-  dv.setUint16(10, count, true) // total entries
-  dv.setUint32(12, centralSize, true) // central dir size
-  dv.setUint32(16, centralStart, true) // central dir offset
-  dv.setUint16(20, 0, true) // comment length
-  return h
+// The end of the archive: the zip64 end record and its locator when the entry count,
+// the central directory's size or its offset overflow the classic fields, then the
+// classic end record (its overflowing fields 0xFFFF / 0xFFFFFFFF).
+export function zipEndRecords(count, cdOffset, cdSize, { zip64 = false } = {}) {
+  const z = zip64 || count >= U16_MAX || big(cdOffset) || big(cdSize)
+  const out = new Uint8Array((z ? 56 + 20 : 0) + 22)
+  const dv = new DataView(out.buffer)
+  let o = 0
+  if (z) {
+    dv.setUint32(0, 0x06064b50, true) // zip64 end of central directory record
+    dv.setBigUint64(4, 44n, true) // size of the rest of this record
+    dv.setUint16(12, 45, true); dv.setUint16(14, 45, true)
+    dv.setUint32(16, 0, true); dv.setUint32(20, 0, true) // disk numbers
+    dv.setBigUint64(24, BigInt(count), true); dv.setBigUint64(32, BigInt(count), true)
+    dv.setBigUint64(40, BigInt(cdSize), true); dv.setBigUint64(48, BigInt(cdOffset), true)
+    dv.setUint32(56, 0x07064b50, true) // zip64 end of central directory locator
+    dv.setUint32(60, 0, true)
+    dv.setBigUint64(64, BigInt(cdOffset + cdSize), true) // where the zip64 record starts
+    dv.setUint32(72, 1, true) // total disks
+    o = 76
+  }
+  dv.setUint32(o, 0x06054b50, true) // end of central directory signature
+  dv.setUint16(o + 4, 0, true); dv.setUint16(o + 6, 0, true)
+  dv.setUint16(o + 8, z ? U16_MAX : count, true)
+  dv.setUint16(o + 10, z ? U16_MAX : count, true)
+  dv.setUint32(o + 12, z ? U32_MAX : cdSize, true)
+  dv.setUint32(o + 16, z ? U32_MAX : cdOffset, true)
+  dv.setUint16(o + 20, 0, true) // comment length
+  return out
+}
+
+// ── Reading by central directory ─────────────────────────────────────────────
+// `readZipIndex(blob)` → [{ name, method, size, compressedSize, offset, crc }] from
+// the end records and central directory (zip64 included), reading only the tail and
+// the directory; `zipEntryBlob(blob, entry)` → the entry's bytes as a Blob (a slice
+// of the archive for a stored entry, so a GB-sized entry is never read into memory).
+export async function readZipIndex(blob) {
+  const tailLen = Math.min(blob.size, 22 + 0xffff + 20)
+  const tail = new Uint8Array(await blob.slice(blob.size - tailLen).arrayBuffer())
+  const tv = new DataView(tail.buffer)
+  let e = -1
+  for (let i = tail.length - 22; i >= 0; i--) if (tv.getUint32(i, true) === 0x06054b50) { e = i; break }
+  if (e < 0) throw new Error('not a ZIP archive (no end-of-central-directory record)')
+  let count = tv.getUint16(e + 10, true), cdSize = tv.getUint32(e + 12, true), cdOffset = tv.getUint32(e + 16, true)
+  if (e >= 20 && tv.getUint32(e - 20, true) === 0x07064b50) {
+    const recOff = Number(tv.getBigUint64(e - 12, true))
+    const rec = new DataView(await blob.slice(recOff, recOff + 56).arrayBuffer())
+    if (rec.getUint32(0, true) !== 0x06064b50) throw new Error('malformed ZIP64 end record')
+    count = Number(rec.getBigUint64(32, true)); cdSize = Number(rec.getBigUint64(40, true)); cdOffset = Number(rec.getBigUint64(48, true))
+  }
+  const cd = new Uint8Array(await blob.slice(cdOffset, cdOffset + cdSize).arrayBuffer())
+  const dv = new DataView(cd.buffer)
+  const dec = new TextDecoder()
+  const entries = []
+  let p = 0
+  for (let n = 0; n < count; n++) {
+    if (p + 46 > cd.length || dv.getUint32(p, true) !== 0x02014b50) throw new Error('malformed ZIP central directory')
+    const nameLen = dv.getUint16(p + 28, true), extraLen = dv.getUint16(p + 30, true), commentLen = dv.getUint16(p + 32, true)
+    let compressedSize = dv.getUint32(p + 20, true), size = dv.getUint32(p + 24, true), offset = dv.getUint32(p + 42, true)
+    // The zip64 field holds, in order, only the fields marked 0xFFFFFFFF.
+    for (let x = p + 46 + nameLen; x + 4 <= p + 46 + nameLen + extraLen;) {
+      const id = dv.getUint16(x, true), len = dv.getUint16(x + 2, true)
+      if (id === 0x0001) {
+        let q = x + 4
+        if (size === U32_MAX) { size = Number(dv.getBigUint64(q, true)); q += 8 }
+        if (compressedSize === U32_MAX) { compressedSize = Number(dv.getBigUint64(q, true)); q += 8 }
+        if (offset === U32_MAX) { offset = Number(dv.getBigUint64(q, true)); q += 8 }
+      }
+      x += 4 + len
+    }
+    entries.push({ name: dec.decode(cd.subarray(p + 46, p + 46 + nameLen)), method: dv.getUint16(p + 10, true),
+      crc: dv.getUint32(p + 16, true), size, compressedSize, offset })
+    p += 46 + nameLen + extraLen + commentLen
+  }
+  return entries
+}
+
+export async function zipEntryBlob(blob, entry) {
+  const lh = new DataView(await blob.slice(entry.offset, entry.offset + 30).arrayBuffer())
+  if (lh.getUint32(0, true) !== 0x04034b50) throw new Error(`ZIP entry "${entry.name}": bad local header`)
+  const start = entry.offset + 30 + lh.getUint16(26, true) + lh.getUint16(28, true)
+  const data = blob.slice(start, start + entry.compressedSize)
+  if (entry.method === 0) return data
+  if (entry.method === 8) return new Response(data.stream().pipeThrough(new DecompressionStream('deflate-raw'))).blob()
+  throw new Error(`ZIP entry "${entry.name}" uses compression method ${entry.method}`)
 }
 
 // Read a ZIP archive (STORE method only — the inverse of zipStore, enough for a
@@ -190,13 +282,13 @@ export function crc32(buf) {
 }
 
 // The running (un-finalized) CRC after `buf`; start from ~0, finish with ~crc >>> 0.
-function crc32Update(crc, buf) {
+export function crc32Update(crc, buf) {
   for (let i = 0; i < buf.length; i++) crc = CRC_TABLE[(crc ^ buf[i]) & 0xff] ^ (crc >>> 8)
   return crc
 }
 
 // CRC-32 of a Blob, read a slice at a time.
-async function crc32Blob(blob, chunkBytes = 8 * 1024 * 1024) {
+export async function crc32Blob(blob, chunkBytes = 8 * 1024 * 1024) {
   let crc = ~0
   for (let off = 0; off < blob.size; off += chunkBytes) {
     crc = crc32Update(crc, new Uint8Array(await blob.slice(off, off + chunkBytes).arrayBuffer()))

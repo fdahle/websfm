@@ -30,14 +30,6 @@ export const ARCHIVE_EXCLUDE = ['log.ndjson', 'log.json']
 // (the store treats absence as "not computed yet"), products regenerate.
 export const ARCHIVE_DERIVED_DIRS = ['images-derived', 'depthmaps', 'products']
 
-// ZIP without ZIP64 addresses entries with 32-bit offsets, so the whole archive
-// must stay under 4 GiB. We write plain ZIP (the reader ecosystem is universal
-// and our writer does not emit ZIP64), so this is a hard ceiling rather than a
-// guess — hence a pre-flight check instead of a corrupt file at the 4 GiB mark.
-export const ZIP32_MAX_BYTES = 0xffffffff
-// Headroom for local/central headers + the manifest (~100 bytes per entry).
-const ZIP32_SLACK = 32 * 1024 * 1024
-
 // Should this project-relative path go into the archive?
 export function shouldArchivePath(relPath, { includeDerived = true } = {}) {
   const path = String(relPath || '')
@@ -126,15 +118,11 @@ export function importedProjectName(name, existingNames = []) {
   return candidate
 }
 
-// Pre-flight for the 4 GiB ZIP ceiling → { ok, error }.
+// Pre-flight for a project file → { ok, error }. The archive is ZIP64 past 4 GiB
+// (utils/zip.js), so the only bound is JavaScript's exact integer range for offsets.
 export function archiveSizeVerdict(totalBytes) {
-  if (totalBytes > ZIP32_MAX_BYTES - ZIP32_SLACK) {
-    return {
-      ok: false,
-      error: `project is ${formatBytes(totalBytes)} — too large for a single project file `
-        + `(the ZIP format caps at 4 GB). Exclude cached/derived data, or keep the project `
-        + `in a folder instead.`,
-    }
+  if (!(totalBytes < Number.MAX_SAFE_INTEGER)) {
+    return { ok: false, error: `project is ${formatBytes(totalBytes)}, too large for a project file` }
   }
   return { ok: true }
 }

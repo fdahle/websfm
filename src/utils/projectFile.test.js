@@ -177,6 +177,29 @@ describe('importProjectArchive', () => {
     store.clear()
     await expect(importProjectArchive({
       file: blob(), projectId: 'dst', limits: { maxTotalBytes: 16 },
-    })).rejects.toThrow(/import limit/)
+    })).rejects.toThrow(/beyond the .* available/)
+  })
+})
+
+// Project files saved before the ZIP64 writer came from fflate's streaming Zip: data
+// descriptors after each entry, deflated JSON, stored binaries. They must still open.
+describe('projects saved by the earlier fflate writer', () => {
+  it('import and peek read them through the central directory', async () => {
+    const { Zip, ZipDeflate, ZipPassThrough } = await import('fflate')
+    const parts = []
+    const zip = new Zip((err, chunk) => { if (err) throw err; if (chunk) parts.push(chunk.slice()) })
+    const add = (name, data, deflate) => { const e = deflate ? new ZipDeflate(name, { level: 6 }) : new ZipPassThrough(name); zip.add(e); e.push(data, true) }
+    const enc = new TextEncoder()
+    add(MANIFEST_NAME, enc.encode(JSON.stringify(MANIFEST)), true)
+    add('project.json', enc.encode(JSON.stringify({ id: 'x', name: 'Old' })), true)
+    add('recon.c1.pos.bin', new Uint8Array(new Float64Array([1.5, -2.25]).buffer), false)
+    zip.end()
+    const file = new Blob(parts)
+    expect(await peekArchiveManifest(file)).toEqual(MANIFEST)
+    store.clear()
+    const r = await importProjectArchive({ file, projectId: 'dst' })
+    expect(r.entryCount).toBe(2)
+    expect(JSON.parse(await store.get('project.json').text())).toEqual({ id: 'x', name: 'Old' })
+    expect([...new Float64Array(await store.get('recon.c1.pos.bin').arrayBuffer())]).toEqual([1.5, -2.25])
   })
 })

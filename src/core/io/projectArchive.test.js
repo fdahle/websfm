@@ -99,11 +99,10 @@ describe('naming', () => {
 })
 
 describe('archiveSizeVerdict', () => {
-  it('accepts a normal project and refuses past the ZIP32 ceiling', () => {
+  it('accepts projects past 4 GB (the archive is ZIP64 there)', () => {
     expect(archiveSizeVerdict(500 * 1024 * 1024).ok).toBe(true)
-    const bad = archiveSizeVerdict(5 * 1024 ** 3)
-    expect(bad.ok).toBe(false)
-    expect(bad.error).toMatch(/4 GB/)
+    expect(archiveSizeVerdict(50 * 1024 ** 3).ok).toBe(true)
+    expect(archiveSizeVerdict(Infinity).ok).toBe(false)
   })
 })
 
