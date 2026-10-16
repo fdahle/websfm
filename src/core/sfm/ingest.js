@@ -14,7 +14,7 @@
 
 import { resolveK } from './reconstruction.js'
 import { undistortPixel, undistortKeypoint, distortionOf, FISHEYE_MAX_RAY_DEG } from './distortion.js'
-import { fitFundamental, sampsonRmsPx } from './fundamental.js'
+import { fitFundamental } from './fundamental.js'
 import { canonicalFrame, scanToCanonical } from './fiducials.js'
 import { calibratedFiducialPairs } from './fiducialModel.js'
 import { mapPositions, kpX, kpY } from './keypointSet.js'
@@ -237,19 +237,23 @@ export function undistortAtIngest({ imgs, Kmap, moveGcpObs, log }) {
 // ── Re-fit pairwise F on the moved keypoints ─────────────────────────────
 // Each pair's F was fitted during matching, on RAW (distorted / scan-space)
 // keypoints. Everything that reads e.F — the init pair's essential
-// decomposition — would otherwise keep
+// decomposition, the focal estimate from pairs — would otherwise keep
 // operating on the stale geometry, which for a wide-angle lens (tens of px of
 // displacement) systematically bends every relative rotation. The stored
 // matches are already RANSAC inliers, so a trimmed least-squares 8-point on
 // the moved coordinates is enough — no re-RANSAC. Applies to both keypoint
 // moves above: Brown undistortion and the film scan→canonical affine.
+//
+// The re-fit is lazy: `e.F` becomes a property that fits on its first read and
+// keeps the result. Only a few dozen pairs are ever read (the probed init
+// candidates), and re-fitting all of them was most of SfM's start-up on a big block
+// (900 cameras: 46 of 49 s for 17,870 pairs). The values are the eager fit's.
 // `movedUuids`: the images whose keypoints moved (undistortion + film frames).
 // `bridgePairs` (the weak PnP bridges) only lose their dropped-keypoint matches;
 // nothing reads their F.
 export function refitMovedPairs({ donePairs, bridgePairs = [], movedUuids, imageByUuid, log }) {
   if (movedUuids.size > 0) {
-    let refit = 0, skipped = 0, droppedMatches = 0
-    const before = [], after = []
+    let pending = 0, skipped = 0, droppedMatches = 0
     const bridges = new Set(bridgePairs)
     for (const e of [...donePairs, ...bridgePairs]) {
       if (!movedUuids.has(e.idA) && !movedUuids.has(e.idB)) continue
@@ -258,38 +262,58 @@ export function refitMovedPairs({ donePairs, bridgePairs = [], movedUuids, image
       // A keypoint dropped at ingest (a fisheye ray far off-axis) is NaN: its matches
       // leave the pair here, once, so no init/PnP/triangulation path ever reads one.
       const m = asPairList(e.matches)
-      const kept = [], ptsA = [], ptsB = []
+      const kept = []
       for (let i = 0; i < m.length; i++) {
         const xa = kpX(iA.kp, m.a(i)), xb = kpX(iB.kp, m.b(i))
         // eslint-disable-next-line no-self-compare
         if (xa !== xa || xb !== xb) continue
         kept.push(m.a(i), m.b(i))
-        ptsA.push({ x: xa, y: kpY(iA.kp, m.a(i)) })
-        ptsB.push({ x: xb, y: kpY(iB.kp, m.b(i)) })
       }
-      if (ptsA.length < m.length) {
-        droppedMatches += m.length - ptsA.length
+      const n = kept.length / 2
+      if (n < m.length) {
+        droppedMatches += m.length - n
         e.matches = new Uint32PairList(Uint32Array.from(kept))
-        if (e.inlierCount != null) e.inlierCount = ptsA.length
+        if (e.inlierCount != null) e.inlierCount = n
       }
       if (!e.F || bridges.has(e)) continue
-      if (ptsA.length < 8) { skipped++; continue }
-      const fit = fitFundamental(ptsA, ptsB)
-      if (!fit) { skipped++; continue }
-      before.push(sampsonRmsPx(e.F, ptsA, ptsB))
-      e.F = fit.F
-      after.push(fit.rmsPx)
-      refit++
+      if (n < 8) { skipped++; continue }
+      refitOnRead(e, iA, iB)
+      pending++
     }
     if (droppedMatches > 0) {
       log(`dropped ${droppedMatches} match(es) on fisheye keypoints too far off-axis`, 'info', 'Reconstruction')
     }
-    if (refit > 0) {
-      const med = (a) => [...a].sort((x, y) => x - y)[a.length >> 1]
-      log(`re-fitted F on undistorted keypoints for ${refit} pair(s)`
-        + `${skipped ? ` (${skipped} skipped)` : ''} — median epipolar RMS `
-        + `${med(before).toFixed(2)}px → ${med(after).toFixed(2)}px (stale distorted-space fit replaced)`,
-        'info', 'Reconstruction')
+    if (pending > 0) {
+      log(`F of ${pending} pair(s) re-fitted on the moved keypoints when first read`
+        + `${skipped ? ` (${skipped} skipped)` : ''} (the distorted-space fit is stale)`, 'info', 'Reconstruction')
     }
   }
+}
+
+// Whether a pair has an F, without fitting a lazy one (a filter over every pair must
+// not re-fit them all).
+export function hasFundamental(e) {
+  return Object.getOwnPropertyDescriptor(e, 'F')?.get ? true : !!e.F
+}
+
+function refitOnRead(e, iA, iB) {
+  let F = e.F, fresh = false
+  Object.defineProperty(e, 'F', {
+    configurable: true, enumerable: true,
+    get() {
+      if (!fresh) {
+        fresh = true
+        const m = asPairList(e.matches)
+        const ptsA = new Array(m.length), ptsB = new Array(m.length)
+        for (let i = 0; i < m.length; i++) {
+          ptsA[i] = { x: kpX(iA.kp, m.a(i)), y: kpY(iA.kp, m.a(i)) }
+          ptsB[i] = { x: kpX(iB.kp, m.b(i)), y: kpY(iB.kp, m.b(i)) }
+        }
+        const fit = fitFundamental(ptsA, ptsB)
+        if (fit) F = fit.F
+      }
+      return F
+    },
+    set(v) { F = v; fresh = true },
+  })
 }

@@ -18,6 +18,7 @@
 // over all guessed images together.
 
 import { essentialSingularValues } from './rotations.js'
+import { hasFundamental } from './ingest.js'
 
 export const FOCAL_FROM_PAIRS_DEFAULTS = {
   maxPairs: 40,       // strongest pairs used per group
@@ -82,7 +83,7 @@ export function estimateFocalsFromPairs({ imgs, Kmap, pairs, isGuess, groupOf, d
   if (!guessed.length) return []
   const guessedSet = new Set(guessed)
   const usable = pairs
-    .filter((e) => e.F && !e.weak && guessedSet.has(e.idA) && guessedSet.has(e.idB))
+    .filter((e) => hasFundamental(e) && !e.weak && guessedSet.has(e.idA) && guessedSet.has(e.idB))
     .sort((a, b) => b.inlierCount - a.inlierCount)
   const global = estimateScale(usable, dims, Kmap, c)
   const byGroup = new Map()

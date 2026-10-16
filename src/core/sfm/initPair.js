@@ -5,6 +5,7 @@ import { asPairList } from './matchCodec.js'
 import { I3, essentialSingularValues } from './rotations.js'
 import { toNorm, camToP34flat } from './tracks.js'
 import { projectPoint, medianTriangulationAngle } from './geometry.js'
+import { hasFundamental } from './ingest.js'
 
 // Initial-pair selection, lifted verbatim out of reconstruct(). A two-view seed
 // is the single best predictor of how well the model grows, so we probe every
@@ -152,7 +153,7 @@ export async function selectInitPair(
   const pairId = (a, b) => (a < b ? `${a}--${b}` : `${b}--${a}`)
   const eligible = donePairs
     .filter((e) => e.inlierCount >= minInitInliers
-      && Kmap.has(e.idA) && Kmap.has(e.idB) && e.F && !excluded.has(pairId(e.idA, e.idB)))
+      && Kmap.has(e.idA) && Kmap.has(e.idB) && hasFundamental(e) && !excluded.has(pairId(e.idA, e.idB)))
     .sort((a, b) => b.inlierCount - a.inlierCount)
   // A seed retry (sfm.js) passes the images earlier attempts registered: a new seed
   // must bring at least one image none of them reached, or the retry re-grows the same
