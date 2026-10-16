@@ -22,6 +22,8 @@ import { compactTrackRecords } from './resultCodec.js'
 import { createTrackStore, makeImageIds } from './trackStore.js'
 import { hasKp, kpX, kpY } from './keypointSet.js'
 import { registrationOutliers, deregisterCamera } from './registrationCheck.js'
+import { estimateFocalsFromPairs } from './focalFromPairs.js'
+import { isFisheyeModel } from './distortion.js'
 import { numStats, fmtStats, modelResiduals as residualsOf, trackHist } from './modelStats.js'
 import { createSelfCalFold } from './selfCalFold.js'
 import { createBundleSession } from './bundleSession.js'
@@ -235,6 +237,36 @@ export async function reconstructSingleModel(input, hooks = {}) {
       donePairs, bridgePairs: weakPairs, imageByUuid, log,
       movedUuids: new Set([...undistortedUuids, ...fiducialTransforms.keys()]),
     })
+
+    // No focal in the metadata (resolveK's default-FOV guess): estimate it from the
+    // verified pair geometry before registration builds on it (focalFromPairs.js).
+    // Film scans and fisheye lenses keep their own paths, and self-calibration 'none'
+    // (the user's "leave the intrinsics as they are") keeps the guess too.
+    if (defaultKCount > 0 && cfg.refineIntrinsics !== 'none') {
+      const imgByUuid = new Map(imgs.map((im) => [im.uuid, im]))
+      const set = estimateFocalsFromPairs({
+        imgs, Kmap, pairs: donePairs,
+        isGuess: (u) => {
+          const im = imgByUuid.get(u)
+          return Kmap.get(u)?.source?.startsWith('default') && im?.sensor?.kind !== 'film'
+            && !isFisheyeModel(im?.sensor?.distortionModel)
+        },
+        groupOf: (u) => imgByUuid.get(u)?.sensorId ?? `image:${u}`,
+        dims: (u) => {
+          const im = imgByUuid.get(u), K = Kmap.get(u)
+          return { width: im?.sensor?.width || im?.meta?.width || 2 * K.cx, height: im?.sensor?.height || im?.meta?.height || 2 * K.cy }
+        },
+      })
+      for (const g of set) {
+        const rec = intrinsicsRecord.get(g.group)
+        const first = imgs.find((im) => (im.sensorId ?? `image:${im.uuid}`) === g.group)
+        if (rec && first) { rec.fxNominal = Kmap.get(first.uuid).fx; rec.source = Kmap.get(first.uuid).source }
+        log(`focal from pair geometry — ${g.images} image(s) without a focal in their metadata`
+          + `${first?.sensor?.label ? ` (${first.sensor.label})` : ''}: f = ${g.s.toFixed(3)} × image size`
+          + ` (${first ? Kmap.get(first.uuid).fx.toFixed(0) : '?'}px), ${g.n} of ${g.of} pair(s) agree within 10 %`
+          + `${g.own ? '' : ' (pooled over all such images)'}`, 'info', 'Reconstruction')
+      }
+    }
 
     // 'auto' self-calibration → a concrete mode, now that ingest knows whether a
     // calibrated distortion model exists (runRecord.js resolveRefineIntrinsics).

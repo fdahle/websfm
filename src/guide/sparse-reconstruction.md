@@ -47,7 +47,16 @@ set to 0.
 
 ## Check the result
 Camera positions should follow the capture path, most useful images should register,
-and the cloud should have coherent shape. In the Quality Report, check reprojection
+and the cloud should have coherent shape.
+
+Two log lines report checks the run makes on its own. Images with no focal length in
+their metadata get one estimated from the verified pairs before registration (**focal
+from pair geometry**); without it, the default guess can be far enough off to bend the
+whole model. After bundle adjustment the **registration check** compares every camera
+with the geometry of its strongest image pairs. A camera that disagrees was registered
+in the wrong place: it is taken out, registered again against the finished model, and
+left out if it still disagrees, because a missing camera does less harm than a
+misplaced one. In the Quality Report, check reprojection
 error, track lengths, calibration drift, coverage, and disconnected components before
 continuing to depth maps.
 

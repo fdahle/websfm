@@ -31,9 +31,12 @@ the normal case; they differ only for anamorphic pixels or a non-square scan.
 sensitive to. Get it wrong and the geometry does not simply scale — it *bows*:
 a too-short focal length makes a flat surface reconstruct as a dish, and the same
 error propagates straight into depth maps and the DEM. WebSfM resolves $f_x$ from
-EXIF plus the sensor definition where possible, and falls back to a default field
-of view (focal ≈ image width) only when nothing better exists — a fallback that
-is logged loudly, because it is a guess.
+EXIF plus the sensor definition where possible. When an image carries no focal at
+all, it estimates one from the image pairs before reconstruction starts: for the right
+focal length, every verified pair's [essential matrix](help:essential-matrix) has two
+equal singular values, and the value most of the strongest pairs agree on pins it to a few
+percent. Only when the pairs disagree, or are too few, does it fall back to a default
+field of view (focal ≈ image width), logged loudly because it is a guess.
 
 Because of that sensitivity, focal length is the first parameter
 [self-calibration](help:self-calibration) refines, and usually the only one worth
