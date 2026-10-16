@@ -61,3 +61,48 @@ describe('loadCrsRegistry', () => {
     vi.unstubAllGlobals()
   })
 })
+
+describe('catalog fallback in ensureProjection', () => {
+  // Fresh modules per test: the registry promise and the projection registry are
+  // module-level singletons.
+  async function freshModules() {
+    vi.resetModules()
+    return { registry: await import('./crsRegistry.js'), crs: await import('./crs.js') }
+  }
+  const catalog = {
+    999003: { code: '999003', name: 'Catalog-only CRS', kind: 'CRS-PROJCRS',
+      proj4: '+proj=tmerc +lat_0=0 +lon_0=9 +k=1 +x_0=500000 +y_0=0 +datum=WGS84 +units=m +no_defs' },
+  }
+  const respond = (url) => {
+    if (String(url).includes('epsg.io')) throw new TypeError('Failed to fetch')
+    return { ok: true, json: async () => catalog }
+  }
+
+  it('resolves a code from the bundled catalog without calling epsg.io', async () => {
+    const fetchMock = vi.fn(async (url) => respond(url))
+    vi.stubGlobal('fetch', fetchMock)
+    const { crs } = await freshModules()
+    await crs.ensureProjection('EPSG:999003')
+    expect(crs.crsInfo('EPSG:999003').name).toBe('Catalog-only CRS')
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('epsg.io'))).toBe(false)
+    vi.unstubAllGlobals()
+  })
+
+  it('says a code outside the catalog needs a connection when epsg.io is unreachable', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url) => respond(url)))
+    const { crs } = await freshModules()
+    await expect(crs.ensureProjection('EPSG:999004')).rejects.toThrow(/not in the built-in catalog/)
+    vi.unstubAllGlobals()
+  })
+
+  it('retries the catalog after a failed load instead of memoising the failure', async () => {
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockImplementation(async (url) => respond(url))
+    vi.stubGlobal('fetch', fetchMock)
+    const { registry } = await freshModules()
+    await expect(registry.findCrsRecord('EPSG:999003')).rejects.toThrow()
+    expect((await registry.findCrsRecord('EPSG:999003'))?.name).toBe('Catalog-only CRS')
+    vi.unstubAllGlobals()
+  })
+})

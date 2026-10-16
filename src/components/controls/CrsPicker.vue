@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, watch, useId, onBeforeUnmount } from 'vue'
-import { CRS_CATALOG, ensureProjection } from '../../core/crs.js'
+import { CRS_CATALOG, crsInfo, ensureProjection } from '../../core/crs.js'
 import { loadCrsRegistry, searchCrsRecords } from '../../core/crsRegistry.js'
 
 const props = defineProps({
@@ -24,6 +24,7 @@ const activeIndex = ref(-1)
 // input: hosts like ModalShell scroll their body (overflow clips an absolute
 // list) and may sit in a transformed ancestor (which re-roots `fixed`).
 const comboboxEl = ref(null)
+const inputEl = ref(null)
 const resultsEl = ref(null)
 const listStyle = ref({})
 const LIST_MAX_HEIGHT = 310
@@ -54,9 +55,12 @@ watch(open, (isOpen) => {
 })
 onBeforeUnmount(() => trackPlacement(false))
 
+// The name comes from the presets, the loaded EPSG index, or a definition this
+// session already resolved (crsInfo falls back to the bare code).
 function labelFor(code) {
   const known = [...presets, ...registry.value].find((c) => c.code === code)
-  return known ? `${known.code} — ${known.name}` : code
+  const name = known?.name ?? crsInfo(code).name
+  return name && name !== code ? `${code} — ${name}` : code
 }
 
 const numericCode = computed(() => {
@@ -76,7 +80,14 @@ const results = computed(() => {
 watch(() => props.modelValue, (value) => {
   selectedLabel.value = labelFor(value)
   if (!open.value) query.value = selectedLabel.value
-})
+  nameFromRegistry()
+}, { immediate: true })
+
+// A code outside the presets would otherwise show bare ("EPSG:6341") until the
+// field is focused; load the index for its name only then.
+function nameFromRegistry() {
+  if (selectedLabel.value === props.modelValue && /^EPSG:\d+$/.test(props.modelValue)) ensureRegistry()
+}
 
 async function ensureRegistry() {
   if (registry.value.length || loading.value) return
@@ -112,11 +123,16 @@ async function choose(record) {
   error.value = 'Validating coordinate system…'
   try {
     await ensureProjection(record.code, record.def ? record : null)
-    emit('update:modelValue', record.code)
-    selectedLabel.value = `${record.code} — ${record.name}`
-    query.value = selectedLabel.value
+    // Show the current value until the parent takes the new one (the modelValue
+    // watch relabels): it may ask first, and a cancel must not leave the field
+    // naming a CRS the project does not have.
     error.value = ''
     open.value = false
+    query.value = selectedLabel.value
+    // Done with the field: a confirm dialog would hand focus back here on close,
+    // and focusing reopens the list.
+    inputEl.value?.blur()
+    emit('update:modelValue', record.code)
   } catch (err) {
     error.value = err?.message || `Could not resolve ${record.code}`
   } finally {
@@ -155,6 +171,7 @@ function onFocusout(event) {
     <div ref="comboboxEl" class="crs-combobox">
       <span class="search-icon" aria-hidden="true">⌕</span>
       <input
+        ref="inputEl"
         class="crs-input"
         role="combobox"
         aria-label="Coordinate reference system"
@@ -174,9 +191,11 @@ function onFocusout(event) {
       <span v-if="loading || applying" class="crs-spinner" aria-hidden="true"></span>
 
       <Teleport to="body">
+      <!-- data-modal-exempt: teleported out of its dialog, so the modal focus trap
+           (utils/modalFocus.js) would otherwise make the list inert and unclickable. -->
       <div
         v-if="open && !disabled" ref="resultsEl" :id="listboxId" class="crs-results" role="listbox"
-        :style="listStyle" @mousedown.prevent
+        :style="listStyle" data-modal-exempt @mousedown.prevent
       >
         <button
           v-for="(record, index) in results"

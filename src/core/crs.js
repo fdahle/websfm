@@ -14,10 +14,12 @@ import { get as getOlProjection } from 'ol/proj'
 // module (it already carries OpenLayers registration and an epsg.io fetch), so
 // it reaches the storage layer directly rather than duplicating file I/O.
 import { readAppJson, writeAppJson } from '../utils/opfs.js'
+import { findCrsRecord } from './crsRegistry.js'
 
 // ── Catalog ─────────────────────────────────────────────────────────────────
 // Curated entries shown in the CRS picker. Any other EPSG code can still be used
-// via ensureProjection() (UTM is generated; everything else is fetched).
+// via ensureProjection() (UTM is generated; the rest comes from the bundled EPSG
+// index, with epsg.io as the last resort).
 //
 // axes: labels for the three components, used so the column mapper / readouts
 //       say "Lon/Lat" for geographic and "Easting/Northing" for projected.
@@ -220,7 +222,8 @@ function applyDef(code, def, opts) {
 }
 
 // Make sure `code` is usable by proj4 and OpenLayers. Resolves the definition
-// from the catalog, a generated UTM def, the OPFS cache, or epsg.io.
+// from the catalog, a generated UTM def, the OPFS cache, the bundled EPSG index,
+// or epsg.io.
 export async function ensureProjection(code, supplied = null) {
   if (registered.has(code)) return true
 
@@ -248,10 +251,22 @@ export async function ensureProjection(code, supplied = null) {
   const cache = await loadDefCache()
   if (cache[code]) { applyDef(code, cache[code]); return true }
 
-  // Last resort: fetch the proj4 string from epsg.io (one network call, cached).
+  // The bundled EPSG catalog (the CRS picker's index) covers nearly every code and
+  // works offline; it also carries the name and area of use.
+  const listed = await findCrsRecord(code).catch(() => null)
+  if (listed) return ensureProjection(code, listed)
+
+  // Last resort, for codes newer than the catalog: fetch the proj4 string from
+  // epsg.io (one network call, cached).
   const num = /^EPSG:(\d+)$/.exec(code)?.[1]
   if (!num) throw new Error(`Unsupported CRS code: ${code}`)
-  const res = await fetch(`https://epsg.io/${num}.proj4`)
+  let res
+  try {
+    res = await fetch(`https://epsg.io/${num}.proj4`)
+  } catch {
+    throw new Error(`${code} is not in the built-in catalog and could not be looked up on epsg.io. `
+      + 'If you are offline, connect once to fetch it; it is remembered afterwards.')
+  }
   if (!res.ok) throw new Error(`Could not resolve ${code} (epsg.io ${res.status})`)
   const def = (await res.text()).trim()
   if (!def.startsWith('+')) throw new Error(`Invalid definition for ${code}`)

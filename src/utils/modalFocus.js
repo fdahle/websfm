@@ -1,5 +1,8 @@
 // One focus owner for both legacy dialogs and ModalShell, including teleported
-// and nested dialogs. Background elements are inert only while a modal is open.
+// and nested dialogs. Background elements are inert only while a modal is open,
+// except layers marked `data-modal-exempt`, which must stay clickable over any
+// dialog: app-level ones (the update prompt, hover help popups) and a dialog's own
+// popups teleported to <body> (the CRS picker's result list).
 export function installModalFocus(doc = document) {
   const selector = '[role="dialog"][aria-modal="true"], [role="alertdialog"][aria-modal="true"]'
   const controls = 'button, input, select, textarea, a[href], [tabindex], [contenteditable="true"]'
@@ -35,7 +38,7 @@ export function installModalFocus(doc = document) {
     restoreInert()
     if (top) {
       for (let node = top; node.parentElement && node !== doc.body; node = node.parentElement) {
-        for (const sibling of node.parentElement.children) if (sibling !== node) {
+        for (const sibling of node.parentElement.children) if (sibling !== node && !sibling.hasAttribute('data-modal-exempt')) {
           inert.set(sibling, sibling.inert)
           sibling.inert = true
         }

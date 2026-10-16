@@ -9,6 +9,7 @@ import registryUrl from 'epsg-index/all.json?url'
 const HORIZONTAL_KINDS = new Set(['CRS-PROJCRS', 'CRS-GEOGCRS', 'CRS-GEOG3DCRS'])
 
 let registryPromise = null
+let recordsByCode = null
 
 function worldExtent(bbox) {
   // epsg-index stores [north, west, south, east].
@@ -40,9 +41,20 @@ export async function loadCrsRegistry() {
       Object.values(index)
         .filter((record) => HORIZONTAL_KINDS.has(record.kind) && (record.proj4 || record.wkt))
         .map(normaliseCrsRecord),
-    )
+    ).catch((error) => {
+      // Don't memoise a failure (e.g. a first load while offline): the next call retries.
+      registryPromise = null
+      throw error
+    })
   }
   return registryPromise
+}
+
+/** The catalog record for `code` ('EPSG:28992'), or null when the catalog lacks it. */
+export async function findCrsRecord(code) {
+  const records = await loadCrsRegistry()
+  if (!recordsByCode) recordsByCode = new Map(records.map((record) => [record.code, record]))
+  return recordsByCode.get(code) ?? null
 }
 
 function searchable(record) {

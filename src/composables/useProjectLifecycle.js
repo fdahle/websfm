@@ -1,7 +1,7 @@
 import { flushPersistence } from '../utils/persistence.js'
 import { computed, nextTick, ref } from 'vue'
 import { storeToRefs } from 'pinia'
-import { ensureProjection } from '../core/crs.js'
+import { crsInfo, ensureProjection } from '../core/crs.js'
 import { formatBytes } from '../core/formatBytes.js'
 import { clearProjectStores, restoreProjectStores } from '../stores/projectStores.js'
 import { loadProgressView } from '../utils/loadProgress.js'
@@ -15,6 +15,7 @@ import { useSensorsStore } from '../stores/useSensorsStore.js'
 import { useGcpsStore } from '../stores/useGcpsStore.js'
 import { useFootprintsStore } from '../stores/useFootprintsStore.js'
 import { usePosesStore } from '../stores/usePosesStore.js'
+import { useReconstructionStore } from '../stores/useReconstructionStore.js'
 import { useLog } from './useLog.js'
 import { showToast } from './useToasts.js'
 import { confirmDialog } from './useConfirmations.js'
@@ -44,9 +45,10 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene, isBusy = 
     openPlan, reconnectProjectFolder, relinkProjectFolder,
     createFolderProject, adoptFolderProject, moveProjectToFolder, moveProjectToBrowser, setProjectCrs,
   } = projectsStore
-  const { reprojectGcps } = useGcpsStore()
-  const { reprojectFootprints } = useFootprintsStore()
-  const { reprojectPoses } = usePosesStore()
+  const gcpsStore = useGcpsStore()
+  const footprintsStore = useFootprintsStore()
+  const posesStore = usePosesStore()
+  const reconstructionStore = useReconstructionStore()
   const {
     projectPickerOpen, newProjectOpen, newProjectCanCancel, saveProjectOpen,
   } = storeToRefs(useModalsStore())
@@ -474,15 +476,41 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene, isBusy = 
   }
 
   // ── Coordinate system ───────────────────────────────────────────────────────
-  // Changing the project CRS re-projects everything stored in it.
+  // Changing the project CRS re-projects everything stored in it, after a
+  // confirmation that says what that touches: a CRS picked by accident while
+  // searching must not silently move every GCP and camera. Resolves true once applied.
   async function handleSetCrs(crs) {
-    if (!currentProjectId.value) return
+    if (!currentProjectId.value) return false
+    const prevCrs = projects.value.find((p) => p.id === currentProjectId.value)?.crs || 'EPSG:4326'
+    if (crs === prevCrs) return false
     await ensureProjection(crs).catch(() => {})
-    await setProjectCrs(currentProjectId.value, crs, async (prevCrs, newCrs) => {
-      await reprojectGcps(prevCrs, newCrs)
-      await reprojectFootprints(prevCrs, newCrs)
-      await reprojectPoses(prevCrs, newCrs)
+    if (!(await confirmDialog({
+      title: 'Change the project CRS?',
+      message: crsChangeMessage(prevCrs, crs),
+      confirmLabel: 'Change CRS',
+    }))) return false
+    await setProjectCrs(currentProjectId.value, crs, async (fromCrs, toCrs) => {
+      await gcpsStore.reprojectGcps(fromCrs, toCrs)
+      await footprintsStore.reprojectFootprints(fromCrs, toCrs)
+      await posesStore.reprojectPoses(fromCrs, toCrs)
     })
+    log(`Project CRS: ${prevCrs} → ${crs}`, 'info', 'Project')
+    return true
+  }
+
+  function crsChangeMessage(fromCrs, toCrs) {
+    const named = (code) => { const n = crsInfo(code).name; return n && n !== code ? `${code} (${n})` : code }
+    const count = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
+    const polygons = footprintsStore.sets.reduce((n, s) => n + s.footprints.length, 0)
+    const moved = [
+      gcpsStore.gcps.length && count(gcpsStore.gcps.length, 'GCP'),
+      posesStore.poses.length && count(posesStore.poses.length, 'camera position'),
+      polygons && count(polygons, 'footprint polygon'),
+    ].filter(Boolean)
+    return `Switch from ${named(fromCrs)} to ${named(toCrs)}. `
+      + (moved.length ? `${moved.join(', ')} will be reprojected into the new CRS. ` : 'Nothing stored in the project needs reprojecting. ')
+      + (reconstructionStore.georef ? 'The current georeference is cleared; run Georeference again afterwards. ' : '')
+      + 'Imported rasters, DEMs and orthophotos keep the CRS they were made in.'
   }
 
   // The one-click projected CRS offered while the project CRS is geographic
@@ -490,10 +518,10 @@ export function useProjectLifecycle({ resetToViewer, clearViewerScene, isBusy = 
   // by hand; the log line carries the derived value and its inputs.
   async function applyCrsSuggestion(suggestion) {
     if (!suggestion?.code) return
-    log(`Project CRS → ${suggestion.code} (${suggestion.name}), suggested from the median of `
+    if (!(await handleSetCrs(suggestion.code))) return
+    log(`Project CRS ${suggestion.code} (${suggestion.name}) was suggested from the median of `
       + `${suggestion.count} camera position(s) at ${suggestion.lat.toFixed(4)}, ${suggestion.lon.toFixed(4)} (lat, lon)`,
     'info', 'Project')
-    await handleSetCrs(suggestion.code)
   }
 
   // ── Project picker actions ──────────────────────────────────────────────────
