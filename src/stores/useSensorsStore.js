@@ -7,7 +7,7 @@ import * as opfs from '../utils/opfs.js'
 import { createDocumentSaver } from '../utils/documentSaver.js'
 import { useImagesStore } from './useImagesStore.js'
 import { emptyFiducialCalibration, isFiducialCalibrated } from '../core/sfm/fiducialModel.js'
-import { applyFiducialMarks } from '../core/io/fiducialMarks.js'
+import { applyFiducialMarks, planFiducialMarkTargets } from '../core/io/fiducialMarks.js'
 import { normalizeLeverArm } from '../core/sfm/cameraPriors.js'
 import { useProjectsStore } from './useProjectsStore.js'
 
@@ -126,34 +126,78 @@ export const useSensorsStore = defineStore('sensors', () => {
   })
   watch(imageSensorSig, ensureExifSensors)
 
-  // Add sensors parsed from a calibration file. These are not EXIF-grouped
-  // (no signature), so the user assigns images to them manually.
-  async function addSensors(rawSensors) {
-    let added = 0
-    for (const raw of rawSensors) {
-      sensors.value.push({
-        id: crypto.randomUUID(),
-        label: raw.label,
-        width: raw.width ?? null,
-        height: raw.height ?? null,
-        focal: raw.focal ?? null,
-        focalUnit: raw.focalUnit ?? 'px',
-        cx: raw.cx ?? null,
-        cy: raw.cy ?? null,
-        k1: raw.k1 ?? null, k2: raw.k2 ?? null, k3: raw.k3 ?? null,
-        p1: raw.p1 ?? null, p2: raw.p2 ?? null,
-        // Seed the model from whatever coefficients the calibration carried; the
-        // user can change it in the sensor table (D3).
-        distortionModel: raw.distortionModel ?? inferDistortionModel(raw),
-        pixelSize: raw.pixelSize ?? null,
-        signature: null,
-        source: 'imported',
-      })
-      added++
+  // Import ▸ Calibration: `items` = [{ sensor, targetId, imageIds }], where `sensor`
+  // comes from core/io/sensor.js buildSensors and `targetId` / `imageIds` from the
+  // dialog (planSensorImport). A target is updated with the values the file has —
+  // everything it lacks stays — a null target becomes a new sensor; the listed
+  // images are then bound to it. Returns { created, updated, assigned }.
+  async function importSensors(items) {
+    let created = 0, updated = 0, assigned = 0
+    for (const { sensor: raw, targetId, imageIds = [] } of items || []) {
+      let s = targetId ? sensors.value.find((x) => x.id === targetId) : null
+      const isNew = !s
+      if (isNew) {
+        s = {
+          id: crypto.randomUUID(), label: raw.label || `Sensor ${nextSensorNumber()}`,
+          width: null, height: null, focal: null, focalUnit: 'px', cx: null, cy: null,
+          k1: null, k2: null, k3: null, k4: null, k5: null, k6: null, p1: null, p2: null, pixelSize: null,
+          distortionModel: 'pinhole', signature: null, source: 'imported',
+        }
+        sensors.value.push(s)
+        created++
+      } else updated++
+      const set = applyImportedValues(s, raw)
+      for (const id of imageIds) {
+        const img = images.value.find((i) => i.id === id)
+        if (img && img.sensorId !== s.id) { img.sensorId = s.id; assigned++ }
+      }
+      log(`Sensor ${s.label} ${isNew ? 'created' : 'updated'} from file: ${set.join(', ') || 'no values'}`
+        + (imageIds.length ? ` — ${imageIds.length} image(s)` : ''), 'success', 'Sensor')
     }
-    log(`Sensors imported: ${added}`, 'success', 'Sensor')
     await save()
-    return added
+    if (assigned && isPersisting()) await imagesStore.save()
+    return { created, updated, assigned }
+  }
+
+  // Copy an imported sensor's values onto `s`; returns what was set, for the log.
+  function applyImportedValues(s, raw) {
+    const set = []
+    for (const k of ['width', 'height', 'cx', 'cy', ...DISTORTION_COEFFS, 'pixelSize']) {
+      if (raw[k] != null) { s[k] = raw[k]; set.push(k) }
+    }
+    if (raw.focal != null) { s.focal = raw.focal; s.focalUnit = raw.focalUnit; set.push(`focal (${raw.focalUnit})`) }
+    // A named lens model wins (coefficients alone cannot say "fisheye"); otherwise
+    // the tightest model covering the imported coefficients.
+    if (raw.distortionModel) { s.distortionModel = raw.distortionModel; set.push(`lens model ${raw.distortionModel}`) }
+    else if (DISTORTION_COEFFS.some((k) => raw[k] != null)) s.distortionModel = inferDistortionModel(s)
+    const focalMm = raw.focal != null && raw.focalUnit === 'mm' ? raw.focal : null
+    if (raw.marks?.length) {
+      // Certificate marks named by position: each is its own slot, so the sensor
+      // comes out calibrated (validate in Calibrate fiducials).
+      s.fiducialCalibration = applyFiducialMarks(s, { marks: raw.marks, focalMm, ppxMm: raw.ppxMm, ppyMm: raw.ppyMm })
+      s.kind = 'film'
+      if (s.fiducialCalibration.focalMm > 0) { s.focal = s.fiducialCalibration.focalMm; s.focalUnit = 'mm' }
+      set.push(`${raw.marks.length} fiducial marks`)
+    } else if (s.kind === 'film' && (focalMm != null || raw.ppxMm != null || raw.ppyMm != null)) {
+      const cal = (s.fiducialCalibration ??= emptyFiducialCalibration())
+      if (focalMm != null) cal.focalMm = focalMm
+      if (raw.ppxMm != null) cal.ppxMm = raw.ppxMm
+      if (raw.ppyMm != null) cal.ppyMm = raw.ppyMm
+      cal.fit = null
+    }
+    if (raw.ppxMm != null || raw.ppyMm != null) {
+      if (s.kind === 'film') set.push('principal point (mm)')
+      // A digital sensor keeps its principal point in pixels: convert about the
+      // image centre (mm y points up, pixel y down) when the sizes are known.
+      else if (s.pixelSize > 0 && s.width > 0 && s.height > 0) {
+        s.cx = s.width / 2 + (raw.ppxMm ?? 0) / s.pixelSize
+        s.cy = s.height / 2 - (raw.ppyMm ?? 0) / s.pixelSize
+        set.push('principal point (mm → px)')
+      } else {
+        log(`Sensor ${s.label}: principal point in mm skipped — needs a pixel size and the image size`, 'warn', 'Sensor')
+      }
+    }
+    return set
   }
 
   // Import externally-id'd camera groups and bind matched images in one pass.
@@ -330,20 +374,16 @@ export const useSensorsStore = defineStore('sensors', () => {
     if (isPersisting()) imagesStore.save()
   }
 
-  // Import ▸ Camera Fiducials: `groups` from core/io/fiducialMarks.js. A group
-  // goes to the sensor with its label (case-insensitive); a lone group with no
-  // matching label (or no sensor column) goes to the only film sensor, else the
-  // only sensor. Returns the number of sensors updated.
-  function importFiducialMarks(groups) {
+  // Import ▸ Camera Fiducials: `groups` from core/io/fiducialMarks.js, applied to
+  // `targetIds[i]` (the import dialog's choice; planFiducialMarkTargets when absent).
+  // Returns the number of sensors updated.
+  function importFiducialMarks(groups, targetIds = planFiducialMarkTargets(groups, sensors.value)) {
     const list = groups || []
-    const film = sensors.value.filter((s) => s.kind === 'film')
-    const sole = film.length === 1 ? film[0] : sensors.value.length === 1 ? sensors.value[0] : null
     let applied = 0
     const unmatched = []
-    for (const g of list) {
-      const lc = g.sensor.toLowerCase()
-      const s = (lc && sensors.value.find((x) => x.label.toLowerCase() === lc)) || (list.length === 1 ? sole : null)
-      if (!s || !g.marks.length) { unmatched.push(g.sensor || '(no sensor column)'); continue }
+    list.forEach((g, i) => {
+      const s = targetIds[i] ? sensors.value.find((x) => x.id === targetIds[i]) : null
+      if (!s || !g.marks.length) { unmatched.push(g.sensor || '(no sensor column)'); return }
       const cal = applyFiducialMarks(s, g)
       s.kind = 'film'
       s.fiducialCalibration = cal
@@ -351,7 +391,7 @@ export const useSensorsStore = defineStore('sensors', () => {
       log(`Sensor ${s.label}: ${g.marks.length} fiducial mark(s) imported`
         + (isFiducialCalibrated(cal) ? ' — validate them in Calibrate fiducials' : ''), 'success', 'Sensor')
       applied++
-    }
+    })
     if (unmatched.length) log(`Camera fiducials: no sensor matched ${unmatched.join(', ')}`, 'warn', 'Sensor')
     if (applied) { save(); if (isPersisting()) imagesStore.save() }
     return applied
@@ -412,7 +452,7 @@ export const useSensorsStore = defineStore('sensors', () => {
     sensors,
     imageCount,
     ensureExifSensors,
-    addSensors,
+    importSensors,
     importCameraGroups,
     updateSensor,
     applyFilmFormat,

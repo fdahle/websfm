@@ -64,6 +64,9 @@ export const useModalsStore = defineStore('modals', () => {
   // tabular import modals ask their "Import as" question prominently only in
   // the sniffed case; a declared kind gets a one-line correction link instead.
   const importKindDeclared  = ref(false)
+  // Fiducial import preview: { kind: 'image', fileName, rows, layout } |
+  // { kind: 'camera', fileName, groups } while open, else null.
+  const fiducialImportData  = ref(null)
   const importKindOpen      = ref(false)  // "what is this dropped file?" chooser
   const importKindFile      = ref(null)   // the File awaiting a kind choice, or null
   const importCloudOpen     = ref(false)  // point-cloud / mesh import settings
@@ -141,6 +144,7 @@ export const useModalsStore = defineStore('modals', () => {
     cameraImportName,
     cameraImportMode,
     importKindDeclared,
+    fiducialImportData,
     importKindOpen,
     importKindFile,
     importCloudOpen,

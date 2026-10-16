@@ -62,6 +62,14 @@ enabled control points, each marked in two registered images; more well-distribu
 control is far better. Spread points across the area and elevation range, and keep
 independent checkpoints out of the fit when you need an honest accuracy test.
 
+**Import → GCP File** reads a table with a point name and its coordinates, optionally
+with one row per image the point is marked in (image name plus pixel x/y). When a file
+carries several coordinate pairs, the dialog takes longitude/latitude (and preselects
+WGS 84) over a projected pair such as `x_map`/`y_map`. A bare `x`/`y` next to an image
+column is read as the pixel position. Change any column it guessed before importing.
+A file with image marks but no coordinates adds those marks to the points of the same
+name. Names not yet in the project become markers, which are never used as control.
+
 To place marks, open an image and choose **Tools → Georeferencing → Edit GCPs**: a
 click on the image then marks the GCP selected in the sidebar, or adds a new one. With
 the 2D map in front, the same button places and moves the surveyed points on the map

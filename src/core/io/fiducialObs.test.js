@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseFiducialObs, guessMapping } from './fiducialObs.js'
+import { parseFiducialObs, guessMapping, previewFiducialObs } from './fiducialObs.js'
 
 describe('parseFiducialObs', () => {
   it('parses a headered CSV', () => {
@@ -31,5 +31,52 @@ describe('parseFiducialObs', () => {
   it('maps alternate header names (mark / u / v)', () => {
     const map = guessMapping(['photo', 'mark', 'u', 'v'], 4, true, { positional: false })
     expect(map).toEqual({ image: 0, fiducial: 1, px: 2, py: 3 })
+  })
+})
+
+// One image per row with an x/y column per mark position (the casa_grande
+// preprocessing output: detected_fiducial_markers.csv).
+describe('parseFiducialObs — one image per row', () => {
+  const text = [
+    'image_id,corner_top_left_x,corner_top_left_y,corner_top_right_x,corner_top_right_y,corner_bottom_left_x,'
+    + 'corner_bottom_left_y,corner_bottom_right_x,corner_bottom_right_y,midside_top_x,midside_top_y,midside_bottom_x,'
+    + 'midside_bottom_y,midside_left_x,midside_left_y,midside_right_x,midside_right_y,principal_point_x,principal_point_y',
+    'ARBCSRD00010006.tif,329.75,329.74,8809.66,329.69,330.28,8810.29,8809.56,8809.25,4568.68,169.96,4569.51,8969.52,'
+    + '168.47,4570.89,8969.09,4569.82,4569.38,4569.9',
+    'ARBCSRD00010007.tif,329.66,329.89,8809.47,329.73,,,8809.52,8809.46,4568.51,170.06,4569.3,8969.41,168.32,4570.92,'
+    + '8968.87,4569.93,4569.21,4569.98',
+  ].join('\n')
+
+  it('spreads each row into one mark per position, named by its slot', () => {
+    const { rows, layout } = parseFiducialObs(text)
+    expect(layout).toBe('wide')
+    const first = rows.filter((r) => r.imageName === 'ARBCSRD00010006.tif')
+    expect(first).toHaveLength(8)
+    expect(first.find((r) => r.fidId === 'corner-tl')).toEqual({ imageName: 'ARBCSRD00010006.tif', fidId: 'corner-tl', px: 329.75, py: 329.74 })
+    expect(first.find((r) => r.fidId === 'side-right')).toMatchObject({ px: 8969.09, py: 4569.82 })
+  })
+
+  it('skips a blank mark and ignores the principal-point columns', () => {
+    const { rows } = parseFiducialObs(text)
+    const second = rows.filter((r) => r.imageName === 'ARBCSRD00010007.tif')
+    expect(second.map((r) => r.fidId)).not.toContain('corner-bl')
+    expect(second).toHaveLength(7)
+    expect(rows.some((r) => r.px === 4569.38)).toBe(false)
+  })
+})
+
+describe('previewFiducialObs', () => {
+  const images = [{ id: 1, name: 'scan_01.tif', fiducialDetections: [{ slot: 'corner-tl' }] }, { id: 2, name: 'scan_02.tif' }]
+  const rows = [
+    { imageName: 'scan_01.tif', fidId: 'corner-tl', px: 1, py: 2 },
+    { imageName: 'scan_01.tif', fidId: 'corner-tr', px: 3, py: 4 },
+    { imageName: 'SCAN_02.jpg', fidId: 'corner-tl', px: 5, py: 6 },
+    { imageName: 'other.tif', fidId: 'corner-tl', px: 7, py: 8 },
+  ]
+  it('groups by file, matches images like the importer and counts replaced slots', () => {
+    const p = previewFiducialObs(rows, images)
+    expect(p.map((g) => [g.fileName, g.imageId, g.marks.length, g.replaces])).toEqual([
+      ['scan_01.tif', 1, 2, 1], ['SCAN_02.jpg', 2, 1, 0], ['other.tif', null, 1, 0],
+    ])
   })
 })

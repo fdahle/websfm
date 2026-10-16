@@ -93,3 +93,17 @@ export function applyFiducialMarks(sensor, group) {
     scanPitchMm: old?.scanPitchMm ?? null, fit: null,
   }
 }
+
+// The sensor each parsed group goes to (an id, or null when none fits): the sensor
+// with the group's label (case-insensitive); a lone group with no matching label
+// (or no sensor column) goes to the only film sensor, else the only sensor.
+export function planFiducialMarkTargets(groups, sensors) {
+  const list = groups || []
+  const film = sensors.filter((s) => s.kind === 'film')
+  const sole = film.length === 1 ? film[0] : sensors.length === 1 ? sensors[0] : null
+  return list.map((g) => {
+    const lc = g.sensor.toLowerCase()
+    const s = (lc && sensors.find((x) => x.label.toLowerCase() === lc)) || (list.length === 1 ? sole : null)
+    return s?.id ?? null
+  })
+}

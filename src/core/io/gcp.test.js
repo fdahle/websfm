@@ -3,6 +3,7 @@ import {
   sniffDelimiter,
   parseRows,
   guessMapping,
+  guessGcpCrs,
   buildGcps,
   hasGcpElevation,
   normalizeGcpRole,
@@ -124,10 +125,40 @@ describe('guessMapping', () => {
     expect(m).toMatchObject({ name: 0, x: 1, y: null, z: null })
   })
 
-  it('fills unmatched roles positionally around header-matched ones', () => {
-    // Header only names z; name/x/y fall back to free columns 0/1/2.
+  it('leaves unknown columns unassigned once the header names any column', () => {
+    // Header only names z; a, b, c are not guessed as name / x / y by position.
     const m = guessMapping(['a', 'b', 'c', 'elevation'], 4, true)
-    expect(m).toMatchObject({ z: 3, name: 0, x: 1, y: 2 })
+    expect(m).toMatchObject({ z: 3, name: null, x: null, y: null })
+  })
+
+  it('falls back to name, x, y, z by position when the header names nothing', () => {
+    expect(guessMapping(['a', 'b', 'c', 'd'], 4, true)).toMatchObject({ name: 0, x: 1, y: 2, z: 3 })
+  })
+
+  // casa_grande's gcp.csv: pixel x/y per image, ground in UTM and lon/lat, accuracies.
+  it('reads image observations with several ground coordinate pairs', () => {
+    const header = ['gcp_label', 'image_file_name', 'x', 'y', 'x_map', 'y_map', 'lon', 'lat', 'elev', 'x_map_acc', 'y_map_acc', 'elev_acc']
+    const m = guessMapping(header, header.length, true)
+    expect(m).toMatchObject({
+      name: 0, image: 1, px: 2, py: 3, x: 6, y: 7, z: 8, accuracyX: 9, accuracyY: 10, accuracyZ: 11,
+    })
+    expect(guessGcpCrs(header, m)).toBe('EPSG:4326')
+  })
+
+  it('takes a projected pair when there is no lon/lat', () => {
+    const header = ['name', 'image', 'x', 'y', 'easting', 'northing', 'z']
+    expect(guessMapping(header, header.length, true)).toMatchObject({ x: 4, y: 5, px: 2, py: 3, z: 6 })
+  })
+
+  it('reads bare x/y beside an image name and no height as pixel observations', () => {
+    const header = ['point_label', 'image_file_name', 'x', 'y']
+    expect(guessMapping(header, 4, true)).toMatchObject({ name: 0, image: 1, px: 2, py: 3, x: null, y: null })
+  })
+
+  it('keeps bare x/y/z as ground coordinates next to explicit pixel columns', () => {
+    const header = ['name', 'x', 'y', 'z', 'image', 'px', 'py']
+    expect(guessMapping(header, header.length, true)).toMatchObject({ x: 1, y: 2, z: 3, image: 4, px: 5, py: 6 })
+    expect(guessGcpCrs(header, guessMapping(header, header.length, true))).toBeNull()
   })
 })
 
@@ -282,5 +313,20 @@ describe('isGroundControl', () => {
   it('treats an absent role as control (back-compat with older projects)', () => {
     const { role, ...noRole } = surveyed
     expect(isGroundControl(noRole, { precision })).toBe(true)
+  })
+})
+
+describe('buildGcps — image observations only', () => {
+  it('keeps points with observations when the file has no ground columns', () => {
+    const mapping = guessMapping(['point_label', 'image_file_name', 'x', 'y'], 4, true)
+    const { gcps, skipped } = buildGcps([['AA44', 'a.tif', '917.79', '3075.5'], ['AA44', 'b.tif', '4812.94', '3198.71']], mapping)
+    expect(skipped).toBe(0)
+    expect(gcps).toHaveLength(1)
+    expect(gcps[0]).toMatchObject({ name: 'AA44', x: null, y: null })
+    expect(gcps[0].observations.map((o) => o.imageName)).toEqual(['a.tif', 'b.tif'])
+  })
+  it('still skips a row without coordinates when the file has ground columns', () => {
+    const mapping = { name: 0, x: 1, y: 2, z: null, image: null, px: null, py: null }
+    expect(buildGcps([['A', '', '']], mapping)).toMatchObject({ gcps: [], skipped: 1 })
   })
 })

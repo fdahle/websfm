@@ -4,7 +4,7 @@ import CrsPicker from '../controls/CrsPicker.vue'
 import ModalShell from './ui/ModalShell.vue'
 import ColumnMappingTable from './ui/ColumnMappingTable.vue'
 import ImportKindSwitch from './ui/ImportKindSwitch.vue'
-import { DELIMITER_OPTIONS, guessMapping, buildGcps } from '../../core/io/gcp.js'
+import { DELIMITER_OPTIONS, guessMapping, buildGcps, guessGcpCrs } from '../../core/io/gcp.js'
 import { axisLabels } from '../../core/crs.js'
 import { GCP_ACCURACY_PRESETS } from '../../core/gcpAccuracy.js'
 import { useDelimitedImport } from '../../composables/useDelimitedImport.js'
@@ -18,6 +18,8 @@ const props = defineProps({
   geojsonGcps: { type: Array,  default: null },
   detectedCrs: { type: String, default: null },
   accuracyDefaults: { type: Object, default: null },
+  // The project's points, so an observations-only file can say which it extends.
+  existingGcps: { type: Array, default: () => [] },
   // The user already said this is a GCP file (Ribbon ▸ Import ▸ GCP File, or the
   // kind chooser), so the "Import as" question shrinks to a correction link —
   // see the same prop on CameraImportModal.
@@ -34,7 +36,14 @@ function switchKind(kind) {
   emit('switch-kind', { kind, rawText: props.rawText, fileName: props.fileName })
 }
 
-const sourceCrs = ref(props.detectedCrs || props.projectCrs)
+// The coordinates' CRS: the one the file declares (GeoJSON), else WGS 84 when the
+// mapped X/Y columns are lon/lat, else the project CRS — until the user picks one.
+const sourceCrsChoice = ref(null)
+const sourceCrs = computed({
+  get: () => sourceCrsChoice.value ?? props.detectedCrs
+    ?? (geojsonMode.value ? null : guessGcpCrs(headerCells.value, mapping.value)) ?? props.projectCrs,
+  set: (v) => { sourceCrsChoice.value = v },
+})
 const remembered = props.accuracyDefaults || {}
 const accuracyPreset = ref(remembered.settings?.preset ?? 'unknown')
 const defaultAccuracyX = ref(remembered.accuracies?.x ?? '')
@@ -81,7 +90,10 @@ const roleOptions = computed(() => {
 })
 
 // Every offered role (labels aside) is a key of `mapping` — buildGcps reads them all.
-const ROLE_IDS = roleOptions.value.filter((o) => o.id !== 'ignore').map((o) => o.id)
+// Listed here rather than read from roleOptions: those labels follow the source CRS,
+// which is itself guessed from the mapping below.
+const ROLE_IDS = ['name', 'x', 'y', 'z', 'image', 'px', 'py', 'role', 'accuracyX', 'accuracyY', 'accuracyZ',
+  'accuracyXY', 'accuracyImgX', 'accuracyImgY', 'correlationXY', 'correlationXZ', 'correlationYZ']
 
 const {
   delimiter, hasHeader, columnRoles, columnCount, headerCells, dataRows, previewRows, setRole, mapping,
@@ -103,10 +115,16 @@ const validDefaults = computed(() => {
   return groundValid && [defaultImageAccuracyX.value, defaultImageAccuracyY.value]
     .every((value) => Number.isFinite(Number(value)) && Number(value) > 0)
 })
+// Image observations alone (name + image + pixel, no ground position) are a valid
+// import too: they join the points of those names, or become markers.
+const observationsOnly = computed(() => !geojsonMode.value && !hasXY.value
+  && ['image', 'px', 'py'].every((r) => mapping.value[r] != null))
+const existingNames = computed(() => new Set((props.existingGcps ?? []).map((g) => g.name)))
+const joining = computed(() => built.value.gcps.filter((g) => existingNames.value.has(g.name)).length)
 const canImport = computed(() =>
   validDefaults.value && (geojsonMode.value
     ? built.value.gcps.length > 0
-    : (hasName.value && hasXY.value && built.value.gcps.length > 0))
+    : (hasName.value && (hasXY.value || observationsOnly.value) && built.value.gcps.length > 0))
 )
 
 const axX = computed(() => axisLabels(sourceCrs.value)[0])
@@ -241,8 +259,13 @@ function doImport() {
 
       <div class="summary">
         <span v-if="!geojsonMode && !hasName" class="warn">Assign a <b>Name / ID</b> column.</span>
-        <span v-else-if="!geojsonMode && !hasXY" class="warn">Assign <b>Abs {{ axX }}</b> and <b>Abs {{ axY }}</b> columns.</span>
+        <span v-else-if="!geojsonMode && !hasXY && !observationsOnly" class="warn">Assign <b>Abs {{ axX }}</b> and <b>Abs {{ axY }}</b> columns, or image name and pixel columns.</span>
         <span v-else-if="!validDefaults" class="warn">Accuracy values must be greater than zero.</span>
+        <span v-else-if="observationsOnly" class="ok">
+          {{ obsCount }} image observation{{ obsCount === 1 ? '' : 's' }} of {{ built.gcps.length }} point{{ built.gcps.length === 1 ? '' : 's' }}, no ground coordinates:
+          <template v-if="joining">{{ joining }} added to points already in the project<template v-if="built.gcps.length - joining">, </template></template>
+          <template v-if="built.gcps.length - joining">{{ built.gcps.length - joining }} new as markers (not used as control until coordinates are added)</template>
+        </span>
         <span v-else class="ok">
           {{ built.gcps.length }} GCP{{ built.gcps.length === 1 ? '' : 's' }}<template v-if="obsCount">, {{ obsCount }} image observation{{ obsCount === 1 ? '' : 's' }}</template>
           <template v-if="built.skipped"> · {{ built.skipped }} row{{ built.skipped === 1 ? '' : 's' }} skipped</template>

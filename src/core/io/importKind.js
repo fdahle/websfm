@@ -10,16 +10,16 @@
 import { sniffDelimiter, parseRows, guessMapping as guessGcps } from './gcp.js'
 import { guessMapping as guessPoses } from './pose.js'
 import { guessMapping as guessSensors } from './sensor.js'
-import { guessMapping as guessFiducials } from './fiducialObs.js'
+import { guessMapping as guessFiducials, wideFiducialLayout } from './fiducialObs.js'
 import { looksLikeFiducialMarks } from './fiducialMarks.js'
 import { looksLikeGeoJson, parseGeoJson } from './geojson.js'
 import { looksLikeXyzText } from './cloudImport.js'
+import { IMAGE_COLUMN } from './nameMatch.js'
 
 // GCP-specific vs. image/photo-specific header tokens (the shared 'label' token
 // is deliberately excluded — it tells us nothing either way).
-const GCP_NAME_TOKEN = /^(name|id|gcp|point|pt)$/i
-const IMAGE_TOKEN = /^(image|img|photo|file|filename|picture)$/i
-const INTRINSIC_KEYS = ['focal', 'k1', 'k2', 'k3', 'p1', 'p2', 'cx', 'cy', 'pixelSize']
+const GCP_NAME_TOKEN = /^(name|id|gcp|point|pt|marker|target)$|^(gcp|point|pt|marker|target)_?(name|id|label)$/i
+const INTRINSIC_KEYS = ['focal', 'k1', 'k2', 'k3', 'p1', 'p2', 'cx', 'cy', 'ppxMm', 'ppyMm', 'pixelSize']
 
 // A COLMAP sparse model is a *set* of files recognised by name, not content —
 // `cameras.txt` / `images.txt` / `points3D.txt` (or their `.bin` variants). Detected
@@ -73,17 +73,25 @@ export function detectFileKind(text, fileName = '') {
   const hasFiducialCol = fidMap.fiducial != null && fidMap.image != null && fidMap.px != null && fidMap.py != null
   const hasGroundCoords = gcpMap.x != null && gcpMap.y != null
 
+  // Image fiducials, one image per row (`corner_top_left_x` in scan pixels). First:
+  // its principal-point columns would otherwise read as intrinsics.
+  if (wideFiducialLayout(header)) return { kind: 'fiducialObs', confidence: 'high' }
   // Camera fiducial marks: a mark id plus millimetre x/y (no image, no pixels).
   if (looksLikeFiducialMarks(header) && fidMap.image == null) return { kind: 'fiducialMarks', confidence: 'high' }
   if (hasIntrinsics && poseMap.image == null) return { kind: 'sensor', confidence: 'high' }
   if (hasFiducialCol && !hasGroundCoords) return { kind: 'fiducialObs', confidence: 'high' }
   if (hasPixels) return { kind: 'gcp', confidence: 'high' }
   if (hasOrientation) return { kind: 'pose', confidence: 'high' }
+  // Per-image intrinsics: an image column with intrinsics and no ground position.
+  if (hasIntrinsics && !hasGroundCoords) return { kind: 'sensor', confidence: 'high' }
 
   // Bare label + X/Y/Z: lean on header wording if it points one way.
   const cells = header.map((c) => String(c ?? '').trim())
   const looksGcp = cells.some((c) => GCP_NAME_TOKEN.test(c))
-  const looksImage = cells.some((c) => IMAGE_TOKEN.test(c))
+  const looksImage = cells.some((c) => IMAGE_COLUMN.test(c))
+  // A point-name column (`gcp_label`, `point_id`) names ground control even beside an
+  // image column: those rows are observations of the point in images.
+  if (cells.some((c) => /^(gcp|point|pt|marker|target)_?(name|id|label)?$/i.test(c))) return { kind: 'gcp', confidence: 'low' }
   if (looksImage && !looksGcp) return { kind: 'pose', confidence: 'low' }
   if (looksGcp && !looksImage) return { kind: 'gcp', confidence: 'low' }
 

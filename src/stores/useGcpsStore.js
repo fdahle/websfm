@@ -175,7 +175,34 @@ export const useGcpsStore = registerProjectStore(defineStore('gcps', () => {
       }
       return base
     }
+    let markers = 0
     for (const raw of rawGcps) {
+      // No ground position (a file of image observations): the observations join a
+      // point of that name, or the point becomes a marker — never a control point.
+      if (raw.x == null || raw.y == null) {
+        const observations = (raw.observations || []).map((o) => ({
+          imageId: resolveImageId.value(o.imageName), imageName: o.imageName, px: o.px, py: o.py,
+          accuracyX: Number.isFinite(o.accuracyX) && o.accuracyX > 0 ? o.accuracyX : imageDefaults.x,
+          accuracyY: Number.isFinite(o.accuracyY) && o.accuracyY > 0 ? o.accuracyY : imageDefaults.y,
+        }))
+        const existing = gcps.value.find((g) => g.name === raw.name)
+        if (existing) {
+          for (const o of observations) {
+            if (!existing.observations.some((e) => e.imageName === o.imageName && e.px === o.px && e.py === o.py)) {
+              existing.observations.push(o)
+            }
+          }
+        } else if (observations.length) {
+          gcps.value.push({
+            id: crypto.randomUUID(), name: raw.name, role: 'marker', x: null, y: null, z: null,
+            accuracyX: null, accuracyY: null, accuracyZ: null, correlationXY: 0, correlationXZ: 0, correlationYZ: 0,
+            accuracyStatus: 'unknown', accuracyConvention: '1sigma', verticalDatum: 'unknown',
+            accuracyImgX: imageDefaults.x, accuracyImgY: imageDefaults.y, observations, enabled: true,
+          })
+          added++; markers++
+        }
+        continue
+      }
       const [x, y, z] = transform([raw.x, raw.y, raw.z ?? 0], sourceCrs, projCrs)
       const values = {
         x: importedAccuracy(raw.accuracyX, defaults.x, 'x'),
@@ -242,7 +269,8 @@ export const useGcpsStore = registerProjectStore(defineStore('gcps', () => {
       }
     }
     const obsCount = rawGcps.reduce((n, g) => n + (g.observations?.length || 0), 0)
-    log(`GCPs imported: ${added} point(s)${obsCount ? `, ${obsCount} observation(s)` : ''} (from ${sourceCrs})`, 'success', 'GCP')
+    log(`GCPs imported: ${added} point(s)${markers ? ` (${markers} marker(s) without coordinates)` : ''}`
+      + `${obsCount ? `, ${obsCount} observation(s)` : ''} (from ${sourceCrs})`, 'success', 'GCP')
     if (unconstrained) log(`${unconstrained} imported GCP(s) have unknown or invalid covariance and will not constrain the solution`,
       'warn', 'GCP')
     await save()

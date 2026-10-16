@@ -12,6 +12,14 @@ describe('detectCameraMode', () => {
     expect(detectCameraMode(text)).toBe('sensor')
   })
 
+  it('detects per-image intrinsics (image column, no positions) as a sensor file', () => {
+    expect(detectCameraMode('image,focal,cx,cy\na.tif,3500,2000,1500')).toBe('sensor')
+  })
+
+  it('detects a one-row film calibration as a sensor file', () => {
+    expect(detectCameraMode('focal_length,pixel_pitch,principal_point_x_mm\n152.865,0.025,-0.03')).toBe('sensor')
+  })
+
   it('defaults to pose on empty input', () => {
     expect(detectCameraMode('')).toBe('pose')
   })

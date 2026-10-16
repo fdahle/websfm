@@ -34,7 +34,7 @@ export function useModalEscape({
     gcpImportOpen, gcpImportText, gcpImportName, gcpImportGeojson, gcpImportCrs,
     footprintImportOpen, footprintImportData, footprintFromPosesOpen,
     cameraImportOpen,
-    importKindOpen, importKindFile,
+    importKindOpen, importKindFile, fiducialImportData,
     importCloudOpen, importCloudData, importRasterOpen, importRasterData, rasterStyleId,
     symbologyProductKind, symbologyCloudId, sfmSourceOpen,
     fiducialDetectOpen, fiducialDetectSensorId, fiducialCalibrateOpen, fiducialCalibrateSensorId,
@@ -68,6 +68,7 @@ export function useModalEscape({
       [importRasterOpen.value,   () => { importRasterOpen.value = false; importRasterData.value = null }],
       [importCloudOpen.value,    () => { importCloudOpen.value = false; importCloudData.value = null }],
       [importKindOpen.value,     () => { importKindOpen.value = false; importKindFile.value = null }],
+      [fiducialImportData.value, () => { fiducialImportData.value = null }],
       [exportKind.value,         () => { exportKind.value = null }],
       [infoImageId.value,        () => { infoImageId.value = null }],
       // Consume Escape while a workflow is running; closing its builder would hide

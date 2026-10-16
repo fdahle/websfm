@@ -36,6 +36,23 @@ describe('detectFileKind', () => {
     expect(detectFileKind(text)).toEqual({ kind: 'sensor', confidence: 'high' })
   })
 
+  it('detects per-image intrinsics (image column, no ground position) as a sensor file', () => {
+    expect(detectFileKind('image,focal,cx,cy\na.tif,3500,2000,1500')).toEqual({ kind: 'sensor', confidence: 'high' })
+  })
+
+  it('detects image fiducials with one image per row (marks in scan pixels), not intrinsics', () => {
+    const text = 'image_id,corner_top_left_x,corner_top_left_y,corner_top_right_x,corner_top_right_y,'
+      + 'corner_bottom_left_x,corner_bottom_left_y,principal_point_x,principal_point_y\n'
+      + 'a.tif,329.7,329.7,8809.7,329.7,330.3,8810.3,4569.4,4569.9'
+    expect(detectFileKind(text)).toEqual({ kind: 'fiducialObs', confidence: 'high' })
+  })
+
+  it('keeps a one-row camera certificate (marks in mm) a sensor file', () => {
+    const text = 'focal_length,corner_top_left_x_mm,corner_top_left_y_mm,corner_top_right_x_mm,corner_top_right_y_mm,'
+      + 'corner_bottom_left_x_mm,corner_bottom_left_y_mm\n152.865,-106,106,106,106,-106,-106'
+    expect(detectFileKind(text)).toEqual({ kind: 'sensor', confidence: 'high' })
+  })
+
   it('leans low-confidence gcp on a name header + bare coordinates', () => {
     const text = 'gcp,x,y,z\nA,1,2,3'
     expect(detectFileKind(text)).toEqual({ kind: 'gcp', confidence: 'low' })
@@ -53,5 +70,15 @@ describe('detectFileKind', () => {
   it('reports ambiguous when no signal points either way', () => {
     const text = 'label,x,y,z\nA,1,2,3'
     expect(detectFileKind(text)).toEqual({ kind: 'ambiguous', confidence: 'low' })
+  })
+})
+
+describe('detectFileKind — image file-name columns', () => {
+  it('reads an image_file_name + lon/lat list as camera positions', () => {
+    expect(detectFileKind('image_file_name,lon,lat,alt,x_map,y_map\na.tif,-111.7,32.9,3810,432998,3642109').kind).toBe('pose')
+  })
+  it('reads a point-label column beside image names as ground control', () => {
+    expect(detectFileKind('gcp_label,image_file_name,x,y,lon,lat,elev\nG1,a.tif,100,200,-111.7,32.9,400').kind).toBe('gcp')
+    expect(detectFileKind('point_label,image_file_name,x,y\nP1,a.tif,100,200').kind).toBe('gcp')
   })
 })

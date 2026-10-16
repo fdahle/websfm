@@ -19,16 +19,16 @@ import { showToast } from './useToasts.js'
 // The dropped/picked-file import funnel, lifted out of App.vue. It drives the
 // import-related modals (all state lives in useModalsStore, pulled in here) and
 // commits parsed data through the injected store actions. Injected deps:
-//   addGcps, addFootprints, addSensors, addPoses — store actions
+//   addGcps, addFootprints, importSensors, addPoses — store actions
 //   activateTab(id) — switch the active tab (to 'map' after a spatial import)
 // `cameraPickMode` is returned so the Ribbon command dispatch (still in App.vue)
 // can hint the file-picker mode before opening the hidden <input>.
-export function useImportRouting({ addGcps, addFootprints, addSensors, addPoses, addFiducialObs, addFiducialMarks, importColmap, openSfmProject, importCloud, importRaster, importProjectFile, addImages, activateTab, showGcps, showSensors, showPoses }) {
+export function useImportRouting({ addGcps, addFootprints, importSensors, addPoses, addFiducialObs, addFiducialMarks, importColmap, openSfmProject, importCloud, importRaster, importProjectFile, addImages, activateTab, showGcps, showSensors, showPoses }) {
   const {
     gcpImportOpen, gcpImportText, gcpImportName, gcpImportGeojson, gcpImportCrs,
     footprintImportOpen, footprintImportData,
     cameraImportOpen, cameraImportText, cameraImportName, cameraImportMode,
-    importKindDeclared, importKindOpen, importKindFile,
+    importKindDeclared, importKindOpen, importKindFile, fiducialImportData,
     importCloudOpen, importCloudData,
     importRasterOpen, importRasterData,
   } = storeToRefs(useModalsStore())
@@ -328,19 +328,27 @@ export function useImportRouting({ addGcps, addFootprints, addSensors, addPoses,
     if (!file || !addFiducialObs) return
     let text
     try { text = await file.text() } catch (err) { readFailed('the fiducial file', file, err); return }
-    const { rows } = parseFiducialObs(text)
-    addFiducialObs(rows)
+    const { rows, layout } = parseFiducialObs(text)
+    if (!rows.length) { log(`Image fiducials: no marks with finite pixel positions in ${file.name}`, 'warn', 'Sensor'); return }
+    fiducialImportData.value = { kind: 'image', fileName: file.name, rows, layout }
   }
 
-  // Camera fiducial marks (a film camera's certificate, mm) commit the same way:
-  // rows group by sensor label, the store matches each group to a sensor.
+  // Camera fiducial marks (a film camera's certificate, mm): rows group by sensor
+  // label; the preview proposes a sensor per group (planFiducialMarkTargets).
   async function openFiducialMarksImport(file) {
     if (!file || !addFiducialMarks) return
     let text
     try { text = await file.text() } catch (err) { readFailed('the fiducial file', file, err); return }
     const { groups } = parseFiducialMarks(text)
     if (!groups.length) { log('Camera fiducials: no marks with finite x_mm / y_mm found', 'warn', 'Sensor'); return }
-    if (addFiducialMarks(groups)) showSensors?.()
+    fiducialImportData.value = { kind: 'camera', fileName: file.name, groups }
+  }
+
+  // The fiducial preview's Import: apply what it showed.
+  function onFiducialImport(payload) {
+    fiducialImportData.value = null
+    if (payload.kind === 'image') addFiducialObs(payload.rows)
+    else if (addFiducialMarks(payload.groups, payload.targetIds)) showSensors?.()
   }
 
   // User answered the "what is this file?" chooser.
@@ -416,7 +424,7 @@ export function useImportRouting({ addGcps, addFootprints, addSensors, addPoses,
   async function onCameraImport(payload) {
     cameraImportOpen.value = false
     if (payload.mode === 'sensor') {
-      await addSensors(payload.sensors)
+      await importSensors(payload.items)
       showSensors?.()
     } else {
       await addPoses(payload.poses, payload.sourceCrs)
@@ -456,7 +464,7 @@ export function useImportRouting({ addGcps, addFootprints, addSensors, addPoses,
     openCloudImport, onCloudImport, onCloudPick,
     openRasterImport, onRasterPick, forkGeoreferencedRasters, addImagesRouted,
     onImportKindChosen, onImportSwitchKind,
-    openCameraImport, onCameraImport, onGcpImport, onFootprintImport,
+    openCameraImport, onCameraImport, onGcpImport, onFootprintImport, onFiducialImport,
     onGcpPick, onCameraPick, onColmapPick, onFiducialObsPick, onFiducialMarksPick,
   }
 }

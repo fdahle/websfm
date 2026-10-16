@@ -131,7 +131,9 @@ describe('useDelimitedImport — role guessing', () => {
     expect(imp.columnRoles.value).toEqual(['image', 'x', 'y', 'z', 'omega', 'phi', 'kappa', 'accuracyX'])
     imp.mode.value = 'sensor'
     await nextTick()
-    expect(imp.columnRoles.value).toEqual(['label', 'width', 'height', 'focal', 'ignore', 'ignore', 'ignore', 'ignore'])
+    // With a header, only recognised columns get a role: x/y/z are not guessed as
+    // width/height/focal by position.
+    expect(imp.columnRoles.value).toEqual(['image', 'ignore', 'ignore', 'ignore', 'ignore', 'ignore', 'ignore', 'ignore'])
     expect(Object.keys(imp.mapping.value)).toEqual(SENSOR_ROLES)
   })
 

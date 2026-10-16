@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseFiducialMarks, looksLikeFiducialMarks, applyFiducialMarks } from './fiducialMarks.js'
+import { parseFiducialMarks, looksLikeFiducialMarks, applyFiducialMarks, planFiducialMarkTargets } from './fiducialMarks.js'
 
 describe('parseFiducialMarks', () => {
   it('groups a headered file by sensor, with per-sensor focal and principal point', () => {
@@ -72,5 +72,14 @@ describe('applyFiducialMarks', () => {
       method: 'certificate', transform: 'projective', scanPitchMm: 0.021, fit: null,
       slotMap: { 'corner-tl': 'F1' }, focalMm: 152.8, ppxMm: 0.1, ppyMm: 0.2,
     })
+  })
+})
+
+describe('planFiducialMarkTargets', () => {
+  const sensors = [{ id: 'a', label: 'RC10', kind: 'film' }, { id: 'b', label: 'Drone' }]
+  it('matches by label, else a lone group goes to the only film sensor', () => {
+    expect(planFiducialMarkTargets([{ sensor: 'drone' }], sensors)).toEqual(['b'])
+    expect(planFiducialMarkTargets([{ sensor: '' }], sensors)).toEqual(['a'])
+    expect(planFiducialMarkTargets([{ sensor: '' }, { sensor: 'x' }], sensors)).toEqual([null, null])
   })
 })

@@ -10,6 +10,10 @@
 //
 // Pure: plain data in, plain data out.
 
+/** Header of a column holding image file names, shared by every tabular importer
+ *  (`image`, `filename`, `image_file_name`, `image_id`, …). */
+export const IMAGE_COLUMN = /^(image|img|photo|picture|file|filename|file_?name|image_?(name|file|file_?name|id)|img_?(name|file))$/i
+
 /** Last path segment, tolerant of both separators. */
 export function basename(n) { return String(n).split(/[\\/]/).pop() }
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { guessMapping, buildPoses } from './pose.js'
+import { guessMapping, buildPoses, guessPoseCrs } from './pose.js'
 
 describe('guessMapping', () => {
   it('maps standard pose headers', () => {
@@ -126,5 +126,20 @@ describe('buildPoses', () => {
       accuracyX: 0.01, accuracyY: 0.02, accuracyZ: 0.03,
       accuracyOmega: 0.1, accuracyPhi: 0.2, accuracyKappa: 0.3,
     })
+  })
+})
+
+describe('guessPoseCrs', () => {
+  it('reads lon/lat position columns as WGS 84', () => {
+    const header = ['image_file_name', 'lon', 'lat', 'alt', 'x_map', 'y_map']
+    const m = guessMapping(header, header.length, true)
+    expect(m).toMatchObject({ image: 0, x: 1, y: 2, z: 3 })
+    // x_map / y_map are not recognised and, with a header, not guessed as angles.
+    expect(m).toMatchObject({ omega: null, phi: null, kappa: null })
+    expect(guessPoseCrs(header, m)).toBe('EPSG:4326')
+  })
+  it('says nothing for projected or generic columns', () => {
+    const header = ['image', 'x', 'y', 'z']
+    expect(guessPoseCrs(header, guessMapping(header, 4, true))).toBeNull()
   })
 })

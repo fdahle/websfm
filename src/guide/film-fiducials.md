@@ -56,6 +56,15 @@ example a mark-shaped blob in the data strip:
   in the rest of the flight. Disagreeing marks go to review as *Disagrees with the
   batch*.
 
+Marks measured elsewhere can be imported instead: **Import → Image Fiducials** reads
+scan-pixel positions matched to images by file name, either one row per mark
+(`image, fiducial, px, py`) or one row per image with an x and a y column per position
+(`corner_top_left_x`, `midside_left_y`, …). In the second layout each mark goes to the
+slot its columns name; other columns, such as a measured principal point, are ignored.
+Before anything changes, a preview lists each file name with the project image it
+matches, how many marks it brings and how many existing marks it replaces. Names not in
+the project are skipped.
+
 ## Review uncertain marks
 Marks that were weak, ambiguous, or rejected by a check are listed under **Needs
 review**; they are not stored until you accept them. Open the image to look before
@@ -77,3 +86,20 @@ from the scans at a scan pitch you enter. Also enter the focal length and princi
 point, and choose the transform (conformal, affine, or projective; affine suits most
 scans). Reconstruction then fits each scan to the certificate and works in one
 shared camera frame per sensor.
+
+## Import the certificate
+Instead of typing it, import the certificate from a file. **Import → Calibration** reads
+a table with one row per camera: the focal length, a pixel pitch, the principal point
+in mm (`principal_point_x_mm`) and one x and y column in mm per mark, named by position
+(`corner_top_left_x_mm`, `midside_left_y_mm`, …). Each mark goes to the slot its name
+gives, so the sensor becomes **Film** and is calibrated straight away. Check it in
+**Calibrate Fiducials**. **Import → Camera Fiducials** takes the other layout, one row per
+mark. It previews the marks and lets you pick the sensor they go to before importing.
+
+Before importing, the dialog shows where each row goes and lets you change it:
+- a row whose label matches a sensor updates that sensor;
+- a single row in a project with one sensor updates that sensor;
+- with an image column, rows become sensors for the images they name;
+- anything else becomes a new sensor.
+
+An update only sets the values the file has; everything else on the sensor stays.

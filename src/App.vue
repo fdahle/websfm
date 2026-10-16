@@ -164,7 +164,7 @@ const { addFootprints, computeFootprints } = footprintsStore
 const sensorsStore = useSensorsStore()
 const { sensors } = storeToRefs(sensorsStore)
 const {
-  addSensors, importFiducialMarks,
+  importSensors, importFiducialMarks,
   } = sensorsStore
 
 // ── Camera poses (extrinsics) ─────────────────────────────────────────────────────
@@ -323,10 +323,10 @@ const {
   openDroppedImport, onImportKindChosen, onImportSwitchKind,
   onCloudImport, onCloudPick,
   openRasterImport, onRasterPick, addImagesRouted,
-  onCameraImport, onGcpImport, onFootprintImport,
+  onCameraImport, onGcpImport, onFootprintImport, onFiducialImport,
   onGcpPick, onCameraPick, onColmapPick, onFiducialObsPick, onFiducialMarksPick,
 } = useImportRouting({
-  addGcps, addFootprints, addSensors, addPoses, addFiducialObs: addFiducialObservations, addFiducialMarks: importFiducialMarks,
+  addGcps, addFootprints, importSensors, addPoses, addFiducialObs: addFiducialObservations, addFiducialMarks: importFiducialMarks,
   importColmap: importColmapModel, importCloud,
   openSfmProject: openSfmImport,
   // A dropped `.tif` arrives as `image/tiff` and would otherwise be ingested as
@@ -469,7 +469,7 @@ provideAppContext({
   matchSummaries, meshClouds, modelCameras, modelMarkers, moveCurrentProjectToBrowser,
   moveCurrentProjectToFolder, moveTab, onCameraImport, onCloudImport, onCropCloudRun, onDemRun,
   onDenseRun, onDepthMapsRun, onDetectRun, onEditSelection, onExportRun, onFilterCloudRun,
-  onFolderConnect, onFolderRepick, onFootprintFromPoses, onFootprintImport, onGcpImport,
+  onFiducialImport, onFolderConnect, onFolderRepick, onFootprintFromPoses, onFootprintImport, onGcpImport,
   onGeoreferenceRun, onGradualSelectionRun, onImageQualityEstimate, onImageQualityGroup,
   onImageQualityRemove, onImportKindChosen, onImportSwitchKind, onMatchRun, onMergeCloudsRun,
   onMeshRun, onOptimizeCamerasRun, onOrthoRun, onProductToolRun, onRasterImportAsImage,

@@ -13,6 +13,7 @@ import { useModalsStore } from '../../stores/useModalsStore.js'
 import { useAppContext } from '../../appContext.js'
 import AutoMaskModal from '../modals/AutoMaskModal.vue'
 import CameraImportModal from '../modals/CameraImportModal.vue'
+import FiducialImportModal from '../modals/FiducialImportModal.vue'
 import CameraPoseTableModal from '../modals/CameraPoseTableModal.vue'
 import CloudSymbologyModal from '../modals/CloudSymbologyModal.vue'
 import FiducialCalibrateModal from '../modals/FiducialCalibrateModal.vue'
@@ -55,7 +56,7 @@ const { hasReferenceDem } = storeToRefs(useExternalStore())
 const { setRasterKind, setVerticalInfo } = useExternalStore()
 const {
   autoMaskOpen, cameraImportMode, cameraImportName, cameraImportOpen, cameraImportText, fiducialCalibrateOpen,
-  fiducialCalibrateSensorId, fiducialDetectOpen, fiducialDetectSensorId, footprintFromPosesOpen, footprintImportData, footprintImportOpen,
+  fiducialCalibrateSensorId, fiducialDetectOpen, fiducialDetectSensorId, fiducialImportData, footprintFromPosesOpen, footprintImportData, footprintImportOpen,
   gcpImportCrs, gcpImportGeojson, gcpImportName, gcpImportOpen, gcpImportText, gcpTableOpen,
   imageTableOpen, importCloudData, importCloudOpen, importKindDeclared, importKindFile, importKindOpen,
   importRasterData, importRasterOpen, infoImageId, maskManagerOpen, matchListOpen, poseTableOpen,
@@ -67,7 +68,7 @@ const {
   confirmRemoveGcp, confirmRemoveSensor, editMask, fiducialCalibrateImages, fiducialCalibrateSensor,
   fiducialDetectImages, fiducialDetectSensor, fillGcpZFromReferenceDem, gcpReport, hasSparse,
   matchNodePositions, matchSummaries, onCameraImport, onCloudImport, onFootprintFromPoses,
-  onFootprintImport, onGcpImport, onImportKindChosen, onImportSwitchKind, onRasterImportAsImage,
+  onFiducialImport, onFootprintImport, onGcpImport, onImportKindChosen, onImportSwitchKind, onRasterImportAsImage,
   onRasterStyleApply, openImageTab, openImageWithResiduals, pickSfmFiles, pickSfmFolder,
   rasterBeingStyled, refreshGcpReport, selectGcp, selectedGcpId, sfmImportSession,
   usedKeysOf,
@@ -109,6 +110,7 @@ const infoImage = computed(() => (infoImageId.value ? imagesStore.imageById(info
       :geojson-gcps="gcpImportGeojson"
       :detected-crs="gcpImportCrs"
       :accuracy-defaults="gcpImportDefaults"
+      :existing-gcps="gcps"
       :kind-declared="importKindDeclared"
       @close="gcpImportOpen = false; gcpImportGeojson = null; gcpImportText = ''; gcpImportCrs = null"
       @import="onGcpImport"
@@ -123,6 +125,17 @@ const infoImage = computed(() => (infoImageId.value ? imagesStore.imageById(info
       :file-name="importKindFile.name"
       @close="importKindOpen = false; importKindFile = null"
       @select="onImportKindChosen"
+    />
+  </Teleport>
+
+  <Teleport to="body">
+    <FiducialImportModal
+      v-if="fiducialImportData"
+      :data="fiducialImportData"
+      :images="images"
+      :sensors="sensors"
+      @close="fiducialImportData = null"
+      @import="onFiducialImport"
     />
   </Teleport>
 
@@ -199,6 +212,8 @@ const infoImage = computed(() => (infoImageId.value ? imagesStore.imageById(info
       :project-crs="currentCrs"
       :detected-mode="cameraImportMode"
       :kind-declared="importKindDeclared"
+      :sensors="sensors"
+      :images="images"
       @close="cameraImportOpen = false"
       @import="onCameraImport"
       @switch-kind="onImportSwitchKind"

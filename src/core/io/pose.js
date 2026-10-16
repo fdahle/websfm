@@ -10,13 +10,15 @@
 // the project CRS (angles pass through unchanged).
 
 import { sniffDelimiter, parseRows } from './gcp.js'
+import { IMAGE_COLUMN } from './nameMatch.js'
 
 export { sniffDelimiter, parseRows }
 
 // ── Column-role guessing ──────────────────────────────────────────────────────
 
 const PATTERNS = {
-  image:   /^(image|img|photo|file|filename|label|name|id|picture)$/i,
+  // Image file names, plus generic name columns: in a pose file a row is an image.
+  image:   new RegExp(`${IMAGE_COLUMN.source}|^(label|name|id)$`, 'i'),
   x:       /^(x|easting|east|e|lon|long|longitude|xs|x_s|xc)$/i,
   y:       /^(y|northing|north|n|lat|latitude|ys|y_s|yc)$/i,
   z:       /^(z|elev|elevation|alt|altitude|height|h|zs|z_s|zc)$/i,
@@ -58,17 +60,27 @@ export const POSE_ROLE_LABELS = {
   accAngle: 'Angle accuracy (all axes)',
 }
 
-// Returns each role mapped to a column index (or null). Header text first, then
-// a positional fallback for image/x/y/z/omega/phi/kappa.
+// The source CRS the mapped position columns name: longitude/latitude headers mean
+// WGS 84 degrees, whatever the project CRS. Null when the headers do not say.
+export function guessPoseCrs(headerCells, mapping) {
+  const head = (role) => String(headerCells?.[mapping?.[role]] ?? '').trim()
+  return /^(lon|long|longitude)$/i.test(head('x')) && /^(lat|latitude)$/i.test(head('y')) ? 'EPSG:4326' : null
+}
+
+// Returns each role mapped to a column index (or null). Header text when there is
+// a header; only a headerless file falls back to position (image, x, y, z, omega,
+// phi, kappa) — with a header, an unrecognised column (`x_map`) stays unassigned
+// rather than becoming an angle because of where it sits.
 export function guessMapping(headerCells, columnCount, hasHeader, { positional = true } = {}) {
   const mapping = Object.fromEntries(POSE_ROLES.map((r) => [r, null]))
 
   if (hasHeader) {
     headerCells.forEach((cell, i) => {
       for (const role of POSE_ROLES) {
-        if (mapping[role] == null && PATTERNS[role].test(cell)) { mapping[role] = i; break }
+        if (mapping[role] == null && PATTERNS[role].test(String(cell ?? '').trim())) { mapping[role] = i; break }
       }
     })
+    return mapping
   }
 
   if (!positional) return mapping
