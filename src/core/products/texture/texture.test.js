@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { faceAdjacency } from './meshGraph.js'
-import { packShelves } from './packing.js'
+import { packAtlas } from './packing.js'
 import { meshGeometry, projectVertices, rasterizeDepth, viewGrid, localCamera, faceCandidates } from './visibility.js'
 import { selectViews } from './labeling.js'
 import { buildCharts } from './charts.js'
@@ -192,14 +192,14 @@ describe('faceAdjacency', () => {
   })
 })
 
-describe('packShelves', () => {
+describe('packAtlas (skyline)', () => {
   it('places every rectangle inside a page without overlap', () => {
     let seed = 7
     const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647
     const n = 600, P = 256
     const w = Int32Array.from({ length: n }, () => 2 + Math.floor(rnd() * 40))
     const h = Int32Array.from({ length: n }, () => 2 + Math.floor(rnd() * 40))
-    const pk = packShelves(w, h, P)
+    const pk = packAtlas(w, h, P)
     const occ = pk.pageHeights.map((ph) => new Uint8Array(P * ph))
     let area = 0, outside = 0, overlap = 0
     for (let i = 0; i < n; i++) {
@@ -215,7 +215,7 @@ describe('packShelves', () => {
     expect(outside).toBe(0)
     expect(overlap).toBe(0)
     const total = pk.pageHeights.reduce((a, ph) => a + ph * P, 0)
-    expect(area / total).toBeGreaterThan(0.7)
+    expect(area / total).toBeGreaterThan(0.85)
   })
 })
 

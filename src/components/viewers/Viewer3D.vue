@@ -14,6 +14,7 @@ import { pickNearestPoint } from '../../core/products/screenPick.js'
 import { settleEditLatch } from '../../core/products/editFraming.js'
 import { viewerMayHandleKey } from '../../utils/keyRouting.js'
 import { useImagesStore } from '../../stores/useImagesStore.js'
+import { texturePageBlobs } from '../../stores/reconstruction/meshTexture.js'
 
 // pointSize / cameraScale are set from the ribbon's View ▸ Scene steppers.
 const { gridZ, background, nearClip, pointSize, cameraScale } = useViewerSettings()
@@ -212,6 +213,54 @@ function disposeObject(root) {
     obj.geometry?.dispose()
     if (obj.material) disposeMaterial(obj.material, textures, materials)
   })
+}
+
+// A cloud layer's object plus the material it is not showing right now (a textured
+// mesh swaps between its lit base material and one unlit material per atlas page).
+function disposeLayer(layer) {
+  disposeObject(layer.object)
+  const textures = new Set(), materials = new Set()
+  if (layer.baseMaterial && layer.baseMaterial !== layer.object.material) disposeMaterial(layer.baseMaterial, textures, materials)
+  if (layer.pageMaterials && layer.pageMaterials !== layer.object.material) disposeMaterial(layer.pageMaterials, textures, materials)
+}
+
+// The atlas pages of a textured mesh as unlit materials, one per page (the geometry's
+// groups say which faces use which). The pages decode asynchronously; a page shows grey
+// until its texture is up. A page larger than this GPU's texture limit is downscaled
+// for display only. UVs follow glTF (v down from the top row), so no flip.
+function pageMaterials(layer, cloud) {
+  if (layer.pageMaterials && layer.pageSource === cloud.texture) return layer.pageMaterials
+  if (layer.pageMaterials && layer.pageMaterials !== layer.object.material) disposeMaterial(layer.pageMaterials)
+  const blobs = texturePageBlobs(cloud.texture)
+  const mats = blobs.map(() => new THREE.MeshBasicMaterial({ side: THREE.DoubleSide, color: 0xbbbbbb }))
+  layer.pageMaterials = mats
+  layer.pageSource = cloud.texture
+  const max = renderer.capabilities.maxTextureSize
+  blobs.forEach(async (blob, i) => {
+    try {
+      let bmp = await createImageBitmap(blob)
+      if (bmp.width > max || bmp.height > max) {
+        const s = max / Math.max(bmp.width, bmp.height)
+        const w = Math.floor(bmp.width * s), h = Math.floor(bmp.height * s)
+        bmp.close()
+        bmp = await createImageBitmap(blob, { resizeWidth: w, resizeHeight: h, resizeQuality: 'high' })
+      }
+      if (unmounted || layer.pageMaterials !== mats) { bmp.close(); return }
+      const tex = new THREE.Texture(bmp)
+      tex.flipY = false
+      tex.colorSpace = THREE.SRGBColorSpace
+      tex.anisotropy = renderer.capabilities.getMaxAnisotropy()
+      tex.minFilter = THREE.LinearMipmapLinearFilter
+      tex.needsUpdate = true
+      mats[i].map = tex
+      mats[i].color.set(0xffffff)
+      mats[i].needsUpdate = true
+      requestRender()
+    } catch (err) {
+      console.warn('Texture page could not be decoded', err)
+    }
+  })
+  return mats
 }
 
 // Removes the glyphs only; geometry, materials and thumbnails are shared/cached.
@@ -472,6 +521,11 @@ function createCloudLayer(cloud) {
   if (isMesh) {
     geometry.setIndex(new THREE.BufferAttribute(cloud.idx, 1))
     geometry.computeVertexNormals()
+    // A textured mesh: UVs, and its faces grouped by atlas page (material index).
+    if (cloud.uv && cloud.texture?.groups?.length) {
+      geometry.setAttribute('uv', new THREE.BufferAttribute(cloud.uv, 2))
+      for (const g of cloud.texture.groups) geometry.addGroup(3 * g.start, 3 * g.count, g.page)
+    }
   }
   geometry.computeBoundingSphere()
   const material = isMesh
@@ -482,7 +536,7 @@ function createCloudLayer(cloud) {
   object.position.set(...origin)
   object.userData.cloudId = cloud.id
   scene.add(object)
-  return { object, positions, count, source: cloud, bounds: robustBounds(positions, count, sceneUp) }
+  return { object, baseMaterial: material, positions, count, source: cloud, bounds: robustBounds(positions, count, sceneUp) }
 }
 
 // Free the GPU buffers of the style-owned attributes (colour, a point cloud's
@@ -508,7 +562,17 @@ function releaseStyleBuffers(geometry, { keepColor, keepIndex }) {
 
 function styleLayer(layer, cloud, elevationRange) {
   const visual = buildCloudStyle(cloud, undefined, { elevationRange })
-  const { geometry, material } = layer.object
+  const { geometry } = layer.object
+  const material = layer.baseMaterial ?? layer.object.material
+  if (visual.texture) {
+    const mats = pageMaterials(layer, cloud)
+    for (const m of mats) {
+      m.opacity = visual.style.opacity
+      m.transparent = visual.style.opacity < 1
+      m.depthWrite = visual.style.opacity === 1
+    }
+    layer.object.material = mats
+  } else if (layer.baseMaterial) layer.object.material = layer.baseMaterial
   const isMesh = cloud.kind === 'mesh'
   const colors = visual.colors
     ? (visual.colors instanceof Uint8Array ? visual.colors : Uint8Array.from(visual.colors)) : null
@@ -574,7 +638,7 @@ function setCloudLayers(clouds) {
   const elevationRange = sharedElevationRange(clouds, cachedElevationRange)
   const ids = new Set(visible.map(c => c.id))
   for (const [id, layer] of cloudLayers) {
-    if (!ids.has(id)) { scene.remove(layer.object); disposeObject(layer.object); cloudLayers.delete(id) }
+    if (!ids.has(id)) { scene.remove(layer.object); disposeLayer(layer); cloudLayers.delete(id) }
   }
   const cameraMaps = visible.map(c => c.cameras).filter(Boolean)
   const camerasChanged = cameraMaps.length !== lastCameraMaps.length || cameraMaps.some((m, i) => m !== lastCameraMaps[i])
@@ -590,8 +654,8 @@ function setCloudLayers(clouds) {
   for (const cloud of visible) {
     let layer = cloudLayers.get(cloud.id)
     if (layer && (layer.source.pos !== cloud.pos || layer.source.points !== cloud.points || layer.source.idx !== cloud.idx
-        || layer.source.count !== cloud.count || layer.source.kind !== cloud.kind)) {
-      scene.remove(layer.object); disposeObject(layer.object); cloudLayers.delete(cloud.id); layer = null
+        || layer.source.uv !== cloud.uv || layer.source.count !== cloud.count || layer.source.kind !== cloud.kind)) {
+      scene.remove(layer.object); disposeLayer(layer); cloudLayers.delete(cloud.id); layer = null
     }
     if (!layer) {
       layer = createCloudLayer(cloud)
@@ -1167,7 +1231,7 @@ onBeforeUnmount(() => {
   clearSelection()
   resizeObserver?.disconnect()
   disposeFrustumResources()
-  for (const { object } of cloudLayers.values()) disposeObject(object)
+  for (const layer of cloudLayers.values()) disposeLayer(layer)
   cloudLayers.clear()
   if (grid) { disposeObject(grid); grid = null }
   controls?.dispose()

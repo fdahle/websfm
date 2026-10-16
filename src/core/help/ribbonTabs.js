@@ -327,9 +327,8 @@ export const TABS = [
             { id: 'mesh-to-points', label: 'Sample to points…', icon: 'point-cloud', needs: ['mesh'],
               blurb: 'Uniform surface sampling into a dense cloud' },
             { section: 'Colour' },
-            // TODO.md ▸ Remaining interoperability ▸ Mesh texturing.
-            { id: 'texture-mesh', label: 'Texture…', icon: 'image', disabled: true,
-              blurb: 'UV atlas + image texture' },
+            { id: 'texture-mesh', label: 'Texture…', icon: 'image', needs: ['mesh', 'sparse'],
+              blurb: 'Photo texture from the registered cameras' },
           ] },
         ],
       },

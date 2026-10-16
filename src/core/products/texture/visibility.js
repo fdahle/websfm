@@ -140,7 +140,8 @@ export function rasterizeDepth(proj, idx, width, height, depth) {
 // Candidate views per face. `geom` from meshGeometry, `views` as above. Hooks:
 //   validLut(vi, grid)    → Uint8Array over the grid (1 = usable: on the photo, not
 //                           masked) or null when every pixel of the window is usable
-//   renderDepth(vi, grid, proj) → Float32Array depth buffer, or null for the CPU one
+//   renderDepth(vi, grid, cam, geom, idx) → Float32Array depth buffer (the WebGPU
+//                           pass), or null for the CPU one
 //   onProgress(done, total)
 // → { K, count: Uint8Array(F), view: Uint16Array(F·K), score: Float32Array(F·K),
 //     orientation: 1 | −1 | 0, seenBy: Int32Array(nViews) }
@@ -164,7 +165,7 @@ export async function faceCandidates(geom, idx, views, opts = {}, hooks = {}) {
     const grid = viewGrid(v, bufferSide)
     const W = grid.width, H = grid.height
     proj = projectVertices(P, cam, grid, proj)
-    let zbuf = hooks.renderDepth ? await hooks.renderDepth(vi, grid, proj) : null
+    let zbuf = hooks.renderDepth ? await hooks.renderDepth(vi, grid, cam, geom, idx) : null
     if (!zbuf) {
       if (!depth || depth.length < W * H) depth = new Float32Array(W * H)
       zbuf = rasterizeDepth(proj, idx, W, H, depth.subarray(0, W * H))

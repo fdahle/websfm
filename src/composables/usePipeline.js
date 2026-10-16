@@ -19,7 +19,7 @@ const DISPLAY_INTERVAL_MS = 100
 // completes instead of vanishing at 99%.
 const COMPLETE_HOLD_MS = 350
 
-export function usePipeline({ images, detectAll, matchAll, reconstruct, computeDepthMaps, densify, generateDem, generateOrtho, generateMesh, editClouds }) {
+export function usePipeline({ images, detectAll, matchAll, reconstruct, computeDepthMaps, densify, generateDem, generateOrtho, generateMesh, editClouds, textureMesh }) {
   const progressOpen    = ref(false)
   const progressTitle   = ref('')
   const progressCurrent = ref(0)
@@ -279,6 +279,14 @@ export function usePipeline({ images, detectAll, matchAll, reconstruct, computeD
     return finishRun(!!cloud)
   }
 
+  // Tools — mesh texture (reconstruction/meshTexture.js). One worker call with real
+  // progress (visibility, selection, bake); cancel by terminating the worker.
+  async function runTextureMesh(request) {
+    openProgress('Texturing Mesh', 100, () => terminateAll('texture cancelled'))
+    const cloud = await textureMesh(request, report)
+    return finishRun(!!cloud)
+  }
+
   return {
     progressOpen,
     progressTitle,
@@ -300,6 +308,7 @@ export function usePipeline({ images, detectAll, matchAll, reconstruct, computeD
     runGenerateOrtho,
     runGenerateMesh,
     runEditClouds,
+    runTextureMesh,
     // The progress contract itself, for a long-running job that is not a pipeline
     // stage — undistorted-image export is minutes of work and must not run behind
     // a frozen UI with no bar. Exposed rather than reimplemented so there stays

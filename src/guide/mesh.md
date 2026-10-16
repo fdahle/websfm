@@ -78,8 +78,9 @@ smooth extrapolated sheets that Gentle keeps.
 <!-- param: colorize default: on -->
 Gives each mesh vertex the colour of its nearest point in the dense point cloud. It
 reads the full cloud, not the thinned copy the solve uses, so colour is as sharp as the vertices
-allow. It is useful for viewing, but is not a texture atlas; close inspection may show
-blurred or stretched colour where mesh vertices are sparse. A vertex with no dense
+allow. It is useful for viewing, but close inspection may show blurred or stretched
+colour where mesh vertices are sparse; for the photos' full detail, texture the mesh
+([Texture a Mesh](guide:texture-mesh)). A vertex with no dense
 point nearby, such as one in a filled hole, falls back to grey. Switch it off for
 geometry-only uses such as STL export; a cloud without colour leaves the mesh
 uncoloured either way.
@@ -116,6 +117,8 @@ replaces these copies.
 - **Crop…** keeps the triangles whose three corners lie inside a box.
 - **Sample to points…** turns the surface into a dense cloud of evenly spread points
   with normals and colour, so the point-cloud tools and the DEM can use a mesh.
+- **Texture…** paints the mesh with the photos themselves, as a new textured mesh.
+  See [Texture a Mesh](guide:texture-mesh).
 - **Mesh area & volume…** (in **Tools → Measure ▾**, with the other measurements)
   reports the surface area and, when the mesh is closed and
   consistently wound, its volume. An open mesh reports how many open edges it has

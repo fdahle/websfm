@@ -18,6 +18,7 @@ import { makeSfmOps } from './ops/sfm.js'
 import { makeDenseOps } from './ops/dense.js'
 import { makeProductsOps } from './ops/products.js'
 import { makeMeshOps } from './ops/mesh.js'
+import { makeTextureOps } from './ops/texture.js'
 import { makeCloudOps } from './ops/cloud.js'
 import { makeTiffOps } from './ops/tiff.js'
 import { makeSegmentOps } from './ops/segment.js'
@@ -85,6 +86,7 @@ const ops = {
   ...makeDenseOps({ rasterize }),
   ...makeProductsOps({ rasterize }),
   ...makeMeshOps(),
+  ...makeTextureOps({ rasterize }),
   ...makeCloudOps(),
   ...makeTiffOps(),
   ...makeSegmentOps({ rasterize }),

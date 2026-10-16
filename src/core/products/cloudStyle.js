@@ -19,8 +19,10 @@ const CLASSES = {
 }
 export const countOf = cloud => cloud?.nVerts ?? cloud?.count ?? cloud?.points?.length ?? 0
 export const hasRgb = cloud => !!cloud?.col || !!cloud?.points?.some(p => p.color)
+export const hasTexture = cloud => !!(cloud?.uv && cloud?.texture?.pages?.length)
 export function styleFields(cloud) {
   return [
+    ...(hasTexture(cloud) ? [{ value: 'texture', label: 'Texture' }] : []),
     ...(hasRgb(cloud) ? [{ value: 'rgb', label: 'RGB' }] : []),
     { value: 'single', label: 'Single colour' },
     { value: 'elevation', label: 'Elevation (Z)' }, { value: 'x', label: 'X coordinate' }, { value: 'y', label: 'Y coordinate' },
@@ -28,7 +30,8 @@ export function styleFields(cloud) {
   ]
 }
 export function resolveCloudStyle(cloud, input = cloud?.style || {}) {
-  const field = styleFields(cloud).some(f => f.value === input.field) ? input.field : (hasRgb(cloud) ? 'rgb' : 'single')
+  const field = styleFields(cloud).some(f => f.value === input.field) ? input.field
+    : (hasTexture(cloud) ? 'texture' : hasRgb(cloud) ? 'rgb' : 'single')
   return { field, colour: /^#[a-f\d]{6}$/i.test(input.colour) ? input.colour : '#44aaff',
     opacity: Number.isFinite(input.opacity) ? Math.max(0, Math.min(1, input.opacity)) : 1,
     ramp: Object.hasOwn(RAMPS, input.ramp) ? input.ramp : 'viridis',
@@ -93,6 +96,8 @@ export function buildCloudStyle(cloud, input, { elevationRange = null } = {}) {
   const label = styleFields(cloud).find(f => f.value === style.field)?.label
   const legend = { field: style.field, label, colour: style.colour, opacity: style.opacity }
   if (style.field === 'single') return { style, colors: null, indices: null, legend }
+  // The atlas pages are drawn by the viewer; no per-vertex colour.
+  if (style.field === 'texture') return { style, colors: null, indices: null, legend, texture: true }
   if (style.field === 'rgb') {
     let colors = cloud.col
     if (!colors) {
@@ -140,7 +145,7 @@ export function groupCloudLegends(layers) {
   const groups = []
   for (const layer of layers) {
     const legend = layer.legend
-    if (!legend || legend.field === 'rgb' || legend.opacity === 0) continue
+    if (!legend || legend.field === 'rgb' || legend.field === 'texture' || legend.opacity === 0) continue
     const entries = legend.entries?.filter(entry => entry.visible)
     if (entries && !entries.length) continue
     let group

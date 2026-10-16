@@ -2,6 +2,7 @@ import { createFrameResolver } from './reconstruction/frames.js'
 import { createSparseRun } from './reconstruction/sparseRun.js'
 import { createProductRuns } from './reconstruction/productRuns.js'
 import { createCloudEdits } from './reconstruction/cloudEdits.js'
+import { createMeshTexture } from './reconstruction/meshTexture.js'
 import { createDense } from './reconstruction/dense.js'
 import { createProducts } from './reconstruction/products.js'
 import { createImporters } from './reconstruction/importers.js'
@@ -669,7 +670,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
 
   // Crop / filter / merge / select and the other Tools-tab edits (reconstruction/cloudEdits.js).
   const {
-    editClouds,
+    editClouds, addDerivedMesh,
   } = createCloudEdits({
     clouds, healthDirty, imagesStore, invalidateSparseDependents, log, mainSparseCloud, makeCloudId,
     save, projects, reconStatus, selectedCloudId, summary, upsertSparseCloud, sensors,
@@ -711,6 +712,11 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     mainSparseCloud, validGeoref, currentCrs: () => projects.currentCrs, georeference,
     scaleFit, scaleFitStatus, log,
     orientationBasis: activeOrientationBasis,
+  })
+
+  // Mesh texture (reconstruction/meshTexture.js).
+  const { textureMesh } = createMeshTexture({
+    addDerivedMesh, clouds, frameModelFor, images, imagesStore, log, mainSparseCloud, reconStatus, save,
   })
 
   // DEM and orthophoto generation (reconstruction/productRuns.js).
@@ -975,7 +981,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     reconstruct,
     importColmapModel, importInteropModel,
     importCloud,
-    editClouds,
+    editClouds, textureMesh,
     // Tools ▸ Model ▾ ▸ Region (core/products/region.js).
     region, regionState, setRegion, clearRegion,
     // Tools ▸ Model ▾ ▸ Orient model (core/products/orientation.js).

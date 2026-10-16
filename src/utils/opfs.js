@@ -1210,6 +1210,8 @@ export async function deletePoses(projectId) {
 //   nrm    Float32  3·N   world-space unit normals (dense-only; Poisson mesh input;
 //                         absent on old projects / normal-less runs — do NOT heal)
 //   idx    Uint32   3·T   triangle vertex indices (mesh clouds only)
+//   uv     Float32  2·N   texture coordinates (textured meshes only, hasUv)
+//   texture Uint8   —     the atlas pages' JPEG bytes, sliced by meta texture.pages
 //   vcount Uint32   N     view-tracks per point (CSR row lengths)
 //   vcam   Uint32   ΣV    camera index into the cloud's viewUuids, per view
 //   vkp    Uint32   ΣV    keypoint index, per view
@@ -1225,7 +1227,7 @@ export async function deletePoses(projectId) {
 // does not rewrite every other. Returns `{ ok: true, files: { cloudId: { key: file } } }`,
 // or `{ ok: false, stale: [cloudId] }` — nothing written — when a reused file has gone
 // (another tab's save collected it); the caller then resends those clouds' buffers.
-const RECON_BIN_KEYS = ['pos', 'col', 'colorMask', 'nrm', 'idx', 'vcount', 'vcam', 'vkp', 'vx', 'vy', 'attributes']
+const RECON_BIN_KEYS = ['pos', 'col', 'colorMask', 'nrm', 'idx', 'uv', 'texture', 'vcount', 'vcam', 'vkp', 'vx', 'vy', 'attributes']
 
 export async function saveReconstruction(projectId, data) {
   return trackPersistence('saveReconstruction:' + String(projectId), async () => {
@@ -1291,7 +1293,8 @@ export async function loadReconstruction(projectId) {
       if (!Number.isSafeInteger(n) || n < 0 || !posOk
           || (c.hasColor && buffers.col?.byteLength !== n * 3)
           || (c.hasNormals && buffers.nrm?.byteLength !== n * 12)
-          || (c.kind === 'mesh' && buffers.idx?.byteLength !== (c.triCount ?? 0) * 12)) {
+          || (c.kind === 'mesh' && buffers.idx?.byteLength !== (c.triCount ?? 0) * 12)
+          || (c.hasUv && (buffers.uv?.byteLength !== n * 8 || buffers.texture?.byteLength !== c.texture?.bytes))) {
         throw new Error('Incomplete saved reconstruction')
       }
       c.buffers = buffers

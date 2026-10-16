@@ -36,3 +36,7 @@ Both apply to the **Mosaic** blend, the default. The log reports how visible the
 seams are: the colour step across seams compared with the step inside one photo
 (×1 means the seams do not show in colour). See
 [Build an Orthophoto](guide:orthophoto).
+
+A [textured mesh](help:texture-atlas) has seams for the same reason: neighbouring
+triangles that take different photos. There, [view selection](help:view-selection)
+keeps them few, and the same per-photo gains level the colours across them.

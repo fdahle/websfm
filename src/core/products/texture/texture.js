@@ -4,7 +4,7 @@
 //   1 visibility   faceCandidates — per-view z-buffer of the mesh, best views per face
 //   2 selection    selectViews    — one view per face, Potts-smoothed (loopy BP)
 //   3 charts       buildCharts    — connected same-view faces; UVs = their projection
-//   4 packing      chartPieces + packShelves at a texel scale lowered until it fits
+//   4 packing      chartPieces + packAtlas at a texel scale lowered until it fits
 //   5 bake         bakeAtlas      — each photo decoded once, every texel sampled
 //   6 levelling    fitGains / applyGains — per-image gains in linear light
 //   7 output       split vertices (one copy per piece a vertex is in), faces by page
@@ -22,7 +22,7 @@ import { weldVertices } from '../meshEdit.js'
 import { meshGeometry, faceCandidates, localCamera } from './visibility.js'
 import { selectViews } from './labeling.js'
 import { buildCharts, cornerPixels, chartPieces } from './charts.js'
-import { packShelves } from './packing.js'
+import { packAtlas } from './packing.js'
 import { bakeAtlas, applyGains } from './bake.js'
 
 const MIN_SCALE = 1 / 64
@@ -77,7 +77,7 @@ export async function textureMesh(mesh, views, opts = {}, hooks = {}) {
       const w = new Int32Array(n), h = new Int32Array(n)
       w.set(cut.pieces.w); h.set(cut.pieces.h)
       w.fill(flat.size, cut.pieces.count); h.fill(flat.size, cut.pieces.count)
-      pack = packShelves(w, h, o.pageSize)
+      pack = packAtlas(w, h, o.pageSize)
       if (pack.nPages <= o.maxPages) break
       s *= Math.min(0.95, Math.sqrt(o.maxPages / pack.nPages) * 0.98)
     } else s *= 0.8

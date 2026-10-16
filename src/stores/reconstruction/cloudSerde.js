@@ -63,6 +63,14 @@ export function serializeMeshCloud(c, { buffers = true } = {}) {
     cameras: [], pointCount: nVerts, nVerts, triCount: c.count || 0,
     hasColor: !!c.col, viewUuids: [],
     ...(c.meshSummary ? { meshSummary: c.meshSummary } : {}),
+    // A textured mesh: UVs (Float32, 2 per vertex) and the atlas pages (JPEG bytes in
+    // one buffer, each page's slice here) are sidecars; the page table and the
+    // face groups per page are metadata.
+    ...(c.uv && c.texture ? {
+      hasUv: true,
+      texture: { pages: c.texture.pages, groups: c.texture.groups, bytes: c.texture.data.byteLength },
+      ...(c.textureSummary ? { textureSummary: c.textureSummary } : {}),
+    } : {}),
   }
   if (!buffers) return { ...meta, buffers: null }
   const pos = c.pos.slice(0, nVerts * 3)
@@ -71,6 +79,7 @@ export function serializeMeshCloud(c, { buffers = true } = {}) {
   return {
     ...meta,
     buffers: { pos: pos.buffer, col: col ? col.buffer : null, idx: idx.buffer,
+      ...(meta.hasUv ? { uv: c.uv.slice(0, nVerts * 2).buffer, texture: c.texture.data.slice().buffer } : {}),
       vcount: null, vcam: null, vkp: null, vx: null, vy: null },
   }
 }
@@ -213,6 +222,11 @@ function deserializeCloudData(c, makeCloudId) {
       pos: markRaw(posF), idx: markRaw(idx), col: col ? markRaw(col) : null,
       // The mesh run record; absent on meshes saved before it existed ⇒ unknown.
       ...(c.meshSummary ? { meshSummary: c.meshSummary } : {}),
+      ...(c.hasUv && b.uv && b.texture ? {
+        uv: markRaw(new Float32Array(b.uv)),
+        texture: markRaw({ data: new Uint8Array(b.texture), pages: c.texture.pages, groups: c.texture.groups }),
+        ...(c.textureSummary ? { textureSummary: c.textureSummary } : {}),
+      } : {}),
     }
   }
   const pos = b.pos ? new Float64Array(b.pos) : new Float64Array(0)

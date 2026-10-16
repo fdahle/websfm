@@ -337,6 +337,9 @@ export const exportOrthoFile = streamingOp('exportOrtho')
 // Input { dense:{ count, pos, col, nrm }, settings }; resolves to
 // { mesh:{ nVerts, count, pos, idx, col }, denseHome:{ pos, col, nrm } }.
 export const meshify = streamingOp('meshify')
+// Mesh texture (workers/ops/texture.js): { mesh, views, settings } →
+// { mesh: { pos, idx, uv, col, nVerts, count }, texture: { data, pages, groups }, summary }.
+export const textureMesh = streamingOp('textureMesh')
 
 // Cloud editing — crop / filter / merge over flat (dense) clouds. See
 // core/products/cloudEdit.js. Input { mode, clouds:[{ id, count, pos, col, nrm }],

@@ -128,7 +128,7 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
     // Point Cloud ▾
     'estimate-normals', 'classify-ground', 'cloud-section', 'transform-cloud', 'align-icp', 'cloud-distance',
     // Mesh ▾
-    'clean-mesh', 'smooth-mesh', 'decimate-mesh', 'crop-mesh', 'mesh-to-points', 'mesh-measure',
+    'clean-mesh', 'smooth-mesh', 'decimate-mesh', 'crop-mesh', 'mesh-to-points', 'texture-mesh', 'mesh-measure',
     // Products ▾
     'dem-contours', 'dem-derivatives', 'clip-raster',
     // Images ▾

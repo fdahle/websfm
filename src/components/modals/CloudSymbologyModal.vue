@@ -39,7 +39,8 @@ function apply(close = false) {
     <SettingsField label="Colour by" label-for="cloud-style-field">
       <select id="cloud-style-field" v-model="draft.field" class="field-input field-select"><option v-for="field in fields" :key="field.value" :value="field.value">{{ field.label }}</option></select>
     </SettingsField>
-    <p v-if="draft.field === 'rgb'" class="field-hint">Use the original RGB colours stored in this cloud.</p>
+    <p v-if="draft.field === 'texture'" class="field-hint">Show the photo texture of this mesh.</p>
+    <p v-else-if="draft.field === 'rgb'" class="field-hint">Use the original RGB colours stored in this cloud.</p>
     <SettingsField v-else-if="draft.field === 'single'" label="Colour" label-for="cloud-style-colour">
       <input id="cloud-style-colour" v-model="draft.colour" type="color" />
     </SettingsField>

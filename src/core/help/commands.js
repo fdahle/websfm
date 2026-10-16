@@ -124,6 +124,7 @@ export const COMMANDS = [
   { name: 'align pairs',  aliases: ['align points'], dispatch: 'align-points',        group: 'Tools', help: 'Align a cloud by picking point pairs' },
   { name: 'icp',          aliases: ['align'],        dispatch: 'align-icp',           group: 'Tools', help: 'Refine an alignment to a reference cloud or mesh' },
   { name: 'clean mesh',   aliases: ['clean'],        dispatch: 'clean-mesh',          group: 'Tools', help: 'Remove specks and bridges, fill holes' },
+  { name: 'texture',      aliases: ['texture-mesh'], dispatch: 'texture-mesh',        group: 'Tools', help: 'Texture a mesh from the registered photos' },
   { name: 'decimate',     aliases: ['simplify'],     dispatch: 'decimate-mesh',       group: 'Tools', help: 'Reduce a mesh to a target triangle count' },
   { name: 'smooth',       aliases: [],               dispatch: 'smooth-mesh',         group: 'Tools', help: 'Taubin-smooth a mesh' },
   { name: 'contours',     aliases: [],               dispatch: 'dem-contours',        group: 'Tools', help: 'Export contour lines from the DEM' },

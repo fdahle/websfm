@@ -17,6 +17,7 @@ import CloudDistanceModal from '../modals/CloudDistanceModal.vue'
 import ContoursModal from '../modals/ContoursModal.vue'
 import CropCloudModal from '../modals/CropCloudModal.vue'
 import DecimateMeshModal from '../modals/DecimateMeshModal.vue'
+import TextureMeshModal from '../modals/TextureMeshModal.vue'
 import DemModal from '../modals/DemModal.vue'
 import DenseModal from '../modals/DenseModal.vue'
 import DepthMapsModal from '../modals/DepthMapsModal.vue'
@@ -271,6 +272,8 @@ const measurementsStore = useMeasurementsStore()
       @close="toolModal = null" @run="onToolEditRun" />
     <DecimateMeshModal v-else-if="toolModal === 'decimate-mesh'" :meshes="meshClouds" :initial-id="toolInitialId"
       @close="toolModal = null" @run="onToolEditRun" />
+    <TextureMeshModal v-else-if="toolModal === 'texture-mesh'" :meshes="meshClouds" :initial-id="toolInitialId"
+      :camera-count="reconstructionStore.mainSparseCloud?.cameras?.size ?? 0" @close="toolModal = null" @run="onToolEditRun" />
     <CropCloudModal v-else-if="toolModal === 'crop-mesh'" mesh :clouds="meshClouds" :initial-id="toolInitialId"
       @close="toolModal = null" @run="onToolEditRun" />
     <SampleMeshModal v-else-if="toolModal === 'mesh-to-points'" :meshes="meshClouds" :initial-id="toolInitialId"

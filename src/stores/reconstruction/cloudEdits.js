@@ -1,4 +1,5 @@
 import { markRaw } from 'vue'
+import { rawTexture } from './meshTexture.js'
 import { isFisheyeModel } from '../../core/sfm/distortion.js'
 import { makeFrameModelResolver } from '../../core/sfm/displayFrame.js'
 import { packSparseCloud, unpackReconstructionResult } from '../../core/sfm/resultCodec.js'
@@ -69,6 +70,8 @@ export function createCloudEdits({
       pos: markRaw(flat.pos),
       idx: markRaw(flat.idx),
       col: markRaw(flat.col || null),
+      // A textured mesh (reconstruction/meshTexture.js): per-vertex UVs + atlas pages.
+      ...(flat.uv && flat.texture ? { uv: markRaw(flat.uv), texture: rawTexture(flat.texture) } : {}),
     }
     clouds.value.push(cloud)
     selectedCloudId.value = cloud.id

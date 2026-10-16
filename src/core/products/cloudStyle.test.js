@@ -118,3 +118,20 @@ describe('shared scales and concise legends', () => {
     expect(layers).toEqual(original)
   })
 })
+
+describe('texture style', () => {
+  const textured = { id: 't', kind: 'mesh', nVerts: 3, count: 1, pos: new Float32Array(9), idx: Uint32Array.of(0, 1, 2),
+    col: new Uint8Array(9), uv: new Float32Array(6), texture: { data: new Uint8Array(1), pages: [{ width: 1, height: 1 }], groups: [] } }
+  it('offers Texture first and uses it by default on a textured mesh', () => {
+    expect(styleFields(textured)[0].value).toBe('texture')
+    const v = buildCloudStyle(textured)
+    expect(v.style.field).toBe('texture')
+    expect(v.texture).toBe(true)
+    expect(v.colors).toBeNull()
+    // The vertex colours stay one choice away.
+    expect(buildCloudStyle(textured, { field: 'rgb' }).colors).toBe(textured.col)
+  })
+  it('is not offered without a texture', () => {
+    expect(styleFields({ ...textured, texture: null }).some((f) => f.value === 'texture')).toBe(false)
+  })
+})

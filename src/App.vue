@@ -107,7 +107,7 @@ const { sidebarWidth, startSidebarResize } = useSidebarResize()
 // Project-scoped store; restore/clear run through the project-store registry.
 const reconstructionStore = useReconstructionStore()
 const { clouds, selectedCloud, mainSparseCloud, dem, ortho, georef, summary: reconSummary } = storeToRefs(reconstructionStore)
-const { reconstruct, importColmapModel, importInteropModel, importCloud, editClouds, computeDepthMaps, densify, generateDem, generateOrtho, generateMesh, effectiveFrameSpec, clearDerived: clearReconstructionDerived } = reconstructionStore
+const { reconstruct, importColmapModel, importInteropModel, importCloud, editClouds, textureMesh, computeDepthMaps, densify, generateDem, generateOrtho, generateMesh, effectiveFrameSpec, clearDerived: clearReconstructionDerived } = reconstructionStore
 
 async function clearCurrentProjectDerived() {
   await clearReconstructionDerived()
@@ -197,7 +197,7 @@ const {
   progressUnit, progressFraction, progressIndeterminate, progressComplete, progressCancelling,
   cancelRun, runDetect, runMatch, runReconstruct, runComputeDepthMaps, runDensify,
   runGenerateDem, runGenerateOrtho, runGenerateMesh, runEditClouds, progress: exportProgress,
-} = usePipeline({ images, detectAll, matchAll, reconstruct, computeDepthMaps, densify, generateDem, generateOrtho, generateMesh, editClouds })
+} = usePipeline({ images, detectAll, matchAll, reconstruct, computeDepthMaps, densify, generateDem, generateOrtho, generateMesh, editClouds, textureMesh })
 
 // ── Derived state ──────────────────────────────────────────────────────────────
 // Everything derived from store state alone (workspace readiness, match summaries,

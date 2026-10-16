@@ -190,6 +190,26 @@ describe('mesh cloud round trip', () => {
     expect([...out.col]).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])
   })
 
+  it('round-trips a texture: UVs, the page bytes, the page table and the face groups', () => {
+    const texture = {
+      data: Uint8Array.from([0xff, 0xd8, 1, 2, 0xff, 0xd8, 3]),
+      pages: [{ width: 64, height: 32, offset: 0, length: 4, type: 'image/jpeg' },
+        { width: 64, height: 8, offset: 4, length: 3, type: 'image/jpeg' }],
+      groups: [{ page: 0, start: 0, count: 1 }, { page: 1, start: 1, count: 1 }],
+    }
+    const uv = Float32Array.from([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8])
+    const textureSummary = { charts: 2, scale: 1 }
+    const ser = serializeCloud({ ...mesh, uv, texture, textureSummary })
+    expect(ser.texture.bytes).toBe(7)
+    const out = deserializeCloud(ser, makeCloudId)
+    expect([...out.uv]).toEqual([...uv])
+    expect([...out.texture.data]).toEqual([...texture.data])
+    expect(out.texture.pages).toEqual(texture.pages)
+    expect(out.texture.groups).toEqual(texture.groups)
+    expect(out.textureSummary).toEqual(textureSummary)
+    expect(roundTrip(mesh).uv).toBeUndefined()
+  })
+
   it('round-trips the mesh run record, and leaves it absent on older meshes', () => {
     const meshSummary = { depth: 8, trim: 'gentle', sourceId: 'd2', stats: { keptTris: 2 } }
     expect(roundTrip({ ...mesh, meshSummary }).meshSummary).toEqual(meshSummary)

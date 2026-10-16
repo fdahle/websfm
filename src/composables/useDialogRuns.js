@@ -22,7 +22,7 @@ import { showToast } from './useToasts.js'
 export function useDialogRuns({ pipeline, closeProductTabs, openImageTab, refreshGcpReport, requestRemoveImages }) {
   const {
     runDetect, runMatch, runReconstruct, runComputeDepthMaps, runDensify,
-    runGenerateDem, runGenerateOrtho, runGenerateMesh, runEditClouds, exportProgress,
+    runGenerateDem, runGenerateOrtho, runGenerateMesh, runEditClouds, runTextureMesh, exportProgress,
   } = pipeline
   const { log } = useLog()
   const imagesStore = useImagesStore()
@@ -159,6 +159,8 @@ export function useDialogRuns({ pipeline, closeProductTabs, openImageTab, refres
     'mesh-to-points': 'mesh-sample',
   }
   async function onToolEditRun(req) {
+    // Texture is a mesh tool, but it reads the photos: its own store run, not an edit.
+    if (toolModal.value === 'texture-mesh') { toolModal.value = null; await runTextureMesh(req); return }
     const mode = TOOL_EDIT_MODES[toolModal.value]
     toolModal.value = null
     if (mode === 'distance') req = { ...req, style: distanceStyle(req.settings.signed) }
