@@ -66,7 +66,15 @@ export const SFM_TUNING = {
   // behaviour). St Nazaire SIFT (HANDOVER ▸ B-ba-ftol): BA 608 → 205 s at 1e-6 with the
   // same cameras, points, reprojection and GNSS fit to 4 decimals; 1e-5 saved another
   // 54 s but moved the median reprojection by 0.01 px, so the standard value stays.
-  baSolver: { pcgMinN: null, pcgRelTol: 1e-6, pcgMaxIter: 200, pcgAcceptPartial: true, functionTolerance: 1e-6 },
+  // direct: wherever PCG would run (≥ ~100 cameras), a sparse block Cholesky of the
+  // reduced camera system instead (crates/reconstruction sparse_chol.rs): exact steps,
+  // where block-Jacobi PCG stalls at its cap on big blocks (1,600 synthetic cameras: 22
+  // of 23 solves capped). With exact steps the LM stop is floored at 10⁻⁵ (bundle.rs
+  // DIRECT_FUNCTION_TOL; the tail past it changed nothing). plan-sfm-scale ▸ S2, bench
+  // 2026-10-16 on identical matches: quarry SfM 259 → 189 s, South Building 85 → 63 s,
+  // same cameras, points, final reprojection and RTK camera fit (13.24 / 18.17 vs
+  // 18.26 cm); synthetic 1,600 cameras 273 → 218 s. { direct: false } is the PCG path.
+  baSolver: { pcgMinN: null, pcgRelTol: 1e-6, pcgMaxIter: 200, pcgAcceptPartial: true, functionTolerance: 1e-6, direct: true },
   // ── Interleaved bundle-adjustment / track filtering ──
   // Observation pruning threshold, in **detection pixels** — sfm.js resolves it to
   // native px against the run's detection scale (core/scaleContext.js, which owns

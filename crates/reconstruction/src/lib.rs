@@ -8,6 +8,7 @@
 mod linalg;
 mod pose;
 mod bundle;
+mod sparse_chol;
 mod mvs;
 
 #[allow(unused_imports)] pub(crate) use linalg::*;

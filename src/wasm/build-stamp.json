@@ -22,11 +22,12 @@
   "crates/mesh/vendor/poisson_reconstruction/src/poisson_vector_field.rs": "b321905a8cc93ef039ccb8f298b23fc1c1b9b31675c3290c68cc8ece5cb429a4",
   "crates/mesh/vendor/poisson_reconstruction/src/polynomial.rs": "ea27260d58048b7223f4177dc436d73568e2178626bc5d6170662efe7494895b",
   "crates/reconstruction/Cargo.toml": "2a9a1642ea87bd3f692295f549b87a5f8025a5d63bafb7f15a30d1cb4800963c",
-  "crates/reconstruction/src/bundle.rs": "d2371f17dce948e99f7afa3b3d0b5cdc51f5fcf11677c269dfebc842b058e505",
-  "crates/reconstruction/src/lib.rs": "38fc1638f72228142614151acf837201401291c2cf7270e53ea700199fd07f07",
+  "crates/reconstruction/src/bundle.rs": "1a5e59e7dc1379d57cd56caafa43bec3de0e77c42aae8edf07f598039e09665b",
+  "crates/reconstruction/src/lib.rs": "4ff75870f7d7c758e946b27f2943d8369f7e35025163efd99a3c474c38c433c3",
   "crates/reconstruction/src/linalg.rs": "c342b0590d453f0d11636dccd6c2f3fde8056bf04a7fc9e70efc3317c2c39619",
   "crates/reconstruction/src/mvs.rs": "b8109e6dffe3c7e4e105d074d8889013856e8d3a72b000b8aac07119364809b2",
   "crates/reconstruction/src/pose.rs": "f2fb88323591c1d4ac00b94b70c7d95fe23e2980cc9cf3324eaad374e8023e5a",
+  "crates/reconstruction/src/sparse_chol.rs": "0138726a4a33f91fbd064bf27143342f2dda5fd31707a03232ca231b3c617b6d",
   "crates/sift/Cargo.toml": "802d05773889556dcfbb755fcd8f61956292c2c2a57f33f7c784b7dbd02ce788",
   "crates/sift/src/lib.rs": "5627ff521992c35f735b7c2d1a8419f2e27ee763b0ca39e8791bf3079c23802a",
   "src/wasm/detection/sift.d.ts": "83efa57daee81366c52cc2aa676e891b57febeb81a797e311a8ceffedb3515d6",
@@ -51,6 +52,6 @@
   "src/wasm/mesh/mesh_bg.wasm.d.ts": "f475b7b6dde3be7bace2b397a46b2e8d0218c736711cd55f32f0a57096ad94a7",
   "src/wasm/reconstruction/reconstruction.d.ts": "b4f274cd844e18e70bd9dfa107fdba82da06b812ba4037a94c6796139614233c",
   "src/wasm/reconstruction/reconstruction.js": "dee3fb8ac20d813fa9bfc3a099e931f71cf423cdf8ddc9b94a88444eda27acef",
-  "src/wasm/reconstruction/reconstruction_bg.wasm": "a078498de43a73a0ac3cdcb89b92e37b00d5ea28690373eb84e552977defc55b",
+  "src/wasm/reconstruction/reconstruction_bg.wasm": "53c1c6c18213c89cc2682b72ec67418ebef1a75eb545589c35b53ec625501238",
   "src/wasm/reconstruction/reconstruction_bg.wasm.d.ts": "acf7f8d688759f866abf985c920c59368948fd4122d15f6b88365348a43ba058"
 }

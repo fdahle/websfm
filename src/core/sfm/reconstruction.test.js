@@ -424,6 +424,10 @@ describe('bundleAdjust', () => {
     // Slot 5: the preconditioner (SolverOpts::precond); only 'ic0' sets it.
     expect(baSolverFlat({ pcgPreconditioner: 'ic0' })[5]).toBe(1)
     expect(baSolverFlat({ pcgPreconditioner: 'jacobi' })[5]).toBeNaN()
+    // Slot 6: the sparse direct solve (SolverOpts::direct).
+    expect(baSolverFlat({ direct: true })[6]).toBe(1)
+    expect(baSolverFlat({ direct: false })[6]).toBe(0)
+    expect(baSolverFlat({})[6]).toBeNaN()
   })
 
   it('returns null when there are no observations', async () => {

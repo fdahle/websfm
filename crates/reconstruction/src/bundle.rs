@@ -75,6 +75,11 @@ pub(crate) const PCG_MIN_N: usize = 600;
 //                   Cholesky IC(0) on the sparse camera pattern (falls back to
 //                   block-Jacobi when the factorisation breaks down). Opt-in while
 //                   the bench decides (plan-parity PAR-2.1).
+//   direct          1 = solve the reduced system by a sparse block Cholesky
+//                   (sparse_chol.rs) wherever PCG would run, exactly instead of to a
+//                   capped tolerance: on a large aerial block block-Jacobi PCG stalls
+//                   at its cap (plan-sfm-scale ▸ S2). The ordering is computed once per
+//                   call; a fill past SPARSE_MAX_BYTES keeps PCG.
 //   function_tol    stop LM once an accepted step lowers the robust cost by less than
 //                   this fraction of it (Ceres' function_tolerance). 0 ⇒ run until no
 //                   step is accepted or `max_iters` — the original behaviour, which on
@@ -83,11 +88,11 @@ pub(crate) const PCG_MIN_N: usize = 600;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct SolverOpts {
     pub pcg_min_n: usize, pub rel_tol: f64, pub max_iter: usize, pub accept_partial: bool, pub function_tol: f64,
-    pub precond: u8,
+    pub precond: u8, pub direct: u8,
 }
 
 impl SolverOpts {
-    pub(crate) const DEFAULT: SolverOpts = SolverOpts { pcg_min_n: PCG_MIN_N, rel_tol: 1e-10, max_iter: 2000, accept_partial: false, function_tol: 0.0, precond: 0 };
+    pub(crate) const DEFAULT: SolverOpts = SolverOpts { pcg_min_n: PCG_MIN_N, rel_tol: 1e-10, max_iter: 2000, accept_partial: false, function_tol: 0.0, precond: 0, direct: 0 };
 
     pub(crate) fn from_flat(f: &[f32]) -> SolverOpts {
         let d = SolverOpts::DEFAULT;
@@ -100,6 +105,7 @@ impl SolverOpts {
             accept_partial: slot(3).map_or(d.accept_partial, |v| v != 0.0),
             function_tol: slot(4).map_or(d.function_tol, |v| v),
             precond: slot(5).filter(|v| *v == 1.0).map_or(d.precond, |_| 1),
+            direct: slot(6).map_or(d.direct, |v| if v == 1.0 { 1 } else { 0 }),
         }
     }
 }
@@ -140,6 +146,12 @@ pub(crate) fn solve_reduced(n: usize, a: &[f64], b: &[f64], blocks: &[(usize, us
 // PCG only, and a capped CG iterate is used as the step (see `accept_partial`), since
 // a 3,000-camera dense matrix alone (2.6 GB) would exhaust the 4 GiB wasm32 memory.
 pub(crate) const DENSE_MAX_N: usize = 4096;
+
+// The largest sparse Cholesky factor allowed (bytes of L); past it the solve stays PCG.
+pub(crate) const SPARSE_MAX_BYTES: usize = 1 << 30;
+
+// The LM stopping rule's floor when the direct solve runs (see bundle_adjust).
+pub(crate) const DIRECT_FUNCTION_TOL: f64 = 1e-5;
 
 // The dispatcher behind both storage forms: `matvec` and the diagonal blocks are the
 // matrix as PCG sees it, `to_dense` builds the n×n copy only when Cholesky runs.
@@ -902,6 +914,16 @@ pub fn bundle_adjust(
     };
     let solver = SolverOpts::from_flat(solver_flat);
     let mut solve_stats = SolveStats::default();
+    // The sparse direct solve's ordering, once for every LM iteration of this call.
+    let direct = if solver.direct == 1 && (pattern.n >= solver.pcg_min_n || pattern.n > DENSE_MAX_N) {
+        crate::sparse_chol::Symbolic::new(&pattern, SPARSE_MAX_BYTES / (8 * 36))
+            .filter(|sym| sym.factor_bytes() <= SPARSE_MAX_BYTES)
+    } else { None };
+    // Exact steps keep finding improvements of a few 10⁻⁶ of the cost long after the
+    // model has stopped changing (1,600 aerial cameras: all 30 iterations ran, RMS
+    // 0.46 px from the 13th on); a 10⁻⁵ stop ends them with the same final model. Only
+    // where the direct solve runs: an inexact PCG step needs the tighter rule.
+    let function_tol = if direct.is_some() { solver.function_tol.max(DIRECT_FUNCTION_TOL) } else { solver.function_tol };
     // Per-group params, one [f64;7] slot each. The focal-scale slot (if present) inits
     // to 1 (multiplies fx/fy); every distortion/principal-point slot inits to 0 — a
     // fisheye group's k slots are offsets from its seed coefficients.
@@ -1244,11 +1266,20 @@ pub fn bundle_adjust(
             }
             if !ok { lambda = (lambda * 4.0).min(1e8); continue; }
 
-            let ic = if solver.precond == 1 && (n >= solver.pcg_min_n || n > DENSE_MAX_N) { BlockIc::new(&pattern, &s) } else { None };
-            let dsol = match solve_reduced_with(n, |x, y| pattern.matvec(&s, x, y), &pattern.diag_blocks(&s), ic.as_ref(),
-                                                || pattern.to_dense(&s), n <= DENSE_MAX_N, &rhs, &solver, &mut solve_stats) {
-                Some(x) => x,
-                None => { lambda = (lambda * 4.0).min(1e8); continue; }
+            let dsol = if let Some(sym) = direct.as_ref() {
+                solve_stats.solves += 1;
+                solve_stats.cholesky += 1;
+                match sym.factor(&pattern, &s) {
+                    Some(f) => f.solve(&pattern, &rhs),
+                    None => { lambda = (lambda * 4.0).min(1e8); continue; }
+                }
+            } else {
+                let ic = if solver.precond == 1 && (n >= solver.pcg_min_n || n > DENSE_MAX_N) { BlockIc::new(&pattern, &s) } else { None };
+                match solve_reduced_with(n, |x, y| pattern.matvec(&s, x, y), &pattern.diag_blocks(&s), ic.as_ref(),
+                                         || pattern.to_dense(&s), n <= DENSE_MAX_N, &rhs, &solver, &mut solve_stats) {
+                    Some(x) => x,
+                    None => { lambda = (lambda * 4.0).min(1e8); continue; }
+                }
             };
 
             // Back-substitute points: δp = −C⁻¹·gp − C⁻¹·(Σ_v E_vᵀ·δv).
@@ -1305,7 +1336,7 @@ pub fn bundle_adjust(
         // Compared within one iteration only: the Huber threshold is re-derived from the
         // residuals at the top of each iteration, so costs of different iterations sit on
         // different scales.
-        if solver.function_tol > 0.0 && cost_at_start - cost <= solver.function_tol * cost_at_start {
+        if function_tol > 0.0 && cost_at_start - cost <= function_tol * cost_at_start {
             break;
         }
     }
@@ -1421,6 +1452,9 @@ mod reduced_solve_tests {
         // The function tolerance is the fifth slot; absent, NaN or negative ⇒ 0 (off).
         assert!((SolverOpts::from_flat(&[f32::NAN, f32::NAN, f32::NAN, f32::NAN, 1e-6]).function_tol - 1e-6).abs() < 1e-12);
         assert_eq!(SolverOpts::from_flat(&[f32::NAN, f32::NAN, f32::NAN, f32::NAN, -1.0]).function_tol, 0.0);
+        // The direct solve is the seventh slot: 1 on, anything else off.
+        assert_eq!(SolverOpts::from_flat(&[f32::NAN, f32::NAN, f32::NAN, f32::NAN, f32::NAN, f32::NAN, 1.0]).direct, 1);
+        assert_eq!(SolverOpts::from_flat(&[f32::NAN, f32::NAN, f32::NAN, f32::NAN, f32::NAN, f32::NAN, 0.0]).direct, 0);
     }
 
     #[test]
@@ -1568,6 +1602,76 @@ mod reduced_solve_tests {
         vals
     }
 
+    // An aerial block's camera graph: a rows×cols grid, each camera coupled with those
+    // within `radius` (Chebyshev), plus one intrinsics group coupled with all.
+    fn aerial_pattern(rows: usize, cols: usize, radius: isize, kdim: usize) -> BlockPattern {
+        let n_cam = rows * cols;
+        let mut dims = vec![6usize; n_cam];
+        dims.push(kdim);
+        BlockPattern::new(dims, |r, touch| {
+            if r == n_cam { for c in 0..=n_cam { touch(c) } return }
+            let (y, x) = ((r / cols) as isize, (r % cols) as isize);
+            for dy in -radius..=radius { for dx in -radius..=radius {
+                let (yy, xx) = (y + dy, x + dx);
+                if yy >= 0 && xx >= 0 && (yy as usize) < rows && (xx as usize) < cols { touch(yy as usize * cols + xx as usize) }
+            }}
+            touch(n_cam);
+        })
+    }
+
+    #[test]
+    fn sparse_cholesky_solves_as_the_dense_one() {
+        use crate::sparse_chol::Symbolic;
+        for (pat, seed) in [(aerial_pattern(9, 7, 2, 4), 3u64), (aerial_pattern(1, 40, 3, 6), 5)] {
+            let vals = spd_fill(&pat, seed, 0.05);
+            let n = pat.n;
+            let mut rng = Lcg(seed + 1);
+            let b: Vec<f64> = (0..n).map(|_| rng.next()).collect();
+            let exact = chol_solve(n, &pat.to_dense(&vals), &b).unwrap();
+            let sym = Symbolic::new(&pat, usize::MAX).unwrap();
+            let x = sym.factor(&pat, &vals).unwrap().solve(&pat, &b);
+            let err = x.iter().zip(&exact).map(|(u, v)| (u - v).abs()).fold(0.0, f64::max);
+            let norm = exact.iter().map(|v| v.abs()).fold(0.0, f64::max);
+            assert!(err <= 1e-10 * norm, "max error {err:e} of {norm:e}");
+        }
+        // Not positive-definite: no factor (the LM loop then raises its damping).
+        let pat = aerial_pattern(4, 4, 1, 3);
+        let mut vals = spd_fill(&pat, 9, 0.05);
+        vals[pat.diag_at[5]] = -1.0;
+        assert!(Symbolic::new(&pat, usize::MAX).unwrap().factor(&pat, &vals).is_none());
+        // A fill bound refuses the ordering rather than blowing memory.
+        assert!(Symbolic::new(&aerial_pattern(20, 20, 3, 4), 100).is_none());
+    }
+
+    // cargo test -p reconstruction --release -- --ignored --nocapture sparse_cholesky_timing
+    #[test]
+    #[ignore]
+    fn sparse_cholesky_timing() {
+        use crate::sparse_chol::Symbolic;
+        for (rows, cols, radius) in [(30, 30, 3), (40, 40, 3), (50, 50, 3), (55, 55, 3)] {
+            let pat = aerial_pattern(rows, cols, radius, 6);
+            let vals = spd_fill(&pat, 1, 0.05);
+            let mut rng = Lcg(2);
+            let b: Vec<f64> = (0..pat.n).map(|_| rng.next()).collect();
+            let t = std::time::Instant::now();
+            let sym = Symbolic::new(&pat, usize::MAX).unwrap();
+            let t_sym = t.elapsed();
+            let t = std::time::Instant::now();
+            let f = sym.factor(&pat, &vals).unwrap();
+            let t_fac = t.elapsed();
+            let t = std::time::Instant::now();
+            let _x = f.solve(&pat, &b);
+            let t_sol = t.elapsed();
+            let a_blocks = pat.cols.len();
+            let t = std::time::Instant::now();
+            let mut y = vec![0f64; pat.n];
+            for _ in 0..20 { pat.matvec(&vals, &b, &mut y) }
+            let t_mv = t.elapsed() / 20;
+            println!("{} cameras (n {}): A {} blocks, L {} blocks ({:.0} MB); ordering {t_sym:?}, factor {t_fac:?}, solve {t_sol:?}; one matvec {t_mv:?}",
+                rows * cols, pat.n, a_blocks, sym.fill_blocks, sym.factor_bytes() as f64 / 1e6);
+        }
+    }
+
     #[test]
     fn block_ic0_is_exact_without_fill_and_beats_jacobi_with_it() {
         // A chain (block tridiagonal) has no fill: IC(0) is the Cholesky factor itself.
@@ -1663,6 +1767,12 @@ mod reduced_solve_tests {
         let after_ic = ic[base + 1];
         assert!(after_ic < 0.2 * before && after_ic < 0.5, "IC rms {before} → {after_ic}");
         assert!(ic[base + 11] < out[base + 11], "CG iterations: IC {} vs Jacobi {}", ic[base + 11], out[base + 11]);
+        // The sparse direct solve (slot 6): converges, every solve direct, no CG at all.
+        let direct = [f32::NAN, f32::NAN, f32::NAN, f32::NAN, f32::NAN, f32::NAN, 1.0];
+        let d = bundle_adjust(&cams, &intr, &pts, &idx, &px, &[], &[], &[], &prior, 10, &[], 0, &direct, &[], &[]);
+        assert!(d[base + 1] < 0.2 * before && d[base + 1] < 0.5, "direct rms {before} → {}", d[base + 1]);
+        assert_eq!(d[base + 6], d[base + 5], "every solve direct");
+        assert_eq!(d[base + 11], 0.0, "no CG iterations");
     }
 
     #[test]
