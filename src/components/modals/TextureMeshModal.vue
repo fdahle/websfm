@@ -26,6 +26,7 @@ const settings = ref({ ...TEXTURE_DEFAULTS })
 const { useGpu, memBudgetBytes } = useComputeSettings()
 const { id: sourceId, item: source } = useSourcePick(() => props.meshes, { initialId: props.initialId })
 const PAGE_SIZES = [2048, 4096, 8192]
+const UNSEEN = [{ value: 'colour', label: 'Flat colour' }, { value: 'remove', label: 'Remove' }]
 const RESOLUTIONS = [{ value: 1, label: 'Native photo pixels' }, { value: 0.5, label: 'Half' }, { value: 0.25, label: 'Quarter' }]
 const valid = computed(() => source.value && props.cameraCount > 0 && settings.value.maxPages >= 1)
 const textured = computed(() => !!source.value?.texture)
@@ -36,7 +37,7 @@ function run() {
     sourceId: sourceId.value,
     settings: {
       pageSize: s.pageSize, maxPages: Math.max(1, Math.round(s.maxPages)), maxScale: s.maxScale,
-      smoothness: Math.max(0, s.smoothness), levelColours: !!s.levelColours, useMasks: !!s.useMasks,
+      smoothness: Math.max(0, s.smoothness), levelColours: !!s.levelColours, useMasks: !!s.useMasks, unseen: s.unseen,
       useGpu: !!useGpu.value, memBudgetBytes: memBudgetBytes.value,
     },
     name: `${source.value?.name ?? 'Mesh'} (textured)`,
@@ -80,6 +81,12 @@ function run() {
         <SettingsField hint="Masked pixels (people, sky, the drone's legs) are never used.">
           <template #label><FieldHelp op="texture-mesh" param="useMasks" :value="settings.useMasks" :default-value="TEXTURE_DEFAULTS.useMasks">Use masks</FieldHelp></template>
           <label class="checkbox-row"><input v-model="settings.useMasks" type="checkbox" class="checkbox" /> Leave masked pixels out</label>
+        </SettingsField>
+        <SettingsField label-for="tex-unseen">
+          <template #label><FieldHelp op="texture-mesh" param="unseen">Faces no photo sees</FieldHelp></template>
+          <select id="tex-unseen" v-model="settings.unseen" class="field-input field-select">
+            <option v-for="u in UNSEEN" :key="u.value" :value="u.value">{{ u.label }}</option>
+          </select>
         </SettingsField>
       </SettingsGroup>
       <AdvancedDisclosure label="Advanced settings">

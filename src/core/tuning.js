@@ -363,8 +363,13 @@ export const TEXTURE_TUNING = {
   maxCandidates: 8,     // best views kept per face for the view selection
   minCos: 0.1,          // faces seen at more than ~84° from their normal are not candidates
   depthTolRel: 0.01,    // depth-test slack as a share of depth, on top of the pixel-footprint term
+  // A face no view sees whole is textured from the view that hides least of it (else
+  // it would get a flat colour).
+  occludedFallback: true,
   // View selection (min-sum loopy BP, Potts).
   bpIterations: 12,
+  // Charts under this many faces are merged into a neighbour's photo where possible.
+  minChartFaces: 12,
   bpDamping: 0.5,
   // Charts: padding texels around each chart rectangle (filled with real photo content,
   // so mipmaps don't bleed); a rectangle less than `minFill` covered by its triangles
@@ -373,6 +378,17 @@ export const TEXTURE_TUNING = {
   minFill: 0.35,
   minSplitTexels: 1024,
   gainSamples: 65536,   // faces sampled for the colour-levelling fit
+  // Seam levelling (texture/seamLevel.js): weight of keeping a chart's offset smooth
+  // along its edges, relative to a seam's two sides meeting; seams far beyond the
+  // model's median seam difference count as misaligned detail and pull less; a small
+  // pull to 0.
+  seamLevelling: true,
+  seamSmoothWeight: 1,
+  seamDelta: 2,           // Cauchy scale, × the model's median seam difference
+  seamEpsilon: 1e-3,
+  seamChromaWeight: 0,    // colour-difference offsets pull at this share of brightness (0: brightness only)
+  seamMaxOffset: 40,      // levels; colour differences get half
+  seamMaxIterations: 2000,
   // Faces no view sees get a flat colour from a palette of cellSize² cells, the colour
   // quantised to `paletteBits` per channel.
   cellSize: 4,

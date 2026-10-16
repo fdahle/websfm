@@ -359,6 +359,7 @@ export const TEXTURE_DEFAULTS = {
   smoothness: 0.5,     // view-selection seam penalty per cut edge
   levelColours: true,  // per-image exposure/white-balance gains before the bake
   useMasks: true,      // leave masked photo pixels out of the texture
+  unseen: 'colour',    // faces no photo sees: 'colour' (flat, from the vertex colours) | 'remove'
 }
 
 // Cloud editing (core/products/cloudEdit.js). Mirrored by FilterCloudModal.vue /

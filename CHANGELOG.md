@@ -9,7 +9,10 @@ Notable changes to websfm. The format follows
 - **Textured meshes**: Tools ▸ Mesh ▸ Texture paints a mesh with the photos
   themselves, as a new mesh with an atlas of JPEG pages. Each triangle takes the photo
   that sees it largest, neighbouring triangles keep to the same photo so seams stay
-  few, and the photos' exposure is levelled across seams. Masks are respected, lenses
+  few, and tiny charts are merged into their neighbours. Exposure is levelled per photo
+  (ignoring samples one photo sees differently) and then across every seam, so the
+  two sides meet. A wall hidden behind a tree is still textured from the photo that
+  hides least of it, and faces no photo sees can be kept in a flat colour or removed. Masks are respected, lenses
   and film scans are sampled through their own camera model, and the depth pass runs
   on the GPU when one is available. The 3D view shows the texture (Colour by ▸
   Texture), and it exports as GLB (pages embedded), OBJ (a zip with the material

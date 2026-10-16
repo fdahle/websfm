@@ -31,8 +31,10 @@ triangles on the same photo, because every change of photo is a seam. Neighbouri
 triangles with the same photo form a chart. A chart is cut straight out of its photo, so
 the texture is the photo's own pixels, resampled once through the lens model.
 
-Triangles that no photo sees, such as the underside of an object or a filled hole,
-get one flat colour: their vertex colour, or grey.
+A triangle that something hides in every photo, such as a wall behind a tree, still
+takes the photo that hides least of it: Poisson closes trees into solid shapes, while
+the photos see the wall between the leaves. Only triangles that face away from every
+photo, such as an underside, are left without one (see **Faces no photo sees**).
 
 ## Texture resolution
 <!-- param: maxScale default: Native photo pixels -->
@@ -56,10 +58,21 @@ detail. Each 4096 × 4096 page needs about 64 MB of graphics memory in the 3D vi
 ## Level colours
 <!-- param: levelColours default: true -->
 Photos of the same surface rarely agree exactly in brightness and white balance, and
-the difference shows as a step at every seam. Levelling compares the photos where they
-see the same triangles and gives each one a gain per colour channel that brings them
-into line, the same correction the mosaicked [orthophoto](guide:orthophoto) uses.
-Switch it off only to see the photos as they were taken.
+the difference shows as a step at every seam. Levelling works in two steps. First each
+photo gets a gain per colour channel from the triangles it shares with the others, the
+same correction the mosaicked [orthophoto](guide:orthophoto) uses; samples where one
+photo shows something the others do not (a branch in front) are left out of that fit.
+Then [seam levelling](help:seam-levelling) brightens or darkens each chart smoothly so
+the two sides of every seam meet. Switch it off only to see the photos as they were
+taken.
+
+## Faces no photo sees
+<!-- param: unseen default: Flat colour -->
+Triangles that face away from every photo, such as the underside of an object or the
+back of a wall nobody photographed, cannot be textured. **Flat colour** keeps them,
+each in one colour from the mesh's vertex colours (grey without), so the mesh stays
+closed. **Remove** leaves them out of the textured mesh, which suits a model for
+viewing where those surfaces would only show as blotches.
 
 ## Use masks
 <!-- param: useMasks default: true -->

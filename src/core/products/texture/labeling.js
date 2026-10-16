@@ -97,3 +97,59 @@ export function selectViews(cand, adj, rev, opts = {}) {
   }
   return labels
 }
+
+// Absorb tiny charts into their neighbours (plan-texture T4). The Potts term keeps most
+// of the surface on few photos, but noisy geometry (vegetation, the fallback faces of
+// an occluded wall) still leaves confetti: thousands of charts of a few faces, each a
+// seam all round and a padded rectangle in the atlas. A chart smaller than `minFaces`
+// takes the photo most of its border edges lead to, when every one of its faces has that
+// photo among its candidates; a few passes let merged charts merge on.
+// labels (modified in place), adj, cand → the number of faces relabelled.
+export function mergeSmallCharts(labels, adj, cand, { minFaces = TEXTURE_TUNING.minChartFaces, passes = 3 } = {}) {
+  const { K, count, view } = cand
+  const F = labels.length
+  const has = (f, v) => { for (let i = 0; i < count[f]; i++) if (view[f * K + i] === v) return true; return false }
+  let total = 0
+  const chartOf = new Int32Array(F), stack = new Int32Array(F), members = []
+  for (let pass = 0; pass < passes; pass++) {
+    chartOf.fill(-1)
+    let changed = 0, nCharts = 0
+    for (let seed = 0; seed < F; seed++) {
+      if (labels[seed] < 0 || chartOf[seed] >= 0) continue
+      // Flood the chart of `seed`.
+      const L = labels[seed], c = nCharts++
+      let sp = 0
+      members.length = 0
+      stack[sp++] = seed; chartOf[seed] = c
+      while (sp) {
+        const f = stack[--sp]
+        members.push(f)
+        for (let k = 0; k < 3; k++) {
+          const g = adj[3 * f + k]
+          if (g >= 0 && chartOf[g] < 0 && labels[g] === L) { chartOf[g] = c; stack[sp++] = g }
+        }
+      }
+      if (members.length >= minFaces) continue
+      // Border edges by neighbouring label.
+      const votes = new Map()
+      for (const f of members) {
+        for (let k = 0; k < 3; k++) {
+          const g = adj[3 * f + k]
+          if (g >= 0 && labels[g] >= 0 && labels[g] !== L) votes.set(labels[g], (votes.get(labels[g]) ?? 0) + 1)
+        }
+      }
+      // All or nothing: moving only the faces that have the photo would split the
+      // chart into new, smaller fragments (measured: more charts, not fewer).
+      const ranked = [...votes].sort((a, b) => b[1] - a[1])
+      for (const [v] of ranked) {
+        if (!members.every((f) => has(f, v))) continue
+        for (const f of members) labels[f] = v
+        changed += members.length
+        break
+      }
+    }
+    total += changed
+    if (!changed) break
+  }
+  return total
+}

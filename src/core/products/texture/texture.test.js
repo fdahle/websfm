@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { faceAdjacency } from './meshGraph.js'
 import { packAtlas } from './packing.js'
 import { meshGeometry, projectVertices, rasterizeDepth, viewGrid, localCamera, faceCandidates } from './visibility.js'
-import { selectViews } from './labeling.js'
+import { selectViews, mergeSmallCharts } from './labeling.js'
 import { buildCharts } from './charts.js'
 import { textureMesh } from './texture.js'
 import { makeSampleMap } from '../../sfm/displayFrame.js'
@@ -250,7 +250,7 @@ describe('faceCandidates', () => {
     const { pos, idx } = sceneMesh(0.2)
     const geom = meshGeometry(pos, idx)
     const view = { ...lookAt([0, -6, 3], [0, 0, 0]), K: K0, width: W, height: H }
-    const cand = await faceCandidates(geom, idx, [view], { bufferSide: 320 })
+    const cand = await faceCandidates(geom, idx, [view], { bufferSide: 320, occludedFallback: false })
     expect(cand.orientation).toBe(1)
     // Ground just behind the box (seen from −y) is hidden; ground in front is seen.
     let hidden = 0, hiddenSeen = 0, front = 0, frontSeen = 0
@@ -268,6 +268,11 @@ describe('faceCandidates', () => {
     for (let f = 0; f < geom.nFaces; f++) {
       if (geom.normal[3 * f + 1] > 0.9) expect(cand.count[f]).toBe(0)
     }
+    // With the fallback, the hidden ground gets the view that hides least of it; the
+    // far side, facing away, still gets nothing.
+    const fb = await faceCandidates(geom, idx, [view], { bufferSide: 320 })
+    expect(fb.fallbackFaces).toBeGreaterThanOrEqual(hidden)
+    for (let f = 0; f < geom.nFaces; f++) if (geom.normal[3 * f + 1] > 0.9) expect(fb.count[f]).toBe(0)
   })
 
   it('treats an unoriented mesh with |cos|', async () => {
@@ -297,6 +302,25 @@ describe('selectViews', () => {
     const cand = { K, count, view, score }
     expect(Array.from(selectViews(cand, adj, rev, { smoothness: 0 }))).toEqual([0, 0, 1, 0, 0, 0])
     expect(Array.from(selectViews(cand, adj, rev, { smoothness: 0.5 }))).toEqual([0, 0, 0, 0, 0, 0])
+  })
+})
+
+describe('mergeSmallCharts', () => {
+  it('moves a small chart to its neighbours\' photo only when every face has it', () => {
+    // A strip of 8 faces: 0–5 on view 0, 6 on view 1 (a 1-face chart), 7 on view 0.
+    const F = 8, K = 2
+    const adj = new Int32Array(3 * F).fill(-1)
+    for (let f = 0; f < F - 1; f++) { adj[3 * f] = f + 1; adj[3 * (f + 1) + 1] = f }
+    const count = new Uint8Array(F).fill(2), view = new Uint16Array(F * K), score = new Float32Array(F * K).fill(1)
+    for (let f = 0; f < F; f++) { view[f * K] = 0; view[f * K + 1] = 1 }
+    const labels = Int32Array.of(0, 0, 0, 0, 0, 0, 1, 0)
+    expect(mergeSmallCharts(labels, adj, { K, count, view, score }, { minFaces: 3 })).toBe(1)
+    expect(labels[6]).toBe(0)
+    // Without view 0 among face 6's candidates it stays.
+    const l2 = Int32Array.of(0, 0, 0, 0, 0, 0, 1, 0)
+    view[6 * K] = 1; count[6] = 1
+    count[7] = 1 // face 7 (itself a 1-face chart) can only take view 0
+    expect(mergeSmallCharts(l2, adj, { K, count, view, score }, { minFaces: 3 })).toBe(0)
   })
 })
 
@@ -347,6 +371,23 @@ describe('textureMesh', () => {
     const off = await run(false), on = await run(true)
     // Seams: the colour step across edges between faces of different pieces.
     expect(seamStep(on)).toBeLessThan(0.7 * seamStep(off))
+    // The run's own figure agrees, and seam levelling is part of it.
+    expect(on.summary.seams.step).toBeLessThan(0.7 * off.summary.seams.step)
+    expect(on.summary.seamLevel.seamVertices).toBeGreaterThan(0)
+    const gainsOnly = await textureMesh(mesh, views, { pageSize: 1024, maxPages: 4, seamLevelling: false }, { loadPhoto: photoLoader(photos) })
+    expect(on.summary.seams.step).toBeLessThan(gainsOnly.summary.seams.step)
+  })
+
+  it('leaves faces no photo sees out when asked', async () => {
+    const mesh = sceneMesh(0.2)
+    const { views, photos } = sceneViews(2) // two views leave much of the scene unseen
+    const keep = await textureMesh(mesh, views, { pageSize: 1024, maxPages: 4 }, { loadPhoto: photoLoader(photos) })
+    const drop = await textureMesh(mesh, views, { pageSize: 1024, maxPages: 4, unseen: 'remove' }, { loadPhoto: photoLoader(photos) })
+    expect(keep.summary.unseenFaces).toBeGreaterThan(0)
+    expect(keep.count).toBe(mesh.idx.length / 3)
+    expect(drop.count).toBe(keep.count - keep.summary.unseenFaces)
+    expect(drop.idx.length).toBe(3 * drop.count)
+    expect(atlasError(drop).mean).toBeLessThan(1)
   })
 
   it('welds an unwelded mesh first, so charts still form', async () => {
