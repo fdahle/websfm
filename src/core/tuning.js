@@ -354,6 +354,37 @@ export const MESH_TUNING = {
   spacingSampleMax: 20000,
 }
 
+// Mesh texture internals (core/products/texture/). User-facing knobs are
+// TEXTURE_DEFAULTS in defaults.user.js.
+export const TEXTURE_TUNING = {
+  // Visibility z-buffer: the mesh is rasterised per view onto a grid of at most this
+  // many pixels on the long side. Visibility needs occlusion, not texel detail.
+  bufferSide: 1536,
+  maxCandidates: 8,     // best views kept per face for the view selection
+  minCos: 0.1,          // faces seen at more than ~84° from their normal are not candidates
+  depthTolRel: 0.01,    // depth-test slack as a share of depth, on top of the pixel-footprint term
+  // View selection (min-sum loopy BP, Potts).
+  bpIterations: 12,
+  bpDamping: 0.5,
+  // Charts: padding texels around each chart rectangle (filled with real photo content,
+  // so mipmaps don't bleed); a rectangle less than `minFill` covered by its triangles
+  // and larger than `minSplitTexels` is bisected.
+  padding: 2,
+  minFill: 0.35,
+  minSplitTexels: 1024,
+  gainSamples: 65536,   // faces sampled for the colour-levelling fit
+  // Faces no view sees get a flat colour from a palette of cellSize² cells, the colour
+  // quantised to `paletteBits` per channel.
+  cellSize: 4,
+  paletteBits: 5,
+  grayFallback: [128, 128, 128],
+  jpegQuality: 0.9,     // atlas pages are stored as JPEG
+  // A mesh with more open edges than this share is taken as unwelded (an STL: every
+  // face its own corners) and welded first; without shared vertices every face would
+  // be a chart of its own.
+  weldOpenShare: 0.5,
+}
+
 // ── Resident feature data (stores; TODO ▸ SC-2/SC-3) ─────────────────────────────
 // Keypoints and matches live on disk and are read per image / per pair on demand
 // (utils/byteLru.js). These budgets bound the CLEAN copies kept for re-use — the open

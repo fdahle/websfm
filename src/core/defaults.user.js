@@ -348,6 +348,19 @@ export const MESH_PRESET_META = [
   { id: 'high',   label: 'Fine',     blurb: 'Octree depth 10 · detailed, slow' },
 ]
 
+// Mesh texture (core/products/texture/). `maxScale` is the finest texel size as a share
+// of a native photo pixel (1 = full photo resolution); the run lowers it until the atlas
+// fits `maxPages` pages of `pageSize`². `smoothness` is the seam penalty of the view
+// selection: higher means fewer, larger charts from slightly worse views.
+export const TEXTURE_DEFAULTS = {
+  pageSize: 4096,      // atlas page side in texels
+  maxPages: 8,         // page cap; the texel scale drops until the atlas fits
+  maxScale: 1,         // finest texel scale relative to the photos' native pixels
+  smoothness: 0.5,     // view-selection seam penalty per cut edge
+  levelColours: true,  // per-image exposure/white-balance gains before the bake
+  useMasks: true,      // leave masked photo pixels out of the texture
+}
+
 // Cloud editing (core/products/cloudEdit.js). Mirrored by FilterCloudModal.vue /
 // CropCloudModal.vue / MergeCloudsModal.vue. These edit **dense** clouds only — a
 // sparse cloud carries the per-point view-tracks the dense/ortho/COLMAP paths read,
