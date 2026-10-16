@@ -19,6 +19,7 @@ import { fisheyeCanvas } from '../../src/core/products/undistort.js'
 import { hasDistortion } from '../../src/core/sfm/distortion.js'
 import { fromScaledPx } from '../../src/core/sfm/geometry.js'
 import { meshToGlbParts } from '../../src/core/products/exporters.js'
+import { sampleRgbaBilinear } from '../../src/core/products/undistort.js'
 import { joinParts } from '../../src/core/io/parts.js'
 
 const arg = (k, d = null) => { const i = process.argv.indexOf(`--${k}`); return i > 0 ? process.argv[i + 1] : d }
@@ -70,6 +71,21 @@ const hooks = {
       }
     }
     return lut
+  },
+  // The photo resampled into the z-buffer grid (as workers/ops/texture.js viewImage).
+  viewImage: async (vi, grid) => {
+    const v = views[vi], map = toPhoto[vi]
+    const s = Math.min(1, grid.scale * 1.25), w = Math.round(v.width * s), h = Math.round(v.height * s)
+    const src = await decode(v, w, h)
+    const data = new Uint8ClampedArray(grid.width * grid.height * 4)
+    for (let gy = 0; gy < grid.height; gy++) {
+      const py = grid.y0 + fromScaledPx(gy, grid.scale)
+      for (let gx = 0; gx < grid.width; gx++) {
+        const p = map ? map(grid.x0 + fromScaledPx(gx, grid.scale), py) : { x: grid.x0 + fromScaledPx(gx, grid.scale), y: py }
+        sampleRgbaBilinear(src, w, h, (p.x + 0.5) * (w / v.width) - 0.5, (p.y + 0.5) * (h / v.height) - 0.5, data, 4 * (gy * grid.width + gx))
+      }
+    }
+    return { data }
   },
   loadPhoto: async (vi, scale) => {
     const v = views[vi]

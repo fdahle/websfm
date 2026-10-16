@@ -23,6 +23,8 @@ Notable changes to websfm. The format follows
   (ignoring samples one photo sees differently) and then across every seam, so the
   two sides meet. A wall hidden behind a tree is still textured from the photo that
   hides least of it, and faces no photo sees can be kept in a flat colour or removed.
+  An optional photo-consistency check leaves out what only some photos saw (people,
+  cars), and photos scored blurrier by Image quality are used less.
   Crop, Clean and Smooth keep the texture (Clean's weld respects it), Sample to points
   takes its colours from it, and the workflow builder has a Texture Mesh block that can
   decimate first. Masks are respected, lenses

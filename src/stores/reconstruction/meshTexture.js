@@ -1,6 +1,7 @@
 import { markRaw } from 'vue'
 import { textureMesh as workerTextureMesh } from '../../workers/computeClient.js'
 import { computeSourceOf } from '../../utils/image.js'
+import { relativeQuality } from '../../core/features/imageQuality.js'
 
 // Tools ▸ Mesh ▾ ▸ Texture (dev/planning/plan-texture.md): a NEW mesh with per-vertex
 // UVs and JPEG atlas pages, textured from the registered photos. Like every mesh tool
@@ -21,6 +22,7 @@ export function createMeshTexture({
       return null
     }
     const frameModel = frameModelFor.value
+    const imagesByUuid = new Map(images.value.map((im) => [im.uuid, im]))
     const views = []
     let unready = 0
     for (const im of images.value) {
@@ -41,6 +43,13 @@ export function createMeshTexture({
       })
     }
     if (unready) log(`Texture: ${unready} photo(s) not readable yet were left out`, 'warn', 'Products')
+    // Sharpness (Tools ▸ Images ▸ Image quality, when it was run): a photo blurrier than
+    // the batch's median scores proportionally less, so a sharper one of similar
+    // resolution wins its faces. Never below 0.3: blur is not occlusion.
+    const rel = relativeQuality(views.map((v) => imagesByUuid.get(v.uuid)?.quality?.sharpness ?? null))
+    let weighted = 0
+    views.forEach((v, i) => { if (rel[i] != null && rel[i] < 1) { v.weight = Math.max(0.3, rel[i]); weighted++ } })
+    if (weighted) log(`Texture: ${weighted} blurrier photo(s) weighted down by their image-quality sharpness`, 'info', 'Products')
     if (!views.length) {
       log('Texture: no registered photo is available', 'error', 'Products')
       return null

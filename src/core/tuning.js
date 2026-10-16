@@ -378,6 +378,7 @@ export const TEXTURE_TUNING = {
   minFill: 0.35,
   minSplitTexels: 1024,
   gainSamples: 65536,   // faces sampled for the colour-levelling fit
+  consistencyMinTol: 0.25, // photo consistency never rejects within ±28 % (log colour)
   // Seam levelling (texture/seamLevel.js): weight of keeping a chart's offset smooth
   // along its edges, relative to a seam's two sides meeting; seams far beyond the
   // model's median seam difference count as misaligned detail and pull less; a small

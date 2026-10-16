@@ -67,6 +67,24 @@ Then [seam levelling](help:seam-levelling) brightens or darkens each chart smoot
 the two sides of every seam meet. Switch it off only to see the photos as they were
 taken.
 
+## Ignore what only some photos see
+<!-- param: photoConsistency default: false -->
+A person walking past, a parked car that drove off, a bird: something in some photos
+but not in others would end up in the texture wherever one of those photos is chosen.
+With this on, the colours every photo shows for each triangle are compared after the
+exposure levelling, and a photo that disagrees with what the others agree on is not
+used for that triangle. A triangle needs at least three photos for this: with two, no
+one can say which is wrong. It costs one extra low-resolution read of every photo.
+
+It is off by default because on a scene where nothing moved it mostly removes views
+of things that genuinely look different from different angles, such as a vine standing
+off a wall or a reflective window, and the texture becomes patchier for it. Turn it
+on for streets, squares and sites with traffic or people.
+
+If you scored **Tools ▸ Images ▸ Image quality**, blurrier photos are also used less:
+a photo less sharp than the median of the set counts proportionally fewer pixels when
+the photos are chosen.
+
 ## Faces no photo sees
 <!-- param: unseen default: Flat colour -->
 Triangles that face away from every photo, such as the underside of an object or the

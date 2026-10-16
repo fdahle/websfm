@@ -38,6 +38,7 @@ function run() {
     settings: {
       pageSize: s.pageSize, maxPages: Math.max(1, Math.round(s.maxPages)), maxScale: s.maxScale,
       smoothness: Math.max(0, s.smoothness), levelColours: !!s.levelColours, useMasks: !!s.useMasks, unseen: s.unseen,
+      photoConsistency: !!s.photoConsistency,
       useGpu: !!useGpu.value, memBudgetBytes: memBudgetBytes.value,
     },
     name: `${source.value?.name ?? 'Mesh'} (textured)`,
@@ -81,6 +82,10 @@ function run() {
         <SettingsField hint="Masked pixels (people, sky, the drone's legs) are never used.">
           <template #label><FieldHelp op="texture-mesh" param="useMasks" :value="settings.useMasks" :default-value="TEXTURE_DEFAULTS.useMasks">Use masks</FieldHelp></template>
           <label class="checkbox-row"><input v-model="settings.useMasks" type="checkbox" class="checkbox" /> Leave masked pixels out</label>
+        </SettingsField>
+        <SettingsField hint="For people, vehicles or anything else that moved between photos.">
+          <template #label><FieldHelp op="texture-mesh" param="photoConsistency" :value="settings.photoConsistency" :default-value="TEXTURE_DEFAULTS.photoConsistency">Ignore what only some photos see</FieldHelp></template>
+          <label class="checkbox-row"><input v-model="settings.photoConsistency" type="checkbox" class="checkbox" /> Check each face's photos against each other</label>
         </SettingsField>
         <SettingsField label-for="tex-unseen">
           <template #label><FieldHelp op="texture-mesh" param="unseen">Faces no photo sees</FieldHelp></template>

@@ -143,9 +143,13 @@ export function rasterizeDepth(proj, idx, width, height, depth) {
 //                           masked) or null when every pixel of the window is usable
 //   renderDepth(vi, grid, cam, geom, idx) → Float32Array depth buffer (the WebGPU
 //                           pass), or null for the CPU one
+//   viewImage(vi, grid)   → { data: RGBA over the grid } | null: the photo resampled
+//                           into the z-buffer grid. Given, every candidate carries
+//                           its colour (mean of the face's probes) for the
+//                           photo-consistency test and the gain fit (texture.js).
 //   onProgress(done, total)
 // → { K, count: Uint8Array(F), view: Uint16Array(F·K), score: Float32Array(F·K),
-//     orientation: 1 | −1 | 0, seenBy: Int32Array(nViews) }
+//     colour: Uint8Array(3·F·K) | null, orientation: 1 | −1 | 0, seenBy: Int32Array(nViews) }
 export async function faceCandidates(geom, idx, views, opts = {}, hooks = {}) {
   const {
     bufferSide = TEXTURE_TUNING.bufferSide, maxCandidates: K = TEXTURE_TUNING.maxCandidates,
@@ -156,6 +160,9 @@ export async function faceCandidates(geom, idx, views, opts = {}, hooks = {}) {
   const count = new Uint8Array(F)
   const view = new Uint16Array(F * K).fill(NO_VIEW)
   const score = new Float32Array(F * K)
+  const withColour = !!hooks.viewImage
+  const colour = withColour ? new Uint8Array(3 * F * K) : null
+  const rgb = [0, 0, 0]
   const seenBy = new Int32Array(views.length)
   // Per face, the best views that see it only partly (an occluder in front): its
   // candidates when no view sees it whole. Several, so the view selection can still
@@ -163,6 +170,7 @@ export async function faceCandidates(geom, idx, views, opts = {}, hooks = {}) {
   const KF = Math.min(K, FALLBACK_K)
   const fbCount = fallback ? new Uint8Array(F) : null
   const fbView = fallback ? new Uint16Array(F * KF).fill(NO_VIEW) : null, fbScore = fallback ? new Float32Array(F * KF) : null
+  const fbColour = fallback && withColour ? new Uint8Array(3 * F * KF) : null
   let proj = null, depth = null
   const PROBES = [[1 - PROBE_PULL, PROBE_PULL / 2, PROBE_PULL / 2], [PROBE_PULL / 2, 1 - PROBE_PULL, PROBE_PULL / 2],
     [PROBE_PULL / 2, PROBE_PULL / 2, 1 - PROBE_PULL], [1 / 3, 1 / 3, 1 / 3]]
@@ -179,6 +187,7 @@ export async function faceCandidates(geom, idx, views, opts = {}, hooks = {}) {
       zbuf = rasterizeDepth(proj, idx, W, H, depth.subarray(0, W * H))
     }
     const lut = hooks.validLut ? await hooks.validLut(vi, grid) : null
+    const img = withColour ? (await hooks.viewImage(vi, grid))?.data ?? null : null
     const { gx, gy, z } = proj
     const footK = 1 / (cam.K.fx * grid.scale) // world size of a grid pixel per unit depth
     const toPx2 = 1 / (grid.scale * grid.scale)
@@ -198,6 +207,7 @@ export async function faceCandidates(geom, idx, views, opts = {}, hooks = {}) {
       if (!(ac >= minCos)) continue
       const tan = Math.min(10, Math.sqrt(1 - ac * ac) / ac)
       let ok = true, onPhoto = true, visible = 0
+      let cr = 0, cg = 0, cb = 0
       for (let p = 0; p < 4 && onPhoto; p++) {
         const [la, lb, lc] = PROBES[p]
         // A 3D point Σλ·V projects to Σ(λ·z·g)/Σ(λ·z): exact under perspective.
@@ -207,6 +217,7 @@ export async function faceCandidates(geom, idx, views, opts = {}, hooks = {}) {
         const ix = Math.min(W - 1, Math.max(0, Math.round(px))), iy = Math.min(H - 1, Math.max(0, Math.round(py)))
         const i = iy * W + ix
         if (lut && !lut[i]) { ok = onPhoto = false; break }
+        if (img) { cr += img[4 * i]; cg += img[4 * i + 1]; cb += img[4 * i + 2] }
         const tol = zp * depthTolRel + zp * footK * (1 + tan)
         if (zp > zbuf[i] + tol) ok = false
         else visible++
@@ -215,23 +226,24 @@ export async function faceCandidates(geom, idx, views, opts = {}, hooks = {}) {
       const area = 0.5 * Math.abs((xb - xa) * (yc - ya) - (xc - xa) * (yb - ya)) * toPx2
       const s = area * weight
       if (!(s > 0)) continue
+      const here = img ? (rgb[0] = cr / 4, rgb[1] = cg / 4, rgb[2] = cb / 4, rgb) : null
       if (!ok) {
         // Partly or wholly hidden: remembered only as the face's fallback, preferring
         // the view that hides least of it, then the larger.
         if (fallback && !count[f]) {
           const fs = s * (0.2 + 0.2 * visible)
-          insertCandidate(fbCount, fbView, fbScore, KF, f, vi, cos < 0 ? -fs : fs)
+          insertCandidate(fbCount, fbView, fbScore, KF, f, vi, cos < 0 ? -fs : fs, fbColour, here)
         }
         continue
       }
-      insertCandidate(count, view, score, K, f, vi, cos < 0 ? -s : s)
+      insertCandidate(count, view, score, K, f, vi, cos < 0 ? -s : s, colour, here)
       seen++
     }
     seenBy[vi] = seen
     hooks.onProgress?.(vi + 1, views.length)
   }
 
-  const orientation = settleOrientation(count, view, score, K, opts.orientation)
+  const orientation = settleOrientation(count, view, score, K, opts.orientation, colour)
   // Faces no view sees whole take their fallback view as the only candidate, if it
   // faces the settled side. Better than a flat colour: Poisson closes trees into
   // solid blobs, while the photos see the wall behind them through the leaves.
@@ -244,29 +256,41 @@ export async function faceCandidates(geom, idx, views, opts = {}, hooks = {}) {
       if (orientation !== 0 && (orientation > 0) !== (sc > 0)) continue
       // Sorted insert, best first.
       let j = n++
-      while (j > 0 && score[f * K + j - 1] < Math.abs(sc)) { view[f * K + j] = view[f * K + j - 1]; score[f * K + j] = score[f * K + j - 1]; j-- }
+      while (j > 0 && score[f * K + j - 1] < Math.abs(sc)) { moveSlot(view, score, colour, f * K + j - 1, f * K + j); j-- }
       view[f * K + j] = fbView[f * KF + i]; score[f * K + j] = Math.abs(sc)
+      if (colour) for (let ch = 0; ch < 3; ch++) colour[3 * (f * K + j) + ch] = fbColour[3 * (f * KF + i) + ch]
     }
     if (n) { count[f] = n; fallbackFaces++ }
   }
-  return { K, count, view, score, orientation, seenBy, fallbackFaces }
+  return { K, count, view, score, colour, orientation, seenBy, fallbackFaces }
+}
+
+// Candidate slot `from` → slot `to` (view, score, and colour when kept).
+function moveSlot(view, score, colour, from, to) {
+  view[to] = view[from]; score[to] = score[from]
+  if (colour) { colour[3 * to] = colour[3 * from]; colour[3 * to + 1] = colour[3 * from + 1]; colour[3 * to + 2] = colour[3 * from + 2] }
 }
 
 // Keep the K best candidates by |score| (the sign carries the facing until the
 // orientation is settled).
-function insertCandidate(count, view, score, K, f, vi, s) {
+function insertCandidate(count, view, score, K, f, vi, s, colour = null, c = null) {
   const base = f * K, n = count[f]
-  if (n < K) { view[base + n] = vi; score[base + n] = s; count[f] = n + 1; return }
-  let worst = 0
-  for (let i = 1; i < K; i++) if (Math.abs(score[base + i]) < Math.abs(score[base + worst])) worst = i
-  if (Math.abs(s) > Math.abs(score[base + worst])) { view[base + worst] = vi; score[base + worst] = s }
+  let slot = -1
+  if (n < K) { slot = base + n; count[f] = n + 1 } else {
+    let worst = 0
+    for (let i = 1; i < K; i++) if (Math.abs(score[base + i]) < Math.abs(score[base + worst])) worst = i
+    if (Math.abs(s) > Math.abs(score[base + worst])) slot = base + worst
+  }
+  if (slot < 0) return
+  view[slot] = vi; score[slot] = s
+  if (colour && c) { colour[3 * slot] = c[0]; colour[3 * slot + 1] = c[1]; colour[3 * slot + 2] = c[2] }
 }
 
 // Decide the winding from every candidate: ≥ 75 % one way is an oriented mesh (drop the
 // other side's candidates, which are back faces that slipped through the depth
 // tolerance); anything in between is unoriented and keeps all of them. Leaves every
 // score positive and each face's candidates sorted best first. → 1 | −1 | 0
-function settleOrientation(count, view, score, K, force = null) {
+function settleOrientation(count, view, score, K, force = null, colour = null) {
   const F = count.length
   let pos = 0, neg = 0
   for (let f = 0; f < F; f++) for (let i = 0; i < count[f]; i++) (score[f * K + i] > 0 ? pos++ : neg++)
@@ -280,9 +304,11 @@ function settleOrientation(count, view, score, K, force = null) {
       if (orientation !== 0 && (orientation > 0) !== (s > 0)) continue
       // Insertion sort, best first (K is small).
       const vi = view[base + i], a = Math.abs(s)
+      const c0 = colour ? colour[3 * (base + i)] : 0, c1 = colour ? colour[3 * (base + i) + 1] : 0, c2 = colour ? colour[3 * (base + i) + 2] : 0
       let j = n++
-      while (j > 0 && score[base + j - 1] < a) { view[base + j] = view[base + j - 1]; score[base + j] = score[base + j - 1]; j-- }
+      while (j > 0 && score[base + j - 1] < a) { moveSlot(view, score, colour, base + j - 1, base + j); j-- }
       view[base + j] = vi; score[base + j] = a
+      if (colour) { colour[3 * (base + j)] = c0; colour[3 * (base + j) + 1] = c1; colour[3 * (base + j) + 2] = c2 }
     }
     for (let i = n; i < K; i++) { view[base + i] = NO_VIEW; score[base + i] = 0 }
     count[f] = n

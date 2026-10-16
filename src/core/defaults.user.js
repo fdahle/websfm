@@ -360,6 +360,10 @@ export const TEXTURE_DEFAULTS = {
   levelColours: true,  // per-image exposure/white-balance gains before the bake
   useMasks: true,      // leave masked photo pixels out of the texture
   unseen: 'colour',    // faces no photo sees: 'colour' (flat, from the vertex colours) | 'remove'
+  // Drop a face's photos that saw something the others did not (people, cars that
+  // moved). Off by default: on a static scene it mostly drops views of things that
+  // look different from different angles (a vine standing off a wall: South Building).
+  photoConsistency: false,
 }
 
 // Cloud editing (core/products/cloudEdit.js). Mirrored by FilterCloudModal.vue /

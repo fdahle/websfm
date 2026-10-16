@@ -19,7 +19,7 @@ import { fitGains, gainSampleClipped, growable, srgbToLinear } from '../colourGa
 import { sampleRgbaBilinear } from '../undistort.js'
 import { faceAdjacency } from './meshGraph.js'
 import { weldVertices } from '../meshEdit.js'
-import { meshGeometry, faceCandidates, localCamera } from './visibility.js'
+import { meshGeometry, faceCandidates, localCamera, NO_VIEW } from './visibility.js'
 import { selectViews, mergeSmallCharts } from './labeling.js'
 import { buildCharts, cornerPixels, chartPieces } from './charts.js'
 import { packAtlas } from './packing.js'
@@ -49,6 +49,8 @@ export async function textureMesh(mesh, views, opts = {}, hooks = {}) {
   const F = geom.nFaces
   const cand = await faceCandidates(geom, idx, views, o, {
     validLut: hooks.validLut, renderDepth: hooks.renderDepth,
+    // Only for photo consistency: it costs one more (small) decode of every photo.
+    viewImage: o.photoConsistency ? hooks.viewImage : undefined,
     onProgress: (d, t) => progress(0.55 * d / t, 'visibility'),
   })
   let seenFaces = 0
@@ -60,6 +62,21 @@ export async function textureMesh(mesh, views, opts = {}, hooks = {}) {
     + (cand.orientation === 0 ? 'mesh winding is inconsistent, so both sides of each face count'
       : `mesh faces point ${cand.orientation > 0 ? 'outward' : 'inward'} (back faces dropped)`),
   seenFaces < 0.5 * F ? 'warn' : 'info')
+
+  // Colours from the visibility pass: gains first (photo consistency compares levelled
+  // colours), then drop each face's views that saw something else there.
+  let early = null, consistency = null
+  if (cand.colour && (o.levelColours || o.photoConsistency)) {
+    early = candidateGains(cand, views.length, o.gainSamples)
+    if (o.photoConsistency) {
+      consistency = dropInconsistentViews(cand, early.gains, o.consistencyMinTol)
+      if (consistency.dropped) {
+        log(`Texture: photo consistency dropped ${consistency.dropped.toLocaleString()} views of `
+          + `${consistency.faces.toLocaleString()} faces that saw something the other photos did not `
+          + `(tolerance ±${((Math.exp(consistency.tolerance) - 1) * 100).toFixed(0)} % in brightness)`)
+      }
+    }
+  }
 
   // 2 · View selection.
   const { adj, rev } = faceAdjacency(idx, geom.nVerts)
@@ -106,7 +123,7 @@ export async function textureMesh(mesh, views, opts = {}, hooks = {}) {
 
   // 5 · Bake, collecting colour-levelling samples from each photo while it is loaded.
   const layout = { pageSize: o.pageSize, pageHeights: pack.pageHeights, scale: s, pieces, place: pack, flat }
-  const levelling = o.levelColours ? gainSampler(geom, idx, cand, views, s, o.gainSamples) : null
+  const levelling = o.levelColours && !early ? gainSampler(geom, idx, cand, views, s, o.gainSamples) : null
   const baked = await bakeAtlas(layout, {
     loadPhoto: hooks.loadPhoto,
     onPhoto: levelling?.sample,
@@ -116,8 +133,8 @@ export async function textureMesh(mesh, views, opts = {}, hooks = {}) {
 
   // 6 · Colour levelling.
   let gainSummary = null
-  if (levelling) {
-    const { gains, summary } = levelling.fit()
+  if (o.levelColours && (levelling || early)) {
+    const { gains, summary } = early ?? levelling.fit()
     applyGains(baked.pages, layout, gains)
     gainSummary = summary
     log(summary.images
@@ -153,7 +170,7 @@ export async function textureMesh(mesh, views, opts = {}, hooks = {}) {
     charts: charts.nCharts, pieces: pieces.count, flatCells: flat.count,
     scale: s, pageSize: o.pageSize, pages: pack.nPages, pageHeights: pack.pageHeights,
     fill: used / pageArea, viewsUsed: baked.decoded, photosFailed: baked.failed.length,
-    gains: gainSummary, seamLevel, seams, nVerts: out.nVerts,
+    gains: gainSummary, consistency, seamLevel, seams, nVerts: out.nVerts,
   }
   return {
     ...out,
@@ -261,26 +278,99 @@ function gainSampler(geom, idx, cand, views, s, max) {
         for (let ch = 0; ch < 3; ch++) obsRgb.push(srgbToLinear(acc[ch] / n))
       }
     },
-    fit() {
-      const nImages = views.length, nPoints = sampleFaces.length
-      let pt = obsPt.array, img = obsImg.array, rgb = obsRgb.array
-      const total = pt.length
-      let res = fitGains({ nImages, nPoints, obsPt: pt, obsImg: img, obsRgb: rgb })
-      for (let round = 0; round < GAIN_ROUNDS; round++) {
-        const keep = consensusInliers(pt, img, rgb, res.gains, nPoints)
-        if (keep.length === pt.length) break
-        pt = keep.map((o) => pt[o]); img = keep.map((o) => img[o])
-        const rgb2 = new Float32Array(3 * keep.length)
-        keep.forEach((o, k) => { rgb2[3 * k] = rgb[3 * o]; rgb2[3 * k + 1] = rgb[3 * o + 1]; rgb2[3 * k + 2] = rgb[3 * o + 2] })
-        pt = Int32Array.from(pt); img = Int32Array.from(img); rgb = rgb2
-        res = fitGains({ nImages, nPoints, obsPt: pt, obsImg: img, obsRgb: rgb })
-      }
-      res.summary.rejected = total - pt.length
-      // Per photo (mean of the three channels), for the run record and the log.
-      res.summary.perView = Array.from({ length: nImages }, (_, i) => +((res.gains[3 * i] + res.gains[3 * i + 1] + res.gains[3 * i + 2]) / 3).toFixed(3))
-      return res
-    },
+    fit: () => robustGains(views.length, sampleFaces.length, obsPt.array, obsImg.array, obsRgb.array),
   }
+}
+
+// fitGains, then drop observations off their face's consensus and fit again (twice).
+function robustGains(nImages, nPoints, pt, img, rgb) {
+  const total = pt.length
+  let res = fitGains({ nImages, nPoints, obsPt: pt, obsImg: img, obsRgb: rgb })
+  for (let round = 0; round < GAIN_ROUNDS; round++) {
+    const keep = consensusInliers(pt, img, rgb, res.gains, nPoints)
+    if (keep.length === pt.length) break
+    const rgb2 = new Float32Array(3 * keep.length)
+    keep.forEach((o, k) => { rgb2[3 * k] = rgb[3 * o]; rgb2[3 * k + 1] = rgb[3 * o + 1]; rgb2[3 * k + 2] = rgb[3 * o + 2] })
+    pt = Int32Array.from(keep, (o) => pt[o]); img = Int32Array.from(keep, (o) => img[o]); rgb = rgb2
+    res = fitGains({ nImages, nPoints, obsPt: pt, obsImg: img, obsRgb: rgb })
+  }
+  res.summary.rejected = total - pt.length
+  // Per photo (mean of the three channels), for the run record and the log.
+  res.summary.perView = Array.from({ length: nImages }, (_, i) => +((res.gains[3 * i] + res.gains[3 * i + 1] + res.gains[3 * i + 2]) / 3).toFixed(3))
+  return res
+}
+
+// Gains from the candidates' own colours (sampled in the visibility pass at z-buffer
+// resolution): every face seen by two or more views, strided to `max`.
+function candidateGains(cand, nViews, max) {
+  const { K, count, view, colour } = cand
+  const F = count.length
+  let multi = 0
+  for (let f = 0; f < F; f++) if (count[f] >= 2) multi++
+  const stride = Math.max(1, Math.ceil(multi / max))
+  const pt = growable(Int32Array), img = growable(Int32Array), rgb = growable(Float32Array)
+  let si = 0
+  for (let f = 0, m = 0; f < F; f++) {
+    if (count[f] < 2 || m++ % stride) continue
+    for (let i = 0; i < count[f]; i++) {
+      const o = 3 * (f * K + i)
+      if (gainSampleClipped(colour[o], colour[o + 1], colour[o + 2])) continue
+      pt.push(si); img.push(view[f * K + i])
+      rgb.push(srgbToLinear(colour[o])); rgb.push(srgbToLinear(colour[o + 1])); rgb.push(srgbToLinear(colour[o + 2]))
+    }
+    si++
+  }
+  return robustGains(nViews, si, pt.array, img.array, rgb.array)
+}
+
+// Photo consistency (Waechter et al. 2014 §4, simplified): a view whose levelled
+// colour for a face is far from what the face's other views agree on saw something
+// else there (a person or car that moved, a branch in front, a reflection), and is
+// dropped as a candidate for that face. Faces with three or more candidates only (two
+// cannot say which is wrong); a face never loses all of them. The tolerance adapts to
+// the model: 3 robust sigmas of all deviations, never below `minTol` (log colour).
+// Modifies cand in place. → { faces, dropped, tolerance }
+function dropInconsistentViews(cand, gains, minTol) {
+  const { K, count, view, score, colour } = cand
+  const F = count.length
+  const lc = (slot, ch) => Math.log(Math.max(1e-4, gains[3 * view[slot] + ch] * srgbToLinear(colour[3 * slot + ch])))
+  const dev = new Float32Array(F * K).fill(-1)
+  const vals = []
+  const devs = []
+  for (let f = 0; f < F; f++) {
+    const n = count[f]
+    if (n < 3) continue
+    for (let ch = 0; ch < 3; ch++) {
+      vals.length = 0
+      for (let i = 0; i < n; i++) vals.push(lc(f * K + i, ch))
+      vals.sort((x, y) => x - y)
+      const med = n & 1 ? vals[n >> 1] : (vals[n / 2 - 1] + vals[n / 2]) / 2
+      for (let i = 0; i < n; i++) dev[f * K + i] = Math.max(dev[f * K + i], Math.abs(lc(f * K + i, ch) - med))
+    }
+    for (let i = 0; i < n; i++) devs.push(dev[f * K + i])
+  }
+  devs.sort((x, y) => x - y)
+  const tolerance = Math.max(minTol, 3 * 1.4826 * (devs.length ? devs[devs.length >> 1] : 0))
+  let faces = 0, dropped = 0
+  for (let f = 0; f < F; f++) {
+    const n = count[f]
+    if (n < 3) continue
+    let keep = 0
+    for (let i = 0; i < n; i++) if (dev[f * K + i] <= tolerance) keep++
+    if (!keep || keep === n) continue
+    let j = 0
+    for (let i = 0; i < n; i++) {
+      const s = f * K + i
+      if (dev[s] > tolerance) continue
+      const d = f * K + j++
+      view[d] = view[s]; score[d] = score[s]
+      colour[3 * d] = colour[3 * s]; colour[3 * d + 1] = colour[3 * s + 1]; colour[3 * d + 2] = colour[3 * s + 2]
+    }
+    for (let i = j; i < n; i++) { view[f * K + i] = NO_VIEW; score[f * K + i] = 0 }
+    count[f] = j
+    faces++; dropped += n - j
+  }
+  return { faces, dropped, tolerance }
 }
 
 // Observations (indices) within 3 robust sigmas of their face's consensus colour after

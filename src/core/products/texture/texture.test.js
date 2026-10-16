@@ -7,6 +7,7 @@ import { buildCharts } from './charts.js'
 import { textureMesh } from './texture.js'
 import { makeSampleMap } from '../../sfm/displayFrame.js'
 import { undistortPixel } from '../../sfm/distortion.js'
+import { sampleRgbaBilinear } from '../undistort.js'
 
 // ── Synthetic scene ──────────────────────────────────────────────────────────
 // Ground z = 0 over [−L, L]², a box [−B, B]² × [0, BH] standing on it, a smooth
@@ -136,6 +137,21 @@ const photoLoader = (photos) => async (vi, scale) => {
   const { photo, dist } = photos[vi]
   const map = makeSampleMap({ K: K0, dist, outScale: scale })
   return { ...photo, map }
+}
+
+// viewImage as the worker builds it: the photo resampled into the z-buffer grid.
+const viewImager = (photos) => async (vi, grid) => {
+  const { photo, dist } = photos[vi]
+  const map = makeSampleMap({ K: K0, dist })
+  const data = new Uint8ClampedArray(grid.width * grid.height * 4)
+  for (let gy = 0; gy < grid.height; gy++) {
+    for (let gx = 0; gx < grid.width; gx++) {
+      const u = grid.x0 + (gx + 0.5) / grid.scale - 0.5, v = grid.y0 + (gy + 0.5) / grid.scale - 0.5
+      const p = map ? map(u, v) : { x: u, y: v }
+      sampleRgbaBilinear(photo.data, photo.width, photo.height, p.x, p.y, data, 4 * (gy * grid.width + gx))
+    }
+  }
+  return { data }
 }
 
 // Sample the atlas at random points of every textured output face and compare with T.
@@ -376,6 +392,50 @@ describe('textureMesh', () => {
     expect(on.summary.seamLevel.seamVertices).toBeGreaterThan(0)
     const gainsOnly = await textureMesh(mesh, views, { pageSize: 1024, maxPages: 4, seamLevelling: false }, { loadPhoto: photoLoader(photos) })
     expect(on.summary.seams.step).toBeLessThan(gainsOnly.summary.seams.step)
+  })
+
+  it('drops the view that saw something the others did not (photo consistency)', async () => {
+    const mesh = sceneMesh(0.2)
+    const { views, photos } = sceneViews(8)
+    // A magenta "person" in front of the ground in photo 0 only.
+    const ph = photos[0].photo
+    for (let y = 120; y < 200; y++) for (let x = 130; x < 190; x++) { const o = 4 * (y * W + x); ph.data[o] = 255; ph.data[o + 1] = 0; ph.data[o + 2] = 255 }
+    // Magenta where it shows: on the surface, not in chart padding.
+    const magenta = (out) => {
+      const pageOf = new Int32Array(out.count)
+      for (const g of out.groups) pageOf.fill(g.page, g.start, g.start + g.count)
+      let n = 0
+      const rgb = [0, 0, 0]
+      for (let f = 0; f < out.count; f++) {
+        const [a, b, c] = [out.idx[3 * f], out.idx[3 * f + 1], out.idx[3 * f + 2]]
+        for (const [l0, l1] of [[0.6, 0.2], [0.2, 0.6], [0.2, 0.2], [1 / 3, 1 / 3]]) {
+          const l2 = 1 - l0 - l1, page = out.pages[pageOf[f]]
+          bilinear(page, (l0 * out.uv[2 * a] + l1 * out.uv[2 * b] + l2 * out.uv[2 * c]) * page.width - 0.5,
+            (l0 * out.uv[2 * a + 1] + l1 * out.uv[2 * b + 1] + l2 * out.uv[2 * c + 1]) * page.height - 0.5, rgb)
+          if (rgb[0] > 200 && rgb[1] < 60 && rgb[2] > 200) n++
+        }
+      }
+      return n
+    }
+    const run = (photoConsistency) => textureMesh(mesh, views, { pageSize: 1024, maxPages: 4, photoConsistency },
+      { loadPhoto: photoLoader(photos), viewImage: viewImager(photos) })
+    const off = await run(false), on = await run(true)
+    expect(magenta(off)).toBeGreaterThan(200)
+    expect(on.summary.consistency.dropped).toBeGreaterThan(0)
+    // Faces only two photos see cannot say which is wrong, and faces the person only
+    // partly covers stay within the tolerance: most of it goes, not all (−83 %).
+    expect(magenta(on)).toBeLessThan(0.25 * magenta(off))
+    expect(atlasError(on).mean).toBeLessThan(atlasError(off).mean)
+  })
+
+  it('fits the gains from the visibility-pass colours when photo consistency reads them', async () => {
+    const mesh = sceneMesh(0.2)
+    const gains = [[1.25, 1.25, 1.25], [0.8, 0.85, 0.8], [1, 1, 1], [1.2, 1.1, 1], [0.85, 0.85, 0.9], [1, 1, 1], [1.15, 1.15, 1.15], [0.9, 0.9, 0.9]]
+    const { views, photos } = sceneViews(8, { gains })
+    const run = (levelColours) => textureMesh(mesh, views, { pageSize: 1024, maxPages: 4, levelColours, seamLevelling: false, photoConsistency: true },
+      { loadPhoto: photoLoader(photos), viewImage: viewImager(photos) })
+    const off = await run(false), on = await run(true)
+    expect(on.summary.seams.step).toBeLessThan(0.7 * off.summary.seams.step)
   })
 
   it('leaves faces no photo sees out when asked', async () => {

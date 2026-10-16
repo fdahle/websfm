@@ -1,6 +1,6 @@
 import { textureMesh as runTexture } from '../../core/products/texture/texture.js'
 import { makeSampleMap } from '../../core/sfm/displayFrame.js'
-import { fisheyeCanvas } from '../../core/products/undistort.js'
+import { fisheyeCanvas, sampleRgbaBilinear } from '../../core/products/undistort.js'
 import { hasDistortion } from '../../core/sfm/distortion.js'
 import { fromScaledPx } from '../../core/sfm/geometry.js'
 import { buildMaskLookup } from '../../core/mask.js'
@@ -37,9 +37,49 @@ export function makeTextureOps({ rasterize } = {}) {
       const width = frame?.width ?? v.width, height = frame?.height ?? v.height
       const canvas = !frame && !hasDistortion(v.selfCal) ? fisheyeCanvas(v.K, v.dist, v.width, v.height) : null
       const rect = canvas ? { x0: -canvas.dx, y0: -canvas.dy, width: canvas.width, height: canvas.height } : undefined
-      return { R: v.R, t: v.t, K: v.K, width, height, rect }
+      return { R: v.R, t: v.t, K: v.K, width, height, rect, weight: v.weight ?? 1 }
     })
     const toPhoto = views.map((v) => makeSampleMap({ K: v.K, dist: v.dist, selfCal: v.selfCal, fiducial: v.fiducial }))
+
+    // Where each z-buffer grid pixel lands on the photo (scan pixels), once per view:
+    // the usable-pixel LUT and the grid-resolution photo both read it.
+    let gridMapOf = { vi: -1, px: null, py: null }
+    function gridMap(vi, grid) {
+      if (gridMapOf.vi === vi) return gridMapOf
+      const map = toPhoto[vi], W = grid.width, H = grid.height
+      const px = new Float32Array(W * H), py = new Float32Array(W * H)
+      for (let gy = 0; gy < H; gy++) {
+        const y = grid.y0 + fromScaledPx(gy, grid.scale)
+        for (let gx = 0; gx < W; gx++) {
+          const x = grid.x0 + fromScaledPx(gx, grid.scale)
+          const p = map ? map(x, y) : { x, y }
+          px[gy * W + gx] = p.x; py[gy * W + gx] = p.y
+        }
+      }
+      gridMapOf = { vi, px, py }
+      return gridMapOf
+    }
+
+    // The photo resampled into the z-buffer grid, for the candidates' colours (photo
+    // consistency, gains): decoded at about the grid's resolution, never above native.
+    async function viewImage(vi, grid) {
+      const v = views[vi]
+      try {
+        const native = Math.max(v.width, v.height)
+        const r = await rasterize(v.url, Math.min(native, Math.ceil(native * grid.scale * 1.25)))
+        const [sx, sy] = Array.isArray(r.scaleXY) ? r.scaleXY : [r.scale, r.scale]
+        const { px, py } = gridMap(vi, grid)
+        const data = new Uint8ClampedArray(grid.width * grid.height * 4)
+        for (let i = 0; i < px.length; i++) {
+          // Scan pixel → decoded raster pixel (centre-aligned, geometry.js toScaledPx).
+          sampleRgbaBilinear(r.data, r.width, r.height, (px[i] + 0.5) * sx - 0.5, (py[i] + 0.5) * sy - 0.5, data, 4 * i)
+        }
+        return { data }
+      } catch (err) {
+        log(`Texture: ${v.name} — photo unavailable for the colour check (${err?.message ?? err})`, 'warn')
+        return null
+      }
+    }
 
     // Grid pixels whose pinhole ray lands on the photo and outside its mask. Null when
     // the whole window is usable (no lens, no film frame, no mask): the common case.
@@ -48,6 +88,7 @@ export function makeTextureOps({ rasterize } = {}) {
       const mask = settings.useMasks !== false ? v.mask : null
       if (!map && !mask) return null
       const W = grid.width, H = grid.height
+      const gm = gridMap(vi, grid)
       let maskLut = null, mw = 0, mh = 0
       if (mask) {
         mw = Math.max(1, Math.round(v.width * grid.scale)); mh = Math.max(1, Math.round(v.height * grid.scale))
@@ -57,10 +98,8 @@ export function makeTextureOps({ rasterize } = {}) {
       }
       const lut = new Uint8Array(W * H)
       for (let gy = 0; gy < H; gy++) {
-        const py = grid.y0 + fromScaledPx(gy, grid.scale)
         for (let gx = 0; gx < W; gx++) {
-          const px = grid.x0 + fromScaledPx(gx, grid.scale)
-          const p = map ? map(px, py) : { x: px, y: py }
+          const p = { x: gm.px[gy * W + gx], y: gm.py[gy * W + gx] }
           if (!(p.x >= -0.5 && p.y >= -0.5 && p.x <= v.width - 0.5 && p.y <= v.height - 0.5)) continue
           if (maskLut) {
             const mx = Math.min(mw - 1, Math.max(0, Math.round((p.x + 0.5) * mw / v.width - 0.5)))
@@ -149,7 +188,7 @@ export function makeTextureOps({ rasterize } = {}) {
     let out
     try {
       out = await runTexture(mesh, coreViews, { ...settings, maxPages }, {
-        validLut, loadPhoto, renderDepth,
+        validLut, loadPhoto, renderDepth, viewImage,
       onLog: log,
         onProgress: (f, stage) => emit('progress', [Math.round(f * 100), 100, stageLabel[stage] ?? stage, f]),
       })
