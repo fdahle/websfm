@@ -52,7 +52,9 @@ const sourceLabel = computed(() => {
   const s = activeSource.value
   if (!s) return groundOnly.value ? 'No classified cloud yet' : 'No point cloud yet'
   const kind = s.kind === 'dense' ? 'Dense cloud' : 'Sparse cloud'
-  return `${kind}${s.name ? ` · ${s.name}` : ''} · ${s.count.toLocaleString()} points${groundOnly.value ? ' · ground class' : ''}`
+  // A streamed cloud is read from its octree, as finely as the cell size needs.
+  const streamed = s.cloud && !s.cloud.pos && s.cloud.lod ? ' · streamed' : ''
+  return `${kind}${s.name ? ` · ${s.name}` : ''} · ${s.count.toLocaleString()} points${streamed}${groundOnly.value ? ' · ground class' : ''}`
 })
 // The machine-level memory budget (Settings ▸ Compute), injected at run() like
 // the dense modals: it bounds the staged points and the grid.

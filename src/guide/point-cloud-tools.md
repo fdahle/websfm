@@ -120,5 +120,15 @@ point in memory; LAS surveys are in their own coordinates already.
 A streamed cloud is marked **streamed** in the sidebar. It keeps positions, colour,
 intensity, classification and the return number and count; a file without colour
 starts coloured by height. It is drawn like any big cloud, and you can style and
-measure on it. Tools that need every point in memory (cropping and filtering,
-selection, export, DEM gridding) leave it out for now, and say so when asked.
+measure on it. Tools read it from its octree:
+
+- **Build DEM** grids it, also as a DTM of its ground class (see
+  [Build DEM ▸ Memory](guide:dem)).
+- **Crop** copies the points inside the box into a new, ordinary cloud that every
+  tool can use (filter, classify, mesh, select). Past 25 million points the copy is
+  thinned evenly, so crop a smaller box for full detail.
+- **Export** writes LAS, binary PLY or XYZ node by node. LAS keeps the file's own
+  coordinate quantisation and its projection records; the points come in a different
+  order than in the source file. LAZ and ASCII PLY are not available for it yet.
+
+Filtering, selecting and the other edits work on a crop of it.

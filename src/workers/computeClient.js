@@ -347,6 +347,14 @@ export const textureMesh = streamingOp('textureMesh')
 // layout, spacing, nodeCount, dataBytes, points, levels }).
 export const buildLod = streamingOp('buildLod')
 
+// Points of an octree into memory (core/lod/extract.js): { lod, data: File, hierarchy:
+// File, box?, maxPoints?, minSpacing?, classes?, fields? } → { cloud, plan }.
+export const extractLod = streamingOp('extractLod')
+
+// A streamed cloud to a LAS / binary PLY / XYZ file, node by node
+// (core/lod/exportStream.js): { lod, data, hierarchy, format, color } → { blob, count }.
+export const exportLod = streamingOp('exportLod')
+
 // Cloud editing — crop / filter / merge over flat (dense) clouds. See
 // core/products/cloudEdit.js. Input { mode, clouds:[{ id, count, pos, col, nrm }],
 // settings }; the source buffers are TRANSFERRED in and round-tripped back under

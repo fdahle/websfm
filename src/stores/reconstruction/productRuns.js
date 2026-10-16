@@ -1,6 +1,7 @@
 import { computeSourceOf } from '../../utils/image.js'
 import { DEFAULT_BUDGET_BYTES } from '../../core/dense/memBudget.js'
-import { stageDemPoints } from '../../core/products/dem.js'
+import { stageDemPoints, DEM_STAGE_BYTES_PER_POINT } from '../../core/products/dem.js'
+import { isStreamed } from '../../core/lod/streamed.js'
 import { regionContains } from '../../core/products/region.js'
 import { generateDem as workerGenerateDem, generateOrtho as workerGenerateOrtho } from '../../workers/computeClient.js'
 import * as opfs from '../../utils/opfs.js'
@@ -14,7 +15,7 @@ import * as opfs from '../../utils/opfs.js'
 export function createProductRuns({
   activeRegion, dem, demSource, depthMapInput, effectiveFrameSpec, frameModelFor, frameStampOf, groundSource,
   images, imagesStore, isPersisting, log, mainSparseCloud, meshCloud, ortho, orthoSurfaces, projects,
-  reconStatus, saveProductRecord, sparseCameras, withPreviewUrl,
+  reconStatus, saveProductRecord, sparseCameras, withPreviewUrl, extractCloudPoints = null,
 }) {
   // Build a DEM from the densest available cloud, in the requested frame
   // (settings.crs: 'local' | 'project'). A new DEM invalidates the old ortho.
@@ -53,12 +54,26 @@ export function createProductRuns({
       // is checked against the machine's memory budget (Settings ▸ Compute).
       const budgetBytes = settings.memBudgetBytes > 0 ? settings.memBudgetBytes : DEFAULT_BUDGET_BYTES
       const r = src.imported ? null : activeRegion()
-      const cls = groundOnly ? src.attributes.classification : null
+      const streamed = isStreamed(src)
+      const cls = groundOnly && !streamed ? src.attributes.classification : null
       const inRegion = r ? (x, y, z) => regionContains(r, x, y, z) : null
       const inside = cls
         ? (x, y, z, i) => cls[i] === 2 && (!inRegion || inRegion(x, y, z))
         : inRegion
-      const staged = stageDemPoints(src.kind === 'dense' ? src : { points: src.points }, { budgetBytes, inside })
+      let staged
+      if (streamed) {
+        // A streamed cloud (core/lod/streamed.js) is read from its octree: down to
+        // half the cell size when one is set (finer levels add nothing to a cell),
+        // within half the budget (the grid gets the rest), the ground class for a DTM.
+        const maxPoints = Math.floor(budgetBytes / 2 / DEM_STAGE_BYTES_PER_POINT)
+        const { cloud: flat, plan } = await extractCloudPoints(src, {
+          classes: groundOnly ? [2] : null, fields: 'xyz', maxPoints, minSpacing: settings.gsd > 0 ? settings.gsd / 2 : 0,
+        }, (d, t, lbl, f) => onProgress?.(d, t, 'Reading the octree', f))
+        staged = { pos: flat.pos, count: flat.count, total: src.count }
+        log(`${groundOnly ? 'DTM' : 'DEM'}: read ${flat.count.toLocaleString()} ${groundOnly ? 'ground ' : ''}points of the streamed cloud `
+          + (plan.complete ? '(every level of its octree)' : `down to ${plan.spacing.toPrecision(3)}-unit spacing`), 'info', 'Products')
+        if (!flat.count) throw new Error(groundOnly ? 'the cloud has no ground points' : 'the cloud has no points')
+      } else staged = stageDemPoints(src.kind === 'dense' ? src : { points: src.points }, { budgetBytes, inside })
       if (cls) log(`DTM: ${staged.count.toLocaleString()} ground points of ${staged.total.toLocaleString()}`, 'info', 'Products')
       else if (r) log(`DEM: region keeps ${staged.count.toLocaleString()} of ${staged.total.toLocaleString()} points`, 'info', 'Products')
       if (cls && !staged.count) throw new Error(r ? 'no ground point lies inside the region' : 'the cloud has no ground points')

@@ -7,6 +7,9 @@ import { makeFrameModelResolver } from '../../core/sfm/displayFrame.js'
 import { packSparseCloud, unpackReconstructionResult } from '../../core/sfm/resultCodec.js'
 import { refineSparse as workerRefineSparse, optimizeSparse as workerOptimizeSparse, editCloud as workerEditCloud } from '../../workers/computeClient.js'
 
+// A crop of a streamed cloud becomes a resident one: at most this many points.
+const STREAMED_CROP_MAX_POINTS = 25_000_000
+
 // Tools-tab edits (`editClouds` modes, dispatched by workers/ops/cloud.js):
 // Mesh ▾ tools read a mesh (mesh-sample turns it into a dense cloud) …
 const MESH_EDIT_MODES = new Set(['mesh-clean', 'mesh-smooth', 'mesh-decimate', 'mesh-crop', 'mesh-sample'])
@@ -26,6 +29,7 @@ const REPLACES_SOURCE_VIEW = new Set(['transform', 'icp', 'distance', 'normals',
 export function createCloudEdits({
   clouds, healthDirty, imagesStore, invalidateSparseDependents, log, mainSparseCloud, makeCloudId,
   save, projects, reconStatus, selectedCloudId, summary, surveyConstraintInput, upsertSparseCloud, sensors,
+  extractCloudPoints = null,
 }) {
   // ── Cloud editing (crop / filter / merge) ────────────────────────────────────
 
@@ -216,6 +220,39 @@ export function createCloudEdits({
     return out
   }
 
+  // Crop of a streamed cloud (core/lod/streamed.js): the points inside the box come
+  // out of its octree as a new, resident cloud that every tool can use. Past the
+  // budget the copy is thinned evenly (finer octree levels left out), never cut.
+  async function cropStreamed(source, settings, name, onProgress) {
+    if (settings.invert) {
+      log('Crop: keeping what lies outside the box is not available for a streamed cloud', 'warn', 'Products')
+      return null
+    }
+    reconStatus.value = 'running'
+    try {
+      const box = { min: settings.min ?? [], max: settings.max ?? [] }
+      const { cloud: flat, plan } = await extractCloudPoints(source, { box, maxPoints: STREAMED_CROP_MAX_POINTS }, onProgress)
+      if (!flat.count) {
+        log('Crop: no point of the cloud lies inside the box', 'warn', 'Products')
+        reconStatus.value = 'done'
+        return null
+      }
+      const cloud = addDerivedCloud(flat, { name: name || `${source.name} (cropped)`, imported: !!source.imported })
+      if (source.style) cloud.style = JSON.parse(JSON.stringify(source.style))
+      log(`Crop: copied ${flat.count.toLocaleString()} points of the streamed cloud into "${cloud.name}"`
+        + (plan.complete ? '' : ` — thinned to ${plan.spacing.toPrecision(3)}-unit spacing to stay within `
+          + `${(STREAMED_CROP_MAX_POINTS / 1e6).toFixed(0)} M points; crop a smaller box for full detail`),
+      plan.complete ? 'success' : 'warn', 'Products')
+      reconStatus.value = 'done'
+      await save()
+      return cloud
+    } catch (err) {
+      log(`Crop error: ${err?.message ?? err}`, 'error', 'Products')
+      reconStatus.value = 'error'
+      return null
+    }
+  }
+
   async function editClouds({ mode, sourceIds = [], settings = {}, name, style = null } = {}, onProgress) {
     // Model edits (Tools ▸ Model ▾): one shared commit path, refineMainSparse.
     if (mode === 'sparse') {
@@ -246,6 +283,9 @@ export function createCloudEdits({
         : (REFERENCE_MODES.has(mode) ? (c.kind === 'dense' || c.kind === 'mesh') : c.kind === 'dense'))
     const sources = resolved.filter((c, slot) => okKind(c, slot))
     const streamed = resolved.find(isStreamed)
+    if (streamed && mode === 'crop' && resolved.length === 1 && extractCloudPoints) {
+      return cropStreamed(streamed, settings, name, onProgress)
+    }
     if (streamed) {
       log(streamedRefusal(streamed, 'Cloud edit'), 'warn', 'Products')
       return null

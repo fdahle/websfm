@@ -1,6 +1,6 @@
 import { markRaw, watch } from 'vue'
 import * as opfs from '../../utils/opfs.js'
-import { buildLod as workerBuildLod } from '../../workers/computeClient.js'
+import { buildLod as workerBuildLod, extractLod as workerExtractLod, exportLod as workerExportLod } from '../../workers/computeClient.js'
 import { openLodReader } from '../../core/lod/reader.js'
 import { LOD_MIN_POINTS } from '../../core/lod/build.js'
 
@@ -127,5 +127,30 @@ export function createCloudLod({ clouds, log, save, projectId, makeCloudId, sele
   }
   watch(() => clouds.value.map((c) => c.lod ? null : c.count), () => { buildMissing() })
 
-  return { buildCloudLod, openCloudLod, importStreamedCloud, pruneLod: prune }
+  // Points of a cloud's octree into memory (core/lod/extract.js), for a tool that
+  // needs resident points: a box, a point budget (met by stopping at a level, so the
+  // cloud is thinned evenly), a spacing that is fine enough, LAS classes.
+  // → { cloud: { count, pos, col?, attributes }, plan: { level, deepest, spacing, complete } }
+  async function extractCloudPoints(cloud, opts = {}, onProgress) {
+    const pid = projectId()
+    if (!cloud?.lod || !pid) throw new Error('the cloud has no octree')
+    const [data, hierarchy] = await Promise.all([
+      opfs.loadLodFile(pid, cloud.lod.dataFile), opfs.loadLodFile(pid, cloud.lod.hierarchyFile),
+    ])
+    return workerExtractLod({ lod: JSON.parse(JSON.stringify(cloud.lod)), data, hierarchy, ...opts },
+      { onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f) })
+  }
+
+  // A cloud written from its octree (a streamed cloud's export): → { blob, count }
+  async function exportCloudLod(cloud, { format, color = true } = {}, onProgress) {
+    const pid = projectId()
+    if (!cloud?.lod || !pid) throw new Error('the cloud has no octree')
+    const [data, hierarchy] = await Promise.all([
+      opfs.loadLodFile(pid, cloud.lod.dataFile), opfs.loadLodFile(pid, cloud.lod.hierarchyFile),
+    ])
+    return workerExportLod({ lod: JSON.parse(JSON.stringify(cloud.lod)), data, hierarchy, format, color },
+      { onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f) })
+  }
+
+  return { buildCloudLod, openCloudLod, importStreamedCloud, extractCloudPoints, exportCloudLod, pruneLod: prune }
 }

@@ -1,11 +1,11 @@
 import { test, expect } from '@playwright/test'
 
-// Streamed import (dev/planning/plan-lod.md ▸ L4): a LAS too large to hold in memory
-// goes straight from the file into a level-of-detail octree; the cloud has no
-// resident points, is drawn through the octree, is left out by tools that need its
-// points, and survives a reload.
+// Streamed import (dev/planning/plan-lod.md ▸ L4, L5): a LAS too large to hold in
+// memory goes straight from the file into a level-of-detail octree; the cloud has no
+// resident points, is drawn through the octree, and tools read it from there (a DTM,
+// a crop into a resident cloud, an export). It survives a reload.
 
-test('a streamed LAS import is drawn, refused by point tools, and survives a reload', async ({ page }) => {
+test('a streamed LAS import is drawn, gridded, cropped and exported from its octree, and survives a reload', async ({ page }) => {
   test.setTimeout(180_000)
   const errors = []
   page.on('pageerror', error => errors.push(error.message))
@@ -44,16 +44,33 @@ test('a streamed LAS import is drawn, refused by point tools, and survives a rel
   })
   await expect.poll(async () => (await layer())?.visible ?? 0, { timeout: 30_000 }).toBeGreaterThan(1000)
 
-  // Tools that need resident points leave it out or refuse it.
+  // Tools that need resident points read it from its octree: a DTM of its ground
+  // class, a crop into a new resident cloud, an export written node by node.
   const tools = await page.evaluate(async () => {
     const { useReconstructionStore } = await import('/src/stores/useReconstructionStore.js')
+    const { DEM_DEFAULTS } = await import('/src/core/defaults.user.js')
     const store = useReconstructionStore()
     const c = store.clouds[0]
-    const edit = await store.editClouds({ mode: 'crop', sourceIds: [c.id], settings: {} })
-    return { edit, dem: store.demSource?.kind ?? null }
+    const ground = store.groundSource?.cloud?.id === c.id
+    await store.generateDem({ ...DEM_DEFAULTS, points: 'ground', gsd: 2, extent: 'all' })
+    const dem = store.dem && { width: store.dem.width, height: store.dem.height, points: store.dem.points }
+    const crop = await store.editClouds({ mode: 'crop', sourceIds: [c.id], settings: { min: [480000, 5200000, null], max: [480100, 5200050, null] }, name: 'corner' })
+    const { blob } = await store.exportCloudLod(c, { format: 'las' })
+    const head = new DataView(await blob.slice(0, 375).arrayBuffer())
+    return { ground, dem, crop: crop && { count: crop.count, resident: !!crop.pos, cls: crop.attributes.classification.length },
+      las: { count: head.getUint32(107, true), size: blob.size, scale: head.getFloat64(131, true) } }
   })
-  expect(tools.edit).toBe(null)
-  expect(tools.dem).toBe(null)
+  expect(tools.ground).toBe(true)
+  // Ground (x ≤ 150) is half the 300 m width, the cloud 250 m deep: a 2 m grid ~76 × 126 cells.
+  expect(tools.dem.points).toBe('ground')
+  expect(tools.dem.width).toBeGreaterThan(70)
+  expect(tools.dem.width).toBeLessThan(85)
+  expect(tools.dem.height).toBeGreaterThan(120)
+  expect(tools.dem.height).toBeLessThan(130)
+  // 100 m × 50 m at 0.5 m spacing: 201 × 101 points, all of them (well inside the budget).
+  expect(tools.crop).toEqual({ count: 201 * 101, resident: true, cls: 201 * 101 })
+  expect(tools.las.count).toBe(300_000)
+  expect(tools.las.size).toBeGreaterThan(300_000 * 26)
 
   // Classification styling from the octree's own statistics.
   await page.evaluate(async () => {

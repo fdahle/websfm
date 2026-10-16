@@ -50,6 +50,9 @@ const { currentCrs } = storeToRefs(useProjectsStore())
 const reconstructionStore = useReconstructionStore()
 const { canGeoreference, canGeoreferenceGcps, clouds, crsSuggestion, dem, demSource, groundSource, denseSummary, depthSummary, georef, georeferenceBlocker, meshSource, meshSources, ortho, orthoSurfaces } = storeToRefs(reconstructionStore)
 const { images } = storeToRefs(useImagesStore())
+// Crop also takes a streamed cloud (core/lod/streamed.js): its box is copied out of
+// the octree into a new, resident cloud.
+const croppableClouds = computed(() => clouds.value.filter((c) => c.kind === 'dense' && c.count > 0 && (c.pos || c.lod)))
 const { gcps } = storeToRefs(useGcpsStore())
 const { poses } = storeToRefs(usePosesStore())
 const { orthoRasters: referenceOrthos } = storeToRefs(useExternalStore())
@@ -305,7 +308,7 @@ const measurementsStore = useMeasurementsStore()
   <Teleport to="body">
     <CropCloudModal
       v-if="cropCloudOpen"
-      :clouds="editableClouds"
+      :clouds="croppableClouds"
       :initial-id="toolInitialId"
       @close="cropCloudOpen = false"
       @run="onCropCloudRun"

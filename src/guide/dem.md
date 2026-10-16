@@ -48,7 +48,8 @@ ground class of a classified cloud: run [Classify Ground](guide:classify-ground)
 first. It uses the cloud selected in the 3D view when that one is classified,
 otherwise the newest classified cloud, and the Source line shows which. Choosing
 Ground only turns on Fill enclosed gaps, because the ground under a removed
-building is a hole the radius fill cannot close.
+building is a hole the radius fill cannot close. A classified LiDAR survey imported
+as a *streamed* cloud (too large for memory) is a ground source too.
 
 ## Surface aggregation
 <!-- param: aggregate default: Max -->
@@ -120,6 +121,12 @@ region when one is set) and allocates the grid. Both must fit the memory budget 
 message names the size it needed: raise the budget, set a region, subsample the cloud
 (Tools ▸ Point Cloud ▸ Filter, voxel), or choose a coarser cell size for the grid.
 Median uses about 8 extra bytes per point; Max, Min and Mean need none.
+
+A *streamed* cloud ([level of detail](help:level-of-detail)) is read from its octree
+instead: only as finely as the cell size needs (points about half a cell apart; finer
+levels add nothing to a cell), and within half the budget, so a 0.5 m DTM of a
+76-million-point survey reads some 20 million of them. With the cell size on auto,
+the budget alone sets how finely it reads.
 
 ## Inspect before export
 Look for spikes, pits, edge extrapolation, bridges across gaps, and a plausible height

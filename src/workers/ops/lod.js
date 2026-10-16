@@ -2,6 +2,9 @@ import { buildLod as runBuild } from '../../core/lod/build.js'
 import { typeName } from '../../core/lod/nodeCodec.js'
 import { openLasStream } from '../../core/io/lasStream.js'
 import { blobSource } from '../../utils/blobParts.js'
+import { openLodReader } from '../../core/lod/reader.js'
+import { planExtract, extractPoints } from '../../core/lod/extract.js'
+import { lodToLas, lodToText } from '../../core/lod/exportStream.js'
 
 // Level-of-detail octree build (dev/planning/plan-lod.md ▸ L2). The core
 // (core/lod/build.js) is pure; this side supplies the files:
@@ -119,7 +122,11 @@ export function makeLodOps({ lazCodec = null } = {}) {
       source = await openLasStream(src, { createLazDecoder: lazCodec?.createDecoder ?? null, onLog: log })
       layout = source.layout
       const h = source.header
-      fileInfo = { version: `${h.versionMajor}.${h.versionMinor}`, format: h.format, laz: h.isLaz }
+      // The projection VLRs (GeoKeys, WKT) go back into a LAS written from the octree.
+      const projection = h.vlrs.filter((v) => v.userId === 'LASF_Projection').map((v) => ({
+        userId: v.userId, recordId: v.recordId, description: '', data: btoa(String.fromCharCode(...v.data)),
+      }))
+      fileInfo = { version: `${h.versionMajor}.${h.versionMinor}`, format: h.format, laz: h.isLaz, projection }
     } else source = arraySource(cloud)
     const tmp = await tmpStore(`lod-${name}`)
     const dataFile = `${name}.lod`, hierarchyFile = `${name}.hier`
@@ -146,5 +153,49 @@ export function makeLodOps({ lazCodec = null } = {}) {
     }
   }
 
-  return { buildLod }
+  // Points of an octree into memory (core/lod/extract.js): a box, a budget, classes.
+  // input { lod, data: File, hierarchy: File, box?, maxPoints?, minSpacing?, classes?: [n], fields? }
+  // → { cloud: { count, pos, col?, attributes }, plan: { level, deepest, spacing, complete } }
+  async function extractLod([input], { emit }) {
+    const { lod, data, hierarchy, box = null, maxPoints = Infinity, minSpacing = 0, classes = null, fields = 'all' } = input
+    const reader = await openLodReader(lod, { data, hierarchy })
+    const plan = planExtract(reader.nodes, lod, { box, maxPoints, minSpacing })
+    const cloud = await extractPoints(reader, plan, lod, {
+      box, classes: classes ? new Set(classes) : null, fields,
+      onProgress: (done, total) => emit('progress', [done, total, 'Reading points', done / Math.max(1, total)]),
+    })
+    const transfer = [cloud.pos.buffer, ...(cloud.col ? [cloud.col.buffer] : []), ...Object.values(cloud.attributes).map((a) => a.buffer)]
+    const { nodes, ...summary } = plan
+    return { result: { cloud, plan: { ...summary, nodes: nodes.length } }, transfer }
+  }
+
+  // A streamed cloud to a file, node by node (core/lod/exportStream.js).
+  // input { lod, data: File, hierarchy: File, format: 'las' | 'ply' | 'xyz', color } → { blob, count }
+  async function exportLod([input], { emit }) {
+    const { lod, data, hierarchy, format, color = true } = input
+    const t0 = performance.now()
+    const reader = await openLodReader(lod, { data, hierarchy })
+    const onProgress = (done, total) => emit('progress', [done, total, 'Writing points', done / Math.max(1, total)])
+    // Parts gathered into a Blob in batches (the browser keeps large Blobs on disk).
+    let blob = null, batch = [], size = 0
+    const add = (p) => {
+      batch.push(p); size += typeof p === 'string' ? p.length : p.byteLength
+      if (size >= 64 << 20) { blob = new Blob(blob ? [blob, ...batch] : batch); batch = []; size = 0 }
+    }
+    let type = 'application/octet-stream'
+    if (format === 'las') {
+      const las = lodToLas(reader, lod, { onProgress })
+      for await (const p of las.parts) add(p)
+      blob = new Blob([las.header(), ...(blob ? [blob] : []), ...batch], { type })
+    } else {
+      if (format === 'xyz') type = 'text/plain;charset=utf-8'
+      for await (const p of lodToText(reader, lod, { format, color, onProgress })) add(p)
+      blob = new Blob([...(blob ? [blob] : []), ...batch], { type })
+    }
+    emit('log', [`${format.toUpperCase()} written: ${lod.points.toLocaleString()} points from the octree, `
+      + `${(blob.size / 1024 ** 2).toFixed(1)} MB in ${((performance.now() - t0) / 1000).toFixed(1)}s`, 'info', 'Export'])
+    return { result: { blob, count: lod.points } }
+  }
+
+  return { buildLod, extractLod, exportLod }
 }

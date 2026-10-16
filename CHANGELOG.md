@@ -14,7 +14,9 @@ Notable changes to websfm. The format follows
 - **Streamed LAS/LAZ import**: a LAS or LAZ file too large to hold in memory is read
   in batches straight into its octree, so a 200-million-point survey imports (in a few
   minutes) and displays; LAZ is decoded a run of chunks at a time. Such a cloud is
-  marked *streamed*; tools that need all of its points in memory leave it out for now.
+  marked *streamed*. Build DEM grids it (also as a DTM of its ground class), reading
+  the octree only as finely as the cell size needs; Crop copies a box of it into an
+  ordinary cloud; Export writes LAS, binary PLY or XYZ node by node.
 - **Measure in 3D**: Tools ▸ Measure ▸ Measure in 3D measures distance, polylines and
   areas directly in the 3D view, picked on the surface of a mesh or on cloud points.
   Lengths are split into horizontal and height change, areas into surface area and

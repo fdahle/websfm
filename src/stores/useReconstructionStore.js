@@ -1,3 +1,4 @@
+import { isStreamed } from '../core/lod/streamed.js'
 import { createFrameResolver } from './reconstruction/frames.js'
 import { createSparseRun } from './reconstruction/sparseRun.js'
 import { createProductRuns } from './reconstruction/productRuns.js'
@@ -265,8 +266,9 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
   // imported COLMAP model, and the fastest orientation/scale sanity check before
   // committing to dense) — the modal warns, it does not gate.
   const demSource = computed(() => {
-    // A resident dense cloud: a streamed one has no points in memory to grid (yet).
-    const dense = clouds.value.find((c) => c.kind === 'dense' && c.pos)
+    // A resident dense cloud first; else a streamed one (core/lod/streamed.js), which
+    // generateDem reads from its octree at the spacing the grid needs.
+    const dense = clouds.value.find((c) => c.kind === 'dense' && c.pos) ?? clouds.value.find((c) => isStreamed(c))
     if (dense?.count) return { cloud: dense, kind: 'dense', count: dense.count, name: dense.name ?? null }
     const sparse = mainSparseCloud.value
     const n = sparse?.points?.length ?? 0
@@ -281,7 +283,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
   // made for exactly this.
   const groundSource = computed(() => {
     const list = clouds.value.filter((c) => c.kind === 'dense' && c.count > 0
-      && c.attributes?.classification?.length === c.count)
+      && (c.attributes?.classification?.length === c.count || (isStreamed(c) && (c.lod.stats?.classes?.[2] ?? 0) > 0)))
     if (!list.length) return null
     const pick = list.find((c) => c.id === selectedCloudId.value) ?? list[list.length - 1]
     return { cloud: pick, kind: 'dense', count: pick.count, name: pick.name ?? null }
@@ -670,12 +672,17 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     sensors, summary, upsertDenseCloud, upsertMeshCloud, withRegion,
   })
 
+  // Level-of-detail octrees of big clouds (reconstruction/cloudLod.js).
+  const { buildCloudLod, openCloudLod, importStreamedCloud, extractCloudPoints, exportCloudLod, pruneLod } = createCloudLod({
+    clouds, log, save, projectId: () => (isPersisting() ? projects.currentProjectId : null), makeCloudId, selectedCloudId,
+  })
+
   // Crop / filter / merge / select and the other Tools-tab edits (reconstruction/cloudEdits.js).
   const {
     editClouds, addDerivedMesh,
   } = createCloudEdits({
     clouds, healthDirty, imagesStore, invalidateSparseDependents, log, mainSparseCloud, makeCloudId,
-    save, projects, reconStatus, selectedCloudId, summary, upsertSparseCloud, sensors,
+    save, projects, reconStatus, selectedCloudId, summary, upsertSparseCloud, sensors, extractCloudPoints,
     // Created below with the sparse run; resolved when an edit runs.
     surveyConstraintInput: (opts) => surveyConstraintInput(opts),
   })
@@ -721,18 +728,13 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     addDerivedMesh, clouds, frameModelFor, images, imagesStore, log, mainSparseCloud, reconStatus, save,
   })
 
-  // Level-of-detail octrees of big clouds (reconstruction/cloudLod.js).
-  const { buildCloudLod, openCloudLod, importStreamedCloud, pruneLod } = createCloudLod({
-    clouds, log, save, projectId: () => (isPersisting() ? projects.currentProjectId : null), makeCloudId, selectedCloudId,
-  })
-
   // DEM and orthophoto generation (reconstruction/productRuns.js).
   const {
     generateDem, generateOrtho,
   } = createProductRuns({
     activeRegion, dem, demSource, depthMapInput, effectiveFrameSpec, frameModelFor, frameStampOf, groundSource,
     images, imagesStore, isPersisting, log, mainSparseCloud, meshCloud, ortho, orthoSurfaces,
-    projects, reconStatus, saveProductRecord, sparseCameras, withPreviewUrl,
+    projects, reconStatus, saveProductRecord, sparseCameras, withPreviewUrl, extractCloudPoints,
   })
 
   // Reconstruct and the survey constraints it shares with gradual selection
@@ -990,7 +992,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     reconstruct,
     importColmapModel, importInteropModel,
     importCloud,
-    editClouds, textureMesh, buildCloudLod, openCloudLod, importStreamedCloud,
+    editClouds, textureMesh, buildCloudLod, openCloudLod, importStreamedCloud, exportCloudLod,
     // Tools ▸ Model ▾ ▸ Region (core/products/region.js).
     region, regionState, setRegion, clearRegion,
     // Tools ▸ Model ▾ ▸ Orient model (core/products/orientation.js).

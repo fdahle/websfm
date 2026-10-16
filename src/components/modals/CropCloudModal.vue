@@ -31,6 +31,9 @@ const { id: sourceId, item: picked } = useSourcePick(() => props.clouds, { initi
 // The points the box is tested against: a cloud's points, or a mesh's vertices.
 const source = computed(() => (picked.value && props.mesh
   ? { count: picked.value.nVerts, pos: picked.value.pos } : picked.value))
+// A streamed cloud (core/lod/streamed.js): no points in memory, its octree has the
+// extent, and the crop copies the box out of the octree into a new cloud.
+const streamed = computed(() => !!(source.value && !source.value.pos && source.value.lod))
 const noun = computed(() => (props.mesh ? 'vertices' : 'points'))
 
 const AXES = [
@@ -42,7 +45,9 @@ const AXES = [
 // Prefill the box from the source's own bbox, so the initial state is "keep
 // everything" and the user shrinks from there rather than guessing coordinates.
 function fillFromBounds() {
-  const b = source.value ? cloudBounds(source.value) : null
+  const lb = streamed.value ? source.value.lod.bounds : null
+  const b = lb ? { minX: lb.min[0], minY: lb.min[1], minZ: lb.min[2], maxX: lb.max[0], maxY: lb.max[1], maxZ: lb.max[2] }
+    : source.value ? cloudBounds(source.value) : null
   if (!b) return
   const r = (v) => Number(v.toFixed(3))
   settings.value = {
@@ -59,7 +64,7 @@ watch(source, fillFromBounds, { immediate: true })
 // every keystroke would jank the UI — so we say "run to see" rather than freeze.
 const LIVE_COUNT_LIMIT = 20_000_000
 const liveKept = ref(null)
-const countable = computed(() => cloudCount(source.value) > 0 && cloudCount(source.value) <= LIVE_COUNT_LIMIT)
+const countable = computed(() => !streamed.value && cloudCount(source.value) > 0 && cloudCount(source.value) <= LIVE_COUNT_LIMIT)
 let timer = null
 
 function recount() {
@@ -94,7 +99,7 @@ function run() {
     settings: {
       min: [num(s.minX), num(s.minY), num(s.minZ)],
       max: [num(s.maxX), num(s.maxY), num(s.maxZ)],
-      invert: !!s.invert,
+      invert: !!s.invert && !streamed.value,
     },
     name: `${picked.value?.name ?? (props.mesh ? 'Mesh' : 'Cloud')} (cropped)`,
   })
@@ -135,13 +140,18 @@ function run() {
         <SettingsField hint="Keep what falls outside the box instead of inside it.">
           <template #label>Invert</template>
           <label class="checkbox-row">
-            <input v-model="settings.invert" type="checkbox" class="checkbox" /> Keep outside the box
+            <input v-model="settings.invert" type="checkbox" class="checkbox" :disabled="streamed" /> Keep outside the box
           </label>
         </SettingsField>
       </SettingsGroup>
 
       <p class="field-hint">
-        <template v-if="liveKept !== null">
+        <template v-if="streamed">
+          A streamed cloud: the points inside the box are copied out of its octree into a new
+          cloud that every tool can use. Past 25 million points the copy is thinned evenly;
+          crop a smaller box for full detail.
+        </template>
+        <template v-else-if="liveKept !== null">
           Keeps {{ liveKept.toLocaleString() }} of {{ sourceCount.toLocaleString() }} {{ noun }}.
         </template>
         <template v-else>
