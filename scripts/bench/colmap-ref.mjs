@@ -7,6 +7,7 @@
 //        [--colmap <colmap binary, default $COLMAP or PATH>] [--mapper mapper|global_mapper] [--dense]
 //        [--denseMaxImageSize 2000] [--cameraModel SIMPLE_RADIAL] [--name <label>]
 //        [--model <COLMAP model dir> --imagePath <dir>]   dense only, on a given model
+//        [--ws <dir>]                                       workspace (default bench-out/<name>-<stamp>)
 //                                                         (e.g. ETH3D's ground-truth cameras)
 //
 // Defaults are COLMAP's own, except two choices that mirror the websfm run so the
@@ -40,7 +41,8 @@ const cfg = args.config ? JSON.parse(await readFile(args.config, 'utf8')) : {}
 const colmap = args.colmap ?? process.env.COLMAP ?? 'colmap'
 const name = args.name ?? `colmap-${cfg.name ?? 'run'}`
 const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
-const ws = join(repo, 'bench-out', `${name}-${stamp}`)
+// `--ws <dir>`: write the workspace there instead (dense workspaces are GBs; keep them off the SSD).
+const ws = args.ws ? resolve(args.ws) : join(repo, 'bench-out', `${name}-${stamp}`)
 await mkdir(ws, { recursive: true })
 const images = args.imagePath ?? cfg.images
 if (!images) throw new Error('config needs "images" (or --imagePath)')
