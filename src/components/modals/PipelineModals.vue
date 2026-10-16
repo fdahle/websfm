@@ -31,6 +31,7 @@ import MergeCloudsModal from '../modals/MergeCloudsModal.vue'
 import MeshMeasureModal from '../modals/MeshMeasureModal.vue'
 import MeshModal from '../modals/MeshModal.vue'
 import NormalsModal from '../modals/NormalsModal.vue'
+import ClassifyGroundModal from '../modals/ClassifyGroundModal.vue'
 import OptimizeCamerasModal from '../modals/OptimizeCamerasModal.vue'
 import OrthoModal from '../modals/OrthoModal.vue'
 import ReconstructModal from '../modals/ReconstructModal.vue'
@@ -46,7 +47,7 @@ const FindGcpsModal = defineAsyncComponent(() => import('../modals/FindGcpsModal
 // command (useCommandDispatch) and hands its settings to useDialogRuns on Run.
 const { currentCrs } = storeToRefs(useProjectsStore())
 const reconstructionStore = useReconstructionStore()
-const { canGeoreference, canGeoreferenceGcps, clouds, crsSuggestion, dem, demSource, denseSummary, georef, georeferenceBlocker, meshSource, meshSources, ortho, orthoSurfaces } = storeToRefs(reconstructionStore)
+const { canGeoreference, canGeoreferenceGcps, clouds, crsSuggestion, dem, demSource, groundSource, denseSummary, depthSummary, georef, georeferenceBlocker, meshSource, meshSources, ortho, orthoSurfaces } = storeToRefs(reconstructionStore)
 const { images } = storeToRefs(useImagesStore())
 const { gcps } = storeToRefs(useGcpsStore())
 const { poses } = storeToRefs(usePosesStore())
@@ -190,6 +191,7 @@ const measurementsStore = useMeasurementsStore()
       @apply-crs-suggestion="applyCrsSuggestion"
       :project-crs="currentCrs"
       :source="demSource"
+      :ground-source="groundSource"
       @close="demOpen = false"
       @run="onDemRun"
     />
@@ -200,6 +202,7 @@ const measurementsStore = useMeasurementsStore()
     <OrthoModal
       v-if="orthoOpen"
       :surfaces="orthoSurfaces"
+      :depth-settings="depthSummary?.settings ?? null"
       :can-georeference="canGeoreference"
       :has-scale="scaleFitValid || georef?.crs === currentCrs"
       :dem-unit="dem?.unit ?? null"
@@ -252,6 +255,8 @@ const measurementsStore = useMeasurementsStore()
   <Teleport to="body">
     <NormalsModal v-if="toolModal === 'estimate-normals'" :clouds="editableClouds" :initial-id="toolInitialId"
       :cameras="reconstructionStore.mainSparseCloud?.cameras ?? null" @close="toolModal = null" @run="onToolEditRun" />
+    <ClassifyGroundModal v-else-if="toolModal === 'classify-ground'" :clouds="editableClouds" :initial-id="toolInitialId"
+      :frame-signature="reconstructionStore.currentFrameSignature" @close="toolModal = null" @run="onToolEditRun" />
     <TransformCloudModal v-else-if="toolModal === 'transform-cloud'" :clouds="editableClouds" :initial-id="toolInitialId"
       @close="toolModal = null" @run="onToolEditRun" />
     <AlignIcpModal v-else-if="toolModal === 'align-icp'" :clouds="editableClouds" :references="[...editableClouds, ...meshClouds]"

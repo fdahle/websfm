@@ -66,11 +66,15 @@ These two are in **Tools → Measure ▾**, with the raster and mesh measurement
   usually arrive without normals, and [meshing](guide:mesh) needs them. *Automatic*
   points the normals towards the cameras for a computed cloud and upwards for an
   imported one.
+- **Classify ground…** labels each point as ground, above ground or low noise with a
+  cloth simulation, so **Build DEM ▸ Points ▸ Ground only** can make a bare-earth
+  terrain model. The result opens coloured by class. See [Classify
+  Ground](guide:classify-ground).
 
 ## Exporting attributes
 **Export ▸ Point Cloud** writes a cloud's point attributes along with its coordinates
-and colours: a computed distance, and whatever an imported file brought (intensity,
-classification, GPS time, PLY scalar fields).
+and colours: a computed distance or ground classification, and whatever an imported
+file brought (intensity, classification, GPS time, PLY scalar fields).
 - **PLY** stores each attribute as a vertex property of its own type (a distance is a
   `float`). CloudCompare, MeshLab and PDAL read them as scalar fields.
 - **LAS** writes intensity, classification, return numbers, scan angle, user data and

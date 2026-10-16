@@ -11,7 +11,7 @@ const MESH_EDIT_MODES = new Set(['mesh-clean', 'mesh-smooth', 'mesh-decimate', '
 const REFERENCE_MODES = new Set(['icp', 'distance'])
 // … and these produce a replacement view of their source (an aligned or
 // recoloured copy), so the source is hidden like a selection edit's.
-const REPLACES_SOURCE_VIEW = new Set(['transform', 'icp', 'distance', 'normals', 'mesh-clean', 'mesh-smooth', 'mesh-decimate'])
+const REPLACES_SOURCE_VIEW = new Set(['transform', 'icp', 'distance', 'normals', 'classify-ground', 'mesh-clean', 'mesh-smooth', 'mesh-decimate'])
 
 // Tools-tab cloud and mesh edits, split out of useReconstructionStore: every
 // `editClouds` mode runs in the cloud-edit worker (workers/ops/cloud.js) and adds a

@@ -119,6 +119,7 @@ export const COMMANDS = [
   { name: 'orient',       aliases: ['orient model', 'level'], dispatch: 'orient-model', group: 'Tools', help: 'Set up, origin and heading of the local frame' },
   { name: 'select',       aliases: ['lasso'],        dispatch: 'view-select-lasso',   group: 'Tools', help: 'Lasso-select dense points in the 3D view' },
   { name: 'normals',      aliases: ['estimate normals'], dispatch: 'estimate-normals', group: 'Tools', help: 'Estimate per-point normals on a dense cloud' },
+  { name: 'ground',       aliases: ['classify ground', 'dtm'], dispatch: 'classify-ground', group: 'Tools', help: 'Classify the ground points of a dense cloud (for a DTM)' },
   { name: 'transform',    aliases: [],               dispatch: 'transform-cloud',     group: 'Tools', help: 'Move, rotate, scale or matrix-transform a cloud' },
   { name: 'align pairs',  aliases: ['align points'], dispatch: 'align-points',        group: 'Tools', help: 'Align a cloud by picking point pairs' },
   { name: 'icp',          aliases: ['align'],        dispatch: 'align-icp',           group: 'Tools', help: 'Refine an alignment to a reference cloud or mesh' },

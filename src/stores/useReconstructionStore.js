@@ -271,6 +271,19 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     return { cloud: sparse, kind: 'sparse', count: n, name: sparse.name ?? null }
   })
 
+  // The cloud Build DEM ▸ Points ▸ Ground only rasterises: a dense cloud carrying a
+  // per-point LAS `classification` (Classify ground, or an imported classified LAS).
+  // Same contract as demSource — DemModal renders it, generateDem consumes it. The
+  // viewer-selected one wins, then the newest: a classified cloud is a derived copy
+  // made for exactly this.
+  const groundSource = computed(() => {
+    const list = clouds.value.filter((c) => c.kind === 'dense' && c.count > 0
+      && c.attributes?.classification?.length === c.count)
+    if (!list.length) return null
+    const pick = list.find((c) => c.id === selectedCloudId.value) ?? list[list.length - 1]
+    return { cloud: pick, kind: 'dense', count: pick.count, name: pick.name ?? null }
+  })
+
   // The dense clouds Build Mesh can use (any dense cloud with per-point normals —
   // computed, edited or imported) and the one it uses by default. Same contract as
   // demSource: MeshModal RENDERS this and generateMesh() CONSUMES it, so the modal's
@@ -704,7 +717,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
   const {
     generateDem, generateOrtho,
   } = createProductRuns({
-    activeRegion, dem, demSource, depthMapInput, effectiveFrameSpec, frameModelFor, frameStampOf,
+    activeRegion, dem, demSource, depthMapInput, effectiveFrameSpec, frameModelFor, frameStampOf, groundSource,
     images, imagesStore, isPersisting, log, mainSparseCloud, meshCloud, ortho, orthoSurfaces,
     projects, reconStatus, saveProductRecord, sparseCameras, withPreviewUrl,
   })
@@ -932,6 +945,7 @@ export const useReconstructionStore = registerProjectStore(defineStore('reconstr
     healthDirty,
     dem,
     demSource,
+    groundSource,
     meshSources,
     meshSource,
     ortho,

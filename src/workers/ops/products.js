@@ -147,17 +147,20 @@ export function makeProductsOps({ rasterize } = {}) {
     // the budget leaves after them.
     const budget = settings.memBudgetBytes > 0 ? settings.memBudgetBytes - pos.byteLength : undefined
     const unitName = frameUnitName(frame.unit)
-    const bounds = productBounds(pos, view.length, settings.extent, 'DEM', unitName, emit)
+    // A DEM of the ground class alone is the bare-earth DTM; say so in the log.
+    const label = settings.points === 'ground' ? 'DTM' : 'DEM'
+    const bounds = productBounds(pos, view.length, settings.extent, label, unitName, emit)
     const grid = rasterizeDem(framed, { ...settings, bounds, memBudgetBytes: budget })
-    if (!grid) throw new Error('DEM: could not rasterise (need a denser cloud or a smaller GSD)')
+    if (!grid) throw new Error(`${label}: could not rasterise (need a denser cloud or a smaller GSD)`)
 
     // A rebuild keeps the previous DEM's symbology (an automatic range follows the new
     // heights; a manual one is the user's and stays).
     const previewBlob = await demPreviewPng(grid, settings.style)
     const unitLabel = frameUnitName(frame.unit)
-    emit('log', [`DEM: ${grid.width}×${grid.height} @ ${grid.gsd.toPrecision(3)} ${unitLabel}/px, `
+    emit('log', [`${label}: ${grid.width}×${grid.height} @ ${grid.gsd.toPrecision(3)} ${unitLabel}/px, `
       + `z ${grid.zMin.toPrecision(4)}–${grid.zMax.toPrecision(4)}, `
-      + `${grid.count} measured + ${grid.filled} filled cells (${frame.crs}`
+      + `${grid.count} measured + ${grid.filled} filled cells`
+      + `${grid.holesFilled ? ` (${grid.holesFilled} in enclosed gaps)` : ''} (${frame.crs}`
       // A local frame's vertical is an estimate; say which camera signal set it.
       + `${frame.crs === 'local' && frame.source ? `, up from ${frame.source}` : ''})`, 'success', 'Products'])
     emit('progress', [1, 1, 'Done'])
@@ -166,7 +169,7 @@ export function makeProductsOps({ rasterize } = {}) {
       width: grid.width, height: grid.height, gsd: grid.gsd,
       originX: grid.originX, originY: grid.originY,
       data: grid.data, mask: grid.mask, zMin: grid.zMin, zMax: grid.zMax,
-      count: grid.count, filled: grid.filled,
+      count: grid.count, filled: grid.filled, holesFilled: grid.holesFilled,
       frame: frameDescriptor(frame, frameSpec), crs: frame.crs, unit: frame.unit,
       previewBlob, ...(settings.style && { style: settings.style }),
     }

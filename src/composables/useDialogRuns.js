@@ -148,6 +148,7 @@ export function useDialogRuns({ pipeline, closeProductTabs, openImageTab, refres
   // mode (core/products/* via workers/ops/cloud.js). Non-destructive, every one.
   const TOOL_EDIT_MODES = {
     'estimate-normals': 'normals',
+    'classify-ground': 'classify-ground',
     'transform-cloud': 'transform',
     'align-icp': 'icp',
     'cloud-distance': 'distance',
@@ -161,7 +162,39 @@ export function useDialogRuns({ pipeline, closeProductTabs, openImageTab, refres
     const mode = TOOL_EDIT_MODES[toolModal.value]
     toolModal.value = null
     if (mode === 'distance') req = { ...req, style: distanceStyle(req.settings.signed) }
-    if (mode) await runEditClouds({ ...req, mode })
+    if (mode === 'classify-ground') req = await groundRequest(req)
+    if (mode && req) await runEditClouds({ ...req, mode })
+  }
+  // Classify ground works in metres along the product vertical, so it needs the
+  // frame a DEM would be built in (THE resolver: georeference > scale bars). A
+  // computed cloud in model units is refused: the cloth's lengths would mean
+  // nothing. An imported cloud is classified as it is (its own z is up, in its
+  // file units, taken as metres). The result opens coloured by class.
+  async function groundRequest(req) {
+    const source = reconstructionStore.clouds.find((c) => c.id === req.sourceIds?.[0])
+    if (!source) return null
+    let frame = null, metresPerUnit = 1, unitLabel = 'm'
+    if (source.imported) {
+      log('Ground filter: an imported cloud is classified in its own coordinates (z up, lengths taken as metres)', 'info', 'Products')
+    } else {
+      const resolved = await reconstructionStore.effectiveFrameSpec({})
+      if (resolved.unit === 'model') {
+        const why = 'the model has no real-world scale — georeference it or add scale bars first'
+        log(`Ground filter: ${why}`, 'error', 'Products')
+        showToast('Classify ground needs metres', { detail: why, kind: 'error', ms: 6000 })
+        return null
+      }
+      frame = resolved.frameSpec
+      metresPerUnit = resolved.frameSpec.metresPerUnit ?? 1
+      unitLabel = resolved.unit
+    }
+    const cameras = [...(reconstructionStore.mainSparseCloud?.cameras ?? new Map()).values()]
+      .map((cam) => ({ R: cam.R.map((r) => [...r]), t: [...cam.t] }))
+    return {
+      ...req,
+      settings: { ...req.settings, frame, metresPerUnit, unitLabel, cameras },
+      style: { field: 'attribute:classification' },
+    }
   }
   // A distance result opens coloured by distance: a signed one on the diverging ramp
   // with a symmetric range (white = no change), an unsigned one sequential from 0.

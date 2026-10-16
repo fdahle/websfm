@@ -35,7 +35,8 @@ export const DEM_STAGE_BYTES_PER_POINT = 24
 
 // Copy a cloud's positions into a fresh Float64 buffer the worker can take by
 // transfer (the source cloud is never detached), keeping only the points for
-// which `inside(x, y, z)` holds when it is given. The buffer is sized to the
+// which `inside(x, y, z, i)` holds when it is given (i: the point's index, for a
+// per-point attribute test such as ground-only). The buffer is sized to the
 // survivors: a count pass runs first, so a region costs no full-cloud copy. All
 // of it is ArrayBuffer memory, so it is checked against the device budget, not
 // the V8 heap.
@@ -51,7 +52,7 @@ export function stageDemPoints(cloud, { inside = null, budgetBytes = DEFAULT_BUD
   let count = total
   if (inside) {
     count = 0
-    for (let i = 0; i < total; i++) { read(i); if (inside(xyz[0], xyz[1], xyz[2])) count++ }
+    for (let i = 0; i < total; i++) { read(i); if (inside(xyz[0], xyz[1], xyz[2], i)) count++ }
   }
   const bytes = count * DEM_STAGE_BYTES_PER_POINT
   if (bytes > budgetBytes) {
@@ -66,7 +67,7 @@ export function stageDemPoints(cloud, { inside = null, budgetBytes = DEFAULT_BUD
     let o = 0
     for (let i = 0; i < total; i++) {
       read(i)
-      if (inside && !inside(xyz[0], xyz[1], xyz[2])) continue
+      if (inside && !inside(xyz[0], xyz[1], xyz[2], i)) continue
       pos[o++] = xyz[0]; pos[o++] = xyz[1]; pos[o++] = xyz[2]
     }
   }
@@ -151,9 +152,12 @@ export function coreExtent(pos, count, { bins = 128, quantile = 0.001, densityFr
 //     memBudgetBytes — working-memory budget for the grid (+ median buffers);
 //                  the caller subtracts anything it already holds (the points)
 // Returns { width, height, gsd, originX, originY, data:Float32Array (NaN=nodata),
-//           mask:Uint8Array (1=has data, incl. filled), zMin, zMax, count, filled }.
+//           mask:Uint8Array (1=has data, incl. filled), zMin, zMax, count, filled,
+//           holesFilled (of `filled`, the cells `fillHoles` interpolated) }.
+//     fillHoles  — after the radius fill, also interpolate every enclosed nodata
+//                  area (fillEnclosedGaps): the ground under removed buildings
 export function rasterizeDem(allPoints, opts = {}) {
-  const { aggregate = 'max', fillMethod = 'idw', fillRadius = 2, maxGrid = 4096 } = opts
+  const { aggregate = 'max', fillMethod = 'idw', fillRadius = 2, maxGrid = 4096, fillHoles = false } = opts
   // `bounds` ({ minX, minY, maxX, maxY }, e.g. coreExtent) limits the grid; points
   // outside are LEFT OUT — clamping them into the edge cells would pile far
   // background onto the border. The auto GSD then reflects the points inside.
@@ -190,6 +194,7 @@ export function rasterizeDem(allPoints, opts = {}) {
   // median adds a cell-offset table and one Float64 per point.
   const budget = Number.isFinite(opts.memBudgetBytes) ? opts.memBudgetBytes : DEFAULT_BUDGET_BYTES
   const need = cells * 24 + (aggregate === 'median' ? cells * 4 + points.length * 8 : 0)
+    + (fillHoles ? cells * ENCLOSED_FILL_BYTES_PER_CELL : 0)
   if (!Number.isSafeInteger(cells) || need > budget) {
     throw new Error(`DEM raster (${width}×${height}) needs ${formatBytes(need)}, over the `
       + `${formatBytes(budget)} working-memory limit; increase GSD or reduce the grid size`)
@@ -244,6 +249,8 @@ export function rasterizeDem(allPoints, opts = {}) {
   if (fillMethod !== 'none' && fillRadius > 0) {
     filled = fillNodata(data, measured, width, height, fillRadius, fillMethod)
   }
+  const holesFilled = fillHoles ? fillEnclosedGaps(data, width, height) : 0
+  filled += holesFilled
 
   const mask = new Uint8Array(cells)
   let zMin = Infinity, zMax = -Infinity
@@ -256,7 +263,7 @@ export function rasterizeDem(allPoints, opts = {}) {
   }
   if (zMin > zMax) { zMin = 0; zMax = 0 }
 
-  return { width, height, gsd, originX, originY, data, mask, zMin, zMax, count, filled }
+  return { width, height, gsd, originX, originY, data, mask, zMin, zMax, count, filled, holesFilled }
 }
 
 // Fill nodata cells by inverse-distance weighting over measured cells within
@@ -294,4 +301,102 @@ export function fillNodata(data, measured, width, height, radius, method = 'idw'
     }
   }
   return filled
+}
+
+// Working memory of fillEnclosedGaps per grid cell: the exterior mask and queue
+// (5 B) plus a pull–push pyramid of Float64 values and Float32 weights (12 B per
+// cell, 4/3 of that over all levels).
+export const ENCLOSED_FILL_BYTES_PER_CELL = 21
+
+// Fill every ENCLOSED nodata area — one that does not reach the grid border —
+// with a smooth surface from the measured cells around it. This is what a DTM
+// needs once buildings and trees are removed: the ground under a roof was never
+// seen, and a radius-limited fill (fillNodata) leaves a building-sized hole.
+// Nodata reaching the border is the edge of the survey and stays nodata, so the
+// grid never grows past what was measured.
+//
+// Method: pull–push (Gortler et al. 1996). Pull averages the grid into a pyramid
+// of halved levels, each cell the weighted mean of its 2×2 children with weight
+// min(1, Σ child weights), until one cell remains. Push walks back down: a cell's
+// value blends its own mean with the bilinearly sampled level above it by its
+// weight, so an empty cell takes the coarse surface and a partly empty one a mix.
+// Only the enclosed cells of the finest level are written. O(cells), no
+// iteration count to choose, and a hole of any size is spanned.
+// Writes into `data` (NaN = nodata); returns the number of cells filled.
+export function fillEnclosedGaps(data, width, height) {
+  const n = width * height
+  // The exterior: nodata cells connected to the border through nodata.
+  const outside = new Uint8Array(n)
+  const queue = new Int32Array(n)
+  let head = 0, tail = 0
+  const seed = (k) => { if (!outside[k] && Number.isNaN(data[k])) { outside[k] = 1; queue[tail++] = k } }
+  for (let c = 0; c < width; c++) { seed(c); seed((height - 1) * width + c) }
+  for (let r = 0; r < height; r++) { seed(r * width); seed(r * width + width - 1) }
+  while (head < tail) {
+    const k = queue[head++]
+    const r = (k / width) | 0, c = k - r * width
+    if (c > 0) seed(k - 1)
+    if (c < width - 1) seed(k + 1)
+    if (r > 0) seed(k - width)
+    if (r < height - 1) seed(k + width)
+  }
+  let enclosed = 0, measured = 0
+  for (let k = 0; k < n; k++) {
+    if (!Number.isNaN(data[k])) measured++
+    else if (!outside[k]) enclosed++
+  }
+  if (!enclosed || !measured) return 0
+
+  // Pull.
+  const levels = []
+  {
+    const val = new Float64Array(n), wt = new Float32Array(n)
+    for (let k = 0; k < n; k++) if (!Number.isNaN(data[k])) { val[k] = data[k]; wt[k] = 1 }
+    levels.push({ w: width, h: height, val, wt })
+  }
+  while (levels[levels.length - 1].w > 1 || levels[levels.length - 1].h > 1) {
+    const { w, h, val, wt } = levels[levels.length - 1]
+    const w2 = Math.ceil(w / 2), h2 = Math.ceil(h / 2)
+    const v2 = new Float64Array(w2 * h2), t2 = new Float32Array(w2 * h2)
+    for (let r = 0; r < h; r++) {
+      for (let c = 0; c < w; c++) {
+        const t = wt[r * w + c]
+        if (!t) continue
+        const p = (r >> 1) * w2 + (c >> 1)
+        v2[p] += t * val[r * w + c]; t2[p] += t
+      }
+    }
+    for (let p = 0; p < v2.length; p++) {
+      if (t2[p] > 0) { v2[p] /= t2[p]; t2[p] = Math.min(1, t2[p]) }
+    }
+    levels.push({ w: w2, h: h2, val: v2, wt: t2 })
+  }
+
+  // Push: every coarser level is complete before the finer one samples it.
+  for (let l = levels.length - 2; l >= 0; l--) {
+    const { w, h, val, wt } = levels[l]
+    const up = levels[l + 1]
+    const finest = l === 0
+    for (let r = 0; r < h; r++) {
+      // This cell's centre in the coarser level's cell coordinates.
+      const fy = Math.min(up.h - 1, Math.max(0, (r + 0.5) / 2 - 0.5))
+      const r0 = Math.floor(fy), r1 = Math.min(up.h - 1, r0 + 1), ty = fy - r0
+      for (let c = 0; c < w; c++) {
+        const k = r * w + c
+        const t = wt[k]
+        if (t >= 1) continue
+        if (finest && outside[k]) continue
+        const fx = Math.min(up.w - 1, Math.max(0, (c + 0.5) / 2 - 0.5))
+        const c0 = Math.floor(fx), c1 = Math.min(up.w - 1, c0 + 1), tx = fx - c0
+        const a = up.val[r0 * up.w + c0] * (1 - tx) + up.val[r0 * up.w + c1] * tx
+        const b = up.val[r1 * up.w + c0] * (1 - tx) + up.val[r1 * up.w + c1] * tx
+        const coarse = a * (1 - ty) + b * ty
+        val[k] = t * val[k] + (1 - t) * coarse
+        if (!finest) wt[k] = 1
+      }
+    }
+  }
+  const fine = levels[0].val
+  for (let k = 0; k < n; k++) if (Number.isNaN(data[k]) && !outside[k]) data[k] = fine[k]
+  return enclosed
 }

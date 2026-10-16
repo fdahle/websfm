@@ -263,6 +263,8 @@ export const DEM_DEFAULTS = {
   fillMethod: 'idw', // 'none' | 'nearest' | 'idw'
   fillRadius: 2,    // IDW hole-fill radius (cells); 0 = none
   extent: 'core',   // 'core' = the cloud's dense footprint (dem.js coreExtent) | 'all' = raw min/max
+  points: 'all',    // 'all' (DSM) | 'ground' = only LAS class 2 of a classified cloud (DTM)
+  fillHoles: false, // also interpolate every enclosed nodata area (under removed buildings)
 }
 
 // Orthophoto (core/products/ortho.js). Mirrored by OrthoModal.vue.
@@ -436,6 +438,17 @@ export const NORMALS_DEFAULTS = {
   k: 16,
   // 'auto' ⇒ towards the cameras for a computed cloud, +Z (up) for an imported one.
   orient: 'auto',           // 'auto' | 'cameras' | 'up' | 'existing'
+}
+// Classify ground (core/products/groundFilter.js, cloth simulation). Lengths in
+// metres; a project without metric scale is refused. Mirrored by ClassifyGroundModal.vue.
+export const GROUND_DEFAULTS = {
+  // Cloth particle spacing. 1 m spans roofs up to ~40 m and follows slopes up to
+  // ~30 %; a large hall needs 2 m, steep mountain terrain 0.5 m.
+  clothResolution: 1,
+  rigidness: 2,          // 1 steep terrain | 2 rolling relief | 3 flat (stiffest)
+  classThreshold: 0.5,   // max distance from the cloth for a ground point
+  slopeSmoothing: true,  // spread the cloth onto continuous steep ground
+  extent: 'core',        // 'core' = the DEM's dense core (outside → class 0) | 'all'
 }
 export const ICP_DEFAULTS = {
   maxIterations: 30,

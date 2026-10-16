@@ -7,6 +7,9 @@ import { decimateMesh } from '../../core/products/meshDecimate.js'
 import { transformCloud, icpAlign, alignmentReport } from '../../core/products/cloudAlign.js'
 import { cloudToCloudDistance, cloudToMeshDistance } from '../../core/products/cloudDistance.js'
 import { estimateSpacing, cloudBounds } from '../../core/products/cloudEdit.js'
+import { classifyCloudGround } from '../../core/products/groundFilter.js'
+import { frameFromSpec } from '../../core/products/frameSpec.js'
+import { pointView } from '../../core/products/pointView.ts'
 
 // Cloud- and mesh-editing ops (the Tools tab's Point Cloud ▾ and Mesh ▾ tools, plus
 // the 3D selection). Pure math lives in core/products/*; this file only marshals
@@ -45,6 +48,27 @@ export function makeCloudOps() {
     normals: ([c], s, log, progress) => {
       const { nrm } = estimateNormals(c, s, log, (f) => progress(f, 'Estimating normals…'))
       return { out: { count: c.count, pos: c.pos, col: c.col, nrm, attributes: c.attributes } }
+    },
+    // Ground classification: the same points with a LAS `classification` attribute
+    // (2 ground, 1 above, 7 low, 0 outside the extent), replacing any earlier one.
+    // `frame` is the product frame spec the store resolved (null: the cloud's own
+    // z is up, an imported survey cloud); `cameras` lets a local spec derive up.
+    'classify-ground': ([c], s, log, progress) => {
+      const frame = s.frame
+        ? frameFromSpec(s.frame, (s.cameras ?? []).map((cam) => ({ R: cam.R, t: cam.t })), pointView(c))
+        : null
+      if (c.attributes?.classification) log('Ground filter: replacing the cloud\'s existing classification', 'warn', 'Products')
+      const result = classifyCloudGround(c, frame, {
+        ...s, budgetBytes: s.memBudgetBytes > 0 ? s.memBudgetBytes : Infinity,
+        onLog: (m) => log(m, 'info', 'Products'),
+        onProgress: (f) => progress(f, 'Simulating the cloth…'),
+      })
+      if (!result) throw new Error('no point lies inside the classified extent')
+      return {
+        out: { count: c.count, pos: c.pos, col: c.col, nrm: c.nrm ?? null,
+          attributes: { ...(c.attributes || {}), classification: result.classes } },
+        extra: result.counts,
+      }
     },
     // Move/rotate/scale by a transform ({ scale, R, t }) or a 4×4 `matrix`. The
     // only keys kept are the cloud's own buffers (transformCloud copies every field).

@@ -126,7 +126,7 @@ export function useCommandDispatch({ tabs, viewers, view, map, tools, exports, r
   const TOOL_MODALS = new Set([
     'gradual-selection',
     // Point Cloud ▾
-    'estimate-normals', 'cloud-section', 'transform-cloud', 'align-icp', 'cloud-distance',
+    'estimate-normals', 'classify-ground', 'cloud-section', 'transform-cloud', 'align-icp', 'cloud-distance',
     // Mesh ▾
     'clean-mesh', 'smooth-mesh', 'decimate-mesh', 'crop-mesh', 'mesh-to-points', 'mesh-measure',
     // Products ▾

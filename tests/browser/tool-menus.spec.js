@@ -84,3 +84,58 @@ test('Point Cloud ▾ and Mesh ▾ tools add derived results through the worker'
 
   expect(errors).toEqual([])
 })
+
+test('Classify ground labels a cloud and Build DEM ▸ Ground only makes a DTM under the roof', async ({ page }) => {
+  const errors = []
+  page.on('pageerror', (e) => errors.push(e.message))
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Create project', exact: true }).click()
+  await expect(page.locator('.loading-overlay')).toHaveCount(0)
+  // 40×40 m of sloping ground at 0.5 m spacing with a 12 m square roof 6 m up: an
+  // imported cloud, so its own z is up and no project scale is needed.
+  await page.evaluate(async () => {
+    const { useReconstructionStore } = await import('/src/stores/useReconstructionStore.js')
+    const xyz = []
+    for (let x = 0; x <= 40; x += 0.5) for (let y = 0; y <= 40; y += 0.5) {
+      const roof = x >= 14 && x <= 26 && y >= 14 && y <= 26
+      xyz.push(x, y, 0.05 * x + (roof ? 6 : 0))
+    }
+    const n = xyz.length / 3
+    useReconstructionStore().importCloud({ count: n, pos: Float64Array.from(xyz), col: new Uint8Array(n * 3).fill(150) }, 'site.ply')
+  })
+
+  await openTool(page, /Point\s*Cloud/, /Classify ground/)
+  await page.getByRole('dialog', { name: 'Classify Ground' }).getByRole('button', { name: 'Classify', exact: true }).click()
+  await expect.poll(async () => (await clouds(page)).find((c) => c.name.endsWith('(ground)'))?.style).toBe('attribute:classification')
+  const counts = await page.evaluate(async () => {
+    const { useReconstructionStore } = await import('/src/stores/useReconstructionStore.js')
+    const c = useReconstructionStore().clouds.find((x) => x.name.endsWith('(ground)'))
+    const n = [0, 0, 0, 0, 0, 0, 0, 0]
+    for (const v of c.attributes.classification) n[v]++
+    return { ground: n[2], above: n[1] }
+  })
+  // 25×25 roof points (12 m at 0.5 m) are above ground; everything else is ground.
+  expect(counts.above).toBe(25 * 25)
+  expect(counts.ground).toBe(81 * 81 - 25 * 25)
+
+  await page.evaluate(async () => {
+    const { useModalsStore } = await import('/src/stores/useModalsStore.js')
+    useModalsStore().demOpen = true
+  })
+  const dialog = page.getByRole('dialog', { name: 'Build DEM' })
+  await dialog.getByLabel('Points').selectOption('ground')
+  await expect(dialog.getByRole('checkbox')).toBeChecked()
+  await dialog.getByRole('button', { name: 'Build DTM', exact: true }).click()
+  // Every cell inside the grid has a height: the hole under the roof is filled.
+  // Empty cells on the grid border are the survey's edge and stay nodata.
+  await expect.poll(async () => page.evaluate(async () => {
+    const { useReconstructionStore } = await import('/src/stores/useReconstructionStore.js')
+    const d = useReconstructionStore().dem
+    if (!d) return null
+    let interior = 0
+    for (let r = 1; r < d.height - 1; r++) for (let c = 1; c < d.width - 1; c++) if (!d.mask[r * d.width + c]) interior++
+    return { points: d.points, interior, holes: d.holesFilled > 0, roofGone: d.zMax < 2.5 }
+  })).toEqual({ points: 'ground', interior: 0, holes: true, roofGone: true })
+
+  expect(errors).toEqual([])
+})

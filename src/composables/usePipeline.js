@@ -265,7 +265,7 @@ export function usePipeline({ images, detectAll, matchAll, reconstruct, computeD
   async function runEditClouds(request) {
     const titles = {
       crop: 'Cropping Cloud', filter: 'Filtering Cloud', merge: 'Merging Clouds', mask: 'Editing Selection',
-      normals: 'Estimating Normals', transform: 'Transforming Cloud', icp: 'Aligning Clouds',
+      normals: 'Estimating Normals', 'classify-ground': 'Classifying Ground', transform: 'Transforming Cloud', icp: 'Aligning Clouds',
       sparse: 'Gradual Selection', optimize: 'Optimizing Cameras',
       distance: 'Computing Distances', section: 'Cutting Section',
       'mesh-clean': 'Cleaning Mesh', 'mesh-smooth': 'Smoothing Mesh', 'mesh-decimate': 'Decimating Mesh',

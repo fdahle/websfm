@@ -26,7 +26,8 @@ positions or GCPs" means there is not enough evidence yet.
 
 ## Ground sample distance
 <!-- param: gsd default: Auto -->
-Cell size in metres or model units per pixel. Auto estimates a sensible value from
+The raster's [ground sample distance](help:ground-sample-distance): cell size in
+metres or model units per pixel. Auto estimates a sensible value from
 point density. Choosing a much finer cell than the source spacing makes a larger file,
 not more detail, and forces interpolation across more empty cells.
 
@@ -39,16 +40,56 @@ fall outside and are left out; a warning appears when that is more than 5%. Choo
 **All points** to grid the full extent of the cloud. A Region (Tools ▸ Model ▸ Region)
 limits the input before either.
 
+## Points
+<!-- param: points default: All points -->
+**All points** (default) builds a surface model (DSM) from the whole cloud, roofs and
+canopy included. **Ground only** builds a bare-earth terrain model (DTM) from the
+ground class of a classified cloud: run [Classify Ground](guide:classify-ground)
+first. It uses the cloud selected in the 3D view when that one is classified,
+otherwise the newest classified cloud, and the Source line shows which. Choosing
+Ground only turns on Fill enclosed gaps, because the ground under a removed
+building is a hole the radius fill cannot close.
+
 ## Surface aggregation
-**Max** creates a DSM top surface, retaining roofs and vegetation. **Min** is only
-“ground-ish”—it is not a classified terrain model. Median resists outliers, while
-mean gives a smooth average where many points occupy a cell.
+<!-- param: aggregate default: Max -->
+How the heights of all points that land in one cell become that cell's single
+height. **Max** (default) keeps the top surface: a DSM with roofs and canopy.
+**Min** takes the lowest point, which is only "ground-ish": it drops some points on
+low vegetation, but it is not a terrain model, and under trees or roofs there is no
+ground in the cloud to find. For a terrain model, use Points ▸ Ground only. **Median** resists stray points above and
+below the surface; **Mean** gives a smooth average where many points share a cell,
+but one outlier pulls it. Median needs about 8 extra bytes per point (see Memory).
 
 ## Gap interpolation
-**Inverse distance** blends nearby measured heights smoothly; **Nearest neighbour**
-preserves hard steps; **None** leaves nodata. The radius never enlarges the raster—it
-only fills an empty cell when measured data is close enough. Large radii can invent
-surface across real gaps, especially from a sparse cloud.
+<!-- param: fillMethod default: Inverse distance -->
+Fills empty cells, which no point landed in, from measured cells nearby
+([gap interpolation](help:gap-interpolation)). **Inverse distance** blends every
+measured cell within the Interpolation radius, weighted by 1/distance², so small
+holes close smoothly. **Nearest neighbour** copies the closest measured height: it
+keeps steps such as roof edges and walls sharp, but fills look blocky. **None** keeps
+the cells as nodata, which shows exactly where the cloud has no data; an orthophoto
+built on this DEM is then transparent there.
+
+## Interpolation radius
+<!-- param: fillRadius default: 2 px -->
+How far, in grid cells, an empty cell may be from a measured one and still be
+filled. The radius never enlarges the raster: it only fills cells inside the grid,
+and only from original measurements, never from other filled cells, so a hole wider
+than twice the radius keeps an unfilled core. 1–2 closes the speckle between points
+of a dense cloud. Larger values bridge real gaps (occluded ground, water, the space
+between buildings) with invented surface, especially from a sparse cloud, whose
+measured cells lie far apart. Because it counts cells, the same radius covers more
+ground at a coarser ground sample distance.
+
+## Fill enclosed gaps
+<!-- param: fillHoles default: Off -->
+Interpolates every empty area that measured cells surround on all sides, however
+large: the ground under a removed building, or a pond. It runs after the radius
+fill, with a smooth multi-resolution average of the measured cells around the gap
+([gap interpolation](help:gap-interpolation)). Empty areas that reach the edge of
+the grid are the edge of the survey and stay nodata. The filled heights are an
+estimate, not a measurement: a building on a slope gets the slope continued under
+it. On by default for Ground only, off otherwise.
 
 ## Show on the 2D map
 Choose **On Map** in the DEM's ribbon tab, or **Display on map** in the Products row's

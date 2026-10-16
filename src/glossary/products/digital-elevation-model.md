@@ -18,6 +18,10 @@ preview is rendered so relief is easy to read at a glance.
 
 <!-- TODO(image): assets/dem-binning.svg - a side-by-side of a scattered dense cloud and the regular grid it bins into, one cell blown up to show several points collapsing to a single representative height, and an empty cell marked as filled by interpolation from its neighbours. -->
 
+Built from every point, the DEM is a **surface model (DSM)**: it runs over roofs and
+tree tops. A **terrain model (DTM)** of the bare earth needs the ground points alone,
+which [ground classification](help:ground-classification) provides.
+
 The cell size is the DEM's [ground sample distance](help:ground-sample-distance),
 and choosing it is the main decision the user makes: finer than the point
 spacing produces holes that have to be interpolated, coarser throws away

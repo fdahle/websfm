@@ -12,18 +12,22 @@ import * as opfs from '../../utils/opfs.js'
 //
 // Deps are the store's own refs and helpers; the store keeps the state.
 export function createProductRuns({
-  activeRegion, dem, demSource, depthMapInput, effectiveFrameSpec, frameModelFor, frameStampOf,
+  activeRegion, dem, demSource, depthMapInput, effectiveFrameSpec, frameModelFor, frameStampOf, groundSource,
   images, imagesStore, isPersisting, log, mainSparseCloud, meshCloud, ortho, orthoSurfaces, projects,
   reconStatus, saveProductRecord, sparseCameras, withPreviewUrl,
 }) {
   // Build a DEM from the densest available cloud, in the requested frame
   // (settings.crs: 'local' | 'project'). A new DEM invalidates the old ortho.
+  // settings.points 'ground' builds a DTM from the ground class (LAS 2) of a
+  // classified cloud instead.
   async function generateDem(settings = {}, onProgress) {
     const sparse = mainSparseCloud.value
+    const groundOnly = settings.points === 'ground'
     // Single source of truth for "which cloud" — the same getter the modal shows.
-    const source = demSource.value
+    const source = groundOnly ? groundSource.value : demSource.value
     if (!source) {
-      log('DEM: build a point cloud first', 'warn', 'Products')
+      log(groundOnly ? 'DTM: classify the ground of a dense cloud first (Tools ▸ Point Cloud ▸ Classify ground)'
+        : 'DEM: build a point cloud first', 'warn', 'Products')
       return
     }
     const src = source.cloud
@@ -49,10 +53,15 @@ export function createProductRuns({
       // is checked against the machine's memory budget (Settings ▸ Compute).
       const budgetBytes = settings.memBudgetBytes > 0 ? settings.memBudgetBytes : DEFAULT_BUDGET_BYTES
       const r = src.imported ? null : activeRegion()
-      const staged = stageDemPoints(src.kind === 'dense' ? src : { points: src.points }, {
-        budgetBytes, inside: r ? (x, y, z) => regionContains(r, x, y, z) : null,
-      })
-      if (r) log(`DEM: region keeps ${staged.count.toLocaleString()} of ${staged.total.toLocaleString()} points`, 'info', 'Products')
+      const cls = groundOnly ? src.attributes.classification : null
+      const inRegion = r ? (x, y, z) => regionContains(r, x, y, z) : null
+      const inside = cls
+        ? (x, y, z, i) => cls[i] === 2 && (!inRegion || inRegion(x, y, z))
+        : inRegion
+      const staged = stageDemPoints(src.kind === 'dense' ? src : { points: src.points }, { budgetBytes, inside })
+      if (cls) log(`DTM: ${staged.count.toLocaleString()} ground points of ${staged.total.toLocaleString()}`, 'info', 'Products')
+      else if (r) log(`DEM: region keeps ${staged.count.toLocaleString()} of ${staged.total.toLocaleString()} points`, 'info', 'Products')
+      if (cls && !staged.count) throw new Error(r ? 'no ground point lies inside the region' : 'the cloud has no ground points')
       if (r && !staged.count) throw new Error('no point of the source lies inside the region')
       const points = { pos: staged.pos, count: staged.count }
       const cameras = [...(sparse?.cameras ?? new Map()).entries()].map(([uuid, cam]) => ({
@@ -63,7 +72,7 @@ export function createProductRuns({
         { transfer: [points.pos.buffer], onLog: (m, l, c) => log(m, l, c), onProgress: (d, t, lbl, f) => onProgress?.(d, t, lbl, f) },
       )
       dem.value = withPreviewUrl({
-        ...grid, createdAt: Date.now(),
+        ...grid, createdAt: Date.now(), points: groundOnly ? 'ground' : 'all',
         name: dem.value?.name || 'DEM',
         frameStamp: frameStampOf(resolved),
       })

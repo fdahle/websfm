@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { rasterizeDem, suggestGsd, cellCenter, stageDemPoints, coreExtent } from './dem.js'
+import { rasterizeDem, suggestGsd, cellCenter, stageDemPoints, coreExtent, fillEnclosedGaps } from './dem.js'
 
 describe('suggestGsd', () => {
   it('scales as √(area/n)', () => {
@@ -177,5 +177,66 @@ describe('coreExtent', () => {
     const dem = rasterizeDem(pts, { gsd: 1, fillRadius: 0, bounds: { minX: 0, minY: 0, maxX: 4, maxY: 4 } })
     expect(dem.width).toBe(5)
     expect(dem.zMax).toBe(1) // the far point's 99 did not land on the border
+  })
+})
+
+describe('fillEnclosedGaps', () => {
+  // A tilted plane z = 0.5·col + 0.25·row on a w×h grid.
+  const plane = (w, h) => {
+    const d = new Float32Array(w * h)
+    for (let r = 0; r < h; r++) for (let c = 0; c < w; c++) d[r * w + c] = 0.5 * c + 0.25 * r
+    return d
+  }
+
+  it('fills a building-sized hole close to the surrounding plane', () => {
+    const w = 64, h = 48
+    const d = plane(w, h)
+    for (let r = 15; r < 35; r++) for (let c = 20; c < 45; c++) d[r * w + c] = NaN
+    expect(fillEnclosedGaps(d, w, h)).toBe(20 * 25)
+    let worst = 0
+    for (let r = 15; r < 35; r++) {
+      for (let c = 20; c < 45; c++) worst = Math.max(worst, Math.abs(d[r * w + c] - (0.5 * c + 0.25 * r)))
+    }
+    // Pull–push is smooth, not exact on a plane; the hole spans 12.5 height units.
+    expect(worst).toBeLessThan(1.5)
+  })
+
+  it('leaves nodata that reaches the border alone', () => {
+    const w = 20, h = 20
+    const d = plane(w, h)
+    for (let r = 0; r < 20; r++) for (let c = 15; c < 20; c++) d[r * w + c] = NaN // survey edge
+    for (let r = 5; r < 9; r++) for (let c = 5; c < 9; c++) d[r * w + c] = NaN // enclosed
+    expect(fillEnclosedGaps(d, w, h)).toBe(16)
+    for (let r = 0; r < 20; r++) for (let c = 15; c < 20; c++) expect(Number.isNaN(d[r * w + c])).toBe(true)
+    for (let r = 5; r < 9; r++) for (let c = 5; c < 9; c++) expect(Number.isFinite(d[r * w + c])).toBe(true)
+  })
+
+  it('does nothing on a full or an empty grid', () => {
+    expect(fillEnclosedGaps(plane(5, 5), 5, 5)).toBe(0)
+    expect(fillEnclosedGaps(new Float32Array(9).fill(NaN), 3, 3)).toBe(0)
+  })
+
+  it('is applied by rasterizeDem when fillHoles is set', () => {
+    // Ground ring around an empty 6×6 courtyard (a removed building).
+    const pts = []
+    for (let x = 0; x <= 20; x++) {
+      for (let y = 0; y <= 20; y++) if (!(x >= 7 && x <= 13 && y >= 7 && y <= 13)) pts.push({ x, y, z: 1 })
+    }
+    const off = rasterizeDem(pts, { gsd: 1, fillRadius: 1 })
+    const on = rasterizeDem(pts, { gsd: 1, fillRadius: 1, fillHoles: true })
+    expect(on.holesFilled).toBeGreaterThan(0)
+    expect(on.count + on.filled).toBe(on.width * on.height)
+    expect(off.count + off.filled).toBeLessThan(off.width * off.height)
+    expect(on.zMax).toBeCloseTo(1, 5)
+  })
+})
+
+describe('stageDemPoints index filter', () => {
+  it('passes the point index to the predicate', () => {
+    const cloud = { count: 4, pos: new Float32Array([0, 0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 3]) }
+    const cls = Uint8Array.from([2, 1, 2, 7])
+    const staged = stageDemPoints(cloud, { inside: (x, y, z, i) => cls[i] === 2 })
+    expect(staged.count).toBe(2)
+    expect(Array.from(staged.pos)).toEqual([0, 0, 0, 2, 2, 2])
   })
 })

@@ -110,7 +110,8 @@ export const TABS = [
         label: 'Images',
         commands: [
           { id: 'import-images', label: 'Images', icon: 'image' },
-          // Scan-pixel mark positions per image; rows match images by name, so
+          // Scan-pixel mark positions per image (a row per mark, or a row per image
+          // with x/y columns per position); rows match images by name, so
           // (unlike GCPs) the images must be there first.
           { id: 'import-image-fiducials', label: 'Image\nFiducials', icon: 'target', needs: ['images'] },
         ],
@@ -119,6 +120,8 @@ export const TABS = [
         label: 'Cameras',
         commands: [
           { id: 'import-camera-list', label: 'Camera\nPoses', icon: 'camera-pose' },
+          // Intrinsics per sensor or per image; updates matching sensors (by label,
+          // the images' sensor, or the only one) or adds new ones — the dialog shows which.
           { id: 'import-calib', label: 'Calibration', icon: 'calibration' },
           // A film camera's certificate marks (mm); rows match sensors by label.
           { id: 'import-camera-fiducials', label: 'Camera\nFiducials', icon: 'camera', needs: ['sensors'] },
@@ -210,7 +213,7 @@ export const TABS = [
             { id: 'image-quality', label: 'Image quality…', icon: 'quality', needs: ['images', 'imagesReady'],
               blurb: 'Score sharpness and exposure; exclude blurry images' },
             { id: 'auto-mask', label: 'Auto mask…', icon: 'mask', needs: ['images', 'imagesReady'],
-              blurb: 'Mask sky, people or background automatically' },
+              blurb: 'Mask a border strip on every image (film edges, data strips)' },
             { section: 'Film scans' },
             { id: 'detect-fiducials', label: 'Detect fiducials…', icon: 'target', needs: ['filmSensor', 'imagesReady'],
               blurb: 'Find the fiducial marks on scanned film frames' },
@@ -299,8 +302,7 @@ export const TABS = [
             { section: 'Attributes' },
             { id: 'estimate-normals', label: 'Estimate normals…', icon: 'normals', needs: ['dense'],
               blurb: 'Per-point normals, e.g. to mesh an imported cloud' },
-            // TODO.md ▸ F14.
-            { id: 'classify-ground', label: 'Classify ground…', icon: 'dem', disabled: true,
+            { id: 'classify-ground', label: 'Classify ground…', icon: 'dem', needs: ['dense'],
               blurb: 'Bare-earth classification for a DTM' },
           ] },
         ],
