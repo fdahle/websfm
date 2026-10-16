@@ -1,4 +1,5 @@
 <script setup>
+import GlossaryTerm from '../glossary/GlossaryTerm.vue'
 import { computed, onMounted, ref } from 'vue'
 import { useGlossarySettings } from '../../composables/useGlossarySettings.js'
 import { useComputeSettings } from '../../composables/useComputeSettings.js'
@@ -34,7 +35,7 @@ const {
   advancedSettingsExpanded, setAdvancedSettingsExpanded, motion, setMotion,
   confirmRemoveMark, setConfirmRemoveMark,
 } = useUiSettings()
-const { gridZ, setGridZ, background, setBackground, nearClip, setNearClip } = useViewerSettings()
+const { gridZ, setGridZ, background, setBackground, nearClip, setNearClip, pointBudget, setPointBudget } = useViewerSettings()
 const { basemap, setBasemap, satelliteUrl, satelliteAttribution, setSatelliteSource } = useMapSettings()
 // Satellite source drafts: saved together on Apply, so a half-typed URL never
 // reaches the map.
@@ -287,6 +288,14 @@ onMounted(refreshStorage)
             <span class="setting-desc">0 adjusts automatically as you zoom. A smaller manual distance keeps nearby points visible. Values use scene units.</span>
           </div>
           <div class="num-input"><input id="viewer-near-clip" type="number" min="0" max="1000" step="0.001" :value="nearClip" @change="setNearClip($event.target.value)" /></div>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <label class="setting-label" for="viewer-point-budget">3D <GlossaryTerm id="level-of-detail">point budget</GlossaryTerm> (million points)</label>
+            <span class="setting-desc">Clouds of 4 million points or more are drawn level of detail: at most this many points at once, in most detail near the view's centre of attention. Lower it if orbiting stutters.</span>
+          </div>
+          <div class="num-input"><input id="viewer-point-budget" type="number" min="1" max="30" step="1" :value="pointBudget" @change="setPointBudget($event.target.value)" /></div>
         </div>
       </template>
 

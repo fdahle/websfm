@@ -6,6 +6,11 @@ Notable changes to websfm. The format follows
 ## [Unreleased]
 
 ### Added
+- **Level-of-detail point clouds**: a dense cloud of 4 million points or more gets an
+  octree in the background (saved with the project, built once), and the 3D view then
+  draws only a point budget's worth of it, the part in front of the camera in most
+  detail, loading the rest as you move. The budget (5 million by default) is in
+  Settings ▸ Map & 3D. Selection tools still see every point.
 - **Measure in 3D**: Tools ▸ Measure ▸ Measure in 3D measures distance, polylines and
   areas directly in the 3D view, picked on the surface of a mesh or on cloud points.
   Lengths are split into horizontal and height change, areas into surface area and

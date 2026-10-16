@@ -82,7 +82,11 @@ thin structure (a wire or mast) loses points.
 
 ## Cleaning the cloud
 Use the 3D viewer to inspect floating clusters, edge shells, holes, and over-smoothed
-areas. Cloud filtering can remove statistical outliers or isolated components, but
+areas. A cloud of 4 million points or more is drawn level of detail: right after it is
+made or imported, an octree of it is built in the background (the log says when), and
+from then on the view shows a point budget's worth of it, the part in front of you in
+most detail. While a selection tool is on, the whole cloud is drawn again, so every
+point can be selected. Cloud filtering can remove statistical outliers or isolated components, but
 systematic defects are better fixed in the depth maps, masks, or source imagery.
 
 To remove points by hand, pick **Select (rectangle)** or **Select (lasso)** in

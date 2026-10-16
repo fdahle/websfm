@@ -22,6 +22,7 @@ import { encodeNode, decodeNode } from './nodeCodec.js'
 import { encodeHierarchy } from './hierarchy.js'
 
 export const CHUNK_MAX = 4_000_000 // points of one chunk built in memory
+export const LOD_MIN_POINTS = 4_000_000 // dense clouds this big get an octree and are drawn through it
 const HEADER = 8                   // block: Uint32 count, Uint32 payload bytes
 const MAX_CHUNK_LEVEL = 12
 
@@ -127,7 +128,8 @@ function groupByCube(pts, root, level) {
 /**
  * Build the octree of `source` into `out` (data) using `tmp` (chunk files).
  * opts { chunkMax, leafMax, grid, layout: { offset, scale } (LAS), onProgress(done, total, label) }
- * → { root, layout, spacing, hierarchy: Uint8Array, nodeCount, dataBytes, points, levels }
+ * → { root, layout, spacing, hierarchy: Uint8Array, bounds, stats: { ranges: { attribute: { min,
+ *   max } }, classes: { value: count } }, nodeCount, dataBytes, points, levels }
  */
 export async function buildLod(source, tmp, out, opts = {}) {
   const { chunkMax = CHUNK_MAX, grid = GRID, onProgress = () => {} } = opts
@@ -140,8 +142,21 @@ export async function buildLod(source, tmp, out, opts = {}) {
   //    in is the one its stored coordinates say.
   const level0 = chunkLevelFor(total, chunkMax)
   const chunks = new Map() // name → { key, count }
+  // Whole-cloud statistics for styling nodes alike (ranges, class counts).
+  const ranges = Object.fromEntries(layout.attributes.map((a) => [a.name, { min: Infinity, max: -Infinity }]))
+  const classes = {}
   let done = 0
   for await (const b of source.batches()) {
+    for (const [name, r] of Object.entries(ranges)) {
+      const arr = b.attributes?.[name]
+      if (!arr) continue
+      for (let i = 0; i < b.count; i++) {
+        const v = arr[i]
+        if (v < r.min) r.min = v
+        if (v > r.max) r.max = v
+      }
+      if (name === 'classification') for (let i = 0; i < b.count; i++) classes[arr[i]] = (classes[arr[i]] ?? 0) + 1
+    }
     const q = { count: b.count, pos: new Float64Array(3 * b.count), col: b.col, attributes: b.attributes }
     for (let i = 0; i < b.count; i++) {
       q.pos[3 * i] = Math.round((b.pos[3 * i] - ox) / sx) * sx + ox
@@ -216,8 +231,10 @@ export async function buildLod(source, tmp, out, opts = {}) {
   entries.sort((a, b) => a.key[0] - b.key[0] || a.key[3] - b.key[3] || a.key[2] - b.key[2] || a.key[1] - b.key[1])
   let dataBytes = 0, points = 0, levels = 0
   for (const e of entries) { dataBytes += e.length; points += e.count; levels = Math.max(levels, e.key[0] + 1) }
+  for (const r of Object.values(ranges)) if (r.min > r.max) { r.min = 0; r.max = 1 }
   return {
     root, layout, spacing: root.size / grid, hierarchy: encodeHierarchy(entries),
+    bounds: { min: [...source.bounds.min], max: [...source.bounds.max] }, stats: { ranges, classes },
     nodeCount: entries.length, dataBytes, points, levels,
   }
 }

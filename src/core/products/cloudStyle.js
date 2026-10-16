@@ -38,14 +38,16 @@ export function resolveCloudStyle(cloud, input = cloud?.style || {}) {
     range: ['manual', 'local'].includes(input.range) ? input.range : 'auto', min: input.min ?? 0, max: input.max ?? 1,
     classes: input.classes || {} }
 }
-export function scalarAt(cloud, field) {
+// `origin`: added to positions stored relative to it (a level-of-detail node's).
+export function scalarAt(cloud, field, origin = null) {
   if (field.startsWith('attribute:')) {
     const values = cloud.attributes?.[field.slice(10)]
     return i => values?.[i] ?? NaN
   }
   const axis = field === 'x' ? 0 : field === 'y' ? 1 : 2
   const key = ['x', 'y', 'z'][axis]
-  return cloud.pos ? i => cloud.pos[i * 3 + axis] : i => cloud.points[i][key]
+  const o = origin?.[axis] ?? 0
+  return cloud.pos ? i => cloud.pos[i * 3 + axis] + o : i => cloud.points[i][key]
 }
 export function scalarRange(cloud, field) {
   const at = scalarAt(cloud, field)
@@ -70,9 +72,12 @@ export function sharedElevationRange(clouds, rangeFor = scalarRange) {
   }
   return min === Infinity ? null : { min, max }
 }
-export function classEntries(cloud, style = {}) {
+// `classCounts` ({ value: count }) stands in for counting the cloud's own points (a
+// level-of-detail node styled with its whole cloud's legend).
+export function classEntries(cloud, style = {}, classCounts = null) {
   const counts = new Map()
-  for (const value of cloud.attributes?.classification || []) {
+  if (classCounts) for (const [value, count] of Object.entries(classCounts)) counts.set(Number(value), count)
+  else for (const value of cloud.attributes?.classification || []) {
     if (Number.isFinite(value)) counts.set(value, (counts.get(value) || 0) + 1)
   }
   return [...counts].sort((a, b) => a[0] - b[0]).map(([value, count]) => {
@@ -90,7 +95,10 @@ export function rampCss(name) {
 
 // GPU colours are disposable display data: the original RGB and attributes are
 // never overwritten. A draw index hides classes without copying coordinates.
-export function buildCloudStyle(cloud, input, { elevationRange = null } = {}) {
+// A part of a cloud (a level-of-detail node) is styled as its whole: `origin` places
+// its relative positions, `range` (the whole cloud's for the field) replaces its own,
+// and `classCounts` its own class counts.
+export function buildCloudStyle(cloud, input, { elevationRange = null, origin = null, range: wholeRange = null, classCounts = null } = {}) {
   const style = resolveCloudStyle(cloud, input)
   const n = countOf(cloud)
   const label = styleFields(cloud).find(f => f.value === style.field)?.label
@@ -107,10 +115,10 @@ export function buildCloudStyle(cloud, input, { elevationRange = null } = {}) {
     return { style, colors, indices: null, legend }
   }
   const colors = new Uint8Array(n * 3)
-  const at = scalarAt(cloud, style.field)
+  const at = scalarAt(cloud, style.field, origin)
   let indices = null
   if (style.field === 'attribute:classification') {
-    const entries = classEntries(cloud, style)
+    const entries = classEntries(cloud, style, classCounts)
     const palette = new Map(entries.map(e => [e.value, rgb(e.colour)]))
     const hidden = new Set(entries.filter(e => !e.visible).map(e => e.value))
     if (hidden.size && cloud.kind !== 'mesh') indices = new Uint32Array(n)
@@ -126,7 +134,7 @@ export function buildCloudStyle(cloud, input, { elevationRange = null } = {}) {
     const range = style.range === 'manual' && Number.isFinite(style.min) && Number.isFinite(style.max) && style.max > style.min
       ? { min: style.min, max: style.max }
       : style.field === 'elevation' && style.range === 'auto' && elevationRange
-        ? elevationRange : scalarRange(cloud, style.field)
+        ? elevationRange : wholeRange ?? scalarRange(cloud, style.field)
     const span = range.max - range.min || 1
     const palette = Array.from({ length: 256 }, (_, i) => RAMPS[style.ramp](i / 255))
     for (let i = 0; i < n; i++) {

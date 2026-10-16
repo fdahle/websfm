@@ -1,7 +1,8 @@
-import { markRaw } from 'vue'
+import { markRaw, watch } from 'vue'
 import * as opfs from '../../utils/opfs.js'
 import { buildLod as workerBuildLod } from '../../workers/computeClient.js'
 import { openLodReader } from '../../core/lod/reader.js'
+import { LOD_MIN_POINTS } from '../../core/lod/build.js'
 
 // Level-of-detail octrees of dense clouds (dev/planning/plan-lod.md). The octree is
 // built in the compute worker straight into the project's lod/ folder; the cloud keeps
@@ -66,6 +67,27 @@ export function createCloudLod({ clouds, log, save, projectId }) {
       return null
     }
   }
+
+  // Every dense cloud of LOD_MIN_POINTS or more gets its octree in the background, one
+  // at a time, once per cloud object (a failed build is not retried until it changes).
+  const attempted = new WeakSet()
+  let running = false
+  async function buildMissing() {
+    if (running || !projectId()) return
+    running = true
+    try {
+      for (;;) {
+        const next = clouds.value.find((c) => c.kind === 'dense' && !c.lod && c.count >= LOD_MIN_POINTS && c.pos && !attempted.has(c))
+        if (!next) break
+        attempted.add(next)
+        log(`Level of detail: building the octree of "${next.name}" (${next.count.toLocaleString()} points)…`, 'info', 'Products')
+        await buildCloudLod(next.id)
+      }
+    } finally {
+      running = false
+    }
+  }
+  watch(() => clouds.value.map((c) => c.lod ? null : c.count), () => { buildMissing() })
 
   return { buildCloudLod, openCloudLod, pruneLod: prune }
 }

@@ -35,6 +35,9 @@ function writeValue(key, v) {
   try { localStorage.setItem(key, String(v)) } catch { /* private mode: session only */ }
 }
 const pointSize = ref(readNumber(POINT_SIZE_KEY, 1, 8, 3))
+// Level-of-detail clouds (plan-lod): at most this many million points drawn at once.
+const POINT_BUDGET_KEY = 'viewer3dPointBudget'
+const pointBudget = ref(readNumber(POINT_BUDGET_KEY, 1, 30, 5))
 const cameraScale = ref(readNumber(CAMERA_SCALE_KEY, 0.2, 3, 1))
 
 export function useViewerSettings() {
@@ -60,6 +63,12 @@ export function useViewerSettings() {
     pointSize.value = v
     writeValue(POINT_SIZE_KEY, v)
   }
+  function setPointBudget(value) {
+    const v = Number(value)
+    if (!Number.isFinite(v) || v < 1 || v > 30) return
+    pointBudget.value = v
+    writeValue(POINT_BUDGET_KEY, v)
+  }
   function setCameraScale(value) {
     const v = Number(value)
     if (!Number.isFinite(v) || v < 0.2 || v > 3) return
@@ -68,6 +77,6 @@ export function useViewerSettings() {
   }
   return {
     gridZ, setGridZ, background, setBackground, nearClip, setNearClip,
-    pointSize, setPointSize, cameraScale, setCameraScale,
+    pointSize, setPointSize, cameraScale, setCameraScale, pointBudget, setPointBudget,
   }
 }

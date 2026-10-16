@@ -26,7 +26,8 @@ is not always retained.
 A `.websfm` file is a portable archive containing source images, features, matches,
 reconstruction, and control. Including cached and derived data makes reopening faster
 but can make the archive much larger. Excluding it is safe: previews, image thumbnails,
-depth maps, DEM, and orthophoto can be rebuilt.
+depth maps, DEM, and orthophoto can be rebuilt. The octrees that big point clouds are
+drawn from ([level of detail](help:level-of-detail)) are always included.
 
 A project file can be any size: past 4 GB it is written in the ZIP64 form, which
 current archive tools (7-Zip, the Windows and macOS archive utilities, Python,

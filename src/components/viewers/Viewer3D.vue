@@ -16,11 +16,13 @@ import { viewerMayHandleKey } from '../../utils/keyRouting.js'
 import { useImagesStore } from '../../stores/useImagesStore.js'
 import { texturePageBlobs } from '../../stores/reconstruction/meshTexture.js'
 import { useMeasurementsStore } from '../../stores/useMeasurementsStore.js'
+import { useReconstructionStore } from '../../stores/useReconstructionStore.js'
+import { createLodLayer, LOD_VIEW_MIN } from './lodLayer.js'
 import { polyline3d, polygon3d } from '../../core/products/measure.js'
 import { cloudUnits, formatMeasure } from '../../core/products/cloudUnits.js'
 
 // pointSize / cameraScale are set from the ribbon's View ▸ Scene steppers.
-const { gridZ, background, nearClip, pointSize, cameraScale } = useViewerSettings()
+const { gridZ, background, nearClip, pointSize, cameraScale, pointBudget } = useViewerSettings()
 const imagesStore = useImagesStore()
 
 const props = defineProps({
@@ -172,6 +174,7 @@ let editPendingIds = new Set()
 // Imported point buffers are immutable; replacing a buffer invalidates its range.
 const elevationRanges = new WeakMap()
 function cachedElevationRange(cloud) {
+  if (cloud.lod?.bounds) return { min: cloud.lod.bounds.min[2], max: cloud.lod.bounds.max[2] }
   const data = cloud.pos || cloud.points
   const count = cloud.nVerts ?? cloud.count ?? cloud.points?.length ?? 0
   let cached = elevationRanges.get(data)
@@ -224,6 +227,7 @@ function disposeObject(root) {
 // A cloud layer's object plus the material it is not showing right now (a textured
 // mesh swaps between its lit base material and one unlit material per atlas page).
 function disposeLayer(layer) {
+  if (layer.lod) { layer.dispose(); return }
   disposeObject(layer.object)
   const textures = new Set(), materials = new Set()
   if (layer.baseMaterial && layer.baseMaterial !== layer.object.material) disposeMaterial(layer.baseMaterial, textures, materials)
@@ -509,7 +513,38 @@ function init() {
 
 // ── Reconstruction visualisation ─────────────────────────────────────────────
 
+// A big dense cloud with an octree (or a streamed one, which has only that) is drawn
+// level of detail (lodLayer.js): a point budget's worth of nodes for the current view.
+// Selecting and index picking need every point drawn: while either is active, a cloud
+// whose points are in memory is drawn whole again (a streamed one cannot be).
+const reconStore = useReconstructionStore()
+const needsAllPoints = () => !!selectTool.value || !!props.pickMode
+const usesLod = (cloud) => cloud.kind === 'dense' && !!cloud.lod
+  && (!cloud.pos || (cloud.count >= LOD_VIEW_MIN && !needsAllPoints()))
+function createLodCloudLayer(cloud) {
+  const material = new THREE.PointsMaterial({ size: pointSize.value, sizeAttenuation: false })
+  material.onBeforeCompile = srgbVertexColors
+  const layer = createLodLayer(cloud, {
+    open: (c) => reconStore.openCloudLod(c),
+    material,
+    onChange: () => {
+      // The root node gives better framing bounds than the octree's box.
+      if (layer.rootPoints && !layer.rootBounds && cloudLayers.get(cloud.id) === layer) {
+        layer.rootBounds = true
+        layer.bounds = layerBounds(layer)
+        updateLayerBounds(); updateGrid()
+      }
+      requestRender()
+    },
+  })
+  layer.bounds = layerBounds(layer)
+  scene.add(layer.object)
+  return layer
+}
+const layerBounds = (layer) => (layer.lod ? layer.boundsFor(sceneUp, robustBounds) : robustBounds(layer.positions, layer.count, sceneUp))
+
 function createCloudLayer(cloud) {
+  if (usesLod(cloud)) return createLodCloudLayer(cloud)
   const isMesh = cloud.kind === 'mesh'
   const count = isMesh ? cloud.nVerts : (cloud.count ?? cloud.points?.length ?? 0)
   if (!count) return null
@@ -567,6 +602,12 @@ function releaseStyleBuffers(geometry, { keepColor, keepIndex }) {
 }
 
 function styleLayer(layer, cloud, elevationRange) {
+  if (layer.lod) {
+    layer.legend = layer.restyle(cloud, elevationRange)
+    layer.style = cloud.style
+    layer.elevationRangeKey = elevationRange ? `${elevationRange.min}:${elevationRange.max}` : ''
+    return
+  }
   const visual = buildCloudStyle(cloud, undefined, { elevationRange })
   const { geometry } = layer.object
   const material = layer.baseMaterial ?? layer.object.material
@@ -632,7 +673,9 @@ function updateLayerBounds() {
 // Reconcile by cloud id, retaining GPU geometry when only selection, names,
 // symbology or another layer changes. Each origin is placed in the same world
 // frame, so projected survey coordinates stay aligned across multiple files.
+let lastClouds = []
 function setCloudLayers(clouds) {
+  lastClouds = clouds
   if (!scene) return
   const hadContent = cloudLayers.size > 0 || frustumGroup.children.length > 0
   const addedCloud = clouds.some(c => c.visible !== false && !knownCloudIds.has(c.id))
@@ -660,7 +703,8 @@ function setCloudLayers(clouds) {
   for (const cloud of visible) {
     let layer = cloudLayers.get(cloud.id)
     if (layer && (layer.source.pos !== cloud.pos || layer.source.points !== cloud.points || layer.source.idx !== cloud.idx
-        || layer.source.uv !== cloud.uv || layer.source.count !== cloud.count || layer.source.kind !== cloud.kind)) {
+        || layer.source.uv !== cloud.uv || layer.source.count !== cloud.count || layer.source.kind !== cloud.kind
+        || !!layer.lod !== usesLod(cloud) || (layer.lod && layer.source.lod !== cloud.lod))) {
       scene.remove(layer.object); disposeLayer(layer); cloudLayers.delete(cloud.id); layer = null
     }
     if (!layer) {
@@ -668,7 +712,7 @@ function setCloudLayers(clouds) {
       if (!layer) continue
       cloudLayers.set(cloud.id, layer)
     } else if (upChanged) {
-      layer.bounds = robustBounds(layer.positions, layer.count, sceneUp)
+      layer.bounds = layerBounds(layer)
     }
     const style = resolveCloudStyle(cloud)
     const sharedRange = style.field === 'elevation' && style.range === 'auto' ? elevationRange : null
@@ -843,6 +887,7 @@ function exitSelection() {
   selectTool.value = null
 }
 watch(selectTool, (t) => emit('select-tool', t))
+watch([() => !!selectTool.value, () => !!props.pickMode], () => setCloudLayers(lastClouds))
 
 function pointerPx(e) {
   const r = container.value.getBoundingClientRect()
@@ -1086,6 +1131,10 @@ function renderFrame() {
   // returns true while it does; its 'change' event re-requests the next frame.
   controls.update()
   updateClipping()
+  // Level-of-detail layers choose their nodes for this view (and fetch missing ones).
+  for (const layer of cloudLayers.values()) {
+    if (layer.lod && layer.object.visible) layer.update(camera, renderer.domElement.clientHeight || 1, pointBudget.value * 1e6)
+  }
   renderer.render(scene, camera)
   if (thumbRequestsPending && frustumGroup.visible) requestMissingThumbs()
 }
@@ -1115,7 +1164,7 @@ watch(gridZ, () => { updateGrid(); requestRender() })
 watch(() => props.sceneUp, (u) => {
   if (u && u.length === 3) {
     sceneUp.set(u[0], u[1], u[2]).normalize()
-    for (const layer of cloudLayers.values()) layer.bounds = robustBounds(layer.positions, layer.count, sceneUp)
+    for (const layer of cloudLayers.values()) layer.bounds = layerBounds(layer)
     updateLayerBounds(); updateGrid()
     requestRender()
   }
@@ -1165,7 +1214,8 @@ function onPickPointerUp(e) {
   const allowed = props.pickMode.cloudIds ? new Set(props.pickMode.cloudIds) : null
   let best = null
   for (const [id, layer] of cloudLayers) {
-    if (!layer.object.visible || (allowed && !allowed.has(id))) continue
+    // A level-of-detail layer draws nodes, not the cloud's indexed points.
+    if (layer.lod || !layer.object.visible || (allowed && !allowed.has(id))) continue
     layer.object.updateMatrixWorld()
     const matrix = viewProj.clone().multiply(layer.object.matrixWorld).elements
     const geometry = layer.object.geometry
@@ -1231,6 +1281,12 @@ function surfaceHit(e) {
   const viewProj = new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse)
   const tolX = (2 * PICK_RADIUS_PX) / w, tolY = (2 * PICK_RADIUS_PX) / h
   for (const [id, layer] of cloudLayers) {
+    if (layer.lod && layer.object.visible) {
+      const hit = layer.pick({ viewProj, x, y, tolX, tolY })
+      const dist = hit && camera.position.distanceTo(new THREE.Vector3(...hit.pos))
+      if (hit && (!best || dist < best.dist)) best = { pos: hit.pos, cloudId: id, dist }
+      continue
+    }
     if (!layer.object.visible || !layer.object.isPoints) continue
     layer.object.updateMatrixWorld()
     const matrix = viewProj.clone().multiply(layer.object.matrixWorld).elements
@@ -1382,11 +1438,15 @@ watch(() => props.images.length, () => {
   }, 300)
 })
 watch(pointSize, (v) => {
-  for (const { object } of cloudLayers.values()) if (object.isPoints) object.material.size = v
+  for (const layer of cloudLayers.values()) {
+    if (layer.lod) layer.baseMaterial.size = v
+    else if (layer.object.isPoints) layer.object.material.size = v
+  }
   for (const e of selections.values()) if (e.overlay) e.overlay.material.size = v + 1
   requestRender()
 })
 watch(nearClip, () => { updateClipping(); requestRender() })
+watch(pointBudget, () => requestRender())
 
 // No right-click context menu here on purpose: OrbitControls uses the right mouse
 // button to pan, so any menu competes with the primary navigation gesture. Coordinate

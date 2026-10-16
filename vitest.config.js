@@ -13,6 +13,9 @@ import { defineConfig } from 'vitest/config'
 // compile, and anything reaching for `document`/`window` or an active Pinia
 // instance will not run. Importing Vue's reactivity (`markRaw`, `ref`) is fine —
 // it is dependency-free JS.
+//
+// `src/components/**` likewise covers plain `.js` scene helpers that sit beside their
+// component (viewers/lodLayer.js: three.js objects, no DOM), never the SFCs.
 export default defineConfig({
   test: {
     environment: 'node',
@@ -21,6 +24,7 @@ export default defineConfig({
       'src/utils/**/*.test.{js,ts}',
       'src/stores/**/*.test.{js,ts}',
       'src/composables/**/*.test.{js,ts}',
+      'src/components/**/*.test.{js,ts}',
     ],
   },
 })
