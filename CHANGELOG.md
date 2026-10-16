@@ -12,7 +12,10 @@ Notable changes to websfm. The format follows
   few, and tiny charts are merged into their neighbours. Exposure is levelled per photo
   (ignoring samples one photo sees differently) and then across every seam, so the
   two sides meet. A wall hidden behind a tree is still textured from the photo that
-  hides least of it, and faces no photo sees can be kept in a flat colour or removed. Masks are respected, lenses
+  hides least of it, and faces no photo sees can be kept in a flat colour or removed.
+  Crop, Clean and Smooth keep the texture (Clean's weld respects it), Sample to points
+  takes its colours from it, and the workflow builder has a Texture Mesh block that can
+  decimate first. Masks are respected, lenses
   and film scans are sampled through their own camera model, and the depth pass runs
   on the GPU when one is available. The 3D view shows the texture (Colour by ▸
   Texture), and it exports as GLB (pages embedded), OBJ (a zip with the material

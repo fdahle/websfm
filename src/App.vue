@@ -196,7 +196,7 @@ const {
   progressOpen, progressTitle, progressCurrent, progressTotal, progressLabel,
   progressUnit, progressFraction, progressIndeterminate, progressComplete, progressCancelling,
   cancelRun, runDetect, runMatch, runReconstruct, runComputeDepthMaps, runDensify,
-  runGenerateDem, runGenerateOrtho, runGenerateMesh, runEditClouds, progress: exportProgress,
+  runGenerateDem, runGenerateOrtho, runGenerateMesh, runEditClouds, runTextureMesh, progress: exportProgress,
 } = usePipeline({ images, detectAll, matchAll, reconstruct, computeDepthMaps, densify, generateDem, generateOrtho, generateMesh, editClouds, textureMesh })
 
 // ── Derived state ──────────────────────────────────────────────────────────────
@@ -225,7 +225,7 @@ const {
   addNewWorkflow, onWorkflowUpdate, closeWorkflowBuilder, onWorkflowRun,
 } = useWorkflowWiring({
   ready: { kpImageCount, sparseReady, cloudReady, denseReady, meshReady, demReady, orthoReady },
-  pipeline: { runDetect, runMatch, runReconstruct, runComputeDepthMaps, runDensify, runGenerateDem, runGenerateOrtho, runGenerateMesh, cancelRun },
+  pipeline: { runDetect, runMatch, runReconstruct, runComputeDepthMaps, runDensify, runGenerateDem, runGenerateOrtho, runGenerateMesh, runEditClouds, runTextureMesh, cancelRun },
   openInteractive: (id, value) => handleCommand(id, value),
 })
 
@@ -368,7 +368,7 @@ const {
   onCropCloudRun, onFilterCloudRun, onGradualSelectionRun, onMergeCloudsRun, onEditSelection, onOptimizeCamerasRun,
   onImageQualityEstimate, onImageQualityGroup, onImageQualityRemove, onToolEditRun, onSectionRun, onProductToolRun,
 } = useDialogRuns({
-  pipeline: { runDetect, runMatch, runReconstruct, runComputeDepthMaps, runDensify, runGenerateDem, runGenerateOrtho, runGenerateMesh, runEditClouds, exportProgress },
+  pipeline: { runDetect, runMatch, runReconstruct, runComputeDepthMaps, runDensify, runGenerateDem, runGenerateOrtho, runGenerateMesh, runEditClouds, runTextureMesh, exportProgress },
   closeProductTabs, openImageTab, refreshGcpReport,
   requestRemoveImages: (ids) => requestRemoveImages(ids),
 })

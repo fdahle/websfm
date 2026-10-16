@@ -71,6 +71,7 @@ function run() {
       <p v-if="source" class="field-hint">
         {{ source.count.toLocaleString() }} → about {{ target.toLocaleString() }} triangles.
         A few million triangles take several seconds.
+        <template v-if="source?.texture"><br />This mesh is textured; the decimated copy is not. Decimate first, then texture.</template>
       </p>
     </template>
     <template #footer>

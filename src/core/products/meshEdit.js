@@ -15,9 +15,17 @@
 // comes from a two-pass stable counting sort of half-edges by (lo, hi) vertex, not a
 // Map keyed by edge.
 //
+// A textured mesh (core/products/texture/) also carries `uv` (Float32, 2 per vertex)
+// and `page` (Uint16, the atlas page per triangle). Steps that keep or drop triangles
+// and vertices carry both along; a triangle a step creates (a filled hole) gets page
+// UNTEXTURED, which tells the caller the texture no longer covers the mesh. A weld
+// joins only corners with the same UV, or it would erase the chart seams.
+//
 // Precision: survey coordinates are ~1e6 (UTM / polar stereographic). Lengths,
 // areas and volumes are computed from coordinate DIFFERENCES or relative to a local
 // origin, never as products of absolute coordinates.
+
+import { sampleRgbaBilinear } from './undistort.js'
 
 // ── Shared helpers ───────────────────────────────────────────────────────────
 
@@ -32,6 +40,9 @@ export function meshVertexCount(mesh) {
   if (!mesh?.pos) return 0
   return mesh.nVerts ?? Math.floor(mesh.pos.length / 3)
 }
+
+/** A triangle no atlas page covers (a filled hole on a textured mesh). */
+export const UNTEXTURED = 0xffff
 
 function emptyMesh(hasCol) {
   return { nVerts: 0, count: 0, pos: new Float64Array(0), idx: new Uint32Array(0), col: hasCol ? new Uint8Array(0) : null }
@@ -49,14 +60,22 @@ function selectTriangles(mesh, keep, kept) {
   const col = mesh.col ? mesh.col.slice(0, nV * 3) : null
   const src = mesh.idx
   const idx = new Uint32Array(kept * 3)
+  const page = mesh.page ? new Uint16Array(kept) : null
   let o = 0
   for (let t = 0; t < nT; t++) {
     if (!keep[t]) continue
     const s = t * 3
+    if (page) page[o / 3] = mesh.page[t]
     idx[o] = src[s]; idx[o + 1] = src[s + 1]; idx[o + 2] = src[s + 2]
     o += 3
   }
-  return { nVerts: nV, count: kept, pos, idx, col }
+  return { nVerts: nV, count: kept, pos, idx, col, ...textureOf(mesh, nV, page) }
+}
+
+// The texture fields of a result: `uv` copied (vertices unchanged) and the given page.
+function textureOf(mesh, nV, page) {
+  if (!mesh.uv) return {}
+  return { uv: mesh.uv.slice(0, nV * 2), ...(page ? { page } : {}) }
 }
 
 /** A triangle whose corner indices repeat or fall outside the vertex array. */
@@ -246,6 +265,7 @@ function medianEdgeLength(mesh) {
 function weldStep(mesh, { epsilon = null, relBbox = WELD_REL_BBOX, relEdge = WELD_REL_EDGE } = {}) {
   const nV = meshVertexCount(mesh), nT = meshTriangleCount(mesh)
   const { pos, idx } = mesh
+  const uv = mesh.uv ?? null
   const hasCol = !!mesh.col
   let minX = Infinity, minY = Infinity, minZ = Infinity, maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity
   for (let v = 0; v < nV; v++) {
@@ -296,6 +316,8 @@ function weldStep(mesh, { epsilon = null, relBbox = WELD_REL_BBOX, relEdge = WEL
         const o = repOf[r] * 3
         const ex = pos[o] - x, ey = pos[o + 1] - y, ez = pos[o + 2] - z
         const d2 = ex * ex + ey * ey + ez * ez
+        // Same UV too, on a textured mesh: a seam vertex has one copy per chart.
+        if (uv && (Math.abs(uv[repOf[r] * 2] - uv[v * 2]) > 1e-7 || Math.abs(uv[repOf[r] * 2 + 1] - uv[v * 2 + 1]) > 1e-7)) continue
         // Nearest representative; ties go to the earlier one (lower new id).
         if (d2 <= eps2 && (d2 < bestD2 || (d2 === bestD2 && r < best))) { best = r; bestD2 = d2 }
       }
@@ -309,10 +331,12 @@ function weldStep(mesh, { epsilon = null, relBbox = WELD_REL_BBOX, relEdge = WEL
 
   const outPos = new Float64Array(m * 3)
   const outCol = hasCol ? new Uint8Array(m * 3) : null
+  const outUv = uv ? new Float32Array(m * 2) : null
   for (let r = 0; r < m; r++) {
     const o = repOf[r] * 3, d = r * 3
     outPos[d] = pos[o]; outPos[d + 1] = pos[o + 1]; outPos[d + 2] = pos[o + 2]
     if (outCol) { outCol[d] = mesh.col[o]; outCol[d + 1] = mesh.col[o + 1]; outCol[d + 2] = mesh.col[o + 2] }
+    if (outUv) { outUv[r * 2] = uv[repOf[r] * 2]; outUv[r * 2 + 1] = uv[repOf[r] * 2 + 1] }
   }
   const outIdx = new Uint32Array(nT * 3)
   let collapsed = 0
@@ -327,7 +351,8 @@ function weldStep(mesh, { epsilon = null, relBbox = WELD_REL_BBOX, relEdge = WEL
         && badIndices(outIdx[s], outIdx[s + 1], outIdx[s + 2], m)) collapsed++
   }
   return {
-    mesh: { nVerts: m, count: nT, pos: outPos, idx: outIdx, col: outCol },
+    mesh: { nVerts: m, count: nT, pos: outPos, idx: outIdx, col: outCol,
+      ...(outUv ? { uv: outUv, ...(mesh.page ? { page: mesh.page.slice(0, nT) } : {}) } : {}) },
     merged: nV - m, collapsedTriangles: collapsed, epsilon: eps, epsilonSource, diagonal, medianEdge,
   }
 }
@@ -394,20 +419,25 @@ function compactStep(mesh) {
   for (let v = 0; v < nV; v++) if (remap[v] === 0) remap[v] = m++
   const outPos = new Float64Array(m * 3)
   const outCol = hasCol ? new Uint8Array(m * 3) : null
+  const outUv = mesh.uv ? new Float32Array(m * 2) : null
   for (let v = 0; v < nV; v++) {
     const d = remap[v]
     if (d < 0) continue
     outPos[d * 3] = pos[v * 3]; outPos[d * 3 + 1] = pos[v * 3 + 1]; outPos[d * 3 + 2] = pos[v * 3 + 2]
     if (outCol) { outCol[d * 3] = mesh.col[v * 3]; outCol[d * 3 + 1] = mesh.col[v * 3 + 1]; outCol[d * 3 + 2] = mesh.col[v * 3 + 2] }
+    if (outUv) { outUv[d * 2] = mesh.uv[v * 2]; outUv[d * 2 + 1] = mesh.uv[v * 2 + 1] }
   }
   const outIdx = new Uint32Array(kept * 3)
+  const outPage = mesh.uv && mesh.page ? new Uint16Array(kept) : null
   let o = 0
   for (let t = 0; t < nT; t++) {
     if (!keep[t]) continue
+    if (outPage) outPage[o / 3] = mesh.page[t]
     outIdx[o++] = remap[idx[t * 3]]; outIdx[o++] = remap[idx[t * 3 + 1]]; outIdx[o++] = remap[idx[t * 3 + 2]]
   }
   return {
-    mesh: { nVerts: m, count: kept, pos: outPos, idx: outIdx, col: outCol },
+    mesh: { nVerts: m, count: kept, pos: outPos, idx: outIdx, col: outCol,
+      ...(outUv ? { uv: outUv, ...(outPage ? { page: outPage } : {}) } : {}) },
     removedTriangles: nT - kept, removedVertices: nV - m,
   }
 }
@@ -602,8 +632,20 @@ function holesStep(mesh, { maxHoleEdges = 64 } = {}) {
   const outIdx = new Uint32Array((nT + nAddT) * 3)
   outIdx.set(idx.subarray(0, nT * 3))
   outIdx.set(addIdx.subarray(0, nAddT * 3), nT * 3)
+  // A textured mesh: the cap's centre vertices get UV 0 and its triangles no page.
+  let tex = {}
+  if (mesh.uv) {
+    const uv = new Float32Array((nV + nAddV) * 2)
+    uv.set(mesh.uv.subarray(0, nV * 2))
+    let page
+    if (mesh.page) {
+      page = new Uint16Array(nT + nAddT).fill(UNTEXTURED)
+      page.set(mesh.page.subarray(0, nT))
+    }
+    tex = { uv, ...(page ? { page } : {}) }
+  }
   return {
-    mesh: { nVerts: nV + nAddV, count: nT + nAddT, pos: outPos, idx: outIdx, col: outCol },
+    mesh: { nVerts: nV + nAddV, count: nT + nAddT, pos: outPos, idx: outIdx, col: outCol, ...tex },
     filled, skipped, tooLarge, addedTriangles: nAddT, addedVertices: nAddV,
   }
 }
@@ -834,15 +876,22 @@ function mulberry32(seed) {
  * barycentrically; the normal is the unit face normal (winding direction). Fully
  * deterministic for a given `seed`. Zero-area triangles are never picked.
  *
- * opts: { count = 1_000_000, seed = 1 }
+ * A textured mesh with `texture` = { pages: [{ width, height, data (RGBA) }] } takes
+ * each point's colour from the atlas instead, at its interpolated UV on its
+ * triangle's page: the photo's detail rather than the blur of vertex colours. A
+ * triangle without a page falls back to the vertex colours.
+ *
+ * opts: { count = 1_000_000, seed = 1, texture? }
  */
-export function sampleMesh(mesh, { count = 1_000_000, seed = 1 } = {}, onLog) {
+export function sampleMesh(mesh, { count = 1_000_000, seed = 1, texture = null } = {}, onLog) {
   const nV = meshVertexCount(mesh), nT = meshTriangleCount(mesh)
-  const hasCol = !!mesh.col
+  const tex = texture?.pages?.length && mesh.uv && mesh.page ? texture.pages : null
+  const hasCol = !!mesh.col || !!tex
   const empty = { count: 0, pos: new Float64Array(0), col: hasCol ? new Uint8Array(0) : null, nrm: new Float32Array(0) }
   const N = Math.max(0, Math.floor(count) || 0)
   if (!nT || !N) return empty
-  const { pos, idx, col } = mesh
+  const { pos, idx, col, uv, page } = mesh
+  const px = new Float32Array(4)
   const cum = new Float64Array(nT)
   let total = 0
   for (let t = 0; t < nT; t++) {
@@ -884,12 +933,17 @@ export function sampleMesh(mesh, { count = 1_000_000, seed = 1 } = {}, onLog) {
     const cx = uy * vz - uz * vy, cy = uz * vx - ux * vz, cz = ux * vy - uy * vx
     const inv = 1 / Math.sqrt(cx * cx + cy * cy + cz * cz)
     outNrm[d] = cx * inv; outNrm[d + 1] = cy * inv; outNrm[d + 2] = cz * inv
-    if (outCol) {
+    const pg = tex ? tex[page[t]] : null
+    if (pg) {
+      const u = wa * uv[a * 2] + wb * uv[b * 2] + wc * uv[c * 2], v = wa * uv[a * 2 + 1] + wb * uv[b * 2 + 1] + wc * uv[c * 2 + 1]
+      sampleRgbaBilinear(pg.data, pg.width, pg.height, u * pg.width - 0.5, v * pg.height - 0.5, px, 0)
+      outCol[d] = Math.round(px[0]); outCol[d + 1] = Math.round(px[1]); outCol[d + 2] = Math.round(px[2])
+    } else if (outCol && col) {
       for (let k = 0; k < 3; k++) outCol[d + k] = Math.round(wa * col[a * 3 + k] + wb * col[b * 3 + k] + wc * col[c * 3 + k])
-    }
+    } else if (outCol) outCol.fill(128, d, d + 3)
   }
   onLog?.(`Mesh sample: ${N.toLocaleString()} points over area ${total.toPrecision(6)} `
-    + `(${(N / total).toPrecision(4)} per unit²), seed ${seed}`, 'info', 'Products')
+    + `(${(N / total).toPrecision(4)} per unit²), seed ${seed}${tex ? ', colour from the texture' : ''}`, 'info', 'Products')
   return { count: N, pos: outPos, col: outCol, nrm: outNrm }
 }
 

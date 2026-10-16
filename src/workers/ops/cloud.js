@@ -33,8 +33,20 @@ export function makeCloudOps() {
   // Push the result's own buffers onto the transfer list. A result may share a
   // buffer with an input (e.g. colour passed through unchanged), so de-duplicate.
   function outward(out, transfer) {
-    for (const key of ['pos', 'col', 'nrm', 'idx']) if (out[key]?.buffer) transfer.push(out[key].buffer)
+    for (const key of ['pos', 'col', 'nrm', 'idx', 'uv', 'page']) if (out[key]?.buffer) transfer.push(out[key].buffer)
     transfer.push(...attributeBuffers(out))
+  }
+
+  // A texture's JPEG pages ({ data, pages }) → [{ width, height, data: RGBA }].
+  async function decodePages(texture) {
+    return Promise.all(texture.pages.map(async (p) => {
+      const bmp = await createImageBitmap(new Blob([texture.data.subarray(p.offset, p.offset + p.length)], { type: p.type }))
+      const canvas = new OffscreenCanvas(bmp.width, bmp.height)
+      const ctx = canvas.getContext('2d', { willReadFrequently: true })
+      ctx.drawImage(bmp, 0, 0)
+      bmp.close()
+      return { width: canvas.width, height: canvas.height, data: ctx.getImageData(0, 0, canvas.width, canvas.height).data }
+    }))
   }
 
   // One entry per mode: (clouds, settings, log, progress) → { out, extra? }.
@@ -118,7 +130,8 @@ export function makeCloudOps() {
       const { mesh, stats } = decimateMesh(m, s, log)
       return { out: mesh, extra: stats }
     },
-    'mesh-sample': ([m], s, log) => ({ out: sampleMesh(m, s, log) }),
+    // A textured mesh samples its colour from the atlas: decode the JPEG pages first.
+    'mesh-sample': async ([m], s, log) => ({ out: sampleMesh(m, { ...s, texture: m.texture ? { pages: await decodePages(m.texture) } : null }, log) }),
   }
 
   // input: { mode, clouds: [{ id, kind, count, pos, col, nrm?, idx?, nVerts?, attributes? }],

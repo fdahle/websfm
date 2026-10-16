@@ -1,5 +1,6 @@
 import { markRaw } from 'vue'
 import { rawTexture } from './meshTexture.js'
+import { facePages, regroupByPage } from '../../core/products/texture/carry.js'
 import { isFisheyeModel } from '../../core/sfm/distortion.js'
 import { makeFrameModelResolver } from '../../core/sfm/displayFrame.js'
 import { packSparseCloud, unpackReconstructionResult } from '../../core/sfm/resultCodec.js'
@@ -76,6 +77,22 @@ export function createCloudEdits({
     clouds.value.push(cloud)
     selectedCloudId.value = cloud.id
     return cloud
+  }
+
+  // A mesh tool's result on a textured source keeps the texture when the tool kept the
+  // triangles' UVs and pages (crop, clean without filled holes, smooth): regroup its
+  // faces by page and share the source's atlas. Otherwise say why it is gone.
+  function carryTexture(source, edited, mode) {
+    if (!(source?.uv && source.texture)) return edited
+    const regrouped = edited.uv ? regroupByPage(edited) : null
+    if (regrouped) {
+      return { ...edited, idx: regrouped.idx, texture: { data: source.texture.data, pages: source.texture.pages, groups: regrouped.groups } }
+    }
+    const why = mode === 'mesh-decimate' ? 'decimation merges triangles, so the photo texture cannot follow'
+      : edited.uv ? 'the filled holes have no photo' : 'this tool does not keep it'
+    log(`Mesh edit: the result has no texture (${why}); texture it again with Tools ▸ Mesh ▸ Texture`, 'warn', 'Products')
+    const { uv: _uv, page: _page, ...plain } = edited
+    return plain
   }
 
   // Swap a derived cloud's buffers for an edited result, keeping its identity
@@ -250,7 +267,14 @@ export function createCloudEdits({
       if (c.kind === 'mesh') {
         const idx = c.idx.slice()
         transfer.push(idx.buffer)
-        return { id: c.id, kind: 'mesh', count: c.count, nVerts: c.nVerts, pos, col, idx }
+        // A textured mesh: UVs and a page per face travel with it (meshEdit.js carries
+        // them); Sample to points also needs the pages themselves.
+        const tex = c.uv && c.texture ? {
+          uv: c.uv.slice(), page: facePages(c.texture.groups, c.count),
+          ...(mode === 'mesh-sample' ? { texture: { data: c.texture.data, pages: c.texture.pages.map((p) => ({ ...p })) } } : {}),
+        } : {}
+        if (tex.uv) transfer.push(tex.uv.buffer, tex.page.buffer)
+        return { id: c.id, kind: 'mesh', count: c.count, nVerts: c.nVerts, pos, col, idx, ...tex }
       }
       const attributes = Object.fromEntries(Object.entries(c.attributes || {}).map(([key, values]) => {
         const copy = values.slice()
@@ -300,7 +324,7 @@ export function createCloudEdits({
           // Provenance follows the SOURCE (slot 0) — a reference only informs the edit.
           imported: REFERENCE_MODES.has(mode) ? !!sources[0].imported : sources.every((c) => c.imported),
         }
-        cloud = edited.idx ? addDerivedMesh(edited, opts) : addDerivedCloud(edited, opts)
+        cloud = edited.idx ? addDerivedMesh(carryTexture(sources[0], edited, mode), opts) : addDerivedCloud(edited, opts)
         // A tool may start its result on a colouring (distance → a diverging ramp);
         // a function sees the worker's small result record (e.g. the distance spread).
         const startStyle = typeof style === 'function' ? style(extra ?? null) : style

@@ -75,4 +75,13 @@ describe('workflow schema', () => {
     }, 'detector', 'superpoint')
     expect(superpoint).toMatchObject({ preset: 'medium', maxDim: 1600, maxKeypoints: 2048, overwrite: true })
   })
+
+  it('textures a mesh once there is a mesh and a sparse model', () => {
+    const wf = createWorkflow('t', ['gen-mesh', 'texture-mesh'])
+    expect(workflowPreflight(wf, { dense: true, sparse: true }).filter((x) => x.level === 'error')).toEqual([])
+    expect(workflowPreflight(createWorkflow('t', ['texture-mesh']), { sparse: true }).some((x) => x.level === 'error')).toBe(true)
+    expect(blockOutputValid('texture-mesh', { texturedMesh: true })).toBe(true)
+    const s = resolveWorkflowSettings('texture-mesh', { ...wf.blocks[1].settings, maxScale: '0.5', decimateTo: 2e5 }, { useGpu: true, memBudgetBytes: 1 })
+    expect(s).toMatchObject({ maxScale: 0.5, decimateTo: 200000, useGpu: true, memBudgetBytes: 1, unseen: 'colour' })
+  })
 })

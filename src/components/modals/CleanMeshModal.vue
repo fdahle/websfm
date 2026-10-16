@@ -96,6 +96,7 @@ function run() {
         <SettingsField v-if="!fillAll" label="Up to" label-for="clean-hole" unit="edges around the hole">
           <input id="clean-hole" v-model.number="settings.maxHoleEdges" type="number" min="3" step="1" class="field-input" />
         </SettingsField>
+        <p v-if="source?.texture" class="field-hint">This mesh is textured: if holes are filled, the result has no texture (no photo covers the patches). Untick Fill holes to keep it.</p>
       </SettingsGroup>
     </template>
 

@@ -2,7 +2,7 @@ import {
   DETECT_SIFT_DEFAULTS, DETECT_SIFT_PRESETS, DETECT_DEFAULTS_BY_DETECTOR, DETECT_PRESETS_BY_DETECTOR,
   MATCH_DEFAULTS, MATCH_PRESETS, RECONSTRUCT_DEFAULTS, RECONSTRUCT_PRESETS,
   DEPTHMAP_DEFAULTS, DENSE_FUSE_DEFAULTS, DEM_DEFAULTS,
-  ORTHO_DEFAULTS, MESH_DEFAULTS, MESH_PRESETS,
+  ORTHO_DEFAULTS, MESH_DEFAULTS, MESH_PRESETS, TEXTURE_DEFAULTS,
 } from './defaults.user.js'
 import { DETECTOR_IDS } from './features/learnedDetectors.js'
 
@@ -82,6 +82,18 @@ export const WORKFLOW_BLOCKS = [
     { key: 'fillHoles', label: 'Fill small holes', type: 'boolean' },
     { key: 'removeFloaters', label: 'Remove floating pieces', type: 'boolean' },
   ]),
+
+  // Textures the newest computed mesh (Build Mesh's), optionally decimated first: a
+  // few hundred thousand triangles texture as well as millions, and lighter.
+  automated('texture-mesh', 'Texture Mesh', 'Products', ['mesh', 'sparse'], ['texturedMesh'],
+    { decimateTo: 0, ...TEXTURE_DEFAULTS }, [
+      { key: 'decimateTo', label: 'Decimate to (triangles, 0 = off)', type: 'number', min: 0 },
+      { key: 'maxScale', label: 'Texture resolution', type: 'select', options: [1, 0.5, 0.25] },
+      { key: 'pageSize', label: 'Page size', type: 'select', options: [2048, 4096, 8192] },
+      { key: 'maxPages', label: 'Maximum pages', type: 'number', min: 1 },
+      { key: 'levelColours', label: 'Level colours', type: 'boolean' },
+      { key: 'unseen', label: 'Faces no photo sees', type: 'select', options: ['colour', 'remove'] },
+    ]),
 
   interactive('eval-overview', 'Quality Report', 'Evaluation'),
   interactive('eval-match-graph', 'Evaluate Matching', 'Evaluation', ['matches']),
@@ -228,6 +240,11 @@ export function resolveWorkflowSettings(type, settings = {}, runtime = {}) {
       memBudgetBytes: runtime.memBudgetBytes }
   }
   if (type === 'gen-mesh') return { ...MESH_DEFAULTS, ...value, ...(MESH_PRESETS[value.preset] || {}) }
+  if (type === 'texture-mesh') {
+    const { decimateTo, ...rest } = { ...TEXTURE_DEFAULTS, ...value }
+    return { ...rest, maxScale: Number(rest.maxScale), pageSize: Number(rest.pageSize), decimateTo: Math.max(0, Math.round(decimateTo || 0)),
+      useGpu: runtime.useGpu, memBudgetBytes: runtime.memBudgetBytes }
+  }
   return value
 }
 

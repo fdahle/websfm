@@ -23,7 +23,7 @@ export function useWorkflowWiring({ ready, pipeline, openInteractive }) {
   const { kpImageCount, sparseReady, cloudReady, denseReady, meshReady, demReady, orthoReady } = ready
   const {
     runDetect, runMatch, runReconstruct, runComputeDepthMaps, runDensify,
-    runGenerateDem, runGenerateOrtho, runGenerateMesh, cancelRun,
+    runGenerateDem, runGenerateOrtho, runGenerateMesh, runEditClouds, runTextureMesh, cancelRun,
   } = pipeline
   const { images } = storeToRefs(useImagesStore())
   const { matchRun, usableMatchCount } = storeToRefs(useMatchesStore())
@@ -50,6 +50,7 @@ export function useWorkflowWiring({ ready, pipeline, openInteractive }) {
     mesh: meshReady.value,
     surface: demReady.value || meshReady.value,
     ortho: orthoReady.value,
+    texturedMesh: clouds.value.some((c) => c.kind === 'mesh' && !!c.texture),
   }))
 
   async function runAutomatedWorkflowBlock(type, rawSettings) {
@@ -73,6 +74,7 @@ export function useWorkflowWiring({ ready, pipeline, openInteractive }) {
     else if (type === 'gen-dem') result = await runGenerateDem(settings)
     else if (type === 'gen-ortho') result = await runGenerateOrtho(settings)
     else if (type === 'gen-mesh') result = await runGenerateMesh(settings)
+    else if (type === 'texture-mesh') result = await runTextureBlock(settings)
     else throw new Error(`Workflow block is not automated: ${type}`)
 
     if (result?.ok === false || result?.unchanged) return result
@@ -84,6 +86,22 @@ export function useWorkflowWiring({ ready, pipeline, openInteractive }) {
       : { ok: false, cancelled: false, reason: `${WORKFLOW_BLOCK_BY_ID.get(type)?.label ?? type} did not replace its output` }
   }
 
+  // Texture Mesh: Build Mesh's mesh (else the newest untextured one), decimated first
+  // when asked and larger than the target.
+  async function runTextureBlock({ decimateTo, ...settings }) {
+    const meshes = clouds.value.filter((c) => c.kind === 'mesh' && c.count > 0 && !c.texture)
+    let source = meshes.find((c) => !c.imported && !c.derived) ?? meshes[meshes.length - 1]
+    if (!source) return { ok: false, cancelled: false, reason: 'Texture Mesh: no mesh to texture' }
+    if (decimateTo > 0 && source.count > decimateTo) {
+      const before = new Set(clouds.value.map((c) => c.id))
+      const dec = await runEditClouds({ mode: 'mesh-decimate', sourceIds: [source.id],
+        settings: { targetTriangles: decimateTo, preserveBoundary: true }, name: `${source.name} (decimated)` })
+      if (dec?.ok === false) return dec
+      source = clouds.value.find((c) => c.kind === 'mesh' && !before.has(c.id)) ?? source
+    }
+    return runTextureMesh({ sourceId: source.id, settings, name: `${source.name} (textured)` })
+  }
+
   function workflowOutputToken(type) {
     if (type === 'match-features') return matchRun.value
     if (type === 'reconstruct') return mainSparseCloud.value
@@ -92,6 +110,7 @@ export function useWorkflowWiring({ ready, pipeline, openInteractive }) {
     if (type === 'gen-dem') return dem.value
     if (type === 'gen-ortho') return ortho.value
     if (type === 'gen-mesh') return clouds.value.find((c) => c.kind === 'mesh' && !c.imported && !c.derived) ?? null
+    if (type === 'texture-mesh') return [...clouds.value].reverse().find((c) => c.kind === 'mesh' && c.texture) ?? null
     return null
   }
 

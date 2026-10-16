@@ -58,3 +58,94 @@ test('a textured mesh shows its atlas and survives project reload', async ({ pag
   expect(restored).toEqual({ pages: 2, groups: [{ page: 0, start: 0, count: 1 }, { page: 1, start: 1, count: 1 }], uv: [0.1, 0.1, 0.9, 0.1] })
   expect(errors).toEqual([])
 })
+
+// The dialog path: Tools ▸ Mesh ▸ Texture… → Texture reaches the store's run (a
+// wiring gap here once left the button doing nothing). With a camera but no photo for
+// it, the run reports that cleanly instead of failing.
+test('the Texture dialog runs the texture through the pipeline', async ({ page }) => {
+  const errors = []
+  page.on('pageerror', (error) => errors.push(error.message))
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Create project', exact: true }).click()
+  await expect(page.locator('.loading-overlay')).toHaveCount(0)
+  await page.evaluate(async () => {
+    const { useReconstructionStore } = await import('/src/stores/useReconstructionStore.js')
+    const { useModalsStore } = await import('/src/stores/useModalsStore.js')
+    const store = useReconstructionStore()
+    store.clouds.push({
+      id: 'sparse-1', name: 'Sparse cloud', kind: 'sparse', createdAt: Date.now(), points: [{ x: 0, y: 0, z: 5 }],
+      cameras: new Map([['cam-1', { R: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], t: [0, 0, 0], K: { fx: 100, fy: 100, cx: 50, cy: 50 } }]]),
+    })
+    store.setMainSparse?.('sparse-1')
+    store.clouds.push({
+      id: 'mesh-1', name: 'Mesh', kind: 'mesh', createdAt: Date.now(), cameras: new Map(), count: 1, nVerts: 3,
+      pos: new Float64Array([0, 0, 5, 1, 0, 5, 0, 1, 5]), idx: Uint32Array.of(0, 1, 2), col: null,
+    })
+    useModalsStore().toolModal = 'texture-mesh'
+  })
+  const dialog = page.getByRole('dialog', { name: 'Texture Mesh' })
+  await expect(dialog).toBeVisible()
+  await dialog.getByRole('button', { name: 'Texture', exact: true }).click()
+  await expect(dialog).toHaveCount(0)
+  await expect.poll(() => page.evaluate(async () => {
+    const { useLog } = await import('/src/composables/useLog.js')
+    return useLog().entries.value.some((e) => /Texture: no registered photo is available/.test(e.message ?? e.msg ?? JSON.stringify(e)))
+  })).toBe(true)
+  expect(errors).toEqual([])
+})
+
+// Mesh tools on a textured mesh, through the real worker: crop keeps the texture
+// (faces regrouped by page), decimate drops it with a warning, sample to points takes
+// the atlas colours.
+test('mesh tools keep, drop or sample a texture', async ({ page }) => {
+  const errors = []
+  page.on('pageerror', (error) => errors.push(error.message))
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Create project', exact: true }).click()
+  await expect(page.locator('.loading-overlay')).toHaveCount(0)
+  const res = await page.evaluate(async () => {
+    const { useReconstructionStore } = await import('/src/stores/useReconstructionStore.js')
+    const { useLog } = await import('/src/composables/useLog.js')
+    const store = useReconstructionStore()
+    const jpeg = async (colour) => {
+      const c = new OffscreenCanvas(16, 16), g = c.getContext('2d'); g.fillStyle = colour; g.fillRect(0, 0, 16, 16)
+      return new Uint8Array(await (await c.convertToBlob({ type: 'image/jpeg', quality: 1 })).arrayBuffer())
+    }
+    const a = await jpeg('#c81414'), b = await jpeg('#1414c8')
+    const data = new Uint8Array(a.length + b.length); data.set(a); data.set(b, a.length)
+    // A 2×1 strip: left half (x < 1) on page 0 (red), right half on page 1 (blue).
+    store.clouds.push({
+      id: 'tex', name: 'Strip', kind: 'mesh', createdAt: Date.now(), derived: true, cameras: new Map(), count: 4, nVerts: 8,
+      pos: new Float64Array([0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 1, 0, 0, 2, 0, 0, 2, 1, 0, 1, 1, 0]),
+      idx: Uint32Array.of(0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7), col: new Uint8Array(24).fill(90),
+      uv: new Float32Array([0.1, 0.1, 0.9, 0.1, 0.9, 0.9, 0.1, 0.9, 0.1, 0.1, 0.9, 0.1, 0.9, 0.9, 0.1, 0.9]),
+      texture: { data, pages: [{ width: 16, height: 16, offset: 0, length: a.length, type: 'image/jpeg' },
+        { width: 16, height: 16, offset: a.length, length: b.length, type: 'image/jpeg' }],
+      groups: [{ page: 0, start: 0, count: 2 }, { page: 1, start: 2, count: 2 }] },
+    })
+    const crop = await store.editClouds({ mode: 'mesh-crop', sourceIds: ['tex'], settings: { min: [0.5, -1, -1] } })
+    const dec = await store.editClouds({ mode: 'mesh-decimate', sourceIds: ['tex'], settings: { targetTriangles: 2, preserveBoundary: false } })
+    const pts = await store.editClouds({ mode: 'mesh-sample', sourceIds: ['tex'], settings: { count: 200, seed: 3 } })
+    let red = 0, blue = 0, wrong = 0
+    for (let i = 0; i < pts.count; i++) {
+      const x = pts.pos[3 * i], r = pts.col[3 * i], bl = pts.col[3 * i + 2]
+      if (x < 0.95) (r > 150 && bl < 60 ? red++ : wrong++)
+      else if (x > 1.05) (bl > 150 && r < 60 ? blue++ : wrong++)
+    }
+    return {
+      crop: { count: crop.count, groups: crop.texture?.groups, uv: crop.uv?.length },
+      dec: { textured: !!dec.texture, count: dec.count },
+      warned: useLog().entries.value.some((e) => /no texture \(decimation/.test(e.message ?? e.msg ?? JSON.stringify(e))),
+      sample: { red, blue, wrong },
+    }
+  })
+  // The crop keeps the faces with all corners at x ≥ 0.5: the right half, on page 1.
+  expect(res.crop.groups.reduce((n, g) => n + g.count, 0)).toBe(res.crop.count)
+  expect(res.crop.uv).toBeGreaterThan(0)
+  expect(res.dec).toEqual({ textured: false, count: 2 })
+  expect(res.warned).toBe(true)
+  expect(res.sample.wrong).toBe(0)
+  expect(res.sample.red).toBeGreaterThan(20)
+  expect(res.sample.blue).toBeGreaterThan(20)
+  expect(errors).toEqual([])
+})

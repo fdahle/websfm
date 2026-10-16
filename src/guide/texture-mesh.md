@@ -18,7 +18,8 @@ any mesh in the project's frame: a built one, a cleaned, decimated or cropped co
 an imported one. A mesh whose triangles do not share their corners, as in an STL file,
 is welded first, and the log says so.
 
-Texture a decimated mesh rather than the full Poisson result. A few hundred thousand
+Texture a decimated mesh rather than the full Poisson result. In the workflow builder,
+the **Texture Mesh** block can do both: set its **Decimate to** to a triangle count. A few hundred thousand
 triangles look the same once textured, because the texture carries the detail, and the
 run, the file and the viewer are all lighter for it.
 
@@ -102,5 +103,15 @@ symbology; RGB still shows the vertex colours).
 PLY and STL write the geometry only. **Export ▸ 3D Tiles…** with the textured mesh
 selected writes the mesh, with its texture, as the tile.
 
-Mesh tools such as Smooth, Decimate or Crop produce untextured copies for now; texture
-the result again if needed.
+## Mesh tools on a textured mesh
+The **Tools ▸ Mesh** tools keep the texture where they can:
+
+- **Crop** and **Clean** keep it. Clean's weld joins only corners that also share a
+  texture position, so the seams between photos stay intact. Filling holes adds patches
+  no photo covers, so a Clean that fills any returns an untextured mesh; untick **Fill
+  holes** to keep the texture.
+- **Smooth** keeps it: the triangles stay the same and move only slightly.
+- **Decimate** cannot: merging triangles leaves nothing for the texture to follow.
+  Decimate first, then texture.
+- **Sample to points** takes each point's colour from the texture, so the cloud has the
+  photos' detail.

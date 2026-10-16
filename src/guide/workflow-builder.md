@@ -11,7 +11,9 @@ You can configure it before importing images; missing inputs appear under **Pref
 
 ## Build and edit
 Click a command in **Blocks** to append it. For a sparse model, add **Detect
-Features**, **Match Features**, then **Sparse Model**. Select a block to edit its
+Features**, **Match Features**, then **Sparse Model**. For a textured model, continue
+with **Depth Maps**, **Dense Model**, **Build Mesh** and **Texture Mesh**; its **Decimate
+to** setting reduces the mesh first (see [Texture a Mesh](guide:texture-mesh)). Select a block to edit its
 settings in the inspector, which appears to the right or below the sequence on
 smaller windows. **Guided**, **Standard**, and **Expert** control the settings detail.
 
