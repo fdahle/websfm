@@ -76,8 +76,10 @@ export function useWorkspaceState() {
   // stay enabled after a project reopen (the planes load on demand).
   // Products gating: a DEM needs any cloud; an ortho needs a DEM (+ depth maps);
   // the preview needs a built product.
+  // A mesh is not a cloud here (and has no `points`: a project whose only cloud is a
+  // mesh, e.g. an imported PLY, used to throw in this check).
   const cloudReady = computed(() => clouds.value.some((c) =>
-    c.kind === 'dense' ? c.count > 0 : c.points.length > 0))
+    c.kind === 'dense' ? c.count > 0 : c.kind !== 'mesh' && (c.points?.length ?? 0) > 0))
   // Mesh needs a dense cloud (Poisson input); the modal further checks it has normals.
   const denseReady = computed(() => clouds.value.some((c) => c.kind === 'dense' && c.count > 0))
   const meshReady = computed(() => clouds.value.some((c) => c.kind === 'mesh' && c.count > 0))
