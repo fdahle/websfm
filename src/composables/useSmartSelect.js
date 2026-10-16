@@ -1,3 +1,4 @@
+import { computeSourceOf } from '../utils/image.js'
 import { ref, shallowRef } from 'vue'
 import { logitsToBinaryMask } from '../core/segment/sam2.js'
 import { segmentEncode, segmentDecode, segmentForget } from '../workers/computeClient.js'
@@ -73,7 +74,7 @@ export function useSmartSelect({ image, nativeSize, drawOverlay }) {
     }
     smartStatus.value = 'encoding'
     try {
-      const r = await segmentEncode(img.uuid, img.computeUrl ?? img.url)
+      const r = await segmentEncode(img.uuid, computeSourceOf(img))
       if (!encodeRev.isCurrent(rev)) {
         // Reset mid-encode (image switch): resetSmart already asked the worker to
         // forget this uuid, but the encode cached it afterwards — free it again.

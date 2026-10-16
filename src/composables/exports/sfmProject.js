@@ -1,3 +1,4 @@
+import { computeSourceOf } from '../../utils/image.js'
 import { makeFrameModelResolver } from '../../core/sfm/displayFrame.js'
 import { distortionOf } from '../../core/sfm/distortion.js'
 import { buildColmapModel, serializeColmapModelBinParts, serializeColmapModelParts } from '../../core/io/colmapModel.js'
@@ -228,7 +229,7 @@ export function createSfmProjectExports({
           continue
         }
         const res = await undistortImage({
-          url: im.computeUrl ?? im.url,
+          url: computeSourceOf(im),
           K: { fx: cam.K.fx, fy: cam.K.fy, cx: cam.K.cx, cy: cam.K.cy },
           dist: frameModel(im).dist,
           selfCal: frameModel(im).selfCal,

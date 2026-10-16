@@ -262,6 +262,14 @@ export function transcodeTiff(blob, jpegQuality, { onThumbnail, onDisplay } = {}
   })
 }
 
+// A TIFF past the canvas limit → its tiled pyramid (workers/rasterSource.js).
+// → { kind: 'pyramid', index, blob, displayBlob, thumbBlob, srcInfo, ms }
+export function buildPyramid(blob, { onProgress } = {}) {
+  return call('buildPyramid', [blob], {
+    onEvent: onProgress ? (ev, a) => { if (ev === 'progress') onProgress(...a) } : undefined,
+  })
+}
+
 // The three long-running ops share one streaming shape: intermediate `log` /
 // `progress` events during the run, a final result on resolve. This factory wires
 // the { onLog, onProgress } hooks to the worker's event stream.

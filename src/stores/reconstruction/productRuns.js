@@ -1,3 +1,4 @@
+import { computeSourceOf } from '../../utils/image.js'
 import { DEFAULT_BUDGET_BYTES } from '../../core/dense/memBudget.js'
 import { stageDemPoints } from '../../core/products/dem.js'
 import { regionContains } from '../../core/products/region.js'
@@ -198,7 +199,7 @@ export function createProductRuns({
         if (!im || !cam) continue
         try { await imagesStore.whenComputeReady(im) } catch { continue } // falls back to map colour
         const { dist, selfCal, fiducial } = frameModel(im)
-        photos.push({ uuid: m.uuid, name: im.name, url: im.computeUrl ?? im.url,
+        photos.push({ uuid: m.uuid, name: im.name, url: computeSourceOf(im),
           K: { fx: cam.K.fx, fy: cam.K.fy, cx: cam.K.cx, cy: cam.K.cy }, dist, selfCal, fiducial })
       }
       // The machine's memory gate (Settings ▸ Compute): the worker sizes its map/photo

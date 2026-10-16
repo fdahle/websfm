@@ -1,5 +1,6 @@
 import init, { decode_tiff } from '../../wasm/imagecodec/imagecodec.js'
 import { tiffToDisplayBlob } from '../../utils/tiff.js'
+import { buildPyramidFromTiff } from '../rasterSource.js'
 
 // TIFF transcode (decode + JPEG/PNG re-encode) runs here so a batch of large
 // TIFFs decodes across the worker pool instead of blocking the main thread;
@@ -44,5 +45,19 @@ export function makeTiffOps() {
     })
     return { result: { displayBlob, computeBlob, width, height, timings, srcInfo } }
   }
-  return { transcodeTiff }
+  // A TIFF past the canvas limit: a tiled pyramid (workers/rasterSource.js) built by
+  // window reads instead of one full decode, plus a display JPEG and a thumbnail
+  // from its levels. → { kind, index, blob, displayBlob, thumbBlob, srcInfo, ms }
+  async function buildPyramid([blob], { emit } = {}) {
+    const t0 = performance.now()
+    let last = 0
+    const out = await buildPyramidFromTiff(blob, {
+      onProgress: emit ? (done, total) => {
+        const now = performance.now()
+        if (now - last > 500 || done === total) { last = now; emit('progress', [done, total]) }
+      } : undefined,
+    })
+    return { result: { ...out, ms: performance.now() - t0 } }
+  }
+  return { transcodeTiff, buildPyramid }
 }

@@ -68,10 +68,10 @@ const flush = async () => { for (let i = 0; i < 5; i++) await Promise.resolve() 
 // The viewer around the editor: a 100×50 native image at scale 1, and a parent
 // that stores whatever mask it is sent (the store's in-memory update), so the
 // echo comes back through `image.mask` like in the app.
-function setup({ mask = null, maskEdit = true, preview = false } = {}) {
+function setup({ mask = null, maskEdit = true, preview = false, largeScan = false, size = [100, 50] } = {}) {
   const image = reactive({ uuid: 'u1', mask })
   const edit = ref(maskEdit)
-  const frame = shallowRef({ width: 100, height: 50, naturalWidth: 100, naturalHeight: 50, bitmapScale: 1, preview, exact: true })
+  const frame = shallowRef({ width: size[0], height: size[1], naturalWidth: 100, naturalHeight: 50, bitmapScale: 1, preview, exact: true })
   const editable = ref(!preview)
   const visible = ref(true)
   const emitted = []
@@ -83,7 +83,7 @@ function setup({ mask = null, maskEdit = true, preview = false } = {}) {
   const m = useMaskEditor({
     image: () => image, maskEdit: () => edit.value,
     viewport: { scale: ref(1), tx: ref(0), ty: ref(0), frame, editable },
-    drawOverlay, emit, isVisible: () => visible.value,
+    drawOverlay, emit, isVisible: () => visible.value, largeScan: () => largeScan,
   })
   return { m, image, edit, frame, editable, visible, emitted, emit }
 }
@@ -113,6 +113,20 @@ describe('useMaskEditor: canvas', () => {
     expect(full.m.canvas().filled).toBe(true)
     expect(full.m.hasMask.value).toBe(true)
     expect(full.m.maskedAt(5, 5)).toBe(true)
+  })
+
+  it('a very large scan gets a reduced canvas: whole-mask actions work, painting does not', async () => {
+    // A KH-9-sized scan: its reduced display copy is all the view ever shows.
+    const { m, emitted } = setup({ preview: true, largeScan: true, size: [65700, 32900] })
+    m.initMaskCanvas()
+    expect(m.canvas()).toMatchObject({ width: 8192, height: 4102 })
+    expect(stroke(m)).toBeNull() // the pointer router never paints here; nor would a stroke
+    const inv = m.invertMask()
+    exportsQ.shift()()
+    await inv
+    expect(emitted).toEqual([{ name: 'update-mask', blob: expect.objectContaining({ filled: true }), persist: false }])
+    expect(m.maskedAt(65699, 32899)).toBe(true) // native coords map onto the reduced canvas
+    expect(m.canUndo.value).toBe(true)
   })
 
   it('maskedAt is null without a mask to ask', () => {

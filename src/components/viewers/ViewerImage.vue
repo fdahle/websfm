@@ -10,6 +10,7 @@ import { useDepthOverlay } from '../../composables/useDepthOverlay.js'
 import { useImageKeypoints } from '../../composables/useImageKeypoints.js'
 import { useFiducialFit } from '../../composables/useFiducialFit.js'
 import { bitmapPixel } from '../../utils/imageViewport.js'
+import { needsPyramid } from '../../core/io/rasterPyramid.js'
 import {
   overlayView, beginOverlayFrame, paintRaster, paintRampLegend, paintResidualLegend,
   paintKeypoints, paintResiduals, paintGcpGuides, paintGcps, paintFiducials,
@@ -118,6 +119,12 @@ const {
   onFrameChange: () => initMaskCanvas(),
 })
 
+// A very large scan (a tiled pyramid, core/io/rasterPyramid.js): the view only
+// ever has its reduced display copy, so `editable` never turns on. Painting and
+// marking by hand are unavailable; the mask is shown and whole-mask actions work.
+const largeScan = computed(() => !!frame.value?.exact
+  && (!!props.image.pyramidIndex || needsPyramid(frame.value.width, frame.value.height)))
+
 const { fidResidual, markedFidIds, fidMarkPos, fidGhosts } = useFiducialFit({
   isFilm: () => props.isFilm,
   marks: () => props.fiducialMarks,
@@ -152,6 +159,7 @@ const {
   drawOverlay, emit,
   // Instances are kept alive per tab via v-show: offsetParent is null while hidden.
   isVisible: () => container.value?.offsetParent !== null,
+  largeScan: () => largeScan.value,
 })
 
 // Every overlay input redraws: prop toggles and data. The GCP and fiducial lists
@@ -549,9 +557,14 @@ defineExpose({ fit, zoomIn, zoomOut, triggerMaskImport, clearMask, triggerDepthI
       <canvas ref="overlayCanvas" class="overlay-canvas" />
 
       <!-- Only the low-res TIFF preview is in: marks/masks would land imprecisely
-           and the mask canvas is rebuilt when full resolution arrives. -->
+           and the mask canvas is rebuilt when full resolution arrives. A very large
+           scan never gets past its reduced copy, so say so instead of "waiting". -->
       <div v-if="(maskEdit || gcpEdit) && imageReady && !editable" class="edit-locked">
-        Loading full resolution — editing resumes when it is ready
+        <template v-if="!largeScan">Loading full resolution — editing resumes when it is ready</template>
+        <template v-else-if="maskEdit">
+          Painting isn't available on very large scans yet — use Import, Invert or Auto mask
+        </template>
+        <template v-else>Marking by hand isn't available on very large scans yet</template>
       </div>
 
       <MaskToolbar
@@ -564,6 +577,7 @@ defineExpose({ fit, zoomIn, zoomOut, triggerMaskImport, clearMask, triggerDepthI
         :can-redo="canRedo"
         :smart-status="smartStatus"
         :smart-has-preview="smartHasPreview"
+        :paintable="editable || !largeScan"
         @set-tool="(t) => (tool = t)"
         @update:brush-radius="(r) => (brushRadius = r)"
         @update:opacity="(o) => { maskOpacity = o; drawOverlay() }"

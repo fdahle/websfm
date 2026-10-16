@@ -36,6 +36,9 @@ export function makeDenseOps({ rasterize }) {
   // A working raster's per-axis scale: what the rounded resize applied (rasterize's
   // scaleXY), never the nominal `scale` alone — see geometry.js scaleK.
   const gridScale = (r) => r.scaleXY ?? r.scale
+  // A source's identity for the memory ledger: the URL, or a pyramid's `key`
+  // (utils/image.js pyramidSource) — an object would stringify to one shared tag.
+  const srcKey = (u) => (typeof u === 'string' ? u : u?.key ?? String(u))
 
   // Any distortion to remove (calibrated OR self-calibrated)?
   function hasAnyDistortion(dist, selfCal) {
@@ -314,7 +317,7 @@ export function makeDenseOps({ rasterize }) {
           r = undistortRaster(r, meta.K, meta.dist, meta.selfCal, meta.photo)
         }
         rasterCache.set(url, r)
-        ledger.track(`raster:${url}`, r.width * r.height * 4)
+        ledger.track(`raster:${srcKey(url)}`, r.width * r.height * 4)
       }
       return rasterCache.get(url)
     }
@@ -324,7 +327,7 @@ export function makeDenseOps({ rasterize }) {
       for (const url of usedSets[i]) {
         const c = (useCount.get(url) || 0) - 1
         useCount.set(url, c)
-        if (c <= 0) { rasterCache.delete(url); ledger.release(`raster:${url}`) }
+        if (c <= 0) { rasterCache.delete(url); ledger.release(`raster:${srcKey(url)}`) }
       }
     }
 

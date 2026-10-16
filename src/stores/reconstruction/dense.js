@@ -1,5 +1,6 @@
+import { computeSourceOf } from '../../utils/image.js'
 import { makeFrameModelResolver } from '../../core/sfm/displayFrame.js'
-import { qualityToMaxDim, fitDepthQuality, filterConfig, filterSettings, logFilterCache, logFilterTotals, mergeFusionCounters, logFusionStream, finishFusion } from '../../core/dense/mvs.js'
+import { qualityToMaxDim, fitDepthQuality, filterConfig, filterSettings, logFilterCache, logFilterTotals, emptyFilterTotals, mergeFusionCounters, logFusionStream, finishFusion } from '../../core/dense/mvs.js'
 import { isFiducialCalibrated } from '../../core/sfm/fiducialModel.js'
 import { packSparseForDense, sparseInputTransfer } from '../../core/dense/sparseInput.js'
 import { computeDepthMaps as workerComputeDepthMaps, POOL_SIZE, filterDepthMaps as workerFilterDepthMaps, densify as workerDensify, meshify as workerMeshify } from '../../workers/computeClient.js'
@@ -93,7 +94,7 @@ export function createDense({
         // self-cal bag applied after it — null when self-cal was off for it.
         const { dist, selfCal } = frameModel(im)
         inputImages.push({
-          uuid, name: im.name, url: im.computeUrl ?? im.url,
+          uuid, name: im.name, url: computeSourceOf(im),
           // Per-image mask (if any) so masked regions are excluded from the dense cloud.
           mask: im.mask?.blob ?? null,
           R: cam.R.map((row) => [...row]),
@@ -231,7 +232,7 @@ export function createDense({
             onProgress?.(counts.reduce((x, y) => x + y, 0), n, lbl, fractions.reduce((x, y) => x + y, 0) / workers)
           } })))
       stats = new Array(n)
-      const totals = { considered: 0, kept: 0, lowNcc: 0, inconsistent: 0, lowParallax: 0 }
+      const totals = emptyFilterTotals()
       let loads = 0, hits = 0, nCand = 0
       parts.forEach((p, w) => {
         for (const i of chunks[w]) stats[i] = p.stats[i]

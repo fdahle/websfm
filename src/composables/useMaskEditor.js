@@ -1,5 +1,5 @@
 import { ref, computed, watch } from 'vue'
-import { maskFromSource, invertMaskPixels, anyExcluded } from '../core/mask.js'
+import { maskFromSource, invertMaskPixels, anyExcluded, maskStorageSize } from '../core/mask.js'
 import { createRevision } from '../utils/revision.js'
 import { viewerMayHandleKey } from '../utils/keyRouting.js'
 import { useSmartSelect } from './useSmartSelect.js'
@@ -30,11 +30,19 @@ import { useSmartSelect } from './useSmartSelect.js'
 //   drawOverlay — schedule an overlay repaint
 //   emit        — component emit, for 'update-mask'
 //   isVisible   — is this viewer the visible tab (instances are v-show-kept)
+//   largeScan   — getter: is the image a very large scan (a tiled pyramid, shown
+//                 only as a reduced copy that never turns full-resolution)
+//
+// A very large scan gets a REDUCED mask canvas (core/mask.js maskStorageSize, the
+// size its mask is stored at) while the reduced copy is shown: the mask is visible
+// and the whole-mask actions (import, invert, clear, undo/redo) work, but painting
+// stays off — the pointer router only paints while `editable`, which a reduced copy
+// never is.
 const UNDO_MAX = 10
 
 function clamp(v, lo, hi) { return Math.min(hi, Math.max(lo, v)) }
 
-export function useMaskEditor({ image, maskEdit, viewport, drawOverlay, emit, isVisible }) {
+export function useMaskEditor({ image, maskEdit, viewport, drawOverlay, emit, isVisible, largeScan = () => false }) {
   const { scale, tx, ty, frame, editable } = viewport
 
   const maskFileInput = ref(null)
@@ -68,24 +76,32 @@ export function useMaskEditor({ image, maskEdit, viewport, drawOverlay, emit, is
   let isDrawing = false
   let strokeHit = false // did the in-flight brush/erase stroke touch the image?
 
-  let maskOffscreen = null // OffscreenCanvas at native image resolution
+  let maskOffscreen = null // OffscreenCanvas at native image resolution (reduced for a large scan)
+  let maskReduced = false  // maskOffscreen is a large scan's reduced, view/whole-mask-only canvas
   const maskRev = createRevision()
   let canvasSource = null
 
   // ── Canvas ──────────────────────────────────────────────────────────────────
 
-  // The mask canvas is always NATIVE-sized. While only a preview bitmap is shown
-  // there is no canvas at all (editing is off then — see `editable`): it is built
-  // when the full-resolution image loads, so a mask is never created or persisted at
-  // the preview's resolution.
+  // The mask canvas is NATIVE-sized. While only a preview bitmap is shown there is
+  // no canvas at all (editing is off then — see `editable`): it is built when the
+  // full-resolution image loads, so a mask is never created or persisted at the
+  // preview's resolution. The exception is a very large scan, which never gets a
+  // full-resolution bitmap: its canvas is at the mask's storage size.
   function initMaskCanvas() {
     maskRev.bump() // a decode aimed at the previous canvas is stale
     canvasSource = null
     const f = frame.value
-    if (!f || f.preview) { maskOffscreen = null; return }
-    maskOffscreen = new OffscreenCanvas(f.width, f.height)
+    maskReduced = !!f && f.preview && f.exact && largeScan()
+    if (!f || (f.preview && !maskReduced)) { maskOffscreen = null; return }
+    const s = maskReduced ? maskStorageSize(f.width, f.height) : { w: f.width, h: f.height }
+    maskOffscreen = new OffscreenCanvas(s.w, s.h)
     if (image().mask?.blob) loadMaskBlob(image().mask.blob)
   }
+
+  // Whole-mask actions (import, invert, clear, undo/redo): with the full-resolution
+  // image, or on a large scan's reduced canvas. Painting checks `editable` alone.
+  const wholeMaskOk = () => editable.value || (maskReduced && !!maskOffscreen && !!frame.value)
 
   // A canvas mutation other than a decode: any in-flight decode/export is now stale.
   function markMaskEdited() {
@@ -132,7 +148,7 @@ export function useMaskEditor({ image, maskEdit, viewport, drawOverlay, emit, is
   // whether the stroke actually touched the image (so a fully-outside stroke can
   // be discarded rather than committed as an empty mask).
   function paintAt(sx, sy) {
-    if (!maskOffscreen) return false
+    if (!maskOffscreen || !editable.value) return false // native canvas only (not a large scan's)
     const imgX = (sx - tx.value) / scale.value
     const imgY = (sy - ty.value) / scale.value
     const r    = brushRadius.value / scale.value
@@ -159,8 +175,14 @@ export function useMaskEditor({ image, maskEdit, viewport, drawOverlay, emit, is
 
   // Whether native pixel (px, py) is excluded by the mask (opaque on the mask
   // canvas), or null when there is no mask to ask.
+  // (px, py) are native; a large scan's reduced canvas is read at its own scale.
   function maskedAt(px, py) {
     if (!maskOffscreen || !hasMask.value) return null
+    const f = frame.value
+    if (maskReduced && f) {
+      px = Math.min(maskOffscreen.width - 1, Math.floor(px * maskOffscreen.width / f.width))
+      py = Math.min(maskOffscreen.height - 1, Math.floor(py * maskOffscreen.height / f.height))
+    }
     return maskOffscreen.getContext('2d').getImageData(px, py, 1, 1).data[3] > 127
   }
 
@@ -217,13 +239,13 @@ export function useMaskEditor({ image, maskEdit, viewport, drawOverlay, emit, is
   }
 
   function undoMask() {
-    if (!editable.value || !undoStack.value.length) return
+    if (!wholeMaskOk() || !undoStack.value.length) return
     redoStack.value.push(image().mask?.blob ?? null)
     applyMaskSnapshot(undoStack.value.pop())
   }
 
   function redoMask() {
-    if (!editable.value || !redoStack.value.length) return
+    if (!wholeMaskOk() || !redoStack.value.length) return
     undoStack.value.push(image().mask?.blob ?? null)
     applyMaskSnapshot(redoStack.value.pop())
   }
@@ -293,7 +315,7 @@ export function useMaskEditor({ image, maskEdit, viewport, drawOverlay, emit, is
   function cancelRect() { rectDrag = null }
 
   async function commitRect() {
-    if (!rectDrag || !maskOffscreen) { rectDrag = null; return }
+    if (!rectDrag || !maskOffscreen || !editable.value) { rectDrag = null; return }
     const { x0, y0, x1, y1, erase } = rectDrag
     rectDrag = null
     const x = Math.min(x0, x1), y = Math.min(y0, y1)
@@ -318,7 +340,7 @@ export function useMaskEditor({ image, maskEdit, viewport, drawOverlay, emit, is
   // Swap excluded ↔ kept over the whole canvas. An inversion that leaves nothing
   // excluded commits `null` (no mask) rather than an all-transparent PNG.
   async function invertMask() {
-    if (!maskOffscreen || !editable.value) return
+    if (!maskOffscreen || !wholeMaskOk()) return
     markMaskEdited()
     const ctx = maskOffscreen.getContext('2d')
     const id  = ctx.getImageData(0, 0, maskOffscreen.width, maskOffscreen.height)
@@ -333,7 +355,7 @@ export function useMaskEditor({ image, maskEdit, viewport, drawOverlay, emit, is
 
   // Clear is undoable (snapshot first) — no confirm dialog needed anymore.
   function clearMask() {
-    if (!maskOffscreen || !hasMask.value || !editable.value) return
+    if (!maskOffscreen || !hasMask.value || !wholeMaskOk()) return
     snapshotForUndo()
     markMaskEdited()
     canvasSource = null
@@ -364,17 +386,18 @@ export function useMaskEditor({ image, maskEdit, viewport, drawOverlay, emit, is
   }
 
   function triggerMaskImport() {
-    if (!editable.value) return // no native-size canvas to import into yet
+    if (!wholeMaskOk()) return // no canvas to import into yet
     maskFileInput.value?.click()
   }
 
-  // Import an image as mask: bright/opaque pixels → red (masked region). Shared
-  // normalize/rescale logic lives in core/mask.js (also used by the Mask Manager).
+  // Import an image as mask (the rule — alpha, or black = masked for an opaque file —
+  // is core/mask.js normalizeMaskPixels, shared with the Mask Manager).
   async function onMaskFileChange(e) {
     const file = e.target.files?.[0]
     e.target.value = ''
     if (!file || !maskOffscreen) return
     try {
+      // The canvas is already at the mask's storage size, which maps to itself.
       const blob = await maskFromSource(file, maskOffscreen.width, maskOffscreen.height)
       // Superseded (undo/stroke/reload while it decoded) → nothing was drawn, so
       // nothing to snapshot or persist.
@@ -395,9 +418,11 @@ export function useMaskEditor({ image, maskEdit, viewport, drawOverlay, emit, is
   // handled here: App.vue owns it (it must yield to open modals first, and with
   // none open it leaves mask-edit mode).
   function onKeydown(e) {
-    if (!maskEdit() || !editable.value || !isVisible()) return
+    if (!maskEdit() || !wholeMaskOk() || !isVisible()) return
     if (!viewerMayHandleKey(e)) return
     const k = e.key.toLowerCase()
+    // A large scan's reduced canvas: no painting tools, only the whole-mask keys.
+    if (!editable.value && !(k === 'i' || ((e.ctrlKey || e.metaKey) && (k === 'z' || k === 'y')))) return
     if ((e.ctrlKey || e.metaKey) && k === 'z') { e.preventDefault(); e.shiftKey ? redoMask() : undoMask(); return }
     if ((e.ctrlKey || e.metaKey) && k === 'y') { e.preventDefault(); redoMask(); return }
     // Smart Select: Enter commits the previewed segment, Del/Backspace discards it.

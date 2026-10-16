@@ -8,6 +8,12 @@ export function createImage(file) {
     // TIFF's display blob is JPEG for speed; compute needs the lossless PNG
     // sibling instead — see utils/tiff.js). null ⇒ consumers fall back to `url`.
     computeUrl: null,
+    // An image past the canvas limit (a native KH-9 scan) has no compute URL at all:
+    // its pixels are a tiled pyramid ({ kind: 'pyramid', key, index, blob }, see
+    // workers/rasterSource.js), read by the workers at the level a step needs.
+    // `pyramidIndex` is the persisted half (the blob is an OPFS derived file).
+    computePyramid: null,
+    pyramidIndex: null,
     // True while `url` is a not-yet-decodable TIFF blob — the UI shows a
     // placeholder instead of a broken <img> until the transcode replaces it.
     previewPending: false,
@@ -42,4 +48,15 @@ export function createImage(file) {
     // deliberately not required to populate these.
     fiducialDetections: [],
   }
+}
+
+// What a compute step (detection, depth, fiducials, ortho, …) reads: the pyramid of
+// an image past the canvas limit, else the lossless compute URL, else the original.
+export function computeSourceOf(img) {
+  return img?.computePyramid ?? img?.computeUrl ?? img?.url ?? null
+}
+
+// A pyramid descriptor for the workers: the persisted index + the container Blob.
+export function pyramidSource(uuid, index, blob) {
+  return { kind: 'pyramid', key: `pyramid:${uuid}`, index, blob }
 }

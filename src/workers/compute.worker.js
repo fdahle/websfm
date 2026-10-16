@@ -26,6 +26,7 @@ import { makeReferenceGcpOps } from './ops/referenceGcps.js'
 import { makeUndistortOps } from './ops/undistort.js'
 import { makeLazCodec } from './ops/laz.js'
 import { makeExportOps } from './ops/export.js'
+import { isPyramid, openPyramid, rasterizePyramid } from './rasterSource.js'
 
 // Decode an image URL (blob: URLs work in a worker) and draw it into an
 // OffscreenCanvas, downscaled so the longest side is ≤ maxDim. Returns RGBA
@@ -42,6 +43,9 @@ function describeUrl(url) {
 }
 
 async function rasterize(url, maxDim) {
+  // An image past the canvas limit is a tiled pyramid (rasterSource.js), read at the
+  // level the request needs; same result shape.
+  if (isPyramid(url)) return rasterizePyramid(await openPyramid(url), maxDim)
   let resp
   try {
     resp = await fetch(url)

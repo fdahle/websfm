@@ -2,7 +2,10 @@ import { extractMetadata } from '../../core/io/metadata.js'
 import { createImage } from '../../utils/image.js'
 import * as opfs from '../../utils/opfs.js'
 import { isTiff, readTiffDimensions, canDecodeTiffNatively } from '../../utils/tiff.js'
-import { transcodeTiff } from '../../workers/computeClient.js'
+import { transcodeTiff, buildPyramid } from '../../workers/computeClient.js'
+import { needsPyramid } from '../../core/io/rasterPyramid.js'
+import { pyramidSource } from '../../utils/image.js'
+import { markRaw } from 'vue'
 
 // TIFF transcodes in flight, bounded by pixels rather than by count. Each holds the
 // decoded RGBA, its canvas and the JPEG + PNG encodes (~12 bytes per pixel), all in
@@ -133,6 +136,13 @@ export function createIngest({
       const total = tiffItems.length
       await Promise.all(tiffItems.map(async ({ item, file }) => {
         try {
+          // Past the canvas limit (a native KH-9 scan, 2 GP): no transcode can exist,
+          // natively or not — build the tiled pyramid by window reads instead.
+          const dims0 = await readTiffDimensions(file).catch(() => null)
+          if (dims0 && needsPyramid(dims0.width, dims0.height)) {
+            await ingestPyramid(item, file, dims0, persistImport, projectId, batchWrites)
+            return
+          }
           if (await canDecodeTiffNatively(file)) {
             // This engine renders the raw TIFF natively — item.url (already the
             // raw object URL) works as-is for both display and compute.
@@ -204,25 +214,34 @@ export function createIngest({
             // dominates decides whether/what to move to a Rust/WASM codec.
             const c = { 1: 'none', 5: 'LZW', 7: 'JPEG', 8: 'Deflate', 32773: 'PackBits' }[srcInfo?.compression] ?? srcInfo?.compression
             const p = { 1: 'gray', 2: 'RGB', 3: 'palette', 6: 'YCbCr' }[srcInfo?.photometric] ?? srcInfo?.photometric
-            const srcMB = srcInfo?.srcBytes ? (srcInfo.srcBytes / 1048576).toFixed(1) : '?'
+            // Only the source fields the decoder could tell us; an unknown one is left out.
+            const shape = [
+              p,
+              srcInfo?.bitsPerSample && `${srcInfo.bitsPerSample}-bit`,
+              srcInfo?.samplesPerPixel && `${srcInfo.samplesPerPixel} spp`,
+              c,
+              srcInfo?.srcBytes && `src ${(srcInfo.srcBytes / 1048576).toFixed(1)} MB`,
+            ].filter((v) => v != null && v !== false && v !== '').join(' · ')
+            // JPEG and PNG encode concurrently: JPEG is time-to-JPEG, PNG the whole encode.
             log(
-              `TIFF timing (${timings.backend ?? '?'}): ${file.name} — decode ${timings.decodeMs?.toFixed(0)}ms · repack ${timings.repackMs?.toFixed(0)}ms · JPEG ${timings.jpegMs?.toFixed(0)}ms · PNG ${timings.pngMs?.toFixed(0)}ms · total ${timings.totalMs?.toFixed(0)}ms  ` +
-              `[${p ?? '?'}/${srcInfo?.bitsPerSample ?? '?'}-bit/${srcInfo?.samplesPerPixel ?? '?'}spp/${c ?? '?'}, src ${srcMB} MB]`,
-              'info', 'Images',
+              `TIFF timing (${timings.backend ?? 'unknown'}): ${file.name} — decode ${timings.decodeMs?.toFixed(0)} ms · repack ${timings.repackMs?.toFixed(0)} ms · `
+              + `JPEG ${timings.jpegMs?.toFixed(0)} ms · PNG ${timings.pngMs?.toFixed(0)} ms · total ${timings.totalMs?.toFixed(0)} ms`
+              + (shape ? `  [${shape}]` : ''),
+              'debug', 'Images',
             )
             // A 16-bit source is stretched between its 0.5 / 99.5 % levels for display
             // and detection (core/io/tonalStretch.js) — record the mapping it got.
             if (srcInfo?.stretch) {
               log(`16-bit TIFF stretched to 8-bit: ${file.name} — DN ${srcInfo.stretch.lo}…${srcInfo.stretch.hi} → 0…255 `
                 + `(0.5 / 99.5 % levels; the high byte alone would span ${srcInfo.stretch.lo >> 8}…${srcInfo.stretch.hi >> 8})`,
-              'info', 'Images')
+              'debug', 'Images')
             }
           }
           // Cache the transcode outputs in OPFS so reopening the project skips
           // the (multi-second) re-decode + re-encode — see the TIFF gotcha in
           // CLAUDE.md. Pure function of the immutable original; fire-and-forget.
           if (persistImport) {
-            log(`Caching TIFF derived blobs: ${file.name} — display ${(displayBlob.size / 1024).toFixed(0)} KB, compute ${(computeBlob.size / 1024).toFixed(0)} KB`, 'info', 'Images')
+            log(`Caching TIFF derived blobs: ${file.name} — display ${(displayBlob.size / 1024).toFixed(0)} KB, compute ${(computeBlob.size / 1024).toFixed(0)} KB`, 'debug', 'Images')
             batchWrites.push(trackWrite(opfs.saveImageDerived(projectId, item.uuid, 'display', displayBlob)
               .catch((err) => log(`OPFS derived save failed (display): ${file.name} — ${err?.message ?? err}`, 'error', 'Images'))))
             batchWrites.push(trackWrite(opfs.saveImageDerived(projectId, item.uuid, 'compute', computeBlob)
@@ -252,6 +271,44 @@ export function createIngest({
     await Promise.allSettled(batchWrites)
     if (added > 1) log(`Added ${added} images`, 'success', 'Images')
     if (persistImport) await save(projectId)
+  }
+
+  // An image past the canvas limit: its compute pixels become a tiled pyramid
+  // (workers/rasterSource.js), its display a reduced JPEG of one level — the viewer
+  // maps it through the native size and treats it as a preview (no editing at
+  // native resolution yet). One at a time: the build reads row bands of the whole
+  // width, so it takes the full transcode budget.
+  async function ingestPyramid(item, file, dims, persistImport, projectId, batchWrites) {
+    await tiffBudget.acquire(TIFF_TRANSCODE_PIXEL_BUDGET)
+    let pyr
+    try {
+      log(`Large TIFF: ${file.name} — ${dims.width}×${dims.height} (${(dims.width * dims.height / 1e6).toFixed(0)} MP) is past `
+        + 'one canvas; building a tiled pyramid', 'info', 'Images')
+      pyr = await buildPyramid(file)
+    } finally {
+      tiffBudget.release(TIFF_TRANSCODE_PIXEL_BUDGET)
+    }
+    const found = images.value.find((img) => img.id === item.id)
+    if (!found) { resolveComputeReady(item.uuid); return }
+    URL.revokeObjectURL(found.url)
+    found.url = URL.createObjectURL(pyr.displayBlob)
+    found.lowResUrl = null
+    found.previewPending = false
+    found.pyramidIndex = markRaw(pyr.index)
+    found.computePyramid = markRaw(pyramidSource(found.uuid, pyr.index, pyr.blob))
+    resolveComputeReady(item.uuid)
+    thumbnails.requestThumbnail(found, { source: pyr.thumbBlob })
+    const L = pyr.index.levels
+    log(`Pyramid: ${file.name} — ${L.length} levels, ${L.reduce((n, l) => n + l.cols * l.rows, 0)} tiles of `
+      + `${pyr.index.tileSize} px, ${(pyr.blob.size / 1024 ** 2).toFixed(0)} MB, ${pyr.index.channels === 1 ? 'gray' : 'RGB'} `
+      + `in ${(pyr.ms / 1000).toFixed(1)} s; display ${L.find((l) => Math.max(l.width, l.height) <= 8192)?.width ?? '?'} px wide`,
+    'debug', 'Images')
+    if (persistImport) {
+      batchWrites.push(trackWrite(opfs.saveImageDerived(projectId, item.uuid, 'display', pyr.displayBlob)
+        .catch((err) => log(`OPFS derived save failed (display): ${file.name} — ${err?.message ?? err}`, 'error', 'Images'))))
+      batchWrites.push(trackWrite(opfs.saveImageDerived(projectId, item.uuid, 'pyramid', pyr.blob)
+        .catch((err) => log(`OPFS derived save failed (pyramid): ${file.name} — ${err?.message ?? err}`, 'error', 'Images'))))
+    }
   }
 
   return {

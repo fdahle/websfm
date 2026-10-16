@@ -262,6 +262,15 @@ export async function tiffToDisplayBlob(blob, { jpegQuality = 0.92, onThumbnail,
     } catch {
       // fall through to geotiff below
     }
+    // The wasm decoder reports bit depth and band count only; take photometric /
+    // compression from the first IFD (header read, no pixel decode). Diagnostic only.
+    if (rgba) {
+      try {
+        const fd = (await (await openTiff(blob)).getImage()).getFileDirectory?.() || {}
+        srcInfo.photometric = await readTiffTag(fd, 'PhotometricInterpretation')
+        srcInfo.compression = await readTiffTag(fd, 'Compression')
+      } catch { /* leave them out of the log */ }
+    }
   }
 
   if (!rgba) {

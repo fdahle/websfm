@@ -1,3 +1,5 @@
+import { computeSourceOf } from '../../utils/image.js'
+import { makeNameResolver } from '../../core/io/nameMatch.js'
 import { observationsToDetections } from '../../core/sfm/fiducialModel.js'
 import { detectFiducialSpots as detectFiducialSpotsWorker, POOL_SIZE, prepareFiducialTemplates, detectFiducials } from '../../workers/computeClient.js'
 import { fiducialDetectionConcurrency } from '../../core/features/detectConcurrency.js'
@@ -24,13 +26,9 @@ export function createImageFiducials({
   function addFiducialObservations(rows) {
     let applied = 0, unmatched = 0
     const byImage = new Map()
+    const resolve = makeNameResolver(images.value)
     for (const r of rows || []) {
-      const lc = String(r.imageName || '').toLowerCase()
-      const base = lc.replace(/\.[^.]+$/, '')
-      const img = images.value.find((i) => {
-        const n = i.name.toLowerCase()
-        return n === lc || n.replace(/\.[^.]+$/, '') === base
-      })
+      const img = imageById(resolve(r.imageName))
       if (!img) { unmatched++; continue }
       if (!byImage.has(img)) byImage.set(img, [])
       byImage.get(img).push({ fidId: r.fidId, px: r.px, py: r.py })
@@ -100,7 +98,7 @@ export function createImageFiducials({
         const img = targets[i]
         try {
           await whenComputeReady(img)
-          const out = await detectFiducialSpotsWorker(img.computeUrl ?? img.url, settings,
+          const out = await detectFiducialSpotsWorker(computeSourceOf(img), settings,
             { onLog: (m) => log(`${img.name}: ${m}`, 'info', 'Fiducial') })
           buffered.push({ id: img.id, name: img.name, out })
         } catch (err) {
@@ -150,7 +148,7 @@ export function createImageFiducials({
       const img = imageById(row.id)
       if (!img) continue
       try {
-        const p = await prepareFiducialTemplates(img.computeUrl ?? img.url,
+        const p = await prepareFiducialTemplates(computeSourceOf(img),
           [{ fidId: d.slot, px: d.px, py: d.py }], { templateHalf: FIDUCIAL_DETECT_TUNING.templateHalf })
         templates.push(...p.templates)
       } catch (err) { log(`${img.name}: donor crop failed — ${err.message}`, 'warn', 'Fiducial') }
@@ -170,7 +168,7 @@ export function createImageFiducials({
       })
       if (!predictions.length) continue
       try {
-        const retry = await detectFiducials(img.computeUrl ?? img.url, templates, predictions,
+        const retry = await detectFiducials(computeSourceOf(img), templates, predictions,
           { ...FIDUCIAL_DETECT_TUNING, tryRotations: false })
         for (const d of retry.results.filter((x) => x.score >= 0.7)) {
           row.out.accepted.push({ slot: d.fidId, px: d.px, py: d.py, family: settings.family,

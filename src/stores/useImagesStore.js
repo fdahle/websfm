@@ -1,3 +1,5 @@
+import { computeSourceOf, pyramidSource } from '../utils/image.js'
+import { needsPyramid } from '../core/io/rasterPyramid.js'
 import { ref, markRaw, computed } from 'vue'
 import { createIngest } from './images/ingest.js'
 import { createDetection } from './images/detection.js'
@@ -7,7 +9,7 @@ import { createKeypointCache } from './images/keypointCache.js'
 import { defineStore } from 'pinia'
 import { isTiff, canDecodeTiffNatively, nativeTiffDecodeResult } from '../utils/tiff.js'
 import {
-  transcodeTiff, POOL_SIZE, imageQuality as imageQualityWorker,
+  transcodeTiff, buildPyramid, POOL_SIZE, imageQuality as imageQualityWorker,
 } from '../workers/computeClient.js'
 import { dataUrlToBlob } from '../core/mask.js'
 import { useLog } from '../composables/useLog.js'
@@ -157,6 +159,9 @@ export const useImagesStore = defineStore('images', () => {
           // Fiducial detections (F4) are spots on the raster — tiny, and persisted
           // inline (independent of keypoint indices).
           fiducialDetections: img.fiducialDetections?.length ? img.fiducialDetections.map((d) => ({ ...d })) : [],
+          // The tiled pyramid's index for an image past the canvas limit (its tiles
+          // are the images-derived/{uuid}.pyramid file).
+          ...(img.pyramidIndex ? { pyramidIndex: img.pyramidIndex } : {}),
           meta: img.meta ? metaToSave : null,
         }
       }),
@@ -305,7 +310,14 @@ export const useImagesStore = defineStore('images', () => {
     }
 
     let displayBlob = null, computeBlob = null
-    if (isTiff(img.sourceName ?? img.name) && nativeTiffDecodeResult() !== true) {
+    if (img.computePyramid) {
+      // Its compute pixels are the pyramid (a Blob, not a URL); only the display heals.
+      displayBlob = await opfs.loadImageDerivedBlob(projectId, img.uuid, 'display')
+      if (!(await readable(displayBlob))) return false
+      URL.revokeObjectURL(img.url)
+      img.url = URL.createObjectURL(displayBlob)
+      return true
+    } else if (isTiff(img.sourceName ?? img.name) && nativeTiffDecodeResult() !== true) {
       // A non-native engine can't decode the raw TIFF, so only the transcode
       // cache is usable here. Re-transcoding is what reopening the project does;
       // it isn't worth running from an <img> error handler.
@@ -487,6 +499,8 @@ export const useImagesStore = defineStore('images', () => {
       // Filled on demand (a row in view) from images-derived/{uuid}.thumb — never at open.
       thumb: null,
       fiducialDetections: Array.isArray(record.fiducialDetections) ? record.fiducialDetections.map((d) => ({ ...d })) : [],
+      pyramidIndex: record.pyramidIndex ? markRaw(record.pyramidIndex) : null,
+      computePyramid: null,
     }))
     images.value = restored
     for (const name of missingKp.slice(0, 20)) {
@@ -519,8 +533,36 @@ export const useImagesStore = defineStore('images', () => {
         const loadOriginal = async () => (blob ??= await opfs.loadImageBlob(projectId, record.uuid, dirs))
         // OPFS keeps the original file, so TIFFs need the same transcode as on
         // ingest (the Blob has no name, so classify by the record's name).
-        let url, computeUrl
-        if (isTiff(record.sourceName ?? record.name)) {
+        let url, computeUrl, computePyramid = null
+        const pyr = isTiff(record.sourceName ?? record.name)
+          && (record.pyramidIndex || (record.meta?.width && needsPyramid(record.meta.width, record.meta.height)))
+        if (pyr) {
+          // Past the canvas limit: the reduced display JPEG + the tile container, or a
+          // rebuild from the original when either is missing.
+          const [displayBlob, pyramidBlob] = await Promise.all([
+            opfs.loadImageDerivedBlob(projectId, record.uuid, 'display'),
+            opfs.loadImageDerivedBlob(projectId, record.uuid, 'pyramid'),
+          ])
+          let index = record.pyramidIndex
+          let display = displayBlob, container = pyramidBlob
+          if (!(index && display && container && container.size === index.bytes)) {
+            log(`Building tiled pyramid (no cache): ${record.name}`, 'info', 'Images')
+            const t = await buildPyramid(await loadOriginal())
+            index = t.index; display = t.displayBlob; container = t.blob
+            if (isPersisting()) {
+              opfs.saveImageDerived(projectId, record.uuid, 'display', display)
+                .catch((err) => log(`OPFS derived save failed (display): ${record.name} — ${err?.message ?? err}`, 'error', 'Images'))
+              opfs.saveImageDerived(projectId, record.uuid, 'pyramid', container)
+                .catch((err) => log(`OPFS derived save failed (pyramid): ${record.name} — ${err?.message ?? err}`, 'error', 'Images'))
+            }
+          } else {
+            log(`Restored tiled pyramid from cache: ${record.name}`, 'info', 'Images')
+          }
+          url = URL.createObjectURL(display)
+          computeUrl = null
+          computePyramid = markRaw(pyramidSource(record.uuid, index, container))
+          img.pyramidIndex = markRaw(index)
+        } else if (isTiff(record.sourceName ?? record.name)) {
           // Native-decode probe is session-cached; only feed it the original on
           // the first TIFF, when the result isn't known yet.
           const known = nativeTiffDecodeResult()
@@ -565,6 +607,7 @@ export const useImagesStore = defineStore('images', () => {
         }
         img.url = url
         img.computeUrl = computeUrl
+        img.computePyramid = computePyramid
         img.previewPending = false
         // The OPFS Files themselves: nothing is read until a viewer or worker decodes.
         if (record.hasMask) img.mask = previewOf(await opfs.loadMaskFile(projectId, record.uuid, dirs))
@@ -607,7 +650,7 @@ export const useImagesStore = defineStore('images', () => {
     await mapConcurrent(targets, Math.max(1, Math.min(4, POOL_SIZE)), async (img) => {
       try {
         await whenComputeReady(img)
-        const q = await imageQualityWorker(img.computeUrl ?? img.url, { mask: img.mask?.blob ?? null })
+        const q = await imageQualityWorker(computeSourceOf(img), { mask: img.mask?.blob ?? null })
         img.quality = {
           sharpness: q.sharpness, sharpnessP90: q.sharpnessP90, meanLuma: q.meanLuma,
           overexposed: q.overexposed, underexposed: q.underexposed,

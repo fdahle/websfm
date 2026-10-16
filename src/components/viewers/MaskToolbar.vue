@@ -18,6 +18,9 @@ const props = defineProps({
   // segment is currently previewed (enables Add/Clear).
   smartStatus:     { type: String,  default: '' },
   smartHasPreview: { type: Boolean, default: false },
+  // False on a very large scan (only its reduced copy is shown): the painting tools
+  // are off; invert / import / clear / undo still work.
+  paintable:       { type: Boolean, default: true },
 })
 
 const emit = defineEmits([
@@ -35,6 +38,7 @@ const TOOLS = [
 
 // Clicking the active tool deselects it → pan/zoom without leaving edit mode.
 function pickTool(id) {
+  if (!props.paintable) return
   emit('set-tool', props.tool === id ? null : id)
 }
 </script>
@@ -47,8 +51,8 @@ function pickTool(id) {
         v-for="t in TOOLS"
         :key="t.id"
         class="mt-btn"
-        :class="{ active: tool === t.id }"
-        :title="t.title"
+        :class="{ active: tool === t.id && paintable, disabled: !paintable }"
+        :title="paintable ? t.title : 'Not available on very large scans yet'"
         @click="pickTool(t.id)"
       >
         <Icon :name="t.icon" class="mt-icon" />

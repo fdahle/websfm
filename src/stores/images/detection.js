@@ -1,3 +1,4 @@
+import { computeSourceOf } from '../../utils/image.js'
 import { learnedDetector, detectorLabel } from '../../core/features/learnedDetectors.js'
 import { useModelsStore } from '../useModelsStore.js'
 import { resolveDetectMaxDim, resolveDetectKeypoints, detectSize } from '../../core/features/detectResolution.js'
@@ -66,7 +67,7 @@ export function createDetection({
       // Pass the per-image mask (if any) so keypoints inside masked regions are
       // dropped at detection — this propagates to matching and reconstruction.
       const res = await detectKeypoints(
-        img.computeUrl ?? img.url,
+        computeSourceOf(img),
         { ...settings, maxDim: res0.maxDim, maxKeypoints: kp0.maxKeypoints, mask: img.mask?.blob ?? null,
           ...(maxOrientations != null ? { maxOrientations } : {}),
           ...(capRule != null ? { capRule } : {}) },

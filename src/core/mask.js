@@ -4,8 +4,16 @@
 // Convention: a mask marks the pixels to EXCLUDE. Stored masks are PNGs where
 // excluded pixels are opaque red (255,0,0,255) and kept pixels are fully
 // transparent (alpha 0). So "is this pixel masked?" reduces to an alpha test.
-// `normalizeMaskPixels` converts an arbitrary imported image into that form
-// (bright OR opaque source pixels → excluded), so every stored mask is uniform.
+// `normalizeMaskPixels` converts an arbitrary imported image into that form, so
+// every stored mask is uniform (see there for the import rule).
+//
+// Resolution: a mask is stored at the image's own size, except for a very large
+// scan (one stored as a tiled pyramid, core/io/rasterPyramid.js), whose native size
+// is past what a canvas can hold. Its mask is stored reduced (`maskStorageSize`).
+// That is safe because every consumer rasterizes a mask to the size it works at
+// (`buildMaskLookup`), never assuming the PNG is image-sized.
+
+import { needsPyramid } from './io/rasterPyramid.js'
 
 // ── Pure (DOM-free, unit-tested) ───────────────────────────────────────────────
 
@@ -17,13 +25,29 @@ export function maskLookupFromRgba(data, w, h) {
   return out
 }
 
+// Does an imported image carry transparency that means something: at least one
+// pixel the alpha rule would keep (alpha ≤ 127)? A JPEG, or a PNG saved without an
+// alpha channel, is opaque everywhere, and the alpha rule would mask all of it.
+export function hasMaskTransparency(data) {
+  for (let i = 3; i < data.length; i += 4) if (data[i] <= 127) return true
+  return false
+}
+
 // Normalize arbitrary RGBA in place to the red-exclude / transparent-keep
-// convention: a source pixel that is bright or opaque becomes excluded.
-// Mirrors the original inline logic in ViewerImage's mask import.
+// convention. Two rules, chosen per file:
+//   • With transparency (hasMaskTransparency): a source pixel that is bright OR
+//     opaque becomes excluded; transparent dark pixels are kept. The app's own
+//     masks (red on transparent) round-trip through this rule unchanged.
+//   • Opaque everywhere (JPEG, plain black-and-white PNG): by brightness, BLACK
+//     (luminance < 128) is excluded and white is kept, as in Metashape and COLMAP
+//     mask files. An all-red stored mask (fully masked, so no transparency) is dark
+//     and stays fully masked.
 export function normalizeMaskPixels(data) {
+  const byAlpha = hasMaskTransparency(data)
   for (let i = 0; i < data.length; i += 4) {
     const lum = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114
-    if (lum > 127 || data[i + 3] > 127) {
+    const excluded = byAlpha ? (lum > 127 || data[i + 3] > 127) : lum < 128
+    if (excluded) {
       data[i] = 255; data[i + 1] = 0; data[i + 2] = 0; data[i + 3] = 255
     } else {
       data[i + 3] = 0
@@ -79,6 +103,40 @@ export function paintBorderExclude(data, w, h, { top = 0, right = 0, bottom = 0,
   return data
 }
 
+// The size a mask for a w×h image is stored at. Native, except for an image past
+// the canvas limit (needsPyramid — where no native-size canvas can exist): then
+// reduced so its long side is MASK_LARGE_LONG_SIDE (the cap on such an image's
+// display copy, so the viewer never shows it coarser than the mask). Returns { w, h, scale } (scale = stored / native, ≤ 1).
+export const MASK_LARGE_LONG_SIDE = 8192
+export function maskStorageSize(w, h) {
+  if (!needsPyramid(w, h)) return { w, h, scale: 1 }
+  const scale = MASK_LARGE_LONG_SIDE / Math.max(w, h)
+  return { w: Math.max(1, Math.round(w * scale)), h: Math.max(1, Math.round(h * scale)), scale }
+}
+
+// Per-side border margins (native px) at a stored mask's `scale`, rounded UP so a
+// reduced mask still covers at least the requested band.
+export function scaleBorderSides(sides, scale) {
+  if (scale === 1) return sides
+  const out = {}
+  for (const k of ['top', 'right', 'bottom', 'left']) out[k] = Math.ceil((sides[k] ?? 0) * scale)
+  return out
+}
+
+// Nearest-neighbour upsample of a 0/1 lookup from sw×sh to w×h. Lets
+// buildMaskLookup serve a working size past the canvas limit from a smaller raster.
+export function upsampleLookupNearest(lut, sw, sh, w, h) {
+  const out = new Uint8Array(w * h)
+  const xs = new Uint32Array(w)
+  for (let x = 0; x < w; x++) xs[x] = Math.min(sw - 1, Math.floor((x + 0.5) * sw / w))
+  for (let y = 0; y < h; y++) {
+    const row = Math.min(sh - 1, Math.floor((y + 0.5) * sh / h)) * sw
+    const o = y * w
+    for (let x = 0; x < w; x++) out[o + x] = lut[row + xs[x]]
+  }
+  return out
+}
+
 // ── Canvas I/O (works on main thread and in workers via OffscreenCanvas) ───────
 //
 // A mask travels as a PNG **Blob**: its bytes live outside the V8 heap, and posting
@@ -104,11 +162,12 @@ export async function maskBlob(source) {
   return source.startsWith('data:') ? dataUrlToBlob(source) : (await fetch(source)).blob()
 }
 
-// Decode any mask source (File/Blob or a URL string), draw it into a w×h canvas,
-// normalize to the exclude convention, and return a PNG Blob sized to w×h. Used for
-// importing a file as a mask and for rescaling a mask across images of a different
-// resolution.
-export async function maskFromSource(source, w, h) {
+// Decode any mask source (File/Blob or a URL string), draw it into a canvas for a
+// w×h image (maskStorageSize: w×h itself unless the image is a very large scan),
+// normalize to the exclude convention, and return the PNG Blob. Used for importing
+// a file as a mask and for rescaling a mask across images of a different resolution.
+export async function maskFromSource(source, nativeW, nativeH) {
+  const { w, h } = maskStorageSize(nativeW, nativeH)
   const blob = await maskBlob(source)
   const bmp = await createImageBitmap(blob)
   const canvas = new OffscreenCanvas(w, h)
@@ -123,21 +182,26 @@ export async function maskFromSource(source, w, h) {
 
 // Rasterize a stored mask (Blob or URL) to a w×h "is-masked" lookup. Used by the
 // compute worker to test keypoint / depth-map pixels against the mask.
+// A working size past the canvas limit is rasterized reduced and upsampled.
 export async function buildMaskLookup(source, w, h) {
   const bmp = await createImageBitmap(await maskBlob(source))
-  const canvas = new OffscreenCanvas(w, h)
+  const s = maskStorageSize(w, h)
+  const canvas = new OffscreenCanvas(s.w, s.h)
   const ctx = canvas.getContext('2d', { willReadFrequently: true })
-  ctx.drawImage(bmp, 0, 0, w, h)
+  ctx.drawImage(bmp, 0, 0, s.w, s.h)
   bmp.close()
-  return maskLookupFromRgba(ctx.getImageData(0, 0, w, h).data, w, h)
+  const lut = maskLookupFromRgba(ctx.getImageData(0, 0, s.w, s.h).data, s.w, s.h)
+  return s.scale === 1 ? lut : upsampleLookupNearest(lut, s.w, s.h, w, h)
 }
 
-// Build a w×h border mask PNG Blob excluding the outer `sides` margins (px).
-// When `base` (an existing stored mask Blob or URL, already in exclude form) is given,
-// it is drawn in first so the result is the UNION of that mask and the border
-// (merge mode); pass null to start blank (replace mode). Used by the Auto-Mask
-// modal's "border" strategy.
-export async function buildBorderMask(w, h, sides, base = null) {
+// Build a border mask PNG Blob for a w×h image (at maskStorageSize) excluding the
+// outer `sides` margins (native px). When `base` (an existing stored mask Blob or
+// URL, already in exclude form) is given, it is drawn in first so the result is the
+// UNION of that mask and the border (merge mode); pass null to start blank (replace
+// mode). Used by Auto Mask's border and the fiducial frame masks.
+export async function buildBorderMask(nativeW, nativeH, nativeSides, base = null) {
+  const { w, h, scale } = maskStorageSize(nativeW, nativeH)
+  const sides = scaleBorderSides(nativeSides, scale)
   const canvas = new OffscreenCanvas(w, h)
   const ctx = canvas.getContext('2d', { willReadFrequently: true })
   if (base) {

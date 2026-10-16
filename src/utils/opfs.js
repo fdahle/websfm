@@ -429,7 +429,7 @@ export async function deleteImage(projectId, uuid) {
 // that every image gets, TIFF or not — same rules: recomputable, absence heals
 // lazily (useImagesStore.requestThumbnail).
 
-const DERIVED_KINDS = ['display', 'compute', 'thumb']
+const DERIVED_KINDS = ['display', 'compute', 'thumb', 'pyramid']
 
 async function derivedName(uuid, kind) {
   return `${uuid}.${DERIVED_KINDS.includes(kind) ? kind : 'display'}`

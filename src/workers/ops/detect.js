@@ -11,6 +11,7 @@ import { buildMaskLookup } from '../../core/mask.js'
 import { analyzeImageQuality, IMAGE_QUALITY_DEFAULTS } from '../../core/features/imageQuality.js'
 import { fromScaledPx } from '../../core/sfm/geometry.js'
 import { KP_STRIDE } from '../../core/features/keypoints.js'
+import { isPyramid, openPyramid, rasterizePyramidTo, readNativeRect } from '../rasterSource.js'
 import {
   FIDUCIAL_DETECT_TUNING, grayFromRgba, detectFiducialsInImage,
 } from '../../core/sfm/fiducialDetect.js'
@@ -323,9 +324,24 @@ export function makeDetectOps({ rasterize }) {
   // actually correlate over, via source-rect drawImage into a tiny canvas. Peak
   // memory is the bitmap plus a (2·half+1)² window.
 
+  // An ImageBitmap of the image, or — for a pyramid (an image past the canvas
+  // limit, workers/rasterSource.js) — a stand-in with the same width / height /
+  // close() whose pixels the helpers below read through the tiles.
   async function decodeBitmap(url) {
+    if (isPyramid(url)) {
+      const pyramid = await openPyramid(url)
+      return { pyramid, width: pyramid.index.width, height: pyramid.index.height, close() {} }
+    }
     const blob = await (await fetch(url)).blob()
     return await createImageBitmap(blob)
+  }
+
+  // The whole bitmap drawn at width × height, RGBA.
+  function scaledRgba(bmp, width, height) {
+    if (bmp.pyramid) return rasterizePyramidTo(bmp.pyramid, width, height).data
+    const ctx = new OffscreenCanvas(width, height).getContext('2d', { willReadFrequently: true })
+    ctx.drawImage(bmp, 0, 0, width, height)
+    return ctx.getImageData(0, 0, width, height).data
   }
 
   // Read one axis-aligned window out of `bmp` as a grayscale float image. The
@@ -338,10 +354,13 @@ export function makeDetectOps({ rasterize }) {
     const w = Math.min(sw, bmp.width), h = Math.min(sh, bmp.height)
     const x = Math.max(0, Math.min(bmp.width - w, Math.round(sx)))
     const y = Math.max(0, Math.min(bmp.height - h, Math.round(sy)))
-    const canvas = new OffscreenCanvas(w, h)
-    const ctx = canvas.getContext('2d', { willReadFrequently: true })
-    ctx.drawImage(bmp, x, y, w, h, 0, 0, w, h)
-    const { data } = ctx.getImageData(0, 0, w, h)
+    let data
+    if (bmp.pyramid) data = readNativeRect(bmp.pyramid, { x0: x, y0: y, x1: x + w, y1: y + h }).data
+    else {
+      const ctx = new OffscreenCanvas(w, h).getContext('2d', { willReadFrequently: true })
+      ctx.drawImage(bmp, x, y, w, h, 0, 0, w, h)
+      data = ctx.getImageData(0, 0, w, h).data
+    }
     const gray = grayFromRgba(data, w, h)
     return { ...gray, originX: x, originY: y }
   }
@@ -382,10 +401,7 @@ export function makeDetectOps({ rasterize }) {
       // Whole image at coarse scale, for the rotation probe + the coarse peak.
       const cw = Math.max(1, Math.round(natW * cfg.coarseScale))
       const ch = Math.max(1, Math.round(natH * cfg.coarseScale))
-      const canvas = new OffscreenCanvas(cw, ch)
-      const ctx = canvas.getContext('2d', { willReadFrequently: true })
-      ctx.drawImage(bmp, 0, 0, cw, ch)
-      const gray = grayFromRgba(ctx.getImageData(0, 0, cw, ch).data, cw, ch)
+      const gray = grayFromRgba(scaledRgba(bmp, cw, ch), cw, ch)
       // The ACTUAL drawn scale, not the requested `coarseScale` — drawImage
       // rounds to whole pixels. (x and y can differ by up to half a coarse
       // pixel, i.e. a few full-res px — far inside the ±refineHalf window the
@@ -415,9 +431,7 @@ export function makeDetectOps({ rasterize }) {
     const natW = bmp.width, natH = bmp.height
     const scale = Math.min(1, maxDim / Math.max(natW, natH))
     const width = Math.round(natW * scale), height = Math.round(natH * scale)
-    const ctx = new OffscreenCanvas(width, height).getContext('2d', { willReadFrequently: true })
-    ctx.drawImage(bmp, 0, 0, width, height)
-    return { data: ctx.getImageData(0, 0, width, height).data, width, height, scale, natW, natH }
+    return { data: scaledRgba(bmp, width, height), width, height, scale, natW, natH }
   }
 
   async function detectFiducialSpots([url, options = {}], { emit } = {}) {

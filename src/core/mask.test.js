@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest'
-import { maskLookupFromRgba, normalizeMaskPixels, paintBorderExclude, invertMaskPixels, anyExcluded } from './mask.js'
+import {
+  maskLookupFromRgba, normalizeMaskPixels, paintBorderExclude, invertMaskPixels, anyExcluded,
+  hasMaskTransparency, maskStorageSize, scaleBorderSides, upsampleLookupNearest, MASK_LARGE_LONG_SIDE,
+} from './mask.js'
 
 // Build a flat RGBA buffer (Uint8ClampedArray-like) of w*h pixels from a list
 // of [r,g,b,a] tuples.
@@ -44,6 +47,75 @@ describe('normalizeMaskPixels', () => {
     const once = Array.from(data)
     normalizeMaskPixels(data)
     expect(Array.from(data)).toEqual(once)
+  })
+})
+
+describe('normalizeMaskPixels: files without transparency', () => {
+  it('masks BLACK and keeps white when every pixel is opaque (JPEG, plain B/W PNG)', () => {
+    const data = rgba([
+      [0, 0, 0, 255],       // black → excluded
+      [255, 255, 255, 255], // white → kept
+      [40, 40, 40, 255],    // dark grey → excluded
+      [200, 200, 200, 255], // light grey → kept
+    ])
+    normalizeMaskPixels(data)
+    expect(Array.from(maskLookupFromRgba(data, 4, 1))).toEqual([1, 0, 1, 0])
+  })
+
+  it('an all-white opaque file masks nothing, an all-black one everything', () => {
+    const white = normalizeMaskPixels(rgba([[255, 255, 255, 255], [255, 255, 255, 255]]))
+    expect(anyExcluded(white)).toBe(false)
+    const black = normalizeMaskPixels(rgba([[0, 0, 0, 255], [0, 0, 0, 255]]))
+    expect(Array.from(maskLookupFromRgba(black, 2, 1))).toEqual([1, 1])
+  })
+
+  it('one transparent pixel switches to the alpha rule (the app\'s own masks round-trip)', () => {
+    const data = rgba([[255, 255, 255, 255], [0, 0, 0, 0], [255, 0, 0, 255]])
+    normalizeMaskPixels(data)
+    expect(Array.from(maskLookupFromRgba(data, 3, 1))).toEqual([1, 0, 1])
+  })
+
+  it('a fully masked stored mask (all red, so opaque everywhere) stays fully masked', () => {
+    const data = rgba([[255, 0, 0, 255], [255, 0, 0, 255]])
+    normalizeMaskPixels(data)
+    expect(Array.from(maskLookupFromRgba(data, 2, 1))).toEqual([1, 1])
+  })
+
+  it('hasMaskTransparency asks for a pixel the alpha rule would keep', () => {
+    expect(hasMaskTransparency(rgba([[0, 0, 0, 255], [9, 9, 9, 200]]))).toBe(false)
+    expect(hasMaskTransparency(rgba([[0, 0, 0, 255], [9, 9, 9, 127]]))).toBe(true)
+  })
+})
+
+describe('maskStorageSize', () => {
+  it('is the native size for an image a canvas can hold', () => {
+    expect(maskStorageSize(6000, 4000)).toEqual({ w: 6000, h: 4000, scale: 1 })
+  })
+  it('is reduced to the display width for a very large scan', () => {
+    const s = maskStorageSize(65700, 32900)
+    expect(s.w).toBe(MASK_LARGE_LONG_SIDE)
+    expect(s.h).toBe(4102)
+    expect(s.scale).toBeCloseTo(8192 / 65700, 12)
+  })
+})
+
+describe('scaleBorderSides', () => {
+  it('rounds margins up so the band still covers the requested native px', () => {
+    expect(scaleBorderSides({ top: 40, left: 1, right: 0 }, 0.125)).toEqual({ top: 5, right: 0, bottom: 0, left: 1 })
+  })
+  it('passes margins through at scale 1', () => {
+    const sides = { top: 3 }
+    expect(scaleBorderSides(sides, 1)).toBe(sides)
+  })
+})
+
+describe('upsampleLookupNearest', () => {
+  it('repeats each source cell over its block', () => {
+    const lut = Uint8Array.from([1, 0, 0, 1]) // 2×2
+    expect(Array.from(upsampleLookupNearest(lut, 2, 2, 4, 2))).toEqual([
+      1, 1, 0, 0,
+      0, 0, 1, 1,
+    ])
   })
 })
 
